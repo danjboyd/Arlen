@@ -1,0 +1,91 @@
+:root {
+  --bg: #f4efe7;
+  --ink: #2a2018;
+  --accent: #1f6f5b;
+  --panel: #fffdf9;
+  --border: #d9cbb8;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: "Georgia", "Times New Roman", serif;
+  color: var(--ink);
+  background: radial-gradient(circle at top right, #fff6e8 0, var(--bg) 55%);
+  line-height: 1.45;
+}
+
+.shell {
+  width: min(960px, 92vw);
+  margin: 0 auto;
+}
+
+header {
+  padding: 1.6rem 0 1rem;
+}
+
+h1 {
+  margin: 0;
+}
+
+.tagline {
+  margin: 0.4rem 0 0.9rem;
+  color: #5d4736;
+}
+
+.nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.nav a {
+  text-decoration: none;
+  color: white;
+  background: var(--accent);
+  padding: 0.35rem 0.65rem;
+  border-radius: 999px;
+  font-size: 0.9rem;
+}
+
+main {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 1rem 1.1rem;
+}
+
+.callout {
+  margin-top: 1rem;
+  padding: 0.7rem;
+  border-left: 4px solid var(--accent);
+  background: #f1fbf8;
+}
+
+.grid {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 0.8rem;
+}
+
+.grid th,
+.grid td {
+  border: 1px solid var(--border);
+  padding: 0.45rem;
+  text-align: left;
+}
+
+.footer {
+  padding: 0.8rem 0 1.4rem;
+  color: #6e5b4b;
+  font-size: 0.9rem;
+}
+
+code {
+  background: #f0e7db;
+  padding: 0.05rem 0.35rem;
+  border-radius: 4px;
+}

@@ -1,0 +1,22 @@
+{
+  "timestamp_utc": "2026-02-18T00:00:00Z",
+  "host": "127.0.0.1",
+  "port": 3000,
+  "healthz_p50_ms": 1.000,
+  "healthz_p95_ms": 50.000,
+  "healthz_p99_ms": 70.000,
+  "healthz_max_ms": 100.000,
+  "healthz_req_per_sec": 500.00,
+  "api_status_p50_ms": 1.000,
+  "api_status_p95_ms": 60.000,
+  "api_status_p99_ms": 90.000,
+  "api_status_max_ms": 120.000,
+  "api_status_req_per_sec": 450.00,
+  "root_p50_ms": 2.000,
+  "root_p95_ms": 80.000,
+  "root_p99_ms": 120.000,
+  "root_max_ms": 160.000,
+  "root_req_per_sec": 300.00,
+  "memory_before_kb": 0,
+  "memory_after_kb": 0
+}

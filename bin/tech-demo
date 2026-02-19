@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+set -eo pipefail
+
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$repo_root"
+
+port="${TECH_DEMO_PORT:-3110}"
+make tech-demo-server >/dev/null
+export ARLEN_APP_ROOT="${repo_root}/examples/tech_demo"
+
+echo "Arlen tech demo listening on http://127.0.0.1:${port}/tech-demo"
+has_port=0
+for arg in "$@"; do
+  if [[ "$arg" == "--port" ]]; then
+    has_port=1
+    break
+  fi
+done
+
+if [[ $has_port -eq 0 ]]; then
+  set -- --port "$port" "$@"
+fi
+
+exec ./build/tech-demo-server "$@"

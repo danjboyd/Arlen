@@ -1,0 +1,7 @@
+<nav class="nav">
+  <a href="/tech-demo">Home</a>
+  <a href="/tech-demo/dashboard">Dashboard</a>
+  <a href="/tech-demo/users/peggy?flag=admin">User Example</a>
+  <a href="/tech-demo/api/catalog">Catalog JSON</a>
+  <a href="/tech-demo/api/summary?view=full">Summary JSON</a>
+</nav>

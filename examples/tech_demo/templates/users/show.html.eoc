@@ -1,0 +1,7 @@
+<section>
+  <h2>User route demo</h2>
+  <p>User from path param: <strong><%= [ctx objectForKey:@"name"] %></strong></p>
+  <p>Flag from query param: <strong><%= [ctx objectForKey:@"flag"] %></strong></p>
+  <p>Request path: <code><%= [ctx objectForKey:@"path"] %></code></p>
+  <p>Raw query: <code><%= [ctx objectForKey:@"query"] %></code></p>
+</section>

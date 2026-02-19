@@ -1,0 +1,48 @@
+{
+  host = "127.0.0.1";
+  port = 3110;
+  logFormat = "text";
+  serveStatic = YES;
+  trustedProxy = NO;
+  performanceLogging = YES;
+  listenBacklog = 128;
+  connectionTimeoutSeconds = 30;
+  enableReusePort = NO;
+  requestLimits = {
+    maxRequestLineBytes = 4096;
+    maxHeaderBytes = 32768;
+    maxBodyBytes = 1048576;
+  };
+  database = {
+    connectionString = "";
+    poolSize = 8;
+  };
+  session = {
+    enabled = NO;
+    secret = "";
+    cookieName = "arlen_session";
+    maxAgeSeconds = 1209600;
+    secure = NO;
+    sameSite = "Lax";
+  };
+  csrf = {
+    enabled = NO;
+    headerName = "x-csrf-token";
+    queryParamName = "csrf_token";
+  };
+  rateLimit = {
+    enabled = NO;
+    requests = 120;
+    windowSeconds = 60;
+  };
+  securityHeaders = {
+    enabled = YES;
+    contentSecurityPolicy = "default-src 'self'";
+  };
+  propaneAccessories = {
+    workerCount = 4;
+    gracefulShutdownSeconds = 10;
+    respawnDelayMs = 250;
+    reloadOverlapSeconds = 1;
+  };
+}

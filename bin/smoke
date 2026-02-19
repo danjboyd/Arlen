@@ -1,0 +1,37 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$repo_root"
+
+make smoke-render >/dev/null
+rendered="$("$repo_root/build/eoc-smoke-render")"
+
+echo "$rendered" | rg -q "<h1>EOC Smoke Test</h1>"
+echo "$rendered" | rg -q "<nav>"
+echo "$rendered" | rg -q "gamma &lt;unsafe&gt;"
+
+make boomhauer >/dev/null
+port="${EOC_SMOKE_PORT:-3100}"
+server_log="$(mktemp)"
+
+"$repo_root/build/boomhauer" --port "$port" --once >"$server_log" 2>&1 &
+server_pid=$!
+
+cleanup() {
+  if kill -0 "$server_pid" 2>/dev/null; then
+    kill "$server_pid" 2>/dev/null || true
+  fi
+  rm -f "$server_log"
+}
+trap cleanup EXIT
+
+sleep 0.25
+http_body="$(curl -fsS "http://127.0.0.1:${port}/")"
+wait "$server_pid"
+
+echo "$http_body" | rg -q "<h1>Arlen EOC Dev Server</h1>"
+echo "$http_body" | rg -q "request path: /"
+echo "$http_body" | rg -q "unsafe sample: &lt;unsafe&gt;"
+
+echo "Smoke test passed"

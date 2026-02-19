@@ -1,0 +1,496 @@
+#import "ALNConfig.h"
+
+#import <stdlib.h>
+
+static NSString *const ALNConfigErrorDomain = @"Arlen.Config.Error";
+
+static NSDictionary *ALNMergeDictionaries(NSDictionary *base, NSDictionary *overlay) {
+  NSMutableDictionary *merged = [NSMutableDictionary dictionaryWithDictionary:base ?: @{}];
+  for (NSString *key in overlay) {
+    id overlayValue = overlay[key];
+    id baseValue = merged[key];
+    if ([baseValue isKindOfClass:[NSDictionary class]] &&
+        [overlayValue isKindOfClass:[NSDictionary class]]) {
+      merged[key] = ALNMergeDictionaries(baseValue, overlayValue);
+    } else {
+      merged[key] = overlayValue;
+    }
+  }
+  return merged;
+}
+
+static NSDictionary *ALNLoadPlist(NSString *path, NSError **error) {
+  if (![[NSFileManager defaultManager] fileExistsAtPath:path]) {
+    return @{};
+  }
+
+  NSData *data = [NSData dataWithContentsOfFile:path options:0 error:error];
+  if (data == nil) {
+    return nil;
+  }
+
+  NSPropertyListFormat format = NSPropertyListXMLFormat_v1_0;
+  id plist = [NSPropertyListSerialization propertyListWithData:data
+                                                       options:NSPropertyListImmutable
+                                                        format:&format
+                                                         error:error];
+  if (![plist isKindOfClass:[NSDictionary class]]) {
+    if (error != NULL) {
+      *error = [NSError errorWithDomain:ALNConfigErrorDomain
+                                   code:2
+                               userInfo:@{
+                                 NSLocalizedDescriptionKey :
+                                   [NSString stringWithFormat:@"Config plist is not a dictionary: %@",
+                                                              path]
+                               }];
+    }
+    return nil;
+  }
+  return plist;
+}
+
+static NSNumber *ALNParseBooleanString(NSString *value) {
+  if ([value length] == 0) {
+    return nil;
+  }
+  NSString *normalized = [[value lowercaseString]
+      stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+  if ([normalized isEqualToString:@"1"] || [normalized isEqualToString:@"true"] ||
+      [normalized isEqualToString:@"yes"] || [normalized isEqualToString:@"on"]) {
+    return @(YES);
+  }
+  if ([normalized isEqualToString:@"0"] || [normalized isEqualToString:@"false"] ||
+      [normalized isEqualToString:@"no"] || [normalized isEqualToString:@"off"]) {
+    return @(NO);
+  }
+  return nil;
+}
+
+static void ALNApplyIntegerOverride(NSMutableDictionary *target,
+                                    NSString *value,
+                                    NSString *key,
+                                    NSInteger minimum) {
+  if ([value length] == 0) {
+    return;
+  }
+  NSInteger parsed = [value integerValue];
+  if (parsed < minimum) {
+    return;
+  }
+  target[key] = @(parsed);
+}
+
+static void ALNApplyLimitOverride(NSMutableDictionary *limits, NSString *value, NSString *key) {
+  ALNApplyIntegerOverride(limits, value, key, 1);
+}
+
+static NSString *ALNEnvValue(const char *name) {
+  const char *value = getenv(name);
+  if (value == NULL || value[0] == '\0') {
+    return nil;
+  }
+  return [NSString stringWithUTF8String:value];
+}
+
+static NSString *ALNEnvValueCompat(const char *primary, const char *legacy) {
+  NSString *primaryValue = ALNEnvValue(primary);
+  if ([primaryValue length] > 0) {
+    return primaryValue;
+  }
+  return ALNEnvValue(legacy);
+}
+
+@implementation ALNConfig
+
++ (NSDictionary *)loadConfigAtRoot:(NSString *)rootPath
+                       environment:(NSString *)environment
+                             error:(NSError **)error {
+  NSString *env = ([environment length] > 0) ? environment : @"development";
+  NSString *configRoot = [rootPath stringByAppendingPathComponent:@"config"];
+  NSString *basePath = [configRoot stringByAppendingPathComponent:@"app.plist"];
+  NSString *envPath =
+      [[configRoot stringByAppendingPathComponent:@"environments"]
+          stringByAppendingPathComponent:[NSString stringWithFormat:@"%@.plist", env]];
+
+  NSError *baseError = nil;
+  NSDictionary *base = ALNLoadPlist(basePath, &baseError);
+  if (base == nil) {
+    if (error != NULL) {
+      *error = baseError;
+    }
+    return nil;
+  }
+
+  NSError *envError = nil;
+  NSDictionary *overlay = ALNLoadPlist(envPath, &envError);
+  if (overlay == nil) {
+    if (error != NULL) {
+      *error = envError;
+    }
+    return nil;
+  }
+
+  NSMutableDictionary *config =
+      [NSMutableDictionary dictionaryWithDictionary:ALNMergeDictionaries(base, overlay)];
+  config[@"environment"] = env;
+
+  NSString *host = ALNEnvValueCompat("ARLEN_HOST", "MOJOOBJC_HOST");
+  NSString *port = ALNEnvValueCompat("ARLEN_PORT", "MOJOOBJC_PORT");
+  NSString *logFormat = ALNEnvValueCompat("ARLEN_LOG_FORMAT", "MOJOOBJC_LOG_FORMAT");
+  NSString *trustedProxy =
+      ALNEnvValueCompat("ARLEN_TRUSTED_PROXY", "MOJOOBJC_TRUSTED_PROXY");
+  NSString *performanceLogging = ALNEnvValueCompat("ARLEN_PERFORMANCE_LOGGING",
+                                                   "MOJOOBJC_PERFORMANCE_LOGGING");
+  NSString *serveStatic = ALNEnvValueCompat("ARLEN_SERVE_STATIC", "MOJOOBJC_SERVE_STATIC");
+  NSString *maxRequestLineBytes =
+      ALNEnvValueCompat("ARLEN_MAX_REQUEST_LINE_BYTES", "MOJOOBJC_MAX_REQUEST_LINE_BYTES");
+  NSString *maxHeaderBytes =
+      ALNEnvValueCompat("ARLEN_MAX_HEADER_BYTES", "MOJOOBJC_MAX_HEADER_BYTES");
+  NSString *maxBodyBytes =
+      ALNEnvValueCompat("ARLEN_MAX_BODY_BYTES", "MOJOOBJC_MAX_BODY_BYTES");
+
+  NSString *listenBacklog =
+      ALNEnvValueCompat("ARLEN_LISTEN_BACKLOG", "MOJOOBJC_LISTEN_BACKLOG");
+  NSString *connectionTimeoutSeconds = ALNEnvValueCompat("ARLEN_CONNECTION_TIMEOUT_SECONDS",
+                                                         "MOJOOBJC_CONNECTION_TIMEOUT_SECONDS");
+  NSString *enableReusePort =
+      ALNEnvValueCompat("ARLEN_ENABLE_REUSEPORT", "MOJOOBJC_ENABLE_REUSEPORT");
+
+  NSString *propaneWorkers =
+      ALNEnvValueCompat("ARLEN_PROPANE_WORKERS", "MOJOOBJC_PROPANE_WORKERS");
+  NSString *propaneGracefulShutdownSeconds =
+      ALNEnvValueCompat("ARLEN_PROPANE_GRACEFUL_SHUTDOWN_SECONDS",
+                        "MOJOOBJC_PROPANE_GRACEFUL_SHUTDOWN_SECONDS");
+  NSString *propaneRespawnDelayMs =
+      ALNEnvValueCompat("ARLEN_PROPANE_RESPAWN_DELAY_MS", "MOJOOBJC_PROPANE_RESPAWN_DELAY_MS");
+  NSString *propaneReloadOverlapSeconds =
+      ALNEnvValueCompat("ARLEN_PROPANE_RELOAD_OVERLAP_SECONDS",
+                        "MOJOOBJC_PROPANE_RELOAD_OVERLAP_SECONDS");
+
+  NSString *databaseConnectionString =
+      ALNEnvValueCompat("ARLEN_DATABASE_URL", "MOJOOBJC_DATABASE_URL");
+  NSString *databasePoolSize =
+      ALNEnvValueCompat("ARLEN_DB_POOL_SIZE", "MOJOOBJC_DB_POOL_SIZE");
+
+  NSString *sessionEnabled =
+      ALNEnvValueCompat("ARLEN_SESSION_ENABLED", "MOJOOBJC_SESSION_ENABLED");
+  NSString *sessionSecret =
+      ALNEnvValueCompat("ARLEN_SESSION_SECRET", "MOJOOBJC_SESSION_SECRET");
+  NSString *sessionCookieName =
+      ALNEnvValueCompat("ARLEN_SESSION_COOKIE_NAME", "MOJOOBJC_SESSION_COOKIE_NAME");
+  NSString *sessionMaxAge =
+      ALNEnvValueCompat("ARLEN_SESSION_MAX_AGE_SECONDS", "MOJOOBJC_SESSION_MAX_AGE_SECONDS");
+  NSString *sessionSecure =
+      ALNEnvValueCompat("ARLEN_SESSION_SECURE", "MOJOOBJC_SESSION_SECURE");
+  NSString *sessionSameSite =
+      ALNEnvValueCompat("ARLEN_SESSION_SAMESITE", "MOJOOBJC_SESSION_SAMESITE");
+
+  NSString *csrfEnabled = ALNEnvValueCompat("ARLEN_CSRF_ENABLED", "MOJOOBJC_CSRF_ENABLED");
+  NSString *csrfHeaderName =
+      ALNEnvValueCompat("ARLEN_CSRF_HEADER_NAME", "MOJOOBJC_CSRF_HEADER_NAME");
+  NSString *csrfQueryParamName =
+      ALNEnvValueCompat("ARLEN_CSRF_QUERY_PARAM_NAME", "MOJOOBJC_CSRF_QUERY_PARAM_NAME");
+
+  NSString *rateLimitEnabled =
+      ALNEnvValueCompat("ARLEN_RATE_LIMIT_ENABLED", "MOJOOBJC_RATE_LIMIT_ENABLED");
+  NSString *rateLimitRequests =
+      ALNEnvValueCompat("ARLEN_RATE_LIMIT_REQUESTS", "MOJOOBJC_RATE_LIMIT_REQUESTS");
+  NSString *rateLimitWindowSeconds =
+      ALNEnvValueCompat("ARLEN_RATE_LIMIT_WINDOW_SECONDS", "MOJOOBJC_RATE_LIMIT_WINDOW_SECONDS");
+
+  NSString *securityHeadersEnabled =
+      ALNEnvValueCompat("ARLEN_SECURITY_HEADERS_ENABLED", "MOJOOBJC_SECURITY_HEADERS_ENABLED");
+  NSString *securityHeadersCSP =
+      ALNEnvValueCompat("ARLEN_CONTENT_SECURITY_POLICY", "MOJOOBJC_CONTENT_SECURITY_POLICY");
+
+  if ([host length] > 0) {
+    config[@"host"] = host;
+  }
+  if ([port length] > 0) {
+    config[@"port"] = @([port integerValue]);
+  }
+  if ([logFormat length] > 0) {
+    config[@"logFormat"] = [logFormat lowercaseString];
+  }
+
+  NSNumber *trustedProxyValue = ALNParseBooleanString(trustedProxy);
+  if (trustedProxyValue != nil) {
+    config[@"trustedProxy"] = trustedProxyValue;
+  }
+  NSNumber *performanceLoggingValue = ALNParseBooleanString(performanceLogging);
+  if (performanceLoggingValue != nil) {
+    config[@"performanceLogging"] = performanceLoggingValue;
+  }
+  NSNumber *serveStaticValue = ALNParseBooleanString(serveStatic);
+  if (serveStaticValue != nil) {
+    config[@"serveStatic"] = serveStaticValue;
+  }
+  NSNumber *enableReusePortValue = ALNParseBooleanString(enableReusePort);
+  if (enableReusePortValue != nil) {
+    config[@"enableReusePort"] = enableReusePortValue;
+  }
+
+  NSMutableDictionary *limits =
+      [NSMutableDictionary dictionaryWithDictionary:config[@"requestLimits"] ?: @{}];
+  ALNApplyLimitOverride(limits, maxRequestLineBytes, @"maxRequestLineBytes");
+  ALNApplyLimitOverride(limits, maxHeaderBytes, @"maxHeaderBytes");
+  ALNApplyLimitOverride(limits, maxBodyBytes, @"maxBodyBytes");
+  config[@"requestLimits"] = limits;
+
+  NSMutableDictionary *propaneAccessories =
+      [NSMutableDictionary dictionaryWithDictionary:config[@"propaneAccessories"] ?: @{}];
+  ALNApplyIntegerOverride(propaneAccessories, propaneWorkers, @"workerCount", 1);
+  ALNApplyIntegerOverride(propaneAccessories,
+                          propaneGracefulShutdownSeconds,
+                          @"gracefulShutdownSeconds",
+                          1);
+  ALNApplyIntegerOverride(propaneAccessories,
+                          propaneRespawnDelayMs,
+                          @"respawnDelayMs",
+                          0);
+  ALNApplyIntegerOverride(propaneAccessories,
+                          propaneReloadOverlapSeconds,
+                          @"reloadOverlapSeconds",
+                          0);
+  config[@"propaneAccessories"] = propaneAccessories;
+
+  NSMutableDictionary *database =
+      [NSMutableDictionary dictionaryWithDictionary:config[@"database"] ?: @{}];
+  if ([databaseConnectionString length] > 0) {
+    database[@"connectionString"] = databaseConnectionString;
+  }
+  ALNApplyIntegerOverride(database, databasePoolSize, @"poolSize", 1);
+  config[@"database"] = database;
+
+  NSMutableDictionary *session =
+      [NSMutableDictionary dictionaryWithDictionary:config[@"session"] ?: @{}];
+  NSNumber *sessionEnabledValue = ALNParseBooleanString(sessionEnabled);
+  if (sessionEnabledValue != nil) {
+    session[@"enabled"] = sessionEnabledValue;
+  }
+  NSNumber *sessionSecureValue = ALNParseBooleanString(sessionSecure);
+  if (sessionSecureValue != nil) {
+    session[@"secure"] = sessionSecureValue;
+  }
+  if ([sessionSecret length] > 0) {
+    session[@"secret"] = sessionSecret;
+  }
+  if ([sessionCookieName length] > 0) {
+    session[@"cookieName"] = sessionCookieName;
+  }
+  if ([sessionSameSite length] > 0) {
+    session[@"sameSite"] = sessionSameSite;
+  }
+  ALNApplyIntegerOverride(session, sessionMaxAge, @"maxAgeSeconds", 1);
+  config[@"session"] = session;
+
+  NSMutableDictionary *csrf =
+      [NSMutableDictionary dictionaryWithDictionary:config[@"csrf"] ?: @{}];
+  NSNumber *csrfEnabledValue = ALNParseBooleanString(csrfEnabled);
+  if (csrfEnabledValue != nil) {
+    csrf[@"enabled"] = csrfEnabledValue;
+  }
+  if ([csrfHeaderName length] > 0) {
+    csrf[@"headerName"] = [csrfHeaderName lowercaseString];
+  }
+  if ([csrfQueryParamName length] > 0) {
+    csrf[@"queryParamName"] = csrfQueryParamName;
+  }
+  config[@"csrf"] = csrf;
+
+  NSMutableDictionary *rateLimit =
+      [NSMutableDictionary dictionaryWithDictionary:config[@"rateLimit"] ?: @{}];
+  NSNumber *rateLimitEnabledValue = ALNParseBooleanString(rateLimitEnabled);
+  if (rateLimitEnabledValue != nil) {
+    rateLimit[@"enabled"] = rateLimitEnabledValue;
+  }
+  ALNApplyIntegerOverride(rateLimit, rateLimitRequests, @"requests", 1);
+  ALNApplyIntegerOverride(rateLimit, rateLimitWindowSeconds, @"windowSeconds", 1);
+  config[@"rateLimit"] = rateLimit;
+
+  NSMutableDictionary *securityHeaders =
+      [NSMutableDictionary dictionaryWithDictionary:config[@"securityHeaders"] ?: @{}];
+  NSNumber *securityHeadersEnabledValue = ALNParseBooleanString(securityHeadersEnabled);
+  if (securityHeadersEnabledValue != nil) {
+    securityHeaders[@"enabled"] = securityHeadersEnabledValue;
+  }
+  if ([securityHeadersCSP length] > 0) {
+    securityHeaders[@"contentSecurityPolicy"] = securityHeadersCSP;
+  }
+  config[@"securityHeaders"] = securityHeaders;
+
+  NSMutableDictionary *topLevel = [NSMutableDictionary dictionaryWithDictionary:config];
+  ALNApplyIntegerOverride(topLevel, listenBacklog, @"listenBacklog", 1);
+  ALNApplyIntegerOverride(topLevel,
+                          connectionTimeoutSeconds,
+                          @"connectionTimeoutSeconds",
+                          1);
+  config = topLevel;
+
+  if (config[@"host"] == nil) {
+    config[@"host"] = @"127.0.0.1";
+  }
+  if (config[@"port"] == nil) {
+    config[@"port"] = @(3000);
+  }
+  if (config[@"logFormat"] == nil) {
+    config[@"logFormat"] = [env isEqualToString:@"development"] ? @"text" : @"json";
+  }
+
+  NSMutableDictionary *finalLimits =
+      [NSMutableDictionary dictionaryWithDictionary:config[@"requestLimits"] ?: @{}];
+  if (finalLimits[@"maxRequestLineBytes"] == nil) {
+    finalLimits[@"maxRequestLineBytes"] = @(4096);
+  }
+  if (finalLimits[@"maxHeaderBytes"] == nil) {
+    finalLimits[@"maxHeaderBytes"] = @(32768);
+  }
+  if (finalLimits[@"maxBodyBytes"] == nil) {
+    finalLimits[@"maxBodyBytes"] = @(1048576);
+  }
+  config[@"requestLimits"] = finalLimits;
+
+  if (config[@"trustedProxy"] == nil) {
+    config[@"trustedProxy"] = @(NO);
+  }
+  if (config[@"performanceLogging"] == nil) {
+    config[@"performanceLogging"] = @(YES);
+  }
+  if (config[@"serveStatic"] == nil) {
+    config[@"serveStatic"] = @([env isEqualToString:@"development"]);
+  }
+  if (config[@"listenBacklog"] == nil) {
+    config[@"listenBacklog"] = @(128);
+  }
+  if (config[@"connectionTimeoutSeconds"] == nil) {
+    config[@"connectionTimeoutSeconds"] = @(30);
+  }
+  if (config[@"enableReusePort"] == nil) {
+    config[@"enableReusePort"] = @(NO);
+  }
+
+  NSMutableDictionary *finalAccessories =
+      [NSMutableDictionary dictionaryWithDictionary:config[@"propaneAccessories"] ?: @{}];
+  if (finalAccessories[@"workerCount"] == nil) {
+    finalAccessories[@"workerCount"] = @(4);
+  }
+  if (finalAccessories[@"gracefulShutdownSeconds"] == nil) {
+    finalAccessories[@"gracefulShutdownSeconds"] = @(10);
+  }
+  if (finalAccessories[@"respawnDelayMs"] == nil) {
+    finalAccessories[@"respawnDelayMs"] = @(250);
+  }
+  if (finalAccessories[@"reloadOverlapSeconds"] == nil) {
+    finalAccessories[@"reloadOverlapSeconds"] = @(1);
+  }
+  config[@"propaneAccessories"] = finalAccessories;
+
+  NSMutableDictionary *finalDatabase =
+      [NSMutableDictionary dictionaryWithDictionary:config[@"database"] ?: @{}];
+  if (finalDatabase[@"poolSize"] == nil) {
+    finalDatabase[@"poolSize"] = @(8);
+  }
+  config[@"database"] = finalDatabase;
+
+  NSMutableDictionary *finalSession =
+      [NSMutableDictionary dictionaryWithDictionary:config[@"session"] ?: @{}];
+  if (finalSession[@"enabled"] == nil) {
+    finalSession[@"enabled"] = @(NO);
+  }
+  if (finalSession[@"cookieName"] == nil) {
+    finalSession[@"cookieName"] = @"arlen_session";
+  }
+  if (finalSession[@"maxAgeSeconds"] == nil) {
+    finalSession[@"maxAgeSeconds"] = @(1209600);
+  }
+  if (finalSession[@"secure"] == nil) {
+    finalSession[@"secure"] = @([env isEqualToString:@"production"]);
+  }
+  if (finalSession[@"sameSite"] == nil) {
+    finalSession[@"sameSite"] = @"Lax";
+  }
+  config[@"session"] = finalSession;
+
+  NSMutableDictionary *finalCSRF =
+      [NSMutableDictionary dictionaryWithDictionary:config[@"csrf"] ?: @{}];
+  if (finalCSRF[@"enabled"] == nil) {
+    finalCSRF[@"enabled"] = @([finalSession[@"enabled"] boolValue]);
+  }
+  if (finalCSRF[@"headerName"] == nil) {
+    finalCSRF[@"headerName"] = @"x-csrf-token";
+  }
+  if (finalCSRF[@"queryParamName"] == nil) {
+    finalCSRF[@"queryParamName"] = @"csrf_token";
+  }
+  config[@"csrf"] = finalCSRF;
+
+  NSMutableDictionary *finalRateLimit =
+      [NSMutableDictionary dictionaryWithDictionary:config[@"rateLimit"] ?: @{}];
+  if (finalRateLimit[@"enabled"] == nil) {
+    finalRateLimit[@"enabled"] = @(NO);
+  }
+  if (finalRateLimit[@"requests"] == nil) {
+    finalRateLimit[@"requests"] = @(120);
+  }
+  if (finalRateLimit[@"windowSeconds"] == nil) {
+    finalRateLimit[@"windowSeconds"] = @(60);
+  }
+  config[@"rateLimit"] = finalRateLimit;
+
+  NSMutableDictionary *finalSecurityHeaders =
+      [NSMutableDictionary dictionaryWithDictionary:config[@"securityHeaders"] ?: @{}];
+  if (finalSecurityHeaders[@"enabled"] == nil) {
+    finalSecurityHeaders[@"enabled"] = @(YES);
+  }
+  if (finalSecurityHeaders[@"contentSecurityPolicy"] == nil) {
+    finalSecurityHeaders[@"contentSecurityPolicy"] = @"default-src 'self'";
+  }
+  config[@"securityHeaders"] = finalSecurityHeaders;
+
+  config[@"port"] = @([config[@"port"] integerValue]);
+  config[@"trustedProxy"] = @([config[@"trustedProxy"] boolValue]);
+  config[@"performanceLogging"] = @([config[@"performanceLogging"] boolValue]);
+  config[@"serveStatic"] = @([config[@"serveStatic"] boolValue]);
+  config[@"listenBacklog"] = @([config[@"listenBacklog"] integerValue]);
+  config[@"connectionTimeoutSeconds"] = @([config[@"connectionTimeoutSeconds"] integerValue]);
+  config[@"enableReusePort"] = @([config[@"enableReusePort"] boolValue]);
+
+  finalLimits[@"maxRequestLineBytes"] = @([finalLimits[@"maxRequestLineBytes"] integerValue]);
+  finalLimits[@"maxHeaderBytes"] = @([finalLimits[@"maxHeaderBytes"] integerValue]);
+  finalLimits[@"maxBodyBytes"] = @([finalLimits[@"maxBodyBytes"] integerValue]);
+  config[@"requestLimits"] = finalLimits;
+
+  finalAccessories[@"workerCount"] = @([finalAccessories[@"workerCount"] integerValue]);
+  finalAccessories[@"gracefulShutdownSeconds"] =
+      @([finalAccessories[@"gracefulShutdownSeconds"] integerValue]);
+  finalAccessories[@"respawnDelayMs"] = @([finalAccessories[@"respawnDelayMs"] integerValue]);
+  finalAccessories[@"reloadOverlapSeconds"] =
+      @([finalAccessories[@"reloadOverlapSeconds"] integerValue]);
+  config[@"propaneAccessories"] = finalAccessories;
+
+  finalDatabase[@"poolSize"] = @([finalDatabase[@"poolSize"] integerValue]);
+  config[@"database"] = finalDatabase;
+
+  finalSession[@"enabled"] = @([finalSession[@"enabled"] boolValue]);
+  finalSession[@"maxAgeSeconds"] = @([finalSession[@"maxAgeSeconds"] integerValue]);
+  finalSession[@"secure"] = @([finalSession[@"secure"] boolValue]);
+  config[@"session"] = finalSession;
+
+  finalCSRF[@"enabled"] = @([finalCSRF[@"enabled"] boolValue]);
+  if ([finalCSRF[@"headerName"] isKindOfClass:[NSString class]]) {
+    finalCSRF[@"headerName"] = [finalCSRF[@"headerName"] lowercaseString];
+  }
+  config[@"csrf"] = finalCSRF;
+
+  finalRateLimit[@"enabled"] = @([finalRateLimit[@"enabled"] boolValue]);
+  finalRateLimit[@"requests"] = @([finalRateLimit[@"requests"] integerValue]);
+  finalRateLimit[@"windowSeconds"] = @([finalRateLimit[@"windowSeconds"] integerValue]);
+  config[@"rateLimit"] = finalRateLimit;
+
+  finalSecurityHeaders[@"enabled"] = @([finalSecurityHeaders[@"enabled"] boolValue]);
+  config[@"securityHeaders"] = finalSecurityHeaders;
+
+  return [NSDictionary dictionaryWithDictionary:config];
+}
+
+@end

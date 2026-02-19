@@ -1,0 +1,19 @@
+<section>
+  <h2>Phase 1 capabilities in one page</h2>
+  <ul>
+  <% for (NSString *item in [ctx objectForKey:@"items"]) { %>
+    <li><%= item %></li>
+  <% } %>
+  </ul>
+
+  <p>
+    Effective client address seen by the app:
+    <code><%= [ctx objectForKey:@"effectiveRemoteAddress"] %></code>
+  </p>
+
+  <div class="callout">
+    <strong>Try this:</strong>
+    Open <code>/tech-demo/users/hank?flag=maintainer</code> and
+    <code>/tech-demo/api/catalog</code> to see template + JSON behavior side by side.
+  </div>
+</section>

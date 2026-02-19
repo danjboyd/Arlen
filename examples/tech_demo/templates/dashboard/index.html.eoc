@@ -1,0 +1,23 @@
+<section>
+  <h2>Dashboard</h2>
+  <p>Active tab: <strong><%= [ctx objectForKey:@"activeTab"] %></strong></p>
+
+  <table class="grid">
+    <thead>
+      <tr>
+        <th>Subsystem</th>
+        <th>Capability</th>
+        <th>Notes</th>
+      </tr>
+    </thead>
+    <tbody>
+    <% for (NSDictionary *row in [ctx objectForKey:@"metrics"]) { %>
+      <tr>
+        <td><%= [row objectForKey:@"name"] %></td>
+        <td><%= [row objectForKey:@"value"] %></td>
+        <td><%= [row objectForKey:@"notes"] %></td>
+      </tr>
+    <% } %>
+    </tbody>
+  </table>
+</section>

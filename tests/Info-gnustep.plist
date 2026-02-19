@@ -1,0 +1,6 @@
+{
+  NOTE = "Arlen XCTest Bundle";
+  NSExecutable = "ArlenTests";
+  NSMainNibFile = "";
+  NSPrincipalClass = "NSObject";
+}

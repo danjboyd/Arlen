@@ -1,0 +1,510 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+print_usage() {
+  cat <<'USAGE'
+Usage: propane [options] [-- worker-args]
+
+Runs Arlen in production manager mode with prefork workers.
+All production manager settings are called "propane accessories".
+
+Options:
+  --workers <n>                     Override propane accessory workerCount
+  --host <addr>                     Override bind host
+  --port <port>                     Override bind port
+  --env <name>                      Environment name (default: production)
+  --pid-file <path>                 PID file path
+  --graceful-shutdown-seconds <n>   Override propane accessory gracefulShutdownSeconds
+  --respawn-delay-ms <n>            Override propane accessory respawnDelayMs
+  --reload-overlap-seconds <n>      Override propane accessory reloadOverlapSeconds
+  --listen-backlog <n>              Override runtime listenBacklog
+  --connection-timeout-seconds <n>  Override runtime connectionTimeoutSeconds
+  --app-root <path>                 App root (default: ARLEN_APP_ROOT or cwd)
+  --framework-root <path>           Framework root (default: ARLEN_FRAMEWORK_ROOT or script root)
+  --no-respawn                      Disable worker respawn on crash/exit
+  --once                            Pass --once to worker and exit after worker exits
+  --print-routes                    Print routes via a single worker and exit
+  --help, -h                        Show this help
+
+Signals:
+  TERM/INT: graceful shutdown
+  HUP: rolling reload (start new workers, then retire old workers)
+
+Environment:
+  ARLEN_APP_ROOT
+  ARLEN_FRAMEWORK_ROOT
+USAGE
+}
+
+script_path="${BASH_SOURCE[0]}"
+if resolved="$(readlink -f "$script_path" 2>/dev/null)"; then
+  script_path="$resolved"
+fi
+script_dir="$(cd "$(dirname "$script_path")" && pwd)"
+default_framework_root="$(cd "$script_dir/.." && pwd)"
+
+framework_root="${ARLEN_FRAMEWORK_ROOT:-$default_framework_root}"
+app_root="${ARLEN_APP_ROOT:-$PWD}"
+environment="production"
+
+workers_override=""
+host_override=""
+port_override=""
+pid_file_override=""
+graceful_override=""
+respawn_delay_override=""
+reload_overlap_override=""
+listen_backlog_override=""
+connection_timeout_override=""
+
+no_respawn=0
+once_mode=0
+print_routes=0
+worker_passthrough=()
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --workers)
+      [[ $# -ge 2 ]] || { echo "propane: --workers requires a value" >&2; exit 2; }
+      workers_override="$2"
+      shift 2
+      ;;
+    --host)
+      [[ $# -ge 2 ]] || { echo "propane: --host requires a value" >&2; exit 2; }
+      host_override="$2"
+      shift 2
+      ;;
+    --port)
+      [[ $# -ge 2 ]] || { echo "propane: --port requires a value" >&2; exit 2; }
+      port_override="$2"
+      shift 2
+      ;;
+    --env)
+      [[ $# -ge 2 ]] || { echo "propane: --env requires a value" >&2; exit 2; }
+      environment="$2"
+      shift 2
+      ;;
+    --pid-file)
+      [[ $# -ge 2 ]] || { echo "propane: --pid-file requires a value" >&2; exit 2; }
+      pid_file_override="$2"
+      shift 2
+      ;;
+    --graceful-shutdown-seconds)
+      [[ $# -ge 2 ]] || { echo "propane: --graceful-shutdown-seconds requires a value" >&2; exit 2; }
+      graceful_override="$2"
+      shift 2
+      ;;
+    --respawn-delay-ms)
+      [[ $# -ge 2 ]] || { echo "propane: --respawn-delay-ms requires a value" >&2; exit 2; }
+      respawn_delay_override="$2"
+      shift 2
+      ;;
+    --reload-overlap-seconds)
+      [[ $# -ge 2 ]] || { echo "propane: --reload-overlap-seconds requires a value" >&2; exit 2; }
+      reload_overlap_override="$2"
+      shift 2
+      ;;
+    --listen-backlog)
+      [[ $# -ge 2 ]] || { echo "propane: --listen-backlog requires a value" >&2; exit 2; }
+      listen_backlog_override="$2"
+      shift 2
+      ;;
+    --connection-timeout-seconds)
+      [[ $# -ge 2 ]] || { echo "propane: --connection-timeout-seconds requires a value" >&2; exit 2; }
+      connection_timeout_override="$2"
+      shift 2
+      ;;
+    --app-root)
+      [[ $# -ge 2 ]] || { echo "propane: --app-root requires a value" >&2; exit 2; }
+      app_root="$2"
+      shift 2
+      ;;
+    --framework-root)
+      [[ $# -ge 2 ]] || { echo "propane: --framework-root requires a value" >&2; exit 2; }
+      framework_root="$2"
+      shift 2
+      ;;
+    --no-respawn)
+      no_respawn=1
+      shift
+      ;;
+    --once)
+      once_mode=1
+      no_respawn=1
+      worker_passthrough+=("--once")
+      shift
+      ;;
+    --print-routes)
+      print_routes=1
+      once_mode=1
+      no_respawn=1
+      workers_override="1"
+      worker_passthrough+=("--print-routes")
+      shift
+      ;;
+    --help|-h)
+      print_usage
+      exit 0
+      ;;
+    --)
+      shift
+      while [[ $# -gt 0 ]]; do
+        worker_passthrough+=("$1")
+        shift
+      done
+      ;;
+    *)
+      worker_passthrough+=("$1")
+      shift
+      ;;
+  esac
+done
+
+if [[ ! "$framework_root" = /* ]]; then
+  framework_root="$PWD/$framework_root"
+fi
+framework_root="$(cd "$framework_root" && pwd)"
+
+if [[ ! "$app_root" = /* ]]; then
+  app_root="$PWD/$app_root"
+fi
+app_root="$(cd "$app_root" && pwd)"
+
+if [[ ! -f "$framework_root/GNUmakefile" || ! -d "$framework_root/src/Arlen" ]]; then
+  echo "propane: invalid framework root: $framework_root" >&2
+  exit 1
+fi
+
+if ! command -v python3 >/dev/null 2>&1; then
+  echo "propane: python3 is required to parse merged config output" >&2
+  exit 1
+fi
+
+make -C "$framework_root" arlen >/dev/null
+
+config_json="$(cd "$app_root" && "$framework_root/build/arlen" config --env "$environment" --json 2>/dev/null || true)"
+if [[ -z "$config_json" ]]; then
+  echo "propane: failed to load app config via arlen config --json" >&2
+  exit 1
+fi
+
+while IFS='=' read -r key value; do
+  case "$key" in
+    config_host) config_host="$value" ;;
+    config_port) config_port="$value" ;;
+    config_workers) config_workers="$value" ;;
+    config_graceful_shutdown_seconds) config_graceful_shutdown_seconds="$value" ;;
+    config_respawn_delay_ms) config_respawn_delay_ms="$value" ;;
+    config_reload_overlap_seconds) config_reload_overlap_seconds="$value" ;;
+    config_listen_backlog) config_listen_backlog="$value" ;;
+    config_connection_timeout_seconds) config_connection_timeout_seconds="$value" ;;
+    config_enable_reuse_port) config_enable_reuse_port="$value" ;;
+  esac
+done < <(python3 - "$config_json" <<'PY'
+import json
+import sys
+
+cfg = json.loads(sys.argv[1])
+accessories = cfg.get("propaneAccessories") or {}
+
+def as_int(value, default, minimum):
+    try:
+        parsed = int(value)
+    except Exception:
+        return default
+    if parsed < minimum:
+        return default
+    return parsed
+
+def as_bool(value, default=False):
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"1", "true", "yes", "on"}:
+            return True
+        if normalized in {"0", "false", "no", "off"}:
+            return False
+    return default
+
+print(f"config_host={cfg.get('host', '127.0.0.1')}")
+print(f"config_port={as_int(cfg.get('port', 3000), 3000, 1)}")
+print(f"config_workers={as_int(accessories.get('workerCount', 4), 4, 1)}")
+print(f"config_graceful_shutdown_seconds={as_int(accessories.get('gracefulShutdownSeconds', 10), 10, 1)}")
+print(f"config_respawn_delay_ms={as_int(accessories.get('respawnDelayMs', 250), 250, 0)}")
+print(f"config_reload_overlap_seconds={as_int(accessories.get('reloadOverlapSeconds', 1), 1, 0)}")
+print(f"config_listen_backlog={as_int(cfg.get('listenBacklog', 128), 128, 1)}")
+print(f"config_connection_timeout_seconds={as_int(cfg.get('connectionTimeoutSeconds', 30), 30, 1)}")
+print(f"config_enable_reuse_port={1 if as_bool(cfg.get('enableReusePort', False), False) else 0}")
+PY
+)
+
+worker_count="${workers_override:-${config_workers:-4}}"
+host="${host_override:-${config_host:-127.0.0.1}}"
+port="${port_override:-${config_port:-3000}}"
+graceful_shutdown_seconds="${graceful_override:-${config_graceful_shutdown_seconds:-10}}"
+respawn_delay_ms="${respawn_delay_override:-${config_respawn_delay_ms:-250}}"
+reload_overlap_seconds="${reload_overlap_override:-${config_reload_overlap_seconds:-1}}"
+listen_backlog="${listen_backlog_override:-${config_listen_backlog:-128}}"
+connection_timeout_seconds="${connection_timeout_override:-${config_connection_timeout_seconds:-30}}"
+enable_reuse_port="${config_enable_reuse_port:-0}"
+
+is_uint() {
+  [[ "$1" =~ ^[0-9]+$ ]]
+}
+
+for numeric in "$worker_count" "$port" "$graceful_shutdown_seconds" "$respawn_delay_ms" "$reload_overlap_seconds" "$listen_backlog" "$connection_timeout_seconds" "$enable_reuse_port"; do
+  if ! is_uint "$numeric"; then
+    echo "propane: expected integer propane accessory/runtime value but got: $numeric" >&2
+    exit 2
+  fi
+done
+
+if (( worker_count > 1 )); then
+  enable_reuse_port=1
+fi
+
+if (( worker_count < 1 )); then
+  echo "propane: resolved worker count must be >= 1" >&2
+  exit 2
+fi
+if (( graceful_shutdown_seconds < 1 )); then
+  echo "propane: graceful shutdown seconds must be >= 1" >&2
+  exit 2
+fi
+if (( respawn_delay_ms < 0 )); then
+  echo "propane: respawn delay must be >= 0" >&2
+  exit 2
+fi
+if (( reload_overlap_seconds < 0 )); then
+  echo "propane: reload overlap seconds must be >= 0" >&2
+  exit 2
+fi
+if (( listen_backlog < 1 )); then
+  echo "propane: listen backlog must be >= 1" >&2
+  exit 2
+fi
+if (( connection_timeout_seconds < 1 )); then
+  echo "propane: connection timeout seconds must be >= 1" >&2
+  exit 2
+fi
+
+pid_file="${pid_file_override:-$app_root/tmp/propane.pid}"
+if [[ ! "$pid_file" = /* ]]; then
+  pid_file="$app_root/$pid_file"
+fi
+mkdir -p "$(dirname "$pid_file")"
+
+if [[ -f "$pid_file" ]]; then
+  existing_pid="$(cat "$pid_file" 2>/dev/null || true)"
+  if [[ -n "$existing_pid" ]] && kill -0 "$existing_pid" 2>/dev/null; then
+    echo "propane: already running with pid $existing_pid (pid file: $pid_file)" >&2
+    exit 1
+  fi
+  rm -f "$pid_file"
+fi
+
+is_app_root=0
+if [[ -f "$app_root/config/app.plist" ]] && ([[ -f "$app_root/src/main.m" ]] || [[ -f "$app_root/app_lite.m" ]]); then
+  is_app_root=1
+fi
+
+if (( is_app_root == 1 )); then
+  ARLEN_APP_ROOT="$app_root" ARLEN_FRAMEWORK_ROOT="$framework_root" \
+    "$framework_root/bin/boomhauer" --no-watch --prepare-only >/dev/null
+  app_binary="$app_root/.boomhauer/build/boomhauer-app"
+else
+  make -C "$framework_root" boomhauer >/dev/null
+  app_binary="$framework_root/build/boomhauer"
+fi
+
+if [[ ! -x "$app_binary" ]]; then
+  echo "propane: expected compiled server binary at $app_binary" >&2
+  exit 1
+fi
+
+worker_args=(--env "$environment" --host "$host" --port "$port")
+worker_args+=("${worker_passthrough[@]}")
+
+export ARLEN_APP_ROOT="$app_root"
+export ARLEN_FRAMEWORK_ROOT="$framework_root"
+export ARLEN_LISTEN_BACKLOG="$listen_backlog"
+export ARLEN_CONNECTION_TIMEOUT_SECONDS="$connection_timeout_seconds"
+export ARLEN_ENABLE_REUSEPORT="$enable_reuse_port"
+
+echo "propane: starting with propane accessories workerCount=$worker_count gracefulShutdownSeconds=$graceful_shutdown_seconds respawnDelayMs=$respawn_delay_ms reloadOverlapSeconds=$reload_overlap_seconds"
+echo "propane: runtime host=$host port=$port listenBacklog=$listen_backlog connectionTimeoutSeconds=$connection_timeout_seconds enableReusePort=$enable_reuse_port"
+
+echo "$$" > "$pid_file"
+
+sleep_ms() {
+  local ms="$1"
+  if (( ms <= 0 )); then
+    return
+  fi
+  local whole="$((ms / 1000))"
+  local frac="$((ms % 1000))"
+  local duration
+  printf -v duration '%d.%03d' "$whole" "$frac"
+  sleep "$duration"
+}
+
+spawn_worker() {
+  "$app_binary" "${worker_args[@]}" &
+  local pid=$!
+  workers+=("$pid")
+  echo "propane: worker started pid=$pid"
+}
+
+terminate_pid_list() {
+  local candidates=("$@")
+  if (( ${#candidates[@]} == 0 )); then
+    return
+  fi
+
+  local alive=()
+  local pid
+  for pid in "${candidates[@]}"; do
+    if kill -0 "$pid" 2>/dev/null; then
+      kill -TERM "$pid" 2>/dev/null || true
+      alive+=("$pid")
+    fi
+  done
+
+  local max_ticks="$((graceful_shutdown_seconds * 10))"
+  if (( max_ticks < 1 )); then
+    max_ticks=1
+  fi
+
+  local tick
+  for ((tick = 0; tick < max_ticks && ${#alive[@]} > 0; tick++)); do
+    local remaining=()
+    for pid in "${alive[@]}"; do
+      if kill -0 "$pid" 2>/dev/null; then
+        remaining+=("$pid")
+      else
+        set +e
+        wait "$pid" 2>/dev/null
+        set -e
+      fi
+    done
+    alive=("${remaining[@]}")
+    if (( ${#alive[@]} > 0 )); then
+      sleep 0.1
+    fi
+  done
+
+  for pid in "${alive[@]}"; do
+    kill -KILL "$pid" 2>/dev/null || true
+  done
+  for pid in "${alive[@]}"; do
+    set +e
+    wait "$pid" 2>/dev/null
+    set -e
+  done
+}
+
+workers=()
+shutting_down=0
+reload_requested=0
+manager_exit=0
+
+on_term() {
+  shutting_down=1
+}
+
+on_hup() {
+  reload_requested=1
+}
+
+cleanup_and_exit() {
+  local code="$1"
+  terminate_pid_list "${workers[@]}"
+  rm -f "$pid_file"
+  exit "$code"
+}
+
+trap on_term INT TERM
+trap on_hup HUP
+
+if (( print_routes == 1 )); then
+  workers=()
+  rm -f "$pid_file"
+  exec "$app_binary" "${worker_args[@]}"
+fi
+
+for ((idx = 0; idx < worker_count; idx++)); do
+  spawn_worker
+done
+
+while (( shutting_down == 0 )); do
+  if (( reload_requested == 1 )); then
+    old_workers=("${workers[@]}")
+    workers=()
+    echo "propane: reload requested; starting replacement workers"
+    for ((idx = 0; idx < worker_count; idx++)); do
+      spawn_worker
+    done
+    if (( reload_overlap_seconds > 0 )); then
+      sleep "$reload_overlap_seconds"
+    fi
+    terminate_pid_list "${old_workers[@]}"
+    reload_requested=0
+  fi
+
+  dead=()
+  for pid in "${workers[@]}"; do
+    if ! kill -0 "$pid" 2>/dev/null; then
+      set +e
+      wait "$pid"
+      status=$?
+      set -e
+      dead+=("$pid:$status")
+    fi
+  done
+
+  if (( ${#dead[@]} > 0 )); then
+    survivors=()
+    for pid in "${workers[@]}"; do
+      is_dead=0
+      for pair in "${dead[@]}"; do
+        dead_pid="${pair%%:*}"
+        if [[ "$pid" == "$dead_pid" ]]; then
+          is_dead=1
+          break
+        fi
+      done
+      if (( is_dead == 0 )); then
+        survivors+=("$pid")
+      fi
+    done
+    workers=("${survivors[@]}")
+
+    for pair in "${dead[@]}"; do
+      dead_pid="${pair%%:*}"
+      dead_status="${pair##*:}"
+      echo "propane: worker exited pid=$dead_pid status=$dead_status"
+    done
+
+    if (( once_mode == 1 )); then
+      manager_exit="${dead[0]##*:}"
+      shutting_down=1
+      continue
+    fi
+
+    if (( no_respawn == 0 )); then
+      for _ in "${dead[@]}"; do
+        sleep_ms "$respawn_delay_ms"
+        spawn_worker
+      done
+    elif (( ${#workers[@]} == 0 )); then
+      manager_exit="${dead[0]##*:}"
+      shutting_down=1
+      continue
+    fi
+  fi
+
+  sleep 0.2
+done
+
+cleanup_and_exit "$manager_exit"

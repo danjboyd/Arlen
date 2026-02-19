@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title><%= [ctx objectForKey:@"pageTitle"] %></title>
+    <link rel="stylesheet" href="/static/tech_demo.css">
+  </head>
+  <body>
+    <header class="shell">
+      <h1><%= [ctx objectForKey:@"pageTitle"] %></h1>
+      <p class="tagline"><%= [ctx objectForKey:@"tagline"] %></p>
+      <% ALNEOCInclude(out, ctx, @"partials/_nav.html.eoc", error); %>
+    </header>
+
+    <main class="shell">
+      <%== [ctx objectForKey:@"content"] %>
+    </main>
+
+    <footer class="shell footer">
+      <p>Arlen tech demo. This page is rendered from compiled <code>.html.eoc</code> templates.</p>
+    </footer>
+  </body>
+</html>

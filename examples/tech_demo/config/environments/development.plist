@@ -1,0 +1,4 @@
+{
+  logFormat = "text";
+  serveStatic = YES;
+}

@@ -1,0 +1,274 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+print_usage() {
+  cat <<'USAGE'
+Usage: boomhauer [options]
+
+Runs a Arlen app from the current app root (or ARLEN_APP_ROOT).
+By default, boomhauer watches for source/template/config/public changes,
+rebuilds, and restarts the server when files change.
+
+Options:
+  --watch        Enable watch mode (default)
+  --no-watch     Disable watch mode
+  --once         Serve one request and exit (disables watch)
+  --prepare-only Compile app/server and exit without starting it
+  --help, -h     Show this help
+
+Environment:
+  ARLEN_APP_ROOT         App root to run (default: current directory)
+  ARLEN_FRAMEWORK_ROOT   Arlen framework root (auto-detected from script path)
+USAGE
+}
+
+script_path="${BASH_SOURCE[0]}"
+if resolved="$(readlink -f "$script_path" 2>/dev/null)"; then
+  script_path="$resolved"
+fi
+script_dir="$(cd "$(dirname "$script_path")" && pwd)"
+default_framework_root="$(cd "$script_dir/.." && pwd)"
+framework_root="${ARLEN_FRAMEWORK_ROOT:-$default_framework_root}"
+
+if [[ ! -f "$framework_root/GNUmakefile" || ! -d "$framework_root/src/Arlen" ]]; then
+  echo "boomhauer: invalid framework root: $framework_root" >&2
+  echo "boomhauer: set ARLEN_FRAMEWORK_ROOT to a valid Arlen repository root" >&2
+  exit 1
+fi
+
+gnustep_sh="/usr/GNUstep/System/Library/Makefiles/GNUstep.sh"
+if [[ ! -f "$gnustep_sh" ]]; then
+  echo "boomhauer: GNUstep.sh not found at $gnustep_sh" >&2
+  exit 1
+fi
+
+app_root="${ARLEN_APP_ROOT:-$PWD}"
+if [[ ! "$app_root" = /* ]]; then
+  app_root="$PWD/$app_root"
+fi
+app_root="$(cd "$app_root" && pwd)"
+
+watch_mode=1
+prepare_only=0
+server_args=()
+for arg in "$@"; do
+  case "$arg" in
+    --watch)
+      watch_mode=1
+      ;;
+    --no-watch)
+      watch_mode=0
+      ;;
+    --help|-h)
+      print_usage
+      exit 0
+      ;;
+    --prepare-only)
+      watch_mode=0
+      prepare_only=1
+      ;;
+    --once)
+      watch_mode=0
+      server_args+=("$arg")
+      ;;
+    --print-routes)
+      watch_mode=0
+      server_args+=("$arg")
+      ;;
+    *)
+      server_args+=("$arg")
+      ;;
+  esac
+done
+
+is_app_root=0
+if [[ -f "$app_root/config/app.plist" ]] && ([[ -f "$app_root/src/main.m" ]] || [[ -f "$app_root/app_lite.m" ]]); then
+  is_app_root=1
+fi
+
+if [[ $is_app_root -eq 0 ]]; then
+  cd "$framework_root"
+  if [[ $watch_mode -eq 1 ]]; then
+    make arlen >/dev/null
+    exec "$framework_root/build/arlen" boomhauer --watch "${server_args[@]}"
+  fi
+
+  make boomhauer >/dev/null
+  if [[ $prepare_only -eq 1 ]]; then
+    exit 0
+  fi
+  export ARLEN_APP_ROOT="$app_root"
+  exec "$framework_root/build/boomhauer" "${server_args[@]}"
+fi
+
+state_root="$app_root/.boomhauer"
+build_root="$state_root/build"
+app_binary="$build_root/boomhauer-app"
+gen_root="$build_root/gen/templates"
+mkdir -p "$gen_root"
+
+watch_fingerprint() {
+  local roots=(src templates config public app_lite.m)
+  local lines=()
+  local rel path
+
+  for rel in "${roots[@]}"; do
+    path="$app_root/$rel"
+    if [[ -d "$path" ]]; then
+      while IFS= read -r file; do
+        local rel_file size mtime
+        rel_file="${file#"$app_root"/}"
+        size="$(stat -c %s "$file" 2>/dev/null || echo 0)"
+        mtime="$(stat -c %Y "$file" 2>/dev/null || echo 0)"
+        lines+=("$rel_file|$size|$mtime")
+      done < <(find "$path" -type f | sort)
+    elif [[ -f "$path" ]]; then
+      local size mtime
+      size="$(stat -c %s "$path" 2>/dev/null || echo 0)"
+      mtime="$(stat -c %Y "$path" 2>/dev/null || echo 0)"
+      lines+=("$rel|$size|$mtime")
+    fi
+  done
+
+  if [[ ${#lines[@]} -eq 0 ]]; then
+    printf 'empty\n'
+    return
+  fi
+
+  printf '%s\n' "${lines[@]}" | sort | sha256sum | awk '{print $1}'
+}
+
+transpile_templates() {
+  if [[ ! -d "$app_root/templates" ]]; then
+    rm -rf "$gen_root"
+    mkdir -p "$gen_root"
+    return
+  fi
+
+  mapfile -t template_files < <(find "$app_root/templates" -type f -name '*.html.eoc' | sort)
+  rm -rf "$gen_root"
+  mkdir -p "$gen_root"
+
+  if [[ ${#template_files[@]} -eq 0 ]]; then
+    return
+  fi
+
+  "$framework_root/build/eocc" \
+    --template-root "$app_root/templates" \
+    --output-dir "$gen_root" \
+    "${template_files[@]}"
+}
+
+compile_app() {
+  make -C "$framework_root" eocc >/dev/null
+  transpile_templates
+
+  mapfile -t framework_sources < <(find "$framework_root/src" -type f -name '*.m' | sort)
+  mapfile -t app_sources < <(find "$app_root/src" -type f -name '*.m' 2>/dev/null | sort)
+  mapfile -t generated_sources < <(find "$gen_root" -type f -name '*.m' 2>/dev/null | sort)
+
+  if [[ -f "$app_root/app_lite.m" ]]; then
+    app_sources+=("$app_root/app_lite.m")
+  fi
+
+  if [[ ${#app_sources[@]} -eq 0 ]]; then
+    echo "boomhauer: no app source files found under $app_root" >&2
+    echo "boomhauer: expected src/main.m (full mode) or app_lite.m (lite mode)" >&2
+    exit 1
+  fi
+
+  mkdir -p "$build_root"
+
+  # shellcheck disable=SC1090
+  set +u
+  source "$gnustep_sh"
+  set -u
+  clang $(gnustep-config --objc-flags) \
+    -I"$framework_root/src/Arlen" \
+    -I"$framework_root/src/Arlen/Core" \
+    -I"$framework_root/src/Arlen/HTTP" \
+    -I"$framework_root/src/Arlen/MVC/Controller" \
+    -I"$framework_root/src/Arlen/MVC/Routing" \
+    -I"$framework_root/src/Arlen/MVC/Template" \
+    -I"$framework_root/src/Arlen/MVC/View" \
+    -I"$framework_root/src/Arlen/Support" \
+    -I"$app_root/src" \
+    "${app_sources[@]}" \
+    "${framework_sources[@]}" \
+    "${generated_sources[@]}" \
+    -o "$app_binary" \
+    $(gnustep-config --base-libs)
+}
+
+child_pid=""
+stop_requested=0
+
+stop_child() {
+  if [[ -n "$child_pid" ]] && kill -0 "$child_pid" 2>/dev/null; then
+    kill -TERM "$child_pid" 2>/dev/null || true
+    wait "$child_pid" 2>/dev/null || true
+  fi
+  child_pid=""
+}
+
+on_signal() {
+  stop_requested=1
+  stop_child
+}
+
+trap on_signal INT TERM
+
+run_once() {
+  compile_app
+  if [[ $prepare_only -eq 1 ]]; then
+    exit 0
+  fi
+  export ARLEN_APP_ROOT="$app_root"
+  exec "$app_binary" "${server_args[@]}"
+}
+
+if [[ $watch_mode -eq 0 ]]; then
+  run_once
+fi
+
+last_fingerprint="$(watch_fingerprint)"
+
+while [[ $stop_requested -eq 0 ]]; do
+  compile_app
+  echo "boomhauer: watching $app_root"
+  export ARLEN_APP_ROOT="$app_root"
+  "$app_binary" "${server_args[@]}" &
+  child_pid="$!"
+  restart_for_change=0
+
+  while [[ $stop_requested -eq 0 ]] && kill -0 "$child_pid" 2>/dev/null; do
+    sleep 1
+    current_fingerprint="$(watch_fingerprint)"
+    if [[ "$current_fingerprint" != "$last_fingerprint" ]]; then
+      last_fingerprint="$current_fingerprint"
+      echo "boomhauer: change detected, rebuilding..."
+      restart_for_change=1
+      stop_child
+      break
+    fi
+  done
+
+  if [[ $stop_requested -eq 1 ]]; then
+    break
+  fi
+
+  if [[ -n "$child_pid" ]]; then
+    set +e
+    wait "$child_pid"
+    child_status=$?
+    set -e
+    child_pid=""
+    if [[ $restart_for_change -eq 0 && $child_status -ne 0 ]]; then
+      echo "boomhauer: server exited with status $child_status" >&2
+      exit "$child_status"
+    fi
+  fi
+
+done
+
+exit 0

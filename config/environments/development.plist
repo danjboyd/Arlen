@@ -1,0 +1,4 @@
+{
+  logFormat = "text";
+  performanceLogging = YES;
+}

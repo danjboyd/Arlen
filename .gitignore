@@ -1,0 +1,62 @@
+# GNUstep and general build output
+build/
+dist/
+obj/
+obj*/
+.deps/
+.libs/
+*.o
+*.obj
+*.lo
+*.la
+*.a
+*.so
+*.dylib
+*.dll
+*.d
+*.gcda
+*.gcno
+*.profraw
+*.profdata
+*.dSYM/
+*.xctest/
+*.xcresult/
+
+# Generated template sources
+build/gen/
+generated/
+*.generated.m
+
+# Logs and temp
+*.log
+*.tmp
+*.temp
+tmp/
+.cache/
+.boomhauer/
+*.pid
+*.out
+
+# Environment and local configuration
+.env
+.env.*
+!.env.example
+.envrc
+.direnv/
+*.local
+.gnustep/
+
+# Python and virtualenv tooling
+.venv/
+venv/
+__pycache__/
+*.pyc
+
+# Editor and OS noise
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
+*~

@@ -1,0 +1,1023 @@
+#import <Foundation/Foundation.h>
+#import <signal.h>
+#import <stdio.h>
+#import <stdlib.h>
+#import <string.h>
+
+#import "ALNConfig.h"
+#import "ALNMigrationRunner.h"
+#import "ALNPg.h"
+
+static volatile sig_atomic_t gWatchRunning = 1;
+
+static void HandleWatchSignal(int sig) {
+  (void)sig;
+  gWatchRunning = 0;
+}
+
+static BOOL InstallWatchSignalHandler(int sig) {
+  struct sigaction action;
+  memset(&action, 0, sizeof(action));
+  action.sa_handler = HandleWatchSignal;
+  sigemptyset(&action.sa_mask);
+  action.sa_flags = 0;
+  return (sigaction(sig, &action, NULL) == 0);
+}
+
+static void PrintUsage(void) {
+  fprintf(stderr,
+          "Usage: arlen <command> [options]\n"
+          "\n"
+          "Commands:\n"
+          "  new <AppName> [--full|--lite] [--force]\n"
+          "  generate <controller|model|migration|test> <Name>\n"
+          "  boomhauer [server args...]\n"
+          "  propane [manager args...]\n"
+          "  migrate [--env <name>] [--dsn <connection_string>] [--dry-run]\n"
+          "  routes\n"
+          "  test [--unit|--integration|--all]\n"
+          "  perf\n"
+          "  build\n"
+          "  config [--env <name>] [--json]\n");
+}
+
+static NSString *ShellQuote(NSString *value) {
+  NSString *escaped = [value stringByReplacingOccurrencesOfString:@"'" withString:@"'\"'\"'"];
+  return [NSString stringWithFormat:@"'%@'", escaped];
+}
+
+static int RunShellCommand(NSString *command) {
+  NSTask *task = [[NSTask alloc] init];
+  task.launchPath = @"/bin/bash";
+  task.arguments = @[ @"-lc", command ];
+  task.standardInput = [NSFileHandle fileHandleWithStandardInput];
+  task.standardOutput = [NSFileHandle fileHandleWithStandardOutput];
+  task.standardError = [NSFileHandle fileHandleWithStandardError];
+  [task launch];
+  [task waitUntilExit];
+  return task.terminationStatus;
+}
+
+static NSString *EnvValue(const char *name) {
+  const char *value = getenv(name);
+  if (value == NULL || value[0] == '\0') {
+    return nil;
+  }
+  return [NSString stringWithUTF8String:value];
+}
+
+static BOOL PathExists(NSString *path, BOOL *isDirectory) {
+  return [[NSFileManager defaultManager] fileExistsAtPath:path isDirectory:isDirectory];
+}
+
+static BOOL IsFrameworkRoot(NSString *path) {
+  BOOL isDirectory = NO;
+  if (!PathExists(path, &isDirectory) || !isDirectory) {
+    return NO;
+  }
+
+  NSString *makefile = [path stringByAppendingPathComponent:@"GNUmakefile"];
+  NSString *tool = [path stringByAppendingPathComponent:@"tools/boomhauer.m"];
+  NSString *runtime = [path stringByAppendingPathComponent:@"src/Arlen/ArlenServer.h"];
+  return PathExists(makefile, NULL) && PathExists(tool, NULL) && PathExists(runtime, NULL);
+}
+
+static NSString *FindFrameworkRoot(NSString *startPath) {
+  if ([startPath length] == 0) {
+    return nil;
+  }
+
+  NSString *candidate = [startPath stringByStandardizingPath];
+  while ([candidate length] > 1) {
+    if (IsFrameworkRoot(candidate)) {
+      return candidate;
+    }
+    NSString *parent = [candidate stringByDeletingLastPathComponent];
+    if ([parent isEqualToString:candidate]) {
+      break;
+    }
+    candidate = parent;
+  }
+
+  return IsFrameworkRoot(candidate) ? candidate : nil;
+}
+
+static NSString *FrameworkRootFromExecutablePath(void) {
+  NSArray *arguments = [[NSProcessInfo processInfo] arguments];
+  if ([arguments count] == 0) {
+    return nil;
+  }
+
+  NSString *invocation = arguments[0];
+  NSString *resolved = invocation;
+  if (![resolved hasPrefix:@"/"]) {
+    NSString *cwd = [[NSFileManager defaultManager] currentDirectoryPath];
+    resolved = [cwd stringByAppendingPathComponent:resolved];
+  }
+  resolved = [resolved stringByStandardizingPath];
+
+  NSString *buildDir = [resolved stringByDeletingLastPathComponent];
+  NSString *candidate = [buildDir stringByDeletingLastPathComponent];
+  if (IsFrameworkRoot(candidate)) {
+    return candidate;
+  }
+  return nil;
+}
+
+static NSString *BoomhauerBuildCommand(NSString *frameworkRoot) {
+  return [NSString stringWithFormat:@"cd %@ && make boomhauer", ShellQuote(frameworkRoot)];
+}
+
+static NSString *BoomhauerLaunchCommand(NSArray *serverArgs, NSString *frameworkRoot, NSString *appRoot) {
+  NSMutableArray *parts = [NSMutableArray array];
+  for (NSString *arg in serverArgs ?: @[]) {
+    [parts addObject:ShellQuote(arg)];
+  }
+  NSString *suffix = ([parts count] > 0) ? [NSString stringWithFormat:@" %@", [parts componentsJoinedByString:@" "]] : @"";
+  return [NSString stringWithFormat:@"cd %@ && ARLEN_APP_ROOT=%@ ./build/boomhauer%@",
+                                    ShellQuote(frameworkRoot), ShellQuote(appRoot), suffix];
+}
+
+static NSDictionary *BuildWatchSnapshot(NSArray *roots) {
+  NSFileManager *fm = [NSFileManager defaultManager];
+  NSString *cwd = [fm currentDirectoryPath];
+  NSMutableDictionary *snapshot = [NSMutableDictionary dictionary];
+
+  for (NSString *relativeRoot in roots) {
+    NSString *root = [cwd stringByAppendingPathComponent:relativeRoot];
+    BOOL isDirectory = NO;
+    if (![fm fileExistsAtPath:root isDirectory:&isDirectory]) {
+      continue;
+    }
+
+    if (!isDirectory) {
+      NSDictionary *attrs = [fm attributesOfItemAtPath:root error:nil];
+      NSString *fileType = attrs[NSFileType];
+      if ([fileType isEqualToString:NSFileTypeRegular]) {
+        NSDate *mtime = attrs[NSFileModificationDate] ?: [NSDate dateWithTimeIntervalSince1970:0];
+        NSNumber *size = attrs[NSFileSize] ?: @(0);
+        snapshot[relativeRoot] =
+            [NSString stringWithFormat:@"%@|%@", @([mtime timeIntervalSince1970]), size];
+      }
+      continue;
+    }
+
+    NSDirectoryEnumerator *enumerator = [fm enumeratorAtPath:root];
+    NSString *entry = nil;
+    while ((entry = [enumerator nextObject])) {
+      NSString *fullPath = [root stringByAppendingPathComponent:entry];
+      BOOL childDirectory = NO;
+      if (![fm fileExistsAtPath:fullPath isDirectory:&childDirectory] || childDirectory) {
+        continue;
+      }
+      NSDictionary *attrs = [fm attributesOfItemAtPath:fullPath error:nil];
+      NSString *fileType = attrs[NSFileType];
+      if (![fileType isEqualToString:NSFileTypeRegular]) {
+        continue;
+      }
+      NSDate *mtime = attrs[NSFileModificationDate] ?: [NSDate dateWithTimeIntervalSince1970:0];
+      NSNumber *size = attrs[NSFileSize] ?: @(0);
+      NSString *relativePath = [relativeRoot stringByAppendingPathComponent:entry];
+      snapshot[relativePath] =
+          [NSString stringWithFormat:@"%@|%@", @([mtime timeIntervalSince1970]), size];
+    }
+  }
+
+  return snapshot;
+}
+
+static int RunBoomhauerWatchMode(NSArray *serverArgs, NSString *frameworkRoot, NSString *appRoot) {
+  if (!InstallWatchSignalHandler(SIGINT) || !InstallWatchSignalHandler(SIGTERM)) {
+    perror("sigaction");
+    return 1;
+  }
+
+  NSArray *watchRoots = @[ @"src", @"templates", @"config", @"tools", @"public", @"app_lite.m" ];
+  NSDictionary *snapshot = BuildWatchSnapshot(watchRoots);
+  NSString *buildCommand = BoomhauerBuildCommand(frameworkRoot);
+  NSString *launchCommand = BoomhauerLaunchCommand(serverArgs, frameworkRoot, appRoot);
+
+  while (gWatchRunning) {
+    int buildStatus = RunShellCommand(buildCommand);
+    if (buildStatus != 0) {
+      return buildStatus;
+    }
+
+    NSTask *server = [[NSTask alloc] init];
+    server.launchPath = @"/bin/bash";
+    server.arguments = @[ @"-lc", launchCommand ];
+    server.standardInput = [NSFileHandle fileHandleWithStandardInput];
+    server.standardOutput = [NSFileHandle fileHandleWithStandardOutput];
+    server.standardError = [NSFileHandle fileHandleWithStandardError];
+    [server launch];
+
+    BOOL shouldRestart = NO;
+    while (gWatchRunning && [server isRunning]) {
+      [NSThread sleepForTimeInterval:1.0];
+      NSDictionary *current = BuildWatchSnapshot(watchRoots);
+      if (![current isEqualToDictionary:snapshot]) {
+        snapshot = current;
+        shouldRestart = YES;
+        fprintf(stderr, "arlen: change detected, restarting boomhauer\n");
+        [server terminate];
+        break;
+      }
+    }
+
+    if ([server isRunning] && !gWatchRunning) {
+      [server terminate];
+    }
+    [server waitUntilExit];
+
+    if (!gWatchRunning) {
+      return 0;
+    }
+    if (shouldRestart) {
+      continue;
+    }
+    return server.terminationStatus;
+  }
+  return 0;
+}
+
+static BOOL WriteTextFile(NSString *path, NSString *content, BOOL force, NSError **error) {
+  NSFileManager *fm = [NSFileManager defaultManager];
+  if ([fm fileExistsAtPath:path] && !force) {
+    if (error != NULL) {
+      *error = [NSError errorWithDomain:@"Arlen.Error"
+                                   code:2
+                               userInfo:@{
+                                 NSLocalizedDescriptionKey :
+                                   [NSString stringWithFormat:@"File exists: %@", path]
+                               }];
+    }
+    return NO;
+  }
+
+  NSString *dir = [path stringByDeletingLastPathComponent];
+  if ([dir length] > 0) {
+    BOOL ok = [fm createDirectoryAtPath:dir
+            withIntermediateDirectories:YES
+                             attributes:nil
+                                  error:error];
+    if (!ok) {
+      return NO;
+    }
+  }
+  return [content writeToFile:path atomically:YES encoding:NSUTF8StringEncoding error:error];
+}
+
+static BOOL ScaffoldFullApp(NSString *root, BOOL force, NSError **error) {
+  NSArray *directories = @[
+    @"config/environments",
+    @"db/migrations",
+    @"public",
+    @"src/Controllers",
+    @"src/Models",
+    @"templates",
+    @"templates/layouts",
+    @"templates/partials",
+    @"tests",
+  ];
+
+  for (NSString *dir in directories) {
+    NSString *path = [root stringByAppendingPathComponent:dir];
+    BOOL ok = [[NSFileManager defaultManager] createDirectoryAtPath:path
+                                         withIntermediateDirectories:YES
+                                                          attributes:nil
+                                                               error:error];
+    if (!ok) {
+      return NO;
+    }
+  }
+
+  BOOL ok = YES;
+  ok = ok && WriteTextFile([root stringByAppendingPathComponent:@"config/app.plist"],
+                           @"{\n"
+                            "  host = \"127.0.0.1\";\n"
+                            "  port = 3000;\n"
+                            "  logFormat = \"text\";\n"
+                            "  serveStatic = YES;\n"
+                            "  listenBacklog = 128;\n"
+                            "  connectionTimeoutSeconds = 30;\n"
+                            "  enableReusePort = NO;\n"
+                            "  requestLimits = {\n"
+                            "    maxRequestLineBytes = 4096;\n"
+                            "    maxHeaderBytes = 32768;\n"
+                            "    maxBodyBytes = 1048576;\n"
+                            "  };\n"
+                            "  database = {\n"
+                            "    connectionString = \"\";\n"
+                            "    poolSize = 8;\n"
+                            "  };\n"
+                            "  session = {\n"
+                            "    enabled = NO;\n"
+                            "    secret = \"\";\n"
+                            "    cookieName = \"arlen_session\";\n"
+                            "    maxAgeSeconds = 1209600;\n"
+                            "    secure = NO;\n"
+                            "    sameSite = \"Lax\";\n"
+                            "  };\n"
+                            "  csrf = {\n"
+                            "    enabled = NO;\n"
+                            "    headerName = \"x-csrf-token\";\n"
+                            "    queryParamName = \"csrf_token\";\n"
+                            "  };\n"
+                            "  rateLimit = {\n"
+                            "    enabled = NO;\n"
+                            "    requests = 120;\n"
+                            "    windowSeconds = 60;\n"
+                            "  };\n"
+                            "  securityHeaders = {\n"
+                            "    enabled = YES;\n"
+                            "    contentSecurityPolicy = \"default-src 'self'\";\n"
+                            "  };\n"
+                            "  propaneAccessories = {\n"
+                            "    workerCount = 4;\n"
+                            "    gracefulShutdownSeconds = 10;\n"
+                            "    respawnDelayMs = 250;\n"
+                            "    reloadOverlapSeconds = 1;\n"
+                            "  };\n"
+                            "}\n",
+                           force, error);
+  ok = ok && WriteTextFile([root stringByAppendingPathComponent:@"config/environments/development.plist"],
+                           @"{\n  logFormat = \"text\";\n}\n", force, error);
+  ok = ok && WriteTextFile([root stringByAppendingPathComponent:@"config/environments/test.plist"],
+                           @"{\n  logFormat = \"json\";\n}\n", force, error);
+  ok = ok && WriteTextFile([root stringByAppendingPathComponent:@"config/environments/production.plist"],
+                           @"{\n  logFormat = \"json\";\n}\n", force, error);
+  ok = ok && WriteTextFile([root stringByAppendingPathComponent:@"templates/index.html.eoc"],
+                           @"<h1><%= [ctx objectForKey:@\"title\"] %></h1>\n", force, error);
+  ok = ok && WriteTextFile([root stringByAppendingPathComponent:@"src/Controllers/HomeController.h"],
+                           @"#import \"ALNController.h\"\n\n"
+                            "@interface HomeController : ALNController\n"
+                            "@end\n",
+                           force, error);
+  ok = ok && WriteTextFile([root stringByAppendingPathComponent:@"src/Controllers/HomeController.m"],
+                           @"#import \"HomeController.h\"\n"
+                            "#import \"ALNContext.h\"\n\n"
+                            "@implementation HomeController\n\n"
+                            "- (id)index:(ALNContext *)ctx {\n"
+                            "  (void)ctx;\n"
+                            "  NSError *error = nil;\n"
+                            "  BOOL rendered = [self renderTemplate:@\"index\"\n"
+                            "                               context:@{ @\"title\" : @\"Welcome to Arlen\" }\n"
+                            "                                 error:&error];\n"
+                            "  if (!rendered) {\n"
+                            "    [self setStatus:500];\n"
+                            "    [self renderText:[NSString stringWithFormat:@\"render failed: %@\",\n"
+                            "                                                error.localizedDescription ?: @\"unknown\"]];\n"
+                            "  }\n"
+                            "  return nil;\n"
+                            "}\n\n"
+                            "@end\n",
+                           force, error);
+  ok = ok && WriteTextFile([root stringByAppendingPathComponent:@"src/main.m"],
+                           @"#import <Foundation/Foundation.h>\n"
+                            "#import <stdio.h>\n"
+                            "#import <stdlib.h>\n\n"
+                            "#import \"ArlenServer.h\"\n"
+                            "#import \"Controllers/HomeController.h\"\n\n"
+                            "static void PrintUsage(void) {\n"
+                            "  fprintf(stdout,\n"
+                            "          \"Usage: boomhauer [--port <port>] [--host <addr>] [--env <env>] [--once] [--print-routes]\\n\");\n"
+                            "}\n\n"
+                            "int main(int argc, const char *argv[]) {\n"
+                            "  @autoreleasepool {\n"
+                            "    int portOverride = 0;\n"
+                            "    NSString *host = nil;\n"
+                            "    NSString *environment = @\"development\";\n"
+                            "    BOOL once = NO;\n"
+                            "    BOOL printRoutes = NO;\n"
+                            "    for (int idx = 1; idx < argc; idx++) {\n"
+                            "      NSString *arg = [NSString stringWithUTF8String:argv[idx]];\n"
+                            "      if ([arg isEqualToString:@\"--port\"]) {\n"
+                            "        if ((idx + 1) >= argc) {\n"
+                            "          PrintUsage();\n"
+                            "          return 2;\n"
+                            "        }\n"
+                            "        portOverride = atoi(argv[++idx]);\n"
+                            "      } else if ([arg isEqualToString:@\"--host\"]) {\n"
+                            "        if ((idx + 1) >= argc) {\n"
+                            "          PrintUsage();\n"
+                            "          return 2;\n"
+                            "        }\n"
+                            "        host = [NSString stringWithUTF8String:argv[++idx]];\n"
+                            "      } else if ([arg isEqualToString:@\"--env\"]) {\n"
+                            "        if ((idx + 1) >= argc) {\n"
+                            "          PrintUsage();\n"
+                            "          return 2;\n"
+                            "        }\n"
+                            "        environment = [NSString stringWithUTF8String:argv[++idx]];\n"
+                            "      } else if ([arg isEqualToString:@\"--once\"]) {\n"
+                            "        once = YES;\n"
+                            "      } else if ([arg isEqualToString:@\"--print-routes\"]) {\n"
+                            "        printRoutes = YES;\n"
+                            "      } else if ([arg isEqualToString:@\"--help\"] || [arg isEqualToString:@\"-h\"]) {\n"
+                            "        PrintUsage();\n"
+                            "        return 0;\n"
+                            "      } else {\n"
+                            "        fprintf(stderr, \"Unknown argument: %s\\n\", argv[idx]);\n"
+                            "        return 2;\n"
+                            "      }\n"
+                            "    }\n\n"
+                            "    NSString *appRoot = [[NSFileManager defaultManager] currentDirectoryPath];\n"
+                            "    NSError *error = nil;\n"
+                            "    ALNApplication *app = [[ALNApplication alloc] initWithEnvironment:environment\n"
+                            "                                                           configRoot:appRoot\n"
+                            "                                                                error:&error];\n"
+                            "    if (app == nil) {\n"
+                            "      fprintf(stderr, \"failed loading config: %s\\n\", [[error localizedDescription] UTF8String]);\n"
+                            "      return 1;\n"
+                            "    }\n\n"
+                            "    [app registerRouteMethod:@\"GET\"\n"
+                            "                        path:@\"/\"\n"
+                            "                        name:@\"home\"\n"
+                            "             controllerClass:[HomeController class]\n"
+                            "                      action:@\"index\"];\n\n"
+                            "    ALNHTTPServer *server =\n"
+                            "        [[ALNHTTPServer alloc] initWithApplication:app\n"
+                            "                                            publicRoot:[appRoot stringByAppendingPathComponent:@\"public\"]];\n"
+                            "    server.serverName = @\"boomhauer\";\n"
+                            "    if (printRoutes) {\n"
+                            "      [server printRoutesToFile:stdout];\n"
+                            "      return 0;\n"
+                            "    }\n"
+                            "    return [server runWithHost:host portOverride:portOverride once:once];\n"
+                            "  }\n"
+                            "}\n",
+                           force, error);
+  ok = ok && WriteTextFile([root stringByAppendingPathComponent:@"README.md"],
+                           @"# New Arlen App\n\n"
+                            "Generated by arlen in full mode.\n\n"
+                            "- `src/main.m` starts an app with default settings.\n"
+                            "- `src/Controllers/HomeController.m` handles `/`.\n"
+                            "- `templates/index.html.eoc` renders the home page.\n",
+                           force, error);
+  ok = ok && WriteTextFile([root stringByAppendingPathComponent:@"public/health.txt"],
+                           @"ok\n", force, error);
+  return ok;
+}
+
+static BOOL ScaffoldLiteApp(NSString *root, BOOL force, NSError **error) {
+  NSArray *directories = @[
+    @"config/environments",
+    @"db/migrations",
+    @"public",
+    @"templates",
+  ];
+  for (NSString *dir in directories) {
+    NSString *path = [root stringByAppendingPathComponent:dir];
+    BOOL ok = [[NSFileManager defaultManager] createDirectoryAtPath:path
+                                         withIntermediateDirectories:YES
+                                                          attributes:nil
+                                                               error:error];
+    if (!ok) {
+      return NO;
+    }
+  }
+
+  BOOL ok = YES;
+  ok = ok && WriteTextFile([root stringByAppendingPathComponent:@"config/app.plist"],
+                           @"{\n  host = \"127.0.0.1\";\n  port = 3000;\n  serveStatic = YES;\n  listenBacklog = 128;\n  connectionTimeoutSeconds = 30;\n  database = {\n    connectionString = \"\";\n    poolSize = 8;\n  };\n  session = {\n    enabled = NO;\n    secret = \"\";\n    cookieName = \"arlen_session\";\n    maxAgeSeconds = 1209600;\n    secure = NO;\n    sameSite = \"Lax\";\n  };\n  csrf = {\n    enabled = NO;\n    headerName = \"x-csrf-token\";\n    queryParamName = \"csrf_token\";\n  };\n  rateLimit = {\n    enabled = NO;\n    requests = 120;\n    windowSeconds = 60;\n  };\n  securityHeaders = {\n    enabled = YES;\n    contentSecurityPolicy = \"default-src 'self'\";\n  };\n  propaneAccessories = {\n    workerCount = 4;\n    gracefulShutdownSeconds = 10;\n    respawnDelayMs = 250;\n    reloadOverlapSeconds = 1;\n  };\n}\n",
+                           force, error);
+  ok = ok && WriteTextFile([root stringByAppendingPathComponent:@"app_lite.m"],
+                           @"#import <Foundation/Foundation.h>\n"
+                            "#import <stdio.h>\n\n"
+                            "#import \"ArlenServer.h\"\n\n"
+                            "@interface LiteController : ALNController\n"
+                            "@end\n\n"
+                            "@implementation LiteController\n\n"
+                            "- (id)index:(ALNContext *)ctx {\n"
+                            "  (void)ctx;\n"
+                            "  [self renderText:@\"hello from lite mode\\n\"];\n"
+                            "  return nil;\n"
+                            "}\n\n"
+                            "@end\n\n"
+                            "static void PrintUsage(void) {\n"
+                            "  fprintf(stdout,\n"
+                            "          \"Usage: boomhauer [--port <port>] [--host <addr>] [--env <env>] [--once] [--print-routes]\\n\");\n"
+                            "}\n\n"
+                            "int main(int argc, const char *argv[]) {\n"
+                            "  @autoreleasepool {\n"
+                            "    int portOverride = 0;\n"
+                            "    NSString *host = nil;\n"
+                            "    NSString *environment = @\"development\";\n"
+                            "    BOOL once = NO;\n"
+                            "    BOOL printRoutes = NO;\n"
+                            "    for (int idx = 1; idx < argc; idx++) {\n"
+                            "      NSString *arg = [NSString stringWithUTF8String:argv[idx]];\n"
+                            "      if ([arg isEqualToString:@\"--port\"]) {\n"
+                            "        if ((idx + 1) >= argc) {\n"
+                            "          PrintUsage();\n"
+                            "          return 2;\n"
+                            "        }\n"
+                            "        portOverride = atoi(argv[++idx]);\n"
+                            "      } else if ([arg isEqualToString:@\"--host\"]) {\n"
+                            "        if ((idx + 1) >= argc) {\n"
+                            "          PrintUsage();\n"
+                            "          return 2;\n"
+                            "        }\n"
+                            "        host = [NSString stringWithUTF8String:argv[++idx]];\n"
+                            "      } else if ([arg isEqualToString:@\"--env\"]) {\n"
+                            "        if ((idx + 1) >= argc) {\n"
+                            "          PrintUsage();\n"
+                            "          return 2;\n"
+                            "        }\n"
+                            "        environment = [NSString stringWithUTF8String:argv[++idx]];\n"
+                            "      } else if ([arg isEqualToString:@\"--once\"]) {\n"
+                            "        once = YES;\n"
+                            "      } else if ([arg isEqualToString:@\"--print-routes\"]) {\n"
+                            "        printRoutes = YES;\n"
+                            "      } else if ([arg isEqualToString:@\"--help\"] || [arg isEqualToString:@\"-h\"]) {\n"
+                            "        PrintUsage();\n"
+                            "        return 0;\n"
+                            "      } else {\n"
+                            "        fprintf(stderr, \"Unknown argument: %s\\n\", argv[idx]);\n"
+                            "        return 2;\n"
+                            "      }\n"
+                            "    }\n"
+                            "    NSString *appRoot = [[NSFileManager defaultManager] currentDirectoryPath];\n"
+                            "    NSError *error = nil;\n"
+                            "    ALNApplication *app = [[ALNApplication alloc] initWithEnvironment:environment\n"
+                            "                                                           configRoot:appRoot\n"
+                            "                                                                error:&error];\n"
+                            "    if (app == nil) {\n"
+                            "      fprintf(stderr, \"failed loading config: %s\\n\", [[error localizedDescription] UTF8String]);\n"
+                            "      return 1;\n"
+                            "    }\n\n"
+                            "    [app registerRouteMethod:@\"GET\"\n"
+                            "                        path:@\"/\"\n"
+                            "                        name:@\"home\"\n"
+                            "             controllerClass:[LiteController class]\n"
+                            "                      action:@\"index\"];\n\n"
+                            "    ALNHTTPServer *server =\n"
+                            "        [[ALNHTTPServer alloc] initWithApplication:app\n"
+                            "                                            publicRoot:[appRoot stringByAppendingPathComponent:@\"public\"]];\n"
+                            "    server.serverName = @\"boomhauer\";\n"
+                            "    if (printRoutes) {\n"
+                            "      [server printRoutesToFile:stdout];\n"
+                            "      return 0;\n"
+                            "    }\n"
+                            "    return [server runWithHost:host portOverride:portOverride once:once];\n"
+                            "  }\n"
+                            "}\n",
+                           force, error);
+  ok = ok && WriteTextFile([root stringByAppendingPathComponent:@"templates/index.html.eoc"],
+                           @"<h1>Lite App</h1>\n", force, error);
+  ok = ok && WriteTextFile([root stringByAppendingPathComponent:@"README.md"],
+                           @"# New Arlen Lite App\n\n"
+                            "Generated by arlen in lite mode.\n\n"
+                            "- `app_lite.m` includes a single-file controller + server setup.\n"
+                            "- You can split this into full mode structure later.\n",
+                           force, error);
+  ok = ok && WriteTextFile([root stringByAppendingPathComponent:@"public/health.txt"],
+                           @"ok\n", force, error);
+  return ok;
+}
+
+static int CommandNew(NSArray *args) {
+  if ([args count] == 0) {
+    fprintf(stderr, "arlen new: missing AppName\n");
+    return 2;
+  }
+  NSString *appName = args[0];
+  BOOL lite = NO;
+  BOOL force = NO;
+
+  for (NSUInteger idx = 1; idx < [args count]; idx++) {
+    NSString *arg = args[idx];
+    if ([arg isEqualToString:@"--lite"]) {
+      lite = YES;
+    } else if ([arg isEqualToString:@"--full"]) {
+      lite = NO;
+    } else if ([arg isEqualToString:@"--force"]) {
+      force = YES;
+    } else {
+      fprintf(stderr, "arlen new: unknown option %s\n", [arg UTF8String]);
+      return 2;
+    }
+  }
+
+  NSString *root =
+      [[[NSFileManager defaultManager] currentDirectoryPath] stringByAppendingPathComponent:appName];
+  NSError *error = nil;
+  BOOL ok = lite ? ScaffoldLiteApp(root, force, &error) : ScaffoldFullApp(root, force, &error);
+  if (!ok) {
+    fprintf(stderr, "arlen new: %s\n", [[error localizedDescription] UTF8String]);
+    return 1;
+  }
+  fprintf(stdout, "Created %s app at %s\n", lite ? "lite" : "full", [root UTF8String]);
+  return 0;
+}
+
+static NSString *CapitalizeFirst(NSString *name) {
+  if ([name length] == 0) {
+    return @"";
+  }
+  NSString *first = [[name substringToIndex:1] uppercaseString];
+  NSString *rest = [name substringFromIndex:1];
+  return [first stringByAppendingString:rest];
+}
+
+static int CommandGenerate(NSArray *args) {
+  if ([args count] < 2) {
+    fprintf(stderr, "arlen generate: expected type and Name\n");
+    return 2;
+  }
+
+  NSString *type = args[0];
+  NSString *name = CapitalizeFirst(args[1]);
+  NSString *root = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSError *error = nil;
+  BOOL ok = NO;
+
+  if ([type isEqualToString:@"controller"]) {
+    NSString *headerPath =
+        [root stringByAppendingPathComponent:
+                  [NSString stringWithFormat:@"src/Controllers/%@Controller.h", name]];
+    NSString *implPath =
+        [root stringByAppendingPathComponent:
+                  [NSString stringWithFormat:@"src/Controllers/%@Controller.m", name]];
+    NSString *header = [NSString stringWithFormat:
+                                     @"#import \"ALNController.h\"\n\n"
+                                      "@interface %@Controller : ALNController\n@end\n",
+                                     name];
+    NSString *impl = [NSString stringWithFormat:
+                                   @"#import \"%@Controller.h\"\n\n"
+                                    "@implementation %@Controller\n\n"
+                                    "- (id)index:(ALNContext *)ctx {\n"
+                                    "  (void)ctx;\n"
+                                    "  [self renderText:@\"%@ index\\n\"];\n"
+                                    "  return nil;\n"
+                                    "}\n\n@end\n",
+                                   name, name, name];
+    ok = WriteTextFile(headerPath, header, NO, &error) &&
+         WriteTextFile(implPath, impl, NO, &error);
+  } else if ([type isEqualToString:@"model"]) {
+    NSString *headerPath =
+        [root stringByAppendingPathComponent:
+                  [NSString stringWithFormat:@"src/Models/%@Repository.h", name]];
+    NSString *implPath =
+        [root stringByAppendingPathComponent:
+                  [NSString stringWithFormat:@"src/Models/%@Repository.m", name]];
+    ok = WriteTextFile(headerPath,
+                       [NSString stringWithFormat:@"#import <Foundation/Foundation.h>\n\n@interface %@Repository : NSObject\n@end\n",
+                                                   name],
+                       NO, &error) &&
+         WriteTextFile(implPath,
+                       [NSString stringWithFormat:@"#import \"%@Repository.h\"\n\n@implementation %@Repository\n@end\n",
+                                                   name, name],
+                       NO, &error);
+  } else if ([type isEqualToString:@"migration"]) {
+    NSString *timestamp =
+        [NSString stringWithFormat:@"%lld", (long long)[[NSDate date] timeIntervalSince1970]];
+    NSString *path =
+        [root stringByAppendingPathComponent:
+                  [NSString stringWithFormat:@"db/migrations/%@_%@.sql", timestamp,
+                                             [name lowercaseString]]];
+    ok = WriteTextFile(path, @"-- migration\n", NO, &error);
+  } else if ([type isEqualToString:@"test"]) {
+    NSString *path =
+        [root stringByAppendingPathComponent:[NSString stringWithFormat:@"tests/%@Tests.m", name]];
+    NSString *content = [NSString stringWithFormat:
+                                      @"#import <XCTest/XCTest.h>\n\n"
+                                       "@interface %@Tests : XCTestCase\n@end\n\n"
+                                       "@implementation %@Tests\n"
+                                       "- (void)testPlaceholder {\n"
+                                       "  XCTAssertTrue(YES);\n"
+                                       "}\n@end\n",
+                                      name, name];
+    ok = WriteTextFile(path, content, NO, &error);
+  } else {
+    fprintf(stderr, "arlen generate: unknown type %s\n", [type UTF8String]);
+    return 2;
+  }
+
+  if (!ok) {
+    fprintf(stderr, "arlen generate: %s\n", [[error localizedDescription] UTF8String]);
+    return 1;
+  }
+
+  fprintf(stdout, "Generated %s %s\n", [type UTF8String], [name UTF8String]);
+  return 0;
+}
+
+static NSString *ResolveFrameworkRootForCommand(NSString *commandName) {
+  NSString *appRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *override = EnvValue("ARLEN_FRAMEWORK_ROOT");
+  if ([override length] > 0) {
+    NSString *candidate = [override hasPrefix:@"/"]
+                              ? [override stringByStandardizingPath]
+                              : [[appRoot stringByAppendingPathComponent:override] stringByStandardizingPath];
+    if (IsFrameworkRoot(candidate)) {
+      return candidate;
+    }
+    fprintf(stderr,
+            "arlen %s: ARLEN_FRAMEWORK_ROOT does not point to a valid Arlen root: %s\n",
+            [commandName UTF8String], [candidate UTF8String]);
+    return nil;
+  }
+
+  NSString *frameworkRoot = FindFrameworkRoot(appRoot);
+  if ([frameworkRoot length] == 0) {
+    frameworkRoot = FrameworkRootFromExecutablePath();
+  }
+  if ([frameworkRoot length] == 0) {
+    fprintf(stderr, "arlen %s: could not locate Arlen framework root from %s\n",
+            [commandName UTF8String], [appRoot UTF8String]);
+    return nil;
+  }
+  return frameworkRoot;
+}
+
+static int CommandBoomhauer(NSArray *args) {
+  BOOL watch = NO;
+  NSMutableArray *serverArgs = [NSMutableArray array];
+  for (NSString *arg in args) {
+    if ([arg isEqualToString:@"--watch"]) {
+      watch = YES;
+      continue;
+    }
+    [serverArgs addObject:arg];
+  }
+
+  NSString *appRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *frameworkRoot = ResolveFrameworkRootForCommand(@"boomhauer");
+  if ([frameworkRoot length] == 0) {
+    return 1;
+  }
+
+  if (watch) {
+    return RunBoomhauerWatchMode(serverArgs, frameworkRoot, appRoot);
+  }
+
+  NSString *command = [NSString stringWithFormat:@"%@ && %@",
+                                                 BoomhauerBuildCommand(frameworkRoot),
+                                                 BoomhauerLaunchCommand(serverArgs, frameworkRoot, appRoot)];
+  return RunShellCommand(command);
+}
+
+static int CommandPropane(NSArray *args) {
+  NSString *appRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *frameworkRoot = ResolveFrameworkRootForCommand(@"propane");
+  if ([frameworkRoot length] == 0) {
+    return 1;
+  }
+
+  NSMutableArray *quoted = [NSMutableArray array];
+  for (NSString *arg in args ?: @[]) {
+    [quoted addObject:ShellQuote(arg)];
+  }
+  NSString *suffix = ([quoted count] > 0) ? [NSString stringWithFormat:@" %@", [quoted componentsJoinedByString:@" "]] : @"";
+
+  NSString *command = [NSString
+      stringWithFormat:@"cd %@ && ARLEN_APP_ROOT=%@ ARLEN_FRAMEWORK_ROOT=%@ ./bin/propane%@",
+                       ShellQuote(frameworkRoot), ShellQuote(appRoot), ShellQuote(frameworkRoot), suffix];
+  return RunShellCommand(command);
+}
+
+static int CommandRoutes(void) {
+  NSString *appRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *frameworkRoot = ResolveFrameworkRootForCommand(@"routes");
+  if ([frameworkRoot length] == 0) {
+    return 1;
+  }
+  NSString *command = [NSString stringWithFormat:@"%@ && %@",
+                                                 BoomhauerBuildCommand(frameworkRoot),
+                                                 BoomhauerLaunchCommand(@[ @"--print-routes" ],
+                                                                        frameworkRoot, appRoot)];
+  return RunShellCommand(command);
+}
+
+static int CommandTest(NSArray *args) {
+  NSString *frameworkRoot = ResolveFrameworkRootForCommand(@"test");
+  if ([frameworkRoot length] == 0) {
+    return 1;
+  }
+  if ([args count] == 0 || [args containsObject:@"--all"]) {
+    return RunShellCommand([NSString stringWithFormat:@"cd %@ && make test", ShellQuote(frameworkRoot)]);
+  }
+  if ([args containsObject:@"--unit"]) {
+    return RunShellCommand([NSString stringWithFormat:@"cd %@ && make test-unit", ShellQuote(frameworkRoot)]);
+  }
+  if ([args containsObject:@"--integration"]) {
+    return RunShellCommand([NSString stringWithFormat:@"cd %@ && make test-integration", ShellQuote(frameworkRoot)]);
+  }
+  fprintf(stderr, "arlen test: unsupported options\n");
+  return 2;
+}
+
+static int CommandPerf(void) {
+  NSString *frameworkRoot = ResolveFrameworkRootForCommand(@"perf");
+  if ([frameworkRoot length] == 0) {
+    return 1;
+  }
+  return RunShellCommand([NSString stringWithFormat:@"cd %@ && make perf", ShellQuote(frameworkRoot)]);
+}
+
+static int CommandBuild(void) {
+  NSString *frameworkRoot = ResolveFrameworkRootForCommand(@"build");
+  if ([frameworkRoot length] == 0) {
+    return 1;
+  }
+  return RunShellCommand([NSString stringWithFormat:@"cd %@ && make all", ShellQuote(frameworkRoot)]);
+}
+
+static int CommandConfig(NSArray *args) {
+  NSString *environment = @"development";
+  BOOL asJSON = NO;
+  for (NSUInteger idx = 0; idx < [args count]; idx++) {
+    NSString *arg = args[idx];
+    if ([arg isEqualToString:@"--env"]) {
+      if (idx + 1 >= [args count]) {
+        fprintf(stderr, "arlen config: --env requires a value\n");
+        return 2;
+      }
+      environment = args[++idx];
+    } else if ([arg isEqualToString:@"--json"]) {
+      asJSON = YES;
+    } else {
+      fprintf(stderr, "arlen config: unknown option %s\n", [arg UTF8String]);
+      return 2;
+    }
+  }
+
+  NSError *error = nil;
+  NSDictionary *config = [ALNConfig loadConfigAtRoot:[[NSFileManager defaultManager] currentDirectoryPath]
+                                        environment:environment
+                                              error:&error];
+  if (config == nil) {
+    fprintf(stderr, "arlen config: %s\n", [[error localizedDescription] UTF8String]);
+    return 1;
+  }
+
+  if (asJSON) {
+    NSData *json = [NSJSONSerialization dataWithJSONObject:config options:NSJSONWritingPrettyPrinted error:&error];
+    if (json == nil) {
+      fprintf(stderr, "arlen config: %s\n", [[error localizedDescription] UTF8String]);
+      return 1;
+    }
+    fprintf(stdout, "%s\n", [[[NSString alloc] initWithData:json encoding:NSUTF8StringEncoding] UTF8String]);
+    return 0;
+  }
+
+  NSArray *keys = [[config allKeys] sortedArrayUsingSelector:@selector(compare:)];
+  for (NSString *key in keys) {
+    fprintf(stdout, "%s=%s\n", [key UTF8String], [[config[key] description] UTF8String]);
+  }
+  return 0;
+}
+
+static NSString *DatabaseConnectionStringFromConfig(NSDictionary *config) {
+  NSDictionary *database = [config[@"database"] isKindOfClass:[NSDictionary class]] ? config[@"database"] : nil;
+  NSString *connectionString =
+      [database[@"connectionString"] isKindOfClass:[NSString class]] ? database[@"connectionString"] : nil;
+  return ([connectionString length] > 0) ? connectionString : nil;
+}
+
+static NSUInteger DatabasePoolSizeFromConfig(NSDictionary *config) {
+  NSDictionary *database = [config[@"database"] isKindOfClass:[NSDictionary class]] ? config[@"database"] : nil;
+  id value = database[@"poolSize"];
+  if ([value respondsToSelector:@selector(unsignedIntegerValue)]) {
+    NSUInteger parsed = [value unsignedIntegerValue];
+    if (parsed >= 1) {
+      return parsed;
+    }
+  }
+  return 4;
+}
+
+static int CommandMigrate(NSArray *args) {
+  NSString *environment = @"development";
+  NSString *dsnOverride = nil;
+  BOOL dryRun = NO;
+
+  for (NSUInteger idx = 0; idx < [args count]; idx++) {
+    NSString *arg = args[idx];
+    if ([arg isEqualToString:@"--env"]) {
+      if (idx + 1 >= [args count]) {
+        fprintf(stderr, "arlen migrate: --env requires a value\n");
+        return 2;
+      }
+      environment = args[++idx];
+    } else if ([arg isEqualToString:@"--dsn"]) {
+      if (idx + 1 >= [args count]) {
+        fprintf(stderr, "arlen migrate: --dsn requires a value\n");
+        return 2;
+      }
+      dsnOverride = args[++idx];
+    } else if ([arg isEqualToString:@"--dry-run"]) {
+      dryRun = YES;
+    } else if ([arg isEqualToString:@"--help"] || [arg isEqualToString:@"-h"]) {
+      fprintf(stdout,
+              "Usage: arlen migrate [--env <name>] [--dsn <connection_string>] [--dry-run]\n");
+      return 0;
+    } else {
+      fprintf(stderr, "arlen migrate: unknown option %s\n", [arg UTF8String]);
+      return 2;
+    }
+  }
+
+  NSString *appRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSError *error = nil;
+  NSDictionary *config = [ALNConfig loadConfigAtRoot:appRoot environment:environment error:&error];
+  if (config == nil) {
+    fprintf(stderr, "arlen migrate: failed to load config: %s\n", [[error localizedDescription] UTF8String]);
+    return 1;
+  }
+
+  NSString *dsn = dsnOverride ?: EnvValue("ARLEN_DATABASE_URL");
+  if ([dsn length] == 0) {
+    dsn = DatabaseConnectionStringFromConfig(config);
+  }
+  if ([dsn length] == 0) {
+    fprintf(stderr,
+            "arlen migrate: no database connection string configured (set --dsn or "
+            "ARLEN_DATABASE_URL or config.database.connectionString)\n");
+    return 1;
+  }
+
+  NSUInteger poolSize = DatabasePoolSizeFromConfig(config);
+  ALNPg *database = [[ALNPg alloc] initWithConnectionString:dsn maxConnections:poolSize error:&error];
+  if (database == nil) {
+    fprintf(stderr, "arlen migrate: failed to initialize database adapter: %s\n",
+            [[error localizedDescription] UTF8String]);
+    return 1;
+  }
+
+  NSString *migrationsPath = [appRoot stringByAppendingPathComponent:@"db/migrations"];
+  NSArray *files = nil;
+  BOOL ok = [ALNMigrationRunner applyMigrationsAtPath:migrationsPath
+                                             database:database
+                                               dryRun:dryRun
+                                         appliedFiles:&files
+                                                error:&error];
+  if (!ok) {
+    fprintf(stderr, "arlen migrate: %s\n", [[error localizedDescription] UTF8String]);
+    return 1;
+  }
+
+  if (dryRun) {
+    fprintf(stdout, "Pending migrations: %lu\n", (unsigned long)[files count]);
+    for (NSString *file in files) {
+      fprintf(stdout, "  %s\n", [[file lastPathComponent] UTF8String]);
+    }
+    return 0;
+  }
+
+  fprintf(stdout, "Applied migrations: %lu\n", (unsigned long)[files count]);
+  for (NSString *file in files) {
+    fprintf(stdout, "  %s\n", [[file lastPathComponent] UTF8String]);
+  }
+  return 0;
+}
+
+int main(int argc, const char *argv[]) {
+  @autoreleasepool {
+    if (argc < 2) {
+      PrintUsage();
+      return 2;
+    }
+
+    NSString *command = [NSString stringWithUTF8String:argv[1]];
+    NSMutableArray *args = [NSMutableArray array];
+    for (int idx = 2; idx < argc; idx++) {
+      [args addObject:[NSString stringWithUTF8String:argv[idx]]];
+    }
+
+    if ([command isEqualToString:@"new"]) {
+      return CommandNew(args);
+    }
+    if ([command isEqualToString:@"generate"]) {
+      return CommandGenerate(args);
+    }
+    if ([command isEqualToString:@"boomhauer"]) {
+      return CommandBoomhauer(args);
+    }
+    if ([command isEqualToString:@"propane"]) {
+      return CommandPropane(args);
+    }
+    if ([command isEqualToString:@"migrate"]) {
+      return CommandMigrate(args);
+    }
+    if ([command isEqualToString:@"routes"]) {
+      return CommandRoutes();
+    }
+    if ([command isEqualToString:@"test"]) {
+      return CommandTest(args);
+    }
+    if ([command isEqualToString:@"perf"]) {
+      return CommandPerf();
+    }
+    if ([command isEqualToString:@"build"]) {
+      return CommandBuild();
+    }
+    if ([command isEqualToString:@"config"]) {
+      return CommandConfig(args);
+    }
+
+    PrintUsage();
+    return 2;
+  }
+}
