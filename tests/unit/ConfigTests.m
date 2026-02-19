@@ -100,6 +100,7 @@
 
   NSDictionary *database = config[@"database"];
   XCTAssertEqual((NSInteger)8, [database[@"poolSize"] integerValue]);
+  XCTAssertEqualObjects(@"postgresql", database[@"adapter"]);
 
   NSDictionary *session = config[@"session"];
   XCTAssertEqualObjects(@(NO), session[@"enabled"]);
@@ -122,6 +123,26 @@
   XCTAssertEqualObjects(@(YES), securityHeaders[@"enabled"]);
   XCTAssertEqualObjects(@"default-src 'self'",
                         securityHeaders[@"contentSecurityPolicy"]);
+
+  NSDictionary *auth = config[@"auth"];
+  XCTAssertEqualObjects(@(NO), auth[@"enabled"]);
+  XCTAssertEqualObjects(@"", auth[@"bearerSecret"]);
+  XCTAssertEqualObjects(@"", auth[@"issuer"]);
+  XCTAssertEqualObjects(@"", auth[@"audience"]);
+
+  NSDictionary *openapi = config[@"openapi"];
+  XCTAssertEqualObjects(@(YES), openapi[@"enabled"]);
+  XCTAssertEqualObjects(@(YES), openapi[@"docsUIEnabled"]);
+  XCTAssertEqualObjects(@"interactive", openapi[@"docsUIStyle"]);
+  XCTAssertEqualObjects(@"Arlen API", openapi[@"title"]);
+  XCTAssertEqualObjects(@"0.1.0", openapi[@"version"]);
+
+  NSDictionary *compatibility = config[@"compatibility"];
+  XCTAssertEqualObjects(@(NO), compatibility[@"pageStateEnabled"]);
+
+  NSDictionary *plugins = config[@"plugins"];
+  XCTAssertTrue([plugins[@"classes"] isKindOfClass:[NSArray class]]);
+  XCTAssertEqual((NSUInteger)0, [plugins[@"classes"] count]);
 
   NSDictionary *limits = config[@"requestLimits"];
   XCTAssertEqual((NSInteger)2048, [limits[@"maxRequestLineBytes"] integerValue]);
@@ -147,6 +168,7 @@
   setenv("ARLEN_PROPANE_RELOAD_OVERLAP_SECONDS", "3", 1);
   setenv("ARLEN_DATABASE_URL", "postgresql://localhost/arlen_test", 1);
   setenv("ARLEN_DB_POOL_SIZE", "11", 1);
+  setenv("ARLEN_DB_ADAPTER", "gdl2", 1);
   setenv("ARLEN_SESSION_ENABLED", "1", 1);
   setenv("ARLEN_SESSION_SECRET", "super-secret", 1);
   setenv("ARLEN_SESSION_COOKIE_NAME", "sid", 1);
@@ -161,6 +183,16 @@
   setenv("ARLEN_RATE_LIMIT_WINDOW_SECONDS", "7", 1);
   setenv("ARLEN_SECURITY_HEADERS_ENABLED", "0", 1);
   setenv("ARLEN_CONTENT_SECURITY_POLICY", "default-src 'none'", 1);
+  setenv("ARLEN_AUTH_ENABLED", "1", 1);
+  setenv("ARLEN_AUTH_BEARER_SECRET", "jwt-secret", 1);
+  setenv("ARLEN_AUTH_ISSUER", "issuer-a", 1);
+  setenv("ARLEN_AUTH_AUDIENCE", "audience-a", 1);
+  setenv("ARLEN_OPENAPI_ENABLED", "0", 1);
+  setenv("ARLEN_OPENAPI_DOCS_UI_ENABLED", "0", 1);
+  setenv("ARLEN_OPENAPI_DOCS_UI_STYLE", "viewer", 1);
+  setenv("ARLEN_OPENAPI_TITLE", "Custom API", 1);
+  setenv("ARLEN_OPENAPI_VERSION", "9.9.9", 1);
+  setenv("ARLEN_PAGE_STATE_COMPAT_ENABLED", "1", 1);
 
   NSError *error = nil;
   NSDictionary *config = [ALNConfig loadConfigAtRoot:root
@@ -181,6 +213,7 @@
   unsetenv("ARLEN_PROPANE_RELOAD_OVERLAP_SECONDS");
   unsetenv("ARLEN_DATABASE_URL");
   unsetenv("ARLEN_DB_POOL_SIZE");
+  unsetenv("ARLEN_DB_ADAPTER");
   unsetenv("ARLEN_SESSION_ENABLED");
   unsetenv("ARLEN_SESSION_SECRET");
   unsetenv("ARLEN_SESSION_COOKIE_NAME");
@@ -195,6 +228,16 @@
   unsetenv("ARLEN_RATE_LIMIT_WINDOW_SECONDS");
   unsetenv("ARLEN_SECURITY_HEADERS_ENABLED");
   unsetenv("ARLEN_CONTENT_SECURITY_POLICY");
+  unsetenv("ARLEN_AUTH_ENABLED");
+  unsetenv("ARLEN_AUTH_BEARER_SECRET");
+  unsetenv("ARLEN_AUTH_ISSUER");
+  unsetenv("ARLEN_AUTH_AUDIENCE");
+  unsetenv("ARLEN_OPENAPI_ENABLED");
+  unsetenv("ARLEN_OPENAPI_DOCS_UI_ENABLED");
+  unsetenv("ARLEN_OPENAPI_DOCS_UI_STYLE");
+  unsetenv("ARLEN_OPENAPI_TITLE");
+  unsetenv("ARLEN_OPENAPI_VERSION");
+  unsetenv("ARLEN_PAGE_STATE_COMPAT_ENABLED");
 
   XCTAssertNil(error);
   NSDictionary *limits = config[@"requestLimits"];
@@ -217,6 +260,7 @@
   XCTAssertEqualObjects(@"postgresql://localhost/arlen_test",
                         database[@"connectionString"]);
   XCTAssertEqual((NSInteger)11, [database[@"poolSize"] integerValue]);
+  XCTAssertEqualObjects(@"gdl2", database[@"adapter"]);
 
   NSDictionary *session = config[@"session"];
   XCTAssertEqualObjects(@(YES), session[@"enabled"]);
@@ -240,6 +284,22 @@
   XCTAssertEqualObjects(@(NO), securityHeaders[@"enabled"]);
   XCTAssertEqualObjects(@"default-src 'none'",
                         securityHeaders[@"contentSecurityPolicy"]);
+
+  NSDictionary *auth = config[@"auth"];
+  XCTAssertEqualObjects(@(YES), auth[@"enabled"]);
+  XCTAssertEqualObjects(@"jwt-secret", auth[@"bearerSecret"]);
+  XCTAssertEqualObjects(@"issuer-a", auth[@"issuer"]);
+  XCTAssertEqualObjects(@"audience-a", auth[@"audience"]);
+
+  NSDictionary *openapi = config[@"openapi"];
+  XCTAssertEqualObjects(@(NO), openapi[@"enabled"]);
+  XCTAssertEqualObjects(@(NO), openapi[@"docsUIEnabled"]);
+  XCTAssertEqualObjects(@"viewer", openapi[@"docsUIStyle"]);
+  XCTAssertEqualObjects(@"Custom API", openapi[@"title"]);
+  XCTAssertEqualObjects(@"9.9.9", openapi[@"version"]);
+
+  NSDictionary *compatibility = config[@"compatibility"];
+  XCTAssertEqualObjects(@(YES), compatibility[@"pageStateEnabled"]);
 }
 
 - (void)testLegacyEnvironmentPrefixFallback {
@@ -263,6 +323,7 @@
   setenv("MOJOOBJC_PROPANE_WORKERS", "6", 1);
   setenv("MOJOOBJC_DATABASE_URL", "postgresql://legacy/db", 1);
   setenv("MOJOOBJC_DB_POOL_SIZE", "5", 1);
+  setenv("MOJOOBJC_DB_ADAPTER", "gdl2", 1);
   setenv("MOJOOBJC_SESSION_ENABLED", "1", 1);
   setenv("MOJOOBJC_SESSION_SECRET", "legacy-secret", 1);
   setenv("MOJOOBJC_CSRF_ENABLED", "1", 1);
@@ -285,6 +346,7 @@
   unsetenv("MOJOOBJC_PROPANE_WORKERS");
   unsetenv("MOJOOBJC_DATABASE_URL");
   unsetenv("MOJOOBJC_DB_POOL_SIZE");
+  unsetenv("MOJOOBJC_DB_ADAPTER");
   unsetenv("MOJOOBJC_SESSION_ENABLED");
   unsetenv("MOJOOBJC_SESSION_SECRET");
   unsetenv("MOJOOBJC_CSRF_ENABLED");
@@ -306,6 +368,7 @@
   NSDictionary *database = config[@"database"];
   XCTAssertEqualObjects(@"postgresql://legacy/db", database[@"connectionString"]);
   XCTAssertEqual((NSInteger)5, [database[@"poolSize"] integerValue]);
+  XCTAssertEqualObjects(@"gdl2", database[@"adapter"]);
   NSDictionary *session = config[@"session"];
   XCTAssertEqualObjects(@(YES), session[@"enabled"]);
   XCTAssertEqualObjects(@"legacy-secret", session[@"secret"]);

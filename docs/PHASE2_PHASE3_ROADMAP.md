@@ -1,6 +1,6 @@
 # Arlen Phase 2 + Phase 3 Roadmap Index
 
-Status: Active (Phase 2A-2D complete; Phase 3 next)  
+Status: Active (Phase 2A-2D complete; Phase 3A-3B complete; Phase 3C next)  
 Last updated: 2026-02-19
 
 This index points to the current roadmap documents:
@@ -22,8 +22,13 @@ Phase 2 is focused on adoption-critical capabilities:
 - performance gap closure (Phase 2C/2D complete: stage coverage, runtime toggles, mandatory `make check` perf gate)
 
 Phase 3 is focused on platform maturity:
-- observability and plugin/lifecycle extension system
-- optional SQL builder and optional GDL2 adapter path
+- observability and plugin/lifecycle extension system (Phase 3A complete)
+- API-contract/auth ergonomics for API-first apps (schema contracts + OpenAPI/docs + auth scopes, Phase 3A complete)
+- OpenAPI docs UX parity hardening (FastAPI-style interactive API browser, Phase 3B complete)
+- OpenAPI docs polish via self-hosted Swagger UI option (Phase 3C)
+- optional SQL builder and optional GDL2 adapter path (Phase 3B complete baseline)
+- optional DisplayGroup/page-state compatibility helpers for migration paths (Phase 3B complete baseline)
+- GNUstepWeb migration compatibility track (opt-in bridge, docs, sample migrations)
 - release/distribution and documentation maturity
 - advanced performance trend analysis and expanded workload profiles
 - deferred parity capabilities (websocket/SSE/realtime/mounting)

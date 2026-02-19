@@ -7,9 +7,13 @@ This guide explains Arlen's runtime model at a high level.
 1. `ALNHTTPServer` accepts an HTTP request.
 2. Request is parsed into `ALNRequest`.
 3. `ALNRouter` matches method/path to a route.
-4. `ALNApplication` dispatches to controller action.
-5. Controller writes response directly or returns `NSDictionary`/`NSArray` for implicit JSON.
-6. `ALNResponse` is serialized and sent.
+4. `ALNApplication` handles built-ins (`/healthz`, `/readyz`, `/livez`, `/metrics`, OpenAPI/docs paths) when no app route matches.
+5. Request contract coercion/validation runs (if configured on the matched route).
+6. Middleware and auth scope/role checks run.
+7. Controller action executes.
+8. Controller writes response directly or returns `NSDictionary`/`NSArray` for implicit JSON.
+9. Response contract validation runs (if configured), then metrics/perf/trace data are finalized.
+10. `ALNResponse` is serialized and sent.
 
 ## 2. Core Types
 
@@ -17,7 +21,7 @@ This guide explains Arlen's runtime model at a high level.
 - `ALNHTTPServer`: network loop and request handling.
 - `ALNRouter` / `ALNRoute`: route registration and matching.
 - `ALNController`: base controller with render helpers.
-- `ALNContext`: request-scoped object (`request`, `response`, `params`, `stash`, logging/perf references).
+- `ALNContext`: request-scoped object (`request`, `response`, `params`, `stash`, logging/perf references, validated params/auth/page-state helpers).
 - `ALNRequest`: parsed request model.
 - `ALNResponse`: mutable response builder.
 
@@ -36,14 +40,38 @@ Transpiler/runtime:
 - `tools/eocc` transpiles templates to Objective-C source.
 - `ALNEOCRuntime` provides rendering and include support.
 
-## 4. JSON Response Behavior
+## 4. Data Layer Model
+
+- `ALNPg`: default PostgreSQL adapter and raw-SQL execution path.
+- `ALNDatabaseAdapter` / `ALNDatabaseConnection`: adapter protocol used for conformance and optional compatibility layers.
+- `ALNSQLBuilder`: optional SQL construction helper for common CRUD/filter/sort/pagination patterns.
+- `ALNDisplayGroup`: optional sort/filter/batch data-controller helper on top of adapters.
+- `ALNGDL2Adapter`: optional migration-oriented adapter wrapper for GDL2/EOControl compatibility paths.
+
+## 5. JSON Response Behavior
 
 If controller action returns an `NSDictionary` or `NSArray` and no explicit body has been committed:
 - Arlen serializes it to JSON implicitly.
 - `Content-Type` is set to `application/json; charset=utf-8`.
 - Controller class may override JSON options via `+jsonWritingOptions`.
 
-## 5. Configuration Model
+## 6. API Contracts and OpenAPI Docs
+
+- Request/response contracts can be configured per route for deterministic validation/coercion.
+- OpenAPI JSON endpoints:
+  - `/openapi.json`
+  - `/.well-known/openapi.json`
+- Documentation endpoints:
+  - `/openapi` (interactive explorer by default)
+  - `/openapi/viewer` (lightweight fallback)
+- `openapi.docsUIStyle` controls `/openapi` rendering (`interactive` or `viewer`).
+
+## 7. Compatibility Helpers
+
+- `compatibility.pageStateEnabled` enables session-backed page-state behavior for migration scenarios.
+- Default remains stateless/transient page-state behavior unless explicitly enabled.
+
+## 8. Configuration Model
 
 Config is loaded from:
 - `config/app.plist`
@@ -51,7 +79,7 @@ Config is loaded from:
 
 Environment variables may override key values (`ARLEN_*`).
 
-## 6. Development vs Production Naming
+## 9. Development vs Production Naming
 
 - Development server: `boomhauer`
 - Production process manager: `propane`

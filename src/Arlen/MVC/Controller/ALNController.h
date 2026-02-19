@@ -4,6 +4,7 @@
 #import <Foundation/Foundation.h>
 
 @class ALNContext;
+@class ALNPageState;
 
 NS_ASSUME_NONNULL_BEGIN
 
@@ -50,6 +51,13 @@ NS_ASSUME_NONNULL_BEGIN
                            message:(NSString *)message;
 - (NSArray *)validationErrors;
 - (BOOL)renderValidationErrors;
+- (NSDictionary *)validatedParams;
+- (nullable id)validatedValueForName:(NSString *)name;
+- (nullable NSDictionary *)authClaims;
+- (NSArray *)authScopes;
+- (NSArray *)authRoles;
+- (nullable NSString *)authSubject;
+- (ALNPageState *)pageStateForKey:(NSString *)pageKey;
 
 @end
 

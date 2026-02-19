@@ -36,6 +36,14 @@ typedef NS_ENUM(NSInteger, ALNRouteKind) {
 @property(nonatomic, assign, readonly) NSUInteger registrationIndex;
 @property(nonatomic, assign, readonly) ALNRouteKind kind;
 @property(nonatomic, assign, readonly) NSUInteger staticSegmentCount;
+@property(nonatomic, copy) NSDictionary *requestSchema;
+@property(nonatomic, copy) NSDictionary *responseSchema;
+@property(nonatomic, copy) NSString *summary;
+@property(nonatomic, copy) NSString *operationID;
+@property(nonatomic, copy) NSArray *tags;
+@property(nonatomic, copy) NSArray *requiredScopes;
+@property(nonatomic, copy) NSArray *requiredRoles;
+@property(nonatomic, assign) BOOL includeInOpenAPI;
 
 - (instancetype)initWithMethod:(NSString *)method
                    pathPattern:(NSString *)pathPattern

@@ -567,88 +567,128 @@ static ALNResponse *ALNErrorResponse(NSInteger statusCode, NSString *body) {
     port = 3000;
   }
 
-  ALNServerSocketTuning tuning = ALNTuningFromConfig(config);
-
-  if (!ALNInstallSignalHandler(SIGINT) || !ALNInstallSignalHandler(SIGTERM)) {
-    perror("sigaction");
+  NSError *startupError = nil;
+  if (![self.application startWithError:&startupError]) {
+    fprintf(stderr, "%s: startup failed: %s\n", [self.serverName UTF8String],
+            [[startupError localizedDescription] UTF8String]);
     return 1;
   }
 
-  int serverFd = socket(AF_INET, SOCK_STREAM, 0);
-  if (serverFd < 0) {
-    perror("socket");
-    return 1;
-  }
+  int exitCode = 0;
+  @try {
+    ALNServerSocketTuning tuning = ALNTuningFromConfig(config);
 
-  int reuse = 1;
-  if (setsockopt(serverFd, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse)) < 0) {
-    perror("setsockopt");
-    close(serverFd);
-    return 1;
-  }
+    if (!ALNInstallSignalHandler(SIGINT) || !ALNInstallSignalHandler(SIGTERM)) {
+      perror("sigaction");
+      exitCode = 1;
+      @throw [NSException exceptionWithName:@"ALNServerStartFailed"
+                                     reason:@"signal handler setup failed"
+                                   userInfo:nil];
+    }
+
+    int serverFd = socket(AF_INET, SOCK_STREAM, 0);
+    if (serverFd < 0) {
+      perror("socket");
+      exitCode = 1;
+      @throw [NSException exceptionWithName:@"ALNServerStartFailed"
+                                     reason:@"socket() failed"
+                                   userInfo:nil];
+    }
+
+    int reuse = 1;
+    if (setsockopt(serverFd, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse)) < 0) {
+      perror("setsockopt");
+      close(serverFd);
+      exitCode = 1;
+      @throw [NSException exceptionWithName:@"ALNServerStartFailed"
+                                     reason:@"setsockopt(SO_REUSEADDR) failed"
+                                   userInfo:nil];
+    }
 
 #ifdef SO_REUSEPORT
-  if (tuning.enableReusePort) {
-    if (setsockopt(serverFd, SOL_SOCKET, SO_REUSEPORT, &reuse, sizeof(reuse)) < 0) {
-      perror("setsockopt(SO_REUSEPORT)");
-      close(serverFd);
-      return 1;
+    if (tuning.enableReusePort) {
+      if (setsockopt(serverFd, SOL_SOCKET, SO_REUSEPORT, &reuse, sizeof(reuse)) < 0) {
+        perror("setsockopt(SO_REUSEPORT)");
+        close(serverFd);
+        exitCode = 1;
+        @throw [NSException exceptionWithName:@"ALNServerStartFailed"
+                                       reason:@"setsockopt(SO_REUSEPORT) failed"
+                                     userInfo:nil];
+      }
     }
-  }
 #endif
 
-  struct sockaddr_in addr;
-  memset(&addr, 0, sizeof(addr));
-  addr.sin_family = AF_INET;
-  addr.sin_port = htons((uint16_t)port);
-  if (inet_pton(AF_INET, [bindHost UTF8String], &addr.sin_addr) != 1) {
-    fprintf(stderr, "%s: invalid host address: %s\n", [self.serverName UTF8String], [bindHost UTF8String]);
-    close(serverFd);
-    return 1;
-  }
+    struct sockaddr_in addr;
+    memset(&addr, 0, sizeof(addr));
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons((uint16_t)port);
+    if (inet_pton(AF_INET, [bindHost UTF8String], &addr.sin_addr) != 1) {
+      fprintf(stderr, "%s: invalid host address: %s\n", [self.serverName UTF8String], [bindHost UTF8String]);
+      close(serverFd);
+      exitCode = 1;
+      @throw [NSException exceptionWithName:@"ALNServerStartFailed"
+                                     reason:@"invalid bind host"
+                                   userInfo:nil];
+    }
 
-  if (bind(serverFd, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
-    perror("bind");
-    close(serverFd);
-    return 1;
-  }
+    if (bind(serverFd, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
+      perror("bind");
+      close(serverFd);
+      exitCode = 1;
+      @throw [NSException exceptionWithName:@"ALNServerStartFailed"
+                                     reason:@"bind() failed"
+                                   userInfo:nil];
+    }
 
-  if (listen(serverFd, (int)tuning.listenBacklog) < 0) {
-    perror("listen");
-    close(serverFd);
-    return 1;
-  }
+    if (listen(serverFd, (int)tuning.listenBacklog) < 0) {
+      perror("listen");
+      close(serverFd);
+      exitCode = 1;
+      @throw [NSException exceptionWithName:@"ALNServerStartFailed"
+                                     reason:@"listen() failed"
+                                   userInfo:nil];
+    }
 
-  fprintf(stdout, "%s listening on http://%s:%d\n", [self.serverName UTF8String], [bindHost UTF8String], port);
-  fflush(stdout);
+    fprintf(stdout, "%s listening on http://%s:%d\n", [self.serverName UTF8String], [bindHost UTF8String], port);
+    fflush(stdout);
 
-  while (gShouldRun) {
-    int clientFd = accept(serverFd, NULL, NULL);
-    if (clientFd < 0) {
-      if (errno == EINTR) {
-        if (!gShouldRun) {
-          break;
+    while (gShouldRun) {
+      int clientFd = accept(serverFd, NULL, NULL);
+      if (clientFd < 0) {
+        if (errno == EINTR) {
+          if (!gShouldRun) {
+            break;
+          }
+          continue;
         }
-        continue;
+        if (errno == EMFILE || errno == ENFILE || errno == ENOBUFS || errno == ENOMEM) {
+          usleep(50000);
+          continue;
+        }
+        perror("accept");
+        break;
       }
-      if (errno == EMFILE || errno == ENFILE || errno == ENOBUFS || errno == ENOMEM) {
-        usleep(50000);
-        continue;
+
+      [self handleClient:clientFd];
+      close(clientFd);
+
+      if (once) {
+        break;
       }
-      perror("accept");
-      break;
     }
 
-    [self handleClient:clientFd];
-    close(clientFd);
-
-    if (once) {
-      break;
+    close(serverFd);
+  } @catch (NSException *exception) {
+    if (![exception.name isEqualToString:@"ALNServerStartFailed"]) {
+      fprintf(stderr, "%s: fatal exception: %s\n", [self.serverName UTF8String],
+              [[exception reason] UTF8String]);
+      exitCode = 1;
     }
+  } @finally {
+    [self.application shutdown];
   }
 
-  close(serverFd);
-  return 0;
+  return exitCode;
 }
 
 @end

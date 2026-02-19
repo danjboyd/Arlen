@@ -202,6 +202,22 @@ static BOOL ALNIsMethodMatch(NSString *routeMethod, NSString *requestMethod) {
   [self.routeGroups removeLastObject];
 }
 
+- (ALNRoute *)routeNamed:(NSString *)name {
+  if ([name length] == 0) {
+    return nil;
+  }
+  for (ALNRoute *route in self.routes) {
+    if ([route.name isEqualToString:name]) {
+      return route;
+    }
+  }
+  return nil;
+}
+
+- (NSArray *)allRoutes {
+  return [NSArray arrayWithArray:self.routes];
+}
+
 - (NSArray *)routeTable {
   NSMutableArray *rows = [NSMutableArray array];
   for (ALNRoute *route in self.routes) {

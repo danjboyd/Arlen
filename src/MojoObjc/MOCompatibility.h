@@ -14,10 +14,16 @@
 #define MORouter ALNRouter
 #define MOView ALNView
 #define MOLogger ALNLogger
+#define MOMetricsRegistry ALNMetricsRegistry
+#define MOAuth ALNAuth
 #define MOPerf ALNPerf
 #define MOPerfTrace ALNPerfTrace
 #define MOPg ALNPg
 #define MOPgConnection ALNPgConnection
+#define MOGDL2Adapter ALNGDL2Adapter
+#define MODisplayGroup ALNDisplayGroup
+#define MOSQLBuilder ALNSQLBuilder
+#define MOPageState ALNPageState
 #define MOMigrationRunner ALNMigrationRunner
 #define MOSessionMiddleware ALNSessionMiddleware
 #define MOCSRFMiddleware ALNCSRFMiddleware
@@ -26,6 +32,11 @@
 
 // Legacy protocol and enum aliases.
 #define MOMiddleware ALNMiddleware
+#define MOLifecycleHook ALNLifecycleHook
+#define MOPlugin ALNPlugin
+#define MOTraceExporter ALNTraceExporter
+#define MODatabaseAdapter ALNDatabaseAdapter
+#define MODatabaseConnection ALNDatabaseConnection
 #define MOLogLevel ALNLogLevel
 #define MOLogLevelDebug ALNLogLevelDebug
 #define MOLogLevelInfo ALNLogLevelInfo

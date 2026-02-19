@@ -1,6 +1,7 @@
 #import "ALNController.h"
 
 #import "ALNContext.h"
+#import "ALNPageState.h"
 #import "ALNRequest.h"
 #import "ALNResponse.h"
 #import "ALNView.h"
@@ -215,6 +216,34 @@ static NSDictionary *ALNTemplateContextFromStash(NSDictionary *stash) {
   self.context.response.statusCode = 422;
   self.context.response.committed = YES;
   return ok;
+}
+
+- (NSDictionary *)validatedParams {
+  return [self.context validatedParams];
+}
+
+- (id)validatedValueForName:(NSString *)name {
+  return [self.context validatedValueForName:name];
+}
+
+- (NSDictionary *)authClaims {
+  return [self.context authClaims];
+}
+
+- (NSArray *)authScopes {
+  return [self.context authScopes];
+}
+
+- (NSArray *)authRoles {
+  return [self.context authRoles];
+}
+
+- (NSString *)authSubject {
+  return [self.context authSubject];
+}
+
+- (ALNPageState *)pageStateForKey:(NSString *)pageKey {
+  return [self.context pageStateForKey:pageKey];
 }
 
 @end

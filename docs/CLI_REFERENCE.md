@@ -21,7 +21,7 @@ Create a new app scaffold.
 - `--force`: overwrite existing files where allowed
 - `--help` / `-h`: show command usage
 
-### `arlen generate <controller|endpoint|model|migration|test> <Name> [options]`
+### `arlen generate <controller|endpoint|model|migration|test|plugin> <Name> [options]`
 
 Generate app artifacts.
 
@@ -40,6 +40,7 @@ Generator behavior:
 - `model`: `src/Models/<Name>Repository.{h,m}`
 - `migration`: `db/migrations/<timestamp>_<name>.sql`
 - `test`: `tests/<Name>Tests.m`
+- `plugin`: `src/Plugins/<Name>Plugin.{h,m}` and class auto-registration in `config/app.plist` (`plugins.classes`)
 
 Notes:
 
@@ -116,6 +117,11 @@ Behavior:
 - if run inside app root (`config/app.plist` plus `src/main.m` or `app_lite.m`), compiles and runs that app
 - defaults to watch mode
 - in app-root watch mode, build failures are captured and rendered as development diagnostics
+- built-in observability/API docs endpoints are available when enabled:
+  - `/metrics`
+  - `/openapi.json`
+  - `/openapi` (interactive explorer by default)
+  - `/openapi/viewer` (lightweight fallback viewer)
 
 Options:
 

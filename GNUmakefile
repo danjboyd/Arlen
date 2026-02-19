@@ -42,7 +42,7 @@ $(BUILD_DIR):
 >mkdir -p $(BUILD_DIR)
 
 $(EOC_TOOL): tools/eocc.m $(EOC_RUNTIME_SRCS) | $(BUILD_DIR)
->source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) tools/eocc.m $(EOC_RUNTIME_SRCS) -o $(EOC_TOOL) $$(gnustep-config --base-libs) -ldl
+>source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) tools/eocc.m $(EOC_RUNTIME_SRCS) -o $(EOC_TOOL) $$(gnustep-config --base-libs) -ldl -lcrypto
 
 eocc: $(EOC_TOOL)
 
@@ -60,10 +60,10 @@ generated-compile: transpile
 >  echo "No generated template sources found in $(GEN_DIR)"; \
 >  exit 1; \
 >fi; \
->clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) $$generated_files $(FRAMEWORK_SRCS) -shared -fPIC -o $(BUILD_DIR)/libArlenFramework.so $$(gnustep-config --base-libs) -ldl
+>clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) $$generated_files $(FRAMEWORK_SRCS) -shared -fPIC -o $(BUILD_DIR)/libArlenFramework.so $$(gnustep-config --base-libs) -ldl -lcrypto
 
 $(ARLEN_TOOL): tools/arlen.m src/Arlen/Core/ALNConfig.m src/Arlen/Data/ALNMigrationRunner.m src/Arlen/Data/ALNPg.m | $(BUILD_DIR)
->source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) tools/arlen.m src/Arlen/Core/ALNConfig.m src/Arlen/Data/ALNMigrationRunner.m src/Arlen/Data/ALNPg.m -o $(ARLEN_TOOL) $$(gnustep-config --base-libs) -ldl
+>source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) tools/arlen.m src/Arlen/Core/ALNConfig.m src/Arlen/Data/ALNMigrationRunner.m src/Arlen/Data/ALNPg.m -o $(ARLEN_TOOL) $$(gnustep-config --base-libs) -ldl -lcrypto
 
 arlen: $(ARLEN_TOOL)
 
@@ -73,7 +73,7 @@ $(BOOMHAUER_TOOL): tools/boomhauer.m transpile
 >  echo "No generated template sources found in $(GEN_DIR)"; \
 >  exit 1; \
 >fi; \
->clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) tools/boomhauer.m $(FRAMEWORK_SRCS) $$generated_files -o $(BOOMHAUER_TOOL) $$(gnustep-config --base-libs) -ldl
+>clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) tools/boomhauer.m $(FRAMEWORK_SRCS) $$generated_files -o $(BOOMHAUER_TOOL) $$(gnustep-config --base-libs) -ldl -lcrypto
 
 boomhauer: $(BOOMHAUER_TOOL)
 dev-server: boomhauer
@@ -84,7 +84,7 @@ $(TECH_DEMO_SERVER_TOOL): examples/tech_demo/src/tech_demo_server.m tech-demo-tr
 >  echo "No generated template sources found in $(TECH_DEMO_GEN_DIR)"; \
 >  exit 1; \
 >fi; \
->clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) examples/tech_demo/src/tech_demo_server.m $(FRAMEWORK_SRCS) $$generated_files -o $(TECH_DEMO_SERVER_TOOL) $$(gnustep-config --base-libs) -ldl
+>clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) examples/tech_demo/src/tech_demo_server.m $(FRAMEWORK_SRCS) $$generated_files -o $(TECH_DEMO_SERVER_TOOL) $$(gnustep-config --base-libs) -ldl -lcrypto
 
 tech-demo-server: $(TECH_DEMO_SERVER_TOOL)
 
@@ -97,19 +97,19 @@ $(SMOKE_RENDER_TOOL): tools/eoc_smoke_render.m transpile
 >  echo "No generated template sources found in $(GEN_DIR)"; \
 >  exit 1; \
 >fi; \
->clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) tools/eoc_smoke_render.m src/Arlen/MVC/Template/ALNEOCRuntime.m $$generated_files -o $(SMOKE_RENDER_TOOL) $$(gnustep-config --base-libs) -ldl
+>clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) tools/eoc_smoke_render.m src/Arlen/MVC/Template/ALNEOCRuntime.m $$generated_files -o $(SMOKE_RENDER_TOOL) $$(gnustep-config --base-libs) -ldl -lcrypto
 
 smoke-render: $(SMOKE_RENDER_TOOL)
 
 $(UNIT_TEST_BIN): $(UNIT_TEST_SRCS) $(FRAMEWORK_SRCS) transpile
 >mkdir -p $(UNIT_TEST_BUNDLE)/Resources
 >source $(GNUSTEP_SH) && generated_files="$$(find $(GEN_DIR) -type f -name '*.m' | sort)"; \
->clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) $(UNIT_TEST_SRCS) $(FRAMEWORK_SRCS) $$generated_files -shared -fPIC -o $(UNIT_TEST_BIN) $$(gnustep-config --base-libs) -ldl -lXCTest
+>clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) $(UNIT_TEST_SRCS) $(FRAMEWORK_SRCS) $$generated_files -shared -fPIC -o $(UNIT_TEST_BIN) $$(gnustep-config --base-libs) -ldl -lcrypto -lXCTest
 >cp tests/Info-gnustep-unit.plist $(UNIT_TEST_BUNDLE)/Resources/Info-gnustep.plist
 
 $(INTEGRATION_TEST_BIN): $(INTEGRATION_TEST_SRCS) boomhauer tech-demo-server
 >mkdir -p $(INTEGRATION_TEST_BUNDLE)/Resources
->source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) $(INTEGRATION_TEST_SRCS) -shared -fPIC -o $(INTEGRATION_TEST_BIN) $$(gnustep-config --base-libs) -ldl -lXCTest
+>source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) $(INTEGRATION_TEST_SRCS) -shared -fPIC -o $(INTEGRATION_TEST_BIN) $$(gnustep-config --base-libs) -ldl -lcrypto -lXCTest
 >cp tests/Info-gnustep-integration.plist $(INTEGRATION_TEST_BUNDLE)/Resources/Info-gnustep.plist
 
 build-tests: $(UNIT_TEST_BIN) $(INTEGRATION_TEST_BIN)

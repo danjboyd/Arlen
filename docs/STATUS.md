@@ -9,7 +9,9 @@ Last updated: 2026-02-19
 - Phase 2B: complete
 - Phase 2C: complete (2026-02-19)
 - Phase 2D: complete (2026-02-19)
-- Phase 3: planned
+- Phase 3A: complete (2026-02-19)
+- Phase 3B: complete (2026-02-19)
+- Phase 3C-3E: planned
 
 ## Completed Today (2026-02-19)
 
@@ -43,6 +45,24 @@ Last updated: 2026-02-19
   - repeated-run, median-based perf aggregation
   - expanded guardrails: endpoint p95, throughput floor, memory growth
   - baseline metadata + explicit update policy (`ARLEN_PERF_UPDATE_BASELINE=1`)
+- Executed Phase 3A platform slice:
+  - metrics registry and `/metrics` endpoint with standardized request/runtime counters
+  - route-level request/response schema contracts with coercion and deterministic validation errors
+  - OpenAPI 3.1 generation and built-in docs endpoints (`/openapi.json`, `/.well-known/openapi.json`, `/openapi`)
+  - auth baseline with bearer/JWT verification helpers, route scope/role checks, and context accessors
+  - plugin/lifecycle contracts with startup/shutdown hooks and config-driven plugin loading
+  - optional trace exporter hook for OpenTelemetry-style integration points
+  - CLI plugin scaffolding (`arlen generate plugin`) and scaffold config defaults for `auth`/`openapi`/`plugins`
+  - boomhauer watch-mode rebuild linker parity fix for OpenSSL-backed auth code (`-lcrypto`)
+- Executed Phase 3B platform slice:
+  - standardized data adapter contracts (`ALNDatabaseAdapter`/`ALNDatabaseConnection`) and adapter conformance harness
+  - optional SQL builder (`ALNSQLBuilder`) with deterministic SQL/parameter snapshot coverage
+  - optional DisplayGroup-style helper (`ALNDisplayGroup`) for sort/filter/batch adapter workflows
+  - PostgreSQL adapter productized against adapter contracts plus optional GDL2 compatibility adapter (`ALNGDL2Adapter`)
+  - opt-in session/page-state compatibility helper (`ALNPageState`) with default stateless behavior preserved
+  - OpenAPI docs UX upgrade to interactive try-it-out explorer at `/openapi`, with `/openapi/viewer` fallback path
+  - config/scaffold support for `database.adapter`, `openapi.docsUIStyle`, and `compatibility.pageStateEnabled`
+  - integration coverage for interactive docs + representative API execution flow
 
 ## Verification State
 
@@ -54,6 +74,10 @@ Last updated: 2026-02-19
 
 ## Next Session Focus
 
-1. Start Phase 3A (observability + extension surface): metrics endpoint and plugin/lifecycle contracts.
-2. Expand API testing ergonomics toward parity matrix Phase 3A goals.
-3. Begin deployment runbook automation hardening and release-trend reporting groundwork.
+1. Start Phase 3C distribution/release/doc maturity tranche.
+2. Publish GSWeb-to-Arlen migration guide and side-by-side migrated reference app.
+3. Publish API-first reference app for schema/OpenAPI/auth defaults.
+4. Expand release/performance trend reporting automation:
+   - endpoint-level trend outputs (`p50`/`p95`/`p99`)
+   - workload-profile expansion for middleware-heavy and template-heavy scenarios
+5. Add self-hosted Swagger UI docs option on top of `/openapi.json` while preserving current docs fallbacks.

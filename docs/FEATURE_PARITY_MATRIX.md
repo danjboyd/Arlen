@@ -29,6 +29,7 @@ Related docs:
 - Foundation-native request/response/config/data abstractions.
 - Deterministic build and runtime behavior across developer and CI environments.
 - Protocol/class extension points instead of Perl-specific metaprogramming patterns.
+- Compatibility/migration layers are additive and opt-in; Arlen-native APIs remain canonical defaults.
 
 ## 4. Mojolicious Capability Classification
 
@@ -59,7 +60,11 @@ Related docs:
 | Convention-heavy generators/scaffolds | Rails, Phoenix | In Scope | Phase 2D-3C | Adoption and onboarding multiplier. |
 | API-only mode ergonomics | Rails, FastAPI | In Scope | Phase 2D | Optimize JSON/API-first application defaults. |
 | Contract-driven validation helpers | FastAPI | In Scope | Phase 2C | Unified coercion + predictable 4xx error contracts. |
+| Schema-first API contracts | FastAPI | In Scope | Phase 3A | Objective-C request/response contracts with deterministic validation and OpenAPI emission. |
 | OpenAPI generation and API docs integration | FastAPI | In Scope | Phase 3A | Improves API discoverability and tooling fit. |
+| Built-in interactive API docs UI | FastAPI | In Scope | Phase 3B-3C | 3B delivered baseline interactive/viewer UX; 3C adds self-hosted Swagger UI polish option. |
+| SDK/export workflow from OpenAPI artifacts | FastAPI ecosystem | In Scope | Phase 3A-3C | Start with artifact export hooks; expand official SDK guidance incrementally. |
+| OAuth2 scope/JWT auth ergonomics | FastAPI | In Scope | Phase 3A | First-party auth/scope helper baseline for API teams. |
 | Service dependency/lifecycle ergonomics | FastAPI, Phoenix | In Scope | Phase 3A | Explicit startup/shutdown and dependency wiring. |
 | Metrics and telemetry primitives | Phoenix | In Scope | Phase 3A | First-class observability posture. |
 | Release packaging with `server`/`migrate` workflow | Phoenix | In Scope | Phase 2D-3C | Core compiled-framework deployment contract. |
@@ -76,7 +81,18 @@ Related docs:
 | Rich-text/CMS layer | Rails | Out of Scope | N/A | Better as ecosystem/package concern. |
 | Asset pipeline in core runtime | Rails | Out of Scope | N/A | Prefer integration with external frontend toolchains. |
 
-## 6. Boomhauer Compile-Failure UX Contract (Agreed)
+## 6. GNUstepWeb Migration Compatibility Classification
+
+| Capability | Bucket | Target Phase | Notes |
+| --- | --- | --- | --- |
+| GSWeb-to-Arlen migration guide + sample migrated app | In Scope | Phase 3C | Critical for confidence with influential GNUstep/WebObjects adopters. |
+| Optional WebObjects/GSWeb naming and routing compatibility helpers | In Scope | Phase 3C | Compatibility package only; Arlen-native APIs remain primary. |
+| Optional component-layer bridge for reusable view composition | In Scope | Phase 3B-3C | Additive module; no default runtime behavior change. |
+| Optional DisplayGroup-style data-controller helper | In Scope | Phase 3B | Delivered in 3B (`ALNDisplayGroup`) for sorting/filtering/batching over adapters. |
+| Optional session/page-state compatibility modes | In Scope | Phase 3B-3C | 3B baseline delivered (`ALNPageState`, opt-in); broader migration docs/package work continues in 3C. |
+| Full source-level WebObjects API parity | Out of Scope | N/A | Arlen targets migration ergonomics and capability outcomes, not full API mirroring. |
+
+## 7. Boomhauer Compile-Failure UX Contract (Agreed)
 
 1. Default mode: when a reload compile fails, `boomhauer` remains alive and serves a rich error response instead of crashing.
 2. Error source coverage: include EOC transpile errors plus Objective-C compile/link errors in one unified response format.
@@ -85,7 +101,7 @@ Related docs:
 5. Signal-to-noise policy: show warnings in collapsed sections; keep hard errors expanded.
 6. Diagnostics payload: include stage, command, exit code, file/line/column, and source snippet where available.
 
-## 7. Compiled Deployment Contract (Agreed)
+## 8. Compiled Deployment Contract (Agreed)
 
 1. Packaging baseline: container-first guidance with first-class VM/systemd documentation.
 2. Artifact model: immutable release artifacts for deploy/rollback determinism.
@@ -96,7 +112,7 @@ Related docs:
 7. Logging model: structured JSON logs to stdout/stderr by default in production.
 8. Rollback model: first-class previous-release switch and restart workflow.
 
-## 8. Refactor Program Required by Parity Goals
+## 9. Refactor Program Required by Parity Goals
 
 1. Error contract unification (Phase 2C): consolidate runtime, transpiler, and compiler error shapes.
 2. Developer reload pipeline split (Phase 2C): isolate `boomhauer` supervisor from app child process/build execution.
@@ -107,8 +123,10 @@ Related docs:
 7. Perf configuration enforcement (Phase 2C): wire `performanceLogging` into runtime headers/log payload behavior.
 8. Perf gate hardening (Phase 2D): make CI/release path run mandatory perf gate and broaden guardrails beyond single endpoint p95.
 9. Baseline governance hardening (Phase 2D-3C): baseline metadata, explicit refresh policy, and trend reporting.
+10. API-contract/auth platform slice (Phase 3A): schema contracts, OpenAPI/docs UI, and auth scope helpers without compromising explicit controller APIs.
+11. GNUstepWeb migration package (Phase 3B-3C): bridge tools/modules/docs with strict opt-in boundaries.
 
-## 9. Test Parity Policy
+## 10. Test Parity Policy
 
 - Benchmark quality by in-scope behavior coverage and regression detection strength, not by matching raw test counts.
 - Maintain a capability-to-tests mapping for every in-scope matrix item.

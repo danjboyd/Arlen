@@ -244,7 +244,9 @@ compile_app() {
       "${framework_sources[@]}" \
       "${generated_sources[@]}" \
       -o "$app_binary" \
-      $(gnustep-config --base-libs)
+      $(gnustep-config --base-libs) \
+      -ldl \
+      -lcrypto
   } >"$tmp_output" 2>&1; then
     :
   else

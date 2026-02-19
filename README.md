@@ -11,7 +11,9 @@ Arlen is designed to solve the same class of problems as frameworks like Mojolic
 - Phase 2B: complete (PostgreSQL adapter, migrations, sessions/CSRF/rate-limit/security headers).
 - Phase 2C: complete (developer error UX + validation + timing controls).
 - Phase 2D: complete (parity baseline + deployment contract + perf gate hardening).
-- Phase 3: planned (`docs/PHASE3_ROADMAP.md`).
+- Phase 3A: complete (metrics, schema/auth contracts, OpenAPI baseline, plugins/lifecycle).
+- Phase 3B: complete (data-layer maturation, interactive OpenAPI explorer, GSWeb compatibility helpers).
+- Phase 3C-3E: planned (`docs/PHASE3_ROADMAP.md`).
 
 ## Quick Start
 

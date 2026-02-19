@@ -7,6 +7,7 @@
 @class ALNResponse;
 @class ALNLogger;
 @class ALNPerfTrace;
+@class ALNPageState;
 
 NS_ASSUME_NONNULL_BEGIN
 
@@ -18,6 +19,12 @@ extern NSString *const ALNContextValidationErrorsStashKey;
 extern NSString *const ALNContextEOCStrictLocalsStashKey;
 extern NSString *const ALNContextEOCStrictStringifyStashKey;
 extern NSString *const ALNContextRequestFormatStashKey;
+extern NSString *const ALNContextValidatedParamsStashKey;
+extern NSString *const ALNContextAuthClaimsStashKey;
+extern NSString *const ALNContextAuthScopesStashKey;
+extern NSString *const ALNContextAuthRolesStashKey;
+extern NSString *const ALNContextAuthSubjectStashKey;
+extern NSString *const ALNContextPageStateEnabledStashKey;
 
 @interface ALNContext : NSObject
 
@@ -55,6 +62,13 @@ extern NSString *const ALNContextRequestFormatStashKey;
                               code:(NSString *)code
                            message:(NSString *)message;
 - (NSArray *)validationErrors;
+- (NSDictionary *)validatedParams;
+- (nullable id)validatedValueForName:(NSString *)name;
+- (nullable NSDictionary *)authClaims;
+- (NSArray *)authScopes;
+- (NSArray *)authRoles;
+- (nullable NSString *)authSubject;
+- (ALNPageState *)pageStateForKey:(NSString *)pageKey;
 
 @end
 

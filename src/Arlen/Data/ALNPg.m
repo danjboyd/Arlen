@@ -695,6 +695,10 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result, int rowIndex) {
 
 @implementation ALNPg
 
+- (NSString *)adapterName {
+  return @"postgresql";
+}
+
 - (instancetype)initWithConnectionString:(NSString *)connectionString
                            maxConnections:(NSUInteger)maxConnections
                                     error:(NSError **)error {
@@ -776,6 +780,16 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result, int rowIndex) {
     } else {
       [connection close];
     }
+  }
+}
+
+- (id<ALNDatabaseConnection>)acquireAdapterConnection:(NSError **)error {
+  return (id<ALNDatabaseConnection>)[self acquireConnection:error];
+}
+
+- (void)releaseAdapterConnection:(id<ALNDatabaseConnection>)connection {
+  if ([connection isKindOfClass:[ALNPgConnection class]]) {
+    [self releaseConnection:(ALNPgConnection *)connection];
   }
 }
 
@@ -874,6 +888,24 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result, int rowIndex) {
   }
 
   return success;
+}
+
+- (BOOL)withTransactionUsingBlock:(BOOL (^)(id<ALNDatabaseConnection> connection,
+                                            NSError **error))block
+                            error:(NSError **)error {
+  if (block == nil) {
+    if (error != NULL) {
+      *error = ALNPgMakeError(ALNPgErrorInvalidArgument,
+                              @"transaction block is required",
+                              nil,
+                              nil);
+    }
+    return NO;
+  }
+
+  return [self withTransaction:^BOOL(ALNPgConnection *connection, NSError **txError) {
+    return block((id<ALNDatabaseConnection>)connection, txError);
+  } error:error];
 }
 
 @end

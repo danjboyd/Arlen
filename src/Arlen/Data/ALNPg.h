@@ -2,6 +2,7 @@
 #define ALN_PG_H
 
 #import <Foundation/Foundation.h>
+#import "ALNDatabaseAdapter.h"
 
 NS_ASSUME_NONNULL_BEGIN
 
@@ -15,7 +16,7 @@ typedef NS_ENUM(NSInteger, ALNPgErrorCode) {
   ALNPgErrorTransactionFailed = 5,
 };
 
-@interface ALNPgConnection : NSObject
+@interface ALNPgConnection : NSObject <ALNDatabaseConnection>
 
 @property(nonatomic, copy, readonly) NSString *connectionString;
 @property(nonatomic, assign, readonly, getter=isOpen) BOOL open;
@@ -56,7 +57,7 @@ typedef NS_ENUM(NSInteger, ALNPgErrorCode) {
 
 @end
 
-@interface ALNPg : NSObject
+@interface ALNPg : NSObject <ALNDatabaseAdapter>
 
 @property(nonatomic, copy, readonly) NSString *connectionString;
 @property(nonatomic, assign, readonly) NSUInteger maxConnections;
@@ -67,6 +68,9 @@ typedef NS_ENUM(NSInteger, ALNPgErrorCode) {
 
 - (nullable ALNPgConnection *)acquireConnection:(NSError *_Nullable *_Nullable)error;
 - (void)releaseConnection:(ALNPgConnection *)connection;
+
+- (nullable id<ALNDatabaseConnection>)acquireAdapterConnection:(NSError *_Nullable *_Nullable)error;
+- (void)releaseAdapterConnection:(id<ALNDatabaseConnection>)connection;
 
 - (nullable NSArray<NSDictionary *> *)executeQuery:(NSString *)sql
                                          parameters:(NSArray *)parameters
@@ -79,6 +83,10 @@ typedef NS_ENUM(NSInteger, ALNPgErrorCode) {
 - (BOOL)withTransaction:(BOOL (^)(ALNPgConnection *connection,
                                   NSError *_Nullable *_Nullable error))block
                   error:(NSError *_Nullable *_Nullable)error;
+- (BOOL)withTransactionUsingBlock:
+            (BOOL (^)(id<ALNDatabaseConnection> connection,
+                      NSError *_Nullable *_Nullable error))block
+                            error:(NSError *_Nullable *_Nullable)error;
 
 @end
 

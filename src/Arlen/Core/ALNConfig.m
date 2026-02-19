@@ -172,6 +172,8 @@ static NSString *ALNEnvValueCompat(const char *primary, const char *legacy) {
       ALNEnvValueCompat("ARLEN_DATABASE_URL", "MOJOOBJC_DATABASE_URL");
   NSString *databasePoolSize =
       ALNEnvValueCompat("ARLEN_DB_POOL_SIZE", "MOJOOBJC_DB_POOL_SIZE");
+  NSString *databaseAdapter =
+      ALNEnvValueCompat("ARLEN_DB_ADAPTER", "MOJOOBJC_DB_ADAPTER");
 
   NSString *sessionEnabled =
       ALNEnvValueCompat("ARLEN_SESSION_ENABLED", "MOJOOBJC_SESSION_ENABLED");
@@ -203,6 +205,26 @@ static NSString *ALNEnvValueCompat(const char *primary, const char *legacy) {
       ALNEnvValueCompat("ARLEN_SECURITY_HEADERS_ENABLED", "MOJOOBJC_SECURITY_HEADERS_ENABLED");
   NSString *securityHeadersCSP =
       ALNEnvValueCompat("ARLEN_CONTENT_SECURITY_POLICY", "MOJOOBJC_CONTENT_SECURITY_POLICY");
+  NSString *authEnabled =
+      ALNEnvValueCompat("ARLEN_AUTH_ENABLED", "MOJOOBJC_AUTH_ENABLED");
+  NSString *authBearerSecret =
+      ALNEnvValueCompat("ARLEN_AUTH_BEARER_SECRET", "MOJOOBJC_AUTH_BEARER_SECRET");
+  NSString *authIssuer =
+      ALNEnvValueCompat("ARLEN_AUTH_ISSUER", "MOJOOBJC_AUTH_ISSUER");
+  NSString *authAudience =
+      ALNEnvValueCompat("ARLEN_AUTH_AUDIENCE", "MOJOOBJC_AUTH_AUDIENCE");
+  NSString *openapiEnabled =
+      ALNEnvValueCompat("ARLEN_OPENAPI_ENABLED", "MOJOOBJC_OPENAPI_ENABLED");
+  NSString *openapiDocsUIEnabled =
+      ALNEnvValueCompat("ARLEN_OPENAPI_DOCS_UI_ENABLED", "MOJOOBJC_OPENAPI_DOCS_UI_ENABLED");
+  NSString *openapiTitle =
+      ALNEnvValueCompat("ARLEN_OPENAPI_TITLE", "MOJOOBJC_OPENAPI_TITLE");
+  NSString *openapiVersion =
+      ALNEnvValueCompat("ARLEN_OPENAPI_VERSION", "MOJOOBJC_OPENAPI_VERSION");
+  NSString *openapiDocsUIStyle =
+      ALNEnvValueCompat("ARLEN_OPENAPI_DOCS_UI_STYLE", "MOJOOBJC_OPENAPI_DOCS_UI_STYLE");
+  NSString *compatibilityPageStateEnabled =
+      ALNEnvValueCompat("ARLEN_PAGE_STATE_COMPAT_ENABLED", "MOJOOBJC_PAGE_STATE_COMPAT_ENABLED");
   NSString *eocStrictLocals =
       ALNEnvValueCompat("ARLEN_EOC_STRICT_LOCALS", "MOJOOBJC_EOC_STRICT_LOCALS");
   NSString *eocStrictStringify =
@@ -268,6 +290,9 @@ static NSString *ALNEnvValueCompat(const char *primary, const char *legacy) {
   if ([databaseConnectionString length] > 0) {
     database[@"connectionString"] = databaseConnectionString;
   }
+  if ([databaseAdapter length] > 0) {
+    database[@"adapter"] = [databaseAdapter lowercaseString];
+  }
   ALNApplyIntegerOverride(database, databasePoolSize, @"poolSize", 1);
   config[@"database"] = database;
 
@@ -327,6 +352,53 @@ static NSString *ALNEnvValueCompat(const char *primary, const char *legacy) {
     securityHeaders[@"contentSecurityPolicy"] = securityHeadersCSP;
   }
   config[@"securityHeaders"] = securityHeaders;
+
+  NSMutableDictionary *auth =
+      [NSMutableDictionary dictionaryWithDictionary:config[@"auth"] ?: @{}];
+  NSNumber *authEnabledValue = ALNParseBooleanString(authEnabled);
+  if (authEnabledValue != nil) {
+    auth[@"enabled"] = authEnabledValue;
+  }
+  if ([authBearerSecret length] > 0) {
+    auth[@"bearerSecret"] = authBearerSecret;
+  }
+  if ([authIssuer length] > 0) {
+    auth[@"issuer"] = authIssuer;
+  }
+  if ([authAudience length] > 0) {
+    auth[@"audience"] = authAudience;
+  }
+  config[@"auth"] = auth;
+
+  NSMutableDictionary *openapi =
+      [NSMutableDictionary dictionaryWithDictionary:config[@"openapi"] ?: @{}];
+  NSNumber *openapiEnabledValue = ALNParseBooleanString(openapiEnabled);
+  if (openapiEnabledValue != nil) {
+    openapi[@"enabled"] = openapiEnabledValue;
+  }
+  NSNumber *openapiDocsUIEnabledValue = ALNParseBooleanString(openapiDocsUIEnabled);
+  if (openapiDocsUIEnabledValue != nil) {
+    openapi[@"docsUIEnabled"] = openapiDocsUIEnabledValue;
+  }
+  if ([openapiTitle length] > 0) {
+    openapi[@"title"] = openapiTitle;
+  }
+  if ([openapiVersion length] > 0) {
+    openapi[@"version"] = openapiVersion;
+  }
+  if ([openapiDocsUIStyle length] > 0) {
+    openapi[@"docsUIStyle"] = [openapiDocsUIStyle lowercaseString];
+  }
+  config[@"openapi"] = openapi;
+
+  NSMutableDictionary *compatibility =
+      [NSMutableDictionary dictionaryWithDictionary:config[@"compatibility"] ?: @{}];
+  NSNumber *compatibilityPageStateEnabledValue =
+      ALNParseBooleanString(compatibilityPageStateEnabled);
+  if (compatibilityPageStateEnabledValue != nil) {
+    compatibility[@"pageStateEnabled"] = compatibilityPageStateEnabledValue;
+  }
+  config[@"compatibility"] = compatibility;
 
   NSMutableDictionary *eoc =
       [NSMutableDictionary dictionaryWithDictionary:config[@"eoc"] ?: @{}];
@@ -416,6 +488,10 @@ static NSString *ALNEnvValueCompat(const char *primary, const char *legacy) {
   if (finalDatabase[@"poolSize"] == nil) {
     finalDatabase[@"poolSize"] = @(8);
   }
+  if (![finalDatabase[@"adapter"] isKindOfClass:[NSString class]] ||
+      [finalDatabase[@"adapter"] length] == 0) {
+    finalDatabase[@"adapter"] = @"postgresql";
+  }
   config[@"database"] = finalDatabase;
 
   NSMutableDictionary *finalSession =
@@ -473,6 +549,52 @@ static NSString *ALNEnvValueCompat(const char *primary, const char *legacy) {
   }
   config[@"securityHeaders"] = finalSecurityHeaders;
 
+  NSMutableDictionary *finalAuth =
+      [NSMutableDictionary dictionaryWithDictionary:config[@"auth"] ?: @{}];
+  if (finalAuth[@"enabled"] == nil) {
+    finalAuth[@"enabled"] = @(NO);
+  }
+  if (finalAuth[@"bearerSecret"] == nil) {
+    finalAuth[@"bearerSecret"] = @"";
+  }
+  if (finalAuth[@"issuer"] == nil) {
+    finalAuth[@"issuer"] = @"";
+  }
+  if (finalAuth[@"audience"] == nil) {
+    finalAuth[@"audience"] = @"";
+  }
+  config[@"auth"] = finalAuth;
+
+  NSMutableDictionary *finalOpenAPI =
+      [NSMutableDictionary dictionaryWithDictionary:config[@"openapi"] ?: @{}];
+  if (finalOpenAPI[@"enabled"] == nil) {
+    finalOpenAPI[@"enabled"] = @(YES);
+  }
+  if (finalOpenAPI[@"docsUIEnabled"] == nil) {
+    finalOpenAPI[@"docsUIEnabled"] = @(![env isEqualToString:@"production"]);
+  }
+  if (finalOpenAPI[@"title"] == nil) {
+    finalOpenAPI[@"title"] = @"Arlen API";
+  }
+  if (finalOpenAPI[@"version"] == nil) {
+    finalOpenAPI[@"version"] = @"0.1.0";
+  }
+  if (finalOpenAPI[@"description"] == nil) {
+    finalOpenAPI[@"description"] = @"Generated by Arlen";
+  }
+  if (![finalOpenAPI[@"docsUIStyle"] isKindOfClass:[NSString class]] ||
+      [finalOpenAPI[@"docsUIStyle"] length] == 0) {
+    finalOpenAPI[@"docsUIStyle"] = @"interactive";
+  }
+  config[@"openapi"] = finalOpenAPI;
+
+  NSMutableDictionary *finalPlugins =
+      [NSMutableDictionary dictionaryWithDictionary:config[@"plugins"] ?: @{}];
+  if (![finalPlugins[@"classes"] isKindOfClass:[NSArray class]]) {
+    finalPlugins[@"classes"] = @[];
+  }
+  config[@"plugins"] = finalPlugins;
+
   NSMutableDictionary *finalEOC =
       [NSMutableDictionary dictionaryWithDictionary:config[@"eoc"] ?: @{}];
   if (finalEOC[@"strictLocals"] == nil) {
@@ -482,6 +604,13 @@ static NSString *ALNEnvValueCompat(const char *primary, const char *legacy) {
     finalEOC[@"strictStringify"] = @(NO);
   }
   config[@"eoc"] = finalEOC;
+
+  NSMutableDictionary *finalCompatibility =
+      [NSMutableDictionary dictionaryWithDictionary:config[@"compatibility"] ?: @{}];
+  if (finalCompatibility[@"pageStateEnabled"] == nil) {
+    finalCompatibility[@"pageStateEnabled"] = @(NO);
+  }
+  config[@"compatibility"] = finalCompatibility;
 
   config[@"port"] = @([config[@"port"] integerValue]);
   config[@"apiOnly"] = @([config[@"apiOnly"] boolValue]);
@@ -506,6 +635,12 @@ static NSString *ALNEnvValueCompat(const char *primary, const char *legacy) {
   config[@"propaneAccessories"] = finalAccessories;
 
   finalDatabase[@"poolSize"] = @([finalDatabase[@"poolSize"] integerValue]);
+  if (![finalDatabase[@"adapter"] isKindOfClass:[NSString class]] ||
+      [finalDatabase[@"adapter"] length] == 0) {
+    finalDatabase[@"adapter"] = @"postgresql";
+  } else {
+    finalDatabase[@"adapter"] = [finalDatabase[@"adapter"] lowercaseString];
+  }
   config[@"database"] = finalDatabase;
 
   finalSession[@"enabled"] = @([finalSession[@"enabled"] boolValue]);
@@ -527,9 +662,51 @@ static NSString *ALNEnvValueCompat(const char *primary, const char *legacy) {
   finalSecurityHeaders[@"enabled"] = @([finalSecurityHeaders[@"enabled"] boolValue]);
   config[@"securityHeaders"] = finalSecurityHeaders;
 
+  finalAuth[@"enabled"] = @([finalAuth[@"enabled"] boolValue]);
+  if (![finalAuth[@"bearerSecret"] isKindOfClass:[NSString class]]) {
+    finalAuth[@"bearerSecret"] = @"";
+  }
+  if (![finalAuth[@"issuer"] isKindOfClass:[NSString class]]) {
+    finalAuth[@"issuer"] = @"";
+  }
+  if (![finalAuth[@"audience"] isKindOfClass:[NSString class]]) {
+    finalAuth[@"audience"] = @"";
+  }
+  config[@"auth"] = finalAuth;
+
+  finalOpenAPI[@"enabled"] = @([finalOpenAPI[@"enabled"] boolValue]);
+  finalOpenAPI[@"docsUIEnabled"] = @([finalOpenAPI[@"docsUIEnabled"] boolValue]);
+  if (![finalOpenAPI[@"title"] isKindOfClass:[NSString class]]) {
+    finalOpenAPI[@"title"] = @"Arlen API";
+  }
+  if (![finalOpenAPI[@"version"] isKindOfClass:[NSString class]]) {
+    finalOpenAPI[@"version"] = @"0.1.0";
+  }
+  if (![finalOpenAPI[@"description"] isKindOfClass:[NSString class]]) {
+    finalOpenAPI[@"description"] = @"Generated by Arlen";
+  }
+  NSString *docsStyle = [finalOpenAPI[@"docsUIStyle"] isKindOfClass:[NSString class]]
+                            ? [finalOpenAPI[@"docsUIStyle"] lowercaseString]
+                            : @"interactive";
+  if (![docsStyle isEqualToString:@"interactive"] &&
+      ![docsStyle isEqualToString:@"viewer"]) {
+    docsStyle = @"interactive";
+  }
+  finalOpenAPI[@"docsUIStyle"] = docsStyle;
+  config[@"openapi"] = finalOpenAPI;
+
+  if (![finalPlugins[@"classes"] isKindOfClass:[NSArray class]]) {
+    finalPlugins[@"classes"] = @[];
+  }
+  config[@"plugins"] = finalPlugins;
+
   finalEOC[@"strictLocals"] = @([finalEOC[@"strictLocals"] boolValue]);
   finalEOC[@"strictStringify"] = @([finalEOC[@"strictStringify"] boolValue]);
   config[@"eoc"] = finalEOC;
+
+  finalCompatibility[@"pageStateEnabled"] =
+      @([finalCompatibility[@"pageStateEnabled"] boolValue]);
+  config[@"compatibility"] = finalCompatibility;
 
   return [NSDictionary dictionaryWithDictionary:config];
 }

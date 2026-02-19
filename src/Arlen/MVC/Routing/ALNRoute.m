@@ -110,6 +110,14 @@ static NSString *ALNNormalizeRouteFormat(NSString *value) {
     _formats = [NSArray arrayWithArray:normalizedFormats];
     _registrationIndex = registrationIndex;
     _segments = ALNSplitPathSegments(pathPattern);
+    _requestSchema = @{};
+    _responseSchema = @{};
+    _summary = @"";
+    _operationID = @"";
+    _tags = @[];
+    _requiredScopes = @[];
+    _requiredRoles = @[];
+    _includeInOpenAPI = YES;
 
     BOOL hasWildcard = NO;
     BOOL hasParam = NO;
@@ -215,6 +223,28 @@ static NSString *ALNNormalizeRouteFormat(NSString *value) {
   if ([self.formats count] > 0) {
     representation[@"formats"] = self.formats;
   }
+  if ([self.summary length] > 0) {
+    representation[@"summary"] = self.summary;
+  }
+  if ([self.operationID length] > 0) {
+    representation[@"operationId"] = self.operationID;
+  }
+  if ([self.tags count] > 0) {
+    representation[@"tags"] = self.tags;
+  }
+  if ([self.requiredScopes count] > 0) {
+    representation[@"requiredScopes"] = self.requiredScopes;
+  }
+  if ([self.requiredRoles count] > 0) {
+    representation[@"requiredRoles"] = self.requiredRoles;
+  }
+  if ([self.requestSchema count] > 0) {
+    representation[@"requestSchema"] = self.requestSchema;
+  }
+  if ([self.responseSchema count] > 0) {
+    representation[@"responseSchema"] = self.responseSchema;
+  }
+  representation[@"includeInOpenAPI"] = @(self.includeInOpenAPI);
   return representation;
 }
 

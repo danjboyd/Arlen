@@ -29,6 +29,8 @@ NS_ASSUME_NONNULL_BEGIN
                       guardAction:(nullable NSString *)guardAction
                           formats:(nullable NSArray *)formats;
 - (void)endRouteGroup;
+- (nullable ALNRoute *)routeNamed:(NSString *)name;
+- (NSArray *)allRoutes;
 - (NSArray *)routeTable;
 
 @end

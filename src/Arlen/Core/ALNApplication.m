@@ -1,6 +1,8 @@
 #import "ALNApplication.h"
 
 #import "ALNConfig.h"
+#import "ALNOpenAPI.h"
+#import "ALNSchemaContract.h"
 #import "ALNRequest.h"
 #import "ALNResponse.h"
 #import "ALNController.h"
@@ -8,12 +10,20 @@
 #import "ALNCSRFMiddleware.h"
 #import "ALNRateLimitMiddleware.h"
 #import "ALNRouter.h"
+#import "ALNRoute.h"
 #import "ALNSecurityHeadersMiddleware.h"
 #import "ALNSessionMiddleware.h"
 #import "ALNLogger.h"
 #import "ALNPerf.h"
+#import "ALNMetrics.h"
+#import "ALNAuth.h"
 
 NSString *const ALNApplicationErrorDomain = @"Arlen.Application.Error";
+
+static BOOL ALNRequestPrefersJSON(ALNRequest *request, BOOL apiOnly);
+static void ALNSetStructuredErrorResponse(ALNResponse *response,
+                                          NSInteger statusCode,
+                                          NSDictionary *payload);
 
 @interface ALNApplication ()
 
@@ -21,7 +31,13 @@ NSString *const ALNApplicationErrorDomain = @"Arlen.Application.Error";
 @property(nonatomic, copy, readwrite) NSDictionary *config;
 @property(nonatomic, copy, readwrite) NSString *environment;
 @property(nonatomic, strong, readwrite) ALNLogger *logger;
+@property(nonatomic, strong, readwrite) ALNMetricsRegistry *metrics;
 @property(nonatomic, strong) NSMutableArray *mutableMiddlewares;
+@property(nonatomic, strong) NSMutableArray *mutablePlugins;
+@property(nonatomic, strong) NSMutableArray *mutableLifecycleHooks;
+@property(nonatomic, assign, readwrite, getter=isStarted) BOOL started;
+
+- (void)loadConfiguredPlugins;
 
 @end
 
@@ -50,43 +66,48 @@ NSString *const ALNApplicationErrorDomain = @"Arlen.Application.Error";
     _environment = [_config[@"environment"] copy] ?: @"development";
     _router = [[ALNRouter alloc] init];
     _logger = [[ALNLogger alloc] initWithFormat:_config[@"logFormat"] ?: @"text"];
+    _metrics = [[ALNMetricsRegistry alloc] init];
     _mutableMiddlewares = [NSMutableArray array];
+    _mutablePlugins = [NSMutableArray array];
+    _mutableLifecycleHooks = [NSMutableArray array];
+    _started = NO;
     if ([_environment isEqualToString:@"development"]) {
       _logger.minimumLevel = ALNLogLevelDebug;
     }
     [self registerBuiltInMiddlewares];
+    [self loadConfiguredPlugins];
   }
   return self;
 }
 
-- (void)registerRouteMethod:(NSString *)method
-                       path:(NSString *)path
-                       name:(NSString *)name
-            controllerClass:(Class)controllerClass
-                     action:(NSString *)actionName {
-  [self registerRouteMethod:method
-                       path:path
-                       name:name
-                    formats:nil
-            controllerClass:controllerClass
-                guardAction:nil
-                     action:actionName];
+- (ALNRoute *)registerRouteMethod:(NSString *)method
+                             path:(NSString *)path
+                             name:(NSString *)name
+                  controllerClass:(Class)controllerClass
+                           action:(NSString *)actionName {
+  return [self registerRouteMethod:method
+                              path:path
+                              name:name
+                           formats:nil
+                   controllerClass:controllerClass
+                       guardAction:nil
+                            action:actionName];
 }
 
-- (void)registerRouteMethod:(NSString *)method
-                       path:(NSString *)path
-                       name:(NSString *)name
-                    formats:(NSArray *)formats
-            controllerClass:(Class)controllerClass
-                guardAction:(NSString *)guardAction
-                     action:(NSString *)actionName {
-  [self.router addRouteMethod:method
-                         path:path
-                         name:name
-                      formats:formats
-              controllerClass:controllerClass
-                  guardAction:guardAction
-                       action:actionName];
+- (ALNRoute *)registerRouteMethod:(NSString *)method
+                             path:(NSString *)path
+                             name:(NSString *)name
+                          formats:(NSArray *)formats
+                  controllerClass:(Class)controllerClass
+                      guardAction:(NSString *)guardAction
+                           action:(NSString *)actionName {
+  return [self.router addRouteMethod:method
+                                path:path
+                                name:name
+                             formats:formats
+                     controllerClass:controllerClass
+                         guardAction:guardAction
+                              action:actionName];
 }
 
 - (void)beginRouteGroupWithPrefix:(NSString *)prefix
@@ -114,6 +135,118 @@ NSString *const ALNApplicationErrorDomain = @"Arlen.Application.Error";
     return;
   }
   [self.mutableMiddlewares addObject:middleware];
+}
+
+- (NSArray *)plugins {
+  return [NSArray arrayWithArray:self.mutablePlugins];
+}
+
+- (NSArray *)lifecycleHooks {
+  return [NSArray arrayWithArray:self.mutableLifecycleHooks];
+}
+
+- (BOOL)registerLifecycleHook:(id<ALNLifecycleHook>)hook {
+  if (hook == nil) {
+    return NO;
+  }
+  [self.mutableLifecycleHooks addObject:hook];
+  return YES;
+}
+
+- (BOOL)registerPlugin:(id<ALNPlugin>)plugin error:(NSError **)error {
+  if (plugin == nil) {
+    if (error != NULL) {
+      *error = [NSError errorWithDomain:ALNApplicationErrorDomain
+                                   code:300
+                               userInfo:@{
+                                 NSLocalizedDescriptionKey : @"plugin is required"
+                               }];
+    }
+    return NO;
+  }
+
+  NSString *name = [plugin pluginName];
+  if ([name length] == 0) {
+    if (error != NULL) {
+      *error = [NSError errorWithDomain:ALNApplicationErrorDomain
+                                   code:301
+                               userInfo:@{
+                                 NSLocalizedDescriptionKey : @"pluginName must not be empty"
+                               }];
+    }
+    return NO;
+  }
+
+  for (id<ALNPlugin> existing in self.mutablePlugins) {
+    if ([[existing pluginName] isEqualToString:name]) {
+      return YES;
+    }
+  }
+
+  if (![plugin registerWithApplication:self error:error]) {
+    return NO;
+  }
+
+  if ([plugin respondsToSelector:@selector(middlewaresForApplication:)]) {
+    NSArray *middlewares = [plugin middlewaresForApplication:self];
+    for (id middleware in middlewares ?: @[]) {
+      if ([middleware conformsToProtocol:@protocol(ALNMiddleware)]) {
+        [self addMiddleware:middleware];
+      }
+    }
+  }
+
+  if ([plugin conformsToProtocol:@protocol(ALNLifecycleHook)]) {
+    [self registerLifecycleHook:(id<ALNLifecycleHook>)plugin];
+  }
+
+  [self.mutablePlugins addObject:plugin];
+  [self.logger info:@"plugin registered"
+             fields:@{
+               @"plugin" : name ?: @"",
+             }];
+  return YES;
+}
+
+- (BOOL)registerPluginClassNamed:(NSString *)className error:(NSError **)error {
+  if ([className length] == 0) {
+    if (error != NULL) {
+      *error = [NSError errorWithDomain:ALNApplicationErrorDomain
+                                   code:302
+                               userInfo:@{
+                                 NSLocalizedDescriptionKey : @"plugin class name is required"
+                               }];
+    }
+    return NO;
+  }
+
+  Class klass = NSClassFromString(className);
+  if (klass == Nil) {
+    if (error != NULL) {
+      *error = [NSError errorWithDomain:ALNApplicationErrorDomain
+                                   code:303
+                               userInfo:@{
+                                 NSLocalizedDescriptionKey :
+                                     [NSString stringWithFormat:@"plugin class not found: %@", className]
+                               }];
+    }
+    return NO;
+  }
+
+  id instance = [[klass alloc] init];
+  if (![instance conformsToProtocol:@protocol(ALNPlugin)]) {
+    if (error != NULL) {
+      *error = [NSError errorWithDomain:ALNApplicationErrorDomain
+                                   code:304
+                               userInfo:@{
+                                 NSLocalizedDescriptionKey :
+                                     [NSString stringWithFormat:@"%@ does not conform to ALNPlugin", className]
+                               }];
+    }
+    return NO;
+  }
+
+  return [self registerPlugin:instance error:error];
 }
 
 static BOOL ALNResponseHasBody(ALNResponse *response) {
@@ -150,6 +283,189 @@ static NSString *ALNStringConfigValue(id value, NSString *defaultValue) {
     return value;
   }
   return defaultValue;
+}
+
+static NSArray *ALNNormalizedUniqueStrings(NSArray *values) {
+  NSMutableArray *normalized = [NSMutableArray array];
+  for (id value in values ?: @[]) {
+    if (![value isKindOfClass:[NSString class]]) {
+      continue;
+    }
+    NSString *trimmed = [value stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    if ([trimmed length] == 0 || [normalized containsObject:trimmed]) {
+      continue;
+    }
+    [normalized addObject:trimmed];
+  }
+  return [NSArray arrayWithArray:normalized];
+}
+
+static NSDictionary *ALNValidationFailurePayload(NSString *requestID, NSArray *errors) {
+  return @{
+    @"error" : @{
+      @"code" : @"validation_failed",
+      @"message" : @"Validation failed",
+      @"status" : @(422),
+      @"request_id" : requestID ?: @"",
+      @"correlation_id" : requestID ?: @"",
+    },
+    @"details" : errors ?: @[]
+  };
+}
+
+static void ALNApplyValidationFailureResponse(ALNApplication *application,
+                                              ALNRequest *request,
+                                              ALNResponse *response,
+                                              NSString *requestID,
+                                              NSArray *errors) {
+  BOOL apiOnly = ALNBoolConfigValue(application.config[@"apiOnly"], NO);
+  if (apiOnly || ALNRequestPrefersJSON(request, apiOnly)) {
+    ALNSetStructuredErrorResponse(response, 422,
+                                  ALNValidationFailurePayload(requestID, errors));
+    return;
+  }
+  response.statusCode = 422;
+  [response setHeader:@"Content-Type" value:@"text/plain; charset=utf-8"];
+  [response setTextBody:@"validation failed\n"];
+  response.committed = YES;
+}
+
+static NSDictionary *ALNAuthConfig(NSDictionary *config) {
+  return ALNDictionaryConfigValue(config, @"auth");
+}
+
+static NSDictionary *ALNOpenAPIConfig(NSDictionary *config) {
+  return ALNDictionaryConfigValue(config, @"openapi");
+}
+
+static BOOL ALNOpenAPIEnabled(ALNApplication *application) {
+  NSDictionary *openapi = ALNOpenAPIConfig(application.config);
+  return ALNBoolConfigValue(openapi[@"enabled"], YES);
+}
+
+static BOOL ALNOpenAPIDocsUIEnabled(ALNApplication *application) {
+  NSDictionary *openapi = ALNOpenAPIConfig(application.config);
+  BOOL defaultEnabled = ![application.environment isEqualToString:@"production"];
+  return ALNBoolConfigValue(openapi[@"docsUIEnabled"], defaultEnabled);
+}
+
+static NSString *ALNOpenAPIDocsUIStyle(ALNApplication *application) {
+  NSDictionary *openapi = ALNOpenAPIConfig(application.config);
+  NSString *style = [openapi[@"docsUIStyle"] isKindOfClass:[NSString class]]
+                        ? [openapi[@"docsUIStyle"] lowercaseString]
+                        : @"interactive";
+  if (![style isEqualToString:@"interactive"] && ![style isEqualToString:@"viewer"]) {
+    style = @"interactive";
+  }
+  return style;
+}
+
+static NSString *ALNOpenAPIBasicViewerHTML(void) {
+  return @"<!doctype html><html><head><meta charset='utf-8'>"
+         "<title>Arlen OpenAPI Viewer</title>"
+         "<style>body{font-family:Menlo,Consolas,monospace;padding:18px;background:#0f172a;color:#e2e8f0;}h1{margin-top:0;}pre{white-space:pre-wrap;background:#111827;padding:14px;border:1px solid #334155;border-radius:6px;}a{color:#38bdf8;}</style>"
+         "</head><body><h1>Arlen OpenAPI Viewer</h1>"
+         "<p>Spec source: <a href='/openapi.json'>/openapi.json</a> · <a href='/openapi'>Interactive explorer</a></p>"
+         "<pre id='spec'>Loading...</pre>"
+         "<script>fetch('/openapi.json').then(r=>r.json()).then(j=>{document.getElementById('spec').textContent=JSON.stringify(j,null,2);}).catch(e=>{document.getElementById('spec').textContent='Failed to load /openapi.json: '+e;});</script>"
+         "</body></html>";
+}
+
+static NSString *ALNOpenAPIInteractiveDocsHTML(void) {
+  return @"<!doctype html><html><head><meta charset='utf-8'>"
+         "<title>Arlen OpenAPI Explorer</title>"
+         "<style>"
+         "body{font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,sans-serif;margin:0;background:#0b1220;color:#e2e8f0;}"
+         "header{padding:16px 22px;border-bottom:1px solid #1f2a44;background:#101a2d;}"
+         "h1{margin:0;font-size:22px;}main{padding:18px;display:grid;gap:12px;max-width:960px;}"
+         ".row{display:grid;gap:8px;}label{font-size:12px;color:#93a3c5;}"
+         "select,input,textarea,button{font:inherit;padding:10px;border-radius:8px;border:1px solid #2a3a5f;background:#0f172a;color:#e2e8f0;}"
+         "button{background:#0ea5e9;border-color:#0284c7;color:#071226;font-weight:700;cursor:pointer;}"
+         "button:hover{background:#38bdf8;}pre{margin:0;white-space:pre-wrap;background:#0f172a;border:1px solid #2a3a5f;border-radius:8px;padding:12px;}"
+         ".muted{color:#9fb0d0;font-size:13px;}a{color:#67e8f9;}#params .param{display:grid;gap:6px;margin-bottom:8px;}"
+         "</style></head><body>"
+         "<header><h1>Arlen OpenAPI Explorer</h1>"
+         "<div class='muted'>FastAPI-style try-it-out flow for generated OpenAPI specs.</div>"
+         "<div class='muted'><a href='/openapi.json'>Raw OpenAPI JSON</a> · <a href='/openapi/viewer'>Lightweight viewer</a></div>"
+         "</header>"
+         "<main>"
+         "<div class='row'><label for='operation'>Operation</label><select id='operation'></select></div>"
+         "<div id='operationMeta' class='muted'></div>"
+         "<div id='params' class='row'></div>"
+         "<div class='row'><label for='requestBody'>JSON Request Body (optional)</label><textarea id='requestBody' rows='8' placeholder='{\"example\":true}'></textarea></div>"
+         "<div><button id='tryBtn'>Try It Out</button></div>"
+         "<div class='row'><label>Response</label><pre id='response'>Select an operation and click Try It Out.</pre></div>"
+         "</main>"
+         "<script>"
+         "const opSelect=document.getElementById('operation');"
+         "const opMeta=document.getElementById('operationMeta');"
+         "const paramsRoot=document.getElementById('params');"
+         "const reqBody=document.getElementById('requestBody');"
+         "const responsePre=document.getElementById('response');"
+         "const tryBtn=document.getElementById('tryBtn');"
+         "let operations=[];"
+         "function opId(path,method){return method.toUpperCase()+' '+path;}"
+         "function clearParams(){while(paramsRoot.firstChild){paramsRoot.removeChild(paramsRoot.firstChild);}}"
+         "function renderParams(op){clearParams();(op.parameters||[]).forEach((p,idx)=>{"
+         "const wrap=document.createElement('div');wrap.className='param';"
+         "const lbl=document.createElement('label');lbl.textContent=(p.in||'param')+': '+p.name+(p.required?' *':'');"
+         "const input=document.createElement('input');input.type='text';input.dataset.paramIndex=String(idx);input.placeholder=p.description||'';"
+         "wrap.appendChild(lbl);wrap.appendChild(input);paramsRoot.appendChild(wrap);});"
+         "}"
+         "function selectedOp(){const idx=Number(opSelect.value||'-1');return (idx>=0&&idx<operations.length)?operations[idx]:null;}"
+         "function renderSelection(){const op=selectedOp();if(!op){opMeta.textContent='';clearParams();return;}"
+         "opMeta.textContent=(op.summary||op.description||'')+' ['+op.method.toUpperCase()+' '+op.path+']';"
+         "renderParams(op);}"
+         "async function loadSpec(){"
+         "const res=await fetch('/openapi.json');if(!res.ok){throw new Error('HTTP '+res.status);}"
+         "const spec=await res.json();const paths=spec.paths||{};operations=[];"
+         "Object.keys(paths).sort().forEach(path=>{const item=paths[path]||{};"
+         "Object.keys(item).forEach(method=>{const lower=method.toLowerCase();"
+         "if(!['get','post','put','patch','delete','head','options'].includes(lower)){return;}"
+         "const op=item[method]||{};operations.push({path,method:lower,summary:op.summary||'',description:op.description||'',parameters:op.parameters||[],requestBody:op.requestBody||null});"
+         "});});"
+         "opSelect.innerHTML='';operations.forEach((op,idx)=>{const opt=document.createElement('option');opt.value=String(idx);opt.textContent=opId(op.path,op.method)+(op.summary?' - '+op.summary:'');opSelect.appendChild(opt);});"
+         "if(operations.length===0){responsePre.textContent='No operations found in /openapi.json';}"
+         "renderSelection();}"
+         "function applyParams(op){let path=op.path;const query=[];const paramInputs=paramsRoot.querySelectorAll('input[data-param-index]');"
+         "paramInputs.forEach(input=>{const idx=Number(input.dataset.paramIndex);const def=op.parameters[idx]||{};const val=input.value||'';"
+         "if((def.in||'')==='path'){path=path.replace('{'+def.name+'}',encodeURIComponent(val));}"
+         "else if((def.in||'')==='query'&&val.length>0){query.push(encodeURIComponent(def.name)+'='+encodeURIComponent(val));}"
+         "});if(query.length>0){path+=(path.includes('?')?'&':'?')+query.join('&');}return path;}"
+         "async function tryOperation(){const op=selectedOp();if(!op){return;}const url=applyParams(op);const init={method:op.method.toUpperCase(),headers:{}};"
+         "const bodyRaw=reqBody.value.trim();if(bodyRaw.length>0&&op.method!=='get'&&op.method!=='head'){init.headers['Content-Type']='application/json';init.body=bodyRaw;}"
+         "let resText='';try{const res=await fetch(url,init);const text=await res.text();resText='HTTP '+res.status+' '+res.statusText+'\\n\\n'+text;}"
+         "catch(err){resText='Request failed: '+err;}responsePre.textContent=resText;}"
+         "opSelect.addEventListener('change',renderSelection);tryBtn.addEventListener('click',tryOperation);"
+         "loadSpec().catch(err=>{responsePre.textContent='Failed to load /openapi.json: '+err;});"
+         "</script>"
+         "</body></html>";
+}
+
+static void ALNRecordRequestMetrics(ALNApplication *application,
+                                    ALNResponse *response,
+                                    ALNPerfTrace *trace) {
+  [application.metrics incrementCounter:@"http_requests_total"];
+  [application.metrics incrementCounter:[NSString stringWithFormat:@"http_status_%ld_total", (long)response.statusCode]];
+  if (response.statusCode >= 500) {
+    [application.metrics incrementCounter:@"http_errors_total"];
+  }
+
+  NSNumber *totalMs = [trace durationMillisecondsForStage:@"total"];
+  if (totalMs != nil) {
+    [application.metrics recordTiming:@"http_request_duration_ms"
+                         milliseconds:[totalMs doubleValue]];
+  }
+  NSNumber *routeMs = [trace durationMillisecondsForStage:@"route"];
+  if (routeMs != nil) {
+    [application.metrics recordTiming:@"http_route_duration_ms"
+                         milliseconds:[routeMs doubleValue]];
+  }
+  NSNumber *controllerMs = [trace durationMillisecondsForStage:@"controller"];
+  if (controllerMs != nil) {
+    [application.metrics recordTiming:@"http_controller_duration_ms"
+                         milliseconds:[controllerMs doubleValue]];
+  }
 }
 
 static NSString *ALNGenerateRequestID(void) {
@@ -265,6 +581,115 @@ static NSString *ALNBuiltInHealthBodyForPath(NSString *path) {
     return @"live\n";
   }
   return nil;
+}
+
+static BOOL ALNRequestMethodIsReadOnly(ALNRequest *request) {
+  return [request.method isEqualToString:@"GET"] ||
+         [request.method isEqualToString:@"HEAD"];
+}
+
+static BOOL ALNHeaderPrefersJSON(ALNRequest *request) {
+  NSString *accept = [request.headers[@"accept"] isKindOfClass:[NSString class]]
+                         ? [request.headers[@"accept"] lowercaseString]
+                         : @"";
+  return [accept containsString:@"application/json"] ||
+         [accept containsString:@"text/json"];
+}
+
+static BOOL ALNApplyBuiltInResponse(ALNApplication *application,
+                                    ALNRequest *request,
+                                    ALNResponse *response,
+                                    NSString *routePath) {
+  BOOL headRequest = [request.method isEqualToString:@"HEAD"];
+  NSString *requestPath = request.path ?: routePath ?: @"/";
+  NSRange queryRange = [requestPath rangeOfString:@"?"];
+  if (queryRange.location != NSNotFound) {
+    requestPath = [requestPath substringToIndex:queryRange.location];
+  }
+  if (!ALNRequestMethodIsReadOnly(request)) {
+    return NO;
+  }
+
+  NSString *healthBody = ALNBuiltInHealthBodyForPath(routePath);
+  if ([healthBody length] > 0) {
+    response.statusCode = 200;
+    [response setHeader:@"Content-Type" value:@"text/plain; charset=utf-8"];
+    if (!headRequest) {
+      [response setTextBody:healthBody];
+    }
+    response.committed = YES;
+    return YES;
+  }
+
+  if ([routePath isEqualToString:@"/metrics"] || [requestPath isEqualToString:@"/metrics"]) {
+    response.statusCode = 200;
+    if (ALNHeaderPrefersJSON(request)) {
+      NSError *jsonError = nil;
+      BOOL ok = [response setJSONBody:[application.metrics snapshot]
+                              options:0
+                                error:&jsonError];
+      if (!ok) {
+        response.statusCode = 500;
+        [response setHeader:@"Content-Type" value:@"text/plain; charset=utf-8"];
+        [response setTextBody:@"metrics serialization failed\n"];
+      }
+    } else {
+      [response setHeader:@"Content-Type" value:@"text/plain; version=0.0.4; charset=utf-8"];
+      if (!headRequest) {
+        [response setTextBody:[application.metrics prometheusText]];
+      }
+    }
+    response.committed = YES;
+    return YES;
+  }
+
+  BOOL openapiPath = [routePath isEqualToString:@"/openapi.json"] ||
+                     [routePath isEqualToString:@"/.well-known/openapi.json"] ||
+                     [requestPath isEqualToString:@"/openapi.json"] ||
+                     [requestPath isEqualToString:@"/.well-known/openapi.json"];
+  if (openapiPath && ALNOpenAPIEnabled(application)) {
+    NSError *jsonError = nil;
+    BOOL ok = [response setJSONBody:[application openAPISpecification]
+                            options:0
+                              error:&jsonError];
+    if (!ok) {
+      response.statusCode = 500;
+      [response setHeader:@"Content-Type" value:@"text/plain; charset=utf-8"];
+      [response setTextBody:@"openapi serialization failed\n"];
+    } else {
+      response.statusCode = 200;
+      if (headRequest) {
+        [response setTextBody:@""];
+      }
+    }
+    response.committed = YES;
+    return YES;
+  }
+
+  BOOL docsPath = [routePath isEqualToString:@"/openapi"] ||
+                  [routePath isEqualToString:@"/docs/openapi"] ||
+                  [requestPath isEqualToString:@"/openapi"] ||
+                  [requestPath isEqualToString:@"/docs/openapi"];
+  BOOL viewerPath = [routePath isEqualToString:@"/openapi/viewer"] ||
+                    [routePath isEqualToString:@"/docs/openapi/viewer"] ||
+                    [requestPath isEqualToString:@"/openapi/viewer"] ||
+                    [requestPath isEqualToString:@"/docs/openapi/viewer"];
+
+  if ((docsPath || viewerPath) && ALNOpenAPIEnabled(application) &&
+      ALNOpenAPIDocsUIEnabled(application)) {
+    BOOL preferViewer = [[ALNOpenAPIDocsUIStyle(application) lowercaseString] isEqualToString:@"viewer"];
+    response.statusCode = 200;
+    [response setHeader:@"Content-Type" value:@"text/html; charset=utf-8"];
+    if (!headRequest) {
+      BOOL renderViewer = viewerPath || (docsPath && preferViewer);
+      [response setTextBody:renderViewer ? ALNOpenAPIBasicViewerHTML()
+                                        : ALNOpenAPIInteractiveDocsHTML()];
+    }
+    response.committed = YES;
+    return YES;
+  }
+
+  return NO;
 }
 
 static NSDictionary *ALNErrorDetailsFromNSError(NSError *error) {
@@ -410,6 +835,220 @@ static void ALNApplyInternalErrorResponse(ALNApplication *application,
   response.committed = YES;
 }
 
+static BOOL ALNApplyRequestContractIfNeeded(ALNApplication *application,
+                                            ALNRequest *request,
+                                            ALNResponse *response,
+                                            ALNContext *context,
+                                            ALNRoute *route,
+                                            NSString *requestID) {
+  NSDictionary *requestSchema = [route.requestSchema isKindOfClass:[NSDictionary class]]
+                                    ? route.requestSchema
+                                    : @{};
+  if ([requestSchema count] == 0) {
+    return YES;
+  }
+
+  NSArray *validationErrors = nil;
+  NSDictionary *coerced = ALNSchemaCoerceRequestValues(requestSchema,
+                                                       request,
+                                                       request.routeParams ?: @{},
+                                                       &validationErrors);
+  if ([validationErrors count] > 0) {
+    context.stash[ALNContextValidationErrorsStashKey] = validationErrors;
+    ALNApplyValidationFailureResponse(application,
+                                      request,
+                                      response,
+                                      requestID,
+                                      validationErrors);
+    return NO;
+  }
+
+  context.stash[ALNContextValidatedParamsStashKey] = coerced ?: @{};
+  return YES;
+}
+
+static void ALNApplyUnauthorizedResponse(ALNApplication *application,
+                                         ALNRequest *request,
+                                         ALNResponse *response,
+                                         NSString *requestID,
+                                         NSString *message,
+                                         NSArray *requiredScopes) {
+  BOOL apiOnly = ALNBoolConfigValue(application.config[@"apiOnly"], NO);
+  if (apiOnly || ALNRequestPrefersJSON(request, apiOnly)) {
+    NSMutableDictionary *details = [NSMutableDictionary dictionary];
+    NSArray *scopes = ALNNormalizedUniqueStrings(requiredScopes);
+    if ([scopes count] > 0) {
+      details[@"required_scopes"] = scopes;
+    }
+    NSDictionary *payload = ALNStructuredErrorPayload(401,
+                                                      @"unauthorized",
+                                                      message ?: @"Unauthorized",
+                                                      requestID,
+                                                      details);
+    ALNSetStructuredErrorResponse(response, 401, payload);
+  } else {
+    response.statusCode = 401;
+    [response setHeader:@"Content-Type" value:@"text/plain; charset=utf-8"];
+    [response setTextBody:@"unauthorized\n"];
+    response.committed = YES;
+  }
+
+  NSMutableArray *authenticate = [NSMutableArray arrayWithObject:@"Bearer"];
+  NSArray *scopes = ALNNormalizedUniqueStrings(requiredScopes);
+  if ([scopes count] > 0) {
+    [authenticate addObject:[NSString stringWithFormat:@"scope=\"%@\"",
+                             [scopes componentsJoinedByString:@" "]]];
+  }
+  [response setHeader:@"WWW-Authenticate" value:[authenticate componentsJoinedByString:@", "]];
+}
+
+static void ALNApplyForbiddenResponse(ALNApplication *application,
+                                      ALNRequest *request,
+                                      ALNResponse *response,
+                                      NSString *requestID,
+                                      NSString *message,
+                                      NSDictionary *details) {
+  BOOL apiOnly = ALNBoolConfigValue(application.config[@"apiOnly"], NO);
+  if (apiOnly || ALNRequestPrefersJSON(request, apiOnly)) {
+    NSDictionary *payload = ALNStructuredErrorPayload(403,
+                                                      @"forbidden",
+                                                      message ?: @"Forbidden",
+                                                      requestID,
+                                                      details ?: @{});
+    ALNSetStructuredErrorResponse(response, 403, payload);
+  } else {
+    response.statusCode = 403;
+    [response setHeader:@"Content-Type" value:@"text/plain; charset=utf-8"];
+    [response setTextBody:@"forbidden\n"];
+    response.committed = YES;
+  }
+}
+
+static BOOL ALNApplyAuthContractIfNeeded(ALNApplication *application,
+                                         ALNRequest *request,
+                                         ALNResponse *response,
+                                         ALNContext *context,
+                                         ALNRoute *route,
+                                         NSString *requestID) {
+  NSArray *requiredScopes = ALNNormalizedUniqueStrings(route.requiredScopes);
+  NSArray *requiredRoles = ALNNormalizedUniqueStrings(route.requiredRoles);
+  if ([requiredScopes count] == 0 && [requiredRoles count] == 0) {
+    return YES;
+  }
+
+  NSDictionary *authConfig = ALNAuthConfig(application.config);
+  NSError *authError = nil;
+  BOOL authenticated = [ALNAuth authenticateContext:context
+                                         authConfig:authConfig
+                                              error:&authError];
+  if (!authenticated) {
+    [application.logger warn:@"request auth rejected"
+                      fields:@{
+                        @"request_id" : requestID ?: @"",
+                        @"error" : authError.localizedDescription ?: @"missing bearer token",
+                        @"route" : route.name ?: @"",
+                      }];
+    ALNApplyUnauthorizedResponse(application,
+                                 request,
+                                 response,
+                                 requestID,
+                                 @"Unauthorized",
+                                 requiredScopes);
+    return NO;
+  }
+
+  if (![ALNAuth context:context hasRequiredScopes:requiredScopes]) {
+    ALNApplyForbiddenResponse(application,
+                              request,
+                              response,
+                              requestID,
+                              @"Missing required scope",
+                              @{
+                                @"required_scopes" : requiredScopes,
+                                @"granted_scopes" : [context authScopes] ?: @[],
+                              });
+    return NO;
+  }
+  if (![ALNAuth context:context hasRequiredRoles:requiredRoles]) {
+    ALNApplyForbiddenResponse(application,
+                              request,
+                              response,
+                              requestID,
+                              @"Missing required role",
+                              @{
+                                @"required_roles" : requiredRoles,
+                                @"granted_roles" : [context authRoles] ?: @[],
+                              });
+    return NO;
+  }
+  return YES;
+}
+
+static BOOL ALNValidateResponseContractIfNeeded(ALNApplication *application,
+                                                ALNRequest *request,
+                                                ALNResponse *response,
+                                                ALNRoute *route,
+                                                id returnValue,
+                                                NSString *requestID) {
+  NSDictionary *responseSchema = [route.responseSchema isKindOfClass:[NSDictionary class]]
+                                     ? route.responseSchema
+                                     : @{};
+  if ([responseSchema count] == 0) {
+    return YES;
+  }
+  if (response.statusCode >= 400) {
+    return YES;
+  }
+
+  id payload = nil;
+  if ([returnValue isKindOfClass:[NSDictionary class]] ||
+      [returnValue isKindOfClass:[NSArray class]]) {
+    payload = returnValue;
+  } else {
+    NSString *contentType = [[response headerForName:@"Content-Type"] lowercaseString] ?: @"";
+    BOOL jsonLike = [contentType containsString:@"application/json"] ||
+                    [contentType containsString:@"text/json"];
+    if (jsonLike && [response.bodyData length] > 0) {
+      NSError *jsonError = nil;
+      payload = [NSJSONSerialization JSONObjectWithData:response.bodyData
+                                                options:0
+                                                  error:&jsonError];
+      if (jsonError != nil) {
+        NSDictionary *details = ALNErrorDetailsFromNSError(jsonError);
+        ALNApplyInternalErrorResponse(application,
+                                      request,
+                                      response,
+                                      requestID,
+                                      500,
+                                      @"response_contract_failed",
+                                      @"Internal Server Error",
+                                      @"Failed parsing response payload for contract validation",
+                                      details);
+        return NO;
+      }
+    }
+  }
+
+  NSArray *validationErrors = nil;
+  BOOL valid = ALNSchemaValidateResponseValue(payload, responseSchema, &validationErrors);
+  if (!valid) {
+    ALNApplyInternalErrorResponse(application,
+                                  request,
+                                  response,
+                                  requestID,
+                                  500,
+                                  @"response_contract_failed",
+                                  @"Internal Server Error",
+                                  @"Response payload failed schema contract",
+                                  @{
+                                    @"contract_errors" : validationErrors ?: @[],
+                                    @"route" : route.name ?: @"",
+                                  });
+    return NO;
+  }
+  return YES;
+}
+
 static void ALNFinalizeResponse(ALNResponse *response,
                                 ALNPerfTrace *trace,
                                 ALNRequest *request,
@@ -447,6 +1086,142 @@ static void ALNFinalizeResponse(ALNResponse *response,
   if ([requestID length] > 0) {
     [response setHeader:@"X-Request-Id" value:requestID];
   }
+}
+
+- (void)loadConfiguredPlugins {
+  NSDictionary *plugins = ALNDictionaryConfigValue(self.config, @"plugins");
+  NSArray *classNames = [plugins[@"classes"] isKindOfClass:[NSArray class]]
+                            ? plugins[@"classes"]
+                            : @[];
+  for (id value in classNames) {
+    if (![value isKindOfClass:[NSString class]] || [value length] == 0) {
+      continue;
+    }
+    NSError *error = nil;
+    BOOL ok = [self registerPluginClassNamed:value error:&error];
+    if (!ok) {
+      [self.logger warn:@"plugin load skipped"
+                 fields:@{
+                   @"plugin_class" : value ?: @"",
+                   @"error" : error.localizedDescription ?: @"unknown",
+                 }];
+    }
+  }
+}
+
+- (BOOL)configureRouteNamed:(NSString *)routeName
+             requestSchema:(NSDictionary *)requestSchema
+            responseSchema:(NSDictionary *)responseSchema
+                   summary:(NSString *)summary
+               operationID:(NSString *)operationID
+                      tags:(NSArray *)tags
+             requiredScopes:(NSArray *)requiredScopes
+              requiredRoles:(NSArray *)requiredRoles
+            includeInOpenAPI:(BOOL)includeInOpenAPI
+                      error:(NSError **)error {
+  ALNRoute *route = [self.router routeNamed:routeName];
+  if (route == nil) {
+    if (error != NULL) {
+      *error = [NSError errorWithDomain:ALNApplicationErrorDomain
+                                   code:305
+                               userInfo:@{
+                                 NSLocalizedDescriptionKey :
+                                     [NSString stringWithFormat:@"route not found: %@", routeName ?: @""]
+                               }];
+    }
+    return NO;
+  }
+
+  route.requestSchema = [requestSchema isKindOfClass:[NSDictionary class]] ? requestSchema : @{};
+  route.responseSchema = [responseSchema isKindOfClass:[NSDictionary class]] ? responseSchema : @{};
+  route.summary = [summary copy] ?: @"";
+  route.operationID = [operationID copy] ?: @"";
+  route.tags = ALNNormalizedUniqueStrings(tags);
+  route.requiredScopes = ALNNormalizedUniqueStrings(requiredScopes);
+  route.requiredRoles = ALNNormalizedUniqueStrings(requiredRoles);
+  route.includeInOpenAPI = includeInOpenAPI;
+  return YES;
+}
+
+- (NSDictionary *)openAPISpecification {
+  return ALNBuildOpenAPISpecification([self.router allRoutes], self.config ?: @{});
+}
+
+- (BOOL)writeOpenAPISpecToPath:(NSString *)path
+                        pretty:(BOOL)pretty
+                         error:(NSError **)error {
+  if ([path length] == 0) {
+    if (error != NULL) {
+      *error = [NSError errorWithDomain:ALNApplicationErrorDomain
+                                   code:306
+                               userInfo:@{
+                                 NSLocalizedDescriptionKey : @"output path is required"
+                               }];
+    }
+    return NO;
+  }
+
+  NSJSONWritingOptions options = pretty ? NSJSONWritingPrettyPrinted : 0;
+  NSData *json = [NSJSONSerialization dataWithJSONObject:[self openAPISpecification]
+                                                 options:options
+                                                   error:error];
+  if (json == nil) {
+    return NO;
+  }
+  return [json writeToFile:path options:NSDataWritingAtomic error:error];
+}
+
+- (BOOL)startWithError:(NSError **)error {
+  if (self.isStarted) {
+    return YES;
+  }
+
+  for (id<ALNLifecycleHook> hook in self.mutableLifecycleHooks) {
+    if (![hook respondsToSelector:@selector(applicationWillStart:error:)]) {
+      continue;
+    }
+    NSError *hookError = nil;
+    BOOL ok = [hook applicationWillStart:self error:&hookError];
+    if (!ok) {
+      if (error != NULL) {
+        *error = hookError ?: [NSError errorWithDomain:ALNApplicationErrorDomain
+                                                  code:307
+                                              userInfo:@{
+                                                NSLocalizedDescriptionKey : @"startup hook rejected startup"
+                                              }];
+      }
+      return NO;
+    }
+  }
+
+  self.started = YES;
+  for (id<ALNLifecycleHook> hook in self.mutableLifecycleHooks) {
+    if ([hook respondsToSelector:@selector(applicationDidStart:)]) {
+      [hook applicationDidStart:self];
+    }
+  }
+  return YES;
+}
+
+- (void)shutdown {
+  if (!self.isStarted) {
+    return;
+  }
+
+  for (NSInteger idx = (NSInteger)[self.mutableLifecycleHooks count] - 1; idx >= 0; idx--) {
+    id<ALNLifecycleHook> hook = self.mutableLifecycleHooks[(NSUInteger)idx];
+    if ([hook respondsToSelector:@selector(applicationWillStop:)]) {
+      [hook applicationWillStop:self];
+    }
+  }
+
+  for (NSInteger idx = (NSInteger)[self.mutableLifecycleHooks count] - 1; idx >= 0; idx--) {
+    id<ALNLifecycleHook> hook = self.mutableLifecycleHooks[(NSUInteger)idx];
+    if ([hook respondsToSelector:@selector(applicationDidStop:)]) {
+      [hook applicationDidStop:self];
+    }
+  }
+  self.started = NO;
 }
 
 - (void)registerBuiltInMiddlewares {
@@ -516,6 +1291,7 @@ static void ALNFinalizeResponse(ALNResponse *response,
   BOOL apiOnly = ALNBoolConfigValue(self.config[@"apiOnly"], NO);
   ALNPerfTrace *trace = [[ALNPerfTrace alloc] initWithEnabled:performanceLogging];
   [trace startStage:@"total"];
+  [self.metrics addGauge:@"http_requests_active" delta:1.0];
 
   NSString *routePath = nil;
   NSString *requestFormat = ALNRequestPreferredFormat(request, apiOnly, &routePath);
@@ -531,34 +1307,40 @@ static void ALNFinalizeResponse(ALNResponse *response,
   [trace endStage:@"route"];
 
   if (match == nil) {
-    NSString *healthBody = nil;
-    BOOL healthMethod = [request.method isEqualToString:@"GET"] ||
-                        [request.method isEqualToString:@"HEAD"];
-    if (healthMethod) {
-      healthBody = ALNBuiltInHealthBodyForPath(routePath);
-    }
-
-    if ([healthBody length] > 0) {
-      response.statusCode = 200;
-      [response setHeader:@"Content-Type" value:@"text/plain; charset=utf-8"];
-      if (![request.method isEqualToString:@"HEAD"]) {
-        [response setTextBody:healthBody];
-      }
-      response.committed = YES;
-    } else if (apiOnly || ALNRequestPrefersJSON(request, apiOnly)) {
+    BOOL handledBuiltIn = ALNApplyBuiltInResponse(self, request, response, routePath);
+    if (!handledBuiltIn && (apiOnly || ALNRequestPrefersJSON(request, apiOnly))) {
       NSDictionary *payload = ALNStructuredErrorPayload(404,
                                                         @"not_found",
                                                         @"Not Found",
                                                         requestID,
                                                         @{});
       ALNSetStructuredErrorResponse(response, 404, payload);
-    } else {
+    } else if (!handledBuiltIn) {
       response.statusCode = 404;
       [response setTextBody:@"not found\n"];
       [response setHeader:@"Content-Type" value:@"text/plain; charset=utf-8"];
       response.committed = YES;
     }
     ALNFinalizeResponse(response, trace, request, requestID, performanceLogging);
+    ALNRecordRequestMetrics(self, response, trace);
+    [self.metrics addGauge:@"http_requests_active" delta:-1.0];
+
+    if (self.traceExporter != nil) {
+      @try {
+        [self.traceExporter exportTrace:[trace dictionaryRepresentation]
+                                request:request
+                               response:response
+                              routeName:@""
+                         controllerName:@""
+                             actionName:@""];
+      } @catch (NSException *exception) {
+        [self.logger warn:@"trace exporter failed"
+                   fields:@{
+                     @"request_id" : requestID ?: @"",
+                     @"exception" : exception.reason ?: @"",
+                   }];
+      }
+    }
 
     NSMutableDictionary *fields = [NSMutableDictionary dictionary];
     fields[@"method"] = request.method ?: @"";
@@ -576,10 +1358,13 @@ static void ALNFinalizeResponse(ALNResponse *response,
   stash[@"request_id"] = requestID ?: @"";
   stash[ALNContextRequestFormatStashKey] = requestFormat ?: @"";
   NSDictionary *eoc = ALNDictionaryConfigValue(self.config, @"eoc");
+  NSDictionary *compatibility = ALNDictionaryConfigValue(self.config, @"compatibility");
   stash[ALNContextEOCStrictLocalsStashKey] =
       @(ALNBoolConfigValue(eoc[@"strictLocals"], NO));
   stash[ALNContextEOCStrictStringifyStashKey] =
       @(ALNBoolConfigValue(eoc[@"strictStringify"], NO));
+  stash[ALNContextPageStateEnabledStashKey] =
+      @(ALNBoolConfigValue(compatibility[@"pageStateEnabled"], NO));
   request.routeParams = match.params ?: @{};
   ALNContext *context = [[ALNContext alloc] initWithRequest:request
                                                    response:response
@@ -592,9 +1377,10 @@ static void ALNFinalizeResponse(ALNResponse *response,
                                                  actionName:match.route.actionName ?: @""];
 
   id returnValue = nil;
-  BOOL shouldDispatchController = YES;
+  BOOL shouldDispatchController =
+      ALNApplyRequestContractIfNeeded(self, request, response, context, match.route, requestID);
   NSMutableArray *executedMiddlewares = [NSMutableArray array];
-  if ([self.mutableMiddlewares count] > 0) {
+  if (shouldDispatchController && [self.mutableMiddlewares count] > 0) {
     [trace startStage:@"middleware"];
     for (id<ALNMiddleware> middleware in self.mutableMiddlewares) {
       NSError *middlewareError = nil;
@@ -634,6 +1420,11 @@ static void ALNFinalizeResponse(ALNResponse *response,
       }
     }
     [trace endStage:@"middleware"];
+  }
+
+  if (shouldDispatchController && !response.committed) {
+    shouldDispatchController =
+        ALNApplyAuthContractIfNeeded(self, request, response, context, match.route, requestID);
   }
 
   if (shouldDispatchController) {
@@ -844,7 +1635,33 @@ static void ALNFinalizeResponse(ALNResponse *response,
     }
   }
 
+  (void)ALNValidateResponseContractIfNeeded(self,
+                                            request,
+                                            response,
+                                            match.route,
+                                            returnValue,
+                                            requestID);
+
   ALNFinalizeResponse(response, trace, request, requestID, performanceLogging);
+  ALNRecordRequestMetrics(self, response, trace);
+  [self.metrics addGauge:@"http_requests_active" delta:-1.0];
+
+  if (self.traceExporter != nil) {
+    @try {
+      [self.traceExporter exportTrace:[trace dictionaryRepresentation]
+                              request:request
+                             response:response
+                            routeName:context.routeName ?: @""
+                       controllerName:context.controllerName ?: @""
+                           actionName:context.actionName ?: @""];
+    } @catch (NSException *exception) {
+      [self.logger warn:@"trace exporter failed"
+                 fields:@{
+                   @"request_id" : requestID ?: @"",
+                   @"exception" : exception.reason ?: @"",
+                 }];
+    }
+  }
 
   NSMutableDictionary *logFields = [NSMutableDictionary dictionary];
   logFields[@"method"] = request.method ?: @"";

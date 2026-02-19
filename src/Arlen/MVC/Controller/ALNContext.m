@@ -4,6 +4,7 @@
 #import "ALNResponse.h"
 #import "ALNLogger.h"
 #import "ALNPerf.h"
+#import "ALNPageState.h"
 
 NSString *const ALNContextSessionStashKey = @"aln.session";
 NSString *const ALNContextSessionDirtyStashKey = @"aln.session.dirty";
@@ -13,6 +14,12 @@ NSString *const ALNContextValidationErrorsStashKey = @"aln.validation.errors";
 NSString *const ALNContextEOCStrictLocalsStashKey = @"aln.eoc.strict_locals";
 NSString *const ALNContextEOCStrictStringifyStashKey = @"aln.eoc.strict_stringify";
 NSString *const ALNContextRequestFormatStashKey = @"aln.request.format";
+NSString *const ALNContextValidatedParamsStashKey = @"aln.contract.validated_params";
+NSString *const ALNContextAuthClaimsStashKey = @"aln.auth.claims";
+NSString *const ALNContextAuthScopesStashKey = @"aln.auth.scopes";
+NSString *const ALNContextAuthRolesStashKey = @"aln.auth.roles";
+NSString *const ALNContextAuthSubjectStashKey = @"aln.auth.subject";
+NSString *const ALNContextPageStateEnabledStashKey = @"aln.compat.page_state_enabled";
 
 @interface ALNContext ()
 
@@ -109,6 +116,10 @@ static BOOL ALNStringRepresentsInteger(NSString *value, NSInteger *parsed) {
   NSMutableDictionary *combined =
       [NSMutableDictionary dictionaryWithDictionary:self.request.queryParams ?: @{}];
   [combined addEntriesFromDictionary:self.params ?: @{}];
+  id validated = self.stash[ALNContextValidatedParamsStashKey];
+  if ([validated isKindOfClass:[NSDictionary class]]) {
+    [combined addEntriesFromDictionary:validated];
+  }
   return [NSDictionary dictionaryWithDictionary:combined];
 }
 
@@ -216,6 +227,62 @@ static BOOL ALNStringRepresentsInteger(NSString *value, NSInteger *parsed) {
     return [NSArray arrayWithArray:current];
   }
   return @[];
+}
+
+- (NSDictionary *)validatedParams {
+  id value = self.stash[ALNContextValidatedParamsStashKey];
+  if ([value isKindOfClass:[NSDictionary class]]) {
+    return value;
+  }
+  return @{};
+}
+
+- (id)validatedValueForName:(NSString *)name {
+  if ([name length] == 0) {
+    return nil;
+  }
+  return [self validatedParams][name];
+}
+
+- (NSDictionary *)authClaims {
+  id value = self.stash[ALNContextAuthClaimsStashKey];
+  if ([value isKindOfClass:[NSDictionary class]]) {
+    return value;
+  }
+  return nil;
+}
+
+- (NSArray *)authScopes {
+  id value = self.stash[ALNContextAuthScopesStashKey];
+  if ([value isKindOfClass:[NSArray class]]) {
+    return value;
+  }
+  return @[];
+}
+
+- (NSArray *)authRoles {
+  id value = self.stash[ALNContextAuthRolesStashKey];
+  if ([value isKindOfClass:[NSArray class]]) {
+    return value;
+  }
+  return @[];
+}
+
+- (NSString *)authSubject {
+  id value = self.stash[ALNContextAuthSubjectStashKey];
+  if ([value isKindOfClass:[NSString class]] && [value length] > 0) {
+    return value;
+  }
+  NSDictionary *claims = [self authClaims];
+  id subject = claims[@"sub"];
+  if ([subject isKindOfClass:[NSString class]] && [subject length] > 0) {
+    return subject;
+  }
+  return nil;
+}
+
+- (ALNPageState *)pageStateForKey:(NSString *)pageKey {
+  return [[ALNPageState alloc] initWithContext:self pageKey:pageKey];
 }
 
 @end

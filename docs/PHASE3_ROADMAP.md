@@ -1,6 +1,6 @@
 # Arlen Phase 3 Roadmap
 
-Status: Proposed with parity baseline  
+Status: Active (Phase 3A-3B complete; Phase 3C-3E planned)  
 Last updated: 2026-02-19
 
 Related docs:
@@ -10,44 +10,61 @@ Related docs:
 
 ## 1. Objective
 
-Scale Arlen from "first production-ready" to a mature platform with strong observability, extensibility, and deliberate delivery of deferred parity capabilities.
+Scale Arlen from "first production-ready" to a mature platform with strong observability, extensibility, API-contract ergonomics, and deliberate delivery of deferred parity capabilities while preserving Arlen-native design defaults.
 
 ## 2. Scope Summary
 
 1. Observability and telemetry maturity.
-2. Plugin/extension system and lifecycle hooks.
-3. Data/model layer expansion (including optional SQL builder and optional GDL2 adapter).
-4. Distribution and operations maturity for compiled deployments.
-5. Deferred parity capabilities (realtime, mounting, ecosystem services).
-6. Packaging, versioning, and onboarding maturity.
-7. Advanced performance observability and tuning on top of Phase 2 mandatory perf gates.
+2. API-contract and auth ergonomics for API-first applications.
+3. Plugin/extension system and lifecycle hooks.
+4. Data/model layer expansion (including optional SQL builder and optional GDL2 adapter).
+5. GNUstepWeb migration compatibility track (additive and opt-in).
+6. Distribution and operations maturity for compiled deployments.
+7. Deferred parity capabilities (realtime, mounting, ecosystem services).
+8. Packaging, versioning, and onboarding maturity.
+9. Advanced performance observability and tuning on top of Phase 2 mandatory perf gates.
 
 ## 3. Milestones
 
-## 3.1 Phase 3A: Observability + Extensibility + API Contracts
+## 3.1 Phase 3A: Observability + API Contracts + Extensibility
 
 Deliverables:
 - Metrics endpoint and standardized runtime counters.
 - Optional trace export integration (OpenTelemetry-friendly).
+- Objective-C-first request/response schema contracts for validation and OpenAPI emission.
+- OpenAPI generation for API-focused applications.
+- Built-in API documentation UI path (OpenAPI viewer) for local/dev use.
+- SDK/export hooks from generated OpenAPI artifacts.
+- First-party auth baseline for API workloads:
+  - bearer/JWT verification helpers
+  - OAuth2 scope checks
+  - route-level RBAC/policy helpers
 - Stable plugin API for middleware/helpers/lifecycle hooks.
 - Explicit startup/shutdown dependency lifecycle contracts.
 - Plugin loading/scaffolding through `arlen` CLI.
-- OpenAPI generation for API-focused applications.
 
 Acceptance:
 - Metrics and key counters verified in integration tests.
+- Schema-contract validation and coercion behavior verified in unit/integration tests.
+- OpenAPI snapshot tests pass for representative apps.
+- API documentation UI endpoint serves generated specs for representative apps.
+- Auth/scope/RBAC contract tests pass for positive and rejection paths.
 - Example plugins pass compatibility tests.
 - Lifecycle hook contract tests pass.
-- OpenAPI snapshot tests pass for representative apps.
 
 ## 3.2 Phase 3B: Data Layer Maturation
+
+Status: Complete (2026-02-19)
 
 Deliverables:
 - Optional SQL builder (`ALNSQLBuilder`) for common CRUD/filter patterns.
 - Keep raw SQL APIs first-class and always available.
 - Productize PostgreSQL contract into an adapter model.
-- Promote GDL2 from spike to optional adapter if Phase 2 spike is favorable.
+- Promote GDL2 from spike to optional adapter with migration-oriented docs.
+- Add optional data-controller helper (`ALNDisplayGroup`-style) for sort/filter/batch workflows on top of adapters.
 - Add adapter conformance harness shared by all data adapters.
+- Add session/page-state compatibility helper layer (opt-in) for migration scenarios that require it.
+- Upgrade OpenAPI docs UI from baseline viewer to FastAPI-style interactive API docs (try-it-out workflow), while keeping the current lightweight viewer path available as fallback.
 
 GDL2 decision criteria:
 - No unacceptable performance overhead for common queries.
@@ -57,8 +74,13 @@ GDL2 decision criteria:
 Acceptance:
 - SQL builder coverage tests and generated SQL snapshots.
 - Adapter conformance test harness across `ALNPg` and GDL2 adapter.
+- Optional data-controller helper contract tests pass for sort/filter/batch behavior.
+- Session/page-state compatibility helper tests pass without changing default Arlen stateless behavior.
+- Interactive docs endpoint supports end-to-end request execution against representative API routes in integration tests.
 
 ## 3.3 Phase 3C: Distribution, Release Management, and Documentation Maturity
+
+Status: Next
 
 Deliverables:
 - Release artifact tooling and lifecycle documentation.
@@ -70,7 +92,15 @@ Deliverables:
   - workload profile expansion for middleware-heavy and template-heavy scenarios
 - Semantic versioning policy and deprecation lifecycle.
 - Packaging/distribution docs and compatibility matrix.
+- OpenAPI docs polish tranche:
+  - self-hosted Swagger UI wired to generated `/openapi.json`
+  - configurable docs UI style selection without removing existing interactive/viewer fallbacks
 - End-to-end cookbook sample apps and validated docs.
+- Migration readiness package:
+  - GSWeb-to-Arlen migration guide
+  - migrated sample app demonstrating side-by-side equivalent behavior
+  - API-first reference app demonstrating schema/OpenAPI/auth defaults
+  - benchmark profile pack for API reference workloads
 
 Acceptance:
 - Performance regression thresholds enforced in CI.
@@ -79,6 +109,8 @@ Acceptance:
 - Release checklist and migration guidance published.
 - Deployment runbooks validated by automated smoke checks.
 - Docs runnable and validated in CI.
+- Swagger UI docs endpoint serves generated specs and supports representative try-it-out API execution in integration tests.
+- Migration sample app and API reference app pass integration/perf baseline checks.
 
 ## 3.4 Phase 3D: Deferred Parity Features (Realtime + Composition)
 
@@ -87,6 +119,7 @@ Deliverables:
 - Server-Sent Events support.
 - App mounting/embedding composition model.
 - Realtime channels/pubsub abstraction layered on websocket foundation.
+- Promote any Phase 3A preview APIs to stable contracts only after compatibility/perf criteria are met.
 
 Acceptance:
 - Websocket and SSE integration tests pass under concurrent load.
@@ -112,6 +145,8 @@ Acceptance:
 3. Avoid heavy abstractions as defaults.
 4. Prefer optional layers over mandatory complexity.
 5. Preserve default-first developer ergonomics.
+6. Keep compatibility/migration surfaces additive and opt-in.
+7. Keep Arlen-native APIs (`ALN*`) as canonical contracts.
 
 ## 5. SQL and ORM Positioning in Phase 3
 
@@ -120,7 +155,14 @@ Acceptance:
 - A full ORM should be considered only if it materially improves ergonomics without violating performance and simplicity goals.
 - GDL2 support is optional and adapter-based, not a core dependency.
 
-## 6. Parity Governance in Phase 3
+## 6. Compatibility Guardrails
+
+- GSWeb/WebObjects-inspired compatibility lives in explicit compatibility modules, not Arlen core defaults.
+- App scaffolds and docs remain Arlen-native by default.
+- Migration helpers must not require runtime-global behavior changes for non-migrating apps.
+- New compatibility layers must pass the same perf/quality gates as core APIs.
+
+## 7. Parity Governance in Phase 3
 
 - Continue quarterly Mojolicious parity deltas against the frozen baseline model in `docs/FEATURE_PARITY_MATRIX.md`.
 - Every newly in-scope capability must include acceptance tests and migration notes when API behavior changes.

@@ -41,6 +41,10 @@ curl -i http://127.0.0.1:3000/
 curl -i http://127.0.0.1:3000/healthz
 curl -i http://127.0.0.1:3000/readyz
 curl -i http://127.0.0.1:3000/livez
+curl -i http://127.0.0.1:3000/metrics
+curl -i http://127.0.0.1:3000/openapi.json
+curl -i http://127.0.0.1:3000/openapi
+curl -i http://127.0.0.1:3000/openapi/viewer
 ```
 
 ## 4. Run Tests and Quality Gates
@@ -148,12 +152,23 @@ Framework/app runtime:
 - `ARLEN_MAX_HEADER_BYTES`
 - `ARLEN_MAX_BODY_BYTES`
 - `ARLEN_DATABASE_URL`
+- `ARLEN_DB_ADAPTER`
 - `ARLEN_DB_POOL_SIZE`
 - `ARLEN_SESSION_ENABLED`
 - `ARLEN_CSRF_ENABLED`
 - `ARLEN_RATE_LIMIT_ENABLED`
 - `ARLEN_RATE_LIMIT_REQUESTS`
 - `ARLEN_RATE_LIMIT_WINDOW_SECONDS`
+- `ARLEN_AUTH_ENABLED`
+- `ARLEN_AUTH_BEARER_SECRET`
+- `ARLEN_AUTH_ISSUER`
+- `ARLEN_AUTH_AUDIENCE`
+- `ARLEN_OPENAPI_ENABLED`
+- `ARLEN_OPENAPI_DOCS_UI_ENABLED`
+- `ARLEN_OPENAPI_DOCS_UI_STYLE` (`interactive` or `viewer`)
+- `ARLEN_OPENAPI_TITLE`
+- `ARLEN_OPENAPI_VERSION`
+- `ARLEN_PAGE_STATE_COMPAT_ENABLED`
 - `ARLEN_EOC_STRICT_LOCALS`
 - `ARLEN_EOC_STRICT_STRINGIFY`
 

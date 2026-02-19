@@ -237,6 +237,57 @@
   XCTAssertTrue([body containsString:@"\"server\""]);
 }
 
+- (void)testOpenAPIInteractiveDocsFlowAndRepresentativeAPIRoute {
+  int port = [self randomPort];
+  NSTask *server = [[NSTask alloc] init];
+  server.launchPath = @"./build/boomhauer";
+  server.arguments = @[ @"--port", [NSString stringWithFormat:@"%d", port] ];
+  server.standardOutput = [NSPipe pipe];
+  server.standardError = [NSPipe pipe];
+  [server launch];
+
+  @try {
+    BOOL docsOK = NO;
+    NSString *docsBody = [self requestPathWithRetries:@"/openapi"
+                                                 port:port
+                                             attempts:60
+                                              success:&docsOK];
+    XCTAssertTrue(docsOK);
+    XCTAssertTrue([docsBody containsString:@"Arlen OpenAPI Explorer"]);
+    XCTAssertTrue([docsBody containsString:@"Try It Out"]);
+    XCTAssertTrue([docsBody containsString:@"fetch('/openapi.json')"]);
+
+    BOOL specOK = NO;
+    NSString *specBody = [self requestPathWithRetries:@"/openapi.json"
+                                                 port:port
+                                             attempts:60
+                                              success:&specOK];
+    XCTAssertTrue(specOK);
+    XCTAssertTrue([specBody containsString:@"\"/api/status\""]);
+
+    BOOL routeOK = NO;
+    NSString *apiBody = [self requestPathWithRetries:@"/api/status"
+                                                port:port
+                                            attempts:60
+                                             success:&routeOK];
+    XCTAssertTrue(routeOK);
+    XCTAssertTrue([apiBody containsString:@"\"ok\""]);
+
+    BOOL viewerOK = NO;
+    NSString *viewerBody = [self requestPathWithRetries:@"/openapi/viewer"
+                                                   port:port
+                                               attempts:60
+                                                success:&viewerOK];
+    XCTAssertTrue(viewerOK);
+    XCTAssertTrue([viewerBody containsString:@"Arlen OpenAPI Viewer"]);
+  } @finally {
+    if ([server isRunning]) {
+      (void)kill(server.processIdentifier, SIGTERM);
+      [server waitUntilExit];
+    }
+  }
+}
+
 - (void)testPathParamEndpoint {
   NSString *body = [self simpleRequestPath:@"/api/echo/hank"];
   XCTAssertTrue([body containsString:@"\"name\""]);
@@ -622,7 +673,7 @@
                                   "}\n"]);
 
     BOOL recovered = NO;
-    for (NSInteger attempt = 0; attempt < 120; attempt++) {
+    for (NSInteger attempt = 0; attempt < 240; attempt++) {
       int curlCode = 0;
       NSString *body = [self runShellCapture:[NSString stringWithFormat:@"curl -fsS http://127.0.0.1:%d/", port]
                                     exitCode:&curlCode];

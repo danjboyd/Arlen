@@ -12,7 +12,7 @@ static void PrintUsage(void) {
           "\n"
           "Commands:\n"
           "  new <AppName> [--full|--lite] [--force]\n"
-          "  generate <controller|endpoint|model|migration|test> <Name> [options]\n"
+          "  generate <controller|endpoint|model|migration|test|plugin> <Name> [options]\n"
           "  boomhauer [server args...]\n"
           "  propane [manager args...]\n"
           "  migrate [--env <name>] [--dsn <connection_string>] [--dry-run]\n"
@@ -30,7 +30,7 @@ static void PrintNewUsage(void) {
 
 static void PrintGenerateUsage(void) {
   fprintf(stdout,
-          "Usage: arlen generate <controller|endpoint|model|migration|test> <Name> [options]\n"
+          "Usage: arlen generate <controller|endpoint|model|migration|test|plugin> <Name> [options]\n"
           "\n"
           "Generator options (controller/endpoint):\n"
           "  --route <path>\n"
@@ -164,6 +164,59 @@ static BOOL WriteTextFile(NSString *path, NSString *content, BOOL force, NSError
   return [content writeToFile:path atomically:YES encoding:NSUTF8StringEncoding error:error];
 }
 
+static BOOL AddPluginClassToAppConfig(NSString *root, NSString *pluginClassName, NSError **error) {
+  if ([pluginClassName length] == 0) {
+    return YES;
+  }
+
+  NSString *configPath = [root stringByAppendingPathComponent:@"config/app.plist"];
+  NSData *data = [NSData dataWithContentsOfFile:configPath options:0 error:error];
+  if (data == nil) {
+    return NO;
+  }
+
+  NSPropertyListFormat format = NSPropertyListOpenStepFormat;
+  id parsed = [NSPropertyListSerialization propertyListWithData:data
+                                                        options:NSPropertyListMutableContainersAndLeaves
+                                                         format:&format
+                                                          error:error];
+  if (![parsed isKindOfClass:[NSMutableDictionary class]]) {
+    if (error != NULL && *error == nil) {
+      *error = [NSError errorWithDomain:@"Arlen.Error"
+                                   code:13
+                               userInfo:@{
+                                 NSLocalizedDescriptionKey : @"config/app.plist must be a dictionary"
+                               }];
+    }
+    return NO;
+  }
+
+  NSMutableDictionary *config = parsed;
+  NSMutableDictionary *plugins = [config[@"plugins"] isKindOfClass:[NSMutableDictionary class]]
+                                     ? config[@"plugins"]
+                                     : [NSMutableDictionary dictionaryWithDictionary:
+                                           ([config[@"plugins"] isKindOfClass:[NSDictionary class]] ? config[@"plugins"] : @{})];
+  NSMutableArray *classes = [plugins[@"classes"] isKindOfClass:[NSMutableArray class]]
+                                ? plugins[@"classes"]
+                                : [NSMutableArray arrayWithArray:
+                                      ([plugins[@"classes"] isKindOfClass:[NSArray class]] ? plugins[@"classes"] : @[])];
+
+  if (![classes containsObject:pluginClassName]) {
+    [classes addObject:pluginClassName];
+  }
+  plugins[@"classes"] = classes;
+  config[@"plugins"] = plugins;
+
+  NSData *serialized = [NSPropertyListSerialization dataWithPropertyList:config
+                                                                   format:NSPropertyListOpenStepFormat
+                                                                  options:0
+                                                                    error:error];
+  if (serialized == nil) {
+    return NO;
+  }
+  return [serialized writeToFile:configPath options:NSDataWritingAtomic error:error];
+}
+
 static BOOL ScaffoldFullApp(NSString *root, BOOL force, NSError **error) {
   NSArray *directories = @[
     @"config/environments",
@@ -171,6 +224,7 @@ static BOOL ScaffoldFullApp(NSString *root, BOOL force, NSError **error) {
     @"public",
     @"src/Controllers",
     @"src/Models",
+    @"src/Plugins",
     @"templates",
     @"templates/layouts",
     @"templates/partials",
@@ -205,6 +259,7 @@ static BOOL ScaffoldFullApp(NSString *root, BOOL force, NSError **error) {
                             "  };\n"
                             "  database = {\n"
                             "    connectionString = \"\";\n"
+                            "    adapter = \"postgresql\";\n"
                             "    poolSize = 8;\n"
                             "  };\n"
                             "  session = {\n"
@@ -228,6 +283,26 @@ static BOOL ScaffoldFullApp(NSString *root, BOOL force, NSError **error) {
                             "  securityHeaders = {\n"
                             "    enabled = YES;\n"
                             "    contentSecurityPolicy = \"default-src 'self'\";\n"
+                            "  };\n"
+                            "  auth = {\n"
+                            "    enabled = NO;\n"
+                            "    bearerSecret = \"\";\n"
+                            "    issuer = \"\";\n"
+                            "    audience = \"\";\n"
+                            "  };\n"
+                            "  openapi = {\n"
+                            "    enabled = YES;\n"
+                            "    docsUIEnabled = YES;\n"
+                            "    docsUIStyle = \"interactive\";\n"
+                            "    title = \"Arlen API\";\n"
+                            "    version = \"0.1.0\";\n"
+                            "    description = \"Generated by Arlen\";\n"
+                            "  };\n"
+                            "  compatibility = {\n"
+                            "    pageStateEnabled = NO;\n"
+                            "  };\n"
+                            "  plugins = {\n"
+                            "    classes = ();\n"
                             "  };\n"
                             "  propaneAccessories = {\n"
                             "    workerCount = 4;\n"
@@ -320,7 +395,7 @@ static BOOL ScaffoldLiteApp(NSString *root, BOOL force, NSError **error) {
 
   BOOL ok = YES;
   ok = ok && WriteTextFile([root stringByAppendingPathComponent:@"config/app.plist"],
-                           @"{\n  host = \"127.0.0.1\";\n  port = 3000;\n  serveStatic = YES;\n  listenBacklog = 128;\n  connectionTimeoutSeconds = 30;\n  database = {\n    connectionString = \"\";\n    poolSize = 8;\n  };\n  session = {\n    enabled = NO;\n    secret = \"\";\n    cookieName = \"arlen_session\";\n    maxAgeSeconds = 1209600;\n    secure = NO;\n    sameSite = \"Lax\";\n  };\n  csrf = {\n    enabled = NO;\n    headerName = \"x-csrf-token\";\n    queryParamName = \"csrf_token\";\n  };\n  rateLimit = {\n    enabled = NO;\n    requests = 120;\n    windowSeconds = 60;\n  };\n  securityHeaders = {\n    enabled = YES;\n    contentSecurityPolicy = \"default-src 'self'\";\n  };\n  propaneAccessories = {\n    workerCount = 4;\n    gracefulShutdownSeconds = 10;\n    respawnDelayMs = 250;\n    reloadOverlapSeconds = 1;\n  };\n}\n",
+                           @"{\n  host = \"127.0.0.1\";\n  port = 3000;\n  serveStatic = YES;\n  listenBacklog = 128;\n  connectionTimeoutSeconds = 30;\n  database = {\n    connectionString = \"\";\n    adapter = \"postgresql\";\n    poolSize = 8;\n  };\n  session = {\n    enabled = NO;\n    secret = \"\";\n    cookieName = \"arlen_session\";\n    maxAgeSeconds = 1209600;\n    secure = NO;\n    sameSite = \"Lax\";\n  };\n  csrf = {\n    enabled = NO;\n    headerName = \"x-csrf-token\";\n    queryParamName = \"csrf_token\";\n  };\n  rateLimit = {\n    enabled = NO;\n    requests = 120;\n    windowSeconds = 60;\n  };\n  securityHeaders = {\n    enabled = YES;\n    contentSecurityPolicy = \"default-src 'self'\";\n  };\n  auth = {\n    enabled = NO;\n    bearerSecret = \"\";\n    issuer = \"\";\n    audience = \"\";\n  };\n  openapi = {\n    enabled = YES;\n    docsUIEnabled = YES;\n    docsUIStyle = \"interactive\";\n    title = \"Arlen API\";\n    version = \"0.1.0\";\n    description = \"Generated by Arlen\";\n  };\n  compatibility = {\n    pageStateEnabled = NO;\n  };\n  plugins = {\n    classes = ();\n  };\n  propaneAccessories = {\n    workerCount = 4;\n    gracefulShutdownSeconds = 10;\n    respawnDelayMs = 250;\n    reloadOverlapSeconds = 1;\n  };\n}\n",
                            force, error);
   ok = ok && WriteTextFile([root stringByAppendingPathComponent:@"app_lite.m"],
                            @"#import <Foundation/Foundation.h>\n"
@@ -764,6 +839,49 @@ static int CommandGenerate(NSArray *args) {
                                        "}\n@end\n",
                                       name, name];
     ok = WriteTextFile(path, content, NO, &error);
+  } else if ([type isEqualToString:@"plugin"]) {
+    NSString *pluginName = [name hasSuffix:@"Plugin"] ? name : [name stringByAppendingString:@"Plugin"];
+    NSString *pluginBase = [pluginName hasSuffix:@"Plugin"] && [pluginName length] > [@"Plugin" length]
+                               ? [pluginName substringToIndex:[pluginName length] - [@"Plugin" length]]
+                               : pluginName;
+    NSString *headerPath =
+        [root stringByAppendingPathComponent:[NSString stringWithFormat:@"src/Plugins/%@.h", pluginName]];
+    NSString *implPath =
+        [root stringByAppendingPathComponent:[NSString stringWithFormat:@"src/Plugins/%@.m", pluginName]];
+    NSString *logicalName = [[pluginBase lowercaseString] copy];
+
+    NSString *header = [NSString stringWithFormat:
+                                     @"#import <Foundation/Foundation.h>\n"
+                                      "#import \"ArlenServer.h\"\n\n"
+                                      "@interface %@ : NSObject <ALNPlugin, ALNLifecycleHook>\n"
+                                      "@end\n",
+                                     pluginName];
+    NSString *impl = [NSString stringWithFormat:
+                                   @"#import \"%@.h\"\n\n"
+                                    "@implementation %@\n\n"
+                                    "- (NSString *)pluginName {\n"
+                                    "  return @\"%@\";\n"
+                                    "}\n\n"
+                                    "- (BOOL)registerWithApplication:(ALNApplication *)application\n"
+                                    "                             error:(NSError **)error {\n"
+                                    "  (void)application;\n"
+                                    "  (void)error;\n"
+                                    "  return YES;\n"
+                                    "}\n\n"
+                                    "- (void)applicationDidStart:(ALNApplication *)application {\n"
+                                    "  (void)application;\n"
+                                    "}\n\n"
+                                    "- (void)applicationWillStop:(ALNApplication *)application {\n"
+                                    "  (void)application;\n"
+                                    "}\n\n"
+                                    "@end\n",
+                                   pluginName, pluginName, logicalName];
+
+    ok = WriteTextFile(headerPath, header, NO, &error) &&
+         WriteTextFile(implPath, impl, NO, &error);
+    if (ok) {
+      ok = AddPluginClassToAppConfig(root, pluginName, &error);
+    }
   } else {
     fprintf(stderr, "arlen generate: unknown type %s\n", [type UTF8String]);
     return 2;
