@@ -8,6 +8,24 @@
 
 @implementation ALNController
 
+static NSDictionary *ALNTemplateContextFromStash(NSDictionary *stash) {
+  NSMutableDictionary *context = [NSMutableDictionary dictionary];
+  for (id key in stash ?: @{}) {
+    if (![key isKindOfClass:[NSString class]]) {
+      continue;
+    }
+    NSString *name = (NSString *)key;
+    if ([name hasPrefix:@"aln."] || [name isEqualToString:@"request_id"]) {
+      continue;
+    }
+    id value = stash[key];
+    if (value != nil) {
+      context[name] = value;
+    }
+  }
+  return [NSDictionary dictionaryWithDictionary:context];
+}
+
 + (NSJSONWritingOptions)jsonWritingOptions {
   return 0;
 }
@@ -18,13 +36,27 @@
   return [self renderTemplate:templateName context:context layout:nil error:error];
 }
 
+- (BOOL)renderTemplate:(NSString *)templateName error:(NSError **)error {
+  return [self renderTemplate:templateName
+                      context:ALNTemplateContextFromStash(self.context.stash)
+                        error:error];
+}
+
 - (BOOL)renderTemplate:(NSString *)templateName
                context:(NSDictionary *)context
                 layout:(NSString *)layoutName
                  error:(NSError **)error {
+  BOOL strictLocals =
+      [self.context.stash[ALNContextEOCStrictLocalsStashKey] boolValue];
+  BOOL strictStringify =
+      [self.context.stash[ALNContextEOCStrictStringifyStashKey] boolValue];
   [self.context.perfTrace startStage:@"render"];
-  NSString *rendered =
-      [ALNView renderTemplate:templateName context:context layout:layoutName error:error];
+  NSString *rendered = [ALNView renderTemplate:templateName
+                                       context:context
+                                        layout:layoutName
+                                  strictLocals:strictLocals
+                               strictStringify:strictStringify
+                                         error:error];
   [self.context.perfTrace endStage:@"render"];
   if (rendered == nil) {
     return NO;
@@ -33,6 +65,54 @@
   [self.context.response setTextBody:rendered];
   self.context.response.committed = YES;
   return YES;
+}
+
+- (BOOL)renderTemplate:(NSString *)templateName
+                layout:(NSString *)layoutName
+                 error:(NSError **)error {
+  return [self renderTemplate:templateName
+                      context:ALNTemplateContextFromStash(self.context.stash)
+                       layout:layoutName
+                        error:error];
+}
+
+- (void)stashValue:(id)value forKey:(NSString *)key {
+  if ([key length] == 0) {
+    return;
+  }
+  if (value == nil) {
+    [self.context.stash removeObjectForKey:key];
+    return;
+  }
+  self.context.stash[key] = value;
+}
+
+- (void)stashValues:(NSDictionary *)values {
+  for (id key in values ?: @{}) {
+    if (![key isKindOfClass:[NSString class]]) {
+      continue;
+    }
+    [self stashValue:values[key] forKey:key];
+  }
+}
+
+- (id)stashValueForKey:(NSString *)key {
+  if ([key length] == 0) {
+    return nil;
+  }
+  return self.context.stash[key];
+}
+
+- (BOOL)renderNegotiatedTemplate:(NSString *)templateName
+                         context:(NSDictionary *)context
+                      jsonObject:(id)jsonObject
+                           error:(NSError **)error {
+  if ([self.context wantsJSON]) {
+    id payload = jsonObject ?: context ?: @{};
+    return [self renderJSON:payload error:error];
+  }
+  NSDictionary *effectiveContext = context ?: ALNTemplateContextFromStash(self.context.stash);
+  return [self renderTemplate:templateName context:effectiveContext error:error];
 }
 
 - (BOOL)renderJSON:(id)object error:(NSError **)error {

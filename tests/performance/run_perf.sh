@@ -5,14 +5,26 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$repo_root"
 
 mkdir -p build/perf
-baseline_file="tests/performance/baselines/default.json"
+baseline_file="${ARLEN_PERF_BASELINE:-tests/performance/baselines/default.json}"
+policy_file="${ARLEN_PERF_POLICY:-tests/performance/policy.json}"
 report_file="build/perf/latest.json"
-csv_file="build/perf/latest.csv"
+summary_csv="build/perf/latest.csv"
+runs_csv="build/perf/latest_runs.csv"
+
+if [[ "${ARLEN_PERF_FAST:-0}" == "1" ]]; then
+  repeats="${ARLEN_PERF_REPEATS:-1}"
+  requests="${ARLEN_PERF_REQUESTS:-40}"
+  skip_gate="${ARLEN_PERF_SKIP_GATE:-1}"
+else
+  repeats="${ARLEN_PERF_REPEATS:-3}"
+  requests="${ARLEN_PERF_REQUESTS:-120}"
+  skip_gate="${ARLEN_PERF_SKIP_GATE:-0}"
+fi
 
 make boomhauer >/dev/null
 
 port="${ARLEN_PERF_PORT:-3301}"
-./build/boomhauer --port "$port" >/tmp/mojo_perf_server.log 2>&1 &
+./build/boomhauer --port "$port" >/tmp/arlen_perf_server.log 2>&1 &
 server_pid=$!
 
 cleanup() {
@@ -23,7 +35,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
-for _ in $(seq 1 40); do
+for _ in $(seq 1 60); do
   if curl -fsS "http://127.0.0.1:${port}/healthz" >/dev/null 2>&1; then
     break
   fi
@@ -52,10 +64,11 @@ percentile() {
   ' "$file"
 }
 
-run_benchmark() {
-  local name="$1"
+run_benchmark_once() {
+  local scenario="$1"
   local path="$2"
-  local requests="$3"
+  local requests_local="$3"
+  local run_id="$4"
   local lat_raw
   local lat_sorted
   lat_raw="$(mktemp)"
@@ -63,7 +76,7 @@ run_benchmark() {
 
   local start_ns end_ns
   start_ns="$(date +%s%N)"
-  for _ in $(seq 1 "$requests"); do
+  for _ in $(seq 1 "$requests_local"); do
     curl -o /dev/null -sS -w "%{time_total}\n" "http://127.0.0.1:${port}${path}" >>"$lat_raw"
   done
   end_ns="$(date +%s%N)"
@@ -75,71 +88,32 @@ run_benchmark() {
   p99="$(percentile "$lat_sorted" 99)"
   max="$(awk 'END {if (NR==0) print "0"; else printf "%.3f", $1}' "$lat_sorted")"
   duration_s="$(awk -v s="$start_ns" -v e="$end_ns" 'BEGIN {printf "%.6f", ((e-s)/1000000000.0)}')"
-  reqps="$(awk -v n="$requests" -v d="$duration_s" 'BEGIN {if (d<=0) print "0"; else printf "%.2f", (n/d)}')"
+  reqps="$(awk -v n="$requests_local" -v d="$duration_s" 'BEGIN {if (d<=0) print "0"; else printf "%.2f", (n/d)}')"
 
-  echo "${name},${requests},${p50},${p95},${p99},${max},${reqps}" >>"$csv_file"
-
-  eval "${name}_p50=${p50}"
-  eval "${name}_p95=${p95}"
-  eval "${name}_p99=${p99}"
-  eval "${name}_max=${max}"
-  eval "${name}_reqps=${reqps}"
-
+  echo "${scenario},${run_id},${requests_local},${p50},${p95},${p99},${max},${reqps},${duration_s}" >>"$runs_csv"
   rm -f "$lat_raw" "$lat_sorted"
 }
 
-echo "scenario,requests,p50_ms,p95_ms,p99_ms,max_ms,req_per_sec" >"$csv_file"
+echo "scenario,run,requests,p50_ms,p95_ms,p99_ms,max_ms,req_per_sec,duration_s" >"$runs_csv"
 
-run_benchmark "healthz" "/healthz" 120
-run_benchmark "api_status" "/api/status" 120
-run_benchmark "root" "/" 120
+for run_id in $(seq 1 "$repeats"); do
+  run_benchmark_once "healthz" "/healthz" "$requests" "$run_id"
+  run_benchmark_once "api_status" "/api/status" "$requests" "$run_id"
+  run_benchmark_once "root" "/" "$requests" "$run_id"
+done
 
 mem_after_kb="$(ps -o rss= -p "$server_pid" | awk '{print $1+0}')"
 
-cat >"$report_file" <<EOF
-{
-  "timestamp_utc": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
-  "host": "127.0.0.1",
-  "port": ${port},
-  "healthz_p50_ms": ${healthz_p50},
-  "healthz_p95_ms": ${healthz_p95},
-  "healthz_p99_ms": ${healthz_p99},
-  "healthz_max_ms": ${healthz_max},
-  "healthz_req_per_sec": ${healthz_reqps},
-  "api_status_p50_ms": ${api_status_p50},
-  "api_status_p95_ms": ${api_status_p95},
-  "api_status_p99_ms": ${api_status_p99},
-  "api_status_max_ms": ${api_status_max},
-  "api_status_req_per_sec": ${api_status_reqps},
-  "root_p50_ms": ${root_p50},
-  "root_p95_ms": ${root_p95},
-  "root_p99_ms": ${root_p99},
-  "root_max_ms": ${root_max},
-  "root_req_per_sec": ${root_reqps},
-  "memory_before_kb": ${mem_before_kb},
-  "memory_after_kb": ${mem_after_kb}
-}
-EOF
+python3 tests/performance/check_perf.py \
+  --runs-csv "$runs_csv" \
+  --report "$report_file" \
+  --summary-csv "$summary_csv" \
+  --baseline "$baseline_file" \
+  --policy "$policy_file" \
+  --host "127.0.0.1" \
+  --port "$port" \
+  --mem-before-kb "$mem_before_kb" \
+  --mem-after-kb "$mem_after_kb" \
+  $([[ "$skip_gate" == "1" ]] && echo "--skip-gate")
 
-if [[ ! -f "$baseline_file" ]]; then
-  cp "$report_file" "$baseline_file"
-  echo "perf: baseline created at $baseline_file"
-  exit 0
-fi
-
-extract_json_number() {
-  local file="$1"
-  local key="$2"
-  grep -E "\"${key}\"" "$file" | head -n1 | sed -E 's/.*: *([0-9.]+).*/\1/'
-}
-
-baseline_root_p95="$(extract_json_number "$baseline_file" "root_p95_ms")"
-current_root_p95="$(extract_json_number "$report_file" "root_p95_ms")"
-threshold="$(awk -v b="$baseline_root_p95" 'BEGIN {printf "%.6f", (b*1.15)}')"
-
-if awk -v c="$current_root_p95" -v t="$threshold" 'BEGIN {exit !(c > t)}'; then
-  echo "perf: regression detected root_p95_ms current=${current_root_p95} threshold=${threshold}"
-  exit 1
-fi
-
-echo "perf: ok report=$report_file csv=$csv_file root_p95_ms=${current_root_p95}"
+echo "perf: complete report=$report_file summary=$summary_csv runs=$runs_csv"

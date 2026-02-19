@@ -30,6 +30,9 @@ typedef NS_ENUM(NSInteger, ALNRouteKind) {
 @property(nonatomic, assign, readonly) Class controllerClass;
 @property(nonatomic, assign, readonly) SEL actionSelector;
 @property(nonatomic, copy, readonly) NSString *actionName;
+@property(nonatomic, assign, readonly) SEL guardSelector;
+@property(nonatomic, copy, readonly) NSString *guardActionName;
+@property(nonatomic, copy, readonly) NSArray *formats;
 @property(nonatomic, assign, readonly) NSUInteger registrationIndex;
 @property(nonatomic, assign, readonly) ALNRouteKind kind;
 @property(nonatomic, assign, readonly) NSUInteger staticSegmentCount;
@@ -40,8 +43,17 @@ typedef NS_ENUM(NSInteger, ALNRouteKind) {
                controllerClass:(Class)controllerClass
                     actionName:(NSString *)actionName
              registrationIndex:(NSUInteger)registrationIndex;
+- (instancetype)initWithMethod:(NSString *)method
+                   pathPattern:(NSString *)pathPattern
+                          name:(nullable NSString *)name
+                       formats:(nullable NSArray *)formats
+               controllerClass:(Class)controllerClass
+               guardActionName:(nullable NSString *)guardActionName
+                    actionName:(NSString *)actionName
+             registrationIndex:(NSUInteger)registrationIndex;
 
 - (nullable NSDictionary *)matchPath:(NSString *)path;
+- (BOOL)matchesFormat:(nullable NSString *)format;
 - (NSDictionary *)dictionaryRepresentation;
 
 @end

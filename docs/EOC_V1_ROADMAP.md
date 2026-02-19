@@ -51,6 +51,8 @@ Deliverables:
   - `<%= expr %>` (HTML-escaped)
   - `<%== expr %>` (raw)
   - `<%# comment %>`
+  - sigil locals (`$name`) for zero-boilerplate context access
+  - strict locals/stringify mode semantics for developer-safe defaults
 - Confirm naming/path conventions for:
   - `templates/**/*.html.eoc`
   - generated `build/gen/templates/**/*.eoc.m`

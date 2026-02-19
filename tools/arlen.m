@@ -12,13 +12,14 @@ static void PrintUsage(void) {
           "\n"
           "Commands:\n"
           "  new <AppName> [--full|--lite] [--force]\n"
-          "  generate <controller|model|migration|test> <Name>\n"
+          "  generate <controller|endpoint|model|migration|test> <Name> [options]\n"
           "  boomhauer [server args...]\n"
           "  propane [manager args...]\n"
           "  migrate [--env <name>] [--dsn <connection_string>] [--dry-run]\n"
           "  routes\n"
           "  test [--unit|--integration|--all]\n"
           "  perf\n"
+          "  check\n"
           "  build\n"
           "  config [--env <name>] [--json]\n");
 }
@@ -28,7 +29,15 @@ static void PrintNewUsage(void) {
 }
 
 static void PrintGenerateUsage(void) {
-  fprintf(stdout, "Usage: arlen generate <controller|model|migration|test> <Name>\n");
+  fprintf(stdout,
+          "Usage: arlen generate <controller|endpoint|model|migration|test> <Name> [options]\n"
+          "\n"
+          "Generator options (controller/endpoint):\n"
+          "  --route <path>\n"
+          "  --method <HTTP>\n"
+          "  --action <name>\n"
+          "  --template [<logical_template>]\n"
+          "  --api\n");
 }
 
 static NSString *ShellQuote(NSString *value) {
@@ -235,7 +244,7 @@ static BOOL ScaffoldFullApp(NSString *root, BOOL force, NSError **error) {
   ok = ok && WriteTextFile([root stringByAppendingPathComponent:@"config/environments/production.plist"],
                            @"{\n  logFormat = \"json\";\n}\n", force, error);
   ok = ok && WriteTextFile([root stringByAppendingPathComponent:@"templates/index.html.eoc"],
-                           @"<h1><%= [ctx objectForKey:@\"title\"] %></h1>\n", force, error);
+                           @"<h1><%= $title %></h1>\n", force, error);
   ok = ok && WriteTextFile([root stringByAppendingPathComponent:@"src/Controllers/HomeController.h"],
                            @"#import \"ALNController.h\"\n\n"
                             "@interface HomeController : ALNController\n"
@@ -247,11 +256,9 @@ static BOOL ScaffoldFullApp(NSString *root, BOOL force, NSError **error) {
                             "@implementation HomeController\n\n"
                             "- (id)index:(ALNContext *)ctx {\n"
                             "  (void)ctx;\n"
+                            "  [self stashValue:@\"Welcome to Arlen\" forKey:@\"title\"];\n"
                             "  NSError *error = nil;\n"
-                            "  BOOL rendered = [self renderTemplate:@\"index\"\n"
-                            "                               context:@{ @\"title\" : @\"Welcome to Arlen\" }\n"
-                            "                                 error:&error];\n"
-                            "  if (!rendered) {\n"
+                            "  if (![self renderTemplate:@\"index\" error:&error]) {\n"
                             "    [self setStatus:500];\n"
                             "    [self renderText:[NSString stringWithFormat:@\"render failed: %@\",\n"
                             "                                                error.localizedDescription ?: @\"unknown\"]];\n"
@@ -262,76 +269,18 @@ static BOOL ScaffoldFullApp(NSString *root, BOOL force, NSError **error) {
                            force, error);
   ok = ok && WriteTextFile([root stringByAppendingPathComponent:@"src/main.m"],
                            @"#import <Foundation/Foundation.h>\n"
-                            "#import <stdio.h>\n"
-                            "#import <stdlib.h>\n\n"
                             "#import \"ArlenServer.h\"\n"
                             "#import \"Controllers/HomeController.h\"\n\n"
-                            "static void PrintUsage(void) {\n"
-                            "  fprintf(stdout,\n"
-                            "          \"Usage: boomhauer [--port <port>] [--host <addr>] [--env <env>] [--once] [--print-routes]\\n\");\n"
+                            "static void RegisterRoutes(ALNApplication *app) {\n"
+                            "  [app registerRouteMethod:@\"GET\"\n"
+                            "                      path:@\"/\"\n"
+                            "                      name:@\"home\"\n"
+                            "           controllerClass:[HomeController class]\n"
+                            "                    action:@\"index\"];\n"
                             "}\n\n"
                             "int main(int argc, const char *argv[]) {\n"
                             "  @autoreleasepool {\n"
-                            "    int portOverride = 0;\n"
-                            "    NSString *host = nil;\n"
-                            "    NSString *environment = @\"development\";\n"
-                            "    BOOL once = NO;\n"
-                            "    BOOL printRoutes = NO;\n"
-                            "    for (int idx = 1; idx < argc; idx++) {\n"
-                            "      NSString *arg = [NSString stringWithUTF8String:argv[idx]];\n"
-                            "      if ([arg isEqualToString:@\"--port\"]) {\n"
-                            "        if ((idx + 1) >= argc) {\n"
-                            "          PrintUsage();\n"
-                            "          return 2;\n"
-                            "        }\n"
-                            "        portOverride = atoi(argv[++idx]);\n"
-                            "      } else if ([arg isEqualToString:@\"--host\"]) {\n"
-                            "        if ((idx + 1) >= argc) {\n"
-                            "          PrintUsage();\n"
-                            "          return 2;\n"
-                            "        }\n"
-                            "        host = [NSString stringWithUTF8String:argv[++idx]];\n"
-                            "      } else if ([arg isEqualToString:@\"--env\"]) {\n"
-                            "        if ((idx + 1) >= argc) {\n"
-                            "          PrintUsage();\n"
-                            "          return 2;\n"
-                            "        }\n"
-                            "        environment = [NSString stringWithUTF8String:argv[++idx]];\n"
-                            "      } else if ([arg isEqualToString:@\"--once\"]) {\n"
-                            "        once = YES;\n"
-                            "      } else if ([arg isEqualToString:@\"--print-routes\"]) {\n"
-                            "        printRoutes = YES;\n"
-                            "      } else if ([arg isEqualToString:@\"--help\"] || [arg isEqualToString:@\"-h\"]) {\n"
-                            "        PrintUsage();\n"
-                            "        return 0;\n"
-                            "      } else {\n"
-                            "        fprintf(stderr, \"Unknown argument: %s\\n\", argv[idx]);\n"
-                            "        return 2;\n"
-                            "      }\n"
-                            "    }\n\n"
-                            "    NSString *appRoot = [[NSFileManager defaultManager] currentDirectoryPath];\n"
-                            "    NSError *error = nil;\n"
-                            "    ALNApplication *app = [[ALNApplication alloc] initWithEnvironment:environment\n"
-                            "                                                           configRoot:appRoot\n"
-                            "                                                                error:&error];\n"
-                            "    if (app == nil) {\n"
-                            "      fprintf(stderr, \"failed loading config: %s\\n\", [[error localizedDescription] UTF8String]);\n"
-                            "      return 1;\n"
-                            "    }\n\n"
-                            "    [app registerRouteMethod:@\"GET\"\n"
-                            "                        path:@\"/\"\n"
-                            "                        name:@\"home\"\n"
-                            "             controllerClass:[HomeController class]\n"
-                            "                      action:@\"index\"];\n\n"
-                            "    ALNHTTPServer *server =\n"
-                            "        [[ALNHTTPServer alloc] initWithApplication:app\n"
-                            "                                            publicRoot:[appRoot stringByAppendingPathComponent:@\"public\"]];\n"
-                            "    server.serverName = @\"boomhauer\";\n"
-                            "    if (printRoutes) {\n"
-                            "      [server printRoutesToFile:stdout];\n"
-                            "      return 0;\n"
-                            "    }\n"
-                            "    return [server runWithHost:host portOverride:portOverride once:once];\n"
+                            "    return ALNRunAppMain(argc, argv, &RegisterRoutes);\n"
                             "  }\n"
                             "}\n",
                            force, error);
@@ -375,7 +324,6 @@ static BOOL ScaffoldLiteApp(NSString *root, BOOL force, NSError **error) {
                            force, error);
   ok = ok && WriteTextFile([root stringByAppendingPathComponent:@"app_lite.m"],
                            @"#import <Foundation/Foundation.h>\n"
-                            "#import <stdio.h>\n\n"
                             "#import \"ArlenServer.h\"\n\n"
                             "@interface LiteController : ALNController\n"
                             "@end\n\n"
@@ -386,72 +334,16 @@ static BOOL ScaffoldLiteApp(NSString *root, BOOL force, NSError **error) {
                             "  return nil;\n"
                             "}\n\n"
                             "@end\n\n"
-                            "static void PrintUsage(void) {\n"
-                            "  fprintf(stdout,\n"
-                            "          \"Usage: boomhauer [--port <port>] [--host <addr>] [--env <env>] [--once] [--print-routes]\\n\");\n"
+                            "static void RegisterRoutes(ALNApplication *app) {\n"
+                            "  [app registerRouteMethod:@\"GET\"\n"
+                            "                      path:@\"/\"\n"
+                            "                      name:@\"home\"\n"
+                            "           controllerClass:[LiteController class]\n"
+                            "                    action:@\"index\"];\n"
                             "}\n\n"
                             "int main(int argc, const char *argv[]) {\n"
                             "  @autoreleasepool {\n"
-                            "    int portOverride = 0;\n"
-                            "    NSString *host = nil;\n"
-                            "    NSString *environment = @\"development\";\n"
-                            "    BOOL once = NO;\n"
-                            "    BOOL printRoutes = NO;\n"
-                            "    for (int idx = 1; idx < argc; idx++) {\n"
-                            "      NSString *arg = [NSString stringWithUTF8String:argv[idx]];\n"
-                            "      if ([arg isEqualToString:@\"--port\"]) {\n"
-                            "        if ((idx + 1) >= argc) {\n"
-                            "          PrintUsage();\n"
-                            "          return 2;\n"
-                            "        }\n"
-                            "        portOverride = atoi(argv[++idx]);\n"
-                            "      } else if ([arg isEqualToString:@\"--host\"]) {\n"
-                            "        if ((idx + 1) >= argc) {\n"
-                            "          PrintUsage();\n"
-                            "          return 2;\n"
-                            "        }\n"
-                            "        host = [NSString stringWithUTF8String:argv[++idx]];\n"
-                            "      } else if ([arg isEqualToString:@\"--env\"]) {\n"
-                            "        if ((idx + 1) >= argc) {\n"
-                            "          PrintUsage();\n"
-                            "          return 2;\n"
-                            "        }\n"
-                            "        environment = [NSString stringWithUTF8String:argv[++idx]];\n"
-                            "      } else if ([arg isEqualToString:@\"--once\"]) {\n"
-                            "        once = YES;\n"
-                            "      } else if ([arg isEqualToString:@\"--print-routes\"]) {\n"
-                            "        printRoutes = YES;\n"
-                            "      } else if ([arg isEqualToString:@\"--help\"] || [arg isEqualToString:@\"-h\"]) {\n"
-                            "        PrintUsage();\n"
-                            "        return 0;\n"
-                            "      } else {\n"
-                            "        fprintf(stderr, \"Unknown argument: %s\\n\", argv[idx]);\n"
-                            "        return 2;\n"
-                            "      }\n"
-                            "    }\n"
-                            "    NSString *appRoot = [[NSFileManager defaultManager] currentDirectoryPath];\n"
-                            "    NSError *error = nil;\n"
-                            "    ALNApplication *app = [[ALNApplication alloc] initWithEnvironment:environment\n"
-                            "                                                           configRoot:appRoot\n"
-                            "                                                                error:&error];\n"
-                            "    if (app == nil) {\n"
-                            "      fprintf(stderr, \"failed loading config: %s\\n\", [[error localizedDescription] UTF8String]);\n"
-                            "      return 1;\n"
-                            "    }\n\n"
-                            "    [app registerRouteMethod:@\"GET\"\n"
-                            "                        path:@\"/\"\n"
-                            "                        name:@\"home\"\n"
-                            "             controllerClass:[LiteController class]\n"
-                            "                      action:@\"index\"];\n\n"
-                            "    ALNHTTPServer *server =\n"
-                            "        [[ALNHTTPServer alloc] initWithApplication:app\n"
-                            "                                            publicRoot:[appRoot stringByAppendingPathComponent:@\"public\"]];\n"
-                            "    server.serverName = @\"boomhauer\";\n"
-                            "    if (printRoutes) {\n"
-                            "      [server printRoutesToFile:stdout];\n"
-                            "      return 0;\n"
-                            "    }\n"
-                            "    return [server runWithHost:host portOverride:portOverride once:once];\n"
+                            "    return ALNRunAppMain(argc, argv, &RegisterRoutes);\n"
                             "  }\n"
                             "}\n",
                            force, error);
@@ -530,8 +422,158 @@ static NSString *CapitalizeFirst(NSString *name) {
   return [first stringByAppendingString:rest];
 }
 
+static NSString *LowercaseFirst(NSString *name) {
+  if ([name length] == 0) {
+    return @"";
+  }
+  NSString *first = [[name substringToIndex:1] lowercaseString];
+  NSString *rest = [name substringFromIndex:1];
+  return [first stringByAppendingString:rest];
+}
+
+static NSString *TrimControllerSuffix(NSString *name) {
+  if ([name hasSuffix:@"Controller"] && [name length] > [@"Controller" length]) {
+    return [name substringToIndex:[name length] - [@"Controller" length]];
+  }
+  return name;
+}
+
+static NSString *SanitizeRouteName(NSString *value) {
+  NSMutableString *out = [NSMutableString string];
+  for (NSUInteger idx = 0; idx < [value length]; idx++) {
+    unichar ch = [value characterAtIndex:idx];
+    BOOL alphaNum = ((ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') ||
+                     (ch >= '0' && ch <= '9'));
+    unichar emitted = alphaNum ? ch : (unichar)'_';
+    [out appendFormat:@"%C", emitted];
+  }
+  NSString *lower = [[out lowercaseString] copy];
+  while ([lower containsString:@"__"]) {
+    lower = [lower stringByReplacingOccurrencesOfString:@"__" withString:@"_"];
+  }
+  return lower;
+}
+
+static NSString *NormalizedTemplateLogicalName(NSString *templateOption,
+                                               NSString *controllerBase,
+                                               NSString *actionName) {
+  NSString *logical = [templateOption copy];
+  if ([logical length] == 0) {
+    logical = [NSString stringWithFormat:@"%@/%@",
+                                         [LowercaseFirst(controllerBase) lowercaseString],
+                                         actionName ?: @"index"];
+  }
+  while ([logical hasPrefix:@"/"]) {
+    logical = [logical substringFromIndex:1];
+  }
+  if ([logical hasSuffix:@".html.eoc"]) {
+    logical = [logical substringToIndex:[logical length] - [@".html.eoc" length]];
+  }
+  return logical;
+}
+
+static BOOL InsertRouteIntoRegisterRoutes(NSString *filePath, NSString *routeLine, NSError **error) {
+  NSString *content = [NSString stringWithContentsOfFile:filePath
+                                                encoding:NSUTF8StringEncoding
+                                                   error:error];
+  if (content == nil) {
+    return NO;
+  }
+  if ([content containsString:routeLine]) {
+    return YES;
+  }
+
+  NSRange signature =
+      [content rangeOfString:@"static void RegisterRoutes(ALNApplication *app)"];
+  if (signature.location != NSNotFound) {
+    NSRange openBraceSearch =
+        NSMakeRange(signature.location, [content length] - signature.location);
+    NSRange openBrace = [content rangeOfString:@"{" options:0 range:openBraceSearch];
+    if (openBrace.location != NSNotFound) {
+      NSInteger depth = 0;
+      for (NSUInteger idx = openBrace.location; idx < [content length]; idx++) {
+        unichar ch = [content characterAtIndex:idx];
+        if (ch == '{') {
+          depth += 1;
+        } else if (ch == '}') {
+          depth -= 1;
+          if (depth == 0) {
+            NSString *updated =
+                [content stringByReplacingCharactersInRange:NSMakeRange(idx, 0)
+                                                 withString:[NSString stringWithFormat:@"\n%@\n", routeLine]];
+            return [updated writeToFile:filePath
+                             atomically:YES
+                               encoding:NSUTF8StringEncoding
+                                  error:error];
+          }
+        }
+      }
+    }
+  }
+
+  NSRange legacyInsertPoint = [content rangeOfString:@"ALNHTTPServer *server"];
+  if (legacyInsertPoint.location == NSNotFound) {
+    legacyInsertPoint = [content rangeOfString:@"return ALNRunAppMain"];
+  }
+  if (legacyInsertPoint.location == NSNotFound) {
+    if (error != NULL) {
+      *error = [NSError errorWithDomain:@"Arlen.Error"
+                                   code:9
+                               userInfo:@{
+                                 NSLocalizedDescriptionKey :
+                                     [NSString stringWithFormat:@"Unable to locate route insertion point in %@",
+                                                                filePath]
+                               }];
+    }
+    return NO;
+  }
+
+  NSString *updated = [content stringByReplacingCharactersInRange:NSMakeRange(legacyInsertPoint.location, 0)
+                                                        withString:[NSString stringWithFormat:@"%@\n", routeLine]];
+  return [updated writeToFile:filePath
+                   atomically:YES
+                     encoding:NSUTF8StringEncoding
+                        error:error];
+}
+
+static BOOL WireGeneratedRoute(NSString *root,
+                               NSString *method,
+                               NSString *routePath,
+                               NSString *controllerBase,
+                               NSString *actionName,
+                               NSError **error) {
+  NSString *mainPath = [root stringByAppendingPathComponent:@"src/main.m"];
+  NSString *litePath = [root stringByAppendingPathComponent:@"app_lite.m"];
+  NSString *target = nil;
+  if ([[NSFileManager defaultManager] fileExistsAtPath:mainPath]) {
+    target = mainPath;
+  } else if ([[NSFileManager defaultManager] fileExistsAtPath:litePath]) {
+    target = litePath;
+  } else {
+    if (error != NULL) {
+      *error = [NSError errorWithDomain:@"Arlen.Error"
+                                   code:10
+                               userInfo:@{
+                                 NSLocalizedDescriptionKey :
+                                     @"Could not find src/main.m or app_lite.m for route wiring"
+                               }];
+    }
+    return NO;
+  }
+
+  NSString *routeName =
+      SanitizeRouteName([NSString stringWithFormat:@"%@_%@", [controllerBase lowercaseString], [actionName lowercaseString]]);
+  NSString *line = [NSString stringWithFormat:
+                                 @"  [app registerRouteMethod:@\"%@\" path:@\"%@\" name:@\"%@\" "
+                                  "controllerClass:[%@Controller class] action:@\"%@\"];",
+                                 [method uppercaseString], routePath, routeName, controllerBase,
+                                 actionName];
+  return InsertRouteIntoRegisterRoutes(target, line, error);
+}
+
 static int CommandGenerate(NSArray *args) {
-  if ([args count] == 1 && ([args[0] isEqualToString:@"--help"] || [args[0] isEqualToString:@"-h"])) {
+  if ([args count] == 1 &&
+      ([args[0] isEqualToString:@"--help"] || [args[0] isEqualToString:@"-h"])) {
     PrintGenerateUsage();
     return 0;
   }
@@ -540,39 +582,151 @@ static int CommandGenerate(NSArray *args) {
     PrintGenerateUsage();
     return 2;
   }
-  if ([args count] == 2 && ([args[1] isEqualToString:@"--help"] || [args[1] isEqualToString:@"-h"])) {
+  if ([args count] == 2 &&
+      ([args[1] isEqualToString:@"--help"] || [args[1] isEqualToString:@"-h"])) {
     PrintGenerateUsage();
     return 0;
   }
 
-  NSString *type = args[0];
+  NSString *type = [args[0] lowercaseString];
   NSString *name = CapitalizeFirst(args[1]);
+  NSString *controllerBase = TrimControllerSuffix(name);
+  NSString *method = @"GET";
+  NSString *routePath = nil;
+  NSString *actionName = @"index";
+  NSString *templateOption = nil;
+  BOOL templateRequested = NO;
+  BOOL apiMode = NO;
+
+  for (NSUInteger idx = 2; idx < [args count]; idx++) {
+    NSString *arg = args[idx];
+    if ([arg isEqualToString:@"--route"]) {
+      if (idx + 1 >= [args count]) {
+        fprintf(stderr, "arlen generate: --route requires a value\n");
+        return 2;
+      }
+      routePath = args[++idx];
+      if (![routePath hasPrefix:@"/"]) {
+        routePath = [@"/" stringByAppendingString:routePath];
+      }
+    } else if ([arg isEqualToString:@"--method"]) {
+      if (idx + 1 >= [args count]) {
+        fprintf(stderr, "arlen generate: --method requires a value\n");
+        return 2;
+      }
+      method = [args[++idx] uppercaseString];
+    } else if ([arg isEqualToString:@"--action"]) {
+      if (idx + 1 >= [args count]) {
+        fprintf(stderr, "arlen generate: --action requires a value\n");
+        return 2;
+      }
+      actionName = args[++idx];
+    } else if ([arg isEqualToString:@"--template"]) {
+      templateRequested = YES;
+      if ((idx + 1) < [args count] && ![args[idx + 1] hasPrefix:@"--"]) {
+        templateOption = args[++idx];
+      }
+    } else if ([arg isEqualToString:@"--api"]) {
+      apiMode = YES;
+    } else if ([arg isEqualToString:@"--help"] || [arg isEqualToString:@"-h"]) {
+      PrintGenerateUsage();
+      return 0;
+    } else {
+      fprintf(stderr, "arlen generate: unknown option %s\n", [arg UTF8String]);
+      return 2;
+    }
+  }
+
+  if ([type isEqualToString:@"endpoint"] && [routePath length] == 0) {
+    fprintf(stderr, "arlen generate endpoint: --route is required\n");
+    return 2;
+  }
+
   NSString *root = [[NSFileManager defaultManager] currentDirectoryPath];
   NSError *error = nil;
   BOOL ok = NO;
 
-  if ([type isEqualToString:@"controller"]) {
+  if ([type isEqualToString:@"controller"] || [type isEqualToString:@"endpoint"]) {
+    BOOL createTemplate = templateRequested || ([type isEqualToString:@"endpoint"] && !apiMode);
+    NSString *templateLogical = createTemplate
+                                    ? NormalizedTemplateLogicalName(templateOption, controllerBase, actionName)
+                                    : nil;
+
     NSString *headerPath =
         [root stringByAppendingPathComponent:
-                  [NSString stringWithFormat:@"src/Controllers/%@Controller.h", name]];
+                  [NSString stringWithFormat:@"src/Controllers/%@Controller.h", controllerBase]];
     NSString *implPath =
         [root stringByAppendingPathComponent:
-                  [NSString stringWithFormat:@"src/Controllers/%@Controller.m", name]];
+                  [NSString stringWithFormat:@"src/Controllers/%@Controller.m", controllerBase]];
     NSString *header = [NSString stringWithFormat:
                                      @"#import \"ALNController.h\"\n\n"
                                       "@interface %@Controller : ALNController\n@end\n",
-                                     name];
+                                     controllerBase];
+
+    NSString *actionBody = nil;
+    if (apiMode) {
+      actionBody = [NSString
+          stringWithFormat:
+              @"- (id)%@:(ALNContext *)ctx {\n"
+               "  return @{ @\"ok\" : @(YES), @\"route\" : ctx.request.path ?: @\"\" };\n"
+               "}\n",
+              actionName];
+    } else if (createTemplate) {
+      actionBody = [NSString
+          stringWithFormat:
+              @"- (id)%@:(ALNContext *)ctx {\n"
+               "  (void)ctx;\n"
+               "  [self stashValue:@\"%@ %@\" forKey:@\"title\"];\n"
+               "  NSError *error = nil;\n"
+               "  if (![self renderTemplate:@\"%@\" error:&error]) {\n"
+               "    [self setStatus:500];\n"
+               "    [self renderText:[NSString stringWithFormat:@\"render failed: %%@\", "
+               "error.localizedDescription ?: @\"unknown\"]];\n"
+               "  }\n"
+               "  return nil;\n"
+               "}\n",
+              actionName, controllerBase, actionName, templateLogical];
+    } else {
+      actionBody = [NSString
+          stringWithFormat:
+              @"- (id)%@:(ALNContext *)ctx {\n"
+               "  (void)ctx;\n"
+               "  [self renderText:@\"%@ %@\\n\"];\n"
+               "  return nil;\n"
+               "}\n",
+              actionName, controllerBase, actionName];
+    }
+
     NSString *impl = [NSString stringWithFormat:
-                                   @"#import \"%@Controller.h\"\n\n"
+                                   @"#import \"%@Controller.h\"\n"
+                                    "#import \"ALNContext.h\"\n\n"
                                     "@implementation %@Controller\n\n"
-                                    "- (id)index:(ALNContext *)ctx {\n"
-                                    "  (void)ctx;\n"
-                                    "  [self renderText:@\"%@ index\\n\"];\n"
-                                    "  return nil;\n"
-                                    "}\n\n@end\n",
-                                   name, name, name];
+                                    "%@\n"
+                                    "@end\n",
+                                   controllerBase, controllerBase, actionBody];
+
     ok = WriteTextFile(headerPath, header, NO, &error) &&
          WriteTextFile(implPath, impl, NO, &error);
+
+    if (ok && createTemplate) {
+      if ([templateLogical containsString:@".."]) {
+        ok = NO;
+        error = [NSError errorWithDomain:@"Arlen.Error"
+                                    code:12
+                                userInfo:@{
+                                  NSLocalizedDescriptionKey : @"template path must not contain '..'"
+                                }];
+      } else {
+        NSString *templatePath =
+            [root stringByAppendingPathComponent:[NSString stringWithFormat:@"templates/%@.html.eoc",
+                                                                            templateLogical]];
+        ok = WriteTextFile(templatePath, @"<h1><%= $title %></h1>\n", NO, &error);
+      }
+    }
+
+    if (ok && [routePath length] > 0) {
+      ok = WireGeneratedRoute(root, method, routePath, controllerBase, actionName, &error);
+    }
   } else if ([type isEqualToString:@"model"]) {
     NSString *headerPath =
         [root stringByAppendingPathComponent:
@@ -581,8 +735,10 @@ static int CommandGenerate(NSArray *args) {
         [root stringByAppendingPathComponent:
                   [NSString stringWithFormat:@"src/Models/%@Repository.m", name]];
     ok = WriteTextFile(headerPath,
-                       [NSString stringWithFormat:@"#import <Foundation/Foundation.h>\n\n@interface %@Repository : NSObject\n@end\n",
-                                                   name],
+                       [NSString stringWithFormat:
+                                     @"#import <Foundation/Foundation.h>\n\n"
+                                      "@interface %@Repository : NSObject\n@end\n",
+                                     name],
                        NO, &error) &&
          WriteTextFile(implPath,
                        [NSString stringWithFormat:@"#import \"%@Repository.h\"\n\n@implementation %@Repository\n@end\n",
@@ -734,6 +890,14 @@ static int CommandBuild(void) {
     return 1;
   }
   return RunShellCommand([NSString stringWithFormat:@"cd %@ && make all", ShellQuote(frameworkRoot)]);
+}
+
+static int CommandCheck(void) {
+  NSString *frameworkRoot = ResolveFrameworkRootForCommand(@"check");
+  if ([frameworkRoot length] == 0) {
+    return 1;
+  }
+  return RunShellCommand([NSString stringWithFormat:@"cd %@ && make check", ShellQuote(frameworkRoot)]);
 }
 
 static int CommandConfig(NSArray *args) {
@@ -924,6 +1088,9 @@ int main(int argc, const char *argv[]) {
     }
     if ([command isEqualToString:@"build"]) {
       return CommandBuild();
+    }
+    if ([command isEqualToString:@"check"]) {
+      return CommandCheck();
     }
     if ([command isEqualToString:@"config"]) {
       return CommandConfig(args);

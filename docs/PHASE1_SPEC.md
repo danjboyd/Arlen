@@ -1,7 +1,7 @@
 # Arlen Phase 1 Specification
 
 Status: Draft  
-Last updated: 2026-02-18
+Last updated: 2026-02-19
 
 ## 1. Purpose
 
@@ -40,9 +40,9 @@ This follows the same high-level philosophy used by frameworks like Mojolicious:
 
 Phase 1 expectations for this goal:
 
-1. A minimal app should only require basic route/controller/template code and a small startup entrypoint.
+1. A minimal app should only require route/controller/template intent and a concise startup entrypoint.
 2. HTTP server internals (socket loop, parse limits, signal handling, proxy plumbing) should live in framework code, not normal app code.
-3. CLI and generated app scaffolds should prefer defaults and avoid forcing verbose configuration.
+3. CLI and generated app scaffolds should prefer defaults, avoid verbose configuration, and minimize manual wiring for common endpoint flows.
 
 ## 3. Phase 1 Scope
 
@@ -142,8 +142,10 @@ Phase 1 expectations for this goal:
 
 - method + path route registration
 - path parameter extraction (`/users/:id`)
+- mixed static/dynamic path patterns such as `/user/admin/:id`
 - wildcard tail (`/assets/*path`) optional in Phase 1
 - named routes for URL generation
+- route parameters exposed to actions via `ctx.params` and controller param helpers
 
 ### 6.2 Route Priority
 
@@ -190,6 +192,12 @@ Minimum Phase 1 helpers:
 - `renderText:string`
 - `redirectTo:status:`
 - `setStatus:`
+
+Ergonomic follow-on contract (Phase 2D, non-breaking addition; now implemented):
+
+- add concise render defaults for common HTML responses (`render` / `render:locals:` style helper family)
+- keep explicit helpers above as stable escape hatches for advanced behavior
+- add controller-local/stash convenience helpers so common templates require minimal controller boilerplate
 
 Controller class JSON options:
 
@@ -396,6 +404,15 @@ Phase 1 target:
 - Production process manager name (Phase 2): `propane`.
 - All `propane` configuration settings and grouped config sections must be referred to as "propane accessories".
 
+### 12.4 Boilerplate Reduction Contract (Phase 2D, Implemented)
+
+To keep Arlen default-first and competitive on developer ergonomics, app scaffolding work meets:
+
+1. Generated full/lite entrypoints delegate argument parsing and server boot wiring to framework runner APIs (`ALNRunAppMain`), without duplicating logic in each app.
+2. Common endpoint additions do not require manual edits to runtime boot plumbing (`main.m`/`app_lite.m`) when generator route-wiring options are used.
+3. Route placeholder patterns (for example `/user/admin/:id`) remain first-class in concise route declaration APIs.
+4. Controller happy-path HTML rendering is available with minimal boilerplate while preserving explicit APIs for advanced/error-sensitive cases.
+
 ## 13. Data Layer Policy (Phase 1)
 
 No framework-mandated ORM in Phase 1.
@@ -472,3 +489,7 @@ Phase 1 is complete when the following are true:
 7. Performance gate strictness
    - Recommendation: fail when p95 regresses by >15% in controlled perf suite.
    - Rationale: meaningful guardrail that catches real regressions while avoiding noise.
+
+8. Boilerplate reduction scope and timing
+   - Recommendation: implement one-line entrypoint/run wiring, route-generation ergonomics, and concise render helper defaults in Phase 2D as additive APIs.
+   - Rationale: improves onboarding and day-to-day productivity without sacrificing explicit low-level control.

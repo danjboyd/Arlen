@@ -192,6 +192,13 @@
   XCTAssertEqualObjects(@"ok\n", body);
 }
 
+- (void)testReadinessAndLivenessEndpoints {
+  NSString *ready = [self simpleRequestPath:@"/readyz"];
+  NSString *live = [self simpleRequestPath:@"/livez"];
+  XCTAssertEqualObjects(@"ready\n", ready);
+  XCTAssertEqualObjects(@"live\n", live);
+}
+
 - (void)testPerformanceHeadersPresentByDefault {
   int curlCode = 0;
   int serverCode = 0;

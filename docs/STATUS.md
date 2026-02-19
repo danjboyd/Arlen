@@ -8,46 +8,52 @@ Last updated: 2026-02-19
 - Phase 2A: complete
 - Phase 2B: complete
 - Phase 2C: complete (2026-02-19)
-- Phase 2D: planned (next)
+- Phase 2D: complete (2026-02-19)
 - Phase 3: planned
 
 ## Completed Today (2026-02-19)
 
-- Established parity planning baseline:
-  - frozen Mojolicious baseline at `9.42`
-  - capability-level parity model (Cocoa-forward APIs)
-  - explicit feature classification buckets (`In Scope`, `Deferred`, `Out of Scope`)
-- Added `docs/FEATURE_PARITY_MATRIX.md` with:
-  - Mojolicious feature classification
-  - competitor-inspired feature classification (Rails, Phoenix, FastAPI)
-  - agreed `boomhauer` compile-failure UX contract
-  - agreed compiled deployment contract
-  - required refactor tracks
-- Updated roadmap docs (`Phase 2`, `Phase 3`, and combined index) to include parity and deployment tracks.
-- Integrated performance gap-closure planning into Phase 2/3 rollout docs:
-  - Phase 2C: stage timing coverage + `performanceLogging` runtime enforcement
-  - Phase 2D: mandatory CI perf gate, expanded perf guardrails, baseline governance
-  - Phase 3C: trend analysis and expanded workload profiles
-- Executed Phase 2C implementation:
-  - `boomhauer` watch mode now survives transpile/compile failures and serves rich dev diagnostics (HTML + JSON)
-  - production-safe structured error payloads with correlation/request IDs
-  - unified params and validation helpers with standardized `422` API response shape
-  - request parse + response-write timing instrumentation, wired to `performanceLogging`
-  - regression coverage for compile-failure recovery, validation contract, and timing-header toggles
+- Closed EOC v1 spec-conformance gaps:
+  - transpiler rewrite for sigil locals (`$name`) with strict syntax checks
+  - runtime local lookup helper and strict render modes (`strict locals`, `strict stringify`)
+  - strict failure diagnostics include template file/line/column metadata
+  - regression coverage for sigil locals, method-call expressions, and strict-mode failures
+- Delivered routing/content-negotiation parity baseline:
+  - nested route groups with inherited prefix/guard/formats
+  - format-aware route matching and request format stash (`Accept` + extension heuristics)
+  - route guard action contract and structured reject/failure handling
+  - API-only mode defaults (`serveStatic=NO`, `logFormat=json`) with env overrides
+- Reduced generated app/controller boilerplate:
+  - added framework runner entrypoint (`ALNRunAppMain`) for full/lite scaffolds
+  - added concise stash/render helpers in `ALNController`
+  - scaffolds now default to zero-boilerplate EOC locals usage (`<%= $title %>`)
+- Expanded `arlen` CLI ergonomics:
+  - added `generate endpoint`
+  - added generator options: `--route`, `--method`, `--action`, `--template`, `--api`
+  - added automatic route wiring into `src/main.m` / `app_lite.m`
+  - added `arlen check` (`make check` wrapper)
+- Established compiled deployment baseline artifacts and workflows:
+  - immutable release packaging script (`tools/deploy/build_release.sh`)
+  - activation script (`tools/deploy/activate_release.sh`)
+  - rollback script (`tools/deploy/rollback_release.sh`)
+  - built-in `/healthz`, `/readyz`, `/livez` endpoints
+  - deployment smoke integration test coverage
+- Hardened perf regression gate:
+  - `make check` now runs unit + integration + perf gate
+  - repeated-run, median-based perf aggregation
+  - expanded guardrails: endpoint p95, throughput floor, memory growth
+  - baseline metadata + explicit update policy (`ARLEN_PERF_UPDATE_BASELINE=1`)
 
 ## Verification State
 
 - `make test-unit`: passing (2026-02-19)
 - `make test-integration`: passing (2026-02-19)
-- PostgreSQL-backed tests are gated by `ARLEN_PG_TEST_DSN` in this environment.
+- `make check`: passing (2026-02-19)
+  - perf gate passed for `healthz`, `api_status`, and `root`
+- PostgreSQL-backed tests remain gated by `ARLEN_PG_TEST_DSN`.
 
-## First Tasks For Next Session
+## Next Session Focus
 
-1. Start Phase 2D implementation:
-   - complete remaining in-scope parity capabilities from `docs/FEATURE_PARITY_MATRIX.md`
-   - finalize explicit in-scope/deferred/out-of-scope rationale coverage
-2. Deliver compiled deployment baseline artifacts and runbooks:
-   - immutable release artifact layout
-   - explicit migrate/health/rollback workflow
-3. Add `make check` CI path with mandatory perf gate execution and baseline governance workflow.
-4. Expand perf gates to include endpoint latency, throughput floor, and memory growth guardrails.
+1. Start Phase 3A (observability + extension surface): metrics endpoint and plugin/lifecycle contracts.
+2. Expand API testing ergonomics toward parity matrix Phase 3A goals.
+3. Begin deployment runbook automation hardening and release-trend reporting groundwork.

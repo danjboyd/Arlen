@@ -15,6 +15,9 @@ extern NSString *const ALNContextSessionDirtyStashKey;
 extern NSString *const ALNContextSessionHadCookieStashKey;
 extern NSString *const ALNContextCSRFTokenStashKey;
 extern NSString *const ALNContextValidationErrorsStashKey;
+extern NSString *const ALNContextEOCStrictLocalsStashKey;
+extern NSString *const ALNContextEOCStrictStringifyStashKey;
+extern NSString *const ALNContextRequestFormatStashKey;
 
 @interface ALNContext : NSObject
 
@@ -46,6 +49,8 @@ extern NSString *const ALNContextValidationErrorsStashKey;
 - (nullable NSString *)stringParamForName:(NSString *)name;
 - (BOOL)requireStringParam:(NSString *)name value:(NSString *_Nullable *_Nullable)value;
 - (BOOL)requireIntegerParam:(NSString *)name value:(NSInteger *_Nullable)value;
+- (NSString *)requestFormat;
+- (BOOL)wantsJSON;
 - (void)addValidationErrorForField:(NSString *)field
                               code:(NSString *)code
                            message:(NSString *)message;

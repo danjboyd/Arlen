@@ -316,4 +316,55 @@
   XCTAssertEqual((NSInteger)55, [rateLimit[@"requests"] integerValue]);
 }
 
+- (void)testEOCStrictModeEnvironmentOverrides {
+  NSString *root = [self prepareConfigTree];
+  XCTAssertNotNil(root);
+
+  setenv("ARLEN_EOC_STRICT_LOCALS", "1", 1);
+  setenv("ARLEN_EOC_STRICT_STRINGIFY", "true", 1);
+
+  NSError *error = nil;
+  NSDictionary *config = [ALNConfig loadConfigAtRoot:root
+                                         environment:@"development"
+                                               error:&error];
+
+  unsetenv("ARLEN_EOC_STRICT_LOCALS");
+  unsetenv("ARLEN_EOC_STRICT_STRINGIFY");
+
+  XCTAssertNil(error);
+  NSDictionary *eoc = config[@"eoc"];
+  XCTAssertEqualObjects(@(YES), eoc[@"strictLocals"]);
+  XCTAssertEqualObjects(@(YES), eoc[@"strictStringify"]);
+}
+
+- (void)testAPIOnlyDefaultsDisableStaticAndUseJSONLogs {
+  NSString *root = [self createTempAppRoot];
+  XCTAssertNotNil(root);
+  if (root == nil) {
+    return;
+  }
+
+  BOOL wrote = YES;
+  wrote = wrote && [self writeFile:[root stringByAppendingPathComponent:@"config/app.plist"]
+                           content:@"{\n"
+                                    "  host = \"127.0.0.1\";\n"
+                                    "  port = 3000;\n"
+                                    "}\n"];
+  wrote = wrote && [self writeFile:[root stringByAppendingPathComponent:@"config/environments/development.plist"]
+                           content:@"{\n}\n"];
+  XCTAssertTrue(wrote);
+
+  setenv("ARLEN_API_ONLY", "1", 1);
+  NSError *error = nil;
+  NSDictionary *config = [ALNConfig loadConfigAtRoot:root
+                                         environment:@"development"
+                                               error:&error];
+  unsetenv("ARLEN_API_ONLY");
+
+  XCTAssertNil(error);
+  XCTAssertEqualObjects(@(YES), config[@"apiOnly"]);
+  XCTAssertEqualObjects(@(NO), config[@"serveStatic"]);
+  XCTAssertEqualObjects(@"json", config[@"logFormat"]);
+}
+
 @end

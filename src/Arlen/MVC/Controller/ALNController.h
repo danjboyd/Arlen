@@ -20,6 +20,18 @@ NS_ASSUME_NONNULL_BEGIN
                context:(nullable NSDictionary *)context
                 layout:(nullable NSString *)layoutName
                  error:(NSError *_Nullable *_Nullable)error;
+- (BOOL)renderTemplate:(NSString *)templateName
+                 error:(NSError *_Nullable *_Nullable)error;
+- (BOOL)renderTemplate:(NSString *)templateName
+                layout:(nullable NSString *)layoutName
+                 error:(NSError *_Nullable *_Nullable)error;
+- (void)stashValue:(nullable id)value forKey:(NSString *)key;
+- (void)stashValues:(NSDictionary *)values;
+- (nullable id)stashValueForKey:(NSString *)key;
+- (BOOL)renderNegotiatedTemplate:(NSString *)templateName
+                          context:(nullable NSDictionary *)context
+                       jsonObject:(nullable id)jsonObject
+                            error:(NSError *_Nullable *_Nullable)error;
 - (BOOL)renderJSON:(id)object error:(NSError *_Nullable *_Nullable)error;
 - (void)renderText:(NSString *)text;
 - (void)redirectTo:(NSString *)location status:(NSInteger)statusCode;

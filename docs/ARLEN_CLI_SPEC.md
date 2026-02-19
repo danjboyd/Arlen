@@ -1,35 +1,28 @@
-# Arlen CLI Specification (Phase 1)
+# Arlen CLI Specification
 
-Status: Draft  
+Status: Implemented through Phase 2D  
 Last updated: 2026-02-19
 
 ## 1. Purpose
 
 `arlen` is the canonical command-line interface for Arlen.
 
-It standardizes developer workflows for:
+It standardizes workflows for:
 
-- creating applications
+- creating apps
 - generating framework artifacts
-- running the development server (`boomhauer`)
-- running tests and performance checks
+- running development and production servers
+- running tests/perf quality gates
 - inspecting routes/config
+- applying DB migrations
 
 ## 2. Design Goals
 
-1. Make full app mode the default path.
-2. Keep command behavior deterministic and scriptable.
-3. Reuse framework runtime/build tools instead of duplicating logic in shell scripts.
-4. Provide a lightweight onboarding path for new users.
-5. Default-first developer experience: generated apps should run on sane defaults with minimal code.
-6. Foundation/libs-base-first implementation: avoid re-implementing functionality available in GNUstep libs-base unless the existing behavior is too heavy or misaligned with project goals.
-
-## 2.1 Developer Experience Guardrails
-
-- `arlen new` should generate an app scaffold that can run with minimal edits.
-- `arlen boomhauer` should prefer convention defaults (`development`, configured host/port) and require no extra options for common workflows.
-- Generated skeletons should keep HTTP/runtime internals in framework code, not app entrypoints.
-- Advanced options should be opt-in and additive, not required for baseline usage.
+1. Full app mode is the default path.
+2. Command behavior is deterministic and scriptable.
+3. Generated apps run with minimal edits.
+4. Common endpoint workflows avoid manual boot plumbing edits.
+5. Full and lite modes share runtime behavior and tool entry points.
 
 ## 3. Command Structure
 
@@ -37,147 +30,122 @@ It standardizes developer workflows for:
 arlen <command> [subcommand] [options]
 ```
 
-Core command groups:
+Implemented command groups:
 
 - `new`
 - `generate`
 - `boomhauer`
+- `propane`
+- `migrate`
 - `routes`
 - `test`
 - `perf`
+- `check`
 - `build`
 - `config`
 
-## 4. Phase 1 Commands
+## 4. Command Contracts
 
-### 4.1 `arlen new`
+### 4.1 `arlen new <AppName> [--full|--lite] [--force]`
 
-Create a new application.
+- default scaffold mode: full
+- full and lite entrypoints use `ALNRunAppMain(...)`
+- generated full scaffold defaults to EOC sigil-local rendering (`<%= $title %>`)
 
-Default behavior:
+### 4.2 `arlen generate <type> <Name> [options]`
 
-- `arlen new MyApp` creates a full app skeleton.
+Types:
 
-Options:
+- `controller`
+- `endpoint`
+- `model`
+- `migration`
+- `test`
 
-- `--full` explicitly request full app skeleton.
-- `--lite` create a single-file lite app scaffold.
-- `--force` overwrite existing target directory.
-- `--help` / `-h` show command usage.
-- `--template <name>` optional starter variation.
+Controller/endpoint options:
 
-### 4.2 `arlen generate`
-
-Scaffold framework components inside an app.
-
-Phase 1 generators:
-
-- `controller <Name>`
-- `model <Name>` (repository-oriented skeleton, not ORM-dependent)
-- `migration <Name>` (placeholder format; db-specific execution may be Phase 2)
-- `test <Name>`
-- `--help` / `-h` show command usage.
-
-### 4.3 `arlen boomhauer`
-
-Run the development server.
+- `--route <path>`
+- `--method <HTTP>`
+- `--action <name>`
+- `--template [<logical_template>]`
+- `--api`
 
 Behavior:
 
-- delegates to framework `bin/boomhauer` using resolved app/framework roots
-- defaults to watch mode
-- forwards boomhauer server args (`--watch`, `--no-watch`, `--prepare-only`, `--port`, `--host`, `--env`, `--once`, `--print-routes`)
-- build/transpile/compile reload failures are rendered via boomhauer diagnostics rather than crashing the supervisor
+- route placeholders are supported (for example `/user/admin/:id`)
+- if `--route` is provided, route registration is auto-wired into `src/main.m` or `app_lite.m`
+- endpoint generator can scaffold route + controller action + optional template in one command
 
-### 4.4 `arlen routes`
+### 4.3 `arlen boomhauer [server args...]`
 
-Print resolved route table in registration order and priority resolution details.
+- runs framework `bin/boomhauer` with app/framework roots resolved
+- defaults to watch-mode behavior from `boomhauer`
+- forwards server args (for example `--port`, `--host`, `--env`, `--watch`, `--no-watch`, `--once`, `--print-routes`)
 
-Output fields:
+### 4.4 `arlen propane [manager args...]`
 
-- method
-- path pattern
-- target controller/action
-- route name (if any)
+- runs framework `bin/propane`
+- all production manager settings are referred to as "propane accessories"
 
-### 4.5 `arlen test`
+### 4.5 `arlen migrate [--env <name>] [--dsn <connection_string>] [--dry-run]`
 
-Run test suites using GNUstep XCTest tooling.
+- applies SQL migrations from `db/migrations`
+- resolves DSN from `--dsn`, `ARLEN_DATABASE_URL`, or config `database.connectionString`
 
-Default:
+### 4.6 `arlen routes`
 
-- unit + integration tests
+- builds and prints resolved route table (`--print-routes` path)
 
-Options:
+### 4.7 `arlen test [--unit|--integration|--all]`
 
-- `--unit`
-- `--integration`
-- `--all`
+- default: equivalent to `--all`
 
-### 4.6 `arlen perf`
+### 4.8 `arlen perf`
 
-Run performance suite and emit benchmark artifacts.
+- runs perf suite and gate (`make perf`)
+- emits reports in `build/perf/`
 
-Outputs:
+### 4.9 `arlen check`
 
-- console summary
-- JSON report under `build/perf/`
-- optional CSV
+- runs unified quality gate (`make check`)
+- includes unit + integration + perf gate
 
-### 4.7 `arlen build`
+### 4.10 `arlen build`
 
-Compile app/runtime artifacts for the active environment.
+- builds framework targets (`make all`)
 
-### 4.8 `arlen config`
+### 4.11 `arlen config [--env <name>] [--json]`
 
-Inspect merged runtime configuration.
-
-Options:
-
-- `--env <environment>`
-- `--json`
+- prints merged runtime config for selected environment
 
 ## 5. Project Awareness
 
 `arlen` operates in two modes:
 
-1. Outside app directory:
-   - supports `arlen new`
-2. Inside app directory:
-   - supports build/run/generate/test/perf/routes/config
+1. Outside app root: `new`
+2. Inside app root: run/generate/build/test/perf/check/routes/config/migrate
 
-App root detection (Phase 1):
+Framework root resolution order:
 
-- presence of expected app manifest markers (to be defined in implementation)
-- for app-run commands, resolve framework root by searching parent directories
-- fallback to inferring framework root from the `arlen` executable location
-- support explicit override via `ARLEN_FRAMEWORK_ROOT`
+1. `ARLEN_FRAMEWORK_ROOT`
+2. parent-directory discovery
+3. inference from `arlen` executable location
 
-## 6. Full vs Lite Handling
+## 6. Full vs Lite Contract
 
-- Full mode is default for `arlen new`.
-- Lite mode is opt-in (`--lite`).
-- Both modes must run on the same core runtime and rendering stack.
-- `arlen boomhauer`, `arlen test`, and `arlen perf` must work for both.
+- full mode remains default
+- lite mode is opt-in (`--lite`)
+- both modes share the same runtime/rendering stack
+- both modes use the same runner entrypoint contract
 
-## 7. Error Handling and Exit Codes
+## 7. Exit Codes
 
-- `0` success
-- `1` runtime/build/test failure
-- `2` invalid CLI usage/arguments
+- `0`: success
+- `1`: runtime/build/test/perf failure
+- `2`: usage/argument error
 
-All command failures should return concise actionable messages.
+## 8. Near-Term Additions (Phase 3)
 
-## 8. Non-Goals (Phase 1)
-
-- Plugin marketplace management
-- Remote deployment orchestration
-- Production process manager command (`arlen propane`) implementation
-
-## 9. Phase 2 Preview
-
-Planned additions:
-
-- `arlen propane` for production manager controls
-- deployment helper commands
-- richer generator templates and extension hooks
+- deployment-oriented CLI helpers layered on existing `tools/deploy/*` scripts
+- richer generator extension hooks
+- plugin/lifecycle scaffolding commands

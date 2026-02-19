@@ -1,6 +1,6 @@
 # Arlen Phase 2 + Phase 3 Roadmap Index
 
-Status: Active (Phase 2A, Phase 2B, and Phase 2C complete; Phase 2D next)  
+Status: Active (Phase 2A-2D complete; Phase 3 next)  
 Last updated: 2026-02-19
 
 This index points to the current roadmap documents:
@@ -15,9 +15,11 @@ Phase 2 is focused on adoption-critical capabilities:
 - `propane` and production runtime hardening (Phase 2A complete)
 - data/security core (Phase 2B complete)
 - developer error and validation ergonomics (Phase 2C complete)
-- parity baseline completion for remaining in-scope core capabilities (Phase 2D)
-- compiled deployment contract baseline (release artifacts, migrate, health, rollback)
-- performance gap closure (stage coverage, runtime toggles, mandatory CI perf gate)
+- EOC spec-conformance parity tranche (Phase 2D complete: sigil locals + strict locals/stringify)
+- generated app/controller boilerplate-reduction tranche (Phase 2D complete: runner entrypoint + route-aware generation + concise render defaults)
+- in-scope parity baseline completion for routing/negotiation/API-only flows (Phase 2D complete)
+- compiled deployment contract baseline (Phase 2D complete: release artifacts, migrate, health, rollback)
+- performance gap closure (Phase 2C/2D complete: stage coverage, runtime toggles, mandatory `make check` perf gate)
 
 Phase 3 is focused on platform maturity:
 - observability and plugin/lifecycle extension system

@@ -2,6 +2,7 @@
 #define ARLEN_H
 
 #import "Core/ALNApplication.h"
+#import "Core/ALNAppRunner.h"
 #import "Core/ALNConfig.h"
 #import "Data/ALNMigrationRunner.h"
 #import "Data/ALNPg.h"

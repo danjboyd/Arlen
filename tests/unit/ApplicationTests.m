@@ -92,6 +92,25 @@
   return nil;
 }
 
+- (BOOL)requireAdmin:(ALNContext *)ctx {
+  NSString *role = [ctx stringParamForName:@"role"];
+  return [role isEqualToString:@"admin"];
+}
+
+- (id)guarded:(ALNContext *)ctx {
+  return @{
+    @"ok" : @(YES),
+    @"route" : ctx.routeName ?: @"",
+  };
+}
+
+- (id)report:(ALNContext *)ctx {
+  return @{
+    @"route" : ctx.routeName ?: @"",
+    @"format" : [ctx requestFormat] ?: @"",
+  };
+}
+
 @end
 
 @interface ApplicationTests : XCTestCase
@@ -138,6 +157,29 @@
                       name:@"explode"
            controllerClass:[AppJSONController class]
                     action:@"explode"];
+  [app beginRouteGroupWithPrefix:@"/admin"
+                     guardAction:@"requireAdmin"
+                         formats:@[ @"json" ]];
+  [app registerRouteMethod:@"GET"
+                      path:@"/audit"
+                      name:@"admin_audit"
+           controllerClass:[AppJSONController class]
+                    action:@"guarded"];
+  [app endRouteGroup];
+  [app registerRouteMethod:@"GET"
+                      path:@"/report"
+                      name:@"report_html"
+                   formats:@[ @"html" ]
+           controllerClass:[AppJSONController class]
+               guardAction:nil
+                    action:@"report"];
+  [app registerRouteMethod:@"GET"
+                      path:@"/report"
+                      name:@"report_json"
+                   formats:@[ @"json" ]
+           controllerClass:[AppJSONController class]
+               guardAction:nil
+                    action:@"report"];
 
   if (useHalting) {
     [app addMiddleware:[[AppHaltingMiddleware alloc] init]];
@@ -206,6 +248,78 @@
   ALNApplication *app = [self buildAppWithHaltingMiddleware:NO];
   ALNResponse *response = [app dispatchRequest:[self requestForPath:@"/missing"]];
   XCTAssertEqual((NSInteger)404, response.statusCode);
+}
+
+- (void)testBuiltInReadinessAndLivenessEndpoints {
+  ALNApplication *app = [self buildAppWithHaltingMiddleware:NO];
+
+  ALNResponse *ready = [app dispatchRequest:[self requestForPath:@"/readyz"]];
+  XCTAssertEqual((NSInteger)200, ready.statusCode);
+  NSString *readyBody = [[NSString alloc] initWithData:ready.bodyData
+                                              encoding:NSUTF8StringEncoding];
+  XCTAssertEqualObjects(@"ready\n", readyBody);
+
+  ALNResponse *live = [app dispatchRequest:[self requestForPath:@"/livez"]];
+  XCTAssertEqual((NSInteger)200, live.statusCode);
+  NSString *liveBody = [[NSString alloc] initWithData:live.bodyData
+                                             encoding:NSUTF8StringEncoding];
+  XCTAssertEqualObjects(@"live\n", liveBody);
+}
+
+- (void)testRouteGuardRejectsWhenConditionFails {
+  ALNApplication *app = [self buildAppWithHaltingMiddleware:NO];
+  ALNResponse *response = [app dispatchRequest:[self requestForPath:@"/admin/audit.json"
+                                                         queryString:@""
+                                                             headers:@{}]];
+  XCTAssertEqual((NSInteger)403, response.statusCode);
+}
+
+- (void)testRouteGuardAllowsWhenConditionPasses {
+  ALNApplication *app = [self buildAppWithHaltingMiddleware:NO];
+  ALNResponse *response = [app dispatchRequest:[self requestForPath:@"/admin/audit.json"
+                                                         queryString:@"role=admin"
+                                                             headers:@{}]];
+  XCTAssertEqual((NSInteger)200, response.statusCode);
+  NSError *error = nil;
+  NSDictionary *json = [NSJSONSerialization JSONObjectWithData:response.bodyData
+                                                       options:0
+                                                         error:&error];
+  XCTAssertNil(error);
+  XCTAssertEqualObjects(@"admin_audit", json[@"route"]);
+}
+
+- (void)testFormatConditionSelectsJSONRouteWhenRequested {
+  ALNApplication *app = [self buildAppWithHaltingMiddleware:NO];
+  ALNResponse *response = [app dispatchRequest:[self requestForPath:@"/report"
+                                                         queryString:@""
+                                                             headers:@{ @"accept" : @"application/json" }]];
+  XCTAssertEqual((NSInteger)200, response.statusCode);
+  NSError *error = nil;
+  NSDictionary *json = [NSJSONSerialization JSONObjectWithData:response.bodyData
+                                                       options:0
+                                                         error:&error];
+  XCTAssertNil(error);
+  XCTAssertEqualObjects(@"report_json", json[@"route"]);
+  XCTAssertEqualObjects(@"json", json[@"format"]);
+}
+
+- (void)testAPIOnlyModeReturnsJSONNotFoundByDefault {
+  ALNApplication *app = [[ALNApplication alloc] initWithConfig:@{
+    @"environment" : @"test",
+    @"apiOnly" : @(YES),
+    @"host" : @"127.0.0.1",
+    @"port" : @(3000),
+  }];
+  ALNResponse *response = [app dispatchRequest:[self requestForPath:@"/missing"]];
+  XCTAssertEqual((NSInteger)404, response.statusCode);
+  XCTAssertEqualObjects(@"application/json; charset=utf-8",
+                        [response headerForName:@"Content-Type"]);
+  NSError *error = nil;
+  NSDictionary *json = [NSJSONSerialization JSONObjectWithData:response.bodyData
+                                                       options:0
+                                                         error:&error];
+  XCTAssertNil(error);
+  XCTAssertEqualObjects(@"not_found", json[@"error"][@"code"]);
 }
 
 - (void)testValidationErrorsReturnStandardized422Shape {

@@ -1,93 +1,151 @@
-# Deployment Guide (Current Model)
+# Deployment Guide
 
 Arlen is designed for deployment behind a reverse proxy.
 
 ## 1. Runtime Boundary
 
 - Arlen handles HTTP application runtime.
-- TLS/HTTPS termination is out of scope for framework runtime.
+- TLS termination is out of scope for framework runtime.
 - Use nginx/apache/Caddy in front of Arlen for public ingress.
 
 ## 2. Server Roles
 
 - `boomhauer`: development server
-- `propane`: production manager (Phase 2A baseline)
+- `propane`: production manager
 
 All production manager settings are referred to as "propane accessories".
 
-## 3. Recommended Production Topology
+## 3. Production Baseline Configuration
 
-1. Run `propane` on loopback/private network.
-2. Terminate TLS at reverse proxy.
-3. Forward proxy headers.
-4. Enable `trustedProxy` in Arlen only for trusted upstreams.
+Recommended app/runtime defaults for production:
 
-## 4. Propane Quick Start
+- `logFormat = "json"`
+- `serveStatic = NO` (behind reverse proxy/CDN)
+- explicit `requestLimits`
+- explicit propane accessories (`workerCount`, shutdown/reload timings)
 
-From app root:
+API-only mode (`apiOnly = YES`, or `ARLEN_API_ONLY=1`) defaults to:
+
+- `serveStatic = NO`
+- `logFormat = "json"`
+
+## 4. Built-In Health Contract
+
+Arlen provides built-in fallback health endpoints:
+
+- `GET /healthz` -> `200 ok\n`
+- `GET /readyz` -> `200 ready\n`
+- `GET /livez` -> `200 live\n`
+
+Use these for LB probes and deployment readiness checks.
+
+## 5. Immutable Release Artifact Workflow
+
+Deployment helper scripts are provided under `tools/deploy/`.
+
+### 5.1 Build a release artifact
 
 ```bash
-/path/to/Arlen/bin/propane --env production
+tools/deploy/build_release.sh \
+  --app-root /path/to/app \
+  --framework-root /path/to/Arlen \
+  --releases-dir /path/to/app/releases
 ```
 
-Signals:
-- `kill -HUP <pid>`: rolling reload
-- `kill -TERM <pid>`: graceful shutdown
+Result layout:
 
-## 5. Example Config with Propane Accessories
-
-```plist
-{
-  host = "127.0.0.1";
-  port = 3000;
-  logFormat = "json";
-  serveStatic = NO;
-  trustedProxy = YES;
-  listenBacklog = 128;
-  connectionTimeoutSeconds = 30;
-
-  requestLimits = {
-    maxRequestLineBytes = 4096;
-    maxHeaderBytes = 32768;
-    maxBodyBytes = 1048576;
-  };
-
-  propaneAccessories = {
-    workerCount = 4;
-    gracefulShutdownSeconds = 10;
-    respawnDelayMs = 250;
-    reloadOverlapSeconds = 1;
-  };
-}
+```text
+releases/<release-id>/
+  app/
+  framework/
+  metadata/
 ```
 
-## 6. Operational Recommendations
+Release metadata includes:
 
-- Keep `serveStatic = NO` in production behind reverse proxy/CDN.
-- Enforce request size limits (`requestLimits`) in app config.
-- Use `logFormat = "json"` for production ingest.
-- Pin explicit propane accessories instead of relying on implicit defaults.
+- `metadata/release.env`
+- `metadata/README.txt` with migrate/run commands
 
-## 7. Roadmap Target Contract (Planned)
+### 5.2 Activate a release
 
-The following deployment contract is accepted and tracked in roadmap documents. Some items are not fully implemented yet.
+```bash
+tools/deploy/activate_release.sh \
+  --releases-dir /path/to/app/releases \
+  --release-id <release-id>
+```
 
-1. Packaging baseline: container-first path with first-class VM/systemd documentation.
-2. Artifact model: immutable release artifacts for deterministic deploy and rollback.
-3. Configuration model: plist + environment override runtime configuration, with no compile-time secrets.
-4. Migration policy: explicit `arlen migrate` deployment step by default.
-5. Availability baseline: zero-downtime rolling reload in `propane`.
-6. Health model: readiness and liveness endpoints as first-class production contract.
-7. Logging model: structured JSON logs to stdout/stderr in production.
-8. Rollback model: first-class previous-release switch and restart workflow.
+This switches `releases/current` symlink.
 
-## 8. Current vs Target Snapshot
+### 5.3 Run migration step (explicit)
 
-| Capability | Current state | Target phase |
+From activated release payload:
+
+```bash
+cd /path/to/app/releases/current/app
+/path/to/app/releases/current/framework/build/arlen migrate --env production
+```
+
+### 5.4 Start runtime from activated release
+
+```bash
+ARLEN_APP_ROOT=/path/to/app/releases/current/app \
+ARLEN_FRAMEWORK_ROOT=/path/to/app/releases/current/framework \
+/path/to/app/releases/current/framework/bin/propane --env production
+```
+
+## 6. Container-First Runbook (Baseline)
+
+Minimum container deployment path:
+
+1. Build release artifact during image build or CI packaging.
+2. Set `ARLEN_APP_ROOT` and `ARLEN_FRAMEWORK_ROOT` to active release paths.
+3. Run migration command before switching traffic.
+4. Start `propane --env production` as container entrypoint.
+5. Probe `/readyz` and `/livez` for rollout/health checks.
+
+## 7. VM/systemd Runbook (Baseline)
+
+Use release symlink plus explicit environment wiring in service unit.
+
+Example service command:
+
+```text
+ExecStart=/path/to/app/releases/current/framework/bin/propane --env production
+Environment=ARLEN_APP_ROOT=/path/to/app/releases/current/app
+Environment=ARLEN_FRAMEWORK_ROOT=/path/to/app/releases/current/framework
+```
+
+Recommended systemd behavior:
+
+- `Restart=always`
+- `TimeoutStopSec` aligned with propane graceful shutdown accessories
+- pre-start migrate step via separate unit or deployment orchestration
+
+## 8. Rollback Workflow
+
+Rollback to specific release:
+
+```bash
+tools/deploy/rollback_release.sh \
+  --releases-dir /path/to/app/releases \
+  --release-id <previous-id>
+```
+
+Rollback to most recent non-current release:
+
+```bash
+tools/deploy/rollback_release.sh --releases-dir /path/to/app/releases
+```
+
+After rollback symlink switch, restart/reload `propane` from `releases/current`.
+
+## 9. Current Capability Snapshot
+
+| Capability | Current state | Verification |
 | --- | --- | --- |
-| Rolling reload in `propane` | Available | Phase 2A (complete) |
-| Immutable release artifact workflow | Planned | Phase 2D |
-| Explicit migration step in deploy runbook | Partial (`arlen migrate` exists) | Phase 2D |
-| Readiness/liveness endpoint contract | Planned | Phase 2D |
-| Rollback runbook/automation contract | Planned | Phase 2D-3C |
-| Container + systemd reference deployment guides | Partial | Phase 2D-3C |
+| Rolling reload in `propane` | Available | Integration-tested |
+| Immutable release artifact workflow | Available | Deployment integration test |
+| Explicit migration step in runbook | Available | Scripted release metadata + docs |
+| Readiness/liveness endpoint contract | Available | Unit + integration tests |
+| Rollback workflow | Available | Deployment integration test |
+| Container + systemd baseline guidance | Available | Documented runbook baseline |

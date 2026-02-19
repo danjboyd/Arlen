@@ -9,6 +9,7 @@ extern NSString *const ALNEOCErrorDomain;
 extern NSString *const ALNEOCErrorLineKey;
 extern NSString *const ALNEOCErrorColumnKey;
 extern NSString *const ALNEOCErrorPathKey;
+extern NSString *const ALNEOCErrorLocalNameKey;
 
 typedef NS_ENUM(NSInteger, ALNEOCErrorCode) {
   ALNEOCErrorTemplateNotFound = 1,
@@ -24,8 +25,32 @@ typedef NSString *_Nullable (*ALNEOCRenderFunction)(id _Nullable ctx,
 NSString *ALNEOCCanonicalTemplatePath(NSString *path);
 NSString *ALNEOCEscapeHTMLString(NSString *input);
 
+BOOL ALNEOCStrictLocalsEnabled(void);
+BOOL ALNEOCStrictStringifyEnabled(void);
+void ALNEOCSetStrictLocalsEnabled(BOOL enabled);
+void ALNEOCSetStrictStringifyEnabled(BOOL enabled);
+
+id _Nullable ALNEOCLocal(id _Nullable ctx,
+                         NSString *name,
+                         NSString *templatePath,
+                         NSUInteger line,
+                         NSUInteger column,
+                         NSError **_Nullable error);
+
 void ALNEOCAppendEscaped(NSMutableString *out, id _Nullable value);
 void ALNEOCAppendRaw(NSMutableString *out, id _Nullable value);
+BOOL ALNEOCAppendEscapedChecked(NSMutableString *out,
+                                id _Nullable value,
+                                NSString *templatePath,
+                                NSUInteger line,
+                                NSUInteger column,
+                                NSError **_Nullable error);
+BOOL ALNEOCAppendRawChecked(NSMutableString *out,
+                            id _Nullable value,
+                            NSString *templatePath,
+                            NSUInteger line,
+                            NSUInteger column,
+                            NSError **_Nullable error);
 
 void ALNEOCClearTemplateRegistry(void);
 void ALNEOCRegisterTemplate(NSString *logicalPath, ALNEOCRenderFunction function);

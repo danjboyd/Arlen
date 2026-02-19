@@ -12,7 +12,7 @@ Open `build/docs/index.html` in your browser.
 
 ## Start Here
 
-- [Current Status](STATUS.md): latest checkpoint and next-session priorities.
+- [Current Status](STATUS.md): latest checkpoint and verified milestone state.
 - [First App Guide](FIRST_APP_GUIDE.md): fastest path to scaffold, run, and extend your first app.
 - [Getting Started](GETTING_STARTED.md): prerequisites, framework build, tests, and workflow overview.
 - [CLI Reference](CLI_REFERENCE.md): command reference for `arlen`, `boomhauer`, and helper scripts.

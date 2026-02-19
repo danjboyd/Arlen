@@ -43,8 +43,9 @@
                                                              error:&error];
   XCTAssertNil(error);
   XCTAssertNotNil(source);
-  XCTAssertTrue([source containsString:@"ALNEOCAppendEscaped(out, ([ctx objectForKey:@\"title\"]));"]);
-  XCTAssertTrue([source containsString:@"ALNEOCAppendRaw(out, (item));"]);
+  XCTAssertTrue([source containsString:@"ALNEOCAppendEscapedChecked(out, (ALNEOCLocal(ctx, @\"title\""]);
+  XCTAssertTrue([source containsString:@"for (NSString *item in ALNEOCLocal(ctx, @\"items\""]);
+  XCTAssertTrue([source containsString:@"ALNEOCAppendRawChecked(out, (item)"]);
   XCTAssertFalse([source containsString:@"this is a template comment"]);
   XCTAssertTrue([source containsString:@"#line"]);
 }
@@ -76,6 +77,35 @@
   XCTAssertNil(source);
   XCTAssertNotNil(error);
   XCTAssertEqual((NSInteger)ALNEOCErrorTranspilerSyntax, [error code]);
+}
+
+- (void)testTranspileRewritesSigilMethodCallExpression {
+  ALNEOCTranspiler *transpiler = [[ALNEOCTranspiler alloc] init];
+  NSString *templateText = @"<p><%= [$myObject generateAString] %></p>";
+
+  NSError *error = nil;
+  NSString *source = [transpiler transpiledSourceForTemplateString:templateText
+                                                       logicalPath:@"method_call.html.eoc"
+                                                             error:&error];
+  XCTAssertNil(error);
+  XCTAssertNotNil(source);
+  XCTAssertTrue([source containsString:@"[ALNEOCLocal(ctx, @\"myObject\""]);
+  XCTAssertTrue([source containsString:@"generateAString]"]);
+}
+
+- (void)testTranspileRejectsInvalidSigilLocal {
+  ALNEOCTranspiler *transpiler = [[ALNEOCTranspiler alloc] init];
+  NSString *templateText = @"<%= $ %>";
+
+  NSError *error = nil;
+  NSString *source = [transpiler transpiledSourceForTemplateString:templateText
+                                                       logicalPath:@"invalid_sigil.html.eoc"
+                                                             error:&error];
+  XCTAssertNil(source);
+  XCTAssertNotNil(error);
+  XCTAssertEqual((NSInteger)ALNEOCErrorTranspilerSyntax, [error code]);
+  XCTAssertNotNil(error.userInfo[ALNEOCErrorLineKey]);
+  XCTAssertNotNil(error.userInfo[ALNEOCErrorColumnKey]);
 }
 
 - (void)testTranspileTemplatePathWritesOutputFile {

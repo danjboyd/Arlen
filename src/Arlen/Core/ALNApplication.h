@@ -35,6 +35,17 @@ NS_ASSUME_NONNULL_BEGIN
                        name:(nullable NSString *)name
             controllerClass:(Class)controllerClass
                      action:(NSString *)actionName;
+- (void)registerRouteMethod:(NSString *)method
+                       path:(NSString *)path
+                       name:(nullable NSString *)name
+                    formats:(nullable NSArray *)formats
+            controllerClass:(Class)controllerClass
+                guardAction:(nullable NSString *)guardAction
+                     action:(NSString *)actionName;
+- (void)beginRouteGroupWithPrefix:(NSString *)prefix
+                      guardAction:(nullable NSString *)guardAction
+                          formats:(nullable NSArray *)formats;
+- (void)endRouteGroup;
 - (void)addMiddleware:(id<ALNMiddleware>)middleware;
 
 - (ALNResponse *)dispatchRequest:(ALNRequest *)request;

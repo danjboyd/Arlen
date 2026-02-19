@@ -34,7 +34,7 @@ INTEGRATION_TEST_SRCS := $(shell find tests/integration -type f -name '*.m' | so
 INCLUDE_FLAGS := -Isrc/Arlen -Isrc/Arlen/Core -Isrc/Arlen/Data -Isrc/Arlen/HTTP -Isrc/Arlen/MVC/Controller -Isrc/Arlen/MVC/Middleware -Isrc/Arlen/MVC/Routing -Isrc/Arlen/MVC/Template -Isrc/Arlen/MVC/View -Isrc/Arlen/Support -Isrc/MojoObjc -Isrc/MojoObjc/Core -Isrc/MojoObjc/Data -Isrc/MojoObjc/HTTP -Isrc/MojoObjc/MVC/Controller -Isrc/MojoObjc/MVC/Middleware -Isrc/MojoObjc/MVC/Routing -Isrc/MojoObjc/MVC/Template -Isrc/MojoObjc/MVC/View -Isrc/MojoObjc/Support -I/usr/include/postgresql
 OBJC_FLAGS := $$(gnustep-config --objc-flags) -fobjc-arc
 
-.PHONY: all eocc transpile tech-demo-transpile generated-compile arlen boomhauer tech-demo-server dev-server tech-demo smoke-render smoke routes build-tests test test-unit test-integration perf docs-html clean
+.PHONY: all eocc transpile tech-demo-transpile generated-compile arlen boomhauer tech-demo-server dev-server tech-demo smoke-render smoke routes build-tests test test-unit test-integration perf perf-fast check docs-html clean
 
 all: eocc transpile generated-compile arlen boomhauer
 
@@ -129,6 +129,11 @@ routes: boomhauer
 
 perf: boomhauer
 >bash ./tests/performance/run_perf.sh
+
+perf-fast: boomhauer
+>ARLEN_PERF_FAST=1 bash ./tests/performance/run_perf.sh
+
+check: test-unit test-integration perf
 
 
 docs-html:

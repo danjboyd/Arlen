@@ -10,7 +10,7 @@ Arlen is designed to solve the same class of problems as frameworks like Mojolic
 - Phase 2A: complete (`propane` + runtime hardening).
 - Phase 2B: complete (PostgreSQL adapter, migrations, sessions/CSRF/rate-limit/security headers).
 - Phase 2C: complete (developer error UX + validation + timing controls).
-- Phase 2D: next.
+- Phase 2D: complete (parity baseline + deployment contract + perf gate hardening).
 - Phase 3: planned (`docs/PHASE3_ROADMAP.md`).
 
 ## Quick Start
@@ -47,10 +47,11 @@ cd MyApp
 /path/to/Arlen/bin/arlen boomhauer --port 3000
 ```
 
-Run tests:
+Run tests and quality gate:
 
 ```bash
 ./bin/test
+make check
 ```
 
 Run the technology demo:

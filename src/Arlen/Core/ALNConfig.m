@@ -142,6 +142,7 @@ static NSString *ALNEnvValueCompat(const char *primary, const char *legacy) {
   NSString *performanceLogging = ALNEnvValueCompat("ARLEN_PERFORMANCE_LOGGING",
                                                    "MOJOOBJC_PERFORMANCE_LOGGING");
   NSString *serveStatic = ALNEnvValueCompat("ARLEN_SERVE_STATIC", "MOJOOBJC_SERVE_STATIC");
+  NSString *apiOnly = ALNEnvValueCompat("ARLEN_API_ONLY", "MOJOOBJC_API_ONLY");
   NSString *maxRequestLineBytes =
       ALNEnvValueCompat("ARLEN_MAX_REQUEST_LINE_BYTES", "MOJOOBJC_MAX_REQUEST_LINE_BYTES");
   NSString *maxHeaderBytes =
@@ -202,6 +203,10 @@ static NSString *ALNEnvValueCompat(const char *primary, const char *legacy) {
       ALNEnvValueCompat("ARLEN_SECURITY_HEADERS_ENABLED", "MOJOOBJC_SECURITY_HEADERS_ENABLED");
   NSString *securityHeadersCSP =
       ALNEnvValueCompat("ARLEN_CONTENT_SECURITY_POLICY", "MOJOOBJC_CONTENT_SECURITY_POLICY");
+  NSString *eocStrictLocals =
+      ALNEnvValueCompat("ARLEN_EOC_STRICT_LOCALS", "MOJOOBJC_EOC_STRICT_LOCALS");
+  NSString *eocStrictStringify =
+      ALNEnvValueCompat("ARLEN_EOC_STRICT_STRINGIFY", "MOJOOBJC_EOC_STRICT_STRINGIFY");
 
   if ([host length] > 0) {
     config[@"host"] = host;
@@ -224,6 +229,10 @@ static NSString *ALNEnvValueCompat(const char *primary, const char *legacy) {
   NSNumber *serveStaticValue = ALNParseBooleanString(serveStatic);
   if (serveStaticValue != nil) {
     config[@"serveStatic"] = serveStaticValue;
+  }
+  NSNumber *apiOnlyValue = ALNParseBooleanString(apiOnly);
+  if (apiOnlyValue != nil) {
+    config[@"apiOnly"] = apiOnlyValue;
   }
   NSNumber *enableReusePortValue = ALNParseBooleanString(enableReusePort);
   if (enableReusePortValue != nil) {
@@ -319,6 +328,18 @@ static NSString *ALNEnvValueCompat(const char *primary, const char *legacy) {
   }
   config[@"securityHeaders"] = securityHeaders;
 
+  NSMutableDictionary *eoc =
+      [NSMutableDictionary dictionaryWithDictionary:config[@"eoc"] ?: @{}];
+  NSNumber *eocStrictLocalsValue = ALNParseBooleanString(eocStrictLocals);
+  if (eocStrictLocalsValue != nil) {
+    eoc[@"strictLocals"] = eocStrictLocalsValue;
+  }
+  NSNumber *eocStrictStringifyValue = ALNParseBooleanString(eocStrictStringify);
+  if (eocStrictStringifyValue != nil) {
+    eoc[@"strictStringify"] = eocStrictStringifyValue;
+  }
+  config[@"eoc"] = eoc;
+
   NSMutableDictionary *topLevel = [NSMutableDictionary dictionaryWithDictionary:config];
   ALNApplyIntegerOverride(topLevel, listenBacklog, @"listenBacklog", 1);
   ALNApplyIntegerOverride(topLevel,
@@ -330,11 +351,16 @@ static NSString *ALNEnvValueCompat(const char *primary, const char *legacy) {
   if (config[@"host"] == nil) {
     config[@"host"] = @"127.0.0.1";
   }
+  if (config[@"apiOnly"] == nil) {
+    config[@"apiOnly"] = @(NO);
+  }
+  BOOL apiOnlyMode = [config[@"apiOnly"] boolValue];
   if (config[@"port"] == nil) {
     config[@"port"] = @(3000);
   }
   if (config[@"logFormat"] == nil) {
-    config[@"logFormat"] = [env isEqualToString:@"development"] ? @"text" : @"json";
+    config[@"logFormat"] =
+        (apiOnlyMode || ![env isEqualToString:@"development"]) ? @"json" : @"text";
   }
 
   NSMutableDictionary *finalLimits =
@@ -357,7 +383,7 @@ static NSString *ALNEnvValueCompat(const char *primary, const char *legacy) {
     config[@"performanceLogging"] = @(YES);
   }
   if (config[@"serveStatic"] == nil) {
-    config[@"serveStatic"] = @([env isEqualToString:@"development"]);
+    config[@"serveStatic"] = @([env isEqualToString:@"development"] && !apiOnlyMode);
   }
   if (config[@"listenBacklog"] == nil) {
     config[@"listenBacklog"] = @(128);
@@ -447,7 +473,18 @@ static NSString *ALNEnvValueCompat(const char *primary, const char *legacy) {
   }
   config[@"securityHeaders"] = finalSecurityHeaders;
 
+  NSMutableDictionary *finalEOC =
+      [NSMutableDictionary dictionaryWithDictionary:config[@"eoc"] ?: @{}];
+  if (finalEOC[@"strictLocals"] == nil) {
+    finalEOC[@"strictLocals"] = @(NO);
+  }
+  if (finalEOC[@"strictStringify"] == nil) {
+    finalEOC[@"strictStringify"] = @(NO);
+  }
+  config[@"eoc"] = finalEOC;
+
   config[@"port"] = @([config[@"port"] integerValue]);
+  config[@"apiOnly"] = @([config[@"apiOnly"] boolValue]);
   config[@"trustedProxy"] = @([config[@"trustedProxy"] boolValue]);
   config[@"performanceLogging"] = @([config[@"performanceLogging"] boolValue]);
   config[@"serveStatic"] = @([config[@"serveStatic"] boolValue]);
@@ -489,6 +526,10 @@ static NSString *ALNEnvValueCompat(const char *primary, const char *legacy) {
 
   finalSecurityHeaders[@"enabled"] = @([finalSecurityHeaders[@"enabled"] boolValue]);
   config[@"securityHeaders"] = finalSecurityHeaders;
+
+  finalEOC[@"strictLocals"] = @([finalEOC[@"strictLocals"] boolValue]);
+  finalEOC[@"strictStringify"] = @([finalEOC[@"strictStringify"] boolValue]);
+  config[@"eoc"] = finalEOC;
 
   return [NSDictionary dictionaryWithDictionary:config];
 }

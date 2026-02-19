@@ -1,5 +1,5 @@
-<h1><%= [ctx objectForKey:@"title"] %></h1>
-<% for (NSString *item in [ctx objectForKey:@"items"]) { %>
+<h1><%= $title %></h1>
+<% for (NSString *item in $items) { %>
 <li><%== item %></li>
 <% } %>
 <%# this is a template comment and should be dropped %>

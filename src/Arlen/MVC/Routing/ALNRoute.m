@@ -18,6 +18,15 @@ static NSArray *ALNSplitPathSegments(NSString *path) {
   return [normalized componentsSeparatedByString:@"/"];
 }
 
+static NSString *ALNNormalizeRouteFormat(NSString *value) {
+  if (![value isKindOfClass:[NSString class]]) {
+    return nil;
+  }
+  NSString *trimmed =
+      [[value lowercaseString] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+  return ([trimmed length] > 0) ? trimmed : nil;
+}
+
 @interface ALNRoute ()
 
 @property(nonatomic, copy, readwrite) NSString *method;
@@ -26,6 +35,9 @@ static NSArray *ALNSplitPathSegments(NSString *path) {
 @property(nonatomic, assign, readwrite) Class controllerClass;
 @property(nonatomic, assign, readwrite) SEL actionSelector;
 @property(nonatomic, copy, readwrite) NSString *actionName;
+@property(nonatomic, assign, readwrite) SEL guardSelector;
+@property(nonatomic, copy, readwrite) NSString *guardActionName;
+@property(nonatomic, copy, readwrite) NSArray *formats;
 @property(nonatomic, assign, readwrite) NSUInteger registrationIndex;
 @property(nonatomic, assign, readwrite) ALNRouteKind kind;
 @property(nonatomic, assign, readwrite) NSUInteger staticSegmentCount;
@@ -54,6 +66,24 @@ static NSArray *ALNSplitPathSegments(NSString *path) {
                controllerClass:(Class)controllerClass
                     actionName:(NSString *)actionName
              registrationIndex:(NSUInteger)registrationIndex {
+  return [self initWithMethod:method
+                  pathPattern:pathPattern
+                         name:name
+                      formats:nil
+              controllerClass:controllerClass
+              guardActionName:nil
+                   actionName:actionName
+            registrationIndex:registrationIndex];
+}
+
+- (instancetype)initWithMethod:(NSString *)method
+                   pathPattern:(NSString *)pathPattern
+                          name:(NSString *)name
+                       formats:(NSArray *)formats
+               controllerClass:(Class)controllerClass
+               guardActionName:(NSString *)guardActionName
+                    actionName:(NSString *)actionName
+             registrationIndex:(NSUInteger)registrationIndex {
   self = [super init];
   if (self) {
     _method = [[method uppercaseString] copy];
@@ -62,6 +92,22 @@ static NSArray *ALNSplitPathSegments(NSString *path) {
     _controllerClass = controllerClass;
     _actionName = [actionName copy];
     _actionSelector = NSSelectorFromString([NSString stringWithFormat:@"%@:", actionName]);
+    _guardActionName = [guardActionName copy] ?: @"";
+    _guardSelector = ([guardActionName length] > 0)
+                         ? NSSelectorFromString([NSString stringWithFormat:@"%@:", guardActionName])
+                         : NULL;
+    NSMutableArray *normalizedFormats = [NSMutableArray array];
+    for (id value in formats ?: @[]) {
+      NSString *normalized = ALNNormalizeRouteFormat(value);
+      if ([normalized length] == 0) {
+        continue;
+      }
+      if ([normalizedFormats containsObject:normalized]) {
+        continue;
+      }
+      [normalizedFormats addObject:normalized];
+    }
+    _formats = [NSArray arrayWithArray:normalizedFormats];
     _registrationIndex = registrationIndex;
     _segments = ALNSplitPathSegments(pathPattern);
 
@@ -141,14 +187,35 @@ static NSArray *ALNSplitPathSegments(NSString *path) {
   return params;
 }
 
+- (BOOL)matchesFormat:(NSString *)format {
+  if ([self.formats count] == 0) {
+    return YES;
+  }
+
+  NSString *requested = ALNNormalizeRouteFormat(format) ?: @"html";
+  for (NSString *candidate in self.formats) {
+    if ([candidate isEqualToString:@"*"] || [candidate isEqualToString:requested]) {
+      return YES;
+    }
+  }
+  return NO;
+}
+
 - (NSDictionary *)dictionaryRepresentation {
-  return @{
+  NSMutableDictionary *representation = [NSMutableDictionary dictionaryWithDictionary:@{
     @"method" : self.method ?: @"",
     @"path" : self.pathPattern ?: @"",
     @"name" : self.name ?: @"",
     @"controller" : NSStringFromClass(self.controllerClass ?: [NSObject class]),
     @"action" : self.actionName ?: @"",
-  };
+  }];
+  if ([self.guardActionName length] > 0) {
+    representation[@"guard"] = self.guardActionName;
+  }
+  if ([self.formats count] > 0) {
+    representation[@"formats"] = self.formats;
+  }
+  return representation;
 }
 
 @end

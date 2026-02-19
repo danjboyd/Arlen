@@ -1,6 +1,6 @@
 # CLI Reference
 
-This document describes the currently implemented command-line interfaces.
+This document describes currently implemented command-line interfaces.
 
 ## `arlen`
 
@@ -21,36 +21,51 @@ Create a new app scaffold.
 - `--force`: overwrite existing files where allowed
 - `--help` / `-h`: show command usage
 
-### `arlen generate <controller|model|migration|test> <Name>`
+### `arlen generate <controller|endpoint|model|migration|test> <Name> [options]`
 
 Generate app artifacts.
 
+Common generator options (`controller` and `endpoint`):
+
+- `--route <path>`: wire route into `src/main.m` or `app_lite.m`
+- `--method <HTTP>`: route method override (default `GET`)
+- `--action <name>`: generated action method name (default `index`)
+- `--template [<logical_template>]`: create template + render stub
+- `--api`: generate JSON-oriented endpoint action
+
+Generator behavior:
+
 - `controller`: `src/Controllers/<Name>Controller.{h,m}`
+- `endpoint`: same controller output with endpoint-oriented defaults (`--route` required)
 - `model`: `src/Models/<Name>Repository.{h,m}`
 - `migration`: `db/migrations/<timestamp>_<name>.sql`
 - `test`: `tests/<Name>Tests.m`
-- `--help` / `-h`: show command usage
+
+Notes:
+
+- placeholder routes are supported (for example `/user/admin/:id`)
+- endpoint generator can create route + action + optional template in one command
 
 ### `arlen migrate [--env <name>] [--dsn <connection_string>] [--dry-run]`
 
 Apply SQL migrations from `db/migrations` to PostgreSQL.
 
 - `--env <name>`: select runtime environment (default: `development`)
-- `--dsn <connection_string>`: override `database.connectionString` from config
+- `--dsn <connection_string>`: override config DSN
 - `--dry-run`: list pending migrations without applying
 
 ### `arlen boomhauer [server args...]`
 
 Build and run `boomhauer` for the current app root.
 
-- delegates to `bin/boomhauer` with `ARLEN_APP_ROOT` + `ARLEN_FRAMEWORK_ROOT`
-- defaults to watch mode (same behavior as running `bin/boomhauer` directly)
-- in app-root watch mode, transpile/compile failures do not terminate `boomhauer`; a diagnostic server is served until the next successful rebuild
-- server args are passed through (for example `--watch`, `--no-watch`, `--prepare-only`, `--port`, `--host`, `--env`, `--once`, `--print-routes`)
+- delegates to framework `bin/boomhauer` with `ARLEN_APP_ROOT` + `ARLEN_FRAMEWORK_ROOT`
+- defaults to watch mode (same as direct `bin/boomhauer`)
+- transpile/compile failures in watch mode do not terminate supervisor; diagnostics are served until next successful rebuild
+- server args are passed through (`--watch`, `--no-watch`, `--prepare-only`, `--port`, `--host`, `--env`, `--once`, `--print-routes`)
 
 ### `arlen propane [manager args...]`
 
-Run the production manager (`propane`) for the current app root.
+Run production manager (`propane`) for the current app root.
 
 - manager args are forwarded to `bin/propane`
 - all production manager settings are called "propane accessories"
@@ -67,7 +82,15 @@ Run framework tests.
 
 ### `arlen perf`
 
-Run performance suite.
+Run performance suite and regression gate (`make perf`).
+
+### `arlen check`
+
+Run full quality gate (`make check`):
+
+- unit tests
+- integration tests
+- perf gate
 
 ### `arlen build`
 
@@ -78,7 +101,7 @@ Build framework targets (`make all`).
 Load and print merged runtime config.
 
 - `--env <name>`: select environment overlay
-- `--json`: print as pretty JSON
+- `--json`: pretty JSON output
 
 ## `boomhauer` Script (`bin/boomhauer`)
 
@@ -89,21 +112,21 @@ boomhauer [options]
 ```
 
 Behavior:
-- If run inside an app root (`config/app.plist` plus `src/main.m` or `app_lite.m`), it compiles that app and watches for changes by default.
-- Otherwise, it runs the framework's built-in server.
-- In app-root watch mode, build failures are captured and rendered as development diagnostics:
-  - browser requests receive an HTML build-error page
-  - API requests can use `GET /api/dev/build-error` for JSON diagnostics
-  - successful source changes automatically resume normal app serving
+
+- if run inside app root (`config/app.plist` plus `src/main.m` or `app_lite.m`), compiles and runs that app
+- defaults to watch mode
+- in app-root watch mode, build failures are captured and rendered as development diagnostics
 
 Options:
+
 - `--watch` (default)
 - `--no-watch`
 - `--once`
-- `--prepare-only` (compile and exit)
+- `--prepare-only`
 - `--help` / `-h`
 
 Environment:
+
 - `ARLEN_APP_ROOT`
 - `ARLEN_FRAMEWORK_ROOT`
 
@@ -116,6 +139,7 @@ propane [options] [-- worker-args]
 ```
 
 Core options:
+
 - `--workers <n>`
 - `--host <addr>`
 - `--port <port>`
@@ -129,6 +153,7 @@ Core options:
 - `--no-respawn`
 
 Signals:
+
 - `TERM` / `INT`: graceful shutdown
 - `HUP`: rolling worker reload
 
@@ -137,7 +162,7 @@ Signals:
 - `bin/test`: run test suite (`make test`)
 - `bin/tech-demo`: run technology demo app
 - `bin/dev`: alias for `bin/boomhauer`
-- `make docs-html`: generate browser-friendly HTML docs under `build/docs`
+- `make docs-html`: generate browser-friendly docs under `build/docs`
 
 ## PostgreSQL Test Gate
 

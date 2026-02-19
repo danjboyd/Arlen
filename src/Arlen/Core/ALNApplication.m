@@ -64,11 +64,41 @@ NSString *const ALNApplicationErrorDomain = @"Arlen.Application.Error";
                        name:(NSString *)name
             controllerClass:(Class)controllerClass
                      action:(NSString *)actionName {
+  [self registerRouteMethod:method
+                       path:path
+                       name:name
+                    formats:nil
+            controllerClass:controllerClass
+                guardAction:nil
+                     action:actionName];
+}
+
+- (void)registerRouteMethod:(NSString *)method
+                       path:(NSString *)path
+                       name:(NSString *)name
+                    formats:(NSArray *)formats
+            controllerClass:(Class)controllerClass
+                guardAction:(NSString *)guardAction
+                     action:(NSString *)actionName {
   [self.router addRouteMethod:method
                          path:path
                          name:name
+                      formats:formats
               controllerClass:controllerClass
+                  guardAction:guardAction
                        action:actionName];
+}
+
+- (void)beginRouteGroupWithPrefix:(NSString *)prefix
+                      guardAction:(NSString *)guardAction
+                          formats:(NSArray *)formats {
+  [self.router beginRouteGroupWithPrefix:prefix
+                             guardAction:guardAction
+                                 formats:formats];
+}
+
+- (void)endRouteGroup {
+  [self.router endRouteGroup];
 }
 
 - (NSArray *)routeTable {
@@ -126,18 +156,93 @@ static NSString *ALNGenerateRequestID(void) {
   return [[NSUUID UUID] UUIDString];
 }
 
-static BOOL ALNRequestPrefersJSON(ALNRequest *request) {
+static BOOL ALNPathLooksLikeAPI(NSString *path) {
+  if (![path isKindOfClass:[NSString class]]) {
+    return NO;
+  }
+  return [path hasPrefix:@"/api/"] || [path isEqualToString:@"/api"];
+}
+
+static NSString *ALNExtractPathFormat(NSString *path, NSString **strippedPath) {
+  if (![path isKindOfClass:[NSString class]] || [path length] == 0) {
+    if (strippedPath != NULL) {
+      *strippedPath = @"/";
+    }
+    return nil;
+  }
+
+  NSString *normalized = path;
+  NSRange queryRange = [normalized rangeOfString:@"?"];
+  if (queryRange.location != NSNotFound) {
+    normalized = [normalized substringToIndex:queryRange.location];
+  }
+  if ([normalized length] == 0) {
+    normalized = @"/";
+  }
+
+  NSString *trimmed = normalized;
+  while ([trimmed length] > 1 && [trimmed hasSuffix:@"/"]) {
+    trimmed = [trimmed substringToIndex:[trimmed length] - 1];
+  }
+
+  NSRange lastSlash = [trimmed rangeOfString:@"/" options:NSBackwardsSearch];
+  NSRange lastDot = [trimmed rangeOfString:@"." options:NSBackwardsSearch];
+  BOOL hasExtension = (lastDot.location != NSNotFound &&
+                       (lastSlash.location == NSNotFound || lastDot.location > lastSlash.location));
+  if (!hasExtension) {
+    if (strippedPath != NULL) {
+      *strippedPath = trimmed;
+    }
+    return nil;
+  }
+
+  NSString *extension = [[trimmed substringFromIndex:lastDot.location + 1] lowercaseString];
+  NSCharacterSet *allowed = [NSCharacterSet characterSetWithCharactersInString:@"abcdefghijklmnopqrstuvwxyz0123456789_"];
+  if ([extension length] == 0 ||
+      [[extension stringByTrimmingCharactersInSet:allowed] length] > 0) {
+    if (strippedPath != NULL) {
+      *strippedPath = trimmed;
+    }
+    return nil;
+  }
+
+  if (strippedPath != NULL) {
+    NSString *withoutExt = [trimmed substringToIndex:lastDot.location];
+    *strippedPath = ([withoutExt length] > 0) ? withoutExt : @"/";
+  }
+  return extension;
+}
+
+static NSString *ALNRequestPreferredFormat(ALNRequest *request, BOOL apiOnly, NSString **strippedPath) {
+  NSString *path = request.path ?: @"/";
+  NSString *pathFormat = ALNExtractPathFormat(path, strippedPath);
+  if ([pathFormat length] > 0) {
+    return pathFormat;
+  }
+
   NSString *accept = [request.headers[@"accept"] isKindOfClass:[NSString class]]
                          ? [request.headers[@"accept"] lowercaseString]
                          : @"";
   if ([accept containsString:@"application/json"] || [accept containsString:@"text/json"]) {
-    return YES;
+    return @"json";
   }
-  NSString *path = request.path ?: @"";
-  if ([path hasPrefix:@"/api/"] || [path isEqualToString:@"/api"]) {
-    return YES;
+  if ([accept containsString:@"text/html"] || [accept containsString:@"application/xhtml+xml"]) {
+    return @"html";
   }
-  return NO;
+
+  NSString *resolvedPath = (strippedPath != NULL && [*strippedPath length] > 0)
+                               ? *strippedPath
+                               : (request.path ?: @"/");
+  if (apiOnly || ALNPathLooksLikeAPI(resolvedPath)) {
+    return @"json";
+  }
+
+  return @"html";
+}
+
+static BOOL ALNRequestPrefersJSON(ALNRequest *request, BOOL apiOnly) {
+  NSString *format = ALNRequestPreferredFormat(request, apiOnly, NULL);
+  return [format isEqualToString:@"json"];
 }
 
 static NSString *ALNEscapeHTML(NSString *value) {
@@ -147,6 +252,19 @@ static NSString *ALNEscapeHTML(NSString *value) {
   safe = [safe stringByReplacingOccurrencesOfString:@">" withString:@"&gt;"];
   safe = [safe stringByReplacingOccurrencesOfString:@"\"" withString:@"&quot;"];
   return [safe stringByReplacingOccurrencesOfString:@"'" withString:@"&#39;"];
+}
+
+static NSString *ALNBuiltInHealthBodyForPath(NSString *path) {
+  if ([path isEqualToString:@"/healthz"]) {
+    return @"ok\n";
+  }
+  if ([path isEqualToString:@"/readyz"]) {
+    return @"ready\n";
+  }
+  if ([path isEqualToString:@"/livez"]) {
+    return @"live\n";
+  }
+  return nil;
 }
 
 static NSDictionary *ALNErrorDetailsFromNSError(NSError *error) {
@@ -269,7 +387,8 @@ static void ALNApplyInternalErrorResponse(ALNApplication *application,
                                           NSString *developerMessage,
                                           NSDictionary *details) {
   BOOL production = [application.environment isEqualToString:@"production"];
-  BOOL prefersJSON = ALNRequestPrefersJSON(request);
+  BOOL apiOnly = ALNBoolConfigValue(application.config[@"apiOnly"], NO);
+  BOOL prefersJSON = ALNRequestPrefersJSON(request, apiOnly);
 
   if (production || prefersJSON) {
     NSDictionary *payload = ALNStructuredErrorPayload(statusCode,
@@ -394,18 +513,51 @@ static void ALNFinalizeResponse(ALNResponse *response,
   [response setHeader:@"X-Request-Id" value:requestID];
 
   BOOL performanceLogging = ALNBoolConfigValue(self.config[@"performanceLogging"], YES);
+  BOOL apiOnly = ALNBoolConfigValue(self.config[@"apiOnly"], NO);
   ALNPerfTrace *trace = [[ALNPerfTrace alloc] initWithEnabled:performanceLogging];
   [trace startStage:@"total"];
 
+  NSString *routePath = nil;
+  NSString *requestFormat = ALNRequestPreferredFormat(request, apiOnly, &routePath);
+  if ([routePath length] == 0) {
+    routePath = request.path ?: @"/";
+  }
+
   [trace startStage:@"route"];
   ALNRouteMatch *match =
-      [self.router matchMethod:request.method ?: @"GET" path:request.path ?: @"/"];
+      [self.router matchMethod:request.method ?: @"GET"
+                          path:routePath
+                        format:requestFormat];
   [trace endStage:@"route"];
 
   if (match == nil) {
-    response.statusCode = 404;
-    [response setTextBody:@"not found\n"];
-    [response setHeader:@"Content-Type" value:@"text/plain; charset=utf-8"];
+    NSString *healthBody = nil;
+    BOOL healthMethod = [request.method isEqualToString:@"GET"] ||
+                        [request.method isEqualToString:@"HEAD"];
+    if (healthMethod) {
+      healthBody = ALNBuiltInHealthBodyForPath(routePath);
+    }
+
+    if ([healthBody length] > 0) {
+      response.statusCode = 200;
+      [response setHeader:@"Content-Type" value:@"text/plain; charset=utf-8"];
+      if (![request.method isEqualToString:@"HEAD"]) {
+        [response setTextBody:healthBody];
+      }
+      response.committed = YES;
+    } else if (apiOnly || ALNRequestPrefersJSON(request, apiOnly)) {
+      NSDictionary *payload = ALNStructuredErrorPayload(404,
+                                                        @"not_found",
+                                                        @"Not Found",
+                                                        requestID,
+                                                        @{});
+      ALNSetStructuredErrorResponse(response, 404, payload);
+    } else {
+      response.statusCode = 404;
+      [response setTextBody:@"not found\n"];
+      [response setHeader:@"Content-Type" value:@"text/plain; charset=utf-8"];
+      response.committed = YES;
+    }
     ALNFinalizeResponse(response, trace, request, requestID, performanceLogging);
 
     NSMutableDictionary *fields = [NSMutableDictionary dictionary];
@@ -422,6 +574,12 @@ static void ALNFinalizeResponse(ALNResponse *response,
 
   NSMutableDictionary *stash = [NSMutableDictionary dictionary];
   stash[@"request_id"] = requestID ?: @"";
+  stash[ALNContextRequestFormatStashKey] = requestFormat ?: @"";
+  NSDictionary *eoc = ALNDictionaryConfigValue(self.config, @"eoc");
+  stash[ALNContextEOCStrictLocalsStashKey] =
+      @(ALNBoolConfigValue(eoc[@"strictLocals"], NO));
+  stash[ALNContextEOCStrictStringifyStashKey] =
+      @(ALNBoolConfigValue(eoc[@"strictStringify"], NO));
   request.routeParams = match.params ?: @{};
   ALNContext *context = [[ALNContext alloc] initWithRequest:request
                                                    response:response
@@ -485,37 +643,104 @@ static void ALNFinalizeResponse(ALNResponse *response,
       if ([controller isKindOfClass:[ALNController class]]) {
         ((ALNController *)controller).context = context;
       }
+      BOOL guardPassed = YES;
+      if (match.route.guardSelector != NULL) {
+        NSMethodSignature *guardSignature =
+            [controller methodSignatureForSelector:match.route.guardSelector];
+        if (guardSignature == nil || [guardSignature numberOfArguments] != 3) {
+          NSDictionary *details = @{
+            @"controller" : context.controllerName ?: @"",
+            @"guard" : match.route.guardActionName ?: @"",
+            @"reason" : @"Guard must accept exactly one ALNContext * parameter"
+          };
+          ALNApplyInternalErrorResponse(self,
+                                        request,
+                                        response,
+                                        requestID,
+                                        500,
+                                        @"invalid_guard_signature",
+                                        @"Internal Server Error",
+                                        @"Invalid route guard signature",
+                                        details);
+          guardPassed = NO;
+        } else {
+          NSInvocation *guardInvocation =
+              [NSInvocation invocationWithMethodSignature:guardSignature];
+          [guardInvocation setTarget:controller];
+          [guardInvocation setSelector:match.route.guardSelector];
+          ALNContext *arg = context;
+          [guardInvocation setArgument:&arg atIndex:2];
+          [guardInvocation invoke];
 
-      NSMethodSignature *signature =
-          [controller methodSignatureForSelector:match.route.actionSelector];
-      if (signature == nil || [signature numberOfArguments] != 3) {
-        NSDictionary *details = @{
-          @"controller" : context.controllerName ?: @"",
-          @"action" : context.actionName ?: @"",
-          @"reason" : @"Action must accept exactly one ALNContext * parameter"
-        };
-        ALNApplyInternalErrorResponse(self,
-                                      request,
-                                      response,
-                                      requestID,
-                                      500,
-                                      @"invalid_action_signature",
-                                      @"Internal Server Error",
-                                      @"Invalid controller action signature",
-                                      details);
-      } else {
-        NSInvocation *invocation = [NSInvocation invocationWithMethodSignature:signature];
-        [invocation setTarget:controller];
-        [invocation setSelector:match.route.actionSelector];
-        ALNContext *arg = context;
-        [invocation setArgument:&arg atIndex:2];
-        [invocation invoke];
+          const char *guardReturnType = [guardSignature methodReturnType];
+          if (strcmp(guardReturnType, @encode(void)) == 0) {
+            guardPassed = !response.committed;
+          } else if (strcmp(guardReturnType, @encode(BOOL)) == 0 ||
+                     strcmp(guardReturnType, @encode(bool)) == 0 ||
+                     strcmp(guardReturnType, "c") == 0) {
+            BOOL value = NO;
+            [guardInvocation getReturnValue:&value];
+            guardPassed = value;
+          } else {
+            __unsafe_unretained id guardResult = nil;
+            [guardInvocation getReturnValue:&guardResult];
+            if ([guardResult respondsToSelector:@selector(boolValue)]) {
+              guardPassed = [guardResult boolValue];
+            } else {
+              guardPassed = (guardResult != nil);
+            }
+          }
+        }
+      }
 
-        const char *returnType = [signature methodReturnType];
-        if (strcmp(returnType, @encode(void)) != 0) {
-          __unsafe_unretained id temp = nil;
-          [invocation getReturnValue:&temp];
-          returnValue = temp;
+      if (!guardPassed && !response.committed) {
+        if (apiOnly || ALNRequestPrefersJSON(request, apiOnly)) {
+          NSDictionary *payload = ALNStructuredErrorPayload(403,
+                                                            @"forbidden",
+                                                            @"Forbidden",
+                                                            requestID,
+                                                            @{});
+          ALNSetStructuredErrorResponse(response, 403, payload);
+        } else {
+          response.statusCode = 403;
+          [response setHeader:@"Content-Type" value:@"text/plain; charset=utf-8"];
+          [response setTextBody:@"forbidden\n"];
+          response.committed = YES;
+        }
+      }
+
+      if (guardPassed && !response.committed) {
+        NSMethodSignature *signature =
+            [controller methodSignatureForSelector:match.route.actionSelector];
+        if (signature == nil || [signature numberOfArguments] != 3) {
+          NSDictionary *details = @{
+            @"controller" : context.controllerName ?: @"",
+            @"action" : context.actionName ?: @"",
+            @"reason" : @"Action must accept exactly one ALNContext * parameter"
+          };
+          ALNApplyInternalErrorResponse(self,
+                                        request,
+                                        response,
+                                        requestID,
+                                        500,
+                                        @"invalid_action_signature",
+                                        @"Internal Server Error",
+                                        @"Invalid controller action signature",
+                                        details);
+        } else {
+          NSInvocation *invocation = [NSInvocation invocationWithMethodSignature:signature];
+          [invocation setTarget:controller];
+          [invocation setSelector:match.route.actionSelector];
+          ALNContext *arg = context;
+          [invocation setArgument:&arg atIndex:2];
+          [invocation invoke];
+
+          const char *returnType = [signature methodReturnType];
+          if (strcmp(returnType, @encode(void)) != 0) {
+            __unsafe_unretained id temp = nil;
+            [invocation getReturnValue:&temp];
+            returnValue = temp;
+          }
         }
       }
     } @catch (NSException *exception) {

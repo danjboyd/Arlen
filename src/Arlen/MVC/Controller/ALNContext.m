@@ -10,6 +10,9 @@ NSString *const ALNContextSessionDirtyStashKey = @"aln.session.dirty";
 NSString *const ALNContextSessionHadCookieStashKey = @"aln.session.had_cookie";
 NSString *const ALNContextCSRFTokenStashKey = @"aln.csrf.token";
 NSString *const ALNContextValidationErrorsStashKey = @"aln.validation.errors";
+NSString *const ALNContextEOCStrictLocalsStashKey = @"aln.eoc.strict_locals";
+NSString *const ALNContextEOCStrictStringifyStashKey = @"aln.eoc.strict_stringify";
+NSString *const ALNContextRequestFormatStashKey = @"aln.request.format";
 
 @interface ALNContext ()
 
@@ -164,6 +167,26 @@ static BOOL ALNStringRepresentsInteger(NSString *value, NSInteger *parsed) {
     *value = parsed;
   }
   return YES;
+}
+
+- (NSString *)requestFormat {
+  id stashValue = self.stash[ALNContextRequestFormatStashKey];
+  if ([stashValue isKindOfClass:[NSString class]] && [stashValue length] > 0) {
+    return [stashValue lowercaseString];
+  }
+
+  NSString *accept = [self.request.headers[@"accept"] isKindOfClass:[NSString class]]
+                         ? [self.request.headers[@"accept"] lowercaseString]
+                         : @"";
+  if ([accept containsString:@"application/json"] || [accept containsString:@"text/json"] ||
+      [self.request.path hasPrefix:@"/api/"] || [self.request.path isEqualToString:@"/api"]) {
+    return @"json";
+  }
+  return @"html";
+}
+
+- (BOOL)wantsJSON {
+  return [[self requestFormat] isEqualToString:@"json"];
 }
 
 - (void)addValidationErrorForField:(NSString *)field

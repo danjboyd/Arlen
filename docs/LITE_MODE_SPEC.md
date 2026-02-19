@@ -1,7 +1,7 @@
 # Lite Mode Specification (Phase 1)
 
 Status: Draft  
-Last updated: 2026-02-18
+Last updated: 2026-02-19
 
 ## 1. Purpose
 
@@ -75,6 +75,14 @@ Phase 1 must support straightforward migration:
 3. Existing templates and middleware remain reusable.
 
 Goal: no rewrite required, only structural refactor.
+
+## 8.1 Boilerplate Reduction Contract (Implemented in Phase 2D)
+
+Lite-mode ergonomics evolved without changing runtime semantics:
+
+1. Generated lite entrypoints delegate startup argument parsing and server boot wiring to framework-runner APIs (`ALNRunAppMain`).
+2. Common endpoint additions are generator-driven (route + action + optional template), avoiding repetitive boot-file edits.
+3. Placeholder path patterns (for example `/user/admin/:id`) remain first-class in concise route declaration and generator options.
 
 ## 9. Limitations in Phase 1
 

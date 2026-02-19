@@ -19,6 +19,13 @@ static NSString *const ALNEOCTokenColumnKey = @"column";
 - (nullable NSArray *)tokensForTemplateString:(NSString *)templateText
                                    logicalPath:(NSString *)logicalPath
                                          error:(NSError *_Nullable *_Nullable)error;
+- (BOOL)isSigilIdentifierStart:(unichar)character;
+- (BOOL)isSigilIdentifierBody:(unichar)character;
+- (nullable NSString *)rewriteSigilLocalsInContent:(NSString *)content
+                                       logicalPath:(NSString *)logicalPath
+                                          fromLine:(NSUInteger)line
+                                            column:(NSUInteger)column
+                                             error:(NSError *_Nullable *_Nullable)error;
 - (void)advanceLine:(NSUInteger *)line
              column:(NSUInteger *)column
       forCharacter:(unichar)character;
@@ -101,8 +108,10 @@ static NSString *const ALNEOCTokenColumnKey = @"column";
 
   for (NSDictionary *token in tokens) {
     NSUInteger line = [token[ALNEOCTokenLineKey] unsignedIntegerValue];
+    NSUInteger column = [token[ALNEOCTokenColumnKey] unsignedIntegerValue];
     NSUInteger type = [token[ALNEOCTokenTypeKey] unsignedIntegerValue];
     NSString *content = token[ALNEOCTokenContentKey];
+    NSString *rewrittenContent = nil;
 
     [source appendFormat:@"#line %lu \"%@\"\n", (unsigned long)line, escapedPath];
     switch (type) {
@@ -140,14 +149,46 @@ static NSString *const ALNEOCTokenColumnKey = @"column";
       break;
     }
     case ALNEOCTokenTypeCode:
-      [source appendString:content];
+      rewrittenContent = [self rewriteSigilLocalsInContent:content
+                                                logicalPath:logicalPath
+                                                   fromLine:line
+                                                     column:column
+                                                      error:error];
+      if (rewrittenContent == nil) {
+        return nil;
+      }
+      [source appendString:rewrittenContent];
       [source appendString:@"\n\n"];
       break;
     case ALNEOCTokenTypeEscapedExpression:
-      [source appendFormat:@"ALNEOCAppendEscaped(out, (%@));\n\n", content];
+      rewrittenContent = [self rewriteSigilLocalsInContent:content
+                                                logicalPath:logicalPath
+                                                   fromLine:line
+                                                     column:column
+                                                      error:error];
+      if (rewrittenContent == nil) {
+        return nil;
+      }
+      [source appendFormat:
+                  @"if (!ALNEOCAppendEscapedChecked(out, (%@), @\"%@\", %lu, %lu, "
+                   "error)) { return nil; }\n\n",
+                  rewrittenContent, escapedPath, (unsigned long)line,
+                  (unsigned long)column];
       break;
     case ALNEOCTokenTypeRawExpression:
-      [source appendFormat:@"ALNEOCAppendRaw(out, (%@));\n\n", content];
+      rewrittenContent = [self rewriteSigilLocalsInContent:content
+                                                logicalPath:logicalPath
+                                                   fromLine:line
+                                                     column:column
+                                                      error:error];
+      if (rewrittenContent == nil) {
+        return nil;
+      }
+      [source appendFormat:
+                  @"if (!ALNEOCAppendRawChecked(out, (%@), @\"%@\", %lu, %lu, "
+                   "error)) { return nil; }\n\n",
+                  rewrittenContent, escapedPath, (unsigned long)line,
+                  (unsigned long)column];
       break;
     default:
       break;
@@ -390,6 +431,200 @@ static NSString *const ALNEOCTokenColumnKey = @"column";
   }
 
   return tokens;
+}
+
+- (BOOL)isSigilIdentifierStart:(unichar)character {
+  if ((character >= 'a' && character <= 'z') ||
+      (character >= 'A' && character <= 'Z') || character == '_') {
+    return YES;
+  }
+  return NO;
+}
+
+- (BOOL)isSigilIdentifierBody:(unichar)character {
+  if ([self isSigilIdentifierStart:character] ||
+      (character >= '0' && character <= '9')) {
+    return YES;
+  }
+  return NO;
+}
+
+- (NSString *)rewriteSigilLocalsInContent:(NSString *)content
+                              logicalPath:(NSString *)logicalPath
+                                 fromLine:(NSUInteger)line
+                                   column:(NSUInteger)column
+                                    error:(NSError **)error {
+  if ([content length] == 0) {
+    return content ?: @"";
+  }
+
+  typedef NS_ENUM(NSUInteger, ALNEOCRewriteState) {
+    ALNEOCRewriteStateNormal = 0,
+    ALNEOCRewriteStateSingleQuote = 1,
+    ALNEOCRewriteStateDoubleQuote = 2,
+    ALNEOCRewriteStateLineComment = 3,
+    ALNEOCRewriteStateBlockComment = 4,
+  };
+
+  NSString *escapedPath = [logicalPath stringByReplacingOccurrencesOfString:@"\\"
+                                                                  withString:@"\\\\"];
+  escapedPath =
+      [escapedPath stringByReplacingOccurrencesOfString:@"\"" withString:@"\\\""];
+
+  NSMutableString *rewritten = [NSMutableString stringWithCapacity:[content length]];
+  ALNEOCRewriteState state = ALNEOCRewriteStateNormal;
+  NSUInteger index = 0;
+  NSUInteger length = [content length];
+  NSUInteger cursorLine = line;
+  NSUInteger cursorColumn = column;
+
+  while (index < length) {
+    unichar current = [content characterAtIndex:index];
+
+    if (state == ALNEOCRewriteStateLineComment) {
+      [rewritten appendFormat:@"%C", current];
+      [self advanceLine:&cursorLine column:&cursorColumn forCharacter:current];
+      index += 1;
+      if (current == '\n') {
+        state = ALNEOCRewriteStateNormal;
+      }
+      continue;
+    }
+
+    if (state == ALNEOCRewriteStateBlockComment) {
+      if (current == '*' && (index + 1) < length &&
+          [content characterAtIndex:index + 1] == '/') {
+        [rewritten appendString:@"*/"];
+        [self advanceLine:&cursorLine column:&cursorColumn forString:@"*/"];
+        index += 2;
+        state = ALNEOCRewriteStateNormal;
+        continue;
+      }
+      [rewritten appendFormat:@"%C", current];
+      [self advanceLine:&cursorLine column:&cursorColumn forCharacter:current];
+      index += 1;
+      continue;
+    }
+
+    if (state == ALNEOCRewriteStateSingleQuote ||
+        state == ALNEOCRewriteStateDoubleQuote) {
+      [rewritten appendFormat:@"%C", current];
+      [self advanceLine:&cursorLine column:&cursorColumn forCharacter:current];
+      index += 1;
+
+      if (current == '\\' && index < length) {
+        unichar escaped = [content characterAtIndex:index];
+        [rewritten appendFormat:@"%C", escaped];
+        [self advanceLine:&cursorLine column:&cursorColumn forCharacter:escaped];
+        index += 1;
+        continue;
+      }
+
+      if ((state == ALNEOCRewriteStateSingleQuote && current == '\'') ||
+          (state == ALNEOCRewriteStateDoubleQuote && current == '"')) {
+        state = ALNEOCRewriteStateNormal;
+      }
+      continue;
+    }
+
+    if (current == '/' && (index + 1) < length) {
+      unichar next = [content characterAtIndex:index + 1];
+      if (next == '/') {
+        [rewritten appendString:@"//"];
+        [self advanceLine:&cursorLine column:&cursorColumn forString:@"//"];
+        index += 2;
+        state = ALNEOCRewriteStateLineComment;
+        continue;
+      }
+      if (next == '*') {
+        [rewritten appendString:@"/*"];
+        [self advanceLine:&cursorLine column:&cursorColumn forString:@"/*"];
+        index += 2;
+        state = ALNEOCRewriteStateBlockComment;
+        continue;
+      }
+    }
+
+    if (current == '\'') {
+      [rewritten appendString:@"'"];
+      [self advanceLine:&cursorLine column:&cursorColumn forCharacter:current];
+      index += 1;
+      state = ALNEOCRewriteStateSingleQuote;
+      continue;
+    }
+
+    if (current == '"') {
+      [rewritten appendString:@"\""];
+      [self advanceLine:&cursorLine column:&cursorColumn forCharacter:current];
+      index += 1;
+      state = ALNEOCRewriteStateDoubleQuote;
+      continue;
+    }
+
+    if (current == '$') {
+      if ((index + 1) >= length) {
+        if (error != NULL) {
+          *error = [NSError
+              errorWithDomain:ALNEOCErrorDomain
+                         code:ALNEOCErrorTranspilerSyntax
+                     userInfo:@{
+                       NSLocalizedDescriptionKey : @"Invalid sigil local",
+                       ALNEOCErrorLineKey : @(cursorLine),
+                       ALNEOCErrorColumnKey : @(cursorColumn),
+                       ALNEOCErrorPathKey : logicalPath ?: @""
+                     }];
+        }
+        return nil;
+      }
+
+      unichar next = [content characterAtIndex:index + 1];
+      if (![self isSigilIdentifierStart:next]) {
+        if (error != NULL) {
+          *error = [NSError
+              errorWithDomain:ALNEOCErrorDomain
+                         code:ALNEOCErrorTranspilerSyntax
+                     userInfo:@{
+                       NSLocalizedDescriptionKey : @"Invalid sigil local",
+                       ALNEOCErrorLineKey : @(cursorLine),
+                       ALNEOCErrorColumnKey : @(cursorColumn),
+                       ALNEOCErrorPathKey : logicalPath ?: @""
+                     }];
+        }
+        return nil;
+      }
+
+      NSUInteger localLine = cursorLine;
+      NSUInteger localColumn = cursorColumn;
+      NSUInteger nameStart = index + 1;
+      NSUInteger scan = nameStart;
+      while (scan < length &&
+             [self isSigilIdentifierBody:[content characterAtIndex:scan]]) {
+        scan += 1;
+      }
+
+      NSString *name =
+          [content substringWithRange:NSMakeRange(nameStart, scan - nameStart)];
+      NSString *escapedName =
+          [name stringByReplacingOccurrencesOfString:@"\"" withString:@"\\\""];
+      [rewritten appendFormat:@"ALNEOCLocal(ctx, @\"%@\", @\"%@\", %lu, %lu, error)",
+                              escapedName, escapedPath, (unsigned long)localLine,
+                              (unsigned long)localColumn];
+
+      for (NSUInteger consumed = index; consumed < scan; consumed++) {
+        [self advanceLine:&cursorLine
+                   column:&cursorColumn
+            forCharacter:[content characterAtIndex:consumed]];
+      }
+      index = scan;
+      continue;
+    }
+
+    [rewritten appendFormat:@"%C", current];
+    [self advanceLine:&cursorLine column:&cursorColumn forCharacter:current];
+    index += 1;
+  }
+
+  return rewritten;
 }
 
 - (void)advanceLine:(NSUInteger *)line

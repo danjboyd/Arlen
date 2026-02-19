@@ -1,6 +1,6 @@
 # Arlen Phase 2 Roadmap
 
-Status: Phase 2A, Phase 2B, and Phase 2C complete; Phase 2D planned (next)  
+Status: Phase 2A, Phase 2B, Phase 2C, and Phase 2D complete  
 Last updated: 2026-02-19
 
 Related docs:
@@ -107,37 +107,50 @@ Verification snapshot (2026-02-19):
 - `make test-unit` passed.
 - `make test-integration` passed.
 
-## 3.4 Phase 2D: Parity Baseline + Deployment Contract
+## 3.4 Phase 2D: Parity Baseline + Deployment Contract (Completed 2026-02-19)
 
-Deliverables:
-- Implement remaining Phase 2 in-scope parity capabilities from `docs/FEATURE_PARITY_MATRIX.md`:
+Delivered:
+- Closed EOC implementation/spec gaps:
+  - sigil local rewrite support (`$name`) in transpiler output
+  - runtime local lookup and strict render modes (`strict locals`, `strict stringify`) per `V1_SPEC.md`
+  - strict-mode failure diagnostics with template filename/line/column metadata
+  - fixture/unit coverage for sigil locals, method-call usage, and strict-mode failures
+  - default scaffold templates updated for zero-boilerplate locals
+- Reduced generated app/controller boilerplate:
+  - framework-runner entrypoint contract (`ALNRunAppMain`) for full/lite scaffolds
+  - route-aware generation flows (`--route`, `--method`, `--action`, `--template`, `--api`)
+  - placeholder route pattern support (for example `/user/admin/:id`) in concise generation flows
+  - concise controller render/stash helpers while preserving explicit APIs
+- Implemented remaining in-scope parity capabilities from `docs/FEATURE_PARITY_MATRIX.md`:
   - nested route groups/guards/conditions
   - content negotiation and format-aware rendering paths
   - API-only mode defaults
-  - baseline testing helpers for HTTP/JSON flows
-- Establish compiled deployment baseline:
-  - immutable release artifact layout
+  - baseline HTTP/JSON flow regression coverage
+- Established compiled deployment baseline:
+  - immutable release artifact layout and metadata
   - explicit migration step in deployment workflow
-  - readiness and liveness endpoints
-  - production JSON logging defaults
-  - rollback workflow via previous release artifact selection
-- Publish first deployment runbooks:
-  - container-first path
-  - VM/systemd path
-- Harden performance regression execution:
-  - add a `make check` path that runs unit + integration + perf gates
-  - keep local fast path available while making perf gate mandatory for CI/release validation
-  - expand perf gate coverage beyond `root_p95_ms` to include endpoint p95, throughput floor, and memory growth guardrails
-  - run benchmark scenarios with repeated runs and median-based comparison to reduce noise
-  - require baseline metadata and explicit baseline update policy
+  - readiness and liveness endpoint contract (`/readyz`, `/livez`)
+  - production JSON logging defaults for API-only posture
+  - rollback workflow through release selection scripts
+- Published first deployment runbook baseline:
+  - container-first operational path
+  - VM/systemd operational path
+- Hardened performance regression execution:
+  - `make check` path runs unit + integration + perf gate
+  - local fast path retained via perf script flags
+  - perf gate expanded beyond single endpoint p95 to endpoint p95 + throughput floor + memory growth guardrails
+  - repeated-run, median-based scenario comparison
+  - baseline metadata and explicit baseline update policy
 
-Acceptance:
-- Phase 2 parity checklist items are implemented, deferred, or out-of-scope with explicit rationale.
-- Deployment smoke tests pass for release artifact boot, migration step, health checks, and rollback.
-- Rolling reload behavior under `propane` is validated with integration tests.
-- `make check` execution path passes in CI environment with perf gate enabled.
-- Perf harness regression tests validate endpoint latency, throughput, and memory guardrail behavior.
-- Baseline refresh/update workflow is documented and enforced in review checklist.
+Acceptance (met):
+- EOC transpiler/runtime behavior matches `V1_SPEC.md` sigil-local and strict render-mode semantics with regression coverage.
+- Full/lite starter apps and generator-driven endpoint flows meet boilerplate-reduction targets.
+- In-scope Phase 2 parity checklist items are implemented or explicitly classified in parity docs.
+- Deployment smoke tests pass for release artifact build, activation, health checks, and rollback.
+- Rolling reload behavior under `propane` remains validated with integration tests.
+- `make check` passes with perf gate enabled.
+- Perf harness regression checks validate endpoint latency, throughput, and memory guardrails.
+- Baseline refresh/update workflow is documented and enforced through explicit update flag policy.
 
 ## 4. Key Decisions (Phase 2)
 
@@ -176,7 +189,7 @@ Recommendation: make perf regression checks release-blocking in CI while preserv
 - Mandatory CI/release execution of perf regression gate via `make check`.
 - Perf budgets include endpoint p95, throughput floor, and memory growth constraints.
 
-## 6. Planned Refactor Tracks
+## 6. Refactor Tracks Executed in Phase 2
 
 1. Split `boomhauer` supervisor from build/worker execution path to guarantee non-crashing reload behavior.
 2. Normalize error payload structures across transpiler/runtime/compiler failure surfaces.
@@ -184,3 +197,5 @@ Recommendation: make perf regression checks release-blocking in CI while preserv
 4. Add reusable validation primitives and shared serialization for validation error responses.
 5. Add explicit parse/write timing instrumentation points in HTTP request lifecycle code paths.
 6. Wire `performanceLogging` configuration into runtime timing headers/log payload behavior.
+7. Align transpiler/runtime local-variable semantics with `V1_SPEC.md` (`$name` rewrite + strict locals/stringify enforcement).
+8. Consolidate app boot and route-generation ergonomics so common endpoint workflows avoid manual `main.m`/`app_lite.m` plumbing edits.

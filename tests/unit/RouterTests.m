@@ -59,4 +59,56 @@
   XCTAssertEqualObjects(match.params[@"path"], @"css/app/site.css");
 }
 
+- (void)testNestedRouteGroupAppliesPrefixGuardAndFormats {
+  ALNRouter *router = [[ALNRouter alloc] init];
+  [router beginRouteGroupWithPrefix:@"/admin"
+                        guardAction:@"requireAdmin"
+                            formats:@[ @"json" ]];
+  [router beginRouteGroupWithPrefix:@"/users" guardAction:nil formats:nil];
+  [router addRouteMethod:@"GET"
+                    path:@"/:id"
+                    name:@"admin_user_show"
+         controllerClass:[RouterDummyController class]
+                  action:@"index"];
+  [router endRouteGroup];
+  [router endRouteGroup];
+
+  ALNRouteMatch *jsonMatch =
+      [router matchMethod:@"GET" path:@"/admin/users/42" format:@"json"];
+  XCTAssertNotNil(jsonMatch);
+  XCTAssertEqualObjects(jsonMatch.route.pathPattern, @"/admin/users/:id");
+  XCTAssertEqualObjects(jsonMatch.route.guardActionName, @"requireAdmin");
+  XCTAssertEqualObjects(jsonMatch.params[@"id"], @"42");
+
+  ALNRouteMatch *htmlMatch =
+      [router matchMethod:@"GET" path:@"/admin/users/42" format:@"html"];
+  XCTAssertNil(htmlMatch);
+}
+
+- (void)testFormatConditionSelectsMatchingRouteVariant {
+  ALNRouter *router = [[ALNRouter alloc] init];
+  [router addRouteMethod:@"GET"
+                    path:@"/report"
+                    name:@"report_html"
+                 formats:@[ @"html" ]
+         controllerClass:[RouterDummyController class]
+             guardAction:nil
+                  action:@"index"];
+  [router addRouteMethod:@"GET"
+                    path:@"/report"
+                    name:@"report_json"
+                 formats:@[ @"json" ]
+         controllerClass:[RouterDummyController class]
+             guardAction:nil
+                  action:@"index"];
+
+  ALNRouteMatch *htmlMatch = [router matchMethod:@"GET" path:@"/report" format:@"html"];
+  XCTAssertNotNil(htmlMatch);
+  XCTAssertEqualObjects(htmlMatch.route.name, @"report_html");
+
+  ALNRouteMatch *jsonMatch = [router matchMethod:@"GET" path:@"/report" format:@"json"];
+  XCTAssertNotNil(jsonMatch);
+  XCTAssertEqualObjects(jsonMatch.route.name, @"report_json");
+}
+
 @end
