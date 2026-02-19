@@ -69,6 +69,29 @@
   return @{ @"ignored" : @(YES) };
 }
 
+- (id)validate:(ALNContext *)ctx {
+  (void)ctx;
+  NSString *name = nil;
+  NSInteger count = 0;
+  [self requireStringParam:@"name" value:&name];
+  [self requireIntegerParam:@"count" value:&count];
+  if ([[self validationErrors] count] > 0) {
+    [self renderValidationErrors];
+    return nil;
+  }
+  return @{
+    @"name" : name ?: @"",
+    @"count" : @(count),
+  };
+}
+
+- (id)explode:(ALNContext *)ctx {
+  (void)ctx;
+  [NSException raise:@"AppJSONControllerException"
+              format:@"boom from controller"];
+  return nil;
+}
+
 @end
 
 @interface ApplicationTests : XCTestCase
@@ -77,9 +100,16 @@
 @implementation ApplicationTests
 
 - (ALNApplication *)buildAppWithHaltingMiddleware:(BOOL)useHalting {
+  return [self buildAppWithHaltingMiddleware:useHalting performanceLogging:YES environment:@"test"];
+}
+
+- (ALNApplication *)buildAppWithHaltingMiddleware:(BOOL)useHalting
+                               performanceLogging:(BOOL)performanceLogging
+                                      environment:(NSString *)environment {
   ALNApplication *app = [[ALNApplication alloc] initWithConfig:@{
-    @"environment" : @"test",
+    @"environment" : environment ?: @"test",
     @"logFormat" : @"json",
+    @"performanceLogging" : @(performanceLogging),
     @"host" : @"127.0.0.1",
     @"port" : @(3000),
   }];
@@ -98,6 +128,16 @@
                       name:@"explicit"
            controllerClass:[AppJSONController class]
                     action:@"explicit"];
+  [app registerRouteMethod:@"GET"
+                      path:@"/validate"
+                      name:@"validate"
+           controllerClass:[AppJSONController class]
+                    action:@"validate"];
+  [app registerRouteMethod:@"GET"
+                      path:@"/explode"
+                      name:@"explode"
+           controllerClass:[AppJSONController class]
+                    action:@"explode"];
 
   if (useHalting) {
     [app addMiddleware:[[AppHaltingMiddleware alloc] init]];
@@ -108,10 +148,16 @@
 }
 
 - (ALNRequest *)requestForPath:(NSString *)path {
+  return [self requestForPath:path queryString:@"" headers:@{}];
+}
+
+- (ALNRequest *)requestForPath:(NSString *)path
+                   queryString:(NSString *)queryString
+                       headers:(NSDictionary *)headers {
   return [[ALNRequest alloc] initWithMethod:@"GET"
                                       path:path
-                               queryString:@""
-                                   headers:@{}
+                               queryString:queryString ?: @""
+                                   headers:headers ?: @{}
                                       body:[NSData data]];
 }
 
@@ -160,6 +206,99 @@
   ALNApplication *app = [self buildAppWithHaltingMiddleware:NO];
   ALNResponse *response = [app dispatchRequest:[self requestForPath:@"/missing"]];
   XCTAssertEqual((NSInteger)404, response.statusCode);
+}
+
+- (void)testValidationErrorsReturnStandardized422Shape {
+  ALNApplication *app = [self buildAppWithHaltingMiddleware:NO];
+  ALNResponse *response = [app dispatchRequest:[self requestForPath:@"/validate"
+                                                         queryString:@"count=nope"
+                                                             headers:@{ @"accept" : @"application/json" }]];
+  XCTAssertEqual((NSInteger)422, response.statusCode);
+  XCTAssertEqualObjects(@"application/json; charset=utf-8",
+                        [response headerForName:@"Content-Type"]);
+
+  NSError *error = nil;
+  NSDictionary *json = [NSJSONSerialization JSONObjectWithData:response.bodyData
+                                                       options:0
+                                                         error:&error];
+  XCTAssertNil(error);
+  XCTAssertEqualObjects(@"validation_failed", json[@"error"][@"code"]);
+  XCTAssertEqualObjects(@"Validation failed", json[@"error"][@"message"]);
+  XCTAssertTrue([json[@"error"][@"request_id"] length] > 0);
+  NSArray *details = json[@"details"];
+  XCTAssertEqual((NSUInteger)2, [details count]);
+}
+
+- (void)testValidationSuccessUsesUnifiedParams {
+  ALNApplication *app = [self buildAppWithHaltingMiddleware:NO];
+  ALNResponse *response = [app dispatchRequest:[self requestForPath:@"/validate"
+                                                         queryString:@"name=peggy&count=7"
+                                                             headers:@{}]];
+  XCTAssertEqual((NSInteger)200, response.statusCode);
+  NSError *error = nil;
+  NSDictionary *json = [NSJSONSerialization JSONObjectWithData:response.bodyData
+                                                       options:0
+                                                         error:&error];
+  XCTAssertNil(error);
+  XCTAssertEqualObjects(@"peggy", json[@"name"]);
+  XCTAssertEqualObjects(@7, json[@"count"]);
+}
+
+- (void)testProductionStructuredErrorIncludesCorrelationID {
+  ALNApplication *app = [self buildAppWithHaltingMiddleware:NO
+                                         performanceLogging:YES
+                                                environment:@"production"];
+  ALNResponse *response = [app dispatchRequest:[self requestForPath:@"/explode"
+                                                         queryString:@""
+                                                             headers:@{ @"accept" : @"application/json" }]];
+  XCTAssertEqual((NSInteger)500, response.statusCode);
+  NSError *error = nil;
+  NSDictionary *json = [NSJSONSerialization JSONObjectWithData:response.bodyData
+                                                       options:0
+                                                         error:&error];
+  XCTAssertNil(error);
+  XCTAssertEqualObjects(@"controller_exception", json[@"error"][@"code"]);
+  XCTAssertEqualObjects(@"Internal Server Error", json[@"error"][@"message"]);
+  XCTAssertTrue([json[@"error"][@"correlation_id"] length] > 0);
+  XCTAssertNil(json[@"details"]);
+}
+
+- (void)testDevelopmentHTMLErrorPageForBrowserRequests {
+  ALNApplication *app = [self buildAppWithHaltingMiddleware:NO];
+  ALNResponse *response = [app dispatchRequest:[self requestForPath:@"/explode"
+                                                         queryString:@""
+                                                             headers:@{ @"accept" : @"text/html" }]];
+  XCTAssertEqual((NSInteger)500, response.statusCode);
+  XCTAssertEqualObjects(@"text/html; charset=utf-8",
+                        [response headerForName:@"Content-Type"]);
+  NSString *body = [[NSString alloc] initWithData:response.bodyData
+                                         encoding:NSUTF8StringEncoding];
+  XCTAssertTrue([body containsString:@"Arlen Development Exception"]);
+  XCTAssertTrue([body containsString:@"Request ID"]);
+}
+
+- (void)testPerformanceHeadersCanBeDisabled {
+  ALNApplication *app = [self buildAppWithHaltingMiddleware:NO
+                                         performanceLogging:NO
+                                                environment:@"test"];
+  ALNRequest *request = [self requestForPath:@"/dict" queryString:@"" headers:@{}];
+  request.parseDurationMilliseconds = 12.0;
+  ALNResponse *response = [app dispatchRequest:request];
+  XCTAssertNil([response headerForName:@"X-Arlen-Total-Ms"]);
+  XCTAssertNil([response headerForName:@"X-Arlen-Parse-Ms"]);
+  XCTAssertNil([response headerForName:@"X-Arlen-Response-Write-Ms"]);
+}
+
+- (void)testPerformanceHeadersIncludeParseAndResponseWriteWhenEnabled {
+  ALNApplication *app = [self buildAppWithHaltingMiddleware:NO
+                                         performanceLogging:YES
+                                                environment:@"test"];
+  ALNRequest *request = [self requestForPath:@"/dict" queryString:@"" headers:@{}];
+  request.parseDurationMilliseconds = 34.5;
+  ALNResponse *response = [app dispatchRequest:request];
+  XCTAssertNotNil([response headerForName:@"X-Arlen-Total-Ms"]);
+  XCTAssertEqualObjects(@"34.500", [response headerForName:@"X-Arlen-Parse-Ms"]);
+  XCTAssertNotNil([response headerForName:@"X-Arlen-Response-Write-Ms"]);
 }
 
 @end

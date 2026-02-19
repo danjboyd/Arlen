@@ -14,6 +14,7 @@ extern NSString *const ALNContextSessionStashKey;
 extern NSString *const ALNContextSessionDirtyStashKey;
 extern NSString *const ALNContextSessionHadCookieStashKey;
 extern NSString *const ALNContextCSRFTokenStashKey;
+extern NSString *const ALNContextValidationErrorsStashKey;
 
 @interface ALNContext : NSObject
 
@@ -40,6 +41,15 @@ extern NSString *const ALNContextCSRFTokenStashKey;
 - (NSMutableDictionary *)session;
 - (void)markSessionDirty;
 - (nullable NSString *)csrfToken;
+- (NSDictionary *)allParams;
+- (nullable id)paramValueForName:(NSString *)name;
+- (nullable NSString *)stringParamForName:(NSString *)name;
+- (BOOL)requireStringParam:(NSString *)name value:(NSString *_Nullable *_Nullable)value;
+- (BOOL)requireIntegerParam:(NSString *)name value:(NSInteger *_Nullable)value;
+- (void)addValidationErrorForField:(NSString *)field
+                              code:(NSString *)code
+                           message:(NSString *)message;
+- (NSArray *)validationErrors;
 
 @end
 

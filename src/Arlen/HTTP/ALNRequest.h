@@ -20,6 +20,8 @@ extern NSString *const ALNRequestErrorDomain;
 @property(nonatomic, copy) NSString *remoteAddress;
 @property(nonatomic, copy) NSString *effectiveRemoteAddress;
 @property(nonatomic, copy) NSString *scheme;
+@property(nonatomic, assign) double parseDurationMilliseconds;
+@property(nonatomic, assign) double responseWriteDurationMilliseconds;
 
 - (instancetype)initWithMethod:(NSString *)method
                           path:(NSString *)path

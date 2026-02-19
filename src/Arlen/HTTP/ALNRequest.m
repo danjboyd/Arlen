@@ -87,6 +87,8 @@ static NSDictionary *ALNParseCookies(NSString *cookieHeader) {
     _remoteAddress = @"";
     _effectiveRemoteAddress = @"";
     _scheme = @"http";
+    _parseDurationMilliseconds = 0.0;
+    _responseWriteDurationMilliseconds = 0.0;
   }
   return self;
 }

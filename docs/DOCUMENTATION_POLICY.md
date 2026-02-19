@@ -8,6 +8,8 @@ Documentation is a product feature, not an afterthought.
 
 A feature is not done until its user-facing behavior is documented.
 
+New-developer success is a primary requirement: documentation should let a developer scaffold and run a first app without guesswork.
+
 ## 2. Documentation Definition of Done
 
 Every feature or behavior change should include updates to all affected docs:
@@ -49,6 +51,7 @@ When applicable, update:
 3. Are environment variables and defaults accurate?
 4. Are cross-links to specs/roadmaps correct?
 5. Are examples aligned with current APIs (`ALN*` primary, legacy aliases called out as compatibility only)?
+6. Can a new developer reach "first running app" by following `docs/FIRST_APP_GUIDE.md` exactly?
 
 ## 7. Browser Docs Build Check
 

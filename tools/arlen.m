@@ -1,28 +1,10 @@
 #import <Foundation/Foundation.h>
-#import <signal.h>
 #import <stdio.h>
 #import <stdlib.h>
-#import <string.h>
 
 #import "ALNConfig.h"
 #import "ALNMigrationRunner.h"
 #import "ALNPg.h"
-
-static volatile sig_atomic_t gWatchRunning = 1;
-
-static void HandleWatchSignal(int sig) {
-  (void)sig;
-  gWatchRunning = 0;
-}
-
-static BOOL InstallWatchSignalHandler(int sig) {
-  struct sigaction action;
-  memset(&action, 0, sizeof(action));
-  action.sa_handler = HandleWatchSignal;
-  sigemptyset(&action.sa_mask);
-  action.sa_flags = 0;
-  return (sigaction(sig, &action, NULL) == 0);
-}
 
 static void PrintUsage(void) {
   fprintf(stderr,
@@ -39,6 +21,14 @@ static void PrintUsage(void) {
           "  perf\n"
           "  build\n"
           "  config [--env <name>] [--json]\n");
+}
+
+static void PrintNewUsage(void) {
+  fprintf(stdout, "Usage: arlen new <AppName> [--full|--lite] [--force]\n");
+}
+
+static void PrintGenerateUsage(void) {
+  fprintf(stdout, "Usage: arlen generate <controller|model|migration|test> <Name>\n");
 }
 
 static NSString *ShellQuote(NSString *value) {
@@ -136,108 +126,6 @@ static NSString *BoomhauerLaunchCommand(NSArray *serverArgs, NSString *framework
   NSString *suffix = ([parts count] > 0) ? [NSString stringWithFormat:@" %@", [parts componentsJoinedByString:@" "]] : @"";
   return [NSString stringWithFormat:@"cd %@ && ARLEN_APP_ROOT=%@ ./build/boomhauer%@",
                                     ShellQuote(frameworkRoot), ShellQuote(appRoot), suffix];
-}
-
-static NSDictionary *BuildWatchSnapshot(NSArray *roots) {
-  NSFileManager *fm = [NSFileManager defaultManager];
-  NSString *cwd = [fm currentDirectoryPath];
-  NSMutableDictionary *snapshot = [NSMutableDictionary dictionary];
-
-  for (NSString *relativeRoot in roots) {
-    NSString *root = [cwd stringByAppendingPathComponent:relativeRoot];
-    BOOL isDirectory = NO;
-    if (![fm fileExistsAtPath:root isDirectory:&isDirectory]) {
-      continue;
-    }
-
-    if (!isDirectory) {
-      NSDictionary *attrs = [fm attributesOfItemAtPath:root error:nil];
-      NSString *fileType = attrs[NSFileType];
-      if ([fileType isEqualToString:NSFileTypeRegular]) {
-        NSDate *mtime = attrs[NSFileModificationDate] ?: [NSDate dateWithTimeIntervalSince1970:0];
-        NSNumber *size = attrs[NSFileSize] ?: @(0);
-        snapshot[relativeRoot] =
-            [NSString stringWithFormat:@"%@|%@", @([mtime timeIntervalSince1970]), size];
-      }
-      continue;
-    }
-
-    NSDirectoryEnumerator *enumerator = [fm enumeratorAtPath:root];
-    NSString *entry = nil;
-    while ((entry = [enumerator nextObject])) {
-      NSString *fullPath = [root stringByAppendingPathComponent:entry];
-      BOOL childDirectory = NO;
-      if (![fm fileExistsAtPath:fullPath isDirectory:&childDirectory] || childDirectory) {
-        continue;
-      }
-      NSDictionary *attrs = [fm attributesOfItemAtPath:fullPath error:nil];
-      NSString *fileType = attrs[NSFileType];
-      if (![fileType isEqualToString:NSFileTypeRegular]) {
-        continue;
-      }
-      NSDate *mtime = attrs[NSFileModificationDate] ?: [NSDate dateWithTimeIntervalSince1970:0];
-      NSNumber *size = attrs[NSFileSize] ?: @(0);
-      NSString *relativePath = [relativeRoot stringByAppendingPathComponent:entry];
-      snapshot[relativePath] =
-          [NSString stringWithFormat:@"%@|%@", @([mtime timeIntervalSince1970]), size];
-    }
-  }
-
-  return snapshot;
-}
-
-static int RunBoomhauerWatchMode(NSArray *serverArgs, NSString *frameworkRoot, NSString *appRoot) {
-  if (!InstallWatchSignalHandler(SIGINT) || !InstallWatchSignalHandler(SIGTERM)) {
-    perror("sigaction");
-    return 1;
-  }
-
-  NSArray *watchRoots = @[ @"src", @"templates", @"config", @"tools", @"public", @"app_lite.m" ];
-  NSDictionary *snapshot = BuildWatchSnapshot(watchRoots);
-  NSString *buildCommand = BoomhauerBuildCommand(frameworkRoot);
-  NSString *launchCommand = BoomhauerLaunchCommand(serverArgs, frameworkRoot, appRoot);
-
-  while (gWatchRunning) {
-    int buildStatus = RunShellCommand(buildCommand);
-    if (buildStatus != 0) {
-      return buildStatus;
-    }
-
-    NSTask *server = [[NSTask alloc] init];
-    server.launchPath = @"/bin/bash";
-    server.arguments = @[ @"-lc", launchCommand ];
-    server.standardInput = [NSFileHandle fileHandleWithStandardInput];
-    server.standardOutput = [NSFileHandle fileHandleWithStandardOutput];
-    server.standardError = [NSFileHandle fileHandleWithStandardError];
-    [server launch];
-
-    BOOL shouldRestart = NO;
-    while (gWatchRunning && [server isRunning]) {
-      [NSThread sleepForTimeInterval:1.0];
-      NSDictionary *current = BuildWatchSnapshot(watchRoots);
-      if (![current isEqualToDictionary:snapshot]) {
-        snapshot = current;
-        shouldRestart = YES;
-        fprintf(stderr, "arlen: change detected, restarting boomhauer\n");
-        [server terminate];
-        break;
-      }
-    }
-
-    if ([server isRunning] && !gWatchRunning) {
-      [server terminate];
-    }
-    [server waitUntilExit];
-
-    if (!gWatchRunning) {
-      return 0;
-    }
-    if (shouldRestart) {
-      continue;
-    }
-    return server.terminationStatus;
-  }
-  return 0;
 }
 
 static BOOL WriteTextFile(NSString *path, NSString *content, BOOL force, NSError **error) {
@@ -450,6 +338,10 @@ static BOOL ScaffoldFullApp(NSString *root, BOOL force, NSError **error) {
   ok = ok && WriteTextFile([root stringByAppendingPathComponent:@"README.md"],
                            @"# New Arlen App\n\n"
                             "Generated by arlen in full mode.\n\n"
+                            "## Run\n\n"
+                            "From this app directory:\n\n"
+                            "- `arlen boomhauer --port 3000` (if `arlen` is on PATH)\n"
+                            "- or `/path/to/Arlen/bin/arlen boomhauer --port 3000`\n\n"
                             "- `src/main.m` starts an app with default settings.\n"
                             "- `src/Controllers/HomeController.m` handles `/`.\n"
                             "- `templates/index.html.eoc` renders the home page.\n",
@@ -568,6 +460,10 @@ static BOOL ScaffoldLiteApp(NSString *root, BOOL force, NSError **error) {
   ok = ok && WriteTextFile([root stringByAppendingPathComponent:@"README.md"],
                            @"# New Arlen Lite App\n\n"
                             "Generated by arlen in lite mode.\n\n"
+                            "## Run\n\n"
+                            "From this app directory:\n\n"
+                            "- `arlen boomhauer --port 3000` (if `arlen` is on PATH)\n"
+                            "- or `/path/to/Arlen/bin/arlen boomhauer --port 3000`\n\n"
                             "- `app_lite.m` includes a single-file controller + server setup.\n"
                             "- You can split this into full mode structure later.\n",
                            force, error);
@@ -579,9 +475,19 @@ static BOOL ScaffoldLiteApp(NSString *root, BOOL force, NSError **error) {
 static int CommandNew(NSArray *args) {
   if ([args count] == 0) {
     fprintf(stderr, "arlen new: missing AppName\n");
+    PrintNewUsage();
     return 2;
   }
+  if ([args count] == 1 && ([args[0] isEqualToString:@"--help"] || [args[0] isEqualToString:@"-h"])) {
+    PrintNewUsage();
+    return 0;
+  }
   NSString *appName = args[0];
+  if ([appName hasPrefix:@"-"]) {
+    fprintf(stderr, "arlen new: missing AppName\n");
+    PrintNewUsage();
+    return 2;
+  }
   BOOL lite = NO;
   BOOL force = NO;
 
@@ -593,8 +499,12 @@ static int CommandNew(NSArray *args) {
       lite = NO;
     } else if ([arg isEqualToString:@"--force"]) {
       force = YES;
+    } else if ([arg isEqualToString:@"--help"] || [arg isEqualToString:@"-h"]) {
+      PrintNewUsage();
+      return 0;
     } else {
       fprintf(stderr, "arlen new: unknown option %s\n", [arg UTF8String]);
+      PrintNewUsage();
       return 2;
     }
   }
@@ -621,9 +531,18 @@ static NSString *CapitalizeFirst(NSString *name) {
 }
 
 static int CommandGenerate(NSArray *args) {
+  if ([args count] == 1 && ([args[0] isEqualToString:@"--help"] || [args[0] isEqualToString:@"-h"])) {
+    PrintGenerateUsage();
+    return 0;
+  }
   if ([args count] < 2) {
     fprintf(stderr, "arlen generate: expected type and Name\n");
+    PrintGenerateUsage();
     return 2;
+  }
+  if ([args count] == 2 && ([args[1] isEqualToString:@"--help"] || [args[1] isEqualToString:@"-h"])) {
+    PrintGenerateUsage();
+    return 0;
   }
 
   NSString *type = args[0];
@@ -732,29 +651,22 @@ static NSString *ResolveFrameworkRootForCommand(NSString *commandName) {
 }
 
 static int CommandBoomhauer(NSArray *args) {
-  BOOL watch = NO;
-  NSMutableArray *serverArgs = [NSMutableArray array];
-  for (NSString *arg in args) {
-    if ([arg isEqualToString:@"--watch"]) {
-      watch = YES;
-      continue;
-    }
-    [serverArgs addObject:arg];
-  }
-
   NSString *appRoot = [[NSFileManager defaultManager] currentDirectoryPath];
   NSString *frameworkRoot = ResolveFrameworkRootForCommand(@"boomhauer");
   if ([frameworkRoot length] == 0) {
     return 1;
   }
 
-  if (watch) {
-    return RunBoomhauerWatchMode(serverArgs, frameworkRoot, appRoot);
+  NSMutableArray *quoted = [NSMutableArray array];
+  for (NSString *arg in args ?: @[]) {
+    [quoted addObject:ShellQuote(arg)];
   }
+  NSString *suffix =
+      ([quoted count] > 0) ? [NSString stringWithFormat:@" %@", [quoted componentsJoinedByString:@" "]] : @"";
 
-  NSString *command = [NSString stringWithFormat:@"%@ && %@",
-                                                 BoomhauerBuildCommand(frameworkRoot),
-                                                 BoomhauerLaunchCommand(serverArgs, frameworkRoot, appRoot)];
+  NSString *command = [NSString stringWithFormat:@"cd %@ && ARLEN_APP_ROOT=%@ ARLEN_FRAMEWORK_ROOT=%@ ./bin/boomhauer%@",
+                                                 ShellQuote(frameworkRoot), ShellQuote(appRoot),
+                                                 ShellQuote(frameworkRoot), suffix];
   return RunShellCommand(command);
 }
 

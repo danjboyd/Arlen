@@ -70,28 +70,41 @@ make docs-html
 
 Open `build/docs/index.html`.
 
-## 7. Scaffold a New App
+## 7. Create Your First App (Recommended CLI Path)
 
-Full app (default):
-
-```bash
-./bin/arlen new MyApp
-```
-
-Lite app:
+Scaffold a full app (default mode):
 
 ```bash
-./bin/arlen new MyLiteApp --lite
+mkdir -p ~/arlen-apps
+cd ~/arlen-apps
+/path/to/Arlen/bin/arlen new MyApp
+cd MyApp
 ```
 
 Run app dev server from app root:
 
 ```bash
-cd MyApp
-/path/to/Arlen/bin/boomhauer
+/path/to/Arlen/bin/arlen boomhauer --port 3000
 ```
 
-By default, `boomhauer` watches source/template/config/public changes and rebuilds.
+By default, boomhauer watches source/template/config/public changes and rebuilds.
+
+If a watched reload fails to transpile/compile, `boomhauer` stays up and serves diagnostics instead of crashing:
+
+```bash
+curl -sS http://127.0.0.1:3000/
+curl -sS -H 'Accept: application/json' http://127.0.0.1:3000/api/dev/build-error
+```
+
+After you fix the source error, the next successful rebuild resumes normal app responses automatically.
+
+Lite app scaffold remains available:
+
+```bash
+/path/to/Arlen/bin/arlen new MyLiteApp --lite
+```
+
+For a copy-paste end-to-end walkthrough, see `docs/FIRST_APP_GUIDE.md`.
 
 ## 8. Common Environment Variables
 
@@ -103,6 +116,7 @@ Framework/app runtime:
 - `ARLEN_LOG_FORMAT`
 - `ARLEN_TRUSTED_PROXY`
 - `ARLEN_SERVE_STATIC`
+- `ARLEN_PERFORMANCE_LOGGING`
 - `ARLEN_MAX_REQUEST_LINE_BYTES`
 - `ARLEN_MAX_HEADER_BYTES`
 - `ARLEN_MAX_BODY_BYTES`

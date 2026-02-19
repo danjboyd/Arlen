@@ -28,6 +28,16 @@ NS_ASSUME_NONNULL_BEGIN
 - (NSMutableDictionary *)session;
 - (nullable NSString *)csrfToken;
 - (void)markSessionDirty;
+- (NSDictionary *)params;
+- (nullable id)paramValueForName:(NSString *)name;
+- (nullable NSString *)stringParamForName:(NSString *)name;
+- (BOOL)requireStringParam:(NSString *)name value:(NSString *_Nullable *_Nullable)value;
+- (BOOL)requireIntegerParam:(NSString *)name value:(NSInteger *_Nullable)value;
+- (void)addValidationErrorForField:(NSString *)field
+                              code:(NSString *)code
+                           message:(NSString *)message;
+- (NSArray *)validationErrors;
+- (BOOL)renderValidationErrors;
 
 @end
 

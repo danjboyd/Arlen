@@ -82,6 +82,322 @@
 
 @end
 
+static NSString *EnvString(const char *name) {
+  const char *raw = getenv(name);
+  if (raw == NULL || raw[0] == '\0') {
+    return nil;
+  }
+  return [NSString stringWithUTF8String:raw];
+}
+
+static NSString *ReadTextFile(NSString *path) {
+  if ([path length] == 0) {
+    return @"";
+  }
+  NSError *error = nil;
+  NSString *content = [NSString stringWithContentsOfFile:path
+                                                encoding:NSUTF8StringEncoding
+                                                   error:&error];
+  if (content != nil) {
+    return content;
+  }
+
+  NSData *data = [NSData dataWithContentsOfFile:path options:0 error:nil];
+  if (data == nil) {
+    return @"";
+  }
+  NSString *fallback = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
+  return fallback ?: @"";
+}
+
+static NSString *EscapeHTML(NSString *value) {
+  NSString *safe = value ?: @"";
+  safe = [safe stringByReplacingOccurrencesOfString:@"&" withString:@"&amp;"];
+  safe = [safe stringByReplacingOccurrencesOfString:@"<" withString:@"&lt;"];
+  safe = [safe stringByReplacingOccurrencesOfString:@">" withString:@"&gt;"];
+  safe = [safe stringByReplacingOccurrencesOfString:@"\"" withString:@"&quot;"];
+  return [safe stringByReplacingOccurrencesOfString:@"'" withString:@"&#39;"];
+}
+
+static NSDictionary *ParseMetadataFile(NSString *path) {
+  NSString *content = ReadTextFile(path);
+  if ([content length] == 0) {
+    return @{};
+  }
+
+  NSMutableDictionary *out = [NSMutableDictionary dictionary];
+  NSArray *lines = [content componentsSeparatedByCharactersInSet:[NSCharacterSet newlineCharacterSet]];
+  for (NSString *line in lines) {
+    NSRange equals = [line rangeOfString:@"="];
+    if (equals.location == NSNotFound) {
+      continue;
+    }
+    NSString *key = [[line substringToIndex:equals.location]
+        stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    NSString *value = [[line substringFromIndex:equals.location + 1]
+        stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    if ([key length] == 0) {
+      continue;
+    }
+    out[key] = value ?: @"";
+  }
+  return out;
+}
+
+static NSDictionary *ExtractPrimaryDiagnostic(NSString *output) {
+  if ([output length] == 0) {
+    return @{};
+  }
+
+  NSRegularExpression *regex =
+      [NSRegularExpression regularExpressionWithPattern:@"^(.+?):([0-9]+):([0-9]+):\\s*(fatal error|error|warning):\\s*(.+)$"
+                                                options:NSRegularExpressionAnchorsMatchLines
+                                                  error:nil];
+  NSArray *matches = [regex matchesInString:output
+                                    options:0
+                                      range:NSMakeRange(0, [output length])];
+  if ([matches count] == 0) {
+    return @{};
+  }
+
+  NSTextCheckingResult *best = nil;
+  for (NSTextCheckingResult *candidate in matches) {
+    if ([candidate numberOfRanges] < 6) {
+      continue;
+    }
+    NSRange severityRange = [candidate rangeAtIndex:4];
+    NSString *severity = [[output substringWithRange:severityRange] lowercaseString];
+    if ([severity isEqualToString:@"warning"]) {
+      if (best == nil) {
+        best = candidate;
+      }
+      continue;
+    }
+    best = candidate;
+    break;
+  }
+
+  if (best == nil || [best numberOfRanges] < 6) {
+    return @{};
+  }
+
+  NSString *file = [output substringWithRange:[best rangeAtIndex:1]];
+  NSString *line = [output substringWithRange:[best rangeAtIndex:2]];
+  NSString *column = [output substringWithRange:[best rangeAtIndex:3]];
+  NSString *severity = [output substringWithRange:[best rangeAtIndex:4]];
+  NSString *message = [output substringWithRange:[best rangeAtIndex:5]];
+  return @{
+    @"file" : file ?: @"",
+    @"line" : @([line integerValue]),
+    @"column" : @([column integerValue]),
+    @"severity" : severity ?: @"",
+    @"message" : message ?: @"",
+  };
+}
+
+static NSString *SourceSnippetForDiagnostic(NSDictionary *diagnostic) {
+  NSString *file = [diagnostic[@"file"] isKindOfClass:[NSString class]] ? diagnostic[@"file"] : nil;
+  NSInteger line = [diagnostic[@"line"] respondsToSelector:@selector(integerValue)]
+                       ? [diagnostic[@"line"] integerValue]
+                       : 0;
+  if ([file length] == 0 || line <= 0) {
+    return @"";
+  }
+
+  NSString *content = ReadTextFile(file);
+  if ([content length] == 0) {
+    return @"";
+  }
+
+  NSArray *lines = [content componentsSeparatedByCharactersInSet:[NSCharacterSet newlineCharacterSet]];
+  NSInteger idx = line - 1;
+  if (idx < 0 || idx >= (NSInteger)[lines count]) {
+    return @"";
+  }
+
+  NSInteger start = MAX(0, idx - 1);
+  NSInteger end = MIN((NSInteger)[lines count] - 1, idx + 1);
+  NSMutableString *snippet = [NSMutableString string];
+  for (NSInteger current = start; current <= end; current++) {
+    NSString *prefix = (current == idx) ? @">" : @" ";
+    [snippet appendFormat:@"%@ %ld | %@\n", prefix, (long)(current + 1), lines[(NSUInteger)current]];
+  }
+  return snippet;
+}
+
+static NSArray *WarningLines(NSString *output) {
+  if ([output length] == 0) {
+    return @[];
+  }
+  NSMutableArray *warnings = [NSMutableArray array];
+  NSArray *lines = [output componentsSeparatedByCharactersInSet:[NSCharacterSet newlineCharacterSet]];
+  for (NSString *line in lines) {
+    if ([[line lowercaseString] containsString:@"warning:"]) {
+      [warnings addObject:line];
+    }
+  }
+  return warnings;
+}
+
+static NSDictionary *BuildFailurePayload(NSString *requestID) {
+  NSString *metaFile = EnvString("ARLEN_BOOMHAUER_BUILD_ERROR_META_FILE");
+  NSString *outputFile = EnvString("ARLEN_BOOMHAUER_BUILD_ERROR_FILE");
+
+  NSDictionary *meta = ParseMetadataFile(metaFile);
+  NSString *stage = [meta[@"stage"] isKindOfClass:[NSString class]] ? meta[@"stage"] : @"compile";
+  NSString *command = [meta[@"command"] isKindOfClass:[NSString class]] ? meta[@"command"] : @"";
+  NSInteger exitCode = [meta[@"exit_code"] respondsToSelector:@selector(integerValue)]
+                           ? [meta[@"exit_code"] integerValue]
+                           : 1;
+
+  NSString *output = ReadTextFile(outputFile);
+  NSDictionary *diagnostic = ExtractPrimaryDiagnostic(output);
+  NSString *snippet = SourceSnippetForDiagnostic(diagnostic);
+  NSArray *warnings = WarningLines(output);
+
+  NSMutableDictionary *details = [NSMutableDictionary dictionary];
+  details[@"stage"] = stage ?: @"compile";
+  details[@"command"] = command ?: @"";
+  details[@"exit_code"] = @(exitCode);
+  if ([diagnostic count] > 0) {
+    [details addEntriesFromDictionary:diagnostic];
+  }
+  if ([snippet length] > 0) {
+    details[@"snippet"] = snippet;
+  }
+  if ([warnings count] > 0) {
+    details[@"warnings"] = warnings;
+  }
+  if ([output length] > 0) {
+    NSUInteger limit = MIN((NSUInteger)16000, [output length]);
+    details[@"output"] = [output substringToIndex:limit];
+  }
+
+  return @{
+    @"error" : @{
+      @"code" : @"dev_build_failed",
+      @"message" : @"Build failed while reloading app",
+      @"request_id" : requestID ?: @"",
+      @"correlation_id" : requestID ?: @"",
+    },
+    @"details" : details
+  };
+}
+
+static BOOL RequestPrefersJSON(ALNRequest *request) {
+  NSString *accept = [request.headers[@"accept"] isKindOfClass:[NSString class]]
+                         ? [request.headers[@"accept"] lowercaseString]
+                         : @"";
+  if ([accept containsString:@"application/json"] || [accept containsString:@"text/json"]) {
+    return YES;
+  }
+  NSString *path = request.path ?: @"";
+  if ([path hasPrefix:@"/api/"] || [path isEqualToString:@"/api"] ||
+      [path hasPrefix:@"/api/dev/"]) {
+    return YES;
+  }
+  return NO;
+}
+
+static NSString *BuildFailureHTML(NSDictionary *payload) {
+  NSDictionary *error = [payload[@"error"] isKindOfClass:[NSDictionary class]] ? payload[@"error"] : @{};
+  NSDictionary *details = [payload[@"details"] isKindOfClass:[NSDictionary class]] ? payload[@"details"] : @{};
+  NSString *requestID = [error[@"request_id"] isKindOfClass:[NSString class]] ? error[@"request_id"] : @"";
+  NSString *message = [error[@"message"] isKindOfClass:[NSString class]] ? error[@"message"] : @"Build failed";
+
+  NSMutableString *html = [NSMutableString string];
+  [html appendString:@"<!doctype html><html><head><meta charset='utf-8'>"];
+  [html appendString:@"<title>Boomhauer Build Error</title>"];
+  [html appendString:@"<style>body{font-family:Menlo,Consolas,monospace;background:#111;color:#eee;padding:24px;}h1{margin-top:0;}pre{background:#1b1b1b;border:1px solid #333;padding:12px;overflow:auto;}code{background:#1b1b1b;padding:2px 4px;}table{border-collapse:collapse;width:100%;}td{border:1px solid #333;padding:6px;vertical-align:top;}details{margin-top:12px;}</style>"];
+  [html appendString:@"</head><body>"];
+  [html appendString:@"<h1>Boomhauer Build Failed</h1>"];
+  [html appendFormat:@"<p>%@</p>", EscapeHTML(message)];
+  [html appendFormat:@"<p><strong>Request ID:</strong> <code>%@</code></p>", EscapeHTML(requestID)];
+  [html appendString:@"<table>"];
+
+  NSArray *orderedKeys = @[ @"stage", @"command", @"exit_code", @"file", @"line", @"column", @"message" ];
+  for (NSString *key in orderedKeys) {
+    id value = details[key];
+    if (value == nil) {
+      continue;
+    }
+    NSString *rendered = [value description] ?: @"";
+    [html appendFormat:@"<tr><td><strong>%@</strong></td><td><pre>%@</pre></td></tr>",
+                       EscapeHTML(key), EscapeHTML(rendered)];
+  }
+
+  NSString *snippet = [details[@"snippet"] isKindOfClass:[NSString class]] ? details[@"snippet"] : @"";
+  if ([snippet length] > 0) {
+    [html appendFormat:@"<tr><td><strong>snippet</strong></td><td><pre>%@</pre></td></tr>",
+                       EscapeHTML(snippet)];
+  }
+
+  NSString *output = [details[@"output"] isKindOfClass:[NSString class]] ? details[@"output"] : @"";
+  if ([output length] > 0) {
+    [html appendFormat:@"<tr><td><strong>output</strong></td><td><pre>%@</pre></td></tr>",
+                       EscapeHTML(output)];
+  }
+  [html appendString:@"</table>"];
+
+  NSArray *warnings = [details[@"warnings"] isKindOfClass:[NSArray class]] ? details[@"warnings"] : @[];
+  if ([warnings count] > 0) {
+    NSString *warningText = [warnings componentsJoinedByString:@"\n"];
+    [html appendFormat:@"<details><summary>Warnings (%lu)</summary><pre>%@</pre></details>",
+                       (unsigned long)[warnings count],
+                       EscapeHTML(warningText)];
+  }
+
+  [html appendString:@"</body></html>"];
+  return html;
+}
+
+@interface BuildErrorController : ALNController
+@end
+
+@implementation BuildErrorController
+
+- (id)health:(ALNContext *)ctx {
+  (void)ctx;
+  [self setStatus:200];
+  [self renderText:@"degraded\n"];
+  return nil;
+}
+
+- (id)json:(ALNContext *)ctx {
+  NSString *requestID = [ctx.stash[@"request_id"] isKindOfClass:[NSString class]]
+                            ? ctx.stash[@"request_id"]
+                            : @"";
+  NSDictionary *payload = BuildFailurePayload(requestID);
+  NSError *error = nil;
+  if (![self renderJSON:payload error:&error]) {
+    [self setStatus:500];
+    [self renderText:[NSString stringWithFormat:@"render failed: %@", error.localizedDescription ?: @"unknown"]];
+    return nil;
+  }
+  [self setStatus:500];
+  return nil;
+}
+
+- (id)show:(ALNContext *)ctx {
+  NSString *requestID = [ctx.stash[@"request_id"] isKindOfClass:[NSString class]]
+                            ? ctx.stash[@"request_id"]
+                            : @"";
+  NSDictionary *payload = BuildFailurePayload(requestID);
+
+  if (RequestPrefersJSON(ctx.request)) {
+    return [self json:ctx];
+  }
+
+  NSString *html = BuildFailureHTML(payload);
+  [self setStatus:500];
+  [ctx.response setHeader:@"Content-Type" value:@"text/html; charset=utf-8"];
+  [ctx.response setTextBody:html ?: @"Build failed\n"];
+  ctx.response.committed = YES;
+  return nil;
+}
+
+@end
+
 static ALNApplication *BuildApplication(NSString *environment) {
   NSError *error = nil;
   ALNApplication *app = [[ALNApplication alloc] initWithEnvironment:environment
@@ -123,6 +439,32 @@ static ALNApplication *BuildApplication(NSString *environment) {
                       name:@"healthz"
            controllerClass:[HealthController class]
                     action:@"check"];
+  return app;
+}
+
+static ALNApplication *BuildBuildErrorApplication(void) {
+  ALNApplication *app = [[ALNApplication alloc] initWithConfig:@{
+    @"environment" : @"development",
+    @"logFormat" : @"text",
+    @"performanceLogging" : @(NO),
+    @"serveStatic" : @(NO),
+  }];
+
+  [app registerRouteMethod:@"ANY"
+                      path:@"/healthz"
+                      name:@"dev_error_health"
+           controllerClass:[BuildErrorController class]
+                    action:@"health"];
+  [app registerRouteMethod:@"ANY"
+                      path:@"/api/dev/build-error"
+                      name:@"dev_error_json"
+           controllerClass:[BuildErrorController class]
+                    action:@"json"];
+  [app registerRouteMethod:@"ANY"
+                      path:@"/*path"
+                      name:@"dev_error_show"
+           controllerClass:[BuildErrorController class]
+                    action:@"show"];
   return app;
 }
 
@@ -172,7 +514,8 @@ int main(int argc, const char *argv[]) {
       }
     }
 
-    ALNApplication *app = BuildApplication(environment);
+    BOOL buildErrorMode = ([EnvString("ARLEN_BOOMHAUER_BUILD_ERROR_FILE") length] > 0);
+    ALNApplication *app = buildErrorMode ? BuildBuildErrorApplication() : BuildApplication(environment);
     if (app == nil) {
       return 1;
     }

@@ -1,13 +1,15 @@
 # EOC v1 Implementation Roadmap
 
 Status: Proposed  
-Last updated: 2026-02-18
+Last updated: 2026-02-19
 
 Related documents:
 
 - `docs/PHASE1_SPEC.md` (framework-level Phase 1 architecture/specification)
 - `docs/ARLEN_CLI_SPEC.md` (Phase 1 CLI contract for `arlen`)
 - `docs/LITE_MODE_SPEC.md` (Phase 1 lite-mode behavior and boundaries)
+- `docs/PHASE2_ROADMAP.md` (Phase 2 hardening milestones, including performance-gap closure)
+- `docs/PHASE3_ROADMAP.md` (Phase 3 trend analysis and expanded performance maturity work)
 - `V1_SPEC.md` (EOC template engine v1 details)
 
 ## Implementation Status (2026-02-18)
@@ -19,6 +21,12 @@ Related documents:
 - Completed: Phase 6 unit-test baseline with XCTest (`make test`).
 - Completed: initial basic-app capability checks (`eoc-smoke-render`, `boomhauer`, `bin/smoke`).
 - In progress: deeper fixture coverage, richer routing/controller layers, and integration-level MVC examples.
+
+## Cross-Cutting Rollout Alignment (2026-02-19)
+
+- Performance-priority work that affects EOC render paths is planned in framework Phase 2/3 roadmaps.
+- Phase 2C/2D define mandatory runtime timing coverage and CI perf-gate hardening.
+- Phase 3C expands trend analysis and workload profile coverage for sustained performance governance.
 
 ## Goal
 

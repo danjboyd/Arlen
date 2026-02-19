@@ -105,6 +105,8 @@ state_root="$app_root/.boomhauer"
 build_root="$state_root/build"
 app_binary="$build_root/boomhauer-app"
 gen_root="$build_root/gen/templates"
+error_output_file="$state_root/last_build_error.log"
+error_meta_file="$state_root/last_build_error.meta"
 mkdir -p "$gen_root"
 
 watch_fingerprint() {
@@ -159,9 +161,47 @@ transpile_templates() {
     "${template_files[@]}"
 }
 
+record_build_failure() {
+  local stage="$1"
+  local command="$2"
+  local exit_code="$3"
+  local output_file="$4"
+
+  command="${command//$'\n'/ }"
+  cp "$output_file" "$error_output_file"
+  {
+    printf 'stage=%s\n' "$stage"
+    printf 'command=%s\n' "$command"
+    printf 'exit_code=%s\n' "$exit_code"
+    printf 'timestamp_utc=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  } >"$error_meta_file"
+}
+
+clear_build_failure_state() {
+  rm -f "$error_output_file" "$error_meta_file"
+}
+
 compile_app() {
-  make -C "$framework_root" eocc >/dev/null
-  transpile_templates
+  local tmp_output
+  tmp_output="$(mktemp)"
+
+  if make -C "$framework_root" eocc >"$tmp_output" 2>&1; then
+    :
+  else
+    local status=$?
+    record_build_failure "tooling" "make -C $framework_root eocc" "$status" "$tmp_output"
+    rm -f "$tmp_output"
+    return "$status"
+  fi
+
+  if transpile_templates >"$tmp_output" 2>&1; then
+    :
+  else
+    local status=$?
+    record_build_failure "template_transpile" "$framework_root/build/eocc --template-root $app_root/templates --output-dir $gen_root ..." "$status" "$tmp_output"
+    rm -f "$tmp_output"
+    return "$status"
+  fi
 
   mapfile -t framework_sources < <(find "$framework_root/src" -type f -name '*.m' | sort)
   mapfile -t app_sources < <(find "$app_root/src" -type f -name '*.m' 2>/dev/null | sort)
@@ -172,35 +212,55 @@ compile_app() {
   fi
 
   if [[ ${#app_sources[@]} -eq 0 ]]; then
-    echo "boomhauer: no app source files found under $app_root" >&2
-    echo "boomhauer: expected src/main.m (full mode) or app_lite.m (lite mode)" >&2
-    exit 1
+    {
+      echo "boomhauer: no app source files found under $app_root"
+      echo "boomhauer: expected src/main.m (full mode) or app_lite.m (lite mode)"
+    } >"$tmp_output"
+    record_build_failure "app_discovery" "discover app sources" 1 "$tmp_output"
+    rm -f "$tmp_output"
+    return 1
   fi
 
   mkdir -p "$build_root"
 
-  # shellcheck disable=SC1090
-  set +u
-  source "$gnustep_sh"
-  set -u
-  clang $(gnustep-config --objc-flags) \
-    -I"$framework_root/src/Arlen" \
-    -I"$framework_root/src/Arlen/Core" \
-    -I"$framework_root/src/Arlen/HTTP" \
-    -I"$framework_root/src/Arlen/MVC/Controller" \
-    -I"$framework_root/src/Arlen/MVC/Routing" \
-    -I"$framework_root/src/Arlen/MVC/Template" \
-    -I"$framework_root/src/Arlen/MVC/View" \
-    -I"$framework_root/src/Arlen/Support" \
-    -I"$app_root/src" \
-    "${app_sources[@]}" \
-    "${framework_sources[@]}" \
-    "${generated_sources[@]}" \
-    -o "$app_binary" \
-    $(gnustep-config --base-libs)
+  if {
+    set +u
+    # shellcheck disable=SC1090
+    source "$gnustep_sh"
+    set -u
+    clang $(gnustep-config --objc-flags) \
+      -I"$framework_root/src/Arlen" \
+      -I"$framework_root/src/Arlen/Core" \
+      -I"$framework_root/src/Arlen/Data" \
+      -I"$framework_root/src/Arlen/HTTP" \
+      -I"$framework_root/src/Arlen/MVC/Controller" \
+      -I"$framework_root/src/Arlen/MVC/Middleware" \
+      -I"$framework_root/src/Arlen/MVC/Routing" \
+      -I"$framework_root/src/Arlen/MVC/Template" \
+      -I"$framework_root/src/Arlen/MVC/View" \
+      -I"$framework_root/src/Arlen/Support" \
+      -I"$app_root/src" \
+      "${app_sources[@]}" \
+      "${framework_sources[@]}" \
+      "${generated_sources[@]}" \
+      -o "$app_binary" \
+      $(gnustep-config --base-libs)
+  } >"$tmp_output" 2>&1; then
+    :
+  else
+    local status=$?
+    record_build_failure "compile" "clang (app/framework/generated sources) -o $app_binary" "$status" "$tmp_output"
+    rm -f "$tmp_output"
+    return "$status"
+  fi
+
+  rm -f "$tmp_output"
+  clear_build_failure_state
+  return 0
 }
 
 child_pid=""
+child_mode=""
 stop_requested=0
 
 stop_child() {
@@ -209,6 +269,7 @@ stop_child() {
     wait "$child_pid" 2>/dev/null || true
   fi
   child_pid=""
+  child_mode=""
 }
 
 on_signal() {
@@ -218,8 +279,27 @@ on_signal() {
 
 trap on_signal INT TERM
 
+start_app_child() {
+  export ARLEN_APP_ROOT="$app_root"
+  "$app_binary" "${server_args[@]}" &
+  child_pid="$!"
+  child_mode="app"
+}
+
+start_error_child() {
+  export ARLEN_APP_ROOT="$app_root"
+  export ARLEN_BOOMHAUER_BUILD_ERROR_FILE="$error_output_file"
+  export ARLEN_BOOMHAUER_BUILD_ERROR_META_FILE="$error_meta_file"
+  "$framework_root/build/boomhauer" "${server_args[@]}" &
+  child_pid="$!"
+  child_mode="build_error"
+}
+
 run_once() {
-  compile_app
+  if ! compile_app; then
+    cat "$error_output_file" >&2 || true
+    exit 1
+  fi
   if [[ $prepare_only -eq 1 ]]; then
     exit 0
   fi
@@ -231,17 +311,36 @@ if [[ $watch_mode -eq 0 ]]; then
   run_once
 fi
 
+if ! make -C "$framework_root" boomhauer >/dev/null; then
+  echo "boomhauer: failed to build fallback dev error server" >&2
+  exit 1
+fi
+
 last_fingerprint="$(watch_fingerprint)"
 
-while [[ $stop_requested -eq 0 ]]; do
-  compile_app
-  echo "boomhauer: watching $app_root"
-  export ARLEN_APP_ROOT="$app_root"
-  "$app_binary" "${server_args[@]}" &
-  child_pid="$!"
-  restart_for_change=0
+echo "boomhauer: watching $app_root"
 
-  while [[ $stop_requested -eq 0 ]] && kill -0 "$child_pid" 2>/dev/null; do
+while [[ $stop_requested -eq 0 ]]; do
+  desired_mode="app"
+  if ! compile_app; then
+    desired_mode="build_error"
+  fi
+
+  if [[ "$desired_mode" == "app" ]]; then
+    if [[ "$child_mode" != "app" ]] || [[ -z "$child_pid" ]] || ! kill -0 "$child_pid" 2>/dev/null; then
+      stop_child
+      start_app_child
+    fi
+  else
+    if [[ "$child_mode" != "build_error" ]] || [[ -z "$child_pid" ]] || ! kill -0 "$child_pid" 2>/dev/null; then
+      stop_child
+      echo "boomhauer: build failed, serving diagnostic error page" >&2
+      start_error_child
+    fi
+  fi
+
+  restart_for_change=0
+  while [[ $stop_requested -eq 0 ]] && [[ -n "$child_pid" ]] && kill -0 "$child_pid" 2>/dev/null; do
     sleep 1
     current_fingerprint="$(watch_fingerprint)"
     if [[ "$current_fingerprint" != "$last_fingerprint" ]]; then
@@ -263,8 +362,13 @@ while [[ $stop_requested -eq 0 ]]; do
     child_status=$?
     set -e
     child_pid=""
+    previous_mode="$child_mode"
+    child_mode=""
     if [[ $restart_for_change -eq 0 && $child_status -ne 0 ]]; then
       echo "boomhauer: server exited with status $child_status" >&2
+      if [[ "$previous_mode" == "build_error" && -f "$error_output_file" ]]; then
+        cat "$error_output_file" >&2 || true
+      fi
       exit "$child_status"
     fi
   fi

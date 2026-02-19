@@ -13,7 +13,8 @@ Open `build/docs/index.html` in your browser.
 ## Start Here
 
 - [Current Status](STATUS.md): latest checkpoint and next-session priorities.
-- [Getting Started](GETTING_STARTED.md): first run, first app, first endpoint.
+- [First App Guide](FIRST_APP_GUIDE.md): fastest path to scaffold, run, and extend your first app.
+- [Getting Started](GETTING_STARTED.md): prerequisites, framework build, tests, and workflow overview.
 - [CLI Reference](CLI_REFERENCE.md): command reference for `arlen`, `boomhauer`, and helper scripts.
 - [Core Concepts](CORE_CONCEPTS.md): runtime architecture and request lifecycle.
 - [Deployment Guide](DEPLOYMENT.md): deployment model and production guidance.
@@ -31,6 +32,7 @@ Open `build/docs/index.html` in your browser.
 - [Phase 2 Roadmap](PHASE2_ROADMAP.md)
 - [Phase 3 Roadmap](PHASE3_ROADMAP.md)
 - [Combined Roadmap Index](PHASE2_PHASE3_ROADMAP.md)
+- [Feature Parity Matrix](FEATURE_PARITY_MATRIX.md)
 - [EOC v1 Roadmap](EOC_V1_ROADMAP.md)
 - [EOC v1 Spec](../V1_SPEC.md)
 

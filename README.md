@@ -9,7 +9,9 @@ Arlen is designed to solve the same class of problems as frameworks like Mojolic
 - Phase 1: complete and working.
 - Phase 2A: complete (`propane` + runtime hardening).
 - Phase 2B: complete (PostgreSQL adapter, migrations, sessions/CSRF/rate-limit/security headers).
-- Phase 2C and Phase 3: planned (`docs/PHASE2_ROADMAP.md`, `docs/PHASE3_ROADMAP.md`).
+- Phase 2C: complete (developer error UX + validation + timing controls).
+- Phase 2D: next.
+- Phase 3: planned (`docs/PHASE3_ROADMAP.md`).
 
 ## Quick Start
 
@@ -33,6 +35,16 @@ Run the built-in development server:
 
 ```bash
 ./bin/boomhauer
+```
+
+Create and run your first app with the CLI:
+
+```bash
+mkdir -p ~/arlen-apps
+cd ~/arlen-apps
+/path/to/Arlen/bin/arlen new MyApp
+cd MyApp
+/path/to/Arlen/bin/arlen boomhauer --port 3000
 ```
 
 Run tests:
@@ -63,6 +75,7 @@ make docs-html
 Open `build/docs/index.html` in a browser.
 
 High-value guides:
+- [First App Guide](docs/FIRST_APP_GUIDE.md)
 - [Getting Started](docs/GETTING_STARTED.md)
 - [CLI Reference](docs/CLI_REFERENCE.md)
 - [Core Concepts](docs/CORE_CONCEPTS.md)

@@ -1,7 +1,7 @@
 # Arlen CLI Specification (Phase 1)
 
 Status: Draft  
-Last updated: 2026-02-18
+Last updated: 2026-02-19
 
 ## 1. Purpose
 
@@ -63,6 +63,7 @@ Options:
 - `--full` explicitly request full app skeleton.
 - `--lite` create a single-file lite app scaffold.
 - `--force` overwrite existing target directory.
+- `--help` / `-h` show command usage.
 - `--template <name>` optional starter variation.
 
 ### 4.2 `arlen generate`
@@ -75,22 +76,18 @@ Phase 1 generators:
 - `model <Name>` (repository-oriented skeleton, not ORM-dependent)
 - `migration <Name>` (placeholder format; db-specific execution may be Phase 2)
 - `test <Name>`
+- `--help` / `-h` show command usage.
 
 ### 4.3 `arlen boomhauer`
 
 Run the development server.
 
-Options:
-
-- `--port <n>`
-- `--host <addr>`
-- `--watch` (restart on source/template/config changes)
-- `--env <environment>`
-
 Behavior:
 
-- builds/transpiles as needed before launch
-- runs app in development profile by default
+- delegates to framework `bin/boomhauer` using resolved app/framework roots
+- defaults to watch mode
+- forwards boomhauer server args (`--watch`, `--no-watch`, `--prepare-only`, `--port`, `--host`, `--env`, `--once`, `--print-routes`)
+- build/transpile/compile reload failures are rendered via boomhauer diagnostics rather than crashing the supervisor
 
 ### 4.4 `arlen routes`
 

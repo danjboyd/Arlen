@@ -50,6 +50,10 @@ static BOOL ALNConfigBool(NSDictionary *config, NSString *key, BOOL defaultValue
   return defaultValue;
 }
 
+static double ALNNowMilliseconds(void) {
+  return [[NSDate date] timeIntervalSinceReferenceDate] * 1000.0;
+}
+
 static NSUInteger ALNConfigUInt(NSDictionary *dict, NSString *key, NSUInteger defaultValue) {
   id value = dict[key];
   if ([value respondsToSelector:@selector(unsignedIntegerValue)]) {
@@ -383,9 +387,52 @@ static ALNResponse *ALNStaticResponseForRequest(ALNRequest *request, NSString *p
   return response;
 }
 
-static void ALNSendResponse(int clientFd, ALNResponse *response) {
+static double ALNParseHeaderDoubleValue(NSString *value) {
+  if (![value isKindOfClass:[NSString class]] || [value length] == 0) {
+    return 0.0;
+  }
+  return [value doubleValue];
+}
+
+static void ALNEnsurePerformanceHeaders(ALNResponse *response,
+                                        BOOL enabled,
+                                        double parseMs,
+                                        double totalMs) {
+  if (!enabled) {
+    return;
+  }
+  if ([response headerForName:@"X-Arlen-Parse-Ms"] == nil) {
+    [response setHeader:@"X-Arlen-Parse-Ms"
+                  value:[NSString stringWithFormat:@"%.3f", parseMs >= 0.0 ? parseMs : 0.0]];
+  }
+  if ([response headerForName:@"X-Arlen-Total-Ms"] == nil) {
+    NSString *total = [NSString stringWithFormat:@"%.3f", totalMs >= 0.0 ? totalMs : 0.0];
+    [response setHeader:@"X-Arlen-Total-Ms" value:total];
+    [response setHeader:@"X-Mojo-Total-Ms" value:total];
+  }
+  if ([response headerForName:@"X-Arlen-Response-Write-Ms"] == nil) {
+    [response setHeader:@"X-Arlen-Response-Write-Ms" value:@"0.000"];
+  }
+}
+
+static double ALNSendResponse(int clientFd, ALNResponse *response, BOOL performanceLogging) {
+  double serializeStart = ALNNowMilliseconds();
   NSData *raw = [response serializedData];
+  double serializeMs = ALNNowMilliseconds() - serializeStart;
+
+  if (performanceLogging) {
+    [response setHeader:@"X-Arlen-Response-Write-Ms"
+                  value:[NSString stringWithFormat:@"%.3f", serializeMs]];
+    double currentTotal = ALNParseHeaderDoubleValue([response headerForName:@"X-Arlen-Total-Ms"]);
+    NSString *total = [NSString stringWithFormat:@"%.3f", (currentTotal + serializeMs)];
+    [response setHeader:@"X-Arlen-Total-Ms" value:total];
+    [response setHeader:@"X-Mojo-Total-Ms" value:total];
+    raw = [response serializedData];
+  }
+
+  double writeStart = ALNNowMilliseconds();
   (void)send(clientFd, [raw bytes], [raw length], 0);
+  return (ALNNowMilliseconds() - writeStart) + serializeMs;
 }
 
 static ALNResponse *ALNErrorResponse(NSInteger statusCode, NSString *body) {
@@ -432,31 +479,50 @@ static ALNResponse *ALNErrorResponse(NSInteger statusCode, NSString *body) {
 }
 
 - (void)handleClient:(int)clientFd {
+  double requestStartMs = ALNNowMilliseconds();
+  BOOL performanceLogging =
+      ALNConfigBool(self.application.config ?: @{}, @"performanceLogging", YES);
   ALNRequestLimits limits = ALNLimitsFromConfig(self.application.config ?: @{});
   ALNServerSocketTuning tuning = ALNTuningFromConfig(self.application.config ?: @{});
   ALNApplyClientSocketTimeout(clientFd, tuning.connectionTimeoutSeconds);
 
   NSInteger readStatus = 0;
+  double parseStartMs = ALNNowMilliseconds();
   NSData *rawRequest = ALNReadHTTPRequestData(clientFd, limits, &readStatus);
+  double parseMs = ALNNowMilliseconds() - parseStartMs;
   if (rawRequest == nil) {
+    ALNResponse *errorResponse = nil;
     if (readStatus == 413) {
-      ALNSendResponse(clientFd, ALNErrorResponse(413, @"payload too large\n"));
+      errorResponse = ALNErrorResponse(413, @"payload too large\n");
     } else if (readStatus == 431) {
-      ALNSendResponse(clientFd, ALNErrorResponse(431, @"request headers too large\n"));
+      errorResponse = ALNErrorResponse(431, @"request headers too large\n");
     } else if (readStatus == 408) {
-      ALNSendResponse(clientFd, ALNErrorResponse(408, @"request timeout\n"));
+      errorResponse = ALNErrorResponse(408, @"request timeout\n");
     } else {
-      ALNSendResponse(clientFd, ALNErrorResponse(400, @"bad request\n"));
+      errorResponse = ALNErrorResponse(400, @"bad request\n");
     }
+    ALNEnsurePerformanceHeaders(errorResponse,
+                                performanceLogging,
+                                parseMs,
+                                ALNNowMilliseconds() - requestStartMs);
+    (void)ALNSendResponse(clientFd, errorResponse, performanceLogging);
     return;
   }
 
   NSError *requestError = nil;
+  double requestParseStartMs = ALNNowMilliseconds();
   ALNRequest *request = [ALNRequest requestFromRawData:rawRequest error:&requestError];
+  parseMs += (ALNNowMilliseconds() - requestParseStartMs);
   if (request == nil) {
-    ALNSendResponse(clientFd, ALNErrorResponse(400, @"bad request\n"));
+    ALNResponse *errorResponse = ALNErrorResponse(400, @"bad request\n");
+    ALNEnsurePerformanceHeaders(errorResponse,
+                                performanceLogging,
+                                parseMs,
+                                ALNNowMilliseconds() - requestStartMs);
+    (void)ALNSendResponse(clientFd, errorResponse, performanceLogging);
     return;
   }
+  request.parseDurationMilliseconds = parseMs;
 
   request.remoteAddress = ALNRemoteAddressForClient(clientFd);
   request.effectiveRemoteAddress = request.remoteAddress ?: @"";
@@ -469,13 +535,23 @@ static ALNResponse *ALNErrorResponse(NSInteger statusCode, NSString *body) {
   if (serveStatic && supportsStaticMethod && [request.path hasPrefix:@"/static/"]) {
     ALNResponse *staticResponse = ALNStaticResponseForRequest(request, self.publicRoot);
     if (staticResponse != nil) {
-      ALNSendResponse(clientFd, staticResponse);
+      ALNEnsurePerformanceHeaders(staticResponse,
+                                  performanceLogging,
+                                  parseMs,
+                                  ALNNowMilliseconds() - requestStartMs);
+      request.responseWriteDurationMilliseconds =
+          ALNSendResponse(clientFd, staticResponse, performanceLogging);
       return;
     }
   }
 
   ALNResponse *response = [self.application dispatchRequest:request];
-  ALNSendResponse(clientFd, response);
+  ALNEnsurePerformanceHeaders(response,
+                              performanceLogging,
+                              parseMs,
+                              ALNNowMilliseconds() - requestStartMs);
+  request.responseWriteDurationMilliseconds =
+      ALNSendResponse(clientFd, response, performanceLogging);
 }
 
 - (int)runWithHost:(NSString *)host

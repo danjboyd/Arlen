@@ -3,6 +3,8 @@
 
 #import <signal.h>
 #import <unistd.h>
+#import <stdlib.h>
+#import <string.h>
 
 @interface HTTPIntegrationTests : XCTestCase
 @end
@@ -11,6 +13,37 @@
 
 - (int)randomPort {
   return 32000 + (int)arc4random_uniform(2000);
+}
+
+- (NSString *)createTempDirectoryWithPrefix:(NSString *)prefix {
+  NSString *templatePath =
+      [NSTemporaryDirectory() stringByAppendingPathComponent:
+                             [NSString stringWithFormat:@"%@-XXXXXX", prefix ?: @"arlen"]];
+  const char *templateCString = [templatePath fileSystemRepresentation];
+  char *buffer = strdup(templateCString);
+  char *created = mkdtemp(buffer);
+  NSString *result = created ? [[NSFileManager defaultManager] stringWithFileSystemRepresentation:created
+                                                                                             length:strlen(created)]
+                             : nil;
+  free(buffer);
+  return result;
+}
+
+- (BOOL)writeFile:(NSString *)path content:(NSString *)content {
+  NSString *dir = [path stringByDeletingLastPathComponent];
+  NSError *error = nil;
+  if (![[NSFileManager defaultManager] createDirectoryAtPath:dir
+                                 withIntermediateDirectories:YES
+                                                  attributes:nil
+                                                       error:&error]) {
+    XCTFail(@"failed creating directory %@: %@", dir, error.localizedDescription);
+    return NO;
+  }
+  if (![content writeToFile:path atomically:YES encoding:NSUTF8StringEncoding error:&error]) {
+    XCTFail(@"failed writing file %@: %@", path, error.localizedDescription);
+    return NO;
+  }
+  return YES;
 }
 
 - (NSString *)runShellCapture:(NSString *)command exitCode:(int *)exitCode {
@@ -157,6 +190,38 @@
 - (void)testHealthEndpoint {
   NSString *body = [self simpleRequestPath:@"/healthz"];
   XCTAssertEqualObjects(@"ok\n", body);
+}
+
+- (void)testPerformanceHeadersPresentByDefault {
+  int curlCode = 0;
+  int serverCode = 0;
+  NSString *headers =
+      [self requestWithServerEnv:nil
+                     serverBinary:@"./build/boomhauer"
+                        curlBody:@"curl -sS -D - -o /dev/null http://127.0.0.1:%d/healthz"
+                        curlCode:&curlCode
+                       serverCode:&serverCode];
+  XCTAssertEqual(0, curlCode);
+  XCTAssertEqual(0, serverCode);
+  XCTAssertTrue([headers containsString:@"X-Arlen-Total-Ms:"]);
+  XCTAssertTrue([headers containsString:@"X-Arlen-Parse-Ms:"]);
+  XCTAssertTrue([headers containsString:@"X-Arlen-Response-Write-Ms:"]);
+}
+
+- (void)testPerformanceHeadersCanBeDisabled {
+  int curlCode = 0;
+  int serverCode = 0;
+  NSString *headers =
+      [self requestWithServerEnv:@"ARLEN_PERFORMANCE_LOGGING=0"
+                     serverBinary:@"./build/boomhauer"
+                        curlBody:@"curl -sS -D - -o /dev/null http://127.0.0.1:%d/healthz"
+                        curlCode:&curlCode
+                       serverCode:&serverCode];
+  XCTAssertEqual(0, curlCode);
+  XCTAssertEqual(0, serverCode);
+  XCTAssertFalse([headers containsString:@"X-Arlen-Total-Ms:"]);
+  XCTAssertFalse([headers containsString:@"X-Arlen-Parse-Ms:"]);
+  XCTAssertFalse([headers containsString:@"X-Arlen-Response-Write-Ms:"]);
 }
 
 - (void)testImplicitJSONEndpoint {
@@ -413,6 +478,161 @@
                            envPrefix:@"ARLEN_APP_ROOT=examples/tech_demo"];
   XCTAssertTrue([body containsString:@":root"]);
   XCTAssertTrue([body containsString:@"--bg"]);
+}
+
+- (void)testBoomhauerWatchServesBuildErrorPageAndRecoversAfterFix {
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *appRoot = [self createTempDirectoryWithPrefix:@"arlen-boomhauer-watch"];
+  XCTAssertNotNil(appRoot);
+  if (appRoot == nil) {
+    return;
+  }
+
+  XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"config/app.plist"]
+                        content:@"{\n"
+                                "  host = \"127.0.0.1\";\n"
+                                "  port = 3000;\n"
+                                "  logFormat = \"text\";\n"
+                                "  serveStatic = NO;\n"
+                                "  performanceLogging = YES;\n"
+                                "}\n"]);
+  XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"config/environments/development.plist"]
+                        content:@"{\n  logFormat = \"text\";\n}\n"]);
+  XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"app_lite.m"]
+                        content:@"#import <Foundation/Foundation.h>\n"
+                                "#import \"ArlenServer.h\"\n"
+                                "@interface BrokenController : ALNController @end\n"
+                                "@implementation BrokenController\n"
+                                "- (id)index:(ALNContext *)ctx {\n"
+                                "  (void)ctx\n"
+                                "  [self renderText:@\"broken\\n\"];\n"
+                                "  return nil;\n"
+                                "}\n"
+                                "@end\n"
+                                "int main(int argc, const char *argv[]) {\n"
+                                "  (void)argc; (void)argv; return 0;\n"
+                                "}\n"]);
+
+  int port = [self randomPort];
+  NSTask *server = [[NSTask alloc] init];
+  server.launchPath = [repoRoot stringByAppendingPathComponent:@"bin/boomhauer"];
+  server.currentDirectoryPath = appRoot;
+  server.arguments = @[ @"--watch", @"--port", [NSString stringWithFormat:@"%d", port] ];
+  NSMutableDictionary *env =
+      [NSMutableDictionary dictionaryWithDictionary:[[NSProcessInfo processInfo] environment]];
+  env[@"ARLEN_FRAMEWORK_ROOT"] = repoRoot;
+  env[@"ARLEN_APP_ROOT"] = appRoot;
+  server.environment = env;
+  server.standardOutput = [NSPipe pipe];
+  server.standardError = [NSPipe pipe];
+  [server launch];
+
+  @try {
+    BOOL errorPageSeen = NO;
+    for (NSInteger attempt = 0; attempt < 80; attempt++) {
+      int curlCode = 0;
+      NSString *body = [self runShellCapture:[NSString stringWithFormat:@"curl -sS http://127.0.0.1:%d/", port]
+                                    exitCode:&curlCode];
+      if (curlCode == 0 && [body containsString:@"Boomhauer Build Failed"]) {
+        errorPageSeen = YES;
+        break;
+      }
+      usleep(250000);
+    }
+    XCTAssertTrue(errorPageSeen);
+
+    int jsonCurlCode = 0;
+    NSString *jsonBody = [self runShellCapture:[NSString stringWithFormat:
+                                                   @"curl -sS -H 'Accept: application/json' http://127.0.0.1:%d/api/dev/build-error",
+                                                   port]
+                                      exitCode:&jsonCurlCode];
+    XCTAssertEqual(0, jsonCurlCode);
+    XCTAssertTrue([jsonBody containsString:@"dev_build_failed"]);
+    XCTAssertTrue([jsonBody containsString:@"stage"]);
+
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"app_lite.m"]
+                          content:@"#import <Foundation/Foundation.h>\n"
+                                  "#import <stdio.h>\n"
+                                  "#import <stdlib.h>\n"
+                                  "#import \"ArlenServer.h\"\n"
+                                  "@interface LiteController : ALNController @end\n"
+                                  "@implementation LiteController\n"
+                                  "- (id)index:(ALNContext *)ctx {\n"
+                                  "  (void)ctx;\n"
+                                  "  [self renderText:@\"hello from lite mode\\n\"];\n"
+                                  "  return nil;\n"
+                                  "}\n"
+                                  "@end\n"
+                                  "static void PrintUsage(void) {\n"
+                                  "  fprintf(stdout, \"Usage: boomhauer [--port <port>] [--host <addr>] [--env <env>] [--once] [--print-routes]\\\\n\");\n"
+                                  "}\n"
+                                  "int main(int argc, const char *argv[]) {\n"
+                                  "  @autoreleasepool {\n"
+                                  "    int portOverride = 0;\n"
+                                  "    NSString *host = nil;\n"
+                                  "    NSString *environment = @\"development\";\n"
+                                  "    BOOL once = NO;\n"
+                                  "    BOOL printRoutes = NO;\n"
+                                  "    for (int idx = 1; idx < argc; idx++) {\n"
+                                  "      NSString *arg = [NSString stringWithUTF8String:argv[idx]];\n"
+                                  "      if ([arg isEqualToString:@\"--port\"]) {\n"
+                                  "        if ((idx + 1) >= argc) { PrintUsage(); return 2; }\n"
+                                  "        portOverride = atoi(argv[++idx]);\n"
+                                  "      } else if ([arg isEqualToString:@\"--host\"]) {\n"
+                                  "        if ((idx + 1) >= argc) { PrintUsage(); return 2; }\n"
+                                  "        host = [NSString stringWithUTF8String:argv[++idx]];\n"
+                                  "      } else if ([arg isEqualToString:@\"--env\"]) {\n"
+                                  "        if ((idx + 1) >= argc) { PrintUsage(); return 2; }\n"
+                                  "        environment = [NSString stringWithUTF8String:argv[++idx]];\n"
+                                  "      } else if ([arg isEqualToString:@\"--once\"]) {\n"
+                                  "        once = YES;\n"
+                                  "      } else if ([arg isEqualToString:@\"--print-routes\"]) {\n"
+                                  "        printRoutes = YES;\n"
+                                  "      } else if ([arg isEqualToString:@\"--help\"] || [arg isEqualToString:@\"-h\"]) {\n"
+                                  "        PrintUsage();\n"
+                                  "        return 0;\n"
+                                  "      } else {\n"
+                                  "        fprintf(stderr, \"Unknown argument: %s\\\\n\", argv[idx]);\n"
+                                  "        return 2;\n"
+                                  "      }\n"
+                                  "    }\n"
+                                  "    NSString *appRootCurrent = [[NSFileManager defaultManager] currentDirectoryPath];\n"
+                                  "    NSError *error = nil;\n"
+                                  "    ALNApplication *app = [[ALNApplication alloc] initWithEnvironment:environment\n"
+                                  "                                                           configRoot:appRootCurrent\n"
+                                  "                                                                error:&error];\n"
+                                  "    if (app == nil) {\n"
+                                  "      fprintf(stderr, \"failed loading config: %s\\\\n\", [[error localizedDescription] UTF8String]);\n"
+                                  "      return 1;\n"
+                                  "    }\n"
+                                  "    [app registerRouteMethod:@\"GET\" path:@\"/\" name:@\"home\" controllerClass:[LiteController class] action:@\"index\"];\n"
+                                  "    ALNHTTPServer *server = [[ALNHTTPServer alloc] initWithApplication:app\n"
+                                  "                                                        publicRoot:[appRootCurrent stringByAppendingPathComponent:@\"public\"]];\n"
+                                  "    server.serverName = @\"boomhauer\";\n"
+                                  "    if (printRoutes) { [server printRoutesToFile:stdout]; return 0; }\n"
+                                  "    return [server runWithHost:host portOverride:portOverride once:once];\n"
+                                  "  }\n"
+                                  "}\n"]);
+
+    BOOL recovered = NO;
+    for (NSInteger attempt = 0; attempt < 120; attempt++) {
+      int curlCode = 0;
+      NSString *body = [self runShellCapture:[NSString stringWithFormat:@"curl -fsS http://127.0.0.1:%d/", port]
+                                    exitCode:&curlCode];
+      if (curlCode == 0 && [body containsString:@"hello from lite mode"]) {
+        recovered = YES;
+        break;
+      }
+      usleep(250000);
+    }
+    XCTAssertTrue(recovered);
+  } @finally {
+    if ([server isRunning]) {
+      (void)kill(server.processIdentifier, SIGTERM);
+      [server waitUntilExit];
+    }
+    [[NSFileManager defaultManager] removeItemAtPath:appRoot error:nil];
+  }
 }
 
 @end

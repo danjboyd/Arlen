@@ -19,6 +19,7 @@ Create a new app scaffold.
 - `--full`: full app scaffold (default)
 - `--lite`: single-file lite scaffold
 - `--force`: overwrite existing files where allowed
+- `--help` / `-h`: show command usage
 
 ### `arlen generate <controller|model|migration|test> <Name>`
 
@@ -28,6 +29,7 @@ Generate app artifacts.
 - `model`: `src/Models/<Name>Repository.{h,m}`
 - `migration`: `db/migrations/<timestamp>_<name>.sql`
 - `test`: `tests/<Name>Tests.m`
+- `--help` / `-h`: show command usage
 
 ### `arlen migrate [--env <name>] [--dsn <connection_string>] [--dry-run]`
 
@@ -41,8 +43,10 @@ Apply SQL migrations from `db/migrations` to PostgreSQL.
 
 Build and run `boomhauer` for the current app root.
 
-- `--watch`: rebuild + restart on changes
-- other args are passed through to server runtime (`--port`, `--host`, `--env`, `--once`, `--print-routes`)
+- delegates to `bin/boomhauer` with `ARLEN_APP_ROOT` + `ARLEN_FRAMEWORK_ROOT`
+- defaults to watch mode (same behavior as running `bin/boomhauer` directly)
+- in app-root watch mode, transpile/compile failures do not terminate `boomhauer`; a diagnostic server is served until the next successful rebuild
+- server args are passed through (for example `--watch`, `--no-watch`, `--prepare-only`, `--port`, `--host`, `--env`, `--once`, `--print-routes`)
 
 ### `arlen propane [manager args...]`
 
@@ -87,6 +91,10 @@ boomhauer [options]
 Behavior:
 - If run inside an app root (`config/app.plist` plus `src/main.m` or `app_lite.m`), it compiles that app and watches for changes by default.
 - Otherwise, it runs the framework's built-in server.
+- In app-root watch mode, build failures are captured and rendered as development diagnostics:
+  - browser requests receive an HTML build-error page
+  - API requests can use `GET /api/dev/build-error` for JSON diagnostics
+  - successful source changes automatically resume normal app serving
 
 Options:
 - `--watch` (default)

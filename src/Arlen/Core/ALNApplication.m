@@ -126,13 +126,205 @@ static NSString *ALNGenerateRequestID(void) {
   return [[NSUUID UUID] UUIDString];
 }
 
-static void ALNFinalizeResponse(ALNResponse *response, ALNPerfTrace *trace, NSString *requestID) {
-  [trace endStage:@"total"];
-  NSNumber *total = [trace durationMillisecondsForStage:@"total"] ?: @(0);
-  [response setHeader:@"X-Arlen-Total-Ms"
-                value:[NSString stringWithFormat:@"%.3f", [total doubleValue]]];
-  [response setHeader:@"X-Mojo-Total-Ms"
-                value:[NSString stringWithFormat:@"%.3f", [total doubleValue]]];
+static BOOL ALNRequestPrefersJSON(ALNRequest *request) {
+  NSString *accept = [request.headers[@"accept"] isKindOfClass:[NSString class]]
+                         ? [request.headers[@"accept"] lowercaseString]
+                         : @"";
+  if ([accept containsString:@"application/json"] || [accept containsString:@"text/json"]) {
+    return YES;
+  }
+  NSString *path = request.path ?: @"";
+  if ([path hasPrefix:@"/api/"] || [path isEqualToString:@"/api"]) {
+    return YES;
+  }
+  return NO;
+}
+
+static NSString *ALNEscapeHTML(NSString *value) {
+  NSString *safe = value ?: @"";
+  safe = [safe stringByReplacingOccurrencesOfString:@"&" withString:@"&amp;"];
+  safe = [safe stringByReplacingOccurrencesOfString:@"<" withString:@"&lt;"];
+  safe = [safe stringByReplacingOccurrencesOfString:@">" withString:@"&gt;"];
+  safe = [safe stringByReplacingOccurrencesOfString:@"\"" withString:@"&quot;"];
+  return [safe stringByReplacingOccurrencesOfString:@"'" withString:@"&#39;"];
+}
+
+static NSDictionary *ALNErrorDetailsFromNSError(NSError *error) {
+  if (error == nil) {
+    return @{};
+  }
+
+  NSMutableDictionary *details = [NSMutableDictionary dictionary];
+  details[@"domain"] = error.domain ?: @"";
+  details[@"code"] = @([error code]);
+  details[@"description"] = error.localizedDescription ?: @"";
+
+  id file = error.userInfo[@"ALNEOCErrorPath"] ?: error.userInfo[@"path"];
+  id line = error.userInfo[@"ALNEOCErrorLine"] ?: error.userInfo[@"line"];
+  id column = error.userInfo[@"ALNEOCErrorColumn"] ?: error.userInfo[@"column"];
+  if ([file isKindOfClass:[NSString class]]) {
+    details[@"file"] = file;
+  }
+  if ([line respondsToSelector:@selector(integerValue)]) {
+    details[@"line"] = @([line integerValue]);
+  }
+  if ([column respondsToSelector:@selector(integerValue)]) {
+    details[@"column"] = @([column integerValue]);
+  }
+  return details;
+}
+
+static NSDictionary *ALNErrorDetailsFromException(NSException *exception) {
+  if (exception == nil) {
+    return @{};
+  }
+
+  NSMutableDictionary *details = [NSMutableDictionary dictionary];
+  details[@"name"] = exception.name ?: @"";
+  details[@"reason"] = exception.reason ?: @"";
+  NSArray *stack = exception.callStackSymbols ?: @[];
+  if ([stack count] > 0) {
+    details[@"stack"] = stack;
+  }
+  return details;
+}
+
+static NSString *ALNDevelopmentErrorPageHTML(NSString *requestID,
+                                             NSString *errorCode,
+                                             NSString *message,
+                                             NSDictionary *details) {
+  NSMutableString *html = [NSMutableString string];
+  [html appendString:@"<!doctype html><html><head><meta charset='utf-8'>"];
+  [html appendString:@"<title>Arlen Development Exception</title>"];
+  [html appendString:@"<style>body{font-family:Menlo,Consolas,monospace;background:#111;color:#eee;padding:24px;}h1{margin-top:0;}pre{background:#1b1b1b;border:1px solid #333;padding:12px;overflow:auto;}code{background:#1b1b1b;padding:2px 4px;}table{border-collapse:collapse;width:100%;}td{border:1px solid #333;padding:6px;vertical-align:top;} .muted{color:#aaa;}</style>"];
+  [html appendString:@"</head><body>"];
+  [html appendString:@"<h1>Arlen Development Exception</h1>"];
+  [html appendFormat:@"<p><strong>Request ID:</strong> <code>%@</code></p>", ALNEscapeHTML(requestID)];
+  [html appendFormat:@"<p><strong>Error Code:</strong> <code>%@</code></p>", ALNEscapeHTML(errorCode)];
+  [html appendFormat:@"<p><strong>Message:</strong> %@</p>", ALNEscapeHTML(message)];
+
+  if ([details count] > 0) {
+    [html appendString:@"<h2>Details</h2><table>"];
+    NSArray *keys = [[details allKeys] sortedArrayUsingSelector:@selector(compare:)];
+    for (NSString *key in keys) {
+      id value = details[key];
+      NSString *rendered = nil;
+      if ([value isKindOfClass:[NSArray class]]) {
+        rendered = [[(NSArray *)value componentsJoinedByString:@"\n"] copy];
+      } else {
+        rendered = [value description] ?: @"";
+      }
+      [html appendFormat:@"<tr><td><strong>%@</strong></td><td><pre>%@</pre></td></tr>",
+                         ALNEscapeHTML(key), ALNEscapeHTML(rendered)];
+    }
+    [html appendString:@"</table>"];
+  } else {
+    [html appendString:@"<p class='muted'>No additional details were captured.</p>"];
+  }
+
+  [html appendString:@"</body></html>"];
+  return html;
+}
+
+static NSDictionary *ALNStructuredErrorPayload(NSInteger statusCode,
+                                               NSString *errorCode,
+                                               NSString *message,
+                                               NSString *requestID,
+                                               NSDictionary *details) {
+  NSMutableDictionary *errorObject = [NSMutableDictionary dictionary];
+  errorObject[@"code"] = errorCode ?: @"internal_error";
+  errorObject[@"message"] = message ?: @"Internal Server Error";
+  errorObject[@"status"] = @(statusCode);
+  errorObject[@"correlation_id"] = requestID ?: @"";
+  errorObject[@"request_id"] = requestID ?: @"";
+
+  NSMutableDictionary *payload = [NSMutableDictionary dictionary];
+  payload[@"error"] = errorObject;
+  if ([details count] > 0) {
+    payload[@"details"] = details;
+  }
+  return payload;
+}
+
+static void ALNSetStructuredErrorResponse(ALNResponse *response,
+                                          NSInteger statusCode,
+                                          NSDictionary *payload) {
+  NSError *jsonError = nil;
+  BOOL ok = [response setJSONBody:payload options:0 error:&jsonError];
+  if (!ok) {
+    [response setHeader:@"Content-Type" value:@"text/plain; charset=utf-8"];
+    [response setTextBody:@"internal server error\n"];
+  }
+  response.statusCode = statusCode;
+  response.committed = YES;
+}
+
+static void ALNApplyInternalErrorResponse(ALNApplication *application,
+                                          ALNRequest *request,
+                                          ALNResponse *response,
+                                          NSString *requestID,
+                                          NSInteger statusCode,
+                                          NSString *errorCode,
+                                          NSString *publicMessage,
+                                          NSString *developerMessage,
+                                          NSDictionary *details) {
+  BOOL production = [application.environment isEqualToString:@"production"];
+  BOOL prefersJSON = ALNRequestPrefersJSON(request);
+
+  if (production || prefersJSON) {
+    NSDictionary *payload = ALNStructuredErrorPayload(statusCode,
+                                                      errorCode,
+                                                      publicMessage,
+                                                      requestID,
+                                                      production ? @{} : (details ?: @{}));
+    ALNSetStructuredErrorResponse(response, statusCode, payload);
+    return;
+  }
+
+  NSString *html = ALNDevelopmentErrorPageHTML(requestID,
+                                               errorCode ?: @"internal_error",
+                                               developerMessage ?: publicMessage,
+                                               details ?: @{});
+  response.statusCode = statusCode;
+  [response setHeader:@"Content-Type" value:@"text/html; charset=utf-8"];
+  [response setTextBody:html ?: @"internal server error\n"];
+  response.committed = YES;
+}
+
+static void ALNFinalizeResponse(ALNResponse *response,
+                                ALNPerfTrace *trace,
+                                ALNRequest *request,
+                                NSString *requestID,
+                                BOOL performanceLogging) {
+  if (performanceLogging && [trace isEnabled]) {
+    [trace setStage:@"parse" durationMilliseconds:request.parseDurationMilliseconds >= 0.0
+                                           ? request.parseDurationMilliseconds
+                                           : 0.0];
+
+    NSNumber *writeStage = [trace durationMillisecondsForStage:@"response_write"];
+    if (writeStage == nil) {
+      double writeMs = request.responseWriteDurationMilliseconds;
+      if (writeMs < 0.0) {
+        writeMs = 0.0;
+      }
+      [trace setStage:@"response_write" durationMilliseconds:writeMs];
+    }
+
+    [trace endStage:@"total"];
+    NSNumber *total = [trace durationMillisecondsForStage:@"total"] ?: @(0);
+    NSNumber *parse = [trace durationMillisecondsForStage:@"parse"] ?: @(0);
+    NSNumber *responseWrite = [trace durationMillisecondsForStage:@"response_write"] ?: @(0);
+
+    [response setHeader:@"X-Arlen-Total-Ms"
+                  value:[NSString stringWithFormat:@"%.3f", [total doubleValue]]];
+    [response setHeader:@"X-Mojo-Total-Ms"
+                  value:[NSString stringWithFormat:@"%.3f", [total doubleValue]]];
+    [response setHeader:@"X-Arlen-Parse-Ms"
+                  value:[NSString stringWithFormat:@"%.3f", [parse doubleValue]]];
+    [response setHeader:@"X-Arlen-Response-Write-Ms"
+                  value:[NSString stringWithFormat:@"%.3f", [responseWrite doubleValue]]];
+  }
+
   if ([requestID length] > 0) {
     [response setHeader:@"X-Request-Id" value:requestID];
   }
@@ -200,8 +392,11 @@ static void ALNFinalizeResponse(ALNResponse *response, ALNPerfTrace *trace, NSSt
   ALNResponse *response = [[ALNResponse alloc] init];
   NSString *requestID = ALNGenerateRequestID();
   [response setHeader:@"X-Request-Id" value:requestID];
-  ALNPerfTrace *trace = [[ALNPerfTrace alloc] init];
+
+  BOOL performanceLogging = ALNBoolConfigValue(self.config[@"performanceLogging"], YES);
+  ALNPerfTrace *trace = [[ALNPerfTrace alloc] initWithEnabled:performanceLogging];
   [trace startStage:@"total"];
+
   [trace startStage:@"route"];
   ALNRouteMatch *match =
       [self.router matchMethod:request.method ?: @"GET" path:request.path ?: @"/"];
@@ -211,15 +406,17 @@ static void ALNFinalizeResponse(ALNResponse *response, ALNPerfTrace *trace, NSSt
     response.statusCode = 404;
     [response setTextBody:@"not found\n"];
     [response setHeader:@"Content-Type" value:@"text/plain; charset=utf-8"];
-    ALNFinalizeResponse(response, trace, requestID);
-    [self.logger info:@"request"
-               fields:@{
-                 @"method" : request.method ?: @"",
-                 @"path" : request.path ?: @"",
-                 @"status" : @(response.statusCode),
-                 @"request_id" : requestID ?: @"",
-                 @"timings" : [trace dictionaryRepresentation]
-               }];
+    ALNFinalizeResponse(response, trace, request, requestID, performanceLogging);
+
+    NSMutableDictionary *fields = [NSMutableDictionary dictionary];
+    fields[@"method"] = request.method ?: @"";
+    fields[@"path"] = request.path ?: @"";
+    fields[@"status"] = @(response.statusCode);
+    fields[@"request_id"] = requestID ?: @"";
+    if (performanceLogging) {
+      fields[@"timings"] = [trace dictionaryRepresentation];
+    }
+    [self.logger info:@"request" fields:fields];
     return response;
   }
 
@@ -227,14 +424,14 @@ static void ALNFinalizeResponse(ALNResponse *response, ALNPerfTrace *trace, NSSt
   stash[@"request_id"] = requestID ?: @"";
   request.routeParams = match.params ?: @{};
   ALNContext *context = [[ALNContext alloc] initWithRequest:request
-                                                 response:response
-                                                   params:request.routeParams
-                                                    stash:stash
-                                                   logger:self.logger
-                                                perfTrace:trace
-                                                routeName:match.route.name ?: @""
-                                           controllerName:NSStringFromClass(match.route.controllerClass)
-                                               actionName:match.route.actionName ?: @""];
+                                                   response:response
+                                                     params:request.routeParams
+                                                      stash:stash
+                                                     logger:self.logger
+                                                  perfTrace:trace
+                                                  routeName:match.route.name ?: @""
+                                             controllerName:NSStringFromClass(match.route.controllerClass)
+                                                 actionName:match.route.actionName ?: @""];
 
   id returnValue = nil;
   BOOL shouldDispatchController = YES;
@@ -249,14 +446,22 @@ static void ALNFinalizeResponse(ALNResponse *response, ALNPerfTrace *trace, NSSt
         shouldDispatchController = NO;
         if (!response.committed) {
           if (middlewareError != nil) {
-            response.statusCode = 500;
-            [response setTextBody:@"middleware failure\n"];
+            NSDictionary *details = ALNErrorDetailsFromNSError(middlewareError);
+            ALNApplyInternalErrorResponse(self,
+                                          request,
+                                          response,
+                                          requestID,
+                                          500,
+                                          @"middleware_failure",
+                                          @"Internal Server Error",
+                                          middlewareError.localizedDescription ?: @"middleware failure",
+                                          details);
           } else {
             response.statusCode = 400;
             [response setTextBody:@"request halted by middleware\n"];
+            [response setHeader:@"Content-Type" value:@"text/plain; charset=utf-8"];
+            response.committed = YES;
           }
-          [response setHeader:@"Content-Type" value:@"text/plain; charset=utf-8"];
-          response.committed = YES;
         }
         if (middlewareError != nil) {
           [self.logger error:@"middleware failure"
@@ -284,10 +489,20 @@ static void ALNFinalizeResponse(ALNResponse *response, ALNPerfTrace *trace, NSSt
       NSMethodSignature *signature =
           [controller methodSignatureForSelector:match.route.actionSelector];
       if (signature == nil || [signature numberOfArguments] != 3) {
-        response.statusCode = 500;
-        [response setTextBody:@"invalid controller action signature\n"];
-        [response setHeader:@"Content-Type" value:@"text/plain; charset=utf-8"];
-        response.committed = YES;
+        NSDictionary *details = @{
+          @"controller" : context.controllerName ?: @"",
+          @"action" : context.actionName ?: @"",
+          @"reason" : @"Action must accept exactly one ALNContext * parameter"
+        };
+        ALNApplyInternalErrorResponse(self,
+                                      request,
+                                      response,
+                                      requestID,
+                                      500,
+                                      @"invalid_action_signature",
+                                      @"Internal Server Error",
+                                      @"Invalid controller action signature",
+                                      details);
       } else {
         NSInvocation *invocation = [NSInvocation invocationWithMethodSignature:signature];
         [invocation setTarget:controller];
@@ -304,10 +519,16 @@ static void ALNFinalizeResponse(ALNResponse *response, ALNPerfTrace *trace, NSSt
         }
       }
     } @catch (NSException *exception) {
-      response.statusCode = 500;
-      [response setTextBody:@"internal server error\n"];
-      [response setHeader:@"Content-Type" value:@"text/plain; charset=utf-8"];
-      response.committed = YES;
+      NSDictionary *details = ALNErrorDetailsFromException(exception);
+      ALNApplyInternalErrorResponse(self,
+                                    request,
+                                    response,
+                                    requestID,
+                                    500,
+                                    @"controller_exception",
+                                    @"Internal Server Error",
+                                    exception.reason ?: @"controller exception",
+                                    details);
       [self.logger error:@"controller exception"
                   fields:@{
                     @"request_id" : requestID ?: @"",
@@ -331,9 +552,16 @@ static void ALNFinalizeResponse(ALNResponse *response, ALNPerfTrace *trace, NSSt
       NSError *jsonError = nil;
       BOOL ok = [response setJSONBody:returnValue options:options error:&jsonError];
       if (!ok) {
-        response.statusCode = 500;
-        [response setTextBody:@"json serialization failed\n"];
-        [response setHeader:@"Content-Type" value:@"text/plain; charset=utf-8"];
+        NSDictionary *details = ALNErrorDetailsFromNSError(jsonError);
+        ALNApplyInternalErrorResponse(self,
+                                      request,
+                                      response,
+                                      requestID,
+                                      500,
+                                      @"json_serialization_failed",
+                                      @"Internal Server Error",
+                                      jsonError.localizedDescription ?: @"json serialization failed",
+                                      details);
         [self.logger error:@"implicit json serialization failed"
                     fields:@{
                       @"request_id" : requestID ?: @"",
@@ -345,8 +573,8 @@ static void ALNFinalizeResponse(ALNResponse *response, ALNPerfTrace *trace, NSSt
         if (response.statusCode == 0) {
           response.statusCode = 200;
         }
+        response.committed = YES;
       }
-      response.committed = YES;
     } else if ([returnValue isKindOfClass:[NSString class]]) {
       [response setTextBody:returnValue];
       [response setHeader:@"Content-Type" value:@"text/plain; charset=utf-8"];
@@ -370,10 +598,16 @@ static void ALNFinalizeResponse(ALNResponse *response, ALNPerfTrace *trace, NSSt
       [middleware didProcessContext:context];
     } @catch (NSException *exception) {
       if (!response.committed) {
-        response.statusCode = 500;
-        [response setHeader:@"Content-Type" value:@"text/plain; charset=utf-8"];
-        [response setTextBody:@"middleware finalize failure\n"];
-        response.committed = YES;
+        NSDictionary *details = ALNErrorDetailsFromException(exception);
+        ALNApplyInternalErrorResponse(self,
+                                      request,
+                                      response,
+                                      requestID,
+                                      500,
+                                      @"middleware_finalize_failure",
+                                      @"Internal Server Error",
+                                      exception.reason ?: @"middleware finalize failure",
+                                      details);
       }
       [self.logger error:@"middleware finalize failure"
                   fields:@{
@@ -385,7 +619,7 @@ static void ALNFinalizeResponse(ALNResponse *response, ALNPerfTrace *trace, NSSt
     }
   }
 
-  ALNFinalizeResponse(response, trace, requestID);
+  ALNFinalizeResponse(response, trace, request, requestID, performanceLogging);
 
   NSMutableDictionary *logFields = [NSMutableDictionary dictionary];
   logFields[@"method"] = request.method ?: @"";
@@ -394,7 +628,9 @@ static void ALNFinalizeResponse(ALNResponse *response, ALNPerfTrace *trace, NSSt
   logFields[@"request_id"] = requestID ?: @"";
   logFields[@"controller"] = context.controllerName ?: @"";
   logFields[@"action"] = context.actionName ?: @"";
-  logFields[@"timings"] = [trace dictionaryRepresentation];
+  if (performanceLogging) {
+    logFields[@"timings"] = [trace dictionaryRepresentation];
+  }
   [self.logger info:@"request" fields:logFields];
 
   return response;

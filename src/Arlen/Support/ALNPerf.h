@@ -7,6 +7,8 @@ NS_ASSUME_NONNULL_BEGIN
 
 @interface ALNPerfTrace : NSObject
 
+- (instancetype)initWithEnabled:(BOOL)enabled;
+- (BOOL)isEnabled;
 - (void)startStage:(NSString *)stage;
 - (void)endStage:(NSString *)stage;
 - (void)setStage:(NSString *)stage durationMilliseconds:(double)durationMs;

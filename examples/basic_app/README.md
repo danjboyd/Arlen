@@ -74,6 +74,7 @@ Then open:
 
 ## Current Limits
 
-- Single-process server, no file watching/reload yet.
-- Minimal routing (`/`, `/healthz`, 404 fallback).
-- No prefork/worker mode (`propane` not implemented yet).
+- This sample app intentionally demonstrates a minimal route surface (`/`, `/healthz`, 404 fallback).
+- Running `./build/boomhauer` directly starts the compiled server binary and does not include app-root watch supervision.
+- Use `./bin/boomhauer` for app-root watch/rebuild behavior and developer diagnostics on compile/transpile failures.
+- Use `./bin/propane` for prefork production manager workflows.

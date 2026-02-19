@@ -78,4 +78,63 @@
   [self.context markSessionDirty];
 }
 
+- (NSDictionary *)params {
+  return [self.context allParams];
+}
+
+- (id)paramValueForName:(NSString *)name {
+  return [self.context paramValueForName:name];
+}
+
+- (NSString *)stringParamForName:(NSString *)name {
+  return [self.context stringParamForName:name];
+}
+
+- (BOOL)requireStringParam:(NSString *)name value:(NSString **)value {
+  return [self.context requireStringParam:name value:value];
+}
+
+- (BOOL)requireIntegerParam:(NSString *)name value:(NSInteger *)value {
+  return [self.context requireIntegerParam:name value:value];
+}
+
+- (void)addValidationErrorForField:(NSString *)field
+                              code:(NSString *)code
+                           message:(NSString *)message {
+  [self.context addValidationErrorForField:field code:code message:message];
+}
+
+- (NSArray *)validationErrors {
+  return [self.context validationErrors];
+}
+
+- (BOOL)renderValidationErrors {
+  NSArray *issues = [self validationErrors];
+  if ([issues count] == 0) {
+    return NO;
+  }
+
+  NSString *requestID = [self.context.stash[@"request_id"] isKindOfClass:[NSString class]]
+                            ? self.context.stash[@"request_id"]
+                            : @"";
+  NSDictionary *payload = @{
+    @"error" : @{
+      @"code" : @"validation_failed",
+      @"message" : @"Validation failed",
+      @"request_id" : requestID ?: @"",
+    },
+    @"details" : issues
+  };
+
+  NSError *error = nil;
+  BOOL ok = [self.context.response setJSONBody:payload options:0 error:&error];
+  if (!ok) {
+    [self.context.response setHeader:@"Content-Type" value:@"text/plain; charset=utf-8"];
+    [self.context.response setTextBody:@"validation failed\n"];
+  }
+  self.context.response.statusCode = 422;
+  self.context.response.committed = YES;
+  return ok;
+}
+
 @end
