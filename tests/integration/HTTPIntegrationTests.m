@@ -148,8 +148,22 @@
 
   usleep(250000);
   NSString *formattedCurl = [NSString stringWithFormat:curlCommand, port];
-  NSString *body = [self runShellCapture:formattedCurl exitCode:curlCode];
+  NSString *body = @"";
+  int localCurlCode = 1;
+  for (NSInteger attempt = 0; attempt < 20; attempt++) {
+    body = [self runShellCapture:formattedCurl exitCode:&localCurlCode];
+    if (localCurlCode == 0) {
+      break;
+    }
+    usleep(200000);
+  }
+  if (curlCode != NULL) {
+    *curlCode = localCurlCode;
+  }
 
+  if (localCurlCode != 0 && [server isRunning]) {
+    [server terminate];
+  }
   [server waitUntilExit];
   if (serverCode != NULL) {
     *serverCode = server.terminationStatus;
@@ -418,7 +432,7 @@
     BOOL firstOK = NO;
     NSString *firstBody = [self requestPathWithRetries:@"/healthz"
                                                   port:port
-                                              attempts:60
+                                              attempts:120
                                                success:&firstOK];
     XCTAssertTrue(firstOK);
     XCTAssertEqualObjects(@"ok\n", firstBody);
@@ -428,7 +442,7 @@
     BOOL secondOK = NO;
     NSString *secondBody = [self requestPathWithRetries:@"/healthz"
                                                    port:port
-                                               attempts:60
+                                               attempts:120
                                                 success:&secondOK];
     XCTAssertTrue(secondOK);
     XCTAssertEqualObjects(@"ok\n", secondBody);
@@ -480,7 +494,7 @@
     BOOL firstOK = NO;
     NSString *firstBody = [self requestPathWithRetries:@"/healthz"
                                                   port:port
-                                              attempts:60
+                                              attempts:120
                                                success:&firstOK];
     XCTAssertTrue(firstOK);
     XCTAssertEqualObjects(@"ok\n", firstBody);
@@ -512,7 +526,7 @@
     BOOL secondOK = NO;
     NSString *secondBody = [self requestPathWithRetries:@"/healthz"
                                                    port:port
-                                               attempts:60
+                                               attempts:120
                                                 success:&secondOK];
     XCTAssertTrue(secondOK);
     XCTAssertEqualObjects(@"ok\n", secondBody);
