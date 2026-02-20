@@ -23,6 +23,7 @@
 #define MOGDL2Adapter ALNGDL2Adapter
 #define MODisplayGroup ALNDisplayGroup
 #define MOSQLBuilder ALNSQLBuilder
+#define MOPostgresSQLBuilder ALNPostgresSQLBuilder
 #define MOPageState ALNPageState
 #define MOMigrationRunner ALNMigrationRunner
 #define MOSessionMiddleware ALNSessionMiddleware

@@ -17,6 +17,7 @@ Arlen is designed to solve the same class of problems as frameworks like Mojolic
 - Phase 3D: complete (websocket/SSE baseline, mount composition, realtime pubsub abstraction).
 - Phase 3E: complete (plugin-first ecosystem services: jobs/cache/i18n/mail/attachments).
 - Phase 3F: complete (doctor + toolchain matrix, ALNPg diagnostics hardening, API helpers, static mount ergonomics, concrete jobs/mail adapters, async worker supervision baseline).
+- Phase 3G: complete (SQL builder v2 expansion, PostgreSQL dialect builder, and standalone `ArlenData` reuse packaging).
 
 ## Quick Start
 
@@ -64,6 +65,7 @@ Run tests and quality gate:
 ./bin/test
 make check
 make ci-quality
+make test-data-layer
 ```
 
 Run the technology demo:
@@ -102,6 +104,7 @@ High-value guides:
 - [Deployment Guide](docs/DEPLOYMENT.md)
 - [Realtime and Composition](docs/REALTIME_COMPOSITION.md)
 - [Ecosystem Services](docs/ECOSYSTEM_SERVICES.md)
+- [ArlenData Reuse Guide](docs/ARLEN_DATA.md)
 - [Propane Manager](docs/PROPANE.md)
 - [Release Process](docs/RELEASE_PROCESS.md)
 - [Performance Profiles](docs/PERFORMANCE_PROFILES.md)

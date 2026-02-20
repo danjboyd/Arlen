@@ -13,6 +13,7 @@ BOOMHAUER_TOOL := $(BUILD_DIR)/boomhauer
 TECH_DEMO_SERVER_TOOL := $(BUILD_DIR)/tech-demo-server
 API_REFERENCE_SERVER_TOOL := $(BUILD_DIR)/api-reference-server
 MIGRATION_SAMPLE_SERVER_TOOL := $(BUILD_DIR)/migration-sample-server
+ARLEN_DATA_EXAMPLE_TOOL := $(BUILD_DIR)/arlen-data-example
 ARLEN_TOOL := $(BUILD_DIR)/arlen
 
 TEMPLATE_ROOT := $(ROOT_DIR)/templates
@@ -23,6 +24,7 @@ TECH_DEMO_TEMPLATE_ROOT := $(TECH_DEMO_ROOT)/templates
 TECH_DEMO_TEMPLATE_FILES := $(shell find $(TECH_DEMO_TEMPLATE_ROOT) -type f -name '*.html.eoc' | sort)
 
 FRAMEWORK_SRCS := $(shell find src -type f -name '*.m' | sort)
+ARLEN_DATA_SRCS := $(shell find src/Arlen/Data -type f -name '*.m' | sort)
 EOC_RUNTIME_SRCS := src/Arlen/MVC/Template/ALNEOCRuntime.m src/Arlen/MVC/Template/ALNEOCTranspiler.m
 
 UNIT_TEST_BUNDLE := $(BUILD_DIR)/tests/ArlenUnitTests.xctest
@@ -36,7 +38,7 @@ INTEGRATION_TEST_SRCS := $(shell find tests/integration -type f -name '*.m' | so
 INCLUDE_FLAGS := -Isrc/Arlen -Isrc/Arlen/Core -Isrc/Arlen/Data -Isrc/Arlen/HTTP -Isrc/Arlen/MVC/Controller -Isrc/Arlen/MVC/Middleware -Isrc/Arlen/MVC/Routing -Isrc/Arlen/MVC/Template -Isrc/Arlen/MVC/View -Isrc/Arlen/Support -Isrc/MojoObjc -Isrc/MojoObjc/Core -Isrc/MojoObjc/Data -Isrc/MojoObjc/HTTP -Isrc/MojoObjc/MVC/Controller -Isrc/MojoObjc/MVC/Middleware -Isrc/MojoObjc/MVC/Routing -Isrc/MojoObjc/MVC/Template -Isrc/MojoObjc/MVC/View -Isrc/MojoObjc/Support -I/usr/include/postgresql
 OBJC_FLAGS := $$(gnustep-config --objc-flags) -fobjc-arc
 
-.PHONY: all eocc transpile tech-demo-transpile generated-compile arlen boomhauer tech-demo-server api-reference-server migration-sample-server dev-server tech-demo smoke-render smoke routes build-tests test test-unit test-integration perf perf-fast deploy-smoke ci-quality check docs-html clean
+.PHONY: all eocc transpile tech-demo-transpile generated-compile arlen boomhauer tech-demo-server api-reference-server migration-sample-server arlen-data-example test-data-layer dev-server tech-demo smoke-render smoke routes build-tests test test-unit test-integration perf perf-fast deploy-smoke ci-quality check docs-html clean
 
 all: eocc transpile generated-compile arlen boomhauer
 
@@ -99,6 +101,14 @@ $(MIGRATION_SAMPLE_SERVER_TOOL): examples/gsweb_migration/src/migration_sample_s
 >source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) examples/gsweb_migration/src/migration_sample_server.m $(FRAMEWORK_SRCS) -o $(MIGRATION_SAMPLE_SERVER_TOOL) $$(gnustep-config --base-libs) -ldl -lcrypto
 
 migration-sample-server: $(MIGRATION_SAMPLE_SERVER_TOOL)
+
+$(ARLEN_DATA_EXAMPLE_TOOL): examples/arlen_data/src/arlen_data_example.m
+>source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) -Isrc examples/arlen_data/src/arlen_data_example.m $(ARLEN_DATA_SRCS) -o $(ARLEN_DATA_EXAMPLE_TOOL) $$(gnustep-config --base-libs) -ldl -lcrypto
+
+arlen-data-example: $(ARLEN_DATA_EXAMPLE_TOOL)
+
+test-data-layer: arlen-data-example
+>$(ARLEN_DATA_EXAMPLE_TOOL)
 
 tech-demo: tech-demo-server
 >TECH_DEMO_PORT="$${TECH_DEMO_PORT:-3110}" ./bin/tech-demo

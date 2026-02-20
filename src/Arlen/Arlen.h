@@ -12,6 +12,7 @@
 #import "Data/ALNGDL2Adapter.h"
 #import "Data/ALNMigrationRunner.h"
 #import "Data/ALNPg.h"
+#import "Data/ALNPostgresSQLBuilder.h"
 #import "Data/ALNSQLBuilder.h"
 #import "HTTP/ALNHTTPServer.h"
 #import "HTTP/ALNRequest.h"

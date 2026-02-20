@@ -44,9 +44,11 @@ Transpiler/runtime:
 
 - `ALNPg`: default PostgreSQL adapter and raw-SQL execution path.
 - `ALNDatabaseAdapter` / `ALNDatabaseConnection`: adapter protocol used for conformance and optional compatibility layers.
-- `ALNSQLBuilder`: optional SQL construction helper for common CRUD/filter/sort/pagination patterns.
+- `ALNSQLBuilder`: optional SQL construction helper (v2 supports nested predicates, joins/aliases, CTE/subquery composition, grouping/having, and `RETURNING`).
+- `ALNPostgresSQLBuilder`: explicit PostgreSQL dialect extension layer for `ON CONFLICT`/upsert semantics.
 - `ALNDisplayGroup`: optional sort/filter/batch data-controller helper on top of adapters.
 - `ALNGDL2Adapter`: optional migration-oriented adapter wrapper for GDL2/EOControl compatibility paths.
+- `ArlenData` umbrella (`src/ArlenData/ArlenData.h`): data-layer-only packaging surface for non-Arlen projects.
 
 ## 5. JSON Response Behavior
 

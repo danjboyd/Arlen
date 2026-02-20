@@ -15,6 +15,7 @@ Last updated: 2026-02-20
 - Phase 3D: complete (2026-02-20)
 - Phase 3E: complete (2026-02-20)
 - Phase 3F: complete (2026-02-20)
+- Phase 3G: complete (2026-02-20)
 
 ## Completed Today (2026-02-20)
 
@@ -74,6 +75,13 @@ Last updated: 2026-02-20
   - implemented static mount ergonomics (explicit mounts, allowlist serving, canonical index redirects)
   - completed concrete jobs/mail file adapters and propane async worker supervision baseline
   - expanded unit/integration acceptance coverage for all new 3F behavior slices
+- Completed Phase 3G SQL builder and data-layer reuse tranche:
+  - expanded `ALNSQLBuilder` to v2 query surface (nested boolean groups, expanded predicates, joins/aliases, grouping/having, CTE/subquery composition, and `RETURNING`)
+  - added explicit PostgreSQL dialect extension builder (`ALNPostgresSQLBuilder`) for `ON CONFLICT` upsert semantics
+  - published standalone data-layer packaging via `src/ArlenData/ArlenData.h`
+  - added non-Arlen validation path (`examples/arlen_data`, `make test-data-layer`)
+  - wired standalone data-layer validation into CI quality gate (`tools/ci/run_phase3c_quality.sh`)
+  - published distribution and versioning guidance in `docs/ARLEN_DATA.md`
 
 ## Verification State (2026-02-20)
 
@@ -101,15 +109,19 @@ Last updated: 2026-02-20
   - API helper tests (typed query/header parsing, ETag/304, envelope helper + opt-in middleware behavior)
   - static serving integration tests for canonical index redirects and extension allowlist enforcement
   - propane integration test for supervised async worker spawn + respawn behavior
+- New Phase 3G checks executed:
+  - deterministic SQL snapshot coverage for builder v2 behavior (`tests/unit/Phase3GTests.m`)
+  - PostgreSQL conflict/upsert dialect-extension snapshot coverage
+  - standalone non-Arlen data-layer build/run validation (`make test-data-layer`)
 - PostgreSQL-backed tests remain gated by `ARLEN_PG_TEST_DSN`.
 
 ## Next Session Focus
 
-1. Phase 3G.1: expand `ALNSQLBuilder` capability surface toward SQL::Abstract-family parity goals.
-2. Phase 3G.2: define PostgreSQL dialect-extension APIs and coverage boundaries.
-3. Phase 3G.3: deliver standalone data-layer reuse packaging (`ArlenData`) and distribution guidance.
+1. Post-3G planning: define Phase 4 sequencing for deferred parity and platform-scale items.
+2. Frontend integration guidance/starter tranche (moved to post-3G planned track).
+3. Evaluate distributed runtime/deployment maturity candidates (clustering and related operational slices).
 
-## Planned Phase Mapping (Post-3F)
+## Planned Phase Mapping (Post-3G)
 
 - Phase 3F (complete):
   - onboarding and diagnostics (`arlen doctor`, compatibility matrix)
@@ -117,10 +129,13 @@ Last updated: 2026-02-20
   - optional API convenience helpers (ETag/304, typed query/header parsing, envelope normalization)
   - static mount allowlist/index ergonomics
   - remaining ecosystem runtime follow-on (jobs/mail adapters + worker supervision baseline)
-- Phase 3G (planned):
+- Phase 3G (complete):
   - `ALNSQLBuilder` v2 capability expansion toward SQL::Abstract-family parity goals (Objective-C-native API design)
-  - PostgreSQL dialect-extension layer for PG-specific builder features
-  - standalone data-layer packaging/reuse path (`ArlenData`) for non-Arlen applications
+  - PostgreSQL dialect-extension layer for PG-specific builder features (`ALNPostgresSQLBuilder`)
+  - standalone data-layer packaging/reuse path (`ArlenData`) for non-Arlen applications + CI validation
+- Post-3G planned:
+  - official frontend toolchain integration guides/starters
+  - broader distributed runtime/deployment maturity tracks
 - Out of scope for Arlen core (explicitly documented):
   - Django-style admin/backoffice product
   - full account-management product surfaces

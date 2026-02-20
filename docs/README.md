@@ -21,6 +21,7 @@ Open `build/docs/index.html` in your browser.
 - [Deployment Guide](DEPLOYMENT.md): deployment model and production guidance.
 - [Realtime and Composition](REALTIME_COMPOSITION.md): websocket/SSE contracts, pubsub hub, and app mounting.
 - [Ecosystem Services](ECOSYSTEM_SERVICES.md): jobs/cache/i18n/mail/attachment adapter contracts and plugin wiring.
+- [ArlenData Reuse Guide](ARLEN_DATA.md): standalone data-layer packaging, checkout, and versioning policy.
 - [Propane Manager](PROPANE.md): production process manager and propane accessories.
 - [Release Process](RELEASE_PROCESS.md): semantic versioning, deprecations, and release checklist.
 - [Performance Profiles](PERFORMANCE_PROFILES.md): profile pack, trend reports, and baseline governance.
@@ -48,3 +49,4 @@ Open `build/docs/index.html` in your browser.
 - [Basic App Smoke Guide](../examples/basic_app/README.md)
 - [API-First Reference App](../examples/api_reference/README.md)
 - [GSWeb Migration Sample](../examples/gsweb_migration/README.md)
+- [ArlenData Standalone Example](../examples/arlen_data/README.md)

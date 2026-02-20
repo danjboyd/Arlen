@@ -78,8 +78,8 @@ Related docs:
 | Toolchain doctor and known-good compatibility matrix | Django/FastAPI ecosystem operational UX | In Scope | Phase 3F (complete) | Completed with bootstrap-first `arlen doctor` and `docs/TOOLCHAIN_MATRIX.md`. |
 | API convenience helpers (ETag/304, typed query/header parsing, envelope middleware) | FastAPI/Express ecosystems | In Scope | Phase 3F (complete) | Completed as opt-in helper layer with unit/integration acceptance coverage. |
 | Static mount allowlist/index ergonomics | Express/FastAPI static serving patterns | In Scope | Phase 3F (complete) | Completed with explicit static mount contract and tested allowlist + canonical redirect behavior. |
-| SQL::Abstract-family capability parity (Objective-C API) | SQL::Abstract ecosystem | In Scope | Phase 3G (planned) | Target capability parity, not Perl API parity; dialect features are extension-layered. |
-| Standalone reusable data-layer module (`ArlenData`) | Multi-framework DB toolkit ecosystems | In Scope | Phase 3G (planned) | Allow SQL/data contracts to be consumed without full Arlen HTTP/MVC runtime coupling. |
+| SQL::Abstract-family capability parity (Objective-C API) | SQL::Abstract ecosystem | In Scope | Phase 3G (complete) | Delivered via `ALNSQLBuilder` v2 (nested predicates, joins/aliases, CTE/subquery composition, grouping/having, returning) with deterministic snapshot coverage. |
+| Standalone reusable data-layer module (`ArlenData`) | Multi-framework DB toolkit ecosystems | In Scope | Phase 3G (complete) | Delivered via `src/ArlenData/ArlenData.h`, standalone sample/target (`make test-data-layer`), and distribution/versioning guidance in `docs/ARLEN_DATA.md`. |
 | Multi-node clustering primitives | Phoenix | Deferred | Post-3E | Requires stronger distributed runtime contracts. |
 | Full ORM as default framework layer | Rails | Deferred | Phase 3B optional track | Keep raw SQL first-class; ORM is additive only. |
 | Django-style admin/backoffice product | Django | Out of Scope | N/A | Better delivered as an optional separate product/module, not core runtime. |
@@ -88,7 +88,7 @@ Related docs:
 | Inbound email framework | Rails | Out of Scope | N/A | Niche workload for Arlen core. |
 | Rich-text/CMS layer | Rails | Out of Scope | N/A | Better as ecosystem/package concern. |
 | Asset pipeline in core runtime | Rails | Out of Scope | N/A | Prefer integration with external frontend toolchains. |
-| Official frontend toolchain integration guides/starters | Node/Vite ecosystems | In Scope | Phase 3G (planned) | Keep core runtime slim while documenting practical frontend integration paths. |
+| Official frontend toolchain integration guides/starters | Node/Vite ecosystems | In Scope | Post-3G planned | Keep core runtime slim while documenting practical frontend integration paths. |
 
 ## 6. GNUstepWeb Migration Compatibility Classification
 

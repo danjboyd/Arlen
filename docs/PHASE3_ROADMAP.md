@@ -1,6 +1,6 @@
 # Arlen Phase 3 Roadmap
 
-Status: Active (Phase 3A-3F complete; Phase 3G planned)  
+Status: Active (Phase 3A-3G complete; post-3G roadmap planning active)  
 Last updated: 2026-02-20
 
 Related docs:
@@ -249,9 +249,31 @@ Acceptance:
 - Static mount behavior is integration-tested for allowlist and redirect semantics.
 - Concrete jobs/mail adapters pass compatibility suites; worker supervision behavior passes integration tests.
 
-## 3.7 Phase 3G: SQL Builder v2 + Data Layer Reuse (Planned)
+## 3.7 Phase 3G: SQL Builder v2 + Data Layer Reuse
 
-Status: Planned
+Status: Complete (2026-02-20)
+
+Completion highlights:
+- Expanded `ALNSQLBuilder` v2 capability surface:
+  - nested boolean groups (`whereAnyGroup:` / `whereAllGroup:`)
+  - broader predicate coverage (`NOT IN`, `BETWEEN`, subquery predicates, DISTINCT operators)
+  - joins and table aliases
+  - `GROUP BY` + `HAVING`
+  - CTE composition and placeholder-safe subquery parameter shifting
+  - `RETURNING` support for insert/update/delete builders
+- Added deterministic snapshot coverage for v2 behavior in `tests/unit/Phase3GTests.m`.
+- Added explicit PostgreSQL dialect extension module:
+  - `ALNPostgresSQLBuilder`
+  - `ON CONFLICT DO NOTHING`
+  - `ON CONFLICT (...) DO UPDATE SET ...`
+  - conflict-clause insertion without coupling PostgreSQL semantics into base builder contracts
+- Published reusable data-layer packaging for non-Arlen consumers:
+  - umbrella include surface: `src/ArlenData/ArlenData.h`
+  - standalone data-layer example: `examples/arlen_data`
+  - standalone validation target: `make test-data-layer`
+  - CI enforcement: `tools/ci/run_phase3c_quality.sh` now runs `make test-data-layer`
+- Published distribution and versioning guidance:
+  - `docs/ARLEN_DATA.md` (sparse checkout guidance, split-repo workflow, versioning contract)
 
 Deliverables:
 - `ALNSQLBuilder` v2 capability expansion toward SQL::Abstract-family parity goals, while preserving Objective-C-native APIs.

@@ -29,6 +29,7 @@ run_perf_profile() {
 
 make test-unit
 make test-integration
+make test-data-layer
 run_perf_profile default
 run_perf_profile middleware_heavy
 run_perf_profile template_heavy

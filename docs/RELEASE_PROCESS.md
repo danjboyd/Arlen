@@ -10,6 +10,9 @@ Arlen uses semantic versioning:
 - `MINOR`: additive features, non-breaking behavior additions
 - `PATCH`: bug fixes and implementation-only hardening
 
+ArlenData (`src/Arlen/Data` + `src/ArlenData`) follows the same semantic-versioning policy.
+Data-layer release details live in `docs/ARLEN_DATA.md`.
+
 ## 2. Deprecation Lifecycle
 
 Deprecations are explicit and time-bounded:
@@ -25,6 +28,7 @@ Run from repository root:
 
 ```bash
 make ci-quality
+make test-data-layer
 make deploy-smoke
 make docs-html
 ```

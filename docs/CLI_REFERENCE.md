@@ -208,6 +208,7 @@ Signals:
 - `bin/tech-demo`: run technology demo app
 - `bin/dev`: alias for `bin/boomhauer`
 - `make ci-quality`: run unit + integration + multi-profile perf quality gate
+- `make test-data-layer`: build and run standalone `ArlenData` example validation
 - `make deploy-smoke`: validate deployment runbook with automated release smoke
 - `make docs-html`: generate browser-friendly docs under `build/docs`
 

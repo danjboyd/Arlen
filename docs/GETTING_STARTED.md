@@ -113,11 +113,13 @@ Direct make targets:
 make test
 make test-unit
 make test-integration
+make test-data-layer
 make check
 make ci-quality
 ```
 
 `make check` runs unit + integration + perf gates.
+`make test-data-layer` validates standalone `ArlenData` consumption outside the full runtime stack.
 
 Phase 3C perf profiles:
 
