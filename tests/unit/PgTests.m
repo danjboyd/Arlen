@@ -6,6 +6,8 @@
 
 #import "ALNMigrationRunner.h"
 #import "ALNPg.h"
+#import "ALNPostgresSQLBuilder.h"
+#import "ALNSQLBuilder.h"
 
 @interface PgTests : XCTestCase
 @end
@@ -453,6 +455,348 @@
     XCTAssertEqualObjects(token, preparedRows[0][@"token"]);
     XCTAssertTrue([preparedRows[0][@"note"] containsString:@"漢字"]);
   }
+
+  (void)[connection executeCommand:[NSString stringWithFormat:@"DROP TABLE IF EXISTS %@", table]
+                        parameters:@[]
+                             error:nil];
+  [database releaseConnection:connection];
+}
+
+- (void)testSQLBuilderAdvancedExpressionsAndLateralJoinsExecuteAgainstPostgres {
+  NSString *dsn = [self pgTestDSN];
+  if ([dsn length] == 0) {
+    return;
+  }
+
+  NSError *error = nil;
+  ALNPg *database = [[ALNPg alloc] initWithConnectionString:dsn maxConnections:2 error:&error];
+  XCTAssertNil(error);
+  XCTAssertNotNil(database);
+  if (database == nil) {
+    return;
+  }
+
+  NSString *docketsTable = [self uniqueNameWithPrefix:@"arlen_pg_dockets"];
+  NSString *documentsTable = [self uniqueNameWithPrefix:@"arlen_pg_documents"];
+  NSString *eventsTable = [self uniqueNameWithPrefix:@"arlen_pg_events"];
+
+  ALNPgConnection *connection = [database acquireConnection:&error];
+  XCTAssertNil(error);
+  XCTAssertNotNil(connection);
+  if (connection == nil) {
+    return;
+  }
+
+  NSString *createDocketsSQL =
+      [NSString stringWithFormat:@"CREATE TABLE %@ (id TEXT PRIMARY KEY, state_code TEXT NOT NULL)", docketsTable];
+  NSString *createDocumentsSQL = [NSString
+      stringWithFormat:@"CREATE TABLE %@ (docket_id TEXT NOT NULL, document_id TEXT NOT NULL, manifest_order INTEGER, title TEXT)",
+                       documentsTable];
+  NSString *createEventsSQL = [NSString stringWithFormat:
+                                           @"CREATE TABLE %@ (docket_id TEXT NOT NULL, event_id TEXT NOT NULL, created_rank INTEGER NOT NULL)",
+                                           eventsTable];
+  XCTAssertGreaterThanOrEqual([connection executeCommand:createDocketsSQL parameters:@[] error:&error], 0);
+  XCTAssertNil(error);
+  XCTAssertGreaterThanOrEqual([connection executeCommand:createDocumentsSQL parameters:@[] error:&error], 0);
+  XCTAssertNil(error);
+  XCTAssertGreaterThanOrEqual([connection executeCommand:createEventsSQL parameters:@[] error:&error], 0);
+  XCTAssertNil(error);
+
+  NSString *insertDocketSQL =
+      [NSString stringWithFormat:@"INSERT INTO %@ (id, state_code) VALUES ($1, $2)", docketsTable];
+  NSInteger insertedDocket =
+      [connection executeCommand:insertDocketSQL parameters:@[ @"d1", @"TX" ] error:&error];
+  XCTAssertEqual((NSInteger)1, insertedDocket);
+  XCTAssertNil(error);
+  insertedDocket = [connection executeCommand:insertDocketSQL parameters:@[ @"d2", @"TX" ] error:&error];
+  XCTAssertEqual((NSInteger)1, insertedDocket);
+  XCTAssertNil(error);
+
+  NSArray *documentRows = @[
+    @[ @"d1", @"doc-a", @1, @"alpha" ],
+    @[ @"d1", @"doc-b", @2, [NSNull null] ],
+    @[ @"d2", @"doc-c", @3, @"charlie" ],
+  ];
+  NSString *insertDocumentSQL = [NSString stringWithFormat:
+                                               @"INSERT INTO %@ (docket_id, document_id, manifest_order, title) "
+                                                "VALUES ($1, $2, $3, $4)",
+                                               documentsTable];
+  for (NSArray *row in documentRows) {
+    XCTAssertEqual((NSInteger)1,
+                   [connection executeCommand:insertDocumentSQL parameters:row error:&error]);
+    XCTAssertNil(error);
+  }
+
+  NSArray *eventRows = @[
+    @[ @"d1", @"ev-1", @1 ],
+    @[ @"d1", @"ev-2", @2 ],
+    @[ @"d2", @"ev-3", @1 ],
+  ];
+  NSString *insertEventSQL =
+      [NSString stringWithFormat:@"INSERT INTO %@ (docket_id, event_id, created_rank) VALUES ($1, $2, $3)",
+                                 eventsTable];
+  for (NSArray *row in eventRows) {
+    XCTAssertEqual((NSInteger)1,
+                   [connection executeCommand:insertEventSQL parameters:row error:&error]);
+    XCTAssertNil(error);
+  }
+
+  ALNSQLBuilder *recentDocs = [ALNSQLBuilder selectFrom:documentsTable columns:@[ @"docket_id" ]];
+  [recentDocs whereField:@"manifest_order" operator:@">=" value:@1];
+  [recentDocs groupByField:@"docket_id"];
+
+  ALNSQLBuilder *latestEvent = [ALNSQLBuilder selectFrom:eventsTable columns:@[ @"event_id" ]];
+  [latestEvent whereExpression:@"e.docket_id = d.id" parameters:nil];
+  [latestEvent orderByField:@"created_rank" descending:YES];
+  [latestEvent limit:1];
+  [latestEvent fromAlias:@"e"];
+
+  ALNSQLBuilder *builder = [ALNSQLBuilder selectFrom:docketsTable
+                                               alias:@"d"
+                                             columns:@[ @"d.id" ]];
+  [builder selectExpression:@"COALESCE(le.event_id, $1)"
+                      alias:@"latest_event"
+                 parameters:@[ @"none" ]];
+  [builder leftJoinSubquery:recentDocs
+                      alias:@"rd"
+               onExpression:@"d.id = rd.docket_id"
+                 parameters:nil];
+  [builder leftJoinLateralSubquery:latestEvent
+                             alias:@"le"
+                      onExpression:@"TRUE"
+                        parameters:nil];
+  [builder whereField:@"d.state_code" equals:@"TX"];
+  [builder orderByField:@"d.id" descending:NO nulls:nil];
+
+  NSDictionary *built = [builder build:&error];
+  XCTAssertNil(error);
+  XCTAssertNotNil(built);
+  if (built == nil) {
+    (void)[connection executeCommand:[NSString stringWithFormat:@"DROP TABLE IF EXISTS %@", eventsTable]
+                          parameters:@[]
+                               error:nil];
+    (void)[connection executeCommand:[NSString stringWithFormat:@"DROP TABLE IF EXISTS %@", documentsTable]
+                          parameters:@[]
+                               error:nil];
+    (void)[connection executeCommand:[NSString stringWithFormat:@"DROP TABLE IF EXISTS %@", docketsTable]
+                          parameters:@[]
+                               error:nil];
+    [database releaseConnection:connection];
+    return;
+  }
+
+  NSArray *rows = [connection executeQuery:built[@"sql"] parameters:built[@"parameters"] error:&error];
+  XCTAssertNil(error);
+  XCTAssertEqual((NSUInteger)2, [rows count]);
+  XCTAssertEqualObjects(@"d1", rows[0][@"id"]);
+  XCTAssertEqualObjects(@"ev-2", rows[0][@"latest_event"]);
+  XCTAssertEqualObjects(@"d2", rows[1][@"id"]);
+  XCTAssertEqualObjects(@"ev-3", rows[1][@"latest_event"]);
+
+  ALNSQLBuilder *cursorBuilder = [ALNSQLBuilder selectFrom:documentsTable
+                                                     alias:@"doc"
+                                                   columns:@[ @"doc.document_id" ]];
+  [cursorBuilder whereExpression:@"(COALESCE(doc.manifest_order, 0), doc.document_id) > ($1, $2)"
+                      parameters:@[ @1, @"doc-a" ]];
+  [cursorBuilder orderByExpression:@"COALESCE(doc.manifest_order, 0)"
+                        descending:NO
+                             nulls:@"LAST"];
+  [cursorBuilder orderByField:@"doc.document_id" descending:NO nulls:nil];
+  NSDictionary *cursorBuilt = [cursorBuilder build:&error];
+  XCTAssertNil(error);
+  XCTAssertNotNil(cursorBuilt);
+  NSArray *cursorRows =
+      [connection executeQuery:cursorBuilt[@"sql"] parameters:cursorBuilt[@"parameters"] error:&error];
+  XCTAssertNil(error);
+  XCTAssertEqual((NSUInteger)2, [cursorRows count]);
+  XCTAssertEqualObjects(@"doc-b", cursorRows[0][@"document_id"]);
+  XCTAssertEqualObjects(@"doc-c", cursorRows[1][@"document_id"]);
+
+  (void)[connection executeCommand:[NSString stringWithFormat:@"DROP TABLE IF EXISTS %@", eventsTable]
+                        parameters:@[]
+                             error:nil];
+  (void)[connection executeCommand:[NSString stringWithFormat:@"DROP TABLE IF EXISTS %@", documentsTable]
+                        parameters:@[]
+                             error:nil];
+  (void)[connection executeCommand:[NSString stringWithFormat:@"DROP TABLE IF EXISTS %@", docketsTable]
+                        parameters:@[]
+                             error:nil];
+  [database releaseConnection:connection];
+}
+
+- (void)testSQLBuilderExpressionTemplatesWithIdentifierBindingsExecuteAgainstPostgres {
+  NSString *dsn = [self pgTestDSN];
+  if ([dsn length] == 0) {
+    return;
+  }
+
+  NSError *error = nil;
+  ALNPg *database = [[ALNPg alloc] initWithConnectionString:dsn maxConnections:2 error:&error];
+  XCTAssertNil(error);
+  XCTAssertNotNil(database);
+  if (database == nil) {
+    return;
+  }
+
+  NSString *table = [self uniqueNameWithPrefix:@"arlen_pg_expr_template"];
+  ALNPgConnection *connection = [database acquireConnection:&error];
+  XCTAssertNil(error);
+  XCTAssertNotNil(connection);
+  if (connection == nil) {
+    return;
+  }
+
+  NSString *createSQL = [NSString
+      stringWithFormat:@"CREATE TABLE %@ (id TEXT PRIMARY KEY, state_code TEXT NOT NULL, title TEXT, updated_at TEXT, created_at TEXT)",
+                       table];
+  XCTAssertGreaterThanOrEqual([connection executeCommand:createSQL parameters:@[] error:&error], 0);
+  XCTAssertNil(error);
+
+  NSString *insertSQL = [NSString
+      stringWithFormat:@"INSERT INTO %@ (id, state_code, title, updated_at, created_at) VALUES ($1, $2, $3, $4, $5)",
+                       table];
+  NSArray *insertParams = @[ @"doc-1", @"TX", @"Texas Notice", @"2026-01-02", @"2026-01-01" ];
+  NSInteger inserted = [connection executeCommand:insertSQL parameters:insertParams error:&error];
+  XCTAssertEqual((NSInteger)1, inserted);
+  XCTAssertNil(error);
+
+  ALNSQLBuilder *builder = [ALNSQLBuilder selectFrom:table
+                                               alias:@"d"
+                                             columns:@[ @"d.id" ]];
+  [builder selectExpression:@"COALESCE({{title_col}}, $1)"
+                      alias:@"display_title"
+         identifierBindings:@{ @"title_col" : @"d.title" }
+                 parameters:@[ @"untitled" ]];
+  [builder whereExpression:@"{{state_col}} = $1 AND {{id_col}} = $2"
+        identifierBindings:@{
+          @"state_col" : @"d.state_code",
+          @"id_col" : @"d.id",
+        }
+                parameters:@[ @"TX", @"doc-1" ]];
+  [builder orderByExpression:@"COALESCE({{updated_col}}, {{created_col}})"
+                  descending:NO
+                       nulls:nil
+          identifierBindings:@{
+            @"updated_col" : @"d.updated_at",
+            @"created_col" : @"d.created_at",
+          }
+                  parameters:nil];
+
+  NSDictionary *built = [builder build:&error];
+  XCTAssertNil(error);
+  XCTAssertNotNil(built);
+  if (built != nil) {
+    NSArray *rows = [connection executeQuery:built[@"sql"] parameters:built[@"parameters"] error:&error];
+    XCTAssertNil(error);
+    XCTAssertEqual((NSUInteger)1, [rows count]);
+    XCTAssertEqualObjects(@"doc-1", rows[0][@"id"]);
+    XCTAssertEqualObjects(@"Texas Notice", rows[0][@"display_title"]);
+  }
+
+  (void)[connection executeCommand:[NSString stringWithFormat:@"DROP TABLE IF EXISTS %@", table]
+                        parameters:@[]
+                             error:nil];
+  [database releaseConnection:connection];
+}
+
+- (void)testPostgresSQLBuilderAdvancedUpsertAssignmentsAndWhereExecute {
+  NSString *dsn = [self pgTestDSN];
+  if ([dsn length] == 0) {
+    return;
+  }
+
+  NSError *error = nil;
+  ALNPg *database = [[ALNPg alloc] initWithConnectionString:dsn maxConnections:2 error:&error];
+  XCTAssertNil(error);
+  XCTAssertNotNil(database);
+  if (database == nil) {
+    return;
+  }
+
+  NSString *table = [self uniqueNameWithPrefix:@"arlen_pg_upsert_expr"];
+  ALNPgConnection *connection = [database acquireConnection:&error];
+  XCTAssertNil(error);
+  XCTAssertNotNil(connection);
+  if (connection == nil) {
+    return;
+  }
+
+  NSString *createSQL = [NSString stringWithFormat:
+                                       @"CREATE TABLE %@ (id TEXT PRIMARY KEY, state TEXT NOT NULL, attempt_count INTEGER NOT NULL, updated_at TEXT NOT NULL)",
+                                       table];
+  XCTAssertGreaterThanOrEqual([connection executeCommand:createSQL parameters:@[] error:&error], 0);
+  XCTAssertNil(error);
+
+  NSString *seedSQL = [NSString stringWithFormat:
+                                     @"INSERT INTO %@ (id, state, attempt_count, updated_at) VALUES ($1, $2, $3, $4)",
+                                     table];
+  NSInteger seeded = [connection executeCommand:seedSQL
+                                     parameters:@[ @"job-1", @"running", @2, @"2026-01-01T00:00:00Z" ]
+                                          error:&error];
+  XCTAssertEqual((NSInteger)1, seeded);
+  XCTAssertNil(error);
+
+  ALNPostgresSQLBuilder *upsert =
+      [ALNPostgresSQLBuilder insertInto:table
+                                 values:@{
+                                   @"attempt_count" : @0,
+                                   @"id" : @"job-1",
+                                   @"state" : @"done",
+                                   @"updated_at" : @"2026-01-02T00:00:00Z",
+                                 }];
+  [upsert onConflictColumns:@[ @"id" ]
+        doUpdateAssignments:@{
+          @"attempt_count" : @{
+            @"expression" : [NSString stringWithFormat:@"\"%@\".\"attempt_count\" + $1", table],
+            @"parameters" : @[ @1 ],
+          },
+          @"state" : @"EXCLUDED.state",
+          @"updated_at" : @{
+            @"expression" : [NSString stringWithFormat:
+                                                @"GREATEST(\"%@\".\"updated_at\", EXCLUDED.\"updated_at\", $1::text)",
+                                                table],
+            @"parameters" : @[ @"2026-01-03T00:00:00Z" ],
+          },
+        }];
+  [upsert onConflictDoUpdateWhereExpression:[NSString stringWithFormat:@"\"%@\".\"state\" <> $1", table]
+                                 parameters:@[ @"done" ]];
+  NSDictionary *built = [upsert build:&error];
+  XCTAssertNil(error);
+  XCTAssertNotNil(built);
+  XCTAssertEqual((NSInteger)1,
+                 [connection executeCommand:built[@"sql"] parameters:built[@"parameters"] error:&error]);
+  XCTAssertNil(error);
+
+  NSDictionary *first =
+      [connection executeQueryOne:[NSString stringWithFormat:
+                                                     @"SELECT state, attempt_count, updated_at FROM %@ WHERE id = $1",
+                                                     table]
+                        parameters:@[ @"job-1" ]
+                             error:&error];
+  XCTAssertNil(error);
+  XCTAssertEqualObjects(@"done", first[@"state"]);
+  XCTAssertEqualObjects(@"3", first[@"attempt_count"]);
+  XCTAssertEqualObjects(@"2026-01-03T00:00:00Z", first[@"updated_at"]);
+
+  NSDictionary *secondBuilt = [upsert build:&error];
+  XCTAssertNil(error);
+  XCTAssertNotNil(secondBuilt);
+  XCTAssertEqual((NSInteger)0,
+                 [connection executeCommand:secondBuilt[@"sql"]
+                                parameters:secondBuilt[@"parameters"]
+                                     error:&error]);
+  XCTAssertNil(error);
+
+  NSDictionary *second =
+      [connection executeQueryOne:[NSString stringWithFormat:
+                                                     @"SELECT state, attempt_count, updated_at FROM %@ WHERE id = $1",
+                                                     table]
+                        parameters:@[ @"job-1" ]
+                             error:&error];
+  XCTAssertNil(error);
+  XCTAssertEqualObjects(@"done", second[@"state"]);
+  XCTAssertEqualObjects(@"3", second[@"attempt_count"]);
+  XCTAssertEqualObjects(@"2026-01-03T00:00:00Z", second[@"updated_at"]);
 
   (void)[connection executeCommand:[NSString stringWithFormat:@"DROP TABLE IF EXISTS %@", table]
                         parameters:@[]

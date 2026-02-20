@@ -11,8 +11,8 @@ This guide defines how to consume Arlen's data layer independently of the HTTP/M
 
 Primary contracts:
 
-- `ALNSQLBuilder` (v2 query builder)
-- `ALNPostgresSQLBuilder` (PostgreSQL dialect extension for conflict/upsert)
+- `ALNSQLBuilder` (v2 query builder with expression selects/predicates/order clauses, subquery+lateral joins, and tuple-friendly cursor predicates)
+- `ALNPostgresSQLBuilder` (PostgreSQL dialect extension for conflict/upsert, including expression-based `DO UPDATE SET` and optional `DO UPDATE ... WHERE`)
 - `ALNDatabaseAdapter` / `ALNDatabaseConnection`
 - `ALNDisplayGroup`
 - `ALNAdapterConformance` helpers
@@ -79,4 +79,22 @@ ArlenData reuse remains continuously validated by CI via:
 
 - `tools/ci/run_phase3c_quality.sh` calling `make test-data-layer`
 - unit snapshots in `tests/unit/Phase3GTests.m`
+- Phase 4A safety/IR regressions in `tests/unit/Phase4ATests.m`
+- PostgreSQL execution regression for identifier-bound templates in `tests/unit/PgTests.m`
 
+## 7. Expression Template Safety Contracts (Phase 4A)
+
+Expression-capable builder APIs now route through a trusted-template IR (`trusted-template-v1`) with explicit contracts:
+
+- Identifier slots use `{{token}}` and must be satisfied by `identifierBindings`.
+- Identifier bindings must resolve to safe SQL identifiers/wildcards (for example `d.state_code`, `d.*`, `*`).
+- Expression parameters must be an array and placeholders must map exactly to `$1..$N`.
+- Malformed expression IR shapes fail deterministically with `ALNSQLBuilderErrorDomain` diagnostics.
+
+These contracts apply to:
+
+- `selectExpression:...identifierBindings:parameters:`
+- `whereExpression:identifierBindings:parameters:`
+- `havingExpression:identifierBindings:parameters:`
+- `orderByExpression:...identifierBindings:parameters:`
+- subquery/lateral join `onExpression` APIs with `identifierBindings`

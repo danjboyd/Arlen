@@ -17,6 +17,7 @@ Last updated: 2026-02-20
 - Phase 3F: complete (2026-02-20)
 - Phase 3G: complete (2026-02-20)
 - Phase 3H: complete (2026-02-20)
+- Phase 4A: complete (2026-02-20)
 
 ## Completed Today (2026-02-20)
 
@@ -78,7 +79,13 @@ Last updated: 2026-02-20
   - expanded unit/integration acceptance coverage for all new 3F behavior slices
 - Completed Phase 3G SQL builder and data-layer reuse tranche:
   - expanded `ALNSQLBuilder` to v2 query surface (nested boolean groups, expanded predicates, joins/aliases, grouping/having, CTE/subquery composition, and `RETURNING`)
+  - added advanced expression/query composition APIs:
+    - select expressions with aliases and placeholder-safe parameter shifting
+    - expression-aware ordering (`NULLS FIRST/LAST`, parameterized order expressions)
+    - subquery and lateral join composition
+    - tuple/composite cursor predicate support via expression predicates
   - added explicit PostgreSQL dialect extension builder (`ALNPostgresSQLBuilder`) for `ON CONFLICT` upsert semantics
+  - extended PostgreSQL conflict/upsert APIs with expression-based `DO UPDATE SET` assignments and optional `DO UPDATE ... WHERE` clauses
   - published standalone data-layer packaging via `src/ArlenData/ArlenData.h`
   - added non-Arlen validation path (`examples/arlen_data`, `make test-data-layer`)
   - wired standalone data-layer validation into CI quality gate (`tools/ci/run_phase3c_quality.sh`)
@@ -89,6 +96,14 @@ Last updated: 2026-02-20
   - added cluster identity response headers (`X-Arlen-Cluster`, `X-Arlen-Node`, `X-Arlen-Worker-Pid`)
   - added propane cluster CLI/env controls and worker export wiring
   - added unit/integration validation for cluster config/runtime/propane propagation
+- Completed Phase 4A query-IR and safety-foundation tranche:
+  - added internal trusted-expression IR representation for expression-capable builder clauses
+  - added source-compatible identifier-binding expression APIs (`{{token}}`) for select/where/having/order/join-on composition
+  - enforced deterministic malformed-shape diagnostics for expression IR, parameter arrays, and identifier-binding contracts
+  - added strict placeholder/parameter coverage checks for expression templates
+  - added regression suites:
+    - `tests/unit/Phase4ATests.m` (snapshot + negative/safety validation)
+    - `tests/unit/PgTests.m` identifier-template PostgreSQL execution coverage
 
 ## Verification State (2026-02-20)
 
@@ -124,15 +139,18 @@ Last updated: 2026-02-20
   - cluster config default/override regression coverage (`tests/unit/ConfigTests.m`)
   - `/clusterz` built-in endpoint and cluster response header integration coverage
   - propane cluster override propagation integration coverage
+- New Phase 4A checks executed:
+  - `tests/unit/Phase4ATests.m` passing (expression IR snapshot, malformed contract rejection, and safety paths)
+  - PostgreSQL expression-template execution regression passing (`testSQLBuilderExpressionTemplatesWithIdentifierBindingsExecuteAgainstPostgres`)
 - PostgreSQL-backed tests remain gated by `ARLEN_PG_TEST_DSN`.
 
 ## Next Session Focus
 
-1. Plan/sequence post-3H Phase 4 platform work (frontend integration guides/starters + larger-scale runtime roadmap).
-2. Decide whether external broker-backed multi-node realtime fanout should be a Phase 4 in-scope milestone.
-3. Review deferred backlog and lock first post-3H execution tranche.
+1. Execute Phase 4B SQL surface completion tranche from `docs/PHASE4_ROADMAP.md`.
+2. Add deterministic snapshot + execution coverage for set operations, window clauses, locking clauses, and join-surface completion.
+3. Keep Phase 4A safety contracts locked while expanding 4B clause families.
 
-## Planned Phase Mapping (Post-3H)
+## Planned Phase Mapping (Post-4A)
 
 - Phase 3F (complete):
   - onboarding and diagnostics (`arlen doctor`, compatibility matrix)
@@ -150,9 +168,12 @@ Last updated: 2026-02-20
 - Maybe Someday backlog:
   - LiveView-like server-driven UI
   - full ORM as default framework layer
-- Post-3H planned:
+- Post-4A planned:
+  - Phase 4B: SQL surface completion
+  - Phase 4C: typed ergonomics + schema codegen
+  - Phase 4D: performance + diagnostics hardening
+  - Phase 4E: conformance + migration hardening
   - official frontend toolchain integration guides/starters
-  - broader Phase 4 platform-scale sequencing
 - Out of scope for Arlen core (explicitly documented):
   - Django-style admin/backoffice product
   - full account-management product surfaces

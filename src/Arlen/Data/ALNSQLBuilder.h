@@ -43,10 +43,27 @@ typedef NS_ENUM(NSInteger, ALNSQLBuilderKind) {
 
 - (instancetype)fromAlias:(NSString *)alias;
 
+- (instancetype)selectExpression:(NSString *)expression
+                           alias:(nullable NSString *)alias;
+- (instancetype)selectExpression:(NSString *)expression
+                           alias:(nullable NSString *)alias
+                      parameters:(nullable NSArray *)parameters;
+- (instancetype)selectExpression:(NSString *)expression
+                           alias:(nullable NSString *)alias
+              identifierBindings:
+                  (nullable NSDictionary<NSString *, NSString *> *)identifierBindings
+                      parameters:(nullable NSArray *)parameters;
+
 - (instancetype)whereField:(NSString *)field equals:(nullable id)value;
 - (instancetype)whereField:(NSString *)field
                   operator:(NSString *)operatorName
                      value:(nullable id)value;
+- (instancetype)whereExpression:(NSString *)expression
+                     parameters:(nullable NSArray *)parameters;
+- (instancetype)whereExpression:(NSString *)expression
+             identifierBindings:
+                 (nullable NSDictionary<NSString *, NSString *> *)identifierBindings
+                     parameters:(nullable NSArray *)parameters;
 - (instancetype)whereFieldIn:(NSString *)field
                       values:(NSArray *)values;
 - (instancetype)whereFieldNotIn:(NSString *)field
@@ -79,6 +96,66 @@ typedef NS_ENUM(NSInteger, ALNSQLBuilderKind) {
                    onLeftField:(NSString *)leftField
                       operator:(NSString *)operatorName
                   onRightField:(NSString *)rightField;
+- (instancetype)joinSubquery:(ALNSQLBuilder *)subquery
+                       alias:(NSString *)alias
+                onExpression:(NSString *)expression
+                  parameters:(nullable NSArray *)parameters;
+- (instancetype)joinSubquery:(ALNSQLBuilder *)subquery
+                       alias:(NSString *)alias
+                onExpression:(NSString *)expression
+          identifierBindings:
+              (nullable NSDictionary<NSString *, NSString *> *)identifierBindings
+                  parameters:(nullable NSArray *)parameters;
+- (instancetype)leftJoinSubquery:(ALNSQLBuilder *)subquery
+                           alias:(NSString *)alias
+                    onExpression:(NSString *)expression
+                      parameters:(nullable NSArray *)parameters;
+- (instancetype)leftJoinSubquery:(ALNSQLBuilder *)subquery
+                           alias:(NSString *)alias
+                    onExpression:(NSString *)expression
+              identifierBindings:
+                  (nullable NSDictionary<NSString *, NSString *> *)identifierBindings
+                      parameters:(nullable NSArray *)parameters;
+- (instancetype)rightJoinSubquery:(ALNSQLBuilder *)subquery
+                            alias:(NSString *)alias
+                     onExpression:(NSString *)expression
+                       parameters:(nullable NSArray *)parameters;
+- (instancetype)rightJoinSubquery:(ALNSQLBuilder *)subquery
+                            alias:(NSString *)alias
+                     onExpression:(NSString *)expression
+               identifierBindings:
+                   (nullable NSDictionary<NSString *, NSString *> *)identifierBindings
+                       parameters:(nullable NSArray *)parameters;
+- (instancetype)joinLateralSubquery:(ALNSQLBuilder *)subquery
+                              alias:(NSString *)alias
+                       onExpression:(NSString *)expression
+                         parameters:(nullable NSArray *)parameters;
+- (instancetype)joinLateralSubquery:(ALNSQLBuilder *)subquery
+                              alias:(NSString *)alias
+                       onExpression:(NSString *)expression
+                 identifierBindings:
+                     (nullable NSDictionary<NSString *, NSString *> *)identifierBindings
+                         parameters:(nullable NSArray *)parameters;
+- (instancetype)leftJoinLateralSubquery:(ALNSQLBuilder *)subquery
+                                  alias:(NSString *)alias
+                           onExpression:(NSString *)expression
+                             parameters:(nullable NSArray *)parameters;
+- (instancetype)leftJoinLateralSubquery:(ALNSQLBuilder *)subquery
+                                  alias:(NSString *)alias
+                           onExpression:(NSString *)expression
+                     identifierBindings:
+                         (nullable NSDictionary<NSString *, NSString *> *)identifierBindings
+                             parameters:(nullable NSArray *)parameters;
+- (instancetype)rightJoinLateralSubquery:(ALNSQLBuilder *)subquery
+                                   alias:(NSString *)alias
+                            onExpression:(NSString *)expression
+                              parameters:(nullable NSArray *)parameters;
+- (instancetype)rightJoinLateralSubquery:(ALNSQLBuilder *)subquery
+                                   alias:(NSString *)alias
+                            onExpression:(NSString *)expression
+                      identifierBindings:
+                          (nullable NSDictionary<NSString *, NSString *> *)identifierBindings
+                              parameters:(nullable NSArray *)parameters;
 
 - (instancetype)groupByField:(NSString *)field;
 - (instancetype)groupByFields:(NSArray<NSString *> *)fields;
@@ -87,6 +164,12 @@ typedef NS_ENUM(NSInteger, ALNSQLBuilderKind) {
 - (instancetype)havingField:(NSString *)field
                    operator:(NSString *)operatorName
                       value:(nullable id)value;
+- (instancetype)havingExpression:(NSString *)expression
+                      parameters:(nullable NSArray *)parameters;
+- (instancetype)havingExpression:(NSString *)expression
+              identifierBindings:
+                  (nullable NSDictionary<NSString *, NSString *> *)identifierBindings
+                      parameters:(nullable NSArray *)parameters;
 - (instancetype)havingAnyGroup:(ALNSQLBuilderGroupBlock)groupBlock;
 - (instancetype)havingAllGroup:(ALNSQLBuilderGroupBlock)groupBlock;
 
@@ -95,6 +178,22 @@ typedef NS_ENUM(NSInteger, ALNSQLBuilderKind) {
                           builder:(ALNSQLBuilder *)builder;
 
 - (instancetype)orderByField:(NSString *)field descending:(BOOL)descending;
+- (instancetype)orderByField:(NSString *)field
+                  descending:(BOOL)descending
+                       nulls:(nullable NSString *)nullsDirective;
+- (instancetype)orderByExpression:(NSString *)expression
+                       descending:(BOOL)descending
+                            nulls:(nullable NSString *)nullsDirective;
+- (instancetype)orderByExpression:(NSString *)expression
+                       descending:(BOOL)descending
+                            nulls:(nullable NSString *)nullsDirective
+                       parameters:(nullable NSArray *)parameters;
+- (instancetype)orderByExpression:(NSString *)expression
+                       descending:(BOOL)descending
+                            nulls:(nullable NSString *)nullsDirective
+               identifierBindings:
+                   (nullable NSDictionary<NSString *, NSString *> *)identifierBindings
+                       parameters:(nullable NSArray *)parameters;
 - (instancetype)limit:(NSUInteger)limit;
 - (instancetype)offset:(NSUInteger)offset;
 

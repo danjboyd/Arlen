@@ -33,6 +33,24 @@ static NSString *ALNSQLBuilderNormalizeOperator(NSString *value) {
   return [tokens componentsJoinedByString:@" "];
 }
 
+static NSString *ALNSQLBuilderTrimmedString(NSString *value) {
+  if (![value isKindOfClass:[NSString class]]) {
+    return @"";
+  }
+  return [value stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+}
+
+static NSString *ALNSQLBuilderNormalizeNullsDirective(NSString *value) {
+  NSString *normalized = ALNSQLBuilderNormalizeOperator(value);
+  if ([normalized isEqualToString:@"FIRST"] || [normalized isEqualToString:@"NULLS FIRST"]) {
+    return @"NULLS FIRST";
+  }
+  if ([normalized isEqualToString:@"LAST"] || [normalized isEqualToString:@"NULLS LAST"]) {
+    return @"NULLS LAST";
+  }
+  return @"";
+}
+
 static BOOL ALNSQLBuilderIdentifierIsSafe(NSString *value) {
   if (![value isKindOfClass:[NSString class]] || [value length] == 0) {
     return NO;
@@ -167,6 +185,50 @@ static NSString *ALNSQLBuilderShiftPlaceholders(NSString *sql, NSUInteger offset
   return rewritten;
 }
 
+static BOOL ALNSQLBuilderExpressionTokenIsSafe(NSString *value) {
+  if (![value isKindOfClass:[NSString class]] || [value length] == 0) {
+    return NO;
+  }
+  NSCharacterSet *allowed =
+      [NSCharacterSet characterSetWithCharactersInString:@"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_"];
+  if ([[value stringByTrimmingCharactersInSet:allowed] length] > 0) {
+    return NO;
+  }
+  unichar first = [value characterAtIndex:0];
+  return ([[NSCharacterSet letterCharacterSet] characterIsMember:first] || first == '_');
+}
+
+static NSRegularExpression *ALNSQLBuilderPlaceholderRegex(void) {
+  static NSRegularExpression *regex = nil;
+  if (regex == nil) {
+    regex = [NSRegularExpression regularExpressionWithPattern:@"\\$([0-9]+)"
+                                                      options:0
+                                                        error:nil];
+  }
+  return regex;
+}
+
+static NSRegularExpression *ALNSQLBuilderIdentifierTokenRegex(void) {
+  static NSRegularExpression *regex = nil;
+  if (regex == nil) {
+    regex = [NSRegularExpression regularExpressionWithPattern:@"\\{\\{([A-Za-z_][A-Za-z0-9_]*)\\}\\}"
+                                                      options:0
+                                                        error:nil];
+  }
+  return regex;
+}
+
+static NSDictionary *ALNSQLBuilderMakeExpressionIR(NSString *expression,
+                                                   NSArray *parameters,
+                                                   NSDictionary *identifierBindings) {
+  return @{
+    @"kind" : @"trusted-template-v1",
+    @"template" : expression ?: @"",
+    @"parameters" : parameters ?: @[],
+    @"identifierBindings" : identifierBindings ?: @{},
+  };
+}
+
 static NSSet *ALNSQLBuilderAllowedComparisonOperators(void) {
   static NSSet *operators = nil;
   if (operators == nil) {
@@ -293,6 +355,36 @@ static NSSet *ALNSQLBuilderAllowedJoinOperators(void) {
   return self;
 }
 
+- (instancetype)selectExpression:(NSString *)expression alias:(NSString *)alias {
+  return [self selectExpression:expression
+                          alias:alias
+             identifierBindings:nil
+                     parameters:nil];
+}
+
+- (instancetype)selectExpression:(NSString *)expression
+                           alias:(NSString *)alias
+                      parameters:(NSArray *)parameters {
+  return [self selectExpression:expression
+                          alias:alias
+             identifierBindings:nil
+                     parameters:parameters];
+}
+
+- (instancetype)selectExpression:(NSString *)expression
+                           alias:(NSString *)alias
+              identifierBindings:(NSDictionary<NSString *, NSString *> *)identifierBindings
+                      parameters:(NSArray *)parameters {
+  NSMutableArray *columns = [NSMutableArray arrayWithArray:self.selectColumns ?: @[]];
+  [columns addObject:@{
+    @"kind" : @"expression",
+    @"expressionIR" : ALNSQLBuilderMakeExpressionIR(expression, parameters, identifierBindings),
+    @"alias" : alias ?: @"",
+  }];
+  self.selectColumns = [NSArray arrayWithArray:columns];
+  return self;
+}
+
 - (instancetype)whereField:(NSString *)field equals:(id)value {
   return [self whereField:field operator:@"=" value:value];
 }
@@ -306,6 +398,23 @@ static NSSet *ALNSQLBuilderAllowedJoinOperators(void) {
     @"operator" : ([normalized length] > 0 ? normalized : @"="),
     @"value" : value ?: [NSNull null],
     @"kind" : @"operator"
+  }];
+  return self;
+}
+
+- (instancetype)whereExpression:(NSString *)expression
+                     parameters:(NSArray *)parameters {
+  return [self whereExpression:expression
+            identifierBindings:nil
+                    parameters:parameters];
+}
+
+- (instancetype)whereExpression:(NSString *)expression
+             identifierBindings:(NSDictionary<NSString *, NSString *> *)identifierBindings
+                     parameters:(NSArray *)parameters {
+  [self.whereClauses addObject:@{
+    @"kind" : @"expression",
+    @"expressionIR" : ALNSQLBuilderMakeExpressionIR(expression, parameters, identifierBindings),
   }];
   return self;
 }
@@ -413,12 +522,14 @@ static NSSet *ALNSQLBuilderAllowedJoinOperators(void) {
              onRightField:(NSString *)rightField {
   NSString *normalized = ALNSQLBuilderNormalizeOperator(operatorName ?: @"=");
   [self.joins addObject:@{
+    @"kind" : @"table",
     @"type" : @"INNER",
     @"table" : tableName ?: @"",
     @"alias" : alias ?: @"",
     @"left" : leftField ?: @"",
     @"operator" : ([normalized length] > 0 ? normalized : @"="),
     @"right" : rightField ?: @"",
+    @"lateral" : @(NO),
   }];
   return self;
 }
@@ -430,12 +541,14 @@ static NSSet *ALNSQLBuilderAllowedJoinOperators(void) {
                  onRightField:(NSString *)rightField {
   NSString *normalized = ALNSQLBuilderNormalizeOperator(operatorName ?: @"=");
   [self.joins addObject:@{
+    @"kind" : @"table",
     @"type" : @"LEFT",
     @"table" : tableName ?: @"",
     @"alias" : alias ?: @"",
     @"left" : leftField ?: @"",
     @"operator" : ([normalized length] > 0 ? normalized : @"="),
     @"right" : rightField ?: @"",
+    @"lateral" : @(NO),
   }];
   return self;
 }
@@ -447,12 +560,176 @@ static NSSet *ALNSQLBuilderAllowedJoinOperators(void) {
                   onRightField:(NSString *)rightField {
   NSString *normalized = ALNSQLBuilderNormalizeOperator(operatorName ?: @"=");
   [self.joins addObject:@{
+    @"kind" : @"table",
     @"type" : @"RIGHT",
     @"table" : tableName ?: @"",
     @"alias" : alias ?: @"",
     @"left" : leftField ?: @"",
     @"operator" : ([normalized length] > 0 ? normalized : @"="),
     @"right" : rightField ?: @"",
+    @"lateral" : @(NO),
+  }];
+  return self;
+}
+
+- (instancetype)joinSubquery:(ALNSQLBuilder *)subquery
+                       alias:(NSString *)alias
+                onExpression:(NSString *)expression
+                  parameters:(NSArray *)parameters {
+  return [self joinSubquery:subquery
+                      alias:alias
+               onExpression:expression
+         identifierBindings:nil
+                 parameters:parameters];
+}
+
+- (instancetype)joinSubquery:(ALNSQLBuilder *)subquery
+                       alias:(NSString *)alias
+                onExpression:(NSString *)expression
+          identifierBindings:(NSDictionary<NSString *, NSString *> *)identifierBindings
+                  parameters:(NSArray *)parameters {
+  [self.joins addObject:@{
+    @"kind" : @"subquery",
+    @"query" : subquery ?: [NSNull null],
+    @"alias" : alias ?: @"",
+    @"onExpressionIR" : ALNSQLBuilderMakeExpressionIR(expression, parameters, identifierBindings),
+    @"type" : @"INNER",
+    @"lateral" : @(NO),
+  }];
+  return self;
+}
+
+- (instancetype)leftJoinSubquery:(ALNSQLBuilder *)subquery
+                           alias:(NSString *)alias
+                    onExpression:(NSString *)expression
+                      parameters:(NSArray *)parameters {
+  return [self leftJoinSubquery:subquery
+                          alias:alias
+                   onExpression:expression
+             identifierBindings:nil
+                     parameters:parameters];
+}
+
+- (instancetype)leftJoinSubquery:(ALNSQLBuilder *)subquery
+                           alias:(NSString *)alias
+                    onExpression:(NSString *)expression
+              identifierBindings:(NSDictionary<NSString *, NSString *> *)identifierBindings
+                      parameters:(NSArray *)parameters {
+  [self.joins addObject:@{
+    @"kind" : @"subquery",
+    @"query" : subquery ?: [NSNull null],
+    @"alias" : alias ?: @"",
+    @"onExpressionIR" : ALNSQLBuilderMakeExpressionIR(expression, parameters, identifierBindings),
+    @"type" : @"LEFT",
+    @"lateral" : @(NO),
+  }];
+  return self;
+}
+
+- (instancetype)rightJoinSubquery:(ALNSQLBuilder *)subquery
+                            alias:(NSString *)alias
+                     onExpression:(NSString *)expression
+                       parameters:(NSArray *)parameters {
+  return [self rightJoinSubquery:subquery
+                           alias:alias
+                    onExpression:expression
+              identifierBindings:nil
+                      parameters:parameters];
+}
+
+- (instancetype)rightJoinSubquery:(ALNSQLBuilder *)subquery
+                            alias:(NSString *)alias
+                     onExpression:(NSString *)expression
+               identifierBindings:(NSDictionary<NSString *, NSString *> *)identifierBindings
+                       parameters:(NSArray *)parameters {
+  [self.joins addObject:@{
+    @"kind" : @"subquery",
+    @"query" : subquery ?: [NSNull null],
+    @"alias" : alias ?: @"",
+    @"onExpressionIR" : ALNSQLBuilderMakeExpressionIR(expression, parameters, identifierBindings),
+    @"type" : @"RIGHT",
+    @"lateral" : @(NO),
+  }];
+  return self;
+}
+
+- (instancetype)joinLateralSubquery:(ALNSQLBuilder *)subquery
+                              alias:(NSString *)alias
+                       onExpression:(NSString *)expression
+                         parameters:(NSArray *)parameters {
+  return [self joinLateralSubquery:subquery
+                             alias:alias
+                      onExpression:expression
+                identifierBindings:nil
+                        parameters:parameters];
+}
+
+- (instancetype)joinLateralSubquery:(ALNSQLBuilder *)subquery
+                              alias:(NSString *)alias
+                       onExpression:(NSString *)expression
+                 identifierBindings:(NSDictionary<NSString *, NSString *> *)identifierBindings
+                         parameters:(NSArray *)parameters {
+  [self.joins addObject:@{
+    @"kind" : @"subquery",
+    @"query" : subquery ?: [NSNull null],
+    @"alias" : alias ?: @"",
+    @"onExpressionIR" : ALNSQLBuilderMakeExpressionIR(expression, parameters, identifierBindings),
+    @"type" : @"INNER",
+    @"lateral" : @(YES),
+  }];
+  return self;
+}
+
+- (instancetype)leftJoinLateralSubquery:(ALNSQLBuilder *)subquery
+                                  alias:(NSString *)alias
+                           onExpression:(NSString *)expression
+                             parameters:(NSArray *)parameters {
+  return [self leftJoinLateralSubquery:subquery
+                                 alias:alias
+                          onExpression:expression
+                    identifierBindings:nil
+                            parameters:parameters];
+}
+
+- (instancetype)leftJoinLateralSubquery:(ALNSQLBuilder *)subquery
+                                  alias:(NSString *)alias
+                           onExpression:(NSString *)expression
+                     identifierBindings:(NSDictionary<NSString *, NSString *> *)identifierBindings
+                             parameters:(NSArray *)parameters {
+  [self.joins addObject:@{
+    @"kind" : @"subquery",
+    @"query" : subquery ?: [NSNull null],
+    @"alias" : alias ?: @"",
+    @"onExpressionIR" : ALNSQLBuilderMakeExpressionIR(expression, parameters, identifierBindings),
+    @"type" : @"LEFT",
+    @"lateral" : @(YES),
+  }];
+  return self;
+}
+
+- (instancetype)rightJoinLateralSubquery:(ALNSQLBuilder *)subquery
+                                   alias:(NSString *)alias
+                            onExpression:(NSString *)expression
+                              parameters:(NSArray *)parameters {
+  return [self rightJoinLateralSubquery:subquery
+                                  alias:alias
+                           onExpression:expression
+                     identifierBindings:nil
+                             parameters:parameters];
+}
+
+- (instancetype)rightJoinLateralSubquery:(ALNSQLBuilder *)subquery
+                                   alias:(NSString *)alias
+                            onExpression:(NSString *)expression
+                      identifierBindings:(NSDictionary<NSString *, NSString *> *)identifierBindings
+                              parameters:(NSArray *)parameters {
+  [self.joins addObject:@{
+    @"kind" : @"subquery",
+    @"query" : subquery ?: [NSNull null],
+    @"alias" : alias ?: @"",
+    @"onExpressionIR" : ALNSQLBuilderMakeExpressionIR(expression, parameters, identifierBindings),
+    @"type" : @"RIGHT",
+    @"lateral" : @(YES),
   }];
   return self;
 }
@@ -484,6 +761,23 @@ static NSSet *ALNSQLBuilderAllowedJoinOperators(void) {
     @"operator" : ([normalized length] > 0 ? normalized : @"="),
     @"value" : value ?: [NSNull null],
     @"kind" : @"operator"
+  }];
+  return self;
+}
+
+- (instancetype)havingExpression:(NSString *)expression
+                      parameters:(NSArray *)parameters {
+  return [self havingExpression:expression
+             identifierBindings:nil
+                     parameters:parameters];
+}
+
+- (instancetype)havingExpression:(NSString *)expression
+              identifierBindings:(NSDictionary<NSString *, NSString *> *)identifierBindings
+                      parameters:(NSArray *)parameters {
+  [self.havingClauses addObject:@{
+    @"kind" : @"expression",
+    @"expressionIR" : ALNSQLBuilderMakeExpressionIR(expression, parameters, identifierBindings),
   }];
   return self;
 }
@@ -540,9 +834,52 @@ static NSSet *ALNSQLBuilderAllowedJoinOperators(void) {
 }
 
 - (instancetype)orderByField:(NSString *)field descending:(BOOL)descending {
+  return [self orderByField:field descending:descending nulls:nil];
+}
+
+- (instancetype)orderByField:(NSString *)field
+                  descending:(BOOL)descending
+                       nulls:(NSString *)nullsDirective {
   [self.orderByClauses addObject:@{
+    @"kind" : @"field",
     @"field" : field ?: @"",
-    @"descending" : @(descending)
+    @"descending" : @(descending),
+    @"nulls" : nullsDirective ?: @"",
+  }];
+  return self;
+}
+
+- (instancetype)orderByExpression:(NSString *)expression
+                       descending:(BOOL)descending
+                            nulls:(NSString *)nullsDirective {
+  return [self orderByExpression:expression
+                      descending:descending
+                           nulls:nullsDirective
+               identifierBindings:nil
+                       parameters:nil];
+}
+
+- (instancetype)orderByExpression:(NSString *)expression
+                       descending:(BOOL)descending
+                            nulls:(NSString *)nullsDirective
+                       parameters:(NSArray *)parameters {
+  return [self orderByExpression:expression
+                      descending:descending
+                           nulls:nullsDirective
+              identifierBindings:nil
+                      parameters:parameters];
+}
+
+- (instancetype)orderByExpression:(NSString *)expression
+                       descending:(BOOL)descending
+                            nulls:(NSString *)nullsDirective
+               identifierBindings:(NSDictionary<NSString *, NSString *> *)identifierBindings
+                       parameters:(NSArray *)parameters {
+  [self.orderByClauses addObject:@{
+    @"kind" : @"expression",
+    @"expressionIR" : ALNSQLBuilderMakeExpressionIR(expression, parameters, identifierBindings),
+    @"descending" : @(descending),
+    @"nulls" : nullsDirective ?: @"",
   }];
   return self;
 }
@@ -593,9 +930,317 @@ static NSSet *ALNSQLBuilderAllowedJoinOperators(void) {
   return YES;
 }
 
-- (nullable NSString *)compileColumns:(NSError **)error {
+- (nullable NSString *)compileTrustedExpression:(id)expressionValue
+                                     parameters:(id)rawParameters
+                                  intoParameters:(NSMutableArray *)parameters
+                                         context:(NSString *)context
+                                           error:(NSError **)error {
+  return [self compileTrustedExpression:expressionValue
+                             parameters:rawParameters
+                     identifierBindings:nil
+                          intoParameters:parameters
+                                 context:context
+                                   error:error];
+}
+
+- (nullable NSString *)compileTrustedExpression:(id)expressionValue
+                                     parameters:(id)rawParameters
+                             identifierBindings:(id)rawIdentifierBindings
+                                  intoParameters:(NSMutableArray *)parameters
+                                         context:(NSString *)context
+                                           error:(NSError **)error {
+  NSString *expression = ALNSQLBuilderTrimmedString(expressionValue);
+  if ([expression length] == 0) {
+    if (error != NULL) {
+      *error = ALNSQLBuilderMakeError(ALNSQLBuilderErrorInvalidArgument,
+                                      @"expression must not be empty",
+                                      context);
+    }
+    return nil;
+  }
+
+  NSDictionary *identifierBindings = @{};
+  if (rawIdentifierBindings != nil &&
+      rawIdentifierBindings != (id)[NSNull null]) {
+    if (![rawIdentifierBindings isKindOfClass:[NSDictionary class]]) {
+      if (error != NULL) {
+        *error = ALNSQLBuilderMakeError(ALNSQLBuilderErrorInvalidArgument,
+                                        @"expression identifier bindings must be a dictionary",
+                                        context);
+      }
+      return nil;
+    }
+    identifierBindings = rawIdentifierBindings;
+  }
+  NSRegularExpression *identifierTokenRegex = ALNSQLBuilderIdentifierTokenRegex();
+  NSArray *identifierTokenMatches =
+      [identifierTokenRegex matchesInString:expression options:0 range:NSMakeRange(0, [expression length])];
+
+  NSString *resolvedExpression = expression;
+  if ([identifierTokenMatches count] > 0) {
+    NSMutableDictionary *resolvedBindings = [NSMutableDictionary dictionary];
+    for (id rawTokenName in identifierBindings) {
+      if (![rawTokenName isKindOfClass:[NSString class]] ||
+          !ALNSQLBuilderExpressionTokenIsSafe(rawTokenName)) {
+        if (error != NULL) {
+          *error = ALNSQLBuilderMakeError(ALNSQLBuilderErrorInvalidArgument,
+                                          @"invalid identifier token name",
+                                          [rawTokenName description]);
+        }
+        return nil;
+      }
+      NSString *identifier = [identifierBindings[rawTokenName] isKindOfClass:[NSString class]]
+                                 ? identifierBindings[rawTokenName]
+                                 : @"";
+      NSString *quotedIdentifier = ALNSQLBuilderQuoteIdentifierOrWildcard(identifier);
+      if (quotedIdentifier == nil || [quotedIdentifier length] == 0) {
+        if (error != NULL) {
+          *error = ALNSQLBuilderMakeError(ALNSQLBuilderErrorInvalidIdentifier,
+                                          @"invalid identifier binding",
+                                          identifier);
+        }
+        return nil;
+      }
+      resolvedBindings[rawTokenName] = quotedIdentifier;
+    }
+
+    NSMutableString *rewritten = [NSMutableString stringWithCapacity:[expression length] + 32];
+    NSMutableSet *usedTokens = [NSMutableSet set];
+    NSUInteger cursor = 0;
+    for (NSTextCheckingResult *match in identifierTokenMatches) {
+      NSRange fullRange = [match rangeAtIndex:0];
+      NSRange tokenRange = [match rangeAtIndex:1];
+      if (fullRange.location > cursor) {
+        [rewritten appendString:[expression substringWithRange:NSMakeRange(cursor,
+                                                                           fullRange.location - cursor)]];
+      }
+      NSString *token = [expression substringWithRange:tokenRange];
+      NSString *replacement = resolvedBindings[token];
+      if ([replacement length] == 0) {
+        if (error != NULL) {
+          *error = ALNSQLBuilderMakeError(ALNSQLBuilderErrorInvalidArgument,
+                                          @"missing identifier binding for token",
+                                          token);
+        }
+        return nil;
+      }
+      [rewritten appendString:replacement];
+      [usedTokens addObject:token];
+      cursor = NSMaxRange(fullRange);
+    }
+    if (cursor < [expression length]) {
+      [rewritten appendString:[expression substringFromIndex:cursor]];
+    }
+
+    for (NSString *token in resolvedBindings) {
+      if (![usedTokens containsObject:token]) {
+        if (error != NULL) {
+          *error = ALNSQLBuilderMakeError(ALNSQLBuilderErrorInvalidArgument,
+                                          @"unused identifier binding token",
+                                          token);
+        }
+        return nil;
+      }
+    }
+    resolvedExpression = [NSString stringWithString:rewritten];
+  } else if ([identifierBindings count] > 0) {
+    if (error != NULL) {
+      *error = ALNSQLBuilderMakeError(
+          ALNSQLBuilderErrorInvalidArgument,
+          @"identifier bindings were provided but expression has no {{token}} placeholders",
+          context);
+    }
+    return nil;
+  }
+
+  NSArray *expressionParameters = @[];
+  if (rawParameters != nil &&
+      rawParameters != (id)[NSNull null]) {
+    if (![rawParameters isKindOfClass:[NSArray class]]) {
+      if (error != NULL) {
+        *error = ALNSQLBuilderMakeError(ALNSQLBuilderErrorInvalidArgument,
+                                        @"expression parameters must be an array",
+                                        context);
+      }
+      return nil;
+    }
+    expressionParameters = rawParameters;
+  }
+  NSRegularExpression *placeholderRegex = ALNSQLBuilderPlaceholderRegex();
+  NSArray *placeholderMatches =
+      [placeholderRegex matchesInString:resolvedExpression
+                                options:0
+                                  range:NSMakeRange(0, [resolvedExpression length])];
+  if ([placeholderMatches count] == 0 && [expressionParameters count] > 0) {
+    if (error != NULL) {
+      *error = ALNSQLBuilderMakeError(ALNSQLBuilderErrorInvalidArgument,
+                                      @"expression parameters require placeholders",
+                                      context);
+    }
+    return nil;
+  }
+  if ([placeholderMatches count] > 0 && [expressionParameters count] == 0) {
+    if (error != NULL) {
+      *error = ALNSQLBuilderMakeError(ALNSQLBuilderErrorInvalidArgument,
+                                      @"expression placeholders require parameter values",
+                                      context);
+    }
+    return nil;
+  }
+
+  NSMutableSet *seenPlaceholderIndexes = [NSMutableSet set];
+  for (NSTextCheckingResult *match in placeholderMatches) {
+    NSRange indexRange = [match rangeAtIndex:1];
+    NSInteger placeholderIndex = [[resolvedExpression substringWithRange:indexRange] integerValue];
+    if (placeholderIndex < 1 || placeholderIndex > (NSInteger)[expressionParameters count]) {
+      if (error != NULL) {
+        *error = ALNSQLBuilderMakeError(ALNSQLBuilderErrorInvalidArgument,
+                                        @"expression placeholder index exceeds provided parameters",
+                                        context);
+      }
+      return nil;
+    }
+    [seenPlaceholderIndexes addObject:@(placeholderIndex)];
+  }
+
+  for (NSUInteger idx = 1; idx <= [expressionParameters count]; idx++) {
+    if (![seenPlaceholderIndexes containsObject:@(idx)]) {
+      if (error != NULL) {
+        *error = ALNSQLBuilderMakeError(ALNSQLBuilderErrorInvalidArgument,
+                                        @"expression parameters must map to placeholders $1..$N",
+                                        context);
+      }
+      return nil;
+    }
+  }
+
+  NSUInteger placeholderOffset = [parameters count];
+  for (id value in expressionParameters) {
+    [parameters addObject:value ?: [NSNull null]];
+  }
+  return ALNSQLBuilderShiftPlaceholders(resolvedExpression, placeholderOffset);
+}
+
+- (nullable NSString *)compileExpressionIR:(id)rawExpressionIR
+                            intoParameters:(NSMutableArray *)parameters
+                                   context:(NSString *)context
+                                     error:(NSError **)error {
+  if (![rawExpressionIR isKindOfClass:[NSDictionary class]]) {
+    if (error != NULL) {
+      *error = ALNSQLBuilderMakeError(ALNSQLBuilderErrorInvalidArgument,
+                                      @"expression IR entry must be a dictionary",
+                                      context);
+    }
+    return nil;
+  }
+
+  NSDictionary *expressionIR = rawExpressionIR;
+  NSString *kind = [expressionIR[@"kind"] isKindOfClass:[NSString class]] ? expressionIR[@"kind"] : @"";
+  if ([kind length] > 0 && ![kind isEqualToString:@"trusted-template-v1"]) {
+    if (error != NULL) {
+      *error = ALNSQLBuilderMakeError(ALNSQLBuilderErrorCompileFailed,
+                                      @"unsupported expression IR kind",
+                                      kind);
+    }
+    return nil;
+  }
+
+  id templateValue = expressionIR[@"template"];
+  if (templateValue == nil) {
+    templateValue = expressionIR[@"expression"];
+  }
+  if (![templateValue isKindOfClass:[NSString class]]) {
+    if (error != NULL) {
+      *error = ALNSQLBuilderMakeError(ALNSQLBuilderErrorInvalidArgument,
+                                      @"expression IR template must be a string",
+                                      context);
+    }
+    return nil;
+  }
+
+  id parametersValue = expressionIR[@"parameters"];
+  if (parametersValue != nil &&
+      parametersValue != (id)[NSNull null] &&
+      ![parametersValue isKindOfClass:[NSArray class]]) {
+    if (error != NULL) {
+      *error = ALNSQLBuilderMakeError(ALNSQLBuilderErrorInvalidArgument,
+                                      @"expression IR parameters must be an array",
+                                      context);
+    }
+    return nil;
+  }
+
+  id identifierBindingsValue = expressionIR[@"identifierBindings"];
+  if (identifierBindingsValue != nil &&
+      identifierBindingsValue != (id)[NSNull null] &&
+      ![identifierBindingsValue isKindOfClass:[NSDictionary class]]) {
+    if (error != NULL) {
+      *error = ALNSQLBuilderMakeError(ALNSQLBuilderErrorInvalidArgument,
+                                      @"expression IR identifierBindings must be a dictionary",
+                                      context);
+    }
+    return nil;
+  }
+
+  return [self compileTrustedExpression:templateValue
+                             parameters:parametersValue
+                     identifierBindings:identifierBindingsValue
+                          intoParameters:parameters
+                                 context:context
+                                   error:error];
+}
+
+- (nullable NSString *)compileColumnsWithParameters:(NSMutableArray *)parameters
+                                              error:(NSError **)error {
   NSMutableArray *columns = [NSMutableArray array];
   for (id value in self.selectColumns ?: @[]) {
+    if ([value isKindOfClass:[NSDictionary class]]) {
+      NSString *kind = [value[@"kind"] isKindOfClass:[NSString class]] ? value[@"kind"] : @"";
+      if (![kind isEqualToString:@"expression"]) {
+        if (error != NULL) {
+          *error = ALNSQLBuilderMakeError(ALNSQLBuilderErrorInvalidArgument,
+                                          @"unsupported select column entry",
+                                          kind);
+        }
+        return nil;
+      }
+
+      id expressionIR = value[@"expressionIR"];
+      NSString *expression = nil;
+      if (expressionIR != nil) {
+        expression = [self compileExpressionIR:expressionIR
+                                intoParameters:parameters
+                                       context:@"select"
+                                         error:error];
+      } else {
+        expression = [self compileTrustedExpression:value[@"expression"]
+                                         parameters:value[@"parameters"]
+                                 identifierBindings:value[@"identifierBindings"]
+                                      intoParameters:parameters
+                                             context:@"select"
+                                               error:error];
+      }
+      if (expression == nil) {
+        return nil;
+      }
+
+      NSString *alias = [value[@"alias"] isKindOfClass:[NSString class]] ? value[@"alias"] : @"";
+      if ([alias length] > 0) {
+        if (!ALNSQLBuilderAliasIsSafe(alias)) {
+          if (error != NULL) {
+            *error = ALNSQLBuilderMakeError(ALNSQLBuilderErrorInvalidIdentifier,
+                                            @"invalid select alias",
+                                            alias);
+          }
+          return nil;
+        }
+        [columns addObject:[NSString stringWithFormat:@"%@ AS \"%@\"", expression, alias]];
+      } else {
+        [columns addObject:expression];
+      }
+      continue;
+    }
+
     if (![value isKindOfClass:[NSString class]] || [value length] == 0) {
       continue;
     }
@@ -714,6 +1359,29 @@ static NSSet *ALNSQLBuilderAllowedJoinOperators(void) {
       if ([groupSQL length] > 0) {
         [fragments addObject:[NSString stringWithFormat:@"(%@)", groupSQL]];
       }
+      continue;
+    }
+
+    if ([kind isEqualToString:@"expression"]) {
+      id expressionIR = clause[@"expressionIR"];
+      NSString *compiledExpression = nil;
+      if (expressionIR != nil) {
+        compiledExpression = [self compileExpressionIR:expressionIR
+                                        intoParameters:parameters
+                                               context:@"where/having"
+                                                 error:error];
+      } else {
+        compiledExpression = [self compileTrustedExpression:clause[@"expression"]
+                                                 parameters:clause[@"parameters"]
+                                         identifierBindings:clause[@"identifierBindings"]
+                                              intoParameters:parameters
+                                                     context:@"where/having"
+                                                       error:error];
+      }
+      if (compiledExpression == nil) {
+        return nil;
+      }
+      [fragments addObject:[NSString stringWithFormat:@"(%@)", compiledExpression]];
       continue;
     }
 
@@ -898,27 +1566,58 @@ static NSSet *ALNSQLBuilderAllowedJoinOperators(void) {
   return YES;
 }
 
-- (BOOL)appendOrderBySQLTo:(NSMutableString *)sql error:(NSError **)error {
+- (BOOL)appendOrderBySQLTo:(NSMutableString *)sql
+                 parameters:(NSMutableArray *)parameters
+                      error:(NSError **)error {
   if ([self.orderByClauses count] == 0) {
     return YES;
   }
 
   NSMutableArray *fragments = [NSMutableArray arrayWithCapacity:[self.orderByClauses count]];
   for (NSDictionary *entry in self.orderByClauses) {
-    NSString *field = [entry[@"field"] isKindOfClass:[NSString class]] ? entry[@"field"] : @"";
-    NSString *quotedField = ALNSQLBuilderQuoteIdentifierOrWildcard(field);
-    if (quotedField == nil || [quotedField isEqualToString:@"*"]) {
-      if (error != NULL) {
-        *error = ALNSQLBuilderMakeError(ALNSQLBuilderErrorInvalidIdentifier,
-                                        @"invalid order field",
-                                        field);
+    NSString *kind = [entry[@"kind"] isKindOfClass:[NSString class]] ? entry[@"kind"] : @"field";
+    NSString *orderTarget = nil;
+    if ([kind isEqualToString:@"expression"]) {
+      id expressionIR = entry[@"expressionIR"];
+      if (expressionIR != nil) {
+        orderTarget = [self compileExpressionIR:expressionIR
+                                 intoParameters:parameters
+                                        context:@"order by"
+                                          error:error];
+      } else {
+        orderTarget = [self compileTrustedExpression:entry[@"expression"]
+                                          parameters:entry[@"parameters"]
+                                  identifierBindings:entry[@"identifierBindings"]
+                                       intoParameters:parameters
+                                              context:@"order by"
+                                                error:error];
       }
-      return NO;
+      if (orderTarget == nil) {
+        return NO;
+      }
+    } else {
+      NSString *field = [entry[@"field"] isKindOfClass:[NSString class]] ? entry[@"field"] : @"";
+      NSString *quotedField = ALNSQLBuilderQuoteIdentifierOrWildcard(field);
+      if (quotedField == nil || [quotedField isEqualToString:@"*"]) {
+        if (error != NULL) {
+          *error = ALNSQLBuilderMakeError(ALNSQLBuilderErrorInvalidIdentifier,
+                                          @"invalid order field",
+                                          field);
+        }
+        return NO;
+      }
+      orderTarget = quotedField;
     }
+
     BOOL descending = [entry[@"descending"] boolValue];
-    [fragments addObject:[NSString stringWithFormat:@"%@ %@",
-                                                    quotedField,
-                                                    descending ? @"DESC" : @"ASC"]];
+    NSString *nulls = ALNSQLBuilderNormalizeNullsDirective(entry[@"nulls"]);
+    NSMutableString *fragment = [NSMutableString stringWithFormat:@"%@ %@",
+                                                         orderTarget,
+                                                         descending ? @"DESC" : @"ASC"];
+    if ([nulls length] > 0) {
+      [fragment appendFormat:@" %@", nulls];
+    }
+    [fragments addObject:[NSString stringWithString:fragment]];
   }
 
   if ([fragments count] > 0) {
@@ -927,7 +1626,9 @@ static NSSet *ALNSQLBuilderAllowedJoinOperators(void) {
   return YES;
 }
 
-- (BOOL)appendJoinSQLTo:(NSMutableString *)sql error:(NSError **)error {
+- (BOOL)appendJoinSQLTo:(NSMutableString *)sql
+             parameters:(NSMutableArray *)parameters
+                  error:(NSError **)error {
   if ([self.joins count] == 0) {
     return YES;
   }
@@ -940,6 +1641,54 @@ static NSSet *ALNSQLBuilderAllowedJoinOperators(void) {
         ![joinType isEqualToString:@"RIGHT"] &&
         ![joinType isEqualToString:@"INNER"]) {
       joinType = @"INNER";
+    }
+    BOOL lateral = [join[@"lateral"] boolValue];
+    NSString *joinKind = [join[@"kind"] isKindOfClass:[NSString class]] ? join[@"kind"] : @"table";
+    if ([joinKind isEqualToString:@"subquery"]) {
+      ALNSQLBuilder *subquery = [join[@"query"] isKindOfClass:[ALNSQLBuilder class]]
+                                    ? join[@"query"]
+                                    : nil;
+      NSString *subquerySQL = [self compileSubquery:subquery parameters:parameters error:error];
+      if (subquerySQL == nil) {
+        return NO;
+      }
+
+      NSString *alias = [join[@"alias"] isKindOfClass:[NSString class]] ? join[@"alias"] : @"";
+      if (!ALNSQLBuilderAliasIsSafe(alias)) {
+        if (error != NULL) {
+          *error = ALNSQLBuilderMakeError(ALNSQLBuilderErrorInvalidIdentifier,
+                                          @"invalid join alias",
+                                          alias);
+        }
+        return NO;
+      }
+
+      id onExpressionIR = join[@"onExpressionIR"];
+      NSString *onExpression = nil;
+      if (onExpressionIR != nil) {
+        onExpression = [self compileExpressionIR:onExpressionIR
+                                  intoParameters:parameters
+                                         context:@"join on"
+                                           error:error];
+      } else {
+        onExpression = [self compileTrustedExpression:join[@"onExpression"]
+                                           parameters:join[@"onParameters"]
+                                   identifierBindings:join[@"onIdentifierBindings"]
+                                        intoParameters:parameters
+                                               context:@"join on"
+                                                 error:error];
+      }
+      if (onExpression == nil) {
+        return NO;
+      }
+
+      [sql appendFormat:@" %@ JOIN %@(%@) AS \"%@\" ON %@",
+                        joinType,
+                        lateral ? @"LATERAL " : @"",
+                        subquerySQL,
+                        alias,
+                        onExpression];
+      continue;
     }
 
     NSString *table = [join[@"table"] isKindOfClass:[NSString class]] ? join[@"table"] : @"";
@@ -1062,12 +1811,12 @@ static NSSet *ALNSQLBuilderAllowedJoinOperators(void) {
         return nil;
       }
 
-      NSString *columns = [self compileColumns:error];
+      NSString *columns = [self compileColumnsWithParameters:parameters error:error];
       if (columns == nil) {
         return nil;
       }
       [sql appendFormat:@"SELECT %@ FROM %@", columns, tableReference];
-      if (![self appendJoinSQLTo:sql error:error]) {
+      if (![self appendJoinSQLTo:sql parameters:parameters error:error]) {
         return nil;
       }
       if (![self appendWhereClauseSQLTo:sql parameters:parameters error:error]) {
@@ -1079,7 +1828,7 @@ static NSSet *ALNSQLBuilderAllowedJoinOperators(void) {
       if (![self appendHavingClauseSQLTo:sql parameters:parameters error:error]) {
         return nil;
       }
-      if (![self appendOrderBySQLTo:sql error:error]) {
+      if (![self appendOrderBySQLTo:sql parameters:parameters error:error]) {
         return nil;
       }
       if (self.hasLimit) {

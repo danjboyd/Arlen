@@ -1,12 +1,13 @@
 # Arlen Phase 2 + Phase 3 Roadmap Index
 
-Status: Active (Phase 2A-2D complete; Phase 3A-3H complete)  
+Status: Active (Phase 2A-2D complete; Phase 3A-3H complete; Phase 4A complete; Phase 4B-4E planned)  
 Last updated: 2026-02-20
 
 This index points to the current roadmap documents:
 
 - `docs/PHASE2_ROADMAP.md`
 - `docs/PHASE3_ROADMAP.md`
+- `docs/PHASE4_ROADMAP.md`
 - `docs/FEATURE_PARITY_MATRIX.md`
 
 ## Summary
@@ -37,13 +38,20 @@ Phase 3 is focused on platform maturity:
 - Phase 3F complete: DX + reliability hardening (`arlen doctor`, toolchain matrix, ALNPg diagnostics, API convenience helpers, static mount ergonomics, concrete jobs/mail adapters, worker supervision baseline)
 - Phase 3G complete: SQL builder v2 capability expansion + standalone data-layer reuse packaging (`ArlenData`)
 - Phase 3H complete: multi-node clustering/runtime primitives (`/clusterz`, cluster headers, propane cluster controls, and cluster-focused integration validation)
+- Phase 4A complete: query IR + safety foundation for expression-capable SQL builder paths
 
-## Planned Next Phases (Post-3H)
+## Planned Next Phases (Post-4A)
 
-1. Phase 4 planning:
-   frontend integration guide/starter track and broader platform-scale sequencing after 3H.
-2. Scope guardrails:
-   admin/backoffice and full account-product surfaces remain outside Arlen core and are expected to ship as optional modules/products.
+Phase 4 rollout is now sequenced in `docs/PHASE4_ROADMAP.md`:
+
+1. Phase 4B: SQL surface completion.
+2. Phase 4C: typed ergonomics + schema codegen.
+3. Phase 4D: performance + diagnostics hardening.
+4. Phase 4E: conformance + migration hardening.
+
+Scope guardrails remain unchanged:
+- admin/backoffice and full account-product surfaces remain outside Arlen core and are expected to ship as optional modules/products.
+- full ORM as default layer remains "Maybe Someday", not a Phase 4 default requirement.
 
 Maybe Someday backlog:
 - LiveView-like server-driven UI

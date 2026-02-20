@@ -19,6 +19,8 @@ Arlen is designed to solve the same class of problems as frameworks like Mojolic
 - Phase 3F: complete (doctor + toolchain matrix, ALNPg diagnostics hardening, API helpers, static mount ergonomics, concrete jobs/mail adapters, async worker supervision baseline).
 - Phase 3G: complete (SQL builder v2 expansion, PostgreSQL dialect builder, and standalone `ArlenData` reuse packaging).
 - Phase 3H: complete (cluster runtime primitives: `/clusterz`, cluster response headers, and propane cluster controls).
+- Phase 4A: complete (query IR foundation for expression compilation, safety contracts, and deterministic malformed-shape diagnostics).
+- Phase 4B-4E: planned (sequenced in `docs/PHASE4_ROADMAP.md`).
 
 ## Quick Start
 
@@ -116,6 +118,7 @@ Specifications and roadmaps:
 - [Phase 1 Spec](docs/PHASE1_SPEC.md)
 - [Phase 2 Roadmap](docs/PHASE2_ROADMAP.md)
 - [Phase 3 Roadmap](docs/PHASE3_ROADMAP.md)
+- [Phase 4 Roadmap](docs/PHASE4_ROADMAP.md)
 - [EOC v1 Spec](V1_SPEC.md)
 
 ## Naming
