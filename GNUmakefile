@@ -66,8 +66,8 @@ generated-compile: transpile
 >fi; \
 >clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) $$generated_files $(FRAMEWORK_SRCS) -shared -fPIC -o $(BUILD_DIR)/libArlenFramework.so $$(gnustep-config --base-libs) -ldl -lcrypto
 
-$(ARLEN_TOOL): tools/arlen.m src/Arlen/Core/ALNConfig.m src/Arlen/Data/ALNMigrationRunner.m src/Arlen/Data/ALNPg.m src/Arlen/Data/ALNSchemaCodegen.m | $(BUILD_DIR)
->source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) tools/arlen.m src/Arlen/Core/ALNConfig.m src/Arlen/Data/ALNMigrationRunner.m src/Arlen/Data/ALNPg.m src/Arlen/Data/ALNSchemaCodegen.m -o $(ARLEN_TOOL) $$(gnustep-config --base-libs) -ldl -lcrypto
+$(ARLEN_TOOL): tools/arlen.m src/Arlen/Core/ALNConfig.m src/Arlen/Data/ALNMigrationRunner.m src/Arlen/Data/ALNPg.m src/Arlen/Data/ALNSQLBuilder.m src/Arlen/Data/ALNSchemaCodegen.m | $(BUILD_DIR)
+>source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) tools/arlen.m src/Arlen/Core/ALNConfig.m src/Arlen/Data/ALNMigrationRunner.m src/Arlen/Data/ALNPg.m src/Arlen/Data/ALNSQLBuilder.m src/Arlen/Data/ALNSchemaCodegen.m -o $(ARLEN_TOOL) $$(gnustep-config --base-libs) -ldl -lcrypto
 
 arlen: $(ARLEN_TOOL)
 

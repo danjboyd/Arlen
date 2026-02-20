@@ -6,6 +6,8 @@
 
 NS_ASSUME_NONNULL_BEGIN
 
+@class ALNSQLBuilder;
+
 extern NSString *const ALNPgErrorDomain;
 extern NSString *const ALNPgErrorDiagnosticsKey;
 extern NSString *const ALNPgErrorSQLStateKey;
@@ -17,6 +19,29 @@ extern NSString *const ALNPgErrorServerTableKey;
 extern NSString *const ALNPgErrorServerColumnKey;
 extern NSString *const ALNPgErrorServerConstraintKey;
 
+extern NSString *const ALNPgQueryStageCompile;
+extern NSString *const ALNPgQueryStageExecute;
+extern NSString *const ALNPgQueryStageResult;
+extern NSString *const ALNPgQueryStageError;
+
+extern NSString *const ALNPgQueryEventStageKey;
+extern NSString *const ALNPgQueryEventSourceKey;
+extern NSString *const ALNPgQueryEventOperationKey;
+extern NSString *const ALNPgQueryEventExecutionModeKey;
+extern NSString *const ALNPgQueryEventCacheHitKey;
+extern NSString *const ALNPgQueryEventCacheFullKey;
+extern NSString *const ALNPgQueryEventSQLHashKey;
+extern NSString *const ALNPgQueryEventSQLLengthKey;
+extern NSString *const ALNPgQueryEventSQLTokenKey;
+extern NSString *const ALNPgQueryEventParameterCountKey;
+extern NSString *const ALNPgQueryEventPreparedStatementKey;
+extern NSString *const ALNPgQueryEventDurationMSKey;
+extern NSString *const ALNPgQueryEventRowCountKey;
+extern NSString *const ALNPgQueryEventAffectedRowsKey;
+extern NSString *const ALNPgQueryEventErrorDomainKey;
+extern NSString *const ALNPgQueryEventErrorCodeKey;
+extern NSString *const ALNPgQueryEventSQLKey;
+
 typedef NS_ENUM(NSInteger, ALNPgErrorCode) {
   ALNPgErrorConnectionFailed = 1,
   ALNPgErrorQueryFailed = 2,
@@ -25,10 +50,24 @@ typedef NS_ENUM(NSInteger, ALNPgErrorCode) {
   ALNPgErrorTransactionFailed = 5,
 };
 
+typedef NS_ENUM(NSInteger, ALNPgPreparedStatementReusePolicy) {
+  ALNPgPreparedStatementReusePolicyDisabled = 0,
+  ALNPgPreparedStatementReusePolicyAuto = 1,
+  ALNPgPreparedStatementReusePolicyAlways = 2,
+};
+
+typedef void (^ALNPgQueryDiagnosticsListener)(NSDictionary<NSString *, id> *event);
+
 @interface ALNPgConnection : NSObject <ALNDatabaseConnection>
 
 @property(nonatomic, copy, readonly) NSString *connectionString;
 @property(nonatomic, assign, readonly, getter=isOpen) BOOL open;
+@property(nonatomic, assign) ALNPgPreparedStatementReusePolicy preparedStatementReusePolicy;
+@property(nonatomic, assign) NSUInteger preparedStatementCacheLimit;
+@property(nonatomic, assign) NSUInteger builderCompilationCacheLimit;
+@property(nonatomic, assign) BOOL includeSQLInDiagnosticsEvents;
+@property(nonatomic, assign) BOOL emitDiagnosticsEventsToStderr;
+@property(nonatomic, copy, nullable) ALNPgQueryDiagnosticsListener queryDiagnosticsListener;
 
 - (nullable instancetype)initWithConnectionString:(NSString *)connectionString
                                             error:(NSError *_Nullable *_Nullable)error;
@@ -64,12 +103,24 @@ typedef NS_ENUM(NSInteger, ALNPgErrorCode) {
 - (BOOL)commitTransaction:(NSError *_Nullable *_Nullable)error;
 - (BOOL)rollbackTransaction:(NSError *_Nullable *_Nullable)error;
 
+- (nullable NSArray<NSDictionary *> *)executeBuilderQuery:(ALNSQLBuilder *)builder
+                                                     error:(NSError *_Nullable *_Nullable)error;
+- (NSInteger)executeBuilderCommand:(ALNSQLBuilder *)builder
+                              error:(NSError *_Nullable *_Nullable)error;
+- (void)resetExecutionCaches;
+
 @end
 
 @interface ALNPg : NSObject <ALNDatabaseAdapter>
 
 @property(nonatomic, copy, readonly) NSString *connectionString;
 @property(nonatomic, assign, readonly) NSUInteger maxConnections;
+@property(nonatomic, assign) ALNPgPreparedStatementReusePolicy preparedStatementReusePolicy;
+@property(nonatomic, assign) NSUInteger preparedStatementCacheLimit;
+@property(nonatomic, assign) NSUInteger builderCompilationCacheLimit;
+@property(nonatomic, assign) BOOL includeSQLInDiagnosticsEvents;
+@property(nonatomic, assign) BOOL emitDiagnosticsEventsToStderr;
+@property(nonatomic, copy, nullable) ALNPgQueryDiagnosticsListener queryDiagnosticsListener;
 
 - (nullable instancetype)initWithConnectionString:(NSString *)connectionString
                                     maxConnections:(NSUInteger)maxConnections
@@ -84,10 +135,14 @@ typedef NS_ENUM(NSInteger, ALNPgErrorCode) {
 - (nullable NSArray<NSDictionary *> *)executeQuery:(NSString *)sql
                                          parameters:(NSArray *)parameters
                                               error:(NSError *_Nullable *_Nullable)error;
+- (nullable NSArray<NSDictionary *> *)executeBuilderQuery:(ALNSQLBuilder *)builder
+                                                     error:(NSError *_Nullable *_Nullable)error;
 
 - (NSInteger)executeCommand:(NSString *)sql
                  parameters:(NSArray *)parameters
                       error:(NSError *_Nullable *_Nullable)error;
+- (NSInteger)executeBuilderCommand:(ALNSQLBuilder *)builder
+                              error:(NSError *_Nullable *_Nullable)error;
 
 - (BOOL)withTransaction:(BOOL (^)(ALNPgConnection *connection,
                                   NSError *_Nullable *_Nullable error))block

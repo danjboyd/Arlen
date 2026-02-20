@@ -238,6 +238,23 @@ Signals:
 - `make deploy-smoke`: validate deployment runbook with automated release smoke
 - `make docs-html`: generate browser-friendly docs under `build/docs`
 
+## Data-Layer Runtime APIs (Phase 4D)
+
+`ALNPgConnection`/`ALNPg` now provide builder-driven execution helpers with query diagnostics hooks:
+
+- `executeBuilderQuery:error:`
+- `executeBuilderCommand:error:`
+- `resetExecutionCaches`
+
+Runtime controls:
+
+- `preparedStatementReusePolicy` (`disabled` | `auto` | `always`)
+- `preparedStatementCacheLimit`
+- `builderCompilationCacheLimit`
+- `queryDiagnosticsListener` (event stages: `compile`, `execute`, `result`, `error`)
+- `includeSQLInDiagnosticsEvents` (default off for redaction-safe metadata)
+- `emitDiagnosticsEventsToStderr`
+
 ## PostgreSQL Test Gate
 
 DB-backed tests are skipped unless this environment variable is set:

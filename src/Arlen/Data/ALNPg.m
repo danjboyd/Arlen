@@ -1,7 +1,9 @@
 #import "ALNPg.h"
+#import "ALNSQLBuilder.h"
 
 #import <dlfcn.h>
 #import <stdlib.h>
+#import <stdint.h>
 #import <string.h>
 
 NSString *const ALNPgErrorDomain = @"Arlen.Data.Pg.Error";
@@ -14,6 +16,29 @@ NSString *const ALNPgErrorServerWhereKey = @"server_where";
 NSString *const ALNPgErrorServerTableKey = @"server_table";
 NSString *const ALNPgErrorServerColumnKey = @"server_column";
 NSString *const ALNPgErrorServerConstraintKey = @"server_constraint";
+
+NSString *const ALNPgQueryStageCompile = @"compile";
+NSString *const ALNPgQueryStageExecute = @"execute";
+NSString *const ALNPgQueryStageResult = @"result";
+NSString *const ALNPgQueryStageError = @"error";
+
+NSString *const ALNPgQueryEventStageKey = @"stage";
+NSString *const ALNPgQueryEventSourceKey = @"source";
+NSString *const ALNPgQueryEventOperationKey = @"operation";
+NSString *const ALNPgQueryEventExecutionModeKey = @"execution_mode";
+NSString *const ALNPgQueryEventCacheHitKey = @"cache_hit";
+NSString *const ALNPgQueryEventCacheFullKey = @"cache_full";
+NSString *const ALNPgQueryEventSQLHashKey = @"sql_hash";
+NSString *const ALNPgQueryEventSQLLengthKey = @"sql_length";
+NSString *const ALNPgQueryEventSQLTokenKey = @"sql_token";
+NSString *const ALNPgQueryEventParameterCountKey = @"parameter_count";
+NSString *const ALNPgQueryEventPreparedStatementKey = @"prepared_statement";
+NSString *const ALNPgQueryEventDurationMSKey = @"duration_ms";
+NSString *const ALNPgQueryEventRowCountKey = @"row_count";
+NSString *const ALNPgQueryEventAffectedRowsKey = @"affected_rows";
+NSString *const ALNPgQueryEventErrorDomainKey = @"error_domain";
+NSString *const ALNPgQueryEventErrorCodeKey = @"error_code";
+NSString *const ALNPgQueryEventSQLKey = @"sql";
 
 typedef struct pg_conn PGconn;
 typedef struct pg_result PGresult;
@@ -53,6 +78,14 @@ static BOOL ALNPgBuildExecParamsBuffer(NSArray *parameters,
                                        ALNPgExecParamsBuffer *buffer,
                                        NSError **error);
 static void ALNPgFreeExecParamsBuffer(ALNPgExecParamsBuffer *buffer);
+static uint64_t ALNPgFNV1a64(NSString *value);
+static NSString *ALNPgSQLHash(NSString *sql);
+static NSString *ALNPgSQLToken(NSString *sql);
+static BOOL ALNPgCanonicalizeBuilderValue(NSMutableString *out,
+                                          id value,
+                                          NSMutableSet *visited);
+static NSString *ALNPgBuilderCompilationSignature(ALNSQLBuilder *builder);
+static void ALNPgEmitEventToStderr(NSDictionary *event);
 
 static PGconn *(*ALNPQconnectdb)(const char *conninfo) = NULL;
 static int (*ALNPQstatus)(const PGconn *conn) = NULL;
@@ -330,6 +363,242 @@ static NSDictionary *ALNPgDiagnosticsFromResult(PGresult *result) {
   return [NSDictionary dictionaryWithDictionary:diagnostics];
 }
 
+static NSArray<NSString *> *ALNPgBuilderSnapshotKeys(void) {
+  static NSArray<NSString *> *keys = nil;
+  if (keys == nil) {
+    keys = @[
+      @"kind",
+      @"tableName",
+      @"tableAlias",
+      @"selectColumns",
+      @"values",
+      @"whereClauses",
+      @"havingClauses",
+      @"orderByClauses",
+      @"joins",
+      @"groupByFields",
+      @"ctes",
+      @"windowClauses",
+      @"setOperations",
+      @"returningColumns",
+      @"limitValue",
+      @"offsetValue",
+      @"hasLimit",
+      @"hasOffset",
+      @"rowLockMode",
+      @"rowLockTables",
+      @"rowLockSkipLocked",
+      @"conflictMode",
+      @"conflictColumns",
+      @"conflictUpdateFields",
+      @"conflictUpdateAssignments",
+      @"conflictDoUpdateWhereExpression",
+      @"conflictDoUpdateWhereParameters",
+    ];
+  }
+  return keys;
+}
+
+static id ALNPgBuilderValueForKey(ALNSQLBuilder *builder, NSString *key) {
+  if (builder == nil || [key length] == 0) {
+    return [NSNull null];
+  }
+  @try {
+    id value = [builder valueForKey:key];
+    return value ?: [NSNull null];
+  } @catch (NSException *exception) {
+    (void)exception;
+    return [NSNull null];
+  }
+}
+
+static BOOL ALNPgCanonicalizeBuilderValue(NSMutableString *out,
+                                          id value,
+                                          NSMutableSet *visited) {
+  if (out == nil) {
+    return NO;
+  }
+
+  if (value == nil || value == [NSNull null]) {
+    [out appendString:@"n;"];
+    return YES;
+  }
+
+  if ([value isKindOfClass:[NSString class]]) {
+    NSString *text = (NSString *)value;
+    [out appendFormat:@"s:%lu:%@;", (unsigned long)[text length], text];
+    return YES;
+  }
+
+  if ([value isKindOfClass:[NSNumber class]]) {
+    [out appendFormat:@"#:%@;", [(NSNumber *)value stringValue]];
+    return YES;
+  }
+
+  if ([value isKindOfClass:[NSDate class]]) {
+    [out appendFormat:@"d:%.6f;", [(NSDate *)value timeIntervalSince1970]];
+    return YES;
+  }
+
+  if ([value isKindOfClass:[NSData class]]) {
+    NSString *base64 = [(NSData *)value base64EncodedStringWithOptions:0];
+    [out appendFormat:@"b:%lu:%@;", (unsigned long)[base64 length], base64];
+    return YES;
+  }
+
+  if ([value isKindOfClass:[NSArray class]]) {
+    NSArray *array = (NSArray *)value;
+    [out appendFormat:@"a:%lu:[", (unsigned long)[array count]];
+    for (id element in array) {
+      if (!ALNPgCanonicalizeBuilderValue(out, element, visited)) {
+        return NO;
+      }
+    }
+    [out appendString:@"];"];
+    return YES;
+  }
+
+  if ([value isKindOfClass:[NSDictionary class]]) {
+    NSDictionary *dictionary = (NSDictionary *)value;
+    NSArray *keys = [[dictionary allKeys] sortedArrayUsingComparator:^NSComparisonResult(id lhs, id rhs) {
+      NSString *left = [lhs isKindOfClass:[NSString class]] ? lhs : [lhs description];
+      NSString *right = [rhs isKindOfClass:[NSString class]] ? rhs : [rhs description];
+      return [left compare:right];
+    }];
+    [out appendFormat:@"m:%lu:{", (unsigned long)[keys count]];
+    for (id key in keys) {
+      NSString *keyText = [key isKindOfClass:[NSString class]] ? key : [key description];
+      [out appendFormat:@"k:%lu:%@=", (unsigned long)[keyText length], keyText];
+      if (!ALNPgCanonicalizeBuilderValue(out, dictionary[key], visited)) {
+        return NO;
+      }
+    }
+    [out appendString:@"};"];
+    return YES;
+  }
+
+  if ([value isKindOfClass:[ALNSQLBuilder class]]) {
+    NSString *identity = [NSString stringWithFormat:@"%p", value];
+    if ([visited containsObject:identity]) {
+      [out appendString:@"builder:<cycle>;"];
+      return YES;
+    }
+
+    [visited addObject:identity];
+    [out appendString:@"builder:{"];
+    for (NSString *key in ALNPgBuilderSnapshotKeys()) {
+      [out appendString:key];
+      [out appendString:@"="];
+      id nested = ALNPgBuilderValueForKey((ALNSQLBuilder *)value, key);
+      if (!ALNPgCanonicalizeBuilderValue(out, nested, visited)) {
+        [visited removeObject:identity];
+        return NO;
+      }
+      [out appendString:@"|"];
+    }
+    [out appendString:@"};"];
+    [visited removeObject:identity];
+    return YES;
+  }
+
+  NSString *text = [value description] ?: @"";
+  [out appendFormat:@"o:%@:%lu:%@;",
+                    NSStringFromClass([value class]) ?: @"NSObject",
+                    (unsigned long)[text length],
+                    text];
+  return YES;
+}
+
+static NSString *ALNPgBuilderCompilationSignature(ALNSQLBuilder *builder) {
+  if (builder == nil) {
+    return nil;
+  }
+
+  NSMutableString *encoded = [NSMutableString string];
+  NSMutableSet *visited = [NSMutableSet set];
+  if (!ALNPgCanonicalizeBuilderValue(encoded, builder, visited)) {
+    return nil;
+  }
+  return [NSString stringWithString:encoded];
+}
+
+static uint64_t ALNPgFNV1a64(NSString *value) {
+  static const uint64_t offsetBasis = UINT64_C(14695981039346656037);
+  static const uint64_t prime = UINT64_C(1099511628211);
+
+  uint64_t hash = offsetBasis;
+  const char *bytes = [[value ?: @"" copy] UTF8String];
+  if (bytes == NULL) {
+    return hash;
+  }
+  for (const unsigned char *cursor = (const unsigned char *)bytes; *cursor != '\0'; cursor++) {
+    hash ^= (uint64_t)(*cursor);
+    hash *= prime;
+  }
+  return hash;
+}
+
+static NSString *ALNPgSQLHash(NSString *sql) {
+  uint64_t hash = ALNPgFNV1a64(sql ?: @"");
+  return [NSString stringWithFormat:@"%016llx", (unsigned long long)hash];
+}
+
+static NSString *ALNPgSQLToken(NSString *sql) {
+  NSString *trimmed = [sql isKindOfClass:[NSString class]]
+                          ? [sql stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]]
+                          : @"";
+  if ([trimmed length] == 0) {
+    return @"";
+  }
+
+  NSArray *parts = [trimmed componentsSeparatedByCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+  NSString *first = @"";
+  for (NSString *part in parts) {
+    if ([part length] > 0) {
+      first = part;
+      break;
+    }
+  }
+  if ([first length] == 0) {
+    return @"";
+  }
+
+  NSCharacterSet *allowed =
+      [NSCharacterSet characterSetWithCharactersInString:@"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_"];
+  NSString *token = [first stringByTrimmingCharactersInSet:[allowed invertedSet]];
+  if ([token length] == 0) {
+    return @"";
+  }
+  return [[token uppercaseString] substringToIndex:MIN((NSUInteger)24, [token length])];
+}
+
+static void ALNPgEmitEventToStderr(NSDictionary *event) {
+  if (![event isKindOfClass:[NSDictionary class]]) {
+    return;
+  }
+
+  NSError *jsonError = nil;
+  NSData *json = [NSJSONSerialization dataWithJSONObject:event options:0 error:&jsonError];
+  if (json != nil && jsonError == nil) {
+    NSString *line = [[NSString alloc] initWithData:json encoding:NSUTF8StringEncoding];
+    if ([line length] > 0) {
+      fprintf(stderr, "%s\n", [line UTF8String]);
+      return;
+    }
+  }
+
+  NSMutableArray *pairs = [NSMutableArray array];
+  NSArray *keys = [[event allKeys] sortedArrayUsingSelector:@selector(compare:)];
+  for (NSString *key in keys) {
+    NSString *value = [event[key] description] ?: @"";
+    [pairs addObject:[NSString stringWithFormat:@"%@=%@", key, value]];
+  }
+  NSString *line = [pairs componentsJoinedByString:@" "];
+  if ([line length] > 0) {
+    fprintf(stderr, "%s\n", [line UTF8String]);
+  }
+}
+
 static NSString *ALNPgStringFromParam(id value) {
   if (value == nil || value == [NSNull null]) {
     return nil;
@@ -502,6 +771,11 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result, int rowIndex) {
 
 @property(nonatomic, copy, readwrite) NSString *connectionString;
 @property(nonatomic, assign, readwrite, getter=isOpen) BOOL open;
+@property(nonatomic, strong) NSMutableDictionary<NSString *, NSDictionary *> *builderCompilationCache;
+@property(nonatomic, strong) NSMutableArray<NSString *> *builderCompilationCacheOrder;
+@property(nonatomic, strong) NSMutableDictionary<NSString *, NSString *> *preparedStatementNamesByKey;
+@property(nonatomic, strong) NSMutableArray<NSString *> *preparedStatementCacheOrder;
+@property(nonatomic, assign) NSUInteger preparedStatementSequence;
 
 @end
 
@@ -551,6 +825,17 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result, int rowIndex) {
 
   _open = YES;
   _inTransaction = NO;
+  _preparedStatementReusePolicy = ALNPgPreparedStatementReusePolicyAuto;
+  _preparedStatementCacheLimit = 128;
+  _builderCompilationCacheLimit = 128;
+  _includeSQLInDiagnosticsEvents = NO;
+  _emitDiagnosticsEventsToStderr = NO;
+  _queryDiagnosticsListener = nil;
+  _builderCompilationCache = [NSMutableDictionary dictionary];
+  _builderCompilationCacheOrder = [NSMutableArray array];
+  _preparedStatementNamesByKey = [NSMutableDictionary dictionary];
+  _preparedStatementCacheOrder = [NSMutableArray array];
+  _preparedStatementSequence = 0;
   return self;
 }
 
@@ -563,6 +848,7 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result, int rowIndex) {
     ALNPQfinish(_conn);
     _conn = NULL;
   }
+  [self resetExecutionCaches];
   self.open = NO;
   _inTransaction = NO;
 }
@@ -575,6 +861,193 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result, int rowIndex) {
                           nil);
   }
   return nil;
+}
+
+- (void)resetExecutionCaches {
+  [self.builderCompilationCache removeAllObjects];
+  [self.builderCompilationCacheOrder removeAllObjects];
+  [self.preparedStatementNamesByKey removeAllObjects];
+  [self.preparedStatementCacheOrder removeAllObjects];
+  self.preparedStatementSequence = 0;
+}
+
+- (BOOL)shouldUsePreparedStatementForParameterCount:(NSUInteger)parameterCount {
+  switch (self.preparedStatementReusePolicy) {
+  case ALNPgPreparedStatementReusePolicyAlways:
+    return YES;
+  case ALNPgPreparedStatementReusePolicyAuto:
+    return (parameterCount > 0);
+  case ALNPgPreparedStatementReusePolicyDisabled:
+  default:
+    return NO;
+  }
+}
+
+- (NSMutableDictionary *)baseQueryEventWithStage:(NSString *)stage
+                                          source:(NSString *)source
+                                       operation:(NSString *)operation
+                                   executionMode:(NSString *)executionMode
+                                             sql:(NSString *)sql
+                                      parameters:(NSArray *)parameters {
+  NSMutableDictionary *event = [NSMutableDictionary dictionary];
+  event[ALNPgQueryEventStageKey] = stage ?: @"";
+  event[ALNPgQueryEventSourceKey] = source ?: @"";
+  event[ALNPgQueryEventOperationKey] = operation ?: @"";
+  event[ALNPgQueryEventExecutionModeKey] = executionMode ?: @"";
+  event[ALNPgQueryEventSQLHashKey] = ALNPgSQLHash(sql ?: @"");
+  event[ALNPgQueryEventSQLLengthKey] = @([sql length]);
+  event[ALNPgQueryEventParameterCountKey] = @([parameters count]);
+  NSString *token = ALNPgSQLToken(sql ?: @"");
+  if ([token length] > 0) {
+    event[ALNPgQueryEventSQLTokenKey] = token;
+  }
+  if (self.includeSQLInDiagnosticsEvents && [sql length] > 0) {
+    event[ALNPgQueryEventSQLKey] = sql;
+  }
+  return event;
+}
+
+- (void)emitQueryEvent:(NSDictionary *)event {
+  NSDictionary *immutable = [NSDictionary dictionaryWithDictionary:event ?: @{}];
+  ALNPgQueryDiagnosticsListener listener = self.queryDiagnosticsListener;
+  if (listener != nil) {
+    listener(immutable);
+  }
+  if (self.emitDiagnosticsEventsToStderr) {
+    ALNPgEmitEventToStderr(immutable);
+  }
+}
+
+- (nullable NSDictionary *)compiledBuilder:(ALNSQLBuilder *)builder
+                                  cacheHit:(BOOL *)cacheHit
+                                     error:(NSError **)error {
+  if (![builder isKindOfClass:[ALNSQLBuilder class]]) {
+    if (error != NULL) {
+      *error = ALNPgMakeError(ALNPgErrorInvalidArgument,
+                              @"builder must be an ALNSQLBuilder",
+                              nil,
+                              nil);
+    }
+    return nil;
+  }
+
+  if (cacheHit != NULL) {
+    *cacheHit = NO;
+  }
+
+  NSString *signature = ALNPgBuilderCompilationSignature(builder);
+  if ([signature length] > 0) {
+    NSDictionary *cached = self.builderCompilationCache[signature];
+    if ([cached isKindOfClass:[NSDictionary class]]) {
+      if (cacheHit != NULL) {
+        *cacheHit = YES;
+      }
+      return cached;
+    }
+  }
+
+  NSError *buildError = nil;
+  NSDictionary *built = [builder build:&buildError];
+  if (built == nil) {
+    if (error != NULL) {
+      *error = buildError ?: ALNPgMakeError(ALNPgErrorQueryFailed,
+                                            @"builder compilation failed",
+                                            nil,
+                                            nil);
+    }
+    return nil;
+  }
+
+  NSString *sql = [built[@"sql"] isKindOfClass:[NSString class]] ? built[@"sql"] : @"";
+  NSArray *parameters = [built[@"parameters"] isKindOfClass:[NSArray class]] ? built[@"parameters"] : @[];
+  if ([sql length] == 0) {
+    if (error != NULL) {
+      *error = ALNPgMakeError(ALNPgErrorInvalidArgument,
+                              @"builder produced empty SQL",
+                              nil,
+                              nil);
+    }
+    return nil;
+  }
+
+  NSDictionary *normalized = @{
+    @"sql" : sql,
+    @"parameters" : [NSArray arrayWithArray:parameters],
+  };
+
+  if ([signature length] > 0 && self.builderCompilationCacheLimit > 0) {
+    if (self.builderCompilationCache[signature] == nil &&
+        [self.builderCompilationCache count] >= self.builderCompilationCacheLimit) {
+      NSString *oldest = [self.builderCompilationCacheOrder firstObject];
+      if ([oldest length] > 0) {
+        [self.builderCompilationCache removeObjectForKey:oldest];
+        [self.builderCompilationCacheOrder removeObjectAtIndex:0];
+      }
+    }
+    self.builderCompilationCache[signature] = normalized;
+    [self.builderCompilationCacheOrder removeObject:signature];
+    [self.builderCompilationCacheOrder addObject:signature];
+  }
+
+  return normalized;
+}
+
+- (nullable NSString *)preparedStatementNameForSQL:(NSString *)sql
+                                     parameterCount:(NSUInteger)parameterCount
+                                          operation:(NSString *)operation
+                                           cacheHit:(BOOL *)cacheHit
+                                          cacheFull:(BOOL *)cacheFull
+                                              error:(NSError **)error {
+  if (cacheHit != NULL) {
+    *cacheHit = NO;
+  }
+  if (cacheFull != NULL) {
+    *cacheFull = NO;
+  }
+
+  NSString *normalizedOperation = [operation isKindOfClass:[NSString class]] ? operation : @"query";
+  NSString *key = [NSString stringWithFormat:@"%@|%lu|%@",
+                                             normalizedOperation,
+                                             (unsigned long)parameterCount,
+                                             sql ?: @""];
+  NSString *cachedName = self.preparedStatementNamesByKey[key];
+  if ([cachedName length] > 0) {
+    if (cacheHit != NULL) {
+      *cacheHit = YES;
+    }
+    return cachedName;
+  }
+
+  if (self.preparedStatementCacheLimit > 0 &&
+      [self.preparedStatementNamesByKey count] >= self.preparedStatementCacheLimit) {
+    if (cacheFull != NULL) {
+      *cacheFull = YES;
+    }
+    return nil;
+  }
+
+  self.preparedStatementSequence += 1;
+  NSString *nameHash = ALNPgSQLHash(key);
+  NSString *statementName =
+      [NSString stringWithFormat:@"aln_%@_%lu",
+                                 [nameHash substringToIndex:MIN((NSUInteger)10, [nameHash length])],
+                                 (unsigned long)self.preparedStatementSequence];
+  NSError *prepareError = nil;
+  BOOL prepared = [self prepareStatementNamed:statementName
+                                          sql:sql ?: @""
+                               parameterCount:(NSInteger)parameterCount
+                                        error:&prepareError];
+  if (!prepared) {
+    if (error != NULL) {
+      *error = prepareError;
+    }
+    return nil;
+  }
+
+  self.preparedStatementNamesByKey[key] = statementName;
+  [self.preparedStatementCacheOrder removeObject:key];
+  [self.preparedStatementCacheOrder addObject:key];
+  return statementName;
 }
 
 - (BOOL)prepareStatementNamed:(NSString *)name
@@ -865,6 +1338,327 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result, int rowIndex) {
   return affected;
 }
 
+- (NSArray<NSDictionary *> *)executeBuilderQuery:(ALNSQLBuilder *)builder
+                                            error:(NSError **)error {
+  NSArray *normalizedParameters = @[];
+  NSString *sql = @"";
+  NSError *compileError = nil;
+  BOOL compileCacheHit = NO;
+  NSTimeInterval compileStarted = [NSDate timeIntervalSinceReferenceDate];
+  NSDictionary *compiled = [self compiledBuilder:builder
+                                        cacheHit:&compileCacheHit
+                                           error:&compileError];
+  NSTimeInterval compileDurationMS =
+      ([NSDate timeIntervalSinceReferenceDate] - compileStarted) * 1000.0;
+  if ([compiled isKindOfClass:[NSDictionary class]]) {
+    sql = [compiled[@"sql"] isKindOfClass:[NSString class]] ? compiled[@"sql"] : @"";
+    normalizedParameters =
+        [compiled[@"parameters"] isKindOfClass:[NSArray class]] ? compiled[@"parameters"] : @[];
+  }
+
+  NSMutableDictionary *compileEvent = [self baseQueryEventWithStage:ALNPgQueryStageCompile
+                                                              source:@"builder"
+                                                           operation:@"query"
+                                                       executionMode:@"compile"
+                                                                 sql:sql
+                                                          parameters:normalizedParameters];
+  compileEvent[ALNPgQueryEventCacheHitKey] = @(compileCacheHit);
+  compileEvent[ALNPgQueryEventDurationMSKey] = @(compileDurationMS);
+  if (compileError != nil) {
+    compileEvent[ALNPgQueryEventErrorDomainKey] = compileError.domain ?: @"";
+    compileEvent[ALNPgQueryEventErrorCodeKey] = @(compileError.code);
+  }
+  [self emitQueryEvent:compileEvent];
+
+  if (compiled == nil) {
+    if (error != NULL) {
+      *error = compileError;
+    }
+    NSMutableDictionary *errorEvent = [self baseQueryEventWithStage:ALNPgQueryStageError
+                                                              source:@"builder"
+                                                           operation:@"query"
+                                                       executionMode:@"compile"
+                                                                 sql:sql
+                                                          parameters:normalizedParameters];
+    if (compileError != nil) {
+      errorEvent[ALNPgQueryEventErrorDomainKey] = compileError.domain ?: @"";
+      errorEvent[ALNPgQueryEventErrorCodeKey] = @(compileError.code);
+      NSString *sqlState =
+          [compileError.userInfo[ALNPgErrorSQLStateKey] isKindOfClass:[NSString class]]
+              ? compileError.userInfo[ALNPgErrorSQLStateKey]
+              : @"";
+      if ([sqlState length] > 0) {
+        errorEvent[ALNPgErrorSQLStateKey] = sqlState;
+      }
+    }
+    [self emitQueryEvent:errorEvent];
+    return nil;
+  }
+
+  BOOL shouldPrepare = [self shouldUsePreparedStatementForParameterCount:[normalizedParameters count]];
+  BOOL preparedCacheHit = NO;
+  BOOL preparedCacheFull = NO;
+  NSString *preparedName = nil;
+  NSError *prepareError = nil;
+  if (shouldPrepare) {
+    preparedName = [self preparedStatementNameForSQL:sql
+                                      parameterCount:[normalizedParameters count]
+                                           operation:@"query"
+                                            cacheHit:&preparedCacheHit
+                                           cacheFull:&preparedCacheFull
+                                               error:&prepareError];
+  }
+
+  NSString *executionMode = ([preparedName length] > 0) ? @"prepared" : @"direct";
+  NSMutableDictionary *executeEvent = [self baseQueryEventWithStage:ALNPgQueryStageExecute
+                                                              source:@"builder"
+                                                           operation:@"query"
+                                                       executionMode:executionMode
+                                                                 sql:sql
+                                                          parameters:normalizedParameters];
+  if ([preparedName length] > 0) {
+    executeEvent[ALNPgQueryEventPreparedStatementKey] = preparedName;
+    executeEvent[ALNPgQueryEventCacheHitKey] = @(preparedCacheHit);
+  } else if (preparedCacheFull) {
+    executeEvent[ALNPgQueryEventCacheFullKey] = @YES;
+  }
+  [self emitQueryEvent:executeEvent];
+
+  if (prepareError != nil) {
+    if (error != NULL) {
+      *error = prepareError;
+    }
+    NSMutableDictionary *errorEvent = [self baseQueryEventWithStage:ALNPgQueryStageError
+                                                              source:@"builder"
+                                                           operation:@"query"
+                                                       executionMode:@"prepare"
+                                                                 sql:sql
+                                                          parameters:normalizedParameters];
+    errorEvent[ALNPgQueryEventErrorDomainKey] = prepareError.domain ?: @"";
+    errorEvent[ALNPgQueryEventErrorCodeKey] = @(prepareError.code);
+    [self emitQueryEvent:errorEvent];
+    return nil;
+  }
+
+  NSError *queryError = nil;
+  NSTimeInterval started = [NSDate timeIntervalSinceReferenceDate];
+  NSArray *rows = nil;
+  if ([preparedName length] > 0) {
+    rows = [self executePreparedQueryNamed:preparedName
+                                parameters:normalizedParameters
+                                     error:&queryError];
+  } else {
+    rows = [self executeQuery:sql parameters:normalizedParameters error:&queryError];
+  }
+  NSTimeInterval durationMS = ([NSDate timeIntervalSinceReferenceDate] - started) * 1000.0;
+
+  if (rows == nil) {
+    if (error != NULL) {
+      *error = queryError;
+    }
+    NSMutableDictionary *errorEvent = [self baseQueryEventWithStage:ALNPgQueryStageError
+                                                              source:@"builder"
+                                                           operation:@"query"
+                                                       executionMode:executionMode
+                                                                 sql:sql
+                                                          parameters:normalizedParameters];
+    errorEvent[ALNPgQueryEventDurationMSKey] = @(durationMS);
+    if ([preparedName length] > 0) {
+      errorEvent[ALNPgQueryEventPreparedStatementKey] = preparedName;
+      errorEvent[ALNPgQueryEventCacheHitKey] = @(preparedCacheHit);
+    } else if (preparedCacheFull) {
+      errorEvent[ALNPgQueryEventCacheFullKey] = @YES;
+    }
+    if (queryError != nil) {
+      errorEvent[ALNPgQueryEventErrorDomainKey] = queryError.domain ?: @"";
+      errorEvent[ALNPgQueryEventErrorCodeKey] = @(queryError.code);
+      NSString *sqlState =
+          [queryError.userInfo[ALNPgErrorSQLStateKey] isKindOfClass:[NSString class]]
+              ? queryError.userInfo[ALNPgErrorSQLStateKey]
+              : @"";
+      if ([sqlState length] > 0) {
+        errorEvent[ALNPgErrorSQLStateKey] = sqlState;
+      }
+    }
+    [self emitQueryEvent:errorEvent];
+    return nil;
+  }
+
+  NSMutableDictionary *resultEvent = [self baseQueryEventWithStage:ALNPgQueryStageResult
+                                                             source:@"builder"
+                                                          operation:@"query"
+                                                      executionMode:executionMode
+                                                                sql:sql
+                                                         parameters:normalizedParameters];
+  resultEvent[ALNPgQueryEventDurationMSKey] = @(durationMS);
+  resultEvent[ALNPgQueryEventRowCountKey] = @([rows count]);
+  if ([preparedName length] > 0) {
+    resultEvent[ALNPgQueryEventPreparedStatementKey] = preparedName;
+    resultEvent[ALNPgQueryEventCacheHitKey] = @(preparedCacheHit);
+  } else if (preparedCacheFull) {
+    resultEvent[ALNPgQueryEventCacheFullKey] = @YES;
+  }
+  [self emitQueryEvent:resultEvent];
+  return rows;
+}
+
+- (NSInteger)executeBuilderCommand:(ALNSQLBuilder *)builder
+                             error:(NSError **)error {
+  NSArray *normalizedParameters = @[];
+  NSString *sql = @"";
+  NSError *compileError = nil;
+  BOOL compileCacheHit = NO;
+  NSTimeInterval compileStarted = [NSDate timeIntervalSinceReferenceDate];
+  NSDictionary *compiled = [self compiledBuilder:builder
+                                        cacheHit:&compileCacheHit
+                                           error:&compileError];
+  NSTimeInterval compileDurationMS =
+      ([NSDate timeIntervalSinceReferenceDate] - compileStarted) * 1000.0;
+  if ([compiled isKindOfClass:[NSDictionary class]]) {
+    sql = [compiled[@"sql"] isKindOfClass:[NSString class]] ? compiled[@"sql"] : @"";
+    normalizedParameters =
+        [compiled[@"parameters"] isKindOfClass:[NSArray class]] ? compiled[@"parameters"] : @[];
+  }
+
+  NSMutableDictionary *compileEvent = [self baseQueryEventWithStage:ALNPgQueryStageCompile
+                                                              source:@"builder"
+                                                           operation:@"command"
+                                                       executionMode:@"compile"
+                                                                 sql:sql
+                                                          parameters:normalizedParameters];
+  compileEvent[ALNPgQueryEventCacheHitKey] = @(compileCacheHit);
+  compileEvent[ALNPgQueryEventDurationMSKey] = @(compileDurationMS);
+  if (compileError != nil) {
+    compileEvent[ALNPgQueryEventErrorDomainKey] = compileError.domain ?: @"";
+    compileEvent[ALNPgQueryEventErrorCodeKey] = @(compileError.code);
+  }
+  [self emitQueryEvent:compileEvent];
+
+  if (compiled == nil) {
+    if (error != NULL) {
+      *error = compileError;
+    }
+    NSMutableDictionary *errorEvent = [self baseQueryEventWithStage:ALNPgQueryStageError
+                                                              source:@"builder"
+                                                           operation:@"command"
+                                                       executionMode:@"compile"
+                                                                 sql:sql
+                                                          parameters:normalizedParameters];
+    if (compileError != nil) {
+      errorEvent[ALNPgQueryEventErrorDomainKey] = compileError.domain ?: @"";
+      errorEvent[ALNPgQueryEventErrorCodeKey] = @(compileError.code);
+    }
+    [self emitQueryEvent:errorEvent];
+    return -1;
+  }
+
+  BOOL shouldPrepare = [self shouldUsePreparedStatementForParameterCount:[normalizedParameters count]];
+  BOOL preparedCacheHit = NO;
+  BOOL preparedCacheFull = NO;
+  NSString *preparedName = nil;
+  NSError *prepareError = nil;
+  if (shouldPrepare) {
+    preparedName = [self preparedStatementNameForSQL:sql
+                                      parameterCount:[normalizedParameters count]
+                                           operation:@"command"
+                                            cacheHit:&preparedCacheHit
+                                           cacheFull:&preparedCacheFull
+                                               error:&prepareError];
+  }
+
+  NSString *executionMode = ([preparedName length] > 0) ? @"prepared" : @"direct";
+  NSMutableDictionary *executeEvent = [self baseQueryEventWithStage:ALNPgQueryStageExecute
+                                                              source:@"builder"
+                                                           operation:@"command"
+                                                       executionMode:executionMode
+                                                                 sql:sql
+                                                          parameters:normalizedParameters];
+  if ([preparedName length] > 0) {
+    executeEvent[ALNPgQueryEventPreparedStatementKey] = preparedName;
+    executeEvent[ALNPgQueryEventCacheHitKey] = @(preparedCacheHit);
+  } else if (preparedCacheFull) {
+    executeEvent[ALNPgQueryEventCacheFullKey] = @YES;
+  }
+  [self emitQueryEvent:executeEvent];
+
+  if (prepareError != nil) {
+    if (error != NULL) {
+      *error = prepareError;
+    }
+    NSMutableDictionary *errorEvent = [self baseQueryEventWithStage:ALNPgQueryStageError
+                                                              source:@"builder"
+                                                           operation:@"command"
+                                                       executionMode:@"prepare"
+                                                                 sql:sql
+                                                          parameters:normalizedParameters];
+    errorEvent[ALNPgQueryEventErrorDomainKey] = prepareError.domain ?: @"";
+    errorEvent[ALNPgQueryEventErrorCodeKey] = @(prepareError.code);
+    [self emitQueryEvent:errorEvent];
+    return -1;
+  }
+
+  NSError *commandError = nil;
+  NSTimeInterval started = [NSDate timeIntervalSinceReferenceDate];
+  NSInteger affected = -1;
+  if ([preparedName length] > 0) {
+    affected = [self executePreparedCommandNamed:preparedName
+                                      parameters:normalizedParameters
+                                           error:&commandError];
+  } else {
+    affected = [self executeCommand:sql parameters:normalizedParameters error:&commandError];
+  }
+  NSTimeInterval durationMS = ([NSDate timeIntervalSinceReferenceDate] - started) * 1000.0;
+
+  if (affected < 0) {
+    if (error != NULL) {
+      *error = commandError;
+    }
+    NSMutableDictionary *errorEvent = [self baseQueryEventWithStage:ALNPgQueryStageError
+                                                              source:@"builder"
+                                                           operation:@"command"
+                                                       executionMode:executionMode
+                                                                 sql:sql
+                                                          parameters:normalizedParameters];
+    errorEvent[ALNPgQueryEventDurationMSKey] = @(durationMS);
+    if ([preparedName length] > 0) {
+      errorEvent[ALNPgQueryEventPreparedStatementKey] = preparedName;
+      errorEvent[ALNPgQueryEventCacheHitKey] = @(preparedCacheHit);
+    } else if (preparedCacheFull) {
+      errorEvent[ALNPgQueryEventCacheFullKey] = @YES;
+    }
+    if (commandError != nil) {
+      errorEvent[ALNPgQueryEventErrorDomainKey] = commandError.domain ?: @"";
+      errorEvent[ALNPgQueryEventErrorCodeKey] = @(commandError.code);
+      NSString *sqlState =
+          [commandError.userInfo[ALNPgErrorSQLStateKey] isKindOfClass:[NSString class]]
+              ? commandError.userInfo[ALNPgErrorSQLStateKey]
+              : @"";
+      if ([sqlState length] > 0) {
+        errorEvent[ALNPgErrorSQLStateKey] = sqlState;
+      }
+    }
+    [self emitQueryEvent:errorEvent];
+    return -1;
+  }
+
+  NSMutableDictionary *resultEvent = [self baseQueryEventWithStage:ALNPgQueryStageResult
+                                                             source:@"builder"
+                                                          operation:@"command"
+                                                      executionMode:executionMode
+                                                                sql:sql
+                                                         parameters:normalizedParameters];
+  resultEvent[ALNPgQueryEventDurationMSKey] = @(durationMS);
+  resultEvent[ALNPgQueryEventAffectedRowsKey] = @(affected);
+  if ([preparedName length] > 0) {
+    resultEvent[ALNPgQueryEventPreparedStatementKey] = preparedName;
+    resultEvent[ALNPgQueryEventCacheHitKey] = @(preparedCacheHit);
+  } else if (preparedCacheFull) {
+    resultEvent[ALNPgQueryEventCacheFullKey] = @YES;
+  }
+  [self emitQueryEvent:resultEvent];
+  return affected;
+}
+
 - (BOOL)runTransactionSQL:(NSString *)sql error:(NSError **)error {
   NSInteger affected = [self executeCommand:sql parameters:@[] error:error];
   return (affected >= 0);
@@ -972,6 +1766,12 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result, int rowIndex) {
   _maxConnections = (maxConnections > 0) ? maxConnections : 8;
   _idleConnections = [NSMutableArray array];
   _inUseConnections = 0;
+  _preparedStatementReusePolicy = ALNPgPreparedStatementReusePolicyAuto;
+  _preparedStatementCacheLimit = 128;
+  _builderCompilationCacheLimit = 128;
+  _includeSQLInDiagnosticsEvents = NO;
+  _emitDiagnosticsEventsToStderr = NO;
+  _queryDiagnosticsListener = nil;
   return self;
 }
 
@@ -989,6 +1789,12 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result, int rowIndex) {
     if ([self.idleConnections count] > 0) {
       ALNPgConnection *connection = [self.idleConnections lastObject];
       [self.idleConnections removeLastObject];
+      connection.preparedStatementReusePolicy = self.preparedStatementReusePolicy;
+      connection.preparedStatementCacheLimit = self.preparedStatementCacheLimit;
+      connection.builderCompilationCacheLimit = self.builderCompilationCacheLimit;
+      connection.includeSQLInDiagnosticsEvents = self.includeSQLInDiagnosticsEvents;
+      connection.emitDiagnosticsEventsToStderr = self.emitDiagnosticsEventsToStderr;
+      connection.queryDiagnosticsListener = self.queryDiagnosticsListener;
       self.inUseConnections += 1;
       return connection;
     }
@@ -1013,6 +1819,12 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result, int rowIndex) {
       }
       return nil;
     }
+    connection.preparedStatementReusePolicy = self.preparedStatementReusePolicy;
+    connection.preparedStatementCacheLimit = self.preparedStatementCacheLimit;
+    connection.builderCompilationCacheLimit = self.builderCompilationCacheLimit;
+    connection.includeSQLInDiagnosticsEvents = self.includeSQLInDiagnosticsEvents;
+    connection.emitDiagnosticsEventsToStderr = self.emitDiagnosticsEventsToStderr;
+    connection.queryDiagnosticsListener = self.queryDiagnosticsListener;
     self.inUseConnections += 1;
     return connection;
   }
@@ -1065,6 +1877,26 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result, int rowIndex) {
   return rows;
 }
 
+- (NSArray<NSDictionary *> *)executeBuilderQuery:(ALNSQLBuilder *)builder
+                                            error:(NSError **)error {
+  NSError *acquireError = nil;
+  ALNPgConnection *connection = [self acquireConnection:&acquireError];
+  if (connection == nil) {
+    if (error != NULL) {
+      *error = acquireError;
+    }
+    return nil;
+  }
+
+  NSArray *rows = nil;
+  @try {
+    rows = [connection executeBuilderQuery:builder error:error];
+  } @finally {
+    [self releaseConnection:connection];
+  }
+  return rows;
+}
+
 - (NSInteger)executeCommand:(NSString *)sql
                  parameters:(NSArray *)parameters
                       error:(NSError **)error {
@@ -1080,6 +1912,26 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result, int rowIndex) {
   NSInteger affected = -1;
   @try {
     affected = [connection executeCommand:sql parameters:parameters ?: @[] error:error];
+  } @finally {
+    [self releaseConnection:connection];
+  }
+  return affected;
+}
+
+- (NSInteger)executeBuilderCommand:(ALNSQLBuilder *)builder
+                             error:(NSError **)error {
+  NSError *acquireError = nil;
+  ALNPgConnection *connection = [self acquireConnection:&acquireError];
+  if (connection == nil) {
+    if (error != NULL) {
+      *error = acquireError;
+    }
+    return -1;
+  }
+
+  NSInteger affected = -1;
+  @try {
+    affected = [connection executeBuilderCommand:builder error:error];
   } @finally {
     [self releaseConnection:connection];
   }

@@ -319,7 +319,24 @@ This generates:
 - `src/Generated/ALNDBSchema.m`
 - `db/schema/arlen_schema.json`
 
-## 14. Deploy Smoke Validation
+## 14. Builder Query Caching + Diagnostics (Phase 4D)
+
+`ALNPgConnection` now supports builder-driven execution with cache/diagnostic controls:
+
+- `executeBuilderQuery:error:`
+- `executeBuilderCommand:error:`
+- `resetExecutionCaches`
+
+Key runtime options:
+
+- `preparedStatementReusePolicy` (`disabled`, `auto`, `always`)
+- `preparedStatementCacheLimit`
+- `builderCompilationCacheLimit`
+- `queryDiagnosticsListener` (events: `compile`, `execute`, `result`, `error`)
+- `includeSQLInDiagnosticsEvents` (default `NO`, keeps metadata redaction-safe)
+- `emitDiagnosticsEventsToStderr`
+
+## 15. Deploy Smoke Validation
 
 ```bash
 make deploy-smoke

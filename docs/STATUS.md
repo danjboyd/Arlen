@@ -18,6 +18,9 @@ Last updated: 2026-02-20
 - Phase 3G: complete (2026-02-20)
 - Phase 3H: complete (2026-02-20)
 - Phase 4A: complete (2026-02-20)
+- Phase 4B: complete (2026-02-20)
+- Phase 4C: complete (2026-02-20)
+- Phase 4D: complete (2026-02-20)
 
 ## Completed Today (2026-02-20)
 
@@ -104,6 +107,13 @@ Last updated: 2026-02-20
   - added regression suites:
     - `tests/unit/Phase4ATests.m` (snapshot + negative/safety validation)
     - `tests/unit/PgTests.m` identifier-template PostgreSQL execution coverage
+- Completed Phase 4D performance and diagnostics tranche:
+  - added builder-driven execution APIs in `ALNPgConnection`/`ALNPg` (`executeBuilderQuery`, `executeBuilderCommand`)
+  - added builder compilation cache and prepared-statement reuse policy controls (`disabled`/`auto`/`always`)
+  - added structured query diagnostics listener pipeline with stage events (`compile`, `execute`, `result`, `error`)
+  - added redaction-safe query metadata defaults (`sql` omitted unless explicitly enabled) and optional stderr event emission
+  - added runtime cache controls (`preparedStatementCacheLimit`, `builderCompilationCacheLimit`, `resetExecutionCaches`)
+  - added PostgreSQL regression coverage for cache-hit behavior and diagnostics metadata contracts
 
 ## Verification State (2026-02-20)
 
@@ -150,13 +160,17 @@ Last updated: 2026-02-20
   - deterministic schema artifact renderer coverage (`tests/unit/SchemaCodegenTests.m`)
   - CLI schema codegen integration and generated-helper compile/execute smoke (`testArlenSchemaCodegenGeneratesTypedHelpers`)
   - `arlen schema-codegen` overwrite and manifest contract coverage
+- New Phase 4D checks executed:
+  - structured builder diagnostics/caching regression (`testBuilderExecutionEmitsStructuredEventsAndUsesCaches`)
+  - redaction + SQLSTATE diagnostics regression (`testBuilderExecutionErrorEventsIncludeSQLStateAndStayRedactedByDefault`)
+  - full suite verification after toolchain link update (`make test-unit`, `make test-integration`, `make test-data-layer`)
 - PostgreSQL-backed tests remain gated by `ARLEN_PG_TEST_DSN`.
 
 ## Next Session Focus
 
-1. Execute Phase 4D performance + diagnostics hardening tranche from `docs/PHASE4_ROADMAP.md`.
-2. Add deterministic builder compilation caching and prepared-statement reuse policy tests.
-3. Add structured query diagnostics/listener pipeline with redaction-safe metadata fields.
+1. Execute Phase 4E conformance + migration hardening tranche from `docs/PHASE4_ROADMAP.md`.
+2. Add property/fuzz coverage for placeholder shifting, parameter ordering, tuple predicates, and expression nesting.
+3. Publish and validate migration guidance from v2 string-heavy builder usage to IR/typed patterns.
 
 ## Planned Phase Mapping (Post-4C)
 
@@ -177,13 +191,13 @@ Last updated: 2026-02-20
   - LiveView-like server-driven UI
   - full ORM as default framework layer
 - Post-4C planned:
-  - Phase 4D: performance + diagnostics hardening
   - Phase 4E: conformance + migration hardening
   - official frontend toolchain integration guides/starters
 - Completed in Phase 4:
   - Phase 4A: query IR + safety foundation
   - Phase 4B: SQL surface completion
   - Phase 4C: typed ergonomics + schema codegen
+  - Phase 4D: performance + diagnostics hardening
 - Out of scope for Arlen core (explicitly documented):
   - Django-style admin/backoffice product
   - full account-management product surfaces

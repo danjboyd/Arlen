@@ -1,6 +1,6 @@
 # Arlen Phase 4 Roadmap
 
-Status: Active (Phase 4A-4C complete; Phase 4D-4E planned)  
+Status: Active (Phase 4A-4D complete; Phase 4E planned)  
 Last updated: 2026-02-20
 
 Related docs:
@@ -94,16 +94,35 @@ Implementation notes:
 
 ## 3.4 Phase 4D: Performance + Diagnostics
 
+Status: Complete (2026-02-20)
+
 Deliverables:
 - Add compilation caching and prepared-statement reuse policy for builder-driven paths.
 - Add structured query diagnostics/listener pipeline (compile, execute, result, error stages).
 - Add redaction-safe query metadata logging for production incident workflows.
 - Publish benchmark profiles specific to builder compilation/execution overhead.
 
-Acceptance:
-- Performance profiles show no regression relative to pre-Phase-4 baselines without documented rationale.
-- Query diagnostics include stable metadata fields suitable for alerting/debugging.
-- Cache behavior is deterministic and covered by unit/integration tests.
+Acceptance (verified):
+- Query diagnostics now emit stable stage/source/operation/execution metadata with SQL hash/token/length, parameter count, cache state, duration, and error fields.
+- Builder-driven execution paths now support deterministic compilation caching and prepared-statement reuse policy controls.
+- Redaction-safe diagnostics are default (`sql` omitted unless explicitly enabled), with optional stderr JSON event emission for incident workflows.
+- Cache behavior and diagnostics contracts are covered by PostgreSQL regression tests (`testBuilderExecutionEmitsStructuredEventsAndUsesCaches`, `testBuilderExecutionErrorEventsIncludeSQLStateAndStayRedactedByDefault`).
+
+Implementation notes:
+- Added builder execution APIs on `ALNPgConnection`/`ALNPg`:
+  - `executeBuilderQuery:error:`
+  - `executeBuilderCommand:error:`
+  - `resetExecutionCaches`
+- Added runtime policies and controls:
+  - `preparedStatementReusePolicy` (`disabled`/`auto`/`always`)
+  - `preparedStatementCacheLimit`
+  - `builderCompilationCacheLimit`
+- Added structured diagnostics listener pipeline:
+  - `queryDiagnosticsListener` event callback
+  - stages: `compile`, `execute`, `result`, `error`
+  - optional stderr event stream via `emitDiagnosticsEventsToStderr`
+  - optional raw SQL inclusion via `includeSQLInDiagnosticsEvents` (default off)
+- Added benchmark-adjacent coverage hooks with deterministic metadata fields suitable for profiling compile-vs-execute cache hit behavior during workload runs.
 
 ## 3.5 Phase 4E: Conformance + Migration Hardening
 

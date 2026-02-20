@@ -1095,6 +1095,177 @@
   [database releaseConnection:connection];
 }
 
+- (void)testBuilderExecutionEmitsStructuredEventsAndUsesCaches {
+  NSString *dsn = [self pgTestDSN];
+  if ([dsn length] == 0) {
+    return;
+  }
+
+  NSError *error = nil;
+  ALNPg *database = [[ALNPg alloc] initWithConnectionString:dsn maxConnections:2 error:&error];
+  XCTAssertNil(error);
+  XCTAssertNotNil(database);
+  if (database == nil) {
+    return;
+  }
+
+  ALNPgConnection *connection = [database acquireConnection:&error];
+  XCTAssertNil(error);
+  XCTAssertNotNil(connection);
+  if (connection == nil) {
+    return;
+  }
+
+  NSString *table = [self uniqueNameWithPrefix:@"arlen_pg_4d_events"];
+  NSString *createSQL =
+      [NSString stringWithFormat:@"CREATE TABLE %@ (id TEXT NOT NULL, state_code TEXT NOT NULL)", table];
+  XCTAssertGreaterThanOrEqual([connection executeCommand:createSQL parameters:@[] error:&error], 0);
+  XCTAssertNil(error);
+
+  NSString *insertSQL =
+      [NSString stringWithFormat:@"INSERT INTO %@ (id, state_code) VALUES ($1, $2)", table];
+  NSInteger inserted = [connection executeCommand:insertSQL
+                                       parameters:@[ @"doc-1", @"TX" ]
+                                            error:&error];
+  XCTAssertEqual((NSInteger)1, inserted);
+  XCTAssertNil(error);
+
+  connection.preparedStatementReusePolicy = ALNPgPreparedStatementReusePolicyAuto;
+  connection.preparedStatementCacheLimit = 16;
+  connection.builderCompilationCacheLimit = 16;
+  connection.includeSQLInDiagnosticsEvents = NO;
+
+  NSMutableArray<NSDictionary *> *events = [NSMutableArray array];
+  connection.queryDiagnosticsListener = ^(NSDictionary<NSString *,id> *event) {
+    if (![event isKindOfClass:[NSDictionary class]]) {
+      return;
+    }
+    [events addObject:[NSDictionary dictionaryWithDictionary:event]];
+  };
+
+  ALNSQLBuilder *builder = [ALNSQLBuilder selectFrom:table columns:@[ @"id" ]];
+  [builder whereField:@"state_code" equals:@"TX"];
+
+  NSArray *firstRows = [connection executeBuilderQuery:builder error:&error];
+  XCTAssertNil(error);
+  XCTAssertEqual((NSUInteger)1, [firstRows count]);
+  XCTAssertEqualObjects(@"doc-1", firstRows[0][@"id"]);
+
+  NSArray *secondRows = [connection executeBuilderQuery:builder error:&error];
+  XCTAssertNil(error);
+  XCTAssertEqual((NSUInteger)1, [secondRows count]);
+  XCTAssertEqualObjects(@"doc-1", secondRows[0][@"id"]);
+
+  NSMutableArray *compileEvents = [NSMutableArray array];
+  NSMutableArray *executeEvents = [NSMutableArray array];
+  NSMutableArray *resultEvents = [NSMutableArray array];
+  for (NSDictionary *event in events) {
+    XCTAssertNotNil(event[ALNPgQueryEventStageKey]);
+    XCTAssertNotNil(event[ALNPgQueryEventSQLHashKey]);
+    XCTAssertNil(event[ALNPgQueryEventSQLKey]);
+
+    NSString *stage = [event[ALNPgQueryEventStageKey] isKindOfClass:[NSString class]]
+                          ? event[ALNPgQueryEventStageKey]
+                          : @"";
+    if ([stage isEqualToString:ALNPgQueryStageCompile]) {
+      [compileEvents addObject:event];
+    } else if ([stage isEqualToString:ALNPgQueryStageExecute]) {
+      [executeEvents addObject:event];
+    } else if ([stage isEqualToString:ALNPgQueryStageResult]) {
+      [resultEvents addObject:event];
+    }
+  }
+
+  XCTAssertEqual((NSUInteger)2, [compileEvents count]);
+  XCTAssertFalse([compileEvents[0][ALNPgQueryEventCacheHitKey] boolValue]);
+  XCTAssertTrue([compileEvents[1][ALNPgQueryEventCacheHitKey] boolValue]);
+
+  XCTAssertEqual((NSUInteger)2, [executeEvents count]);
+  XCTAssertEqualObjects(@"prepared", executeEvents[0][ALNPgQueryEventExecutionModeKey]);
+  XCTAssertFalse([executeEvents[0][ALNPgQueryEventCacheHitKey] boolValue]);
+  XCTAssertEqualObjects(@"prepared", executeEvents[1][ALNPgQueryEventExecutionModeKey]);
+  XCTAssertTrue([executeEvents[1][ALNPgQueryEventCacheHitKey] boolValue]);
+
+  XCTAssertEqual((NSUInteger)2, [resultEvents count]);
+  XCTAssertEqualObjects(@1, resultEvents[0][ALNPgQueryEventRowCountKey]);
+  XCTAssertEqualObjects(@1, resultEvents[1][ALNPgQueryEventRowCountKey]);
+
+  (void)[connection executeCommand:[NSString stringWithFormat:@"DROP TABLE IF EXISTS %@", table]
+                        parameters:@[]
+                             error:nil];
+  [database releaseConnection:connection];
+}
+
+- (void)testBuilderExecutionErrorEventsIncludeSQLStateAndStayRedactedByDefault {
+  NSString *dsn = [self pgTestDSN];
+  if ([dsn length] == 0) {
+    return;
+  }
+
+  NSError *error = nil;
+  ALNPg *database = [[ALNPg alloc] initWithConnectionString:dsn maxConnections:2 error:&error];
+  XCTAssertNil(error);
+  XCTAssertNotNil(database);
+  if (database == nil) {
+    return;
+  }
+
+  ALNPgConnection *connection = [database acquireConnection:&error];
+  XCTAssertNil(error);
+  XCTAssertNotNil(connection);
+  if (connection == nil) {
+    return;
+  }
+
+  connection.preparedStatementReusePolicy = ALNPgPreparedStatementReusePolicyAuto;
+  connection.includeSQLInDiagnosticsEvents = NO;
+
+  NSMutableArray<NSDictionary *> *events = [NSMutableArray array];
+  connection.queryDiagnosticsListener = ^(NSDictionary<NSString *,id> *event) {
+    if (![event isKindOfClass:[NSDictionary class]]) {
+      return;
+    }
+    [events addObject:[NSDictionary dictionaryWithDictionary:event]];
+  };
+
+  ALNSQLBuilder *builder = [ALNSQLBuilder selectFrom:@"phase4d_missing_table" columns:@[ @"id" ]];
+  NSArray *rows = [connection executeBuilderQuery:builder error:&error];
+  XCTAssertNil(rows);
+  XCTAssertNotNil(error);
+  NSString *sqlState = [error.userInfo[ALNPgErrorSQLStateKey] isKindOfClass:[NSString class]]
+                           ? error.userInfo[ALNPgErrorSQLStateKey]
+                           : @"";
+  XCTAssertEqual((NSUInteger)5, [sqlState length]);
+
+  BOOL sawCompile = NO;
+  BOOL sawError = NO;
+  for (NSDictionary *event in events) {
+    NSString *stage = [event[ALNPgQueryEventStageKey] isKindOfClass:[NSString class]]
+                          ? event[ALNPgQueryEventStageKey]
+                          : @"";
+    if ([stage isEqualToString:ALNPgQueryStageCompile]) {
+      sawCompile = YES;
+    }
+    if (![stage isEqualToString:ALNPgQueryStageError]) {
+      continue;
+    }
+
+    sawError = YES;
+    XCTAssertNil(event[ALNPgQueryEventSQLKey]);
+    XCTAssertEqualObjects(ALNPgErrorDomain, event[ALNPgQueryEventErrorDomainKey]);
+    XCTAssertTrue([event[ALNPgQueryEventErrorCodeKey] integerValue] != 0);
+
+    NSString *eventSQLState = [event[ALNPgErrorSQLStateKey] isKindOfClass:[NSString class]]
+                                  ? event[ALNPgErrorSQLStateKey]
+                                  : @"";
+    XCTAssertEqualObjects(sqlState, eventSQLState);
+  }
+
+  XCTAssertTrue(sawCompile);
+  XCTAssertTrue(sawError);
+  [database releaseConnection:connection];
+}
+
 - (void)testQueryErrorsIncludeSQLStateDiagnostics {
   NSString *dsn = [self pgTestDSN];
   if ([dsn length] == 0) {

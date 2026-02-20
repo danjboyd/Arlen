@@ -14,6 +14,7 @@ Primary contracts:
 - `ALNSQLBuilder` (v2 query builder with expression selects/predicates/order clauses, subquery+lateral joins, and tuple-friendly cursor predicates)
 - `ALNPostgresSQLBuilder` (PostgreSQL dialect extension for conflict/upsert, including expression-based `DO UPDATE SET` and optional `DO UPDATE ... WHERE`)
 - `ALNSchemaCodegen` (deterministic typed schema helper artifact rendering)
+- `ALNPg` builder execution/caching/diagnostics APIs (`executeBuilderQuery`, `executeBuilderCommand`, query stage listener events)
 - `ALNDatabaseAdapter` / `ALNDatabaseConnection`
 - `ALNDisplayGroup`
 - `ALNAdapterConformance` helpers
@@ -120,3 +121,22 @@ Generated table APIs expose:
 - typed column accessor methods (`columnX`, `qualifiedColumnX`)
 
 Consumers can include generated files in non-Arlen builds as long as `ALNSQLBuilder` is linked.
+
+## 9. Phase 4D Query Execution Diagnostics + Caching
+
+`ALNPgConnection`/`ALNPg` now expose builder-driven execution helpers:
+
+- `executeBuilderQuery:error:`
+- `executeBuilderCommand:error:`
+- `resetExecutionCaches`
+
+Runtime controls:
+
+- prepared statement reuse policy: `disabled`, `auto`, `always`
+- cache limits:
+  - `preparedStatementCacheLimit`
+  - `builderCompilationCacheLimit`
+- diagnostics controls:
+  - `queryDiagnosticsListener` (stage events: `compile`, `execute`, `result`, `error`)
+  - `emitDiagnosticsEventsToStderr`
+  - `includeSQLInDiagnosticsEvents` (default off; redaction-safe metadata remains default)

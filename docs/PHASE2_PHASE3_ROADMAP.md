@@ -1,6 +1,6 @@
 # Arlen Phase 2 + Phase 3 Roadmap Index
 
-Status: Active (Phase 2A-2D complete; Phase 3A-3H complete; Phase 4A-4C complete; Phase 4D-4E planned)  
+Status: Active (Phase 2A-2D complete; Phase 3A-3H complete; Phase 4A-4D complete; Phase 4E planned)  
 Last updated: 2026-02-20
 
 This index points to the current roadmap documents:
@@ -41,13 +41,13 @@ Phase 3 is focused on platform maturity:
 - Phase 4A complete: query IR + safety foundation for expression-capable SQL builder paths
 - Phase 4B complete: SQL surface completion for advanced composition/locking/join/window/set clauses
 - Phase 4C complete: typed schema codegen and generated table/column helper APIs
+- Phase 4D complete: builder execution caching + prepared statement reuse policy + structured/redacted query diagnostics
 
-## Planned Next Phases (Post-4C)
+## Planned Next Phases (Post-4D)
 
 Phase 4 rollout is now sequenced in `docs/PHASE4_ROADMAP.md`:
 
-1. Phase 4D: performance + diagnostics hardening.
-2. Phase 4E: conformance + migration hardening.
+1. Phase 4E: conformance + migration hardening.
 
 Scope guardrails remain unchanged:
 - admin/backoffice and full account-product surfaces remain outside Arlen core and are expected to ship as optional modules/products.

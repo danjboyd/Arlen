@@ -22,7 +22,8 @@ Arlen is designed to solve the same class of problems as frameworks like Mojolic
 - Phase 4A: complete (query IR foundation for expression compilation, safety contracts, and deterministic malformed-shape diagnostics).
 - Phase 4B: complete (SQL surface completion for set/window/predicate/locking/join/CTE composition).
 - Phase 4C: complete (typed schema codegen with generated table/column helper APIs and CLI workflow).
-- Phase 4D-4E: planned (sequenced in `docs/PHASE4_ROADMAP.md`).
+- Phase 4D: complete (builder execution caching, prepared-statement reuse policy, and structured/redacted query diagnostics).
+- Phase 4E: planned (sequenced in `docs/PHASE4_ROADMAP.md`).
 
 ## Quick Start
 
