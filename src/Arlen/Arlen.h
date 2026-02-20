@@ -32,5 +32,6 @@
 #import "Support/ALNMetrics.h"
 #import "Support/ALNPerf.h"
 #import "Support/ALNAuth.h"
+#import "Support/ALNRealtime.h"
 
 #endif

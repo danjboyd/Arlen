@@ -1,7 +1,7 @@
 # Arlen Feature Parity Matrix
 
 Status: Active baseline  
-Last updated: 2026-02-19
+Last updated: 2026-02-20
 
 Related docs:
 - `docs/PHASE2_ROADMAP.md`
@@ -48,9 +48,9 @@ Related docs:
 | Dev server auto-reload (`morbo` analog) | In Scope | Phase 2C | Must remain running on compile/transpile failures. |
 | Rich dev exception pages + production-safe errors | In Scope | Phase 2C | Includes structured errors with correlation IDs. |
 | Testing ergonomics for HTTP/JSON/DOM flows | In Scope | Phase 2D-3A | Behavior parity benchmarked vs in-scope Mojolicious cases. |
-| WebSocket support | Deferred | Phase 3D | Important parity item; not a Phase 2 blocker. |
-| SSE support | Deferred | Phase 3D | Implement after Phase 2C/2D stability work. |
-| App mounting/embedding patterns | Deferred | Phase 3D | Valuable for modular deployments, not first-wave. |
+| WebSocket support | In Scope | Phase 3D (complete) | Delivered with controller-driven upgrade contract and websocket frame loop baseline. |
+| SSE support | In Scope | Phase 3D (complete) | Delivered with controller `renderSSEEvents:` contract and integration coverage. |
+| App mounting/embedding patterns | In Scope | Phase 3D (complete) | Delivered via `mountApplication:atPrefix:` request rewriting/dispatch contract. |
 | CGI/PSGI compatibility modes | Out of Scope | N/A | Not aligned with Cocoa/GNUstep compiled deployment model. |
 
 ## 5. Competitor-Inspired Capability Classification
@@ -68,7 +68,7 @@ Related docs:
 | Service dependency/lifecycle ergonomics | FastAPI, Phoenix | In Scope | Phase 3A | Explicit startup/shutdown and dependency wiring. |
 | Metrics and telemetry primitives | Phoenix | In Scope | Phase 3A | First-class observability posture. |
 | Release packaging with `server`/`migrate` workflow | Phoenix | In Scope | Phase 2D-3C | Core compiled-framework deployment contract. |
-| Realtime channels/pubsub abstraction | Phoenix | Deferred | Phase 3D | Build after websocket foundation is stable. |
+| Realtime channels/pubsub abstraction | Phoenix | In Scope | Phase 3D (complete) | Delivered with `ALNRealtimeHub` channel fanout abstraction over websocket channel mode. |
 | LiveView-like server-driven UI | Phoenix | Deferred | Post-3D exploratory track | Strategic but high-scope; not on core path yet. |
 | Background jobs abstraction | Rails | Deferred | Phase 3E candidate | Useful, but not a near-term parity blocker. |
 | File attachment abstraction | Rails | Deferred | Phase 3E candidate | Prefer adapter/plugin model first. |

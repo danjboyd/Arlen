@@ -35,9 +35,12 @@ static void ALNSetStructuredErrorResponse(ALNResponse *response,
 @property(nonatomic, strong) NSMutableArray *mutableMiddlewares;
 @property(nonatomic, strong) NSMutableArray *mutablePlugins;
 @property(nonatomic, strong) NSMutableArray *mutableLifecycleHooks;
+@property(nonatomic, strong) NSMutableArray *mutableMounts;
 @property(nonatomic, assign, readwrite, getter=isStarted) BOOL started;
 
 - (void)loadConfiguredPlugins;
+- (nullable NSDictionary *)mountedEntryForPath:(NSString *)requestPath
+                                   rewrittenPath:(NSString *_Nullable *_Nullable)rewrittenPath;
 
 @end
 
@@ -70,6 +73,7 @@ static void ALNSetStructuredErrorResponse(ALNResponse *response,
     _mutableMiddlewares = [NSMutableArray array];
     _mutablePlugins = [NSMutableArray array];
     _mutableLifecycleHooks = [NSMutableArray array];
+    _mutableMounts = [NSMutableArray array];
     _started = NO;
     if ([_environment isEqualToString:@"development"]) {
       _logger.minimumLevel = ALNLogLevelDebug;
@@ -120,6 +124,30 @@ static void ALNSetStructuredErrorResponse(ALNResponse *response,
 
 - (void)endRouteGroup {
   [self.router endRouteGroup];
+}
+
+- (BOOL)mountApplication:(ALNApplication *)application atPrefix:(NSString *)prefix {
+  if (application == nil || application == self) {
+    return NO;
+  }
+
+  NSString *normalizedPrefix = ALNNormalizeMountPrefix(prefix);
+  if ([normalizedPrefix length] == 0) {
+    return NO;
+  }
+
+  for (NSDictionary *entry in self.mutableMounts) {
+    NSString *existingPrefix = [entry[@"prefix"] isKindOfClass:[NSString class]] ? entry[@"prefix"] : @"";
+    if ([existingPrefix isEqualToString:normalizedPrefix]) {
+      return NO;
+    }
+  }
+
+  [self.mutableMounts addObject:@{
+    @"prefix" : normalizedPrefix,
+    @"application" : application
+  }];
+  return YES;
 }
 
 - (NSArray *)routeTable {
@@ -283,6 +311,48 @@ static NSString *ALNStringConfigValue(id value, NSString *defaultValue) {
     return value;
   }
   return defaultValue;
+}
+
+static NSString *ALNNormalizeMountPrefix(NSString *prefix) {
+  if (![prefix isKindOfClass:[NSString class]] || [prefix length] == 0) {
+    return nil;
+  }
+  NSString *normalized =
+      [prefix stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+  while ([normalized containsString:@"//"]) {
+    normalized = [normalized stringByReplacingOccurrencesOfString:@"//" withString:@"/"];
+  }
+  if (![normalized hasPrefix:@"/"]) {
+    normalized = [@"/" stringByAppendingString:normalized];
+  }
+  while ([normalized length] > 1 && [normalized hasSuffix:@"/"]) {
+    normalized = [normalized substringToIndex:[normalized length] - 1];
+  }
+  if ([normalized length] == 0 || [normalized isEqualToString:@"/"]) {
+    return nil;
+  }
+  return normalized;
+}
+
+static NSString *ALNRewriteMountedPath(NSString *requestPath, NSString *prefix) {
+  NSString *path = [requestPath isKindOfClass:[NSString class]] ? requestPath : @"/";
+  if ([path length] == 0) {
+    path = @"/";
+  }
+  if (![path hasPrefix:@"/"]) {
+    path = [@"/" stringByAppendingString:path];
+  }
+
+  if ([path isEqualToString:prefix]) {
+    return @"/";
+  }
+
+  NSString *prefixWithSlash = [prefix stringByAppendingString:@"/"];
+  if ([path hasPrefix:prefixWithSlash]) {
+    NSString *trimmed = [path substringFromIndex:[prefix length]];
+    return ([trimmed length] > 0) ? trimmed : @"/";
+  }
+  return nil;
 }
 
 static NSArray *ALNNormalizedUniqueStrings(NSArray *values) {
@@ -1188,6 +1258,38 @@ static void ALNFinalizeResponse(ALNResponse *response,
   }
 }
 
+- (NSDictionary *)mountedEntryForPath:(NSString *)requestPath
+                         rewrittenPath:(NSString **)rewrittenPath {
+  NSString *path = [requestPath isKindOfClass:[NSString class]] ? requestPath : @"/";
+  if ([path length] == 0) {
+    path = @"/";
+  }
+
+  NSDictionary *best = nil;
+  NSString *bestRewritten = nil;
+  NSUInteger bestPrefixLength = 0;
+  for (NSDictionary *entry in self.mutableMounts) {
+    NSString *prefix = [entry[@"prefix"] isKindOfClass:[NSString class]] ? entry[@"prefix"] : @"";
+    if ([prefix length] == 0) {
+      continue;
+    }
+    NSString *rewritten = ALNRewriteMountedPath(path, prefix);
+    if ([rewritten length] == 0) {
+      continue;
+    }
+    if ([prefix length] > bestPrefixLength) {
+      best = entry;
+      bestRewritten = rewritten;
+      bestPrefixLength = [prefix length];
+    }
+  }
+
+  if (rewrittenPath != NULL) {
+    *rewrittenPath = [bestRewritten copy];
+  }
+  return best;
+}
+
 - (BOOL)configureRouteNamed:(NSString *)routeName
              requestSchema:(NSDictionary *)requestSchema
             responseSchema:(NSDictionary *)responseSchema
@@ -1255,6 +1357,31 @@ static void ALNFinalizeResponse(ALNResponse *response,
     return YES;
   }
 
+  for (NSDictionary *entry in self.mutableMounts) {
+    ALNApplication *mounted =
+        [entry[@"application"] isKindOfClass:[ALNApplication class]] ? entry[@"application"] : nil;
+    if (mounted == nil) {
+      continue;
+    }
+    NSError *mountedError = nil;
+    BOOL mountedStarted = [mounted startWithError:&mountedError];
+    if (!mountedStarted) {
+      if (error != NULL) {
+        NSString *prefix = [entry[@"prefix"] isKindOfClass:[NSString class]] ? entry[@"prefix"] : @"";
+        NSString *message =
+            [NSString stringWithFormat:@"mounted application failed to start at %@: %@",
+                                       prefix,
+                                       mountedError.localizedDescription ?: @"unknown"];
+        *error = [NSError errorWithDomain:ALNApplicationErrorDomain
+                                     code:308
+                                 userInfo:@{
+                                   NSLocalizedDescriptionKey : message
+                                 }];
+      }
+      return NO;
+    }
+  }
+
   for (id<ALNLifecycleHook> hook in self.mutableLifecycleHooks) {
     if (![hook respondsToSelector:@selector(applicationWillStart:error:)]) {
       continue;
@@ -1301,6 +1428,15 @@ static void ALNFinalizeResponse(ALNResponse *response,
     }
   }
   self.started = NO;
+
+  for (NSInteger idx = (NSInteger)[self.mutableMounts count] - 1; idx >= 0; idx--) {
+    NSDictionary *entry = self.mutableMounts[(NSUInteger)idx];
+    ALNApplication *mounted =
+        [entry[@"application"] isKindOfClass:[ALNApplication class]] ? entry[@"application"] : nil;
+    if (mounted != nil) {
+      [mounted shutdown];
+    }
+  }
 }
 
 - (void)registerBuiltInMiddlewares {
@@ -1362,6 +1498,38 @@ static void ALNFinalizeResponse(ALNResponse *response,
 }
 
 - (ALNResponse *)dispatchRequest:(ALNRequest *)request {
+  NSString *rewrittenPath = nil;
+  NSDictionary *mountedEntry = [self mountedEntryForPath:request.path rewrittenPath:&rewrittenPath];
+  if (mountedEntry != nil) {
+    ALNApplication *mountedApp =
+        [mountedEntry[@"application"] isKindOfClass:[ALNApplication class]]
+            ? mountedEntry[@"application"]
+            : nil;
+    NSString *prefix = [mountedEntry[@"prefix"] isKindOfClass:[NSString class]]
+                           ? mountedEntry[@"prefix"]
+                           : @"";
+    if (mountedApp != nil && [rewrittenPath length] > 0) {
+      ALNRequest *forwarded =
+          [[ALNRequest alloc] initWithMethod:request.method
+                                        path:rewrittenPath
+                                 queryString:request.queryString
+                                     headers:request.headers
+                                        body:request.body];
+      forwarded.routeParams = request.routeParams ?: @{};
+      forwarded.remoteAddress = request.remoteAddress ?: @"";
+      forwarded.effectiveRemoteAddress = request.effectiveRemoteAddress ?: @"";
+      forwarded.scheme = request.scheme ?: @"http";
+      forwarded.parseDurationMilliseconds = request.parseDurationMilliseconds;
+      forwarded.responseWriteDurationMilliseconds = request.responseWriteDurationMilliseconds;
+
+      ALNResponse *forwardedResponse = [mountedApp dispatchRequest:forwarded];
+      if ([prefix length] > 0 && [forwardedResponse headerForName:@"X-Arlen-Mount-Prefix"] == nil) {
+        [forwardedResponse setHeader:@"X-Arlen-Mount-Prefix" value:prefix];
+      }
+      return forwardedResponse;
+    }
+  }
+
   ALNResponse *response = [[ALNResponse alloc] init];
   NSString *requestID = ALNGenerateRequestID();
   [response setHeader:@"X-Request-Id" value:requestID];

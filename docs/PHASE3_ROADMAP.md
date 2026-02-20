@@ -1,6 +1,6 @@
 # Arlen Phase 3 Roadmap
 
-Status: Active (Phase 3A-3C complete; Phase 3D-3E planned)  
+Status: Active (Phase 3A-3D complete; Phase 3E planned)  
 Last updated: 2026-02-20
 
 Related docs:
@@ -126,6 +126,26 @@ Acceptance:
 
 ## 3.4 Phase 3D: Deferred Parity Features (Realtime + Composition)
 
+Status: Complete (2026-02-20)
+
+Completion highlights:
+- WebSocket runtime support in `ALNHTTPServer` with controller-driven upgrade contracts.
+- Controller helpers for realtime workflows:
+  - `acceptWebSocketEcho`
+  - `acceptWebSocketChannel:`
+  - `renderSSEEvents:`
+- Mount/embedding composition contract in `ALNApplication`:
+  - `mountApplication:atPrefix:`
+  - path rewriting and mounted app dispatch with prefix tracking header.
+- Realtime channel/pubsub abstraction:
+  - `ALNRealtimeHub`
+  - deterministic fanout and unsubscribe behavior covered in unit tests.
+- Integration validation:
+  - websocket echo round-trip
+  - websocket channel fanout between concurrent clients
+  - SSE under concurrent request load
+  - mounted app route composition behavior.
+
 Deliverables:
 - WebSocket support for app and controller workflows.
 - Server-Sent Events support.
@@ -139,6 +159,8 @@ Acceptance:
 - Realtime channel behavior is covered with deterministic fixture tests.
 
 ## 3.5 Phase 3E: Ecosystem Services (Deferred Candidate Track)
+
+Status: Planned
 
 Deliverables:
 - Plugin-first background jobs abstraction.

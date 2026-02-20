@@ -14,7 +14,8 @@ Arlen is designed to solve the same class of problems as frameworks like Mojolic
 - Phase 3A: complete (metrics, schema/auth contracts, OpenAPI baseline, plugins/lifecycle).
 - Phase 3B: complete (data-layer maturation, interactive OpenAPI explorer, GSWeb compatibility helpers).
 - Phase 3C: complete (release/doc maturity, perf trend profiles, swagger docs style, migration readiness package).
-- Phase 3D-3E: planned (`docs/PHASE3_ROADMAP.md`).
+- Phase 3D: complete (websocket/SSE baseline, mount composition, realtime pubsub abstraction).
+- Phase 3E: planned (`docs/PHASE3_ROADMAP.md`).
 
 ## Quick Start
 
@@ -91,6 +92,7 @@ High-value guides:
 - [CLI Reference](docs/CLI_REFERENCE.md)
 - [Core Concepts](docs/CORE_CONCEPTS.md)
 - [Deployment Guide](docs/DEPLOYMENT.md)
+- [Realtime and Composition](docs/REALTIME_COMPOSITION.md)
 - [Propane Manager](docs/PROPANE.md)
 - [Release Process](docs/RELEASE_PROCESS.md)
 - [Performance Profiles](docs/PERFORMANCE_PROFILES.md)

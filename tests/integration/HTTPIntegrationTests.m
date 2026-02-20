@@ -66,6 +66,11 @@
   return output ?: @"";
 }
 
+- (NSString *)runPythonScript:(NSString *)script exitCode:(int *)exitCode {
+  NSString *command = [NSString stringWithFormat:@"python3 - <<'PY'\n%@\nPY", script ?: @""];
+  return [self runShellCapture:command exitCode:exitCode];
+}
+
 - (NSString *)requestPathWithRetries:(NSString *)path
                                 port:(int)port
                             attempts:(NSInteger)attempts
@@ -344,6 +349,252 @@
   NSString *body = [self simpleRequestPath:@"/api/echo/hank"];
   XCTAssertTrue([body containsString:@"\"name\""]);
   XCTAssertTrue([body containsString:@"hank"]);
+}
+
+- (void)testWebSocketEchoRouteRoundTrip {
+  int port = [self randomPort];
+  NSTask *server = [[NSTask alloc] init];
+  server.launchPath = @"./build/boomhauer";
+  server.arguments = @[ @"--port", [NSString stringWithFormat:@"%d", port] ];
+  server.standardOutput = [NSPipe pipe];
+  server.standardError = [NSPipe pipe];
+  [server launch];
+
+  @try {
+    BOOL ready = NO;
+    (void)[self requestPathWithRetries:@"/healthz" port:port attempts:60 success:&ready];
+    XCTAssertTrue(ready);
+
+    NSString *script = [NSString stringWithFormat:
+                                         @"import base64, os, socket, struct\n"
+                                         @"PORT=%d\n"
+                                         @"def recv_exact(sock, size):\n"
+                                         @"    data=b''\n"
+                                         @"    while len(data)<size:\n"
+                                         @"        chunk=sock.recv(size-len(data))\n"
+                                         @"        if not chunk:\n"
+                                         @"            raise RuntimeError('connection closed')\n"
+                                         @"        data += chunk\n"
+                                         @"    return data\n"
+                                         @"def send_text(sock, text):\n"
+                                         @"    payload=text.encode('utf-8')\n"
+                                         @"    mask=os.urandom(4)\n"
+                                         @"    header=bytearray([0x81])\n"
+                                         @"    length=len(payload)\n"
+                                         @"    if length <= 125:\n"
+                                         @"        header.append(0x80 | length)\n"
+                                         @"    elif length <= 65535:\n"
+                                         @"        header.append(0x80 | 126)\n"
+                                         @"        header.extend(struct.pack('!H', length))\n"
+                                         @"    else:\n"
+                                         @"        header.append(0x80 | 127)\n"
+                                         @"        header.extend(struct.pack('!Q', length))\n"
+                                         @"    masked=bytes(payload[i] ^ mask[i %% 4] for i in range(length))\n"
+                                         @"    sock.sendall(bytes(header)+mask+masked)\n"
+                                         @"def recv_text(sock):\n"
+                                         @"    b1, b2 = recv_exact(sock, 2)\n"
+                                         @"    opcode = b1 & 0x0F\n"
+                                         @"    length = b2 & 0x7F\n"
+                                         @"    masked = (b2 & 0x80) != 0\n"
+                                         @"    if length == 126:\n"
+                                         @"        length = struct.unpack('!H', recv_exact(sock, 2))[0]\n"
+                                         @"    elif length == 127:\n"
+                                         @"        length = struct.unpack('!Q', recv_exact(sock, 8))[0]\n"
+                                         @"    mask_key = recv_exact(sock, 4) if masked else b''\n"
+                                         @"    payload = recv_exact(sock, length)\n"
+                                         @"    if masked:\n"
+                                         @"        payload = bytes(payload[i] ^ mask_key[i %% 4] for i in range(length))\n"
+                                         @"    if opcode != 0x1:\n"
+                                         @"        raise RuntimeError('unexpected opcode %%d' %% opcode)\n"
+                                         @"    return payload.decode('utf-8')\n"
+                                         @"key = base64.b64encode(os.urandom(16)).decode('ascii')\n"
+                                         @"req = (\n"
+                                         @"    f'GET /ws/echo HTTP/1.1\\r\\n'\n"
+                                         @"    f'Host: 127.0.0.1:{PORT}\\r\\n'\n"
+                                         @"    'Upgrade: websocket\\r\\n'\n"
+                                         @"    'Connection: Upgrade\\r\\n'\n"
+                                         @"    f'Sec-WebSocket-Key: {key}\\r\\n'\n"
+                                         @"    'Sec-WebSocket-Version: 13\\r\\n\\r\\n'\n"
+                                         @").encode('utf-8')\n"
+                                         @"sock = socket.create_connection(('127.0.0.1', PORT), timeout=5)\n"
+                                         @"sock.sendall(req)\n"
+                                         @"resp = sock.recv(4096).decode('utf-8', 'replace')\n"
+                                         @"if '101 Switching Protocols' not in resp:\n"
+                                         @"    raise RuntimeError(resp)\n"
+                                         @"send_text(sock, 'hello-ws')\n"
+                                         @"print(recv_text(sock))\n"
+                                         @"sock.close()\n",
+                                         port];
+    int pyCode = 0;
+    NSString *output = [self runPythonScript:script exitCode:&pyCode];
+    XCTAssertEqual(0, pyCode);
+    NSString *trimmed =
+        [output stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    XCTAssertEqualObjects(@"hello-ws", trimmed);
+  } @finally {
+    if ([server isRunning]) {
+      (void)kill(server.processIdentifier, SIGTERM);
+      [server waitUntilExit];
+    }
+  }
+}
+
+- (void)testWebSocketChannelPubSubFanout {
+  int port = [self randomPort];
+  NSTask *server = [[NSTask alloc] init];
+  server.launchPath = @"./build/boomhauer";
+  server.arguments = @[ @"--port", [NSString stringWithFormat:@"%d", port] ];
+  server.standardOutput = [NSPipe pipe];
+  server.standardError = [NSPipe pipe];
+  [server launch];
+
+  @try {
+    BOOL ready = NO;
+    (void)[self requestPathWithRetries:@"/healthz" port:port attempts:60 success:&ready];
+    XCTAssertTrue(ready);
+
+    NSString *script = [NSString stringWithFormat:
+                                         @"import base64, os, socket, struct\n"
+                                         @"PORT=%d\n"
+                                         @"def recv_exact(sock, size):\n"
+                                         @"    data=b''\n"
+                                         @"    while len(data)<size:\n"
+                                         @"        chunk=sock.recv(size-len(data))\n"
+                                         @"        if not chunk:\n"
+                                         @"            raise RuntimeError('connection closed')\n"
+                                         @"        data += chunk\n"
+                                         @"    return data\n"
+                                         @"def send_text(sock, text):\n"
+                                         @"    payload=text.encode('utf-8')\n"
+                                         @"    mask=os.urandom(4)\n"
+                                         @"    header=bytearray([0x81])\n"
+                                         @"    length=len(payload)\n"
+                                         @"    if length <= 125:\n"
+                                         @"        header.append(0x80 | length)\n"
+                                         @"    elif length <= 65535:\n"
+                                         @"        header.append(0x80 | 126)\n"
+                                         @"        header.extend(struct.pack('!H', length))\n"
+                                         @"    else:\n"
+                                         @"        header.append(0x80 | 127)\n"
+                                         @"        header.extend(struct.pack('!Q', length))\n"
+                                         @"    masked=bytes(payload[i] ^ mask[i %% 4] for i in range(length))\n"
+                                         @"    sock.sendall(bytes(header)+mask+masked)\n"
+                                         @"def recv_text(sock):\n"
+                                         @"    b1, b2 = recv_exact(sock, 2)\n"
+                                         @"    opcode = b1 & 0x0F\n"
+                                         @"    length = b2 & 0x7F\n"
+                                         @"    masked = (b2 & 0x80) != 0\n"
+                                         @"    if length == 126:\n"
+                                         @"        length = struct.unpack('!H', recv_exact(sock, 2))[0]\n"
+                                         @"    elif length == 127:\n"
+                                         @"        length = struct.unpack('!Q', recv_exact(sock, 8))[0]\n"
+                                         @"    mask_key = recv_exact(sock, 4) if masked else b''\n"
+                                         @"    payload = recv_exact(sock, length)\n"
+                                         @"    if masked:\n"
+                                         @"        payload = bytes(payload[i] ^ mask_key[i %% 4] for i in range(length))\n"
+                                         @"    if opcode != 0x1:\n"
+                                         @"        raise RuntimeError('unexpected opcode %%d' %% opcode)\n"
+                                         @"    return payload.decode('utf-8')\n"
+                                         @"def ws_connect(path):\n"
+                                         @"    key = base64.b64encode(os.urandom(16)).decode('ascii')\n"
+                                         @"    req = (\n"
+                                         @"      f'GET {path} HTTP/1.1\\r\\n'\n"
+                                         @"      f'Host: 127.0.0.1:{PORT}\\r\\n'\n"
+                                         @"      'Upgrade: websocket\\r\\n'\n"
+                                         @"      'Connection: Upgrade\\r\\n'\n"
+                                         @"      f'Sec-WebSocket-Key: {key}\\r\\n'\n"
+                                         @"      'Sec-WebSocket-Version: 13\\r\\n\\r\\n'\n"
+                                         @"    ).encode('utf-8')\n"
+                                         @"    sock = socket.create_connection(('127.0.0.1', PORT), timeout=5)\n"
+                                         @"    sock.sendall(req)\n"
+                                         @"    resp = sock.recv(4096).decode('utf-8', 'replace')\n"
+                                         @"    if '101 Switching Protocols' not in resp:\n"
+                                         @"      raise RuntimeError(resp)\n"
+                                         @"    return sock\n"
+                                         @"ws1 = ws_connect('/ws/channel/alpha')\n"
+                                         @"ws2 = ws_connect('/ws/channel/alpha')\n"
+                                         @"send_text(ws1, 'fanout-message')\n"
+                                         @"m1 = recv_text(ws1)\n"
+                                         @"m2 = recv_text(ws2)\n"
+                                         @"print(m1)\n"
+                                         @"print(m2)\n"
+                                         @"ws1.close(); ws2.close()\n",
+                                         port];
+    int pyCode = 0;
+    NSString *output = [self runPythonScript:script exitCode:&pyCode];
+    XCTAssertEqual(0, pyCode);
+    NSArray *lines =
+        [[output stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]]
+            componentsSeparatedByCharactersInSet:[NSCharacterSet newlineCharacterSet]];
+    XCTAssertGreaterThanOrEqual([lines count], 2u);
+    XCTAssertEqualObjects(@"fanout-message", lines[0]);
+    XCTAssertEqualObjects(@"fanout-message", lines[1]);
+  } @finally {
+    if ([server isRunning]) {
+      (void)kill(server.processIdentifier, SIGTERM);
+      [server waitUntilExit];
+    }
+  }
+}
+
+- (void)testSSETickerHandlesConcurrentRequests {
+  int port = [self randomPort];
+  NSTask *server = [[NSTask alloc] init];
+  server.launchPath = @"./build/boomhauer";
+  server.arguments = @[ @"--port", [NSString stringWithFormat:@"%d", port] ];
+  server.standardOutput = [NSPipe pipe];
+  server.standardError = [NSPipe pipe];
+  [server launch];
+
+  @try {
+    BOOL ready = NO;
+    (void)[self requestPathWithRetries:@"/healthz" port:port attempts:60 success:&ready];
+    XCTAssertTrue(ready);
+
+    NSString *script = [NSString stringWithFormat:
+                                         @"import threading, urllib.request\n"
+                                         @"PORT=%d\n"
+                                         @"errors=[]\n"
+                                         @"def worker(idx):\n"
+                                         @"    try:\n"
+                                         @"        with urllib.request.urlopen(f'http://127.0.0.1:{PORT}/sse/ticker?count=3', timeout=5) as res:\n"
+                                         @"            body = res.read().decode('utf-8')\n"
+                                         @"            ctype = res.headers.get('Content-Type', '')\n"
+                                         @"            if 'text/event-stream' not in ctype:\n"
+                                         @"                errors.append(f'bad content type {ctype}')\n"
+                                         @"            if body.count('event: tick') < 3:\n"
+                                         @"                errors.append(f'bad event count {idx}')\n"
+                                         @"    except Exception as exc:\n"
+                                         @"        errors.append(str(exc))\n"
+                                         @"threads=[]\n"
+                                         @"for i in range(6):\n"
+                                         @"    t=threading.Thread(target=worker, args=(i,))\n"
+                                         @"    t.start(); threads.append(t)\n"
+                                         @"for t in threads:\n"
+                                         @"    t.join()\n"
+                                         @"if errors:\n"
+                                         @"    raise RuntimeError('; '.join(errors))\n"
+                                         @"print('ok')\n",
+                                         port];
+    int pyCode = 0;
+    NSString *output = [self runPythonScript:script exitCode:&pyCode];
+    XCTAssertEqual(0, pyCode);
+    XCTAssertTrue([output containsString:@"ok"]);
+  } @finally {
+    if ([server isRunning]) {
+      (void)kill(server.processIdentifier, SIGTERM);
+      [server waitUntilExit];
+    }
+  }
+}
+
+- (void)testMountedApplicationCompositionRoutes {
+  NSString *statusBody = [self simpleRequestPath:@"/embedded/status"];
+  XCTAssertEqualObjects(@"embedded-ok\n", statusBody);
+
+  NSString *apiBody = [self simpleRequestPath:@"/embedded/api/status"];
+  XCTAssertTrue([apiBody containsString:@"\"mounted\""]);
+  XCTAssertTrue([apiBody containsString:@"\"embedded-app\""]);
 }
 
 - (void)testStaticAssetEndpointInDevelopment {

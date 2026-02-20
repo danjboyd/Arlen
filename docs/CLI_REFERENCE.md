@@ -127,6 +127,11 @@ Behavior:
   - `/openapi` (interactive explorer by default)
   - `/openapi/viewer` (lightweight fallback viewer)
   - `/openapi/swagger` (self-hosted swagger-style docs UI)
+- built-in Phase 3D sample realtime/composition routes:
+  - `/ws/echo`
+  - `/ws/channel/:channel`
+  - `/sse/ticker`
+  - mounted app sample at `/embedded/*`
 
 Options:
 

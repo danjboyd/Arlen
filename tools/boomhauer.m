@@ -69,6 +69,73 @@
 
 @end
 
+@interface RealtimeController : ALNController
+@end
+
+@implementation RealtimeController
+
+- (id)wsEcho:(ALNContext *)ctx {
+  (void)ctx;
+  [self acceptWebSocketEcho];
+  return nil;
+}
+
+- (id)wsChannel:(ALNContext *)ctx {
+  NSString *channel = [self stringParamForName:@"channel"] ?: @"default";
+  [self acceptWebSocketChannel:channel];
+  return nil;
+}
+
+- (id)sseTicker:(ALNContext *)ctx {
+  NSInteger count = 3;
+  NSString *rawCount = [self stringParamForName:@"count"];
+  if ([rawCount length] > 0) {
+    NSInteger parsed = [rawCount integerValue];
+    if (parsed > 0 && parsed <= 12) {
+      count = parsed;
+    }
+  }
+
+  NSMutableArray *events = [NSMutableArray array];
+  for (NSInteger idx = 0; idx < count; idx++) {
+    [events addObject:@{
+      @"id" : [NSString stringWithFormat:@"%ld", (long)(idx + 1)],
+      @"event" : @"tick",
+      @"data" : @{
+        @"index" : @(idx + 1),
+        @"source" : @"boomhauer",
+      },
+      @"retry" : @(1000),
+    }];
+  }
+  [self renderSSEEvents:events];
+  return nil;
+}
+
+@end
+
+@interface EmbeddedController : ALNController
+@end
+
+@implementation EmbeddedController
+
+- (id)status:(ALNContext *)ctx {
+  (void)ctx;
+  [self renderText:@"embedded-ok\n"];
+  return nil;
+}
+
+- (id)apiStatus:(ALNContext *)ctx {
+  (void)ctx;
+  return @{
+    @"ok" : @(YES),
+    @"mounted" : @(YES),
+    @"name" : @"embedded-app",
+  };
+}
+
+@end
+
 @interface HealthController : ALNController
 @end
 
@@ -435,10 +502,48 @@ static ALNApplication *BuildApplication(NSString *environment) {
            controllerClass:[ApiController class]
                     action:@"requestMeta"];
   [app registerRouteMethod:@"GET"
+                      path:@"/ws/echo"
+                      name:@"ws_echo"
+           controllerClass:[RealtimeController class]
+                    action:@"wsEcho"];
+  [app registerRouteMethod:@"GET"
+                      path:@"/ws/channel/:channel"
+                      name:@"ws_channel"
+           controllerClass:[RealtimeController class]
+                    action:@"wsChannel"];
+  [app registerRouteMethod:@"GET"
+                      path:@"/sse/ticker"
+                      name:@"sse_ticker"
+           controllerClass:[RealtimeController class]
+                    action:@"sseTicker"];
+  [app registerRouteMethod:@"GET"
                       path:@"/healthz"
                       name:@"healthz"
            controllerClass:[HealthController class]
                     action:@"check"];
+
+  ALNApplication *embeddedApp = [[ALNApplication alloc] initWithConfig:@{
+    @"environment" : environment ?: @"development",
+    @"logFormat" : @"text",
+    @"performanceLogging" : @(YES),
+    @"apiOnly" : @(NO),
+    @"serveStatic" : @(NO),
+    @"openapi" : @{
+      @"enabled" : @(NO),
+      @"docsUIEnabled" : @(NO),
+    },
+  }];
+  [embeddedApp registerRouteMethod:@"GET"
+                              path:@"/status"
+                              name:@"embedded_status"
+                   controllerClass:[EmbeddedController class]
+                            action:@"status"];
+  [embeddedApp registerRouteMethod:@"GET"
+                              path:@"/api/status"
+                              name:@"embedded_api_status"
+                   controllerClass:[EmbeddedController class]
+                            action:@"apiStatus"];
+  (void)[app mountApplication:embeddedApp atPrefix:@"/embedded"];
   return app;
 }
 

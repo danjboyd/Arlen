@@ -3,6 +3,7 @@
 #import <arpa/inet.h>
 #import <errno.h>
 #import <netinet/in.h>
+#import <openssl/sha.h>
 #import <signal.h>
 #import <stdio.h>
 #import <string.h>
@@ -13,6 +14,7 @@
 #import "ALNApplication.h"
 #import "ALNRequest.h"
 #import "ALNResponse.h"
+#import "ALNRealtime.h"
 
 typedef struct {
   NSUInteger maxRequestLineBytes;
@@ -126,6 +128,225 @@ static NSInteger ALNParseContentLength(NSString *headerText) {
     return (NSInteger)parsed;
   }
   return 0;
+}
+
+static BOOL ALNHeaderContainsToken(NSString *value, NSString *needleLower) {
+  if (![value isKindOfClass:[NSString class]] || [value length] == 0 ||
+      ![needleLower isKindOfClass:[NSString class]] || [needleLower length] == 0) {
+    return NO;
+  }
+  NSArray *parts = [[value lowercaseString] componentsSeparatedByString:@","];
+  for (NSString *candidate in parts) {
+    NSString *trimmed =
+        [candidate stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    if ([trimmed isEqualToString:needleLower]) {
+      return YES;
+    }
+  }
+  return NO;
+}
+
+static BOOL ALNRequestIsWebSocketUpgrade(ALNRequest *request) {
+  if (request == nil || ![request.method isEqualToString:@"GET"]) {
+    return NO;
+  }
+  NSString *upgrade = request.headers[@"upgrade"];
+  NSString *connection = request.headers[@"connection"];
+  NSString *key = request.headers[@"sec-websocket-key"];
+  if (!ALNHeaderContainsToken(upgrade, @"websocket")) {
+    return NO;
+  }
+  if (!ALNHeaderContainsToken(connection, @"upgrade")) {
+    return NO;
+  }
+  return [key isKindOfClass:[NSString class]] && [key length] > 0;
+}
+
+static BOOL ALNSocketLikelyWebSocketUpgrade(int clientFd) {
+  for (;;) {
+    unsigned char bytes[2048];
+    ssize_t peeked = recv(clientFd, bytes, sizeof(bytes), MSG_PEEK);
+    if (peeked < 0) {
+      if (errno == EINTR) {
+        continue;
+      }
+      return NO;
+    }
+    if (peeked == 0) {
+      return NO;
+    }
+
+    NSString *snippet =
+        [[NSString alloc] initWithBytes:bytes length:(NSUInteger)peeked encoding:NSUTF8StringEncoding];
+    if (snippet == nil) {
+      return NO;
+    }
+    NSString *lower = [snippet lowercaseString];
+    BOOL hasUpgradeHeader = [lower rangeOfString:@"\r\nupgrade:"].location != NSNotFound &&
+                            [lower rangeOfString:@"websocket"].location != NSNotFound;
+    BOOL hasConnectionUpgrade = [lower rangeOfString:@"\r\nconnection:"].location != NSNotFound &&
+                                [lower rangeOfString:@"upgrade"].location != NSNotFound;
+    return hasUpgradeHeader && hasConnectionUpgrade;
+  }
+}
+
+static NSString *ALNWebSocketAcceptKey(NSString *clientKey) {
+  if (![clientKey isKindOfClass:[NSString class]] || [clientKey length] == 0) {
+    return @"";
+  }
+  NSString *combined = [clientKey stringByAppendingString:@"258EAFA5-E914-47DA-95CA-C5AB0DC85B11"];
+  NSData *combinedData = [combined dataUsingEncoding:NSUTF8StringEncoding];
+  if (combinedData == nil) {
+    return @"";
+  }
+  unsigned char digest[SHA_DIGEST_LENGTH];
+  SHA1([combinedData bytes], (unsigned long)[combinedData length], digest);
+  NSData *digestData = [NSData dataWithBytes:digest length:SHA_DIGEST_LENGTH];
+  return [digestData base64EncodedStringWithOptions:0] ?: @"";
+}
+
+static BOOL ALNSendAll(int fd, const void *bytes, size_t length) {
+  const unsigned char *cursor = (const unsigned char *)bytes;
+  size_t remaining = length;
+  while (remaining > 0) {
+    ssize_t written = send(fd, cursor, remaining, 0);
+    if (written < 0) {
+      if (errno == EINTR) {
+        continue;
+      }
+      return NO;
+    }
+    if (written == 0) {
+      return NO;
+    }
+    cursor += (size_t)written;
+    remaining -= (size_t)written;
+  }
+  return YES;
+}
+
+static BOOL ALNRecvAll(int fd, void *buffer, size_t length) {
+  unsigned char *cursor = (unsigned char *)buffer;
+  size_t remaining = length;
+  while (remaining > 0) {
+    ssize_t readBytes = recv(fd, cursor, remaining, 0);
+    if (readBytes < 0) {
+      if (errno == EINTR) {
+        continue;
+      }
+      return NO;
+    }
+    if (readBytes == 0) {
+      return NO;
+    }
+    cursor += (size_t)readBytes;
+    remaining -= (size_t)readBytes;
+  }
+  return YES;
+}
+
+static NSData *ALNWebSocketFrameData(uint8_t opcode, NSData *payload) {
+  NSData *body = payload ?: [NSData data];
+  NSUInteger length = [body length];
+  NSMutableData *frame = [NSMutableData data];
+  uint8_t first = (uint8_t)(0x80 | (opcode & 0x0F));
+  [frame appendBytes:&first length:1];
+
+  if (length <= 125) {
+    uint8_t second = (uint8_t)length;
+    [frame appendBytes:&second length:1];
+  } else if (length <= 65535) {
+    uint8_t second = 126;
+    uint16_t networkLength = htons((uint16_t)length);
+    [frame appendBytes:&second length:1];
+    [frame appendBytes:&networkLength length:2];
+  } else {
+    uint8_t second = 127;
+    uint64_t rawLength = (uint64_t)length;
+    unsigned char extended[8];
+    for (NSInteger idx = 0; idx < 8; idx++) {
+      extended[7 - idx] = (unsigned char)((rawLength >> (idx * 8)) & 0xFF);
+    }
+    [frame appendBytes:&second length:1];
+    [frame appendBytes:extended length:8];
+  }
+
+  if (length > 0) {
+    [frame appendData:body];
+  }
+  return frame;
+}
+
+static BOOL ALNWebSocketSendFrame(int fd, uint8_t opcode, NSData *payload) {
+  NSData *frame = ALNWebSocketFrameData(opcode, payload ?: [NSData data]);
+  return ALNSendAll(fd, [frame bytes], [frame length]);
+}
+
+static BOOL ALNWebSocketReadFrame(int fd,
+                                  uint8_t *opcode,
+                                  BOOL *fin,
+                                  NSData **payload,
+                                  NSUInteger maxPayloadBytes) {
+  unsigned char header[2];
+  if (!ALNRecvAll(fd, header, sizeof(header))) {
+    return NO;
+  }
+
+  BOOL final = ((header[0] & 0x80) != 0);
+  uint8_t frameOpcode = (uint8_t)(header[0] & 0x0F);
+  BOOL masked = ((header[1] & 0x80) != 0);
+  uint64_t payloadLength = (uint64_t)(header[1] & 0x7F);
+  if (payloadLength == 126) {
+    unsigned char ext[2];
+    if (!ALNRecvAll(fd, ext, sizeof(ext))) {
+      return NO;
+    }
+    payloadLength = ((uint64_t)ext[0] << 8) | (uint64_t)ext[1];
+  } else if (payloadLength == 127) {
+    unsigned char ext[8];
+    if (!ALNRecvAll(fd, ext, sizeof(ext))) {
+      return NO;
+    }
+    payloadLength = 0;
+    for (NSUInteger idx = 0; idx < 8; idx++) {
+      payloadLength = (payloadLength << 8) | (uint64_t)ext[idx];
+    }
+  }
+
+  if (payloadLength > (uint64_t)maxPayloadBytes) {
+    return NO;
+  }
+
+  unsigned char mask[4] = {0, 0, 0, 0};
+  if (masked) {
+    if (!ALNRecvAll(fd, mask, sizeof(mask))) {
+      return NO;
+    }
+  }
+
+  NSMutableData *data = [NSMutableData dataWithLength:(NSUInteger)payloadLength];
+  if (payloadLength > 0) {
+    if (!ALNRecvAll(fd, [data mutableBytes], (size_t)payloadLength)) {
+      return NO;
+    }
+    if (masked) {
+      unsigned char *bytes = (unsigned char *)[data mutableBytes];
+      for (uint64_t idx = 0; idx < payloadLength; idx++) {
+        bytes[idx] ^= mask[idx % 4];
+      }
+    }
+  }
+
+  if (opcode != NULL) {
+    *opcode = frameOpcode;
+  }
+  if (fin != NULL) {
+    *fin = final;
+  }
+  if (payload != NULL) {
+    *payload = data;
+  }
+  return YES;
 }
 
 static NSData *ALNReadHTTPRequestData(int clientFd, ALNRequestLimits limits, NSInteger *statusCode) {
@@ -444,10 +665,68 @@ static ALNResponse *ALNErrorResponse(NSInteger statusCode, NSString *body) {
   return response;
 }
 
+@interface ALNWebSocketClientSession : NSObject <ALNRealtimeSubscriber>
+
+@property(nonatomic, assign, readonly) int clientFd;
+@property(nonatomic, strong, readonly) NSLock *sendLock;
+@property(nonatomic, assign) BOOL closed;
+
+- (instancetype)initWithClientFd:(int)clientFd;
+- (BOOL)sendTextMessage:(NSString *)message;
+- (BOOL)sendBinaryPayload:(NSData *)payload opcode:(uint8_t)opcode;
+- (void)sendCloseFrame;
+
+@end
+
+@implementation ALNWebSocketClientSession
+
+- (instancetype)initWithClientFd:(int)clientFd {
+  self = [super init];
+  if (self) {
+    _clientFd = clientFd;
+    _sendLock = [[NSLock alloc] init];
+    _closed = NO;
+  }
+  return self;
+}
+
+- (BOOL)sendBinaryPayload:(NSData *)payload opcode:(uint8_t)opcode {
+  [self.sendLock lock];
+  BOOL canSend = !self.closed;
+  BOOL ok = canSend ? ALNWebSocketSendFrame(self.clientFd, opcode, payload ?: [NSData data]) : NO;
+  if (!ok) {
+    self.closed = YES;
+  }
+  [self.sendLock unlock];
+  return ok;
+}
+
+- (BOOL)sendTextMessage:(NSString *)message {
+  NSData *payload = [[message ?: @"" copy] dataUsingEncoding:NSUTF8StringEncoding] ?: [NSData data];
+  return [self sendBinaryPayload:payload opcode:0x1];
+}
+
+- (void)sendCloseFrame {
+  [self.sendLock lock];
+  if (!self.closed) {
+    (void)ALNWebSocketSendFrame(self.clientFd, 0x8, [NSData data]);
+    self.closed = YES;
+  }
+  [self.sendLock unlock];
+}
+
+- (void)receiveRealtimeMessage:(NSString *)message onChannel:(NSString *)channel {
+  (void)channel;
+  (void)[self sendTextMessage:message ?: @""];
+}
+
+@end
+
 @interface ALNHTTPServer ()
 
 @property(nonatomic, strong, readwrite) ALNApplication *application;
 @property(nonatomic, copy, readwrite) NSString *publicRoot;
+@property(nonatomic, strong) NSLock *dispatchLock;
 
 @end
 
@@ -460,6 +739,7 @@ static ALNResponse *ALNErrorResponse(NSInteger statusCode, NSString *body) {
     _application = application;
     _publicRoot = [publicRoot copy];
     _serverName = @"server";
+    _dispatchLock = [[NSLock alloc] init];
   }
   return self;
 }
@@ -476,6 +756,123 @@ static ALNResponse *ALNErrorResponse(NSInteger statusCode, NSString *body) {
 
 - (void)requestStop {
   gShouldRun = 0;
+}
+
+- (NSString *)webSocketModeFromResponse:(ALNResponse *)response {
+  NSString *mode = [[response headerForName:@"X-Arlen-WebSocket-Mode"] lowercaseString];
+  if ([mode isEqualToString:@"echo"] || [mode isEqualToString:@"channel"]) {
+    return mode;
+  }
+  return @"";
+}
+
+- (NSString *)webSocketChannelFromResponse:(ALNResponse *)response {
+  NSString *channel = [response headerForName:@"X-Arlen-WebSocket-Channel"];
+  if (![channel isKindOfClass:[NSString class]]) {
+    return @"default";
+  }
+  NSString *normalized =
+      [[channel stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]]
+          lowercaseString];
+  return ([normalized length] > 0) ? normalized : @"default";
+}
+
+- (BOOL)sendWebSocketHandshakeForRequest:(ALNRequest *)request
+                                response:(ALNResponse *)response
+                                clientFd:(int)clientFd {
+  NSString *clientKey = request.headers[@"sec-websocket-key"];
+  NSString *acceptKey = ALNWebSocketAcceptKey(clientKey);
+  if ([acceptKey length] == 0) {
+    return NO;
+  }
+
+  NSMutableString *handshake = [NSMutableString string];
+  [handshake appendString:@"HTTP/1.1 101 Switching Protocols\r\n"];
+  [handshake appendString:@"Upgrade: websocket\r\n"];
+  [handshake appendString:@"Connection: Upgrade\r\n"];
+  [handshake appendFormat:@"Sec-WebSocket-Accept: %@\r\n", acceptKey];
+
+  NSString *requestID = [response headerForName:@"X-Request-Id"];
+  if ([requestID length] > 0) {
+    [handshake appendFormat:@"X-Request-Id: %@\r\n", requestID];
+  }
+  NSString *protocol = [response headerForName:@"Sec-WebSocket-Protocol"];
+  if ([protocol length] > 0) {
+    [handshake appendFormat:@"Sec-WebSocket-Protocol: %@\r\n", protocol];
+  }
+  [handshake appendString:@"\r\n"];
+
+  NSData *data = [handshake dataUsingEncoding:NSUTF8StringEncoding];
+  return ALNSendAll(clientFd, [data bytes], [data length]);
+}
+
+- (void)runWebSocketSessionForRequest:(ALNRequest *)request
+                             response:(ALNResponse *)response
+                             clientFd:(int)clientFd {
+  (void)request;
+  NSString *mode = [self webSocketModeFromResponse:response];
+  if ([mode length] == 0) {
+    return;
+  }
+
+  ALNWebSocketClientSession *session = [[ALNWebSocketClientSession alloc] initWithClientFd:clientFd];
+  ALNRealtimeSubscription *subscription = nil;
+  NSString *channel = @"";
+  if ([mode isEqualToString:@"channel"]) {
+    channel = [self webSocketChannelFromResponse:response];
+    subscription = [[ALNRealtimeHub sharedHub] subscribeChannel:channel subscriber:session];
+  }
+
+  while (gShouldRun && !session.closed) {
+    uint8_t opcode = 0;
+    BOOL fin = NO;
+    NSData *payload = nil;
+    if (!ALNWebSocketReadFrame(clientFd, &opcode, &fin, &payload, 1048576)) {
+      break;
+    }
+    if (!fin) {
+      break;
+    }
+
+    if (opcode == 0x8) {
+      [session sendCloseFrame];
+      break;
+    }
+    if (opcode == 0x9) {
+      (void)[session sendBinaryPayload:payload ?: [NSData data] opcode:0xA];
+      continue;
+    }
+    if (opcode == 0xA) {
+      continue;
+    }
+    if (opcode != 0x1) {
+      continue;
+    }
+
+    NSString *message = [[NSString alloc] initWithData:(payload ?: [NSData data])
+                                              encoding:NSUTF8StringEncoding];
+    if (message == nil) {
+      message = @"";
+    }
+
+    if ([mode isEqualToString:@"channel"]) {
+      (void)[[ALNRealtimeHub sharedHub] publishMessage:message onChannel:channel];
+    } else {
+      (void)[session sendTextMessage:message];
+    }
+  }
+
+  if (subscription != nil) {
+    [[ALNRealtimeHub sharedHub] unsubscribe:subscription];
+  }
+}
+
+- (void)handleClientOnBackgroundThread:(NSNumber *)clientFDObject {
+  @autoreleasepool {
+    int clientFd = [clientFDObject intValue];
+    [self handleClient:clientFd];
+    close(clientFd);
+  }
 }
 
 - (void)handleClient:(int)clientFd {
@@ -545,7 +942,25 @@ static ALNResponse *ALNErrorResponse(NSInteger statusCode, NSString *body) {
     }
   }
 
-  ALNResponse *response = [self.application dispatchRequest:request];
+  ALNResponse *response = nil;
+  [self.dispatchLock lock];
+  @try {
+    response = [self.application dispatchRequest:request];
+  } @finally {
+    [self.dispatchLock unlock];
+  }
+
+  NSString *webSocketMode = [self webSocketModeFromResponse:response];
+  BOOL webSocketUpgrade = ALNRequestIsWebSocketUpgrade(request) &&
+                          response.statusCode == 101 &&
+                          [webSocketMode length] > 0;
+  if (webSocketUpgrade) {
+    if ([self sendWebSocketHandshakeForRequest:request response:response clientFd:clientFd]) {
+      [self runWebSocketSessionForRequest:request response:response clientFd:clientFd];
+    }
+    return;
+  }
+
   ALNEnsurePerformanceHeaders(response,
                               performanceLogging,
                               parseMs,
@@ -669,8 +1084,15 @@ static ALNResponse *ALNErrorResponse(NSInteger statusCode, NSString *body) {
         break;
       }
 
-      [self handleClient:clientFd];
-      close(clientFd);
+      BOOL runInBackground = (!once && ALNSocketLikelyWebSocketUpgrade(clientFd));
+      if (runInBackground) {
+        [NSThread detachNewThreadSelector:@selector(handleClientOnBackgroundThread:)
+                                 toTarget:self
+                               withObject:@(clientFd)];
+      } else {
+        [self handleClient:clientFd];
+        close(clientFd);
+      }
 
       if (once) {
         break;

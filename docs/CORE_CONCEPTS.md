@@ -64,14 +64,28 @@ If controller action returns an `NSDictionary` or `NSArray` and no explicit body
 - Documentation endpoints:
   - `/openapi` (interactive explorer by default)
   - `/openapi/viewer` (lightweight fallback)
-- `openapi.docsUIStyle` controls `/openapi` rendering (`interactive` or `viewer`).
+  - `/openapi/swagger` (self-hosted swagger-style docs UI)
+- `openapi.docsUIStyle` controls `/openapi` rendering (`interactive`, `viewer`, or `swagger`).
 
-## 7. Compatibility Helpers
+## 7. Realtime and Composition
+
+- WebSocket controller contracts:
+  - `acceptWebSocketEcho`
+  - `acceptWebSocketChannel:`
+- SSE controller contract:
+  - `renderSSEEvents:`
+- Realtime channel fanout abstraction:
+  - `ALNRealtimeHub`
+- App composition:
+  - `mountApplication:atPrefix:`
+  - mounted requests are path-rewritten and dispatched into child app context.
+
+## 8. Compatibility Helpers
 
 - `compatibility.pageStateEnabled` enables session-backed page-state behavior for migration scenarios.
 - Default remains stateless/transient page-state behavior unless explicitly enabled.
 
-## 8. Configuration Model
+## 9. Configuration Model
 
 Config is loaded from:
 - `config/app.plist`
@@ -79,7 +93,7 @@ Config is loaded from:
 
 Environment variables may override key values (`ARLEN_*`).
 
-## 9. Development vs Production Naming
+## 10. Development vs Production Naming
 
 - Development server: `boomhauer`
 - Production process manager: `propane`

@@ -46,6 +46,38 @@ curl -i http://127.0.0.1:3000/openapi.json
 curl -i http://127.0.0.1:3000/openapi
 curl -i http://127.0.0.1:3000/openapi/viewer
 curl -i http://127.0.0.1:3000/openapi/swagger
+curl -i http://127.0.0.1:3000/sse/ticker?count=2
+curl -i http://127.0.0.1:3000/embedded/status
+curl -i http://127.0.0.1:3000/embedded/api/status
+```
+
+WebSocket echo smoke test:
+
+```bash
+python3 - <<'PY'
+import base64, os, socket, struct
+port = 3000
+key = base64.b64encode(os.urandom(16)).decode("ascii")
+req = (
+    f"GET /ws/echo HTTP/1.1\r\n"
+    f"Host: 127.0.0.1:{port}\r\n"
+    "Upgrade: websocket\r\n"
+    "Connection: Upgrade\r\n"
+    f"Sec-WebSocket-Key: {key}\r\n"
+    "Sec-WebSocket-Version: 13\r\n\r\n"
+).encode()
+s = socket.create_connection(("127.0.0.1", port), timeout=5)
+s.sendall(req)
+print(s.recv(4096).decode("utf-8", "replace").split("\r\n")[0])
+mask = os.urandom(4)
+payload = b"hello-ws"
+frame = bytearray([0x81, 0x80 | len(payload)]) + mask + bytes(payload[i] ^ mask[i % 4] for i in range(len(payload)))
+s.sendall(frame)
+b1, b2 = s.recv(1)[0], s.recv(1)[0]
+length = b2 & 0x7F
+print(s.recv(length).decode())
+s.close()
+PY
 ```
 
 ## 4. Run Tests and Quality Gates

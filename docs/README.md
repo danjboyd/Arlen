@@ -18,6 +18,7 @@ Open `build/docs/index.html` in your browser.
 - [CLI Reference](CLI_REFERENCE.md): command reference for `arlen`, `boomhauer`, and helper scripts.
 - [Core Concepts](CORE_CONCEPTS.md): runtime architecture and request lifecycle.
 - [Deployment Guide](DEPLOYMENT.md): deployment model and production guidance.
+- [Realtime and Composition](REALTIME_COMPOSITION.md): websocket/SSE contracts, pubsub hub, and app mounting.
 - [Propane Manager](PROPANE.md): production process manager and propane accessories.
 - [Release Process](RELEASE_PROCESS.md): semantic versioning, deprecations, and release checklist.
 - [Performance Profiles](PERFORMANCE_PROFILES.md): profile pack, trend reports, and baseline governance.

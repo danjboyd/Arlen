@@ -12,7 +12,8 @@ Last updated: 2026-02-20
 - Phase 3A: complete (2026-02-19)
 - Phase 3B: complete (2026-02-19)
 - Phase 3C: complete (2026-02-20)
-- Phase 3D-3E: planned
+- Phase 3D: complete (2026-02-20)
+- Phase 3E: planned
 
 ## Completed Today (2026-02-20)
 
@@ -43,6 +44,13 @@ Last updated: 2026-02-20
   - `docs/RELEASE_PROCESS.md`
   - `docs/PERFORMANCE_PROFILES.md`
   - updated `README.md`, `docs/README.md`, `docs/GETTING_STARTED.md`, `docs/CLI_REFERENCE.md`, `docs/DEPLOYMENT.md`, `docs/PHASE3_ROADMAP.md`
+- Completed Phase 3D realtime/composition tranche:
+  - websocket upgrade + frame handling in `ALNHTTPServer`
+  - controller-level realtime helpers (`acceptWebSocketEcho`, `acceptWebSocketChannel`, `renderSSEEvents`)
+  - mount/embedding contract via `mountApplication:atPrefix:`
+  - realtime channel/pubsub abstraction via `ALNRealtimeHub`
+  - boomhauer routes for websocket echo/channel, SSE ticker, and mounted app sample routes
+  - unit/integration coverage for realtime and mount composition flows
 
 ## Verification State (2026-02-20)
 
@@ -54,10 +62,15 @@ Last updated: 2026-02-20
   - `template_heavy`
   - `api_reference`
   - `migration_sample`
+- New Phase 3D checks executed:
+  - websocket echo round-trip integration test
+  - websocket channel fanout integration test
+  - concurrent SSE integration test
+  - mounted app composition unit/integration tests
 - PostgreSQL-backed tests remain gated by `ARLEN_PG_TEST_DSN`.
 
 ## Next Session Focus
 
-1. Start Phase 3D design/contract spike for WebSocket + SSE.
-2. Define mount/embedding composition contracts and fixture tests.
-3. Decide initial realtime pubsub abstraction surface for deferred parity track.
+1. Start Phase 3E planning for plugin-first background jobs contract.
+2. Define caching abstraction contract and adapter boundary.
+3. Draft i18n/mail/attachments candidate scope and acceptance tests.

@@ -4,6 +4,8 @@ NSString *const ALNResponseErrorDomain = @"Arlen.HTTP.Response.Error";
 
 static NSString *ALNStatusText(NSInteger statusCode) {
   switch (statusCode) {
+  case 101:
+    return @"Switching Protocols";
   case 200:
     return @"OK";
   case 201:

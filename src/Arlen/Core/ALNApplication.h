@@ -78,6 +78,7 @@ NS_ASSUME_NONNULL_BEGIN
                       guardAction:(nullable NSString *)guardAction
                           formats:(nullable NSArray *)formats;
 - (void)endRouteGroup;
+- (BOOL)mountApplication:(ALNApplication *)application atPrefix:(NSString *)prefix;
 - (void)addMiddleware:(id<ALNMiddleware>)middleware;
 - (BOOL)registerLifecycleHook:(id<ALNLifecycleHook>)hook;
 - (BOOL)registerPlugin:(id<ALNPlugin>)plugin error:(NSError *_Nullable *_Nullable)error;

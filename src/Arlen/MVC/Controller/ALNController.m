@@ -27,6 +27,25 @@ static NSDictionary *ALNTemplateContextFromStash(NSDictionary *stash) {
   return [NSDictionary dictionaryWithDictionary:context];
 }
 
+static NSString *ALNJSONStringFromObject(id value) {
+  if (value == nil || value == [NSNull null]) {
+    return @"";
+  }
+  if ([value isKindOfClass:[NSString class]]) {
+    return value;
+  }
+  if ([NSJSONSerialization isValidJSONObject:value]) {
+    NSData *data = [NSJSONSerialization dataWithJSONObject:value options:0 error:nil];
+    if (data != nil) {
+      NSString *json = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
+      if ([json length] > 0) {
+        return json;
+      }
+    }
+  }
+  return [value description] ?: @"";
+}
+
 + (NSJSONWritingOptions)jsonWritingOptions {
   return 0;
 }
@@ -128,6 +147,78 @@ static NSDictionary *ALNTemplateContextFromStash(NSDictionary *stash) {
 - (void)renderText:(NSString *)text {
   [self.context.response setHeader:@"Content-Type" value:@"text/plain; charset=utf-8"];
   [self.context.response setTextBody:text ?: @""];
+  self.context.response.committed = YES;
+}
+
+- (void)renderSSEEvents:(NSArray *)events {
+  NSMutableString *body = [NSMutableString string];
+  for (id value in events ?: @[]) {
+    NSDictionary *event = [value isKindOfClass:[NSDictionary class]] ? value : @{};
+    NSString *eventName = [event[@"event"] isKindOfClass:[NSString class]] ? event[@"event"] : @"";
+    NSString *eventID = [event[@"id"] isKindOfClass:[NSString class]] ? event[@"id"] : @"";
+    NSString *data = ALNJSONStringFromObject(event[@"data"]);
+    NSString *retry =
+        [event[@"retry"] respondsToSelector:@selector(integerValue)]
+            ? [NSString stringWithFormat:@"%ld", (long)[event[@"retry"] integerValue]]
+            : @"";
+
+    if ([eventID length] > 0) {
+      [body appendFormat:@"id: %@\n", eventID];
+    }
+    if ([eventName length] > 0) {
+      [body appendFormat:@"event: %@\n", eventName];
+    }
+    if ([retry length] > 0) {
+      [body appendFormat:@"retry: %@\n", retry];
+    }
+
+    NSString *normalizedData = data ?: @"";
+    NSArray *dataLines =
+        [normalizedData componentsSeparatedByCharactersInSet:[NSCharacterSet newlineCharacterSet]];
+    if ([dataLines count] == 0) {
+      [body appendString:@"data:\n"];
+    } else {
+      for (NSString *line in dataLines) {
+        [body appendFormat:@"data: %@\n", line ?: @""];
+      }
+    }
+    [body appendString:@"\n"];
+  }
+
+  [self.context.response setStatusCode:200];
+  [self.context.response setHeader:@"Content-Type" value:@"text/event-stream; charset=utf-8"];
+  [self.context.response setHeader:@"Cache-Control" value:@"no-cache"];
+  [self.context.response setHeader:@"Connection" value:@"keep-alive"];
+  [self.context.response setHeader:@"X-Accel-Buffering" value:@"no"];
+  [self.context.response setTextBody:body];
+  self.context.response.committed = YES;
+}
+
+- (void)acceptWebSocketEcho {
+  [self.context.response setStatusCode:101];
+  [self.context.response setHeader:@"Connection" value:@"Upgrade"];
+  [self.context.response setHeader:@"Upgrade" value:@"websocket"];
+  [self.context.response setHeader:@"X-Arlen-WebSocket-Mode" value:@"echo"];
+  [self.context.response setHeader:@"Content-Type" value:@""];
+  [self.context.response.bodyData setLength:0];
+  self.context.response.committed = YES;
+}
+
+- (void)acceptWebSocketChannel:(NSString *)channel {
+  NSString *normalized = [channel isKindOfClass:[NSString class]] ? channel : @"";
+  normalized =
+      [normalized stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+  if ([normalized length] == 0) {
+    normalized = @"default";
+  }
+
+  [self.context.response setStatusCode:101];
+  [self.context.response setHeader:@"Connection" value:@"Upgrade"];
+  [self.context.response setHeader:@"Upgrade" value:@"websocket"];
+  [self.context.response setHeader:@"X-Arlen-WebSocket-Mode" value:@"channel"];
+  [self.context.response setHeader:@"X-Arlen-WebSocket-Channel" value:[normalized lowercaseString]];
+  [self.context.response setHeader:@"Content-Type" value:@""];
+  [self.context.response.bodyData setLength:0];
   self.context.response.committed = YES;
 }
 
