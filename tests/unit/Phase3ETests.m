@@ -1,6 +1,8 @@
 #import <Foundation/Foundation.h>
 #import <XCTest/XCTest.h>
 
+#import <stdlib.h>
+
 #import "ALNApplication.h"
 #import "ALNContext.h"
 #import "ALNController.h"
@@ -209,6 +211,14 @@ static NSInteger gPhase3EPluginDidStopCount = 0;
   return app;
 }
 
+- (NSString *)redisTestURL {
+  const char *value = getenv("ARLEN_REDIS_TEST_URL");
+  if (value == NULL || value[0] == '\0') {
+    return nil;
+  }
+  return [NSString stringWithUTF8String:value];
+}
+
 - (NSDictionary *)jsonFromResponse:(ALNResponse *)response {
   NSError *error = nil;
   id value = [NSJSONSerialization JSONObjectWithData:response.bodyData options:0 error:&error];
@@ -366,6 +376,42 @@ static NSInteger gPhase3EPluginDidStopCount = 0;
   XCTAssertEqual((NSUInteger)0, summary.retriedCount);
   XCTAssertTrue(summary.reachedRunLimit);
   XCTAssertEqual((NSUInteger)1, [[adapter pendingJobsSnapshot] count]);
+}
+
+- (void)testRedisCacheAdapterRejectsInvalidURL {
+  NSError *error = nil;
+  ALNRedisCacheAdapter *adapter = [[ALNRedisCacheAdapter alloc] initWithURLString:@"http://localhost:6379/0"
+                                                                         namespace:@"arlen:test:invalid"
+                                                                       adapterName:@"redis_invalid"
+                                                                             error:&error];
+  XCTAssertNil(adapter);
+  XCTAssertNotNil(error);
+}
+
+- (void)testRedisCacheAdapterConformanceSuiteWhenConfigured {
+  NSString *url = [self redisTestURL];
+  if ([url length] == 0) {
+    return;
+  }
+
+  NSString *namespacePrefix =
+      [NSString stringWithFormat:@"arlen:test:%@", [[NSUUID UUID] UUIDString] ?: @"phase3e"];
+  NSError *adapterError = nil;
+  ALNRedisCacheAdapter *adapter = [[ALNRedisCacheAdapter alloc] initWithURLString:url
+                                                                         namespace:namespacePrefix
+                                                                       adapterName:@"redis_test_cache"
+                                                                             error:&adapterError];
+  XCTAssertNotNil(adapter);
+  XCTAssertNil(adapterError);
+  if (adapter == nil) {
+    return;
+  }
+
+  NSError *suiteError = nil;
+  BOOL suiteOK = ALNRunCacheAdapterConformanceSuite(adapter, &suiteError);
+  XCTAssertTrue(suiteOK);
+  XCTAssertNil(suiteError);
+  (void)[adapter clearWithError:NULL];
 }
 
 @end

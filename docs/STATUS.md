@@ -61,8 +61,9 @@ Last updated: 2026-02-20
 - Completed Phase 3E follow-on execution slice:
   - added `arlen generate plugin --preset` templates for Redis cache, queue-backed jobs, and SMTP mail workflows
   - defined optional worker runtime contract (`ALNJobWorkerRuntime`, `ALNJobWorker`, `ALNJobWorkerRunSummary`)
+  - implemented concrete Redis cache backend adapter (`ALNRedisCacheAdapter`) with conformance-compatible behavior
   - added production guidance for service persistence + retention policy baselines
-  - added integration coverage for plugin preset generation and unit coverage for worker drain/ack/retry/run-limit behavior
+  - added integration coverage for plugin preset generation and unit coverage for worker drain/ack/retry/run-limit + Redis adapter conformance
 
 ## Verification State (2026-02-20)
 
@@ -89,5 +90,5 @@ Last updated: 2026-02-20
 ## Next Session Focus
 
 1. Add end-to-end example apps that exercise generated service plugin presets under real backend dependencies.
-2. Implement concrete backend adapters (beyond templates) and run full conformance suites against them.
+2. Implement concrete backend adapters for jobs/mail/attachments (beyond templates) and run full conformance suites against them.
 3. Design propane-integrated worker supervision model for dedicated async job workers.

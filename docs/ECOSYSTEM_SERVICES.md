@@ -88,6 +88,10 @@ Example:
 - point lookup at a specific timestamp (`objectForKey:atTime:error:`)
 - remove/clear
 
+Concrete backend adapter now available:
+
+- `ALNRedisCacheAdapter` (`redis://` URL initializer, namespace isolation, and cache-conformance compatible TTL behavior)
+
 ## 6. I18n Baseline
 
 `ALNLocalizationAdapter` supports:
@@ -165,6 +169,8 @@ arlen generate plugin SmtpMail --preset smtp-mail
 
 All presets are compile-safe templates that default to in-memory adapters until you replace the template hooks with concrete backend clients.
 
+The `redis-cache` preset now instantiates `ALNRedisCacheAdapter` directly when `ARLEN_REDIS_URL` is set.
+
 ## 12. Optional Job Worker Runtime Contract
 
 Phase 3E follow-on adds an optional worker contract for scheduled/asynchronous execution:
@@ -203,3 +209,9 @@ Operational checklist:
 - Run `ALNRun*ConformanceSuite` for each custom adapter in CI.
 - Alert on queue depth, retry rates, dead-letter growth, and mail delivery failures.
 - Document adapter failover behavior and data-loss assumptions per environment.
+
+Optional conformance validation with a live Redis instance:
+
+```sh
+ARLEN_REDIS_TEST_URL="redis://127.0.0.1:6379/0" make test-unit
+```

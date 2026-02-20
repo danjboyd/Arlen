@@ -248,6 +248,7 @@ Framework/app runtime:
 - `ARLEN_EOC_STRICT_LOCALS`
 - `ARLEN_EOC_STRICT_STRINGIFY`
 - `ARLEN_REDIS_URL` (plugin template hook)
+- `ARLEN_REDIS_TEST_URL` (optional live Redis conformance test target)
 - `ARLEN_SMTP_HOST` (plugin template hook)
 - `ARLEN_SMTP_PORT` (plugin template hook)
 - `ARLEN_JOB_WORKER_INTERVAL_SECONDS` (plugin template hook)

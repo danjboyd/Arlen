@@ -119,6 +119,15 @@ typedef NS_ENUM(NSUInteger, ALNJobWorkerDisposition) {
 
 @end
 
+@interface ALNRedisCacheAdapter : NSObject <ALNCacheAdapter>
+
+- (nullable instancetype)initWithURLString:(NSString *)urlString
+                                 namespace:(nullable NSString *)namespacePrefix
+                               adapterName:(nullable NSString *)adapterName
+                                     error:(NSError *_Nullable *_Nullable)error;
+
+@end
+
 @protocol ALNLocalizationAdapter <NSObject>
 
 - (NSString *)adapterName;

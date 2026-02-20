@@ -45,6 +45,7 @@ Generator behavior:
 - `migration`: `db/migrations/<timestamp>_<name>.sql`
 - `test`: `tests/<Name>Tests.m`
 - `plugin`: `src/Plugins/<Name>Plugin.{h,m}` and class auto-registration in `config/app.plist` (`plugins.classes`), with optional `--preset` service templates
+  - `redis-cache` preset uses `ALNRedisCacheAdapter` when `ARLEN_REDIS_URL` is configured
 
 Notes:
 

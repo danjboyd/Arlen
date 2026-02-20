@@ -1,5 +1,11 @@
 #import "ALNServices.h"
 
+#include <errno.h>
+#include <netdb.h>
+#include <sys/socket.h>
+#include <sys/types.h>
+#include <unistd.h>
+
 NSString *const ALNServiceErrorDomain = @"Arlen.Services.Error";
 
 static NSError *ALNServiceError(NSInteger code, NSString *message, NSError *underlying) {
@@ -607,6 +613,654 @@ static NSString *ALNNormalizeLocale(NSString *locale) {
   [self.lock lock];
   [self.entriesByKey removeAllObjects];
   [self.lock unlock];
+  return YES;
+}
+
+@end
+
+@interface ALNRedisCacheAdapter ()
+
+@property(nonatomic, copy) NSString *adapterNameValue;
+@property(nonatomic, copy) NSString *host;
+@property(nonatomic, assign) NSUInteger port;
+@property(nonatomic, assign) NSInteger databaseIndex;
+@property(nonatomic, copy) NSString *password;
+@property(nonatomic, copy) NSString *namespacePrefix;
+@property(nonatomic, assign) NSTimeInterval ioTimeoutSeconds;
+
+@end
+
+static BOOL ALNParseSignedInteger(NSString *text, long long *outValue) {
+  if (![text isKindOfClass:[NSString class]] || [text length] == 0) {
+    return NO;
+  }
+  const char *raw = [text UTF8String];
+  if (raw == NULL) {
+    return NO;
+  }
+  errno = 0;
+  char *end = NULL;
+  long long parsed = strtoll(raw, &end, 10);
+  if (errno != 0 || end == NULL || *end != '\0') {
+    return NO;
+  }
+  if (outValue != NULL) {
+    *outValue = parsed;
+  }
+  return YES;
+}
+
+static NSError *ALNRedisClientError(NSInteger code, NSString *message, NSError *underlying) {
+  return ALNServiceError(code, message, underlying);
+}
+
+static BOOL ALNRedisWriteBytes(int socketFD, const uint8_t *bytes, size_t length, NSError **error) {
+  size_t written = 0;
+  while (written < length) {
+    ssize_t count = send(socketFD, bytes + written, length - written, 0);
+    if (count < 0) {
+      if (errno == EINTR) {
+        continue;
+      }
+      if (error != NULL) {
+        *error = ALNRedisClientError(2200,
+                                     [NSString stringWithFormat:@"redis write failed: %s", strerror(errno)],
+                                     nil);
+      }
+      return NO;
+    }
+    if (count == 0) {
+      if (error != NULL) {
+        *error = ALNRedisClientError(2201, @"redis connection closed during write", nil);
+      }
+      return NO;
+    }
+    written += (size_t)count;
+  }
+  return YES;
+}
+
+static BOOL ALNRedisWriteData(int socketFD, NSData *data, NSError **error) {
+  return ALNRedisWriteBytes(socketFD, (const uint8_t *)[data bytes], [data length], error);
+}
+
+static BOOL ALNRedisReadExact(int socketFD, uint8_t *buffer, size_t length, NSError **error) {
+  size_t readCount = 0;
+  while (readCount < length) {
+    ssize_t count = recv(socketFD, buffer + readCount, length - readCount, 0);
+    if (count < 0) {
+      if (errno == EINTR) {
+        continue;
+      }
+      if (error != NULL) {
+        *error = ALNRedisClientError(2202,
+                                     [NSString stringWithFormat:@"redis read failed: %s", strerror(errno)],
+                                     nil);
+      }
+      return NO;
+    }
+    if (count == 0) {
+      if (error != NULL) {
+        *error = ALNRedisClientError(2203, @"redis connection closed during read", nil);
+      }
+      return NO;
+    }
+    readCount += (size_t)count;
+  }
+  return YES;
+}
+
+static NSString *ALNRedisReadLine(int socketFD, NSError **error) {
+  NSMutableData *buffer = [NSMutableData data];
+  while (YES) {
+    uint8_t byte = 0;
+    if (!ALNRedisReadExact(socketFD, &byte, 1, error)) {
+      return nil;
+    }
+    if (byte == '\r') {
+      uint8_t lf = 0;
+      if (!ALNRedisReadExact(socketFD, &lf, 1, error)) {
+        return nil;
+      }
+      if (lf != '\n') {
+        if (error != NULL) {
+          *error = ALNRedisClientError(2204, @"redis protocol error: expected LF after CR", nil);
+        }
+        return nil;
+      }
+      break;
+    }
+    [buffer appendBytes:&byte length:1];
+    if ([buffer length] > (1024 * 1024)) {
+      if (error != NULL) {
+        *error = ALNRedisClientError(2205, @"redis protocol error: line too long", nil);
+      }
+      return nil;
+    }
+  }
+
+  NSString *line = [[NSString alloc] initWithData:buffer encoding:NSUTF8StringEncoding];
+  if (line == nil) {
+    if (error != NULL) {
+      *error = ALNRedisClientError(2206, @"redis protocol error: line is not UTF-8", nil);
+    }
+    return nil;
+  }
+  return line;
+}
+
+static id ALNRedisReadReply(int socketFD, NSError **error);
+
+static id ALNRedisReadArrayReply(int socketFD, NSString *countText, NSError **error) {
+  long long count = 0;
+  if (!ALNParseSignedInteger(countText, &count) || count < -1) {
+    if (error != NULL) {
+      *error = ALNRedisClientError(2207, @"redis protocol error: invalid array length", nil);
+    }
+    return nil;
+  }
+  if (count == -1) {
+    return [NSNull null];
+  }
+  NSMutableArray *out = [NSMutableArray arrayWithCapacity:(NSUInteger)count];
+  for (long long index = 0; index < count; index++) {
+    NSError *stepError = nil;
+    id item = ALNRedisReadReply(socketFD, &stepError);
+    if (stepError != nil) {
+      if (error != NULL) {
+        *error = stepError;
+      }
+      return nil;
+    }
+    [out addObject:item ?: [NSNull null]];
+  }
+  return [NSArray arrayWithArray:out];
+}
+
+static id ALNRedisReadBulkReply(int socketFD, NSString *lengthText, NSError **error) {
+  long long length = 0;
+  if (!ALNParseSignedInteger(lengthText, &length) || length < -1) {
+    if (error != NULL) {
+      *error = ALNRedisClientError(2208, @"redis protocol error: invalid bulk length", nil);
+    }
+    return nil;
+  }
+  if (length == -1) {
+    return [NSNull null];
+  }
+
+  NSMutableData *data = [NSMutableData dataWithLength:(NSUInteger)length];
+  if (length > 0 && !ALNRedisReadExact(socketFD, [data mutableBytes], (size_t)length, error)) {
+    return nil;
+  }
+  uint8_t tail[2] = { 0, 0 };
+  if (!ALNRedisReadExact(socketFD, tail, 2, error)) {
+    return nil;
+  }
+  if (tail[0] != '\r' || tail[1] != '\n') {
+    if (error != NULL) {
+      *error = ALNRedisClientError(2209, @"redis protocol error: malformed bulk terminator", nil);
+    }
+    return nil;
+  }
+  return [NSData dataWithData:data];
+}
+
+static id ALNRedisReadReply(int socketFD, NSError **error) {
+  uint8_t prefix = 0;
+  if (!ALNRedisReadExact(socketFD, &prefix, 1, error)) {
+    return nil;
+  }
+
+  NSString *line = ALNRedisReadLine(socketFD, error);
+  if (line == nil) {
+    return nil;
+  }
+
+  if (prefix == '+') {
+    return line;
+  }
+  if (prefix == '-') {
+    if (error != NULL) {
+      *error = ALNRedisClientError(2210, [NSString stringWithFormat:@"redis error reply: %@", line], nil);
+    }
+    return nil;
+  }
+  if (prefix == ':') {
+    long long value = 0;
+    if (!ALNParseSignedInteger(line, &value)) {
+      if (error != NULL) {
+        *error = ALNRedisClientError(2211, @"redis protocol error: invalid integer reply", nil);
+      }
+      return nil;
+    }
+    return @(value);
+  }
+  if (prefix == '$') {
+    return ALNRedisReadBulkReply(socketFD, line, error);
+  }
+  if (prefix == '*') {
+    return ALNRedisReadArrayReply(socketFD, line, error);
+  }
+
+  if (error != NULL) {
+    *error = ALNRedisClientError(2212, @"redis protocol error: unknown reply prefix", nil);
+  }
+  return nil;
+}
+
+static BOOL ALNRedisWriteCommand(int socketFD, NSArray *parts, NSError **error) {
+  NSMutableData *payload = [NSMutableData data];
+  NSString *header = [NSString stringWithFormat:@"*%lu\r\n", (unsigned long)[parts count]];
+  [payload appendData:[header dataUsingEncoding:NSUTF8StringEncoding]];
+  for (id part in parts ?: @[]) {
+    NSData *bytes = nil;
+    if ([part isKindOfClass:[NSData class]]) {
+      bytes = part;
+    } else if ([part isKindOfClass:[NSString class]]) {
+      bytes = [(NSString *)part dataUsingEncoding:NSUTF8StringEncoding];
+    } else if ([part respondsToSelector:@selector(description)]) {
+      bytes = [[part description] dataUsingEncoding:NSUTF8StringEncoding];
+    }
+    if (bytes == nil) {
+      bytes = [NSData data];
+    }
+    NSString *bulkHeader = [NSString stringWithFormat:@"$%lu\r\n", (unsigned long)[bytes length]];
+    [payload appendData:[bulkHeader dataUsingEncoding:NSUTF8StringEncoding]];
+    [payload appendData:bytes];
+    [payload appendData:[@"\r\n" dataUsingEncoding:NSUTF8StringEncoding]];
+  }
+  return ALNRedisWriteData(socketFD, payload, error);
+}
+
+static int ALNRedisOpenSocketConnection(NSString *host,
+                                        NSUInteger port,
+                                        NSTimeInterval timeoutSeconds,
+                                        NSError **error) {
+  NSString *normalizedHost = ALNNonEmptyString(host, @"");
+  if ([normalizedHost length] == 0) {
+    if (error != NULL) {
+      *error = ALNRedisClientError(2213, @"redis host is required", nil);
+    }
+    return -1;
+  }
+  if (port == 0 || port > 65535) {
+    if (error != NULL) {
+      *error = ALNRedisClientError(2214, @"redis port must be between 1 and 65535", nil);
+    }
+    return -1;
+  }
+
+  struct addrinfo hints;
+  memset(&hints, 0, sizeof(hints));
+  hints.ai_family = AF_UNSPEC;
+  hints.ai_socktype = SOCK_STREAM;
+  hints.ai_protocol = IPPROTO_TCP;
+
+  char portBuffer[16];
+  snprintf(portBuffer, sizeof(portBuffer), "%u", (unsigned int)port);
+
+  struct addrinfo *result = NULL;
+  int resolveStatus = getaddrinfo([normalizedHost UTF8String], portBuffer, &hints, &result);
+  if (resolveStatus != 0 || result == NULL) {
+    if (error != NULL) {
+      *error = ALNRedisClientError(
+          2215,
+          [NSString stringWithFormat:@"redis address resolution failed: %s", gai_strerror(resolveStatus)],
+          nil);
+    }
+    if (result != NULL) {
+      freeaddrinfo(result);
+    }
+    return -1;
+  }
+
+  int socketFD = -1;
+  long timeoutMillis = (long)(timeoutSeconds * 1000.0);
+  if (timeoutMillis <= 0) {
+    timeoutMillis = 2500;
+  }
+  struct timeval timeoutValue;
+  timeoutValue.tv_sec = timeoutMillis / 1000;
+  timeoutValue.tv_usec = (timeoutMillis % 1000) * 1000;
+
+  for (struct addrinfo *candidate = result; candidate != NULL; candidate = candidate->ai_next) {
+    socketFD = socket(candidate->ai_family, candidate->ai_socktype, candidate->ai_protocol);
+    if (socketFD < 0) {
+      continue;
+    }
+
+    (void)setsockopt(socketFD, SOL_SOCKET, SO_RCVTIMEO, &timeoutValue, sizeof(timeoutValue));
+    (void)setsockopt(socketFD, SOL_SOCKET, SO_SNDTIMEO, &timeoutValue, sizeof(timeoutValue));
+
+    if (connect(socketFD, candidate->ai_addr, candidate->ai_addrlen) == 0) {
+      break;
+    }
+    close(socketFD);
+    socketFD = -1;
+  }
+  freeaddrinfo(result);
+
+  if (socketFD < 0) {
+    if (error != NULL) {
+      *error = ALNRedisClientError(2216,
+                                   [NSString stringWithFormat:@"redis connect failed: %s", strerror(errno)],
+                                   nil);
+    }
+    return -1;
+  }
+  return socketFD;
+}
+
+@implementation ALNRedisCacheAdapter
+
+- (instancetype)initWithURLString:(NSString *)urlString
+                        namespace:(NSString *)namespacePrefix
+                      adapterName:(NSString *)adapterName
+                            error:(NSError **)error {
+  self = [super init];
+  if (!self) {
+    return nil;
+  }
+
+  NSString *normalizedURL = ALNNonEmptyString(urlString, @"");
+  NSURLComponents *components = [NSURLComponents componentsWithString:normalizedURL];
+  NSString *scheme = [[components.scheme lowercaseString] copy];
+  if (components == nil || ![scheme isEqualToString:@"redis"]) {
+    if (error != NULL) {
+      *error = ALNRedisClientError(2217, @"redis URL must use redis:// scheme", nil);
+    }
+    return nil;
+  }
+
+  NSString *host = ALNNonEmptyString(components.host, @"");
+  if ([host length] == 0) {
+    if (error != NULL) {
+      *error = ALNRedisClientError(2218, @"redis URL must include host", nil);
+    }
+    return nil;
+  }
+  NSUInteger port = components.port != nil ? [components.port unsignedIntegerValue] : 6379;
+  if (port == 0 || port > 65535) {
+    if (error != NULL) {
+      *error = ALNRedisClientError(2219, @"redis URL has invalid port", nil);
+    }
+    return nil;
+  }
+
+  NSInteger dbIndex = 0;
+  NSString *path = ALNNonEmptyString(components.path, @"");
+  if ([path hasPrefix:@"/"] && [path length] > 1) {
+    NSString *dbText = [path substringFromIndex:1];
+    long long parsedDB = 0;
+    if (!ALNParseSignedInteger(dbText, &parsedDB) || parsedDB < 0) {
+      if (error != NULL) {
+        *error = ALNRedisClientError(2220, @"redis URL database path must be a non-negative integer", nil);
+      }
+      return nil;
+    }
+    dbIndex = (NSInteger)parsedDB;
+  }
+
+  _host = [host copy];
+  _port = port;
+  _databaseIndex = dbIndex;
+  _password = [ALNNonEmptyString(components.password, @"") copy];
+  _namespacePrefix = [ALNNonEmptyString(namespacePrefix, @"arlen:cache") copy];
+  _adapterNameValue =
+      [ALNNonEmptyString(adapterName,
+                         [NSString stringWithFormat:@"redis_cache@%@:%lu", host, (unsigned long)port]) copy];
+  _ioTimeoutSeconds = 2.5;
+  return self;
+}
+
+- (NSString *)adapterName {
+  return self.adapterNameValue ?: @"redis_cache";
+}
+
+- (NSString *)indexKey {
+  return [NSString stringWithFormat:@"%@:__keys__", self.namespacePrefix ?: @"arlen:cache"];
+}
+
+- (NSString *)namespacedKeyForKey:(NSString *)key {
+  return [NSString stringWithFormat:@"%@:%@", self.namespacePrefix ?: @"arlen:cache", key ?: @""];
+}
+
+- (int)openConnectionWithError:(NSError **)error {
+  int fd = ALNRedisOpenSocketConnection(self.host, self.port, self.ioTimeoutSeconds, error);
+  if (fd < 0) {
+    return -1;
+  }
+
+  if ([self.password length] > 0) {
+    NSError *authError = nil;
+    if (!ALNRedisWriteCommand(fd, @[ @"AUTH", self.password ], &authError)) {
+      close(fd);
+      if (error != NULL) {
+        *error = authError;
+      }
+      return -1;
+    }
+    id authReply = ALNRedisReadReply(fd, &authError);
+    if (authReply == nil || ![[authReply description] isEqualToString:@"OK"]) {
+      close(fd);
+      if (error != NULL) {
+        *error = authError ?: ALNRedisClientError(2221, @"redis AUTH failed", nil);
+      }
+      return -1;
+    }
+  }
+
+  if (self.databaseIndex > 0) {
+    NSError *selectError = nil;
+    if (!ALNRedisWriteCommand(fd, @[ @"SELECT", [NSString stringWithFormat:@"%ld", (long)self.databaseIndex] ],
+                              &selectError)) {
+      close(fd);
+      if (error != NULL) {
+        *error = selectError;
+      }
+      return -1;
+    }
+    id selectReply = ALNRedisReadReply(fd, &selectError);
+    if (selectReply == nil || ![[selectReply description] isEqualToString:@"OK"]) {
+      close(fd);
+      if (error != NULL) {
+        *error = selectError ?: ALNRedisClientError(2222, @"redis SELECT failed", nil);
+      }
+      return -1;
+    }
+  }
+
+  return fd;
+}
+
+- (id)runCommand:(NSArray *)parts error:(NSError **)error {
+  int fd = [self openConnectionWithError:error];
+  if (fd < 0) {
+    return nil;
+  }
+
+  NSError *commandError = nil;
+  BOOL wrote = ALNRedisWriteCommand(fd, parts, &commandError);
+  id reply = nil;
+  if (wrote) {
+    reply = ALNRedisReadReply(fd, &commandError);
+  }
+  close(fd);
+
+  if (!wrote || commandError != nil) {
+    if (error != NULL) {
+      *error = commandError ?: ALNRedisClientError(2223, @"redis command failed", nil);
+    }
+    return nil;
+  }
+  return reply;
+}
+
+- (NSData *)serializedRecordForObject:(id)object
+                           expiresAt:(NSDate *)expiresAt
+                               error:(NSError **)error {
+  NSDictionary *record = @{
+    @"value" : object ?: [NSNull null],
+    @"expiresAt" : expiresAt != nil ? @([expiresAt timeIntervalSince1970]) : [NSNull null]
+  };
+  NSError *serializeError = nil;
+  NSData *payload = [NSPropertyListSerialization dataWithPropertyList:record
+                                                               format:NSPropertyListBinaryFormat_v1_0
+                                                              options:0
+                                                                error:&serializeError];
+  if (payload == nil) {
+    if (error != NULL) {
+      *error = ALNRedisClientError(2224, @"cache value is not property-list serializable", serializeError);
+    }
+    return nil;
+  }
+  return payload;
+}
+
+- (NSDictionary *)recordFromPayload:(NSData *)payload error:(NSError **)error {
+  if (![payload isKindOfClass:[NSData class]]) {
+    if (error != NULL) {
+      *error = ALNRedisClientError(2225, @"redis cache payload is not data", nil);
+    }
+    return nil;
+  }
+  NSError *parseError = nil;
+  NSPropertyListFormat format = NSPropertyListBinaryFormat_v1_0;
+  id parsed = [NSPropertyListSerialization propertyListWithData:payload
+                                                        options:NSPropertyListImmutable
+                                                         format:&format
+                                                          error:&parseError];
+  if (![parsed isKindOfClass:[NSDictionary class]]) {
+    if (error != NULL) {
+      *error = ALNRedisClientError(2226, @"redis cache payload is malformed", parseError);
+    }
+    return nil;
+  }
+  return parsed;
+}
+
+- (BOOL)setObject:(id)object
+           forKey:(NSString *)key
+       ttlSeconds:(NSTimeInterval)ttlSeconds
+            error:(NSError **)error {
+  NSString *normalizedKey = ALNNonEmptyString(key, @"");
+  if ([normalizedKey length] == 0) {
+    if (error != NULL) {
+      *error = ALNRedisClientError(2227, @"cache key is required", nil);
+    }
+    return NO;
+  }
+  if (object == nil || object == [NSNull null]) {
+    return [self removeObjectForKey:normalizedKey error:error];
+  }
+
+  NSDate *expiresAt = nil;
+  if (ttlSeconds > 0.0) {
+    expiresAt = [NSDate dateWithTimeIntervalSinceNow:ttlSeconds];
+  }
+
+  NSData *payload = [self serializedRecordForObject:object expiresAt:expiresAt error:error];
+  if (payload == nil) {
+    return NO;
+  }
+
+  NSString *storageKey = [self namespacedKeyForKey:normalizedKey];
+  id setReply = [self runCommand:@[ @"SET", storageKey, payload ] error:error];
+  if (setReply == nil || ![[setReply description] isEqualToString:@"OK"]) {
+    if (setReply != nil && error != NULL) {
+      *error = ALNRedisClientError(2228, @"redis SET failed", nil);
+    }
+    return NO;
+  }
+
+  (void)[self runCommand:@[ @"SADD", [self indexKey], storageKey ] error:NULL];
+  return YES;
+}
+
+- (id)objectForKey:(NSString *)key atTime:(NSDate *)timestamp error:(NSError **)error {
+  NSString *normalizedKey = ALNNonEmptyString(key, @"");
+  if ([normalizedKey length] == 0) {
+    if (error != NULL) {
+      *error = ALNRedisClientError(2229, @"cache key is required", nil);
+    }
+    return nil;
+  }
+
+  NSString *storageKey = [self namespacedKeyForKey:normalizedKey];
+  id reply = [self runCommand:@[ @"GET", storageKey ] error:error];
+  if (reply == nil) {
+    return nil;
+  }
+  if (reply == [NSNull null]) {
+    return nil;
+  }
+
+  NSData *payload = [reply isKindOfClass:[NSData class]] ? reply : nil;
+  NSDictionary *record = [self recordFromPayload:payload error:error];
+  if (record == nil) {
+    return nil;
+  }
+
+  NSDate *now = timestamp ?: [NSDate date];
+  id expiresAtValue = record[@"expiresAt"];
+  if ([expiresAtValue respondsToSelector:@selector(doubleValue)]) {
+    NSTimeInterval expiresAtInterval = [expiresAtValue doubleValue];
+    NSDate *expiresAt = [NSDate dateWithTimeIntervalSince1970:expiresAtInterval];
+    if ([expiresAt compare:now] != NSOrderedDescending) {
+      (void)[self removeObjectForKey:normalizedKey error:NULL];
+      return nil;
+    }
+  }
+
+  id value = record[@"value"];
+  return (value == [NSNull null]) ? nil : value;
+}
+
+- (BOOL)removeObjectForKey:(NSString *)key error:(NSError **)error {
+  NSString *normalizedKey = ALNNonEmptyString(key, @"");
+  if ([normalizedKey length] == 0) {
+    if (error != NULL) {
+      *error = ALNRedisClientError(2230, @"cache key is required", nil);
+    }
+    return NO;
+  }
+
+  NSString *storageKey = [self namespacedKeyForKey:normalizedKey];
+  if ([self runCommand:@[ @"DEL", storageKey ] error:error] == nil && error != NULL && *error != nil) {
+    return NO;
+  }
+  (void)[self runCommand:@[ @"SREM", [self indexKey], storageKey ] error:NULL];
+  return YES;
+}
+
+- (BOOL)clearWithError:(NSError **)error {
+  NSString *indexKey = [self indexKey];
+  id reply = [self runCommand:@[ @"SMEMBERS", indexKey ] error:error];
+  if (reply == nil && error != NULL && *error != nil) {
+    return NO;
+  }
+
+  if ([reply isKindOfClass:[NSArray class]]) {
+    for (id entry in (NSArray *)reply) {
+      NSString *storageKey = nil;
+      if ([entry isKindOfClass:[NSData class]]) {
+        storageKey = [[NSString alloc] initWithData:entry encoding:NSUTF8StringEncoding];
+      } else if ([entry isKindOfClass:[NSString class]]) {
+        storageKey = entry;
+      }
+      if ([storageKey length] == 0) {
+        continue;
+      }
+      if ([self runCommand:@[ @"DEL", storageKey ] error:error] == nil && error != NULL && *error != nil) {
+        return NO;
+      }
+    }
+  }
+
+  if ([self runCommand:@[ @"DEL", indexKey ] error:error] == nil && error != NULL && *error != nil) {
+    return NO;
+  }
   return YES;
 }
 

@@ -235,6 +235,7 @@
     XCTAssertNil(readError);
     XCTAssertTrue([redisPlugin containsString:@"ARLEN_REDIS_URL"]);
     XCTAssertTrue([redisPlugin containsString:@"setCacheAdapter"]);
+    XCTAssertTrue([redisPlugin containsString:@"ALNRedisCacheAdapter"]);
 
     readError = nil;
     NSString *queuePlugin =

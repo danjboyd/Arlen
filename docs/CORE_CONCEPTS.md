@@ -91,6 +91,7 @@ Arlen Phase 3E adds plugin-first ecosystem service adapters:
 - attachments: `ALNAttachmentAdapter`
 
 Default in-memory adapters are provided and can be replaced by plugins during app registration.
+Concrete backend cache adapter available: `ALNRedisCacheAdapter`.
 
 Controller-level service access is available through `ALNController`/`ALNContext` helpers:
 
