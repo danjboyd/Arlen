@@ -1,6 +1,6 @@
 # Arlen Phase 3 Roadmap
 
-Status: Active (Phase 3A-3D complete; Phase 3E planned)  
+Status: Complete (Phase 3A-3E complete)  
 Last updated: 2026-02-20
 
 Related docs:
@@ -160,7 +160,25 @@ Acceptance:
 
 ## 3.5 Phase 3E: Ecosystem Services (Deferred Candidate Track)
 
-Status: Planned
+Status: Complete (2026-02-20)
+
+Completion highlights:
+- Added ecosystem service contracts and in-memory baseline adapters:
+  - jobs: `ALNJobAdapter`
+  - cache: `ALNCacheAdapter`
+  - i18n: `ALNLocalizationAdapter`
+  - mail: `ALNMailAdapter`
+  - attachments: `ALNAttachmentAdapter`
+- Added compatibility suite APIs for plugin adapter verification:
+  - `ALNRunJobAdapterConformanceSuite`
+  - `ALNRunCacheAdapterConformanceSuite`
+  - `ALNRunLocalizationAdapterConformanceSuite`
+  - `ALNRunMailAdapterConformanceSuite`
+  - `ALNRunAttachmentAdapterConformanceSuite`
+  - `ALNRunServiceCompatibilitySuite`
+- Added plugin-first service override hooks on `ALNApplication` and request/controller access via `ALNContext` + `ALNController`.
+- Added Phase 3E unit/integration coverage, including boomhauer sample service routes.
+- Published service guide and usage examples in `docs/ECOSYSTEM_SERVICES.md`.
 
 Deliverables:
 - Plugin-first background jobs abstraction.

@@ -2,6 +2,7 @@
 #define ALN_CONTROLLER_H
 
 #import <Foundation/Foundation.h>
+#import "ALNServices.h"
 
 @class ALNContext;
 @class ALNPageState;
@@ -60,6 +61,16 @@ NS_ASSUME_NONNULL_BEGIN
 - (NSArray *)authScopes;
 - (NSArray *)authRoles;
 - (nullable NSString *)authSubject;
+- (nullable id<ALNJobAdapter>)jobsAdapter;
+- (nullable id<ALNCacheAdapter>)cacheAdapter;
+- (nullable id<ALNLocalizationAdapter>)localizationAdapter;
+- (nullable id<ALNMailAdapter>)mailAdapter;
+- (nullable id<ALNAttachmentAdapter>)attachmentAdapter;
+- (NSString *)localizedStringForKey:(NSString *)key
+                              locale:(nullable NSString *)locale
+                      fallbackLocale:(nullable NSString *)fallbackLocale
+                        defaultValue:(nullable NSString *)defaultValue
+                           arguments:(nullable NSDictionary *)arguments;
 - (ALNPageState *)pageStateForKey:(NSString *)pageKey;
 
 @end

@@ -70,11 +70,11 @@ Related docs:
 | Release packaging with `server`/`migrate` workflow | Phoenix | In Scope | Phase 2D-3C | Core compiled-framework deployment contract. |
 | Realtime channels/pubsub abstraction | Phoenix | In Scope | Phase 3D (complete) | Delivered with `ALNRealtimeHub` channel fanout abstraction over websocket channel mode. |
 | LiveView-like server-driven UI | Phoenix | Deferred | Post-3D exploratory track | Strategic but high-scope; not on core path yet. |
-| Background jobs abstraction | Rails | Deferred | Phase 3E candidate | Useful, but not a near-term parity blocker. |
-| File attachment abstraction | Rails | Deferred | Phase 3E candidate | Prefer adapter/plugin model first. |
-| Mail delivery abstraction | Rails | Deferred | Phase 3E candidate | Plugin-first approach before core inclusion. |
-| Built-in caching framework | Rails | Deferred | Phase 3E candidate | Add once core observability/perf gates are mature. |
-| I18n framework | Rails | Deferred | Phase 3E candidate | Platform maturity feature. |
+| Background jobs abstraction | Rails | In Scope | Phase 3E (complete) | Delivered as plugin-first `ALNJobAdapter` contract with in-memory baseline and conformance suite. |
+| File attachment abstraction | Rails | In Scope | Phase 3E (complete) | Delivered via `ALNAttachmentAdapter` with optional adapter replacement through plugins. |
+| Mail delivery abstraction | Rails | In Scope | Phase 3E (complete) | Delivered via `ALNMailAdapter` + `ALNMailMessage` contract with plugin override support. |
+| Built-in caching framework | Rails | In Scope | Phase 3E (complete) | Delivered as `ALNCacheAdapter` with TTL semantics and adapter conformance tests. |
+| I18n framework | Rails | In Scope | Phase 3E (complete) | Delivered as `ALNLocalizationAdapter` with locale fallback and interpolation baseline. |
 | Multi-node clustering primitives | Phoenix | Deferred | Post-3E | Requires stronger distributed runtime contracts. |
 | Full ORM as default framework layer | Rails | Deferred | Phase 3B optional track | Keep raw SQL first-class; ORM is additive only. |
 | Inbound email framework | Rails | Out of Scope | N/A | Niche workload for Arlen core. |

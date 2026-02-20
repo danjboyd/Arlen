@@ -36,6 +36,13 @@ static void ALNSetStructuredErrorResponse(ALNResponse *response,
 @property(nonatomic, strong) NSMutableArray *mutablePlugins;
 @property(nonatomic, strong) NSMutableArray *mutableLifecycleHooks;
 @property(nonatomic, strong) NSMutableArray *mutableMounts;
+@property(nonatomic, strong, readwrite) id<ALNJobAdapter> jobsAdapter;
+@property(nonatomic, strong, readwrite) id<ALNCacheAdapter> cacheAdapter;
+@property(nonatomic, strong, readwrite) id<ALNLocalizationAdapter> localizationAdapter;
+@property(nonatomic, strong, readwrite) id<ALNMailAdapter> mailAdapter;
+@property(nonatomic, strong, readwrite) id<ALNAttachmentAdapter> attachmentAdapter;
+@property(nonatomic, copy) NSString *i18nDefaultLocale;
+@property(nonatomic, copy) NSString *i18nFallbackLocale;
 @property(nonatomic, assign, readwrite, getter=isStarted) BOOL started;
 
 - (void)loadConfiguredPlugins;
@@ -74,6 +81,29 @@ static void ALNSetStructuredErrorResponse(ALNResponse *response,
     _mutablePlugins = [NSMutableArray array];
     _mutableLifecycleHooks = [NSMutableArray array];
     _mutableMounts = [NSMutableArray array];
+    _jobsAdapter = [[ALNInMemoryJobAdapter alloc] init];
+    _cacheAdapter = [[ALNInMemoryCacheAdapter alloc] init];
+    _localizationAdapter = [[ALNInMemoryLocalizationAdapter alloc] init];
+    _mailAdapter = [[ALNInMemoryMailAdapter alloc] init];
+    _attachmentAdapter = [[ALNInMemoryAttachmentAdapter alloc] init];
+    NSDictionary *services = [_config[@"services"] isKindOfClass:[NSDictionary class]] ? _config[@"services"] : @{};
+    NSDictionary *i18nConfig =
+        [services[@"i18n"] isKindOfClass:[NSDictionary class]] ? services[@"i18n"] : @{};
+    NSString *defaultLocale =
+        [i18nConfig[@"defaultLocale"] isKindOfClass:[NSString class]] ? i18nConfig[@"defaultLocale"] : @"en";
+    if ([defaultLocale length] == 0) {
+      defaultLocale = @"en";
+    }
+    defaultLocale = [defaultLocale lowercaseString];
+    NSString *fallbackLocale = [i18nConfig[@"fallbackLocale"] isKindOfClass:[NSString class]]
+                                   ? i18nConfig[@"fallbackLocale"]
+                                   : defaultLocale;
+    if ([fallbackLocale length] == 0) {
+      fallbackLocale = defaultLocale;
+    }
+    fallbackLocale = [fallbackLocale lowercaseString];
+    _i18nDefaultLocale = [defaultLocale copy];
+    _i18nFallbackLocale = [fallbackLocale copy];
     _started = NO;
     if ([_environment isEqualToString:@"development"]) {
       _logger.minimumLevel = ALNLogLevelDebug;
@@ -163,6 +193,56 @@ static void ALNSetStructuredErrorResponse(ALNResponse *response,
     return;
   }
   [self.mutableMiddlewares addObject:middleware];
+}
+
+- (void)setJobsAdapter:(id<ALNJobAdapter>)adapter {
+  if (adapter == nil) {
+    return;
+  }
+  _jobsAdapter = adapter;
+}
+
+- (void)setCacheAdapter:(id<ALNCacheAdapter>)adapter {
+  if (adapter == nil) {
+    return;
+  }
+  _cacheAdapter = adapter;
+}
+
+- (void)setLocalizationAdapter:(id<ALNLocalizationAdapter>)adapter {
+  if (adapter == nil) {
+    return;
+  }
+  _localizationAdapter = adapter;
+}
+
+- (void)setMailAdapter:(id<ALNMailAdapter>)adapter {
+  if (adapter == nil) {
+    return;
+  }
+  _mailAdapter = adapter;
+}
+
+- (void)setAttachmentAdapter:(id<ALNAttachmentAdapter>)adapter {
+  if (adapter == nil) {
+    return;
+  }
+  _attachmentAdapter = adapter;
+}
+
+- (NSString *)localizedStringForKey:(NSString *)key
+                             locale:(NSString *)locale
+                     fallbackLocale:(NSString *)fallbackLocale
+                       defaultValue:(NSString *)defaultValue
+                          arguments:(NSDictionary *)arguments {
+  if (self.localizationAdapter == nil) {
+    return defaultValue ?: @"";
+  }
+  return [self.localizationAdapter localizedStringForKey:key ?: @""
+                                                  locale:locale ?: @""
+                                          fallbackLocale:fallbackLocale ?: @""
+                                            defaultValue:defaultValue ?: @""
+                                               arguments:arguments ?: @{}];
 }
 
 - (NSArray *)plugins {
@@ -1604,6 +1684,26 @@ static void ALNFinalizeResponse(ALNResponse *response,
   NSMutableDictionary *stash = [NSMutableDictionary dictionary];
   stash[@"request_id"] = requestID ?: @"";
   stash[ALNContextRequestFormatStashKey] = requestFormat ?: @"";
+  if (self.jobsAdapter != nil) {
+    stash[ALNContextJobsAdapterStashKey] = self.jobsAdapter;
+  }
+  if (self.cacheAdapter != nil) {
+    stash[ALNContextCacheAdapterStashKey] = self.cacheAdapter;
+  }
+  if (self.localizationAdapter != nil) {
+    stash[ALNContextLocalizationAdapterStashKey] = self.localizationAdapter;
+  }
+  if (self.mailAdapter != nil) {
+    stash[ALNContextMailAdapterStashKey] = self.mailAdapter;
+  }
+  if (self.attachmentAdapter != nil) {
+    stash[ALNContextAttachmentAdapterStashKey] = self.attachmentAdapter;
+  }
+
+  stash[ALNContextI18nDefaultLocaleStashKey] = self.i18nDefaultLocale ?: @"en";
+  stash[ALNContextI18nFallbackLocaleStashKey] =
+      self.i18nFallbackLocale ?: self.i18nDefaultLocale ?: @"en";
+
   NSDictionary *eoc = ALNDictionaryConfigValue(self.config, @"eoc");
   NSDictionary *compatibility = ALNDictionaryConfigValue(self.config, @"compatibility");
   stash[ALNContextEOCStrictLocalsStashKey] =

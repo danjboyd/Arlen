@@ -140,6 +140,11 @@
   NSDictionary *compatibility = config[@"compatibility"];
   XCTAssertEqualObjects(@(NO), compatibility[@"pageStateEnabled"]);
 
+  NSDictionary *services = config[@"services"];
+  NSDictionary *i18n = services[@"i18n"];
+  XCTAssertEqualObjects(@"en", i18n[@"defaultLocale"]);
+  XCTAssertEqualObjects(@"en", i18n[@"fallbackLocale"]);
+
   NSDictionary *plugins = config[@"plugins"];
   XCTAssertTrue([plugins[@"classes"] isKindOfClass:[NSArray class]]);
   XCTAssertEqual((NSUInteger)0, [plugins[@"classes"] count]);
@@ -192,6 +197,8 @@
   setenv("ARLEN_OPENAPI_DOCS_UI_STYLE", "viewer", 1);
   setenv("ARLEN_OPENAPI_TITLE", "Custom API", 1);
   setenv("ARLEN_OPENAPI_VERSION", "9.9.9", 1);
+  setenv("ARLEN_I18N_DEFAULT_LOCALE", "es", 1);
+  setenv("ARLEN_I18N_FALLBACK_LOCALE", "en", 1);
   setenv("ARLEN_PAGE_STATE_COMPAT_ENABLED", "1", 1);
 
   NSError *error = nil;
@@ -237,6 +244,8 @@
   unsetenv("ARLEN_OPENAPI_DOCS_UI_STYLE");
   unsetenv("ARLEN_OPENAPI_TITLE");
   unsetenv("ARLEN_OPENAPI_VERSION");
+  unsetenv("ARLEN_I18N_DEFAULT_LOCALE");
+  unsetenv("ARLEN_I18N_FALLBACK_LOCALE");
   unsetenv("ARLEN_PAGE_STATE_COMPAT_ENABLED");
 
   XCTAssertNil(error);
@@ -300,6 +309,11 @@
 
   NSDictionary *compatibility = config[@"compatibility"];
   XCTAssertEqualObjects(@(YES), compatibility[@"pageStateEnabled"]);
+
+  NSDictionary *services = config[@"services"];
+  NSDictionary *i18n = services[@"i18n"];
+  XCTAssertEqualObjects(@"es", i18n[@"defaultLocale"]);
+  XCTAssertEqualObjects(@"en", i18n[@"fallbackLocale"]);
 }
 
 - (void)testLegacyEnvironmentPrefixFallback {

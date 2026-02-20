@@ -2,6 +2,7 @@
 #define ALN_CONTEXT_H
 
 #import <Foundation/Foundation.h>
+#import "ALNServices.h"
 
 @class ALNRequest;
 @class ALNResponse;
@@ -25,6 +26,13 @@ extern NSString *const ALNContextAuthScopesStashKey;
 extern NSString *const ALNContextAuthRolesStashKey;
 extern NSString *const ALNContextAuthSubjectStashKey;
 extern NSString *const ALNContextPageStateEnabledStashKey;
+extern NSString *const ALNContextJobsAdapterStashKey;
+extern NSString *const ALNContextCacheAdapterStashKey;
+extern NSString *const ALNContextLocalizationAdapterStashKey;
+extern NSString *const ALNContextMailAdapterStashKey;
+extern NSString *const ALNContextAttachmentAdapterStashKey;
+extern NSString *const ALNContextI18nDefaultLocaleStashKey;
+extern NSString *const ALNContextI18nFallbackLocaleStashKey;
 
 @interface ALNContext : NSObject
 
@@ -68,6 +76,16 @@ extern NSString *const ALNContextPageStateEnabledStashKey;
 - (NSArray *)authScopes;
 - (NSArray *)authRoles;
 - (nullable NSString *)authSubject;
+- (nullable id<ALNJobAdapter>)jobsAdapter;
+- (nullable id<ALNCacheAdapter>)cacheAdapter;
+- (nullable id<ALNLocalizationAdapter>)localizationAdapter;
+- (nullable id<ALNMailAdapter>)mailAdapter;
+- (nullable id<ALNAttachmentAdapter>)attachmentAdapter;
+- (NSString *)localizedStringForKey:(NSString *)key
+                              locale:(nullable NSString *)locale
+                      fallbackLocale:(nullable NSString *)fallbackLocale
+                        defaultValue:(nullable NSString *)defaultValue
+                           arguments:(nullable NSDictionary *)arguments;
 - (ALNPageState *)pageStateForKey:(NSString *)pageKey;
 
 @end

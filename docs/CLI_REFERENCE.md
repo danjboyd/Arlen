@@ -132,6 +132,12 @@ Behavior:
   - `/ws/channel/:channel`
   - `/sse/ticker`
   - mounted app sample at `/embedded/*`
+- built-in Phase 3E sample ecosystem-service routes:
+  - `/services/cache`
+  - `/services/jobs`
+  - `/services/i18n`
+  - `/services/mail`
+  - `/services/attachments`
 
 Options:
 

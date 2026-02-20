@@ -333,6 +333,38 @@ static NSString *ALNJSONStringFromObject(id value) {
   return [self.context authSubject];
 }
 
+- (id<ALNJobAdapter>)jobsAdapter {
+  return [self.context jobsAdapter];
+}
+
+- (id<ALNCacheAdapter>)cacheAdapter {
+  return [self.context cacheAdapter];
+}
+
+- (id<ALNLocalizationAdapter>)localizationAdapter {
+  return [self.context localizationAdapter];
+}
+
+- (id<ALNMailAdapter>)mailAdapter {
+  return [self.context mailAdapter];
+}
+
+- (id<ALNAttachmentAdapter>)attachmentAdapter {
+  return [self.context attachmentAdapter];
+}
+
+- (NSString *)localizedStringForKey:(NSString *)key
+                             locale:(NSString *)locale
+                     fallbackLocale:(NSString *)fallbackLocale
+                       defaultValue:(NSString *)defaultValue
+                          arguments:(NSDictionary *)arguments {
+  return [self.context localizedStringForKey:key
+                                      locale:locale
+                              fallbackLocale:fallbackLocale
+                                defaultValue:defaultValue
+                                   arguments:arguments];
+}
+
 - (ALNPageState *)pageStateForKey:(NSString *)pageKey {
   return [self.context pageStateForKey:pageKey];
 }

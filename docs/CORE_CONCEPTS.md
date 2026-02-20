@@ -80,12 +80,33 @@ If controller action returns an `NSDictionary` or `NSArray` and no explicit body
   - `mountApplication:atPrefix:`
   - mounted requests are path-rewritten and dispatched into child app context.
 
-## 8. Compatibility Helpers
+## 8. Ecosystem Services
+
+Arlen Phase 3E adds plugin-first ecosystem service adapters:
+
+- jobs: `ALNJobAdapter`
+- cache: `ALNCacheAdapter`
+- i18n: `ALNLocalizationAdapter`
+- mail: `ALNMailAdapter`
+- attachments: `ALNAttachmentAdapter`
+
+Default in-memory adapters are provided and can be replaced by plugins during app registration.
+
+Controller-level service access is available through `ALNController`/`ALNContext` helpers:
+
+- `jobsAdapter`
+- `cacheAdapter`
+- `localizationAdapter`
+- `mailAdapter`
+- `attachmentAdapter`
+- `localizedStringForKey:locale:fallbackLocale:defaultValue:arguments:`
+
+## 9. Compatibility Helpers
 
 - `compatibility.pageStateEnabled` enables session-backed page-state behavior for migration scenarios.
 - Default remains stateless/transient page-state behavior unless explicitly enabled.
 
-## 9. Configuration Model
+## 10. Configuration Model
 
 Config is loaded from:
 - `config/app.plist`
@@ -93,7 +114,7 @@ Config is loaded from:
 
 Environment variables may override key values (`ARLEN_*`).
 
-## 10. Development vs Production Naming
+## 11. Development vs Production Naming
 
 - Development server: `boomhauer`
 - Production process manager: `propane`

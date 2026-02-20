@@ -13,7 +13,7 @@ Last updated: 2026-02-20
 - Phase 3B: complete (2026-02-19)
 - Phase 3C: complete (2026-02-20)
 - Phase 3D: complete (2026-02-20)
-- Phase 3E: planned
+- Phase 3E: complete (2026-02-20)
 
 ## Completed Today (2026-02-20)
 
@@ -51,6 +51,13 @@ Last updated: 2026-02-20
   - realtime channel/pubsub abstraction via `ALNRealtimeHub`
   - boomhauer routes for websocket echo/channel, SSE ticker, and mounted app sample routes
   - unit/integration coverage for realtime and mount composition flows
+- Completed Phase 3E ecosystem services tranche:
+  - service adapter contracts (`ALNJobAdapter`, `ALNCacheAdapter`, `ALNLocalizationAdapter`, `ALNMailAdapter`, `ALNAttachmentAdapter`)
+  - in-memory baseline adapters and compatibility suites (`ALNRun*ConformanceSuite`, `ALNRunServiceCompatibilitySuite`)
+  - plugin-first service override wiring through `ALNApplication`
+  - controller/context service access helpers and i18n locale fallback config
+  - boomhauer sample service routes (`/services/cache`, `/services/jobs`, `/services/i18n`, `/services/mail`, `/services/attachments`)
+  - published guide: `docs/ECOSYSTEM_SERVICES.md`
 
 ## Verification State (2026-02-20)
 
@@ -67,10 +74,15 @@ Last updated: 2026-02-20
   - websocket channel fanout integration test
   - concurrent SSE integration test
   - mounted app composition unit/integration tests
+- New Phase 3E checks executed:
+  - plugin-driven service wiring + lifecycle verification
+  - service compatibility suite coverage for jobs/cache/i18n/mail/attachments
+  - controller-level service helper route verification
+  - boomhauer integration tests for service sample routes
 - PostgreSQL-backed tests remain gated by `ARLEN_PG_TEST_DSN`.
 
 ## Next Session Focus
 
-1. Start Phase 3E planning for plugin-first background jobs contract.
-2. Define caching abstraction contract and adapter boundary.
-3. Draft i18n/mail/attachments candidate scope and acceptance tests.
+1. Add external adapter examples (Redis cache, queue-backed jobs, SMTP mail) as plugin templates.
+2. Define optional worker runtime contract for scheduled/asynchronous job execution.
+3. Expand docs with production guidance for service persistence and retention policies.

@@ -351,6 +351,33 @@
   XCTAssertTrue([body containsString:@"hank"]);
 }
 
+- (void)testPhase3EServiceRoutesCacheAndI18n {
+  NSString *cacheBody = [self simpleRequestPath:@"/services/cache?value=ok"];
+  XCTAssertTrue([cacheBody containsString:@"\"ok\""]);
+  XCTAssertTrue([cacheBody containsString:@"\"adapter\""]);
+  XCTAssertTrue([cacheBody containsString:@"\"value\":\"ok\""] ||
+                [cacheBody containsString:@"\"value\": \"ok\""]);
+
+  NSString *i18nBody = [self simpleRequestPath:@"/services/i18n?locale=es"];
+  XCTAssertTrue([i18nBody containsString:@"\"ok\""]);
+  XCTAssertTrue([i18nBody containsString:@"Hola Arlen"]);
+}
+
+- (void)testPhase3EServiceRoutesJobsMailAndAttachment {
+  NSString *jobsBody = [self simpleRequestPath:@"/services/jobs"];
+  XCTAssertTrue([jobsBody containsString:@"\"enqueuedJobID\""]);
+  XCTAssertTrue([jobsBody containsString:@"\"dequeuedJobID\""]);
+
+  NSString *mailBody = [self simpleRequestPath:@"/services/mail"];
+  XCTAssertTrue([mailBody containsString:@"\"deliveryID\""]);
+  XCTAssertTrue([mailBody containsString:@"\"deliveries\""]);
+
+  NSString *attachmentBody = [self simpleRequestPath:@"/services/attachments?content=phase3e"];
+  XCTAssertTrue([attachmentBody containsString:@"\"attachmentID\""]);
+  XCTAssertTrue([attachmentBody containsString:@"\"content\":\"phase3e\""] ||
+                [attachmentBody containsString:@"\"content\": \"phase3e\""]);
+}
+
 - (void)testWebSocketEchoRouteRoundTrip {
   int port = [self randomPort];
   NSTask *server = [[NSTask alloc] init];

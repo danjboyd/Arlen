@@ -20,6 +20,13 @@ NSString *const ALNContextAuthScopesStashKey = @"aln.auth.scopes";
 NSString *const ALNContextAuthRolesStashKey = @"aln.auth.roles";
 NSString *const ALNContextAuthSubjectStashKey = @"aln.auth.subject";
 NSString *const ALNContextPageStateEnabledStashKey = @"aln.compat.page_state_enabled";
+NSString *const ALNContextJobsAdapterStashKey = @"aln.services.jobs";
+NSString *const ALNContextCacheAdapterStashKey = @"aln.services.cache";
+NSString *const ALNContextLocalizationAdapterStashKey = @"aln.services.i18n";
+NSString *const ALNContextMailAdapterStashKey = @"aln.services.mail";
+NSString *const ALNContextAttachmentAdapterStashKey = @"aln.services.attachment";
+NSString *const ALNContextI18nDefaultLocaleStashKey = @"aln.services.i18n.default_locale";
+NSString *const ALNContextI18nFallbackLocaleStashKey = @"aln.services.i18n.fallback_locale";
 
 @interface ALNContext ()
 
@@ -279,6 +286,78 @@ static BOOL ALNStringRepresentsInteger(NSString *value, NSInteger *parsed) {
     return subject;
   }
   return nil;
+}
+
+- (id<ALNJobAdapter>)jobsAdapter {
+  id value = self.stash[ALNContextJobsAdapterStashKey];
+  if ([value conformsToProtocol:@protocol(ALNJobAdapter)]) {
+    return value;
+  }
+  return nil;
+}
+
+- (id<ALNCacheAdapter>)cacheAdapter {
+  id value = self.stash[ALNContextCacheAdapterStashKey];
+  if ([value conformsToProtocol:@protocol(ALNCacheAdapter)]) {
+    return value;
+  }
+  return nil;
+}
+
+- (id<ALNLocalizationAdapter>)localizationAdapter {
+  id value = self.stash[ALNContextLocalizationAdapterStashKey];
+  if ([value conformsToProtocol:@protocol(ALNLocalizationAdapter)]) {
+    return value;
+  }
+  return nil;
+}
+
+- (id<ALNMailAdapter>)mailAdapter {
+  id value = self.stash[ALNContextMailAdapterStashKey];
+  if ([value conformsToProtocol:@protocol(ALNMailAdapter)]) {
+    return value;
+  }
+  return nil;
+}
+
+- (id<ALNAttachmentAdapter>)attachmentAdapter {
+  id value = self.stash[ALNContextAttachmentAdapterStashKey];
+  if ([value conformsToProtocol:@protocol(ALNAttachmentAdapter)]) {
+    return value;
+  }
+  return nil;
+}
+
+- (NSString *)localizedStringForKey:(NSString *)key
+                             locale:(NSString *)locale
+                     fallbackLocale:(NSString *)fallbackLocale
+                       defaultValue:(NSString *)defaultValue
+                          arguments:(NSDictionary *)arguments {
+  id<ALNLocalizationAdapter> adapter = [self localizationAdapter];
+  if (adapter == nil) {
+    return defaultValue ?: @"";
+  }
+
+  NSString *resolvedLocale = ([locale isKindOfClass:[NSString class]] && [locale length] > 0)
+                                 ? locale
+                                 : self.stash[ALNContextI18nDefaultLocaleStashKey];
+  NSString *resolvedFallback =
+      ([fallbackLocale isKindOfClass:[NSString class]] && [fallbackLocale length] > 0)
+          ? fallbackLocale
+          : self.stash[ALNContextI18nFallbackLocaleStashKey];
+
+  if (![resolvedLocale isKindOfClass:[NSString class]]) {
+    resolvedLocale = @"en";
+  }
+  if (![resolvedFallback isKindOfClass:[NSString class]]) {
+    resolvedFallback = resolvedLocale;
+  }
+
+  return [adapter localizedStringForKey:key ?: @""
+                                 locale:resolvedLocale ?: @"en"
+                         fallbackLocale:resolvedFallback ?: @"en"
+                           defaultValue:defaultValue ?: @""
+                              arguments:arguments ?: @{}];
 }
 
 - (ALNPageState *)pageStateForKey:(NSString *)pageKey {

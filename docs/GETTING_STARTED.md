@@ -49,6 +49,11 @@ curl -i http://127.0.0.1:3000/openapi/swagger
 curl -i http://127.0.0.1:3000/sse/ticker?count=2
 curl -i http://127.0.0.1:3000/embedded/status
 curl -i http://127.0.0.1:3000/embedded/api/status
+curl -i http://127.0.0.1:3000/services/cache?value=ok
+curl -i http://127.0.0.1:3000/services/jobs
+curl -i http://127.0.0.1:3000/services/i18n?locale=es
+curl -i http://127.0.0.1:3000/services/mail
+curl -i http://127.0.0.1:3000/services/attachments?content=hello
 ```
 
 WebSocket echo smoke test:
@@ -223,6 +228,8 @@ Framework/app runtime:
 - `ARLEN_OPENAPI_DOCS_UI_STYLE` (`interactive`, `viewer`, or `swagger`)
 - `ARLEN_OPENAPI_TITLE`
 - `ARLEN_OPENAPI_VERSION`
+- `ARLEN_I18N_DEFAULT_LOCALE`
+- `ARLEN_I18N_FALLBACK_LOCALE`
 - `ARLEN_PAGE_STATE_COMPAT_ENABLED`
 - `ARLEN_EOC_STRICT_LOCALS`
 - `ARLEN_EOC_STRICT_STRINGIFY`

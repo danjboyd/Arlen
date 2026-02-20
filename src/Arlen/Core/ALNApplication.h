@@ -2,6 +2,7 @@
 #define ALN_APPLICATION_H
 
 #import <Foundation/Foundation.h>
+#import "ALNServices.h"
 
 @class ALNRequest;
 @class ALNResponse;
@@ -54,6 +55,11 @@ NS_ASSUME_NONNULL_BEGIN
 @property(nonatomic, copy, readonly) NSArray *middlewares;
 @property(nonatomic, copy, readonly) NSArray *plugins;
 @property(nonatomic, copy, readonly) NSArray *lifecycleHooks;
+@property(nonatomic, strong, readonly) id<ALNJobAdapter> jobsAdapter;
+@property(nonatomic, strong, readonly) id<ALNCacheAdapter> cacheAdapter;
+@property(nonatomic, strong, readonly) id<ALNLocalizationAdapter> localizationAdapter;
+@property(nonatomic, strong, readonly) id<ALNMailAdapter> mailAdapter;
+@property(nonatomic, strong, readonly) id<ALNAttachmentAdapter> attachmentAdapter;
 @property(nonatomic, assign, readonly, getter=isStarted) BOOL started;
 @property(nonatomic, strong, nullable) id<ALNTraceExporter> traceExporter;
 
@@ -80,6 +86,16 @@ NS_ASSUME_NONNULL_BEGIN
 - (void)endRouteGroup;
 - (BOOL)mountApplication:(ALNApplication *)application atPrefix:(NSString *)prefix;
 - (void)addMiddleware:(id<ALNMiddleware>)middleware;
+- (void)setJobsAdapter:(id<ALNJobAdapter>)adapter;
+- (void)setCacheAdapter:(id<ALNCacheAdapter>)adapter;
+- (void)setLocalizationAdapter:(id<ALNLocalizationAdapter>)adapter;
+- (void)setMailAdapter:(id<ALNMailAdapter>)adapter;
+- (void)setAttachmentAdapter:(id<ALNAttachmentAdapter>)adapter;
+- (NSString *)localizedStringForKey:(NSString *)key
+                              locale:(nullable NSString *)locale
+                      fallbackLocale:(nullable NSString *)fallbackLocale
+                        defaultValue:(nullable NSString *)defaultValue
+                           arguments:(nullable NSDictionary *)arguments;
 - (BOOL)registerLifecycleHook:(id<ALNLifecycleHook>)hook;
 - (BOOL)registerPlugin:(id<ALNPlugin>)plugin error:(NSError *_Nullable *_Nullable)error;
 - (BOOL)registerPluginClassNamed:(NSString *)className error:(NSError *_Nullable *_Nullable)error;

@@ -136,6 +136,170 @@
 
 @end
 
+@interface ServicesController : ALNController
+@end
+
+@implementation ServicesController
+
+- (id)cacheProbe:(ALNContext *)ctx {
+  (void)ctx;
+  id<ALNCacheAdapter> cache = [self cacheAdapter];
+  if (cache == nil) {
+    return @{
+      @"ok" : @(NO),
+      @"error" : @"cache adapter unavailable",
+    };
+  }
+
+  NSString *key = [self stringParamForName:@"key"] ?: @"phase3e.cache";
+  NSString *value = [self stringParamForName:@"value"] ?: @"cache-ok";
+  NSError *error = nil;
+  BOOL stored = [cache setObject:value forKey:key ttlSeconds:30 error:&error];
+  id cached = [cache objectForKey:key atTime:[NSDate date] error:NULL];
+  return @{
+    @"ok" : @(stored && cached != nil),
+    @"adapter" : [cache adapterName] ?: @"",
+    @"key" : key ?: @"",
+    @"value" : cached ?: @"",
+    @"error" : error.localizedDescription ?: @"",
+  };
+}
+
+- (id)jobsProbe:(ALNContext *)ctx {
+  (void)ctx;
+  id<ALNJobAdapter> jobs = [self jobsAdapter];
+  if (jobs == nil) {
+    return @{
+      @"ok" : @(NO),
+      @"error" : @"jobs adapter unavailable",
+    };
+  }
+
+  NSString *name = [self stringParamForName:@"name"] ?: @"boomhauer.jobs.demo";
+  NSError *error = nil;
+  NSString *jobID = [jobs enqueueJobNamed:name
+                                  payload:@{
+                                    @"source" : @"boomhauer",
+                                  }
+                                  options:@{
+                                    @"maxAttempts" : @2,
+                                  }
+                                    error:&error];
+  ALNJobEnvelope *leased = [jobs dequeueDueJobAt:[NSDate date] error:NULL];
+  if (leased != nil) {
+    (void)[jobs acknowledgeJobID:leased.jobID error:NULL];
+  }
+
+  return @{
+    @"ok" : @([jobID length] > 0),
+    @"adapter" : [jobs adapterName] ?: @"",
+    @"enqueuedJobID" : jobID ?: @"",
+    @"dequeuedJobID" : leased.jobID ?: @"",
+    @"pending" : @([[jobs pendingJobsSnapshot] count]),
+    @"error" : error.localizedDescription ?: @"",
+  };
+}
+
+- (id)i18nProbe:(ALNContext *)ctx {
+  (void)ctx;
+  id<ALNLocalizationAdapter> localization = [self localizationAdapter];
+  if (localization == nil) {
+    return @{
+      @"ok" : @(NO),
+      @"error" : @"i18n adapter unavailable",
+    };
+  }
+
+  NSString *locale = [self stringParamForName:@"locale"] ?: @"en";
+  NSString *name = [self stringParamForName:@"name"] ?: @"Arlen";
+  NSString *message = [self localizedStringForKey:@"phase3e.greeting"
+                                           locale:locale
+                                   fallbackLocale:nil
+                                     defaultValue:@"Hello %{name}"
+                                        arguments:@{
+                                          @"name" : name ?: @"Arlen",
+                                        }];
+  return @{
+    @"ok" : @([message length] > 0),
+    @"adapter" : [localization adapterName] ?: @"",
+    @"locale" : locale ?: @"",
+    @"message" : message ?: @"",
+  };
+}
+
+- (id)mailProbe:(ALNContext *)ctx {
+  (void)ctx;
+  id<ALNMailAdapter> mail = [self mailAdapter];
+  if (mail == nil) {
+    return @{
+      @"ok" : @(NO),
+      @"error" : @"mail adapter unavailable",
+    };
+  }
+
+  ALNMailMessage *message = [[ALNMailMessage alloc] initWithFrom:@"noreply@arlen.dev"
+                                                               to:@[ @"ops@arlen.dev" ]
+                                                               cc:nil
+                                                              bcc:nil
+                                                          subject:@"Phase3E mail probe"
+                                                         textBody:@"boomhauer mail probe"
+                                                         htmlBody:nil
+                                                          headers:@{
+                                                            @"X-Arlen-Server" : @"boomhauer",
+                                                          }
+                                                         metadata:@{
+                                                           @"route" : @"services_mail",
+                                                         }];
+  NSError *error = nil;
+  NSString *deliveryID = [mail deliverMessage:message error:&error];
+  NSArray *deliveries = [mail deliveriesSnapshot];
+  return @{
+    @"ok" : @([deliveryID length] > 0),
+    @"adapter" : [mail adapterName] ?: @"",
+    @"deliveryID" : deliveryID ?: @"",
+    @"deliveries" : @([deliveries count]),
+    @"error" : error.localizedDescription ?: @"",
+  };
+}
+
+- (id)attachmentProbe:(ALNContext *)ctx {
+  (void)ctx;
+  id<ALNAttachmentAdapter> attachments = [self attachmentAdapter];
+  if (attachments == nil) {
+    return @{
+      @"ok" : @(NO),
+      @"error" : @"attachment adapter unavailable",
+    };
+  }
+
+  NSString *content = [self stringParamForName:@"content"] ?: @"attachment-ok";
+  NSData *data = [content dataUsingEncoding:NSUTF8StringEncoding] ?: [NSData data];
+  NSError *error = nil;
+  NSString *attachmentID =
+      [attachments saveAttachmentNamed:@"boomhauer-phase3e.txt"
+                           contentType:@"text/plain"
+                                  data:data
+                              metadata:@{
+                                @"route" : @"services_attachments",
+                              }
+                                 error:&error];
+  NSDictionary *metadata = nil;
+  NSData *readBack =
+      [attachments attachmentDataForID:attachmentID ?: @"" metadata:&metadata error:NULL];
+  NSString *readText = [[NSString alloc] initWithData:readBack ?: [NSData data]
+                                             encoding:NSUTF8StringEncoding] ?: @"";
+  return @{
+    @"ok" : @([attachmentID length] > 0 && [readText isEqualToString:content]),
+    @"adapter" : [attachments adapterName] ?: @"",
+    @"attachmentID" : attachmentID ?: @"",
+    @"content" : readText ?: @"",
+    @"sizeBytes" : metadata[@"sizeBytes"] ?: @(0),
+    @"error" : error.localizedDescription ?: @"",
+  };
+}
+
+@end
+
 @interface HealthController : ALNController
 @end
 
@@ -476,6 +640,17 @@ static ALNApplication *BuildApplication(NSString *environment) {
     return nil;
   }
 
+  (void)[app.localizationAdapter registerTranslations:@{
+    @"phase3e.greeting" : @"Hello %{name}",
+  }
+                                                locale:@"en"
+                                                 error:NULL];
+  (void)[app.localizationAdapter registerTranslations:@{
+    @"phase3e.greeting" : @"Hola %{name}",
+  }
+                                                locale:@"es"
+                                                 error:NULL];
+
   [app registerRouteMethod:@"GET"
                       path:@"/"
                       name:@"home"
@@ -516,6 +691,31 @@ static ALNApplication *BuildApplication(NSString *environment) {
                       name:@"sse_ticker"
            controllerClass:[RealtimeController class]
                     action:@"sseTicker"];
+  [app registerRouteMethod:@"GET"
+                      path:@"/services/cache"
+                      name:@"services_cache"
+           controllerClass:[ServicesController class]
+                    action:@"cacheProbe"];
+  [app registerRouteMethod:@"GET"
+                      path:@"/services/jobs"
+                      name:@"services_jobs"
+           controllerClass:[ServicesController class]
+                    action:@"jobsProbe"];
+  [app registerRouteMethod:@"GET"
+                      path:@"/services/i18n"
+                      name:@"services_i18n"
+           controllerClass:[ServicesController class]
+                    action:@"i18nProbe"];
+  [app registerRouteMethod:@"GET"
+                      path:@"/services/mail"
+                      name:@"services_mail"
+           controllerClass:[ServicesController class]
+                    action:@"mailProbe"];
+  [app registerRouteMethod:@"GET"
+                      path:@"/services/attachments"
+                      name:@"services_attachments"
+           controllerClass:[ServicesController class]
+                    action:@"attachmentProbe"];
   [app registerRouteMethod:@"GET"
                       path:@"/healthz"
                       name:@"healthz"

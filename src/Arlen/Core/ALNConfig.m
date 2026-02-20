@@ -223,6 +223,10 @@ static NSString *ALNEnvValueCompat(const char *primary, const char *legacy) {
       ALNEnvValueCompat("ARLEN_OPENAPI_VERSION", "MOJOOBJC_OPENAPI_VERSION");
   NSString *openapiDocsUIStyle =
       ALNEnvValueCompat("ARLEN_OPENAPI_DOCS_UI_STYLE", "MOJOOBJC_OPENAPI_DOCS_UI_STYLE");
+  NSString *i18nDefaultLocale =
+      ALNEnvValueCompat("ARLEN_I18N_DEFAULT_LOCALE", "MOJOOBJC_I18N_DEFAULT_LOCALE");
+  NSString *i18nFallbackLocale =
+      ALNEnvValueCompat("ARLEN_I18N_FALLBACK_LOCALE", "MOJOOBJC_I18N_FALLBACK_LOCALE");
   NSString *compatibilityPageStateEnabled =
       ALNEnvValueCompat("ARLEN_PAGE_STATE_COMPAT_ENABLED", "MOJOOBJC_PAGE_STATE_COMPAT_ENABLED");
   NSString *eocStrictLocals =
@@ -390,6 +394,19 @@ static NSString *ALNEnvValueCompat(const char *primary, const char *legacy) {
     openapi[@"docsUIStyle"] = [openapiDocsUIStyle lowercaseString];
   }
   config[@"openapi"] = openapi;
+
+  NSMutableDictionary *services =
+      [NSMutableDictionary dictionaryWithDictionary:config[@"services"] ?: @{}];
+  NSMutableDictionary *i18n =
+      [NSMutableDictionary dictionaryWithDictionary:services[@"i18n"] ?: @{}];
+  if ([i18nDefaultLocale length] > 0) {
+    i18n[@"defaultLocale"] = [i18nDefaultLocale lowercaseString];
+  }
+  if ([i18nFallbackLocale length] > 0) {
+    i18n[@"fallbackLocale"] = [i18nFallbackLocale lowercaseString];
+  }
+  services[@"i18n"] = i18n;
+  config[@"services"] = services;
 
   NSMutableDictionary *compatibility =
       [NSMutableDictionary dictionaryWithDictionary:config[@"compatibility"] ?: @{}];
@@ -588,6 +605,21 @@ static NSString *ALNEnvValueCompat(const char *primary, const char *legacy) {
   }
   config[@"openapi"] = finalOpenAPI;
 
+  NSMutableDictionary *finalServices =
+      [NSMutableDictionary dictionaryWithDictionary:config[@"services"] ?: @{}];
+  NSMutableDictionary *finalI18n =
+      [NSMutableDictionary dictionaryWithDictionary:finalServices[@"i18n"] ?: @{}];
+  if (![finalI18n[@"defaultLocale"] isKindOfClass:[NSString class]] ||
+      [finalI18n[@"defaultLocale"] length] == 0) {
+    finalI18n[@"defaultLocale"] = @"en";
+  }
+  if (![finalI18n[@"fallbackLocale"] isKindOfClass:[NSString class]] ||
+      [finalI18n[@"fallbackLocale"] length] == 0) {
+    finalI18n[@"fallbackLocale"] = finalI18n[@"defaultLocale"];
+  }
+  finalServices[@"i18n"] = finalI18n;
+  config[@"services"] = finalServices;
+
   NSMutableDictionary *finalPlugins =
       [NSMutableDictionary dictionaryWithDictionary:config[@"plugins"] ?: @{}];
   if (![finalPlugins[@"classes"] isKindOfClass:[NSArray class]]) {
@@ -695,6 +727,25 @@ static NSString *ALNEnvValueCompat(const char *primary, const char *legacy) {
   }
   finalOpenAPI[@"docsUIStyle"] = docsStyle;
   config[@"openapi"] = finalOpenAPI;
+
+  NSMutableDictionary *normalizedI18n =
+      [NSMutableDictionary dictionaryWithDictionary:finalServices[@"i18n"] ?: @{}];
+  NSString *defaultLocale = [normalizedI18n[@"defaultLocale"] isKindOfClass:[NSString class]]
+                                ? [normalizedI18n[@"defaultLocale"] lowercaseString]
+                                : @"en";
+  if ([defaultLocale length] == 0) {
+    defaultLocale = @"en";
+  }
+  NSString *fallbackLocale = [normalizedI18n[@"fallbackLocale"] isKindOfClass:[NSString class]]
+                                 ? [normalizedI18n[@"fallbackLocale"] lowercaseString]
+                                 : defaultLocale;
+  if ([fallbackLocale length] == 0) {
+    fallbackLocale = defaultLocale;
+  }
+  normalizedI18n[@"defaultLocale"] = defaultLocale;
+  normalizedI18n[@"fallbackLocale"] = fallbackLocale;
+  finalServices[@"i18n"] = normalizedI18n;
+  config[@"services"] = finalServices;
 
   if (![finalPlugins[@"classes"] isKindOfClass:[NSArray class]]) {
     finalPlugins[@"classes"] = @[];

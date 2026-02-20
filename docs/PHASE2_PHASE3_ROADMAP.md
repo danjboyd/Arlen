@@ -1,6 +1,6 @@
 # Arlen Phase 2 + Phase 3 Roadmap Index
 
-Status: Active (Phase 2A-2D complete; Phase 3A-3D complete; Phase 3E next)  
+Status: Active (Phase 2A-2D complete; Phase 3A-3E complete)  
 Last updated: 2026-02-20
 
 This index points to the current roadmap documents:
@@ -32,7 +32,7 @@ Phase 3 is focused on platform maturity:
 - release/distribution and documentation maturity (Phase 3C complete baseline)
 - advanced performance trend analysis and expanded workload profiles (Phase 3C complete baseline)
 - deferred parity capabilities baseline (websocket/SSE/realtime/mounting, Phase 3D complete)
-- deferred ecosystem services track
+- deferred ecosystem services track (Phase 3E complete baseline)
 
 ## Data Layer Direction
 
