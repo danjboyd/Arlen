@@ -11,6 +11,8 @@ EOC_TOOL := $(BUILD_DIR)/eocc
 SMOKE_RENDER_TOOL := $(BUILD_DIR)/eoc-smoke-render
 BOOMHAUER_TOOL := $(BUILD_DIR)/boomhauer
 TECH_DEMO_SERVER_TOOL := $(BUILD_DIR)/tech-demo-server
+API_REFERENCE_SERVER_TOOL := $(BUILD_DIR)/api-reference-server
+MIGRATION_SAMPLE_SERVER_TOOL := $(BUILD_DIR)/migration-sample-server
 ARLEN_TOOL := $(BUILD_DIR)/arlen
 
 TEMPLATE_ROOT := $(ROOT_DIR)/templates
@@ -34,7 +36,7 @@ INTEGRATION_TEST_SRCS := $(shell find tests/integration -type f -name '*.m' | so
 INCLUDE_FLAGS := -Isrc/Arlen -Isrc/Arlen/Core -Isrc/Arlen/Data -Isrc/Arlen/HTTP -Isrc/Arlen/MVC/Controller -Isrc/Arlen/MVC/Middleware -Isrc/Arlen/MVC/Routing -Isrc/Arlen/MVC/Template -Isrc/Arlen/MVC/View -Isrc/Arlen/Support -Isrc/MojoObjc -Isrc/MojoObjc/Core -Isrc/MojoObjc/Data -Isrc/MojoObjc/HTTP -Isrc/MojoObjc/MVC/Controller -Isrc/MojoObjc/MVC/Middleware -Isrc/MojoObjc/MVC/Routing -Isrc/MojoObjc/MVC/Template -Isrc/MojoObjc/MVC/View -Isrc/MojoObjc/Support -I/usr/include/postgresql
 OBJC_FLAGS := $$(gnustep-config --objc-flags) -fobjc-arc
 
-.PHONY: all eocc transpile tech-demo-transpile generated-compile arlen boomhauer tech-demo-server dev-server tech-demo smoke-render smoke routes build-tests test test-unit test-integration perf perf-fast check docs-html clean
+.PHONY: all eocc transpile tech-demo-transpile generated-compile arlen boomhauer tech-demo-server api-reference-server migration-sample-server dev-server tech-demo smoke-render smoke routes build-tests test test-unit test-integration perf perf-fast deploy-smoke ci-quality check docs-html clean
 
 all: eocc transpile generated-compile arlen boomhauer
 
@@ -88,6 +90,16 @@ $(TECH_DEMO_SERVER_TOOL): examples/tech_demo/src/tech_demo_server.m tech-demo-tr
 
 tech-demo-server: $(TECH_DEMO_SERVER_TOOL)
 
+$(API_REFERENCE_SERVER_TOOL): examples/api_reference/src/api_reference_server.m
+>source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) examples/api_reference/src/api_reference_server.m $(FRAMEWORK_SRCS) -o $(API_REFERENCE_SERVER_TOOL) $$(gnustep-config --base-libs) -ldl -lcrypto
+
+api-reference-server: $(API_REFERENCE_SERVER_TOOL)
+
+$(MIGRATION_SAMPLE_SERVER_TOOL): examples/gsweb_migration/src/migration_sample_server.m
+>source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) examples/gsweb_migration/src/migration_sample_server.m $(FRAMEWORK_SRCS) -o $(MIGRATION_SAMPLE_SERVER_TOOL) $$(gnustep-config --base-libs) -ldl -lcrypto
+
+migration-sample-server: $(MIGRATION_SAMPLE_SERVER_TOOL)
+
 tech-demo: tech-demo-server
 >TECH_DEMO_PORT="$${TECH_DEMO_PORT:-3110}" ./bin/tech-demo
 
@@ -107,7 +119,7 @@ $(UNIT_TEST_BIN): $(UNIT_TEST_SRCS) $(FRAMEWORK_SRCS) transpile
 >clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) $(UNIT_TEST_SRCS) $(FRAMEWORK_SRCS) $$generated_files -shared -fPIC -o $(UNIT_TEST_BIN) $$(gnustep-config --base-libs) -ldl -lcrypto -lXCTest
 >cp tests/Info-gnustep-unit.plist $(UNIT_TEST_BUNDLE)/Resources/Info-gnustep.plist
 
-$(INTEGRATION_TEST_BIN): $(INTEGRATION_TEST_SRCS) boomhauer tech-demo-server
+$(INTEGRATION_TEST_BIN): $(INTEGRATION_TEST_SRCS) boomhauer tech-demo-server api-reference-server migration-sample-server
 >mkdir -p $(INTEGRATION_TEST_BUNDLE)/Resources
 >source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) $(INTEGRATION_TEST_SRCS) -shared -fPIC -o $(INTEGRATION_TEST_BIN) $$(gnustep-config --base-libs) -ldl -lcrypto -lXCTest
 >cp tests/Info-gnustep-integration.plist $(INTEGRATION_TEST_BUNDLE)/Resources/Info-gnustep.plist
@@ -132,6 +144,12 @@ perf: boomhauer
 
 perf-fast: boomhauer
 >ARLEN_PERF_FAST=1 bash ./tests/performance/run_perf.sh
+
+deploy-smoke:
+>bash ./tools/deploy/smoke_release.sh --app-root examples/tech_demo --framework-root $(ROOT_DIR)
+
+ci-quality:
+>bash ./tools/ci/run_phase3c_quality.sh
 
 check: test-unit test-integration perf
 

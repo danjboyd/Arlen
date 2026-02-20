@@ -45,6 +45,7 @@ curl -i http://127.0.0.1:3000/metrics
 curl -i http://127.0.0.1:3000/openapi.json
 curl -i http://127.0.0.1:3000/openapi
 curl -i http://127.0.0.1:3000/openapi/viewer
+curl -i http://127.0.0.1:3000/openapi/swagger
 ```
 
 ## 4. Run Tests and Quality Gates
@@ -60,9 +61,19 @@ make test
 make test-unit
 make test-integration
 make check
+make ci-quality
 ```
 
 `make check` runs unit + integration + perf gates.
+
+Phase 3C perf profiles:
+
+```bash
+ARLEN_PERF_PROFILE=middleware_heavy make perf
+ARLEN_PERF_PROFILE=template_heavy make perf
+ARLEN_PERF_PROFILE=api_reference make perf
+ARLEN_PERF_PROFILE=migration_sample make perf
+```
 
 ## 5. Run Tech Demo
 
@@ -72,7 +83,19 @@ make check
 
 Open `http://127.0.0.1:3110/tech-demo`.
 
-## 6. Build Browser-Friendly Documentation
+## 6. Run API Reference and Migration Samples
+
+```bash
+make api-reference-server
+ARLEN_APP_ROOT=examples/api_reference ./build/api-reference-server --port 3125
+```
+
+```bash
+make migration-sample-server
+ARLEN_APP_ROOT=examples/gsweb_migration ./build/migration-sample-server --port 3126
+```
+
+## 7. Build Browser-Friendly Documentation
 
 ```bash
 make docs-html
@@ -80,7 +103,7 @@ make docs-html
 
 Open `build/docs/index.html`.
 
-## 7. Create Your First App (Recommended CLI Path)
+## 8. Create Your First App (Recommended CLI Path)
 
 Scaffold a full app:
 
@@ -116,7 +139,7 @@ Lite scaffold remains available:
 
 For a full walkthrough, see `docs/FIRST_APP_GUIDE.md`.
 
-## 8. Generate Endpoints Quickly
+## 9. Generate Endpoints Quickly
 
 From app root:
 
@@ -135,7 +158,7 @@ Run full app quality gate from app root:
 /path/to/Arlen/bin/arlen check
 ```
 
-## 9. Common Environment Variables
+## 10. Common Environment Variables
 
 Framework/app runtime:
 
@@ -165,7 +188,7 @@ Framework/app runtime:
 - `ARLEN_AUTH_AUDIENCE`
 - `ARLEN_OPENAPI_ENABLED`
 - `ARLEN_OPENAPI_DOCS_UI_ENABLED`
-- `ARLEN_OPENAPI_DOCS_UI_STYLE` (`interactive` or `viewer`)
+- `ARLEN_OPENAPI_DOCS_UI_STYLE` (`interactive`, `viewer`, or `swagger`)
 - `ARLEN_OPENAPI_TITLE`
 - `ARLEN_OPENAPI_VERSION`
 - `ARLEN_PAGE_STATE_COMPAT_ENABLED`
@@ -174,7 +197,7 @@ Framework/app runtime:
 
 Legacy compatibility fallback (`MOJOOBJC_*`) is supported but transitional.
 
-## 10. Migrations (PostgreSQL)
+## 11. Migrations (PostgreSQL)
 
 From app root with `db/migrations`:
 
@@ -186,4 +209,10 @@ Dry-run pending migrations:
 
 ```bash
 /path/to/Arlen/bin/arlen migrate --dry-run
+```
+
+## 12. Deploy Smoke Validation
+
+```bash
+make deploy-smoke
 ```

@@ -73,7 +73,14 @@ while IFS= read -r file; do
   md_files+=("${file#"$repo_root/"}")
 done < <(find "$repo_root/docs" -maxdepth 1 -type f -name '*.md' | sort)
 
-md_files+=(README.md V1_SPEC.md examples/tech_demo/README.md examples/basic_app/README.md)
+md_files+=(
+  README.md
+  V1_SPEC.md
+  examples/tech_demo/README.md
+  examples/basic_app/README.md
+  examples/api_reference/README.md
+  examples/gsweb_migration/README.md
+)
 
 for rel in "${md_files[@]}"; do
   src="$repo_root/$rel"

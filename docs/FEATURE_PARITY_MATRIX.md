@@ -62,7 +62,7 @@ Related docs:
 | Contract-driven validation helpers | FastAPI | In Scope | Phase 2C | Unified coercion + predictable 4xx error contracts. |
 | Schema-first API contracts | FastAPI | In Scope | Phase 3A | Objective-C request/response contracts with deterministic validation and OpenAPI emission. |
 | OpenAPI generation and API docs integration | FastAPI | In Scope | Phase 3A | Improves API discoverability and tooling fit. |
-| Built-in interactive API docs UI | FastAPI | In Scope | Phase 3B-3C | 3B delivered baseline interactive/viewer UX; 3C adds self-hosted Swagger UI polish option. |
+| Built-in interactive API docs UI | FastAPI | In Scope | Phase 3B-3C | 3B delivered interactive/viewer UX; 3C completed self-hosted Swagger-style option (`/openapi/swagger`). |
 | SDK/export workflow from OpenAPI artifacts | FastAPI ecosystem | In Scope | Phase 3A-3C | Start with artifact export hooks; expand official SDK guidance incrementally. |
 | OAuth2 scope/JWT auth ergonomics | FastAPI | In Scope | Phase 3A | First-party auth/scope helper baseline for API teams. |
 | Service dependency/lifecycle ergonomics | FastAPI, Phoenix | In Scope | Phase 3A | Explicit startup/shutdown and dependency wiring. |
@@ -85,7 +85,7 @@ Related docs:
 
 | Capability | Bucket | Target Phase | Notes |
 | --- | --- | --- | --- |
-| GSWeb-to-Arlen migration guide + sample migrated app | In Scope | Phase 3C | Critical for confidence with influential GNUstep/WebObjects adopters. |
+| GSWeb-to-Arlen migration guide + sample migrated app | In Scope | Phase 3C | Completed with `docs/MIGRATION_GSWEB.md` and `examples/gsweb_migration`. |
 | Optional WebObjects/GSWeb naming and routing compatibility helpers | In Scope | Phase 3C | Compatibility package only; Arlen-native APIs remain primary. |
 | Optional component-layer bridge for reusable view composition | In Scope | Phase 3B-3C | Additive module; no default runtime behavior change. |
 | Optional DisplayGroup-style data-controller helper | In Scope | Phase 3B | Delivered in 3B (`ALNDisplayGroup`) for sorting/filtering/batching over adapters. |

@@ -302,6 +302,44 @@
   }
 }
 
+- (void)testOpenAPISwaggerDocsStyleAndDedicatedRoute {
+  int port = [self randomPort];
+  NSTask *server = [[NSTask alloc] init];
+  server.launchPath = @"/bin/bash";
+  server.arguments = @[
+    @"-lc",
+    [NSString stringWithFormat:@"ARLEN_OPENAPI_DOCS_UI_STYLE=swagger ./build/boomhauer --port %d", port]
+  ];
+  server.standardOutput = [NSPipe pipe];
+  server.standardError = [NSPipe pipe];
+  [server launch];
+
+  @try {
+    BOOL docsOK = NO;
+    NSString *docsBody = [self requestPathWithRetries:@"/openapi"
+                                                 port:port
+                                             attempts:60
+                                              success:&docsOK];
+    XCTAssertTrue(docsOK);
+    XCTAssertTrue([docsBody containsString:@"Arlen Swagger UI"]);
+    XCTAssertTrue([docsBody containsString:@"Try It Out"]);
+    XCTAssertTrue([docsBody containsString:@"fetch('/openapi.json')"]);
+
+    BOOL swaggerOK = NO;
+    NSString *swaggerBody = [self requestPathWithRetries:@"/openapi/swagger"
+                                                    port:port
+                                                attempts:60
+                                                 success:&swaggerOK];
+    XCTAssertTrue(swaggerOK);
+    XCTAssertTrue([swaggerBody containsString:@"Arlen Swagger UI"]);
+  } @finally {
+    if ([server isRunning]) {
+      (void)kill(server.processIdentifier, SIGTERM);
+      [server waitUntilExit];
+    }
+  }
+}
+
 - (void)testPathParamEndpoint {
   NSString *body = [self simpleRequestPath:@"/api/echo/hank"];
   XCTAssertTrue([body containsString:@"\"name\""]);
@@ -396,6 +434,51 @@
   XCTAssertTrue([body containsString:@"\"framework\""]);
   XCTAssertTrue([body containsString:@"Arlen"]);
   XCTAssertTrue([body containsString:@"\"query\""]);
+}
+
+- (void)testAPIReferenceAppStatusAndSwaggerDocs {
+  NSString *statusBody = [self requestPath:@"/api/reference/status"
+                              serverBinary:@"./build/api-reference-server"
+                                 envPrefix:@"ARLEN_APP_ROOT=examples/api_reference"];
+  XCTAssertTrue([statusBody containsString:@"\"ok\""]);
+  XCTAssertTrue([statusBody containsString:@"api_reference_server"]);
+
+  NSString *docsBody = [self requestPath:@"/openapi"
+                            serverBinary:@"./build/api-reference-server"
+                               envPrefix:@"ARLEN_APP_ROOT=examples/api_reference"];
+  XCTAssertTrue([docsBody containsString:@"Arlen Swagger UI"]);
+
+  NSString *specBody = [self requestPath:@"/openapi.json"
+                            serverBinary:@"./build/api-reference-server"
+                               envPrefix:@"ARLEN_APP_ROOT=examples/api_reference"];
+  XCTAssertTrue([specBody containsString:@"\"/api/reference/users/{id}\""]);
+}
+
+- (void)testAPIReferenceAppAuthEnforcesBearerScopeRoute {
+  int curlCode = 0;
+  int serverCode = 0;
+  NSString *status =
+      [self requestWithServerEnv:@"ARLEN_APP_ROOT=examples/api_reference"
+                     serverBinary:@"./build/api-reference-server"
+                        curlBody:@"curl -sS -o /dev/null -w '%%{http_code}' "
+                                 "http://127.0.0.1:%d/api/reference/users/7"
+                        curlCode:&curlCode
+                       serverCode:&serverCode];
+  XCTAssertEqual(0, curlCode);
+  XCTAssertEqual(0, serverCode);
+  XCTAssertEqualObjects(@"401",
+                        [status stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]]);
+}
+
+- (void)testGSWebMigrationSampleSideBySideRouteParity {
+  NSString *legacyBody = [self requestPath:@"/legacy/users/42"
+                              serverBinary:@"./build/migration-sample-server"
+                                 envPrefix:@"ARLEN_APP_ROOT=examples/gsweb_migration"];
+  NSString *arlenBody = [self requestPath:@"/arlen/users/42"
+                             serverBinary:@"./build/migration-sample-server"
+                                envPrefix:@"ARLEN_APP_ROOT=examples/gsweb_migration"];
+  XCTAssertEqualObjects(legacyBody, arlenBody);
+  XCTAssertEqualObjects(@"user:42\n", legacyBody);
 }
 
 - (void)testPropaneServesRequestsAndHandlesReloadSignal {

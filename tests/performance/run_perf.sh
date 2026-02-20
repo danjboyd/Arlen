@@ -5,11 +5,44 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$repo_root"
 
 mkdir -p build/perf
-baseline_file="${ARLEN_PERF_BASELINE:-tests/performance/baselines/default.json}"
-policy_file="${ARLEN_PERF_POLICY:-tests/performance/policy.json}"
 report_file="build/perf/latest.json"
 summary_csv="build/perf/latest.csv"
 runs_csv="build/perf/latest_runs.csv"
+trend_json="build/perf/latest_trend.json"
+trend_md="build/perf/latest_trend.md"
+
+profile="${ARLEN_PERF_PROFILE:-default}"
+profile_file="${ARLEN_PERF_PROFILE_FILE:-tests/performance/profiles/${profile}.sh}"
+if [[ ! -f "$profile_file" ]]; then
+  echo "perf: profile file not found: $profile_file"
+  exit 2
+fi
+
+PROFILE_NAME="$profile"
+MAKE_TARGETS=(boomhauer)
+SERVER_BINARY="./build/boomhauer"
+SERVER_ARGS=(--port "{port}")
+SERVER_ENV=()
+READINESS_PATH="/healthz"
+SCENARIOS=(
+  "healthz:/healthz"
+  "api_status:/api/status"
+  "root:/"
+)
+
+# shellcheck disable=SC1090
+source "$profile_file"
+if [[ ${#SCENARIOS[@]} -eq 0 ]]; then
+  echo "perf: profile contains no scenarios: $profile_file"
+  exit 2
+fi
+
+baseline_file="${ARLEN_PERF_BASELINE:-tests/performance/baselines/${PROFILE_NAME}.json}"
+policy_file="${ARLEN_PERF_POLICY:-tests/performance/policies/${PROFILE_NAME}.json}"
+if [[ ! -f "$policy_file" && -f "tests/performance/policy.json" ]]; then
+  policy_file="tests/performance/policy.json"
+fi
+history_dir="${ARLEN_PERF_HISTORY_DIR:-build/perf/history/${PROFILE_NAME}}"
 
 if [[ "${ARLEN_PERF_FAST:-0}" == "1" ]]; then
   repeats="${ARLEN_PERF_REPEATS:-1}"
@@ -21,10 +54,23 @@ else
   skip_gate="${ARLEN_PERF_SKIP_GATE:-0}"
 fi
 
-make boomhauer >/dev/null
+make "${MAKE_TARGETS[@]}" >/dev/null
 
 port="${ARLEN_PERF_PORT:-3301}"
-./build/boomhauer --port "$port" >/tmp/arlen_perf_server.log 2>&1 &
+resolved_args=()
+for arg in "${SERVER_ARGS[@]}"; do
+  resolved_args+=("${arg//\{port\}/$port}")
+done
+
+launch_cmd=(env)
+for env_pair in "${SERVER_ENV[@]}"; do
+  launch_cmd+=("$env_pair")
+done
+launch_cmd+=("$SERVER_BINARY")
+launch_cmd+=("${resolved_args[@]}")
+
+server_log="build/perf/server_${PROFILE_NAME}.log"
+"${launch_cmd[@]}" >"$server_log" 2>&1 &
 server_pid=$!
 
 cleanup() {
@@ -36,14 +82,16 @@ cleanup() {
 trap cleanup EXIT
 
 for _ in $(seq 1 60); do
-  if curl -fsS "http://127.0.0.1:${port}/healthz" >/dev/null 2>&1; then
+  if curl -fsS "http://127.0.0.1:${port}${READINESS_PATH}" >/dev/null 2>&1; then
     break
   fi
   sleep 0.05
 done
 
-if ! curl -fsS "http://127.0.0.1:${port}/healthz" >/dev/null 2>&1; then
+if ! curl -fsS "http://127.0.0.1:${port}${READINESS_PATH}" >/dev/null 2>&1; then
   echo "perf: server failed to start"
+  echo "perf: startup log follows"
+  cat "$server_log"
   exit 1
 fi
 
@@ -65,10 +113,11 @@ percentile() {
 }
 
 run_benchmark_once() {
-  local scenario="$1"
-  local path="$2"
-  local requests_local="$3"
-  local run_id="$4"
+  local profile_local="$1"
+  local scenario="$2"
+  local path="$3"
+  local requests_local="$4"
+  local run_id="$5"
   local lat_raw
   local lat_sorted
   lat_raw="$(mktemp)"
@@ -90,30 +139,49 @@ run_benchmark_once() {
   duration_s="$(awk -v s="$start_ns" -v e="$end_ns" 'BEGIN {printf "%.6f", ((e-s)/1000000000.0)}')"
   reqps="$(awk -v n="$requests_local" -v d="$duration_s" 'BEGIN {if (d<=0) print "0"; else printf "%.2f", (n/d)}')"
 
-  echo "${scenario},${run_id},${requests_local},${p50},${p95},${p99},${max},${reqps},${duration_s}" >>"$runs_csv"
+  echo "${profile_local},${scenario},${run_id},${requests_local},${p50},${p95},${p99},${max},${reqps},${duration_s}" >>"$runs_csv"
   rm -f "$lat_raw" "$lat_sorted"
 }
 
-echo "scenario,run,requests,p50_ms,p95_ms,p99_ms,max_ms,req_per_sec,duration_s" >"$runs_csv"
+echo "profile,scenario,run,requests,p50_ms,p95_ms,p99_ms,max_ms,req_per_sec,duration_s" >"$runs_csv"
 
 for run_id in $(seq 1 "$repeats"); do
-  run_benchmark_once "healthz" "/healthz" "$requests" "$run_id"
-  run_benchmark_once "api_status" "/api/status" "$requests" "$run_id"
-  run_benchmark_once "root" "/" "$requests" "$run_id"
+  for scenario_entry in "${SCENARIOS[@]}"; do
+    scenario_name="${scenario_entry%%:*}"
+    scenario_path="${scenario_entry#*:}"
+    run_benchmark_once "$PROFILE_NAME" "$scenario_name" "$scenario_path" "$requests" "$run_id"
+  done
 done
 
 mem_after_kb="$(ps -o rss= -p "$server_pid" | awk '{print $1+0}')"
 
+set +e
 python3 tests/performance/check_perf.py \
   --runs-csv "$runs_csv" \
   --report "$report_file" \
   --summary-csv "$summary_csv" \
   --baseline "$baseline_file" \
   --policy "$policy_file" \
+  --profile "$PROFILE_NAME" \
   --host "127.0.0.1" \
   --port "$port" \
   --mem-before-kb "$mem_before_kb" \
   --mem-after-kb "$mem_after_kb" \
   $([[ "$skip_gate" == "1" ]] && echo "--skip-gate")
+gate_status=$?
+set -e
 
-echo "perf: complete report=$report_file summary=$summary_csv runs=$runs_csv"
+timestamp_utc="$(date -u +%Y%m%dT%H%M%SZ)"
+mkdir -p "$history_dir"
+archived_report="${history_dir}/${timestamp_utc}.json"
+cp "$report_file" "$archived_report"
+
+python3 tests/performance/trend_report.py \
+  --history-dir "$history_dir" \
+  --output-json "$trend_json" \
+  --output-md "$trend_md" \
+  --profile "$PROFILE_NAME"
+
+echo "perf: complete profile=$PROFILE_NAME report=$report_file summary=$summary_csv runs=$runs_csv"
+echo "perf: archived report=$archived_report trend_json=$trend_json trend_md=$trend_md"
+exit "$gate_status"

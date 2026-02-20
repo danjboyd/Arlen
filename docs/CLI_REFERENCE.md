@@ -85,6 +85,10 @@ Run framework tests.
 
 Run performance suite and regression gate (`make perf`).
 
+Profile selection is environment-driven:
+
+- `ARLEN_PERF_PROFILE=default|middleware_heavy|template_heavy|api_reference|migration_sample`
+
 ### `arlen check`
 
 Run full quality gate (`make check`):
@@ -122,6 +126,7 @@ Behavior:
   - `/openapi.json`
   - `/openapi` (interactive explorer by default)
   - `/openapi/viewer` (lightweight fallback viewer)
+  - `/openapi/swagger` (self-hosted swagger-style docs UI)
 
 Options:
 
@@ -168,6 +173,8 @@ Signals:
 - `bin/test`: run test suite (`make test`)
 - `bin/tech-demo`: run technology demo app
 - `bin/dev`: alias for `bin/boomhauer`
+- `make ci-quality`: run unit + integration + multi-profile perf quality gate
+- `make deploy-smoke`: validate deployment runbook with automated release smoke
 - `make docs-html`: generate browser-friendly docs under `build/docs`
 
 ## PostgreSQL Test Gate

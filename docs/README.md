@@ -19,6 +19,9 @@ Open `build/docs/index.html` in your browser.
 - [Core Concepts](CORE_CONCEPTS.md): runtime architecture and request lifecycle.
 - [Deployment Guide](DEPLOYMENT.md): deployment model and production guidance.
 - [Propane Manager](PROPANE.md): production process manager and propane accessories.
+- [Release Process](RELEASE_PROCESS.md): semantic versioning, deprecations, and release checklist.
+- [Performance Profiles](PERFORMANCE_PROFILES.md): profile pack, trend reports, and baseline governance.
+- [GSWeb Migration Guide](MIGRATION_GSWEB.md): side-by-side migration strategy and sample parity routes.
 
 ## Documentation Process
 
@@ -40,3 +43,5 @@ Open `build/docs/index.html` in your browser.
 
 - [Tech Demo](../examples/tech_demo/README.md)
 - [Basic App Smoke Guide](../examples/basic_app/README.md)
+- [API-First Reference App](../examples/api_reference/README.md)
+- [GSWeb Migration Sample](../examples/gsweb_migration/README.md)

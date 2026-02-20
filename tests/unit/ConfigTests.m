@@ -400,6 +400,33 @@
   XCTAssertEqualObjects(@(YES), eoc[@"strictStringify"]);
 }
 
+- (void)testOpenAPIDocsStyleSupportsSwaggerAndRejectsUnknownValues {
+  NSString *root = [self prepareConfigTree];
+  XCTAssertNotNil(root);
+
+  setenv("ARLEN_OPENAPI_DOCS_UI_STYLE", "swagger", 1);
+  NSError *error = nil;
+  NSDictionary *config = [ALNConfig loadConfigAtRoot:root
+                                         environment:@"development"
+                                               error:&error];
+  unsetenv("ARLEN_OPENAPI_DOCS_UI_STYLE");
+
+  XCTAssertNil(error);
+  NSDictionary *openapi = config[@"openapi"];
+  XCTAssertEqualObjects(@"swagger", openapi[@"docsUIStyle"]);
+
+  setenv("ARLEN_OPENAPI_DOCS_UI_STYLE", "invalid-style", 1);
+  error = nil;
+  config = [ALNConfig loadConfigAtRoot:root
+                           environment:@"development"
+                                 error:&error];
+  unsetenv("ARLEN_OPENAPI_DOCS_UI_STYLE");
+
+  XCTAssertNil(error);
+  openapi = config[@"openapi"];
+  XCTAssertEqualObjects(@"interactive", openapi[@"docsUIStyle"]);
+}
+
 - (void)testAPIOnlyDefaultsDisableStaticAndUseJSONLogs {
   NSString *root = [self createTempAppRoot];
   XCTAssertNotNil(root);

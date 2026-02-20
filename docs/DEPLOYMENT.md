@@ -139,7 +139,31 @@ tools/deploy/rollback_release.sh --releases-dir /path/to/app/releases
 
 After rollback symlink switch, restart/reload `propane` from `releases/current`.
 
-## 9. Current Capability Snapshot
+## 9. Automated Runbook Validation
+
+Phase 3C adds automated smoke validation for the documented release runbook:
+
+```bash
+tools/deploy/smoke_release.sh \
+  --app-root examples/tech_demo \
+  --framework-root /path/to/Arlen
+```
+
+Or via make target:
+
+```bash
+make deploy-smoke
+```
+
+This validates:
+
+- release build
+- activation
+- health probe from activated payload
+- rollback
+- health probe after rollback
+
+## 10. Current Capability Snapshot
 
 | Capability | Current state | Verification |
 | --- | --- | --- |
@@ -149,3 +173,4 @@ After rollback symlink switch, restart/reload `propane` from `releases/current`.
 | Readiness/liveness endpoint contract | Available | Unit + integration tests |
 | Rollback workflow | Available | Deployment integration test |
 | Container + systemd baseline guidance | Available | Documented runbook baseline |
+| Deployment runbook smoke validation | Available | `tools/deploy/smoke_release.sh` + integration test |

@@ -1,0 +1,169 @@
+{
+  "baseline_metadata": {
+    "created_utc": "2026-02-20T17:01:17Z",
+    "update_policy": "Set ARLEN_PERF_UPDATE_BASELINE=1 (or --update-baseline) for intentional baseline refreshes.",
+    "updated_utc": "2026-02-20T17:11:02Z"
+  },
+  "host": "127.0.0.1",
+  "machine": {
+    "cpu_count": 14,
+    "platform": "Linux-6.12.69+deb13-amd64-x86_64-with-glibc2.41",
+    "python": "3.13.5"
+  },
+  "memory": {
+    "after_kb": 52696,
+    "before_kb": 30688,
+    "growth_kb": 22008
+  },
+  "policy": {
+    "latency_regression_ratio": 1.35,
+    "memory_growth_kb_max": 32768,
+    "memory_growth_ratio": 2.0,
+    "throughput_floor_ratio": 0.55
+  },
+  "port": 3301,
+  "profile": "api_reference",
+  "repeats": 3,
+  "scenarios": {
+    "openapi_docs": {
+      "duration_s": 0.713811,
+      "max_ms": 0.834,
+      "p50_ms": 0.484,
+      "p95_ms": 0.648,
+      "p99_ms": 0.804,
+      "profile": "api_reference",
+      "repeats": 3,
+      "req_per_sec": 168.11,
+      "requests": 120,
+      "runs": [
+        {
+          "duration_s": 0.711251,
+          "max_ms": 0.834,
+          "p50_ms": 0.484,
+          "p95_ms": 0.648,
+          "p99_ms": 0.679,
+          "profile": "api_reference",
+          "req_per_sec": 168.72,
+          "requests": 120,
+          "run": 1
+        },
+        {
+          "duration_s": 0.718216,
+          "max_ms": 1.397,
+          "p50_ms": 0.481,
+          "p95_ms": 0.671,
+          "p99_ms": 0.804,
+          "profile": "api_reference",
+          "req_per_sec": 167.08,
+          "requests": 120,
+          "run": 2
+        },
+        {
+          "duration_s": 0.713811,
+          "max_ms": 0.817,
+          "p50_ms": 0.495,
+          "p95_ms": 0.638,
+          "p99_ms": 0.816,
+          "profile": "api_reference",
+          "req_per_sec": 168.11,
+          "requests": 120,
+          "run": 3
+        }
+      ]
+    },
+    "openapi_json": {
+      "duration_s": 0.72797,
+      "max_ms": 1.001,
+      "p50_ms": 0.66,
+      "p95_ms": 0.819,
+      "p99_ms": 0.924,
+      "profile": "api_reference",
+      "repeats": 3,
+      "req_per_sec": 164.84,
+      "requests": 120,
+      "runs": [
+        {
+          "duration_s": 0.818231,
+          "max_ms": 1.152,
+          "p50_ms": 0.792,
+          "p95_ms": 0.937,
+          "p99_ms": 0.972,
+          "profile": "api_reference",
+          "req_per_sec": 146.66,
+          "requests": 120,
+          "run": 1
+        },
+        {
+          "duration_s": 0.71771,
+          "max_ms": 1.001,
+          "p50_ms": 0.656,
+          "p95_ms": 0.79,
+          "p99_ms": 0.82,
+          "profile": "api_reference",
+          "req_per_sec": 167.2,
+          "requests": 120,
+          "run": 2
+        },
+        {
+          "duration_s": 0.72797,
+          "max_ms": 0.977,
+          "p50_ms": 0.66,
+          "p95_ms": 0.819,
+          "p99_ms": 0.924,
+          "profile": "api_reference",
+          "req_per_sec": 164.84,
+          "requests": 120,
+          "run": 3
+        }
+      ]
+    },
+    "status": {
+      "duration_s": 0.729026,
+      "max_ms": 0.899,
+      "p50_ms": 0.589,
+      "p95_ms": 0.763,
+      "p99_ms": 0.802,
+      "profile": "api_reference",
+      "repeats": 3,
+      "req_per_sec": 164.6,
+      "requests": 120,
+      "runs": [
+        {
+          "duration_s": 0.82505,
+          "max_ms": 0.908,
+          "p50_ms": 0.661,
+          "p95_ms": 0.796,
+          "p99_ms": 0.835,
+          "profile": "api_reference",
+          "req_per_sec": 145.45,
+          "requests": 120,
+          "run": 1
+        },
+        {
+          "duration_s": 0.702195,
+          "max_ms": 0.899,
+          "p50_ms": 0.578,
+          "p95_ms": 0.707,
+          "p99_ms": 0.802,
+          "profile": "api_reference",
+          "req_per_sec": 170.89,
+          "requests": 120,
+          "run": 2
+        },
+        {
+          "duration_s": 0.729026,
+          "max_ms": 0.864,
+          "p50_ms": 0.589,
+          "p95_ms": 0.763,
+          "p99_ms": 0.794,
+          "profile": "api_reference",
+          "req_per_sec": 164.6,
+          "requests": 120,
+          "run": 3
+        }
+      ]
+    }
+  },
+  "schema_version": 2,
+  "timestamp_utc": "2026-02-20T17:11:02Z"
+}

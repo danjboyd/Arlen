@@ -174,6 +174,11 @@ static NSInteger gPhase3APluginStopCount = 0;
 }
 
 - (ALNApplication *)buildAppWithPluginConfig:(BOOL)usePluginConfig {
+  return [self buildAppWithPluginConfig:usePluginConfig docsStyle:nil];
+}
+
+- (ALNApplication *)buildAppWithPluginConfig:(BOOL)usePluginConfig
+                                   docsStyle:(NSString *)docsStyle {
   NSMutableDictionary *config = [NSMutableDictionary dictionaryWithDictionary:@{
     @"environment" : @"test",
     @"logFormat" : @"json",
@@ -191,6 +196,12 @@ static NSInteger gPhase3APluginStopCount = 0;
       @"version" : @"3a-test",
     },
   }];
+  if ([docsStyle length] > 0) {
+    NSMutableDictionary *openapi =
+        [NSMutableDictionary dictionaryWithDictionary:config[@"openapi"] ?: @{}];
+    openapi[@"docsUIStyle"] = [docsStyle lowercaseString];
+    config[@"openapi"] = openapi;
+  }
   if (usePluginConfig) {
     config[@"plugins"] = @{
       @"classes" : @[ @"Phase3ATestPlugin" ]
@@ -378,6 +389,30 @@ static NSInteger gPhase3APluginStopCount = 0;
   XCTAssertNil(exportError);
   BOOL exists = [[NSFileManager defaultManager] fileExistsAtPath:tmp];
   XCTAssertTrue(exists);
+}
+
+- (void)testSwaggerDocsStyleServesSwaggerUIAndDedicatedPath {
+  ALNApplication *app = [self buildAppWithPluginConfig:NO docsStyle:@"swagger"];
+
+  ALNResponse *docs = [app dispatchRequest:[self requestWithMethod:@"GET"
+                                                              path:@"/openapi"
+                                                       queryString:@""
+                                                           headers:@{}]];
+  XCTAssertEqual((NSInteger)200, docs.statusCode);
+  NSString *docsBody = [[NSString alloc] initWithData:docs.bodyData
+                                              encoding:NSUTF8StringEncoding];
+  XCTAssertTrue([docsBody containsString:@"Arlen Swagger UI"]);
+  XCTAssertTrue([docsBody containsString:@"Try It Out"]);
+  XCTAssertTrue([docsBody containsString:@"fetch('/openapi.json')"]);
+
+  ALNResponse *swagger = [app dispatchRequest:[self requestWithMethod:@"GET"
+                                                                 path:@"/openapi/swagger"
+                                                          queryString:@""
+                                                              headers:@{}]];
+  XCTAssertEqual((NSInteger)200, swagger.statusCode);
+  NSString *swaggerBody = [[NSString alloc] initWithData:swagger.bodyData
+                                                encoding:NSUTF8StringEncoding];
+  XCTAssertTrue([swaggerBody containsString:@"Arlen Swagger UI"]);
 }
 
 - (void)testPluginLoadingAndLifecycleHooks {

@@ -9,6 +9,10 @@
 
 @implementation DeploymentIntegrationTests
 
+- (int)randomPort {
+  return 34000 + (int)arc4random_uniform(2000);
+}
+
 - (NSString *)createTempDirectoryWithPrefix:(NSString *)prefix {
   NSString *templatePath =
       [NSTemporaryDirectory() stringByAppendingPathComponent:[NSString stringWithFormat:@"%@-XXXXXX", prefix]];
@@ -129,6 +133,51 @@
         [releasesDir stringByAppendingPathComponent:@"rel1/metadata/release.env"];
     BOOL metadataExists = [[NSFileManager defaultManager] fileExistsAtPath:metadataFile];
     XCTAssertTrue(metadataExists);
+  } @finally {
+    [[NSFileManager defaultManager] removeItemAtPath:appRoot error:nil];
+    [[NSFileManager defaultManager] removeItemAtPath:workRoot error:nil];
+  }
+}
+
+- (void)testReleaseSmokeScriptValidatesDeployRunbook {
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *appRoot = [self createTempDirectoryWithPrefix:@"arlen-smoke-app"];
+  NSString *workRoot = [self createTempDirectoryWithPrefix:@"arlen-smoke-work"];
+  XCTAssertNotNil(appRoot);
+  XCTAssertNotNil(workRoot);
+  if (appRoot == nil || workRoot == nil) {
+    return;
+  }
+
+  @try {
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"config/app.plist"]
+                          content:@"{\n"
+                                  "  host = \"127.0.0.1\";\n"
+                                  "  port = 3000;\n"
+                                  "}\n"]);
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"config/environments/production.plist"]
+                          content:@"{\n  logFormat = \"json\";\n}\n"]);
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"app_lite.m"]
+                          content:@"#import <Foundation/Foundation.h>\n"
+                                  "int main(int argc, const char *argv[]) { (void)argc; (void)argv; return 0; }\n"]);
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"public/health.txt"]
+                          content:@"ok\n"]);
+
+    int code = 0;
+    int port = [self randomPort];
+    NSString *smokeOutput = [self runShellCapture:[NSString stringWithFormat:
+                                                       @"%s/tools/deploy/smoke_release.sh "
+                                                        "--app-root %s "
+                                                        "--framework-root %s "
+                                                        "--work-dir %s "
+                                                        "--port %d "
+                                                        "--release-a smoke-1 "
+                                                        "--release-b smoke-2",
+                                                       [repoRoot UTF8String], [appRoot UTF8String],
+                                                       [repoRoot UTF8String], [workRoot UTF8String], port]
+                                         exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", smokeOutput);
+    XCTAssertTrue([smokeOutput containsString:@"release smoke passed"]);
   } @finally {
     [[NSFileManager defaultManager] removeItemAtPath:appRoot error:nil];
     [[NSFileManager defaultManager] removeItemAtPath:workRoot error:nil];

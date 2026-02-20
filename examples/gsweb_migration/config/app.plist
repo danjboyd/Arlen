@@ -1,0 +1,23 @@
+{
+  host = "127.0.0.1";
+  port = 3126;
+  apiOnly = YES;
+  serveStatic = NO;
+  logFormat = "json";
+
+  openapi = {
+    enabled = YES;
+    docsUIEnabled = YES;
+    docsUIStyle = "viewer";
+    title = "GSWeb Migration Sample";
+    version = "1.0.0";
+    description = "Side-by-side legacy and Arlen route equivalence sample";
+  };
+
+  propaneAccessories = {
+    workerCount = 2;
+    gracefulShutdownSeconds = 10;
+    respawnDelayMs = 250;
+    reloadOverlapSeconds = 1;
+  };
+}

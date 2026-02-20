@@ -689,7 +689,8 @@ static NSString *ALNEnvValueCompat(const char *primary, const char *legacy) {
                             ? [finalOpenAPI[@"docsUIStyle"] lowercaseString]
                             : @"interactive";
   if (![docsStyle isEqualToString:@"interactive"] &&
-      ![docsStyle isEqualToString:@"viewer"]) {
+      ![docsStyle isEqualToString:@"viewer"] &&
+      ![docsStyle isEqualToString:@"swagger"]) {
     docsStyle = @"interactive";
   }
   finalOpenAPI[@"docsUIStyle"] = docsStyle;

@@ -62,6 +62,7 @@ def load_runs(path: Path):
                 continue
             scenarios.setdefault(scenario, []).append(
                 {
+                    "profile": (row.get("profile") or "").strip(),
                     "run": as_int(row.get("run"), 0),
                     "requests": as_int(row.get("requests"), 0),
                     "p50_ms": as_float(row.get("p50_ms"), 0),
@@ -78,7 +79,13 @@ def load_runs(path: Path):
 def aggregate_runs(scenarios):
     aggregated = {}
     for name, runs in scenarios.items():
+        profile = ""
+        for candidate in runs:
+            if candidate.get("profile"):
+                profile = candidate.get("profile")
+                break
         aggregated[name] = {
+            "profile": profile,
             "requests": max([r["requests"] for r in runs] or [0]),
             "repeats": len(runs),
             "p50_ms": median([r["p50_ms"] for r in runs]),
@@ -96,12 +103,13 @@ def write_summary_csv(path: Path, scenarios):
     with path.open("w", encoding="utf-8", newline="") as f:
         writer = csv.writer(f)
         writer.writerow(
-            ["scenario", "requests", "repeats", "p50_ms", "p95_ms", "p99_ms", "max_ms", "req_per_sec"]
+            ["profile", "scenario", "requests", "repeats", "p50_ms", "p95_ms", "p99_ms", "max_ms", "req_per_sec"]
         )
         for scenario in sorted(scenarios.keys()):
             m = scenarios[scenario]
             writer.writerow(
                 [
+                    m.get("profile", ""),
                     scenario,
                     m["requests"],
                     m["repeats"],
@@ -202,6 +210,7 @@ def write_baseline(path: Path, report, policy, existing_baseline):
             "update_policy": "Set ARLEN_PERF_UPDATE_BASELINE=1 (or --update-baseline) for intentional baseline refreshes.",
         },
         "policy": policy,
+        "profile": report.get("profile", "default"),
         "host": report.get("host", "127.0.0.1"),
         "port": report.get("port", 0),
         "timestamp_utc": report.get("timestamp_utc"),
@@ -223,6 +232,7 @@ def main():
     parser.add_argument("--summary-csv", required=True)
     parser.add_argument("--baseline", required=True)
     parser.add_argument("--policy", required=True)
+    parser.add_argument("--profile", default="default")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=0)
     parser.add_argument("--mem-before-kb", type=int, default=0)
@@ -242,6 +252,7 @@ def main():
     report = {
         "schema_version": 2,
         "timestamp_utc": utc_now(),
+        "profile": args.profile,
         "host": args.host,
         "port": args.port,
         "repeats": repeats,

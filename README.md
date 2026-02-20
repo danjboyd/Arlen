@@ -13,7 +13,8 @@ Arlen is designed to solve the same class of problems as frameworks like Mojolic
 - Phase 2D: complete (parity baseline + deployment contract + perf gate hardening).
 - Phase 3A: complete (metrics, schema/auth contracts, OpenAPI baseline, plugins/lifecycle).
 - Phase 3B: complete (data-layer maturation, interactive OpenAPI explorer, GSWeb compatibility helpers).
-- Phase 3C-3E: planned (`docs/PHASE3_ROADMAP.md`).
+- Phase 3C: complete (release/doc maturity, perf trend profiles, swagger docs style, migration readiness package).
+- Phase 3D-3E: planned (`docs/PHASE3_ROADMAP.md`).
 
 ## Quick Start
 
@@ -54,6 +55,7 @@ Run tests and quality gate:
 ```bash
 ./bin/test
 make check
+make ci-quality
 ```
 
 Run the technology demo:
@@ -63,6 +65,12 @@ Run the technology demo:
 ```
 
 Then open `http://127.0.0.1:3110/tech-demo`.
+
+Run deployment smoke validation:
+
+```bash
+make deploy-smoke
+```
 
 ## Documentation
 
@@ -84,6 +92,9 @@ High-value guides:
 - [Core Concepts](docs/CORE_CONCEPTS.md)
 - [Deployment Guide](docs/DEPLOYMENT.md)
 - [Propane Manager](docs/PROPANE.md)
+- [Release Process](docs/RELEASE_PROCESS.md)
+- [Performance Profiles](docs/PERFORMANCE_PROFILES.md)
+- [GSWeb Migration Guide](docs/MIGRATION_GSWEB.md)
 - [Documentation Policy](docs/DOCUMENTATION_POLICY.md)
 
 Specifications and roadmaps:

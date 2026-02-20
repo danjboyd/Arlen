@@ -1,0 +1,30 @@
+{
+  host = "127.0.0.1";
+  port = 3125;
+  apiOnly = YES;
+  serveStatic = NO;
+  logFormat = "json";
+
+  auth = {
+    enabled = YES;
+    bearerSecret = "api-reference-secret";
+    issuer = "";
+    audience = "";
+  };
+
+  openapi = {
+    enabled = YES;
+    docsUIEnabled = YES;
+    docsUIStyle = "swagger";
+    title = "Arlen API Reference";
+    version = "1.0.0";
+    description = "Reference API-first application";
+  };
+
+  propaneAccessories = {
+    workerCount = 2;
+    gracefulShutdownSeconds = 10;
+    respawnDelayMs = 250;
+    reloadOverlapSeconds = 1;
+  };
+}

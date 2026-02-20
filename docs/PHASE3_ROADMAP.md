@@ -1,7 +1,7 @@
 # Arlen Phase 3 Roadmap
 
-Status: Active (Phase 3A-3B complete; Phase 3C-3E planned)  
-Last updated: 2026-02-19
+Status: Active (Phase 3A-3C complete; Phase 3D-3E planned)  
+Last updated: 2026-02-20
 
 Related docs:
 - `docs/PHASE2_ROADMAP.md`
@@ -80,7 +80,19 @@ Acceptance:
 
 ## 3.3 Phase 3C: Distribution, Release Management, and Documentation Maturity
 
-Status: Next
+Status: Complete (2026-02-20)
+
+Completion highlights:
+- Profile-based perf expansion with trend archives (`tests/performance/profiles/*`, `build/perf/history/*`, `latest_trend.*`).
+- CI quality workflow and multi-profile perf artifact publication (`.github/workflows/phase3c-quality.yml`).
+- Self-hosted Swagger-style docs UI option (`openapi.docsUIStyle = "swagger"`, `/openapi/swagger`).
+- Release lifecycle and semver/deprecation process docs (`docs/RELEASE_PROCESS.md`).
+- Automated deployment runbook smoke validation (`tools/deploy/smoke_release.sh`, integration coverage).
+- Migration readiness package:
+  - GSWeb migration guide (`docs/MIGRATION_GSWEB.md`)
+  - side-by-side migrated sample (`examples/gsweb_migration`)
+  - API-first reference app (`examples/api_reference`)
+  - benchmark profile pack entries for reference and migration workloads.
 
 Deliverables:
 - Release artifact tooling and lifecycle documentation.

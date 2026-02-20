@@ -1,0 +1,169 @@
+{
+  "baseline_metadata": {
+    "created_utc": "2026-02-20T17:01:22Z",
+    "update_policy": "Set ARLEN_PERF_UPDATE_BASELINE=1 (or --update-baseline) for intentional baseline refreshes.",
+    "updated_utc": "2026-02-20T17:11:13Z"
+  },
+  "host": "127.0.0.1",
+  "machine": {
+    "cpu_count": 14,
+    "platform": "Linux-6.12.69+deb13-amd64-x86_64-with-glibc2.41",
+    "python": "3.13.5"
+  },
+  "memory": {
+    "after_kb": 39976,
+    "before_kb": 30672,
+    "growth_kb": 9304
+  },
+  "policy": {
+    "latency_regression_ratio": 1.35,
+    "memory_growth_kb_max": 32768,
+    "memory_growth_ratio": 2.0,
+    "throughput_floor_ratio": 0.55
+  },
+  "port": 3301,
+  "profile": "migration_sample",
+  "repeats": 3,
+  "scenarios": {
+    "arlen_user": {
+      "duration_s": 0.699972,
+      "max_ms": 0.886,
+      "p50_ms": 0.525,
+      "p95_ms": 0.695,
+      "p99_ms": 0.762,
+      "profile": "migration_sample",
+      "repeats": 3,
+      "req_per_sec": 171.44,
+      "requests": 120,
+      "runs": [
+        {
+          "duration_s": 0.686801,
+          "max_ms": 0.761,
+          "p50_ms": 0.525,
+          "p95_ms": 0.652,
+          "p99_ms": 0.712,
+          "profile": "migration_sample",
+          "req_per_sec": 174.72,
+          "requests": 120,
+          "run": 1
+        },
+        {
+          "duration_s": 0.767753,
+          "max_ms": 1.026,
+          "p50_ms": 0.569,
+          "p95_ms": 0.731,
+          "p99_ms": 0.844,
+          "profile": "migration_sample",
+          "req_per_sec": 156.3,
+          "requests": 120,
+          "run": 2
+        },
+        {
+          "duration_s": 0.699972,
+          "max_ms": 0.886,
+          "p50_ms": 0.515,
+          "p95_ms": 0.695,
+          "p99_ms": 0.762,
+          "profile": "migration_sample",
+          "req_per_sec": 171.44,
+          "requests": 120,
+          "run": 3
+        }
+      ]
+    },
+    "legacy_user": {
+      "duration_s": 0.737065,
+      "max_ms": 0.831,
+      "p50_ms": 0.566,
+      "p95_ms": 0.738,
+      "p99_ms": 0.791,
+      "profile": "migration_sample",
+      "repeats": 3,
+      "req_per_sec": 162.81,
+      "requests": 120,
+      "runs": [
+        {
+          "duration_s": 0.678329,
+          "max_ms": 0.771,
+          "p50_ms": 0.509,
+          "p95_ms": 0.677,
+          "p99_ms": 0.735,
+          "profile": "migration_sample",
+          "req_per_sec": 176.91,
+          "requests": 120,
+          "run": 1
+        },
+        {
+          "duration_s": 0.754563,
+          "max_ms": 0.834,
+          "p50_ms": 0.588,
+          "p95_ms": 0.738,
+          "p99_ms": 0.791,
+          "profile": "migration_sample",
+          "req_per_sec": 159.03,
+          "requests": 120,
+          "run": 2
+        },
+        {
+          "duration_s": 0.737065,
+          "max_ms": 0.831,
+          "p50_ms": 0.566,
+          "p95_ms": 0.772,
+          "p99_ms": 0.796,
+          "profile": "migration_sample",
+          "req_per_sec": 162.81,
+          "requests": 120,
+          "run": 3
+        }
+      ]
+    },
+    "openapi_docs": {
+      "duration_s": 0.683897,
+      "max_ms": 0.751,
+      "p50_ms": 0.486,
+      "p95_ms": 0.648,
+      "p99_ms": 0.682,
+      "profile": "migration_sample",
+      "repeats": 3,
+      "req_per_sec": 175.47,
+      "requests": 120,
+      "runs": [
+        {
+          "duration_s": 0.683897,
+          "max_ms": 0.829,
+          "p50_ms": 0.486,
+          "p95_ms": 0.648,
+          "p99_ms": 0.736,
+          "profile": "migration_sample",
+          "req_per_sec": 175.47,
+          "requests": 120,
+          "run": 1
+        },
+        {
+          "duration_s": 0.715522,
+          "max_ms": 0.734,
+          "p50_ms": 0.486,
+          "p95_ms": 0.659,
+          "p99_ms": 0.682,
+          "profile": "migration_sample",
+          "req_per_sec": 167.71,
+          "requests": 120,
+          "run": 2
+        },
+        {
+          "duration_s": 0.674661,
+          "max_ms": 0.751,
+          "p50_ms": 0.455,
+          "p95_ms": 0.596,
+          "p99_ms": 0.681,
+          "profile": "migration_sample",
+          "req_per_sec": 177.87,
+          "requests": 120,
+          "run": 3
+        }
+      ]
+    }
+  },
+  "schema_version": 2,
+  "timestamp_utc": "2026-02-20T17:11:13Z"
+}
