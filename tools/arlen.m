@@ -5,6 +5,7 @@
 #import "ALNConfig.h"
 #import "ALNMigrationRunner.h"
 #import "ALNPg.h"
+#import "ALNSchemaCodegen.h"
 
 static void PrintUsage(void) {
   fprintf(stderr,
@@ -16,6 +17,7 @@ static void PrintUsage(void) {
           "  boomhauer [server args...]\n"
           "  propane [manager args...]\n"
           "  migrate [--env <name>] [--dsn <connection_string>] [--dry-run]\n"
+          "  schema-codegen [--env <name>] [--dsn <connection_string>] [--output-dir <path>] [--manifest <path>] [--prefix <ClassPrefix>] [--force]\n"
           "  routes\n"
           "  test [--unit|--integration|--all]\n"
           "  perf\n"
@@ -1583,6 +1585,162 @@ static NSUInteger DatabasePoolSizeFromConfig(NSDictionary *config) {
   return 4;
 }
 
+static NSString *ResolvePathFromRoot(NSString *root, NSString *rawPath) {
+  NSString *candidate = Trimmed(rawPath);
+  if ([candidate length] == 0) {
+    return root;
+  }
+  NSString *expanded = [candidate stringByExpandingTildeInPath];
+  if ([expanded hasPrefix:@"/"]) {
+    return [expanded stringByStandardizingPath];
+  }
+  return [[root stringByAppendingPathComponent:expanded] stringByStandardizingPath];
+}
+
+static int CommandSchemaCodegen(NSArray *args) {
+  NSString *environment = @"development";
+  NSString *dsnOverride = nil;
+  NSString *outputDirArg = @"src/Generated";
+  NSString *manifestArg = @"db/schema/arlen_schema.json";
+  NSString *classPrefix = @"ALNDB";
+  BOOL force = NO;
+
+  for (NSUInteger idx = 0; idx < [args count]; idx++) {
+    NSString *arg = args[idx];
+    if ([arg isEqualToString:@"--env"]) {
+      if (idx + 1 >= [args count]) {
+        fprintf(stderr, "arlen schema-codegen: --env requires a value\n");
+        return 2;
+      }
+      environment = args[++idx];
+    } else if ([arg isEqualToString:@"--dsn"]) {
+      if (idx + 1 >= [args count]) {
+        fprintf(stderr, "arlen schema-codegen: --dsn requires a value\n");
+        return 2;
+      }
+      dsnOverride = args[++idx];
+    } else if ([arg isEqualToString:@"--output-dir"]) {
+      if (idx + 1 >= [args count]) {
+        fprintf(stderr, "arlen schema-codegen: --output-dir requires a value\n");
+        return 2;
+      }
+      outputDirArg = args[++idx];
+    } else if ([arg isEqualToString:@"--manifest"]) {
+      if (idx + 1 >= [args count]) {
+        fprintf(stderr, "arlen schema-codegen: --manifest requires a value\n");
+        return 2;
+      }
+      manifestArg = args[++idx];
+    } else if ([arg isEqualToString:@"--prefix"]) {
+      if (idx + 1 >= [args count]) {
+        fprintf(stderr, "arlen schema-codegen: --prefix requires a value\n");
+        return 2;
+      }
+      classPrefix = args[++idx];
+    } else if ([arg isEqualToString:@"--force"]) {
+      force = YES;
+    } else if ([arg isEqualToString:@"--help"] || [arg isEqualToString:@"-h"]) {
+      fprintf(stdout,
+              "Usage: arlen schema-codegen [--env <name>] [--dsn <connection_string>] "
+              "[--output-dir <path>] [--manifest <path>] [--prefix <ClassPrefix>] [--force]\n");
+      return 0;
+    } else {
+      fprintf(stderr, "arlen schema-codegen: unknown option %s\n", [arg UTF8String]);
+      return 2;
+    }
+  }
+
+  NSString *appRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSError *error = nil;
+  NSDictionary *config = [ALNConfig loadConfigAtRoot:appRoot environment:environment error:&error];
+  if (config == nil) {
+    fprintf(stderr, "arlen schema-codegen: failed to load config: %s\n", [[error localizedDescription] UTF8String]);
+    return 1;
+  }
+
+  NSString *dsn = dsnOverride ?: EnvValue("ARLEN_DATABASE_URL");
+  if ([dsn length] == 0) {
+    dsn = DatabaseConnectionStringFromConfig(config);
+  }
+  if ([dsn length] == 0) {
+    fprintf(stderr,
+            "arlen schema-codegen: no database connection string configured (set --dsn or "
+            "ARLEN_DATABASE_URL or config.database.connectionString)\n");
+    return 1;
+  }
+
+  NSUInteger poolSize = DatabasePoolSizeFromConfig(config);
+  ALNPg *database = [[ALNPg alloc] initWithConnectionString:dsn maxConnections:poolSize error:&error];
+  if (database == nil) {
+    fprintf(stderr, "arlen schema-codegen: failed to initialize database adapter: %s\n",
+            [[error localizedDescription] UTF8String]);
+    return 1;
+  }
+
+  NSString *introspectionSQL =
+      @"SELECT c.table_schema, c.table_name, c.column_name, c.ordinal_position "
+       "FROM information_schema.columns c "
+       "JOIN information_schema.tables t "
+       "  ON t.table_schema = c.table_schema "
+       " AND t.table_name = c.table_name "
+       "WHERE c.table_schema NOT IN ('pg_catalog', 'information_schema') "
+       "  AND t.table_type IN ('BASE TABLE', 'VIEW') "
+       "ORDER BY c.table_schema, c.table_name, c.ordinal_position, c.column_name";
+  NSArray *rows = [database executeQuery:introspectionSQL parameters:@[] error:&error];
+  if (rows == nil) {
+    fprintf(stderr, "arlen schema-codegen: failed schema introspection query: %s\n",
+            [[error localizedDescription] UTF8String]);
+    return 1;
+  }
+
+  NSDictionary *artifacts = [ALNSchemaCodegen renderArtifactsFromColumns:rows
+                                                              classPrefix:classPrefix
+                                                                    error:&error];
+  if (artifacts == nil) {
+    fprintf(stderr, "arlen schema-codegen: %s\n", [[error localizedDescription] UTF8String]);
+    return 1;
+  }
+
+  NSString *outputDir = ResolvePathFromRoot(appRoot, outputDirArg);
+  NSString *manifestPath = ResolvePathFromRoot(appRoot, manifestArg);
+  NSString *baseName = [artifacts[@"baseName"] isKindOfClass:[NSString class]]
+                           ? artifacts[@"baseName"]
+                           : @"ALNDBSchema";
+  NSString *headerPath = [outputDir stringByAppendingPathComponent:[NSString stringWithFormat:@"%@.h", baseName]];
+  NSString *implementationPath =
+      [outputDir stringByAppendingPathComponent:[NSString stringWithFormat:@"%@.m", baseName]];
+
+  if (!WriteTextFile(headerPath, artifacts[@"header"] ?: @"", force, &error)) {
+    fprintf(stderr, "arlen schema-codegen: failed writing %s: %s\n",
+            [headerPath UTF8String], [[error localizedDescription] UTF8String]);
+    return 1;
+  }
+  if (!WriteTextFile(implementationPath, artifacts[@"implementation"] ?: @"", force, &error)) {
+    fprintf(stderr, "arlen schema-codegen: failed writing %s: %s\n",
+            [implementationPath UTF8String], [[error localizedDescription] UTF8String]);
+    return 1;
+  }
+  if (!WriteTextFile(manifestPath, artifacts[@"manifest"] ?: @"", force, &error)) {
+    fprintf(stderr, "arlen schema-codegen: failed writing %s: %s\n",
+            [manifestPath UTF8String], [[error localizedDescription] UTF8String]);
+    return 1;
+  }
+
+  NSInteger tableCount = [artifacts[@"tableCount"] respondsToSelector:@selector(integerValue)]
+                             ? [artifacts[@"tableCount"] integerValue]
+                             : 0;
+  NSInteger columnCount = [artifacts[@"columnCount"] respondsToSelector:@selector(integerValue)]
+                              ? [artifacts[@"columnCount"] integerValue]
+                              : 0;
+  fprintf(stdout, "Generated typed schema artifacts.\n");
+  fprintf(stdout, "  tables: %ld\n", (long)tableCount);
+  fprintf(stdout, "  columns: %ld\n", (long)columnCount);
+  fprintf(stdout, "  header: %s\n", [headerPath UTF8String]);
+  fprintf(stdout, "  implementation: %s\n", [implementationPath UTF8String]);
+  fprintf(stdout, "  manifest: %s\n", [manifestPath UTF8String]);
+  return 0;
+}
+
 static int CommandMigrate(NSArray *args) {
   NSString *environment = @"development";
   NSString *dsnOverride = nil;
@@ -1695,6 +1853,9 @@ int main(int argc, const char *argv[]) {
     }
     if ([command isEqualToString:@"migrate"]) {
       return CommandMigrate(args);
+    }
+    if ([command isEqualToString:@"schema-codegen"]) {
+      return CommandSchemaCodegen(args);
     }
     if ([command isEqualToString:@"routes"]) {
       return CommandRoutes();

@@ -294,7 +294,32 @@ Dry-run pending migrations:
 /path/to/Arlen/bin/arlen migrate --dry-run
 ```
 
-## 13. Deploy Smoke Validation
+## 13. Generate Typed DB Helpers (Phase 4C)
+
+From app root:
+
+```bash
+/path/to/Arlen/bin/arlen schema-codegen --env development
+```
+
+Custom output paths/prefix and overwrite mode:
+
+```bash
+/path/to/Arlen/bin/arlen schema-codegen \
+  --env development \
+  --output-dir src/Generated \
+  --manifest db/schema/arlen_schema.json \
+  --prefix ALNDB \
+  --force
+```
+
+This generates:
+
+- `src/Generated/ALNDBSchema.h`
+- `src/Generated/ALNDBSchema.m`
+- `db/schema/arlen_schema.json`
+
+## 14. Deploy Smoke Validation
 
 ```bash
 make deploy-smoke

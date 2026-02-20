@@ -13,6 +13,7 @@ Primary contracts:
 
 - `ALNSQLBuilder` (v2 query builder with expression selects/predicates/order clauses, subquery+lateral joins, and tuple-friendly cursor predicates)
 - `ALNPostgresSQLBuilder` (PostgreSQL dialect extension for conflict/upsert, including expression-based `DO UPDATE SET` and optional `DO UPDATE ... WHERE`)
+- `ALNSchemaCodegen` (deterministic typed schema helper artifact rendering)
 - `ALNDatabaseAdapter` / `ALNDatabaseConnection`
 - `ALNDisplayGroup`
 - `ALNAdapterConformance` helpers
@@ -98,3 +99,24 @@ These contracts apply to:
 - `havingExpression:identifierBindings:parameters:`
 - `orderByExpression:...identifierBindings:parameters:`
 - subquery/lateral join `onExpression` APIs with `identifierBindings`
+
+## 8. Typed Schema Codegen Workflow (Phase 4C)
+
+Use the CLI in an app root with PostgreSQL config:
+
+```bash
+/path/to/Arlen/bin/arlen schema-codegen --env development
+```
+
+This introspects `information_schema` and writes deterministic artifacts:
+
+- `src/Generated/ALNDBSchema.h`
+- `src/Generated/ALNDBSchema.m`
+- `db/schema/arlen_schema.json`
+
+Generated table APIs expose:
+
+- typed table-level builder entrypoints (`selectAll`, `selectColumns`, `insertValues`, `updateValues`, `deleteBuilder`)
+- typed column accessor methods (`columnX`, `qualifiedColumnX`)
+
+Consumers can include generated files in non-Arlen builds as long as `ALNSQLBuilder` is linked.

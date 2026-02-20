@@ -146,15 +146,19 @@ Last updated: 2026-02-20
   - deterministic snapshot coverage for set operations, windows, predicates, joins, CTE columns, and locking (`tests/unit/Phase4BTests.m`)
   - PostgreSQL execution regression for 4B clause families (`testSQLBuilderPhase4BFeaturesExecuteAgainstPostgres`)
   - misuse-path diagnostics for invalid set-operation and locking contracts
+- New Phase 4C checks executed:
+  - deterministic schema artifact renderer coverage (`tests/unit/SchemaCodegenTests.m`)
+  - CLI schema codegen integration and generated-helper compile/execute smoke (`testArlenSchemaCodegenGeneratesTypedHelpers`)
+  - `arlen schema-codegen` overwrite and manifest contract coverage
 - PostgreSQL-backed tests remain gated by `ARLEN_PG_TEST_DSN`.
 
 ## Next Session Focus
 
-1. Execute Phase 4C typed ergonomics + schema codegen tranche from `docs/PHASE4_ROADMAP.md`.
-2. Define deterministic schema introspection/codegen artifacts for typed table/column symbols.
-3. Add compile + execution coverage for generated typed helpers while keeping legacy string APIs source-compatible.
+1. Execute Phase 4D performance + diagnostics hardening tranche from `docs/PHASE4_ROADMAP.md`.
+2. Add deterministic builder compilation caching and prepared-statement reuse policy tests.
+3. Add structured query diagnostics/listener pipeline with redaction-safe metadata fields.
 
-## Planned Phase Mapping (Post-4B)
+## Planned Phase Mapping (Post-4C)
 
 - Phase 3F (complete):
   - onboarding and diagnostics (`arlen doctor`, compatibility matrix)
@@ -172,11 +176,14 @@ Last updated: 2026-02-20
 - Maybe Someday backlog:
   - LiveView-like server-driven UI
   - full ORM as default framework layer
-- Post-4B planned:
-  - Phase 4C: typed ergonomics + schema codegen
+- Post-4C planned:
   - Phase 4D: performance + diagnostics hardening
   - Phase 4E: conformance + migration hardening
   - official frontend toolchain integration guides/starters
+- Completed in Phase 4:
+  - Phase 4A: query IR + safety foundation
+  - Phase 4B: SQL surface completion
+  - Phase 4C: typed ergonomics + schema codegen
 - Out of scope for Arlen core (explicitly documented):
   - Django-style admin/backoffice product
   - full account-management product surfaces

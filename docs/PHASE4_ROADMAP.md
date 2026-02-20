@@ -1,6 +1,6 @@
 # Arlen Phase 4 Roadmap
 
-Status: Active (Phase 4A-4B complete; Phase 4C-4E planned)  
+Status: Active (Phase 4A-4C complete; Phase 4D-4E planned)  
 Last updated: 2026-02-20
 
 Related docs:
@@ -73,15 +73,24 @@ Implementation notes:
 
 ## 3.3 Phase 4C: Typed Ergonomics + Schema Codegen
 
+Status: Complete (2026-02-20)
+
 Deliverables:
 - Add schema introspection/codegen pipeline for typed table/column symbols.
 - Provide typed builder helper APIs generated from schema artifacts.
 - Publish generator workflow docs and migration examples from string-based builder calls.
 
-Acceptance:
+Acceptance (verified):
 - Generated artifacts are deterministic and diff-friendly.
 - Generated APIs compile and execute in representative sample apps.
 - Legacy string-based builder APIs remain supported during migration window.
+
+Implementation notes:
+- Added `ALNSchemaCodegen` in `src/Arlen/Data` for deterministic schema metadata normalization and typed artifact rendering.
+- Added new CLI workflow: `arlen schema-codegen` with environment/DSN/output/manifest/prefix/force controls.
+- Generated APIs now include table-scoped builder entrypoints plus typed column/qualified-column accessors.
+- Added deterministic renderer unit coverage in `tests/unit/SchemaCodegenTests.m`.
+- Added PostgreSQL integration coverage for CLI generation + compile/execute smoke in `tests/integration/PostgresIntegrationTests.m`.
 
 ## 3.4 Phase 4D: Performance + Diagnostics
 

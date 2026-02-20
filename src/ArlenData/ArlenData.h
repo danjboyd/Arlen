@@ -8,6 +8,7 @@
 #import "Arlen/Data/ALNMigrationRunner.h"
 #import "Arlen/Data/ALNPg.h"
 #import "Arlen/Data/ALNPostgresSQLBuilder.h"
+#import "Arlen/Data/ALNSchemaCodegen.h"
 #import "Arlen/Data/ALNSQLBuilder.h"
 
 #endif

@@ -1,7 +1,7 @@
 # Arlen CLI Specification
 
-Status: Implemented through Phase 2D  
-Last updated: 2026-02-19
+Status: Implemented through Phase 4C  
+Last updated: 2026-02-20
 
 ## 1. Purpose
 
@@ -15,6 +15,7 @@ It standardizes workflows for:
 - running tests/perf quality gates
 - inspecting routes/config
 - applying DB migrations
+- generating typed DB schema helper APIs
 
 ## 2. Design Goals
 
@@ -37,12 +38,14 @@ Implemented command groups:
 - `boomhauer`
 - `propane`
 - `migrate`
+- `schema-codegen`
 - `routes`
 - `test`
 - `perf`
 - `check`
 - `build`
 - `config`
+- `doctor`
 
 ## 4. Command Contracts
 
@@ -118,12 +121,23 @@ Behavior:
 
 - prints merged runtime config for selected environment
 
+### 4.12 `arlen doctor [--env <name>] [--json]`
+
+- runs bootstrap diagnostics before any framework build requirement
+- supports machine-readable output for onboarding and CI gating
+
+### 4.13 `arlen schema-codegen [--env <name>] [--dsn <connection_string>] [--output-dir <path>] [--manifest <path>] [--prefix <ClassPrefix>] [--force]`
+
+- introspects PostgreSQL `information_schema` for non-system schemas
+- emits deterministic typed helper artifacts (`<prefix>Schema.h/.m`) and JSON manifest
+- supports overwrite via `--force` for regeneration workflows
+
 ## 5. Project Awareness
 
 `arlen` operates in two modes:
 
 1. Outside app root: `new`
-2. Inside app root: run/generate/build/test/perf/check/routes/config/migrate
+2. Inside app root: run/generate/build/test/perf/check/routes/config/migrate/schema-codegen
 
 Framework root resolution order:
 

@@ -69,6 +69,23 @@ Apply SQL migrations from `db/migrations` to PostgreSQL.
 - `--dsn <connection_string>`: override config DSN
 - `--dry-run`: list pending migrations without applying
 
+### `arlen schema-codegen [--env <name>] [--dsn <connection_string>] [--output-dir <path>] [--manifest <path>] [--prefix <ClassPrefix>] [--force]`
+
+Introspect PostgreSQL schema metadata and generate typed table/column helper APIs.
+
+- `--env <name>`: select runtime environment (default: `development`)
+- `--dsn <connection_string>`: override config DSN
+- `--output-dir <path>`: destination directory for generated Objective-C files (default: `src/Generated`)
+- `--manifest <path>`: destination JSON manifest path (default: `db/schema/arlen_schema.json`)
+- `--prefix <ClassPrefix>`: class prefix for generated APIs (default: `ALNDB`)
+- `--force`: overwrite existing generated files
+
+Generated artifacts:
+
+- `<output-dir>/<prefix>Schema.h`
+- `<output-dir>/<prefix>Schema.m`
+- `<manifest>`
+
 ### `arlen boomhauer [server args...]`
 
 Build and run `boomhauer` for the current app root.
