@@ -45,4 +45,10 @@
     respawnDelayMs = 250;
     reloadOverlapSeconds = 1;
   };
+  cluster = {
+    enabled = NO;
+    name = "default";
+    expectedNodes = 1;
+    emitHeaders = YES;
+  };
 }

@@ -7,7 +7,7 @@ This guide explains Arlen's runtime model at a high level.
 1. `ALNHTTPServer` accepts an HTTP request.
 2. Request is parsed into `ALNRequest`.
 3. `ALNRouter` matches method/path to a route.
-4. `ALNApplication` handles built-ins (`/healthz`, `/readyz`, `/livez`, `/metrics`, OpenAPI/docs paths) when no app route matches.
+4. `ALNApplication` handles built-ins (`/healthz`, `/readyz`, `/livez`, `/metrics`, `/clusterz`, OpenAPI/docs paths) when no app route matches.
 5. Request contract coercion/validation runs (if configured on the matched route).
 6. Middleware and auth scope/role checks run.
 7. Controller action executes.
@@ -81,6 +81,13 @@ If controller action returns an `NSDictionary` or `NSArray` and no explicit body
 - App composition:
   - `mountApplication:atPrefix:`
   - mounted requests are path-rewritten and dispatched into child app context.
+
+Cluster runtime contract (Phase 3H):
+
+- `GET /clusterz` returns runtime cluster identity and deployment contract details.
+- Responses include `X-Arlen-Cluster`, `X-Arlen-Node`, and `X-Arlen-Worker-Pid` when `cluster.emitHeaders = YES`.
+- Session mode is signed-cookie payloads; multi-node deployments must share `session.secret` across nodes.
+- Realtime fanout remains node-local by default (`ALNRealtimeHub`); multi-node broadcast requires an external broker layer.
 
 ## 8. Ecosystem Services
 

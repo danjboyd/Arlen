@@ -19,6 +19,10 @@ Options:
   --reload-overlap-seconds <n>      Override propane accessory reloadOverlapSeconds
   --listen-backlog <n>              Override runtime listenBacklog
   --connection-timeout-seconds <n>  Override runtime connectionTimeoutSeconds
+  --cluster-enabled                 Enable clustered runtime contracts
+  --cluster-name <name>             Override cluster name
+  --cluster-node-id <id>            Override cluster node ID
+  --cluster-expected-nodes <n>      Override expected cluster node count
   --job-worker-cmd <command>        Spawn supervised async worker command
   --job-worker-count <n>            Number of supervised async worker processes
   --job-worker-respawn-delay-ms <n> Override async worker respawn delay
@@ -38,6 +42,10 @@ Environment:
   ARLEN_FRAMEWORK_ROOT
   ARLEN_PROPANE_JOB_WORKER_COMMAND
   ARLEN_PROPANE_JOB_WORKER_COUNT
+  ARLEN_CLUSTER_ENABLED
+  ARLEN_CLUSTER_NAME
+  ARLEN_CLUSTER_NODE_ID
+  ARLEN_CLUSTER_EXPECTED_NODES
 USAGE
 }
 
@@ -61,6 +69,10 @@ respawn_delay_override=""
 reload_overlap_override=""
 listen_backlog_override=""
 connection_timeout_override=""
+cluster_enabled_override=""
+cluster_name_override=""
+cluster_node_id_override=""
+cluster_expected_nodes_override=""
 job_worker_cmd_override=""
 job_worker_count_override=""
 job_worker_respawn_delay_override=""
@@ -120,6 +132,25 @@ while [[ $# -gt 0 ]]; do
     --connection-timeout-seconds)
       [[ $# -ge 2 ]] || { echo "propane: --connection-timeout-seconds requires a value" >&2; exit 2; }
       connection_timeout_override="$2"
+      shift 2
+      ;;
+    --cluster-enabled)
+      cluster_enabled_override="1"
+      shift
+      ;;
+    --cluster-name)
+      [[ $# -ge 2 ]] || { echo "propane: --cluster-name requires a value" >&2; exit 2; }
+      cluster_name_override="$2"
+      shift 2
+      ;;
+    --cluster-node-id)
+      [[ $# -ge 2 ]] || { echo "propane: --cluster-node-id requires a value" >&2; exit 2; }
+      cluster_node_id_override="$2"
+      shift 2
+      ;;
+    --cluster-expected-nodes)
+      [[ $# -ge 2 ]] || { echo "propane: --cluster-expected-nodes requires a value" >&2; exit 2; }
+      cluster_expected_nodes_override="$2"
       shift 2
       ;;
     --job-worker-cmd)
@@ -225,6 +256,10 @@ while IFS='=' read -r key value; do
     config_job_worker_count) config_job_worker_count="$value" ;;
     config_job_worker_command) config_job_worker_command="$value" ;;
     config_job_worker_respawn_delay_ms) config_job_worker_respawn_delay_ms="$value" ;;
+    config_cluster_enabled) config_cluster_enabled="$value" ;;
+    config_cluster_name) config_cluster_name="$value" ;;
+    config_cluster_node_id) config_cluster_node_id="$value" ;;
+    config_cluster_expected_nodes) config_cluster_expected_nodes="$value" ;;
   esac
 done < <(python3 - "$config_json" <<'PY'
 import json
@@ -232,6 +267,7 @@ import sys
 
 cfg = json.loads(sys.argv[1])
 accessories = cfg.get("propaneAccessories") or {}
+cluster = cfg.get("cluster") or {}
 
 def as_int(value, default, minimum):
     try:
@@ -270,6 +306,10 @@ print(f"config_enable_reuse_port={1 if as_bool(cfg.get('enableReusePort', False)
 print(f"config_job_worker_count={as_int(accessories.get('jobWorkerCount', 0), 0, 0)}")
 print(f"config_job_worker_command={as_str(accessories.get('jobWorkerCommand', ''), '')}")
 print(f"config_job_worker_respawn_delay_ms={as_int(accessories.get('jobWorkerRespawnDelayMs', 250), 250, 0)}")
+print(f"config_cluster_enabled={1 if as_bool(cluster.get('enabled', False), False) else 0}")
+print(f"config_cluster_name={as_str(cluster.get('name', 'default'), 'default')}")
+print(f"config_cluster_node_id={as_str(cluster.get('nodeID', 'node'), 'node')}")
+print(f"config_cluster_expected_nodes={as_int(cluster.get('expectedNodes', 1), 1, 1)}")
 PY
 )
 
@@ -290,7 +330,44 @@ is_uint() {
   [[ "$1" =~ ^[0-9]+$ ]]
 }
 
-for numeric in "$worker_count" "$port" "$graceful_shutdown_seconds" "$respawn_delay_ms" "$reload_overlap_seconds" "$listen_backlog" "$connection_timeout_seconds" "$enable_reuse_port" "$job_worker_count" "$job_worker_respawn_delay_ms"; do
+parse_bool_int() {
+  local raw="${1:-}"
+  local normalized="${raw,,}"
+  case "$normalized" in
+    1|true|yes|on)
+      echo "1"
+      return 0
+      ;;
+    0|false|no|off)
+      echo "0"
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+cluster_enabled_raw="${cluster_enabled_override:-${ARLEN_CLUSTER_ENABLED:-${config_cluster_enabled:-0}}}"
+if ! cluster_enabled="$(parse_bool_int "$cluster_enabled_raw")"; then
+  echo "propane: cluster enabled must be a boolean (got: $cluster_enabled_raw)" >&2
+  exit 2
+fi
+cluster_name="${cluster_name_override:-${ARLEN_CLUSTER_NAME:-${config_cluster_name:-default}}}"
+cluster_node_id="${cluster_node_id_override:-${ARLEN_CLUSTER_NODE_ID:-${config_cluster_node_id:-}}}"
+cluster_expected_nodes="${cluster_expected_nodes_override:-${ARLEN_CLUSTER_EXPECTED_NODES:-${config_cluster_expected_nodes:-1}}}"
+
+if [[ -z "$cluster_name" ]]; then
+  cluster_name="default"
+fi
+if [[ -z "$cluster_node_id" ]]; then
+  cluster_node_id="$(hostname -s 2>/dev/null || hostname 2>/dev/null || echo node)"
+fi
+if [[ -z "$cluster_node_id" ]]; then
+  cluster_node_id="node"
+fi
+
+for numeric in "$worker_count" "$port" "$graceful_shutdown_seconds" "$respawn_delay_ms" "$reload_overlap_seconds" "$listen_backlog" "$connection_timeout_seconds" "$enable_reuse_port" "$job_worker_count" "$job_worker_respawn_delay_ms" "$cluster_expected_nodes"; do
   if ! is_uint "$numeric"; then
     echo "propane: expected integer propane accessory/runtime value but got: $numeric" >&2
     exit 2
@@ -331,6 +408,10 @@ if (( job_worker_count < 0 )); then
 fi
 if (( job_worker_count > 0 )) && [[ -z "$job_worker_command" ]]; then
   echo "propane: --job-worker-count requires --job-worker-cmd (or propane accessories jobWorkerCommand)" >&2
+  exit 2
+fi
+if (( cluster_expected_nodes < 1 )); then
+  echo "propane: cluster expected nodes must be >= 1" >&2
   exit 2
 fi
 
@@ -376,9 +457,14 @@ export ARLEN_FRAMEWORK_ROOT="$framework_root"
 export ARLEN_LISTEN_BACKLOG="$listen_backlog"
 export ARLEN_CONNECTION_TIMEOUT_SECONDS="$connection_timeout_seconds"
 export ARLEN_ENABLE_REUSEPORT="$enable_reuse_port"
+export ARLEN_CLUSTER_ENABLED="$cluster_enabled"
+export ARLEN_CLUSTER_NAME="$cluster_name"
+export ARLEN_CLUSTER_NODE_ID="$cluster_node_id"
+export ARLEN_CLUSTER_EXPECTED_NODES="$cluster_expected_nodes"
 
 echo "propane: starting with propane accessories workerCount=$worker_count gracefulShutdownSeconds=$graceful_shutdown_seconds respawnDelayMs=$respawn_delay_ms reloadOverlapSeconds=$reload_overlap_seconds"
 echo "propane: runtime host=$host port=$port listenBacklog=$listen_backlog connectionTimeoutSeconds=$connection_timeout_seconds enableReusePort=$enable_reuse_port"
+echo "propane: cluster enabled=$cluster_enabled name=$cluster_name nodeID=$cluster_node_id expectedNodes=$cluster_expected_nodes"
 if (( job_worker_count > 0 )); then
   echo "propane: async workers count=$job_worker_count respawnDelayMs=$job_worker_respawn_delay_ms"
 fi

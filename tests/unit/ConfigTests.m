@@ -149,6 +149,14 @@
   XCTAssertTrue([plugins[@"classes"] isKindOfClass:[NSArray class]]);
   XCTAssertEqual((NSUInteger)0, [plugins[@"classes"] count]);
 
+  NSDictionary *cluster = config[@"cluster"];
+  XCTAssertEqualObjects(@(NO), cluster[@"enabled"]);
+  XCTAssertEqualObjects(@"default", cluster[@"name"]);
+  XCTAssertTrue([cluster[@"nodeID"] isKindOfClass:[NSString class]]);
+  XCTAssertGreaterThan([(NSString *)cluster[@"nodeID"] length], (NSUInteger)0);
+  XCTAssertEqual((NSInteger)1, [cluster[@"expectedNodes"] integerValue]);
+  XCTAssertEqualObjects(@(YES), cluster[@"emitHeaders"]);
+
   NSDictionary *limits = config[@"requestLimits"];
   XCTAssertEqual((NSInteger)2048, [limits[@"maxRequestLineBytes"] integerValue]);
   XCTAssertEqual((NSInteger)16384, [limits[@"maxHeaderBytes"] integerValue]);
@@ -200,6 +208,11 @@
   setenv("ARLEN_I18N_DEFAULT_LOCALE", "es", 1);
   setenv("ARLEN_I18N_FALLBACK_LOCALE", "en", 1);
   setenv("ARLEN_PAGE_STATE_COMPAT_ENABLED", "1", 1);
+  setenv("ARLEN_CLUSTER_ENABLED", "1", 1);
+  setenv("ARLEN_CLUSTER_NAME", "prod-east", 1);
+  setenv("ARLEN_CLUSTER_NODE_ID", "node-7", 1);
+  setenv("ARLEN_CLUSTER_EXPECTED_NODES", "5", 1);
+  setenv("ARLEN_CLUSTER_EMIT_HEADERS", "0", 1);
 
   NSError *error = nil;
   NSDictionary *config = [ALNConfig loadConfigAtRoot:root
@@ -247,6 +260,11 @@
   unsetenv("ARLEN_I18N_DEFAULT_LOCALE");
   unsetenv("ARLEN_I18N_FALLBACK_LOCALE");
   unsetenv("ARLEN_PAGE_STATE_COMPAT_ENABLED");
+  unsetenv("ARLEN_CLUSTER_ENABLED");
+  unsetenv("ARLEN_CLUSTER_NAME");
+  unsetenv("ARLEN_CLUSTER_NODE_ID");
+  unsetenv("ARLEN_CLUSTER_EXPECTED_NODES");
+  unsetenv("ARLEN_CLUSTER_EMIT_HEADERS");
 
   XCTAssertNil(error);
   NSDictionary *limits = config[@"requestLimits"];
@@ -314,6 +332,13 @@
   NSDictionary *i18n = services[@"i18n"];
   XCTAssertEqualObjects(@"es", i18n[@"defaultLocale"]);
   XCTAssertEqualObjects(@"en", i18n[@"fallbackLocale"]);
+
+  NSDictionary *cluster = config[@"cluster"];
+  XCTAssertEqualObjects(@(YES), cluster[@"enabled"]);
+  XCTAssertEqualObjects(@"prod-east", cluster[@"name"]);
+  XCTAssertEqualObjects(@"node-7", cluster[@"nodeID"]);
+  XCTAssertEqual((NSInteger)5, [cluster[@"expectedNodes"] integerValue]);
+  XCTAssertEqualObjects(@(NO), cluster[@"emitHeaders"]);
 }
 
 - (void)testLegacyEnvironmentPrefixFallback {
@@ -343,6 +368,11 @@
   setenv("MOJOOBJC_CSRF_ENABLED", "1", 1);
   setenv("MOJOOBJC_RATE_LIMIT_ENABLED", "1", 1);
   setenv("MOJOOBJC_RATE_LIMIT_REQUESTS", "55", 1);
+  setenv("MOJOOBJC_CLUSTER_ENABLED", "1", 1);
+  setenv("MOJOOBJC_CLUSTER_NAME", "legacy-cluster", 1);
+  setenv("MOJOOBJC_CLUSTER_NODE_ID", "legacy-node", 1);
+  setenv("MOJOOBJC_CLUSTER_EXPECTED_NODES", "4", 1);
+  setenv("MOJOOBJC_CLUSTER_EMIT_HEADERS", "0", 1);
 
   NSError *error = nil;
   NSDictionary *config = [ALNConfig loadConfigAtRoot:root
@@ -366,6 +396,11 @@
   unsetenv("MOJOOBJC_CSRF_ENABLED");
   unsetenv("MOJOOBJC_RATE_LIMIT_ENABLED");
   unsetenv("MOJOOBJC_RATE_LIMIT_REQUESTS");
+  unsetenv("MOJOOBJC_CLUSTER_ENABLED");
+  unsetenv("MOJOOBJC_CLUSTER_NAME");
+  unsetenv("MOJOOBJC_CLUSTER_NODE_ID");
+  unsetenv("MOJOOBJC_CLUSTER_EXPECTED_NODES");
+  unsetenv("MOJOOBJC_CLUSTER_EMIT_HEADERS");
 
   XCTAssertNil(error);
   XCTAssertEqualObjects(@"0.0.0.0", config[@"host"]);
@@ -391,6 +426,12 @@
   NSDictionary *rateLimit = config[@"rateLimit"];
   XCTAssertEqualObjects(@(YES), rateLimit[@"enabled"]);
   XCTAssertEqual((NSInteger)55, [rateLimit[@"requests"] integerValue]);
+  NSDictionary *cluster = config[@"cluster"];
+  XCTAssertEqualObjects(@(YES), cluster[@"enabled"]);
+  XCTAssertEqualObjects(@"legacy-cluster", cluster[@"name"]);
+  XCTAssertEqualObjects(@"legacy-node", cluster[@"nodeID"]);
+  XCTAssertEqual((NSInteger)4, [cluster[@"expectedNodes"] integerValue]);
+  XCTAssertEqualObjects(@(NO), cluster[@"emitHeaders"]);
 }
 
 - (void)testEOCStrictModeEnvironmentOverrides {

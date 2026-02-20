@@ -18,6 +18,7 @@ Arlen is designed to solve the same class of problems as frameworks like Mojolic
 - Phase 3E: complete (plugin-first ecosystem services: jobs/cache/i18n/mail/attachments).
 - Phase 3F: complete (doctor + toolchain matrix, ALNPg diagnostics hardening, API helpers, static mount ergonomics, concrete jobs/mail adapters, async worker supervision baseline).
 - Phase 3G: complete (SQL builder v2 expansion, PostgreSQL dialect builder, and standalone `ArlenData` reuse packaging).
+- Phase 3H: complete (cluster runtime primitives: `/clusterz`, cluster response headers, and propane cluster controls).
 
 ## Quick Start
 

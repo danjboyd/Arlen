@@ -127,6 +127,15 @@ static NSArray *ALNParseCSVExtensions(NSString *value) {
   return ALNNormalizeExtensionList(parts);
 }
 
+static NSString *ALNDefaultClusterNodeID(void) {
+  NSString *host = [[[NSProcessInfo processInfo] hostName] lowercaseString];
+  host = [host stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+  if ([host length] == 0) {
+    host = @"node";
+  }
+  return host;
+}
+
 @implementation ALNConfig
 
 + (NSDictionary *)loadConfigAtRoot:(NSString *)rootPath
@@ -260,6 +269,16 @@ static NSArray *ALNParseCSVExtensions(NSString *value) {
       ALNEnvValueCompat("ARLEN_PAGE_STATE_COMPAT_ENABLED", "MOJOOBJC_PAGE_STATE_COMPAT_ENABLED");
   NSString *responseEnvelopeEnabled =
       ALNEnvValueCompat("ARLEN_RESPONSE_ENVELOPE_ENABLED", "MOJOOBJC_RESPONSE_ENVELOPE_ENABLED");
+  NSString *clusterEnabled =
+      ALNEnvValueCompat("ARLEN_CLUSTER_ENABLED", "MOJOOBJC_CLUSTER_ENABLED");
+  NSString *clusterName =
+      ALNEnvValueCompat("ARLEN_CLUSTER_NAME", "MOJOOBJC_CLUSTER_NAME");
+  NSString *clusterNodeID =
+      ALNEnvValueCompat("ARLEN_CLUSTER_NODE_ID", "MOJOOBJC_CLUSTER_NODE_ID");
+  NSString *clusterExpectedNodes =
+      ALNEnvValueCompat("ARLEN_CLUSTER_EXPECTED_NODES", "MOJOOBJC_CLUSTER_EXPECTED_NODES");
+  NSString *clusterEmitHeaders =
+      ALNEnvValueCompat("ARLEN_CLUSTER_EMIT_HEADERS", "MOJOOBJC_CLUSTER_EMIT_HEADERS");
   NSString *eocStrictLocals =
       ALNEnvValueCompat("ARLEN_EOC_STRICT_LOCALS", "MOJOOBJC_EOC_STRICT_LOCALS");
   NSString *eocStrictStringify =
@@ -459,6 +478,25 @@ static NSArray *ALNParseCSVExtensions(NSString *value) {
     apiHelpers[@"responseEnvelopeEnabled"] = responseEnvelopeEnabledValue;
   }
   config[@"apiHelpers"] = apiHelpers;
+
+  NSMutableDictionary *cluster =
+      [NSMutableDictionary dictionaryWithDictionary:config[@"cluster"] ?: @{}];
+  NSNumber *clusterEnabledValue = ALNParseBooleanString(clusterEnabled);
+  if (clusterEnabledValue != nil) {
+    cluster[@"enabled"] = clusterEnabledValue;
+  }
+  if ([clusterName length] > 0) {
+    cluster[@"name"] = clusterName;
+  }
+  if ([clusterNodeID length] > 0) {
+    cluster[@"nodeID"] = clusterNodeID;
+  }
+  ALNApplyIntegerOverride(cluster, clusterExpectedNodes, @"expectedNodes", 1);
+  NSNumber *clusterEmitHeadersValue = ALNParseBooleanString(clusterEmitHeaders);
+  if (clusterEmitHeadersValue != nil) {
+    cluster[@"emitHeaders"] = clusterEmitHeadersValue;
+  }
+  config[@"cluster"] = cluster;
 
   NSMutableDictionary *eoc =
       [NSMutableDictionary dictionaryWithDictionary:config[@"eoc"] ?: @{}];
@@ -708,6 +746,27 @@ static NSArray *ALNParseCSVExtensions(NSString *value) {
   }
   config[@"apiHelpers"] = finalAPIHelpers;
 
+  NSMutableDictionary *finalCluster =
+      [NSMutableDictionary dictionaryWithDictionary:config[@"cluster"] ?: @{}];
+  if (finalCluster[@"enabled"] == nil) {
+    finalCluster[@"enabled"] = @(NO);
+  }
+  if (![finalCluster[@"name"] isKindOfClass:[NSString class]] ||
+      [finalCluster[@"name"] length] == 0) {
+    finalCluster[@"name"] = @"default";
+  }
+  if (![finalCluster[@"nodeID"] isKindOfClass:[NSString class]] ||
+      [finalCluster[@"nodeID"] length] == 0) {
+    finalCluster[@"nodeID"] = ALNDefaultClusterNodeID();
+  }
+  if (finalCluster[@"expectedNodes"] == nil) {
+    finalCluster[@"expectedNodes"] = @(1);
+  }
+  if (finalCluster[@"emitHeaders"] == nil) {
+    finalCluster[@"emitHeaders"] = @(YES);
+  }
+  config[@"cluster"] = finalCluster;
+
   config[@"port"] = @([config[@"port"] integerValue]);
   config[@"apiOnly"] = @([config[@"apiOnly"] boolValue]);
   config[@"trustedProxy"] = @([config[@"trustedProxy"] boolValue]);
@@ -839,6 +898,33 @@ static NSArray *ALNParseCSVExtensions(NSString *value) {
   finalAPIHelpers[@"responseEnvelopeEnabled"] =
       @([finalAPIHelpers[@"responseEnvelopeEnabled"] boolValue]);
   config[@"apiHelpers"] = finalAPIHelpers;
+
+  finalCluster[@"enabled"] = @([finalCluster[@"enabled"] boolValue]);
+  NSInteger expectedNodes = [finalCluster[@"expectedNodes"] integerValue];
+  if (expectedNodes < 1) {
+    expectedNodes = 1;
+  }
+  finalCluster[@"expectedNodes"] = @(expectedNodes);
+  finalCluster[@"emitHeaders"] = @([finalCluster[@"emitHeaders"] boolValue]);
+  NSString *normalizedClusterName =
+      [finalCluster[@"name"] isKindOfClass:[NSString class]] ? finalCluster[@"name"] : @"default";
+  normalizedClusterName =
+      [normalizedClusterName stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+  if ([normalizedClusterName length] == 0) {
+    normalizedClusterName = @"default";
+  }
+  finalCluster[@"name"] = normalizedClusterName;
+  NSString *normalizedNodeID =
+      [finalCluster[@"nodeID"] isKindOfClass:[NSString class]]
+          ? finalCluster[@"nodeID"]
+          : ALNDefaultClusterNodeID();
+  normalizedNodeID =
+      [normalizedNodeID stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+  if ([normalizedNodeID length] == 0) {
+    normalizedNodeID = ALNDefaultClusterNodeID();
+  }
+  finalCluster[@"nodeID"] = normalizedNodeID;
+  config[@"cluster"] = finalCluster;
 
   return [NSDictionary dictionaryWithDictionary:config];
 }

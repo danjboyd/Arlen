@@ -23,6 +23,7 @@ Recommended app/runtime defaults for production:
 - `serveStatic = NO` (behind reverse proxy/CDN)
 - explicit `requestLimits`
 - explicit propane accessories (`workerCount`, shutdown/reload timings)
+- explicit cluster settings when running multi-node (`cluster.enabled`, `cluster.name`, `cluster.expectedNodes`)
 
 API-only mode (`apiOnly = YES`, or `ARLEN_API_ONLY=1`) defaults to:
 
@@ -36,8 +37,15 @@ Arlen provides built-in fallback health endpoints:
 - `GET /healthz` -> `200 ok\n`
 - `GET /readyz` -> `200 ready\n`
 - `GET /livez` -> `200 live\n`
+- `GET /clusterz` -> `200` JSON cluster/runtime contract payload
 
 Use these for LB probes and deployment readiness checks.
+
+When `cluster.emitHeaders = YES` (default), responses include:
+
+- `X-Arlen-Cluster`
+- `X-Arlen-Node`
+- `X-Arlen-Worker-Pid`
 
 ## 5. Immutable Release Artifact Workflow
 
@@ -168,6 +176,7 @@ This validates:
 | Capability | Current state | Verification |
 | --- | --- | --- |
 | Rolling reload in `propane` | Available | Integration-tested |
+| Cluster identity/status contract (`/clusterz` + response headers) | Available | Unit + integration tests |
 | Immutable release artifact workflow | Available | Deployment integration test |
 | Explicit migration step in runbook | Available | Scripted release metadata + docs |
 | Readiness/liveness endpoint contract | Available | Unit + integration tests |

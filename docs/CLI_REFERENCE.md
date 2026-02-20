@@ -137,6 +137,7 @@ Behavior:
 - in app-root watch mode, build failures are captured and rendered as development diagnostics
 - built-in observability/API docs endpoints are available when enabled:
   - `/metrics`
+  - `/clusterz`
   - `/openapi.json`
   - `/openapi` (interactive explorer by default)
   - `/openapi/viewer` (lightweight fallback viewer)
@@ -186,6 +187,10 @@ Core options:
 - `--reload-overlap-seconds <n>`
 - `--listen-backlog <n>`
 - `--connection-timeout-seconds <n>`
+- `--cluster-enabled`
+- `--cluster-name <name>`
+- `--cluster-node-id <id>`
+- `--cluster-expected-nodes <n>`
 - `--job-worker-cmd <command>`
 - `--job-worker-count <n>`
 - `--job-worker-respawn-delay-ms <n>`
@@ -196,6 +201,10 @@ Async worker environment fallbacks:
 - `ARLEN_PROPANE_JOB_WORKER_COMMAND`
 - `ARLEN_PROPANE_JOB_WORKER_COUNT`
 - `ARLEN_PROPANE_JOB_WORKER_RESPAWN_DELAY_MS`
+- `ARLEN_CLUSTER_ENABLED`
+- `ARLEN_CLUSTER_NAME`
+- `ARLEN_CLUSTER_NODE_ID`
+- `ARLEN_CLUSTER_EXPECTED_NODES`
 
 Signals:
 

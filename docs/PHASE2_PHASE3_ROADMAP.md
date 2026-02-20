@@ -1,6 +1,6 @@
 # Arlen Phase 2 + Phase 3 Roadmap Index
 
-Status: Active (Phase 2A-2D complete; Phase 3A-3G complete; post-3G planning active)  
+Status: Active (Phase 2A-2D complete; Phase 3A-3H complete)  
 Last updated: 2026-02-20
 
 This index points to the current roadmap documents:
@@ -36,13 +36,18 @@ Phase 3 is focused on platform maturity:
 - ecosystem services follow-on scaffolds (plugin presets + optional job worker runtime contract + concrete Redis cache and filesystem attachment adapters, Phase 3E follow-on complete)
 - Phase 3F complete: DX + reliability hardening (`arlen doctor`, toolchain matrix, ALNPg diagnostics, API convenience helpers, static mount ergonomics, concrete jobs/mail adapters, worker supervision baseline)
 - Phase 3G complete: SQL builder v2 capability expansion + standalone data-layer reuse packaging (`ArlenData`)
+- Phase 3H complete: multi-node clustering/runtime primitives (`/clusterz`, cluster headers, propane cluster controls, and cluster-focused integration validation)
 
-## Planned Next Phases (Post-3G)
+## Planned Next Phases (Post-3H)
 
 1. Phase 4 planning:
-   frontend integration guide/starter track, clustering/deployment maturity, and other deferred items after Phase 3 closeout.
+   frontend integration guide/starter track and broader platform-scale sequencing after 3H.
 2. Scope guardrails:
    admin/backoffice and full account-product surfaces remain outside Arlen core and are expected to ship as optional modules/products.
+
+Maybe Someday backlog:
+- LiveView-like server-driven UI
+- full ORM as default framework layer
 
 ## Data Layer Direction
 

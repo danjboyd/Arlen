@@ -1,6 +1,6 @@
 # Arlen Phase 3 Roadmap
 
-Status: Active (Phase 3A-3G complete; post-3G roadmap planning active)  
+Status: Active (Phase 3A-3H complete)  
 Last updated: 2026-02-20
 
 Related docs:
@@ -293,12 +293,54 @@ Acceptance:
 - Non-Arlen sample usage is documented and validated in CI.
 - Packaging/versioning policy for data-layer reuse is documented and enforceable.
 
-## 3.8 Core Scope Decisions (Agreed)
+## 3.8 Phase 3H: Multi-Node Clustering + Distributed Runtime
+
+Status: Complete (2026-02-20)
+
+Completion highlights:
+- Added first-class cluster runtime config contract:
+  - `cluster.enabled`
+  - `cluster.name`
+  - `cluster.nodeID` (hostname-derived default when omitted)
+  - `cluster.expectedNodes`
+  - `cluster.emitHeaders`
+  - environment override support (`ARLEN_CLUSTER_*` + legacy `MOJOOBJC_CLUSTER_*`)
+- Added built-in cluster status endpoint:
+  - `GET /clusterz` returns cluster identity plus deployment contracts for session and realtime behavior.
+- Added cluster identity response headers (when enabled):
+  - `X-Arlen-Cluster`
+  - `X-Arlen-Node`
+  - `X-Arlen-Worker-Pid`
+- Added cluster-aware propane manager controls:
+  - `--cluster-enabled`
+  - `--cluster-name`
+  - `--cluster-node-id`
+  - `--cluster-expected-nodes`
+  - resolved values exported to workers through `ARLEN_CLUSTER_*`.
+- Added unit/integration validation for cluster defaults, env overrides, built-in endpoint behavior, header emission toggles, and propane override propagation.
+
+Deliverables:
+- Multi-node runtime primitives for horizontally scaled Arlen deployments.
+- Cluster-safe routing/session/realtime baseline guidance, prioritizing explicit contracts over implicit magic.
+- Cluster-aware process/runtime documentation for `propane`-managed deployments.
+- Integration validation strategy for representative multi-node request/reload/failure scenarios.
+
+Acceptance:
+- Representative multi-node smoke/integration suite passes in CI.
+- Runtime/operational contracts are documented with explicit failure-mode behavior.
+- Realtime and async worker behavior remains correct under multi-node deployment assumptions.
+
+## 3.9 Core Scope Decisions (Agreed)
 
 - Keep Django-style admin/backoffice capabilities out of Arlen core; pursue optional separate product/module paths.
 - Keep full account-management product surfaces (registration/reset/provider workflows) out of Arlen core; retain auth primitives in core.
 - Treat ecosystem package volume as a platform/community outcome, not a core roadmap deliverable.
 - Keep asset pipeline bundling out of core runtime scope; maintain official frontend integration guidance/starter paths without bundler lock-in.
+
+## 3.10 Maybe Someday Backlog
+
+- LiveView-like server-driven UI.
+- Full ORM as default framework layer.
 
 ## 4. Principles
 

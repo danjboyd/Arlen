@@ -273,6 +273,63 @@
   XCTAssertEqualObjects(@"live\n", live);
 }
 
+- (void)testClusterStatusEndpointAndHeaders {
+  NSString *clusterEnv =
+      @"ARLEN_CLUSTER_ENABLED=1 "
+       "ARLEN_CLUSTER_NAME=alpha "
+       "ARLEN_CLUSTER_NODE_ID=node-a "
+       "ARLEN_CLUSTER_EXPECTED_NODES=3";
+
+  int curlCode = 0;
+  int serverCode = 0;
+  NSString *body =
+      [self requestWithServerEnv:clusterEnv
+                     serverBinary:@"./build/boomhauer"
+                        curlBody:@"curl -fsS http://127.0.0.1:%d/clusterz"
+                        curlCode:&curlCode
+                       serverCode:&serverCode];
+  XCTAssertEqual(0, curlCode);
+  XCTAssertEqual(0, serverCode);
+  XCTAssertTrue([body containsString:@"\"ok\":true"] || [body containsString:@"\"ok\": true"]);
+  XCTAssertTrue([body containsString:@"\"enabled\":true"] || [body containsString:@"\"enabled\": true"]);
+  XCTAssertTrue([body containsString:@"\"name\":\"alpha\""] ||
+                [body containsString:@"\"name\": \"alpha\""]);
+  XCTAssertTrue([body containsString:@"\"node_id\":\"node-a\""] ||
+                [body containsString:@"\"node_id\": \"node-a\""]);
+  XCTAssertTrue([body containsString:@"\"expected_nodes\":3"] ||
+                [body containsString:@"\"expected_nodes\": 3"]);
+  XCTAssertTrue([body containsString:@"\"cluster_broadcast\":\"external_broker_required\""] ||
+                [body containsString:@"\"cluster_broadcast\": \"external_broker_required\""]);
+
+  NSString *headers =
+      [self requestWithServerEnv:clusterEnv
+                     serverBinary:@"./build/boomhauer"
+                        curlBody:@"curl -sS -D - -o /dev/null http://127.0.0.1:%d/healthz"
+                        curlCode:&curlCode
+                       serverCode:&serverCode];
+  XCTAssertEqual(0, curlCode);
+  XCTAssertEqual(0, serverCode);
+  XCTAssertTrue([headers containsString:@"X-Arlen-Cluster: alpha"]);
+  XCTAssertTrue([headers containsString:@"X-Arlen-Node: node-a"]);
+  XCTAssertTrue([headers containsString:@"X-Arlen-Worker-Pid:"]);
+}
+
+- (void)testClusterHeadersCanBeDisabled {
+  int curlCode = 0;
+  int serverCode = 0;
+  NSString *headers =
+      [self requestWithServerEnv:@"ARLEN_CLUSTER_EMIT_HEADERS=0 ARLEN_CLUSTER_NAME=alpha ARLEN_CLUSTER_NODE_ID=node-a"
+                     serverBinary:@"./build/boomhauer"
+                        curlBody:@"curl -sS -D - -o /dev/null http://127.0.0.1:%d/healthz"
+                        curlCode:&curlCode
+                       serverCode:&serverCode];
+  XCTAssertEqual(0, curlCode);
+  XCTAssertEqual(0, serverCode);
+  XCTAssertFalse([headers containsString:@"X-Arlen-Cluster:"]);
+  XCTAssertFalse([headers containsString:@"X-Arlen-Node:"]);
+  XCTAssertFalse([headers containsString:@"X-Arlen-Worker-Pid:"]);
+}
+
 - (void)testPerformanceHeadersPresentByDefault {
   int curlCode = 0;
   int serverCode = 0;
@@ -1086,6 +1143,98 @@
                                                 success:&secondOK];
     XCTAssertTrue(secondOK);
     XCTAssertEqualObjects(@"ok\n", secondBody);
+
+    XCTAssertEqual(0, kill(server.processIdentifier, SIGTERM));
+    [server waitUntilExit];
+    XCTAssertEqual(0, server.terminationStatus);
+    XCTAssertFalse([[NSFileManager defaultManager] fileExistsAtPath:pidFile]);
+  } @finally {
+    if ([server isRunning]) {
+      (void)kill(server.processIdentifier, SIGTERM);
+      [server waitUntilExit];
+    }
+    [[NSFileManager defaultManager] removeItemAtPath:pidFile error:nil];
+  }
+}
+
+- (void)testPropaneClusterOverridesApplyToWorkers {
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *appRoot = [repoRoot stringByAppendingPathComponent:@"examples/tech_demo"];
+  int port = [self randomPort];
+  NSString *pidFile = [NSTemporaryDirectory()
+      stringByAppendingPathComponent:[NSString stringWithFormat:@"arlen-propane-cluster-%d.pid", port]];
+
+  NSTask *server = [[NSTask alloc] init];
+  server.launchPath = [repoRoot stringByAppendingPathComponent:@"bin/propane"];
+  server.currentDirectoryPath = repoRoot;
+  server.arguments = @[
+    @"--workers",
+    @"1",
+    @"--host",
+    @"127.0.0.1",
+    @"--port",
+    [NSString stringWithFormat:@"%d", port],
+    @"--env",
+    @"development",
+    @"--pid-file",
+    pidFile,
+    @"--cluster-enabled",
+    @"--cluster-name",
+    @"phase3h-cluster",
+    @"--cluster-node-id",
+    @"phase3h-node",
+    @"--cluster-expected-nodes",
+    @"2",
+  ];
+  NSMutableDictionary *env =
+      [NSMutableDictionary dictionaryWithDictionary:[[NSProcessInfo processInfo] environment]];
+  env[@"ARLEN_FRAMEWORK_ROOT"] = repoRoot;
+  env[@"ARLEN_APP_ROOT"] = appRoot;
+  server.environment = env;
+
+  [server launch];
+
+  @try {
+    BOOL ready = NO;
+    NSString *healthBody = [self requestPathWithRetries:@"/healthz"
+                                                   port:port
+                                               attempts:120
+                                                success:&ready];
+    XCTAssertTrue(ready);
+    XCTAssertEqualObjects(@"ok\n", healthBody);
+
+    BOOL clusterzReady = NO;
+    NSString *clusterBody = [self requestPathWithRetries:@"/clusterz"
+                                                    port:port
+                                                attempts:120
+                                                 success:&clusterzReady];
+    XCTAssertTrue(clusterzReady);
+    XCTAssertTrue([clusterBody containsString:@"\"enabled\":true"] ||
+                  [clusterBody containsString:@"\"enabled\": true"]);
+    XCTAssertTrue([clusterBody containsString:@"\"name\":\"phase3h-cluster\""] ||
+                  [clusterBody containsString:@"\"name\": \"phase3h-cluster\""]);
+    XCTAssertTrue([clusterBody containsString:@"\"node_id\":\"phase3h-node\""] ||
+                  [clusterBody containsString:@"\"node_id\": \"phase3h-node\""]);
+    XCTAssertTrue([clusterBody containsString:@"\"expected_nodes\":2"] ||
+                  [clusterBody containsString:@"\"expected_nodes\": 2"]);
+
+    BOOL headerSeen = NO;
+    for (NSInteger attempt = 0; attempt < 40; attempt++) {
+      int curlCode = 0;
+      NSString *headers = [self runShellCapture:[NSString stringWithFormat:
+                                                             @"curl -sS -D - -o /dev/null http://127.0.0.1:%d/healthz",
+                                                             port]
+                                        exitCode:&curlCode];
+      if (curlCode == 0 &&
+          [headers containsString:@"X-Arlen-Cluster: phase3h-cluster"] &&
+          [headers containsString:@"X-Arlen-Node: phase3h-node"] &&
+          [headers containsString:@"X-Arlen-Worker-Pid:"]) {
+        headerSeen = YES;
+        break;
+      }
+      usleep(200000);
+    }
+    XCTAssertTrue(headerSeen);
 
     XCTAssertEqual(0, kill(server.processIdentifier, SIGTERM));
     [server waitUntilExit];

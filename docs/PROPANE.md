@@ -40,6 +40,19 @@ enableReusePort = NO;
 
 When `workerCount > 1`, `propane` enables `SO_REUSEPORT` automatically for worker binds.
 
+Cluster controls:
+
+```plist
+cluster = {
+  enabled = NO;
+  name = "default";
+  expectedNodes = 1;
+  emitHeaders = YES;
+};
+```
+
+`nodeID` is optional in config; when omitted, Arlen derives a node ID from hostname.
+
 ## Signals
 
 - `HUP`: rolling reload (new workers first, then old workers drain)
@@ -57,6 +70,10 @@ When `workerCount > 1`, `propane` enables `SO_REUSEPORT` automatically for worke
 - `--reload-overlap-seconds <n>`
 - `--listen-backlog <n>`
 - `--connection-timeout-seconds <n>`
+- `--cluster-enabled`
+- `--cluster-name <name>`
+- `--cluster-node-id <id>`
+- `--cluster-expected-nodes <n>`
 - `--job-worker-cmd <command>`
 - `--job-worker-count <n>`
 - `--job-worker-respawn-delay-ms <n>`
@@ -69,3 +86,9 @@ Environment fallbacks:
 - `ARLEN_PROPANE_JOB_WORKER_COMMAND`
 - `ARLEN_PROPANE_JOB_WORKER_COUNT`
 - `ARLEN_PROPANE_JOB_WORKER_RESPAWN_DELAY_MS`
+- `ARLEN_CLUSTER_ENABLED`
+- `ARLEN_CLUSTER_NAME`
+- `ARLEN_CLUSTER_NODE_ID`
+- `ARLEN_CLUSTER_EXPECTED_NODES`
+
+`propane` exports resolved cluster values to worker processes, so CLI overrides are consistently applied at runtime.

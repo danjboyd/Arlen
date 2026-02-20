@@ -58,6 +58,7 @@ curl -i http://127.0.0.1:3000/healthz
 curl -i http://127.0.0.1:3000/readyz
 curl -i http://127.0.0.1:3000/livez
 curl -i http://127.0.0.1:3000/metrics
+curl -i http://127.0.0.1:3000/clusterz
 curl -i http://127.0.0.1:3000/openapi.json
 curl -i http://127.0.0.1:3000/openapi
 curl -i http://127.0.0.1:3000/openapi/viewer
@@ -260,6 +261,11 @@ Framework/app runtime:
 - `ARLEN_OPENAPI_DOCS_UI_STYLE` (`interactive`, `viewer`, or `swagger`)
 - `ARLEN_OPENAPI_TITLE`
 - `ARLEN_OPENAPI_VERSION`
+- `ARLEN_CLUSTER_ENABLED`
+- `ARLEN_CLUSTER_NAME`
+- `ARLEN_CLUSTER_NODE_ID`
+- `ARLEN_CLUSTER_EXPECTED_NODES`
+- `ARLEN_CLUSTER_EMIT_HEADERS`
 - `ARLEN_I18N_DEFAULT_LOCALE`
 - `ARLEN_I18N_FALLBACK_LOCALE`
 - `ARLEN_PAGE_STATE_COMPAT_ENABLED`

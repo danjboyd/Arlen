@@ -16,6 +16,7 @@ Last updated: 2026-02-20
 - Phase 3E: complete (2026-02-20)
 - Phase 3F: complete (2026-02-20)
 - Phase 3G: complete (2026-02-20)
+- Phase 3H: complete (2026-02-20)
 
 ## Completed Today (2026-02-20)
 
@@ -82,6 +83,12 @@ Last updated: 2026-02-20
   - added non-Arlen validation path (`examples/arlen_data`, `make test-data-layer`)
   - wired standalone data-layer validation into CI quality gate (`tools/ci/run_phase3c_quality.sh`)
   - published distribution and versioning guidance in `docs/ARLEN_DATA.md`
+- Completed Phase 3H multi-node clustering/distributed-runtime tranche:
+  - added cluster config contract defaults/env overrides (`cluster.*`, `ARLEN_CLUSTER_*`)
+  - added built-in cluster status endpoint (`/clusterz`)
+  - added cluster identity response headers (`X-Arlen-Cluster`, `X-Arlen-Node`, `X-Arlen-Worker-Pid`)
+  - added propane cluster CLI/env controls and worker export wiring
+  - added unit/integration validation for cluster config/runtime/propane propagation
 
 ## Verification State (2026-02-20)
 
@@ -113,15 +120,19 @@ Last updated: 2026-02-20
   - deterministic SQL snapshot coverage for builder v2 behavior (`tests/unit/Phase3GTests.m`)
   - PostgreSQL conflict/upsert dialect-extension snapshot coverage
   - standalone non-Arlen data-layer build/run validation (`make test-data-layer`)
+- New Phase 3H checks executed:
+  - cluster config default/override regression coverage (`tests/unit/ConfigTests.m`)
+  - `/clusterz` built-in endpoint and cluster response header integration coverage
+  - propane cluster override propagation integration coverage
 - PostgreSQL-backed tests remain gated by `ARLEN_PG_TEST_DSN`.
 
 ## Next Session Focus
 
-1. Post-3G planning: define Phase 4 sequencing for deferred parity and platform-scale items.
-2. Frontend integration guidance/starter tranche (moved to post-3G planned track).
-3. Evaluate distributed runtime/deployment maturity candidates (clustering and related operational slices).
+1. Plan/sequence post-3H Phase 4 platform work (frontend integration guides/starters + larger-scale runtime roadmap).
+2. Decide whether external broker-backed multi-node realtime fanout should be a Phase 4 in-scope milestone.
+3. Review deferred backlog and lock first post-3H execution tranche.
 
-## Planned Phase Mapping (Post-3G)
+## Planned Phase Mapping (Post-3H)
 
 - Phase 3F (complete):
   - onboarding and diagnostics (`arlen doctor`, compatibility matrix)
@@ -133,9 +144,15 @@ Last updated: 2026-02-20
   - `ALNSQLBuilder` v2 capability expansion toward SQL::Abstract-family parity goals (Objective-C-native API design)
   - PostgreSQL dialect-extension layer for PG-specific builder features (`ALNPostgresSQLBuilder`)
   - standalone data-layer packaging/reuse path (`ArlenData`) for non-Arlen applications + CI validation
-- Post-3G planned:
+- Phase 3H (complete):
+  - multi-node clustering primitives and distributed runtime hardening
+  - cluster-oriented integration validation + operational contracts
+- Maybe Someday backlog:
+  - LiveView-like server-driven UI
+  - full ORM as default framework layer
+- Post-3H planned:
   - official frontend toolchain integration guides/starters
-  - broader distributed runtime/deployment maturity tracks
+  - broader Phase 4 platform-scale sequencing
 - Out of scope for Arlen core (explicitly documented):
   - Django-style admin/backoffice product
   - full account-management product surfaces

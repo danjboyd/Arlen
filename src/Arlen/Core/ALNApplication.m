@@ -19,6 +19,8 @@
 #import "ALNMetrics.h"
 #import "ALNAuth.h"
 
+#include <unistd.h>
+
 NSString *const ALNApplicationErrorDomain = @"Arlen.Application.Error";
 
 static BOOL ALNRequestPrefersJSON(ALNRequest *request, BOOL apiOnly);
@@ -43,6 +45,11 @@ static void ALNSetStructuredErrorResponse(ALNResponse *response,
 @property(nonatomic, strong, readwrite) id<ALNLocalizationAdapter> localizationAdapter;
 @property(nonatomic, strong, readwrite) id<ALNMailAdapter> mailAdapter;
 @property(nonatomic, strong, readwrite) id<ALNAttachmentAdapter> attachmentAdapter;
+@property(nonatomic, assign, readwrite) BOOL clusterEnabled;
+@property(nonatomic, copy, readwrite) NSString *clusterName;
+@property(nonatomic, copy, readwrite) NSString *clusterNodeID;
+@property(nonatomic, assign, readwrite) NSUInteger clusterExpectedNodes;
+@property(nonatomic, assign, readwrite) BOOL clusterEmitHeaders;
 @property(nonatomic, copy) NSString *i18nDefaultLocale;
 @property(nonatomic, copy) NSString *i18nFallbackLocale;
 @property(nonatomic, assign, readwrite, getter=isStarted) BOOL started;
@@ -108,6 +115,37 @@ static void ALNSetStructuredErrorResponse(ALNResponse *response,
     fallbackLocale = [fallbackLocale lowercaseString];
     _i18nDefaultLocale = [defaultLocale copy];
     _i18nFallbackLocale = [fallbackLocale copy];
+    NSDictionary *cluster = [_config[@"cluster"] isKindOfClass:[NSDictionary class]]
+                                ? _config[@"cluster"]
+                                : @{};
+    id clusterEnabledValue = cluster[@"enabled"];
+    _clusterEnabled = [clusterEnabledValue respondsToSelector:@selector(boolValue)]
+                          ? [clusterEnabledValue boolValue]
+                          : NO;
+    NSString *clusterNameValue = [cluster[@"name"] isKindOfClass:[NSString class]]
+                                     ? cluster[@"name"]
+                                     : @"default";
+    if ([clusterNameValue length] == 0) {
+      clusterNameValue = @"default";
+    }
+    _clusterName = [clusterNameValue copy];
+    NSString *clusterNodeIDValue = [cluster[@"nodeID"] isKindOfClass:[NSString class]]
+                                       ? cluster[@"nodeID"]
+                                       : @"node";
+    if ([clusterNodeIDValue length] == 0) {
+      clusterNodeIDValue = @"node";
+    }
+    _clusterNodeID = [clusterNodeIDValue copy];
+    id expectedNodesValue = cluster[@"expectedNodes"];
+    NSUInteger expectedNodes =
+        [expectedNodesValue respondsToSelector:@selector(unsignedIntegerValue)]
+            ? [expectedNodesValue unsignedIntegerValue]
+            : (NSUInteger)1;
+    _clusterExpectedNodes = (expectedNodes < 1) ? 1 : expectedNodes;
+    id emitHeadersValue = cluster[@"emitHeaders"];
+    _clusterEmitHeaders = [emitHeadersValue respondsToSelector:@selector(boolValue)]
+                              ? [emitHeadersValue boolValue]
+                              : YES;
     _started = NO;
     if ([_environment isEqualToString:@"development"]) {
       _logger.minimumLevel = ALNLogLevelDebug;
@@ -864,6 +902,37 @@ static NSString *ALNBuiltInHealthBodyForPath(NSString *path) {
   return nil;
 }
 
+static NSDictionary *ALNClusterStatusPayload(ALNApplication *application) {
+  NSDictionary *session = ALNDictionaryConfigValue(application.config, @"session");
+  BOOL sessionEnabled = ALNBoolConfigValue(session[@"enabled"], NO);
+  BOOL sessionSecretConfigured =
+      [ALNStringConfigValue(session[@"secret"], @"") length] > 0;
+
+  return @{
+    @"ok" : @(YES),
+    @"cluster" : @{
+      @"enabled" : @(application.clusterEnabled),
+      @"name" : application.clusterName ?: @"default",
+      @"node_id" : application.clusterNodeID ?: @"node",
+      @"expected_nodes" : @(application.clusterExpectedNodes),
+      @"worker_pid" : @((NSInteger)getpid()),
+      @"mode" : application.clusterEnabled ? @"multi_node" : @"single_node",
+    },
+    @"contracts" : @{
+      @"session" : @{
+        @"enabled" : @(sessionEnabled),
+        @"mode" : @"cookie_signed",
+        @"shared_secret_required" : @(sessionEnabled),
+        @"shared_secret_configured" : @(sessionSecretConfigured),
+      },
+      @"realtime" : @{
+        @"mode" : @"node_local_pubsub",
+        @"cluster_broadcast" : @"external_broker_required",
+      }
+    }
+  };
+}
+
 static BOOL ALNRequestMethodIsReadOnly(ALNRequest *request) {
   return [request.method isEqualToString:@"GET"] ||
          [request.method isEqualToString:@"HEAD"];
@@ -897,6 +966,23 @@ static BOOL ALNApplyBuiltInResponse(ALNApplication *application,
     [response setHeader:@"Content-Type" value:@"text/plain; charset=utf-8"];
     if (!headRequest) {
       [response setTextBody:healthBody];
+    }
+    response.committed = YES;
+    return YES;
+  }
+
+  if ([routePath isEqualToString:@"/clusterz"] || [requestPath isEqualToString:@"/clusterz"]) {
+    response.statusCode = 200;
+    NSError *jsonError = nil;
+    BOOL ok = [response setJSONBody:ALNClusterStatusPayload(application)
+                            options:0
+                              error:&jsonError];
+    if (!ok) {
+      response.statusCode = 500;
+      [response setHeader:@"Content-Type" value:@"text/plain; charset=utf-8"];
+      [response setTextBody:@"cluster status serialization failed\n"];
+    } else if (headRequest) {
+      [response setTextBody:@""];
     }
     response.committed = YES;
     return YES;
@@ -1342,7 +1428,8 @@ static BOOL ALNValidateResponseContractIfNeeded(ALNApplication *application,
   return YES;
 }
 
-static void ALNFinalizeResponse(ALNResponse *response,
+static void ALNFinalizeResponse(ALNApplication *application,
+                                ALNResponse *response,
                                 ALNPerfTrace *trace,
                                 ALNRequest *request,
                                 NSString *requestID,
@@ -1378,6 +1465,12 @@ static void ALNFinalizeResponse(ALNResponse *response,
 
   if ([requestID length] > 0) {
     [response setHeader:@"X-Request-Id" value:requestID];
+  }
+  if (application.clusterEmitHeaders) {
+    [response setHeader:@"X-Arlen-Cluster" value:application.clusterName ?: @"default"];
+    [response setHeader:@"X-Arlen-Node" value:application.clusterNodeID ?: @"node"];
+    [response setHeader:@"X-Arlen-Worker-Pid"
+                  value:[NSString stringWithFormat:@"%d", (int)getpid()]];
   }
 }
 
@@ -1752,7 +1845,7 @@ static void ALNFinalizeResponse(ALNResponse *response,
       [response setHeader:@"Content-Type" value:@"text/plain; charset=utf-8"];
       response.committed = YES;
     }
-    ALNFinalizeResponse(response, trace, request, requestID, performanceLogging);
+    ALNFinalizeResponse(self, response, trace, request, requestID, performanceLogging);
     ALNRecordRequestMetrics(self, response, trace);
     [self.metrics addGauge:@"http_requests_active" delta:-1.0];
 
@@ -2093,7 +2186,7 @@ static void ALNFinalizeResponse(ALNResponse *response,
                                             returnValue,
                                             requestID);
 
-  ALNFinalizeResponse(response, trace, request, requestID, performanceLogging);
+  ALNFinalizeResponse(self, response, trace, request, requestID, performanceLogging);
   ALNRecordRequestMetrics(self, response, trace);
   [self.metrics addGauge:@"http_requests_active" delta:-1.0];
 

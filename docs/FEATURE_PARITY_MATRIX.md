@@ -21,6 +21,7 @@ Related docs:
 
 - In Scope: required for Arlen core roadmap and release planning.
 - Deferred: desired for parity/maturity but intentionally scheduled after current core milestones.
+- Maybe Someday: strategically interesting but intentionally unscheduled and not part of active phase commitments.
 - Out of Scope: intentionally excluded from Arlen core; may be plugin/ecosystem concerns later.
 
 ## 3. Cocoa-Forward Design Pillars
@@ -69,7 +70,7 @@ Related docs:
 | Metrics and telemetry primitives | Phoenix | In Scope | Phase 3A | First-class observability posture. |
 | Release packaging with `server`/`migrate` workflow | Phoenix | In Scope | Phase 2D-3C | Core compiled-framework deployment contract. |
 | Realtime channels/pubsub abstraction | Phoenix | In Scope | Phase 3D (complete) | Delivered with `ALNRealtimeHub` channel fanout abstraction over websocket channel mode. |
-| LiveView-like server-driven UI | Phoenix | Deferred | Post-3D exploratory track | Strategic but high-scope; not on core path yet. |
+| LiveView-like server-driven UI | Phoenix | Maybe Someday | Unscheduled backlog | Strategic but high-scope; reconsider after clustering/runtime maturity. |
 | Background jobs abstraction | Rails | In Scope | Phase 3E (complete) | Delivered as plugin-first `ALNJobAdapter` contract with in-memory baseline and conformance suite. |
 | File attachment abstraction | Rails | In Scope | Phase 3E (complete) | Delivered via `ALNAttachmentAdapter` with optional adapter replacement through plugins. |
 | Mail delivery abstraction | Rails | In Scope | Phase 3E (complete) | Delivered via `ALNMailAdapter` + `ALNMailMessage` contract with plugin override support. |
@@ -80,15 +81,15 @@ Related docs:
 | Static mount allowlist/index ergonomics | Express/FastAPI static serving patterns | In Scope | Phase 3F (complete) | Completed with explicit static mount contract and tested allowlist + canonical redirect behavior. |
 | SQL::Abstract-family capability parity (Objective-C API) | SQL::Abstract ecosystem | In Scope | Phase 3G (complete) | Delivered via `ALNSQLBuilder` v2 (nested predicates, joins/aliases, CTE/subquery composition, grouping/having, returning) with deterministic snapshot coverage. |
 | Standalone reusable data-layer module (`ArlenData`) | Multi-framework DB toolkit ecosystems | In Scope | Phase 3G (complete) | Delivered via `src/ArlenData/ArlenData.h`, standalone sample/target (`make test-data-layer`), and distribution/versioning guidance in `docs/ARLEN_DATA.md`. |
-| Multi-node clustering primitives | Phoenix | Deferred | Post-3E | Requires stronger distributed runtime contracts. |
-| Full ORM as default framework layer | Rails | Deferred | Phase 3B optional track | Keep raw SQL first-class; ORM is additive only. |
+| Multi-node clustering primitives | Phoenix | In Scope | Phase 3H (complete) | Delivered runtime cluster contracts (`/clusterz`, cluster headers) and propane cluster controls with integration coverage. |
+| Full ORM as default framework layer | Rails | Maybe Someday | Unscheduled backlog | Keep raw SQL first-class; ORM remains optional/additive unless priorities change. |
 | Django-style admin/backoffice product | Django | Out of Scope | N/A | Better delivered as an optional separate product/module, not core runtime. |
 | Full account-management product (registration/reset/provider workflows) | Django/Rails/FastAPI ecosystems | Out of Scope | N/A | Keep auth primitives in core; full account workflows live in optional product layers. |
 | Ecosystem package volume as a core milestone | npm/PyPI ecosystems | Out of Scope | N/A | Core guarantees extension contracts; package breadth is platform/community-driven. |
 | Inbound email framework | Rails | Out of Scope | N/A | Niche workload for Arlen core. |
 | Rich-text/CMS layer | Rails | Out of Scope | N/A | Better as ecosystem/package concern. |
 | Asset pipeline in core runtime | Rails | Out of Scope | N/A | Prefer integration with external frontend toolchains. |
-| Official frontend toolchain integration guides/starters | Node/Vite ecosystems | In Scope | Post-3G planned | Keep core runtime slim while documenting practical frontend integration paths. |
+| Official frontend toolchain integration guides/starters | Node/Vite ecosystems | In Scope | Post-3H planned | Keep core runtime slim while documenting practical frontend integration paths. |
 
 ## 6. GNUstepWeb Migration Compatibility Classification
 
