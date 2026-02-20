@@ -280,11 +280,16 @@ static NSSet *ALNSQLBuilderAllowedJoinOperators(void) {
 @property(nonatomic, strong) NSMutableArray *joins;
 @property(nonatomic, strong) NSMutableArray *groupByFields;
 @property(nonatomic, strong) NSMutableArray *ctes;
+@property(nonatomic, strong) NSMutableArray *windowClauses;
+@property(nonatomic, strong) NSMutableArray *setOperations;
 @property(nonatomic, strong) NSMutableArray *returningColumns;
 @property(nonatomic, assign) NSUInteger limitValue;
 @property(nonatomic, assign) NSUInteger offsetValue;
 @property(nonatomic, assign) BOOL hasLimit;
 @property(nonatomic, assign) BOOL hasOffset;
+@property(nonatomic, copy) NSString *rowLockMode;
+@property(nonatomic, copy) NSArray *rowLockTables;
+@property(nonatomic, assign) BOOL rowLockSkipLocked;
 
 @end
 
@@ -343,9 +348,14 @@ static NSSet *ALNSQLBuilderAllowedJoinOperators(void) {
     _joins = [NSMutableArray array];
     _groupByFields = [NSMutableArray array];
     _ctes = [NSMutableArray array];
+    _windowClauses = [NSMutableArray array];
+    _setOperations = [NSMutableArray array];
     _returningColumns = [NSMutableArray array];
     _hasLimit = NO;
     _hasOffset = NO;
+    _rowLockMode = @"";
+    _rowLockTables = @[];
+    _rowLockSkipLocked = NO;
   }
   return self;
 }
@@ -398,6 +408,48 @@ static NSSet *ALNSQLBuilderAllowedJoinOperators(void) {
     @"operator" : ([normalized length] > 0 ? normalized : @"="),
     @"value" : value ?: [NSNull null],
     @"kind" : @"operator"
+  }];
+  return self;
+}
+
+- (instancetype)whereExistsSubquery:(ALNSQLBuilder *)subquery {
+  [self.whereClauses addObject:@{
+    @"kind" : @"exists-subquery",
+    @"query" : subquery ?: [NSNull null],
+  }];
+  return self;
+}
+
+- (instancetype)whereNotExistsSubquery:(ALNSQLBuilder *)subquery {
+  [self.whereClauses addObject:@{
+    @"kind" : @"not-exists-subquery",
+    @"query" : subquery ?: [NSNull null],
+  }];
+  return self;
+}
+
+- (instancetype)whereField:(NSString *)field
+                  operator:(NSString *)operatorName
+               anySubquery:(ALNSQLBuilder *)subquery {
+  NSString *normalized = ALNSQLBuilderNormalizeOperator(operatorName ?: @"=");
+  [self.whereClauses addObject:@{
+    @"kind" : @"any-subquery",
+    @"field" : field ?: @"",
+    @"operator" : ([normalized length] > 0 ? normalized : @"="),
+    @"query" : subquery ?: [NSNull null],
+  }];
+  return self;
+}
+
+- (instancetype)whereField:(NSString *)field
+                  operator:(NSString *)operatorName
+               allSubquery:(ALNSQLBuilder *)subquery {
+  NSString *normalized = ALNSQLBuilderNormalizeOperator(operatorName ?: @"=");
+  [self.whereClauses addObject:@{
+    @"kind" : @"all-subquery",
+    @"field" : field ?: @"",
+    @"operator" : ([normalized length] > 0 ? normalized : @"="),
+    @"query" : subquery ?: [NSNull null],
   }];
   return self;
 }
@@ -530,6 +582,7 @@ static NSSet *ALNSQLBuilderAllowedJoinOperators(void) {
     @"operator" : ([normalized length] > 0 ? normalized : @"="),
     @"right" : rightField ?: @"",
     @"lateral" : @(NO),
+    @"conditionKind" : @"on-fields",
   }];
   return self;
 }
@@ -549,6 +602,7 @@ static NSSet *ALNSQLBuilderAllowedJoinOperators(void) {
     @"operator" : ([normalized length] > 0 ? normalized : @"="),
     @"right" : rightField ?: @"",
     @"lateral" : @(NO),
+    @"conditionKind" : @"on-fields",
   }];
   return self;
 }
@@ -568,6 +622,100 @@ static NSSet *ALNSQLBuilderAllowedJoinOperators(void) {
     @"operator" : ([normalized length] > 0 ? normalized : @"="),
     @"right" : rightField ?: @"",
     @"lateral" : @(NO),
+    @"conditionKind" : @"on-fields",
+  }];
+  return self;
+}
+
+- (instancetype)fullJoinTable:(NSString *)tableName
+                         alias:(NSString *)alias
+                   onLeftField:(NSString *)leftField
+                      operator:(NSString *)operatorName
+                  onRightField:(NSString *)rightField {
+  NSString *normalized = ALNSQLBuilderNormalizeOperator(operatorName ?: @"=");
+  [self.joins addObject:@{
+    @"kind" : @"table",
+    @"type" : @"FULL",
+    @"table" : tableName ?: @"",
+    @"alias" : alias ?: @"",
+    @"left" : leftField ?: @"",
+    @"operator" : ([normalized length] > 0 ? normalized : @"="),
+    @"right" : rightField ?: @"",
+    @"lateral" : @(NO),
+    @"conditionKind" : @"on-fields",
+  }];
+  return self;
+}
+
+- (instancetype)crossJoinTable:(NSString *)tableName
+                         alias:(NSString *)alias {
+  [self.joins addObject:@{
+    @"kind" : @"table",
+    @"type" : @"CROSS",
+    @"table" : tableName ?: @"",
+    @"alias" : alias ?: @"",
+    @"lateral" : @(NO),
+    @"conditionKind" : @"none",
+  }];
+  return self;
+}
+
+- (instancetype)joinTable:(NSString *)tableName
+                    alias:(NSString *)alias
+               usingFields:(NSArray<NSString *> *)fields {
+  [self.joins addObject:@{
+    @"kind" : @"table",
+    @"type" : @"INNER",
+    @"table" : tableName ?: @"",
+    @"alias" : alias ?: @"",
+    @"lateral" : @(NO),
+    @"conditionKind" : @"using-fields",
+    @"usingFields" : fields ?: @[],
+  }];
+  return self;
+}
+
+- (instancetype)leftJoinTable:(NSString *)tableName
+                        alias:(NSString *)alias
+                   usingFields:(NSArray<NSString *> *)fields {
+  [self.joins addObject:@{
+    @"kind" : @"table",
+    @"type" : @"LEFT",
+    @"table" : tableName ?: @"",
+    @"alias" : alias ?: @"",
+    @"lateral" : @(NO),
+    @"conditionKind" : @"using-fields",
+    @"usingFields" : fields ?: @[],
+  }];
+  return self;
+}
+
+- (instancetype)rightJoinTable:(NSString *)tableName
+                         alias:(NSString *)alias
+                    usingFields:(NSArray<NSString *> *)fields {
+  [self.joins addObject:@{
+    @"kind" : @"table",
+    @"type" : @"RIGHT",
+    @"table" : tableName ?: @"",
+    @"alias" : alias ?: @"",
+    @"lateral" : @(NO),
+    @"conditionKind" : @"using-fields",
+    @"usingFields" : fields ?: @[],
+  }];
+  return self;
+}
+
+- (instancetype)fullJoinTable:(NSString *)tableName
+                         alias:(NSString *)alias
+                    usingFields:(NSArray<NSString *> *)fields {
+  [self.joins addObject:@{
+    @"kind" : @"table",
+    @"type" : @"FULL",
+    @"table" : tableName ?: @"",
+    @"alias" : alias ?: @"",
+    @"lateral" : @(NO),
+    @"conditionKind" : @"using-fields",
+    @"usingFields" : fields ?: @[],
   }];
   return self;
 }
@@ -648,6 +796,33 @@ static NSSet *ALNSQLBuilderAllowedJoinOperators(void) {
     @"alias" : alias ?: @"",
     @"onExpressionIR" : ALNSQLBuilderMakeExpressionIR(expression, parameters, identifierBindings),
     @"type" : @"RIGHT",
+    @"lateral" : @(NO),
+  }];
+  return self;
+}
+
+- (instancetype)fullJoinSubquery:(ALNSQLBuilder *)subquery
+                            alias:(NSString *)alias
+                     onExpression:(NSString *)expression
+                       parameters:(NSArray *)parameters {
+  return [self fullJoinSubquery:subquery
+                          alias:alias
+                   onExpression:expression
+             identifierBindings:nil
+                     parameters:parameters];
+}
+
+- (instancetype)fullJoinSubquery:(ALNSQLBuilder *)subquery
+                            alias:(NSString *)alias
+                     onExpression:(NSString *)expression
+               identifierBindings:(NSDictionary<NSString *, NSString *> *)identifierBindings
+                       parameters:(NSArray *)parameters {
+  [self.joins addObject:@{
+    @"kind" : @"subquery",
+    @"query" : subquery ?: [NSNull null],
+    @"alias" : alias ?: @"",
+    @"onExpressionIR" : ALNSQLBuilderMakeExpressionIR(expression, parameters, identifierBindings),
+    @"type" : @"FULL",
     @"lateral" : @(NO),
   }];
   return self;
@@ -734,6 +909,33 @@ static NSSet *ALNSQLBuilderAllowedJoinOperators(void) {
   return self;
 }
 
+- (instancetype)fullJoinLateralSubquery:(ALNSQLBuilder *)subquery
+                                   alias:(NSString *)alias
+                            onExpression:(NSString *)expression
+                              parameters:(NSArray *)parameters {
+  return [self fullJoinLateralSubquery:subquery
+                                  alias:alias
+                           onExpression:expression
+                     identifierBindings:nil
+                             parameters:parameters];
+}
+
+- (instancetype)fullJoinLateralSubquery:(ALNSQLBuilder *)subquery
+                                   alias:(NSString *)alias
+                            onExpression:(NSString *)expression
+                      identifierBindings:(NSDictionary<NSString *, NSString *> *)identifierBindings
+                              parameters:(NSArray *)parameters {
+  [self.joins addObject:@{
+    @"kind" : @"subquery",
+    @"query" : subquery ?: [NSNull null],
+    @"alias" : alias ?: @"",
+    @"onExpressionIR" : ALNSQLBuilderMakeExpressionIR(expression, parameters, identifierBindings),
+    @"type" : @"FULL",
+    @"lateral" : @(YES),
+  }];
+  return self;
+}
+
 - (instancetype)groupByField:(NSString *)field {
   if ([field length] > 0) {
     [self.groupByFields addObject:[field copy]];
@@ -815,8 +1017,15 @@ static NSSet *ALNSQLBuilderAllowedJoinOperators(void) {
 }
 
 - (instancetype)withCTE:(NSString *)name builder:(ALNSQLBuilder *)builder {
+  return [self withCTE:name columns:nil builder:builder];
+}
+
+- (instancetype)withCTE:(NSString *)name
+                columns:(NSArray<NSString *> *)columns
+                builder:(ALNSQLBuilder *)builder {
   [self.ctes addObject:@{
     @"name" : name ?: @"",
+    @"columns" : columns ?: @[],
     @"query" : builder ?: [NSNull null],
     @"recursive" : @(NO)
   }];
@@ -825,10 +1034,69 @@ static NSSet *ALNSQLBuilderAllowedJoinOperators(void) {
 
 - (instancetype)withRecursiveCTE:(NSString *)name
                          builder:(ALNSQLBuilder *)builder {
+  return [self withRecursiveCTE:name columns:nil builder:builder];
+}
+
+- (instancetype)withRecursiveCTE:(NSString *)name
+                         columns:(NSArray<NSString *> *)columns
+                         builder:(ALNSQLBuilder *)builder {
   [self.ctes addObject:@{
     @"name" : name ?: @"",
+    @"columns" : columns ?: @[],
     @"query" : builder ?: [NSNull null],
     @"recursive" : @(YES)
+  }];
+  return self;
+}
+
+- (instancetype)windowNamed:(NSString *)name
+                 expression:(NSString *)expression
+                 parameters:(NSArray *)parameters {
+  return [self windowNamed:name
+                expression:expression
+       identifierBindings:nil
+                parameters:parameters];
+}
+
+- (instancetype)windowNamed:(NSString *)name
+                 expression:(NSString *)expression
+        identifierBindings:(NSDictionary<NSString *, NSString *> *)identifierBindings
+                 parameters:(NSArray *)parameters {
+  [self.windowClauses addObject:@{
+    @"name" : name ?: @"",
+    @"expressionIR" : ALNSQLBuilderMakeExpressionIR(expression, parameters, identifierBindings),
+  }];
+  return self;
+}
+
+- (instancetype)unionWith:(ALNSQLBuilder *)builder {
+  [self.setOperations addObject:@{
+    @"operator" : @"UNION",
+    @"query" : builder ?: [NSNull null],
+  }];
+  return self;
+}
+
+- (instancetype)unionAllWith:(ALNSQLBuilder *)builder {
+  [self.setOperations addObject:@{
+    @"operator" : @"UNION ALL",
+    @"query" : builder ?: [NSNull null],
+  }];
+  return self;
+}
+
+- (instancetype)intersectWith:(ALNSQLBuilder *)builder {
+  [self.setOperations addObject:@{
+    @"operator" : @"INTERSECT",
+    @"query" : builder ?: [NSNull null],
+  }];
+  return self;
+}
+
+- (instancetype)exceptWith:(ALNSQLBuilder *)builder {
+  [self.setOperations addObject:@{
+    @"operator" : @"EXCEPT",
+    @"query" : builder ?: [NSNull null],
   }];
   return self;
 }
@@ -893,6 +1161,23 @@ static NSSet *ALNSQLBuilderAllowedJoinOperators(void) {
 - (instancetype)offset:(NSUInteger)offset {
   self.offsetValue = offset;
   self.hasOffset = YES;
+  return self;
+}
+
+- (instancetype)forUpdate {
+  self.rowLockMode = @"FOR UPDATE";
+  self.rowLockTables = @[];
+  return self;
+}
+
+- (instancetype)forUpdateOfTables:(NSArray<NSString *> *)tables {
+  self.rowLockMode = @"FOR UPDATE";
+  self.rowLockTables = [tables copy] ?: @[];
+  return self;
+}
+
+- (instancetype)skipLocked {
+  self.rowLockSkipLocked = YES;
   return self;
 }
 
@@ -1385,6 +1670,20 @@ static NSSet *ALNSQLBuilderAllowedJoinOperators(void) {
       continue;
     }
 
+    if ([kind isEqualToString:@"exists-subquery"] || [kind isEqualToString:@"not-exists-subquery"]) {
+      ALNSQLBuilder *subquery = [clause[@"query"] isKindOfClass:[ALNSQLBuilder class]]
+                                    ? clause[@"query"]
+                                    : nil;
+      NSString *subquerySQL = [self compileSubquery:subquery parameters:parameters error:error];
+      if (subquerySQL == nil) {
+        return nil;
+      }
+      [fragments addObject:[NSString stringWithFormat:@"%@ (%@)",
+                                                       [kind isEqualToString:@"not-exists-subquery"] ? @"NOT EXISTS" : @"EXISTS",
+                                                       subquerySQL]];
+      continue;
+    }
+
     if (!ALNSQLBuilderIdentifierIsSafe(field)) {
       if (error != NULL) {
         *error = ALNSQLBuilderMakeError(ALNSQLBuilderErrorInvalidIdentifier,
@@ -1451,6 +1750,34 @@ static NSSet *ALNSQLBuilderAllowedJoinOperators(void) {
       [fragments addObject:[NSString stringWithFormat:@"%@ %@ (%@)",
                                                        quotedField,
                                                        [kind isEqualToString:@"subquery-not-in"] ? @"NOT IN" : @"IN",
+                                                       subquerySQL]];
+      continue;
+    }
+
+    if ([kind isEqualToString:@"any-subquery"] || [kind isEqualToString:@"all-subquery"]) {
+      NSString *operatorName = [clause[@"operator"] isKindOfClass:[NSString class]]
+                                   ? ALNSQLBuilderNormalizeOperator(clause[@"operator"])
+                                   : @"=";
+      if (![ALNSQLBuilderAllowedComparisonOperators() containsObject:operatorName]) {
+        if (error != NULL) {
+          *error = ALNSQLBuilderMakeError(ALNSQLBuilderErrorUnsupportedOperator,
+                                          @"unsupported ANY/ALL operator",
+                                          operatorName);
+        }
+        return nil;
+      }
+
+      ALNSQLBuilder *subquery = [clause[@"query"] isKindOfClass:[ALNSQLBuilder class]]
+                                    ? clause[@"query"]
+                                    : nil;
+      NSString *subquerySQL = [self compileSubquery:subquery parameters:parameters error:error];
+      if (subquerySQL == nil) {
+        return nil;
+      }
+      [fragments addObject:[NSString stringWithFormat:@"%@ %@ %@ (%@)",
+                                                       quotedField,
+                                                       operatorName,
+                                                       [kind isEqualToString:@"any-subquery"] ? @"ANY" : @"ALL",
                                                        subquerySQL]];
       continue;
     }
@@ -1566,6 +1893,49 @@ static NSSet *ALNSQLBuilderAllowedJoinOperators(void) {
   return YES;
 }
 
+- (BOOL)appendWindowSQLTo:(NSMutableString *)sql
+               parameters:(NSMutableArray *)parameters
+                    error:(NSError **)error {
+  if ([self.windowClauses count] == 0) {
+    return YES;
+  }
+  if (self.kind != ALNSQLBuilderKindSelect) {
+    if (error != NULL) {
+      *error = ALNSQLBuilderMakeError(ALNSQLBuilderErrorInvalidArgument,
+                                      @"WINDOW clauses are only supported for select builders",
+                                      self.tableName);
+    }
+    return NO;
+  }
+
+  NSMutableArray *fragments = [NSMutableArray arrayWithCapacity:[self.windowClauses count]];
+  for (NSDictionary *entry in self.windowClauses) {
+    NSString *name = [entry[@"name"] isKindOfClass:[NSString class]] ? entry[@"name"] : @"";
+    if (!ALNSQLBuilderAliasIsSafe(name)) {
+      if (error != NULL) {
+        *error = ALNSQLBuilderMakeError(ALNSQLBuilderErrorInvalidIdentifier,
+                                        @"invalid window name",
+                                        name);
+      }
+      return NO;
+    }
+
+    NSString *expression = [self compileExpressionIR:entry[@"expressionIR"]
+                                      intoParameters:parameters
+                                             context:@"window"
+                                               error:error];
+    if (expression == nil) {
+      return NO;
+    }
+    [fragments addObject:[NSString stringWithFormat:@"\"%@\" AS (%@)", name, expression]];
+  }
+
+  if ([fragments count] > 0) {
+    [sql appendFormat:@" WINDOW %@", [fragments componentsJoinedByString:@", "]];
+  }
+  return YES;
+}
+
 - (BOOL)appendOrderBySQLTo:(NSMutableString *)sql
                  parameters:(NSMutableArray *)parameters
                       error:(NSError **)error {
@@ -1626,6 +1996,63 @@ static NSSet *ALNSQLBuilderAllowedJoinOperators(void) {
   return YES;
 }
 
+- (BOOL)appendRowLockSQLTo:(NSMutableString *)sql error:(NSError **)error {
+  if ([self.rowLockMode length] == 0) {
+    if (self.rowLockSkipLocked) {
+      if (error != NULL) {
+        *error = ALNSQLBuilderMakeError(ALNSQLBuilderErrorInvalidArgument,
+                                        @"SKIP LOCKED requires FOR UPDATE",
+                                        self.tableName);
+      }
+      return NO;
+    }
+    return YES;
+  }
+
+  if (self.kind != ALNSQLBuilderKindSelect) {
+    if (error != NULL) {
+      *error = ALNSQLBuilderMakeError(ALNSQLBuilderErrorInvalidArgument,
+                                      @"row-lock clauses are only supported for select builders",
+                                      self.tableName);
+    }
+    return NO;
+  }
+
+  NSString *lockMode = ALNSQLBuilderNormalizeOperator(self.rowLockMode);
+  if (![lockMode isEqualToString:@"FOR UPDATE"]) {
+    if (error != NULL) {
+      *error = ALNSQLBuilderMakeError(ALNSQLBuilderErrorInvalidArgument,
+                                      @"unsupported row-lock mode",
+                                      self.rowLockMode);
+    }
+    return NO;
+  }
+
+  [sql appendString:@" FOR UPDATE"];
+
+  if ([self.rowLockTables count] > 0) {
+    NSMutableArray *quotedTables = [NSMutableArray arrayWithCapacity:[self.rowLockTables count]];
+    for (id rawTable in self.rowLockTables) {
+      NSString *table = [rawTable isKindOfClass:[NSString class]] ? rawTable : @"";
+      if (!ALNSQLBuilderIdentifierIsSafe(table)) {
+        if (error != NULL) {
+          *error = ALNSQLBuilderMakeError(ALNSQLBuilderErrorInvalidIdentifier,
+                                          @"invalid FOR UPDATE table",
+                                          table);
+        }
+        return NO;
+      }
+      [quotedTables addObject:ALNSQLBuilderQuoteIdentifier(table)];
+    }
+    [sql appendFormat:@" OF %@", [quotedTables componentsJoinedByString:@", "]];
+  }
+
+  if (self.rowLockSkipLocked) {
+    [sql appendString:@" SKIP LOCKED"];
+  }
+  return YES;
+}
+
 - (BOOL)appendJoinSQLTo:(NSMutableString *)sql
              parameters:(NSMutableArray *)parameters
                   error:(NSError **)error {
@@ -1639,6 +2066,8 @@ static NSSet *ALNSQLBuilderAllowedJoinOperators(void) {
                              : @"INNER";
     if (![joinType isEqualToString:@"LEFT"] &&
         ![joinType isEqualToString:@"RIGHT"] &&
+        ![joinType isEqualToString:@"FULL"] &&
+        ![joinType isEqualToString:@"CROSS"] &&
         ![joinType isEqualToString:@"INNER"]) {
       joinType = @"INNER";
     }
@@ -1698,6 +2127,56 @@ static NSSet *ALNSQLBuilderAllowedJoinOperators(void) {
       return NO;
     }
 
+    NSString *conditionKind = [join[@"conditionKind"] isKindOfClass:[NSString class]]
+                                  ? join[@"conditionKind"]
+                                  : @"on-fields";
+    if ([conditionKind isEqualToString:@"none"]) {
+      if (![joinType isEqualToString:@"CROSS"]) {
+        if (error != NULL) {
+          *error = ALNSQLBuilderMakeError(ALNSQLBuilderErrorInvalidArgument,
+                                          @"join without condition is only valid for CROSS JOIN",
+                                          table);
+        }
+        return NO;
+      }
+      [sql appendFormat:@" CROSS JOIN %@", tableReference];
+      continue;
+    }
+
+    if ([conditionKind isEqualToString:@"using-fields"]) {
+      NSArray *rawFields = [join[@"usingFields"] isKindOfClass:[NSArray class]]
+                               ? join[@"usingFields"]
+                               : @[];
+      if ([rawFields count] == 0) {
+        if (error != NULL) {
+          *error = ALNSQLBuilderMakeError(ALNSQLBuilderErrorInvalidArgument,
+                                          @"USING join requires at least one field",
+                                          table);
+        }
+        return NO;
+      }
+
+      NSMutableArray *quotedFields = [NSMutableArray arrayWithCapacity:[rawFields count]];
+      for (id rawField in rawFields) {
+        NSString *field = [rawField isKindOfClass:[NSString class]] ? rawField : @"";
+        if (!ALNSQLBuilderAliasIsSafe(field)) {
+          if (error != NULL) {
+            *error = ALNSQLBuilderMakeError(ALNSQLBuilderErrorInvalidIdentifier,
+                                            @"invalid USING join field",
+                                            field);
+          }
+          return NO;
+        }
+        [quotedFields addObject:ALNSQLBuilderQuoteIdentifier(field)];
+      }
+
+      [sql appendFormat:@" %@ JOIN %@ USING (%@)",
+                        joinType,
+                        tableReference,
+                        [quotedFields componentsJoinedByString:@", "]];
+      continue;
+    }
+
     NSString *left = [join[@"left"] isKindOfClass:[NSString class]] ? join[@"left"] : @"";
     NSString *right = [join[@"right"] isKindOfClass:[NSString class]] ? join[@"right"] : @"";
     if (!ALNSQLBuilderIdentifierIsSafe(left) || !ALNSQLBuilderIdentifierIsSafe(right)) {
@@ -1737,12 +2216,24 @@ static NSSet *ALNSQLBuilderAllowedJoinOperators(void) {
   if ([self.ctes count] == 0) {
     return YES;
   }
+  if (self.kind != ALNSQLBuilderKindSelect &&
+      self.kind != ALNSQLBuilderKindInsert &&
+      self.kind != ALNSQLBuilderKindUpdate &&
+      self.kind != ALNSQLBuilderKindDelete) {
+    if (error != NULL) {
+      *error = ALNSQLBuilderMakeError(ALNSQLBuilderErrorInvalidArgument,
+                                      @"CTEs require a valid builder kind",
+                                      self.tableName);
+    }
+    return NO;
+  }
 
   NSMutableArray *fragments = [NSMutableArray arrayWithCapacity:[self.ctes count]];
   BOOL hasRecursive = NO;
 
   for (NSDictionary *entry in self.ctes) {
     NSString *name = [entry[@"name"] isKindOfClass:[NSString class]] ? entry[@"name"] : @"";
+    NSArray *columns = [entry[@"columns"] isKindOfClass:[NSArray class]] ? entry[@"columns"] : @[];
     ALNSQLBuilder *builder = [entry[@"query"] isKindOfClass:[ALNSQLBuilder class]]
                                  ? entry[@"query"]
                                  : nil;
@@ -1762,8 +2253,27 @@ static NSSet *ALNSQLBuilderAllowedJoinOperators(void) {
       return NO;
     }
 
-    [fragments addObject:[NSString stringWithFormat:@"\"%@\" AS (%@)",
+    NSString *columnsClause = @"";
+    if ([columns count] > 0) {
+      NSMutableArray *quotedColumns = [NSMutableArray arrayWithCapacity:[columns count]];
+      for (id rawColumn in columns) {
+        NSString *column = [rawColumn isKindOfClass:[NSString class]] ? rawColumn : @"";
+        if (!ALNSQLBuilderAliasIsSafe(column)) {
+          if (error != NULL) {
+            *error = ALNSQLBuilderMakeError(ALNSQLBuilderErrorInvalidIdentifier,
+                                            @"invalid CTE column name",
+                                            column);
+          }
+          return NO;
+        }
+        [quotedColumns addObject:ALNSQLBuilderQuoteIdentifier(column)];
+      }
+      columnsClause = [NSString stringWithFormat:@" (%@)", [quotedColumns componentsJoinedByString:@", "]];
+    }
+
+    [fragments addObject:[NSString stringWithFormat:@"\"%@\"%@ AS (%@)",
                                                      name,
+                                                     columnsClause,
                                                      subquerySQL]];
     hasRecursive = hasRecursive || recursive;
   }
@@ -1774,6 +2284,49 @@ static NSSet *ALNSQLBuilderAllowedJoinOperators(void) {
                       [fragments componentsJoinedByString:@", "]];
   }
   return YES;
+}
+
+- (nullable NSString *)compileSetOperationsFromBaseSQL:(NSString *)baseSQL
+                                             parameters:(NSMutableArray *)parameters
+                                                  error:(NSError **)error {
+  if ([self.setOperations count] == 0) {
+    return baseSQL ?: @"";
+  }
+  if (self.kind != ALNSQLBuilderKindSelect) {
+    if (error != NULL) {
+      *error = ALNSQLBuilderMakeError(ALNSQLBuilderErrorInvalidArgument,
+                                      @"set operations are only supported for select builders",
+                                      self.tableName);
+    }
+    return nil;
+  }
+
+  NSMutableString *composed = [NSMutableString stringWithFormat:@"(%@)", baseSQL ?: @""];
+  NSSet *allowed = [NSSet setWithArray:@[ @"UNION", @"UNION ALL", @"INTERSECT", @"EXCEPT" ]];
+
+  for (NSDictionary *entry in self.setOperations) {
+    NSString *op = [entry[@"operator"] isKindOfClass:[NSString class]]
+                       ? ALNSQLBuilderNormalizeOperator(entry[@"operator"])
+                       : @"";
+    if (![allowed containsObject:op]) {
+      if (error != NULL) {
+        *error = ALNSQLBuilderMakeError(ALNSQLBuilderErrorInvalidArgument,
+                                        @"unsupported set operation",
+                                        op);
+      }
+      return nil;
+    }
+    ALNSQLBuilder *query = [entry[@"query"] isKindOfClass:[ALNSQLBuilder class]]
+                               ? entry[@"query"]
+                               : nil;
+    NSString *subquerySQL = [self compileSubquery:query parameters:parameters error:error];
+    if (subquerySQL == nil) {
+      return nil;
+    }
+    [composed appendFormat:@" %@ (%@)", op, subquerySQL];
+  }
+
+  return [NSString stringWithString:composed];
 }
 
 - (nullable NSDictionary *)build:(NSError **)error {
@@ -1828,6 +2381,9 @@ static NSSet *ALNSQLBuilderAllowedJoinOperators(void) {
       if (![self appendHavingClauseSQLTo:sql parameters:parameters error:error]) {
         return nil;
       }
+      if (![self appendWindowSQLTo:sql parameters:parameters error:error]) {
+        return nil;
+      }
       if (![self appendOrderBySQLTo:sql parameters:parameters error:error]) {
         return nil;
       }
@@ -1836,6 +2392,9 @@ static NSSet *ALNSQLBuilderAllowedJoinOperators(void) {
       }
       if (self.hasOffset) {
         [sql appendFormat:@" OFFSET %lu", (unsigned long)self.offsetValue];
+      }
+      if (![self appendRowLockSQLTo:sql error:error]) {
+        return nil;
       }
       break;
     }
@@ -1926,6 +2485,16 @@ static NSSet *ALNSQLBuilderAllowedJoinOperators(void) {
       }
       return nil;
     }
+  }
+
+  NSString *setOperationSQL = [self compileSetOperationsFromBaseSQL:sql
+                                                          parameters:parameters
+                                                               error:error];
+  if (setOperationSQL == nil) {
+    return nil;
+  }
+  if ([self.setOperations count] > 0) {
+    [sql setString:setOperationSQL];
   }
 
   return @{

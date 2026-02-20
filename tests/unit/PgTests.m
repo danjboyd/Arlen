@@ -804,6 +804,297 @@
   [database releaseConnection:connection];
 }
 
+- (void)testSQLBuilderPhase4BFeaturesExecuteAgainstPostgres {
+  NSString *dsn = [self pgTestDSN];
+  if ([dsn length] == 0) {
+    return;
+  }
+
+  NSError *error = nil;
+  ALNPg *database = [[ALNPg alloc] initWithConnectionString:dsn maxConnections:2 error:&error];
+  XCTAssertNil(error);
+  XCTAssertNotNil(database);
+  if (database == nil) {
+    return;
+  }
+
+  ALNPgConnection *connection = [database acquireConnection:&error];
+  XCTAssertNil(error);
+  XCTAssertNotNil(connection);
+  if (connection == nil) {
+    return;
+  }
+
+  NSString *activeDocsTable = [self uniqueNameWithPrefix:@"arlen_pg_4b_active_docs"];
+  NSString *archivedDocsTable = [self uniqueNameWithPrefix:@"arlen_pg_4b_archived_docs"];
+  NSString *blockedDocsTable = [self uniqueNameWithPrefix:@"arlen_pg_4b_blocked_docs"];
+  NSString *scoresTable = [self uniqueNameWithPrefix:@"arlen_pg_4b_scores"];
+  NSString *usersTable = [self uniqueNameWithPrefix:@"arlen_pg_4b_users"];
+  NSString *eventsTable = [self uniqueNameWithPrefix:@"arlen_pg_4b_events"];
+  NSString *thresholdsTable = [self uniqueNameWithPrefix:@"arlen_pg_4b_thresholds"];
+  NSString *minimaTable = [self uniqueNameWithPrefix:@"arlen_pg_4b_minima"];
+  NSString *joinUsersTable = [self uniqueNameWithPrefix:@"arlen_pg_4b_join_users"];
+  NSString *profilesTable = [self uniqueNameWithPrefix:@"arlen_pg_4b_profiles"];
+  NSString *rolesTable = [self uniqueNameWithPrefix:@"arlen_pg_4b_roles"];
+  NSString *tenantsTable = [self uniqueNameWithPrefix:@"arlen_pg_4b_tenants"];
+  NSString *jobsTable = [self uniqueNameWithPrefix:@"arlen_pg_4b_jobs"];
+
+  NSArray *createStatements = @[
+    [NSString stringWithFormat:@"CREATE TABLE %@ (doc_id TEXT NOT NULL, state_code TEXT NOT NULL)", activeDocsTable],
+    [NSString stringWithFormat:@"CREATE TABLE %@ (doc_id TEXT NOT NULL, state_code TEXT NOT NULL)", archivedDocsTable],
+    [NSString stringWithFormat:@"CREATE TABLE %@ (doc_id TEXT NOT NULL, block_flag INTEGER NOT NULL)", blockedDocsTable],
+    [NSString stringWithFormat:@"CREATE TABLE %@ (user_id TEXT NOT NULL, team_id TEXT NOT NULL, score INTEGER NOT NULL)", scoresTable],
+    [NSString stringWithFormat:@"CREATE TABLE %@ (id TEXT NOT NULL, score INTEGER NOT NULL)", usersTable],
+    [NSString stringWithFormat:@"CREATE TABLE %@ (user_id TEXT NOT NULL, state TEXT NOT NULL)", eventsTable],
+    [NSString stringWithFormat:@"CREATE TABLE %@ (value INTEGER NOT NULL, category TEXT NOT NULL)", thresholdsTable],
+    [NSString stringWithFormat:@"CREATE TABLE %@ (min_score INTEGER NOT NULL, enabled INTEGER NOT NULL)", minimaTable],
+    [NSString stringWithFormat:@"CREATE TABLE %@ (user_id INTEGER NOT NULL, role_id INTEGER NOT NULL)", joinUsersTable],
+    [NSString stringWithFormat:@"CREATE TABLE %@ (user_id INTEGER NOT NULL)", profilesTable],
+    [NSString stringWithFormat:@"CREATE TABLE %@ (id INTEGER NOT NULL)", rolesTable],
+    [NSString stringWithFormat:@"CREATE TABLE %@ (kind TEXT NOT NULL)", tenantsTable],
+    [NSString stringWithFormat:@"CREATE TABLE %@ (id INTEGER NOT NULL, state TEXT NOT NULL)", jobsTable],
+  ];
+  for (NSString *statement in createStatements) {
+    NSInteger created = [connection executeCommand:statement parameters:@[] error:&error];
+    XCTAssertGreaterThanOrEqual(created, (NSInteger)0);
+    XCTAssertNil(error);
+  }
+
+  NSString *insertActiveSQL = [NSString stringWithFormat:@"INSERT INTO %@ (doc_id, state_code) VALUES ($1, $2)", activeDocsTable];
+  NSInteger affected = [connection executeCommand:insertActiveSQL
+                                       parameters:@[ @"a1", @"TX" ]
+                                            error:&error];
+  XCTAssertEqual((NSInteger)1, affected);
+  XCTAssertNil(error);
+  affected = [connection executeCommand:insertActiveSQL
+                             parameters:@[ @"shared", @"TX" ]
+                                  error:&error];
+  XCTAssertEqual((NSInteger)1, affected);
+  XCTAssertNil(error);
+
+  NSString *insertArchivedSQL =
+      [NSString stringWithFormat:@"INSERT INTO %@ (doc_id, state_code) VALUES ($1, $2)", archivedDocsTable];
+  affected = [connection executeCommand:insertArchivedSQL
+                             parameters:@[ @"b1", @"TX" ]
+                                  error:&error];
+  XCTAssertEqual((NSInteger)1, affected);
+  XCTAssertNil(error);
+  affected = [connection executeCommand:insertArchivedSQL
+                             parameters:@[ @"shared", @"TX" ]
+                                  error:&error];
+  XCTAssertEqual((NSInteger)1, affected);
+  XCTAssertNil(error);
+
+  NSString *insertBlockedSQL =
+      [NSString stringWithFormat:@"INSERT INTO %@ (doc_id, block_flag) VALUES ($1, $2)", blockedDocsTable];
+  affected = [connection executeCommand:insertBlockedSQL
+                             parameters:@[ @"shared", @1 ]
+                                  error:&error];
+  XCTAssertEqual((NSInteger)1, affected);
+  XCTAssertNil(error);
+
+  NSString *insertScoreSQL =
+      [NSString stringWithFormat:@"INSERT INTO %@ (user_id, team_id, score) VALUES ($1, $2, $3)", scoresTable];
+  NSArray *scoreRows = @[
+    @[ @"u1", @"t1", @10 ],
+    @[ @"u2", @"t1", @7 ],
+    @[ @"u3", @"t2", @4 ],
+  ];
+  for (NSArray *row in scoreRows) {
+    XCTAssertEqual((NSInteger)1, [connection executeCommand:insertScoreSQL parameters:row error:&error]);
+    XCTAssertNil(error);
+  }
+
+  NSString *insertUserSQL = [NSString stringWithFormat:@"INSERT INTO %@ (id, score) VALUES ($1, $2)", usersTable];
+  affected = [connection executeCommand:insertUserSQL parameters:@[ @"u1", @10 ] error:&error];
+  XCTAssertEqual((NSInteger)1, affected);
+  XCTAssertNil(error);
+  affected = [connection executeCommand:insertUserSQL parameters:@[ @"u2", @3 ] error:&error];
+  XCTAssertEqual((NSInteger)1, affected);
+  XCTAssertNil(error);
+
+  NSString *insertEventSQL = [NSString stringWithFormat:@"INSERT INTO %@ (user_id, state) VALUES ($1, $2)", eventsTable];
+  affected = [connection executeCommand:insertEventSQL parameters:@[ @"u1", @"ready" ] error:&error];
+  XCTAssertEqual((NSInteger)1, affected);
+  XCTAssertNil(error);
+  affected = [connection executeCommand:insertEventSQL parameters:@[ @"u2", @"pending" ] error:&error];
+  XCTAssertEqual((NSInteger)1, affected);
+  XCTAssertNil(error);
+
+  NSString *insertThresholdSQL =
+      [NSString stringWithFormat:@"INSERT INTO %@ (value, category) VALUES ($1, $2)", thresholdsTable];
+  affected = [connection executeCommand:insertThresholdSQL parameters:@[ @5, @"risk" ] error:&error];
+  XCTAssertEqual((NSInteger)1, affected);
+  XCTAssertNil(error);
+  affected = [connection executeCommand:insertThresholdSQL parameters:@[ @8, @"risk" ] error:&error];
+  XCTAssertEqual((NSInteger)1, affected);
+  XCTAssertNil(error);
+
+  NSString *insertMinimaSQL = [NSString stringWithFormat:@"INSERT INTO %@ (min_score, enabled) VALUES ($1, $2)", minimaTable];
+  affected = [connection executeCommand:insertMinimaSQL parameters:@[ @4, @1 ] error:&error];
+  XCTAssertEqual((NSInteger)1, affected);
+  XCTAssertNil(error);
+
+  NSString *insertJoinUserSQL =
+      [NSString stringWithFormat:@"INSERT INTO %@ (user_id, role_id) VALUES ($1, $2)", joinUsersTable];
+  affected = [connection executeCommand:insertJoinUserSQL parameters:@[ @1, @1 ] error:&error];
+  XCTAssertEqual((NSInteger)1, affected);
+  XCTAssertNil(error);
+  NSString *insertProfileSQL = [NSString stringWithFormat:@"INSERT INTO %@ (user_id) VALUES ($1)", profilesTable];
+  affected = [connection executeCommand:insertProfileSQL parameters:@[ @1 ] error:&error];
+  XCTAssertEqual((NSInteger)1, affected);
+  XCTAssertNil(error);
+  NSString *insertRoleSQL = [NSString stringWithFormat:@"INSERT INTO %@ (id) VALUES ($1)", rolesTable];
+  affected = [connection executeCommand:insertRoleSQL parameters:@[ @1 ] error:&error];
+  XCTAssertEqual((NSInteger)1, affected);
+  XCTAssertNil(error);
+  NSString *insertTenantSQL = [NSString stringWithFormat:@"INSERT INTO %@ (kind) VALUES ($1)", tenantsTable];
+  affected = [connection executeCommand:insertTenantSQL parameters:@[ @"default" ] error:&error];
+  XCTAssertEqual((NSInteger)1, affected);
+  XCTAssertNil(error);
+
+  NSString *insertJobSQL = [NSString stringWithFormat:@"INSERT INTO %@ (id, state) VALUES ($1, $2)", jobsTable];
+  affected = [connection executeCommand:insertJobSQL parameters:@[ @1, @"queued" ] error:&error];
+  XCTAssertEqual((NSInteger)1, affected);
+  XCTAssertNil(error);
+  affected = [connection executeCommand:insertJobSQL parameters:@[ @2, @"queued" ] error:&error];
+  XCTAssertEqual((NSInteger)1, affected);
+  XCTAssertNil(error);
+
+  ALNSQLBuilder *activeDocs = [ALNSQLBuilder selectFrom:activeDocsTable columns:@[ @"doc_id" ]];
+  [activeDocs whereField:@"state_code" equals:@"TX"];
+  ALNSQLBuilder *archivedDocs = [ALNSQLBuilder selectFrom:archivedDocsTable columns:@[ @"doc_id" ]];
+  [archivedDocs whereField:@"state_code" equals:@"TX"];
+  ALNSQLBuilder *blockedDocs = [ALNSQLBuilder selectFrom:blockedDocsTable columns:@[ @"doc_id" ]];
+  [blockedDocs whereField:@"block_flag" equals:@1];
+  [[activeDocs unionAllWith:archivedDocs] exceptWith:blockedDocs];
+  NSDictionary *setBuilt = [activeDocs build:&error];
+  XCTAssertNil(error);
+  XCTAssertNotNil(setBuilt);
+  NSArray *setRows = [connection executeQuery:setBuilt[@"sql"] parameters:setBuilt[@"parameters"] error:&error];
+  XCTAssertNil(error);
+  XCTAssertEqual((NSUInteger)2, [setRows count]);
+  NSSet *docIDs = [NSSet setWithArray:@[ setRows[0][@"doc_id"], setRows[1][@"doc_id"] ]];
+  XCTAssertTrue([docIDs containsObject:@"a1"]);
+  XCTAssertTrue([docIDs containsObject:@"b1"]);
+
+  ALNSQLBuilder *windowBuilder = [ALNSQLBuilder selectFrom:scoresTable
+                                                     alias:@"s"
+                                                   columns:@[ @"s.user_id" ]];
+  [windowBuilder selectExpression:@"ROW_NUMBER() OVER {{w}}"
+                            alias:@"row_num"
+               identifierBindings:@{ @"w" : @"rank_win" }
+                       parameters:nil];
+  [windowBuilder windowNamed:@"rank_win"
+                  expression:@"PARTITION BY {{team_col}} ORDER BY {{score_col}} DESC"
+         identifierBindings:@{
+           @"team_col" : @"s.team_id",
+           @"score_col" : @"s.score",
+         }
+                  parameters:nil];
+  [windowBuilder orderByField:@"s.user_id" descending:NO nulls:nil];
+  NSDictionary *windowBuilt = [windowBuilder build:&error];
+  XCTAssertNil(error);
+  XCTAssertNotNil(windowBuilt);
+  NSArray *windowRows = [connection executeQuery:windowBuilt[@"sql"] parameters:windowBuilt[@"parameters"] error:&error];
+  XCTAssertNil(error);
+  XCTAssertEqual((NSUInteger)3, [windowRows count]);
+  NSMutableDictionary *rankByUser = [NSMutableDictionary dictionary];
+  for (NSDictionary *row in windowRows) {
+    rankByUser[row[@"user_id"]] = row[@"row_num"];
+  }
+  XCTAssertEqualObjects(@"1", rankByUser[@"u1"]);
+  XCTAssertEqualObjects(@"2", rankByUser[@"u2"]);
+  XCTAssertEqualObjects(@"1", rankByUser[@"u3"]);
+
+  ALNSQLBuilder *eventProbe = [ALNSQLBuilder selectFrom:eventsTable alias:@"e" columns:@[ @"e.user_id" ]];
+  [eventProbe whereExpression:@"e.user_id = u.id" parameters:nil];
+  ALNSQLBuilder *anyThreshold = [ALNSQLBuilder selectFrom:thresholdsTable columns:@[ @"value" ]];
+  [anyThreshold whereField:@"category" equals:@"risk"];
+  ALNSQLBuilder *allMinimum = [ALNSQLBuilder selectFrom:minimaTable columns:@[ @"min_score" ]];
+  [allMinimum whereField:@"enabled" equals:@1];
+
+  ALNSQLBuilder *predicateBuilder = [ALNSQLBuilder selectFrom:usersTable alias:@"u" columns:@[ @"u.id" ]];
+  [predicateBuilder whereExistsSubquery:eventProbe];
+  [predicateBuilder whereField:@"u.score" operator:@">=" anySubquery:anyThreshold];
+  [predicateBuilder whereField:@"u.score" operator:@">=" allSubquery:allMinimum];
+  [predicateBuilder orderByField:@"u.id" descending:NO nulls:nil];
+  NSDictionary *predicateBuilt = [predicateBuilder build:&error];
+  XCTAssertNil(error);
+  XCTAssertNotNil(predicateBuilt);
+  NSArray *predicateRows =
+      [connection executeQuery:predicateBuilt[@"sql"] parameters:predicateBuilt[@"parameters"] error:&error];
+  XCTAssertNil(error);
+  XCTAssertEqual((NSUInteger)1, [predicateRows count]);
+  XCTAssertEqualObjects(@"u1", predicateRows[0][@"id"]);
+
+  ALNSQLBuilder *joinBuilder = [ALNSQLBuilder selectFrom:joinUsersTable
+                                                   alias:@"u"
+                                                 columns:@[ @"u.user_id", @"r.id", @"t.kind" ]];
+  [joinBuilder joinTable:profilesTable alias:@"p" usingFields:@[ @"user_id" ]];
+  [joinBuilder fullJoinTable:rolesTable
+                       alias:@"r"
+                 onLeftField:@"u.role_id"
+                    operator:@"="
+                onRightField:@"r.id"];
+  [joinBuilder crossJoinTable:tenantsTable alias:@"t"];
+  NSDictionary *joinBuilt = [joinBuilder build:&error];
+  XCTAssertNil(error);
+  XCTAssertNotNil(joinBuilt);
+  NSArray *joinRows = [connection executeQuery:joinBuilt[@"sql"] parameters:joinBuilt[@"parameters"] error:&error];
+  XCTAssertNil(error);
+  XCTAssertEqual((NSUInteger)1, [joinRows count]);
+  XCTAssertEqualObjects(@"1", joinRows[0][@"user_id"]);
+  XCTAssertEqualObjects(@"default", joinRows[0][@"kind"]);
+
+  ALNSQLBuilder *recentReady = [ALNSQLBuilder selectFrom:eventsTable columns:@[ @"user_id" ]];
+  [recentReady whereField:@"state" equals:@"ready"];
+  ALNSQLBuilder *cteBuilder = [ALNSQLBuilder selectFrom:@"recent_ids" columns:@[ @"recent_ids.user_id" ]];
+  [cteBuilder withRecursiveCTE:@"recent_ids" columns:@[ @"user_id" ] builder:recentReady];
+  NSDictionary *cteBuilt = [cteBuilder build:&error];
+  XCTAssertNil(error);
+  XCTAssertNotNil(cteBuilt);
+  NSArray *cteRows = [connection executeQuery:cteBuilt[@"sql"] parameters:cteBuilt[@"parameters"] error:&error];
+  XCTAssertNil(error);
+  XCTAssertEqual((NSUInteger)1, [cteRows count]);
+  XCTAssertEqualObjects(@"u1", cteRows[0][@"user_id"]);
+
+  ALNSQLBuilder *lockBuilder = [ALNSQLBuilder selectFrom:jobsTable alias:@"j" columns:@[ @"j.id" ]];
+  [lockBuilder whereField:@"j.state" equals:@"queued"];
+  [lockBuilder orderByField:@"j.id" descending:NO nulls:nil];
+  [lockBuilder limit:1];
+  [lockBuilder forUpdateOfTables:@[ @"j" ]];
+  [lockBuilder skipLocked];
+  NSDictionary *lockBuilt = [lockBuilder build:&error];
+  XCTAssertNil(error);
+  XCTAssertNotNil(lockBuilt);
+  NSArray *lockRows = [connection executeQuery:lockBuilt[@"sql"] parameters:lockBuilt[@"parameters"] error:&error];
+  XCTAssertNil(error);
+  XCTAssertEqual((NSUInteger)1, [lockRows count]);
+  XCTAssertEqualObjects(@"1", lockRows[0][@"id"]);
+
+  NSArray *dropStatements = @[
+    [NSString stringWithFormat:@"DROP TABLE IF EXISTS %@", jobsTable],
+    [NSString stringWithFormat:@"DROP TABLE IF EXISTS %@", tenantsTable],
+    [NSString stringWithFormat:@"DROP TABLE IF EXISTS %@", rolesTable],
+    [NSString stringWithFormat:@"DROP TABLE IF EXISTS %@", profilesTable],
+    [NSString stringWithFormat:@"DROP TABLE IF EXISTS %@", joinUsersTable],
+    [NSString stringWithFormat:@"DROP TABLE IF EXISTS %@", minimaTable],
+    [NSString stringWithFormat:@"DROP TABLE IF EXISTS %@", thresholdsTable],
+    [NSString stringWithFormat:@"DROP TABLE IF EXISTS %@", eventsTable],
+    [NSString stringWithFormat:@"DROP TABLE IF EXISTS %@", usersTable],
+    [NSString stringWithFormat:@"DROP TABLE IF EXISTS %@", scoresTable],
+    [NSString stringWithFormat:@"DROP TABLE IF EXISTS %@", blockedDocsTable],
+    [NSString stringWithFormat:@"DROP TABLE IF EXISTS %@", archivedDocsTable],
+    [NSString stringWithFormat:@"DROP TABLE IF EXISTS %@", activeDocsTable],
+  ];
+  for (NSString *statement in dropStatements) {
+    (void)[connection executeCommand:statement parameters:@[] error:nil];
+  }
+
+  [database releaseConnection:connection];
+}
+
 - (void)testQueryErrorsIncludeSQLStateDiagnostics {
   NSString *dsn = [self pgTestDSN];
   if ([dsn length] == 0) {

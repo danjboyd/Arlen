@@ -1,6 +1,6 @@
 # Arlen Phase 4 Roadmap
 
-Status: Active (Phase 4A complete; Phase 4B-4E planned)  
+Status: Active (Phase 4A-4B complete; Phase 4C-4E planned)  
 Last updated: 2026-02-20
 
 Related docs:
@@ -51,6 +51,8 @@ Implementation notes:
 
 ## 3.2 Phase 4B: SQL Surface Completion
 
+Status: Complete (2026-02-20)
+
 Deliverables:
 - Add set-operation composition (`UNION`, `UNION ALL`, `INTERSECT`, `EXCEPT`).
 - Add window-function composition and named window clauses.
@@ -58,10 +60,16 @@ Deliverables:
 - Add join-surface completion (`USING`, `CROSS`, `FULL`) where supported by dialect modules.
 - Expand CTE ergonomics and recursive composition contracts.
 
-Acceptance:
+Acceptance (verified):
 - Deterministic SQL/parameter snapshot coverage for each new clause family.
 - PostgreSQL execution coverage validates representative query behavior and row results.
 - Unsupported dialect semantics fail with explicit, test-covered diagnostics.
+
+Implementation notes:
+- Added `ALNSQLBuilder` API coverage for set operations, named window clauses, `EXISTS`/`ANY`/`ALL` predicates, `FOR UPDATE ... SKIP LOCKED`, `USING`/`CROSS`/`FULL` joins, and CTE column lists.
+- Added deterministic snapshot coverage in `tests/unit/Phase4BTests.m` across each new clause family.
+- Added PostgreSQL execution coverage in `tests/unit/PgTests.m` (`testSQLBuilderPhase4BFeaturesExecuteAgainstPostgres`).
+- Added explicit misuse diagnostics coverage for invalid set-operation usage and locking contracts.
 
 ## 3.3 Phase 4C: Typed Ergonomics + Schema Codegen
 

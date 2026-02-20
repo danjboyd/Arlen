@@ -58,6 +58,14 @@ typedef NS_ENUM(NSInteger, ALNSQLBuilderKind) {
 - (instancetype)whereField:(NSString *)field
                   operator:(NSString *)operatorName
                      value:(nullable id)value;
+- (instancetype)whereExistsSubquery:(ALNSQLBuilder *)subquery;
+- (instancetype)whereNotExistsSubquery:(ALNSQLBuilder *)subquery;
+- (instancetype)whereField:(NSString *)field
+                  operator:(NSString *)operatorName
+               anySubquery:(ALNSQLBuilder *)subquery;
+- (instancetype)whereField:(NSString *)field
+                  operator:(NSString *)operatorName
+               allSubquery:(ALNSQLBuilder *)subquery;
 - (instancetype)whereExpression:(NSString *)expression
                      parameters:(nullable NSArray *)parameters;
 - (instancetype)whereExpression:(NSString *)expression
@@ -96,6 +104,25 @@ typedef NS_ENUM(NSInteger, ALNSQLBuilderKind) {
                    onLeftField:(NSString *)leftField
                       operator:(NSString *)operatorName
                   onRightField:(NSString *)rightField;
+- (instancetype)fullJoinTable:(NSString *)tableName
+                         alias:(nullable NSString *)alias
+                   onLeftField:(NSString *)leftField
+                      operator:(NSString *)operatorName
+                  onRightField:(NSString *)rightField;
+- (instancetype)crossJoinTable:(NSString *)tableName
+                         alias:(nullable NSString *)alias;
+- (instancetype)joinTable:(NSString *)tableName
+                    alias:(nullable NSString *)alias
+               usingFields:(NSArray<NSString *> *)fields;
+- (instancetype)leftJoinTable:(NSString *)tableName
+                        alias:(nullable NSString *)alias
+                   usingFields:(NSArray<NSString *> *)fields;
+- (instancetype)rightJoinTable:(NSString *)tableName
+                         alias:(nullable NSString *)alias
+                    usingFields:(NSArray<NSString *> *)fields;
+- (instancetype)fullJoinTable:(NSString *)tableName
+                         alias:(nullable NSString *)alias
+                    usingFields:(NSArray<NSString *> *)fields;
 - (instancetype)joinSubquery:(ALNSQLBuilder *)subquery
                        alias:(NSString *)alias
                 onExpression:(NSString *)expression
@@ -121,6 +148,16 @@ typedef NS_ENUM(NSInteger, ALNSQLBuilderKind) {
                      onExpression:(NSString *)expression
                        parameters:(nullable NSArray *)parameters;
 - (instancetype)rightJoinSubquery:(ALNSQLBuilder *)subquery
+                            alias:(NSString *)alias
+                     onExpression:(NSString *)expression
+               identifierBindings:
+                   (nullable NSDictionary<NSString *, NSString *> *)identifierBindings
+                       parameters:(nullable NSArray *)parameters;
+- (instancetype)fullJoinSubquery:(ALNSQLBuilder *)subquery
+                            alias:(NSString *)alias
+                     onExpression:(NSString *)expression
+                       parameters:(nullable NSArray *)parameters;
+- (instancetype)fullJoinSubquery:(ALNSQLBuilder *)subquery
                             alias:(NSString *)alias
                      onExpression:(NSString *)expression
                identifierBindings:
@@ -156,6 +193,16 @@ typedef NS_ENUM(NSInteger, ALNSQLBuilderKind) {
                       identifierBindings:
                           (nullable NSDictionary<NSString *, NSString *> *)identifierBindings
                               parameters:(nullable NSArray *)parameters;
+- (instancetype)fullJoinLateralSubquery:(ALNSQLBuilder *)subquery
+                                   alias:(NSString *)alias
+                            onExpression:(NSString *)expression
+                              parameters:(nullable NSArray *)parameters;
+- (instancetype)fullJoinLateralSubquery:(ALNSQLBuilder *)subquery
+                                   alias:(NSString *)alias
+                            onExpression:(NSString *)expression
+                      identifierBindings:
+                          (nullable NSDictionary<NSString *, NSString *> *)identifierBindings
+                              parameters:(nullable NSArray *)parameters;
 
 - (instancetype)groupByField:(NSString *)field;
 - (instancetype)groupByFields:(NSArray<NSString *> *)fields;
@@ -174,8 +221,27 @@ typedef NS_ENUM(NSInteger, ALNSQLBuilderKind) {
 - (instancetype)havingAllGroup:(ALNSQLBuilderGroupBlock)groupBlock;
 
 - (instancetype)withCTE:(NSString *)name builder:(ALNSQLBuilder *)builder;
+- (instancetype)withCTE:(NSString *)name
+                columns:(nullable NSArray<NSString *> *)columns
+                builder:(ALNSQLBuilder *)builder;
 - (instancetype)withRecursiveCTE:(NSString *)name
                           builder:(ALNSQLBuilder *)builder;
+- (instancetype)withRecursiveCTE:(NSString *)name
+                         columns:(nullable NSArray<NSString *> *)columns
+                         builder:(ALNSQLBuilder *)builder;
+
+- (instancetype)windowNamed:(NSString *)name
+                 expression:(NSString *)expression
+                 parameters:(nullable NSArray *)parameters;
+- (instancetype)windowNamed:(NSString *)name
+                 expression:(NSString *)expression
+        identifierBindings:(nullable NSDictionary<NSString *, NSString *> *)identifierBindings
+                 parameters:(nullable NSArray *)parameters;
+
+- (instancetype)unionWith:(ALNSQLBuilder *)builder;
+- (instancetype)unionAllWith:(ALNSQLBuilder *)builder;
+- (instancetype)intersectWith:(ALNSQLBuilder *)builder;
+- (instancetype)exceptWith:(ALNSQLBuilder *)builder;
 
 - (instancetype)orderByField:(NSString *)field descending:(BOOL)descending;
 - (instancetype)orderByField:(NSString *)field
@@ -196,6 +262,9 @@ typedef NS_ENUM(NSInteger, ALNSQLBuilderKind) {
                        parameters:(nullable NSArray *)parameters;
 - (instancetype)limit:(NSUInteger)limit;
 - (instancetype)offset:(NSUInteger)offset;
+- (instancetype)forUpdate;
+- (instancetype)forUpdateOfTables:(nullable NSArray<NSString *> *)tables;
+- (instancetype)skipLocked;
 
 - (instancetype)returningField:(NSString *)field;
 - (instancetype)returningFields:(NSArray<NSString *> *)fields;

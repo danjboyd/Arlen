@@ -142,15 +142,19 @@ Last updated: 2026-02-20
 - New Phase 4A checks executed:
   - `tests/unit/Phase4ATests.m` passing (expression IR snapshot, malformed contract rejection, and safety paths)
   - PostgreSQL expression-template execution regression passing (`testSQLBuilderExpressionTemplatesWithIdentifierBindingsExecuteAgainstPostgres`)
+- New Phase 4B checks executed:
+  - deterministic snapshot coverage for set operations, windows, predicates, joins, CTE columns, and locking (`tests/unit/Phase4BTests.m`)
+  - PostgreSQL execution regression for 4B clause families (`testSQLBuilderPhase4BFeaturesExecuteAgainstPostgres`)
+  - misuse-path diagnostics for invalid set-operation and locking contracts
 - PostgreSQL-backed tests remain gated by `ARLEN_PG_TEST_DSN`.
 
 ## Next Session Focus
 
-1. Execute Phase 4B SQL surface completion tranche from `docs/PHASE4_ROADMAP.md`.
-2. Add deterministic snapshot + execution coverage for set operations, window clauses, locking clauses, and join-surface completion.
-3. Keep Phase 4A safety contracts locked while expanding 4B clause families.
+1. Execute Phase 4C typed ergonomics + schema codegen tranche from `docs/PHASE4_ROADMAP.md`.
+2. Define deterministic schema introspection/codegen artifacts for typed table/column symbols.
+3. Add compile + execution coverage for generated typed helpers while keeping legacy string APIs source-compatible.
 
-## Planned Phase Mapping (Post-4A)
+## Planned Phase Mapping (Post-4B)
 
 - Phase 3F (complete):
   - onboarding and diagnostics (`arlen doctor`, compatibility matrix)
@@ -168,8 +172,7 @@ Last updated: 2026-02-20
 - Maybe Someday backlog:
   - LiveView-like server-driven UI
   - full ORM as default framework layer
-- Post-4A planned:
-  - Phase 4B: SQL surface completion
+- Post-4B planned:
   - Phase 4C: typed ergonomics + schema codegen
   - Phase 4D: performance + diagnostics hardening
   - Phase 4E: conformance + migration hardening
