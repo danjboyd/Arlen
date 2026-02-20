@@ -33,6 +33,7 @@ Phase 3 is focused on platform maturity:
 - advanced performance trend analysis and expanded workload profiles (Phase 3C complete baseline)
 - deferred parity capabilities baseline (websocket/SSE/realtime/mounting, Phase 3D complete)
 - deferred ecosystem services track (Phase 3E complete baseline)
+- ecosystem services follow-on scaffolds (plugin presets + optional job worker runtime contract, Phase 3E follow-on complete)
 
 ## Data Layer Direction
 

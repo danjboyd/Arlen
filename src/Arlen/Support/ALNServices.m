@@ -111,6 +111,154 @@ static NSString *ALNNormalizeLocale(NSString *locale) {
 
 @end
 
+@interface ALNJobWorkerRunSummary ()
+
+@property(nonatomic, assign, readwrite) NSUInteger leasedCount;
+@property(nonatomic, assign, readwrite) NSUInteger acknowledgedCount;
+@property(nonatomic, assign, readwrite) NSUInteger retriedCount;
+@property(nonatomic, assign, readwrite) NSUInteger handlerErrorCount;
+@property(nonatomic, assign, readwrite) BOOL reachedRunLimit;
+
+@end
+
+@implementation ALNJobWorkerRunSummary
+
+- (instancetype)initWithLeasedCount:(NSUInteger)leasedCount
+                  acknowledgedCount:(NSUInteger)acknowledgedCount
+                       retriedCount:(NSUInteger)retriedCount
+                  handlerErrorCount:(NSUInteger)handlerErrorCount
+                    reachedRunLimit:(BOOL)reachedRunLimit {
+  self = [super init];
+  if (self) {
+    _leasedCount = leasedCount;
+    _acknowledgedCount = acknowledgedCount;
+    _retriedCount = retriedCount;
+    _handlerErrorCount = handlerErrorCount;
+    _reachedRunLimit = reachedRunLimit;
+  }
+  return self;
+}
+
+- (id)copyWithZone:(NSZone *)zone {
+  return [[ALNJobWorkerRunSummary allocWithZone:zone] initWithLeasedCount:self.leasedCount
+                                                         acknowledgedCount:self.acknowledgedCount
+                                                              retriedCount:self.retriedCount
+                                                         handlerErrorCount:self.handlerErrorCount
+                                                           reachedRunLimit:self.reachedRunLimit];
+}
+
+- (NSDictionary *)dictionaryRepresentation {
+  return @{
+    @"leasedCount" : @(self.leasedCount),
+    @"acknowledgedCount" : @(self.acknowledgedCount),
+    @"retriedCount" : @(self.retriedCount),
+    @"handlerErrorCount" : @(self.handlerErrorCount),
+    @"reachedRunLimit" : @(self.reachedRunLimit),
+  };
+}
+
+@end
+
+@interface ALNJobWorker ()
+
+@property(nonatomic, strong) id<ALNJobAdapter> jobsAdapter;
+
+@end
+
+@implementation ALNJobWorker
+
+- (instancetype)initWithJobsAdapter:(id<ALNJobAdapter>)jobsAdapter {
+  self = [super init];
+  if (self) {
+    _jobsAdapter = jobsAdapter;
+    _maxJobsPerRun = 50;
+    _retryDelaySeconds = 5.0;
+  }
+  return self;
+}
+
+- (ALNJobWorkerRunSummary *)runDueJobsAt:(NSDate *)timestamp
+                                  runtime:(id<ALNJobWorkerRuntime>)runtime
+                                    error:(NSError **)error {
+  if (self.jobsAdapter == nil) {
+    if (error != NULL) {
+      *error = ALNServiceError(500, @"jobs adapter is required", nil);
+    }
+    return nil;
+  }
+  if (runtime == nil) {
+    if (error != NULL) {
+      *error = ALNServiceError(501, @"job worker runtime is required", nil);
+    }
+    return nil;
+  }
+
+  NSDate *runAt = timestamp ?: [NSDate date];
+  NSUInteger maxJobs = (self.maxJobsPerRun > 0) ? self.maxJobsPerRun : 1;
+  NSUInteger leasedCount = 0;
+  NSUInteger acknowledgedCount = 0;
+  NSUInteger retriedCount = 0;
+  NSUInteger handlerErrorCount = 0;
+  BOOL reachedRunLimit = NO;
+
+  for (NSUInteger index = 0; index < maxJobs; index++) {
+    NSError *dequeueError = nil;
+    ALNJobEnvelope *job = [self.jobsAdapter dequeueDueJobAt:runAt error:&dequeueError];
+    if (dequeueError != nil) {
+      if (error != NULL) {
+        *error = ALNServiceError(502, @"failed to dequeue due job", dequeueError);
+      }
+      return nil;
+    }
+    if (job == nil) {
+      reachedRunLimit = NO;
+      break;
+    }
+
+    leasedCount += 1;
+
+    NSError *handlerError = nil;
+    ALNJobWorkerDisposition disposition = [runtime handleJob:job error:&handlerError];
+    if (handlerError != nil) {
+      handlerErrorCount += 1;
+    }
+
+    if (disposition == ALNJobWorkerDispositionAcknowledge) {
+      NSError *ackError = nil;
+      if (![self.jobsAdapter acknowledgeJobID:job.jobID error:&ackError]) {
+        if (error != NULL) {
+          *error = ALNServiceError(503, @"failed to acknowledge job", ackError);
+        }
+        return nil;
+      }
+      acknowledgedCount += 1;
+      continue;
+    }
+
+    NSTimeInterval retryDelay = (self.retryDelaySeconds > 0.0) ? self.retryDelaySeconds : 0.0;
+    NSError *retryError = nil;
+    if (![self.jobsAdapter retryJob:job delaySeconds:retryDelay error:&retryError]) {
+      if (error != NULL) {
+        *error = ALNServiceError(504, @"failed to retry job", retryError);
+      }
+      return nil;
+    }
+    retriedCount += 1;
+  }
+
+  if (leasedCount >= maxJobs) {
+    reachedRunLimit = YES;
+  }
+
+  return [[ALNJobWorkerRunSummary alloc] initWithLeasedCount:leasedCount
+                                            acknowledgedCount:acknowledgedCount
+                                                 retriedCount:retriedCount
+                                            handlerErrorCount:handlerErrorCount
+                                              reachedRunLimit:reachedRunLimit];
+}
+
+@end
+
 @interface ALNInMemoryJobAdapter ()
 
 @property(nonatomic, copy) NSString *adapterNameValue;

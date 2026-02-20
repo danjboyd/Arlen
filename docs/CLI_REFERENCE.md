@@ -33,6 +33,10 @@ Common generator options (`controller` and `endpoint`):
 - `--template [<logical_template>]`: create template + render stub
 - `--api`: generate JSON-oriented endpoint action
 
+Plugin generator options:
+
+- `--preset <generic|redis-cache|queue-jobs|smtp-mail>`: choose service-oriented plugin scaffold (default `generic`)
+
 Generator behavior:
 
 - `controller`: `src/Controllers/<Name>Controller.{h,m}`
@@ -40,7 +44,7 @@ Generator behavior:
 - `model`: `src/Models/<Name>Repository.{h,m}`
 - `migration`: `db/migrations/<timestamp>_<name>.sql`
 - `test`: `tests/<Name>Tests.m`
-- `plugin`: `src/Plugins/<Name>Plugin.{h,m}` and class auto-registration in `config/app.plist` (`plugins.classes`)
+- `plugin`: `src/Plugins/<Name>Plugin.{h,m}` and class auto-registration in `config/app.plist` (`plugins.classes`), with optional `--preset` service templates
 
 Notes:
 

@@ -195,7 +195,21 @@ Run full app quality gate from app root:
 /path/to/Arlen/bin/arlen check
 ```
 
-## 10. Common Environment Variables
+## 10. Scaffold Service Plugins
+
+From app root:
+
+```bash
+/path/to/Arlen/bin/arlen generate plugin RedisCache --preset redis-cache
+/path/to/Arlen/bin/arlen generate plugin QueueJobs --preset queue-jobs
+/path/to/Arlen/bin/arlen generate plugin SmtpMail --preset smtp-mail
+```
+
+These presets generate compile-safe templates and auto-register classes in `config/app.plist`.
+
+`queue-jobs` preset uses `ALNJobWorker` + `ALNJobWorkerRuntime` as an optional worker contract for periodic job draining.
+
+## 11. Common Environment Variables
 
 Framework/app runtime:
 
@@ -233,10 +247,15 @@ Framework/app runtime:
 - `ARLEN_PAGE_STATE_COMPAT_ENABLED`
 - `ARLEN_EOC_STRICT_LOCALS`
 - `ARLEN_EOC_STRICT_STRINGIFY`
+- `ARLEN_REDIS_URL` (plugin template hook)
+- `ARLEN_SMTP_HOST` (plugin template hook)
+- `ARLEN_SMTP_PORT` (plugin template hook)
+- `ARLEN_JOB_WORKER_INTERVAL_SECONDS` (plugin template hook)
+- `ARLEN_JOB_WORKER_RETRY_DELAY_SECONDS` (plugin template hook)
 
 Legacy compatibility fallback (`MOJOOBJC_*`) is supported but transitional.
 
-## 11. Migrations (PostgreSQL)
+## 12. Migrations (PostgreSQL)
 
 From app root with `db/migrations`:
 
@@ -250,7 +269,7 @@ Dry-run pending migrations:
 /path/to/Arlen/bin/arlen migrate --dry-run
 ```
 
-## 12. Deploy Smoke Validation
+## 13. Deploy Smoke Validation
 
 ```bash
 make deploy-smoke

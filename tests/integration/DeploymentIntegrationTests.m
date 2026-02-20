@@ -184,4 +184,89 @@
   }
 }
 
+- (void)testArlenGeneratePluginPresetsCreateServiceTemplates {
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *workRoot = [self createTempDirectoryWithPrefix:@"arlen-plugin-presets"];
+  XCTAssertNotNil(workRoot);
+  if (workRoot == nil) {
+    return;
+  }
+
+  @try {
+    int code = 0;
+    NSString *buildOutput = [self runShellCapture:[NSString stringWithFormat:@"cd %@ && make arlen", repoRoot]
+                                         exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", buildOutput);
+
+    NSString *newOutput = [self
+        runShellCapture:[NSString stringWithFormat:@"cd %@ && ARLEN_FRAMEWORK_ROOT=%@ %@/build/arlen "
+                                                  "new PresetApp --full",
+                                                  workRoot, repoRoot, repoRoot]
+               exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", newOutput);
+
+    NSString *appRoot = [workRoot stringByAppendingPathComponent:@"PresetApp"];
+    NSString *generateRedis = [self
+        runShellCapture:[NSString stringWithFormat:@"cd %@ && ARLEN_FRAMEWORK_ROOT=%@ %@/build/arlen "
+                                                  "generate plugin RedisCache --preset redis-cache",
+                                                  appRoot, repoRoot, repoRoot]
+               exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", generateRedis);
+
+    NSString *generateQueue = [self
+        runShellCapture:[NSString stringWithFormat:@"cd %@ && ARLEN_FRAMEWORK_ROOT=%@ %@/build/arlen "
+                                                  "generate plugin QueueJobs --preset queue-jobs",
+                                                  appRoot, repoRoot, repoRoot]
+               exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", generateQueue);
+
+    NSString *generateSMTP = [self
+        runShellCapture:[NSString stringWithFormat:@"cd %@ && ARLEN_FRAMEWORK_ROOT=%@ %@/build/arlen "
+                                                  "generate plugin SmtpMail --preset smtp-mail",
+                                                  appRoot, repoRoot, repoRoot]
+               exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", generateSMTP);
+
+    NSError *readError = nil;
+    NSString *redisPlugin =
+        [NSString stringWithContentsOfFile:[appRoot stringByAppendingPathComponent:@"src/Plugins/RedisCachePlugin.m"]
+                                  encoding:NSUTF8StringEncoding
+                                     error:&readError];
+    XCTAssertNil(readError);
+    XCTAssertTrue([redisPlugin containsString:@"ARLEN_REDIS_URL"]);
+    XCTAssertTrue([redisPlugin containsString:@"setCacheAdapter"]);
+
+    readError = nil;
+    NSString *queuePlugin =
+        [NSString stringWithContentsOfFile:[appRoot stringByAppendingPathComponent:@"src/Plugins/QueueJobsPlugin.m"]
+                                  encoding:NSUTF8StringEncoding
+                                     error:&readError];
+    XCTAssertNil(readError);
+    XCTAssertTrue([queuePlugin containsString:@"ALNJobWorker"]);
+    XCTAssertTrue([queuePlugin containsString:@"setJobsAdapter"]);
+    XCTAssertTrue([queuePlugin containsString:@"runDueJobsAt"]);
+
+    readError = nil;
+    NSString *smtpPlugin =
+        [NSString stringWithContentsOfFile:[appRoot stringByAppendingPathComponent:@"src/Plugins/SmtpMailPlugin.m"]
+                                  encoding:NSUTF8StringEncoding
+                                     error:&readError];
+    XCTAssertNil(readError);
+    XCTAssertTrue([smtpPlugin containsString:@"ARLEN_SMTP_HOST"]);
+    XCTAssertTrue([smtpPlugin containsString:@"setMailAdapter"]);
+
+    readError = nil;
+    NSString *configContents =
+        [NSString stringWithContentsOfFile:[appRoot stringByAppendingPathComponent:@"config/app.plist"]
+                                  encoding:NSUTF8StringEncoding
+                                     error:&readError];
+    XCTAssertNil(readError);
+    XCTAssertTrue([configContents containsString:@"RedisCachePlugin"]);
+    XCTAssertTrue([configContents containsString:@"QueueJobsPlugin"]);
+    XCTAssertTrue([configContents containsString:@"SmtpMailPlugin"]);
+  } @finally {
+    [[NSFileManager defaultManager] removeItemAtPath:workRoot error:nil];
+  }
+}
+
 @end

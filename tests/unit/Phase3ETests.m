@@ -134,6 +134,43 @@ static NSInteger gPhase3EPluginDidStopCount = 0;
 
 @end
 
+@interface Phase3EJobWorkerRuntime : NSObject <ALNJobWorkerRuntime>
+
+@property(nonatomic, assign) ALNJobWorkerDisposition disposition;
+@property(nonatomic, assign) NSUInteger callCount;
+@property(nonatomic, assign) BOOL emitHandlerErrors;
+
+- (instancetype)initWithDisposition:(ALNJobWorkerDisposition)disposition;
+
+@end
+
+@implementation Phase3EJobWorkerRuntime
+
+- (instancetype)initWithDisposition:(ALNJobWorkerDisposition)disposition {
+  self = [super init];
+  if (self) {
+    _disposition = disposition;
+    _callCount = 0;
+    _emitHandlerErrors = NO;
+  }
+  return self;
+}
+
+- (ALNJobWorkerDisposition)handleJob:(ALNJobEnvelope *)job error:(NSError **)error {
+  self.callCount += 1;
+  if (self.emitHandlerErrors && error != NULL) {
+    *error = [NSError errorWithDomain:@"Phase3E.Tests"
+                                 code:1
+                             userInfo:@{
+                               NSLocalizedDescriptionKey :
+                                   [NSString stringWithFormat:@"runtime failure for %@", job.name ?: @""]
+                             }];
+  }
+  return self.disposition;
+}
+
+@end
+
 @interface Phase3ETests : XCTestCase
 @end
 
@@ -240,6 +277,95 @@ static NSInteger gPhase3EPluginDidStopCount = 0;
   XCTAssertEqualObjects(@"probe", payload[@"attachmentText"]);
 
   [app shutdown];
+}
+
+- (void)testJobWorkerAcknowledgesSuccessfulJobs {
+  ALNInMemoryJobAdapter *adapter = [[ALNInMemoryJobAdapter alloc] initWithAdapterName:@"phase3e_worker_ack"];
+  XCTAssertNotNil([adapter enqueueJobNamed:@"job.a" payload:@{} options:@{} error:NULL]);
+  XCTAssertNotNil([adapter enqueueJobNamed:@"job.b" payload:@{} options:@{} error:NULL]);
+
+  ALNJobWorker *worker = [[ALNJobWorker alloc] initWithJobsAdapter:adapter];
+  worker.maxJobsPerRun = 10;
+  worker.retryDelaySeconds = 0;
+  Phase3EJobWorkerRuntime *runtime =
+      [[Phase3EJobWorkerRuntime alloc] initWithDisposition:ALNJobWorkerDispositionAcknowledge];
+
+  NSError *error = nil;
+  ALNJobWorkerRunSummary *summary = [worker runDueJobsAt:[NSDate date] runtime:runtime error:&error];
+  XCTAssertNil(error);
+  XCTAssertNotNil(summary);
+  XCTAssertEqual((NSUInteger)2, summary.leasedCount);
+  XCTAssertEqual((NSUInteger)2, summary.acknowledgedCount);
+  XCTAssertEqual((NSUInteger)0, summary.retriedCount);
+  XCTAssertEqual((NSUInteger)0, summary.handlerErrorCount);
+  XCTAssertFalse(summary.reachedRunLimit);
+  XCTAssertEqual((NSUInteger)2, runtime.callCount);
+  XCTAssertEqual((NSUInteger)0, [[adapter pendingJobsSnapshot] count]);
+  XCTAssertEqual((NSUInteger)0, [[adapter deadLetterJobsSnapshot] count]);
+}
+
+- (void)testJobWorkerRetriesFailedJobsUntilDeadLettered {
+  ALNInMemoryJobAdapter *adapter = [[ALNInMemoryJobAdapter alloc] initWithAdapterName:@"phase3e_worker_retry"];
+  XCTAssertNotNil([adapter enqueueJobNamed:@"job.retry"
+                                   payload:@{}
+                                   options:@{
+                                     @"maxAttempts" : @2
+                                   }
+                                     error:NULL]);
+
+  ALNJobWorker *worker = [[ALNJobWorker alloc] initWithJobsAdapter:adapter];
+  worker.maxJobsPerRun = 1;
+  worker.retryDelaySeconds = 0;
+  Phase3EJobWorkerRuntime *runtime =
+      [[Phase3EJobWorkerRuntime alloc] initWithDisposition:ALNJobWorkerDispositionRetry];
+  runtime.emitHandlerErrors = YES;
+
+  NSError *firstError = nil;
+  ALNJobWorkerRunSummary *firstRun = [worker runDueJobsAt:[NSDate date] runtime:runtime error:&firstError];
+  XCTAssertNil(firstError);
+  XCTAssertNotNil(firstRun);
+  XCTAssertEqual((NSUInteger)1, firstRun.leasedCount);
+  XCTAssertEqual((NSUInteger)0, firstRun.acknowledgedCount);
+  XCTAssertEqual((NSUInteger)1, firstRun.retriedCount);
+  XCTAssertEqual((NSUInteger)1, firstRun.handlerErrorCount);
+  XCTAssertTrue(firstRun.reachedRunLimit);
+  XCTAssertEqual((NSUInteger)1, [[adapter pendingJobsSnapshot] count]);
+  XCTAssertEqual((NSUInteger)0, [[adapter deadLetterJobsSnapshot] count]);
+
+  NSError *secondError = nil;
+  ALNJobWorkerRunSummary *secondRun = [worker runDueJobsAt:[NSDate date] runtime:runtime error:&secondError];
+  XCTAssertNil(secondError);
+  XCTAssertNotNil(secondRun);
+  XCTAssertEqual((NSUInteger)1, secondRun.leasedCount);
+  XCTAssertEqual((NSUInteger)0, secondRun.acknowledgedCount);
+  XCTAssertEqual((NSUInteger)1, secondRun.retriedCount);
+  XCTAssertEqual((NSUInteger)1, secondRun.handlerErrorCount);
+  XCTAssertTrue(secondRun.reachedRunLimit);
+  XCTAssertEqual((NSUInteger)0, [[adapter pendingJobsSnapshot] count]);
+  XCTAssertEqual((NSUInteger)1, [[adapter deadLetterJobsSnapshot] count]);
+}
+
+- (void)testJobWorkerRespectsRunLimit {
+  ALNInMemoryJobAdapter *adapter = [[ALNInMemoryJobAdapter alloc] initWithAdapterName:@"phase3e_worker_limit"];
+  XCTAssertNotNil([adapter enqueueJobNamed:@"job.1" payload:@{} options:@{} error:NULL]);
+  XCTAssertNotNil([adapter enqueueJobNamed:@"job.2" payload:@{} options:@{} error:NULL]);
+  XCTAssertNotNil([adapter enqueueJobNamed:@"job.3" payload:@{} options:@{} error:NULL]);
+
+  ALNJobWorker *worker = [[ALNJobWorker alloc] initWithJobsAdapter:adapter];
+  worker.maxJobsPerRun = 2;
+  worker.retryDelaySeconds = 0;
+  Phase3EJobWorkerRuntime *runtime =
+      [[Phase3EJobWorkerRuntime alloc] initWithDisposition:ALNJobWorkerDispositionAcknowledge];
+
+  NSError *error = nil;
+  ALNJobWorkerRunSummary *summary = [worker runDueJobsAt:[NSDate date] runtime:runtime error:&error];
+  XCTAssertNil(error);
+  XCTAssertNotNil(summary);
+  XCTAssertEqual((NSUInteger)2, summary.leasedCount);
+  XCTAssertEqual((NSUInteger)2, summary.acknowledgedCount);
+  XCTAssertEqual((NSUInteger)0, summary.retriedCount);
+  XCTAssertTrue(summary.reachedRunLimit);
+  XCTAssertEqual((NSUInteger)1, [[adapter pendingJobsSnapshot] count]);
 }
 
 @end

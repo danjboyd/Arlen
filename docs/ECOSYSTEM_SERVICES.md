@@ -146,3 +146,60 @@ Built-in sample routes in `boomhauer`:
 - `/services/i18n`
 - `/services/mail`
 - `/services/attachments`
+
+## 11. External Adapter Plugin Templates
+
+`arlen generate plugin` now supports service-oriented presets:
+
+- `--preset redis-cache`
+- `--preset queue-jobs`
+- `--preset smtp-mail`
+
+Example:
+
+```sh
+arlen generate plugin RedisCache --preset redis-cache
+arlen generate plugin QueueJobs --preset queue-jobs
+arlen generate plugin SmtpMail --preset smtp-mail
+```
+
+All presets are compile-safe templates that default to in-memory adapters until you replace the template hooks with concrete backend clients.
+
+## 12. Optional Job Worker Runtime Contract
+
+Phase 3E follow-on adds an optional worker contract for scheduled/asynchronous execution:
+
+- `ALNJobWorkerRuntime` (`handleJob:error:`)
+- `ALNJobWorker` (`runDueJobsAt:runtime:error:`)
+- `ALNJobWorkerRunSummary` (deterministic run metrics)
+
+`ALNJobWorker` drives dequeue/ack/retry against any `ALNJobAdapter` implementation and is intentionally optional so app/server topology can remain plugin-defined.
+
+## 13. Production Persistence and Retention Guidance
+
+Recommended production direction by service area:
+
+- Cache: use Redis or Memcached; reserve in-memory cache for development and tests.
+- Jobs: use a durable queue backend (Redis streams, PostgreSQL queue table, or dedicated broker) for multi-process reliability.
+- Mail: use SMTP/API provider adapters with provider-side retries and bounce tracking.
+- Attachments: store payload bytes in object storage and keep metadata in relational records.
+- I18n: keep locale catalogs versioned and deploy them with app releases.
+
+Retention policy baseline:
+
+1. Jobs:
+   Requeue with bounded retries and move exhausted jobs to dead-letter storage.
+2. Dead letters:
+   Keep at least 7-30 days, with explicit replay/deletion workflows.
+3. Mail:
+   Retain delivery metadata and provider message IDs for audit/debug windows.
+4. Attachments:
+   Define lifecycle policies by bucket/path and remove orphaned metadata.
+5. Cache:
+   Set explicit TTLs for all keys and avoid unbounded key growth.
+
+Operational checklist:
+
+- Run `ALNRun*ConformanceSuite` for each custom adapter in CI.
+- Alert on queue depth, retry rates, dead-letter growth, and mail delivery failures.
+- Document adapter failover behavior and data-loss assumptions per environment.

@@ -37,7 +37,10 @@ static void PrintGenerateUsage(void) {
           "  --method <HTTP>\n"
           "  --action <name>\n"
           "  --template [<logical_template>]\n"
-          "  --api\n");
+          "  --api\n"
+          "\n"
+          "Generator options (plugin):\n"
+          "  --preset <generic|redis-cache|queue-jobs|smtp-mail>\n");
 }
 
 static NSString *ShellQuote(NSString *value) {
@@ -646,6 +649,170 @@ static BOOL WireGeneratedRoute(NSString *root,
   return InsertRouteIntoRegisterRoutes(target, line, error);
 }
 
+static BOOL IsSupportedPluginPreset(NSString *preset) {
+  NSString *normalized = [[preset lowercaseString] copy];
+  return [normalized isEqualToString:@"generic"] || [normalized isEqualToString:@"redis-cache"] ||
+         [normalized isEqualToString:@"queue-jobs"] || [normalized isEqualToString:@"smtp-mail"];
+}
+
+static NSString *PluginImplementationForPreset(NSString *pluginName,
+                                               NSString *logicalName,
+                                               NSString *preset) {
+  NSString *normalized = [[preset lowercaseString] copy];
+  if ([normalized isEqualToString:@"redis-cache"]) {
+    return [NSString stringWithFormat:
+                         @"#import \"%@.h\"\n"
+                          "#import <stdlib.h>\n\n"
+                          "@implementation %@\n\n"
+                          "- (NSString *)pluginName {\n"
+                          "  return @\"%@\";\n"
+                          "}\n\n"
+                          "- (BOOL)registerWithApplication:(ALNApplication *)application\n"
+                          "                             error:(NSError **)error {\n"
+                          "  (void)error;\n"
+                          "  const char *rawRedisURL = getenv(\"ARLEN_REDIS_URL\");\n"
+                          "  NSString *redisURL = (rawRedisURL != NULL) ? [NSString stringWithUTF8String:rawRedisURL] : @\"\";\n"
+                          "  if ([redisURL length] == 0) {\n"
+                          "    [application setCacheAdapter:[[ALNInMemoryCacheAdapter alloc] initWithAdapterName:@\"redis_cache_fallback\"]];\n"
+                          "    return YES;\n"
+                          "  }\n\n"
+                          "  // Template hook: replace this fallback with a real Redis-backed adapter.\n"
+                          "  [application setCacheAdapter:[[ALNInMemoryCacheAdapter alloc] initWithAdapterName:@\"redis_cache_template\"]];\n"
+                          "  return YES;\n"
+                          "}\n\n"
+                          "- (void)applicationDidStart:(ALNApplication *)application {\n"
+                          "  (void)application;\n"
+                          "}\n\n"
+                          "- (void)applicationWillStop:(ALNApplication *)application {\n"
+                          "  (void)application;\n"
+                          "}\n\n"
+                          "@end\n",
+                         pluginName, pluginName, logicalName];
+  }
+
+  if ([normalized isEqualToString:@"queue-jobs"]) {
+    return [NSString stringWithFormat:
+                         @"#import \"%@.h\"\n"
+                          "#import <stdlib.h>\n\n"
+                          "@interface %@QueueRuntime : NSObject <ALNJobWorkerRuntime>\n"
+                          "@end\n\n"
+                          "@implementation %@QueueRuntime\n\n"
+                          "- (ALNJobWorkerDisposition)handleJob:(ALNJobEnvelope *)job\n"
+                          "                               error:(NSError **)error {\n"
+                          "  (void)error;\n"
+                          "  // Template hook: dispatch by job.name and payload.\n"
+                          "  return ([job.name length] > 0) ? ALNJobWorkerDispositionAcknowledge\n"
+                          "                                 : ALNJobWorkerDispositionRetry;\n"
+                          "}\n\n"
+                          "@end\n\n"
+                          "@interface %@ ()\n"
+                          "@property(nonatomic, strong) ALNJobWorker *worker;\n"
+                          "@property(nonatomic, strong) id<ALNJobWorkerRuntime> runtime;\n"
+                          "@property(nonatomic, strong) NSTimer *workerTimer;\n"
+                          "@end\n\n"
+                          "@implementation %@\n\n"
+                          "- (NSString *)pluginName {\n"
+                          "  return @\"%@\";\n"
+                          "}\n\n"
+                          "- (BOOL)registerWithApplication:(ALNApplication *)application\n"
+                          "                             error:(NSError **)error {\n"
+                          "  (void)error;\n"
+                          "  [application setJobsAdapter:[[ALNInMemoryJobAdapter alloc] initWithAdapterName:@\"queue_jobs_template\"]];\n"
+                          "  self.worker = [[ALNJobWorker alloc] initWithJobsAdapter:application.jobsAdapter];\n"
+                          "  self.worker.maxJobsPerRun = 100;\n"
+                          "  const char *rawDelay = getenv(\"ARLEN_JOB_WORKER_RETRY_DELAY_SECONDS\");\n"
+                          "  double retryDelay = (rawDelay != NULL) ? atof(rawDelay) : 5.0;\n"
+                          "  self.worker.retryDelaySeconds = (retryDelay >= 0.0) ? retryDelay : 5.0;\n"
+                          "  self.runtime = [[%@QueueRuntime alloc] init];\n"
+                          "  return YES;\n"
+                          "}\n\n"
+                          "- (void)applicationDidStart:(ALNApplication *)application {\n"
+                          "  (void)application;\n"
+                          "  const char *rawInterval = getenv(\"ARLEN_JOB_WORKER_INTERVAL_SECONDS\");\n"
+                          "  double interval = (rawInterval != NULL) ? atof(rawInterval) : 1.0;\n"
+                          "  if (interval <= 0.0) {\n"
+                          "    interval = 1.0;\n"
+                          "  }\n"
+                          "  self.workerTimer = [NSTimer scheduledTimerWithTimeInterval:interval\n"
+                          "                                                    target:self\n"
+                          "                                                  selector:@selector(runWorkerTick:)\n"
+                          "                                                  userInfo:nil\n"
+                          "                                                   repeats:YES];\n"
+                          "}\n\n"
+                          "- (void)runWorkerTick:(NSTimer *)timer {\n"
+                          "  (void)timer;\n"
+                          "  if (self.worker == nil || self.runtime == nil) {\n"
+                          "    return;\n"
+                          "  }\n"
+                          "  NSError *workerError = nil;\n"
+                          "  (void)[self.worker runDueJobsAt:[NSDate date] runtime:self.runtime error:&workerError];\n"
+                          "  (void)workerError;\n"
+                          "}\n\n"
+                          "- (void)applicationWillStop:(ALNApplication *)application {\n"
+                          "  (void)application;\n"
+                          "  [self.workerTimer invalidate];\n"
+                          "  self.workerTimer = nil;\n"
+                          "}\n\n"
+                          "@end\n",
+                         pluginName, pluginName, pluginName, pluginName, pluginName, logicalName, pluginName];
+  }
+
+  if ([normalized isEqualToString:@"smtp-mail"]) {
+    return [NSString stringWithFormat:
+                         @"#import \"%@.h\"\n"
+                          "#import <stdlib.h>\n\n"
+                          "@implementation %@\n\n"
+                          "- (NSString *)pluginName {\n"
+                          "  return @\"%@\";\n"
+                          "}\n\n"
+                          "- (BOOL)registerWithApplication:(ALNApplication *)application\n"
+                          "                             error:(NSError **)error {\n"
+                          "  (void)error;\n"
+                          "  const char *rawHost = getenv(\"ARLEN_SMTP_HOST\");\n"
+                          "  NSString *smtpHost = (rawHost != NULL) ? [NSString stringWithUTF8String:rawHost] : @\"\";\n"
+                          "  const char *rawPort = getenv(\"ARLEN_SMTP_PORT\");\n"
+                          "  NSInteger smtpPort = (rawPort != NULL) ? atoi(rawPort) : 587;\n"
+                          "  (void)smtpPort;\n"
+                          "  if ([smtpHost length] == 0) {\n"
+                          "    [application setMailAdapter:[[ALNInMemoryMailAdapter alloc] initWithAdapterName:@\"smtp_mail_fallback\"]];\n"
+                          "    return YES;\n"
+                          "  }\n\n"
+                          "  // Template hook: replace this fallback with a real SMTP-backed adapter.\n"
+                          "  [application setMailAdapter:[[ALNInMemoryMailAdapter alloc] initWithAdapterName:@\"smtp_mail_template\"]];\n"
+                          "  return YES;\n"
+                          "}\n\n"
+                          "- (void)applicationDidStart:(ALNApplication *)application {\n"
+                          "  (void)application;\n"
+                          "}\n\n"
+                          "- (void)applicationWillStop:(ALNApplication *)application {\n"
+                          "  (void)application;\n"
+                          "}\n\n"
+                          "@end\n",
+                         pluginName, pluginName, logicalName];
+  }
+
+  return [NSString stringWithFormat:
+                       @"#import \"%@.h\"\n\n"
+                        "@implementation %@\n\n"
+                        "- (NSString *)pluginName {\n"
+                        "  return @\"%@\";\n"
+                        "}\n\n"
+                        "- (BOOL)registerWithApplication:(ALNApplication *)application\n"
+                        "                             error:(NSError **)error {\n"
+                        "  (void)application;\n"
+                        "  (void)error;\n"
+                        "  return YES;\n"
+                        "}\n\n"
+                        "- (void)applicationDidStart:(ALNApplication *)application {\n"
+                        "  (void)application;\n"
+                        "}\n\n"
+                        "- (void)applicationWillStop:(ALNApplication *)application {\n"
+                        "  (void)application;\n"
+                        "}\n\n"
+                        "@end\n",
+                       pluginName, pluginName, logicalName];
+}
+
 static int CommandGenerate(NSArray *args) {
   if ([args count] == 1 &&
       ([args[0] isEqualToString:@"--help"] || [args[0] isEqualToString:@"-h"])) {
@@ -672,6 +839,8 @@ static int CommandGenerate(NSArray *args) {
   NSString *templateOption = nil;
   BOOL templateRequested = NO;
   BOOL apiMode = NO;
+  NSString *pluginPreset = @"generic";
+  BOOL pluginPresetExplicit = NO;
 
   for (NSUInteger idx = 2; idx < [args count]; idx++) {
     NSString *arg = args[idx];
@@ -703,6 +872,13 @@ static int CommandGenerate(NSArray *args) {
       }
     } else if ([arg isEqualToString:@"--api"]) {
       apiMode = YES;
+    } else if ([arg isEqualToString:@"--preset"]) {
+      if (idx + 1 >= [args count]) {
+        fprintf(stderr, "arlen generate: --preset requires a value\n");
+        return 2;
+      }
+      pluginPreset = [[args[++idx] lowercaseString] copy];
+      pluginPresetExplicit = YES;
     } else if ([arg isEqualToString:@"--help"] || [arg isEqualToString:@"-h"]) {
       PrintGenerateUsage();
       return 0;
@@ -714,6 +890,14 @@ static int CommandGenerate(NSArray *args) {
 
   if ([type isEqualToString:@"endpoint"] && [routePath length] == 0) {
     fprintf(stderr, "arlen generate endpoint: --route is required\n");
+    return 2;
+  }
+  if (pluginPresetExplicit && ![type isEqualToString:@"plugin"]) {
+    fprintf(stderr, "arlen generate: --preset is only valid for plugin generator\n");
+    return 2;
+  }
+  if ([type isEqualToString:@"plugin"] && !IsSupportedPluginPreset(pluginPreset)) {
+    fprintf(stderr, "arlen generate plugin: unsupported --preset %s\n", [pluginPreset UTF8String]);
     return 2;
   }
 
@@ -856,26 +1040,7 @@ static int CommandGenerate(NSArray *args) {
                                       "@interface %@ : NSObject <ALNPlugin, ALNLifecycleHook>\n"
                                       "@end\n",
                                      pluginName];
-    NSString *impl = [NSString stringWithFormat:
-                                   @"#import \"%@.h\"\n\n"
-                                    "@implementation %@\n\n"
-                                    "- (NSString *)pluginName {\n"
-                                    "  return @\"%@\";\n"
-                                    "}\n\n"
-                                    "- (BOOL)registerWithApplication:(ALNApplication *)application\n"
-                                    "                             error:(NSError **)error {\n"
-                                    "  (void)application;\n"
-                                    "  (void)error;\n"
-                                    "  return YES;\n"
-                                    "}\n\n"
-                                    "- (void)applicationDidStart:(ALNApplication *)application {\n"
-                                    "  (void)application;\n"
-                                    "}\n\n"
-                                    "- (void)applicationWillStop:(ALNApplication *)application {\n"
-                                    "  (void)application;\n"
-                                    "}\n\n"
-                                    "@end\n",
-                                   pluginName, pluginName, logicalName];
+    NSString *impl = PluginImplementationForPreset(pluginName, logicalName, pluginPreset);
 
     ok = WriteTextFile(headerPath, header, NO, &error) &&
          WriteTextFile(implPath, impl, NO, &error);

@@ -58,6 +58,11 @@ Last updated: 2026-02-20
   - controller/context service access helpers and i18n locale fallback config
   - boomhauer sample service routes (`/services/cache`, `/services/jobs`, `/services/i18n`, `/services/mail`, `/services/attachments`)
   - published guide: `docs/ECOSYSTEM_SERVICES.md`
+- Completed Phase 3E follow-on execution slice:
+  - added `arlen generate plugin --preset` templates for Redis cache, queue-backed jobs, and SMTP mail workflows
+  - defined optional worker runtime contract (`ALNJobWorkerRuntime`, `ALNJobWorker`, `ALNJobWorkerRunSummary`)
+  - added production guidance for service persistence + retention policy baselines
+  - added integration coverage for plugin preset generation and unit coverage for worker drain/ack/retry/run-limit behavior
 
 ## Verification State (2026-02-20)
 
@@ -83,6 +88,6 @@ Last updated: 2026-02-20
 
 ## Next Session Focus
 
-1. Add external adapter examples (Redis cache, queue-backed jobs, SMTP mail) as plugin templates.
-2. Define optional worker runtime contract for scheduled/asynchronous job execution.
-3. Expand docs with production guidance for service persistence and retention policies.
+1. Add end-to-end example apps that exercise generated service plugin presets under real backend dependencies.
+2. Implement concrete backend adapters (beyond templates) and run full conformance suites against them.
+3. Design propane-integrated worker supervision model for dedicated async job workers.

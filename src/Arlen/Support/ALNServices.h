@@ -50,6 +50,47 @@ extern NSString *const ALNServiceErrorDomain;
 
 @end
 
+typedef NS_ENUM(NSUInteger, ALNJobWorkerDisposition) {
+  ALNJobWorkerDispositionAcknowledge = 0,
+  ALNJobWorkerDispositionRetry = 1,
+};
+
+@protocol ALNJobWorkerRuntime <NSObject>
+
+- (ALNJobWorkerDisposition)handleJob:(ALNJobEnvelope *)job
+                               error:(NSError *_Nullable *_Nullable)error;
+
+@end
+
+@interface ALNJobWorkerRunSummary : NSObject <NSCopying>
+
+@property(nonatomic, assign, readonly) NSUInteger leasedCount;
+@property(nonatomic, assign, readonly) NSUInteger acknowledgedCount;
+@property(nonatomic, assign, readonly) NSUInteger retriedCount;
+@property(nonatomic, assign, readonly) NSUInteger handlerErrorCount;
+@property(nonatomic, assign, readonly) BOOL reachedRunLimit;
+
+- (instancetype)initWithLeasedCount:(NSUInteger)leasedCount
+                   acknowledgedCount:(NSUInteger)acknowledgedCount
+                        retriedCount:(NSUInteger)retriedCount
+                   handlerErrorCount:(NSUInteger)handlerErrorCount
+                     reachedRunLimit:(BOOL)reachedRunLimit;
+- (NSDictionary *)dictionaryRepresentation;
+
+@end
+
+@interface ALNJobWorker : NSObject
+
+@property(nonatomic, assign) NSUInteger maxJobsPerRun;
+@property(nonatomic, assign) NSTimeInterval retryDelaySeconds;
+
+- (instancetype)initWithJobsAdapter:(id<ALNJobAdapter>)jobsAdapter;
+- (nullable ALNJobWorkerRunSummary *)runDueJobsAt:(nullable NSDate *)timestamp
+                                           runtime:(id<ALNJobWorkerRuntime>)runtime
+                                             error:(NSError *_Nullable *_Nullable)error;
+
+@end
+
 @interface ALNInMemoryJobAdapter : NSObject <ALNJobAdapter>
 
 - (instancetype)initWithAdapterName:(nullable NSString *)adapterName;

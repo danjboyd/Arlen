@@ -101,6 +101,12 @@ Controller-level service access is available through `ALNController`/`ALNContext
 - `attachmentAdapter`
 - `localizedStringForKey:locale:fallbackLocale:defaultValue:arguments:`
 
+Optional job runtime contract for scheduled/asynchronous execution:
+
+- `ALNJobWorkerRuntime`
+- `ALNJobWorker`
+- `ALNJobWorkerRunSummary`
+
 ## 9. Compatibility Helpers
 
 - `compatibility.pageStateEnabled` enables session-backed page-state behavior for migration scenarios.

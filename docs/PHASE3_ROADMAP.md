@@ -179,6 +179,9 @@ Completion highlights:
 - Added plugin-first service override hooks on `ALNApplication` and request/controller access via `ALNContext` + `ALNController`.
 - Added Phase 3E unit/integration coverage, including boomhauer sample service routes.
 - Published service guide and usage examples in `docs/ECOSYSTEM_SERVICES.md`.
+- Added post-completion follow-on scaffolds:
+  - `arlen generate plugin --preset` templates for Redis cache, queue-backed jobs, and SMTP mail flows
+  - optional job worker runtime contract (`ALNJobWorkerRuntime`, `ALNJobWorker`, `ALNJobWorkerRunSummary`)
 
 Deliverables:
 - Plugin-first background jobs abstraction.
