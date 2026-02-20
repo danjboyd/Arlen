@@ -13,6 +13,22 @@ Initialize GNUstep tooling in your shell:
 source /usr/GNUstep/System/Library/Makefiles/GNUstep.sh
 ```
 
+Run bootstrap diagnostics before building:
+
+```bash
+/path/to/Arlen/bin/arlen doctor
+```
+
+Use JSON output for tooling/CI integrations:
+
+```bash
+/path/to/Arlen/bin/arlen doctor --json
+```
+
+Reference known-good baselines:
+
+- `docs/TOOLCHAIN_MATRIX.md`
+
 ## 2. Build Arlen
 
 From repository root:

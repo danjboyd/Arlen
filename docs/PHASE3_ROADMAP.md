@@ -1,6 +1,6 @@
 # Arlen Phase 3 Roadmap
 
-Status: Complete (Phase 3A-3E complete)  
+Status: Active (Phase 3A-3F complete; Phase 3G planned)  
 Last updated: 2026-02-20
 
 Related docs:
@@ -194,6 +194,89 @@ Deliverables:
 Acceptance:
 - Service contracts validated through plugin compatibility suites.
 - Baseline guides and examples published for each adopted service area.
+
+## 3.6 Phase 3F: DX + Reliability Hardening
+
+Status: Complete (2026-02-20)
+
+Completion highlights:
+- Added bootstrap-first doctor workflow:
+  - `bin/arlen doctor` delegates to `bin/arlen-doctor` before any `make arlen`
+  - script-mode diagnostics run even when GNUstep or build prerequisites are missing
+  - JSON output supports automation/CI consumers
+- Published known-good onboarding baseline matrix in `docs/TOOLCHAIN_MATRIX.md`.
+- Hardened `ALNPg` diagnostics and reliability:
+  - regression coverage for direct and prepared parameterized `SELECT`
+  - SQLSTATE + server diagnostics metadata in `NSError.userInfo`
+- Added API convenience primitives:
+  - typed query/header parsing helpers on `ALNContext`/`ALNController`
+  - ETag/`304 Not Modified` helper contract
+  - opt-in response envelope middleware (`apiHelpers.responseEnvelopeEnabled`)
+  - controller envelope helper APIs
+- Added static mount ergonomics:
+  - explicit `mountStaticDirectory:atPrefix:allowExtensions:`
+  - config-driven `staticMounts` loading
+  - allowlist-driven static extension serving
+  - canonical index redirects for directory and `/index.html` forms
+- Completed remaining ecosystem runtime slice:
+  - concrete filesystem jobs/mail adapters (`ALNFileJobAdapter`, `ALNFileMailAdapter`)
+  - propane async worker supervision baseline (`jobWorker*` propane accessories + CLI/env overrides)
+- Added Phase 3F unit/integration acceptance coverage for API helpers, static-mount semantics, and async worker supervision.
+
+Deliverables:
+- Toolchain onboarding hardening:
+  - `arlen doctor` command for local environment checks
+  - known-good toolchain/version compatibility matrix in docs
+- PostgreSQL adapter reliability and diagnostics hardening:
+  - parameterized `SELECT` behavior regression coverage
+  - richer SQL diagnostics in `NSError` metadata (including SQLSTATE and server detail fields)
+- API convenience primitives (opt-in only):
+  - ETag / `304 Not Modified` helper contract
+  - typed query/header parsing helpers
+  - response envelope normalization helper/middleware
+- Static mount ergonomics:
+  - explicit static mount registration contract
+  - canonical directory index redirect behavior
+  - allowlist-based static serving contract
+- Complete remaining Phase 3E follow-on runtime slice:
+  - concrete jobs and mail backend adapters
+  - propane-integrated worker supervision baseline for async job runtimes
+
+Acceptance:
+- `arlen doctor` validates representative supported environments and emits actionable diagnostics.
+- ALNPg diagnostics include SQLSTATE-oriented metadata for representative failure modes.
+- API convenience helpers are covered by positive/rejection tests and remain opt-in.
+- Static mount behavior is integration-tested for allowlist and redirect semantics.
+- Concrete jobs/mail adapters pass compatibility suites; worker supervision behavior passes integration tests.
+
+## 3.7 Phase 3G: SQL Builder v2 + Data Layer Reuse (Planned)
+
+Status: Planned
+
+Deliverables:
+- `ALNSQLBuilder` v2 capability expansion toward SQL::Abstract-family parity goals, while preserving Objective-C-native APIs.
+- Core SQL builder expansions (non-dialect-specific):
+  - nested boolean condition groups
+  - broader operator coverage
+  - joins/aliases/grouping/having
+  - subquery and CTE composition
+  - `RETURNING` and other commonly used ANSI/PostgreSQL-compatible clauses where practical
+- Dialect extension layering for PostgreSQL-specific features (for example conflict/upsert-focused constructs) without forcing those semantics into baseline builder contracts.
+- Publish reusable data-layer packaging for non-Arlen consumers (`ArlenData` module/targets) so SQL builder and adapter contracts can be consumed independently of HTTP/MVC runtime layers.
+- Distribution guidance for partial source consumption and optional split-repo publishing workflow.
+
+Acceptance:
+- New SQL builder capabilities have deterministic SQL/parameter snapshot coverage.
+- Dialect-specific features are isolated behind explicit APIs/modules.
+- Non-Arlen sample usage is documented and validated in CI.
+- Packaging/versioning policy for data-layer reuse is documented and enforceable.
+
+## 3.8 Core Scope Decisions (Agreed)
+
+- Keep Django-style admin/backoffice capabilities out of Arlen core; pursue optional separate product/module paths.
+- Keep full account-management product surfaces (registration/reset/provider workflows) out of Arlen core; retain auth primitives in core.
+- Treat ecosystem package volume as a platform/community outcome, not a core roadmap deliverable.
+- Keep asset pipeline bundling out of core runtime scope; maintain official frontend integration guidance/starter paths without bundler lock-in.
 
 ## 4. Principles
 

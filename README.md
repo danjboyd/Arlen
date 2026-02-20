@@ -16,6 +16,7 @@ Arlen is designed to solve the same class of problems as frameworks like Mojolic
 - Phase 3C: complete (release/doc maturity, perf trend profiles, swagger docs style, migration readiness package).
 - Phase 3D: complete (websocket/SSE baseline, mount composition, realtime pubsub abstraction).
 - Phase 3E: complete (plugin-first ecosystem services: jobs/cache/i18n/mail/attachments).
+- Phase 3F: complete (doctor + toolchain matrix, ALNPg diagnostics hardening, API helpers, static mount ergonomics, concrete jobs/mail adapters, async worker supervision baseline).
 
 ## Quick Start
 
@@ -27,6 +28,12 @@ Initialize GNUstep in your shell:
 
 ```bash
 source /usr/GNUstep/System/Library/Makefiles/GNUstep.sh
+```
+
+Run bootstrap diagnostics before building:
+
+```bash
+./bin/arlen doctor
 ```
 
 Build framework tools and dev server:
@@ -89,6 +96,7 @@ Open `build/docs/index.html` in a browser.
 High-value guides:
 - [First App Guide](docs/FIRST_APP_GUIDE.md)
 - [Getting Started](docs/GETTING_STARTED.md)
+- [Toolchain Matrix](docs/TOOLCHAIN_MATRIX.md)
 - [CLI Reference](docs/CLI_REFERENCE.md)
 - [Core Concepts](docs/CORE_CONCEPTS.md)
 - [Deployment Guide](docs/DEPLOYMENT.md)

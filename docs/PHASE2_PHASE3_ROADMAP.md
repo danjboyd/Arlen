@@ -1,6 +1,6 @@
 # Arlen Phase 2 + Phase 3 Roadmap Index
 
-Status: Active (Phase 2A-2D complete; Phase 3A-3E complete)  
+Status: Active (Phase 2A-2D complete; Phase 3A-3F complete; Phase 3G planned)  
 Last updated: 2026-02-20
 
 This index points to the current roadmap documents:
@@ -34,6 +34,15 @@ Phase 3 is focused on platform maturity:
 - deferred parity capabilities baseline (websocket/SSE/realtime/mounting, Phase 3D complete)
 - deferred ecosystem services track (Phase 3E complete baseline)
 - ecosystem services follow-on scaffolds (plugin presets + optional job worker runtime contract + concrete Redis cache and filesystem attachment adapters, Phase 3E follow-on complete)
+- Phase 3F complete: DX + reliability hardening (`arlen doctor`, toolchain matrix, ALNPg diagnostics, API convenience helpers, static mount ergonomics, concrete jobs/mail adapters, worker supervision baseline)
+- planned Phase 3G: SQL builder v2 capability expansion + standalone data-layer reuse packaging (`ArlenData`)
+
+## Planned Next Phases (Post-3F)
+
+1. Phase 3G:
+   SQL builder capability growth and reusable data-layer extraction for non-Arlen applications.
+2. Scope guardrails:
+   admin/backoffice and full account-product surfaces remain outside Arlen core and are expected to ship as optional modules/products.
 
 ## Data Layer Direction
 

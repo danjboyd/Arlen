@@ -100,6 +100,33 @@ static NSString *ALNEnvValueCompat(const char *primary, const char *legacy) {
   return ALNEnvValue(legacy);
 }
 
+static NSArray *ALNNormalizeExtensionList(NSArray *values) {
+  NSMutableArray *normalized = [NSMutableArray array];
+  for (id value in values ?: @[]) {
+    if (![value isKindOfClass:[NSString class]]) {
+      continue;
+    }
+    NSString *extension = [[(NSString *)value lowercaseString]
+        stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    while ([extension hasPrefix:@"."]) {
+      extension = [extension substringFromIndex:1];
+    }
+    if ([extension length] == 0 || [normalized containsObject:extension]) {
+      continue;
+    }
+    [normalized addObject:extension];
+  }
+  return [NSArray arrayWithArray:normalized];
+}
+
+static NSArray *ALNParseCSVExtensions(NSString *value) {
+  if (![value isKindOfClass:[NSString class]] || [value length] == 0) {
+    return @[];
+  }
+  NSArray *parts = [value componentsSeparatedByString:@","];
+  return ALNNormalizeExtensionList(parts);
+}
+
 @implementation ALNConfig
 
 + (NSDictionary *)loadConfigAtRoot:(NSString *)rootPath
@@ -142,6 +169,8 @@ static NSString *ALNEnvValueCompat(const char *primary, const char *legacy) {
   NSString *performanceLogging = ALNEnvValueCompat("ARLEN_PERFORMANCE_LOGGING",
                                                    "MOJOOBJC_PERFORMANCE_LOGGING");
   NSString *serveStatic = ALNEnvValueCompat("ARLEN_SERVE_STATIC", "MOJOOBJC_SERVE_STATIC");
+  NSString *staticAllowExtensions =
+      ALNEnvValueCompat("ARLEN_STATIC_ALLOW_EXTENSIONS", "MOJOOBJC_STATIC_ALLOW_EXTENSIONS");
   NSString *apiOnly = ALNEnvValueCompat("ARLEN_API_ONLY", "MOJOOBJC_API_ONLY");
   NSString *maxRequestLineBytes =
       ALNEnvValueCompat("ARLEN_MAX_REQUEST_LINE_BYTES", "MOJOOBJC_MAX_REQUEST_LINE_BYTES");
@@ -229,6 +258,8 @@ static NSString *ALNEnvValueCompat(const char *primary, const char *legacy) {
       ALNEnvValueCompat("ARLEN_I18N_FALLBACK_LOCALE", "MOJOOBJC_I18N_FALLBACK_LOCALE");
   NSString *compatibilityPageStateEnabled =
       ALNEnvValueCompat("ARLEN_PAGE_STATE_COMPAT_ENABLED", "MOJOOBJC_PAGE_STATE_COMPAT_ENABLED");
+  NSString *responseEnvelopeEnabled =
+      ALNEnvValueCompat("ARLEN_RESPONSE_ENVELOPE_ENABLED", "MOJOOBJC_RESPONSE_ENVELOPE_ENABLED");
   NSString *eocStrictLocals =
       ALNEnvValueCompat("ARLEN_EOC_STRICT_LOCALS", "MOJOOBJC_EOC_STRICT_LOCALS");
   NSString *eocStrictStringify =
@@ -255,6 +286,10 @@ static NSString *ALNEnvValueCompat(const char *primary, const char *legacy) {
   NSNumber *serveStaticValue = ALNParseBooleanString(serveStatic);
   if (serveStaticValue != nil) {
     config[@"serveStatic"] = serveStaticValue;
+  }
+  NSArray *staticAllowExtensionsValue = ALNParseCSVExtensions(staticAllowExtensions);
+  if ([staticAllowExtensionsValue count] > 0) {
+    config[@"staticAllowExtensions"] = staticAllowExtensionsValue;
   }
   NSNumber *apiOnlyValue = ALNParseBooleanString(apiOnly);
   if (apiOnlyValue != nil) {
@@ -417,6 +452,14 @@ static NSString *ALNEnvValueCompat(const char *primary, const char *legacy) {
   }
   config[@"compatibility"] = compatibility;
 
+  NSMutableDictionary *apiHelpers =
+      [NSMutableDictionary dictionaryWithDictionary:config[@"apiHelpers"] ?: @{}];
+  NSNumber *responseEnvelopeEnabledValue = ALNParseBooleanString(responseEnvelopeEnabled);
+  if (responseEnvelopeEnabledValue != nil) {
+    apiHelpers[@"responseEnvelopeEnabled"] = responseEnvelopeEnabledValue;
+  }
+  config[@"apiHelpers"] = apiHelpers;
+
   NSMutableDictionary *eoc =
       [NSMutableDictionary dictionaryWithDictionary:config[@"eoc"] ?: @{}];
   NSNumber *eocStrictLocalsValue = ALNParseBooleanString(eocStrictLocals);
@@ -473,6 +516,20 @@ static NSString *ALNEnvValueCompat(const char *primary, const char *legacy) {
   }
   if (config[@"serveStatic"] == nil) {
     config[@"serveStatic"] = @([env isEqualToString:@"development"] && !apiOnlyMode);
+  }
+  NSArray *defaultStaticAllowExtensions = @[
+    @"css", @"js",   @"json", @"txt",  @"html", @"htm", @"svg",
+    @"png", @"jpg",  @"jpeg", @"gif",  @"ico",  @"webp", @"woff",
+    @"woff2", @"map", @"xml"
+  ];
+  NSArray *configuredStaticAllowExtensions =
+      [config[@"staticAllowExtensions"] isKindOfClass:[NSArray class]]
+          ? ALNNormalizeExtensionList(config[@"staticAllowExtensions"])
+          : @[];
+  if ([configuredStaticAllowExtensions count] == 0) {
+    config[@"staticAllowExtensions"] = defaultStaticAllowExtensions;
+  } else {
+    config[@"staticAllowExtensions"] = configuredStaticAllowExtensions;
   }
   if (config[@"listenBacklog"] == nil) {
     config[@"listenBacklog"] = @(128);
@@ -644,11 +701,30 @@ static NSString *ALNEnvValueCompat(const char *primary, const char *legacy) {
   }
   config[@"compatibility"] = finalCompatibility;
 
+  NSMutableDictionary *finalAPIHelpers =
+      [NSMutableDictionary dictionaryWithDictionary:config[@"apiHelpers"] ?: @{}];
+  if (finalAPIHelpers[@"responseEnvelopeEnabled"] == nil) {
+    finalAPIHelpers[@"responseEnvelopeEnabled"] = @(NO);
+  }
+  config[@"apiHelpers"] = finalAPIHelpers;
+
   config[@"port"] = @([config[@"port"] integerValue]);
   config[@"apiOnly"] = @([config[@"apiOnly"] boolValue]);
   config[@"trustedProxy"] = @([config[@"trustedProxy"] boolValue]);
   config[@"performanceLogging"] = @([config[@"performanceLogging"] boolValue]);
   config[@"serveStatic"] = @([config[@"serveStatic"] boolValue]);
+  NSArray *normalizedStaticAllowExtensions =
+      ALNNormalizeExtensionList([config[@"staticAllowExtensions"] isKindOfClass:[NSArray class]]
+                                    ? config[@"staticAllowExtensions"]
+                                    : @[]);
+  if ([normalizedStaticAllowExtensions count] == 0) {
+    normalizedStaticAllowExtensions = @[
+      @"css", @"js",   @"json", @"txt",  @"html", @"htm", @"svg",
+      @"png", @"jpg",  @"jpeg", @"gif",  @"ico",  @"webp", @"woff",
+      @"woff2", @"map", @"xml"
+    ];
+  }
+  config[@"staticAllowExtensions"] = normalizedStaticAllowExtensions;
   config[@"listenBacklog"] = @([config[@"listenBacklog"] integerValue]);
   config[@"connectionTimeoutSeconds"] = @([config[@"connectionTimeoutSeconds"] integerValue]);
   config[@"enableReusePort"] = @([config[@"enableReusePort"] boolValue]);
@@ -759,6 +835,10 @@ static NSString *ALNEnvValueCompat(const char *primary, const char *legacy) {
   finalCompatibility[@"pageStateEnabled"] =
       @([finalCompatibility[@"pageStateEnabled"] boolValue]);
   config[@"compatibility"] = finalCompatibility;
+
+  finalAPIHelpers[@"responseEnvelopeEnabled"] =
+      @([finalAPIHelpers[@"responseEnvelopeEnabled"] boolValue]);
+  config[@"apiHelpers"] = finalAPIHelpers;
 
   return [NSDictionary dictionaryWithDictionary:config];
 }

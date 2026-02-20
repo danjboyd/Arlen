@@ -48,13 +48,24 @@ NS_ASSUME_NONNULL_BEGIN
 - (NSDictionary *)params;
 - (nullable id)paramValueForName:(NSString *)name;
 - (nullable NSString *)stringParamForName:(NSString *)name;
+- (nullable NSString *)queryValueForName:(NSString *)name;
+- (nullable NSString *)headerValueForName:(NSString *)name;
+- (nullable NSNumber *)queryIntegerForName:(NSString *)name;
+- (nullable NSNumber *)queryBooleanForName:(NSString *)name;
+- (nullable NSNumber *)headerIntegerForName:(NSString *)name;
+- (nullable NSNumber *)headerBooleanForName:(NSString *)name;
 - (BOOL)requireStringParam:(NSString *)name value:(NSString *_Nullable *_Nullable)value;
 - (BOOL)requireIntegerParam:(NSString *)name value:(NSInteger *_Nullable)value;
+- (BOOL)applyETagAndReturnNotModifiedIfMatch:(NSString *)etag;
 - (void)addValidationErrorForField:(NSString *)field
                               code:(NSString *)code
                            message:(NSString *)message;
 - (NSArray *)validationErrors;
 - (BOOL)renderValidationErrors;
+- (NSDictionary *)normalizedEnvelopeWithData:(nullable id)data meta:(nullable NSDictionary *)meta;
+- (BOOL)renderJSONEnvelopeWithData:(nullable id)data
+                              meta:(nullable NSDictionary *)meta
+                             error:(NSError *_Nullable *_Nullable)error;
 - (NSDictionary *)validatedParams;
 - (nullable id)validatedValueForName:(NSString *)name;
 - (nullable NSDictionary *)authClaims;

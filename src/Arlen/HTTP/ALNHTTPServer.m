@@ -552,55 +552,243 @@ static NSString *ALNContentTypeForFilePath(NSString *filePath) {
   return @"application/octet-stream";
 }
 
-static ALNResponse *ALNStaticResponseForRequest(ALNRequest *request, NSString *publicRoot) {
-  ALNResponse *response = [[ALNResponse alloc] init];
+static NSArray *ALNDefaultStaticAllowExtensions(void) {
+  return @[
+    @"css",
+    @"js",
+    @"json",
+    @"txt",
+    @"html",
+    @"htm",
+    @"svg",
+    @"png",
+    @"jpg",
+    @"jpeg",
+    @"gif",
+    @"ico",
+    @"webp",
+    @"woff",
+    @"woff2",
+    @"map",
+    @"xml",
+  ];
+}
 
-  if (![request.path hasPrefix:@"/static/"]) {
+static NSArray *ALNNormalizedStaticAllowExtensions(NSArray *values) {
+  NSMutableArray *normalized = [NSMutableArray array];
+  for (id value in values ?: @[]) {
+    if (![value isKindOfClass:[NSString class]]) {
+      continue;
+    }
+    NSString *extension = [[(NSString *)value lowercaseString]
+        stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    while ([extension hasPrefix:@"."]) {
+      extension = [extension substringFromIndex:1];
+    }
+    if ([extension length] == 0 || [normalized containsObject:extension]) {
+      continue;
+    }
+    [normalized addObject:extension];
+  }
+  return [NSArray arrayWithArray:normalized];
+}
+
+static NSString *ALNNormalizeStaticPrefix(NSString *prefix) {
+  if (![prefix isKindOfClass:[NSString class]] || [prefix length] == 0) {
+    return nil;
+  }
+  NSString *normalized =
+      [prefix stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+  while ([normalized containsString:@"//"]) {
+    normalized = [normalized stringByReplacingOccurrencesOfString:@"//" withString:@"/"];
+  }
+  if (![normalized hasPrefix:@"/"]) {
+    normalized = [@"/" stringByAppendingString:normalized];
+  }
+  while ([normalized length] > 1 && [normalized hasSuffix:@"/"]) {
+    normalized = [normalized substringToIndex:[normalized length] - 1];
+  }
+  return ([normalized length] > 0) ? normalized : nil;
+}
+
+static NSString *ALNResolvedStaticDirectory(NSString *directory, NSString *publicRoot) {
+  if (![directory isKindOfClass:[NSString class]] || [directory length] == 0) {
+    return nil;
+  }
+  NSString *trimmed =
+      [directory stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+  if ([trimmed length] == 0) {
     return nil;
   }
 
-  NSString *relativePath = [request.path substringFromIndex:[@"/static/" length]];
-  if ([relativePath length] == 0 || [relativePath containsString:@".."] ||
-      [relativePath hasPrefix:@"/"]) {
-    response.statusCode = 404;
-    [response setTextBody:@"not found\n"];
-    [response setHeader:@"Content-Type" value:@"text/plain; charset=utf-8"];
-    return response;
+  if ([trimmed hasPrefix:@"/"]) {
+    return [trimmed stringByStandardizingPath];
+  }
+  NSString *base = [[publicRoot stringByDeletingLastPathComponent] stringByStandardizingPath];
+  return [[base stringByAppendingPathComponent:trimmed] stringByStandardizingPath];
+}
+
+static BOOL ALNStaticCandidateWithinRoot(NSString *candidate, NSString *root) {
+  if ([candidate length] == 0 || [root length] == 0) {
+    return NO;
+  }
+  return [candidate isEqualToString:root] ||
+         [candidate hasPrefix:[root stringByAppendingString:@"/"]];
+}
+
+static BOOL ALNPathWithinStaticPrefix(NSString *requestPath,
+                                      NSString *prefix,
+                                      NSString **relativePath) {
+  NSString *path = [requestPath isKindOfClass:[NSString class]] ? requestPath : @"/";
+  if ([path length] == 0) {
+    path = @"/";
   }
 
-  NSString *standardRoot = [publicRoot stringByStandardizingPath];
-  NSString *candidatePath = [standardRoot stringByAppendingPathComponent:relativePath];
+  if ([path isEqualToString:prefix]) {
+    if (relativePath != NULL) {
+      *relativePath = @"";
+    }
+    return YES;
+  }
+
+  NSString *prefixWithSlash = [prefix stringByAppendingString:@"/"];
+  if (![path hasPrefix:prefixWithSlash]) {
+    return NO;
+  }
+
+  NSString *relative = [path substringFromIndex:[prefixWithSlash length]];
+  if (relativePath != NULL) {
+    *relativePath = relative ?: @"";
+  }
+  return YES;
+}
+
+static BOOL ALNStaticExtensionAllowed(NSString *filePath, NSArray *allowExtensions) {
+  NSArray *allowlist = [allowExtensions isKindOfClass:[NSArray class]] ? allowExtensions : @[];
+  if ([allowlist count] == 0) {
+    return NO;
+  }
+  NSString *extension = [[filePath pathExtension] lowercaseString];
+  if ([extension length] == 0) {
+    return NO;
+  }
+  return [allowlist containsObject:extension];
+}
+
+static ALNResponse *ALNStaticNotFoundResponse(void) {
+  ALNResponse *response = [[ALNResponse alloc] init];
+  response.statusCode = 404;
+  [response setTextBody:@"not found\n"];
+  [response setHeader:@"Content-Type" value:@"text/plain; charset=utf-8"];
+  return response;
+}
+
+static ALNResponse *ALNStaticRedirectResponse(NSString *location) {
+  ALNResponse *response = [[ALNResponse alloc] init];
+  response.statusCode = 301;
+  [response setHeader:@"Location" value:location ?: @"/"];
+  [response setHeader:@"Content-Type" value:@"text/plain; charset=utf-8"];
+  [response setTextBody:@"moved permanently\n"];
+  response.committed = YES;
+  return response;
+}
+
+static NSString *ALNPathWithTrailingSlash(NSString *path) {
+  NSString *normalized = [path isKindOfClass:[NSString class]] ? path : @"/";
+  if ([normalized length] == 0) {
+    normalized = @"/";
+  }
+  if (![normalized hasSuffix:@"/"]) {
+    normalized = [normalized stringByAppendingString:@"/"];
+  }
+  return normalized;
+}
+
+static ALNResponse *ALNStaticResponseForMount(ALNRequest *request,
+                                              NSDictionary *mount,
+                                              NSString *publicRoot) {
+  NSString *prefix = ALNNormalizeStaticPrefix(mount[@"prefix"]);
+  NSString *directory = [mount[@"directory"] isKindOfClass:[NSString class]] ? mount[@"directory"] : @"";
+  NSArray *allowExtensions = [mount[@"allowExtensions"] isKindOfClass:[NSArray class]]
+                                 ? mount[@"allowExtensions"]
+                                 : @[];
+  if ([prefix length] == 0 || [directory length] == 0) {
+    return nil;
+  }
+
+  NSString *relativePath = nil;
+  if (!ALNPathWithinStaticPrefix(request.path, prefix, &relativePath)) {
+    return nil;
+  }
+
+  if ([relativePath containsString:@".."] ||
+      [relativePath hasPrefix:@"/"]) {
+    return ALNStaticNotFoundResponse();
+  }
+
+  NSString *standardRoot = ALNResolvedStaticDirectory(directory, publicRoot);
+  if ([standardRoot length] == 0) {
+    return ALNStaticNotFoundResponse();
+  }
+
+  NSString *candidatePath = ([relativePath length] > 0)
+                                ? [standardRoot stringByAppendingPathComponent:relativePath]
+                                : standardRoot;
   NSString *standardCandidate = [candidatePath stringByStandardizingPath];
 
-  BOOL validRoot = [standardCandidate isEqualToString:standardRoot] ||
-                   [standardCandidate hasPrefix:[standardRoot stringByAppendingString:@"/"]];
-  if (!validRoot) {
-    response.statusCode = 404;
-    [response setTextBody:@"not found\n"];
-    [response setHeader:@"Content-Type" value:@"text/plain; charset=utf-8"];
-    return response;
+  if (!ALNStaticCandidateWithinRoot(standardCandidate, standardRoot)) {
+    return ALNStaticNotFoundResponse();
   }
 
   BOOL isDirectory = NO;
   BOOL exists = [[NSFileManager defaultManager] fileExistsAtPath:standardCandidate
                                                       isDirectory:&isDirectory];
-  if (!exists || isDirectory) {
-    response.statusCode = 404;
-    [response setTextBody:@"not found\n"];
-    [response setHeader:@"Content-Type" value:@"text/plain; charset=utf-8"];
-    return response;
+  if (!exists) {
+    return ALNStaticNotFoundResponse();
   }
 
-  NSData *fileData = [NSData dataWithContentsOfFile:standardCandidate];
+  NSString *resolvedFilePath = nil;
+  if (isDirectory) {
+    NSString *indexHTML = [standardCandidate stringByAppendingPathComponent:@"index.html"];
+    NSString *indexHTM = [standardCandidate stringByAppendingPathComponent:@"index.htm"];
+    BOOL hasIndexHTML = [[NSFileManager defaultManager] fileExistsAtPath:indexHTML];
+    BOOL hasIndexHTM = [[NSFileManager defaultManager] fileExistsAtPath:indexHTM];
+    if (!hasIndexHTML && !hasIndexHTM) {
+      return ALNStaticNotFoundResponse();
+    }
+
+    if (![request.path hasSuffix:@"/"]) {
+      return ALNStaticRedirectResponse(ALNPathWithTrailingSlash(request.path));
+    }
+    resolvedFilePath = hasIndexHTML ? indexHTML : indexHTM;
+  } else {
+    NSString *filename = [[standardCandidate lastPathComponent] lowercaseString];
+    if ([filename isEqualToString:@"index.html"] || [filename isEqualToString:@"index.htm"]) {
+      NSString *parent = [request.path stringByDeletingLastPathComponent];
+      if ([parent length] == 0) {
+        parent = @"/";
+      }
+      return ALNStaticRedirectResponse(ALNPathWithTrailingSlash(parent));
+    }
+    resolvedFilePath = standardCandidate;
+  }
+
+  if (![resolvedFilePath length] || !ALNStaticExtensionAllowed(resolvedFilePath, allowExtensions)) {
+    return ALNStaticNotFoundResponse();
+  }
+
+  NSData *fileData = [NSData dataWithContentsOfFile:resolvedFilePath];
   if (fileData == nil) {
+    ALNResponse *response = [[ALNResponse alloc] init];
     response.statusCode = 500;
     [response setTextBody:@"failed to read static asset\n"];
     [response setHeader:@"Content-Type" value:@"text/plain; charset=utf-8"];
     return response;
   }
 
+  ALNResponse *response = [[ALNResponse alloc] init];
   response.statusCode = 200;
-  [response setHeader:@"Content-Type" value:ALNContentTypeForFilePath(standardCandidate)];
+  [response setHeader:@"Content-Type" value:ALNContentTypeForFilePath(resolvedFilePath)];
   if (![request.method isEqualToString:@"HEAD"]) {
     [response appendData:fileData];
   }
@@ -742,6 +930,53 @@ static ALNResponse *ALNErrorResponse(NSInteger statusCode, NSString *body) {
     _dispatchLock = [[NSLock alloc] init];
   }
   return self;
+}
+
+- (NSArray *)effectiveStaticMounts {
+  NSMutableArray *mounts = [NSMutableArray array];
+  NSMutableSet *seenPrefixes = [NSMutableSet set];
+
+  NSArray *configured = [self.application.staticMounts isKindOfClass:[NSArray class]]
+                            ? self.application.staticMounts
+                            : @[];
+  for (NSDictionary *entry in configured) {
+    if (![entry isKindOfClass:[NSDictionary class]]) {
+      continue;
+    }
+    NSString *prefix = ALNNormalizeStaticPrefix(entry[@"prefix"]);
+    NSString *directory = [entry[@"directory"] isKindOfClass:[NSString class]] ? entry[@"directory"] : @"";
+    NSArray *allowExtensions = ALNNormalizedStaticAllowExtensions(entry[@"allowExtensions"]);
+    if ([prefix length] == 0 || [directory length] == 0) {
+      continue;
+    }
+    if ([allowExtensions count] == 0) {
+      allowExtensions = ALNDefaultStaticAllowExtensions();
+    }
+    if ([seenPrefixes containsObject:prefix]) {
+      continue;
+    }
+    [seenPrefixes addObject:prefix];
+    [mounts addObject:@{
+      @"prefix" : prefix,
+      @"directory" : directory,
+      @"allowExtensions" : allowExtensions,
+    }];
+  }
+
+  BOOL serveStatic = ALNConfigBool(self.application.config ?: @{}, @"serveStatic", NO);
+  if (serveStatic && ![seenPrefixes containsObject:@"/static"]) {
+    NSArray *configuredAllowlist =
+        ALNNormalizedStaticAllowExtensions(self.application.config[@"staticAllowExtensions"]);
+    NSArray *allowExtensions =
+        ([configuredAllowlist count] > 0) ? configuredAllowlist : ALNDefaultStaticAllowExtensions();
+    [mounts addObject:@{
+      @"prefix" : @"/static",
+      @"directory" : @"public",
+      @"allowExtensions" : allowExtensions,
+    }];
+  }
+
+  return [NSArray arrayWithArray:mounts];
 }
 
 - (void)printRoutesToFile:(FILE *)stream {
@@ -926,12 +1161,15 @@ static ALNResponse *ALNErrorResponse(NSInteger statusCode, NSString *body) {
   request.scheme = @"http";
   ALNApplyProxyMetadata(request, self.application.config ?: @{});
 
-  BOOL serveStatic = ALNConfigBool(self.application.config ?: @{}, @"serveStatic", NO);
   BOOL supportsStaticMethod = [request.method isEqualToString:@"GET"] ||
                               [request.method isEqualToString:@"HEAD"];
-  if (serveStatic && supportsStaticMethod && [request.path hasPrefix:@"/static/"]) {
-    ALNResponse *staticResponse = ALNStaticResponseForRequest(request, self.publicRoot);
-    if (staticResponse != nil) {
+  if (supportsStaticMethod) {
+    NSArray *staticMounts = [self effectiveStaticMounts];
+    for (NSDictionary *mount in staticMounts) {
+      ALNResponse *staticResponse = ALNStaticResponseForMount(request, mount, self.publicRoot);
+      if (staticResponse == nil) {
+        continue;
+      }
       ALNEnsurePerformanceHeaders(staticResponse,
                                   performanceLogging,
                                   parseMs,

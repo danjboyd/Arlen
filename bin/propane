@@ -19,6 +19,9 @@ Options:
   --reload-overlap-seconds <n>      Override propane accessory reloadOverlapSeconds
   --listen-backlog <n>              Override runtime listenBacklog
   --connection-timeout-seconds <n>  Override runtime connectionTimeoutSeconds
+  --job-worker-cmd <command>        Spawn supervised async worker command
+  --job-worker-count <n>            Number of supervised async worker processes
+  --job-worker-respawn-delay-ms <n> Override async worker respawn delay
   --app-root <path>                 App root (default: ARLEN_APP_ROOT or cwd)
   --framework-root <path>           Framework root (default: ARLEN_FRAMEWORK_ROOT or script root)
   --no-respawn                      Disable worker respawn on crash/exit
@@ -33,6 +36,8 @@ Signals:
 Environment:
   ARLEN_APP_ROOT
   ARLEN_FRAMEWORK_ROOT
+  ARLEN_PROPANE_JOB_WORKER_COMMAND
+  ARLEN_PROPANE_JOB_WORKER_COUNT
 USAGE
 }
 
@@ -56,6 +61,9 @@ respawn_delay_override=""
 reload_overlap_override=""
 listen_backlog_override=""
 connection_timeout_override=""
+job_worker_cmd_override=""
+job_worker_count_override=""
+job_worker_respawn_delay_override=""
 
 no_respawn=0
 once_mode=0
@@ -112,6 +120,21 @@ while [[ $# -gt 0 ]]; do
     --connection-timeout-seconds)
       [[ $# -ge 2 ]] || { echo "propane: --connection-timeout-seconds requires a value" >&2; exit 2; }
       connection_timeout_override="$2"
+      shift 2
+      ;;
+    --job-worker-cmd)
+      [[ $# -ge 2 ]] || { echo "propane: --job-worker-cmd requires a value" >&2; exit 2; }
+      job_worker_cmd_override="$2"
+      shift 2
+      ;;
+    --job-worker-count)
+      [[ $# -ge 2 ]] || { echo "propane: --job-worker-count requires a value" >&2; exit 2; }
+      job_worker_count_override="$2"
+      shift 2
+      ;;
+    --job-worker-respawn-delay-ms)
+      [[ $# -ge 2 ]] || { echo "propane: --job-worker-respawn-delay-ms requires a value" >&2; exit 2; }
+      job_worker_respawn_delay_override="$2"
       shift 2
       ;;
     --app-root)
@@ -199,6 +222,9 @@ while IFS='=' read -r key value; do
     config_listen_backlog) config_listen_backlog="$value" ;;
     config_connection_timeout_seconds) config_connection_timeout_seconds="$value" ;;
     config_enable_reuse_port) config_enable_reuse_port="$value" ;;
+    config_job_worker_count) config_job_worker_count="$value" ;;
+    config_job_worker_command) config_job_worker_command="$value" ;;
+    config_job_worker_respawn_delay_ms) config_job_worker_respawn_delay_ms="$value" ;;
   esac
 done < <(python3 - "$config_json" <<'PY'
 import json
@@ -227,6 +253,11 @@ def as_bool(value, default=False):
             return False
     return default
 
+def as_str(value, default=""):
+    if isinstance(value, str):
+        return value
+    return default
+
 print(f"config_host={cfg.get('host', '127.0.0.1')}")
 print(f"config_port={as_int(cfg.get('port', 3000), 3000, 1)}")
 print(f"config_workers={as_int(accessories.get('workerCount', 4), 4, 1)}")
@@ -236,6 +267,9 @@ print(f"config_reload_overlap_seconds={as_int(accessories.get('reloadOverlapSeco
 print(f"config_listen_backlog={as_int(cfg.get('listenBacklog', 128), 128, 1)}")
 print(f"config_connection_timeout_seconds={as_int(cfg.get('connectionTimeoutSeconds', 30), 30, 1)}")
 print(f"config_enable_reuse_port={1 if as_bool(cfg.get('enableReusePort', False), False) else 0}")
+print(f"config_job_worker_count={as_int(accessories.get('jobWorkerCount', 0), 0, 0)}")
+print(f"config_job_worker_command={as_str(accessories.get('jobWorkerCommand', ''), '')}")
+print(f"config_job_worker_respawn_delay_ms={as_int(accessories.get('jobWorkerRespawnDelayMs', 250), 250, 0)}")
 PY
 )
 
@@ -248,12 +282,15 @@ reload_overlap_seconds="${reload_overlap_override:-${config_reload_overlap_secon
 listen_backlog="${listen_backlog_override:-${config_listen_backlog:-128}}"
 connection_timeout_seconds="${connection_timeout_override:-${config_connection_timeout_seconds:-30}}"
 enable_reuse_port="${config_enable_reuse_port:-0}"
+job_worker_count="${job_worker_count_override:-${config_job_worker_count:-${ARLEN_PROPANE_JOB_WORKER_COUNT:-0}}}"
+job_worker_command="${job_worker_cmd_override:-${config_job_worker_command:-${ARLEN_PROPANE_JOB_WORKER_COMMAND:-}}}"
+job_worker_respawn_delay_ms="${job_worker_respawn_delay_override:-${config_job_worker_respawn_delay_ms:-${ARLEN_PROPANE_JOB_WORKER_RESPAWN_DELAY_MS:-250}}}"
 
 is_uint() {
   [[ "$1" =~ ^[0-9]+$ ]]
 }
 
-for numeric in "$worker_count" "$port" "$graceful_shutdown_seconds" "$respawn_delay_ms" "$reload_overlap_seconds" "$listen_backlog" "$connection_timeout_seconds" "$enable_reuse_port"; do
+for numeric in "$worker_count" "$port" "$graceful_shutdown_seconds" "$respawn_delay_ms" "$reload_overlap_seconds" "$listen_backlog" "$connection_timeout_seconds" "$enable_reuse_port" "$job_worker_count" "$job_worker_respawn_delay_ms"; do
   if ! is_uint "$numeric"; then
     echo "propane: expected integer propane accessory/runtime value but got: $numeric" >&2
     exit 2
@@ -286,6 +323,14 @@ if (( listen_backlog < 1 )); then
 fi
 if (( connection_timeout_seconds < 1 )); then
   echo "propane: connection timeout seconds must be >= 1" >&2
+  exit 2
+fi
+if (( job_worker_count < 0 )); then
+  echo "propane: job worker count must be >= 0" >&2
+  exit 2
+fi
+if (( job_worker_count > 0 )) && [[ -z "$job_worker_command" ]]; then
+  echo "propane: --job-worker-count requires --job-worker-cmd (or propane accessories jobWorkerCommand)" >&2
   exit 2
 fi
 
@@ -334,6 +379,9 @@ export ARLEN_ENABLE_REUSEPORT="$enable_reuse_port"
 
 echo "propane: starting with propane accessories workerCount=$worker_count gracefulShutdownSeconds=$graceful_shutdown_seconds respawnDelayMs=$respawn_delay_ms reloadOverlapSeconds=$reload_overlap_seconds"
 echo "propane: runtime host=$host port=$port listenBacklog=$listen_backlog connectionTimeoutSeconds=$connection_timeout_seconds enableReusePort=$enable_reuse_port"
+if (( job_worker_count > 0 )); then
+  echo "propane: async workers count=$job_worker_count respawnDelayMs=$job_worker_respawn_delay_ms"
+fi
 
 echo "$$" > "$pid_file"
 
@@ -354,6 +402,16 @@ spawn_worker() {
   local pid=$!
   workers+=("$pid")
   echo "propane: worker started pid=$pid"
+}
+
+spawn_job_worker() {
+  if (( job_worker_count < 1 )) || [[ -z "$job_worker_command" ]]; then
+    return
+  fi
+  bash -lc "$job_worker_command" &
+  local pid=$!
+  job_workers+=("$pid")
+  echo "propane: async worker started pid=$pid"
 }
 
 terminate_pid_list() {
@@ -405,6 +463,7 @@ terminate_pid_list() {
 }
 
 workers=()
+job_workers=()
 shutting_down=0
 reload_requested=0
 manager_exit=0
@@ -420,6 +479,7 @@ on_hup() {
 cleanup_and_exit() {
   local code="$1"
   terminate_pid_list "${workers[@]}"
+  terminate_pid_list "${job_workers[@]}"
   rm -f "$pid_file"
   exit "$code"
 }
@@ -436,19 +496,28 @@ fi
 for ((idx = 0; idx < worker_count; idx++)); do
   spawn_worker
 done
+for ((idx = 0; idx < job_worker_count; idx++)); do
+  spawn_job_worker
+done
 
 while (( shutting_down == 0 )); do
   if (( reload_requested == 1 )); then
     old_workers=("${workers[@]}")
+    old_job_workers=("${job_workers[@]}")
     workers=()
+    job_workers=()
     echo "propane: reload requested; starting replacement workers"
     for ((idx = 0; idx < worker_count; idx++)); do
       spawn_worker
+    done
+    for ((idx = 0; idx < job_worker_count; idx++)); do
+      spawn_job_worker
     done
     if (( reload_overlap_seconds > 0 )); then
       sleep "$reload_overlap_seconds"
     fi
     terminate_pid_list "${old_workers[@]}"
+    terminate_pid_list "${old_job_workers[@]}"
     reload_requested=0
   fi
 
@@ -501,6 +570,48 @@ while (( shutting_down == 0 )); do
       manager_exit="${dead[0]##*:}"
       shutting_down=1
       continue
+    fi
+  fi
+
+  job_dead=()
+  for pid in "${job_workers[@]}"; do
+    if ! kill -0 "$pid" 2>/dev/null; then
+      set +e
+      wait "$pid"
+      status=$?
+      set -e
+      job_dead+=("$pid:$status")
+    fi
+  done
+
+  if (( ${#job_dead[@]} > 0 )); then
+    job_survivors=()
+    for pid in "${job_workers[@]}"; do
+      is_dead=0
+      for pair in "${job_dead[@]}"; do
+        dead_pid="${pair%%:*}"
+        if [[ "$pid" == "$dead_pid" ]]; then
+          is_dead=1
+          break
+        fi
+      done
+      if (( is_dead == 0 )); then
+        job_survivors+=("$pid")
+      fi
+    done
+    job_workers=("${job_survivors[@]}")
+
+    for pair in "${job_dead[@]}"; do
+      dead_pid="${pair%%:*}"
+      dead_status="${pair##*:}"
+      echo "propane: async worker exited pid=$dead_pid status=$dead_status"
+    done
+
+    if (( no_respawn == 0 )); then
+      for _ in "${job_dead[@]}"; do
+        sleep_ms "$job_worker_respawn_delay_ms"
+        spawn_job_worker
+      done
     fi
   fi
 

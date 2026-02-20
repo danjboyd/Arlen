@@ -55,6 +55,7 @@ NS_ASSUME_NONNULL_BEGIN
 @property(nonatomic, copy, readonly) NSArray *middlewares;
 @property(nonatomic, copy, readonly) NSArray *plugins;
 @property(nonatomic, copy, readonly) NSArray *lifecycleHooks;
+@property(nonatomic, copy, readonly) NSArray *staticMounts;
 @property(nonatomic, strong, readonly) id<ALNJobAdapter> jobsAdapter;
 @property(nonatomic, strong, readonly) id<ALNCacheAdapter> cacheAdapter;
 @property(nonatomic, strong, readonly) id<ALNLocalizationAdapter> localizationAdapter;
@@ -85,6 +86,9 @@ NS_ASSUME_NONNULL_BEGIN
                           formats:(nullable NSArray *)formats;
 - (void)endRouteGroup;
 - (BOOL)mountApplication:(ALNApplication *)application atPrefix:(NSString *)prefix;
+- (BOOL)mountStaticDirectory:(NSString *)directory
+                    atPrefix:(NSString *)prefix
+             allowExtensions:(nullable NSArray *)allowExtensions;
 - (void)addMiddleware:(id<ALNMiddleware>)middleware;
 - (void)setJobsAdapter:(id<ALNJobAdapter>)adapter;
 - (void)setCacheAdapter:(id<ALNCacheAdapter>)adapter;

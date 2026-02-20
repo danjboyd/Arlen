@@ -15,6 +15,7 @@ Open `build/docs/index.html` in your browser.
 - [Current Status](STATUS.md): latest checkpoint and verified milestone state.
 - [First App Guide](FIRST_APP_GUIDE.md): fastest path to scaffold, run, and extend your first app.
 - [Getting Started](GETTING_STARTED.md): prerequisites, framework build, tests, and workflow overview.
+- [Toolchain Matrix](TOOLCHAIN_MATRIX.md): known-good onboarding/runtime toolchain baseline.
 - [CLI Reference](CLI_REFERENCE.md): command reference for `arlen`, `boomhauer`, and helper scripts.
 - [Core Concepts](CORE_CONCEPTS.md): runtime architecture and request lifecycle.
 - [Deployment Guide](DEPLOYMENT.md): deployment model and production guidance.

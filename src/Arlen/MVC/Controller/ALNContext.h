@@ -62,8 +62,15 @@ extern NSString *const ALNContextI18nFallbackLocaleStashKey;
 - (NSDictionary *)allParams;
 - (nullable id)paramValueForName:(NSString *)name;
 - (nullable NSString *)stringParamForName:(NSString *)name;
+- (nullable NSString *)queryValueForName:(NSString *)name;
+- (nullable NSString *)headerValueForName:(NSString *)name;
+- (nullable NSNumber *)queryIntegerForName:(NSString *)name;
+- (nullable NSNumber *)queryBooleanForName:(NSString *)name;
+- (nullable NSNumber *)headerIntegerForName:(NSString *)name;
+- (nullable NSNumber *)headerBooleanForName:(NSString *)name;
 - (BOOL)requireStringParam:(NSString *)name value:(NSString *_Nullable *_Nullable)value;
 - (BOOL)requireIntegerParam:(NSString *)name value:(NSInteger *_Nullable)value;
+- (BOOL)applyETagAndReturnNotModifiedIfMatch:(NSString *)etag;
 - (NSString *)requestFormat;
 - (BOOL)wantsJSON;
 - (void)addValidationErrorForField:(NSString *)field

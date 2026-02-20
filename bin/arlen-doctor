@@ -1,0 +1,261 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+print_usage() {
+  cat <<'USAGE'
+Usage: arlen doctor [--env <name>] [--json]
+
+Runs bootstrap environment checks without requiring an Arlen build.
+USAGE
+}
+
+environment="development"
+as_json=0
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --env)
+      [[ $# -ge 2 ]] || { echo "arlen doctor: --env requires a value" >&2; exit 2; }
+      environment="$2"
+      shift 2
+      ;;
+    --json)
+      as_json=1
+      shift
+      ;;
+    --help|-h)
+      print_usage
+      exit 0
+      ;;
+    *)
+      echo "arlen doctor: unknown option $1" >&2
+      exit 2
+      ;;
+  esac
+done
+
+script_path="${BASH_SOURCE[0]}"
+if resolved="$(readlink -f "$script_path" 2>/dev/null)"; then
+  script_path="$resolved"
+fi
+script_dir="$(cd "$(dirname "$script_path")" && pwd)"
+repo_root="$(cd "$script_dir/.." && pwd)"
+app_root="$PWD"
+
+to_absolute_path() {
+  local raw="$1"
+  if [[ -z "$raw" ]]; then
+    return 1
+  fi
+  if [[ "$raw" = /* ]]; then
+    printf '%s\n' "$raw"
+  else
+    printf '%s\n' "$app_root/$raw"
+  fi
+}
+
+is_framework_root() {
+  local candidate="$1"
+  [[ -f "$candidate/GNUmakefile" && -d "$candidate/src/Arlen" ]]
+}
+
+find_framework_root() {
+  local candidate="$1"
+  while [[ -n "$candidate" ]]; do
+    if is_framework_root "$candidate"; then
+      echo "$candidate"
+      return 0
+    fi
+    local parent
+    parent="$(dirname "$candidate")"
+    [[ "$parent" != "$candidate" ]] || break
+    candidate="$parent"
+  done
+  return 1
+}
+
+pass_count=0
+warn_count=0
+fail_count=0
+checks=()
+
+add_check() {
+  local check_id="$1"
+  local status="$2"
+  local message="$3"
+  local hint="${4:-}"
+  checks+=("$check_id"$'\t'"$status"$'\t'"$message"$'\t'"$hint")
+  case "$status" in
+    pass) pass_count=$((pass_count + 1)) ;;
+    warn) warn_count=$((warn_count + 1)) ;;
+    fail) fail_count=$((fail_count + 1)) ;;
+  esac
+}
+
+framework_root=""
+framework_override="${ARLEN_FRAMEWORK_ROOT:-}"
+if [[ -n "$framework_override" ]]; then
+  candidate="$(to_absolute_path "$framework_override")"
+  if is_framework_root "$candidate"; then
+    framework_root="$candidate"
+    add_check "framework_root" "pass" "framework root: $framework_root"
+  else
+    add_check "framework_root" "fail" "ARLEN_FRAMEWORK_ROOT is not valid: $framework_override" \
+      "Unset ARLEN_FRAMEWORK_ROOT or point it to an Arlen checkout with GNUmakefile + src/Arlen."
+  fi
+else
+  if is_framework_root "$repo_root"; then
+    framework_root="$repo_root"
+  elif resolved_root="$(find_framework_root "$app_root" 2>/dev/null)"; then
+    framework_root="$resolved_root"
+  fi
+
+  if [[ -n "$framework_root" ]]; then
+    add_check "framework_root" "pass" "framework root: $framework_root"
+  else
+    add_check "framework_root" "fail" "could not resolve framework root" \
+      "Run inside an Arlen checkout or set ARLEN_FRAMEWORK_ROOT."
+  fi
+fi
+
+app_config_path="$app_root/config/app.plist"
+if [[ -f "$app_config_path" ]]; then
+  add_check "app_root" "pass" "app config found: $app_config_path"
+else
+  add_check "app_root" "warn" "app config not found at $app_config_path" \
+    "Run 'arlen new <AppName>' if you are bootstrapping a new app."
+fi
+
+gnustep_script="/usr/GNUstep/System/Library/Makefiles/GNUstep.sh"
+if [[ -f "$gnustep_script" ]]; then
+  add_check "gnustep_script" "pass" "GNUstep script present: $gnustep_script"
+else
+  add_check "gnustep_script" "fail" "missing GNUstep script: $gnustep_script" \
+    "Install GNUstep development packages."
+fi
+
+check_command() {
+  local command_name="$1"
+  local level="$2"
+  local missing_hint="$3"
+  if command -v "$command_name" >/dev/null 2>&1; then
+    local resolved
+    resolved="$(command -v "$command_name")"
+    add_check "tool_$command_name" "pass" "$command_name found at $resolved"
+  else
+    add_check "tool_$command_name" "$level" "$command_name not found on PATH" "$missing_hint"
+  fi
+}
+
+check_command "clang" "fail" "Install compiler toolchain and ensure PATH is configured."
+check_command "make" "fail" "Install make and ensure PATH is configured."
+check_command "bash" "fail" "Install bash and ensure PATH is configured."
+check_command "xctest" "warn" "Install Debian package 'tools-xctest' for test execution."
+check_command "python3" "warn" "Install python3 for helper scripts and JSON doctor output."
+check_command "curl" "warn" "Install curl for integration smoke checks."
+
+if [[ -f "$gnustep_script" ]]; then
+  if bash -lc "source '$gnustep_script' >/dev/null 2>&1 && gnustep-config --objc-flags >/dev/null"; then
+    add_check "gnustep_config" "pass" "gnustep-config responded successfully"
+  else
+    add_check "gnustep_config" "fail" "failed running gnustep-config after sourcing GNUstep.sh" \
+      "Verify GNUstep installation and shell init."
+  fi
+fi
+
+if command -v ldconfig >/dev/null 2>&1; then
+  libpq_line="$(ldconfig -p 2>/dev/null | grep -m1 'libpq\\.so' || true)"
+  if [[ -n "$libpq_line" ]]; then
+    add_check "libpq" "pass" "libpq available: $libpq_line"
+  else
+    add_check "libpq" "warn" "libpq not detected via ldconfig" \
+      "Install PostgreSQL client libraries (libpq) for ALNPg and migrations."
+  fi
+else
+  add_check "libpq" "warn" "ldconfig unavailable; skipping libpq detection" \
+    "Verify libpq availability manually if PostgreSQL support is required."
+fi
+
+matrix_path="$repo_root/docs/TOOLCHAIN_MATRIX.md"
+if [[ -f "$matrix_path" ]]; then
+  add_check "toolchain_matrix" "pass" "known-good matrix available: docs/TOOLCHAIN_MATRIX.md"
+else
+  add_check "toolchain_matrix" "warn" "known-good matrix missing: docs/TOOLCHAIN_MATRIX.md" \
+    "Add and maintain docs/TOOLCHAIN_MATRIX.md for onboarding guidance."
+fi
+
+if (( as_json == 1 )); then
+  if ! command -v python3 >/dev/null 2>&1; then
+    echo "arlen doctor: --json requires python3" >&2
+    exit 1
+  fi
+
+  checks_payload="$(printf '%s\n' "${checks[@]}")"
+  ARLEN_DOCTOR_CHECKS_PAYLOAD="$checks_payload" \
+    python3 - "$app_root" "$framework_root" "$environment" "$pass_count" "$warn_count" "$fail_count" <<'PY'
+import json
+import os
+import sys
+
+app_root = sys.argv[1]
+framework_root = sys.argv[2]
+environment = sys.argv[3]
+pass_count = int(sys.argv[4])
+warn_count = int(sys.argv[5])
+fail_count = int(sys.argv[6])
+
+checks = []
+for raw in os.environ.get("ARLEN_DOCTOR_CHECKS_PAYLOAD", "").splitlines():
+    raw = raw.rstrip("\n")
+    if not raw:
+        continue
+    parts = raw.split("\t", 3)
+    while len(parts) < 4:
+        parts.append("")
+    check_id, status, message, hint = parts
+    checks.append({
+        "id": check_id,
+        "status": status,
+        "message": message,
+        "hint": hint,
+    })
+
+payload = {
+    "appRoot": app_root,
+    "frameworkRoot": framework_root,
+    "environment": environment,
+    "summary": {
+        "pass": pass_count,
+        "warn": warn_count,
+        "fail": fail_count,
+    },
+    "checks": checks,
+}
+print(json.dumps(payload, indent=2))
+PY
+else
+  echo "Arlen doctor"
+  echo "  app root: $app_root"
+  if [[ -n "$framework_root" ]]; then
+    echo "  framework root: $framework_root"
+  else
+    echo "  framework root: (unresolved)"
+  fi
+  echo "  environment: $environment"
+  for entry in "${checks[@]}"; do
+    IFS=$'\t' read -r check_id status message hint <<<"$entry"
+    status_upper="${status^^}"
+    printf '[%s] %s\n' "$status_upper" "$message"
+    if [[ -n "$hint" ]]; then
+      printf '       hint: %s\n' "$hint"
+    fi
+  done
+  echo
+  echo "Summary: pass=$pass_count warn=$warn_count fail=$fail_count"
+  echo "Known-good matrix: docs/TOOLCHAIN_MATRIX.md"
+fi
+
+if (( fail_count > 0 )); then
+  exit 1
+fi
+exit 0

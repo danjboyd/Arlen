@@ -7,6 +7,15 @@
 NS_ASSUME_NONNULL_BEGIN
 
 extern NSString *const ALNPgErrorDomain;
+extern NSString *const ALNPgErrorDiagnosticsKey;
+extern NSString *const ALNPgErrorSQLStateKey;
+extern NSString *const ALNPgErrorServerDetailKey;
+extern NSString *const ALNPgErrorServerHintKey;
+extern NSString *const ALNPgErrorServerPositionKey;
+extern NSString *const ALNPgErrorServerWhereKey;
+extern NSString *const ALNPgErrorServerTableKey;
+extern NSString *const ALNPgErrorServerColumnKey;
+extern NSString *const ALNPgErrorServerConstraintKey;
 
 typedef NS_ENUM(NSInteger, ALNPgErrorCode) {
   ALNPgErrorConnectionFailed = 1,

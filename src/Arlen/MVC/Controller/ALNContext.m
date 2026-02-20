@@ -62,6 +62,97 @@ static BOOL ALNStringRepresentsInteger(NSString *value, NSInteger *parsed) {
   return YES;
 }
 
+static BOOL ALNStringRepresentsBoolean(NSString *value, BOOL *parsed) {
+  if (![value isKindOfClass:[NSString class]] || [value length] == 0) {
+    return NO;
+  }
+  NSString *normalized = [[value lowercaseString]
+      stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+  if ([normalized isEqualToString:@"1"] || [normalized isEqualToString:@"true"] ||
+      [normalized isEqualToString:@"yes"] || [normalized isEqualToString:@"on"]) {
+    if (parsed != NULL) {
+      *parsed = YES;
+    }
+    return YES;
+  }
+  if ([normalized isEqualToString:@"0"] || [normalized isEqualToString:@"false"] ||
+      [normalized isEqualToString:@"no"] || [normalized isEqualToString:@"off"]) {
+    if (parsed != NULL) {
+      *parsed = NO;
+    }
+    return YES;
+  }
+  return NO;
+}
+
+static NSString *ALNStringFromValue(id value) {
+  if (value == nil || value == [NSNull null]) {
+    return nil;
+  }
+  if ([value isKindOfClass:[NSString class]]) {
+    return value;
+  }
+  if ([value respondsToSelector:@selector(description)]) {
+    return [value description];
+  }
+  return nil;
+}
+
+static NSString *ALNNormalizeETag(NSString *etag) {
+  if (![etag isKindOfClass:[NSString class]]) {
+    return nil;
+  }
+  NSString *trimmed =
+      [etag stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+  if ([trimmed length] == 0) {
+    return nil;
+  }
+  BOOL weak = [trimmed hasPrefix:@"W/"];
+  NSString *token = weak ? [trimmed substringFromIndex:2] : trimmed;
+  token = [token stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+  if (![token hasPrefix:@"\""]) {
+    token = [NSString stringWithFormat:@"\"%@\"", token];
+  } else if (![token hasSuffix:@"\""] && [token length] > 1) {
+    token = [token stringByAppendingString:@"\""];
+  }
+  return weak ? [NSString stringWithFormat:@"W/%@", token] : token;
+}
+
+static NSString *ALNComparableETagToken(NSString *tag) {
+  NSString *normalized = ALNNormalizeETag(tag);
+  if ([normalized length] == 0) {
+    return @"";
+  }
+  if ([normalized hasPrefix:@"W/"]) {
+    normalized = [normalized substringFromIndex:2];
+  }
+  return normalized;
+}
+
+static BOOL ALNETagListMatches(NSString *ifNoneMatchHeader, NSString *etag) {
+  if (![ifNoneMatchHeader isKindOfClass:[NSString class]] || [ifNoneMatchHeader length] == 0 ||
+      [etag length] == 0) {
+    return NO;
+  }
+  NSString *comparableETag = ALNComparableETagToken(etag);
+  NSArray *parts = [ifNoneMatchHeader componentsSeparatedByString:@","];
+  for (NSString *part in parts) {
+    NSString *token =
+        [part stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    if ([token isEqualToString:@"*"]) {
+      return YES;
+    }
+    if ([token isEqualToString:etag]) {
+      return YES;
+    }
+    if ([[ALNComparableETagToken(token) lowercaseString]
+            isEqualToString:[comparableETag lowercaseString]]) {
+      return YES;
+    }
+  }
+  return NO;
+}
+
 - (instancetype)initWithRequest:(ALNRequest *)request
                        response:(ALNResponse *)response
                          params:(NSDictionary *)params
@@ -140,16 +231,62 @@ static BOOL ALNStringRepresentsInteger(NSString *value, NSInteger *parsed) {
 
 - (NSString *)stringParamForName:(NSString *)name {
   id value = [self paramValueForName:name];
-  if (value == nil || value == [NSNull null]) {
+  return ALNStringFromValue(value);
+}
+
+- (NSString *)queryValueForName:(NSString *)name {
+  if ([name length] == 0) {
     return nil;
   }
-  if ([value isKindOfClass:[NSString class]]) {
-    return value;
+  return ALNStringFromValue(self.request.queryParams[name]);
+}
+
+- (NSString *)headerValueForName:(NSString *)name {
+  if ([name length] == 0) {
+    return nil;
   }
-  if ([value respondsToSelector:@selector(description)]) {
-    return [value description];
+  NSString *normalized = [[name lowercaseString] copy];
+  id value = self.request.headers[normalized];
+  if (value == nil) {
+    value = self.request.headers[name];
   }
-  return nil;
+  return ALNStringFromValue(value);
+}
+
+- (NSNumber *)queryIntegerForName:(NSString *)name {
+  NSString *raw = [self queryValueForName:name];
+  NSInteger parsed = 0;
+  if (!ALNStringRepresentsInteger(raw, &parsed)) {
+    return nil;
+  }
+  return @(parsed);
+}
+
+- (NSNumber *)queryBooleanForName:(NSString *)name {
+  NSString *raw = [self queryValueForName:name];
+  BOOL parsed = NO;
+  if (!ALNStringRepresentsBoolean(raw, &parsed)) {
+    return nil;
+  }
+  return @(parsed);
+}
+
+- (NSNumber *)headerIntegerForName:(NSString *)name {
+  NSString *raw = [self headerValueForName:name];
+  NSInteger parsed = 0;
+  if (!ALNStringRepresentsInteger(raw, &parsed)) {
+    return nil;
+  }
+  return @(parsed);
+}
+
+- (NSNumber *)headerBooleanForName:(NSString *)name {
+  NSString *raw = [self headerValueForName:name];
+  BOOL parsed = NO;
+  if (!ALNStringRepresentsBoolean(raw, &parsed)) {
+    return nil;
+  }
+  return @(parsed);
 }
 
 - (BOOL)requireStringParam:(NSString *)name value:(NSString **)value {
@@ -184,6 +321,24 @@ static BOOL ALNStringRepresentsInteger(NSString *value, NSInteger *parsed) {
   if (value != NULL) {
     *value = parsed;
   }
+  return YES;
+}
+
+- (BOOL)applyETagAndReturnNotModifiedIfMatch:(NSString *)etag {
+  NSString *normalized = ALNNormalizeETag(etag);
+  if ([normalized length] == 0) {
+    return NO;
+  }
+
+  [self.response setHeader:@"ETag" value:normalized];
+  NSString *ifNoneMatch = [self headerValueForName:@"if-none-match"];
+  if (!ALNETagListMatches(ifNoneMatch, normalized)) {
+    return NO;
+  }
+
+  self.response.statusCode = 304;
+  [self.response.bodyData setLength:0];
+  self.response.committed = YES;
   return YES;
 }
 

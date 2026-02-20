@@ -97,6 +97,14 @@ typedef NS_ENUM(NSUInteger, ALNJobWorkerDisposition) {
 
 @end
 
+@interface ALNFileJobAdapter : NSObject <ALNJobAdapter>
+
+- (nullable instancetype)initWithStoragePath:(NSString *)storagePath
+                                  adapterName:(nullable NSString *)adapterName
+                                        error:(NSError *_Nullable *_Nullable)error;
+
+@end
+
 @protocol ALNCacheAdapter <NSObject>
 
 - (NSString *)adapterName;
@@ -187,6 +195,14 @@ typedef NS_ENUM(NSUInteger, ALNJobWorkerDisposition) {
 @interface ALNInMemoryMailAdapter : NSObject <ALNMailAdapter>
 
 - (instancetype)initWithAdapterName:(nullable NSString *)adapterName;
+
+@end
+
+@interface ALNFileMailAdapter : NSObject <ALNMailAdapter>
+
+- (nullable instancetype)initWithStorageDirectory:(NSString *)storageDirectory
+                                      adapterName:(nullable NSString *)adapterName
+                                            error:(NSError *_Nullable *_Nullable)error;
 
 @end
 

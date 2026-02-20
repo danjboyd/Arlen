@@ -158,6 +158,86 @@
                            error:nil];
 }
 
+- (void)testParameterizedSelectRegressionCoversDirectAndPreparedQueries {
+  NSString *dsn = [self pgTestDSN];
+  if ([dsn length] == 0) {
+    return;
+  }
+
+  NSError *error = nil;
+  ALNPg *database = [[ALNPg alloc] initWithConnectionString:dsn maxConnections:2 error:&error];
+  XCTAssertNil(error);
+  XCTAssertNotNil(database);
+  if (database == nil) {
+    return;
+  }
+
+  NSArray *rows = [database executeQuery:@"SELECT COALESCE($1::text, 'missing') AS text_value, "
+                                         "$2::int + 5 AS int_value, "
+                                         "($3::text IS NULL)::int AS is_null"
+                              parameters:@[ @"hank", @7, [NSNull null] ]
+                                   error:&error];
+  XCTAssertNil(error);
+  XCTAssertEqual((NSUInteger)1, [rows count]);
+  NSDictionary *row = [rows firstObject];
+  XCTAssertEqualObjects(@"hank", row[@"text_value"]);
+  XCTAssertEqualObjects(@"12", row[@"int_value"]);
+  XCTAssertEqualObjects(@"1", row[@"is_null"]);
+
+  ALNPgConnection *connection = [database acquireConnection:&error];
+  XCTAssertNil(error);
+  XCTAssertNotNil(connection);
+  if (connection == nil) {
+    return;
+  }
+
+  BOOL prepared = [connection prepareStatementNamed:@"phase3f_select"
+                                                sql:@"SELECT $1::text AS token, $2::int * 2 AS doubled"
+                                     parameterCount:2
+                                              error:&error];
+  XCTAssertTrue(prepared);
+  XCTAssertNil(error);
+
+  NSArray *preparedRows = [connection executePreparedQueryNamed:@"phase3f_select"
+                                                     parameters:@[ @"select-ok", @21 ]
+                                                          error:&error];
+  XCTAssertNil(error);
+  XCTAssertEqual((NSUInteger)1, [preparedRows count]);
+  NSDictionary *preparedRow = [preparedRows firstObject];
+  XCTAssertEqualObjects(@"select-ok", preparedRow[@"token"]);
+  XCTAssertEqualObjects(@"42", preparedRow[@"doubled"]);
+
+  [database releaseConnection:connection];
+}
+
+- (void)testQueryErrorsIncludeSQLStateDiagnostics {
+  NSString *dsn = [self pgTestDSN];
+  if ([dsn length] == 0) {
+    return;
+  }
+
+  NSError *error = nil;
+  ALNPg *database = [[ALNPg alloc] initWithConnectionString:dsn maxConnections:2 error:&error];
+  XCTAssertNil(error);
+  XCTAssertNotNil(database);
+  if (database == nil) {
+    return;
+  }
+
+  NSArray *rows =
+      [database executeQuery:@"SELECT * FROM phase3f_missing_table"
+                  parameters:@[]
+                       error:&error];
+  XCTAssertNil(rows);
+  XCTAssertNotNil(error);
+
+  NSString *sqlState = [error.userInfo[ALNPgErrorSQLStateKey] isKindOfClass:[NSString class]]
+                           ? error.userInfo[ALNPgErrorSQLStateKey]
+                           : @"";
+  XCTAssertEqual((NSUInteger)5, [sqlState length]);
+  XCTAssertNotNil(error.userInfo[ALNPgErrorDiagnosticsKey]);
+}
+
 - (void)testMigrationRunnerAppliesPendingFiles {
   NSString *dsn = [self pgTestDSN];
   if ([dsn length] == 0) {

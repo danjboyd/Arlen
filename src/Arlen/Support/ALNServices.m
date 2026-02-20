@@ -54,6 +54,51 @@ static NSString *ALNNormalizeLocale(NSString *locale) {
   return value;
 }
 
+static NSDate *ALNDateFromTimestampValue(id value, NSDate *defaultValue) {
+  if ([value isKindOfClass:[NSDate class]]) {
+    return value;
+  }
+  if ([value respondsToSelector:@selector(doubleValue)]) {
+    return [NSDate dateWithTimeIntervalSince1970:[value doubleValue]];
+  }
+  return defaultValue ?: [NSDate date];
+}
+
+static ALNJobEnvelope *ALNJobEnvelopeFromDictionary(id value) {
+  if (![value isKindOfClass:[NSDictionary class]]) {
+    return nil;
+  }
+  NSDictionary *dict = (NSDictionary *)value;
+  NSString *jobID = ALNNonEmptyString(dict[@"jobID"], @"");
+  NSString *name = ALNNonEmptyString(dict[@"name"], @"");
+  if ([jobID length] == 0 || [name length] == 0) {
+    return nil;
+  }
+
+  NSUInteger attempt = [dict[@"attempt"] respondsToSelector:@selector(unsignedIntegerValue)]
+                           ? [dict[@"attempt"] unsignedIntegerValue]
+                           : 0;
+  NSUInteger maxAttempts =
+      [dict[@"maxAttempts"] respondsToSelector:@selector(unsignedIntegerValue)]
+          ? [dict[@"maxAttempts"] unsignedIntegerValue]
+          : 1;
+  NSUInteger sequence = [dict[@"sequence"] respondsToSelector:@selector(unsignedIntegerValue)]
+                            ? [dict[@"sequence"] unsignedIntegerValue]
+                            : 0;
+  NSDictionary *payload = ALNNormalizeDictionary(dict[@"payload"]);
+  NSDate *createdAt = ALNDateFromTimestampValue(dict[@"createdAt"], [NSDate date]);
+  NSDate *notBefore = ALNDateFromTimestampValue(dict[@"notBefore"], createdAt);
+
+  return [[ALNJobEnvelope alloc] initWithJobID:jobID
+                                          name:name
+                                       payload:payload
+                                       attempt:attempt
+                                   maxAttempts:maxAttempts
+                                     notBefore:notBefore
+                                     createdAt:createdAt
+                                      sequence:sequence];
+}
+
 @interface ALNJobEnvelope ()
 
 @property(nonatomic, copy, readwrite) NSString *jobID;
@@ -498,6 +543,521 @@ static NSString *ALNNormalizeLocale(NSString *locale) {
   [self.leasedByID removeAllObjects];
   [self.deadLetters removeAllObjects];
   self.sequenceCounter = 0;
+  [self.lock unlock];
+}
+
+@end
+
+@interface ALNFileJobAdapter ()
+
+@property(nonatomic, copy) NSString *adapterNameValue;
+@property(nonatomic, copy) NSString *storagePath;
+@property(nonatomic, strong) NSFileManager *fileManager;
+@property(nonatomic, strong) NSLock *lock;
+
+@end
+
+@implementation ALNFileJobAdapter
+
+- (instancetype)initWithStoragePath:(NSString *)storagePath
+                         adapterName:(NSString *)adapterName
+                               error:(NSError **)error {
+  self = [super init];
+  if (!self) {
+    return nil;
+  }
+
+  NSString *normalizedPath = [[ALNNonEmptyString(storagePath, @"") stringByExpandingTildeInPath]
+      stringByStandardizingPath];
+  if ([normalizedPath length] == 0) {
+    if (error != NULL) {
+      *error = ALNServiceError(120, @"job adapter storage path is required", nil);
+    }
+    return nil;
+  }
+
+  _adapterNameValue = [ALNNonEmptyString(adapterName, @"file_jobs") copy];
+  _storagePath = [normalizedPath copy];
+  _fileManager = [[NSFileManager alloc] init];
+  _lock = [[NSLock alloc] init];
+
+  NSString *directory = [_storagePath stringByDeletingLastPathComponent];
+  NSError *directoryError = nil;
+  if (![_fileManager createDirectoryAtPath:directory
+               withIntermediateDirectories:YES
+                                attributes:nil
+                                     error:&directoryError]) {
+    if (error != NULL) {
+      *error = ALNServiceError(121, @"job adapter storage directory could not be created", directoryError);
+    }
+    return nil;
+  }
+
+  if (![_fileManager fileExistsAtPath:_storagePath]) {
+    NSError *writeError = nil;
+    if (![self writeState:@{
+          @"sequenceCounter" : @(0),
+          @"pending" : @[],
+          @"leased" : @{},
+          @"deadLetters" : @[],
+        }
+               error:&writeError]) {
+      if (error != NULL) {
+        *error = writeError;
+      }
+      return nil;
+    }
+  }
+  return self;
+}
+
+- (NSString *)adapterName {
+  return self.adapterNameValue ?: @"file_jobs";
+}
+
+- (NSDictionary *)defaultState {
+  return @{
+    @"sequenceCounter" : @(0),
+    @"pending" : @[],
+    @"leased" : @{},
+    @"deadLetters" : @[],
+  };
+}
+
+- (BOOL)writeState:(NSDictionary *)state error:(NSError **)error {
+  NSError *serializeError = nil;
+  NSData *payload = [NSPropertyListSerialization dataWithPropertyList:state ?: [self defaultState]
+                                                                format:NSPropertyListBinaryFormat_v1_0
+                                                               options:0
+                                                                 error:&serializeError];
+  if (payload == nil) {
+    if (error != NULL) {
+      *error = ALNServiceError(122, @"job adapter state could not be serialized", serializeError);
+    }
+    return NO;
+  }
+
+  NSError *writeError = nil;
+  if (![payload writeToFile:self.storagePath options:NSDataWritingAtomic error:&writeError]) {
+    if (error != NULL) {
+      *error = ALNServiceError(123, @"job adapter state could not be persisted", writeError);
+    }
+    return NO;
+  }
+  return YES;
+}
+
+- (NSDictionary *)readState:(NSError **)error {
+  NSData *payload = [NSData dataWithContentsOfFile:self.storagePath options:0 error:error];
+  if (payload == nil) {
+    if (error != NULL && *error == nil) {
+      *error = ALNServiceError(124, @"job adapter state could not be read", nil);
+    }
+    return nil;
+  }
+
+  NSError *parseError = nil;
+  NSPropertyListFormat format = NSPropertyListBinaryFormat_v1_0;
+  id parsed = [NSPropertyListSerialization propertyListWithData:payload
+                                                        options:NSPropertyListMutableContainersAndLeaves
+                                                         format:&format
+                                                          error:&parseError];
+  if (![parsed isKindOfClass:[NSDictionary class]]) {
+    if (error != NULL) {
+      *error = ALNServiceError(125, @"job adapter state is malformed", parseError);
+    }
+    return nil;
+  }
+  return parsed;
+}
+
+- (NSArray *)sortedPendingFromState:(NSDictionary *)state {
+  NSArray *rawPending = [state[@"pending"] isKindOfClass:[NSArray class]] ? state[@"pending"] : @[];
+  NSMutableArray *pending = [NSMutableArray array];
+  for (id entry in rawPending) {
+    ALNJobEnvelope *envelope = ALNJobEnvelopeFromDictionary(entry);
+    if (envelope != nil) {
+      [pending addObject:envelope];
+    }
+  }
+  [pending sortUsingComparator:^NSComparisonResult(ALNJobEnvelope *a, ALNJobEnvelope *b) {
+    NSComparisonResult dueOrder = [a.notBefore compare:b.notBefore];
+    if (dueOrder != NSOrderedSame) {
+      return dueOrder;
+    }
+    if (a.sequence < b.sequence) {
+      return NSOrderedAscending;
+    }
+    if (a.sequence > b.sequence) {
+      return NSOrderedDescending;
+    }
+    return NSOrderedSame;
+  }];
+  return [NSArray arrayWithArray:pending];
+}
+
+- (NSMutableDictionary *)mutableLeasedMapFromState:(NSDictionary *)state {
+  NSDictionary *rawLeased = [state[@"leased"] isKindOfClass:[NSDictionary class]] ? state[@"leased"] : @{};
+  NSMutableDictionary *leased = [NSMutableDictionary dictionary];
+  for (id key in rawLeased) {
+    if (![key isKindOfClass:[NSString class]]) {
+      continue;
+    }
+    ALNJobEnvelope *envelope = ALNJobEnvelopeFromDictionary(rawLeased[key]);
+    if (envelope != nil) {
+      leased[key] = envelope;
+    }
+  }
+  return leased;
+}
+
+- (NSArray *)deadLettersFromState:(NSDictionary *)state {
+  NSArray *rawDeadLetters = [state[@"deadLetters"] isKindOfClass:[NSArray class]] ? state[@"deadLetters"] : @[];
+  NSMutableArray *deadLetters = [NSMutableArray array];
+  for (id entry in rawDeadLetters) {
+    ALNJobEnvelope *envelope = ALNJobEnvelopeFromDictionary(entry);
+    if (envelope != nil) {
+      [deadLetters addObject:envelope];
+    }
+  }
+  return [NSArray arrayWithArray:deadLetters];
+}
+
+- (NSDictionary *)stateDictionaryWithSequenceCounter:(NSUInteger)sequenceCounter
+                                             pending:(NSArray *)pending
+                                              leased:(NSDictionary *)leased
+                                         deadLetters:(NSArray *)deadLetters {
+  NSMutableArray *pendingPayload = [NSMutableArray array];
+  for (ALNJobEnvelope *envelope in pending ?: @[]) {
+    [pendingPayload addObject:[envelope dictionaryRepresentation]];
+  }
+
+  NSMutableDictionary *leasedPayload = [NSMutableDictionary dictionary];
+  for (id key in leased ?: @{}) {
+    if (![key isKindOfClass:[NSString class]]) {
+      continue;
+    }
+    ALNJobEnvelope *envelope = [leased[key] isKindOfClass:[ALNJobEnvelope class]] ? leased[key] : nil;
+    if (envelope != nil) {
+      leasedPayload[key] = [envelope dictionaryRepresentation];
+    }
+  }
+
+  NSMutableArray *deadLetterPayload = [NSMutableArray array];
+  for (ALNJobEnvelope *envelope in deadLetters ?: @[]) {
+    [deadLetterPayload addObject:[envelope dictionaryRepresentation]];
+  }
+
+  return @{
+    @"sequenceCounter" : @(sequenceCounter),
+    @"pending" : pendingPayload,
+    @"leased" : leasedPayload,
+    @"deadLetters" : deadLetterPayload,
+  };
+}
+
+- (NSString *)enqueueJobNamed:(NSString *)name
+                      payload:(NSDictionary *)payload
+                      options:(NSDictionary *)options
+                        error:(NSError **)error {
+  NSString *normalizedName = ALNNonEmptyString(name, @"");
+  if ([normalizedName length] == 0) {
+    if (error != NULL) {
+      *error = ALNServiceError(126, @"job name is required", nil);
+    }
+    return nil;
+  }
+
+  NSDictionary *normalizedOptions = ALNNormalizeDictionary(options);
+  NSUInteger maxAttempts = 3;
+  id configuredAttempts = normalizedOptions[@"maxAttempts"];
+  if ([configuredAttempts respondsToSelector:@selector(unsignedIntegerValue)] &&
+      [configuredAttempts unsignedIntegerValue] > 0) {
+    maxAttempts = [configuredAttempts unsignedIntegerValue];
+  }
+
+  NSDate *notBefore = [NSDate date];
+  id configuredNotBefore = normalizedOptions[@"notBefore"];
+  if ([configuredNotBefore isKindOfClass:[NSDate class]]) {
+    notBefore = configuredNotBefore;
+  } else if ([configuredNotBefore respondsToSelector:@selector(doubleValue)]) {
+    NSTimeInterval delay = [configuredNotBefore doubleValue];
+    if (delay > 0) {
+      notBefore = [NSDate dateWithTimeIntervalSinceNow:delay];
+    }
+  }
+
+  [self.lock lock];
+  NSError *stateError = nil;
+  NSDictionary *state = [self readState:&stateError];
+  if (state == nil) {
+    [self.lock unlock];
+    if (error != NULL) {
+      *error = stateError;
+    }
+    return nil;
+  }
+
+  NSUInteger sequenceCounter = [state[@"sequenceCounter"] respondsToSelector:@selector(unsignedIntegerValue)]
+                                   ? [state[@"sequenceCounter"] unsignedIntegerValue]
+                                   : 0;
+  sequenceCounter += 1;
+  NSString *jobID = [NSString stringWithFormat:@"job-%lu", (unsigned long)sequenceCounter];
+  ALNJobEnvelope *envelope = [[ALNJobEnvelope alloc] initWithJobID:jobID
+                                                               name:normalizedName
+                                                            payload:ALNNormalizeDictionary(payload)
+                                                            attempt:0
+                                                        maxAttempts:maxAttempts
+                                                          notBefore:notBefore
+                                                          createdAt:[NSDate date]
+                                                           sequence:sequenceCounter];
+
+  NSMutableArray *pending = [NSMutableArray arrayWithArray:[self sortedPendingFromState:state]];
+  [pending addObject:envelope];
+  [pending sortUsingComparator:^NSComparisonResult(ALNJobEnvelope *a, ALNJobEnvelope *b) {
+    NSComparisonResult dueOrder = [a.notBefore compare:b.notBefore];
+    if (dueOrder != NSOrderedSame) {
+      return dueOrder;
+    }
+    if (a.sequence < b.sequence) {
+      return NSOrderedAscending;
+    }
+    if (a.sequence > b.sequence) {
+      return NSOrderedDescending;
+    }
+    return NSOrderedSame;
+  }];
+
+  NSDictionary *nextState = [self stateDictionaryWithSequenceCounter:sequenceCounter
+                                                              pending:pending
+                                                               leased:[self mutableLeasedMapFromState:state]
+                                                          deadLetters:[self deadLettersFromState:state]];
+  NSError *writeError = nil;
+  BOOL persisted = [self writeState:nextState error:&writeError];
+  [self.lock unlock];
+  if (!persisted) {
+    if (error != NULL) {
+      *error = writeError;
+    }
+    return nil;
+  }
+  return jobID;
+}
+
+- (ALNJobEnvelope *)dequeueDueJobAt:(NSDate *)timestamp error:(NSError **)error {
+  NSDate *now = timestamp ?: [NSDate date];
+  [self.lock lock];
+  NSError *stateError = nil;
+  NSDictionary *state = [self readState:&stateError];
+  if (state == nil) {
+    [self.lock unlock];
+    if (error != NULL) {
+      *error = stateError;
+    }
+    return nil;
+  }
+
+  NSMutableArray *pending = [NSMutableArray arrayWithArray:[self sortedPendingFromState:state]];
+  NSMutableDictionary *leased = [self mutableLeasedMapFromState:state];
+  NSArray *deadLetters = [self deadLettersFromState:state];
+  NSUInteger sequenceCounter = [state[@"sequenceCounter"] respondsToSelector:@selector(unsignedIntegerValue)]
+                                   ? [state[@"sequenceCounter"] unsignedIntegerValue]
+                                   : 0;
+
+  NSUInteger foundIndex = NSNotFound;
+  ALNJobEnvelope *selected = nil;
+  for (NSUInteger idx = 0; idx < [pending count]; idx++) {
+    ALNJobEnvelope *candidate = [pending[idx] isKindOfClass:[ALNJobEnvelope class]] ? pending[idx] : nil;
+    if (candidate != nil && [candidate.notBefore compare:now] != NSOrderedDescending) {
+      foundIndex = idx;
+      selected = candidate;
+      break;
+    }
+  }
+
+  if (selected == nil || foundIndex == NSNotFound) {
+    [self.lock unlock];
+    return nil;
+  }
+
+  [pending removeObjectAtIndex:foundIndex];
+  ALNJobEnvelope *leasedEnvelope = [[ALNJobEnvelope alloc] initWithJobID:selected.jobID
+                                                                     name:selected.name
+                                                                  payload:selected.payload
+                                                                  attempt:selected.attempt + 1
+                                                              maxAttempts:selected.maxAttempts
+                                                                notBefore:selected.notBefore
+                                                                createdAt:selected.createdAt
+                                                                 sequence:selected.sequence];
+  leased[leasedEnvelope.jobID] = leasedEnvelope;
+
+  NSDictionary *nextState = [self stateDictionaryWithSequenceCounter:sequenceCounter
+                                                              pending:pending
+                                                               leased:leased
+                                                          deadLetters:deadLetters];
+  NSError *writeError = nil;
+  BOOL persisted = [self writeState:nextState error:&writeError];
+  [self.lock unlock];
+  if (!persisted) {
+    if (error != NULL) {
+      *error = writeError;
+    }
+    return nil;
+  }
+  return [leasedEnvelope copy];
+}
+
+- (BOOL)acknowledgeJobID:(NSString *)jobID error:(NSError **)error {
+  NSString *normalizedID = ALNNonEmptyString(jobID, @"");
+  if ([normalizedID length] == 0) {
+    if (error != NULL) {
+      *error = ALNServiceError(127, @"job ID is required", nil);
+    }
+    return NO;
+  }
+
+  [self.lock lock];
+  NSError *stateError = nil;
+  NSDictionary *state = [self readState:&stateError];
+  if (state == nil) {
+    [self.lock unlock];
+    if (error != NULL) {
+      *error = stateError;
+    }
+    return NO;
+  }
+
+  NSMutableDictionary *leased = [self mutableLeasedMapFromState:state];
+  if (leased[normalizedID] == nil) {
+    [self.lock unlock];
+    if (error != NULL) {
+      *error = ALNServiceError(128, @"job is not currently leased", nil);
+    }
+    return NO;
+  }
+  [leased removeObjectForKey:normalizedID];
+
+  NSDictionary *nextState = [self stateDictionaryWithSequenceCounter:[state[@"sequenceCounter"] unsignedIntegerValue]
+                                                              pending:[self sortedPendingFromState:state]
+                                                               leased:leased
+                                                          deadLetters:[self deadLettersFromState:state]];
+  NSError *writeError = nil;
+  BOOL persisted = [self writeState:nextState error:&writeError];
+  [self.lock unlock];
+  if (!persisted) {
+    if (error != NULL) {
+      *error = writeError;
+    }
+    return NO;
+  }
+  return YES;
+}
+
+- (BOOL)retryJob:(ALNJobEnvelope *)job
+    delaySeconds:(NSTimeInterval)delaySeconds
+           error:(NSError **)error {
+  if (![job isKindOfClass:[ALNJobEnvelope class]]) {
+    if (error != NULL) {
+      *error = ALNServiceError(129, @"job envelope is required", nil);
+    }
+    return NO;
+  }
+
+  NSString *jobID = ALNNonEmptyString(job.jobID, @"");
+  if ([jobID length] == 0) {
+    if (error != NULL) {
+      *error = ALNServiceError(130, @"job ID is required for retry", nil);
+    }
+    return NO;
+  }
+
+  [self.lock lock];
+  NSError *stateError = nil;
+  NSDictionary *state = [self readState:&stateError];
+  if (state == nil) {
+    [self.lock unlock];
+    if (error != NULL) {
+      *error = stateError;
+    }
+    return NO;
+  }
+
+  NSMutableArray *pending = [NSMutableArray arrayWithArray:[self sortedPendingFromState:state]];
+  NSMutableDictionary *leased = [self mutableLeasedMapFromState:state];
+  NSMutableArray *deadLetters = [NSMutableArray arrayWithArray:[self deadLettersFromState:state]];
+  ALNJobEnvelope *leasedEnvelope = [leased[jobID] isKindOfClass:[ALNJobEnvelope class]] ? leased[jobID] : nil;
+  if (leasedEnvelope == nil) {
+    [self.lock unlock];
+    if (error != NULL) {
+      *error = ALNServiceError(131, @"job is not currently leased", nil);
+    }
+    return NO;
+  }
+  [leased removeObjectForKey:jobID];
+
+  if (leasedEnvelope.attempt >= leasedEnvelope.maxAttempts) {
+    [deadLetters addObject:leasedEnvelope];
+  } else {
+    NSTimeInterval safeDelay = (delaySeconds > 0.0) ? delaySeconds : 0.0;
+    ALNJobEnvelope *requeued = [[ALNJobEnvelope alloc] initWithJobID:leasedEnvelope.jobID
+                                                                 name:leasedEnvelope.name
+                                                              payload:leasedEnvelope.payload
+                                                              attempt:leasedEnvelope.attempt
+                                                          maxAttempts:leasedEnvelope.maxAttempts
+                                                            notBefore:[NSDate dateWithTimeIntervalSinceNow:safeDelay]
+                                                            createdAt:leasedEnvelope.createdAt
+                                                             sequence:leasedEnvelope.sequence];
+    [pending addObject:requeued];
+    [pending sortUsingComparator:^NSComparisonResult(ALNJobEnvelope *a, ALNJobEnvelope *b) {
+      NSComparisonResult dueOrder = [a.notBefore compare:b.notBefore];
+      if (dueOrder != NSOrderedSame) {
+        return dueOrder;
+      }
+      if (a.sequence < b.sequence) {
+        return NSOrderedAscending;
+      }
+      if (a.sequence > b.sequence) {
+        return NSOrderedDescending;
+      }
+      return NSOrderedSame;
+    }];
+  }
+
+  NSDictionary *nextState = [self stateDictionaryWithSequenceCounter:[state[@"sequenceCounter"] unsignedIntegerValue]
+                                                              pending:pending
+                                                               leased:leased
+                                                          deadLetters:deadLetters];
+  NSError *writeError = nil;
+  BOOL persisted = [self writeState:nextState error:&writeError];
+  [self.lock unlock];
+  if (!persisted) {
+    if (error != NULL) {
+      *error = writeError;
+    }
+    return NO;
+  }
+  return YES;
+}
+
+- (NSArray *)pendingJobsSnapshot {
+  [self.lock lock];
+  NSDictionary *state = [self readState:NULL];
+  NSArray *snapshot = [self sortedPendingFromState:state ?: @{}];
+  [self.lock unlock];
+  return snapshot ?: @[];
+}
+
+- (NSArray *)deadLetterJobsSnapshot {
+  [self.lock lock];
+  NSDictionary *state = [self readState:NULL];
+  NSArray *snapshot = [self deadLettersFromState:state ?: @{}];
+  [self.lock unlock];
+  return snapshot ?: @[];
+}
+
+- (void)reset {
+  [self.lock lock];
+  (void)[self writeState:[self defaultState] error:NULL];
   [self.lock unlock];
 }
 
@@ -1533,6 +2093,181 @@ static int ALNRedisOpenSocketConnection(NSString *host,
 - (void)reset {
   [self.lock lock];
   [self.deliveries removeAllObjects];
+  self.nextDeliveryID = 0;
+  [self.lock unlock];
+}
+
+@end
+
+@interface ALNFileMailAdapter ()
+
+@property(nonatomic, copy) NSString *adapterNameValue;
+@property(nonatomic, copy) NSString *storageDirectory;
+@property(nonatomic, strong) NSFileManager *fileManager;
+@property(nonatomic, strong) NSLock *lock;
+@property(nonatomic, assign) NSUInteger nextDeliveryID;
+
+@end
+
+@implementation ALNFileMailAdapter
+
+- (instancetype)initWithStorageDirectory:(NSString *)storageDirectory
+                             adapterName:(NSString *)adapterName
+                                   error:(NSError **)error {
+  self = [super init];
+  if (!self) {
+    return nil;
+  }
+
+  NSString *normalizedDirectory =
+      [[ALNNonEmptyString(storageDirectory, @"") stringByExpandingTildeInPath] stringByStandardizingPath];
+  if ([normalizedDirectory length] == 0) {
+    if (error != NULL) {
+      *error = ALNServiceError(420, @"mail storage directory is required", nil);
+    }
+    return nil;
+  }
+
+  _adapterNameValue = [ALNNonEmptyString(adapterName, @"file_mail") copy];
+  _storageDirectory = [normalizedDirectory copy];
+  _fileManager = [[NSFileManager alloc] init];
+  _lock = [[NSLock alloc] init];
+  _nextDeliveryID = 0;
+
+  NSError *directoryError = nil;
+  if (![_fileManager createDirectoryAtPath:_storageDirectory
+               withIntermediateDirectories:YES
+                                attributes:nil
+                                     error:&directoryError]) {
+    if (error != NULL) {
+      *error = ALNServiceError(421, @"mail storage directory could not be created", directoryError);
+    }
+    return nil;
+  }
+
+  NSArray *existing = [_fileManager contentsOfDirectoryAtPath:_storageDirectory error:NULL];
+  for (NSString *item in existing ?: @[]) {
+    if (![item hasPrefix:@"mail-"] || ![item hasSuffix:@".plist"]) {
+      continue;
+    }
+    NSString *numeric = [item substringWithRange:NSMakeRange([@"mail-" length],
+                                                              [item length] - [@"mail-" length] - [@".plist" length])];
+    NSUInteger parsed = (NSUInteger)[numeric integerValue];
+    if (parsed > _nextDeliveryID) {
+      _nextDeliveryID = parsed;
+    }
+  }
+  return self;
+}
+
+- (NSString *)adapterName {
+  return self.adapterNameValue ?: @"file_mail";
+}
+
+- (NSString *)deliveryPathForID:(NSString *)deliveryID {
+  return [self.storageDirectory stringByAppendingPathComponent:[NSString stringWithFormat:@"%@.plist", deliveryID ?: @""]];
+}
+
+- (NSString *)nextDeliveryIdentifier {
+  self.nextDeliveryID += 1;
+  return [NSString stringWithFormat:@"mail-%lu", (unsigned long)self.nextDeliveryID];
+}
+
+- (NSString *)deliverMessage:(ALNMailMessage *)message error:(NSError **)error {
+  if (![message isKindOfClass:[ALNMailMessage class]]) {
+    if (error != NULL) {
+      *error = ALNServiceError(422, @"mail message is required", nil);
+    }
+    return nil;
+  }
+  if ([[message to] count] == 0) {
+    if (error != NULL) {
+      *error = ALNServiceError(423, @"mail message requires at least one recipient", nil);
+    }
+    return nil;
+  }
+
+  [self.lock lock];
+  NSString *deliveryID = [self nextDeliveryIdentifier];
+  NSDictionary *entry = @{
+    @"deliveryID" : deliveryID ?: @"",
+    @"timestamp" : @([[NSDate date] timeIntervalSince1970]),
+    @"message" : [message dictionaryRepresentation],
+  };
+  NSError *serializeError = nil;
+  NSData *payload = [NSPropertyListSerialization dataWithPropertyList:entry
+                                                                format:NSPropertyListBinaryFormat_v1_0
+                                                               options:0
+                                                                 error:&serializeError];
+  if (payload == nil) {
+    [self.lock unlock];
+    if (error != NULL) {
+      *error = ALNServiceError(424, @"mail delivery payload could not be serialized", serializeError);
+    }
+    return nil;
+  }
+
+  NSError *writeError = nil;
+  BOOL wrote = [payload writeToFile:[self deliveryPathForID:deliveryID]
+                            options:NSDataWritingAtomic
+                              error:&writeError];
+  [self.lock unlock];
+  if (!wrote) {
+    if (error != NULL) {
+      *error = ALNServiceError(425, @"mail delivery payload could not be persisted", writeError);
+    }
+    return nil;
+  }
+  return deliveryID;
+}
+
+- (NSArray *)deliveriesSnapshot {
+  [self.lock lock];
+  NSError *listError = nil;
+  NSArray *contents = [self.fileManager contentsOfDirectoryAtPath:self.storageDirectory error:&listError];
+  if (contents == nil) {
+    (void)listError;
+    [self.lock unlock];
+    return @[];
+  }
+
+  NSMutableArray *entries = [NSMutableArray array];
+  NSArray *sorted = [contents sortedArrayUsingSelector:@selector(compare:)];
+  for (NSString *item in sorted) {
+    if (![item hasSuffix:@".plist"]) {
+      continue;
+    }
+    NSString *path = [self.storageDirectory stringByAppendingPathComponent:item];
+    NSData *payload = [NSData dataWithContentsOfFile:path];
+    if (payload == nil) {
+      continue;
+    }
+    NSError *parseError = nil;
+    NSPropertyListFormat format = NSPropertyListBinaryFormat_v1_0;
+    id parsed = [NSPropertyListSerialization propertyListWithData:payload
+                                                          options:NSPropertyListImmutable
+                                                           format:&format
+                                                            error:&parseError];
+    if (![parsed isKindOfClass:[NSDictionary class]]) {
+      (void)parseError;
+      continue;
+    }
+    [entries addObject:parsed];
+  }
+  [self.lock unlock];
+  return [NSArray arrayWithArray:entries];
+}
+
+- (void)reset {
+  [self.lock lock];
+  NSArray *contents = [self.fileManager contentsOfDirectoryAtPath:self.storageDirectory error:NULL];
+  for (NSString *item in contents ?: @[]) {
+    if (![item hasSuffix:@".plist"]) {
+      continue;
+    }
+    NSString *path = [self.storageDirectory stringByAppendingPathComponent:item];
+    (void)[self.fileManager removeItemAtPath:path error:NULL];
+  }
   self.nextDeliveryID = 0;
   [self.lock unlock];
 }

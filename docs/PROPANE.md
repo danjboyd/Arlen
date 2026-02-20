@@ -24,6 +24,9 @@ propaneAccessories = {
   gracefulShutdownSeconds = 10;
   respawnDelayMs = 250;
   reloadOverlapSeconds = 1;
+  jobWorkerCount = 0;
+  jobWorkerCommand = "";
+  jobWorkerRespawnDelayMs = 250;
 };
 ```
 
@@ -45,9 +48,24 @@ When `workerCount > 1`, `propane` enables `SO_REUSEPORT` automatically for worke
 ## CLI Overrides
 
 - `--workers <n>`
+- `--host <addr>`
+- `--port <port>`
+- `--env <name>`
+- `--pid-file <path>`
 - `--graceful-shutdown-seconds <n>`
 - `--respawn-delay-ms <n>`
 - `--reload-overlap-seconds <n>`
 - `--listen-backlog <n>`
 - `--connection-timeout-seconds <n>`
+- `--job-worker-cmd <command>`
+- `--job-worker-count <n>`
+- `--job-worker-respawn-delay-ms <n>`
 - `--no-respawn`
+
+Async worker options supervise non-HTTP background processes under the same manager.
+
+Environment fallbacks:
+
+- `ARLEN_PROPANE_JOB_WORKER_COMMAND`
+- `ARLEN_PROPANE_JOB_WORKER_COUNT`
+- `ARLEN_PROPANE_JOB_WORKER_RESPAWN_DELAY_MS`

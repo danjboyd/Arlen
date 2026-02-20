@@ -134,6 +134,61 @@
   return last;
 }
 
+- (NSArray *)childProcessInfoForParent:(pid_t)parentPID {
+  int exitCode = 0;
+  NSString *command =
+      [NSString stringWithFormat:@"ps -o pid= -o args= --ppid %d 2>/dev/null", (int)parentPID];
+  NSString *output = [self runShellCapture:command exitCode:&exitCode];
+  if (exitCode != 0 || [output length] == 0) {
+    return @[];
+  }
+
+  NSMutableArray *info = [NSMutableArray array];
+  NSArray *lines = [output componentsSeparatedByCharactersInSet:[NSCharacterSet newlineCharacterSet]];
+  for (NSString *line in lines) {
+    NSString *trimmed =
+        [line stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    if ([trimmed length] == 0) {
+      continue;
+    }
+
+    NSScanner *scanner = [NSScanner scannerWithString:trimmed];
+    NSInteger pid = 0;
+    if (![scanner scanInteger:&pid] || pid <= 0) {
+      continue;
+    }
+    NSString *args = @"";
+    if ([scanner scanLocation] < [trimmed length]) {
+      args = [[trimmed substringFromIndex:[scanner scanLocation]]
+          stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    }
+    [info addObject:@{
+      @"pid" : @(pid),
+      @"args" : args ?: @"",
+    }];
+  }
+  return info;
+}
+
+- (pid_t)waitForChildPIDForParent:(pid_t)parentPID
+                  containingToken:(NSString *)token
+                         excluding:(pid_t)excludedPID
+                         attempts:(NSInteger)attempts {
+  NSString *needle = token ?: @"";
+  for (NSInteger idx = 0; idx < attempts; idx++) {
+    NSArray *info = [self childProcessInfoForParent:parentPID];
+    for (NSDictionary *entry in info) {
+      pid_t pid = (pid_t)[entry[@"pid"] intValue];
+      NSString *args = [entry[@"args"] isKindOfClass:[NSString class]] ? entry[@"args"] : @"";
+      if (pid > 0 && pid != excludedPID && [args containsString:needle]) {
+        return pid;
+      }
+    }
+    usleep(200000);
+  }
+  return (pid_t)0;
+}
+
 - (NSString *)requestWithServerEnv:(NSString *)envPrefix
                        serverBinary:(NSString *)serverBinary
                           curlBody:(NSString *)curlCommand
@@ -629,6 +684,146 @@
   XCTAssertEqualObjects(@"static ok\n", body);
 }
 
+- (void)testStaticMountCanonicalIndexRedirects {
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *token = [[[NSUUID UUID] UUIDString] lowercaseString];
+  NSString *relativeRoot = [NSString stringWithFormat:@"phase3f-static-%@",
+                                                      [token stringByReplacingOccurrencesOfString:@"-"
+                                                                                       withString:@""]];
+  NSString *indexPath = [repoRoot stringByAppendingPathComponent:
+                                    [NSString stringWithFormat:@"public/%@/docs/index.html", relativeRoot]];
+  NSString *assetRoot = [indexPath stringByDeletingLastPathComponent];
+  NSError *setupError = nil;
+  BOOL created = [[NSFileManager defaultManager] createDirectoryAtPath:assetRoot
+                                            withIntermediateDirectories:YES
+                                                             attributes:nil
+                                                                  error:&setupError];
+  XCTAssertTrue(created);
+  XCTAssertNil(setupError);
+  XCTAssertTrue([@"phase3f-index\n" writeToFile:indexPath
+                                     atomically:YES
+                                       encoding:NSUTF8StringEncoding
+                                          error:&setupError]);
+  XCTAssertNil(setupError);
+
+  @try {
+    int curlCode = 0;
+    int serverCode = 0;
+    NSString *headersNoSlash = [self requestWithServerEnv:nil
+                                              serverBinary:@"./build/boomhauer"
+                                                 curlBody:[NSString stringWithFormat:
+                                                                     @"curl -sS -D - -o /dev/null "
+                                                                      "http://127.0.0.1:%%d/static/%@/docs",
+                                                                      relativeRoot]
+                                                 curlCode:&curlCode
+                                                serverCode:&serverCode];
+    XCTAssertEqual(0, curlCode);
+    XCTAssertEqual(0, serverCode);
+    XCTAssertTrue([headersNoSlash containsString:@" 301 "]);
+    NSString *expectedNoSlashLocation =
+        [NSString stringWithFormat:@"Location: /static/%@/docs/", relativeRoot];
+    XCTAssertTrue([headersNoSlash containsString:expectedNoSlashLocation]);
+
+    NSString *headersIndex = [self requestWithServerEnv:nil
+                                            serverBinary:@"./build/boomhauer"
+                                               curlBody:[NSString stringWithFormat:
+                                                                   @"curl -sS -D - -o /dev/null "
+                                                                    "http://127.0.0.1:%%d/static/%@/docs/index.html",
+                                                                    relativeRoot]
+                                               curlCode:&curlCode
+                                              serverCode:&serverCode];
+    XCTAssertEqual(0, curlCode);
+    XCTAssertEqual(0, serverCode);
+    XCTAssertTrue([headersIndex containsString:@" 301 "]);
+    NSString *expectedIndexLocation =
+        [NSString stringWithFormat:@"Location: /static/%@/docs/", relativeRoot];
+    XCTAssertTrue([headersIndex containsString:expectedIndexLocation]);
+
+    NSString *body = [self requestWithServerEnv:nil
+                                    serverBinary:@"./build/boomhauer"
+                                       curlBody:[NSString stringWithFormat:
+                                                           @"curl -fsS http://127.0.0.1:%%d/static/%@/docs/",
+                                                           relativeRoot]
+                                       curlCode:&curlCode
+                                      serverCode:&serverCode];
+    XCTAssertEqual(0, curlCode);
+    XCTAssertEqual(0, serverCode);
+    XCTAssertEqualObjects(@"phase3f-index\n", body);
+  } @finally {
+    NSString *cleanupPath = [repoRoot stringByAppendingPathComponent:
+                                        [NSString stringWithFormat:@"public/%@", relativeRoot]];
+    (void)[[NSFileManager defaultManager] removeItemAtPath:cleanupPath error:nil];
+  }
+}
+
+- (void)testStaticAllowlistBlocksAndAllowsConfiguredExtensions {
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *token = [[[NSUUID UUID] UUIDString] lowercaseString];
+  NSString *relativeRoot = [NSString stringWithFormat:@"phase3f-static-%@",
+                                                      [token stringByReplacingOccurrencesOfString:@"-"
+                                                                                       withString:@""]];
+  NSString *assetDir = [repoRoot stringByAppendingPathComponent:
+                                   [NSString stringWithFormat:@"public/%@", relativeRoot]];
+  NSString *blockedPath = [assetDir stringByAppendingPathComponent:@"blocked.exe"];
+  NSError *setupError = nil;
+  BOOL created = [[NSFileManager defaultManager] createDirectoryAtPath:assetDir
+                                            withIntermediateDirectories:YES
+                                                             attributes:nil
+                                                                  error:&setupError];
+  XCTAssertTrue(created);
+  XCTAssertNil(setupError);
+  XCTAssertTrue([@"blocked\n" writeToFile:blockedPath
+                               atomically:YES
+                                 encoding:NSUTF8StringEncoding
+                                    error:&setupError]);
+  XCTAssertNil(setupError);
+
+  @try {
+    int curlCode = 0;
+    int serverCode = 0;
+    NSString *statusBlocked = [self requestWithServerEnv:nil
+                                             serverBinary:@"./build/boomhauer"
+                                                curlBody:[NSString stringWithFormat:
+                                                                    @"curl -sS -o /dev/null -w '%%{http_code}' "
+                                                                     "http://127.0.0.1:%%d/static/%@/blocked.exe",
+                                                                     relativeRoot]
+                                                curlCode:&curlCode
+                                               serverCode:&serverCode];
+    XCTAssertEqual(0, curlCode);
+    XCTAssertEqual(0, serverCode);
+    XCTAssertEqualObjects(@"404",
+                          [statusBlocked stringByTrimmingCharactersInSet:
+                                               [NSCharacterSet whitespaceAndNewlineCharacterSet]]);
+
+    NSString *statusAllowed = [self requestWithServerEnv:@"ARLEN_STATIC_ALLOW_EXTENSIONS=txt,exe"
+                                             serverBinary:@"./build/boomhauer"
+                                                curlBody:[NSString stringWithFormat:
+                                                                    @"curl -sS -o /dev/null -w '%%{http_code}' "
+                                                                     "http://127.0.0.1:%%d/static/%@/blocked.exe",
+                                                                     relativeRoot]
+                                                curlCode:&curlCode
+                                               serverCode:&serverCode];
+    XCTAssertEqual(0, curlCode);
+    XCTAssertEqual(0, serverCode);
+    XCTAssertEqualObjects(@"200",
+                          [statusAllowed stringByTrimmingCharactersInSet:
+                                              [NSCharacterSet whitespaceAndNewlineCharacterSet]]);
+
+    NSString *body = [self requestWithServerEnv:@"ARLEN_STATIC_ALLOW_EXTENSIONS=txt,exe"
+                                    serverBinary:@"./build/boomhauer"
+                                       curlBody:[NSString stringWithFormat:
+                                                           @"curl -fsS http://127.0.0.1:%%d/static/%@/blocked.exe",
+                                                           relativeRoot]
+                                       curlCode:&curlCode
+                                      serverCode:&serverCode];
+    XCTAssertEqual(0, curlCode);
+    XCTAssertEqual(0, serverCode);
+    XCTAssertEqualObjects(@"blocked\n", body);
+  } @finally {
+    (void)[[NSFileManager defaultManager] removeItemAtPath:assetDir error:nil];
+  }
+}
+
 - (void)testHeaderLimitReturns431 {
   int curlCode = 0;
   int serverCode = 0;
@@ -890,6 +1085,87 @@
                                                attempts:120
                                                 success:&secondOK];
     XCTAssertTrue(secondOK);
+    XCTAssertEqualObjects(@"ok\n", secondBody);
+
+    XCTAssertEqual(0, kill(server.processIdentifier, SIGTERM));
+    [server waitUntilExit];
+    XCTAssertEqual(0, server.terminationStatus);
+    XCTAssertFalse([[NSFileManager defaultManager] fileExistsAtPath:pidFile]);
+  } @finally {
+    if ([server isRunning]) {
+      (void)kill(server.processIdentifier, SIGTERM);
+      [server waitUntilExit];
+    }
+    [[NSFileManager defaultManager] removeItemAtPath:pidFile error:nil];
+  }
+}
+
+- (void)testPropaneSupervisesAsyncWorkersAndRespawnsOnCrash {
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *appRoot = [repoRoot stringByAppendingPathComponent:@"examples/tech_demo"];
+  int port = [self randomPort];
+  NSString *pidFile = [NSTemporaryDirectory()
+      stringByAppendingPathComponent:[NSString stringWithFormat:@"arlen-propane-async-%d.pid", port]];
+
+  NSTask *server = [[NSTask alloc] init];
+  server.launchPath = [repoRoot stringByAppendingPathComponent:@"bin/propane"];
+  server.currentDirectoryPath = repoRoot;
+  server.arguments = @[
+    @"--workers",
+    @"1",
+    @"--host",
+    @"127.0.0.1",
+    @"--port",
+    [NSString stringWithFormat:@"%d", port],
+    @"--env",
+    @"development",
+    @"--pid-file",
+    pidFile,
+    @"--job-worker-cmd",
+    @"sleep 30",
+    @"--job-worker-count",
+    @"1",
+    @"--job-worker-respawn-delay-ms",
+    @"100",
+  ];
+  NSMutableDictionary *env =
+      [NSMutableDictionary dictionaryWithDictionary:[[NSProcessInfo processInfo] environment]];
+  env[@"ARLEN_FRAMEWORK_ROOT"] = repoRoot;
+  env[@"ARLEN_APP_ROOT"] = appRoot;
+  server.environment = env;
+
+  [server launch];
+
+  @try {
+    BOOL ready = NO;
+    NSString *body = [self requestPathWithRetries:@"/healthz"
+                                             port:port
+                                         attempts:120
+                                          success:&ready];
+    XCTAssertTrue(ready);
+    XCTAssertEqualObjects(@"ok\n", body);
+
+    pid_t firstAsyncPID = [self waitForChildPIDForParent:server.processIdentifier
+                                          containingToken:@"sleep 30"
+                                                excluding:0
+                                                 attempts:80];
+    XCTAssertTrue(firstAsyncPID > 0);
+
+    XCTAssertEqual(0, kill(firstAsyncPID, SIGKILL));
+
+    pid_t replacementAsyncPID = [self waitForChildPIDForParent:server.processIdentifier
+                                                containingToken:@"sleep 30"
+                                                      excluding:firstAsyncPID
+                                                       attempts:120];
+    XCTAssertTrue(replacementAsyncPID > 0);
+    XCTAssertNotEqual((int)firstAsyncPID, (int)replacementAsyncPID);
+
+    BOOL secondReady = NO;
+    NSString *secondBody = [self requestPathWithRetries:@"/healthz"
+                                                   port:port
+                                               attempts:120
+                                                success:&secondReady];
+    XCTAssertTrue(secondReady);
     XCTAssertEqualObjects(@"ok\n", secondBody);
 
     XCTAssertEqual(0, kill(server.processIdentifier, SIGTERM));

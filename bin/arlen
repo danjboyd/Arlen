@@ -2,5 +2,14 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+if [[ "${1:-}" == "doctor" ]]; then
+  shift
+  if [[ ! -x "$repo_root/bin/arlen-doctor" ]]; then
+    echo "arlen doctor: missing bootstrap script at $repo_root/bin/arlen-doctor" >&2
+    exit 1
+  fi
+  exec "$repo_root/bin/arlen-doctor" "$@"
+fi
+
 make -C "$repo_root" arlen >/dev/null
 exec "$repo_root/build/arlen" "$@"

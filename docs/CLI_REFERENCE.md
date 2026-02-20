@@ -21,6 +21,15 @@ Create a new app scaffold.
 - `--force`: overwrite existing files where allowed
 - `--help` / `-h`: show command usage
 
+### `arlen doctor [--env <name>] [--json]`
+
+Run bootstrap environment diagnostics without requiring a framework build.
+
+- delegated by `bin/arlen` directly to `bin/arlen-doctor` before any `make arlen`
+- intended for first-run toolchain validation (GNUstep/tooling presence)
+- `--env <name>`: include the target environment name in output (default `development`)
+- `--json`: emit structured JSON diagnostics
+
 ### `arlen generate <controller|endpoint|model|migration|test|plugin> <Name> [options]`
 
 Generate app artifacts.
@@ -177,7 +186,16 @@ Core options:
 - `--reload-overlap-seconds <n>`
 - `--listen-backlog <n>`
 - `--connection-timeout-seconds <n>`
+- `--job-worker-cmd <command>`
+- `--job-worker-count <n>`
+- `--job-worker-respawn-delay-ms <n>`
 - `--no-respawn`
+
+Async worker environment fallbacks:
+
+- `ARLEN_PROPANE_JOB_WORKER_COMMAND`
+- `ARLEN_PROPANE_JOB_WORKER_COUNT`
+- `ARLEN_PROPANE_JOB_WORKER_RESPAWN_DELAY_MS`
 
 Signals:
 

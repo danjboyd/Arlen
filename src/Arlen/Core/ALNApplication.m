@@ -9,6 +9,7 @@
 #import "ALNContext.h"
 #import "ALNCSRFMiddleware.h"
 #import "ALNRateLimitMiddleware.h"
+#import "ALNResponseEnvelopeMiddleware.h"
 #import "ALNRouter.h"
 #import "ALNRoute.h"
 #import "ALNSecurityHeadersMiddleware.h"
@@ -36,6 +37,7 @@ static void ALNSetStructuredErrorResponse(ALNResponse *response,
 @property(nonatomic, strong) NSMutableArray *mutablePlugins;
 @property(nonatomic, strong) NSMutableArray *mutableLifecycleHooks;
 @property(nonatomic, strong) NSMutableArray *mutableMounts;
+@property(nonatomic, strong) NSMutableArray *mutableStaticMounts;
 @property(nonatomic, strong, readwrite) id<ALNJobAdapter> jobsAdapter;
 @property(nonatomic, strong, readwrite) id<ALNCacheAdapter> cacheAdapter;
 @property(nonatomic, strong, readwrite) id<ALNLocalizationAdapter> localizationAdapter;
@@ -46,6 +48,7 @@ static void ALNSetStructuredErrorResponse(ALNResponse *response,
 @property(nonatomic, assign, readwrite, getter=isStarted) BOOL started;
 
 - (void)loadConfiguredPlugins;
+- (void)loadConfiguredStaticMounts;
 - (nullable NSDictionary *)mountedEntryForPath:(NSString *)requestPath
                                    rewrittenPath:(NSString *_Nullable *_Nullable)rewrittenPath;
 
@@ -81,6 +84,7 @@ static void ALNSetStructuredErrorResponse(ALNResponse *response,
     _mutablePlugins = [NSMutableArray array];
     _mutableLifecycleHooks = [NSMutableArray array];
     _mutableMounts = [NSMutableArray array];
+    _mutableStaticMounts = [NSMutableArray array];
     _jobsAdapter = [[ALNInMemoryJobAdapter alloc] init];
     _cacheAdapter = [[ALNInMemoryCacheAdapter alloc] init];
     _localizationAdapter = [[ALNInMemoryLocalizationAdapter alloc] init];
@@ -109,6 +113,7 @@ static void ALNSetStructuredErrorResponse(ALNResponse *response,
       _logger.minimumLevel = ALNLogLevelDebug;
     }
     [self registerBuiltInMiddlewares];
+    [self loadConfiguredStaticMounts];
     [self loadConfiguredPlugins];
   }
   return self;
@@ -176,6 +181,43 @@ static void ALNSetStructuredErrorResponse(ALNResponse *response,
   [self.mutableMounts addObject:@{
     @"prefix" : normalizedPrefix,
     @"application" : application
+  }];
+  return YES;
+}
+
+- (NSArray *)staticMounts {
+  return [NSArray arrayWithArray:self.mutableStaticMounts];
+}
+
+- (BOOL)mountStaticDirectory:(NSString *)directory
+                    atPrefix:(NSString *)prefix
+             allowExtensions:(NSArray *)allowExtensions {
+  NSString *normalizedPrefix = ALNNormalizeMountPrefix(prefix);
+  if ([normalizedPrefix length] == 0) {
+    return NO;
+  }
+
+  NSString *normalizedDirectory = [directory isKindOfClass:[NSString class]]
+                                      ? [directory stringByStandardizingPath]
+                                      : @"";
+  normalizedDirectory = [normalizedDirectory stringByTrimmingCharactersInSet:
+                                               [NSCharacterSet whitespaceAndNewlineCharacterSet]];
+  if ([normalizedDirectory length] == 0) {
+    return NO;
+  }
+
+  for (NSDictionary *entry in self.mutableStaticMounts) {
+    NSString *existingPrefix = [entry[@"prefix"] isKindOfClass:[NSString class]] ? entry[@"prefix"] : @"";
+    if ([existingPrefix isEqualToString:normalizedPrefix]) {
+      return NO;
+    }
+  }
+
+  NSArray *extensions = ALNNormalizedStaticExtensions(allowExtensions);
+  [self.mutableStaticMounts addObject:@{
+    @"prefix" : normalizedPrefix,
+    @"directory" : normalizedDirectory,
+    @"allowExtensions" : extensions ?: @[],
   }];
   return YES;
 }
@@ -433,6 +475,28 @@ static NSString *ALNRewriteMountedPath(NSString *requestPath, NSString *prefix) 
     return ([trimmed length] > 0) ? trimmed : @"/";
   }
   return nil;
+}
+
+static NSArray *ALNNormalizedStaticExtensions(NSArray *allowExtensions) {
+  NSMutableArray *normalized = [NSMutableArray array];
+  for (id value in allowExtensions ?: @[]) {
+    if (![value isKindOfClass:[NSString class]]) {
+      continue;
+    }
+    NSString *extension = [[(NSString *)value lowercaseString]
+        stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    while ([extension hasPrefix:@"."]) {
+      extension = [extension substringFromIndex:1];
+    }
+    if ([extension length] == 0) {
+      continue;
+    }
+    if ([normalized containsObject:extension]) {
+      continue;
+    }
+    [normalized addObject:extension];
+  }
+  return [NSArray arrayWithArray:normalized];
 }
 
 static NSArray *ALNNormalizedUniqueStrings(NSArray *values) {
@@ -1338,6 +1402,40 @@ static void ALNFinalizeResponse(ALNResponse *response,
   }
 }
 
+- (void)loadConfiguredStaticMounts {
+  NSArray *mounts = [self.config[@"staticMounts"] isKindOfClass:[NSArray class]]
+                        ? self.config[@"staticMounts"]
+                        : @[];
+  for (id value in mounts) {
+    if (![value isKindOfClass:[NSDictionary class]]) {
+      continue;
+    }
+
+    NSDictionary *entry = (NSDictionary *)value;
+    NSString *prefix = [entry[@"prefix"] isKindOfClass:[NSString class]] ? entry[@"prefix"] : @"";
+    NSString *directory = [entry[@"directory"] isKindOfClass:[NSString class]] ? entry[@"directory"] : @"";
+    NSArray *allowExtensions = [entry[@"allowExtensions"] isKindOfClass:[NSArray class]]
+                                   ? entry[@"allowExtensions"]
+                                   : @[];
+    if ([prefix length] == 0 || [directory length] == 0) {
+      [self.logger warn:@"static mount skipped"
+                 fields:@{
+                   @"reason" : @"staticMounts entry requires prefix + directory",
+                 }];
+      continue;
+    }
+
+    if (![self mountStaticDirectory:directory atPrefix:prefix allowExtensions:allowExtensions]) {
+      [self.logger warn:@"static mount skipped"
+                 fields:@{
+                   @"prefix" : prefix ?: @"",
+                   @"directory" : directory ?: @"",
+                   @"reason" : @"duplicate/invalid static mount entry",
+                 }];
+    }
+  }
+}
+
 - (NSDictionary *)mountedEntryForPath:(NSString *)requestPath
                          rewrittenPath:(NSString **)rewrittenPath {
   NSString *path = [requestPath isKindOfClass:[NSString class]] ? requestPath : @"/";
@@ -1574,6 +1672,12 @@ static void ALNFinalizeResponse(ALNResponse *response,
       [self addMiddleware:[[ALNCSRFMiddleware alloc] initWithHeaderName:headerName
                                                          queryParamName:queryParam]];
     }
+  }
+
+  NSDictionary *apiHelpers = ALNDictionaryConfigValue(self.config, @"apiHelpers");
+  BOOL responseEnvelopeEnabled = ALNBoolConfigValue(apiHelpers[@"responseEnvelopeEnabled"], NO);
+  if (responseEnvelopeEnabled) {
+    [self addMiddleware:[[ALNResponseEnvelopeMiddleware alloc] init]];
   }
 }
 

@@ -46,6 +46,26 @@ static NSString *ALNJSONStringFromObject(id value) {
   return [value description] ?: @"";
 }
 
+static NSDictionary *ALNEnvelopePayload(ALNContext *context, id data, NSDictionary *meta) {
+  NSMutableDictionary *payload = [NSMutableDictionary dictionary];
+  payload[@"data"] = (data != nil) ? data : [NSNull null];
+
+  NSMutableDictionary *metaObject = [NSMutableDictionary dictionary];
+  if ([meta isKindOfClass:[NSDictionary class]]) {
+    [metaObject addEntriesFromDictionary:meta];
+  }
+  NSString *requestID = [context.stash[@"request_id"] isKindOfClass:[NSString class]]
+                            ? context.stash[@"request_id"]
+                            : @"";
+  if ([requestID length] > 0 && metaObject[@"request_id"] == nil) {
+    metaObject[@"request_id"] = requestID;
+  }
+  if ([metaObject count] > 0) {
+    payload[@"meta"] = metaObject;
+  }
+  return [NSDictionary dictionaryWithDictionary:payload];
+}
+
 + (NSJSONWritingOptions)jsonWritingOptions {
   return 0;
 }
@@ -262,12 +282,40 @@ static NSString *ALNJSONStringFromObject(id value) {
   return [self.context stringParamForName:name];
 }
 
+- (NSString *)queryValueForName:(NSString *)name {
+  return [self.context queryValueForName:name];
+}
+
+- (NSString *)headerValueForName:(NSString *)name {
+  return [self.context headerValueForName:name];
+}
+
+- (NSNumber *)queryIntegerForName:(NSString *)name {
+  return [self.context queryIntegerForName:name];
+}
+
+- (NSNumber *)queryBooleanForName:(NSString *)name {
+  return [self.context queryBooleanForName:name];
+}
+
+- (NSNumber *)headerIntegerForName:(NSString *)name {
+  return [self.context headerIntegerForName:name];
+}
+
+- (NSNumber *)headerBooleanForName:(NSString *)name {
+  return [self.context headerBooleanForName:name];
+}
+
 - (BOOL)requireStringParam:(NSString *)name value:(NSString **)value {
   return [self.context requireStringParam:name value:value];
 }
 
 - (BOOL)requireIntegerParam:(NSString *)name value:(NSInteger *)value {
   return [self.context requireIntegerParam:name value:value];
+}
+
+- (BOOL)applyETagAndReturnNotModifiedIfMatch:(NSString *)etag {
+  return [self.context applyETagAndReturnNotModifiedIfMatch:etag];
 }
 
 - (void)addValidationErrorForField:(NSString *)field
@@ -307,6 +355,16 @@ static NSString *ALNJSONStringFromObject(id value) {
   self.context.response.statusCode = 422;
   self.context.response.committed = YES;
   return ok;
+}
+
+- (NSDictionary *)normalizedEnvelopeWithData:(id)data meta:(NSDictionary *)meta {
+  return ALNEnvelopePayload(self.context, data, meta);
+}
+
+- (BOOL)renderJSONEnvelopeWithData:(id)data
+                              meta:(NSDictionary *)meta
+                             error:(NSError **)error {
+  return [self renderJSON:[self normalizedEnvelopeWithData:data meta:meta] error:error];
 }
 
 - (NSDictionary *)validatedParams {

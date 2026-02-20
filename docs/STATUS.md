@@ -14,6 +14,7 @@ Last updated: 2026-02-20
 - Phase 3C: complete (2026-02-20)
 - Phase 3D: complete (2026-02-20)
 - Phase 3E: complete (2026-02-20)
+- Phase 3F: complete (2026-02-20)
 
 ## Completed Today (2026-02-20)
 
@@ -65,6 +66,14 @@ Last updated: 2026-02-20
   - implemented concrete filesystem attachment backend adapter (`ALNFileSystemAttachmentAdapter`)
   - added production guidance for service persistence + retention policy baselines
   - added integration coverage for plugin preset generation and unit coverage for worker drain/ack/retry/run-limit + Redis cache/attachment adapter conformance
+- Completed Phase 3F DX + reliability hardening tranche:
+  - added bootstrap-first doctor path (`bin/arlen doctor` -> `bin/arlen-doctor`) with JSON diagnostics output
+  - published known-good toolchain matrix (`docs/TOOLCHAIN_MATRIX.md`)
+  - hardened ALNPg diagnostics with SQLSTATE/server metadata and parameterized `SELECT` regression coverage
+  - added API convenience primitives (typed query/header parsing, ETag/304 helpers, response-envelope helpers/middleware)
+  - implemented static mount ergonomics (explicit mounts, allowlist serving, canonical index redirects)
+  - completed concrete jobs/mail file adapters and propane async worker supervision baseline
+  - expanded unit/integration acceptance coverage for all new 3F behavior slices
 
 ## Verification State (2026-02-20)
 
@@ -86,10 +95,33 @@ Last updated: 2026-02-20
   - service compatibility suite coverage for jobs/cache/i18n/mail/attachments
   - controller-level service helper route verification
   - boomhauer integration tests for service sample routes
+- New Phase 3F checks executed:
+  - `arlen doctor` bootstrap pre-build diagnostics + JSON payload validation
+  - ALNPg SQLSTATE/diagnostics regression tests
+  - API helper tests (typed query/header parsing, ETag/304, envelope helper + opt-in middleware behavior)
+  - static serving integration tests for canonical index redirects and extension allowlist enforcement
+  - propane integration test for supervised async worker spawn + respawn behavior
 - PostgreSQL-backed tests remain gated by `ARLEN_PG_TEST_DSN`.
 
 ## Next Session Focus
 
-1. Add end-to-end example apps that exercise generated service plugin presets under real backend dependencies.
-2. Implement concrete backend adapters for jobs/mail (beyond templates) and run full conformance suites against them.
-3. Design propane-integrated worker supervision model for dedicated async job workers.
+1. Phase 3G.1: expand `ALNSQLBuilder` capability surface toward SQL::Abstract-family parity goals.
+2. Phase 3G.2: define PostgreSQL dialect-extension APIs and coverage boundaries.
+3. Phase 3G.3: deliver standalone data-layer reuse packaging (`ArlenData`) and distribution guidance.
+
+## Planned Phase Mapping (Post-3F)
+
+- Phase 3F (complete):
+  - onboarding and diagnostics (`arlen doctor`, compatibility matrix)
+  - ALNPg reliability and SQL diagnostics hardening
+  - optional API convenience helpers (ETag/304, typed query/header parsing, envelope normalization)
+  - static mount allowlist/index ergonomics
+  - remaining ecosystem runtime follow-on (jobs/mail adapters + worker supervision baseline)
+- Phase 3G (planned):
+  - `ALNSQLBuilder` v2 capability expansion toward SQL::Abstract-family parity goals (Objective-C-native API design)
+  - PostgreSQL dialect-extension layer for PG-specific builder features
+  - standalone data-layer packaging/reuse path (`ArlenData`) for non-Arlen applications
+- Out of scope for Arlen core (explicitly documented):
+  - Django-style admin/backoffice product
+  - full account-management product surfaces
+  - package-volume ecosystem targets as a core roadmap deliverable

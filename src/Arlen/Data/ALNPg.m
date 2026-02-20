@@ -4,6 +4,15 @@
 #import <stdlib.h>
 
 NSString *const ALNPgErrorDomain = @"Arlen.Data.Pg.Error";
+NSString *const ALNPgErrorDiagnosticsKey = @"pg_diagnostics";
+NSString *const ALNPgErrorSQLStateKey = @"sqlstate";
+NSString *const ALNPgErrorServerDetailKey = @"server_detail";
+NSString *const ALNPgErrorServerHintKey = @"server_hint";
+NSString *const ALNPgErrorServerPositionKey = @"server_position";
+NSString *const ALNPgErrorServerWhereKey = @"server_where";
+NSString *const ALNPgErrorServerTableKey = @"server_table";
+NSString *const ALNPgErrorServerColumnKey = @"server_column";
+NSString *const ALNPgErrorServerConstraintKey = @"server_constraint";
 
 typedef struct pg_conn PGconn;
 typedef struct pg_result PGresult;
@@ -25,6 +34,11 @@ static NSError *ALNPgMakeError(ALNPgErrorCode code,
                                NSString *message,
                                NSString *detail,
                                NSString *sql);
+static NSError *ALNPgMakeErrorWithDiagnostics(ALNPgErrorCode code,
+                                              NSString *message,
+                                              NSString *detail,
+                                              NSString *sql,
+                                              NSDictionary *diagnostics);
 
 static PGconn *(*ALNPQconnectdb)(const char *conninfo) = NULL;
 static int (*ALNPQstatus)(const PGconn *conn) = NULL;
@@ -52,6 +66,7 @@ static PGresult *(*ALNPQexecPrepared)(PGconn *conn,
                                       int resultFormat) = NULL;
 static int (*ALNPQresultStatus)(const PGresult *res) = NULL;
 static char *(*ALNPQresultErrorMessage)(const PGresult *res) = NULL;
+static char *(*ALNPQresultErrorField)(const PGresult *res, int fieldcode) = NULL;
 static void (*ALNPQclear)(PGresult *res) = NULL;
 static int (*ALNPQnfields)(const PGresult *res) = NULL;
 static int (*ALNPQntuples)(const PGresult *res) = NULL;
@@ -63,6 +78,10 @@ static char *(*ALNPQcmdTuples)(PGresult *res) = NULL;
 static BOOL ALNBindLibpqSymbol(void **target, void *handle, const char *symbolName) {
   *target = dlsym(handle, symbolName);
   return (*target != NULL);
+}
+
+static void ALNBindOptionalLibpqSymbol(void **target, void *handle, const char *symbolName) {
+  *target = dlsym(handle, symbolName);
 }
 
 static BOOL ALNLoadLibpq(NSError **error) {
@@ -123,6 +142,7 @@ static BOOL ALNLoadLibpq(NSError **error) {
     ok = ok && ALNBindLibpqSymbol((void **)&ALNPQgetisnull, handle, "PQgetisnull");
     ok = ok && ALNBindLibpqSymbol((void **)&ALNPQgetvalue, handle, "PQgetvalue");
     ok = ok && ALNBindLibpqSymbol((void **)&ALNPQcmdTuples, handle, "PQcmdTuples");
+    ALNBindOptionalLibpqSymbol((void **)&ALNPQresultErrorField, handle, "PQresultErrorField");
 
     if (!ok) {
       const char *dlError = dlerror();
@@ -147,6 +167,14 @@ static NSError *ALNPgMakeError(ALNPgErrorCode code,
                                NSString *message,
                                NSString *detail,
                                NSString *sql) {
+  return ALNPgMakeErrorWithDiagnostics(code, message, detail, sql, nil);
+}
+
+static NSError *ALNPgMakeErrorWithDiagnostics(ALNPgErrorCode code,
+                                              NSString *message,
+                                              NSString *detail,
+                                              NSString *sql,
+                                              NSDictionary *diagnostics) {
   NSMutableDictionary *userInfo = [NSMutableDictionary dictionary];
   userInfo[NSLocalizedDescriptionKey] = message ?: @"database error";
   if ([detail length] > 0) {
@@ -155,7 +183,137 @@ static NSError *ALNPgMakeError(ALNPgErrorCode code,
   if ([sql length] > 0) {
     userInfo[@"sql"] = sql;
   }
+
+  NSDictionary *normalizedDiagnostics =
+      [diagnostics isKindOfClass:[NSDictionary class]] ? diagnostics : @{};
+  NSString *sqlState = [normalizedDiagnostics[ALNPgErrorSQLStateKey] isKindOfClass:[NSString class]]
+                           ? normalizedDiagnostics[ALNPgErrorSQLStateKey]
+                           : @"";
+  if ([sqlState length] > 0) {
+    userInfo[ALNPgErrorSQLStateKey] = sqlState;
+  }
+  NSString *serverDetail =
+      [normalizedDiagnostics[ALNPgErrorServerDetailKey] isKindOfClass:[NSString class]]
+          ? normalizedDiagnostics[ALNPgErrorServerDetailKey]
+          : @"";
+  if ([serverDetail length] > 0) {
+    userInfo[ALNPgErrorServerDetailKey] = serverDetail;
+  }
+  NSString *serverHint =
+      [normalizedDiagnostics[ALNPgErrorServerHintKey] isKindOfClass:[NSString class]]
+          ? normalizedDiagnostics[ALNPgErrorServerHintKey]
+          : @"";
+  if ([serverHint length] > 0) {
+    userInfo[ALNPgErrorServerHintKey] = serverHint;
+  }
+  NSString *serverPosition =
+      [normalizedDiagnostics[ALNPgErrorServerPositionKey] isKindOfClass:[NSString class]]
+          ? normalizedDiagnostics[ALNPgErrorServerPositionKey]
+          : @"";
+  if ([serverPosition length] > 0) {
+    userInfo[ALNPgErrorServerPositionKey] = serverPosition;
+  }
+  NSString *serverWhere =
+      [normalizedDiagnostics[ALNPgErrorServerWhereKey] isKindOfClass:[NSString class]]
+          ? normalizedDiagnostics[ALNPgErrorServerWhereKey]
+          : @"";
+  if ([serverWhere length] > 0) {
+    userInfo[ALNPgErrorServerWhereKey] = serverWhere;
+  }
+  NSString *serverTable =
+      [normalizedDiagnostics[ALNPgErrorServerTableKey] isKindOfClass:[NSString class]]
+          ? normalizedDiagnostics[ALNPgErrorServerTableKey]
+          : @"";
+  if ([serverTable length] > 0) {
+    userInfo[ALNPgErrorServerTableKey] = serverTable;
+  }
+  NSString *serverColumn =
+      [normalizedDiagnostics[ALNPgErrorServerColumnKey] isKindOfClass:[NSString class]]
+          ? normalizedDiagnostics[ALNPgErrorServerColumnKey]
+          : @"";
+  if ([serverColumn length] > 0) {
+    userInfo[ALNPgErrorServerColumnKey] = serverColumn;
+  }
+  NSString *serverConstraint =
+      [normalizedDiagnostics[ALNPgErrorServerConstraintKey] isKindOfClass:[NSString class]]
+          ? normalizedDiagnostics[ALNPgErrorServerConstraintKey]
+          : @"";
+  if ([serverConstraint length] > 0) {
+    userInfo[ALNPgErrorServerConstraintKey] = serverConstraint;
+  }
+  if ([normalizedDiagnostics count] > 0) {
+    userInfo[ALNPgErrorDiagnosticsKey] = normalizedDiagnostics;
+  }
   return [NSError errorWithDomain:ALNPgErrorDomain code:code userInfo:userInfo];
+}
+
+static NSString *ALNPgResultErrorFieldString(PGresult *result, int fieldCode) {
+  if (result == NULL || ALNPQresultErrorField == NULL) {
+    return nil;
+  }
+  const char *value = ALNPQresultErrorField(result, fieldCode);
+  if (value == NULL || value[0] == '\0') {
+    return nil;
+  }
+  NSString *text = [NSString stringWithUTF8String:value];
+  if (![text isKindOfClass:[NSString class]]) {
+    return nil;
+  }
+  NSString *trimmed =
+      [text stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+  return ([trimmed length] > 0) ? trimmed : nil;
+}
+
+static NSDictionary *ALNPgDiagnosticsFromResult(PGresult *result) {
+  if (result == NULL || ALNPQresultErrorField == NULL) {
+    return @{};
+  }
+
+  enum {
+    ALNPG_DIAG_SQLSTATE = 'C',
+    ALNPG_DIAG_DETAIL = 'D',
+    ALNPG_DIAG_HINT = 'H',
+    ALNPG_DIAG_POSITION = 'P',
+    ALNPG_DIAG_WHERE = 'W',
+    ALNPG_DIAG_TABLE = 't',
+    ALNPG_DIAG_COLUMN = 'c',
+    ALNPG_DIAG_CONSTRAINT = 'n',
+  };
+
+  NSMutableDictionary *diagnostics = [NSMutableDictionary dictionary];
+  NSString *sqlState = ALNPgResultErrorFieldString(result, ALNPG_DIAG_SQLSTATE);
+  if ([sqlState length] > 0) {
+    diagnostics[ALNPgErrorSQLStateKey] = sqlState;
+  }
+  NSString *detail = ALNPgResultErrorFieldString(result, ALNPG_DIAG_DETAIL);
+  if ([detail length] > 0) {
+    diagnostics[ALNPgErrorServerDetailKey] = detail;
+  }
+  NSString *hint = ALNPgResultErrorFieldString(result, ALNPG_DIAG_HINT);
+  if ([hint length] > 0) {
+    diagnostics[ALNPgErrorServerHintKey] = hint;
+  }
+  NSString *position = ALNPgResultErrorFieldString(result, ALNPG_DIAG_POSITION);
+  if ([position length] > 0) {
+    diagnostics[ALNPgErrorServerPositionKey] = position;
+  }
+  NSString *where = ALNPgResultErrorFieldString(result, ALNPG_DIAG_WHERE);
+  if ([where length] > 0) {
+    diagnostics[ALNPgErrorServerWhereKey] = where;
+  }
+  NSString *table = ALNPgResultErrorFieldString(result, ALNPG_DIAG_TABLE);
+  if ([table length] > 0) {
+    diagnostics[ALNPgErrorServerTableKey] = table;
+  }
+  NSString *column = ALNPgResultErrorFieldString(result, ALNPG_DIAG_COLUMN);
+  if ([column length] > 0) {
+    diagnostics[ALNPgErrorServerColumnKey] = column;
+  }
+  NSString *constraint = ALNPgResultErrorFieldString(result, ALNPG_DIAG_CONSTRAINT);
+  if ([constraint length] > 0) {
+    diagnostics[ALNPgErrorServerConstraintKey] = constraint;
+  }
+  return [NSDictionary dictionaryWithDictionary:diagnostics];
 }
 
 static NSString *ALNPgStringFromParam(id value) {
@@ -312,15 +470,27 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result, int rowIndex) {
                                [sql UTF8String],
                                (int)parameterCount,
                                NULL);
-  ALNExecStatusType status = ALNPQresultStatus(result);
-  if (status != ALNPGRES_COMMAND_OK) {
-    NSString *detail = [NSString stringWithUTF8String:ALNPQresultErrorMessage(result) ?: ""];
-    ALNPQclear(result);
+  if (result == NULL) {
     if (error != NULL) {
+      NSString *detail = [NSString stringWithUTF8String:ALNPQerrorMessage(_conn) ?: ""];
       *error = ALNPgMakeError(ALNPgErrorQueryFailed,
                               @"failed to prepare statement",
                               detail,
                               sql);
+    }
+    return NO;
+  }
+  ALNExecStatusType status = ALNPQresultStatus(result);
+  if (status != ALNPGRES_COMMAND_OK) {
+    NSString *detail = [NSString stringWithUTF8String:ALNPQresultErrorMessage(result) ?: ""];
+    NSDictionary *diagnostics = ALNPgDiagnosticsFromResult(result);
+    ALNPQclear(result);
+    if (error != NULL) {
+      *error = ALNPgMakeErrorWithDiagnostics(ALNPgErrorQueryFailed,
+                                             @"failed to prepare statement",
+                                             detail,
+                                             sql,
+                                             diagnostics);
     }
     return NO;
   }
@@ -503,12 +673,14 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result, int rowIndex) {
   ALNExecStatusType status = ALNPQresultStatus(result);
   if (status != ALNPGRES_TUPLES_OK) {
     NSString *detail = [NSString stringWithUTF8String:ALNPQresultErrorMessage(result) ?: ""];
+    NSDictionary *diagnostics = ALNPgDiagnosticsFromResult(result);
     ALNPQclear(result);
     if (error != NULL) {
-      *error = ALNPgMakeError(ALNPgErrorQueryFailed,
-                              @"query did not return rows",
-                              detail,
-                              sql);
+      *error = ALNPgMakeErrorWithDiagnostics(ALNPgErrorQueryFailed,
+                                             @"query did not return rows",
+                                             detail,
+                                             sql,
+                                             diagnostics);
     }
     return nil;
   }
@@ -539,12 +711,14 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result, int rowIndex) {
   ALNExecStatusType status = ALNPQresultStatus(result);
   if (status != ALNPGRES_COMMAND_OK) {
     NSString *detail = [NSString stringWithUTF8String:ALNPQresultErrorMessage(result) ?: ""];
+    NSDictionary *diagnostics = ALNPgDiagnosticsFromResult(result);
     ALNPQclear(result);
     if (error != NULL) {
-      *error = ALNPgMakeError(ALNPgErrorQueryFailed,
-                              @"command execution failed",
-                              detail,
-                              sql);
+      *error = ALNPgMakeErrorWithDiagnostics(ALNPgErrorQueryFailed,
+                                             @"command execution failed",
+                                             detail,
+                                             sql,
+                                             diagnostics);
     }
     return -1;
   }
@@ -569,12 +743,14 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result, int rowIndex) {
   ALNExecStatusType status = ALNPQresultStatus(result);
   if (status != ALNPGRES_TUPLES_OK) {
     NSString *detail = [NSString stringWithUTF8String:ALNPQresultErrorMessage(result) ?: ""];
+    NSDictionary *diagnostics = ALNPgDiagnosticsFromResult(result);
     ALNPQclear(result);
     if (error != NULL) {
-      *error = ALNPgMakeError(ALNPgErrorQueryFailed,
-                              @"prepared query did not return rows",
-                              detail,
-                              name);
+      *error = ALNPgMakeErrorWithDiagnostics(ALNPgErrorQueryFailed,
+                                             @"prepared query did not return rows",
+                                             detail,
+                                             name,
+                                             diagnostics);
     }
     return nil;
   }
@@ -595,12 +771,14 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result, int rowIndex) {
   ALNExecStatusType status = ALNPQresultStatus(result);
   if (status != ALNPGRES_COMMAND_OK) {
     NSString *detail = [NSString stringWithUTF8String:ALNPQresultErrorMessage(result) ?: ""];
+    NSDictionary *diagnostics = ALNPgDiagnosticsFromResult(result);
     ALNPQclear(result);
     if (error != NULL) {
-      *error = ALNPgMakeError(ALNPgErrorQueryFailed,
-                              @"prepared command execution failed",
-                              detail,
-                              name);
+      *error = ALNPgMakeErrorWithDiagnostics(ALNPgErrorQueryFailed,
+                                             @"prepared command execution failed",
+                                             detail,
+                                             name,
+                                             diagnostics);
     }
     return -1;
   }

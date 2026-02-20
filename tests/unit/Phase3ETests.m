@@ -457,4 +457,46 @@ static NSInteger gPhase3EPluginDidStopCount = 0;
   (void)[[NSFileManager defaultManager] removeItemAtPath:rootPath error:NULL];
 }
 
+- (void)testFileJobAdapterConformanceSuite {
+  NSString *rootPath = [self temporaryPathWithPrefix:@"arlen-phase3f-jobs"];
+  NSString *storagePath = [rootPath stringByAppendingPathComponent:@"jobs/state.plist"];
+  NSError *adapterError = nil;
+  ALNFileJobAdapter *adapter = [[ALNFileJobAdapter alloc] initWithStoragePath:storagePath
+                                                                   adapterName:@"file_test_jobs"
+                                                                         error:&adapterError];
+  XCTAssertNotNil(adapter);
+  XCTAssertNil(adapterError);
+  if (adapter == nil) {
+    return;
+  }
+
+  NSError *suiteError = nil;
+  BOOL suiteOK = ALNRunJobAdapterConformanceSuite(adapter, &suiteError);
+  XCTAssertTrue(suiteOK);
+  XCTAssertNil(suiteError);
+  XCTAssertEqual((NSUInteger)0, [[adapter pendingJobsSnapshot] count]);
+  XCTAssertEqual((NSUInteger)0, [[adapter deadLetterJobsSnapshot] count]);
+  (void)[[NSFileManager defaultManager] removeItemAtPath:rootPath error:NULL];
+}
+
+- (void)testFileMailAdapterConformanceSuite {
+  NSString *rootPath = [self temporaryPathWithPrefix:@"arlen-phase3f-mail"];
+  NSError *adapterError = nil;
+  ALNFileMailAdapter *adapter = [[ALNFileMailAdapter alloc] initWithStorageDirectory:rootPath
+                                                                          adapterName:@"file_test_mail"
+                                                                                error:&adapterError];
+  XCTAssertNotNil(adapter);
+  XCTAssertNil(adapterError);
+  if (adapter == nil) {
+    return;
+  }
+
+  NSError *suiteError = nil;
+  BOOL suiteOK = ALNRunMailAdapterConformanceSuite(adapter, &suiteError);
+  XCTAssertTrue(suiteOK);
+  XCTAssertNil(suiteError);
+  XCTAssertEqual((NSUInteger)0, [[adapter deliveriesSnapshot] count]);
+  (void)[[NSFileManager defaultManager] removeItemAtPath:rootPath error:NULL];
+}
+
 @end
