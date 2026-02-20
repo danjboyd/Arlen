@@ -2,6 +2,7 @@
 
 #import <dlfcn.h>
 #import <stdlib.h>
+#import <string.h>
 
 NSString *const ALNPgErrorDomain = @"Arlen.Data.Pg.Error";
 NSString *const ALNPgErrorDiagnosticsKey = @"pg_diagnostics";
@@ -27,6 +28,14 @@ typedef enum {
   ALNPGRES_TUPLES_OK = 2,
 } ALNExecStatusType;
 
+typedef struct {
+  const char **paramValues;
+  char **ownedParamValues;
+  int *paramLengths;
+  int *paramFormats;
+  NSUInteger count;
+} ALNPgExecParamsBuffer;
+
 static void *gLibpqHandle = NULL;
 static NSString *gLibpqLoadError = nil;
 
@@ -39,6 +48,11 @@ static NSError *ALNPgMakeErrorWithDiagnostics(ALNPgErrorCode code,
                                               NSString *detail,
                                               NSString *sql,
                                               NSDictionary *diagnostics);
+static BOOL ALNPgBuildExecParamsBuffer(NSArray *parameters,
+                                       NSString *sql,
+                                       ALNPgExecParamsBuffer *buffer,
+                                       NSError **error);
+static void ALNPgFreeExecParamsBuffer(ALNPgExecParamsBuffer *buffer);
 
 static PGconn *(*ALNPQconnectdb)(const char *conninfo) = NULL;
 static int (*ALNPQstatus)(const PGconn *conn) = NULL;
@@ -335,6 +349,125 @@ static NSString *ALNPgStringFromParam(id value) {
   return [value description];
 }
 
+static void ALNPgFreeExecParamsBuffer(ALNPgExecParamsBuffer *buffer) {
+  if (buffer == NULL) {
+    return;
+  }
+
+  if (buffer->ownedParamValues != NULL) {
+    for (NSUInteger idx = 0; idx < buffer->count; idx++) {
+      if (buffer->ownedParamValues[idx] != NULL) {
+        free(buffer->ownedParamValues[idx]);
+      }
+    }
+    free(buffer->ownedParamValues);
+  }
+  if (buffer->paramValues != NULL) {
+    free((void *)buffer->paramValues);
+  }
+  if (buffer->paramLengths != NULL) {
+    free(buffer->paramLengths);
+  }
+  if (buffer->paramFormats != NULL) {
+    free(buffer->paramFormats);
+  }
+
+  buffer->paramValues = NULL;
+  buffer->ownedParamValues = NULL;
+  buffer->paramLengths = NULL;
+  buffer->paramFormats = NULL;
+  buffer->count = 0;
+}
+
+static BOOL ALNPgBuildExecParamsBuffer(NSArray *parameters,
+                                       NSString *sql,
+                                       ALNPgExecParamsBuffer *buffer,
+                                       NSError **error) {
+  if (buffer == NULL) {
+    if (error != NULL) {
+      *error = ALNPgMakeError(ALNPgErrorInvalidArgument,
+                              @"query parameter buffer is required",
+                              nil,
+                              sql);
+    }
+    return NO;
+  }
+
+  memset(buffer, 0, sizeof(*buffer));
+  NSUInteger count = [parameters count];
+  buffer->count = count;
+  if (count == 0) {
+    return YES;
+  }
+
+  buffer->paramValues = calloc(count, sizeof(const char *));
+  buffer->ownedParamValues = calloc(count, sizeof(char *));
+  buffer->paramLengths = calloc(count, sizeof(int));
+  buffer->paramFormats = calloc(count, sizeof(int));
+  if (buffer->paramValues == NULL || buffer->ownedParamValues == NULL ||
+      buffer->paramLengths == NULL || buffer->paramFormats == NULL) {
+    if (error != NULL) {
+      *error = ALNPgMakeError(ALNPgErrorQueryFailed,
+                              @"failed to prepare query parameters",
+                              @"parameter buffer allocation failed",
+                              sql);
+    }
+    ALNPgFreeExecParamsBuffer(buffer);
+    return NO;
+  }
+
+  for (NSUInteger idx = 0; idx < count; idx++) {
+    id value = parameters[idx];
+    NSString *stringValue = ALNPgStringFromParam(value);
+    if (stringValue == nil) {
+      buffer->paramValues[idx] = NULL;
+      buffer->paramLengths[idx] = 0;
+      buffer->paramFormats[idx] = 0;
+      continue;
+    }
+
+    NSData *utf8 = [stringValue dataUsingEncoding:NSUTF8StringEncoding allowLossyConversion:NO];
+    if (utf8 == nil) {
+      if (error != NULL) {
+        NSString *detail = [NSString stringWithFormat:@"parameter %lu is not valid UTF-8",
+                                                      (unsigned long)(idx + 1)];
+        *error = ALNPgMakeError(ALNPgErrorInvalidArgument,
+                                @"failed to encode query parameter",
+                                detail,
+                                sql);
+      }
+      ALNPgFreeExecParamsBuffer(buffer);
+      return NO;
+    }
+
+    NSUInteger utf8Length = [utf8 length];
+    char *bytes = calloc(utf8Length + 1, sizeof(char));
+    if (bytes == NULL) {
+      if (error != NULL) {
+        *error = ALNPgMakeError(ALNPgErrorQueryFailed,
+                                @"failed to prepare query parameters",
+                                @"parameter value allocation failed",
+                                sql);
+      }
+      ALNPgFreeExecParamsBuffer(buffer);
+      return NO;
+    }
+
+    if (utf8Length > 0) {
+      memcpy(bytes, [utf8 bytes], utf8Length);
+    }
+    bytes[utf8Length] = '\0';
+
+    buffer->ownedParamValues[idx] = bytes;
+    buffer->paramValues[idx] = bytes;
+    // Text format parameters are consumed as C strings by libpq.
+    buffer->paramLengths[idx] = 0;
+    buffer->paramFormats[idx] = 0;
+  }
+
+  return YES;
+}
+
 static NSDictionary *ALNPgRowDictionary(PGresult *result, int rowIndex) {
   int fieldCount = ALNPQnfields(result);
   NSMutableDictionary *row = [NSMutableDictionary dictionaryWithCapacity:(NSUInteger)fieldCount];
@@ -519,50 +652,20 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result, int rowIndex) {
   }
 
   NSUInteger count = [parameters count];
-  const char **paramValues = NULL;
-  int *paramLengths = NULL;
-  int *paramFormats = NULL;
-  NSMutableArray *buffers = [NSMutableArray arrayWithCapacity:count];
-
-  if (count > 0) {
-    paramValues = calloc(count, sizeof(const char *));
-    paramLengths = calloc(count, sizeof(int));
-    paramFormats = calloc(count, sizeof(int));
-    for (NSUInteger idx = 0; idx < count; idx++) {
-      id value = parameters[idx];
-      NSString *stringValue = ALNPgStringFromParam(value);
-      if (stringValue == nil) {
-        paramValues[idx] = NULL;
-        paramLengths[idx] = 0;
-        paramFormats[idx] = 0;
-        continue;
-      }
-      NSData *data = [stringValue dataUsingEncoding:NSUTF8StringEncoding];
-      [buffers addObject:data ?: [NSData data]];
-      paramValues[idx] = (const char *)[[buffers lastObject] bytes];
-      paramLengths[idx] = (int)[[buffers lastObject] length];
-      paramFormats[idx] = 0;
-    }
+  ALNPgExecParamsBuffer paramBuffer;
+  if (!ALNPgBuildExecParamsBuffer(parameters ?: @[], sql, &paramBuffer, error)) {
+    return NULL;
   }
 
   PGresult *result = ALNPQexecParams(_conn,
                                   [sql UTF8String],
                                   (int)count,
                                   NULL,
-                                  paramValues,
-                                  paramLengths,
-                                  paramFormats,
+                                  paramBuffer.paramValues,
+                                  paramBuffer.paramLengths,
+                                  paramBuffer.paramFormats,
                                   0);
-
-  if (paramValues != NULL) {
-    free(paramValues);
-  }
-  if (paramLengths != NULL) {
-    free(paramLengths);
-  }
-  if (paramFormats != NULL) {
-    free(paramFormats);
-  }
+  ALNPgFreeExecParamsBuffer(&paramBuffer);
 
   if (result == NULL) {
     if (error != NULL) {
@@ -599,49 +702,19 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result, int rowIndex) {
   }
 
   NSUInteger count = [parameters count];
-  const char **paramValues = NULL;
-  int *paramLengths = NULL;
-  int *paramFormats = NULL;
-  NSMutableArray *buffers = [NSMutableArray arrayWithCapacity:count];
-
-  if (count > 0) {
-    paramValues = calloc(count, sizeof(const char *));
-    paramLengths = calloc(count, sizeof(int));
-    paramFormats = calloc(count, sizeof(int));
-    for (NSUInteger idx = 0; idx < count; idx++) {
-      id value = parameters[idx];
-      NSString *stringValue = ALNPgStringFromParam(value);
-      if (stringValue == nil) {
-        paramValues[idx] = NULL;
-        paramLengths[idx] = 0;
-        paramFormats[idx] = 0;
-        continue;
-      }
-      NSData *data = [stringValue dataUsingEncoding:NSUTF8StringEncoding];
-      [buffers addObject:data ?: [NSData data]];
-      paramValues[idx] = (const char *)[[buffers lastObject] bytes];
-      paramLengths[idx] = (int)[[buffers lastObject] length];
-      paramFormats[idx] = 0;
-    }
+  ALNPgExecParamsBuffer paramBuffer;
+  if (!ALNPgBuildExecParamsBuffer(parameters ?: @[], name, &paramBuffer, error)) {
+    return NULL;
   }
 
   PGresult *result = ALNPQexecPrepared(_conn,
                                     [name UTF8String],
                                     (int)count,
-                                    paramValues,
-                                    paramLengths,
-                                    paramFormats,
+                                    paramBuffer.paramValues,
+                                    paramBuffer.paramLengths,
+                                    paramBuffer.paramFormats,
                                     0);
-
-  if (paramValues != NULL) {
-    free(paramValues);
-  }
-  if (paramLengths != NULL) {
-    free(paramLengths);
-  }
-  if (paramFormats != NULL) {
-    free(paramFormats);
-  }
+  ALNPgFreeExecParamsBuffer(&paramBuffer);
 
   if (result == NULL && error != NULL) {
     NSString *detail = [NSString stringWithUTF8String:ALNPQerrorMessage(_conn) ?: ""];

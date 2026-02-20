@@ -210,6 +210,256 @@
   [database releaseConnection:connection];
 }
 
+- (void)testLongProjectionParameterizedSelectPreservesUTF8Parameters {
+  NSString *dsn = [self pgTestDSN];
+  if ([dsn length] == 0) {
+    return;
+  }
+
+  NSError *error = nil;
+  ALNPg *database = [[ALNPg alloc] initWithConnectionString:dsn maxConnections:2 error:&error];
+  XCTAssertNil(error);
+  XCTAssertNotNil(database);
+  if (database == nil) {
+    return;
+  }
+
+  NSString *table = [self uniqueNameWithPrefix:@"arlen_pg_long_select"];
+  ALNPgConnection *connection = [database acquireConnection:&error];
+  XCTAssertNil(error);
+  XCTAssertNotNil(connection);
+  if (connection == nil) {
+    return;
+  }
+
+  NSString *createSQL = [NSString stringWithFormat:
+                                       @"CREATE TABLE %@("
+                                        "state_code TEXT NOT NULL, "
+                                        "docket_id TEXT NOT NULL, "
+                                        "document_id TEXT NOT NULL, "
+                                        "filename TEXT NOT NULL, "
+                                        "doc_type TEXT NOT NULL, "
+                                        "file_date TEXT NOT NULL, "
+                                        "fetched_at TEXT NOT NULL, "
+                                        "source_url TEXT NOT NULL, "
+                                        "content_type TEXT NOT NULL, "
+                                        "size_bytes INTEGER NOT NULL, "
+                                        "pdf_sha256 TEXT NOT NULL, "
+                                        "pdf_path TEXT NOT NULL, "
+                                        "ocr_strategy TEXT NOT NULL, "
+                                        "ocr_engine TEXT NOT NULL, "
+                                        "ocr_language TEXT NOT NULL, "
+                                        "ocr_extracted_at TEXT NOT NULL, "
+                                        "ocr_text_sha256 TEXT NOT NULL, "
+                                        "text_path TEXT NOT NULL, "
+                                        "respondent_count INTEGER NOT NULL, "
+                                        "respondent_extracted_at TEXT NOT NULL, "
+                                        "respondent_extractor_version TEXT NOT NULL, "
+                                        "respondent_has_llm_vision INTEGER NOT NULL, "
+                                        "manifest_order INTEGER NOT NULL, "
+                                        "created_at TEXT NOT NULL, "
+                                        "updated_at TEXT NOT NULL, "
+                                        "is_active INTEGER NOT NULL"
+                                        ")",
+                                       table];
+  XCTAssertGreaterThanOrEqual([connection executeCommand:createSQL parameters:@[] error:&error], 0);
+  XCTAssertNil(error);
+
+  NSString *stateCode = @"ZZ";
+  NSString *docketID = @"CD_2024-000001_ñ";
+  NSString *documentID =
+      [NSString stringWithFormat:@"DOC_%@_%@", [self uniqueNameWithPrefix:@"fixture"], @"abcdef0123456789"];
+
+  NSString *insertSQL = [NSString stringWithFormat:
+                                       @"INSERT INTO %@ "
+                                        "(state_code, docket_id, document_id, filename, doc_type, file_date, "
+                                        "fetched_at, source_url, content_type, size_bytes, pdf_sha256, pdf_path, "
+                                        "ocr_strategy, ocr_engine, ocr_language, ocr_extracted_at, ocr_text_sha256, text_path, "
+                                        "respondent_count, respondent_extracted_at, respondent_extractor_version, "
+                                        "respondent_has_llm_vision, manifest_order, created_at, updated_at, is_active) "
+                                        "VALUES "
+                                        "($1, $2, $3, $4, $5, $6, "
+                                        "$7, $8, $9, $10, $11, $12, "
+                                        "$13, $14, $15, $16, $17, $18, "
+                                        "$19, $20, $21, $22, $23, $24, $25, $26)",
+                                       table];
+  NSArray *insertParams = @[
+    stateCode,
+    docketID,
+    documentID,
+    @"fixture.pdf",
+    @"order",
+    @"2024-01-03",
+    @"2024-01-03T00:00:00Z",
+    @"https://example.invalid/doc.pdf",
+    @"application/pdf",
+    @1234,
+    @"sha256-fixture",
+    @"/tmp/doc.pdf",
+    @"tesseract",
+    @"tesseract5",
+    @"en",
+    @"2024-01-03T00:00:10Z",
+    @"sha256-text",
+    @"/tmp/doc.txt",
+    @2,
+    @"2024-01-03T00:00:20Z",
+    @"extractor-v1",
+    @0,
+    @1,
+    @"2024-01-03T00:00:30Z",
+    @"2024-01-03T00:00:40Z",
+    @1,
+  ];
+  XCTAssertEqual((NSInteger)1, [connection executeCommand:insertSQL parameters:insertParams error:&error]);
+  XCTAssertNil(error);
+
+  NSString *selectSQL = [NSString stringWithFormat:
+                                       @"SELECT \"state_code\", \"docket_id\", \"document_id\", \"filename\", "
+                                        "\"doc_type\", \"file_date\", \"fetched_at\", \"source_url\", "
+                                        "\"content_type\", \"size_bytes\", \"pdf_sha256\", \"pdf_path\", "
+                                        "\"ocr_strategy\", \"ocr_engine\", \"ocr_language\", \"ocr_extracted_at\", "
+                                        "\"ocr_text_sha256\", \"text_path\", \"respondent_count\", "
+                                        "\"respondent_extracted_at\", \"respondent_extractor_version\", "
+                                        "\"respondent_has_llm_vision\", \"manifest_order\", \"created_at\", "
+                                        "\"updated_at\", \"is_active\" "
+                                        "FROM \"%@\" "
+                                        "WHERE \"state_code\" = $1 AND \"docket_id\" = $2 AND \"document_id\" = $3",
+                                       table];
+  NSArray *queryParams = @[ stateCode, docketID, documentID ];
+
+  for (NSInteger idx = 0; idx < 120; idx++) {
+    NSArray *rows = [connection executeQuery:selectSQL parameters:queryParams error:&error];
+    XCTAssertNil(error);
+    XCTAssertEqual((NSUInteger)1, [rows count]);
+    NSDictionary *row = [rows firstObject];
+    XCTAssertEqualObjects(stateCode, row[@"state_code"]);
+    XCTAssertEqualObjects(docketID, row[@"docket_id"]);
+    XCTAssertEqualObjects(documentID, row[@"document_id"]);
+  }
+
+  NSString *preparedName = [self uniqueNameWithPrefix:@"arlen_long_select"];
+  BOOL prepared = [connection prepareStatementNamed:preparedName
+                                                sql:selectSQL
+                                     parameterCount:3
+                                              error:&error];
+  XCTAssertTrue(prepared);
+  XCTAssertNil(error);
+
+  for (NSInteger idx = 0; idx < 120; idx++) {
+    NSArray *rows = [connection executePreparedQueryNamed:preparedName
+                                               parameters:queryParams
+                                                    error:&error];
+    XCTAssertNil(error);
+    XCTAssertEqual((NSUInteger)1, [rows count]);
+    NSDictionary *row = [rows firstObject];
+    XCTAssertEqualObjects(stateCode, row[@"state_code"]);
+    XCTAssertEqualObjects(docketID, row[@"docket_id"]);
+    XCTAssertEqualObjects(documentID, row[@"document_id"]);
+  }
+
+  (void)[connection executeCommand:[NSString stringWithFormat:@"DROP TABLE IF EXISTS %@", table]
+                        parameters:@[]
+                             error:nil];
+  [database releaseConnection:connection];
+}
+
+- (void)testPreparedCommandUTF8ParameterStressRemainsStable {
+  NSString *dsn = [self pgTestDSN];
+  if ([dsn length] == 0) {
+    return;
+  }
+
+  NSError *error = nil;
+  ALNPg *database = [[ALNPg alloc] initWithConnectionString:dsn maxConnections:2 error:&error];
+  XCTAssertNil(error);
+  XCTAssertNotNil(database);
+  if (database == nil) {
+    return;
+  }
+
+  NSString *table = [self uniqueNameWithPrefix:@"arlen_pg_utf8_stress"];
+  ALNPgConnection *connection = [database acquireConnection:&error];
+  XCTAssertNil(error);
+  XCTAssertNotNil(connection);
+  if (connection == nil) {
+    return;
+  }
+
+  NSString *createSQL =
+      [NSString stringWithFormat:@"CREATE TABLE %@ (id SERIAL PRIMARY KEY, token TEXT NOT NULL, note TEXT NOT NULL)",
+                                 table];
+  XCTAssertGreaterThanOrEqual([connection executeCommand:createSQL parameters:@[] error:&error], 0);
+  XCTAssertNil(error);
+
+  NSString *insertSQL = [NSString stringWithFormat:@"INSERT INTO %@ (token, note) VALUES ($1, $2)", table];
+  NSString *insertName = [self uniqueNameWithPrefix:@"arlen_utf8_insert"];
+  BOOL insertPrepared = [connection prepareStatementNamed:insertName
+                                                      sql:insertSQL
+                                           parameterCount:2
+                                                    error:&error];
+  XCTAssertTrue(insertPrepared);
+  XCTAssertNil(error);
+
+  NSInteger total = 180;
+  NSMutableArray *tokens = [NSMutableArray arrayWithCapacity:(NSUInteger)total];
+  for (NSInteger idx = 0; idx < total; idx++) {
+    NSString *token = [NSString stringWithFormat:@"tok-%03ld-ñ-Ω-漢字", (long)idx];
+    NSMutableString *note = [NSMutableString stringWithCapacity:256];
+    [note appendFormat:@"note-%03ld-", (long)idx];
+    for (NSInteger rep = 0; rep < 8; rep++) {
+      [note appendString:@"αλφα-ñ-漢字-"];
+    }
+    [tokens addObject:token];
+
+    NSInteger affected = [connection executePreparedCommandNamed:insertName
+                                                      parameters:@[ token, note ]
+                                                           error:&error];
+    XCTAssertNil(error);
+    XCTAssertEqual((NSInteger)1, affected);
+  }
+
+  NSDictionary *countRow = [connection executeQueryOne:[NSString stringWithFormat:@"SELECT COUNT(*) AS count FROM %@", table]
+                                            parameters:@[]
+                                                 error:&error];
+  XCTAssertNil(error);
+  NSString *expectedCount = [NSString stringWithFormat:@"%ld", (long)total];
+  XCTAssertEqualObjects(expectedCount, countRow[@"count"]);
+
+  NSString *probeSQL = [NSString stringWithFormat:@"SELECT token, note FROM %@ WHERE token = $1", table];
+  NSString *probeName = [self uniqueNameWithPrefix:@"arlen_utf8_probe"];
+  BOOL probePrepared = [connection prepareStatementNamed:probeName
+                                                     sql:probeSQL
+                                          parameterCount:1
+                                                   error:&error];
+  XCTAssertTrue(probePrepared);
+  XCTAssertNil(error);
+
+  NSArray *probeIndexes = @[ @0, @53, @179 ];
+  for (NSNumber *indexValue in probeIndexes) {
+    NSInteger idx = [indexValue integerValue];
+    NSString *token = tokens[(NSUInteger)idx];
+
+    NSArray *rows = [connection executeQuery:probeSQL parameters:@[ token ] error:&error];
+    XCTAssertNil(error);
+    XCTAssertEqual((NSUInteger)1, [rows count]);
+    XCTAssertEqualObjects(token, rows[0][@"token"]);
+
+    NSArray *preparedRows = [connection executePreparedQueryNamed:probeName
+                                                       parameters:@[ token ]
+                                                            error:&error];
+    XCTAssertNil(error);
+    XCTAssertEqual((NSUInteger)1, [preparedRows count]);
+    XCTAssertEqualObjects(token, preparedRows[0][@"token"]);
+    XCTAssertTrue([preparedRows[0][@"note"] containsString:@"漢字"]);
+  }
+
+  (void)[connection executeCommand:[NSString stringWithFormat:@"DROP TABLE IF EXISTS %@", table]
+                        parameters:@[]
+                             error:nil];
+  [database releaseConnection:connection];
+}
+
 - (void)testQueryErrorsIncludeSQLStateDiagnostics {
   NSString *dsn = [self pgTestDSN];
   if ([dsn length] == 0) {
