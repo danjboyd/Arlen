@@ -1701,6 +1701,312 @@ static int ALNRedisOpenSocketConnection(NSString *host,
 
 @end
 
+@interface ALNFileSystemAttachmentAdapter ()
+
+@property(nonatomic, copy) NSString *adapterNameValue;
+@property(nonatomic, copy) NSString *rootDirectory;
+@property(nonatomic, strong) NSFileManager *fileManager;
+@property(nonatomic, strong) NSLock *lock;
+
+@end
+
+@implementation ALNFileSystemAttachmentAdapter
+
+- (instancetype)initWithRootDirectory:(NSString *)rootDirectory
+                          adapterName:(NSString *)adapterName
+                                error:(NSError **)error {
+  self = [super init];
+  if (!self) {
+    return nil;
+  }
+
+  NSString *normalizedRoot = [[ALNNonEmptyString(rootDirectory, @"") stringByExpandingTildeInPath]
+      stringByStandardizingPath];
+  if ([normalizedRoot length] == 0) {
+    if (error != NULL) {
+      *error = ALNServiceError(550, @"attachment root directory is required", nil);
+    }
+    return nil;
+  }
+
+  _adapterNameValue = [ALNNonEmptyString(adapterName, @"filesystem_attachment") copy];
+  _rootDirectory = [normalizedRoot copy];
+  _fileManager = [[NSFileManager alloc] init];
+  _lock = [[NSLock alloc] init];
+
+  NSError *directoryError = nil;
+  BOOL created = [_fileManager createDirectoryAtPath:_rootDirectory
+                         withIntermediateDirectories:YES
+                                          attributes:nil
+                                               error:&directoryError];
+  if (!created) {
+    if (error != NULL) {
+      *error = ALNServiceError(551, @"attachment root directory could not be created", directoryError);
+    }
+    return nil;
+  }
+  return self;
+}
+
+- (NSString *)adapterName {
+  return self.adapterNameValue ?: @"filesystem_attachment";
+}
+
+- (NSString *)attachmentDataPathForID:(NSString *)attachmentID {
+  return [self.rootDirectory stringByAppendingPathComponent:[NSString stringWithFormat:@"%@.bin", attachmentID ?: @""]];
+}
+
+- (NSString *)attachmentMetadataPathForID:(NSString *)attachmentID {
+  return [self.rootDirectory stringByAppendingPathComponent:[NSString stringWithFormat:@"%@.plist", attachmentID ?: @""]];
+}
+
+- (NSString *)nextAttachmentID {
+  NSString *uuid = [[[NSUUID UUID] UUIDString] lowercaseString];
+  NSString *suffix = [uuid stringByReplacingOccurrencesOfString:@"-" withString:@""];
+  return [NSString stringWithFormat:@"att-%@", suffix ?: @""];
+}
+
+- (NSDictionary *)normalizedMetadataEntry:(NSDictionary *)entry {
+  return @{
+    @"attachmentID" : ALNNonEmptyString(entry[@"attachmentID"], @""),
+    @"name" : ALNNonEmptyString(entry[@"name"], @""),
+    @"contentType" : ALNNonEmptyString(entry[@"contentType"], @"application/octet-stream"),
+    @"sizeBytes" : [entry[@"sizeBytes"] respondsToSelector:@selector(unsignedLongLongValue)]
+        ? @([entry[@"sizeBytes"] unsignedLongLongValue])
+        : @(0),
+    @"createdAt" : [entry[@"createdAt"] respondsToSelector:@selector(doubleValue)] ? @([entry[@"createdAt"] doubleValue]) : @(0),
+    @"metadata" : ALNNormalizeDictionary(entry[@"metadata"]),
+  };
+}
+
+- (NSDictionary *)metadataEntryForAttachmentID:(NSString *)attachmentID error:(NSError **)error {
+  NSString *metadataPath = [self attachmentMetadataPathForID:attachmentID];
+  if (![self.fileManager fileExistsAtPath:metadataPath]) {
+    return nil;
+  }
+
+  NSData *metadataData = [NSData dataWithContentsOfFile:metadataPath];
+  if (metadataData == nil) {
+    if (error != NULL) {
+      *error = ALNServiceError(552, @"attachment metadata could not be read", nil);
+    }
+    return nil;
+  }
+
+  NSError *parseError = nil;
+  NSPropertyListFormat format = NSPropertyListBinaryFormat_v1_0;
+  id parsed = [NSPropertyListSerialization propertyListWithData:metadataData
+                                                        options:NSPropertyListImmutable
+                                                         format:&format
+                                                          error:&parseError];
+  if (![parsed isKindOfClass:[NSDictionary class]]) {
+    if (error != NULL) {
+      *error = ALNServiceError(553, @"attachment metadata is malformed", parseError);
+    }
+    return nil;
+  }
+  return parsed;
+}
+
+- (NSString *)saveAttachmentNamed:(NSString *)name
+                      contentType:(NSString *)contentType
+                             data:(NSData *)data
+                         metadata:(NSDictionary *)metadata
+                            error:(NSError **)error {
+  NSString *normalizedName = ALNNonEmptyString(name, @"");
+  if ([normalizedName length] == 0) {
+    if (error != NULL) {
+      *error = ALNServiceError(554, @"attachment name is required", nil);
+    }
+    return nil;
+  }
+  if (![data isKindOfClass:[NSData class]]) {
+    if (error != NULL) {
+      *error = ALNServiceError(555, @"attachment data is required", nil);
+    }
+    return nil;
+  }
+
+  NSString *normalizedType = ALNNonEmptyString(contentType, @"application/octet-stream");
+  NSDictionary *userMetadata = ALNNormalizeDictionary(metadata);
+  NSString *attachmentID = [self nextAttachmentID];
+  NSDictionary *entry = @{
+    @"attachmentID" : attachmentID ?: @"",
+    @"name" : normalizedName,
+    @"contentType" : normalizedType,
+    @"sizeBytes" : @([data length]),
+    @"createdAt" : @([[NSDate date] timeIntervalSince1970]),
+    @"metadata" : userMetadata,
+  };
+
+  NSError *serializeError = nil;
+  NSData *metadataData = [NSPropertyListSerialization dataWithPropertyList:entry
+                                                                     format:NSPropertyListBinaryFormat_v1_0
+                                                                    options:0
+                                                                      error:&serializeError];
+  if (metadataData == nil) {
+    if (error != NULL) {
+      *error = ALNServiceError(556, @"attachment metadata could not be serialized", serializeError);
+    }
+    return nil;
+  }
+
+  NSString *dataPath = [self attachmentDataPathForID:attachmentID];
+  NSString *metadataPath = [self attachmentMetadataPathForID:attachmentID];
+
+  [self.lock lock];
+  BOOL wroteData = [data writeToFile:dataPath atomically:YES];
+  if (!wroteData) {
+    [self.lock unlock];
+    if (error != NULL) {
+      *error = ALNServiceError(557, @"attachment data could not be persisted", nil);
+    }
+    return nil;
+  }
+
+  BOOL wroteMetadata = [metadataData writeToFile:metadataPath atomically:YES];
+  if (!wroteMetadata) {
+    (void)[self.fileManager removeItemAtPath:dataPath error:NULL];
+    [self.lock unlock];
+    if (error != NULL) {
+      *error = ALNServiceError(558, @"attachment metadata could not be persisted", nil);
+    }
+    return nil;
+  }
+  [self.lock unlock];
+  return attachmentID;
+}
+
+- (NSData *)attachmentDataForID:(NSString *)attachmentID
+                       metadata:(NSDictionary **)metadata
+                          error:(NSError **)error {
+  NSString *normalizedID = ALNNonEmptyString(attachmentID, @"");
+  if ([normalizedID length] == 0) {
+    if (error != NULL) {
+      *error = ALNServiceError(559, @"attachment ID is required", nil);
+    }
+    return nil;
+  }
+
+  [self.lock lock];
+  NSError *readError = nil;
+  NSDictionary *entry = [self metadataEntryForAttachmentID:normalizedID error:&readError];
+  if (entry == nil) {
+    [self.lock unlock];
+    if (readError != nil && error != NULL) {
+      *error = readError;
+    }
+    return nil;
+  }
+
+  NSString *dataPath = [self attachmentDataPathForID:normalizedID];
+  NSData *data = [NSData dataWithContentsOfFile:dataPath];
+  if (data == nil) {
+    [self.lock unlock];
+    if (error != NULL) {
+      *error = ALNServiceError(560, @"attachment data could not be read", nil);
+    }
+    return nil;
+  }
+
+  if (metadata != NULL) {
+    *metadata = [self normalizedMetadataEntry:entry];
+  }
+  [self.lock unlock];
+  return data;
+}
+
+- (NSDictionary *)attachmentMetadataForID:(NSString *)attachmentID error:(NSError **)error {
+  NSString *normalizedID = ALNNonEmptyString(attachmentID, @"");
+  if ([normalizedID length] == 0) {
+    if (error != NULL) {
+      *error = ALNServiceError(561, @"attachment ID is required", nil);
+    }
+    return nil;
+  }
+
+  [self.lock lock];
+  NSError *readError = nil;
+  NSDictionary *entry = [self metadataEntryForAttachmentID:normalizedID error:&readError];
+  [self.lock unlock];
+  if (entry == nil) {
+    if (readError != nil && error != NULL) {
+      *error = readError;
+    }
+    return nil;
+  }
+  return [self normalizedMetadataEntry:entry];
+}
+
+- (BOOL)deleteAttachmentID:(NSString *)attachmentID error:(NSError **)error {
+  NSString *normalizedID = ALNNonEmptyString(attachmentID, @"");
+  if ([normalizedID length] == 0) {
+    if (error != NULL) {
+      *error = ALNServiceError(562, @"attachment ID is required", nil);
+    }
+    return NO;
+  }
+
+  NSString *dataPath = [self attachmentDataPathForID:normalizedID];
+  NSString *metadataPath = [self attachmentMetadataPathForID:normalizedID];
+
+  [self.lock lock];
+  BOOL hadData = [self.fileManager fileExistsAtPath:dataPath];
+  BOOL hadMetadata = [self.fileManager fileExistsAtPath:metadataPath];
+
+  if (hadData && ![self.fileManager removeItemAtPath:dataPath error:error]) {
+    [self.lock unlock];
+    return NO;
+  }
+  if (hadMetadata && ![self.fileManager removeItemAtPath:metadataPath error:error]) {
+    [self.lock unlock];
+    return NO;
+  }
+  [self.lock unlock];
+  return hadData || hadMetadata;
+}
+
+- (NSArray *)listAttachmentMetadata {
+  [self.lock lock];
+  NSError *listError = nil;
+  NSArray *contents = [self.fileManager contentsOfDirectoryAtPath:self.rootDirectory error:&listError];
+  if (contents == nil) {
+    (void)listError;
+    [self.lock unlock];
+    return @[];
+  }
+
+  NSMutableArray *entries = [NSMutableArray array];
+  for (NSString *item in contents) {
+    if (![item hasSuffix:@".plist"]) {
+      continue;
+    }
+    NSString *attachmentID = [item substringToIndex:[item length] - [@".plist" length]];
+    NSDictionary *entry = [self metadataEntryForAttachmentID:attachmentID error:NULL];
+    if (entry == nil) {
+      continue;
+    }
+    [entries addObject:[self normalizedMetadataEntry:entry]];
+  }
+  [self.lock unlock];
+  NSSortDescriptor *sortDescriptor =
+      [NSSortDescriptor sortDescriptorWithKey:@"attachmentID" ascending:YES selector:@selector(compare:)];
+  [entries sortUsingDescriptors:@[ sortDescriptor ]];
+  return [NSArray arrayWithArray:entries];
+}
+
+- (void)reset {
+  [self.lock lock];
+  NSArray *contents = [self.fileManager contentsOfDirectoryAtPath:self.rootDirectory error:NULL];
+  for (NSString *item in contents ?: @[]) {
+    NSString *path = [self.rootDirectory stringByAppendingPathComponent:item];
+    (void)[self.fileManager removeItemAtPath:path error:NULL];
+  }
+  [self.lock unlock];
+}
+
+@end
+
 static NSError *ALNConformanceStepError(NSString *suite, NSString *step, NSError *underlying) {
   NSString *message = [NSString stringWithFormat:@"%@ conformance failed at step '%@'",
                                                  suite ?: @"service",

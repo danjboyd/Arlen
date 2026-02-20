@@ -128,6 +128,10 @@ Legacy compatibility fallback:
 - fetch data + metadata (`attachmentDataForID:metadata:error:`)
 - metadata/list/delete helpers
 
+Concrete backend adapter now available:
+
+- `ALNFileSystemAttachmentAdapter` (persist attachment binaries + metadata to a configured root directory)
+
 ## 9. Compatibility Suites
 
 Phase 3E includes adapter compatibility suites:

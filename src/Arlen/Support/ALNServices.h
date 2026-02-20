@@ -216,6 +216,14 @@ typedef NS_ENUM(NSUInteger, ALNJobWorkerDisposition) {
 
 @end
 
+@interface ALNFileSystemAttachmentAdapter : NSObject <ALNAttachmentAdapter>
+
+- (nullable instancetype)initWithRootDirectory:(NSString *)rootDirectory
+                                   adapterName:(nullable NSString *)adapterName
+                                         error:(NSError *_Nullable *_Nullable)error;
+
+@end
+
 FOUNDATION_EXPORT BOOL ALNRunJobAdapterConformanceSuite(id<ALNJobAdapter> adapter,
                                                         NSError *_Nullable *_Nullable error);
 FOUNDATION_EXPORT BOOL ALNRunCacheAdapterConformanceSuite(id<ALNCacheAdapter> adapter,

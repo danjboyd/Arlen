@@ -183,6 +183,7 @@ Completion highlights:
   - `arlen generate plugin --preset` templates for Redis cache, queue-backed jobs, and SMTP mail flows
   - optional job worker runtime contract (`ALNJobWorkerRuntime`, `ALNJobWorker`, `ALNJobWorkerRunSummary`)
   - concrete Redis cache adapter (`ALNRedisCacheAdapter`) validated via cache conformance suite
+  - concrete filesystem attachment adapter (`ALNFileSystemAttachmentAdapter`) validated via attachment conformance suite
 
 Deliverables:
 - Plugin-first background jobs abstraction.

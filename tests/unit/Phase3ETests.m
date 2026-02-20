@@ -219,6 +219,18 @@ static NSInteger gPhase3EPluginDidStopCount = 0;
   return [NSString stringWithUTF8String:value];
 }
 
+- (NSString *)temporaryPathWithPrefix:(NSString *)prefix {
+  NSString *baseDirectory = NSTemporaryDirectory();
+  if ([baseDirectory length] == 0) {
+    baseDirectory = @"/tmp";
+  }
+  NSString *normalizedPrefix = [prefix isKindOfClass:[NSString class]] && [prefix length] > 0 ? prefix : @"phase3e";
+  NSString *name = [NSString stringWithFormat:@"%@-%@",
+                                              normalizedPrefix,
+                                              [[NSUUID UUID] UUIDString] ?: @"tmp"];
+  return [baseDirectory stringByAppendingPathComponent:name];
+}
+
 - (NSDictionary *)jsonFromResponse:(ALNResponse *)response {
   NSError *error = nil;
   id value = [NSJSONSerialization JSONObjectWithData:response.bodyData options:0 error:&error];
@@ -412,6 +424,37 @@ static NSInteger gPhase3EPluginDidStopCount = 0;
   XCTAssertTrue(suiteOK);
   XCTAssertNil(suiteError);
   (void)[adapter clearWithError:NULL];
+}
+
+- (void)testFileSystemAttachmentAdapterRejectsEmptyRoot {
+  NSError *error = nil;
+  ALNFileSystemAttachmentAdapter *adapter =
+      [[ALNFileSystemAttachmentAdapter alloc] initWithRootDirectory:@""
+                                                        adapterName:@"fs_invalid"
+                                                              error:&error];
+  XCTAssertNil(adapter);
+  XCTAssertNotNil(error);
+}
+
+- (void)testFileSystemAttachmentAdapterConformanceSuite {
+  NSString *rootPath = [self temporaryPathWithPrefix:@"arlen-phase3e-attachments"];
+  NSError *adapterError = nil;
+  ALNFileSystemAttachmentAdapter *adapter =
+      [[ALNFileSystemAttachmentAdapter alloc] initWithRootDirectory:rootPath
+                                                        adapterName:@"filesystem_test_attachment"
+                                                              error:&adapterError];
+  XCTAssertNotNil(adapter);
+  XCTAssertNil(adapterError);
+  if (adapter == nil) {
+    return;
+  }
+
+  NSError *suiteError = nil;
+  BOOL suiteOK = ALNRunAttachmentAdapterConformanceSuite(adapter, &suiteError);
+  XCTAssertTrue(suiteOK);
+  XCTAssertNil(suiteError);
+  XCTAssertEqual((NSUInteger)0, [[adapter listAttachmentMetadata] count]);
+  (void)[[NSFileManager defaultManager] removeItemAtPath:rootPath error:NULL];
 }
 
 @end
