@@ -123,6 +123,107 @@
   XCTAssertEqualObjects(expectedDeleteParams, deleteBuilt[@"parameters"]);
 }
 
+- (void)testSelectExpressionColumnsWithAliasesAndParameterShiftingSnapshot {
+  ALNSQLBuilder *builder = [ALNSQLBuilder selectFrom:@"documents"
+                                               alias:@"d"
+                                             columns:@[ @"d.document_id" ]];
+  [builder selectExpression:@"COALESCE(d.title, $1)"
+                      alias:@"display_title"
+                 parameters:@[ @"untitled" ]];
+  [builder selectExpression:@"CASE WHEN d.is_active THEN $1 ELSE $2 END"
+                      alias:@"state_label"
+                 parameters:@[ @"active", @"inactive" ]];
+  [builder selectExpression:@"d.updated_at::text" alias:@"updated_at_text" parameters:nil];
+  [builder selectExpression:@"jsonb_object_agg(d.meta_key, d.meta_value)"
+                      alias:@"meta_payload"
+                 parameters:nil];
+  [builder whereField:@"d.state_code" equals:@"TX"];
+  [builder groupByField:@"d.document_id"];
+
+  NSError *error = nil;
+  NSDictionary *built = [builder build:&error];
+  XCTAssertNil(error);
+  XCTAssertNotNil(built);
+  XCTAssertEqualObjects(
+      @"SELECT \"d\".\"document_id\", COALESCE(d.title, $1) AS \"display_title\", CASE WHEN d.is_active THEN $2 ELSE $3 END AS \"state_label\", d.updated_at::text AS \"updated_at_text\", jsonb_object_agg(d.meta_key, d.meta_value) AS \"meta_payload\" FROM \"documents\" AS \"d\" WHERE \"d\".\"state_code\" = $4 GROUP BY \"d\".\"document_id\"",
+      built[@"sql"]);
+  NSArray *expectedParams = @[ @"untitled", @"active", @"inactive", @"TX" ];
+  XCTAssertEqualObjects(expectedParams, built[@"parameters"]);
+}
+
+- (void)testExpressionAwareOrderingSupportsNullsAndParameterizedExpressionsSnapshot {
+  ALNSQLBuilder *builder = [ALNSQLBuilder selectFrom:@"documents"
+                                             columns:@[ @"id", @"priority", @"updated_at", @"created_at" ]];
+  [builder orderByField:@"priority" descending:YES nulls:@"last"];
+  [builder orderByExpression:@"COALESCE(updated_at, created_at)"
+                  descending:NO
+                       nulls:@"first"];
+  [builder orderByExpression:@"COALESCE(rank, $1)"
+                  descending:NO
+                       nulls:nil
+                  parameters:@[ @0 ]];
+
+  NSError *error = nil;
+  NSDictionary *built = [builder build:&error];
+  XCTAssertNil(error);
+  XCTAssertNotNil(built);
+  XCTAssertEqualObjects(
+      @"SELECT \"id\", \"priority\", \"updated_at\", \"created_at\" FROM \"documents\" ORDER BY \"priority\" DESC NULLS LAST, COALESCE(updated_at, created_at) ASC NULLS FIRST, COALESCE(rank, $1) ASC",
+      built[@"sql"]);
+  NSArray *expectedParams = @[ @0 ];
+  XCTAssertEqualObjects(expectedParams, built[@"parameters"]);
+}
+
+- (void)testSubqueryAndLateralJoinCompositionSnapshot {
+  ALNSQLBuilder *recentDocs = [ALNSQLBuilder selectFrom:@"documents" columns:@[ @"docket_id" ]];
+  [recentDocs whereField:@"state_code" equals:@"TX"];
+
+  ALNSQLBuilder *latestEvent = [ALNSQLBuilder selectFrom:@"events" columns:@[ @"event_id" ]];
+  [latestEvent whereExpression:@"events.docket_id = d.id" parameters:nil];
+  [latestEvent orderByField:@"created_at" descending:YES];
+  [latestEvent limit:1];
+
+  ALNSQLBuilder *builder = [ALNSQLBuilder selectFrom:@"dockets"
+                                               alias:@"d"
+                                             columns:@[ @"d.id", @"d.state_code" ]];
+  [builder leftJoinSubquery:recentDocs
+                      alias:@"rd"
+               onExpression:@"d.id = rd.docket_id AND rd.rank >= $1"
+                 parameters:@[ @0 ]];
+  [builder leftJoinLateralSubquery:latestEvent
+                             alias:@"le"
+                      onExpression:@"TRUE"
+                        parameters:nil];
+  [builder whereField:@"d.state_code" equals:@"TX"];
+
+  NSError *error = nil;
+  NSDictionary *built = [builder build:&error];
+  XCTAssertNil(error);
+  XCTAssertNotNil(built);
+  XCTAssertEqualObjects(
+      @"SELECT \"d\".\"id\", \"d\".\"state_code\" FROM \"dockets\" AS \"d\" LEFT JOIN (SELECT \"docket_id\" FROM \"documents\" WHERE \"state_code\" = $1) AS \"rd\" ON d.id = rd.docket_id AND rd.rank >= $2 LEFT JOIN LATERAL (SELECT \"event_id\" FROM \"events\" WHERE (events.docket_id = d.id) ORDER BY \"created_at\" DESC LIMIT 1) AS \"le\" ON TRUE WHERE \"d\".\"state_code\" = $3",
+      built[@"sql"]);
+  NSArray *expectedParams = @[ @"TX", @0, @"TX" ];
+  XCTAssertEqualObjects(expectedParams, built[@"parameters"]);
+}
+
+- (void)testCompositeTuplePredicateWithExpressionSnapshot {
+  ALNSQLBuilder *builder = [ALNSQLBuilder selectFrom:@"documents"
+                                             columns:@[ @"document_id", @"manifest_order" ]];
+  [builder whereExpression:@"(COALESCE(manifest_order, 0), document_id) > ($1, $2)"
+                parameters:@[ @8, @"doc-002" ]];
+
+  NSError *error = nil;
+  NSDictionary *built = [builder build:&error];
+  XCTAssertNil(error);
+  XCTAssertNotNil(built);
+  XCTAssertEqualObjects(
+      @"SELECT \"document_id\", \"manifest_order\" FROM \"documents\" WHERE ((COALESCE(manifest_order, 0), document_id) > ($1, $2))",
+      built[@"sql"]);
+  NSArray *expectedParams = @[ @8, @"doc-002" ];
+  XCTAssertEqualObjects(expectedParams, built[@"parameters"]);
+}
+
 - (void)testPostgresConflictUpsertDialectSnapshots {
   NSError *error = nil;
 
@@ -158,6 +259,42 @@
       upsertBuilt[@"sql"]);
   NSArray *expectedUpsertParams = @[ @7, @"Peggy" ];
   XCTAssertEqualObjects(expectedUpsertParams, upsertBuilt[@"parameters"]);
+}
+
+- (void)testPostgresConflictUpsertAdvancedAssignmentExpressionsSnapshot {
+  NSError *error = nil;
+  ALNPostgresSQLBuilder *upsert =
+      [ALNPostgresSQLBuilder insertInto:@"queue_jobs"
+                                 values:@{
+                                   @"attempt_count" : @0,
+                                   @"id" : @9,
+                                   @"state" : @"queued",
+                                   @"updated_at" : @"2026-01-01T00:00:00Z",
+                                 }];
+  [upsert onConflictColumns:@[ @"id" ]
+        doUpdateAssignments:@{
+          @"attempt_count" : @{
+            @"expression" : @"\"queue_jobs\".\"attempt_count\" + $1",
+            @"parameters" : @[ @1 ],
+          },
+          @"state" : @"EXCLUDED.state",
+          @"updated_at" : @{
+            @"expression" : @"GREATEST(\"queue_jobs\".\"updated_at\", EXCLUDED.\"updated_at\", $1::text)",
+            @"parameters" : @[ @"2026-01-02T00:00:00Z" ],
+          },
+        }];
+  [upsert onConflictDoUpdateWhereExpression:@"\"queue_jobs\".\"state\" <> $1"
+                                 parameters:@[ @"done" ]];
+  [upsert returningField:@"id"];
+
+  NSDictionary *built = [upsert build:&error];
+  XCTAssertNil(error);
+  XCTAssertNotNil(built);
+  XCTAssertEqualObjects(
+      @"INSERT INTO \"queue_jobs\" (\"attempt_count\", \"id\", \"state\", \"updated_at\") VALUES ($1, $2, $3, $4) ON CONFLICT (\"id\") DO UPDATE SET \"attempt_count\" = \"queue_jobs\".\"attempt_count\" + $5, \"state\" = EXCLUDED.state, \"updated_at\" = GREATEST(\"queue_jobs\".\"updated_at\", EXCLUDED.\"updated_at\", $6::text) WHERE \"queue_jobs\".\"state\" <> $7 RETURNING \"id\"",
+      built[@"sql"]);
+  NSArray *expectedParams = @[ @0, @9, @"queued", @"2026-01-01T00:00:00Z", @1, @"2026-01-02T00:00:00Z", @"done" ];
+  XCTAssertEqualObjects(expectedParams, built[@"parameters"]);
 }
 
 - (void)testPostgresConflictRejectedForNonInsert {

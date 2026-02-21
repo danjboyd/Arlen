@@ -22,6 +22,42 @@
   return [NSString stringWithUTF8String:value];
 }
 
+- (NSDictionary *)phase4EConformanceMatrixFixture {
+  NSString *root = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *path = [root stringByAppendingPathComponent:@"tests/fixtures/sql_builder/phase4e_conformance_matrix.json"];
+  NSData *data = [NSData dataWithContentsOfFile:path];
+  XCTAssertNotNil(data);
+  if (data == nil) {
+    return @{};
+  }
+
+  NSError *error = nil;
+  NSDictionary *payload = [NSJSONSerialization JSONObjectWithData:data options:0 error:&error];
+  XCTAssertNil(error);
+  XCTAssertNotNil(payload);
+  if (payload == nil) {
+    return @{};
+  }
+  return payload;
+}
+
+- (NSDictionary<NSString *, NSDictionary *> *)phase4EConformanceScenarioLookup {
+  NSDictionary *fixture = [self phase4EConformanceMatrixFixture];
+  NSArray *scenarios = [fixture[@"scenarios"] isKindOfClass:[NSArray class]] ? fixture[@"scenarios"] : @[];
+  NSMutableDictionary<NSString *, NSDictionary *> *lookup = [NSMutableDictionary dictionary];
+  for (NSDictionary *scenario in scenarios) {
+    if (![scenario isKindOfClass:[NSDictionary class]]) {
+      continue;
+    }
+    NSString *scenarioID = [scenario[@"id"] isKindOfClass:[NSString class]] ? scenario[@"id"] : @"";
+    if ([scenarioID length] == 0) {
+      continue;
+    }
+    lookup[scenarioID] = scenario;
+  }
+  return lookup;
+}
+
 - (NSString *)uniqueNameWithPrefix:(NSString *)prefix {
   NSString *uuid = [[[NSUUID UUID] UUIDString] lowercaseString];
   uuid = [uuid stringByReplacingOccurrencesOfString:@"-" withString:@""];
@@ -459,6 +495,274 @@
   (void)[connection executeCommand:[NSString stringWithFormat:@"DROP TABLE IF EXISTS %@", table]
                         parameters:@[]
                              error:nil];
+  [database releaseConnection:connection];
+}
+
+- (void)testPhase4EConformanceScenariosExecuteAgainstPostgres {
+  NSString *dsn = [self pgTestDSN];
+  if ([dsn length] == 0) {
+    return;
+  }
+
+  NSDictionary<NSString *, NSDictionary *> *scenarios = [self phase4EConformanceScenarioLookup];
+  NSArray<NSString *> *requiredScenarioIDs = @[
+    @"template_select",
+    @"set_operation",
+    @"expression_ordering",
+    @"lateral_join",
+    @"tuple_cursor",
+    @"window_named",
+    @"exists_any_all",
+    @"locking_skip_locked",
+    @"postgres_upsert_expression",
+  ];
+  for (NSString *scenarioID in requiredScenarioIDs) {
+    XCTAssertNotNil(scenarios[scenarioID]);
+  }
+
+  NSError *error = nil;
+  ALNPg *database = [[ALNPg alloc] initWithConnectionString:dsn maxConnections:2 error:&error];
+  XCTAssertNil(error);
+  XCTAssertNotNil(database);
+  if (database == nil) {
+    return;
+  }
+
+  ALNPgConnection *connection = [database acquireConnection:&error];
+  XCTAssertNil(error);
+  XCTAssertNotNil(connection);
+  if (connection == nil) {
+    return;
+  }
+
+  NSArray *createStatements = @[
+    @"CREATE TEMP TABLE documents (id TEXT NOT NULL, state_code TEXT NOT NULL, title TEXT, updated_at TEXT, created_at TEXT, priority INTEGER, manifest_order INTEGER NOT NULL, document_id TEXT NOT NULL)",
+    @"CREATE TEMP TABLE active_docs (doc_id TEXT NOT NULL, state_code TEXT NOT NULL)",
+    @"CREATE TEMP TABLE archived_docs (doc_id TEXT NOT NULL, state_code TEXT NOT NULL)",
+    @"CREATE TEMP TABLE blocked_docs (doc_id TEXT NOT NULL, block_flag INTEGER NOT NULL)",
+    @"CREATE TEMP TABLE dockets (id TEXT NOT NULL, state_code TEXT NOT NULL)",
+    @"CREATE TEMP TABLE events (event_id TEXT, docket_id TEXT, user_id TEXT, state TEXT, updated_at TEXT, created_at TEXT)",
+    @"CREATE TEMP TABLE scores (user_id TEXT NOT NULL, team_id TEXT NOT NULL, score INTEGER NOT NULL)",
+    @"CREATE TEMP TABLE users (id TEXT NOT NULL, score INTEGER NOT NULL)",
+    @"CREATE TEMP TABLE thresholds (value INTEGER NOT NULL, category TEXT NOT NULL)",
+    @"CREATE TEMP TABLE minima (min_score INTEGER NOT NULL, enabled INTEGER NOT NULL)",
+    @"CREATE TEMP TABLE queue_jobs (id INTEGER NOT NULL, state TEXT NOT NULL, attempt_count INTEGER NOT NULL, updated_at TEXT NOT NULL)",
+  ];
+  for (NSString *statement in createStatements) {
+    XCTAssertGreaterThanOrEqual([connection executeCommand:statement parameters:@[] error:&error], (NSInteger)0);
+    XCTAssertNil(error);
+  }
+
+  NSString *insertDocumentsSQL =
+      @"INSERT INTO documents (id, state_code, title, updated_at, created_at, priority, manifest_order, document_id) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)";
+  NSArray *documentRows = @[
+    @[ @"d1", @"TX", @"Texas Notice", @"2026-01-02", @"2026-01-01", @5, @7, @"doc-001" ],
+    @[ @"d2", @"TX", [NSNull null], @"2026-01-03", @"2026-01-02", [NSNull null], @8, @"doc-002" ],
+    @[ @"d3", @"TX", @"Gamma", [NSNull null], @"2026-01-04", @1, @8, @"doc-003" ],
+    @[ @"d4", @"TX", @"Delta", @"2026-01-05", @"2026-01-05", @3, @9, @"doc-004" ],
+  ];
+  for (NSArray *row in documentRows) {
+    XCTAssertEqual((NSInteger)1, [connection executeCommand:insertDocumentsSQL parameters:row error:&error]);
+    XCTAssertNil(error);
+  }
+
+  NSInteger affected = [connection executeCommand:@"INSERT INTO active_docs (doc_id, state_code) VALUES ($1, $2)"
+                                       parameters:@[ @"a1", @"TX" ]
+                                            error:&error];
+  XCTAssertEqual((NSInteger)1, affected);
+  XCTAssertNil(error);
+  affected = [connection executeCommand:@"INSERT INTO active_docs (doc_id, state_code) VALUES ($1, $2)"
+                             parameters:@[ @"shared", @"TX" ]
+                                  error:&error];
+  XCTAssertEqual((NSInteger)1, affected);
+  XCTAssertNil(error);
+  affected = [connection executeCommand:@"INSERT INTO archived_docs (doc_id, state_code) VALUES ($1, $2)"
+                             parameters:@[ @"b1", @"TX" ]
+                                  error:&error];
+  XCTAssertEqual((NSInteger)1, affected);
+  XCTAssertNil(error);
+  affected = [connection executeCommand:@"INSERT INTO archived_docs (doc_id, state_code) VALUES ($1, $2)"
+                             parameters:@[ @"shared", @"TX" ]
+                                  error:&error];
+  XCTAssertEqual((NSInteger)1, affected);
+  XCTAssertNil(error);
+  affected = [connection executeCommand:@"INSERT INTO blocked_docs (doc_id, block_flag) VALUES ($1, $2)"
+                             parameters:@[ @"shared", @1 ]
+                                  error:&error];
+  XCTAssertEqual((NSInteger)1, affected);
+  XCTAssertNil(error);
+
+  affected = [connection executeCommand:@"INSERT INTO dockets (id, state_code) VALUES ($1, $2)"
+                             parameters:@[ @"d1", @"TX" ]
+                                  error:&error];
+  XCTAssertEqual((NSInteger)1, affected);
+  XCTAssertNil(error);
+  affected = [connection executeCommand:@"INSERT INTO dockets (id, state_code) VALUES ($1, $2)"
+                             parameters:@[ @"d2", @"TX" ]
+                                  error:&error];
+  XCTAssertEqual((NSInteger)1, affected);
+  XCTAssertNil(error);
+
+  NSArray *eventRows = @[
+    @[ @"ev-1", @"d1", [NSNull null], [NSNull null], @"2026-01-01", @"2026-01-01" ],
+    @[ @"ev-2", @"d1", [NSNull null], [NSNull null], @"2026-01-03", @"2026-01-02" ],
+    @[ @"ev-3", @"d2", [NSNull null], [NSNull null], @"2026-01-02", @"2026-01-01" ],
+    @[ [NSNull null], [NSNull null], @"u1", @"ready", [NSNull null], [NSNull null] ],
+    @[ [NSNull null], [NSNull null], @"u2", @"pending", [NSNull null], [NSNull null] ],
+  ];
+  NSString *insertEventsSQL =
+      @"INSERT INTO events (event_id, docket_id, user_id, state, updated_at, created_at) VALUES ($1, $2, $3, $4, $5, $6)";
+  for (NSArray *row in eventRows) {
+    XCTAssertEqual((NSInteger)1, [connection executeCommand:insertEventsSQL parameters:row error:&error]);
+    XCTAssertNil(error);
+  }
+
+  NSArray *scoreRows = @[
+    @[ @"u1", @"t1", @10 ],
+    @[ @"u2", @"t1", @7 ],
+    @[ @"u3", @"t2", @4 ],
+  ];
+  for (NSArray *row in scoreRows) {
+    XCTAssertEqual((NSInteger)1,
+                   [connection executeCommand:@"INSERT INTO scores (user_id, team_id, score) VALUES ($1, $2, $3)"
+                                   parameters:row
+                                        error:&error]);
+    XCTAssertNil(error);
+  }
+
+  affected = [connection executeCommand:@"INSERT INTO users (id, score) VALUES ($1, $2)"
+                             parameters:@[ @"u1", @10 ]
+                                  error:&error];
+  XCTAssertEqual((NSInteger)1, affected);
+  XCTAssertNil(error);
+  affected = [connection executeCommand:@"INSERT INTO users (id, score) VALUES ($1, $2)"
+                             parameters:@[ @"u2", @3 ]
+                                  error:&error];
+  XCTAssertEqual((NSInteger)1, affected);
+  XCTAssertNil(error);
+
+  affected = [connection executeCommand:@"INSERT INTO thresholds (value, category) VALUES ($1, $2)"
+                             parameters:@[ @5, @"risk" ]
+                                  error:&error];
+  XCTAssertEqual((NSInteger)1, affected);
+  XCTAssertNil(error);
+  affected = [connection executeCommand:@"INSERT INTO thresholds (value, category) VALUES ($1, $2)"
+                             parameters:@[ @8, @"risk" ]
+                                  error:&error];
+  XCTAssertEqual((NSInteger)1, affected);
+  XCTAssertNil(error);
+
+  affected = [connection executeCommand:@"INSERT INTO minima (min_score, enabled) VALUES ($1, $2)"
+                             parameters:@[ @4, @1 ]
+                                  error:&error];
+  XCTAssertEqual((NSInteger)1, affected);
+  XCTAssertNil(error);
+
+  affected = [connection executeCommand:@"INSERT INTO queue_jobs (id, state, attempt_count, updated_at) VALUES ($1, $2, $3, $4)"
+                             parameters:@[ @1, @"queued", @0, @"2026-01-01T00:00:00Z" ]
+                                  error:&error];
+  XCTAssertEqual((NSInteger)1, affected);
+  XCTAssertNil(error);
+  affected = [connection executeCommand:@"INSERT INTO queue_jobs (id, state, attempt_count, updated_at) VALUES ($1, $2, $3, $4)"
+                             parameters:@[ @9, @"running", @2, @"2026-01-01T00:00:00Z" ]
+                                  error:&error];
+  XCTAssertEqual((NSInteger)1, affected);
+  XCTAssertNil(error);
+
+  NSDictionary *templateScenario = scenarios[@"template_select"];
+  NSArray *templateRows =
+      [connection executeQuery:templateScenario[@"sql"] parameters:templateScenario[@"parameters"] error:&error];
+  XCTAssertNil(error);
+  XCTAssertEqual((NSUInteger)4, [templateRows count]);
+  NSMutableDictionary *displayByID = [NSMutableDictionary dictionary];
+  for (NSDictionary *row in templateRows) {
+    displayByID[row[@"id"]] = row[@"display_title"];
+  }
+  XCTAssertEqualObjects(@"untitled", displayByID[@"d2"]);
+
+  NSDictionary *setScenario = scenarios[@"set_operation"];
+  NSArray *setRows = [connection executeQuery:setScenario[@"sql"]
+                                   parameters:setScenario[@"parameters"]
+                                        error:&error];
+  XCTAssertNil(error);
+  XCTAssertEqual((NSUInteger)2, [setRows count]);
+  NSSet *setDocIDs = [NSSet setWithArray:@[ setRows[0][@"doc_id"], setRows[1][@"doc_id"] ]];
+  XCTAssertTrue([setDocIDs containsObject:@"a1"]);
+  XCTAssertTrue([setDocIDs containsObject:@"b1"]);
+
+  NSDictionary *orderingScenario = scenarios[@"expression_ordering"];
+  NSArray *orderingRows = [connection executeQuery:orderingScenario[@"sql"]
+                                        parameters:orderingScenario[@"parameters"]
+                                             error:&error];
+  XCTAssertNil(error);
+  XCTAssertEqual((NSUInteger)4, [orderingRows count]);
+  XCTAssertEqualObjects(@"d1", orderingRows[0][@"id"]);
+  XCTAssertEqualObjects(@"d2", orderingRows[3][@"id"]);
+
+  NSDictionary *lateralScenario = scenarios[@"lateral_join"];
+  NSArray *lateralRows = [connection executeQuery:lateralScenario[@"sql"]
+                                       parameters:lateralScenario[@"parameters"]
+                                            error:&error];
+  XCTAssertNil(error);
+  XCTAssertEqual((NSUInteger)2, [lateralRows count]);
+  XCTAssertEqualObjects(@"d1", lateralRows[0][@"id"]);
+  XCTAssertEqualObjects(@"d2", lateralRows[1][@"id"]);
+
+  NSDictionary *tupleScenario = scenarios[@"tuple_cursor"];
+  NSArray *tupleRows = [connection executeQuery:tupleScenario[@"sql"]
+                                     parameters:tupleScenario[@"parameters"]
+                                          error:&error];
+  XCTAssertNil(error);
+  XCTAssertEqual((NSUInteger)2, [tupleRows count]);
+  XCTAssertEqualObjects(@"doc-003", tupleRows[0][@"document_id"]);
+  XCTAssertEqualObjects(@"doc-004", tupleRows[1][@"document_id"]);
+
+  NSDictionary *windowScenario = scenarios[@"window_named"];
+  NSArray *windowRows = [connection executeQuery:windowScenario[@"sql"]
+                                      parameters:windowScenario[@"parameters"]
+                                           error:&error];
+  XCTAssertNil(error);
+  XCTAssertEqual((NSUInteger)3, [windowRows count]);
+  NSMutableDictionary *windowRankByUser = [NSMutableDictionary dictionary];
+  for (NSDictionary *row in windowRows) {
+    windowRankByUser[row[@"user_id"]] = row[@"row_num"];
+  }
+  XCTAssertEqualObjects(@"1", windowRankByUser[@"u1"]);
+  XCTAssertEqualObjects(@"2", windowRankByUser[@"u2"]);
+  XCTAssertEqualObjects(@"1", windowRankByUser[@"u3"]);
+
+  NSDictionary *predicateScenario = scenarios[@"exists_any_all"];
+  NSArray *predicateRows = [connection executeQuery:predicateScenario[@"sql"]
+                                         parameters:predicateScenario[@"parameters"]
+                                              error:&error];
+  XCTAssertNil(error);
+  XCTAssertEqual((NSUInteger)1, [predicateRows count]);
+  XCTAssertEqualObjects(@"u1", predicateRows[0][@"id"]);
+
+  NSDictionary *lockingScenario = scenarios[@"locking_skip_locked"];
+  NSArray *lockingRows = [connection executeQuery:lockingScenario[@"sql"]
+                                       parameters:lockingScenario[@"parameters"]
+                                            error:&error];
+  XCTAssertNil(error);
+  XCTAssertEqual((NSUInteger)1, [lockingRows count]);
+  XCTAssertEqualObjects(@"1", lockingRows[0][@"id"]);
+
+  NSDictionary *upsertScenario = scenarios[@"postgres_upsert_expression"];
+  NSInteger upserted = [connection executeCommand:upsertScenario[@"sql"]
+                                       parameters:upsertScenario[@"parameters"]
+                                            error:&error];
+  XCTAssertNil(error);
+  XCTAssertEqual((NSInteger)1, upserted);
+
+  NSDictionary *upsertRow =
+      [connection executeQueryOne:@"SELECT state, attempt_count, updated_at FROM queue_jobs WHERE id = $1"
+                       parameters:@[ @9 ]
+                            error:&error];
+  XCTAssertNil(error);
+  XCTAssertEqualObjects(@"queued", upsertRow[@"state"]);
+  XCTAssertEqualObjects(@"3", upsertRow[@"attempt_count"]);
+  XCTAssertEqualObjects(@"2026-01-02T00:00:00Z", upsertRow[@"updated_at"]);
+
   [database releaseConnection:connection];
 }
 

@@ -1,0 +1,35 @@
+name: phase4-sanitizers
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  sanitizer-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            clang \
+            curl \
+            jq \
+            make \
+            pandoc \
+            python3 \
+            tools-xctest \
+            gnustep-make \
+            gnustep-base-runtime \
+            libgnustep-base-dev
+
+      - name: Run Phase 4 sanitizer gate
+        env:
+          GNUSTEP_USER_ROOT: ${{ github.workspace }}/.gnustep
+        run: |
+          bash ./tools/ci/run_phase4_sanitizers.sh

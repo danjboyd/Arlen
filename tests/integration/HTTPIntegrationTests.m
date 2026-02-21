@@ -676,6 +676,161 @@
   }
 }
 
+- (void)testWebSocketFrameLengthBoundariesAndMalformedFrames {
+  int port = [self randomPort];
+  NSTask *server = [[NSTask alloc] init];
+  server.launchPath = @"./build/boomhauer";
+  server.arguments = @[ @"--port", [NSString stringWithFormat:@"%d", port] ];
+  server.standardOutput = [NSPipe pipe];
+  server.standardError = [NSPipe pipe];
+  [server launch];
+
+  @try {
+    BOOL ready = NO;
+    (void)[self requestPathWithRetries:@"/healthz" port:port attempts:60 success:&ready];
+    XCTAssertTrue(ready);
+
+    NSString *script = [NSString stringWithFormat:
+                                         @"import base64, os, socket, struct\n"
+                                         @"PORT=%d\n"
+                                         @"MAX_PAYLOAD=1048576\n"
+                                         @"def recv_exact(sock, size):\n"
+                                         @"    data=b''\n"
+                                         @"    while len(data)<size:\n"
+                                         @"        chunk=sock.recv(size-len(data))\n"
+                                         @"        if not chunk:\n"
+                                         @"            raise RuntimeError('connection closed')\n"
+                                         @"        data += chunk\n"
+                                         @"    return data\n"
+                                         @"def ws_connect(path):\n"
+                                         @"    key = base64.b64encode(os.urandom(16)).decode('ascii')\n"
+                                         @"    req = (\n"
+                                         @"      f'GET {path} HTTP/1.1\\r\\n'\n"
+                                         @"      f'Host: 127.0.0.1:{PORT}\\r\\n'\n"
+                                         @"      'Upgrade: websocket\\r\\n'\n"
+                                         @"      'Connection: Upgrade\\r\\n'\n"
+                                         @"      f'Sec-WebSocket-Key: {key}\\r\\n'\n"
+                                         @"      'Sec-WebSocket-Version: 13\\r\\n\\r\\n'\n"
+                                         @"    ).encode('utf-8')\n"
+                                         @"    sock = socket.create_connection(('127.0.0.1', PORT), timeout=4)\n"
+                                         @"    sock.settimeout(4)\n"
+                                         @"    sock.sendall(req)\n"
+                                         @"    response = b''\n"
+                                         @"    while b'\\r\\n\\r\\n' not in response:\n"
+                                         @"      chunk = sock.recv(4096)\n"
+                                         @"      if not chunk:\n"
+                                         @"        break\n"
+                                         @"      response += chunk\n"
+                                         @"      if len(response) > 65536:\n"
+                                         @"        break\n"
+                                         @"    if b'101 Switching Protocols' not in response:\n"
+                                         @"      raise RuntimeError(response.decode('utf-8', 'replace'))\n"
+                                         @"    return sock\n"
+                                         @"def send_text(sock, text):\n"
+                                         @"    payload=text.encode('utf-8')\n"
+                                         @"    mask=os.urandom(4)\n"
+                                         @"    header=bytearray([0x81])\n"
+                                         @"    length=len(payload)\n"
+                                         @"    if length <= 125:\n"
+                                         @"      header.append(0x80 | length)\n"
+                                         @"    elif length <= 65535:\n"
+                                         @"      header.append(0x80 | 126)\n"
+                                         @"      header.extend(struct.pack('!H', length))\n"
+                                         @"    else:\n"
+                                         @"      header.append(0x80 | 127)\n"
+                                         @"      header.extend(struct.pack('!Q', length))\n"
+                                         @"    masked=bytes(payload[i] ^ mask[i %% 4] for i in range(length))\n"
+                                         @"    sock.sendall(bytes(header)+mask+masked)\n"
+                                         @"def recv_text(sock):\n"
+                                         @"    b1, b2 = recv_exact(sock, 2)\n"
+                                         @"    opcode = b1 & 0x0F\n"
+                                         @"    length = b2 & 0x7F\n"
+                                         @"    masked = (b2 & 0x80) != 0\n"
+                                         @"    if length == 126:\n"
+                                         @"      length = struct.unpack('!H', recv_exact(sock, 2))[0]\n"
+                                         @"    elif length == 127:\n"
+                                         @"      length = struct.unpack('!Q', recv_exact(sock, 8))[0]\n"
+                                         @"    mask_key = recv_exact(sock, 4) if masked else b''\n"
+                                         @"    payload = recv_exact(sock, length)\n"
+                                         @"    if masked:\n"
+                                         @"      payload = bytes(payload[i] ^ mask_key[i %% 4] for i in range(length))\n"
+                                         @"    if opcode != 0x1:\n"
+                                         @"      raise RuntimeError('unexpected opcode %%d' %% opcode)\n"
+                                         @"    return payload.decode('utf-8')\n"
+                                         @"def expect_closed(sock, label):\n"
+                                         @"    sock.settimeout(2)\n"
+                                         @"    try:\n"
+                                         @"      data = sock.recv(64)\n"
+                                         @"    except ConnectionResetError:\n"
+                                         @"      print(f'{label}-closed')\n"
+                                         @"      return\n"
+                                         @"    except BrokenPipeError:\n"
+                                         @"      print(f'{label}-closed')\n"
+                                         @"      return\n"
+                                         @"    except socket.timeout:\n"
+                                         @"      raise RuntimeError(f'{label}-timeout')\n"
+                                         @"    if data == b'':\n"
+                                         @"      print(f'{label}-closed')\n"
+                                         @"      return\n"
+                                         @"    opcode = data[0] & 0x0F\n"
+                                         @"    if opcode == 0x8:\n"
+                                         @"      print(f'{label}-closed')\n"
+                                         @"      return\n"
+                                         @"    raise RuntimeError(f'{label}-unexpected-data')\n"
+                                         @"for size in (125, 126, 65535, 65536):\n"
+                                         @"    sock = ws_connect('/ws/echo')\n"
+                                         @"    payload = 'x' * size\n"
+                                         @"    send_text(sock, payload)\n"
+                                         @"    echoed = recv_text(sock)\n"
+                                         @"    if echoed != payload:\n"
+                                         @"      raise RuntimeError(f'echo-mismatch-{size}')\n"
+                                         @"    print(f'length-{size}-ok')\n"
+                                         @"    sock.close()\n"
+                                         @"oversized = ws_connect('/ws/echo')\n"
+                                         @"oversized_header = bytearray([0x81, 0x80 | 127])\n"
+                                         @"oversized_header.extend(struct.pack('!Q', MAX_PAYLOAD + 1))\n"
+                                         @"oversized.sendall(bytes(oversized_header))\n"
+                                         @"expect_closed(oversized, 'oversized')\n"
+                                         @"oversized.close()\n"
+                                         @"truncated = ws_connect('/ws/echo')\n"
+                                         @"declared = 4096\n"
+                                         @"partial = b'partial-payload'\n"
+                                         @"mask = os.urandom(4)\n"
+                                         @"frame = bytearray([0x81, 0x80 | 126])\n"
+                                         @"frame.extend(struct.pack('!H', declared))\n"
+                                         @"frame.extend(mask)\n"
+                                         @"masked = bytes(partial[i] ^ mask[i %% 4] for i in range(len(partial)))\n"
+                                         @"truncated.sendall(bytes(frame) + masked)\n"
+                                         @"truncated.shutdown(socket.SHUT_WR)\n"
+                                         @"expect_closed(truncated, 'truncated')\n"
+                                         @"truncated.close()\n",
+                                         port];
+
+    int pyCode = 0;
+    NSString *output = [self runPythonScript:script exitCode:&pyCode];
+    XCTAssertEqual(0, pyCode);
+    XCTAssertTrue([output containsString:@"length-125-ok"]);
+    XCTAssertTrue([output containsString:@"length-126-ok"]);
+    XCTAssertTrue([output containsString:@"length-65535-ok"]);
+    XCTAssertTrue([output containsString:@"length-65536-ok"]);
+    XCTAssertTrue([output containsString:@"oversized-closed"]);
+    XCTAssertTrue([output containsString:@"truncated-closed"]);
+
+    BOOL stillReady = NO;
+    NSString *healthBody = [self requestPathWithRetries:@"/healthz"
+                                                   port:port
+                                               attempts:20
+                                                success:&stillReady];
+    XCTAssertTrue(stillReady);
+    XCTAssertEqualObjects(@"ok\n", healthBody);
+  } @finally {
+    if ([server isRunning]) {
+      (void)kill(server.processIdentifier, SIGTERM);
+      [server waitUntilExit];
+    }
+  }
+}
+
 - (void)testSSETickerHandlesConcurrentRequests {
   int port = [self randomPort];
   NSTask *server = [[NSTask alloc] init];
@@ -911,6 +1066,93 @@
   XCTAssertEqual(0, curlCode);
   XCTAssertEqual(0, serverCode);
   XCTAssertEqualObjects(@"413", [status stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]]);
+}
+
+- (void)testContentLengthEdgeCasesRejectMalformedAndRespectLimit {
+  int port = [self randomPort];
+  NSTask *server = [[NSTask alloc] init];
+  server.launchPath = @"/bin/bash";
+  server.arguments = @[
+    @"-lc",
+    [NSString stringWithFormat:@"ARLEN_MAX_BODY_BYTES=16 ./build/boomhauer --port %d", port]
+  ];
+  server.standardOutput = [NSPipe pipe];
+  server.standardError = [NSPipe pipe];
+  [server launch];
+
+  @try {
+    BOOL ready = NO;
+    (void)[self requestPathWithRetries:@"/healthz" port:port attempts:60 success:&ready];
+    XCTAssertTrue(ready);
+
+    NSString *script = [NSString stringWithFormat:
+                                         @"import socket\n"
+                                         @"PORT=%d\n"
+                                         @"def read_status_line(request_bytes):\n"
+                                         @"    sock = socket.create_connection(('127.0.0.1', PORT), timeout=3)\n"
+                                         @"    sock.settimeout(3)\n"
+                                         @"    sock.sendall(request_bytes)\n"
+                                         @"    response = b''\n"
+                                         @"    while b'\\r\\n' not in response:\n"
+                                         @"      chunk = sock.recv(4096)\n"
+                                         @"      if not chunk:\n"
+                                         @"        break\n"
+                                         @"      response += chunk\n"
+                                         @"      if len(response) > 16384:\n"
+                                         @"        break\n"
+                                         @"    sock.close()\n"
+                                         @"    if b'\\r\\n' not in response:\n"
+                                         @"      raise RuntimeError('missing-status-line')\n"
+                                         @"    return response.split(b'\\r\\n', 1)[0].decode('ascii', 'replace')\n"
+                                         @"exact_limit = read_status_line(\n"
+                                         @"    b'GET /healthz HTTP/1.1\\r\\n'\n"
+                                         @"    b'Host: 127.0.0.1\\r\\n'\n"
+                                         @"    b'Content-Length: 16\\r\\n'\n"
+                                         @"    b'\\r\\n'\n"
+                                         @"    b'1234567890abcdef'\n"
+                                         @")\n"
+                                         @"over_limit = read_status_line(\n"
+                                         @"    b'GET /healthz HTTP/1.1\\r\\n'\n"
+                                         @"    b'Host: 127.0.0.1\\r\\n'\n"
+                                         @"    b'Content-Length: 17\\r\\n'\n"
+                                         @"    b'\\r\\n'\n"
+                                         @"    b'1234567890abcdefg'\n"
+                                         @")\n"
+                                         @"invalid = read_status_line(\n"
+                                         @"    b'GET /healthz HTTP/1.1\\r\\n'\n"
+                                         @"    b'Host: 127.0.0.1\\r\\n'\n"
+                                         @"    b'Content-Length: abc\\r\\n'\n"
+                                         @"    b'\\r\\n'\n"
+                                         @")\n"
+                                         @"huge = read_status_line(\n"
+                                         @"    b'GET /healthz HTTP/1.1\\r\\n'\n"
+                                         @"    b'Host: 127.0.0.1\\r\\n'\n"
+                                         @"    b'Content-Length: 999999999999999999999999999\\r\\n'\n"
+                                         @"    b'\\r\\n'\n"
+                                         @")\n"
+                                         @"print(exact_limit)\n"
+                                         @"print(over_limit)\n"
+                                         @"print(invalid)\n"
+                                         @"print(huge)\n",
+                                         port];
+
+    int pyCode = 0;
+    NSString *output = [self runPythonScript:script exitCode:&pyCode];
+    XCTAssertEqual(0, pyCode);
+    NSArray *lines =
+        [[output stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]]
+            componentsSeparatedByCharactersInSet:[NSCharacterSet newlineCharacterSet]];
+    XCTAssertGreaterThanOrEqual([lines count], 4u);
+    XCTAssertTrue([lines[0] containsString:@" 200 "]);
+    XCTAssertTrue([lines[1] containsString:@" 413 "]);
+    XCTAssertTrue([lines[2] containsString:@" 400 "]);
+    XCTAssertTrue([lines[3] containsString:@" 413 "]);
+  } @finally {
+    if ([server isRunning]) {
+      (void)kill(server.processIdentifier, SIGTERM);
+      [server waitUntilExit];
+    }
+  }
 }
 
 - (void)testTrustedProxyMetadata {

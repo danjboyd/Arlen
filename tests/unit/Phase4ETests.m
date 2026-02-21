@@ -164,6 +164,54 @@
     @"parameters" : setBuilt[@"parameters"] ?: @[],
   };
 
+  ALNSQLBuilder *orderingBuilder = [ALNSQLBuilder selectFrom:@"documents"
+                                                        alias:@"d"
+                                                      columns:@[ @"d.id" ]];
+  [orderingBuilder orderByField:@"d.priority" descending:YES nulls:@"LAST"];
+  [orderingBuilder orderByExpression:@"COALESCE({{updated_col}}, {{created_col}}, $1)"
+                          descending:NO
+                               nulls:@"FIRST"
+                  identifierBindings:@{
+                    @"updated_col" : @"d.updated_at",
+                    @"created_col" : @"d.created_at",
+                  }
+                          parameters:@[ @"1970-01-01T00:00:00Z" ]];
+  NSDictionary *orderingBuilt = [orderingBuilder build:error];
+  if (orderingBuilt == nil) {
+    return nil;
+  }
+  results[@"expression_ordering"] = @{
+    @"sql" : orderingBuilt[@"sql"] ?: @"",
+    @"parameters" : orderingBuilt[@"parameters"] ?: @[],
+  };
+
+  ALNSQLBuilder *latestEvent = [ALNSQLBuilder selectFrom:@"events"
+                                                   alias:@"e"
+                                                 columns:@[ @"e.event_id" ]];
+  [latestEvent whereExpression:@"e.docket_id = d.id" parameters:nil];
+  [latestEvent orderByExpression:@"COALESCE(e.updated_at, e.created_at)"
+                      descending:YES
+                           nulls:@"LAST"];
+  [latestEvent limit:1];
+
+  ALNSQLBuilder *lateralBuilder = [ALNSQLBuilder selectFrom:@"dockets"
+                                                      alias:@"d"
+                                                    columns:@[ @"d.id", @"d.state_code" ]];
+  [lateralBuilder leftJoinLateralSubquery:latestEvent
+                                    alias:@"le"
+                             onExpression:@"TRUE"
+                               parameters:nil];
+  [lateralBuilder whereField:@"d.state_code" equals:@"TX"];
+  [lateralBuilder orderByField:@"d.id" descending:NO nulls:nil];
+  NSDictionary *lateralBuilt = [lateralBuilder build:error];
+  if (lateralBuilt == nil) {
+    return nil;
+  }
+  results[@"lateral_join"] = @{
+    @"sql" : lateralBuilt[@"sql"] ?: @"",
+    @"parameters" : lateralBuilt[@"parameters"] ?: @[],
+  };
+
   ALNSQLBuilder *cursorBuilder = [ALNSQLBuilder selectFrom:@"documents"
                                                      alias:@"doc"
                                                    columns:@[ @"doc.document_id" ]];
@@ -180,6 +228,72 @@
   results[@"tuple_cursor"] = @{
     @"sql" : cursorBuilt[@"sql"] ?: @"",
     @"parameters" : cursorBuilt[@"parameters"] ?: @[],
+  };
+
+  ALNSQLBuilder *windowBuilder = [ALNSQLBuilder selectFrom:@"scores"
+                                                      alias:@"s"
+                                                    columns:@[ @"s.user_id" ]];
+  [windowBuilder selectExpression:@"ROW_NUMBER() OVER {{win}}"
+                            alias:@"row_num"
+               identifierBindings:@{ @"win" : @"score_win" }
+                       parameters:nil];
+  [windowBuilder windowNamed:@"score_win"
+                  expression:@"PARTITION BY {{team_col}} ORDER BY {{score_col}} DESC"
+         identifierBindings:@{
+           @"team_col" : @"s.team_id",
+           @"score_col" : @"s.score",
+         }
+                  parameters:nil];
+  [windowBuilder orderByField:@"s.user_id" descending:NO nulls:nil];
+  NSDictionary *windowBuilt = [windowBuilder build:error];
+  if (windowBuilt == nil) {
+    return nil;
+  }
+  results[@"window_named"] = @{
+    @"sql" : windowBuilt[@"sql"] ?: @"",
+    @"parameters" : windowBuilt[@"parameters"] ?: @[],
+  };
+
+  ALNSQLBuilder *eventProbe = [ALNSQLBuilder selectFrom:@"events"
+                                                  alias:@"e"
+                                                columns:@[ @"e.user_id" ]];
+  [eventProbe whereExpression:@"e.user_id = u.id" parameters:nil];
+  ALNSQLBuilder *anyThreshold = [ALNSQLBuilder selectFrom:@"thresholds" columns:@[ @"value" ]];
+  [anyThreshold whereField:@"category" equals:@"risk"];
+  ALNSQLBuilder *allMinimum = [ALNSQLBuilder selectFrom:@"minima" columns:@[ @"min_score" ]];
+  [allMinimum whereField:@"enabled" equals:@1];
+
+  ALNSQLBuilder *predicateBuilder = [ALNSQLBuilder selectFrom:@"users"
+                                                        alias:@"u"
+                                                      columns:@[ @"u.id" ]];
+  [predicateBuilder whereExistsSubquery:eventProbe];
+  [predicateBuilder whereField:@"u.score" operator:@">=" anySubquery:anyThreshold];
+  [predicateBuilder whereField:@"u.score" operator:@">=" allSubquery:allMinimum];
+  [predicateBuilder orderByField:@"u.id" descending:NO nulls:nil];
+  NSDictionary *predicateBuilt = [predicateBuilder build:error];
+  if (predicateBuilt == nil) {
+    return nil;
+  }
+  results[@"exists_any_all"] = @{
+    @"sql" : predicateBuilt[@"sql"] ?: @"",
+    @"parameters" : predicateBuilt[@"parameters"] ?: @[],
+  };
+
+  ALNSQLBuilder *lockBuilder = [ALNSQLBuilder selectFrom:@"queue_jobs"
+                                                   alias:@"q"
+                                                 columns:@[ @"q.id" ]];
+  [lockBuilder whereField:@"q.state" equals:@"queued"];
+  [lockBuilder orderByField:@"q.id" descending:NO nulls:nil];
+  [lockBuilder limit:1];
+  [lockBuilder forUpdateOfTables:@[ @"q" ]];
+  [lockBuilder skipLocked];
+  NSDictionary *lockBuilt = [lockBuilder build:error];
+  if (lockBuilt == nil) {
+    return nil;
+  }
+  results[@"locking_skip_locked"] = @{
+    @"sql" : lockBuilt[@"sql"] ?: @"",
+    @"parameters" : lockBuilt[@"parameters"] ?: @[],
   };
 
   ALNPostgresSQLBuilder *upsert =

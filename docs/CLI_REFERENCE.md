@@ -234,7 +234,10 @@ Signals:
 - `bin/tech-demo`: run technology demo app
 - `bin/dev`: alias for `bin/boomhauer`
 - `make ci-quality`: run unit + integration + multi-profile perf quality gate
+- `make ci-sanitizers`: run ASan/UBSan gate across unit + integration + data-layer checks
 - `tools/ci/run_phase4_quality.sh`: explicit Phase 4 CI gate entrypoint
+- `tools/ci/run_phase4_sanitizers.sh`: explicit sanitizer CI gate entrypoint
+  - set `ARLEN_SANITIZER_INCLUDE_INTEGRATION=1` to include full integration suite in sanitizer runs
 - `make test-data-layer`: build and run standalone `ArlenData` example validation
 - `make deploy-smoke`: validate deployment runbook with automated release smoke
 - `make docs-html`: generate browser-friendly docs under `build/docs`

@@ -37,6 +37,7 @@ Run from repository root:
 
 ```bash
 make ci-quality
+make ci-sanitizers
 make test-data-layer
 make deploy-smoke
 make docs-html
@@ -70,3 +71,11 @@ Trend outputs are generated on every run:
 - `build/perf/latest_trend.md`
 
 CI uploads `build/perf/` and profile baselines as release-quality artifacts.
+
+## 5. Branch Protection (Manual Repo Setting)
+
+GitHub branch protection is configured in repository settings, not in-tree.
+For `main`, require these status checks before merge:
+
+- `phase4-quality / quality-gate`
+- `phase4-sanitizers / sanitizer-gate`

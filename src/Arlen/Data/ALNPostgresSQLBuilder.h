@@ -12,6 +12,10 @@ NS_ASSUME_NONNULL_BEGIN
 - (instancetype)onConflictDoNothing;
 - (instancetype)onConflictColumns:(nullable NSArray<NSString *> *)columns
                 doUpdateSetFields:(NSArray<NSString *> *)fields;
+- (instancetype)onConflictColumns:(nullable NSArray<NSString *> *)columns
+             doUpdateAssignments:(NSDictionary<NSString *, id> *)assignments;
+- (instancetype)onConflictDoUpdateWhereExpression:(NSString *)expression
+                                       parameters:(nullable NSArray *)parameters;
 
 @end
 

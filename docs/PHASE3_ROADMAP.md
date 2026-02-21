@@ -5,6 +5,7 @@ Last updated: 2026-02-20
 
 Related docs:
 - `docs/PHASE2_ROADMAP.md`
+- `docs/PHASE4_ROADMAP.md`
 - `docs/FEATURE_PARITY_MATRIX.md`
 - `docs/DEPLOYMENT.md`
 
@@ -341,6 +342,13 @@ Acceptance:
 
 - LiveView-like server-driven UI.
 - Full ORM as default framework layer.
+
+## 3.11 Post-3H Rollout Hand-Off
+
+Phase 3 scope is complete through 3H. Post-3H sequencing is tracked in:
+
+- `docs/PHASE4_ROADMAP.md` (Phase 4A-4E)
+- `docs/PHASE2_PHASE3_ROADMAP.md` (cross-phase index + scope guardrails)
 
 ## 4. Principles
 

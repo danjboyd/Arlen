@@ -355,6 +355,12 @@ CI gate command:
 make ci-quality
 ```
 
+Sanitizer gate command:
+
+```bash
+make ci-sanitizers
+```
+
 ## 16. Deploy Smoke Validation
 
 ```bash
