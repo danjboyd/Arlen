@@ -1,0 +1,43 @@
+{
+  "version": "phase4e-v1",
+  "scenarios": [
+    {
+      "id": "template_select",
+      "sql": "SELECT \"d\".\"id\", COALESCE(\"d\".\"title\", $1) AS \"display_title\" FROM \"documents\" AS \"d\" WHERE (\"d\".\"state_code\" = $2) ORDER BY COALESCE(\"d\".\"updated_at\", \"d\".\"created_at\") ASC NULLS LAST",
+      "parameters": [
+        "untitled",
+        "TX"
+      ]
+    },
+    {
+      "id": "set_operation",
+      "sql": "(SELECT \"doc_id\" FROM \"active_docs\" WHERE \"state_code\" = $1) UNION ALL (SELECT \"doc_id\" FROM \"archived_docs\" WHERE \"state_code\" = $2) EXCEPT (SELECT \"doc_id\" FROM \"blocked_docs\" WHERE \"block_flag\" = $3)",
+      "parameters": [
+        "TX",
+        "TX",
+        1
+      ]
+    },
+    {
+      "id": "tuple_cursor",
+      "sql": "SELECT \"doc\".\"document_id\" FROM \"documents\" AS \"doc\" WHERE ((COALESCE(doc.manifest_order, 0), doc.document_id) > ($1, $2)) ORDER BY COALESCE(doc.manifest_order, 0) ASC NULLS LAST, \"doc\".\"document_id\" ASC",
+      "parameters": [
+        8,
+        "doc-002"
+      ]
+    },
+    {
+      "id": "postgres_upsert_expression",
+      "sql": "INSERT INTO \"queue_jobs\" (\"attempt_count\", \"id\", \"state\", \"updated_at\") VALUES ($1, $2, $3, $4) ON CONFLICT (\"id\") DO UPDATE SET \"attempt_count\" = \"queue_jobs\".\"attempt_count\" + $5, \"state\" = EXCLUDED.state, \"updated_at\" = GREATEST(\"queue_jobs\".\"updated_at\", EXCLUDED.\"updated_at\", $6::text) WHERE \"queue_jobs\".\"state\" <> $7 RETURNING \"id\"",
+      "parameters": [
+        0,
+        9,
+        "queued",
+        "2026-01-01T00:00:00Z",
+        1,
+        "2026-01-02T00:00:00Z",
+        "done"
+      ]
+    }
+  ]
+}

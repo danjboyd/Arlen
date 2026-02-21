@@ -23,7 +23,7 @@ Arlen is designed to solve the same class of problems as frameworks like Mojolic
 - Phase 4B: complete (SQL surface completion for set/window/predicate/locking/join/CTE composition).
 - Phase 4C: complete (typed schema codegen with generated table/column helper APIs and CLI workflow).
 - Phase 4D: complete (builder execution caching, prepared-statement reuse policy, and structured/redacted query diagnostics).
-- Phase 4E: planned (sequenced in `docs/PHASE4_ROADMAP.md`).
+- Phase 4E: complete (conformance matrix, property/long-run regression suite, migration/deprecation hardening, and Phase 4 quality gate wiring).
 
 ## Quick Start
 
@@ -111,6 +111,8 @@ High-value guides:
 - [Realtime and Composition](docs/REALTIME_COMPOSITION.md)
 - [Ecosystem Services](docs/ECOSYSTEM_SERVICES.md)
 - [ArlenData Reuse Guide](docs/ARLEN_DATA.md)
+- [SQL Builder Conformance Matrix](docs/SQL_BUILDER_CONFORMANCE_MATRIX.md)
+- [SQL Builder Phase 4 Migration Guide](docs/SQL_BUILDER_PHASE4_MIGRATION.md)
 - [Propane Manager](docs/PROPANE.md)
 - [Release Process](docs/RELEASE_PROCESS.md)
 - [Performance Profiles](docs/PERFORMANCE_PROFILES.md)

@@ -140,3 +140,16 @@ Runtime controls:
   - `queryDiagnosticsListener` (stage events: `compile`, `execute`, `result`, `error`)
   - `emitDiagnosticsEventsToStderr`
   - `includeSQLInDiagnosticsEvents` (default off; redaction-safe metadata remains default)
+
+## 10. Phase 4E Conformance + Migration Hardening
+
+Conformance matrix:
+
+- `docs/SQL_BUILDER_CONFORMANCE_MATRIX.md`
+- `tests/fixtures/sql_builder/phase4e_conformance_matrix.json`
+- `tests/unit/Phase4ETests.m`
+
+Migration/deprecation docs:
+
+- `docs/SQL_BUILDER_PHASE4_MIGRATION.md`
+- `docs/RELEASE_PROCESS.md` (phase-4 transitional API lifecycle)

@@ -336,7 +336,26 @@ Key runtime options:
 - `includeSQLInDiagnosticsEvents` (default `NO`, keeps metadata redaction-safe)
 - `emitDiagnosticsEventsToStderr`
 
-## 15. Deploy Smoke Validation
+## 15. Conformance + Migration Hardening (Phase 4E)
+
+Review matrix + migration references:
+
+- `docs/SQL_BUILDER_CONFORMANCE_MATRIX.md`
+- `docs/SQL_BUILDER_PHASE4_MIGRATION.md`
+
+Run regression gate:
+
+```bash
+make test-unit
+```
+
+CI gate command:
+
+```bash
+make ci-quality
+```
+
+## 16. Deploy Smoke Validation
 
 ```bash
 make deploy-smoke

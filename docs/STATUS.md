@@ -21,6 +21,7 @@ Last updated: 2026-02-20
 - Phase 4B: complete (2026-02-20)
 - Phase 4C: complete (2026-02-20)
 - Phase 4D: complete (2026-02-20)
+- Phase 4E: complete (2026-02-20)
 
 ## Completed Today (2026-02-20)
 
@@ -34,6 +35,10 @@ Last updated: 2026-02-20
   - `tools/ci/run_phase3c_quality.sh`
   - `.github/workflows/phase3c-quality.yml`
   - `make ci-quality`
+- Added Phase 4 quality gate path:
+  - `tools/ci/run_phase4_quality.sh`
+  - `.github/workflows/phase4-quality.yml`
+  - `make ci-quality` now targets Phase 4 gate coverage
 - Added OpenAPI docs style option `swagger`:
   - config acceptance for `openapi.docsUIStyle = "swagger"`
   - runtime endpoint `/openapi/swagger`
@@ -114,6 +119,12 @@ Last updated: 2026-02-20
   - added redaction-safe query metadata defaults (`sql` omitted unless explicitly enabled) and optional stderr event emission
   - added runtime cache controls (`preparedStatementCacheLimit`, `builderCompilationCacheLimit`, `resetExecutionCaches`)
   - added PostgreSQL regression coverage for cache-hit behavior and diagnostics metadata contracts
+- Completed Phase 4E conformance and migration-hardening tranche:
+  - introduced machine-readable SQL builder conformance matrix fixture and docs
+  - added deterministic property/long-run regression tests for placeholder shifting, parameter ordering, tuple predicates, and nested expression shapes
+  - published migration guide from v2 string-heavy patterns to IR/typed patterns
+  - finalized phase-4 transitional API deprecation lifecycle contracts in release docs
+  - added dedicated Phase 4 CI quality gate workflow/script and wired `make ci-quality` to the new gate
 
 ## Verification State (2026-02-20)
 
@@ -164,13 +175,18 @@ Last updated: 2026-02-20
   - structured builder diagnostics/caching regression (`testBuilderExecutionEmitsStructuredEventsAndUsesCaches`)
   - redaction + SQLSTATE diagnostics regression (`testBuilderExecutionErrorEventsIncludeSQLStateAndStayRedactedByDefault`)
   - full suite verification after toolchain link update (`make test-unit`, `make test-integration`, `make test-data-layer`)
+- New Phase 4E checks executed:
+  - conformance matrix snapshot regression (`testConformanceMatrixMatchesExpectedSnapshots`)
+  - deterministic property gates for placeholder shifting + parameter ordering (`testPropertyPlaceholderShiftingAcrossExpressionComposition`, `testPropertyDeterministicParameterOrderingForInsertAndUpdate`)
+  - tuple/nested long-run shape regression coverage (`testPropertyTuplePredicatesPreserveParameterOrder`, `testLongRunRegressionSuiteForNestedExpressionShapes`)
+  - representative migration path validation (`testMigrationGuideRepresentativeFlowCompilesAndPreservesContracts`)
 - PostgreSQL-backed tests remain gated by `ARLEN_PG_TEST_DSN`.
 
 ## Next Session Focus
 
-1. Execute Phase 4E conformance + migration hardening tranche from `docs/PHASE4_ROADMAP.md`.
-2. Add property/fuzz coverage for placeholder shifting, parameter ordering, tuple predicates, and expression nesting.
-3. Publish and validate migration guidance from v2 string-heavy builder usage to IR/typed patterns.
+1. Maintain Phase 4 conformance coverage and expand matrix scenarios as new builder capabilities ship.
+2. Add optional dialect-matrix execution validation beyond PostgreSQL where adapters become available.
+3. Evaluate Phase 5 roadmap priorities after Phase 4 completion checkpoint.
 
 ## Planned Phase Mapping (Post-4C)
 
@@ -191,13 +207,13 @@ Last updated: 2026-02-20
   - LiveView-like server-driven UI
   - full ORM as default framework layer
 - Post-4C planned:
-  - Phase 4E: conformance + migration hardening
   - official frontend toolchain integration guides/starters
 - Completed in Phase 4:
   - Phase 4A: query IR + safety foundation
   - Phase 4B: SQL surface completion
   - Phase 4C: typed ergonomics + schema codegen
   - Phase 4D: performance + diagnostics hardening
+  - Phase 4E: conformance + migration hardening
 - Out of scope for Arlen core (explicitly documented):
   - Django-style admin/backoffice product
   - full account-management product surfaces

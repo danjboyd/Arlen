@@ -159,7 +159,7 @@ deploy-smoke:
 >bash ./tools/deploy/smoke_release.sh --app-root examples/tech_demo --framework-root $(ROOT_DIR)
 
 ci-quality:
->bash ./tools/ci/run_phase3c_quality.sh
+>bash ./tools/ci/run_phase4_quality.sh
 
 check: test-unit test-integration perf
 
