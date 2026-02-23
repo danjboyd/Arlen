@@ -294,12 +294,24 @@ Dry-run pending migrations:
 /path/to/Arlen/bin/arlen migrate --dry-run
 ```
 
+Named database target (uses `db/migrations/<target>`):
+
+```bash
+/path/to/Arlen/bin/arlen migrate --env development --database analytics
+```
+
 ## 13. Generate Typed DB Helpers (Phase 4C)
 
 From app root:
 
 ```bash
 /path/to/Arlen/bin/arlen schema-codegen --env development
+```
+
+Named database target (uses target-aware defaults):
+
+```bash
+/path/to/Arlen/bin/arlen schema-codegen --env development --database analytics --force
 ```
 
 Custom output paths/prefix and overwrite mode:

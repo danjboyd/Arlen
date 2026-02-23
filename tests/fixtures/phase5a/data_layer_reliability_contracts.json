@@ -227,6 +227,63 @@
           "ALNDatabaseRouterErrorMissingAdapter"
         ]
       }
+    },
+    {
+      "id": "multi_database_migration_targeting_contract",
+      "claim": "CLI migration targeting applies deterministic ordering and idempotent state isolation per named database target.",
+      "source_docs": [
+        "docs/PHASE5_ROADMAP.md",
+        "docs/PHASE5C_MULTI_DATABASE_TOOLING.md",
+        "docs/CLI_REFERENCE.md"
+      ],
+      "verification": [
+        {
+          "kind": "integration",
+          "file": "tests/integration/PostgresIntegrationTests.m",
+          "test": "testArlenMigrateCommandSupportsNamedDatabaseTargetsAndFailureRetry"
+        }
+      ]
+    },
+    {
+      "id": "migration_failure_retry_recovery_contract",
+      "claim": "Target-scoped migration failure is explicit and retry after fixing migration content resumes from remaining pending files only.",
+      "source_docs": [
+        "docs/PHASE5_ROADMAP.md",
+        "docs/PHASE5C_MULTI_DATABASE_TOOLING.md"
+      ],
+      "verification": [
+        {
+          "kind": "integration",
+          "file": "tests/integration/PostgresIntegrationTests.m",
+          "test": "testArlenMigrateCommandSupportsNamedDatabaseTargetsAndFailureRetry"
+        }
+      ]
+    },
+    {
+      "id": "schema_codegen_target_manifest_contract",
+      "claim": "Schema codegen emits deterministic per-target artifacts and includes explicit database target metadata in manifests.",
+      "source_docs": [
+        "docs/PHASE5_ROADMAP.md",
+        "docs/PHASE5C_MULTI_DATABASE_TOOLING.md",
+        "docs/ARLEN_DATA.md"
+      ],
+      "verification": [
+        {
+          "kind": "integration",
+          "file": "tests/integration/PostgresIntegrationTests.m",
+          "test": "testArlenSchemaCodegenSupportsNamedDatabaseTargets"
+        },
+        {
+          "kind": "unit",
+          "file": "tests/unit/SchemaCodegenTests.m",
+          "test": "testRenderArtifactsIncludesDatabaseTargetMetadata"
+        },
+        {
+          "kind": "unit",
+          "file": "tests/unit/SchemaCodegenTests.m",
+          "test": "testRenderArtifactsRejectsInvalidDatabaseTarget"
+        }
+      ]
     }
   ]
 }

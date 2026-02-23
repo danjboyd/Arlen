@@ -16,8 +16,8 @@ static void PrintUsage(void) {
           "  generate <controller|endpoint|model|migration|test|plugin> <Name> [options]\n"
           "  boomhauer [server args...]\n"
           "  propane [manager args...]\n"
-          "  migrate [--env <name>] [--dsn <connection_string>] [--dry-run]\n"
-          "  schema-codegen [--env <name>] [--dsn <connection_string>] [--output-dir <path>] [--manifest <path>] [--prefix <ClassPrefix>] [--force]\n"
+          "  migrate [--env <name>] [--database <target>] [--dsn <connection_string>] [--dry-run]\n"
+          "  schema-codegen [--env <name>] [--database <target>] [--dsn <connection_string>] [--output-dir <path>] [--manifest <path>] [--prefix <ClassPrefix>] [--force]\n"
           "  routes\n"
           "  test [--unit|--integration|--all]\n"
           "  perf\n"
@@ -1566,15 +1566,86 @@ static int CommandConfig(NSArray *args) {
   return 0;
 }
 
-static NSString *DatabaseConnectionStringFromConfig(NSDictionary *config) {
-  NSDictionary *database = [config[@"database"] isKindOfClass:[NSDictionary class]] ? config[@"database"] : nil;
-  NSString *connectionString =
-      [database[@"connectionString"] isKindOfClass:[NSString class]] ? database[@"connectionString"] : nil;
-  return ([connectionString length] > 0) ? connectionString : nil;
+static NSString *NormalizeDatabaseTarget(NSString *rawValue) {
+  NSString *target =
+      [rawValue isKindOfClass:[NSString class]] ? [Trimmed(rawValue) lowercaseString] : @"";
+  return ([target length] > 0) ? target : @"default";
 }
 
-static NSUInteger DatabasePoolSizeFromConfig(NSDictionary *config) {
-  NSDictionary *database = [config[@"database"] isKindOfClass:[NSDictionary class]] ? config[@"database"] : nil;
+static BOOL DatabaseTargetIsValid(NSString *target) {
+  if (![target isKindOfClass:[NSString class]] || [target length] == 0) {
+    return NO;
+  }
+  if ([target length] > 32) {
+    return NO;
+  }
+  NSCharacterSet *allowed =
+      [NSCharacterSet characterSetWithCharactersInString:@"abcdefghijklmnopqrstuvwxyz0123456789_"];
+  if ([[target stringByTrimmingCharactersInSet:allowed] length] > 0) {
+    return NO;
+  }
+  unichar first = [target characterAtIndex:0];
+  return ([[NSCharacterSet letterCharacterSet] characterIsMember:first] || first == '_');
+}
+
+static NSDictionary *DatabaseConfigSectionForTarget(NSDictionary *config, NSString *databaseTarget) {
+  if (![config isKindOfClass:[NSDictionary class]]) {
+    return nil;
+  }
+
+  NSString *target = NormalizeDatabaseTarget(databaseTarget);
+  if ([target isEqualToString:@"default"]) {
+    return [config[@"database"] isKindOfClass:[NSDictionary class]] ? config[@"database"] : nil;
+  }
+
+  NSDictionary *databases = [config[@"databases"] isKindOfClass:[NSDictionary class]] ? config[@"databases"] : nil;
+  NSDictionary *targetConfig = [databases[target] isKindOfClass:[NSDictionary class]] ? databases[target] : nil;
+  if (targetConfig != nil) {
+    return targetConfig;
+  }
+
+  NSDictionary *databaseTargets =
+      [config[@"databaseTargets"] isKindOfClass:[NSDictionary class]] ? config[@"databaseTargets"] : nil;
+  targetConfig = [databaseTargets[target] isKindOfClass:[NSDictionary class]] ? databaseTargets[target] : nil;
+  if (targetConfig != nil) {
+    return targetConfig;
+  }
+
+  return nil;
+}
+
+static NSString *DatabaseConnectionStringFromEnvironmentForTarget(NSString *databaseTarget) {
+  NSString *target = NormalizeDatabaseTarget(databaseTarget);
+  if (![target isEqualToString:@"default"]) {
+    NSString *envName = [NSString stringWithFormat:@"ARLEN_DATABASE_URL_%@", [target uppercaseString]];
+    NSString *targeted = EnvValue([envName UTF8String]);
+    if ([targeted length] > 0) {
+      return targeted;
+    }
+  }
+  return EnvValue("ARLEN_DATABASE_URL");
+}
+
+static NSString *DatabaseConnectionStringFromConfigForTarget(NSDictionary *config, NSString *databaseTarget) {
+  NSDictionary *database = DatabaseConfigSectionForTarget(config, databaseTarget);
+  NSString *connectionString =
+      [database[@"connectionString"] isKindOfClass:[NSString class]] ? database[@"connectionString"] : nil;
+  if ([connectionString length] > 0) {
+    return connectionString;
+  }
+
+  if ([NormalizeDatabaseTarget(databaseTarget) isEqualToString:@"default"]) {
+    return nil;
+  }
+
+  NSDictionary *fallback = [config[@"database"] isKindOfClass:[NSDictionary class]] ? config[@"database"] : nil;
+  NSString *fallbackConnection =
+      [fallback[@"connectionString"] isKindOfClass:[NSString class]] ? fallback[@"connectionString"] : nil;
+  return ([fallbackConnection length] > 0) ? fallbackConnection : nil;
+}
+
+static NSUInteger DatabasePoolSizeFromConfigForTarget(NSDictionary *config, NSString *databaseTarget) {
+  NSDictionary *database = DatabaseConfigSectionForTarget(config, databaseTarget);
   id value = database[@"poolSize"];
   if ([value respondsToSelector:@selector(unsignedIntegerValue)]) {
     NSUInteger parsed = [value unsignedIntegerValue];
@@ -1582,7 +1653,36 @@ static NSUInteger DatabasePoolSizeFromConfig(NSDictionary *config) {
       return parsed;
     }
   }
+
+  if (![NormalizeDatabaseTarget(databaseTarget) isEqualToString:@"default"]) {
+    NSDictionary *fallback = [config[@"database"] isKindOfClass:[NSDictionary class]] ? config[@"database"] : nil;
+    value = fallback[@"poolSize"];
+    if ([value respondsToSelector:@selector(unsignedIntegerValue)]) {
+      NSUInteger parsed = [value unsignedIntegerValue];
+      if (parsed >= 1) {
+        return parsed;
+      }
+    }
+  }
   return 4;
+}
+
+static NSString *DatabaseTargetPascalSuffix(NSString *databaseTarget) {
+  NSArray<NSString *> *parts = [NormalizeDatabaseTarget(databaseTarget) componentsSeparatedByString:@"_"];
+  NSMutableString *suffix = [NSMutableString string];
+  for (NSString *part in parts) {
+    if ([part length] == 0) {
+      continue;
+    }
+    NSString *lower = [part lowercaseString];
+    NSString *first = [[lower substringToIndex:1] uppercaseString];
+    NSString *rest = ([lower length] > 1) ? [lower substringFromIndex:1] : @"";
+    [suffix appendFormat:@"%@%@", first, rest];
+  }
+  if ([suffix length] == 0) {
+    return @"Default";
+  }
+  return [NSString stringWithString:suffix];
 }
 
 static NSString *ResolvePathFromRoot(NSString *root, NSString *rawPath) {
@@ -1599,10 +1699,14 @@ static NSString *ResolvePathFromRoot(NSString *root, NSString *rawPath) {
 
 static int CommandSchemaCodegen(NSArray *args) {
   NSString *environment = @"development";
+  NSString *databaseTarget = @"default";
   NSString *dsnOverride = nil;
   NSString *outputDirArg = @"src/Generated";
   NSString *manifestArg = @"db/schema/arlen_schema.json";
   NSString *classPrefix = @"ALNDB";
+  BOOL outputDirExplicit = NO;
+  BOOL manifestExplicit = NO;
+  BOOL classPrefixExplicit = NO;
   BOOL force = NO;
 
   for (NSUInteger idx = 0; idx < [args count]; idx++) {
@@ -1619,34 +1723,60 @@ static int CommandSchemaCodegen(NSArray *args) {
         return 2;
       }
       dsnOverride = args[++idx];
+    } else if ([arg isEqualToString:@"--database"]) {
+      if (idx + 1 >= [args count]) {
+        fprintf(stderr, "arlen schema-codegen: --database requires a value\n");
+        return 2;
+      }
+      databaseTarget = NormalizeDatabaseTarget(args[++idx]);
+      if (!DatabaseTargetIsValid(databaseTarget)) {
+        fprintf(stderr,
+                "arlen schema-codegen: --database must match [a-z][a-z0-9_]* and be <= 32 characters\n");
+        return 2;
+      }
     } else if ([arg isEqualToString:@"--output-dir"]) {
       if (idx + 1 >= [args count]) {
         fprintf(stderr, "arlen schema-codegen: --output-dir requires a value\n");
         return 2;
       }
       outputDirArg = args[++idx];
+      outputDirExplicit = YES;
     } else if ([arg isEqualToString:@"--manifest"]) {
       if (idx + 1 >= [args count]) {
         fprintf(stderr, "arlen schema-codegen: --manifest requires a value\n");
         return 2;
       }
       manifestArg = args[++idx];
+      manifestExplicit = YES;
     } else if ([arg isEqualToString:@"--prefix"]) {
       if (idx + 1 >= [args count]) {
         fprintf(stderr, "arlen schema-codegen: --prefix requires a value\n");
         return 2;
       }
       classPrefix = args[++idx];
+      classPrefixExplicit = YES;
     } else if ([arg isEqualToString:@"--force"]) {
       force = YES;
     } else if ([arg isEqualToString:@"--help"] || [arg isEqualToString:@"-h"]) {
       fprintf(stdout,
-              "Usage: arlen schema-codegen [--env <name>] [--dsn <connection_string>] "
+              "Usage: arlen schema-codegen [--env <name>] [--database <target>] [--dsn <connection_string>] "
               "[--output-dir <path>] [--manifest <path>] [--prefix <ClassPrefix>] [--force]\n");
       return 0;
     } else {
       fprintf(stderr, "arlen schema-codegen: unknown option %s\n", [arg UTF8String]);
       return 2;
+    }
+  }
+
+  if (![databaseTarget isEqualToString:@"default"]) {
+    if (!outputDirExplicit) {
+      outputDirArg = [NSString stringWithFormat:@"src/Generated/%@", databaseTarget];
+    }
+    if (!manifestExplicit) {
+      manifestArg = [NSString stringWithFormat:@"db/schema/arlen_schema_%@.json", databaseTarget];
+    }
+    if (!classPrefixExplicit) {
+      classPrefix = [NSString stringWithFormat:@"ALNDB%@", DatabaseTargetPascalSuffix(databaseTarget)];
     }
   }
 
@@ -1658,18 +1788,21 @@ static int CommandSchemaCodegen(NSArray *args) {
     return 1;
   }
 
-  NSString *dsn = dsnOverride ?: EnvValue("ARLEN_DATABASE_URL");
+  NSString *dsn = dsnOverride;
   if ([dsn length] == 0) {
-    dsn = DatabaseConnectionStringFromConfig(config);
+    dsn = DatabaseConnectionStringFromEnvironmentForTarget(databaseTarget);
+  }
+  if ([dsn length] == 0) {
+    dsn = DatabaseConnectionStringFromConfigForTarget(config, databaseTarget);
   }
   if ([dsn length] == 0) {
     fprintf(stderr,
             "arlen schema-codegen: no database connection string configured (set --dsn or "
-            "ARLEN_DATABASE_URL or config.database.connectionString)\n");
+            "ARLEN_DATABASE_URL[_TARGET] or config.database/config.databases connectionString)\n");
     return 1;
   }
 
-  NSUInteger poolSize = DatabasePoolSizeFromConfig(config);
+  NSUInteger poolSize = DatabasePoolSizeFromConfigForTarget(config, databaseTarget);
   ALNPg *database = [[ALNPg alloc] initWithConnectionString:dsn maxConnections:poolSize error:&error];
   if (database == nil) {
     fprintf(stderr, "arlen schema-codegen: failed to initialize database adapter: %s\n",
@@ -1695,6 +1828,7 @@ static int CommandSchemaCodegen(NSArray *args) {
 
   NSDictionary *artifacts = [ALNSchemaCodegen renderArtifactsFromColumns:rows
                                                               classPrefix:classPrefix
+                                                           databaseTarget:databaseTarget
                                                                     error:&error];
   if (artifacts == nil) {
     fprintf(stderr, "arlen schema-codegen: %s\n", [[error localizedDescription] UTF8String]);
@@ -1733,6 +1867,7 @@ static int CommandSchemaCodegen(NSArray *args) {
                               ? [artifacts[@"columnCount"] integerValue]
                               : 0;
   fprintf(stdout, "Generated typed schema artifacts.\n");
+  fprintf(stdout, "  database target: %s\n", [databaseTarget UTF8String]);
   fprintf(stdout, "  tables: %ld\n", (long)tableCount);
   fprintf(stdout, "  columns: %ld\n", (long)columnCount);
   fprintf(stdout, "  header: %s\n", [headerPath UTF8String]);
@@ -1743,6 +1878,7 @@ static int CommandSchemaCodegen(NSArray *args) {
 
 static int CommandMigrate(NSArray *args) {
   NSString *environment = @"development";
+  NSString *databaseTarget = @"default";
   NSString *dsnOverride = nil;
   BOOL dryRun = NO;
 
@@ -1760,11 +1896,22 @@ static int CommandMigrate(NSArray *args) {
         return 2;
       }
       dsnOverride = args[++idx];
+    } else if ([arg isEqualToString:@"--database"]) {
+      if (idx + 1 >= [args count]) {
+        fprintf(stderr, "arlen migrate: --database requires a value\n");
+        return 2;
+      }
+      databaseTarget = NormalizeDatabaseTarget(args[++idx]);
+      if (!DatabaseTargetIsValid(databaseTarget)) {
+        fprintf(stderr,
+                "arlen migrate: --database must match [a-z][a-z0-9_]* and be <= 32 characters\n");
+        return 2;
+      }
     } else if ([arg isEqualToString:@"--dry-run"]) {
       dryRun = YES;
     } else if ([arg isEqualToString:@"--help"] || [arg isEqualToString:@"-h"]) {
       fprintf(stdout,
-              "Usage: arlen migrate [--env <name>] [--dsn <connection_string>] [--dry-run]\n");
+              "Usage: arlen migrate [--env <name>] [--database <target>] [--dsn <connection_string>] [--dry-run]\n");
       return 0;
     } else {
       fprintf(stderr, "arlen migrate: unknown option %s\n", [arg UTF8String]);
@@ -1780,18 +1927,21 @@ static int CommandMigrate(NSArray *args) {
     return 1;
   }
 
-  NSString *dsn = dsnOverride ?: EnvValue("ARLEN_DATABASE_URL");
+  NSString *dsn = dsnOverride;
   if ([dsn length] == 0) {
-    dsn = DatabaseConnectionStringFromConfig(config);
+    dsn = DatabaseConnectionStringFromEnvironmentForTarget(databaseTarget);
+  }
+  if ([dsn length] == 0) {
+    dsn = DatabaseConnectionStringFromConfigForTarget(config, databaseTarget);
   }
   if ([dsn length] == 0) {
     fprintf(stderr,
             "arlen migrate: no database connection string configured (set --dsn or "
-            "ARLEN_DATABASE_URL or config.database.connectionString)\n");
+            "ARLEN_DATABASE_URL[_TARGET] or config.database/config.databases connectionString)\n");
     return 1;
   }
 
-  NSUInteger poolSize = DatabasePoolSizeFromConfig(config);
+  NSUInteger poolSize = DatabasePoolSizeFromConfigForTarget(config, databaseTarget);
   ALNPg *database = [[ALNPg alloc] initWithConnectionString:dsn maxConnections:poolSize error:&error];
   if (database == nil) {
     fprintf(stderr, "arlen migrate: failed to initialize database adapter: %s\n",
@@ -1800,9 +1950,13 @@ static int CommandMigrate(NSArray *args) {
   }
 
   NSString *migrationsPath = [appRoot stringByAppendingPathComponent:@"db/migrations"];
+  if (![databaseTarget isEqualToString:@"default"]) {
+    migrationsPath = [migrationsPath stringByAppendingPathComponent:databaseTarget];
+  }
   NSArray *files = nil;
   BOOL ok = [ALNMigrationRunner applyMigrationsAtPath:migrationsPath
                                              database:database
+                                       databaseTarget:databaseTarget
                                                dryRun:dryRun
                                          appliedFiles:&files
                                                 error:&error];
@@ -1812,6 +1966,7 @@ static int CommandMigrate(NSArray *args) {
   }
 
   if (dryRun) {
+    fprintf(stdout, "Database target: %s\n", [databaseTarget UTF8String]);
     fprintf(stdout, "Pending migrations: %lu\n", (unsigned long)[files count]);
     for (NSString *file in files) {
       fprintf(stdout, "  %s\n", [[file lastPathComponent] UTF8String]);
@@ -1819,6 +1974,7 @@ static int CommandMigrate(NSArray *args) {
     return 0;
   }
 
+  fprintf(stdout, "Database target: %s\n", [databaseTarget UTF8String]);
   fprintf(stdout, "Applied migrations: %lu\n", (unsigned long)[files count]);
   for (NSString *file in files) {
     fprintf(stdout, "  %s\n", [[file lastPathComponent] UTF8String]);

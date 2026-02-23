@@ -3,6 +3,7 @@
 #import "ALNPg.h"
 
 NSString *const ALNMigrationRunnerErrorDomain = @"Arlen.Data.MigrationRunner.Error";
+NSString *const ALNMigrationRunnerDefaultDatabaseTarget = @"default";
 
 static NSError *ALNMigrationError(NSString *message, NSString *detail) {
   NSMutableDictionary *userInfo = [NSMutableDictionary dictionary];
@@ -14,6 +15,50 @@ static NSError *ALNMigrationError(NSString *message, NSString *detail) {
 }
 
 @implementation ALNMigrationRunner
+
++ (NSString *)normalizedDatabaseTarget:(NSString *)databaseTarget {
+  NSString *normalized =
+      [databaseTarget isKindOfClass:[NSString class]]
+          ? [[databaseTarget stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]]
+                lowercaseString]
+          : @"";
+  if ([normalized length] == 0) {
+    return ALNMigrationRunnerDefaultDatabaseTarget;
+  }
+  return normalized;
+}
+
++ (BOOL)isSafeDatabaseTarget:(NSString *)databaseTarget {
+  if (![databaseTarget isKindOfClass:[NSString class]] || [databaseTarget length] == 0) {
+    return NO;
+  }
+  if ([databaseTarget length] > 32) {
+    return NO;
+  }
+  NSCharacterSet *allowed =
+      [NSCharacterSet characterSetWithCharactersInString:@"abcdefghijklmnopqrstuvwxyz0123456789_"];
+  if ([[databaseTarget stringByTrimmingCharactersInSet:allowed] length] > 0) {
+    return NO;
+  }
+  unichar first = [databaseTarget characterAtIndex:0];
+  return ([[NSCharacterSet letterCharacterSet] characterIsMember:first] || first == '_');
+}
+
++ (nullable NSString *)migrationsTableNameForDatabaseTarget:(NSString *)databaseTarget
+                                                     error:(NSError **)error {
+  NSString *normalized = [self normalizedDatabaseTarget:databaseTarget];
+  if (![self isSafeDatabaseTarget:normalized]) {
+    if (error != NULL) {
+      *error = ALNMigrationError(
+          @"database target must match [a-z][a-z0-9_]* and be <= 32 characters", normalized);
+    }
+    return nil;
+  }
+  if ([normalized isEqualToString:ALNMigrationRunnerDefaultDatabaseTarget]) {
+    return @"arlen_schema_migrations";
+  }
+  return [NSString stringWithFormat:@"arlen_schema_migrations__%@", normalized];
+}
 
 + (NSArray<NSString *> *)migrationFilesAtPath:(NSString *)migrationsPath
                                         error:(NSError **)error {
@@ -68,21 +113,23 @@ static NSError *ALNMigrationError(NSString *message, NSString *detail) {
   return [name copy] ?: @"";
 }
 
-+ (BOOL)ensureMigrationsTableWithDatabase:(ALNPg *)database error:(NSError **)error {
-  NSInteger affected =
-      [database executeCommand:@"CREATE TABLE IF NOT EXISTS arlen_schema_migrations ("
-                                "version TEXT PRIMARY KEY,"
-                                "applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW()"
-                                ")"
-                     parameters:@[]
-                          error:error];
++ (BOOL)ensureMigrationsTableWithDatabase:(ALNPg *)database
+                                tableName:(NSString *)tableName
+                                    error:(NSError **)error {
+  NSString *sql = [NSString stringWithFormat:@"CREATE TABLE IF NOT EXISTS %@ ("
+                                              "version TEXT PRIMARY KEY,"
+                                              "applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW()"
+                                              ")",
+                                             tableName];
+  NSInteger affected = [database executeCommand:sql parameters:@[] error:error];
   return (affected >= 0);
 }
 
-+ (nullable NSSet *)appliedVersionSetWithDatabase:(ALNPg *)database error:(NSError **)error {
-  NSArray *rows = [database executeQuery:@"SELECT version FROM arlen_schema_migrations"
-                               parameters:@[]
-                                    error:error];
++ (nullable NSSet *)appliedVersionSetWithDatabase:(ALNPg *)database
+                                         tableName:(NSString *)tableName
+                                             error:(NSError **)error {
+  NSString *sql = [NSString stringWithFormat:@"SELECT version FROM %@ ORDER BY version", tableName];
+  NSArray *rows = [database executeQuery:sql parameters:@[] error:error];
   if (rows == nil) {
     return nil;
   }
@@ -99,17 +146,23 @@ static NSError *ALNMigrationError(NSString *message, NSString *detail) {
 
 + (NSArray<NSString *> *)pendingMigrationFilesAtPath:(NSString *)migrationsPath
                                              database:(ALNPg *)database
+                                       databaseTarget:(NSString *)databaseTarget
                                                 error:(NSError **)error {
   NSArray *allMigrations = [self migrationFilesAtPath:migrationsPath error:error];
   if (allMigrations == nil) {
     return nil;
   }
 
-  if (![self ensureMigrationsTableWithDatabase:database error:error]) {
+  NSString *tableName = [self migrationsTableNameForDatabaseTarget:databaseTarget error:error];
+  if ([tableName length] == 0) {
     return nil;
   }
 
-  NSSet *applied = [self appliedVersionSetWithDatabase:database error:error];
+  if (![self ensureMigrationsTableWithDatabase:database tableName:tableName error:error]) {
+    return nil;
+  }
+
+  NSSet *applied = [self appliedVersionSetWithDatabase:database tableName:tableName error:error];
   if (applied == nil) {
     return nil;
   }
@@ -126,11 +179,20 @@ static NSError *ALNMigrationError(NSString *message, NSString *detail) {
 
 + (BOOL)applyMigrationsAtPath:(NSString *)migrationsPath
                      database:(ALNPg *)database
+               databaseTarget:(NSString *)databaseTarget
                        dryRun:(BOOL)dryRun
                  appliedFiles:(NSArray<NSString *> **)appliedFiles
                         error:(NSError **)error {
-  NSArray *pending = [self pendingMigrationFilesAtPath:migrationsPath database:database error:error];
+  NSArray *pending = [self pendingMigrationFilesAtPath:migrationsPath
+                                              database:database
+                                        databaseTarget:databaseTarget
+                                                 error:error];
   if (pending == nil) {
+    return NO;
+  }
+
+  NSString *tableName = [self migrationsTableNameForDatabaseTarget:databaseTarget error:error];
+  if ([tableName length] == 0) {
     return NO;
   }
 
@@ -156,13 +218,14 @@ static NSError *ALNMigrationError(NSString *message, NSString *detail) {
 
     NSString *version = [self versionForMigrationFile:migrationPath];
     __block NSError *transactionError = nil;
+    NSString *insertSQL = [NSString stringWithFormat:@"INSERT INTO %@ (version) VALUES ($1)", tableName];
     BOOL appliedOK = [database withTransaction:^BOOL(ALNPgConnection *connection, NSError **blockError) {
       NSInteger affected = [connection executeCommand:sql parameters:@[] error:blockError];
       if (affected < 0) {
         return NO;
       }
 
-      NSInteger inserted = [connection executeCommand:@"INSERT INTO arlen_schema_migrations (version) VALUES ($1)"
+      NSInteger inserted = [connection executeCommand:insertSQL
                                            parameters:@[ version ]
                                                 error:blockError];
       if (inserted < 0) {
@@ -184,6 +247,28 @@ static NSError *ALNMigrationError(NSString *message, NSString *detail) {
     *appliedFiles = applied;
   }
   return YES;
+}
+
++ (nullable NSArray<NSString *> *)pendingMigrationFilesAtPath:(NSString *)migrationsPath
+                                                      database:(ALNPg *)database
+                                                         error:(NSError **)error {
+  return [self pendingMigrationFilesAtPath:migrationsPath
+                                  database:database
+                            databaseTarget:ALNMigrationRunnerDefaultDatabaseTarget
+                                     error:error];
+}
+
++ (BOOL)applyMigrationsAtPath:(NSString *)migrationsPath
+                     database:(ALNPg *)database
+                       dryRun:(BOOL)dryRun
+                 appliedFiles:(NSArray<NSString *> **)appliedFiles
+                        error:(NSError **)error {
+  return [self applyMigrationsAtPath:migrationsPath
+                            database:database
+                      databaseTarget:ALNMigrationRunnerDefaultDatabaseTarget
+                              dryRun:dryRun
+                        appliedFiles:appliedFiles
+                               error:error];
 }
 
 @end

@@ -1,6 +1,6 @@
 # Arlen Phase 5 Roadmap
 
-Status: Proposed  
+Status: Phase 5A-5C initial implementation complete  
 Last updated: 2026-02-23
 
 Related docs:
@@ -108,6 +108,8 @@ Implementation notes:
 
 ## 3.3 Phase 5C: Multi-Database Tooling + Migration Targeting
 
+Status: Initial implementation complete (2026-02-23)
+
 Deliverables:
 
 - Extend CLI commands with explicit database target selection:
@@ -122,6 +124,26 @@ Acceptance (required):
 - End-to-end tests prove migration ordering/idempotency for at least two named database targets.
 - Codegen outputs remain deterministic and diff-friendly per target.
 - Failure/retry behavior is covered by regression tests.
+
+Implementation notes:
+
+- Extended CLI target selection for migration and schema codegen:
+  - `tools/arlen.m` (`migrate --database <target>`, `schema-codegen --database <target>`)
+- Added deterministic per-target migration state isolation:
+  - `src/Arlen/Data/ALNMigrationRunner.h`
+  - `src/Arlen/Data/ALNMigrationRunner.m`
+- Added schema-codegen manifest target metadata support:
+  - `src/Arlen/Data/ALNSchemaCodegen.h`
+  - `src/Arlen/Data/ALNSchemaCodegen.m`
+- Added 5C integration + unit coverage:
+  - `tests/integration/PostgresIntegrationTests.m`
+    - `testArlenMigrateCommandSupportsNamedDatabaseTargetsAndFailureRetry`
+    - `testArlenSchemaCodegenSupportsNamedDatabaseTargets`
+  - `tests/unit/SchemaCodegenTests.m`
+- Added Phase 5C docs and contract mappings:
+  - `docs/PHASE5C_MULTI_DATABASE_TOOLING.md`
+  - updated `tests/fixtures/phase5a/data_layer_reliability_contracts.json`
+  - updated `tests/fixtures/phase5a/external_regression_intake.json`
 
 ## 3.4 Phase 5D: Compile-Time Typed Data Contracts (SQL-First)
 

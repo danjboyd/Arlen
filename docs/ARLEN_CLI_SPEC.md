@@ -1,7 +1,7 @@
 # Arlen CLI Specification
 
-Status: Implemented through Phase 4C  
-Last updated: 2026-02-20
+Status: Implemented through Phase 5C  
+Last updated: 2026-02-23
 
 ## 1. Purpose
 
@@ -90,10 +90,11 @@ Behavior:
 - runs framework `bin/propane`
 - all production manager settings are referred to as "propane accessories"
 
-### 4.5 `arlen migrate [--env <name>] [--dsn <connection_string>] [--dry-run]`
+### 4.5 `arlen migrate [--env <name>] [--database <target>] [--dsn <connection_string>] [--dry-run]`
 
-- applies SQL migrations from `db/migrations`
-- resolves DSN from `--dsn`, `ARLEN_DATABASE_URL`, or config `database.connectionString`
+- applies SQL migrations from `db/migrations` (`db/migrations/<target>` for non-default targets)
+- resolves DSN from `--dsn`, `ARLEN_DATABASE_URL_<TARGET>`, `ARLEN_DATABASE_URL`, or config `database/databases`
+- migration state table is target-aware (`arlen_schema_migrations` or `arlen_schema_migrations__<target>`)
 
 ### 4.6 `arlen routes`
 
@@ -126,11 +127,16 @@ Behavior:
 - runs bootstrap diagnostics before any framework build requirement
 - supports machine-readable output for onboarding and CI gating
 
-### 4.13 `arlen schema-codegen [--env <name>] [--dsn <connection_string>] [--output-dir <path>] [--manifest <path>] [--prefix <ClassPrefix>] [--force]`
+### 4.13 `arlen schema-codegen [--env <name>] [--database <target>] [--dsn <connection_string>] [--output-dir <path>] [--manifest <path>] [--prefix <ClassPrefix>] [--force]`
 
 - introspects PostgreSQL `information_schema` for non-system schemas
 - emits deterministic typed helper artifacts (`<prefix>Schema.h/.m`) and JSON manifest
 - supports overwrite via `--force` for regeneration workflows
+- non-default targets use deterministic defaults when not overridden:
+  - output dir: `src/Generated/<target>`
+  - manifest: `db/schema/arlen_schema_<target>.json`
+  - prefix: `ALNDB<PascalTarget>`
+  - manifest metadata includes `"database_target"`
 
 ## 5. Project Awareness
 

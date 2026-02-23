@@ -371,6 +371,363 @@
                      exitCode:NULL];
 }
 
+- (void)testArlenMigrateCommandSupportsNamedDatabaseTargetsAndFailureRetry {
+  NSString *dsn = [self pgTestDSN];
+  if ([dsn length] == 0) {
+    return;
+  }
+
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *appRoot = [self createTempDirectory];
+  XCTAssertNotNil(appRoot);
+  if (appRoot == nil) {
+    return;
+  }
+
+  NSString *primaryTable =
+      [[NSString stringWithFormat:@"arlen_primary_%@", [[NSUUID UUID] UUIDString]] lowercaseString];
+  primaryTable = [primaryTable stringByReplacingOccurrencesOfString:@"-" withString:@""];
+  NSString *analyticsTable =
+      [[NSString stringWithFormat:@"arlen_analytics_%@", [[NSUUID UUID] UUIDString]] lowercaseString];
+  analyticsTable = [analyticsTable stringByReplacingOccurrencesOfString:@"-" withString:@""];
+
+  NSError *error = nil;
+  XCTAssertTrue([[NSFileManager defaultManager]
+                    createDirectoryAtPath:[appRoot stringByAppendingPathComponent:@"config/environments"]
+              withIntermediateDirectories:YES
+                               attributes:nil
+                                    error:&error]);
+  XCTAssertNil(error);
+  XCTAssertTrue([[NSFileManager defaultManager]
+                    createDirectoryAtPath:[appRoot stringByAppendingPathComponent:@"db/migrations/primary"]
+              withIntermediateDirectories:YES
+                               attributes:nil
+                                    error:&error]);
+  XCTAssertNil(error);
+  XCTAssertTrue([[NSFileManager defaultManager]
+                    createDirectoryAtPath:[appRoot stringByAppendingPathComponent:@"db/migrations/analytics"]
+              withIntermediateDirectories:YES
+                               attributes:nil
+                                    error:&error]);
+  XCTAssertNil(error);
+
+  NSString *escapedDSN = [dsn stringByReplacingOccurrencesOfString:@"\"" withString:@"\\\""];
+  NSString *config =
+      [NSString stringWithFormat:@"{\n"
+                                 "  host = \"127.0.0.1\";\n"
+                                 "  port = 3000;\n"
+                                 "  database = {\n"
+                                 "    connectionString = \"%@\";\n"
+                                 "    poolSize = 2;\n"
+                                 "  };\n"
+                                 "  databases = {\n"
+                                 "    primary = {\n"
+                                 "      connectionString = \"%@\";\n"
+                                 "      poolSize = 2;\n"
+                                 "    };\n"
+                                 "    analytics = {\n"
+                                 "      connectionString = \"%@\";\n"
+                                 "      poolSize = 2;\n"
+                                 "    };\n"
+                                 "  };\n"
+                                 "}\n",
+                                 escapedDSN, escapedDSN, escapedDSN];
+  XCTAssertTrue([config writeToFile:[appRoot stringByAppendingPathComponent:@"config/app.plist"]
+                         atomically:YES
+                           encoding:NSUTF8StringEncoding
+                              error:&error]);
+  XCTAssertNil(error);
+  XCTAssertTrue([@"{}\n" writeToFile:[appRoot stringByAppendingPathComponent:@"config/environments/development.plist"]
+                          atomically:YES
+                            encoding:NSUTF8StringEncoding
+                               error:&error]);
+  XCTAssertNil(error);
+
+  NSString *primaryMigration1 =
+      [appRoot stringByAppendingPathComponent:@"db/migrations/primary/2026022301_create_primary_table.sql"];
+  NSString *primarySQL1 =
+      [NSString stringWithFormat:@"CREATE TABLE %@(id SERIAL PRIMARY KEY, value TEXT NOT NULL);\n"
+                                 "INSERT INTO %@ (value) VALUES ('seed-1');\n",
+                                 primaryTable, primaryTable];
+  XCTAssertTrue([primarySQL1 writeToFile:primaryMigration1
+                              atomically:YES
+                                encoding:NSUTF8StringEncoding
+                                   error:&error]);
+  XCTAssertNil(error);
+
+  NSString *primaryMigration2 =
+      [appRoot stringByAppendingPathComponent:@"db/migrations/primary/2026022302_insert_primary_row.sql"];
+  NSString *primarySQL2 =
+      [NSString stringWithFormat:@"INSERT INTO %@ (value) VALUES ('seed-2');\n", primaryTable];
+  XCTAssertTrue([primarySQL2 writeToFile:primaryMigration2
+                              atomically:YES
+                                encoding:NSUTF8StringEncoding
+                                   error:&error]);
+  XCTAssertNil(error);
+
+  NSString *analyticsMigration1 =
+      [appRoot stringByAppendingPathComponent:@"db/migrations/analytics/2026022301_create_analytics_table.sql"];
+  NSString *analyticsSQL1 =
+      [NSString stringWithFormat:@"CREATE TABLE %@(id SERIAL PRIMARY KEY, event_name TEXT NOT NULL);\n"
+                                 "INSERT INTO %@ (event_name) VALUES ('opened');\n",
+                                 analyticsTable, analyticsTable];
+  XCTAssertTrue([analyticsSQL1 writeToFile:analyticsMigration1
+                                atomically:YES
+                                  encoding:NSUTF8StringEncoding
+                                     error:&error]);
+  XCTAssertNil(error);
+
+  NSString *analyticsMigration2 =
+      [appRoot stringByAppendingPathComponent:@"db/migrations/analytics/2026022302_bad_analytics_row.sql"];
+  NSString *badAnalyticsSQL = [NSString stringWithFormat:@"INSER INTO %@ (event_name) VALUES ('broken');\n",
+                                                         analyticsTable];
+  XCTAssertTrue([badAnalyticsSQL writeToFile:analyticsMigration2
+                                  atomically:YES
+                                    encoding:NSUTF8StringEncoding
+                                       error:&error]);
+  XCTAssertNil(error);
+
+  int code = 0;
+  NSString *buildOutput =
+      [self runShellCapture:[NSString stringWithFormat:@"cd %@ && make arlen", repoRoot]
+                   exitCode:&code];
+  XCTAssertEqual(0, code, @"%@", buildOutput);
+
+  NSString *primaryCommand = [NSString stringWithFormat:
+      @"cd %@ && ARLEN_FRAMEWORK_ROOT=%@ %@/build/arlen migrate --env development --database primary",
+      appRoot, repoRoot, repoRoot];
+  NSString *primaryFirst = [self runShellCapture:primaryCommand exitCode:&code];
+  XCTAssertEqual(0, code, @"%@", primaryFirst);
+  XCTAssertTrue([primaryFirst containsString:@"Database target: primary"], @"%@", primaryFirst);
+  XCTAssertTrue([primaryFirst containsString:@"Applied migrations: 2"], @"%@", primaryFirst);
+
+  NSString *primarySecond = [self runShellCapture:primaryCommand exitCode:&code];
+  XCTAssertEqual(0, code, @"%@", primarySecond);
+  XCTAssertTrue([primarySecond containsString:@"Applied migrations: 0"], @"%@", primarySecond);
+
+  NSString *analyticsCommand = [NSString stringWithFormat:
+      @"cd %@ && ARLEN_FRAMEWORK_ROOT=%@ %@/build/arlen migrate --env development --database analytics",
+      appRoot, repoRoot, repoRoot];
+  NSString *analyticsFirst = [self runShellCapture:analyticsCommand exitCode:&code];
+  XCTAssertNotEqual(0, code, @"%@", analyticsFirst);
+  XCTAssertTrue([analyticsFirst containsString:@"arlen migrate:"], @"%@", analyticsFirst);
+
+  NSString *primaryCountOutput =
+      [self runShellCapture:[NSString stringWithFormat:@"psql %s -Atc \"SELECT COUNT(*) FROM %@\"",
+                                                       [dsn UTF8String], primaryTable]
+                   exitCode:&code];
+  XCTAssertEqual(0, code, @"%@", primaryCountOutput);
+  NSString *primaryCount =
+      [primaryCountOutput stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+  XCTAssertEqualObjects(@"2", primaryCount);
+
+  NSString *analyticsCountOutput =
+      [self runShellCapture:[NSString stringWithFormat:@"psql %s -Atc \"SELECT COUNT(*) FROM %@\"",
+                                                       [dsn UTF8String], analyticsTable]
+                   exitCode:&code];
+  XCTAssertEqual(0, code, @"%@", analyticsCountOutput);
+  NSString *analyticsCount =
+      [analyticsCountOutput stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+  XCTAssertEqualObjects(@"1", analyticsCount);
+
+  NSString *goodAnalyticsSQL =
+      [NSString stringWithFormat:@"INSERT INTO %@ (event_name) VALUES ('recovered');\n", analyticsTable];
+  XCTAssertTrue([goodAnalyticsSQL writeToFile:analyticsMigration2
+                                   atomically:YES
+                                     encoding:NSUTF8StringEncoding
+                                        error:&error]);
+  XCTAssertNil(error);
+
+  NSString *analyticsSecond = [self runShellCapture:analyticsCommand exitCode:&code];
+  XCTAssertEqual(0, code, @"%@", analyticsSecond);
+  XCTAssertTrue([analyticsSecond containsString:@"Applied migrations: 1"], @"%@", analyticsSecond);
+
+  NSString *analyticsThird = [self runShellCapture:analyticsCommand exitCode:&code];
+  XCTAssertEqual(0, code, @"%@", analyticsThird);
+  XCTAssertTrue([analyticsThird containsString:@"Applied migrations: 0"], @"%@", analyticsThird);
+
+  NSString *dryRunPrimary = [self runShellCapture:[primaryCommand stringByAppendingString:@" --dry-run"]
+                                         exitCode:&code];
+  XCTAssertEqual(0, code, @"%@", dryRunPrimary);
+  XCTAssertTrue([dryRunPrimary containsString:@"Pending migrations: 0"], @"%@", dryRunPrimary);
+  NSString *dryRunAnalytics = [self runShellCapture:[analyticsCommand stringByAppendingString:@" --dry-run"]
+                                           exitCode:&code];
+  XCTAssertEqual(0, code, @"%@", dryRunAnalytics);
+  XCTAssertTrue([dryRunAnalytics containsString:@"Pending migrations: 0"], @"%@", dryRunAnalytics);
+
+  NSString *primaryTrackingOutput =
+      [self runShellCapture:[NSString stringWithFormat:@"psql %s -Atc \"SELECT COUNT(*) FROM arlen_schema_migrations__primary\"",
+                                                       [dsn UTF8String]]
+                   exitCode:&code];
+  XCTAssertEqual(0, code, @"%@", primaryTrackingOutput);
+  NSString *primaryTracking =
+      [primaryTrackingOutput stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+  XCTAssertEqualObjects(@"2", primaryTracking);
+
+  NSString *analyticsTrackingOutput =
+      [self runShellCapture:[NSString stringWithFormat:@"psql %s -Atc \"SELECT COUNT(*) FROM arlen_schema_migrations__analytics\"",
+                                                       [dsn UTF8String]]
+                   exitCode:&code];
+  XCTAssertEqual(0, code, @"%@", analyticsTrackingOutput);
+  NSString *analyticsTracking =
+      [analyticsTrackingOutput stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+  XCTAssertEqualObjects(@"2", analyticsTracking);
+
+  (void)[self runShellCapture:[NSString stringWithFormat:@"psql %s -c \"DROP TABLE IF EXISTS %@\" >/dev/null 2>&1",
+                                                         [dsn UTF8String], primaryTable]
+                     exitCode:NULL];
+  (void)[self runShellCapture:[NSString stringWithFormat:@"psql %s -c \"DROP TABLE IF EXISTS %@\" >/dev/null 2>&1",
+                                                         [dsn UTF8String], analyticsTable]
+                     exitCode:NULL];
+  (void)[self runShellCapture:[NSString stringWithFormat:@"psql %s -c \"DROP TABLE IF EXISTS arlen_schema_migrations__primary\" >/dev/null 2>&1",
+                                                         [dsn UTF8String]]
+                     exitCode:NULL];
+  (void)[self runShellCapture:[NSString stringWithFormat:@"psql %s -c \"DROP TABLE IF EXISTS arlen_schema_migrations__analytics\" >/dev/null 2>&1",
+                                                         [dsn UTF8String]]
+                     exitCode:NULL];
+}
+
+- (void)testArlenSchemaCodegenSupportsNamedDatabaseTargets {
+  NSString *dsn = [self pgTestDSN];
+  if ([dsn length] == 0) {
+    return;
+  }
+
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *appRoot = [self createTempDirectory];
+  XCTAssertNotNil(appRoot);
+  if (appRoot == nil) {
+    return;
+  }
+
+  NSString *primaryTable =
+      [[NSString stringWithFormat:@"arlen_codegen_primary_%@", [[NSUUID UUID] UUIDString]] lowercaseString];
+  primaryTable = [primaryTable stringByReplacingOccurrencesOfString:@"-" withString:@""];
+  NSString *analyticsTable =
+      [[NSString stringWithFormat:@"arlen_codegen_analytics_%@", [[NSUUID UUID] UUIDString]] lowercaseString];
+  analyticsTable = [analyticsTable stringByReplacingOccurrencesOfString:@"-" withString:@""];
+
+  NSError *error = nil;
+  XCTAssertTrue([[NSFileManager defaultManager]
+                    createDirectoryAtPath:[appRoot stringByAppendingPathComponent:@"config/environments"]
+              withIntermediateDirectories:YES
+                               attributes:nil
+                                    error:&error]);
+  XCTAssertNil(error);
+
+  NSString *escapedDSN = [dsn stringByReplacingOccurrencesOfString:@"\"" withString:@"\\\""];
+  NSString *config =
+      [NSString stringWithFormat:@"{\n"
+                                 "  host = \"127.0.0.1\";\n"
+                                 "  port = 3000;\n"
+                                 "  database = {\n"
+                                 "    connectionString = \"%@\";\n"
+                                 "    poolSize = 2;\n"
+                                 "  };\n"
+                                 "  databases = {\n"
+                                 "    primary = {\n"
+                                 "      connectionString = \"%@\";\n"
+                                 "      poolSize = 2;\n"
+                                 "    };\n"
+                                 "    analytics = {\n"
+                                 "      connectionString = \"%@\";\n"
+                                 "      poolSize = 2;\n"
+                                 "    };\n"
+                                 "  };\n"
+                                 "}\n",
+                                 escapedDSN, escapedDSN, escapedDSN];
+  XCTAssertTrue([config writeToFile:[appRoot stringByAppendingPathComponent:@"config/app.plist"]
+                         atomically:YES
+                           encoding:NSUTF8StringEncoding
+                              error:&error]);
+  XCTAssertNil(error);
+  XCTAssertTrue([@"{}\n" writeToFile:[appRoot stringByAppendingPathComponent:@"config/environments/development.plist"]
+                          atomically:YES
+                            encoding:NSUTF8StringEncoding
+                               error:&error]);
+  XCTAssertNil(error);
+
+  int code = 0;
+  NSString *createPrimary =
+      [self runShellCapture:[NSString stringWithFormat:@"psql %s -c \"CREATE TABLE %@(id TEXT NOT NULL, value TEXT NOT NULL)\"",
+                                                       [dsn UTF8String], primaryTable]
+                   exitCode:&code];
+  XCTAssertEqual(0, code, @"%@", createPrimary);
+  NSString *createAnalytics =
+      [self runShellCapture:[NSString stringWithFormat:@"psql %s -c \"CREATE TABLE %@(id TEXT NOT NULL, event_name TEXT NOT NULL)\"",
+                                                       [dsn UTF8String], analyticsTable]
+                   exitCode:&code];
+  XCTAssertEqual(0, code, @"%@", createAnalytics);
+
+  NSString *buildOutput =
+      [self runShellCapture:[NSString stringWithFormat:@"cd %@ && make arlen", repoRoot]
+                   exitCode:&code];
+  XCTAssertEqual(0, code, @"%@", buildOutput);
+
+  NSString *analyticsCommand = [NSString stringWithFormat:
+      @"cd %@ && ARLEN_FRAMEWORK_ROOT=%@ %@/build/arlen schema-codegen --env development --database analytics --force",
+      appRoot, repoRoot, repoRoot];
+  NSString *analyticsOutput = [self runShellCapture:analyticsCommand exitCode:&code];
+  XCTAssertEqual(0, code, @"%@", analyticsOutput);
+  XCTAssertTrue([analyticsOutput containsString:@"database target: analytics"], @"%@", analyticsOutput);
+
+  NSString *analyticsHeaderPath =
+      [appRoot stringByAppendingPathComponent:@"src/Generated/analytics/ALNDBAnalyticsSchema.h"];
+  NSString *analyticsManifestPath =
+      [appRoot stringByAppendingPathComponent:@"db/schema/arlen_schema_analytics.json"];
+  NSString *analyticsHeader = [NSString stringWithContentsOfFile:analyticsHeaderPath
+                                                        encoding:NSUTF8StringEncoding
+                                                           error:&error];
+  XCTAssertNotNil(analyticsHeader);
+  XCTAssertNil(error);
+  NSString *analyticsManifest = [NSString stringWithContentsOfFile:analyticsManifestPath
+                                                          encoding:NSUTF8StringEncoding
+                                                             error:&error];
+  XCTAssertNotNil(analyticsManifest);
+  XCTAssertNil(error);
+  XCTAssertTrue([analyticsManifest containsString:@"\"database_target\": \"analytics\""]);
+  NSString *analyticsTableFragment = [NSString stringWithFormat:@"\"table\": \"%@\"", analyticsTable];
+  XCTAssertTrue([analyticsManifest containsString:analyticsTableFragment]);
+
+  NSString *analyticsOutput2 = [self runShellCapture:analyticsCommand exitCode:&code];
+  XCTAssertEqual(0, code, @"%@", analyticsOutput2);
+  NSString *analyticsHeader2 = [NSString stringWithContentsOfFile:analyticsHeaderPath
+                                                         encoding:NSUTF8StringEncoding
+                                                            error:&error];
+  XCTAssertNotNil(analyticsHeader2);
+  XCTAssertNil(error);
+  NSString *analyticsManifest2 = [NSString stringWithContentsOfFile:analyticsManifestPath
+                                                           encoding:NSUTF8StringEncoding
+                                                              error:&error];
+  XCTAssertNotNil(analyticsManifest2);
+  XCTAssertNil(error);
+  XCTAssertEqualObjects(analyticsHeader, analyticsHeader2);
+  XCTAssertEqualObjects(analyticsManifest, analyticsManifest2);
+
+  NSString *primaryCommand = [NSString stringWithFormat:
+      @"cd %@ && ARLEN_FRAMEWORK_ROOT=%@ %@/build/arlen schema-codegen --env development --database primary --force",
+      appRoot, repoRoot, repoRoot];
+  NSString *primaryOutput = [self runShellCapture:primaryCommand exitCode:&code];
+  XCTAssertEqual(0, code, @"%@", primaryOutput);
+  XCTAssertTrue([primaryOutput containsString:@"database target: primary"], @"%@", primaryOutput);
+
+  NSString *primaryManifestPath =
+      [appRoot stringByAppendingPathComponent:@"db/schema/arlen_schema_primary.json"];
+  NSString *primaryManifest = [NSString stringWithContentsOfFile:primaryManifestPath
+                                                        encoding:NSUTF8StringEncoding
+                                                           error:&error];
+  XCTAssertNotNil(primaryManifest);
+  XCTAssertNil(error);
+  XCTAssertTrue([primaryManifest containsString:@"\"database_target\": \"primary\""]);
+
+  (void)[self runShellCapture:[NSString stringWithFormat:@"psql %s -c \"DROP TABLE IF EXISTS %@\" >/dev/null 2>&1",
+                                                         [dsn UTF8String], primaryTable]
+                     exitCode:NULL];
+  (void)[self runShellCapture:[NSString stringWithFormat:@"psql %s -c \"DROP TABLE IF EXISTS %@\" >/dev/null 2>&1",
+                                                         [dsn UTF8String], analyticsTable]
+                     exitCode:NULL];
+}
+
 - (void)testDatabaseRouterReadWriteRoutingAcrossLiveAdapters {
   NSString *dsn = [self pgTestDSN];
   if ([dsn length] == 0) {

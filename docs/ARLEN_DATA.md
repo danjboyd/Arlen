@@ -169,3 +169,23 @@ Migration/deprecation docs:
 Primary reference:
 
 - `docs/PHASE5B_RUNTIME_ROUTING.md`
+
+## 12. Phase 5C Target-Aware Migration + Codegen Tooling
+
+CLI workflows now support explicit target selection:
+
+- `arlen migrate --database <target>`
+- `arlen schema-codegen --database <target>`
+
+Target-aware defaults:
+
+- migrations path: `db/migrations/<target>`
+- migration state table: `arlen_schema_migrations__<target>`
+- schema output dir: `src/Generated/<target>`
+- schema manifest path: `db/schema/arlen_schema_<target>.json`
+
+Schema manifests include `database_target` metadata for deterministic per-target artifact tracking.
+
+Primary reference:
+
+- `docs/PHASE5C_MULTI_DATABASE_TOOLING.md`

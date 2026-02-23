@@ -136,4 +136,28 @@
   XCTAssertEqual(ALNSchemaCodegenErrorIdentifierCollision, error.code);
 }
 
+- (void)testRenderArtifactsIncludesDatabaseTargetMetadata {
+  NSError *error = nil;
+  NSDictionary *artifacts = [ALNSchemaCodegen renderArtifactsFromColumns:[self sampleRows]
+                                                              classPrefix:@"ALNDB"
+                                                           databaseTarget:@"analytics"
+                                                                    error:&error];
+  XCTAssertNil(error);
+  XCTAssertNotNil(artifacts);
+  NSString *manifest = [artifacts[@"manifest"] isKindOfClass:[NSString class]] ? artifacts[@"manifest"] : @"";
+  XCTAssertTrue([manifest containsString:@"\"database_target\": \"analytics\""]);
+}
+
+- (void)testRenderArtifactsRejectsInvalidDatabaseTarget {
+  NSError *error = nil;
+  NSDictionary *artifacts = [ALNSchemaCodegen renderArtifactsFromColumns:[self sampleRows]
+                                                              classPrefix:@"ALNDB"
+                                                           databaseTarget:@"bad-target"
+                                                                    error:&error];
+  XCTAssertNil(artifacts);
+  XCTAssertNotNil(error);
+  XCTAssertEqualObjects(ALNSchemaCodegenErrorDomain, error.domain);
+  XCTAssertEqual(ALNSchemaCodegenErrorInvalidArgument, error.code);
+}
+
 @end

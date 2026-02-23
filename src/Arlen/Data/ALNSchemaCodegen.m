@@ -217,6 +217,16 @@ static NSString *ALNSchemaCodegenJSONEscape(NSString *value) {
 + (NSDictionary<NSString *,id> *)renderArtifactsFromColumns:(NSArray<NSDictionary *> *)rows
                                                  classPrefix:(NSString *)classPrefix
                                                        error:(NSError **)error {
+  return [self renderArtifactsFromColumns:rows
+                              classPrefix:classPrefix
+                           databaseTarget:nil
+                                    error:error];
+}
+
++ (NSDictionary<NSString *,id> *)renderArtifactsFromColumns:(NSArray<NSDictionary *> *)rows
+                                                 classPrefix:(NSString *)classPrefix
+                                              databaseTarget:(NSString *)databaseTarget
+                                                       error:(NSError **)error {
   NSString *prefix = ALNSchemaCodegenStringValue(classPrefix);
   if ([prefix length] == 0) {
     prefix = @"ALNDB";
@@ -226,6 +236,17 @@ static NSString *ALNSchemaCodegenJSONEscape(NSString *value) {
       *error = ALNSchemaCodegenError(ALNSchemaCodegenErrorInvalidArgument,
                                      @"class prefix must be a valid identifier",
                                      prefix);
+    }
+    return nil;
+  }
+
+  NSString *normalizedDatabaseTarget = [ALNSchemaCodegenStringValue(databaseTarget) lowercaseString];
+  if ([normalizedDatabaseTarget length] > 0 &&
+      !ALNSchemaCodegenIdentifierIsSafe(normalizedDatabaseTarget)) {
+    if (error != NULL) {
+      *error = ALNSchemaCodegenError(ALNSchemaCodegenErrorInvalidArgument,
+                                     @"database target must be a valid identifier",
+                                     normalizedDatabaseTarget);
     }
     return nil;
   }
@@ -389,6 +410,10 @@ static NSString *ALNSchemaCodegenJSONEscape(NSString *value) {
   [manifest appendString:@"  \"version\": 1,\n"];
   [manifest appendFormat:@"  \"class_prefix\": \"%@\",\n", ALNSchemaCodegenJSONEscape(prefix)];
   [manifest appendFormat:@"  \"artifact_base_name\": \"%@\",\n", ALNSchemaCodegenJSONEscape(baseName)];
+  if ([normalizedDatabaseTarget length] > 0) {
+    [manifest appendFormat:@"  \"database_target\": \"%@\",\n",
+                           ALNSchemaCodegenJSONEscape(normalizedDatabaseTarget)];
+  }
   [manifest appendString:@"  \"tables\": [\n"];
   for (NSUInteger index = 0; index < [tables count]; index++) {
     NSDictionary *tableDescriptor = tables[index];

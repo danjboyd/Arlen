@@ -8,6 +8,7 @@
 NS_ASSUME_NONNULL_BEGIN
 
 extern NSString *const ALNMigrationRunnerErrorDomain;
+extern NSString *const ALNMigrationRunnerDefaultDatabaseTarget;
 
 @interface ALNMigrationRunner : NSObject
 
@@ -16,7 +17,19 @@ extern NSString *const ALNMigrationRunnerErrorDomain;
 
 + (nullable NSArray<NSString *> *)pendingMigrationFilesAtPath:(NSString *)migrationsPath
                                                       database:(ALNPg *)database
+                                                databaseTarget:(nullable NSString *)databaseTarget
                                                          error:(NSError *_Nullable *_Nullable)error;
+
++ (nullable NSArray<NSString *> *)pendingMigrationFilesAtPath:(NSString *)migrationsPath
+                                                      database:(ALNPg *)database
+                                                         error:(NSError *_Nullable *_Nullable)error;
+
++ (BOOL)applyMigrationsAtPath:(NSString *)migrationsPath
+                     database:(ALNPg *)database
+               databaseTarget:(nullable NSString *)databaseTarget
+                       dryRun:(BOOL)dryRun
+                 appliedFiles:(NSArray<NSString *> *_Nullable *_Nullable)appliedFiles
+                        error:(NSError *_Nullable *_Nullable)error;
 
 + (BOOL)applyMigrationsAtPath:(NSString *)migrationsPath
                      database:(ALNPg *)database

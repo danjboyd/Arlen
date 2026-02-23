@@ -22,6 +22,11 @@ typedef NS_ENUM(NSInteger, ALNSchemaCodegenErrorCode) {
                                                            classPrefix:(NSString *)classPrefix
                                                                  error:(NSError *_Nullable *_Nullable)error;
 
++ (nullable NSDictionary<NSString *, id> *)renderArtifactsFromColumns:(NSArray<NSDictionary *> *)rows
+                                                           classPrefix:(NSString *)classPrefix
+                                                        databaseTarget:(nullable NSString *)databaseTarget
+                                                                 error:(NSError *_Nullable *_Nullable)error;
+
 @end
 
 NS_ASSUME_NONNULL_END

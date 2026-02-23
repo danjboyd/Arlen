@@ -61,24 +61,36 @@ Notes:
 - placeholder routes are supported (for example `/user/admin/:id`)
 - endpoint generator can create route + action + optional template in one command
 
-### `arlen migrate [--env <name>] [--dsn <connection_string>] [--dry-run]`
+### `arlen migrate [--env <name>] [--database <target>] [--dsn <connection_string>] [--dry-run]`
 
 Apply SQL migrations from `db/migrations` to PostgreSQL.
 
 - `--env <name>`: select runtime environment (default: `development`)
+- `--database <target>`: select migration target (default: `default`)
 - `--dsn <connection_string>`: override config DSN
 - `--dry-run`: list pending migrations without applying
+- per-target migration directory: `db/migrations/<target>` (for non-default targets)
+- per-target migration state table: `arlen_schema_migrations__<target>`
+- target-specific env override: `ARLEN_DATABASE_URL_<TARGET>`
 
-### `arlen schema-codegen [--env <name>] [--dsn <connection_string>] [--output-dir <path>] [--manifest <path>] [--prefix <ClassPrefix>] [--force]`
+### `arlen schema-codegen [--env <name>] [--database <target>] [--dsn <connection_string>] [--output-dir <path>] [--manifest <path>] [--prefix <ClassPrefix>] [--force]`
 
 Introspect PostgreSQL schema metadata and generate typed table/column helper APIs.
 
 - `--env <name>`: select runtime environment (default: `development`)
+- `--database <target>`: select codegen target (default: `default`)
 - `--dsn <connection_string>`: override config DSN
 - `--output-dir <path>`: destination directory for generated Objective-C files (default: `src/Generated`)
 - `--manifest <path>`: destination JSON manifest path (default: `db/schema/arlen_schema.json`)
 - `--prefix <ClassPrefix>`: class prefix for generated APIs (default: `ALNDB`)
 - `--force`: overwrite existing generated files
+
+For non-default targets when path/prefix options are omitted:
+
+- output dir default: `src/Generated/<target>`
+- manifest default: `db/schema/arlen_schema_<target>.json`
+- class prefix default: `ALNDB<PascalTarget>`
+- manifest includes `"database_target": "<target>"`
 
 Generated artifacts:
 

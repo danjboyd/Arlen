@@ -139,6 +139,55 @@
           "test": "testUnknownResolverTargetFailsDeterministically"
         }
       ]
+    },
+    {
+      "id": "rails_multi_database_migration_path_and_state",
+      "source_framework": "rails",
+      "source_area": "multi-db migrations",
+      "source_reference": "per-database migration state and ordered apply semantics",
+      "bug_class": "cross_target_migration_state_collision",
+      "arlen_contract_id": "multi_database_migration_targeting_contract",
+      "status": "covered",
+      "arlen_tests": [
+        {
+          "file": "tests/integration/PostgresIntegrationTests.m",
+          "test": "testArlenMigrateCommandSupportsNamedDatabaseTargetsAndFailureRetry"
+        }
+      ]
+    },
+    {
+      "id": "django_migration_retry_after_failed_step",
+      "source_framework": "django",
+      "source_area": "migration executor",
+      "source_reference": "failed migration retry should continue from first unapplied step",
+      "bug_class": "migration_retry_state_corruption",
+      "arlen_contract_id": "migration_failure_retry_recovery_contract",
+      "status": "covered",
+      "arlen_tests": [
+        {
+          "file": "tests/integration/PostgresIntegrationTests.m",
+          "test": "testArlenMigrateCommandSupportsNamedDatabaseTargetsAndFailureRetry"
+        }
+      ]
+    },
+    {
+      "id": "prisma_codegen_target_metadata_isolation",
+      "source_framework": "prisma",
+      "source_area": "schema generation outputs",
+      "source_reference": "target-specific generated artifacts require explicit metadata",
+      "bug_class": "generated_artifact_target_ambiguity",
+      "arlen_contract_id": "schema_codegen_target_manifest_contract",
+      "status": "covered",
+      "arlen_tests": [
+        {
+          "file": "tests/integration/PostgresIntegrationTests.m",
+          "test": "testArlenSchemaCodegenSupportsNamedDatabaseTargets"
+        },
+        {
+          "file": "tests/unit/SchemaCodegenTests.m",
+          "test": "testRenderArtifactsIncludesDatabaseTargetMetadata"
+        }
+      ]
     }
   ]
 }
