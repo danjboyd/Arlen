@@ -316,6 +316,7 @@ static ALNJobEnvelope *ALNJobEnvelopeFromDictionary(id value) {
 @property(nonatomic, strong) NSMutableArray *pending;
 @property(nonatomic, strong) NSMutableDictionary *leasedByID;
 @property(nonatomic, strong) NSMutableArray *deadLetters;
+@property(nonatomic, strong) NSMutableDictionary *idempotencyToJobID;
 @property(nonatomic, strong) NSLock *lock;
 @property(nonatomic, assign) NSUInteger sequenceCounter;
 
@@ -334,6 +335,7 @@ static ALNJobEnvelope *ALNJobEnvelopeFromDictionary(id value) {
     _pending = [NSMutableArray array];
     _leasedByID = [NSMutableDictionary dictionary];
     _deadLetters = [NSMutableArray array];
+    _idempotencyToJobID = [NSMutableDictionary dictionary];
     _lock = [[NSLock alloc] init];
     _sequenceCounter = 0;
   }
@@ -362,6 +364,46 @@ static ALNJobEnvelope *ALNJobEnvelopeFromDictionary(id value) {
     index += 1;
   }
   [self.pending insertObject:envelope atIndex:index];
+}
+
+- (BOOL)isActiveJobID:(NSString *)jobID {
+  NSString *normalizedID = ALNNonEmptyString(jobID, @"");
+  if ([normalizedID length] == 0) {
+    return NO;
+  }
+  if ([self.leasedByID[normalizedID] isKindOfClass:[ALNJobEnvelope class]]) {
+    return YES;
+  }
+  for (id value in self.pending) {
+    if (![value isKindOfClass:[ALNJobEnvelope class]]) {
+      continue;
+    }
+    ALNJobEnvelope *envelope = (ALNJobEnvelope *)value;
+    if ([envelope.jobID isEqualToString:normalizedID]) {
+      return YES;
+    }
+  }
+  return NO;
+}
+
+- (void)removeIdempotencyMappingsForJobID:(NSString *)jobID {
+  NSString *normalizedID = ALNNonEmptyString(jobID, @"");
+  if ([normalizedID length] == 0 || [self.idempotencyToJobID count] == 0) {
+    return;
+  }
+  NSArray *keys = [NSArray arrayWithArray:[self.idempotencyToJobID allKeys]];
+  for (id rawKey in keys) {
+    NSString *key = [rawKey isKindOfClass:[NSString class]] ? rawKey : @"";
+    if ([key length] == 0) {
+      continue;
+    }
+    NSString *mapped = [self.idempotencyToJobID[key] isKindOfClass:[NSString class]]
+                            ? self.idempotencyToJobID[key]
+                            : @"";
+    if ([mapped isEqualToString:normalizedID]) {
+      [self.idempotencyToJobID removeObjectForKey:key];
+    }
+  }
 }
 
 - (NSString *)enqueueJobNamed:(NSString *)name
@@ -394,8 +436,21 @@ static ALNJobEnvelope *ALNJobEnvelopeFromDictionary(id value) {
       notBefore = [NSDate dateWithTimeIntervalSinceNow:delay];
     }
   }
+  NSString *idempotencyKey = ALNNonEmptyString(normalizedOptions[@"idempotencyKey"], @"");
 
   [self.lock lock];
+  if ([idempotencyKey length] > 0) {
+    NSString *existingJobID = [self.idempotencyToJobID[idempotencyKey] isKindOfClass:[NSString class]]
+                                  ? self.idempotencyToJobID[idempotencyKey]
+                                  : @"";
+    if ([existingJobID length] > 0) {
+      if ([self isActiveJobID:existingJobID]) {
+        [self.lock unlock];
+        return existingJobID;
+      }
+      [self.idempotencyToJobID removeObjectForKey:idempotencyKey];
+    }
+  }
   self.sequenceCounter += 1;
   NSString *jobID = [NSString stringWithFormat:@"job-%lu", (unsigned long)self.sequenceCounter];
   ALNJobEnvelope *envelope = [[ALNJobEnvelope alloc] initWithJobID:jobID
@@ -407,6 +462,9 @@ static ALNJobEnvelope *ALNJobEnvelopeFromDictionary(id value) {
                                                           createdAt:[NSDate date]
                                                            sequence:self.sequenceCounter];
   [self insertPendingEnvelope:envelope];
+  if ([idempotencyKey length] > 0) {
+    self.idempotencyToJobID[idempotencyKey] = jobID;
+  }
   [self.lock unlock];
   return jobID;
 }
@@ -463,6 +521,7 @@ static ALNJobEnvelope *ALNJobEnvelopeFromDictionary(id value) {
   BOOL exists = (self.leasedByID[normalizedID] != nil);
   if (exists) {
     [self.leasedByID removeObjectForKey:normalizedID];
+    [self removeIdempotencyMappingsForJobID:normalizedID];
   }
   [self.lock unlock];
 
@@ -505,6 +564,7 @@ static ALNJobEnvelope *ALNJobEnvelopeFromDictionary(id value) {
   [self.leasedByID removeObjectForKey:jobID];
   if (leased.attempt >= leased.maxAttempts) {
     [self.deadLetters addObject:leased];
+    [self removeIdempotencyMappingsForJobID:jobID];
     [self.lock unlock];
     return YES;
   }
@@ -542,6 +602,7 @@ static ALNJobEnvelope *ALNJobEnvelopeFromDictionary(id value) {
   [self.pending removeAllObjects];
   [self.leasedByID removeAllObjects];
   [self.deadLetters removeAllObjects];
+  [self.idempotencyToJobID removeAllObjects];
   self.sequenceCounter = 0;
   [self.lock unlock];
 }
@@ -599,6 +660,7 @@ static ALNJobEnvelope *ALNJobEnvelopeFromDictionary(id value) {
           @"sequenceCounter" : @(0),
           @"pending" : @[],
           @"leased" : @{},
+          @"idempotencyMap" : @{},
           @"deadLetters" : @[],
         }
                error:&writeError]) {
@@ -620,6 +682,7 @@ static ALNJobEnvelope *ALNJobEnvelopeFromDictionary(id value) {
     @"sequenceCounter" : @(0),
     @"pending" : @[],
     @"leased" : @{},
+    @"idempotencyMap" : @{},
     @"deadLetters" : @[],
   };
 }
@@ -711,6 +774,25 @@ static ALNJobEnvelope *ALNJobEnvelopeFromDictionary(id value) {
   return leased;
 }
 
+- (NSMutableDictionary *)mutableIdempotencyMapFromState:(NSDictionary *)state {
+  NSDictionary *rawMap =
+      [state[@"idempotencyMap"] isKindOfClass:[NSDictionary class]] ? state[@"idempotencyMap"] : @{};
+  NSMutableDictionary *map = [NSMutableDictionary dictionary];
+  for (id key in rawMap) {
+    if (![key isKindOfClass:[NSString class]]) {
+      continue;
+    }
+    NSString *normalizedKey = ALNNonEmptyString(key, @"");
+    NSString *jobID = [rawMap[key] isKindOfClass:[NSString class]] ? rawMap[key] : @"";
+    jobID = ALNNonEmptyString(jobID, @"");
+    if ([normalizedKey length] == 0 || [jobID length] == 0) {
+      continue;
+    }
+    map[normalizedKey] = jobID;
+  }
+  return map;
+}
+
 - (NSArray *)deadLettersFromState:(NSDictionary *)state {
   NSArray *rawDeadLetters = [state[@"deadLetters"] isKindOfClass:[NSArray class]] ? state[@"deadLetters"] : @[];
   NSMutableArray *deadLetters = [NSMutableArray array];
@@ -723,9 +805,49 @@ static ALNJobEnvelope *ALNJobEnvelopeFromDictionary(id value) {
   return [NSArray arrayWithArray:deadLetters];
 }
 
+- (BOOL)isJobID:(NSString *)jobID activeInPending:(NSArray *)pending leased:(NSDictionary *)leased {
+  NSString *normalizedID = ALNNonEmptyString(jobID, @"");
+  if ([normalizedID length] == 0) {
+    return NO;
+  }
+  if ([leased[normalizedID] isKindOfClass:[ALNJobEnvelope class]]) {
+    return YES;
+  }
+  for (id value in pending) {
+    if (![value isKindOfClass:[ALNJobEnvelope class]]) {
+      continue;
+    }
+    ALNJobEnvelope *envelope = (ALNJobEnvelope *)value;
+    if ([envelope.jobID isEqualToString:normalizedID]) {
+      return YES;
+    }
+  }
+  return NO;
+}
+
+- (void)removeIdempotencyMappingsForJobID:(NSString *)jobID
+                                   inMap:(NSMutableDictionary *)idempotencyMap {
+  NSString *normalizedID = ALNNonEmptyString(jobID, @"");
+  if ([normalizedID length] == 0 || ![idempotencyMap isKindOfClass:[NSMutableDictionary class]]) {
+    return;
+  }
+  NSArray *keys = [NSArray arrayWithArray:[idempotencyMap allKeys]];
+  for (id rawKey in keys) {
+    NSString *key = [rawKey isKindOfClass:[NSString class]] ? rawKey : @"";
+    if ([key length] == 0) {
+      continue;
+    }
+    NSString *mapped = [idempotencyMap[key] isKindOfClass:[NSString class]] ? idempotencyMap[key] : @"";
+    if ([mapped isEqualToString:normalizedID]) {
+      [idempotencyMap removeObjectForKey:key];
+    }
+  }
+}
+
 - (NSDictionary *)stateDictionaryWithSequenceCounter:(NSUInteger)sequenceCounter
                                              pending:(NSArray *)pending
                                               leased:(NSDictionary *)leased
+                                      idempotencyMap:(NSDictionary *)idempotencyMap
                                          deadLetters:(NSArray *)deadLetters {
   NSMutableArray *pendingPayload = [NSMutableArray array];
   for (ALNJobEnvelope *envelope in pending ?: @[]) {
@@ -743,6 +865,19 @@ static ALNJobEnvelope *ALNJobEnvelopeFromDictionary(id value) {
     }
   }
 
+  NSMutableDictionary *idempotencyPayload = [NSMutableDictionary dictionary];
+  for (id rawKey in idempotencyMap ?: @{}) {
+    NSString *key = [rawKey isKindOfClass:[NSString class]] ? rawKey : @"";
+    if ([key length] == 0) {
+      continue;
+    }
+    NSString *jobID = [idempotencyMap[key] isKindOfClass:[NSString class]] ? idempotencyMap[key] : @"";
+    if ([jobID length] == 0) {
+      continue;
+    }
+    idempotencyPayload[key] = jobID;
+  }
+
   NSMutableArray *deadLetterPayload = [NSMutableArray array];
   for (ALNJobEnvelope *envelope in deadLetters ?: @[]) {
     [deadLetterPayload addObject:[envelope dictionaryRepresentation]];
@@ -752,6 +887,7 @@ static ALNJobEnvelope *ALNJobEnvelopeFromDictionary(id value) {
     @"sequenceCounter" : @(sequenceCounter),
     @"pending" : pendingPayload,
     @"leased" : leasedPayload,
+    @"idempotencyMap" : idempotencyPayload,
     @"deadLetters" : deadLetterPayload,
   };
 }
@@ -786,6 +922,7 @@ static ALNJobEnvelope *ALNJobEnvelopeFromDictionary(id value) {
       notBefore = [NSDate dateWithTimeIntervalSinceNow:delay];
     }
   }
+  NSString *idempotencyKey = ALNNonEmptyString(normalizedOptions[@"idempotencyKey"], @"");
 
   [self.lock lock];
   NSError *stateError = nil;
@@ -796,6 +933,24 @@ static ALNJobEnvelope *ALNJobEnvelopeFromDictionary(id value) {
       *error = stateError;
     }
     return nil;
+  }
+
+  NSMutableArray *pending = [NSMutableArray arrayWithArray:[self sortedPendingFromState:state]];
+  NSMutableDictionary *leased = [self mutableLeasedMapFromState:state];
+  NSMutableDictionary *idempotencyMap = [self mutableIdempotencyMapFromState:state];
+  NSArray *deadLetters = [self deadLettersFromState:state];
+
+  if ([idempotencyKey length] > 0) {
+    NSString *existingJobID = [idempotencyMap[idempotencyKey] isKindOfClass:[NSString class]]
+                                  ? idempotencyMap[idempotencyKey]
+                                  : @"";
+    if ([existingJobID length] > 0) {
+      if ([self isJobID:existingJobID activeInPending:pending leased:leased]) {
+        [self.lock unlock];
+        return existingJobID;
+      }
+      [idempotencyMap removeObjectForKey:idempotencyKey];
+    }
   }
 
   NSUInteger sequenceCounter = [state[@"sequenceCounter"] respondsToSelector:@selector(unsignedIntegerValue)]
@@ -811,8 +966,6 @@ static ALNJobEnvelope *ALNJobEnvelopeFromDictionary(id value) {
                                                           notBefore:notBefore
                                                           createdAt:[NSDate date]
                                                            sequence:sequenceCounter];
-
-  NSMutableArray *pending = [NSMutableArray arrayWithArray:[self sortedPendingFromState:state]];
   [pending addObject:envelope];
   [pending sortUsingComparator:^NSComparisonResult(ALNJobEnvelope *a, ALNJobEnvelope *b) {
     NSComparisonResult dueOrder = [a.notBefore compare:b.notBefore];
@@ -827,11 +980,15 @@ static ALNJobEnvelope *ALNJobEnvelopeFromDictionary(id value) {
     }
     return NSOrderedSame;
   }];
+  if ([idempotencyKey length] > 0) {
+    idempotencyMap[idempotencyKey] = jobID;
+  }
 
   NSDictionary *nextState = [self stateDictionaryWithSequenceCounter:sequenceCounter
                                                               pending:pending
-                                                               leased:[self mutableLeasedMapFromState:state]
-                                                          deadLetters:[self deadLettersFromState:state]];
+                                                               leased:leased
+                                                      idempotencyMap:idempotencyMap
+                                                          deadLetters:deadLetters];
   NSError *writeError = nil;
   BOOL persisted = [self writeState:nextState error:&writeError];
   [self.lock unlock];
@@ -859,6 +1016,7 @@ static ALNJobEnvelope *ALNJobEnvelopeFromDictionary(id value) {
 
   NSMutableArray *pending = [NSMutableArray arrayWithArray:[self sortedPendingFromState:state]];
   NSMutableDictionary *leased = [self mutableLeasedMapFromState:state];
+  NSMutableDictionary *idempotencyMap = [self mutableIdempotencyMapFromState:state];
   NSArray *deadLetters = [self deadLettersFromState:state];
   NSUInteger sequenceCounter = [state[@"sequenceCounter"] respondsToSelector:@selector(unsignedIntegerValue)]
                                    ? [state[@"sequenceCounter"] unsignedIntegerValue]
@@ -894,6 +1052,7 @@ static ALNJobEnvelope *ALNJobEnvelopeFromDictionary(id value) {
   NSDictionary *nextState = [self stateDictionaryWithSequenceCounter:sequenceCounter
                                                               pending:pending
                                                                leased:leased
+                                                      idempotencyMap:idempotencyMap
                                                           deadLetters:deadLetters];
   NSError *writeError = nil;
   BOOL persisted = [self writeState:nextState error:&writeError];
@@ -928,6 +1087,7 @@ static ALNJobEnvelope *ALNJobEnvelopeFromDictionary(id value) {
   }
 
   NSMutableDictionary *leased = [self mutableLeasedMapFromState:state];
+  NSMutableDictionary *idempotencyMap = [self mutableIdempotencyMapFromState:state];
   if (leased[normalizedID] == nil) {
     [self.lock unlock];
     if (error != NULL) {
@@ -936,10 +1096,12 @@ static ALNJobEnvelope *ALNJobEnvelopeFromDictionary(id value) {
     return NO;
   }
   [leased removeObjectForKey:normalizedID];
+  [self removeIdempotencyMappingsForJobID:normalizedID inMap:idempotencyMap];
 
   NSDictionary *nextState = [self stateDictionaryWithSequenceCounter:[state[@"sequenceCounter"] unsignedIntegerValue]
                                                               pending:[self sortedPendingFromState:state]
                                                                leased:leased
+                                                      idempotencyMap:idempotencyMap
                                                           deadLetters:[self deadLettersFromState:state]];
   NSError *writeError = nil;
   BOOL persisted = [self writeState:nextState error:&writeError];
@@ -984,6 +1146,7 @@ static ALNJobEnvelope *ALNJobEnvelopeFromDictionary(id value) {
 
   NSMutableArray *pending = [NSMutableArray arrayWithArray:[self sortedPendingFromState:state]];
   NSMutableDictionary *leased = [self mutableLeasedMapFromState:state];
+  NSMutableDictionary *idempotencyMap = [self mutableIdempotencyMapFromState:state];
   NSMutableArray *deadLetters = [NSMutableArray arrayWithArray:[self deadLettersFromState:state]];
   ALNJobEnvelope *leasedEnvelope = [leased[jobID] isKindOfClass:[ALNJobEnvelope class]] ? leased[jobID] : nil;
   if (leasedEnvelope == nil) {
@@ -997,6 +1160,7 @@ static ALNJobEnvelope *ALNJobEnvelopeFromDictionary(id value) {
 
   if (leasedEnvelope.attempt >= leasedEnvelope.maxAttempts) {
     [deadLetters addObject:leasedEnvelope];
+    [self removeIdempotencyMappingsForJobID:jobID inMap:idempotencyMap];
   } else {
     NSTimeInterval safeDelay = (delaySeconds > 0.0) ? delaySeconds : 0.0;
     ALNJobEnvelope *requeued = [[ALNJobEnvelope alloc] initWithJobID:leasedEnvelope.jobID
@@ -1026,6 +1190,7 @@ static ALNJobEnvelope *ALNJobEnvelopeFromDictionary(id value) {
   NSDictionary *nextState = [self stateDictionaryWithSequenceCounter:[state[@"sequenceCounter"] unsignedIntegerValue]
                                                               pending:pending
                                                                leased:leased
+                                                      idempotencyMap:idempotencyMap
                                                           deadLetters:deadLetters];
   NSError *writeError = nil;
   BOOL persisted = [self writeState:nextState error:&writeError];
@@ -2099,6 +2264,85 @@ static int ALNRedisOpenSocketConnection(NSString *host,
 
 @end
 
+@interface ALNRetryingMailAdapter ()
+
+@property(nonatomic, strong) id<ALNMailAdapter> baseAdapter;
+
+@end
+
+@implementation ALNRetryingMailAdapter
+
+- (instancetype)initWithBaseAdapter:(id<ALNMailAdapter>)baseAdapter {
+  self = [super init];
+  if (self) {
+    _baseAdapter = baseAdapter;
+    _maxAttempts = 3;
+    _retryDelaySeconds = 0.0;
+  }
+  return self;
+}
+
+- (NSString *)adapterName {
+  NSString *baseName = [self.baseAdapter respondsToSelector:@selector(adapterName)]
+                           ? [self.baseAdapter adapterName]
+                           : @"mail_adapter";
+  return [NSString stringWithFormat:@"retrying_mail(%@)", ALNNonEmptyString(baseName, @"mail_adapter")];
+}
+
+- (NSString *)deliverMessage:(ALNMailMessage *)message error:(NSError **)error {
+  if (self.baseAdapter == nil) {
+    if (error != NULL) {
+      *error = ALNServiceError(4310, @"mail base adapter is required", nil);
+    }
+    return nil;
+  }
+
+  NSUInteger attempts = (self.maxAttempts > 0) ? self.maxAttempts : 1;
+  NSTimeInterval retryDelay = (self.retryDelaySeconds > 0.0) ? self.retryDelaySeconds : 0.0;
+  NSError *lastError = nil;
+
+  for (NSUInteger idx = 0; idx < attempts; idx++) {
+    NSError *attemptError = nil;
+    NSString *deliveryID = [self.baseAdapter deliverMessage:message error:&attemptError];
+    if ([deliveryID length] > 0) {
+      return deliveryID;
+    }
+    if (attemptError != nil) {
+      lastError = attemptError;
+    }
+    if ((idx + 1) < attempts && retryDelay > 0.0) {
+      [NSThread sleepForTimeInterval:retryDelay];
+    }
+  }
+
+  if (error != NULL) {
+    NSMutableDictionary *userInfo = [NSMutableDictionary dictionary];
+    userInfo[NSLocalizedDescriptionKey] = @"mail delivery failed after retry attempts";
+    userInfo[@"attempt_count"] = @(attempts);
+    userInfo[@"adapter"] = [self.baseAdapter adapterName] ?: @"";
+    if (lastError != nil) {
+      userInfo[NSUnderlyingErrorKey] = lastError;
+    }
+    *error = [NSError errorWithDomain:ALNServiceErrorDomain code:4311 userInfo:userInfo];
+  }
+  return nil;
+}
+
+- (NSArray *)deliveriesSnapshot {
+  if (self.baseAdapter == nil) {
+    return @[];
+  }
+  return [self.baseAdapter deliveriesSnapshot] ?: @[];
+}
+
+- (void)reset {
+  if (self.baseAdapter != nil) {
+    [self.baseAdapter reset];
+  }
+}
+
+@end
+
 @interface ALNFileMailAdapter ()
 
 @property(nonatomic, copy) NSString *adapterNameValue;
@@ -2436,6 +2680,127 @@ static int ALNRedisOpenSocketConnection(NSString *host,
 
 @end
 
+@interface ALNRetryingAttachmentAdapter ()
+
+@property(nonatomic, strong) id<ALNAttachmentAdapter> baseAdapter;
+
+@end
+
+@implementation ALNRetryingAttachmentAdapter
+
+- (instancetype)initWithBaseAdapter:(id<ALNAttachmentAdapter>)baseAdapter {
+  self = [super init];
+  if (self) {
+    _baseAdapter = baseAdapter;
+    _maxAttempts = 3;
+    _retryDelaySeconds = 0.0;
+  }
+  return self;
+}
+
+- (NSString *)adapterName {
+  NSString *baseName = [self.baseAdapter respondsToSelector:@selector(adapterName)]
+                           ? [self.baseAdapter adapterName]
+                           : @"attachment_adapter";
+  return [NSString stringWithFormat:@"retrying_attachment(%@)",
+                                    ALNNonEmptyString(baseName, @"attachment_adapter")];
+}
+
+- (NSString *)saveAttachmentNamed:(NSString *)name
+                      contentType:(NSString *)contentType
+                             data:(NSData *)data
+                         metadata:(NSDictionary *)metadata
+                            error:(NSError **)error {
+  if (self.baseAdapter == nil) {
+    if (error != NULL) {
+      *error = ALNServiceError(563, @"attachment base adapter is required", nil);
+    }
+    return nil;
+  }
+
+  NSUInteger attempts = (self.maxAttempts > 0) ? self.maxAttempts : 1;
+  NSTimeInterval retryDelay = (self.retryDelaySeconds > 0.0) ? self.retryDelaySeconds : 0.0;
+  NSError *lastError = nil;
+
+  for (NSUInteger idx = 0; idx < attempts; idx++) {
+    NSError *attemptError = nil;
+    NSString *attachmentID = [self.baseAdapter saveAttachmentNamed:name
+                                                       contentType:contentType
+                                                              data:data
+                                                          metadata:metadata
+                                                             error:&attemptError];
+    if ([attachmentID length] > 0) {
+      return attachmentID;
+    }
+    if (attemptError != nil) {
+      lastError = attemptError;
+    }
+    if ((idx + 1) < attempts && retryDelay > 0.0) {
+      [NSThread sleepForTimeInterval:retryDelay];
+    }
+  }
+
+  if (error != NULL) {
+    NSMutableDictionary *userInfo = [NSMutableDictionary dictionary];
+    userInfo[NSLocalizedDescriptionKey] = @"attachment save failed after retry attempts";
+    userInfo[@"attempt_count"] = @(attempts);
+    userInfo[@"adapter"] = [self.baseAdapter adapterName] ?: @"";
+    if (lastError != nil) {
+      userInfo[NSUnderlyingErrorKey] = lastError;
+    }
+    *error = [NSError errorWithDomain:ALNServiceErrorDomain code:564 userInfo:userInfo];
+  }
+  return nil;
+}
+
+- (NSData *)attachmentDataForID:(NSString *)attachmentID
+                       metadata:(NSDictionary **)metadata
+                          error:(NSError **)error {
+  if (self.baseAdapter == nil) {
+    if (error != NULL) {
+      *error = ALNServiceError(565, @"attachment base adapter is required", nil);
+    }
+    return nil;
+  }
+  return [self.baseAdapter attachmentDataForID:attachmentID metadata:metadata error:error];
+}
+
+- (NSDictionary *)attachmentMetadataForID:(NSString *)attachmentID
+                                    error:(NSError **)error {
+  if (self.baseAdapter == nil) {
+    if (error != NULL) {
+      *error = ALNServiceError(566, @"attachment base adapter is required", nil);
+    }
+    return nil;
+  }
+  return [self.baseAdapter attachmentMetadataForID:attachmentID error:error];
+}
+
+- (BOOL)deleteAttachmentID:(NSString *)attachmentID error:(NSError **)error {
+  if (self.baseAdapter == nil) {
+    if (error != NULL) {
+      *error = ALNServiceError(567, @"attachment base adapter is required", nil);
+    }
+    return NO;
+  }
+  return [self.baseAdapter deleteAttachmentID:attachmentID error:error];
+}
+
+- (NSArray *)listAttachmentMetadata {
+  if (self.baseAdapter == nil) {
+    return @[];
+  }
+  return [self.baseAdapter listAttachmentMetadata] ?: @[];
+}
+
+- (void)reset {
+  if (self.baseAdapter != nil) {
+    [self.baseAdapter reset];
+  }
+}
+
+@end
+
 @interface ALNFileSystemAttachmentAdapter ()
 
 @property(nonatomic, copy) NSString *adapterNameValue;
@@ -2759,6 +3124,69 @@ BOOL ALNRunJobAdapterConformanceSuite(id<ALNJobAdapter> adapter, NSError **error
 
   [adapter reset];
   NSError *stepError = nil;
+
+  NSString *idempotentID = [adapter enqueueJobNamed:@"phase7d.idempotent"
+                                            payload:@{ @"index" : @0 }
+                                            options:@{ @"idempotencyKey" : @"tenant-a:phase7d:0001" }
+                                              error:&stepError];
+  if ([idempotentID length] == 0) {
+    if (error != NULL) {
+      *error = ALNConformanceStepError(@"jobs", @"enqueue_idempotent", stepError);
+    }
+    return NO;
+  }
+
+  NSString *idempotentDuplicateID = [adapter enqueueJobNamed:@"phase7d.idempotent"
+                                                     payload:@{ @"index" : @999 }
+                                                     options:@{ @"idempotencyKey" : @"tenant-a:phase7d:0001" }
+                                                       error:&stepError];
+  if (![idempotentDuplicateID isEqualToString:idempotentID]) {
+    if (error != NULL) {
+      *error = ALNConformanceStepError(@"jobs", @"idempotency_duplicate_enqueue", stepError);
+    }
+    return NO;
+  }
+
+  ALNJobEnvelope *idempotentLease = [adapter dequeueDueJobAt:[NSDate date] error:&stepError];
+  if (![idempotentLease isKindOfClass:[ALNJobEnvelope class]] ||
+      ![idempotentLease.jobID isEqualToString:idempotentID]) {
+    if (error != NULL) {
+      *error = ALNConformanceStepError(@"jobs", @"idempotency_dequeue", stepError);
+    }
+    return NO;
+  }
+  if (![adapter acknowledgeJobID:idempotentLease.jobID error:&stepError]) {
+    if (error != NULL) {
+      *error = ALNConformanceStepError(@"jobs", @"idempotency_ack", stepError);
+    }
+    return NO;
+  }
+
+  NSString *idempotentAfterAckID = [adapter enqueueJobNamed:@"phase7d.idempotent"
+                                                    payload:@{ @"index" : @1 }
+                                                    options:@{ @"idempotencyKey" : @"tenant-a:phase7d:0001" }
+                                                      error:&stepError];
+  if ([idempotentAfterAckID length] == 0 || [idempotentAfterAckID isEqualToString:idempotentID]) {
+    if (error != NULL) {
+      *error = ALNConformanceStepError(@"jobs", @"idempotency_after_ack_reenqueue", stepError);
+    }
+    return NO;
+  }
+  ALNJobEnvelope *idempotentAfterAckLease = [adapter dequeueDueJobAt:[NSDate date] error:&stepError];
+  if (![idempotentAfterAckLease isKindOfClass:[ALNJobEnvelope class]] ||
+      ![idempotentAfterAckLease.jobID isEqualToString:idempotentAfterAckID]) {
+    if (error != NULL) {
+      *error = ALNConformanceStepError(@"jobs", @"idempotency_after_ack_dequeue", stepError);
+    }
+    return NO;
+  }
+  if (![adapter acknowledgeJobID:idempotentAfterAckLease.jobID error:&stepError]) {
+    if (error != NULL) {
+      *error = ALNConformanceStepError(@"jobs", @"idempotency_after_ack_ack", stepError);
+    }
+    return NO;
+  }
+
   NSString *firstID = [adapter enqueueJobNamed:@"phase3e.first" payload:@{ @"index" : @1 } options:@{} error:&stepError];
   if ([firstID length] == 0) {
     if (error != NULL) {
@@ -2894,6 +3322,35 @@ BOOL ALNRunCacheAdapterConformanceSuite(id<ALNCacheAdapter> adapter, NSError **e
   if (expired != nil) {
     if (error != NULL) {
       *error = ALNConformanceStepError(@"cache", @"ttl_expiry", nil);
+    }
+    return NO;
+  }
+
+  if (![adapter setObject:@"value-persist" forKey:@"key-persist" ttlSeconds:0 error:&stepError]) {
+    if (error != NULL) {
+      *error = ALNConformanceStepError(@"cache", @"set_non_expiring", stepError);
+    }
+    return NO;
+  }
+  NSString *persisted = [adapter objectForKey:@"key-persist"
+                                       atTime:[NSDate dateWithTimeIntervalSinceNow:3600]
+                                        error:&stepError];
+  if (![persisted isEqualToString:@"value-persist"]) {
+    if (error != NULL) {
+      *error = ALNConformanceStepError(@"cache", @"non_expiring_lookup", stepError);
+    }
+    return NO;
+  }
+
+  if (![adapter setObject:nil forKey:@"key-persist" ttlSeconds:0 error:&stepError]) {
+    if (error != NULL) {
+      *error = ALNConformanceStepError(@"cache", @"set_nil_removes", stepError);
+    }
+    return NO;
+  }
+  if ([adapter objectForKey:@"key-persist" atTime:[NSDate date] error:&stepError] != nil) {
+    if (error != NULL) {
+      *error = ALNConformanceStepError(@"cache", @"set_nil_verify", nil);
     }
     return NO;
   }

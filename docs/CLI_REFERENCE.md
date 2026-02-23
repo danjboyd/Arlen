@@ -304,6 +304,24 @@ Runtime controls:
 - `ARLEN_PHASE5E_SOAK_ITERS` (optional loop count override for Phase 5E soak tests, default `120`)
 - `emitDiagnosticsEventsToStderr`
 
+## Service Durability APIs (Phase 7D)
+
+Jobs enqueue options:
+
+- `maxAttempts` (existing retry budget control)
+- `idempotencyKey` (new keyed dedupe control while job is pending/leased)
+
+Retry wrappers:
+
+- `ALNRetryingMailAdapter`
+  - wraps any `id<ALNMailAdapter>`
+  - controls: `maxAttempts`, `retryDelaySeconds`
+  - deterministic exhaustion error: `ALNServiceErrorDomain` code `4311`
+- `ALNRetryingAttachmentAdapter`
+  - wraps any `id<ALNAttachmentAdapter>`
+  - controls: `maxAttempts`, `retryDelaySeconds`
+  - deterministic exhaustion error: `ALNServiceErrorDomain` code `564`
+
 ## PostgreSQL Test Gate
 
 DB-backed tests are skipped unless this environment variable is set:

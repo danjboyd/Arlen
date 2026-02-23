@@ -1,6 +1,6 @@
 # Arlen Phase 2 + Phase 3 Roadmap Index
 
-Status: Active (Phase 2A-2D complete; Phase 3A-3H complete; Phase 4A-4E complete; Phase 5A-5E complete; Phase 7A/7B/7C initial slices implemented; Phase 7 follow-on planned)  
+Status: Active (Phase 2A-2D complete; Phase 3A-3H complete; Phase 4A-4E complete; Phase 5A-5E complete; Phase 7A/7B/7C/7D initial slices implemented; Phase 7 follow-on planned)  
 Last updated: 2026-02-23
 
 This index points to the current roadmap documents:
@@ -68,7 +68,11 @@ Phase 7 execution/planning is defined in `docs/PHASE7_ROADMAP.md`, including:
   - request trace/correlation propagation contracts (`X-Correlation-Id`, `X-Trace-Id`, `traceparent`)
   - deterministic JSON health/readiness signal payloads and strict readiness policy switch
   - deploy runbook operability validation script integration
-- remaining 7A/7B/7C follow-on and 7D-7H planning:
+- Phase 7D initial service-durability slice completed (`docs/PHASE7D_SERVICE_DURABILITY.md`):
+  - jobs idempotency-key dedupe/release contracts for in-memory and file job adapters
+  - cache conformance hardening for zero-TTL persistence and nil-removal semantics
+  - retry policy wrappers for mail/attachment adapters with deterministic exhaustion diagnostics
+- remaining 7A/7B/7C/7D follow-on and 7E-7H planning:
   - additional runtime hardening for `boomhauer`/`propane`
   - security defaults and policy contracts
   - deeper observability/operability maturity and coding-agent-first DX contracts

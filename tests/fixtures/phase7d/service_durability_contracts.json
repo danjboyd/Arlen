@@ -1,0 +1,91 @@
+{
+  "version": "phase7d-service-durability-contracts-v1",
+  "contracts": [
+    {
+      "id": "jobs.idempotency.keyed_deduplication",
+      "claim": "Jobs adapters provide deterministic idempotency-key deduplication while work is pending/leased and release keys after acknowledgement.",
+      "source_docs": [
+        "docs/PHASE7_ROADMAP.md",
+        "docs/PHASE7D_SERVICE_DURABILITY.md",
+        "docs/ECOSYSTEM_SERVICES.md"
+      ],
+      "verification": [
+        {
+          "kind": "unit",
+          "file": "tests/unit/Phase7DTests.m",
+          "test": "testInMemoryJobAdapterIdempotencyKeyDeduplicatesUntilAcknowledged"
+        },
+        {
+          "kind": "unit",
+          "file": "tests/unit/Phase7DTests.m",
+          "test": "testFileJobAdapterIdempotencyKeyPersistsAcrossAdapterReload"
+        },
+        {
+          "kind": "unit",
+          "file": "tests/unit/Phase3ETests.m",
+          "test": "testFileJobAdapterConformanceSuite"
+        }
+      ]
+    },
+    {
+      "id": "cache.expiry.consistency_and_nil_remove",
+      "claim": "Cache conformance enforces stable expiry behavior for zero-TTL keys and deterministic nil-set removal semantics.",
+      "source_docs": [
+        "docs/PHASE7D_SERVICE_DURABILITY.md",
+        "docs/ECOSYSTEM_SERVICES.md"
+      ],
+      "verification": [
+        {
+          "kind": "unit",
+          "file": "tests/unit/Phase7DTests.m",
+          "test": "testCacheConformanceSuiteCoversPersistenceAndNilRemovalSemantics"
+        },
+        {
+          "kind": "unit",
+          "file": "tests/unit/Phase3ETests.m",
+          "test": "testPluginWiresAdaptersAndRunsCompatibilitySuites"
+        }
+      ]
+    },
+    {
+      "id": "mail.retry.policy",
+      "claim": "Mail retry wrappers expose deterministic retry attempt limits and failure diagnostics for transient delivery failures.",
+      "source_docs": [
+        "docs/PHASE7D_SERVICE_DURABILITY.md",
+        "docs/ECOSYSTEM_SERVICES.md"
+      ],
+      "verification": [
+        {
+          "kind": "unit",
+          "file": "tests/unit/Phase7DTests.m",
+          "test": "testRetryingMailAdapterRetriesToSuccess"
+        },
+        {
+          "kind": "unit",
+          "file": "tests/unit/Phase7DTests.m",
+          "test": "testRetryingMailAdapterReturnsDeterministicErrorWhenExhausted"
+        }
+      ]
+    },
+    {
+      "id": "attachment.retry.policy",
+      "claim": "Attachment retry wrappers expose deterministic retry attempt limits and failure diagnostics for transient persistence failures.",
+      "source_docs": [
+        "docs/PHASE7D_SERVICE_DURABILITY.md",
+        "docs/ECOSYSTEM_SERVICES.md"
+      ],
+      "verification": [
+        {
+          "kind": "unit",
+          "file": "tests/unit/Phase7DTests.m",
+          "test": "testRetryingAttachmentAdapterRetriesToSuccess"
+        },
+        {
+          "kind": "unit",
+          "file": "tests/unit/Phase7DTests.m",
+          "test": "testRetryingAttachmentAdapterReturnsDeterministicErrorWhenExhausted"
+        }
+      ]
+    }
+  ]
+}

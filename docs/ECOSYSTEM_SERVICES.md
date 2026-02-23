@@ -79,6 +79,15 @@ Example:
 4. inspect queue/dead-letter snapshots
 
 `options.maxAttempts` controls retry budget.
+`options.idempotencyKey` enables keyed deduplication while work remains pending/leased.
+
+Idempotency contract:
+
+- duplicate enqueue calls with the same `idempotencyKey` return the existing `jobID` while that job is still active
+- the key is released after acknowledgement, allowing intentional replay enqueue later
+- implemented in baseline adapters:
+  - `ALNInMemoryJobAdapter`
+  - `ALNFileJobAdapter`
 
 ## 5. Cache Baseline
 
@@ -120,6 +129,12 @@ Legacy compatibility fallback:
 - delivery snapshots (`deliveriesSnapshot`)
 - reset for test isolation
 
+Retry wrapper:
+
+- `ALNRetryingMailAdapter` wraps any `ALNMailAdapter` with deterministic retry policy controls:
+  - `maxAttempts` (default `3`)
+  - `retryDelaySeconds` (default `0`)
+
 ## 8. Attachment Baseline
 
 `ALNAttachmentAdapter` supports:
@@ -127,6 +142,10 @@ Legacy compatibility fallback:
 - save named attachment (`saveAttachmentNamed:contentType:data:metadata:error:`)
 - fetch data + metadata (`attachmentDataForID:metadata:error:`)
 - metadata/list/delete helpers
+
+Retry wrapper:
+
+- `ALNRetryingAttachmentAdapter` wraps any `ALNAttachmentAdapter` and applies retry policy for attachment save operations (`maxAttempts`, `retryDelaySeconds`).
 
 Concrete backend adapter now available:
 
@@ -144,6 +163,11 @@ Phase 3E includes adapter compatibility suites:
 - `ALNRunServiceCompatibilitySuite`
 
 These are intended for plugin adapter verification.
+Phase 7D extends durability checks for jobs/cache conformance:
+
+- jobs idempotency-key dedupe/release semantics
+- cache zero-TTL persistence semantics
+- cache `setObject:nil` deterministic removal semantics
 
 ## 10. Boomhauer Service Routes
 

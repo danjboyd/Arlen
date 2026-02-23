@@ -1,6 +1,6 @@
 # Arlen Phase 7 Roadmap
 
-Status: Active (Phase 7A, 7B, and 7C initial slices implemented; follow-on in progress)  
+Status: Active (Phase 7A, 7B, 7C, and 7D initial slices implemented; follow-on in progress)  
 Last updated: 2026-02-23
 
 Related docs:
@@ -9,6 +9,7 @@ Related docs:
 - `docs/PHASE7A_RUNTIME_HARDENING.md`
 - `docs/PHASE7B_SECURITY_DEFAULTS.md`
 - `docs/PHASE7C_OBSERVABILITY_OPERABILITY.md`
+- `docs/PHASE7D_SERVICE_DURABILITY.md`
 - `docs/STATUS.md`
 - `docs/FEATURE_PARITY_MATRIX.md`
 - `docs/PROPANE.md`
@@ -163,7 +164,7 @@ Implementation notes (initial slice, 2026-02-23):
 
 ## 3.4 Phase 7D: Ecosystem Service Durability
 
-Status: Planned
+Status: Initial slice implemented (2026-02-23); remaining 7D deliverables in progress
 
 Deliverables:
 
@@ -177,6 +178,25 @@ Acceptance (required):
 - Service durability semantics are explicit and test-backed.
 - Failure/retry behavior is deterministic and visible in diagnostics.
 - Adapter conformance suites include production-style fault scenarios.
+
+Implementation notes (initial slice, 2026-02-23):
+
+- Added deterministic jobs idempotency-key contract (`enqueue` option: `idempotencyKey`):
+  - duplicate enqueues with active pending/leased jobs return the same `jobID`
+  - key mapping is released on acknowledgement so replay requests can enqueue new work
+  - implemented for `ALNInMemoryJobAdapter` and `ALNFileJobAdapter` (persisted mapping state for file adapter)
+- Expanded cache durability conformance semantics:
+  - zero TTL (`ttlSeconds = 0`) is validated as non-expiring storage
+  - `setObject:nil` is validated as deterministic key removal
+- Added retry-policy wrappers with deterministic error contracts:
+  - `ALNRetryingMailAdapter` (`maxAttempts`, `retryDelaySeconds`; exhaustion error code `4311`)
+  - `ALNRetryingAttachmentAdapter` (`maxAttempts`, `retryDelaySeconds`; exhaustion error code `564`)
+- Added executable contract fixture and docs:
+  - `tests/fixtures/phase7d/service_durability_contracts.json`
+  - `docs/PHASE7D_SERVICE_DURABILITY.md`
+- Added regression coverage:
+  - `tests/unit/Phase7DTests.m` (jobs idempotency, retry wrapper behavior, fixture schema/reference integrity)
+  - `tests/unit/Phase3ETests.m` conformance execution path coverage for updated jobs/cache contracts
 
 ## 3.5 Phase 7E: EOC + Template Pipeline Maturity
 

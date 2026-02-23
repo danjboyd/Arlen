@@ -198,6 +198,15 @@ typedef NS_ENUM(NSUInteger, ALNJobWorkerDisposition) {
 
 @end
 
+@interface ALNRetryingMailAdapter : NSObject <ALNMailAdapter>
+
+@property(nonatomic, assign) NSUInteger maxAttempts;
+@property(nonatomic, assign) NSTimeInterval retryDelaySeconds;
+
+- (instancetype)initWithBaseAdapter:(id<ALNMailAdapter>)baseAdapter;
+
+@end
+
 @interface ALNFileMailAdapter : NSObject <ALNMailAdapter>
 
 - (nullable instancetype)initWithStorageDirectory:(NSString *)storageDirectory
@@ -229,6 +238,15 @@ typedef NS_ENUM(NSUInteger, ALNJobWorkerDisposition) {
 @interface ALNInMemoryAttachmentAdapter : NSObject <ALNAttachmentAdapter>
 
 - (instancetype)initWithAdapterName:(nullable NSString *)adapterName;
+
+@end
+
+@interface ALNRetryingAttachmentAdapter : NSObject <ALNAttachmentAdapter>
+
+@property(nonatomic, assign) NSUInteger maxAttempts;
+@property(nonatomic, assign) NSTimeInterval retryDelaySeconds;
+
+- (instancetype)initWithBaseAdapter:(id<ALNAttachmentAdapter>)baseAdapter;
 
 @end
 

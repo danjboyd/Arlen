@@ -30,7 +30,8 @@ Last updated: 2026-02-23
 - Phase 7A: initial slice implemented (2026-02-23)
 - Phase 7B: initial slice implemented (2026-02-23)
 - Phase 7C: initial slice implemented (2026-02-23)
-- Phase 7D-7H: planned (roadmap defined 2026-02-23)
+- Phase 7D: initial slice implemented (2026-02-23)
+- Phase 7E-7H: planned (roadmap defined 2026-02-23)
 
 ## Completed Today (2026-02-23)
 
@@ -51,6 +52,13 @@ Last updated: 2026-02-23
   - strict readiness startup gating contract (`readinessRequiresStartup` => deterministic `503 not_ready` before startup)
   - deployment runbook operability validation script and smoke integration (`tools/deploy/validate_operability.sh`, `tools/deploy/smoke_release.sh`)
   - Phase 7C contract fixture + docs (`tests/fixtures/phase7c/observability_operability_contracts.json`, `docs/PHASE7C_OBSERVABILITY_OPERABILITY.md`)
+- Implemented Phase 7D initial service-durability slice:
+  - jobs idempotency-key contract (`enqueue` option `idempotencyKey`) for in-memory and file job adapters with deterministic dedupe/release semantics
+  - expanded cache conformance semantics (zero-TTL persistence and `setObject:nil` key-removal contract)
+  - added retry policy wrappers for service durability:
+    - `ALNRetryingMailAdapter` (`maxAttempts`, `retryDelaySeconds`, deterministic exhaustion diagnostics)
+    - `ALNRetryingAttachmentAdapter` (`maxAttempts`, `retryDelaySeconds`, deterministic exhaustion diagnostics)
+  - Phase 7D contract fixture + docs (`tests/fixtures/phase7d/service_durability_contracts.json`, `docs/PHASE7D_SERVICE_DURABILITY.md`)
 - Completed Phase 5A-5E implementation tranche.
 - Added typed schema contracts + typed SQL generation workflow (5D) and validated compile-time/runtime contract behavior.
 - Added Phase 5E hardening coverage:
@@ -189,6 +197,10 @@ Last updated: 2026-02-23
   - service compatibility suite coverage for jobs/cache/i18n/mail/attachments
   - controller-level service helper route verification
   - boomhauer integration tests for service sample routes
+- New Phase 7D checks executed:
+  - job idempotency-key durability tests for in-memory and file adapters (`tests/unit/Phase7DTests.m`)
+  - retry policy wrapper deterministic success/exhaustion diagnostics tests (`tests/unit/Phase7DTests.m`)
+  - cache conformance semantics regression for zero-TTL persistence and nil-removal contracts (`tests/unit/Phase7DTests.m`)
 - New Phase 3F checks executed:
   - `arlen doctor` bootstrap pre-build diagnostics + JSON payload validation
   - ALNPg SQLSTATE/diagnostics regression tests

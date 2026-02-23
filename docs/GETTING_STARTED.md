@@ -264,6 +264,26 @@ These presets generate compile-safe templates and auto-register classes in `conf
 
 `queue-jobs` preset uses `ALNJobWorker` + `ALNJobWorkerRuntime` as an optional worker contract for periodic job draining.
 
+Service durability patterns (Phase 7D):
+
+- keyed job dedupe on enqueue:
+
+```objc
+NSString *jobID = [jobs enqueueJobNamed:@"invoice.sync"
+                                payload:@{ @"invoiceID" : @"42" }
+                                options:@{ @"maxAttempts" : @3,
+                                           @"idempotencyKey" : @"tenant-a:invoice:42" }
+                                  error:&error];
+```
+
+- retry wrapper adapters:
+
+```objc
+id<ALNMailAdapter> mail = [[ALNRetryingMailAdapter alloc] initWithBaseAdapter:baseMailAdapter];
+id<ALNAttachmentAdapter> attachments =
+    [[ALNRetryingAttachmentAdapter alloc] initWithBaseAdapter:baseAttachmentAdapter];
+```
+
 ## 11. Common Environment Variables
 
 Framework/app runtime:
