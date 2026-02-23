@@ -1,0 +1,154 @@
+{
+  "version": "phase5a-v1",
+  "contracts": [
+    {
+      "id": "expression_identifier_binding_safety",
+      "claim": "Expression identifier tokens require safe bindings and deterministic diagnostics for malformed shapes.",
+      "source_docs": [
+        "docs/PHASE4_ROADMAP.md",
+        "docs/ARLEN_DATA.md",
+        "docs/SQL_BUILDER_PHASE4_MIGRATION.md"
+      ],
+      "verification": [
+        {
+          "kind": "unit",
+          "file": "tests/unit/Phase4ATests.m",
+          "test": "testExpressionTemplateRequiresIdentifierBindingsForTokens"
+        },
+        {
+          "kind": "unit",
+          "file": "tests/unit/Phase4ATests.m",
+          "test": "testExpressionTemplateRejectsUnsafeIdentifierBindings"
+        },
+        {
+          "kind": "integration",
+          "file": "tests/unit/PgTests.m",
+          "test": "testSQLBuilderExpressionTemplatesWithIdentifierBindingsExecuteAgainstPostgres"
+        }
+      ],
+      "unsupported_diagnostics": {
+        "domain_symbol": "ALNSQLBuilderErrorDomain",
+        "code_symbols": [
+          "ALNSQLBuilderErrorInvalidArgument",
+          "ALNSQLBuilderErrorInvalidIdentifier"
+        ]
+      }
+    },
+    {
+      "id": "placeholder_contract_contiguity",
+      "claim": "Builder output placeholder numbering remains contiguous and parameter ordering remains deterministic under composition stress.",
+      "source_docs": [
+        "docs/SQL_BUILDER_CONFORMANCE_MATRIX.md",
+        "docs/PHASE4_ROADMAP.md"
+      ],
+      "verification": [
+        {
+          "kind": "conformance",
+          "file": "tests/unit/Phase4ETests.m",
+          "test": "testConformanceMatrixMatchesExpectedSnapshots"
+        },
+        {
+          "kind": "long_run",
+          "file": "tests/unit/Phase4ETests.m",
+          "test": "testPropertyPlaceholderShiftingAcrossExpressionComposition"
+        },
+        {
+          "kind": "long_run",
+          "file": "tests/unit/Phase4ETests.m",
+          "test": "testLongRunRegressionSuiteForNestedExpressionShapes"
+        }
+      ]
+    },
+    {
+      "id": "locking_skip_locked_contract",
+      "claim": "FOR UPDATE and SKIP LOCKED rendering is deterministic and invalid lock combinations fail explicitly.",
+      "source_docs": [
+        "docs/SQL_BUILDER_CONFORMANCE_MATRIX.md",
+        "docs/PHASE4_ROADMAP.md"
+      ],
+      "verification": [
+        {
+          "kind": "unit",
+          "file": "tests/unit/Phase4BTests.m",
+          "test": "testForUpdateSkipLockedSnapshot"
+        },
+        {
+          "kind": "unit",
+          "file": "tests/unit/Phase4BTests.m",
+          "test": "testSkipLockedRequiresForUpdate"
+        },
+        {
+          "kind": "integration",
+          "file": "tests/unit/PgTests.m",
+          "test": "testSQLBuilderPhase4BFeaturesExecuteAgainstPostgres"
+        }
+      ],
+      "unsupported_diagnostics": {
+        "domain_symbol": "ALNSQLBuilderErrorDomain",
+        "code_symbols": [
+          "ALNSQLBuilderErrorInvalidArgument"
+        ]
+      }
+    },
+    {
+      "id": "postgres_upsert_expression_contract",
+      "claim": "PostgreSQL ON CONFLICT expression assignments and DO UPDATE WHERE semantics remain stable in SQL and execution behavior.",
+      "source_docs": [
+        "docs/SQL_BUILDER_CONFORMANCE_MATRIX.md",
+        "docs/ARLEN_DATA.md"
+      ],
+      "verification": [
+        {
+          "kind": "conformance",
+          "file": "tests/unit/Phase4ETests.m",
+          "test": "testConformanceMatrixMatchesExpectedSnapshots"
+        },
+        {
+          "kind": "integration",
+          "file": "tests/unit/PgTests.m",
+          "test": "testPostgresSQLBuilderAdvancedUpsertAssignmentsAndWhereExecute"
+        },
+        {
+          "kind": "integration",
+          "file": "tests/unit/PgTests.m",
+          "test": "testPhase4EConformanceScenariosExecuteAgainstPostgres"
+        }
+      ]
+    },
+    {
+      "id": "builder_diagnostics_redaction_and_cache_contract",
+      "claim": "Builder execution diagnostics emit stable stage metadata while keeping SQL redacted by default and surfacing cache behavior explicitly.",
+      "source_docs": [
+        "docs/ARLEN_DATA.md",
+        "docs/PHASE4_ROADMAP.md"
+      ],
+      "verification": [
+        {
+          "kind": "integration",
+          "file": "tests/unit/PgTests.m",
+          "test": "testBuilderExecutionEmitsStructuredEventsAndUsesCaches"
+        },
+        {
+          "kind": "integration",
+          "file": "tests/unit/PgTests.m",
+          "test": "testBuilderExecutionErrorEventsIncludeSQLStateAndStayRedactedByDefault"
+        }
+      ]
+    },
+    {
+      "id": "adapter_capability_metadata_contract",
+      "claim": "Adapters publish deterministic capability metadata used for dialect expectation mapping and CI contract validation.",
+      "source_docs": [
+        "docs/PHASE5_ROADMAP.md",
+        "docs/PHASE5A_RELIABILITY_CONTRACTS.md"
+      ],
+      "verification": [
+        {
+          "kind": "unit",
+          "file": "tests/unit/Phase5ATests.m",
+          "test": "testAdapterCapabilityMetadataMatchesFixtureContracts"
+        }
+      ]
+    }
+  ]
+}

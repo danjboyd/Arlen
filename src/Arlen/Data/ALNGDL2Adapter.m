@@ -11,6 +11,24 @@
 
 @implementation ALNGDL2Adapter
 
++ (NSDictionary<NSString *, id> *)capabilityMetadata {
+  NSMutableDictionary *metadata = [NSMutableDictionary dictionaryWithDictionary:[ALNPg capabilityMetadata]];
+  metadata[@"adapter"] = @"gdl2";
+  metadata[@"dialect"] = @"compat_fallback_pg";
+  metadata[@"compatibility_mode"] = @"fallback_pg";
+  return [NSDictionary dictionaryWithDictionary:metadata];
+}
+
+- (NSDictionary<NSString *, id> *)capabilityMetadata {
+  NSMutableDictionary *metadata = [NSMutableDictionary dictionaryWithDictionary:[[self class] capabilityMetadata]];
+  metadata[@"migration_mode"] = self.migrationMode ?: @"compat_fallback_pg";
+  metadata[@"supports_native_gdl2_runtime"] = @([[self class] isNativeGDL2RuntimeAvailable]);
+  if (self.fallbackAdapter != nil) {
+    metadata[@"fallback_adapter"] = [self.fallbackAdapter adapterName] ?: @"";
+  }
+  return [NSDictionary dictionaryWithDictionary:metadata];
+}
+
 - (instancetype)initWithConnectionString:(NSString *)connectionString
                            maxConnections:(NSUInteger)maxConnections
                                     error:(NSError **)error {

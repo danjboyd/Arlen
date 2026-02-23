@@ -1,0 +1,95 @@
+{
+  "version": "phase5a-intake-v1",
+  "scenarios": [
+    {
+      "id": "django_skip_locked_requires_lock_mode",
+      "source_framework": "django",
+      "source_area": "select_for_update",
+      "source_reference": "skip_locked must be paired with a locking mode",
+      "bug_class": "locking_contract_misuse",
+      "arlen_contract_id": "locking_skip_locked_contract",
+      "status": "covered",
+      "arlen_tests": [
+        {
+          "file": "tests/unit/Phase4BTests.m",
+          "test": "testSkipLockedRequiresForUpdate"
+        }
+      ]
+    },
+    {
+      "id": "rails_upsert_expression_and_where_guard",
+      "source_framework": "rails",
+      "source_area": "upsert/conflict handling",
+      "source_reference": "conflict-update expressions and conditional updates",
+      "bug_class": "upsert_state_regression",
+      "arlen_contract_id": "postgres_upsert_expression_contract",
+      "status": "covered",
+      "arlen_tests": [
+        {
+          "file": "tests/unit/PgTests.m",
+          "test": "testPostgresSQLBuilderAdvancedUpsertAssignmentsAndWhereExecute"
+        }
+      ]
+    },
+    {
+      "id": "ecto_placeholder_shift_in_composed_queries",
+      "source_framework": "ecto",
+      "source_area": "query composition",
+      "source_reference": "placeholder ordering under nested composition",
+      "bug_class": "parameter_index_shift_regression",
+      "arlen_contract_id": "placeholder_contract_contiguity",
+      "status": "covered",
+      "arlen_tests": [
+        {
+          "file": "tests/unit/Phase4ETests.m",
+          "test": "testPropertyPlaceholderShiftingAcrossExpressionComposition"
+        }
+      ]
+    },
+    {
+      "id": "laravel_identifier_expression_injection_controls",
+      "source_framework": "laravel",
+      "source_area": "query builder raw expressions",
+      "source_reference": "dynamic identifier protection in expression APIs",
+      "bug_class": "identifier_injection_regression",
+      "arlen_contract_id": "expression_identifier_binding_safety",
+      "status": "covered",
+      "arlen_tests": [
+        {
+          "file": "tests/unit/Phase4ATests.m",
+          "test": "testExpressionTemplateRejectsUnsafeIdentifierBindings"
+        }
+      ]
+    },
+    {
+      "id": "phoenix_ecto_redacted_query_event_defaults",
+      "source_framework": "phoenix",
+      "source_area": "query telemetry",
+      "source_reference": "metadata-rich events with safe default redaction",
+      "bug_class": "diagnostic_data_exposure_regression",
+      "arlen_contract_id": "builder_diagnostics_redaction_and_cache_contract",
+      "status": "covered",
+      "arlen_tests": [
+        {
+          "file": "tests/unit/PgTests.m",
+          "test": "testBuilderExecutionErrorEventsIncludeSQLStateAndStayRedactedByDefault"
+        }
+      ]
+    },
+    {
+      "id": "typed_sql_capability_manifest_for_agents",
+      "source_framework": "prisma",
+      "source_area": "typed sql/capability metadata",
+      "source_reference": "typed query surfaces need clear capability signaling",
+      "bug_class": "capability_assumption_mismatch",
+      "arlen_contract_id": "adapter_capability_metadata_contract",
+      "status": "covered",
+      "arlen_tests": [
+        {
+          "file": "tests/unit/Phase5ATests.m",
+          "test": "testAdapterCapabilityMetadataMatchesFixtureContracts"
+        }
+      ]
+    }
+  ]
+}

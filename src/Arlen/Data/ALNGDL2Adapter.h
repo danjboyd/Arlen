@@ -14,6 +14,8 @@ NS_ASSUME_NONNULL_BEGIN
 @property(nonatomic, strong, readonly) ALNPg *fallbackAdapter;
 @property(nonatomic, copy, readonly) NSString *migrationMode;
 
++ (NSDictionary<NSString *, id> *)capabilityMetadata;
+
 - (nullable instancetype)initWithConnectionString:(NSString *)connectionString
                                     maxConnections:(NSUInteger)maxConnections
                                              error:(NSError *_Nullable *_Nullable)error;

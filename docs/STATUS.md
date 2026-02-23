@@ -1,6 +1,6 @@
 # Arlen Status Checkpoint
 
-Last updated: 2026-02-20
+Last updated: 2026-02-23
 
 ## Current Milestone State
 
@@ -186,7 +186,7 @@ Last updated: 2026-02-20
 
 1. Maintain Phase 4 conformance coverage and expand matrix scenarios as new builder capabilities ship.
 2. Add optional dialect-matrix execution validation beyond PostgreSQL where adapters become available.
-3. Evaluate Phase 5 roadmap priorities after Phase 4 completion checkpoint.
+3. Begin Phase 5A reliability contract mapping and external regression intake execution (`docs/PHASE5_ROADMAP.md`).
 
 ## Planned Phase Mapping (Post-4C)
 

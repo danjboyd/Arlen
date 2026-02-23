@@ -1740,6 +1740,27 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result, int rowIndex) {
 
 @implementation ALNPg
 
+- (NSDictionary<NSString *, id> *)capabilityMetadata {
+  return [[self class] capabilityMetadata];
+}
+
++ (NSDictionary<NSString *, id> *)capabilityMetadata {
+  return @{
+    @"adapter" : @"postgresql",
+    @"dialect" : @"postgresql",
+    @"supports_builder_compilation_cache" : @YES,
+    @"supports_builder_diagnostics" : @YES,
+    @"supports_cte" : @YES,
+    @"supports_for_update" : @YES,
+    @"supports_lateral_join" : @YES,
+    @"supports_on_conflict" : @YES,
+    @"supports_recursive_cte" : @YES,
+    @"supports_set_operations" : @YES,
+    @"supports_skip_locked" : @YES,
+    @"supports_window_clauses" : @YES,
+  };
+}
+
 - (NSString *)adapterName {
   return @"postgresql";
 }

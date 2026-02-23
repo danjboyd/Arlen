@@ -45,6 +45,10 @@ typedef NS_ENUM(NSInteger, ALNDatabaseAdapterErrorCode) {
                       NSError *_Nullable *_Nullable error))block
                             error:(NSError *_Nullable *_Nullable)error;
 
+@optional
+
+- (NSDictionary<NSString *, id> *)capabilityMetadata;
+
 @end
 
 FOUNDATION_EXPORT NSError *ALNDatabaseAdapterMakeError(ALNDatabaseAdapterErrorCode code,

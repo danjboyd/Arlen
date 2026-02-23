@@ -1,0 +1,34 @@
+{
+  "version": "phase5a-capabilities-v1",
+  "adapters": {
+    "postgresql": {
+      "adapter": "postgresql",
+      "dialect": "postgresql",
+      "supports_builder_compilation_cache": true,
+      "supports_builder_diagnostics": true,
+      "supports_cte": true,
+      "supports_for_update": true,
+      "supports_lateral_join": true,
+      "supports_on_conflict": true,
+      "supports_recursive_cte": true,
+      "supports_set_operations": true,
+      "supports_skip_locked": true,
+      "supports_window_clauses": true
+    },
+    "gdl2": {
+      "adapter": "gdl2",
+      "dialect": "compat_fallback_pg",
+      "compatibility_mode": "fallback_pg",
+      "supports_builder_compilation_cache": true,
+      "supports_builder_diagnostics": true,
+      "supports_cte": true,
+      "supports_for_update": true,
+      "supports_lateral_join": true,
+      "supports_on_conflict": true,
+      "supports_recursive_cte": true,
+      "supports_set_operations": true,
+      "supports_skip_locked": true,
+      "supports_window_clauses": true
+    }
+  }
+}

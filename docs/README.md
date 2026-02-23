@@ -23,6 +23,7 @@ Open `build/docs/index.html` in your browser.
 - [Ecosystem Services](ECOSYSTEM_SERVICES.md): jobs/cache/i18n/mail/attachment adapter contracts and plugin wiring.
 - [ArlenData Reuse Guide](ARLEN_DATA.md): standalone data-layer packaging, checkout, and versioning policy.
 - [SQL Builder Conformance Matrix](SQL_BUILDER_CONFORMANCE_MATRIX.md): phase-4 SQL snapshot matrix and regression gate map.
+- [Phase 5A Reliability Contracts](PHASE5A_RELIABILITY_CONTRACTS.md): contract map, external regression intake workflow, and adapter capability metadata baselines.
 - [SQL Builder Phase 4 Migration Guide](SQL_BUILDER_PHASE4_MIGRATION.md): migration from string-heavy builder usage to IR/typed patterns.
 - [Propane Manager](PROPANE.md): production process manager and propane accessories.
 - [Release Process](RELEASE_PROCESS.md): semantic versioning, deprecations, and release checklist.
@@ -41,6 +42,7 @@ Open `build/docs/index.html` in your browser.
 - [Phase 2 Roadmap](PHASE2_ROADMAP.md)
 - [Phase 3 Roadmap](PHASE3_ROADMAP.md)
 - [Phase 4 Roadmap](PHASE4_ROADMAP.md)
+- [Phase 5 Roadmap](PHASE5_ROADMAP.md)
 - [Combined Roadmap Index](PHASE2_PHASE3_ROADMAP.md)
 - [Feature Parity Matrix](FEATURE_PARITY_MATRIX.md)
 - [EOC v1 Roadmap](EOC_V1_ROADMAP.md)

@@ -122,6 +122,8 @@ typedef void (^ALNPgQueryDiagnosticsListener)(NSDictionary<NSString *, id> *even
 @property(nonatomic, assign) BOOL emitDiagnosticsEventsToStderr;
 @property(nonatomic, copy, nullable) ALNPgQueryDiagnosticsListener queryDiagnosticsListener;
 
++ (NSDictionary<NSString *, id> *)capabilityMetadata;
+
 - (nullable instancetype)initWithConnectionString:(NSString *)connectionString
                                     maxConnections:(NSUInteger)maxConnections
                                              error:(NSError *_Nullable *_Nullable)error;

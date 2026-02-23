@@ -1,13 +1,14 @@
 # Arlen Phase 2 + Phase 3 Roadmap Index
 
 Status: Active (Phase 2A-2D complete; Phase 3A-3H complete; Phase 4A-4E complete)  
-Last updated: 2026-02-20
+Last updated: 2026-02-23
 
 This index points to the current roadmap documents:
 
 - `docs/PHASE2_ROADMAP.md`
 - `docs/PHASE3_ROADMAP.md`
 - `docs/PHASE4_ROADMAP.md`
+- `docs/PHASE5_ROADMAP.md`
 - `docs/FEATURE_PARITY_MATRIX.md`
 
 ## Summary
@@ -48,9 +49,15 @@ Phase 3 is focused on platform maturity:
 
 Phase 4 rollout is complete in `docs/PHASE4_ROADMAP.md`.
 
+Phase 5 planning is defined in `docs/PHASE5_ROADMAP.md`, including:
+
+- reliability contract mapping for advertised behavior
+- external regression intake (competitor test scenarios translated into Arlen-native contract coverage)
+- multi-database routing/tooling maturity and SQL-first compile-time typed data contracts
+
 Scope guardrails remain unchanged:
 - admin/backoffice and full account-product surfaces remain outside Arlen core and are expected to ship as optional modules/products.
-- full ORM as default layer remains "Maybe Someday", not a Phase 4 default requirement.
+- full ORM as default layer remains "Maybe Someday", not a Phase 5 default requirement.
 
 Maybe Someday backlog:
 - LiveView-like server-driven UI
