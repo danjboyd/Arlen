@@ -371,6 +371,314 @@
                      exitCode:NULL];
 }
 
+- (void)testArlenSchemaCodegenTypedContractsCompileAndDecodeDeterministically {
+  NSString *dsn = [self pgTestDSN];
+  if ([dsn length] == 0) {
+    return;
+  }
+
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *appRoot = [self createTempDirectory];
+  XCTAssertNotNil(appRoot);
+  if (appRoot == nil) {
+    return;
+  }
+
+  NSString *table =
+      [[NSString stringWithFormat:@"phase5d_users_%@", [[NSUUID UUID] UUIDString]] lowercaseString];
+  table = [table stringByReplacingOccurrencesOfString:@"-" withString:@"_"];
+
+  NSError *error = nil;
+  XCTAssertTrue([[NSFileManager defaultManager]
+                    createDirectoryAtPath:[appRoot stringByAppendingPathComponent:@"config/environments"]
+              withIntermediateDirectories:YES
+                               attributes:nil
+                                    error:&error]);
+  XCTAssertNil(error);
+
+  NSString *config =
+      [NSString stringWithFormat:@"{\n"
+                                 "  host = \"127.0.0.1\";\n"
+                                 "  port = 3000;\n"
+                                 "  database = {\n"
+                                 "    connectionString = \"%@\";\n"
+                                 "    poolSize = 2;\n"
+                                 "  };\n"
+                                 "}\n",
+                                 [dsn stringByReplacingOccurrencesOfString:@"\"" withString:@"\\\""]];
+  XCTAssertTrue([config writeToFile:[appRoot stringByAppendingPathComponent:@"config/app.plist"]
+                         atomically:YES
+                           encoding:NSUTF8StringEncoding
+                              error:&error]);
+  XCTAssertNil(error);
+  XCTAssertTrue([@"{}\n" writeToFile:[appRoot stringByAppendingPathComponent:@"config/environments/development.plist"]
+                          atomically:YES
+                            encoding:NSUTF8StringEncoding
+                               error:&error]);
+  XCTAssertNil(error);
+
+  int code = 0;
+  NSString *createOutput =
+      [self runShellCapture:[NSString stringWithFormat:@"psql %s -c \"CREATE TABLE %@(id TEXT NOT NULL, age INTEGER)\"",
+                                                       [dsn UTF8String], table]
+                   exitCode:&code];
+  XCTAssertEqual(0, code, @"%@", createOutput);
+
+  int buildCode = 0;
+  NSString *buildOutput =
+      [self runShellCapture:[NSString stringWithFormat:@"cd %@ && make arlen", repoRoot]
+                   exitCode:&buildCode];
+  XCTAssertEqual(0, buildCode, @"%@", buildOutput);
+
+  NSString *codegenCommand = [NSString stringWithFormat:
+      @"cd %@ && ARLEN_FRAMEWORK_ROOT=%@ %@/build/arlen schema-codegen --env development --prefix ALNDB --typed-contracts --force",
+      appRoot, repoRoot, repoRoot];
+  NSString *codegenOutput = [self runShellCapture:codegenCommand exitCode:&code];
+  XCTAssertEqual(0, code, @"%@", codegenOutput);
+  XCTAssertTrue([codegenOutput containsString:@"typed contracts: enabled"], @"%@", codegenOutput);
+
+  NSString *manifestPath = [appRoot stringByAppendingPathComponent:@"db/schema/arlen_schema.json"];
+  NSData *manifestData = [NSData dataWithContentsOfFile:manifestPath];
+  XCTAssertNotNil(manifestData);
+  NSDictionary *manifest = [NSJSONSerialization JSONObjectWithData:manifestData options:0 error:&error];
+  XCTAssertNotNil(manifest);
+  XCTAssertNil(error);
+  XCTAssertEqualObjects(@YES, manifest[@"typed_contracts"]);
+  NSArray *tables = [manifest[@"tables"] isKindOfClass:[NSArray class]] ? manifest[@"tables"] : @[];
+  XCTAssertTrue([tables count] > 0);
+  NSDictionary *firstTable = [tables firstObject];
+  NSString *className =
+      [firstTable[@"class_name"] isKindOfClass:[NSString class]] ? firstTable[@"class_name"] : nil;
+  NSString *rowClassName =
+      [firstTable[@"row_class_name"] isKindOfClass:[NSString class]] ? firstTable[@"row_class_name"] : nil;
+  NSString *insertClassName =
+      [firstTable[@"insert_class_name"] isKindOfClass:[NSString class]] ? firstTable[@"insert_class_name"] : nil;
+  XCTAssertNotNil(className);
+  XCTAssertNotNil(rowClassName);
+  XCTAssertNotNil(insertClassName);
+  if (className == nil || rowClassName == nil || insertClassName == nil) {
+    (void)[self runShellCapture:[NSString stringWithFormat:@"psql %s -c \"DROP TABLE IF EXISTS %@\" >/dev/null 2>&1",
+                                                           [dsn UTF8String], table]
+                       exitCode:NULL];
+    return;
+  }
+
+  NSString *implPath = [appRoot stringByAppendingPathComponent:@"src/Generated/ALNDBSchema.m"];
+  NSString *smokeSourcePath = [appRoot stringByAppendingPathComponent:@"phase5d_typed_contracts_smoke.m"];
+  NSString *smokeBinaryPath = [appRoot stringByAppendingPathComponent:@"phase5d_typed_contracts_smoke"];
+  NSString *smokeSource =
+      [NSString stringWithFormat:
+                    @"#import <Foundation/Foundation.h>\n"
+                     "#import \"ALNSQLBuilder.h\"\n"
+                     "#import \"ALNDBSchema.h\"\n"
+                     "\n"
+                     "int main(void) {\n"
+                     "  @autoreleasepool {\n"
+                     "    %@ *insertValues = [[%@ alloc] init];\n"
+                     "    insertValues.columnId = @\"u-1\";\n"
+                     "    insertValues.columnAge = @42;\n"
+                     "    NSError *error = nil;\n"
+                     "    ALNSQLBuilder *builder = [%@ insertContract:insertValues];\n"
+                     "    NSDictionary *built = [builder build:&error];\n"
+                     "    if (built == nil || error != nil) {\n"
+                     "      return 1;\n"
+                     "    }\n"
+                     "    %@ *decoded = [%@ decodeTypedRow:@{ @\"id\" : @\"u-1\", @\"age\" : @42 } error:&error];\n"
+                     "    if (decoded == nil || error != nil) {\n"
+                     "      return 2;\n"
+                     "    }\n"
+                     "    error = nil;\n"
+                     "    decoded = [%@ decodeTypedRow:@{ @\"id\" : @42 } error:&error];\n"
+                     "    if (decoded != nil || error == nil) {\n"
+                     "      return 3;\n"
+                     "    }\n"
+                     "    if (![error.domain isEqualToString:ALNDBSchemaTypedDecodeErrorDomain]) {\n"
+                     "      return 4;\n"
+                     "    }\n"
+                     "    fprintf(stdout, \"phase5d-typed-contracts-ok\\n\");\n"
+                     "  }\n"
+                     "  return 0;\n"
+                     "}\n",
+                    insertClassName, insertClassName, className, rowClassName, className, className];
+  XCTAssertTrue([smokeSource writeToFile:smokeSourcePath
+                              atomically:YES
+                                encoding:NSUTF8StringEncoding
+                                   error:&error]);
+  XCTAssertNil(error);
+
+  NSString *compileCommand = [NSString stringWithFormat:
+      @"source /usr/GNUstep/System/Library/Makefiles/GNUstep.sh && clang $(gnustep-config --objc-flags) "
+       "-fobjc-arc -I%@/src/Arlen -I%@/src/Arlen/Data -I%@/src/Generated %@ %@ %@/src/Arlen/Data/ALNSQLBuilder.m "
+       "-o %@ $(gnustep-config --base-libs) -ldl -lcrypto",
+      repoRoot, repoRoot, appRoot, smokeSourcePath, implPath, repoRoot, smokeBinaryPath];
+  NSString *compileOutput = [self runShellCapture:compileCommand exitCode:&code];
+  XCTAssertEqual(0, code, @"%@", compileOutput);
+
+  NSString *runOutput = [self runShellCapture:[NSString stringWithFormat:@"%@", smokeBinaryPath]
+                                     exitCode:&code];
+  XCTAssertEqual(0, code, @"%@", runOutput);
+  XCTAssertTrue([runOutput containsString:@"phase5d-typed-contracts-ok"], @"%@", runOutput);
+
+  NSString *brokenSourcePath = [appRoot stringByAppendingPathComponent:@"phase5d_typed_contracts_broken.m"];
+  NSString *brokenSource =
+      [NSString stringWithFormat:
+                    @"#import <Foundation/Foundation.h>\n"
+                     "#import \"ALNDBSchema.h\"\n"
+                     "\n"
+                     "int main(void) {\n"
+                     "  %@ *row = nil;\n"
+                     "  id bad = row.fieldDoesNotExist;\n"
+                     "  return (bad == nil) ? 0 : 1;\n"
+                     "}\n",
+                    rowClassName];
+  XCTAssertTrue([brokenSource writeToFile:brokenSourcePath
+                               atomically:YES
+                                 encoding:NSUTF8StringEncoding
+                                    error:&error]);
+  XCTAssertNil(error);
+
+  NSString *brokenCompile = [NSString stringWithFormat:
+      @"source /usr/GNUstep/System/Library/Makefiles/GNUstep.sh && clang $(gnustep-config --objc-flags) "
+       "-fobjc-arc -I%@/src/Generated %@ %@ -o %@.broken $(gnustep-config --base-libs) -ldl -lcrypto",
+      appRoot, brokenSourcePath, implPath, smokeBinaryPath];
+  NSString *brokenCompileOutput = [self runShellCapture:brokenCompile exitCode:&code];
+  XCTAssertNotEqual(0, code);
+  XCTAssertTrue([brokenCompileOutput containsString:@"fieldDoesNotExist"], @"%@", brokenCompileOutput);
+
+  (void)[self runShellCapture:[NSString stringWithFormat:@"psql %s -c \"DROP TABLE IF EXISTS %@\" >/dev/null 2>&1",
+                                                         [dsn UTF8String], table]
+                     exitCode:NULL];
+}
+
+- (void)testArlenTypedSQLCodegenGeneratesTypedParameterAndResultHelpers {
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *appRoot = [self createTempDirectory];
+  XCTAssertNotNil(appRoot);
+  if (appRoot == nil) {
+    return;
+  }
+
+  NSError *error = nil;
+  XCTAssertTrue([[NSFileManager defaultManager]
+                    createDirectoryAtPath:[appRoot stringByAppendingPathComponent:@"db/sql/typed"]
+              withIntermediateDirectories:YES
+                               attributes:nil
+                                    error:&error]);
+  XCTAssertNil(error);
+
+  NSString *queryPath = [appRoot stringByAppendingPathComponent:@"db/sql/typed/list_users_by_status.sql"];
+  NSString *query =
+      @"-- arlen:name list_users_by_status\n"
+       "-- arlen:params status:text limit:int\n"
+       "-- arlen:result id:text name:text\n"
+       "SELECT id, name FROM users WHERE status = $1 LIMIT $2;\n";
+  XCTAssertTrue([query writeToFile:queryPath
+                        atomically:YES
+                          encoding:NSUTF8StringEncoding
+                             error:&error]);
+  XCTAssertNil(error);
+
+  int code = 0;
+  NSString *buildOutput =
+      [self runShellCapture:[NSString stringWithFormat:@"cd %@ && make arlen", repoRoot]
+                   exitCode:&code];
+  XCTAssertEqual(0, code, @"%@", buildOutput);
+
+  NSString *command = [NSString stringWithFormat:
+      @"cd %@ && ARLEN_FRAMEWORK_ROOT=%@ %@/build/arlen typed-sql-codegen --force",
+      appRoot, repoRoot, repoRoot];
+  NSString *output = [self runShellCapture:command exitCode:&code];
+  XCTAssertEqual(0, code, @"%@", output);
+  XCTAssertTrue([output containsString:@"Generated typed SQL artifacts"], @"%@", output);
+
+  NSString *headerPath = [appRoot stringByAppendingPathComponent:@"src/Generated/ALNDBTypedSQL.h"];
+  NSString *implPath = [appRoot stringByAppendingPathComponent:@"src/Generated/ALNDBTypedSQL.m"];
+  NSString *manifestPath = [appRoot stringByAppendingPathComponent:@"db/schema/arlen_typed_sql.json"];
+  NSString *header = [NSString stringWithContentsOfFile:headerPath
+                                               encoding:NSUTF8StringEncoding
+                                                  error:&error];
+  XCTAssertNotNil(header);
+  XCTAssertNil(error);
+  NSString *manifest = [NSString stringWithContentsOfFile:manifestPath
+                                                 encoding:NSUTF8StringEncoding
+                                                    error:&error];
+  XCTAssertNotNil(manifest);
+  XCTAssertNil(error);
+  XCTAssertTrue([header containsString:@"ALNDBTypedSQLListUsersByStatusRow"]);
+  XCTAssertTrue([header containsString:@"parametersForListUsersByStatusWithStatus"]);
+  XCTAssertTrue([manifest containsString:@"\"name\": \"list_users_by_status\""]);
+
+  NSString *smokeSourcePath = [appRoot stringByAppendingPathComponent:@"phase5d_typed_sql_smoke.m"];
+  NSString *smokeBinaryPath = [appRoot stringByAppendingPathComponent:@"phase5d_typed_sql_smoke"];
+  NSString *smokeSource =
+      @"#import <Foundation/Foundation.h>\n"
+       "#import \"ALNDBTypedSQL.h\"\n"
+       "\n"
+       "int main(void) {\n"
+       "  @autoreleasepool {\n"
+       "    NSArray *params = [ALNDBTypedSQL parametersForListUsersByStatusWithStatus:@\"active\" limit:@3];\n"
+       "    if ([params count] != 2) {\n"
+       "      return 1;\n"
+       "    }\n"
+       "    NSError *error = nil;\n"
+       "    ALNDBTypedSQLListUsersByStatusRow *row = [ALNDBTypedSQL decodeListUsersByStatusRow:@{ @\"id\" : @\"u1\", @\"name\" : @\"dan\" } error:&error];\n"
+       "    if (row == nil || error != nil) {\n"
+       "      return 2;\n"
+       "    }\n"
+       "    error = nil;\n"
+       "    row = [ALNDBTypedSQL decodeListUsersByStatusRow:@{ @\"id\" : @1, @\"name\" : @\"dan\" } error:&error];\n"
+       "    if (row != nil || error == nil) {\n"
+       "      return 3;\n"
+       "    }\n"
+       "    if (![error.domain isEqualToString:ALNDBTypedSQLErrorDomain]) {\n"
+       "      return 4;\n"
+       "    }\n"
+       "    fprintf(stdout, \"phase5d-typed-sql-ok\\n\");\n"
+       "  }\n"
+       "  return 0;\n"
+       "}\n";
+  XCTAssertTrue([smokeSource writeToFile:smokeSourcePath
+                              atomically:YES
+                                encoding:NSUTF8StringEncoding
+                                   error:&error]);
+  XCTAssertNil(error);
+
+  NSString *compileCommand = [NSString stringWithFormat:
+      @"source /usr/GNUstep/System/Library/Makefiles/GNUstep.sh && clang $(gnustep-config --objc-flags) "
+       "-fobjc-arc -I%@/src/Generated %@ %@ -o %@ $(gnustep-config --base-libs) -ldl -lcrypto",
+      appRoot, smokeSourcePath, implPath, smokeBinaryPath];
+  NSString *compileOutput = [self runShellCapture:compileCommand exitCode:&code];
+  XCTAssertEqual(0, code, @"%@", compileOutput);
+
+  NSString *runOutput = [self runShellCapture:[NSString stringWithFormat:@"%@", smokeBinaryPath]
+                                     exitCode:&code];
+  XCTAssertEqual(0, code, @"%@", runOutput);
+  XCTAssertTrue([runOutput containsString:@"phase5d-typed-sql-ok"], @"%@", runOutput);
+
+  NSString *brokenSourcePath = [appRoot stringByAppendingPathComponent:@"phase5d_typed_sql_broken.m"];
+  NSString *brokenSource =
+      @"#import <Foundation/Foundation.h>\n"
+       "#import \"ALNDBTypedSQL.h\"\n"
+       "int main(void) {\n"
+       "  ALNDBTypedSQLListUsersByStatusRow *row = nil;\n"
+       "  id x = row.fieldMissing;\n"
+       "  return (x == nil) ? 0 : 1;\n"
+       "}\n";
+  XCTAssertTrue([brokenSource writeToFile:brokenSourcePath
+                               atomically:YES
+                                 encoding:NSUTF8StringEncoding
+                                    error:&error]);
+  XCTAssertNil(error);
+
+  NSString *brokenCompile = [NSString stringWithFormat:
+      @"source /usr/GNUstep/System/Library/Makefiles/GNUstep.sh && clang $(gnustep-config --objc-flags) "
+       "-fobjc-arc -I%@/src/Generated %@ %@ -o %@.broken $(gnustep-config --base-libs) -ldl -lcrypto",
+      appRoot, brokenSourcePath, implPath, smokeBinaryPath];
+  NSString *brokenOutput = [self runShellCapture:brokenCompile exitCode:&code];
+  XCTAssertNotEqual(0, code);
+  XCTAssertTrue([brokenOutput containsString:@"fieldMissing"], @"%@", brokenOutput);
+}
+
 - (void)testArlenMigrateCommandSupportsNamedDatabaseTargetsAndFailureRetry {
   NSString *dsn = [self pgTestDSN];
   if ([dsn length] == 0) {

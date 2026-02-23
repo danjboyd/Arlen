@@ -73,7 +73,7 @@ Apply SQL migrations from `db/migrations` to PostgreSQL.
 - per-target migration state table: `arlen_schema_migrations__<target>`
 - target-specific env override: `ARLEN_DATABASE_URL_<TARGET>`
 
-### `arlen schema-codegen [--env <name>] [--database <target>] [--dsn <connection_string>] [--output-dir <path>] [--manifest <path>] [--prefix <ClassPrefix>] [--force]`
+### `arlen schema-codegen [--env <name>] [--database <target>] [--dsn <connection_string>] [--output-dir <path>] [--manifest <path>] [--prefix <ClassPrefix>] [--typed-contracts] [--force]`
 
 Introspect PostgreSQL schema metadata and generate typed table/column helper APIs.
 
@@ -83,6 +83,7 @@ Introspect PostgreSQL schema metadata and generate typed table/column helper API
 - `--output-dir <path>`: destination directory for generated Objective-C files (default: `src/Generated`)
 - `--manifest <path>`: destination JSON manifest path (default: `db/schema/arlen_schema.json`)
 - `--prefix <ClassPrefix>`: class prefix for generated APIs (default: `ALNDB`)
+- `--typed-contracts`: include typed row/insert/update contracts and decode helpers in generated artifacts
 - `--force`: overwrite existing generated files
 
 For non-default targets when path/prefix options are omitted:
@@ -97,6 +98,16 @@ Generated artifacts:
 - `<output-dir>/<prefix>Schema.h`
 - `<output-dir>/<prefix>Schema.m`
 - `<manifest>`
+
+### `arlen typed-sql-codegen [--input-dir <path>] [--output-dir <path>] [--manifest <path>] [--prefix <ClassPrefix>] [--force]`
+
+Compile SQL files with metadata comments into typed parameter/result helpers.
+
+- `--input-dir <path>`: SQL source directory (default: `db/sql/typed`)
+- `--output-dir <path>`: generated Objective-C output directory (default: `src/Generated`)
+- `--manifest <path>`: typed SQL manifest output (default: `db/schema/arlen_typed_sql.json`)
+- `--prefix <ClassPrefix>`: generated class prefix (default: `ALNDB`)
+- `--force`: overwrite existing generated files
 
 ### `arlen boomhauer [server args...]`
 

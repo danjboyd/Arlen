@@ -147,6 +147,8 @@ Implementation notes:
 
 ## 3.4 Phase 5D: Compile-Time Typed Data Contracts (SQL-First)
 
+Status: Initial implementation complete (2026-02-23)
+
 Deliverables:
 
 - Extend schema-codegen outputs beyond symbol helpers to optional typed row/insert/update artifacts.
@@ -159,6 +161,30 @@ Acceptance (required):
 - Compile-time checks fail clearly for broken typed contract usage.
 - Runtime decode mismatch failures are deterministic and test-covered.
 - Existing SQL-builder contract tests continue passing unchanged.
+
+Implementation notes:
+
+- Extended schema codegen for optional typed contract output:
+  - `tools/arlen.m` (`schema-codegen --typed-contracts`)
+  - `src/Arlen/Data/ALNSchemaCodegen.h`
+  - `src/Arlen/Data/ALNSchemaCodegen.m`
+- Generated typed row/insert/update artifacts now include:
+  - typed contract classes per table (`Row`, `Insert`, `Update`)
+  - `insertContract`/`updateContract` helpers
+  - deterministic `decodeTypedRow`/`decodeTypedRows` runtime decode helpers
+  - explicit typed decode error domain + codes in generated output
+- Added optional typed SQL artifact workflow:
+  - `tools/arlen.m` command `typed-sql-codegen`
+  - SQL input files with `-- arlen:name|params|result` metadata compile into typed parameter/result helpers
+- Added 5D unit + integration coverage:
+  - `tests/unit/SchemaCodegenTests.m`
+  - `tests/integration/PostgresIntegrationTests.m`
+    - `testArlenSchemaCodegenTypedContractsCompileAndDecodeDeterministically`
+    - `testArlenTypedSQLCodegenGeneratesTypedParameterAndResultHelpers`
+- Added Phase 5D docs and contract mappings:
+  - `docs/PHASE5D_TYPED_CONTRACTS.md`
+  - updated `tests/fixtures/phase5a/data_layer_reliability_contracts.json`
+  - updated `tests/fixtures/phase5a/external_regression_intake.json`
 
 ## 3.5 Phase 5E: Production Hardening + Confidence Release Pack
 

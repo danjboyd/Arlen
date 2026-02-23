@@ -189,3 +189,26 @@ Schema manifests include `database_target` metadata for deterministic per-target
 Primary reference:
 
 - `docs/PHASE5C_MULTI_DATABASE_TOOLING.md`
+
+## 13. Phase 5D Typed Data Contracts + Typed SQL
+
+Schema codegen now supports optional typed contract output:
+
+- `arlen schema-codegen --typed-contracts`
+
+When enabled, generated schema artifacts include:
+
+- per-table `Row`, `Insert`, and `Update` classes
+- table-level `insertContract` / `updateContract` helpers
+- deterministic runtime decode helpers (`decodeTypedRow`, `decodeTypedRows`)
+- generated decode error domain + error codes
+
+Typed SQL helpers are available through:
+
+- `arlen typed-sql-codegen`
+
+This compiles SQL files with metadata comments into typed parameter/result helper APIs.
+
+Primary reference:
+
+- `docs/PHASE5D_TYPED_CONTRACTS.md`

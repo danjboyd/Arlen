@@ -68,6 +68,66 @@ static NSString *ALNSchemaCodegenPascalSuffix(NSString *identifier) {
   return [NSString stringWithString:suffix];
 }
 
+static BOOL ALNSchemaCodegenIsNullableFromValue(id value) {
+  NSString *text = [[ALNSchemaCodegenStringValue(value) lowercaseString] stringByTrimmingCharactersInSet:
+                                                                         [NSCharacterSet whitespaceAndNewlineCharacterSet]];
+  if ([text isEqualToString:@"no"] || [text isEqualToString:@"false"] || [text isEqualToString:@"0"]) {
+    return NO;
+  }
+  return YES;
+}
+
+static NSDictionary<NSString *, NSString *> *ALNSchemaCodegenTypeDescriptor(NSString *dataType) {
+  NSString *normalized = [[ALNSchemaCodegenStringValue(dataType) lowercaseString]
+      stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+
+  if ([normalized isEqualToString:@"smallint"] || [normalized isEqualToString:@"integer"] ||
+      [normalized isEqualToString:@"bigint"] || [normalized isEqualToString:@"numeric"] ||
+      [normalized isEqualToString:@"decimal"] || [normalized isEqualToString:@"real"] ||
+      [normalized isEqualToString:@"double precision"] || [normalized isEqualToString:@"boolean"]) {
+    return @{
+      @"objcType" : @"NSNumber *",
+      @"runtimeClass" : @"NSNumber",
+      @"propertyAttribute" : @"strong",
+      @"displayType" : ([normalized length] > 0 ? normalized : @"number"),
+    };
+  }
+  if ([normalized isEqualToString:@"bytea"]) {
+    return @{
+      @"objcType" : @"NSData *",
+      @"runtimeClass" : @"NSData",
+      @"propertyAttribute" : @"copy",
+      @"displayType" : @"bytea",
+    };
+  }
+  if ([normalized isEqualToString:@"json"] || [normalized isEqualToString:@"jsonb"]) {
+    return @{
+      @"objcType" : @"id",
+      @"runtimeClass" : @"",
+      @"propertyAttribute" : @"strong",
+      @"displayType" : normalized,
+    };
+  }
+  if ([normalized isEqualToString:@"uuid"] || [normalized isEqualToString:@"text"] ||
+      [normalized hasPrefix:@"character"] || [normalized hasSuffix:@"time zone"] ||
+      [normalized hasPrefix:@"timestamp"] || [normalized isEqualToString:@"date"] ||
+      [normalized isEqualToString:@"time"] || [normalized isEqualToString:@"inet"] ||
+      [normalized isEqualToString:@"cidr"] || [normalized isEqualToString:@"macaddr"]) {
+    return @{
+      @"objcType" : @"NSString *",
+      @"runtimeClass" : @"NSString",
+      @"propertyAttribute" : @"copy",
+      @"displayType" : ([normalized length] > 0 ? normalized : @"text"),
+    };
+  }
+  return @{
+    @"objcType" : @"id",
+    @"runtimeClass" : @"",
+    @"propertyAttribute" : @"strong",
+    @"displayType" : ([normalized length] > 0 ? normalized : @"any"),
+  };
+}
+
 static NSString *ALNSchemaCodegenQualifiedTableName(NSString *schema, NSString *table) {
   if ([schema isEqualToString:@"public"]) {
     return table;
@@ -167,6 +227,14 @@ static NSString *ALNSchemaCodegenJSONEscape(NSString *value) {
     if ([column length] == 0) {
       column = ALNSchemaCodegenStringValue(row[@"column_name"]);
     }
+    NSString *dataType = ALNSchemaCodegenStringValue(row[@"data_type"]);
+    if ([dataType length] == 0) {
+      dataType = ALNSchemaCodegenStringValue(row[@"type"]);
+    }
+    if ([dataType length] == 0) {
+      dataType = @"text";
+    }
+    BOOL nullable = ALNSchemaCodegenIsNullableFromValue(row[@"is_nullable"]);
 
     NSInteger ordinal =
         ALNSchemaCodegenOrdinalValue(row[@"ordinal"], ALNSchemaCodegenOrdinalValue(row[@"ordinal_position"], fallbackOrdinal));
@@ -188,6 +256,8 @@ static NSString *ALNSchemaCodegenJSONEscape(NSString *value) {
       @"table" : table,
       @"column" : column,
       @"ordinal" : @(ordinal),
+      @"dataType" : dataType,
+      @"nullable" : @(nullable),
     }];
   }
 
@@ -220,12 +290,25 @@ static NSString *ALNSchemaCodegenJSONEscape(NSString *value) {
   return [self renderArtifactsFromColumns:rows
                               classPrefix:classPrefix
                            databaseTarget:nil
+                    includeTypedContracts:NO
                                     error:error];
 }
 
 + (NSDictionary<NSString *,id> *)renderArtifactsFromColumns:(NSArray<NSDictionary *> *)rows
                                                  classPrefix:(NSString *)classPrefix
                                               databaseTarget:(NSString *)databaseTarget
+                                                       error:(NSError **)error {
+  return [self renderArtifactsFromColumns:rows
+                              classPrefix:classPrefix
+                           databaseTarget:databaseTarget
+                   includeTypedContracts:NO
+                                    error:error];
+}
+
++ (NSDictionary<NSString *,id> *)renderArtifactsFromColumns:(NSArray<NSDictionary *> *)rows
+                                                 classPrefix:(NSString *)classPrefix
+                                              databaseTarget:(NSString *)databaseTarget
+                                       includeTypedContracts:(BOOL)includeTypedContracts
                                                        error:(NSError **)error {
   NSString *prefix = ALNSchemaCodegenStringValue(classPrefix);
   if ([prefix length] == 0) {
@@ -308,9 +391,20 @@ static NSString *ALNSchemaCodegenJSONEscape(NSString *value) {
     }
     [usedSuffixes addObject:suffix];
 
+    NSString *propertyName = [NSString stringWithFormat:@"column%@", suffix];
+    NSDictionary<NSString *, NSString *> *typeDescriptor =
+        ALNSchemaCodegenTypeDescriptor(entry[@"dataType"]);
+
     [columns addObject:@{
       @"name" : column,
       @"suffix" : suffix,
+      @"propertyName" : propertyName,
+      @"objcType" : typeDescriptor[@"objcType"] ?: @"id",
+      @"runtimeClass" : typeDescriptor[@"runtimeClass"] ?: @"",
+      @"propertyAttribute" : typeDescriptor[@"propertyAttribute"] ?: @"strong",
+      @"dataType" : entry[@"dataType"] ?: @"text",
+      @"displayType" : typeDescriptor[@"displayType"] ?: @"any",
+      @"nullable" : [entry[@"nullable"] respondsToSelector:@selector(boolValue)] ? entry[@"nullable"] : @(YES),
     }];
     totalColumns += 1;
   }
@@ -330,12 +424,109 @@ static NSString *ALNSchemaCodegenJSONEscape(NSString *value) {
   [implementation appendString:@"// Generated by arlen schema-codegen. Do not edit by hand.\n"];
   [implementation appendFormat:@"#import \"%@.h\"\n\n", baseName];
 
+  NSString *typedDecodeErrorEnumName = [NSString stringWithFormat:@"%@TypedDecodeErrorCode", baseName];
+  NSString *typedDecodeErrorDomainName = [NSString stringWithFormat:@"%@TypedDecodeErrorDomain", baseName];
+  NSString *typedDecodeErrorFunctionName = [NSString stringWithFormat:@"%@TypedDecodeError", baseName];
+  if (includeTypedContracts) {
+    [header appendFormat:@"typedef NS_ENUM(NSInteger, %@) {\n", typedDecodeErrorEnumName];
+    [header appendFormat:@"  %@MissingField = 1,\n", typedDecodeErrorEnumName];
+    [header appendFormat:@"  %@InvalidType = 2,\n", typedDecodeErrorEnumName];
+    [header appendString:@"};\n\n"];
+    [header appendFormat:@"FOUNDATION_EXPORT NSString *const %@;\n\n", typedDecodeErrorDomainName];
+
+    [implementation appendFormat:@"NSString *const %@ = @\"Arlen.Data.SchemaCodegen.TypedDecode.%@\";\n\n",
+                                 typedDecodeErrorDomainName,
+                                 baseName];
+    [implementation appendFormat:@"static NSError *%@( %@ code,\n",
+                                 typedDecodeErrorFunctionName,
+                                 typedDecodeErrorEnumName];
+    [implementation appendString:@"                                  NSString *field,\n"];
+    [implementation appendString:@"                                  NSString *expectedType,\n"];
+    [implementation appendString:@"                                  NSString *detail) {\n"];
+    [implementation appendString:@"  NSMutableDictionary *userInfo = [NSMutableDictionary dictionary];\n"];
+    [implementation appendString:@"  userInfo[NSLocalizedDescriptionKey] = detail ?: @\"typed row decode failure\";\n"];
+    [implementation appendString:@"  if ([field length] > 0) {\n"];
+    [implementation appendString:@"    userInfo[@\"field\"] = field;\n"];
+    [implementation appendString:@"  }\n"];
+    [implementation appendString:@"  if ([expectedType length] > 0) {\n"];
+    [implementation appendString:@"    userInfo[@\"expected_type\"] = expectedType;\n"];
+    [implementation appendString:@"  }\n"];
+    [implementation appendFormat:@"  return [NSError errorWithDomain:%@\n", typedDecodeErrorDomainName];
+    [implementation appendString:@"                             code:code\n"];
+    [implementation appendString:@"                         userInfo:userInfo];\n"];
+    [implementation appendString:@"}\n\n"];
+  }
+
   for (NSMutableDictionary *tableDescriptor in tables) {
     NSString *schema = tableDescriptor[@"schema"];
     NSString *table = tableDescriptor[@"table"];
     NSString *className = tableDescriptor[@"className"];
     NSArray *columns = tableDescriptor[@"columns"];
     NSString *qualifiedTable = ALNSchemaCodegenQualifiedTableName(schema, table);
+    NSString *rowClassName = [NSString stringWithFormat:@"%@Row", className];
+    NSString *insertClassName = [NSString stringWithFormat:@"%@Insert", className];
+    NSString *updateClassName = [NSString stringWithFormat:@"%@Update", className];
+
+    if (includeTypedContracts) {
+      [header appendFormat:@"@interface %@ : NSObject\n", rowClassName];
+      for (NSDictionary *column in columns) {
+        NSString *propertyName = column[@"propertyName"];
+        NSString *objcType = column[@"objcType"];
+        NSString *propertyAttribute = column[@"propertyAttribute"];
+        NSString *nullability =
+            [column[@"nullable"] respondsToSelector:@selector(boolValue)] && [column[@"nullable"] boolValue]
+                ? @"nullable"
+                : @"nonnull";
+        [header appendFormat:@"@property(nonatomic, %@, readonly, %@) %@ %@;\n",
+                             propertyAttribute,
+                             nullability,
+                             objcType,
+                             propertyName];
+      }
+      [header appendString:@"- (instancetype)init"];
+      NSUInteger index = 0;
+      for (NSDictionary *column in columns) {
+        NSString *propertyName = column[@"propertyName"];
+        NSString *objcType = column[@"objcType"];
+        NSString *selectorPart = (index == 0)
+                                     ? [NSString stringWithFormat:@"With%@:", ALNSchemaCodegenPascalSuffix(propertyName)]
+                                     : [NSString stringWithFormat:@"%@:", propertyName];
+        [header appendFormat:@"%@(%@)%@", selectorPart, objcType, propertyName];
+        if (index + 1 < [columns count]) {
+          [header appendString:@" "];
+        }
+        index += 1;
+      }
+      [header appendString:@" NS_DESIGNATED_INITIALIZER;\n"];
+      [header appendString:@"- (instancetype)init NS_UNAVAILABLE;\n"];
+      [header appendString:@"@end\n\n"];
+
+      [header appendFormat:@"@interface %@ : NSObject\n", insertClassName];
+      for (NSDictionary *column in columns) {
+        NSString *propertyName = column[@"propertyName"];
+        NSString *objcType = column[@"objcType"];
+        NSString *propertyAttribute = column[@"propertyAttribute"];
+        [header appendFormat:@"@property(nonatomic, %@, nullable) %@ %@;\n",
+                             propertyAttribute,
+                             objcType,
+                             propertyName];
+      }
+      [header appendString:@"- (NSDictionary<NSString *, id> *)builderValues;\n"];
+      [header appendString:@"@end\n\n"];
+
+      [header appendFormat:@"@interface %@ : NSObject\n", updateClassName];
+      for (NSDictionary *column in columns) {
+        NSString *propertyName = column[@"propertyName"];
+        NSString *objcType = column[@"objcType"];
+        NSString *propertyAttribute = column[@"propertyAttribute"];
+        [header appendFormat:@"@property(nonatomic, %@, nullable) %@ %@;\n",
+                             propertyAttribute,
+                             objcType,
+                             propertyName];
+      }
+      [header appendString:@"- (NSDictionary<NSString *, id> *)builderValues;\n"];
+      [header appendString:@"@end\n\n"];
+    }
 
     [header appendFormat:@"@interface %@ : NSObject\n", className];
     [header appendString:@"+ (NSString *)tableName;\n"];
@@ -346,12 +537,90 @@ static NSString *ALNSchemaCodegenJSONEscape(NSString *value) {
     [header appendString:@"+ (ALNSQLBuilder *)insertValues:(NSDictionary<NSString *, id> *)values;\n"];
     [header appendString:@"+ (ALNSQLBuilder *)updateValues:(NSDictionary<NSString *, id> *)values;\n"];
     [header appendString:@"+ (ALNSQLBuilder *)deleteBuilder;\n"];
+    if (includeTypedContracts) {
+      [header appendFormat:@"+ (ALNSQLBuilder *)insertContract:(%@ *)contractValues;\n", insertClassName];
+      [header appendFormat:@"+ (ALNSQLBuilder *)updateContract:(%@ *)contractValues;\n", updateClassName];
+      [header appendFormat:@"+ (nullable %@ *)decodeTypedRow:(NSDictionary<NSString *, id> *)row\n",
+                           rowClassName];
+      [header appendString:@"                            error:(NSError *_Nullable *_Nullable)error;\n"];
+      [header appendFormat:@"+ (nullable NSArray<%@ *> *)decodeTypedRows:(NSArray<NSDictionary<NSString *, id> *> *)rows\n",
+                           rowClassName];
+      [header appendString:@"                                      error:(NSError *_Nullable *_Nullable)error;\n"];
+    }
     for (NSDictionary *column in columns) {
       NSString *suffix = column[@"suffix"];
       [header appendFormat:@"+ (NSString *)column%@;\n", suffix];
       [header appendFormat:@"+ (NSString *)qualifiedColumn%@;\n", suffix];
     }
     [header appendString:@"@end\n\n"];
+
+    if (includeTypedContracts) {
+      [implementation appendFormat:@"@implementation %@\n\n", rowClassName];
+      for (NSDictionary *column in columns) {
+        NSString *propertyName = column[@"propertyName"];
+        NSString *objcType = column[@"objcType"];
+        NSString *propertyAttribute = column[@"propertyAttribute"];
+        [implementation appendFormat:@"@property(nonatomic, %@, readwrite) %@ %@;\n",
+                                     propertyAttribute,
+                                     objcType,
+                                     propertyName];
+      }
+      [implementation appendString:@"\n"];
+      [implementation appendString:@"- (instancetype)init"];
+      NSUInteger initIndex = 0;
+      for (NSDictionary *column in columns) {
+        NSString *propertyName = column[@"propertyName"];
+        NSString *objcType = column[@"objcType"];
+        NSString *selectorPart = (initIndex == 0)
+                                     ? [NSString stringWithFormat:@"With%@:", ALNSchemaCodegenPascalSuffix(propertyName)]
+                                     : [NSString stringWithFormat:@"%@:", propertyName];
+        [implementation appendFormat:@"%@(%@)%@", selectorPart, objcType, propertyName];
+        if (initIndex + 1 < [columns count]) {
+          [implementation appendString:@" "];
+        }
+        initIndex += 1;
+      }
+      [implementation appendString:@" {\n"];
+      [implementation appendString:@"  self = [super init];\n"];
+      [implementation appendString:@"  if (self == nil) {\n"];
+      [implementation appendString:@"    return nil;\n"];
+      [implementation appendString:@"  }\n"];
+      for (NSDictionary *column in columns) {
+        NSString *propertyName = column[@"propertyName"];
+        [implementation appendFormat:@"  _%@ = %@;\n", propertyName, propertyName];
+      }
+      [implementation appendString:@"  return self;\n"];
+      [implementation appendString:@"}\n\n"];
+      [implementation appendString:@"@end\n\n"];
+
+      [implementation appendFormat:@"@implementation %@\n\n", insertClassName];
+      [implementation appendString:@"- (NSDictionary<NSString *, id> *)builderValues {\n"];
+      [implementation appendString:@"  NSMutableDictionary *values = [NSMutableDictionary dictionary];\n"];
+      for (NSDictionary *column in columns) {
+        NSString *name = column[@"name"];
+        NSString *propertyName = column[@"propertyName"];
+        [implementation appendFormat:@"  if (self.%@ != nil) {\n", propertyName];
+        [implementation appendFormat:@"    values[@\"%@\"] = self.%@;\n", name, propertyName];
+        [implementation appendString:@"  }\n"];
+      }
+      [implementation appendString:@"  return values;\n"];
+      [implementation appendString:@"}\n\n"];
+      [implementation appendString:@"@end\n\n"];
+
+      [implementation appendFormat:@"@implementation %@\n\n", updateClassName];
+      [implementation appendString:@"- (NSDictionary<NSString *, id> *)builderValues {\n"];
+      [implementation appendString:@"  NSMutableDictionary *values = [NSMutableDictionary dictionary];\n"];
+      for (NSDictionary *column in columns) {
+        NSString *name = column[@"name"];
+        NSString *propertyName = column[@"propertyName"];
+        [implementation appendFormat:@"  if (self.%@ != nil) {\n", propertyName];
+        [implementation appendFormat:@"    values[@\"%@\"] = self.%@;\n", name, propertyName];
+        [implementation appendString:@"  }\n"];
+      }
+      [implementation appendString:@"  return values;\n"];
+      [implementation appendString:@"}\n\n"];
+      [implementation appendString:@"@end\n\n"];
+    }
 
     [implementation appendFormat:@"@implementation %@\n\n", className];
     [implementation appendFormat:@"+ (NSString *)tableName {\n  return @\"%@\";\n}\n\n",
@@ -388,6 +657,113 @@ static NSString *ALNSchemaCodegenJSONEscape(NSString *value) {
     [implementation appendString:@"  return [ALNSQLBuilder deleteFrom:[self tableName]];\n"];
     [implementation appendString:@"}\n\n"];
 
+    if (includeTypedContracts) {
+      [implementation appendFormat:@"+ (ALNSQLBuilder *)insertContract:(%@ *)contractValues {\n",
+                                   insertClassName];
+      [implementation appendString:@"  return [self insertValues:[contractValues builderValues]];\n"];
+      [implementation appendString:@"}\n\n"];
+      [implementation appendFormat:@"+ (ALNSQLBuilder *)updateContract:(%@ *)contractValues {\n",
+                                   updateClassName];
+      [implementation appendString:@"  return [self updateValues:[contractValues builderValues]];\n"];
+      [implementation appendString:@"}\n\n"];
+      [implementation appendFormat:@"+ (nullable %@ *)decodeTypedRow:(NSDictionary<NSString *, id> *)row\n",
+                                   rowClassName];
+      [implementation appendString:@"                            error:(NSError **)error {\n"];
+      [implementation appendString:@"  if (![row isKindOfClass:[NSDictionary class]]) {\n"];
+      [implementation appendFormat:@"    if (error != NULL) {\n"];
+      [implementation appendFormat:@"      *error = %@( %@InvalidType, @\"row\", @\"NSDictionary\", @\"typed row must be a dictionary\");\n",
+                                   typedDecodeErrorFunctionName,
+                                   typedDecodeErrorEnumName];
+      [implementation appendString:@"    }\n"];
+      [implementation appendString:@"    return nil;\n"];
+      [implementation appendString:@"  }\n"];
+      for (NSDictionary *column in columns) {
+        NSString *name = column[@"name"];
+        NSString *propertyName = column[@"propertyName"];
+        NSString *objcType = column[@"objcType"];
+        NSString *runtimeClass = column[@"runtimeClass"];
+        BOOL nullable = [column[@"nullable"] respondsToSelector:@selector(boolValue)] && [column[@"nullable"] boolValue];
+        NSString *displayType = column[@"displayType"];
+        [implementation appendFormat:@"  id raw%@ = row[@\"%@\"];\n",
+                                     ALNSchemaCodegenPascalSuffix(propertyName),
+                                     name];
+        [implementation appendFormat:@"  if (raw%@ == [NSNull null]) {\n",
+                                     ALNSchemaCodegenPascalSuffix(propertyName)];
+        [implementation appendFormat:@"    raw%@ = nil;\n", ALNSchemaCodegenPascalSuffix(propertyName)];
+        [implementation appendString:@"  }\n"];
+        if (!nullable) {
+          [implementation appendFormat:@"  if (raw%@ == nil) {\n", ALNSchemaCodegenPascalSuffix(propertyName)];
+          [implementation appendString:@"    if (error != NULL) {\n"];
+          [implementation appendFormat:@"      *error = %@( %@MissingField, @\"%@\", @\"%@\", @\"missing required field\");\n",
+                                       typedDecodeErrorFunctionName,
+                                       typedDecodeErrorEnumName,
+                                       name,
+                                       displayType];
+          [implementation appendString:@"    }\n"];
+          [implementation appendString:@"    return nil;\n"];
+          [implementation appendString:@"  }\n"];
+        }
+        if ([runtimeClass length] > 0) {
+          [implementation appendFormat:@"  if (raw%@ != nil && ![raw%@ isKindOfClass:[%@ class]]) {\n",
+                                       ALNSchemaCodegenPascalSuffix(propertyName),
+                                       ALNSchemaCodegenPascalSuffix(propertyName),
+                                       runtimeClass];
+          [implementation appendString:@"    if (error != NULL) {\n"];
+          [implementation appendFormat:@"      *error = %@( %@InvalidType, @\"%@\", @\"%@\", @\"field has unexpected runtime type\");\n",
+                                       typedDecodeErrorFunctionName,
+                                       typedDecodeErrorEnumName,
+                                       name,
+                                       displayType];
+          [implementation appendString:@"    }\n"];
+          [implementation appendString:@"    return nil;\n"];
+          [implementation appendString:@"  }\n"];
+        }
+        [implementation appendFormat:@"  %@ %@ = (%@)raw%@;\n",
+                                     objcType,
+                                     propertyName,
+                                     objcType,
+                                     ALNSchemaCodegenPascalSuffix(propertyName)];
+      }
+      [implementation appendString:@"  return [["];
+      [implementation appendString:rowClassName];
+      [implementation appendString:@" alloc] init"];
+      NSUInteger decodeInitIndex = 0;
+      for (NSDictionary *column in columns) {
+        NSString *propertyName = column[@"propertyName"];
+        NSString *selectorPart = (decodeInitIndex == 0)
+                                     ? [NSString stringWithFormat:@"With%@:", ALNSchemaCodegenPascalSuffix(propertyName)]
+                                     : [NSString stringWithFormat:@"%@:", propertyName];
+        [implementation appendFormat:@"%@%@", selectorPart, propertyName];
+        if (decodeInitIndex + 1 < [columns count]) {
+          [implementation appendString:@" "];
+        }
+        decodeInitIndex += 1;
+      }
+      [implementation appendString:@"];\n"];
+      [implementation appendString:@"}\n\n"];
+      [implementation appendFormat:@"+ (nullable NSArray<%@ *> *)decodeTypedRows:(NSArray<NSDictionary<NSString *, id> *> *)rows\n",
+                                   rowClassName];
+      [implementation appendString:@"                                      error:(NSError **)error {\n"];
+      [implementation appendString:@"  if (![rows isKindOfClass:[NSArray class]]) {\n"];
+      [implementation appendString:@"    if (error != NULL) {\n"];
+      [implementation appendFormat:@"      *error = %@( %@InvalidType, @\"rows\", @\"NSArray\", @\"typed rows must be an array\");\n",
+                                   typedDecodeErrorFunctionName,
+                                   typedDecodeErrorEnumName];
+      [implementation appendString:@"    }\n"];
+      [implementation appendString:@"    return nil;\n"];
+      [implementation appendString:@"  }\n"];
+      [implementation appendString:@"  NSMutableArray *decoded = [NSMutableArray arrayWithCapacity:[rows count]];\n"];
+      [implementation appendString:@"  for (id rawRow in rows) {\n"];
+      [implementation appendFormat:@"    %@ *typed = [self decodeTypedRow:rawRow error:error];\n", rowClassName];
+      [implementation appendString:@"    if (typed == nil) {\n"];
+      [implementation appendString:@"      return nil;\n"];
+      [implementation appendString:@"    }\n"];
+      [implementation appendString:@"    [decoded addObject:typed];\n"];
+      [implementation appendString:@"  }\n"];
+      [implementation appendString:@"  return decoded;\n"];
+      [implementation appendString:@"}\n\n"];
+    }
+
     for (NSDictionary *column in columns) {
       NSString *name = column[@"name"];
       NSString *suffix = column[@"suffix"];
@@ -410,6 +786,7 @@ static NSString *ALNSchemaCodegenJSONEscape(NSString *value) {
   [manifest appendString:@"  \"version\": 1,\n"];
   [manifest appendFormat:@"  \"class_prefix\": \"%@\",\n", ALNSchemaCodegenJSONEscape(prefix)];
   [manifest appendFormat:@"  \"artifact_base_name\": \"%@\",\n", ALNSchemaCodegenJSONEscape(baseName)];
+  [manifest appendFormat:@"  \"typed_contracts\": %@,\n", includeTypedContracts ? @"true" : @"false"];
   if ([normalizedDatabaseTarget length] > 0) {
     [manifest appendFormat:@"  \"database_target\": \"%@\",\n",
                            ALNSchemaCodegenJSONEscape(normalizedDatabaseTarget)];
@@ -420,12 +797,20 @@ static NSString *ALNSchemaCodegenJSONEscape(NSString *value) {
     NSString *schema = tableDescriptor[@"schema"];
     NSString *table = tableDescriptor[@"table"];
     NSString *className = tableDescriptor[@"className"];
+    NSString *rowClassName = [NSString stringWithFormat:@"%@Row", className];
+    NSString *insertClassName = [NSString stringWithFormat:@"%@Insert", className];
+    NSString *updateClassName = [NSString stringWithFormat:@"%@Update", className];
     NSArray *columns = tableDescriptor[@"columns"];
 
     [manifest appendString:@"    {\n"];
     [manifest appendFormat:@"      \"schema\": \"%@\",\n", ALNSchemaCodegenJSONEscape(schema)];
     [manifest appendFormat:@"      \"table\": \"%@\",\n", ALNSchemaCodegenJSONEscape(table)];
     [manifest appendFormat:@"      \"class_name\": \"%@\",\n", ALNSchemaCodegenJSONEscape(className)];
+    if (includeTypedContracts) {
+      [manifest appendFormat:@"      \"row_class_name\": \"%@\",\n", ALNSchemaCodegenJSONEscape(rowClassName)];
+      [manifest appendFormat:@"      \"insert_class_name\": \"%@\",\n", ALNSchemaCodegenJSONEscape(insertClassName)];
+      [manifest appendFormat:@"      \"update_class_name\": \"%@\",\n", ALNSchemaCodegenJSONEscape(updateClassName)];
+    }
     [manifest appendString:@"      \"columns\": ["];
     for (NSUInteger columnIndex = 0; columnIndex < [columns count]; columnIndex++) {
       NSDictionary *column = columns[columnIndex];

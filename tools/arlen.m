@@ -17,7 +17,8 @@ static void PrintUsage(void) {
           "  boomhauer [server args...]\n"
           "  propane [manager args...]\n"
           "  migrate [--env <name>] [--database <target>] [--dsn <connection_string>] [--dry-run]\n"
-          "  schema-codegen [--env <name>] [--database <target>] [--dsn <connection_string>] [--output-dir <path>] [--manifest <path>] [--prefix <ClassPrefix>] [--force]\n"
+          "  schema-codegen [--env <name>] [--database <target>] [--dsn <connection_string>] [--output-dir <path>] [--manifest <path>] [--prefix <ClassPrefix>] [--typed-contracts] [--force]\n"
+          "  typed-sql-codegen [--input-dir <path>] [--output-dir <path>] [--manifest <path>] [--prefix <ClassPrefix>] [--force]\n"
           "  routes\n"
           "  test [--unit|--integration|--all]\n"
           "  perf\n"
@@ -1697,6 +1698,738 @@ static NSString *ResolvePathFromRoot(NSString *root, NSString *rawPath) {
   return [[root stringByAppendingPathComponent:expanded] stringByStandardizingPath];
 }
 
+static NSString *const ALNTypedSQLCodegenErrorDomain = @"Arlen.CLI.TypedSQLCodegen.Error";
+
+static NSError *ALNTypedSQLCodegenError(NSString *message, NSString *detail) {
+  NSMutableDictionary *userInfo = [NSMutableDictionary dictionary];
+  userInfo[NSLocalizedDescriptionKey] = message ?: @"typed sql codegen error";
+  if ([detail length] > 0) {
+    userInfo[@"detail"] = detail;
+  }
+  return [NSError errorWithDomain:ALNTypedSQLCodegenErrorDomain code:1 userInfo:userInfo];
+}
+
+static BOOL ALNTypedSQLIdentifierIsSafe(NSString *value) {
+  if (![value isKindOfClass:[NSString class]] || [value length] == 0) {
+    return NO;
+  }
+  NSCharacterSet *allowed =
+      [NSCharacterSet characterSetWithCharactersInString:@"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_"];
+  if ([[value stringByTrimmingCharactersInSet:allowed] length] > 0) {
+    return NO;
+  }
+  unichar first = [value characterAtIndex:0];
+  return ([[NSCharacterSet letterCharacterSet] characterIsMember:first] || first == '_');
+}
+
+static NSString *ALNTypedSQLPascalSuffix(NSString *identifier) {
+  NSArray<NSString *> *parts = [[Trimmed(identifier) lowercaseString] componentsSeparatedByString:@"_"];
+  NSMutableString *suffix = [NSMutableString string];
+  for (NSString *part in parts) {
+    if ([part length] == 0) {
+      continue;
+    }
+    NSString *first = [[part substringToIndex:1] uppercaseString];
+    NSString *rest = ([part length] > 1) ? [part substringFromIndex:1] : @"";
+    [suffix appendFormat:@"%@%@", first, rest];
+  }
+  if ([suffix length] == 0) {
+    [suffix appendString:@"Query"];
+  }
+  return [NSString stringWithString:suffix];
+}
+
+static NSString *ALNTypedSQLLowerCamel(NSString *identifier) {
+  NSString *pascal = ALNTypedSQLPascalSuffix(identifier);
+  if ([pascal length] == 0) {
+    return @"value";
+  }
+  NSString *first = [[pascal substringToIndex:1] lowercaseString];
+  NSString *rest = ([pascal length] > 1) ? [pascal substringFromIndex:1] : @"";
+  return [NSString stringWithFormat:@"%@%@", first, rest];
+}
+
+static NSDictionary<NSString *, NSString *> *ALNTypedSQLTypeDescriptor(NSString *token, BOOL *nullable) {
+  NSString *normalized = [[Trimmed(token) lowercaseString] copy];
+  BOOL isNullable = NO;
+  if ([normalized hasSuffix:@"?"]) {
+    isNullable = YES;
+    normalized = [normalized substringToIndex:[normalized length] - 1];
+  }
+  if (nullable != NULL) {
+    *nullable = isNullable;
+  }
+  if ([normalized isEqualToString:@"text"] || [normalized isEqualToString:@"string"] ||
+      [normalized isEqualToString:@"uuid"]) {
+    return @{
+      @"objcType" : @"NSString *",
+      @"runtimeClass" : @"NSString",
+      @"propertyAttribute" : @"copy",
+      @"displayType" : normalized,
+    };
+  }
+  if ([normalized isEqualToString:@"int"] || [normalized isEqualToString:@"integer"] ||
+      [normalized isEqualToString:@"number"] || [normalized isEqualToString:@"bool"] ||
+      [normalized isEqualToString:@"boolean"]) {
+    return @{
+      @"objcType" : @"NSNumber *",
+      @"runtimeClass" : @"NSNumber",
+      @"propertyAttribute" : @"strong",
+      @"displayType" : normalized,
+    };
+  }
+  if ([normalized isEqualToString:@"json"]) {
+    return @{
+      @"objcType" : @"id",
+      @"runtimeClass" : @"",
+      @"propertyAttribute" : @"strong",
+      @"displayType" : normalized,
+    };
+  }
+  return @{
+    @"objcType" : @"id",
+    @"runtimeClass" : @"",
+    @"propertyAttribute" : @"strong",
+    @"displayType" : ([normalized length] > 0 ? normalized : @"any"),
+  };
+}
+
+static NSArray<NSDictionary<NSString *, id> *> *ALNTypedSQLParseFieldSpecs(NSString *rawSpec,
+                                                                            NSString *label,
+                                                                            NSError **error) {
+  NSString *spec = Trimmed(rawSpec);
+  if ([spec length] == 0) {
+    return @[];
+  }
+
+  NSString *normalized = [[spec stringByReplacingOccurrencesOfString:@"," withString:@" "]
+      stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+  NSArray<NSString *> *tokens =
+      [normalized componentsSeparatedByCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+  NSMutableArray<NSDictionary<NSString *, id> *> *fields = [NSMutableArray array];
+
+  for (NSString *token in tokens) {
+    NSString *part = Trimmed(token);
+    if ([part length] == 0) {
+      continue;
+    }
+    NSRange separatorRange = [part rangeOfString:@":"];
+    if (separatorRange.location == NSNotFound) {
+      if (error != NULL) {
+        *error = ALNTypedSQLCodegenError(
+            [NSString stringWithFormat:@"%@ entries must use name:type format", label], part);
+      }
+      return nil;
+    }
+    NSString *name = Trimmed([part substringToIndex:separatorRange.location]);
+    NSString *typeToken = Trimmed([part substringFromIndex:separatorRange.location + 1]);
+    if (!ALNTypedSQLIdentifierIsSafe(name)) {
+      if (error != NULL) {
+        *error = ALNTypedSQLCodegenError(
+            [NSString stringWithFormat:@"%@ field identifier is invalid", label], name);
+      }
+      return nil;
+    }
+
+    BOOL nullable = NO;
+    NSDictionary<NSString *, NSString *> *typeDescriptor = ALNTypedSQLTypeDescriptor(typeToken, &nullable);
+    [fields addObject:@{
+      @"name" : name,
+      @"propertyName" : [NSString stringWithFormat:@"field%@", ALNTypedSQLPascalSuffix(name)],
+      @"objcType" : typeDescriptor[@"objcType"] ?: @"id",
+      @"runtimeClass" : typeDescriptor[@"runtimeClass"] ?: @"",
+      @"propertyAttribute" : typeDescriptor[@"propertyAttribute"] ?: @"strong",
+      @"displayType" : typeDescriptor[@"displayType"] ?: @"any",
+      @"nullable" : @(nullable),
+    }];
+  }
+
+  return fields;
+}
+
+static NSString *ALNTypedSQLEscapeObjCString(NSString *value) {
+  NSMutableString *escaped = [NSMutableString stringWithCapacity:[value length] + 8];
+  for (NSUInteger idx = 0; idx < [value length]; idx++) {
+    unichar ch = [value characterAtIndex:idx];
+    switch (ch) {
+      case '"':
+        [escaped appendString:@"\\\""];
+        break;
+      case '\\':
+        [escaped appendString:@"\\\\"];
+        break;
+      case '\n':
+        [escaped appendString:@"\\n"];
+        break;
+      case '\r':
+        [escaped appendString:@"\\r"];
+        break;
+      case '\t':
+        [escaped appendString:@"\\t"];
+        break;
+      default:
+        [escaped appendFormat:@"%C", ch];
+        break;
+    }
+  }
+  return [NSString stringWithString:escaped];
+}
+
+static NSString *ALNTypedSQLJSONEscape(NSString *value) {
+  NSMutableString *escaped = [NSMutableString stringWithCapacity:[value length] + 8];
+  for (NSUInteger idx = 0; idx < [value length]; idx++) {
+    unichar ch = [value characterAtIndex:idx];
+    switch (ch) {
+      case '"':
+        [escaped appendString:@"\\\""];
+        break;
+      case '\\':
+        [escaped appendString:@"\\\\"];
+        break;
+      case '\n':
+        [escaped appendString:@"\\n"];
+        break;
+      case '\r':
+        [escaped appendString:@"\\r"];
+        break;
+      case '\t':
+        [escaped appendString:@"\\t"];
+        break;
+      default:
+        if (ch < 0x20) {
+          [escaped appendFormat:@"\\u%04x", ch];
+        } else {
+          [escaped appendFormat:@"%C", ch];
+        }
+        break;
+    }
+  }
+  return [NSString stringWithString:escaped];
+}
+
+static NSDictionary<NSString *, id> *ALNTypedSQLParseDefinitionAtPath(NSString *path, NSError **error) {
+  NSString *contents = [NSString stringWithContentsOfFile:path
+                                                 encoding:NSUTF8StringEncoding
+                                                    error:error];
+  if (contents == nil) {
+    return nil;
+  }
+
+  NSArray<NSString *> *lines = [contents componentsSeparatedByCharactersInSet:[NSCharacterSet newlineCharacterSet]];
+  NSString *queryName = nil;
+  NSString *paramsSpec = @"";
+  NSString *resultSpec = @"";
+  NSMutableArray<NSString *> *sqlLines = [NSMutableArray array];
+
+  for (NSString *line in lines) {
+    NSString *trimmed = Trimmed(line);
+    if ([trimmed hasPrefix:@"-- arlen:name "]) {
+      queryName = Trimmed([trimmed substringFromIndex:[@"-- arlen:name " length]]);
+      continue;
+    }
+    if ([trimmed hasPrefix:@"-- arlen:params "]) {
+      paramsSpec = Trimmed([trimmed substringFromIndex:[@"-- arlen:params " length]]);
+      continue;
+    }
+    if ([trimmed hasPrefix:@"-- arlen:result "]) {
+      resultSpec = Trimmed([trimmed substringFromIndex:[@"-- arlen:result " length]]);
+      continue;
+    }
+    if ([trimmed hasPrefix:@"--"]) {
+      continue;
+    }
+    if ([trimmed length] > 0) {
+      [sqlLines addObject:trimmed];
+    }
+  }
+
+  if (!ALNTypedSQLIdentifierIsSafe(queryName)) {
+    if (error != NULL) {
+      *error = ALNTypedSQLCodegenError(@"typed SQL query requires '-- arlen:name <identifier>'",
+                                       [path lastPathComponent]);
+    }
+    return nil;
+  }
+
+  NSArray<NSDictionary<NSString *, id> *> *params = ALNTypedSQLParseFieldSpecs(paramsSpec, @"params", error);
+  if (params == nil) {
+    return nil;
+  }
+  NSArray<NSDictionary<NSString *, id> *> *resultFields =
+      ALNTypedSQLParseFieldSpecs(resultSpec, @"result", error);
+  if (resultFields == nil) {
+    return nil;
+  }
+  if ([resultFields count] == 0) {
+    if (error != NULL) {
+      *error = ALNTypedSQLCodegenError(@"typed SQL query requires at least one result field",
+                                       [path lastPathComponent]);
+    }
+    return nil;
+  }
+
+  NSString *sql = [sqlLines componentsJoinedByString:@" "];
+  if ([sql length] == 0) {
+    if (error != NULL) {
+      *error = ALNTypedSQLCodegenError(@"typed SQL query body is empty", [path lastPathComponent]);
+    }
+    return nil;
+  }
+
+  NSString *methodSuffix = ALNTypedSQLPascalSuffix(queryName);
+  return @{
+    @"name" : queryName,
+    @"methodSuffix" : methodSuffix,
+    @"params" : params,
+    @"result" : resultFields,
+    @"sql" : sql,
+    @"sourcePath" : path,
+  };
+}
+
+static NSDictionary<NSString *, id> *ALNTypedSQLRenderArtifacts(NSArray<NSDictionary<NSString *, id> *> *definitions,
+                                                                NSString *classPrefix,
+                                                                NSError **error) {
+  NSString *prefix = Trimmed(classPrefix);
+  if ([prefix length] == 0) {
+    prefix = @"ALNDB";
+  }
+  if (!ALNTypedSQLIdentifierIsSafe(prefix)) {
+    if (error != NULL) {
+      *error = ALNTypedSQLCodegenError(@"class prefix must be a valid identifier", prefix);
+    }
+    return nil;
+  }
+  if ([definitions count] == 0) {
+    if (error != NULL) {
+      *error = ALNTypedSQLCodegenError(@"no typed SQL definitions were provided", @"");
+    }
+    return nil;
+  }
+
+  NSString *baseName = [NSString stringWithFormat:@"%@TypedSQL", prefix];
+  NSString *guard = [NSString stringWithFormat:@"%@_H", [[baseName uppercaseString]
+      stringByReplacingOccurrencesOfString:@"[^A-Z0-9_]" withString:@"_"]];
+  NSString *errorDomainName = [NSString stringWithFormat:@"%@ErrorDomain", baseName];
+  NSString *errorEnumName = [NSString stringWithFormat:@"%@ErrorCode", baseName];
+  NSString *errorBuilderName = [NSString stringWithFormat:@"%@MakeError", baseName];
+
+  NSMutableString *header = [NSMutableString string];
+  [header appendString:@"// Generated by arlen typed-sql-codegen. Do not edit by hand.\n"];
+  [header appendFormat:@"#ifndef %@\n", guard];
+  [header appendFormat:@"#define %@\n\n", guard];
+  [header appendString:@"#import <Foundation/Foundation.h>\n\n"];
+  [header appendString:@"NS_ASSUME_NONNULL_BEGIN\n\n"];
+  [header appendFormat:@"typedef NS_ENUM(NSInteger, %@) {\n", errorEnumName];
+  [header appendFormat:@"  %@MissingField = 1,\n", errorEnumName];
+  [header appendFormat:@"  %@InvalidType = 2,\n", errorEnumName];
+  [header appendString:@"};\n\n"];
+  [header appendFormat:@"FOUNDATION_EXPORT NSString *const %@;\n\n", errorDomainName];
+
+  NSMutableString *implementation = [NSMutableString string];
+  [implementation appendString:@"// Generated by arlen typed-sql-codegen. Do not edit by hand.\n"];
+  [implementation appendFormat:@"#import \"%@.h\"\n\n", baseName];
+  [implementation appendFormat:@"NSString *const %@ = @\"Arlen.CLI.TypedSQL.%@\";\n\n",
+                               errorDomainName,
+                               baseName];
+  [implementation appendFormat:@"static NSError *%@( %@ code,\n", errorBuilderName, errorEnumName];
+  [implementation appendString:@"                            NSString *field,\n"];
+  [implementation appendString:@"                            NSString *expected,\n"];
+  [implementation appendString:@"                            NSString *detail) {\n"];
+  [implementation appendString:@"  NSMutableDictionary *userInfo = [NSMutableDictionary dictionary];\n"];
+  [implementation appendString:@"  userInfo[NSLocalizedDescriptionKey] = detail ?: @\"typed SQL decode failure\";\n"];
+  [implementation appendString:@"  if ([field length] > 0) {\n"];
+  [implementation appendString:@"    userInfo[@\"field\"] = field;\n"];
+  [implementation appendString:@"  }\n"];
+  [implementation appendString:@"  if ([expected length] > 0) {\n"];
+  [implementation appendString:@"    userInfo[@\"expected_type\"] = expected;\n"];
+  [implementation appendString:@"  }\n"];
+  [implementation appendFormat:@"  return [NSError errorWithDomain:%@ code:code userInfo:userInfo];\n", errorDomainName];
+  [implementation appendString:@"}\n\n"];
+
+  for (NSDictionary<NSString *, id> *definition in definitions) {
+    NSString *suffix = definition[@"methodSuffix"];
+    NSString *rowClass = [NSString stringWithFormat:@"%@%@Row", baseName, suffix];
+    NSArray<NSDictionary<NSString *, id> *> *resultFields = definition[@"result"];
+
+    [header appendFormat:@"@interface %@ : NSObject\n", rowClass];
+    for (NSDictionary<NSString *, id> *field in resultFields) {
+      NSString *propertyName = field[@"propertyName"];
+      NSString *objcType = field[@"objcType"];
+      NSString *propertyAttribute = field[@"propertyAttribute"];
+      NSString *nullability =
+          [field[@"nullable"] respondsToSelector:@selector(boolValue)] && [field[@"nullable"] boolValue]
+              ? @"nullable"
+              : @"nonnull";
+      [header appendFormat:@"@property(nonatomic, %@, readonly, %@) %@ %@;\n",
+                           propertyAttribute, nullability, objcType, propertyName];
+    }
+    [header appendString:@"- (instancetype)init"];
+    NSUInteger idx = 0;
+    for (NSDictionary<NSString *, id> *field in resultFields) {
+      NSString *propertyName = field[@"propertyName"];
+      NSString *objcType = field[@"objcType"];
+      NSString *selector =
+          (idx == 0) ? [NSString stringWithFormat:@"With%@:", ALNTypedSQLPascalSuffix(propertyName)]
+                     : [NSString stringWithFormat:@"%@:", propertyName];
+      [header appendFormat:@"%@(%@)%@", selector, objcType, propertyName];
+      if (idx + 1 < [resultFields count]) {
+        [header appendString:@" "];
+      }
+      idx += 1;
+    }
+    [header appendString:@" NS_DESIGNATED_INITIALIZER;\n"];
+    [header appendString:@"- (instancetype)init NS_UNAVAILABLE;\n"];
+    [header appendString:@"@end\n\n"];
+
+    [implementation appendFormat:@"@interface %@ ()\n", rowClass];
+    for (NSDictionary<NSString *, id> *field in resultFields) {
+      NSString *propertyName = field[@"propertyName"];
+      NSString *objcType = field[@"objcType"];
+      NSString *propertyAttribute = field[@"propertyAttribute"];
+      [implementation appendFormat:@"@property(nonatomic, %@, readwrite) %@ %@;\n",
+                                   propertyAttribute, objcType, propertyName];
+    }
+    [implementation appendString:@"@end\n\n"];
+    [implementation appendFormat:@"@implementation %@\n\n", rowClass];
+    [implementation appendString:@"- (instancetype)init"];
+    idx = 0;
+    for (NSDictionary<NSString *, id> *field in resultFields) {
+      NSString *propertyName = field[@"propertyName"];
+      NSString *objcType = field[@"objcType"];
+      NSString *selector =
+          (idx == 0) ? [NSString stringWithFormat:@"With%@:", ALNTypedSQLPascalSuffix(propertyName)]
+                     : [NSString stringWithFormat:@"%@:", propertyName];
+      [implementation appendFormat:@"%@(%@)%@", selector, objcType, propertyName];
+      if (idx + 1 < [resultFields count]) {
+        [implementation appendString:@" "];
+      }
+      idx += 1;
+    }
+    [implementation appendString:@" {\n"];
+    [implementation appendString:@"  self = [super init];\n"];
+    [implementation appendString:@"  if (self == nil) {\n"];
+    [implementation appendString:@"    return nil;\n"];
+    [implementation appendString:@"  }\n"];
+    for (NSDictionary<NSString *, id> *field in resultFields) {
+      NSString *propertyName = field[@"propertyName"];
+      [implementation appendFormat:@"  _%@ = %@;\n", propertyName, propertyName];
+    }
+    [implementation appendString:@"  return self;\n"];
+    [implementation appendString:@"}\n\n"];
+    [implementation appendString:@"@end\n\n"];
+  }
+
+  [header appendFormat:@"@interface %@ : NSObject\n", baseName];
+  for (NSDictionary<NSString *, id> *definition in definitions) {
+    NSString *suffix = definition[@"methodSuffix"];
+    NSArray<NSDictionary<NSString *, id> *> *params = definition[@"params"];
+    NSString *rowClass = [NSString stringWithFormat:@"%@%@Row", baseName, suffix];
+    [header appendFormat:@"+ (NSString *)sql%@;\n", suffix];
+    if ([params count] == 0) {
+      [header appendFormat:@"+ (NSArray *)parametersFor%@;\n", suffix];
+    } else {
+      [header appendFormat:@"+ (NSArray *)parametersFor%@", suffix];
+      NSUInteger paramIdx = 0;
+      for (NSDictionary<NSString *, id> *param in params) {
+        NSString *objcType = param[@"objcType"];
+        NSString *name = ALNTypedSQLLowerCamel(param[@"name"]);
+        NSString *selector =
+            (paramIdx == 0) ? [NSString stringWithFormat:@"With%@:", ALNTypedSQLPascalSuffix(name)]
+                            : [NSString stringWithFormat:@"%@:", name];
+        [header appendFormat:@"%@(%@)%@", selector, objcType, name];
+        if (paramIdx + 1 < [params count]) {
+          [header appendString:@" "];
+        }
+        paramIdx += 1;
+      }
+      [header appendString:@";\n"];
+    }
+    [header appendFormat:@"+ (nullable %@ *)decode%@Row:(NSDictionary<NSString *, id> *)row\n",
+                         rowClass, suffix];
+    [header appendString:@"                            error:(NSError *_Nullable *_Nullable)error;\n"];
+  }
+  [header appendString:@"@end\n\n"];
+  [header appendString:@"NS_ASSUME_NONNULL_END\n\n"];
+  [header appendString:@"#endif\n"];
+
+  [implementation appendFormat:@"@implementation %@\n\n", baseName];
+  for (NSDictionary<NSString *, id> *definition in definitions) {
+    NSString *suffix = definition[@"methodSuffix"];
+    NSArray<NSDictionary<NSString *, id> *> *params = definition[@"params"];
+    NSArray<NSDictionary<NSString *, id> *> *resultFields = definition[@"result"];
+    NSString *rowClass = [NSString stringWithFormat:@"%@%@Row", baseName, suffix];
+    NSString *sql = definition[@"sql"];
+
+    [implementation appendFormat:@"+ (NSString *)sql%@ {\n", suffix];
+    [implementation appendFormat:@"  return @\"%@\";\n", ALNTypedSQLEscapeObjCString(sql)];
+    [implementation appendString:@"}\n\n"];
+
+    if ([params count] == 0) {
+      [implementation appendFormat:@"+ (NSArray *)parametersFor%@ {\n", suffix];
+      [implementation appendString:@"  return @[];\n"];
+      [implementation appendString:@"}\n\n"];
+    } else {
+      [implementation appendFormat:@"+ (NSArray *)parametersFor%@", suffix];
+      NSUInteger paramIdx = 0;
+      for (NSDictionary<NSString *, id> *param in params) {
+        NSString *objcType = param[@"objcType"];
+        NSString *name = ALNTypedSQLLowerCamel(param[@"name"]);
+        NSString *selector =
+            (paramIdx == 0) ? [NSString stringWithFormat:@"With%@:", ALNTypedSQLPascalSuffix(name)]
+                            : [NSString stringWithFormat:@"%@:", name];
+        [implementation appendFormat:@"%@(%@)%@", selector, objcType, name];
+        if (paramIdx + 1 < [params count]) {
+          [implementation appendString:@" "];
+        }
+        paramIdx += 1;
+      }
+      [implementation appendString:@" {\n"];
+      [implementation appendString:@"  return @["];
+      for (NSUInteger idx = 0; idx < [params count]; idx++) {
+        NSDictionary<NSString *, id> *param = params[idx];
+        NSString *name = ALNTypedSQLLowerCamel(param[@"name"]);
+        [implementation appendFormat:@"%@ ?: [NSNull null]", name];
+        if (idx + 1 < [params count]) {
+          [implementation appendString:@", "];
+        }
+      }
+      [implementation appendString:@"];\n"];
+      [implementation appendString:@"}\n\n"];
+    }
+
+    [implementation appendFormat:@"+ (nullable %@ *)decode%@Row:(NSDictionary<NSString *, id> *)row\n",
+                                 rowClass, suffix];
+    [implementation appendString:@"                            error:(NSError **)error {\n"];
+    [implementation appendString:@"  if (![row isKindOfClass:[NSDictionary class]]) {\n"];
+    [implementation appendString:@"    if (error != NULL) {\n"];
+    [implementation appendFormat:@"      *error = %@( %@InvalidType, @\"row\", @\"NSDictionary\", @\"typed SQL row must be a dictionary\");\n",
+                                 errorBuilderName, errorEnumName];
+    [implementation appendString:@"    }\n"];
+    [implementation appendString:@"    return nil;\n"];
+    [implementation appendString:@"  }\n"];
+
+    for (NSDictionary<NSString *, id> *field in resultFields) {
+      NSString *name = field[@"name"];
+      NSString *propertyName = field[@"propertyName"];
+      NSString *objcType = field[@"objcType"];
+      NSString *runtimeClass = field[@"runtimeClass"];
+      BOOL nullable = [field[@"nullable"] respondsToSelector:@selector(boolValue)] && [field[@"nullable"] boolValue];
+      NSString *displayType = field[@"displayType"];
+      NSString *pascalProperty = ALNTypedSQLPascalSuffix(propertyName);
+      [implementation appendFormat:@"  id raw%@ = row[@\"%@\"];\n", pascalProperty, name];
+      [implementation appendFormat:@"  if (raw%@ == [NSNull null]) {\n", pascalProperty];
+      [implementation appendFormat:@"    raw%@ = nil;\n", pascalProperty];
+      [implementation appendString:@"  }\n"];
+      if (!nullable) {
+        [implementation appendFormat:@"  if (raw%@ == nil) {\n", pascalProperty];
+        [implementation appendString:@"    if (error != NULL) {\n"];
+        [implementation appendFormat:@"      *error = %@( %@MissingField, @\"%@\", @\"%@\", @\"missing required result field\");\n",
+                                     errorBuilderName, errorEnumName, name, displayType];
+        [implementation appendString:@"    }\n"];
+        [implementation appendString:@"    return nil;\n"];
+        [implementation appendString:@"  }\n"];
+      }
+      if ([runtimeClass length] > 0) {
+        [implementation appendFormat:@"  if (raw%@ != nil && ![raw%@ isKindOfClass:[%@ class]]) {\n",
+                                     pascalProperty, pascalProperty, runtimeClass];
+        [implementation appendString:@"    if (error != NULL) {\n"];
+        [implementation appendFormat:@"      *error = %@( %@InvalidType, @\"%@\", @\"%@\", @\"result field has unexpected type\");\n",
+                                     errorBuilderName, errorEnumName, name, displayType];
+        [implementation appendString:@"    }\n"];
+        [implementation appendString:@"    return nil;\n"];
+        [implementation appendString:@"  }\n"];
+      }
+      [implementation appendFormat:@"  %@ %@ = (%@)raw%@;\n", objcType, propertyName, objcType, pascalProperty];
+    }
+
+    [implementation appendString:@"  return [["];
+    [implementation appendString:rowClass];
+    [implementation appendString:@" alloc] init"];
+    NSUInteger resultIndex = 0;
+    for (NSDictionary<NSString *, id> *field in resultFields) {
+      NSString *propertyName = field[@"propertyName"];
+      NSString *selector =
+          (resultIndex == 0)
+              ? [NSString stringWithFormat:@"With%@:", ALNTypedSQLPascalSuffix(propertyName)]
+              : [NSString stringWithFormat:@"%@:", propertyName];
+      [implementation appendFormat:@"%@%@", selector, propertyName];
+      if (resultIndex + 1 < [resultFields count]) {
+        [implementation appendString:@" "];
+      }
+      resultIndex += 1;
+    }
+    [implementation appendString:@"];\n"];
+    [implementation appendString:@"}\n\n"];
+  }
+  [implementation appendString:@"@end\n"];
+
+  NSMutableString *manifest = [NSMutableString string];
+  [manifest appendString:@"{\n"];
+  [manifest appendString:@"  \"version\": 1,\n"];
+  [manifest appendFormat:@"  \"class_prefix\": \"%@\",\n", ALNTypedSQLJSONEscape(prefix)];
+  [manifest appendFormat:@"  \"artifact_base_name\": \"%@\",\n", ALNTypedSQLJSONEscape(baseName)];
+  [manifest appendString:@"  \"queries\": [\n"];
+  for (NSUInteger idx = 0; idx < [definitions count]; idx++) {
+    NSDictionary<NSString *, id> *definition = definitions[idx];
+    [manifest appendString:@"    {\n"];
+    [manifest appendFormat:@"      \"name\": \"%@\",\n", ALNTypedSQLJSONEscape(definition[@"name"] ?: @"")];
+    [manifest appendFormat:@"      \"source\": \"%@\"\n",
+                           ALNTypedSQLJSONEscape([definition[@"sourcePath"] lastPathComponent] ?: @"")];
+    [manifest appendString:@"    }"];
+    if (idx + 1 < [definitions count]) {
+      [manifest appendString:@","];
+    }
+    [manifest appendString:@"\n"];
+  }
+  [manifest appendString:@"  ]\n"];
+  [manifest appendString:@"}\n"];
+
+  return @{
+    @"baseName" : baseName,
+    @"header" : [NSString stringWithString:header],
+    @"implementation" : [NSString stringWithString:implementation],
+    @"manifest" : [NSString stringWithString:manifest],
+    @"queryCount" : @([definitions count]),
+  };
+}
+
+static int CommandTypedSQLCodegen(NSArray *args) {
+  NSString *inputDirArg = @"db/sql/typed";
+  NSString *outputDirArg = @"src/Generated";
+  NSString *manifestArg = @"db/schema/arlen_typed_sql.json";
+  NSString *classPrefix = @"ALNDB";
+  BOOL force = NO;
+
+  for (NSUInteger idx = 0; idx < [args count]; idx++) {
+    NSString *arg = args[idx];
+    if ([arg isEqualToString:@"--input-dir"]) {
+      if (idx + 1 >= [args count]) {
+        fprintf(stderr, "arlen typed-sql-codegen: --input-dir requires a value\n");
+        return 2;
+      }
+      inputDirArg = args[++idx];
+    } else if ([arg isEqualToString:@"--output-dir"]) {
+      if (idx + 1 >= [args count]) {
+        fprintf(stderr, "arlen typed-sql-codegen: --output-dir requires a value\n");
+        return 2;
+      }
+      outputDirArg = args[++idx];
+    } else if ([arg isEqualToString:@"--manifest"]) {
+      if (idx + 1 >= [args count]) {
+        fprintf(stderr, "arlen typed-sql-codegen: --manifest requires a value\n");
+        return 2;
+      }
+      manifestArg = args[++idx];
+    } else if ([arg isEqualToString:@"--prefix"]) {
+      if (idx + 1 >= [args count]) {
+        fprintf(stderr, "arlen typed-sql-codegen: --prefix requires a value\n");
+        return 2;
+      }
+      classPrefix = args[++idx];
+    } else if ([arg isEqualToString:@"--force"]) {
+      force = YES;
+    } else if ([arg isEqualToString:@"--help"] || [arg isEqualToString:@"-h"]) {
+      fprintf(stdout,
+              "Usage: arlen typed-sql-codegen [--input-dir <path>] [--output-dir <path>] "
+              "[--manifest <path>] [--prefix <ClassPrefix>] [--force]\n");
+      return 0;
+    } else {
+      fprintf(stderr, "arlen typed-sql-codegen: unknown option %s\n", [arg UTF8String]);
+      return 2;
+    }
+  }
+
+  NSString *appRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *inputDir = ResolvePathFromRoot(appRoot, inputDirArg);
+  NSString *outputDir = ResolvePathFromRoot(appRoot, outputDirArg);
+  NSString *manifestPath = ResolvePathFromRoot(appRoot, manifestArg);
+
+  BOOL isDirectory = NO;
+  if (![[NSFileManager defaultManager] fileExistsAtPath:inputDir isDirectory:&isDirectory] || !isDirectory) {
+    fprintf(stderr, "arlen typed-sql-codegen: input directory not found: %s\n", [inputDir UTF8String]);
+    return 1;
+  }
+
+  NSError *error = nil;
+  NSArray<NSString *> *entries =
+      [[NSFileManager defaultManager] contentsOfDirectoryAtPath:inputDir error:&error];
+  if (entries == nil) {
+    fprintf(stderr, "arlen typed-sql-codegen: failed to read input directory: %s\n",
+            [[error localizedDescription] UTF8String]);
+    return 1;
+  }
+  NSMutableArray<NSString *> *sqlFiles = [NSMutableArray array];
+  for (NSString *entry in entries) {
+    if (![[entry pathExtension] isEqualToString:@"sql"]) {
+      continue;
+    }
+    NSString *fullPath = [inputDir stringByAppendingPathComponent:entry];
+    BOOL childDirectory = NO;
+    if ([[NSFileManager defaultManager] fileExistsAtPath:fullPath isDirectory:&childDirectory] && !childDirectory) {
+      [sqlFiles addObject:fullPath];
+    }
+  }
+  [sqlFiles sortUsingSelector:@selector(compare:)];
+  if ([sqlFiles count] == 0) {
+    fprintf(stderr, "arlen typed-sql-codegen: no .sql files found in %s\n", [inputDir UTF8String]);
+    return 1;
+  }
+
+  NSMutableArray<NSDictionary<NSString *, id> *> *definitions = [NSMutableArray array];
+  NSMutableSet<NSString *> *seenNames = [NSMutableSet set];
+  for (NSString *filePath in sqlFiles) {
+    NSDictionary<NSString *, id> *definition = ALNTypedSQLParseDefinitionAtPath(filePath, &error);
+    if (definition == nil) {
+      fprintf(stderr, "arlen typed-sql-codegen: %s\n", [[error localizedDescription] UTF8String]);
+      return 1;
+    }
+    NSString *name = definition[@"name"];
+    if ([seenNames containsObject:name]) {
+      fprintf(stderr, "arlen typed-sql-codegen: duplicate query name: %s\n", [name UTF8String]);
+      return 1;
+    }
+    [seenNames addObject:name];
+    [definitions addObject:definition];
+  }
+
+  NSDictionary<NSString *, id> *artifacts = ALNTypedSQLRenderArtifacts(definitions, classPrefix, &error);
+  if (artifacts == nil) {
+    fprintf(stderr, "arlen typed-sql-codegen: %s\n", [[error localizedDescription] UTF8String]);
+    return 1;
+  }
+
+  NSString *baseName = [artifacts[@"baseName"] isKindOfClass:[NSString class]] ? artifacts[@"baseName"] : @"ALNDBTypedSQL";
+  NSString *headerPath = [outputDir stringByAppendingPathComponent:[NSString stringWithFormat:@"%@.h", baseName]];
+  NSString *implementationPath = [outputDir stringByAppendingPathComponent:[NSString stringWithFormat:@"%@.m", baseName]];
+
+  if (!WriteTextFile(headerPath, artifacts[@"header"] ?: @"", force, &error)) {
+    fprintf(stderr, "arlen typed-sql-codegen: failed writing %s: %s\n",
+            [headerPath UTF8String], [[error localizedDescription] UTF8String]);
+    return 1;
+  }
+  if (!WriteTextFile(implementationPath, artifacts[@"implementation"] ?: @"", force, &error)) {
+    fprintf(stderr, "arlen typed-sql-codegen: failed writing %s: %s\n",
+            [implementationPath UTF8String], [[error localizedDescription] UTF8String]);
+    return 1;
+  }
+  if (!WriteTextFile(manifestPath, artifacts[@"manifest"] ?: @"", force, &error)) {
+    fprintf(stderr, "arlen typed-sql-codegen: failed writing %s: %s\n",
+            [manifestPath UTF8String], [[error localizedDescription] UTF8String]);
+    return 1;
+  }
+
+  NSInteger queryCount = [artifacts[@"queryCount"] respondsToSelector:@selector(integerValue)]
+                             ? [artifacts[@"queryCount"] integerValue]
+                             : 0;
+  fprintf(stdout, "Generated typed SQL artifacts.\n");
+  fprintf(stdout, "  queries: %ld\n", (long)queryCount);
+  fprintf(stdout, "  header: %s\n", [headerPath UTF8String]);
+  fprintf(stdout, "  implementation: %s\n", [implementationPath UTF8String]);
+  fprintf(stdout, "  manifest: %s\n", [manifestPath UTF8String]);
+  return 0;
+}
+
 static int CommandSchemaCodegen(NSArray *args) {
   NSString *environment = @"development";
   NSString *databaseTarget = @"default";
@@ -1707,6 +2440,7 @@ static int CommandSchemaCodegen(NSArray *args) {
   BOOL outputDirExplicit = NO;
   BOOL manifestExplicit = NO;
   BOOL classPrefixExplicit = NO;
+  BOOL includeTypedContracts = NO;
   BOOL force = NO;
 
   for (NSUInteger idx = 0; idx < [args count]; idx++) {
@@ -1757,10 +2491,12 @@ static int CommandSchemaCodegen(NSArray *args) {
       classPrefixExplicit = YES;
     } else if ([arg isEqualToString:@"--force"]) {
       force = YES;
+    } else if ([arg isEqualToString:@"--typed-contracts"]) {
+      includeTypedContracts = YES;
     } else if ([arg isEqualToString:@"--help"] || [arg isEqualToString:@"-h"]) {
       fprintf(stdout,
               "Usage: arlen schema-codegen [--env <name>] [--database <target>] [--dsn <connection_string>] "
-              "[--output-dir <path>] [--manifest <path>] [--prefix <ClassPrefix>] [--force]\n");
+              "[--output-dir <path>] [--manifest <path>] [--prefix <ClassPrefix>] [--typed-contracts] [--force]\n");
       return 0;
     } else {
       fprintf(stderr, "arlen schema-codegen: unknown option %s\n", [arg UTF8String]);
@@ -1811,7 +2547,7 @@ static int CommandSchemaCodegen(NSArray *args) {
   }
 
   NSString *introspectionSQL =
-      @"SELECT c.table_schema, c.table_name, c.column_name, c.ordinal_position "
+      @"SELECT c.table_schema, c.table_name, c.column_name, c.ordinal_position, c.data_type, c.is_nullable "
        "FROM information_schema.columns c "
        "JOIN information_schema.tables t "
        "  ON t.table_schema = c.table_schema "
@@ -1829,6 +2565,7 @@ static int CommandSchemaCodegen(NSArray *args) {
   NSDictionary *artifacts = [ALNSchemaCodegen renderArtifactsFromColumns:rows
                                                               classPrefix:classPrefix
                                                            databaseTarget:databaseTarget
+                                                    includeTypedContracts:includeTypedContracts
                                                                     error:&error];
   if (artifacts == nil) {
     fprintf(stderr, "arlen schema-codegen: %s\n", [[error localizedDescription] UTF8String]);
@@ -1868,6 +2605,7 @@ static int CommandSchemaCodegen(NSArray *args) {
                               : 0;
   fprintf(stdout, "Generated typed schema artifacts.\n");
   fprintf(stdout, "  database target: %s\n", [databaseTarget UTF8String]);
+  fprintf(stdout, "  typed contracts: %s\n", includeTypedContracts ? "enabled" : "disabled");
   fprintf(stdout, "  tables: %ld\n", (long)tableCount);
   fprintf(stdout, "  columns: %ld\n", (long)columnCount);
   fprintf(stdout, "  header: %s\n", [headerPath UTF8String]);
@@ -2012,6 +2750,9 @@ int main(int argc, const char *argv[]) {
     }
     if ([command isEqualToString:@"schema-codegen"]) {
       return CommandSchemaCodegen(args);
+    }
+    if ([command isEqualToString:@"typed-sql-codegen"]) {
+      return CommandTypedSQLCodegen(args);
     }
     if ([command isEqualToString:@"routes"]) {
       return CommandRoutes();

@@ -284,6 +284,58 @@
           "test": "testRenderArtifactsRejectsInvalidDatabaseTarget"
         }
       ]
+    },
+    {
+      "id": "typed_table_contract_codegen_surface_contract",
+      "claim": "Schema codegen typed-contract mode emits deterministic row/insert/update classes with compile-visible insert/update/decode helper surfaces.",
+      "source_docs": [
+        "docs/PHASE5_ROADMAP.md",
+        "docs/PHASE5D_TYPED_CONTRACTS.md",
+        "docs/ARLEN_DATA.md"
+      ],
+      "verification": [
+        {
+          "kind": "unit",
+          "file": "tests/unit/SchemaCodegenTests.m",
+          "test": "testRenderArtifactsWithTypedContractsIncludesDecodeAndContractSurfaces"
+        },
+        {
+          "kind": "integration",
+          "file": "tests/integration/PostgresIntegrationTests.m",
+          "test": "testArlenSchemaCodegenTypedContractsCompileAndDecodeDeterministically"
+        }
+      ]
+    },
+    {
+      "id": "typed_row_decode_determinism_contract",
+      "claim": "Generated typed row decode helpers fail deterministically with explicit decode error domains/codes on missing field and runtime type mismatch.",
+      "source_docs": [
+        "docs/PHASE5_ROADMAP.md",
+        "docs/PHASE5D_TYPED_CONTRACTS.md"
+      ],
+      "verification": [
+        {
+          "kind": "integration",
+          "file": "tests/integration/PostgresIntegrationTests.m",
+          "test": "testArlenSchemaCodegenTypedContractsCompileAndDecodeDeterministically"
+        }
+      ]
+    },
+    {
+      "id": "typed_sql_artifact_workflow_contract",
+      "claim": "Typed SQL codegen compiles SQL metadata files into deterministic typed parameter/result helpers and catches broken contract usage at compile time.",
+      "source_docs": [
+        "docs/PHASE5_ROADMAP.md",
+        "docs/PHASE5D_TYPED_CONTRACTS.md",
+        "docs/CLI_REFERENCE.md"
+      ],
+      "verification": [
+        {
+          "kind": "integration",
+          "file": "tests/integration/PostgresIntegrationTests.m",
+          "test": "testArlenTypedSQLCodegenGeneratesTypedParameterAndResultHelpers"
+        }
+      ]
     }
   ]
 }

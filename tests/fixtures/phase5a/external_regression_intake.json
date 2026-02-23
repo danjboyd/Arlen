@@ -188,6 +188,55 @@
           "test": "testRenderArtifactsIncludesDatabaseTargetMetadata"
         }
       ]
+    },
+    {
+      "id": "prisma_typed_sql_generated_contract_surface",
+      "source_framework": "prisma",
+      "source_area": "typed SQL client generation",
+      "source_reference": "generated typed query parameter/result surfaces should fail fast on contract drift",
+      "bug_class": "typed_generated_surface_drift",
+      "arlen_contract_id": "typed_sql_artifact_workflow_contract",
+      "status": "covered",
+      "arlen_tests": [
+        {
+          "file": "tests/integration/PostgresIntegrationTests.m",
+          "test": "testArlenTypedSQLCodegenGeneratesTypedParameterAndResultHelpers"
+        }
+      ]
+    },
+    {
+      "id": "ecto_result_cast_mismatch_decode_diagnostics",
+      "source_framework": "ecto",
+      "source_area": "schema/result casting",
+      "source_reference": "result type mismatches should emit deterministic decode diagnostics",
+      "bug_class": "typed_decode_mismatch_silence",
+      "arlen_contract_id": "typed_row_decode_determinism_contract",
+      "status": "covered",
+      "arlen_tests": [
+        {
+          "file": "tests/integration/PostgresIntegrationTests.m",
+          "test": "testArlenSchemaCodegenTypedContractsCompileAndDecodeDeterministically"
+        }
+      ]
+    },
+    {
+      "id": "rails_codegen_model_contract_compile_feedback",
+      "source_framework": "rails",
+      "source_area": "generated model API contracts",
+      "source_reference": "generated type surfaces should expose compile-visible breakage on missing members",
+      "bug_class": "compile_time_contract_regression",
+      "arlen_contract_id": "typed_table_contract_codegen_surface_contract",
+      "status": "covered",
+      "arlen_tests": [
+        {
+          "file": "tests/integration/PostgresIntegrationTests.m",
+          "test": "testArlenSchemaCodegenTypedContractsCompileAndDecodeDeterministically"
+        },
+        {
+          "file": "tests/unit/SchemaCodegenTests.m",
+          "test": "testRenderArtifactsWithTypedContractsIncludesDecodeAndContractSurfaces"
+        }
+      ]
     }
   ]
 }

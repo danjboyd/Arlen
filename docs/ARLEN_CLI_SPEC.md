@@ -1,6 +1,6 @@
 # Arlen CLI Specification
 
-Status: Implemented through Phase 5C  
+Status: Implemented through Phase 5D  
 Last updated: 2026-02-23
 
 ## 1. Purpose
@@ -39,6 +39,7 @@ Implemented command groups:
 - `propane`
 - `migrate`
 - `schema-codegen`
+- `typed-sql-codegen`
 - `routes`
 - `test`
 - `perf`
@@ -127,23 +128,33 @@ Behavior:
 - runs bootstrap diagnostics before any framework build requirement
 - supports machine-readable output for onboarding and CI gating
 
-### 4.13 `arlen schema-codegen [--env <name>] [--database <target>] [--dsn <connection_string>] [--output-dir <path>] [--manifest <path>] [--prefix <ClassPrefix>] [--force]`
+### 4.13 `arlen schema-codegen [--env <name>] [--database <target>] [--dsn <connection_string>] [--output-dir <path>] [--manifest <path>] [--prefix <ClassPrefix>] [--typed-contracts] [--force]`
 
 - introspects PostgreSQL `information_schema` for non-system schemas
 - emits deterministic typed helper artifacts (`<prefix>Schema.h/.m`) and JSON manifest
 - supports overwrite via `--force` for regeneration workflows
+- optional typed table contracts via `--typed-contracts` (row/insert/update + decode helpers)
 - non-default targets use deterministic defaults when not overridden:
   - output dir: `src/Generated/<target>`
   - manifest: `db/schema/arlen_schema_<target>.json`
   - prefix: `ALNDB<PascalTarget>`
   - manifest metadata includes `"database_target"`
 
+### 4.14 `arlen typed-sql-codegen [--input-dir <path>] [--output-dir <path>] [--manifest <path>] [--prefix <ClassPrefix>] [--force]`
+
+- compiles SQL files with `-- arlen:name|params|result` metadata into typed parameter/result helpers
+- default input directory: `db/sql/typed`
+- emits deterministic generated artifacts:
+  - `<output-dir>/<prefix>TypedSQL.h`
+  - `<output-dir>/<prefix>TypedSQL.m`
+  - `<manifest>` (default `db/schema/arlen_typed_sql.json`)
+
 ## 5. Project Awareness
 
 `arlen` operates in two modes:
 
 1. Outside app root: `new`
-2. Inside app root: run/generate/build/test/perf/check/routes/config/migrate/schema-codegen
+2. Inside app root: run/generate/build/test/perf/check/routes/config/migrate/schema-codegen/typed-sql-codegen
 
 Framework root resolution order:
 

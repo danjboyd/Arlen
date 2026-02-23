@@ -314,6 +314,12 @@ Named database target (uses target-aware defaults):
 /path/to/Arlen/bin/arlen schema-codegen --env development --database analytics --force
 ```
 
+Include typed row/insert/update contract artifacts:
+
+```bash
+/path/to/Arlen/bin/arlen schema-codegen --env development --typed-contracts --force
+```
+
 Custom output paths/prefix and overwrite mode:
 
 ```bash
@@ -330,6 +336,21 @@ This generates:
 - `src/Generated/ALNDBSchema.h`
 - `src/Generated/ALNDBSchema.m`
 - `db/schema/arlen_schema.json`
+
+Generate typed SQL parameter/result helpers from SQL files:
+
+```bash
+/path/to/Arlen/bin/arlen typed-sql-codegen --force
+```
+
+Default SQL input format:
+
+```sql
+-- arlen:name list_users_by_status
+-- arlen:params status:text limit:int
+-- arlen:result id:text name:text
+SELECT id, name FROM users WHERE status = $1 LIMIT $2;
+```
 
 ## 14. Builder Query Caching + Diagnostics (Phase 4D)
 

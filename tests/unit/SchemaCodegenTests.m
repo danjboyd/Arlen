@@ -37,6 +37,27 @@
   ];
 }
 
+- (NSArray<NSDictionary *> *)typedSampleRows {
+  return @[
+    @{
+      @"table_schema" : @"public",
+      @"table_name" : @"users",
+      @"column_name" : @"id",
+      @"ordinal_position" : @1,
+      @"data_type" : @"text",
+      @"is_nullable" : @"NO",
+    },
+    @{
+      @"table_schema" : @"public",
+      @"table_name" : @"users",
+      @"column_name" : @"age",
+      @"ordinal_position" : @2,
+      @"data_type" : @"integer",
+      @"is_nullable" : @"YES",
+    },
+  ];
+}
+
 - (void)testRenderArtifactsDeterministicAndSorted {
   NSArray *rows = [self sampleRows];
   NSArray *reversed = [[rows reverseObjectEnumerator] allObjects];
@@ -158,6 +179,39 @@
   XCTAssertNotNil(error);
   XCTAssertEqualObjects(ALNSchemaCodegenErrorDomain, error.domain);
   XCTAssertEqual(ALNSchemaCodegenErrorInvalidArgument, error.code);
+}
+
+- (void)testRenderArtifactsWithTypedContractsIncludesDecodeAndContractSurfaces {
+  NSError *error = nil;
+  NSDictionary *artifacts = [ALNSchemaCodegen renderArtifactsFromColumns:[self typedSampleRows]
+                                                              classPrefix:@"ALNDB"
+                                                           databaseTarget:@"analytics"
+                                                    includeTypedContracts:YES
+                                                                    error:&error];
+  XCTAssertNil(error);
+  XCTAssertNotNil(artifacts);
+
+  NSString *header = [artifacts[@"header"] isKindOfClass:[NSString class]] ? artifacts[@"header"] : @"";
+  NSString *implementation =
+      [artifacts[@"implementation"] isKindOfClass:[NSString class]] ? artifacts[@"implementation"] : @"";
+  NSString *manifest = [artifacts[@"manifest"] isKindOfClass:[NSString class]] ? artifacts[@"manifest"] : @"";
+
+  XCTAssertTrue([header containsString:@"ALNDBSchemaTypedDecodeErrorDomain"]);
+  XCTAssertTrue([header containsString:@"@interface ALNDBPublicUsersRow : NSObject"]);
+  XCTAssertTrue([header containsString:@"@interface ALNDBPublicUsersInsert : NSObject"]);
+  XCTAssertTrue([header containsString:@"@interface ALNDBPublicUsersUpdate : NSObject"]);
+  XCTAssertTrue([header containsString:@"+ (ALNSQLBuilder *)insertContract:(ALNDBPublicUsersInsert *)contractValues;"]);
+  XCTAssertTrue([header containsString:@"+ (nullable ALNDBPublicUsersRow *)decodeTypedRow:(NSDictionary<NSString *, id> *)row"]);
+
+  XCTAssertTrue([implementation containsString:@"Arlen.Data.SchemaCodegen.TypedDecode.ALNDBSchema"]);
+  XCTAssertTrue([implementation containsString:@"+ (ALNSQLBuilder *)insertContract:(ALNDBPublicUsersInsert *)contractValues {"]);
+  XCTAssertTrue([implementation containsString:@"+ (nullable ALNDBPublicUsersRow *)decodeTypedRow:(NSDictionary<NSString *, id> *)row"]);
+  XCTAssertTrue([implementation containsString:@"missing required field"]);
+  XCTAssertTrue([implementation containsString:@"field has unexpected runtime type"]);
+
+  XCTAssertTrue([manifest containsString:@"\"typed_contracts\": true"]);
+  XCTAssertTrue([manifest containsString:@"\"row_class_name\": \"ALNDBPublicUsersRow\""]);
+  XCTAssertTrue([manifest containsString:@"\"insert_class_name\": \"ALNDBPublicUsersInsert\""]);
 }
 
 @end

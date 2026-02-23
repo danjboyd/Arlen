@@ -20,11 +20,17 @@ typedef NS_ENUM(NSInteger, ALNSchemaCodegenErrorCode) {
 
 + (nullable NSDictionary<NSString *, id> *)renderArtifactsFromColumns:(NSArray<NSDictionary *> *)rows
                                                            classPrefix:(NSString *)classPrefix
+                                                                error:(NSError *_Nullable *_Nullable)error;
+
++ (nullable NSDictionary<NSString *, id> *)renderArtifactsFromColumns:(NSArray<NSDictionary *> *)rows
+                                                           classPrefix:(NSString *)classPrefix
+                                                        databaseTarget:(nullable NSString *)databaseTarget
                                                                  error:(NSError *_Nullable *_Nullable)error;
 
 + (nullable NSDictionary<NSString *, id> *)renderArtifactsFromColumns:(NSArray<NSDictionary *> *)rows
                                                            classPrefix:(NSString *)classPrefix
                                                         databaseTarget:(nullable NSString *)databaseTarget
+                                                 includeTypedContracts:(BOOL)includeTypedContracts
                                                                  error:(NSError *_Nullable *_Nullable)error;
 
 @end
