@@ -22,9 +22,9 @@ Recommended app/runtime defaults for production:
 - `logFormat = "json"`
 - `serveStatic = NO` (behind reverse proxy/CDN)
 - explicit `requestLimits`
-- explicit observability policy (`observability.tracePropagationEnabled`, `observability.healthDetailsEnabled`, `observability.readinessRequiresStartup`)
+- explicit observability policy (`observability.tracePropagationEnabled`, `observability.healthDetailsEnabled`, `observability.readinessRequiresStartup`, `observability.readinessRequiresClusterQuorum`)
 - explicit propane accessories (`workerCount`, shutdown/reload timings)
-- explicit cluster settings when running multi-node (`cluster.enabled`, `cluster.name`, `cluster.expectedNodes`)
+- explicit cluster settings when running multi-node (`cluster.enabled`, `cluster.name`, `cluster.expectedNodes`, `cluster.observedNodes`)
 
 API-only mode (`apiOnly = YES`, or `ARLEN_API_ONLY=1`) defaults to:
 
@@ -52,11 +52,25 @@ Strict readiness mode:
 - set `observability.readinessRequiresStartup = YES` (or `ARLEN_READINESS_REQUIRES_STARTUP=1`)
 - before startup completes, `GET /readyz` returns deterministic `503 not_ready`
 
+Cluster quorum readiness mode:
+
+- set `observability.readinessRequiresClusterQuorum = YES` (or `ARLEN_READINESS_REQUIRES_CLUSTER_QUORUM=1`)
+- in multi-node mode, `GET /readyz` returns deterministic `503 not_ready` when `cluster.observedNodes < cluster.expectedNodes`
+- JSON readiness payload includes `checks.cluster_quorum` diagnostics (`ok`, `required_for_readyz`, `status`, `observed_nodes`, `expected_nodes`)
+
+Cluster status payload (`/clusterz`) includes distributed-runtime diagnostics:
+
+- `cluster.quorum` summary (`status`, `met`, observed/expected nodes)
+- `coordination` section with capability boundaries for cross-node routing/fanout/jobs/cache semantics
+
 When `cluster.emitHeaders = YES` (default), responses include:
 
 - `X-Arlen-Cluster`
 - `X-Arlen-Node`
 - `X-Arlen-Worker-Pid`
+- `X-Arlen-Cluster-Status`
+- `X-Arlen-Cluster-Observed-Nodes`
+- `X-Arlen-Cluster-Expected-Nodes`
 
 ## 5. Immutable Release Artifact Workflow
 
@@ -211,7 +225,7 @@ This validates:
 | Capability | Current state | Verification |
 | --- | --- | --- |
 | Rolling reload in `propane` | Available | Integration-tested |
-| Cluster identity/status contract (`/clusterz` + response headers) | Available | Unit + integration tests |
+| Cluster identity/status contract (`/clusterz` + response headers) | Available (with quorum + coordination depth) | Unit + integration tests |
 | Immutable release artifact workflow | Available | Deployment integration test |
 | Explicit migration step in runbook | Available | Scripted release metadata + docs |
 | Readiness/liveness endpoint contract | Available | Unit + integration tests |

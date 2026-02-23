@@ -1,6 +1,6 @@
 # Arlen Phase 7 Roadmap
 
-Status: Active (Phase 7A, 7B, 7C, 7D, 7E, 7F, and 7G initial slices implemented; follow-on in progress)  
+Status: Active (Phase 7A, 7B, 7C, 7D, 7E, 7F, 7G, and 7H initial slices implemented; follow-on in progress)  
 Last updated: 2026-02-23
 
 Related docs:
@@ -13,6 +13,7 @@ Related docs:
 - `docs/PHASE7E_TEMPLATE_PIPELINE_MATURITY.md`
 - `docs/PHASE7F_FRONTEND_STARTERS.md`
 - `docs/PHASE7G_CODING_AGENT_DX_CONTRACTS.md`
+- `docs/PHASE7H_DISTRIBUTED_RUNTIME_DEPTH.md`
 - `docs/STATUS.md`
 - `docs/FEATURE_PARITY_MATRIX.md`
 - `docs/PROPANE.md`
@@ -313,7 +314,7 @@ Implementation notes (initial slice, 2026-02-23):
 
 ## 3.8 Phase 7H: Distributed Runtime Depth
 
-Status: Planned
+Status: Initial slice implemented (2026-02-23); remaining 7H deliverables in progress
 
 Deliverables:
 
@@ -328,13 +329,41 @@ Acceptance (required):
 - Capability boundaries are explicit and documented.
 - Operational diagnostics support rapid incident triage.
 
+Implementation notes (initial slice, 2026-02-23):
+
+- Added quorum-aware readiness contract controls:
+  - `observability.readinessRequiresClusterQuorum` (default `NO`)
+  - `cluster.observedNodes` (default `cluster.expectedNodes`)
+  - env overrides with legacy fallback support:
+    - `ARLEN_READINESS_REQUIRES_CLUSTER_QUORUM`
+    - `ARLEN_CLUSTER_OBSERVED_NODES`
+- Added deterministic readiness quorum gating behavior:
+  - `GET /readyz` returns `503 not_ready` when quorum is required and not met
+  - JSON readiness payload includes `checks.cluster_quorum` diagnostics
+- Expanded `/clusterz` distributed-runtime contract payload:
+  - `cluster.observed_nodes`
+  - `cluster.quorum` summary (`status`, `met`, `observed_nodes`, `expected_nodes`)
+  - `coordination` section with explicit capability matrix boundaries
+- Added deterministic cluster diagnostics response headers:
+  - `X-Arlen-Cluster-Status`
+  - `X-Arlen-Cluster-Observed-Nodes`
+  - `X-Arlen-Cluster-Expected-Nodes`
+- Added executable contract fixture and docs:
+  - `tests/fixtures/phase7h/distributed_runtime_contracts.json`
+  - `docs/PHASE7H_DISTRIBUTED_RUNTIME_DEPTH.md`
+- Added regression coverage:
+  - `tests/unit/ConfigTests.m` (quorum/observed node config defaults + env/legacy behavior)
+  - `tests/unit/ApplicationTests.m` (quorum-gated readiness + `/clusterz` coordination payload)
+  - `tests/integration/HTTPIntegrationTests.m` (headers + readiness failure-mode coverage)
+  - `tests/unit/Phase7HTests.m` (fixture schema/reference integrity)
+
 ## 4. Suggested Execution Sequence
 
 Recommended sequencing for adoption impact and risk reduction:
 
 1. Wave 1: Phase 7A + Phase 7B (initial slices complete)
 2. Wave 2: Phase 7C + Phase 7D + Phase 7E (initial slices complete)
-3. Wave 3: Phase 7H
+3. Wave 3: Phase 7H (initial slice complete; follow-on in progress)
 
 ## 5. Testing and Quality Strategy
 

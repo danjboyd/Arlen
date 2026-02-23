@@ -130,6 +130,19 @@ ARLEN_READINESS_REQUIRES_STARTUP=1 ./bin/boomhauer
 
 With this setting, `GET /readyz` returns deterministic `503 not_ready` until startup completes.
 
+Cluster quorum readiness override (multi-node deployments):
+
+```bash
+ARLEN_CLUSTER_ENABLED=1 \
+ARLEN_CLUSTER_EXPECTED_NODES=3 \
+ARLEN_CLUSTER_OBSERVED_NODES=2 \
+ARLEN_READINESS_REQUIRES_CLUSTER_QUORUM=1 \
+./bin/boomhauer
+```
+
+With this setting, `GET /readyz` returns deterministic `503 not_ready` until observed nodes
+meet expected quorum.
+
 ## 4. Run Tests and Quality Gates
 
 ```bash

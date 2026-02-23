@@ -51,6 +51,7 @@ static void ALNSetStructuredErrorResponse(ALNResponse *response,
 @property(nonatomic, copy, readwrite) NSString *clusterName;
 @property(nonatomic, copy, readwrite) NSString *clusterNodeID;
 @property(nonatomic, assign, readwrite) NSUInteger clusterExpectedNodes;
+@property(nonatomic, assign, readwrite) NSUInteger clusterObservedNodes;
 @property(nonatomic, assign, readwrite) BOOL clusterEmitHeaders;
 @property(nonatomic, copy) NSString *i18nDefaultLocale;
 @property(nonatomic, copy) NSString *i18nFallbackLocale;
@@ -146,6 +147,12 @@ static void ALNSetStructuredErrorResponse(ALNResponse *response,
             ? [expectedNodesValue unsignedIntegerValue]
             : (NSUInteger)1;
     _clusterExpectedNodes = (expectedNodes < 1) ? 1 : expectedNodes;
+    id observedNodesValue = cluster[@"observedNodes"];
+    NSUInteger observedNodes =
+        [observedNodesValue respondsToSelector:@selector(unsignedIntegerValue)]
+            ? [observedNodesValue unsignedIntegerValue]
+            : _clusterExpectedNodes;
+    _clusterObservedNodes = observedNodes;
     id emitHeadersValue = cluster[@"emitHeaders"];
     _clusterEmitHeaders = [emitHeadersValue respondsToSelector:@selector(boolValue)]
                               ? [emitHeadersValue boolValue]
@@ -1061,6 +1068,45 @@ static BOOL ALNReadinessRequiresStartup(ALNApplication *application) {
   return ALNBoolConfigValue(observability[@"readinessRequiresStartup"], NO);
 }
 
+static BOOL ALNReadinessRequiresClusterQuorum(ALNApplication *application) {
+  NSDictionary *observability = ALNObservabilityConfig(application);
+  return ALNBoolConfigValue(observability[@"readinessRequiresClusterQuorum"], NO);
+}
+
+static NSString *ALNClusterCoordinationStatus(ALNApplication *application) {
+  if (!application.clusterEnabled) {
+    return @"single_node";
+  }
+  NSUInteger expectedNodes = (application.clusterExpectedNodes < 1) ? 1 : application.clusterExpectedNodes;
+  NSUInteger observedNodes = application.clusterObservedNodes;
+  if (observedNodes == 0) {
+    return @"partitioned";
+  }
+  if (observedNodes < expectedNodes) {
+    return @"degraded";
+  }
+  return @"nominal";
+}
+
+static BOOL ALNClusterQuorumMet(ALNApplication *application) {
+  if (!application.clusterEnabled) {
+    return YES;
+  }
+  NSUInteger expectedNodes = (application.clusterExpectedNodes < 1) ? 1 : application.clusterExpectedNodes;
+  return application.clusterObservedNodes >= expectedNodes;
+}
+
+static NSDictionary *ALNClusterQuorumSummary(ALNApplication *application) {
+  NSUInteger expectedNodes = (application.clusterExpectedNodes < 1) ? 1 : application.clusterExpectedNodes;
+  NSUInteger observedNodes = application.clusterObservedNodes;
+  return @{
+    @"status" : ALNClusterCoordinationStatus(application),
+    @"met" : @(ALNClusterQuorumMet(application)),
+    @"observed_nodes" : @(observedNodes),
+    @"expected_nodes" : @(expectedNodes),
+  };
+}
+
 static NSDictionary *ALNTraceExportPayload(ALNPerfTrace *trace,
                                            NSString *requestID,
                                            NSDictionary *traceContext,
@@ -1233,7 +1279,8 @@ static NSDictionary *ALNOperationalSignalPayload(ALNApplication *application,
                                                  NSString *signal,
                                                  BOOL ok,
                                                  BOOL startupReady,
-                                                 BOOL readinessRequiresStartup) {
+                                                 BOOL readinessRequiresStartup,
+                                                 BOOL readinessRequiresClusterQuorum) {
   NSDictionary *metricsSnapshot = [application.metrics snapshot];
   NSDictionary *gauges = [metricsSnapshot[@"gauges"] isKindOfClass:[NSDictionary class]]
                              ? metricsSnapshot[@"gauges"]
@@ -1266,6 +1313,18 @@ static NSDictionary *ALNOperationalSignalPayload(ALNApplication *application,
     @"started" : @(startupReady),
     @"required_for_readyz" : @(readinessRequiresStartup),
   };
+  NSDictionary *quorumSummary = ALNClusterQuorumSummary(application);
+  BOOL quorumMet = [quorumSummary[@"met"] respondsToSelector:@selector(boolValue)]
+                       ? [quorumSummary[@"met"] boolValue]
+                       : YES;
+  BOOL quorumRequired = readinessRequiresClusterQuorum && application.clusterEnabled;
+  checks[@"cluster_quorum"] = @{
+    @"ok" : @(quorumMet || !quorumRequired),
+    @"required_for_readyz" : @(quorumRequired),
+    @"status" : quorumSummary[@"status"] ?: @"single_node",
+    @"observed_nodes" : quorumSummary[@"observed_nodes"] ?: @(application.clusterObservedNodes),
+    @"expected_nodes" : quorumSummary[@"expected_nodes"] ?: @(application.clusterExpectedNodes),
+  };
 
   NSMutableDictionary *payload = [NSMutableDictionary dictionary];
   payload[@"ok"] = @(ok);
@@ -1285,6 +1344,7 @@ static NSDictionary *ALNClusterStatusPayload(ALNApplication *application) {
   BOOL sessionEnabled = ALNBoolConfigValue(session[@"enabled"], NO);
   BOOL sessionSecretConfigured =
       [ALNStringConfigValue(session[@"secret"], @"") length] > 0;
+  NSDictionary *quorumSummary = ALNClusterQuorumSummary(application);
 
   return @{
     @"ok" : @(YES),
@@ -1293,8 +1353,10 @@ static NSDictionary *ALNClusterStatusPayload(ALNApplication *application) {
       @"name" : application.clusterName ?: @"default",
       @"node_id" : application.clusterNodeID ?: @"node",
       @"expected_nodes" : @(application.clusterExpectedNodes),
+      @"observed_nodes" : @(application.clusterObservedNodes),
       @"worker_pid" : @((NSInteger)getpid()),
       @"mode" : application.clusterEnabled ? @"multi_node" : @"single_node",
+      @"quorum" : quorumSummary,
     },
     @"contracts" : @{
       @"session" : @{
@@ -1306,6 +1368,16 @@ static NSDictionary *ALNClusterStatusPayload(ALNApplication *application) {
       @"realtime" : @{
         @"mode" : @"node_local_pubsub",
         @"cluster_broadcast" : @"external_broker_required",
+      }
+    },
+    @"coordination" : @{
+      @"membership_source" : @"static_config",
+      @"state" : quorumSummary[@"status"] ?: @"single_node",
+      @"capability_matrix" : @{
+        @"cross_node_request_routing" : @"external_load_balancer_required",
+        @"cross_node_realtime_fanout" : @"external_broker_required",
+        @"cross_node_jobs_deduplication" : @"external_queue_required",
+        @"cross_node_cache_coherence" : @"external_cache_required",
       }
     }
   };
@@ -1357,11 +1429,19 @@ static BOOL ALNApplyBuiltInResponse(ALNApplication *application,
   if ([healthBody length] > 0) {
     BOOL healthDetailsEnabled = ALNHealthDetailsEnabled(application);
     BOOL readinessRequiresStartup = ALNReadinessRequiresStartup(application);
+    BOOL readinessRequiresClusterQuorum = ALNReadinessRequiresClusterQuorum(application);
+    BOOL clusterQuorumMet = ALNClusterQuorumMet(application);
     NSString *signal = ALNHealthSignalNameForPath(healthPath);
     BOOL startupReady = application.isStarted;
-    BOOL ready = ![signal isEqualToString:@"ready"] ||
-                 !readinessRequiresStartup ||
-                 startupReady;
+    BOOL ready = YES;
+    if ([signal isEqualToString:@"ready"]) {
+      if (readinessRequiresStartup && !startupReady) {
+        ready = NO;
+      }
+      if (ready && readinessRequiresClusterQuorum && application.clusterEnabled && !clusterQuorumMet) {
+        ready = NO;
+      }
+    }
     response.statusCode = ready ? 200 : 503;
 
     BOOL prefersJSON = ALNBuiltInEndpointPrefersJSON(request);
@@ -1370,7 +1450,8 @@ static BOOL ALNApplyBuiltInResponse(ALNApplication *application,
                                                           signal,
                                                           ready,
                                                           startupReady,
-                                                          readinessRequiresStartup);
+                                                          readinessRequiresStartup,
+                                                          readinessRequiresClusterQuorum);
       NSError *jsonError = nil;
       BOOL ok = [response setJSONBody:payload options:0 error:&jsonError];
       if (!ok) {
@@ -1905,10 +1986,25 @@ static void ALNFinalizeResponse(ALNApplication *application,
   }
 
   if (application.clusterEmitHeaders) {
+    NSDictionary *quorumSummary = ALNClusterQuorumSummary(application);
+    NSString *clusterStatus = [quorumSummary[@"status"] isKindOfClass:[NSString class]]
+                                  ? quorumSummary[@"status"]
+                                  : @"single_node";
+    NSString *observedNodes =
+        [quorumSummary[@"observed_nodes"] respondsToSelector:@selector(stringValue)]
+            ? [quorumSummary[@"observed_nodes"] stringValue]
+            : [NSString stringWithFormat:@"%lu", (unsigned long)application.clusterObservedNodes];
+    NSString *expectedNodes =
+        [quorumSummary[@"expected_nodes"] respondsToSelector:@selector(stringValue)]
+            ? [quorumSummary[@"expected_nodes"] stringValue]
+            : [NSString stringWithFormat:@"%lu", (unsigned long)application.clusterExpectedNodes];
     [response setHeader:@"X-Arlen-Cluster" value:application.clusterName ?: @"default"];
     [response setHeader:@"X-Arlen-Node" value:application.clusterNodeID ?: @"node"];
     [response setHeader:@"X-Arlen-Worker-Pid"
                   value:[NSString stringWithFormat:@"%d", (int)getpid()]];
+    [response setHeader:@"X-Arlen-Cluster-Status" value:clusterStatus];
+    [response setHeader:@"X-Arlen-Cluster-Observed-Nodes" value:observedNodes];
+    [response setHeader:@"X-Arlen-Cluster-Expected-Nodes" value:expectedNodes];
   }
 }
 

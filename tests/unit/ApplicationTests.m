@@ -579,6 +579,123 @@
   [app shutdown];
 }
 
+- (void)testReadyzJSONCanRequireClusterQuorumAndReturnDeterministic503 {
+  ALNApplication *degraded = [[ALNApplication alloc] initWithConfig:@{
+    @"environment" : @"test",
+    @"logFormat" : @"json",
+    @"observability" : @{
+      @"readinessRequiresClusterQuorum" : @(YES),
+    },
+    @"cluster" : @{
+      @"enabled" : @(YES),
+      @"name" : @"alpha",
+      @"nodeID" : @"node-a",
+      @"expectedNodes" : @(3),
+      @"observedNodes" : @(1),
+    },
+  }];
+
+  ALNResponse *notReady = [degraded dispatchRequest:[self requestForPath:@"/readyz"
+                                                              queryString:@""
+                                                                  headers:@{
+                                                                    @"accept" : @"application/json",
+                                                                  }]];
+  XCTAssertEqual((NSInteger)503, notReady.statusCode);
+  NSError *jsonError = nil;
+  NSDictionary *notReadyJSON = [NSJSONSerialization JSONObjectWithData:notReady.bodyData
+                                                                options:0
+                                                                  error:&jsonError];
+  XCTAssertNil(jsonError);
+  XCTAssertEqualObjects(@"ready", notReadyJSON[@"signal"]);
+  XCTAssertEqualObjects(@"not_ready", notReadyJSON[@"status"]);
+  XCTAssertEqualObjects(@(NO), notReadyJSON[@"ready"]);
+  NSDictionary *quorumCheck =
+      [notReadyJSON[@"checks"][@"cluster_quorum"] isKindOfClass:[NSDictionary class]]
+          ? notReadyJSON[@"checks"][@"cluster_quorum"]
+          : @{};
+  XCTAssertEqualObjects(@(YES), quorumCheck[@"required_for_readyz"]);
+  XCTAssertEqualObjects(@(NO), quorumCheck[@"ok"]);
+  XCTAssertEqualObjects(@"degraded", quorumCheck[@"status"]);
+  XCTAssertEqual((NSInteger)1, [quorumCheck[@"observed_nodes"] integerValue]);
+  XCTAssertEqual((NSInteger)3, [quorumCheck[@"expected_nodes"] integerValue]);
+
+  ALNApplication *nominal = [[ALNApplication alloc] initWithConfig:@{
+    @"environment" : @"test",
+    @"logFormat" : @"json",
+    @"observability" : @{
+      @"readinessRequiresClusterQuorum" : @(YES),
+    },
+    @"cluster" : @{
+      @"enabled" : @(YES),
+      @"name" : @"alpha",
+      @"nodeID" : @"node-a",
+      @"expectedNodes" : @(3),
+      @"observedNodes" : @(3),
+    },
+  }];
+  ALNResponse *ready = [nominal dispatchRequest:[self requestForPath:@"/readyz"
+                                                           queryString:@""
+                                                               headers:@{
+                                                                 @"accept" : @"application/json",
+                                                               }]];
+  XCTAssertEqual((NSInteger)200, ready.statusCode);
+  jsonError = nil;
+  NSDictionary *readyJSON = [NSJSONSerialization JSONObjectWithData:ready.bodyData
+                                                             options:0
+                                                               error:&jsonError];
+  XCTAssertNil(jsonError);
+  XCTAssertEqualObjects(@(YES), readyJSON[@"ready"]);
+  NSDictionary *readyQuorumCheck =
+      [readyJSON[@"checks"][@"cluster_quorum"] isKindOfClass:[NSDictionary class]]
+          ? readyJSON[@"checks"][@"cluster_quorum"]
+          : @{};
+  XCTAssertEqualObjects(@"nominal", readyQuorumCheck[@"status"]);
+  XCTAssertEqualObjects(@(YES), readyQuorumCheck[@"ok"]);
+}
+
+- (void)testClusterStatusPayloadIncludesQuorumAndCapabilityMatrix {
+  ALNApplication *app = [[ALNApplication alloc] initWithConfig:@{
+    @"environment" : @"test",
+    @"logFormat" : @"json",
+    @"cluster" : @{
+      @"enabled" : @(YES),
+      @"name" : @"alpha",
+      @"nodeID" : @"node-a",
+      @"expectedNodes" : @(4),
+      @"observedNodes" : @(2),
+    },
+  }];
+
+  ALNResponse *response = [app dispatchRequest:[self requestForPath:@"/clusterz"]];
+  XCTAssertEqual((NSInteger)200, response.statusCode);
+
+  NSError *jsonError = nil;
+  NSDictionary *payload = [NSJSONSerialization JSONObjectWithData:response.bodyData
+                                                          options:0
+                                                            error:&jsonError];
+  XCTAssertNil(jsonError);
+  NSDictionary *cluster =
+      [payload[@"cluster"] isKindOfClass:[NSDictionary class]] ? payload[@"cluster"] : @{};
+  XCTAssertEqual((NSInteger)4, [cluster[@"expected_nodes"] integerValue]);
+  XCTAssertEqual((NSInteger)2, [cluster[@"observed_nodes"] integerValue]);
+  NSDictionary *quorum =
+      [cluster[@"quorum"] isKindOfClass:[NSDictionary class]] ? cluster[@"quorum"] : @{};
+  XCTAssertEqualObjects(@"degraded", quorum[@"status"]);
+  XCTAssertEqualObjects(@(NO), quorum[@"met"]);
+
+  NSDictionary *coordination =
+      [payload[@"coordination"] isKindOfClass:[NSDictionary class]] ? payload[@"coordination"] : @{};
+  XCTAssertEqualObjects(@"degraded", coordination[@"state"]);
+  NSDictionary *capabilityMatrix =
+      [coordination[@"capability_matrix"] isKindOfClass:[NSDictionary class]]
+          ? coordination[@"capability_matrix"]
+          : @{};
+  XCTAssertEqualObjects(@"external_load_balancer_required",
+                        capabilityMatrix[@"cross_node_request_routing"]);
+  XCTAssertEqualObjects(@"external_broker_required",
+                        capabilityMatrix[@"cross_node_realtime_fanout"]);
+}
+
 - (void)testTraceExporterReceivesTraceContextMetadata {
   ALNApplication *app = [self buildAppWithHaltingMiddleware:NO];
   AppTraceCaptureExporter *exporter = [[AppTraceCaptureExporter alloc] init];

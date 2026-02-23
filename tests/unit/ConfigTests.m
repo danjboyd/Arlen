@@ -145,6 +145,7 @@
   XCTAssertEqualObjects(@(YES), observability[@"tracePropagationEnabled"]);
   XCTAssertEqualObjects(@(YES), observability[@"healthDetailsEnabled"]);
   XCTAssertEqualObjects(@(NO), observability[@"readinessRequiresStartup"]);
+  XCTAssertEqualObjects(@(NO), observability[@"readinessRequiresClusterQuorum"]);
 
   NSDictionary *services = config[@"services"];
   NSDictionary *i18n = services[@"i18n"];
@@ -161,6 +162,7 @@
   XCTAssertTrue([cluster[@"nodeID"] isKindOfClass:[NSString class]]);
   XCTAssertGreaterThan([(NSString *)cluster[@"nodeID"] length], (NSUInteger)0);
   XCTAssertEqual((NSInteger)1, [cluster[@"expectedNodes"] integerValue]);
+  XCTAssertEqual((NSInteger)1, [cluster[@"observedNodes"] integerValue]);
   XCTAssertEqualObjects(@(YES), cluster[@"emitHeaders"]);
 
   NSDictionary *limits = config[@"requestLimits"];
@@ -222,10 +224,12 @@
   setenv("ARLEN_TRACE_PROPAGATION_ENABLED", "0", 1);
   setenv("ARLEN_HEALTH_DETAILS_ENABLED", "0", 1);
   setenv("ARLEN_READINESS_REQUIRES_STARTUP", "1", 1);
+  setenv("ARLEN_READINESS_REQUIRES_CLUSTER_QUORUM", "1", 1);
   setenv("ARLEN_CLUSTER_ENABLED", "1", 1);
   setenv("ARLEN_CLUSTER_NAME", "prod-east", 1);
   setenv("ARLEN_CLUSTER_NODE_ID", "node-7", 1);
   setenv("ARLEN_CLUSTER_EXPECTED_NODES", "5", 1);
+  setenv("ARLEN_CLUSTER_OBSERVED_NODES", "2", 1);
   setenv("ARLEN_CLUSTER_EMIT_HEADERS", "0", 1);
 
   NSError *error = nil;
@@ -279,10 +283,12 @@
   unsetenv("ARLEN_TRACE_PROPAGATION_ENABLED");
   unsetenv("ARLEN_HEALTH_DETAILS_ENABLED");
   unsetenv("ARLEN_READINESS_REQUIRES_STARTUP");
+  unsetenv("ARLEN_READINESS_REQUIRES_CLUSTER_QUORUM");
   unsetenv("ARLEN_CLUSTER_ENABLED");
   unsetenv("ARLEN_CLUSTER_NAME");
   unsetenv("ARLEN_CLUSTER_NODE_ID");
   unsetenv("ARLEN_CLUSTER_EXPECTED_NODES");
+  unsetenv("ARLEN_CLUSTER_OBSERVED_NODES");
   unsetenv("ARLEN_CLUSTER_EMIT_HEADERS");
 
   XCTAssertNil(error);
@@ -354,6 +360,7 @@
   XCTAssertEqualObjects(@(NO), observability[@"tracePropagationEnabled"]);
   XCTAssertEqualObjects(@(NO), observability[@"healthDetailsEnabled"]);
   XCTAssertEqualObjects(@(YES), observability[@"readinessRequiresStartup"]);
+  XCTAssertEqualObjects(@(YES), observability[@"readinessRequiresClusterQuorum"]);
 
   NSDictionary *services = config[@"services"];
   NSDictionary *i18n = services[@"i18n"];
@@ -365,6 +372,7 @@
   XCTAssertEqualObjects(@"prod-east", cluster[@"name"]);
   XCTAssertEqualObjects(@"node-7", cluster[@"nodeID"]);
   XCTAssertEqual((NSInteger)5, [cluster[@"expectedNodes"] integerValue]);
+  XCTAssertEqual((NSInteger)2, [cluster[@"observedNodes"] integerValue]);
   XCTAssertEqualObjects(@(NO), cluster[@"emitHeaders"]);
 }
 
@@ -400,10 +408,12 @@
   setenv("MOJOOBJC_TRACE_PROPAGATION_ENABLED", "0", 1);
   setenv("MOJOOBJC_HEALTH_DETAILS_ENABLED", "0", 1);
   setenv("MOJOOBJC_READINESS_REQUIRES_STARTUP", "1", 1);
+  setenv("MOJOOBJC_READINESS_REQUIRES_CLUSTER_QUORUM", "1", 1);
   setenv("MOJOOBJC_CLUSTER_ENABLED", "1", 1);
   setenv("MOJOOBJC_CLUSTER_NAME", "legacy-cluster", 1);
   setenv("MOJOOBJC_CLUSTER_NODE_ID", "legacy-node", 1);
   setenv("MOJOOBJC_CLUSTER_EXPECTED_NODES", "4", 1);
+  setenv("MOJOOBJC_CLUSTER_OBSERVED_NODES", "1", 1);
   setenv("MOJOOBJC_CLUSTER_EMIT_HEADERS", "0", 1);
 
   NSError *error = nil;
@@ -433,10 +443,12 @@
   unsetenv("MOJOOBJC_TRACE_PROPAGATION_ENABLED");
   unsetenv("MOJOOBJC_HEALTH_DETAILS_ENABLED");
   unsetenv("MOJOOBJC_READINESS_REQUIRES_STARTUP");
+  unsetenv("MOJOOBJC_READINESS_REQUIRES_CLUSTER_QUORUM");
   unsetenv("MOJOOBJC_CLUSTER_ENABLED");
   unsetenv("MOJOOBJC_CLUSTER_NAME");
   unsetenv("MOJOOBJC_CLUSTER_NODE_ID");
   unsetenv("MOJOOBJC_CLUSTER_EXPECTED_NODES");
+  unsetenv("MOJOOBJC_CLUSTER_OBSERVED_NODES");
   unsetenv("MOJOOBJC_CLUSTER_EMIT_HEADERS");
 
   XCTAssertNil(error);
@@ -471,11 +483,13 @@
   XCTAssertEqualObjects(@(NO), observability[@"tracePropagationEnabled"]);
   XCTAssertEqualObjects(@(NO), observability[@"healthDetailsEnabled"]);
   XCTAssertEqualObjects(@(YES), observability[@"readinessRequiresStartup"]);
+  XCTAssertEqualObjects(@(YES), observability[@"readinessRequiresClusterQuorum"]);
   NSDictionary *cluster = config[@"cluster"];
   XCTAssertEqualObjects(@(YES), cluster[@"enabled"]);
   XCTAssertEqualObjects(@"legacy-cluster", cluster[@"name"]);
   XCTAssertEqualObjects(@"legacy-node", cluster[@"nodeID"]);
   XCTAssertEqual((NSInteger)4, [cluster[@"expectedNodes"] integerValue]);
+  XCTAssertEqual((NSInteger)1, [cluster[@"observedNodes"] integerValue]);
   XCTAssertEqualObjects(@(NO), cluster[@"emitHeaders"]);
 }
 

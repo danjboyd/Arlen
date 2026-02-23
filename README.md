@@ -36,6 +36,7 @@ Arlen is designed to solve the same class of problems as frameworks like Mojolic
 - Phase 7E: initial slice implemented (template lint diagnostics, expanded multiline/nested fixture coverage, and include/render path hardening integration checks).
 - Phase 7F: initial slice implemented (frontend starter generation presets, static-asset/API wiring templates, and reproducibility/deploy-packaging validation).
 - Phase 7G: initial slice implemented (coding-agent JSON workflow contracts, fix-it diagnostics, and deploy/build/check planning payloads).
+- Phase 7H: initial slice implemented (quorum-gated readiness, expanded `/clusterz` coordination contracts, and distributed-runtime diagnostics headers).
 
 ## Quick Start
 
@@ -132,6 +133,7 @@ High-value guides:
 - [Phase 7E Template Pipeline Maturity](docs/PHASE7E_TEMPLATE_PIPELINE_MATURITY.md)
 - [Phase 7F Frontend Integration Starters](docs/PHASE7F_FRONTEND_STARTERS.md)
 - [Phase 7G Coding-Agent DX Contracts](docs/PHASE7G_CODING_AGENT_DX_CONTRACTS.md)
+- [Phase 7H Distributed Runtime Depth](docs/PHASE7H_DISTRIBUTED_RUNTIME_DEPTH.md)
 - [Template Troubleshooting](docs/TEMPLATE_TROUBLESHOOTING.md)
 - [SQL Builder Phase 4 Migration Guide](docs/SQL_BUILDER_PHASE4_MIGRATION.md)
 - [Propane Manager](docs/PROPANE.md)

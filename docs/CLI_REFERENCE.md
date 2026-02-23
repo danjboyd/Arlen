@@ -220,6 +220,10 @@ Behavior:
   - `GET /healthz` with `Accept: application/json` (or `?format=json`)
   - `GET /readyz` with `Accept: application/json` (or `?format=json`)
   - strict readiness (`503 not_ready` before startup) can be enabled with `ARLEN_READINESS_REQUIRES_STARTUP=1`
+  - quorum-gated readiness in cluster mode can be enabled with `ARLEN_READINESS_REQUIRES_CLUSTER_QUORUM=1`
+- distributed runtime diagnostics include:
+  - `GET /clusterz` quorum and coordination capability-matrix payload
+  - response headers `X-Arlen-Cluster-Status`, `X-Arlen-Cluster-Observed-Nodes`, and `X-Arlen-Cluster-Expected-Nodes` (when `cluster.emitHeaders=YES`)
 - built-in observability/API docs endpoints are available when enabled:
   - `/metrics`
   - `/clusterz`
@@ -256,6 +260,8 @@ Environment:
 - `ARLEN_TRACE_PROPAGATION_ENABLED` (default `1`; legacy `MOJOOBJC_TRACE_PROPAGATION_ENABLED` also accepted)
 - `ARLEN_HEALTH_DETAILS_ENABLED` (default `1`; legacy `MOJOOBJC_HEALTH_DETAILS_ENABLED` also accepted)
 - `ARLEN_READINESS_REQUIRES_STARTUP` (default `0`; legacy `MOJOOBJC_READINESS_REQUIRES_STARTUP` also accepted)
+- `ARLEN_READINESS_REQUIRES_CLUSTER_QUORUM` (default `0`; legacy `MOJOOBJC_READINESS_REQUIRES_CLUSTER_QUORUM` also accepted)
+- `ARLEN_CLUSTER_OBSERVED_NODES` (defaults to expected nodes; legacy `MOJOOBJC_CLUSTER_OBSERVED_NODES` also accepted)
 
 ## `propane` Script (`bin/propane`)
 
@@ -295,6 +301,7 @@ Async worker environment fallbacks:
 - `ARLEN_CLUSTER_NAME`
 - `ARLEN_CLUSTER_NODE_ID`
 - `ARLEN_CLUSTER_EXPECTED_NODES`
+- `ARLEN_CLUSTER_OBSERVED_NODES`
 
 Signals:
 

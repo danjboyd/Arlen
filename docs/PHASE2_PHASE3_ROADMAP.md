@@ -1,6 +1,6 @@
 # Arlen Phase 2 + Phase 3 Roadmap Index
 
-Status: Active (Phase 2A-2D complete; Phase 3A-3H complete; Phase 4A-4E complete; Phase 5A-5E complete; Phase 7A/7B/7C/7D/7E/7F initial slices implemented; Phase 7 follow-on planned)  
+Status: Active (Phase 2A-2D complete; Phase 3A-3H complete; Phase 4A-4E complete; Phase 5A-5E complete; Phase 7A/7B/7C/7D/7E/7F/7G/7H initial slices implemented; Phase 7 follow-on planned)  
 Last updated: 2026-02-23
 
 This index points to the current roadmap documents:
@@ -85,7 +85,11 @@ Phase 7 execution/planning is defined in `docs/PHASE7_ROADMAP.md`, including:
   - deterministic `arlen build`/`arlen check` dry-run planning payloads (`--dry-run --json`)
   - deploy release build planning payloads via `tools/deploy/build_release.sh --dry-run --json`
   - fix-it diagnostics and integration regression harness for coding-agent loops
-- remaining 7A/7B/7C/7D/7E/7F/7G follow-on and 7H planning:
+- Phase 7H initial distributed-runtime depth slice completed (`docs/PHASE7H_DISTRIBUTED_RUNTIME_DEPTH.md`):
+  - quorum-gated readiness contract (`readinessRequiresClusterQuorum` + observed/expected node controls)
+  - expanded `/clusterz` quorum + coordination capability-matrix payload
+  - deterministic cluster diagnostics headers (`X-Arlen-Cluster-Status`, observed/expected node counts)
+- remaining 7A/7B/7C/7D/7E/7F/7G/7H follow-on:
   - additional runtime hardening for `boomhauer`/`propane`
   - security defaults and policy contracts
   - deeper observability/operability maturity and coding-agent-first DX contracts

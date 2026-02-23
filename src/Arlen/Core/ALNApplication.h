@@ -65,6 +65,7 @@ NS_ASSUME_NONNULL_BEGIN
 @property(nonatomic, copy, readonly) NSString *clusterName;
 @property(nonatomic, copy, readonly) NSString *clusterNodeID;
 @property(nonatomic, assign, readonly) NSUInteger clusterExpectedNodes;
+@property(nonatomic, assign, readonly) NSUInteger clusterObservedNodes;
 @property(nonatomic, assign, readonly) BOOL clusterEmitHeaders;
 @property(nonatomic, assign, readonly, getter=isStarted) BOOL started;
 @property(nonatomic, strong, nullable) id<ALNTraceExporter> traceExporter;

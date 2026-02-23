@@ -34,7 +34,7 @@ Last updated: 2026-02-23
 - Phase 7E: initial slice implemented (2026-02-23)
 - Phase 7F: initial slice implemented (2026-02-23)
 - Phase 7G: initial slice implemented (2026-02-23)
-- Phase 7H: planned (roadmap defined 2026-02-23)
+- Phase 7H: initial slice implemented (2026-02-23)
 
 ## Completed Today (2026-02-23)
 
@@ -80,6 +80,12 @@ Last updated: 2026-02-23
   - added deploy release planning contract (`tools/deploy/build_release.sh --dry-run --json`)
   - added structured fix-it diagnostics (`error.code`, `error.fixit.action`, `error.fixit.example`)
   - Phase 7G contract fixture + docs (`tests/fixtures/phase7g/coding_agent_dx_contracts.json`, `docs/PHASE7G_CODING_AGENT_DX_CONTRACTS.md`)
+- Implemented Phase 7H initial distributed-runtime depth slice:
+  - added quorum-aware readiness controls (`observability.readinessRequiresClusterQuorum`, `cluster.observedNodes`) with env/legacy override support
+  - added deterministic readiness gating contract for quorum-unmet multi-node deployments (`/readyz` => `503 not_ready`)
+  - expanded `/clusterz` payload with quorum summary and coordination capability matrix
+  - added distributed-runtime diagnostics headers (`X-Arlen-Cluster-Status`, observed/expected node counts)
+  - Phase 7H contract fixture + docs (`tests/fixtures/phase7h/distributed_runtime_contracts.json`, `docs/PHASE7H_DISTRIBUTED_RUNTIME_DEPTH.md`)
 - Completed Phase 5A-5E implementation tranche.
 - Added typed schema contracts + typed SQL generation workflow (5D) and validated compile-time/runtime contract behavior.
 - Added Phase 5E hardening coverage:
@@ -236,6 +242,12 @@ Last updated: 2026-02-23
 - New Phase 7G checks executed:
   - coding-agent JSON workflow regression (`new/generate/build/check/deploy` planning + fix-it diagnostics) (`tests/integration/DeploymentIntegrationTests.m`)
   - phase fixture schema/reference validation (`tests/unit/Phase7GTests.m`)
+- New Phase 7H checks executed:
+  - quorum-readiness config default/env/legacy override regression (`tests/unit/ConfigTests.m`)
+  - deterministic readiness gating payload regression for degraded/nominal quorum states (`tests/unit/ApplicationTests.m`)
+  - `/clusterz` quorum + coordination payload regression (`tests/unit/ApplicationTests.m`, `tests/integration/HTTPIntegrationTests.m`)
+  - cluster diagnostics response header emission/disable regression (`tests/integration/HTTPIntegrationTests.m`)
+  - phase fixture schema/reference validation (`tests/unit/Phase7HTests.m`)
 - New Phase 3F checks executed:
   - `arlen doctor` bootstrap pre-build diagnostics + JSON payload validation
   - ALNPg SQLSTATE/diagnostics regression tests
@@ -289,9 +301,9 @@ Last updated: 2026-02-23
 
 ## Next Session Focus
 
-1. Continue remaining Phase 7D ecosystem service durability depth (production-adapter failure/recovery integration coverage) (`docs/PHASE7_ROADMAP.md`).
-2. Continue remaining Phase 7E template-pipeline depth (additional lint/diagnostic rules and watch/deploy render-path regressions) (`docs/PHASE7_ROADMAP.md`).
-3. Continue Phase 7G follow-on contracts and start Phase 7H distributed-runtime depth execution (`docs/PHASE7_ROADMAP.md`).
+1. Continue Phase 7H follow-on distributed-runtime depth (dynamic membership/failure-drill automation) (`docs/PHASE7_ROADMAP.md`).
+2. Continue remaining Phase 7D ecosystem service durability depth (production-adapter failure/recovery integration coverage) (`docs/PHASE7_ROADMAP.md`).
+3. Continue Phase 7G follow-on coding-agent contract coverage and Phase 7E lint/diagnostic follow-on depth (`docs/PHASE7_ROADMAP.md`).
 
 ## Planned Phase Mapping (Post-4C)
 
@@ -316,10 +328,11 @@ Last updated: 2026-02-23
   - Phase 7E initial template-pipeline maturity slice implemented (lint diagnostics + fixture matrix + include/render-path hardening checks)
   - Phase 7F initial frontend integration starter slice implemented (deterministic starter generation + deploy packaging coverage)
   - Phase 7G initial coding-agent DX slice implemented (JSON workflow contracts + fix-it diagnostics + deploy/build/check planning payloads)
+  - Phase 7H initial distributed-runtime depth slice implemented (quorum-gated readiness + expanded `/clusterz` coordination matrix + cluster diagnostics headers)
   - remaining runtime hardening for `boomhauer`/`propane` in progress
   - remaining security policy/default hardening in progress
   - remaining observability/operability + coding-agent DX follow-on
-  - ecosystem durability, template pipeline hardening, frontend starters, distributed-runtime depth
+  - ecosystem durability, template pipeline hardening, frontend starters, distributed-runtime follow-on depth
 - Maybe Someday backlog:
   - LiveView-like server-driven UI
   - full ORM as default framework layer

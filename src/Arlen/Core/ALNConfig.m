@@ -230,6 +230,9 @@ static NSDictionary *ALNSecurityProfileDefaults(NSString *profileName) {
   NSString *readinessRequiresStartup =
       ALNEnvValueCompat("ARLEN_READINESS_REQUIRES_STARTUP",
                         "MOJOOBJC_READINESS_REQUIRES_STARTUP");
+  NSString *readinessRequiresClusterQuorum =
+      ALNEnvValueCompat("ARLEN_READINESS_REQUIRES_CLUSTER_QUORUM",
+                        "MOJOOBJC_READINESS_REQUIRES_CLUSTER_QUORUM");
   NSString *serveStatic = ALNEnvValueCompat("ARLEN_SERVE_STATIC", "MOJOOBJC_SERVE_STATIC");
   NSString *staticAllowExtensions =
       ALNEnvValueCompat("ARLEN_STATIC_ALLOW_EXTENSIONS", "MOJOOBJC_STATIC_ALLOW_EXTENSIONS");
@@ -334,6 +337,8 @@ static NSDictionary *ALNSecurityProfileDefaults(NSString *profileName) {
       ALNEnvValueCompat("ARLEN_CLUSTER_NODE_ID", "MOJOOBJC_CLUSTER_NODE_ID");
   NSString *clusterExpectedNodes =
       ALNEnvValueCompat("ARLEN_CLUSTER_EXPECTED_NODES", "MOJOOBJC_CLUSTER_EXPECTED_NODES");
+  NSString *clusterObservedNodes =
+      ALNEnvValueCompat("ARLEN_CLUSTER_OBSERVED_NODES", "MOJOOBJC_CLUSTER_OBSERVED_NODES");
   NSString *clusterEmitHeaders =
       ALNEnvValueCompat("ARLEN_CLUSTER_EMIT_HEADERS", "MOJOOBJC_CLUSTER_EMIT_HEADERS");
   NSString *eocStrictLocals =
@@ -561,6 +566,11 @@ static NSDictionary *ALNSecurityProfileDefaults(NSString *profileName) {
   if (readinessRequiresStartupValue != nil) {
     observability[@"readinessRequiresStartup"] = readinessRequiresStartupValue;
   }
+  NSNumber *readinessRequiresClusterQuorumValue =
+      ALNParseBooleanString(readinessRequiresClusterQuorum);
+  if (readinessRequiresClusterQuorumValue != nil) {
+    observability[@"readinessRequiresClusterQuorum"] = readinessRequiresClusterQuorumValue;
+  }
   config[@"observability"] = observability;
 
   NSMutableDictionary *cluster =
@@ -576,6 +586,7 @@ static NSDictionary *ALNSecurityProfileDefaults(NSString *profileName) {
     cluster[@"nodeID"] = clusterNodeID;
   }
   ALNApplyIntegerOverride(cluster, clusterExpectedNodes, @"expectedNodes", 1);
+  ALNApplyIntegerOverride(cluster, clusterObservedNodes, @"observedNodes", 0);
   NSNumber *clusterEmitHeadersValue = ALNParseBooleanString(clusterEmitHeaders);
   if (clusterEmitHeadersValue != nil) {
     cluster[@"emitHeaders"] = clusterEmitHeadersValue;
@@ -851,6 +862,9 @@ static NSDictionary *ALNSecurityProfileDefaults(NSString *profileName) {
   if (finalObservability[@"readinessRequiresStartup"] == nil) {
     finalObservability[@"readinessRequiresStartup"] = @(NO);
   }
+  if (finalObservability[@"readinessRequiresClusterQuorum"] == nil) {
+    finalObservability[@"readinessRequiresClusterQuorum"] = @(NO);
+  }
   config[@"observability"] = finalObservability;
 
   NSMutableDictionary *finalCluster =
@@ -868,6 +882,16 @@ static NSDictionary *ALNSecurityProfileDefaults(NSString *profileName) {
   }
   if (finalCluster[@"expectedNodes"] == nil) {
     finalCluster[@"expectedNodes"] = @(1);
+  }
+  if (finalCluster[@"observedNodes"] == nil) {
+    NSInteger expectedNodesDefault =
+        [finalCluster[@"expectedNodes"] respondsToSelector:@selector(integerValue)]
+            ? [finalCluster[@"expectedNodes"] integerValue]
+            : 1;
+    if (expectedNodesDefault < 1) {
+      expectedNodesDefault = 1;
+    }
+    finalCluster[@"observedNodes"] = @(expectedNodesDefault);
   }
   if (finalCluster[@"emitHeaders"] == nil) {
     finalCluster[@"emitHeaders"] = @(YES);
@@ -1017,6 +1041,8 @@ static NSDictionary *ALNSecurityProfileDefaults(NSString *profileName) {
       @([finalObservability[@"healthDetailsEnabled"] boolValue]);
   finalObservability[@"readinessRequiresStartup"] =
       @([finalObservability[@"readinessRequiresStartup"] boolValue]);
+  finalObservability[@"readinessRequiresClusterQuorum"] =
+      @([finalObservability[@"readinessRequiresClusterQuorum"] boolValue]);
   config[@"observability"] = finalObservability;
 
   finalCluster[@"enabled"] = @([finalCluster[@"enabled"] boolValue]);
@@ -1025,6 +1051,11 @@ static NSDictionary *ALNSecurityProfileDefaults(NSString *profileName) {
     expectedNodes = 1;
   }
   finalCluster[@"expectedNodes"] = @(expectedNodes);
+  NSInteger observedNodes = [finalCluster[@"observedNodes"] integerValue];
+  if (observedNodes < 0) {
+    observedNodes = 0;
+  }
+  finalCluster[@"observedNodes"] = @(observedNodes);
   finalCluster[@"emitHeaders"] = @([finalCluster[@"emitHeaders"] boolValue]);
   NSString *normalizedClusterName =
       [finalCluster[@"name"] isKindOfClass:[NSString class]] ? finalCluster[@"name"] : @"default";

@@ -318,7 +318,8 @@
       @"ARLEN_CLUSTER_ENABLED=1 "
        "ARLEN_CLUSTER_NAME=alpha "
        "ARLEN_CLUSTER_NODE_ID=node-a "
-       "ARLEN_CLUSTER_EXPECTED_NODES=3";
+       "ARLEN_CLUSTER_EXPECTED_NODES=3 "
+       "ARLEN_CLUSTER_OBSERVED_NODES=2";
 
   int curlCode = 0;
   int serverCode = 0;
@@ -338,6 +339,11 @@
                 [body containsString:@"\"node_id\": \"node-a\""]);
   XCTAssertTrue([body containsString:@"\"expected_nodes\":3"] ||
                 [body containsString:@"\"expected_nodes\": 3"]);
+  XCTAssertTrue([body containsString:@"\"observed_nodes\":2"] ||
+                [body containsString:@"\"observed_nodes\": 2"]);
+  XCTAssertTrue([body containsString:@"\"quorum\""]);
+  XCTAssertTrue([body containsString:@"\"status\":\"degraded\""] ||
+                [body containsString:@"\"status\": \"degraded\""]);
   XCTAssertTrue([body containsString:@"\"cluster_broadcast\":\"external_broker_required\""] ||
                 [body containsString:@"\"cluster_broadcast\": \"external_broker_required\""]);
 
@@ -352,6 +358,9 @@
   XCTAssertTrue([headers containsString:@"X-Arlen-Cluster: alpha"]);
   XCTAssertTrue([headers containsString:@"X-Arlen-Node: node-a"]);
   XCTAssertTrue([headers containsString:@"X-Arlen-Worker-Pid:"]);
+  XCTAssertTrue([headers containsString:@"X-Arlen-Cluster-Status: degraded"]);
+  XCTAssertTrue([headers containsString:@"X-Arlen-Cluster-Observed-Nodes: 2"]);
+  XCTAssertTrue([headers containsString:@"X-Arlen-Cluster-Expected-Nodes: 3"]);
 }
 
 - (void)testClusterHeadersCanBeDisabled {
@@ -368,6 +377,57 @@
   XCTAssertFalse([headers containsString:@"X-Arlen-Cluster:"]);
   XCTAssertFalse([headers containsString:@"X-Arlen-Node:"]);
   XCTAssertFalse([headers containsString:@"X-Arlen-Worker-Pid:"]);
+  XCTAssertFalse([headers containsString:@"X-Arlen-Cluster-Status:"]);
+  XCTAssertFalse([headers containsString:@"X-Arlen-Cluster-Observed-Nodes:"]);
+  XCTAssertFalse([headers containsString:@"X-Arlen-Cluster-Expected-Nodes:"]);
+}
+
+- (void)testReadinessCanRequireClusterQuorumInMultiNodeMode {
+  NSString *clusterEnv =
+      @"ARLEN_CLUSTER_ENABLED=1 "
+       "ARLEN_CLUSTER_NAME=alpha "
+       "ARLEN_CLUSTER_NODE_ID=node-a "
+       "ARLEN_CLUSTER_EXPECTED_NODES=3 "
+       "ARLEN_CLUSTER_OBSERVED_NODES=1 "
+       "ARLEN_READINESS_REQUIRES_CLUSTER_QUORUM=1";
+
+  int curlCode = 0;
+  int serverCode = 0;
+  NSString *response =
+      [self requestWithServerEnv:clusterEnv
+                     serverBinary:@"./build/boomhauer"
+                        curlBody:@"curl -sS -i -H 'Accept: application/json' http://127.0.0.1:%d/readyz"
+                        curlCode:&curlCode
+                       serverCode:&serverCode];
+  XCTAssertEqual(0, curlCode);
+  XCTAssertEqual(0, serverCode);
+  XCTAssertTrue([response containsString:@" 503 "] ||
+                [response hasPrefix:@"HTTP/1.1 503"] ||
+                [response hasPrefix:@"HTTP/1.0 503"]);
+  XCTAssertTrue([response containsString:@"\"status\":\"not_ready\""] ||
+                [response containsString:@"\"status\": \"not_ready\""]);
+  XCTAssertTrue([response containsString:@"\"cluster_quorum\""]);
+  XCTAssertTrue([response containsString:@"\"required_for_readyz\":true"] ||
+                [response containsString:@"\"required_for_readyz\": true"]);
+  XCTAssertTrue([response containsString:@"\"observed_nodes\":1"] ||
+                [response containsString:@"\"observed_nodes\": 1"]);
+  XCTAssertTrue([response containsString:@"\"expected_nodes\":3"] ||
+                [response containsString:@"\"expected_nodes\": 3"]);
+
+  NSString *nominalEnv =
+      @"ARLEN_CLUSTER_ENABLED=1 "
+       "ARLEN_CLUSTER_EXPECTED_NODES=3 "
+       "ARLEN_CLUSTER_OBSERVED_NODES=3 "
+       "ARLEN_READINESS_REQUIRES_CLUSTER_QUORUM=1";
+  NSString *readyBody =
+      [self requestWithServerEnv:nominalEnv
+                     serverBinary:@"./build/boomhauer"
+                        curlBody:@"curl -fsS http://127.0.0.1:%d/readyz"
+                        curlCode:&curlCode
+                       serverCode:&serverCode];
+  XCTAssertEqual(0, curlCode);
+  XCTAssertEqual(0, serverCode);
+  XCTAssertEqualObjects(@"ready\n", readyBody);
 }
 
 - (void)testPerformanceHeadersPresentByDefault {

@@ -1,0 +1,105 @@
+{
+  "version": "phase7h-distributed-runtime-contracts-v1",
+  "contracts": [
+    {
+      "id": "phase7h.readiness_quorum_gate_contract",
+      "claim": "Readiness can require cluster quorum in multi-node mode and returns deterministic not-ready payloads when observed nodes are below expected nodes.",
+      "source_docs": [
+        "docs/PHASE7H_DISTRIBUTED_RUNTIME_DEPTH.md",
+        "docs/DEPLOYMENT.md"
+      ],
+      "verification": [
+        {
+          "kind": "unit",
+          "file": "tests/unit/ApplicationTests.m",
+          "test": "testReadyzJSONCanRequireClusterQuorumAndReturnDeterministic503"
+        },
+        {
+          "kind": "integration",
+          "file": "tests/integration/HTTPIntegrationTests.m",
+          "test": "testReadinessCanRequireClusterQuorumInMultiNodeMode"
+        }
+      ]
+    },
+    {
+      "id": "phase7h.cluster_status_quorum_and_coordination_contract",
+      "claim": "Cluster status payload includes quorum summary and explicit coordination capability boundaries for distributed runtime behavior.",
+      "source_docs": [
+        "docs/PHASE7H_DISTRIBUTED_RUNTIME_DEPTH.md",
+        "docs/DEPLOYMENT.md"
+      ],
+      "verification": [
+        {
+          "kind": "unit",
+          "file": "tests/unit/ApplicationTests.m",
+          "test": "testClusterStatusPayloadIncludesQuorumAndCapabilityMatrix"
+        },
+        {
+          "kind": "integration",
+          "file": "tests/integration/HTTPIntegrationTests.m",
+          "test": "testClusterStatusEndpointAndHeaders"
+        }
+      ]
+    },
+    {
+      "id": "phase7h.cluster_header_diagnostics_contract",
+      "claim": "Cluster response headers expose deterministic distributed-runtime diagnostics and can be disabled explicitly.",
+      "source_docs": [
+        "docs/PHASE7H_DISTRIBUTED_RUNTIME_DEPTH.md",
+        "docs/CLI_REFERENCE.md"
+      ],
+      "verification": [
+        {
+          "kind": "integration",
+          "file": "tests/integration/HTTPIntegrationTests.m",
+          "test": "testClusterStatusEndpointAndHeaders"
+        },
+        {
+          "kind": "integration",
+          "file": "tests/integration/HTTPIntegrationTests.m",
+          "test": "testClusterHeadersCanBeDisabled"
+        }
+      ]
+    },
+    {
+      "id": "phase7h.config_quorum_and_observed_nodes_contract",
+      "claim": "Config defaults plus environment and legacy overrides support quorum-readiness and observed-node controls with deterministic normalization.",
+      "source_docs": [
+        "docs/PHASE7H_DISTRIBUTED_RUNTIME_DEPTH.md",
+        "docs/CLI_REFERENCE.md"
+      ],
+      "verification": [
+        {
+          "kind": "unit",
+          "file": "tests/unit/ConfigTests.m",
+          "test": "testLoadConfigMergesAndAppliesDefaults"
+        },
+        {
+          "kind": "unit",
+          "file": "tests/unit/ConfigTests.m",
+          "test": "testEnvironmentOverridesRequestLimitsAndProxyFlags"
+        },
+        {
+          "kind": "unit",
+          "file": "tests/unit/ConfigTests.m",
+          "test": "testLegacyEnvironmentPrefixFallback"
+        }
+      ]
+    },
+    {
+      "id": "phase7h.fixture_integrity_contract",
+      "claim": "Phase 7H fixture references remain schema-valid and linked to existing docs/tests.",
+      "source_docs": [
+        "docs/PHASE7H_DISTRIBUTED_RUNTIME_DEPTH.md",
+        "tests/fixtures/phase7h/distributed_runtime_contracts.json"
+      ],
+      "verification": [
+        {
+          "kind": "unit",
+          "file": "tests/unit/Phase7HTests.m",
+          "test": "testDistributedRuntimeDepthContractFixtureSchemaAndTestCoverage"
+        }
+      ]
+    }
+  ]
+}
