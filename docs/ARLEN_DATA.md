@@ -16,6 +16,7 @@ Primary contracts:
 - `ALNSchemaCodegen` (deterministic typed schema helper artifact rendering)
 - `ALNPg` builder execution/caching/diagnostics APIs (`executeBuilderQuery`, `executeBuilderCommand`, query stage listener events)
 - `ALNDatabaseAdapter` / `ALNDatabaseConnection`
+- `ALNDatabaseRouter` (multi-target runtime routing with stickiness and diagnostics)
 - `ALNDisplayGroup`
 - `ALNAdapterConformance` helpers
 - `ALNPg`, `ALNMigrationRunner`, `ALNGDL2Adapter`
@@ -153,3 +154,18 @@ Migration/deprecation docs:
 
 - `docs/SQL_BUILDER_PHASE4_MIGRATION.md`
 - `docs/RELEASE_PROCESS.md` (phase-4 transitional API lifecycle)
+
+## 11. Phase 5B Multi-Database Runtime Routing
+
+`ALNDatabaseRouter` provides operation-aware target selection on top of adapter contracts:
+
+- read routes (`executeQuery`) default to a named read target
+- write routes (`executeCommand`, transactions) default to a named write target
+- optional read-after-write stickiness via bounded scope keys in routing context
+- optional tenant/shard hook override via `routeTargetResolver`
+- optional read fallback to write target on execution error
+- structured route diagnostics via `routingDiagnosticsListener`
+
+Primary reference:
+
+- `docs/PHASE5B_RUNTIME_ROUTING.md`

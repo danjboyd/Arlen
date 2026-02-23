@@ -76,6 +76,8 @@ Implementation notes:
 
 ## 3.2 Phase 5B: Multi-Database Runtime Routing
 
+Status: Initial implementation complete (2026-02-23)
+
 Deliverables:
 
 - Add runtime DB routing contract for operation-class aware target selection (for example read/write role routing).
@@ -88,6 +90,21 @@ Acceptance (required):
 - Unit tests verify deterministic routing decisions from stable inputs.
 - Integration tests validate read/write routing behavior against multiple live DB endpoints.
 - Regression tests cover pool exhaustion, route fallback, and rollback boundaries.
+
+Implementation notes:
+
+- Added runtime router surface:
+  - `src/Arlen/Data/ALNDatabaseRouter.h`
+  - `src/Arlen/Data/ALNDatabaseRouter.m`
+- Added ArlenData export for router:
+  - `src/ArlenData/ArlenData.h`
+- Added dedicated Phase 5B unit + integration coverage:
+  - `tests/unit/Phase5BTests.m`
+  - `tests/integration/PostgresIntegrationTests.m` (`testDatabaseRouterReadWriteRoutingAcrossLiveAdapters`)
+- Added Phase 5B docs and contract mappings:
+  - `docs/PHASE5B_RUNTIME_ROUTING.md`
+  - updated `tests/fixtures/phase5a/data_layer_reliability_contracts.json`
+  - updated `tests/fixtures/phase5a/external_regression_intake.json`
 
 ## 3.3 Phase 5C: Multi-Database Tooling + Migration Targeting
 

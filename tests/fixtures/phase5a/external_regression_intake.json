@@ -90,6 +90,55 @@
           "test": "testAdapterCapabilityMetadataMatchesFixtureContracts"
         }
       ]
+    },
+    {
+      "id": "rails_multi_db_role_switching_read_write_contract",
+      "source_framework": "rails",
+      "source_area": "active record multi-db role routing",
+      "source_reference": "role-based read/write routing across separate endpoints",
+      "bug_class": "route_target_mismatch",
+      "arlen_contract_id": "runtime_read_write_route_selection_contract",
+      "status": "covered",
+      "arlen_tests": [
+        {
+          "file": "tests/unit/Phase5BTests.m",
+          "test": "testRoutingSelectsReadAndWriteTargetsDeterministically"
+        }
+      ]
+    },
+    {
+      "id": "django_read_your_write_stickiness_window",
+      "source_framework": "django",
+      "source_area": "database routers and replica lag mitigation",
+      "source_reference": "bounded read-after-write stickiness behavior",
+      "bug_class": "stale_read_after_write",
+      "arlen_contract_id": "read_after_write_stickiness_scope_contract",
+      "status": "covered",
+      "arlen_tests": [
+        {
+          "file": "tests/unit/Phase5BTests.m",
+          "test": "testReadAfterWriteStickinessRespectsBoundedScope"
+        }
+      ]
+    },
+    {
+      "id": "ecto_dynamic_repo_fallback_diagnostics",
+      "source_framework": "ecto",
+      "source_area": "dynamic repo + replica fallback",
+      "source_reference": "fallback routing and unknown-target errors must be explicit",
+      "bug_class": "fallback_silence_regression",
+      "arlen_contract_id": "routing_hook_and_fallback_contract",
+      "status": "covered",
+      "arlen_tests": [
+        {
+          "file": "tests/unit/Phase5BTests.m",
+          "test": "testReadFallbackToWriteTargetOnReadFailure"
+        },
+        {
+          "file": "tests/unit/Phase5BTests.m",
+          "test": "testUnknownResolverTargetFailsDeterministically"
+        }
+      ]
     }
   ]
 }

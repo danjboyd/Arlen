@@ -149,6 +149,84 @@
           "test": "testAdapterCapabilityMetadataMatchesFixtureContracts"
         }
       ]
+    },
+    {
+      "id": "runtime_read_write_route_selection_contract",
+      "claim": "Runtime routing deterministically selects read or write targets by operation class while preserving observable route metadata.",
+      "source_docs": [
+        "docs/PHASE5_ROADMAP.md",
+        "docs/PHASE5B_RUNTIME_ROUTING.md",
+        "docs/ARLEN_DATA.md"
+      ],
+      "verification": [
+        {
+          "kind": "unit",
+          "file": "tests/unit/Phase5BTests.m",
+          "test": "testRoutingSelectsReadAndWriteTargetsDeterministically"
+        },
+        {
+          "kind": "integration",
+          "file": "tests/integration/PostgresIntegrationTests.m",
+          "test": "testDatabaseRouterReadWriteRoutingAcrossLiveAdapters"
+        }
+      ]
+    },
+    {
+      "id": "read_after_write_stickiness_scope_contract",
+      "claim": "Read-after-write stickiness applies only within configured bounded scope and transaction boundaries update stickiness only on successful commit.",
+      "source_docs": [
+        "docs/PHASE5_ROADMAP.md",
+        "docs/PHASE5B_RUNTIME_ROUTING.md"
+      ],
+      "verification": [
+        {
+          "kind": "unit",
+          "file": "tests/unit/Phase5BTests.m",
+          "test": "testReadAfterWriteStickinessRespectsBoundedScope"
+        },
+        {
+          "kind": "unit",
+          "file": "tests/unit/Phase5BTests.m",
+          "test": "testTransactionFailureDoesNotActivateStickinessButSuccessDoes"
+        },
+        {
+          "kind": "integration",
+          "file": "tests/integration/PostgresIntegrationTests.m",
+          "test": "testDatabaseRouterReadWriteRoutingAcrossLiveAdapters"
+        }
+      ]
+    },
+    {
+      "id": "routing_hook_and_fallback_contract",
+      "claim": "Tenant/shard routing hooks and read-fallback behavior produce deterministic target selection and explicit unknown-target diagnostics.",
+      "source_docs": [
+        "docs/PHASE5_ROADMAP.md",
+        "docs/PHASE5B_RUNTIME_ROUTING.md"
+      ],
+      "verification": [
+        {
+          "kind": "unit",
+          "file": "tests/unit/Phase5BTests.m",
+          "test": "testRouteTargetResolverSupportsTenantAndShardHints"
+        },
+        {
+          "kind": "unit",
+          "file": "tests/unit/Phase5BTests.m",
+          "test": "testReadFallbackToWriteTargetOnReadFailure"
+        },
+        {
+          "kind": "unit",
+          "file": "tests/unit/Phase5BTests.m",
+          "test": "testUnknownResolverTargetFailsDeterministically"
+        }
+      ],
+      "unsupported_diagnostics": {
+        "domain_symbol": "ALNDatabaseRouterErrorDomain",
+        "code_symbols": [
+          "ALNDatabaseRouterErrorUnknownTarget",
+          "ALNDatabaseRouterErrorMissingAdapter"
+        ]
+      }
     }
   ]
 }

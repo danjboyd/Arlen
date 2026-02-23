@@ -24,6 +24,7 @@ Open `build/docs/index.html` in your browser.
 - [ArlenData Reuse Guide](ARLEN_DATA.md): standalone data-layer packaging, checkout, and versioning policy.
 - [SQL Builder Conformance Matrix](SQL_BUILDER_CONFORMANCE_MATRIX.md): phase-4 SQL snapshot matrix and regression gate map.
 - [Phase 5A Reliability Contracts](PHASE5A_RELIABILITY_CONTRACTS.md): contract map, external regression intake workflow, and adapter capability metadata baselines.
+- [Phase 5B Runtime Routing](PHASE5B_RUNTIME_ROUTING.md): multi-database read/write routing, scoped stickiness, and diagnostics contracts.
 - [SQL Builder Phase 4 Migration Guide](SQL_BUILDER_PHASE4_MIGRATION.md): migration from string-heavy builder usage to IR/typed patterns.
 - [Propane Manager](PROPANE.md): production process manager and propane accessories.
 - [Release Process](RELEASE_PROCESS.md): semantic versioning, deprecations, and release checklist.

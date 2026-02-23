@@ -371,4 +371,184 @@
                      exitCode:NULL];
 }
 
+- (void)testDatabaseRouterReadWriteRoutingAcrossLiveAdapters {
+  NSString *dsn = [self pgTestDSN];
+  if ([dsn length] == 0) {
+    return;
+  }
+
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *workRoot = [self createTempDirectory];
+  XCTAssertNotNil(workRoot);
+  if (workRoot == nil) {
+    return;
+  }
+
+  NSString *table =
+      [[NSString stringWithFormat:@"arlen_router_%@", [[NSUUID UUID] UUIDString]] lowercaseString];
+  table = [table stringByReplacingOccurrencesOfString:@"-" withString:@""];
+
+  NSString *sourcePath = [workRoot stringByAppendingPathComponent:@"phase5b_router_smoke.m"];
+  NSString *binaryPath = [workRoot stringByAppendingPathComponent:@"phase5b_router_smoke"];
+  NSString *escapedDSN = [dsn stringByReplacingOccurrencesOfString:@"\"" withString:@"\\\""];
+  NSString *escapedTable = [table stringByReplacingOccurrencesOfString:@"\"" withString:@"\\\""];
+
+  NSString *source = [NSString stringWithFormat:
+      @"#import <Foundation/Foundation.h>\n"
+       "#import \"ALNDatabaseRouter.h\"\n"
+       "#import \"ALNPg.h\"\n"
+       "\n"
+       "int main(void) {\n"
+       "  @autoreleasepool {\n"
+       "    NSString *dsn = @\"%@\";\n"
+       "    NSString *table = @\"%@\";\n"
+       "    NSError *error = nil;\n"
+       "    ALNPg *reader = [[ALNPg alloc] initWithConnectionString:dsn maxConnections:2 error:&error];\n"
+       "    if (reader == nil || error != nil) {\n"
+       "      fprintf(stderr, \"reader init failed\\n\");\n"
+       "      return 1;\n"
+       "    }\n"
+       "    ALNPg *writer = [[ALNPg alloc] initWithConnectionString:dsn maxConnections:2 error:&error];\n"
+       "    if (writer == nil || error != nil) {\n"
+       "      fprintf(stderr, \"writer init failed\\n\");\n"
+       "      return 2;\n"
+       "    }\n"
+       "    ALNDatabaseRouter *router = [[ALNDatabaseRouter alloc]\n"
+       "      initWithTargets:@{ @\"reader\" : reader, @\"writer\" : writer }\n"
+       "      defaultReadTarget:@\"reader\"\n"
+       "      defaultWriteTarget:@\"writer\"\n"
+       "      error:&error];\n"
+       "    if (router == nil || error != nil) {\n"
+       "      fprintf(stderr, \"router init failed\\n\");\n"
+       "      return 3;\n"
+       "    }\n"
+       "\n"
+       "    NSMutableArray<NSDictionary *> *events = [NSMutableArray array];\n"
+       "    router.routingDiagnosticsListener = ^(NSDictionary<NSString *, id> *event) {\n"
+       "      [events addObject:[NSDictionary dictionaryWithDictionary:event ?: @{}]];\n"
+       "    };\n"
+       "\n"
+       "    NSInteger affected = [router executeCommand:[NSString stringWithFormat:@\"CREATE TABLE %%@ (id SERIAL PRIMARY KEY, value TEXT NOT NULL)\", table]\n"
+       "                                        parameters:@[]\n"
+       "                                             error:&error];\n"
+       "    if (affected < 0 || error != nil) {\n"
+       "      fprintf(stderr, \"create failed\\n\");\n"
+       "      return 4;\n"
+       "    }\n"
+       "    affected = [router executeCommand:[NSString stringWithFormat:@\"INSERT INTO %%@ (value) VALUES ($1)\", table]\n"
+       "                                 parameters:@[ @\"seed\" ]\n"
+       "                                      error:&error];\n"
+       "    if (affected != 1 || error != nil) {\n"
+       "      fprintf(stderr, \"insert seed failed\\n\");\n"
+       "      return 5;\n"
+       "    }\n"
+       "\n"
+       "    NSArray<NSDictionary *> *rows = [router executeQuery:[NSString stringWithFormat:@\"SELECT COUNT(*) AS count FROM %%@\", table]\n"
+       "                                                    parameters:@[]\n"
+       "                                                         error:&error];\n"
+       "    NSString *count = [[rows firstObject][@\"count\"] isKindOfClass:[NSString class]] ? [rows firstObject][@\"count\"] : @\"\";\n"
+       "    if ([count isEqualToString:@\"1\"] == NO || error != nil) {\n"
+       "      fprintf(stderr, \"initial read failed\\n\");\n"
+       "      return 6;\n"
+       "    }\n"
+       "\n"
+       "    NSDictionary *firstReadEvent = nil;\n"
+       "    for (NSDictionary *event in events) {\n"
+       "      NSString *operationClass = [event[@\"operation_class\"] isKindOfClass:[NSString class]] ? event[@\"operation_class\"] : @\"\";\n"
+       "      if ([operationClass isEqualToString:@\"read\"]) {\n"
+       "        firstReadEvent = event;\n"
+       "        break;\n"
+       "      }\n"
+       "    }\n"
+       "    NSString *firstTarget = [firstReadEvent[@\"selected_target\"] isKindOfClass:[NSString class]] ? firstReadEvent[@\"selected_target\"] : @\"\";\n"
+       "    if ([firstTarget isEqualToString:@\"reader\"] == NO) {\n"
+       "      fprintf(stderr, \"initial route target mismatch\\n\");\n"
+       "      return 7;\n"
+       "    }\n"
+       "\n"
+       "    router.readAfterWriteStickinessSeconds = 5;\n"
+       "    NSDictionary *scope = @{ @\"stickiness_scope\" : @\"integration-scope-a\" };\n"
+       "    affected = [router executeCommand:[NSString stringWithFormat:@\"INSERT INTO %%@ (value) VALUES ($1)\", table]\n"
+       "                                 parameters:@[ @\"stickiness\" ]\n"
+       "                             routingContext:scope\n"
+       "                                      error:&error];\n"
+       "    if (affected != 1 || error != nil) {\n"
+       "      fprintf(stderr, \"stickiness write failed\\n\");\n"
+       "      return 8;\n"
+       "    }\n"
+       "\n"
+       "    rows = [router executeQuery:[NSString stringWithFormat:@\"SELECT COUNT(*) AS count FROM %%@\", table]\n"
+       "                    parameters:@[]\n"
+       "                routingContext:scope\n"
+       "                         error:&error];\n"
+       "    count = [[rows firstObject][@\"count\"] isKindOfClass:[NSString class]] ? [rows firstObject][@\"count\"] : @\"\";\n"
+       "    if ([count isEqualToString:@\"2\"] == NO || error != nil) {\n"
+       "      fprintf(stderr, \"sticky read failed\\n\");\n"
+       "      return 9;\n"
+       "    }\n"
+       "\n"
+       "    NSDictionary *stickyReadEvent = nil;\n"
+       "    for (NSInteger idx = (NSInteger)[events count] - 1; idx >= 0; idx--) {\n"
+       "      NSDictionary *event = events[(NSUInteger)idx];\n"
+       "      NSString *operationClass = [event[@\"operation_class\"] isKindOfClass:[NSString class]] ? event[@\"operation_class\"] : @\"\";\n"
+       "      if (![operationClass isEqualToString:@\"read\"]) {\n"
+       "        continue;\n"
+       "      }\n"
+       "      NSString *scopeValue = [event[@\"stickiness_scope\"] isKindOfClass:[NSString class]] ? event[@\"stickiness_scope\"] : @\"\";\n"
+       "      if ([scopeValue isEqualToString:@\"integration-scope-a\"]) {\n"
+       "        stickyReadEvent = event;\n"
+       "        break;\n"
+       "      }\n"
+       "    }\n"
+       "    NSString *stickyTarget = [stickyReadEvent[@\"selected_target\"] isKindOfClass:[NSString class]] ? stickyReadEvent[@\"selected_target\"] : @\"\";\n"
+       "    BOOL usedStickiness = [stickyReadEvent[@\"used_stickiness\"] boolValue];\n"
+       "    if ([stickyTarget isEqualToString:@\"writer\"] == NO || !usedStickiness) {\n"
+       "      fprintf(stderr, \"sticky route metadata mismatch\\n\");\n"
+       "      return 10;\n"
+       "    }\n"
+       "\n"
+       "    (void)[writer executeCommand:[NSString stringWithFormat:@\"DROP TABLE IF EXISTS %%@\", table]\n"
+       "                        parameters:@[]\n"
+       "                             error:NULL];\n"
+       "    fprintf(stdout, \"phase5b-router-ok\\n\");\n"
+       "  }\n"
+       "  return 0;\n"
+       "}\n",
+      escapedDSN, escapedTable];
+
+  NSError *writeError = nil;
+  BOOL wrote = [source writeToFile:sourcePath
+                        atomically:YES
+                          encoding:NSUTF8StringEncoding
+                             error:&writeError];
+  XCTAssertTrue(wrote);
+  XCTAssertNil(writeError);
+  if (!wrote) {
+    return;
+  }
+
+  NSString *compileCommand = [NSString stringWithFormat:
+      @"source /usr/GNUstep/System/Library/Makefiles/GNUstep.sh && clang $(gnustep-config --objc-flags) "
+       "-fobjc-arc -I%@/src/Arlen -I%@/src/Arlen/Data %@ %@/src/Arlen/Data/ALNDatabaseAdapter.m "
+       "%@/src/Arlen/Data/ALNDatabaseRouter.m %@/src/Arlen/Data/ALNPg.m %@/src/Arlen/Data/ALNSQLBuilder.m "
+       "%@/src/Arlen/Data/ALNPostgresSQLBuilder.m -o %@ $(gnustep-config --base-libs) -ldl -lcrypto",
+      repoRoot,
+      repoRoot,
+      sourcePath,
+      repoRoot,
+      repoRoot,
+      repoRoot,
+      repoRoot,
+      repoRoot,
+      binaryPath];
+  int compileCode = 0;
+  NSString *compileOutput = [self runShellCapture:compileCommand exitCode:&compileCode];
+  XCTAssertEqual(0, compileCode, @"%@", compileOutput);
+
+  int runCode = 0;
+  NSString *runOutput = [self runShellCapture:binaryPath exitCode:&runCode];
+  XCTAssertEqual(0, runCode, @"%@", runOutput);
+  XCTAssertTrue([runOutput containsString:@"phase5b-router-ok"], @"%@", runOutput);
+}
+
 @end
