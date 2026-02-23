@@ -1,0 +1,50 @@
+{
+  "version": "phase7f-frontend-starter-contracts-v1",
+  "contracts": [
+    {
+      "id": "phase7f.frontend_generate_presets",
+      "claim": "Frontend starter generation supports deterministic preset workflows for vanilla-spa and progressive-mpa templates.",
+      "source_docs": [
+        "docs/PHASE7F_FRONTEND_STARTERS.md",
+        "docs/CLI_REFERENCE.md"
+      ],
+      "verification": [
+        {
+          "kind": "integration",
+          "file": "tests/integration/DeploymentIntegrationTests.m",
+          "test": "testArlenGenerateFrontendStartersAreDeterministicAndDeployPackaged"
+        }
+      ]
+    },
+    {
+      "id": "phase7f.frontend_release_packaging",
+      "claim": "Generated starter static assets are included in immutable release packaging under app/public frontend paths.",
+      "source_docs": [
+        "docs/PHASE7F_FRONTEND_STARTERS.md",
+        "docs/DEPLOYMENT.md"
+      ],
+      "verification": [
+        {
+          "kind": "integration",
+          "file": "tests/integration/DeploymentIntegrationTests.m",
+          "test": "testArlenGenerateFrontendStartersAreDeterministicAndDeployPackaged"
+        }
+      ]
+    },
+    {
+      "id": "phase7f.starter_versioning_guidance",
+      "claim": "Starter manifests and documentation provide deterministic versioning and upgrade guidance for generated frontend templates.",
+      "source_docs": [
+        "docs/PHASE7F_FRONTEND_STARTERS.md",
+        "docs/GETTING_STARTED.md"
+      ],
+      "verification": [
+        {
+          "kind": "unit",
+          "file": "tests/unit/Phase7FTests.m",
+          "test": "testFrontendStarterContractFixtureSchemaAndTestCoverage"
+        }
+      ]
+    }
+  ]
+}

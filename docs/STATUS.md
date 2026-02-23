@@ -32,7 +32,8 @@ Last updated: 2026-02-23
 - Phase 7C: initial slice implemented (2026-02-23)
 - Phase 7D: initial slice implemented (2026-02-23)
 - Phase 7E: initial slice implemented (2026-02-23)
-- Phase 7F-7H: planned (roadmap defined 2026-02-23)
+- Phase 7F: initial slice implemented (2026-02-23)
+- Phase 7G-7H: planned (roadmap defined 2026-02-23)
 
 ## Completed Today (2026-02-23)
 
@@ -66,6 +67,12 @@ Last updated: 2026-02-23
   - expanded multiline/nested/malformed fixture matrix and include-guard lint fixtures
   - guarded include contract in default template render path (`templates/index.html.eoc`)
   - Phase 7E contract fixture + docs (`tests/fixtures/phase7e/template_pipeline_contracts.json`, `docs/PHASE7E_TEMPLATE_PIPELINE_MATURITY.md`, `docs/TEMPLATE_TROUBLESHOOTING.md`)
+- Implemented Phase 7F initial frontend-starter slice:
+  - added `arlen generate frontend <Name> --preset <vanilla-spa|progressive-mpa>` scaffolding contract
+  - deterministic starter layout under `public/frontend/<slug>/` with static assets and starter manifest
+  - starter API wiring examples (`/healthz?format=json`, `/metrics`) for zero-extra-controller bootstrap
+  - release packaging compatibility contract via `public/` artifact inclusion
+  - Phase 7F contract fixture + docs (`tests/fixtures/phase7f/frontend_starter_contracts.json`, `docs/PHASE7F_FRONTEND_STARTERS.md`)
 - Completed Phase 5A-5E implementation tranche.
 - Added typed schema contracts + typed SQL generation workflow (5D) and validated compile-time/runtime contract behavior.
 - Added Phase 5E hardening coverage:
@@ -214,6 +221,11 @@ Last updated: 2026-02-23
   - root render integration verification for partial include output (`tests/integration/HTTPIntegrationTests.m`)
   - `eocc` lint warning shape/behavior integration verification (`tests/integration/DeploymentIntegrationTests.m`)
   - phase fixture schema/reference validation (`tests/unit/Phase7ETests.m`)
+- New Phase 7F checks executed:
+  - frontend starter generation preset coverage + deterministic reproducibility hashing (`tests/integration/DeploymentIntegrationTests.m`)
+  - release packaging inclusion coverage for generated frontend assets (`tests/integration/DeploymentIntegrationTests.m`)
+  - unsupported preset deterministic rejection diagnostics (`tests/integration/DeploymentIntegrationTests.m`)
+  - phase fixture schema/reference validation (`tests/unit/Phase7FTests.m`)
 - New Phase 3F checks executed:
   - `arlen doctor` bootstrap pre-build diagnostics + JSON payload validation
   - ALNPg SQLSTATE/diagnostics regression tests
@@ -269,7 +281,7 @@ Last updated: 2026-02-23
 
 1. Continue remaining Phase 7D ecosystem service durability depth (production-adapter failure/recovery integration coverage) (`docs/PHASE7_ROADMAP.md`).
 2. Continue remaining Phase 7E template-pipeline depth (additional lint/diagnostic rules and watch/deploy render-path regressions) (`docs/PHASE7_ROADMAP.md`).
-3. Start Phase 7G coding-agent-first DX contracts (machine-readable CLI outputs + fix-it diagnostics + agent regression harness) (`docs/PHASE7_ROADMAP.md`).
+3. Start Phase 7G coding-agent-first DX contracts and Phase 7H distributed-runtime depth execution planning (`docs/PHASE7_ROADMAP.md`).
 
 ## Planned Phase Mapping (Post-4C)
 
@@ -292,6 +304,7 @@ Last updated: 2026-02-23
   - Phase 7C initial observability/operability slice implemented (trace propagation/correlation headers + JSON health/readiness signals + deploy operability validation script)
   - Phase 7D initial ecosystem service durability slice implemented (idempotency/retry/cache durability contracts)
   - Phase 7E initial template-pipeline maturity slice implemented (lint diagnostics + fixture matrix + include/render-path hardening checks)
+  - Phase 7F initial frontend integration starter slice implemented (deterministic starter generation + deploy packaging coverage)
   - remaining runtime hardening for `boomhauer`/`propane` in progress
   - remaining security policy/default hardening in progress
   - remaining observability/operability + coding-agent-first DX contracts

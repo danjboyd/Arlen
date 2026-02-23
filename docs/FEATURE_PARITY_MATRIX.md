@@ -1,7 +1,7 @@
 # Arlen Feature Parity Matrix
 
 Status: Active baseline  
-Last updated: 2026-02-20
+Last updated: 2026-02-23
 
 Related docs:
 - `docs/PHASE2_ROADMAP.md`
@@ -89,7 +89,7 @@ Related docs:
 | Inbound email framework | Rails | Out of Scope | N/A | Niche workload for Arlen core. |
 | Rich-text/CMS layer | Rails | Out of Scope | N/A | Better as ecosystem/package concern. |
 | Asset pipeline in core runtime | Rails | Out of Scope | N/A | Prefer integration with external frontend toolchains. |
-| Official frontend toolchain integration guides/starters | Node/Vite ecosystems | In Scope | Post-3H planned | Keep core runtime slim while documenting practical frontend integration paths. |
+| Official frontend toolchain integration guides/starters | Node/Vite ecosystems | In Scope | Phase 7F (initial slice complete) | Keep core runtime slim while documenting practical frontend integration paths. |
 
 ## 6. GNUstepWeb Migration Compatibility Classification
 

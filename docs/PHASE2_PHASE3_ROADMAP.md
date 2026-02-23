@@ -1,6 +1,6 @@
 # Arlen Phase 2 + Phase 3 Roadmap Index
 
-Status: Active (Phase 2A-2D complete; Phase 3A-3H complete; Phase 4A-4E complete; Phase 5A-5E complete; Phase 7A/7B/7C/7D/7E initial slices implemented; Phase 7 follow-on planned)  
+Status: Active (Phase 2A-2D complete; Phase 3A-3H complete; Phase 4A-4E complete; Phase 5A-5E complete; Phase 7A/7B/7C/7D/7E/7F initial slices implemented; Phase 7 follow-on planned)  
 Last updated: 2026-02-23
 
 This index points to the current roadmap documents:
@@ -76,7 +76,11 @@ Phase 7 execution/planning is defined in `docs/PHASE7_ROADMAP.md`, including:
   - deterministic transpiler lint diagnostics (`unguarded_include`) and `eocc` warning output contracts
   - expanded multiline/nested/error-shape template fixture coverage
   - include/render-path integration hardening checks and troubleshooting workflow docs
-- remaining 7A/7B/7C/7D/7E follow-on and 7F-7H planning:
+- Phase 7F initial frontend integration starter slice completed (`docs/PHASE7F_FRONTEND_STARTERS.md`):
+  - `arlen generate frontend` deterministic starter generation (`vanilla-spa`, `progressive-mpa`)
+  - static asset/API wiring templates under `public/frontend/<slug>/`
+  - deploy packaging and reproducibility integration checks
+- remaining 7A/7B/7C/7D/7E/7F follow-on and 7G-7H planning:
   - additional runtime hardening for `boomhauer`/`propane`
   - security defaults and policy contracts
   - deeper observability/operability maturity and coding-agent-first DX contracts

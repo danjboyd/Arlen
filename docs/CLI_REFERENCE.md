@@ -30,7 +30,7 @@ Run bootstrap environment diagnostics without requiring a framework build.
 - `--env <name>`: include the target environment name in output (default `development`)
 - `--json`: emit structured JSON diagnostics
 
-### `arlen generate <controller|endpoint|model|migration|test|plugin> <Name> [options]`
+### `arlen generate <controller|endpoint|model|migration|test|plugin|frontend> <Name> [options]`
 
 Generate app artifacts.
 
@@ -46,6 +46,10 @@ Plugin generator options:
 
 - `--preset <generic|redis-cache|queue-jobs|smtp-mail>`: choose service-oriented plugin scaffold (default `generic`)
 
+Frontend generator options:
+
+- `--preset <vanilla-spa|progressive-mpa>`: choose frontend starter scaffold (default `vanilla-spa`)
+
 Generator behavior:
 
 - `controller`: `src/Controllers/<Name>Controller.{h,m}`
@@ -55,6 +59,7 @@ Generator behavior:
 - `test`: `tests/<Name>Tests.m`
 - `plugin`: `src/Plugins/<Name>Plugin.{h,m}` and class auto-registration in `config/app.plist` (`plugins.classes`), with optional `--preset` service templates
   - `redis-cache` preset uses `ALNRedisCacheAdapter` when `ARLEN_REDIS_URL` is configured
+- `frontend`: deterministic starter assets under `public/frontend/<name_slug>/` with `index.html`, `app.js`, `styles.css`, `starter_manifest.json`, and `README.md`
 
 Notes:
 
@@ -303,6 +308,7 @@ Signals:
 - `make test-data-layer`: build and run standalone `ArlenData` example validation
 - `make deploy-smoke`: validate deployment runbook with automated release smoke
 - `tools/deploy/validate_operability.sh`: validate text/JSON health/readiness/metrics operability contracts against a running server
+- `arlen generate frontend <Name> --preset <vanilla-spa|progressive-mpa>`: scaffold frontend starter templates with built-in API wiring examples
 - `make docs-html`: generate browser-friendly docs under `build/docs`
 
 ## Data-Layer Runtime APIs (Phase 4D)

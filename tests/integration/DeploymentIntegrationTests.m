@@ -270,6 +270,119 @@
   }
 }
 
+- (void)testArlenGenerateFrontendStartersAreDeterministicAndDeployPackaged {
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *workRoot = [self createTempDirectoryWithPrefix:@"arlen-frontend-starters"];
+  XCTAssertNotNil(workRoot);
+  if (workRoot == nil) {
+    return;
+  }
+
+  @try {
+    int code = 0;
+    NSString *buildOutput = [self runShellCapture:[NSString stringWithFormat:@"cd %@ && make arlen", repoRoot]
+                                         exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", buildOutput);
+
+    NSString *newA = [self
+        runShellCapture:[NSString stringWithFormat:@"cd %@ && ARLEN_FRAMEWORK_ROOT=%@ %@/build/arlen "
+                                                  "new FrontendA --full",
+                                                  workRoot, repoRoot, repoRoot]
+               exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", newA);
+
+    NSString *newB = [self
+        runShellCapture:[NSString stringWithFormat:@"cd %@ && ARLEN_FRAMEWORK_ROOT=%@ %@/build/arlen "
+                                                  "new FrontendB --full",
+                                                  workRoot, repoRoot, repoRoot]
+               exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", newB);
+
+    NSString *appA = [workRoot stringByAppendingPathComponent:@"FrontendA"];
+    NSString *appB = [workRoot stringByAppendingPathComponent:@"FrontendB"];
+
+    NSString *generateAVanilla = [self
+        runShellCapture:[NSString stringWithFormat:@"cd %@ && ARLEN_FRAMEWORK_ROOT=%@ %@/build/arlen "
+                                                  "generate frontend Dashboard --preset vanilla-spa",
+                                                  appA, repoRoot, repoRoot]
+               exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", generateAVanilla);
+
+    NSString *generateAProgressive = [self
+        runShellCapture:[NSString stringWithFormat:@"cd %@ && ARLEN_FRAMEWORK_ROOT=%@ %@/build/arlen "
+                                                  "generate frontend Portal --preset progressive-mpa",
+                                                  appA, repoRoot, repoRoot]
+               exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", generateAProgressive);
+
+    NSString *generateBVanilla = [self
+        runShellCapture:[NSString stringWithFormat:@"cd %@ && ARLEN_FRAMEWORK_ROOT=%@ %@/build/arlen "
+                                                  "generate frontend Dashboard --preset vanilla-spa",
+                                                  appB, repoRoot, repoRoot]
+               exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", generateBVanilla);
+
+    NSString *generateBProgressive = [self
+        runShellCapture:[NSString stringWithFormat:@"cd %@ && ARLEN_FRAMEWORK_ROOT=%@ %@/build/arlen "
+                                                  "generate frontend Portal --preset progressive-mpa",
+                                                  appB, repoRoot, repoRoot]
+               exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", generateBProgressive);
+
+    NSString *invalidPreset = [self
+        runShellCapture:[NSString stringWithFormat:@"cd %@ && ARLEN_FRAMEWORK_ROOT=%@ %@/build/arlen "
+                                                  "generate frontend Broken --preset unsupported",
+                                                  appA, repoRoot, repoRoot]
+               exitCode:&code];
+    XCTAssertEqual(2, code, @"%@", invalidPreset);
+    XCTAssertTrue([invalidPreset containsString:@"unsupported --preset"]);
+
+    NSString *hashA = [self runShellCapture:[NSString stringWithFormat:
+                                                 @"cd %@ && find public/frontend -type f -print0 | "
+                                                  "sort -z | xargs -0 sha256sum",
+                                                 appA]
+                                   exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", hashA);
+    NSString *hashB = [self runShellCapture:[NSString stringWithFormat:
+                                                 @"cd %@ && find public/frontend -type f -print0 | "
+                                                  "sort -z | xargs -0 sha256sum",
+                                                 appB]
+                                   exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", hashB);
+    XCTAssertEqualObjects(hashA, hashB);
+
+    BOOL vanillaManifestExists =
+        [[NSFileManager defaultManager]
+            fileExistsAtPath:[appA stringByAppendingPathComponent:
+                                       @"public/frontend/dashboard/starter_manifest.json"]];
+    BOOL progressiveManifestExists =
+        [[NSFileManager defaultManager]
+            fileExistsAtPath:[appA stringByAppendingPathComponent:
+                                       @"public/frontend/portal/starter_manifest.json"]];
+    XCTAssertTrue(vanillaManifestExists);
+    XCTAssertTrue(progressiveManifestExists);
+
+    NSString *releasesDir = [workRoot stringByAppendingPathComponent:@"releases"];
+    NSString *releaseBuild = [self
+        runShellCapture:[NSString stringWithFormat:
+                                      @"%s/tools/deploy/build_release.sh --app-root %s "
+                                       "--framework-root %s --releases-dir %s --release-id frontend-1",
+                                      [repoRoot UTF8String], [appA UTF8String], [repoRoot UTF8String],
+                                      [releasesDir UTF8String]]
+               exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", releaseBuild);
+
+    NSString *releaseVanilla =
+        [releasesDir stringByAppendingPathComponent:@"frontend-1/app/public/frontend/dashboard/index.html"];
+    NSString *releaseProgressive =
+        [releasesDir stringByAppendingPathComponent:@"frontend-1/app/public/frontend/portal/index.html"];
+    XCTAssertTrue([[NSFileManager defaultManager] fileExistsAtPath:releaseVanilla]);
+    XCTAssertTrue([[NSFileManager defaultManager] fileExistsAtPath:releaseProgressive]);
+  } @finally {
+    [[NSFileManager defaultManager] removeItemAtPath:workRoot error:nil];
+  }
+}
+
 - (void)testEOCCEmitsDeterministicLintDiagnosticsForUnguardedInclude {
   NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
   NSString *workRoot = [self createTempDirectoryWithPrefix:@"arlen-eocc-lint"];

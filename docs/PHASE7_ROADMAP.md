@@ -1,6 +1,6 @@
 # Arlen Phase 7 Roadmap
 
-Status: Active (Phase 7A, 7B, 7C, 7D, and 7E initial slices implemented; follow-on in progress)  
+Status: Active (Phase 7A, 7B, 7C, 7D, 7E, and 7F initial slices implemented; follow-on in progress)  
 Last updated: 2026-02-23
 
 Related docs:
@@ -11,6 +11,7 @@ Related docs:
 - `docs/PHASE7C_OBSERVABILITY_OPERABILITY.md`
 - `docs/PHASE7D_SERVICE_DURABILITY.md`
 - `docs/PHASE7E_TEMPLATE_PIPELINE_MATURITY.md`
+- `docs/PHASE7F_FRONTEND_STARTERS.md`
 - `docs/STATUS.md`
 - `docs/FEATURE_PARITY_MATRIX.md`
 - `docs/PROPANE.md`
@@ -239,7 +240,7 @@ Implementation notes (initial slice, 2026-02-23):
 
 ## 3.6 Phase 7F: Frontend Integration Starters
 
-Status: Planned
+Status: Initial slice implemented (2026-02-23); remaining 7F deliverables in progress
 
 Deliverables:
 
@@ -253,6 +254,26 @@ Acceptance (required):
 - New users can bootstrap supported frontend integration paths quickly.
 - Starter flows are deterministic and tested.
 - Frontend guidance stays aligned with Arlen release policy.
+
+Implementation notes (initial slice, 2026-02-23):
+
+- Added frontend starter generation path in CLI:
+  - `arlen generate frontend <Name> --preset <vanilla-spa|progressive-mpa>`
+  - deterministic generated layout under `public/frontend/<slug>/...`
+  - default preset when omitted: `vanilla-spa`
+- Starter templates include static assets plus API consumption examples:
+  - built-in JSON signal endpoint usage (`/healthz?format=json`)
+  - metrics endpoint preview (`/metrics`)
+- Added deterministic starter version manifest contract:
+  - generated `starter_manifest.json` with version `phase7f-starter-v1`
+- Added release-packaging alignment:
+  - starter assets are generated under `public/`, matching deploy packaging contract
+- Added executable contract fixture and docs:
+  - `tests/fixtures/phase7f/frontend_starter_contracts.json`
+  - `docs/PHASE7F_FRONTEND_STARTERS.md`
+- Added regression coverage:
+  - `tests/integration/DeploymentIntegrationTests.m` (starter reproducibility + release packaging)
+  - `tests/unit/Phase7FTests.m` (fixture schema/reference integrity)
 
 ## 3.7 Phase 7G: Coding-Agent-First DX Contracts
 
@@ -294,7 +315,7 @@ Recommended sequencing for adoption impact and risk reduction:
 
 1. Wave 1: Phase 7A + Phase 7B (initial slices complete)
 2. Wave 2: Phase 7C + Phase 7D + Phase 7E (initial slices complete)
-3. Wave 3: Phase 7G + Phase 7F + Phase 7H
+3. Wave 3: Phase 7G + Phase 7H
 
 ## 5. Testing and Quality Strategy
 

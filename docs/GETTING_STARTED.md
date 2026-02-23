@@ -284,7 +284,35 @@ id<ALNAttachmentAdapter> attachments =
     [[ALNRetryingAttachmentAdapter alloc] initWithBaseAdapter:baseAttachmentAdapter];
 ```
 
-## 11. Template Troubleshooting
+## 11. Generate Frontend Starters
+
+From app root:
+
+```bash
+/path/to/Arlen/bin/arlen generate frontend Dashboard --preset vanilla-spa
+/path/to/Arlen/bin/arlen generate frontend Portal --preset progressive-mpa
+```
+
+Generated assets are deterministic and land under:
+
+- `public/frontend/<name_slug>/index.html`
+- `public/frontend/<name_slug>/app.js`
+- `public/frontend/<name_slug>/styles.css`
+- `public/frontend/<name_slug>/starter_manifest.json`
+- `public/frontend/<name_slug>/README.md`
+
+These starters demonstrate static asset serving plus API consumption against built-in endpoints:
+
+- `/healthz?format=json`
+- `/metrics`
+
+Starter assets are release-packaging compatible because they live under `public/`.
+
+Reference guide:
+
+- `docs/PHASE7F_FRONTEND_STARTERS.md`
+
+## 12. Template Troubleshooting
 
 Run targeted transpile/lint checks when templates fail to compile or behave unexpectedly:
 
@@ -309,7 +337,7 @@ Full troubleshooting workflow:
 
 - `docs/TEMPLATE_TROUBLESHOOTING.md`
 
-## 12. Common Environment Variables
+## 13. Common Environment Variables
 
 Framework/app runtime:
 
@@ -366,7 +394,7 @@ Framework/app runtime:
 
 Legacy compatibility fallback (`MOJOOBJC_*`) is supported but transitional.
 
-## 13. Migrations (PostgreSQL)
+## 14. Migrations (PostgreSQL)
 
 From app root with `db/migrations`:
 
@@ -386,7 +414,7 @@ Named database target (uses `db/migrations/<target>`):
 /path/to/Arlen/bin/arlen migrate --env development --database analytics
 ```
 
-## 14. Generate Typed DB Helpers (Phase 4C)
+## 15. Generate Typed DB Helpers (Phase 4C)
 
 From app root:
 
@@ -438,7 +466,7 @@ Default SQL input format:
 SELECT id, name FROM users WHERE status = $1 LIMIT $2;
 ```
 
-## 15. Builder Query Caching + Diagnostics (Phase 4D)
+## 16. Builder Query Caching + Diagnostics (Phase 4D)
 
 `ALNPgConnection` now supports builder-driven execution with cache/diagnostic controls:
 
@@ -455,7 +483,7 @@ Key runtime options:
 - `includeSQLInDiagnosticsEvents` (default `NO`, keeps metadata redaction-safe)
 - `emitDiagnosticsEventsToStderr`
 
-## 16. Conformance + Migration Hardening (Phase 4E)
+## 17. Conformance + Migration Hardening (Phase 4E)
 
 Review matrix + migration references:
 
@@ -480,7 +508,7 @@ Sanitizer gate command:
 make ci-sanitizers
 ```
 
-## 17. Deploy Smoke Validation
+## 18. Deploy Smoke Validation
 
 ```bash
 make deploy-smoke
