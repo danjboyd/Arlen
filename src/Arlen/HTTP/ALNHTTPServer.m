@@ -1067,6 +1067,18 @@ static ALNResponse *ALNErrorResponse(NSInteger statusCode, NSString *body) {
   if ([requestID length] > 0) {
     [handshake appendFormat:@"X-Request-Id: %@\r\n", requestID];
   }
+  NSString *correlationID = [response headerForName:@"X-Correlation-Id"];
+  if ([correlationID length] > 0) {
+    [handshake appendFormat:@"X-Correlation-Id: %@\r\n", correlationID];
+  }
+  NSString *traceID = [response headerForName:@"X-Trace-Id"];
+  if ([traceID length] > 0) {
+    [handshake appendFormat:@"X-Trace-Id: %@\r\n", traceID];
+  }
+  NSString *traceparent = [response headerForName:@"traceparent"];
+  if ([traceparent length] > 0) {
+    [handshake appendFormat:@"traceparent: %@\r\n", traceparent];
+  }
   NSString *protocol = [response headerForName:@"Sec-WebSocket-Protocol"];
   if ([protocol length] > 0) {
     [handshake appendFormat:@"Sec-WebSocket-Protocol: %@\r\n", protocol];

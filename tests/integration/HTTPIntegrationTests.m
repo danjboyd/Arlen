@@ -274,6 +274,38 @@
   XCTAssertEqualObjects(@"live\n", live);
 }
 
+- (void)testHealthEndpointSupportsJSONSignalPayload {
+  int curlCode = 0;
+  int serverCode = 0;
+  NSString *body =
+      [self requestWithServerEnv:nil
+                     serverBinary:@"./build/boomhauer"
+                        curlBody:@"curl -fsS -H 'Accept: application/json' http://127.0.0.1:%d/healthz"
+                        curlCode:&curlCode
+                       serverCode:&serverCode];
+  XCTAssertEqual(0, curlCode);
+  XCTAssertEqual(0, serverCode);
+  XCTAssertTrue([body containsString:@"\"signal\":\"health\""] ||
+                [body containsString:@"\"signal\": \"health\""]);
+  XCTAssertTrue([body containsString:@"\"checks\""]);
+}
+
+- (void)testTraceparentAndCorrelationHeadersAreEmitted {
+  int curlCode = 0;
+  int serverCode = 0;
+  NSString *headers =
+      [self requestWithServerEnv:nil
+                     serverBinary:@"./build/boomhauer"
+                        curlBody:@"curl -sS -D - -o /dev/null -H 'traceparent: 00-0123456789abcdef0123456789abcdef-1111111111111111-01' http://127.0.0.1:%d/healthz"
+                        curlCode:&curlCode
+                       serverCode:&serverCode];
+  XCTAssertEqual(0, curlCode);
+  XCTAssertEqual(0, serverCode);
+  XCTAssertTrue([headers containsString:@"X-Correlation-Id:"]);
+  XCTAssertTrue([headers containsString:@"X-Trace-Id: 0123456789abcdef0123456789abcdef"]);
+  XCTAssertTrue([headers containsString:@"traceparent: 00-0123456789abcdef0123456789abcdef-"]);
+}
+
 - (void)testClusterStatusEndpointAndHeaders {
   NSString *clusterEnv =
       @"ARLEN_CLUSTER_ENABLED=1 "

@@ -181,6 +181,14 @@ Behavior:
   - header `Retry-After: 1`
   - header `X-Arlen-Backpressure-Reason: websocket_session_limit`
 - security misconfiguration now fails startup deterministically (for example missing `session.secret` when `session.enabled=YES`)
+- request responses emit correlation/trace headers:
+  - `X-Request-Id`
+  - `X-Correlation-Id`
+  - `X-Trace-Id` + `traceparent` (when trace propagation is enabled)
+- built-in health/readiness probes support JSON signal payloads when requested:
+  - `GET /healthz` with `Accept: application/json` (or `?format=json`)
+  - `GET /readyz` with `Accept: application/json` (or `?format=json`)
+  - strict readiness (`503 not_ready` before startup) can be enabled with `ARLEN_READINESS_REQUIRES_STARTUP=1`
 - built-in observability/API docs endpoints are available when enabled:
   - `/metrics`
   - `/clusterz`
@@ -214,6 +222,9 @@ Environment:
 - `ARLEN_FRAMEWORK_ROOT`
 - `ARLEN_SECURITY_PROFILE` (`balanced`, `strict`, or `edge`; legacy `MOJOOBJC_SECURITY_PROFILE` also accepted)
 - `ARLEN_MAX_WEBSOCKET_SESSIONS` (runtime websocket session limit; legacy `MOJOOBJC_MAX_WEBSOCKET_SESSIONS` also accepted)
+- `ARLEN_TRACE_PROPAGATION_ENABLED` (default `1`; legacy `MOJOOBJC_TRACE_PROPAGATION_ENABLED` also accepted)
+- `ARLEN_HEALTH_DETAILS_ENABLED` (default `1`; legacy `MOJOOBJC_HEALTH_DETAILS_ENABLED` also accepted)
+- `ARLEN_READINESS_REQUIRES_STARTUP` (default `0`; legacy `MOJOOBJC_READINESS_REQUIRES_STARTUP` also accepted)
 
 ## `propane` Script (`bin/propane`)
 
@@ -272,6 +283,7 @@ Signals:
   - set `ARLEN_SANITIZER_INCLUDE_INTEGRATION=1` to include full integration suite in sanitizer runs
 - `make test-data-layer`: build and run standalone `ArlenData` example validation
 - `make deploy-smoke`: validate deployment runbook with automated release smoke
+- `tools/deploy/validate_operability.sh`: validate text/JSON health/readiness/metrics operability contracts against a running server
 - `make docs-html`: generate browser-friendly docs under `build/docs`
 
 ## Data-Layer Runtime APIs (Phase 4D)

@@ -19,6 +19,8 @@
 #import "ALNMetrics.h"
 #import "ALNAuth.h"
 
+#include <ctype.h>
+#include <math.h>
 #include <unistd.h>
 
 NSString *const ALNApplicationErrorDomain = @"Arlen.Application.Error";
@@ -52,6 +54,8 @@ static void ALNSetStructuredErrorResponse(ALNResponse *response,
 @property(nonatomic, assign, readwrite) BOOL clusterEmitHeaders;
 @property(nonatomic, copy) NSString *i18nDefaultLocale;
 @property(nonatomic, copy) NSString *i18nFallbackLocale;
+@property(nonatomic, strong) NSDate *bootedAt;
+@property(nonatomic, strong) NSDate *startedAt;
 @property(nonatomic, assign, readwrite, getter=isStarted) BOOL started;
 
 - (void)loadConfiguredPlugins;
@@ -146,6 +150,8 @@ static void ALNSetStructuredErrorResponse(ALNResponse *response,
     _clusterEmitHeaders = [emitHeadersValue respondsToSelector:@selector(boolValue)]
                               ? [emitHeadersValue boolValue]
                               : YES;
+    _bootedAt = [NSDate date];
+    _startedAt = nil;
     _started = NO;
     if ([_environment isEqualToString:@"development"]) {
       _logger.minimumLevel = ALNLogLevelDebug;
@@ -858,6 +864,250 @@ static NSString *ALNGenerateRequestID(void) {
   return [[NSUUID UUID] UUIDString];
 }
 
+static NSString *ALNISO8601Now(void) {
+  static NSDateFormatter *formatter = nil;
+  if (formatter == nil) {
+    formatter = [[NSDateFormatter alloc] init];
+    formatter.locale = [[NSLocale alloc] initWithLocaleIdentifier:@"en_US_POSIX"];
+    formatter.timeZone = [NSTimeZone timeZoneWithAbbreviation:@"UTC"];
+    formatter.dateFormat = @"yyyy-MM-dd'T'HH:mm:ss.SSS'Z'";
+  }
+  return [formatter stringFromDate:[NSDate date]];
+}
+
+static NSString *ALNHeaderValue(NSDictionary *headers, NSString *name) {
+  if (![headers isKindOfClass:[NSDictionary class]] ||
+      ![name isKindOfClass:[NSString class]] ||
+      [name length] == 0) {
+    return @"";
+  }
+
+  id direct = headers[name];
+  if ([direct isKindOfClass:[NSString class]]) {
+    return direct;
+  }
+
+  NSString *lowerName = [name lowercaseString];
+  id lowered = headers[lowerName];
+  if ([lowered isKindOfClass:[NSString class]]) {
+    return lowered;
+  }
+
+  for (id key in headers) {
+    if (![key isKindOfClass:[NSString class]]) {
+      continue;
+    }
+    NSString *candidateName = [(NSString *)key lowercaseString];
+    if (![candidateName isEqualToString:lowerName]) {
+      continue;
+    }
+    id value = headers[key];
+    if ([value isKindOfClass:[NSString class]]) {
+      return value;
+    }
+  }
+  return @"";
+}
+
+static BOOL ALNStringIsHexOfLength(NSString *value, NSUInteger expectedLength) {
+  if (![value isKindOfClass:[NSString class]] || [value length] != expectedLength) {
+    return NO;
+  }
+  NSCharacterSet *nonHex = [[NSCharacterSet characterSetWithCharactersInString:@"0123456789abcdefABCDEF"] invertedSet];
+  return [value rangeOfCharacterFromSet:nonHex].location == NSNotFound;
+}
+
+static NSString *ALNRandomHexString(NSUInteger length) {
+  if (length == 0) {
+    return @"";
+  }
+  NSMutableString *output = [NSMutableString stringWithCapacity:length];
+  while ([output length] < length) {
+    NSString *chunk =
+        [[[[NSUUID UUID] UUIDString] stringByReplacingOccurrencesOfString:@"-" withString:@""]
+            lowercaseString];
+    [output appendString:chunk];
+  }
+  if ([output length] > length) {
+    return [output substringToIndex:length];
+  }
+  return output;
+}
+
+static NSString *ALNNormalizedTraceIDCandidate(NSString *value) {
+  if (![value isKindOfClass:[NSString class]] || [value length] == 0) {
+    return @"";
+  }
+  NSString *trimmed =
+      [value stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+  if ([trimmed length] == 0) {
+    return @"";
+  }
+
+  NSMutableString *hex = [NSMutableString stringWithCapacity:32];
+  NSUInteger length = [trimmed length];
+  for (NSUInteger idx = 0; idx < length && [hex length] < 32; idx++) {
+    unichar ch = [trimmed characterAtIndex:idx];
+    if ((ch >= '0' && ch <= '9') || (ch >= 'a' && ch <= 'f') ||
+        (ch >= 'A' && ch <= 'F')) {
+      [hex appendFormat:@"%c", (char)tolower((int)ch)];
+    }
+  }
+
+  if ([hex length] != 32) {
+    return @"";
+  }
+  NSString *normalized = [hex copy];
+  if ([normalized isEqualToString:@"00000000000000000000000000000000"]) {
+    return @"";
+  }
+  return normalized;
+}
+
+static NSDictionary *ALNParsedTraceparentHeader(NSString *headerValue) {
+  if (![headerValue isKindOfClass:[NSString class]] || [headerValue length] == 0) {
+    return @{};
+  }
+
+  NSArray *members = [headerValue componentsSeparatedByString:@","];
+  NSString *firstMember = [members count] > 0 ? members[0] : @"";
+  NSString *trimmedFirstMember =
+      [firstMember stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+  NSArray *segments = [trimmedFirstMember componentsSeparatedByString:@"-"];
+  if ([segments count] != 4) {
+    return @{};
+  }
+
+  NSString *version = [segments[0] lowercaseString];
+  NSString *traceID = [segments[1] lowercaseString];
+  NSString *parentSpanID = [segments[2] lowercaseString];
+  NSString *flags = [segments[3] lowercaseString];
+
+  if (!ALNStringIsHexOfLength(version, 2) ||
+      !ALNStringIsHexOfLength(traceID, 32) ||
+      !ALNStringIsHexOfLength(parentSpanID, 16) ||
+      !ALNStringIsHexOfLength(flags, 2)) {
+    return @{};
+  }
+  if ([traceID isEqualToString:@"00000000000000000000000000000000"] ||
+      [parentSpanID isEqualToString:@"0000000000000000"]) {
+    return @{};
+  }
+
+  return @{
+    @"version" : version,
+    @"trace_id" : traceID,
+    @"parent_span_id" : parentSpanID,
+    @"flags" : flags,
+  };
+}
+
+static NSDictionary *ALNBuildRequestTraceContext(ALNRequest *request,
+                                                 BOOL tracePropagationEnabled) {
+  if (!tracePropagationEnabled) {
+    return @{};
+  }
+
+  NSString *incomingTraceparent = ALNHeaderValue(request.headers, @"traceparent");
+  NSDictionary *parsedTraceparent = ALNParsedTraceparentHeader(incomingTraceparent);
+
+  NSString *traceID = [parsedTraceparent[@"trace_id"] isKindOfClass:[NSString class]]
+                          ? parsedTraceparent[@"trace_id"]
+                          : @"";
+  if ([traceID length] == 0) {
+    traceID = ALNNormalizedTraceIDCandidate(ALNHeaderValue(request.headers, @"x-trace-id"));
+  }
+  if ([traceID length] == 0) {
+    traceID = ALNRandomHexString(32);
+  }
+
+  NSString *parentSpanID = [parsedTraceparent[@"parent_span_id"] isKindOfClass:[NSString class]]
+                               ? parsedTraceparent[@"parent_span_id"]
+                               : @"";
+  NSString *flags = [parsedTraceparent[@"flags"] isKindOfClass:[NSString class]]
+                        ? parsedTraceparent[@"flags"]
+                        : @"01";
+  if (!ALNStringIsHexOfLength(flags, 2)) {
+    flags = @"01";
+  }
+
+  NSString *spanID = ALNRandomHexString(16);
+  NSString *traceparent = [NSString stringWithFormat:@"00-%@-%@-%@", traceID, spanID, flags];
+
+  return @{
+    @"trace_id" : traceID ?: @"",
+    @"span_id" : spanID ?: @"",
+    @"parent_span_id" : parentSpanID ?: @"",
+    @"traceparent" : traceparent ?: @"",
+  };
+}
+
+static NSDictionary *ALNObservabilityConfig(ALNApplication *application) {
+  return ALNDictionaryConfigValue(application.config, @"observability");
+}
+
+static BOOL ALNTracePropagationEnabled(ALNApplication *application) {
+  NSDictionary *observability = ALNObservabilityConfig(application);
+  return ALNBoolConfigValue(observability[@"tracePropagationEnabled"], YES);
+}
+
+static BOOL ALNHealthDetailsEnabled(ALNApplication *application) {
+  NSDictionary *observability = ALNObservabilityConfig(application);
+  return ALNBoolConfigValue(observability[@"healthDetailsEnabled"], YES);
+}
+
+static BOOL ALNReadinessRequiresStartup(ALNApplication *application) {
+  NSDictionary *observability = ALNObservabilityConfig(application);
+  return ALNBoolConfigValue(observability[@"readinessRequiresStartup"], NO);
+}
+
+static NSDictionary *ALNTraceExportPayload(ALNPerfTrace *trace,
+                                           NSString *requestID,
+                                           NSDictionary *traceContext,
+                                           ALNRequest *request,
+                                           ALNResponse *response,
+                                           NSString *routeName,
+                                           NSString *controllerName,
+                                           NSString *actionName) {
+  NSMutableDictionary *payload =
+      [NSMutableDictionary dictionaryWithDictionary:[trace dictionaryRepresentation] ?: @{}];
+  payload[@"event"] = @"http.request.trace";
+  payload[@"method"] = request.method ?: @"";
+  payload[@"path"] = request.path ?: @"";
+  payload[@"status"] = @(response.statusCode);
+  payload[@"request_id"] = requestID ?: @"";
+  payload[@"correlation_id"] = requestID ?: @"";
+  payload[@"route"] = routeName ?: @"";
+  payload[@"controller"] = controllerName ?: @"";
+  payload[@"action"] = actionName ?: @"";
+
+  NSString *traceID = [traceContext[@"trace_id"] isKindOfClass:[NSString class]]
+                          ? traceContext[@"trace_id"]
+                          : @"";
+  NSString *spanID = [traceContext[@"span_id"] isKindOfClass:[NSString class]]
+                         ? traceContext[@"span_id"]
+                         : @"";
+  NSString *parentSpanID = [traceContext[@"parent_span_id"] isKindOfClass:[NSString class]]
+                               ? traceContext[@"parent_span_id"]
+                               : @"";
+  NSString *traceparent = [traceContext[@"traceparent"] isKindOfClass:[NSString class]]
+                              ? traceContext[@"traceparent"]
+                              : @"";
+  if ([traceID length] > 0) {
+    payload[@"trace_id"] = traceID;
+  }
+  if ([spanID length] > 0) {
+    payload[@"span_id"] = spanID;
+  }
+  if ([parentSpanID length] > 0) {
+    payload[@"parent_span_id"] = parentSpanID;
+  }
+  if ([traceparent length] > 0) {
+    payload[@"traceparent"] = traceparent;
+  }
+  return payload;
+}
+
 static BOOL ALNPathLooksLikeAPI(NSString *path) {
   if (![path isKindOfClass:[NSString class]]) {
     return NO;
@@ -969,6 +1219,67 @@ static NSString *ALNBuiltInHealthBodyForPath(NSString *path) {
   return nil;
 }
 
+static NSString *ALNHealthSignalNameForPath(NSString *path) {
+  if ([path isEqualToString:@"/readyz"]) {
+    return @"ready";
+  }
+  if ([path isEqualToString:@"/livez"]) {
+    return @"live";
+  }
+  return @"health";
+}
+
+static NSDictionary *ALNOperationalSignalPayload(ALNApplication *application,
+                                                 NSString *signal,
+                                                 BOOL ok,
+                                                 BOOL startupReady,
+                                                 BOOL readinessRequiresStartup) {
+  NSDictionary *metricsSnapshot = [application.metrics snapshot];
+  NSDictionary *gauges = [metricsSnapshot[@"gauges"] isKindOfClass:[NSDictionary class]]
+                             ? metricsSnapshot[@"gauges"]
+                             : @{};
+  double activeRequests = [gauges[@"http_requests_active"] respondsToSelector:@selector(doubleValue)]
+                              ? [gauges[@"http_requests_active"] doubleValue]
+                              : 0.0;
+
+  NSDate *uptimeAnchor = application.startedAt ?: application.bootedAt ?: [NSDate date];
+  NSTimeInterval uptimeSeconds = [[NSDate date] timeIntervalSinceDate:uptimeAnchor];
+  if (uptimeSeconds < 0.0) {
+    uptimeSeconds = 0.0;
+  }
+
+  NSMutableDictionary *checks = [NSMutableDictionary dictionary];
+  checks[@"request_dispatch"] = @{
+    @"ok" : @(YES),
+    @"mode" : @"in_process",
+  };
+  checks[@"metrics_registry"] = @{
+    @"ok" : @(YES),
+    @"source" : @"ALNMetricsRegistry",
+  };
+  checks[@"active_requests"] = @{
+    @"ok" : @(activeRequests >= 0.0),
+    @"value" : @(activeRequests),
+  };
+  checks[@"startup"] = @{
+    @"ok" : @(startupReady || !readinessRequiresStartup),
+    @"started" : @(startupReady),
+    @"required_for_readyz" : @(readinessRequiresStartup),
+  };
+
+  NSMutableDictionary *payload = [NSMutableDictionary dictionary];
+  payload[@"ok"] = @(ok);
+  payload[@"signal"] = signal ?: @"health";
+  payload[@"status"] = ok ? ([signal isEqualToString:@"ready"] ? @"ready" : @"ok") : @"not_ready";
+  payload[@"timestamp_utc"] = ALNISO8601Now();
+  payload[@"uptime_seconds"] = @((NSInteger)floor(uptimeSeconds));
+  payload[@"checks"] = checks;
+  if ([signal isEqualToString:@"ready"]) {
+    payload[@"ready"] = @(ok);
+  }
+  return payload;
+}
+
 static NSDictionary *ALNClusterStatusPayload(ALNApplication *application) {
   NSDictionary *session = ALNDictionaryConfigValue(application.config, @"session");
   BOOL sessionEnabled = ALNBoolConfigValue(session[@"enabled"], NO);
@@ -1006,11 +1317,19 @@ static BOOL ALNRequestMethodIsReadOnly(ALNRequest *request) {
 }
 
 static BOOL ALNHeaderPrefersJSON(ALNRequest *request) {
-  NSString *accept = [request.headers[@"accept"] isKindOfClass:[NSString class]]
-                         ? [request.headers[@"accept"] lowercaseString]
-                         : @"";
+  NSString *accept = [ALNHeaderValue(request.headers, @"accept") lowercaseString];
   return [accept containsString:@"application/json"] ||
          [accept containsString:@"text/json"];
+}
+
+static BOOL ALNBuiltInEndpointPrefersJSON(ALNRequest *request) {
+  if (ALNHeaderPrefersJSON(request)) {
+    return YES;
+  }
+  NSString *format = [request.queryParams[@"format"] isKindOfClass:[NSString class]]
+                         ? [request.queryParams[@"format"] lowercaseString]
+                         : @"";
+  return [format isEqualToString:@"json"];
 }
 
 static BOOL ALNApplyBuiltInResponse(ALNApplication *application,
@@ -1027,12 +1346,46 @@ static BOOL ALNApplyBuiltInResponse(ALNApplication *application,
     return NO;
   }
 
+  NSString *healthPath = routePath;
   NSString *healthBody = ALNBuiltInHealthBodyForPath(routePath);
+  if ([healthBody length] == 0) {
+    healthBody = ALNBuiltInHealthBodyForPath(requestPath);
+    if ([healthBody length] > 0) {
+      healthPath = requestPath;
+    }
+  }
   if ([healthBody length] > 0) {
-    response.statusCode = 200;
-    [response setHeader:@"Content-Type" value:@"text/plain; charset=utf-8"];
-    if (!headRequest) {
-      [response setTextBody:healthBody];
+    BOOL healthDetailsEnabled = ALNHealthDetailsEnabled(application);
+    BOOL readinessRequiresStartup = ALNReadinessRequiresStartup(application);
+    NSString *signal = ALNHealthSignalNameForPath(healthPath);
+    BOOL startupReady = application.isStarted;
+    BOOL ready = ![signal isEqualToString:@"ready"] ||
+                 !readinessRequiresStartup ||
+                 startupReady;
+    response.statusCode = ready ? 200 : 503;
+
+    BOOL prefersJSON = ALNBuiltInEndpointPrefersJSON(request);
+    if (prefersJSON && healthDetailsEnabled) {
+      NSDictionary *payload = ALNOperationalSignalPayload(application,
+                                                          signal,
+                                                          ready,
+                                                          startupReady,
+                                                          readinessRequiresStartup);
+      NSError *jsonError = nil;
+      BOOL ok = [response setJSONBody:payload options:0 error:&jsonError];
+      if (!ok) {
+        response.statusCode = 500;
+        [response setHeader:@"Content-Type" value:@"text/plain; charset=utf-8"];
+        [response setTextBody:@"health status serialization failed\n"];
+      } else if (headRequest) {
+        [response.bodyData setLength:0];
+      }
+    } else {
+      [response setHeader:@"Content-Type" value:@"text/plain; charset=utf-8"];
+      if (!headRequest) {
+        NSString *body = ready ? healthBody : @"not_ready\n";
+        [response setTextBody:body];
+      }
     }
     response.committed = YES;
     return YES;
@@ -1500,6 +1853,7 @@ static void ALNFinalizeResponse(ALNApplication *application,
                                 ALNPerfTrace *trace,
                                 ALNRequest *request,
                                 NSString *requestID,
+                                NSDictionary *traceContext,
                                 BOOL performanceLogging) {
   if (performanceLogging && [trace isEnabled]) {
     [trace setStage:@"parse" durationMilliseconds:request.parseDurationMilliseconds >= 0.0
@@ -1532,7 +1886,24 @@ static void ALNFinalizeResponse(ALNApplication *application,
 
   if ([requestID length] > 0) {
     [response setHeader:@"X-Request-Id" value:requestID];
+    [response setHeader:@"X-Correlation-Id" value:requestID];
   }
+
+  if (ALNTracePropagationEnabled(application)) {
+    NSString *traceID = [traceContext[@"trace_id"] isKindOfClass:[NSString class]]
+                            ? traceContext[@"trace_id"]
+                            : @"";
+    NSString *traceparent = [traceContext[@"traceparent"] isKindOfClass:[NSString class]]
+                                ? traceContext[@"traceparent"]
+                                : @"";
+    if ([traceID length] > 0) {
+      [response setHeader:@"X-Trace-Id" value:traceID];
+    }
+    if ([traceparent length] > 0) {
+      [response setHeader:@"traceparent" value:traceparent];
+    }
+  }
+
   if (application.clusterEmitHeaders) {
     [response setHeader:@"X-Arlen-Cluster" value:application.clusterName ?: @"default"];
     [response setHeader:@"X-Arlen-Node" value:application.clusterNodeID ?: @"node"];
@@ -1747,6 +2118,7 @@ static void ALNFinalizeResponse(ALNApplication *application,
   }
 
   self.started = YES;
+  self.startedAt = [NSDate date];
   for (id<ALNLifecycleHook> hook in self.mutableLifecycleHooks) {
     if ([hook respondsToSelector:@selector(applicationDidStart:)]) {
       [hook applicationDidStart:self];
@@ -1774,6 +2146,7 @@ static void ALNFinalizeResponse(ALNApplication *application,
     }
   }
   self.started = NO;
+  self.startedAt = nil;
 
   for (NSInteger idx = (NSInteger)[self.mutableMounts count] - 1; idx >= 0; idx--) {
     NSDictionary *entry = self.mutableMounts[(NSUInteger)idx];
@@ -1889,6 +2262,20 @@ static void ALNFinalizeResponse(ALNApplication *application,
   [response setHeader:@"X-Request-Id" value:requestID];
 
   BOOL performanceLogging = ALNBoolConfigValue(self.config[@"performanceLogging"], YES);
+  BOOL tracePropagationEnabled = ALNTracePropagationEnabled(self);
+  NSDictionary *traceContext = ALNBuildRequestTraceContext(request, tracePropagationEnabled);
+  NSString *traceID = [traceContext[@"trace_id"] isKindOfClass:[NSString class]]
+                          ? traceContext[@"trace_id"]
+                          : @"";
+  NSString *spanID = [traceContext[@"span_id"] isKindOfClass:[NSString class]]
+                         ? traceContext[@"span_id"]
+                         : @"";
+  NSString *parentSpanID = [traceContext[@"parent_span_id"] isKindOfClass:[NSString class]]
+                               ? traceContext[@"parent_span_id"]
+                               : @"";
+  NSString *traceparent = [traceContext[@"traceparent"] isKindOfClass:[NSString class]]
+                              ? traceContext[@"traceparent"]
+                              : @"";
   BOOL apiOnly = ALNBoolConfigValue(self.config[@"apiOnly"], NO);
   ALNPerfTrace *trace = [[ALNPerfTrace alloc] initWithEnabled:performanceLogging];
   [trace startStage:@"total"];
@@ -1922,13 +2309,26 @@ static void ALNFinalizeResponse(ALNApplication *application,
       [response setHeader:@"Content-Type" value:@"text/plain; charset=utf-8"];
       response.committed = YES;
     }
-    ALNFinalizeResponse(self, response, trace, request, requestID, performanceLogging);
+    ALNFinalizeResponse(self,
+                        response,
+                        trace,
+                        request,
+                        requestID,
+                        traceContext,
+                        performanceLogging);
     ALNRecordRequestMetrics(self, response, trace);
     [self.metrics addGauge:@"http_requests_active" delta:-1.0];
 
     if (self.traceExporter != nil) {
       @try {
-        [self.traceExporter exportTrace:[trace dictionaryRepresentation]
+        [self.traceExporter exportTrace:ALNTraceExportPayload(trace,
+                                                              requestID,
+                                                              traceContext,
+                                                              request,
+                                                              response,
+                                                              @"",
+                                                              @"",
+                                                              @"")
                                 request:request
                                response:response
                               routeName:@""
@@ -1947,7 +2347,17 @@ static void ALNFinalizeResponse(ALNApplication *application,
     fields[@"method"] = request.method ?: @"";
     fields[@"path"] = request.path ?: @"";
     fields[@"status"] = @(response.statusCode);
+    fields[@"event"] = @"http.request.completed";
     fields[@"request_id"] = requestID ?: @"";
+    fields[@"correlation_id"] = requestID ?: @"";
+    if (tracePropagationEnabled && [traceID length] > 0) {
+      fields[@"trace_id"] = traceID;
+      fields[@"span_id"] = spanID ?: @"";
+      if ([parentSpanID length] > 0) {
+        fields[@"parent_span_id"] = parentSpanID;
+      }
+      fields[@"traceparent"] = traceparent ?: @"";
+    }
     if (performanceLogging) {
       fields[@"timings"] = [trace dictionaryRepresentation];
     }
@@ -1957,6 +2367,14 @@ static void ALNFinalizeResponse(ALNApplication *application,
 
   NSMutableDictionary *stash = [NSMutableDictionary dictionary];
   stash[@"request_id"] = requestID ?: @"";
+  if (tracePropagationEnabled && [traceID length] > 0) {
+    stash[@"aln.trace_id"] = traceID;
+    stash[@"aln.span_id"] = spanID ?: @"";
+    if ([parentSpanID length] > 0) {
+      stash[@"aln.parent_span_id"] = parentSpanID;
+    }
+    stash[@"aln.traceparent"] = traceparent ?: @"";
+  }
   stash[ALNContextRequestFormatStashKey] = requestFormat ?: @"";
   if (self.jobsAdapter != nil) {
     stash[ALNContextJobsAdapterStashKey] = self.jobsAdapter;
@@ -2263,13 +2681,26 @@ static void ALNFinalizeResponse(ALNApplication *application,
                                             returnValue,
                                             requestID);
 
-  ALNFinalizeResponse(self, response, trace, request, requestID, performanceLogging);
+  ALNFinalizeResponse(self,
+                      response,
+                      trace,
+                      request,
+                      requestID,
+                      traceContext,
+                      performanceLogging);
   ALNRecordRequestMetrics(self, response, trace);
   [self.metrics addGauge:@"http_requests_active" delta:-1.0];
 
   if (self.traceExporter != nil) {
     @try {
-      [self.traceExporter exportTrace:[trace dictionaryRepresentation]
+      [self.traceExporter exportTrace:ALNTraceExportPayload(trace,
+                                                            requestID,
+                                                            traceContext,
+                                                            request,
+                                                            response,
+                                                            context.routeName ?: @"",
+                                                            context.controllerName ?: @"",
+                                                            context.actionName ?: @"")
                               request:request
                              response:response
                             routeName:context.routeName ?: @""
@@ -2288,7 +2719,18 @@ static void ALNFinalizeResponse(ALNApplication *application,
   logFields[@"method"] = request.method ?: @"";
   logFields[@"path"] = request.path ?: @"";
   logFields[@"status"] = @(response.statusCode);
+  logFields[@"event"] = @"http.request.completed";
   logFields[@"request_id"] = requestID ?: @"";
+  logFields[@"correlation_id"] = requestID ?: @"";
+  if (tracePropagationEnabled && [traceID length] > 0) {
+    logFields[@"trace_id"] = traceID;
+    logFields[@"span_id"] = spanID ?: @"";
+    if ([parentSpanID length] > 0) {
+      logFields[@"parent_span_id"] = parentSpanID;
+    }
+    logFields[@"traceparent"] = traceparent ?: @"";
+  }
+  logFields[@"route"] = context.routeName ?: @"";
   logFields[@"controller"] = context.controllerName ?: @"";
   logFields[@"action"] = context.actionName ?: @"";
   if (performanceLogging) {

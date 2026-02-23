@@ -300,19 +300,6 @@
 
 @end
 
-@interface HealthController : ALNController
-@end
-
-@implementation HealthController
-
-- (id)check:(ALNContext *)ctx {
-  (void)ctx;
-  [self renderText:@"ok\n"];
-  return nil;
-}
-
-@end
-
 static NSString *EnvString(const char *name) {
   const char *raw = getenv(name);
   if (raw == NULL || raw[0] == '\0') {
@@ -716,12 +703,6 @@ static ALNApplication *BuildApplication(NSString *environment) {
                       name:@"services_attachments"
            controllerClass:[ServicesController class]
                     action:@"attachmentProbe"];
-  [app registerRouteMethod:@"GET"
-                      path:@"/healthz"
-                      name:@"healthz"
-           controllerClass:[HealthController class]
-                    action:@"check"];
-
   ALNApplication *embeddedApp = [[ALNApplication alloc] initWithConfig:@{
     @"environment" : environment ?: @"development",
     @"logFormat" : @"text",

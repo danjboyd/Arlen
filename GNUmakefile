@@ -72,7 +72,7 @@ $(ARLEN_TOOL): tools/arlen.m src/Arlen/Core/ALNConfig.m src/Arlen/Data/ALNMigrat
 
 arlen: $(ARLEN_TOOL)
 
-$(BOOMHAUER_TOOL): tools/boomhauer.m transpile
+$(BOOMHAUER_TOOL): tools/boomhauer.m $(FRAMEWORK_SRCS) transpile
 >source $(GNUSTEP_SH) && generated_files="$$(find $(GEN_DIR) -type f -name '*.m' | sort)"; \
 >if [ -z "$$generated_files" ]; then \
 >  echo "No generated template sources found in $(GEN_DIR)"; \
@@ -83,7 +83,7 @@ $(BOOMHAUER_TOOL): tools/boomhauer.m transpile
 boomhauer: $(BOOMHAUER_TOOL)
 dev-server: boomhauer
 
-$(TECH_DEMO_SERVER_TOOL): examples/tech_demo/src/tech_demo_server.m tech-demo-transpile
+$(TECH_DEMO_SERVER_TOOL): examples/tech_demo/src/tech_demo_server.m $(FRAMEWORK_SRCS) tech-demo-transpile
 >source $(GNUSTEP_SH) && generated_files="$$(find $(TECH_DEMO_GEN_DIR) -type f -name '*.m' | sort)"; \
 >if [ -z "$$generated_files" ]; then \
 >  echo "No generated template sources found in $(TECH_DEMO_GEN_DIR)"; \
@@ -93,12 +93,12 @@ $(TECH_DEMO_SERVER_TOOL): examples/tech_demo/src/tech_demo_server.m tech-demo-tr
 
 tech-demo-server: $(TECH_DEMO_SERVER_TOOL)
 
-$(API_REFERENCE_SERVER_TOOL): examples/api_reference/src/api_reference_server.m
+$(API_REFERENCE_SERVER_TOOL): examples/api_reference/src/api_reference_server.m $(FRAMEWORK_SRCS)
 >source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) examples/api_reference/src/api_reference_server.m $(FRAMEWORK_SRCS) -o $(API_REFERENCE_SERVER_TOOL) $$(gnustep-config --base-libs) -ldl -lcrypto
 
 api-reference-server: $(API_REFERENCE_SERVER_TOOL)
 
-$(MIGRATION_SAMPLE_SERVER_TOOL): examples/gsweb_migration/src/migration_sample_server.m
+$(MIGRATION_SAMPLE_SERVER_TOOL): examples/gsweb_migration/src/migration_sample_server.m $(FRAMEWORK_SRCS)
 >source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) examples/gsweb_migration/src/migration_sample_server.m $(FRAMEWORK_SRCS) -o $(MIGRATION_SAMPLE_SERVER_TOOL) $$(gnustep-config --base-libs) -ldl -lcrypto
 
 migration-sample-server: $(MIGRATION_SAMPLE_SERVER_TOOL)

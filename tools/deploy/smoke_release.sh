@@ -5,7 +5,7 @@ usage() {
   cat <<'USAGE'
 Usage: smoke_release.sh [options]
 
-Validate release build/activate/health/rollback runbook end-to-end.
+Validate release build/activate/health-readiness operability/rollback runbook end-to-end.
 
 Options:
   --app-root <path>        App root to package (default: cwd)
@@ -95,7 +95,7 @@ run_release_health_check() {
 
   ARLEN_APP_ROOT="$release_dir/app" \
     ARLEN_FRAMEWORK_ROOT="$release_dir/framework" \
-    "$release_dir/framework/build/boomhauer" --port "$probe_port" --once >"$server_log" 2>&1 &
+    "$release_dir/framework/build/boomhauer" --port "$probe_port" >"$server_log" 2>&1 &
   local server_pid=$!
 
   local success=0
@@ -107,13 +107,27 @@ run_release_health_check() {
     sleep 0.05
   done
 
-  wait "$server_pid" || true
   if [[ "$success" != "1" ]]; then
+    kill -TERM "$server_pid" >/dev/null 2>&1 || true
+    wait "$server_pid" || true
     echo "smoke_release.sh: health probe failed for $release_dir"
     echo "smoke_release.sh: server log follows"
     cat "$server_log"
     return 1
   fi
+
+  if ! "$framework_root/tools/deploy/validate_operability.sh" \
+      --base-url "http://127.0.0.1:${probe_port}" >/dev/null; then
+    kill -TERM "$server_pid" >/dev/null 2>&1 || true
+    wait "$server_pid" || true
+    echo "smoke_release.sh: operability validation failed for $release_dir"
+    echo "smoke_release.sh: server log follows"
+    cat "$server_log"
+    return 1
+  fi
+
+  kill -TERM "$server_pid" >/dev/null 2>&1 || true
+  wait "$server_pid" || true
   return 0
 }
 

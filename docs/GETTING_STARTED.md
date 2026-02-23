@@ -57,6 +57,9 @@ curl -i http://127.0.0.1:3000/
 curl -i http://127.0.0.1:3000/healthz
 curl -i http://127.0.0.1:3000/readyz
 curl -i http://127.0.0.1:3000/livez
+curl -i -H 'Accept: application/json' http://127.0.0.1:3000/healthz
+curl -i -H 'Accept: application/json' http://127.0.0.1:3000/readyz
+curl -i -H 'traceparent: 00-0123456789abcdef0123456789abcdef-1111111111111111-01' http://127.0.0.1:3000/healthz
 curl -i http://127.0.0.1:3000/metrics
 curl -i http://127.0.0.1:3000/clusterz
 curl -i http://127.0.0.1:3000/openapi.json
@@ -118,6 +121,14 @@ ARLEN_SECURITY_PROFILE=strict ./bin/boomhauer
 ```
 
 `strict` profile requires valid security secrets/config; startup fails fast if required values are missing.
+
+Strict readiness startup gating override:
+
+```bash
+ARLEN_READINESS_REQUIRES_STARTUP=1 ./bin/boomhauer
+```
+
+With this setting, `GET /readyz` returns deterministic `503 not_ready` until startup completes.
 
 ## 4. Run Tests and Quality Gates
 
@@ -267,6 +278,9 @@ Framework/app runtime:
 - `ARLEN_SERVE_STATIC`
 - `ARLEN_API_ONLY`
 - `ARLEN_PERFORMANCE_LOGGING`
+- `ARLEN_TRACE_PROPAGATION_ENABLED`
+- `ARLEN_HEALTH_DETAILS_ENABLED`
+- `ARLEN_READINESS_REQUIRES_STARTUP`
 - `ARLEN_MAX_REQUEST_LINE_BYTES`
 - `ARLEN_MAX_HEADER_BYTES`
 - `ARLEN_MAX_BODY_BYTES`

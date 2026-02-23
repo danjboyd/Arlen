@@ -22,6 +22,7 @@ Recommended app/runtime defaults for production:
 - `logFormat = "json"`
 - `serveStatic = NO` (behind reverse proxy/CDN)
 - explicit `requestLimits`
+- explicit observability policy (`observability.tracePropagationEnabled`, `observability.healthDetailsEnabled`, `observability.readinessRequiresStartup`)
 - explicit propane accessories (`workerCount`, shutdown/reload timings)
 - explicit cluster settings when running multi-node (`cluster.enabled`, `cluster.name`, `cluster.expectedNodes`)
 
@@ -40,6 +41,16 @@ Arlen provides built-in fallback health endpoints:
 - `GET /clusterz` -> `200` JSON cluster/runtime contract payload
 
 Use these for LB probes and deployment readiness checks.
+
+JSON signal payloads are available for health/readiness when requested:
+
+- `GET /healthz` with `Accept: application/json` (or `?format=json`)
+- `GET /readyz` with `Accept: application/json` (or `?format=json`)
+
+Strict readiness mode:
+
+- set `observability.readinessRequiresStartup = YES` (or `ARLEN_READINESS_REQUIRES_STARTUP=1`)
+- before startup completes, `GET /readyz` returns deterministic `503 not_ready`
 
 When `cluster.emitHeaders = YES` (default), responses include:
 
@@ -163,13 +174,19 @@ Or via make target:
 make deploy-smoke
 ```
 
+Standalone operability validation for a running server:
+
+```bash
+tools/deploy/validate_operability.sh --base-url http://127.0.0.1:3000
+```
+
 This validates:
 
 - release build
 - activation
-- health probe from activated payload
+- text + JSON health/readiness probe contracts from activated payload
 - rollback
-- health probe after rollback
+- text + JSON health/readiness probe contracts after rollback
 
 ## 10. Current Capability Snapshot
 

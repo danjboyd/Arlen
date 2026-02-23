@@ -29,7 +29,8 @@ Last updated: 2026-02-23
 - Phase 5E: complete (2026-02-23)
 - Phase 7A: initial slice implemented (2026-02-23)
 - Phase 7B: initial slice implemented (2026-02-23)
-- Phase 7C-7H: planned (roadmap defined 2026-02-23)
+- Phase 7C: initial slice implemented (2026-02-23)
+- Phase 7D-7H: planned (roadmap defined 2026-02-23)
 
 ## Completed Today (2026-02-23)
 
@@ -43,6 +44,13 @@ Last updated: 2026-02-23
   - fail-fast startup diagnostics for missing security-critical secret/dependency contracts
   - middleware wiring hardening for CSRF/session dependency behavior
   - Phase 7B contract fixture + docs (`tests/fixtures/phase7b/security_policy_contracts.json`, `docs/PHASE7B_SECURITY_DEFAULTS.md`)
+- Implemented Phase 7C initial observability/operability slice:
+  - observability config contract defaults + env/legacy overrides (`observability.tracePropagationEnabled`, `observability.healthDetailsEnabled`, `observability.readinessRequiresStartup`)
+  - request correlation + trace propagation response headers (`X-Correlation-Id`, `X-Trace-Id`, `traceparent`) and enriched trace exporter payload metadata
+  - JSON signal payload contracts for `/healthz` and `/readyz` with deterministic check objects
+  - strict readiness startup gating contract (`readinessRequiresStartup` => deterministic `503 not_ready` before startup)
+  - deployment runbook operability validation script and smoke integration (`tools/deploy/validate_operability.sh`, `tools/deploy/smoke_release.sh`)
+  - Phase 7C contract fixture + docs (`tests/fixtures/phase7c/observability_operability_contracts.json`, `docs/PHASE7C_OBSERVABILITY_OPERABILITY.md`)
 - Completed Phase 5A-5E implementation tranche.
 - Added typed schema contracts + typed SQL generation workflow (5D) and validated compile-time/runtime contract behavior.
 - Added Phase 5E hardening coverage:
@@ -223,13 +231,20 @@ Last updated: 2026-02-23
   - security profile preset defaults + legacy/env override regression (`tests/unit/ConfigTests.m`)
   - fail-fast startup misconfiguration diagnostics (`tests/unit/ApplicationTests.m`)
   - phase fixture schema/reference validation (`tests/unit/Phase7BTests.m`)
+- New Phase 7C checks executed:
+  - observability config default/env/legacy override regression (`tests/unit/ConfigTests.m`)
+  - trace propagation response-header + trace exporter metadata regression (`tests/unit/ApplicationTests.m`)
+  - deterministic JSON health/readiness signal payload regression (`tests/unit/ApplicationTests.m`, `tests/integration/HTTPIntegrationTests.m`)
+  - strict startup-gated readiness regression (`tests/unit/ApplicationTests.m`)
+  - release smoke operability validation-script path regression (`tests/integration/DeploymentIntegrationTests.m`)
+  - phase fixture schema/reference validation (`tests/unit/Phase7CTests.m`)
 - PostgreSQL-backed tests remain gated by `ARLEN_PG_TEST_DSN`.
 
 ## Next Session Focus
 
 1. Continue remaining Phase 7A runtime hardening contracts (timeouts, graceful reload/shutdown, and additional failure-mode regressions) (`docs/PHASE7_ROADMAP.md`).
 2. Continue remaining Phase 7B security-default policy contracts and deployment/incident runbook depth (`docs/PHASE7_ROADMAP.md`).
-3. Define Phase 7C + 7G observability and coding-agent-first DX contract fixtures (`docs/PHASE7_ROADMAP.md`).
+3. Continue remaining Phase 7C observability/operability depth (job/runtime event-shape coverage and diagnostics artifact pack workflows) and start Phase 7G coding-agent-first DX contracts (`docs/PHASE7_ROADMAP.md`).
 
 ## Planned Phase Mapping (Post-4C)
 
@@ -249,9 +264,10 @@ Last updated: 2026-02-23
 - Phase 7 (active):
   - Phase 7A initial runtime hardening slice implemented (websocket backpressure contract + overload diagnostics)
   - Phase 7B initial security-default slice implemented (profile presets + fail-fast startup validation)
+  - Phase 7C initial observability/operability slice implemented (trace propagation/correlation headers + JSON health/readiness signals + deploy operability validation script)
   - remaining runtime hardening for `boomhauer`/`propane` in progress
   - remaining security policy/default hardening in progress
-  - observability/operability + coding-agent-first DX contracts
+  - remaining observability/operability + coding-agent-first DX contracts
   - ecosystem durability, template pipeline hardening, frontend starters, distributed-runtime depth
 - Maybe Someday backlog:
   - LiveView-like server-driven UI

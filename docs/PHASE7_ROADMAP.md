@@ -1,6 +1,6 @@
 # Arlen Phase 7 Roadmap
 
-Status: Active (Phase 7A and 7B initial slices implemented; follow-on in progress)  
+Status: Active (Phase 7A, 7B, and 7C initial slices implemented; follow-on in progress)  
 Last updated: 2026-02-23
 
 Related docs:
@@ -8,6 +8,7 @@ Related docs:
 - `docs/PHASE2_PHASE3_ROADMAP.md`
 - `docs/PHASE7A_RUNTIME_HARDENING.md`
 - `docs/PHASE7B_SECURITY_DEFAULTS.md`
+- `docs/PHASE7C_OBSERVABILITY_OPERABILITY.md`
 - `docs/STATUS.md`
 - `docs/FEATURE_PARITY_MATRIX.md`
 - `docs/PROPANE.md`
@@ -114,7 +115,7 @@ Implementation notes (initial slice, 2026-02-23):
 
 ## 3.3 Phase 7C: Observability + Operability Maturity
 
-Status: Planned
+Status: Initial slice implemented (2026-02-23); remaining 7C deliverables in progress
 
 Deliverables:
 
@@ -128,6 +129,37 @@ Acceptance (required):
 - Operators can trace representative request and background-job flows end-to-end.
 - Health/readiness semantics are deterministic and test-covered.
 - Observability payload schemas are documented and contract tested.
+
+Implementation notes (initial slice, 2026-02-23):
+
+- Added deterministic observability config contract:
+  - `observability.tracePropagationEnabled` (default `YES`)
+  - `observability.healthDetailsEnabled` (default `YES`)
+  - `observability.readinessRequiresStartup` (default `NO`)
+  - env overrides with legacy fallback support
+- Added trace propagation and correlation response-header contracts:
+  - `X-Request-Id`
+  - `X-Correlation-Id`
+  - `X-Trace-Id` (when trace propagation is enabled)
+  - `traceparent` (when trace propagation is enabled)
+- Added trace metadata enrichment for request logs and `traceExporter` payloads:
+  - stable event shape `http.request.completed` for request-complete logs
+  - trace metadata fields (`trace_id`, `span_id`, `parent_span_id`, `traceparent`) in exporter payloads
+- Added JSON health/readiness signal contracts with deterministic check payload shape:
+  - `/healthz` and `/readyz` return JSON payloads when `Accept: application/json` (or `?format=json`)
+  - strict readiness option (`readinessRequiresStartup`) returns deterministic `503 not_ready` when startup has not completed
+- Added deployment runbook operability validation script + smoke integration:
+  - `tools/deploy/validate_operability.sh`
+  - `tools/deploy/smoke_release.sh` now validates operability probes before passing
+- Added executable contract fixture and docs:
+  - `tests/fixtures/phase7c/observability_operability_contracts.json`
+  - `docs/PHASE7C_OBSERVABILITY_OPERABILITY.md`
+- Added regression coverage:
+  - `tests/unit/ConfigTests.m` (observability default + env/legacy override behavior)
+  - `tests/unit/ApplicationTests.m` (trace propagation, health/readiness JSON payload, strict readiness, trace exporter metadata)
+  - `tests/integration/HTTPIntegrationTests.m` (health JSON signal + trace/correlation response headers)
+  - `tests/integration/DeploymentIntegrationTests.m` (release smoke runbook operability validation path)
+  - `tests/unit/Phase7CTests.m` (fixture schema/reference integrity)
 
 ## 3.4 Phase 7D: Ecosystem Service Durability
 

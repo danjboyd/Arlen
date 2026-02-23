@@ -113,6 +113,44 @@
 
 @end
 
+@interface AppTraceCaptureExporter : NSObject <ALNTraceExporter>
+
+@property(nonatomic, strong) NSDictionary *lastTrace;
+@property(nonatomic, copy) NSString *lastRouteName;
+@property(nonatomic, copy) NSString *lastControllerName;
+@property(nonatomic, copy) NSString *lastActionName;
+
+@end
+
+@implementation AppTraceCaptureExporter
+
+- (instancetype)init {
+  self = [super init];
+  if (self) {
+    _lastTrace = @{};
+    _lastRouteName = @"";
+    _lastControllerName = @"";
+    _lastActionName = @"";
+  }
+  return self;
+}
+
+- (void)exportTrace:(NSDictionary *)trace
+            request:(ALNRequest *)request
+           response:(ALNResponse *)response
+          routeName:(NSString *)routeName
+     controllerName:(NSString *)controllerName
+         actionName:(NSString *)actionName {
+  (void)request;
+  (void)response;
+  self.lastTrace = [trace isKindOfClass:[NSDictionary class]] ? trace : @{};
+  self.lastRouteName = [routeName copy] ?: @"";
+  self.lastControllerName = [controllerName copy] ?: @"";
+  self.lastActionName = [actionName copy] ?: @"";
+}
+
+@end
+
 @interface ApplicationTests : XCTestCase
 @end
 
@@ -201,6 +239,17 @@
                                queryString:queryString ?: @""
                                    headers:headers ?: @{}
                                       body:[NSData data]];
+}
+
+- (NSString *)traceIDFromTraceparent:(NSString *)traceparent {
+  if (![traceparent isKindOfClass:[NSString class]]) {
+    return @"";
+  }
+  NSArray *segments = [traceparent componentsSeparatedByString:@"-"];
+  if ([segments count] != 4) {
+    return @"";
+  }
+  return [segments[1] isKindOfClass:[NSString class]] ? segments[1] : @"";
 }
 
 - (void)testImplicitJSONForDictionaryReturn {
@@ -413,6 +462,142 @@
   XCTAssertNotNil([response headerForName:@"X-Arlen-Total-Ms"]);
   XCTAssertEqualObjects(@"34.500", [response headerForName:@"X-Arlen-Parse-Ms"]);
   XCTAssertNotNil([response headerForName:@"X-Arlen-Response-Write-Ms"]);
+}
+
+- (void)testResponseIncludesTracePropagationHeadersAndCorrelationByDefault {
+  ALNApplication *app = [self buildAppWithHaltingMiddleware:NO];
+  NSString *incomingTraceparent =
+      @"00-0123456789abcdef0123456789abcdef-1111111111111111-01";
+  ALNResponse *response = [app dispatchRequest:[self requestForPath:@"/dict"
+                                                         queryString:@""
+                                                             headers:@{
+                                                               @"traceparent" : incomingTraceparent,
+                                                             }]];
+  XCTAssertEqual((NSInteger)200, response.statusCode);
+  NSString *requestID = [response headerForName:@"X-Request-Id"];
+  NSString *correlationID = [response headerForName:@"X-Correlation-Id"];
+  NSString *traceID = [response headerForName:@"X-Trace-Id"];
+  NSString *traceparent = [response headerForName:@"traceparent"];
+  XCTAssertTrue([requestID length] > 0);
+  XCTAssertEqualObjects(requestID, correlationID);
+  XCTAssertEqualObjects(@"0123456789abcdef0123456789abcdef", traceID);
+  XCTAssertEqualObjects(traceID, [self traceIDFromTraceparent:traceparent]);
+  XCTAssertNotEqualObjects(incomingTraceparent, traceparent);
+}
+
+- (void)testTracePropagationCanBeDisabledByConfig {
+  ALNApplication *app = [[ALNApplication alloc] initWithConfig:@{
+    @"environment" : @"test",
+    @"logFormat" : @"json",
+    @"observability" : @{
+      @"tracePropagationEnabled" : @(NO),
+    },
+  }];
+  [app registerRouteMethod:@"GET"
+                      path:@"/dict"
+                      name:@"dict"
+           controllerClass:[AppJSONController class]
+                    action:@"dict"];
+
+  ALNResponse *response = [app dispatchRequest:[self requestForPath:@"/dict"
+                                                         queryString:@""
+                                                             headers:@{
+                                                               @"traceparent" :
+                                                                   @"00-0123456789abcdef0123456789abcdef-1111111111111111-01",
+                                                             }]];
+  XCTAssertEqual((NSInteger)200, response.statusCode);
+  XCTAssertTrue([[response headerForName:@"X-Correlation-Id"] length] > 0);
+  XCTAssertNil([response headerForName:@"X-Trace-Id"]);
+  XCTAssertNil([response headerForName:@"traceparent"]);
+}
+
+- (void)testHealthzJSONPayloadIncludesDeterministicSignalChecks {
+  ALNApplication *app = [self buildAppWithHaltingMiddleware:NO];
+  ALNResponse *response = [app dispatchRequest:[self requestForPath:@"/healthz"
+                                                         queryString:@""
+                                                             headers:@{
+                                                               @"accept" : @"application/json",
+                                                             }]];
+  XCTAssertEqual((NSInteger)200, response.statusCode);
+  XCTAssertEqualObjects(@"application/json; charset=utf-8",
+                        [response headerForName:@"Content-Type"]);
+
+  NSError *error = nil;
+  NSDictionary *json = [NSJSONSerialization JSONObjectWithData:response.bodyData
+                                                       options:0
+                                                         error:&error];
+  XCTAssertNil(error);
+  XCTAssertEqualObjects(@"health", json[@"signal"]);
+  XCTAssertEqualObjects(@"ok", json[@"status"]);
+  XCTAssertEqualObjects(@(YES), json[@"ok"]);
+  NSDictionary *checks = [json[@"checks"] isKindOfClass:[NSDictionary class]] ? json[@"checks"] : @{};
+  XCTAssertEqualObjects(@(YES), checks[@"request_dispatch"][@"ok"]);
+  XCTAssertNotNil(checks[@"active_requests"][@"value"]);
+}
+
+- (void)testReadyzJSONCanRequireStartedStateAndReturnDeterministic503 {
+  ALNApplication *app = [[ALNApplication alloc] initWithConfig:@{
+    @"environment" : @"test",
+    @"logFormat" : @"json",
+    @"observability" : @{
+      @"readinessRequiresStartup" : @(YES),
+    },
+  }];
+
+  ALNResponse *notReady = [app dispatchRequest:[self requestForPath:@"/readyz"
+                                                         queryString:@""
+                                                             headers:@{
+                                                               @"accept" : @"application/json",
+                                                             }]];
+  XCTAssertEqual((NSInteger)503, notReady.statusCode);
+  NSError *jsonError = nil;
+  NSDictionary *notReadyJSON = [NSJSONSerialization JSONObjectWithData:notReady.bodyData
+                                                                options:0
+                                                                  error:&jsonError];
+  XCTAssertNil(jsonError);
+  XCTAssertEqualObjects(@"ready", notReadyJSON[@"signal"]);
+  XCTAssertEqualObjects(@"not_ready", notReadyJSON[@"status"]);
+  XCTAssertEqualObjects(@(NO), notReadyJSON[@"ready"]);
+  XCTAssertEqualObjects(@(YES), notReadyJSON[@"checks"][@"startup"][@"required_for_readyz"]);
+
+  NSError *startError = nil;
+  XCTAssertTrue([app startWithError:&startError]);
+  XCTAssertNil(startError);
+
+  ALNResponse *ready = [app dispatchRequest:[self requestForPath:@"/readyz"
+                                                      queryString:@""
+                                                          headers:@{
+                                                            @"accept" : @"application/json",
+                                                          }]];
+  XCTAssertEqual((NSInteger)200, ready.statusCode);
+  jsonError = nil;
+  NSDictionary *readyJSON = [NSJSONSerialization JSONObjectWithData:ready.bodyData
+                                                             options:0
+                                                               error:&jsonError];
+  XCTAssertNil(jsonError);
+  XCTAssertEqualObjects(@(YES), readyJSON[@"ready"]);
+  [app shutdown];
+}
+
+- (void)testTraceExporterReceivesTraceContextMetadata {
+  ALNApplication *app = [self buildAppWithHaltingMiddleware:NO];
+  AppTraceCaptureExporter *exporter = [[AppTraceCaptureExporter alloc] init];
+  app.traceExporter = exporter;
+
+  NSString *incomingTraceID = @"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+  ALNResponse *response = [app dispatchRequest:[self requestForPath:@"/dict"
+                                                         queryString:@""
+                                                             headers:@{
+                                                               @"x-trace-id" : incomingTraceID,
+                                                             }]];
+  XCTAssertEqual((NSInteger)200, response.statusCode);
+  NSDictionary *trace = exporter.lastTrace;
+  XCTAssertEqualObjects(@"http.request.trace", trace[@"event"]);
+  XCTAssertEqualObjects(incomingTraceID, trace[@"trace_id"]);
+  XCTAssertTrue([trace[@"request_id"] length] > 0);
+  XCTAssertEqualObjects(trace[@"request_id"], trace[@"correlation_id"]);
+  XCTAssertTrue([trace[@"span_id"] length] == 16);
+  XCTAssertEqualObjects(@"dict", exporter.lastRouteName);
 }
 
 - (void)testStartFailsFastWhenSessionEnabledWithoutSecret {

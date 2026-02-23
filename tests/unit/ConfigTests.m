@@ -141,6 +141,11 @@
   NSDictionary *compatibility = config[@"compatibility"];
   XCTAssertEqualObjects(@(NO), compatibility[@"pageStateEnabled"]);
 
+  NSDictionary *observability = config[@"observability"];
+  XCTAssertEqualObjects(@(YES), observability[@"tracePropagationEnabled"]);
+  XCTAssertEqualObjects(@(YES), observability[@"healthDetailsEnabled"]);
+  XCTAssertEqualObjects(@(NO), observability[@"readinessRequiresStartup"]);
+
   NSDictionary *services = config[@"services"];
   NSDictionary *i18n = services[@"i18n"];
   XCTAssertEqualObjects(@"en", i18n[@"defaultLocale"]);
@@ -214,6 +219,9 @@
   setenv("ARLEN_I18N_DEFAULT_LOCALE", "es", 1);
   setenv("ARLEN_I18N_FALLBACK_LOCALE", "en", 1);
   setenv("ARLEN_PAGE_STATE_COMPAT_ENABLED", "1", 1);
+  setenv("ARLEN_TRACE_PROPAGATION_ENABLED", "0", 1);
+  setenv("ARLEN_HEALTH_DETAILS_ENABLED", "0", 1);
+  setenv("ARLEN_READINESS_REQUIRES_STARTUP", "1", 1);
   setenv("ARLEN_CLUSTER_ENABLED", "1", 1);
   setenv("ARLEN_CLUSTER_NAME", "prod-east", 1);
   setenv("ARLEN_CLUSTER_NODE_ID", "node-7", 1);
@@ -268,6 +276,9 @@
   unsetenv("ARLEN_I18N_DEFAULT_LOCALE");
   unsetenv("ARLEN_I18N_FALLBACK_LOCALE");
   unsetenv("ARLEN_PAGE_STATE_COMPAT_ENABLED");
+  unsetenv("ARLEN_TRACE_PROPAGATION_ENABLED");
+  unsetenv("ARLEN_HEALTH_DETAILS_ENABLED");
+  unsetenv("ARLEN_READINESS_REQUIRES_STARTUP");
   unsetenv("ARLEN_CLUSTER_ENABLED");
   unsetenv("ARLEN_CLUSTER_NAME");
   unsetenv("ARLEN_CLUSTER_NODE_ID");
@@ -339,6 +350,11 @@
   NSDictionary *compatibility = config[@"compatibility"];
   XCTAssertEqualObjects(@(YES), compatibility[@"pageStateEnabled"]);
 
+  NSDictionary *observability = config[@"observability"];
+  XCTAssertEqualObjects(@(NO), observability[@"tracePropagationEnabled"]);
+  XCTAssertEqualObjects(@(NO), observability[@"healthDetailsEnabled"]);
+  XCTAssertEqualObjects(@(YES), observability[@"readinessRequiresStartup"]);
+
   NSDictionary *services = config[@"services"];
   NSDictionary *i18n = services[@"i18n"];
   XCTAssertEqualObjects(@"es", i18n[@"defaultLocale"]);
@@ -381,6 +397,9 @@
   setenv("MOJOOBJC_CSRF_ENABLED", "1", 1);
   setenv("MOJOOBJC_RATE_LIMIT_ENABLED", "1", 1);
   setenv("MOJOOBJC_RATE_LIMIT_REQUESTS", "55", 1);
+  setenv("MOJOOBJC_TRACE_PROPAGATION_ENABLED", "0", 1);
+  setenv("MOJOOBJC_HEALTH_DETAILS_ENABLED", "0", 1);
+  setenv("MOJOOBJC_READINESS_REQUIRES_STARTUP", "1", 1);
   setenv("MOJOOBJC_CLUSTER_ENABLED", "1", 1);
   setenv("MOJOOBJC_CLUSTER_NAME", "legacy-cluster", 1);
   setenv("MOJOOBJC_CLUSTER_NODE_ID", "legacy-node", 1);
@@ -411,6 +430,9 @@
   unsetenv("MOJOOBJC_CSRF_ENABLED");
   unsetenv("MOJOOBJC_RATE_LIMIT_ENABLED");
   unsetenv("MOJOOBJC_RATE_LIMIT_REQUESTS");
+  unsetenv("MOJOOBJC_TRACE_PROPAGATION_ENABLED");
+  unsetenv("MOJOOBJC_HEALTH_DETAILS_ENABLED");
+  unsetenv("MOJOOBJC_READINESS_REQUIRES_STARTUP");
   unsetenv("MOJOOBJC_CLUSTER_ENABLED");
   unsetenv("MOJOOBJC_CLUSTER_NAME");
   unsetenv("MOJOOBJC_CLUSTER_NODE_ID");
@@ -445,6 +467,10 @@
   NSDictionary *rateLimit = config[@"rateLimit"];
   XCTAssertEqualObjects(@(YES), rateLimit[@"enabled"]);
   XCTAssertEqual((NSInteger)55, [rateLimit[@"requests"] integerValue]);
+  NSDictionary *observability = config[@"observability"];
+  XCTAssertEqualObjects(@(NO), observability[@"tracePropagationEnabled"]);
+  XCTAssertEqualObjects(@(NO), observability[@"healthDetailsEnabled"]);
+  XCTAssertEqualObjects(@(YES), observability[@"readinessRequiresStartup"]);
   NSDictionary *cluster = config[@"cluster"];
   XCTAssertEqualObjects(@(YES), cluster[@"enabled"]);
   XCTAssertEqualObjects(@"legacy-cluster", cluster[@"name"]);

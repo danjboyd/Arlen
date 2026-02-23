@@ -221,6 +221,15 @@ static NSDictionary *ALNSecurityProfileDefaults(NSString *profileName) {
       ALNEnvValueCompat("ARLEN_TRUSTED_PROXY", "MOJOOBJC_TRUSTED_PROXY");
   NSString *performanceLogging = ALNEnvValueCompat("ARLEN_PERFORMANCE_LOGGING",
                                                    "MOJOOBJC_PERFORMANCE_LOGGING");
+  NSString *tracePropagationEnabled =
+      ALNEnvValueCompat("ARLEN_TRACE_PROPAGATION_ENABLED",
+                        "MOJOOBJC_TRACE_PROPAGATION_ENABLED");
+  NSString *healthDetailsEnabled =
+      ALNEnvValueCompat("ARLEN_HEALTH_DETAILS_ENABLED",
+                        "MOJOOBJC_HEALTH_DETAILS_ENABLED");
+  NSString *readinessRequiresStartup =
+      ALNEnvValueCompat("ARLEN_READINESS_REQUIRES_STARTUP",
+                        "MOJOOBJC_READINESS_REQUIRES_STARTUP");
   NSString *serveStatic = ALNEnvValueCompat("ARLEN_SERVE_STATIC", "MOJOOBJC_SERVE_STATIC");
   NSString *staticAllowExtensions =
       ALNEnvValueCompat("ARLEN_STATIC_ALLOW_EXTENSIONS", "MOJOOBJC_STATIC_ALLOW_EXTENSIONS");
@@ -538,6 +547,22 @@ static NSDictionary *ALNSecurityProfileDefaults(NSString *profileName) {
   }
   config[@"apiHelpers"] = apiHelpers;
 
+  NSMutableDictionary *observability =
+      [NSMutableDictionary dictionaryWithDictionary:config[@"observability"] ?: @{}];
+  NSNumber *tracePropagationEnabledValue = ALNParseBooleanString(tracePropagationEnabled);
+  if (tracePropagationEnabledValue != nil) {
+    observability[@"tracePropagationEnabled"] = tracePropagationEnabledValue;
+  }
+  NSNumber *healthDetailsEnabledValue = ALNParseBooleanString(healthDetailsEnabled);
+  if (healthDetailsEnabledValue != nil) {
+    observability[@"healthDetailsEnabled"] = healthDetailsEnabledValue;
+  }
+  NSNumber *readinessRequiresStartupValue = ALNParseBooleanString(readinessRequiresStartup);
+  if (readinessRequiresStartupValue != nil) {
+    observability[@"readinessRequiresStartup"] = readinessRequiresStartupValue;
+  }
+  config[@"observability"] = observability;
+
   NSMutableDictionary *cluster =
       [NSMutableDictionary dictionaryWithDictionary:config[@"cluster"] ?: @{}];
   NSNumber *clusterEnabledValue = ALNParseBooleanString(clusterEnabled);
@@ -815,6 +840,19 @@ static NSDictionary *ALNSecurityProfileDefaults(NSString *profileName) {
   }
   config[@"apiHelpers"] = finalAPIHelpers;
 
+  NSMutableDictionary *finalObservability =
+      [NSMutableDictionary dictionaryWithDictionary:config[@"observability"] ?: @{}];
+  if (finalObservability[@"tracePropagationEnabled"] == nil) {
+    finalObservability[@"tracePropagationEnabled"] = @(YES);
+  }
+  if (finalObservability[@"healthDetailsEnabled"] == nil) {
+    finalObservability[@"healthDetailsEnabled"] = @(YES);
+  }
+  if (finalObservability[@"readinessRequiresStartup"] == nil) {
+    finalObservability[@"readinessRequiresStartup"] = @(NO);
+  }
+  config[@"observability"] = finalObservability;
+
   NSMutableDictionary *finalCluster =
       [NSMutableDictionary dictionaryWithDictionary:config[@"cluster"] ?: @{}];
   if (finalCluster[@"enabled"] == nil) {
@@ -972,6 +1010,14 @@ static NSDictionary *ALNSecurityProfileDefaults(NSString *profileName) {
   finalAPIHelpers[@"responseEnvelopeEnabled"] =
       @([finalAPIHelpers[@"responseEnvelopeEnabled"] boolValue]);
   config[@"apiHelpers"] = finalAPIHelpers;
+
+  finalObservability[@"tracePropagationEnabled"] =
+      @([finalObservability[@"tracePropagationEnabled"] boolValue]);
+  finalObservability[@"healthDetailsEnabled"] =
+      @([finalObservability[@"healthDetailsEnabled"] boolValue]);
+  finalObservability[@"readinessRequiresStartup"] =
+      @([finalObservability[@"readinessRequiresStartup"] boolValue]);
+  config[@"observability"] = finalObservability;
 
   finalCluster[@"enabled"] = @([finalCluster[@"enabled"] boolValue]);
   NSInteger expectedNodes = [finalCluster[@"expectedNodes"] integerValue];

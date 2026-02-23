@@ -60,6 +60,15 @@ static NSDictionary *ALNEnvelopePayload(ALNContext *context, id data, NSDictiona
   if ([requestID length] > 0 && metaObject[@"request_id"] == nil) {
     metaObject[@"request_id"] = requestID;
   }
+  if ([requestID length] > 0 && metaObject[@"correlation_id"] == nil) {
+    metaObject[@"correlation_id"] = requestID;
+  }
+  NSString *traceID = [context.stash[@"aln.trace_id"] isKindOfClass:[NSString class]]
+                          ? context.stash[@"aln.trace_id"]
+                          : @"";
+  if ([traceID length] > 0 && metaObject[@"trace_id"] == nil) {
+    metaObject[@"trace_id"] = traceID;
+  }
   if ([metaObject count] > 0) {
     payload[@"meta"] = metaObject;
   }
@@ -337,12 +346,19 @@ static NSDictionary *ALNEnvelopePayload(ALNContext *context, id data, NSDictiona
   NSString *requestID = [self.context.stash[@"request_id"] isKindOfClass:[NSString class]]
                             ? self.context.stash[@"request_id"]
                             : @"";
+  NSString *traceID = [self.context.stash[@"aln.trace_id"] isKindOfClass:[NSString class]]
+                          ? self.context.stash[@"aln.trace_id"]
+                          : @"";
+  NSMutableDictionary *errorObject = [NSMutableDictionary dictionary];
+  errorObject[@"code"] = @"validation_failed";
+  errorObject[@"message"] = @"Validation failed";
+  errorObject[@"request_id"] = requestID ?: @"";
+  errorObject[@"correlation_id"] = requestID ?: @"";
+  if ([traceID length] > 0) {
+    errorObject[@"trace_id"] = traceID;
+  }
   NSDictionary *payload = @{
-    @"error" : @{
-      @"code" : @"validation_failed",
-      @"message" : @"Validation failed",
-      @"request_id" : requestID ?: @"",
-    },
+    @"error" : errorObject,
     @"details" : issues
   };
 
