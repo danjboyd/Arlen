@@ -28,7 +28,8 @@ Last updated: 2026-02-23
 - Phase 5D: complete (2026-02-23)
 - Phase 5E: complete (2026-02-23)
 - Phase 7A: initial slice implemented (2026-02-23)
-- Phase 7B-7H: planned (roadmap defined 2026-02-23)
+- Phase 7B: initial slice implemented (2026-02-23)
+- Phase 7C-7H: planned (roadmap defined 2026-02-23)
 
 ## Completed Today (2026-02-23)
 
@@ -37,6 +38,11 @@ Last updated: 2026-02-23
   - deterministic overload diagnostics (`503` + `X-Arlen-Backpressure-Reason`)
   - runtime limit env contract (`ARLEN_MAX_WEBSOCKET_SESSIONS`)
   - Phase 7A contract fixture + docs (`tests/fixtures/phase7a/runtime_hardening_contracts.json`, `docs/PHASE7A_RUNTIME_HARDENING.md`)
+- Implemented Phase 7B initial security-default slice:
+  - security profile presets (`balanced`, `strict`, `edge`) with deterministic default policy behavior
+  - fail-fast startup diagnostics for missing security-critical secret/dependency contracts
+  - middleware wiring hardening for CSRF/session dependency behavior
+  - Phase 7B contract fixture + docs (`tests/fixtures/phase7b/security_policy_contracts.json`, `docs/PHASE7B_SECURITY_DEFAULTS.md`)
 - Completed Phase 5A-5E implementation tranche.
 - Added typed schema contracts + typed SQL generation workflow (5D) and validated compile-time/runtime contract behavior.
 - Added Phase 5E hardening coverage:
@@ -213,12 +219,16 @@ Last updated: 2026-02-23
   - websocket backpressure overload integration regression (`testWebSocketSessionLimitReturns503UnderBackpressure`)
   - runtime websocket session limit default/env contract (`tests/unit/ConfigTests.m`)
   - phase fixture schema/reference validation (`tests/unit/Phase7ATests.m`)
+- New Phase 7B checks executed:
+  - security profile preset defaults + legacy/env override regression (`tests/unit/ConfigTests.m`)
+  - fail-fast startup misconfiguration diagnostics (`tests/unit/ApplicationTests.m`)
+  - phase fixture schema/reference validation (`tests/unit/Phase7BTests.m`)
 - PostgreSQL-backed tests remain gated by `ARLEN_PG_TEST_DSN`.
 
 ## Next Session Focus
 
 1. Continue remaining Phase 7A runtime hardening contracts (timeouts, graceful reload/shutdown, and additional failure-mode regressions) (`docs/PHASE7_ROADMAP.md`).
-2. Begin Phase 7B security-default profile and misconfiguration diagnostic contracts (`docs/PHASE7_ROADMAP.md`).
+2. Continue remaining Phase 7B security-default policy contracts and deployment/incident runbook depth (`docs/PHASE7_ROADMAP.md`).
 3. Define Phase 7C + 7G observability and coding-agent-first DX contract fixtures (`docs/PHASE7_ROADMAP.md`).
 
 ## Planned Phase Mapping (Post-4C)
@@ -238,8 +248,9 @@ Last updated: 2026-02-23
   - cluster-oriented integration validation + operational contracts
 - Phase 7 (active):
   - Phase 7A initial runtime hardening slice implemented (websocket backpressure contract + overload diagnostics)
+  - Phase 7B initial security-default slice implemented (profile presets + fail-fast startup validation)
   - remaining runtime hardening for `boomhauer`/`propane` in progress
-  - security policy/default hardening
+  - remaining security policy/default hardening in progress
   - observability/operability + coding-agent-first DX contracts
   - ecosystem durability, template pipeline hardening, frontend starters, distributed-runtime depth
 - Maybe Someday backlog:

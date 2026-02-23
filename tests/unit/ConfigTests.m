@@ -86,6 +86,7 @@
   XCTAssertEqual((NSInteger)3000, [config[@"port"] integerValue]);
   XCTAssertEqualObjects(@"text", config[@"logFormat"]);
   XCTAssertEqualObjects(@"development", config[@"environment"]);
+  XCTAssertEqualObjects(@"balanced", config[@"securityProfile"]);
   XCTAssertEqualObjects(@(NO), config[@"trustedProxy"]);
   XCTAssertEqualObjects(@(YES), config[@"serveStatic"]);
   XCTAssertEqual((NSInteger)128, [config[@"listenBacklog"] integerValue]);
@@ -173,6 +174,7 @@
   setenv("ARLEN_MAX_REQUEST_LINE_BYTES", "111", 1);
   setenv("ARLEN_MAX_HEADER_BYTES", "222", 1);
   setenv("ARLEN_MAX_BODY_BYTES", "333", 1);
+  setenv("ARLEN_SECURITY_PROFILE", "strict", 1);
   setenv("ARLEN_MAX_WEBSOCKET_SESSIONS", "9", 1);
   setenv("ARLEN_TRUSTED_PROXY", "true", 1);
   setenv("ARLEN_SERVE_STATIC", "0", 1);
@@ -226,6 +228,7 @@
   unsetenv("ARLEN_MAX_REQUEST_LINE_BYTES");
   unsetenv("ARLEN_MAX_HEADER_BYTES");
   unsetenv("ARLEN_MAX_BODY_BYTES");
+  unsetenv("ARLEN_SECURITY_PROFILE");
   unsetenv("ARLEN_MAX_WEBSOCKET_SESSIONS");
   unsetenv("ARLEN_TRUSTED_PROXY");
   unsetenv("ARLEN_SERVE_STATIC");
@@ -278,6 +281,7 @@
   XCTAssertEqual((NSInteger)333, [limits[@"maxBodyBytes"] integerValue]);
   NSDictionary *runtimeLimits = config[@"runtimeLimits"];
   XCTAssertEqual((NSInteger)9, [runtimeLimits[@"maxConcurrentWebSocketSessions"] integerValue]);
+  XCTAssertEqualObjects(@"strict", config[@"securityProfile"]);
   XCTAssertEqualObjects(@(YES), config[@"trustedProxy"]);
   XCTAssertEqualObjects(@(NO), config[@"serveStatic"]);
   XCTAssertEqual((NSInteger)2222, [config[@"listenBacklog"] integerValue]);
@@ -360,6 +364,7 @@
 
   setenv("MOJOOBJC_HOST", "0.0.0.0", 1);
   setenv("MOJOOBJC_PORT", "3999", 1);
+  setenv("MOJOOBJC_SECURITY_PROFILE", "edge", 1);
   setenv("MOJOOBJC_MAX_REQUEST_LINE_BYTES", "9001", 1);
   setenv("MOJOOBJC_MAX_HEADER_BYTES", "9002", 1);
   setenv("MOJOOBJC_MAX_BODY_BYTES", "9003", 1);
@@ -389,6 +394,7 @@
 
   unsetenv("MOJOOBJC_HOST");
   unsetenv("MOJOOBJC_PORT");
+  unsetenv("MOJOOBJC_SECURITY_PROFILE");
   unsetenv("MOJOOBJC_MAX_REQUEST_LINE_BYTES");
   unsetenv("MOJOOBJC_MAX_HEADER_BYTES");
   unsetenv("MOJOOBJC_MAX_BODY_BYTES");
@@ -414,12 +420,14 @@
   XCTAssertNil(error);
   XCTAssertEqualObjects(@"0.0.0.0", config[@"host"]);
   XCTAssertEqual((NSInteger)3999, [config[@"port"] integerValue]);
+  XCTAssertEqualObjects(@"edge", config[@"securityProfile"]);
   NSDictionary *limits = config[@"requestLimits"];
   XCTAssertEqual((NSInteger)9001, [limits[@"maxRequestLineBytes"] integerValue]);
   XCTAssertEqual((NSInteger)9002, [limits[@"maxHeaderBytes"] integerValue]);
   XCTAssertEqual((NSInteger)9003, [limits[@"maxBodyBytes"] integerValue]);
   NSDictionary *runtimeLimits = config[@"runtimeLimits"];
   XCTAssertEqual((NSInteger)13, [runtimeLimits[@"maxConcurrentWebSocketSessions"] integerValue]);
+  XCTAssertEqualObjects(@(YES), config[@"trustedProxy"]);
   XCTAssertEqual((NSInteger)9004, [config[@"listenBacklog"] integerValue]);
   XCTAssertEqual((NSInteger)31, [config[@"connectionTimeoutSeconds"] integerValue]);
   XCTAssertEqualObjects(@(YES), config[@"enableReusePort"]);
@@ -491,6 +499,62 @@
   XCTAssertNil(error);
   openapi = config[@"openapi"];
   XCTAssertEqualObjects(@"interactive", openapi[@"docsUIStyle"]);
+}
+
+- (void)testSecurityProfilePresetsApplyDeterministicDefaults {
+  NSString *root = [self prepareConfigTree];
+  XCTAssertNotNil(root);
+
+  setenv("ARLEN_SECURITY_PROFILE", "strict", 1);
+  NSError *error = nil;
+  NSDictionary *strictConfig = [ALNConfig loadConfigAtRoot:root
+                                               environment:@"development"
+                                                     error:&error];
+  unsetenv("ARLEN_SECURITY_PROFILE");
+
+  XCTAssertNil(error);
+  XCTAssertEqualObjects(@"strict", strictConfig[@"securityProfile"]);
+  XCTAssertEqualObjects(@(NO), strictConfig[@"trustedProxy"]);
+  NSDictionary *strictSession = strictConfig[@"session"];
+  NSDictionary *strictCSRF = strictConfig[@"csrf"];
+  NSDictionary *strictSecurityHeaders = strictConfig[@"securityHeaders"];
+  XCTAssertEqualObjects(@(YES), strictSession[@"enabled"]);
+  XCTAssertEqualObjects(@(YES), strictCSRF[@"enabled"]);
+  XCTAssertEqualObjects(@(YES), strictSecurityHeaders[@"enabled"]);
+
+  setenv("ARLEN_SECURITY_PROFILE", "edge", 1);
+  error = nil;
+  NSDictionary *edgeConfig = [ALNConfig loadConfigAtRoot:root
+                                             environment:@"development"
+                                                   error:&error];
+  unsetenv("ARLEN_SECURITY_PROFILE");
+
+  XCTAssertNil(error);
+  XCTAssertEqualObjects(@"edge", edgeConfig[@"securityProfile"]);
+  XCTAssertEqualObjects(@(YES), edgeConfig[@"trustedProxy"]);
+  NSDictionary *edgeSession = edgeConfig[@"session"];
+  NSDictionary *edgeCSRF = edgeConfig[@"csrf"];
+  NSDictionary *edgeSecurityHeaders = edgeConfig[@"securityHeaders"];
+  XCTAssertEqualObjects(@(NO), edgeSession[@"enabled"]);
+  XCTAssertEqualObjects(@(NO), edgeCSRF[@"enabled"]);
+  XCTAssertEqualObjects(@(YES), edgeSecurityHeaders[@"enabled"]);
+
+  setenv("ARLEN_SECURITY_PROFILE", "unknown", 1);
+  error = nil;
+  NSDictionary *fallbackConfig = [ALNConfig loadConfigAtRoot:root
+                                                 environment:@"development"
+                                                       error:&error];
+  unsetenv("ARLEN_SECURITY_PROFILE");
+
+  XCTAssertNil(error);
+  XCTAssertEqualObjects(@"balanced", fallbackConfig[@"securityProfile"]);
+  XCTAssertEqualObjects(@(NO), fallbackConfig[@"trustedProxy"]);
+  NSDictionary *fallbackSession = fallbackConfig[@"session"];
+  NSDictionary *fallbackCSRF = fallbackConfig[@"csrf"];
+  NSDictionary *fallbackSecurityHeaders = fallbackConfig[@"securityHeaders"];
+  XCTAssertEqualObjects(@(NO), fallbackSession[@"enabled"]);
+  XCTAssertEqualObjects(@(NO), fallbackCSRF[@"enabled"]);
+  XCTAssertEqualObjects(@(YES), fallbackSecurityHeaders[@"enabled"]);
 }
 
 - (void)testAPIOnlyDefaultsDisableStaticAndUseJSONLogs {

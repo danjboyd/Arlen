@@ -136,6 +136,50 @@ static NSString *ALNDefaultClusterNodeID(void) {
   return host;
 }
 
+static NSString *ALNNormalizedSecurityProfileName(id rawValue) {
+  if (![rawValue isKindOfClass:[NSString class]]) {
+    return @"balanced";
+  }
+  NSString *normalized = [[(NSString *)rawValue lowercaseString]
+      stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+  if ([normalized isEqualToString:@"strict"]) {
+    return @"strict";
+  }
+  if ([normalized isEqualToString:@"edge"]) {
+    return @"edge";
+  }
+  if ([normalized isEqualToString:@"balanced"]) {
+    return @"balanced";
+  }
+  return @"balanced";
+}
+
+static NSDictionary *ALNSecurityProfileDefaults(NSString *profileName) {
+  NSString *normalized = ALNNormalizedSecurityProfileName(profileName);
+  if ([normalized isEqualToString:@"strict"]) {
+    return @{
+      @"trustedProxy" : @(NO),
+      @"sessionEnabled" : @(YES),
+      @"csrfEnabled" : @(YES),
+      @"securityHeadersEnabled" : @(YES),
+    };
+  }
+  if ([normalized isEqualToString:@"edge"]) {
+    return @{
+      @"trustedProxy" : @(YES),
+      @"sessionEnabled" : @(NO),
+      @"csrfEnabled" : @(NO),
+      @"securityHeadersEnabled" : @(YES),
+    };
+  }
+  return @{
+    @"trustedProxy" : @(NO),
+    @"sessionEnabled" : @(NO),
+    @"csrfEnabled" : @(NO),
+    @"securityHeadersEnabled" : @(YES),
+  };
+}
+
 @implementation ALNConfig
 
 + (NSDictionary *)loadConfigAtRoot:(NSString *)rootPath
@@ -181,6 +225,8 @@ static NSString *ALNDefaultClusterNodeID(void) {
   NSString *staticAllowExtensions =
       ALNEnvValueCompat("ARLEN_STATIC_ALLOW_EXTENSIONS", "MOJOOBJC_STATIC_ALLOW_EXTENSIONS");
   NSString *apiOnly = ALNEnvValueCompat("ARLEN_API_ONLY", "MOJOOBJC_API_ONLY");
+  NSString *securityProfile =
+      ALNEnvValueCompat("ARLEN_SECURITY_PROFILE", "MOJOOBJC_SECURITY_PROFILE");
   NSString *maxRequestLineBytes =
       ALNEnvValueCompat("ARLEN_MAX_REQUEST_LINE_BYTES", "MOJOOBJC_MAX_REQUEST_LINE_BYTES");
   NSString *maxHeaderBytes =
@@ -315,6 +361,9 @@ static NSString *ALNDefaultClusterNodeID(void) {
   NSNumber *apiOnlyValue = ALNParseBooleanString(apiOnly);
   if (apiOnlyValue != nil) {
     config[@"apiOnly"] = apiOnlyValue;
+  }
+  if ([securityProfile length] > 0) {
+    config[@"securityProfile"] = ALNNormalizedSecurityProfileName(securityProfile);
   }
   NSNumber *enableReusePortValue = ALNParseBooleanString(enableReusePort);
   if (enableReusePortValue != nil) {
@@ -542,6 +591,9 @@ static NSString *ALNDefaultClusterNodeID(void) {
     config[@"logFormat"] =
         (apiOnlyMode || ![env isEqualToString:@"development"]) ? @"json" : @"text";
   }
+  NSString *securityProfileName = ALNNormalizedSecurityProfileName(config[@"securityProfile"]);
+  NSDictionary *securityProfileDefaults = ALNSecurityProfileDefaults(securityProfileName);
+  config[@"securityProfile"] = securityProfileName;
 
   NSMutableDictionary *finalLimits =
       [NSMutableDictionary dictionaryWithDictionary:config[@"requestLimits"] ?: @{}];
@@ -564,7 +616,7 @@ static NSString *ALNDefaultClusterNodeID(void) {
   config[@"runtimeLimits"] = finalRuntimeLimits;
 
   if (config[@"trustedProxy"] == nil) {
-    config[@"trustedProxy"] = @(NO);
+    config[@"trustedProxy"] = securityProfileDefaults[@"trustedProxy"] ?: @(NO);
   }
   if (config[@"performanceLogging"] == nil) {
     config[@"performanceLogging"] = @(YES);
@@ -626,7 +678,7 @@ static NSString *ALNDefaultClusterNodeID(void) {
   NSMutableDictionary *finalSession =
       [NSMutableDictionary dictionaryWithDictionary:config[@"session"] ?: @{}];
   if (finalSession[@"enabled"] == nil) {
-    finalSession[@"enabled"] = @(NO);
+    finalSession[@"enabled"] = securityProfileDefaults[@"sessionEnabled"] ?: @(NO);
   }
   if (finalSession[@"cookieName"] == nil) {
     finalSession[@"cookieName"] = @"arlen_session";
@@ -645,7 +697,7 @@ static NSString *ALNDefaultClusterNodeID(void) {
   NSMutableDictionary *finalCSRF =
       [NSMutableDictionary dictionaryWithDictionary:config[@"csrf"] ?: @{}];
   if (finalCSRF[@"enabled"] == nil) {
-    finalCSRF[@"enabled"] = @([finalSession[@"enabled"] boolValue]);
+    finalCSRF[@"enabled"] = securityProfileDefaults[@"csrfEnabled"] ?: @([finalSession[@"enabled"] boolValue]);
   }
   if (finalCSRF[@"headerName"] == nil) {
     finalCSRF[@"headerName"] = @"x-csrf-token";
@@ -671,7 +723,7 @@ static NSString *ALNDefaultClusterNodeID(void) {
   NSMutableDictionary *finalSecurityHeaders =
       [NSMutableDictionary dictionaryWithDictionary:config[@"securityHeaders"] ?: @{}];
   if (finalSecurityHeaders[@"enabled"] == nil) {
-    finalSecurityHeaders[@"enabled"] = @(YES);
+    finalSecurityHeaders[@"enabled"] = securityProfileDefaults[@"securityHeadersEnabled"] ?: @(YES);
   }
   if (finalSecurityHeaders[@"contentSecurityPolicy"] == nil) {
     finalSecurityHeaders[@"contentSecurityPolicy"] = @"default-src 'self'";
@@ -786,6 +838,7 @@ static NSString *ALNDefaultClusterNodeID(void) {
 
   config[@"port"] = @([config[@"port"] integerValue]);
   config[@"apiOnly"] = @([config[@"apiOnly"] boolValue]);
+  config[@"securityProfile"] = ALNNormalizedSecurityProfileName(config[@"securityProfile"]);
   config[@"trustedProxy"] = @([config[@"trustedProxy"] boolValue]);
   config[@"performanceLogging"] = @([config[@"performanceLogging"] boolValue]);
   config[@"serveStatic"] = @([config[@"serveStatic"] boolValue]);

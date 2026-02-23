@@ -30,6 +30,7 @@ Arlen is designed to solve the same class of problems as frameworks like Mojolic
 - Phase 5D: complete (typed row/insert/update schema contracts, typed decode helpers, and typed SQL codegen workflow).
 - Phase 5E: complete (data-layer soak/fault hardening gates and release confidence artifact pack generation).
 - Phase 7A: initial slice implemented (websocket runtime backpressure boundary + deterministic overload diagnostics).
+- Phase 7B: initial slice implemented (security profile presets + fail-fast security misconfiguration startup diagnostics).
 
 ## Quick Start
 
@@ -120,6 +121,7 @@ High-value guides:
 - [SQL Builder Conformance Matrix](docs/SQL_BUILDER_CONFORMANCE_MATRIX.md)
 - [Phase 5E Hardening + Confidence](docs/PHASE5E_HARDENING_CONFIDENCE.md)
 - [Phase 7A Runtime Hardening](docs/PHASE7A_RUNTIME_HARDENING.md)
+- [Phase 7B Security Defaults](docs/PHASE7B_SECURITY_DEFAULTS.md)
 - [SQL Builder Phase 4 Migration Guide](docs/SQL_BUILDER_PHASE4_MIGRATION.md)
 - [Propane Manager](docs/PROPANE.md)
 - [Release Process](docs/RELEASE_PROCESS.md)

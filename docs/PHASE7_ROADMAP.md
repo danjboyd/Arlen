@@ -1,12 +1,13 @@
 # Arlen Phase 7 Roadmap
 
-Status: Active (Phase 7A initial slice implemented; 7A follow-on in progress)  
+Status: Active (Phase 7A and 7B initial slices implemented; follow-on in progress)  
 Last updated: 2026-02-23
 
 Related docs:
 - `docs/PHASE5_ROADMAP.md`
 - `docs/PHASE2_PHASE3_ROADMAP.md`
 - `docs/PHASE7A_RUNTIME_HARDENING.md`
+- `docs/PHASE7B_SECURITY_DEFAULTS.md`
 - `docs/STATUS.md`
 - `docs/FEATURE_PARITY_MATRIX.md`
 - `docs/PROPANE.md`
@@ -76,7 +77,7 @@ Implementation notes (initial slice, 2026-02-23):
 
 ## 3.2 Phase 7B: Security Defaults + Policy Contracts
 
-Status: Planned
+Status: Initial slice implemented (2026-02-23); remaining 7B deliverables in progress
 
 Deliverables:
 
@@ -90,6 +91,26 @@ Acceptance (required):
 - Secure-by-default profile is documented and regression tested.
 - Risky/misconfigured paths fail clearly and deterministically.
 - Security policy behavior is visible in docs and CI contracts.
+
+Implementation notes (initial slice, 2026-02-23):
+
+- Added security profile presets with deterministic default behavior:
+  - `balanced` (default), `strict`, `edge`
+  - profile-controlled defaults for `trustedProxy`, `session.enabled`, `csrf.enabled`, and `securityHeaders.enabled`
+  - environment override: `ARLEN_SECURITY_PROFILE` (legacy fallback supported)
+- Added fail-fast startup diagnostics for security misconfiguration:
+  - `session.enabled` without `session.secret`
+  - `csrf.enabled` without `session.enabled`
+  - `auth.enabled` without `auth.bearerSecret`
+- Added middleware wiring hardening:
+  - CSRF middleware now requires active session middleware registration
+- Added executable contract fixture and docs:
+  - `tests/fixtures/phase7b/security_policy_contracts.json`
+  - `docs/PHASE7B_SECURITY_DEFAULTS.md`
+- Added regression coverage:
+  - `tests/unit/ConfigTests.m` (profile defaults and legacy/env behavior)
+  - `tests/unit/ApplicationTests.m` (startup fail-fast diagnostics and strict-profile success path)
+  - `tests/unit/Phase7BTests.m` (fixture schema/reference integrity)
 
 ## 3.3 Phase 7C: Observability + Operability Maturity
 

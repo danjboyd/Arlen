@@ -111,6 +111,14 @@ ARLEN_MAX_WEBSOCKET_SESSIONS=1 ./bin/boomhauer
 With this limit, a second concurrent websocket upgrade receives `503 Service Unavailable` with
 `X-Arlen-Backpressure-Reason: websocket_session_limit`.
 
+Security profile override:
+
+```bash
+ARLEN_SECURITY_PROFILE=strict ./bin/boomhauer
+```
+
+`strict` profile requires valid security secrets/config; startup fails fast if required values are missing.
+
 ## 4. Run Tests and Quality Gates
 
 ```bash
@@ -254,6 +262,7 @@ Framework/app runtime:
 - `ARLEN_HOST`
 - `ARLEN_PORT`
 - `ARLEN_LOG_FORMAT`
+- `ARLEN_SECURITY_PROFILE` (`balanced`, `strict`, or `edge`)
 - `ARLEN_TRUSTED_PROXY`
 - `ARLEN_SERVE_STATIC`
 - `ARLEN_API_ONLY`

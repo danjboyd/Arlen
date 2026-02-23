@@ -415,4 +415,86 @@
   XCTAssertNotNil([response headerForName:@"X-Arlen-Response-Write-Ms"]);
 }
 
+- (void)testStartFailsFastWhenSessionEnabledWithoutSecret {
+  ALNApplication *app = [[ALNApplication alloc] initWithConfig:@{
+    @"environment" : @"test",
+    @"logFormat" : @"json",
+    @"session" : @{
+      @"enabled" : @(YES),
+      @"secret" : @"",
+    },
+  }];
+
+  NSError *startError = nil;
+  BOOL started = [app startWithError:&startError];
+  XCTAssertFalse(started);
+  XCTAssertNotNil(startError);
+  XCTAssertEqualObjects(@"Arlen.Application.Error", startError.domain);
+  XCTAssertEqual((NSInteger)330, startError.code);
+  XCTAssertTrue([startError.localizedDescription containsString:@"session.enabled requires session.secret"]);
+}
+
+- (void)testStartFailsFastWhenCSRFEnabledWithoutSession {
+  ALNApplication *app = [[ALNApplication alloc] initWithConfig:@{
+    @"environment" : @"test",
+    @"logFormat" : @"json",
+    @"session" : @{
+      @"enabled" : @(NO),
+      @"secret" : @"",
+    },
+    @"csrf" : @{
+      @"enabled" : @(YES),
+    },
+  }];
+
+  NSError *startError = nil;
+  BOOL started = [app startWithError:&startError];
+  XCTAssertFalse(started);
+  XCTAssertNotNil(startError);
+  XCTAssertEqualObjects(@"Arlen.Application.Error", startError.domain);
+  XCTAssertEqual((NSInteger)331, startError.code);
+  XCTAssertTrue([startError.localizedDescription containsString:@"csrf.enabled requires session.enabled"]);
+}
+
+- (void)testStartFailsFastWhenAuthEnabledWithoutBearerSecret {
+  ALNApplication *app = [[ALNApplication alloc] initWithConfig:@{
+    @"environment" : @"test",
+    @"logFormat" : @"json",
+    @"auth" : @{
+      @"enabled" : @(YES),
+      @"bearerSecret" : @"",
+    },
+  }];
+
+  NSError *startError = nil;
+  BOOL started = [app startWithError:&startError];
+  XCTAssertFalse(started);
+  XCTAssertNotNil(startError);
+  XCTAssertEqualObjects(@"Arlen.Application.Error", startError.domain);
+  XCTAssertEqual((NSInteger)332, startError.code);
+  XCTAssertTrue([startError.localizedDescription containsString:@"auth.enabled requires auth.bearerSecret"]);
+}
+
+- (void)testStartSucceedsForStrictProfileWhenRequiredSecretsConfigured {
+  ALNApplication *app = [[ALNApplication alloc] initWithConfig:@{
+    @"environment" : @"test",
+    @"logFormat" : @"json",
+    @"securityProfile" : @"strict",
+    @"session" : @{
+      @"enabled" : @(YES),
+      @"secret" : @"strict-profile-secret",
+    },
+    @"csrf" : @{
+      @"enabled" : @(YES),
+    },
+  }];
+
+  NSError *startError = nil;
+  BOOL started = [app startWithError:&startError];
+  XCTAssertTrue(started);
+  XCTAssertNil(startError);
+  XCTAssertTrue(app.isStarted);
+  [app shutdown];
+}
+
 @end

@@ -1,0 +1,60 @@
+{
+  "version": "phase7b-security-contracts-v1",
+  "contracts": [
+    {
+      "id": "security_profile_preset_defaults_contract",
+      "claim": "Security profile presets apply deterministic default behavior for proxy trust, session, CSRF, and security headers while preserving explicit overrides.",
+      "source_docs": [
+        "docs/PHASE7_ROADMAP.md",
+        "docs/PHASE7B_SECURITY_DEFAULTS.md"
+      ],
+      "verification": [
+        {
+          "kind": "unit",
+          "file": "tests/unit/ConfigTests.m",
+          "test": "testLoadConfigMergesAndAppliesDefaults"
+        },
+        {
+          "kind": "unit",
+          "file": "tests/unit/ConfigTests.m",
+          "test": "testSecurityProfilePresetsApplyDeterministicDefaults"
+        },
+        {
+          "kind": "unit",
+          "file": "tests/unit/ConfigTests.m",
+          "test": "testLegacyEnvironmentPrefixFallback"
+        }
+      ]
+    },
+    {
+      "id": "security_misconfiguration_fail_fast_contract",
+      "claim": "Misconfigured security-critical settings fail application startup with deterministic diagnostics.",
+      "source_docs": [
+        "docs/PHASE7_ROADMAP.md",
+        "docs/PHASE7B_SECURITY_DEFAULTS.md"
+      ],
+      "verification": [
+        {
+          "kind": "unit",
+          "file": "tests/unit/ApplicationTests.m",
+          "test": "testStartFailsFastWhenSessionEnabledWithoutSecret"
+        },
+        {
+          "kind": "unit",
+          "file": "tests/unit/ApplicationTests.m",
+          "test": "testStartFailsFastWhenCSRFEnabledWithoutSession"
+        },
+        {
+          "kind": "unit",
+          "file": "tests/unit/ApplicationTests.m",
+          "test": "testStartFailsFastWhenAuthEnabledWithoutBearerSecret"
+        },
+        {
+          "kind": "unit",
+          "file": "tests/unit/ApplicationTests.m",
+          "test": "testStartSucceedsForStrictProfileWhenRequiredSecretsConfigured"
+        }
+      ]
+    }
+  ]
+}

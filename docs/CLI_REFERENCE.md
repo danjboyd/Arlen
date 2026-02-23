@@ -180,6 +180,7 @@ Behavior:
   - status `503 Service Unavailable`
   - header `Retry-After: 1`
   - header `X-Arlen-Backpressure-Reason: websocket_session_limit`
+- security misconfiguration now fails startup deterministically (for example missing `session.secret` when `session.enabled=YES`)
 - built-in observability/API docs endpoints are available when enabled:
   - `/metrics`
   - `/clusterz`
@@ -211,6 +212,7 @@ Environment:
 
 - `ARLEN_APP_ROOT`
 - `ARLEN_FRAMEWORK_ROOT`
+- `ARLEN_SECURITY_PROFILE` (`balanced`, `strict`, or `edge`; legacy `MOJOOBJC_SECURITY_PROFILE` also accepted)
 - `ARLEN_MAX_WEBSOCKET_SESSIONS` (runtime websocket session limit; legacy `MOJOOBJC_MAX_WEBSOCKET_SESSIONS` also accepted)
 
 ## `propane` Script (`bin/propane`)

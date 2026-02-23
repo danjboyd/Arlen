@@ -1,6 +1,6 @@
 # Arlen Phase 2 + Phase 3 Roadmap Index
 
-Status: Active (Phase 2A-2D complete; Phase 3A-3H complete; Phase 4A-4E complete; Phase 5A-5E complete; Phase 7A initial slice implemented; Phase 7 follow-on planned)  
+Status: Active (Phase 2A-2D complete; Phase 3A-3H complete; Phase 4A-4E complete; Phase 5A-5E complete; Phase 7A and 7B initial slices implemented; Phase 7 follow-on planned)  
 Last updated: 2026-02-23
 
 This index points to the current roadmap documents:
@@ -61,7 +61,10 @@ Phase 7 execution/planning is defined in `docs/PHASE7_ROADMAP.md`, including:
 - Phase 7A initial runtime hardening slice completed (`docs/PHASE7A_RUNTIME_HARDENING.md`):
   - websocket session backpressure safety boundary
   - deterministic overload diagnostics contract (`503` + `X-Arlen-Backpressure-Reason`)
-- remaining 7A follow-on and 7B-7H planning:
+- Phase 7B initial security-default slice completed (`docs/PHASE7B_SECURITY_DEFAULTS.md`):
+  - security profile presets (`balanced`, `strict`, `edge`)
+  - fail-fast startup diagnostics for security misconfiguration contracts
+- remaining 7A/7B follow-on and 7C-7H planning:
   - additional runtime hardening for `boomhauer`/`propane`
   - security defaults and policy contracts
   - observability/operability maturity and coding-agent-first DX contracts

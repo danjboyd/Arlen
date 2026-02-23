@@ -473,6 +473,73 @@ static NSString *ALNStringConfigValue(id value, NSString *defaultValue) {
   return defaultValue;
 }
 
+static NSString *ALNTrimmedStringConfigValue(id value) {
+  if (![value isKindOfClass:[NSString class]]) {
+    return @"";
+  }
+  return [(NSString *)value stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+}
+
+static NSError *ALNSecurityConfigValidationError(NSInteger code,
+                                                 NSString *message,
+                                                 NSString *configKey,
+                                                 NSString *reason,
+                                                 NSString *securityProfile) {
+  NSMutableDictionary *userInfo = [NSMutableDictionary dictionary];
+  userInfo[NSLocalizedDescriptionKey] = message ?: @"invalid security configuration";
+  if ([configKey length] > 0) {
+    userInfo[@"config_key"] = configKey;
+  }
+  if ([reason length] > 0) {
+    userInfo[@"reason"] = reason;
+  }
+  if ([securityProfile length] > 0) {
+    userInfo[@"security_profile"] = securityProfile;
+  }
+  return [NSError errorWithDomain:ALNApplicationErrorDomain code:code userInfo:userInfo];
+}
+
+static NSError *ALNValidateSecurityConfiguration(NSDictionary *config) {
+  NSDictionary *session = ALNDictionaryConfigValue(config, @"session");
+  NSDictionary *csrf = ALNDictionaryConfigValue(config, @"csrf");
+  NSDictionary *auth = ALNDictionaryConfigValue(config, @"auth");
+  NSString *securityProfile = ALNStringConfigValue(config[@"securityProfile"], @"balanced");
+
+  BOOL sessionEnabled = ALNBoolConfigValue(session[@"enabled"], NO);
+  NSString *sessionSecret = ALNTrimmedStringConfigValue(session[@"secret"]);
+  if (sessionEnabled && [sessionSecret length] == 0) {
+    return ALNSecurityConfigValidationError(
+        330,
+        @"Invalid security configuration: session.enabled requires session.secret",
+        @"session.secret",
+        @"missing_required_secret",
+        securityProfile);
+  }
+
+  BOOL csrfEnabled = ALNBoolConfigValue(csrf[@"enabled"], sessionEnabled);
+  if (csrfEnabled && !sessionEnabled) {
+    return ALNSecurityConfigValidationError(
+        331,
+        @"Invalid security configuration: csrf.enabled requires session.enabled",
+        @"csrf.enabled",
+        @"missing_session_dependency",
+        securityProfile);
+  }
+
+  BOOL authEnabled = ALNBoolConfigValue(auth[@"enabled"], NO);
+  NSString *authBearerSecret = ALNTrimmedStringConfigValue(auth[@"bearerSecret"]);
+  if (authEnabled && [authBearerSecret length] == 0) {
+    return ALNSecurityConfigValidationError(
+        332,
+        @"Invalid security configuration: auth.enabled requires auth.bearerSecret",
+        @"auth.bearerSecret",
+        @"missing_required_secret",
+        securityProfile);
+  }
+
+  return nil;
+}
+
 static NSString *ALNNormalizeMountPrefix(NSString *prefix) {
   if (![prefix isKindOfClass:[NSString class]] || [prefix length] == 0) {
     return nil;
@@ -1628,6 +1695,14 @@ static void ALNFinalizeResponse(ALNApplication *application,
     return YES;
   }
 
+  NSError *securityConfigError = ALNValidateSecurityConfiguration(self.config);
+  if (securityConfigError != nil) {
+    if (error != NULL) {
+      *error = securityConfigError;
+    }
+    return NO;
+  }
+
   for (NSDictionary *entry in self.mutableMounts) {
     ALNApplication *mounted =
         [entry[@"application"] isKindOfClass:[ALNApplication class]] ? entry[@"application"] : nil;
@@ -1730,6 +1805,7 @@ static void ALNFinalizeResponse(ALNApplication *application,
 
   NSDictionary *session = ALNDictionaryConfigValue(self.config, @"session");
   BOOL sessionEnabled = ALNBoolConfigValue(session[@"enabled"], NO);
+  BOOL sessionMiddlewareActive = NO;
   if (sessionEnabled) {
     NSString *secret = ALNStringConfigValue(session[@"secret"], nil);
     if ([secret length] == 0) {
@@ -1748,13 +1824,14 @@ static void ALNFinalizeResponse(ALNApplication *application,
                                                           maxAgeSeconds:maxAge
                                                                  secure:secure
                                                                sameSite:sameSite]];
+      sessionMiddlewareActive = YES;
     }
   }
 
   NSDictionary *csrf = ALNDictionaryConfigValue(self.config, @"csrf");
   BOOL csrfEnabled = ALNBoolConfigValue(csrf[@"enabled"], sessionEnabled);
   if (csrfEnabled) {
-    if (!sessionEnabled) {
+    if (!sessionMiddlewareActive) {
       [self.logger warn:@"csrf middleware disabled"
                  fields:@{
                    @"reason" : @"csrf requires session middleware",
