@@ -1,0 +1,65 @@
+{
+  "version": "phase7g-coding-agent-dx-contracts-v1",
+  "contracts": [
+    {
+      "id": "phase7g.cli_json_scaffold_contracts",
+      "claim": "Scaffold workflows emit machine-readable JSON payloads with deterministic generated/modified file sets.",
+      "source_docs": [
+        "docs/PHASE7G_CODING_AGENT_DX_CONTRACTS.md",
+        "docs/CLI_REFERENCE.md"
+      ],
+      "verification": [
+        {
+          "kind": "integration",
+          "file": "tests/integration/DeploymentIntegrationTests.m",
+          "test": "testAgentJSONWorkflowContractsCoverScaffoldBuildCheckAndDeploy"
+        }
+      ]
+    },
+    {
+      "id": "phase7g.fixit_diagnostics_contracts",
+      "claim": "JSON workflow failures map to deterministic fix-it diagnostics with action + example guidance.",
+      "source_docs": [
+        "docs/PHASE7G_CODING_AGENT_DX_CONTRACTS.md",
+        "docs/CLI_REFERENCE.md"
+      ],
+      "verification": [
+        {
+          "kind": "integration",
+          "file": "tests/integration/DeploymentIntegrationTests.m",
+          "test": "testAgentJSONWorkflowContractsCoverScaffoldBuildCheckAndDeploy"
+        }
+      ]
+    },
+    {
+      "id": "phase7g.deploy_release_json_plan_contract",
+      "claim": "Release build workflow supports deterministic deploy planning payloads via --dry-run --json.",
+      "source_docs": [
+        "docs/PHASE7G_CODING_AGENT_DX_CONTRACTS.md",
+        "docs/DEPLOYMENT.md"
+      ],
+      "verification": [
+        {
+          "kind": "integration",
+          "file": "tests/integration/DeploymentIntegrationTests.m",
+          "test": "testAgentJSONWorkflowContractsCoverScaffoldBuildCheckAndDeploy"
+        }
+      ]
+    },
+    {
+      "id": "phase7g.fixture_integrity_contract",
+      "claim": "Phase 7G contract fixture remains schema-valid and references existing docs/tests.",
+      "source_docs": [
+        "docs/PHASE7G_CODING_AGENT_DX_CONTRACTS.md",
+        "tests/fixtures/phase7g/coding_agent_dx_contracts.json"
+      ],
+      "verification": [
+        {
+          "kind": "unit",
+          "file": "tests/unit/Phase7GTests.m",
+          "test": "testCodingAgentDXContractFixtureSchemaAndTestCoverage"
+        }
+      ]
+    }
+  ]
+}

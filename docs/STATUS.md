@@ -33,7 +33,8 @@ Last updated: 2026-02-23
 - Phase 7D: initial slice implemented (2026-02-23)
 - Phase 7E: initial slice implemented (2026-02-23)
 - Phase 7F: initial slice implemented (2026-02-23)
-- Phase 7G-7H: planned (roadmap defined 2026-02-23)
+- Phase 7G: initial slice implemented (2026-02-23)
+- Phase 7H: planned (roadmap defined 2026-02-23)
 
 ## Completed Today (2026-02-23)
 
@@ -73,6 +74,12 @@ Last updated: 2026-02-23
   - starter API wiring examples (`/healthz?format=json`, `/metrics`) for zero-extra-controller bootstrap
   - release packaging compatibility contract via `public/` artifact inclusion
   - Phase 7F contract fixture + docs (`tests/fixtures/phase7f/frontend_starter_contracts.json`, `docs/PHASE7F_FRONTEND_STARTERS.md`)
+- Implemented Phase 7G initial coding-agent DX slice:
+  - added machine-readable JSON contracts for scaffold workflows (`arlen new/generate --json`)
+  - added deterministic build/check planning contracts (`arlen build/check --dry-run --json`)
+  - added deploy release planning contract (`tools/deploy/build_release.sh --dry-run --json`)
+  - added structured fix-it diagnostics (`error.code`, `error.fixit.action`, `error.fixit.example`)
+  - Phase 7G contract fixture + docs (`tests/fixtures/phase7g/coding_agent_dx_contracts.json`, `docs/PHASE7G_CODING_AGENT_DX_CONTRACTS.md`)
 - Completed Phase 5A-5E implementation tranche.
 - Added typed schema contracts + typed SQL generation workflow (5D) and validated compile-time/runtime contract behavior.
 - Added Phase 5E hardening coverage:
@@ -226,6 +233,9 @@ Last updated: 2026-02-23
   - release packaging inclusion coverage for generated frontend assets (`tests/integration/DeploymentIntegrationTests.m`)
   - unsupported preset deterministic rejection diagnostics (`tests/integration/DeploymentIntegrationTests.m`)
   - phase fixture schema/reference validation (`tests/unit/Phase7FTests.m`)
+- New Phase 7G checks executed:
+  - coding-agent JSON workflow regression (`new/generate/build/check/deploy` planning + fix-it diagnostics) (`tests/integration/DeploymentIntegrationTests.m`)
+  - phase fixture schema/reference validation (`tests/unit/Phase7GTests.m`)
 - New Phase 3F checks executed:
   - `arlen doctor` bootstrap pre-build diagnostics + JSON payload validation
   - ALNPg SQLSTATE/diagnostics regression tests
@@ -281,7 +291,7 @@ Last updated: 2026-02-23
 
 1. Continue remaining Phase 7D ecosystem service durability depth (production-adapter failure/recovery integration coverage) (`docs/PHASE7_ROADMAP.md`).
 2. Continue remaining Phase 7E template-pipeline depth (additional lint/diagnostic rules and watch/deploy render-path regressions) (`docs/PHASE7_ROADMAP.md`).
-3. Start Phase 7G coding-agent-first DX contracts and Phase 7H distributed-runtime depth execution planning (`docs/PHASE7_ROADMAP.md`).
+3. Continue Phase 7G follow-on contracts and start Phase 7H distributed-runtime depth execution (`docs/PHASE7_ROADMAP.md`).
 
 ## Planned Phase Mapping (Post-4C)
 
@@ -305,9 +315,10 @@ Last updated: 2026-02-23
   - Phase 7D initial ecosystem service durability slice implemented (idempotency/retry/cache durability contracts)
   - Phase 7E initial template-pipeline maturity slice implemented (lint diagnostics + fixture matrix + include/render-path hardening checks)
   - Phase 7F initial frontend integration starter slice implemented (deterministic starter generation + deploy packaging coverage)
+  - Phase 7G initial coding-agent DX slice implemented (JSON workflow contracts + fix-it diagnostics + deploy/build/check planning payloads)
   - remaining runtime hardening for `boomhauer`/`propane` in progress
   - remaining security policy/default hardening in progress
-  - remaining observability/operability + coding-agent-first DX contracts
+  - remaining observability/operability + coding-agent DX follow-on
   - ecosystem durability, template pipeline hardening, frontend starters, distributed-runtime depth
 - Maybe Someday backlog:
   - LiveView-like server-driven UI

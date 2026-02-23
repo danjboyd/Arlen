@@ -12,8 +12,8 @@ static void PrintUsage(void) {
           "Usage: arlen <command> [options]\n"
           "\n"
           "Commands:\n"
-          "  new <AppName> [--full|--lite] [--force]\n"
-          "  generate <controller|endpoint|model|migration|test|plugin|frontend> <Name> [options]\n"
+          "  new <AppName> [--full|--lite] [--force] [--json]\n"
+          "  generate <controller|endpoint|model|migration|test|plugin|frontend> <Name> [options] [--json]\n"
           "  boomhauer [server args...]\n"
           "  propane [manager args...]\n"
           "  migrate [--env <name>] [--database <target>] [--dsn <connection_string>] [--dry-run]\n"
@@ -22,19 +22,19 @@ static void PrintUsage(void) {
           "  routes\n"
           "  test [--unit|--integration|--all]\n"
           "  perf\n"
-          "  check\n"
-          "  build\n"
+          "  check [--dry-run] [--json]\n"
+          "  build [--dry-run] [--json]\n"
           "  config [--env <name>] [--json]\n"
           "  doctor [--env <name>] [--json]\n");
 }
 
 static void PrintNewUsage(void) {
-  fprintf(stdout, "Usage: arlen new <AppName> [--full|--lite] [--force]\n");
+  fprintf(stdout, "Usage: arlen new <AppName> [--full|--lite] [--force] [--json]\n");
 }
 
 static void PrintGenerateUsage(void) {
   fprintf(stdout,
-          "Usage: arlen generate <controller|endpoint|model|migration|test|plugin|frontend> <Name> [options]\n"
+          "Usage: arlen generate <controller|endpoint|model|migration|test|plugin|frontend> <Name> [options] [--json]\n"
           "\n"
           "Generator options (controller/endpoint):\n"
           "  --route <path>\n"
@@ -47,7 +47,134 @@ static void PrintGenerateUsage(void) {
           "  --preset <generic|redis-cache|queue-jobs|smtp-mail>\n"
           "\n"
           "Generator options (frontend):\n"
-          "  --preset <vanilla-spa|progressive-mpa>\n");
+          "  --preset <vanilla-spa|progressive-mpa>\n"
+          "\n"
+          "Machine-readable output:\n"
+          "  --json\n");
+}
+
+static void PrintBuildUsage(void) {
+  fprintf(stdout, "Usage: arlen build [--dry-run] [--json]\n");
+}
+
+static void PrintCheckUsage(void) {
+  fprintf(stdout, "Usage: arlen check [--dry-run] [--json]\n");
+}
+
+static NSString *AgentContractVersion(void) {
+  return @"phase7g-agent-dx-contracts-v1";
+}
+
+static BOOL ArgsContainFlag(NSArray *args, NSString *flag) {
+  for (NSString *arg in args ?: @[]) {
+    if ([arg isEqualToString:flag]) {
+      return YES;
+    }
+  }
+  return NO;
+}
+
+static NSString *RelativePathFromRoot(NSString *root, NSString *path) {
+  NSString *standardRoot = [[root ?: @"" stringByStandardizingPath] copy];
+  NSString *standardPath = [[path ?: @"" stringByStandardizingPath] copy];
+  if ([standardRoot length] == 0 || [standardPath length] == 0) {
+    return @"";
+  }
+
+  if ([standardPath isEqualToString:standardRoot]) {
+    return @"";
+  }
+
+  NSString *prefix = [standardRoot hasSuffix:@"/"] ? standardRoot : [standardRoot stringByAppendingString:@"/"];
+  if (![standardPath hasPrefix:prefix]) {
+    return @"";
+  }
+  return [standardPath substringFromIndex:[prefix length]];
+}
+
+static NSArray<NSString *> *SortedFileListAtRoot(NSString *root) {
+  NSMutableArray<NSString *> *files = [NSMutableArray array];
+  NSFileManager *fm = [NSFileManager defaultManager];
+  NSDirectoryEnumerator *enumerator = [fm enumeratorAtPath:root];
+  for (NSString *relativePath in enumerator) {
+    NSString *absolutePath = [root stringByAppendingPathComponent:relativePath];
+    BOOL isDirectory = NO;
+    if ([fm fileExistsAtPath:absolutePath isDirectory:&isDirectory] && !isDirectory) {
+      [files addObject:relativePath];
+    }
+  }
+  return [files sortedArrayUsingSelector:@selector(compare:)];
+}
+
+static NSArray<NSString *> *SortedUniqueStrings(NSArray<NSString *> *values) {
+  NSArray<NSString *> *sorted = [values ?: @[] sortedArrayUsingSelector:@selector(compare:)];
+  NSMutableArray<NSString *> *unique = [NSMutableArray arrayWithCapacity:[sorted count]];
+  NSString *last = nil;
+  for (NSString *value in sorted) {
+    if (![value isKindOfClass:[NSString class]]) {
+      continue;
+    }
+    if (last == nil || ![last isEqualToString:value]) {
+      [unique addObject:value];
+      last = value;
+    }
+  }
+  return unique;
+}
+
+static void PrintJSONPayload(FILE *stream, NSDictionary *payload) {
+  NSError *error = nil;
+  NSData *json = [NSJSONSerialization dataWithJSONObject:payload ?: @{}
+                                                 options:NSJSONWritingPrettyPrinted
+                                                   error:&error];
+  if (json == nil) {
+    fprintf(stderr, "arlen: failed to render JSON output: %s\n",
+            [[error localizedDescription] UTF8String]);
+    return;
+  }
+  NSString *text = [[NSString alloc] initWithData:json encoding:NSUTF8StringEncoding] ?: @"{}";
+  fprintf(stream, "%s\n", [text UTF8String]);
+}
+
+static int EmitMachineError(NSString *command,
+                            NSString *workflow,
+                            NSString *errorCode,
+                            NSString *message,
+                            NSString *fixitAction,
+                            NSString *fixitExample,
+                            int exitCode) {
+  NSMutableDictionary *errorObject = [NSMutableDictionary dictionary];
+  errorObject[@"code"] = errorCode ?: @"unknown_error";
+  errorObject[@"message"] = message ?: @"";
+
+  NSMutableDictionary *fixit = [NSMutableDictionary dictionary];
+  if ([fixitAction length] > 0) {
+    fixit[@"action"] = fixitAction;
+  }
+  if ([fixitExample length] > 0) {
+    fixit[@"example"] = fixitExample;
+  }
+  if ([fixit count] > 0) {
+    errorObject[@"fixit"] = fixit;
+  }
+
+  NSDictionary *payload = @{
+    @"version" : AgentContractVersion(),
+    @"command" : command ?: @"",
+    @"workflow" : workflow ?: @"",
+    @"status" : @"error",
+    @"error" : errorObject,
+    @"exit_code" : @(exitCode),
+  };
+  PrintJSONPayload(stdout, payload);
+  return exitCode;
+}
+
+static void AppendRelativePath(NSMutableArray<NSString *> *paths, NSString *root, NSString *absolutePath) {
+  NSString *relative = RelativePathFromRoot(root, absolutePath);
+  if ([relative length] > 0) {
+    [paths addObject:relative];
+  }
 }
 
 static NSString *ShellQuote(NSString *value) {
@@ -482,7 +609,14 @@ static BOOL ScaffoldLiteApp(NSString *root, BOOL force, NSError **error) {
 }
 
 static int CommandNew(NSArray *args) {
+  BOOL asJSON = ArgsContainFlag(args, @"--json");
   if ([args count] == 0) {
+    if (asJSON) {
+      return EmitMachineError(@"new", @"scaffold", @"missing_app_name",
+                              @"arlen new: missing AppName",
+                              @"Provide an app name after `arlen new`.",
+                              @"arlen new DemoApp --full --json", 2);
+    }
     fprintf(stderr, "arlen new: missing AppName\n");
     PrintNewUsage();
     return 2;
@@ -493,6 +627,12 @@ static int CommandNew(NSArray *args) {
   }
   NSString *appName = args[0];
   if ([appName hasPrefix:@"-"]) {
+    if (asJSON) {
+      return EmitMachineError(@"new", @"scaffold", @"missing_app_name",
+                              @"arlen new: missing AppName",
+                              @"Provide an app name after `arlen new`.",
+                              @"arlen new DemoApp --full --json", 2);
+    }
     fprintf(stderr, "arlen new: missing AppName\n");
     PrintNewUsage();
     return 2;
@@ -508,10 +648,19 @@ static int CommandNew(NSArray *args) {
       lite = NO;
     } else if ([arg isEqualToString:@"--force"]) {
       force = YES;
+    } else if ([arg isEqualToString:@"--json"]) {
+      asJSON = YES;
     } else if ([arg isEqualToString:@"--help"] || [arg isEqualToString:@"-h"]) {
       PrintNewUsage();
       return 0;
     } else {
+      if (asJSON) {
+        return EmitMachineError(
+            @"new", @"scaffold", @"unknown_option",
+            [NSString stringWithFormat:@"arlen new: unknown option %@", arg ?: @""],
+            @"Use only --full/--lite/--force/--json with `arlen new`.",
+            @"arlen new DemoApp --full --json", 2);
+      }
       fprintf(stderr, "arlen new: unknown option %s\n", [arg UTF8String]);
       PrintNewUsage();
       return 2;
@@ -523,9 +672,35 @@ static int CommandNew(NSArray *args) {
   NSError *error = nil;
   BOOL ok = lite ? ScaffoldLiteApp(root, force, &error) : ScaffoldFullApp(root, force, &error);
   if (!ok) {
+    if (asJSON) {
+      NSString *message = [NSString stringWithFormat:@"arlen new: %@",
+                                                     error.localizedDescription ?: @"scaffold failed"];
+      NSString *fixitAction = @"Choose a new app directory or use --force to overwrite allowed files.";
+      NSString *fixitExample = [NSString stringWithFormat:@"arlen new %@ --%@ --force --json", appName,
+                                                          lite ? @"lite" : @"full"];
+      return EmitMachineError(@"new", @"scaffold", @"scaffold_failed",
+                              message, fixitAction, fixitExample, 1);
+    }
     fprintf(stderr, "arlen new: %s\n", [[error localizedDescription] UTF8String]);
     return 1;
   }
+
+  if (asJSON) {
+    NSArray<NSString *> *createdFiles = SortedFileListAtRoot(root);
+    NSDictionary *payload = @{
+      @"version" : AgentContractVersion(),
+      @"command" : @"new",
+      @"workflow" : @"scaffold",
+      @"status" : @"ok",
+      @"mode" : lite ? @"lite" : @"full",
+      @"app_name" : appName ?: @"",
+      @"app_root" : [root stringByStandardizingPath],
+      @"created_files" : createdFiles ?: @[],
+    };
+    PrintJSONPayload(stdout, payload);
+    return 0;
+  }
+
   fprintf(stdout, "Created %s app at %s\n", lite ? "lite" : "full", [root UTF8String]);
   return 0;
 }
@@ -658,6 +833,7 @@ static BOOL WireGeneratedRoute(NSString *root,
                                NSString *routePath,
                                NSString *controllerBase,
                                NSString *actionName,
+                               NSString **modifiedFilePath,
                                NSError **error) {
   NSString *mainPath = [root stringByAppendingPathComponent:@"src/main.m"];
   NSString *litePath = [root stringByAppendingPathComponent:@"app_lite.m"];
@@ -685,7 +861,11 @@ static BOOL WireGeneratedRoute(NSString *root,
                                   "controllerClass:[%@Controller class] action:@\"%@\"];",
                                  [method uppercaseString], routePath, routeName, controllerBase,
                                  actionName];
-  return InsertRouteIntoRegisterRoutes(target, line, error);
+  BOOL ok = InsertRouteIntoRegisterRoutes(target, line, error);
+  if (ok && modifiedFilePath != NULL) {
+    *modifiedFilePath = target;
+  }
+  return ok;
 }
 
 static BOOL IsSupportedPluginPreset(NSString *preset) {
@@ -1179,12 +1359,19 @@ static NSDictionary<NSString *, NSString *> *FrontendStarterFilesForPreset(NSStr
 }
 
 static int CommandGenerate(NSArray *args) {
+  BOOL asJSON = ArgsContainFlag(args, @"--json");
   if ([args count] == 1 &&
       ([args[0] isEqualToString:@"--help"] || [args[0] isEqualToString:@"-h"])) {
     PrintGenerateUsage();
     return 0;
   }
   if ([args count] < 2) {
+    if (asJSON) {
+      return EmitMachineError(@"generate", @"scaffold", @"missing_type_or_name",
+                              @"arlen generate: expected type and Name",
+                              @"Provide generator type and Name before options.",
+                              @"arlen generate controller Home --json", 2);
+    }
     fprintf(stderr, "arlen generate: expected type and Name\n");
     PrintGenerateUsage();
     return 2;
@@ -1206,11 +1393,19 @@ static int CommandGenerate(NSArray *args) {
   BOOL apiMode = NO;
   NSString *presetOption = @"";
   BOOL presetExplicit = NO;
+  NSMutableArray<NSString *> *generatedFiles = [NSMutableArray array];
+  NSMutableArray<NSString *> *modifiedFiles = [NSMutableArray array];
 
   for (NSUInteger idx = 2; idx < [args count]; idx++) {
     NSString *arg = args[idx];
     if ([arg isEqualToString:@"--route"]) {
       if (idx + 1 >= [args count]) {
+        if (asJSON) {
+          return EmitMachineError(@"generate", @"scaffold", @"missing_route_value",
+                                  @"arlen generate: --route requires a value",
+                                  @"Provide a route path after --route.",
+                                  @"arlen generate endpoint UsersShow --route /users/:id --json", 2);
+        }
         fprintf(stderr, "arlen generate: --route requires a value\n");
         return 2;
       }
@@ -1220,12 +1415,24 @@ static int CommandGenerate(NSArray *args) {
       }
     } else if ([arg isEqualToString:@"--method"]) {
       if (idx + 1 >= [args count]) {
+        if (asJSON) {
+          return EmitMachineError(@"generate", @"scaffold", @"missing_method_value",
+                                  @"arlen generate: --method requires a value",
+                                  @"Provide an HTTP method after --method.",
+                                  @"arlen generate endpoint UsersShow --method GET --route /users/:id --json", 2);
+        }
         fprintf(stderr, "arlen generate: --method requires a value\n");
         return 2;
       }
       method = [args[++idx] uppercaseString];
     } else if ([arg isEqualToString:@"--action"]) {
       if (idx + 1 >= [args count]) {
+        if (asJSON) {
+          return EmitMachineError(@"generate", @"scaffold", @"missing_action_value",
+                                  @"arlen generate: --action requires a value",
+                                  @"Provide an action name after --action.",
+                                  @"arlen generate controller Home --action index --json", 2);
+        }
         fprintf(stderr, "arlen generate: --action requires a value\n");
         return 2;
       }
@@ -1239,21 +1446,41 @@ static int CommandGenerate(NSArray *args) {
       apiMode = YES;
     } else if ([arg isEqualToString:@"--preset"]) {
       if (idx + 1 >= [args count]) {
+        if (asJSON) {
+          return EmitMachineError(@"generate", @"scaffold", @"missing_preset_value",
+                                  @"arlen generate: --preset requires a value",
+                                  @"Provide a preset value after --preset.",
+                                  @"arlen generate plugin Cache --preset redis-cache --json", 2);
+        }
         fprintf(stderr, "arlen generate: --preset requires a value\n");
         return 2;
       }
       presetOption = [[args[++idx] lowercaseString] copy];
       presetExplicit = YES;
+    } else if ([arg isEqualToString:@"--json"]) {
+      asJSON = YES;
     } else if ([arg isEqualToString:@"--help"] || [arg isEqualToString:@"-h"]) {
       PrintGenerateUsage();
       return 0;
     } else {
+      if (asJSON) {
+        return EmitMachineError(@"generate", @"scaffold", @"unknown_option",
+                                [NSString stringWithFormat:@"arlen generate: unknown option %@", arg ?: @""],
+                                @"Remove unsupported options and rerun with documented generator flags.",
+                                @"arlen generate controller Home --route / --json", 2);
+      }
       fprintf(stderr, "arlen generate: unknown option %s\n", [arg UTF8String]);
       return 2;
     }
   }
 
   if ([type isEqualToString:@"endpoint"] && [routePath length] == 0) {
+    if (asJSON) {
+      return EmitMachineError(@"generate", @"scaffold", @"missing_route",
+                              @"arlen generate endpoint: --route is required",
+                              @"Endpoint generation requires an explicit route.",
+                              @"arlen generate endpoint UsersShow --route /users/:id --json", 2);
+    }
     fprintf(stderr, "arlen generate endpoint: --route is required\n");
     return 2;
   }
@@ -1265,14 +1492,34 @@ static int CommandGenerate(NSArray *args) {
     }
   }
   if (presetExplicit && ![type isEqualToString:@"plugin"] && ![type isEqualToString:@"frontend"]) {
+    if (asJSON) {
+      return EmitMachineError(@"generate", @"scaffold", @"preset_invalid_for_generator",
+                              @"arlen generate: --preset is only valid for plugin/frontend generators",
+                              @"Use --preset only with plugin or frontend generators.",
+                              @"arlen generate frontend Dashboard --preset vanilla-spa --json", 2);
+    }
     fprintf(stderr, "arlen generate: --preset is only valid for plugin/frontend generators\n");
     return 2;
   }
   if ([type isEqualToString:@"plugin"] && !IsSupportedPluginPreset(presetOption)) {
+    if (asJSON) {
+      return EmitMachineError(@"generate", @"scaffold", @"unsupported_plugin_preset",
+                              [NSString stringWithFormat:@"arlen generate plugin: unsupported --preset %@",
+                                                         presetOption ?: @""],
+                              @"Use one of: generic, redis-cache, queue-jobs, smtp-mail.",
+                              @"arlen generate plugin Cache --preset redis-cache --json", 2);
+    }
     fprintf(stderr, "arlen generate plugin: unsupported --preset %s\n", [presetOption UTF8String]);
     return 2;
   }
   if ([type isEqualToString:@"frontend"] && !IsSupportedFrontendPreset(presetOption)) {
+    if (asJSON) {
+      return EmitMachineError(@"generate", @"scaffold", @"unsupported_frontend_preset",
+                              [NSString stringWithFormat:@"arlen generate frontend: unsupported --preset %@",
+                                                         presetOption ?: @""],
+                              @"Use one of: vanilla-spa, progressive-mpa.",
+                              @"arlen generate frontend Dashboard --preset vanilla-spa --json", 2);
+    }
     fprintf(stderr, "arlen generate frontend: unsupported --preset %s\n", [presetOption UTF8String]);
     return 2;
   }
@@ -1340,8 +1587,16 @@ static int CommandGenerate(NSArray *args) {
                                     "@end\n",
                                    controllerBase, controllerBase, actionBody];
 
-    ok = WriteTextFile(headerPath, header, NO, &error) &&
-         WriteTextFile(implPath, impl, NO, &error);
+    ok = WriteTextFile(headerPath, header, NO, &error);
+    if (ok) {
+      AppendRelativePath(generatedFiles, root, headerPath);
+    }
+    if (ok) {
+      ok = WriteTextFile(implPath, impl, NO, &error);
+      if (ok) {
+        AppendRelativePath(generatedFiles, root, implPath);
+      }
+    }
 
     if (ok && createTemplate) {
       if ([templateLogical containsString:@".."]) {
@@ -1356,11 +1611,18 @@ static int CommandGenerate(NSArray *args) {
             [root stringByAppendingPathComponent:[NSString stringWithFormat:@"templates/%@.html.eoc",
                                                                             templateLogical]];
         ok = WriteTextFile(templatePath, @"<h1><%= $title %></h1>\n", NO, &error);
+        if (ok) {
+          AppendRelativePath(generatedFiles, root, templatePath);
+        }
       }
     }
 
     if (ok && [routePath length] > 0) {
-      ok = WireGeneratedRoute(root, method, routePath, controllerBase, actionName, &error);
+      NSString *modifiedRouteFile = nil;
+      ok = WireGeneratedRoute(root, method, routePath, controllerBase, actionName, &modifiedRouteFile, &error);
+      if (ok) {
+        AppendRelativePath(modifiedFiles, root, modifiedRouteFile);
+      }
     }
   } else if ([type isEqualToString:@"model"]) {
     NSString *headerPath =
@@ -1374,11 +1636,19 @@ static int CommandGenerate(NSArray *args) {
                                      @"#import <Foundation/Foundation.h>\n\n"
                                       "@interface %@Repository : NSObject\n@end\n",
                                      name],
-                       NO, &error) &&
-         WriteTextFile(implPath,
-                       [NSString stringWithFormat:@"#import \"%@Repository.h\"\n\n@implementation %@Repository\n@end\n",
-                                                   name, name],
                        NO, &error);
+    if (ok) {
+      AppendRelativePath(generatedFiles, root, headerPath);
+    }
+    if (ok) {
+      ok = WriteTextFile(implPath,
+                         [NSString stringWithFormat:@"#import \"%@Repository.h\"\n\n@implementation %@Repository\n@end\n",
+                                                     name, name],
+                         NO, &error);
+      if (ok) {
+        AppendRelativePath(generatedFiles, root, implPath);
+      }
+    }
   } else if ([type isEqualToString:@"migration"]) {
     NSString *timestamp =
         [NSString stringWithFormat:@"%lld", (long long)[[NSDate date] timeIntervalSince1970]];
@@ -1387,6 +1657,9 @@ static int CommandGenerate(NSArray *args) {
                   [NSString stringWithFormat:@"db/migrations/%@_%@.sql", timestamp,
                                              [name lowercaseString]]];
     ok = WriteTextFile(path, @"-- migration\n", NO, &error);
+    if (ok) {
+      AppendRelativePath(generatedFiles, root, path);
+    }
   } else if ([type isEqualToString:@"test"]) {
     NSString *path =
         [root stringByAppendingPathComponent:[NSString stringWithFormat:@"tests/%@Tests.m", name]];
@@ -1399,6 +1672,9 @@ static int CommandGenerate(NSArray *args) {
                                        "}\n@end\n",
                                       name, name];
     ok = WriteTextFile(path, content, NO, &error);
+    if (ok) {
+      AppendRelativePath(generatedFiles, root, path);
+    }
   } else if ([type isEqualToString:@"plugin"]) {
     NSString *pluginName = [name hasSuffix:@"Plugin"] ? name : [name stringByAppendingString:@"Plugin"];
     NSString *pluginBase = [pluginName hasSuffix:@"Plugin"] && [pluginName length] > [@"Plugin" length]
@@ -1418,10 +1694,21 @@ static int CommandGenerate(NSArray *args) {
                                      pluginName];
     NSString *impl = PluginImplementationForPreset(pluginName, logicalName, presetOption);
 
-    ok = WriteTextFile(headerPath, header, NO, &error) &&
-         WriteTextFile(implPath, impl, NO, &error);
+    ok = WriteTextFile(headerPath, header, NO, &error);
+    if (ok) {
+      AppendRelativePath(generatedFiles, root, headerPath);
+    }
+    if (ok) {
+      ok = WriteTextFile(implPath, impl, NO, &error);
+      if (ok) {
+        AppendRelativePath(generatedFiles, root, implPath);
+      }
+    }
     if (ok) {
       ok = AddPluginClassToAppConfig(root, pluginName, &error);
+      if (ok) {
+        AppendRelativePath(modifiedFiles, root, [root stringByAppendingPathComponent:@"config/app.plist"]);
+      }
     }
   } else if ([type isEqualToString:@"frontend"]) {
     NSString *slug = NormalizedFrontendSlug(name);
@@ -1436,22 +1723,65 @@ static int CommandGenerate(NSArray *args) {
         ok = NO;
         break;
       }
+      AppendRelativePath(generatedFiles, root, absolutePath);
     }
   } else {
+    if (asJSON) {
+      return EmitMachineError(@"generate", @"scaffold", @"unknown_generator_type",
+                              [NSString stringWithFormat:@"arlen generate: unknown type %@", type ?: @""],
+                              @"Use one of: controller, endpoint, model, migration, test, plugin, frontend.",
+                              @"arlen generate controller Home --json", 2);
+    }
     fprintf(stderr, "arlen generate: unknown type %s\n", [type UTF8String]);
     return 2;
   }
 
   if (!ok) {
+    if (asJSON) {
+      NSString *message = [NSString stringWithFormat:@"arlen generate: %@",
+                                                     error.localizedDescription ?: @"generation failed"];
+      NSString *fixitAction = @"Update generator inputs or remove conflicting files before retrying.";
+      NSString *fixitExample = [NSString stringWithFormat:@"arlen generate %@ %@ --json",
+                                                          type ?: @"controller", name ?: @"Home"];
+      if ([error.localizedDescription containsString:@"File exists:"]) {
+        fixitAction = @"Remove or rename existing files, or choose a different artifact name.";
+      }
+      return EmitMachineError(@"generate", @"scaffold", @"generation_failed",
+                              message, fixitAction, fixitExample, 1);
+    }
     fprintf(stderr, "arlen generate: %s\n", [[error localizedDescription] UTF8String]);
     return 1;
+  }
+
+  if (asJSON) {
+    NSMutableDictionary *payload = [NSMutableDictionary dictionary];
+    payload[@"version"] = AgentContractVersion();
+    payload[@"command"] = @"generate";
+    payload[@"workflow"] = @"scaffold";
+    payload[@"status"] = @"ok";
+    payload[@"generator"] = type ?: @"";
+    payload[@"name"] = name ?: @"";
+    payload[@"app_root"] = [root stringByStandardizingPath];
+    if ([routePath length] > 0) {
+      payload[@"route"] = routePath;
+    }
+    if ([presetOption length] > 0 &&
+        ([type isEqualToString:@"plugin"] || [type isEqualToString:@"frontend"])) {
+      payload[@"preset"] = presetOption;
+    }
+    payload[@"generated_files"] = SortedUniqueStrings(generatedFiles);
+    payload[@"modified_files"] = SortedUniqueStrings(modifiedFiles);
+    PrintJSONPayload(stdout, payload);
+    return 0;
   }
 
   fprintf(stdout, "Generated %s %s\n", [type UTF8String], [name UTF8String]);
   return 0;
 }
 
-static NSString *ResolveFrameworkRootForCommand(NSString *commandName) {
+static NSString *ResolveFrameworkRootForCommandDetailed(NSString *commandName,
+                                                        BOOL emitErrors,
+                                                        NSString **errorMessage) {
   NSString *appRoot = [[NSFileManager defaultManager] currentDirectoryPath];
   NSString *override = EnvValue("ARLEN_FRAMEWORK_ROOT");
   if ([override length] > 0) {
@@ -1461,9 +1791,15 @@ static NSString *ResolveFrameworkRootForCommand(NSString *commandName) {
     if (IsFrameworkRoot(candidate)) {
       return candidate;
     }
-    fprintf(stderr,
-            "arlen %s: ARLEN_FRAMEWORK_ROOT does not point to a valid Arlen root: %s\n",
-            [commandName UTF8String], [candidate UTF8String]);
+    NSString *message =
+        [NSString stringWithFormat:@"arlen %@: ARLEN_FRAMEWORK_ROOT does not point to a valid Arlen root: %@",
+                                   commandName ?: @"", candidate ?: @""];
+    if (errorMessage != NULL) {
+      *errorMessage = message;
+    }
+    if (emitErrors) {
+      fprintf(stderr, "%s\n", [message UTF8String]);
+    }
     return nil;
   }
 
@@ -1472,11 +1808,21 @@ static NSString *ResolveFrameworkRootForCommand(NSString *commandName) {
     frameworkRoot = FrameworkRootFromExecutablePath();
   }
   if ([frameworkRoot length] == 0) {
-    fprintf(stderr, "arlen %s: could not locate Arlen framework root from %s\n",
-            [commandName UTF8String], [appRoot UTF8String]);
+    NSString *message = [NSString stringWithFormat:@"arlen %@: could not locate Arlen framework root from %@",
+                                                   commandName ?: @"", appRoot ?: @""];
+    if (errorMessage != NULL) {
+      *errorMessage = message;
+    }
+    if (emitErrors) {
+      fprintf(stderr, "%s\n", [message UTF8String]);
+    }
     return nil;
   }
   return frameworkRoot;
+}
+
+static NSString *ResolveFrameworkRootForCommand(NSString *commandName) {
+  return ResolveFrameworkRootForCommandDetailed(commandName, YES, NULL);
 }
 
 static int CommandBoomhauer(NSArray *args) {
@@ -1557,20 +1903,111 @@ static int CommandPerf(void) {
   return RunShellCommand([NSString stringWithFormat:@"cd %@ && make perf", ShellQuote(frameworkRoot)]);
 }
 
-static int CommandBuild(void) {
-  NSString *frameworkRoot = ResolveFrameworkRootForCommand(@"build");
+static int RunMakeWorkflowCommand(NSString *commandName, NSString *makeTarget, NSArray *args) {
+  BOOL asJSON = NO;
+  BOOL dryRun = NO;
+  for (NSUInteger idx = 0; idx < [args count]; idx++) {
+    NSString *arg = args[idx];
+    if ([arg isEqualToString:@"--json"]) {
+      asJSON = YES;
+    } else if ([arg isEqualToString:@"--dry-run"]) {
+      dryRun = YES;
+    } else if ([arg isEqualToString:@"--help"] || [arg isEqualToString:@"-h"]) {
+      if ([commandName isEqualToString:@"build"]) {
+        PrintBuildUsage();
+      } else {
+        PrintCheckUsage();
+      }
+      return 0;
+    } else {
+      if (asJSON) {
+        return EmitMachineError(commandName, commandName, @"unknown_option",
+                                [NSString stringWithFormat:@"arlen %@: unknown option %@", commandName ?: @"",
+                                                           arg ?: @""],
+                                @"Use only --dry-run and --json for this command.",
+                                [NSString stringWithFormat:@"arlen %@ --dry-run --json", commandName ?: @""], 2);
+      }
+      fprintf(stderr, "arlen %s: unknown option %s\n", [commandName UTF8String], [arg UTF8String]);
+      if ([commandName isEqualToString:@"build"]) {
+        PrintBuildUsage();
+      } else {
+        PrintCheckUsage();
+      }
+      return 2;
+    }
+  }
+
+  NSString *resolveError = nil;
+  NSString *frameworkRoot = ResolveFrameworkRootForCommandDetailed(commandName, !asJSON, &resolveError);
   if ([frameworkRoot length] == 0) {
+    if (asJSON) {
+      NSString *example = [NSString stringWithFormat:@"ARLEN_FRAMEWORK_ROOT=/path/to/Arlen arlen %@ --dry-run --json",
+                                                     commandName ?: @""];
+      return EmitMachineError(commandName, commandName, @"framework_root_unresolved",
+                              resolveError ?: @"failed to resolve framework root",
+                              @"Set ARLEN_FRAMEWORK_ROOT or run inside an Arlen checkout/app.",
+                              example, 1);
+    }
     return 1;
   }
-  return RunShellCommand([NSString stringWithFormat:@"cd %@ && make all", ShellQuote(frameworkRoot)]);
+
+  NSString *shellCommand =
+      [NSString stringWithFormat:@"cd %@ && make %@", ShellQuote(frameworkRoot), makeTarget ?: @""];
+
+  if (dryRun) {
+    if (asJSON) {
+      NSDictionary *payload = @{
+        @"version" : AgentContractVersion(),
+        @"command" : commandName ?: @"",
+        @"workflow" : commandName ?: @"",
+        @"status" : @"planned",
+        @"framework_root" : frameworkRoot ?: @"",
+        @"make_target" : makeTarget ?: @"",
+        @"shell_command" : shellCommand ?: @"",
+      };
+      PrintJSONPayload(stdout, payload);
+      return 0;
+    }
+    fprintf(stdout, "arlen %s dry-run: %s\n", [commandName UTF8String], [shellCommand UTF8String]);
+    return 0;
+  }
+
+  if (!asJSON) {
+    return RunShellCommand(shellCommand);
+  }
+
+  int exitCode = 0;
+  NSString *capturedOutput = RunShellCaptureCommand(shellCommand, &exitCode);
+  NSMutableDictionary *payload = [NSMutableDictionary dictionary];
+  payload[@"version"] = AgentContractVersion();
+  payload[@"command"] = commandName ?: @"";
+  payload[@"workflow"] = commandName ?: @"";
+  payload[@"status"] = (exitCode == 0) ? @"ok" : @"error";
+  payload[@"framework_root"] = frameworkRoot ?: @"";
+  payload[@"make_target"] = makeTarget ?: @"";
+  payload[@"shell_command"] = shellCommand ?: @"";
+  payload[@"exit_code"] = @(exitCode);
+  payload[@"captured_output"] = capturedOutput ?: @"";
+  if (exitCode != 0) {
+    payload[@"error"] = @{
+      @"code" : @"make_failed",
+      @"message" : [NSString stringWithFormat:@"`make %@` failed", makeTarget ?: @""],
+      @"fixit" : @{
+        @"action" : @"Inspect captured_output and repair the first failing target before rerunning.",
+        @"example" : [NSString stringWithFormat:@"arlen %@ --json", commandName ?: @""],
+      }
+    };
+  }
+  PrintJSONPayload(stdout, payload);
+  return exitCode;
 }
 
-static int CommandCheck(void) {
-  NSString *frameworkRoot = ResolveFrameworkRootForCommand(@"check");
-  if ([frameworkRoot length] == 0) {
-    return 1;
-  }
-  return RunShellCommand([NSString stringWithFormat:@"cd %@ && make check", ShellQuote(frameworkRoot)]);
+static int CommandBuild(NSArray *args) {
+  return RunMakeWorkflowCommand(@"build", @"all", args ?: @[]);
+}
+
+static int CommandCheck(NSArray *args) {
+  return RunMakeWorkflowCommand(@"check", @"check", args ?: @[]);
 }
 
 static void AddDoctorCheck(NSMutableArray *checks,
@@ -3085,10 +3522,10 @@ int main(int argc, const char *argv[]) {
       return CommandPerf();
     }
     if ([command isEqualToString:@"build"]) {
-      return CommandBuild();
+      return CommandBuild(args);
     }
     if ([command isEqualToString:@"check"]) {
-      return CommandCheck();
+      return CommandCheck(args);
     }
     if ([command isEqualToString:@"config"]) {
       return CommandConfig(args);

@@ -71,6 +71,24 @@ tools/deploy/build_release.sh \
   --releases-dir /path/to/app/releases
 ```
 
+Optional coding-agent planning mode:
+
+```bash
+tools/deploy/build_release.sh \
+  --app-root /path/to/app \
+  --framework-root /path/to/Arlen \
+  --releases-dir /path/to/app/releases \
+  --release-id rel-001 \
+  --dry-run \
+  --json
+```
+
+`--dry-run --json` emits a deterministic machine payload (`phase7g-agent-dx-contracts-v1`) with:
+
+- `workflow = deploy.build_release`
+- `status = planned`
+- resolved app/framework/release paths and target release id
+
 Result layout:
 
 ```text

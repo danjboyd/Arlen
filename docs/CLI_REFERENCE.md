@@ -12,13 +12,14 @@ arlen <command> [options]
 
 Commands:
 
-### `arlen new <AppName> [--full|--lite] [--force]`
+### `arlen new <AppName> [--full|--lite] [--force] [--json]`
 
 Create a new app scaffold.
 
 - `--full`: full app scaffold (default)
 - `--lite`: single-file lite scaffold
 - `--force`: overwrite existing files where allowed
+- `--json`: emit machine-readable scaffold payload (`phase7g-agent-dx-contracts-v1`)
 - `--help` / `-h`: show command usage
 
 ### `arlen doctor [--env <name>] [--json]`
@@ -30,7 +31,7 @@ Run bootstrap environment diagnostics without requiring a framework build.
 - `--env <name>`: include the target environment name in output (default `development`)
 - `--json`: emit structured JSON diagnostics
 
-### `arlen generate <controller|endpoint|model|migration|test|plugin|frontend> <Name> [options]`
+### `arlen generate <controller|endpoint|model|migration|test|plugin|frontend> <Name> [options] [--json]`
 
 Generate app artifacts.
 
@@ -49,6 +50,7 @@ Plugin generator options:
 Frontend generator options:
 
 - `--preset <vanilla-spa|progressive-mpa>`: choose frontend starter scaffold (default `vanilla-spa`)
+- `--json`: emit machine-readable scaffold/fix-it payload (`phase7g-agent-dx-contracts-v1`)
 
 Generator behavior:
 
@@ -148,17 +150,22 @@ Profile selection is environment-driven:
 
 - `ARLEN_PERF_PROFILE=default|middleware_heavy|template_heavy|api_reference|migration_sample`
 
-### `arlen check`
+### `arlen check [--dry-run] [--json]`
 
 Run full quality gate (`make check`):
 
 - unit tests
 - integration tests
 - perf gate
+- `--dry-run`: emit planned `make check` workflow without executing it
+- `--json`: emit machine-readable workflow payloads/failure diagnostics (`phase7g-agent-dx-contracts-v1`)
 
-### `arlen build`
+### `arlen build [--dry-run] [--json]`
 
 Build framework targets (`make all`).
+
+- `--dry-run`: emit planned `make all` workflow without executing it
+- `--json`: emit machine-readable workflow payloads/failure diagnostics (`phase7g-agent-dx-contracts-v1`)
 
 ## `build/eocc`
 
@@ -308,6 +315,7 @@ Signals:
 - `make test-data-layer`: build and run standalone `ArlenData` example validation
 - `make deploy-smoke`: validate deployment runbook with automated release smoke
 - `tools/deploy/validate_operability.sh`: validate text/JSON health/readiness/metrics operability contracts against a running server
+- `tools/deploy/build_release.sh --dry-run --json`: emit deploy release planning payload for coding-agent automation
 - `arlen generate frontend <Name> --preset <vanilla-spa|progressive-mpa>`: scaffold frontend starter templates with built-in API wiring examples
 - `make docs-html`: generate browser-friendly docs under `build/docs`
 

@@ -513,3 +513,31 @@ make ci-sanitizers
 ```bash
 make deploy-smoke
 ```
+
+## 19. Coding-Agent JSON Workflow Contracts
+
+Scaffold and generator workflows can emit machine-readable payloads:
+
+```bash
+/path/to/Arlen/bin/arlen new AgentApp --full --json
+/path/to/Arlen/bin/arlen generate endpoint Health --route /healthz --json
+```
+
+Build/check planning workflows:
+
+```bash
+/path/to/Arlen/bin/arlen build --dry-run --json
+/path/to/Arlen/bin/arlen check --dry-run --json
+```
+
+Deploy release planning workflow:
+
+```bash
+tools/deploy/build_release.sh \
+  --app-root /path/to/app \
+  --framework-root /path/to/Arlen \
+  --releases-dir /path/to/app/releases \
+  --release-id rel-001 \
+  --dry-run \
+  --json
+```

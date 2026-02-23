@@ -77,6 +77,7 @@ Related docs:
 | Built-in caching framework | Rails | In Scope | Phase 3E (complete) | Delivered as `ALNCacheAdapter` with TTL semantics and adapter conformance tests. |
 | I18n framework | Rails | In Scope | Phase 3E (complete) | Delivered as `ALNLocalizationAdapter` with locale fallback and interpolation baseline. |
 | Toolchain doctor and known-good compatibility matrix | Django/FastAPI ecosystem operational UX | In Scope | Phase 3F (complete) | Completed with bootstrap-first `arlen doctor` and `docs/TOOLCHAIN_MATRIX.md`. |
+| Coding-agent-first machine CLI contracts (JSON + fix-it diagnostics) | Codex/Claude-style agent workflows | In Scope | Phase 7G (initial slice complete) | Deterministic scaffold/build/check/deploy planning payloads for iterative agent execution loops. |
 | API convenience helpers (ETag/304, typed query/header parsing, envelope middleware) | FastAPI/Express ecosystems | In Scope | Phase 3F (complete) | Completed as opt-in helper layer with unit/integration acceptance coverage. |
 | Static mount allowlist/index ergonomics | Express/FastAPI static serving patterns | In Scope | Phase 3F (complete) | Completed with explicit static mount contract and tested allowlist + canonical redirect behavior. |
 | SQL::Abstract-family capability parity (Objective-C API) | SQL::Abstract ecosystem | In Scope | Phase 3G (complete) | Delivered via `ALNSQLBuilder` v2 (nested predicates, joins/aliases, CTE/subquery composition, grouping/having, returning) with deterministic snapshot coverage. |

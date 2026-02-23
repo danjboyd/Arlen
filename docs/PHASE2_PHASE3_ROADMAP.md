@@ -80,7 +80,12 @@ Phase 7 execution/planning is defined in `docs/PHASE7_ROADMAP.md`, including:
   - `arlen generate frontend` deterministic starter generation (`vanilla-spa`, `progressive-mpa`)
   - static asset/API wiring templates under `public/frontend/<slug>/`
   - deploy packaging and reproducibility integration checks
-- remaining 7A/7B/7C/7D/7E/7F follow-on and 7G-7H planning:
+- Phase 7G initial coding-agent DX slice completed (`docs/PHASE7G_CODING_AGENT_DX_CONTRACTS.md`):
+  - machine-readable JSON contracts for `arlen new`/`arlen generate` workflows
+  - deterministic `arlen build`/`arlen check` dry-run planning payloads (`--dry-run --json`)
+  - deploy release build planning payloads via `tools/deploy/build_release.sh --dry-run --json`
+  - fix-it diagnostics and integration regression harness for coding-agent loops
+- remaining 7A/7B/7C/7D/7E/7F/7G follow-on and 7H planning:
   - additional runtime hardening for `boomhauer`/`propane`
   - security defaults and policy contracts
   - deeper observability/operability maturity and coding-agent-first DX contracts

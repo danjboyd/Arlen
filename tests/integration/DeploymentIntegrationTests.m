@@ -64,6 +64,25 @@
   return [stdoutText stringByAppendingString:stderrText];
 }
 
+- (NSDictionary *)parseJSONDictionaryFromOutput:(NSString *)output context:(NSString *)context {
+  NSString *trimmed =
+      [output stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+  XCTAssertTrue([trimmed length] > 0, @"%@ output was empty", context);
+  if ([trimmed length] == 0) {
+    return @{};
+  }
+
+  NSData *data = [trimmed dataUsingEncoding:NSUTF8StringEncoding];
+  NSError *error = nil;
+  id parsed = [NSJSONSerialization JSONObjectWithData:data options:0 error:&error];
+  XCTAssertNil(error, @"%@ produced invalid JSON: %@\n%@", context, error.localizedDescription, output);
+  XCTAssertTrue([parsed isKindOfClass:[NSDictionary class]], @"%@ expected JSON object output\n%@", context, output);
+  if (![parsed isKindOfClass:[NSDictionary class]]) {
+    return @{};
+  }
+  return parsed;
+}
+
 - (void)testReleaseBuildActivateAndRollbackScripts {
   NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
   NSString *appRoot = [self createTempDirectoryWithPrefix:@"arlen-release-app"];
@@ -378,6 +397,119 @@
         [releasesDir stringByAppendingPathComponent:@"frontend-1/app/public/frontend/portal/index.html"];
     XCTAssertTrue([[NSFileManager defaultManager] fileExistsAtPath:releaseVanilla]);
     XCTAssertTrue([[NSFileManager defaultManager] fileExistsAtPath:releaseProgressive]);
+  } @finally {
+    [[NSFileManager defaultManager] removeItemAtPath:workRoot error:nil];
+  }
+}
+
+- (void)testAgentJSONWorkflowContractsCoverScaffoldBuildCheckAndDeploy {
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *workRoot = [self createTempDirectoryWithPrefix:@"arlen-agent-dx"];
+  XCTAssertNotNil(workRoot);
+  if (workRoot == nil) {
+    return;
+  }
+
+  @try {
+    int code = 0;
+    NSString *buildOutput = [self runShellCapture:[NSString stringWithFormat:@"cd %@ && make arlen", repoRoot]
+                                         exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", buildOutput);
+
+    NSString *newOutput =
+        [self runShellCapture:[NSString stringWithFormat:@"cd %@ && ARLEN_FRAMEWORK_ROOT=%@ %@/build/arlen "
+                                                      "new AgentDX --full --json",
+                                                      workRoot, repoRoot, repoRoot]
+                     exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", newOutput);
+    NSDictionary *newPayload = [self parseJSONDictionaryFromOutput:newOutput context:@"arlen new --json"];
+    XCTAssertEqualObjects(@"phase7g-agent-dx-contracts-v1", newPayload[@"version"]);
+    XCTAssertEqualObjects(@"new", newPayload[@"command"]);
+    XCTAssertEqualObjects(@"scaffold", newPayload[@"workflow"]);
+    XCTAssertEqualObjects(@"ok", newPayload[@"status"]);
+    NSArray *createdFiles = [newPayload[@"created_files"] isKindOfClass:[NSArray class]]
+                                ? newPayload[@"created_files"]
+                                : @[];
+    XCTAssertTrue([createdFiles containsObject:@"config/app.plist"]);
+
+    NSString *appRoot = [workRoot stringByAppendingPathComponent:@"AgentDX"];
+    NSString *generateOutput =
+        [self runShellCapture:[NSString stringWithFormat:@"cd %@ && ARLEN_FRAMEWORK_ROOT=%@ %@/build/arlen "
+                                                      "generate endpoint AgentStatus --route /agent/status "
+                                                      "--method GET --action status --api --json",
+                                                      appRoot, repoRoot, repoRoot]
+                     exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", generateOutput);
+    NSDictionary *generatePayload =
+        [self parseJSONDictionaryFromOutput:generateOutput context:@"arlen generate --json"];
+    XCTAssertEqualObjects(@"generate", generatePayload[@"command"]);
+    XCTAssertEqualObjects(@"ok", generatePayload[@"status"]);
+    NSArray *generatedFiles = [generatePayload[@"generated_files"] isKindOfClass:[NSArray class]]
+                                  ? generatePayload[@"generated_files"]
+                                  : @[];
+    XCTAssertTrue([generatedFiles containsObject:@"src/Controllers/AgentStatusController.h"]);
+    XCTAssertTrue([generatedFiles containsObject:@"src/Controllers/AgentStatusController.m"]);
+    NSArray *modifiedFiles = [generatePayload[@"modified_files"] isKindOfClass:[NSArray class]]
+                                 ? generatePayload[@"modified_files"]
+                                 : @[];
+    XCTAssertTrue([modifiedFiles containsObject:@"src/main.m"]);
+
+    NSString *invalidGenerateOutput =
+        [self runShellCapture:[NSString stringWithFormat:@"cd %@ && ARLEN_FRAMEWORK_ROOT=%@ %@/build/arlen "
+                                                      "generate endpoint MissingRoute --json",
+                                                      appRoot, repoRoot, repoRoot]
+                     exitCode:&code];
+    XCTAssertEqual(2, code, @"%@", invalidGenerateOutput);
+    NSDictionary *invalidPayload =
+        [self parseJSONDictionaryFromOutput:invalidGenerateOutput
+                                    context:@"arlen generate missing route --json"];
+    XCTAssertEqualObjects(@"error", invalidPayload[@"status"]);
+    NSDictionary *error = [invalidPayload[@"error"] isKindOfClass:[NSDictionary class]]
+                              ? invalidPayload[@"error"]
+                              : @{};
+    XCTAssertEqualObjects(@"missing_route", error[@"code"]);
+    NSDictionary *fixit = [error[@"fixit"] isKindOfClass:[NSDictionary class]] ? error[@"fixit"] : @{};
+    NSString *fixitExample = [fixit[@"example"] isKindOfClass:[NSString class]] ? fixit[@"example"] : @"";
+    XCTAssertTrue([fixitExample containsString:@"--route"]);
+
+    NSString *buildPlanOutput =
+        [self runShellCapture:[NSString stringWithFormat:@"cd %@ && ARLEN_FRAMEWORK_ROOT=%@ %@/build/arlen "
+                                                      "build --dry-run --json",
+                                                      appRoot, repoRoot, repoRoot]
+                     exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", buildPlanOutput);
+    NSDictionary *buildPlan = [self parseJSONDictionaryFromOutput:buildPlanOutput context:@"arlen build --json"];
+    XCTAssertEqualObjects(@"build", buildPlan[@"command"]);
+    XCTAssertEqualObjects(@"planned", buildPlan[@"status"]);
+    XCTAssertEqualObjects(@"all", buildPlan[@"make_target"]);
+
+    NSString *checkPlanOutput =
+        [self runShellCapture:[NSString stringWithFormat:@"cd %@ && ARLEN_FRAMEWORK_ROOT=%@ %@/build/arlen "
+                                                      "check --dry-run --json",
+                                                      appRoot, repoRoot, repoRoot]
+                     exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", checkPlanOutput);
+    NSDictionary *checkPlan = [self parseJSONDictionaryFromOutput:checkPlanOutput context:@"arlen check --json"];
+    XCTAssertEqualObjects(@"check", checkPlan[@"command"]);
+    XCTAssertEqualObjects(@"planned", checkPlan[@"status"]);
+    XCTAssertEqualObjects(@"check", checkPlan[@"make_target"]);
+
+    NSString *deployPlanOutput =
+        [self runShellCapture:[NSString stringWithFormat:
+                                            @"%s/tools/deploy/build_release.sh --app-root %s "
+                                             "--framework-root %s --releases-dir %s --release-id agent-dx-1 "
+                                             "--dry-run --json",
+                                            [repoRoot UTF8String], [appRoot UTF8String],
+                                            [repoRoot UTF8String],
+                                            [[workRoot stringByAppendingPathComponent:@"releases"] UTF8String]]
+                     exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", deployPlanOutput);
+    NSDictionary *deployPlan =
+        [self parseJSONDictionaryFromOutput:deployPlanOutput context:@"build_release.sh --json"];
+    XCTAssertEqualObjects(@"phase7g-agent-dx-contracts-v1", deployPlan[@"version"]);
+    XCTAssertEqualObjects(@"deploy.build_release", deployPlan[@"workflow"]);
+    XCTAssertEqualObjects(@"planned", deployPlan[@"status"]);
+    XCTAssertEqualObjects(@"agent-dx-1", deployPlan[@"release_id"]);
   } @finally {
     [[NSFileManager defaultManager] removeItemAtPath:workRoot error:nil];
   }

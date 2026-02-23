@@ -1,6 +1,6 @@
 # Arlen Phase 7 Roadmap
 
-Status: Active (Phase 7A, 7B, 7C, 7D, 7E, and 7F initial slices implemented; follow-on in progress)  
+Status: Active (Phase 7A, 7B, 7C, 7D, 7E, 7F, and 7G initial slices implemented; follow-on in progress)  
 Last updated: 2026-02-23
 
 Related docs:
@@ -12,6 +12,7 @@ Related docs:
 - `docs/PHASE7D_SERVICE_DURABILITY.md`
 - `docs/PHASE7E_TEMPLATE_PIPELINE_MATURITY.md`
 - `docs/PHASE7F_FRONTEND_STARTERS.md`
+- `docs/PHASE7G_CODING_AGENT_DX_CONTRACTS.md`
 - `docs/STATUS.md`
 - `docs/FEATURE_PARITY_MATRIX.md`
 - `docs/PROPANE.md`
@@ -277,7 +278,7 @@ Implementation notes (initial slice, 2026-02-23):
 
 ## 3.7 Phase 7G: Coding-Agent-First DX Contracts
 
-Status: Planned
+Status: Initial slice implemented (2026-02-23); remaining 7G deliverables in progress
 
 Deliverables:
 
@@ -291,6 +292,24 @@ Acceptance (required):
 - Key workflows are reliable for Codex/Claude-style iterative execution.
 - CLI outputs are stable and parseable for automation.
 - Agent-targeted workflows are documented and regression tested.
+
+Implementation notes (initial slice, 2026-02-23):
+
+- Added machine-readable JSON contracts (`phase7g-agent-dx-contracts-v1`) for:
+  - `arlen new ... --json`
+  - `arlen generate ... --json`
+  - `arlen build --dry-run --json`
+  - `arlen check --dry-run --json`
+- Added coding-agent fix-it diagnostics in JSON error payloads:
+  - deterministic `error.code` + `error.fixit.action` + `error.fixit.example`
+- Added deploy workflow planning contract:
+  - `tools/deploy/build_release.sh --dry-run --json`
+- Added executable contract fixture and docs:
+  - `tests/fixtures/phase7g/coding_agent_dx_contracts.json`
+  - `docs/PHASE7G_CODING_AGENT_DX_CONTRACTS.md`
+- Added regression coverage:
+  - `tests/integration/DeploymentIntegrationTests.m` (agent workflow scenario)
+  - `tests/unit/Phase7GTests.m` (fixture schema/reference integrity)
 
 ## 3.8 Phase 7H: Distributed Runtime Depth
 
@@ -315,7 +334,7 @@ Recommended sequencing for adoption impact and risk reduction:
 
 1. Wave 1: Phase 7A + Phase 7B (initial slices complete)
 2. Wave 2: Phase 7C + Phase 7D + Phase 7E (initial slices complete)
-3. Wave 3: Phase 7G + Phase 7H
+3. Wave 3: Phase 7H
 
 ## 5. Testing and Quality Strategy
 
