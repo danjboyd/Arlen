@@ -175,6 +175,11 @@ Behavior:
 - if run inside app root (`config/app.plist` plus `src/main.m` or `app_lite.m`), compiles and runs that app
 - defaults to watch mode
 - in app-root watch mode, build failures are captured and rendered as development diagnostics
+- websocket session upgrades are bounded by `runtimeLimits.maxConcurrentWebSocketSessions` (default `256`)
+- websocket backpressure limit violations return deterministic overload diagnostics:
+  - status `503 Service Unavailable`
+  - header `Retry-After: 1`
+  - header `X-Arlen-Backpressure-Reason: websocket_session_limit`
 - built-in observability/API docs endpoints are available when enabled:
   - `/metrics`
   - `/clusterz`
@@ -206,6 +211,7 @@ Environment:
 
 - `ARLEN_APP_ROOT`
 - `ARLEN_FRAMEWORK_ROOT`
+- `ARLEN_MAX_WEBSOCKET_SESSIONS` (runtime websocket session limit; legacy `MOJOOBJC_MAX_WEBSOCKET_SESSIONS` also accepted)
 
 ## `propane` Script (`bin/propane`)
 

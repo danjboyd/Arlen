@@ -28,6 +28,10 @@ typedef struct {
   BOOL enableReusePort;
 } ALNServerSocketTuning;
 
+typedef struct {
+  NSUInteger maxConcurrentWebSocketSessions;
+} ALNRuntimeLimits;
+
 static volatile sig_atomic_t gShouldRun = 1;
 
 static void ALNHandleSignal(int sig) {
@@ -81,6 +85,14 @@ static ALNServerSocketTuning ALNTuningFromConfig(NSDictionary *config) {
   out.listenBacklog = ALNConfigUInt(config, @"listenBacklog", 128);
   out.connectionTimeoutSeconds = ALNConfigUInt(config, @"connectionTimeoutSeconds", 30);
   out.enableReusePort = ALNConfigBool(config, @"enableReusePort", NO);
+  return out;
+}
+
+static ALNRuntimeLimits ALNRuntimeLimitsFromConfig(NSDictionary *config) {
+  NSDictionary *runtimeLimits = config[@"runtimeLimits"] ?: @{};
+  ALNRuntimeLimits out;
+  out.maxConcurrentWebSocketSessions =
+      ALNConfigUInt(runtimeLimits, @"maxConcurrentWebSocketSessions", 256);
   return out;
 }
 
@@ -915,6 +927,8 @@ static ALNResponse *ALNErrorResponse(NSInteger statusCode, NSString *body) {
 @property(nonatomic, strong, readwrite) ALNApplication *application;
 @property(nonatomic, copy, readwrite) NSString *publicRoot;
 @property(nonatomic, strong) NSLock *dispatchLock;
+@property(nonatomic, strong) NSLock *runtimeCountersLock;
+@property(nonatomic, assign) NSUInteger activeWebSocketSessions;
 
 @end
 
@@ -928,6 +942,8 @@ static ALNResponse *ALNErrorResponse(NSInteger statusCode, NSString *body) {
     _publicRoot = [publicRoot copy];
     _serverName = @"server";
     _dispatchLock = [[NSLock alloc] init];
+    _runtimeCountersLock = [[NSLock alloc] init];
+    _activeWebSocketSessions = 0;
   }
   return self;
 }
@@ -991,6 +1007,26 @@ static ALNResponse *ALNErrorResponse(NSInteger statusCode, NSString *body) {
 
 - (void)requestStop {
   gShouldRun = 0;
+}
+
+- (BOOL)reserveWebSocketSessionWithLimit:(NSUInteger)limit {
+  [self.runtimeCountersLock lock];
+  BOOL allowed = YES;
+  if (limit > 0 && self.activeWebSocketSessions >= limit) {
+    allowed = NO;
+  } else {
+    self.activeWebSocketSessions += 1;
+  }
+  [self.runtimeCountersLock unlock];
+  return allowed;
+}
+
+- (void)releaseWebSocketSessionReservation {
+  [self.runtimeCountersLock lock];
+  if (self.activeWebSocketSessions > 0) {
+    self.activeWebSocketSessions -= 1;
+  }
+  [self.runtimeCountersLock unlock];
 }
 
 - (NSString *)webSocketModeFromResponse:(ALNResponse *)response {
@@ -1105,8 +1141,12 @@ static ALNResponse *ALNErrorResponse(NSInteger statusCode, NSString *body) {
 - (void)handleClientOnBackgroundThread:(NSNumber *)clientFDObject {
   @autoreleasepool {
     int clientFd = [clientFDObject intValue];
-    [self handleClient:clientFd];
-    close(clientFd);
+    @try {
+      [self handleClient:clientFd];
+    } @finally {
+      close(clientFd);
+      [self releaseWebSocketSessionReservation];
+    }
   }
 }
 
@@ -1230,6 +1270,8 @@ static ALNResponse *ALNErrorResponse(NSInteger statusCode, NSString *body) {
   int exitCode = 0;
   @try {
     ALNServerSocketTuning tuning = ALNTuningFromConfig(config);
+    ALNRuntimeLimits runtimeLimits = ALNRuntimeLimitsFromConfig(config);
+    BOOL performanceLogging = ALNConfigBool(config, @"performanceLogging", YES);
 
     if (!ALNInstallSignalHandler(SIGINT) || !ALNInstallSignalHandler(SIGTERM)) {
       perror("sigaction");
@@ -1324,6 +1366,18 @@ static ALNResponse *ALNErrorResponse(NSInteger statusCode, NSString *body) {
 
       BOOL runInBackground = (!once && ALNSocketLikelyWebSocketUpgrade(clientFd));
       if (runInBackground) {
+        BOOL reserved =
+            [self reserveWebSocketSessionWithLimit:runtimeLimits.maxConcurrentWebSocketSessions];
+        if (!reserved) {
+          ALNResponse *busyResponse = ALNErrorResponse(503, @"server busy\n");
+          [busyResponse setHeader:@"Retry-After" value:@"1"];
+          [busyResponse setHeader:@"X-Arlen-Backpressure-Reason"
+                            value:@"websocket_session_limit"];
+          ALNEnsurePerformanceHeaders(busyResponse, performanceLogging, 0.0, 0.0);
+          (void)ALNSendResponse(clientFd, busyResponse, performanceLogging);
+          close(clientFd);
+          continue;
+        }
         [NSThread detachNewThreadSelector:@selector(handleClientOnBackgroundThread:)
                                  toTarget:self
                                withObject:@(clientFd)];

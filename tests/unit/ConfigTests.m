@@ -161,6 +161,9 @@
   XCTAssertEqual((NSInteger)2048, [limits[@"maxRequestLineBytes"] integerValue]);
   XCTAssertEqual((NSInteger)16384, [limits[@"maxHeaderBytes"] integerValue]);
   XCTAssertEqual((NSInteger)65536, [limits[@"maxBodyBytes"] integerValue]);
+
+  NSDictionary *runtimeLimits = config[@"runtimeLimits"];
+  XCTAssertEqual((NSInteger)256, [runtimeLimits[@"maxConcurrentWebSocketSessions"] integerValue]);
 }
 
 - (void)testEnvironmentOverridesRequestLimitsAndProxyFlags {
@@ -170,6 +173,7 @@
   setenv("ARLEN_MAX_REQUEST_LINE_BYTES", "111", 1);
   setenv("ARLEN_MAX_HEADER_BYTES", "222", 1);
   setenv("ARLEN_MAX_BODY_BYTES", "333", 1);
+  setenv("ARLEN_MAX_WEBSOCKET_SESSIONS", "9", 1);
   setenv("ARLEN_TRUSTED_PROXY", "true", 1);
   setenv("ARLEN_SERVE_STATIC", "0", 1);
   setenv("ARLEN_LISTEN_BACKLOG", "2222", 1);
@@ -222,6 +226,7 @@
   unsetenv("ARLEN_MAX_REQUEST_LINE_BYTES");
   unsetenv("ARLEN_MAX_HEADER_BYTES");
   unsetenv("ARLEN_MAX_BODY_BYTES");
+  unsetenv("ARLEN_MAX_WEBSOCKET_SESSIONS");
   unsetenv("ARLEN_TRUSTED_PROXY");
   unsetenv("ARLEN_SERVE_STATIC");
   unsetenv("ARLEN_LISTEN_BACKLOG");
@@ -271,6 +276,8 @@
   XCTAssertEqual((NSInteger)111, [limits[@"maxRequestLineBytes"] integerValue]);
   XCTAssertEqual((NSInteger)222, [limits[@"maxHeaderBytes"] integerValue]);
   XCTAssertEqual((NSInteger)333, [limits[@"maxBodyBytes"] integerValue]);
+  NSDictionary *runtimeLimits = config[@"runtimeLimits"];
+  XCTAssertEqual((NSInteger)9, [runtimeLimits[@"maxConcurrentWebSocketSessions"] integerValue]);
   XCTAssertEqualObjects(@(YES), config[@"trustedProxy"]);
   XCTAssertEqualObjects(@(NO), config[@"serveStatic"]);
   XCTAssertEqual((NSInteger)2222, [config[@"listenBacklog"] integerValue]);
@@ -356,6 +363,7 @@
   setenv("MOJOOBJC_MAX_REQUEST_LINE_BYTES", "9001", 1);
   setenv("MOJOOBJC_MAX_HEADER_BYTES", "9002", 1);
   setenv("MOJOOBJC_MAX_BODY_BYTES", "9003", 1);
+  setenv("MOJOOBJC_MAX_WEBSOCKET_SESSIONS", "13", 1);
   setenv("MOJOOBJC_LISTEN_BACKLOG", "9004", 1);
   setenv("MOJOOBJC_CONNECTION_TIMEOUT_SECONDS", "31", 1);
   setenv("MOJOOBJC_ENABLE_REUSEPORT", "1", 1);
@@ -384,6 +392,7 @@
   unsetenv("MOJOOBJC_MAX_REQUEST_LINE_BYTES");
   unsetenv("MOJOOBJC_MAX_HEADER_BYTES");
   unsetenv("MOJOOBJC_MAX_BODY_BYTES");
+  unsetenv("MOJOOBJC_MAX_WEBSOCKET_SESSIONS");
   unsetenv("MOJOOBJC_LISTEN_BACKLOG");
   unsetenv("MOJOOBJC_CONNECTION_TIMEOUT_SECONDS");
   unsetenv("MOJOOBJC_ENABLE_REUSEPORT");
@@ -409,6 +418,8 @@
   XCTAssertEqual((NSInteger)9001, [limits[@"maxRequestLineBytes"] integerValue]);
   XCTAssertEqual((NSInteger)9002, [limits[@"maxHeaderBytes"] integerValue]);
   XCTAssertEqual((NSInteger)9003, [limits[@"maxBodyBytes"] integerValue]);
+  NSDictionary *runtimeLimits = config[@"runtimeLimits"];
+  XCTAssertEqual((NSInteger)13, [runtimeLimits[@"maxConcurrentWebSocketSessions"] integerValue]);
   XCTAssertEqual((NSInteger)9004, [config[@"listenBacklog"] integerValue]);
   XCTAssertEqual((NSInteger)31, [config[@"connectionTimeoutSeconds"] integerValue]);
   XCTAssertEqualObjects(@(YES), config[@"enableReusePort"]);

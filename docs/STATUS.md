@@ -27,9 +27,16 @@ Last updated: 2026-02-23
 - Phase 5C: complete (2026-02-23)
 - Phase 5D: complete (2026-02-23)
 - Phase 5E: complete (2026-02-23)
+- Phase 7A: initial slice implemented (2026-02-23)
+- Phase 7B-7H: planned (roadmap defined 2026-02-23)
 
 ## Completed Today (2026-02-23)
 
+- Implemented Phase 7A initial runtime hardening slice:
+  - websocket session backpressure boundary (`runtimeLimits.maxConcurrentWebSocketSessions`)
+  - deterministic overload diagnostics (`503` + `X-Arlen-Backpressure-Reason`)
+  - runtime limit env contract (`ARLEN_MAX_WEBSOCKET_SESSIONS`)
+  - Phase 7A contract fixture + docs (`tests/fixtures/phase7a/runtime_hardening_contracts.json`, `docs/PHASE7A_RUNTIME_HARDENING.md`)
 - Completed Phase 5A-5E implementation tranche.
 - Added typed schema contracts + typed SQL generation workflow (5D) and validated compile-time/runtime contract behavior.
 - Added Phase 5E hardening coverage:
@@ -148,7 +155,7 @@ Last updated: 2026-02-23
   - finalized phase-4 transitional API deprecation lifecycle contracts in release docs
   - added dedicated Phase 4 CI quality gate workflow/script and wired `make ci-quality` to the new gate
 
-## Verification State (2026-02-20)
+## Verification State (2026-02-23)
 
 - `make test-unit`: passing
 - `make test-integration`: passing
@@ -202,13 +209,17 @@ Last updated: 2026-02-23
   - deterministic property gates for placeholder shifting + parameter ordering (`testPropertyPlaceholderShiftingAcrossExpressionComposition`, `testPropertyDeterministicParameterOrderingForInsertAndUpdate`)
   - tuple/nested long-run shape regression coverage (`testPropertyTuplePredicatesPreserveParameterOrder`, `testLongRunRegressionSuiteForNestedExpressionShapes`)
   - representative migration path validation (`testMigrationGuideRepresentativeFlowCompilesAndPreservesContracts`)
+- New Phase 7A checks executed:
+  - websocket backpressure overload integration regression (`testWebSocketSessionLimitReturns503UnderBackpressure`)
+  - runtime websocket session limit default/env contract (`tests/unit/ConfigTests.m`)
+  - phase fixture schema/reference validation (`tests/unit/Phase7ATests.m`)
 - PostgreSQL-backed tests remain gated by `ARLEN_PG_TEST_DSN`.
 
 ## Next Session Focus
 
-1. Maintain Phase 4 conformance coverage and expand matrix scenarios as new builder capabilities ship.
-2. Add optional dialect-matrix execution validation beyond PostgreSQL where adapters become available.
-3. Begin Phase 5A reliability contract mapping and external regression intake execution (`docs/PHASE5_ROADMAP.md`).
+1. Continue remaining Phase 7A runtime hardening contracts (timeouts, graceful reload/shutdown, and additional failure-mode regressions) (`docs/PHASE7_ROADMAP.md`).
+2. Begin Phase 7B security-default profile and misconfiguration diagnostic contracts (`docs/PHASE7_ROADMAP.md`).
+3. Define Phase 7C + 7G observability and coding-agent-first DX contract fixtures (`docs/PHASE7_ROADMAP.md`).
 
 ## Planned Phase Mapping (Post-4C)
 
@@ -225,11 +236,15 @@ Last updated: 2026-02-23
 - Phase 3H (complete):
   - multi-node clustering primitives and distributed runtime hardening
   - cluster-oriented integration validation + operational contracts
+- Phase 7 (active):
+  - Phase 7A initial runtime hardening slice implemented (websocket backpressure contract + overload diagnostics)
+  - remaining runtime hardening for `boomhauer`/`propane` in progress
+  - security policy/default hardening
+  - observability/operability + coding-agent-first DX contracts
+  - ecosystem durability, template pipeline hardening, frontend starters, distributed-runtime depth
 - Maybe Someday backlog:
   - LiveView-like server-driven UI
   - full ORM as default framework layer
-- Post-4C planned:
-  - official frontend toolchain integration guides/starters
 - Completed in Phase 4:
   - Phase 4A: query IR + safety foundation
   - Phase 4B: SQL surface completion

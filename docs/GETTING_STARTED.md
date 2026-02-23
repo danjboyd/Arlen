@@ -102,6 +102,15 @@ s.close()
 PY
 ```
 
+Runtime websocket backpressure limit override:
+
+```bash
+ARLEN_MAX_WEBSOCKET_SESSIONS=1 ./bin/boomhauer
+```
+
+With this limit, a second concurrent websocket upgrade receives `503 Service Unavailable` with
+`X-Arlen-Backpressure-Reason: websocket_session_limit`.
+
 ## 4. Run Tests and Quality Gates
 
 ```bash
@@ -252,6 +261,7 @@ Framework/app runtime:
 - `ARLEN_MAX_REQUEST_LINE_BYTES`
 - `ARLEN_MAX_HEADER_BYTES`
 - `ARLEN_MAX_BODY_BYTES`
+- `ARLEN_MAX_WEBSOCKET_SESSIONS`
 - `ARLEN_DATABASE_URL`
 - `ARLEN_DB_ADAPTER`
 - `ARLEN_DB_POOL_SIZE`

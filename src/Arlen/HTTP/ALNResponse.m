@@ -34,6 +34,8 @@ static NSString *ALNStatusText(NSInteger statusCode) {
     return @"Payload Too Large";
   case 431:
     return @"Request Header Fields Too Large";
+  case 503:
+    return @"Service Unavailable";
   case 422:
     return @"Unprocessable Content";
   case 500:

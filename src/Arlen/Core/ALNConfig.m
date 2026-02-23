@@ -187,6 +187,8 @@ static NSString *ALNDefaultClusterNodeID(void) {
       ALNEnvValueCompat("ARLEN_MAX_HEADER_BYTES", "MOJOOBJC_MAX_HEADER_BYTES");
   NSString *maxBodyBytes =
       ALNEnvValueCompat("ARLEN_MAX_BODY_BYTES", "MOJOOBJC_MAX_BODY_BYTES");
+  NSString *maxWebSocketSessions =
+      ALNEnvValueCompat("ARLEN_MAX_WEBSOCKET_SESSIONS", "MOJOOBJC_MAX_WEBSOCKET_SESSIONS");
 
   NSString *listenBacklog =
       ALNEnvValueCompat("ARLEN_LISTEN_BACKLOG", "MOJOOBJC_LISTEN_BACKLOG");
@@ -325,6 +327,14 @@ static NSString *ALNDefaultClusterNodeID(void) {
   ALNApplyLimitOverride(limits, maxHeaderBytes, @"maxHeaderBytes");
   ALNApplyLimitOverride(limits, maxBodyBytes, @"maxBodyBytes");
   config[@"requestLimits"] = limits;
+
+  NSMutableDictionary *runtimeLimits =
+      [NSMutableDictionary dictionaryWithDictionary:config[@"runtimeLimits"] ?: @{}];
+  ALNApplyIntegerOverride(runtimeLimits,
+                          maxWebSocketSessions,
+                          @"maxConcurrentWebSocketSessions",
+                          1);
+  config[@"runtimeLimits"] = runtimeLimits;
 
   NSMutableDictionary *propaneAccessories =
       [NSMutableDictionary dictionaryWithDictionary:config[@"propaneAccessories"] ?: @{}];
@@ -545,6 +555,13 @@ static NSString *ALNDefaultClusterNodeID(void) {
     finalLimits[@"maxBodyBytes"] = @(1048576);
   }
   config[@"requestLimits"] = finalLimits;
+
+  NSMutableDictionary *finalRuntimeLimits =
+      [NSMutableDictionary dictionaryWithDictionary:config[@"runtimeLimits"] ?: @{}];
+  if (finalRuntimeLimits[@"maxConcurrentWebSocketSessions"] == nil) {
+    finalRuntimeLimits[@"maxConcurrentWebSocketSessions"] = @(256);
+  }
+  config[@"runtimeLimits"] = finalRuntimeLimits;
 
   if (config[@"trustedProxy"] == nil) {
     config[@"trustedProxy"] = @(NO);
@@ -792,6 +809,10 @@ static NSString *ALNDefaultClusterNodeID(void) {
   finalLimits[@"maxHeaderBytes"] = @([finalLimits[@"maxHeaderBytes"] integerValue]);
   finalLimits[@"maxBodyBytes"] = @([finalLimits[@"maxBodyBytes"] integerValue]);
   config[@"requestLimits"] = finalLimits;
+
+  finalRuntimeLimits[@"maxConcurrentWebSocketSessions"] =
+      @([finalRuntimeLimits[@"maxConcurrentWebSocketSessions"] integerValue]);
+  config[@"runtimeLimits"] = finalRuntimeLimits;
 
   finalAccessories[@"workerCount"] = @([finalAccessories[@"workerCount"] integerValue]);
   finalAccessories[@"gracefulShutdownSeconds"] =

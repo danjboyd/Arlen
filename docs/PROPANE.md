@@ -36,9 +36,14 @@ Runtime socket controls:
 listenBacklog = 128;
 connectionTimeoutSeconds = 30;
 enableReusePort = NO;
+runtimeLimits = {
+  maxConcurrentWebSocketSessions = 256;
+};
 ```
 
 When `workerCount > 1`, `propane` enables `SO_REUSEPORT` automatically for worker binds.
+When websocket session limit is exceeded, workers return deterministic overload diagnostics
+(`503 Service Unavailable` with `X-Arlen-Backpressure-Reason: websocket_session_limit`).
 
 Cluster controls:
 
@@ -90,5 +95,6 @@ Environment fallbacks:
 - `ARLEN_CLUSTER_NAME`
 - `ARLEN_CLUSTER_NODE_ID`
 - `ARLEN_CLUSTER_EXPECTED_NODES`
+- `ARLEN_MAX_WEBSOCKET_SESSIONS`
 
 `propane` exports resolved cluster values to worker processes, so CLI overrides are consistently applied at runtime.

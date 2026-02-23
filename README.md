@@ -29,6 +29,7 @@ Arlen is designed to solve the same class of problems as frameworks like Mojolic
 - Phase 5C: complete (target-aware multi-database migration/schema-codegen tooling and deterministic per-target state).
 - Phase 5D: complete (typed row/insert/update schema contracts, typed decode helpers, and typed SQL codegen workflow).
 - Phase 5E: complete (data-layer soak/fault hardening gates and release confidence artifact pack generation).
+- Phase 7A: initial slice implemented (websocket runtime backpressure boundary + deterministic overload diagnostics).
 
 ## Quick Start
 
@@ -118,6 +119,7 @@ High-value guides:
 - [ArlenData Reuse Guide](docs/ARLEN_DATA.md)
 - [SQL Builder Conformance Matrix](docs/SQL_BUILDER_CONFORMANCE_MATRIX.md)
 - [Phase 5E Hardening + Confidence](docs/PHASE5E_HARDENING_CONFIDENCE.md)
+- [Phase 7A Runtime Hardening](docs/PHASE7A_RUNTIME_HARDENING.md)
 - [SQL Builder Phase 4 Migration Guide](docs/SQL_BUILDER_PHASE4_MIGRATION.md)
 - [Propane Manager](docs/PROPANE.md)
 - [Release Process](docs/RELEASE_PROCESS.md)
@@ -130,6 +132,8 @@ Specifications and roadmaps:
 - [Phase 2 Roadmap](docs/PHASE2_ROADMAP.md)
 - [Phase 3 Roadmap](docs/PHASE3_ROADMAP.md)
 - [Phase 4 Roadmap](docs/PHASE4_ROADMAP.md)
+- [Phase 5 Roadmap](docs/PHASE5_ROADMAP.md)
+- [Phase 7 Roadmap](docs/PHASE7_ROADMAP.md)
 - [EOC v1 Spec](V1_SPEC.md)
 
 ## Naming

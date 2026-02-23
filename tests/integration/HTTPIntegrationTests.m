@@ -259,6 +259,7 @@
   NSString *body = [self simpleRequestPath:@"/"];
   XCTAssertTrue([body containsString:@"Arlen EOC Dev Server"]);
   XCTAssertTrue([body containsString:@"render pipeline ok"]);
+  XCTAssertTrue([body containsString:@"template:multiline-ok"]);
 }
 
 - (void)testHealthEndpoint {
@@ -570,6 +571,74 @@
     NSString *trimmed =
         [output stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
     XCTAssertEqualObjects(@"hello-ws", trimmed);
+  } @finally {
+    if ([server isRunning]) {
+      (void)kill(server.processIdentifier, SIGTERM);
+      [server waitUntilExit];
+    }
+  }
+}
+
+- (void)testWebSocketSessionLimitReturns503UnderBackpressure {
+  int port = [self randomPort];
+  NSTask *server = [[NSTask alloc] init];
+  server.launchPath = @"/bin/bash";
+  server.arguments = @[
+    @"-lc",
+    [NSString stringWithFormat:@"ARLEN_MAX_WEBSOCKET_SESSIONS=1 ./build/boomhauer --port %d", port]
+  ];
+  server.standardOutput = [NSPipe pipe];
+  server.standardError = [NSPipe pipe];
+  [server launch];
+
+  @try {
+    BOOL ready = NO;
+    (void)[self requestPathWithRetries:@"/healthz" port:port attempts:60 success:&ready];
+    XCTAssertTrue(ready);
+
+    NSString *script = [NSString stringWithFormat:
+                                         @"import base64, os, socket, time\n"
+                                         @"PORT=%d\n"
+                                         @"def read_headers(sock):\n"
+                                         @"    data=b''\n"
+                                         @"    while b'\\r\\n\\r\\n' not in data:\n"
+                                         @"        chunk=sock.recv(4096)\n"
+                                         @"        if not chunk:\n"
+                                         @"            break\n"
+                                         @"        data += chunk\n"
+                                         @"    return data.decode('utf-8', 'replace')\n"
+                                         @"def ws_handshake_request(path):\n"
+                                         @"    key=base64.b64encode(os.urandom(16)).decode('ascii')\n"
+                                         @"    return (\n"
+                                         @"        f'GET {path} HTTP/1.1\\r\\n'\n"
+                                         @"        f'Host: 127.0.0.1:{PORT}\\r\\n'\n"
+                                         @"        'Upgrade: websocket\\r\\n'\n"
+                                         @"        'Connection: Upgrade\\r\\n'\n"
+                                         @"        f'Sec-WebSocket-Key: {key}\\r\\n'\n"
+                                         @"        'Sec-WebSocket-Version: 13\\r\\n\\r\\n'\n"
+                                         @"    ).encode('utf-8')\n"
+                                         @"first = socket.create_connection(('127.0.0.1', PORT), timeout=5)\n"
+                                         @"first.sendall(ws_handshake_request('/ws/echo'))\n"
+                                         @"first_headers = read_headers(first)\n"
+                                         @"if '101 Switching Protocols' not in first_headers:\n"
+                                         @"    raise RuntimeError(first_headers)\n"
+                                         @"time.sleep(0.2)\n"
+                                         @"second = socket.create_connection(('127.0.0.1', PORT), timeout=5)\n"
+                                         @"second.sendall(ws_handshake_request('/ws/echo'))\n"
+                                         @"second_headers = read_headers(second)\n"
+                                         @"print(second_headers)\n"
+                                         @"if '503 Service Unavailable' not in second_headers:\n"
+                                         @"    raise RuntimeError(second_headers)\n"
+                                         @"if 'X-Arlen-Backpressure-Reason: websocket_session_limit' not in second_headers:\n"
+                                         @"    raise RuntimeError(second_headers)\n"
+                                         @"first.close()\n"
+                                         @"second.close()\n",
+                                         port];
+    int pyCode = 0;
+    NSString *output = [self runPythonScript:script exitCode:&pyCode];
+    XCTAssertEqual(0, pyCode);
+    XCTAssertTrue([output containsString:@"503 Service Unavailable"]);
+    XCTAssertTrue([output containsString:@"X-Arlen-Backpressure-Reason: websocket_session_limit"]);
   } @finally {
     if ([server isRunning]) {
       (void)kill(server.processIdentifier, SIGTERM);

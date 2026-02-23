@@ -28,6 +28,7 @@ Open `build/docs/index.html` in your browser.
 - [Phase 5C Multi-Database Tooling](PHASE5C_MULTI_DATABASE_TOOLING.md): target-aware migrate/schema-codegen flows and deterministic per-target migration state.
 - [Phase 5D Typed Data Contracts](PHASE5D_TYPED_CONTRACTS.md): typed row/insert/update generation, decode helpers, and typed SQL artifacts.
 - [Phase 5E Hardening + Confidence](PHASE5E_HARDENING_CONFIDENCE.md): soak/fault gates and release confidence artifact pack workflow.
+- [Phase 7A Runtime Hardening](PHASE7A_RUNTIME_HARDENING.md): websocket backpressure safety limit contract and deterministic overload diagnostics.
 - [SQL Builder Phase 4 Migration Guide](SQL_BUILDER_PHASE4_MIGRATION.md): migration from string-heavy builder usage to IR/typed patterns.
 - [Propane Manager](PROPANE.md): production process manager and propane accessories.
 - [Release Process](RELEASE_PROCESS.md): semantic versioning, deprecations, and release checklist.
@@ -47,6 +48,7 @@ Open `build/docs/index.html` in your browser.
 - [Phase 3 Roadmap](PHASE3_ROADMAP.md)
 - [Phase 4 Roadmap](PHASE4_ROADMAP.md)
 - [Phase 5 Roadmap](PHASE5_ROADMAP.md)
+- [Phase 7 Roadmap](PHASE7_ROADMAP.md)
 - [Combined Roadmap Index](PHASE2_PHASE3_ROADMAP.md)
 - [Feature Parity Matrix](FEATURE_PARITY_MATRIX.md)
 - [EOC v1 Roadmap](EOC_V1_ROADMAP.md)
