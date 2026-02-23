@@ -258,8 +258,9 @@ Signals:
 - `bin/dev`: alias for `bin/boomhauer`
 - `make ci-quality`: run unit + integration + multi-profile perf quality gate
 - `make ci-sanitizers`: run ASan/UBSan gate across unit + integration + data-layer checks
-- `tools/ci/run_phase4_quality.sh`: explicit Phase 4 CI gate entrypoint
-- `tools/ci/run_phase4_sanitizers.sh`: explicit sanitizer CI gate entrypoint
+- `make phase5e-confidence`: generate Phase 5E release confidence artifacts in `build/release_confidence/phase5e`
+- `tools/ci/run_phase5e_quality.sh`: explicit Phase 5E CI gate entrypoint
+- `tools/ci/run_phase5e_sanitizers.sh`: explicit Phase 5E sanitizer CI gate entrypoint
   - set `ARLEN_SANITIZER_INCLUDE_INTEGRATION=1` to include full integration suite in sanitizer runs
 - `make test-data-layer`: build and run standalone `ArlenData` example validation
 - `make deploy-smoke`: validate deployment runbook with automated release smoke
@@ -280,6 +281,7 @@ Runtime controls:
 - `builderCompilationCacheLimit`
 - `queryDiagnosticsListener` (event stages: `compile`, `execute`, `result`, `error`)
 - `includeSQLInDiagnosticsEvents` (default off for redaction-safe metadata)
+- `ARLEN_PHASE5E_SOAK_ITERS` (optional loop count override for Phase 5E soak tests, default `120`)
 - `emitDiagnosticsEventsToStderr`
 
 ## PostgreSQL Test Gate

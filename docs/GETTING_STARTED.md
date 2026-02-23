@@ -117,10 +117,18 @@ make test-integration
 make test-data-layer
 make check
 make ci-quality
+make phase5e-confidence
 ```
 
 `make check` runs unit + integration + perf gates.
 `make test-data-layer` validates standalone `ArlenData` consumption outside the full runtime stack.
+`make ci-quality` runs the Phase 5E quality gate (including soak/fault tests and confidence artifact generation).
+
+Soak iteration override:
+
+```bash
+ARLEN_PHASE5E_SOAK_ITERS=240 make ci-quality
+```
 
 Phase 3C perf profiles:
 

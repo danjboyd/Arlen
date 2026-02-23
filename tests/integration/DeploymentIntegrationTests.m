@@ -270,4 +270,68 @@
   }
 }
 
+- (void)testPhase5EConfidenceArtifactGeneratorProducesExpectedPack {
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *outputRoot = [self createTempDirectoryWithPrefix:@"arlen-phase5e-confidence"];
+  XCTAssertNotNil(outputRoot);
+  if (outputRoot == nil) {
+    return;
+  }
+
+  @try {
+    int code = 0;
+    NSString *command = [NSString stringWithFormat:
+        @"cd %@ && python3 ./tools/ci/generate_phase5e_confidence_artifacts.py "
+         "--repo-root %@ --output-dir %@",
+        repoRoot, repoRoot, outputRoot];
+    NSString *output = [self runShellCapture:command exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", output);
+    XCTAssertTrue([output containsString:@"phase5e-confidence: generated artifacts"], @"%@", output);
+
+    NSString *manifestPath = [outputRoot stringByAppendingPathComponent:@"manifest.json"];
+    NSString *adapterPath =
+        [outputRoot stringByAppendingPathComponent:@"adapter_capability_matrix_snapshot.json"];
+    NSString *conformancePath =
+        [outputRoot stringByAppendingPathComponent:@"sql_builder_conformance_summary.json"];
+    NSString *markdownPath =
+        [outputRoot stringByAppendingPathComponent:@"phase5e_release_confidence.md"];
+
+    NSError *error = nil;
+    NSData *manifestData = [NSData dataWithContentsOfFile:manifestPath];
+    XCTAssertNotNil(manifestData);
+    NSDictionary *manifest = [NSJSONSerialization JSONObjectWithData:manifestData options:0 error:&error];
+    XCTAssertNotNil(manifest);
+    XCTAssertNil(error);
+    XCTAssertEqualObjects(@"phase5e-confidence-v1", manifest[@"version"]);
+
+    NSData *adapterData = [NSData dataWithContentsOfFile:adapterPath];
+    XCTAssertNotNil(adapterData);
+    NSDictionary *adapterSnapshot =
+        [NSJSONSerialization JSONObjectWithData:adapterData options:0 error:&error];
+    XCTAssertNotNil(adapterSnapshot);
+    XCTAssertNil(error);
+    XCTAssertEqualObjects(@"phase5e-confidence-v1", adapterSnapshot[@"version"]);
+    XCTAssertTrue([adapterSnapshot[@"adapter_count"] integerValue] >= 2);
+
+    NSData *conformanceData = [NSData dataWithContentsOfFile:conformancePath];
+    XCTAssertNotNil(conformanceData);
+    NSDictionary *conformanceSummary =
+        [NSJSONSerialization JSONObjectWithData:conformanceData options:0 error:&error];
+    XCTAssertNotNil(conformanceSummary);
+    XCTAssertNil(error);
+    XCTAssertEqualObjects(@"phase5e-confidence-v1", conformanceSummary[@"version"]);
+    XCTAssertTrue([conformanceSummary[@"scenario_count"] integerValue] > 0);
+
+    NSString *markdown =
+        [NSString stringWithContentsOfFile:markdownPath encoding:NSUTF8StringEncoding error:&error];
+    XCTAssertNotNil(markdown);
+    XCTAssertNil(error);
+    XCTAssertTrue([markdown containsString:@"# Phase 5E Release Confidence Summary"]);
+    XCTAssertTrue([markdown containsString:@"Adapter Capability Snapshot"]);
+    XCTAssertTrue([markdown containsString:@"SQL Builder Conformance Summary"]);
+  } @finally {
+    [[NSFileManager defaultManager] removeItemAtPath:outputRoot error:nil];
+  }
+}
+
 @end

@@ -1,4 +1,4 @@
-name: phase4-quality
+name: phase5e-quality
 
 on:
   push:
@@ -30,18 +30,19 @@ jobs:
             gnustep-base-runtime \
             libgnustep-base-dev
 
-      - name: Run Phase 4 quality gate
+      - name: Run Phase 5E quality gate
         env:
           GNUSTEP_USER_ROOT: ${{ github.workspace }}/.gnustep
         run: |
-          bash ./tools/ci/run_phase4_quality.sh
+          bash ./tools/ci/run_phase5e_quality.sh
 
-      - name: Upload perf artifacts
+      - name: Upload perf + confidence artifacts
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: perf-artifacts-${{ github.run_id }}
+          name: phase5e-artifacts-${{ github.run_id }}
           path: |
             build/perf
+            build/release_confidence
             tests/performance/baselines
             tests/performance/policies

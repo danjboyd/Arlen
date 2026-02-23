@@ -1,6 +1,6 @@
 # Release Process
 
-This document defines Arlen release lifecycle operations for Phase 3C.
+This document defines Arlen release lifecycle operations through Phase 5E.
 
 ## 1. Versioning Policy
 
@@ -38,10 +38,15 @@ Run from repository root:
 ```bash
 make ci-quality
 make ci-sanitizers
+make phase5e-confidence
 make test-data-layer
 make deploy-smoke
 make docs-html
 ```
+
+`make ci-quality` generates release confidence artifacts under:
+
+- `build/release_confidence/phase5e/`
 
 Then execute artifact flow:
 
@@ -77,5 +82,5 @@ CI uploads `build/perf/` and profile baselines as release-quality artifacts.
 GitHub branch protection is configured in repository settings, not in-tree.
 For `main`, require these status checks before merge:
 
-- `phase4-quality / quality-gate`
-- `phase4-sanitizers / sanitizer-gate`
+- `phase5e-quality / quality-gate`
+- `phase5e-sanitizers / sanitizer-gate`

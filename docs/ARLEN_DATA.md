@@ -212,3 +212,29 @@ This compiles SQL files with metadata comments into typed parameter/result helpe
 Primary reference:
 
 - `docs/PHASE5D_TYPED_CONTRACTS.md`
+
+## 14. Phase 5E Hardening + Confidence Artifacts
+
+Phase 5E adds explicit hardening and release-evidence workflows for the data layer:
+
+- soak/fault regression coverage in `tests/unit/PgTests.m`
+  - connection interruption recovery
+  - transaction abort rollback behavior
+  - builder compile/execute cache churn under sustained loops
+- deterministic confidence artifact generation:
+  - `python3 tools/ci/generate_phase5e_confidence_artifacts.py`
+  - output directory: `build/release_confidence/phase5e`
+
+Key gates:
+
+- `make ci-quality`
+- `make ci-sanitizers`
+- `make phase5e-confidence`
+
+Soak loop count override:
+
+- `ARLEN_PHASE5E_SOAK_ITERS` (default `120`)
+
+Primary reference:
+
+- `docs/PHASE5E_HARDENING_CONFIDENCE.md`

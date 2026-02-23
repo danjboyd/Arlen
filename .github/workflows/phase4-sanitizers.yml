@@ -1,4 +1,4 @@
-name: phase4-sanitizers
+name: phase5e-sanitizers
 
 on:
   push:
@@ -28,8 +28,8 @@ jobs:
             gnustep-base-runtime \
             libgnustep-base-dev
 
-      - name: Run Phase 4 sanitizer gate
+      - name: Run Phase 5E sanitizer gate
         env:
           GNUSTEP_USER_ROOT: ${{ github.workspace }}/.gnustep
         run: |
-          bash ./tools/ci/run_phase4_sanitizers.sh
+          bash ./tools/ci/run_phase5e_sanitizers.sh

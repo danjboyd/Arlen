@@ -336,6 +336,74 @@
           "test": "testArlenTypedSQLCodegenGeneratesTypedParameterAndResultHelpers"
         }
       ]
+    },
+    {
+      "id": "soak_query_compile_execute_contract",
+      "claim": "Sustained SQL-builder compile/execute loops preserve deterministic results while exercising cache churn boundaries under bounded cache limits.",
+      "source_docs": [
+        "docs/PHASE5_ROADMAP.md",
+        "docs/PHASE5E_HARDENING_CONFIDENCE.md",
+        "docs/ARLEN_DATA.md"
+      ],
+      "verification": [
+        {
+          "kind": "long_run",
+          "file": "tests/unit/PgTests.m",
+          "test": "testBuilderCacheEvictionChurnAndSoakExecutionRemainDeterministic"
+        }
+      ]
+    },
+    {
+      "id": "fault_injection_connectivity_interrupt_contract",
+      "claim": "Connection interruption paths fail with deterministic adapter diagnostics and pooled connection reacquire remains functional.",
+      "source_docs": [
+        "docs/PHASE5_ROADMAP.md",
+        "docs/PHASE5E_HARDENING_CONFIDENCE.md"
+      ],
+      "verification": [
+        {
+          "kind": "unit",
+          "file": "tests/unit/PgTests.m",
+          "test": "testConnectionInterruptionReturnsDeterministicErrorAndPoolRecovers"
+        }
+      ],
+      "unsupported_diagnostics": {
+        "domain_symbol": "ALNPgErrorDomain",
+        "code_symbols": [
+          "ALNPgErrorConnectionFailed"
+        ]
+      }
+    },
+    {
+      "id": "fault_injection_transaction_abort_contract",
+      "claim": "Transaction abort paths roll back deterministicly and subsequent commands remain healthy.",
+      "source_docs": [
+        "docs/PHASE5_ROADMAP.md",
+        "docs/PHASE5E_HARDENING_CONFIDENCE.md"
+      ],
+      "verification": [
+        {
+          "kind": "unit",
+          "file": "tests/unit/PgTests.m",
+          "test": "testTransactionAbortPathRollsBackAndConnectionRemainsUsable"
+        }
+      ]
+    },
+    {
+      "id": "release_confidence_artifact_pack_contract",
+      "claim": "Release confidence artifacts are generated deterministically from capability and conformance fixtures and validated in integration tests.",
+      "source_docs": [
+        "docs/PHASE5_ROADMAP.md",
+        "docs/PHASE5E_HARDENING_CONFIDENCE.md",
+        "docs/RELEASE_PROCESS.md"
+      ],
+      "verification": [
+        {
+          "kind": "integration",
+          "file": "tests/integration/DeploymentIntegrationTests.m",
+          "test": "testPhase5EConfidenceArtifactGeneratorProducesExpectedPack"
+        }
+      ]
     }
   ]
 }

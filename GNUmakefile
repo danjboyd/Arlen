@@ -39,7 +39,7 @@ INCLUDE_FLAGS := -Isrc/Arlen -Isrc/Arlen/Core -Isrc/Arlen/Data -Isrc/Arlen/HTTP 
 EXTRA_OBJC_FLAGS ?=
 OBJC_FLAGS := $$(gnustep-config --objc-flags) -fobjc-arc $(EXTRA_OBJC_FLAGS)
 
-.PHONY: all eocc transpile tech-demo-transpile generated-compile arlen boomhauer tech-demo-server api-reference-server migration-sample-server arlen-data-example test-data-layer dev-server tech-demo smoke-render smoke routes build-tests test test-unit test-integration perf perf-fast deploy-smoke ci-quality ci-sanitizers check docs-html clean
+.PHONY: all eocc transpile tech-demo-transpile generated-compile arlen boomhauer tech-demo-server api-reference-server migration-sample-server arlen-data-example test-data-layer dev-server tech-demo smoke-render smoke routes build-tests test test-unit test-integration perf perf-fast deploy-smoke phase5e-confidence ci-quality ci-sanitizers check docs-html clean
 
 all: eocc transpile generated-compile arlen boomhauer
 
@@ -159,11 +159,14 @@ perf-fast: boomhauer
 deploy-smoke:
 >bash ./tools/deploy/smoke_release.sh --app-root examples/tech_demo --framework-root $(ROOT_DIR)
 
+phase5e-confidence:
+>python3 ./tools/ci/generate_phase5e_confidence_artifacts.py --repo-root $(ROOT_DIR) --output-dir $(ROOT_DIR)/build/release_confidence/phase5e
+
 ci-quality:
->bash ./tools/ci/run_phase5a_quality.sh
+>bash ./tools/ci/run_phase5e_quality.sh
 
 ci-sanitizers:
->bash ./tools/ci/run_phase4_sanitizers.sh
+>bash ./tools/ci/run_phase5e_sanitizers.sh
 
 check: test-unit test-integration perf
 

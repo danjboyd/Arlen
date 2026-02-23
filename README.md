@@ -24,6 +24,11 @@ Arlen is designed to solve the same class of problems as frameworks like Mojolic
 - Phase 4C: complete (typed schema codegen with generated table/column helper APIs and CLI workflow).
 - Phase 4D: complete (builder execution caching, prepared-statement reuse policy, and structured/redacted query diagnostics).
 - Phase 4E: complete (conformance matrix, property/long-run regression suite, migration/deprecation hardening, and Phase 4 quality gate wiring).
+- Phase 5A: complete (reliability contract mapping, external regression intake, and adapter capability metadata baselines).
+- Phase 5B: complete (runtime read/write routing, scoped read-after-write stickiness, and deterministic fallback diagnostics).
+- Phase 5C: complete (target-aware multi-database migration/schema-codegen tooling and deterministic per-target state).
+- Phase 5D: complete (typed row/insert/update schema contracts, typed decode helpers, and typed SQL codegen workflow).
+- Phase 5E: complete (data-layer soak/fault hardening gates and release confidence artifact pack generation).
 
 ## Quick Start
 
@@ -112,6 +117,7 @@ High-value guides:
 - [Ecosystem Services](docs/ECOSYSTEM_SERVICES.md)
 - [ArlenData Reuse Guide](docs/ARLEN_DATA.md)
 - [SQL Builder Conformance Matrix](docs/SQL_BUILDER_CONFORMANCE_MATRIX.md)
+- [Phase 5E Hardening + Confidence](docs/PHASE5E_HARDENING_CONFIDENCE.md)
 - [SQL Builder Phase 4 Migration Guide](docs/SQL_BUILDER_PHASE4_MIGRATION.md)
 - [Propane Manager](docs/PROPANE.md)
 - [Release Process](docs/RELEASE_PROCESS.md)

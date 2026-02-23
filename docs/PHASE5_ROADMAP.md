@@ -1,6 +1,6 @@
 # Arlen Phase 5 Roadmap
 
-Status: Phase 5A-5C initial implementation complete  
+Status: Phase 5A-5E initial implementation complete  
 Last updated: 2026-02-23
 
 Related docs:
@@ -188,6 +188,8 @@ Implementation notes:
 
 ## 3.5 Phase 5E: Production Hardening + Confidence Release Pack
 
+Status: Initial implementation complete (2026-02-23)
+
 Deliverables:
 
 - Add long-run soak suites for query compile/execute paths across representative workloads.
@@ -201,6 +203,26 @@ Acceptance (required):
 
 - Phase 5 release candidates require passing soak + fault-injection gates.
 - Confidence artifacts are produced and reviewed as part of each release cycle.
+
+Implementation notes:
+
+- Added long-run/fault-injection PostgreSQL regression coverage:
+  - `tests/unit/PgTests.m`
+    - `testBuilderCacheEvictionChurnAndSoakExecutionRemainDeterministic`
+    - `testConnectionInterruptionReturnsDeterministicErrorAndPoolRecovers`
+    - `testTransactionAbortPathRollsBackAndConnectionRemainsUsable`
+- Added deterministic release confidence artifact generator and integration validation:
+  - `tools/ci/generate_phase5e_confidence_artifacts.py`
+  - `tests/integration/DeploymentIntegrationTests.m`
+    - `testPhase5EConfidenceArtifactGeneratorProducesExpectedPack`
+- Added Phase 5E quality/sanitizer gate entrypoints:
+  - `tools/ci/run_phase5e_quality.sh`
+  - `tools/ci/run_phase5e_sanitizers.sh`
+  - `GNUmakefile` targets: `ci-quality`, `ci-sanitizers`, `phase5e-confidence`
+- Added Phase 5E docs and contract mappings:
+  - `docs/PHASE5E_HARDENING_CONFIDENCE.md`
+  - updated `tests/fixtures/phase5a/data_layer_reliability_contracts.json`
+  - updated `tests/fixtures/phase5a/external_regression_intake.json`
 
 ## 4. Testing and Regression Strategy
 

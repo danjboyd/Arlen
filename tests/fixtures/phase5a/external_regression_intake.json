@@ -237,6 +237,66 @@
           "test": "testRenderArtifactsWithTypedContractsIncludesDecodeAndContractSurfaces"
         }
       ]
+    },
+    {
+      "id": "rails_pool_reconnect_after_connection_interrupt",
+      "source_framework": "rails",
+      "source_area": "connection pool resilience",
+      "source_reference": "dropped connections should fail explicitly and subsequent checkout should recover",
+      "bug_class": "connection_interrupt_recovery_regression",
+      "arlen_contract_id": "fault_injection_connectivity_interrupt_contract",
+      "status": "covered",
+      "arlen_tests": [
+        {
+          "file": "tests/unit/PgTests.m",
+          "test": "testConnectionInterruptionReturnsDeterministicErrorAndPoolRecovers"
+        }
+      ]
+    },
+    {
+      "id": "django_atomic_abort_rollback_on_integrity_error",
+      "source_framework": "django",
+      "source_area": "transaction atomic block behavior",
+      "source_reference": "transaction abort on integrity error should roll back and permit subsequent writes",
+      "bug_class": "transaction_abort_recovery_regression",
+      "arlen_contract_id": "fault_injection_transaction_abort_contract",
+      "status": "covered",
+      "arlen_tests": [
+        {
+          "file": "tests/unit/PgTests.m",
+          "test": "testTransactionAbortPathRollsBackAndConnectionRemainsUsable"
+        }
+      ]
+    },
+    {
+      "id": "ecto_cache_churn_under_small_statement_and_plan_limits",
+      "source_framework": "ecto",
+      "source_area": "query cache and prepared statement reuse",
+      "source_reference": "small cache limits should preserve deterministic behavior under churn-heavy loops",
+      "bug_class": "cache_eviction_churn_regression",
+      "arlen_contract_id": "soak_query_compile_execute_contract",
+      "status": "covered",
+      "arlen_tests": [
+        {
+          "file": "tests/unit/PgTests.m",
+          "test": "testBuilderCacheEvictionChurnAndSoakExecutionRemainDeterministic"
+        }
+      ]
+    },
+    {
+      "id": "prisma_release_confidence_pack_generation",
+      "source_framework": "prisma",
+      "source_area": "release confidence artifact generation",
+      "source_reference": "release confidence packs should include capability and conformance snapshots",
+      "bug_class": "release_confidence_artifact_drift",
+      "arlen_contract_id": "release_confidence_artifact_pack_contract",
+      "status": "covered",
+      "arlen_tests": [
+        {
+          "file": "tests/integration/DeploymentIntegrationTests.m",
+          "test": "testPhase5EConfidenceArtifactGeneratorProducesExpectedPack"
+        }
+      ]
     }
   ]
 }
