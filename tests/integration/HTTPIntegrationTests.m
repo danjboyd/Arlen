@@ -262,6 +262,13 @@
   XCTAssertTrue([body containsString:@"template:multiline-ok"]);
 }
 
+- (void)testRootEndpointIncludesNavigationPartial {
+  NSString *body = [self simpleRequestPath:@"/"];
+  XCTAssertTrue([body containsString:@"<nav>"]);
+  XCTAssertTrue([body containsString:@"href=\"/\""]);
+  XCTAssertTrue([body containsString:@"href=\"/about\""]);
+}
+
 - (void)testHealthEndpoint {
   NSString *body = [self simpleRequestPath:@"/healthz"];
   XCTAssertEqualObjects(@"ok\n", body);

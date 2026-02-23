@@ -14,6 +14,13 @@ static NSString *const ALNEOCTokenContentKey = @"content";
 static NSString *const ALNEOCTokenLineKey = @"line";
 static NSString *const ALNEOCTokenColumnKey = @"column";
 
+NSString *const ALNEOCLintDiagnosticLevelKey = @"level";
+NSString *const ALNEOCLintDiagnosticCodeKey = @"code";
+NSString *const ALNEOCLintDiagnosticMessageKey = @"message";
+NSString *const ALNEOCLintDiagnosticPathKey = @"path";
+NSString *const ALNEOCLintDiagnosticLineKey = @"line";
+NSString *const ALNEOCLintDiagnosticColumnKey = @"column";
+
 @interface ALNEOCTranspiler ()
 
 - (nullable NSArray *)tokensForTemplateString:(NSString *)templateText
@@ -26,6 +33,13 @@ static NSString *const ALNEOCTokenColumnKey = @"column";
                                           fromLine:(NSUInteger)line
                                             column:(NSUInteger)column
                                              error:(NSError *_Nullable *_Nullable)error;
+- (NSArray<NSDictionary *> *)lintDiagnosticsForTokens:(NSArray *)tokens
+                                           logicalPath:(NSString *)logicalPath;
+- (void)appendIncludeLintDiagnosticsForToken:(NSDictionary *)token
+                                  logicalPath:(NSString *)logicalPath
+                                  diagnostics:(NSMutableArray<NSDictionary *> *)diagnostics;
+- (BOOL)isGuardedIncludeCallInContent:(NSString *)content atLocation:(NSUInteger)location;
+- (BOOL)isWhitespaceCharacter:(unichar)character;
 - (void)advanceLine:(NSUInteger *)line
              column:(NSUInteger *)column
       forCharacter:(unichar)character;
@@ -71,6 +85,18 @@ static NSString *const ALNEOCTokenColumnKey = @"column";
 
   NSString *relative = [fullTemplate substringFromIndex:[rootWithSlash length]];
   return ALNEOCCanonicalTemplatePath(relative);
+}
+
+- (NSArray<NSDictionary *> *)lintDiagnosticsForTemplateString:(NSString *)templateText
+                                                   logicalPath:(NSString *)logicalPath
+                                                         error:(NSError **)error {
+  NSArray *tokens = [self tokensForTemplateString:templateText
+                                      logicalPath:logicalPath
+                                            error:error];
+  if (tokens == nil) {
+    return nil;
+  }
+  return [self lintDiagnosticsForTokens:tokens logicalPath:logicalPath];
 }
 
 - (NSString *)transpiledSourceForTemplateString:(NSString *)templateText
@@ -431,6 +457,153 @@ static NSString *const ALNEOCTokenColumnKey = @"column";
   }
 
   return tokens;
+}
+
+- (NSArray<NSDictionary *> *)lintDiagnosticsForTokens:(NSArray *)tokens
+                                           logicalPath:(NSString *)logicalPath {
+  NSMutableArray<NSDictionary *> *diagnostics = [NSMutableArray array];
+
+  for (NSDictionary *token in tokens) {
+    NSUInteger type = [token[ALNEOCTokenTypeKey] unsignedIntegerValue];
+    if (type != ALNEOCTokenTypeCode) {
+      continue;
+    }
+    [self appendIncludeLintDiagnosticsForToken:token
+                                   logicalPath:logicalPath
+                                   diagnostics:diagnostics];
+  }
+
+  return [NSArray arrayWithArray:diagnostics];
+}
+
+- (void)appendIncludeLintDiagnosticsForToken:(NSDictionary *)token
+                                  logicalPath:(NSString *)logicalPath
+                                  diagnostics:(NSMutableArray<NSDictionary *> *)diagnostics {
+  NSString *content = [token[ALNEOCTokenContentKey] isKindOfClass:[NSString class]]
+                          ? token[ALNEOCTokenContentKey]
+                          : @"";
+  if ([content length] == 0) {
+    return;
+  }
+
+  NSUInteger tokenLine = [token[ALNEOCTokenLineKey] unsignedIntegerValue];
+  NSUInteger tokenColumn = [token[ALNEOCTokenColumnKey] unsignedIntegerValue];
+  NSRange searchRange = NSMakeRange(0, [content length]);
+
+  while (searchRange.location < [content length]) {
+    NSRange match = [content rangeOfString:@"ALNEOCInclude("
+                                   options:0
+                                     range:searchRange];
+    if (match.location == NSNotFound) {
+      break;
+    }
+
+    if (![self isGuardedIncludeCallInContent:content atLocation:match.location]) {
+      NSUInteger line = tokenLine;
+      NSUInteger column = tokenColumn;
+      if (match.location > 0) {
+        NSString *prefix = [content substringToIndex:match.location];
+        [self advanceLine:&line column:&column forString:prefix];
+      }
+
+      [diagnostics addObject:@{
+        ALNEOCLintDiagnosticLevelKey : @"warning",
+        ALNEOCLintDiagnosticCodeKey : @"unguarded_include",
+        ALNEOCLintDiagnosticMessageKey :
+            @"ALNEOCInclude return value should be checked; wrap include call in "
+             @"if (!ALNEOCInclude(...)) { return nil; }",
+        ALNEOCLintDiagnosticPathKey : logicalPath ?: @"",
+        ALNEOCLintDiagnosticLineKey : @(line),
+        ALNEOCLintDiagnosticColumnKey : @(column)
+      }];
+    }
+
+    NSUInteger nextLocation = match.location + match.length;
+    if (nextLocation >= [content length]) {
+      break;
+    }
+    searchRange = NSMakeRange(nextLocation, [content length] - nextLocation);
+  }
+}
+
+- (BOOL)isGuardedIncludeCallInContent:(NSString *)content atLocation:(NSUInteger)location {
+  if ([content length] == 0 || location == 0 || location > [content length]) {
+    return NO;
+  }
+
+  NSInteger scan = (NSInteger)location - 1;
+  while (scan >= 0 &&
+         [self isWhitespaceCharacter:[content characterAtIndex:(NSUInteger)scan]]) {
+    scan -= 1;
+  }
+
+  BOOL hasInnerWrapper = NO;
+  if (scan >= 0 && [content characterAtIndex:(NSUInteger)scan] == '(') {
+    hasInnerWrapper = YES;
+    scan -= 1;
+    while (scan >= 0 &&
+           [self isWhitespaceCharacter:[content characterAtIndex:(NSUInteger)scan]]) {
+      scan -= 1;
+    }
+  }
+
+  if (scan < 0 || [content characterAtIndex:(NSUInteger)scan] != '!') {
+    return NO;
+  }
+  scan -= 1;
+
+  while (scan >= 0 &&
+         [self isWhitespaceCharacter:[content characterAtIndex:(NSUInteger)scan]]) {
+    scan -= 1;
+  }
+  if (scan < 0 || [content characterAtIndex:(NSUInteger)scan] != '(') {
+    return NO;
+  }
+
+  if (hasInnerWrapper) {
+    // Covered pattern: if (!(ALNEOCInclude(...))).
+  }
+  scan -= 1;
+
+  while (scan >= 0 &&
+         [self isWhitespaceCharacter:[content characterAtIndex:(NSUInteger)scan]]) {
+    scan -= 1;
+  }
+  if (scan < 1) {
+    return NO;
+  }
+  if ([content characterAtIndex:(NSUInteger)(scan - 1)] != 'i' ||
+      [content characterAtIndex:(NSUInteger)scan] != 'f') {
+    return NO;
+  }
+
+  NSInteger beforeIndex = scan - 2;
+  if (beforeIndex >= 0 &&
+      [self isSigilIdentifierBody:[content characterAtIndex:(NSUInteger)beforeIndex]]) {
+    return NO;
+  }
+
+  NSUInteger afterIndex = (NSUInteger)scan + 1;
+  if (afterIndex < [content length] &&
+      [self isSigilIdentifierBody:[content characterAtIndex:afterIndex]]) {
+    return NO;
+  }
+
+  return YES;
+}
+
+- (BOOL)isWhitespaceCharacter:(unichar)character {
+  switch (character) {
+  case ' ':
+  case '\t':
+  case '\n':
+  case '\r':
+  case '\f':
+  case '\v':
+    return YES;
+  default:
+    return NO;
+  }
 }
 
 - (BOOL)isSigilIdentifierStart:(unichar)character {

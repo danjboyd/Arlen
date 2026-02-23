@@ -270,6 +270,52 @@
   }
 }
 
+- (void)testEOCCEmitsDeterministicLintDiagnosticsForUnguardedInclude {
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *workRoot = [self createTempDirectoryWithPrefix:@"arlen-eocc-lint"];
+  XCTAssertNotNil(workRoot);
+  if (workRoot == nil) {
+    return;
+  }
+
+  @try {
+    NSString *templateRoot = [workRoot stringByAppendingPathComponent:@"templates"];
+    NSString *outputRoot = [workRoot stringByAppendingPathComponent:@"generated"];
+    NSString *partialsRoot = [templateRoot stringByAppendingPathComponent:@"partials"];
+
+    XCTAssertTrue([self writeFile:[partialsRoot stringByAppendingPathComponent:@"_nav.html.eoc"]
+                          content:@"<nav>ok</nav>\n"]);
+    XCTAssertTrue([self writeFile:[templateRoot stringByAppendingPathComponent:@"lint_unguarded_include.html.eoc"]
+                          content:@"<main>\n"
+                                  "<% ALNEOCInclude(out, ctx, @\"partials/_nav.html.eoc\", error); %>\n"
+                                  "</main>\n"]);
+    XCTAssertTrue([self writeFile:[templateRoot stringByAppendingPathComponent:@"lint_guarded_include.html.eoc"]
+                          content:@"<main>\n"
+                                  "<% if (!ALNEOCInclude(out, ctx, @\"partials/_nav.html.eoc\", error)) { return nil; } %>\n"
+                                  "</main>\n"]);
+
+    int code = 0;
+    NSString *output =
+        [self runShellCapture:[NSString stringWithFormat:
+                                            @"cd %@ && ./build/eocc --template-root %@ --output-dir %@ %@ %@",
+                                            repoRoot,
+                                            templateRoot,
+                                            outputRoot,
+                                            [templateRoot
+                                                stringByAppendingPathComponent:@"lint_unguarded_include.html.eoc"],
+                                            [templateRoot
+                                                stringByAppendingPathComponent:@"lint_guarded_include.html.eoc"]]
+                     exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", output);
+    XCTAssertTrue([output containsString:@"code=unguarded_include"], @"%@", output);
+    XCTAssertTrue([output containsString:@"path=lint_unguarded_include.html.eoc line=2 column=4"],
+                  @"%@", output);
+    XCTAssertFalse([output containsString:@"path=lint_guarded_include.html.eoc"], @"%@", output);
+  } @finally {
+    [[NSFileManager defaultManager] removeItemAtPath:workRoot error:nil];
+  }
+}
+
 - (void)testPhase5EConfidenceArtifactGeneratorProducesExpectedPack {
   NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
   NSString *outputRoot = [self createTempDirectoryWithPrefix:@"arlen-phase5e-confidence"];

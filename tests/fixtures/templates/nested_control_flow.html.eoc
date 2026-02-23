@@ -1,0 +1,19 @@
+<%
+NSArray *sections = $sections;
+NSUInteger visibleCount = 0;
+%>
+<ul class="sections">
+<% for (NSDictionary *section in sections) { %>
+  <% NSArray *rows = section[@"rows"]; %>
+  <li class="section"><%= section[@"title"] %></li>
+  <ul>
+  <% for (NSDictionary *row in rows) { %>
+    <% if ([row[@"visible"] boolValue]) { %>
+      <% visibleCount += 1; %>
+      <li data-row="<%= row[@"id"] %>"><%== row[@"label"] %></li>
+    <% } %>
+  <% } %>
+  </ul>
+<% } %>
+</ul>
+<p class="visible-count"><%= [NSString stringWithFormat:@"visible=%@", @(visibleCount)] %></p>

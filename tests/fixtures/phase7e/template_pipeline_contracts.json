@@ -1,0 +1,75 @@
+{
+  "version": "phase7e-template-pipeline-contracts-v1",
+  "contracts": [
+    {
+      "id": "phase7e.multiline_and_nested_fixture_coverage",
+      "claim": "Template transpilation supports representative multiline and nested-control-flow fixtures with deterministic generated output shape.",
+      "source_docs": [
+        "docs/PHASE7E_TEMPLATE_PIPELINE_MATURITY.md",
+        "docs/TEMPLATE_TROUBLESHOOTING.md"
+      ],
+      "verification": [
+        {
+          "kind": "unit",
+          "file": "tests/unit/TranspilerTests.m",
+          "test": "testTranspileFixtureWithMultilineTagsAndExpressions"
+        },
+        {
+          "kind": "unit",
+          "file": "tests/unit/TranspilerTests.m",
+          "test": "testTranspileFixtureWithNestedControlFlowAndSigils"
+        }
+      ]
+    },
+    {
+      "id": "phase7e.deterministic_malformed_diagnostics",
+      "claim": "Malformed multiline expression/sigil scenarios return deterministic syntax diagnostics with stable path/line/column metadata.",
+      "source_docs": [
+        "docs/PHASE7E_TEMPLATE_PIPELINE_MATURITY.md",
+        "docs/TEMPLATE_TROUBLESHOOTING.md"
+      ],
+      "verification": [
+        {
+          "kind": "unit",
+          "file": "tests/unit/TranspilerTests.m",
+          "test": "testTranspileFixtureRejectsMultilineEmptyExpressionWithDeterministicLocation"
+        },
+        {
+          "kind": "unit",
+          "file": "tests/unit/TranspilerTests.m",
+          "test": "testTranspileFixtureRejectsMultilineInvalidSigilWithDeterministicLocation"
+        }
+      ]
+    },
+    {
+      "id": "phase7e.include_lint_and_render_path_contract",
+      "claim": "Unguarded include usage surfaces deterministic lint diagnostics while guarded include render paths stay integration-safe.",
+      "source_docs": [
+        "docs/PHASE7E_TEMPLATE_PIPELINE_MATURITY.md",
+        "docs/TEMPLATE_TROUBLESHOOTING.md"
+      ],
+      "verification": [
+        {
+          "kind": "unit",
+          "file": "tests/unit/TranspilerTests.m",
+          "test": "testLintDiagnosticsReportUnguardedIncludeWithDeterministicLocation"
+        },
+        {
+          "kind": "unit",
+          "file": "tests/unit/TranspilerTests.m",
+          "test": "testLintDiagnosticsDoNotReportGuardedInclude"
+        },
+        {
+          "kind": "integration",
+          "file": "tests/integration/HTTPIntegrationTests.m",
+          "test": "testRootEndpointIncludesNavigationPartial"
+        },
+        {
+          "kind": "integration",
+          "file": "tests/integration/DeploymentIntegrationTests.m",
+          "test": "testEOCCEmitsDeterministicLintDiagnosticsForUnguardedInclude"
+        }
+      ]
+    }
+  ]
+}

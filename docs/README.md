@@ -32,6 +32,8 @@ Open `build/docs/index.html` in your browser.
 - [Phase 7B Security Defaults](PHASE7B_SECURITY_DEFAULTS.md): security profile presets, fail-fast startup validation, and policy contracts.
 - [Phase 7C Observability + Operability](PHASE7C_OBSERVABILITY_OPERABILITY.md): trace/correlation propagation, JSON health/readiness signal contracts, and deploy operability validation script.
 - [Phase 7D Service Durability](PHASE7D_SERVICE_DURABILITY.md): jobs idempotency-key contracts, cache expiry/removal durability semantics, and retry wrappers for mail/attachment adapters.
+- [Phase 7E Template Pipeline Maturity](PHASE7E_TEMPLATE_PIPELINE_MATURITY.md): lint diagnostics, expanded multiline/nested fixture matrix, and render-path hardening contracts.
+- [Template Troubleshooting](TEMPLATE_TROUBLESHOOTING.md): deterministic transpile/lint diagnostics and repair workflow.
 - [SQL Builder Phase 4 Migration Guide](SQL_BUILDER_PHASE4_MIGRATION.md): migration from string-heavy builder usage to IR/typed patterns.
 - [Propane Manager](PROPANE.md): production process manager and propane accessories.
 - [Release Process](RELEASE_PROCESS.md): semantic versioning, deprecations, and release checklist.

@@ -284,7 +284,32 @@ id<ALNAttachmentAdapter> attachments =
     [[ALNRetryingAttachmentAdapter alloc] initWithBaseAdapter:baseAttachmentAdapter];
 ```
 
-## 11. Common Environment Variables
+## 11. Template Troubleshooting
+
+Run targeted transpile/lint checks when templates fail to compile or behave unexpectedly:
+
+```bash
+./build/eocc --template-root templates --output-dir build/gen/templates templates/index.html.eoc
+```
+
+`eocc` emits deterministic syntax/lint metadata:
+
+- syntax failure location:
+  - `eocc: location path=<path> line=<line> column=<column>`
+- lint warning shape:
+  - `eocc: warning path=<path> line=<line> column=<column> code=<code> message=<message>`
+
+Current lint rule:
+
+- `unguarded_include`
+  - update include calls to guard return values:
+    - `if (!ALNEOCInclude(out, ctx, @\"partials/_nav.html.eoc\", error)) { return nil; }`
+
+Full troubleshooting workflow:
+
+- `docs/TEMPLATE_TROUBLESHOOTING.md`
+
+## 12. Common Environment Variables
 
 Framework/app runtime:
 
@@ -341,7 +366,7 @@ Framework/app runtime:
 
 Legacy compatibility fallback (`MOJOOBJC_*`) is supported but transitional.
 
-## 12. Migrations (PostgreSQL)
+## 13. Migrations (PostgreSQL)
 
 From app root with `db/migrations`:
 
@@ -361,7 +386,7 @@ Named database target (uses `db/migrations/<target>`):
 /path/to/Arlen/bin/arlen migrate --env development --database analytics
 ```
 
-## 13. Generate Typed DB Helpers (Phase 4C)
+## 14. Generate Typed DB Helpers (Phase 4C)
 
 From app root:
 
@@ -413,7 +438,7 @@ Default SQL input format:
 SELECT id, name FROM users WHERE status = $1 LIMIT $2;
 ```
 
-## 14. Builder Query Caching + Diagnostics (Phase 4D)
+## 15. Builder Query Caching + Diagnostics (Phase 4D)
 
 `ALNPgConnection` now supports builder-driven execution with cache/diagnostic controls:
 
@@ -430,7 +455,7 @@ Key runtime options:
 - `includeSQLInDiagnosticsEvents` (default `NO`, keeps metadata redaction-safe)
 - `emitDiagnosticsEventsToStderr`
 
-## 15. Conformance + Migration Hardening (Phase 4E)
+## 16. Conformance + Migration Hardening (Phase 4E)
 
 Review matrix + migration references:
 
@@ -455,7 +480,7 @@ Sanitizer gate command:
 make ci-sanitizers
 ```
 
-## 16. Deploy Smoke Validation
+## 17. Deploy Smoke Validation
 
 ```bash
 make deploy-smoke

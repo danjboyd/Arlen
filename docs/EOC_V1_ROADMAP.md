@@ -1,7 +1,7 @@
 # EOC v1 Implementation Roadmap
 
-Status: Proposed  
-Last updated: 2026-02-19
+Status: Active  
+Last updated: 2026-02-23
 
 Related documents:
 
@@ -12,15 +12,18 @@ Related documents:
 - `docs/PHASE3_ROADMAP.md` (Phase 3 trend analysis and expanded performance maturity work)
 - `V1_SPEC.md` (EOC template engine v1 details)
 
-## Implementation Status (2026-02-18)
+## Implementation Status (2026-02-23)
 
 - Completed: Phase 2 runtime support scaffolding (`ALNEOCRuntime`).
 - Completed: Phase 3 `eocc` transpiler CLI with state-machine parser and `#line` output.
 - Completed: Phase 4 registry source generation (`EOCRegistry.m` output from `eocc`).
 - Completed: Phase 5 initial GNUstep build integration via root `GNUmakefile` targets.
 - Completed: Phase 6 unit-test baseline with XCTest (`make test`).
+- Completed: deeper fixture coverage for multiline tags and malformed-tag diagnostics.
+- Completed: template lint diagnostics for unguarded include calls (`eocc` warning contract: path/line/column/code/message).
+- Completed: troubleshooting workflow docs for deterministic transpile/lint repair loops.
 - Completed: initial basic-app capability checks (`eoc-smoke-render`, `boomhauer`, `bin/smoke`).
-- In progress: deeper fixture coverage, richer routing/controller layers, and integration-level MVC examples.
+- In progress: richer routing/controller layers and integration-level MVC examples.
 
 ## Cross-Cutting Rollout Alignment (2026-02-19)
 

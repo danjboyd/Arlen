@@ -1,6 +1,6 @@
 # Arlen Phase 7 Roadmap
 
-Status: Active (Phase 7A, 7B, 7C, and 7D initial slices implemented; follow-on in progress)  
+Status: Active (Phase 7A, 7B, 7C, 7D, and 7E initial slices implemented; follow-on in progress)  
 Last updated: 2026-02-23
 
 Related docs:
@@ -10,6 +10,7 @@ Related docs:
 - `docs/PHASE7B_SECURITY_DEFAULTS.md`
 - `docs/PHASE7C_OBSERVABILITY_OPERABILITY.md`
 - `docs/PHASE7D_SERVICE_DURABILITY.md`
+- `docs/PHASE7E_TEMPLATE_PIPELINE_MATURITY.md`
 - `docs/STATUS.md`
 - `docs/FEATURE_PARITY_MATRIX.md`
 - `docs/PROPANE.md`
@@ -200,7 +201,7 @@ Implementation notes (initial slice, 2026-02-23):
 
 ## 3.5 Phase 7E: EOC + Template Pipeline Maturity
 
-Status: Planned
+Status: Initial slice implemented (2026-02-23); remaining 7E deliverables in progress
 
 Deliverables:
 
@@ -214,6 +215,27 @@ Acceptance (required):
 - Template failure diagnostics remain deterministic and actionable.
 - Fixture coverage includes representative complex template patterns.
 - End-to-end render-path regressions are captured in CI.
+
+Implementation notes (initial slice, 2026-02-23):
+
+- Added deterministic template lint diagnostics in `ALNEOCTranspiler`:
+  - `lintDiagnosticsForTemplateString:logicalPath:error:`
+  - rule: `unguarded_include` (warn when `ALNEOCInclude(...)` return value is not checked)
+- `eocc` now emits compile-time lint warnings with stable shape:
+  - `path`, `line`, `column`, `code`, `message`
+- Expanded template fixture matrix:
+  - multiline, malformed multiline expression/sigil, nested control-flow, guarded/unguarded include patterns
+- Hardened default include/render path contract:
+  - root template include now guards failure and returns `nil` deterministically
+- Added executable contract fixture and docs:
+  - `tests/fixtures/phase7e/template_pipeline_contracts.json`
+  - `docs/PHASE7E_TEMPLATE_PIPELINE_MATURITY.md`
+  - `docs/TEMPLATE_TROUBLESHOOTING.md`
+- Added regression coverage:
+  - `tests/unit/TranspilerTests.m` (fixture matrix + lint diagnostics)
+  - `tests/integration/HTTPIntegrationTests.m` (root render includes partial contract)
+  - `tests/integration/DeploymentIntegrationTests.m` (`eocc` lint output contract)
+  - `tests/unit/Phase7ETests.m` (fixture schema/reference integrity)
 
 ## 3.6 Phase 7F: Frontend Integration Starters
 
@@ -270,9 +292,9 @@ Acceptance (required):
 
 Recommended sequencing for adoption impact and risk reduction:
 
-1. Wave 1: Phase 7A + Phase 7B
-2. Wave 2: Phase 7C + Phase 7G + Phase 7E
-3. Wave 3: Phase 7D + Phase 7F + Phase 7H
+1. Wave 1: Phase 7A + Phase 7B (initial slices complete)
+2. Wave 2: Phase 7C + Phase 7D + Phase 7E (initial slices complete)
+3. Wave 3: Phase 7G + Phase 7F + Phase 7H
 
 ## 5. Testing and Quality Strategy
 

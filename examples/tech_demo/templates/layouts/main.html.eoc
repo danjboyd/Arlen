@@ -10,7 +10,7 @@
     <header class="shell">
       <h1><%= [ctx objectForKey:@"pageTitle"] %></h1>
       <p class="tagline"><%= [ctx objectForKey:@"tagline"] %></p>
-      <% ALNEOCInclude(out, ctx, @"partials/_nav.html.eoc", error); %>
+      <% if (!ALNEOCInclude(out, ctx, @"partials/_nav.html.eoc", error)) { return nil; } %>
     </header>
 
     <main class="shell">

@@ -1,5 +1,10 @@
 <h1><%= [ctx objectForKey:@"title"] %></h1>
-<% ALNEOCInclude(out, ctx, @"partials/_nav.html.eoc", error); %>
+<%
+NSString *templateNote =
+    [NSString stringWithFormat:@"%@:%@", @"template", @"multiline-ok"];
+%>
+<p class="template-note"><%= templateNote %></p>
+<% if (!ALNEOCInclude(out, ctx, @"partials/_nav.html.eoc", error)) { return nil; } %>
 <ul>
 <% for (NSString *item in [ctx objectForKey:@"items"]) { %>
   <li><%= item %></li>

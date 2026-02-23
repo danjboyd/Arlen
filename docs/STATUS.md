@@ -31,7 +31,8 @@ Last updated: 2026-02-23
 - Phase 7B: initial slice implemented (2026-02-23)
 - Phase 7C: initial slice implemented (2026-02-23)
 - Phase 7D: initial slice implemented (2026-02-23)
-- Phase 7E-7H: planned (roadmap defined 2026-02-23)
+- Phase 7E: initial slice implemented (2026-02-23)
+- Phase 7F-7H: planned (roadmap defined 2026-02-23)
 
 ## Completed Today (2026-02-23)
 
@@ -59,6 +60,12 @@ Last updated: 2026-02-23
     - `ALNRetryingMailAdapter` (`maxAttempts`, `retryDelaySeconds`, deterministic exhaustion diagnostics)
     - `ALNRetryingAttachmentAdapter` (`maxAttempts`, `retryDelaySeconds`, deterministic exhaustion diagnostics)
   - Phase 7D contract fixture + docs (`tests/fixtures/phase7d/service_durability_contracts.json`, `docs/PHASE7D_SERVICE_DURABILITY.md`)
+- Implemented Phase 7E initial template-pipeline maturity slice:
+  - `ALNEOCTranspiler` lint diagnostics API for deterministic compile-time warnings (`unguarded_include`)
+  - `eocc` warning output contract with stable `path/line/column/code/message` fields
+  - expanded multiline/nested/malformed fixture matrix and include-guard lint fixtures
+  - guarded include contract in default template render path (`templates/index.html.eoc`)
+  - Phase 7E contract fixture + docs (`tests/fixtures/phase7e/template_pipeline_contracts.json`, `docs/PHASE7E_TEMPLATE_PIPELINE_MATURITY.md`, `docs/TEMPLATE_TROUBLESHOOTING.md`)
 - Completed Phase 5A-5E implementation tranche.
 - Added typed schema contracts + typed SQL generation workflow (5D) and validated compile-time/runtime contract behavior.
 - Added Phase 5E hardening coverage:
@@ -201,6 +208,12 @@ Last updated: 2026-02-23
   - job idempotency-key durability tests for in-memory and file adapters (`tests/unit/Phase7DTests.m`)
   - retry policy wrapper deterministic success/exhaustion diagnostics tests (`tests/unit/Phase7DTests.m`)
   - cache conformance semantics regression for zero-TTL persistence and nil-removal contracts (`tests/unit/Phase7DTests.m`)
+- New Phase 7E checks executed:
+  - transpiler fixture matrix expansion for multiline/nested/error-shape templates (`tests/unit/TranspilerTests.m`)
+  - deterministic transpiler lint diagnostics for guarded/unguarded include contracts (`tests/unit/TranspilerTests.m`)
+  - root render integration verification for partial include output (`tests/integration/HTTPIntegrationTests.m`)
+  - `eocc` lint warning shape/behavior integration verification (`tests/integration/DeploymentIntegrationTests.m`)
+  - phase fixture schema/reference validation (`tests/unit/Phase7ETests.m`)
 - New Phase 3F checks executed:
   - `arlen doctor` bootstrap pre-build diagnostics + JSON payload validation
   - ALNPg SQLSTATE/diagnostics regression tests
@@ -254,9 +267,9 @@ Last updated: 2026-02-23
 
 ## Next Session Focus
 
-1. Continue remaining Phase 7A runtime hardening contracts (timeouts, graceful reload/shutdown, and additional failure-mode regressions) (`docs/PHASE7_ROADMAP.md`).
-2. Continue remaining Phase 7B security-default policy contracts and deployment/incident runbook depth (`docs/PHASE7_ROADMAP.md`).
-3. Continue remaining Phase 7C observability/operability depth (job/runtime event-shape coverage and diagnostics artifact pack workflows) and start Phase 7G coding-agent-first DX contracts (`docs/PHASE7_ROADMAP.md`).
+1. Continue remaining Phase 7D ecosystem service durability depth (production-adapter failure/recovery integration coverage) (`docs/PHASE7_ROADMAP.md`).
+2. Continue remaining Phase 7E template-pipeline depth (additional lint/diagnostic rules and watch/deploy render-path regressions) (`docs/PHASE7_ROADMAP.md`).
+3. Start Phase 7G coding-agent-first DX contracts (machine-readable CLI outputs + fix-it diagnostics + agent regression harness) (`docs/PHASE7_ROADMAP.md`).
 
 ## Planned Phase Mapping (Post-4C)
 
@@ -277,6 +290,8 @@ Last updated: 2026-02-23
   - Phase 7A initial runtime hardening slice implemented (websocket backpressure contract + overload diagnostics)
   - Phase 7B initial security-default slice implemented (profile presets + fail-fast startup validation)
   - Phase 7C initial observability/operability slice implemented (trace propagation/correlation headers + JSON health/readiness signals + deploy operability validation script)
+  - Phase 7D initial ecosystem service durability slice implemented (idempotency/retry/cache durability contracts)
+  - Phase 7E initial template-pipeline maturity slice implemented (lint diagnostics + fixture matrix + include/render-path hardening checks)
   - remaining runtime hardening for `boomhauer`/`propane` in progress
   - remaining security policy/default hardening in progress
   - remaining observability/operability + coding-agent-first DX contracts

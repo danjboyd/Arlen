@@ -134,4 +134,107 @@
   XCTAssertTrue([generated containsString:@"ALNEOCRender_"]);
 }
 
+- (void)testTranspileFixtureWithMultilineTagsAndExpressions {
+  ALNEOCTranspiler *transpiler = [[ALNEOCTranspiler alloc] init];
+  NSString *templateText = [self loadFixture:@"multiline_tags.html.eoc"];
+
+  NSError *error = nil;
+  NSString *source = [transpiler transpiledSourceForTemplateString:templateText
+                                                       logicalPath:@"multiline_tags.html.eoc"
+                                                             error:&error];
+  XCTAssertNil(error);
+  XCTAssertNotNil(source);
+  XCTAssertTrue([source containsString:@"NSString *header ="]);
+  XCTAssertTrue([source containsString:@"ALNEOCLocal(ctx, @\"title\""]);
+  XCTAssertTrue([source containsString:@"NSArray *rows = ALNEOCLocal(ctx, @\"items\""]);
+  XCTAssertTrue([source containsString:@"for (NSString *row in rows) {"]);
+  XCTAssertTrue([source containsString:@"ALNEOCAppendRawChecked(out, (row)"]);
+  XCTAssertTrue([source containsString:@"row-count"]);
+}
+
+- (void)testTranspileFixtureRejectsMultilineEmptyExpressionWithDeterministicLocation {
+  ALNEOCTranspiler *transpiler = [[ALNEOCTranspiler alloc] init];
+  NSString *templateText = [self loadFixture:@"malformed_empty_expression_multiline.html.eoc"];
+
+  NSError *error = nil;
+  NSString *source = [transpiler transpiledSourceForTemplateString:templateText
+                                                       logicalPath:@"malformed_empty_expression_multiline.html.eoc"
+                                                             error:&error];
+  XCTAssertNil(source);
+  XCTAssertNotNil(error);
+  XCTAssertEqual((NSInteger)ALNEOCErrorTranspilerSyntax, [error code]);
+  XCTAssertEqualObjects(ALNEOCErrorDomain, [error domain]);
+  XCTAssertEqualObjects(@2, error.userInfo[ALNEOCErrorLineKey]);
+  XCTAssertEqualObjects(@4, error.userInfo[ALNEOCErrorColumnKey]);
+}
+
+- (void)testTranspileFixtureRejectsMultilineInvalidSigilWithDeterministicLocation {
+  ALNEOCTranspiler *transpiler = [[ALNEOCTranspiler alloc] init];
+  NSString *templateText = [self loadFixture:@"malformed_invalid_sigil_multiline.html.eoc"];
+
+  NSError *error = nil;
+  NSString *source = [transpiler transpiledSourceForTemplateString:templateText
+                                                       logicalPath:@"malformed_invalid_sigil_multiline.html.eoc"
+                                                             error:&error];
+  XCTAssertNil(source);
+  XCTAssertNotNil(error);
+  XCTAssertEqual((NSInteger)ALNEOCErrorTranspilerSyntax, [error code]);
+  XCTAssertEqualObjects(ALNEOCErrorDomain, [error domain]);
+  XCTAssertEqualObjects(@2, error.userInfo[ALNEOCErrorLineKey]);
+  XCTAssertEqualObjects(@4, error.userInfo[ALNEOCErrorColumnKey]);
+}
+
+- (void)testTranspileFixtureWithNestedControlFlowAndSigils {
+  ALNEOCTranspiler *transpiler = [[ALNEOCTranspiler alloc] init];
+  NSString *templateText = [self loadFixture:@"nested_control_flow.html.eoc"];
+
+  NSError *error = nil;
+  NSString *source = [transpiler transpiledSourceForTemplateString:templateText
+                                                       logicalPath:@"nested_control_flow.html.eoc"
+                                                             error:&error];
+  XCTAssertNil(error);
+  XCTAssertNotNil(source);
+  XCTAssertTrue([source containsString:@"NSArray *sections = ALNEOCLocal(ctx, @\"sections\""]);
+  XCTAssertTrue([source containsString:@"for (NSDictionary *section in sections) {"]);
+  XCTAssertTrue([source containsString:@"for (NSDictionary *row in rows) {"]);
+  XCTAssertTrue([source containsString:@"visibleCount += 1;"]);
+  XCTAssertTrue([source containsString:@"ALNEOCAppendRawChecked(out, (row[@\"label\"])"]);
+}
+
+- (void)testLintDiagnosticsReportUnguardedIncludeWithDeterministicLocation {
+  ALNEOCTranspiler *transpiler = [[ALNEOCTranspiler alloc] init];
+  NSString *templateText = [self loadFixture:@"lint_unguarded_include.html.eoc"];
+
+  NSError *error = nil;
+  NSArray<NSDictionary *> *diagnostics =
+      [transpiler lintDiagnosticsForTemplateString:templateText
+                                       logicalPath:@"lint_unguarded_include.html.eoc"
+                                             error:&error];
+  XCTAssertNil(error);
+  XCTAssertNotNil(diagnostics);
+  XCTAssertEqual((NSUInteger)1, [diagnostics count]);
+
+  NSDictionary *diagnostic = [diagnostics firstObject];
+  XCTAssertEqualObjects(@"warning", diagnostic[ALNEOCLintDiagnosticLevelKey]);
+  XCTAssertEqualObjects(@"unguarded_include", diagnostic[ALNEOCLintDiagnosticCodeKey]);
+  XCTAssertEqualObjects(@"lint_unguarded_include.html.eoc",
+                        diagnostic[ALNEOCLintDiagnosticPathKey]);
+  XCTAssertEqualObjects(@2, diagnostic[ALNEOCLintDiagnosticLineKey]);
+  XCTAssertEqualObjects(@4, diagnostic[ALNEOCLintDiagnosticColumnKey]);
+}
+
+- (void)testLintDiagnosticsDoNotReportGuardedInclude {
+  ALNEOCTranspiler *transpiler = [[ALNEOCTranspiler alloc] init];
+  NSString *templateText = [self loadFixture:@"lint_guarded_include.html.eoc"];
+
+  NSError *error = nil;
+  NSArray<NSDictionary *> *diagnostics =
+      [transpiler lintDiagnosticsForTemplateString:templateText
+                                       logicalPath:@"lint_guarded_include.html.eoc"
+                                             error:&error];
+  XCTAssertNil(error);
+  XCTAssertNotNil(diagnostics);
+  XCTAssertEqual((NSUInteger)0, [diagnostics count]);
+}
+
 @end

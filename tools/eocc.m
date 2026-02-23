@@ -134,6 +134,41 @@ int main(int argc, const char *argv[]) {
         return 1;
       }
 
+      NSString *templateText = [NSString stringWithContentsOfFile:templatePath
+                                                         encoding:NSUTF8StringEncoding
+                                                            error:nil];
+      if (templateText != nil) {
+        NSArray<NSDictionary *> *diagnostics =
+            [transpiler lintDiagnosticsForTemplateString:templateText
+                                             logicalPath:logicalPath
+                                                   error:nil];
+        for (NSDictionary *diagnostic in diagnostics ?: @[]) {
+          NSString *path = [diagnostic[ALNEOCLintDiagnosticPathKey] isKindOfClass:[NSString class]]
+                               ? diagnostic[ALNEOCLintDiagnosticPathKey]
+                               : logicalPath;
+          NSString *line = [diagnostic[ALNEOCLintDiagnosticLineKey] respondsToSelector:@selector(stringValue)]
+                               ? [diagnostic[ALNEOCLintDiagnosticLineKey] stringValue]
+                               : @"";
+          NSString *column =
+              [diagnostic[ALNEOCLintDiagnosticColumnKey] respondsToSelector:@selector(stringValue)]
+                  ? [diagnostic[ALNEOCLintDiagnosticColumnKey] stringValue]
+                  : @"";
+          NSString *code = [diagnostic[ALNEOCLintDiagnosticCodeKey] isKindOfClass:[NSString class]]
+                               ? diagnostic[ALNEOCLintDiagnosticCodeKey]
+                               : @"lint";
+          NSString *message = [diagnostic[ALNEOCLintDiagnosticMessageKey] isKindOfClass:[NSString class]]
+                                  ? diagnostic[ALNEOCLintDiagnosticMessageKey]
+                                  : @"template lint warning";
+          fprintf(stderr,
+                  "eocc: warning path=%s line=%s column=%s code=%s message=%s\n",
+                  [path UTF8String], [line UTF8String], [column UTF8String],
+                  [code UTF8String], [message UTF8String]);
+        }
+      } else {
+        fprintf(stderr, "eocc: warning unable to lint template: %s\n",
+                [templatePath UTF8String]);
+      }
+
       [registryEntries addObject:@{
         @"logicalPath" : logicalPath,
         @"symbol" : [transpiler symbolNameForLogicalPath:logicalPath]

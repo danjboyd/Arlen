@@ -33,6 +33,7 @@ Arlen is designed to solve the same class of problems as frameworks like Mojolic
 - Phase 7B: initial slice implemented (security profile presets + fail-fast security misconfiguration startup diagnostics).
 - Phase 7C: initial slice implemented (trace/correlation propagation headers, JSON health/readiness signal payloads, and deploy operability validation script integration).
 - Phase 7D: initial slice implemented (jobs idempotency-key durability contracts, cache expiry/removal conformance hardening, and retry-policy wrappers for mail/attachments).
+- Phase 7E: initial slice implemented (template lint diagnostics, expanded multiline/nested fixture coverage, and include/render path hardening integration checks).
 
 ## Quick Start
 
@@ -126,6 +127,8 @@ High-value guides:
 - [Phase 7B Security Defaults](docs/PHASE7B_SECURITY_DEFAULTS.md)
 - [Phase 7C Observability + Operability](docs/PHASE7C_OBSERVABILITY_OPERABILITY.md)
 - [Phase 7D Service Durability](docs/PHASE7D_SERVICE_DURABILITY.md)
+- [Phase 7E Template Pipeline Maturity](docs/PHASE7E_TEMPLATE_PIPELINE_MATURITY.md)
+- [Template Troubleshooting](docs/TEMPLATE_TROUBLESHOOTING.md)
 - [SQL Builder Phase 4 Migration Guide](docs/SQL_BUILDER_PHASE4_MIGRATION.md)
 - [Propane Manager](docs/PROPANE.md)
 - [Release Process](docs/RELEASE_PROCESS.md)

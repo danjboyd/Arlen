@@ -1,0 +1,14 @@
+<%
+NSString *header =
+    [NSString stringWithFormat:@"%@ %@", @"Arlen", $title];
+NSArray *rows = $items;
+%>
+<h1><%= header %></h1>
+<ul>
+<% for (NSString *row in rows) { %>
+  <li><%== row %></li>
+<% } %>
+</ul>
+<p><%=
+  [NSString stringWithFormat:@"%@:%@", @"row-count", @([rows count])]
+%></p>

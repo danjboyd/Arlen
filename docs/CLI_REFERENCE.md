@@ -155,6 +155,25 @@ Run full quality gate (`make check`):
 
 Build framework targets (`make all`).
 
+## `build/eocc`
+
+Template transpiler used by `make`/`boomhauer` pipelines.
+
+Usage:
+
+```text
+build/eocc --template-root <dir> --output-dir <dir> [--registry-out <file>] <template1.html.eoc> [template2 ...]
+```
+
+Diagnostics behavior:
+
+- syntax/transpile failures return non-zero and emit deterministic location metadata:
+  - `eocc: location path=<path> line=<line> column=<column>`
+- lint warnings are emitted during successful transpile:
+  - `eocc: warning path=<path> line=<line> column=<column> code=<code> message=<message>`
+  - current lint code: `unguarded_include` (include return value should be checked)
+- lint warnings are non-fatal in this phase slice
+
 ### `arlen config [--env <name>] [--json]`
 
 Load and print merged runtime config.
