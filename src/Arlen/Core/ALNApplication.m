@@ -21,6 +21,9 @@
 
 #include <ctype.h>
 #include <math.h>
+#include <stdio.h>
+#include <sys/time.h>
+#include <time.h>
 #include <unistd.h>
 
 NSString *const ALNApplicationErrorDomain = @"Arlen.Application.Error";
@@ -1134,14 +1137,35 @@ static NSString *ALNGenerateRequestID(void) {
 }
 
 static NSString *ALNISO8601Now(void) {
-  static NSDateFormatter *formatter = nil;
-  if (formatter == nil) {
-    formatter = [[NSDateFormatter alloc] init];
-    formatter.locale = [[NSLocale alloc] initWithLocaleIdentifier:@"en_US_POSIX"];
-    formatter.timeZone = [NSTimeZone timeZoneWithAbbreviation:@"UTC"];
-    formatter.dateFormat = @"yyyy-MM-dd'T'HH:mm:ss.SSS'Z'";
+  struct timeval tv;
+  if (gettimeofday(&tv, NULL) != 0) {
+    return @"1970-01-01T00:00:00.000Z";
   }
-  return [formatter stringFromDate:[NSDate date]];
+
+  time_t seconds = tv.tv_sec;
+  struct tm utc;
+  if (gmtime_r(&seconds, &utc) == NULL) {
+    return @"1970-01-01T00:00:00.000Z";
+  }
+
+  int milliseconds = (int)(tv.tv_usec / 1000);
+  char buffer[32];
+  int written = snprintf(buffer,
+                         sizeof(buffer),
+                         "%04d-%02d-%02dT%02d:%02d:%02d.%03dZ",
+                         utc.tm_year + 1900,
+                         utc.tm_mon + 1,
+                         utc.tm_mday,
+                         utc.tm_hour,
+                         utc.tm_min,
+                         utc.tm_sec,
+                         milliseconds);
+  if (written <= 0 || written >= (int)sizeof(buffer)) {
+    return @"1970-01-01T00:00:00.000Z";
+  }
+
+  NSString *formatted = [NSString stringWithUTF8String:buffer];
+  return [formatted length] > 0 ? formatted : @"1970-01-01T00:00:00.000Z";
 }
 
 static NSString *ALNHeaderValue(NSDictionary *headers, NSString *name) {

@@ -1,5 +1,9 @@
 #import "ALNLogger.h"
 
+#include <stdio.h>
+#include <sys/time.h>
+#include <time.h>
+
 static NSString *ALNLogLevelLabel(ALNLogLevel level) {
   switch (level) {
   case ALNLogLevelDebug:
@@ -15,16 +19,35 @@ static NSString *ALNLogLevelLabel(ALNLogLevel level) {
 }
 
 static NSString *ALNISO8601Now(void) {
-  NSMutableDictionary *threadDictionary = [[NSThread currentThread] threadDictionary];
-  NSDateFormatter *formatter = threadDictionary[@"ALNLoggerISO8601Formatter"];
-  if (![formatter isKindOfClass:[NSDateFormatter class]]) {
-    formatter = [[NSDateFormatter alloc] init];
-    formatter.locale = [[NSLocale alloc] initWithLocaleIdentifier:@"en_US_POSIX"];
-    formatter.timeZone = [NSTimeZone timeZoneWithAbbreviation:@"UTC"];
-    formatter.dateFormat = @"yyyy-MM-dd'T'HH:mm:ss.SSS'Z'";
-    threadDictionary[@"ALNLoggerISO8601Formatter"] = formatter;
+  struct timeval tv;
+  if (gettimeofday(&tv, NULL) != 0) {
+    return @"1970-01-01T00:00:00.000Z";
   }
-  return [formatter stringFromDate:[NSDate date]];
+
+  time_t seconds = tv.tv_sec;
+  struct tm utc;
+  if (gmtime_r(&seconds, &utc) == NULL) {
+    return @"1970-01-01T00:00:00.000Z";
+  }
+
+  int milliseconds = (int)(tv.tv_usec / 1000);
+  char buffer[32];
+  int written = snprintf(buffer,
+                         sizeof(buffer),
+                         "%04d-%02d-%02dT%02d:%02d:%02d.%03dZ",
+                         utc.tm_year + 1900,
+                         utc.tm_mon + 1,
+                         utc.tm_mday,
+                         utc.tm_hour,
+                         utc.tm_min,
+                         utc.tm_sec,
+                         milliseconds);
+  if (written <= 0 || written >= (int)sizeof(buffer)) {
+    return @"1970-01-01T00:00:00.000Z";
+  }
+
+  NSString *formatted = [NSString stringWithUTF8String:buffer];
+  return [formatted length] > 0 ? formatted : @"1970-01-01T00:00:00.000Z";
 }
 
 static NSDictionary *ALNMergedFields(NSString *message, ALNLogLevel level,
@@ -66,10 +89,12 @@ static NSDictionary *ALNMergedFields(NSString *message, ALNLogLevel level,
                                                    options:0
                                                      error:&jsonError];
     if (data != nil) {
-      fprintf(stderr, "%s\n", [[NSString alloc] initWithData:data
-                                                    encoding:NSUTF8StringEncoding]
-                                 .UTF8String);
-      return;
+      NSString *line = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
+      const char *utf8 = [line UTF8String];
+      if (utf8 != NULL) {
+        fprintf(stderr, "%s\n", utf8);
+        return;
+      }
     }
   }
 

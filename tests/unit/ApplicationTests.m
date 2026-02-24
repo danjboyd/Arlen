@@ -279,6 +279,15 @@
   return [segments[1] isKindOfClass:[NSString class]] ? segments[1] : @"";
 }
 
+- (BOOL)isISO8601UTCMillisecondTimestamp:(NSString *)value {
+  if (![value isKindOfClass:[NSString class]]) {
+    return NO;
+  }
+  NSRange match = [value rangeOfString:@"^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
+                               options:NSRegularExpressionSearch];
+  return match.location != NSNotFound;
+}
+
 - (void)testImplicitJSONForDictionaryReturn {
   ALNApplication *app = [self buildAppWithHaltingMiddleware:NO];
   ALNResponse *response = [app dispatchRequest:[self requestForPath:@"/dict"]];
@@ -592,6 +601,71 @@
   NSDictionary *checks = [json[@"checks"] isKindOfClass:[NSDictionary class]] ? json[@"checks"] : @{};
   XCTAssertEqualObjects(@(YES), checks[@"request_dispatch"][@"ok"]);
   XCTAssertNotNil(checks[@"active_requests"][@"value"]);
+  NSString *timestamp = [json[@"timestamp_utc"] isKindOfClass:[NSString class]] ? json[@"timestamp_utc"] : @"";
+  XCTAssertTrue([self isISO8601UTCMillisecondTimestamp:timestamp]);
+}
+
+- (void)testHealthzJSONDispatchIsStableUnderConcurrentLoad {
+  ALNApplication *app = [self buildAppWithHaltingMiddleware:NO];
+  NSOperationQueue *queue = [[NSOperationQueue alloc] init];
+  queue.maxConcurrentOperationCount = 12;
+
+  NSLock *failureLock = [[NSLock alloc] init];
+  NSMutableArray *failures = [NSMutableArray array];
+  NSUInteger workerCount = 12;
+  NSUInteger requestsPerWorker = 120;
+
+  for (NSUInteger worker = 0; worker < workerCount; worker++) {
+    [queue addOperationWithBlock:^{
+      @autoreleasepool {
+        for (NSUInteger idx = 0; idx < requestsPerWorker; idx++) {
+          [failureLock lock];
+          BOOL shouldStop = ([failures count] > 0);
+          [failureLock unlock];
+          if (shouldStop) {
+            break;
+          }
+
+          ALNResponse *response = [app dispatchRequest:[self requestForPath:@"/healthz"
+                                                                 queryString:@""
+                                                                     headers:@{
+                                                                       @"accept" : @"application/json",
+                                                                     }]];
+          if (response.statusCode != 200) {
+            [failureLock lock];
+            [failures addObject:[NSString stringWithFormat:@"unexpected status=%ld",
+                                                           (long)response.statusCode]];
+            [failureLock unlock];
+            break;
+          }
+
+          NSError *jsonError = nil;
+          NSDictionary *json = [NSJSONSerialization JSONObjectWithData:response.bodyData
+                                                               options:0
+                                                                 error:&jsonError];
+          if (jsonError != nil || ![json isKindOfClass:[NSDictionary class]]) {
+            [failureLock lock];
+            [failures addObject:@"healthz JSON decode failed"];
+            [failureLock unlock];
+            break;
+          }
+
+          NSString *timestamp = [json[@"timestamp_utc"] isKindOfClass:[NSString class]]
+                                    ? json[@"timestamp_utc"]
+                                    : @"";
+          if (![self isISO8601UTCMillisecondTimestamp:timestamp]) {
+            [failureLock lock];
+            [failures addObject:[NSString stringWithFormat:@"invalid timestamp_utc=%@", timestamp]];
+            [failureLock unlock];
+            break;
+          }
+        }
+      }
+    }];
+  }
+
+  [queue waitUntilAllOperationsAreFinished];
+  XCTAssertEqual((NSUInteger)0, [failures count], @"%@", [failures firstObject]);
 }
 
 - (void)testReadyzJSONCanRequireStartedStateAndReturnDeterministic503 {
