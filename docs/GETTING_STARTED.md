@@ -130,6 +130,22 @@ ARLEN_READINESS_REQUIRES_STARTUP=1 ./bin/boomhauer
 
 With this setting, `GET /readyz` returns deterministic `503 not_ready` until startup completes.
 
+Route compile startup override:
+
+```bash
+ARLEN_ROUTING_COMPILE_ON_START=0 ./bin/boomhauer
+```
+
+With this setting, route action/guard/schema readiness checks run lazily on first route use instead of during startup.
+
+Route compile warning escalation override:
+
+```bash
+ARLEN_ROUTING_ROUTE_COMPILE_WARNINGS_AS_ERRORS=1 ./bin/boomhauer
+```
+
+With this setting, startup fails when route schema readiness emits warnings.
+
 Cluster quorum readiness override (multi-node deployments):
 
 ```bash
@@ -413,6 +429,8 @@ Framework/app runtime:
 - `ARLEN_PAGE_STATE_COMPAT_ENABLED`
 - `ARLEN_EOC_STRICT_LOCALS`
 - `ARLEN_EOC_STRICT_STRINGIFY`
+- `ARLEN_ROUTING_COMPILE_ON_START`
+- `ARLEN_ROUTING_ROUTE_COMPILE_WARNINGS_AS_ERRORS`
 - `ARLEN_REDIS_URL` (plugin template hook)
 - `ARLEN_REDIS_TEST_URL` (optional live Redis conformance test target)
 - `ARLEN_SMTP_HOST` (plugin template hook)

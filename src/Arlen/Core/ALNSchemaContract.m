@@ -141,6 +141,178 @@ static NSArray *ALNSchemaTransformerNames(NSDictionary *descriptor) {
   return [NSArray arrayWithArray:names];
 }
 
+static NSDictionary *ALNSchemaReadinessDiagnostic(NSString *field,
+                                                  NSString *severity,
+                                                  NSString *code,
+                                                  NSString *message,
+                                                  NSDictionary *meta) {
+  NSMutableDictionary *entry = [NSMutableDictionary dictionary];
+  entry[@"field"] = [field isKindOfClass:[NSString class]] ? field : @"";
+  entry[@"severity"] = [severity isKindOfClass:[NSString class]] ? severity : @"error";
+  entry[@"code"] = [code isKindOfClass:[NSString class]] ? code : @"invalid_schema";
+  entry[@"message"] =
+      [message isKindOfClass:[NSString class]] ? message : @"Invalid schema descriptor";
+  if ([meta isKindOfClass:[NSDictionary class]] && [meta count] > 0) {
+    entry[@"meta"] = meta;
+  }
+  return entry;
+}
+
+static NSSet *ALNSupportedSchemaTypes(void) {
+  static NSSet *types = nil;
+  if (types == nil) {
+    types = [[NSSet alloc] initWithArray:@[
+      @"string",
+      @"integer",
+      @"number",
+      @"boolean",
+      @"object",
+      @"array",
+    ]];
+  }
+  return types;
+}
+
+static NSString *ALNSchemaJoinFieldPath(NSString *base, NSString *segment) {
+  NSString *lhs = [base isKindOfClass:[NSString class]] ? base : @"";
+  NSString *rhs = [segment isKindOfClass:[NSString class]] ? segment : @"";
+  if ([lhs length] == 0) {
+    return rhs;
+  }
+  if ([rhs length] == 0) {
+    return lhs;
+  }
+  return [NSString stringWithFormat:@"%@.%@", lhs, rhs];
+}
+
+static void ALNCollectSchemaReadinessDiagnosticsForDescriptor(id rawDescriptor,
+                                                              NSString *fieldPath,
+                                                              NSMutableArray *diagnostics) {
+  NSString *path = [fieldPath isKindOfClass:[NSString class]] ? fieldPath : @"";
+  if (rawDescriptor != nil &&
+      ![rawDescriptor isKindOfClass:[NSDictionary class]] &&
+      ![rawDescriptor isKindOfClass:[NSString class]]) {
+    [diagnostics addObject:ALNSchemaReadinessDiagnostic(
+                            path,
+                            @"warning",
+                            @"invalid_descriptor",
+                            @"Descriptor should be a dictionary or type string",
+                            @{ @"descriptor_class" : NSStringFromClass([rawDescriptor class]) ?: @"" })];
+    return;
+  }
+
+  NSDictionary *descriptor = ALNSchemaDescriptorFromValue(rawDescriptor);
+  NSString *declaredType = [descriptor[@"type"] isKindOfClass:[NSString class]]
+                               ? [descriptor[@"type"] lowercaseString]
+                               : @"";
+  if ([declaredType length] > 0 &&
+      ![ALNSupportedSchemaTypes() containsObject:declaredType]) {
+    [diagnostics addObject:ALNSchemaReadinessDiagnostic(path,
+                                                        @"error",
+                                                        @"unsupported_type",
+                                                        @"Schema type is not supported",
+                                                        @{ @"type" : declaredType ?: @"" })];
+  }
+
+  id requiredValue = descriptor[@"required"];
+  if (requiredValue != nil &&
+      ![requiredValue isKindOfClass:[NSArray class]] &&
+      ![requiredValue respondsToSelector:@selector(boolValue)]) {
+    [diagnostics addObject:ALNSchemaReadinessDiagnostic(
+                            path,
+                            @"warning",
+                            @"invalid_required_shape",
+                            @"required should be an array or boolean",
+                            @{ @"required_class" : NSStringFromClass([requiredValue class]) ?: @"" })];
+  }
+
+  id singleTransformer = descriptor[@"transformer"];
+  if (singleTransformer != nil && ![singleTransformer isKindOfClass:[NSString class]]) {
+    [diagnostics addObject:ALNSchemaReadinessDiagnostic(
+                            path,
+                            @"warning",
+                            @"invalid_transformer_shape",
+                            @"transformer should be a string",
+                            @{ @"transformer_class" : NSStringFromClass([singleTransformer class]) ?: @"" })];
+  }
+
+  id multipleTransformers = descriptor[@"transformers"];
+  if (multipleTransformers != nil && ![multipleTransformers isKindOfClass:[NSArray class]]) {
+    [diagnostics addObject:ALNSchemaReadinessDiagnostic(
+                            path,
+                            @"warning",
+                            @"invalid_transformers_shape",
+                            @"transformers should be an array",
+                            @{ @"transformers_class" : NSStringFromClass([multipleTransformers class]) ?: @"" })];
+  } else if ([multipleTransformers isKindOfClass:[NSArray class]]) {
+    NSArray *values = (NSArray *)multipleTransformers;
+    for (NSUInteger idx = 0; idx < [values count]; idx++) {
+      id value = values[idx];
+      if ([value isKindOfClass:[NSString class]]) {
+        continue;
+      }
+      [diagnostics addObject:ALNSchemaReadinessDiagnostic(
+                              path,
+                              @"warning",
+                              @"invalid_transformer_name",
+                              @"transformers entries should be strings",
+                              @{
+                                @"index" : @(idx),
+                                @"transformer_class" : NSStringFromClass([value class]) ?: @""
+                              })];
+    }
+  }
+
+  for (NSString *name in ALNSchemaTransformerNames(descriptor)) {
+    if (ALNValueTransformerNamed(name) != nil) {
+      continue;
+    }
+    [diagnostics addObject:ALNSchemaReadinessDiagnostic(path,
+                                                        @"error",
+                                                        @"invalid_transformer",
+                                                        [NSString
+                                                            stringWithFormat:@"Unknown value transformer '%@'",
+                                                                             name ?: @""],
+                                                        @{ @"transformer" : name ?: @"" })];
+  }
+
+  id explicitProperties = descriptor[@"properties"];
+  if (explicitProperties != nil && ![explicitProperties isKindOfClass:[NSDictionary class]]) {
+    [diagnostics addObject:ALNSchemaReadinessDiagnostic(
+                            path,
+                            @"warning",
+                            @"invalid_properties_shape",
+                            @"properties should be a dictionary",
+                            @{ @"properties_class" : NSStringFromClass([explicitProperties class]) ?: @"" })];
+  }
+  NSDictionary *properties = ALNSchemaProperties(descriptor);
+  NSArray *propertyNames = [[properties allKeys] sortedArrayUsingSelector:@selector(compare:)];
+  for (id key in propertyNames) {
+    if (![key isKindOfClass:[NSString class]]) {
+      continue;
+    }
+    NSString *propertyPath = ALNSchemaJoinFieldPath(path, (NSString *)key);
+    ALNCollectSchemaReadinessDiagnosticsForDescriptor(properties[key],
+                                                      propertyPath,
+                                                      diagnostics);
+  }
+
+  id items = descriptor[@"items"];
+  if (items != nil &&
+      ![items isKindOfClass:[NSDictionary class]] &&
+      ![items isKindOfClass:[NSString class]]) {
+    [diagnostics addObject:ALNSchemaReadinessDiagnostic(
+                            path,
+                            @"warning",
+                            @"invalid_items_shape",
+                            @"items should be a dictionary or type string",
+                            @{ @"items_class" : NSStringFromClass([items class]) ?: @"" })];
+  } else if (items != nil) {
+    NSString *itemsPath = ([path length] > 0) ? [path stringByAppendingString:@"[]"] : @"[]";
+    ALNCollectSchemaReadinessDiagnosticsForDescriptor(items, itemsPath, diagnostics);
+  }
+}
+
 static BOOL ALNSchemaApplyDescriptorTransformers(id rawValue,
                                                  NSDictionary *descriptor,
                                                  NSString *fieldPath,
@@ -477,6 +649,16 @@ static NSString *ALNSchemaSource(NSDictionary *descriptor) {
     return @"param";
   }
   return source;
+}
+
+NSArray *ALNSchemaReadinessDiagnostics(NSDictionary *schema) {
+  if (![schema isKindOfClass:[NSDictionary class]] || [schema count] == 0) {
+    return @[];
+  }
+
+  NSMutableArray *diagnostics = [NSMutableArray array];
+  ALNCollectSchemaReadinessDiagnosticsForDescriptor(schema, @"", diagnostics);
+  return [NSArray arrayWithArray:diagnostics];
 }
 
 NSDictionary *ALNSchemaCoerceRequestValues(NSDictionary *schema,

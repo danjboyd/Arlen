@@ -7,13 +7,14 @@ This guide explains Arlen's runtime model at a high level.
 1. `ALNHTTPServer` accepts an HTTP request.
 2. Request is parsed into `ALNRequest`.
 3. `ALNRouter` matches method/path to a route.
-4. `ALNApplication` handles built-ins (`/healthz`, `/readyz`, `/livez`, `/metrics`, `/clusterz`, OpenAPI/docs paths) when no app route matches.
-5. Request contract coercion/validation runs (if configured on the matched route).
-6. Middleware and auth scope/role checks run.
-7. Controller action executes.
-8. Controller writes response directly or returns `NSDictionary`/`NSArray` for implicit JSON.
-9. Response contract validation runs (if configured), then metrics/perf/trace data are finalized.
-10. `ALNResponse` is serialized and sent.
+4. Route invocation metadata is resolved from startup compile output (or lazily compiled when startup compile is disabled).
+5. `ALNApplication` handles built-ins (`/healthz`, `/readyz`, `/livez`, `/metrics`, `/clusterz`, OpenAPI/docs paths) when no app route matches.
+6. Request contract coercion/validation runs (if configured on the matched route).
+7. Middleware and auth scope/role checks run.
+8. Controller action executes.
+9. Controller writes response directly or returns `NSDictionary`/`NSArray` for implicit JSON.
+10. Response contract validation runs (if configured), then metrics/perf/trace data are finalized.
+11. `ALNResponse` is serialized and sent.
 
 ## 2. Core Types
 
@@ -147,6 +148,10 @@ Config is loaded from:
 - `config/environments/<environment>.plist`
 
 Environment variables may override key values (`ARLEN_*`).
+
+Routing compile defaults:
+- `routing.compileOnStart = YES`
+- `routing.routeCompileWarningsAsErrors = NO`
 
 ## 11. Development vs Production Naming
 

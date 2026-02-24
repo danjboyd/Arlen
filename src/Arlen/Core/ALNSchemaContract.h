@@ -12,6 +12,8 @@ NSDictionary *_Nullable ALNSchemaCoerceRequestValues(NSDictionary *schema,
                                                      NSDictionary *routeParams,
                                                      NSArray *_Nullable *_Nullable errors);
 
+NSArray *_Nonnull ALNSchemaReadinessDiagnostics(NSDictionary *schema);
+
 BOOL ALNSchemaValidateResponseValue(id _Nullable value,
                                     NSDictionary *schema,
                                     NSArray *_Nullable *_Nullable errors);

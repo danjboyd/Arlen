@@ -1,6 +1,6 @@
 # Arlen Phase 8 Roadmap
 
-Status: Active (Phase 8A complete; Phase 8B planned)  
+Status: Active (Phase 8A complete; Phase 8B complete)  
 Last updated: 2026-02-24
 
 Related docs:
@@ -64,7 +64,7 @@ Implementation notes (completed):
 
 ## 3.2 Phase 8B: Startup Route Compilation + Validation
 
-Status: Planned
+Status: Complete (2026-02-24)
 
 Deliverables:
 
@@ -82,6 +82,21 @@ Acceptance (required):
 - Missing transformer references in route schemas fail startup deterministically.
 - Successful startup implies dispatch-ready route invocation contracts.
 - Runtime dispatch no longer depends on first-hit signature validation paths.
+
+Implementation notes (completed):
+
+- Added startup route compile pass in `ALNApplication` (`startWithError:`) gated by `routing.compileOnStart` (default `YES`).
+- Added route compile diagnostics with deterministic `compile_code` contracts for:
+  - invalid action signature (`route_action_signature_invalid`)
+  - invalid guard signature (`route_guard_signature_invalid`)
+  - invalid schema readiness (`route_schema_invalid`)
+  - warning escalation (`route_compile_warning`)
+- Added schema-readiness diagnostics in `ALNSchemaContract` for transformer references, unsupported types, and descriptor-shape warnings.
+- Added route-level cached invocation metadata (`compiledActionSignature`, `compiledGuardSignature`, `compiledInvocationMetadata`) and switched dispatch to consume cached signatures.
+- Added additive config controls:
+  - `routing.compileOnStart` (default `YES`)
+  - `routing.routeCompileWarningsAsErrors` (default `NO`)
+- Added unit coverage for startup compile failures and warning-escalation behavior in `ApplicationTests`, plus config override coverage in `ConfigTests`.
 
 ## 4. Testing and Rollout Strategy
 

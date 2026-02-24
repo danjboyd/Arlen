@@ -44,6 +44,9 @@ typedef NS_ENUM(NSInteger, ALNRouteKind) {
 @property(nonatomic, copy) NSArray *requiredScopes;
 @property(nonatomic, copy) NSArray *requiredRoles;
 @property(nonatomic, assign) BOOL includeInOpenAPI;
+@property(nonatomic, strong, nullable) NSMethodSignature *compiledActionSignature;
+@property(nonatomic, strong, nullable) NSMethodSignature *compiledGuardSignature;
+@property(nonatomic, assign) BOOL compiledInvocationMetadata;
 
 - (instancetype)initWithMethod:(NSString *)method
                    pathPattern:(NSString *)pathPattern

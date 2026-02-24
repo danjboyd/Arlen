@@ -1,6 +1,6 @@
 # Arlen Phase 2 + Phase 3 Roadmap Index
 
-Status: Active (Phase 2A-2D complete; Phase 3A-3H complete; Phase 4A-4E complete; Phase 5A-5E complete; Phase 7A/7B/7C/7D/7E/7F/7G/7H initial slices implemented; Phase 7 follow-on active; Phase 8A complete; Phase 8B planned)  
+Status: Active (Phase 2A-2D complete; Phase 3A-3H complete; Phase 4A-4E complete; Phase 5A-5E complete; Phase 7A/7B/7C/7D/7E/7F/7G/7H initial slices implemented; Phase 7 follow-on active; Phase 8A complete; Phase 8B complete)  
 Last updated: 2026-02-24
 
 This index points to the current roadmap documents:
@@ -102,7 +102,7 @@ Phase 8 execution/planning is defined in `docs/PHASE8_ROADMAP.md`, including:
   - EOC keypath-local support (`$identifier(.identifier)*`)
   - centralized value-transformer registry for schema/runtime conversion paths
   - unified field-error envelope contract with keypath-ready field semantics
-- Phase 8B planned:
+- Phase 8B complete:
   - startup route compilation and fail-fast signature/schema readiness validation
   - cached dispatch invocation metadata to reduce runtime signature checks
 - explicitly deferred (future consideration, out-of-scope for 8A/8B):

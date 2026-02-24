@@ -156,6 +156,10 @@
   XCTAssertTrue([plugins[@"classes"] isKindOfClass:[NSArray class]]);
   XCTAssertEqual((NSUInteger)0, [plugins[@"classes"] count]);
 
+  NSDictionary *routing = config[@"routing"];
+  XCTAssertEqualObjects(@(YES), routing[@"compileOnStart"]);
+  XCTAssertEqualObjects(@(NO), routing[@"routeCompileWarningsAsErrors"]);
+
   NSDictionary *cluster = config[@"cluster"];
   XCTAssertEqualObjects(@(NO), cluster[@"enabled"]);
   XCTAssertEqualObjects(@"default", cluster[@"name"]);
@@ -231,6 +235,8 @@
   setenv("ARLEN_CLUSTER_EXPECTED_NODES", "5", 1);
   setenv("ARLEN_CLUSTER_OBSERVED_NODES", "2", 1);
   setenv("ARLEN_CLUSTER_EMIT_HEADERS", "0", 1);
+  setenv("ARLEN_ROUTING_COMPILE_ON_START", "0", 1);
+  setenv("ARLEN_ROUTING_ROUTE_COMPILE_WARNINGS_AS_ERRORS", "1", 1);
 
   NSError *error = nil;
   NSDictionary *config = [ALNConfig loadConfigAtRoot:root
@@ -290,6 +296,8 @@
   unsetenv("ARLEN_CLUSTER_EXPECTED_NODES");
   unsetenv("ARLEN_CLUSTER_OBSERVED_NODES");
   unsetenv("ARLEN_CLUSTER_EMIT_HEADERS");
+  unsetenv("ARLEN_ROUTING_COMPILE_ON_START");
+  unsetenv("ARLEN_ROUTING_ROUTE_COMPILE_WARNINGS_AS_ERRORS");
 
   XCTAssertNil(error);
   NSDictionary *limits = config[@"requestLimits"];
@@ -374,6 +382,10 @@
   XCTAssertEqual((NSInteger)5, [cluster[@"expectedNodes"] integerValue]);
   XCTAssertEqual((NSInteger)2, [cluster[@"observedNodes"] integerValue]);
   XCTAssertEqualObjects(@(NO), cluster[@"emitHeaders"]);
+
+  NSDictionary *routing = config[@"routing"];
+  XCTAssertEqualObjects(@(NO), routing[@"compileOnStart"]);
+  XCTAssertEqualObjects(@(YES), routing[@"routeCompileWarningsAsErrors"]);
 }
 
 - (void)testLegacyEnvironmentPrefixFallback {
@@ -415,6 +427,8 @@
   setenv("MOJOOBJC_CLUSTER_EXPECTED_NODES", "4", 1);
   setenv("MOJOOBJC_CLUSTER_OBSERVED_NODES", "1", 1);
   setenv("MOJOOBJC_CLUSTER_EMIT_HEADERS", "0", 1);
+  setenv("MOJOOBJC_ROUTING_COMPILE_ON_START", "0", 1);
+  setenv("MOJOOBJC_ROUTING_ROUTE_COMPILE_WARNINGS_AS_ERRORS", "1", 1);
 
   NSError *error = nil;
   NSDictionary *config = [ALNConfig loadConfigAtRoot:root
@@ -450,6 +464,8 @@
   unsetenv("MOJOOBJC_CLUSTER_EXPECTED_NODES");
   unsetenv("MOJOOBJC_CLUSTER_OBSERVED_NODES");
   unsetenv("MOJOOBJC_CLUSTER_EMIT_HEADERS");
+  unsetenv("MOJOOBJC_ROUTING_COMPILE_ON_START");
+  unsetenv("MOJOOBJC_ROUTING_ROUTE_COMPILE_WARNINGS_AS_ERRORS");
 
   XCTAssertNil(error);
   XCTAssertEqualObjects(@"0.0.0.0", config[@"host"]);
@@ -491,6 +507,10 @@
   XCTAssertEqual((NSInteger)4, [cluster[@"expectedNodes"] integerValue]);
   XCTAssertEqual((NSInteger)1, [cluster[@"observedNodes"] integerValue]);
   XCTAssertEqualObjects(@(NO), cluster[@"emitHeaders"]);
+
+  NSDictionary *routing = config[@"routing"];
+  XCTAssertEqualObjects(@(NO), routing[@"compileOnStart"]);
+  XCTAssertEqualObjects(@(YES), routing[@"routeCompileWarningsAsErrors"]);
 }
 
 - (void)testEOCStrictModeEnvironmentOverrides {

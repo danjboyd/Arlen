@@ -113,6 +113,33 @@
 
 @end
 
+@interface AppInvalidActionController : ALNController
+@end
+
+@implementation AppInvalidActionController
+
+- (id)invalidAction {
+  return @{ @"ok" : @(YES) };
+}
+
+@end
+
+@interface AppInvalidGuardController : ALNController
+@end
+
+@implementation AppInvalidGuardController
+
+- (BOOL)invalidGuard {
+  return YES;
+}
+
+- (id)ok:(ALNContext *)ctx {
+  (void)ctx;
+  return @{ @"ok" : @(YES) };
+}
+
+@end
+
 @interface AppTraceCaptureExporter : NSObject <ALNTraceExporter>
 
 @property(nonatomic, strong) NSDictionary *lastTrace;
@@ -747,6 +774,182 @@
   XCTAssertEqualObjects(trace[@"request_id"], trace[@"correlation_id"]);
   XCTAssertTrue([trace[@"span_id"] length] == 16);
   XCTAssertEqualObjects(@"dict", exporter.lastRouteName);
+}
+
+- (void)testStartFailsWhenRouteActionSignatureIsInvalid {
+  ALNApplication *app = [[ALNApplication alloc] initWithConfig:@{
+    @"environment" : @"test",
+    @"logFormat" : @"json",
+  }];
+  [app registerRouteMethod:@"GET"
+                      path:@"/broken"
+                      name:@"broken_action"
+           controllerClass:[AppInvalidActionController class]
+                    action:@"invalidAction"];
+
+  NSError *startError = nil;
+  BOOL started = [app startWithError:&startError];
+  XCTAssertFalse(started);
+  XCTAssertNotNil(startError);
+  XCTAssertEqualObjects(@"Arlen.Application.Error", startError.domain);
+  XCTAssertEqual((NSInteger)333, startError.code);
+  XCTAssertEqualObjects(@"route_action_signature_invalid", startError.userInfo[@"compile_code"]);
+  XCTAssertEqualObjects(@"broken_action", startError.userInfo[@"route_name"]);
+}
+
+- (void)testStartFailsWhenRouteGuardSignatureIsInvalid {
+  ALNApplication *app = [[ALNApplication alloc] initWithConfig:@{
+    @"environment" : @"test",
+    @"logFormat" : @"json",
+  }];
+  [app registerRouteMethod:@"GET"
+                      path:@"/guarded"
+                      name:@"broken_guard"
+                   formats:nil
+           controllerClass:[AppInvalidGuardController class]
+               guardAction:@"invalidGuard"
+                    action:@"ok"];
+
+  NSError *startError = nil;
+  BOOL started = [app startWithError:&startError];
+  XCTAssertFalse(started);
+  XCTAssertNotNil(startError);
+  XCTAssertEqualObjects(@"Arlen.Application.Error", startError.domain);
+  XCTAssertEqual((NSInteger)334, startError.code);
+  XCTAssertEqualObjects(@"route_guard_signature_invalid", startError.userInfo[@"compile_code"]);
+  XCTAssertEqualObjects(@"broken_guard", startError.userInfo[@"route_name"]);
+}
+
+- (void)testStartFailsWhenRouteSchemaReferencesMissingTransformer {
+  ALNApplication *app = [[ALNApplication alloc] initWithConfig:@{
+    @"environment" : @"test",
+    @"logFormat" : @"json",
+  }];
+  [app registerRouteMethod:@"GET"
+                      path:@"/dict"
+                      name:@"dict"
+           controllerClass:[AppJSONController class]
+                    action:@"dict"];
+
+  NSError *configureError = nil;
+  BOOL configured = [app configureRouteNamed:@"dict"
+                               requestSchema:@{
+                                 @"type" : @"object",
+                                 @"properties" : @{
+                                   @"name" : @{
+                                     @"type" : @"string",
+                                     @"source" : @"query",
+                                     @"required" : @(YES),
+                                     @"transformer" : @"missing_transformer",
+                                   },
+                                 },
+                               }
+                              responseSchema:nil
+                                     summary:nil
+                                 operationID:nil
+                                        tags:nil
+                               requiredScopes:nil
+                                requiredRoles:nil
+                              includeInOpenAPI:YES
+                                        error:&configureError];
+  XCTAssertTrue(configured);
+  XCTAssertNil(configureError);
+
+  NSError *startError = nil;
+  BOOL started = [app startWithError:&startError];
+  XCTAssertFalse(started);
+  XCTAssertNotNil(startError);
+  XCTAssertEqualObjects(@"Arlen.Application.Error", startError.domain);
+  XCTAssertEqual((NSInteger)335, startError.code);
+  XCTAssertEqualObjects(@"route_schema_invalid", startError.userInfo[@"compile_code"]);
+  NSArray *details = [startError.userInfo[@"details"] isKindOfClass:[NSArray class]]
+                          ? startError.userInfo[@"details"]
+                          : @[];
+  XCTAssertEqual((NSUInteger)1, [details count]);
+  NSDictionary *entry =
+      [[details firstObject] isKindOfClass:[NSDictionary class]] ? [details firstObject] : @{};
+  XCTAssertEqualObjects(@"request.name", entry[@"field"]);
+  XCTAssertEqualObjects(@"invalid_transformer", entry[@"code"]);
+}
+
+- (void)testCompileOnStartCanBeDisabledForCompatibility {
+  ALNApplication *app = [[ALNApplication alloc] initWithConfig:@{
+    @"environment" : @"test",
+    @"logFormat" : @"json",
+    @"apiOnly" : @(YES),
+    @"routing" : @{
+      @"compileOnStart" : @(NO),
+    },
+  }];
+  [app registerRouteMethod:@"GET"
+                      path:@"/broken"
+                      name:@"broken_action"
+           controllerClass:[AppInvalidActionController class]
+                    action:@"invalidAction"];
+
+  NSError *startError = nil;
+  BOOL started = [app startWithError:&startError];
+  XCTAssertTrue(started);
+  XCTAssertNil(startError);
+
+  ALNResponse *response = [app dispatchRequest:[self requestForPath:@"/broken"]];
+  XCTAssertEqual((NSInteger)500, response.statusCode);
+  NSError *jsonError = nil;
+  NSDictionary *json = [NSJSONSerialization JSONObjectWithData:response.bodyData
+                                                       options:0
+                                                         error:&jsonError];
+  XCTAssertNil(jsonError);
+  XCTAssertEqualObjects(@"invalid_action_signature", json[@"error"][@"code"]);
+  [app shutdown];
+}
+
+- (void)testRouteCompileWarningsCanBeEscalatedToStartupErrors {
+  ALNApplication *app = [[ALNApplication alloc] initWithConfig:@{
+    @"environment" : @"test",
+    @"logFormat" : @"json",
+    @"routing" : @{
+      @"compileOnStart" : @(YES),
+      @"routeCompileWarningsAsErrors" : @(YES),
+    },
+  }];
+  [app registerRouteMethod:@"GET"
+                      path:@"/dict"
+                      name:@"dict_warning"
+           controllerClass:[AppJSONController class]
+                    action:@"dict"];
+
+  NSError *configureError = nil;
+  BOOL configured = [app configureRouteNamed:@"dict_warning"
+                               requestSchema:@{
+                                 @"type" : @"array",
+                                 @"items" : @42,
+                               }
+                              responseSchema:nil
+                                     summary:nil
+                                 operationID:nil
+                                        tags:nil
+                               requiredScopes:nil
+                                requiredRoles:nil
+                              includeInOpenAPI:YES
+                                        error:&configureError];
+  XCTAssertTrue(configured);
+  XCTAssertNil(configureError);
+
+  NSError *startError = nil;
+  BOOL started = [app startWithError:&startError];
+  XCTAssertFalse(started);
+  XCTAssertNotNil(startError);
+  XCTAssertEqual((NSInteger)336, startError.code);
+  XCTAssertEqualObjects(@"route_compile_warning", startError.userInfo[@"compile_code"]);
+  NSArray *details = [startError.userInfo[@"details"] isKindOfClass:[NSArray class]]
+                          ? startError.userInfo[@"details"]
+                          : @[];
+  XCTAssertEqual((NSUInteger)1, [details count]);
+  NSDictionary *entry =
+      [[details firstObject] isKindOfClass:[NSDictionary class]] ? [details firstObject] : @{};
+  XCTAssertEqualObjects(@"request", entry[@"field"]);
+  XCTAssertEqualObjects(@"invalid_items_shape", entry[@"code"]);
+  XCTAssertEqualObjects(@"warning", entry[@"severity"]);
 }
 
 - (void)testStartFailsFastWhenSessionEnabledWithoutSecret {

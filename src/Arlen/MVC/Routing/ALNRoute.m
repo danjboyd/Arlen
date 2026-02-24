@@ -118,6 +118,9 @@ static NSString *ALNNormalizeRouteFormat(NSString *value) {
     _requiredScopes = @[];
     _requiredRoles = @[];
     _includeInOpenAPI = YES;
+    _compiledActionSignature = nil;
+    _compiledGuardSignature = nil;
+    _compiledInvocationMetadata = NO;
 
     BOOL hasWildcard = NO;
     BOOL hasParam = NO;

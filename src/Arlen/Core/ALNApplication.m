@@ -61,6 +61,14 @@ static void ALNSetStructuredErrorResponse(ALNResponse *response,
 
 - (void)loadConfiguredPlugins;
 - (void)loadConfiguredStaticMounts;
+- (BOOL)compileRegisteredRoutesWithWarningsAsErrors:(BOOL)warningsAsErrors
+                                              error:(NSError *_Nullable *_Nullable)error;
+- (BOOL)compileRoute:(ALNRoute *)route
+       controllerMap:(NSMutableDictionary *)controllerMap
+    warningsAsErrors:(BOOL)warningsAsErrors
+               error:(NSError *_Nullable *_Nullable)error;
+- (BOOL)routingCompileOnStartEnabled;
+- (BOOL)routingRouteCompileWarningsAsErrorsEnabled;
 - (nullable NSDictionary *)mountedEntryForPath:(NSString *)requestPath
                                    rewrittenPath:(NSString *_Nullable *_Nullable)rewrittenPath;
 
@@ -484,6 +492,169 @@ static NSString *ALNStringConfigValue(id value, NSString *defaultValue) {
     return value;
   }
   return defaultValue;
+}
+
+static NSDictionary *ALNRouteCompileContext(ALNRoute *route) {
+  if (route == nil) {
+    return @{};
+  }
+  NSMutableDictionary *context = [NSMutableDictionary dictionary];
+  context[@"route_name"] = [route.name isKindOfClass:[NSString class]] ? route.name : @"";
+  context[@"route_method"] = [route.method isKindOfClass:[NSString class]] ? route.method : @"";
+  context[@"route_path"] = [route.pathPattern isKindOfClass:[NSString class]] ? route.pathPattern : @"";
+  context[@"controller"] = NSStringFromClass(route.controllerClass ?: [NSObject class]);
+  context[@"action"] = [route.actionName isKindOfClass:[NSString class]] ? route.actionName : @"";
+  context[@"guard"] = [route.guardActionName isKindOfClass:[NSString class]] ? route.guardActionName : @"";
+  return context;
+}
+
+static NSError *ALNRouteCompileError(NSInteger code,
+                                     NSString *compileCode,
+                                     NSString *responseErrorCode,
+                                     NSString *message,
+                                     ALNRoute *route,
+                                     NSArray *details) {
+  NSMutableDictionary *userInfo = [NSMutableDictionary dictionary];
+  userInfo[NSLocalizedDescriptionKey] = message ?: @"route compile failed";
+  if ([compileCode length] > 0) {
+    userInfo[@"compile_code"] = compileCode;
+  }
+  if ([responseErrorCode length] > 0) {
+    userInfo[@"response_error_code"] = responseErrorCode;
+  }
+  [userInfo addEntriesFromDictionary:ALNRouteCompileContext(route)];
+  if ([details isKindOfClass:[NSArray class]] && [details count] > 0) {
+    userInfo[@"details"] = details;
+  }
+  return [NSError errorWithDomain:ALNApplicationErrorDomain
+                             code:code
+                         userInfo:userInfo];
+}
+
+static NSString *ALNRouteCompileResponseErrorCode(NSError *error) {
+  if (![error.userInfo isKindOfClass:[NSDictionary class]]) {
+    return @"route_compile_failed";
+  }
+  NSString *code = [error.userInfo[@"response_error_code"] isKindOfClass:[NSString class]]
+                       ? error.userInfo[@"response_error_code"]
+                       : @"";
+  if ([code length] > 0) {
+    return code;
+  }
+  return @"route_compile_failed";
+}
+
+static NSDictionary *ALNRouteCompileRuntimeDetails(NSError *error) {
+  if (![error.userInfo isKindOfClass:[NSDictionary class]]) {
+    return @{};
+  }
+  NSDictionary *userInfo = error.userInfo;
+  NSMutableDictionary *details = [NSMutableDictionary dictionary];
+  NSArray *keys = @[
+    @"compile_code",
+    @"route_name",
+    @"route_method",
+    @"route_path",
+    @"controller",
+    @"action",
+    @"guard",
+  ];
+  for (NSString *key in keys) {
+    id value = userInfo[key];
+    if ([value isKindOfClass:[NSString class]] && [value length] > 0) {
+      details[key] = value;
+    }
+  }
+  NSArray *diagnostics = [userInfo[@"details"] isKindOfClass:[NSArray class]]
+                             ? userInfo[@"details"]
+                             : @[];
+  if ([diagnostics count] > 0) {
+    details[@"route_compile_diagnostics"] = diagnostics;
+  }
+  return details;
+}
+
+static NSDictionary *ALNNormalizedSchemaCompileDiagnostic(NSDictionary *entry,
+                                                          NSString *schemaName) {
+  NSString *field = [entry[@"field"] isKindOfClass:[NSString class]] ? entry[@"field"] : @"";
+  NSString *severity = [entry[@"severity"] isKindOfClass:[NSString class]]
+                           ? [entry[@"severity"] lowercaseString]
+                           : @"error";
+  if (![severity isEqualToString:@"warning"] && ![severity isEqualToString:@"error"]) {
+    severity = @"error";
+  }
+  NSString *code = [entry[@"code"] isKindOfClass:[NSString class]] ? entry[@"code"] : @"invalid_schema";
+  NSString *message =
+      [entry[@"message"] isKindOfClass:[NSString class]] ? entry[@"message"] : @"invalid schema descriptor";
+
+  NSMutableDictionary *diagnostic = [NSMutableDictionary dictionary];
+  if ([field length] > 0) {
+    diagnostic[@"field"] = [NSString stringWithFormat:@"%@.%@", schemaName ?: @"schema", field];
+  } else {
+    diagnostic[@"field"] = schemaName ?: @"schema";
+  }
+  diagnostic[@"severity"] = severity;
+  diagnostic[@"code"] = code;
+  diagnostic[@"message"] = message;
+
+  NSMutableDictionary *meta = [NSMutableDictionary dictionary];
+  NSDictionary *rawMeta = [entry[@"meta"] isKindOfClass:[NSDictionary class]] ? entry[@"meta"] : @{};
+  if ([rawMeta count] > 0) {
+    [meta addEntriesFromDictionary:rawMeta];
+  }
+  if ([schemaName length] > 0) {
+    meta[@"schema"] = schemaName;
+  }
+  if ([meta count] > 0) {
+    diagnostic[@"meta"] = meta;
+  }
+  return diagnostic;
+}
+
+static NSDictionary *ALNSchemaShapeCompileWarning(NSString *schemaName, id rawSchema) {
+  NSString *label = [schemaName length] > 0 ? schemaName : @"schema";
+  NSString *schemaClass = (rawSchema != nil) ? NSStringFromClass([rawSchema class]) : @"";
+  return @{
+    @"field" : label,
+    @"severity" : @"warning",
+    @"code" : @"schema_not_dictionary",
+    @"message" : @"Route schema should be a dictionary descriptor",
+    @"meta" : @{
+      @"schema" : label,
+      @"schema_class" : schemaClass ?: @"",
+    }
+  };
+}
+
+static BOOL ALNCompileDiagnosticIsError(NSDictionary *diagnostic) {
+  NSString *severity = [diagnostic[@"severity"] isKindOfClass:[NSString class]]
+                           ? [diagnostic[@"severity"] lowercaseString]
+                           : @"error";
+  return ![severity isEqualToString:@"warning"];
+}
+
+static NSArray *ALNRouteSchemaDiagnosticsForSchema(id rawSchema, NSString *schemaName) {
+  NSMutableArray *diagnostics = [NSMutableArray array];
+  if (rawSchema == nil) {
+    return diagnostics;
+  }
+  if (![rawSchema isKindOfClass:[NSDictionary class]]) {
+    [diagnostics addObject:ALNSchemaShapeCompileWarning(schemaName, rawSchema)];
+    return diagnostics;
+  }
+
+  NSArray *schemaDiagnostics = ALNSchemaReadinessDiagnostics((NSDictionary *)rawSchema);
+  for (id value in schemaDiagnostics) {
+    if (![value isKindOfClass:[NSDictionary class]]) {
+      continue;
+    }
+    [diagnostics addObject:ALNNormalizedSchemaCompileDiagnostic((NSDictionary *)value, schemaName)];
+  }
+  return diagnostics;
+}
+
+static NSDictionary *ALNRoutingConfig(NSDictionary *config) {
+  return ALNDictionaryConfigValue(config, @"routing");
 }
 
 static NSString *ALNTrimmedStringConfigValue(id value) {
@@ -2211,6 +2382,176 @@ static void ALNFinalizeResponse(ALNApplication *application,
   route.requiredScopes = ALNNormalizedUniqueStrings(requiredScopes);
   route.requiredRoles = ALNNormalizedUniqueStrings(requiredRoles);
   route.includeInOpenAPI = includeInOpenAPI;
+  route.compiledActionSignature = nil;
+  route.compiledGuardSignature = nil;
+  route.compiledInvocationMetadata = NO;
+  return YES;
+}
+
+- (BOOL)routingCompileOnStartEnabled {
+  NSDictionary *routing = ALNRoutingConfig(self.config);
+  return ALNBoolConfigValue(routing[@"compileOnStart"], YES);
+}
+
+- (BOOL)routingRouteCompileWarningsAsErrorsEnabled {
+  NSDictionary *routing = ALNRoutingConfig(self.config);
+  return ALNBoolConfigValue(routing[@"routeCompileWarningsAsErrors"], NO);
+}
+
+- (BOOL)compileRoute:(ALNRoute *)route
+       controllerMap:(NSMutableDictionary *)controllerMap
+    warningsAsErrors:(BOOL)warningsAsErrors
+               error:(NSError **)error {
+  if (route == nil) {
+    return YES;
+  }
+  if (route.compiledInvocationMetadata) {
+    return YES;
+  }
+
+  route.compiledActionSignature = nil;
+  route.compiledGuardSignature = nil;
+  route.compiledInvocationMetadata = NO;
+
+  if (route.controllerClass == Nil) {
+    if (error != NULL) {
+      *error = ALNRouteCompileError(337,
+                                    @"route_controller_invalid",
+                                    @"route_compile_failed",
+                                    @"Invalid route controller class",
+                                    route,
+                                    @[]);
+    }
+    return NO;
+  }
+
+  NSMutableDictionary *controllers = [controllerMap isKindOfClass:[NSMutableDictionary class]]
+                                         ? controllerMap
+                                         : [NSMutableDictionary dictionary];
+  NSString *controllerKey = NSStringFromClass(route.controllerClass);
+  id controller = controllers[controllerKey];
+  if (controller == nil) {
+    controller = [[route.controllerClass alloc] init];
+    if (controller == nil) {
+      if (error != NULL) {
+        *error = ALNRouteCompileError(337,
+                                      @"route_controller_uninstantiable",
+                                      @"route_compile_failed",
+                                      @"Controller could not be instantiated",
+                                      route,
+                                      @[]);
+      }
+      return NO;
+    }
+    controllers[controllerKey] = controller;
+  }
+
+  NSMethodSignature *actionSignature = [controller methodSignatureForSelector:route.actionSelector];
+  if (actionSignature == nil || [actionSignature numberOfArguments] != 3) {
+    if (error != NULL) {
+      *error = ALNRouteCompileError(333,
+                                    @"route_action_signature_invalid",
+                                    @"invalid_action_signature",
+                                    @"Action must accept exactly one ALNContext * parameter",
+                                    route,
+                                    @[]);
+    }
+    return NO;
+  }
+
+  NSMethodSignature *guardSignature = nil;
+  if (route.guardSelector != NULL) {
+    guardSignature = [controller methodSignatureForSelector:route.guardSelector];
+    if (guardSignature == nil || [guardSignature numberOfArguments] != 3) {
+      if (error != NULL) {
+        *error = ALNRouteCompileError(334,
+                                      @"route_guard_signature_invalid",
+                                      @"invalid_guard_signature",
+                                      @"Guard must accept exactly one ALNContext * parameter",
+                                      route,
+                                      @[]);
+      }
+      return NO;
+    }
+  }
+
+  NSMutableArray *diagnostics = [NSMutableArray array];
+  [diagnostics addObjectsFromArray:ALNRouteSchemaDiagnosticsForSchema(route.requestSchema, @"request")];
+  [diagnostics addObjectsFromArray:ALNRouteSchemaDiagnosticsForSchema(route.responseSchema, @"response")];
+
+  NSMutableArray *errors = [NSMutableArray array];
+  NSMutableArray *warnings = [NSMutableArray array];
+  for (id value in diagnostics) {
+    if (![value isKindOfClass:[NSDictionary class]]) {
+      continue;
+    }
+    NSDictionary *diagnostic = (NSDictionary *)value;
+    if (ALNCompileDiagnosticIsError(diagnostic)) {
+      [errors addObject:diagnostic];
+    } else {
+      [warnings addObject:diagnostic];
+    }
+  }
+
+  if ([errors count] > 0) {
+    if (error != NULL) {
+      *error = ALNRouteCompileError(335,
+                                    @"route_schema_invalid",
+                                    @"route_schema_not_ready",
+                                    @"Route schema readiness validation failed",
+                                    route,
+                                    errors);
+    }
+    return NO;
+  }
+
+  if (warningsAsErrors && [warnings count] > 0) {
+    if (error != NULL) {
+      *error = ALNRouteCompileError(336,
+                                    @"route_compile_warning",
+                                    @"route_compile_warning",
+                                    @"Route compile warning treated as error",
+                                    route,
+                                    warnings);
+    }
+    return NO;
+  }
+
+  if ([warnings count] > 0) {
+    [self.logger warn:@"route compile warning"
+               fields:@{
+                 @"route_name" : route.name ?: @"",
+                 @"route_path" : route.pathPattern ?: @"",
+                 @"controller" : NSStringFromClass(route.controllerClass ?: [NSObject class]),
+                 @"diagnostics" : warnings,
+               }];
+  }
+
+  route.compiledActionSignature = actionSignature;
+  route.compiledGuardSignature = guardSignature;
+  route.compiledInvocationMetadata = YES;
+  return YES;
+}
+
+- (BOOL)compileRegisteredRoutesWithWarningsAsErrors:(BOOL)warningsAsErrors
+                                              error:(NSError **)error {
+  NSMutableDictionary *controllerMap = [NSMutableDictionary dictionary];
+  for (id value in [self.router allRoutes]) {
+    if (![value isKindOfClass:[ALNRoute class]]) {
+      continue;
+    }
+    NSError *routeError = nil;
+    BOOL ok = [self compileRoute:(ALNRoute *)value
+                    controllerMap:controllerMap
+                 warningsAsErrors:warningsAsErrors
+                            error:&routeError];
+    if (!ok) {
+      if (error != NULL) {
+        *error = routeError;
+      }
+      return NO;
+    }
+  }
   return YES;
 }
 
@@ -2253,6 +2594,19 @@ static void ALNFinalizeResponse(ALNApplication *application,
       *error = securityConfigError;
     }
     return NO;
+  }
+
+  if ([self routingCompileOnStartEnabled]) {
+    NSError *routeCompileError = nil;
+    BOOL compiled = [self compileRegisteredRoutesWithWarningsAsErrors:
+                              [self routingRouteCompileWarningsAsErrorsEnabled]
+                                                               error:&routeCompileError];
+    if (!compiled) {
+      if (error != NULL) {
+        *error = routeCompileError;
+      }
+      return NO;
+    }
   }
 
   for (NSDictionary *entry in self.mutableMounts) {
@@ -2597,7 +2951,25 @@ static void ALNFinalizeResponse(ALNApplication *application,
                                                  actionName:match.route.actionName ?: @""];
 
   id returnValue = nil;
+  NSError *routeCompileError = nil;
+  BOOL routeReady = [self compileRoute:match.route
+                         controllerMap:nil
+                      warningsAsErrors:[self routingRouteCompileWarningsAsErrorsEnabled]
+                                 error:&routeCompileError];
+  if (!routeReady) {
+    NSDictionary *details = ALNRouteCompileRuntimeDetails(routeCompileError);
+    ALNApplyInternalErrorResponse(self,
+                                  request,
+                                  response,
+                                  requestID,
+                                  500,
+                                  ALNRouteCompileResponseErrorCode(routeCompileError),
+                                  @"Internal Server Error",
+                                  routeCompileError.localizedDescription ?: @"route compile failed",
+                                  details);
+  }
   BOOL shouldDispatchController =
+      routeReady &&
       ALNApplyRequestContractIfNeeded(self, request, response, context, match.route, requestID);
   NSMutableArray *executedMiddlewares = [NSMutableArray array];
   if (shouldDispatchController && [self.mutableMiddlewares count] > 0) {
@@ -2656,9 +3028,8 @@ static void ALNFinalizeResponse(ALNApplication *application,
       }
       BOOL guardPassed = YES;
       if (match.route.guardSelector != NULL) {
-        NSMethodSignature *guardSignature =
-            [controller methodSignatureForSelector:match.route.guardSelector];
-        if (guardSignature == nil || [guardSignature numberOfArguments] != 3) {
+        NSMethodSignature *guardSignature = match.route.compiledGuardSignature;
+        if (guardSignature == nil) {
           NSDictionary *details = @{
             @"controller" : context.controllerName ?: @"",
             @"guard" : match.route.guardActionName ?: @"",
@@ -2721,9 +3092,8 @@ static void ALNFinalizeResponse(ALNApplication *application,
       }
 
       if (guardPassed && !response.committed) {
-        NSMethodSignature *signature =
-            [controller methodSignatureForSelector:match.route.actionSelector];
-        if (signature == nil || [signature numberOfArguments] != 3) {
+        NSMethodSignature *signature = match.route.compiledActionSignature;
+        if (signature == nil) {
           NSDictionary *details = @{
             @"controller" : context.controllerName ?: @"",
             @"action" : context.actionName ?: @"",

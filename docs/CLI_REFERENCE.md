@@ -215,6 +215,9 @@ Behavior:
   - header `Retry-After: 1`
   - header `X-Arlen-Backpressure-Reason: websocket_session_limit`
 - security misconfiguration now fails startup deterministically (for example missing `session.secret` when `session.enabled=YES`)
+- route compile validation now fails startup deterministically when enabled (`routing.compileOnStart=YES`):
+  - invalid action/guard signatures
+  - invalid route schema transformer/type readiness
 - request responses emit correlation/trace headers:
   - `X-Request-Id`
   - `X-Correlation-Id`
@@ -265,6 +268,8 @@ Environment:
 - `ARLEN_READINESS_REQUIRES_STARTUP` (default `0`; legacy `MOJOOBJC_READINESS_REQUIRES_STARTUP` also accepted)
 - `ARLEN_READINESS_REQUIRES_CLUSTER_QUORUM` (default `0`; legacy `MOJOOBJC_READINESS_REQUIRES_CLUSTER_QUORUM` also accepted)
 - `ARLEN_CLUSTER_OBSERVED_NODES` (defaults to expected nodes; legacy `MOJOOBJC_CLUSTER_OBSERVED_NODES` also accepted)
+- `ARLEN_ROUTING_COMPILE_ON_START` (default `1`; legacy `MOJOOBJC_ROUTING_COMPILE_ON_START` also accepted)
+- `ARLEN_ROUTING_ROUTE_COMPILE_WARNINGS_AS_ERRORS` (default `0`; legacy `MOJOOBJC_ROUTING_ROUTE_COMPILE_WARNINGS_AS_ERRORS` also accepted)
 
 ## `propane` Script (`bin/propane`)
 

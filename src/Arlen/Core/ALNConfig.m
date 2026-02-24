@@ -345,6 +345,12 @@ static NSDictionary *ALNSecurityProfileDefaults(NSString *profileName) {
       ALNEnvValueCompat("ARLEN_EOC_STRICT_LOCALS", "MOJOOBJC_EOC_STRICT_LOCALS");
   NSString *eocStrictStringify =
       ALNEnvValueCompat("ARLEN_EOC_STRICT_STRINGIFY", "MOJOOBJC_EOC_STRICT_STRINGIFY");
+  NSString *routingCompileOnStart =
+      ALNEnvValueCompat("ARLEN_ROUTING_COMPILE_ON_START",
+                        "MOJOOBJC_ROUTING_COMPILE_ON_START");
+  NSString *routingRouteCompileWarningsAsErrors =
+      ALNEnvValueCompat("ARLEN_ROUTING_ROUTE_COMPILE_WARNINGS_AS_ERRORS",
+                        "MOJOOBJC_ROUTING_ROUTE_COMPILE_WARNINGS_AS_ERRORS");
 
   if ([host length] > 0) {
     config[@"host"] = host;
@@ -605,6 +611,19 @@ static NSDictionary *ALNSecurityProfileDefaults(NSString *profileName) {
   }
   config[@"eoc"] = eoc;
 
+  NSMutableDictionary *routing =
+      [NSMutableDictionary dictionaryWithDictionary:config[@"routing"] ?: @{}];
+  NSNumber *routingCompileOnStartValue = ALNParseBooleanString(routingCompileOnStart);
+  if (routingCompileOnStartValue != nil) {
+    routing[@"compileOnStart"] = routingCompileOnStartValue;
+  }
+  NSNumber *routingRouteCompileWarningsAsErrorsValue =
+      ALNParseBooleanString(routingRouteCompileWarningsAsErrors);
+  if (routingRouteCompileWarningsAsErrorsValue != nil) {
+    routing[@"routeCompileWarningsAsErrors"] = routingRouteCompileWarningsAsErrorsValue;
+  }
+  config[@"routing"] = routing;
+
   NSMutableDictionary *topLevel = [NSMutableDictionary dictionaryWithDictionary:config];
   ALNApplyIntegerOverride(topLevel, listenBacklog, @"listenBacklog", 1);
   ALNApplyIntegerOverride(topLevel,
@@ -837,6 +856,16 @@ static NSDictionary *ALNSecurityProfileDefaults(NSString *profileName) {
   }
   config[@"eoc"] = finalEOC;
 
+  NSMutableDictionary *finalRouting =
+      [NSMutableDictionary dictionaryWithDictionary:config[@"routing"] ?: @{}];
+  if (finalRouting[@"compileOnStart"] == nil) {
+    finalRouting[@"compileOnStart"] = @(YES);
+  }
+  if (finalRouting[@"routeCompileWarningsAsErrors"] == nil) {
+    finalRouting[@"routeCompileWarningsAsErrors"] = @(NO);
+  }
+  config[@"routing"] = finalRouting;
+
   NSMutableDictionary *finalCompatibility =
       [NSMutableDictionary dictionaryWithDictionary:config[@"compatibility"] ?: @{}];
   if (finalCompatibility[@"pageStateEnabled"] == nil) {
@@ -1026,6 +1055,11 @@ static NSDictionary *ALNSecurityProfileDefaults(NSString *profileName) {
   finalEOC[@"strictLocals"] = @([finalEOC[@"strictLocals"] boolValue]);
   finalEOC[@"strictStringify"] = @([finalEOC[@"strictStringify"] boolValue]);
   config[@"eoc"] = finalEOC;
+
+  finalRouting[@"compileOnStart"] = @([finalRouting[@"compileOnStart"] boolValue]);
+  finalRouting[@"routeCompileWarningsAsErrors"] =
+      @([finalRouting[@"routeCompileWarningsAsErrors"] boolValue]);
+  config[@"routing"] = finalRouting;
 
   finalCompatibility[@"pageStateEnabled"] =
       @([finalCompatibility[@"pageStateEnabled"] boolValue]);

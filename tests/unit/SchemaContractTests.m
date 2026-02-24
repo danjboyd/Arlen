@@ -117,6 +117,42 @@
   XCTAssertEqualObjects(@"to_integer", entry[@"meta"][@"transformer"]);
 }
 
+- (void)testSchemaReadinessDiagnosticsReportUnknownTransformerAsError {
+  NSDictionary *schema = @{
+    @"type" : @"object",
+    @"properties" : @{
+      @"name" : @{
+        @"type" : @"string",
+        @"transformer" : @"missing_transformer",
+      },
+    },
+  };
+
+  NSArray *diagnostics = ALNSchemaReadinessDiagnostics(schema);
+  XCTAssertEqual((NSUInteger)1, [diagnostics count]);
+  NSDictionary *entry =
+      [[diagnostics firstObject] isKindOfClass:[NSDictionary class]] ? [diagnostics firstObject] : @{};
+  XCTAssertEqualObjects(@"name", entry[@"field"]);
+  XCTAssertEqualObjects(@"error", entry[@"severity"]);
+  XCTAssertEqualObjects(@"invalid_transformer", entry[@"code"]);
+  XCTAssertEqualObjects(@"missing_transformer", entry[@"meta"][@"transformer"]);
+}
+
+- (void)testSchemaReadinessDiagnosticsReportDescriptorShapeWarnings {
+  NSDictionary *schema = @{
+    @"type" : @"array",
+    @"items" : @42,
+  };
+
+  NSArray *diagnostics = ALNSchemaReadinessDiagnostics(schema);
+  XCTAssertEqual((NSUInteger)1, [diagnostics count]);
+  NSDictionary *entry =
+      [[diagnostics firstObject] isKindOfClass:[NSDictionary class]] ? [diagnostics firstObject] : @{};
+  XCTAssertEqualObjects(@"", entry[@"field"]);
+  XCTAssertEqualObjects(@"warning", entry[@"severity"]);
+  XCTAssertEqualObjects(@"invalid_items_shape", entry[@"code"]);
+}
+
 - (void)testDefaultTransformerRegistryIncludesExpectedBuiltIns {
   NSArray<NSString *> *names = ALNRegisteredValueTransformerNames();
   XCTAssertTrue([names containsObject:@"trim"]);
