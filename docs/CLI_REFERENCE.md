@@ -211,7 +211,12 @@ Behavior:
 - if run inside app root (`config/app.plist` plus `src/main.m` or `app_lite.m`), compiles and runs that app
 - defaults to watch mode
 - in app-root watch mode, build failures are captured and rendered as development diagnostics
+- concurrent HTTP sessions are bounded by `runtimeLimits.maxConcurrentHTTPSessions` (default `256`)
 - websocket session upgrades are bounded by `runtimeLimits.maxConcurrentWebSocketSessions` (default `256`)
+- HTTP session limit violations return deterministic overload diagnostics:
+  - status `503 Service Unavailable`
+  - header `Retry-After: 1`
+  - header `X-Arlen-Backpressure-Reason: http_session_limit`
 - websocket backpressure limit violations return deterministic overload diagnostics:
   - status `503 Service Unavailable`
   - header `Retry-After: 1`
@@ -264,6 +269,7 @@ Environment:
 - `ARLEN_APP_ROOT`
 - `ARLEN_FRAMEWORK_ROOT`
 - `ARLEN_SECURITY_PROFILE` (`balanced`, `strict`, or `edge`; legacy `MOJOOBJC_SECURITY_PROFILE` also accepted)
+- `ARLEN_MAX_HTTP_SESSIONS` (runtime HTTP session limit; legacy `MOJOOBJC_MAX_HTTP_SESSIONS` also accepted)
 - `ARLEN_MAX_WEBSOCKET_SESSIONS` (runtime websocket session limit; legacy `MOJOOBJC_MAX_WEBSOCKET_SESSIONS` also accepted)
 - `ARLEN_TRACE_PROPAGATION_ENABLED` (default `1`; legacy `MOJOOBJC_TRACE_PROPAGATION_ENABLED` also accepted)
 - `ARLEN_HEALTH_DETAILS_ENABLED` (default `1`; legacy `MOJOOBJC_HEALTH_DETAILS_ENABLED` also accepted)

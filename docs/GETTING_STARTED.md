@@ -122,6 +122,15 @@ ARLEN_MAX_WEBSOCKET_SESSIONS=1 ./bin/boomhauer
 With this limit, a second concurrent websocket upgrade receives `503 Service Unavailable` with
 `X-Arlen-Backpressure-Reason: websocket_session_limit`.
 
+Runtime HTTP session backpressure limit override:
+
+```bash
+ARLEN_MAX_HTTP_SESSIONS=128 ./bin/boomhauer
+```
+
+With this limit, excess concurrent HTTP sessions receive `503 Service Unavailable` with
+`X-Arlen-Backpressure-Reason: http_session_limit`.
+
 Security profile override:
 
 ```bash
@@ -413,6 +422,7 @@ Framework/app runtime:
 - `ARLEN_MAX_REQUEST_LINE_BYTES`
 - `ARLEN_MAX_HEADER_BYTES`
 - `ARLEN_MAX_BODY_BYTES`
+- `ARLEN_MAX_HTTP_SESSIONS`
 - `ARLEN_MAX_WEBSOCKET_SESSIONS`
 - `ARLEN_DATABASE_URL`
 - `ARLEN_DB_ADAPTER`

@@ -259,6 +259,8 @@ static NSDictionary *ALNSecurityProfileDefaults(NSString *profileName) {
       ALNEnvValueCompat("ARLEN_MAX_HEADER_BYTES", "MOJOOBJC_MAX_HEADER_BYTES");
   NSString *maxBodyBytes =
       ALNEnvValueCompat("ARLEN_MAX_BODY_BYTES", "MOJOOBJC_MAX_BODY_BYTES");
+  NSString *maxHTTPSessions =
+      ALNEnvValueCompat("ARLEN_MAX_HTTP_SESSIONS", "MOJOOBJC_MAX_HTTP_SESSIONS");
   NSString *maxWebSocketSessions =
       ALNEnvValueCompat("ARLEN_MAX_WEBSOCKET_SESSIONS", "MOJOOBJC_MAX_WEBSOCKET_SESSIONS");
 
@@ -417,6 +419,10 @@ static NSDictionary *ALNSecurityProfileDefaults(NSString *profileName) {
 
   NSMutableDictionary *runtimeLimits =
       [NSMutableDictionary dictionaryWithDictionary:config[@"runtimeLimits"] ?: @{}];
+  ALNApplyIntegerOverride(runtimeLimits,
+                          maxHTTPSessions,
+                          @"maxConcurrentHTTPSessions",
+                          1);
   ALNApplyIntegerOverride(runtimeLimits,
                           maxWebSocketSessions,
                           @"maxConcurrentWebSocketSessions",
@@ -686,6 +692,9 @@ static NSDictionary *ALNSecurityProfileDefaults(NSString *profileName) {
 
   NSMutableDictionary *finalRuntimeLimits =
       [NSMutableDictionary dictionaryWithDictionary:config[@"runtimeLimits"] ?: @{}];
+  if (finalRuntimeLimits[@"maxConcurrentHTTPSessions"] == nil) {
+    finalRuntimeLimits[@"maxConcurrentHTTPSessions"] = @(256);
+  }
   if (finalRuntimeLimits[@"maxConcurrentWebSocketSessions"] == nil) {
     finalRuntimeLimits[@"maxConcurrentWebSocketSessions"] = @(256);
   }
@@ -980,6 +989,8 @@ static NSDictionary *ALNSecurityProfileDefaults(NSString *profileName) {
   finalLimits[@"maxBodyBytes"] = @([finalLimits[@"maxBodyBytes"] integerValue]);
   config[@"requestLimits"] = finalLimits;
 
+  finalRuntimeLimits[@"maxConcurrentHTTPSessions"] =
+      @([finalRuntimeLimits[@"maxConcurrentHTTPSessions"] integerValue]);
   finalRuntimeLimits[@"maxConcurrentWebSocketSessions"] =
       @([finalRuntimeLimits[@"maxConcurrentWebSocketSessions"] integerValue]);
   config[@"runtimeLimits"] = finalRuntimeLimits;

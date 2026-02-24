@@ -324,6 +324,74 @@
   }
 }
 
+- (void)testHTTPSessionLimitReturns503UnderBackpressure {
+  int port = [self randomPort];
+  NSTask *server = [[NSTask alloc] init];
+  server.launchPath = @"/bin/bash";
+  server.arguments = @[
+    @"-lc",
+    [NSString stringWithFormat:@"ARLEN_MAX_HTTP_SESSIONS=1 ./build/boomhauer --port %d", port]
+  ];
+  server.standardOutput = [NSPipe pipe];
+  server.standardError = [NSPipe pipe];
+  [server launch];
+
+  @try {
+    BOOL ready = NO;
+    (void)[self requestPathWithRetries:@"/healthz" port:port attempts:60 success:&ready];
+    XCTAssertTrue(ready);
+
+    NSString *script = [NSString stringWithFormat:
+                                         @"import socket, time, urllib.request\n"
+                                         @"PORT=%d\n"
+                                         @"def read_headers(sock):\n"
+                                         @"    data=b''\n"
+                                         @"    while b'\\r\\n\\r\\n' not in data:\n"
+                                         @"        chunk=sock.recv(4096)\n"
+                                         @"        if not chunk:\n"
+                                         @"            break\n"
+                                         @"        data += chunk\n"
+                                         @"    return data.decode('utf-8', 'replace')\n"
+                                         @"partial = socket.create_connection(('127.0.0.1', PORT), timeout=5)\n"
+                                         @"partial.sendall((\n"
+                                         @"    f'GET /healthz HTTP/1.1\\r\\n'\n"
+                                         @"    f'Host: 127.0.0.1:{PORT}\\r\\n'\n"
+                                         @").encode('utf-8'))\n"
+                                         @"time.sleep(0.2)\n"
+                                         @"second = socket.create_connection(('127.0.0.1', PORT), timeout=5)\n"
+                                         @"second.sendall((\n"
+                                         @"    f'GET /healthz HTTP/1.1\\r\\n'\n"
+                                         @"    f'Host: 127.0.0.1:{PORT}\\r\\n'\n"
+                                         @"    'Connection: close\\r\\n\\r\\n'\n"
+                                         @").encode('utf-8'))\n"
+                                         @"headers = read_headers(second)\n"
+                                         @"print(headers)\n"
+                                         @"if '503 Service Unavailable' not in headers:\n"
+                                         @"    raise RuntimeError(headers)\n"
+                                         @"if 'X-Arlen-Backpressure-Reason: http_session_limit' not in headers:\n"
+                                         @"    raise RuntimeError(headers)\n"
+                                         @"second.close()\n"
+                                         @"partial.close()\n"
+                                         @"time.sleep(0.2)\n"
+                                         @"body = urllib.request.urlopen(f'http://127.0.0.1:{PORT}/healthz', timeout=3).read().decode('utf-8')\n"
+                                         @"if body != 'ok\\n':\n"
+                                         @"    raise RuntimeError(body)\n"
+                                         @"print('recovered')\n",
+                                         port];
+    int pyCode = 0;
+    NSString *output = [self runPythonScript:script exitCode:&pyCode];
+    XCTAssertEqual(0, pyCode);
+    XCTAssertTrue([output containsString:@"503 Service Unavailable"]);
+    XCTAssertTrue([output containsString:@"X-Arlen-Backpressure-Reason: http_session_limit"]);
+    XCTAssertTrue([output containsString:@"recovered"]);
+  } @finally {
+    if ([server isRunning]) {
+      (void)kill(server.processIdentifier, SIGTERM);
+      [server waitUntilExit];
+    }
+  }
+}
+
 - (void)testKeepAliveAllowsMultipleRequestsOnSingleConnection {
   int port = [self randomPort];
   NSTask *server = [[NSTask alloc] init];

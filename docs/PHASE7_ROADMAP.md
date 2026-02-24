@@ -66,10 +66,15 @@ Acceptance (required):
 
 Implementation notes (initial slice, 2026-02-23):
 
-- Added runtime websocket backpressure limit contract:
+- Added runtime HTTP/websocket backpressure limit contracts:
+  - config key: `runtimeLimits.maxConcurrentHTTPSessions` (default `256`)
+  - environment override: `ARLEN_MAX_HTTP_SESSIONS` (legacy fallback supported)
   - config key: `runtimeLimits.maxConcurrentWebSocketSessions` (default `256`)
   - environment override: `ARLEN_MAX_WEBSOCKET_SESSIONS` (legacy fallback supported)
-- Added deterministic overload response contract for websocket session limit violations:
+- Added deterministic overload response contracts for session limit violations:
+  - `503 Service Unavailable`
+  - `Retry-After: 1`
+  - `X-Arlen-Backpressure-Reason: http_session_limit`
   - `503 Service Unavailable`
   - `Retry-After: 1`
   - `X-Arlen-Backpressure-Reason: websocket_session_limit`
@@ -77,8 +82,9 @@ Implementation notes (initial slice, 2026-02-23):
   - `tests/fixtures/phase7a/runtime_hardening_contracts.json`
   - `docs/PHASE7A_RUNTIME_HARDENING.md`
 - Added regression coverage:
+  - `tests/integration/HTTPIntegrationTests.m` (`testHTTPSessionLimitReturns503UnderBackpressure`)
   - `tests/integration/HTTPIntegrationTests.m` (`testWebSocketSessionLimitReturns503UnderBackpressure`)
-  - `tests/unit/ConfigTests.m` (default + env override coverage for runtime limit)
+  - `tests/unit/ConfigTests.m` (default + env/legacy override coverage for runtime limits)
   - `tests/unit/Phase7ATests.m` (fixture schema/reference integrity)
 
 ## 3.2 Phase 7B: Security Defaults + Policy Contracts

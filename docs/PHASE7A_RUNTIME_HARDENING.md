@@ -7,6 +7,7 @@ This document captures the initial 7A implementation slice completed on 2026-02-
 ## 1. Scope (Initial Slice)
 
 - WebSocket session backpressure boundary for runtime worker/session paths.
+- HTTP session backpressure boundary for runtime worker/session paths.
 - Deterministic overload diagnostics instead of silent runtime fallback.
 - Explicit config and environment contract for the session-limit safety boundary.
 
@@ -16,12 +17,15 @@ Runtime key:
 
 ```plist
 runtimeLimits = {
+  maxConcurrentHTTPSessions = 256;
   maxConcurrentWebSocketSessions = 256;
 };
 ```
 
 Environment overrides:
 
+- `ARLEN_MAX_HTTP_SESSIONS`
+- legacy compatibility fallback: `MOJOOBJC_MAX_HTTP_SESSIONS`
 - `ARLEN_MAX_WEBSOCKET_SESSIONS`
 - legacy compatibility fallback: `MOJOOBJC_MAX_WEBSOCKET_SESSIONS`
 
@@ -29,9 +33,18 @@ Contract behavior:
 
 - Default is `256` when unset.
 - Values are normalized to integer form in final config output.
-- Limit applies to websocket sessions managed by runtime worker threads.
+- Limits apply to HTTP session concurrency and websocket session concurrency
+  managed by runtime worker threads.
 
 ## 3. Backpressure Response Contract
+
+When an incoming HTTP session would exceed `runtimeLimits.maxConcurrentHTTPSessions`:
+
+- return status: `503 Service Unavailable`
+- return body: `server busy\n`
+- include header: `Retry-After: 1`
+- include header: `X-Arlen-Backpressure-Reason: http_session_limit`
+- close the client socket; do not silently downgrade behavior
 
 When an incoming websocket upgrade would exceed `runtimeLimits.maxConcurrentWebSocketSessions`:
 
@@ -54,6 +67,7 @@ Runtime/config verification:
   - `testEnvironmentOverridesRequestLimitsAndProxyFlags`
   - `testLegacyEnvironmentPrefixFallback`
 - `tests/integration/HTTPIntegrationTests.m`:
+  - `testHTTPSessionLimitReturns503UnderBackpressure`
   - `testWebSocketSessionLimitReturns503UnderBackpressure`
 - `tests/unit/Phase7ATests.m`:
   - `testRuntimeHardeningContractFixtureSchemaAndTestCoverage`

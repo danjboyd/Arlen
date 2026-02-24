@@ -30,6 +30,7 @@ typedef struct {
 
 typedef struct {
   NSUInteger maxConcurrentWebSocketSessions;
+  NSUInteger maxConcurrentHTTPSessions;
 } ALNRuntimeLimits;
 
 static volatile sig_atomic_t gShouldRun = 1;
@@ -93,6 +94,8 @@ static ALNRuntimeLimits ALNRuntimeLimitsFromConfig(NSDictionary *config) {
   ALNRuntimeLimits out;
   out.maxConcurrentWebSocketSessions =
       ALNConfigUInt(runtimeLimits, @"maxConcurrentWebSocketSessions", 256);
+  out.maxConcurrentHTTPSessions =
+      ALNConfigUInt(runtimeLimits, @"maxConcurrentHTTPSessions", 256);
   return out;
 }
 
@@ -930,7 +933,9 @@ static ALNResponse *ALNErrorResponse(NSInteger statusCode, NSString *body) {
 @property(nonatomic, strong, readwrite) ALNApplication *application;
 @property(nonatomic, copy, readwrite) NSString *publicRoot;
 @property(nonatomic, strong) NSLock *runtimeCountersLock;
+@property(nonatomic, assign) NSUInteger activeHTTPSessions;
 @property(nonatomic, assign) NSUInteger activeWebSocketSessions;
+@property(nonatomic, assign) NSUInteger maxConcurrentHTTPSessions;
 @property(nonatomic, assign) NSUInteger maxConcurrentWebSocketSessions;
 
 @end
@@ -945,7 +950,9 @@ static ALNResponse *ALNErrorResponse(NSInteger statusCode, NSString *body) {
     _publicRoot = [publicRoot copy];
     _serverName = @"server";
     _runtimeCountersLock = [[NSLock alloc] init];
+    _activeHTTPSessions = 0;
     _activeWebSocketSessions = 0;
+    _maxConcurrentHTTPSessions = 256;
     _maxConcurrentWebSocketSessions = 256;
   }
   return self;
@@ -1022,6 +1029,26 @@ static ALNResponse *ALNErrorResponse(NSInteger statusCode, NSString *body) {
   }
   [self.runtimeCountersLock unlock];
   return allowed;
+}
+
+- (BOOL)reserveHTTPSessionWithLimit:(NSUInteger)limit {
+  [self.runtimeCountersLock lock];
+  BOOL allowed = YES;
+  if (limit > 0 && self.activeHTTPSessions >= limit) {
+    allowed = NO;
+  } else {
+    self.activeHTTPSessions += 1;
+  }
+  [self.runtimeCountersLock unlock];
+  return allowed;
+}
+
+- (void)releaseHTTPSessionReservation {
+  [self.runtimeCountersLock lock];
+  if (self.activeHTTPSessions > 0) {
+    self.activeHTTPSessions -= 1;
+  }
+  [self.runtimeCountersLock unlock];
 }
 
 - (void)releaseWebSocketSessionReservation {
@@ -1159,6 +1186,7 @@ static ALNResponse *ALNErrorResponse(NSInteger statusCode, NSString *body) {
     @try {
       [self handleClient:clientFd];
     } @finally {
+      [self releaseHTTPSessionReservation];
       close(clientFd);
     }
   }
@@ -1329,6 +1357,7 @@ static ALNResponse *ALNErrorResponse(NSInteger statusCode, NSString *body) {
   @try {
     ALNServerSocketTuning tuning = ALNTuningFromConfig(config);
     ALNRuntimeLimits runtimeLimits = ALNRuntimeLimitsFromConfig(config);
+    self.maxConcurrentHTTPSessions = runtimeLimits.maxConcurrentHTTPSessions;
     self.maxConcurrentWebSocketSessions = runtimeLimits.maxConcurrentWebSocketSessions;
 
     if (!ALNInstallSignalHandler(SIGINT) || !ALNInstallSignalHandler(SIGTERM)) {
@@ -1422,14 +1451,38 @@ static ALNResponse *ALNErrorResponse(NSInteger statusCode, NSString *body) {
         break;
       }
 
+      BOOL reservedHTTPSession =
+          [self reserveHTTPSessionWithLimit:self.maxConcurrentHTTPSessions];
+      if (!reservedHTTPSession) {
+        ALNResponse *busyResponse = ALNErrorResponse(503, @"server busy\n");
+        [busyResponse setHeader:@"Retry-After" value:@"1"];
+        [busyResponse setHeader:@"X-Arlen-Backpressure-Reason"
+                          value:@"http_session_limit"];
+        [busyResponse setHeader:@"Connection" value:@"close"];
+        (void)ALNSendResponse(clientFd, busyResponse, NO);
+        close(clientFd);
+        continue;
+      }
+
       BOOL runInBackground = !once;
       if (runInBackground) {
-        [NSThread detachNewThreadSelector:@selector(handleClientOnBackgroundThread:)
-                                 toTarget:self
-                               withObject:@(clientFd)];
+        @try {
+          [NSThread detachNewThreadSelector:@selector(handleClientOnBackgroundThread:)
+                                   toTarget:self
+                                 withObject:@(clientFd)];
+        } @catch (NSException *exception) {
+          (void)exception;
+          [self releaseHTTPSessionReservation];
+          close(clientFd);
+          continue;
+        }
       } else {
-        [self handleClient:clientFd];
-        close(clientFd);
+        @try {
+          [self handleClient:clientFd];
+        } @finally {
+          [self releaseHTTPSessionReservation];
+          close(clientFd);
+        }
       }
 
       if (once) {

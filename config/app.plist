@@ -13,6 +13,10 @@
     maxHeaderBytes = 32768;
     maxBodyBytes = 1048576;
   };
+  runtimeLimits = {
+    maxConcurrentHTTPSessions = 256;
+    maxConcurrentWebSocketSessions = 256;
+  };
   database = {
     connectionString = "";
     poolSize = 8;

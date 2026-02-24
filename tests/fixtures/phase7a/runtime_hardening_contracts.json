@@ -2,6 +2,21 @@
   "version": "phase7a-runtime-contracts-v1",
   "contracts": [
     {
+      "id": "http_session_limit_backpressure_contract",
+      "claim": "When concurrent HTTP sessions exceed the configured runtime limit, Arlen returns deterministic 503 backpressure diagnostics.",
+      "source_docs": [
+        "docs/PHASE7_ROADMAP.md",
+        "docs/PHASE7A_RUNTIME_HARDENING.md"
+      ],
+      "verification": [
+        {
+          "kind": "integration",
+          "file": "tests/integration/HTTPIntegrationTests.m",
+          "test": "testHTTPSessionLimitReturns503UnderBackpressure"
+        }
+      ]
+    },
+    {
       "id": "ws_session_limit_backpressure_contract",
       "claim": "When concurrent websocket sessions exceed the configured runtime limit, Arlen returns deterministic 503 backpressure diagnostics.",
       "source_docs": [
@@ -13,6 +28,31 @@
           "kind": "integration",
           "file": "tests/integration/HTTPIntegrationTests.m",
           "test": "testWebSocketSessionLimitReturns503UnderBackpressure"
+        }
+      ]
+    },
+    {
+      "id": "runtime_http_limit_config_contract",
+      "claim": "Runtime HTTP backpressure limit has deterministic default and environment override behavior.",
+      "source_docs": [
+        "docs/PHASE7_ROADMAP.md",
+        "docs/PHASE7A_RUNTIME_HARDENING.md"
+      ],
+      "verification": [
+        {
+          "kind": "unit",
+          "file": "tests/unit/ConfigTests.m",
+          "test": "testLoadConfigMergesAndAppliesDefaults"
+        },
+        {
+          "kind": "unit",
+          "file": "tests/unit/ConfigTests.m",
+          "test": "testEnvironmentOverridesRequestLimitsAndProxyFlags"
+        },
+        {
+          "kind": "unit",
+          "file": "tests/unit/ConfigTests.m",
+          "test": "testLegacyEnvironmentPrefixFallback"
         }
       ]
     },

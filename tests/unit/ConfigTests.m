@@ -176,6 +176,7 @@
   XCTAssertEqual((NSInteger)65536, [limits[@"maxBodyBytes"] integerValue]);
 
   NSDictionary *runtimeLimits = config[@"runtimeLimits"];
+  XCTAssertEqual((NSInteger)256, [runtimeLimits[@"maxConcurrentHTTPSessions"] integerValue]);
   XCTAssertEqual((NSInteger)256, [runtimeLimits[@"maxConcurrentWebSocketSessions"] integerValue]);
 }
 
@@ -186,6 +187,7 @@
   setenv("ARLEN_MAX_REQUEST_LINE_BYTES", "111", 1);
   setenv("ARLEN_MAX_HEADER_BYTES", "222", 1);
   setenv("ARLEN_MAX_BODY_BYTES", "333", 1);
+  setenv("ARLEN_MAX_HTTP_SESSIONS", "17", 1);
   setenv("ARLEN_SECURITY_PROFILE", "strict", 1);
   setenv("ARLEN_MAX_WEBSOCKET_SESSIONS", "9", 1);
   setenv("ARLEN_TRUSTED_PROXY", "true", 1);
@@ -248,6 +250,7 @@
   unsetenv("ARLEN_MAX_REQUEST_LINE_BYTES");
   unsetenv("ARLEN_MAX_HEADER_BYTES");
   unsetenv("ARLEN_MAX_BODY_BYTES");
+  unsetenv("ARLEN_MAX_HTTP_SESSIONS");
   unsetenv("ARLEN_SECURITY_PROFILE");
   unsetenv("ARLEN_MAX_WEBSOCKET_SESSIONS");
   unsetenv("ARLEN_TRUSTED_PROXY");
@@ -308,6 +311,7 @@
   XCTAssertEqual((NSInteger)222, [limits[@"maxHeaderBytes"] integerValue]);
   XCTAssertEqual((NSInteger)333, [limits[@"maxBodyBytes"] integerValue]);
   NSDictionary *runtimeLimits = config[@"runtimeLimits"];
+  XCTAssertEqual((NSInteger)17, [runtimeLimits[@"maxConcurrentHTTPSessions"] integerValue]);
   XCTAssertEqual((NSInteger)9, [runtimeLimits[@"maxConcurrentWebSocketSessions"] integerValue]);
   XCTAssertEqualObjects(@"strict", config[@"securityProfile"]);
   XCTAssertEqualObjects(@"warn", config[@"logLevel"]);
@@ -409,6 +413,7 @@
   setenv("MOJOOBJC_MAX_REQUEST_LINE_BYTES", "9001", 1);
   setenv("MOJOOBJC_MAX_HEADER_BYTES", "9002", 1);
   setenv("MOJOOBJC_MAX_BODY_BYTES", "9003", 1);
+  setenv("MOJOOBJC_MAX_HTTP_SESSIONS", "21", 1);
   setenv("MOJOOBJC_MAX_WEBSOCKET_SESSIONS", "13", 1);
   setenv("MOJOOBJC_LISTEN_BACKLOG", "9004", 1);
   setenv("MOJOOBJC_CONNECTION_TIMEOUT_SECONDS", "31", 1);
@@ -447,6 +452,7 @@
   unsetenv("MOJOOBJC_MAX_REQUEST_LINE_BYTES");
   unsetenv("MOJOOBJC_MAX_HEADER_BYTES");
   unsetenv("MOJOOBJC_MAX_BODY_BYTES");
+  unsetenv("MOJOOBJC_MAX_HTTP_SESSIONS");
   unsetenv("MOJOOBJC_MAX_WEBSOCKET_SESSIONS");
   unsetenv("MOJOOBJC_LISTEN_BACKLOG");
   unsetenv("MOJOOBJC_CONNECTION_TIMEOUT_SECONDS");
@@ -483,6 +489,7 @@
   XCTAssertEqual((NSInteger)9002, [limits[@"maxHeaderBytes"] integerValue]);
   XCTAssertEqual((NSInteger)9003, [limits[@"maxBodyBytes"] integerValue]);
   NSDictionary *runtimeLimits = config[@"runtimeLimits"];
+  XCTAssertEqual((NSInteger)21, [runtimeLimits[@"maxConcurrentHTTPSessions"] integerValue]);
   XCTAssertEqual((NSInteger)13, [runtimeLimits[@"maxConcurrentWebSocketSessions"] integerValue]);
   XCTAssertEqualObjects(@(YES), config[@"trustedProxy"]);
   XCTAssertEqual((NSInteger)9004, [config[@"listenBacklog"] integerValue]);

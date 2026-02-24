@@ -15,16 +15,16 @@ static NSString *ALNLogLevelLabel(ALNLogLevel level) {
 }
 
 static NSString *ALNISO8601Now(void) {
-  static NSDateFormatter *formatter = nil;
-  @synchronized([ALNLogger class]) {
-    if (formatter == nil) {
-      formatter = [[NSDateFormatter alloc] init];
-      formatter.locale = [[NSLocale alloc] initWithLocaleIdentifier:@"en_US_POSIX"];
-      formatter.timeZone = [NSTimeZone timeZoneWithAbbreviation:@"UTC"];
-      formatter.dateFormat = @"yyyy-MM-dd'T'HH:mm:ss.SSS'Z'";
-    }
-    return [formatter stringFromDate:[NSDate date]];
+  NSMutableDictionary *threadDictionary = [[NSThread currentThread] threadDictionary];
+  NSDateFormatter *formatter = threadDictionary[@"ALNLoggerISO8601Formatter"];
+  if (![formatter isKindOfClass:[NSDateFormatter class]]) {
+    formatter = [[NSDateFormatter alloc] init];
+    formatter.locale = [[NSLocale alloc] initWithLocaleIdentifier:@"en_US_POSIX"];
+    formatter.timeZone = [NSTimeZone timeZoneWithAbbreviation:@"UTC"];
+    formatter.dateFormat = @"yyyy-MM-dd'T'HH:mm:ss.SSS'Z'";
+    threadDictionary[@"ALNLoggerISO8601Formatter"] = formatter;
   }
+  return [formatter stringFromDate:[NSDate date]];
 }
 
 static NSDictionary *ALNMergedFields(NSString *message, ALNLogLevel level,
