@@ -5,16 +5,21 @@ This is the main documentation index for Arlen.
 Generate browser-friendly docs:
 
 ```bash
+make docs-api
 make docs-html
+make docs-serve
 ```
 
-Open `build/docs/index.html` in your browser.
+Open `build/docs/index.html` in your browser, or use `make docs-serve` for local hosting.
 
 ## Start Here
 
 - [Current Status](STATUS.md): latest checkpoint and verified milestone state.
 - [First App Guide](FIRST_APP_GUIDE.md): fastest path to scaffold, run, and extend your first app.
 - [Getting Started](GETTING_STARTED.md): prerequisites, framework build, tests, and workflow overview.
+- [Getting Started Tracks](GETTING_STARTED_TRACKS.md): quickstart, API-first, HTML-first, and data-layer onboarding paths.
+- [API Reference](API_REFERENCE.md): generated public API docs with per-method purpose and usage guidance.
+- [Arlen for X Migration Guides](ARLEN_FOR_X_INDEX.md): framework-by-framework migration playbooks.
 - [Toolchain Matrix](TOOLCHAIN_MATRIX.md): known-good onboarding/runtime toolchain baseline.
 - [CLI Reference](CLI_REFERENCE.md): command reference for `arlen`, `boomhauer`, and helper scripts.
 - [Core Concepts](CORE_CONCEPTS.md): runtime architecture and request lifecycle.
@@ -42,6 +47,12 @@ Open `build/docs/index.html` in your browser.
 - [Release Process](RELEASE_PROCESS.md): semantic versioning, deprecations, and release checklist.
 - [Performance Profiles](PERFORMANCE_PROFILES.md): profile pack, trend reports, and baseline governance.
 - [GSWeb Migration Guide](MIGRATION_GSWEB.md): side-by-side migration strategy and sample parity routes.
+- [Arlen for Rails](ARLEN_FOR_RAILS.md): concept and architecture migration path from Rails.
+- [Arlen for Django](ARLEN_FOR_DJANGO.md): concept and architecture migration path from Django.
+- [Arlen for Laravel](ARLEN_FOR_LARAVEL.md): concept and architecture migration path from Laravel.
+- [Arlen for FastAPI](ARLEN_FOR_FASTAPI.md): concept and architecture migration path from FastAPI.
+- [Arlen for Express/NestJS](ARLEN_FOR_EXPRESS_NESTJS.md): concept and architecture migration path from Express/NestJS.
+- [Arlen for Mojolicious](ARLEN_FOR_MOJOLICIOUS.md): concept and architecture migration path from Mojolicious.
 
 ## Documentation Process
 
@@ -58,6 +69,7 @@ Open `build/docs/index.html` in your browser.
 - [Phase 5 Roadmap](PHASE5_ROADMAP.md)
 - [Phase 7 Roadmap](PHASE7_ROADMAP.md)
 - [Phase 8 Roadmap](PHASE8_ROADMAP.md)
+- [Phase 9 Roadmap](PHASE9_ROADMAP.md)
 - [Combined Roadmap Index](PHASE2_PHASE3_ROADMAP.md)
 - [Feature Parity Matrix](FEATURE_PARITY_MATRIX.md)
 - [EOC v1 Roadmap](EOC_V1_ROADMAP.md)

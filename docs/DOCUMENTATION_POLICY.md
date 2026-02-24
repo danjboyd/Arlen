@@ -15,9 +15,10 @@ New-developer success is a primary requirement: documentation should let a devel
 Every feature or behavior change should include updates to all affected docs:
 
 1. User-facing guide/reference updates
-2. Spec/roadmap updates when scope or contract changes
-3. Example updates when developer workflows change
-4. Migration notes when behavior changes incompatibly
+2. API reference updates when public headers change
+3. Spec/roadmap updates when scope or contract changes
+4. Example updates when developer workflows change
+5. Migration notes when behavior changes incompatibly
 
 ## 3. Required Update Targets
 
@@ -27,6 +28,7 @@ When applicable, update:
 - `docs/README.md`
 - `docs/GETTING_STARTED.md`
 - `docs/CLI_REFERENCE.md`
+- `docs/API_REFERENCE.md` and generated pages under `docs/api/` when public API changes
 - relevant spec (`docs/PHASE1_SPEC.md`, `V1_SPEC.md`, etc.)
 - roadmap docs if milestone/scope changed
 
@@ -52,12 +54,14 @@ When applicable, update:
 4. Are cross-links to specs/roadmaps correct?
 5. Are examples aligned with current APIs (`ALN*` primary, legacy aliases called out as compatibility only)?
 6. Can a new developer reach "first running app" by following `docs/FIRST_APP_GUIDE.md` exactly?
+7. If public headers changed, were API docs regenerated with `python3 tools/docs/generate_api_reference.py`?
 
 ## 7. Browser Docs Build Check
 
 When documentation content changes, run:
 
 ```bash
+make docs-api
 make docs-html
 ```
 
@@ -65,6 +69,7 @@ Validate that:
 - `build/docs/index.html` loads correctly
 - primary navigation links resolve
 - newly added pages are rendered
+- API reference pages under `build/docs/docs/api/` render and link correctly
 
 ## 8. Ongoing Maintenance Cadence
 

@@ -37,6 +37,7 @@ Arlen is designed to solve the same class of problems as frameworks like Mojolic
 - Phase 7F: initial slice implemented (frontend starter generation presets, static-asset/API wiring templates, and reproducibility/deploy-packaging validation).
 - Phase 7G: initial slice implemented (coding-agent JSON workflow contracts, fix-it diagnostics, and deploy/build/check planning payloads).
 - Phase 7H: initial slice implemented (quorum-gated readiness, expanded `/clusterz` coordination contracts, and distributed-runtime diagnostics headers).
+- Phase 9: active (documentation platform, generated API reference, onboarding tracks, and migration guide suite).
 
 ## Quick Start
 
@@ -109,7 +110,9 @@ Start here:
 Generate browser-friendly HTML docs:
 
 ```bash
+make docs-api
 make docs-html
+make docs-serve
 ```
 
 Open `build/docs/index.html` in a browser.
@@ -117,6 +120,9 @@ Open `build/docs/index.html` in a browser.
 High-value guides:
 - [First App Guide](docs/FIRST_APP_GUIDE.md)
 - [Getting Started](docs/GETTING_STARTED.md)
+- [Getting Started Tracks](docs/GETTING_STARTED_TRACKS.md)
+- [API Reference](docs/API_REFERENCE.md)
+- [Arlen for X Migration Guides](docs/ARLEN_FOR_X_INDEX.md)
 - [Toolchain Matrix](docs/TOOLCHAIN_MATRIX.md)
 - [CLI Reference](docs/CLI_REFERENCE.md)
 - [Core Concepts](docs/CORE_CONCEPTS.md)
@@ -140,6 +146,12 @@ High-value guides:
 - [Release Process](docs/RELEASE_PROCESS.md)
 - [Performance Profiles](docs/PERFORMANCE_PROFILES.md)
 - [GSWeb Migration Guide](docs/MIGRATION_GSWEB.md)
+- [Arlen for Rails](docs/ARLEN_FOR_RAILS.md)
+- [Arlen for Django](docs/ARLEN_FOR_DJANGO.md)
+- [Arlen for Laravel](docs/ARLEN_FOR_LARAVEL.md)
+- [Arlen for FastAPI](docs/ARLEN_FOR_FASTAPI.md)
+- [Arlen for Express/NestJS](docs/ARLEN_FOR_EXPRESS_NESTJS.md)
+- [Arlen for Mojolicious](docs/ARLEN_FOR_MOJOLICIOUS.md)
 - [Documentation Policy](docs/DOCUMENTATION_POLICY.md)
 
 Specifications and roadmaps:
@@ -150,6 +162,7 @@ Specifications and roadmaps:
 - [Phase 5 Roadmap](docs/PHASE5_ROADMAP.md)
 - [Phase 7 Roadmap](docs/PHASE7_ROADMAP.md)
 - [Phase 8 Roadmap](docs/PHASE8_ROADMAP.md)
+- [Phase 9 Roadmap](docs/PHASE9_ROADMAP.md)
 - [EOC v1 Spec](V1_SPEC.md)
 - [RFC: Keypath Locals + Transformers + Route Compile](docs/RFC_KEYPATH_TRANSFORMERS_ROUTE_COMPILE.md)
 

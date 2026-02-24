@@ -40,7 +40,7 @@ INCLUDE_FLAGS := -Isrc/Arlen -Isrc/Arlen/Core -Isrc/Arlen/Data -Isrc/Arlen/HTTP 
 EXTRA_OBJC_FLAGS ?=
 OBJC_FLAGS := $$(gnustep-config --objc-flags) -fobjc-arc $(EXTRA_OBJC_FLAGS)
 
-.PHONY: all eocc transpile tech-demo-transpile generated-compile arlen boomhauer tech-demo-server api-reference-server migration-sample-server arlen-data-example test-data-layer dev-server tech-demo smoke-render smoke routes build-tests test test-unit test-integration perf perf-fast deploy-smoke phase5e-confidence ci-quality ci-sanitizers check docs-html clean
+.PHONY: all eocc transpile tech-demo-transpile generated-compile arlen boomhauer tech-demo-server api-reference-server migration-sample-server arlen-data-example test-data-layer dev-server tech-demo smoke-render smoke routes build-tests test test-unit test-integration perf perf-fast deploy-smoke phase5e-confidence ci-quality ci-sanitizers check docs-api docs-html docs-serve clean
 
 all: eocc transpile generated-compile arlen boomhauer
 
@@ -174,6 +174,12 @@ check: test-unit test-integration perf
 
 docs-html:
 >bash ./tools/build_docs_html.sh
+
+docs-api:
+>python3 ./tools/docs/generate_api_reference.py --repo-root $(ROOT_DIR)
+
+docs-serve: docs-html
+>DOCS_PORT="$${DOCS_PORT:-4173}" python3 -m http.server "$${DOCS_PORT}" --directory $(ROOT_DIR)/build/docs
 
 smoke: smoke-render boomhauer
 >bash ./bin/smoke

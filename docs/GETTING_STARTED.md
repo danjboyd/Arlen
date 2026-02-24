@@ -2,6 +2,14 @@
 
 This guide gets you from zero to a running Arlen app.
 
+Choose a focused path if you prefer guided onboarding:
+
+- `docs/GETTING_STARTED_TRACKS.md`
+- `docs/GETTING_STARTED_QUICKSTART.md`
+- `docs/GETTING_STARTED_API_FIRST.md`
+- `docs/GETTING_STARTED_HTML_FIRST.md`
+- `docs/GETTING_STARTED_DATA_LAYER.md`
+
 ## 1. Prerequisites
 
 - GNUstep development toolchain
@@ -220,7 +228,9 @@ ARLEN_APP_ROOT=examples/gsweb_migration ./build/migration-sample-server --port 3
 ## 7. Build Browser-Friendly Documentation
 
 ```bash
+make docs-api
 make docs-html
+make docs-serve
 ```
 
 Open `build/docs/index.html`.

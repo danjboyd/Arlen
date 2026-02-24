@@ -333,7 +333,9 @@ Signals:
 - `tools/deploy/validate_operability.sh`: validate text/JSON health/readiness/metrics operability contracts against a running server
 - `tools/deploy/build_release.sh --dry-run --json`: emit deploy release planning payload for coding-agent automation
 - `arlen generate frontend <Name> --preset <vanilla-spa|progressive-mpa>`: scaffold frontend starter templates with built-in API wiring examples
+- `make docs-api`: regenerate API reference markdown from `Arlen.h` / `ArlenData.h` exports
 - `make docs-html`: generate browser-friendly docs under `build/docs`
+- `make docs-serve`: serve generated docs locally (default `http://127.0.0.1:4173`, override via `DOCS_PORT`)
 
 ## Data-Layer Runtime APIs (Phase 4D)
 

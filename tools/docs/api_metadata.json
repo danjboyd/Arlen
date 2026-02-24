@@ -1,0 +1,209 @@
+{
+  "symbols": {
+    "ALNApplication": {
+      "summary": "Primary runtime container for route registration, middleware/plugins, service adapters, lifecycle hooks, and OpenAPI metadata.",
+      "usage_example": "NSError *error = nil;\nALNApplication *app = [[ALNApplication alloc] initWithEnvironment:@\"development\"\n                                                     configRoot:@\"config\"\n                                                          error:&error];\nif (app == nil) {\n  NSLog(@\"startup config failed: %@\", error);\n  return;\n}\n\n[app registerRouteMethod:@\"GET\"\n                    path:@\"/healthz\"\n                    name:@\"healthz\"\n         controllerClass:[HealthController class]\n                  action:@\"show\"];\n\nif (![app startWithError:&error]) {\n  NSLog(@\"app startup failed: %@\", error);\n}"
+    },
+    "ALNConfig": {
+      "summary": "Configuration loader that merges base + environment plist files into the runtime config dictionary."
+    },
+    "ALNMiddleware": {
+      "summary": "Middleware protocol for pre-dispatch and optional post-dispatch request processing."
+    },
+    "ALNLifecycleHook": {
+      "summary": "Lifecycle callback protocol invoked around app startup and shutdown boundaries."
+    },
+    "ALNPlugin": {
+      "summary": "Plugin protocol for declarative app extension (registration + optional middleware contribution)."
+    },
+    "ALNTraceExporter": {
+      "summary": "Trace-export protocol used to publish structured request spans to external observability sinks."
+    },
+    "ALNHTTPServer": {
+      "summary": "HTTP server host that binds an `ALNApplication` to socket runtime and request loop execution.",
+      "usage_example": "ALNHTTPServer *server = [[ALNHTTPServer alloc] initWithApplication:app\n                                                          publicRoot:@\"public\"];\nint exitCode = [server runWithHost:@\"127.0.0.1\"\n                      portOverride:3000\n                              once:NO];"
+    },
+    "ALNRequest": {
+      "summary": "Immutable HTTP request model containing method/path/query/headers/body and parsed parameter helpers."
+    },
+    "ALNResponse": {
+      "summary": "Mutable HTTP response model for status, headers, and body serialization into wire-format bytes."
+    },
+    "ALNContext": {
+      "summary": "Per-request execution context shared across middleware and controllers, including params/auth/session/services.",
+      "usage_example": "NSString *userID = [context stringParamForName:@\"id\"];\nif (userID == nil) {\n  [context addValidationErrorForField:@\"id\"\n                                 code:@\"required\"\n                              message:@\"id is required\"];\n}"
+    },
+    "ALNController": {
+      "summary": "Base controller with template/JSON rendering, parameter helpers, auth/session helpers, and envelope conventions.",
+      "usage_example": "- (void)showUser {\n  NSString *userID = [self stringParamForName:@\"id\"];\n  if (userID == nil) {\n    [self addValidationErrorForField:@\"id\"\n                                code:@\"required\"\n                             message:@\"id is required\"];\n    [self renderValidationErrors];\n    return;\n  }\n\n  NSDictionary *payload = @{ @\"id\": userID, @\"status\": @\"ok\" };\n  NSError *error = nil;\n  [self renderJSONEnvelopeWithData:payload meta:nil error:&error];\n}"
+    },
+    "ALNPageState": {
+      "summary": "Page-state helper for namespaced key/value persistence across requests in compatibility workflows."
+    },
+    "ALNRouter": {
+      "summary": "Route registry and matcher with support for route grouping, guard actions, and format constraints."
+    },
+    "ALNRoute": {
+      "summary": "Single route descriptor containing method/path pattern/controller/action and matching helpers."
+    },
+    "ALNRouteMatch": {
+      "summary": "Route match result object containing matched route metadata and extracted route params."
+    },
+    "ALNEOCTranspiler": {
+      "summary": "EOC template compiler/transpiler with lint diagnostics and deterministic symbol/path resolution."
+    },
+    "ALNView": {
+      "summary": "Template renderer that executes transpiled EOC templates with optional strict locals/stringify behavior."
+    },
+    "ALNCSRFMiddleware": {
+      "summary": "CSRF validation middleware for state-changing requests using token headers/query params."
+    },
+    "ALNRateLimitMiddleware": {
+      "summary": "In-memory rate limiting middleware for per-window request throttling."
+    },
+    "ALNResponseEnvelopeMiddleware": {
+      "summary": "Middleware that normalizes JSON API responses into a consistent envelope shape."
+    },
+    "ALNSecurityHeadersMiddleware": {
+      "summary": "Middleware that injects security-related response headers (including optional CSP)."
+    },
+    "ALNSessionMiddleware": {
+      "summary": "Session middleware that signs/verifies cookie-backed session state for request context access."
+    },
+    "ALNDatabaseConnection": {
+      "summary": "Database-connection protocol defining query/command primitives used by adapters and routers."
+    },
+    "ALNDatabaseAdapter": {
+      "summary": "Database-adapter protocol defining connection lifecycle, query primitives, transactions, and capability metadata."
+    },
+    "ALNDatabaseRouter": {
+      "summary": "Read/write routing layer that selects database targets by operation class and routing context."
+    },
+    "ALNDisplayGroup": {
+      "summary": "DisplayGroup-style query helper that builds list fetches from filter and sort descriptors."
+    },
+    "ALNGDL2Adapter": {
+      "summary": "Optional GDL2 compatibility adapter with fallback behavior when native GDL2 runtime is unavailable."
+    },
+    "ALNMigrationRunner": {
+      "summary": "Migration discovery and migration execution runner for SQL migration directories."
+    },
+    "ALNPgConnection": {
+      "summary": "PostgreSQL connection wrapper with SQL execution, prepared statements, transactions, and builder execution helpers."
+    },
+    "ALNPg": {
+      "summary": "PostgreSQL adapter with pooled connections and adapter-compatible query/command/transaction APIs.",
+      "usage_example": "NSError *error = nil;\nALNPg *db = [[ALNPg alloc] initWithConnectionString:@\"postgres://localhost/arlen\"\n                                     maxConnections:4\n                                              error:&error];\nNSArray *rows = [db executeQuery:@\"SELECT now() AS ts\"\n                      parameters:@[]\n                           error:&error];"
+    },
+    "ALNSQLBuilder": {
+      "summary": "Fluent SQL builder for `SELECT`/`INSERT`/`UPDATE`/`DELETE` with expression-safe composition and deterministic SQL output.",
+      "usage_example": "NSError *error = nil;\nALNSQLBuilder *builder = [[[ALNSQLBuilder selectFrom:@\"users\" columns:@[@\"id\", @\"email\"]]\n    whereField:@\"status\" equals:@\"active\"]\n    orderByField:@\"id\" descending:NO];\nNSString *sql = [builder buildSQL:&error];\nNSArray *params = [builder buildParameters:&error];"
+    },
+    "ALNPostgresSQLBuilder": {
+      "summary": "PostgreSQL dialect extension for `ALNSQLBuilder` covering `ON CONFLICT` upsert behaviors."
+    },
+    "ALNSchemaCodegen": {
+      "summary": "Schema artifact generator for typed table/column contracts and optional typed decode helpers."
+    },
+    "ALNAuth": {
+      "summary": "Authentication and authorization helpers for bearer token extraction, JWT verification, and scope/role checks."
+    },
+    "ALNLogger": {
+      "summary": "Structured logger with configurable output format and level-specific convenience methods."
+    },
+    "ALNMetricsRegistry": {
+      "summary": "In-memory metrics registry for counters, gauges, timings, snapshots, and Prometheus text output."
+    },
+    "ALNPerfTrace": {
+      "summary": "Per-request performance stage recorder used for internal timing diagnostics and perf event export."
+    },
+    "ALNRealtimeSubscriber": {
+      "summary": "Realtime callback protocol implemented by websocket/session subscribers."
+    },
+    "ALNRealtimeSubscription": {
+      "summary": "Subscription token returned by realtime hub subscribe calls and used for unsubscribe operations."
+    },
+    "ALNRealtimeHub": {
+      "summary": "In-process pub/sub hub used for websocket channel fanout and simple realtime event routing.",
+      "usage_example": "ALNRealtimeHub *hub = [ALNRealtimeHub sharedHub];\nNSUInteger delivered = [hub publishMessage:@\"status:ok\" onChannel:@\"system\"];\nNSLog(@\"delivered to %lu subscribers\", (unsigned long)delivered);"
+    },
+    "ALNJobAdapter": {
+      "summary": "Job adapter protocol for enqueue/dequeue/ack/retry operations and queue state diagnostics."
+    },
+    "ALNJobEnvelope": {
+      "summary": "Immutable leased-job envelope containing identity, payload, attempt counters, and schedule metadata."
+    },
+    "ALNJobWorkerRuntime": {
+      "summary": "Worker runtime callback protocol that decides ack/retry/discard disposition for leased jobs."
+    },
+    "ALNJobWorker": {
+      "summary": "Worker orchestration helper that leases due jobs and executes them through a runtime callback."
+    },
+    "ALNJobWorkerRunSummary": {
+      "summary": "Summary payload for one worker run, including lease/ack/retry/error counters."
+    },
+    "ALNCacheAdapter": {
+      "summary": "Cache adapter protocol for set/get/remove/clear operations with optional TTL semantics."
+    },
+    "ALNLocalizationAdapter": {
+      "summary": "Localization adapter protocol for translation registration, lookup, and locale discovery."
+    },
+    "ALNMailMessage": {
+      "summary": "Mail payload model containing sender/recipients/content/headers/metadata fields."
+    },
+    "ALNMailAdapter": {
+      "summary": "Mail adapter protocol for outbound delivery and delivery snapshot diagnostics."
+    },
+    "ALNAttachmentAdapter": {
+      "summary": "Attachment adapter protocol for save/read/delete/list operations on binary blobs + metadata."
+    },
+    "ALNRedisCacheAdapter": {
+      "summary": "Redis-backed cache adapter implementation compatible with `ALNCacheAdapter` semantics."
+    },
+    "ALNFileJobAdapter": {
+      "summary": "Filesystem-backed job queue adapter for durable local/edge deployments."
+    },
+    "ALNFileMailAdapter": {
+      "summary": "Filesystem-backed mail adapter that writes deliveries to disk for auditing/testing."
+    },
+    "ALNFileSystemAttachmentAdapter": {
+      "summary": "Filesystem-backed attachment adapter for durable binary storage."
+    }
+  },
+  "properties": {
+    "ALNApplication|router": {
+      "purpose": "Router instance that owns route registration and path matching for this app."
+    },
+    "ALNApplication|config": {
+      "purpose": "Resolved application configuration dictionary used at runtime."
+    },
+    "ALNApplication|environment": {
+      "purpose": "Current runtime environment name (`development`, `test`, `production`, etc.)."
+    },
+    "ALNApplication|logger": {
+      "purpose": "Application-wide structured logger used by controllers/middleware/runtime internals."
+    },
+    "ALNApplication|metrics": {
+      "purpose": "Application-wide metrics registry used for counters/gauges/timings and `/metrics` export."
+    },
+    "ALNApplication|middlewares": {
+      "purpose": "Ordered middleware list executed for request pre/post processing."
+    },
+    "ALNApplication|plugins": {
+      "purpose": "Registered plugin instances that extended this app during bootstrap."
+    },
+    "ALNApplication|lifecycleHooks": {
+      "purpose": "Registered lifecycle hooks invoked around startup and shutdown."
+    },
+    "ALNApplication|staticMounts": {
+      "purpose": "Configured static mount definitions used by the HTTP server static-file path."
+    },
+    "ALNApplication|clusterName": {
+      "purpose": "Cluster identifier used for distributed-runtime diagnostics and headers."
+    },
+    "ALNApplication|clusterNodeID": {
+      "purpose": "Node identifier used for distributed-runtime diagnostics and headers."
+    }
+  },
+  "methods": {}
+}

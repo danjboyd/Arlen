@@ -1,6 +1,6 @@
 # Arlen Phase 2 + Phase 3 Roadmap Index
 
-Status: Active (Phase 2A-2D complete; Phase 3A-3H complete; Phase 4A-4E complete; Phase 5A-5E complete; Phase 7A/7B/7C/7D/7E/7F/7G/7H initial slices implemented; Phase 7 follow-on active; Phase 8A complete; Phase 8B complete)  
+Status: Active (Phase 2A-2D complete; Phase 3A-3H complete; Phase 4A-4E complete; Phase 5A-5E complete; Phase 7A/7B/7C/7D/7E/7F/7G/7H initial slices implemented; Phase 7 follow-on active; Phase 8A complete; Phase 8B complete; Phase 9A/9B/9C/9D complete; Phase 9E initial slice complete)  
 Last updated: 2026-02-24
 
 This index points to the current roadmap documents:
@@ -11,6 +11,7 @@ This index points to the current roadmap documents:
 - `docs/PHASE5_ROADMAP.md`
 - `docs/PHASE7_ROADMAP.md`
 - `docs/PHASE8_ROADMAP.md`
+- `docs/PHASE9_ROADMAP.md`
 - `docs/FEATURE_PARITY_MATRIX.md`
 
 ## Summary
@@ -109,6 +110,19 @@ Phase 8 execution/planning is defined in `docs/PHASE8_ROADMAP.md`, including:
   - KVO-driven incremental server-render patch streaming
   - NSUndoManager-style command/audit/undo architecture
   - NSPredicate/NSSortDescriptor-primary query surface
+
+Phase 9 execution/planning is defined in `docs/PHASE9_ROADMAP.md`, including:
+
+- Phase 9A complete:
+  - recursive HTML docs publishing pipeline and local docs serving command
+- Phase 9B complete:
+  - generated API reference from public umbrella headers with method-level purpose/usage guidance
+- Phase 9C complete:
+  - track-based getting-started docs (quickstart/api/html/data-layer)
+- Phase 9D complete:
+  - Arlen-for-X migration guide suite (Rails, Django, Laravel, FastAPI, Express/NestJS, Mojolicious)
+- Phase 9E initial slice complete:
+  - documentation policy quality-gate updates for API docs regeneration and HTML validation
 
 Scope guardrails remain unchanged:
 - admin/backoffice and full account-product surfaces remain outside Arlen core and are expected to ship as optional modules/products.

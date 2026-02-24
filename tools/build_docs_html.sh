@@ -3,11 +3,24 @@ set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 out_root="${1:-$repo_root/build/docs}"
+api_generator="$repo_root/tools/docs/generate_api_reference.py"
 
 if ! command -v pandoc >/dev/null 2>&1; then
   echo "build_docs_html: pandoc not found in PATH" >&2
   exit 1
 fi
+
+if ! command -v python3 >/dev/null 2>&1; then
+  echo "build_docs_html: python3 not found in PATH" >&2
+  exit 1
+fi
+
+if [[ ! -f "$api_generator" ]]; then
+  echo "build_docs_html: missing API generator at $api_generator" >&2
+  exit 1
+fi
+
+python3 "$api_generator" --repo-root "$repo_root"
 
 rm -rf "$out_root"
 mkdir -p "$out_root"
@@ -71,7 +84,7 @@ CSS
 md_files=()
 while IFS= read -r file; do
   md_files+=("${file#"$repo_root/"}")
-done < <(find "$repo_root/docs" -maxdepth 1 -type f -name '*.md' | sort)
+done < <(find "$repo_root/docs" -type f -name '*.md' | sort)
 
 md_files+=(
   README.md
@@ -80,6 +93,7 @@ md_files+=(
   examples/basic_app/README.md
   examples/api_reference/README.md
   examples/gsweb_migration/README.md
+  examples/arlen_data/README.md
 )
 
 for rel in "${md_files[@]}"; do
@@ -103,13 +117,27 @@ for rel in "${md_files[@]}"; do
     --metadata title="Arlen Docs - ${rel%.md}" \
     --output "$dst"
 
-  sed -i 's/\.md"/.html"/g' "$dst"
-  sed -i 's/\.md#/.html#/g' "$dst"
+  sed -E -i 's/href="([^"]+)\.md"/href="\1.html"/g' "$dst"
+  sed -E -i 's/href="([^"]+)\.md#/href="\1.html#/g' "$dst"
   sed -i 's|<body>|<body><main>|' "$dst"
   sed -i 's|</body>|</main></body>|' "$dst"
 done
 
-if [[ -f "$out_root/README.html" ]]; then
+if [[ -f "$out_root/docs/README.html" ]]; then
+  cat > "$out_root/index.html" <<'HTML'
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="refresh" content="0; url=docs/README.html">
+  <title>Arlen Docs</title>
+</head>
+<body>
+  <p>Redirecting to <a href="docs/README.html">Arlen documentation index</a>...</p>
+</body>
+</html>
+HTML
+elif [[ -f "$out_root/README.html" ]]; then
   cp "$out_root/README.html" "$out_root/index.html"
 fi
 
