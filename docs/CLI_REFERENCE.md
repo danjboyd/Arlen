@@ -149,6 +149,8 @@ Run performance suite and regression gate (`make perf`).
 Profile selection is environment-driven:
 
 - `ARLEN_PERF_PROFILE=default|middleware_heavy|template_heavy|api_reference|migration_sample`
+- `ARLEN_PERF_PROFILE=default|middleware_heavy|template_heavy|api_reference|migration_sample|comparison_http`
+- `ARLEN_PERF_CONCURRENCY=<n>` (optional concurrent request fanout per scenario)
 
 ### `arlen check [--dry-run] [--json]`
 

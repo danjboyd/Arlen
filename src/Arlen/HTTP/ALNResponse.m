@@ -61,7 +61,6 @@ static NSString *ALNStatusText(NSInteger statusCode) {
     _headers = [NSMutableDictionary dictionary];
     _bodyData = [NSMutableData data];
     _committed = NO;
-    [self setHeader:@"Connection" value:@"close"];
     [self setHeader:@"Server" value:@"Arlen"];
   }
   return self;

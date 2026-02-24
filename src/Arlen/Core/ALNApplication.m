@@ -58,6 +58,7 @@ static void ALNSetStructuredErrorResponse(ALNResponse *response,
 @property(nonatomic, strong) NSDate *bootedAt;
 @property(nonatomic, strong) NSDate *startedAt;
 @property(nonatomic, assign, readwrite, getter=isStarted) BOOL started;
+@property(nonatomic, strong) NSLock *routeCompilationLock;
 
 - (void)loadConfiguredPlugins;
 - (void)loadConfiguredStaticMounts;
@@ -168,9 +169,10 @@ static void ALNSetStructuredErrorResponse(ALNResponse *response,
     _bootedAt = [NSDate date];
     _startedAt = nil;
     _started = NO;
-    if ([_environment isEqualToString:@"development"]) {
-      _logger.minimumLevel = ALNLogLevelDebug;
-    }
+    _routeCompilationLock = [[NSLock alloc] init];
+    ALNLogLevel defaultLogLevel =
+        [_environment isEqualToString:@"development"] ? ALNLogLevelDebug : ALNLogLevelInfo;
+    _logger.minimumLevel = ALNLogLevelFromConfigValue(_config[@"logLevel"], defaultLogLevel);
     [self registerBuiltInMiddlewares];
     [self loadConfiguredStaticMounts];
     [self loadConfiguredPlugins];
@@ -490,6 +492,27 @@ static NSUInteger ALNUIntConfigValue(id value, NSUInteger defaultValue, NSUInteg
 static NSString *ALNStringConfigValue(id value, NSString *defaultValue) {
   if ([value isKindOfClass:[NSString class]] && [value length] > 0) {
     return value;
+  }
+  return defaultValue;
+}
+
+static ALNLogLevel ALNLogLevelFromConfigValue(id value, ALNLogLevel defaultValue) {
+  if (![value isKindOfClass:[NSString class]]) {
+    return defaultValue;
+  }
+  NSString *normalized = [[(NSString *)value lowercaseString]
+      stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+  if ([normalized isEqualToString:@"debug"]) {
+    return ALNLogLevelDebug;
+  }
+  if ([normalized isEqualToString:@"info"]) {
+    return ALNLogLevelInfo;
+  }
+  if ([normalized isEqualToString:@"warn"]) {
+    return ALNLogLevelWarn;
+  }
+  if ([normalized isEqualToString:@"error"]) {
+    return ALNLogLevelError;
   }
   return defaultValue;
 }
@@ -2952,10 +2975,18 @@ static void ALNFinalizeResponse(ALNApplication *application,
 
   id returnValue = nil;
   NSError *routeCompileError = nil;
-  BOOL routeReady = [self compileRoute:match.route
+  BOOL routeReady = YES;
+  if (!match.route.compiledInvocationMetadata) {
+    [self.routeCompilationLock lock];
+    @try {
+      routeReady = [self compileRoute:match.route
                          controllerMap:nil
                       warningsAsErrors:[self routingRouteCompileWarningsAsErrorsEnabled]
                                  error:&routeCompileError];
+    } @finally {
+      [self.routeCompilationLock unlock];
+    }
+  }
   if (!routeReady) {
     NSDictionary *details = ALNRouteCompileRuntimeDetails(routeCompileError);
     ALNApplyInternalErrorResponse(self,

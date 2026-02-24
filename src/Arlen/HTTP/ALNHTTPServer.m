@@ -174,32 +174,29 @@ static BOOL ALNRequestIsWebSocketUpgrade(ALNRequest *request) {
   return [key isKindOfClass:[NSString class]] && [key length] > 0;
 }
 
-static BOOL ALNSocketLikelyWebSocketUpgrade(int clientFd) {
-  for (;;) {
-    unsigned char bytes[2048];
-    ssize_t peeked = recv(clientFd, bytes, sizeof(bytes), MSG_PEEK);
-    if (peeked < 0) {
-      if (errno == EINTR) {
-        continue;
-      }
-      return NO;
-    }
-    if (peeked == 0) {
-      return NO;
-    }
-
-    NSString *snippet =
-        [[NSString alloc] initWithBytes:bytes length:(NSUInteger)peeked encoding:NSUTF8StringEncoding];
-    if (snippet == nil) {
-      return NO;
-    }
-    NSString *lower = [snippet lowercaseString];
-    BOOL hasUpgradeHeader = [lower rangeOfString:@"\r\nupgrade:"].location != NSNotFound &&
-                            [lower rangeOfString:@"websocket"].location != NSNotFound;
-    BOOL hasConnectionUpgrade = [lower rangeOfString:@"\r\nconnection:"].location != NSNotFound &&
-                                [lower rangeOfString:@"upgrade"].location != NSNotFound;
-    return hasUpgradeHeader && hasConnectionUpgrade;
+static BOOL ALNShouldKeepAliveForRequest(ALNRequest *request, ALNResponse *response) {
+  if (request == nil || response == nil) {
+    return NO;
   }
+
+  NSString *responseConnection = [[response headerForName:@"Connection"] lowercaseString];
+  if (ALNHeaderContainsToken(responseConnection, @"close")) {
+    return NO;
+  }
+  if (ALNHeaderContainsToken(responseConnection, @"keep-alive")) {
+    return YES;
+  }
+
+  NSString *requestConnection = [request.headers[@"connection"] lowercaseString];
+  if (ALNHeaderContainsToken(requestConnection, @"close")) {
+    return NO;
+  }
+
+  NSString *version = [[request.httpVersion ?: @"HTTP/1.1" uppercaseString] copy];
+  if ([version isEqualToString:@"HTTP/1.0"]) {
+    return ALNHeaderContainsToken(requestConnection, @"keep-alive");
+  }
+  return YES;
 }
 
 static NSString *ALNWebSocketAcceptKey(NSString *clientKey) {
@@ -388,6 +385,12 @@ static NSData *ALNReadHTTPRequestData(int clientFd, ALNRequestLimits limits, NSI
       return nil;
     }
     if (readBytes == 0) {
+      if ([buffer length] == 0) {
+        if (statusCode != NULL) {
+          *statusCode = 0;
+        }
+        return nil;
+      }
       break;
     }
 
@@ -852,7 +855,7 @@ static double ALNSendResponse(int clientFd, ALNResponse *response, BOOL performa
   }
 
   double writeStart = ALNNowMilliseconds();
-  (void)send(clientFd, [raw bytes], [raw length], 0);
+  (void)ALNSendAll(clientFd, [raw bytes], [raw length]);
   return (ALNNowMilliseconds() - writeStart) + serializeMs;
 }
 
@@ -926,9 +929,9 @@ static ALNResponse *ALNErrorResponse(NSInteger statusCode, NSString *body) {
 
 @property(nonatomic, strong, readwrite) ALNApplication *application;
 @property(nonatomic, copy, readwrite) NSString *publicRoot;
-@property(nonatomic, strong) NSLock *dispatchLock;
 @property(nonatomic, strong) NSLock *runtimeCountersLock;
 @property(nonatomic, assign) NSUInteger activeWebSocketSessions;
+@property(nonatomic, assign) NSUInteger maxConcurrentWebSocketSessions;
 
 @end
 
@@ -941,9 +944,9 @@ static ALNResponse *ALNErrorResponse(NSInteger statusCode, NSString *body) {
     _application = application;
     _publicRoot = [publicRoot copy];
     _serverName = @"server";
-    _dispatchLock = [[NSLock alloc] init];
     _runtimeCountersLock = [[NSLock alloc] init];
     _activeWebSocketSessions = 0;
+    _maxConcurrentWebSocketSessions = 256;
   }
   return self;
 }
@@ -1157,106 +1160,149 @@ static ALNResponse *ALNErrorResponse(NSInteger statusCode, NSString *body) {
       [self handleClient:clientFd];
     } @finally {
       close(clientFd);
-      [self releaseWebSocketSessionReservation];
     }
   }
 }
 
 - (void)handleClient:(int)clientFd {
-  double requestStartMs = ALNNowMilliseconds();
   BOOL performanceLogging =
       ALNConfigBool(self.application.config ?: @{}, @"performanceLogging", YES);
   ALNRequestLimits limits = ALNLimitsFromConfig(self.application.config ?: @{});
   ALNServerSocketTuning tuning = ALNTuningFromConfig(self.application.config ?: @{});
   ALNApplyClientSocketTimeout(clientFd, tuning.connectionTimeoutSeconds);
 
-  NSInteger readStatus = 0;
-  double parseStartMs = ALNNowMilliseconds();
-  NSData *rawRequest = ALNReadHTTPRequestData(clientFd, limits, &readStatus);
-  double parseMs = ALNNowMilliseconds() - parseStartMs;
-  if (rawRequest == nil) {
-    ALNResponse *errorResponse = nil;
-    if (readStatus == 413) {
-      errorResponse = ALNErrorResponse(413, @"payload too large\n");
-    } else if (readStatus == 431) {
-      errorResponse = ALNErrorResponse(431, @"request headers too large\n");
-    } else if (readStatus == 408) {
-      errorResponse = ALNErrorResponse(408, @"request timeout\n");
-    } else {
-      errorResponse = ALNErrorResponse(400, @"bad request\n");
-    }
-    ALNEnsurePerformanceHeaders(errorResponse,
-                                performanceLogging,
-                                parseMs,
-                                ALNNowMilliseconds() - requestStartMs);
-    (void)ALNSendResponse(clientFd, errorResponse, performanceLogging);
-    return;
-  }
+  NSUInteger requestsHandled = 0;
+  while (gShouldRun) {
+    double requestStartMs = ALNNowMilliseconds();
 
-  NSError *requestError = nil;
-  double requestParseStartMs = ALNNowMilliseconds();
-  ALNRequest *request = [ALNRequest requestFromRawData:rawRequest error:&requestError];
-  parseMs += (ALNNowMilliseconds() - requestParseStartMs);
-  if (request == nil) {
-    ALNResponse *errorResponse = ALNErrorResponse(400, @"bad request\n");
-    ALNEnsurePerformanceHeaders(errorResponse,
-                                performanceLogging,
-                                parseMs,
-                                ALNNowMilliseconds() - requestStartMs);
-    (void)ALNSendResponse(clientFd, errorResponse, performanceLogging);
-    return;
-  }
-  request.parseDurationMilliseconds = parseMs;
-
-  request.remoteAddress = ALNRemoteAddressForClient(clientFd);
-  request.effectiveRemoteAddress = request.remoteAddress ?: @"";
-  request.scheme = @"http";
-  ALNApplyProxyMetadata(request, self.application.config ?: @{});
-
-  BOOL supportsStaticMethod = [request.method isEqualToString:@"GET"] ||
-                              [request.method isEqualToString:@"HEAD"];
-  if (supportsStaticMethod) {
-    NSArray *staticMounts = [self effectiveStaticMounts];
-    for (NSDictionary *mount in staticMounts) {
-      ALNResponse *staticResponse = ALNStaticResponseForMount(request, mount, self.publicRoot);
-      if (staticResponse == nil) {
-        continue;
+    NSInteger readStatus = 0;
+    double parseStartMs = ALNNowMilliseconds();
+    NSData *rawRequest = ALNReadHTTPRequestData(clientFd, limits, &readStatus);
+    double parseMs = ALNNowMilliseconds() - parseStartMs;
+    if (rawRequest == nil) {
+      if (readStatus == 0) {
+        return;
       }
-      ALNEnsurePerformanceHeaders(staticResponse,
+      if (requestsHandled > 0 && readStatus == 408) {
+        return;
+      }
+
+      ALNResponse *errorResponse = nil;
+      if (readStatus == 413) {
+        errorResponse = ALNErrorResponse(413, @"payload too large\n");
+      } else if (readStatus == 431) {
+        errorResponse = ALNErrorResponse(431, @"request headers too large\n");
+      } else if (readStatus == 408) {
+        errorResponse = ALNErrorResponse(408, @"request timeout\n");
+      } else {
+        errorResponse = ALNErrorResponse(400, @"bad request\n");
+      }
+      [errorResponse setHeader:@"Connection" value:@"close"];
+      ALNEnsurePerformanceHeaders(errorResponse,
                                   performanceLogging,
                                   parseMs,
                                   ALNNowMilliseconds() - requestStartMs);
-      request.responseWriteDurationMilliseconds =
-          ALNSendResponse(clientFd, staticResponse, performanceLogging);
+      (void)ALNSendResponse(clientFd, errorResponse, performanceLogging);
+      return;
+    }
+
+    NSError *requestError = nil;
+    double requestParseStartMs = ALNNowMilliseconds();
+    ALNRequest *request = [ALNRequest requestFromRawData:rawRequest error:&requestError];
+    parseMs += (ALNNowMilliseconds() - requestParseStartMs);
+    if (request == nil) {
+      ALNResponse *errorResponse = ALNErrorResponse(400, @"bad request\n");
+      [errorResponse setHeader:@"Connection" value:@"close"];
+      ALNEnsurePerformanceHeaders(errorResponse,
+                                  performanceLogging,
+                                  parseMs,
+                                  ALNNowMilliseconds() - requestStartMs);
+      (void)ALNSendResponse(clientFd, errorResponse, performanceLogging);
+      return;
+    }
+    request.parseDurationMilliseconds = parseMs;
+
+    request.remoteAddress = ALNRemoteAddressForClient(clientFd);
+    request.effectiveRemoteAddress = request.remoteAddress ?: @"";
+    request.scheme = @"http";
+    ALNApplyProxyMetadata(request, self.application.config ?: @{});
+
+    BOOL supportsStaticMethod = [request.method isEqualToString:@"GET"] ||
+                                [request.method isEqualToString:@"HEAD"];
+    BOOL handledStatic = NO;
+    if (supportsStaticMethod) {
+      NSArray *staticMounts = [self effectiveStaticMounts];
+      for (NSDictionary *mount in staticMounts) {
+        ALNResponse *staticResponse = ALNStaticResponseForMount(request, mount, self.publicRoot);
+        if (staticResponse == nil) {
+          continue;
+        }
+        BOOL keepAlive = ALNShouldKeepAliveForRequest(request, staticResponse);
+        [staticResponse setHeader:@"Connection" value:(keepAlive ? @"keep-alive" : @"close")];
+        ALNEnsurePerformanceHeaders(staticResponse,
+                                    performanceLogging,
+                                    parseMs,
+                                    ALNNowMilliseconds() - requestStartMs);
+        request.responseWriteDurationMilliseconds =
+            ALNSendResponse(clientFd, staticResponse, performanceLogging);
+        requestsHandled += 1;
+        if (!keepAlive) {
+          return;
+        }
+        handledStatic = YES;
+        break;
+      }
+    }
+    if (handledStatic) {
+      continue;
+    }
+
+    ALNResponse *response = [self.application dispatchRequest:request];
+
+    NSString *webSocketMode = [self webSocketModeFromResponse:response];
+    BOOL webSocketUpgrade = ALNRequestIsWebSocketUpgrade(request) &&
+                            response.statusCode == 101 &&
+                            [webSocketMode length] > 0;
+    if (webSocketUpgrade) {
+      BOOL reserved =
+          [self reserveWebSocketSessionWithLimit:self.maxConcurrentWebSocketSessions];
+      if (!reserved) {
+        ALNResponse *busyResponse = ALNErrorResponse(503, @"server busy\n");
+        [busyResponse setHeader:@"Retry-After" value:@"1"];
+        [busyResponse setHeader:@"X-Arlen-Backpressure-Reason"
+                          value:@"websocket_session_limit"];
+        [busyResponse setHeader:@"Connection" value:@"close"];
+        ALNEnsurePerformanceHeaders(busyResponse,
+                                    performanceLogging,
+                                    parseMs,
+                                    ALNNowMilliseconds() - requestStartMs);
+        (void)ALNSendResponse(clientFd, busyResponse, performanceLogging);
+        return;
+      }
+
+      @try {
+        if ([self sendWebSocketHandshakeForRequest:request response:response clientFd:clientFd]) {
+          [self runWebSocketSessionForRequest:request response:response clientFd:clientFd];
+        }
+      } @finally {
+        [self releaseWebSocketSessionReservation];
+      }
+      return;
+    }
+
+    BOOL keepAlive = ALNShouldKeepAliveForRequest(request, response);
+    [response setHeader:@"Connection" value:(keepAlive ? @"keep-alive" : @"close")];
+    ALNEnsurePerformanceHeaders(response,
+                                performanceLogging,
+                                parseMs,
+                                ALNNowMilliseconds() - requestStartMs);
+    request.responseWriteDurationMilliseconds =
+        ALNSendResponse(clientFd, response, performanceLogging);
+    requestsHandled += 1;
+    if (!keepAlive) {
       return;
     }
   }
-
-  ALNResponse *response = nil;
-  [self.dispatchLock lock];
-  @try {
-    response = [self.application dispatchRequest:request];
-  } @finally {
-    [self.dispatchLock unlock];
-  }
-
-  NSString *webSocketMode = [self webSocketModeFromResponse:response];
-  BOOL webSocketUpgrade = ALNRequestIsWebSocketUpgrade(request) &&
-                          response.statusCode == 101 &&
-                          [webSocketMode length] > 0;
-  if (webSocketUpgrade) {
-    if ([self sendWebSocketHandshakeForRequest:request response:response clientFd:clientFd]) {
-      [self runWebSocketSessionForRequest:request response:response clientFd:clientFd];
-    }
-    return;
-  }
-
-  ALNEnsurePerformanceHeaders(response,
-                              performanceLogging,
-                              parseMs,
-                              ALNNowMilliseconds() - requestStartMs);
-  request.responseWriteDurationMilliseconds =
-      ALNSendResponse(clientFd, response, performanceLogging);
 }
 
 - (int)runWithHost:(NSString *)host
@@ -1283,7 +1329,7 @@ static ALNResponse *ALNErrorResponse(NSInteger statusCode, NSString *body) {
   @try {
     ALNServerSocketTuning tuning = ALNTuningFromConfig(config);
     ALNRuntimeLimits runtimeLimits = ALNRuntimeLimitsFromConfig(config);
-    BOOL performanceLogging = ALNConfigBool(config, @"performanceLogging", YES);
+    self.maxConcurrentWebSocketSessions = runtimeLimits.maxConcurrentWebSocketSessions;
 
     if (!ALNInstallSignalHandler(SIGINT) || !ALNInstallSignalHandler(SIGTERM)) {
       perror("sigaction");
@@ -1376,20 +1422,8 @@ static ALNResponse *ALNErrorResponse(NSInteger statusCode, NSString *body) {
         break;
       }
 
-      BOOL runInBackground = (!once && ALNSocketLikelyWebSocketUpgrade(clientFd));
+      BOOL runInBackground = !once;
       if (runInBackground) {
-        BOOL reserved =
-            [self reserveWebSocketSessionWithLimit:runtimeLimits.maxConcurrentWebSocketSessions];
-        if (!reserved) {
-          ALNResponse *busyResponse = ALNErrorResponse(503, @"server busy\n");
-          [busyResponse setHeader:@"Retry-After" value:@"1"];
-          [busyResponse setHeader:@"X-Arlen-Backpressure-Reason"
-                            value:@"websocket_session_limit"];
-          ALNEnsurePerformanceHeaders(busyResponse, performanceLogging, 0.0, 0.0);
-          (void)ALNSendResponse(clientFd, busyResponse, performanceLogging);
-          close(clientFd);
-          continue;
-        }
         [NSThread detachNewThreadSelector:@selector(handleClientOnBackgroundThread:)
                                  toTarget:self
                                withObject:@(clientFd)];

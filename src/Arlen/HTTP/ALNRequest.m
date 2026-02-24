@@ -60,6 +60,7 @@ static NSDictionary *ALNParseCookies(NSString *cookieHeader) {
 @property(nonatomic, copy, readwrite) NSString *method;
 @property(nonatomic, copy, readwrite) NSString *path;
 @property(nonatomic, copy, readwrite) NSString *queryString;
+@property(nonatomic, copy, readwrite) NSString *httpVersion;
 @property(nonatomic, copy, readwrite) NSDictionary *headers;
 @property(nonatomic, strong, readwrite) NSData *body;
 @property(nonatomic, copy, readwrite) NSDictionary *queryParams;
@@ -72,6 +73,7 @@ static NSDictionary *ALNParseCookies(NSString *cookieHeader) {
 - (instancetype)initWithMethod:(NSString *)method
                           path:(NSString *)path
                    queryString:(NSString *)queryString
+                   httpVersion:(NSString *)httpVersion
                        headers:(NSDictionary *)headers
                           body:(NSData *)body {
   self = [super init];
@@ -79,6 +81,7 @@ static NSDictionary *ALNParseCookies(NSString *cookieHeader) {
     _method = [[method uppercaseString] copy];
     _path = [path copy];
     _queryString = [queryString copy] ?: @"";
+    _httpVersion = [httpVersion copy] ?: @"HTTP/1.1";
     _headers = [NSDictionary dictionaryWithDictionary:headers ?: @{}];
     _body = body ?: [NSData data];
     _queryParams = ALNParseQueryString(_queryString);
@@ -91,6 +94,19 @@ static NSDictionary *ALNParseCookies(NSString *cookieHeader) {
     _responseWriteDurationMilliseconds = 0.0;
   }
   return self;
+}
+
+- (instancetype)initWithMethod:(NSString *)method
+                          path:(NSString *)path
+                   queryString:(NSString *)queryString
+                       headers:(NSDictionary *)headers
+                          body:(NSData *)body {
+  return [self initWithMethod:method
+                         path:path
+                  queryString:queryString
+                  httpVersion:@"HTTP/1.1"
+                      headers:headers
+                         body:body];
 }
 
 + (ALNRequest *)requestFromRawData:(NSData *)data error:(NSError **)error {
@@ -152,6 +168,10 @@ static NSDictionary *ALNParseCookies(NSString *cookieHeader) {
 
   NSString *method = parts[0];
   NSString *uri = parts[1];
+  NSString *httpVersion = ([parts count] >= 3) ? parts[2] : @"HTTP/1.1";
+  if (![httpVersion isKindOfClass:[NSString class]] || [httpVersion length] == 0) {
+    httpVersion = @"HTTP/1.1";
+  }
   NSString *path = uri;
   NSString *query = @"";
   NSRange q = [uri rangeOfString:@"?"];
@@ -183,6 +203,7 @@ static NSDictionary *ALNParseCookies(NSString *cookieHeader) {
   return [[ALNRequest alloc] initWithMethod:method
                                       path:path
                                queryString:query
+                               httpVersion:httpVersion
                                    headers:headers
                                       body:body];
 }

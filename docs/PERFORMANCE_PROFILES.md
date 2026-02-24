@@ -11,6 +11,7 @@ Profiles live in `tests/performance/profiles/`:
 - `template_heavy`
 - `api_reference`
 - `migration_sample`
+- `comparison_http`
 
 Each profile defines server target, launch env, readiness path, and scenario list.
 
@@ -32,6 +33,18 @@ Fast local path:
 
 ```bash
 ARLEN_PERF_FAST=1 ARLEN_PERF_SKIP_GATE=0 ARLEN_PERF_REQUESTS=40 make perf
+```
+
+External comparison path (production-style config, reduced logging overhead, concurrent clients):
+
+```bash
+ARLEN_PERF_PROFILE=comparison_http ARLEN_PERF_SKIP_GATE=1 make perf
+```
+
+Optional concurrency override (all profiles):
+
+```bash
+ARLEN_PERF_CONCURRENCY=8 ARLEN_PERF_PROFILE=comparison_http ARLEN_PERF_SKIP_GATE=1 make perf
 ```
 
 ## 3. Baselines and Policy

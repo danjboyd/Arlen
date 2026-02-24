@@ -281,6 +281,241 @@
   XCTAssertEqualObjects(@"live\n", live);
 }
 
+- (void)testPartialRequestDoesNotBlockSecondClient {
+  int port = [self randomPort];
+  NSTask *server = [[NSTask alloc] init];
+  server.launchPath = @"./build/boomhauer";
+  server.arguments = @[ @"--port", [NSString stringWithFormat:@"%d", port] ];
+  server.standardOutput = [NSPipe pipe];
+  server.standardError = [NSPipe pipe];
+  [server launch];
+
+  @try {
+    BOOL ready = NO;
+    (void)[self requestPathWithRetries:@"/healthz" port:port attempts:60 success:&ready];
+    XCTAssertTrue(ready);
+
+    NSString *script = [NSString stringWithFormat:
+                                         @"import socket, time, urllib.request\n"
+                                         @"PORT=%d\n"
+                                         @"partial = socket.create_connection(('127.0.0.1', PORT), timeout=5)\n"
+                                         @"partial.sendall(b'GET /healthz HTTP/1.1\\r\\nHost: 127.0.0.1\\r\\n')\n"
+                                         @"time.sleep(0.2)\n"
+                                         @"start = time.time()\n"
+                                         @"body = urllib.request.urlopen(f'http://127.0.0.1:{PORT}/healthz', timeout=3).read().decode('utf-8')\n"
+                                         @"elapsed = time.time() - start\n"
+                                         @"partial.close()\n"
+                                         @"if body != 'ok\\n':\n"
+                                         @"    raise RuntimeError(body)\n"
+                                         @"if elapsed > 1.2:\n"
+                                         @"    raise RuntimeError(f'second request blocked for {elapsed:.3f}s')\n"
+                                         @"print(f'{elapsed:.3f}')\n",
+                                         port];
+    int pyCode = 0;
+    NSString *output = [self runPythonScript:script exitCode:&pyCode];
+    XCTAssertEqual(0, pyCode);
+    XCTAssertTrue([[output stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]]
+        doubleValue] < 1.2);
+  } @finally {
+    if ([server isRunning]) {
+      (void)kill(server.processIdentifier, SIGTERM);
+      [server waitUntilExit];
+    }
+  }
+}
+
+- (void)testKeepAliveAllowsMultipleRequestsOnSingleConnection {
+  int port = [self randomPort];
+  NSTask *server = [[NSTask alloc] init];
+  server.launchPath = @"./build/boomhauer";
+  server.arguments = @[ @"--port", [NSString stringWithFormat:@"%d", port] ];
+  server.standardOutput = [NSPipe pipe];
+  server.standardError = [NSPipe pipe];
+  [server launch];
+
+  @try {
+    BOOL ready = NO;
+    (void)[self requestPathWithRetries:@"/healthz" port:port attempts:60 success:&ready];
+    XCTAssertTrue(ready);
+
+    NSString *script = [NSString stringWithFormat:
+                                         @"import socket\n"
+                                         @"PORT=%d\n"
+                                         @"def read_response(sock):\n"
+                                         @"    data = b''\n"
+                                         @"    while b'\\r\\n\\r\\n' not in data:\n"
+                                         @"        chunk = sock.recv(4096)\n"
+                                         @"        if not chunk:\n"
+                                         @"            raise RuntimeError('connection closed before headers')\n"
+                                         @"        data += chunk\n"
+                                         @"    head, body = data.split(b'\\r\\n\\r\\n', 1)\n"
+                                         @"    lines = head.decode('utf-8', 'replace').split('\\r\\n')\n"
+                                         @"    status = lines[0]\n"
+                                         @"    headers = {}\n"
+                                         @"    for line in lines[1:]:\n"
+                                         @"        if ':' not in line:\n"
+                                         @"            continue\n"
+                                         @"        name, value = line.split(':', 1)\n"
+                                         @"        headers[name.strip().lower()] = value.strip()\n"
+                                         @"    length = int(headers.get('content-length', '0'))\n"
+                                         @"    while len(body) < length:\n"
+                                         @"        chunk = sock.recv(4096)\n"
+                                         @"        if not chunk:\n"
+                                         @"            raise RuntimeError('connection closed before body complete')\n"
+                                         @"        body += chunk\n"
+                                         @"    return status, headers, body[:length]\n"
+                                         @"sock = socket.create_connection(('127.0.0.1', PORT), timeout=5)\n"
+                                         @"sock.sendall((\n"
+                                         @"    f'GET /healthz HTTP/1.1\\r\\n'\n"
+                                         @"    f'Host: 127.0.0.1:{PORT}\\r\\n'\n"
+                                         @"    'Connection: keep-alive\\r\\n\\r\\n'\n"
+                                         @").encode('utf-8'))\n"
+                                         @"status1, headers1, body1 = read_response(sock)\n"
+                                         @"if '200' not in status1 or body1 != b'ok\\n':\n"
+                                         @"    raise RuntimeError(status1)\n"
+                                         @"if headers1.get('connection', '').lower() != 'keep-alive':\n"
+                                         @"    raise RuntimeError('expected keep-alive on first response')\n"
+                                         @"sock.sendall((\n"
+                                         @"    f'GET /healthz HTTP/1.1\\r\\n'\n"
+                                         @"    f'Host: 127.0.0.1:{PORT}\\r\\n'\n"
+                                         @"    'Connection: close\\r\\n\\r\\n'\n"
+                                         @").encode('utf-8'))\n"
+                                         @"status2, headers2, body2 = read_response(sock)\n"
+                                         @"if '200' not in status2 or body2 != b'ok\\n':\n"
+                                         @"    raise RuntimeError(status2)\n"
+                                         @"if headers2.get('connection', '').lower() != 'close':\n"
+                                         @"    raise RuntimeError('expected close on second response')\n"
+                                         @"sock.close()\n"
+                                         @"print('ok')\n",
+                                         port];
+    int pyCode = 0;
+    NSString *output = [self runPythonScript:script exitCode:&pyCode];
+    XCTAssertEqual(0, pyCode);
+    XCTAssertTrue([output containsString:@"ok"]);
+  } @finally {
+    if ([server isRunning]) {
+      (void)kill(server.processIdentifier, SIGTERM);
+      [server waitUntilExit];
+    }
+  }
+}
+
+- (void)testConcurrentDispatchIsNotGloballySerialized {
+  int port = [self randomPort];
+  NSTask *server = [[NSTask alloc] init];
+  server.launchPath = @"./build/boomhauer";
+  server.arguments = @[ @"--port", [NSString stringWithFormat:@"%d", port] ];
+  server.standardOutput = [NSPipe pipe];
+  server.standardError = [NSPipe pipe];
+  [server launch];
+
+  @try {
+    BOOL ready = NO;
+    (void)[self requestPathWithRetries:@"/healthz" port:port attempts:60 success:&ready];
+    XCTAssertTrue(ready);
+
+    NSString *script = [NSString stringWithFormat:
+                                         @"import json, threading, time, urllib.request\n"
+                                         @"PORT=%d\n"
+                                         @"slow = {}\n"
+                                         @"def run_slow():\n"
+                                         @"    payload = urllib.request.urlopen(f'http://127.0.0.1:{PORT}/api/sleep?ms=1200', timeout=5).read().decode('utf-8')\n"
+                                         @"    slow['payload'] = payload\n"
+                                         @"t = threading.Thread(target=run_slow)\n"
+                                         @"t.start()\n"
+                                         @"time.sleep(0.1)\n"
+                                         @"start = time.time()\n"
+                                         @"health = urllib.request.urlopen(f'http://127.0.0.1:{PORT}/healthz', timeout=3).read().decode('utf-8')\n"
+                                         @"elapsed = time.time() - start\n"
+                                         @"t.join()\n"
+                                         @"data = json.loads(slow.get('payload', '{}'))\n"
+                                         @"if data.get('sleep_ms') != 1200:\n"
+                                         @"    raise RuntimeError('slow request did not complete')\n"
+                                         @"if health != 'ok\\n':\n"
+                                         @"    raise RuntimeError(health)\n"
+                                         @"if elapsed > 0.8:\n"
+                                         @"    raise RuntimeError(f'health request blocked for {elapsed:.3f}s')\n"
+                                         @"print(f'{elapsed:.3f}')\n",
+                                         port];
+    int pyCode = 0;
+    NSString *output = [self runPythonScript:script exitCode:&pyCode];
+    XCTAssertEqual(0, pyCode);
+    XCTAssertTrue([[output stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]]
+        doubleValue] < 0.8);
+  } @finally {
+    if ([server isRunning]) {
+      (void)kill(server.processIdentifier, SIGTERM);
+      [server waitUntilExit];
+    }
+  }
+}
+
+- (void)testLargeResponseBodyIsNotTruncatedUnderBackpressure {
+  int port = [self randomPort];
+  NSTask *server = [[NSTask alloc] init];
+  server.launchPath = @"./build/boomhauer";
+  server.arguments = @[ @"--port", [NSString stringWithFormat:@"%d", port] ];
+  server.standardOutput = [NSPipe pipe];
+  server.standardError = [NSPipe pipe];
+  [server launch];
+
+  @try {
+    BOOL ready = NO;
+    (void)[self requestPathWithRetries:@"/healthz" port:port attempts:60 success:&ready];
+    XCTAssertTrue(ready);
+
+    NSString *script = [NSString stringWithFormat:
+                                         @"import socket, time\n"
+                                         @"PORT=%d\n"
+                                         @"SIZE=262144\n"
+                                         @"sock = socket.create_connection(('127.0.0.1', PORT), timeout=5)\n"
+                                         @"sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 1024)\n"
+                                         @"request = (\n"
+                                         @"    f'GET /api/blob?size={SIZE} HTTP/1.1\\r\\n'\n"
+                                         @"    f'Host: 127.0.0.1:{PORT}\\r\\n'\n"
+                                         @"    'Connection: close\\r\\n\\r\\n'\n"
+                                         @").encode('utf-8')\n"
+                                         @"sock.sendall(request)\n"
+                                         @"time.sleep(0.2)\n"
+                                         @"data = b''\n"
+                                         @"while True:\n"
+                                         @"    chunk = sock.recv(8192)\n"
+                                         @"    if not chunk:\n"
+                                         @"        break\n"
+                                         @"    data += chunk\n"
+                                         @"sock.close()\n"
+                                         @"if b'\\r\\n\\r\\n' not in data:\n"
+                                         @"    raise RuntimeError('missing response headers')\n"
+                                         @"head, body = data.split(b'\\r\\n\\r\\n', 1)\n"
+                                         @"headers = {}\n"
+                                         @"for line in head.decode('utf-8', 'replace').split('\\r\\n')[1:]:\n"
+                                         @"    if ':' not in line:\n"
+                                         @"        continue\n"
+                                         @"    name, value = line.split(':', 1)\n"
+                                         @"    headers[name.strip().lower()] = value.strip()\n"
+                                         @"length = int(headers.get('content-length', '0'))\n"
+                                         @"if length != SIZE:\n"
+                                         @"    raise RuntimeError(f'content-length mismatch {length} != {SIZE}')\n"
+                                         @"if len(body) != SIZE:\n"
+                                         @"    raise RuntimeError(f'truncated body {len(body)} != {SIZE}')\n"
+                                         @"if body[:64] != b'x' * 64:\n"
+                                         @"    raise RuntimeError('unexpected body prefix')\n"
+                                         @"print(len(body))\n",
+                                         port];
+    int pyCode = 0;
+    NSString *output = [self runPythonScript:script exitCode:&pyCode];
+    XCTAssertEqual(0, pyCode);
+    XCTAssertEqualObjects(@"262144",
+                          [output stringByTrimmingCharactersInSet:
+                                      [NSCharacterSet whitespaceAndNewlineCharacterSet]]);
+  } @finally {
+    if ([server isRunning]) {
+      (void)kill(server.processIdentifier, SIGTERM);
+      [server waitUntilExit];
+    }
+  }
+}
+
 - (void)testHealthEndpointSupportsJSONSignalPayload {
   int curlCode = 0;
   int serverCode = 0;

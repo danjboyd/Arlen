@@ -24,6 +24,7 @@ SERVER_BINARY="./build/boomhauer"
 SERVER_ARGS=(--port "{port}")
 SERVER_ENV=()
 READINESS_PATH="/healthz"
+CONCURRENCY=1
 SCENARIOS=(
   "healthz:/healthz"
   "api_status:/api/status"
@@ -35,6 +36,16 @@ source "$profile_file"
 if [[ ${#SCENARIOS[@]} -eq 0 ]]; then
   echo "perf: profile contains no scenarios: $profile_file"
   exit 2
+fi
+
+concurrency="${ARLEN_PERF_CONCURRENCY:-$CONCURRENCY}"
+if ! [[ "$concurrency" =~ ^[0-9]+$ ]] || (( concurrency < 1 )); then
+  echo "perf: invalid concurrency value: ${concurrency}"
+  exit 2
+fi
+
+if [[ "$PROFILE_NAME" == "default" && "$concurrency" == "1" ]]; then
+  echo "perf: note: default profile is CI regression-oriented. For external comparisons use ARLEN_PERF_PROFILE=comparison_http."
 fi
 
 baseline_file="${ARLEN_PERF_BASELINE:-tests/performance/baselines/${PROFILE_NAME}.json}"
@@ -125,9 +136,16 @@ run_benchmark_once() {
 
   local start_ns end_ns
   start_ns="$(date +%s%N)"
-  for _ in $(seq 1 "$requests_local"); do
-    curl -o /dev/null -sS -w "%{time_total}\n" "http://127.0.0.1:${port}${path}" >>"$lat_raw"
-  done
+  local url="http://127.0.0.1:${port}${path}"
+  if (( concurrency <= 1 )); then
+    for _ in $(seq 1 "$requests_local"); do
+      curl -o /dev/null -sS -w "%{time_total}\n" "$url" >>"$lat_raw"
+    done
+  else
+    seq 1 "$requests_local" \
+      | xargs -P "$concurrency" -I{} curl -o /dev/null -sS -w "%{time_total}\n" "$url" \
+          >>"$lat_raw"
+  fi
   end_ns="$(date +%s%N)"
 
   awk '{printf "%.6f\n", ($1*1000.0)}' "$lat_raw" | sort -n >"$lat_sorted"
@@ -139,11 +157,11 @@ run_benchmark_once() {
   duration_s="$(awk -v s="$start_ns" -v e="$end_ns" 'BEGIN {printf "%.6f", ((e-s)/1000000000.0)}')"
   reqps="$(awk -v n="$requests_local" -v d="$duration_s" 'BEGIN {if (d<=0) print "0"; else printf "%.2f", (n/d)}')"
 
-  echo "${profile_local},${scenario},${run_id},${requests_local},${p50},${p95},${p99},${max},${reqps},${duration_s}" >>"$runs_csv"
+  echo "${profile_local},${scenario},${run_id},${requests_local},${concurrency},${p50},${p95},${p99},${max},${reqps},${duration_s}" >>"$runs_csv"
   rm -f "$lat_raw" "$lat_sorted"
 }
 
-echo "profile,scenario,run,requests,p50_ms,p95_ms,p99_ms,max_ms,req_per_sec,duration_s" >"$runs_csv"
+echo "profile,scenario,run,requests,concurrency,p50_ms,p95_ms,p99_ms,max_ms,req_per_sec,duration_s" >"$runs_csv"
 
 for run_id in $(seq 1 "$repeats"); do
   for scenario_entry in "${SCENARIOS[@]}"; do

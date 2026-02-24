@@ -154,6 +154,19 @@ static NSString *ALNNormalizedSecurityProfileName(id rawValue) {
   return @"balanced";
 }
 
+static NSString *ALNNormalizedLogLevelName(id rawValue) {
+  if (![rawValue isKindOfClass:[NSString class]]) {
+    return nil;
+  }
+  NSString *normalized = [[(NSString *)rawValue lowercaseString]
+      stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+  if ([normalized isEqualToString:@"debug"] || [normalized isEqualToString:@"info"] ||
+      [normalized isEqualToString:@"warn"] || [normalized isEqualToString:@"error"]) {
+    return normalized;
+  }
+  return nil;
+}
+
 static NSDictionary *ALNSecurityProfileDefaults(NSString *profileName) {
   NSString *normalized = ALNNormalizedSecurityProfileName(profileName);
   if ([normalized isEqualToString:@"strict"]) {
@@ -217,6 +230,7 @@ static NSDictionary *ALNSecurityProfileDefaults(NSString *profileName) {
   NSString *host = ALNEnvValueCompat("ARLEN_HOST", "MOJOOBJC_HOST");
   NSString *port = ALNEnvValueCompat("ARLEN_PORT", "MOJOOBJC_PORT");
   NSString *logFormat = ALNEnvValueCompat("ARLEN_LOG_FORMAT", "MOJOOBJC_LOG_FORMAT");
+  NSString *logLevel = ALNEnvValueCompat("ARLEN_LOG_LEVEL", "MOJOOBJC_LOG_LEVEL");
   NSString *trustedProxy =
       ALNEnvValueCompat("ARLEN_TRUSTED_PROXY", "MOJOOBJC_TRUSTED_PROXY");
   NSString *performanceLogging = ALNEnvValueCompat("ARLEN_PERFORMANCE_LOGGING",
@@ -360,6 +374,10 @@ static NSDictionary *ALNSecurityProfileDefaults(NSString *profileName) {
   }
   if ([logFormat length] > 0) {
     config[@"logFormat"] = [logFormat lowercaseString];
+  }
+  NSString *normalizedLogLevel = ALNNormalizedLogLevelName(logLevel);
+  if ([normalizedLogLevel length] > 0) {
+    config[@"logLevel"] = normalizedLogLevel;
   }
 
   NSNumber *trustedProxyValue = ALNParseBooleanString(trustedProxy);
@@ -646,6 +664,9 @@ static NSDictionary *ALNSecurityProfileDefaults(NSString *profileName) {
     config[@"logFormat"] =
         (apiOnlyMode || ![env isEqualToString:@"development"]) ? @"json" : @"text";
   }
+  if (config[@"logLevel"] == nil) {
+    config[@"logLevel"] = [env isEqualToString:@"development"] ? @"debug" : @"info";
+  }
   NSString *securityProfileName = ALNNormalizedSecurityProfileName(config[@"securityProfile"]);
   NSDictionary *securityProfileDefaults = ALNSecurityProfileDefaults(securityProfileName);
   config[@"securityProfile"] = securityProfileName;
@@ -929,6 +950,11 @@ static NSDictionary *ALNSecurityProfileDefaults(NSString *profileName) {
 
   config[@"port"] = @([config[@"port"] integerValue]);
   config[@"apiOnly"] = @([config[@"apiOnly"] boolValue]);
+  NSString *resolvedLogLevel = ALNNormalizedLogLevelName(config[@"logLevel"]);
+  if ([resolvedLogLevel length] == 0) {
+    resolvedLogLevel = [env isEqualToString:@"development"] ? @"debug" : @"info";
+  }
+  config[@"logLevel"] = resolvedLogLevel;
   config[@"securityProfile"] = ALNNormalizedSecurityProfileName(config[@"securityProfile"]);
   config[@"trustedProxy"] = @([config[@"trustedProxy"] boolValue]);
   config[@"performanceLogging"] = @([config[@"performanceLogging"] boolValue]);

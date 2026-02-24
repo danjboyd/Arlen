@@ -3,6 +3,7 @@
 @interface ALNRouter ()
 
 @property(nonatomic, strong) NSMutableArray *routes;
+@property(nonatomic, strong) NSMutableDictionary *routesByMethod;
 @property(nonatomic, strong) NSMutableArray *routeGroups;
 @property(nonatomic, assign) NSUInteger routeCounter;
 
@@ -60,10 +61,64 @@ static NSArray *ALNNormalizeFormats(NSArray *formats) {
   return [NSArray arrayWithArray:normalized];
 }
 
+static NSString *ALNNormalizedMethodName(NSString *method) {
+  if (![method isKindOfClass:[NSString class]] || [method length] == 0) {
+    return @"GET";
+  }
+  return [[method uppercaseString] copy];
+}
+
+static ALNRouteMatch *ALNBestRouteMatchInCandidates(NSArray *candidates,
+                                                     NSString *path,
+                                                     NSString *format) {
+  ALNRoute *bestRoute = nil;
+  NSDictionary *bestParams = nil;
+
+  for (ALNRoute *route in candidates) {
+    if (![route matchesFormat:format]) {
+      continue;
+    }
+
+    NSDictionary *params = [route matchPath:path];
+    if (params == nil) {
+      continue;
+    }
+
+    if (bestRoute == nil) {
+      bestRoute = route;
+      bestParams = params;
+      continue;
+    }
+
+    BOOL shouldReplace = NO;
+    if (route.kind > bestRoute.kind) {
+      shouldReplace = YES;
+    } else if (route.kind == bestRoute.kind &&
+               route.staticSegmentCount > bestRoute.staticSegmentCount) {
+      shouldReplace = YES;
+    } else if (route.kind == bestRoute.kind &&
+               route.staticSegmentCount == bestRoute.staticSegmentCount &&
+               route.registrationIndex < bestRoute.registrationIndex) {
+      shouldReplace = YES;
+    }
+
+    if (shouldReplace) {
+      bestRoute = route;
+      bestParams = params;
+    }
+  }
+
+  if (bestRoute == nil) {
+    return nil;
+  }
+  return [[ALNRouteMatch alloc] initWithRoute:bestRoute params:bestParams];
+}
+
 - (instancetype)init {
   self = [super init];
   if (self) {
     _routes = [NSMutableArray array];
+    _routesByMethod = [NSMutableDictionary dictionary];
     _routeGroups = [NSMutableArray array];
     _routeCounter = 0;
   }
@@ -122,14 +177,15 @@ static NSArray *ALNNormalizeFormats(NSArray *formats) {
                                         actionName:action
                                  registrationIndex:self.routeCounter++];
   [self.routes addObject:route];
-  return route;
-}
 
-static BOOL ALNIsMethodMatch(NSString *routeMethod, NSString *requestMethod) {
-  if ([routeMethod isEqualToString:@"ANY"]) {
-    return YES;
-  }
-  return [routeMethod isEqualToString:[requestMethod uppercaseString]];
+  NSString *bucketKey = ALNNormalizedMethodName(route.method);
+  NSMutableArray *bucket =
+      [self.routesByMethod[bucketKey] isKindOfClass:[NSMutableArray class]]
+          ? self.routesByMethod[bucketKey]
+          : [NSMutableArray array];
+  [bucket addObject:route];
+  self.routesByMethod[bucketKey] = bucket;
+  return route;
 }
 
 - (ALNRouteMatch *)matchMethod:(NSString *)method path:(NSString *)path {
@@ -139,49 +195,22 @@ static BOOL ALNIsMethodMatch(NSString *routeMethod, NSString *requestMethod) {
 - (ALNRouteMatch *)matchMethod:(NSString *)method
                           path:(NSString *)path
                         format:(NSString *)format {
-  ALNRoute *bestRoute = nil;
-  NSDictionary *bestParams = nil;
+  NSString *requestMethod = ALNNormalizedMethodName(method);
+  NSArray *methodCandidates =
+      [self.routesByMethod[requestMethod] isKindOfClass:[NSArray class]]
+          ? self.routesByMethod[requestMethod]
+          : @[];
+  NSArray *anyCandidates =
+      [self.routesByMethod[@"ANY"] isKindOfClass:[NSArray class]]
+          ? self.routesByMethod[@"ANY"]
+          : @[];
 
-  for (ALNRoute *route in self.routes) {
-    if (!ALNIsMethodMatch(route.method, method)) {
-      continue;
-    }
-    if (![route matchesFormat:format]) {
-      continue;
-    }
-    NSDictionary *params = [route matchPath:path];
-    if (params == nil) {
-      continue;
-    }
-
-    if (bestRoute == nil) {
-      bestRoute = route;
-      bestParams = params;
-      continue;
-    }
-
-    BOOL shouldReplace = NO;
-    if (route.kind > bestRoute.kind) {
-      shouldReplace = YES;
-    } else if (route.kind == bestRoute.kind &&
-               route.staticSegmentCount > bestRoute.staticSegmentCount) {
-      shouldReplace = YES;
-    } else if (route.kind == bestRoute.kind &&
-               route.staticSegmentCount == bestRoute.staticSegmentCount &&
-               route.registrationIndex < bestRoute.registrationIndex) {
-      shouldReplace = YES;
-    }
-
-    if (shouldReplace) {
-      bestRoute = route;
-      bestParams = params;
-    }
+  ALNRouteMatch *methodMatch =
+      ALNBestRouteMatchInCandidates(methodCandidates, path, format);
+  if (methodMatch != nil || [requestMethod isEqualToString:@"ANY"]) {
+    return methodMatch;
   }
-
-  if (bestRoute == nil) {
-    return nil;
-  }
-  return [[ALNRouteMatch alloc] initWithRoute:bestRoute params:bestParams];
+  return ALNBestRouteMatchInCandidates(anyCandidates, path, format);
 }
 
 - (void)beginRouteGroupWithPrefix:(NSString *)prefix

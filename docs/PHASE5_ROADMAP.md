@@ -5,6 +5,7 @@ Last updated: 2026-02-23
 
 Related docs:
 - `docs/PHASE4_ROADMAP.md`
+- `docs/PHASE7_ROADMAP.md`
 - `docs/PHASE2_PHASE3_ROADMAP.md`
 - `docs/STATUS.md`
 - `docs/FEATURE_PARITY_MATRIX.md`

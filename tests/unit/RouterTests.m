@@ -111,4 +111,26 @@
   XCTAssertEqualObjects(jsonMatch.route.name, @"report_json");
 }
 
+- (void)testAnyMethodFallbackStillMatchesWhenSpecificMethodMissing {
+  ALNRouter *router = [[ALNRouter alloc] init];
+  [router addRouteMethod:@"ANY"
+                    path:@"/status"
+                    name:@"status_any"
+         controllerClass:[RouterDummyController class]
+                  action:@"index"];
+  [router addRouteMethod:@"POST"
+                    path:@"/status"
+                    name:@"status_post"
+         controllerClass:[RouterDummyController class]
+                  action:@"index"];
+
+  ALNRouteMatch *getMatch = [router matchMethod:@"GET" path:@"/status"];
+  XCTAssertNotNil(getMatch);
+  XCTAssertEqualObjects(@"status_any", getMatch.route.name);
+
+  ALNRouteMatch *postMatch = [router matchMethod:@"POST" path:@"/status"];
+  XCTAssertNotNil(postMatch);
+  XCTAssertEqualObjects(@"status_post", postMatch.route.name);
+}
+
 @end

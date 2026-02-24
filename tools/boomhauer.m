@@ -67,6 +67,48 @@
   };
 }
 
+- (id)sleep:(ALNContext *)ctx {
+  NSInteger delayMs = 250;
+  NSNumber *requested = [ctx queryIntegerForName:@"ms"];
+  if (requested != nil) {
+    NSInteger parsed = [requested integerValue];
+    if (parsed >= 0 && parsed <= 10000) {
+      delayMs = parsed;
+    }
+  }
+  if (delayMs > 0) {
+    [NSThread sleepForTimeInterval:((double)delayMs) / 1000.0];
+  }
+  return @{
+    @"ok" : @(YES),
+    @"sleep_ms" : @(delayMs),
+  };
+}
+
+- (id)blob:(ALNContext *)ctx {
+  NSInteger size = 262144;
+  NSNumber *requested = [ctx queryIntegerForName:@"size"];
+  if (requested != nil) {
+    NSInteger parsed = [requested integerValue];
+    if (parsed > 0 && parsed <= 2097152) {
+      size = parsed;
+    }
+  }
+
+  static NSString *chunk =
+      @"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx";
+  NSMutableString *payload = [NSMutableString stringWithCapacity:(NSUInteger)size];
+  while ((NSInteger)[payload length] < size) {
+    NSInteger remaining = size - (NSInteger)[payload length];
+    if (remaining >= (NSInteger)[chunk length]) {
+      [payload appendString:chunk];
+    } else {
+      [payload appendString:[chunk substringToIndex:(NSUInteger)remaining]];
+    }
+  }
+  return payload;
+}
+
 @end
 
 @interface RealtimeController : ALNController
@@ -663,6 +705,16 @@ static ALNApplication *BuildApplication(NSString *environment) {
                       name:@"api_request_meta"
            controllerClass:[ApiController class]
                     action:@"requestMeta"];
+  [app registerRouteMethod:@"GET"
+                      path:@"/api/sleep"
+                      name:@"api_sleep"
+           controllerClass:[ApiController class]
+                    action:@"sleep"];
+  [app registerRouteMethod:@"GET"
+                      path:@"/api/blob"
+                      name:@"api_blob"
+           controllerClass:[ApiController class]
+                    action:@"blob"];
   [app registerRouteMethod:@"GET"
                       path:@"/ws/echo"
                       name:@"ws_echo"

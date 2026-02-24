@@ -20,6 +20,7 @@
   XCTAssertNil(error);
   XCTAssertEqualObjects(@"GET", request.method);
   XCTAssertEqualObjects(@"/items/list", request.path);
+  XCTAssertEqualObjects(@"HTTP/1.1", request.httpVersion);
   XCTAssertEqualObjects(@"Peggy Hill", request.queryParams[@"name"]);
   XCTAssertEqualObjects(@"Arlen", request.queryParams[@"city"]);
   XCTAssertEqualObjects(@"1", request.headers[@"x-test"]);
@@ -67,6 +68,17 @@
   XCTAssertNil(error);
   XCTAssertEqualObjects(@"1", request.cookies[@"a"]);
   XCTAssertEqualObjects(@"two", request.cookies[@"b"]);
+}
+
+- (void)testDefaultsHTTPVersionWhenMissingFromRequestLine {
+  NSString *raw = @"GET /healthz\r\n"
+                  "Host: localhost\r\n\r\n";
+  NSData *data = [raw dataUsingEncoding:NSUTF8StringEncoding];
+
+  NSError *error = nil;
+  ALNRequest *request = [ALNRequest requestFromRawData:data error:&error];
+  XCTAssertNil(error);
+  XCTAssertEqualObjects(@"HTTP/1.1", request.httpVersion);
 }
 
 @end

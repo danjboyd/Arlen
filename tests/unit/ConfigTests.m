@@ -85,6 +85,7 @@
   XCTAssertEqualObjects(@"127.0.0.1", config[@"host"]);
   XCTAssertEqual((NSInteger)3000, [config[@"port"] integerValue]);
   XCTAssertEqualObjects(@"text", config[@"logFormat"]);
+  XCTAssertEqualObjects(@"debug", config[@"logLevel"]);
   XCTAssertEqualObjects(@"development", config[@"environment"]);
   XCTAssertEqualObjects(@"balanced", config[@"securityProfile"]);
   XCTAssertEqualObjects(@(NO), config[@"trustedProxy"]);
@@ -222,6 +223,7 @@
   setenv("ARLEN_OPENAPI_DOCS_UI_STYLE", "viewer", 1);
   setenv("ARLEN_OPENAPI_TITLE", "Custom API", 1);
   setenv("ARLEN_OPENAPI_VERSION", "9.9.9", 1);
+  setenv("ARLEN_LOG_LEVEL", "warn", 1);
   setenv("ARLEN_I18N_DEFAULT_LOCALE", "es", 1);
   setenv("ARLEN_I18N_FALLBACK_LOCALE", "en", 1);
   setenv("ARLEN_PAGE_STATE_COMPAT_ENABLED", "1", 1);
@@ -283,6 +285,7 @@
   unsetenv("ARLEN_OPENAPI_DOCS_UI_STYLE");
   unsetenv("ARLEN_OPENAPI_TITLE");
   unsetenv("ARLEN_OPENAPI_VERSION");
+  unsetenv("ARLEN_LOG_LEVEL");
   unsetenv("ARLEN_I18N_DEFAULT_LOCALE");
   unsetenv("ARLEN_I18N_FALLBACK_LOCALE");
   unsetenv("ARLEN_PAGE_STATE_COMPAT_ENABLED");
@@ -307,6 +310,7 @@
   NSDictionary *runtimeLimits = config[@"runtimeLimits"];
   XCTAssertEqual((NSInteger)9, [runtimeLimits[@"maxConcurrentWebSocketSessions"] integerValue]);
   XCTAssertEqualObjects(@"strict", config[@"securityProfile"]);
+  XCTAssertEqualObjects(@"warn", config[@"logLevel"]);
   XCTAssertEqualObjects(@(YES), config[@"trustedProxy"]);
   XCTAssertEqualObjects(@(NO), config[@"serveStatic"]);
   XCTAssertEqual((NSInteger)2222, [config[@"listenBacklog"] integerValue]);
@@ -400,6 +404,7 @@
 
   setenv("MOJOOBJC_HOST", "0.0.0.0", 1);
   setenv("MOJOOBJC_PORT", "3999", 1);
+  setenv("MOJOOBJC_LOG_LEVEL", "error", 1);
   setenv("MOJOOBJC_SECURITY_PROFILE", "edge", 1);
   setenv("MOJOOBJC_MAX_REQUEST_LINE_BYTES", "9001", 1);
   setenv("MOJOOBJC_MAX_HEADER_BYTES", "9002", 1);
@@ -437,6 +442,7 @@
 
   unsetenv("MOJOOBJC_HOST");
   unsetenv("MOJOOBJC_PORT");
+  unsetenv("MOJOOBJC_LOG_LEVEL");
   unsetenv("MOJOOBJC_SECURITY_PROFILE");
   unsetenv("MOJOOBJC_MAX_REQUEST_LINE_BYTES");
   unsetenv("MOJOOBJC_MAX_HEADER_BYTES");
@@ -470,6 +476,7 @@
   XCTAssertNil(error);
   XCTAssertEqualObjects(@"0.0.0.0", config[@"host"]);
   XCTAssertEqual((NSInteger)3999, [config[@"port"] integerValue]);
+  XCTAssertEqualObjects(@"error", config[@"logLevel"]);
   XCTAssertEqualObjects(@"edge", config[@"securityProfile"]);
   NSDictionary *limits = config[@"requestLimits"];
   XCTAssertEqual((NSInteger)9001, [limits[@"maxRequestLineBytes"] integerValue]);

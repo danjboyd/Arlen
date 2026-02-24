@@ -12,6 +12,7 @@ extern NSString *const ALNRequestErrorDomain;
 @property(nonatomic, copy, readonly) NSString *method;
 @property(nonatomic, copy, readonly) NSString *path;
 @property(nonatomic, copy, readonly) NSString *queryString;
+@property(nonatomic, copy, readonly) NSString *httpVersion;
 @property(nonatomic, copy, readonly) NSDictionary *headers;
 @property(nonatomic, strong, readonly) NSData *body;
 @property(nonatomic, copy, readonly) NSDictionary *queryParams;
@@ -22,6 +23,13 @@ extern NSString *const ALNRequestErrorDomain;
 @property(nonatomic, copy) NSString *scheme;
 @property(nonatomic, assign) double parseDurationMilliseconds;
 @property(nonatomic, assign) double responseWriteDurationMilliseconds;
+
+- (instancetype)initWithMethod:(NSString *)method
+                          path:(NSString *)path
+                   queryString:(NSString *)queryString
+                   httpVersion:(NSString *)httpVersion
+                       headers:(NSDictionary *)headers
+                          body:(NSData *)body;
 
 - (instancetype)initWithMethod:(NSString *)method
                           path:(NSString *)path

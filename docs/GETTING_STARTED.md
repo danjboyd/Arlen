@@ -203,6 +203,7 @@ ARLEN_PERF_PROFILE=middleware_heavy make perf
 ARLEN_PERF_PROFILE=template_heavy make perf
 ARLEN_PERF_PROFILE=api_reference make perf
 ARLEN_PERF_PROFILE=migration_sample make perf
+ARLEN_PERF_PROFILE=comparison_http ARLEN_PERF_SKIP_GATE=1 make perf
 ```
 
 ## 5. Run Tech Demo
@@ -400,6 +401,7 @@ Framework/app runtime:
 - `ARLEN_HOST`
 - `ARLEN_PORT`
 - `ARLEN_LOG_FORMAT`
+- `ARLEN_LOG_LEVEL` (`debug`, `info`, `warn`, or `error`)
 - `ARLEN_SECURITY_PROFILE` (`balanced`, `strict`, or `edge`)
 - `ARLEN_TRUSTED_PROXY`
 - `ARLEN_SERVE_STATIC`
@@ -447,6 +449,7 @@ Framework/app runtime:
 - `ARLEN_SMTP_PORT` (plugin template hook)
 - `ARLEN_JOB_WORKER_INTERVAL_SECONDS` (plugin template hook)
 - `ARLEN_JOB_WORKER_RETRY_DELAY_SECONDS` (plugin template hook)
+- `ARLEN_PERF_CONCURRENCY` (perf harness request concurrency override)
 
 Legacy compatibility fallback (`MOJOOBJC_*`) is supported but transitional.
 
