@@ -390,6 +390,15 @@
   XCTAssertTrue([json[@"error"][@"request_id"] length] > 0);
   NSArray *details = json[@"details"];
   XCTAssertEqual((NSUInteger)2, [details count]);
+  for (id entryValue in details) {
+    XCTAssertTrue([entryValue isKindOfClass:[NSDictionary class]]);
+    NSDictionary *entry = (NSDictionary *)entryValue;
+    XCTAssertTrue([entry[@"field"] isKindOfClass:[NSString class]]);
+    XCTAssertTrue([entry[@"code"] isKindOfClass:[NSString class]]);
+    XCTAssertTrue([entry[@"message"] isKindOfClass:[NSString class]]);
+    XCTAssertTrue([entry[@"code"] length] > 0);
+    XCTAssertTrue([entry[@"message"] length] > 0);
+  }
 }
 
 - (void)testValidationSuccessUsesUnifiedParams {
@@ -424,6 +433,29 @@
   XCTAssertEqualObjects(@"Internal Server Error", json[@"error"][@"message"]);
   XCTAssertTrue([json[@"error"][@"correlation_id"] length] > 0);
   XCTAssertNil(json[@"details"]);
+}
+
+- (void)testDevelopmentJSONStructuredErrorIncludesNormalizedDetails {
+  ALNApplication *app = [self buildAppWithHaltingMiddleware:NO];
+  ALNResponse *response = [app dispatchRequest:[self requestForPath:@"/explode"
+                                                         queryString:@""
+                                                             headers:@{ @"accept" : @"application/json" }]];
+  XCTAssertEqual((NSInteger)500, response.statusCode);
+  NSError *error = nil;
+  NSDictionary *json = [NSJSONSerialization JSONObjectWithData:response.bodyData
+                                                       options:0
+                                                         error:&error];
+  XCTAssertNil(error);
+  XCTAssertEqualObjects(@"controller_exception", json[@"error"][@"code"]);
+  NSArray *details = json[@"details"];
+  XCTAssertEqual((NSUInteger)1, [details count]);
+  NSDictionary *entry =
+      [[details firstObject] isKindOfClass:[NSDictionary class]] ? [details firstObject] : @{};
+  XCTAssertEqualObjects(@"", entry[@"field"]);
+  XCTAssertEqualObjects(@"controller_exception", entry[@"code"]);
+  XCTAssertTrue([entry[@"message"] length] > 0);
+  NSDictionary *meta = [entry[@"meta"] isKindOfClass:[NSDictionary class]] ? entry[@"meta"] : @{};
+  XCTAssertEqualObjects(@"AppJSONControllerException", meta[@"name"]);
 }
 
 - (void)testDevelopmentHTMLErrorPageForBrowserRequests {

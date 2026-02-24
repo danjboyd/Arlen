@@ -93,6 +93,21 @@
   XCTAssertTrue([source containsString:@"generateAString]"]);
 }
 
+- (void)testTranspileFixtureRewritesKeypathSigilLocals {
+  ALNEOCTranspiler *transpiler = [[ALNEOCTranspiler alloc] init];
+  NSString *templateText = [self loadFixture:@"keypath_locals.html.eoc"];
+
+  NSError *error = nil;
+  NSString *source = [transpiler transpiledSourceForTemplateString:templateText
+                                                       logicalPath:@"keypath_locals.html.eoc"
+                                                             error:&error];
+  XCTAssertNil(error);
+  XCTAssertNotNil(source);
+  XCTAssertTrue([source containsString:@"NSDictionary *profile = ALNEOCLocalPath(ctx, @\"user.profile\""]);
+  XCTAssertTrue([source containsString:@"ALNEOCAppendEscapedChecked(out, (ALNEOCLocalPath(ctx, @\"user.profile.email\""]);
+  XCTAssertTrue([source containsString:@"ALNEOCLocal(ctx, @\"title\""]);
+}
+
 - (void)testTranspileRejectsInvalidSigilLocal {
   ALNEOCTranspiler *transpiler = [[ALNEOCTranspiler alloc] init];
   NSString *templateText = @"<%= $ %>";
@@ -106,6 +121,22 @@
   XCTAssertEqual((NSInteger)ALNEOCErrorTranspilerSyntax, [error code]);
   XCTAssertNotNil(error.userInfo[ALNEOCErrorLineKey]);
   XCTAssertNotNil(error.userInfo[ALNEOCErrorColumnKey]);
+}
+
+- (void)testTranspileRejectsInvalidKeypathSigilLocal {
+  ALNEOCTranspiler *transpiler = [[ALNEOCTranspiler alloc] init];
+  NSString *templateText = [self loadFixture:@"malformed_invalid_sigil_keypath.html.eoc"];
+
+  NSError *error = nil;
+  NSString *source = [transpiler transpiledSourceForTemplateString:templateText
+                                                       logicalPath:@"malformed_invalid_sigil_keypath.html.eoc"
+                                                             error:&error];
+  XCTAssertNil(source);
+  XCTAssertNotNil(error);
+  XCTAssertEqual((NSInteger)ALNEOCErrorTranspilerSyntax, [error code]);
+  XCTAssertEqualObjects(ALNEOCErrorDomain, [error domain]);
+  XCTAssertEqualObjects(@1, error.userInfo[ALNEOCErrorLineKey]);
+  XCTAssertEqualObjects(@4, error.userInfo[ALNEOCErrorColumnKey]);
 }
 
 - (void)testTranspileTemplatePathWritesOutputFile {

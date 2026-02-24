@@ -46,13 +46,16 @@ Supported tags:
 EOC supports sigil locals so controller-provided values feel in-scope in templates.
 
 - `$identifier` resolves to a local value from render context.
-- Identifier format: `[A-Za-z_][A-Za-z0-9_]*`.
+- `$identifier(.identifier)*` resolves a dotted keypath from render context.
+- Identifier segment format: `[A-Za-z_][A-Za-z0-9_]*`.
+- Keypath traversal starts from the root local, then resolves each segment on the current object.
 - Locals are typed as `id` and may be strings, numbers, arrays, dictionaries, or custom objects.
 - Locals can be used anywhere an Objective-C expression is valid.
 
 Examples:
 
 - `<%= $title %>`
+- `<%= $user.profile.email %>`
 - `<%= [$myObject generateAString] %>`
 - `<% for (id row in $rows) { %> ... <% } %>`
 
@@ -60,6 +63,7 @@ Examples:
 
 ```html
 <h1><%= $title %></h1>
+<p><%= $user.profile.email %></p>
 <ul>
 <% for (NSString *item in $items) { %>
   <li><%= item %></li>
@@ -87,10 +91,13 @@ Behavior:
 Context model:
 
 - `ctx` is object-based (`id`) to allow idiomatic Objective-C method calls.
-- Generated templates resolve sigil locals through runtime lookup (conceptually `ALNEOCLocal(ctx, @"name")`).
+- Generated templates resolve sigil locals through runtime lookup:
+  - root locals use `ALNEOCLocal(ctx, @"name", ...)`
+  - dotted keypaths use `ALNEOCLocalPath(ctx, @"user.profile.email", ...)`
 - Default local lookup behavior:
-  - if `ctx` is `NSDictionary`/`NSMutableDictionary` (or responds to `objectForKey:`), use key lookup
-  - missing keys resolve to `nil` unless strict locals mode is enabled
+  - if `ctx` (or intermediate segment object) is `NSDictionary`/`NSMutableDictionary` (or responds to `objectForKey:`), use key lookup
+  - otherwise attempt `valueForKey:` lookup
+  - missing keys/segments resolve to `nil` unless strict locals mode is enabled
 - Optional helper protocol(s) may be added later, but v1 does not require strict protocol conformance.
 
 ## 5. Escaping Rules
@@ -108,7 +115,11 @@ v1 supports opt-in strict modes to catch template mistakes early.
 
 - Strict locals mode:
   - unresolved sigil locals (for example `$missingKey`) fail render with `ALNEOCErrorTemplateExecutionFailed`
-  - diagnostics include template path/line/column and the local name
+  - unresolved keypath segments (for example `$user.profile.email` when `profile` is missing) fail with the same error code
+  - diagnostics include template path/line/column and local metadata:
+    - root local key (`local`)
+    - keypath (`key_path`) when dotted form is used
+    - missing segment (`segment`) when a dotted lookup fails
 - Strict stringify mode:
   - expression output (`<%= ... %>` and `<%== ... %>`) must be clearly string-convertible
   - accepted values are `NSString` or objects whose `-stringValue` returns `NSString`
@@ -147,7 +158,9 @@ Implementation requirements:
 - Use a deterministic state machine parser (TEXT, TAG).
 - Do not rely on regex-only parsing.
 - Support multiline code and expressions.
-- Recognize and rewrite sigil locals (`$name`) in code/expression tags to deterministic local lookup calls.
+- Recognize and rewrite sigil locals in code/expression tags to deterministic local lookup calls:
+  - `$name` -> `ALNEOCLocal(...)`
+  - `$user.profile.email` -> `ALNEOCLocalPath(...)`
 - Emit `#line` directives before generated chunks to preserve template file/line diagnostics.
 
 Parsing errors must include:
@@ -202,6 +215,7 @@ Implications:
 
 - Can render a template with plain text, control flow, and expression output.
 - Sigil locals render without explicit `ctx` boilerplate.
+- Dotted sigil locals (`$identifier(.identifier)*`) render deterministically.
 - Sigil locals support object method-call use cases (for example `<%= [$myObject generateAString] %>`).
 - `<%= ... %>` escapes correctly.
 - `<%== ... %>` outputs raw string.

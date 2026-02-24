@@ -1,16 +1,34 @@
 #import "ALNSchemaContract.h"
 
 #import "ALNRequest.h"
+#import "ALNValueTransformers.h"
 
 static void ALNAppendSchemaError(NSMutableArray *errors,
                                  NSString *field,
                                  NSString *code,
                                  NSString *message) {
-  [errors addObject:@{
+  NSMutableDictionary *entry = [NSMutableDictionary dictionaryWithDictionary:@{
     @"field" : field ?: @"",
     @"code" : code ?: @"invalid",
     @"message" : message ?: @"invalid value",
   }];
+  [errors addObject:entry];
+}
+
+static void ALNAppendSchemaErrorWithMetadata(NSMutableArray *errors,
+                                             NSString *field,
+                                             NSString *code,
+                                             NSString *message,
+                                             NSDictionary *metadata) {
+  NSMutableDictionary *entry = [NSMutableDictionary dictionaryWithDictionary:@{
+    @"field" : field ?: @"",
+    @"code" : code ?: @"invalid",
+    @"message" : message ?: @"invalid value",
+  }];
+  if ([metadata isKindOfClass:[NSDictionary class]] && [metadata count] > 0) {
+    entry[@"meta"] = metadata;
+  }
+  [errors addObject:entry];
 }
 
 static NSDictionary *ALNSchemaDescriptorFromValue(id raw) {
@@ -35,7 +53,8 @@ static NSDictionary *ALNSchemaProperties(NSDictionary *schema) {
   NSMutableDictionary *properties = [NSMutableDictionary dictionary];
   NSSet *reserved = [NSSet setWithArray:@[
     @"type", @"required", @"description", @"title", @"items", @"enum", @"source",
-    @"default", @"coerce", @"minimum", @"maximum", @"minLength", @"maxLength"
+    @"default", @"coerce", @"minimum", @"maximum", @"minLength", @"maxLength",
+    @"transformer", @"transformers"
   ]];
   for (id key in schema) {
     if (![key isKindOfClass:[NSString class]]) {
@@ -88,6 +107,82 @@ static NSString *ALNSchemaType(NSDictionary *descriptor) {
     return @"array";
   }
   return @"string";
+}
+
+static NSArray *ALNSchemaTransformerNames(NSDictionary *descriptor) {
+  NSMutableArray *names = [NSMutableArray array];
+
+  NSString *single = [descriptor[@"transformer"] isKindOfClass:[NSString class]]
+                         ? descriptor[@"transformer"]
+                         : @"";
+  if ([single length] > 0) {
+    NSString *trimmed = [single stringByTrimmingCharactersInSet:
+                                    [NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    if ([trimmed length] > 0) {
+      [names addObject:trimmed];
+    }
+  }
+
+  NSArray *multiple = [descriptor[@"transformers"] isKindOfClass:[NSArray class]]
+                          ? descriptor[@"transformers"]
+                          : @[];
+  for (id value in multiple) {
+    if (![value isKindOfClass:[NSString class]]) {
+      continue;
+    }
+    NSString *trimmed = [value stringByTrimmingCharactersInSet:
+                                   [NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    if ([trimmed length] == 0 || [names containsObject:trimmed]) {
+      continue;
+    }
+    [names addObject:trimmed];
+  }
+
+  return [NSArray arrayWithArray:names];
+}
+
+static BOOL ALNSchemaApplyDescriptorTransformers(id rawValue,
+                                                 NSDictionary *descriptor,
+                                                 NSString *fieldPath,
+                                                 NSMutableArray *errors,
+                                                 id *transformedOut) {
+  NSArray *transformers = ALNSchemaTransformerNames(descriptor);
+  if ([transformers count] == 0) {
+    if (transformedOut != NULL) {
+      *transformedOut = rawValue;
+    }
+    return YES;
+  }
+
+  id current = rawValue;
+  for (NSString *name in transformers) {
+    NSError *transformError = nil;
+    id transformed = ALNApplyValueTransformerNamed(name, current, &transformError);
+    if (transformError != nil) {
+      NSString *code =
+          (transformError.code == ALNValueTransformerErrorUnknownTransformer)
+              ? @"invalid_transformer"
+              : @"invalid_transform";
+      NSMutableDictionary *meta = [NSMutableDictionary dictionary];
+      meta[@"transformer"] = name ?: @"";
+      if ([transformError.domain length] > 0) {
+        meta[@"domain"] = transformError.domain;
+      }
+      meta[@"domain_code"] = @((NSInteger)transformError.code);
+      ALNAppendSchemaErrorWithMetadata(errors,
+                                       fieldPath,
+                                       code,
+                                       transformError.localizedDescription ?: @"invalid transform",
+                                       meta);
+      return NO;
+    }
+    current = transformed;
+  }
+
+  if (transformedOut != NULL) {
+    *transformedOut = current;
+  }
+  return YES;
 }
 
 static BOOL ALNParseInteger(NSString *value, NSInteger *outValue) {
@@ -290,7 +385,17 @@ static BOOL ALNSchemaValidateValueRecursive(id value,
     coerceValue = [descriptor[@"coerce"] boolValue];
   }
 
-  id coercedScalar = ALNSchemaCoerceScalarValue(value, descriptor, fieldPath, coerceValue, errors);
+  id transformedValue = value;
+  if (!ALNSchemaApplyDescriptorTransformers(value,
+                                            descriptor,
+                                            fieldPath,
+                                            errors,
+                                            &transformedValue)) {
+    return NO;
+  }
+
+  id coercedScalar =
+      ALNSchemaCoerceScalarValue(transformedValue, descriptor, fieldPath, coerceValue, errors);
   if (coercedScalar == nil) {
     return NO;
   }

@@ -31,6 +31,7 @@ UNIT_TEST_BUNDLE := $(BUILD_DIR)/tests/ArlenUnitTests.xctest
 UNIT_TEST_BIN := $(UNIT_TEST_BUNDLE)/ArlenUnitTests
 INTEGRATION_TEST_BUNDLE := $(BUILD_DIR)/tests/ArlenIntegrationTests.xctest
 INTEGRATION_TEST_BIN := $(INTEGRATION_TEST_BUNDLE)/ArlenIntegrationTests
+GNUSTEP_TEST_HOME := $(ROOT_DIR)/.gnustep-home
 
 UNIT_TEST_SRCS := $(shell find tests/unit -type f -name '*.m' | sort)
 INTEGRATION_TEST_SRCS := $(shell find tests/integration -type f -name '*.m' | sort)
@@ -138,12 +139,12 @@ $(INTEGRATION_TEST_BIN): $(INTEGRATION_TEST_SRCS) boomhauer tech-demo-server api
 build-tests: $(UNIT_TEST_BIN) $(INTEGRATION_TEST_BIN)
 
 test-unit: $(UNIT_TEST_BIN)
->mkdir -p $(ROOT_DIR)/.gnustep
->export GNUSTEP_USER_ROOT="$(ROOT_DIR)/.gnustep"; source $(GNUSTEP_SH) && LD_PRELOAD="$(XCTEST_LD_PRELOAD)" ASAN_OPTIONS="$(ASAN_OPTIONS)" UBSAN_OPTIONS="$(UBSAN_OPTIONS)" xctest $(UNIT_TEST_BUNDLE)
+>mkdir -p $(GNUSTEP_TEST_HOME)/GNUstep/Defaults/.lck
+>HOME="$(GNUSTEP_TEST_HOME)" source $(GNUSTEP_SH) && LD_PRELOAD="$(XCTEST_LD_PRELOAD)" ASAN_OPTIONS="$(ASAN_OPTIONS)" UBSAN_OPTIONS="$(UBSAN_OPTIONS)" xctest $(UNIT_TEST_BUNDLE)
 
 test-integration: $(INTEGRATION_TEST_BIN)
->mkdir -p $(ROOT_DIR)/.gnustep
->export GNUSTEP_USER_ROOT="$(ROOT_DIR)/.gnustep"; source $(GNUSTEP_SH) && LD_PRELOAD="$(XCTEST_LD_PRELOAD)" ASAN_OPTIONS="$(ASAN_OPTIONS)" UBSAN_OPTIONS="$(UBSAN_OPTIONS)" xctest $(INTEGRATION_TEST_BUNDLE)
+>mkdir -p $(GNUSTEP_TEST_HOME)/GNUstep/Defaults/.lck
+>HOME="$(GNUSTEP_TEST_HOME)" source $(GNUSTEP_SH) && LD_PRELOAD="$(XCTEST_LD_PRELOAD)" ASAN_OPTIONS="$(ASAN_OPTIONS)" UBSAN_OPTIONS="$(UBSAN_OPTIONS)" xctest $(INTEGRATION_TEST_BUNDLE)
 
 test: test-unit test-integration
 
@@ -178,4 +179,4 @@ smoke: smoke-render boomhauer
 >bash ./bin/smoke
 
 clean:
->rm -rf $(BUILD_DIR) $(ROOT_DIR)/.gnustep
+>rm -rf $(BUILD_DIR) $(ROOT_DIR)/.gnustep $(ROOT_DIR)/.gnustep-home

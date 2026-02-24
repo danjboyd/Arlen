@@ -135,6 +135,38 @@ static NSString *RenderFailure(id ctx, NSError **error) {
   XCTAssertEqualObjects(@"missingKey", error.userInfo[ALNEOCErrorLocalNameKey]);
 }
 
+- (void)testLocalPathLookupFromNestedDictionary {
+  NSDictionary *ctx = @{
+    @"user" : @{
+      @"profile" : @{
+        @"email" : @"dev@example.test",
+      },
+    },
+  };
+  NSError *error = nil;
+  id value = ALNEOCLocalPath(ctx, @"user.profile.email", @"index.html.eoc", 5, 3, &error);
+  XCTAssertNil(error);
+  XCTAssertEqualObjects(@"dev@example.test", value);
+}
+
+- (void)testStrictLocalsMissingKeyPathSegmentProducesDiagnostic {
+  ALNEOCSetStrictLocalsEnabled(YES);
+
+  NSDictionary *ctx = @{ @"user" : @{} };
+  NSError *error = nil;
+  id value = ALNEOCLocalPath(ctx, @"user.profile.email", @"index.html.eoc", 12, 8, &error);
+  XCTAssertNil(value);
+  XCTAssertNotNil(error);
+  XCTAssertEqualObjects(ALNEOCErrorDomain, error.domain);
+  XCTAssertEqual((NSInteger)ALNEOCErrorTemplateExecutionFailed, [error code]);
+  XCTAssertEqualObjects(@"index.html.eoc", error.userInfo[ALNEOCErrorPathKey]);
+  XCTAssertEqualObjects(@12, error.userInfo[ALNEOCErrorLineKey]);
+  XCTAssertEqualObjects(@8, error.userInfo[ALNEOCErrorColumnKey]);
+  XCTAssertEqualObjects(@"user", error.userInfo[ALNEOCErrorLocalNameKey]);
+  XCTAssertEqualObjects(@"user.profile.email", error.userInfo[ALNEOCErrorKeyPathKey]);
+  XCTAssertEqualObjects(@"profile", error.userInfo[ALNEOCErrorSegmentKey]);
+}
+
 - (void)testStrictStringifyAllowsStringValueObjects {
   ALNEOCSetStrictStringifyEnabled(YES);
 

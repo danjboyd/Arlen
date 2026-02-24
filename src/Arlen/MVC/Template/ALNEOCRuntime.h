@@ -10,6 +10,8 @@ extern NSString *const ALNEOCErrorLineKey;
 extern NSString *const ALNEOCErrorColumnKey;
 extern NSString *const ALNEOCErrorPathKey;
 extern NSString *const ALNEOCErrorLocalNameKey;
+extern NSString *const ALNEOCErrorKeyPathKey;
+extern NSString *const ALNEOCErrorSegmentKey;
 
 typedef NS_ENUM(NSInteger, ALNEOCErrorCode) {
   ALNEOCErrorTemplateNotFound = 1,
@@ -36,6 +38,12 @@ id _Nullable ALNEOCLocal(id _Nullable ctx,
                          NSUInteger line,
                          NSUInteger column,
                          NSError **_Nullable error);
+id _Nullable ALNEOCLocalPath(id _Nullable ctx,
+                             NSString *keyPath,
+                             NSString *templatePath,
+                             NSUInteger line,
+                             NSUInteger column,
+                             NSError **_Nullable error);
 
 void ALNEOCAppendEscaped(NSMutableString *out, id _Nullable value);
 void ALNEOCAppendRaw(NSMutableString *out, id _Nullable value);

@@ -185,6 +185,9 @@ Diagnostics behavior:
   - `eocc: warning path=<path> line=<line> column=<column> code=<code> message=<message>`
   - current lint code: `unguarded_include` (include return value should be checked)
 - lint warnings are non-fatal in this phase slice
+- sigil local grammar supports:
+  - `$identifier`
+  - `$identifier(.identifier)*` (dotted keypaths)
 
 ### `arlen config [--env <name>] [--json]`
 
@@ -313,6 +316,7 @@ Signals:
 - `bin/test`: run test suite (`make test`)
 - `bin/tech-demo`: run technology demo app
 - `bin/dev`: alias for `bin/boomhauer`
+- `make test-unit` / `make test-integration`: run XCTest bundles with repo-local GNUstep defaults home (`.gnustep-home`)
 - `make ci-quality`: run unit + integration + multi-profile perf quality gate
 - `make ci-sanitizers`: run ASan/UBSan gate across unit + integration + data-layer checks
 - `make phase5e-confidence`: generate Phase 5E release confidence artifacts in `build/release_confidence/phase5e`

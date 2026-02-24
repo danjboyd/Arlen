@@ -775,13 +775,43 @@ NSString *const ALNEOCLintDiagnosticColumnKey = @"column";
         scan += 1;
       }
 
+      while (scan < length && [content characterAtIndex:scan] == '.') {
+        if ((scan + 1) >= length ||
+            ![self isSigilIdentifierStart:[content characterAtIndex:scan + 1]]) {
+          if (error != NULL) {
+            *error = [NSError
+                errorWithDomain:ALNEOCErrorDomain
+                           code:ALNEOCErrorTranspilerSyntax
+                       userInfo:@{
+                         NSLocalizedDescriptionKey : @"Invalid sigil local",
+                         ALNEOCErrorLineKey : @(cursorLine),
+                         ALNEOCErrorColumnKey : @(cursorColumn),
+                         ALNEOCErrorPathKey : logicalPath ?: @""
+                       }];
+          }
+          return nil;
+        }
+        scan += 1;
+        while (scan < length &&
+               [self isSigilIdentifierBody:[content characterAtIndex:scan]]) {
+          scan += 1;
+        }
+      }
+
       NSString *name =
           [content substringWithRange:NSMakeRange(nameStart, scan - nameStart)];
       NSString *escapedName =
           [name stringByReplacingOccurrencesOfString:@"\"" withString:@"\\\""];
-      [rewritten appendFormat:@"ALNEOCLocal(ctx, @\"%@\", @\"%@\", %lu, %lu, error)",
-                              escapedName, escapedPath, (unsigned long)localLine,
-                              (unsigned long)localColumn];
+      if ([name containsString:@"."]) {
+        [rewritten appendFormat:
+                      @"ALNEOCLocalPath(ctx, @\"%@\", @\"%@\", %lu, %lu, error)",
+                      escapedName, escapedPath, (unsigned long)localLine,
+                      (unsigned long)localColumn];
+      } else {
+        [rewritten appendFormat:@"ALNEOCLocal(ctx, @\"%@\", @\"%@\", %lu, %lu, error)",
+                                escapedName, escapedPath, (unsigned long)localLine,
+                                (unsigned long)localColumn];
+      }
 
       for (NSUInteger consumed = index; consumed < scan; consumed++) {
         [self advanceLine:&cursorLine

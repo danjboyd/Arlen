@@ -39,6 +39,10 @@ Supported tags:
 Transpiler/runtime:
 - `tools/eocc` transpiles templates to Objective-C source.
 - `ALNEOCRuntime` provides rendering and include support.
+- Sigil locals support both root identifiers and dotted keypaths:
+  - `$title`
+  - `$user.profile.email`
+- Dotted keypaths resolve through runtime helper lookups with strict-locals diagnostics for missing roots/segments.
 
 ## 4. Data Layer Model
 
@@ -60,6 +64,20 @@ If controller action returns an `NSDictionary` or `NSArray` and no explicit body
 ## 6. API Contracts and OpenAPI Docs
 
 - Request/response contracts can be configured per route for deterministic validation/coercion.
+- Schema descriptors support named transformer hooks before type validation:
+  - `transformer` (single name)
+  - `transformers` (ordered pipeline)
+- Built-in transformer names:
+  - `trim`
+  - `lowercase`
+  - `uppercase`
+  - `to_integer`
+  - `to_number`
+  - `to_boolean`
+  - `iso8601_date`
+- JSON error payloads use a unified structure with keypath-ready detail entries:
+  - `error.code`, `error.message`, `error.request_id`, `error.correlation_id`
+  - `details[]` entries with `field`, `code`, `message`, optional `meta`
 - OpenAPI JSON endpoints:
   - `/openapi.json`
   - `/.well-known/openapi.json`

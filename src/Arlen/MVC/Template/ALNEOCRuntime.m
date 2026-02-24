@@ -5,6 +5,8 @@ NSString *const ALNEOCErrorLineKey = @"line";
 NSString *const ALNEOCErrorColumnKey = @"column";
 NSString *const ALNEOCErrorPathKey = @"path";
 NSString *const ALNEOCErrorLocalNameKey = @"local";
+NSString *const ALNEOCErrorKeyPathKey = @"key_path";
+NSString *const ALNEOCErrorSegmentKey = @"segment";
 
 static NSString *const ALNEOCThreadOptionsKey = @"aln.eoc.render_options";
 static NSString *const ALNEOCThreadStrictLocalsKey = @"strict_locals";
@@ -51,7 +53,9 @@ static NSError *ALNEOCTemplateExecutionError(NSString *message,
                                              NSString *templatePath,
                                              NSUInteger line,
                                              NSUInteger column,
-                                             NSString *localName) {
+                                             NSString *localName,
+                                             NSString *keyPath,
+                                             NSString *segment) {
   NSMutableDictionary *userInfo = [NSMutableDictionary dictionary];
   userInfo[NSLocalizedDescriptionKey] = message ?: @"Template execution failed";
   if ([templatePath length] > 0) {
@@ -65,6 +69,12 @@ static NSError *ALNEOCTemplateExecutionError(NSString *message,
   }
   if ([localName length] > 0) {
     userInfo[ALNEOCErrorLocalNameKey] = localName;
+  }
+  if ([keyPath length] > 0) {
+    userInfo[ALNEOCErrorKeyPathKey] = keyPath;
+  }
+  if ([segment length] > 0) {
+    userInfo[ALNEOCErrorSegmentKey] = segment;
   }
   return [NSError errorWithDomain:ALNEOCErrorDomain
                              code:ALNEOCErrorTemplateExecutionFailed
@@ -114,16 +124,16 @@ static NSString *ALNEOCStringValueWithOptions(id value,
   return [value description] ?: @"";
 }
 
-static id ALNEOCLookupLocal(id ctx, NSString *name, BOOL *found) {
+static id ALNEOCLookupValueOnObject(id object, NSString *name, BOOL *found) {
   if (found != NULL) {
     *found = NO;
   }
-  if (ctx == nil || [name length] == 0) {
+  if (object == nil || [name length] == 0) {
     return nil;
   }
 
-  if ([ctx isKindOfClass:[NSDictionary class]]) {
-    NSDictionary *dictionary = (NSDictionary *)ctx;
+  if ([object isKindOfClass:[NSDictionary class]]) {
+    NSDictionary *dictionary = (NSDictionary *)object;
     id value = dictionary[name];
     if (value != nil && found != NULL) {
       *found = YES;
@@ -131,17 +141,17 @@ static id ALNEOCLookupLocal(id ctx, NSString *name, BOOL *found) {
     return value;
   }
 
-  if ([ctx respondsToSelector:@selector(objectForKey:)]) {
-    id value = [ctx objectForKey:name];
+  if ([object respondsToSelector:@selector(objectForKey:)]) {
+    id value = [object objectForKey:name];
     if (value != nil && found != NULL) {
       *found = YES;
     }
     return value;
   }
 
-  if ([ctx respondsToSelector:@selector(valueForKey:)]) {
+  if ([object respondsToSelector:@selector(valueForKey:)]) {
     @try {
-      id value = [ctx valueForKey:name];
+      id value = [object valueForKey:name];
       if (value != nil && found != NULL) {
         *found = YES;
       }
@@ -153,6 +163,10 @@ static id ALNEOCLookupLocal(id ctx, NSString *name, BOOL *found) {
   }
 
   return nil;
+}
+
+static id ALNEOCLookupLocal(id ctx, NSString *name, BOOL *found) {
+  return ALNEOCLookupValueOnObject(ctx, name, found);
 }
 
 id ALNEOCLocal(id ctx,
@@ -170,9 +184,72 @@ id ALNEOCLocal(id ctx,
   if (ALNEOCStrictLocalsEnabled() && error != NULL) {
     NSString *message =
         [NSString stringWithFormat:@"Undefined EOC local: $%@", name ?: @""];
-    *error = ALNEOCTemplateExecutionError(message, templatePath, line, column, name);
+    *error = ALNEOCTemplateExecutionError(
+        message, templatePath, line, column, name, nil, nil);
   }
   return nil;
+}
+
+id ALNEOCLocalPath(id ctx,
+                   NSString *keyPath,
+                   NSString *templatePath,
+                   NSUInteger line,
+                   NSUInteger column,
+                   NSError **error) {
+  if ([keyPath length] == 0) {
+    return nil;
+  }
+
+  NSArray *segments = [keyPath componentsSeparatedByString:@"."];
+  if ([segments count] == 0) {
+    return ALNEOCLocal(ctx, keyPath, templatePath, line, column, error);
+  }
+
+  NSString *rootLocal = [segments[0] isKindOfClass:[NSString class]] ? segments[0] : @"";
+  BOOL found = NO;
+  id current = ALNEOCLookupLocal(ctx, rootLocal, &found);
+  if (!found) {
+    if (ALNEOCStrictLocalsEnabled() && error != NULL) {
+      NSString *message = [NSString stringWithFormat:@"Undefined EOC local: $%@",
+                                                     rootLocal ?: @""];
+      *error = ALNEOCTemplateExecutionError(message,
+                                            templatePath,
+                                            line,
+                                            column,
+                                            rootLocal,
+                                            keyPath,
+                                            rootLocal);
+    }
+    return nil;
+  }
+
+  if ([segments count] == 1) {
+    return current;
+  }
+
+  for (NSUInteger idx = 1; idx < [segments count]; idx++) {
+    NSString *segment =
+        [segments[idx] isKindOfClass:[NSString class]] ? segments[idx] : @"";
+    BOOL segmentFound = NO;
+    current = ALNEOCLookupValueOnObject(current, segment, &segmentFound);
+    if (!segmentFound) {
+      if (ALNEOCStrictLocalsEnabled() && error != NULL) {
+        NSString *message = [NSString
+            stringWithFormat:@"Undefined EOC key path segment '%@' in $%@",
+                             segment ?: @"", keyPath ?: @""];
+        *error = ALNEOCTemplateExecutionError(message,
+                                              templatePath,
+                                              line,
+                                              column,
+                                              rootLocal,
+                                              keyPath,
+                                              segment);
+      }
+      return nil;
+    }
+  }
+
+  return current;
 }
 
 NSString *ALNEOCCanonicalTemplatePath(NSString *path) {
@@ -260,7 +337,8 @@ static BOOL ALNEOCAppendChecked(NSMutableString *out,
   if (!conversionOK || rendered == nil) {
     if (error != NULL) {
       NSString *message = @"Expression output is not string-convertible in strict stringify mode";
-      *error = ALNEOCTemplateExecutionError(message, templatePath, line, column, nil);
+      *error = ALNEOCTemplateExecutionError(
+          message, templatePath, line, column, nil, nil, nil);
     }
     return NO;
   }

@@ -632,7 +632,75 @@ static NSArray *ALNNormalizedUniqueStrings(NSArray *values) {
   return [NSArray arrayWithArray:normalized];
 }
 
+static NSDictionary *ALNErrorDetailEntry(NSString *field,
+                                         NSString *code,
+                                         NSString *message,
+                                         NSDictionary *meta) {
+  NSMutableDictionary *entry = [NSMutableDictionary dictionary];
+  entry[@"field"] = [field isKindOfClass:[NSString class]] ? field : @"";
+  entry[@"code"] = [code isKindOfClass:[NSString class]] && [code length] > 0 ? code : @"invalid";
+  entry[@"message"] = [message isKindOfClass:[NSString class]] && [message length] > 0
+                          ? message
+                          : @"invalid value";
+  if ([meta isKindOfClass:[NSDictionary class]] && [meta count] > 0) {
+    entry[@"meta"] = meta;
+  }
+  return entry;
+}
+
+static NSArray *ALNNormalizedErrorDetailsArray(id rawDetails) {
+  if ([rawDetails isKindOfClass:[NSArray class]]) {
+    NSMutableArray *normalized = [NSMutableArray array];
+    for (id value in (NSArray *)rawDetails) {
+      if ([value isKindOfClass:[NSDictionary class]]) {
+        NSDictionary *entry = (NSDictionary *)value;
+        NSString *field = [entry[@"field"] isKindOfClass:[NSString class]] ? entry[@"field"] : @"";
+        NSString *code = [entry[@"code"] isKindOfClass:[NSString class]] ? entry[@"code"] : @"invalid";
+        NSString *message =
+            [entry[@"message"] isKindOfClass:[NSString class]] ? entry[@"message"] : @"invalid value";
+        NSMutableDictionary *meta = [NSMutableDictionary dictionary];
+        NSDictionary *entryMeta = [entry[@"meta"] isKindOfClass:[NSDictionary class]] ? entry[@"meta"] : @{};
+        if ([entryMeta count] > 0) {
+          [meta addEntriesFromDictionary:entryMeta];
+        }
+        for (id key in entry) {
+          if (![key isKindOfClass:[NSString class]]) {
+            continue;
+          }
+          NSString *name = (NSString *)key;
+          if ([name isEqualToString:@"field"] || [name isEqualToString:@"code"] ||
+              [name isEqualToString:@"message"] || [name isEqualToString:@"meta"]) {
+            continue;
+          }
+          meta[name] = entry[key] ?: [NSNull null];
+        }
+        [normalized addObject:ALNErrorDetailEntry(field,
+                                                  code,
+                                                  message,
+                                                  [meta count] > 0 ? meta : nil)];
+      } else {
+        [normalized addObject:ALNErrorDetailEntry(@"",
+                                                  @"invalid",
+                                                  [value description] ?: @"invalid value",
+                                                  nil)];
+      }
+    }
+    return [NSArray arrayWithArray:normalized];
+  }
+
+  if ([rawDetails isKindOfClass:[NSDictionary class]] &&
+      [(NSDictionary *)rawDetails count] > 0) {
+    return @[ ALNErrorDetailEntry(@"",
+                                  @"internal_error_details",
+                                  @"Additional error details",
+                                  (NSDictionary *)rawDetails) ];
+  }
+
+  return @[];
+}
+
 static NSDictionary *ALNValidationFailurePayload(NSString *requestID, NSArray *errors) {
+  NSArray *details = ALNNormalizedErrorDetailsArray(errors);
   return @{
     @"error" : @{
       @"code" : @"validation_failed",
@@ -641,7 +709,7 @@ static NSDictionary *ALNValidationFailurePayload(NSString *requestID, NSArray *e
       @"request_id" : requestID ?: @"",
       @"correlation_id" : requestID ?: @"",
     },
-    @"details" : errors ?: @[]
+    @"details" : details ?: @[]
   };
 }
 
@@ -1653,7 +1721,7 @@ static NSDictionary *ALNStructuredErrorPayload(NSInteger statusCode,
                                                NSString *errorCode,
                                                NSString *message,
                                                NSString *requestID,
-                                               NSDictionary *details) {
+                                               id details) {
   NSMutableDictionary *errorObject = [NSMutableDictionary dictionary];
   errorObject[@"code"] = errorCode ?: @"internal_error";
   errorObject[@"message"] = message ?: @"Internal Server Error";
@@ -1663,8 +1731,9 @@ static NSDictionary *ALNStructuredErrorPayload(NSInteger statusCode,
 
   NSMutableDictionary *payload = [NSMutableDictionary dictionary];
   payload[@"error"] = errorObject;
-  if ([details count] > 0) {
-    payload[@"details"] = details;
+  NSArray *normalizedDetails = ALNNormalizedErrorDetailsArray(details);
+  if ([normalizedDetails count] > 0) {
+    payload[@"details"] = normalizedDetails;
   }
   return payload;
 }
@@ -1696,11 +1765,18 @@ static void ALNApplyInternalErrorResponse(ALNApplication *application,
   BOOL prefersJSON = ALNRequestPrefersJSON(request, apiOnly);
 
   if (production || prefersJSON) {
+    id structuredDetails = @[];
+    if (!production && [details count] > 0) {
+      structuredDetails = @[ ALNErrorDetailEntry(@"",
+                                                 errorCode ?: @"internal_error",
+                                                 developerMessage ?: publicMessage,
+                                                 details ?: @{}) ];
+    }
     NSDictionary *payload = ALNStructuredErrorPayload(statusCode,
                                                       errorCode,
                                                       publicMessage,
                                                       requestID,
-                                                      production ? @{} : (details ?: @{}));
+                                                      structuredDetails);
     ALNSetStructuredErrorResponse(response, statusCode, payload);
     return;
   }
@@ -1755,11 +1831,14 @@ static void ALNApplyUnauthorizedResponse(ALNApplication *application,
                                          NSArray *requiredScopes) {
   BOOL apiOnly = ALNBoolConfigValue(application.config[@"apiOnly"], NO);
   if (apiOnly || ALNRequestPrefersJSON(request, apiOnly)) {
-    NSMutableDictionary *details = [NSMutableDictionary dictionary];
     NSArray *scopes = ALNNormalizedUniqueStrings(requiredScopes);
-    if ([scopes count] > 0) {
-      details[@"required_scopes"] = scopes;
-    }
+    NSDictionary *meta = ([scopes count] > 0) ? @{ @"required_scopes" : scopes } : @{};
+    NSArray *details = ([meta count] > 0)
+                           ? @[ ALNErrorDetailEntry(@"auth",
+                                                    @"unauthorized",
+                                                    message ?: @"Unauthorized",
+                                                    meta) ]
+                           : @[];
     NSDictionary *payload = ALNStructuredErrorPayload(401,
                                                       @"unauthorized",
                                                       message ?: @"Unauthorized",
@@ -1790,11 +1869,17 @@ static void ALNApplyForbiddenResponse(ALNApplication *application,
                                       NSDictionary *details) {
   BOOL apiOnly = ALNBoolConfigValue(application.config[@"apiOnly"], NO);
   if (apiOnly || ALNRequestPrefersJSON(request, apiOnly)) {
+    NSArray *structuredDetails =
+        ([details count] > 0) ? @[ ALNErrorDetailEntry(@"auth",
+                                                       @"forbidden",
+                                                       message ?: @"Forbidden",
+                                                       details ?: @{}) ]
+                              : @[];
     NSDictionary *payload = ALNStructuredErrorPayload(403,
                                                       @"forbidden",
                                                       message ?: @"Forbidden",
                                                       requestID,
-                                                      details ?: @{});
+                                                      structuredDetails);
     ALNSetStructuredErrorResponse(response, 403, payload);
   } else {
     response.statusCode = 403;

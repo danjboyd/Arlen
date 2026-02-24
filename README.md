@@ -149,7 +149,9 @@ Specifications and roadmaps:
 - [Phase 4 Roadmap](docs/PHASE4_ROADMAP.md)
 - [Phase 5 Roadmap](docs/PHASE5_ROADMAP.md)
 - [Phase 7 Roadmap](docs/PHASE7_ROADMAP.md)
+- [Phase 8 Roadmap](docs/PHASE8_ROADMAP.md)
 - [EOC v1 Spec](V1_SPEC.md)
+- [RFC: Keypath Locals + Transformers + Route Compile](docs/RFC_KEYPATH_TRANSFORMERS_ROUTE_COMPILE.md)
 
 ## Naming
 

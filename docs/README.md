@@ -57,10 +57,12 @@ Open `build/docs/index.html` in your browser.
 - [Phase 4 Roadmap](PHASE4_ROADMAP.md)
 - [Phase 5 Roadmap](PHASE5_ROADMAP.md)
 - [Phase 7 Roadmap](PHASE7_ROADMAP.md)
+- [Phase 8 Roadmap](PHASE8_ROADMAP.md)
 - [Combined Roadmap Index](PHASE2_PHASE3_ROADMAP.md)
 - [Feature Parity Matrix](FEATURE_PARITY_MATRIX.md)
 - [EOC v1 Roadmap](EOC_V1_ROADMAP.md)
 - [EOC v1 Spec](../V1_SPEC.md)
+- [RFC: Keypath Locals + Transformers + Route Compile](RFC_KEYPATH_TRANSFORMERS_ROUTE_COMPILE.md)
 
 ## Examples
 

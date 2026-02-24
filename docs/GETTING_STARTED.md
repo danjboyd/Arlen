@@ -164,6 +164,7 @@ make phase5e-confidence
 `make check` runs unit + integration + perf gates.
 `make test-data-layer` validates standalone `ArlenData` consumption outside the full runtime stack.
 `make ci-quality` runs the Phase 5E quality gate (including soak/fault tests and confidence artifact generation).
+`make test-unit` and `make test-integration` run with a repo-local GNUstep test home (`.gnustep-home`) to keep defaults/lock files isolated.
 
 Soak iteration override:
 
@@ -345,6 +346,20 @@ Current lint rule:
 - `unguarded_include`
   - update include calls to guard return values:
     - `if (!ALNEOCInclude(out, ctx, @\"partials/_nav.html.eoc\", error)) { return nil; }`
+
+Sigil locals support both root and dotted keypath forms:
+
+- `$title`
+- `$user.profile.email`
+
+Invalid sigil keypath syntax (for example trailing dots) fails transpilation deterministically with location metadata.
+
+Schema request/response descriptors can optionally apply named transformers before type validation:
+
+- `transformer` (single)
+- `transformers` (ordered list)
+
+Built-ins include `trim`, `lowercase`, `uppercase`, `to_integer`, `to_number`, `to_boolean`, and `iso8601_date`.
 
 Full troubleshooting workflow:
 

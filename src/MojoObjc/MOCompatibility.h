@@ -59,6 +59,8 @@
 #define MOJOEOCErrorLineKey ALNEOCErrorLineKey
 #define MOJOEOCErrorColumnKey ALNEOCErrorColumnKey
 #define MOJOEOCErrorPathKey ALNEOCErrorPathKey
+#define MOJOEOCErrorKeyPathKey ALNEOCErrorKeyPathKey
+#define MOJOEOCErrorSegmentKey ALNEOCErrorSegmentKey
 
 typedef ALNEOCRenderFunction MOJOEOCRenderFunction;
 typedef ALNEOCErrorCode MOJOEOCErrorCode;
@@ -71,6 +73,7 @@ typedef ALNEOCErrorCode MOJOEOCErrorCode;
 
 #define MOJOEOCCanonicalTemplatePath ALNEOCCanonicalTemplatePath
 #define MOJOEOCEscapeHTMLString ALNEOCEscapeHTMLString
+#define MOJOEOCLocalPath ALNEOCLocalPath
 #define MOJOEOCAppendEscaped ALNEOCAppendEscaped
 #define MOJOEOCAppendRaw ALNEOCAppendRaw
 #define MOJOEOCClearTemplateRegistry ALNEOCClearTemplateRegistry

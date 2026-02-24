@@ -296,6 +296,11 @@ static NSInteger gPhase3APluginStopCount = 0;
   XCTAssertEqualObjects(@"validation_failed", json[@"error"][@"code"]);
   NSArray *details = json[@"details"];
   XCTAssertTrue([details count] > 0);
+  NSDictionary *entry =
+      [[details firstObject] isKindOfClass:[NSDictionary class]] ? [details firstObject] : @{};
+  XCTAssertTrue([entry[@"field"] isKindOfClass:[NSString class]]);
+  XCTAssertTrue([entry[@"code"] isKindOfClass:[NSString class]]);
+  XCTAssertTrue([entry[@"message"] isKindOfClass:[NSString class]]);
 }
 
 - (void)testAuthScopeRejectionReturns403 {
@@ -314,6 +319,17 @@ static NSInteger gPhase3APluginStopCount = 0;
   XCTAssertEqual((NSInteger)403, response.statusCode);
   NSDictionary *json = [self jsonFromResponse:response];
   XCTAssertEqualObjects(@"forbidden", json[@"error"][@"code"]);
+  NSArray *details = [json[@"details"] isKindOfClass:[NSArray class]] ? json[@"details"] : @[];
+  XCTAssertEqual((NSUInteger)1, [details count]);
+  NSDictionary *entry =
+      [[details firstObject] isKindOfClass:[NSDictionary class]] ? [details firstObject] : @{};
+  XCTAssertEqualObjects(@"auth", entry[@"field"]);
+  XCTAssertEqualObjects(@"forbidden", entry[@"code"]);
+  NSDictionary *meta = [entry[@"meta"] isKindOfClass:[NSDictionary class]] ? entry[@"meta"] : @{};
+  NSArray *required = [meta[@"required_scopes"] isKindOfClass:[NSArray class]]
+                           ? meta[@"required_scopes"]
+                           : @[];
+  XCTAssertTrue([required containsObject:@"users:read"]);
 }
 
 - (void)testMissingBearerTokenReturns401 {
@@ -326,6 +342,19 @@ static NSInteger gPhase3APluginStopCount = 0;
                                                                }]];
   XCTAssertEqual((NSInteger)401, response.statusCode);
   XCTAssertTrue([[response headerForName:@"WWW-Authenticate"] containsString:@"Bearer"]);
+  NSDictionary *json = [self jsonFromResponse:response];
+  XCTAssertEqualObjects(@"unauthorized", json[@"error"][@"code"]);
+  NSArray *details = [json[@"details"] isKindOfClass:[NSArray class]] ? json[@"details"] : @[];
+  XCTAssertEqual((NSUInteger)1, [details count]);
+  NSDictionary *entry =
+      [[details firstObject] isKindOfClass:[NSDictionary class]] ? [details firstObject] : @{};
+  XCTAssertEqualObjects(@"auth", entry[@"field"]);
+  XCTAssertEqualObjects(@"unauthorized", entry[@"code"]);
+  NSDictionary *meta = [entry[@"meta"] isKindOfClass:[NSDictionary class]] ? entry[@"meta"] : @{};
+  NSArray *required = [meta[@"required_scopes"] isKindOfClass:[NSArray class]]
+                           ? meta[@"required_scopes"]
+                           : @[];
+  XCTAssertTrue([required containsObject:@"users:read"]);
 }
 
 - (void)testBuiltInMetricsAndOpenAPIEndpoints {
