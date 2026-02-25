@@ -93,6 +93,7 @@
   XCTAssertEqual((NSInteger)128, [config[@"listenBacklog"] integerValue]);
   XCTAssertEqual((NSInteger)30, [config[@"connectionTimeoutSeconds"] integerValue]);
   XCTAssertEqualObjects(@(NO), config[@"enableReusePort"]);
+  XCTAssertEqualObjects(@"concurrent", config[@"requestDispatchMode"]);
 
   NSDictionary *accessories = config[@"propaneAccessories"];
   XCTAssertEqual((NSInteger)4, [accessories[@"workerCount"] integerValue]);
@@ -180,6 +181,18 @@
   XCTAssertEqual((NSInteger)256, [runtimeLimits[@"maxConcurrentWebSocketSessions"] integerValue]);
 }
 
+- (void)testProductionDefaultsToSerializedRequestDispatchMode {
+  NSString *root = [self prepareConfigTree];
+  XCTAssertNotNil(root);
+
+  NSError *error = nil;
+  NSDictionary *config = [ALNConfig loadConfigAtRoot:root
+                                         environment:@"production"
+                                               error:&error];
+  XCTAssertNil(error);
+  XCTAssertEqualObjects(@"serialized", config[@"requestDispatchMode"]);
+}
+
 - (void)testEnvironmentOverridesRequestLimitsAndProxyFlags {
   NSString *root = [self prepareConfigTree];
   XCTAssertNotNil(root);
@@ -195,6 +208,7 @@
   setenv("ARLEN_LISTEN_BACKLOG", "2222", 1);
   setenv("ARLEN_CONNECTION_TIMEOUT_SECONDS", "45", 1);
   setenv("ARLEN_ENABLE_REUSEPORT", "true", 1);
+  setenv("ARLEN_REQUEST_DISPATCH_MODE", "serialized", 1);
   setenv("ARLEN_PROPANE_WORKERS", "7", 1);
   setenv("ARLEN_PROPANE_GRACEFUL_SHUTDOWN_SECONDS", "12", 1);
   setenv("ARLEN_PROPANE_RESPAWN_DELAY_MS", "555", 1);
@@ -258,6 +272,7 @@
   unsetenv("ARLEN_LISTEN_BACKLOG");
   unsetenv("ARLEN_CONNECTION_TIMEOUT_SECONDS");
   unsetenv("ARLEN_ENABLE_REUSEPORT");
+  unsetenv("ARLEN_REQUEST_DISPATCH_MODE");
   unsetenv("ARLEN_PROPANE_WORKERS");
   unsetenv("ARLEN_PROPANE_GRACEFUL_SHUTDOWN_SECONDS");
   unsetenv("ARLEN_PROPANE_RESPAWN_DELAY_MS");
@@ -320,6 +335,7 @@
   XCTAssertEqual((NSInteger)2222, [config[@"listenBacklog"] integerValue]);
   XCTAssertEqual((NSInteger)45, [config[@"connectionTimeoutSeconds"] integerValue]);
   XCTAssertEqualObjects(@(YES), config[@"enableReusePort"]);
+  XCTAssertEqualObjects(@"serialized", config[@"requestDispatchMode"]);
 
   NSDictionary *accessories = config[@"propaneAccessories"];
   XCTAssertEqual((NSInteger)7, [accessories[@"workerCount"] integerValue]);
@@ -418,6 +434,7 @@
   setenv("MOJOOBJC_LISTEN_BACKLOG", "9004", 1);
   setenv("MOJOOBJC_CONNECTION_TIMEOUT_SECONDS", "31", 1);
   setenv("MOJOOBJC_ENABLE_REUSEPORT", "1", 1);
+  setenv("MOJOOBJC_REQUEST_DISPATCH_MODE", "serialized", 1);
   setenv("MOJOOBJC_PROPANE_WORKERS", "6", 1);
   setenv("MOJOOBJC_DATABASE_URL", "postgresql://legacy/db", 1);
   setenv("MOJOOBJC_DB_POOL_SIZE", "5", 1);
@@ -457,6 +474,7 @@
   unsetenv("MOJOOBJC_LISTEN_BACKLOG");
   unsetenv("MOJOOBJC_CONNECTION_TIMEOUT_SECONDS");
   unsetenv("MOJOOBJC_ENABLE_REUSEPORT");
+  unsetenv("MOJOOBJC_REQUEST_DISPATCH_MODE");
   unsetenv("MOJOOBJC_PROPANE_WORKERS");
   unsetenv("MOJOOBJC_DATABASE_URL");
   unsetenv("MOJOOBJC_DB_POOL_SIZE");
@@ -495,6 +513,7 @@
   XCTAssertEqual((NSInteger)9004, [config[@"listenBacklog"] integerValue]);
   XCTAssertEqual((NSInteger)31, [config[@"connectionTimeoutSeconds"] integerValue]);
   XCTAssertEqualObjects(@(YES), config[@"enableReusePort"]);
+  XCTAssertEqualObjects(@"serialized", config[@"requestDispatchMode"]);
   NSDictionary *accessories = config[@"propaneAccessories"];
   XCTAssertEqual((NSInteger)6, [accessories[@"workerCount"] integerValue]);
   NSDictionary *database = config[@"database"];

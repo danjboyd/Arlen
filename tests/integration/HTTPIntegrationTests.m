@@ -518,6 +518,111 @@
   }
 }
 
+- (void)testProductionModeSerializesRequestDispatchByDefault {
+  int port = [self randomPort];
+  NSTask *server = [[NSTask alloc] init];
+  server.launchPath = @"./build/boomhauer";
+  server.arguments = @[ @"--env", @"production", @"--port", [NSString stringWithFormat:@"%d", port] ];
+  server.standardOutput = [NSPipe pipe];
+  server.standardError = [NSPipe pipe];
+  [server launch];
+
+  @try {
+    BOOL ready = NO;
+    (void)[self requestPathWithRetries:@"/healthz" port:port attempts:60 success:&ready];
+    XCTAssertTrue(ready);
+
+    NSString *script = [NSString stringWithFormat:
+                                         @"import json, threading, time, urllib.request\n"
+                                         @"PORT=%d\n"
+                                         @"slow = {}\n"
+                                         @"def run_slow():\n"
+                                         @"    payload = urllib.request.urlopen(f'http://127.0.0.1:{PORT}/api/sleep?ms=1400', timeout=8).read().decode('utf-8')\n"
+                                         @"    slow['payload'] = payload\n"
+                                         @"t = threading.Thread(target=run_slow)\n"
+                                         @"t.start()\n"
+                                         @"time.sleep(0.2)\n"
+                                         @"start = time.time()\n"
+                                         @"health = urllib.request.urlopen(f'http://127.0.0.1:{PORT}/healthz', timeout=8).read().decode('utf-8')\n"
+                                         @"elapsed = time.time() - start\n"
+                                         @"t.join()\n"
+                                         @"data = json.loads(slow.get('payload', '{}'))\n"
+                                         @"if data.get('sleep_ms') != 1400:\n"
+                                         @"    raise RuntimeError('slow request did not complete')\n"
+                                         @"if health != 'ok\\n':\n"
+                                         @"    raise RuntimeError(health)\n"
+                                         @"if elapsed < 0.9:\n"
+                                         @"    raise RuntimeError(f'expected serialized dispatch, elapsed={elapsed:.3f}s')\n"
+                                         @"print(f'{elapsed:.3f}')\n",
+                                         port];
+    int pyCode = 0;
+    NSString *output = [self runPythonScript:script exitCode:&pyCode];
+    XCTAssertEqual(0, pyCode);
+    XCTAssertTrue([[output stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]]
+        doubleValue] >= 0.9);
+  } @finally {
+    if ([server isRunning]) {
+      (void)kill(server.processIdentifier, SIGTERM);
+      [server waitUntilExit];
+    }
+  }
+}
+
+- (void)testProductionRequestDispatchModeCanBeOverriddenToConcurrent {
+  int port = [self randomPort];
+  NSTask *server = [[NSTask alloc] init];
+  server.launchPath = @"/bin/bash";
+  server.arguments = @[
+    @"-lc",
+    [NSString stringWithFormat:
+                  @"ARLEN_REQUEST_DISPATCH_MODE=concurrent ./build/boomhauer --env production --port %d",
+                  port]
+  ];
+  server.standardOutput = [NSPipe pipe];
+  server.standardError = [NSPipe pipe];
+  [server launch];
+
+  @try {
+    BOOL ready = NO;
+    (void)[self requestPathWithRetries:@"/healthz" port:port attempts:60 success:&ready];
+    XCTAssertTrue(ready);
+
+    NSString *script = [NSString stringWithFormat:
+                                         @"import json, threading, time, urllib.request\n"
+                                         @"PORT=%d\n"
+                                         @"slow = {}\n"
+                                         @"def run_slow():\n"
+                                         @"    payload = urllib.request.urlopen(f'http://127.0.0.1:{PORT}/api/sleep?ms=1200', timeout=5).read().decode('utf-8')\n"
+                                         @"    slow['payload'] = payload\n"
+                                         @"t = threading.Thread(target=run_slow)\n"
+                                         @"t.start()\n"
+                                         @"time.sleep(0.1)\n"
+                                         @"start = time.time()\n"
+                                         @"health = urllib.request.urlopen(f'http://127.0.0.1:{PORT}/healthz', timeout=3).read().decode('utf-8')\n"
+                                         @"elapsed = time.time() - start\n"
+                                         @"t.join()\n"
+                                         @"data = json.loads(slow.get('payload', '{}'))\n"
+                                         @"if data.get('sleep_ms') != 1200:\n"
+                                         @"    raise RuntimeError('slow request did not complete')\n"
+                                         @"if health != 'ok\\n':\n"
+                                         @"    raise RuntimeError(health)\n"
+                                         @"if elapsed > 0.8:\n"
+                                         @"    raise RuntimeError(f'health request blocked for {elapsed:.3f}s')\n"
+                                         @"print(f'{elapsed:.3f}')\n",
+                                         port];
+    int pyCode = 0;
+    NSString *output = [self runPythonScript:script exitCode:&pyCode];
+    XCTAssertEqual(0, pyCode);
+    XCTAssertTrue([[output stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]]
+        doubleValue] < 0.8);
+  } @finally {
+    if ([server isRunning]) {
+      (void)kill(server.processIdentifier, SIGTERM);
+      [server waitUntilExit];
+    }
+  }
+}
+
 - (void)testLargeResponseBodyIsNotTruncatedUnderBackpressure {
   int port = [self randomPort];
   NSTask *server = [[NSTask alloc] init];

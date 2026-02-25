@@ -99,6 +99,19 @@ static ALNRuntimeLimits ALNRuntimeLimitsFromConfig(NSDictionary *config) {
   return out;
 }
 
+static NSString *ALNRequestDispatchModeFromConfig(NSDictionary *config) {
+  id raw = config[@"requestDispatchMode"];
+  if (![raw isKindOfClass:[NSString class]]) {
+    return @"concurrent";
+  }
+  NSString *normalized = [[(NSString *)raw lowercaseString]
+      stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+  if ([normalized isEqualToString:@"serialized"]) {
+    return @"serialized";
+  }
+  return @"concurrent";
+}
+
 static void ALNApplyClientSocketTimeout(int clientFd, NSUInteger timeoutSeconds) {
   if (timeoutSeconds == 0) {
     return;
@@ -937,6 +950,8 @@ static ALNResponse *ALNErrorResponse(NSInteger statusCode, NSString *body) {
 @property(nonatomic, assign) NSUInteger activeWebSocketSessions;
 @property(nonatomic, assign) NSUInteger maxConcurrentHTTPSessions;
 @property(nonatomic, assign) NSUInteger maxConcurrentWebSocketSessions;
+@property(nonatomic, strong) NSLock *requestDispatchLock;
+@property(nonatomic, assign) BOOL serializeRequestDispatch;
 
 @end
 
@@ -954,6 +969,8 @@ static ALNResponse *ALNErrorResponse(NSInteger statusCode, NSString *body) {
     _activeWebSocketSessions = 0;
     _maxConcurrentHTTPSessions = 256;
     _maxConcurrentWebSocketSessions = 256;
+    _requestDispatchLock = [[NSLock alloc] init];
+    _serializeRequestDispatch = NO;
   }
   return self;
 }
@@ -1285,7 +1302,17 @@ static ALNResponse *ALNErrorResponse(NSInteger statusCode, NSString *body) {
       continue;
     }
 
-    ALNResponse *response = [self.application dispatchRequest:request];
+    ALNResponse *response = nil;
+    if (self.serializeRequestDispatch) {
+      [self.requestDispatchLock lock];
+      @try {
+        response = [self.application dispatchRequest:request];
+      } @finally {
+        [self.requestDispatchLock unlock];
+      }
+    } else {
+      response = [self.application dispatchRequest:request];
+    }
 
     NSString *webSocketMode = [self webSocketModeFromResponse:response];
     BOOL webSocketUpgrade = ALNRequestIsWebSocketUpgrade(request) &&
@@ -1357,6 +1384,8 @@ static ALNResponse *ALNErrorResponse(NSInteger statusCode, NSString *body) {
   @try {
     ALNServerSocketTuning tuning = ALNTuningFromConfig(config);
     ALNRuntimeLimits runtimeLimits = ALNRuntimeLimitsFromConfig(config);
+    NSString *requestDispatchMode = ALNRequestDispatchModeFromConfig(config);
+    self.serializeRequestDispatch = [requestDispatchMode isEqualToString:@"serialized"];
     self.maxConcurrentHTTPSessions = runtimeLimits.maxConcurrentHTTPSessions;
     self.maxConcurrentWebSocketSessions = runtimeLimits.maxConcurrentWebSocketSessions;
 

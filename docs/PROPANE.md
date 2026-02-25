@@ -36,6 +36,7 @@ Runtime socket controls:
 listenBacklog = 128;
 connectionTimeoutSeconds = 30;
 enableReusePort = NO;
+requestDispatchMode = "serialized";
 runtimeLimits = {
   maxConcurrentHTTPSessions = 256;
   maxConcurrentWebSocketSessions = 256;
@@ -100,5 +101,6 @@ Environment fallbacks:
 - `ARLEN_CLUSTER_EXPECTED_NODES`
 - `ARLEN_MAX_HTTP_SESSIONS`
 - `ARLEN_MAX_WEBSOCKET_SESSIONS`
+- `ARLEN_REQUEST_DISPATCH_MODE` (`serialized` by default in production; set `concurrent` to opt in)
 
 `propane` exports resolved cluster values to worker processes, so CLI overrides are consistently applied at runtime.

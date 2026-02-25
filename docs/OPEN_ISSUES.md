@@ -2,7 +2,7 @@
 
 ## ISSUE-001: Worker crash under normal HTTP traffic (`malloc_consolidate` / intermittent `502`)
 
-- Status: `open`
+- Status: `in_verification`
 - Priority: `critical`
 - GitHub: https://github.com/danjboyd/Arlen/issues/1
 - Last updated: `2026-02-24`
@@ -38,6 +38,13 @@ Externally this presents as intermittent or sustained `502 Bad Gateway` from ngi
 - Unit + integration + local ASAN/UBSAN stress remained green in local environment.
 - Production-like environment still reproduces crash, so root cause is not fully resolved.
 - Most likely class remains a concurrency-exposed memory/lifecycle defect introduced after `3876cd8`.
+- Root-cause hypothesis now aligned with bisect window:
+  - post-`3876cd8` runtime switched to concurrent per-connection request dispatch without
+    serialized application dispatch in each worker.
+  - production (`propane` / `--env production`) now defaults to
+    `requestDispatchMode=serialized` to restore per-worker dispatch serialization while keeping
+    explicit `concurrent` opt-in for workloads that require it.
+  - regression coverage added for production-default serialization + explicit concurrent override.
 
 ### Next diagnostics to run (next session)
 

@@ -167,6 +167,19 @@ static NSString *ALNNormalizedLogLevelName(id rawValue) {
   return nil;
 }
 
+static NSString *ALNNormalizedRequestDispatchMode(id rawValue) {
+  if (![rawValue isKindOfClass:[NSString class]]) {
+    return nil;
+  }
+  NSString *normalized = [[(NSString *)rawValue lowercaseString]
+      stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+  if ([normalized isEqualToString:@"concurrent"] ||
+      [normalized isEqualToString:@"serialized"]) {
+    return normalized;
+  }
+  return nil;
+}
+
 static NSDictionary *ALNSecurityProfileDefaults(NSString *profileName) {
   NSString *normalized = ALNNormalizedSecurityProfileName(profileName);
   if ([normalized isEqualToString:@"strict"]) {
@@ -270,6 +283,8 @@ static NSDictionary *ALNSecurityProfileDefaults(NSString *profileName) {
                                                          "MOJOOBJC_CONNECTION_TIMEOUT_SECONDS");
   NSString *enableReusePort =
       ALNEnvValueCompat("ARLEN_ENABLE_REUSEPORT", "MOJOOBJC_ENABLE_REUSEPORT");
+  NSString *requestDispatchMode =
+      ALNEnvValueCompat("ARLEN_REQUEST_DISPATCH_MODE", "MOJOOBJC_REQUEST_DISPATCH_MODE");
 
   NSString *propaneWorkers =
       ALNEnvValueCompat("ARLEN_PROPANE_WORKERS", "MOJOOBJC_PROPANE_WORKERS");
@@ -408,6 +423,10 @@ static NSDictionary *ALNSecurityProfileDefaults(NSString *profileName) {
   NSNumber *enableReusePortValue = ALNParseBooleanString(enableReusePort);
   if (enableReusePortValue != nil) {
     config[@"enableReusePort"] = enableReusePortValue;
+  }
+  NSString *requestDispatchModeValue = ALNNormalizedRequestDispatchMode(requestDispatchMode);
+  if ([requestDispatchModeValue length] > 0) {
+    config[@"requestDispatchMode"] = requestDispatchModeValue;
   }
 
   NSMutableDictionary *limits =
@@ -732,6 +751,11 @@ static NSDictionary *ALNSecurityProfileDefaults(NSString *profileName) {
   if (config[@"enableReusePort"] == nil) {
     config[@"enableReusePort"] = @(NO);
   }
+  if (![config[@"requestDispatchMode"] isKindOfClass:[NSString class]] ||
+      [config[@"requestDispatchMode"] length] == 0) {
+    config[@"requestDispatchMode"] =
+        [env isEqualToString:@"production"] ? @"serialized" : @"concurrent";
+  }
 
   NSMutableDictionary *finalAccessories =
       [NSMutableDictionary dictionaryWithDictionary:config[@"propaneAccessories"] ?: @{}];
@@ -983,6 +1007,13 @@ static NSDictionary *ALNSecurityProfileDefaults(NSString *profileName) {
   config[@"listenBacklog"] = @([config[@"listenBacklog"] integerValue]);
   config[@"connectionTimeoutSeconds"] = @([config[@"connectionTimeoutSeconds"] integerValue]);
   config[@"enableReusePort"] = @([config[@"enableReusePort"] boolValue]);
+  NSString *resolvedRequestDispatchMode =
+      ALNNormalizedRequestDispatchMode(config[@"requestDispatchMode"]);
+  if ([resolvedRequestDispatchMode length] == 0) {
+    resolvedRequestDispatchMode =
+        [env isEqualToString:@"production"] ? @"serialized" : @"concurrent";
+  }
+  config[@"requestDispatchMode"] = resolvedRequestDispatchMode;
 
   finalLimits[@"maxRequestLineBytes"] = @([finalLimits[@"maxRequestLineBytes"] integerValue]);
   finalLimits[@"maxHeaderBytes"] = @([finalLimits[@"maxHeaderBytes"] integerValue]);
