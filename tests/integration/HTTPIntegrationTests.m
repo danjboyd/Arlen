@@ -623,6 +623,86 @@
   }
 }
 
+- (void)testProductionSerializedDispatchClosesHTTPConnections {
+  int port = [self randomPort];
+  NSTask *server = [[NSTask alloc] init];
+  server.launchPath = @"./build/boomhauer";
+  server.arguments = @[ @"--env", @"production", @"--port", [NSString stringWithFormat:@"%d", port] ];
+  server.standardOutput = [NSPipe pipe];
+  server.standardError = [NSPipe pipe];
+  [server launch];
+
+  @try {
+    BOOL ready = NO;
+    (void)[self requestPathWithRetries:@"/healthz" port:port attempts:60 success:&ready];
+    XCTAssertTrue(ready);
+
+    NSString *script = [NSString stringWithFormat:
+                                         @"import socket\n"
+                                         @"PORT=%d\n"
+                                         @"sock = socket.create_connection(('127.0.0.1', PORT), timeout=5)\n"
+                                         @"sock.settimeout(5)\n"
+                                         @"request = (\n"
+                                         @"    f'GET /healthz HTTP/1.1\\r\\n'\n"
+                                         @"    f'Host: 127.0.0.1:{PORT}\\r\\n'\n"
+                                         @"    'Connection: keep-alive\\r\\n\\r\\n'\n"
+                                         @").encode('utf-8')\n"
+                                         @"sock.sendall(request)\n"
+                                         @"data = b''\n"
+                                         @"while b'\\r\\n\\r\\n' not in data:\n"
+                                         @"    chunk = sock.recv(4096)\n"
+                                         @"    if not chunk:\n"
+                                         @"        raise RuntimeError('connection closed before headers')\n"
+                                         @"    data += chunk\n"
+                                         @"head, rest = data.split(b'\\r\\n\\r\\n', 1)\n"
+                                         @"headers = {}\n"
+                                         @"for line in head.decode('utf-8', 'replace').split('\\r\\n')[1:]:\n"
+                                         @"    if ':' not in line:\n"
+                                         @"        continue\n"
+                                         @"    name, value = line.split(':', 1)\n"
+                                         @"    headers[name.strip().lower()] = value.strip().lower()\n"
+                                         @"length = int(headers.get('content-length', '0'))\n"
+                                         @"body = rest\n"
+                                         @"while len(body) < length:\n"
+                                         @"    chunk = sock.recv(4096)\n"
+                                         @"    if not chunk:\n"
+                                         @"        break\n"
+                                         @"    body += chunk\n"
+                                         @"if headers.get('connection') != 'close':\n"
+                                         @"    raise RuntimeError(f\"expected Connection: close, got {headers.get('connection')}\")\n"
+                                         @"if body[:length] != b'ok\\n':\n"
+                                         @"    raise RuntimeError(f'unexpected body: {body[:length]!r}')\n"
+                                         @"second = (\n"
+                                         @"    f'GET /healthz HTTP/1.1\\r\\n'\n"
+                                         @"    f'Host: 127.0.0.1:{PORT}\\r\\n'\n"
+                                         @"    'Connection: close\\r\\n\\r\\n'\n"
+                                         @").encode('utf-8')\n"
+                                         @"closed = False\n"
+                                         @"try:\n"
+                                         @"    sock.sendall(second)\n"
+                                         @"    followup = sock.recv(1)\n"
+                                         @"    closed = (followup == b'')\n"
+                                         @"except OSError:\n"
+                                         @"    closed = True\n"
+                                         @"sock.close()\n"
+                                         @"if not closed:\n"
+                                         @"    raise RuntimeError('expected socket to be closed after first response')\n"
+                                         @"print('ok')\n",
+                                         port];
+    int pyCode = 0;
+    NSString *output = [self runPythonScript:script exitCode:&pyCode];
+    XCTAssertEqual(0, pyCode);
+    XCTAssertEqualObjects(@"ok",
+                          [output stringByTrimmingCharactersInSet:
+                                      [NSCharacterSet whitespaceAndNewlineCharacterSet]]);
+  } @finally {
+    if ([server isRunning]) {
+      (void)kill(server.processIdentifier, SIGTERM);
+      [server waitUntilExit];
+    }
+  }
+}
+
 - (void)testLargeResponseBodyIsNotTruncatedUnderBackpressure {
   int port = [self randomPort];
   NSTask *server = [[NSTask alloc] init];

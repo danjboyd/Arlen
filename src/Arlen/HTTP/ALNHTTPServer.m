@@ -1282,7 +1282,8 @@ static ALNResponse *ALNErrorResponse(NSInteger statusCode, NSString *body) {
         if (staticResponse == nil) {
           continue;
         }
-        BOOL keepAlive = ALNShouldKeepAliveForRequest(request, staticResponse);
+        BOOL keepAlive = (!self.serializeRequestDispatch) &&
+                         ALNShouldKeepAliveForRequest(request, staticResponse);
         [staticResponse setHeader:@"Connection" value:(keepAlive ? @"keep-alive" : @"close")];
         ALNEnsurePerformanceHeaders(staticResponse,
                                     performanceLogging,
@@ -1345,7 +1346,8 @@ static ALNResponse *ALNErrorResponse(NSInteger statusCode, NSString *body) {
       return;
     }
 
-    BOOL keepAlive = ALNShouldKeepAliveForRequest(request, response);
+    BOOL keepAlive = (!self.serializeRequestDispatch) &&
+                     ALNShouldKeepAliveForRequest(request, response);
     [response setHeader:@"Connection" value:(keepAlive ? @"keep-alive" : @"close")];
     ALNEnsurePerformanceHeaders(response,
                                 performanceLogging,
@@ -1493,7 +1495,7 @@ static ALNResponse *ALNErrorResponse(NSInteger statusCode, NSString *body) {
         continue;
       }
 
-      BOOL runInBackground = !once;
+      BOOL runInBackground = (!once && !self.serializeRequestDispatch);
       if (runInBackground) {
         @try {
           [NSThread detachNewThreadSelector:@selector(handleClientOnBackgroundThread:)
