@@ -131,8 +131,18 @@ static void ALNBindOptionalLibpqSymbol(void **target, void *handle, const char *
   *target = dlsym(handle, symbolName);
 }
 
+static NSObject *ALNLibpqLoadLockToken(void) {
+  static NSObject *token = nil;
+  @synchronized([ALNPg class]) {
+    if (token == nil) {
+      token = [[NSObject alloc] init];
+    }
+  }
+  return token;
+}
+
 static BOOL ALNLoadLibpq(NSError **error) {
-  @synchronized([NSObject class]) {
+  @synchronized(ALNLibpqLoadLockToken()) {
     if (gLibpqHandle != NULL) {
       return YES;
     }

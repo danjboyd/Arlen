@@ -146,6 +146,68 @@
   [hub reset];
 }
 
+- (void)testRealtimeHubAppliesSubscriberCapsAndReportsMetrics {
+  ALNRealtimeHub *hub = [ALNRealtimeHub sharedHub];
+  [hub reset];
+  [hub configureLimitsWithMaxTotalSubscribers:2 maxSubscribersPerChannel:1];
+
+  Phase3DRealtimeSubscriber *a = [[Phase3DRealtimeSubscriber alloc] init];
+  Phase3DRealtimeSubscriber *b = [[Phase3DRealtimeSubscriber alloc] init];
+  Phase3DRealtimeSubscriber *c = [[Phase3DRealtimeSubscriber alloc] init];
+  Phase3DRealtimeSubscriber *d = [[Phase3DRealtimeSubscriber alloc] init];
+
+  ALNRealtimeSubscription *subA = [hub subscribeChannel:@"updates" subscriber:a];
+  XCTAssertNotNil(subA);
+
+  ALNRealtimeSubscription *subB = [hub subscribeChannel:@"updates" subscriber:b];
+  XCTAssertNil(subB);
+
+  ALNRealtimeSubscription *subC = [hub subscribeChannel:@"alerts" subscriber:c];
+  XCTAssertNotNil(subC);
+
+  ALNRealtimeSubscription *subD = [hub subscribeChannel:@"news" subscriber:d];
+  XCTAssertNil(subD);
+
+  NSDictionary *metrics = [hub metricsSnapshot];
+  XCTAssertEqual((NSInteger)2, [metrics[@"activeSubscribers"] integerValue]);
+  XCTAssertEqual((NSInteger)2, [metrics[@"activeChannels"] integerValue]);
+  XCTAssertEqual((NSInteger)2, [metrics[@"totalSubscriptions"] integerValue]);
+  XCTAssertEqual((NSInteger)2, [metrics[@"rejectedSubscriptions"] integerValue]);
+  XCTAssertEqual((NSInteger)1, [metrics[@"maxSubscribersPerChannel"] integerValue]);
+  XCTAssertEqual((NSInteger)2, [metrics[@"maxTotalSubscribers"] integerValue]);
+
+  [hub unsubscribe:subA];
+  [hub unsubscribe:subC];
+  metrics = [hub metricsSnapshot];
+  XCTAssertEqual((NSInteger)0, [metrics[@"activeSubscribers"] integerValue]);
+  XCTAssertEqual((NSInteger)2, [metrics[@"totalUnsubscriptions"] integerValue]);
+
+  [hub reset];
+}
+
+- (void)testRealtimeHubSubscriptionChurnReturnsToZeroSubscribers {
+  ALNRealtimeHub *hub = [ALNRealtimeHub sharedHub];
+  [hub reset];
+
+  NSUInteger churnIterations = 400;
+  for (NSUInteger idx = 0; idx < churnIterations; idx++) {
+    Phase3DRealtimeSubscriber *subscriber = [[Phase3DRealtimeSubscriber alloc] init];
+    NSString *channel = [NSString stringWithFormat:@"topic-%lu", (unsigned long)(idx % 7)];
+    ALNRealtimeSubscription *subscription =
+        [hub subscribeChannel:channel subscriber:subscriber];
+    XCTAssertNotNil(subscription);
+    [hub unsubscribe:subscription];
+  }
+
+  NSDictionary *metrics = [hub metricsSnapshot];
+  XCTAssertEqual((NSInteger)0, [metrics[@"activeSubscribers"] integerValue]);
+  XCTAssertEqual((NSInteger)churnIterations, [metrics[@"totalSubscriptions"] integerValue]);
+  XCTAssertEqual((NSInteger)churnIterations, [metrics[@"totalUnsubscriptions"] integerValue]);
+  XCTAssertEqual((NSInteger)0, [metrics[@"rejectedSubscriptions"] integerValue]);
+
+  [hub reset];
+}
+
 - (void)testMountApplicationRoutesRewritePathAndPreserveJSONFlow {
   ALNApplication *parent = [[ALNApplication alloc] initWithConfig:@{
     @"environment" : @"test",

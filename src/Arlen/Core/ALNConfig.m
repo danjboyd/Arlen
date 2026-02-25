@@ -276,6 +276,17 @@ static NSDictionary *ALNSecurityProfileDefaults(NSString *profileName) {
       ALNEnvValueCompat("ARLEN_MAX_HTTP_SESSIONS", "MOJOOBJC_MAX_HTTP_SESSIONS");
   NSString *maxWebSocketSessions =
       ALNEnvValueCompat("ARLEN_MAX_WEBSOCKET_SESSIONS", "MOJOOBJC_MAX_WEBSOCKET_SESSIONS");
+  NSString *maxHTTPWorkers =
+      ALNEnvValueCompat("ARLEN_MAX_HTTP_WORKERS", "MOJOOBJC_MAX_HTTP_WORKERS");
+  NSString *maxQueuedHTTPConnections =
+      ALNEnvValueCompat("ARLEN_MAX_QUEUED_HTTP_CONNECTIONS",
+                        "MOJOOBJC_MAX_QUEUED_HTTP_CONNECTIONS");
+  NSString *maxRealtimeTotalSubscribers =
+      ALNEnvValueCompat("ARLEN_MAX_REALTIME_SUBSCRIBERS",
+                        "MOJOOBJC_MAX_REALTIME_SUBSCRIBERS");
+  NSString *maxRealtimeChannelSubscribers =
+      ALNEnvValueCompat("ARLEN_MAX_REALTIME_SUBSCRIBERS_PER_CHANNEL",
+                        "MOJOOBJC_MAX_REALTIME_SUBSCRIBERS_PER_CHANNEL");
 
   NSString *listenBacklog =
       ALNEnvValueCompat("ARLEN_LISTEN_BACKLOG", "MOJOOBJC_LISTEN_BACKLOG");
@@ -446,6 +457,22 @@ static NSDictionary *ALNSecurityProfileDefaults(NSString *profileName) {
                           maxWebSocketSessions,
                           @"maxConcurrentWebSocketSessions",
                           1);
+  ALNApplyIntegerOverride(runtimeLimits,
+                          maxHTTPWorkers,
+                          @"maxConcurrentHTTPWorkers",
+                          1);
+  ALNApplyIntegerOverride(runtimeLimits,
+                          maxQueuedHTTPConnections,
+                          @"maxQueuedHTTPConnections",
+                          1);
+  ALNApplyIntegerOverride(runtimeLimits,
+                          maxRealtimeTotalSubscribers,
+                          @"maxRealtimeTotalSubscribers",
+                          0);
+  ALNApplyIntegerOverride(runtimeLimits,
+                          maxRealtimeChannelSubscribers,
+                          @"maxRealtimeChannelSubscribers",
+                          0);
   config[@"runtimeLimits"] = runtimeLimits;
 
   NSMutableDictionary *propaneAccessories =
@@ -716,6 +743,18 @@ static NSDictionary *ALNSecurityProfileDefaults(NSString *profileName) {
   }
   if (finalRuntimeLimits[@"maxConcurrentWebSocketSessions"] == nil) {
     finalRuntimeLimits[@"maxConcurrentWebSocketSessions"] = @(256);
+  }
+  if (finalRuntimeLimits[@"maxConcurrentHTTPWorkers"] == nil) {
+    finalRuntimeLimits[@"maxConcurrentHTTPWorkers"] = @(8);
+  }
+  if (finalRuntimeLimits[@"maxQueuedHTTPConnections"] == nil) {
+    finalRuntimeLimits[@"maxQueuedHTTPConnections"] = @(256);
+  }
+  if (finalRuntimeLimits[@"maxRealtimeTotalSubscribers"] == nil) {
+    finalRuntimeLimits[@"maxRealtimeTotalSubscribers"] = @(0);
+  }
+  if (finalRuntimeLimits[@"maxRealtimeChannelSubscribers"] == nil) {
+    finalRuntimeLimits[@"maxRealtimeChannelSubscribers"] = @(0);
   }
   config[@"runtimeLimits"] = finalRuntimeLimits;
 
@@ -1024,6 +1063,27 @@ static NSDictionary *ALNSecurityProfileDefaults(NSString *profileName) {
       @([finalRuntimeLimits[@"maxConcurrentHTTPSessions"] integerValue]);
   finalRuntimeLimits[@"maxConcurrentWebSocketSessions"] =
       @([finalRuntimeLimits[@"maxConcurrentWebSocketSessions"] integerValue]);
+  NSInteger maxWorkers = [finalRuntimeLimits[@"maxConcurrentHTTPWorkers"] integerValue];
+  if (maxWorkers < 1) {
+    maxWorkers = 8;
+  }
+  finalRuntimeLimits[@"maxConcurrentHTTPWorkers"] = @(maxWorkers);
+  NSInteger maxQueuedConnections = [finalRuntimeLimits[@"maxQueuedHTTPConnections"] integerValue];
+  if (maxQueuedConnections < 1) {
+    maxQueuedConnections = 256;
+  }
+  finalRuntimeLimits[@"maxQueuedHTTPConnections"] = @(maxQueuedConnections);
+  NSInteger maxRealtimeTotal = [finalRuntimeLimits[@"maxRealtimeTotalSubscribers"] integerValue];
+  if (maxRealtimeTotal < 0) {
+    maxRealtimeTotal = 0;
+  }
+  finalRuntimeLimits[@"maxRealtimeTotalSubscribers"] = @(maxRealtimeTotal);
+  NSInteger maxRealtimePerChannel =
+      [finalRuntimeLimits[@"maxRealtimeChannelSubscribers"] integerValue];
+  if (maxRealtimePerChannel < 0) {
+    maxRealtimePerChannel = 0;
+  }
+  finalRuntimeLimits[@"maxRealtimeChannelSubscribers"] = @(maxRealtimePerChannel);
   config[@"runtimeLimits"] = finalRuntimeLimits;
 
   finalAccessories[@"workerCount"] = @([finalAccessories[@"workerCount"] integerValue]);

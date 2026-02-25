@@ -203,4 +203,38 @@ static NSString *RenderFailure(id ctx, NSError **error) {
   XCTAssertEqualObjects(@9, error.userInfo[ALNEOCErrorColumnKey]);
 }
 
+- (void)testPushPopRenderOptionsRestoresPriorStrictFlags {
+  ALNEOCSetStrictLocalsEnabled(NO);
+  ALNEOCSetStrictStringifyEnabled(NO);
+
+  NSDictionary *token = ALNEOCPushRenderOptions(YES, YES);
+  XCTAssertTrue(ALNEOCStrictLocalsEnabled());
+  XCTAssertTrue(ALNEOCStrictStringifyEnabled());
+
+  ALNEOCPopRenderOptions(token);
+  XCTAssertFalse(ALNEOCStrictLocalsEnabled());
+  XCTAssertFalse(ALNEOCStrictStringifyEnabled());
+}
+
+- (void)testPushPopRenderOptionsSupportsNestedScopes {
+  ALNEOCSetStrictLocalsEnabled(NO);
+  ALNEOCSetStrictStringifyEnabled(NO);
+
+  NSDictionary *outer = ALNEOCPushRenderOptions(YES, NO);
+  XCTAssertTrue(ALNEOCStrictLocalsEnabled());
+  XCTAssertFalse(ALNEOCStrictStringifyEnabled());
+
+  NSDictionary *inner = ALNEOCPushRenderOptions(NO, YES);
+  XCTAssertFalse(ALNEOCStrictLocalsEnabled());
+  XCTAssertTrue(ALNEOCStrictStringifyEnabled());
+
+  ALNEOCPopRenderOptions(inner);
+  XCTAssertTrue(ALNEOCStrictLocalsEnabled());
+  XCTAssertFalse(ALNEOCStrictStringifyEnabled());
+
+  ALNEOCPopRenderOptions(outer);
+  XCTAssertFalse(ALNEOCStrictLocalsEnabled());
+  XCTAssertFalse(ALNEOCStrictStringifyEnabled());
+}
+
 @end

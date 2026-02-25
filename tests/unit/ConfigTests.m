@@ -179,6 +179,10 @@
   NSDictionary *runtimeLimits = config[@"runtimeLimits"];
   XCTAssertEqual((NSInteger)256, [runtimeLimits[@"maxConcurrentHTTPSessions"] integerValue]);
   XCTAssertEqual((NSInteger)256, [runtimeLimits[@"maxConcurrentWebSocketSessions"] integerValue]);
+  XCTAssertEqual((NSInteger)8, [runtimeLimits[@"maxConcurrentHTTPWorkers"] integerValue]);
+  XCTAssertEqual((NSInteger)256, [runtimeLimits[@"maxQueuedHTTPConnections"] integerValue]);
+  XCTAssertEqual((NSInteger)0, [runtimeLimits[@"maxRealtimeTotalSubscribers"] integerValue]);
+  XCTAssertEqual((NSInteger)0, [runtimeLimits[@"maxRealtimeChannelSubscribers"] integerValue]);
 }
 
 - (void)testProductionDefaultsToSerializedRequestDispatchMode {
@@ -203,6 +207,10 @@
   setenv("ARLEN_MAX_HTTP_SESSIONS", "17", 1);
   setenv("ARLEN_SECURITY_PROFILE", "strict", 1);
   setenv("ARLEN_MAX_WEBSOCKET_SESSIONS", "9", 1);
+  setenv("ARLEN_MAX_HTTP_WORKERS", "3", 1);
+  setenv("ARLEN_MAX_QUEUED_HTTP_CONNECTIONS", "11", 1);
+  setenv("ARLEN_MAX_REALTIME_SUBSCRIBERS", "41", 1);
+  setenv("ARLEN_MAX_REALTIME_SUBSCRIBERS_PER_CHANNEL", "7", 1);
   setenv("ARLEN_TRUSTED_PROXY", "true", 1);
   setenv("ARLEN_SERVE_STATIC", "0", 1);
   setenv("ARLEN_LISTEN_BACKLOG", "2222", 1);
@@ -267,6 +275,10 @@
   unsetenv("ARLEN_MAX_HTTP_SESSIONS");
   unsetenv("ARLEN_SECURITY_PROFILE");
   unsetenv("ARLEN_MAX_WEBSOCKET_SESSIONS");
+  unsetenv("ARLEN_MAX_HTTP_WORKERS");
+  unsetenv("ARLEN_MAX_QUEUED_HTTP_CONNECTIONS");
+  unsetenv("ARLEN_MAX_REALTIME_SUBSCRIBERS");
+  unsetenv("ARLEN_MAX_REALTIME_SUBSCRIBERS_PER_CHANNEL");
   unsetenv("ARLEN_TRUSTED_PROXY");
   unsetenv("ARLEN_SERVE_STATIC");
   unsetenv("ARLEN_LISTEN_BACKLOG");
@@ -328,6 +340,10 @@
   NSDictionary *runtimeLimits = config[@"runtimeLimits"];
   XCTAssertEqual((NSInteger)17, [runtimeLimits[@"maxConcurrentHTTPSessions"] integerValue]);
   XCTAssertEqual((NSInteger)9, [runtimeLimits[@"maxConcurrentWebSocketSessions"] integerValue]);
+  XCTAssertEqual((NSInteger)3, [runtimeLimits[@"maxConcurrentHTTPWorkers"] integerValue]);
+  XCTAssertEqual((NSInteger)11, [runtimeLimits[@"maxQueuedHTTPConnections"] integerValue]);
+  XCTAssertEqual((NSInteger)41, [runtimeLimits[@"maxRealtimeTotalSubscribers"] integerValue]);
+  XCTAssertEqual((NSInteger)7, [runtimeLimits[@"maxRealtimeChannelSubscribers"] integerValue]);
   XCTAssertEqualObjects(@"strict", config[@"securityProfile"]);
   XCTAssertEqualObjects(@"warn", config[@"logLevel"]);
   XCTAssertEqualObjects(@(YES), config[@"trustedProxy"]);
@@ -431,6 +447,10 @@
   setenv("MOJOOBJC_MAX_BODY_BYTES", "9003", 1);
   setenv("MOJOOBJC_MAX_HTTP_SESSIONS", "21", 1);
   setenv("MOJOOBJC_MAX_WEBSOCKET_SESSIONS", "13", 1);
+  setenv("MOJOOBJC_MAX_HTTP_WORKERS", "2", 1);
+  setenv("MOJOOBJC_MAX_QUEUED_HTTP_CONNECTIONS", "9", 1);
+  setenv("MOJOOBJC_MAX_REALTIME_SUBSCRIBERS", "17", 1);
+  setenv("MOJOOBJC_MAX_REALTIME_SUBSCRIBERS_PER_CHANNEL", "4", 1);
   setenv("MOJOOBJC_LISTEN_BACKLOG", "9004", 1);
   setenv("MOJOOBJC_CONNECTION_TIMEOUT_SECONDS", "31", 1);
   setenv("MOJOOBJC_ENABLE_REUSEPORT", "1", 1);
@@ -471,6 +491,10 @@
   unsetenv("MOJOOBJC_MAX_BODY_BYTES");
   unsetenv("MOJOOBJC_MAX_HTTP_SESSIONS");
   unsetenv("MOJOOBJC_MAX_WEBSOCKET_SESSIONS");
+  unsetenv("MOJOOBJC_MAX_HTTP_WORKERS");
+  unsetenv("MOJOOBJC_MAX_QUEUED_HTTP_CONNECTIONS");
+  unsetenv("MOJOOBJC_MAX_REALTIME_SUBSCRIBERS");
+  unsetenv("MOJOOBJC_MAX_REALTIME_SUBSCRIBERS_PER_CHANNEL");
   unsetenv("MOJOOBJC_LISTEN_BACKLOG");
   unsetenv("MOJOOBJC_CONNECTION_TIMEOUT_SECONDS");
   unsetenv("MOJOOBJC_ENABLE_REUSEPORT");
@@ -509,6 +533,10 @@
   NSDictionary *runtimeLimits = config[@"runtimeLimits"];
   XCTAssertEqual((NSInteger)21, [runtimeLimits[@"maxConcurrentHTTPSessions"] integerValue]);
   XCTAssertEqual((NSInteger)13, [runtimeLimits[@"maxConcurrentWebSocketSessions"] integerValue]);
+  XCTAssertEqual((NSInteger)2, [runtimeLimits[@"maxConcurrentHTTPWorkers"] integerValue]);
+  XCTAssertEqual((NSInteger)9, [runtimeLimits[@"maxQueuedHTTPConnections"] integerValue]);
+  XCTAssertEqual((NSInteger)17, [runtimeLimits[@"maxRealtimeTotalSubscribers"] integerValue]);
+  XCTAssertEqual((NSInteger)4, [runtimeLimits[@"maxRealtimeChannelSubscribers"] integerValue]);
   XCTAssertEqualObjects(@(YES), config[@"trustedProxy"]);
   XCTAssertEqual((NSInteger)9004, [config[@"listenBacklog"] integerValue]);
   XCTAssertEqual((NSInteger)31, [config[@"connectionTimeoutSeconds"] integerValue]);

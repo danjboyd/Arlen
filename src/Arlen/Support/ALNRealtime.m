@@ -34,6 +34,13 @@ static NSString *ALNNormalizeChannelName(NSString *value) {
 
 @property(nonatomic, strong) NSMutableDictionary *subscriptionsByChannel;
 @property(nonatomic, strong) NSLock *lock;
+@property(nonatomic, assign) NSUInteger maxTotalSubscribers;
+@property(nonatomic, assign) NSUInteger maxSubscribersPerChannel;
+@property(nonatomic, assign) NSUInteger activeSubscriberCount;
+@property(nonatomic, assign) NSUInteger peakSubscriberCount;
+@property(nonatomic, assign) NSUInteger totalSubscriptions;
+@property(nonatomic, assign) NSUInteger totalUnsubscriptions;
+@property(nonatomic, assign) NSUInteger rejectedSubscriptions;
 
 @end
 
@@ -54,8 +61,23 @@ static NSString *ALNNormalizeChannelName(NSString *value) {
   if (self) {
     _subscriptionsByChannel = [NSMutableDictionary dictionary];
     _lock = [[NSLock alloc] init];
+    _maxTotalSubscribers = 0;
+    _maxSubscribersPerChannel = 0;
+    _activeSubscriberCount = 0;
+    _peakSubscriberCount = 0;
+    _totalSubscriptions = 0;
+    _totalUnsubscriptions = 0;
+    _rejectedSubscriptions = 0;
   }
   return self;
+}
+
+- (void)configureLimitsWithMaxTotalSubscribers:(NSUInteger)maxTotalSubscribers
+                    maxSubscribersPerChannel:(NSUInteger)maxSubscribersPerChannel {
+  [self.lock lock];
+  self.maxTotalSubscribers = maxTotalSubscribers;
+  self.maxSubscribersPerChannel = maxSubscribersPerChannel;
+  [self.lock unlock];
 }
 
 - (ALNRealtimeSubscription *)subscribeChannel:(NSString *)channel
@@ -70,11 +92,29 @@ static NSString *ALNNormalizeChannelName(NSString *value) {
 
   [self.lock lock];
   NSMutableArray *subscriptions = self.subscriptionsByChannel[normalized];
+  NSUInteger channelCount = [subscriptions count];
+  if (self.maxTotalSubscribers > 0 &&
+      self.activeSubscriberCount >= self.maxTotalSubscribers) {
+    self.rejectedSubscriptions += 1;
+    [self.lock unlock];
+    return nil;
+  }
+  if (self.maxSubscribersPerChannel > 0 &&
+      channelCount >= self.maxSubscribersPerChannel) {
+    self.rejectedSubscriptions += 1;
+    [self.lock unlock];
+    return nil;
+  }
   if (subscriptions == nil) {
     subscriptions = [NSMutableArray array];
     self.subscriptionsByChannel[normalized] = subscriptions;
   }
   [subscriptions addObject:subscription];
+  self.activeSubscriberCount += 1;
+  self.totalSubscriptions += 1;
+  if (self.activeSubscriberCount > self.peakSubscriberCount) {
+    self.peakSubscriberCount = self.activeSubscriberCount;
+  }
   [self.lock unlock];
 
   return subscription;
@@ -93,7 +133,14 @@ static NSString *ALNNormalizeChannelName(NSString *value) {
   [self.lock lock];
   NSMutableArray *subscriptions = self.subscriptionsByChannel[channel];
   if (subscriptions != nil) {
+    NSUInteger beforeCount = [subscriptions count];
     [subscriptions removeObjectIdenticalTo:subscription];
+    if ([subscriptions count] < beforeCount) {
+      if (self.activeSubscriberCount > 0) {
+        self.activeSubscriberCount -= 1;
+      }
+      self.totalUnsubscriptions += 1;
+    }
     if ([subscriptions count] == 0) {
       [self.subscriptionsByChannel removeObjectForKey:channel];
     }
@@ -146,9 +193,32 @@ static NSString *ALNNormalizeChannelName(NSString *value) {
   return count;
 }
 
+- (NSDictionary *)metricsSnapshot {
+  [self.lock lock];
+  NSDictionary *snapshot = @{
+    @"activeSubscribers" : @(self.activeSubscriberCount),
+    @"activeChannels" : @([self.subscriptionsByChannel count]),
+    @"peakSubscribers" : @(self.peakSubscriberCount),
+    @"totalSubscriptions" : @(self.totalSubscriptions),
+    @"totalUnsubscriptions" : @(self.totalUnsubscriptions),
+    @"rejectedSubscriptions" : @(self.rejectedSubscriptions),
+    @"maxTotalSubscribers" : @(self.maxTotalSubscribers),
+    @"maxSubscribersPerChannel" : @(self.maxSubscribersPerChannel),
+  };
+  [self.lock unlock];
+  return snapshot;
+}
+
 - (void)reset {
   [self.lock lock];
   [self.subscriptionsByChannel removeAllObjects];
+  self.maxTotalSubscribers = 0;
+  self.maxSubscribersPerChannel = 0;
+  self.activeSubscriberCount = 0;
+  self.peakSubscriberCount = 0;
+  self.totalSubscriptions = 0;
+  self.totalUnsubscriptions = 0;
+  self.rejectedSubscriptions = 0;
   [self.lock unlock];
 }
 

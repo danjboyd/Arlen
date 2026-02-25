@@ -11,6 +11,7 @@ NSString *const ALNEOCErrorSegmentKey = @"segment";
 static NSString *const ALNEOCThreadOptionsKey = @"aln.eoc.render_options";
 static NSString *const ALNEOCThreadStrictLocalsKey = @"strict_locals";
 static NSString *const ALNEOCThreadStrictStringifyKey = @"strict_stringify";
+static NSString *const ALNEOCThreadOptionsStackKey = @"aln.eoc.render_options_stack";
 
 static NSMutableDictionary *ALNEOCTemplateRegistry(void) {
   static NSMutableDictionary *registry = nil;
@@ -35,6 +36,17 @@ static NSMutableDictionary *ALNEOCThreadOptions(void) {
   return options;
 }
 
+static NSMutableArray *ALNEOCThreadOptionStack(void) {
+  NSMutableDictionary *threadDictionary = [[NSThread currentThread] threadDictionary];
+  id current = threadDictionary[ALNEOCThreadOptionsStackKey];
+  if ([current isKindOfClass:[NSMutableArray class]]) {
+    return current;
+  }
+  NSMutableArray *stack = [NSMutableArray array];
+  threadDictionary[ALNEOCThreadOptionsStackKey] = stack;
+  return stack;
+}
+
 BOOL ALNEOCStrictLocalsEnabled(void) {
   return [ALNEOCThreadOptions()[ALNEOCThreadStrictLocalsKey] boolValue];
 }
@@ -49,6 +61,39 @@ void ALNEOCSetStrictLocalsEnabled(BOOL enabled) {
 
 void ALNEOCSetStrictStringifyEnabled(BOOL enabled) {
   ALNEOCThreadOptions()[ALNEOCThreadStrictStringifyKey] = @(enabled);
+}
+
+NSDictionary *ALNEOCPushRenderOptions(BOOL strictLocals, BOOL strictStringify) {
+  NSDictionary *snapshot = @{
+    ALNEOCThreadStrictLocalsKey : @(ALNEOCStrictLocalsEnabled()),
+    ALNEOCThreadStrictStringifyKey : @(ALNEOCStrictStringifyEnabled()),
+  };
+  [ALNEOCThreadOptionStack() addObject:snapshot];
+  ALNEOCSetStrictLocalsEnabled(strictLocals);
+  ALNEOCSetStrictStringifyEnabled(strictStringify);
+  return snapshot;
+}
+
+void ALNEOCPopRenderOptions(NSDictionary *token) {
+  (void)token;
+  NSMutableArray *stack = ALNEOCThreadOptionStack();
+  if ([stack count] == 0) {
+    return;
+  }
+  NSDictionary *restore = nil;
+  id candidate = [stack lastObject];
+  if ([candidate isKindOfClass:[NSDictionary class]]) {
+    restore = candidate;
+  }
+  [stack removeLastObject];
+  BOOL strictLocals = [restore[ALNEOCThreadStrictLocalsKey] boolValue];
+  BOOL strictStringify = [restore[ALNEOCThreadStrictStringifyKey] boolValue];
+  ALNEOCSetStrictLocalsEnabled(strictLocals);
+  ALNEOCSetStrictStringifyEnabled(strictStringify);
+
+  if ([stack count] == 0) {
+    [[[NSThread currentThread] threadDictionary] removeObjectForKey:ALNEOCThreadOptionsStackKey];
+  }
 }
 
 static NSError *ALNEOCTemplateExecutionError(NSString *message,

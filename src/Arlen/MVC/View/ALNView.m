@@ -37,14 +37,13 @@
              strictStringify:(BOOL)strictStringify
                        error:(NSError **)error {
   NSString *logical = [self normalizeTemplateLogicalPath:templateName];
-  BOOL previousStrictLocals = ALNEOCStrictLocalsEnabled();
-  BOOL previousStrictStringify = ALNEOCStrictStringifyEnabled();
-  ALNEOCSetStrictLocalsEnabled(strictLocals);
-  ALNEOCSetStrictStringifyEnabled(strictStringify);
-
-  NSString *body = ALNEOCRenderTemplate(logical, context ?: @{}, error);
-  ALNEOCSetStrictLocalsEnabled(previousStrictLocals);
-  ALNEOCSetStrictStringifyEnabled(previousStrictStringify);
+  NSDictionary *bodyToken = ALNEOCPushRenderOptions(strictLocals, strictStringify);
+  NSString *body = nil;
+  @try {
+    body = ALNEOCRenderTemplate(logical, context ?: @{}, error);
+  } @finally {
+    ALNEOCPopRenderOptions(bodyToken);
+  }
   if (body == nil) {
     return nil;
   }
@@ -57,11 +56,13 @@
       [NSMutableDictionary dictionaryWithDictionary:context ?: @{}];
   layoutContext[@"content"] = body;
   NSString *layoutLogical = [self normalizeTemplateLogicalPath:layoutName];
-  ALNEOCSetStrictLocalsEnabled(strictLocals);
-  ALNEOCSetStrictStringifyEnabled(strictStringify);
-  NSString *renderedLayout = ALNEOCRenderTemplate(layoutLogical, layoutContext, error);
-  ALNEOCSetStrictLocalsEnabled(previousStrictLocals);
-  ALNEOCSetStrictStringifyEnabled(previousStrictStringify);
+  NSDictionary *layoutToken = ALNEOCPushRenderOptions(strictLocals, strictStringify);
+  NSString *renderedLayout = nil;
+  @try {
+    renderedLayout = ALNEOCRenderTemplate(layoutLogical, layoutContext, error);
+  } @finally {
+    ALNEOCPopRenderOptions(layoutToken);
+  }
   return renderedLayout;
 }
 

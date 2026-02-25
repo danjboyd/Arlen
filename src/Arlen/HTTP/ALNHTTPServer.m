@@ -31,13 +31,21 @@ typedef struct {
 typedef struct {
   NSUInteger maxConcurrentWebSocketSessions;
   NSUInteger maxConcurrentHTTPSessions;
+  NSUInteger maxConcurrentHTTPWorkers;
+  NSUInteger maxQueuedHTTPConnections;
+  NSUInteger maxRealtimeTotalSubscribers;
+  NSUInteger maxRealtimeChannelSubscribers;
 } ALNRuntimeLimits;
 
-static volatile sig_atomic_t gShouldRun = 1;
+static volatile sig_atomic_t gSignalStopRequested = 0;
 
 static void ALNHandleSignal(int sig) {
   (void)sig;
-  gShouldRun = 0;
+  gSignalStopRequested = 1;
+}
+
+static BOOL ALNSignalStopRequested(void) {
+  return (gSignalStopRequested != 0);
 }
 
 static BOOL ALNInstallSignalHandler(int sig) {
@@ -72,6 +80,17 @@ static NSUInteger ALNConfigUInt(NSDictionary *dict, NSString *key, NSUInteger de
   return defaultValue;
 }
 
+static NSUInteger ALNConfigUIntAllowZero(NSDictionary *dict, NSString *key, NSUInteger defaultValue) {
+  id value = dict[key];
+  if ([value respondsToSelector:@selector(integerValue)]) {
+    NSInteger parsed = [value integerValue];
+    if (parsed >= 0) {
+      return (NSUInteger)parsed;
+    }
+  }
+  return defaultValue;
+}
+
 static ALNRequestLimits ALNLimitsFromConfig(NSDictionary *config) {
   NSDictionary *limits = config[@"requestLimits"] ?: @{};
   ALNRequestLimits out;
@@ -96,6 +115,14 @@ static ALNRuntimeLimits ALNRuntimeLimitsFromConfig(NSDictionary *config) {
       ALNConfigUInt(runtimeLimits, @"maxConcurrentWebSocketSessions", 256);
   out.maxConcurrentHTTPSessions =
       ALNConfigUInt(runtimeLimits, @"maxConcurrentHTTPSessions", 256);
+  out.maxConcurrentHTTPWorkers =
+      ALNConfigUInt(runtimeLimits, @"maxConcurrentHTTPWorkers", 8);
+  out.maxQueuedHTTPConnections =
+      ALNConfigUInt(runtimeLimits, @"maxQueuedHTTPConnections", 256);
+  out.maxRealtimeTotalSubscribers =
+      ALNConfigUIntAllowZero(runtimeLimits, @"maxRealtimeTotalSubscribers", 0);
+  out.maxRealtimeChannelSubscribers =
+      ALNConfigUIntAllowZero(runtimeLimits, @"maxRealtimeChannelSubscribers", 0);
   return out;
 }
 
@@ -384,7 +411,7 @@ static NSData *ALNReadHTTPRequestData(int clientFd, ALNRequestLimits limits, NSI
   NSUInteger headerBytes = 0;
   NSUInteger expectedTotalBytes = NSNotFound;
 
-  while (gShouldRun) {
+  while (1) {
     char chunk[8192];
     ssize_t readBytes = recv(clientFd, chunk, sizeof(chunk), 0);
     if (readBytes < 0) {
@@ -958,8 +985,15 @@ static ALNResponse *ALNErrorResponse(NSInteger statusCode, NSString *body) {
 @property(nonatomic, assign) NSUInteger activeWebSocketSessions;
 @property(nonatomic, assign) NSUInteger maxConcurrentHTTPSessions;
 @property(nonatomic, assign) NSUInteger maxConcurrentWebSocketSessions;
+@property(nonatomic, assign) NSUInteger maxConcurrentHTTPWorkers;
+@property(nonatomic, assign) NSUInteger maxQueuedHTTPConnections;
 @property(nonatomic, strong) NSLock *requestDispatchLock;
 @property(nonatomic, assign) BOOL serializeRequestDispatch;
+@property(atomic, assign) BOOL shouldRun;
+@property(nonatomic, strong) NSCondition *httpWorkerQueueCondition;
+@property(nonatomic, strong) NSMutableArray *pendingHTTPClientFDs;
+@property(nonatomic, assign) BOOL httpWorkerPoolStarted;
+@property(atomic, assign) int serverSocketFD;
 
 @end
 
@@ -977,8 +1011,15 @@ static ALNResponse *ALNErrorResponse(NSInteger statusCode, NSString *body) {
     _activeWebSocketSessions = 0;
     _maxConcurrentHTTPSessions = 256;
     _maxConcurrentWebSocketSessions = 256;
+    _maxConcurrentHTTPWorkers = 8;
+    _maxQueuedHTTPConnections = 256;
     _requestDispatchLock = [[NSLock alloc] init];
     _serializeRequestDispatch = NO;
+    _shouldRun = YES;
+    _httpWorkerQueueCondition = [[NSCondition alloc] init];
+    _pendingHTTPClientFDs = [NSMutableArray array];
+    _httpWorkerPoolStarted = NO;
+    _serverSocketFD = -1;
   }
   return self;
 }
@@ -1041,7 +1082,102 @@ static ALNResponse *ALNErrorResponse(NSInteger statusCode, NSString *body) {
 }
 
 - (void)requestStop {
-  gShouldRun = 0;
+  self.shouldRun = NO;
+  int serverFd = self.serverSocketFD;
+  if (serverFd >= 0) {
+    (void)shutdown(serverFd, SHUT_RDWR);
+  }
+  [self.httpWorkerQueueCondition lock];
+  [self.httpWorkerQueueCondition broadcast];
+  [self.httpWorkerQueueCondition unlock];
+}
+
+- (BOOL)shouldContinueRunning {
+  return self.shouldRun && !ALNSignalStopRequested();
+}
+
+- (BOOL)hasQueuedHTTPClients {
+  [self.httpWorkerQueueCondition lock];
+  BOOL hasQueued = ([self.pendingHTTPClientFDs count] > 0);
+  [self.httpWorkerQueueCondition unlock];
+  return hasQueued;
+}
+
+- (BOOL)enqueueHTTPClientForWorker:(int)clientFd {
+  [self.httpWorkerQueueCondition lock];
+  BOOL accepted = ([self.pendingHTTPClientFDs count] < self.maxQueuedHTTPConnections);
+  if (accepted) {
+    [self.pendingHTTPClientFDs addObject:@(clientFd)];
+    [self.httpWorkerQueueCondition signal];
+  }
+  [self.httpWorkerQueueCondition unlock];
+  return accepted;
+}
+
+- (int)dequeueHTTPClientForWorker {
+  [self.httpWorkerQueueCondition lock];
+  while ([self.pendingHTTPClientFDs count] == 0 && [self shouldContinueRunning]) {
+    [self.httpWorkerQueueCondition waitUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.25]];
+  }
+
+  int clientFd = -1;
+  if ([self.pendingHTTPClientFDs count] > 0) {
+    NSNumber *next = self.pendingHTTPClientFDs[0];
+    [self.pendingHTTPClientFDs removeObjectAtIndex:0];
+    clientFd = [next intValue];
+  }
+  [self.httpWorkerQueueCondition unlock];
+  return clientFd;
+}
+
+- (void)runHTTPWorkerLoop:(NSNumber *)workerIndexObject {
+  (void)workerIndexObject;
+  @autoreleasepool {
+    while ([self shouldContinueRunning] || [self hasQueuedHTTPClients]) {
+      int clientFd = [self dequeueHTTPClientForWorker];
+      if (clientFd < 0) {
+        continue;
+      }
+
+      @autoreleasepool {
+        @try {
+          [self handleClient:clientFd];
+        } @finally {
+          [self releaseHTTPSessionReservation];
+          close(clientFd);
+        }
+      }
+    }
+  }
+}
+
+- (BOOL)startHTTPWorkerPoolIfNeeded {
+  NSUInteger workerCount = 0;
+  [self.httpWorkerQueueCondition lock];
+  if (!self.httpWorkerPoolStarted) {
+    self.httpWorkerPoolStarted = YES;
+    workerCount = self.maxConcurrentHTTPWorkers;
+  }
+  [self.httpWorkerQueueCondition unlock];
+
+  for (NSUInteger idx = 0; idx < workerCount; idx++) {
+    @try {
+      [NSThread detachNewThreadSelector:@selector(runHTTPWorkerLoop:)
+                               toTarget:self
+                             withObject:@(idx)];
+    } @catch (NSException *exception) {
+      (void)exception;
+      return NO;
+    }
+  }
+  return YES;
+}
+
+- (void)resetHTTPWorkerPoolState {
+  [self.httpWorkerQueueCondition lock];
+  [self.pendingHTTPClientFDs removeAllObjects];
+  self.httpWorkerPoolStarted = NO;
+  [self.httpWorkerQueueCondition unlock];
 }
 
 - (BOOL)reserveWebSocketSessionWithLimit:(NSUInteger)limit {
@@ -1159,9 +1295,12 @@ static ALNResponse *ALNErrorResponse(NSInteger statusCode, NSString *body) {
   if ([mode isEqualToString:@"channel"]) {
     channel = [self webSocketChannelFromResponse:response];
     subscription = [[ALNRealtimeHub sharedHub] subscribeChannel:channel subscriber:session];
+    if (subscription == nil) {
+      return;
+    }
   }
 
-  while (gShouldRun && ![session isClosedSnapshot]) {
+  while ([self shouldContinueRunning] && ![session isClosedSnapshot]) {
     uint8_t opcode = 0;
     BOOL fin = NO;
     NSData *payload = nil;
@@ -1205,18 +1344,6 @@ static ALNResponse *ALNErrorResponse(NSInteger statusCode, NSString *body) {
   }
 }
 
-- (void)handleClientOnBackgroundThread:(NSNumber *)clientFDObject {
-  @autoreleasepool {
-    int clientFd = [clientFDObject intValue];
-    @try {
-      [self handleClient:clientFd];
-    } @finally {
-      [self releaseHTTPSessionReservation];
-      close(clientFd);
-    }
-  }
-}
-
 - (void)handleClient:(int)clientFd {
   BOOL performanceLogging =
       ALNConfigBool(self.application.config ?: @{}, @"performanceLogging", YES);
@@ -1225,7 +1352,7 @@ static ALNResponse *ALNErrorResponse(NSInteger statusCode, NSString *body) {
   ALNApplyClientSocketTimeout(clientFd, tuning.connectionTimeoutSeconds);
 
   NSUInteger requestsHandled = 0;
-  while (gShouldRun) {
+  while ([self shouldContinueRunning]) {
     double requestStartMs = ALNNowMilliseconds();
 
     NSInteger readStatus = 0;
@@ -1376,7 +1503,9 @@ static ALNResponse *ALNErrorResponse(NSInteger statusCode, NSString *body) {
 - (int)runWithHost:(NSString *)host
       portOverride:(NSInteger)portOverride
               once:(BOOL)once {
-  gShouldRun = 1;
+  gSignalStopRequested = 0;
+  self.shouldRun = YES;
+  [self resetHTTPWorkerPoolState];
 
   NSDictionary *config = self.application.config ?: @{};
   NSString *bindHost = ([host length] > 0) ? host : (config[@"host"] ?: @"127.0.0.1");
@@ -1401,6 +1530,11 @@ static ALNResponse *ALNErrorResponse(NSInteger statusCode, NSString *body) {
     self.serializeRequestDispatch = [requestDispatchMode isEqualToString:@"serialized"];
     self.maxConcurrentHTTPSessions = runtimeLimits.maxConcurrentHTTPSessions;
     self.maxConcurrentWebSocketSessions = runtimeLimits.maxConcurrentWebSocketSessions;
+    self.maxConcurrentHTTPWorkers = runtimeLimits.maxConcurrentHTTPWorkers;
+    self.maxQueuedHTTPConnections = runtimeLimits.maxQueuedHTTPConnections;
+    [[ALNRealtimeHub sharedHub]
+        configureLimitsWithMaxTotalSubscribers:runtimeLimits.maxRealtimeTotalSubscribers
+                      maxSubscribersPerChannel:runtimeLimits.maxRealtimeChannelSubscribers];
 
     if (!ALNInstallSignalHandler(SIGINT) || !ALNInstallSignalHandler(SIGTERM)) {
       perror("sigaction");
@@ -1418,11 +1552,13 @@ static ALNResponse *ALNErrorResponse(NSInteger statusCode, NSString *body) {
                                      reason:@"socket() failed"
                                    userInfo:nil];
     }
+    self.serverSocketFD = serverFd;
 
     int reuse = 1;
     if (setsockopt(serverFd, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse)) < 0) {
       perror("setsockopt");
       close(serverFd);
+      self.serverSocketFD = -1;
       exitCode = 1;
       @throw [NSException exceptionWithName:@"ALNServerStartFailed"
                                      reason:@"setsockopt(SO_REUSEADDR) failed"
@@ -1434,6 +1570,7 @@ static ALNResponse *ALNErrorResponse(NSInteger statusCode, NSString *body) {
       if (setsockopt(serverFd, SOL_SOCKET, SO_REUSEPORT, &reuse, sizeof(reuse)) < 0) {
         perror("setsockopt(SO_REUSEPORT)");
         close(serverFd);
+        self.serverSocketFD = -1;
         exitCode = 1;
         @throw [NSException exceptionWithName:@"ALNServerStartFailed"
                                        reason:@"setsockopt(SO_REUSEPORT) failed"
@@ -1449,6 +1586,7 @@ static ALNResponse *ALNErrorResponse(NSInteger statusCode, NSString *body) {
     if (inet_pton(AF_INET, [bindHost UTF8String], &addr.sin_addr) != 1) {
       fprintf(stderr, "%s: invalid host address: %s\n", [self.serverName UTF8String], [bindHost UTF8String]);
       close(serverFd);
+      self.serverSocketFD = -1;
       exitCode = 1;
       @throw [NSException exceptionWithName:@"ALNServerStartFailed"
                                      reason:@"invalid bind host"
@@ -1458,6 +1596,7 @@ static ALNResponse *ALNErrorResponse(NSInteger statusCode, NSString *body) {
     if (bind(serverFd, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
       perror("bind");
       close(serverFd);
+      self.serverSocketFD = -1;
       exitCode = 1;
       @throw [NSException exceptionWithName:@"ALNServerStartFailed"
                                      reason:@"bind() failed"
@@ -1467,6 +1606,7 @@ static ALNResponse *ALNErrorResponse(NSInteger statusCode, NSString *body) {
     if (listen(serverFd, (int)tuning.listenBacklog) < 0) {
       perror("listen");
       close(serverFd);
+      self.serverSocketFD = -1;
       exitCode = 1;
       @throw [NSException exceptionWithName:@"ALNServerStartFailed"
                                      reason:@"listen() failed"
@@ -1476,11 +1616,20 @@ static ALNResponse *ALNErrorResponse(NSInteger statusCode, NSString *body) {
     fprintf(stdout, "%s listening on http://%s:%d\n", [self.serverName UTF8String], [bindHost UTF8String], port);
     fflush(stdout);
 
-    while (gShouldRun) {
+    if (!once && !self.serializeRequestDispatch) {
+      if (![self startHTTPWorkerPoolIfNeeded]) {
+        exitCode = 1;
+        @throw [NSException exceptionWithName:@"ALNServerStartFailed"
+                                       reason:@"failed to start HTTP worker pool"
+                                     userInfo:nil];
+      }
+    }
+
+    while ([self shouldContinueRunning]) {
       int clientFd = accept(serverFd, NULL, NULL);
       if (clientFd < 0) {
         if (errno == EINTR) {
-          if (!gShouldRun) {
+          if (![self shouldContinueRunning]) {
             break;
           }
           continue;
@@ -1507,18 +1656,19 @@ static ALNResponse *ALNErrorResponse(NSInteger statusCode, NSString *body) {
       }
 
       // In serialized mode, keep request handling on the accept thread and
-      // avoid detached per-connection threading to maintain deterministic flow.
+      // avoid background queueing to maintain deterministic flow.
       BOOL runInBackground = (!once && !self.serializeRequestDispatch);
       if (runInBackground) {
-        @try {
-          [NSThread detachNewThreadSelector:@selector(handleClientOnBackgroundThread:)
-                                   toTarget:self
-                                 withObject:@(clientFd)];
-        } @catch (NSException *exception) {
-          (void)exception;
+        BOOL enqueued = [self enqueueHTTPClientForWorker:clientFd];
+        if (!enqueued) {
+          ALNResponse *busyResponse = ALNErrorResponse(503, @"server busy\n");
+          [busyResponse setHeader:@"Retry-After" value:@"1"];
+          [busyResponse setHeader:@"X-Arlen-Backpressure-Reason"
+                            value:@"http_worker_queue_full"];
+          [busyResponse setHeader:@"Connection" value:@"close"];
+          (void)ALNSendResponse(clientFd, busyResponse, NO);
           [self releaseHTTPSessionReservation];
           close(clientFd);
-          continue;
         }
       } else {
         @try {
@@ -1535,6 +1685,7 @@ static ALNResponse *ALNErrorResponse(NSInteger statusCode, NSString *body) {
     }
 
     close(serverFd);
+    self.serverSocketFD = -1;
   } @catch (NSException *exception) {
     if (![exception.name isEqualToString:@"ALNServerStartFailed"]) {
       fprintf(stderr, "%s: fatal exception: %s\n", [self.serverName UTF8String],
@@ -1542,6 +1693,8 @@ static ALNResponse *ALNErrorResponse(NSInteger statusCode, NSString *body) {
       exitCode = 1;
     }
   } @finally {
+    self.serverSocketFD = -1;
+    [self requestStop];
     [self.application shutdown];
   }
 

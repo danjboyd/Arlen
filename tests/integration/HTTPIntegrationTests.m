@@ -392,6 +392,88 @@
   }
 }
 
+- (void)testConcurrentWorkerQueueLimitReturns503UnderBackpressure {
+  int port = [self randomPort];
+  NSTask *server = [[NSTask alloc] init];
+  server.launchPath = @"/bin/bash";
+  server.arguments = @[
+    @"-lc",
+    [NSString stringWithFormat:
+                  @"ARLEN_MAX_HTTP_SESSIONS=8 ARLEN_MAX_HTTP_WORKERS=1 "
+                   @"ARLEN_MAX_QUEUED_HTTP_CONNECTIONS=1 ./build/boomhauer --port %d",
+                  port]
+  ];
+  server.standardOutput = [NSPipe pipe];
+  server.standardError = [NSPipe pipe];
+  [server launch];
+
+  @try {
+    BOOL ready = NO;
+    (void)[self requestPathWithRetries:@"/healthz" port:port attempts:60 success:&ready];
+    XCTAssertTrue(ready);
+
+    NSString *script = [NSString stringWithFormat:
+                                         @"import socket, time, urllib.request\n"
+                                         @"PORT=%d\n"
+                                         @"def read_headers(sock):\n"
+                                         @"    data=b''\n"
+                                         @"    while b'\\r\\n\\r\\n' not in data:\n"
+                                         @"        chunk=sock.recv(4096)\n"
+                                         @"        if not chunk:\n"
+                                         @"            break\n"
+                                         @"        data += chunk\n"
+                                         @"    return data.decode('utf-8', 'replace')\n"
+                                         @"def slow_request_socket():\n"
+                                         @"    sock = socket.create_connection(('127.0.0.1', PORT), timeout=5)\n"
+                                         @"    sock.settimeout(5)\n"
+                                         @"    sock.sendall((\n"
+                                         @"        f'GET /api/sleep?ms=1200 HTTP/1.1\\r\\n'\n"
+                                         @"        f'Host: 127.0.0.1:{PORT}\\r\\n'\n"
+                                         @"        'Connection: close\\r\\n\\r\\n'\n"
+                                         @"    ).encode('utf-8'))\n"
+                                         @"    return sock\n"
+                                         @"first = slow_request_socket()\n"
+                                         @"second = slow_request_socket()\n"
+                                         @"time.sleep(0.2)\n"
+                                         @"third = socket.create_connection(('127.0.0.1', PORT), timeout=5)\n"
+                                         @"third.settimeout(5)\n"
+                                         @"third.sendall((\n"
+                                         @"    f'GET /healthz HTTP/1.1\\r\\n'\n"
+                                         @"    f'Host: 127.0.0.1:{PORT}\\r\\n'\n"
+                                         @"    'Connection: close\\r\\n\\r\\n'\n"
+                                         @").encode('utf-8'))\n"
+                                         @"third_headers = read_headers(third)\n"
+                                         @"print(third_headers)\n"
+                                         @"if '503 Service Unavailable' not in third_headers:\n"
+                                         @"    raise RuntimeError(third_headers)\n"
+                                         @"if 'X-Arlen-Backpressure-Reason: http_worker_queue_full' not in third_headers:\n"
+                                         @"    raise RuntimeError(third_headers)\n"
+                                         @"first_headers = read_headers(first)\n"
+                                         @"second_headers = read_headers(second)\n"
+                                         @"if '200' not in first_headers:\n"
+                                         @"    raise RuntimeError(first_headers)\n"
+                                         @"if '200' not in second_headers:\n"
+                                         @"    raise RuntimeError(second_headers)\n"
+                                         @"first.close(); second.close(); third.close()\n"
+                                         @"body = urllib.request.urlopen(f'http://127.0.0.1:{PORT}/healthz', timeout=4).read().decode('utf-8')\n"
+                                         @"if body != 'ok\\n':\n"
+                                         @"    raise RuntimeError(body)\n"
+                                         @"print('recovered')\n",
+                                         port];
+    int pyCode = 0;
+    NSString *output = [self runPythonScript:script exitCode:&pyCode];
+    XCTAssertEqual(0, pyCode);
+    XCTAssertTrue([output containsString:@"503 Service Unavailable"]);
+    XCTAssertTrue([output containsString:@"X-Arlen-Backpressure-Reason: http_worker_queue_full"]);
+    XCTAssertTrue([output containsString:@"recovered"]);
+  } @finally {
+    if ([server isRunning]) {
+      (void)kill(server.processIdentifier, SIGTERM);
+      [server waitUntilExit];
+    }
+  }
+}
+
 - (void)testKeepAliveAllowsMultipleRequestsOnSingleConnection {
   int port = [self randomPort];
   NSTask *server = [[NSTask alloc] init];
@@ -701,6 +783,208 @@
       [server waitUntilExit];
     }
   }
+}
+
+- (void)runMixedRequestLifecycleStressWithServerCommand:(NSString *)serverCommand
+                                         expectKeepAlive:(BOOL)expectKeepAlive {
+  int port = [self randomPort];
+  NSTask *server = [[NSTask alloc] init];
+  server.launchPath = @"/bin/bash";
+  server.arguments = @[ @"-lc", [NSString stringWithFormat:serverCommand ?: @"./build/boomhauer --port %d", port] ];
+  server.standardOutput = [NSPipe pipe];
+  server.standardError = [NSPipe pipe];
+  [server launch];
+
+  @try {
+    BOOL ready = NO;
+    (void)[self requestPathWithRetries:@"/healthz" port:port attempts:60 success:&ready];
+    XCTAssertTrue(ready);
+
+    NSString *script = [NSString stringWithFormat:
+                                         @"import base64, os, socket, struct, threading, urllib.request\n"
+                                         @"PORT=%d\n"
+                                         @"EXPECT_KEEPALIVE=%d\n"
+                                         @"def recv_exact(sock, size):\n"
+                                         @"    data=b''\n"
+                                         @"    while len(data) < size:\n"
+                                         @"        chunk=sock.recv(size - len(data))\n"
+                                         @"        if not chunk:\n"
+                                         @"            raise RuntimeError('connection closed')\n"
+                                         @"        data += chunk\n"
+                                         @"    return data\n"
+                                         @"def read_http_response(sock):\n"
+                                         @"    data=b''\n"
+                                         @"    while b'\\r\\n\\r\\n' not in data:\n"
+                                         @"        chunk=sock.recv(4096)\n"
+                                         @"        if not chunk:\n"
+                                         @"            raise RuntimeError('closed before headers')\n"
+                                         @"        data += chunk\n"
+                                         @"    head, rest = data.split(b'\\r\\n\\r\\n', 1)\n"
+                                         @"    lines=head.decode('utf-8', 'replace').split('\\r\\n')\n"
+                                         @"    status=lines[0]\n"
+                                         @"    headers={}\n"
+                                         @"    for line in lines[1:]:\n"
+                                         @"        if ':' not in line:\n"
+                                         @"            continue\n"
+                                         @"        name, value = line.split(':', 1)\n"
+                                         @"        headers[name.strip().lower()] = value.strip()\n"
+                                         @"    length=int(headers.get('content-length', '0'))\n"
+                                         @"    body=rest\n"
+                                         @"    while len(body) < length:\n"
+                                         @"        chunk=sock.recv(4096)\n"
+                                         @"        if not chunk:\n"
+                                         @"            break\n"
+                                         @"        body += chunk\n"
+                                         @"    return status, headers, body[:length]\n"
+                                         @"def ws_connect(path):\n"
+                                         @"    key=base64.b64encode(os.urandom(16)).decode('ascii')\n"
+                                         @"    req=(\n"
+                                         @"      f'GET {path} HTTP/1.1\\r\\n'\n"
+                                         @"      f'Host: 127.0.0.1:{PORT}\\r\\n'\n"
+                                         @"      'Upgrade: websocket\\r\\n'\n"
+                                         @"      'Connection: Upgrade\\r\\n'\n"
+                                         @"      f'Sec-WebSocket-Key: {key}\\r\\n'\n"
+                                         @"      'Sec-WebSocket-Version: 13\\r\\n\\r\\n'\n"
+                                         @"    ).encode('utf-8')\n"
+                                         @"    sock=socket.create_connection(('127.0.0.1', PORT), timeout=5)\n"
+                                         @"    sock.settimeout(5)\n"
+                                         @"    sock.sendall(req)\n"
+                                         @"    response=b''\n"
+                                         @"    while b'\\r\\n\\r\\n' not in response:\n"
+                                         @"        chunk=sock.recv(4096)\n"
+                                         @"        if not chunk:\n"
+                                         @"            break\n"
+                                         @"        response += chunk\n"
+                                         @"    if b'101 Switching Protocols' not in response:\n"
+                                         @"        raise RuntimeError(response.decode('utf-8', 'replace'))\n"
+                                         @"    return sock\n"
+                                         @"def ws_send_text(sock, text):\n"
+                                         @"    payload=text.encode('utf-8')\n"
+                                         @"    mask=os.urandom(4)\n"
+                                         @"    header=bytearray([0x81])\n"
+                                         @"    length=len(payload)\n"
+                                         @"    if length <= 125:\n"
+                                         @"        header.append(0x80 | length)\n"
+                                         @"    elif length <= 65535:\n"
+                                         @"        header.append(0x80 | 126)\n"
+                                         @"        header.extend(struct.pack('!H', length))\n"
+                                         @"    else:\n"
+                                         @"        header.append(0x80 | 127)\n"
+                                         @"        header.extend(struct.pack('!Q', length))\n"
+                                         @"    masked=bytes(payload[i] ^ mask[i & 3] for i in range(length))\n"
+                                         @"    sock.sendall(bytes(header) + mask + masked)\n"
+                                         @"def ws_recv_text(sock):\n"
+                                         @"    b1, b2 = recv_exact(sock, 2)\n"
+                                         @"    opcode = b1 & 0x0F\n"
+                                         @"    length = b2 & 0x7F\n"
+                                         @"    masked = (b2 & 0x80) != 0\n"
+                                         @"    if length == 126:\n"
+                                         @"        length = struct.unpack('!H', recv_exact(sock, 2))[0]\n"
+                                         @"    elif length == 127:\n"
+                                         @"        length = struct.unpack('!Q', recv_exact(sock, 8))[0]\n"
+                                         @"    mask_key = recv_exact(sock, 4) if masked else b''\n"
+                                         @"    payload = recv_exact(sock, length)\n"
+                                         @"    if masked:\n"
+                                         @"        payload = bytes(payload[i] ^ mask_key[i & 3] for i in range(length))\n"
+                                         @"    if opcode != 0x1:\n"
+                                         @"        raise RuntimeError(f'unexpected opcode {opcode}')\n"
+                                         @"    return payload.decode('utf-8')\n"
+                                         @"ws = ws_connect('/ws/echo')\n"
+                                         @"for idx in range(4):\n"
+                                         @"    token = f'ws-{idx}'\n"
+                                         @"    ws_send_text(ws, token)\n"
+                                         @"    echoed = ws_recv_text(ws)\n"
+                                         @"    if echoed != token:\n"
+                                         @"        raise RuntimeError('websocket echo mismatch')\n"
+                                         @"ws.close()\n"
+                                         @"if EXPECT_KEEPALIVE:\n"
+                                         @"    sock = socket.create_connection(('127.0.0.1', PORT), timeout=5)\n"
+                                         @"    for idx in range(4):\n"
+                                         @"        conn = 'close' if idx == 3 else 'keep-alive'\n"
+                                         @"        req=(\n"
+                                         @"            f'GET /healthz HTTP/1.1\\r\\n'\n"
+                                         @"            f'Host: 127.0.0.1:{PORT}\\r\\n'\n"
+                                         @"            f'Connection: {conn}\\r\\n\\r\\n'\n"
+                                         @"        ).encode('utf-8')\n"
+                                         @"        sock.sendall(req)\n"
+                                         @"        status, headers, body = read_http_response(sock)\n"
+                                         @"        if '200' not in status or body != b'ok\\n':\n"
+                                         @"            raise RuntimeError(status)\n"
+                                         @"        if headers.get('connection', '').lower() != conn:\n"
+                                         @"            raise RuntimeError('unexpected keep-alive behavior')\n"
+                                         @"    sock.close()\n"
+                                         @"else:\n"
+                                         @"    for _ in range(4):\n"
+                                         @"        sock = socket.create_connection(('127.0.0.1', PORT), timeout=5)\n"
+                                         @"        req=(\n"
+                                         @"            f'GET /healthz HTTP/1.1\\r\\n'\n"
+                                         @"            f'Host: 127.0.0.1:{PORT}\\r\\n'\n"
+                                         @"            'Connection: keep-alive\\r\\n\\r\\n'\n"
+                                         @"        ).encode('utf-8')\n"
+                                         @"        sock.sendall(req)\n"
+                                         @"        status, headers, body = read_http_response(sock)\n"
+                                         @"        if '200' not in status or body != b'ok\\n':\n"
+                                         @"            raise RuntimeError(status)\n"
+                                         @"        if headers.get('connection', '').lower() != 'close':\n"
+                                         @"            raise RuntimeError('expected close in serialized mode')\n"
+                                         @"        sock.settimeout(0.5)\n"
+                                         @"        try:\n"
+                                         @"            tail = sock.recv(1)\n"
+                                         @"        except OSError:\n"
+                                         @"            tail = b''\n"
+                                         @"        if tail not in (b'',):\n"
+                                         @"            raise RuntimeError('socket should be closed')\n"
+                                         @"        sock.close()\n"
+                                         @"errors=[]\n"
+                                         @"def worker(idx):\n"
+                                         @"    try:\n"
+                                         @"        slow = urllib.request.urlopen(\n"
+                                         @"            f'http://127.0.0.1:{PORT}/api/sleep?ms=140', timeout=5).read().decode('utf-8')\n"
+                                         @"        if 'sleep_ms' not in slow:\n"
+                                         @"            errors.append(f'slow-{idx}')\n"
+                                         @"        fast = urllib.request.urlopen(\n"
+                                         @"            f'http://127.0.0.1:{PORT}/healthz', timeout=4).read().decode('utf-8')\n"
+                                         @"        if fast != 'ok\\n':\n"
+                                         @"            errors.append(f'fast-{idx}')\n"
+                                         @"    except Exception as exc:\n"
+                                         @"        errors.append(str(exc))\n"
+                                         @"threads=[]\n"
+                                         @"for idx in range(6):\n"
+                                         @"    t=threading.Thread(target=worker, args=(idx,))\n"
+                                         @"    t.start()\n"
+                                         @"    threads.append(t)\n"
+                                         @"for t in threads:\n"
+                                         @"    t.join()\n"
+                                         @"if errors:\n"
+                                         @"    raise RuntimeError('; '.join(errors))\n"
+                                         @"final = urllib.request.urlopen(f'http://127.0.0.1:{PORT}/healthz', timeout=4).read().decode('utf-8')\n"
+                                         @"if final != 'ok\\n':\n"
+                                         @"    raise RuntimeError(final)\n"
+                                         @"print('ok')\n",
+                                         port,
+                                         expectKeepAlive ? 1 : 0];
+    int pyCode = 0;
+    NSString *output = [self runPythonScript:script exitCode:&pyCode];
+    XCTAssertEqual(0, pyCode);
+    XCTAssertEqualObjects(@"ok",
+                          [output stringByTrimmingCharactersInSet:
+                                      [NSCharacterSet whitespaceAndNewlineCharacterSet]]);
+  } @finally {
+    if ([server isRunning]) {
+      (void)kill(server.processIdentifier, SIGTERM);
+      [server waitUntilExit];
+    }
+  }
+}
+
+- (void)testConcurrentModeMixedLifecycleStressRemainsStable {
+  [self runMixedRequestLifecycleStressWithServerCommand:@"./build/boomhauer --port %d"
+                                        expectKeepAlive:YES];
+}
+
+- (void)testSerializedModeMixedLifecycleStressRemainsStable {
+  [self runMixedRequestLifecycleStressWithServerCommand:@"./build/boomhauer --env production --port %d"
+                                        expectKeepAlive:NO];
 }
 
 - (void)testLargeResponseBodyIsNotTruncatedUnderBackpressure {

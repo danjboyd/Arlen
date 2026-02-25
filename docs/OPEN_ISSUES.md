@@ -56,4 +56,5 @@ Externally this presents as intermittent or sustained `502 Bad Gateway` from ngi
 1. Keep serialized-mode connection lifecycle deterministic in production defaults.
 2. Require integration coverage for any future changes to HTTP connection persistence + worker dispatch interaction.
 3. Re-run ASAN/UBSAN + endpoint traffic smoke during future runtime concurrency refactors.
-4. Track proactive concurrency backlog from `docs/CONCURRENCY_AUDIT_2026-02-25.md`.
+4. Keep `tools/ci/run_runtime_concurrency_gate.sh` in pre-merge validation for HTTP/runtime lifecycle changes.
+5. Track/update concurrency hardening baselines in `docs/CONCURRENCY_AUDIT_2026-02-25.md`.

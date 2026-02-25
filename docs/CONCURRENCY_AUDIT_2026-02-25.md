@@ -32,44 +32,55 @@ This audit was performed immediately after fixing worker crash issue #1 (`malloc
 
 ### High Priority
 
-1. Global stop flag is process-global, not server-instance scoped.
+1. Global stop flag was process-global, not server-instance scoped. `resolved`
    - Location: `src/Arlen/HTTP/ALNHTTPServer.m` (`gShouldRun`)
    - Risk: multiple `ALNHTTPServer` instances in one process can interfere with each other during stop/reload.
-   - Recommendation: move stop state to per-instance field and isolate signal handling/loop control per server instance.
+   - Applied fix:
+     - per-instance `shouldRun` state now controls request/session loops
+     - process signal handling now uses `gSignalStopRequested` only for signal-triggered termination
 
-2. Concurrent mode still uses detached thread per accepted connection.
+2. Concurrent mode used detached thread per accepted connection. `resolved`
    - Location: `src/Arlen/HTTP/ALNHTTPServer.m` (`detachNewThreadSelector`)
    - Risk: thread fanout pressure and lifecycle complexity under heavy keep-alive/slow-client traffic.
-   - Recommendation: replace detached-thread model with bounded worker pool or queue-driven execution.
+   - Applied fix:
+     - bounded HTTP worker pool (`maxConcurrentHTTPWorkers`)
+     - bounded queue (`maxQueuedHTTPConnections`)
+     - deterministic backpressure response (`X-Arlen-Backpressure-Reason: http_worker_queue_full`)
 
 ### Medium Priority
 
-3. Realtime hub subscription set is global singleton and unbounded by channel cardinality.
+3. Realtime hub subscription set was global singleton and unbounded by channel cardinality. `resolved`
    - Location: `src/Arlen/Support/ALNRealtime.m`
    - Risk: memory growth and stale subscription accumulation if app-level flows fail to unsubscribe cleanly.
-   - Recommendation: add optional channel/subscriber caps + stale-subscription pruning diagnostics.
+   - Applied fix:
+     - optional global cap (`maxRealtimeTotalSubscribers`)
+     - optional per-channel cap (`maxRealtimeChannelSubscribers`)
+     - metrics snapshot for active/peak/churn/rejected subscribers
 
-4. libpq loader synchronization uses `@synchronized([NSObject class])`.
+4. libpq loader synchronization used `@synchronized([NSObject class])`. `resolved`
    - Location: `src/Arlen/Data/ALNPg.m`
    - Risk: coarse global lock coupling; avoid locking on broadly shared class object.
-   - Recommendation: switch to dedicated static lock token for libpq load path.
+   - Applied fix:
+     - dedicated lock token now isolates libpq loader initialization path
 
-5. EOC strict-mode options are thread-local and sticky for thread lifetime.
+5. EOC strict-mode options were thread-local and sticky for thread lifetime. `resolved`
    - Location: `src/Arlen/MVC/Template/ALNEOCRuntime.m`
    - Risk: option bleed across reused worker threads if callers set strict flags without reset discipline.
-   - Recommendation: add scoped push/pop API for render options (RAII-style helper).
+   - Applied fix:
+     - scoped strict-mode API (`ALNEOCPushRenderOptions` / `ALNEOCPopRenderOptions`)
+     - view rendering now uses scoped option handling
 
 ## Proactive Test Plan
 
-1. Add a stress integration suite for HTTP session lifecycle:
+1. Add a stress integration suite for HTTP session lifecycle. `completed`
    - mixed keep-alive + slow clients + websocket upgrades
    - run in both `serialized` and `concurrent` modes
 
-2. Add sanitizer gating focused on runtime concurrency:
+2. Add sanitizer gating focused on runtime concurrency. `completed`
    - ASAN/UBSAN minimum gate stays required
    - add TSAN experiment profile where toolchain/runtime support permits
 
-3. Add long-running fanout test for realtime hub:
+3. Add long-running fanout test for realtime hub. `completed`
    - subscription churn + forced disconnect paths
    - validate bounded growth and deterministic cleanup
 
@@ -77,4 +88,4 @@ This audit was performed immediately after fixing worker crash issue #1 (`malloc
 
 - Critical production crash issue is resolved in consumer validation.
 - Additional hardening in websocket and template registry paths has been applied.
-- Remaining items above are proactive engineering backlog, not currently known live regressions.
+- Follow-up concurrency hardening actions above are now implemented with unit/integration/CI coverage.

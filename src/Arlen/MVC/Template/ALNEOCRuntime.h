@@ -31,6 +31,8 @@ BOOL ALNEOCStrictLocalsEnabled(void);
 BOOL ALNEOCStrictStringifyEnabled(void);
 void ALNEOCSetStrictLocalsEnabled(BOOL enabled);
 void ALNEOCSetStrictStringifyEnabled(BOOL enabled);
+NSDictionary *ALNEOCPushRenderOptions(BOOL strictLocals, BOOL strictStringify);
+void ALNEOCPopRenderOptions(NSDictionary *_Nullable token);
 
 id _Nullable ALNEOCLocal(id _Nullable ctx,
                          NSString *name,

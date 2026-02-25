@@ -3,6 +3,7 @@
 
 #import <stdlib.h>
 #import <string.h>
+#import <unistd.h>
 
 #import "ALNMigrationRunner.h"
 #import "ALNPg.h"
@@ -89,6 +90,59 @@
                              : nil;
   free(buffer);
   return result;
+}
+
+- (void)pgLoaderConcurrencyWorker:(NSMutableDictionary *)state {
+  @autoreleasepool {
+    NSError *error = nil;
+    ALNPg *database = [[ALNPg alloc]
+        initWithConnectionString:@"host=127.0.0.1 port=1 dbname=arlen_loader_test connect_timeout=1"
+                  maxConnections:1
+                           error:&error];
+    @synchronized(state) {
+      NSInteger completed = [state[@"completed"] integerValue];
+      state[@"completed"] = @(completed + 1);
+      if (database == nil && error == nil) {
+        NSInteger nilOutcomes = [state[@"nilOutcomes"] integerValue];
+        state[@"nilOutcomes"] = @(nilOutcomes + 1);
+      }
+    }
+  }
+}
+
+- (void)testLibpqLoaderRemainsDeterministicDuringConcurrentInitialization {
+  NSMutableDictionary *state = [@{
+    @"completed" : @(0),
+    @"nilOutcomes" : @(0),
+  } mutableCopy];
+
+  NSInteger workers = 10;
+  for (NSInteger idx = 0; idx < workers; idx++) {
+    [NSThread detachNewThreadSelector:@selector(pgLoaderConcurrencyWorker:)
+                             toTarget:self
+                           withObject:state];
+  }
+
+  NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:8.0];
+  while ([[NSDate date] compare:deadline] == NSOrderedAscending) {
+    NSInteger completed = 0;
+    @synchronized(state) {
+      completed = [state[@"completed"] integerValue];
+    }
+    if (completed >= workers) {
+      break;
+    }
+    usleep(20000);
+  }
+
+  NSInteger completed = 0;
+  NSInteger nilOutcomes = 0;
+  @synchronized(state) {
+    completed = [state[@"completed"] integerValue];
+    nilOutcomes = [state[@"nilOutcomes"] integerValue];
+  }
+  XCTAssertEqual(workers, completed);
+  XCTAssertEqual((NSInteger)0, nilOutcomes);
 }
 
 - (void)testConnectionAndPreparedStatements {
