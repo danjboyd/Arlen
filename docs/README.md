@@ -81,6 +81,7 @@ Open `build/docs/index.html` in your browser, or use `make docs-serve` for local
 - [Phase 7 Roadmap](PHASE7_ROADMAP.md)
 - [Phase 8 Roadmap](PHASE8_ROADMAP.md)
 - [Phase 9 Roadmap](PHASE9_ROADMAP.md)
+- [Phase 10 Roadmap](PHASE10_ROADMAP.md)
 - [Competitive Benchmark Roadmap](COMPETITIVE_BENCHMARK_ROADMAP.md)
 - [Phase B Parity Checklist (FastAPI)](PHASEB_PARITY_CHECKLIST_FASTAPI.md)
 - [Phase C Benchmark Protocol](PHASEC_BENCHMARK_PROTOCOL.md)

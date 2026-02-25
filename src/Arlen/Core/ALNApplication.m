@@ -21,6 +21,7 @@
 
 #include <ctype.h>
 #include <math.h>
+#include <objc/runtime.h>
 #include <stdio.h>
 #include <sys/time.h>
 #include <time.h>
@@ -28,10 +29,45 @@
 
 NSString *const ALNApplicationErrorDomain = @"Arlen.Application.Error";
 
+typedef id (*ALNContextObjectIMP)(id target, SEL selector, ALNContext *context);
+typedef void (*ALNContextVoidIMP)(id target, SEL selector, ALNContext *context);
+typedef BOOL (*ALNContextBoolIMP)(id target, SEL selector, ALNContext *context);
+
 static BOOL ALNRequestPrefersJSON(ALNRequest *request, BOOL apiOnly);
 static void ALNSetStructuredErrorResponse(ALNResponse *response,
                                           NSInteger statusCode,
                                           NSDictionary *payload);
+
+static const char *ALNObjCTypeWithoutQualifiers(const char *typeEncoding) {
+  if (typeEncoding == NULL) {
+    return "";
+  }
+  const char *cursor = typeEncoding;
+  while (*cursor == 'r' || *cursor == 'n' || *cursor == 'N' || *cursor == 'o' ||
+         *cursor == 'O' || *cursor == 'R' || *cursor == 'V') {
+    cursor++;
+  }
+  return cursor;
+}
+
+static ALNRouteInvocationReturnKind ALNReturnKindForSignature(NSMethodSignature *signature) {
+  if (signature == nil) {
+    return ALNRouteInvocationReturnKindUnknown;
+  }
+
+  const char *returnType = ALNObjCTypeWithoutQualifiers([signature methodReturnType]);
+  if (strcmp(returnType, @encode(void)) == 0) {
+    return ALNRouteInvocationReturnKindVoid;
+  }
+  if (returnType[0] == '@') {
+    return ALNRouteInvocationReturnKindObject;
+  }
+  if (strcmp(returnType, @encode(BOOL)) == 0 || strcmp(returnType, @encode(bool)) == 0 ||
+      strcmp(returnType, "c") == 0 || strcmp(returnType, "B") == 0) {
+    return ALNRouteInvocationReturnKindBool;
+  }
+  return ALNRouteInvocationReturnKindUnknown;
+}
 
 @interface ALNApplication ()
 
@@ -2431,6 +2467,10 @@ static void ALNFinalizeResponse(ALNApplication *application,
   route.includeInOpenAPI = includeInOpenAPI;
   route.compiledActionSignature = nil;
   route.compiledGuardSignature = nil;
+  route.compiledActionIMP = NULL;
+  route.compiledGuardIMP = NULL;
+  route.compiledActionReturnKind = ALNRouteInvocationReturnKindUnknown;
+  route.compiledGuardReturnKind = ALNRouteInvocationReturnKindUnknown;
   route.compiledInvocationMetadata = NO;
   return YES;
 }
@@ -2458,6 +2498,10 @@ static void ALNFinalizeResponse(ALNApplication *application,
 
   route.compiledActionSignature = nil;
   route.compiledGuardSignature = nil;
+  route.compiledActionIMP = NULL;
+  route.compiledGuardIMP = NULL;
+  route.compiledActionReturnKind = ALNRouteInvocationReturnKindUnknown;
+  route.compiledGuardReturnKind = ALNRouteInvocationReturnKindUnknown;
   route.compiledInvocationMetadata = NO;
 
   if (route.controllerClass == Nil) {
@@ -2494,12 +2538,20 @@ static void ALNFinalizeResponse(ALNApplication *application,
   }
 
   NSMethodSignature *actionSignature = [controller methodSignatureForSelector:route.actionSelector];
-  if (actionSignature == nil || [actionSignature numberOfArguments] != 3) {
+  Method actionMethod = class_getInstanceMethod(route.controllerClass, route.actionSelector);
+  IMP actionIMP = (actionMethod != NULL) ? method_getImplementation(actionMethod) : NULL;
+  ALNRouteInvocationReturnKind actionReturnKind = ALNReturnKindForSignature(actionSignature);
+  BOOL actionSignatureValid = (actionSignature != nil &&
+                               [actionSignature numberOfArguments] == 3 &&
+                               actionIMP != NULL &&
+                               (actionReturnKind == ALNRouteInvocationReturnKindVoid ||
+                                actionReturnKind == ALNRouteInvocationReturnKindObject));
+  if (!actionSignatureValid) {
     if (error != NULL) {
       *error = ALNRouteCompileError(333,
                                     @"route_action_signature_invalid",
                                     @"invalid_action_signature",
-                                    @"Action must accept exactly one ALNContext * parameter",
+                                    @"Action must accept exactly one ALNContext * parameter and return object/void",
                                     route,
                                     @[]);
     }
@@ -2507,14 +2559,25 @@ static void ALNFinalizeResponse(ALNApplication *application,
   }
 
   NSMethodSignature *guardSignature = nil;
+  IMP guardIMP = NULL;
+  ALNRouteInvocationReturnKind guardReturnKind = ALNRouteInvocationReturnKindUnknown;
   if (route.guardSelector != NULL) {
     guardSignature = [controller methodSignatureForSelector:route.guardSelector];
-    if (guardSignature == nil || [guardSignature numberOfArguments] != 3) {
+    Method guardMethod = class_getInstanceMethod(route.controllerClass, route.guardSelector);
+    guardIMP = (guardMethod != NULL) ? method_getImplementation(guardMethod) : NULL;
+    guardReturnKind = ALNReturnKindForSignature(guardSignature);
+    BOOL guardSignatureValid = (guardSignature != nil &&
+                                [guardSignature numberOfArguments] == 3 &&
+                                guardIMP != NULL &&
+                                (guardReturnKind == ALNRouteInvocationReturnKindVoid ||
+                                 guardReturnKind == ALNRouteInvocationReturnKindObject ||
+                                 guardReturnKind == ALNRouteInvocationReturnKindBool));
+    if (!guardSignatureValid) {
       if (error != NULL) {
         *error = ALNRouteCompileError(334,
                                       @"route_guard_signature_invalid",
                                       @"invalid_guard_signature",
-                                      @"Guard must accept exactly one ALNContext * parameter",
+                                      @"Guard must accept exactly one ALNContext * parameter and return bool/object/void",
                                       route,
                                       @[]);
       }
@@ -2576,6 +2639,10 @@ static void ALNFinalizeResponse(ALNApplication *application,
 
   route.compiledActionSignature = actionSignature;
   route.compiledGuardSignature = guardSignature;
+  route.compiledActionIMP = actionIMP;
+  route.compiledGuardIMP = guardIMP;
+  route.compiledActionReturnKind = actionReturnKind;
+  route.compiledGuardReturnKind = guardReturnKind;
   route.compiledInvocationMetadata = YES;
   return YES;
 }
@@ -3083,12 +3150,13 @@ static void ALNFinalizeResponse(ALNApplication *application,
       }
       BOOL guardPassed = YES;
       if (match.route.guardSelector != NULL) {
-        NSMethodSignature *guardSignature = match.route.compiledGuardSignature;
-        if (guardSignature == nil) {
+        IMP guardIMP = match.route.compiledGuardIMP;
+        ALNRouteInvocationReturnKind guardReturnKind = match.route.compiledGuardReturnKind;
+        if (guardIMP == NULL || guardReturnKind == ALNRouteInvocationReturnKindUnknown) {
           NSDictionary *details = @{
             @"controller" : context.controllerName ?: @"",
             @"guard" : match.route.guardActionName ?: @"",
-            @"reason" : @"Guard must accept exactly one ALNContext * parameter"
+            @"reason" : @"Guard must accept exactly one ALNContext * parameter and return bool/object/void"
           };
           ALNApplyInternalErrorResponse(self,
                                         request,
@@ -3101,31 +3169,20 @@ static void ALNFinalizeResponse(ALNApplication *application,
                                         details);
           guardPassed = NO;
         } else {
-          NSInvocation *guardInvocation =
-              [NSInvocation invocationWithMethodSignature:guardSignature];
-          [guardInvocation setTarget:controller];
-          [guardInvocation setSelector:match.route.guardSelector];
-          ALNContext *arg = context;
-          [guardInvocation setArgument:&arg atIndex:2];
-          [guardInvocation invoke];
-
-          const char *guardReturnType = [guardSignature methodReturnType];
-          if (strcmp(guardReturnType, @encode(void)) == 0) {
+          if (guardReturnKind == ALNRouteInvocationReturnKindVoid) {
+            ((ALNContextVoidIMP)guardIMP)(controller, match.route.guardSelector, context);
             guardPassed = !response.committed;
-          } else if (strcmp(guardReturnType, @encode(BOOL)) == 0 ||
-                     strcmp(guardReturnType, @encode(bool)) == 0 ||
-                     strcmp(guardReturnType, "c") == 0) {
-            BOOL value = NO;
-            [guardInvocation getReturnValue:&value];
-            guardPassed = value;
-          } else {
-            __unsafe_unretained id guardResult = nil;
-            [guardInvocation getReturnValue:&guardResult];
+          } else if (guardReturnKind == ALNRouteInvocationReturnKindBool) {
+            guardPassed = ((ALNContextBoolIMP)guardIMP)(controller, match.route.guardSelector, context);
+          } else if (guardReturnKind == ALNRouteInvocationReturnKindObject) {
+            id guardResult = ((ALNContextObjectIMP)guardIMP)(controller, match.route.guardSelector, context);
             if ([guardResult respondsToSelector:@selector(boolValue)]) {
               guardPassed = [guardResult boolValue];
             } else {
               guardPassed = (guardResult != nil);
             }
+          } else {
+            guardPassed = NO;
           }
         }
       }
@@ -3147,12 +3204,13 @@ static void ALNFinalizeResponse(ALNApplication *application,
       }
 
       if (guardPassed && !response.committed) {
-        NSMethodSignature *signature = match.route.compiledActionSignature;
-        if (signature == nil) {
+        IMP actionIMP = match.route.compiledActionIMP;
+        ALNRouteInvocationReturnKind actionReturnKind = match.route.compiledActionReturnKind;
+        if (actionIMP == NULL || actionReturnKind == ALNRouteInvocationReturnKindUnknown) {
           NSDictionary *details = @{
             @"controller" : context.controllerName ?: @"",
             @"action" : context.actionName ?: @"",
-            @"reason" : @"Action must accept exactly one ALNContext * parameter"
+            @"reason" : @"Action must accept exactly one ALNContext * parameter and return object/void"
           };
           ALNApplyInternalErrorResponse(self,
                                         request,
@@ -3164,18 +3222,10 @@ static void ALNFinalizeResponse(ALNApplication *application,
                                         @"Invalid controller action signature",
                                         details);
         } else {
-          NSInvocation *invocation = [NSInvocation invocationWithMethodSignature:signature];
-          [invocation setTarget:controller];
-          [invocation setSelector:match.route.actionSelector];
-          ALNContext *arg = context;
-          [invocation setArgument:&arg atIndex:2];
-          [invocation invoke];
-
-          const char *returnType = [signature methodReturnType];
-          if (strcmp(returnType, @encode(void)) != 0) {
-            __unsafe_unretained id temp = nil;
-            [invocation getReturnValue:&temp];
-            returnValue = temp;
+          if (actionReturnKind == ALNRouteInvocationReturnKindVoid) {
+            ((ALNContextVoidIMP)actionIMP)(controller, match.route.actionSelector, context);
+          } else if (actionReturnKind == ALNRouteInvocationReturnKindObject) {
+            returnValue = ((ALNContextObjectIMP)actionIMP)(controller, match.route.actionSelector, context);
           }
         }
       }

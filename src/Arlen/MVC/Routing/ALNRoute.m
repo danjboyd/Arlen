@@ -120,6 +120,10 @@ static NSString *ALNNormalizeRouteFormat(NSString *value) {
     _includeInOpenAPI = YES;
     _compiledActionSignature = nil;
     _compiledGuardSignature = nil;
+    _compiledActionIMP = NULL;
+    _compiledGuardIMP = NULL;
+    _compiledActionReturnKind = ALNRouteInvocationReturnKindUnknown;
+    _compiledGuardReturnKind = ALNRouteInvocationReturnKindUnknown;
     _compiledInvocationMetadata = NO;
 
     BOOL hasWildcard = NO;

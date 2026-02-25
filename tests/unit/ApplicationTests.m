@@ -1,11 +1,15 @@
 #import <Foundation/Foundation.h>
 #import <XCTest/XCTest.h>
 
+#import <unistd.h>
+
 #import "ALNApplication.h"
 #import "ALNContext.h"
 #import "ALNController.h"
 #import "ALNRequest.h"
 #import "ALNResponse.h"
+#import "ALNRoute.h"
+#import "ALNRouter.h"
 
 @interface AppHeaderMiddleware : NSObject <ALNMiddleware>
 @end
@@ -140,6 +144,18 @@
 
 @end
 
+@interface AppInvalidReturnTypeController : ALNController
+@end
+
+@implementation AppInvalidReturnTypeController
+
+- (NSInteger)invalidReturn:(ALNContext *)ctx {
+  (void)ctx;
+  return 7;
+}
+
+@end
+
 @interface AppTraceCaptureExporter : NSObject <ALNTraceExporter>
 
 @property(nonatomic, strong) NSDictionary *lastTrace;
@@ -266,6 +282,34 @@
                                queryString:queryString ?: @""
                                    headers:headers ?: @{}
                                       body:[NSData data]];
+}
+
+- (void)concurrentDispatchWorker:(NSMutableDictionary *)state {
+  @autoreleasepool {
+    ALNApplication *app = state[@"app"];
+    NSInteger iterations = [state[@"iterations"] integerValue];
+    for (NSInteger idx = 0; idx < iterations; idx++) {
+      ALNResponse *dictResponse = [app dispatchRequest:[self requestForPath:@"/dict"]];
+      BOOL dictOK = (dictResponse.statusCode == 200);
+
+      ALNResponse *guardedResponse = [app dispatchRequest:[self requestForPath:@"/admin/audit.json"
+                                                                   queryString:@"role=admin"
+                                                                       headers:@{}]];
+      BOOL guardedOK = (guardedResponse.statusCode == 200);
+
+      if (!dictOK || !guardedOK) {
+        @synchronized(state) {
+          NSInteger failures = [state[@"failures"] integerValue];
+          state[@"failures"] = @(failures + 1);
+        }
+      }
+    }
+
+    @synchronized(state) {
+      NSInteger completed = [state[@"completed"] integerValue];
+      state[@"completed"] = @(completed + 1);
+    }
+  }
 }
 
 - (NSString *)traceIDFromTraceparent:(NSString *)traceparent {
@@ -892,6 +936,103 @@
   XCTAssertEqual((NSInteger)334, startError.code);
   XCTAssertEqualObjects(@"route_guard_signature_invalid", startError.userInfo[@"compile_code"]);
   XCTAssertEqualObjects(@"broken_guard", startError.userInfo[@"route_name"]);
+}
+
+- (void)testStartFailsWhenRouteActionReturnTypeIsInvalid {
+  ALNApplication *app = [[ALNApplication alloc] initWithConfig:@{
+    @"environment" : @"test",
+    @"logFormat" : @"json",
+  }];
+  [app registerRouteMethod:@"GET"
+                      path:@"/broken"
+                      name:@"broken_return_type"
+           controllerClass:[AppInvalidReturnTypeController class]
+                    action:@"invalidReturn"];
+
+  NSError *startError = nil;
+  BOOL started = [app startWithError:&startError];
+  XCTAssertFalse(started);
+  XCTAssertNotNil(startError);
+  XCTAssertEqualObjects(@"Arlen.Application.Error", startError.domain);
+  XCTAssertEqual((NSInteger)333, startError.code);
+  XCTAssertEqualObjects(@"route_action_signature_invalid", startError.userInfo[@"compile_code"]);
+  XCTAssertEqualObjects(@"broken_return_type", startError.userInfo[@"route_name"]);
+}
+
+- (void)testRouteCompilationCachesDirectInvocationMetadata {
+  ALNApplication *app = [self buildAppWithHaltingMiddleware:NO];
+  NSError *startError = nil;
+  BOOL started = [app startWithError:&startError];
+  XCTAssertTrue(started);
+  XCTAssertNil(startError);
+  if (!started) {
+    return;
+  }
+
+  ALNRoute *dictRoute = [app.router routeNamed:@"dict"];
+  XCTAssertNotNil(dictRoute);
+  XCTAssertNotNil(dictRoute.compiledActionSignature);
+  XCTAssertEqual(ALNRouteInvocationReturnKindObject, dictRoute.compiledActionReturnKind);
+  XCTAssertNotEqual((void *)dictRoute.compiledActionIMP, NULL);
+  XCTAssertEqual((void *)dictRoute.compiledGuardIMP, NULL);
+
+  ALNRoute *guardedRoute = [app.router routeNamed:@"admin_audit"];
+  XCTAssertNotNil(guardedRoute);
+  XCTAssertNotNil(guardedRoute.compiledActionSignature);
+  XCTAssertNotNil(guardedRoute.compiledGuardSignature);
+  XCTAssertEqual(ALNRouteInvocationReturnKindObject, guardedRoute.compiledActionReturnKind);
+  XCTAssertEqual(ALNRouteInvocationReturnKindBool, guardedRoute.compiledGuardReturnKind);
+  XCTAssertNotEqual((void *)guardedRoute.compiledActionIMP, NULL);
+  XCTAssertNotEqual((void *)guardedRoute.compiledGuardIMP, NULL);
+  [app shutdown];
+}
+
+- (void)testConcurrentDispatchWithCompiledInvocationMetadata {
+  ALNApplication *app = [self buildAppWithHaltingMiddleware:NO];
+  NSError *startError = nil;
+  BOOL started = [app startWithError:&startError];
+  XCTAssertTrue(started);
+  XCTAssertNil(startError);
+  if (!started) {
+    return;
+  }
+
+  NSInteger workers = 8;
+  NSMutableDictionary *state = [@{
+    @"app" : app,
+    @"iterations" : @(120),
+    @"completed" : @(0),
+    @"failures" : @(0),
+  } mutableCopy];
+
+  for (NSInteger idx = 0; idx < workers; idx++) {
+    [NSThread detachNewThreadSelector:@selector(concurrentDispatchWorker:)
+                             toTarget:self
+                           withObject:state];
+  }
+
+  NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:20.0];
+  while ([[NSDate date] compare:deadline] == NSOrderedAscending) {
+    NSInteger completed = 0;
+    @synchronized(state) {
+      completed = [state[@"completed"] integerValue];
+    }
+    if (completed >= workers) {
+      break;
+    }
+    usleep(20000);
+  }
+
+  NSInteger completed = 0;
+  NSInteger failures = 0;
+  @synchronized(state) {
+    completed = [state[@"completed"] integerValue];
+    failures = [state[@"failures"] integerValue];
+  }
+
+  XCTAssertEqual(workers, completed);
+  XCTAssertEqual((NSInteger)0, failures);
+  [app shutdown];
 }
 
 - (void)testStartFailsWhenRouteSchemaReferencesMissingTransformer {

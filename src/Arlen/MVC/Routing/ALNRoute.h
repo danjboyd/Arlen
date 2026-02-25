@@ -11,6 +11,13 @@ typedef NS_ENUM(NSInteger, ALNRouteKind) {
   ALNRouteKindWildcard = 1,
 };
 
+typedef NS_ENUM(NSUInteger, ALNRouteInvocationReturnKind) {
+  ALNRouteInvocationReturnKindUnknown = 0,
+  ALNRouteInvocationReturnKindVoid = 1,
+  ALNRouteInvocationReturnKindObject = 2,
+  ALNRouteInvocationReturnKindBool = 3,
+};
+
 @class ALNRoute;
 
 @interface ALNRouteMatch : NSObject
@@ -46,6 +53,10 @@ typedef NS_ENUM(NSInteger, ALNRouteKind) {
 @property(nonatomic, assign) BOOL includeInOpenAPI;
 @property(nonatomic, strong, nullable) NSMethodSignature *compiledActionSignature;
 @property(nonatomic, strong, nullable) NSMethodSignature *compiledGuardSignature;
+@property(nonatomic, assign, nullable) IMP compiledActionIMP;
+@property(nonatomic, assign, nullable) IMP compiledGuardIMP;
+@property(nonatomic, assign) ALNRouteInvocationReturnKind compiledActionReturnKind;
+@property(nonatomic, assign) ALNRouteInvocationReturnKind compiledGuardReturnKind;
 @property(nonatomic, assign) BOOL compiledInvocationMetadata;
 
 - (instancetype)initWithMethod:(NSString *)method

@@ -1,6 +1,6 @@
 # Arlen Phase 2 + Phase 3 Roadmap Index
 
-Status: Active (Phase 2A-2D complete; Phase 3A-3H complete; Phase 4A-4E complete; Phase 5A-5E complete; Phase 7A/7B/7C/7D/7E/7F/7G/7H initial slices implemented; Phase 7 follow-on active; Phase 8A complete; Phase 8B complete; Phase 9A/9B/9C/9D/9E/9F/9G/9H/9I/9J complete)  
+Status: Active (Phase 2A-2D complete; Phase 3A-3H complete; Phase 4A-4E complete; Phase 5A-5E complete; Phase 7A/7B/7C/7D/7E/7F/7G/7H initial slices implemented; Phase 7 follow-on active; Phase 8A complete; Phase 8B complete; Phase 9A/9B/9C/9D/9E/9F/9G/9H/9I/9J complete; Phase 10 planned)  
 Last updated: 2026-02-25
 
 This index points to the current roadmap documents:
@@ -134,6 +134,12 @@ Phase 9 execution/planning is defined in `docs/PHASE9_ROADMAP.md`, including:
   - deterministic runtime seam fault-injection harness and artifact pack (HTTP parser/dispatcher, websocket lifecycle, runtime stop/start boundaries) with seed-replay controls and CI/local command entrypoint
 - Phase 9J complete:
   - enterprise release certification pack generation, threshold/fail-criteria enforcement, known-risk register validation, and release-script certification gating for release candidates
+
+Phase 10 execution/planning is defined in `docs/PHASE10_ROADMAP.md`, focused on:
+
+- yyjson-backed JSON serialization migration with parity-focused testing before cutover
+- runtime + CLI/tooling JSON call-site migration behind a deterministic backend switch
+- release confidence gates for JSON behavior equivalence and performance deltas
 
 Scope guardrails remain unchanged:
 - admin/backoffice and full account-product surfaces remain outside Arlen core and are expected to ship as optional modules/products.

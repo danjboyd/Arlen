@@ -53,6 +53,7 @@ Last updated: 2026-02-25
 - Phase 9H: complete (2026-02-25)
 - Phase 9I: complete (2026-02-25)
 - Phase 9J: complete (2026-02-25)
+- Phase 10: planned (yyjson-backed JSON migration roadmap published 2026-02-25)
 
 ## Completed Today (2026-02-25)
 
