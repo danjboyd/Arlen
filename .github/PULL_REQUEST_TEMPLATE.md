@@ -5,6 +5,7 @@
 - [ ] `make test-unit`
 - [ ] `make test-integration`
 - [ ] `make test-data-layer` (or not applicable)
+- [ ] `make ci-docs` (for docs/public header/API reference changes)
 - [ ] `bash ./tools/ci/run_runtime_concurrency_gate.sh` (for HTTP/runtime/realtime changes)
 - [ ] `make ci-sanitizers` (ASAN/UBSAN required for runtime changes)
 

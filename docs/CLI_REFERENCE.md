@@ -213,14 +213,28 @@ Behavior:
 - in app-root watch mode, build failures are captured and rendered as development diagnostics
 - concurrent HTTP sessions are bounded by `runtimeLimits.maxConcurrentHTTPSessions` (default `256`)
 - websocket session upgrades are bounded by `runtimeLimits.maxConcurrentWebSocketSessions` (default `256`)
+- request dispatch mode is controlled by `requestDispatchMode` (`serialized` default in `production`, `concurrent` otherwise)
+  - `serialized` mode forces one request per HTTP connection (`Connection: close`) to keep worker execution deterministic
 - HTTP session limit violations return deterministic overload diagnostics:
   - status `503 Service Unavailable`
   - header `Retry-After: 1`
   - header `X-Arlen-Backpressure-Reason: http_session_limit`
+- HTTP worker queue overflow returns deterministic overload diagnostics:
+  - status `503 Service Unavailable`
+  - header `Retry-After: 1`
+  - header `X-Arlen-Backpressure-Reason: http_worker_queue_full`
 - websocket backpressure limit violations return deterministic overload diagnostics:
   - status `503 Service Unavailable`
   - header `Retry-After: 1`
   - header `X-Arlen-Backpressure-Reason: websocket_session_limit`
+- realtime channel subscription cap violations return deterministic overload diagnostics:
+  - status `503 Service Unavailable`
+  - header `Retry-After: 1`
+  - header `X-Arlen-Backpressure-Reason: realtime_channel_subscriber_limit`
+- realtime global subscription cap violations return deterministic overload diagnostics:
+  - status `503 Service Unavailable`
+  - header `Retry-After: 1`
+  - header `X-Arlen-Backpressure-Reason: realtime_total_subscriber_limit`
 - security misconfiguration now fails startup deterministically (for example missing `session.secret` when `session.enabled=YES`)
 - route compile validation now fails startup deterministically when enabled (`routing.compileOnStart=YES`):
   - invalid action/guard signatures
@@ -271,6 +285,11 @@ Environment:
 - `ARLEN_SECURITY_PROFILE` (`balanced`, `strict`, or `edge`; legacy `MOJOOBJC_SECURITY_PROFILE` also accepted)
 - `ARLEN_MAX_HTTP_SESSIONS` (runtime HTTP session limit; legacy `MOJOOBJC_MAX_HTTP_SESSIONS` also accepted)
 - `ARLEN_MAX_WEBSOCKET_SESSIONS` (runtime websocket session limit; legacy `MOJOOBJC_MAX_WEBSOCKET_SESSIONS` also accepted)
+- `ARLEN_MAX_HTTP_WORKERS` (runtime HTTP worker pool size; legacy `MOJOOBJC_MAX_HTTP_WORKERS` also accepted)
+- `ARLEN_MAX_QUEUED_HTTP_CONNECTIONS` (runtime HTTP worker queue depth; legacy `MOJOOBJC_MAX_QUEUED_HTTP_CONNECTIONS` also accepted)
+- `ARLEN_MAX_REALTIME_SUBSCRIBERS` (runtime global realtime subscriber cap; legacy `MOJOOBJC_MAX_REALTIME_SUBSCRIBERS` also accepted)
+- `ARLEN_MAX_REALTIME_SUBSCRIBERS_PER_CHANNEL` (runtime per-channel realtime subscriber cap; legacy `MOJOOBJC_MAX_REALTIME_SUBSCRIBERS_PER_CHANNEL` also accepted)
+- `ARLEN_REQUEST_DISPATCH_MODE` (`concurrent` or `serialized`; defaults to `serialized` in `production`, `concurrent` otherwise; legacy `MOJOOBJC_REQUEST_DISPATCH_MODE` also accepted)
 - `ARLEN_TRACE_PROPAGATION_ENABLED` (default `1`; legacy `MOJOOBJC_TRACE_PROPAGATION_ENABLED` also accepted)
 - `ARLEN_HEALTH_DETAILS_ENABLED` (default `1`; legacy `MOJOOBJC_HEALTH_DETAILS_ENABLED` also accepted)
 - `ARLEN_READINESS_REQUIRES_STARTUP` (default `0`; legacy `MOJOOBJC_READINESS_REQUIRES_STARTUP` also accepted)
@@ -313,16 +332,24 @@ Async worker environment fallbacks:
 - `ARLEN_PROPANE_JOB_WORKER_COMMAND`
 - `ARLEN_PROPANE_JOB_WORKER_COUNT`
 - `ARLEN_PROPANE_JOB_WORKER_RESPAWN_DELAY_MS`
+- `ARLEN_PROPANE_LIFECYCLE_LOG` (optional file path for structured lifecycle diagnostics)
 - `ARLEN_CLUSTER_ENABLED`
 - `ARLEN_CLUSTER_NAME`
 - `ARLEN_CLUSTER_NODE_ID`
 - `ARLEN_CLUSTER_EXPECTED_NODES`
 - `ARLEN_CLUSTER_OBSERVED_NODES`
+- `ARLEN_REQUEST_DISPATCH_MODE` (`serialized` by default in production workers)
 
 Signals:
 
 - `TERM` / `INT`: graceful shutdown
 - `HUP`: rolling worker reload
+
+Lifecycle diagnostics:
+
+- stdout emits deterministic lines prefixed with `propane:lifecycle`
+- line contract: `event=<name> manager_pid=<pid> key=value ...`
+- worker churn fields include stable `status`, `exit_reason`, `restart_action`, and `reason`
 
 ## Other Helper Scripts and Build Targets
 
@@ -330,17 +357,40 @@ Signals:
 - `bin/tech-demo`: run technology demo app
 - `bin/dev`: alias for `bin/boomhauer`
 - `make test-unit` / `make test-integration`: run XCTest bundles with repo-local GNUstep defaults home (`.gnustep-home`)
-- `make ci-quality`: run unit + integration + multi-profile perf quality gate
-- `make ci-sanitizers`: run ASan/UBSan gate across unit + integration + data-layer checks
+- `make ci-quality`: run unit + integration + multi-profile perf quality gate plus runtime concurrency and Phase 9I fault-injection checks
+- `make ci-sanitizers`: run Phase 9H blocking sanitizer gate (ASan/UBSan + runtime probe + data-layer checks), validate suppression registry, and generate sanitizer confidence artifacts under `build/release_confidence/phase9h`
+- `make ci-fault-injection`: run Phase 9I runtime seam fault-injection matrix and generate artifacts under `build/release_confidence/phase9i`
+- `make ci-release-certification`: run Phase 9J enterprise release checklist and generate certification artifacts under `build/release_confidence/phase9j`
 - `make phase5e-confidence`: generate Phase 5E release confidence artifacts in `build/release_confidence/phase5e`
 - `tools/ci/run_phase5e_quality.sh`: explicit Phase 5E CI gate entrypoint
 - `tools/ci/run_phase5e_sanitizers.sh`: explicit Phase 5E sanitizer CI gate entrypoint
-  - set `ARLEN_SANITIZER_INCLUDE_INTEGRATION=1` to include full integration suite in sanitizer runs
+  - set `ARLEN_SANITIZER_INCLUDE_INTEGRATION=1` to include full integration suite (default is `0`)
+  - set `ARLEN_SANITIZER_INCLUDE_TSAN=1` to run TSAN experimental lane (non-blocking)
+- `tools/ci/run_phase5e_tsan_experimental.sh`: execute TSAN experimental lane directly and retain artifacts in `build/sanitizers/tsan`
+- `tools/ci/run_phase9i_fault_injection.sh`: explicit Phase 9I fault-injection gate entrypoint
+  - `ARLEN_PHASE9I_SEED` controls replay seed (default `9011`)
+  - `ARLEN_PHASE9I_ITERS` controls iterations per mode (default `1`)
+  - `ARLEN_PHASE9I_MODES` selects modes (`concurrent,serialized` by default)
+  - `ARLEN_PHASE9I_SCENARIOS` selects optional scenario subset (comma-separated)
+  - `ARLEN_PHASE9I_OUTPUT_DIR` overrides artifact output directory
+- `tools/ci/run_phase9j_release_certification.sh`: explicit Phase 9J release-certification gate entrypoint
+  - `ARLEN_PHASE9J_RELEASE_ID` sets the release-candidate id in generated pack metadata
+  - `ARLEN_PHASE9J_OUTPUT_DIR` overrides artifact output directory
+  - `ARLEN_PHASE9J_SKIP_GATES=1` skips gate execution and regenerates certification from existing artifacts
+  - `ARLEN_PHASE9J_ALLOW_INCOMPLETE=1` emits an incomplete pack without failing the command
 - `make test-data-layer`: build and run standalone `ArlenData` example validation
+- `make parity-phaseb`: run Arlen-vs-FastAPI Phase B parity gate for frozen benchmark scenarios (creates report at `build/perf/parity_fastapi_latest.json`)
+- `make perf-phasec`: run Phase C benchmark protocol (warmup + concurrency ladder) and write `build/perf/phasec/latest_protocol_report.json`
+- `make perf-phased`: run Phase D baseline campaign (parity + Arlen/FastAPI matrix) and write `build/perf/phased/latest_campaign_report.json`
 - `make deploy-smoke`: validate deployment runbook with automated release smoke
 - `tools/deploy/validate_operability.sh`: validate text/JSON health/readiness/metrics operability contracts against a running server
 - `tools/deploy/build_release.sh --dry-run --json`: emit deploy release planning payload for coding-agent automation
+  - enforces Phase 9J certification manifest by default (`build/release_confidence/phase9j/manifest.json`)
+  - use `--certification-manifest <path>` to override manifest location
+  - use `--allow-missing-certification` only for non-RC smoke/local packaging flows
 - `arlen generate frontend <Name> --preset <vanilla-spa|progressive-mpa>`: scaffold frontend starter templates with built-in API wiring examples
+- `make ci-docs`: run docs quality gate (API docs regen consistency + HTML artifact/link checks)
+- `tools/ci/run_docs_quality.sh`: docs-quality CI entrypoint used by `make ci-docs` and workflow gate
 - `make docs-api`: regenerate API reference markdown from `Arlen.h` / `ArlenData.h` exports
 - `make docs-html`: generate browser-friendly docs under `build/docs`
 - `make docs-serve`: serve generated docs locally (default `http://127.0.0.1:4173`, override via `DOCS_PORT`)

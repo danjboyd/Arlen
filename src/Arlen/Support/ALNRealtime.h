@@ -29,6 +29,10 @@ NS_ASSUME_NONNULL_BEGIN
                     maxSubscribersPerChannel:(NSUInteger)maxSubscribersPerChannel;
 - (nullable ALNRealtimeSubscription *)subscribeChannel:(NSString *)channel
                                             subscriber:(id<ALNRealtimeSubscriber>)subscriber;
+- (nullable ALNRealtimeSubscription *)
+    subscribeChannel:(NSString *)channel
+          subscriber:(id<ALNRealtimeSubscriber>)subscriber
+    rejectionReason:(NSString * _Nullable * _Nullable)rejectionReason;
 - (void)unsubscribe:(nullable ALNRealtimeSubscription *)subscription;
 - (NSUInteger)publishMessage:(NSString *)message onChannel:(NSString *)channel;
 - (NSUInteger)subscriberCountForChannel:(NSString *)channel;

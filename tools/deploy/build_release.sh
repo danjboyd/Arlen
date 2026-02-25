@@ -16,6 +16,11 @@ Options:
   --framework-root <path>  Arlen framework root (default: script ../..)
   --releases-dir <path>    Release output root (default: <app-root>/releases)
   --release-id <id>        Explicit release id (default: UTC timestamp)
+  --certification-manifest <path>
+                          Phase 9J certification manifest path
+                          (default: <framework-root>/build/release_confidence/phase9j/manifest.json)
+  --allow-missing-certification
+                          Skip certification manifest enforcement (non-RC use only)
   --dry-run                Validate inputs and emit planned release metadata only
   --json                   Emit machine-readable workflow payloads
   --help                   Show this help
@@ -39,6 +44,10 @@ app_root="$PWD"
 framework_root="$default_framework_root"
 releases_dir=""
 release_id="$(date -u +%Y%m%dT%H%M%SZ)"
+certification_manifest=""
+allow_missing_certification=0
+certification_status=""
+certification_bundle_manifest=""
 dry_run=0
 output_json=0
 
@@ -89,6 +98,12 @@ emit_success_json() {
   if [[ -n "$latest_built" ]]; then
     printf ',"latest_built_symlink":"%s"' "$(json_escape "$latest_built")"
   fi
+  if [[ -n "$certification_manifest" ]]; then
+    printf ',"certification_manifest":"%s"' "$(json_escape "$certification_manifest")"
+  fi
+  if [[ -n "$certification_status" ]]; then
+    printf ',"certification_status":"%s"' "$(json_escape "$certification_status")"
+  fi
   printf '}\n'
 }
 
@@ -134,6 +149,20 @@ while [[ $# -gt 0 ]]; do
       release_id="$2"
       shift 2
       ;;
+    --certification-manifest)
+      [[ $# -ge 2 ]] || emit_error \
+        "missing_option_value" \
+        "--certification-manifest requires a value" \
+        "Provide the Phase 9J certification manifest path after --certification-manifest." \
+        "tools/deploy/build_release.sh --certification-manifest build/release_confidence/phase9j/manifest.json --app-root /path/to/app" \
+        2
+      certification_manifest="$2"
+      shift 2
+      ;;
+    --allow-missing-certification)
+      allow_missing_certification=1
+      shift
+      ;;
     --dry-run)
       dry_run=1
       shift
@@ -177,6 +206,10 @@ fi
 app_root="$(cd "$app_root" && pwd)"
 framework_root="$(cd "$framework_root" && pwd)"
 
+if [[ -z "$certification_manifest" ]]; then
+  certification_manifest="$framework_root/build/release_confidence/phase9j/manifest.json"
+fi
+
 if [[ -z "$releases_dir" ]]; then
   releases_dir="$app_root/releases"
 fi
@@ -199,6 +232,63 @@ if [[ ! -d "$app_root/config" ]]; then
     "Run from a valid app root or scaffold one with `arlen new` first." \
     "cd /path/to/work && /path/to/Arlen/build/arlen new DemoApp --full" \
     1
+fi
+
+if [[ "$allow_missing_certification" != "1" ]]; then
+  if [[ ! -f "$certification_manifest" ]]; then
+    emit_error \
+      "missing_release_certification" \
+      "missing Phase 9J certification manifest: $certification_manifest" \
+      "Generate certification artifacts before release packaging." \
+      "make ci-release-certification" \
+      1
+  fi
+
+  set +e
+  certification_check_output="$(python3 - "$certification_manifest" <<'PY'
+import json
+import sys
+
+path = sys.argv[1]
+with open(path, "r", encoding="utf-8") as handle:
+    payload = json.load(handle)
+
+if not isinstance(payload, dict):
+    raise SystemExit("manifest JSON must be an object")
+
+version = payload.get("version")
+if not isinstance(version, str) or version != "phase9j-release-certification-v1":
+    raise SystemExit("manifest version must be phase9j-release-certification-v1")
+
+status = payload.get("status")
+if not isinstance(status, str) or not status:
+    raise SystemExit("manifest missing string field 'status'")
+
+print(status)
+PY
+)"
+  certification_check_rc=$?
+  set -e
+  if [[ "$certification_check_rc" -ne 0 ]]; then
+    emit_error \
+      "invalid_release_certification" \
+      "invalid Phase 9J certification manifest at $certification_manifest" \
+      "Regenerate certification artifacts and ensure manifest schema/status are valid." \
+      "make ci-release-certification" \
+      1
+  fi
+
+  certification_status="$(printf '%s' "$certification_check_output" | tr -d '\r\n')"
+  if [[ "$certification_status" != "certified" ]]; then
+    emit_error \
+      "release_not_certified" \
+      "release candidate is incomplete: certification status is '$certification_status'" \
+      "Fix blocking certification failures and regenerate the certification pack." \
+      "make ci-release-certification" \
+      1
+  fi
+else
+  certification_status="waived"
 fi
 
 release_dir="$releases_dir/$release_id"
@@ -245,15 +335,28 @@ copy_if_exists "$framework_root/bin" "$release_dir/framework/bin"
 copy_if_exists "$framework_root/build/boomhauer" "$release_dir/framework/build/boomhauer"
 copy_if_exists "$framework_root/build/arlen" "$release_dir/framework/build/arlen"
 
+if [[ "$allow_missing_certification" != "1" ]]; then
+  certification_source_dir="$(cd "$(dirname "$certification_manifest")" && pwd)"
+  certification_bundle_dir="$release_dir/metadata/certification"
+  mkdir -p "$certification_bundle_dir"
+  cp -a "$certification_source_dir"/. "$certification_bundle_dir/"
+  certification_bundle_manifest="$certification_bundle_dir/manifest.json"
+fi
+
 cat >"$release_dir/metadata/release.env" <<EOF
 RELEASE_ID=$release_id
 RELEASE_CREATED_UTC=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 ARLEN_APP_ROOT=$release_dir/app
 ARLEN_FRAMEWORK_ROOT=$release_dir/framework
+ARLEN_RELEASE_CERTIFICATION_STATUS=$certification_status
+ARLEN_RELEASE_CERTIFICATION_MANIFEST=$certification_bundle_manifest
 EOF
 
 cat >"$release_dir/metadata/README.txt" <<EOF
 Release: $release_id
+
+Release certification status: $certification_status
+Release certification manifest: $certification_bundle_manifest
 
 Run migrate step before switching traffic:
   cd "$release_dir/app" && "$release_dir/framework/build/arlen" migrate --env production

@@ -112,7 +112,8 @@
     int code = 0;
     NSString *build1 = [self runShellCapture:[NSString stringWithFormat:
                                                   @"%s/tools/deploy/build_release.sh --app-root %s "
-                                                   "--framework-root %s --releases-dir %s --release-id rel1",
+                                                   "--framework-root %s --releases-dir %s --release-id rel1 "
+                                                   "--allow-missing-certification",
                                                   [repoRoot UTF8String], [appRoot UTF8String],
                                                   [repoRoot UTF8String], [releasesDir UTF8String]]
                                     exitCode:&code];
@@ -120,7 +121,8 @@
 
     NSString *build2 = [self runShellCapture:[NSString stringWithFormat:
                                                   @"%s/tools/deploy/build_release.sh --app-root %s "
-                                                   "--framework-root %s --releases-dir %s --release-id rel2",
+                                                   "--framework-root %s --releases-dir %s --release-id rel2 "
+                                                   "--allow-missing-certification",
                                                   [repoRoot UTF8String], [appRoot UTF8String],
                                                   [repoRoot UTF8String], [releasesDir UTF8String]]
                                     exitCode:&code];
@@ -622,6 +624,501 @@
     XCTAssertTrue([markdown containsString:@"SQL Builder Conformance Summary"]);
   } @finally {
     [[NSFileManager defaultManager] removeItemAtPath:outputRoot error:nil];
+  }
+}
+
+- (void)testPhase9HSanitizerSuppressionValidatorAcceptsFixture {
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+
+  int code = 0;
+  NSString *output = [self runShellCapture:[NSString stringWithFormat:
+                                                        @"cd %@ && python3 ./tools/ci/check_sanitizer_suppressions.py "
+                                                         "--fixture tests/fixtures/sanitizers/phase9h_suppressions.json",
+                                                        repoRoot]
+                                   exitCode:&code];
+  XCTAssertEqual(0, code, @"%@", output);
+  XCTAssertTrue([output containsString:@"sanitizer-suppressions: ok"], @"%@", output);
+}
+
+- (void)testPhase9HSanitizerSuppressionValidatorRejectsExpiredSuppression {
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *workRoot = [self createTempDirectoryWithPrefix:@"arlen-phase9h-suppressions"];
+  XCTAssertNotNil(workRoot);
+  if (workRoot == nil) {
+    return;
+  }
+
+  @try {
+    NSString *fixturePath = [workRoot stringByAppendingPathComponent:@"suppressions.json"];
+    XCTAssertTrue([self writeFile:fixturePath
+                          content:@"{\n"
+                                  "  \"version\": \"phase9h-suppression-registry-v1\",\n"
+                                  "  \"lastUpdated\": \"2026-02-25\",\n"
+                                  "  \"suppressions\": [\n"
+                                  "    {\n"
+                                  "      \"id\": \"tsan-expired-001\",\n"
+                                  "      \"status\": \"active\",\n"
+                                  "      \"sanitizer\": \"thread\",\n"
+                                  "      \"owner\": \"runtime-core\",\n"
+                                  "      \"reason\": \"temporary suppression for triage\",\n"
+                                  "      \"introducedOn\": \"2020-01-01\",\n"
+                                  "      \"expiresOn\": \"2020-01-15\"\n"
+                                  "    }\n"
+                                  "  ]\n"
+                                  "}\n"]);
+
+    int code = 0;
+    NSString *output = [self runShellCapture:[NSString stringWithFormat:
+                                                          @"cd %@ && python3 ./tools/ci/check_sanitizer_suppressions.py "
+                                                           "--fixture %@",
+                                                          repoRoot, fixturePath]
+                                     exitCode:&code];
+    XCTAssertNotEqual(0, code, @"%@", output);
+    XCTAssertTrue([output containsString:@"validation failed"], @"%@", output);
+    XCTAssertTrue([output containsString:@"suppression expired on 2020-01-15"], @"%@", output);
+  } @finally {
+    [[NSFileManager defaultManager] removeItemAtPath:workRoot error:nil];
+  }
+}
+
+- (void)testPhase9HSanitizerConfidenceArtifactGeneratorProducesExpectedPack {
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *outputRoot = [self createTempDirectoryWithPrefix:@"arlen-phase9h-confidence"];
+  XCTAssertNotNil(outputRoot);
+  if (outputRoot == nil) {
+    return;
+  }
+
+  @try {
+    int code = 0;
+    NSString *command = [NSString stringWithFormat:
+        @"cd %@ && python3 ./tools/ci/generate_phase9h_sanitizer_confidence_artifacts.py "
+         "--repo-root %@ --output-dir %@ --blocking-status pass --tsan-status skipped",
+        repoRoot, repoRoot, outputRoot];
+    NSString *output = [self runShellCapture:command exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", output);
+    XCTAssertTrue([output containsString:@"phase9h-sanitizers: generated artifacts"], @"%@", output);
+
+    NSString *manifestPath = [outputRoot stringByAppendingPathComponent:@"manifest.json"];
+    NSString *laneStatusPath = [outputRoot stringByAppendingPathComponent:@"sanitizer_lane_status.json"];
+    NSString *matrixPath =
+        [outputRoot stringByAppendingPathComponent:@"sanitizer_matrix_summary.json"];
+    NSString *suppressionPath =
+        [outputRoot stringByAppendingPathComponent:@"sanitizer_suppression_summary.json"];
+    NSString *markdownPath =
+        [outputRoot stringByAppendingPathComponent:@"phase9h_sanitizer_confidence.md"];
+
+    NSError *error = nil;
+    NSData *manifestData = [NSData dataWithContentsOfFile:manifestPath];
+    XCTAssertNotNil(manifestData);
+    NSDictionary *manifest = [NSJSONSerialization JSONObjectWithData:manifestData options:0 error:&error];
+    XCTAssertNotNil(manifest);
+    XCTAssertNil(error);
+    XCTAssertEqualObjects(@"phase9h-sanitizer-confidence-v1", manifest[@"version"]);
+
+    NSData *laneStatusData = [NSData dataWithContentsOfFile:laneStatusPath];
+    XCTAssertNotNil(laneStatusData);
+    NSDictionary *laneStatus =
+        [NSJSONSerialization JSONObjectWithData:laneStatusData options:0 error:&error];
+    XCTAssertNotNil(laneStatus);
+    XCTAssertNil(error);
+    NSDictionary *laneStatuses = laneStatus[@"lane_statuses"];
+    XCTAssertEqualObjects(@"pass", laneStatuses[@"asan_ubsan_blocking"]);
+    XCTAssertEqualObjects(@"skipped", laneStatuses[@"tsan_experimental"]);
+
+    NSData *matrixData = [NSData dataWithContentsOfFile:matrixPath];
+    XCTAssertNotNil(matrixData);
+    NSDictionary *matrixSummary =
+        [NSJSONSerialization JSONObjectWithData:matrixData options:0 error:&error];
+    XCTAssertNotNil(matrixSummary);
+    XCTAssertNil(error);
+    XCTAssertEqualObjects(@"phase9h-sanitizer-confidence-v1", matrixSummary[@"version"]);
+    XCTAssertTrue([matrixSummary[@"lanes"] count] >= 2);
+
+    NSData *suppressionData = [NSData dataWithContentsOfFile:suppressionPath];
+    XCTAssertNotNil(suppressionData);
+    NSDictionary *suppressionSummary =
+        [NSJSONSerialization JSONObjectWithData:suppressionData options:0 error:&error];
+    XCTAssertNotNil(suppressionSummary);
+    XCTAssertNil(error);
+    XCTAssertEqualObjects(@"phase9h-sanitizer-confidence-v1", suppressionSummary[@"version"]);
+    XCTAssertEqual(0, [suppressionSummary[@"active_count"] integerValue]);
+
+    NSString *markdown =
+        [NSString stringWithContentsOfFile:markdownPath encoding:NSUTF8StringEncoding error:&error];
+    XCTAssertNotNil(markdown);
+    XCTAssertNil(error);
+    XCTAssertTrue([markdown containsString:@"# Phase 9H Sanitizer Confidence Summary"]);
+    XCTAssertTrue([markdown containsString:@"Lane Status"]);
+    XCTAssertTrue([markdown containsString:@"Suppression Summary"]);
+  } @finally {
+    [[NSFileManager defaultManager] removeItemAtPath:outputRoot error:nil];
+  }
+}
+
+- (void)testPhase9IFaultInjectionHarnessProducesExpectedPack {
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *outputRoot = [self createTempDirectoryWithPrefix:@"arlen-phase9i-confidence"];
+  XCTAssertNotNil(outputRoot);
+  if (outputRoot == nil) {
+    return;
+  }
+
+  @try {
+    int code = 0;
+    NSString *command = [NSString stringWithFormat:
+        @"cd %@ && ARLEN_PHASE9I_OUTPUT_DIR=%@ ARLEN_PHASE9I_ITERS=1 "
+         "ARLEN_PHASE9I_MODES=concurrent ARLEN_PHASE9I_SEED=4242 "
+         "bash ./tools/ci/run_phase9i_fault_injection.sh",
+        repoRoot, outputRoot];
+    NSString *output = [self runShellCapture:command exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", output);
+    XCTAssertTrue([output containsString:@"phase9i-fault-injection: generated artifacts"], @"%@", output);
+
+    NSString *manifestPath = [outputRoot stringByAppendingPathComponent:@"manifest.json"];
+    NSString *resultsPath = [outputRoot stringByAppendingPathComponent:@"fault_injection_results.json"];
+    NSString *markdownPath =
+        [outputRoot stringByAppendingPathComponent:@"phase9i_fault_injection_summary.md"];
+
+    NSError *error = nil;
+    NSData *manifestData = [NSData dataWithContentsOfFile:manifestPath];
+    XCTAssertNotNil(manifestData);
+    NSDictionary *manifest = [NSJSONSerialization JSONObjectWithData:manifestData options:0 error:&error];
+    XCTAssertNotNil(manifest);
+    XCTAssertNil(error);
+    XCTAssertEqualObjects(@"phase9i-fault-injection-v1", manifest[@"version"]);
+
+    NSData *resultsData = [NSData dataWithContentsOfFile:resultsPath];
+    XCTAssertNotNil(resultsData);
+    NSDictionary *resultsPayload =
+        [NSJSONSerialization JSONObjectWithData:resultsData options:0 error:&error];
+    XCTAssertNotNil(resultsPayload);
+    XCTAssertNil(error);
+    XCTAssertEqualObjects(@"phase9i-fault-injection-v1", resultsPayload[@"version"]);
+    NSDictionary *summary = resultsPayload[@"summary"];
+    XCTAssertNotNil(summary);
+    XCTAssertEqual(0, [summary[@"failed"] integerValue]);
+    XCTAssertTrue([summary[@"total"] integerValue] > 0);
+    NSDictionary *seamCounts = summary[@"seam_counts"];
+    XCTAssertTrue([seamCounts[@"http_parser_dispatcher"] integerValue] > 0);
+    XCTAssertTrue([seamCounts[@"websocket_handshake_lifecycle"] integerValue] > 0);
+    XCTAssertTrue([seamCounts[@"runtime_stop_start_boundary"] integerValue] > 0);
+
+    NSString *markdown =
+        [NSString stringWithContentsOfFile:markdownPath encoding:NSUTF8StringEncoding error:&error];
+    XCTAssertNotNil(markdown);
+    XCTAssertNil(error);
+    XCTAssertTrue([markdown containsString:@"# Phase 9I Fault Injection Summary"]);
+    XCTAssertTrue([markdown containsString:@"Scenario Matrix"]);
+  } @finally {
+    [[NSFileManager defaultManager] removeItemAtPath:outputRoot error:nil];
+  }
+}
+
+- (void)testPhase9IFaultInjectionSeedReplayIsDeterministic {
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *outputA = [self createTempDirectoryWithPrefix:@"arlen-phase9i-seed-a"];
+  NSString *outputB = [self createTempDirectoryWithPrefix:@"arlen-phase9i-seed-b"];
+  XCTAssertNotNil(outputA);
+  XCTAssertNotNil(outputB);
+  if (outputA == nil || outputB == nil) {
+    return;
+  }
+
+  @try {
+    int code = 0;
+    NSString *command = [NSString stringWithFormat:
+        @"cd %@ && make boomhauer && "
+         "python3 ./tools/ci/runtime_fault_injection.py --repo-root %@ --binary ./build/boomhauer "
+         "--output-dir %@ --seed 777 --iterations 2 --modes concurrent --scenarios socket_churn_burst && "
+         "python3 ./tools/ci/runtime_fault_injection.py --repo-root %@ --binary ./build/boomhauer "
+         "--output-dir %@ --seed 777 --iterations 2 --modes concurrent --scenarios socket_churn_burst",
+        repoRoot, repoRoot, outputA, repoRoot, outputB];
+    NSString *output = [self runShellCapture:command exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", output);
+
+    NSError *error = nil;
+    NSData *resultsDataA =
+        [NSData dataWithContentsOfFile:[outputA stringByAppendingPathComponent:@"fault_injection_results.json"]];
+    NSData *resultsDataB =
+        [NSData dataWithContentsOfFile:[outputB stringByAppendingPathComponent:@"fault_injection_results.json"]];
+    XCTAssertNotNil(resultsDataA);
+    XCTAssertNotNil(resultsDataB);
+    NSDictionary *payloadA =
+        [NSJSONSerialization JSONObjectWithData:resultsDataA options:0 error:&error];
+    XCTAssertNotNil(payloadA);
+    XCTAssertNil(error);
+    NSDictionary *payloadB =
+        [NSJSONSerialization JSONObjectWithData:resultsDataB options:0 error:&error];
+    XCTAssertNotNil(payloadB);
+    XCTAssertNil(error);
+
+    NSArray *rowsA = [payloadA[@"results"] isKindOfClass:[NSArray class]] ? payloadA[@"results"] : @[];
+    NSArray *rowsB = [payloadB[@"results"] isKindOfClass:[NSArray class]] ? payloadB[@"results"] : @[];
+    XCTAssertEqual([rowsA count], [rowsB count]);
+
+    NSMutableArray *seedsA = [NSMutableArray array];
+    NSMutableArray *seedsB = [NSMutableArray array];
+    for (id value in rowsA) {
+      NSDictionary *row = [value isKindOfClass:[NSDictionary class]] ? value : @{};
+      [seedsA addObject:row[@"seed"] ?: [NSNull null]];
+    }
+    for (id value in rowsB) {
+      NSDictionary *row = [value isKindOfClass:[NSDictionary class]] ? value : @{};
+      [seedsB addObject:row[@"seed"] ?: [NSNull null]];
+    }
+
+    XCTAssertEqualObjects(seedsA, seedsB);
+  } @finally {
+    [[NSFileManager defaultManager] removeItemAtPath:outputA error:nil];
+    [[NSFileManager defaultManager] removeItemAtPath:outputB error:nil];
+  }
+}
+
+- (void)testPhase9JReleaseCertificationGeneratorProducesExpectedPack {
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *fixtureRoot = [self createTempDirectoryWithPrefix:@"arlen-phase9j-fixtures"];
+  NSString *outputRoot = [self createTempDirectoryWithPrefix:@"arlen-phase9j-output"];
+  XCTAssertNotNil(fixtureRoot);
+  XCTAssertNotNil(outputRoot);
+  if (fixtureRoot == nil || outputRoot == nil) {
+    return;
+  }
+
+  @try {
+    NSString *phase5eDir = [fixtureRoot stringByAppendingPathComponent:@"phase5e"];
+    NSString *phase9hDir = [fixtureRoot stringByAppendingPathComponent:@"phase9h"];
+    NSString *phase9iDir = [fixtureRoot stringByAppendingPathComponent:@"phase9i"];
+
+    XCTAssertTrue([self writeFile:[phase5eDir stringByAppendingPathComponent:@"manifest.json"]
+                          content:@"{\n"
+                                  "  \"version\": \"phase5e-confidence-v1\"\n"
+                                  "}\n"]);
+    XCTAssertTrue([self writeFile:[phase5eDir stringByAppendingPathComponent:@"adapter_capability_matrix_snapshot.json"]
+                          content:@"{\n"
+                                  "  \"version\": \"phase5e-confidence-v1\",\n"
+                                  "  \"adapter_count\": 2\n"
+                                  "}\n"]);
+    XCTAssertTrue([self writeFile:[phase5eDir stringByAppendingPathComponent:@"sql_builder_conformance_summary.json"]
+                          content:@"{\n"
+                                  "  \"version\": \"phase5e-confidence-v1\",\n"
+                                  "  \"scenario_count\": 6\n"
+                                  "}\n"]);
+
+    XCTAssertTrue([self writeFile:[phase9hDir stringByAppendingPathComponent:@"sanitizer_lane_status.json"]
+                          content:@"{\n"
+                                  "  \"version\": \"phase9h-sanitizer-confidence-v1\",\n"
+                                  "  \"lane_statuses\": {\n"
+                                  "    \"asan_ubsan_blocking\": \"pass\",\n"
+                                  "    \"tsan_experimental\": \"skipped\"\n"
+                                  "  }\n"
+                                  "}\n"]);
+    XCTAssertTrue([self writeFile:[phase9hDir stringByAppendingPathComponent:@"sanitizer_suppression_summary.json"]
+                          content:@"{\n"
+                                  "  \"version\": \"phase9h-sanitizer-confidence-v1\",\n"
+                                  "  \"active_count\": 0,\n"
+                                  "  \"resolved_count\": 1,\n"
+                                  "  \"expiring_soon\": 0\n"
+                                  "}\n"]);
+
+    XCTAssertTrue([self writeFile:[phase9iDir stringByAppendingPathComponent:@"fault_injection_results.json"]
+                          content:@"{\n"
+                                  "  \"version\": \"phase9i-fault-injection-v1\",\n"
+                                  "  \"summary\": {\n"
+                                  "    \"failed\": 0,\n"
+                                  "    \"total\": 8,\n"
+                                  "    \"seam_counts\": {\n"
+                                  "      \"http_parser_dispatcher\": 3,\n"
+                                  "      \"websocket_handshake_lifecycle\": 3,\n"
+                                  "      \"runtime_stop_start_boundary\": 2\n"
+                                  "    }\n"
+                                  "  }\n"
+                                  "}\n"]);
+
+    int code = 0;
+    NSString *command = [NSString stringWithFormat:
+        @"cd %@ && python3 ./tools/ci/generate_phase9j_release_certification_pack.py "
+         "--repo-root %@ --output-dir %@ --release-id rc-test-001 "
+         "--phase5e-dir %@ --phase9h-dir %@ --phase9i-dir %@",
+        repoRoot, repoRoot, outputRoot, phase5eDir, phase9hDir, phase9iDir];
+    NSString *output = [self runShellCapture:command exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", output);
+    XCTAssertTrue([output containsString:@"phase9j-certification: generated artifacts"], @"%@", output);
+
+    NSError *error = nil;
+    NSData *manifestData = [NSData dataWithContentsOfFile:[outputRoot stringByAppendingPathComponent:@"manifest.json"]];
+    XCTAssertNotNil(manifestData);
+    NSDictionary *manifest = [NSJSONSerialization JSONObjectWithData:manifestData options:0 error:&error];
+    XCTAssertNotNil(manifest);
+    XCTAssertNil(error);
+    XCTAssertEqualObjects(@"phase9j-release-certification-v1", manifest[@"version"]);
+    XCTAssertEqualObjects(@"certified", manifest[@"status"]);
+
+    NSData *summaryData =
+        [NSData dataWithContentsOfFile:[outputRoot stringByAppendingPathComponent:@"certification_summary.json"]];
+    XCTAssertNotNil(summaryData);
+    NSDictionary *summary = [NSJSONSerialization JSONObjectWithData:summaryData options:0 error:&error];
+    XCTAssertNotNil(summary);
+    XCTAssertNil(error);
+    XCTAssertEqualObjects(@"certified", summary[@"status"]);
+    NSDictionary *gateSummary = summary[@"gate_summary"];
+    XCTAssertEqual(0, [gateSummary[@"blocking_failed"] integerValue]);
+
+    NSString *markdown =
+        [NSString stringWithContentsOfFile:[outputRoot stringByAppendingPathComponent:@"phase9j_release_certification.md"]
+                                  encoding:NSUTF8StringEncoding
+                                     error:&error];
+    XCTAssertNotNil(markdown);
+    XCTAssertNil(error);
+    XCTAssertTrue([markdown containsString:@"# Phase 9J Release Certification"]);
+    XCTAssertTrue([markdown containsString:@"Known-Risk Register"]);
+  } @finally {
+    [[NSFileManager defaultManager] removeItemAtPath:fixtureRoot error:nil];
+    [[NSFileManager defaultManager] removeItemAtPath:outputRoot error:nil];
+  }
+}
+
+- (void)testPhase9JReleaseCertificationGeneratorRejectsStaleRiskRegister {
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *fixtureRoot = [self createTempDirectoryWithPrefix:@"arlen-phase9j-stale-fixtures"];
+  NSString *outputRoot = [self createTempDirectoryWithPrefix:@"arlen-phase9j-stale-output"];
+  XCTAssertNotNil(fixtureRoot);
+  XCTAssertNotNil(outputRoot);
+  if (fixtureRoot == nil || outputRoot == nil) {
+    return;
+  }
+
+  @try {
+    NSString *phase5eDir = [fixtureRoot stringByAppendingPathComponent:@"phase5e"];
+    NSString *phase9hDir = [fixtureRoot stringByAppendingPathComponent:@"phase9h"];
+    NSString *phase9iDir = [fixtureRoot stringByAppendingPathComponent:@"phase9i"];
+    NSString *riskPath = [fixtureRoot stringByAppendingPathComponent:@"known_risks.json"];
+
+    XCTAssertTrue([self writeFile:[phase5eDir stringByAppendingPathComponent:@"manifest.json"]
+                          content:@"{\n"
+                                  "  \"version\": \"phase5e-confidence-v1\"\n"
+                                  "}\n"]);
+    XCTAssertTrue([self writeFile:[phase9hDir stringByAppendingPathComponent:@"sanitizer_lane_status.json"]
+                          content:@"{\n"
+                                  "  \"version\": \"phase9h-sanitizer-confidence-v1\",\n"
+                                  "  \"lane_statuses\": {\n"
+                                  "    \"asan_ubsan_blocking\": \"pass\",\n"
+                                  "    \"tsan_experimental\": \"pass\"\n"
+                                  "  }\n"
+                                  "}\n"]);
+    XCTAssertTrue([self writeFile:[phase9iDir stringByAppendingPathComponent:@"fault_injection_results.json"]
+                          content:@"{\n"
+                                  "  \"version\": \"phase9i-fault-injection-v1\",\n"
+                                  "  \"summary\": {\n"
+                                  "    \"failed\": 0,\n"
+                                  "    \"total\": 5,\n"
+                                  "    \"seam_counts\": {\n"
+                                  "      \"http_parser_dispatcher\": 2,\n"
+                                  "      \"websocket_handshake_lifecycle\": 2,\n"
+                                  "      \"runtime_stop_start_boundary\": 1\n"
+                                  "    }\n"
+                                  "  }\n"
+                                  "}\n"]);
+    XCTAssertTrue([self writeFile:riskPath
+                          content:@"{\n"
+                                  "  \"version\": \"phase9j-known-risk-register-v1\",\n"
+                                  "  \"lastUpdated\": \"2020-01-01\",\n"
+                                  "  \"risks\": [\n"
+                                  "    {\n"
+                                  "      \"id\": \"old-risk\",\n"
+                                  "      \"title\": \"stale register entry\",\n"
+                                  "      \"status\": \"active\",\n"
+                                  "      \"owner\": \"runtime-core\",\n"
+                                  "      \"targetDate\": \"2026-03-01\"\n"
+                                  "    }\n"
+                                  "  ]\n"
+                                  "}\n"]);
+
+    int code = 0;
+    NSString *command = [NSString stringWithFormat:
+        @"cd %@ && python3 ./tools/ci/generate_phase9j_release_certification_pack.py "
+         "--repo-root %@ --output-dir %@ --release-id rc-test-stale "
+         "--phase5e-dir %@ --phase9h-dir %@ --phase9i-dir %@ --risk-register %@",
+        repoRoot, repoRoot, outputRoot, phase5eDir, phase9hDir, phase9iDir, riskPath];
+    NSString *output = [self runShellCapture:command exitCode:&code];
+    XCTAssertNotEqual(0, code, @"%@", output);
+    XCTAssertTrue([output containsString:@"known-risk register is stale"], @"%@", output);
+
+    NSError *error = nil;
+    NSData *manifestData = [NSData dataWithContentsOfFile:[outputRoot stringByAppendingPathComponent:@"manifest.json"]];
+    XCTAssertNotNil(manifestData);
+    NSDictionary *manifest = [NSJSONSerialization JSONObjectWithData:manifestData options:0 error:&error];
+    XCTAssertNotNil(manifest);
+    XCTAssertNil(error);
+    XCTAssertEqualObjects(@"incomplete", manifest[@"status"]);
+  } @finally {
+    [[NSFileManager defaultManager] removeItemAtPath:fixtureRoot error:nil];
+    [[NSFileManager defaultManager] removeItemAtPath:outputRoot error:nil];
+  }
+}
+
+- (void)testBuildReleaseRequiresPhase9JCertificationByDefault {
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *appRoot = [self createTempDirectoryWithPrefix:@"arlen-phase9j-release-app"];
+  NSString *workRoot = [self createTempDirectoryWithPrefix:@"arlen-phase9j-release-work"];
+  XCTAssertNotNil(appRoot);
+  XCTAssertNotNil(workRoot);
+  if (appRoot == nil || workRoot == nil) {
+    return;
+  }
+
+  @try {
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"config/app.plist"]
+                          content:@"{\n"
+                                  "  host = \"127.0.0.1\";\n"
+                                  "  port = 3000;\n"
+                                  "}\n"]);
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"config/environments/production.plist"]
+                          content:@"{\n  logFormat = \"json\";\n}\n"]);
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"app_lite.m"]
+                          content:@"#import <Foundation/Foundation.h>\n"
+                                  "int main(int argc, const char *argv[]) { (void)argc; (void)argv; return 0; }\n"]);
+
+    NSString *releasesDir = [workRoot stringByAppendingPathComponent:@"releases"];
+    NSString *missingManifest = [workRoot stringByAppendingPathComponent:@"missing/manifest.json"];
+    NSString *certManifest = [workRoot stringByAppendingPathComponent:@"cert/manifest.json"];
+    XCTAssertTrue([self writeFile:certManifest
+                          content:@"{\n"
+                                  "  \"version\": \"phase9j-release-certification-v1\",\n"
+                                  "  \"status\": \"certified\",\n"
+                                  "  \"release_id\": \"rc-unit\",\n"
+                                  "  \"artifacts\": []\n"
+                                  "}\n"]);
+
+    int code = 0;
+    NSString *missingOutput = [self runShellCapture:[NSString stringWithFormat:
+                                                         @"%s/tools/deploy/build_release.sh "
+                                                          "--app-root %s --framework-root %s --releases-dir %s "
+                                                          "--release-id missing-cert --certification-manifest %s "
+                                                          "--dry-run",
+                                                         [repoRoot UTF8String], [appRoot UTF8String],
+                                                         [repoRoot UTF8String], [releasesDir UTF8String],
+                                                         [missingManifest UTF8String]]
+                                           exitCode:&code];
+    XCTAssertNotEqual(0, code, @"%@", missingOutput);
+    XCTAssertTrue([missingOutput containsString:@"missing Phase 9J certification manifest"], @"%@", missingOutput);
+
+    NSString *passingOutput = [self runShellCapture:[NSString stringWithFormat:
+                                                         @"%s/tools/deploy/build_release.sh "
+                                                          "--app-root %s --framework-root %s --releases-dir %s "
+                                                          "--release-id with-cert --certification-manifest %s "
+                                                          "--dry-run --json",
+                                                         [repoRoot UTF8String], [appRoot UTF8String],
+                                                         [repoRoot UTF8String], [releasesDir UTF8String],
+                                                         [certManifest UTF8String]]
+                                           exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", passingOutput);
+    NSDictionary *payload = [self parseJSONDictionaryFromOutput:passingOutput context:@"build_release dry-run json"];
+    XCTAssertEqualObjects(@"planned", payload[@"status"]);
+    XCTAssertEqualObjects(@"certified", payload[@"certification_status"]);
+  } @finally {
+    [[NSFileManager defaultManager] removeItemAtPath:appRoot error:nil];
+    [[NSFileManager defaultManager] removeItemAtPath:workRoot error:nil];
   }
 }
 

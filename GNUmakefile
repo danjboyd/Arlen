@@ -40,7 +40,7 @@ INCLUDE_FLAGS := -Isrc/Arlen -Isrc/Arlen/Core -Isrc/Arlen/Data -Isrc/Arlen/HTTP 
 EXTRA_OBJC_FLAGS ?=
 OBJC_FLAGS := $$(gnustep-config --objc-flags) -fobjc-arc $(EXTRA_OBJC_FLAGS)
 
-.PHONY: all eocc transpile tech-demo-transpile generated-compile arlen boomhauer tech-demo-server api-reference-server migration-sample-server arlen-data-example test-data-layer dev-server tech-demo smoke-render smoke routes build-tests test test-unit test-integration perf perf-fast deploy-smoke phase5e-confidence ci-quality ci-sanitizers check docs-api docs-html docs-serve clean
+.PHONY: all eocc transpile tech-demo-transpile generated-compile arlen boomhauer tech-demo-server api-reference-server migration-sample-server arlen-data-example test-data-layer dev-server tech-demo smoke-render smoke routes build-tests test test-unit test-integration perf perf-fast parity-phaseb perf-phasec perf-phased deploy-smoke phase5e-confidence ci-quality ci-sanitizers ci-fault-injection ci-release-certification ci-docs check docs-api docs-html docs-serve clean
 
 all: eocc transpile generated-compile arlen boomhauer
 
@@ -157,6 +157,15 @@ perf: boomhauer
 perf-fast: boomhauer
 >ARLEN_PERF_FAST=1 bash ./tests/performance/run_perf.sh
 
+parity-phaseb: boomhauer
+>bash ./tests/performance/run_phaseb_parity.sh
+
+perf-phasec: boomhauer
+>python3 ./tests/performance/run_phasec_protocol.py
+
+perf-phased: boomhauer
+>python3 ./tests/performance/run_phased_campaign.py
+
 deploy-smoke:
 >bash ./tools/deploy/smoke_release.sh --app-root examples/tech_demo --framework-root $(ROOT_DIR)
 
@@ -168,6 +177,15 @@ ci-quality:
 
 ci-sanitizers:
 >bash ./tools/ci/run_phase5e_sanitizers.sh
+
+ci-fault-injection:
+>bash ./tools/ci/run_phase9i_fault_injection.sh
+
+ci-release-certification:
+>bash ./tools/ci/run_phase9j_release_certification.sh
+
+ci-docs:
+>bash ./tools/ci/run_docs_quality.sh
 
 check: test-unit test-integration perf
 

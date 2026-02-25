@@ -82,6 +82,15 @@ static NSString *ALNNormalizeChannelName(NSString *value) {
 
 - (ALNRealtimeSubscription *)subscribeChannel:(NSString *)channel
                                    subscriber:(id<ALNRealtimeSubscriber>)subscriber {
+  return [self subscribeChannel:channel subscriber:subscriber rejectionReason:NULL];
+}
+
+- (ALNRealtimeSubscription *)subscribeChannel:(NSString *)channel
+                                   subscriber:(id<ALNRealtimeSubscriber>)subscriber
+                             rejectionReason:(NSString **)rejectionReason {
+  if (rejectionReason != NULL) {
+    *rejectionReason = nil;
+  }
   NSString *normalized = ALNNormalizeChannelName(channel);
   if ([normalized length] == 0 || subscriber == nil) {
     return nil;
@@ -96,12 +105,18 @@ static NSString *ALNNormalizeChannelName(NSString *value) {
   if (self.maxTotalSubscribers > 0 &&
       self.activeSubscriberCount >= self.maxTotalSubscribers) {
     self.rejectedSubscriptions += 1;
+    if (rejectionReason != NULL) {
+      *rejectionReason = @"max_total_subscribers";
+    }
     [self.lock unlock];
     return nil;
   }
   if (self.maxSubscribersPerChannel > 0 &&
       channelCount >= self.maxSubscribersPerChannel) {
     self.rejectedSubscriptions += 1;
+    if (rejectionReason != NULL) {
+      *rejectionReason = @"max_channel_subscribers";
+    }
     [self.lock unlock];
     return nil;
   }

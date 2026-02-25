@@ -131,6 +131,35 @@ ARLEN_MAX_HTTP_SESSIONS=128 ./bin/boomhauer
 With this limit, excess concurrent HTTP sessions receive `503 Service Unavailable` with
 `X-Arlen-Backpressure-Reason: http_session_limit`.
 
+Runtime worker queue backpressure override:
+
+```bash
+ARLEN_MAX_HTTP_WORKERS=1 ARLEN_MAX_QUEUED_HTTP_CONNECTIONS=1 ./bin/boomhauer
+```
+
+With this limit, excess queued requests receive `503 Service Unavailable` with
+`X-Arlen-Backpressure-Reason: http_worker_queue_full`.
+
+Runtime realtime subscriber backpressure override:
+
+```bash
+ARLEN_MAX_REALTIME_SUBSCRIBERS_PER_CHANNEL=1 ./bin/boomhauer
+```
+
+With this limit, excess `/ws/channel/:channel` subscriptions receive `503 Service Unavailable`
+with `X-Arlen-Backpressure-Reason: realtime_channel_subscriber_limit`.
+
+Request dispatch mode override:
+
+```bash
+ARLEN_REQUEST_DISPATCH_MODE=concurrent ./bin/boomhauer --env production
+```
+
+`requestDispatchMode` accepts `concurrent` or `serialized`.
+Default is `serialized` in `production` and `concurrent` in non-production environments.
+`serialized` mode also forces `Connection: close` and one request per HTTP connection to preserve
+the known-stable worker lifecycle under production load.
+
 Security profile override:
 
 ```bash
@@ -189,14 +218,24 @@ make test
 make test-unit
 make test-integration
 make test-data-layer
+make parity-phaseb
+make perf-phasec
+make perf-phased
 make check
 make ci-quality
+make ci-fault-injection
+make ci-release-certification
 make phase5e-confidence
 ```
 
 `make check` runs unit + integration + perf gates.
 `make test-data-layer` validates standalone `ArlenData` consumption outside the full runtime stack.
-`make ci-quality` runs the Phase 5E quality gate (including soak/fault tests and confidence artifact generation).
+`make parity-phaseb` runs the Arlen-vs-FastAPI Phase B parity gate and writes `build/perf/parity_fastapi_latest.json`.
+`make perf-phasec` runs the Phase C warmup/concurrency-ladder protocol and writes `build/perf/phasec/latest_protocol_report.json`.
+`make perf-phased` runs the Phase D baseline campaign (parity + comparison matrix) and writes `build/perf/phased/latest_campaign_report.json`.
+`make ci-quality` runs the Phase 5E quality gate (including soak/fault tests, runtime concurrency checks, Phase 9I fault injection, and confidence artifact generation).
+`make ci-fault-injection` runs the Phase 9I runtime seam fault matrix and writes artifacts under `build/release_confidence/phase9i`.
+`make ci-release-certification` runs the Phase 9J release checklist and writes certification artifacts under `build/release_confidence/phase9j`.
 `make test-unit` and `make test-integration` run with a repo-local GNUstep test home (`.gnustep-home`) to keep defaults/lock files isolated.
 
 Soak iteration override:
@@ -577,6 +616,32 @@ Sanitizer gate command:
 make ci-sanitizers
 ```
 
+`make ci-sanitizers` runs the Phase 9H blocking lane (ASan/UBSan), validates suppression registry
+contracts, and generates confidence artifacts under `build/release_confidence/phase9h`.
+
+Optional TSAN experimental lane:
+
+```bash
+ARLEN_SANITIZER_INCLUDE_TSAN=1 make ci-sanitizers
+```
+
+TSAN artifacts are retained at `build/sanitizers/tsan` for triage.
+
+Fault-injection gate seed replay:
+
+```bash
+ARLEN_PHASE9I_SEED=9011 make ci-fault-injection
+```
+
+Release certification gate:
+
+```bash
+make ci-release-certification
+```
+
+This command packages release evidence from the inline hardening gates, sanitizer/race-detection reports,
+fault/stress matrices, and known-risk register validation into a single Phase 9J certification pack.
+
 ## 18. Deploy Smoke Validation
 
 ```bash
@@ -607,6 +672,10 @@ tools/deploy/build_release.sh \
   --framework-root /path/to/Arlen \
   --releases-dir /path/to/app/releases \
   --release-id rel-001 \
+  --certification-manifest /path/to/Arlen/build/release_confidence/phase9j/manifest.json \
   --dry-run \
   --json
 ```
+
+`build_release.sh` enforces a Phase 9J certification manifest by default. Use `--allow-missing-certification`
+only for non-release smoke workflows.

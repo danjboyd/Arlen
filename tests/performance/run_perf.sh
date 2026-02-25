@@ -65,7 +65,9 @@ else
   skip_gate="${ARLEN_PERF_SKIP_GATE:-0}"
 fi
 
-make "${MAKE_TARGETS[@]}" >/dev/null
+if [[ "${ARLEN_PERF_SKIP_BUILD:-0}" != "1" ]]; then
+  make "${MAKE_TARGETS[@]}" >/dev/null
+fi
 
 port="${ARLEN_PERF_PORT:-3301}"
 resolved_args=()

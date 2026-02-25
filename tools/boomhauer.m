@@ -4,6 +4,178 @@
 
 #import "ArlenServer.h"
 
+static NSString *EnvString(const char *name) {
+  const char *raw = getenv(name);
+  if (raw == NULL || raw[0] == '\0') {
+    return nil;
+  }
+  return [NSString stringWithUTF8String:raw];
+}
+
+static NSString *TrimmedStringValue(id value) {
+  if (![value isKindOfClass:[NSString class]]) {
+    return @"";
+  }
+  NSString *trimmed = [(NSString *)value stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+  return trimmed ?: @"";
+}
+
+static BOOL ParseStrictIntegerValue(id value, NSInteger *parsedOut) {
+  if ([value isKindOfClass:[NSNumber class]]) {
+    if (parsedOut != NULL) {
+      *parsedOut = [(NSNumber *)value integerValue];
+    }
+    return YES;
+  }
+  if (![value isKindOfClass:[NSString class]]) {
+    return NO;
+  }
+  NSString *trimmed =
+      [(NSString *)value stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+  if ([trimmed length] == 0) {
+    return NO;
+  }
+  NSScanner *scanner = [NSScanner scannerWithString:trimmed];
+  NSInteger parsed = 0;
+  if (![scanner scanInteger:&parsed] || ![scanner isAtEnd]) {
+    return NO;
+  }
+  if (parsedOut != NULL) {
+    *parsedOut = parsed;
+  }
+  return YES;
+}
+
+static NSString *NormalizedDBIdentifier(NSString *value, NSString *fallback) {
+  NSString *trimmed = TrimmedStringValue(value);
+  if ([trimmed length] == 0) {
+    return fallback ?: @"";
+  }
+  NSCharacterSet *allowed =
+      [NSCharacterSet characterSetWithCharactersInString:
+                           @"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_"];
+  if ([[trimmed stringByTrimmingCharactersInSet:allowed] length] > 0) {
+    return fallback ?: @"";
+  }
+  return trimmed;
+}
+
+static NSString *BenchmarkDBSchema(void) {
+  return NormalizedDBIdentifier(EnvString("ARLEN_BENCH_DB_SCHEMA"), @"bench");
+}
+
+static NSString *BenchmarkDBTable(void) {
+  return NormalizedDBIdentifier(EnvString("ARLEN_BENCH_DB_TABLE"), @"items");
+}
+
+static NSUInteger BenchmarkDBPoolSize(void) {
+  NSInteger parsed = 8;
+  NSString *raw = EnvString("ARLEN_BENCH_DB_POOL_SIZE");
+  if ([raw length] > 0) {
+    parsed = [raw integerValue];
+  }
+  if (parsed < 1 || parsed > 128) {
+    return 8;
+  }
+  return (NSUInteger)parsed;
+}
+
+static NSString *BenchmarkDBConnectionString(void) {
+  NSString *explicit = EnvString("ARLEN_BENCH_DB_URL");
+  if ([explicit length] > 0) {
+    return explicit;
+  }
+  explicit = EnvString("ARLEN_DATABASE_URL");
+  if ([explicit length] > 0) {
+    return explicit;
+  }
+
+  NSMutableArray *parts = [NSMutableArray array];
+  NSString *host = TrimmedStringValue(EnvString("PGHOST"));
+  if ([host length] > 0) {
+    [parts addObject:[NSString stringWithFormat:@"host=%@", host]];
+  }
+
+  NSString *port = TrimmedStringValue(EnvString("PGPORT"));
+  if ([port length] == 0) {
+    port = @"5432";
+  }
+  [parts addObject:[NSString stringWithFormat:@"port=%@", port]];
+
+  NSString *user = TrimmedStringValue(EnvString("PGUSER"));
+  if ([user length] == 0) {
+    user = TrimmedStringValue(EnvString("USER"));
+  }
+  if ([user length] > 0) {
+    [parts addObject:[NSString stringWithFormat:@"user=%@", user]];
+  }
+
+  NSString *password = TrimmedStringValue(EnvString("PGPASSWORD"));
+  if ([password length] > 0) {
+    [parts addObject:[NSString stringWithFormat:@"password=%@", password]];
+  }
+
+  NSString *database = TrimmedStringValue(EnvString("PGDATABASE"));
+  if ([database length] == 0) {
+    database = @"arlen_bench_local";
+  }
+  [parts addObject:[NSString stringWithFormat:@"dbname=%@", database]];
+
+  return [parts componentsJoinedByString:@" "];
+}
+
+static ALNPg *BenchmarkDBAdapter(NSError **error) {
+  static ALNPg *adapter = nil;
+  @synchronized([ALNPg class]) {
+    if (adapter != nil) {
+      return adapter;
+    }
+    NSString *connectionString = BenchmarkDBConnectionString();
+    ALNPg *candidate = [[ALNPg alloc] initWithConnectionString:connectionString
+                                                 maxConnections:BenchmarkDBPoolSize()
+                                                          error:error];
+    if (candidate != nil) {
+      adapter = candidate;
+    }
+    return adapter;
+  }
+}
+
+static NSDictionary *BenchmarkDBErrorPayload(NSString *code, NSString *message) {
+  return @{
+    @"error" : @{
+      @"code" : code ?: @"error",
+      @"message" : message ?: @"request failed",
+    }
+  };
+}
+
+static NSDictionary *BenchmarkDBParseRequestObject(ALNContext *ctx, NSError **error) {
+  NSData *body = [ctx.request.body isKindOfClass:[NSData class]] ? ctx.request.body : [NSData data];
+  if ([body length] == 0) {
+    if (error != NULL) {
+      *error = [NSError errorWithDomain:@"Boomhauer.DB.API"
+                                   code:1
+                               userInfo:@{
+                                 NSLocalizedDescriptionKey : @"request body must be a JSON object"
+                               }];
+    }
+    return nil;
+  }
+  id parsed = [NSJSONSerialization JSONObjectWithData:body options:0 error:error];
+  if (![parsed isKindOfClass:[NSDictionary class]]) {
+    if (error != NULL && *error == nil) {
+      *error = [NSError errorWithDomain:@"Boomhauer.DB.API"
+                                   code:2
+                               userInfo:@{
+                                 NSLocalizedDescriptionKey : @"request body must be a JSON object"
+                               }];
+    }
+    return nil;
+  }
+  return parsed;
+}
+
 @interface HomeController : ALNController
 @end
 
@@ -107,6 +279,145 @@
     }
   }
   return payload;
+}
+
+- (id)dbItemsRead:(ALNContext *)ctx {
+  (void)ctx;
+  NSString *category = TrimmedStringValue([self queryValueForName:@"category"]);
+  if ([category length] == 0) {
+    [self setStatus:400];
+    return BenchmarkDBErrorPayload(@"bad_request", @"category is required");
+  }
+
+  NSInteger limit = 50;
+  NSNumber *requestedLimit = [self queryIntegerForName:@"limit"];
+  if (requestedLimit != nil) {
+    limit = [requestedLimit integerValue];
+  }
+  if (limit < 1 || limit > 1000) {
+    [self setStatus:400];
+    return BenchmarkDBErrorPayload(@"bad_request", @"limit must be between 1 and 1000");
+  }
+
+  NSError *dbError = nil;
+  ALNPg *database = BenchmarkDBAdapter(&dbError);
+  if (database == nil) {
+    [self setStatus:500];
+    return BenchmarkDBErrorPayload(@"db_unavailable", @"database connection unavailable");
+  }
+
+  NSString *sql = [NSString stringWithFormat:
+                                @"select id, name, amount, category, "
+                                 "to_char(updated_at at time zone 'UTC', "
+                                 "'YYYY-MM-DD\"T\"HH24:MI:SS.US\"Z\"') as created "
+                                 "from \"%@\".\"%@\" "
+                                 "where category = $1 "
+                                 "order by id asc "
+                                 "limit $2",
+                                 BenchmarkDBSchema(),
+                                 BenchmarkDBTable()];
+  NSArray *rows = [database executeQuery:sql parameters:@[ category, @(limit) ] error:&dbError];
+  if (rows == nil) {
+    [self setStatus:500];
+    return BenchmarkDBErrorPayload(@"db_error", @"database query failed");
+  }
+
+  NSMutableArray *items = [NSMutableArray arrayWithCapacity:[rows count]];
+  for (id value in rows) {
+    NSDictionary *row = [value isKindOfClass:[NSDictionary class]] ? value : @{};
+    NSInteger itemID = [row[@"id"] respondsToSelector:@selector(integerValue)]
+                           ? [row[@"id"] integerValue]
+                           : 0;
+    NSInteger amount = [row[@"amount"] respondsToSelector:@selector(integerValue)]
+                           ? [row[@"amount"] integerValue]
+                           : 0;
+    NSString *name = [row[@"name"] isKindOfClass:[NSString class]] ? row[@"name"] : @"";
+    NSString *itemCategory =
+        [row[@"category"] isKindOfClass:[NSString class]] ? row[@"category"] : @"";
+    NSString *created = [row[@"created"] isKindOfClass:[NSString class]] ? row[@"created"] : @"";
+    [items addObject:@{
+      @"id" : @(itemID),
+      @"name" : name,
+      @"amount" : @(amount),
+      @"category" : itemCategory,
+      @"created" : created,
+    }];
+  }
+
+  return @{
+    @"items" : items,
+    @"count" : @([items count]),
+    @"category" : category,
+    @"limit" : @(limit),
+  };
+}
+
+- (id)dbItemsWrite:(ALNContext *)ctx {
+  NSError *parseError = nil;
+  NSDictionary *payload = BenchmarkDBParseRequestObject(ctx, &parseError);
+  if (payload == nil) {
+    [self setStatus:400];
+    return BenchmarkDBErrorPayload(@"bad_request", @"request body must be a JSON object");
+  }
+
+  NSString *name = TrimmedStringValue(payload[@"name"]);
+  NSString *category = TrimmedStringValue(payload[@"category"]);
+  NSInteger amount = 0;
+  BOOL amountOK = ParseStrictIntegerValue(payload[@"amount"], &amount);
+
+  if ([name length] == 0 || [category length] == 0 || !amountOK) {
+    [self setStatus:400];
+    return BenchmarkDBErrorPayload(@"bad_request",
+                                   @"name/category/amount are required and amount must be integer");
+  }
+  if (amount < -1000000 || amount > 1000000) {
+    [self setStatus:400];
+    return BenchmarkDBErrorPayload(@"bad_request", @"amount must be between -1000000 and 1000000");
+  }
+
+  NSError *dbError = nil;
+  ALNPg *database = BenchmarkDBAdapter(&dbError);
+  if (database == nil) {
+    [self setStatus:500];
+    return BenchmarkDBErrorPayload(@"db_unavailable", @"database connection unavailable");
+  }
+
+  NSString *sql = [NSString stringWithFormat:
+                                @"insert into \"%@\".\"%@\" (name, amount, category) "
+                                 "values ($1, $2, $3) "
+                                 "returning id, name, amount, category, "
+                                 "to_char(updated_at at time zone 'UTC', "
+                                 "'YYYY-MM-DD\"T\"HH24:MI:SS.US\"Z\"') as created",
+                                 BenchmarkDBSchema(),
+                                 BenchmarkDBTable()];
+  NSArray *rows = [database executeQuery:sql
+                              parameters:@[ name, @(amount), category ]
+                                   error:&dbError];
+  if ([rows count] == 0) {
+    [self setStatus:500];
+    return BenchmarkDBErrorPayload(@"db_error", @"database insert failed");
+  }
+
+  NSDictionary *row = [rows[0] isKindOfClass:[NSDictionary class]] ? rows[0] : @{};
+  NSInteger itemID = [row[@"id"] respondsToSelector:@selector(integerValue)]
+                         ? [row[@"id"] integerValue]
+                         : 0;
+  NSInteger storedAmount = [row[@"amount"] respondsToSelector:@selector(integerValue)]
+                               ? [row[@"amount"] integerValue]
+                               : amount;
+  NSString *storedName = [row[@"name"] isKindOfClass:[NSString class]] ? row[@"name"] : name;
+  NSString *storedCategory =
+      [row[@"category"] isKindOfClass:[NSString class]] ? row[@"category"] : category;
+  NSString *created = [row[@"created"] isKindOfClass:[NSString class]] ? row[@"created"] : @"";
+
+  [self setStatus:201];
+  return @{
+    @"id" : @(itemID),
+    @"name" : storedName,
+    @"amount" : @(storedAmount),
+    @"category" : storedCategory,
+    @"created" : created,
+  };
 }
 
 @end
@@ -341,14 +652,6 @@
 }
 
 @end
-
-static NSString *EnvString(const char *name) {
-  const char *raw = getenv(name);
-  if (raw == NULL || raw[0] == '\0') {
-    return nil;
-  }
-  return [NSString stringWithUTF8String:raw];
-}
 
 static NSString *ReadTextFile(NSString *path) {
   if ([path length] == 0) {
@@ -715,6 +1018,16 @@ static ALNApplication *BuildApplication(NSString *environment) {
                       name:@"api_blob"
            controllerClass:[ApiController class]
                     action:@"blob"];
+  [app registerRouteMethod:@"GET"
+                      path:@"/api/db/items"
+                      name:@"api_db_items_read"
+           controllerClass:[ApiController class]
+                    action:@"dbItemsRead"];
+  [app registerRouteMethod:@"POST"
+                      path:@"/api/db/items"
+                      name:@"api_db_items_write"
+           controllerClass:[ApiController class]
+                    action:@"dbItemsWrite"];
   [app registerRouteMethod:@"GET"
                       path:@"/ws/echo"
                       name:@"ws_echo"

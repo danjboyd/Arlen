@@ -42,6 +42,7 @@ Environment:
   ARLEN_FRAMEWORK_ROOT
   ARLEN_PROPANE_JOB_WORKER_COMMAND
   ARLEN_PROPANE_JOB_WORKER_COUNT
+  ARLEN_PROPANE_LIFECYCLE_LOG
   ARLEN_CLUSTER_ENABLED
   ARLEN_CLUSTER_NAME
   ARLEN_CLUSTER_NODE_ID
@@ -462,6 +463,40 @@ export ARLEN_CLUSTER_NAME="$cluster_name"
 export ARLEN_CLUSTER_NODE_ID="$cluster_node_id"
 export ARLEN_CLUSTER_EXPECTED_NODES="$cluster_expected_nodes"
 
+lifecycle_log_file="${ARLEN_PROPANE_LIFECYCLE_LOG:-}"
+if [[ -n "$lifecycle_log_file" ]]; then
+  if [[ ! "$lifecycle_log_file" = /* ]]; then
+    lifecycle_log_file="$app_root/$lifecycle_log_file"
+  fi
+  mkdir -p "$(dirname "$lifecycle_log_file")"
+  : > "$lifecycle_log_file"
+fi
+
+emit_lifecycle_event() {
+  local event="$1"
+  shift
+  local line="propane:lifecycle event=$event manager_pid=$$"
+  local kv
+  for kv in "$@"; do
+    line="$line $kv"
+  done
+  echo "$line"
+  if [[ -n "$lifecycle_log_file" ]]; then
+    echo "$line" >> "$lifecycle_log_file"
+  fi
+}
+
+describe_wait_status() {
+  local status="$1"
+  if (( status >= 128 )); then
+    echo "signal_$((status - 128))"
+  elif (( status == 0 )); then
+    echo "exit_0"
+  else
+    echo "exit_$status"
+  fi
+}
+
 echo "propane: starting with propane accessories workerCount=$worker_count gracefulShutdownSeconds=$graceful_shutdown_seconds respawnDelayMs=$respawn_delay_ms reloadOverlapSeconds=$reload_overlap_seconds"
 echo "propane: runtime host=$host port=$port listenBacklog=$listen_backlog connectionTimeoutSeconds=$connection_timeout_seconds enableReusePort=$enable_reuse_port"
 echo "propane: cluster enabled=$cluster_enabled name=$cluster_name nodeID=$cluster_node_id expectedNodes=$cluster_expected_nodes"
@@ -470,6 +505,12 @@ if (( job_worker_count > 0 )); then
 fi
 
 echo "$$" > "$pid_file"
+emit_lifecycle_event "manager_started" \
+  "worker_count=$worker_count" \
+  "async_worker_count=$job_worker_count" \
+  "host=$host" \
+  "port=$port" \
+  "env=$environment"
 
 sleep_ms() {
   local ms="$1"
@@ -484,13 +525,16 @@ sleep_ms() {
 }
 
 spawn_worker() {
+  local start_reason="${1:-boot}"
   "$app_binary" "${worker_args[@]}" &
   local pid=$!
   workers+=("$pid")
   echo "propane: worker started pid=$pid"
+  emit_lifecycle_event "worker_started" "role=http" "pid=$pid" "reason=$start_reason"
 }
 
 spawn_job_worker() {
+  local start_reason="${1:-boot}"
   if (( job_worker_count < 1 )) || [[ -z "$job_worker_command" ]]; then
     return
   fi
@@ -498,9 +542,13 @@ spawn_job_worker() {
   local pid=$!
   job_workers+=("$pid")
   echo "propane: async worker started pid=$pid"
+  emit_lifecycle_event "async_worker_started" "role=async" "pid=$pid" "reason=$start_reason"
 }
 
 terminate_pid_list() {
+  local role="$1"
+  local stop_reason="$2"
+  shift 2
   local candidates=("$@")
   if (( ${#candidates[@]} == 0 )); then
     return
@@ -510,6 +558,7 @@ terminate_pid_list() {
   local pid
   for pid in "${candidates[@]}"; do
     if kill -0 "$pid" 2>/dev/null; then
+      emit_lifecycle_event "${role}_stop_requested" "role=$role" "pid=$pid" "signal=TERM" "reason=$stop_reason"
       kill -TERM "$pid" 2>/dev/null || true
       alive+=("$pid")
     fi
@@ -529,7 +578,11 @@ terminate_pid_list() {
       else
         set +e
         wait "$pid" 2>/dev/null
+        local status=$?
         set -e
+        local exit_reason
+        exit_reason="$(describe_wait_status "$status")"
+        emit_lifecycle_event "${role}_stopped" "role=$role" "pid=$pid" "status=$status" "exit_reason=$exit_reason" "reason=$stop_reason"
       fi
     done
     alive=("${remaining[@]}")
@@ -539,12 +592,17 @@ terminate_pid_list() {
   done
 
   for pid in "${alive[@]}"; do
+    emit_lifecycle_event "${role}_stop_requested" "role=$role" "pid=$pid" "signal=KILL" "reason=${stop_reason}_grace_timeout"
     kill -KILL "$pid" 2>/dev/null || true
   done
   for pid in "${alive[@]}"; do
     set +e
     wait "$pid" 2>/dev/null
+    local status=$?
     set -e
+    local exit_reason
+    exit_reason="$(describe_wait_status "$status")"
+    emit_lifecycle_event "${role}_stopped" "role=$role" "pid=$pid" "status=$status" "exit_reason=$exit_reason" "reason=${stop_reason}_grace_timeout"
   done
 }
 
@@ -553,24 +611,40 @@ job_workers=()
 shutting_down=0
 reload_requested=0
 manager_exit=0
+shutdown_reason="manager_exit"
+reload_generation=0
 
 on_term() {
+  local signal_name="${1:-TERM}"
+  local normalized="${signal_name,,}"
+  if (( shutting_down == 1 )); then
+    return
+  fi
+  shutdown_reason="signal_${normalized}"
+  emit_lifecycle_event "manager_shutdown_requested" "signal=$signal_name" "reason=$shutdown_reason"
   shutting_down=1
 }
 
 on_hup() {
+  if (( shutting_down == 1 )); then
+    return
+  fi
+  emit_lifecycle_event "manager_reload_requested" "signal=HUP"
   reload_requested=1
 }
 
 cleanup_and_exit() {
   local code="$1"
-  terminate_pid_list "${workers[@]}"
-  terminate_pid_list "${job_workers[@]}"
+  emit_lifecycle_event "manager_stopping" "reason=$shutdown_reason" "exit_code=$code"
+  terminate_pid_list "http_worker" "$shutdown_reason" "${workers[@]}"
+  terminate_pid_list "async_worker" "$shutdown_reason" "${job_workers[@]}"
   rm -f "$pid_file"
+  emit_lifecycle_event "manager_stopped" "reason=$shutdown_reason" "exit_code=$code"
   exit "$code"
 }
 
-trap on_term INT TERM
+trap 'on_term INT' INT
+trap 'on_term TERM' TERM
 trap on_hup HUP
 
 if (( print_routes == 1 )); then
@@ -580,30 +654,33 @@ if (( print_routes == 1 )); then
 fi
 
 for ((idx = 0; idx < worker_count; idx++)); do
-  spawn_worker
+  spawn_worker "boot"
 done
 for ((idx = 0; idx < job_worker_count; idx++)); do
-  spawn_job_worker
+  spawn_job_worker "boot"
 done
 
 while (( shutting_down == 0 )); do
   if (( reload_requested == 1 )); then
+    reload_generation=$((reload_generation + 1))
     old_workers=("${workers[@]}")
     old_job_workers=("${job_workers[@]}")
     workers=()
     job_workers=()
     echo "propane: reload requested; starting replacement workers"
+    emit_lifecycle_event "manager_reload_started" "generation=$reload_generation" "worker_count=$worker_count" "async_worker_count=$job_worker_count"
     for ((idx = 0; idx < worker_count; idx++)); do
-      spawn_worker
+      spawn_worker "reload_generation_${reload_generation}"
     done
     for ((idx = 0; idx < job_worker_count; idx++)); do
-      spawn_job_worker
+      spawn_job_worker "reload_generation_${reload_generation}"
     done
     if (( reload_overlap_seconds > 0 )); then
       sleep "$reload_overlap_seconds"
     fi
-    terminate_pid_list "${old_workers[@]}"
-    terminate_pid_list "${old_job_workers[@]}"
+    terminate_pid_list "http_worker" "reload_retire_generation_${reload_generation}" "${old_workers[@]}"
+    terminate_pid_list "async_worker" "reload_retire_generation_${reload_generation}" "${old_job_workers[@]}"
+    emit_lifecycle_event "manager_reload_completed" "generation=$reload_generation" "active_workers=${#workers[@]}" "active_async_workers=${#job_workers[@]}"
     reload_requested=0
   fi
 
@@ -639,10 +716,18 @@ while (( shutting_down == 0 )); do
       dead_pid="${pair%%:*}"
       dead_status="${pair##*:}"
       echo "propane: worker exited pid=$dead_pid status=$dead_status"
+      dead_exit_reason="$(describe_wait_status "$dead_status")"
+      restart_action="none"
+      if (( no_respawn == 0 && once_mode == 0 && shutting_down == 0 )); then
+        restart_action="respawn"
+      fi
+      emit_lifecycle_event "worker_exited" "role=http" "pid=$dead_pid" "status=$dead_status" "exit_reason=$dead_exit_reason" "restart_action=$restart_action"
     done
 
     if (( once_mode == 1 )); then
       manager_exit="${dead[0]##*:}"
+      shutdown_reason="once_mode_worker_exit"
+      emit_lifecycle_event "manager_shutdown_requested" "signal=internal" "reason=$shutdown_reason" "exit_status=$manager_exit"
       shutting_down=1
       continue
     fi
@@ -650,10 +735,12 @@ while (( shutting_down == 0 )); do
     if (( no_respawn == 0 )); then
       for _ in "${dead[@]}"; do
         sleep_ms "$respawn_delay_ms"
-        spawn_worker
+        spawn_worker "respawn_after_exit"
       done
     elif (( ${#workers[@]} == 0 )); then
       manager_exit="${dead[0]##*:}"
+      shutdown_reason="workers_exhausted_no_respawn"
+      emit_lifecycle_event "manager_shutdown_requested" "signal=internal" "reason=$shutdown_reason" "exit_status=$manager_exit"
       shutting_down=1
       continue
     fi
@@ -691,12 +778,18 @@ while (( shutting_down == 0 )); do
       dead_pid="${pair%%:*}"
       dead_status="${pair##*:}"
       echo "propane: async worker exited pid=$dead_pid status=$dead_status"
+      dead_exit_reason="$(describe_wait_status "$dead_status")"
+      restart_action="none"
+      if (( no_respawn == 0 && shutting_down == 0 )); then
+        restart_action="respawn"
+      fi
+      emit_lifecycle_event "async_worker_exited" "role=async" "pid=$dead_pid" "status=$dead_status" "exit_reason=$dead_exit_reason" "restart_action=$restart_action"
     done
 
     if (( no_respawn == 0 )); then
       for _ in "${job_dead[@]}"; do
         sleep_ms "$job_worker_respawn_delay_ms"
-        spawn_job_worker
+        spawn_job_worker "respawn_after_exit"
       done
     fi
   fi

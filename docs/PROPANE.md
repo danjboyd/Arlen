@@ -43,6 +43,9 @@ runtimeLimits = {
 };
 ```
 
+`requestDispatchMode = "serialized"` forces one request per HTTP connection (`Connection: close`)
+so production workers keep the stable serialized execution path by default.
+
 When `workerCount > 1`, `propane` enables `SO_REUSEPORT` automatically for worker binds.
 When HTTP session limit is exceeded, workers return deterministic overload diagnostics
 (`503 Service Unavailable` with `X-Arlen-Backpressure-Reason: http_session_limit`).
@@ -95,6 +98,7 @@ Environment fallbacks:
 - `ARLEN_PROPANE_JOB_WORKER_COMMAND`
 - `ARLEN_PROPANE_JOB_WORKER_COUNT`
 - `ARLEN_PROPANE_JOB_WORKER_RESPAWN_DELAY_MS`
+- `ARLEN_PROPANE_LIFECYCLE_LOG` (optional path for structured lifecycle diagnostics copy)
 - `ARLEN_CLUSTER_ENABLED`
 - `ARLEN_CLUSTER_NAME`
 - `ARLEN_CLUSTER_NODE_ID`
@@ -104,3 +108,27 @@ Environment fallbacks:
 - `ARLEN_REQUEST_DISPATCH_MODE` (`serialized` by default in production; set `concurrent` to opt in)
 
 `propane` exports resolved cluster values to worker processes, so CLI overrides are consistently applied at runtime.
+
+## Lifecycle Diagnostics Contract
+
+`propane` emits machine-readable lifecycle lines to stdout:
+
+```text
+propane:lifecycle event=<event_name> manager_pid=<pid> key=value ...
+```
+
+When `ARLEN_PROPANE_LIFECYCLE_LOG` is set, the same lines are also appended to that file.
+
+Stable event coverage includes:
+
+- manager lifecycle: `manager_started`, `manager_reload_requested`, `manager_reload_started`,
+  `manager_reload_completed`, `manager_shutdown_requested`, `manager_stopping`, `manager_stopped`
+- worker churn: `worker_started`, `worker_exited`, `async_worker_started`, `async_worker_exited`
+- stop semantics: `http_worker_stop_requested` / `http_worker_stopped` and
+  `async_worker_stop_requested` / `async_worker_stopped`
+
+Stable churn/stop fields include:
+
+- `reason` (for example `respawn_after_exit`, `reload_retire_generation_1`, `signal_term`)
+- `status` and `exit_reason` (`exit_0`, `exit_1`, `signal_9`, etc.)
+- `restart_action` (`none` or `respawn`)

@@ -34,6 +34,16 @@ jobs:
         run: |
           bash ./tools/ci/run_phase5e_sanitizers.sh
 
+      - name: Upload sanitizer confidence artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase9h-sanitizer-confidence
+          path: |
+            build/release_confidence/phase9h/**
+            build/sanitizers/tsan/**
+          if-no-files-found: warn
+
   tsan-experimental:
     runs-on: ubuntu-latest
     continue-on-error: true
@@ -61,3 +71,11 @@ jobs:
           GNUSTEP_USER_ROOT: ${{ github.workspace }}/.gnustep
         run: |
           bash ./tools/ci/run_phase5e_tsan_experimental.sh
+
+      - name: Upload TSAN experimental artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase9h-tsan-experimental
+          path: build/sanitizers/tsan/**
+          if-no-files-found: warn

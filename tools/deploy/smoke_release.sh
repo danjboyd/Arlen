@@ -135,13 +135,15 @@ run_release_health_check() {
   --app-root "$app_root" \
   --framework-root "$framework_root" \
   --releases-dir "$releases_dir" \
-  --release-id "$release_a" >/dev/null
+  --release-id "$release_a" \
+  --allow-missing-certification >/dev/null
 
 "$framework_root/tools/deploy/build_release.sh" \
   --app-root "$app_root" \
   --framework-root "$framework_root" \
   --releases-dir "$releases_dir" \
-  --release-id "$release_b" >/dev/null
+  --release-id "$release_b" \
+  --allow-missing-certification >/dev/null
 
 "$framework_root/tools/deploy/activate_release.sh" \
   --releases-dir "$releases_dir" \

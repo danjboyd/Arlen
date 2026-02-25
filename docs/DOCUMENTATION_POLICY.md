@@ -55,6 +55,7 @@ When applicable, update:
 5. Are examples aligned with current APIs (`ALN*` primary, legacy aliases called out as compatibility only)?
 6. Can a new developer reach "first running app" by following `docs/FIRST_APP_GUIDE.md` exactly?
 7. If public headers changed, were API docs regenerated with `python3 tools/docs/generate_api_reference.py`?
+8. Did the docs quality gate pass (`make ci-docs`)?
 
 ## 7. Browser Docs Build Check
 
@@ -63,6 +64,7 @@ When documentation content changes, run:
 ```bash
 make docs-api
 make docs-html
+make ci-docs
 ```
 
 Validate that:
@@ -70,6 +72,15 @@ Validate that:
 - primary navigation links resolve
 - newly added pages are rendered
 - API reference pages under `build/docs/docs/api/` render and link correctly
+- generated API reference markdown (`docs/API_REFERENCE.md` + `docs/api/*.md`) is up to date with no uncommitted generator diff
+
+Automated gate entrypoint:
+
+```bash
+bash ./tools/ci/run_docs_quality.sh
+```
+
+This command is CI-enforced and is the source of truth for docs quality pass/fail.
 
 ## 8. Ongoing Maintenance Cadence
 

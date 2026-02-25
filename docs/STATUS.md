@@ -1,6 +1,12 @@
 # Arlen Status Checkpoint
 
-Last updated: 2026-02-24
+Last updated: 2026-02-25
+
+## Benchmark Handoff (2026-02-24 EOD)
+
+- Added end-of-day checkpoint for benchmark work:
+  - `docs/BENCHMARK_HANDOFF_2026-02-24.md`
+  - includes latest verified Phase D run (`20260224T233744Z`), artifact paths, known Phase E blocker, and morning resume checklist
 
 ## Current Milestone State
 
@@ -41,7 +47,120 @@ Last updated: 2026-02-24
 - Phase 9B: complete (2026-02-24)
 - Phase 9C: complete (2026-02-24)
 - Phase 9D: complete (2026-02-24)
-- Phase 9E: initial slice implemented (2026-02-24)
+- Phase 9E: complete (2026-02-25)
+- Phase 9F: complete (2026-02-25)
+- Phase 9G: complete (2026-02-25)
+- Phase 9H: complete (2026-02-25)
+- Phase 9I: complete (2026-02-25)
+- Phase 9J: complete (2026-02-25)
+
+## Completed Today (2026-02-25)
+
+- Completed Phase 9E documentation quality gate tranche:
+  - added CI docs-quality entrypoint script (`tools/ci/run_docs_quality.sh`)
+  - added Makefile gate target (`make ci-docs`)
+  - added dedicated workflow (`.github/workflows/docs-quality.yml`)
+  - updated docs policy + PR checklist contracts for API/docs regeneration validation
+
+- Completed Phase 9F inline concurrency/backpressure hardening tranche:
+  - realtime websocket channel admission now applies deterministic `503` overload diagnostics when subscriber caps are reached:
+    - `X-Arlen-Backpressure-Reason: realtime_channel_subscriber_limit`
+    - `X-Arlen-Backpressure-Reason: realtime_total_subscriber_limit`
+  - extended mixed lifecycle integration stress path to include:
+    - websocket echo
+    - websocket channel fanout
+    - SSE stream delivery checks
+    - concurrent HTTP slow/fast churn
+    - both `concurrent` and `serialized` dispatch modes
+  - added integration regression:
+    - `tests/integration/HTTPIntegrationTests.m` (`testRealtimeChannelSubscriberLimitReturns503UnderBackpressure`)
+  - added unit regression for deterministic realtime rejection reason contracts:
+    - `tests/unit/Phase3DTests.m` (`testRealtimeHubSubscriptionRejectionReasonsAreDeterministic`)
+  - expanded runtime concurrency gate probe:
+    - mixed websocket channel + SSE validation
+    - startup/shutdown overlap under active load with post-restart recovery validation
+  - updated runtime operator docs:
+    - `docs/RUNTIME_CONCURRENCY_GATE.md`
+    - `docs/CLI_REFERENCE.md`
+    - `docs/GETTING_STARTED.md`
+
+- Completed Phase 9G worker lifecycle + signal durability tranche:
+  - added deterministic propane lifecycle diagnostics contract:
+    - `propane:lifecycle event=<name> manager_pid=<pid> key=value ...`
+    - optional mirrored log file via `ARLEN_PROPANE_LIFECYCLE_LOG`
+    - stable churn/stop fields (`reason`, `status`, `exit_reason`, `restart_action`)
+  - added propane integration regressions in `tests/integration/HTTPIntegrationTests.m`:
+    - repeated boot/stop/restart loops under active HTTP traffic
+    - graceful shutdown drain behavior for in-flight + queued + keep-alive connections
+    - mixed signal supervision path (`SIGHUP` reload + `SIGTERM` shutdown) with diagnostics assertions
+  - updated operator docs for lifecycle diagnostics:
+    - `docs/PROPANE.md`
+    - `docs/CLI_REFERENCE.md`
+
+- Completed Phase 9H sanitizer + race-detection maturity tranche:
+  - added sanitizer matrix + suppression fixtures:
+    - `tests/fixtures/sanitizers/phase9h_sanitizer_matrix.json`
+    - `tests/fixtures/sanitizers/phase9h_suppressions.json`
+  - added suppression registry validator:
+    - `tools/ci/check_sanitizer_suppressions.py`
+  - added sanitizer confidence artifact generator:
+    - `tools/ci/generate_phase9h_sanitizer_confidence_artifacts.py`
+    - emits lane status + delta/suppression summaries under `build/release_confidence/phase9h`
+  - hardened sanitizer CI orchestration:
+    - `tools/ci/run_phase5e_sanitizers.sh` now validates suppressions, records blocking/TSAN status, and always emits confidence artifacts
+    - `tools/ci/run_phase5e_tsan_experimental.sh` now retains `build/sanitizers/tsan/tsan.log` + `summary.json`
+    - `.github/workflows/phase4-sanitizers.yml` uploads sanitizer confidence and TSAN artifacts
+  - expanded runtime sanitizer probe surface in `tools/ci/runtime_concurrency_probe.py`:
+    - route contracts (`/`, `/about`, `/api/status`, `/api/echo/:name`)
+    - data-layer API contracts (`/api/db/items` read/write validation + error-shape checks)
+  - added suppression lifecycle policy documentation:
+    - `docs/SANITIZER_SUPPRESSION_POLICY.md`
+
+- Completed Phase 9I deterministic fault-injection tranche:
+  - added runtime seam fault-injection harness + entrypoint:
+    - `tools/ci/runtime_fault_injection.py`
+    - `tools/ci/run_phase9i_fault_injection.sh`
+    - `make ci-fault-injection`
+  - added fault seam/scenario matrix fixture:
+    - `tests/fixtures/fault_injection/phase9i_fault_scenarios.json`
+  - added replay controls for deterministic scenario ordering and scope:
+    - `ARLEN_PHASE9I_SEED`
+    - `ARLEN_PHASE9I_ITERS`
+    - `ARLEN_PHASE9I_MODES`
+    - `ARLEN_PHASE9I_SCENARIOS`
+  - added confidence artifacts under `build/release_confidence/phase9i`:
+    - `fault_injection_results.json`
+    - `phase9i_fault_injection_summary.md`
+    - `manifest.json`
+  - integrated Phase 9I gate into quality pipeline:
+    - `tools/ci/run_phase5e_quality.sh`
+  - added tooling regression tests:
+    - `tests/integration/DeploymentIntegrationTests.m`
+  - added operator/developer guide:
+    - `docs/PHASE9I_FAULT_INJECTION.md`
+
+- Completed Phase 9J enterprise release-certification tranche:
+  - added certification pack generator and gate entrypoint:
+    - `tools/ci/generate_phase9j_release_certification_pack.py`
+    - `tools/ci/run_phase9j_release_certification.sh`
+    - `make ci-release-certification`
+  - added threshold + known-risk fixtures:
+    - `tests/fixtures/release/phase9j_certification_thresholds.json`
+    - `tests/fixtures/release/phase9j_known_risks.json`
+  - added release certification artifact pack under `build/release_confidence/phase9j`:
+    - `manifest.json`
+    - `certification_summary.json`
+    - `release_gate_matrix.json`
+    - `known_risk_register_snapshot.json`
+    - `phase9j_release_certification.md`
+  - enforced certification in release packaging script:
+    - `tools/deploy/build_release.sh` now requires a valid Phase 9J manifest (`status=certified`) by default
+    - non-RC opt-out available via `--allow-missing-certification`
+  - linked known-risk register from release notes:
+    - `docs/KNOWN_RISK_REGISTER.md`
+    - `docs/RELEASE_NOTES.md`
+  - added integration regressions for certification generation, stale risk-register rejection, and build-release enforcement:
+    - `tests/integration/DeploymentIntegrationTests.m`
 
 ## Completed Today (2026-02-24)
 
@@ -73,6 +192,28 @@ Last updated: 2026-02-24
   - `README.md`
   - `docs/PHASE2_PHASE3_ROADMAP.md`
   - `docs/PHASE9_ROADMAP.md`
+- Added competitive benchmarking execution roadmap:
+  - `docs/COMPETITIVE_BENCHMARK_ROADMAP.md`
+  - completed Phase A claim-matrix freeze for v1 Arlen-vs-FastAPI benchmark scenarios
+- Completed Phase B parity implementation for frozen benchmark scenarios:
+  - FastAPI reference service + dependency contract (`tests/performance/fastapi_reference/`)
+  - executable parity gate (`tests/performance/check_parity_fastapi.py`, `make parity-phaseb`)
+  - parity report artifact (`build/perf/parity_fastapi_latest.json`)
+  - checklist doc (`docs/PHASEB_PARITY_CHECKLIST_FASTAPI.md`)
+- Completed Phase C benchmark protocol hardening:
+  - protocol contract file (`tests/performance/protocols/phasec_comparison_http.json`)
+  - executable warmup + concurrency ladder runner (`tests/performance/run_phasec_protocol.py`, `make perf-phasec`)
+  - fixed host/profile/port + machine/tool/git metadata capture in protocol report
+  - protocol artifact entrypoint (`build/perf/phasec/latest_protocol_report.json`)
+  - protocol guide (`docs/PHASEC_BENCHMARK_PROTOCOL.md`)
+- Completed Phase D baseline campaign execution:
+  - FastAPI benchmark profiles for pair parity (`tests/performance/profiles/fastapi_comparison_http.sh`, `tests/performance/profiles/fastapi_middleware_heavy.sh`)
+  - fixed campaign protocol contract (`tests/performance/protocols/phased_baseline_campaign.json`)
+  - middleware-heavy pair currently constrained to ladder `1,4` pending Phase E stability/perf triage at higher concurrency
+  - executable campaign runner (`tests/performance/run_phased_campaign.py`, `make perf-phased`)
+  - generated deliverables: framework summary + per-scenario comparison table + methodology note + raw artifact bundle
+  - campaign artifact entrypoint (`build/perf/phased/latest_campaign_report.json`)
+  - campaign guide (`docs/PHASED_BASELINE_CAMPAIGN.md`)
 
 ## Completed Today (2026-02-23)
 

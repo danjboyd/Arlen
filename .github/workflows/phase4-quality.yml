@@ -36,6 +36,14 @@ jobs:
         run: |
           bash ./tools/ci/run_phase5e_quality.sh
 
+      - name: Run Phase 9J release certification pack
+        if: github.event_name == 'release'
+        env:
+          GNUSTEP_USER_ROOT: ${{ github.workspace }}/.gnustep
+        run: |
+          ARLEN_PHASE9J_RELEASE_ID="${{ github.event.release.tag_name }}" \
+            bash ./tools/ci/run_phase9j_release_certification.sh
+
       - name: Upload perf + confidence artifacts
         if: always()
         uses: actions/upload-artifact@v4

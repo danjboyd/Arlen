@@ -12,6 +12,8 @@ Profiles live in `tests/performance/profiles/`:
 - `api_reference`
 - `migration_sample`
 - `comparison_http`
+- `fastapi_comparison_http`
+- `fastapi_middleware_heavy`
 
 Each profile defines server target, launch env, readiness path, and scenario list.
 
@@ -46,6 +48,22 @@ Optional concurrency override (all profiles):
 ```bash
 ARLEN_PERF_CONCURRENCY=8 ARLEN_PERF_PROFILE=comparison_http ARLEN_PERF_SKIP_GATE=1 make perf
 ```
+
+Phase C standardized benchmark protocol (warmup + concurrency ladder + metadata artifacts):
+
+```bash
+make perf-phasec
+```
+
+Protocol contract and artifacts are documented in `docs/PHASEC_BENCHMARK_PROTOCOL.md`.
+
+Phase D standardized baseline campaign (parity + Arlen/FastAPI matrix + comparison artifacts):
+
+```bash
+make perf-phased
+```
+
+Campaign contract and artifacts are documented in `docs/PHASED_BASELINE_CAMPAIGN.md`.
 
 ## 3. Baselines and Policy
 

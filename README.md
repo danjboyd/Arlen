@@ -37,7 +37,7 @@ Arlen is designed to solve the same class of problems as frameworks like Mojolic
 - Phase 7F: initial slice implemented (frontend starter generation presets, static-asset/API wiring templates, and reproducibility/deploy-packaging validation).
 - Phase 7G: initial slice implemented (coding-agent JSON workflow contracts, fix-it diagnostics, and deploy/build/check planning payloads).
 - Phase 7H: initial slice implemented (quorum-gated readiness, expanded `/clusterz` coordination contracts, and distributed-runtime diagnostics headers).
-- Phase 9: active (documentation platform, generated API reference, onboarding tracks, and migration guide suite).
+- Phase 9: complete (documentation platform, generated API reference, onboarding tracks/migration guides, and enterprise release certification hardening track).
 
 ## Quick Start
 
@@ -84,7 +84,12 @@ Run tests and quality gate:
 ```bash
 ./bin/test
 make check
+make parity-phaseb
+make perf-phasec
+make perf-phased
 make ci-quality
+make ci-fault-injection
+make ci-release-certification
 make test-data-layer
 ```
 
@@ -143,6 +148,11 @@ High-value guides:
 - [Template Troubleshooting](docs/TEMPLATE_TROUBLESHOOTING.md)
 - [SQL Builder Phase 4 Migration Guide](docs/SQL_BUILDER_PHASE4_MIGRATION.md)
 - [Propane Manager](docs/PROPANE.md)
+- [Sanitizer Suppression Policy](docs/SANITIZER_SUPPRESSION_POLICY.md)
+- [Phase 9I Fault Injection](docs/PHASE9I_FAULT_INJECTION.md)
+- [Phase 9J Release Certification](docs/PHASE9J_RELEASE_CERTIFICATION.md)
+- [Known Risk Register](docs/KNOWN_RISK_REGISTER.md)
+- [Release Notes](docs/RELEASE_NOTES.md)
 - [Release Process](docs/RELEASE_PROCESS.md)
 - [Performance Profiles](docs/PERFORMANCE_PROFILES.md)
 - [GSWeb Migration Guide](docs/MIGRATION_GSWEB.md)
@@ -150,6 +160,10 @@ High-value guides:
 - [Arlen for Django](docs/ARLEN_FOR_DJANGO.md)
 - [Arlen for Laravel](docs/ARLEN_FOR_LARAVEL.md)
 - [Arlen for FastAPI](docs/ARLEN_FOR_FASTAPI.md)
+- [Competitive Benchmark Roadmap](docs/COMPETITIVE_BENCHMARK_ROADMAP.md)
+- [Phase B Parity Checklist (FastAPI)](docs/PHASEB_PARITY_CHECKLIST_FASTAPI.md)
+- [Phase C Benchmark Protocol](docs/PHASEC_BENCHMARK_PROTOCOL.md)
+- [Phase D Baseline Campaign](docs/PHASED_BASELINE_CAMPAIGN.md)
 - [Arlen for Express/NestJS](docs/ARLEN_FOR_EXPRESS_NESTJS.md)
 - [Arlen for Mojolicious](docs/ARLEN_FOR_MOJOLICIOUS.md)
 - [Documentation Policy](docs/DOCUMENTATION_POLICY.md)
@@ -163,6 +177,10 @@ Specifications and roadmaps:
 - [Phase 7 Roadmap](docs/PHASE7_ROADMAP.md)
 - [Phase 8 Roadmap](docs/PHASE8_ROADMAP.md)
 - [Phase 9 Roadmap](docs/PHASE9_ROADMAP.md)
+- [Competitive Benchmark Roadmap](docs/COMPETITIVE_BENCHMARK_ROADMAP.md)
+- [Phase B Parity Checklist (FastAPI)](docs/PHASEB_PARITY_CHECKLIST_FASTAPI.md)
+- [Phase C Benchmark Protocol](docs/PHASEC_BENCHMARK_PROTOCOL.md)
+- [Phase D Baseline Campaign](docs/PHASED_BASELINE_CAMPAIGN.md)
 - [EOC v1 Spec](V1_SPEC.md)
 - [RFC: Keypath Locals + Transformers + Route Compile](docs/RFC_KEYPATH_TRANSFORMERS_ROUTE_COMPILE.md)
 

@@ -1,6 +1,6 @@
 # Release Process
 
-This document defines Arlen release lifecycle operations through Phase 5E.
+This document defines Arlen release lifecycle operations through Phase 9J.
 
 ## 1. Versioning Policy
 
@@ -36,17 +36,29 @@ For SQL/data-layer transitional APIs introduced in Phase 4:
 Run from repository root:
 
 ```bash
+make ci-release-certification
+```
+
+`make ci-release-certification` executes the release checklist gates and generates the
+Phase 9J certification pack under:
+
+- `build/release_confidence/phase9j/`
+
+Upstream evidence included by this pack:
+
+- `build/release_confidence/phase5e/`
+- `build/release_confidence/phase9h/`
+- `build/release_confidence/phase9i/`
+
+If you need to run checklist gates individually:
+
+```bash
 make ci-quality
 make ci-sanitizers
-make phase5e-confidence
-make test-data-layer
+make ci-fault-injection
 make deploy-smoke
 make docs-html
 ```
-
-`make ci-quality` generates release confidence artifacts under:
-
-- `build/release_confidence/phase5e/`
 
 Then execute artifact flow:
 
@@ -54,7 +66,8 @@ Then execute artifact flow:
 tools/deploy/build_release.sh \
   --app-root /path/to/app \
   --framework-root /path/to/Arlen \
-  --releases-dir /path/to/app/releases
+  --releases-dir /path/to/app/releases \
+  --certification-manifest /path/to/Arlen/build/release_confidence/phase9j/manifest.json
 ```
 
 Validate activation + rollback:
@@ -63,6 +76,10 @@ Validate activation + rollback:
 tools/deploy/activate_release.sh --releases-dir /path/to/app/releases --release-id <id>
 tools/deploy/rollback_release.sh --releases-dir /path/to/app/releases --release-id <previous-id>
 ```
+
+Release notes must include a link to:
+
+- `docs/KNOWN_RISK_REGISTER.md`
 
 ## 4. Perf Trend Artifacts
 

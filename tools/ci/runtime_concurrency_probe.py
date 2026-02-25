@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import argparse
 import base64
+import json
 import os
 import random
 import socket
@@ -8,8 +9,9 @@ import struct
 import subprocess
 import threading
 import time
+import urllib.error
 import urllib.request
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 
 
 def recv_exact(sock: socket.socket, size: int) -> bytes:
@@ -108,6 +110,117 @@ def ws_recv_text(sock: socket.socket) -> str:
     return payload.decode("utf-8")
 
 
+def run_channel_probe(port: int, expect_keep_alive: bool) -> None:
+    if expect_keep_alive:
+        publisher = ws_connect(port, "/ws/channel/runtime-gate")
+        subscriber = ws_connect(port, "/ws/channel/runtime-gate")
+        try:
+            ws_send_text(publisher, "runtime-fanout")
+            first = ws_recv_text(publisher)
+            second = ws_recv_text(subscriber)
+            if first != "runtime-fanout" or second != "runtime-fanout":
+                raise RuntimeError("websocket channel fanout mismatch")
+        finally:
+            publisher.close()
+            subscriber.close()
+        return
+
+    client = ws_connect(port, "/ws/channel/runtime-gate")
+    try:
+        ws_send_text(client, "runtime-fanout")
+        echoed = ws_recv_text(client)
+        if echoed != "runtime-fanout":
+            raise RuntimeError("websocket channel self-echo mismatch")
+    finally:
+        client.close()
+
+
+def run_sse_probe(port: int) -> None:
+    with urllib.request.urlopen(
+        f"http://127.0.0.1:{port}/sse/ticker?count=3", timeout=5
+    ) as response:
+        body = response.read().decode("utf-8")
+        content_type = response.headers.get("Content-Type", "")
+    if "text/event-stream" not in content_type:
+        raise RuntimeError(f"unexpected sse content type: {content_type}")
+    if body.count("event: tick") < 3:
+        raise RuntimeError("missing expected sse events")
+
+
+def read_json_payload(data: bytes) -> Dict[str, object]:
+    decoded = data.decode("utf-8", "replace")
+    parsed = json.loads(decoded)
+    if not isinstance(parsed, dict):
+        raise RuntimeError("expected JSON object payload")
+    return parsed
+
+
+def run_route_surface_probe(port: int) -> None:
+    root = urllib.request.urlopen(f"http://127.0.0.1:{port}/", timeout=4).read().decode(
+        "utf-8", "replace"
+    )
+    if "Arlen EOC Dev Server" not in root:
+        raise RuntimeError("root render payload missing expected marker")
+
+    about = urllib.request.urlopen(f"http://127.0.0.1:{port}/about", timeout=4).read().decode(
+        "utf-8", "replace"
+    )
+    if "Arlen Phase 1 server" not in about:
+        raise RuntimeError("about route payload mismatch")
+
+    status_payload = read_json_payload(
+        urllib.request.urlopen(f"http://127.0.0.1:{port}/api/status", timeout=4).read()
+    )
+    if status_payload.get("ok") is not True:
+        raise RuntimeError("api/status did not report ok=true")
+
+    echo_payload = read_json_payload(
+        urllib.request.urlopen(f"http://127.0.0.1:{port}/api/echo/runtime-probe", timeout=4).read()
+    )
+    if echo_payload.get("name") != "runtime-probe":
+        raise RuntimeError("api/echo route payload mismatch")
+
+
+def run_data_layer_probe(port: int) -> None:
+    invalid_write = urllib.request.Request(
+        f"http://127.0.0.1:{port}/api/db/items",
+        data=b"{}",
+        method="POST",
+        headers={"Content-Type": "application/json"},
+    )
+    try:
+        with urllib.request.urlopen(invalid_write, timeout=5) as response:
+            payload = read_json_payload(response.read())
+            status = response.status
+    except urllib.error.HTTPError as exc:
+        payload = read_json_payload(exc.read())
+        status = exc.code
+
+    if status != 400:
+        raise RuntimeError(f"db write validation expected 400, got {status}")
+    if payload.get("error", {}).get("code") != "bad_request":  # type: ignore[union-attr]
+        raise RuntimeError("db write validation payload missing bad_request")
+
+    read_url = f"http://127.0.0.1:{port}/api/db/items?category=phase9h&limit=2"
+    try:
+        with urllib.request.urlopen(read_url, timeout=5) as response:
+            read_payload = read_json_payload(response.read())
+            read_status = response.status
+    except urllib.error.HTTPError as exc:
+        read_payload = read_json_payload(exc.read())
+        read_status = exc.code
+
+    if read_status == 200:
+        if "items" not in read_payload:
+            raise RuntimeError("db read success payload missing items")
+        return
+    if read_status != 500:
+        raise RuntimeError(f"db read expected 200/500, got {read_status}")
+    error_code = read_payload.get("error", {}).get("code")  # type: ignore[union-attr]
+    if error_code not in {"db_error", "db_unavailable"}:
+        raise RuntimeError(f"unexpected db read error code: {error_code}")
+
+
 def wait_ready(port: int, timeout_seconds: float = 12.0) -> None:
     deadline = time.time() + timeout_seconds
     last_error = ""
@@ -136,6 +249,9 @@ def run_mixed_probe_once(port: int, expect_keep_alive: bool) -> None:
                 raise RuntimeError("websocket echo mismatch")
     finally:
         ws.close()
+
+    run_channel_probe(port, expect_keep_alive)
+    run_sse_probe(port)
 
     if expect_keep_alive:
         sock = socket.create_connection(("127.0.0.1", port), timeout=5)
@@ -223,23 +339,80 @@ def run_mode(binary: str, mode: str, expect_keep_alive: bool, iterations: int) -
     if mode == "serialized":
         command = [binary, "--env", "production", "--port", str(port)]
 
-    server = subprocess.Popen(
-        command,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-    )
+    overlap_stop: Optional[threading.Event] = None
+    load_thread: Optional[threading.Thread] = None
+    server = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     try:
         wait_ready(port)
+        run_route_surface_probe(port)
+        run_data_layer_probe(port)
         for _ in range(iterations):
             run_mixed_probe_once(port, expect_keep_alive)
-    finally:
+
+        overlap_errors: List[str] = []
+        overlap_stop = threading.Event()
+
+        def overlap_load() -> None:
+            while not overlap_stop.is_set():
+                try:
+                    body = urllib.request.urlopen(
+                        f"http://127.0.0.1:{port}/healthz", timeout=1.0
+                    ).read().decode("utf-8")
+                    if body != "ok\n":
+                        overlap_errors.append(f"bad health body: {body!r}")
+                    urllib.request.urlopen(
+                        f"http://127.0.0.1:{port}/api/sleep?ms=40", timeout=1.5
+                    ).read()
+                except Exception as exc:  # noqa: BLE001
+                    message = str(exc).lower()
+                    transient = any(
+                        token in message
+                        for token in (
+                            "connection refused",
+                            "connection reset",
+                            "remote end closed",
+                            "timed out",
+                            "bad status line",
+                        )
+                    )
+                    if not transient and not overlap_stop.is_set():
+                        overlap_errors.append(str(exc))
+                time.sleep(0.02)
+
+        load_thread = threading.Thread(target=overlap_load)
+        load_thread.start()
+        time.sleep(0.25)
+
         server.terminate()
         try:
             server.wait(timeout=8)
         except subprocess.TimeoutExpired:
             server.kill()
             server.wait(timeout=5)
+
+        server = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        wait_ready(port)
+        run_route_surface_probe(port)
+        run_data_layer_probe(port)
+
+        overlap_stop.set()
+        load_thread.join(timeout=5)
+        if overlap_errors:
+            raise RuntimeError("; ".join(overlap_errors))
+
+        run_mixed_probe_once(port, expect_keep_alive)
+    finally:
+        if overlap_stop is not None:
+            overlap_stop.set()
+        if load_thread is not None:
+            load_thread.join(timeout=5)
+        if server.poll() is None:
+            server.terminate()
+            try:
+                server.wait(timeout=8)
+            except subprocess.TimeoutExpired:
+                server.kill()
+                server.wait(timeout=5)
 
 
 def main() -> int:

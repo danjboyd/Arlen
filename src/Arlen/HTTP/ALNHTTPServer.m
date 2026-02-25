@@ -911,6 +911,16 @@ static ALNResponse *ALNErrorResponse(NSInteger statusCode, NSString *body) {
   return response;
 }
 
+static NSString *ALNRealtimeBackpressureReasonForSubscriptionRejection(NSString *reason) {
+  if ([reason isEqualToString:@"max_total_subscribers"]) {
+    return @"realtime_total_subscriber_limit";
+  }
+  if ([reason isEqualToString:@"max_channel_subscribers"]) {
+    return @"realtime_channel_subscriber_limit";
+  }
+  return @"realtime_subscriber_limit";
+}
+
 @interface ALNWebSocketClientSession : NSObject <ALNRealtimeSubscriber>
 
 @property(nonatomic, assign, readonly) int clientFd;
@@ -1280,67 +1290,58 @@ static ALNResponse *ALNErrorResponse(NSInteger statusCode, NSString *body) {
   return ALNSendAll(clientFd, [data bytes], [data length]);
 }
 
-- (void)runWebSocketSessionForRequest:(ALNRequest *)request
-                             response:(ALNResponse *)response
-                             clientFd:(int)clientFd {
-  (void)request;
-  NSString *mode = [self webSocketModeFromResponse:response];
-  if ([mode length] == 0) {
+- (void)runWebSocketSessionWithMode:(NSString *)mode
+                            channel:(NSString *)channel
+                            session:(ALNWebSocketClientSession *)session
+                       subscription:(ALNRealtimeSubscription *)subscription
+                           clientFd:(int)clientFd {
+  if ([mode length] == 0 || session == nil) {
     return;
   }
 
-  ALNWebSocketClientSession *session = [[ALNWebSocketClientSession alloc] initWithClientFd:clientFd];
-  ALNRealtimeSubscription *subscription = nil;
-  NSString *channel = @"";
-  if ([mode isEqualToString:@"channel"]) {
-    channel = [self webSocketChannelFromResponse:response];
-    subscription = [[ALNRealtimeHub sharedHub] subscribeChannel:channel subscriber:session];
-    if (subscription == nil) {
-      return;
-    }
-  }
+  @try {
+    while ([self shouldContinueRunning] && ![session isClosedSnapshot]) {
+      uint8_t opcode = 0;
+      BOOL fin = NO;
+      NSData *payload = nil;
+      if (!ALNWebSocketReadFrame(clientFd, &opcode, &fin, &payload, 1048576)) {
+        break;
+      }
+      if (!fin) {
+        break;
+      }
 
-  while ([self shouldContinueRunning] && ![session isClosedSnapshot]) {
-    uint8_t opcode = 0;
-    BOOL fin = NO;
-    NSData *payload = nil;
-    if (!ALNWebSocketReadFrame(clientFd, &opcode, &fin, &payload, 1048576)) {
-      break;
-    }
-    if (!fin) {
-      break;
-    }
+      if (opcode == 0x8) {
+        [session sendCloseFrame];
+        break;
+      }
+      if (opcode == 0x9) {
+        (void)[session sendBinaryPayload:payload ?: [NSData data] opcode:0xA];
+        continue;
+      }
+      if (opcode == 0xA) {
+        continue;
+      }
+      if (opcode != 0x1) {
+        continue;
+      }
 
-    if (opcode == 0x8) {
-      [session sendCloseFrame];
-      break;
-    }
-    if (opcode == 0x9) {
-      (void)[session sendBinaryPayload:payload ?: [NSData data] opcode:0xA];
-      continue;
-    }
-    if (opcode == 0xA) {
-      continue;
-    }
-    if (opcode != 0x1) {
-      continue;
-    }
+      NSString *message = [[NSString alloc] initWithData:(payload ?: [NSData data])
+                                                encoding:NSUTF8StringEncoding];
+      if (message == nil) {
+        message = @"";
+      }
 
-    NSString *message = [[NSString alloc] initWithData:(payload ?: [NSData data])
-                                              encoding:NSUTF8StringEncoding];
-    if (message == nil) {
-      message = @"";
+      if ([mode isEqualToString:@"channel"]) {
+        (void)[[ALNRealtimeHub sharedHub] publishMessage:message onChannel:channel];
+      } else {
+        (void)[session sendTextMessage:message];
+      }
     }
-
-    if ([mode isEqualToString:@"channel"]) {
-      (void)[[ALNRealtimeHub sharedHub] publishMessage:message onChannel:channel];
-    } else {
-      (void)[session sendTextMessage:message];
+  } @finally {
+    if (subscription != nil) {
+      [[ALNRealtimeHub sharedHub] unsubscribe:subscription];
     }
-  }
-
-  if (subscription != nil) {
-    [[ALNRealtimeHub sharedHub] unsubscribe:subscription];
   }
 }
 
@@ -1457,6 +1458,10 @@ static ALNResponse *ALNErrorResponse(NSInteger statusCode, NSString *body) {
                             response.statusCode == 101 &&
                             [webSocketMode length] > 0;
     if (webSocketUpgrade) {
+      ALNWebSocketClientSession *webSocketSession = nil;
+      ALNRealtimeSubscription *channelSubscription = nil;
+      NSString *webSocketChannel = @"";
+
       BOOL reserved =
           [self reserveWebSocketSessionWithLimit:self.maxConcurrentWebSocketSessions];
       if (!reserved) {
@@ -1473,9 +1478,43 @@ static ALNResponse *ALNErrorResponse(NSInteger statusCode, NSString *body) {
         return;
       }
 
+      if ([webSocketMode isEqualToString:@"channel"]) {
+        webSocketChannel = [self webSocketChannelFromResponse:response];
+        webSocketSession = [[ALNWebSocketClientSession alloc] initWithClientFd:clientFd];
+        NSString *rejectionReason = nil;
+        channelSubscription = [[ALNRealtimeHub sharedHub]
+            subscribeChannel:webSocketChannel
+                   subscriber:webSocketSession
+             rejectionReason:&rejectionReason];
+        if (channelSubscription == nil) {
+          ALNResponse *busyResponse = ALNErrorResponse(503, @"server busy\n");
+          [busyResponse setHeader:@"Retry-After" value:@"1"];
+          [busyResponse setHeader:@"X-Arlen-Backpressure-Reason"
+                            value:ALNRealtimeBackpressureReasonForSubscriptionRejection(
+                                      rejectionReason)];
+          [busyResponse setHeader:@"Connection" value:@"close"];
+          ALNEnsurePerformanceHeaders(busyResponse,
+                                      performanceLogging,
+                                      parseMs,
+                                      ALNNowMilliseconds() - requestStartMs);
+          (void)ALNSendResponse(clientFd, busyResponse, performanceLogging);
+          [self releaseWebSocketSessionReservation];
+          return;
+        }
+      }
+
       @try {
         if ([self sendWebSocketHandshakeForRequest:request response:response clientFd:clientFd]) {
-          [self runWebSocketSessionForRequest:request response:response clientFd:clientFd];
+          if (webSocketSession == nil) {
+            webSocketSession = [[ALNWebSocketClientSession alloc] initWithClientFd:clientFd];
+          }
+          [self runWebSocketSessionWithMode:webSocketMode
+                                    channel:webSocketChannel
+                                    session:webSocketSession
+                               subscription:channelSubscription
+                                   clientFd:clientFd];
+        } else if (channelSubscription != nil) {
+          [[ALNRealtimeHub sharedHub] unsubscribe:channelSubscription];
         }
       } @finally {
         [self releaseWebSocketSessionReservation];

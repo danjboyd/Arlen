@@ -7,6 +7,7 @@ Generate browser-friendly docs:
 ```bash
 make docs-api
 make docs-html
+make ci-docs
 make docs-serve
 ```
 
@@ -41,6 +42,11 @@ Open `build/docs/index.html` in your browser, or use `make docs-serve` for local
 - [Phase 7F Frontend Integration Starters](PHASE7F_FRONTEND_STARTERS.md): frontend starter generation presets, static/API wiring templates, and deploy-packaging reproducibility contracts.
 - [Phase 7G Coding-Agent DX Contracts](PHASE7G_CODING_AGENT_DX_CONTRACTS.md): machine-readable scaffold/build/check/deploy planning payloads and fix-it diagnostics for coding-agent workflows.
 - [Phase 7H Distributed Runtime Depth](PHASE7H_DISTRIBUTED_RUNTIME_DEPTH.md): quorum-gated readiness semantics, expanded `/clusterz` coordination matrix, and distributed-runtime diagnostics headers.
+- [Sanitizer Suppression Policy](SANITIZER_SUPPRESSION_POLICY.md): temporary suppression lifecycle and expiration contracts for Phase 9H sanitizer lanes.
+- [Phase 9I Fault Injection](PHASE9I_FAULT_INJECTION.md): deterministic runtime seam fault scenarios, seed replay, and triage artifacts.
+- [Phase 9J Release Certification](PHASE9J_RELEASE_CERTIFICATION.md): release checklist execution, certification thresholds, and enterprise release artifact pack.
+- [Known Risk Register](KNOWN_RISK_REGISTER.md): active release risks with owner and target date contracts.
+- [Release Notes](RELEASE_NOTES.md): current release-notes scaffold linked to certification and risk-register evidence.
 - [Template Troubleshooting](TEMPLATE_TROUBLESHOOTING.md): deterministic transpile/lint diagnostics and repair workflow.
 - [SQL Builder Phase 4 Migration Guide](SQL_BUILDER_PHASE4_MIGRATION.md): migration from string-heavy builder usage to IR/typed patterns.
 - [Propane Manager](PROPANE.md): production process manager and propane accessories.
@@ -51,6 +57,11 @@ Open `build/docs/index.html` in your browser, or use `make docs-serve` for local
 - [Arlen for Django](ARLEN_FOR_DJANGO.md): concept and architecture migration path from Django.
 - [Arlen for Laravel](ARLEN_FOR_LARAVEL.md): concept and architecture migration path from Laravel.
 - [Arlen for FastAPI](ARLEN_FOR_FASTAPI.md): concept and architecture migration path from FastAPI.
+- [Competitive Benchmark Roadmap](COMPETITIVE_BENCHMARK_ROADMAP.md): scenario-driven, reproducible benchmark plan for publishable Arlen-vs-framework claims.
+- [Benchmark Handoff (2026-02-24 EOD)](BENCHMARK_HANDOFF_2026-02-24.md): checkpoint log with latest run ids, artifacts, blocker notes, and morning resume steps.
+- [Phase B Parity Checklist (FastAPI)](PHASEB_PARITY_CHECKLIST_FASTAPI.md): executable parity gate for frozen v1 benchmark scenarios.
+- [Phase C Benchmark Protocol](PHASEC_BENCHMARK_PROTOCOL.md): warmup + concurrency-ladder benchmark protocol with reproducibility artifacts.
+- [Phase D Baseline Campaign](PHASED_BASELINE_CAMPAIGN.md): full Arlen-vs-FastAPI baseline matrix execution with comparison tables and artifact bundle.
 - [Arlen for Express/NestJS](ARLEN_FOR_EXPRESS_NESTJS.md): concept and architecture migration path from Express/NestJS.
 - [Arlen for Mojolicious](ARLEN_FOR_MOJOLICIOUS.md): concept and architecture migration path from Mojolicious.
 
@@ -70,6 +81,10 @@ Open `build/docs/index.html` in your browser, or use `make docs-serve` for local
 - [Phase 7 Roadmap](PHASE7_ROADMAP.md)
 - [Phase 8 Roadmap](PHASE8_ROADMAP.md)
 - [Phase 9 Roadmap](PHASE9_ROADMAP.md)
+- [Competitive Benchmark Roadmap](COMPETITIVE_BENCHMARK_ROADMAP.md)
+- [Phase B Parity Checklist (FastAPI)](PHASEB_PARITY_CHECKLIST_FASTAPI.md)
+- [Phase C Benchmark Protocol](PHASEC_BENCHMARK_PROTOCOL.md)
+- [Phase D Baseline Campaign](PHASED_BASELINE_CAMPAIGN.md)
 - [Combined Roadmap Index](PHASE2_PHASE3_ROADMAP.md)
 - [Feature Parity Matrix](FEATURE_PARITY_MATRIX.md)
 - [EOC v1 Roadmap](EOC_V1_ROADMAP.md)

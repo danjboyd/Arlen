@@ -185,6 +185,39 @@
   [hub reset];
 }
 
+- (void)testRealtimeHubSubscriptionRejectionReasonsAreDeterministic {
+  ALNRealtimeHub *hub = [ALNRealtimeHub sharedHub];
+  [hub reset];
+  [hub configureLimitsWithMaxTotalSubscribers:1 maxSubscribersPerChannel:1];
+
+  Phase3DRealtimeSubscriber *first = [[Phase3DRealtimeSubscriber alloc] init];
+  Phase3DRealtimeSubscriber *second = [[Phase3DRealtimeSubscriber alloc] init];
+
+  NSString *rejectionReason = nil;
+  ALNRealtimeSubscription *firstSubscription =
+      [hub subscribeChannel:@"updates" subscriber:first rejectionReason:&rejectionReason];
+  XCTAssertNotNil(firstSubscription);
+  XCTAssertNil(rejectionReason);
+
+  ALNRealtimeSubscription *totalRejected =
+      [hub subscribeChannel:@"alerts" subscriber:second rejectionReason:&rejectionReason];
+  XCTAssertNil(totalRejected);
+  XCTAssertEqualObjects(@"max_total_subscribers", rejectionReason);
+  [hub reset];
+
+  [hub configureLimitsWithMaxTotalSubscribers:0 maxSubscribersPerChannel:1];
+  firstSubscription = [hub subscribeChannel:@"updates" subscriber:first rejectionReason:&rejectionReason];
+  XCTAssertNotNil(firstSubscription);
+  XCTAssertNil(rejectionReason);
+
+  ALNRealtimeSubscription *channelRejected =
+      [hub subscribeChannel:@"updates" subscriber:second rejectionReason:&rejectionReason];
+  XCTAssertNil(channelRejected);
+  XCTAssertEqualObjects(@"max_channel_subscribers", rejectionReason);
+
+  [hub reset];
+}
+
 - (void)testRealtimeHubSubscriptionChurnReturnsToZeroSubscribers {
   ALNRealtimeHub *hub = [ALNRealtimeHub sharedHub];
   [hub reset];
