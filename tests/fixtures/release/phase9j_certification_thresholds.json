@@ -1,0 +1,24 @@
+{
+  "version": "phase9j-certification-thresholds-v1",
+  "release_candidate": {
+    "requires_certification_pack": true,
+    "required_manifest_status": "certified"
+  },
+  "blocking_requirements": {
+    "phase5e_manifest_required": true,
+    "phase9h_blocking_lane_allowed": ["pass"],
+    "phase9i_max_failed_scenarios": 0,
+    "phase9i_required_seams": [
+      "http_parser_dispatcher",
+      "websocket_handshake_lifecycle",
+      "runtime_stop_start_boundary"
+    ]
+  },
+  "non_blocking_requirements": {
+    "phase9h_tsan_allowed": ["pass", "skipped"]
+  },
+  "risk_register": {
+    "max_age_days": 14,
+    "active_required_fields": ["owner", "targetDate"]
+  }
+}

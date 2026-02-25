@@ -1,0 +1,43 @@
+name: docs-quality
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  docs-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            clang \
+            curl \
+            jq \
+            make \
+            pandoc \
+            python3 \
+            tools-xctest \
+            gnustep-make \
+            gnustep-base-runtime \
+            libgnustep-base-dev
+
+      - name: Run docs quality gate
+        env:
+          GNUSTEP_USER_ROOT: ${{ github.workspace }}/.gnustep
+        run: |
+          bash ./tools/ci/run_docs_quality.sh
+
+      - name: Upload docs artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: docs-artifacts-${{ github.run_id }}
+          path: |
+            build/docs

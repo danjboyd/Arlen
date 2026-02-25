@@ -1,0 +1,48 @@
+{
+  "schema_version": 1,
+  "name": "phased_baseline_campaign_v1",
+  "host": "127.0.0.1",
+  "concurrency_ladder": [1, 4, 8, 16, 32],
+  "warmup": {
+    "requests": 30,
+    "repeats": 1
+  },
+  "measured": {
+    "requests": 120,
+    "repeats": 3
+  },
+  "pairs": [
+    {
+      "name": "comparison_http",
+      "arlen_profile": "comparison_http",
+      "fastapi_profile": "fastapi_comparison_http",
+      "arlen_port": 3301,
+      "fastapi_port": 3311
+    },
+    {
+      "name": "middleware_heavy",
+      "arlen_profile": "middleware_heavy",
+      "fastapi_profile": "fastapi_middleware_heavy",
+      "arlen_port": 3302,
+      "fastapi_port": 3312,
+      "concurrency_ladder": [1, 4]
+    }
+  ],
+  "claim_targets": [
+    {
+      "claim_id": "C01",
+      "pair": "comparison_http",
+      "scenario": "healthz"
+    },
+    {
+      "claim_id": "C02",
+      "pair": "comparison_http",
+      "scenario": "api_status"
+    },
+    {
+      "claim_id": "C03",
+      "pair": "middleware_heavy",
+      "scenario": "api_echo"
+    }
+  ]
+}

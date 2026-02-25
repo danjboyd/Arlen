@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "name": "phasec_comparison_http_v1",
+  "profile": "comparison_http",
+  "host": "127.0.0.1",
+  "port": 3301,
+  "concurrency_ladder": [1, 4, 8, 16, 32],
+  "warmup": {
+    "requests": 30,
+    "repeats": 1
+  },
+  "measured": {
+    "requests": 120,
+    "repeats": 3
+  }
+}

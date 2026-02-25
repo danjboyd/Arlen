@@ -1,0 +1,50 @@
+{
+  "version": "phase9i-fault-scenarios-v1",
+  "lastUpdated": "2026-02-25",
+  "seams": [
+    {
+      "id": "http_parser_dispatcher",
+      "description": "HTTP parser and dispatcher boundaries under malformed/partial client input"
+    },
+    {
+      "id": "websocket_handshake_lifecycle",
+      "description": "Websocket upgrade, malformed handshake, and frame lifecycle boundaries"
+    },
+    {
+      "id": "runtime_stop_start_boundary",
+      "description": "Runtime stop/start overlap and lifecycle recovery seams"
+    }
+  ],
+  "scenarios": [
+    {
+      "id": "http_partial_request_disconnect",
+      "seam": "http_parser_dispatcher",
+      "description": "Send partial HTTP request and disconnect abruptly before parser completion"
+    },
+    {
+      "id": "http_delayed_write_sequence",
+      "seam": "http_parser_dispatcher",
+      "description": "Slow-chunked HTTP writes with jitter while validating parallel health responsiveness"
+    },
+    {
+      "id": "socket_churn_burst",
+      "seam": "http_parser_dispatcher",
+      "description": "Rapid socket connect/close churn with mixed graceful and abrupt disconnects"
+    },
+    {
+      "id": "websocket_malformed_upgrade",
+      "seam": "websocket_handshake_lifecycle",
+      "description": "Inject malformed websocket upgrade handshake and record upgrade acceptance/rejection diagnostics"
+    },
+    {
+      "id": "websocket_partial_frame_disconnect",
+      "seam": "websocket_handshake_lifecycle",
+      "description": "Abrupt disconnect mid-frame followed by recovery websocket echo probe"
+    },
+    {
+      "id": "runtime_restart_overlap",
+      "seam": "runtime_stop_start_boundary",
+      "description": "Terminate and restart runtime under active concurrent load with deterministic recovery checks"
+    }
+  ]
+}
