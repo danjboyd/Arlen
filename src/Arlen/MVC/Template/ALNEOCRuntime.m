@@ -14,10 +14,12 @@ static NSString *const ALNEOCThreadStrictStringifyKey = @"strict_stringify";
 
 static NSMutableDictionary *ALNEOCTemplateRegistry(void) {
   static NSMutableDictionary *registry = nil;
-  if (registry == nil) {
-    registry = [[NSMutableDictionary alloc] init];
+  @synchronized([NSThread class]) {
+    if (registry == nil) {
+      registry = [[NSMutableDictionary alloc] init];
+    }
+    return registry;
   }
-  return registry;
 }
 
 static NSMutableDictionary *ALNEOCThreadOptions(void) {

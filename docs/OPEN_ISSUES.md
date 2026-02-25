@@ -2,10 +2,10 @@
 
 ## ISSUE-001: Worker crash under normal HTTP traffic (`malloc_consolidate` / intermittent `502`)
 
-- Status: `in_verification`
+- Status: `resolved`
 - Priority: `critical`
 - GitHub: https://github.com/danjboyd/Arlen/issues/1
-- Last updated: `2026-02-24`
+- Last updated: `2026-02-25`
 
 ### Summary
 
@@ -32,23 +32,28 @@ Externally this presents as intermittent or sustained `502 Bad Gateway` from ngi
   - `/v1/states/OK/dockets/CD_2025-002412/documents/{document_id}/pdf`
   - `/v1/states/OK/dockets/CD_2025-002412/documents`
 
-### Notes from latest triage
+### Resolution summary
 
-- Timestamp formatting was hardened in `08ea39a` to remove shared `NSDateFormatter` concurrency risk.
-- Unit + integration + local ASAN/UBSAN stress remained green in local environment.
-- Production-like environment still reproduces crash, so root cause is not fully resolved.
-- Most likely class remains a concurrency-exposed memory/lifecycle defect introduced after `3876cd8`.
-- Root-cause hypothesis now aligned with bisect window:
-  - post-`3876cd8` runtime switched to concurrent per-connection request dispatch without
-    serialized application dispatch in each worker.
-  - production (`propane` / `--env production`) now defaults to
-    `requestDispatchMode=serialized` to restore per-worker dispatch serialization while keeping
-    explicit `concurrent` opt-in for workloads that require it.
-  - regression coverage added for production-default serialization + explicit concurrent override.
+- Fix commit: `0920889` (`fix(http): stabilize serialized dispatch connection lifecycle`)
+- Final fix behavior in serialized mode:
+  - force one request per HTTP connection (`Connection: close`)
+  - disable detached per-connection background thread handling
+  - preserve explicit concurrent behavior as opt-in (`requestDispatchMode=concurrent`)
+- Regression coverage:
+  - `HTTPIntegrationTests::testProductionSerializedDispatchClosesHTTPConnections`
+  - existing production serialization/concurrent-override tests remained passing
 
-### Next diagnostics to run (next session)
+### Verification evidence
 
-1. Rebuild the real app + Arlen with ASAN/UBSAN and reproduce on failing endpoints.
-2. Capture first crashing stack with core dumps enabled (`coredumpctl gdb`) for `status=134/139`.
-3. Run same workload with single worker and serialized request dispatch to isolate concurrency contribution.
-4. If needed, bisect post-`3876cd8` commits in runtime/data paths with the real app workload.
+- Live consumer validation (StateCompulsoryPoolingAPI, production-like traffic on `iep-softwaredev`) confirmed issue resolved after upgrading to `0920889`.
+- Arlen CI/local validation remained green after patch:
+  - unit suite
+  - integration suite
+  - postgres integration suite
+
+### Post-resolution watchpoints
+
+1. Keep serialized-mode connection lifecycle deterministic in production defaults.
+2. Require integration coverage for any future changes to HTTP connection persistence + worker dispatch interaction.
+3. Re-run ASAN/UBSAN + endpoint traffic smoke during future runtime concurrency refactors.
+4. Track proactive concurrency backlog from `docs/CONCURRENCY_AUDIT_2026-02-25.md`.

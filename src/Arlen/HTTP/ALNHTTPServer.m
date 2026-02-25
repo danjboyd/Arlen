@@ -894,6 +894,7 @@ static ALNResponse *ALNErrorResponse(NSInteger statusCode, NSString *body) {
 - (BOOL)sendTextMessage:(NSString *)message;
 - (BOOL)sendBinaryPayload:(NSData *)payload opcode:(uint8_t)opcode;
 - (void)sendCloseFrame;
+- (BOOL)isClosedSnapshot;
 
 @end
 
@@ -932,6 +933,13 @@ static ALNResponse *ALNErrorResponse(NSInteger statusCode, NSString *body) {
     self.closed = YES;
   }
   [self.sendLock unlock];
+}
+
+- (BOOL)isClosedSnapshot {
+  [self.sendLock lock];
+  BOOL closed = self.closed;
+  [self.sendLock unlock];
+  return closed;
 }
 
 - (void)receiveRealtimeMessage:(NSString *)message onChannel:(NSString *)channel {
@@ -1153,7 +1161,7 @@ static ALNResponse *ALNErrorResponse(NSInteger statusCode, NSString *body) {
     subscription = [[ALNRealtimeHub sharedHub] subscribeChannel:channel subscriber:session];
   }
 
-  while (gShouldRun && !session.closed) {
+  while (gShouldRun && ![session isClosedSnapshot]) {
     uint8_t opcode = 0;
     BOOL fin = NO;
     NSData *payload = nil;
@@ -1282,6 +1290,8 @@ static ALNResponse *ALNErrorResponse(NSInteger statusCode, NSString *body) {
         if (staticResponse == nil) {
           continue;
         }
+        // Serialized dispatch deliberately uses one request per connection.
+        // This preserves the known-stable worker lifecycle under production load.
         BOOL keepAlive = (!self.serializeRequestDispatch) &&
                          ALNShouldKeepAliveForRequest(request, staticResponse);
         [staticResponse setHeader:@"Connection" value:(keepAlive ? @"keep-alive" : @"close")];
@@ -1346,6 +1356,7 @@ static ALNResponse *ALNErrorResponse(NSInteger statusCode, NSString *body) {
       return;
     }
 
+    // Serialized dispatch deliberately uses one request per connection.
     BOOL keepAlive = (!self.serializeRequestDispatch) &&
                      ALNShouldKeepAliveForRequest(request, response);
     [response setHeader:@"Connection" value:(keepAlive ? @"keep-alive" : @"close")];
@@ -1495,6 +1506,8 @@ static ALNResponse *ALNErrorResponse(NSInteger statusCode, NSString *body) {
         continue;
       }
 
+      // In serialized mode, keep request handling on the accept thread and
+      // avoid detached per-connection threading to maintain deterministic flow.
       BOOL runInBackground = (!once && !self.serializeRequestDispatch);
       if (runInBackground) {
         @try {
