@@ -76,10 +76,14 @@ static NSDictionary *ALNMergedFields(NSString *message, ALNLogLevel level,
   return self;
 }
 
+- (BOOL)shouldLogLevel:(ALNLogLevel)level {
+  return level >= self.minimumLevel;
+}
+
 - (void)logLevel:(ALNLogLevel)level
          message:(NSString *)message
           fields:(NSDictionary *)fields {
-  if (level < self.minimumLevel) {
+  if (![self shouldLogLevel:level]) {
     return;
   }
 

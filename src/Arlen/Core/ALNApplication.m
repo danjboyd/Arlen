@@ -25,6 +25,7 @@
 #include <objc/message.h>
 #include <objc/runtime.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <sys/time.h>
 #include <time.h>
 #include <unistd.h>
@@ -1321,8 +1322,64 @@ static void ALNRecordRequestMetrics(ALNApplication *application,
   }
 }
 
+static NSString *ALNFastRandomHexString(NSUInteger length) {
+  if (length == 0) {
+    return @"";
+  }
+
+  static const char hexDigits[] = "0123456789abcdef";
+  NSUInteger byteCount = (length + 1) / 2;
+
+  uint8_t stackRandomBytes[32];
+  uint8_t *randomBytes = stackRandomBytes;
+  BOOL randomBytesNeedsFree = NO;
+  if (byteCount > sizeof(stackRandomBytes)) {
+    randomBytes = calloc(byteCount, sizeof(uint8_t));
+    if (randomBytes == NULL) {
+      return @"";
+    }
+    randomBytesNeedsFree = YES;
+  }
+  arc4random_buf(randomBytes, byteCount);
+
+  char stackHexChars[64];
+  char *hexChars = stackHexChars;
+  BOOL hexCharsNeedsFree = NO;
+  if (length > sizeof(stackHexChars)) {
+    hexChars = calloc(length, sizeof(char));
+    if (hexChars == NULL) {
+      if (randomBytesNeedsFree) {
+        free(randomBytes);
+      }
+      return @"";
+    }
+    hexCharsNeedsFree = YES;
+  }
+
+  for (NSUInteger idx = 0; idx < length; idx++) {
+    uint8_t byte = randomBytes[idx / 2];
+    uint8_t nibble = (idx % 2 == 0) ? (uint8_t)((byte >> 4) & 0x0F) : (uint8_t)(byte & 0x0F);
+    hexChars[idx] = hexDigits[nibble];
+  }
+
+  NSString *result = nil;
+  if (hexCharsNeedsFree) {
+    result = [[NSString alloc] initWithBytesNoCopy:hexChars
+                                            length:length
+                                          encoding:NSASCIIStringEncoding
+                                      freeWhenDone:YES];
+  } else {
+    result = [[NSString alloc] initWithBytes:hexChars length:length encoding:NSASCIIStringEncoding];
+  }
+
+  if (randomBytesNeedsFree) {
+    free(randomBytes);
+  }
+  return result ?: @"";
+}
+
 static NSString *ALNGenerateRequestID(void) {
-  return [[NSUUID UUID] UUIDString];
+  return ALNFastRandomHexString(32);
 }
 
 static NSString *ALNISO8601Now(void) {
@@ -1400,20 +1457,7 @@ static BOOL ALNStringIsHexOfLength(NSString *value, NSUInteger expectedLength) {
 }
 
 static NSString *ALNRandomHexString(NSUInteger length) {
-  if (length == 0) {
-    return @"";
-  }
-  NSMutableString *output = [NSMutableString stringWithCapacity:length];
-  while ([output length] < length) {
-    NSString *chunk =
-        [[[[NSUUID UUID] UUIDString] stringByReplacingOccurrencesOfString:@"-" withString:@""]
-            lowercaseString];
-    [output appendString:chunk];
-  }
-  if ([output length] > length) {
-    return [output substringToIndex:length];
-  }
-  return output;
+  return ALNFastRandomHexString(length);
 }
 
 static NSString *ALNNormalizedTraceIDCandidate(NSString *value) {
@@ -3145,25 +3189,27 @@ static void ALNFinalizeResponse(ALNApplication *application,
       }
     }
 
-    NSMutableDictionary *fields = [NSMutableDictionary dictionary];
-    fields[@"method"] = request.method ?: @"";
-    fields[@"path"] = request.path ?: @"";
-    fields[@"status"] = @(response.statusCode);
-    fields[@"event"] = @"http.request.completed";
-    fields[@"request_id"] = requestID ?: @"";
-    fields[@"correlation_id"] = requestID ?: @"";
-    if (tracePropagationEnabled && [traceID length] > 0) {
-      fields[@"trace_id"] = traceID;
-      fields[@"span_id"] = spanID ?: @"";
-      if ([parentSpanID length] > 0) {
-        fields[@"parent_span_id"] = parentSpanID;
+    if ([self.logger shouldLogLevel:ALNLogLevelInfo]) {
+      NSMutableDictionary *fields = [NSMutableDictionary dictionary];
+      fields[@"method"] = request.method ?: @"";
+      fields[@"path"] = request.path ?: @"";
+      fields[@"status"] = @(response.statusCode);
+      fields[@"event"] = @"http.request.completed";
+      fields[@"request_id"] = requestID ?: @"";
+      fields[@"correlation_id"] = requestID ?: @"";
+      if (tracePropagationEnabled && [traceID length] > 0) {
+        fields[@"trace_id"] = traceID;
+        fields[@"span_id"] = spanID ?: @"";
+        if ([parentSpanID length] > 0) {
+          fields[@"parent_span_id"] = parentSpanID;
+        }
+        fields[@"traceparent"] = traceparent ?: @"";
       }
-      fields[@"traceparent"] = traceparent ?: @"";
+      if (performanceLogging) {
+        fields[@"timings"] = [trace dictionaryRepresentation];
+      }
+      [self.logger info:@"request" fields:fields];
     }
-    if (performanceLogging) {
-      fields[@"timings"] = [trace dictionaryRepresentation];
-    }
-    [self.logger info:@"request" fields:fields];
     return response;
   }
 
@@ -3509,28 +3555,30 @@ static void ALNFinalizeResponse(ALNApplication *application,
     }
   }
 
-  NSMutableDictionary *logFields = [NSMutableDictionary dictionary];
-  logFields[@"method"] = request.method ?: @"";
-  logFields[@"path"] = request.path ?: @"";
-  logFields[@"status"] = @(response.statusCode);
-  logFields[@"event"] = @"http.request.completed";
-  logFields[@"request_id"] = requestID ?: @"";
-  logFields[@"correlation_id"] = requestID ?: @"";
-  if (tracePropagationEnabled && [traceID length] > 0) {
-    logFields[@"trace_id"] = traceID;
-    logFields[@"span_id"] = spanID ?: @"";
-    if ([parentSpanID length] > 0) {
-      logFields[@"parent_span_id"] = parentSpanID;
+  if ([self.logger shouldLogLevel:ALNLogLevelInfo]) {
+    NSMutableDictionary *logFields = [NSMutableDictionary dictionary];
+    logFields[@"method"] = request.method ?: @"";
+    logFields[@"path"] = request.path ?: @"";
+    logFields[@"status"] = @(response.statusCode);
+    logFields[@"event"] = @"http.request.completed";
+    logFields[@"request_id"] = requestID ?: @"";
+    logFields[@"correlation_id"] = requestID ?: @"";
+    if (tracePropagationEnabled && [traceID length] > 0) {
+      logFields[@"trace_id"] = traceID;
+      logFields[@"span_id"] = spanID ?: @"";
+      if ([parentSpanID length] > 0) {
+        logFields[@"parent_span_id"] = parentSpanID;
+      }
+      logFields[@"traceparent"] = traceparent ?: @"";
     }
-    logFields[@"traceparent"] = traceparent ?: @"";
+    logFields[@"route"] = context.routeName ?: @"";
+    logFields[@"controller"] = context.controllerName ?: @"";
+    logFields[@"action"] = context.actionName ?: @"";
+    if (performanceLogging) {
+      logFields[@"timings"] = [trace dictionaryRepresentation];
+    }
+    [self.logger info:@"request" fields:logFields];
   }
-  logFields[@"route"] = context.routeName ?: @"";
-  logFields[@"controller"] = context.controllerName ?: @"";
-  logFields[@"action"] = context.actionName ?: @"";
-  if (performanceLogging) {
-    logFields[@"timings"] = [trace dictionaryRepresentation];
-  }
-  [self.logger info:@"request" fields:logFields];
 
   return response;
 }

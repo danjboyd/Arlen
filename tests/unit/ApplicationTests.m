@@ -333,6 +333,15 @@
   return match.location != NSNotFound;
 }
 
+- (BOOL)isLowerHexString:(NSString *)value length:(NSUInteger)length {
+  if (![value isKindOfClass:[NSString class]] || [value length] != length) {
+    return NO;
+  }
+  NSRange match =
+      [value rangeOfString:@"^[0-9a-f]+$" options:NSRegularExpressionSearch];
+  return match.location != NSNotFound;
+}
+
 - (void)testImplicitJSONForDictionaryReturn {
   ALNApplication *app = [self buildAppWithHaltingMiddleware:NO];
   ALNResponse *response = [app dispatchRequest:[self requestForPath:@"/dict"]];
@@ -596,6 +605,29 @@
   XCTAssertEqualObjects(@"0123456789abcdef0123456789abcdef", traceID);
   XCTAssertEqualObjects(traceID, [self traceIDFromTraceparent:traceparent]);
   XCTAssertNotEqualObjects(incomingTraceparent, traceparent);
+}
+
+- (void)testRequestAndTraceIDsUseDeterministicLowerHexShape {
+  ALNApplication *app = [self buildAppWithHaltingMiddleware:NO];
+  ALNResponse *response = [app dispatchRequest:[self requestForPath:@"/dict"
+                                                         queryString:@""
+                                                             headers:@{}]];
+  XCTAssertEqual((NSInteger)200, response.statusCode);
+
+  NSString *requestID = [response headerForName:@"X-Request-Id"];
+  NSString *traceID = [response headerForName:@"X-Trace-Id"];
+  NSString *traceparent = [response headerForName:@"traceparent"];
+  NSString *spanID = @"";
+  if ([traceparent isKindOfClass:[NSString class]]) {
+    NSArray *segments = [traceparent componentsSeparatedByString:@"-"];
+    if ([segments count] == 4 && [segments[2] isKindOfClass:[NSString class]]) {
+      spanID = segments[2];
+    }
+  }
+
+  XCTAssertTrue([self isLowerHexString:requestID length:32]);
+  XCTAssertTrue([self isLowerHexString:traceID length:32]);
+  XCTAssertTrue([self isLowerHexString:spanID length:16]);
 }
 
 - (void)testTracePropagationCanBeDisabledByConfig {

@@ -118,7 +118,7 @@ static NSString *ALNStatusText(NSInteger statusCode) {
   return YES;
 }
 
-- (NSData *)serializedData {
+- (NSData *)serializedHeaderData {
   if ([self headerForName:@"Content-Length"] == nil) {
     [self setHeader:@"Content-Length"
               value:[NSString stringWithFormat:@"%lu",
@@ -137,9 +137,12 @@ static NSString *ALNStatusText(NSInteger statusCode) {
     [head appendFormat:@"%@: %@\r\n", key, self.headers[key]];
   }
   [head appendString:@"\r\n"];
+  return [head dataUsingEncoding:NSUTF8StringEncoding] ?: [NSData data];
+}
 
+- (NSData *)serializedData {
   NSMutableData *result = [NSMutableData data];
-  [result appendData:[head dataUsingEncoding:NSUTF8StringEncoding]];
+  [result appendData:[self serializedHeaderData]];
   [result appendData:self.bodyData];
   return result;
 }

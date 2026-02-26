@@ -169,7 +169,7 @@
   XCTAssertGreaterThan([(NSString *)cluster[@"nodeID"] length], (NSUInteger)0);
   XCTAssertEqual((NSInteger)1, [cluster[@"expectedNodes"] integerValue]);
   XCTAssertEqual((NSInteger)1, [cluster[@"observedNodes"] integerValue]);
-  XCTAssertEqualObjects(@(YES), cluster[@"emitHeaders"]);
+  XCTAssertEqualObjects(@(NO), cluster[@"emitHeaders"]);
 
   NSDictionary *limits = config[@"requestLimits"];
   XCTAssertEqual((NSInteger)2048, [limits[@"maxRequestLineBytes"] integerValue]);
@@ -195,6 +195,24 @@
                                                error:&error];
   XCTAssertNil(error);
   XCTAssertEqualObjects(@"serialized", config[@"requestDispatchMode"]);
+}
+
+- (void)testClusterEmitHeadersDefaultsToEnabledWhenClusterModeIsEnabled {
+  NSString *root = [self prepareConfigTree];
+  XCTAssertNotNil(root);
+
+  setenv("ARLEN_CLUSTER_ENABLED", "1", 1);
+  unsetenv("ARLEN_CLUSTER_EMIT_HEADERS");
+  NSError *error = nil;
+  NSDictionary *config = [ALNConfig loadConfigAtRoot:root
+                                         environment:@"development"
+                                               error:&error];
+  unsetenv("ARLEN_CLUSTER_ENABLED");
+
+  XCTAssertNil(error);
+  NSDictionary *cluster = config[@"cluster"];
+  XCTAssertEqualObjects(@(YES), cluster[@"enabled"]);
+  XCTAssertEqualObjects(@(YES), cluster[@"emitHeaders"]);
 }
 
 - (void)testEnvironmentOverridesRequestLimitsAndProxyFlags {

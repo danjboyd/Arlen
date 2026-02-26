@@ -1016,7 +1016,11 @@ static NSDictionary *ALNSecurityProfileDefaults(NSString *profileName) {
     finalCluster[@"observedNodes"] = @(expectedNodesDefault);
   }
   if (finalCluster[@"emitHeaders"] == nil) {
-    finalCluster[@"emitHeaders"] = @(YES);
+    BOOL clusterEnabled =
+        [finalCluster[@"enabled"] respondsToSelector:@selector(boolValue)] ?
+            [finalCluster[@"enabled"] boolValue] :
+            NO;
+    finalCluster[@"emitHeaders"] = @(clusterEnabled);
   }
   config[@"cluster"] = finalCluster;
 

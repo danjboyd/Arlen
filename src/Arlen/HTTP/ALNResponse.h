@@ -22,6 +22,7 @@ extern NSString *const ALNResponseErrorDomain;
 - (BOOL)setJSONBody:(id)object
             options:(NSJSONWritingOptions)options
               error:(NSError *_Nullable *_Nullable)error;
+- (NSData *)serializedHeaderData;
 - (NSData *)serializedData;
 
 @end

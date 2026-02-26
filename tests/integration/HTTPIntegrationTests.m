@@ -294,6 +294,10 @@
   NSTask *server = [[NSTask alloc] init];
   server.launchPath = @"./build/boomhauer";
   server.arguments = @[ @"--port", [NSString stringWithFormat:@"%d", port] ];
+  NSMutableDictionary *environment =
+      [NSMutableDictionary dictionaryWithDictionary:[[NSProcessInfo processInfo] environment]];
+  environment[@"ARLEN_CONNECTION_TIMEOUT_SECONDS"] = @"120";
+  server.environment = environment;
   server.standardOutput = [NSPipe pipe];
   server.standardError = [NSPipe pipe];
   [server launch];
@@ -320,7 +324,8 @@
                                          @"print(f'{elapsed:.3f}')\n",
                                          port];
     int pyCode = 0;
-    NSString *output = [self runPythonScript:script exitCode:&pyCode];
+    NSString *command = [NSString stringWithFormat:@"python3 - <<'PY' 2>&1\n%@\nPY", script ?: @""];
+    NSString *output = [self runShellCapture:command exitCode:&pyCode];
     XCTAssertEqual(0, pyCode);
     XCTAssertTrue([[output stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]]
         doubleValue] < 1.2);
@@ -558,6 +563,120 @@
     NSString *output = [self runPythonScript:script exitCode:&pyCode];
     XCTAssertEqual(0, pyCode);
     XCTAssertTrue([output containsString:@"ok"]);
+  } @finally {
+    if ([server isRunning]) {
+      (void)kill(server.processIdentifier, SIGTERM);
+      [server waitUntilExit];
+    }
+  }
+}
+
+- (void)testKeepAliveRequestChurnDoesNotShowUnboundedRSSGrowth {
+  const char *enabled = getenv("ARLEN_ENABLE_PHASE10J_RSS_CHURN");
+  if (!(enabled != NULL && strcmp(enabled, "1") == 0)) {
+    return;
+  }
+
+  int port = [self randomPort];
+  NSTask *server = [[NSTask alloc] init];
+  server.launchPath = @"./build/boomhauer";
+  server.arguments = @[ @"--port", [NSString stringWithFormat:@"%d", port] ];
+  server.standardOutput = [NSPipe pipe];
+  server.standardError = [NSPipe pipe];
+  [server launch];
+
+  @try {
+    BOOL ready = NO;
+    (void)[self requestPathWithRetries:@"/healthz" port:port attempts:60 success:&ready];
+    XCTAssertTrue(ready);
+
+    NSString *script = [NSString stringWithFormat:
+                                         @"import socket\n"
+                                         @"import time\n"
+                                         @"PORT=%d\n"
+                                         @"PID=%d\n"
+                                         @"TOTAL_REQUESTS=200\n"
+                                         @"RSS_GROWTH_LIMIT_KB=32768\n"
+                                         @"def rss_kb(pid):\n"
+                                         @"    with open(f'/proc/{pid}/status', 'r', encoding='utf-8') as f:\n"
+                                         @"        for line in f:\n"
+                                         @"            if line.startswith('VmRSS:'):\n"
+                                         @"                parts = line.split()\n"
+                                         @"                if len(parts) >= 2:\n"
+                                         @"                    return int(parts[1])\n"
+                                         @"    raise RuntimeError('VmRSS not found')\n"
+                                         @"def read_response(sock):\n"
+                                         @"    data = b''\n"
+                                         @"    while b'\\r\\n\\r\\n' not in data:\n"
+                                         @"        chunk = sock.recv(4096)\n"
+                                         @"        if not chunk:\n"
+                                         @"            raise RuntimeError('connection closed before headers')\n"
+                                         @"        data += chunk\n"
+                                         @"    head, body = data.split(b'\\r\\n\\r\\n', 1)\n"
+                                         @"    lines = head.decode('utf-8', 'replace').split('\\r\\n')\n"
+                                         @"    status = lines[0]\n"
+                                         @"    headers = {}\n"
+                                         @"    for line in lines[1:]:\n"
+                                         @"        if ':' not in line:\n"
+                                         @"            continue\n"
+                                         @"        name, value = line.split(':', 1)\n"
+                                         @"        headers[name.strip().lower()] = value.strip()\n"
+                                         @"    length = int(headers.get('content-length', '0'))\n"
+                                         @"    while len(body) < length:\n"
+                                         @"        chunk = sock.recv(4096)\n"
+                                         @"        if not chunk:\n"
+                                         @"            raise RuntimeError('connection closed before body complete')\n"
+                                         @"        body += chunk\n"
+                                         @"    return status, headers, body[:length]\n"
+                                         @"sock = socket.create_connection(('127.0.0.1', PORT), timeout=60)\n"
+                                         @"sock.settimeout(60)\n"
+                                         @"rss_before = rss_kb(PID)\n"
+                                         @"deadline = time.monotonic() + 120.0\n"
+                                         @"for idx in range(TOTAL_REQUESTS):\n"
+                                         @"    if time.monotonic() > deadline:\n"
+                                         @"        raise RuntimeError('keep-alive churn deadline exceeded')\n"
+                                         @"    connection = 'close' if idx == (TOTAL_REQUESTS - 1) else 'keep-alive'\n"
+                                         @"    sock.sendall((\n"
+                                         @"        f'GET /healthz HTTP/1.1\\r\\n'\n"
+                                         @"        f'Host: 127.0.0.1:{PORT}\\r\\n'\n"
+                                         @"        f'Connection: {connection}\\r\\n\\r\\n'\n"
+                                         @"    ).encode('utf-8'))\n"
+                                         @"    status, headers, body = read_response(sock)\n"
+                                         @"    if '200' not in status:\n"
+                                         @"        raise RuntimeError(status)\n"
+                                         @"    if body != b'ok\\n':\n"
+                                         @"        raise RuntimeError(body.decode('utf-8', 'replace'))\n"
+                                         @"    if idx < (TOTAL_REQUESTS - 1) and headers.get('connection', '').lower() != 'keep-alive':\n"
+                                         @"        raise RuntimeError('keep-alive unexpectedly disabled')\n"
+                                         @"sock.close()\n"
+                                         @"rss_after = rss_kb(PID)\n"
+                                         @"growth = rss_after - rss_before\n"
+                                         @"print(f'{rss_before},{rss_after},{growth}')\n"
+                                         @"if growth > RSS_GROWTH_LIMIT_KB:\n"
+                                         @"    raise RuntimeError(f'unbounded rss growth detected: {growth} kB')\n",
+                                         port,
+                                         (int)server.processIdentifier];
+    int pyCode = 0;
+    NSString *command = [NSString stringWithFormat:@"python3 - <<'PY' 2>&1\n%@\nPY", script ?: @""];
+    NSString *output = [self runShellCapture:command exitCode:&pyCode];
+    if (pyCode != 0) {
+      NSLog(@"phase10j churn python failed (exit=%d): %@", pyCode, output ?: @"");
+    }
+    XCTAssertEqual(0, pyCode, @"%@", output);
+    NSArray *lines = [[output stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]]
+        componentsSeparatedByCharactersInSet:[NSCharacterSet newlineCharacterSet]];
+    NSString *measurementLine = @"";
+    for (NSString *line in [lines reverseObjectEnumerator]) {
+      if ([line containsString:@","]) {
+        measurementLine = line;
+        break;
+      }
+    }
+    NSArray *parts = [measurementLine componentsSeparatedByString:@","];
+    if ([parts count] != 3) {
+      NSLog(@"phase10j churn unexpected output: %@", output ?: @"");
+    }
+    XCTAssertEqual((NSUInteger)3, [parts count]);
   } @finally {
     if ([server isRunning]) {
       (void)kill(server.processIdentifier, SIGTERM);

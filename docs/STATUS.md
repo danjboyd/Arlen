@@ -53,7 +53,7 @@ Last updated: 2026-02-26
 - Phase 9H: complete (2026-02-25)
 - Phase 9I: complete (2026-02-25)
 - Phase 9J: complete (2026-02-25)
-- Phase 10: active (10A/10B/10C/10D/10E/10F/10G/10H/10I complete on 2026-02-26; perf threshold calibration complete)
+- Phase 10: active (10A/10B/10C/10D/10E/10F/10G/10H/10I/10J complete on 2026-02-26)
 
 ## Completed Today (2026-02-26)
 
@@ -107,6 +107,13 @@ Last updated: 2026-02-26
   - wired app-root compile path (`bin/boomhauer`) to honor the same toggles and pass deterministic feature macros
   - hardened runtime fallback behavior/metadata when compiled without yyjson or llhttp (`ALNJSONSerialization`, `ALNRequest`)
   - added regression coverage for feature-disabled compile path (`tests/integration/DeploymentIntegrationTests.m`)
+- Completed Phase 10J HTTP runtime hot-path optimization tranche:
+  - added per-request autorelease pools in the HTTP accept/request loops and added keep-alive RSS churn regression coverage (env-gated lane)
+  - reduced request identity and observability overhead (`arc4random_buf`-backed hex IDs; logger-level-gated info field construction)
+  - reduced response-path copies via header/body split serialization (`ALNResponse serializedHeaderData`, `ALNHTTPServer` send path)
+  - removed duplicated read-path parse work with a single head metadata parse pass (content-length/header-limit enforcement retained)
+  - applied queue/static mount micro-optimizations (O(1)-style dequeue with compaction, cached effective static mounts)
+  - hardened cluster header defaults so `cluster.emitHeaders` inherits `cluster.enabled` when unset
 
 ## Completed Today (2026-02-25)
 

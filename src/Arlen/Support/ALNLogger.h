@@ -18,6 +18,7 @@ typedef NS_ENUM(NSInteger, ALNLogLevel) {
 @property(nonatomic, assign) ALNLogLevel minimumLevel;
 
 - (instancetype)initWithFormat:(NSString *)format;
+- (BOOL)shouldLogLevel:(ALNLogLevel)level;
 - (void)logLevel:(ALNLogLevel)level
          message:(NSString *)message
           fields:(nullable NSDictionary *)fields;

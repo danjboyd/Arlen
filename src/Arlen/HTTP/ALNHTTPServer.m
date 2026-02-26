@@ -2,6 +2,7 @@
 
 #import <arpa/inet.h>
 #import <errno.h>
+#import <limits.h>
 #import <netinet/in.h>
 #import <openssl/sha.h>
 #import <signal.h>
@@ -36,6 +37,14 @@ typedef struct {
   NSUInteger maxRealtimeTotalSubscribers;
   NSUInteger maxRealtimeChannelSubscribers;
 } ALNRuntimeLimits;
+
+typedef struct {
+  BOOL headerComplete;
+  NSUInteger headerBytes;
+  NSUInteger requestLineBytes;
+  NSInteger contentLength;
+  NSInteger statusCode;
+} ALNRequestHeadMetadata;
 
 static volatile sig_atomic_t gSignalStopRequested = 0;
 
@@ -170,37 +179,229 @@ static void ALNApplyClientSocketTimeout(int clientFd, NSUInteger timeoutSeconds)
   (void)setsockopt(clientFd, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout));
 }
 
-static NSInteger ALNParseContentLength(NSString *headerText) {
-  NSArray *lines = [headerText componentsSeparatedByString:@"\r\n"];
-  for (NSUInteger idx = 1; idx < [lines count]; idx++) {
-    NSString *line = lines[idx];
-    NSRange colon = [line rangeOfString:@":"];
-    if (colon.location == NSNotFound) {
-      continue;
-    }
+static BOOL ALNIsWhitespaceByte(uint8_t value) {
+  return value == ' ' || value == '\t' || value == '\r' || value == '\n' || value == '\f' ||
+         value == '\v';
+}
 
-    NSString *name = [[[line substringToIndex:colon.location]
-        stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]] lowercaseString];
-    if (![name isEqualToString:@"content-length"]) {
-      continue;
-    }
-
-    NSString *value = [[line substringFromIndex:colon.location + 1]
-        stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
-    if ([value length] == 0) {
-      return -1;
-    }
-    NSCharacterSet *nonDigits = [[NSCharacterSet decimalDigitCharacterSet] invertedSet];
-    if ([value rangeOfCharacterFromSet:nonDigits].location != NSNotFound) {
-      return -1;
-    }
-    long long parsed = [value longLongValue];
-    if (parsed < 0) {
-      return -1;
-    }
-    return (NSInteger)parsed;
+static BOOL ALNAsciiEqualsIgnoreCase(const uint8_t *bytes, NSUInteger length, const char *literal) {
+  if (bytes == NULL || literal == NULL) {
+    return NO;
   }
-  return 0;
+  NSUInteger literalLength = (NSUInteger)strlen(literal);
+  if (length != literalLength) {
+    return NO;
+  }
+  for (NSUInteger idx = 0; idx < length; idx++) {
+    uint8_t left = bytes[idx];
+    uint8_t right = (uint8_t)literal[idx];
+    if (left >= 'A' && left <= 'Z') {
+      left = (uint8_t)(left - 'A' + 'a');
+    }
+    if (right >= 'A' && right <= 'Z') {
+      right = (uint8_t)(right - 'A' + 'a');
+    }
+    if (left != right) {
+      return NO;
+    }
+  }
+  return YES;
+}
+
+static BOOL ALNParseContentLengthBytes(const uint8_t *bytes,
+                                       NSUInteger length,
+                                       NSInteger *contentLengthOut) {
+  if (contentLengthOut != NULL) {
+    *contentLengthOut = 0;
+  }
+  if (bytes == NULL || length == 0) {
+    return YES;
+  }
+
+  NSUInteger start = 0;
+  while (start < length && ALNIsWhitespaceByte(bytes[start])) {
+    start += 1;
+  }
+  NSUInteger end = length;
+  while (end > start && ALNIsWhitespaceByte(bytes[end - 1])) {
+    end -= 1;
+  }
+  if (start >= end) {
+    return NO;
+  }
+
+  unsigned long long parsed = 0ULL;
+  BOOL overflow = NO;
+  for (NSUInteger idx = start; idx < end; idx++) {
+    uint8_t ch = bytes[idx];
+    if (ch < '0' || ch > '9') {
+      return NO;
+    }
+    unsigned long long digit = (unsigned long long)(ch - '0');
+    if (!overflow &&
+        (parsed > (ULLONG_MAX / 10ULL) ||
+         (parsed == (ULLONG_MAX / 10ULL) && digit > (ULLONG_MAX % 10ULL)))) {
+      overflow = YES;
+      continue;
+    }
+    if (overflow) {
+      continue;
+    }
+    parsed = (parsed * 10ULL) + digit;
+  }
+
+  if (overflow || parsed > (unsigned long long)NSIntegerMax) {
+    if (contentLengthOut != NULL) {
+      *contentLengthOut = NSIntegerMax;
+    }
+    return YES;
+  }
+  if (contentLengthOut != NULL) {
+    *contentLengthOut = (NSInteger)parsed;
+  }
+  return YES;
+}
+
+static BOOL ALNParseRequestHeadMetadata(NSData *buffer,
+                                        ALNRequestLimits limits,
+                                        ALNRequestHeadMetadata *metadataOut) {
+  ALNRequestHeadMetadata metadata;
+  metadata.headerComplete = NO;
+  metadata.headerBytes = 0;
+  metadata.requestLineBytes = 0;
+  metadata.contentLength = 0;
+  metadata.statusCode = 0;
+
+  NSUInteger length = [buffer length];
+  if (length > limits.maxHeaderBytes) {
+    metadata.statusCode = 431;
+    if (metadataOut != NULL) {
+      *metadataOut = metadata;
+    }
+    return NO;
+  }
+  if (length < 4) {
+    if (metadataOut != NULL) {
+      *metadataOut = metadata;
+    }
+    return NO;
+  }
+
+  const uint8_t *bytes = (const uint8_t *)[buffer bytes];
+  NSUInteger separatorLocation = NSNotFound;
+  for (NSUInteger idx = 0; idx + 3 < length; idx++) {
+    if (bytes[idx] == '\r' && bytes[idx + 1] == '\n' && bytes[idx + 2] == '\r' &&
+        bytes[idx + 3] == '\n') {
+      separatorLocation = idx;
+      break;
+    }
+  }
+  if (separatorLocation == NSNotFound) {
+    if (metadataOut != NULL) {
+      *metadataOut = metadata;
+    }
+    return NO;
+  }
+
+  NSUInteger headerBytes = separatorLocation + 4;
+  if (headerBytes > limits.maxHeaderBytes) {
+    metadata.statusCode = 431;
+    if (metadataOut != NULL) {
+      *metadataOut = metadata;
+    }
+    return NO;
+  }
+
+  NSUInteger requestLineBytes = separatorLocation;
+  for (NSUInteger idx = 0; idx + 1 < separatorLocation; idx++) {
+    if (bytes[idx] == '\r' && bytes[idx + 1] == '\n') {
+      requestLineBytes = idx;
+      break;
+    }
+  }
+  if (requestLineBytes > limits.maxRequestLineBytes) {
+    metadata.statusCode = 431;
+    if (metadataOut != NULL) {
+      *metadataOut = metadata;
+    }
+    return NO;
+  }
+
+  NSInteger contentLength = 0;
+  NSUInteger lineStart = requestLineBytes;
+  if (lineStart + 1 < separatorLocation && bytes[lineStart] == '\r' && bytes[lineStart + 1] == '\n') {
+    lineStart += 2;
+  }
+  while (lineStart < separatorLocation) {
+    NSUInteger lineEnd = lineStart;
+    while (lineEnd + 1 < headerBytes &&
+           !(bytes[lineEnd] == '\r' && bytes[lineEnd + 1] == '\n')) {
+      lineEnd += 1;
+    }
+    if (lineEnd + 1 >= headerBytes || lineEnd > separatorLocation) {
+      metadata.statusCode = 400;
+      if (metadataOut != NULL) {
+        *metadataOut = metadata;
+      }
+      return NO;
+    }
+    if (lineEnd == lineStart) {
+      lineStart += 2;
+      continue;
+    }
+
+    NSUInteger colon = lineStart;
+    while (colon < lineEnd && bytes[colon] != ':') {
+      colon += 1;
+    }
+    if (colon < lineEnd) {
+      NSUInteger nameStart = lineStart;
+      NSUInteger nameEnd = colon;
+      while (nameStart < nameEnd && ALNIsWhitespaceByte(bytes[nameStart])) {
+        nameStart += 1;
+      }
+      while (nameEnd > nameStart && ALNIsWhitespaceByte(bytes[nameEnd - 1])) {
+        nameEnd -= 1;
+      }
+      if (ALNAsciiEqualsIgnoreCase(bytes + nameStart, nameEnd - nameStart, "content-length")) {
+        NSInteger parsedContentLength = 0;
+        if (!ALNParseContentLengthBytes(bytes + colon + 1, lineEnd - (colon + 1), &parsedContentLength)) {
+          metadata.statusCode = 400;
+          if (metadataOut != NULL) {
+            *metadataOut = metadata;
+          }
+          return NO;
+        }
+        contentLength = parsedContentLength;
+        break;
+      }
+    }
+    lineStart = lineEnd + 2;
+  }
+
+  if (contentLength < 0 || (NSUInteger)contentLength > limits.maxBodyBytes) {
+    metadata.statusCode = 413;
+    if (metadataOut != NULL) {
+      *metadataOut = metadata;
+    }
+    return NO;
+  }
+  if ((NSUInteger)contentLength > NSUIntegerMax - headerBytes) {
+    metadata.statusCode = 413;
+    if (metadataOut != NULL) {
+      *metadataOut = metadata;
+    }
+    return NO;
+  }
+
+  metadata.headerComplete = YES;
+  metadata.headerBytes = headerBytes;
+  metadata.requestLineBytes = requestLineBytes;
+  metadata.contentLength = contentLength;
+  if (metadataOut != NULL) {
+    *metadataOut = metadata;
+  }
+  return YES;
 }
 
 static BOOL ALNHeaderContainsToken(NSString *value, NSString *needleLower) {
@@ -425,8 +626,9 @@ static NSData *ALNReadHTTPRequestData(int clientFd, ALNRequestLimits limits, NSI
   }
 
   NSMutableData *buffer = [NSMutableData data];
-  NSData *headerSeparator = [@"\r\n\r\n" dataUsingEncoding:NSUTF8StringEncoding];
-  NSUInteger headerBytes = 0;
+  ALNRequestHeadMetadata metadata;
+  memset(&metadata, 0, sizeof(metadata));
+  BOOL metadataReady = NO;
   NSUInteger expectedTotalBytes = NSNotFound;
 
   while (1) {
@@ -457,72 +659,26 @@ static NSData *ALNReadHTTPRequestData(int clientFd, ALNRequestLimits limits, NSI
 
     [buffer appendBytes:chunk length:(NSUInteger)readBytes];
 
-    if (headerBytes == 0) {
-      if ([buffer length] > limits.maxHeaderBytes) {
-        if (statusCode != NULL) {
-          *statusCode = 431;
+    if (!metadataReady) {
+      ALNRequestHeadMetadata parsedMetadata;
+      memset(&parsedMetadata, 0, sizeof(parsedMetadata));
+      if (!ALNParseRequestHeadMetadata(buffer, limits, &parsedMetadata)) {
+        if (parsedMetadata.statusCode != 0) {
+          if (statusCode != NULL) {
+            *statusCode = parsedMetadata.statusCode;
+          }
+          return nil;
         }
-        return nil;
-      }
-
-      NSRange separatorRange =
-          [buffer rangeOfData:headerSeparator options:0 range:NSMakeRange(0, [buffer length])];
-      if (separatorRange.location == NSNotFound) {
         continue;
       }
-
-      headerBytes = separatorRange.location + separatorRange.length;
-      if (headerBytes > limits.maxHeaderBytes) {
-        if (statusCode != NULL) {
-          *statusCode = 431;
-        }
-        return nil;
-      }
-
-      NSData *headerData = [buffer subdataWithRange:NSMakeRange(0, separatorRange.location)];
-      NSString *headerText = [[NSString alloc] initWithData:headerData encoding:NSUTF8StringEncoding];
-      if (headerText == nil) {
-        if (statusCode != NULL) {
-          *statusCode = 400;
-        }
-        return nil;
-      }
-
-      NSRange requestLineEnd = [headerText rangeOfString:@"\r\n"];
-      NSUInteger requestLineBytes =
-          (requestLineEnd.location == NSNotFound) ? [headerData length] : requestLineEnd.location;
-      if (requestLineBytes > limits.maxRequestLineBytes) {
-        if (statusCode != NULL) {
-          *statusCode = 431;
-        }
-        return nil;
-      }
-
-      NSInteger contentLength = ALNParseContentLength(headerText);
-      if (contentLength < 0) {
-        if (statusCode != NULL) {
-          *statusCode = 400;
-        }
-        return nil;
-      }
-      if ((NSUInteger)contentLength > limits.maxBodyBytes) {
-        if (statusCode != NULL) {
-          *statusCode = 413;
-        }
-        return nil;
-      }
-
-      expectedTotalBytes = headerBytes + (NSUInteger)contentLength;
-      if (expectedTotalBytes < headerBytes) {
-        if (statusCode != NULL) {
-          *statusCode = 413;
-        }
-        return nil;
-      }
+      metadata = parsedMetadata;
+      metadataReady = YES;
+      expectedTotalBytes = metadata.headerBytes + (NSUInteger)metadata.contentLength;
     }
 
-    if (headerBytes > 0) {
-      NSUInteger bodyBytesRead = ([buffer length] >= headerBytes) ? ([buffer length] - headerBytes) : 0;
+    if (metadataReady) {
+      NSUInteger bodyBytesRead =
+          ([buffer length] >= metadata.headerBytes) ? ([buffer length] - metadata.headerBytes) : 0;
       if (bodyBytesRead > limits.maxBodyBytes) {
         if (statusCode != NULL) {
           *statusCode = 413;
@@ -902,7 +1058,7 @@ static void ALNEnsurePerformanceHeaders(ALNResponse *response,
 
 static double ALNSendResponse(int clientFd, ALNResponse *response, BOOL performanceLogging) {
   double serializeStart = ALNNowMilliseconds();
-  NSData *raw = [response serializedData];
+  NSData *headerData = [response serializedHeaderData];
   double serializeMs = ALNNowMilliseconds() - serializeStart;
 
   if (performanceLogging) {
@@ -912,11 +1068,17 @@ static double ALNSendResponse(int clientFd, ALNResponse *response, BOOL performa
     NSString *total = [NSString stringWithFormat:@"%.3f", (currentTotal + serializeMs)];
     [response setHeader:@"X-Arlen-Total-Ms" value:total];
     [response setHeader:@"X-Mojo-Total-Ms" value:total];
-    raw = [response serializedData];
+    headerData = [response serializedHeaderData];
   }
 
   double writeStart = ALNNowMilliseconds();
-  (void)ALNSendAll(clientFd, [raw bytes], [raw length]);
+  if ([headerData length] > 0) {
+    (void)ALNSendAll(clientFd, [headerData bytes], [headerData length]);
+  }
+  NSData *bodyData = response.bodyData ?: [NSData data];
+  if ([bodyData length] > 0) {
+    (void)ALNSendAll(clientFd, [bodyData bytes], [bodyData length]);
+  }
   return (ALNNowMilliseconds() - writeStart) + serializeMs;
 }
 
@@ -1021,8 +1183,11 @@ static NSString *ALNRealtimeBackpressureReasonForSubscriptionRejection(NSString 
 @property(atomic, assign) BOOL shouldRun;
 @property(nonatomic, strong) NSCondition *httpWorkerQueueCondition;
 @property(nonatomic, strong) NSMutableArray *pendingHTTPClientFDs;
+@property(nonatomic, assign) NSUInteger pendingHTTPClientFDHeadIndex;
 @property(nonatomic, assign) BOOL httpWorkerPoolStarted;
 @property(atomic, assign) int serverSocketFD;
+@property(nonatomic, strong) NSLock *staticMountCacheLock;
+@property(nonatomic, copy) NSArray *cachedStaticMounts;
 
 @end
 
@@ -1048,13 +1213,16 @@ static NSString *ALNRealtimeBackpressureReasonForSubscriptionRejection(NSString 
     _shouldRun = YES;
     _httpWorkerQueueCondition = [[NSCondition alloc] init];
     _pendingHTTPClientFDs = [NSMutableArray array];
+    _pendingHTTPClientFDHeadIndex = 0;
     _httpWorkerPoolStarted = NO;
     _serverSocketFD = -1;
+    _staticMountCacheLock = [[NSLock alloc] init];
+    _cachedStaticMounts = nil;
   }
   return self;
 }
 
-- (NSArray *)effectiveStaticMounts {
+- (NSArray *)buildEffectiveStaticMounts {
   NSMutableArray *mounts = [NSMutableArray array];
   NSMutableSet *seenPrefixes = [NSMutableSet set];
 
@@ -1101,6 +1269,30 @@ static NSString *ALNRealtimeBackpressureReasonForSubscriptionRejection(NSString 
   return [NSArray arrayWithArray:mounts];
 }
 
+- (NSArray *)effectiveStaticMounts {
+  [self.staticMountCacheLock lock];
+  NSArray *cached = self.cachedStaticMounts;
+  [self.staticMountCacheLock unlock];
+  if (cached != nil) {
+    return cached;
+  }
+
+  NSArray *built = [self buildEffectiveStaticMounts];
+  [self.staticMountCacheLock lock];
+  if (self.cachedStaticMounts == nil) {
+    self.cachedStaticMounts = built ?: @[];
+  }
+  NSArray *resolved = self.cachedStaticMounts;
+  [self.staticMountCacheLock unlock];
+  return resolved ?: @[];
+}
+
+- (void)invalidateStaticMountsCache {
+  [self.staticMountCacheLock lock];
+  self.cachedStaticMounts = nil;
+  [self.staticMountCacheLock unlock];
+}
+
 - (void)printRoutesToFile:(FILE *)stream {
   FILE *out = (stream != NULL) ? stream : stdout;
   NSArray *routes = [self.application routeTable];
@@ -1126,16 +1318,24 @@ static NSString *ALNRealtimeBackpressureReasonForSubscriptionRejection(NSString 
   return self.shouldRun && !ALNSignalStopRequested();
 }
 
+- (NSUInteger)queuedHTTPClientCountLocked {
+  NSUInteger queued = [self.pendingHTTPClientFDs count];
+  if (self.pendingHTTPClientFDHeadIndex >= queued) {
+    return 0;
+  }
+  return queued - self.pendingHTTPClientFDHeadIndex;
+}
+
 - (BOOL)hasQueuedHTTPClients {
   [self.httpWorkerQueueCondition lock];
-  BOOL hasQueued = ([self.pendingHTTPClientFDs count] > 0);
+  BOOL hasQueued = ([self queuedHTTPClientCountLocked] > 0);
   [self.httpWorkerQueueCondition unlock];
   return hasQueued;
 }
 
 - (BOOL)enqueueHTTPClientForWorker:(int)clientFd {
   [self.httpWorkerQueueCondition lock];
-  BOOL accepted = ([self.pendingHTTPClientFDs count] < self.maxQueuedHTTPConnections);
+  BOOL accepted = ([self queuedHTTPClientCountLocked] < self.maxQueuedHTTPConnections);
   if (accepted) {
     [self.pendingHTTPClientFDs addObject:@(clientFd)];
     [self.httpWorkerQueueCondition signal];
@@ -1146,15 +1346,27 @@ static NSString *ALNRealtimeBackpressureReasonForSubscriptionRejection(NSString 
 
 - (int)dequeueHTTPClientForWorker {
   [self.httpWorkerQueueCondition lock];
-  while ([self.pendingHTTPClientFDs count] == 0 && [self shouldContinueRunning]) {
+  while ([self queuedHTTPClientCountLocked] == 0 && [self shouldContinueRunning]) {
     [self.httpWorkerQueueCondition waitUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.25]];
   }
 
   int clientFd = -1;
-  if ([self.pendingHTTPClientFDs count] > 0) {
-    NSNumber *next = self.pendingHTTPClientFDs[0];
-    [self.pendingHTTPClientFDs removeObjectAtIndex:0];
+  NSUInteger queuedCount = [self queuedHTTPClientCountLocked];
+  if (queuedCount > 0) {
+    NSNumber *next = self.pendingHTTPClientFDs[self.pendingHTTPClientFDHeadIndex];
+    self.pendingHTTPClientFDHeadIndex += 1;
     clientFd = [next intValue];
+
+    NSUInteger totalCount = [self.pendingHTTPClientFDs count];
+    if (self.pendingHTTPClientFDHeadIndex >= totalCount) {
+      [self.pendingHTTPClientFDs removeAllObjects];
+      self.pendingHTTPClientFDHeadIndex = 0;
+    } else if (self.pendingHTTPClientFDHeadIndex >= 64 &&
+               self.pendingHTTPClientFDHeadIndex * 2 >= totalCount) {
+      NSRange consumed = NSMakeRange(0, self.pendingHTTPClientFDHeadIndex);
+      [self.pendingHTTPClientFDs removeObjectsInRange:consumed];
+      self.pendingHTTPClientFDHeadIndex = 0;
+    }
   }
   [self.httpWorkerQueueCondition unlock];
   return clientFd;
@@ -1206,8 +1418,10 @@ static NSString *ALNRealtimeBackpressureReasonForSubscriptionRejection(NSString 
 - (void)resetHTTPWorkerPoolState {
   [self.httpWorkerQueueCondition lock];
   [self.pendingHTTPClientFDs removeAllObjects];
+  self.pendingHTTPClientFDHeadIndex = 0;
   self.httpWorkerPoolStarted = NO;
   [self.httpWorkerQueueCondition unlock];
+  [self invalidateStaticMountsCache];
 }
 
 - (BOOL)reserveWebSocketSessionWithLimit:(NSUInteger)limit {
@@ -1374,56 +1588,57 @@ static NSString *ALNRealtimeBackpressureReasonForSubscriptionRejection(NSString 
 
   NSUInteger requestsHandled = 0;
   while ([self shouldContinueRunning]) {
-    double requestStartMs = ALNNowMilliseconds();
+    @autoreleasepool {
+      double requestStartMs = ALNNowMilliseconds();
 
-    NSInteger readStatus = 0;
-    double parseStartMs = ALNNowMilliseconds();
-    NSData *rawRequest = ALNReadHTTPRequestData(clientFd, limits, &readStatus);
-    double parseMs = ALNNowMilliseconds() - parseStartMs;
-    if (rawRequest == nil) {
-      if (readStatus == 0) {
+      NSInteger readStatus = 0;
+      double parseStartMs = ALNNowMilliseconds();
+      NSData *rawRequest = ALNReadHTTPRequestData(clientFd, limits, &readStatus);
+      double parseMs = ALNNowMilliseconds() - parseStartMs;
+      if (rawRequest == nil) {
+        if (readStatus == 0) {
+          return;
+        }
+        if (requestsHandled > 0 && readStatus == 408) {
+          return;
+        }
+
+        ALNResponse *errorResponse = nil;
+        if (readStatus == 413) {
+          errorResponse = ALNErrorResponse(413, @"payload too large\n");
+        } else if (readStatus == 431) {
+          errorResponse = ALNErrorResponse(431, @"request headers too large\n");
+        } else if (readStatus == 408) {
+          errorResponse = ALNErrorResponse(408, @"request timeout\n");
+        } else {
+          errorResponse = ALNErrorResponse(400, @"bad request\n");
+        }
+        [errorResponse setHeader:@"Connection" value:@"close"];
+        ALNEnsurePerformanceHeaders(errorResponse,
+                                    performanceLogging,
+                                    parseMs,
+                                    ALNNowMilliseconds() - requestStartMs);
+        (void)ALNSendResponse(clientFd, errorResponse, performanceLogging);
         return;
       }
-      if (requestsHandled > 0 && readStatus == 408) {
+
+      NSError *requestError = nil;
+      double requestParseStartMs = ALNNowMilliseconds();
+      ALNRequest *request = [ALNRequest requestFromRawData:rawRequest
+                                                   backend:self.requestParserBackend
+                                                     error:&requestError];
+      parseMs += (ALNNowMilliseconds() - requestParseStartMs);
+      if (request == nil) {
+        ALNResponse *errorResponse = ALNErrorResponse(400, @"bad request\n");
+        [errorResponse setHeader:@"Connection" value:@"close"];
+        ALNEnsurePerformanceHeaders(errorResponse,
+                                    performanceLogging,
+                                    parseMs,
+                                    ALNNowMilliseconds() - requestStartMs);
+        (void)ALNSendResponse(clientFd, errorResponse, performanceLogging);
         return;
       }
-
-      ALNResponse *errorResponse = nil;
-      if (readStatus == 413) {
-        errorResponse = ALNErrorResponse(413, @"payload too large\n");
-      } else if (readStatus == 431) {
-        errorResponse = ALNErrorResponse(431, @"request headers too large\n");
-      } else if (readStatus == 408) {
-        errorResponse = ALNErrorResponse(408, @"request timeout\n");
-      } else {
-        errorResponse = ALNErrorResponse(400, @"bad request\n");
-      }
-      [errorResponse setHeader:@"Connection" value:@"close"];
-      ALNEnsurePerformanceHeaders(errorResponse,
-                                  performanceLogging,
-                                  parseMs,
-                                  ALNNowMilliseconds() - requestStartMs);
-      (void)ALNSendResponse(clientFd, errorResponse, performanceLogging);
-      return;
-    }
-
-    NSError *requestError = nil;
-    double requestParseStartMs = ALNNowMilliseconds();
-    ALNRequest *request = [ALNRequest requestFromRawData:rawRequest
-                                                 backend:self.requestParserBackend
-                                                   error:&requestError];
-    parseMs += (ALNNowMilliseconds() - requestParseStartMs);
-    if (request == nil) {
-      ALNResponse *errorResponse = ALNErrorResponse(400, @"bad request\n");
-      [errorResponse setHeader:@"Connection" value:@"close"];
-      ALNEnsurePerformanceHeaders(errorResponse,
-                                  performanceLogging,
-                                  parseMs,
-                                  ALNNowMilliseconds() - requestStartMs);
-      (void)ALNSendResponse(clientFd, errorResponse, performanceLogging);
-      return;
-    }
-    request.parseDurationMilliseconds = parseMs;
+      request.parseDurationMilliseconds = parseMs;
 
     request.remoteAddress = ALNRemoteAddressForClient(clientFd);
     request.effectiveRemoteAddress = request.remoteAddress ?: @"";
@@ -1555,8 +1770,9 @@ static NSString *ALNRealtimeBackpressureReasonForSubscriptionRejection(NSString 
     request.responseWriteDurationMilliseconds =
         ALNSendResponse(clientFd, response, performanceLogging);
     requestsHandled += 1;
-    if (!keepAlive) {
-      return;
+      if (!keepAlive) {
+        return;
+      }
     }
   }
 }
@@ -1569,6 +1785,7 @@ static NSString *ALNRealtimeBackpressureReasonForSubscriptionRejection(NSString 
   [self resetHTTPWorkerPoolState];
 
   NSDictionary *config = self.application.config ?: @{};
+  [self invalidateStaticMountsCache];
   NSString *bindHost = ([host length] > 0) ? host : (config[@"host"] ?: @"127.0.0.1");
   NSInteger configPort = [config[@"port"] integerValue];
   int port = (portOverride > 0) ? (int)portOverride : (int)configPort;
@@ -1738,7 +1955,9 @@ static NSString *ALNRealtimeBackpressureReasonForSubscriptionRejection(NSString 
         }
       } else {
         @try {
-          [self handleClient:clientFd];
+          @autoreleasepool {
+            [self handleClient:clientFd];
+          }
         } @finally {
           [self releaseHTTPSessionReservation];
           close(clientFd);

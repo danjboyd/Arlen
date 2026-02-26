@@ -1,6 +1,6 @@
 # Arlen Phase 10 Roadmap
 
-Status: Active (10A/10B/10C/10D/10E/10F/10G/10H/10I complete; perf gate calibration completed)  
+Status: Active (10A/10B/10C/10D/10E/10F/10G/10H/10I/10J complete)  
 Last updated: 2026-02-26
 
 Related docs:
@@ -56,6 +56,7 @@ Key findings:
 7. Phase 10G: dispatch/runtime invocation overhead reduction (cached IMP path).
 8. Phase 10H: replace HTTP parse pipeline with llhttp-based parser path.
 9. Phase 10I: compile-time feature toggles for JSON/parser backends.
+10. Phase 10J: HTTP runtime hot-path memory/throughput optimization tranche.
 
 ## 4. Milestones
 
@@ -243,6 +244,51 @@ Acceptance (required):
 - Runtime/backend metadata and selection APIs report deterministic fallback state (`foundation`/`legacy`, version `disabled`) when compiled out.
 - Existing default builds remain unchanged (`yyjson` + `llhttp` enabled by default).
 
+## 4.10 Phase 10J: HTTP Runtime Hot-Path Memory/Throughput Optimization
+
+Status: Complete (2026-02-26)
+
+Deliverables:
+
+- 10J.1 per-request memory lifecycle hardening:
+  - add explicit per-request `@autoreleasepool` boundaries in HTTP hot loops (accept-thread and keep-alive request loop paths).
+  - add long-run keep-alive/request-churn regression coverage with RSS-growth guardrails.
+- 10J.2 production dispatch default policy hardening (gated, not immediate blind flip):
+  - keep a reliability-first default while adding benchmark/operability controls to force concurrent dispatch where appropriate.
+  - define evidence gates required before changing production default dispatch mode.
+- 10J.3 per-request identity/observability overhead reduction:
+  - replace UUID-string-heavy request/trace ID generation with lower-overhead hex ID generation.
+  - default cluster response headers to disabled when cluster mode is disabled.
+- 10J.4 response write-path copy reduction:
+  - avoid building full response combined `NSData` for every request.
+  - write headers/body with reduced-copy strategy while preserving response contract semantics.
+- 10J.5 read+parse pipeline deduplication:
+  - remove duplicate header/content-length parsing work between socket read path and request parser path.
+  - enforce request limits via a single parse pass where practical.
+- 10J.6 suppressed-log overhead elimination:
+  - avoid constructing large per-request info log field dictionaries when current logger level will drop them.
+- 10J.7 queue/static-mount micro-optimizations:
+  - replace O(n) dequeue (`removeObjectAtIndex:0`) in HTTP worker queue.
+  - cache normalized static mounts instead of rebuilding per request.
+
+Implemented in this tranche:
+
+- added explicit per-request `@autoreleasepool` boundaries in accept and keep-alive HTTP loops.
+- added a keep-alive RSS churn regression guard lane (gated via `ARLEN_ENABLE_PHASE10J_RSS_CHURN=1`).
+- replaced UUID-string-heavy request/trace identifier generation with lower-overhead random hex generation.
+- defaulted cluster response header emission to `cluster.enabled` when `cluster.emitHeaders` is unset.
+- split response serialization into header/body send path to avoid full combined response `NSData` allocations per request.
+- eliminated duplicated read-path header/content-length parse work with a single metadata parse pass.
+- avoided constructing info-log dictionaries when logger level suppresses info messages.
+- replaced O(n) queue dequeue with head-index compaction strategy and cached effective static mount normalization.
+
+Acceptance (required):
+
+- Long-run request churn no longer shows unbounded RSS growth attributable to request-loop autorelease retention.
+- Benchmark deltas show net win for small-request latency/throughput and no regression for larger request classes.
+- No regressions in request/response behavioral contracts, logging contracts, or deployment operability checks.
+- Dispatch-default policy change (if any) is gated by explicit reliability evidence, not by benchmark-only results.
+
 ## 5. Test Strategy
 
 Minimum mandatory test layers:
@@ -269,6 +315,7 @@ Minimum mandatory test layers:
 7. 10G dispatch/runtime invocation overhead hardening.
 8. 10H llhttp parser migration as final Phase 10 performance hardening stream.
 9. 10I compile-time backend toggle hardening for controlled feature-disable builds.
+10. 10J HTTP runtime hot-path memory/throughput optimization and reliability-gated dispatch policy.
 
 ## 7. Explicit Non-Goals (Phase 10)
 
