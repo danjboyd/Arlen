@@ -25,6 +25,7 @@ typedef NS_ENUM(NSUInteger, ALNJSONBackend) {
 + (ALNJSONBackend)backend;
 + (NSString *)backendName;
 + (NSString *)yyjsonVersion;
++ (NSString *)foundationFallbackDeprecationDate;
 
 // Testing helpers. Runtime code should rely on env-based backend selection.
 + (void)setBackendForTesting:(ALNJSONBackend)backend;

@@ -196,7 +196,7 @@ Diagnostics behavior:
 Load and print merged runtime config.
 
 - `--env <name>`: select environment overlay
-- `--json`: pretty JSON output
+- `--json`: deterministic pretty JSON output (sorted keys when runtime supports `NSJSONWritingSortedKeys`)
 
 ## `boomhauer` Script (`bin/boomhauer`)
 
@@ -293,6 +293,7 @@ Environment:
 - `ARLEN_MAX_REALTIME_SUBSCRIBERS` (runtime global realtime subscriber cap; legacy `MOJOOBJC_MAX_REALTIME_SUBSCRIBERS` also accepted)
 - `ARLEN_MAX_REALTIME_SUBSCRIBERS_PER_CHANNEL` (runtime per-channel realtime subscriber cap; legacy `MOJOOBJC_MAX_REALTIME_SUBSCRIBERS_PER_CHANNEL` also accepted)
 - `ARLEN_REQUEST_DISPATCH_MODE` (`concurrent` or `serialized`; defaults to `serialized` in `production`, `concurrent` otherwise; legacy `MOJOOBJC_REQUEST_DISPATCH_MODE` also accepted)
+- `ARLEN_JSON_BACKEND` (`yyjson` default, `foundation`/`nsjson` fallback for A/B validation; foundation fallback deprecation target: `2026-04-30`)
 - `ARLEN_TRACE_PROPAGATION_ENABLED` (default `1`; legacy `MOJOOBJC_TRACE_PROPAGATION_ENABLED` also accepted)
 - `ARLEN_HEALTH_DETAILS_ENABLED` (default `1`; legacy `MOJOOBJC_HEALTH_DETAILS_ENABLED` also accepted)
 - `ARLEN_READINESS_REQUIRES_STARTUP` (default `0`; legacy `MOJOOBJC_READINESS_REQUIRES_STARTUP` also accepted)
@@ -360,10 +361,12 @@ Lifecycle diagnostics:
 - `bin/tech-demo`: run technology demo app
 - `bin/dev`: alias for `bin/boomhauer`
 - `make test-unit` / `make test-integration`: run XCTest bundles with repo-local GNUstep defaults home (`.gnustep-home`)
-- `make ci-quality`: run unit + integration + multi-profile perf quality gate plus runtime concurrency and Phase 9I fault-injection checks
+- `make ci-quality`: run unit + integration + multi-profile perf quality gate plus runtime concurrency, JSON abstraction/performance gates, and Phase 9I fault-injection checks
 - `make ci-sanitizers`: run Phase 9H blocking sanitizer gate (ASan/UBSan + runtime probe + data-layer checks), validate suppression registry, and generate sanitizer confidence artifacts under `build/release_confidence/phase9h`
 - `make ci-fault-injection`: run Phase 9I runtime seam fault-injection matrix and generate artifacts under `build/release_confidence/phase9i`
 - `make ci-release-certification`: run Phase 9J enterprise release checklist and generate certification artifacts under `build/release_confidence/phase9j`
+- `make ci-json-abstraction`: fail when runtime sources bypass `ALNJSONSerialization`
+- `make ci-json-perf`: run Phase 10E JSON backend microbenchmark gate and generate artifacts under `build/release_confidence/phase10e`
 - `make phase5e-confidence`: generate Phase 5E release confidence artifacts in `build/release_confidence/phase5e`
 - `tools/ci/run_phase5e_quality.sh`: explicit Phase 5E CI gate entrypoint
 - `tools/ci/run_phase5e_sanitizers.sh`: explicit Phase 5E sanitizer CI gate entrypoint
@@ -381,6 +384,12 @@ Lifecycle diagnostics:
   - `ARLEN_PHASE9J_OUTPUT_DIR` overrides artifact output directory
   - `ARLEN_PHASE9J_SKIP_GATES=1` skips gate execution and regenerates certification from existing artifacts
   - `ARLEN_PHASE9J_ALLOW_INCOMPLETE=1` emits an incomplete pack without failing the command
+- `tools/ci/run_phase10e_json_performance.sh`: explicit Phase 10E JSON backend performance gate entrypoint
+  - `ARLEN_PHASE10E_ITERATIONS` controls benchmark iterations (default `1500`)
+  - `ARLEN_PHASE10E_WARMUP` controls warmup iterations (default `200`)
+  - `ARLEN_PHASE10E_OUTPUT_DIR` overrides artifact output directory
+  - `ARLEN_PHASE10E_FIXTURES_DIR` overrides fixture corpus directory
+  - `ARLEN_PHASE10E_THRESHOLDS` overrides threshold policy fixture path
 - `make test-data-layer`: build and run standalone `ArlenData` example validation
 - `make parity-phaseb`: run Arlen-vs-FastAPI Phase B parity gate for frozen benchmark scenarios (creates report at `build/perf/parity_fastapi_latest.json`)
 - `make perf-phasec`: run Phase C benchmark protocol (warmup + concurrency ladder) and write `build/perf/phasec/latest_protocol_report.json`
@@ -389,7 +398,9 @@ Lifecycle diagnostics:
 - `tools/deploy/validate_operability.sh`: validate text/JSON health/readiness/metrics operability contracts against a running server
 - `tools/deploy/build_release.sh --dry-run --json`: emit deploy release planning payload for coding-agent automation
   - enforces Phase 9J certification manifest by default (`build/release_confidence/phase9j/manifest.json`)
+  - enforces Phase 10E JSON performance manifest by default (`build/release_confidence/phase10e/manifest.json`)
   - use `--certification-manifest <path>` to override manifest location
+  - use `--json-performance-manifest <path>` to override JSON performance manifest location
   - use `--allow-missing-certification` only for non-RC smoke/local packaging flows
 - `arlen generate frontend <Name> --preset <vanilla-spa|progressive-mpa>`: scaffold frontend starter templates with built-in API wiring examples
 - `make ci-docs`: run docs quality gate (API docs regen consistency + HTML artifact/link checks)

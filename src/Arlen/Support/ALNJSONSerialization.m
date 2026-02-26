@@ -376,6 +376,10 @@ static BOOL ALNValidateJSONObjectRecursive(id obj, NSUInteger depth) {
   return @YYJSON_VERSION_STRING;
 }
 
++ (NSString *)foundationFallbackDeprecationDate {
+  return @"2026-04-30";
+}
+
 + (void)setBackendForTesting:(ALNJSONBackend)backend {
   @synchronized(self) {
     gALNJSONBackend = backend;

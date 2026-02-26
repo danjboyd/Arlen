@@ -3,6 +3,7 @@
 #import <stdlib.h>
 
 #import "ALNConfig.h"
+#import "ALNJSONSerialization.h"
 #import "ALNMigrationRunner.h"
 #import "ALNPg.h"
 #import "ALNSchemaCodegen.h"
@@ -122,18 +123,27 @@ static NSArray<NSString *> *SortedUniqueStrings(NSArray<NSString *> *values) {
   return unique;
 }
 
-static void PrintJSONPayload(FILE *stream, NSDictionary *payload) {
+static NSJSONWritingOptions StableJSONWritingOptions(void) {
+  NSJSONWritingOptions options = NSJSONWritingPrettyPrinted;
+#ifdef NSJSONWritingSortedKeys
+  options |= NSJSONWritingSortedKeys;
+#endif
+  return options;
+}
+
+static BOOL PrintJSONPayload(FILE *stream, NSDictionary *payload) {
   NSError *error = nil;
-  NSData *json = [NSJSONSerialization dataWithJSONObject:payload ?: @{}
-                                                 options:NSJSONWritingPrettyPrinted
-                                                   error:&error];
+  NSData *json = [ALNJSONSerialization dataWithJSONObject:payload ?: @{}
+                                                   options:StableJSONWritingOptions()
+                                                     error:&error];
   if (json == nil) {
     fprintf(stderr, "arlen: failed to render JSON output: %s\n",
             [[error localizedDescription] UTF8String]);
-    return;
+    return NO;
   }
   NSString *text = [[NSString alloc] initWithData:json encoding:NSUTF8StringEncoding] ?: @"{}";
   fprintf(stream, "%s\n", [text UTF8String]);
+  return YES;
 }
 
 static int EmitMachineError(NSString *command,
@@ -2248,15 +2258,9 @@ static int CommandDoctor(NSArray *args) {
       @"summary" : summary,
       @"checks" : checks,
     };
-    NSError *jsonError = nil;
-    NSData *json = [NSJSONSerialization dataWithJSONObject:payload
-                                                   options:NSJSONWritingPrettyPrinted
-                                                     error:&jsonError];
-    if (json == nil) {
-      fprintf(stderr, "arlen doctor: %s\n", [[jsonError localizedDescription] UTF8String]);
+    if (!PrintJSONPayload(stdout, payload)) {
       return 1;
     }
-    fprintf(stdout, "%s\n", [[[NSString alloc] initWithData:json encoding:NSUTF8StringEncoding] UTF8String]);
   } else {
     NSString *safeFrameworkRoot = ([frameworkRoot length] > 0) ? frameworkRoot : @"(unresolved)";
     fprintf(stdout, "Arlen doctor\n");
@@ -2309,7 +2313,9 @@ static int CommandConfig(NSArray *args) {
   }
 
   if (asJSON) {
-    NSData *json = [NSJSONSerialization dataWithJSONObject:config options:NSJSONWritingPrettyPrinted error:&error];
+    NSData *json = [ALNJSONSerialization dataWithJSONObject:config
+                                                    options:StableJSONWritingOptions()
+                                                      error:&error];
     if (json == nil) {
       fprintf(stderr, "arlen config: %s\n", [[error localizedDescription] UTF8String]);
       return 1;

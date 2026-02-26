@@ -91,4 +91,23 @@
                 @"boomhauer app compile path must include yyjson C source");
 }
 
+- (void)testGNUmakefileIncludesJSONReliabilityGateTargets {
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *makefilePath = [repoRoot stringByAppendingPathComponent:@"GNUmakefile"];
+  NSString *makefile = [self readFile:makefilePath];
+
+  XCTAssertTrue([makefile containsString:@"ci-json-abstraction:"]);
+  XCTAssertTrue([makefile containsString:@"ci-json-perf:"]);
+  XCTAssertTrue([makefile containsString:@"check: ci-json-abstraction"]);
+}
+
+- (void)testPhase5EQualityPipelineIncludesJSONPerformanceGate {
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *scriptPath = [repoRoot stringByAppendingPathComponent:@"tools/ci/run_phase5e_quality.sh"];
+  NSString *script = [self readFile:scriptPath];
+
+  XCTAssertTrue([script containsString:@"check_runtime_json_abstraction.py"]);
+  XCTAssertTrue([script containsString:@"run_phase10e_json_performance.sh"]);
+}
+
 @end

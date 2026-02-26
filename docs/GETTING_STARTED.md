@@ -163,6 +163,15 @@ Default is `serialized` in `production` and `concurrent` in non-production envir
 `serialized` mode also forces `Connection: close` and one request per HTTP connection to preserve
 the known-stable worker lifecycle under production load.
 
+JSON backend override (A/B validation only):
+
+```bash
+ARLEN_JSON_BACKEND=foundation ./bin/boomhauer --env production
+```
+
+Default backend is `yyjson`. Foundation fallback remains available temporarily for rollout verification
+and is scheduled for removal after `2026-04-30`.
+
 Security profile override:
 
 ```bash
@@ -226,6 +235,8 @@ make perf-phasec
 make perf-phased
 make check
 make ci-quality
+make ci-json-abstraction
+make ci-json-perf
 make ci-fault-injection
 make ci-release-certification
 make phase5e-confidence
@@ -236,7 +247,9 @@ make phase5e-confidence
 `make parity-phaseb` runs the Arlen-vs-FastAPI Phase B parity gate and writes `build/perf/parity_fastapi_latest.json`.
 `make perf-phasec` runs the Phase C warmup/concurrency-ladder protocol and writes `build/perf/phasec/latest_protocol_report.json`.
 `make perf-phased` runs the Phase D baseline campaign (parity + comparison matrix) and writes `build/perf/phased/latest_campaign_report.json`.
-`make ci-quality` runs the Phase 5E quality gate (including soak/fault tests, runtime concurrency checks, Phase 9I fault injection, and confidence artifact generation).
+`make ci-quality` runs the Phase 5E quality gate (including soak/fault tests, runtime concurrency checks, JSON abstraction/performance gates, Phase 9I fault injection, and confidence artifact generation).
+`make ci-json-abstraction` blocks direct runtime `NSJSONSerialization` usage outside `ALNJSONSerialization`.
+`make ci-json-perf` runs the Phase 10E JSON backend microbenchmark gate and writes artifacts under `build/release_confidence/phase10e`.
 `make ci-fault-injection` runs the Phase 9I runtime seam fault matrix and writes artifacts under `build/release_confidence/phase9i`.
 `make ci-release-certification` runs the Phase 9J release checklist and writes certification artifacts under `build/release_confidence/phase9j`.
 `make test-unit` and `make test-integration` run with a repo-local GNUstep test home (`.gnustep-home`) to keep defaults/lock files isolated.
@@ -645,6 +658,18 @@ make ci-release-certification
 This command packages release evidence from the inline hardening gates, sanitizer/race-detection reports,
 fault/stress matrices, and known-risk register validation into a single Phase 9J certification pack.
 
+JSON backend performance gate (standalone):
+
+```bash
+make ci-json-perf
+```
+
+Override benchmark controls when needed:
+
+```bash
+ARLEN_PHASE10E_ITERATIONS=1200 ARLEN_PHASE10E_WARMUP=150 make ci-json-perf
+```
+
 ## 18. Deploy Smoke Validation
 
 ```bash
@@ -676,9 +701,10 @@ tools/deploy/build_release.sh \
   --releases-dir /path/to/app/releases \
   --release-id rel-001 \
   --certification-manifest /path/to/Arlen/build/release_confidence/phase9j/manifest.json \
+  --json-performance-manifest /path/to/Arlen/build/release_confidence/phase10e/manifest.json \
   --dry-run \
   --json
 ```
 
-`build_release.sh` enforces a Phase 9J certification manifest by default. Use `--allow-missing-certification`
-only for non-release smoke workflows.
+`build_release.sh` enforces both a Phase 9J certification manifest and a Phase 10E JSON performance
+manifest by default. Use `--allow-missing-certification` only for non-release smoke workflows.

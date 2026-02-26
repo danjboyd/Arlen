@@ -3,6 +3,7 @@
 #import <stdlib.h>
 
 #import "ArlenServer.h"
+#import "ALNJSONSerialization.h"
 
 static NSString *EnvString(const char *name) {
   const char *raw = getenv(name);
@@ -162,7 +163,7 @@ static NSDictionary *BenchmarkDBParseRequestObject(ALNContext *ctx, NSError **er
     }
     return nil;
   }
-  id parsed = [NSJSONSerialization JSONObjectWithData:body options:0 error:error];
+  id parsed = [ALNJSONSerialization JSONObjectWithData:body options:0 error:error];
   if (![parsed isKindOfClass:[NSDictionary class]]) {
     if (error != NULL && *error == nil) {
       *error = [NSError errorWithDomain:@"Boomhauer.DB.API"

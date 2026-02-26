@@ -53,7 +53,7 @@ Last updated: 2026-02-26
 - Phase 9H: complete (2026-02-25)
 - Phase 9I: complete (2026-02-25)
 - Phase 9J: complete (2026-02-25)
-- Phase 10: active (10A/10B/10C complete on 2026-02-26; 10D+ pending)
+- Phase 10: active (10A/10B/10C/10D/10E/10F complete on 2026-02-26; 10G+ pending)
 
 ## Completed Today (2026-02-26)
 
@@ -66,6 +66,18 @@ Last updated: 2026-02-26
 - Completed Phase 10C runtime migration tranche:
   - migrated runtime JSON call sites to `ALNJSONSerialization` across response, schema, envelope middleware, session middleware, auth, logger, application, pg diagnostics, and controller rendering paths
   - added regression guard test to prevent direct runtime `NSJSONSerialization` usage in migrated files
+- Completed Phase 10D CLI/tooling migration tranche:
+  - migrated JSON handling in `tools/arlen.m` and `tools/boomhauer.m` to `ALNJSONSerialization`
+  - standardized deterministic CLI JSON output options (pretty + sorted-keys when available) and added deterministic output regression coverage for `arlen config --json`
+- Completed Phase 10E JSON performance confidence tranche:
+  - added in-repo JSON microbenchmark tool (`tools/json_perf_bench.m`) and fixture corpus (`tests/fixtures/performance/json/*.json`)
+  - added Phase 10E CI gate + artifact generator (`tools/ci/run_phase10e_json_performance.sh`, `tools/ci/generate_phase10e_json_perf_artifacts.py`)
+  - added threshold policy fixture and release confidence manifest pack under `build/release_confidence/phase10e`
+- Completed Phase 10F cutover/guardrails tranche:
+  - added runtime lint/check rule preventing direct runtime `NSJSONSerialization` usage (`tools/ci/check_runtime_json_abstraction.py`, `make ci-json-abstraction`)
+  - integrated JSON abstraction/performance gates into quality pipeline (`make ci-quality`) and check path (`make check`)
+  - updated release packaging to require Phase 10E JSON performance evidence by default (`tools/deploy/build_release.sh`)
+  - published foundation fallback deprecation timeline metadata (`ALNJSONSerialization foundationFallbackDeprecationDate = 2026-04-30`)
 
 ## Completed Today (2026-02-25)
 

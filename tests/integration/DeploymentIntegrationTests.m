@@ -1111,6 +1111,185 @@
     NSString *releasesDir = [workRoot stringByAppendingPathComponent:@"releases"];
     NSString *missingManifest = [workRoot stringByAppendingPathComponent:@"missing/manifest.json"];
     NSString *certManifest = [workRoot stringByAppendingPathComponent:@"cert/manifest.json"];
+    NSString *jsonPerfManifest = [workRoot stringByAppendingPathComponent:@"json/manifest.json"];
+    XCTAssertTrue([self writeFile:certManifest
+                          content:@"{\n"
+                                  "  \"version\": \"phase9j-release-certification-v1\",\n"
+                                  "  \"status\": \"certified\",\n"
+                                  "  \"release_id\": \"rc-unit\",\n"
+                                  "  \"artifacts\": []\n"
+                                  "}\n"]);
+    XCTAssertTrue([self writeFile:jsonPerfManifest
+                          content:@"{\n"
+                                  "  \"version\": \"phase10e-json-performance-v1\",\n"
+                                  "  \"status\": \"pass\",\n"
+                                  "  \"artifacts\": []\n"
+                                  "}\n"]);
+
+    int code = 0;
+    NSString *missingOutput = [self runShellCapture:[NSString stringWithFormat:
+                                                         @"%s/tools/deploy/build_release.sh "
+                                                          "--app-root %s --framework-root %s --releases-dir %s "
+                                                          "--release-id missing-cert --certification-manifest %s "
+                                                          "--json-performance-manifest %s "
+                                                          "--dry-run",
+                                                         [repoRoot UTF8String], [appRoot UTF8String],
+                                                         [repoRoot UTF8String], [releasesDir UTF8String],
+                                                         [missingManifest UTF8String],
+                                                         [jsonPerfManifest UTF8String]]
+                                           exitCode:&code];
+    XCTAssertNotEqual(0, code, @"%@", missingOutput);
+    XCTAssertTrue([missingOutput containsString:@"missing Phase 9J certification manifest"], @"%@", missingOutput);
+
+    NSString *passingOutput = [self runShellCapture:[NSString stringWithFormat:
+                                                         @"%s/tools/deploy/build_release.sh "
+                                                          "--app-root %s --framework-root %s --releases-dir %s "
+                                                          "--release-id with-cert --certification-manifest %s "
+                                                          "--json-performance-manifest %s "
+                                                          "--dry-run --json",
+                                                         [repoRoot UTF8String], [appRoot UTF8String],
+                                                         [repoRoot UTF8String], [releasesDir UTF8String],
+                                                         [certManifest UTF8String],
+                                                         [jsonPerfManifest UTF8String]]
+                                           exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", passingOutput);
+    NSDictionary *payload = [self parseJSONDictionaryFromOutput:passingOutput context:@"build_release dry-run json"];
+    XCTAssertEqualObjects(@"planned", payload[@"status"]);
+    XCTAssertEqualObjects(@"certified", payload[@"certification_status"]);
+    XCTAssertEqualObjects(@"pass", payload[@"json_performance_status"]);
+  } @finally {
+    [[NSFileManager defaultManager] removeItemAtPath:appRoot error:nil];
+    [[NSFileManager defaultManager] removeItemAtPath:workRoot error:nil];
+  }
+}
+
+- (void)testPhase10EJSONPerformanceGeneratorProducesExpectedPack {
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *outputRoot = [self createTempDirectoryWithPrefix:@"arlen-phase10e-confidence"];
+  XCTAssertNotNil(outputRoot);
+  if (outputRoot == nil) {
+    return;
+  }
+
+  @try {
+    int code = 0;
+    NSString *command = [NSString stringWithFormat:
+                                      @"cd %@ && ARLEN_PHASE10E_OUTPUT_DIR=%@ "
+                                       "ARLEN_PHASE10E_ITERATIONS=120 ARLEN_PHASE10E_WARMUP=20 "
+                                       "bash ./tools/ci/run_phase10e_json_performance.sh",
+                                      repoRoot, outputRoot];
+    NSString *output = [self runShellCapture:command exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", output);
+
+    NSString *manifestPath = [outputRoot stringByAppendingPathComponent:@"manifest.json"];
+    NSError *error = nil;
+    NSData *manifestData = [NSData dataWithContentsOfFile:manifestPath];
+    XCTAssertNotNil(manifestData);
+    if (manifestData == nil) {
+      return;
+    }
+    NSDictionary *manifest = [NSJSONSerialization JSONObjectWithData:manifestData options:0 error:&error];
+    XCTAssertNotNil(manifest);
+    XCTAssertNil(error);
+    if (![manifest isKindOfClass:[NSDictionary class]]) {
+      return;
+    }
+
+    XCTAssertEqualObjects(@"phase10e-json-performance-v1", manifest[@"version"]);
+    XCTAssertEqualObjects(@"pass", manifest[@"status"]);
+    NSArray *artifacts = [manifest[@"artifacts"] isKindOfClass:[NSArray class]] ? manifest[@"artifacts"] : @[];
+    XCTAssertTrue([artifacts containsObject:@"json_backend_delta_summary.json"]);
+    XCTAssertTrue([artifacts containsObject:@"phase10e_json_performance.md"]);
+  } @finally {
+    [[NSFileManager defaultManager] removeItemAtPath:outputRoot error:nil];
+  }
+}
+
+- (void)testRuntimeJSONAbstractionCheckScriptPasses {
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  int code = 0;
+  NSString *output = [self runShellCapture:[NSString stringWithFormat:
+                                                @"cd %@ && python3 ./tools/ci/check_runtime_json_abstraction.py --repo-root %@",
+                                                repoRoot, repoRoot]
+                                  exitCode:&code];
+  XCTAssertEqual(0, code, @"%@", output);
+  XCTAssertTrue([output containsString:@"runtime JSON abstraction check passed"], @"%@", output);
+}
+
+- (void)testArlenConfigJSONOutputIsDeterministicAcrossRuns {
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *workRoot = [self createTempDirectoryWithPrefix:@"arlen-config-json-deterministic"];
+  XCTAssertNotNil(workRoot);
+  if (workRoot == nil) {
+    return;
+  }
+
+  @try {
+    NSString *appRoot = [workRoot stringByAppendingPathComponent:@"ConfigDeterministicApp"];
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"config/app.plist"]
+                          content:@"{\n"
+                                  "  port = 3010;\n"
+                                  "  host = \"127.0.0.1\";\n"
+                                  "  logFormat = \"json\";\n"
+                                  "}\n"]);
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"config/environments/development.plist"]
+                          content:@"{\n"
+                                  "  requestDispatchMode = \"serialized\";\n"
+                                  "}\n"]);
+
+    int code = 0;
+    NSString *buildOutput = [self runShellCapture:[NSString stringWithFormat:@"cd %@ && make arlen", repoRoot]
+                                         exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", buildOutput);
+
+    NSString *command = [NSString stringWithFormat:
+                                      @"cd %@ && ARLEN_FRAMEWORK_ROOT=%@ %@/build/arlen config --env development --json",
+                                      appRoot, repoRoot, repoRoot];
+    NSString *outputA = [self runShellCapture:command exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", outputA);
+    NSString *outputB = [self runShellCapture:command exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", outputB);
+
+    NSString *trimmedA =
+        [outputA stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    NSString *trimmedB =
+        [outputB stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    XCTAssertEqualObjects(trimmedA, trimmedB);
+
+    NSDictionary *payload = [self parseJSONDictionaryFromOutput:outputA context:@"arlen config --json"];
+    XCTAssertEqualObjects(@"127.0.0.1", payload[@"host"]);
+    XCTAssertEqual((NSInteger)3010, [payload[@"port"] integerValue]);
+    XCTAssertEqualObjects(@"serialized", payload[@"requestDispatchMode"]);
+  } @finally {
+    [[NSFileManager defaultManager] removeItemAtPath:workRoot error:nil];
+  }
+}
+
+- (void)testBuildReleaseRequiresPhase10EJSONPerformanceEvidenceByDefault {
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *appRoot = [self createTempDirectoryWithPrefix:@"arlen-phase10e-release-app"];
+  NSString *workRoot = [self createTempDirectoryWithPrefix:@"arlen-phase10e-release-work"];
+  XCTAssertNotNil(appRoot);
+  XCTAssertNotNil(workRoot);
+  if (appRoot == nil || workRoot == nil) {
+    return;
+  }
+
+  @try {
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"config/app.plist"]
+                          content:@"{\n"
+                                  "  host = \"127.0.0.1\";\n"
+                                  "  port = 3000;\n"
+                                  "}\n"]);
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"config/environments/production.plist"]
+                          content:@"{\n  logFormat = \"json\";\n}\n"]);
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"app_lite.m"]
+                          content:@"#import <Foundation/Foundation.h>\n"
+                                  "int main(int argc, const char *argv[]) { (void)argc; (void)argv; return 0; }\n"]);
+
+    NSString *releasesDir = [workRoot stringByAppendingPathComponent:@"releases"];
+    NSString *certManifest = [workRoot stringByAppendingPathComponent:@"cert/manifest.json"];
+    NSString *missingJSONPerfManifest = [workRoot stringByAppendingPathComponent:@"missing-json/manifest.json"];
     XCTAssertTrue([self writeFile:certManifest
                           content:@"{\n"
                                   "  \"version\": \"phase9j-release-certification-v1\",\n"
@@ -1120,31 +1299,19 @@
                                   "}\n"]);
 
     int code = 0;
-    NSString *missingOutput = [self runShellCapture:[NSString stringWithFormat:
-                                                         @"%s/tools/deploy/build_release.sh "
-                                                          "--app-root %s --framework-root %s --releases-dir %s "
-                                                          "--release-id missing-cert --certification-manifest %s "
-                                                          "--dry-run",
-                                                         [repoRoot UTF8String], [appRoot UTF8String],
-                                                         [repoRoot UTF8String], [releasesDir UTF8String],
-                                                         [missingManifest UTF8String]]
-                                           exitCode:&code];
-    XCTAssertNotEqual(0, code, @"%@", missingOutput);
-    XCTAssertTrue([missingOutput containsString:@"missing Phase 9J certification manifest"], @"%@", missingOutput);
-
-    NSString *passingOutput = [self runShellCapture:[NSString stringWithFormat:
-                                                         @"%s/tools/deploy/build_release.sh "
-                                                          "--app-root %s --framework-root %s --releases-dir %s "
-                                                          "--release-id with-cert --certification-manifest %s "
-                                                          "--dry-run --json",
-                                                         [repoRoot UTF8String], [appRoot UTF8String],
-                                                         [repoRoot UTF8String], [releasesDir UTF8String],
-                                                         [certManifest UTF8String]]
-                                           exitCode:&code];
-    XCTAssertEqual(0, code, @"%@", passingOutput);
-    NSDictionary *payload = [self parseJSONDictionaryFromOutput:passingOutput context:@"build_release dry-run json"];
-    XCTAssertEqualObjects(@"planned", payload[@"status"]);
-    XCTAssertEqualObjects(@"certified", payload[@"certification_status"]);
+    NSString *output = [self runShellCapture:[NSString stringWithFormat:
+                                                  @"%s/tools/deploy/build_release.sh "
+                                                   "--app-root %s --framework-root %s --releases-dir %s "
+                                                   "--release-id missing-json-perf --certification-manifest %s "
+                                                   "--json-performance-manifest %s "
+                                                   "--dry-run",
+                                                  [repoRoot UTF8String], [appRoot UTF8String],
+                                                  [repoRoot UTF8String], [releasesDir UTF8String],
+                                                  [certManifest UTF8String],
+                                                  [missingJSONPerfManifest UTF8String]]
+                                    exitCode:&code];
+    XCTAssertNotEqual(0, code, @"%@", output);
+    XCTAssertTrue([output containsString:@"missing Phase 10E JSON performance manifest"], @"%@", output);
   } @finally {
     [[NSFileManager defaultManager] removeItemAtPath:appRoot error:nil];
     [[NSFileManager defaultManager] removeItemAtPath:workRoot error:nil];

@@ -1,0 +1,117 @@
+{
+  "tenant": "enterprise-acct-7",
+  "request": {
+    "id": "2f5e55ce-2d35-42ad-8a72-0a4f0a1f10d2",
+    "region": "us-central-1",
+    "flags": {
+      "dryRun": false,
+      "trace": true,
+      "strict": true
+    },
+    "headers": {
+      "x-request-source": "phase10e",
+      "x-release-track": "perf",
+      "x-correlation-id": "b733d8f6f4a044f18dc97b7a12f0f123"
+    }
+  },
+  "users": [
+    {
+      "id": 1001,
+      "name": "User 1001",
+      "roles": ["admin", "writer", "auditor"],
+      "profile": {
+        "active": true,
+        "lastLogin": "2026-02-24T19:50:00Z",
+        "preferences": {
+          "theme": "light",
+          "timezone": "America/Chicago",
+          "locales": ["en-US", "es-MX"]
+        }
+      }
+    },
+    {
+      "id": 1002,
+      "name": "User 1002",
+      "roles": ["reader", "ops"],
+      "profile": {
+        "active": true,
+        "lastLogin": "2026-02-24T19:51:00Z",
+        "preferences": {
+          "theme": "light",
+          "timezone": "America/Denver",
+          "locales": ["en-US"]
+        }
+      }
+    },
+    {
+      "id": 1003,
+      "name": "User 1003",
+      "roles": ["reader"],
+      "profile": {
+        "active": false,
+        "lastLogin": "2026-02-20T13:11:00Z",
+        "preferences": {
+          "theme": "dark",
+          "timezone": "America/Chicago",
+          "locales": ["en-US", "fr-CA"]
+        }
+      }
+    },
+    {
+      "id": 1004,
+      "name": "User 1004",
+      "roles": ["writer", "publisher"],
+      "profile": {
+        "active": true,
+        "lastLogin": "2026-02-25T03:11:00Z",
+        "preferences": {
+          "theme": "light",
+          "timezone": "America/Los_Angeles",
+          "locales": ["en-US", "de-DE"]
+        }
+      }
+    },
+    {
+      "id": 1005,
+      "name": "User 1005",
+      "roles": ["ops", "security", "auditor"],
+      "profile": {
+        "active": true,
+        "lastLogin": "2026-02-25T08:22:00Z",
+        "preferences": {
+          "theme": "dark",
+          "timezone": "America/New_York",
+          "locales": ["en-US", "ja-JP"]
+        }
+      }
+    }
+  ],
+  "events": [
+    {"type": "auth.login", "at": "2026-02-25T09:00:00Z", "durationMs": 3.12, "ok": true},
+    {"type": "db.query", "at": "2026-02-25T09:00:01Z", "durationMs": 17.84, "ok": true},
+    {"type": "db.query", "at": "2026-02-25T09:00:02Z", "durationMs": 9.41, "ok": true},
+    {"type": "cache.miss", "at": "2026-02-25T09:00:03Z", "durationMs": 0.87, "ok": true},
+    {"type": "mail.enqueue", "at": "2026-02-25T09:00:04Z", "durationMs": 1.55, "ok": true},
+    {"type": "queue.dispatch", "at": "2026-02-25T09:00:05Z", "durationMs": 4.28, "ok": true},
+    {"type": "render.html", "at": "2026-02-25T09:00:06Z", "durationMs": 22.90, "ok": true},
+    {"type": "render.json", "at": "2026-02-25T09:00:07Z", "durationMs": 5.47, "ok": true},
+    {"type": "http.response", "at": "2026-02-25T09:00:08Z", "durationMs": 2.19, "ok": true}
+  ],
+  "metrics": {
+    "requestCount": 52191,
+    "errorCount": 83,
+    "warningCount": 304,
+    "percentiles": {
+      "p50": 3.85,
+      "p75": 9.12,
+      "p90": 17.91,
+      "p95": 29.01,
+      "p99": 57.22
+    }
+  },
+  "notes": [
+    "phase10e benchmark fixture",
+    "designed for nested object/array traversal",
+    "used in decode/encode hotpath comparisons"
+  ]
+}

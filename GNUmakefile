@@ -15,6 +15,7 @@ API_REFERENCE_SERVER_TOOL := $(BUILD_DIR)/api-reference-server
 MIGRATION_SAMPLE_SERVER_TOOL := $(BUILD_DIR)/migration-sample-server
 ARLEN_DATA_EXAMPLE_TOOL := $(BUILD_DIR)/arlen-data-example
 ARLEN_TOOL := $(BUILD_DIR)/arlen
+JSON_PERF_BENCH_TOOL := $(BUILD_DIR)/json-perf-bench
 
 TEMPLATE_ROOT := $(ROOT_DIR)/templates
 TEMPLATE_FILES := $(shell find $(TEMPLATE_ROOT) -type f -name '*.html.eoc' | sort)
@@ -53,7 +54,7 @@ ifneq ($(findstring -fno-objc-arc,$(OBJC_FLAGS)),)
 $(error OBJC_FLAGS cannot disable ARC)
 endif
 
-.PHONY: all eocc transpile tech-demo-transpile generated-compile arlen boomhauer tech-demo-server api-reference-server migration-sample-server arlen-data-example test-data-layer dev-server tech-demo smoke-render smoke routes build-tests test test-unit test-integration perf perf-fast parity-phaseb perf-phasec perf-phased deploy-smoke phase5e-confidence ci-quality ci-sanitizers ci-fault-injection ci-release-certification ci-docs check docs-api docs-html docs-serve clean
+.PHONY: all eocc transpile tech-demo-transpile generated-compile arlen boomhauer tech-demo-server api-reference-server migration-sample-server arlen-data-example json-perf-bench test-data-layer dev-server tech-demo smoke-render smoke routes build-tests test test-unit test-integration perf perf-fast parity-phaseb perf-phasec perf-phased deploy-smoke phase5e-confidence ci-quality ci-sanitizers ci-fault-injection ci-release-certification ci-json-abstraction ci-json-perf ci-docs check docs-api docs-html docs-serve clean
 
 all: eocc transpile generated-compile arlen boomhauer
 
@@ -85,6 +86,11 @@ $(ARLEN_TOOL): tools/arlen.m src/Arlen/Core/ALNConfig.m src/Arlen/Data/ALNMigrat
 >source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) tools/arlen.m src/Arlen/Core/ALNConfig.m src/Arlen/Data/ALNMigrationRunner.m src/Arlen/Data/ALNPg.m src/Arlen/Data/ALNSQLBuilder.m src/Arlen/Data/ALNSchemaCodegen.m $(JSON_SERIALIZATION_SRCS) -o $(ARLEN_TOOL) $$(gnustep-config --base-libs) -ldl -lcrypto
 
 arlen: $(ARLEN_TOOL)
+
+$(JSON_PERF_BENCH_TOOL): tools/json_perf_bench.m $(JSON_SERIALIZATION_SRCS) | $(BUILD_DIR)
+>source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) tools/json_perf_bench.m $(JSON_SERIALIZATION_SRCS) -o $(JSON_PERF_BENCH_TOOL) $$(gnustep-config --base-libs) -ldl -lcrypto
+
+json-perf-bench: $(JSON_PERF_BENCH_TOOL)
 
 $(BOOMHAUER_TOOL): tools/boomhauer.m $(FRAMEWORK_SRCS) transpile
 >source $(GNUSTEP_SH) && generated_files="$$(find $(GEN_DIR) -type f -name '*.m' | sort)"; \
@@ -197,10 +203,16 @@ ci-fault-injection:
 ci-release-certification:
 >bash ./tools/ci/run_phase9j_release_certification.sh
 
+ci-json-abstraction:
+>python3 ./tools/ci/check_runtime_json_abstraction.py --repo-root $(ROOT_DIR)
+
+ci-json-perf:
+>bash ./tools/ci/run_phase10e_json_performance.sh
+
 ci-docs:
 >bash ./tools/ci/run_docs_quality.sh
 
-check: test-unit test-integration perf
+check: ci-json-abstraction test-unit test-integration perf
 
 
 docs-html:

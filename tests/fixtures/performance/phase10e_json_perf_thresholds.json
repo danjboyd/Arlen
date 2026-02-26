@@ -1,0 +1,9 @@
+{
+  "version": "phase10e-json-performance-thresholds-v1",
+  "decode_ops_ratio_min": 0.70,
+  "encode_ops_ratio_min": 0.70,
+  "decode_p95_ratio_max": 1.50,
+  "encode_p95_ratio_max": 1.50,
+  "decode_expected_improvement_ratio_min": 1.05,
+  "decode_expected_improvement_fixture_count": 1
+}

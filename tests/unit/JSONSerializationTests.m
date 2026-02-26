@@ -82,6 +82,12 @@
   XCTAssertEqual((NSUInteger)1, matches);
 }
 
+- (void)testFoundationFallbackDeprecationDateIsPublished {
+  NSString *deprecationDate = [ALNJSONSerialization foundationFallbackDeprecationDate];
+  XCTAssertNotNil(deprecationDate);
+  XCTAssertEqualObjects(@"2026-04-30", deprecationDate);
+}
+
 - (void)testRoundTripParityAcrossBackends {
   NSString *fixture = @"{\"name\":\"Arlen\",\"count\":3,\"ok\":true,\"items\":[1,2,{\"x\":\"y\"}],\"unicode\":\"mañana\"}";
   NSData *input = [self utf8Data:fixture];
@@ -229,6 +235,45 @@
     XCTAssertFalse([contents containsString:@"NSJSONSerialization"], @"file=%@", relativePath);
     XCTAssertTrue([contents containsString:@"ALNJSONSerialization"], @"file=%@", relativePath);
   }
+}
+
+- (void)testToolingJSONCallsitesUseAbstraction {
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSArray<NSString *> *toolFiles = @[
+    @"tools/arlen.m",
+    @"tools/boomhauer.m",
+  ];
+
+  for (NSString *relativePath in toolFiles) {
+    NSString *path = [repoRoot stringByAppendingPathComponent:relativePath];
+    NSError *error = nil;
+    NSString *contents = [NSString stringWithContentsOfFile:path
+                                                   encoding:NSUTF8StringEncoding
+                                                      error:&error];
+    XCTAssertNotNil(contents, @"file=%@", relativePath);
+    XCTAssertNil(error, @"file=%@", relativePath);
+    if (contents == nil) {
+      continue;
+    }
+    XCTAssertFalse([contents containsString:@"NSJSONSerialization"], @"file=%@", relativePath);
+    XCTAssertTrue([contents containsString:@"ALNJSONSerialization"], @"file=%@", relativePath);
+  }
+}
+
+- (void)testArlenToolUsesStableSortedJSONOutputOptions {
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *toolPath = [repoRoot stringByAppendingPathComponent:@"tools/arlen.m"];
+  NSError *error = nil;
+  NSString *contents =
+      [NSString stringWithContentsOfFile:toolPath encoding:NSUTF8StringEncoding error:&error];
+  XCTAssertNotNil(contents);
+  XCTAssertNil(error);
+  if (contents == nil) {
+    return;
+  }
+  XCTAssertTrue([contents containsString:@"StableJSONWritingOptions"]);
+  XCTAssertTrue([contents containsString:@"NSJSONWritingPrettyPrinted"]);
+  XCTAssertTrue([contents containsString:@"NSJSONWritingSortedKeys"]);
 }
 
 - (void)testYYJSONAPIsAreEncapsulatedToSerializationModule {

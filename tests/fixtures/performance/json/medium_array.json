@@ -1,0 +1,29 @@
+{
+  "items": [
+    {"id": 1, "name": "alpha", "enabled": true, "score": 11.25, "tags": ["a", "b", "c"]},
+    {"id": 2, "name": "beta", "enabled": false, "score": 21.50, "tags": ["a", "d", "e"]},
+    {"id": 3, "name": "gamma", "enabled": true, "score": 31.75, "tags": ["f", "g", "h"]},
+    {"id": 4, "name": "delta", "enabled": true, "score": 19.10, "tags": ["a", "h", "i"]},
+    {"id": 5, "name": "epsilon", "enabled": false, "score": 8.33, "tags": ["j", "k", "l"]},
+    {"id": 6, "name": "zeta", "enabled": true, "score": 44.99, "tags": ["x", "y", "z"]},
+    {"id": 7, "name": "eta", "enabled": true, "score": 3.41, "tags": ["d", "m", "n"]},
+    {"id": 8, "name": "theta", "enabled": false, "score": 16.40, "tags": ["o", "p", "q"]},
+    {"id": 9, "name": "iota", "enabled": true, "score": 7.20, "tags": ["r", "s", "t"]},
+    {"id": 10, "name": "kappa", "enabled": false, "score": 55.00, "tags": ["u", "v", "w"]},
+    {"id": 11, "name": "lambda", "enabled": true, "score": 12.42, "tags": ["aa", "bb", "cc"]},
+    {"id": 12, "name": "mu", "enabled": false, "score": 14.17, "tags": ["dd", "ee", "ff"]},
+    {"id": 13, "name": "nu", "enabled": true, "score": 33.33, "tags": ["gg", "hh", "ii"]},
+    {"id": 14, "name": "xi", "enabled": true, "score": 28.56, "tags": ["jj", "kk", "ll"]},
+    {"id": 15, "name": "omicron", "enabled": false, "score": 17.77, "tags": ["mm", "nn", "oo"]},
+    {"id": 16, "name": "pi", "enabled": true, "score": 10.01, "tags": ["pp", "qq", "rr"]},
+    {"id": 17, "name": "rho", "enabled": true, "score": 39.95, "tags": ["ss", "tt", "uu"]},
+    {"id": 18, "name": "sigma", "enabled": false, "score": 24.66, "tags": ["vv", "ww", "xx"]},
+    {"id": 19, "name": "tau", "enabled": true, "score": 2.02, "tags": ["yy", "zz", "aaa"]},
+    {"id": 20, "name": "upsilon", "enabled": false, "score": 63.12, "tags": ["bbb", "ccc", "ddd"]}
+  ],
+  "meta": {
+    "source": "phase10e",
+    "description": "representative medium payload for encode/decode parity",
+    "generated": "2026-02-26"
+  }
+}

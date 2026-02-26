@@ -19,6 +19,9 @@ Options:
   --certification-manifest <path>
                           Phase 9J certification manifest path
                           (default: <framework-root>/build/release_confidence/phase9j/manifest.json)
+  --json-performance-manifest <path>
+                          Phase 10E JSON performance manifest path
+                          (default: <framework-root>/build/release_confidence/phase10e/manifest.json)
   --allow-missing-certification
                           Skip certification manifest enforcement (non-RC use only)
   --dry-run                Validate inputs and emit planned release metadata only
@@ -45,9 +48,12 @@ framework_root="$default_framework_root"
 releases_dir=""
 release_id="$(date -u +%Y%m%dT%H%M%SZ)"
 certification_manifest=""
+json_performance_manifest=""
 allow_missing_certification=0
 certification_status=""
 certification_bundle_manifest=""
+json_performance_status=""
+json_performance_bundle_manifest=""
 dry_run=0
 output_json=0
 
@@ -104,6 +110,12 @@ emit_success_json() {
   if [[ -n "$certification_status" ]]; then
     printf ',"certification_status":"%s"' "$(json_escape "$certification_status")"
   fi
+  if [[ -n "$json_performance_manifest" ]]; then
+    printf ',"json_performance_manifest":"%s"' "$(json_escape "$json_performance_manifest")"
+  fi
+  if [[ -n "$json_performance_status" ]]; then
+    printf ',"json_performance_status":"%s"' "$(json_escape "$json_performance_status")"
+  fi
   printf '}\n'
 }
 
@@ -159,6 +171,16 @@ while [[ $# -gt 0 ]]; do
       certification_manifest="$2"
       shift 2
       ;;
+    --json-performance-manifest)
+      [[ $# -ge 2 ]] || emit_error \
+        "missing_option_value" \
+        "--json-performance-manifest requires a value" \
+        "Provide the Phase 10E JSON performance manifest path after --json-performance-manifest." \
+        "tools/deploy/build_release.sh --json-performance-manifest build/release_confidence/phase10e/manifest.json --app-root /path/to/app" \
+        2
+      json_performance_manifest="$2"
+      shift 2
+      ;;
     --allow-missing-certification)
       allow_missing_certification=1
       shift
@@ -208,6 +230,9 @@ framework_root="$(cd "$framework_root" && pwd)"
 
 if [[ -z "$certification_manifest" ]]; then
   certification_manifest="$framework_root/build/release_confidence/phase9j/manifest.json"
+fi
+if [[ -z "$json_performance_manifest" ]]; then
+  json_performance_manifest="$framework_root/build/release_confidence/phase10e/manifest.json"
 fi
 
 if [[ -z "$releases_dir" ]]; then
@@ -287,8 +312,62 @@ PY
       "make ci-release-certification" \
       1
   fi
+
+  if [[ ! -f "$json_performance_manifest" ]]; then
+    emit_error \
+      "missing_json_performance_evidence" \
+      "missing Phase 10E JSON performance manifest: $json_performance_manifest" \
+      "Generate JSON backend performance artifacts before release packaging." \
+      "make ci-json-perf" \
+      1
+  fi
+
+  set +e
+  json_perf_check_output="$(python3 - "$json_performance_manifest" <<'PY'
+import json
+import sys
+
+path = sys.argv[1]
+with open(path, "r", encoding="utf-8") as handle:
+    payload = json.load(handle)
+
+if not isinstance(payload, dict):
+    raise SystemExit("manifest JSON must be an object")
+
+version = payload.get("version")
+if not isinstance(version, str) or version != "phase10e-json-performance-v1":
+    raise SystemExit("manifest version must be phase10e-json-performance-v1")
+
+status = payload.get("status")
+if not isinstance(status, str) or not status:
+    raise SystemExit("manifest missing string field 'status'")
+
+print(status)
+PY
+)"
+  json_perf_check_rc=$?
+  set -e
+  if [[ "$json_perf_check_rc" -ne 0 ]]; then
+    emit_error \
+      "invalid_json_performance_evidence" \
+      "invalid Phase 10E JSON performance manifest at $json_performance_manifest" \
+      "Regenerate JSON backend performance artifacts and ensure manifest schema/status are valid." \
+      "make ci-json-perf" \
+      1
+  fi
+
+  json_performance_status="$(printf '%s' "$json_perf_check_output" | tr -d '\r\n')"
+  if [[ "$json_performance_status" != "pass" ]]; then
+    emit_error \
+      "json_performance_gate_failed" \
+      "release candidate is incomplete: JSON performance status is '$json_performance_status'" \
+      "Fix JSON performance gate violations and regenerate the Phase 10E pack." \
+      "make ci-json-perf" \
+      1
+  fi
 else
   certification_status="waived"
+  json_performance_status="waived"
 fi
 
 release_dir="$releases_dir/$release_id"
@@ -341,6 +420,12 @@ if [[ "$allow_missing_certification" != "1" ]]; then
   mkdir -p "$certification_bundle_dir"
   cp -a "$certification_source_dir"/. "$certification_bundle_dir/"
   certification_bundle_manifest="$certification_bundle_dir/manifest.json"
+
+  json_performance_source_dir="$(cd "$(dirname "$json_performance_manifest")" && pwd)"
+  json_performance_bundle_dir="$release_dir/metadata/json_performance"
+  mkdir -p "$json_performance_bundle_dir"
+  cp -a "$json_performance_source_dir"/. "$json_performance_bundle_dir/"
+  json_performance_bundle_manifest="$json_performance_bundle_dir/manifest.json"
 fi
 
 cat >"$release_dir/metadata/release.env" <<EOF
@@ -350,6 +435,8 @@ ARLEN_APP_ROOT=$release_dir/app
 ARLEN_FRAMEWORK_ROOT=$release_dir/framework
 ARLEN_RELEASE_CERTIFICATION_STATUS=$certification_status
 ARLEN_RELEASE_CERTIFICATION_MANIFEST=$certification_bundle_manifest
+ARLEN_JSON_PERFORMANCE_STATUS=$json_performance_status
+ARLEN_JSON_PERFORMANCE_MANIFEST=$json_performance_bundle_manifest
 EOF
 
 cat >"$release_dir/metadata/README.txt" <<EOF
@@ -357,6 +444,8 @@ Release: $release_id
 
 Release certification status: $certification_status
 Release certification manifest: $certification_bundle_manifest
+JSON performance status: $json_performance_status
+JSON performance manifest: $json_performance_bundle_manifest
 
 Run migrate step before switching traffic:
   cd "$release_dir/app" && "$release_dir/framework/build/arlen" migrate --env production

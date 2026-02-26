@@ -1,6 +1,6 @@
 # Arlen Phase 10 Roadmap
 
-Status: Active (10A/10B/10C complete; 10D+ planned)  
+Status: Active (10A/10B/10C/10D/10E/10F complete; 10G+ planned)  
 Last updated: 2026-02-26
 
 Related docs:
@@ -127,7 +127,7 @@ Acceptance (required):
 
 ## 4.4 Phase 10D: CLI + Tooling Migration
 
-Status: Planned
+Status: Complete (2026-02-26)
 
 Deliverables:
 
@@ -145,7 +145,7 @@ Acceptance (required):
 
 ## 4.5 Phase 10E: Performance and Rollout Gates
 
-Status: Planned
+Status: Complete (2026-02-26)
 
 Deliverables:
 
@@ -164,7 +164,7 @@ Acceptance (required):
 
 ## 4.6 Phase 10F: Cutover + Legacy Guardrails
 
-Status: Planned
+Status: Complete (2026-02-26)
 
 Deliverables:
 
