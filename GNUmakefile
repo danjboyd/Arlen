@@ -38,7 +38,17 @@ INTEGRATION_TEST_SRCS := $(shell find tests/integration -type f -name '*.m' | so
 
 INCLUDE_FLAGS := -Isrc/Arlen -Isrc/Arlen/Core -Isrc/Arlen/Data -Isrc/Arlen/HTTP -Isrc/Arlen/MVC/Controller -Isrc/Arlen/MVC/Middleware -Isrc/Arlen/MVC/Routing -Isrc/Arlen/MVC/Template -Isrc/Arlen/MVC/View -Isrc/Arlen/Support -Isrc/MojoObjc -Isrc/MojoObjc/Core -Isrc/MojoObjc/Data -Isrc/MojoObjc/HTTP -Isrc/MojoObjc/MVC/Controller -Isrc/MojoObjc/MVC/Middleware -Isrc/MojoObjc/MVC/Routing -Isrc/MojoObjc/MVC/Template -Isrc/MojoObjc/MVC/View -Isrc/MojoObjc/Support -I/usr/include/postgresql
 EXTRA_OBJC_FLAGS ?=
-OBJC_FLAGS := $$(gnustep-config --objc-flags) -fobjc-arc $(EXTRA_OBJC_FLAGS)
+ARC_REQUIRED_FLAG := -fobjc-arc
+ifneq ($(findstring -fno-objc-arc,$(EXTRA_OBJC_FLAGS)),)
+$(error EXTRA_OBJC_FLAGS cannot contain -fno-objc-arc; Arlen enforces ARC across all first-party Objective-C compile paths)
+endif
+override OBJC_FLAGS := $$(gnustep-config --objc-flags) $(ARC_REQUIRED_FLAG) $(EXTRA_OBJC_FLAGS)
+ifneq ($(findstring $(ARC_REQUIRED_FLAG),$(OBJC_FLAGS)),$(ARC_REQUIRED_FLAG))
+$(error OBJC_FLAGS must include -fobjc-arc)
+endif
+ifneq ($(findstring -fno-objc-arc,$(OBJC_FLAGS)),)
+$(error OBJC_FLAGS cannot disable ARC)
+endif
 
 .PHONY: all eocc transpile tech-demo-transpile generated-compile arlen boomhauer tech-demo-server api-reference-server migration-sample-server arlen-data-example test-data-layer dev-server tech-demo smoke-render smoke routes build-tests test test-unit test-integration perf perf-fast parity-phaseb perf-phasec perf-phased deploy-smoke phase5e-confidence ci-quality ci-sanitizers ci-fault-injection ci-release-certification ci-docs check docs-api docs-html docs-serve clean
 

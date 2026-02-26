@@ -58,7 +58,8 @@ This builds:
 ./bin/boomhauer
 ```
 
-`boomhauer` compiles app/framework/generated Objective-C sources with `-fobjc-arc` by default.
+`boomhauer` and `make` compile first-party Objective-C sources with `-fobjc-arc` by default.
+`EXTRA_OBJC_FLAGS` is allowed for additive flags (for example sanitizers), but cannot disable ARC.
 
 Check endpoints:
 

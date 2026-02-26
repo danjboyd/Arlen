@@ -63,6 +63,9 @@ Build framework tools and dev server:
 make all
 ```
 
+Build policy: Arlen enforces ARC across first-party Objective-C compile paths (`-fobjc-arc` required).
+`EXTRA_OBJC_FLAGS` is additive only and cannot disable ARC.
+
 Run the built-in development server:
 
 ```bash
