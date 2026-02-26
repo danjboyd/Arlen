@@ -72,4 +72,23 @@
   XCTAssertTrue(matches > 0, @"boomhauer compile path must enforce -fobjc-arc");
 }
 
+- (void)testGNUmakefileIncludesYYJSONCSourceInFrameworkBuilds {
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *makefilePath = [repoRoot stringByAppendingPathComponent:@"GNUmakefile"];
+  NSString *makefile = [self readFile:makefilePath];
+
+  XCTAssertTrue([makefile containsString:
+                              @"THIRD_PARTY_C_SRCS := src/Arlen/Support/third_party/yyjson/yyjson.c"]);
+  XCTAssertTrue([makefile containsString:@"FRAMEWORK_SRCS += $(THIRD_PARTY_C_SRCS)"]);
+}
+
+- (void)testBoomhauerCompilePathIncludesYYJSONCSource {
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *scriptPath = [repoRoot stringByAppendingPathComponent:@"bin/boomhauer"];
+  NSString *script = [self readFile:scriptPath];
+
+  XCTAssertTrue([script containsString:@"find \"$framework_root/src/Arlen/Support/third_party/yyjson\" -type f -name '*.c'"],
+                @"boomhauer app compile path must include yyjson C source");
+}
+
 @end

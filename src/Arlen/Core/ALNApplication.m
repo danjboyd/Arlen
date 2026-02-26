@@ -15,6 +15,7 @@
 #import "ALNSecurityHeadersMiddleware.h"
 #import "ALNSessionMiddleware.h"
 #import "ALNLogger.h"
+#import "ALNJSONSerialization.h"
 #import "ALNPerf.h"
 #import "ALNMetrics.h"
 #import "ALNAuth.h"
@@ -2229,9 +2230,9 @@ static BOOL ALNValidateResponseContractIfNeeded(ALNApplication *application,
                     [contentType containsString:@"text/json"];
     if (jsonLike && [response.bodyData length] > 0) {
       NSError *jsonError = nil;
-      payload = [NSJSONSerialization JSONObjectWithData:response.bodyData
-                                                options:0
-                                                  error:&jsonError];
+      payload = [ALNJSONSerialization JSONObjectWithData:response.bodyData
+                                                 options:0
+                                                   error:&jsonError];
       if (jsonError != nil) {
         NSDictionary *details = ALNErrorDetailsFromNSError(jsonError);
         ALNApplyInternalErrorResponse(application,
@@ -2688,9 +2689,9 @@ static void ALNFinalizeResponse(ALNApplication *application,
   }
 
   NSJSONWritingOptions options = pretty ? NSJSONWritingPrettyPrinted : 0;
-  NSData *json = [NSJSONSerialization dataWithJSONObject:[self openAPISpecification]
-                                                 options:options
-                                                   error:error];
+  NSData *json = [ALNJSONSerialization dataWithJSONObject:[self openAPISpecification]
+                                                  options:options
+                                                    error:error];
   if (json == nil) {
     return NO;
   }

@@ -1,6 +1,7 @@
 #import "ALNSessionMiddleware.h"
 
 #import "ALNContext.h"
+#import "ALNJSONSerialization.h"
 #import "ALNRequest.h"
 #import "ALNResponse.h"
 
@@ -142,7 +143,7 @@ static NSData *ALNXORCipher(NSData *input, NSData *key, NSData *nonce) {
   };
 
   NSError *jsonError = nil;
-  NSData *plaintext = [NSJSONSerialization dataWithJSONObject:payload options:0 error:&jsonError];
+  NSData *plaintext = [ALNJSONSerialization dataWithJSONObject:payload options:0 error:&jsonError];
   if (plaintext == nil) {
     return nil;
   }
@@ -191,7 +192,7 @@ static NSData *ALNXORCipher(NSData *input, NSData *key, NSData *nonce) {
 
   NSError *jsonError = nil;
   NSDictionary *payload =
-      [NSJSONSerialization JSONObjectWithData:plaintext options:0 error:&jsonError];
+      [ALNJSONSerialization JSONObjectWithData:plaintext options:0 error:&jsonError];
   if (![payload isKindOfClass:[NSDictionary class]]) {
     return nil;
   }

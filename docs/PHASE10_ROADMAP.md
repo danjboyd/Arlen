@@ -1,7 +1,7 @@
 # Arlen Phase 10 Roadmap
 
-Status: Planned  
-Last updated: 2026-02-25
+Status: Active (10A/10B/10C complete; 10D+ planned)  
+Last updated: 2026-02-26
 
 Related docs:
 - `docs/PHASE9_ROADMAP.md`
@@ -60,7 +60,7 @@ Key findings:
 
 ## 4.1 Phase 10A: yyjson Foundation Layer
 
-Status: Planned
+Status: Complete (2026-02-26)
 
 Deliverables:
 
@@ -80,7 +80,7 @@ Acceptance (required):
 
 ## 4.2 Phase 10B: Parity + Regression Contract Matrix
 
-Status: Planned
+Status: Complete (2026-02-26)
 
 Deliverables:
 
@@ -103,7 +103,7 @@ Acceptance (required):
 
 ## 4.3 Phase 10C: Runtime JSON Path Migration
 
-Status: Planned
+Status: Complete (2026-02-26)
 
 Deliverables:
 

@@ -4,6 +4,7 @@
 #import <openssl/hmac.h>
 
 #import "ALNContext.h"
+#import "ALNJSONSerialization.h"
 #import "ALNRequest.h"
 
 NSString *const ALNAuthErrorDomain = @"Arlen.Auth.Error";
@@ -55,7 +56,7 @@ static NSDictionary *ALNJSONObjectFromBase64URLPart(NSString *part) {
     return nil;
   }
   NSError *error = nil;
-  id object = [NSJSONSerialization JSONObjectWithData:decoded options:0 error:&error];
+  id object = [ALNJSONSerialization JSONObjectWithData:decoded options:0 error:&error];
   if (error != nil || ![object isKindOfClass:[NSDictionary class]]) {
     return nil;
   }

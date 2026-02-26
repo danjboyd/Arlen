@@ -1,6 +1,7 @@
 #import "ALNJSONSerialization.h"
 
 #include <math.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "third_party/yyjson/yyjson.h"
@@ -342,7 +343,8 @@ static BOOL ALNValidateJSONObjectRecursive(id obj, NSUInteger depth) {
 @implementation ALNJSONSerialization
 
 + (ALNJSONBackend)backendFromEnvironment {
-  NSString *raw = [[[NSProcessInfo processInfo] environment][@"ARLEN_JSON_BACKEND"] lowercaseString];
+  const char *rawValue = getenv("ARLEN_JSON_BACKEND");
+  NSString *raw = (rawValue != NULL) ? [[NSString stringWithUTF8String:rawValue] lowercaseString] : @"";
   if ([raw isEqualToString:@"foundation"] || [raw isEqualToString:@"nsjson"]) {
     return ALNJSONBackendFoundation;
   }
@@ -370,6 +372,10 @@ static BOOL ALNValidateJSONObjectRecursive(id obj, NSUInteger depth) {
   return ([self backend] == ALNJSONBackendFoundation) ? @"foundation" : @"yyjson";
 }
 
++ (NSString *)yyjsonVersion {
+  return @YYJSON_VERSION_STRING;
+}
+
 + (void)setBackendForTesting:(ALNJSONBackend)backend {
   @synchronized(self) {
     gALNJSONBackend = backend;
@@ -387,10 +393,6 @@ static BOOL ALNValidateJSONObjectRecursive(id obj, NSUInteger depth) {
 + (id)JSONObjectWithData:(NSData *)data
                  options:(NSJSONReadingOptions)options
                    error:(NSError **)error {
-  if ([self backend] == ALNJSONBackendFoundation) {
-    return [NSJSONSerialization JSONObjectWithData:data options:options error:error];
-  }
-
   if (data == nil) {
     ALNSetError(error,
                 ALNJSONSerializationErrorInvalidArgument,
@@ -398,9 +400,24 @@ static BOOL ALNValidateJSONObjectRecursive(id obj, NSUInteger depth) {
     return nil;
   }
 
+  if ([self backend] == ALNJSONBackendFoundation) {
+    id parsed = [NSJSONSerialization JSONObjectWithData:data options:options error:error];
+    if (parsed == nil) {
+      return nil;
+    }
+    if ((options & NSJSONReadingAllowFragments) == 0 &&
+        !([parsed isKindOfClass:[NSArray class]] || [parsed isKindOfClass:[NSDictionary class]])) {
+      ALNSetError(error,
+                  ALNJSONSerializationErrorParseFailed,
+                  @"Top-level JSON value must be array or object unless fragments are allowed");
+      return nil;
+    }
+    return parsed;
+  }
+
   yyjson_read_err readErr;
   memset(&readErr, 0, sizeof(readErr));
-  yyjson_doc *doc = yyjson_read_opts((const char *)[data bytes],
+  yyjson_doc *doc = yyjson_read_opts((char *)[data bytes],
                                      (size_t)[data length],
                                      YYJSON_READ_NOFLAG,
                                      NULL,
@@ -432,15 +449,15 @@ static BOOL ALNValidateJSONObjectRecursive(id obj, NSUInteger depth) {
 + (NSData *)dataWithJSONObject:(id)obj
                        options:(NSJSONWritingOptions)options
                          error:(NSError **)error {
-  if ([self backend] == ALNJSONBackendFoundation) {
-    return [NSJSONSerialization dataWithJSONObject:obj options:options error:error];
-  }
-
   if (![self isValidJSONObject:obj]) {
     ALNSetError(error,
                 ALNJSONSerializationErrorUnsupportedType,
                 @"Invalid object graph for JSON encoding");
     return nil;
+  }
+
+  if ([self backend] == ALNJSONBackendFoundation) {
+    return [NSJSONSerialization dataWithJSONObject:obj options:options error:error];
   }
 
   yyjson_mut_doc *doc = yyjson_mut_doc_new(NULL);
@@ -483,10 +500,6 @@ static BOOL ALNValidateJSONObjectRecursive(id obj, NSUInteger depth) {
 }
 
 + (BOOL)isValidJSONObject:(id)obj {
-  if ([self backend] == ALNJSONBackendFoundation) {
-    return [NSJSONSerialization isValidJSONObject:obj];
-  }
-
   if (obj == nil) {
     return NO;
   }

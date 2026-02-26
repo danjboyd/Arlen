@@ -1,6 +1,7 @@
 #import "ALNResponseEnvelopeMiddleware.h"
 
 #import "ALNContext.h"
+#import "ALNJSONSerialization.h"
 #import "ALNResponse.h"
 
 @interface ALNResponseEnvelopeMiddleware ()
@@ -84,7 +85,7 @@
   }
 
   NSError *parseError = nil;
-  id parsed = [NSJSONSerialization JSONObjectWithData:response.bodyData options:0 error:&parseError];
+  id parsed = [ALNJSONSerialization JSONObjectWithData:response.bodyData options:0 error:&parseError];
   if (parseError != nil || parsed == nil) {
     return;
   }

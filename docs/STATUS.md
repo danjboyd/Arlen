@@ -1,6 +1,6 @@
 # Arlen Status Checkpoint
 
-Last updated: 2026-02-25
+Last updated: 2026-02-26
 
 ## Benchmark Handoff (2026-02-24 EOD)
 
@@ -53,7 +53,19 @@ Last updated: 2026-02-25
 - Phase 9H: complete (2026-02-25)
 - Phase 9I: complete (2026-02-25)
 - Phase 9J: complete (2026-02-25)
-- Phase 10: planned (yyjson-backed JSON migration roadmap published 2026-02-25)
+- Phase 10: active (10A/10B/10C complete on 2026-02-26; 10D+ pending)
+
+## Completed Today (2026-02-26)
+
+- Completed Phase 10A yyjson foundation tranche:
+  - yyjson C source is wired into framework build targets (`GNUmakefile`) and app-root `bin/boomhauer` compile path
+  - `ALNJSONSerialization` exposes deterministic backend selection (`ARLEN_JSON_BACKEND`) plus yyjson version metadata
+- Completed Phase 10B parity/regression tranche:
+  - added serializer contract tests covering backend selection, round-trip parity, mutable container/leaf behavior, fragment handling, invalid JSON failures, object-validity rules, and sorted-key equivalence
+  - added encapsulation regression test ensuring direct yyjson API usage remains constrained to serialization module
+- Completed Phase 10C runtime migration tranche:
+  - migrated runtime JSON call sites to `ALNJSONSerialization` across response, schema, envelope middleware, session middleware, auth, logger, application, pg diagnostics, and controller rendering paths
+  - added regression guard test to prevent direct runtime `NSJSONSerialization` usage in migrated files
 
 ## Completed Today (2026-02-25)
 

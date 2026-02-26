@@ -1194,12 +1194,18 @@
 
   NSString *compileCommand = [NSString stringWithFormat:
       @"source /usr/GNUstep/System/Library/Makefiles/GNUstep.sh && clang $(gnustep-config --objc-flags) "
-       "-fobjc-arc -I%@/src/Arlen -I%@/src/Arlen/Data %@ %@/src/Arlen/Data/ALNDatabaseAdapter.m "
-       "%@/src/Arlen/Data/ALNDatabaseRouter.m %@/src/Arlen/Data/ALNPg.m %@/src/Arlen/Data/ALNSQLBuilder.m "
-       "%@/src/Arlen/Data/ALNPostgresSQLBuilder.m -o %@ $(gnustep-config --base-libs) -ldl -lcrypto",
+       "-fobjc-arc -I%@/src/Arlen -I%@/src/Arlen/Data -I%@/src/Arlen/Support %@ "
+       "%@/src/Arlen/Data/ALNDatabaseAdapter.m %@/src/Arlen/Data/ALNDatabaseRouter.m "
+       "%@/src/Arlen/Data/ALNPg.m %@/src/Arlen/Data/ALNSQLBuilder.m "
+       "%@/src/Arlen/Data/ALNPostgresSQLBuilder.m %@/src/Arlen/Support/ALNJSONSerialization.m "
+       "%@/src/Arlen/Support/third_party/yyjson/yyjson.c "
+       "-o %@ $(gnustep-config --base-libs) -ldl -lcrypto",
+      repoRoot,
       repoRoot,
       repoRoot,
       sourcePath,
+      repoRoot,
+      repoRoot,
       repoRoot,
       repoRoot,
       repoRoot,

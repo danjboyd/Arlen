@@ -1,5 +1,6 @@
 #import "ALNSchemaContract.h"
 
+#import "ALNJSONSerialization.h"
 #import "ALNRequest.h"
 #import "ALNValueTransformers.h"
 
@@ -689,9 +690,9 @@ NSDictionary *ALNSchemaCoerceRequestValues(NSDictionary *schema,
   NSDictionary *bodyObject = nil;
   if (needsBodyObject && [request.body length] > 0) {
     NSError *bodyError = nil;
-    id parsedBody = [NSJSONSerialization JSONObjectWithData:request.body
-                                                    options:0
-                                                      error:&bodyError];
+    id parsedBody = [ALNJSONSerialization JSONObjectWithData:request.body
+                                                     options:0
+                                                       error:&bodyError];
     if (bodyError != nil || ![parsedBody isKindOfClass:[NSDictionary class]]) {
       ALNAppendSchemaError(validationErrors, @"body", @"invalid_json", @"must be a JSON object");
     } else {

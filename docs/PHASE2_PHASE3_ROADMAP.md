@@ -135,7 +135,7 @@ Phase 9 execution/planning is defined in `docs/PHASE9_ROADMAP.md`, including:
 - Phase 9J complete:
   - enterprise release certification pack generation, threshold/fail-criteria enforcement, known-risk register validation, and release-script certification gating for release candidates
 
-Phase 10 execution/planning is defined in `docs/PHASE10_ROADMAP.md`, focused on:
+Phase 10 execution is tracked in `docs/PHASE10_ROADMAP.md` (active; 10A/10B/10C complete), focused on:
 
 - yyjson-backed JSON serialization migration with parity-focused testing before cutover
 - runtime + CLI/tooling JSON call-site migration behind a deterministic backend switch

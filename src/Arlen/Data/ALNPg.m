@@ -1,4 +1,5 @@
 #import "ALNPg.h"
+#import "ALNJSONSerialization.h"
 #import "ALNSQLBuilder.h"
 
 #import <dlfcn.h>
@@ -588,7 +589,7 @@ static void ALNPgEmitEventToStderr(NSDictionary *event) {
   }
 
   NSError *jsonError = nil;
-  NSData *json = [NSJSONSerialization dataWithJSONObject:event options:0 error:&jsonError];
+  NSData *json = [ALNJSONSerialization dataWithJSONObject:event options:0 error:&jsonError];
   if (json != nil && jsonError == nil) {
     NSString *line = [[NSString alloc] initWithData:json encoding:NSUTF8StringEncoding];
     if ([line length] > 0) {

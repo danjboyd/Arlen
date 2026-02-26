@@ -24,7 +24,10 @@ TECH_DEMO_TEMPLATE_ROOT := $(TECH_DEMO_ROOT)/templates
 TECH_DEMO_TEMPLATE_FILES := $(shell find $(TECH_DEMO_TEMPLATE_ROOT) -type f -name '*.html.eoc' | sort)
 
 FRAMEWORK_SRCS := $(shell find src -type f -name '*.m' | sort)
+THIRD_PARTY_C_SRCS := src/Arlen/Support/third_party/yyjson/yyjson.c
+FRAMEWORK_SRCS += $(THIRD_PARTY_C_SRCS)
 ARLEN_DATA_SRCS := $(shell find src/Arlen/Data -type f -name '*.m' | sort)
+JSON_SERIALIZATION_SRCS := src/Arlen/Support/ALNJSONSerialization.m $(THIRD_PARTY_C_SRCS)
 EOC_RUNTIME_SRCS := src/Arlen/MVC/Template/ALNEOCRuntime.m src/Arlen/MVC/Template/ALNEOCTranspiler.m
 
 UNIT_TEST_BUNDLE := $(BUILD_DIR)/tests/ArlenUnitTests.xctest
@@ -78,8 +81,8 @@ generated-compile: transpile
 >fi; \
 >clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) $$generated_files $(FRAMEWORK_SRCS) -shared -fPIC -o $(BUILD_DIR)/libArlenFramework.so $$(gnustep-config --base-libs) -ldl -lcrypto
 
-$(ARLEN_TOOL): tools/arlen.m src/Arlen/Core/ALNConfig.m src/Arlen/Data/ALNMigrationRunner.m src/Arlen/Data/ALNPg.m src/Arlen/Data/ALNSQLBuilder.m src/Arlen/Data/ALNSchemaCodegen.m | $(BUILD_DIR)
->source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) tools/arlen.m src/Arlen/Core/ALNConfig.m src/Arlen/Data/ALNMigrationRunner.m src/Arlen/Data/ALNPg.m src/Arlen/Data/ALNSQLBuilder.m src/Arlen/Data/ALNSchemaCodegen.m -o $(ARLEN_TOOL) $$(gnustep-config --base-libs) -ldl -lcrypto
+$(ARLEN_TOOL): tools/arlen.m src/Arlen/Core/ALNConfig.m src/Arlen/Data/ALNMigrationRunner.m src/Arlen/Data/ALNPg.m src/Arlen/Data/ALNSQLBuilder.m src/Arlen/Data/ALNSchemaCodegen.m $(JSON_SERIALIZATION_SRCS) | $(BUILD_DIR)
+>source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) tools/arlen.m src/Arlen/Core/ALNConfig.m src/Arlen/Data/ALNMigrationRunner.m src/Arlen/Data/ALNPg.m src/Arlen/Data/ALNSQLBuilder.m src/Arlen/Data/ALNSchemaCodegen.m $(JSON_SERIALIZATION_SRCS) -o $(ARLEN_TOOL) $$(gnustep-config --base-libs) -ldl -lcrypto
 
 arlen: $(ARLEN_TOOL)
 
@@ -115,7 +118,7 @@ $(MIGRATION_SAMPLE_SERVER_TOOL): examples/gsweb_migration/src/migration_sample_s
 migration-sample-server: $(MIGRATION_SAMPLE_SERVER_TOOL)
 
 $(ARLEN_DATA_EXAMPLE_TOOL): examples/arlen_data/src/arlen_data_example.m
->source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) -Isrc examples/arlen_data/src/arlen_data_example.m $(ARLEN_DATA_SRCS) -o $(ARLEN_DATA_EXAMPLE_TOOL) $$(gnustep-config --base-libs) -ldl -lcrypto
+>source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) -Isrc examples/arlen_data/src/arlen_data_example.m $(ARLEN_DATA_SRCS) $(JSON_SERIALIZATION_SRCS) -o $(ARLEN_DATA_EXAMPLE_TOOL) $$(gnustep-config --base-libs) -ldl -lcrypto
 
 arlen-data-example: $(ARLEN_DATA_EXAMPLE_TOOL)
 

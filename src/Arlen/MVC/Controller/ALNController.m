@@ -1,6 +1,7 @@
 #import "ALNController.h"
 
 #import "ALNContext.h"
+#import "ALNJSONSerialization.h"
 #import "ALNPageState.h"
 #import "ALNRequest.h"
 #import "ALNResponse.h"
@@ -34,8 +35,8 @@ static NSString *ALNJSONStringFromObject(id value) {
   if ([value isKindOfClass:[NSString class]]) {
     return value;
   }
-  if ([NSJSONSerialization isValidJSONObject:value]) {
-    NSData *data = [NSJSONSerialization dataWithJSONObject:value options:0 error:nil];
+  if ([ALNJSONSerialization isValidJSONObject:value]) {
+    NSData *data = [ALNJSONSerialization dataWithJSONObject:value options:0 error:nil];
     if (data != nil) {
       NSString *json = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
       if ([json length] > 0) {

@@ -1,4 +1,5 @@
 #import "ALNLogger.h"
+#import "ALNJSONSerialization.h"
 
 #include <stdio.h>
 #include <sys/time.h>
@@ -85,9 +86,9 @@ static NSDictionary *ALNMergedFields(NSString *message, ALNLogLevel level,
   NSDictionary *merged = ALNMergedFields(message, level, fields);
   if ([self.format isEqualToString:@"json"]) {
     NSError *jsonError = nil;
-    NSData *data = [NSJSONSerialization dataWithJSONObject:merged
-                                                   options:0
-                                                     error:&jsonError];
+    NSData *data = [ALNJSONSerialization dataWithJSONObject:merged
+                                                    options:0
+                                                      error:&jsonError];
     if (data != nil) {
       NSString *line = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
       const char *utf8 = [line UTF8String];

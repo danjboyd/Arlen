@@ -203,7 +203,12 @@ compile_app() {
     return "$status"
   fi
 
-  mapfile -t framework_sources < <(find "$framework_root/src" -type f -name '*.m' | sort)
+  mapfile -t framework_sources < <(
+    {
+      find "$framework_root/src" -type f -name '*.m'
+      find "$framework_root/src/Arlen/Support/third_party/yyjson" -type f -name '*.c' 2>/dev/null
+    } | sort
+  )
   mapfile -t app_sources < <(find "$app_root/src" -type f -name '*.m' 2>/dev/null | sort)
   mapfile -t generated_sources < <(find "$gen_root" -type f -name '*.m' 2>/dev/null | sort)
 

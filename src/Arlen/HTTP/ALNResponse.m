@@ -1,5 +1,7 @@
 #import "ALNResponse.h"
 
+#import "ALNJSONSerialization.h"
+
 NSString *const ALNResponseErrorDomain = @"Arlen.HTTP.Response.Error";
 
 static NSString *ALNStatusText(NSInteger statusCode) {
@@ -106,7 +108,7 @@ static NSString *ALNStatusText(NSInteger statusCode) {
 - (BOOL)setJSONBody:(id)object
             options:(NSJSONWritingOptions)options
               error:(NSError **)error {
-  NSData *json = [NSJSONSerialization dataWithJSONObject:object options:options error:error];
+  NSData *json = [ALNJSONSerialization dataWithJSONObject:object options:options error:error];
   if (json == nil) {
     return NO;
   }
