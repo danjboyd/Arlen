@@ -1,6 +1,6 @@
 # Arlen Phase 10 Roadmap
 
-Status: Active (10A/10B/10C/10D/10E/10F/10G/10H complete; perf gate calibration completed)  
+Status: Active (10A/10B/10C/10D/10E/10F/10G/10H/10I complete; perf gate calibration completed)  
 Last updated: 2026-02-26
 
 Related docs:
@@ -55,6 +55,7 @@ Key findings:
 6. Phase 10F: full cutover and legacy guardrails.
 7. Phase 10G: dispatch/runtime invocation overhead reduction (cached IMP path).
 8. Phase 10H: replace HTTP parse pipeline with llhttp-based parser path.
+9. Phase 10I: compile-time feature toggles for JSON/parser backends.
 
 ## 4. Milestones
 
@@ -216,6 +217,27 @@ Acceptance (required):
 - Parser-gate thresholds are calibrated to a stable no-catastrophic-regression policy (with future ratchet tightening as runtime optimizations land).
 - Rollout can be toggled safely between legacy and llhttp parser paths during validation.
 
+## 4.9 Phase 10I: Compile-Time Backend Toggle Hardening
+
+Status: Complete (2026-02-26)
+
+Deliverables:
+
+- Add compile-time switches to build pipelines:
+  - `ARLEN_ENABLE_YYJSON` (`1` default, `0` disables yyjson compilation)
+  - `ARLEN_ENABLE_LLHTTP` (`1` default, `0` disables llhttp compilation)
+- Ensure app-root compile path (`bin/boomhauer`) and framework `GNUmakefile` honor the same switches.
+- Preserve runtime behavior deterministically when features are compiled out:
+  - JSON serialization falls back to Foundation backend.
+  - HTTP parsing falls back to legacy parser backend.
+- Add regression coverage for disabled-feature compile path and fallback metadata contracts.
+
+Acceptance (required):
+
+- Arlen compiles with either backend feature disabled independently.
+- Runtime/backend metadata and selection APIs report deterministic fallback state (`foundation`/`legacy`, version `disabled`) when compiled out.
+- Existing default builds remain unchanged (`yyjson` + `llhttp` enabled by default).
+
 ## 5. Test Strategy
 
 Minimum mandatory test layers:
@@ -241,6 +263,7 @@ Minimum mandatory test layers:
 6. 10F default cutover + guardrails.
 7. 10G dispatch/runtime invocation overhead hardening.
 8. 10H llhttp parser migration as final Phase 10 performance hardening stream.
+9. 10I compile-time backend toggle hardening for controlled feature-disable builds.
 
 ## 7. Explicit Non-Goals (Phase 10)
 

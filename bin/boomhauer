@@ -184,6 +184,21 @@ clear_build_failure_state() {
 compile_app() {
   local tmp_output
   tmp_output="$(mktemp)"
+  local enable_yyjson="${ARLEN_ENABLE_YYJSON:-1}"
+  local enable_llhttp="${ARLEN_ENABLE_LLHTTP:-1}"
+
+  if [[ "$enable_yyjson" != "0" && "$enable_yyjson" != "1" ]]; then
+    printf 'boomhauer: ARLEN_ENABLE_YYJSON must be 0 or 1 (got %s)\n' "$enable_yyjson" >"$tmp_output"
+    record_build_failure "feature_flags" "validate ARLEN_ENABLE_YYJSON" 2 "$tmp_output"
+    rm -f "$tmp_output"
+    return 2
+  fi
+  if [[ "$enable_llhttp" != "0" && "$enable_llhttp" != "1" ]]; then
+    printf 'boomhauer: ARLEN_ENABLE_LLHTTP must be 0 or 1 (got %s)\n' "$enable_llhttp" >"$tmp_output"
+    record_build_failure "feature_flags" "validate ARLEN_ENABLE_LLHTTP" 2 "$tmp_output"
+    rm -f "$tmp_output"
+    return 2
+  fi
 
   if make -C "$framework_root" eocc >"$tmp_output" 2>&1; then
     :
@@ -206,8 +221,12 @@ compile_app() {
   mapfile -t framework_sources < <(
     {
       find "$framework_root/src" -type f -name '*.m'
-      find "$framework_root/src/Arlen/Support/third_party/yyjson" -type f -name '*.c' 2>/dev/null
-      find "$framework_root/src/Arlen/Support/third_party/llhttp" -type f -name '*.c' 2>/dev/null
+      if [[ "$enable_yyjson" == "1" ]]; then
+        find "$framework_root/src/Arlen/Support/third_party/yyjson" -type f -name '*.c' 2>/dev/null
+      fi
+      if [[ "$enable_llhttp" == "1" ]]; then
+        find "$framework_root/src/Arlen/Support/third_party/llhttp" -type f -name '*.c' 2>/dev/null
+      fi
     } | sort
   )
   mapfile -t app_sources < <(find "$app_root/src" -type f -name '*.m' 2>/dev/null | sort)
@@ -236,6 +255,8 @@ compile_app() {
     set -u
     clang $(gnustep-config --objc-flags) \
       -fobjc-arc \
+      -DARLEN_ENABLE_YYJSON="$enable_yyjson" \
+      -DARLEN_ENABLE_LLHTTP="$enable_llhttp" \
       -I"$framework_root/src/Arlen" \
       -I"$framework_root/src/Arlen/Core" \
       -I"$framework_root/src/Arlen/Data" \

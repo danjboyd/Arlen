@@ -45,6 +45,12 @@ From repository root:
 make all
 ```
 
+Compile-time feature toggles:
+
+```bash
+ARLEN_ENABLE_YYJSON=0 ARLEN_ENABLE_LLHTTP=0 make all
+```
+
 This builds:
 
 - EOC transpiler (`build/eocc`)
@@ -171,6 +177,15 @@ ARLEN_JSON_BACKEND=foundation ./bin/boomhauer --env production
 
 Default backend is `yyjson`. Foundation fallback remains available temporarily for rollout verification
 and is scheduled for removal after `2026-04-30`.
+
+HTTP parser backend override:
+
+```bash
+ARLEN_HTTP_PARSER_BACKEND=legacy ./bin/boomhauer --env production
+```
+
+`llhttp` is the default parser backend when it is compiled in. Set compile-time toggle
+`ARLEN_ENABLE_LLHTTP=0` before build/prepare steps to force legacy-only parser builds.
 
 Security profile override:
 

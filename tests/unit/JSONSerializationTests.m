@@ -34,7 +34,10 @@
 }
 
 - (void)forEachBackend:(void (^)(ALNJSONBackend backend))block {
-  NSArray<NSNumber *> *backends = @[ @(ALNJSONBackendFoundation), @(ALNJSONBackendYYJSON) ];
+  NSMutableArray<NSNumber *> *backends = [NSMutableArray arrayWithObject:@(ALNJSONBackendFoundation)];
+  if ([ALNJSONSerialization isYYJSONAvailable]) {
+    [backends addObject:@(ALNJSONBackendYYJSON)];
+  }
   for (NSNumber *entry in backends) {
     ALNJSONBackend backend = (ALNJSONBackend)[entry unsignedIntegerValue];
     [ALNJSONSerialization setBackendForTesting:backend];
@@ -55,18 +58,26 @@
 
   setenv("ARLEN_JSON_BACKEND", "yyjson", 1);
   [ALNJSONSerialization resetBackendForTesting];
-  XCTAssertEqual(ALNJSONBackendYYJSON, [ALNJSONSerialization backend]);
-  XCTAssertEqualObjects(@"yyjson", [ALNJSONSerialization backendName]);
+  ALNJSONBackend expectedYYJSONBackend =
+      [ALNJSONSerialization isYYJSONAvailable] ? ALNJSONBackendYYJSON : ALNJSONBackendFoundation;
+  XCTAssertEqual(expectedYYJSONBackend, [ALNJSONSerialization backend]);
+  XCTAssertEqualObjects([ALNJSONSerialization isYYJSONAvailable] ? @"yyjson" : @"foundation",
+                        [ALNJSONSerialization backendName]);
 
   setenv("ARLEN_JSON_BACKEND", "unknown", 1);
   [ALNJSONSerialization resetBackendForTesting];
-  XCTAssertEqual(ALNJSONBackendYYJSON, [ALNJSONSerialization backend]);
+  ALNJSONBackend expectedUnknownBackend =
+      [ALNJSONSerialization isYYJSONAvailable] ? ALNJSONBackendYYJSON : ALNJSONBackendFoundation;
+  XCTAssertEqual(expectedUnknownBackend, [ALNJSONSerialization backend]);
 }
 
 - (void)testYYJSONVersionMetadataIsAvailable {
   NSString *version = [ALNJSONSerialization yyjsonVersion];
   XCTAssertNotNil(version);
-  XCTAssertTrue([version length] > 0);
+  if (![ALNJSONSerialization isYYJSONAvailable]) {
+    XCTAssertEqualObjects(@"disabled", version);
+    return;
+  }
 
   NSError *error = nil;
   NSRegularExpression *regex =

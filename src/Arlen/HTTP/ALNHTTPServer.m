@@ -150,7 +150,8 @@ static ALNHTTPParserBackend ALNHTTPParserBackendFromConfig(NSDictionary *config)
       return ALNHTTPParserBackendLegacy;
     }
     if ([normalized isEqualToString:@"llhttp"]) {
-      return ALNHTTPParserBackendLLHTTP;
+      return [ALNRequest isLLHTTPAvailable] ? ALNHTTPParserBackendLLHTTP
+                                            : ALNHTTPParserBackendLegacy;
     }
   }
   return [ALNRequest resolvedParserBackend];

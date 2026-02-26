@@ -112,6 +112,67 @@
   XCTAssertTrue(matches > 0, @"boomhauer compile path must enforce -fobjc-arc");
 }
 
+- (void)testCompileTimeFeatureFlagsCanDisableYYJSONAndLLHTTP {
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *workRoot = [self createTempDirectoryWithPrefix:@"arlen-feature-toggle-smoke"];
+  XCTAssertNotNil(workRoot);
+  if (workRoot == nil) {
+    return;
+  }
+
+  @try {
+    NSString *sourcePath = [workRoot stringByAppendingPathComponent:@"main.m"];
+    NSString *binaryPath = [workRoot stringByAppendingPathComponent:@"feature-toggle-smoke"];
+    XCTAssertTrue([self writeFile:sourcePath
+                          content:@"#import <Foundation/Foundation.h>\n"
+                                  "#import \"ALNJSONSerialization.h\"\n"
+                                  "#import \"ALNRequest.h\"\n"
+                                  "#include <stdlib.h>\n"
+                                  "\n"
+                                  "int main(int argc, const char *argv[]) {\n"
+                                  "  (void)argc;\n"
+                                  "  (void)argv;\n"
+                                  "  @autoreleasepool {\n"
+                                  "    [ALNJSONSerialization resetBackendForTesting];\n"
+                                  "    unsetenv(\"ARLEN_HTTP_PARSER_BACKEND\");\n"
+                                  "    fprintf(stdout,\n"
+                                  "            \"json_available=%d json_backend=%s yyjson_version=%s\\n\",\n"
+                                  "            [ALNJSONSerialization isYYJSONAvailable] ? 1 : 0,\n"
+                                  "            [[ALNJSONSerialization backendName] UTF8String],\n"
+                                  "            [[ALNJSONSerialization yyjsonVersion] UTF8String]);\n"
+                                  "    fprintf(stdout,\n"
+                                  "            \"llhttp_available=%d parser_backend=%s llhttp_version=%s\\n\",\n"
+                                  "            [ALNRequest isLLHTTPAvailable] ? 1 : 0,\n"
+                                  "            [[ALNRequest resolvedParserBackendName] UTF8String],\n"
+                                  "            [[ALNRequest llhttpVersion] UTF8String]);\n"
+                                  "  }\n"
+                                  "  return 0;\n"
+                                  "}\n"]);
+
+    int code = 0;
+    NSString *compileOutput = [self runShellCapture:[NSString stringWithFormat:
+        @"source /usr/GNUstep/System/Library/Makefiles/GNUstep.sh && clang $(gnustep-config --objc-flags) "
+         "-fobjc-arc -DARLEN_ENABLE_YYJSON=0 -DARLEN_ENABLE_LLHTTP=0 "
+         "-I%@/src/Arlen -I%@/src/Arlen/HTTP -I%@/src/Arlen/Support "
+         "%@ %@/src/Arlen/Support/ALNJSONSerialization.m %@/src/Arlen/HTTP/ALNRequest.m "
+         "-o %@ $(gnustep-config --base-libs) -ldl -lcrypto",
+        repoRoot, repoRoot, repoRoot, sourcePath, repoRoot, repoRoot, binaryPath]
+                                       exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", compileOutput);
+
+    NSString *runOutput = [self runShellCapture:binaryPath exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", runOutput);
+    XCTAssertTrue([runOutput containsString:@"json_available=0"], @"%@", runOutput);
+    XCTAssertTrue([runOutput containsString:@"json_backend=foundation"], @"%@", runOutput);
+    XCTAssertTrue([runOutput containsString:@"yyjson_version=disabled"], @"%@", runOutput);
+    XCTAssertTrue([runOutput containsString:@"llhttp_available=0"], @"%@", runOutput);
+    XCTAssertTrue([runOutput containsString:@"parser_backend=legacy"], @"%@", runOutput);
+    XCTAssertTrue([runOutput containsString:@"llhttp_version=disabled"], @"%@", runOutput);
+  } @finally {
+    [[NSFileManager defaultManager] removeItemAtPath:workRoot error:nil];
+  }
+}
+
 - (void)testReleaseBuildActivateAndRollbackScripts {
   NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
   NSString *appRoot = [self createTempDirectoryWithPrefix:@"arlen-release-app"];

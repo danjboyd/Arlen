@@ -11,7 +11,12 @@
 @implementation RequestTests
 
 - (NSArray<NSNumber *> *)allBackends {
-  return @[ @(ALNHTTPParserBackendLLHTTP), @(ALNHTTPParserBackendLegacy) ];
+  NSMutableArray<NSNumber *> *backends = [NSMutableArray array];
+  if ([ALNRequest isLLHTTPAvailable]) {
+    [backends addObject:@(ALNHTTPParserBackendLLHTTP)];
+  }
+  [backends addObject:@(ALNHTTPParserBackendLegacy)];
+  return backends;
 }
 
 - (NSString *)backendName:(ALNHTTPParserBackend)backend {
@@ -112,8 +117,11 @@
 
 - (void)testResolvedParserBackendDefaultsToLLHTTPAndAllowsLegacyOverride {
   unsetenv("ARLEN_HTTP_PARSER_BACKEND");
-  XCTAssertEqual(ALNHTTPParserBackendLLHTTP, [ALNRequest resolvedParserBackend]);
-  XCTAssertEqualObjects(@"llhttp", [ALNRequest resolvedParserBackendName]);
+  ALNHTTPParserBackend expectedDefaultBackend =
+      [ALNRequest isLLHTTPAvailable] ? ALNHTTPParserBackendLLHTTP : ALNHTTPParserBackendLegacy;
+  XCTAssertEqual(expectedDefaultBackend, [ALNRequest resolvedParserBackend]);
+  XCTAssertEqualObjects([ALNRequest isLLHTTPAvailable] ? @"llhttp" : @"legacy",
+                        [ALNRequest resolvedParserBackendName]);
 
   setenv("ARLEN_HTTP_PARSER_BACKEND", "legacy", 1);
   XCTAssertEqual(ALNHTTPParserBackendLegacy, [ALNRequest resolvedParserBackend]);
@@ -124,6 +132,10 @@
 
 - (void)testLLHTTPVersionLooksValid {
   NSString *version = [ALNRequest llhttpVersion];
+  if (![ALNRequest isLLHTTPAvailable]) {
+    XCTAssertEqualObjects(@"disabled", version);
+    return;
+  }
   XCTAssertTrue([version isKindOfClass:[NSString class]]);
   NSRange match = [version rangeOfString:@"^\\d+\\.\\d+\\.\\d+$"
                                  options:NSRegularExpressionSearch];
@@ -131,6 +143,10 @@
 }
 
 - (void)testLLHTTPAndLegacyParsersProduceEquivalentRequestObject {
+  if (![ALNRequest isLLHTTPAvailable]) {
+    return;
+  }
+
   NSString *raw = @"POST /v1/ping?x=1&y=two HTTP/1.1\r\n"
                   "Host: localhost\r\n"
                   "X-Trace: abc123\r\n"

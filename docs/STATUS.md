@@ -53,7 +53,7 @@ Last updated: 2026-02-26
 - Phase 9H: complete (2026-02-25)
 - Phase 9I: complete (2026-02-25)
 - Phase 9J: complete (2026-02-25)
-- Phase 10: active (10A/10B/10C/10D/10E/10F/10G/10H complete on 2026-02-26; perf threshold calibration complete)
+- Phase 10: active (10A/10B/10C/10D/10E/10F/10G/10H/10I complete on 2026-02-26; perf threshold calibration complete)
 
 ## Completed Today (2026-02-26)
 
@@ -96,6 +96,11 @@ Last updated: 2026-02-26
   - calibrated default threshold fixtures to stable no-catastrophic-regression guardrails for current runtime baseline:
     - `tests/fixtures/performance/phase10g_dispatch_perf_thresholds.json`
     - `tests/fixtures/performance/phase10h_http_parse_perf_thresholds.json`
+- Completed Phase 10I compile-time backend toggle tranche:
+  - added build-time switches in `GNUmakefile` (`ARLEN_ENABLE_YYJSON`, `ARLEN_ENABLE_LLHTTP`) with strict `0|1` validation and compile-flag propagation
+  - wired app-root compile path (`bin/boomhauer`) to honor the same toggles and pass deterministic feature macros
+  - hardened runtime fallback behavior/metadata when compiled without yyjson or llhttp (`ALNJSONSerialization`, `ALNRequest`)
+  - added regression coverage for feature-disabled compile path (`tests/integration/DeploymentIntegrationTests.m`)
 
 ## Completed Today (2026-02-25)
 

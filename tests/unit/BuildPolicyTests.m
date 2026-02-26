@@ -23,7 +23,7 @@
   XCTAssertTrue([makefile containsString:@"ARC_REQUIRED_FLAG := -fobjc-arc"]);
   XCTAssertTrue([makefile containsString:
                               @"override OBJC_FLAGS := $$(gnustep-config --objc-flags) "
-                               "$(ARC_REQUIRED_FLAG) $(EXTRA_OBJC_FLAGS)"]);
+                               "$(ARC_REQUIRED_FLAG) $(FEATURE_FLAGS) $(EXTRA_OBJC_FLAGS)"]);
   XCTAssertTrue([makefile containsString:@"EXTRA_OBJC_FLAGS cannot contain -fno-objc-arc"]);
   XCTAssertTrue([makefile containsString:@"OBJC_FLAGS cannot disable ARC"]);
 }
@@ -77,6 +77,13 @@
   NSString *makefilePath = [repoRoot stringByAppendingPathComponent:@"GNUmakefile"];
   NSString *makefile = [self readFile:makefilePath];
 
+  XCTAssertTrue([makefile containsString:@"ARLEN_ENABLE_YYJSON ?= 1"]);
+  XCTAssertTrue([makefile containsString:@"ARLEN_ENABLE_LLHTTP ?= 1"]);
+  XCTAssertTrue([makefile containsString:@"ARLEN_ENABLE_YYJSON must be 0 or 1"]);
+  XCTAssertTrue([makefile containsString:@"ARLEN_ENABLE_LLHTTP must be 0 or 1"]);
+  XCTAssertTrue([makefile containsString:
+                              @"FEATURE_FLAGS := -DARLEN_ENABLE_YYJSON=$(ARLEN_ENABLE_YYJSON) "
+                               "-DARLEN_ENABLE_LLHTTP=$(ARLEN_ENABLE_LLHTTP)"]);
   XCTAssertTrue([makefile containsString:
                               @"YYJSON_C_SRCS := src/Arlen/Support/third_party/yyjson/yyjson.c"]);
   XCTAssertTrue([makefile containsString:@"LLHTTP_C_SRCS := src/Arlen/Support/third_party/llhttp/llhttp.c"]);
@@ -92,10 +99,16 @@
   NSString *scriptPath = [repoRoot stringByAppendingPathComponent:@"bin/boomhauer"];
   NSString *script = [self readFile:scriptPath];
 
+  XCTAssertTrue([script containsString:@"local enable_yyjson=\"${ARLEN_ENABLE_YYJSON:-1}\""]);
+  XCTAssertTrue([script containsString:@"local enable_llhttp=\"${ARLEN_ENABLE_LLHTTP:-1}\""]);
+  XCTAssertTrue([script containsString:@"ARLEN_ENABLE_YYJSON must be 0 or 1"]);
+  XCTAssertTrue([script containsString:@"ARLEN_ENABLE_LLHTTP must be 0 or 1"]);
   XCTAssertTrue([script containsString:@"find \"$framework_root/src/Arlen/Support/third_party/yyjson\" -type f -name '*.c'"],
                 @"boomhauer app compile path must include yyjson C source");
   XCTAssertTrue([script containsString:@"find \"$framework_root/src/Arlen/Support/third_party/llhttp\" -type f -name '*.c'"],
                 @"boomhauer app compile path must include llhttp C sources");
+  XCTAssertTrue([script containsString:@"-DARLEN_ENABLE_YYJSON=\"$enable_yyjson\""]);
+  XCTAssertTrue([script containsString:@"-DARLEN_ENABLE_LLHTTP=\"$enable_llhttp\""]);
 }
 
 - (void)testGNUmakefileIncludesJSONReliabilityGateTargets {

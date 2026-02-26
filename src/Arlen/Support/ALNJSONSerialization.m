@@ -4,7 +4,9 @@
 #include <stdlib.h>
 #include <string.h>
 
+#if ARLEN_ENABLE_YYJSON
 #include "third_party/yyjson/yyjson.h"
+#endif
 
 static NSString *const ALNJSONSerializationErrorDomain = @"Arlen.JSON.Serialization.Error";
 
@@ -19,7 +21,12 @@ enum {
 
 static NSUInteger const ALNJSONMaxDepth = 512;
 
-static ALNJSONBackend gALNJSONBackend = ALNJSONBackendYYJSON;
+static ALNJSONBackend gALNJSONBackend =
+#if ARLEN_ENABLE_YYJSON
+    ALNJSONBackendYYJSON;
+#else
+    ALNJSONBackendFoundation;
+#endif
 static BOOL gALNJSONBackendInitialized = NO;
 
 static void ALNSetError(NSError **error, NSInteger code, NSString *message) {
@@ -45,6 +52,7 @@ static BOOL ALNNSNumberLooksBoolean(NSNumber *number) {
 
 static BOOL ALNValidateJSONObjectRecursive(id obj, NSUInteger depth);
 
+#if ARLEN_ENABLE_YYJSON
 static id ALNFoundationFromYYValue(yyjson_val *value,
                                    NSJSONReadingOptions options,
                                    NSUInteger depth,
@@ -296,6 +304,7 @@ static yyjson_mut_val *ALNYYValueFromFoundation(yyjson_mut_doc *doc,
               [NSString stringWithFormat:@"Unsupported JSON type: %@", NSStringFromClass([obj class])]);
   return NULL;
 }
+#endif
 
 static BOOL ALNValidateJSONObjectRecursive(id obj, NSUInteger depth) {
   if (obj == nil) {
@@ -345,10 +354,24 @@ static BOOL ALNValidateJSONObjectRecursive(id obj, NSUInteger depth) {
 + (ALNJSONBackend)backendFromEnvironment {
   const char *rawValue = getenv("ARLEN_JSON_BACKEND");
   NSString *raw = (rawValue != NULL) ? [[NSString stringWithUTF8String:rawValue] lowercaseString] : @"";
+  if ([raw length] == 0) {
+#if ARLEN_ENABLE_YYJSON
+    return ALNJSONBackendYYJSON;
+#else
+    return ALNJSONBackendFoundation;
+#endif
+  }
   if ([raw isEqualToString:@"foundation"] || [raw isEqualToString:@"nsjson"]) {
     return ALNJSONBackendFoundation;
   }
+#if ARLEN_ENABLE_YYJSON
+  if ([raw isEqualToString:@"yyjson"]) {
+    return ALNJSONBackendYYJSON;
+  }
   return ALNJSONBackendYYJSON;
+#else
+  return ALNJSONBackendFoundation;
+#endif
 }
 
 + (void)initializeBackendIfNeeded {
@@ -369,11 +392,26 @@ static BOOL ALNValidateJSONObjectRecursive(id obj, NSUInteger depth) {
 }
 
 + (NSString *)backendName {
-  return ([self backend] == ALNJSONBackendFoundation) ? @"foundation" : @"yyjson";
+  if ([self backend] == ALNJSONBackendFoundation || ![self isYYJSONAvailable]) {
+    return @"foundation";
+  }
+  return @"yyjson";
 }
 
 + (NSString *)yyjsonVersion {
+#if ARLEN_ENABLE_YYJSON
   return @YYJSON_VERSION_STRING;
+#else
+  return @"disabled";
+#endif
+}
+
++ (BOOL)isYYJSONAvailable {
+#if ARLEN_ENABLE_YYJSON
+  return YES;
+#else
+  return NO;
+#endif
 }
 
 + (NSString *)foundationFallbackDeprecationDate {
@@ -381,8 +419,12 @@ static BOOL ALNValidateJSONObjectRecursive(id obj, NSUInteger depth) {
 }
 
 + (void)setBackendForTesting:(ALNJSONBackend)backend {
+  ALNJSONBackend effectiveBackend = backend;
+  if (effectiveBackend == ALNJSONBackendYYJSON && ![self isYYJSONAvailable]) {
+    effectiveBackend = ALNJSONBackendFoundation;
+  }
   @synchronized(self) {
-    gALNJSONBackend = backend;
+    gALNJSONBackend = effectiveBackend;
     gALNJSONBackendInitialized = YES;
   }
 }
@@ -390,7 +432,11 @@ static BOOL ALNValidateJSONObjectRecursive(id obj, NSUInteger depth) {
 + (void)resetBackendForTesting {
   @synchronized(self) {
     gALNJSONBackendInitialized = NO;
+#if ARLEN_ENABLE_YYJSON
     gALNJSONBackend = ALNJSONBackendYYJSON;
+#else
+    gALNJSONBackend = ALNJSONBackendFoundation;
+#endif
   }
 }
 
@@ -404,7 +450,7 @@ static BOOL ALNValidateJSONObjectRecursive(id obj, NSUInteger depth) {
     return nil;
   }
 
-  if ([self backend] == ALNJSONBackendFoundation) {
+  if ([self backend] == ALNJSONBackendFoundation || ![self isYYJSONAvailable]) {
     id parsed = [NSJSONSerialization JSONObjectWithData:data options:options error:error];
     if (parsed == nil) {
       return nil;
@@ -419,6 +465,7 @@ static BOOL ALNValidateJSONObjectRecursive(id obj, NSUInteger depth) {
     return parsed;
   }
 
+#if ARLEN_ENABLE_YYJSON
   yyjson_read_err readErr;
   memset(&readErr, 0, sizeof(readErr));
   yyjson_doc *doc = yyjson_read_opts((char *)[data bytes],
@@ -448,6 +495,9 @@ static BOOL ALNValidateJSONObjectRecursive(id obj, NSUInteger depth) {
   id parsed = ALNFoundationFromYYValue(root, options, 0, error);
   yyjson_doc_free(doc);
   return parsed;
+#else
+  return [NSJSONSerialization JSONObjectWithData:data options:options error:error];
+#endif
 }
 
 + (NSData *)dataWithJSONObject:(id)obj
@@ -460,10 +510,11 @@ static BOOL ALNValidateJSONObjectRecursive(id obj, NSUInteger depth) {
     return nil;
   }
 
-  if ([self backend] == ALNJSONBackendFoundation) {
+  if ([self backend] == ALNJSONBackendFoundation || ![self isYYJSONAvailable]) {
     return [NSJSONSerialization dataWithJSONObject:obj options:options error:error];
   }
 
+#if ARLEN_ENABLE_YYJSON
   yyjson_mut_doc *doc = yyjson_mut_doc_new(NULL);
   if (doc == NULL) {
     ALNSetError(error,
@@ -501,6 +552,9 @@ static BOOL ALNValidateJSONObjectRecursive(id obj, NSUInteger depth) {
   free(raw);
   yyjson_mut_doc_free(doc);
   return data;
+#else
+  return [NSJSONSerialization dataWithJSONObject:obj options:options error:error];
+#endif
 }
 
 + (BOOL)isValidJSONObject:(id)obj {

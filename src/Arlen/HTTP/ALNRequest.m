@@ -1,6 +1,8 @@
 #import "ALNRequest.h"
 
+#if ARLEN_ENABLE_LLHTTP
 #import "third_party/llhttp/llhttp.h"
+#endif
 
 NSString *const ALNRequestErrorDomain = @"Arlen.HTTP.Request.Error";
 
@@ -88,7 +90,11 @@ static void ALNSplitURI(NSString *uri, NSString **pathOut, NSString **queryOut) 
 static ALNHTTPParserBackend ALNResolvedParserBackendFromEnvironment(void) {
   const char *raw = getenv("ARLEN_HTTP_PARSER_BACKEND");
   if (raw == NULL || raw[0] == '\0') {
+#if ARLEN_ENABLE_LLHTTP
     return ALNHTTPParserBackendLLHTTP;
+#else
+    return ALNHTTPParserBackendLegacy;
+#endif
   }
 
   NSString *value = [NSString stringWithUTF8String:raw];
@@ -99,9 +105,14 @@ static ALNHTTPParserBackend ALNResolvedParserBackendFromEnvironment(void) {
       [normalized isEqualToString:@"string"]) {
     return ALNHTTPParserBackendLegacy;
   }
+#if ARLEN_ENABLE_LLHTTP
   return ALNHTTPParserBackendLLHTTP;
+#else
+  return ALNHTTPParserBackendLegacy;
+#endif
 }
 
+#if ARLEN_ENABLE_LLHTTP
 @interface ALNLLHTTPParseState : NSObject
 
 @property(nonatomic, strong) NSMutableData *methodData;
@@ -282,6 +293,7 @@ static NSData *ALNNormalizedRawDataForLLHTTP(NSData *data) {
   }
   return normalized;
 }
+#endif
 
 static ALNRequest *ALNRequestFromRawDataLegacy(NSData *data, NSError **error) {
   NSData *separatorData = [@"\r\n\r\n" dataUsingEncoding:NSUTF8StringEncoding];
@@ -363,6 +375,7 @@ static ALNRequest *ALNRequestFromRawDataLegacy(NSData *data, NSError **error) {
                                        body:body];
 }
 
+#if ARLEN_ENABLE_LLHTTP
 static ALNRequest *ALNRequestFromRawDataLLHTTP(NSData *data, NSError **error) {
   if (data == nil || [data length] == 0) {
     if (error != NULL) {
@@ -462,6 +475,7 @@ static ALNRequest *ALNRequestFromRawDataLLHTTP(NSData *data, NSError **error) {
                                     headers:state.headers
                                        body:state.bodyData];
 }
+#endif
 
 @interface ALNRequest ()
 
@@ -525,7 +539,11 @@ static ALNRequest *ALNRequestFromRawDataLLHTTP(NSData *data, NSError **error) {
   if (backend == ALNHTTPParserBackendLegacy) {
     return @"legacy";
   }
+#if ARLEN_ENABLE_LLHTTP
   return @"llhttp";
+#else
+  return @"legacy";
+#endif
 }
 
 + (NSString *)resolvedParserBackendName {
@@ -533,10 +551,22 @@ static ALNRequest *ALNRequestFromRawDataLLHTTP(NSData *data, NSError **error) {
 }
 
 + (NSString *)llhttpVersion {
+#if ARLEN_ENABLE_LLHTTP
   return [NSString stringWithFormat:@"%d.%d.%d",
                                     LLHTTP_VERSION_MAJOR,
                                     LLHTTP_VERSION_MINOR,
                                     LLHTTP_VERSION_PATCH];
+#else
+  return @"disabled";
+#endif
+}
+
++ (BOOL)isLLHTTPAvailable {
+#if ARLEN_ENABLE_LLHTTP
+  return YES;
+#else
+  return NO;
+#endif
 }
 
 + (ALNRequest *)requestFromRawData:(NSData *)data error:(NSError **)error {
@@ -549,7 +579,11 @@ static ALNRequest *ALNRequestFromRawDataLLHTTP(NSData *data, NSError **error) {
   if (backend == ALNHTTPParserBackendLegacy) {
     return ALNRequestFromRawDataLegacy(data ?: [NSData data], error);
   }
+#if ARLEN_ENABLE_LLHTTP
   return ALNRequestFromRawDataLLHTTP(data ?: [NSData data], error);
+#else
+  return ALNRequestFromRawDataLegacy(data ?: [NSData data], error);
+#endif
 }
 
 @end

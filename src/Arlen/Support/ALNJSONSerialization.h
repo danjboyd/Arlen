@@ -3,6 +3,10 @@
 
 #import <Foundation/Foundation.h>
 
+#ifndef ARLEN_ENABLE_YYJSON
+#define ARLEN_ENABLE_YYJSON 1
+#endif
+
 NS_ASSUME_NONNULL_BEGIN
 
 typedef NS_ENUM(NSUInteger, ALNJSONBackend) {
@@ -25,6 +29,7 @@ typedef NS_ENUM(NSUInteger, ALNJSONBackend) {
 + (ALNJSONBackend)backend;
 + (NSString *)backendName;
 + (NSString *)yyjsonVersion;
++ (BOOL)isYYJSONAvailable;
 + (NSString *)foundationFallbackDeprecationDate;
 
 // Testing helpers. Runtime code should rely on env-based backend selection.

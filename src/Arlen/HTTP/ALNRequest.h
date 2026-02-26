@@ -3,6 +3,10 @@
 
 #import <Foundation/Foundation.h>
 
+#ifndef ARLEN_ENABLE_LLHTTP
+#define ARLEN_ENABLE_LLHTTP 1
+#endif
+
 NS_ASSUME_NONNULL_BEGIN
 
 extern NSString *const ALNRequestErrorDomain;
@@ -51,6 +55,7 @@ typedef NS_ENUM(NSUInteger, ALNHTTPParserBackend) {
 + (NSString *)resolvedParserBackendName;
 + (NSString *)parserBackendNameForBackend:(ALNHTTPParserBackend)backend;
 + (NSString *)llhttpVersion;
++ (BOOL)isLLHTTPAvailable;
 
 @end
 
