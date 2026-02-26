@@ -1172,12 +1172,25 @@
   }
 
   @try {
+    NSString *thresholdsPath = [outputRoot stringByAppendingPathComponent:@"thresholds.json"];
+    XCTAssertTrue([self writeFile:thresholdsPath
+                          content:@"{\n"
+                                  "  \"version\": \"phase10e-json-performance-thresholds-v1\",\n"
+                                  "  \"decode_ops_ratio_min\": 0.0,\n"
+                                  "  \"encode_ops_ratio_min\": 0.0,\n"
+                                  "  \"decode_p95_ratio_max\": 999.0,\n"
+                                  "  \"encode_p95_ratio_max\": 999.0,\n"
+                                  "  \"decode_expected_improvement_ratio_min\": 0.0,\n"
+                                  "  \"decode_expected_improvement_fixture_count\": 0\n"
+                                  "}\n"]);
+
     int code = 0;
     NSString *command = [NSString stringWithFormat:
                                       @"cd %@ && ARLEN_PHASE10E_OUTPUT_DIR=%@ "
+                                       "ARLEN_PHASE10E_THRESHOLDS=%@ "
                                        "ARLEN_PHASE10E_ITERATIONS=120 ARLEN_PHASE10E_WARMUP=20 "
                                        "bash ./tools/ci/run_phase10e_json_performance.sh",
-                                      repoRoot, outputRoot];
+                                      repoRoot, outputRoot, thresholdsPath];
     NSString *output = [self runShellCapture:command exitCode:&code];
     XCTAssertEqual(0, code, @"%@", output);
 

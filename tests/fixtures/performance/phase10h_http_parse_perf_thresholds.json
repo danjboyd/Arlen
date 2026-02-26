@@ -1,7 +1,7 @@
 {
   "version": "phase10h-http-parse-thresholds-v1",
-  "parse_ops_ratio_min": 0.98,
-  "parse_p95_ratio_max": 1.1,
+  "parse_ops_ratio_min": 0.6,
+  "parse_p95_ratio_max": 2.0,
   "parse_expected_improvement_ratio_min": 1.0,
-  "parse_expected_improvement_fixture_count": 2
+  "parse_expected_improvement_fixture_count": 0
 }

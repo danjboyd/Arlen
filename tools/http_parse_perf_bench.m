@@ -1,5 +1,7 @@
 #import <Foundation/Foundation.h>
 
+#import <time.h>
+
 #import "ALNJSONSerialization.h"
 #import "ALNRequest.h"
 
@@ -7,6 +9,19 @@ static void PrintUsage(void) {
   fprintf(stderr,
           "Usage: http_parse_perf_bench [--fixtures-dir <path>] [--backend <llhttp|legacy>] "
           "[--iterations <count>] [--warmup <count>]\n");
+}
+
+static double ALNMonotonicMicros(void) {
+  struct timespec ts;
+#ifdef CLOCK_MONOTONIC_RAW
+  const clockid_t clockID = CLOCK_MONOTONIC_RAW;
+#else
+  const clockid_t clockID = CLOCK_MONOTONIC;
+#endif
+  if (clock_gettime(clockID, &ts) != 0) {
+    return 0.0;
+  }
+  return ((double)ts.tv_sec * 1000000.0) + ((double)ts.tv_nsec / 1000.0);
 }
 
 static NSDictionary *TimingSummaryFromSamples(NSArray<NSNumber *> *samplesMicros) {
@@ -97,9 +112,12 @@ static NSDictionary *RunBenchmarkForFixture(NSString *fixturePath,
   for (NSUInteger idx = 0; idx < measureIterations; idx++) {
     @autoreleasepool {
       NSError *error = nil;
-      NSDate *start = [NSDate date];
+      double startMicros = ALNMonotonicMicros();
       ALNRequest *request = [ALNRequest requestFromRawData:fixtureData backend:backend error:&error];
-      NSTimeInterval elapsed = [[NSDate date] timeIntervalSinceDate:start];
+      double elapsedMicros = ALNMonotonicMicros() - startMicros;
+      if (elapsedMicros < 0.0) {
+        elapsedMicros = 0.0;
+      }
       if (request == nil || error != nil) {
         if (errorOut != NULL) {
           *errorOut = error ?: [NSError errorWithDomain:@"Arlen.HTTP.Parse.Perf"
@@ -110,7 +128,7 @@ static NSDictionary *RunBenchmarkForFixture(NSString *fixturePath,
         }
         return nil;
       }
-      [samples addObject:@(elapsed * 1000000.0)];
+      [samples addObject:@(elapsedMicros)];
     }
   }
 

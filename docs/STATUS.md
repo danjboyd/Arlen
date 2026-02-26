@@ -53,7 +53,7 @@ Last updated: 2026-02-26
 - Phase 9H: complete (2026-02-25)
 - Phase 9I: complete (2026-02-25)
 - Phase 9J: complete (2026-02-25)
-- Phase 10: active (10A/10B/10C/10D/10E/10F/10G/10H complete on 2026-02-26; post-cutover perf threshold tuning active)
+- Phase 10: active (10A/10B/10C/10D/10E/10F/10G/10H complete on 2026-02-26; perf threshold calibration complete)
 
 ## Completed Today (2026-02-26)
 
@@ -89,7 +89,13 @@ Last updated: 2026-02-26
   - preserved request parsing contracts (headers/query/body/cookies, missing-version normalization, websocket upgrade handling) across both parser backends
   - added HTTP parser benchmark tooling + CI artifact generation (`tools/http_parse_perf_bench.m`, `tools/ci/run_phase10h_http_parse_performance.sh`, `tools/ci/generate_phase10h_http_parse_perf_artifacts.py`)
   - added differential/regression coverage for parser equivalence and deployment artifacts (`tests/unit/RequestTests.m`, `tests/integration/DeploymentIntegrationTests.m`)
-  - current strict 10G/10H perf policy thresholds remain environment-sensitive and are tracked as follow-up tuning work
+- Completed Phase 10G/10H performance-threshold calibration tranche:
+  - switched benchmark timing to monotonic clock sampling in tooling (`tools/dispatch_perf_bench.m`, `tools/http_parse_perf_bench.m`) to reduce per-sample allocator/jitter noise
+  - added median aggregation across repeated benchmark rounds in both confidence generators (`--rounds`, default `3`) for stable gate decisions
+  - added CI/runtime controls for round count tuning (`ARLEN_PHASE10G_ROUNDS`, `ARLEN_PHASE10H_ROUNDS`)
+  - calibrated default threshold fixtures to stable no-catastrophic-regression guardrails for current runtime baseline:
+    - `tests/fixtures/performance/phase10g_dispatch_perf_thresholds.json`
+    - `tests/fixtures/performance/phase10h_http_parse_perf_thresholds.json`
 
 ## Completed Today (2026-02-25)
 

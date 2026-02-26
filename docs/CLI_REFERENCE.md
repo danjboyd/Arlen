@@ -367,6 +367,8 @@ Lifecycle diagnostics:
 - `make ci-release-certification`: run Phase 9J enterprise release checklist and generate certification artifacts under `build/release_confidence/phase9j`
 - `make ci-json-abstraction`: fail when runtime sources bypass `ALNJSONSerialization`
 - `make ci-json-perf`: run Phase 10E JSON backend microbenchmark gate and generate artifacts under `build/release_confidence/phase10e`
+- `make ci-dispatch-perf`: run Phase 10G dispatch invocation benchmark gate and generate artifacts under `build/release_confidence/phase10g`
+- `make ci-http-parse-perf`: run Phase 10H HTTP parser benchmark gate and generate artifacts under `build/release_confidence/phase10h`
 - `make phase5e-confidence`: generate Phase 5E release confidence artifacts in `build/release_confidence/phase5e`
 - `tools/ci/run_phase5e_quality.sh`: explicit Phase 5E CI gate entrypoint
 - `tools/ci/run_phase5e_sanitizers.sh`: explicit Phase 5E sanitizer CI gate entrypoint
@@ -387,9 +389,23 @@ Lifecycle diagnostics:
 - `tools/ci/run_phase10e_json_performance.sh`: explicit Phase 10E JSON backend performance gate entrypoint
   - `ARLEN_PHASE10E_ITERATIONS` controls benchmark iterations (default `1500`)
   - `ARLEN_PHASE10E_WARMUP` controls warmup iterations (default `200`)
+  - `ARLEN_PHASE10E_ROUNDS` controls median-aggregation benchmark rounds (default `3`)
   - `ARLEN_PHASE10E_OUTPUT_DIR` overrides artifact output directory
   - `ARLEN_PHASE10E_FIXTURES_DIR` overrides fixture corpus directory
   - `ARLEN_PHASE10E_THRESHOLDS` overrides threshold policy fixture path
+- `tools/ci/run_phase10g_dispatch_performance.sh`: explicit Phase 10G dispatch benchmark gate entrypoint
+  - `ARLEN_PHASE10G_ITERATIONS` controls benchmark iterations (default `50000`)
+  - `ARLEN_PHASE10G_WARMUP` controls warmup iterations (default `5000`)
+  - `ARLEN_PHASE10G_ROUNDS` controls median-aggregation benchmark rounds (default `3`)
+  - `ARLEN_PHASE10G_OUTPUT_DIR` overrides artifact output directory
+  - `ARLEN_PHASE10G_THRESHOLDS` overrides threshold policy fixture path
+- `tools/ci/run_phase10h_http_parse_performance.sh`: explicit Phase 10H HTTP parser benchmark gate entrypoint
+  - `ARLEN_PHASE10H_ITERATIONS` controls benchmark iterations (default `1500`)
+  - `ARLEN_PHASE10H_WARMUP` controls warmup iterations (default `200`)
+  - `ARLEN_PHASE10H_ROUNDS` controls median-aggregation benchmark rounds (default `5`)
+  - `ARLEN_PHASE10H_OUTPUT_DIR` overrides artifact output directory
+  - `ARLEN_PHASE10H_FIXTURES_DIR` overrides fixture corpus directory
+  - `ARLEN_PHASE10H_THRESHOLDS` overrides threshold policy fixture path
 - `make test-data-layer`: build and run standalone `ArlenData` example validation
 - `make parity-phaseb`: run Arlen-vs-FastAPI Phase B parity gate for frozen benchmark scenarios (creates report at `build/perf/parity_fastapi_latest.json`)
 - `make perf-phasec`: run Phase C benchmark protocol (warmup + concurrency ladder) and write `build/perf/phasec/latest_protocol_report.json`

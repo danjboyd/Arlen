@@ -8,6 +8,7 @@ import json
 import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
+from statistics import median
 from typing import Any, Dict, List, Tuple
 
 
@@ -76,6 +77,106 @@ def run_benchmark(
     if not isinstance(fixtures, list) or len(fixtures) == 0:
         raise RuntimeError(f"http parse benchmark output missing fixtures for backend={backend}")
     return payload
+
+
+def run_benchmark_rounds(
+    benchmark_binary: Path,
+    fixtures_dir: Path,
+    iterations: int,
+    warmup: int,
+    backend: str,
+    rounds: int,
+) -> List[Dict[str, Any]]:
+    return [
+        run_benchmark(benchmark_binary, fixtures_dir, iterations, warmup, backend)
+        for _ in range(rounds)
+    ]
+
+
+def median_number(values: List[float]) -> float:
+    if not values:
+        return 0.0
+    return float(median(values))
+
+
+def aggregate_backend_rounds(backend: str, rounds_payload: List[Dict[str, Any]]) -> Dict[str, Any]:
+    fixtures_by_name: Dict[str, List[Dict[str, Any]]] = {}
+    llhttp_version = "unknown"
+    iteration_values: List[float] = []
+    warmup_values: List[float] = []
+    for payload in rounds_payload:
+        raw_version = payload.get("llhttp_version")
+        if isinstance(raw_version, str) and raw_version:
+            llhttp_version = raw_version
+        raw_iterations = payload.get("iterations")
+        if isinstance(raw_iterations, (int, float)):
+            iteration_values.append(float(raw_iterations))
+        raw_warmup = payload.get("warmup")
+        if isinstance(raw_warmup, (int, float)):
+            warmup_values.append(float(raw_warmup))
+        fixtures = payload.get("fixtures")
+        if not isinstance(fixtures, list):
+            continue
+        for fixture in fixtures:
+            if not isinstance(fixture, dict):
+                continue
+            name = fixture.get("fixture")
+            if not isinstance(name, str) or not name:
+                continue
+            fixtures_by_name.setdefault(name, []).append(fixture)
+
+    aggregated_fixtures: List[Dict[str, Any]] = []
+    for fixture_name in sorted(fixtures_by_name.keys()):
+        rows = fixtures_by_name[fixture_name]
+        bytes_values = [
+            float(row.get("bytes"))
+            for row in rows
+            if isinstance(row.get("bytes"), (int, float))
+        ]
+        parse_values: Dict[str, List[float]] = {
+            "iterations": [],
+            "avg_us": [],
+            "p95_us": [],
+            "ops_per_sec": [],
+            "total_seconds": [],
+        }
+        for row in rows:
+            parse = row.get("parse")
+            if not isinstance(parse, dict):
+                continue
+            for key in parse_values.keys():
+                value = parse.get(key)
+                if isinstance(value, (int, float)):
+                    parse_values[key].append(float(value))
+
+        aggregated_parse: Dict[str, Any] = {}
+        for key, values in parse_values.items():
+            if key == "iterations":
+                aggregated_parse[key] = int(round(median_number(values)))
+            else:
+                aggregated_parse[key] = median_number(values)
+
+        aggregated_fixtures.append(
+            {
+                "fixture": fixture_name,
+                "bytes": int(round(median_number(bytes_values))),
+                "parse": aggregated_parse,
+            }
+        )
+
+    return {
+        "version": "phase10h-http-parse-benchmark-v1",
+        "backend": backend,
+        "llhttp_version": llhttp_version,
+        "iterations": int(round(median_number(iteration_values))),
+        "warmup": int(round(median_number(warmup_values))),
+        "fixture_count": len(aggregated_fixtures),
+        "fixtures": aggregated_fixtures,
+        "aggregation": {
+            "method": "median",
+            "round_count": len(rounds_payload),
+        },
+    }
 
 
 def fixture_index(payload: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
@@ -204,6 +305,7 @@ def render_markdown(
     commit_sha: str,
     iterations: int,
     warmup: int,
+    rounds: int,
     status: str,
     policy: Dict[str, Any],
     violations: List[str],
@@ -218,6 +320,7 @@ def render_markdown(
     lines.append(f"Status: `{status}`")
     lines.append(f"Iterations: `{iterations}`")
     lines.append(f"Warmup iterations: `{warmup}`")
+    lines.append(f"Benchmark rounds: `{rounds}` (median aggregation)")
     lines.append("")
     lines.append("## Artifacts")
     lines.append("")
@@ -274,6 +377,7 @@ def main() -> int:
     parser.add_argument("--output-dir", default="build/release_confidence/phase10h")
     parser.add_argument("--iterations", type=int, default=1500)
     parser.add_argument("--warmup", type=int, default=200)
+    parser.add_argument("--rounds", type=int, default=5)
     parser.add_argument(
         "--allow-fail",
         action="store_true",
@@ -293,10 +397,28 @@ def main() -> int:
         raise SystemExit(f"fixtures dir not found: {fixtures_dir}")
     if not thresholds_path.exists():
         raise SystemExit(f"thresholds file not found: {thresholds_path}")
+    if args.rounds < 1:
+        raise SystemExit("--rounds must be >= 1")
 
     thresholds = load_json(thresholds_path)
-    legacy = run_benchmark(benchmark_binary, fixtures_dir, args.iterations, args.warmup, "legacy")
-    llhttp = run_benchmark(benchmark_binary, fixtures_dir, args.iterations, args.warmup, "llhttp")
+    legacy_rounds = run_benchmark_rounds(
+        benchmark_binary,
+        fixtures_dir,
+        args.iterations,
+        args.warmup,
+        "legacy",
+        args.rounds,
+    )
+    llhttp_rounds = run_benchmark_rounds(
+        benchmark_binary,
+        fixtures_dir,
+        args.iterations,
+        args.warmup,
+        "llhttp",
+        args.rounds,
+    )
+    legacy = aggregate_backend_rounds("legacy", legacy_rounds)
+    llhttp = aggregate_backend_rounds("llhttp", llhttp_rounds)
 
     deltas = summarize_deltas(legacy, llhttp)
     status, violations, policy_snapshot = evaluate_thresholds(thresholds, deltas)
@@ -319,6 +441,7 @@ def main() -> int:
         "generated_at": generated_at,
         "commit": commit_sha,
         "status": status,
+        "rounds": args.rounds,
         "thresholds_version": thresholds.get("version", ""),
         "policy": policy_snapshot,
         "violations": violations,
@@ -331,6 +454,7 @@ def main() -> int:
         commit_sha,
         args.iterations,
         args.warmup,
+        args.rounds,
         status,
         policy_snapshot,
         violations,

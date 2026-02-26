@@ -8,6 +8,7 @@ output_dir="${ARLEN_PHASE10G_OUTPUT_DIR:-$repo_root/build/release_confidence/pha
 thresholds_path="${ARLEN_PHASE10G_THRESHOLDS:-$repo_root/tests/fixtures/performance/phase10g_dispatch_perf_thresholds.json}"
 iterations="${ARLEN_PHASE10G_ITERATIONS:-50000}"
 warmup="${ARLEN_PHASE10G_WARMUP:-5000}"
+rounds="${ARLEN_PHASE10G_ROUNDS:-3}"
 allow_fail="${ARLEN_PHASE10G_ALLOW_FAIL:-0}"
 
 set +u
@@ -22,6 +23,7 @@ generator_args=(
   "--output-dir" "$output_dir"
   "--iterations" "$iterations"
   "--warmup" "$warmup"
+  "--rounds" "$rounds"
 )
 if [[ "$allow_fail" == "1" ]]; then
   generator_args+=("--allow-fail")

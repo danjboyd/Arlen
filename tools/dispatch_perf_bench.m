@@ -1,6 +1,7 @@
 #import <Foundation/Foundation.h>
 
 #import <stdlib.h>
+#import <time.h>
 
 #import "ALNApplication.h"
 #import "ALNContext.h"
@@ -30,6 +31,19 @@ static void PrintUsage(void) {
   fprintf(stderr,
           "Usage: dispatch_perf_bench [--mode <cached_imp|selector>] [--iterations <count>] "
           "[--warmup <count>]\n");
+}
+
+static double ALNMonotonicMicros(void) {
+  struct timespec ts;
+#ifdef CLOCK_MONOTONIC_RAW
+  const clockid_t clockID = CLOCK_MONOTONIC_RAW;
+#else
+  const clockid_t clockID = CLOCK_MONOTONIC;
+#endif
+  if (clock_gettime(clockID, &ts) != 0) {
+    return 0.0;
+  }
+  return ((double)ts.tv_sec * 1000000.0) + ((double)ts.tv_nsec / 1000.0);
 }
 
 static NSDictionary *TimingSummaryFromSamples(NSArray<NSNumber *> *samplesMicros) {
@@ -143,9 +157,12 @@ static NSDictionary *RunDispatchBenchmark(NSString *mode,
                                                      queryString:@""
                                                          headers:@{}
                                                             body:[NSData data]];
-        NSDate *start = [NSDate date];
+        double startMicros = ALNMonotonicMicros();
         ALNResponse *response = [app dispatchRequest:request];
-        NSTimeInterval elapsed = [[NSDate date] timeIntervalSinceDate:start];
+        double elapsedMicros = ALNMonotonicMicros() - startMicros;
+        if (elapsedMicros < 0.0) {
+          elapsedMicros = 0.0;
+        }
         if (response.statusCode != 200) {
           if (errorOut != NULL) {
             *errorOut = [NSError errorWithDomain:@"Arlen.Dispatch.Bench"
@@ -154,7 +171,7 @@ static NSDictionary *RunDispatchBenchmark(NSString *mode,
           }
           return nil;
         }
-        [samples addObject:@(elapsed * 1000000.0)];
+        [samples addObject:@(elapsedMicros)];
       }
     }
   } @finally {

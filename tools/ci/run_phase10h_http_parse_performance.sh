@@ -9,6 +9,7 @@ fixtures_dir="${ARLEN_PHASE10H_FIXTURES_DIR:-$repo_root/tests/fixtures/performan
 thresholds_path="${ARLEN_PHASE10H_THRESHOLDS:-$repo_root/tests/fixtures/performance/phase10h_http_parse_perf_thresholds.json}"
 iterations="${ARLEN_PHASE10H_ITERATIONS:-1500}"
 warmup="${ARLEN_PHASE10H_WARMUP:-200}"
+rounds="${ARLEN_PHASE10H_ROUNDS:-5}"
 allow_fail="${ARLEN_PHASE10H_ALLOW_FAIL:-0}"
 
 set +u
@@ -24,6 +25,7 @@ generator_args=(
   "--output-dir" "$output_dir"
   "--iterations" "$iterations"
   "--warmup" "$warmup"
+  "--rounds" "$rounds"
 )
 if [[ "$allow_fail" == "1" ]]; then
   generator_args+=("--allow-fail")

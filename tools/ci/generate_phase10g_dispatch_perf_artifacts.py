@@ -8,6 +8,7 @@ import json
 import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
+from statistics import median
 from typing import Any, Dict, List
 
 
@@ -68,6 +69,51 @@ def run_benchmark(benchmark_binary: Path, mode: str, iterations: int, warmup: in
     if not isinstance(timing, dict):
         raise RuntimeError(f"dispatch benchmark missing timing payload for mode={mode}")
     return payload
+
+
+def run_benchmark_rounds(
+    benchmark_binary: Path,
+    mode: str,
+    iterations: int,
+    warmup: int,
+    rounds: int,
+) -> List[Dict[str, Any]]:
+    return [run_benchmark(benchmark_binary, mode, iterations, warmup) for _ in range(rounds)]
+
+
+def median_number(values: List[float]) -> float:
+    if not values:
+        return 0.0
+    return float(median(values))
+
+
+def aggregate_rounds(mode: str, rounds_payload: List[Dict[str, Any]]) -> Dict[str, Any]:
+    timing_keys = ("iterations", "avg_us", "p95_us", "ops_per_sec", "total_seconds")
+    aggregate_timing: Dict[str, Any] = {}
+    for key in timing_keys:
+        raw_values: List[float] = []
+        for payload in rounds_payload:
+            timing = payload.get("timing")
+            if not isinstance(timing, dict):
+                continue
+            value = timing.get(key)
+            if isinstance(value, (int, float)):
+                raw_values.append(float(value))
+        if key == "iterations":
+            aggregate_timing[key] = int(round(median_number(raw_values)))
+        else:
+            aggregate_timing[key] = median_number(raw_values)
+
+    return {
+        "version": "phase10g-dispatch-benchmark-v1",
+        "mode": mode,
+        "timing": aggregate_timing,
+        "aggregation": {
+            "method": "median",
+            "round_count": len(rounds_payload),
+        },
+        "rounds": rounds_payload,
+    }
 
 
 def metric(timing_payload: Dict[str, Any], name: str) -> float:
@@ -131,6 +177,7 @@ def render_markdown(
     commit_sha: str,
     iterations: int,
     warmup: int,
+    rounds: int,
     threshold_eval: Dict[str, Any],
     output_dir: Path,
 ) -> str:
@@ -147,6 +194,7 @@ def render_markdown(
     lines.append(f"Status: `{status}`")
     lines.append(f"Iterations: `{iterations}`")
     lines.append(f"Warmup iterations: `{warmup}`")
+    lines.append(f"Benchmark rounds: `{rounds}` (median aggregation)")
     lines.append("")
     lines.append("## Artifacts")
     lines.append("")
@@ -191,6 +239,7 @@ def main() -> int:
     parser.add_argument("--output-dir", default="build/release_confidence/phase10g")
     parser.add_argument("--iterations", type=int, default=50000)
     parser.add_argument("--warmup", type=int, default=5000)
+    parser.add_argument("--rounds", type=int, default=3)
     parser.add_argument(
         "--allow-fail",
         action="store_true",
@@ -207,10 +256,26 @@ def main() -> int:
         raise SystemExit(f"benchmark binary not found: {benchmark_binary}")
     if not thresholds_path.exists():
         raise SystemExit(f"thresholds file not found: {thresholds_path}")
+    if args.rounds < 1:
+        raise SystemExit("--rounds must be >= 1")
 
     thresholds = load_json(thresholds_path)
-    selector = run_benchmark(benchmark_binary, "selector", args.iterations, args.warmup)
-    cached = run_benchmark(benchmark_binary, "cached_imp", args.iterations, args.warmup)
+    selector_rounds = run_benchmark_rounds(
+        benchmark_binary,
+        "selector",
+        args.iterations,
+        args.warmup,
+        args.rounds,
+    )
+    cached_rounds = run_benchmark_rounds(
+        benchmark_binary,
+        "cached_imp",
+        args.iterations,
+        args.warmup,
+        args.rounds,
+    )
+    selector = aggregate_rounds("selector", selector_rounds)
+    cached = aggregate_rounds("cached_imp", cached_rounds)
     threshold_eval = evaluate_thresholds(thresholds, selector, cached)
 
     generated_at = datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
@@ -231,6 +296,7 @@ def main() -> int:
         "generated_at": generated_at,
         "commit": commit_sha,
         "status": threshold_eval["status"],
+        "rounds": args.rounds,
         "thresholds_version": thresholds.get("version", ""),
         "policy": threshold_eval["policy"],
         "violations": threshold_eval["violations"],
@@ -243,6 +309,7 @@ def main() -> int:
         commit_sha,
         args.iterations,
         args.warmup,
+        args.rounds,
         threshold_eval,
         output_dir,
     )

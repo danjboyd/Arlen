@@ -237,6 +237,8 @@ make check
 make ci-quality
 make ci-json-abstraction
 make ci-json-perf
+make ci-dispatch-perf
+make ci-http-parse-perf
 make ci-fault-injection
 make ci-release-certification
 make phase5e-confidence
@@ -250,6 +252,8 @@ make phase5e-confidence
 `make ci-quality` runs the Phase 5E quality gate (including soak/fault tests, runtime concurrency checks, JSON abstraction/performance gates, Phase 9I fault injection, and confidence artifact generation).
 `make ci-json-abstraction` blocks direct runtime `NSJSONSerialization` usage outside `ALNJSONSerialization`.
 `make ci-json-perf` runs the Phase 10E JSON backend microbenchmark gate and writes artifacts under `build/release_confidence/phase10e`.
+`make ci-dispatch-perf` runs the Phase 10G dispatch benchmark gate and writes artifacts under `build/release_confidence/phase10g`.
+`make ci-http-parse-perf` runs the Phase 10H HTTP parser benchmark gate and writes artifacts under `build/release_confidence/phase10h`.
 `make ci-fault-injection` runs the Phase 9I runtime seam fault matrix and writes artifacts under `build/release_confidence/phase9i`.
 `make ci-release-certification` runs the Phase 9J release checklist and writes certification artifacts under `build/release_confidence/phase9j`.
 `make test-unit` and `make test-integration` run with a repo-local GNUstep test home (`.gnustep-home`) to keep defaults/lock files isolated.
@@ -667,7 +671,31 @@ make ci-json-perf
 Override benchmark controls when needed:
 
 ```bash
-ARLEN_PHASE10E_ITERATIONS=1200 ARLEN_PHASE10E_WARMUP=150 make ci-json-perf
+ARLEN_PHASE10E_ITERATIONS=1200 ARLEN_PHASE10E_WARMUP=150 ARLEN_PHASE10E_ROUNDS=5 make ci-json-perf
+```
+
+Dispatch invocation performance gate (standalone):
+
+```bash
+make ci-dispatch-perf
+```
+
+Tune dispatch benchmark controls:
+
+```bash
+ARLEN_PHASE10G_ITERATIONS=60000 ARLEN_PHASE10G_WARMUP=6000 ARLEN_PHASE10G_ROUNDS=5 make ci-dispatch-perf
+```
+
+HTTP parser performance gate (standalone):
+
+```bash
+make ci-http-parse-perf
+```
+
+Tune HTTP parser benchmark controls:
+
+```bash
+ARLEN_PHASE10H_ITERATIONS=2000 ARLEN_PHASE10H_WARMUP=250 ARLEN_PHASE10H_ROUNDS=5 make ci-http-parse-perf
 ```
 
 ## 18. Deploy Smoke Validation

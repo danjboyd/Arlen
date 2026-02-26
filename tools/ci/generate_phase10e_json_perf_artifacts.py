@@ -9,6 +9,7 @@ import os
 import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
+from statistics import median
 from typing import Any, Dict, List, Tuple
 
 
@@ -83,6 +84,119 @@ def run_benchmark(
     if not isinstance(fixtures, list) or len(fixtures) == 0:
         raise RuntimeError(f"benchmark output missing fixtures for backend={backend}")
     return payload
+
+
+def run_benchmark_rounds(
+    benchmark_binary: Path,
+    fixtures_dir: Path,
+    iterations: int,
+    warmup: int,
+    backend: str,
+    rounds: int,
+) -> List[Dict[str, Any]]:
+    return [
+        run_benchmark(benchmark_binary, fixtures_dir, iterations, warmup, backend)
+        for _ in range(rounds)
+    ]
+
+
+def median_number(values: List[float]) -> float:
+    if not values:
+        return 0.0
+    return float(median(values))
+
+
+def aggregate_backend_rounds(backend: str, rounds_payload: List[Dict[str, Any]]) -> Dict[str, Any]:
+    fixtures_by_name: Dict[str, List[Dict[str, Any]]] = {}
+    yyjson_version = "unknown"
+    iteration_values: List[float] = []
+    warmup_values: List[float] = []
+    for payload in rounds_payload:
+        raw_version = payload.get("yyjson_version")
+        if isinstance(raw_version, str) and raw_version:
+            yyjson_version = raw_version
+        raw_iterations = payload.get("iterations")
+        if isinstance(raw_iterations, (int, float)):
+            iteration_values.append(float(raw_iterations))
+        raw_warmup = payload.get("warmup")
+        if isinstance(raw_warmup, (int, float)):
+            warmup_values.append(float(raw_warmup))
+        fixtures = payload.get("fixtures")
+        if not isinstance(fixtures, list):
+            continue
+        for fixture in fixtures:
+            if not isinstance(fixture, dict):
+                continue
+            name = fixture.get("fixture")
+            if not isinstance(name, str) or not name:
+                continue
+            fixtures_by_name.setdefault(name, []).append(fixture)
+
+    aggregated_fixtures: List[Dict[str, Any]] = []
+    for fixture_name in sorted(fixtures_by_name.keys()):
+        rows = fixtures_by_name[fixture_name]
+        bytes_values = [
+            float(row.get("bytes"))
+            for row in rows
+            if isinstance(row.get("bytes"), (int, float))
+        ]
+        mode_values: Dict[str, Dict[str, List[float]]] = {
+            "decode": {
+                "iterations": [],
+                "avg_us": [],
+                "p95_us": [],
+                "ops_per_sec": [],
+                "total_seconds": [],
+            },
+            "encode": {
+                "iterations": [],
+                "avg_us": [],
+                "p95_us": [],
+                "ops_per_sec": [],
+                "total_seconds": [],
+            },
+        }
+        for row in rows:
+            for mode in ("decode", "encode"):
+                mode_payload = row.get(mode)
+                if not isinstance(mode_payload, dict):
+                    continue
+                for key in mode_values[mode].keys():
+                    value = mode_payload.get(key)
+                    if isinstance(value, (int, float)):
+                        mode_values[mode][key].append(float(value))
+
+        aggregated_decode: Dict[str, Any] = {}
+        aggregated_encode: Dict[str, Any] = {}
+        for mode, target in (("decode", aggregated_decode), ("encode", aggregated_encode)):
+            for key, values in mode_values[mode].items():
+                if key == "iterations":
+                    target[key] = int(round(median_number(values)))
+                else:
+                    target[key] = median_number(values)
+
+        aggregated_fixtures.append(
+            {
+                "fixture": fixture_name,
+                "bytes": int(round(median_number(bytes_values))),
+                "decode": aggregated_decode,
+                "encode": aggregated_encode,
+            }
+        )
+
+    return {
+        "version": "phase10e-json-benchmark-v1",
+        "backend": backend,
+        "yyjson_version": yyjson_version,
+        "iterations": int(round(median_number(iteration_values))),
+        "warmup": int(round(median_number(warmup_values))),
+        "fixture_count": len(aggregated_fixtures),
+        "fixtures": aggregated_fixtures,
+        "aggregation": {
+            "method": "median",
+            "round_count": len(rounds_payload),
+        },
+    }
 
 
 def fixture_index(payload: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
@@ -243,6 +357,7 @@ def render_markdown(
     commit_sha: str,
     iterations: int,
     warmup: int,
+    rounds: int,
     status: str,
     policy: Dict[str, Any],
     violations: List[str],
@@ -257,6 +372,7 @@ def render_markdown(
     lines.append(f"Status: `{status}`")
     lines.append(f"Iterations: `{iterations}`")
     lines.append(f"Warmup iterations: `{warmup}`")
+    lines.append(f"Benchmark rounds: `{rounds}` (median aggregation)")
     lines.append("")
     lines.append("## Artifacts")
     lines.append("")
@@ -317,6 +433,7 @@ def main() -> int:
     parser.add_argument("--output-dir", default="build/release_confidence/phase10e")
     parser.add_argument("--iterations", type=int, default=1500)
     parser.add_argument("--warmup", type=int, default=200)
+    parser.add_argument("--rounds", type=int, default=3)
     parser.add_argument(
         "--allow-fail",
         action="store_true",
@@ -336,22 +453,28 @@ def main() -> int:
         raise SystemExit(f"fixtures dir not found: {fixtures_dir}")
     if not thresholds_path.exists():
         raise SystemExit(f"thresholds file not found: {thresholds_path}")
+    if args.rounds < 1:
+        raise SystemExit("--rounds must be >= 1")
 
     thresholds = load_json(thresholds_path)
-    foundation = run_benchmark(
+    foundation_rounds = run_benchmark_rounds(
         benchmark_binary,
         fixtures_dir,
         args.iterations,
         args.warmup,
         "foundation",
+        args.rounds,
     )
-    yyjson = run_benchmark(
+    yyjson_rounds = run_benchmark_rounds(
         benchmark_binary,
         fixtures_dir,
         args.iterations,
         args.warmup,
         "yyjson",
+        args.rounds,
     )
+    foundation = aggregate_backend_rounds("foundation", foundation_rounds)
+    yyjson = aggregate_backend_rounds("yyjson", yyjson_rounds)
 
     deltas = summarize_deltas(foundation, yyjson)
     status, violations, policy_snapshot = evaluate_thresholds(thresholds, deltas)
@@ -375,6 +498,7 @@ def main() -> int:
         "commit": commit_sha,
         "status": status,
         "thresholds_version": thresholds.get("version", ""),
+        "rounds": args.rounds,
         "policy": policy_snapshot,
         "violations": violations,
         "deltas": deltas,
@@ -386,6 +510,7 @@ def main() -> int:
         commit_sha,
         args.iterations,
         args.warmup,
+        args.rounds,
         status,
         policy_snapshot,
         violations,
@@ -401,6 +526,7 @@ def main() -> int:
         "status": status,
         "iterations": args.iterations,
         "warmup": args.warmup,
+        "rounds": args.rounds,
         "thresholds": str(thresholds_path),
         "artifacts": [
             foundation_path.name,
