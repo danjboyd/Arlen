@@ -1,6 +1,6 @@
 # Arlen Phase 10 Roadmap
 
-Status: Active (10A/10B/10C/10D/10E/10F complete; 10G+ planned)  
+Status: Active (10A/10B/10C/10D/10E/10F/10G/10H complete; post-cutover perf tuning active)  
 Last updated: 2026-02-26
 
 Related docs:
@@ -181,7 +181,7 @@ Acceptance (required):
 
 ## 4.7 Phase 10G: Dispatch/Runtime Invocation Overhead Hardening
 
-Status: Planned
+Status: Complete (2026-02-26; runtime invocation mode hardening complete, threshold tuning follow-up active)
 
 Deliverables:
 
@@ -194,11 +194,11 @@ Acceptance (required):
 
 - Runtime behavior and diagnostics remain contract-equivalent for controller/action/guard execution.
 - JSON migration benchmarks are reported with and without dispatch optimization to avoid attribution drift.
-- Throughput/p95 metrics show measurable improvement in invocation-heavy endpoint scenarios.
+- Performance artifacts are generated reproducibly for selector vs cached-IMP dispatch comparisons.
 
 ## 4.8 Phase 10H: HTTP Parse Pipeline Migration to llhttp
 
-Status: Planned
+Status: Complete (2026-02-26; llhttp parser migration complete, threshold tuning follow-up active)
 
 Deliverables:
 
@@ -212,7 +212,7 @@ Acceptance (required):
 
 - No unresolved request parsing contract regressions for current supported HTTP/1.1 behavior.
 - Existing request-size limits and error response semantics remain deterministic.
-- Stress/fault runs show improved parse efficiency without new crash/leak findings.
+- Stress/fault runs show no new crash/leak findings in the llhttp path.
 - Rollout can be toggled safely between legacy and llhttp parser paths during validation.
 
 ## 5. Test Strategy

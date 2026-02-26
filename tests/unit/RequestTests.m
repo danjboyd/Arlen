@@ -1,6 +1,8 @@
 #import <Foundation/Foundation.h>
 #import <XCTest/XCTest.h>
 
+#import <stdlib.h>
+
 #import "ALNRequest.h"
 
 @interface RequestTests : XCTestCase
@@ -8,25 +10,36 @@
 
 @implementation RequestTests
 
-- (void)testParsesRequestLineAndQueryParams {
+- (NSArray<NSNumber *> *)allBackends {
+  return @[ @(ALNHTTPParserBackendLLHTTP), @(ALNHTTPParserBackendLegacy) ];
+}
+
+- (NSString *)backendName:(ALNHTTPParserBackend)backend {
+  return [ALNRequest parserBackendNameForBackend:backend] ?: @"unknown";
+}
+
+- (void)testParsesRequestLineAndQueryParamsAcrossBackends {
   NSString *raw = @"GET /items/list?name=Peggy+Hill&city=Arlen HTTP/1.1\r\n"
                   "Host: localhost\r\n"
                   "X-Test: 1\r\n\r\n";
   NSData *data = [raw dataUsingEncoding:NSUTF8StringEncoding];
 
-  NSError *error = nil;
-  ALNRequest *request = [ALNRequest requestFromRawData:data error:&error];
+  for (NSNumber *backendValue in [self allBackends]) {
+    ALNHTTPParserBackend backend = (ALNHTTPParserBackend)[backendValue unsignedIntegerValue];
+    NSError *error = nil;
+    ALNRequest *request = [ALNRequest requestFromRawData:data backend:backend error:&error];
 
-  XCTAssertNil(error);
-  XCTAssertEqualObjects(@"GET", request.method);
-  XCTAssertEqualObjects(@"/items/list", request.path);
-  XCTAssertEqualObjects(@"HTTP/1.1", request.httpVersion);
-  XCTAssertEqualObjects(@"Peggy Hill", request.queryParams[@"name"]);
-  XCTAssertEqualObjects(@"Arlen", request.queryParams[@"city"]);
-  XCTAssertEqualObjects(@"1", request.headers[@"x-test"]);
+    XCTAssertNil(error, @"backend=%@", [self backendName:backend]);
+    XCTAssertEqualObjects(@"GET", request.method, @"backend=%@", [self backendName:backend]);
+    XCTAssertEqualObjects(@"/items/list", request.path, @"backend=%@", [self backendName:backend]);
+    XCTAssertEqualObjects(@"HTTP/1.1", request.httpVersion, @"backend=%@", [self backendName:backend]);
+    XCTAssertEqualObjects(@"Peggy Hill", request.queryParams[@"name"], @"backend=%@", [self backendName:backend]);
+    XCTAssertEqualObjects(@"Arlen", request.queryParams[@"city"], @"backend=%@", [self backendName:backend]);
+    XCTAssertEqualObjects(@"1", request.headers[@"x-test"], @"backend=%@", [self backendName:backend]);
+  }
 }
 
-- (void)testPreservesBinaryBodyBytes {
+- (void)testPreservesBinaryBodyBytesAcrossBackends {
   NSString *header = @"POST /upload HTTP/1.1\r\n"
                      "Host: localhost\r\n"
                      "Content-Length: 4\r\n\r\n";
@@ -34,51 +47,124 @@
   unsigned char bytes[4] = {0x00, 0xFF, 0x10, 0x7F};
   [raw appendBytes:bytes length:4];
 
-  NSError *error = nil;
-  ALNRequest *request = [ALNRequest requestFromRawData:raw error:&error];
+  for (NSNumber *backendValue in [self allBackends]) {
+    ALNHTTPParserBackend backend = (ALNHTTPParserBackend)[backendValue unsignedIntegerValue];
+    NSError *error = nil;
+    ALNRequest *request = [ALNRequest requestFromRawData:raw backend:backend error:&error];
 
-  XCTAssertNil(error);
-  XCTAssertEqual((NSUInteger)4, [request.body length]);
-  const unsigned char *bodyBytes = [request.body bytes];
-  XCTAssertEqual((unsigned char)0x00, bodyBytes[0]);
-  XCTAssertEqual((unsigned char)0xFF, bodyBytes[1]);
-  XCTAssertEqual((unsigned char)0x10, bodyBytes[2]);
-  XCTAssertEqual((unsigned char)0x7F, bodyBytes[3]);
+    XCTAssertNil(error, @"backend=%@", [self backendName:backend]);
+    XCTAssertEqual((NSUInteger)4, [request.body length], @"backend=%@", [self backendName:backend]);
+    const unsigned char *bodyBytes = [request.body bytes];
+    XCTAssertEqual((unsigned char)0x00, bodyBytes[0], @"backend=%@", [self backendName:backend]);
+    XCTAssertEqual((unsigned char)0xFF, bodyBytes[1], @"backend=%@", [self backendName:backend]);
+    XCTAssertEqual((unsigned char)0x10, bodyBytes[2], @"backend=%@", [self backendName:backend]);
+    XCTAssertEqual((unsigned char)0x7F, bodyBytes[3], @"backend=%@", [self backendName:backend]);
+  }
 }
 
-- (void)testInvalidHeaderEncodingReturnsError {
+- (void)testInvalidHeaderEncodingReturnsErrorAcrossBackends {
   NSMutableData *raw = [NSMutableData data];
   unsigned char invalidHeader[3] = {0xC3, 0x28, 0x0A};
   [raw appendBytes:invalidHeader length:3];
 
-  NSError *error = nil;
-  ALNRequest *request = [ALNRequest requestFromRawData:raw error:&error];
+  for (NSNumber *backendValue in [self allBackends]) {
+    ALNHTTPParserBackend backend = (ALNHTTPParserBackend)[backendValue unsignedIntegerValue];
+    NSError *error = nil;
+    ALNRequest *request = [ALNRequest requestFromRawData:raw backend:backend error:&error];
 
-  XCTAssertNil(request);
-  XCTAssertNotNil(error);
+    XCTAssertNil(request, @"backend=%@", [self backendName:backend]);
+    XCTAssertNotNil(error, @"backend=%@", [self backendName:backend]);
+    XCTAssertEqualObjects(ALNRequestErrorDomain, error.domain, @"backend=%@", [self backendName:backend]);
+  }
 }
 
-- (void)testParsesCookiesFromHeader {
+- (void)testParsesCookiesFromHeaderAcrossBackends {
   NSString *raw = @"GET / HTTP/1.1\r\n"
                   "Host: localhost\r\n"
                   "Cookie: a=1; b=two\r\n\r\n";
   NSData *data = [raw dataUsingEncoding:NSUTF8StringEncoding];
-  NSError *error = nil;
-  ALNRequest *request = [ALNRequest requestFromRawData:data error:&error];
-  XCTAssertNil(error);
-  XCTAssertEqualObjects(@"1", request.cookies[@"a"]);
-  XCTAssertEqualObjects(@"two", request.cookies[@"b"]);
+
+  for (NSNumber *backendValue in [self allBackends]) {
+    ALNHTTPParserBackend backend = (ALNHTTPParserBackend)[backendValue unsignedIntegerValue];
+    NSError *error = nil;
+    ALNRequest *request = [ALNRequest requestFromRawData:data backend:backend error:&error];
+
+    XCTAssertNil(error, @"backend=%@", [self backendName:backend]);
+    XCTAssertEqualObjects(@"1", request.cookies[@"a"], @"backend=%@", [self backendName:backend]);
+    XCTAssertEqualObjects(@"two", request.cookies[@"b"], @"backend=%@", [self backendName:backend]);
+  }
 }
 
-- (void)testDefaultsHTTPVersionWhenMissingFromRequestLine {
+- (void)testDefaultsHTTPVersionWhenMissingFromRequestLineAcrossBackends {
   NSString *raw = @"GET /healthz\r\n"
                   "Host: localhost\r\n\r\n";
   NSData *data = [raw dataUsingEncoding:NSUTF8StringEncoding];
 
-  NSError *error = nil;
-  ALNRequest *request = [ALNRequest requestFromRawData:data error:&error];
-  XCTAssertNil(error);
-  XCTAssertEqualObjects(@"HTTP/1.1", request.httpVersion);
+  for (NSNumber *backendValue in [self allBackends]) {
+    ALNHTTPParserBackend backend = (ALNHTTPParserBackend)[backendValue unsignedIntegerValue];
+    NSError *error = nil;
+    ALNRequest *request = [ALNRequest requestFromRawData:data backend:backend error:&error];
+
+    XCTAssertNil(error, @"backend=%@", [self backendName:backend]);
+    XCTAssertEqualObjects(@"HTTP/1.1", request.httpVersion, @"backend=%@", [self backendName:backend]);
+  }
+}
+
+- (void)testResolvedParserBackendDefaultsToLLHTTPAndAllowsLegacyOverride {
+  unsetenv("ARLEN_HTTP_PARSER_BACKEND");
+  XCTAssertEqual(ALNHTTPParserBackendLLHTTP, [ALNRequest resolvedParserBackend]);
+  XCTAssertEqualObjects(@"llhttp", [ALNRequest resolvedParserBackendName]);
+
+  setenv("ARLEN_HTTP_PARSER_BACKEND", "legacy", 1);
+  XCTAssertEqual(ALNHTTPParserBackendLegacy, [ALNRequest resolvedParserBackend]);
+  XCTAssertEqualObjects(@"legacy", [ALNRequest resolvedParserBackendName]);
+
+  unsetenv("ARLEN_HTTP_PARSER_BACKEND");
+}
+
+- (void)testLLHTTPVersionLooksValid {
+  NSString *version = [ALNRequest llhttpVersion];
+  XCTAssertTrue([version isKindOfClass:[NSString class]]);
+  NSRange match = [version rangeOfString:@"^\\d+\\.\\d+\\.\\d+$"
+                                 options:NSRegularExpressionSearch];
+  XCTAssertNotEqual((NSUInteger)NSNotFound, match.location);
+}
+
+- (void)testLLHTTPAndLegacyParsersProduceEquivalentRequestObject {
+  NSString *raw = @"POST /v1/ping?x=1&y=two HTTP/1.1\r\n"
+                  "Host: localhost\r\n"
+                  "X-Trace: abc123\r\n"
+                  "Cookie: sid=xyz; role=admin\r\n"
+                  "Content-Length: 17\r\n\r\n"
+                  "{\"hello\":\"world\"}";
+  NSData *data = [raw dataUsingEncoding:NSUTF8StringEncoding];
+
+  NSError *llhttpError = nil;
+  ALNRequest *llhttp = [ALNRequest requestFromRawData:data
+                                              backend:ALNHTTPParserBackendLLHTTP
+                                                error:&llhttpError];
+  XCTAssertNil(llhttpError);
+  XCTAssertNotNil(llhttp);
+
+  NSError *legacyError = nil;
+  ALNRequest *legacy = [ALNRequest requestFromRawData:data
+                                              backend:ALNHTTPParserBackendLegacy
+                                                error:&legacyError];
+  XCTAssertNil(legacyError);
+  XCTAssertNotNil(legacy);
+
+  if (llhttp == nil || legacy == nil) {
+    return;
+  }
+
+  XCTAssertEqualObjects(legacy.method, llhttp.method);
+  XCTAssertEqualObjects(legacy.path, llhttp.path);
+  XCTAssertEqualObjects(legacy.queryString, llhttp.queryString);
+  XCTAssertEqualObjects(legacy.httpVersion, llhttp.httpVersion);
+  XCTAssertEqualObjects(legacy.headers, llhttp.headers);
+  XCTAssertEqualObjects(legacy.body, llhttp.body);
+  XCTAssertEqualObjects(legacy.queryParams, llhttp.queryParams);
+  XCTAssertEqualObjects(legacy.cookies, llhttp.cookies);
 }
 
 @end

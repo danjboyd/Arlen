@@ -16,6 +16,8 @@ MIGRATION_SAMPLE_SERVER_TOOL := $(BUILD_DIR)/migration-sample-server
 ARLEN_DATA_EXAMPLE_TOOL := $(BUILD_DIR)/arlen-data-example
 ARLEN_TOOL := $(BUILD_DIR)/arlen
 JSON_PERF_BENCH_TOOL := $(BUILD_DIR)/json-perf-bench
+DISPATCH_PERF_BENCH_TOOL := $(BUILD_DIR)/dispatch-perf-bench
+HTTP_PARSE_PERF_BENCH_TOOL := $(BUILD_DIR)/http-parse-perf-bench
 
 TEMPLATE_ROOT := $(ROOT_DIR)/templates
 TEMPLATE_FILES := $(shell find $(TEMPLATE_ROOT) -type f -name '*.html.eoc' | sort)
@@ -25,10 +27,12 @@ TECH_DEMO_TEMPLATE_ROOT := $(TECH_DEMO_ROOT)/templates
 TECH_DEMO_TEMPLATE_FILES := $(shell find $(TECH_DEMO_TEMPLATE_ROOT) -type f -name '*.html.eoc' | sort)
 
 FRAMEWORK_SRCS := $(shell find src -type f -name '*.m' | sort)
-THIRD_PARTY_C_SRCS := src/Arlen/Support/third_party/yyjson/yyjson.c
+YYJSON_C_SRCS := src/Arlen/Support/third_party/yyjson/yyjson.c
+LLHTTP_C_SRCS := src/Arlen/Support/third_party/llhttp/llhttp.c src/Arlen/Support/third_party/llhttp/api.c src/Arlen/Support/third_party/llhttp/http.c
+THIRD_PARTY_C_SRCS := $(YYJSON_C_SRCS) $(LLHTTP_C_SRCS)
 FRAMEWORK_SRCS += $(THIRD_PARTY_C_SRCS)
 ARLEN_DATA_SRCS := $(shell find src/Arlen/Data -type f -name '*.m' | sort)
-JSON_SERIALIZATION_SRCS := src/Arlen/Support/ALNJSONSerialization.m $(THIRD_PARTY_C_SRCS)
+JSON_SERIALIZATION_SRCS := src/Arlen/Support/ALNJSONSerialization.m $(YYJSON_C_SRCS)
 EOC_RUNTIME_SRCS := src/Arlen/MVC/Template/ALNEOCRuntime.m src/Arlen/MVC/Template/ALNEOCTranspiler.m
 
 UNIT_TEST_BUNDLE := $(BUILD_DIR)/tests/ArlenUnitTests.xctest
@@ -54,7 +58,7 @@ ifneq ($(findstring -fno-objc-arc,$(OBJC_FLAGS)),)
 $(error OBJC_FLAGS cannot disable ARC)
 endif
 
-.PHONY: all eocc transpile tech-demo-transpile generated-compile arlen boomhauer tech-demo-server api-reference-server migration-sample-server arlen-data-example json-perf-bench test-data-layer dev-server tech-demo smoke-render smoke routes build-tests test test-unit test-integration perf perf-fast parity-phaseb perf-phasec perf-phased deploy-smoke phase5e-confidence ci-quality ci-sanitizers ci-fault-injection ci-release-certification ci-json-abstraction ci-json-perf ci-docs check docs-api docs-html docs-serve clean
+.PHONY: all eocc transpile tech-demo-transpile generated-compile arlen boomhauer tech-demo-server api-reference-server migration-sample-server arlen-data-example json-perf-bench dispatch-perf-bench http-parse-perf-bench test-data-layer dev-server tech-demo smoke-render smoke routes build-tests test test-unit test-integration perf perf-fast parity-phaseb perf-phasec perf-phased deploy-smoke phase5e-confidence ci-quality ci-sanitizers ci-fault-injection ci-release-certification ci-json-abstraction ci-json-perf ci-dispatch-perf ci-http-parse-perf ci-docs check docs-api docs-html docs-serve clean
 
 all: eocc transpile generated-compile arlen boomhauer
 
@@ -91,6 +95,16 @@ $(JSON_PERF_BENCH_TOOL): tools/json_perf_bench.m $(JSON_SERIALIZATION_SRCS) | $(
 >source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) tools/json_perf_bench.m $(JSON_SERIALIZATION_SRCS) -o $(JSON_PERF_BENCH_TOOL) $$(gnustep-config --base-libs) -ldl -lcrypto
 
 json-perf-bench: $(JSON_PERF_BENCH_TOOL)
+
+$(DISPATCH_PERF_BENCH_TOOL): tools/dispatch_perf_bench.m $(FRAMEWORK_SRCS) | $(BUILD_DIR)
+>source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) tools/dispatch_perf_bench.m $(FRAMEWORK_SRCS) -o $(DISPATCH_PERF_BENCH_TOOL) $$(gnustep-config --base-libs) -ldl -lcrypto
+
+dispatch-perf-bench: $(DISPATCH_PERF_BENCH_TOOL)
+
+$(HTTP_PARSE_PERF_BENCH_TOOL): tools/http_parse_perf_bench.m src/Arlen/HTTP/ALNRequest.m src/Arlen/Support/ALNJSONSerialization.m $(THIRD_PARTY_C_SRCS) | $(BUILD_DIR)
+>source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) tools/http_parse_perf_bench.m src/Arlen/HTTP/ALNRequest.m src/Arlen/Support/ALNJSONSerialization.m $(THIRD_PARTY_C_SRCS) -o $(HTTP_PARSE_PERF_BENCH_TOOL) $$(gnustep-config --base-libs) -ldl -lcrypto
+
+http-parse-perf-bench: $(HTTP_PARSE_PERF_BENCH_TOOL)
 
 $(BOOMHAUER_TOOL): tools/boomhauer.m $(FRAMEWORK_SRCS) transpile
 >source $(GNUSTEP_SH) && generated_files="$$(find $(GEN_DIR) -type f -name '*.m' | sort)"; \
@@ -208,6 +222,12 @@ ci-json-abstraction:
 
 ci-json-perf:
 >bash ./tools/ci/run_phase10e_json_performance.sh
+
+ci-dispatch-perf:
+>bash ./tools/ci/run_phase10g_dispatch_performance.sh
+
+ci-http-parse-perf:
+>bash ./tools/ci/run_phase10h_http_parse_performance.sh
 
 ci-docs:
 >bash ./tools/ci/run_docs_quality.sh

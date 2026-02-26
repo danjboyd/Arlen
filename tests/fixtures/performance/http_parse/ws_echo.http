@@ -1,0 +1,7 @@
+GET /ws/echo HTTP/1.1
+Host: 127.0.0.1:39991
+Upgrade: websocket
+Connection: Upgrade
+Sec-WebSocket-Key: dGVzdGtleQ==
+Sec-WebSocket-Version: 13
+

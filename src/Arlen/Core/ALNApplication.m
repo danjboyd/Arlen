@@ -22,6 +22,7 @@
 
 #include <ctype.h>
 #include <math.h>
+#include <objc/message.h>
 #include <objc/runtime.h>
 #include <stdio.h>
 #include <sys/time.h>
@@ -33,6 +34,11 @@ NSString *const ALNApplicationErrorDomain = @"Arlen.Application.Error";
 typedef id (*ALNContextObjectIMP)(id target, SEL selector, ALNContext *context);
 typedef void (*ALNContextVoidIMP)(id target, SEL selector, ALNContext *context);
 typedef BOOL (*ALNContextBoolIMP)(id target, SEL selector, ALNContext *context);
+
+typedef NS_ENUM(NSUInteger, ALNRuntimeInvocationMode) {
+  ALNRuntimeInvocationModeCachedIMP = 0,
+  ALNRuntimeInvocationModeSelector = 1,
+};
 
 static BOOL ALNRequestPrefersJSON(ALNRequest *request, BOOL apiOnly);
 static void ALNSetStructuredErrorResponse(ALNResponse *response,
@@ -70,6 +76,148 @@ static ALNRouteInvocationReturnKind ALNReturnKindForSignature(NSMethodSignature 
   return ALNRouteInvocationReturnKindUnknown;
 }
 
+static ALNRuntimeInvocationMode ALNInvocationModeFromString(NSString *rawValue,
+                                                            ALNRuntimeInvocationMode defaultMode) {
+  if (![rawValue isKindOfClass:[NSString class]]) {
+    return defaultMode;
+  }
+  NSString *normalized = [[rawValue lowercaseString]
+      stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+  if ([normalized isEqualToString:@"selector"] ||
+      [normalized isEqualToString:@"objc_msgsend"] ||
+      [normalized isEqualToString:@"legacy"]) {
+    return ALNRuntimeInvocationModeSelector;
+  }
+  if ([normalized isEqualToString:@"cached_imp"] ||
+      [normalized isEqualToString:@"cached"] ||
+      [normalized isEqualToString:@"imp"]) {
+    return ALNRuntimeInvocationModeCachedIMP;
+  }
+  return defaultMode;
+}
+
+static ALNRuntimeInvocationMode ALNResolvedRuntimeInvocationMode(NSDictionary *config) {
+  ALNRuntimeInvocationMode mode =
+      ALNInvocationModeFromString(config[@"runtimeInvocationMode"], ALNRuntimeInvocationModeCachedIMP);
+  const char *rawEnv = getenv("ARLEN_RUNTIME_INVOCATION_MODE");
+  if (rawEnv != NULL && rawEnv[0] != '\0') {
+    NSString *envValue = [NSString stringWithUTF8String:rawEnv];
+    mode = ALNInvocationModeFromString(envValue, mode);
+  }
+  return mode;
+}
+
+static NSString *ALNRuntimeInvocationModeName(ALNRuntimeInvocationMode mode) {
+  if (mode == ALNRuntimeInvocationModeSelector) {
+    return @"selector";
+  }
+  return @"cached_imp";
+}
+
+static BOOL ALNRouteInvocationResultToBool(id value) {
+  if ([value respondsToSelector:@selector(boolValue)]) {
+    return [value boolValue];
+  }
+  return (value != nil);
+}
+
+static BOOL ALNInvokeRouteGuard(id controller,
+                                ALNRoute *route,
+                                ALNContext *context,
+                                ALNResponse *response,
+                                ALNRuntimeInvocationMode mode,
+                                BOOL *guardPassedOut) {
+  if (controller == nil || route == nil || context == nil || response == nil || guardPassedOut == NULL) {
+    return NO;
+  }
+
+  ALNRouteInvocationReturnKind guardReturnKind = route.compiledGuardReturnKind;
+  if (guardReturnKind == ALNRouteInvocationReturnKindUnknown) {
+    return NO;
+  }
+
+  IMP guardIMP = route.compiledGuardIMP;
+  BOOL guardPassed = YES;
+  if (mode == ALNRuntimeInvocationModeSelector) {
+    if (guardReturnKind == ALNRouteInvocationReturnKindVoid) {
+      ((ALNContextVoidIMP)objc_msgSend)(controller, route.guardSelector, context);
+      guardPassed = !response.committed;
+    } else if (guardReturnKind == ALNRouteInvocationReturnKindBool) {
+      guardPassed = ((ALNContextBoolIMP)objc_msgSend)(controller, route.guardSelector, context);
+    } else if (guardReturnKind == ALNRouteInvocationReturnKindObject) {
+      id guardResult = ((ALNContextObjectIMP)objc_msgSend)(controller, route.guardSelector, context);
+      guardPassed = ALNRouteInvocationResultToBool(guardResult);
+    } else {
+      return NO;
+    }
+    *guardPassedOut = guardPassed;
+    return YES;
+  }
+
+  if (guardIMP == NULL) {
+    return NO;
+  }
+  if (guardReturnKind == ALNRouteInvocationReturnKindVoid) {
+    ((ALNContextVoidIMP)guardIMP)(controller, route.guardSelector, context);
+    guardPassed = !response.committed;
+  } else if (guardReturnKind == ALNRouteInvocationReturnKindBool) {
+    guardPassed = ((ALNContextBoolIMP)guardIMP)(controller, route.guardSelector, context);
+  } else if (guardReturnKind == ALNRouteInvocationReturnKindObject) {
+    id guardResult = ((ALNContextObjectIMP)guardIMP)(controller, route.guardSelector, context);
+    guardPassed = ALNRouteInvocationResultToBool(guardResult);
+  } else {
+    return NO;
+  }
+  *guardPassedOut = guardPassed;
+  return YES;
+}
+
+static BOOL ALNInvokeRouteAction(id controller,
+                                 ALNRoute *route,
+                                 ALNContext *context,
+                                 ALNRuntimeInvocationMode mode,
+                                 id *returnValueOut) {
+  if (controller == nil || route == nil || context == nil) {
+    return NO;
+  }
+
+  ALNRouteInvocationReturnKind actionReturnKind = route.compiledActionReturnKind;
+  if (actionReturnKind == ALNRouteInvocationReturnKindUnknown) {
+    return NO;
+  }
+
+  id returnValue = nil;
+  IMP actionIMP = route.compiledActionIMP;
+  if (mode == ALNRuntimeInvocationModeSelector) {
+    if (actionReturnKind == ALNRouteInvocationReturnKindVoid) {
+      ((ALNContextVoidIMP)objc_msgSend)(controller, route.actionSelector, context);
+    } else if (actionReturnKind == ALNRouteInvocationReturnKindObject) {
+      returnValue = ((ALNContextObjectIMP)objc_msgSend)(controller, route.actionSelector, context);
+    } else {
+      return NO;
+    }
+    if (returnValueOut != NULL) {
+      *returnValueOut = returnValue;
+    }
+    return YES;
+  }
+
+  if (actionIMP == NULL) {
+    return NO;
+  }
+  if (actionReturnKind == ALNRouteInvocationReturnKindVoid) {
+    ((ALNContextVoidIMP)actionIMP)(controller, route.actionSelector, context);
+  } else if (actionReturnKind == ALNRouteInvocationReturnKindObject) {
+    returnValue = ((ALNContextObjectIMP)actionIMP)(controller, route.actionSelector, context);
+  } else {
+    return NO;
+  }
+  if (returnValueOut != NULL) {
+    *returnValueOut = returnValue;
+  }
+  return YES;
+}
+
 @interface ALNApplication ()
 
 @property(nonatomic, strong, readwrite) ALNRouter *router;
@@ -95,6 +243,8 @@ static ALNRouteInvocationReturnKind ALNReturnKindForSignature(NSMethodSignature 
 @property(nonatomic, assign, readwrite) BOOL clusterEmitHeaders;
 @property(nonatomic, copy) NSString *i18nDefaultLocale;
 @property(nonatomic, copy) NSString *i18nFallbackLocale;
+@property(nonatomic, copy, readwrite) NSString *runtimeInvocationMode;
+@property(nonatomic, assign) ALNRuntimeInvocationMode runtimeInvocationModeKind;
 @property(nonatomic, strong) NSDate *bootedAt;
 @property(nonatomic, strong) NSDate *startedAt;
 @property(nonatomic, assign, readwrite, getter=isStarted) BOOL started;
@@ -206,6 +356,8 @@ static ALNRouteInvocationReturnKind ALNReturnKindForSignature(NSMethodSignature 
     _clusterEmitHeaders = [emitHeadersValue respondsToSelector:@selector(boolValue)]
                               ? [emitHeadersValue boolValue]
                               : YES;
+    _runtimeInvocationModeKind = ALNResolvedRuntimeInvocationMode(_config);
+    _runtimeInvocationMode = [ALNRuntimeInvocationModeName(_runtimeInvocationModeKind) copy];
     _bootedAt = [NSDate date];
     _startedAt = nil;
     _started = NO;
@@ -3151,9 +3303,13 @@ static void ALNFinalizeResponse(ALNApplication *application,
       }
       BOOL guardPassed = YES;
       if (match.route.guardSelector != NULL) {
-        IMP guardIMP = match.route.compiledGuardIMP;
-        ALNRouteInvocationReturnKind guardReturnKind = match.route.compiledGuardReturnKind;
-        if (guardIMP == NULL || guardReturnKind == ALNRouteInvocationReturnKindUnknown) {
+        BOOL guardInvocationOK = ALNInvokeRouteGuard(controller,
+                                                     match.route,
+                                                     context,
+                                                     response,
+                                                     self.runtimeInvocationModeKind,
+                                                     &guardPassed);
+        if (!guardInvocationOK) {
           NSDictionary *details = @{
             @"controller" : context.controllerName ?: @"",
             @"guard" : match.route.guardActionName ?: @"",
@@ -3169,22 +3325,6 @@ static void ALNFinalizeResponse(ALNApplication *application,
                                         @"Invalid route guard signature",
                                         details);
           guardPassed = NO;
-        } else {
-          if (guardReturnKind == ALNRouteInvocationReturnKindVoid) {
-            ((ALNContextVoidIMP)guardIMP)(controller, match.route.guardSelector, context);
-            guardPassed = !response.committed;
-          } else if (guardReturnKind == ALNRouteInvocationReturnKindBool) {
-            guardPassed = ((ALNContextBoolIMP)guardIMP)(controller, match.route.guardSelector, context);
-          } else if (guardReturnKind == ALNRouteInvocationReturnKindObject) {
-            id guardResult = ((ALNContextObjectIMP)guardIMP)(controller, match.route.guardSelector, context);
-            if ([guardResult respondsToSelector:@selector(boolValue)]) {
-              guardPassed = [guardResult boolValue];
-            } else {
-              guardPassed = (guardResult != nil);
-            }
-          } else {
-            guardPassed = NO;
-          }
         }
       }
 
@@ -3205,9 +3345,12 @@ static void ALNFinalizeResponse(ALNApplication *application,
       }
 
       if (guardPassed && !response.committed) {
-        IMP actionIMP = match.route.compiledActionIMP;
-        ALNRouteInvocationReturnKind actionReturnKind = match.route.compiledActionReturnKind;
-        if (actionIMP == NULL || actionReturnKind == ALNRouteInvocationReturnKindUnknown) {
+        BOOL actionInvocationOK = ALNInvokeRouteAction(controller,
+                                                       match.route,
+                                                       context,
+                                                       self.runtimeInvocationModeKind,
+                                                       &returnValue);
+        if (!actionInvocationOK) {
           NSDictionary *details = @{
             @"controller" : context.controllerName ?: @"",
             @"action" : context.actionName ?: @"",
@@ -3222,12 +3365,6 @@ static void ALNFinalizeResponse(ALNApplication *application,
                                         @"Internal Server Error",
                                         @"Invalid controller action signature",
                                         details);
-        } else {
-          if (actionReturnKind == ALNRouteInvocationReturnKindVoid) {
-            ((ALNContextVoidIMP)actionIMP)(controller, match.route.actionSelector, context);
-          } else if (actionReturnKind == ALNRouteInvocationReturnKindObject) {
-            returnValue = ((ALNContextObjectIMP)actionIMP)(controller, match.route.actionSelector, context);
-          }
         }
       }
     } @catch (NSException *exception) {

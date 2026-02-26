@@ -1,6 +1,7 @@
 #import <Foundation/Foundation.h>
 #import <XCTest/XCTest.h>
 
+#import <stdlib.h>
 #import <unistd.h>
 
 #import "ALNApplication.h"
@@ -1032,6 +1033,57 @@
 
   XCTAssertEqual(workers, completed);
   XCTAssertEqual((NSInteger)0, failures);
+  [app shutdown];
+}
+
+- (void)testRuntimeInvocationModeDefaultsToCachedIMP {
+  unsetenv("ARLEN_RUNTIME_INVOCATION_MODE");
+  ALNApplication *app = [self buildAppWithHaltingMiddleware:NO];
+  XCTAssertEqualObjects(@"cached_imp", app.runtimeInvocationMode);
+  [app shutdown];
+}
+
+- (void)testSelectorInvocationModePreservesGuardAndActionContracts {
+  setenv("ARLEN_RUNTIME_INVOCATION_MODE", "selector", 1);
+  ALNApplication *app = [self buildAppWithHaltingMiddleware:NO];
+
+  @try {
+    NSError *startError = nil;
+    BOOL started = [app startWithError:&startError];
+    XCTAssertTrue(started);
+    XCTAssertNil(startError);
+    if (!started) {
+      return;
+    }
+
+    XCTAssertEqualObjects(@"selector", app.runtimeInvocationMode);
+
+    ALNResponse *dictResponse = [app dispatchRequest:[self requestForPath:@"/dict"]];
+    XCTAssertEqual((NSInteger)200, dictResponse.statusCode);
+
+    ALNResponse *allowed = [app dispatchRequest:[self requestForPath:@"/admin/audit.json"
+                                                         queryString:@"role=admin"
+                                                             headers:@{}]];
+    XCTAssertEqual((NSInteger)200, allowed.statusCode);
+
+    ALNResponse *forbidden = [app dispatchRequest:[self requestForPath:@"/admin/audit.json"
+                                                           queryString:@"role=user"
+                                                               headers:@{}]];
+    XCTAssertEqual((NSInteger)403, forbidden.statusCode);
+  } @finally {
+    [app shutdown];
+    unsetenv("ARLEN_RUNTIME_INVOCATION_MODE");
+  }
+}
+
+- (void)testConfigCanSelectRuntimeInvocationMode {
+  unsetenv("ARLEN_RUNTIME_INVOCATION_MODE");
+  ALNApplication *app = [[ALNApplication alloc] initWithConfig:@{
+    @"environment" : @"test",
+    @"logFormat" : @"json",
+    @"runtimeInvocationMode" : @"selector",
+  }];
+  XCTAssertEqualObjects(@"selector", app.runtimeInvocationMode);
   [app shutdown];
 }
 

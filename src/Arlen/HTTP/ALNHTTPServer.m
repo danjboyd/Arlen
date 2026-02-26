@@ -139,6 +139,23 @@ static NSString *ALNRequestDispatchModeFromConfig(NSDictionary *config) {
   return @"concurrent";
 }
 
+static ALNHTTPParserBackend ALNHTTPParserBackendFromConfig(NSDictionary *config) {
+  id raw = config[@"httpParserBackend"];
+  if ([raw isKindOfClass:[NSString class]]) {
+    NSString *normalized = [[(NSString *)raw lowercaseString]
+        stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    if ([normalized isEqualToString:@"legacy"] ||
+        [normalized isEqualToString:@"manual"] ||
+        [normalized isEqualToString:@"string"]) {
+      return ALNHTTPParserBackendLegacy;
+    }
+    if ([normalized isEqualToString:@"llhttp"]) {
+      return ALNHTTPParserBackendLLHTTP;
+    }
+  }
+  return [ALNRequest resolvedParserBackend];
+}
+
 static void ALNApplyClientSocketTimeout(int clientFd, NSUInteger timeoutSeconds) {
   if (timeoutSeconds == 0) {
     return;
@@ -997,6 +1014,7 @@ static NSString *ALNRealtimeBackpressureReasonForSubscriptionRejection(NSString 
 @property(nonatomic, assign) NSUInteger maxConcurrentWebSocketSessions;
 @property(nonatomic, assign) NSUInteger maxConcurrentHTTPWorkers;
 @property(nonatomic, assign) NSUInteger maxQueuedHTTPConnections;
+@property(nonatomic, assign) ALNHTTPParserBackend requestParserBackend;
 @property(nonatomic, strong) NSLock *requestDispatchLock;
 @property(nonatomic, assign) BOOL serializeRequestDispatch;
 @property(atomic, assign) BOOL shouldRun;
@@ -1023,6 +1041,7 @@ static NSString *ALNRealtimeBackpressureReasonForSubscriptionRejection(NSString 
     _maxConcurrentWebSocketSessions = 256;
     _maxConcurrentHTTPWorkers = 8;
     _maxQueuedHTTPConnections = 256;
+    _requestParserBackend = [ALNRequest resolvedParserBackend];
     _requestDispatchLock = [[NSLock alloc] init];
     _serializeRequestDispatch = NO;
     _shouldRun = YES;
@@ -1389,7 +1408,9 @@ static NSString *ALNRealtimeBackpressureReasonForSubscriptionRejection(NSString 
 
     NSError *requestError = nil;
     double requestParseStartMs = ALNNowMilliseconds();
-    ALNRequest *request = [ALNRequest requestFromRawData:rawRequest error:&requestError];
+    ALNRequest *request = [ALNRequest requestFromRawData:rawRequest
+                                                 backend:self.requestParserBackend
+                                                   error:&requestError];
     parseMs += (ALNNowMilliseconds() - requestParseStartMs);
     if (request == nil) {
       ALNResponse *errorResponse = ALNErrorResponse(400, @"bad request\n");
@@ -1566,6 +1587,7 @@ static NSString *ALNRealtimeBackpressureReasonForSubscriptionRejection(NSString 
     ALNServerSocketTuning tuning = ALNTuningFromConfig(config);
     ALNRuntimeLimits runtimeLimits = ALNRuntimeLimitsFromConfig(config);
     NSString *requestDispatchMode = ALNRequestDispatchModeFromConfig(config);
+    self.requestParserBackend = ALNHTTPParserBackendFromConfig(config);
     self.serializeRequestDispatch = [requestDispatchMode isEqualToString:@"serialized"];
     self.maxConcurrentHTTPSessions = runtimeLimits.maxConcurrentHTTPSessions;
     self.maxConcurrentWebSocketSessions = runtimeLimits.maxConcurrentWebSocketSessions;
@@ -1653,6 +1675,10 @@ static NSString *ALNRealtimeBackpressureReasonForSubscriptionRejection(NSString 
     }
 
     fprintf(stdout, "%s listening on http://%s:%d\n", [self.serverName UTF8String], [bindHost UTF8String], port);
+    fprintf(stdout, "%s http parser backend=%s llhttp=%s\n",
+            [self.serverName UTF8String],
+            [[ALNRequest parserBackendNameForBackend:self.requestParserBackend] UTF8String],
+            [[ALNRequest llhttpVersion] UTF8String]);
     fflush(stdout);
 
     if (!once && !self.serializeRequestDispatch) {

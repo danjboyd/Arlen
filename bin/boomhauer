@@ -207,6 +207,7 @@ compile_app() {
     {
       find "$framework_root/src" -type f -name '*.m'
       find "$framework_root/src/Arlen/Support/third_party/yyjson" -type f -name '*.c' 2>/dev/null
+      find "$framework_root/src/Arlen/Support/third_party/llhttp" -type f -name '*.c' 2>/dev/null
     } | sort
   )
   mapfile -t app_sources < <(find "$app_root/src" -type f -name '*.m' 2>/dev/null | sort)

@@ -7,6 +7,11 @@ NS_ASSUME_NONNULL_BEGIN
 
 extern NSString *const ALNRequestErrorDomain;
 
+typedef NS_ENUM(NSUInteger, ALNHTTPParserBackend) {
+  ALNHTTPParserBackendLLHTTP = 0,
+  ALNHTTPParserBackendLegacy = 1,
+};
+
 @interface ALNRequest : NSObject
 
 @property(nonatomic, copy, readonly) NSString *method;
@@ -39,6 +44,13 @@ extern NSString *const ALNRequestErrorDomain;
 
 + (nullable ALNRequest *)requestFromRawData:(NSData *)data
                                      error:(NSError *_Nullable *_Nullable)error;
++ (nullable ALNRequest *)requestFromRawData:(NSData *)data
+                                    backend:(ALNHTTPParserBackend)backend
+                                      error:(NSError *_Nullable *_Nullable)error;
++ (ALNHTTPParserBackend)resolvedParserBackend;
++ (NSString *)resolvedParserBackendName;
++ (NSString *)parserBackendNameForBackend:(ALNHTTPParserBackend)backend;
++ (NSString *)llhttpVersion;
 
 @end
 

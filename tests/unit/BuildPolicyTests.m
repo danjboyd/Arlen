@@ -78,8 +78,13 @@
   NSString *makefile = [self readFile:makefilePath];
 
   XCTAssertTrue([makefile containsString:
-                              @"THIRD_PARTY_C_SRCS := src/Arlen/Support/third_party/yyjson/yyjson.c"]);
+                              @"YYJSON_C_SRCS := src/Arlen/Support/third_party/yyjson/yyjson.c"]);
+  XCTAssertTrue([makefile containsString:@"LLHTTP_C_SRCS := src/Arlen/Support/third_party/llhttp/llhttp.c"]);
+  XCTAssertTrue([makefile containsString:@"src/Arlen/Support/third_party/llhttp/api.c"]);
+  XCTAssertTrue([makefile containsString:@"src/Arlen/Support/third_party/llhttp/http.c"]);
   XCTAssertTrue([makefile containsString:@"FRAMEWORK_SRCS += $(THIRD_PARTY_C_SRCS)"]);
+  XCTAssertTrue([makefile containsString:
+                              @"JSON_SERIALIZATION_SRCS := src/Arlen/Support/ALNJSONSerialization.m $(YYJSON_C_SRCS)"]);
 }
 
 - (void)testBoomhauerCompilePathIncludesYYJSONCSource {
@@ -89,6 +94,8 @@
 
   XCTAssertTrue([script containsString:@"find \"$framework_root/src/Arlen/Support/third_party/yyjson\" -type f -name '*.c'"],
                 @"boomhauer app compile path must include yyjson C source");
+  XCTAssertTrue([script containsString:@"find \"$framework_root/src/Arlen/Support/third_party/llhttp\" -type f -name '*.c'"],
+                @"boomhauer app compile path must include llhttp C sources");
 }
 
 - (void)testGNUmakefileIncludesJSONReliabilityGateTargets {
@@ -98,6 +105,8 @@
 
   XCTAssertTrue([makefile containsString:@"ci-json-abstraction:"]);
   XCTAssertTrue([makefile containsString:@"ci-json-perf:"]);
+  XCTAssertTrue([makefile containsString:@"ci-dispatch-perf:"]);
+  XCTAssertTrue([makefile containsString:@"ci-http-parse-perf:"]);
   XCTAssertTrue([makefile containsString:@"check: ci-json-abstraction"]);
 }
 
@@ -108,6 +117,8 @@
 
   XCTAssertTrue([script containsString:@"check_runtime_json_abstraction.py"]);
   XCTAssertTrue([script containsString:@"run_phase10e_json_performance.sh"]);
+  XCTAssertTrue([script containsString:@"run_phase10g_dispatch_performance.sh"]);
+  XCTAssertTrue([script containsString:@"run_phase10h_http_parse_performance.sh"]);
 }
 
 @end

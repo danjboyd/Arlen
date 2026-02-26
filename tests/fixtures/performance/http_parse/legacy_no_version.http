@@ -1,0 +1,6 @@
+POST /v1/legacy
+Host: localhost
+Content-Type: application/json
+Content-Length: 11
+
+{"ok":true}

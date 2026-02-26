@@ -1205,6 +1205,110 @@
   }
 }
 
+- (void)testPhase10GDispatchPerformanceGeneratorProducesExpectedPack {
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *outputRoot = [self createTempDirectoryWithPrefix:@"arlen-phase10g-confidence"];
+  XCTAssertNotNil(outputRoot);
+  if (outputRoot == nil) {
+    return;
+  }
+
+  @try {
+    NSString *thresholdsPath = [outputRoot stringByAppendingPathComponent:@"thresholds.json"];
+    XCTAssertTrue([self writeFile:thresholdsPath
+                          content:@"{\n"
+                                  "  \"version\": \"phase10g-dispatch-thresholds-v1\",\n"
+                                  "  \"ops_ratio_min\": 0.0,\n"
+                                  "  \"p95_ratio_max\": 999.0\n"
+                                  "}\n"]);
+
+    int code = 0;
+    NSString *command = [NSString stringWithFormat:
+                                      @"cd %@ && ARLEN_PHASE10G_OUTPUT_DIR=%@ "
+                                       "ARLEN_PHASE10G_THRESHOLDS=%@ "
+                                       "ARLEN_PHASE10G_ITERATIONS=8000 ARLEN_PHASE10G_WARMUP=800 "
+                                       "bash ./tools/ci/run_phase10g_dispatch_performance.sh",
+                                      repoRoot, outputRoot, thresholdsPath];
+    NSString *output = [self runShellCapture:command exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", output);
+
+    NSString *manifestPath = [outputRoot stringByAppendingPathComponent:@"manifest.json"];
+    NSError *error = nil;
+    NSData *manifestData = [NSData dataWithContentsOfFile:manifestPath];
+    XCTAssertNotNil(manifestData);
+    if (manifestData == nil) {
+      return;
+    }
+    NSDictionary *manifest = [NSJSONSerialization JSONObjectWithData:manifestData options:0 error:&error];
+    XCTAssertNotNil(manifest);
+    XCTAssertNil(error);
+    if (![manifest isKindOfClass:[NSDictionary class]]) {
+      return;
+    }
+
+    XCTAssertEqualObjects(@"phase10g-dispatch-performance-v1", manifest[@"version"]);
+    XCTAssertEqualObjects(@"pass", manifest[@"status"]);
+    NSArray *artifacts = [manifest[@"artifacts"] isKindOfClass:[NSArray class]] ? manifest[@"artifacts"] : @[];
+    XCTAssertTrue([artifacts containsObject:@"dispatch_delta_summary.json"]);
+    XCTAssertTrue([artifacts containsObject:@"phase10g_dispatch_performance.md"]);
+  } @finally {
+    [[NSFileManager defaultManager] removeItemAtPath:outputRoot error:nil];
+  }
+}
+
+- (void)testPhase10HHTTPParsePerformanceGeneratorProducesExpectedPack {
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *outputRoot = [self createTempDirectoryWithPrefix:@"arlen-phase10h-confidence"];
+  XCTAssertNotNil(outputRoot);
+  if (outputRoot == nil) {
+    return;
+  }
+
+  @try {
+    NSString *thresholdsPath = [outputRoot stringByAppendingPathComponent:@"thresholds.json"];
+    XCTAssertTrue([self writeFile:thresholdsPath
+                          content:@"{\n"
+                                  "  \"version\": \"phase10h-http-parse-thresholds-v1\",\n"
+                                  "  \"parse_ops_ratio_min\": 0.0,\n"
+                                  "  \"parse_p95_ratio_max\": 999.0,\n"
+                                  "  \"parse_expected_improvement_ratio_min\": 0.0,\n"
+                                  "  \"parse_expected_improvement_fixture_count\": 0\n"
+                                  "}\n"]);
+
+    int code = 0;
+    NSString *command = [NSString stringWithFormat:
+                                      @"cd %@ && ARLEN_PHASE10H_OUTPUT_DIR=%@ "
+                                       "ARLEN_PHASE10H_THRESHOLDS=%@ "
+                                       "ARLEN_PHASE10H_ITERATIONS=300 ARLEN_PHASE10H_WARMUP=40 "
+                                       "bash ./tools/ci/run_phase10h_http_parse_performance.sh",
+                                      repoRoot, outputRoot, thresholdsPath];
+    NSString *output = [self runShellCapture:command exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", output);
+
+    NSString *manifestPath = [outputRoot stringByAppendingPathComponent:@"manifest.json"];
+    NSError *error = nil;
+    NSData *manifestData = [NSData dataWithContentsOfFile:manifestPath];
+    XCTAssertNotNil(manifestData);
+    if (manifestData == nil) {
+      return;
+    }
+    NSDictionary *manifest = [NSJSONSerialization JSONObjectWithData:manifestData options:0 error:&error];
+    XCTAssertNotNil(manifest);
+    XCTAssertNil(error);
+    if (![manifest isKindOfClass:[NSDictionary class]]) {
+      return;
+    }
+
+    XCTAssertEqualObjects(@"phase10h-http-parse-performance-v1", manifest[@"version"]);
+    XCTAssertEqualObjects(@"pass", manifest[@"status"]);
+    NSArray *artifacts = [manifest[@"artifacts"] isKindOfClass:[NSArray class]] ? manifest[@"artifacts"] : @[];
+    XCTAssertTrue([artifacts containsObject:@"http_parser_delta_summary.json"]);
+    XCTAssertTrue([artifacts containsObject:@"phase10h_http_parse_performance.md"]);
+  } @finally {
+    [[NSFileManager defaultManager] removeItemAtPath:outputRoot error:nil];
+  }
+}
+
 - (void)testRuntimeJSONAbstractionCheckScriptPasses {
   NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
   int code = 0;

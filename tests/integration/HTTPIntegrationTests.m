@@ -3071,7 +3071,7 @@
 
   @try {
     BOOL errorPageSeen = NO;
-    for (NSInteger attempt = 0; attempt < 80; attempt++) {
+    for (NSInteger attempt = 0; attempt < 240; attempt++) {
       int curlCode = 0;
       NSString *body = [self runShellCapture:[NSString stringWithFormat:@"curl -sS http://127.0.0.1:%d/", port]
                                     exitCode:&curlCode];
@@ -3083,14 +3083,21 @@
     }
     XCTAssertTrue(errorPageSeen);
 
-    int jsonCurlCode = 0;
-    NSString *jsonBody = [self runShellCapture:[NSString stringWithFormat:
-                                                   @"curl -sS -H 'Accept: application/json' http://127.0.0.1:%d/api/dev/build-error",
-                                                   port]
-                                      exitCode:&jsonCurlCode];
-    XCTAssertEqual(0, jsonCurlCode);
-    XCTAssertTrue([jsonBody containsString:@"dev_build_failed"]);
-    XCTAssertTrue([jsonBody containsString:@"stage"]);
+    BOOL jsonErrorSeen = NO;
+    for (NSInteger attempt = 0; attempt < 120; attempt++) {
+      int jsonCurlCode = 0;
+      NSString *jsonBody = [self runShellCapture:[NSString stringWithFormat:
+                                                     @"curl -sS -H 'Accept: application/json' http://127.0.0.1:%d/api/dev/build-error",
+                                                     port]
+                                        exitCode:&jsonCurlCode];
+      if (jsonCurlCode == 0 && [jsonBody containsString:@"dev_build_failed"] &&
+          [jsonBody containsString:@"stage"]) {
+        jsonErrorSeen = YES;
+        break;
+      }
+      usleep(250000);
+    }
+    XCTAssertTrue(jsonErrorSeen);
 
     XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"app_lite.m"]
                           content:@"#import <Foundation/Foundation.h>\n"

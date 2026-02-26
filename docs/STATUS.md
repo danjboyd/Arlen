@@ -53,7 +53,7 @@ Last updated: 2026-02-26
 - Phase 9H: complete (2026-02-25)
 - Phase 9I: complete (2026-02-25)
 - Phase 9J: complete (2026-02-25)
-- Phase 10: active (10A/10B/10C/10D/10E/10F complete on 2026-02-26; 10G+ pending)
+- Phase 10: active (10A/10B/10C/10D/10E/10F/10G/10H complete on 2026-02-26; post-cutover perf threshold tuning active)
 
 ## Completed Today (2026-02-26)
 
@@ -78,6 +78,18 @@ Last updated: 2026-02-26
   - integrated JSON abstraction/performance gates into quality pipeline (`make ci-quality`) and check path (`make check`)
   - updated release packaging to require Phase 10E JSON performance evidence by default (`tools/deploy/build_release.sh`)
   - published foundation fallback deprecation timeline metadata (`ALNJSONSerialization foundationFallbackDeprecationDate = 2026-04-30`)
+- Completed Phase 10G dispatch/runtime invocation hardening tranche:
+  - introduced explicit runtime invocation modes (`cached_imp` default, `selector` fallback) with config/env controls and runtime introspection (`ALNApplication runtimeInvocationMode`)
+  - preserved action/guard contract semantics while removing the reflection-heavy default dispatch path
+  - added dispatch benchmark tooling + CI artifact generation (`tools/dispatch_perf_bench.m`, `tools/ci/run_phase10g_dispatch_performance.sh`, `tools/ci/generate_phase10g_dispatch_perf_artifacts.py`)
+  - added regression coverage for invocation-path correctness + policy wiring (`tests/unit/ApplicationTests.m`, `tests/integration/DeploymentIntegrationTests.m`, `tests/unit/BuildPolicyTests.m`)
+- Completed Phase 10H llhttp parser migration tranche:
+  - integrated vendored llhttp `9.3.1` into framework/app builds and boomhauer compile path
+  - added parser backend abstraction + rollout control (`ARLEN_HTTP_PARSER_BACKEND`, config `httpParserBackend`) with llhttp default and legacy fallback
+  - preserved request parsing contracts (headers/query/body/cookies, missing-version normalization, websocket upgrade handling) across both parser backends
+  - added HTTP parser benchmark tooling + CI artifact generation (`tools/http_parse_perf_bench.m`, `tools/ci/run_phase10h_http_parse_performance.sh`, `tools/ci/generate_phase10h_http_parse_perf_artifacts.py`)
+  - added differential/regression coverage for parser equivalence and deployment artifacts (`tests/unit/RequestTests.m`, `tests/integration/DeploymentIntegrationTests.m`)
+  - current strict 10G/10H perf policy thresholds remain environment-sensitive and are tracked as follow-up tuning work
 
 ## Completed Today (2026-02-25)
 
