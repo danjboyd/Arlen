@@ -58,6 +58,8 @@ This builds:
 ./bin/boomhauer
 ```
 
+`boomhauer` compiles app/framework/generated Objective-C sources with `-fobjc-arc` by default.
+
 Check endpoints:
 
 ```bash

@@ -83,6 +83,35 @@
   return parsed;
 }
 
+- (void)testBoomhauerBuildCompilePathEnforcesARC {
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *scriptPath = [repoRoot stringByAppendingPathComponent:@"bin/boomhauer"];
+
+  NSError *error = nil;
+  NSString *script =
+      [NSString stringWithContentsOfFile:scriptPath encoding:NSUTF8StringEncoding error:&error];
+  XCTAssertNotNil(script);
+  XCTAssertNil(error);
+  if (script == nil || error != nil) {
+    return;
+  }
+
+  NSRegularExpression *regex =
+      [NSRegularExpression regularExpressionWithPattern:
+                               @"clang\\s+\\$\\(gnustep-config --objc-flags\\)(?:\\s+|\\\\\\n)+-fobjc-arc"
+                                                options:0
+                                                  error:&error];
+  XCTAssertNotNil(regex);
+  XCTAssertNil(error);
+  if (regex == nil || error != nil) {
+    return;
+  }
+
+  NSUInteger matches =
+      [regex numberOfMatchesInString:script options:0 range:NSMakeRange(0, [script length])];
+  XCTAssertTrue(matches > 0, @"boomhauer compile path must enforce -fobjc-arc");
+}
+
 - (void)testReleaseBuildActivateAndRollbackScripts {
   NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
   NSString *appRoot = [self createTempDirectoryWithPrefix:@"arlen-release-app"];

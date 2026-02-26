@@ -209,6 +209,7 @@ boomhauer [options]
 Behavior:
 
 - if run inside app root (`config/app.plist` plus `src/main.m` or `app_lite.m`), compiles and runs that app
+- compile path enforces `-fobjc-arc` for app/framework/generated Objective-C sources
 - defaults to watch mode
 - in app-root watch mode, build failures are captured and rendered as development diagnostics
 - concurrent HTTP sessions are bounded by `runtimeLimits.maxConcurrentHTTPSessions` (default `256`)

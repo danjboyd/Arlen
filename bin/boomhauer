@@ -229,6 +229,7 @@ compile_app() {
     source "$gnustep_sh"
     set -u
     clang $(gnustep-config --objc-flags) \
+      -fobjc-arc \
       -I"$framework_root/src/Arlen" \
       -I"$framework_root/src/Arlen/Core" \
       -I"$framework_root/src/Arlen/Data" \
