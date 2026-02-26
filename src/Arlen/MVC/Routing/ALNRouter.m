@@ -70,6 +70,7 @@ static NSString *ALNNormalizedMethodName(NSString *method) {
 
 static ALNRouteMatch *ALNBestRouteMatchInCandidates(NSArray *candidates,
                                                      NSString *path,
+                                                     NSArray *pathSegments,
                                                      NSString *format) {
   ALNRoute *bestRoute = nil;
   NSDictionary *bestParams = nil;
@@ -79,7 +80,7 @@ static ALNRouteMatch *ALNBestRouteMatchInCandidates(NSArray *candidates,
       continue;
     }
 
-    NSDictionary *params = [route matchPath:path];
+    NSDictionary *params = [route matchPath:path pathSegments:pathSegments];
     if (params == nil) {
       continue;
     }
@@ -196,6 +197,9 @@ static ALNRouteMatch *ALNBestRouteMatchInCandidates(NSArray *candidates,
                           path:(NSString *)path
                         format:(NSString *)format {
   NSString *requestMethod = ALNNormalizedMethodName(method);
+  NSString *normalizedPath =
+      ([path isKindOfClass:[NSString class]] && [path length] > 0) ? path : @"/";
+  NSArray *pathSegments = [ALNRoute pathSegmentsForPath:normalizedPath];
   NSArray *methodCandidates =
       [self.routesByMethod[requestMethod] isKindOfClass:[NSArray class]]
           ? self.routesByMethod[requestMethod]
@@ -206,11 +210,11 @@ static ALNRouteMatch *ALNBestRouteMatchInCandidates(NSArray *candidates,
           : @[];
 
   ALNRouteMatch *methodMatch =
-      ALNBestRouteMatchInCandidates(methodCandidates, path, format);
+      ALNBestRouteMatchInCandidates(methodCandidates, normalizedPath, pathSegments, format);
   if (methodMatch != nil || [requestMethod isEqualToString:@"ANY"]) {
     return methodMatch;
   }
-  return ALNBestRouteMatchInCandidates(anyCandidates, path, format);
+  return ALNBestRouteMatchInCandidates(anyCandidates, normalizedPath, pathSegments, format);
 }
 
 - (void)beginRouteGroupWithPrefix:(NSString *)prefix

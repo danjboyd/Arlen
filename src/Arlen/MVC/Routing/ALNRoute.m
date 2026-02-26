@@ -152,7 +152,13 @@ static NSString *ALNNormalizeRouteFormat(NSString *value) {
 }
 
 - (NSDictionary *)matchPath:(NSString *)path {
-  NSArray *incoming = ALNSplitPathSegments(path);
+  return [self matchPath:path pathSegments:nil];
+}
+
+- (NSDictionary *)matchPath:(NSString *)path pathSegments:(NSArray *)pathSegments {
+  NSArray *incoming = [pathSegments isKindOfClass:[NSArray class]]
+                          ? pathSegments
+                          : ALNSplitPathSegments(path);
   NSMutableDictionary *params = [NSMutableDictionary dictionary];
   NSUInteger patternCount = [self.segments count];
   NSUInteger incomingCount = [incoming count];
@@ -200,6 +206,10 @@ static NSString *ALNNormalizeRouteFormat(NSString *value) {
     return nil;
   }
   return params;
+}
+
++ (NSArray *)pathSegmentsForPath:(NSString *)path {
+  return ALNSplitPathSegments(path);
 }
 
 - (BOOL)matchesFormat:(NSString *)format {

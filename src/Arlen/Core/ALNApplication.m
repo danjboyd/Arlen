@@ -3109,6 +3109,7 @@ static void ALNFinalizeResponse(ALNApplication *application,
 
   BOOL performanceLogging = ALNBoolConfigValue(self.config[@"performanceLogging"], YES);
   BOOL tracePropagationEnabled = ALNTracePropagationEnabled(self);
+  BOOL infoLoggingEnabled = [self.logger shouldLogLevel:ALNLogLevelInfo];
   NSDictionary *traceContext = ALNBuildRequestTraceContext(request, tracePropagationEnabled);
   NSString *traceID = [traceContext[@"trace_id"] isKindOfClass:[NSString class]]
                           ? traceContext[@"trace_id"]
@@ -3129,6 +3130,7 @@ static void ALNFinalizeResponse(ALNApplication *application,
 
   NSString *routePath = nil;
   NSString *requestFormat = ALNRequestPreferredFormat(request, apiOnly, &routePath);
+  BOOL prefersJSON = [requestFormat isEqualToString:@"json"];
   if ([routePath length] == 0) {
     routePath = request.path ?: @"/";
   }
@@ -3142,7 +3144,7 @@ static void ALNFinalizeResponse(ALNApplication *application,
 
   if (match == nil) {
     BOOL handledBuiltIn = ALNApplyBuiltInResponse(self, request, response, routePath);
-    if (!handledBuiltIn && (apiOnly || ALNRequestPrefersJSON(request, apiOnly))) {
+    if (!handledBuiltIn && (apiOnly || prefersJSON)) {
       NSDictionary *payload = ALNStructuredErrorPayload(404,
                                                         @"not_found",
                                                         @"Not Found",
@@ -3189,7 +3191,7 @@ static void ALNFinalizeResponse(ALNApplication *application,
       }
     }
 
-    if ([self.logger shouldLogLevel:ALNLogLevelInfo]) {
+    if (infoLoggingEnabled) {
       NSMutableDictionary *fields = [NSMutableDictionary dictionary];
       fields[@"method"] = request.method ?: @"";
       fields[@"path"] = request.path ?: @"";
@@ -3292,8 +3294,9 @@ static void ALNFinalizeResponse(ALNApplication *application,
   BOOL shouldDispatchController =
       routeReady &&
       ALNApplyRequestContractIfNeeded(self, request, response, context, match.route, requestID);
-  NSMutableArray *executedMiddlewares = [NSMutableArray array];
+  NSMutableArray *executedMiddlewares = nil;
   if (shouldDispatchController && [self.mutableMiddlewares count] > 0) {
+    executedMiddlewares = [NSMutableArray arrayWithCapacity:[self.mutableMiddlewares count]];
     [trace startStage:@"middleware"];
     for (id<ALNMiddleware> middleware in self.mutableMiddlewares) {
       NSError *middlewareError = nil;
@@ -3375,7 +3378,7 @@ static void ALNFinalizeResponse(ALNApplication *application,
       }
 
       if (!guardPassed && !response.committed) {
-        if (apiOnly || ALNRequestPrefersJSON(request, apiOnly)) {
+        if (apiOnly || prefersJSON) {
           NSDictionary *payload = ALNStructuredErrorPayload(403,
                                                             @"forbidden",
                                                             @"Forbidden",
@@ -3555,7 +3558,7 @@ static void ALNFinalizeResponse(ALNApplication *application,
     }
   }
 
-  if ([self.logger shouldLogLevel:ALNLogLevelInfo]) {
+  if (infoLoggingEnabled) {
     NSMutableDictionary *logFields = [NSMutableDictionary dictionary];
     logFields[@"method"] = request.method ?: @"";
     logFields[@"path"] = request.path ?: @"";

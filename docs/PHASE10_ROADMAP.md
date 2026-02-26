@@ -1,6 +1,6 @@
 # Arlen Phase 10 Roadmap
 
-Status: Active (10A/10B/10C/10D/10E/10F/10G/10H/10I/10J complete)  
+Status: Active (10A/10B/10C/10D/10E/10F/10G/10H/10I/10J/10K complete)  
 Last updated: 2026-02-26
 
 Related docs:
@@ -57,6 +57,7 @@ Key findings:
 8. Phase 10H: replace HTTP parse pipeline with llhttp-based parser path.
 9. Phase 10I: compile-time feature toggles for JSON/parser backends.
 10. Phase 10J: HTTP runtime hot-path memory/throughput optimization tranche.
+11. Phase 10K: benchmark-driven write/parse/baseline overhead optimization pass.
 
 ## 4. Milestones
 
@@ -289,6 +290,57 @@ Acceptance (required):
 - No regressions in request/response behavioral contracts, logging contracts, or deployment operability checks.
 - Dispatch-default policy change (if any) is gated by explicit reliability evidence, not by benchmark-only results.
 
+## 4.11 Phase 10K: Benchmark-Driven Throughput/Latency Optimization Pass
+
+Status: Complete (2026-02-26)
+
+Deliverables:
+
+- 10K.1 `H_blob_large` write-path optimization:
+  - add reduced-copy/gathered response emission (`writev`-style path with deterministic fallback).
+  - add per-worker reusable output buffers to reduce per-chunk allocation churn.
+  - add file/static large-payload fast path (`sendfile` where available, portable fallback retained).
+  - preserve partial-write/backpressure/error semantics and connection-close correctness.
+- 10K.2 parser + metadata path optimization for `F_http_parse_many_headers` and `E_http_parse_large_path`:
+  - parse headers/path into spans first and materialize Foundation objects lazily on demand.
+  - reduce unconditional lowercase/copy work in header-path hot loops.
+  - avoid large-path split/alloc churn with byte-oriented pre-match helpers before full route materialization.
+  - preserve existing request contract behavior and parser backend toggles.
+- 10K.3 `A_json_status` framework-tax fast path:
+  - add an explicitly minimal request execution path for trivial JSON status-style endpoints.
+  - avoid avoidable context/log/trace/middleware allocation work when equivalent behavior is configured as disabled.
+  - keep auth/session/security semantics unchanged when enabled (no bypass of required middleware).
+- 10K.4 cross-cutting allocation/contention cleanup:
+  - introduce ARC-safe per-worker scratch storage reuse for request/response hot data structures.
+  - reduce shared lock contention via per-worker or sharded state where contract-safe.
+  - further reduce dynamic dispatch overhead in hot handlers via cached metadata/IMP paths.
+  - avoid unsafe generic object pooling that weakens ARC lifetime/ownership guarantees.
+
+Implemented in this tranche:
+
+- added gathered response emission (`writev`) for header+body writes with deterministic `send` fallback path.
+- added static-file fast path using response file metadata + `sendfile` when available, with portable read-loop fallback.
+- eliminated eager static-file `NSData` loading in static mount handling and served regular files directly from disk.
+- introduced thread-local llhttp parse-state reuse to reduce per-request parser object churn.
+- reduced llhttp header parse overhead with byte-level OWS trim + lowercase normalization before string materialization.
+- split request URI directly from llhttp span bytes to avoid full request-line URI materialization and split copies.
+- reduced large-path route-match allocation churn by splitting request path segments once per match attempt and reusing them across candidates.
+- reduced baseline dispatch-path allocations by caching info-level log gating and preferred-format decisions per request, and lazily allocating middleware execution tracking.
+- cached serialized response header data with invalidation and added explicit file-body length support for static send paths.
+- added regression coverage for new hot paths:
+  - `tests/unit/ResponseTests.m`
+  - `tests/unit/RequestTests.m`
+  - `tests/unit/RouterTests.m`
+  - `tests/integration/HTTPIntegrationTests.m`
+
+Acceptance (required):
+
+- New benchmark confidence artifacts capture pre/post deltas for `A_json_status`, `E_http_parse_large_path`, `F_http_parse_many_headers`, and `H_blob_large`.
+- `H_blob_large` shows a clear throughput + p95 latency improvement relative to 10J baseline without regressions in correctness tests.
+- `E/F` parser suites show improved throughput without request-contract regressions (headers/query/cookies/path params/error behavior).
+- `A_json_status` shows measurable reduction in baseline framework overhead while preserving logging/trace/security contracts.
+- Long-run stress/fault/sanitizer lanes show no new memory safety or lifecycle regressions.
+
 ## 5. Test Strategy
 
 Minimum mandatory test layers:
@@ -316,6 +368,7 @@ Minimum mandatory test layers:
 8. 10H llhttp parser migration as final Phase 10 performance hardening stream.
 9. 10I compile-time backend toggle hardening for controlled feature-disable builds.
 10. 10J HTTP runtime hot-path memory/throughput optimization and reliability-gated dispatch policy.
+11. 10K benchmark-driven write/parse/baseline overhead optimization pass with reliability gates.
 
 ## 7. Explicit Non-Goals (Phase 10)
 

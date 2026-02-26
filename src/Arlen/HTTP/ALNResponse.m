@@ -51,6 +51,8 @@ static NSString *ALNStatusText(NSInteger statusCode) {
 
 @property(nonatomic, strong, readwrite) NSMutableDictionary *headers;
 @property(nonatomic, strong, readwrite) NSMutableData *bodyData;
+@property(nonatomic, strong) NSData *cachedHeaderData;
+@property(nonatomic, assign) BOOL serializedHeadersDirty;
 
 @end
 
@@ -63,9 +65,43 @@ static NSString *ALNStatusText(NSInteger statusCode) {
     _headers = [NSMutableDictionary dictionary];
     _bodyData = [NSMutableData data];
     _committed = NO;
+    _fileBodyPath = nil;
+    _fileBodyLength = 0;
+    _cachedHeaderData = nil;
+    _serializedHeadersDirty = YES;
     [self setHeader:@"Server" value:@"Arlen"];
   }
   return self;
+}
+
+- (void)invalidateSerializedHeaders {
+  self.serializedHeadersDirty = YES;
+  self.cachedHeaderData = nil;
+}
+
+- (void)setStatusCode:(NSInteger)statusCode {
+  if (_statusCode == statusCode) {
+    return;
+  }
+  _statusCode = statusCode;
+  [self invalidateSerializedHeaders];
+}
+
+- (void)setFileBodyPath:(NSString *)fileBodyPath {
+  if ((_fileBodyPath == nil && fileBodyPath == nil) ||
+      [_fileBodyPath isEqualToString:fileBodyPath]) {
+    return;
+  }
+  _fileBodyPath = [fileBodyPath copy];
+  [self invalidateSerializedHeaders];
+}
+
+- (void)setFileBodyLength:(unsigned long long)fileBodyLength {
+  if (_fileBodyLength == fileBodyLength) {
+    return;
+  }
+  _fileBodyLength = fileBodyLength;
+  [self invalidateSerializedHeaders];
 }
 
 - (void)setHeader:(NSString *)name value:(NSString *)value {
@@ -73,6 +109,7 @@ static NSString *ALNStatusText(NSInteger statusCode) {
     return;
   }
   self.headers[name] = value ?: @"";
+  [self invalidateSerializedHeaders];
 }
 
 - (NSString *)headerForName:(NSString *)name {
@@ -83,7 +120,10 @@ static NSString *ALNStatusText(NSInteger statusCode) {
   if (data == nil) {
     return;
   }
+  self.fileBodyPath = nil;
+  self.fileBodyLength = 0;
   [self.bodyData appendData:data];
+  [self invalidateSerializedHeaders];
   self.committed = YES;
 }
 
@@ -98,7 +138,10 @@ static NSString *ALNStatusText(NSInteger statusCode) {
 }
 
 - (void)setTextBody:(NSString *)text {
+  self.fileBodyPath = nil;
+  self.fileBodyLength = 0;
   [self.bodyData setLength:0];
+  [self invalidateSerializedHeaders];
   [self appendText:text ?: @""];
   if ([self headerForName:@"Content-Type"] == nil) {
     [self setHeader:@"Content-Type" value:@"text/plain; charset=utf-8"];
@@ -112,17 +155,27 @@ static NSString *ALNStatusText(NSInteger statusCode) {
   if (json == nil) {
     return NO;
   }
+  self.fileBodyPath = nil;
+  self.fileBodyLength = 0;
   [self.bodyData setLength:0];
+  [self invalidateSerializedHeaders];
   [self appendData:json];
   [self setHeader:@"Content-Type" value:@"application/json; charset=utf-8"];
   return YES;
 }
 
 - (NSData *)serializedHeaderData {
+  if (!self.serializedHeadersDirty && self.cachedHeaderData != nil) {
+    return self.cachedHeaderData;
+  }
+
   if ([self headerForName:@"Content-Length"] == nil) {
+    unsigned long long bodyLength = [self.bodyData length];
+    if ([self.fileBodyPath length] > 0) {
+      bodyLength = self.fileBodyLength;
+    }
     [self setHeader:@"Content-Length"
-              value:[NSString stringWithFormat:@"%lu",
-                                             (unsigned long)[self.bodyData length]]];
+              value:[NSString stringWithFormat:@"%llu", bodyLength]];
   }
 
   if ([self headerForName:@"Content-Type"] == nil) {
@@ -137,7 +190,10 @@ static NSString *ALNStatusText(NSInteger statusCode) {
     [head appendFormat:@"%@: %@\r\n", key, self.headers[key]];
   }
   [head appendString:@"\r\n"];
-  return [head dataUsingEncoding:NSUTF8StringEncoding] ?: [NSData data];
+  NSData *serialized = [head dataUsingEncoding:NSUTF8StringEncoding] ?: [NSData data];
+  self.cachedHeaderData = serialized;
+  self.serializedHeadersDirty = NO;
+  return serialized;
 }
 
 - (NSData *)serializedData {

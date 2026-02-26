@@ -53,7 +53,7 @@ Last updated: 2026-02-26
 - Phase 9H: complete (2026-02-25)
 - Phase 9I: complete (2026-02-25)
 - Phase 9J: complete (2026-02-25)
-- Phase 10: active (10A/10B/10C/10D/10E/10F/10G/10H/10I/10J complete on 2026-02-26)
+- Phase 10: active (10A/10B/10C/10D/10E/10F/10G/10H/10I/10J/10K complete on 2026-02-26)
 
 ## Completed Today (2026-02-26)
 
@@ -114,6 +114,25 @@ Last updated: 2026-02-26
   - removed duplicated read-path parse work with a single head metadata parse pass (content-length/header-limit enforcement retained)
   - applied queue/static mount micro-optimizations (O(1)-style dequeue with compaction, cached effective static mounts)
   - hardened cluster header defaults so `cluster.emitHeaders` inherits `cluster.enabled` when unset
+- Completed Phase 10K benchmark-driven optimization tranche:
+  - optimized `H_blob_large`/large static write paths:
+    - gathered header+body writes via `writev` with deterministic fallback
+    - static file fast path via `sendfile` with read-loop fallback
+    - static mount serving now streams regular files from disk instead of eager `NSData` loads
+  - optimized `E/F` parser/metadata path:
+    - thread-local llhttp parse-state reuse
+    - byte-level header trim/lowercase normalization to reduce copy churn
+    - URI span split before string materialization for path/query extraction
+    - route matching now reuses one split path-segment array per candidate sweep
+  - optimized baseline request-path overhead without bypassing middleware/security contracts:
+    - per-request preferred-format + info-log-level gating reuse in dispatch
+    - lazy middleware execution-array allocation
+    - response header serialization cache with invalidation
+  - added/expanded regression coverage:
+    - `tests/unit/ResponseTests.m`
+    - `tests/unit/RequestTests.m`
+    - `tests/unit/RouterTests.m`
+    - `tests/integration/HTTPIntegrationTests.m` (`testStaticLargeAssetReturnsExpectedBodyAndLength`)
 
 ## Completed Today (2026-02-25)
 

@@ -137,6 +137,8 @@ NSString *_errorMessage;
 BOOL _messageComplete;
 }
 
+- (void)resetForNextParse;
+
 @end
 
 @implementation ALNLLHTTPParseState
@@ -163,10 +165,30 @@ BOOL _messageComplete;
   return self;
 }
 
+- (void)resetForNextParse {
+  _urlStart = NULL;
+  _urlLength = 0;
+  _urlData = nil;
+  _headerFieldStart = NULL;
+  _headerFieldLength = 0;
+  _headerFieldData = nil;
+  _headerValueStart = NULL;
+  _headerValueLength = 0;
+  _headerValueData = nil;
+  _bodyStart = NULL;
+  _bodyLength = 0;
+  _bodyData = nil;
+  [_headers removeAllObjects];
+  _errorMessage = @"";
+  _messageComplete = NO;
+}
+
 @end
 
 static llhttp_settings_t gALNLLHTTPSettings;
 static pthread_once_t gALNLLHTTPSettingsOnce = PTHREAD_ONCE_INIT;
+static pthread_key_t gALNLLHTTPStateKey;
+static pthread_once_t gALNLLHTTPStateKeyOnce = PTHREAD_ONCE_INIT;
 
 static ALNLLHTTPParseState *ALNLLHTTPState(llhttp_t *parser) {
   if (parser == NULL || parser->data == NULL) {
@@ -231,14 +253,98 @@ static int ALNLLHTTPAppendSpan(const char **start,
   return 0;
 }
 
-static NSString *ALNLLHTTPStringFromSpan(const char *start, size_t length, NSData *data) {
+static BOOL ALNLLHTTPSpanBytes(const char *start,
+                               size_t length,
+                               NSData *data,
+                               const unsigned char **bytesOut,
+                               size_t *lengthOut) {
+  if (bytesOut == NULL || lengthOut == NULL) {
+    return NO;
+  }
   if (data != nil) {
-    return [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
+    *bytesOut = [data bytes];
+    *lengthOut = [data length];
+    return YES;
   }
   if (start == NULL || length == 0) {
+    *bytesOut = NULL;
+    *lengthOut = 0;
+    return YES;
+  }
+  *bytesOut = (const unsigned char *)start;
+  *lengthOut = length;
+  return YES;
+}
+
+static BOOL ALNLLHTTPIsOWSByte(unsigned char byte) {
+  return (byte == ' ' || byte == '\t' || byte == '\r' || byte == '\n');
+}
+
+static void ALNLLHTTPTrimOWS(const unsigned char **bytes, size_t *length) {
+  if (bytes == NULL || length == NULL || *bytes == NULL || *length == 0) {
+    return;
+  }
+  const unsigned char *cursor = *bytes;
+  size_t remaining = *length;
+  while (remaining > 0 && ALNLLHTTPIsOWSByte(cursor[0])) {
+    cursor += 1;
+    remaining -= 1;
+  }
+  while (remaining > 0 && ALNLLHTTPIsOWSByte(cursor[remaining - 1])) {
+    remaining -= 1;
+  }
+  *bytes = cursor;
+  *length = remaining;
+}
+
+static NSString *ALNLLHTTPLowercasedASCIIHeaderName(const unsigned char *bytes, size_t length) {
+  if (bytes == NULL || length == 0) {
     return @"";
   }
-  return [[NSString alloc] initWithBytes:start length:length encoding:NSUTF8StringEncoding];
+
+  char stack[256];
+  char *buffer = stack;
+  BOOL needsFree = NO;
+  if (length > sizeof(stack)) {
+    buffer = malloc(length);
+    if (buffer == NULL) {
+      return nil;
+    }
+    needsFree = YES;
+  }
+
+  for (size_t idx = 0; idx < length; idx++) {
+    unsigned char byte = bytes[idx];
+    if (byte >= 'A' && byte <= 'Z') {
+      buffer[idx] = (char)(byte + ('a' - 'A'));
+      continue;
+    }
+    if (byte > 127) {
+      if (needsFree) {
+        free(buffer);
+      }
+      return nil;
+    }
+    buffer[idx] = (char)byte;
+  }
+
+  NSString *value = nil;
+  if (needsFree) {
+    value = [[NSString alloc] initWithBytesNoCopy:buffer
+                                           length:length
+                                         encoding:NSASCIIStringEncoding
+                                     freeWhenDone:YES];
+  } else {
+    value = [[NSString alloc] initWithBytes:buffer length:length encoding:NSASCIIStringEncoding];
+  }
+  return value;
+}
+
+static NSString *ALNLLHTTPHeaderValueString(const unsigned char *bytes, size_t length) {
+  if (bytes == NULL || length == 0) {
+    return @"";
+  }
+  return [[NSString alloc] initWithBytes:bytes length:length encoding:NSUTF8StringEncoding];
 }
 
 static NSData *ALNLLHTTPCopyDataFromSpan(const char *start, size_t length, NSData *data) {
@@ -279,23 +385,36 @@ static int ALNLLHTTPFinalizeHeader(llhttp_t *parser) {
     return ALNLLHTTPSetError(parser, @"Invalid header field");
   }
 
-  NSString *field =
-      ALNLLHTTPStringFromSpan(state->_headerFieldStart, state->_headerFieldLength, state->_headerFieldData);
-  NSString *value =
-      ALNLLHTTPStringFromSpan(state->_headerValueStart, state->_headerValueLength, state->_headerValueData);
-  if (field == nil || value == nil) {
+  const unsigned char *fieldBytes = NULL;
+  size_t fieldByteLength = 0;
+  (void)ALNLLHTTPSpanBytes(state->_headerFieldStart,
+                           state->_headerFieldLength,
+                           state->_headerFieldData,
+                           &fieldBytes,
+                           &fieldByteLength);
+  ALNLLHTTPTrimOWS(&fieldBytes, &fieldByteLength);
+  NSString *name = ALNLLHTTPLowercasedASCIIHeaderName(fieldBytes, fieldByteLength);
+  if (name == nil) {
     return ALNLLHTTPSetError(parser, @"Request header is not valid UTF-8");
   }
-
-  NSString *name = [[[field lowercaseString]
-      stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]] copy];
-  NSString *trimmedValue =
-      [[value stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]] copy];
   if ([name length] == 0) {
     return ALNLLHTTPSetError(parser, @"Invalid header field");
   }
 
-  state->_headers[name] = trimmedValue ?: @"";
+  const unsigned char *valueBytes = NULL;
+  size_t valueByteLength = 0;
+  (void)ALNLLHTTPSpanBytes(state->_headerValueStart,
+                           state->_headerValueLength,
+                           state->_headerValueData,
+                           &valueBytes,
+                           &valueByteLength);
+  ALNLLHTTPTrimOWS(&valueBytes, &valueByteLength);
+  NSString *value = ALNLLHTTPHeaderValueString(valueBytes, valueByteLength);
+  if (value == nil) {
+    return ALNLLHTTPSetError(parser, @"Request header is not valid UTF-8");
+  }
+
+  state->_headers[name] = value ?: @"";
   ALNLLHTTPResetSpan(&state->_headerFieldStart, &state->_headerFieldLength, &state->_headerFieldData);
   ALNLLHTTPResetSpan(&state->_headerValueStart, &state->_headerValueLength, &state->_headerValueData);
   return 0;
@@ -381,6 +500,29 @@ static const llhttp_settings_t *ALNLLHTTPSharedSettings(void) {
   return &gALNLLHTTPSettings;
 }
 
+static void ALNLLHTTPThreadStateRelease(void *value) {
+  if (value != NULL) {
+    CFBridgingRelease(value);
+  }
+}
+
+static void ALNLLHTTPInitializeThreadStateKey(void) {
+  (void)pthread_key_create(&gALNLLHTTPStateKey, ALNLLHTTPThreadStateRelease);
+}
+
+static ALNLLHTTPParseState *ALNLLHTTPThreadState(void) {
+  pthread_once(&gALNLLHTTPStateKeyOnce, ALNLLHTTPInitializeThreadStateKey);
+  void *stored = pthread_getspecific(gALNLLHTTPStateKey);
+  ALNLLHTTPParseState *state =
+      (stored != NULL) ? (__bridge ALNLLHTTPParseState *)stored : nil;
+  if (state == nil) {
+    state = [[ALNLLHTTPParseState alloc] init];
+    pthread_setspecific(gALNLLHTTPStateKey, CFBridgingRetain(state));
+  }
+  [state resetForNextParse];
+  return state;
+}
+
 static BOOL ALNRequestLineNeedsHTTPVersionNormalization(NSData *data) {
   if (data == nil || [data length] == 0) {
     return NO;
@@ -452,6 +594,56 @@ static NSData *ALNNormalizedRawDataForLLHTTP(NSData *data) {
                                                               [data length] - remainderOffset)]];
   }
   return normalized;
+}
+
+static BOOL ALNLLHTTPSplitURIFromSpan(const char *start,
+                                      size_t length,
+                                      NSData *data,
+                                      NSString **pathOut,
+                                      NSString **queryOut) {
+  const unsigned char *bytes = NULL;
+  size_t byteLength = 0;
+  (void)ALNLLHTTPSpanBytes(start, length, data, &bytes, &byteLength);
+
+  const unsigned char *queryBytes = NULL;
+  size_t queryLength = 0;
+  size_t pathLength = byteLength;
+  for (size_t idx = 0; idx < byteLength; idx++) {
+    if (bytes[idx] == '?') {
+      pathLength = idx;
+      queryBytes = bytes + idx + 1;
+      queryLength = byteLength - idx - 1;
+      break;
+    }
+  }
+
+  NSString *path = @"/";
+  if (pathLength > 0) {
+    path = [[NSString alloc] initWithBytes:bytes
+                                    length:pathLength
+                                  encoding:NSUTF8StringEncoding];
+    if (path == nil) {
+      return NO;
+    }
+  }
+
+  NSString *query = @"";
+  if (queryLength > 0) {
+    query = [[NSString alloc] initWithBytes:queryBytes
+                                     length:queryLength
+                                   encoding:NSUTF8StringEncoding];
+    if (query == nil) {
+      return NO;
+    }
+  }
+
+  if (pathOut != NULL) {
+    *pathOut = path;
+  }
+  if (queryOut != NULL) {
+    *queryOut = query;
+  }
+  return YES;
 }
 #endif
 
@@ -544,7 +736,7 @@ static ALNRequest *ALNRequestFromRawDataLLHTTPOnce(NSData *data, NSError **error
     return nil;
   }
 
-  ALNLLHTTPParseState *state = [[ALNLLHTTPParseState alloc] init];
+  ALNLLHTTPParseState *state = ALNLLHTTPThreadState();
 
   llhttp_t parser;
   llhttp_init(&parser, HTTP_REQUEST, ALNLLHTTPSharedSettings());
@@ -593,14 +785,14 @@ static ALNRequest *ALNRequestFromRawDataLLHTTPOnce(NSData *data, NSError **error
   uint8_t parsedMethod = llhttp_get_method(&parser);
   const char *methodCString = llhttp_method_name((llhttp_method_t)parsedMethod);
   NSString *method = (methodCString != NULL) ? [NSString stringWithUTF8String:methodCString] : nil;
-  NSString *uri = ALNLLHTTPStringFromSpan(state->_urlStart, state->_urlLength, state->_urlData);
-  if (method == nil || uri == nil) {
+  size_t uriLength = ALNLLHTTPSpanLength(state->_urlStart, state->_urlLength, state->_urlData);
+  if (method == nil) {
     if (error != NULL) {
       *error = ALNRequestError(1, @"Request header is not valid UTF-8");
     }
     return nil;
   }
-  if ([method length] == 0 || [uri length] == 0) {
+  if ([method length] == 0 || uriLength == 0) {
     if (error != NULL) {
       *error = ALNRequestError(3, @"Invalid request line");
     }
@@ -622,7 +814,16 @@ static ALNRequest *ALNRequestFromRawDataLLHTTPOnce(NSData *data, NSError **error
 
   NSString *path = nil;
   NSString *query = nil;
-  ALNSplitURI(uri, &path, &query);
+  if (!ALNLLHTTPSplitURIFromSpan(state->_urlStart,
+                                 state->_urlLength,
+                                 state->_urlData,
+                                 &path,
+                                 &query)) {
+    if (error != NULL) {
+      *error = ALNRequestError(1, @"Request header is not valid UTF-8");
+    }
+    return nil;
+  }
 
   NSData *body = ALNLLHTTPCopyDataFromSpan(state->_bodyStart, state->_bodyLength, state->_bodyData);
   return [[ALNRequest alloc] initWithMethod:method

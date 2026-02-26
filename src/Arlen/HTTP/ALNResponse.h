@@ -13,6 +13,8 @@ extern NSString *const ALNResponseErrorDomain;
 @property(nonatomic, strong, readonly) NSMutableDictionary *headers;
 @property(nonatomic, strong, readonly) NSMutableData *bodyData;
 @property(nonatomic, assign) BOOL committed;
+@property(nonatomic, copy, nullable) NSString *fileBodyPath;
+@property(nonatomic, assign) unsigned long long fileBodyLength;
 
 - (void)setHeader:(NSString *)name value:(NSString *)value;
 - (nullable NSString *)headerForName:(NSString *)name;

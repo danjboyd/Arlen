@@ -37,4 +37,31 @@
   XCTAssertTrue([text hasSuffix:@"\r\n\r\nmissing"]);
 }
 
+- (void)testSerializedHeaderUsesFileBodyLengthWhenPresent {
+  ALNResponse *response = [[ALNResponse alloc] init];
+  response.statusCode = 200;
+  response.fileBodyPath = @"/tmp/static.txt";
+  response.fileBodyLength = 321;
+
+  NSData *headerData = [response serializedHeaderData];
+  NSString *headerText = [[NSString alloc] initWithData:headerData encoding:NSUTF8StringEncoding];
+  XCTAssertNotNil(headerText);
+  XCTAssertTrue([headerText containsString:@"Content-Length: 321\r\n"]);
+}
+
+- (void)testSerializedHeaderCacheInvalidatesOnMutation {
+  ALNResponse *response = [[ALNResponse alloc] init];
+  [response appendText:@"hello"];
+
+  NSData *first = [response serializedHeaderData];
+  NSData *second = [response serializedHeaderData];
+  XCTAssertTrue(first == second);
+
+  [response setHeader:@"X-Test" value:@"1"];
+  NSData *third = [response serializedHeaderData];
+  NSString *headerText = [[NSString alloc] initWithData:third encoding:NSUTF8StringEncoding];
+  XCTAssertFalse(second == third);
+  XCTAssertTrue([headerText containsString:@"X-Test: 1\r\n"]);
+}
+
 @end

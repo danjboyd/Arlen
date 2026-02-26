@@ -2,15 +2,21 @@
 
 #import <arpa/inet.h>
 #import <errno.h>
+#import <fcntl.h>
 #import <limits.h>
 #import <netinet/in.h>
 #import <openssl/sha.h>
 #import <signal.h>
 #import <stdio.h>
 #import <string.h>
+#import <sys/stat.h>
 #import <sys/socket.h>
+#import <sys/uio.h>
 #import <sys/time.h>
 #import <unistd.h>
+#ifdef __linux__
+#import <sys/sendfile.h>
+#endif
 
 #import "ALNApplication.h"
 #import "ALNRequest.h"
@@ -494,6 +500,135 @@ static BOOL ALNSendAll(int fd, const void *bytes, size_t length) {
     remaining -= (size_t)written;
   }
   return YES;
+}
+
+static BOOL ALNWritevAll(int fd, const struct iovec *iov, int iovcnt) {
+  if (iov == NULL || iovcnt <= 0) {
+    return YES;
+  }
+
+  struct iovec localIOV[8];
+  if (iovcnt > (int)(sizeof(localIOV) / sizeof(localIOV[0]))) {
+    return NO;
+  }
+  for (int idx = 0; idx < iovcnt; idx++) {
+    localIOV[idx] = iov[idx];
+  }
+
+  int current = 0;
+  while (current < iovcnt) {
+    ssize_t written = writev(fd, &localIOV[current], iovcnt - current);
+    if (written < 0) {
+      if (errno == EINTR) {
+        continue;
+      }
+      return NO;
+    }
+    if (written == 0) {
+      return NO;
+    }
+
+    ssize_t remainingWrite = written;
+    while (current < iovcnt && remainingWrite > 0) {
+      size_t segmentLength = localIOV[current].iov_len;
+      if ((size_t)remainingWrite >= segmentLength) {
+        remainingWrite -= (ssize_t)segmentLength;
+        current += 1;
+        continue;
+      }
+
+      localIOV[current].iov_base = ((char *)localIOV[current].iov_base) + remainingWrite;
+      localIOV[current].iov_len -= (size_t)remainingWrite;
+      remainingWrite = 0;
+    }
+  }
+  return YES;
+}
+
+static BOOL ALNSendFileReadFallback(int clientFd, int fileFd, unsigned long long remaining) {
+  if (remaining == 0) {
+    return YES;
+  }
+
+  unsigned char buffer[16384];
+  while (remaining > 0) {
+    size_t chunk = (remaining > (unsigned long long)sizeof(buffer))
+                       ? sizeof(buffer)
+                       : (size_t)remaining;
+    ssize_t readBytes = read(fileFd, buffer, chunk);
+    if (readBytes < 0) {
+      if (errno == EINTR) {
+        continue;
+      }
+      return NO;
+    }
+    if (readBytes == 0) {
+      return NO;
+    }
+    if (!ALNSendAll(clientFd, buffer, (size_t)readBytes)) {
+      return NO;
+    }
+    remaining -= (unsigned long long)readBytes;
+  }
+  return YES;
+}
+
+static BOOL ALNSendFileAtPath(int clientFd, NSString *path, unsigned long long byteLength) {
+  if (![path isKindOfClass:[NSString class]] || [path length] == 0) {
+    return NO;
+  }
+  if (byteLength == 0) {
+    return YES;
+  }
+
+  int fileFd = open([path fileSystemRepresentation], O_RDONLY);
+  if (fileFd < 0) {
+    return NO;
+  }
+
+  BOOL ok = NO;
+  unsigned long long remaining = byteLength;
+#ifdef __linux__
+  off_t offset = 0;
+  while (remaining > 0) {
+    size_t chunk = (remaining > (unsigned long long)SSIZE_MAX)
+                       ? (size_t)SSIZE_MAX
+                       : (size_t)remaining;
+    ssize_t sent = sendfile(clientFd, fileFd, &offset, chunk);
+    if (sent < 0) {
+      if (errno == EINTR) {
+        continue;
+      }
+      if (errno == EINVAL || errno == ENOSYS) {
+        if (lseek(fileFd, offset, SEEK_SET) < 0) {
+          ok = NO;
+          goto cleanup;
+        }
+        ok = ALNSendFileReadFallback(clientFd, fileFd, remaining);
+        goto cleanup;
+      }
+      ok = NO;
+      goto cleanup;
+    }
+    if (sent == 0) {
+      break;
+    }
+    remaining -= (unsigned long long)sent;
+  }
+  ok = (remaining == 0);
+  if (!ok) {
+    if (lseek(fileFd, offset, SEEK_SET) < 0) {
+      goto cleanup;
+    }
+    ok = ALNSendFileReadFallback(clientFd, fileFd, remaining);
+  }
+#else
+  ok = ALNSendFileReadFallback(clientFd, fileFd, remaining);
+#endif
+
+cleanup:
+  close(fileFd);
+  return ok;
 }
 
 static BOOL ALNRecvAll(int fd, void *buffer, size_t length) {
@@ -1009,8 +1144,9 @@ static ALNResponse *ALNStaticResponseForMount(ALNRequest *request,
     return ALNStaticNotFoundResponse();
   }
 
-  NSData *fileData = [NSData dataWithContentsOfFile:resolvedFilePath];
-  if (fileData == nil) {
+  struct stat fileStat;
+  if (stat([resolvedFilePath fileSystemRepresentation], &fileStat) != 0 ||
+      !S_ISREG(fileStat.st_mode)) {
     ALNResponse *response = [[ALNResponse alloc] init];
     response.statusCode = 500;
     [response setTextBody:@"failed to read static asset\n"];
@@ -1022,7 +1158,8 @@ static ALNResponse *ALNStaticResponseForMount(ALNRequest *request,
   response.statusCode = 200;
   [response setHeader:@"Content-Type" value:ALNContentTypeForFilePath(resolvedFilePath)];
   if (![request.method isEqualToString:@"HEAD"]) {
-    [response appendData:fileData];
+    response.fileBodyPath = resolvedFilePath;
+    response.fileBodyLength = (unsigned long long)fileStat.st_size;
   }
   response.committed = YES;
   return response;
@@ -1072,12 +1209,34 @@ static double ALNSendResponse(int clientFd, ALNResponse *response, BOOL performa
   }
 
   double writeStart = ALNNowMilliseconds();
-  if ([headerData length] > 0) {
-    (void)ALNSendAll(clientFd, [headerData bytes], [headerData length]);
-  }
+  NSUInteger headerLength = [headerData length];
   NSData *bodyData = response.bodyData ?: [NSData data];
-  if ([bodyData length] > 0) {
-    (void)ALNSendAll(clientFd, [bodyData bytes], [bodyData length]);
+  NSUInteger bodyLength = [bodyData length];
+  NSString *fileBodyPath = response.fileBodyPath;
+  unsigned long long fileBodyLength = response.fileBodyLength;
+
+  if ([fileBodyPath length] > 0 && fileBodyLength > 0) {
+    if (headerLength > 0) {
+      (void)ALNSendAll(clientFd, [headerData bytes], headerLength);
+    }
+    (void)ALNSendFileAtPath(clientFd, fileBodyPath, fileBodyLength);
+  } else if (headerLength > 0 && bodyLength > 0) {
+    struct iovec iov[2];
+    iov[0].iov_base = (void *)[headerData bytes];
+    iov[0].iov_len = headerLength;
+    iov[1].iov_base = (void *)[bodyData bytes];
+    iov[1].iov_len = bodyLength;
+    if (!ALNWritevAll(clientFd, iov, 2)) {
+      (void)ALNSendAll(clientFd, [headerData bytes], headerLength);
+      (void)ALNSendAll(clientFd, [bodyData bytes], bodyLength);
+    }
+  } else {
+    if (headerLength > 0) {
+      (void)ALNSendAll(clientFd, [headerData bytes], headerLength);
+    }
+    if (bodyLength > 0) {
+      (void)ALNSendAll(clientFd, [bodyData bytes], bodyLength);
+    }
   }
   return (ALNNowMilliseconds() - writeStart) + serializeMs;
 }

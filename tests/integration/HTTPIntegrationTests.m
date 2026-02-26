@@ -2075,6 +2075,82 @@
   XCTAssertEqualObjects(@"static ok\n", body);
 }
 
+- (void)testStaticLargeAssetReturnsExpectedBodyAndLength {
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *token = [[[NSUUID UUID] UUIDString] lowercaseString];
+  NSString *relativeRoot = [NSString stringWithFormat:@"phase10k-static-%@",
+                                                      [token stringByReplacingOccurrencesOfString:@"-"
+                                                                                       withString:@""]];
+  NSString *assetDir = [repoRoot stringByAppendingPathComponent:
+                                   [NSString stringWithFormat:@"public/%@", relativeRoot]];
+  NSString *assetPath = [assetDir stringByAppendingPathComponent:@"large.txt"];
+
+  NSMutableString *payload = [NSMutableString stringWithCapacity:131072];
+  static NSString *chunk =
+      @"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx";
+  for (NSUInteger idx = 0; idx < 2048; idx++) {
+    [payload appendString:chunk];
+  }
+
+  NSError *setupError = nil;
+  BOOL created = [[NSFileManager defaultManager] createDirectoryAtPath:assetDir
+                                            withIntermediateDirectories:YES
+                                                             attributes:nil
+                                                                  error:&setupError];
+  XCTAssertTrue(created);
+  XCTAssertNil(setupError);
+  XCTAssertTrue([payload writeToFile:assetPath
+                          atomically:YES
+                            encoding:NSUTF8StringEncoding
+                               error:&setupError]);
+  XCTAssertNil(setupError);
+
+  NSString *downloadPath = [self createTempFilePathWithPrefix:@"phase10k-static" suffix:@".txt"];
+  @try {
+    int curlCode = 0;
+    int serverCode = 0;
+    NSString *headers = [self requestWithServerEnv:nil
+                                       serverBinary:@"./build/boomhauer"
+                                          curlBody:[NSString stringWithFormat:
+                                                              @"curl -sS -D - -o /dev/null "
+                                                               "http://127.0.0.1:%%d/static/%@/large.txt",
+                                                              relativeRoot]
+                                          curlCode:&curlCode
+                                         serverCode:&serverCode];
+    XCTAssertEqual(0, curlCode);
+    XCTAssertEqual(0, serverCode);
+    NSString *contentLengthLine =
+        [NSString stringWithFormat:@"Content-Length: %lu", (unsigned long)[payload length]];
+    XCTAssertTrue([headers containsString:contentLengthLine], @"%@", headers);
+
+    NSString *downloadedLength = [self requestWithServerEnv:nil
+                                               serverBinary:@"./build/boomhauer"
+                                                  curlBody:[NSString stringWithFormat:
+                                                                      @"curl -fsS -o '%@' "
+                                                                       "http://127.0.0.1:%%d/static/%@/large.txt "
+                                                                       "&& wc -c < '%@'",
+                                                                      downloadPath,
+                                                                      relativeRoot,
+                                                                      downloadPath]
+                                                  curlCode:&curlCode
+                                                 serverCode:&serverCode];
+    XCTAssertEqual(0, curlCode);
+    XCTAssertEqual(0, serverCode);
+    NSInteger byteCount = [[downloadedLength
+        stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]]
+        integerValue];
+    XCTAssertEqual((NSInteger)[payload length], byteCount);
+
+    NSString *body = [NSString stringWithContentsOfFile:downloadPath
+                                               encoding:NSUTF8StringEncoding
+                                                  error:nil];
+    XCTAssertEqualObjects(payload, body);
+  } @finally {
+    (void)[[NSFileManager defaultManager] removeItemAtPath:downloadPath error:nil];
+    (void)[[NSFileManager defaultManager] removeItemAtPath:assetDir error:nil];
+  }
+}
+
 - (void)testStaticMountCanonicalIndexRedirects {
   NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
   NSString *token = [[[NSUUID UUID] UUIDString] lowercaseString];

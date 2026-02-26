@@ -254,4 +254,47 @@
   XCTAssertEqualObjects(legacy.cookies, llhttp.cookies);
 }
 
+- (void)testLLHTTPAndLegacyParsersHandleLargePathAndHeaderWhitespace {
+  if (![ALNRequest isLLHTTPAvailable]) {
+    return;
+  }
+
+  NSMutableString *largeSegment = [NSMutableString string];
+  for (NSUInteger idx = 0; idx < 2048; idx++) {
+    [largeSegment appendString:@"ab"];
+  }
+  NSString *path = [NSString stringWithFormat:@"/api/echo/%@", largeSegment];
+  NSString *raw = [NSString stringWithFormat:@"GET %@?k=v HTTP/1.1\r\n"
+                                         "Host: localhost\r\n"
+                                         "X-Trace:\t  trace-value  \r\n"
+                                         "Cookie: sid=abc123\r\n\r\n",
+                                         path];
+  NSData *data = [raw dataUsingEncoding:NSUTF8StringEncoding];
+
+  NSError *llhttpError = nil;
+  ALNRequest *llhttp = [ALNRequest requestFromRawData:data
+                                              backend:ALNHTTPParserBackendLLHTTP
+                                                error:&llhttpError];
+  XCTAssertNil(llhttpError);
+  XCTAssertNotNil(llhttp);
+
+  NSError *legacyError = nil;
+  ALNRequest *legacy = [ALNRequest requestFromRawData:data
+                                              backend:ALNHTTPParserBackendLegacy
+                                                error:&legacyError];
+  XCTAssertNil(legacyError);
+  XCTAssertNotNil(legacy);
+
+  if (llhttp == nil || legacy == nil) {
+    return;
+  }
+
+  XCTAssertEqualObjects(legacy.path, llhttp.path);
+  XCTAssertEqualObjects(legacy.queryString, llhttp.queryString);
+  XCTAssertEqualObjects(@"trace-value", llhttp.headers[@"x-trace"]);
+  XCTAssertEqualObjects(@"trace-value", legacy.headers[@"x-trace"]);
+  XCTAssertEqualObjects(@"abc123", llhttp.cookies[@"sid"]);
+  XCTAssertEqualObjects(@"abc123", legacy.cookies[@"sid"]);
+}
+
 @end

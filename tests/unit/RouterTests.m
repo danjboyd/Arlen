@@ -133,4 +133,17 @@
   XCTAssertEqualObjects(@"status_post", postMatch.route.name);
 }
 
+- (void)testEmptyPathNormalizesToRootForMatching {
+  ALNRouter *router = [[ALNRouter alloc] init];
+  [router addRouteMethod:@"GET"
+                    path:@"/"
+                    name:@"root"
+         controllerClass:[RouterDummyController class]
+                  action:@"index"];
+
+  ALNRouteMatch *match = [router matchMethod:@"GET" path:@""];
+  XCTAssertNotNil(match);
+  XCTAssertEqualObjects(@"root", match.route.name);
+}
+
 @end
