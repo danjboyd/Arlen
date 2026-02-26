@@ -254,6 +254,12 @@ def summarize_deltas(legacy: Dict[str, Any], llhttp: Dict[str, Any]) -> List[Dic
 def evaluate_thresholds(thresholds: Dict[str, Any], deltas: List[Dict[str, Any]]) -> Tuple[str, List[str], Dict[str, Any]]:
     parse_ops_ratio_min = float(thresholds.get("parse_ops_ratio_min", 0.0))
     parse_p95_ratio_max = float(thresholds.get("parse_p95_ratio_max", 999.0))
+    small_request_bytes_max = int(thresholds.get("small_request_bytes_max", 0))
+    small_parse_ops_ratio_min = float(thresholds.get("small_parse_ops_ratio_min", parse_ops_ratio_min))
+    small_parse_p95_ratio_max = float(thresholds.get("small_parse_p95_ratio_max", parse_p95_ratio_max))
+    large_request_bytes_min = int(thresholds.get("large_request_bytes_min", 0))
+    large_parse_ops_ratio_min = float(thresholds.get("large_parse_ops_ratio_min", parse_ops_ratio_min))
+    large_parse_p95_ratio_max = float(thresholds.get("large_parse_p95_ratio_max", parse_p95_ratio_max))
     parse_expected_improvement_ratio_min = float(
         thresholds.get("parse_expected_improvement_ratio_min", 1.0)
     )
@@ -263,6 +269,8 @@ def evaluate_thresholds(thresholds: Dict[str, Any], deltas: List[Dict[str, Any]]
 
     violations: List[str] = []
     improvement_count = 0
+    small_fixture_count = 0
+    large_fixture_count = 0
     for row in deltas:
         fixture = str(row.get("fixture", "unknown"))
         if row.get("status") != "ok":
@@ -271,6 +279,7 @@ def evaluate_thresholds(thresholds: Dict[str, Any], deltas: List[Dict[str, Any]]
 
         parse_ops_ratio = float(row.get("parse_ops_ratio", 0.0))
         parse_p95_ratio = float(row.get("parse_p95_ratio", 0.0))
+        fixture_bytes = int(row.get("bytes", 0))
 
         if parse_ops_ratio >= parse_expected_improvement_ratio_min:
             improvement_count += 1
@@ -282,6 +291,28 @@ def evaluate_thresholds(thresholds: Dict[str, Any], deltas: List[Dict[str, Any]]
             violations.append(
                 f"fixture '{fixture}' parse p95 ratio {parse_p95_ratio:.3f} > {parse_p95_ratio_max:.3f}"
             )
+
+        if small_request_bytes_max > 0 and fixture_bytes <= small_request_bytes_max:
+            small_fixture_count += 1
+            if parse_ops_ratio < small_parse_ops_ratio_min:
+                violations.append(
+                    f"small fixture '{fixture}' parse ops ratio {parse_ops_ratio:.3f} < {small_parse_ops_ratio_min:.3f}"
+                )
+            if parse_p95_ratio > small_parse_p95_ratio_max:
+                violations.append(
+                    f"small fixture '{fixture}' parse p95 ratio {parse_p95_ratio:.3f} > {small_parse_p95_ratio_max:.3f}"
+                )
+
+        if large_request_bytes_min > 0 and fixture_bytes >= large_request_bytes_min:
+            large_fixture_count += 1
+            if parse_ops_ratio < large_parse_ops_ratio_min:
+                violations.append(
+                    f"large fixture '{fixture}' parse ops ratio {parse_ops_ratio:.3f} < {large_parse_ops_ratio_min:.3f}"
+                )
+            if parse_p95_ratio > large_parse_p95_ratio_max:
+                violations.append(
+                    f"large fixture '{fixture}' parse p95 ratio {parse_p95_ratio:.3f} > {large_parse_p95_ratio_max:.3f}"
+                )
 
     if improvement_count < parse_expected_improvement_fixture_count:
         violations.append(
@@ -296,6 +327,14 @@ def evaluate_thresholds(thresholds: Dict[str, Any], deltas: List[Dict[str, Any]]
         "parse_expected_improvement_ratio_min": parse_expected_improvement_ratio_min,
         "parse_expected_improvement_fixture_count": parse_expected_improvement_fixture_count,
         "parse_improvement_count_observed": improvement_count,
+        "small_request_bytes_max": small_request_bytes_max,
+        "small_fixture_count_observed": small_fixture_count,
+        "small_parse_ops_ratio_min": small_parse_ops_ratio_min,
+        "small_parse_p95_ratio_max": small_parse_p95_ratio_max,
+        "large_request_bytes_min": large_request_bytes_min,
+        "large_fixture_count_observed": large_fixture_count,
+        "large_parse_ops_ratio_min": large_parse_ops_ratio_min,
+        "large_parse_p95_ratio_max": large_parse_p95_ratio_max,
     }
     return ("pass" if not violations else "fail", violations, policy_snapshot)
 
@@ -335,6 +374,18 @@ def render_markdown(
     lines.append(f"- parse ops ratio min: `{policy.get('parse_ops_ratio_min', 0.0):.3f}`")
     lines.append(f"- parse p95 ratio max: `{policy.get('parse_p95_ratio_max', 0.0):.3f}`")
     lines.append(
+        f"- small fixture policy: bytes <= `{int(policy.get('small_request_bytes_max', 0))}`, "
+        f"ops >= `{policy.get('small_parse_ops_ratio_min', 0.0):.3f}`, "
+        f"p95 <= `{policy.get('small_parse_p95_ratio_max', 0.0):.3f}` "
+        f"(observed `{int(policy.get('small_fixture_count_observed', 0))}` fixtures)"
+    )
+    lines.append(
+        f"- large fixture policy: bytes >= `{int(policy.get('large_request_bytes_min', 0))}`, "
+        f"ops >= `{policy.get('large_parse_ops_ratio_min', 0.0):.3f}`, "
+        f"p95 <= `{policy.get('large_parse_p95_ratio_max', 0.0):.3f}` "
+        f"(observed `{int(policy.get('large_fixture_count_observed', 0))}` fixtures)"
+    )
+    lines.append(
         "- parse expected improvement requirement: "
         f"`{policy.get('parse_expected_improvement_fixture_count', 0)}` fixtures at or above "
         f"`{policy.get('parse_expected_improvement_ratio_min', 0.0):.3f}` "
@@ -343,15 +394,16 @@ def render_markdown(
     lines.append("")
     lines.append("## Backend Delta Table (llhttp / legacy)")
     lines.append("")
-    lines.append("| Fixture | Parse ops ratio | Parse p95 ratio |")
-    lines.append("| --- | --- | --- |")
+    lines.append("| Fixture | Bytes | Parse ops ratio | Parse p95 ratio |")
+    lines.append("| --- | --- | --- | --- |")
     for row in deltas:
         fixture = row.get("fixture", "unknown")
+        fixture_bytes = int(row.get("bytes", 0))
         if row.get("status") != "ok":
-            lines.append(f"| {fixture} | n/a | n/a |")
+            lines.append(f"| {fixture} | {fixture_bytes} | n/a | n/a |")
             continue
         lines.append(
-            f"| {fixture} | {float(row.get('parse_ops_ratio', 0.0)):.3f} | "
+            f"| {fixture} | {fixture_bytes} | {float(row.get('parse_ops_ratio', 0.0)):.3f} | "
             f"{float(row.get('parse_p95_ratio', 0.0)):.3f} |"
         )
     lines.append("")

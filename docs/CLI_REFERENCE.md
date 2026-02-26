@@ -409,6 +409,10 @@ Lifecycle diagnostics:
   - `ARLEN_PHASE10H_OUTPUT_DIR` overrides artifact output directory
   - `ARLEN_PHASE10H_FIXTURES_DIR` overrides fixture corpus directory
   - `ARLEN_PHASE10H_THRESHOLDS` overrides threshold policy fixture path
+  - threshold policy supports global + fixture-size classes:
+    - global: `parse_ops_ratio_min`, `parse_p95_ratio_max`, expected-improvement keys
+    - small fixture class: `small_request_bytes_max`, `small_parse_ops_ratio_min`, `small_parse_p95_ratio_max`
+    - large fixture class: `large_request_bytes_min`, `large_parse_ops_ratio_min`, `large_parse_p95_ratio_max`
 - `make test-data-layer`: build and run standalone `ArlenData` example validation
 - `make parity-phaseb`: run Arlen-vs-FastAPI Phase B parity gate for frozen benchmark scenarios (creates report at `build/perf/parity_fastapi_latest.json`)
 - `make perf-phasec`: run Phase C benchmark protocol (warmup + concurrency ladder) and write `build/perf/phasec/latest_protocol_report.json`

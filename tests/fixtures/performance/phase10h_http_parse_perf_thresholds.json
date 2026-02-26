@@ -1,7 +1,13 @@
 {
   "version": "phase10h-http-parse-thresholds-v1",
-  "parse_ops_ratio_min": 0.6,
-  "parse_p95_ratio_max": 2.0,
-  "parse_expected_improvement_ratio_min": 1.0,
-  "parse_expected_improvement_fixture_count": 0
+  "parse_ops_ratio_min": 1.0,
+  "parse_p95_ratio_max": 1.0,
+  "small_request_bytes_max": 512,
+  "small_parse_ops_ratio_min": 1.05,
+  "small_parse_p95_ratio_max": 1.0,
+  "large_request_bytes_min": 4096,
+  "large_parse_ops_ratio_min": 1.2,
+  "large_parse_p95_ratio_max": 0.95,
+  "parse_expected_improvement_ratio_min": 1.1,
+  "parse_expected_improvement_fixture_count": 5
 }

@@ -89,13 +89,19 @@ Last updated: 2026-02-26
   - preserved request parsing contracts (headers/query/body/cookies, missing-version normalization, websocket upgrade handling) across both parser backends
   - added HTTP parser benchmark tooling + CI artifact generation (`tools/http_parse_perf_bench.m`, `tools/ci/run_phase10h_http_parse_performance.sh`, `tools/ci/generate_phase10h_http_parse_perf_artifacts.py`)
   - added differential/regression coverage for parser equivalence and deployment artifacts (`tests/unit/RequestTests.m`, `tests/integration/DeploymentIntegrationTests.m`)
+  - reduced small-request adapter overhead in `ALNRequest`:
+    - shared one-time llhttp settings initialization
+    - span-first callback collection (reduced per-callback mutable-data appends)
+    - removed unconditional request-line normalization copy from hot path (fallback/compatibility only)
+    - deferred query/cookie parsing until first access
 - Completed Phase 10G/10H performance-threshold calibration tranche:
   - switched benchmark timing to monotonic clock sampling in tooling (`tools/dispatch_perf_bench.m`, `tools/http_parse_perf_bench.m`) to reduce per-sample allocator/jitter noise
   - added median aggregation across repeated benchmark rounds in both confidence generators (`--rounds`, default `3`) for stable gate decisions
   - added CI/runtime controls for round count tuning (`ARLEN_PHASE10G_ROUNDS`, `ARLEN_PHASE10H_ROUNDS`)
-  - calibrated default threshold fixtures to stable no-catastrophic-regression guardrails for current runtime baseline:
+  - calibrated default threshold fixtures to enforce llhttp parity-or-better on small fixtures and stronger gains on large fixtures:
     - `tests/fixtures/performance/phase10g_dispatch_perf_thresholds.json`
     - `tests/fixtures/performance/phase10h_http_parse_perf_thresholds.json`
+  - expanded parser fixture corpus with a large-request stress fixture (`tests/fixtures/performance/http_parse/large_headers_query.http`)
 - Completed Phase 10I compile-time backend toggle tranche:
   - added build-time switches in `GNUmakefile` (`ARLEN_ENABLE_YYJSON`, `ARLEN_ENABLE_LLHTTP`) with strict `0|1` validation and compile-flag propagation
   - wired app-root compile path (`bin/boomhauer`) to honor the same toggles and pass deterministic feature macros

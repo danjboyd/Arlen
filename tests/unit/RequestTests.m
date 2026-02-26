@@ -115,6 +115,77 @@
   }
 }
 
+- (void)testLLHTTPMissingVersionFallbackPreservesBodyHeadersAndQuery {
+  if (![ALNRequest isLLHTTPAvailable]) {
+    return;
+  }
+
+  NSString *raw = @"POST /legacy/items?x=1&y=two\r\n"
+                  "Host: localhost\r\n"
+                  "Cookie: sid=abc123\r\n"
+                  "X-Trace: zzz\r\n"
+                  "Content-Length: 7\r\n\r\n"
+                  "payload";
+  NSData *data = [raw dataUsingEncoding:NSUTF8StringEncoding];
+
+  NSError *llhttpError = nil;
+  ALNRequest *llhttp = [ALNRequest requestFromRawData:data
+                                              backend:ALNHTTPParserBackendLLHTTP
+                                                error:&llhttpError];
+  XCTAssertNil(llhttpError);
+  XCTAssertNotNil(llhttp);
+
+  NSError *legacyError = nil;
+  ALNRequest *legacy = [ALNRequest requestFromRawData:data
+                                              backend:ALNHTTPParserBackendLegacy
+                                                error:&legacyError];
+  XCTAssertNil(legacyError);
+  XCTAssertNotNil(legacy);
+
+  if (llhttp == nil || legacy == nil) {
+    return;
+  }
+
+  XCTAssertEqualObjects(@"HTTP/1.1", llhttp.httpVersion);
+  XCTAssertEqualObjects(legacy.method, llhttp.method);
+  XCTAssertEqualObjects(legacy.path, llhttp.path);
+  XCTAssertEqualObjects(legacy.queryString, llhttp.queryString);
+  XCTAssertEqualObjects(legacy.headers, llhttp.headers);
+  XCTAssertEqualObjects(legacy.body, llhttp.body);
+  XCTAssertEqualObjects(legacy.queryParams, llhttp.queryParams);
+  XCTAssertEqualObjects(legacy.cookies, llhttp.cookies);
+}
+
+- (void)testQueryParamsAndCookiesAreCachedAfterFirstAccessAcrossBackends {
+  NSString *raw = @"GET /items/list?name=Peggy+Hill&city=Arlen HTTP/1.1\r\n"
+                  "Host: localhost\r\n"
+                  "Cookie: sid=abc123; role=admin\r\n\r\n";
+  NSData *data = [raw dataUsingEncoding:NSUTF8StringEncoding];
+
+  for (NSNumber *backendValue in [self allBackends]) {
+    ALNHTTPParserBackend backend = (ALNHTTPParserBackend)[backendValue unsignedIntegerValue];
+    NSError *error = nil;
+    ALNRequest *request = [ALNRequest requestFromRawData:data backend:backend error:&error];
+    XCTAssertNil(error, @"backend=%@", [self backendName:backend]);
+    XCTAssertNotNil(request, @"backend=%@", [self backendName:backend]);
+    if (request == nil) {
+      continue;
+    }
+
+    NSDictionary *queryParamsFirst = request.queryParams;
+    NSDictionary *queryParamsSecond = request.queryParams;
+    NSDictionary *cookiesFirst = request.cookies;
+    NSDictionary *cookiesSecond = request.cookies;
+
+    XCTAssertEqualObjects(@"Peggy Hill", queryParamsFirst[@"name"], @"backend=%@", [self backendName:backend]);
+    XCTAssertEqualObjects(@"Arlen", queryParamsFirst[@"city"], @"backend=%@", [self backendName:backend]);
+    XCTAssertEqualObjects(@"abc123", cookiesFirst[@"sid"], @"backend=%@", [self backendName:backend]);
+    XCTAssertEqualObjects(@"admin", cookiesFirst[@"role"], @"backend=%@", [self backendName:backend]);
+    XCTAssertTrue(queryParamsFirst == queryParamsSecond, @"backend=%@", [self backendName:backend]);
+    XCTAssertTrue(cookiesFirst == cookiesSecond, @"backend=%@", [self backendName:backend]);
+  }
+}
+
 - (void)testResolvedParserBackendDefaultsToLLHTTPAndAllowsLegacyOverride {
   unsetenv("ARLEN_HTTP_PARSER_BACKEND");
   ALNHTTPParserBackend expectedDefaultBackend =

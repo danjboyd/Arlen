@@ -208,13 +208,18 @@ Deliverables:
 - Add parser differential tests and malformed-input regressions between legacy parser and llhttp path.
 - Add performance artifacts focused on parse throughput/latency and allocator pressure under load.
 - Provide a staged fallback toggle for controlled rollout and A/B validation.
+- Reduce llhttp adapter overhead for small requests:
+  - one-time shared parser settings initialization
+  - span-first callback accumulation (avoid per-callback append churn when contiguous)
+  - remove unconditional request-line normalization copy from the hot path
+  - defer query/cookie materialization until first access
 
 Acceptance (required):
 
 - No unresolved request parsing contract regressions for current supported HTTP/1.1 behavior.
 - Existing request-size limits and error response semantics remain deterministic.
 - Stress/fault runs show no new crash/leak findings in the llhttp path.
-- Parser-gate thresholds are calibrated to a stable no-catastrophic-regression policy (with future ratchet tightening as runtime optimizations land).
+- Parser-gate thresholds enforce llhttp parity-or-better for small fixtures and stronger gains for large fixtures.
 - Rollout can be toggled safely between legacy and llhttp parser paths during validation.
 
 ## 4.9 Phase 10I: Compile-Time Backend Toggle Hardening

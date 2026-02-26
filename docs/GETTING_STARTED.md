@@ -713,6 +713,9 @@ Tune HTTP parser benchmark controls:
 ARLEN_PHASE10H_ITERATIONS=2000 ARLEN_PHASE10H_WARMUP=250 ARLEN_PHASE10H_ROUNDS=5 make ci-http-parse-perf
 ```
 
+Tune parser gate policy by editing `tests/fixtures/performance/phase10h_http_parse_perf_thresholds.json`
+(`small_*` and `large_*` keys set size-class requirements in addition to global ratios).
+
 ## 18. Deploy Smoke Validation
 
 ```bash
