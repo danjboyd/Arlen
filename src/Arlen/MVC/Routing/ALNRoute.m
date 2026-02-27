@@ -283,7 +283,7 @@ static NSString *ALNNormalizedPathForFastMatch(NSString *path) {
   NSArray *incoming = [pathSegments isKindOfClass:[NSArray class]]
                           ? pathSegments
                           : ALNSplitPathSegments(path);
-  NSMutableDictionary *params = [NSMutableDictionary dictionary];
+  NSMutableDictionary *params = nil;
   NSUInteger patternCount = [self.segments count];
   NSUInteger incomingCount = [incoming count];
 
@@ -296,6 +296,9 @@ static NSString *ALNNormalizedPathForFastMatch(NSString *path) {
       NSString *name = [patternSegment substringFromIndex:1];
       if ([name length] == 0) {
         name = @"wildcard";
+      }
+      if (params == nil) {
+        params = [NSMutableDictionary dictionaryWithCapacity:1];
       }
       if (idx > incomingCount) {
         params[name] = @"";
@@ -317,6 +320,9 @@ static NSString *ALNNormalizedPathForFastMatch(NSString *path) {
       if ([name length] == 0) {
         return nil;
       }
+      if (params == nil) {
+        params = [NSMutableDictionary dictionaryWithCapacity:2];
+      }
       params[name] = incomingSegment ?: @"";
       continue;
     }
@@ -329,7 +335,7 @@ static NSString *ALNNormalizedPathForFastMatch(NSString *path) {
   if (incomingCount != patternCount) {
     return nil;
   }
-  return params;
+  return params ?: @{};
 }
 
 - (NSDictionary *)matchPath:(NSString *)path pathSegments:(NSArray *)pathSegments {

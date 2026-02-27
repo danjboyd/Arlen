@@ -255,6 +255,12 @@ static BOOL ALNInvokeRouteAction(id controller,
 @property(nonatomic, assign, readwrite) NSUInteger clusterObservedNodes;
 @property(nonatomic, assign, readwrite) BOOL clusterEmitHeaders;
 @property(nonatomic, assign) BOOL metricsEnabled;
+@property(nonatomic, assign) BOOL tracePropagationEnabled;
+@property(nonatomic, assign) BOOL apiOnly;
+@property(nonatomic, assign) BOOL performanceLoggingEnabled;
+@property(nonatomic, assign) BOOL eocStrictLocalsEnabled;
+@property(nonatomic, assign) BOOL eocStrictStringifyEnabled;
+@property(nonatomic, assign) BOOL pageStateEnabled;
 @property(nonatomic, copy) NSString *i18nDefaultLocale;
 @property(nonatomic, copy) NSString *i18nFallbackLocale;
 @property(nonatomic, copy, readwrite) NSString *runtimeInvocationMode;
@@ -378,6 +384,37 @@ static BOOL ALNInvokeRouteAction(id controller,
     _metricsEnabled = [metricsEnabledValue respondsToSelector:@selector(boolValue)]
                           ? [metricsEnabledValue boolValue]
                           : YES;
+    id tracePropagationEnabledValue = observability[@"tracePropagationEnabled"];
+    _tracePropagationEnabled = [tracePropagationEnabledValue respondsToSelector:@selector(boolValue)]
+                                   ? [tracePropagationEnabledValue boolValue]
+                                   : YES;
+    id apiOnlyValue = _config[@"apiOnly"];
+    _apiOnly = [apiOnlyValue respondsToSelector:@selector(boolValue)]
+                   ? [apiOnlyValue boolValue]
+                   : NO;
+    id performanceLoggingValue = _config[@"performanceLogging"];
+    _performanceLoggingEnabled = [performanceLoggingValue respondsToSelector:@selector(boolValue)]
+                                     ? [performanceLoggingValue boolValue]
+                                     : YES;
+    NSDictionary *eoc = [_config[@"eoc"] isKindOfClass:[NSDictionary class]]
+                            ? _config[@"eoc"]
+                            : @{};
+    id strictLocalsValue = eoc[@"strictLocals"];
+    _eocStrictLocalsEnabled = [strictLocalsValue respondsToSelector:@selector(boolValue)]
+                                  ? [strictLocalsValue boolValue]
+                                  : NO;
+    id strictStringifyValue = eoc[@"strictStringify"];
+    _eocStrictStringifyEnabled = [strictStringifyValue respondsToSelector:@selector(boolValue)]
+                                     ? [strictStringifyValue boolValue]
+                                     : NO;
+    NSDictionary *compatibility =
+        [_config[@"compatibility"] isKindOfClass:[NSDictionary class]]
+            ? _config[@"compatibility"]
+            : @{};
+    id pageStateEnabledValue = compatibility[@"pageStateEnabled"];
+    _pageStateEnabled = [pageStateEnabledValue respondsToSelector:@selector(boolValue)]
+                            ? [pageStateEnabledValue boolValue]
+                            : NO;
     _runtimeInvocationModeKind = ALNResolvedRuntimeInvocationMode(_config);
     _runtimeInvocationMode = [ALNRuntimeInvocationModeName(_runtimeInvocationModeKind) copy];
     _bootedAt = [NSDate date];
@@ -1748,11 +1785,6 @@ static NSDictionary *ALNObservabilityConfig(ALNApplication *application) {
   return ALNDictionaryConfigValue(application.config, @"observability");
 }
 
-static BOOL ALNTracePropagationEnabled(ALNApplication *application) {
-  NSDictionary *observability = ALNObservabilityConfig(application);
-  return ALNBoolConfigValue(observability[@"tracePropagationEnabled"], YES);
-}
-
 static BOOL ALNHealthDetailsEnabled(ALNApplication *application) {
   NSDictionary *observability = ALNObservabilityConfig(application);
   return ALNBoolConfigValue(observability[@"healthDetailsEnabled"], YES);
@@ -1894,13 +1926,9 @@ static NSString *ALNExtractPathFormat(NSString *path, NSString **strippedPath) {
   return extension;
 }
 
-static NSString *ALNRequestPreferredFormat(ALNRequest *request, BOOL apiOnly, NSString **strippedPath) {
-  NSString *path = request.path ?: @"/";
-  NSString *pathFormat = ALNExtractPathFormat(path, strippedPath);
-  if ([pathFormat length] > 0) {
-    return pathFormat;
-  }
-
+static NSString *ALNRequestPreferredFormatWithoutPathExtension(ALNRequest *request,
+                                                               BOOL apiOnly,
+                                                               NSString *resolvedPath) {
   NSString *accept = [request.headers[@"accept"] isKindOfClass:[NSString class]]
                          ? [request.headers[@"accept"] lowercaseString]
                          : @"";
@@ -1911,14 +1939,25 @@ static NSString *ALNRequestPreferredFormat(ALNRequest *request, BOOL apiOnly, NS
     return @"html";
   }
 
-  NSString *resolvedPath = (strippedPath != NULL && [*strippedPath length] > 0)
-                               ? *strippedPath
-                               : (request.path ?: @"/");
-  if (apiOnly || ALNPathLooksLikeAPI(resolvedPath)) {
+  NSString *path = ([resolvedPath isKindOfClass:[NSString class]] && [resolvedPath length] > 0)
+                       ? resolvedPath
+                       : (request.path ?: @"/");
+  if (apiOnly || ALNPathLooksLikeAPI(path)) {
     return @"json";
   }
-
   return @"html";
+}
+
+static NSString *ALNRequestPreferredFormat(ALNRequest *request, BOOL apiOnly, NSString **strippedPath) {
+  NSString *path = request.path ?: @"/";
+  NSString *pathFormat = ALNExtractPathFormat(path, strippedPath);
+  if ([pathFormat length] > 0) {
+    return pathFormat;
+  }
+  NSString *resolvedPath = (strippedPath != NULL && [*strippedPath length] > 0)
+                               ? *strippedPath
+                               : path;
+  return ALNRequestPreferredFormatWithoutPathExtension(request, apiOnly, resolvedPath);
 }
 
 static BOOL ALNRequestPrefersJSON(ALNRequest *request, BOOL apiOnly) {
@@ -3265,12 +3304,12 @@ static void ALNFinalizeResponse(ALNApplication *application,
   NSString *requestID = ALNGenerateRequestID();
   [response setHeader:@"X-Request-Id" value:requestID];
 
-  BOOL performanceLogging = ALNBoolConfigValue(self.config[@"performanceLogging"], YES);
+  BOOL performanceLogging = self.performanceLoggingEnabled;
   BOOL metricsEnabled = self.metricsEnabled;
   BOOL infoLoggingEnabled = [self.logger shouldLogLevel:ALNLogLevelInfo];
   ALNRequestTraceContext traceContext =
-      ALNBuildRequestTraceContext(request, ALNTracePropagationEnabled(self));
-  BOOL apiOnly = ALNBoolConfigValue(self.config[@"apiOnly"], NO);
+      ALNBuildRequestTraceContext(request, self.tracePropagationEnabled);
+  BOOL apiOnly = self.apiOnly;
   ALNPerfTrace *trace =
       performanceLogging ? [[ALNPerfTrace alloc] initWithEnabled:YES] : ALNDisabledPerfTrace();
   if (performanceLogging) {
@@ -3280,26 +3319,55 @@ static void ALNFinalizeResponse(ALNApplication *application,
     [self.metrics addGauge:@"http_requests_active" delta:1.0];
   }
 
-  NSString *routePath = nil;
-  NSString *requestFormat = ALNRequestPreferredFormat(request, apiOnly, &routePath);
-  BOOL prefersJSON = [requestFormat isEqualToString:@"json"];
-  if ([routePath length] == 0) {
-    routePath = request.path ?: @"/";
+  NSString *routePath = request.path ?: @"/";
+  NSString *requestFormat = nil;
+  BOOL routerNeedsFormatExtraction = self.router.hasFormatConstrainedRoutes;
+  if (routerNeedsFormatExtraction) {
+    requestFormat = ALNRequestPreferredFormat(request, apiOnly, &routePath);
+    if ([routePath length] == 0) {
+      routePath = request.path ?: @"/";
+    }
   }
 
   if (performanceLogging) {
     [trace startStage:@"route"];
   }
+  NSString *retryStrippedPath = nil;
+  NSString *retryPathFormat = nil;
   ALNRouteMatch *match =
       [self.router matchMethod:request.method ?: @"GET"
                           path:routePath
                         format:requestFormat];
+  if (match == nil && !routerNeedsFormatExtraction) {
+    retryPathFormat = ALNExtractPathFormat(routePath, &retryStrippedPath);
+    if ([retryStrippedPath length] > 0 && ![retryStrippedPath isEqualToString:routePath]) {
+      match = [self.router matchMethod:request.method ?: @"GET"
+                                  path:retryStrippedPath
+                                format:nil];
+      if (match != nil) {
+        routePath = retryStrippedPath;
+        requestFormat = retryPathFormat;
+      }
+    }
+  }
   if (performanceLogging) {
     [trace endStage:@"route"];
   }
 
   if (match == nil) {
-    BOOL handledBuiltIn = ALNApplyBuiltInResponse(self, request, response, routePath);
+    NSString *builtInPath = routePath;
+    if (!routerNeedsFormatExtraction && [retryStrippedPath length] > 0) {
+      builtInPath = retryStrippedPath;
+    }
+    if ([requestFormat length] == 0 && [retryPathFormat length] > 0) {
+      requestFormat = retryPathFormat;
+    }
+    if ([requestFormat length] == 0) {
+      requestFormat =
+          ALNRequestPreferredFormatWithoutPathExtension(request, apiOnly, builtInPath);
+    }
+    BOOL prefersJSON = [requestFormat isEqualToString:@"json"];
+    BOOL handledBuiltIn = ALNApplyBuiltInResponse(self, request, response, builtInPath);
     if (!handledBuiltIn && (apiOnly || prefersJSON)) {
       NSDictionary *payload = ALNStructuredErrorPayload(404,
                                                         @"not_found",
@@ -3373,7 +3441,12 @@ static void ALNFinalizeResponse(ALNApplication *application,
     return response;
   }
 
-  NSMutableDictionary *stash = [NSMutableDictionary dictionary];
+  if ([requestFormat length] == 0) {
+    requestFormat = ALNRequestPreferredFormatWithoutPathExtension(request, apiOnly, routePath);
+  }
+  BOOL prefersJSON = [requestFormat isEqualToString:@"json"];
+
+  NSMutableDictionary *stash = [NSMutableDictionary dictionaryWithCapacity:12];
   stash[@"request_id"] = requestID ?: @"";
   if (ALNTraceContextHasTraceID(&traceContext)) {
     stash[@"aln.trace_id"] = ALNStringFromTraceBuffer(traceContext.traceID);
@@ -3399,19 +3472,12 @@ static void ALNFinalizeResponse(ALNApplication *application,
   if (self.attachmentAdapter != nil) {
     stash[ALNContextAttachmentAdapterStashKey] = self.attachmentAdapter;
   }
-
   stash[ALNContextI18nDefaultLocaleStashKey] = self.i18nDefaultLocale ?: @"en";
   stash[ALNContextI18nFallbackLocaleStashKey] =
       self.i18nFallbackLocale ?: self.i18nDefaultLocale ?: @"en";
-
-  NSDictionary *eoc = ALNDictionaryConfigValue(self.config, @"eoc");
-  NSDictionary *compatibility = ALNDictionaryConfigValue(self.config, @"compatibility");
-  stash[ALNContextEOCStrictLocalsStashKey] =
-      @(ALNBoolConfigValue(eoc[@"strictLocals"], NO));
-  stash[ALNContextEOCStrictStringifyStashKey] =
-      @(ALNBoolConfigValue(eoc[@"strictStringify"], NO));
-  stash[ALNContextPageStateEnabledStashKey] =
-      @(ALNBoolConfigValue(compatibility[@"pageStateEnabled"], NO));
+  stash[ALNContextEOCStrictLocalsStashKey] = @(self.eocStrictLocalsEnabled);
+  stash[ALNContextEOCStrictStringifyStashKey] = @(self.eocStrictStringifyEnabled);
+  stash[ALNContextPageStateEnabledStashKey] = @(self.pageStateEnabled);
   request.routeParams = match.params ?: @{};
   ALNContext *context = [[ALNContext alloc] initWithRequest:request
                                                    response:response

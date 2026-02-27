@@ -495,6 +495,27 @@
   XCTAssertEqualObjects(@"json", json[@"format"]);
 }
 
+- (void)testExtensionFallbackStillMatchesRouteWithoutFormatConstraints {
+  ALNApplication *app = [self buildAppWithHaltingMiddleware:NO];
+  ALNResponse *response = [app dispatchRequest:[self requestForPath:@"/dict.json"]];
+  XCTAssertEqual((NSInteger)200, response.statusCode);
+  NSError *error = nil;
+  NSDictionary *json = [NSJSONSerialization JSONObjectWithData:response.bodyData
+                                                       options:0
+                                                         error:&error];
+  XCTAssertNil(error);
+  XCTAssertEqualObjects(@(YES), json[@"ok"]);
+}
+
+- (void)testBuiltInSignalPathSupportsExtensionFallback {
+  ALNApplication *app = [self buildAppWithHaltingMiddleware:NO];
+  ALNResponse *response = [app dispatchRequest:[self requestForPath:@"/healthz.json"]];
+  XCTAssertEqual((NSInteger)200, response.statusCode);
+  NSString *body = [[NSString alloc] initWithData:response.bodyData
+                                         encoding:NSUTF8StringEncoding];
+  XCTAssertEqualObjects(@"ok\n", body);
+}
+
 - (void)testAPIOnlyModeReturnsJSONNotFoundByDefault {
   ALNApplication *app = [[ALNApplication alloc] initWithConfig:@{
     @"environment" : @"test",

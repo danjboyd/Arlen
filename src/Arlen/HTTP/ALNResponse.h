@@ -21,6 +21,7 @@ extern NSString *const ALNResponseErrorDomain;
 @property(nonatomic, assign) long fileBodyMTimeNanoseconds;
 
 - (void)setHeader:(NSString *)name value:(NSString *)value;
+- (void)setHeadersIfMissing:(NSDictionary<NSString *, NSString *> *)headers;
 - (nullable NSString *)headerForName:(NSString *)name;
 - (void)appendData:(NSData *)data;
 - (void)appendText:(NSString *)text;

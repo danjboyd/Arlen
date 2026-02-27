@@ -178,6 +178,27 @@ static NSString *ALNStatusText(NSInteger statusCode) {
   [self.orderedHeaderKeys insertObject:name atIndex:insertion];
 }
 
+- (BOOL)setHeaderInternal:(NSString *)name
+                    value:(NSString *)value
+               invalidate:(BOOL)invalidate {
+  if ([name length] == 0) {
+    return NO;
+  }
+  NSString *resolvedValue = value ?: @"";
+  NSString *currentValue = [self.headers[name] isKindOfClass:[NSString class]] ? self.headers[name] : nil;
+  if (currentValue != nil && [currentValue isEqualToString:resolvedValue]) {
+    return NO;
+  }
+  if (currentValue == nil) {
+    [self insertOrderedHeaderKeyIfNeeded:name];
+  }
+  self.headers[name] = resolvedValue;
+  if (invalidate) {
+    [self invalidateSerializedHeaders];
+  }
+  return YES;
+}
+
 - (void)setStatusCode:(NSInteger)statusCode {
   if (_statusCode == statusCode) {
     return;
@@ -227,19 +248,34 @@ static NSString *ALNStatusText(NSInteger statusCode) {
 }
 
 - (void)setHeader:(NSString *)name value:(NSString *)value {
-  if ([name length] == 0) {
+  (void)[self setHeaderInternal:name value:value invalidate:YES];
+}
+
+- (void)setHeadersIfMissing:(NSDictionary<NSString *, NSString *> *)headers {
+  if (![headers isKindOfClass:[NSDictionary class]] || [headers count] == 0) {
     return;
   }
-  NSString *resolvedValue = value ?: @"";
-  NSString *currentValue = [self.headers[name] isKindOfClass:[NSString class]] ? self.headers[name] : nil;
-  if (currentValue != nil && [currentValue isEqualToString:resolvedValue]) {
-    return;
+  BOOL mutated = NO;
+  for (id rawName in headers) {
+    if (![rawName isKindOfClass:[NSString class]]) {
+      continue;
+    }
+    NSString *name = (NSString *)rawName;
+    if ([name length] == 0) {
+      continue;
+    }
+    if ([self.headers[name] isKindOfClass:[NSString class]]) {
+      continue;
+    }
+    id rawValue = headers[name];
+    NSString *value = [rawValue isKindOfClass:[NSString class]] ? rawValue : @"";
+    if ([self setHeaderInternal:name value:value invalidate:NO]) {
+      mutated = YES;
+    }
   }
-  if (currentValue == nil) {
-    [self insertOrderedHeaderKeyIfNeeded:name];
+  if (mutated) {
+    [self invalidateSerializedHeaders];
   }
-  self.headers[name] = resolvedValue;
-  [self invalidateSerializedHeaders];
 }
 
 - (NSString *)headerForName:(NSString *)name {
@@ -321,7 +357,10 @@ static NSString *ALNStatusText(NSInteger statusCode) {
   self.fileBodyMTimeNanoseconds = 0;
   [self.bodyData setLength:0];
   [self invalidateSerializedHeaders];
-  [self appendData:json];
+  if ([json length] > 0) {
+    [self.bodyData appendData:json];
+  }
+  self.committed = YES;
   [self setHeader:@"Content-Type" value:@"application/json; charset=utf-8"];
   return YES;
 }
@@ -335,29 +374,39 @@ static NSString *ALNStatusText(NSInteger statusCode) {
     return nil;
   }
 
-  if ([self headerForName:@"Content-Length"] == nil) {
+  if (![self.headers[@"Content-Length"] isKindOfClass:[NSString class]]) {
     unsigned long long bodyLength = [self.bodyData length];
     if ([self.fileBodyPath length] > 0) {
       bodyLength = self.fileBodyLength;
     }
-    [self setHeader:@"Content-Length"
-              value:[NSString stringWithFormat:@"%llu", bodyLength]];
+    (void)[self setHeaderInternal:@"Content-Length"
+                            value:[NSString stringWithFormat:@"%llu", bodyLength]
+                       invalidate:NO];
   }
 
-  if ([self headerForName:@"Content-Type"] == nil) {
-    [self setHeader:@"Content-Type" value:@"text/plain; charset=utf-8"];
+  if (![self.headers[@"Content-Type"] isKindOfClass:[NSString class]]) {
+    (void)[self setHeaderInternal:@"Content-Type"
+                            value:@"text/plain; charset=utf-8"
+                       invalidate:NO];
   }
 
-  NSMutableString *head = [NSMutableString stringWithFormat:@"HTTP/1.1 %ld %@\r\n",
-                                                             (long)self.statusCode,
-                                                             ALNStatusText(self.statusCode)];
   [self rebuildOrderedHeaderKeysIfNeeded];
+  NSUInteger estimatedCapacity = 64 + ([self.orderedHeaderKeys count] * 32);
+  NSMutableString *head = [NSMutableString stringWithCapacity:estimatedCapacity];
+  [head appendString:@"HTTP/1.1 "];
+  [head appendFormat:@"%ld", (long)self.statusCode];
+  [head appendString:@" "];
+  [head appendString:ALNStatusText(self.statusCode)];
+  [head appendString:@"\r\n"];
   for (NSString *key in self.orderedHeaderKeys) {
     NSString *value = self.headers[key];
     if (![value isKindOfClass:[NSString class]]) {
       continue;
     }
-    [head appendFormat:@"%@: %@\r\n", key, value];
+    [head appendString:key];
+    [head appendString:@": "];
+    [head appendString:value];
+    [head appendString:@"\r\n"];
   }
   [head appendString:@"\r\n"];
   NSData *serialized = [head dataUsingEncoding:NSUTF8StringEncoding] ?: [NSData data];

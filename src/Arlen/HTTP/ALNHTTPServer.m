@@ -1401,35 +1401,6 @@ static NSData *ALNReadHTTPRequestDataLegacy(int clientFd,
   }
 }
 
-static void ALNRequestLineMetrics(const uint8_t *bytes,
-                                  size_t length,
-                                  NSUInteger *lineBytesOut,
-                                  BOOL *lineCompleteOut) {
-  if (lineBytesOut != NULL) {
-    *lineBytesOut = 0;
-  }
-  if (lineCompleteOut != NULL) {
-    *lineCompleteOut = NO;
-  }
-  if (bytes == NULL || length == 0) {
-    return;
-  }
-  for (size_t idx = 0; idx + 1 < length; idx++) {
-    if (bytes[idx] == '\r' && bytes[idx + 1] == '\n') {
-      if (lineBytesOut != NULL) {
-        *lineBytesOut = (NSUInteger)idx;
-      }
-      if (lineCompleteOut != NULL) {
-        *lineCompleteOut = YES;
-      }
-      return;
-    }
-  }
-  if (lineBytesOut != NULL) {
-    *lineBytesOut = (NSUInteger)length;
-  }
-}
-
 static ALNRequest *ALNReadHTTPRequestLLHTTP(int clientFd,
                                             ALNRequestLimits limits,
                                             NSInteger *statusCode,
@@ -1445,25 +1416,43 @@ static ALNRequest *ALNReadHTTPRequestLLHTTP(int clientFd,
   }
 
   while (1) {
+    size_t separatorLocation = SIZE_MAX;
+    BOOL separatorFound = NO;
+    BOOL metadataReady = NO;
+    ALNRequestHeadMetadata parsedMetadata;
+    memset(&parsedMetadata, 0, sizeof(parsedMetadata));
+
     if (readState->length > 0) {
-      NSUInteger requestLineBytes = 0;
-      BOOL requestLineComplete = NO;
-      ALNRequestLineMetrics(readState->bytes,
-                            readState->length,
-                            &requestLineBytes,
-                            &requestLineComplete);
-      if (requestLineComplete) {
-        if (requestLineBytes > limits.maxRequestLineBytes) {
+      separatorLocation =
+          ALNFindHeaderTerminator(readState->bytes, readState->length, readState->scanOffset);
+      separatorFound = (separatorLocation != SIZE_MAX);
+      if (separatorFound) {
+        size_t headerBytes = separatorLocation + 4;
+        if (headerBytes > limits.maxHeaderBytes) {
           if (statusCode != NULL) {
             *statusCode = 431;
           }
           return nil;
         }
-      } else if (readState->length > limits.maxRequestLineBytes) {
-        if (statusCode != NULL) {
-          *statusCode = 431;
+        metadataReady = ALNParseRequestHeadMetadataBytes(readState->bytes,
+                                                         headerBytes,
+                                                         limits,
+                                                         &parsedMetadata);
+        if (!metadataReady && parsedMetadata.statusCode != 0) {
+          if (statusCode != NULL) {
+            *statusCode = parsedMetadata.statusCode;
+          }
+          return nil;
         }
-        return nil;
+        readState->scanOffset = separatorLocation + 1;
+      } else {
+        readState->scanOffset = readState->length;
+        if (readState->length > limits.maxHeaderBytes) {
+          if (statusCode != NULL) {
+            *statusCode = 431;
+          }
+          return nil;
+        }
       }
     }
 
@@ -1484,20 +1473,8 @@ static ALNRequest *ALNReadHTTPRequestLLHTTP(int clientFd,
                                                         error:&requestError];
     if (requestError != nil) {
       NSInteger derivedStatus = 400;
-      size_t parseErrorHeaderTerminator =
-          ALNFindHeaderTerminator(readState->bytes, readState->length, readState->scanOffset);
-      if (parseErrorHeaderTerminator != SIZE_MAX) {
-        size_t headerBytes = parseErrorHeaderTerminator + 4;
-        ALNRequestHeadMetadata parsedMetadata;
-        memset(&parsedMetadata, 0, sizeof(parsedMetadata));
-        if (!ALNParseRequestHeadMetadataBytes(readState->bytes,
-                                              headerBytes,
-                                              limits,
-                                              &parsedMetadata)) {
-          if (parsedMetadata.statusCode != 0) {
-            derivedStatus = parsedMetadata.statusCode;
-          }
-        }
+      if (separatorFound && parsedMetadata.statusCode != 0) {
+        derivedStatus = parsedMetadata.statusCode;
       } else if (readState->length > limits.maxHeaderBytes) {
         derivedStatus = 431;
       }
@@ -1507,29 +1484,8 @@ static ALNRequest *ALNReadHTTPRequestLLHTTP(int clientFd,
       return nil;
     }
 
-    size_t separatorLocation =
-        ALNFindHeaderTerminator(readState->bytes, readState->length, readState->scanOffset);
-    if (separatorLocation != SIZE_MAX) {
-      size_t headerBytes = separatorLocation + 4;
-      if (headerBytes > limits.maxHeaderBytes) {
-        if (statusCode != NULL) {
-          *statusCode = 431;
-        }
-        return nil;
-      }
-      readState->scanOffset = separatorLocation + 1;
-    } else {
-      readState->scanOffset = readState->length;
-      if (readState->length > limits.maxHeaderBytes) {
-        if (statusCode != NULL) {
-          *statusCode = 431;
-        }
-        return nil;
-      }
-    }
-
     if (headersComplete) {
-      if (separatorLocation == SIZE_MAX) {
+      if (!separatorFound) {
         if (statusCode != NULL) {
           *statusCode = 400;
         }

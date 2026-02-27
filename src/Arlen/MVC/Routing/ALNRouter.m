@@ -6,6 +6,7 @@
 @property(nonatomic, strong) NSMutableDictionary *routesByMethod;
 @property(nonatomic, strong) NSMutableArray *routeGroups;
 @property(nonatomic, assign) NSUInteger routeCounter;
+@property(nonatomic, assign, readwrite) BOOL hasFormatConstrainedRoutes;
 
 @end
 
@@ -68,11 +69,30 @@ static NSString *ALNNormalizedMethodName(NSString *method) {
   return [[method uppercaseString] copy];
 }
 
+static BOOL ALNRouteShouldReplace(ALNRoute *candidate, ALNRoute *bestRoute) {
+  if (bestRoute == nil) {
+    return YES;
+  }
+  if (candidate.kind > bestRoute.kind) {
+    return YES;
+  }
+  if (candidate.kind == bestRoute.kind &&
+      candidate.staticSegmentCount > bestRoute.staticSegmentCount) {
+    return YES;
+  }
+  if (candidate.kind == bestRoute.kind &&
+      candidate.staticSegmentCount == bestRoute.staticSegmentCount &&
+      candidate.registrationIndex < bestRoute.registrationIndex) {
+    return YES;
+  }
+  return NO;
+}
+
 static ALNRouteMatch *ALNBestRouteMatchInCandidates(NSArray *candidates,
                                                      NSString *path,
                                                      NSString *format) {
   ALNRoute *bestRoute = nil;
-  BOOL bestRouteNeedsPathSegments = NO;
+  NSDictionary *bestParams = nil;
   NSArray *lazyPathSegments = nil;
 
   for (ALNRoute *route in candidates) {
@@ -88,40 +108,18 @@ static ALNRouteMatch *ALNBestRouteMatchInCandidates(NSArray *candidates,
       }
       candidateSegments = lazyPathSegments;
     }
-    if (![route matchesPath:path pathSegments:candidateSegments]) {
+    NSDictionary *candidateParams = [route matchPath:path pathSegments:candidateSegments];
+    if (candidateParams == nil) {
       continue;
     }
 
-    if (bestRoute == nil) {
+    if (ALNRouteShouldReplace(route, bestRoute)) {
       bestRoute = route;
-      bestRouteNeedsPathSegments = !useFastPath;
-      continue;
-    }
-
-    BOOL shouldReplace = NO;
-    if (route.kind > bestRoute.kind) {
-      shouldReplace = YES;
-    } else if (route.kind == bestRoute.kind &&
-               route.staticSegmentCount > bestRoute.staticSegmentCount) {
-      shouldReplace = YES;
-    } else if (route.kind == bestRoute.kind &&
-               route.staticSegmentCount == bestRoute.staticSegmentCount &&
-               route.registrationIndex < bestRoute.registrationIndex) {
-      shouldReplace = YES;
-    }
-
-    if (shouldReplace) {
-      bestRoute = route;
-      bestRouteNeedsPathSegments = !useFastPath;
+      bestParams = candidateParams;
     }
   }
 
-  if (bestRoute == nil) {
-    return nil;
-  }
-  NSArray *paramsSegments = bestRouteNeedsPathSegments ? lazyPathSegments : nil;
-  NSDictionary *bestParams = [bestRoute paramsForPath:path pathSegments:paramsSegments];
-  if (bestParams == nil) {
+  if (bestRoute == nil || bestParams == nil) {
     return nil;
   }
   return [[ALNRouteMatch alloc] initWithRoute:bestRoute params:bestParams];
@@ -134,6 +132,7 @@ static ALNRouteMatch *ALNBestRouteMatchInCandidates(NSArray *candidates,
     _routesByMethod = [NSMutableDictionary dictionary];
     _routeGroups = [NSMutableArray array];
     _routeCounter = 0;
+    _hasFormatConstrainedRoutes = NO;
   }
   return self;
 }
@@ -180,6 +179,9 @@ static ALNRouteMatch *ALNBestRouteMatchInCandidates(NSArray *candidates,
   NSString *resolvedGuard =
       ([guardAction length] > 0) ? [guardAction copy] : [inheritedGuard copy];
   NSArray *resolvedFormats = ([formats count] > 0) ? ALNNormalizeFormats(formats) : inheritedFormats;
+  if ([resolvedFormats count] > 0) {
+    self.hasFormatConstrainedRoutes = YES;
+  }
 
   ALNRoute *route = [[ALNRoute alloc] initWithMethod:method
                                        pathPattern:resolvedPath

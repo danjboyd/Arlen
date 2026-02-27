@@ -29,12 +29,18 @@
 - (BOOL)processContext:(ALNContext *)context error:(NSError **)error {
   (void)error;
   ALNResponse *response = context.response;
-  [self ensureHeader:@"X-Content-Type-Options" value:@"nosniff" response:response];
-  [self ensureHeader:@"X-Frame-Options" value:@"SAMEORIGIN" response:response];
-  [self ensureHeader:@"Referrer-Policy" value:@"strict-origin-when-cross-origin" response:response];
-  [self ensureHeader:@"Cross-Origin-Opener-Policy" value:@"same-origin" response:response];
-  [self ensureHeader:@"Cross-Origin-Resource-Policy" value:@"same-site" response:response];
-  [self ensureHeader:@"X-Permitted-Cross-Domain-Policies" value:@"none" response:response];
+  static NSDictionary<NSString *, NSString *> *defaults = nil;
+  if (defaults == nil) {
+    defaults = @{
+      @"X-Content-Type-Options" : @"nosniff",
+      @"X-Frame-Options" : @"SAMEORIGIN",
+      @"Referrer-Policy" : @"strict-origin-when-cross-origin",
+      @"Cross-Origin-Opener-Policy" : @"same-origin",
+      @"Cross-Origin-Resource-Policy" : @"same-site",
+      @"X-Permitted-Cross-Domain-Policies" : @"none",
+    };
+  }
+  [response setHeadersIfMissing:defaults];
   if ([self.contentSecurityPolicy length] > 0) {
     [self ensureHeader:@"Content-Security-Policy" value:self.contentSecurityPolicy response:response];
   }

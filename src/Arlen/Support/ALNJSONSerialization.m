@@ -214,13 +214,28 @@ static yyjson_mut_val *ALNYYValueFromFoundation(yyjson_mut_doc *doc,
       case 'Q':
         return yyjson_mut_uint(doc, [number unsignedLongLongValue]);
       case 'f':
-      case 'd':
-        return yyjson_mut_real(doc, [number doubleValue]);
+      case 'd': {
+        double floatingValue = [number doubleValue];
+        if (!isfinite(floatingValue)) {
+          ALNSetError(error,
+                      ALNJSONSerializationErrorUnsupportedType,
+                      @"JSON numbers must be finite");
+          return NULL;
+        }
+        return yyjson_mut_real(doc, floatingValue);
+      }
       default:
         break;
       }
     }
-    return yyjson_mut_real(doc, [number doubleValue]);
+    double fallbackValue = [number doubleValue];
+    if (!isfinite(fallbackValue)) {
+      ALNSetError(error,
+                  ALNJSONSerializationErrorUnsupportedType,
+                  @"JSON numbers must be finite");
+      return NULL;
+    }
+    return yyjson_mut_real(doc, fallbackValue);
   }
 
   if ([obj isKindOfClass:[NSArray class]]) {
@@ -503,10 +518,17 @@ static BOOL ALNValidateJSONObjectRecursive(id obj, NSUInteger depth) {
 + (NSData *)dataWithJSONObject:(id)obj
                        options:(NSJSONWritingOptions)options
                          error:(NSError **)error {
-  if (![self isValidJSONObject:obj]) {
+  if (obj == nil) {
+    ALNSetError(error,
+                ALNJSONSerializationErrorInvalidArgument,
+                @"Input object cannot be nil");
+    return nil;
+  }
+  BOOL rootIsContainer = [obj isKindOfClass:[NSArray class]] || [obj isKindOfClass:[NSDictionary class]];
+  if (!rootIsContainer) {
     ALNSetError(error,
                 ALNJSONSerializationErrorUnsupportedType,
-                @"Invalid object graph for JSON encoding");
+                @"Top-level JSON value must be NSArray or NSDictionary");
     return nil;
   }
 

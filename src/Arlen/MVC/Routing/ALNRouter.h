@@ -9,6 +9,8 @@ NS_ASSUME_NONNULL_BEGIN
 
 @interface ALNRouter : NSObject
 
+@property(nonatomic, assign, readonly) BOOL hasFormatConstrainedRoutes;
+
 - (ALNRoute *)addRouteMethod:(NSString *)method
                        path:(NSString *)path
                        name:(nullable NSString *)name
