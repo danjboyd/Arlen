@@ -7,6 +7,7 @@
 #import "ALNApplication.h"
 #import "ALNContext.h"
 #import "ALNController.h"
+#import "ALNMetrics.h"
 #import "ALNRequest.h"
 #import "ALNResponse.h"
 #import "ALNRoute.h"
@@ -636,6 +637,44 @@
   XCTAssertNotNil([response headerForName:@"X-Arlen-Total-Ms"]);
   XCTAssertEqualObjects(@"34.500", [response headerForName:@"X-Arlen-Parse-Ms"]);
   XCTAssertNotNil([response headerForName:@"X-Arlen-Response-Write-Ms"]);
+}
+
+- (void)testMetricsCanBeDisabledByConfig {
+  ALNApplication *app = [[ALNApplication alloc] initWithConfig:@{
+    @"environment" : @"test",
+    @"logFormat" : @"json",
+    @"observability" : @{
+      @"metricsEnabled" : @(NO),
+    },
+  }];
+  [app registerRouteMethod:@"GET"
+                      path:@"/dict"
+                      name:@"dict"
+           controllerClass:[AppJSONController class]
+                    action:@"dict"];
+
+  ALNResponse *response = [app dispatchRequest:[self requestForPath:@"/dict"]];
+  XCTAssertEqual((NSInteger)200, response.statusCode);
+
+  NSDictionary *snapshot = [app.metrics snapshot];
+  NSDictionary *counters = [snapshot[@"counters"] isKindOfClass:[NSDictionary class]]
+                               ? snapshot[@"counters"]
+                               : @{};
+  NSDictionary *gauges = [snapshot[@"gauges"] isKindOfClass:[NSDictionary class]]
+                             ? snapshot[@"gauges"]
+                             : @{};
+  NSDictionary *timings = [snapshot[@"timings"] isKindOfClass:[NSDictionary class]]
+                              ? snapshot[@"timings"]
+                              : @{};
+  XCTAssertEqual((NSUInteger)0, [counters count]);
+  XCTAssertEqual((NSUInteger)0, [gauges count]);
+  XCTAssertEqual((NSUInteger)0, [timings count]);
+
+  ALNResponse *metrics = [app dispatchRequest:[self requestForPath:@"/metrics"]];
+  XCTAssertEqual((NSInteger)200, metrics.statusCode);
+  NSString *metricsBody = [[NSString alloc] initWithData:metrics.bodyData
+                                                encoding:NSUTF8StringEncoding];
+  XCTAssertEqual((NSUInteger)0, [metricsBody length]);
 }
 
 - (void)testResponseIncludesTracePropagationHeadersAndCorrelationByDefault {

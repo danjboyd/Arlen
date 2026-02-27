@@ -43,8 +43,8 @@ runtimeLimits = {
 };
 ```
 
-`requestDispatchMode = "serialized"` forces one request per HTTP connection (`Connection: close`)
-so production workers keep the stable serialized execution path by default.
+`requestDispatchMode = "serialized"` keeps the stable serialized execution path by default while
+still honoring HTTP keep-alive negotiation.
 
 When `workerCount > 1`, `propane` enables `SO_REUSEPORT` automatically for worker binds.
 When HTTP session limit is exceeded, workers return deterministic overload diagnostics
@@ -59,7 +59,7 @@ cluster = {
   enabled = NO;
   name = "default";
   expectedNodes = 1;
-  emitHeaders = YES;
+  emitHeaders = NO;
 };
 ```
 

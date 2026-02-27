@@ -260,6 +260,8 @@ static NSDictionary *ALNSecurityProfileDefaults(NSString *profileName) {
   NSString *readinessRequiresClusterQuorum =
       ALNEnvValueCompat("ARLEN_READINESS_REQUIRES_CLUSTER_QUORUM",
                         "MOJOOBJC_READINESS_REQUIRES_CLUSTER_QUORUM");
+  NSString *metricsEnabled =
+      ALNEnvValueCompat("ARLEN_METRICS_ENABLED", "MOJOOBJC_METRICS_ENABLED");
   NSString *serveStatic = ALNEnvValueCompat("ARLEN_SERVE_STATIC", "MOJOOBJC_SERVE_STATIC");
   NSString *staticAllowExtensions =
       ALNEnvValueCompat("ARLEN_STATIC_ALLOW_EXTENSIONS", "MOJOOBJC_STATIC_ALLOW_EXTENSIONS");
@@ -647,6 +649,10 @@ static NSDictionary *ALNSecurityProfileDefaults(NSString *profileName) {
   if (readinessRequiresClusterQuorumValue != nil) {
     observability[@"readinessRequiresClusterQuorum"] = readinessRequiresClusterQuorumValue;
   }
+  NSNumber *metricsEnabledValue = ALNParseBooleanString(metricsEnabled);
+  if (metricsEnabledValue != nil) {
+    observability[@"metricsEnabled"] = metricsEnabledValue;
+  }
   config[@"observability"] = observability;
 
   NSMutableDictionary *cluster =
@@ -987,6 +993,9 @@ static NSDictionary *ALNSecurityProfileDefaults(NSString *profileName) {
   if (finalObservability[@"readinessRequiresClusterQuorum"] == nil) {
     finalObservability[@"readinessRequiresClusterQuorum"] = @(NO);
   }
+  if (finalObservability[@"metricsEnabled"] == nil) {
+    finalObservability[@"metricsEnabled"] = @(YES);
+  }
   config[@"observability"] = finalObservability;
 
   NSMutableDictionary *finalCluster =
@@ -1209,6 +1218,8 @@ static NSDictionary *ALNSecurityProfileDefaults(NSString *profileName) {
       @([finalObservability[@"readinessRequiresStartup"] boolValue]);
   finalObservability[@"readinessRequiresClusterQuorum"] =
       @([finalObservability[@"readinessRequiresClusterQuorum"] boolValue]);
+  finalObservability[@"metricsEnabled"] =
+      @([finalObservability[@"metricsEnabled"] boolValue]);
   config[@"observability"] = finalObservability;
 
   finalCluster[@"enabled"] = @([finalCluster[@"enabled"] boolValue]);

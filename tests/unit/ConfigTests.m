@@ -148,6 +148,7 @@
   XCTAssertEqualObjects(@(YES), observability[@"healthDetailsEnabled"]);
   XCTAssertEqualObjects(@(NO), observability[@"readinessRequiresStartup"]);
   XCTAssertEqualObjects(@(NO), observability[@"readinessRequiresClusterQuorum"]);
+  XCTAssertEqualObjects(@(YES), observability[@"metricsEnabled"]);
 
   NSDictionary *services = config[@"services"];
   NSDictionary *i18n = services[@"i18n"];
@@ -273,6 +274,7 @@
   setenv("ARLEN_HEALTH_DETAILS_ENABLED", "0", 1);
   setenv("ARLEN_READINESS_REQUIRES_STARTUP", "1", 1);
   setenv("ARLEN_READINESS_REQUIRES_CLUSTER_QUORUM", "1", 1);
+  setenv("ARLEN_METRICS_ENABLED", "0", 1);
   setenv("ARLEN_CLUSTER_ENABLED", "1", 1);
   setenv("ARLEN_CLUSTER_NAME", "prod-east", 1);
   setenv("ARLEN_CLUSTER_NODE_ID", "node-7", 1);
@@ -341,6 +343,7 @@
   unsetenv("ARLEN_HEALTH_DETAILS_ENABLED");
   unsetenv("ARLEN_READINESS_REQUIRES_STARTUP");
   unsetenv("ARLEN_READINESS_REQUIRES_CLUSTER_QUORUM");
+  unsetenv("ARLEN_METRICS_ENABLED");
   unsetenv("ARLEN_CLUSTER_ENABLED");
   unsetenv("ARLEN_CLUSTER_NAME");
   unsetenv("ARLEN_CLUSTER_NODE_ID");
@@ -427,6 +430,7 @@
   XCTAssertEqualObjects(@(NO), observability[@"healthDetailsEnabled"]);
   XCTAssertEqualObjects(@(YES), observability[@"readinessRequiresStartup"]);
   XCTAssertEqualObjects(@(YES), observability[@"readinessRequiresClusterQuorum"]);
+  XCTAssertEqualObjects(@(NO), observability[@"metricsEnabled"]);
 
   NSDictionary *services = config[@"services"];
   NSDictionary *i18n = services[@"i18n"];
@@ -486,6 +490,7 @@
   setenv("MOJOOBJC_HEALTH_DETAILS_ENABLED", "0", 1);
   setenv("MOJOOBJC_READINESS_REQUIRES_STARTUP", "1", 1);
   setenv("MOJOOBJC_READINESS_REQUIRES_CLUSTER_QUORUM", "1", 1);
+  setenv("MOJOOBJC_METRICS_ENABLED", "0", 1);
   setenv("MOJOOBJC_CLUSTER_ENABLED", "1", 1);
   setenv("MOJOOBJC_CLUSTER_NAME", "legacy-cluster", 1);
   setenv("MOJOOBJC_CLUSTER_NODE_ID", "legacy-node", 1);
@@ -530,6 +535,7 @@
   unsetenv("MOJOOBJC_HEALTH_DETAILS_ENABLED");
   unsetenv("MOJOOBJC_READINESS_REQUIRES_STARTUP");
   unsetenv("MOJOOBJC_READINESS_REQUIRES_CLUSTER_QUORUM");
+  unsetenv("MOJOOBJC_METRICS_ENABLED");
   unsetenv("MOJOOBJC_CLUSTER_ENABLED");
   unsetenv("MOJOOBJC_CLUSTER_NAME");
   unsetenv("MOJOOBJC_CLUSTER_NODE_ID");
@@ -579,6 +585,7 @@
   XCTAssertEqualObjects(@(NO), observability[@"healthDetailsEnabled"]);
   XCTAssertEqualObjects(@(YES), observability[@"readinessRequiresStartup"]);
   XCTAssertEqualObjects(@(YES), observability[@"readinessRequiresClusterQuorum"]);
+  XCTAssertEqualObjects(@(NO), observability[@"metricsEnabled"]);
   NSDictionary *cluster = config[@"cluster"];
   XCTAssertEqualObjects(@(YES), cluster[@"enabled"]);
   XCTAssertEqualObjects(@"legacy-cluster", cluster[@"name"]);

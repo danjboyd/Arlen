@@ -53,6 +53,6 @@
     enabled = NO;
     name = "default";
     expectedNodes = 1;
-    emitHeaders = YES;
+    emitHeaders = NO;
   };
 }

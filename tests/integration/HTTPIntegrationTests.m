@@ -890,7 +890,7 @@
   }
 }
 
-- (void)testProductionSerializedDispatchClosesHTTPConnections {
+- (void)testProductionSerializedDispatchAllowsKeepAliveConnections {
   int port = [self randomPort];
   NSTask *server = [[NSTask alloc] init];
   server.launchPath = @"./build/boomhauer";
@@ -909,34 +909,34 @@
                                          @"PORT=%d\n"
                                          @"sock = socket.create_connection(('127.0.0.1', PORT), timeout=5)\n"
                                          @"sock.settimeout(5)\n"
-                                         @"request = (\n"
+                                         @"first = (\n"
                                          @"    f'GET /healthz HTTP/1.1\\r\\n'\n"
                                          @"    f'Host: 127.0.0.1:{PORT}\\r\\n'\n"
                                          @"    'Connection: keep-alive\\r\\n\\r\\n'\n"
                                          @").encode('utf-8')\n"
-                                         @"sock.sendall(request)\n"
-                                         @"data = b''\n"
-                                         @"while b'\\r\\n\\r\\n' not in data:\n"
+                                         @"sock.sendall(first)\n"
+                                         @"data1 = b''\n"
+                                         @"while b'\\r\\n\\r\\n' not in data1:\n"
                                          @"    chunk = sock.recv(4096)\n"
                                          @"    if not chunk:\n"
                                          @"        raise RuntimeError('connection closed before headers')\n"
-                                         @"    data += chunk\n"
-                                         @"head, rest = data.split(b'\\r\\n\\r\\n', 1)\n"
-                                         @"headers = {}\n"
+                                         @"    data1 += chunk\n"
+                                         @"head, rest = data1.split(b'\\r\\n\\r\\n', 1)\n"
+                                         @"headers1 = {}\n"
                                          @"for line in head.decode('utf-8', 'replace').split('\\r\\n')[1:]:\n"
                                          @"    if ':' not in line:\n"
                                          @"        continue\n"
                                          @"    name, value = line.split(':', 1)\n"
-                                         @"    headers[name.strip().lower()] = value.strip().lower()\n"
-                                         @"length = int(headers.get('content-length', '0'))\n"
+                                         @"    headers1[name.strip().lower()] = value.strip().lower()\n"
+                                         @"length = int(headers1.get('content-length', '0'))\n"
                                          @"body = rest\n"
                                          @"while len(body) < length:\n"
                                          @"    chunk = sock.recv(4096)\n"
                                          @"    if not chunk:\n"
                                          @"        break\n"
                                          @"    body += chunk\n"
-                                         @"if headers.get('connection') != 'close':\n"
-                                         @"    raise RuntimeError(f\"expected Connection: close, got {headers.get('connection')}\")\n"
+                                         @"if headers1.get('connection') != 'keep-alive':\n"
+                                         @"    raise RuntimeError(f\"expected Connection: keep-alive, got {headers1.get('connection')}\")\n"
                                          @"if body[:length] != b'ok\\n':\n"
                                          @"    raise RuntimeError(f'unexpected body: {body[:length]!r}')\n"
                                          @"second = (\n"
@@ -944,16 +944,36 @@
                                          @"    f'Host: 127.0.0.1:{PORT}\\r\\n'\n"
                                          @"    'Connection: close\\r\\n\\r\\n'\n"
                                          @").encode('utf-8')\n"
-                                         @"closed = False\n"
-                                         @"try:\n"
-                                         @"    sock.sendall(second)\n"
-                                         @"    followup = sock.recv(1)\n"
-                                         @"    closed = (followup == b'')\n"
-                                         @"except OSError:\n"
-                                         @"    closed = True\n"
+                                         @"sock.sendall(second)\n"
+                                         @"data2 = b''\n"
+                                         @"while b'\\r\\n\\r\\n' not in data2:\n"
+                                         @"    chunk = sock.recv(4096)\n"
+                                         @"    if not chunk:\n"
+                                         @"        raise RuntimeError('connection closed before second response headers')\n"
+                                         @"    data2 += chunk\n"
+                                         @"head2, rest2 = data2.split(b'\\r\\n\\r\\n', 1)\n"
+                                         @"headers2 = {}\n"
+                                         @"for line in head2.decode('utf-8', 'replace').split('\\r\\n')[1:]:\n"
+                                         @"    if ':' not in line:\n"
+                                         @"        continue\n"
+                                         @"    name, value = line.split(':', 1)\n"
+                                         @"    headers2[name.strip().lower()] = value.strip().lower()\n"
+                                         @"length2 = int(headers2.get('content-length', '0'))\n"
+                                         @"body2 = rest2\n"
+                                         @"while len(body2) < length2:\n"
+                                         @"    chunk = sock.recv(4096)\n"
+                                         @"    if not chunk:\n"
+                                         @"        break\n"
+                                         @"    body2 += chunk\n"
+                                         @"if headers2.get('connection') != 'close':\n"
+                                         @"    raise RuntimeError(f\"expected Connection: close, got {headers2.get('connection')}\")\n"
+                                         @"if body2[:length2] != b'ok\\n':\n"
+                                         @"    raise RuntimeError(f'unexpected second body: {body2[:length2]!r}')\n"
+                                         @"sock.settimeout(1)\n"
+                                         @"followup = sock.recv(1)\n"
                                          @"sock.close()\n"
-                                         @"if not closed:\n"
-                                         @"    raise RuntimeError('expected socket to be closed after first response')\n"
+                                         @"if followup != b'':\n"
+                                         @"    raise RuntimeError('expected socket to be closed after second response')\n"
                                          @"print('ok')\n",
                                          port];
     int pyCode = 0;
@@ -1193,7 +1213,7 @@
 
 - (void)testSerializedModeMixedLifecycleStressRemainsStable {
   [self runMixedRequestLifecycleStressWithServerCommand:@"./build/boomhauer --env production --port %d"
-                                        expectKeepAlive:NO];
+                                        expectKeepAlive:YES];
 }
 
 - (void)testLargeResponseBodyIsNotTruncatedUnderBackpressure {
@@ -1349,6 +1369,25 @@
   int serverCode = 0;
   NSString *headers =
       [self requestWithServerEnv:@"ARLEN_CLUSTER_EMIT_HEADERS=0 ARLEN_CLUSTER_NAME=alpha ARLEN_CLUSTER_NODE_ID=node-a"
+                     serverBinary:@"./build/boomhauer"
+                        curlBody:@"curl -sS -D - -o /dev/null http://127.0.0.1:%d/healthz"
+                        curlCode:&curlCode
+                       serverCode:&serverCode];
+  XCTAssertEqual(0, curlCode);
+  XCTAssertEqual(0, serverCode);
+  XCTAssertFalse([headers containsString:@"X-Arlen-Cluster:"]);
+  XCTAssertFalse([headers containsString:@"X-Arlen-Node:"]);
+  XCTAssertFalse([headers containsString:@"X-Arlen-Worker-Pid:"]);
+  XCTAssertFalse([headers containsString:@"X-Arlen-Cluster-Status:"]);
+  XCTAssertFalse([headers containsString:@"X-Arlen-Cluster-Observed-Nodes:"]);
+  XCTAssertFalse([headers containsString:@"X-Arlen-Cluster-Expected-Nodes:"]);
+}
+
+- (void)testClusterHeadersRequireClusterEnabled {
+  int curlCode = 0;
+  int serverCode = 0;
+  NSString *headers =
+      [self requestWithServerEnv:@"ARLEN_CLUSTER_ENABLED=0 ARLEN_CLUSTER_EMIT_HEADERS=1 ARLEN_CLUSTER_NAME=alpha ARLEN_CLUSTER_NODE_ID=node-a"
                      serverBinary:@"./build/boomhauer"
                         curlBody:@"curl -sS -D - -o /dev/null http://127.0.0.1:%d/healthz"
                         curlCode:&curlCode

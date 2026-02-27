@@ -254,6 +254,7 @@ static BOOL ALNInvokeRouteAction(id controller,
 @property(nonatomic, assign, readwrite) NSUInteger clusterExpectedNodes;
 @property(nonatomic, assign, readwrite) NSUInteger clusterObservedNodes;
 @property(nonatomic, assign, readwrite) BOOL clusterEmitHeaders;
+@property(nonatomic, assign) BOOL metricsEnabled;
 @property(nonatomic, copy) NSString *i18nDefaultLocale;
 @property(nonatomic, copy) NSString *i18nFallbackLocale;
 @property(nonatomic, copy, readwrite) NSString *runtimeInvocationMode;
@@ -369,6 +370,14 @@ static BOOL ALNInvokeRouteAction(id controller,
     _clusterEmitHeaders = [emitHeadersValue respondsToSelector:@selector(boolValue)]
                               ? [emitHeadersValue boolValue]
                               : YES;
+    NSDictionary *observability =
+        [_config[@"observability"] isKindOfClass:[NSDictionary class]]
+            ? _config[@"observability"]
+            : @{};
+    id metricsEnabledValue = observability[@"metricsEnabled"];
+    _metricsEnabled = [metricsEnabledValue respondsToSelector:@selector(boolValue)]
+                          ? [metricsEnabledValue boolValue]
+                          : YES;
     _runtimeInvocationModeKind = ALNResolvedRuntimeInvocationMode(_config);
     _runtimeInvocationMode = [ALNRuntimeInvocationModeName(_runtimeInvocationModeKind) copy];
     _bootedAt = [NSDate date];
@@ -1311,6 +1320,9 @@ static NSString *ALNOpenAPISwaggerDocsHTML(void) {
 static void ALNRecordRequestMetrics(ALNApplication *application,
                                     ALNResponse *response,
                                     ALNPerfTrace *trace) {
+  if (!application.metricsEnabled) {
+    return;
+  }
   [application.metrics incrementCounter:@"http_requests_total"];
   [application.metrics incrementCounter:[NSString stringWithFormat:@"http_status_%ld_total", (long)response.statusCode]];
   if (response.statusCode >= 500) {
@@ -1332,6 +1344,18 @@ static void ALNRecordRequestMetrics(ALNApplication *application,
     [application.metrics recordTiming:@"http_controller_duration_ms"
                          milliseconds:[controllerMs doubleValue]];
   }
+}
+
+static ALNPerfTrace *ALNDisabledPerfTrace(void) {
+  static ALNPerfTrace *trace = nil;
+  if (trace == nil) {
+    @synchronized([ALNPerfTrace class]) {
+      if (trace == nil) {
+        trace = [[ALNPerfTrace alloc] initWithEnabled:NO];
+      }
+    }
+  }
+  return trace;
 }
 
 static NSString *ALNFastRandomHexString(NSUInteger length) {
@@ -1940,7 +1964,7 @@ static NSDictionary *ALNOperationalSignalPayload(ALNApplication *application,
                                                  BOOL startupReady,
                                                  BOOL readinessRequiresStartup,
                                                  BOOL readinessRequiresClusterQuorum) {
-  NSDictionary *metricsSnapshot = [application.metrics snapshot];
+  NSDictionary *metricsSnapshot = application.metricsEnabled ? [application.metrics snapshot] : @{};
   NSDictionary *gauges = [metricsSnapshot[@"gauges"] isKindOfClass:[NSDictionary class]]
                              ? metricsSnapshot[@"gauges"]
                              : @{};
@@ -1962,6 +1986,7 @@ static NSDictionary *ALNOperationalSignalPayload(ALNApplication *application,
   checks[@"metrics_registry"] = @{
     @"ok" : @(YES),
     @"source" : @"ALNMetricsRegistry",
+    @"enabled" : @(application.metricsEnabled),
   };
   checks[@"active_requests"] = @{
     @"ok" : @(activeRequests >= 0.0),
@@ -2654,7 +2679,7 @@ static void ALNFinalizeResponse(ALNApplication *application,
     }
   }
 
-  if (application.clusterEmitHeaders) {
+  if (application.clusterEnabled && application.clusterEmitHeaders) {
     NSDictionary *quorumSummary = ALNClusterQuorumSummary(application);
     NSString *clusterStatus = [quorumSummary[@"status"] isKindOfClass:[NSString class]]
                                   ? quorumSummary[@"status"]
@@ -3241,13 +3266,19 @@ static void ALNFinalizeResponse(ALNApplication *application,
   [response setHeader:@"X-Request-Id" value:requestID];
 
   BOOL performanceLogging = ALNBoolConfigValue(self.config[@"performanceLogging"], YES);
+  BOOL metricsEnabled = self.metricsEnabled;
   BOOL infoLoggingEnabled = [self.logger shouldLogLevel:ALNLogLevelInfo];
   ALNRequestTraceContext traceContext =
       ALNBuildRequestTraceContext(request, ALNTracePropagationEnabled(self));
   BOOL apiOnly = ALNBoolConfigValue(self.config[@"apiOnly"], NO);
-  ALNPerfTrace *trace = [[ALNPerfTrace alloc] initWithEnabled:performanceLogging];
-  [trace startStage:@"total"];
-  [self.metrics addGauge:@"http_requests_active" delta:1.0];
+  ALNPerfTrace *trace =
+      performanceLogging ? [[ALNPerfTrace alloc] initWithEnabled:YES] : ALNDisabledPerfTrace();
+  if (performanceLogging) {
+    [trace startStage:@"total"];
+  }
+  if (metricsEnabled) {
+    [self.metrics addGauge:@"http_requests_active" delta:1.0];
+  }
 
   NSString *routePath = nil;
   NSString *requestFormat = ALNRequestPreferredFormat(request, apiOnly, &routePath);
@@ -3256,12 +3287,16 @@ static void ALNFinalizeResponse(ALNApplication *application,
     routePath = request.path ?: @"/";
   }
 
-  [trace startStage:@"route"];
+  if (performanceLogging) {
+    [trace startStage:@"route"];
+  }
   ALNRouteMatch *match =
       [self.router matchMethod:request.method ?: @"GET"
                           path:routePath
                         format:requestFormat];
-  [trace endStage:@"route"];
+  if (performanceLogging) {
+    [trace endStage:@"route"];
+  }
 
   if (match == nil) {
     BOOL handledBuiltIn = ALNApplyBuiltInResponse(self, request, response, routePath);
@@ -3286,7 +3321,9 @@ static void ALNFinalizeResponse(ALNApplication *application,
                         &traceContext,
                         performanceLogging);
     ALNRecordRequestMetrics(self, response, trace);
-    [self.metrics addGauge:@"http_requests_active" delta:-1.0];
+    if (metricsEnabled) {
+      [self.metrics addGauge:@"http_requests_active" delta:-1.0];
+    }
 
     if (self.traceExporter != nil) {
       @try {
@@ -3662,7 +3699,9 @@ static void ALNFinalizeResponse(ALNApplication *application,
                       &traceContext,
                       performanceLogging);
   ALNRecordRequestMetrics(self, response, trace);
-  [self.metrics addGauge:@"http_requests_active" delta:-1.0];
+  if (metricsEnabled) {
+    [self.metrics addGauge:@"http_requests_active" delta:-1.0];
+  }
 
   if (self.traceExporter != nil) {
     @try {

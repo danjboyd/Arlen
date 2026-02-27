@@ -2649,10 +2649,8 @@ static NSString *ALNRealtimeBackpressureReasonForSubscriptionRejection(NSString 
             if (staticResponse == nil) {
               continue;
             }
-            // Serialized dispatch deliberately uses one request per connection.
-            // This preserves the known-stable worker lifecycle under production load.
-            BOOL keepAlive = (!self.serializeRequestDispatch) &&
-                             ALNShouldKeepAliveForRequest(request, staticResponse);
+            // Request dispatch mode does not force connection close; keep-alive follows HTTP semantics.
+            BOOL keepAlive = ALNShouldKeepAliveForRequest(request, staticResponse);
             [staticResponse setHeader:@"Connection" value:(keepAlive ? @"keep-alive" : @"close")];
             ALNEnsurePerformanceHeaders(staticResponse,
                                         performanceLogging,
@@ -2753,9 +2751,8 @@ static NSString *ALNRealtimeBackpressureReasonForSubscriptionRejection(NSString 
           return;
         }
 
-        // Serialized dispatch deliberately uses one request per connection.
-        BOOL keepAlive = (!self.serializeRequestDispatch) &&
-                         ALNShouldKeepAliveForRequest(request, response);
+        // Request dispatch mode does not force connection close; keep-alive follows HTTP semantics.
+        BOOL keepAlive = ALNShouldKeepAliveForRequest(request, response);
         [response setHeader:@"Connection" value:(keepAlive ? @"keep-alive" : @"close")];
         ALNEnsurePerformanceHeaders(response,
                                     performanceLogging,

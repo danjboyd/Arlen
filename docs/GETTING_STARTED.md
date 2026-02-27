@@ -166,8 +166,17 @@ ARLEN_REQUEST_DISPATCH_MODE=concurrent ./bin/boomhauer --env production
 
 `requestDispatchMode` accepts `concurrent` or `serialized`.
 Default is `serialized` in `production` and `concurrent` in non-production environments.
-`serialized` mode also forces `Connection: close` and one request per HTTP connection to preserve
-the known-stable worker lifecycle under production load.
+`serialized` mode preserves deterministic in-process dispatch ordering while still honoring HTTP
+keep-alive negotiation.
+
+Runtime metrics hot-path override:
+
+```bash
+ARLEN_METRICS_ENABLED=0 ./bin/boomhauer --env production
+```
+
+With this setting, request-path metrics counter/gauge/timing updates are bypassed (the `/metrics`
+endpoint remains available but reflects only explicitly recorded metrics).
 
 JSON backend override (A/B validation only):
 

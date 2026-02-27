@@ -217,7 +217,7 @@ Behavior:
 - concurrent HTTP sessions are bounded by `runtimeLimits.maxConcurrentHTTPSessions` (default `256`)
 - websocket session upgrades are bounded by `runtimeLimits.maxConcurrentWebSocketSessions` (default `256`)
 - request dispatch mode is controlled by `requestDispatchMode` (`serialized` default in `production`, `concurrent` otherwise)
-  - `serialized` mode forces one request per HTTP connection (`Connection: close`) to keep worker execution deterministic
+  - `serialized` mode keeps dispatch execution deterministic while still honoring HTTP keep-alive negotiation
 - HTTP session limit violations return deterministic overload diagnostics:
   - status `503 Service Unavailable`
   - header `Retry-After: 1`
@@ -253,7 +253,7 @@ Behavior:
   - quorum-gated readiness in cluster mode can be enabled with `ARLEN_READINESS_REQUIRES_CLUSTER_QUORUM=1`
 - distributed runtime diagnostics include:
   - `GET /clusterz` quorum and coordination capability-matrix payload
-  - response headers `X-Arlen-Cluster-Status`, `X-Arlen-Cluster-Observed-Nodes`, and `X-Arlen-Cluster-Expected-Nodes` (when `cluster.emitHeaders=YES`)
+  - response headers `X-Arlen-Cluster-Status`, `X-Arlen-Cluster-Observed-Nodes`, and `X-Arlen-Cluster-Expected-Nodes` (when `cluster.enabled=YES` and `cluster.emitHeaders=YES`)
 - built-in observability/API docs endpoints are available when enabled:
   - `/metrics`
   - `/clusterz`
@@ -298,6 +298,7 @@ Environment:
 - `ARLEN_ENABLE_YYJSON` (compile-time toggle for app-root builds via `bin/boomhauer`; `1` default, set `0` to compile without yyjson)
 - `ARLEN_ENABLE_LLHTTP` (compile-time toggle for app-root builds via `bin/boomhauer`; `1` default, set `0` to compile without llhttp)
 - `ARLEN_TRACE_PROPAGATION_ENABLED` (default `1`; legacy `MOJOOBJC_TRACE_PROPAGATION_ENABLED` also accepted)
+- `ARLEN_METRICS_ENABLED` (default `1`; disables hot-path metrics writes when set to `0`; legacy `MOJOOBJC_METRICS_ENABLED` also accepted)
 - `ARLEN_HEALTH_DETAILS_ENABLED` (default `1`; legacy `MOJOOBJC_HEALTH_DETAILS_ENABLED` also accepted)
 - `ARLEN_READINESS_REQUIRES_STARTUP` (default `0`; legacy `MOJOOBJC_READINESS_REQUIRES_STARTUP` also accepted)
 - `ARLEN_READINESS_REQUIRES_CLUSTER_QUORUM` (default `0`; legacy `MOJOOBJC_READINESS_REQUIRES_CLUSTER_QUORUM` also accepted)
