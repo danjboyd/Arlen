@@ -1383,6 +1383,506 @@
   }
 }
 
+- (void)testPhase10LRouteMatchInvestigationGeneratorProducesExpectedPack {
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *outputRoot = [self createTempDirectoryWithPrefix:@"arlen-phase10l-confidence"];
+  XCTAssertNotNil(outputRoot);
+  if (outputRoot == nil) {
+    return;
+  }
+
+  @try {
+    NSString *thresholdsPath = [outputRoot stringByAppendingPathComponent:@"thresholds.json"];
+    XCTAssertTrue([self writeFile:thresholdsPath
+                          content:@"{\n"
+                                  "  \"version\": \"phase10l-route-match-thresholds-v1\",\n"
+                                  "  \"min_ops_per_sec_default\": 0.0,\n"
+                                  "  \"max_p95_us_default\": 9999999.0,\n"
+                                  "  \"min_ops_per_sec_by_scenario\": {\n"
+                                  "    \"static_hit\": 0.0,\n"
+                                  "    \"param_hit\": 0.0,\n"
+                                  "    \"wildcard_hit\": 0.0,\n"
+                                  "    \"miss\": 0.0\n"
+                                  "  },\n"
+                                  "  \"max_p95_us_by_scenario\": {\n"
+                                  "    \"static_hit\": 9999999.0,\n"
+                                  "    \"param_hit\": 9999999.0,\n"
+                                  "    \"wildcard_hit\": 9999999.0,\n"
+                                  "    \"miss\": 9999999.0\n"
+                                  "  }\n"
+                                  "}\n"]);
+
+    int code = 0;
+    NSString *command = [NSString stringWithFormat:
+                                      @"cd %@ && ARLEN_PHASE10L_OUTPUT_DIR=%@ "
+                                       "ARLEN_PHASE10L_THRESHOLDS=%@ "
+                                       "ARLEN_PHASE10L_ROUTE_COUNT=1800 "
+                                       "ARLEN_PHASE10L_ITERATIONS=300 ARLEN_PHASE10L_WARMUP=40 "
+                                       "ARLEN_PHASE10L_ROUNDS=2 ARLEN_PHASE10L_CAPTURE_FLAMEGRAPH=0 "
+                                       "bash ./tools/ci/run_phase10l_route_match_investigation.sh",
+                                      repoRoot, outputRoot, thresholdsPath];
+    NSString *output = [self runShellCapture:command exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", output);
+
+    NSString *manifestPath = [outputRoot stringByAppendingPathComponent:@"manifest.json"];
+    NSError *error = nil;
+    NSData *manifestData = [NSData dataWithContentsOfFile:manifestPath];
+    XCTAssertNotNil(manifestData);
+    if (manifestData == nil) {
+      return;
+    }
+    NSDictionary *manifest = [NSJSONSerialization JSONObjectWithData:manifestData options:0 error:&error];
+    XCTAssertNotNil(manifest);
+    XCTAssertNil(error);
+    if (![manifest isKindOfClass:[NSDictionary class]]) {
+      return;
+    }
+
+    XCTAssertEqualObjects(@"phase10l-route-match-investigation-v1", manifest[@"version"]);
+    XCTAssertEqualObjects(@"pass", manifest[@"status"]);
+    NSArray *artifacts = [manifest[@"artifacts"] isKindOfClass:[NSArray class]] ? manifest[@"artifacts"] : @[];
+    XCTAssertTrue([artifacts containsObject:@"route_match_threshold_eval.json"]);
+    XCTAssertTrue([artifacts containsObject:@"flamegraph_capture_status.json"]);
+    XCTAssertTrue([artifacts containsObject:@"phase10l_route_match_investigation.md"]);
+
+    NSString *flamegraphStatusPath = [outputRoot stringByAppendingPathComponent:@"flamegraph_capture_status.json"];
+    NSData *flamegraphStatusData = [NSData dataWithContentsOfFile:flamegraphStatusPath];
+    XCTAssertNotNil(flamegraphStatusData);
+    if (flamegraphStatusData == nil) {
+      return;
+    }
+    NSDictionary *flamegraphStatus =
+        [NSJSONSerialization JSONObjectWithData:flamegraphStatusData options:0 error:&error];
+    XCTAssertNotNil(flamegraphStatus);
+    XCTAssertNil(error);
+    if (![flamegraphStatus isKindOfClass:[NSDictionary class]]) {
+      return;
+    }
+    XCTAssertEqualObjects(@(NO), flamegraphStatus[@"captured"]);
+    XCTAssertEqualObjects(@"disabled", flamegraphStatus[@"reason"]);
+  } @finally {
+    [[NSFileManager defaultManager] removeItemAtPath:outputRoot error:nil];
+  }
+}
+
+- (void)testPhase10MBackendParityMatrixGeneratorProducesExpectedPack {
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *outputRoot = [self createTempDirectoryWithPrefix:@"arlen-phase10m-backend-parity"];
+  XCTAssertNotNil(outputRoot);
+  if (outputRoot == nil) {
+    return;
+  }
+
+  @try {
+    int code = 0;
+    NSString *command = [NSString stringWithFormat:
+                                      @"cd %@ && ARLEN_PHASE10M_PARITY_OUTPUT_DIR=%@ "
+                                       "ARLEN_PHASE10M_MATRIX_COMBOS=1:1 "
+                                       "bash ./tools/ci/run_phase10m_backend_parity_matrix.sh",
+                                      repoRoot, outputRoot];
+    NSString *output = [self runShellCapture:command exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", output);
+
+    NSString *manifestPath = [outputRoot stringByAppendingPathComponent:@"manifest.json"];
+    NSError *error = nil;
+    NSData *manifestData = [NSData dataWithContentsOfFile:manifestPath];
+    XCTAssertNotNil(manifestData);
+    if (manifestData == nil) {
+      return;
+    }
+    NSDictionary *manifest = [NSJSONSerialization JSONObjectWithData:manifestData options:0 error:&error];
+    XCTAssertNotNil(manifest);
+    XCTAssertNil(error);
+    if (![manifest isKindOfClass:[NSDictionary class]]) {
+      return;
+    }
+
+    XCTAssertEqualObjects(@"phase10m-backend-parity-matrix-v1", manifest[@"version"]);
+    XCTAssertEqualObjects(@"pass", manifest[@"status"]);
+    NSArray *artifacts = [manifest[@"artifacts"] isKindOfClass:[NSArray class]] ? manifest[@"artifacts"] : @[];
+    XCTAssertTrue([artifacts containsObject:@"backend_parity_summary.json"]);
+    XCTAssertTrue([artifacts containsObject:@"phase10m_backend_parity_matrix.md"]);
+  } @finally {
+    [[NSFileManager defaultManager] removeItemAtPath:outputRoot error:nil];
+  }
+}
+
+- (void)testPhase10MProtocolAdversarialProbeProducesExpectedPack {
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *outputRoot = [self createTempDirectoryWithPrefix:@"arlen-phase10m-protocol-adversarial"];
+  XCTAssertNotNil(outputRoot);
+  if (outputRoot == nil) {
+    return;
+  }
+
+  @try {
+    int code = 0;
+    NSString *command = [NSString stringWithFormat:
+                                      @"cd %@ && ARLEN_PHASE10M_PROTOCOL_OUTPUT_DIR=%@ "
+                                       "ARLEN_PHASE10M_PROTOCOL_BACKENDS=llhttp,legacy "
+                                       "bash ./tools/ci/run_phase10m_protocol_adversarial.sh",
+                                      repoRoot, outputRoot];
+    NSString *output = [self runShellCapture:command exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", output);
+
+    NSString *manifestPath = [outputRoot stringByAppendingPathComponent:@"manifest.json"];
+    NSError *error = nil;
+    NSData *manifestData = [NSData dataWithContentsOfFile:manifestPath];
+    XCTAssertNotNil(manifestData);
+    if (manifestData == nil) {
+      return;
+    }
+    NSDictionary *manifest = [NSJSONSerialization JSONObjectWithData:manifestData options:0 error:&error];
+    XCTAssertNotNil(manifest);
+    XCTAssertNil(error);
+    if (![manifest isKindOfClass:[NSDictionary class]]) {
+      return;
+    }
+
+    XCTAssertEqualObjects(@"phase10m-protocol-adversarial-v1", manifest[@"version"]);
+    XCTAssertEqualObjects(@"pass", manifest[@"status"]);
+    NSArray *artifacts = [manifest[@"artifacts"] isKindOfClass:[NSArray class]] ? manifest[@"artifacts"] : @[];
+    XCTAssertTrue([artifacts containsObject:@"protocol_adversarial_results.json"]);
+    XCTAssertTrue([artifacts containsObject:@"phase10m_protocol_adversarial.md"]);
+  } @finally {
+    [[NSFileManager defaultManager] removeItemAtPath:outputRoot error:nil];
+  }
+}
+
+- (void)testPhase10MSyscallFaultInjectionHarnessProducesExpectedPack {
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *outputRoot = [self createTempDirectoryWithPrefix:@"arlen-phase10m-syscall-faults"];
+  XCTAssertNotNil(outputRoot);
+  if (outputRoot == nil) {
+    return;
+  }
+
+  @try {
+    int code = 0;
+    NSString *command = [NSString stringWithFormat:
+                                      @"cd %@ && ARLEN_PHASE10M_SYSCALL_OUTPUT_DIR=%@ "
+                                       "ARLEN_PHASE10M_SYSCALL_MODES=serialized "
+                                       "ARLEN_PHASE10M_SYSCALL_SCENARIOS=syscall_writev_eagain_keepalive,syscall_sendfile_fallback_keepalive "
+                                       "bash ./tools/ci/run_phase10m_syscall_fault_injection.sh",
+                                      repoRoot, outputRoot];
+    NSString *output = [self runShellCapture:command exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", output);
+    XCTAssertTrue([output containsString:@"phase9i-fault-injection: generated artifacts"], @"%@", output);
+
+    NSString *resultsPath = [outputRoot stringByAppendingPathComponent:@"fault_injection_results.json"];
+    NSData *resultsData = [NSData dataWithContentsOfFile:resultsPath];
+    XCTAssertNotNil(resultsData);
+    if (resultsData == nil) {
+      return;
+    }
+    NSError *error = nil;
+    NSDictionary *resultsPayload = [NSJSONSerialization JSONObjectWithData:resultsData options:0 error:&error];
+    XCTAssertNotNil(resultsPayload);
+    XCTAssertNil(error);
+    if (![resultsPayload isKindOfClass:[NSDictionary class]]) {
+      return;
+    }
+
+    XCTAssertEqualObjects(@"phase9i-fault-injection-v1", resultsPayload[@"version"]);
+    XCTAssertEqualObjects(@"phase10m-syscall-fault-scenarios-v1", resultsPayload[@"scenario_fixture_version"]);
+    NSDictionary *summary = [resultsPayload[@"summary"] isKindOfClass:[NSDictionary class]]
+                                ? resultsPayload[@"summary"]
+                                : @{};
+    XCTAssertEqualObjects(@0, summary[@"failed"]);
+  } @finally {
+    [[NSFileManager defaultManager] removeItemAtPath:outputRoot error:nil];
+  }
+}
+
+- (void)testPhase10MAllocationFaultInjectionHarnessProducesExpectedPack {
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *outputRoot = [self createTempDirectoryWithPrefix:@"arlen-phase10m-allocation-faults"];
+  XCTAssertNotNil(outputRoot);
+  if (outputRoot == nil) {
+    return;
+  }
+
+  @try {
+    int code = 0;
+    NSString *command = [NSString stringWithFormat:
+                                      @"cd %@ && ARLEN_PHASE10M_ALLOC_OUTPUT_DIR=%@ "
+                                       "ARLEN_PHASE10M_ALLOC_MODES=serialized "
+                                       "ARLEN_PHASE10M_ALLOC_ITERS=1 "
+                                       "ARLEN_PHASE10M_ALLOC_SCENARIOS=alloc_read_state_realloc_once,alloc_parser_headername_malloc_once,alloc_response_serialize_once "
+                                       "bash ./tools/ci/run_phase10m_allocation_fault_injection.sh",
+                                      repoRoot, outputRoot];
+    NSString *output = [self runShellCapture:command exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", output);
+
+    NSString *resultsPath = [outputRoot stringByAppendingPathComponent:@"fault_injection_results.json"];
+    NSData *resultsData = [NSData dataWithContentsOfFile:resultsPath];
+    XCTAssertNotNil(resultsData);
+    if (resultsData == nil) {
+      return;
+    }
+
+    NSError *error = nil;
+    NSDictionary *resultsPayload = [NSJSONSerialization JSONObjectWithData:resultsData options:0 error:&error];
+    XCTAssertNotNil(resultsPayload);
+    XCTAssertNil(error);
+    if (![resultsPayload isKindOfClass:[NSDictionary class]]) {
+      return;
+    }
+
+    XCTAssertEqualObjects(@"phase9i-fault-injection-v1", resultsPayload[@"version"]);
+    XCTAssertEqualObjects(@"phase10m-allocation-fault-scenarios-v1",
+                          resultsPayload[@"scenario_fixture_version"]);
+    NSDictionary *summary = [resultsPayload[@"summary"] isKindOfClass:[NSDictionary class]]
+                                ? resultsPayload[@"summary"]
+                                : @{};
+    XCTAssertEqualObjects(@0, summary[@"failed"]);
+  } @finally {
+    [[NSFileManager defaultManager] removeItemAtPath:outputRoot error:nil];
+  }
+}
+
+- (void)testPhase10MLongRunSoakGeneratorProducesExpectedPack {
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *outputRoot = [self createTempDirectoryWithPrefix:@"arlen-phase10m-soak"];
+  XCTAssertNotNil(outputRoot);
+  if (outputRoot == nil) {
+    return;
+  }
+
+  @try {
+    NSString *thresholdsPath = [outputRoot stringByAppendingPathComponent:@"soak-thresholds.json"];
+    XCTAssertTrue([self writeFile:thresholdsPath
+                          content:@"{\n"
+                                  "  \"version\": \"phase10m-soak-thresholds-v1\",\n"
+                                  "  \"modes\": [\"concurrent\", \"serialized\"],\n"
+                                  "  \"requestsPerMode\": 80,\n"
+                                  "  \"sampleEveryRequests\": 20,\n"
+                                  "  \"restartCycles\": 1,\n"
+                                  "  \"maxRequestFailures\": 2,\n"
+                                  "  \"maxRssDeltaKB\": 131072,\n"
+                                  "  \"maxFDDelta\": 96,\n"
+                                  "  \"maxSocketFDDelta\": 96\n"
+                                  "}\n"]);
+
+    int code = 0;
+    NSString *command = [NSString stringWithFormat:
+                                      @"cd %@ && ARLEN_PHASE10M_SOAK_OUTPUT_DIR=%@ "
+                                       "ARLEN_PHASE10M_SOAK_THRESHOLDS=%@ "
+                                       "bash ./tools/ci/run_phase10m_soak.sh",
+                                      repoRoot, outputRoot, thresholdsPath];
+    NSString *output = [self runShellCapture:command exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", output);
+
+    NSString *manifestPath = [outputRoot stringByAppendingPathComponent:@"manifest.json"];
+    NSData *manifestData = [NSData dataWithContentsOfFile:manifestPath];
+    XCTAssertNotNil(manifestData);
+    if (manifestData == nil) {
+      return;
+    }
+
+    NSError *error = nil;
+    NSDictionary *manifest = [NSJSONSerialization JSONObjectWithData:manifestData options:0 error:&error];
+    XCTAssertNotNil(manifest);
+    XCTAssertNil(error);
+    if (![manifest isKindOfClass:[NSDictionary class]]) {
+      return;
+    }
+
+    XCTAssertEqualObjects(@"phase10m-soak-v1", manifest[@"version"]);
+    XCTAssertEqualObjects(@"pass", manifest[@"status"]);
+    NSArray *artifacts = [manifest[@"artifacts"] isKindOfClass:[NSArray class]] ? manifest[@"artifacts"] : @[];
+    XCTAssertTrue([artifacts containsObject:@"soak_results.json"]);
+    XCTAssertTrue([artifacts containsObject:@"phase10m_soak_summary.md"]);
+  } @finally {
+    [[NSFileManager defaultManager] removeItemAtPath:outputRoot error:nil];
+  }
+}
+
+- (void)testPhase10MChaosRestartGeneratorProducesExpectedPack {
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *outputRoot = [self createTempDirectoryWithPrefix:@"arlen-phase10m-chaos-restart"];
+  XCTAssertNotNil(outputRoot);
+  if (outputRoot == nil) {
+    return;
+  }
+
+  @try {
+    NSString *thresholdsPath = [outputRoot stringByAppendingPathComponent:@"chaos-thresholds.json"];
+    XCTAssertTrue([self writeFile:thresholdsPath
+                          content:@"{\n"
+                                  "  \"version\": \"phase10m-chaos-restart-thresholds-v1\",\n"
+                                  "  \"workers\": 2,\n"
+                                  "  \"churnCycles\": 1,\n"
+                                  "  \"loadThreads\": 2,\n"
+                                  "  \"loadDurationSeconds\": 2,\n"
+                                  "  \"startupTimeoutSeconds\": 60,\n"
+                                  "  \"cycleReadinessTimeoutSeconds\": 20,\n"
+                                  "  \"maxNon200Responses\": 8,\n"
+                                  "  \"maxLoadErrors\": 8,\n"
+                                  "  \"allowedManagerExitCodes\": [0, -15],\n"
+                                  "  \"requiredLifecycleTokens\": [\n"
+                                  "    \"event=manager_started\",\n"
+                                  "    \"event=worker_started\",\n"
+                                  "    \"event=manager_reload_requested\",\n"
+                                  "    \"signal=HUP\",\n"
+                                  "    \"event=manager_shutdown_requested\",\n"
+                                  "    \"signal=TERM\",\n"
+                                  "    \"event=http_worker_stopped\",\n"
+                                  "    \"event=manager_stopped\"\n"
+                                  "  ]\n"
+                                  "}\n"]);
+
+    int code = 0;
+    NSString *command = [NSString stringWithFormat:
+                                      @"cd %@ && ARLEN_PHASE10M_CHAOS_OUTPUT_DIR=%@ "
+                                       "ARLEN_PHASE10M_CHAOS_THRESHOLDS=%@ "
+                                       "bash ./tools/ci/run_phase10m_chaos_restart.sh",
+                                      repoRoot, outputRoot, thresholdsPath];
+    NSString *output = [self runShellCapture:command exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", output);
+
+    NSString *manifestPath = [outputRoot stringByAppendingPathComponent:@"manifest.json"];
+    NSData *manifestData = [NSData dataWithContentsOfFile:manifestPath];
+    XCTAssertNotNil(manifestData);
+    if (manifestData == nil) {
+      return;
+    }
+
+    NSError *error = nil;
+    NSDictionary *manifest = [NSJSONSerialization JSONObjectWithData:manifestData options:0 error:&error];
+    XCTAssertNotNil(manifest);
+    XCTAssertNil(error);
+    if (![manifest isKindOfClass:[NSDictionary class]]) {
+      return;
+    }
+
+    XCTAssertEqualObjects(@"phase10m-chaos-restart-v1", manifest[@"version"]);
+    XCTAssertEqualObjects(@"pass", manifest[@"status"]);
+    NSArray *artifacts = [manifest[@"artifacts"] isKindOfClass:[NSArray class]] ? manifest[@"artifacts"] : @[];
+    XCTAssertTrue([artifacts containsObject:@"chaos_restart_results.json"]);
+    XCTAssertTrue([artifacts containsObject:@"phase10m_chaos_restart.md"]);
+    XCTAssertTrue([artifacts containsObject:@"phase10m_chaos_lifecycle.log"]);
+  } @finally {
+    [[NSFileManager defaultManager] removeItemAtPath:outputRoot error:nil];
+  }
+}
+
+- (void)testPhase10MStaticAnalysisGeneratorProducesExpectedPack {
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *outputRoot = [self createTempDirectoryWithPrefix:@"arlen-phase10m-static-analysis"];
+  XCTAssertNotNil(outputRoot);
+  if (outputRoot == nil) {
+    return;
+  }
+
+  @try {
+    int code = 0;
+    NSString *command = [NSString stringWithFormat:
+                                      @"cd %@ && ARLEN_PHASE10M_STATIC_ANALYSIS_OUTPUT_DIR=%@ "
+                                       "bash ./tools/ci/run_phase10m_static_analysis.sh",
+                                      repoRoot, outputRoot];
+    NSString *output = [self runShellCapture:command exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", output);
+
+    NSString *manifestPath = [outputRoot stringByAppendingPathComponent:@"manifest.json"];
+    NSData *manifestData = [NSData dataWithContentsOfFile:manifestPath];
+    XCTAssertNotNil(manifestData);
+    if (manifestData == nil) {
+      return;
+    }
+
+    NSError *error = nil;
+    NSDictionary *manifest = [NSJSONSerialization JSONObjectWithData:manifestData options:0 error:&error];
+    XCTAssertNotNil(manifest);
+    XCTAssertNil(error);
+    if (![manifest isKindOfClass:[NSDictionary class]]) {
+      return;
+    }
+
+    XCTAssertEqualObjects(@"phase10m-static-analysis-v1", manifest[@"version"]);
+    XCTAssertEqualObjects(@"pass", manifest[@"status"]);
+    NSArray *artifacts = [manifest[@"artifacts"] isKindOfClass:[NSArray class]] ? manifest[@"artifacts"] : @[];
+    XCTAssertTrue([artifacts containsObject:@"static_analysis_results.json"]);
+    XCTAssertTrue([artifacts containsObject:@"phase10m_static_analysis.md"]);
+  } @finally {
+    [[NSFileManager defaultManager] removeItemAtPath:outputRoot error:nil];
+  }
+}
+
+- (void)testPhase10MBlobThroughputGeneratorProducesExpectedPack {
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *outputRoot = [self createTempDirectoryWithPrefix:@"arlen-phase10m-blob-throughput"];
+  XCTAssertNotNil(outputRoot);
+  if (outputRoot == nil) {
+    return;
+  }
+
+  @try {
+    NSString *thresholdsPath = [outputRoot stringByAppendingPathComponent:@"blob-thresholds.json"];
+    XCTAssertTrue([self writeFile:thresholdsPath
+                          content:@"{\n"
+                                  "  \"version\": \"phase10m-blob-throughput-thresholds-v1\",\n"
+                                  "  \"scenario_names\": {\n"
+                                  "    \"legacy_e2e\": \"blob_legacy_string_e2e\",\n"
+                                  "    \"binary_e2e\": \"blob_binary_e2e\",\n"
+                                  "    \"binary_sendfile\": \"blob_binary_sendfile\"\n"
+                                  "  },\n"
+                                  "  \"binary_vs_legacy\": {\n"
+                                  "    \"min_req_per_sec_ratio\": 0.0,\n"
+                                  "    \"max_p95_ratio\": 9999999.0\n"
+                                  "  },\n"
+                                  "  \"sendfile_vs_binary\": {\n"
+                                  "    \"min_req_per_sec_ratio\": 0.0,\n"
+                                  "    \"max_p95_ratio\": 9999999.0\n"
+                                  "  },\n"
+                                  "  \"min_req_per_sec\": {\n"
+                                  "    \"blob_binary_e2e\": 0.0,\n"
+                                  "    \"blob_binary_sendfile\": 0.0\n"
+                                  "  },\n"
+                                  "  \"max_p95_ms\": {\n"
+                                  "    \"blob_binary_e2e\": 9999999.0,\n"
+                                  "    \"blob_binary_sendfile\": 9999999.0\n"
+                                  "  }\n"
+                                  "}\n"]);
+
+    int code = 0;
+    NSString *command = [NSString stringWithFormat:
+                                      @"cd %@ && ARLEN_PHASE10M_BLOB_OUTPUT_DIR=%@ "
+                                       "ARLEN_PHASE10M_BLOB_THRESHOLDS=%@ "
+                                       "ARLEN_PHASE10M_BLOB_CONCURRENCY=4 "
+                                       "ARLEN_PHASE10M_BLOB_REPEATS=1 "
+                                       "ARLEN_PHASE10M_BLOB_REQUESTS=20 "
+                                       "bash ./tools/ci/run_phase10m_blob_throughput.sh",
+                                      repoRoot, outputRoot, thresholdsPath];
+    NSString *output = [self runShellCapture:command exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", output);
+
+    NSString *manifestPath = [outputRoot stringByAppendingPathComponent:@"manifest.json"];
+    NSData *manifestData = [NSData dataWithContentsOfFile:manifestPath];
+    XCTAssertNotNil(manifestData);
+    if (manifestData == nil) {
+      return;
+    }
+
+    NSError *error = nil;
+    NSDictionary *manifest = [NSJSONSerialization JSONObjectWithData:manifestData options:0 error:&error];
+    XCTAssertNotNil(manifest);
+    XCTAssertNil(error);
+    if (![manifest isKindOfClass:[NSDictionary class]]) {
+      return;
+    }
+
+    XCTAssertEqualObjects(@"phase10m-blob-throughput-v1", manifest[@"version"]);
+    XCTAssertEqualObjects(@"pass", manifest[@"status"]);
+    NSArray *artifacts = [manifest[@"artifacts"] isKindOfClass:[NSArray class]] ? manifest[@"artifacts"] : @[];
+    XCTAssertTrue([artifacts containsObject:@"phase10m_blob_throughput_eval.json"]);
+    XCTAssertTrue([artifacts containsObject:@"phase10m_blob_throughput.md"]);
+    XCTAssertTrue([artifacts containsObject:@"phase10m_blob_perf_report.json"]);
+  } @finally {
+    [[NSFileManager defaultManager] removeItemAtPath:outputRoot error:nil];
+  }
+}
+
 - (void)testRuntimeJSONAbstractionCheckScriptPasses {
   NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
   int code = 0;

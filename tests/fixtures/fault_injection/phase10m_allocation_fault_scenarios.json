@@ -1,0 +1,35 @@
+{
+  "version": "phase10m-allocation-fault-scenarios-v1",
+  "lastUpdated": "2026-02-26",
+  "seams": [
+    {
+      "id": "allocation_read_path",
+      "description": "Connection read-state growth allocation failure handling"
+    },
+    {
+      "id": "allocation_parser_path",
+      "description": "Parser metadata/header-name allocation failure handling"
+    },
+    {
+      "id": "allocation_response_serializer",
+      "description": "Response header serialization allocation failure handling"
+    }
+  ],
+  "scenarios": [
+    {
+      "id": "alloc_read_state_realloc_once",
+      "seam": "allocation_read_path",
+      "description": "Inject one read-state realloc ENOMEM and verify 503 fault path plus healthy recovery"
+    },
+    {
+      "id": "alloc_parser_headername_malloc_once",
+      "seam": "allocation_parser_path",
+      "description": "Inject one parser header-name malloc ENOMEM and verify 400 fault path plus healthy recovery"
+    },
+    {
+      "id": "alloc_response_serialize_once",
+      "seam": "allocation_response_serializer",
+      "description": "Inject one response header serialization allocation fault and verify fallback 500 plus healthy recovery"
+    }
+  ]
+}

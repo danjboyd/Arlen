@@ -36,6 +36,7 @@ NS_ASSUME_NONNULL_BEGIN
                             error:(NSError *_Nullable *_Nullable)error;
 - (BOOL)renderJSON:(id)object error:(NSError *_Nullable *_Nullable)error;
 - (void)renderText:(NSString *)text;
+- (void)renderData:(NSData *)data contentType:(nullable NSString *)contentType;
 - (void)renderSSEEvents:(NSArray *)events;
 - (void)acceptWebSocketEcho;
 - (void)acceptWebSocketChannel:(NSString *)channel;

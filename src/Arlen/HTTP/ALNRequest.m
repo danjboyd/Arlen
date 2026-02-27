@@ -4,8 +4,75 @@
 #import "third_party/llhttp/llhttp.h"
 #include <pthread.h>
 #endif
+#include <errno.h>
+#include <limits.h>
+#include <stdlib.h>
+#include <string.h>
+#include <strings.h>
 
 NSString *const ALNRequestErrorDomain = @"Arlen.HTTP.Request.Error";
+
+static NSLock *gALNRequestFaultInjectionLock = nil;
+static NSMutableSet *gALNRequestFaultInjectionConsumed = nil;
+
+static BOOL ALNRequestEnvFlagEnabled(const char *name) {
+  if (name == NULL || name[0] == '\0') {
+    return NO;
+  }
+  const char *raw = getenv(name);
+  if (raw == NULL || raw[0] == '\0') {
+    return NO;
+  }
+  if (strcmp(raw, "0") == 0) {
+    return NO;
+  }
+  if (strcasecmp(raw, "false") == 0 || strcasecmp(raw, "off") == 0 ||
+      strcasecmp(raw, "no") == 0) {
+    return NO;
+  }
+  return YES;
+}
+
+static void ALNEnsureRequestFaultInjectionState(void) {
+  if (gALNRequestFaultInjectionLock != nil && gALNRequestFaultInjectionConsumed != nil) {
+    return;
+  }
+  @synchronized([NSProcessInfo processInfo]) {
+    if (gALNRequestFaultInjectionLock == nil) {
+      gALNRequestFaultInjectionLock = [[NSLock alloc] init];
+    }
+    if (gALNRequestFaultInjectionConsumed == nil) {
+      gALNRequestFaultInjectionConsumed = [NSMutableSet set];
+    }
+  }
+}
+
+static BOOL ALNRequestConsumeFaultOnce(const char *name) {
+  if (!ALNRequestEnvFlagEnabled(name)) {
+    return NO;
+  }
+  ALNEnsureRequestFaultInjectionState();
+  NSString *key = [NSString stringWithUTF8String:name];
+  if ([key length] == 0) {
+    return NO;
+  }
+  BOOL shouldInject = NO;
+  [gALNRequestFaultInjectionLock lock];
+  if (![gALNRequestFaultInjectionConsumed containsObject:key]) {
+    [gALNRequestFaultInjectionConsumed addObject:key];
+    shouldInject = YES;
+  }
+  [gALNRequestFaultInjectionLock unlock];
+  return shouldInject;
+}
+
+static void *ALNRequestMallocWithFaults(size_t size) {
+  if (ALNRequestConsumeFaultOnce("ARLEN_FAULT_ALLOC_HEADERNAME_MALLOC_ONCE")) {
+    errno = ENOMEM;
+    return NULL;
+  }
+  return malloc(size);
+}
 
 static NSError *ALNRequestError(NSInteger code, NSString *message) {
   return [NSError errorWithDomain:ALNRequestErrorDomain
@@ -134,6 +201,7 @@ NSMutableData *_bodyData;
 
 NSMutableDictionary *_headers;
 NSString *_errorMessage;
+BOOL _headersComplete;
 BOOL _messageComplete;
 }
 
@@ -160,6 +228,7 @@ BOOL _messageComplete;
     _bodyData = nil;
     _headers = [NSMutableDictionary dictionary];
     _errorMessage = @"";
+    _headersComplete = NO;
     _messageComplete = NO;
   }
   return self;
@@ -180,6 +249,7 @@ BOOL _messageComplete;
   _bodyData = nil;
   [_headers removeAllObjects];
   _errorMessage = @"";
+  _headersComplete = NO;
   _messageComplete = NO;
 }
 
@@ -187,6 +257,8 @@ BOOL _messageComplete;
 
 static llhttp_settings_t gALNLLHTTPSettings;
 static pthread_once_t gALNLLHTTPSettingsOnce = PTHREAD_ONCE_INIT;
+static llhttp_settings_t gALNLLHTTPStreamingSettings;
+static pthread_once_t gALNLLHTTPStreamingSettingsOnce = PTHREAD_ONCE_INIT;
 static pthread_key_t gALNLLHTTPStateKey;
 static pthread_once_t gALNLLHTTPStateKeyOnce = PTHREAD_ONCE_INIT;
 
@@ -306,7 +378,7 @@ static NSString *ALNLLHTTPLowercasedASCIIHeaderName(const unsigned char *bytes, 
   char *buffer = stack;
   BOOL needsFree = NO;
   if (length > sizeof(stack)) {
-    buffer = malloc(length);
+    buffer = ALNRequestMallocWithFaults(length);
     if (buffer == NULL) {
       return nil;
     }
@@ -461,6 +533,7 @@ static int ALNLLHTTPOnHeadersComplete(llhttp_t *parser) {
   if (state == nil) {
     return ALNLLHTTPSetError(parser, @"invalid parser state");
   }
+  state->_headersComplete = YES;
   if (ALNLLHTTPSpanLength(state->_headerFieldStart, state->_headerFieldLength, state->_headerFieldData) > 0 ||
       ALNLLHTTPSpanLength(state->_headerValueStart, state->_headerValueLength, state->_headerValueData) > 0) {
     return ALNLLHTTPFinalizeHeader(parser);
@@ -484,6 +557,14 @@ static int ALNLLHTTPOnMessageComplete(llhttp_t *parser) {
   return 0;
 }
 
+static int ALNLLHTTPOnMessageCompletePause(llhttp_t *parser) {
+  ALNLLHTTPParseState *state = ALNLLHTTPState(parser);
+  if (state != nil) {
+    state->_messageComplete = YES;
+  }
+  return HPE_PAUSED;
+}
+
 static void ALNLLHTTPInitializeSharedSettings(void) {
   llhttp_settings_init(&gALNLLHTTPSettings);
   gALNLLHTTPSettings.on_url = ALNLLHTTPOnURL;
@@ -498,6 +579,22 @@ static void ALNLLHTTPInitializeSharedSettings(void) {
 static const llhttp_settings_t *ALNLLHTTPSharedSettings(void) {
   pthread_once(&gALNLLHTTPSettingsOnce, ALNLLHTTPInitializeSharedSettings);
   return &gALNLLHTTPSettings;
+}
+
+static void ALNLLHTTPInitializeStreamingSettings(void) {
+  llhttp_settings_init(&gALNLLHTTPStreamingSettings);
+  gALNLLHTTPStreamingSettings.on_url = ALNLLHTTPOnURL;
+  gALNLLHTTPStreamingSettings.on_header_field = ALNLLHTTPOnHeaderField;
+  gALNLLHTTPStreamingSettings.on_header_value = ALNLLHTTPOnHeaderValue;
+  gALNLLHTTPStreamingSettings.on_header_value_complete = ALNLLHTTPOnHeaderValueComplete;
+  gALNLLHTTPStreamingSettings.on_headers_complete = ALNLLHTTPOnHeadersComplete;
+  gALNLLHTTPStreamingSettings.on_body = ALNLLHTTPOnBody;
+  gALNLLHTTPStreamingSettings.on_message_complete = ALNLLHTTPOnMessageCompletePause;
+}
+
+static const llhttp_settings_t *ALNLLHTTPStreamingSettings(void) {
+  pthread_once(&gALNLLHTTPStreamingSettingsOnce, ALNLLHTTPInitializeStreamingSettings);
+  return &gALNLLHTTPStreamingSettings;
 }
 
 static void ALNLLHTTPThreadStateRelease(void *value) {
@@ -728,61 +825,90 @@ static ALNRequest *ALNRequestFromRawDataLegacy(NSData *data, NSError **error) {
 }
 
 #if ARLEN_ENABLE_LLHTTP
-static ALNRequest *ALNRequestFromRawDataLLHTTPOnce(NSData *data, NSError **error) {
-  if (data == nil || [data length] == 0) {
-    if (error != NULL) {
-      *error = ALNRequestError(2, @"Missing request line");
+static NSInteger ALNLLHTTPErrorCodeForMessage(NSString *message) {
+  if ([message isKindOfClass:[NSString class]] && [message containsString:@"UTF-8"]) {
+    return 1;
+  }
+  return 3;
+}
+
+static NSInteger ALNLLHTTPParsedContentLength(ALNLLHTTPParseState *state) {
+  NSString *rawValue = [state->_headers[@"content-length"] isKindOfClass:[NSString class]]
+                           ? state->_headers[@"content-length"]
+                           : nil;
+  if (![rawValue isKindOfClass:[NSString class]] || [rawValue length] == 0) {
+    return 0;
+  }
+  NSString *trimmed =
+      [rawValue stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+  if ([trimmed length] == 0) {
+    return -1;
+  }
+
+  const char *bytes = [trimmed UTF8String];
+  if (bytes == NULL || bytes[0] == '\0') {
+    return -1;
+  }
+  unsigned long long parsed = 0ULL;
+  for (const unsigned char *cursor = (const unsigned char *)bytes; *cursor != '\0'; cursor++) {
+    if (*cursor < '0' || *cursor > '9') {
+      return -1;
     }
-    return nil;
+    unsigned long long digit = (unsigned long long)(*cursor - '0');
+    if (parsed > (ULLONG_MAX / 10ULL) ||
+        (parsed == (ULLONG_MAX / 10ULL) && digit > (ULLONG_MAX % 10ULL))) {
+      return NSIntegerMax;
+    }
+    parsed = (parsed * 10ULL) + digit;
+    if (parsed > (unsigned long long)NSIntegerMax) {
+      return NSIntegerMax;
+    }
   }
+  return (NSInteger)parsed;
+}
 
-  ALNLLHTTPParseState *state = ALNLLHTTPThreadState();
-
-  llhttp_t parser;
-  llhttp_init(&parser, HTTP_REQUEST, ALNLLHTTPSharedSettings());
-  parser.data = (__bridge void *)state;
-
-  const char *bytes = (const char *)[data bytes];
-  size_t length = (size_t)[data length];
-  llhttp_errno_t parseError = llhttp_execute(&parser, bytes, length);
-  BOOL pausedForUpgrade = (parseError == HPE_PAUSED_UPGRADE);
-  if (pausedForUpgrade) {
-    llhttp_resume_after_upgrade(&parser);
-    parseError = HPE_OK;
+static NSError *ALNLLHTTPParseErrorForState(ALNLLHTTPParseState *state,
+                                            llhttp_t *parser,
+                                            llhttp_errno_t parseError) {
+  NSString *message = state->_errorMessage;
+  if ([message length] == 0) {
+    const char *reason = llhttp_get_error_reason(parser);
+    if (reason != NULL && reason[0] != '\0') {
+      message = [NSString stringWithUTF8String:reason] ?: @"Invalid request line";
+    } else {
+      const char *name = llhttp_errno_name(parseError);
+      message = [NSString stringWithFormat:@"HTTP parse error (%s)", name != NULL ? name : "unknown"];
+    }
   }
-  if (parseError == HPE_OK && !pausedForUpgrade) {
-    parseError = llhttp_finish(&parser);
-  }
+  return ALNRequestError(ALNLLHTTPErrorCodeForMessage(message), message);
+}
 
-  if (parseError != HPE_OK) {
-    NSInteger code = 3;
-    NSString *message = state->_errorMessage;
-    if ([message length] == 0) {
-      const char *reason = llhttp_get_error_reason(&parser);
-      if (reason != NULL && reason[0] != '\0') {
-        message = [NSString stringWithUTF8String:reason] ?: @"Invalid request line";
-      } else {
-        const char *name = llhttp_errno_name(parseError);
-        message = [NSString stringWithFormat:@"HTTP parse error (%s)", name != NULL ? name : "unknown"];
+static size_t ALNLLHTTPConsumedLength(llhttp_t *parser, const char *bufferStart, size_t bufferLength) {
+  if (parser == NULL || bufferStart == NULL) {
+    return 0;
+  }
+  size_t consumed = 0;
+  const char *errorPos = llhttp_get_error_pos(parser);
+  if (errorPos != NULL && errorPos >= bufferStart) {
+    ptrdiff_t delta = errorPos - bufferStart;
+    if (delta >= 0) {
+      consumed = (size_t)delta;
+      if (consumed > bufferLength) {
+        consumed = bufferLength;
       }
     }
-    if ([message containsString:@"UTF-8"]) {
-      code = 1;
-    }
-    if (error != NULL) {
-      *error = ALNRequestError(code, message);
-    }
-    return nil;
   }
-
-  if (!state->_messageComplete) {
-    if (error != NULL) {
-      *error = ALNRequestError(3, @"Invalid request line");
-    }
-    return nil;
+  if (consumed == 0) {
+    consumed = bufferLength;
   }
+  return consumed;
+}
 
-  uint8_t parsedMethod = llhttp_get_method(&parser);
+static ALNRequest *ALNBuildRequestFromLLHTTPState(NSData *sourceData,
+                                                  llhttp_t *parser,
+                                                  ALNLLHTTPParseState *state,
+                                                  NSError **error) {
+  uint8_t parsedMethod = llhttp_get_method(parser);
   const char *methodCString = llhttp_method_name((llhttp_method_t)parsedMethod);
   NSString *method = (methodCString != NULL) ? [NSString stringWithUTF8String:methodCString] : nil;
   size_t uriLength = ALNLLHTTPSpanLength(state->_urlStart, state->_urlLength, state->_urlData);
@@ -799,12 +925,12 @@ static ALNRequest *ALNRequestFromRawDataLLHTTPOnce(NSData *data, NSError **error
     return nil;
   }
 
-  uint8_t major = llhttp_get_http_major(&parser);
-  uint8_t minor = llhttp_get_http_minor(&parser);
+  uint8_t major = llhttp_get_http_major(parser);
+  uint8_t minor = llhttp_get_http_minor(parser);
   BOOL missingVersionRequestLine = NO;
   if (major == 0 && minor == 9) {
     // Preserve legacy compatibility for request lines that omit the HTTP version token.
-    missingVersionRequestLine = ALNRequestLineNeedsHTTPVersionNormalization(data);
+    missingVersionRequestLine = ALNRequestLineNeedsHTTPVersionNormalization(sourceData);
   }
   NSString *httpVersion = (missingVersionRequestLine
                                ? @"HTTP/1.1"
@@ -832,6 +958,120 @@ static ALNRequest *ALNRequestFromRawDataLLHTTPOnce(NSData *data, NSError **error
                                 httpVersion:httpVersion
                                     headers:state->_headers
                                        body:body];
+}
+
+static ALNRequest *ALNRequestFromRawDataLLHTTPOnce(NSData *data, NSError **error) {
+  if (data == nil || [data length] == 0) {
+    if (error != NULL) {
+      *error = ALNRequestError(2, @"Missing request line");
+    }
+    return nil;
+  }
+
+  ALNLLHTTPParseState *state = ALNLLHTTPThreadState();
+
+  llhttp_t parser;
+  llhttp_init(&parser, HTTP_REQUEST, ALNLLHTTPSharedSettings());
+  parser.data = (__bridge void *)state;
+
+  const char *bytes = (const char *)[data bytes];
+  size_t length = (size_t)[data length];
+  llhttp_errno_t parseError = llhttp_execute(&parser, bytes, length);
+  BOOL pausedForUpgrade = (parseError == HPE_PAUSED_UPGRADE);
+  if (pausedForUpgrade) {
+    llhttp_resume_after_upgrade(&parser);
+    parseError = HPE_OK;
+  }
+  if (parseError == HPE_OK && !pausedForUpgrade) {
+    parseError = llhttp_finish(&parser);
+  }
+
+  if (parseError != HPE_OK) {
+    if (error != NULL) {
+      *error = ALNLLHTTPParseErrorForState(state, &parser, parseError);
+    }
+    return nil;
+  }
+
+  if (!state->_messageComplete) {
+    if (error != NULL) {
+      *error = ALNRequestError(3, @"Invalid request line");
+    }
+    return nil;
+  }
+
+  return ALNBuildRequestFromLLHTTPState(data, &parser, state, error);
+}
+
+static ALNRequest *ALNRequestFromBufferedDataLLHTTP(NSData *data,
+                                                    NSUInteger *consumedLength,
+                                                    BOOL *headersComplete,
+                                                    NSInteger *contentLength,
+                                                    NSError **error) {
+  if (consumedLength != NULL) {
+    *consumedLength = 0;
+  }
+  if (headersComplete != NULL) {
+    *headersComplete = NO;
+  }
+  if (contentLength != NULL) {
+    *contentLength = 0;
+  }
+  if (error != NULL) {
+    *error = nil;
+  }
+
+  if (data == nil || [data length] == 0) {
+    return nil;
+  }
+
+  ALNLLHTTPParseState *state = ALNLLHTTPThreadState();
+
+  llhttp_t parser;
+  llhttp_init(&parser, HTTP_REQUEST, ALNLLHTTPStreamingSettings());
+  parser.data = (__bridge void *)state;
+
+  const char *bytes = (const char *)[data bytes];
+  size_t length = (size_t)[data length];
+  llhttp_errno_t parseError = llhttp_execute(&parser, bytes, length);
+  if (parseError == HPE_PAUSED_UPGRADE) {
+    llhttp_resume_after_upgrade(&parser);
+    parseError = state->_messageComplete ? HPE_PAUSED : HPE_OK;
+  }
+
+  if (headersComplete != NULL) {
+    *headersComplete = state->_headersComplete;
+  }
+  if (contentLength != NULL) {
+    *contentLength = ALNLLHTTPParsedContentLength(state);
+  }
+
+  if (parseError == HPE_PAUSED && state->_messageComplete) {
+    if (consumedLength != NULL) {
+      *consumedLength = (NSUInteger)ALNLLHTTPConsumedLength(&parser, bytes, length);
+    }
+    return ALNBuildRequestFromLLHTTPState(data, &parser, state, error);
+  }
+
+  if (parseError == HPE_OK && !state->_messageComplete) {
+    return nil;
+  }
+
+  if (parseError != HPE_OK) {
+    if (error != NULL) {
+      *error = ALNLLHTTPParseErrorForState(state, &parser, parseError);
+    }
+    return nil;
+  }
+
+  if (!state->_messageComplete) {
+    return nil;
+  }
+
+  if (consumedLength != NULL) {
+    *consumedLength = (NSUInteger)ALNLLHTTPConsumedLength(&parser, bytes, length);
+  }
+  return ALNBuildRequestFromLLHTTPState(data, &parser, state, error);
 }
 
 static ALNRequest *ALNRequestFromRawDataLLHTTP(NSData *data, NSError **error) {
@@ -870,8 +1110,8 @@ static ALNRequest *ALNRequestFromRawDataLLHTTP(NSData *data, NSError **error) {
 @property(nonatomic, copy, readwrite) NSString *httpVersion;
 @property(nonatomic, copy, readwrite) NSDictionary *headers;
 @property(nonatomic, strong, readwrite) NSData *body;
-@property(nonatomic, copy, readwrite) NSDictionary *queryParams;
-@property(nonatomic, copy, readwrite) NSDictionary *cookies;
+@property(nonatomic, copy) NSDictionary *cachedQueryParams;
+@property(nonatomic, copy) NSDictionary *cachedCookies;
 
 @end
 
@@ -915,29 +1155,29 @@ static ALNRequest *ALNRequestFromRawDataLLHTTP(NSData *data, NSError **error) {
 }
 
 - (NSDictionary *)queryParams {
-  if (_queryParams != nil) {
-    return _queryParams;
+  NSDictionary *cached = self.cachedQueryParams;
+  if (cached != nil) {
+    return cached;
   }
-
-  @synchronized(self) {
-    if (_queryParams == nil) {
-      _queryParams = [ALNParseQueryString(_queryString) copy];
-    }
-    return _queryParams;
+  NSDictionary *parsed = [ALNParseQueryString(_queryString) copy];
+  if (parsed == nil) {
+    parsed = @{};
   }
+  self.cachedQueryParams = parsed;
+  return self.cachedQueryParams ?: parsed;
 }
 
 - (NSDictionary *)cookies {
-  if (_cookies != nil) {
-    return _cookies;
+  NSDictionary *cached = self.cachedCookies;
+  if (cached != nil) {
+    return cached;
   }
-
-  @synchronized(self) {
-    if (_cookies == nil) {
-      _cookies = [ALNParseCookies(_headers[@"cookie"]) copy];
-    }
-    return _cookies;
+  NSDictionary *parsed = [ALNParseCookies(_headers[@"cookie"]) copy];
+  if (parsed == nil) {
+    parsed = @{};
   }
+  self.cachedCookies = parsed;
+  return self.cachedCookies ?: parsed;
 }
 
 + (ALNHTTPParserBackend)resolvedParserBackend {
@@ -992,6 +1232,46 @@ static ALNRequest *ALNRequestFromRawDataLLHTTP(NSData *data, NSError **error) {
   return ALNRequestFromRawDataLLHTTP(data ?: [NSData data], error);
 #else
   return ALNRequestFromRawDataLegacy(data ?: [NSData data], error);
+#endif
+}
+
++ (ALNRequest *)requestFromBufferedData:(NSData *)data
+                                backend:(ALNHTTPParserBackend)backend
+                         consumedLength:(NSUInteger *)consumedLength
+                        headersComplete:(BOOL *)headersComplete
+                          contentLength:(NSInteger *)contentLength
+                                  error:(NSError **)error {
+  if (consumedLength != NULL) {
+    *consumedLength = 0;
+  }
+  if (headersComplete != NULL) {
+    *headersComplete = NO;
+  }
+  if (contentLength != NULL) {
+    *contentLength = 0;
+  }
+  if (error != NULL) {
+    *error = nil;
+  }
+
+  NSData *buffer = data ?: [NSData data];
+  if ([buffer length] == 0) {
+    return nil;
+  }
+
+  if (backend == ALNHTTPParserBackendLegacy) {
+    // Legacy parser does not support partial message detection.
+    // Treat parse errors as "incomplete" until the server confirms frame boundaries.
+    return nil;
+  }
+#if ARLEN_ENABLE_LLHTTP
+  return ALNRequestFromBufferedDataLLHTTP(buffer,
+                                          consumedLength,
+                                          headersComplete,
+                                          contentLength,
+                                          error);
+#else
+  return nil;
 #endif
 }
 

@@ -159,19 +159,30 @@ def server_command(binary: str, mode: str, port: int) -> List[str]:
     return [binary, "--port", str(port)]
 
 
-def start_server(binary: str, mode: str, port: int) -> subprocess.Popen[str]:
+def start_server(
+    binary: str,
+    mode: str,
+    port: int,
+    env_overrides: Optional[Dict[str, str]] = None,
+    wait_for_ready: bool = True,
+) -> subprocess.Popen[str]:
     command = server_command(binary, mode, port)
+    env = dict(os.environ)
+    if env_overrides:
+        env.update(env_overrides)
     process = subprocess.Popen(
         command,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
+        env=env,
     )
-    try:
-        wait_ready(port)
-    except Exception:
-        stop_server(process)
-        raise
+    if wait_for_ready:
+        try:
+            wait_ready(port)
+        except Exception:
+            stop_server(process)
+            raise
     return process
 
 
@@ -404,11 +415,36 @@ def send_partial_websocket_frame_then_disconnect(port: int, rng: random.Random) 
     }
 
 
-def run_with_server(binary: str, mode: str, callback: Callable[[int], Dict[str, Any]]) -> Dict[str, Any]:
+def run_with_server(
+    binary: str,
+    mode: str,
+    callback: Callable[[int], Dict[str, Any]],
+    env_overrides: Optional[Dict[str, str]] = None,
+    skip_ready_probe: bool = False,
+) -> Dict[str, Any]:
     port = allocate_free_port()
-    server = start_server(binary, mode, port)
+    server = start_server(
+        binary,
+        mode,
+        port,
+        env_overrides=env_overrides,
+        wait_for_ready=not skip_ready_probe,
+    )
     try:
-        result = callback(port)
+        if skip_ready_probe:
+            deadline = time.time() + 12.0
+            while True:
+                try:
+                    result = callback(port)
+                    break
+                except Exception as exc:  # noqa: BLE001
+                    signature = normalize_failure_signature(exc)
+                    if signature in RECOVERABLE_RESTART_SIGNATURES and time.time() < deadline:
+                        time.sleep(0.05)
+                        continue
+                    raise
+        else:
+            result = callback(port)
         assert_health(port)
         return result
     finally:
@@ -512,6 +548,319 @@ def scenario_runtime_restart_overlap(binary: str, mode: str, rng: random.Random)
         stop_server(process)
 
 
+def _repo_root_from_binary(binary: str) -> Path:
+    return Path(binary).resolve().parent.parent
+
+
+def _prepare_static_probe(binary: str, rng: random.Random) -> Tuple[str, Path, str]:
+    repo_root = _repo_root_from_binary(binary)
+    token = f"phase10m-{rng.randrange(1, 2**31 - 1):08x}"
+    relative_root = f"{token}"
+    asset_dir = repo_root / "public" / relative_root
+    asset_dir.mkdir(parents=True, exist_ok=True)
+    payload = f"phase10m-static-probe-{token}\\n"
+    (asset_dir / "probe.txt").write_text(payload, encoding="utf-8")
+    return relative_root, asset_dir, payload
+
+
+def _single_roundtrip(port: int, path: str) -> Dict[str, Any]:
+    sock = socket.create_connection(("127.0.0.1", port), timeout=5)
+    sock.settimeout(5)
+    try:
+        request = (
+            f"GET {path} HTTP/1.1\r\n"
+            f"Host: 127.0.0.1:{port}\r\n"
+            "Connection: close\r\n\r\n"
+        ).encode("utf-8")
+        sock.sendall(request)
+        status, _, body = read_http_response(sock)
+        return {"path": path, "status": status, "body": body.decode("utf-8", "replace")}
+    finally:
+        sock.close()
+
+
+def _raw_roundtrip_request(port: int, request: bytes) -> Dict[str, Any]:
+    sock = socket.create_connection(("127.0.0.1", port), timeout=5)
+    sock.settimeout(5)
+    try:
+        sock.sendall(request)
+        status, _, body = read_http_response(sock)
+        return {"status": status, "body": body.decode("utf-8", "replace")}
+    finally:
+        sock.close()
+
+
+def _keepalive_roundtrip(port: int, paths: List[str], keepalive: bool = True) -> List[Dict[str, Any]]:
+    if not paths:
+        return []
+    if not keepalive:
+        return [_single_roundtrip(port, path) for path in paths]
+    sock = socket.create_connection(("127.0.0.1", port), timeout=5)
+    sock.settimeout(5)
+    responses: List[Dict[str, Any]] = []
+    try:
+        for idx, path in enumerate(paths):
+            connection_header = "close" if idx == len(paths) - 1 else "keep-alive"
+            request = (
+                f"GET {path} HTTP/1.1\\r\\n"
+                f"Host: 127.0.0.1:{port}\\r\\n"
+                f"Connection: {connection_header}\\r\\n\\r\\n"
+            ).encode("utf-8")
+            sock.sendall(request)
+            status, _, body = read_http_response(sock)
+            responses.append({"path": path, "status": status, "body": body.decode("utf-8", "replace")})
+    finally:
+        sock.close()
+    return responses
+
+
+def scenario_syscall_writev_eagain_keepalive(binary: str, mode: str, rng: random.Random) -> Dict[str, Any]:
+    _ = rng
+
+    def runner(port: int) -> Dict[str, Any]:
+        responses = _keepalive_roundtrip(port, ["/healthz", "/healthz"], keepalive=(mode != "serialized"))
+        if len(responses) != 2:
+            raise RuntimeError("writev keepalive probe missing responses")
+        if "200" not in responses[0]["status"] or "200" not in responses[1]["status"]:
+            raise RuntimeError(f"writev keepalive probe status mismatch: {responses}")
+        if responses[0]["body"] != "ok\n" or responses[1]["body"] != "ok\n":
+            raise RuntimeError(f"writev keepalive probe body mismatch: {responses}")
+        return {"responses": responses}
+
+    return run_with_server(
+        binary,
+        mode,
+        runner,
+        env_overrides={"ARLEN_FAULT_WRITEV_EAGAIN_ONCE": "1"},
+    )
+
+
+def scenario_syscall_writev_short_keepalive(binary: str, mode: str, rng: random.Random) -> Dict[str, Any]:
+    _ = rng
+
+    def runner(port: int) -> Dict[str, Any]:
+        responses = _keepalive_roundtrip(port, ["/healthz", "/healthz"], keepalive=(mode != "serialized"))
+        if len(responses) != 2:
+            raise RuntimeError("writev short keepalive probe missing responses")
+        if "200" not in responses[0]["status"] or "200" not in responses[1]["status"]:
+            raise RuntimeError(f"writev short keepalive probe status mismatch: {responses}")
+        if responses[0]["body"] != "ok\n" or responses[1]["body"] != "ok\n":
+            raise RuntimeError(f"writev short keepalive probe body mismatch: {responses}")
+        return {"responses": responses}
+
+    return run_with_server(
+        binary,
+        mode,
+        runner,
+        env_overrides={"ARLEN_FAULT_WRITEV_SHORT_ONCE": "1"},
+    )
+
+
+def scenario_syscall_recv_eintr_keepalive(binary: str, mode: str, rng: random.Random) -> Dict[str, Any]:
+    _ = rng
+
+    def runner(port: int) -> Dict[str, Any]:
+        responses = _keepalive_roundtrip(port, ["/healthz", "/healthz"], keepalive=(mode != "serialized"))
+        if len(responses) != 2:
+            raise RuntimeError("recv EINTR keepalive probe missing responses")
+        if "200" not in responses[0]["status"] or "200" not in responses[1]["status"]:
+            raise RuntimeError(f"recv EINTR keepalive probe status mismatch: {responses}")
+        if responses[0]["body"] != "ok\n" or responses[1]["body"] != "ok\n":
+            raise RuntimeError(f"recv EINTR keepalive probe body mismatch: {responses}")
+        return {"responses": responses}
+
+    return run_with_server(
+        binary,
+        mode,
+        runner,
+        env_overrides={"ARLEN_FAULT_RECV_EINTR_ONCE": "1"},
+    )
+
+
+def scenario_syscall_sendfile_fallback_keepalive(binary: str, mode: str, rng: random.Random) -> Dict[str, Any]:
+    relative_root, asset_dir, payload = _prepare_static_probe(binary, rng)
+
+    def runner(port: int) -> Dict[str, Any]:
+        static_path = f"/static/{relative_root}/probe.txt"
+        responses = _keepalive_roundtrip(
+            port, [static_path, "/healthz"], keepalive=(mode != "serialized")
+        )
+        if len(responses) != 2:
+            raise RuntimeError("sendfile fallback keepalive probe missing responses")
+        if "200" not in responses[0]["status"] or "200" not in responses[1]["status"]:
+            raise RuntimeError(f"sendfile fallback status mismatch: {responses}")
+        if responses[0]["body"] != payload:
+            raise RuntimeError(f"sendfile fallback static payload mismatch: {responses[0]['body']!r}")
+        if responses[1]["body"] != "ok\n":
+            raise RuntimeError(f"sendfile fallback health payload mismatch: {responses[1]['body']!r}")
+        return {"responses": responses, "static_path": static_path}
+
+    try:
+        return run_with_server(
+            binary,
+            mode,
+            runner,
+            env_overrides={"ARLEN_FAULT_SENDFILE_FORCE_FALLBACK_ONCE": "1"},
+        )
+    finally:
+        try:
+            if asset_dir.exists():
+                for child in asset_dir.glob("*"):
+                    child.unlink(missing_ok=True)
+                asset_dir.rmdir()
+        except Exception:
+            pass
+
+
+def scenario_syscall_static_open_retry(binary: str, mode: str, rng: random.Random) -> Dict[str, Any]:
+    relative_root, asset_dir, payload = _prepare_static_probe(binary, rng)
+
+    def runner(port: int) -> Dict[str, Any]:
+        static_path = f"/static/{relative_root}/probe.txt"
+        responses = _keepalive_roundtrip(
+            port, [static_path, "/healthz"], keepalive=(mode != "serialized")
+        )
+        if len(responses) != 2:
+            raise RuntimeError("static open retry probe missing responses")
+        if "200" not in responses[0]["status"] or "200" not in responses[1]["status"]:
+            raise RuntimeError(f"static open retry status mismatch: {responses}")
+        if responses[0]["body"] != payload or responses[1]["body"] != "ok\n":
+            raise RuntimeError(f"static open retry payload mismatch: {responses}")
+        return {"responses": responses, "static_path": static_path}
+
+    try:
+        return run_with_server(
+            binary,
+            mode,
+            runner,
+            env_overrides={"ARLEN_FAULT_STATIC_OPEN_EINTR_ONCE": "1"},
+        )
+    finally:
+        try:
+            if asset_dir.exists():
+                for child in asset_dir.glob("*"):
+                    child.unlink(missing_ok=True)
+                asset_dir.rmdir()
+        except Exception:
+            pass
+
+
+def scenario_syscall_static_stat_retry(binary: str, mode: str, rng: random.Random) -> Dict[str, Any]:
+    relative_root, asset_dir, payload = _prepare_static_probe(binary, rng)
+
+    def runner(port: int) -> Dict[str, Any]:
+        static_path = f"/static/{relative_root}/probe.txt"
+        responses = _keepalive_roundtrip(
+            port, [static_path, "/healthz"], keepalive=(mode != "serialized")
+        )
+        if len(responses) != 2:
+            raise RuntimeError("static stat retry probe missing responses")
+        if "200" not in responses[0]["status"] or "200" not in responses[1]["status"]:
+            raise RuntimeError(f"static stat retry status mismatch: {responses}")
+        if responses[0]["body"] != payload or responses[1]["body"] != "ok\n":
+            raise RuntimeError(f"static stat retry payload mismatch: {responses}")
+        return {"responses": responses, "static_path": static_path}
+
+    try:
+        return run_with_server(
+            binary,
+            mode,
+            runner,
+            env_overrides={
+                "ARLEN_FAULT_STATIC_STAT_EINTR_ONCE": "1",
+                "ARLEN_FAULT_PATH_STAT_EINTR_ONCE": "1",
+            },
+        )
+    finally:
+        try:
+            if asset_dir.exists():
+                for child in asset_dir.glob("*"):
+                    child.unlink(missing_ok=True)
+                asset_dir.rmdir()
+        except Exception:
+            pass
+
+
+def scenario_alloc_read_state_realloc_once(binary: str, mode: str, rng: random.Random) -> Dict[str, Any]:
+    _ = rng
+
+    def runner(port: int) -> Dict[str, Any]:
+        oversized_value = "a" * 16384
+        request = (
+            f"GET /healthz HTTP/1.1\r\n"
+            f"Host: 127.0.0.1:{port}\r\n"
+            f"X-Overflow: {oversized_value}\r\n"
+            "Connection: close\r\n\r\n"
+        ).encode("utf-8")
+        response = _raw_roundtrip_request(port, request)
+        if "400" not in response["status"] and "503" not in response["status"]:
+            raise RuntimeError(
+                "allocation read-state scenario expected 400/503, got "
+                f"{response}"
+            )
+        recovery = _single_roundtrip(port, "/healthz")
+        if "200" not in recovery["status"] or recovery["body"] != "ok\n":
+            raise RuntimeError(f"allocation read-state recovery mismatch: {recovery}")
+        return {"fault_response": response, "recovery": recovery}
+
+    return run_with_server(
+        binary,
+        mode,
+        runner,
+        env_overrides={"ARLEN_FAULT_ALLOC_READSTATE_REALLOC_ONCE": "1"},
+        skip_ready_probe=True,
+    )
+
+
+def scenario_alloc_parser_headername_malloc_once(binary: str, mode: str, rng: random.Random) -> Dict[str, Any]:
+    _ = rng
+
+    def runner(port: int) -> Dict[str, Any]:
+        oversized_header_name = "X-" + ("A" * 320)
+        request = (
+            f"GET /healthz HTTP/1.1\r\n"
+            f"Host: 127.0.0.1:{port}\r\n"
+            f"{oversized_header_name}: value\r\n"
+            "Connection: close\r\n\r\n"
+        ).encode("utf-8")
+        response = _raw_roundtrip_request(port, request)
+        if "400" not in response["status"]:
+            raise RuntimeError(
+                f"allocation parser-header scenario expected 400, got {response}"
+            )
+        recovery = _single_roundtrip(port, "/healthz")
+        if "200" not in recovery["status"] or recovery["body"] != "ok\n":
+            raise RuntimeError(f"allocation parser-header recovery mismatch: {recovery}")
+        return {"fault_response": response, "recovery": recovery}
+
+    return run_with_server(
+        binary,
+        mode,
+        runner,
+        env_overrides={"ARLEN_FAULT_ALLOC_HEADERNAME_MALLOC_ONCE": "1"},
+    )
+
+
+def scenario_alloc_response_serialize_once(binary: str, mode: str, rng: random.Random) -> Dict[str, Any]:
+    _ = rng
+
+    def runner(port: int) -> Dict[str, Any]:
+        first = _single_roundtrip(port, "/healthz")
+        if "500" not in first["status"]:
+            raise RuntimeError(f"allocation response-serialize scenario expected 500, got {first}")
+        second = _single_roundtrip(port, "/healthz")
+        if "200" not in second["status"] or second["body"] != "ok\n":
+            raise RuntimeError(f"allocation response-serialize recovery mismatch: {second}")
+        return {"fault_response": first, "recovery": second}
+
+    return run_with_server(
+        binary,
+        mode,
+        runner,
+        env_overrides={"ARLEN_FAULT_ALLOC_RESPONSE_SERIALIZE_ONCE": "1"},
+        skip_ready_probe=True,
+    )
+
 SCENARIO_RUNNERS: Dict[str, Callable[[str, str, random.Random], Dict[str, Any]]] = {
     "http_partial_request_disconnect": scenario_http_partial_request_disconnect,
     "http_delayed_write_sequence": scenario_http_delayed_write_sequence,
@@ -519,6 +868,15 @@ SCENARIO_RUNNERS: Dict[str, Callable[[str, str, random.Random], Dict[str, Any]]]
     "websocket_malformed_upgrade": scenario_websocket_malformed_upgrade,
     "websocket_partial_frame_disconnect": scenario_websocket_partial_frame_disconnect,
     "runtime_restart_overlap": scenario_runtime_restart_overlap,
+    "syscall_writev_eagain_keepalive": scenario_syscall_writev_eagain_keepalive,
+    "syscall_writev_short_keepalive": scenario_syscall_writev_short_keepalive,
+    "syscall_recv_eintr_keepalive": scenario_syscall_recv_eintr_keepalive,
+    "syscall_sendfile_fallback_keepalive": scenario_syscall_sendfile_fallback_keepalive,
+    "syscall_static_open_retry": scenario_syscall_static_open_retry,
+    "syscall_static_stat_retry": scenario_syscall_static_stat_retry,
+    "alloc_read_state_realloc_once": scenario_alloc_read_state_realloc_once,
+    "alloc_parser_headername_malloc_once": scenario_alloc_parser_headername_malloc_once,
+    "alloc_response_serialize_once": scenario_alloc_response_serialize_once,
 }
 
 

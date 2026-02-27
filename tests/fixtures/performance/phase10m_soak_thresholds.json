@@ -1,0 +1,12 @@
+{
+  "version": "phase10m-soak-thresholds-v1",
+  "lastUpdated": "2026-02-26",
+  "modes": ["concurrent", "serialized"],
+  "requestsPerMode": 480,
+  "sampleEveryRequests": 80,
+  "restartCycles": 2,
+  "maxRequestFailures": 4,
+  "maxRssDeltaKB": 131072,
+  "maxFDDelta": 96,
+  "maxSocketFDDelta": 96
+}

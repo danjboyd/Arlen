@@ -1,0 +1,41 @@
+{
+  "version": "phase10m-protocol-adversarial-v1",
+  "lastUpdated": "2026-02-26",
+  "limits": {
+    "maxRequestLineBytes": 48,
+    "maxHeaderBytes": 80,
+    "maxBodyBytes": 16
+  },
+  "cases": [
+    {
+      "id": "valid_small_request",
+      "description": "Nominal health request should succeed under strict limits",
+      "request": "GET /healthz HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n",
+      "expectedStatus": 200
+    },
+    {
+      "id": "invalid_content_length_alpha",
+      "description": "Non-numeric content-length must return 400",
+      "request": "GET /healthz HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Length: abc\r\n\r\n",
+      "expectedStatus": 400
+    },
+    {
+      "id": "body_over_limit",
+      "description": "Body exceeding configured limit should return 413",
+      "request": "GET /healthz HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Length: 17\r\n\r\n1234567890abcdefg",
+      "expectedStatus": 413
+    },
+    {
+      "id": "header_over_limit",
+      "description": "Large header set should return 431",
+      "request": "GET /healthz HTTP/1.1\r\nHost: 127.0.0.1\r\nX-Big: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\r\n\r\n",
+      "expectedStatus": 431
+    },
+    {
+      "id": "request_line_over_limit",
+      "description": "Long request line should return 431",
+      "request": "GET /aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n",
+      "expectedStatus": 431
+    }
+  ]
+}

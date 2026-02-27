@@ -53,7 +53,20 @@ Last updated: 2026-02-26
 - Phase 9H: complete (2026-02-25)
 - Phase 9I: complete (2026-02-25)
 - Phase 9J: complete (2026-02-25)
-- Phase 10: active (10A/10B/10C/10D/10E/10F/10G/10H/10I/10J/10K complete on 2026-02-26)
+- Phase 10: complete (10A/10B/10C/10D/10E/10F/10G/10H/10I/10J/10K/10L/10M complete on 2026-02-26)
+
+## Phase 10M Completion (2026-02-26)
+
+- completed 10M.9 large-body response throughput hardening:
+  - added `NSData` implicit return fast path and explicit `renderData:contentType:` helper
+  - converted `/api/blob` to cached binary payload generation and added `impl=legacy-string` comparison mode
+  - added `mode=sendfile` blob variant to isolate transport throughput path
+  - added split performance profile (`blob_legacy_string_e2e`, `blob_binary_e2e`, `blob_binary_sendfile`)
+  - added throughput artifact gate + thresholds + make target:
+    - `tools/ci/run_phase10m_blob_throughput.sh`
+    - `tools/ci/generate_phase10m_blob_throughput_artifacts.py`
+    - `tests/fixtures/performance/phase10m_blob_throughput_thresholds.json`
+    - `make ci-blob-throughput`
 
 ## Completed Today (2026-02-26)
 
@@ -133,6 +146,90 @@ Last updated: 2026-02-26
     - `tests/unit/RequestTests.m`
     - `tests/unit/RouterTests.m`
     - `tests/integration/HTTPIntegrationTests.m` (`testStaticLargeAssetReturnsExpectedBodyAndLength`)
+- Completed Phase 10L targeted native C hot-path follow-on:
+  - completed 10L.1/10L.2/10L.3 runtime hardening:
+    - peer address cached once per connection lifecycle
+    - incremental C request-read/head state machine with reusable per-connection buffers
+    - safe bounded static-file fd cache with strict metadata validation and lifecycle reset
+  - completed 10L.4 response serialization refinement:
+    - stable ordered header layout replaces per-request key sorting
+    - no-op header sets no longer invalidate serialized-header cache
+  - completed 10L.5 request lazy-parse contention reduction:
+    - removed `@synchronized` monitor path for lazy `queryParams`/`cookies`
+    - switched to lock-free atomic cached fields while preserving lazy semantics
+  - completed 10L.6 route-matcher investigation gate:
+    - added large-route-table benchmark tool (`tools/route_match_perf_bench.m`)
+    - added CI artifact gate with optional flamegraph evidence capture (`tools/ci/run_phase10l_route_match_investigation.sh`, `tools/ci/generate_phase10l_route_match_artifacts.py`)
+    - added thresholds fixture + deployment regression coverage for artifact pack generation
+- Completed Phase 10M initial reliability/safety tranche:
+  - completed 10M.1 sanitizer matrix hardening:
+    - added fixture + artifact generator + runner:
+      - `tests/fixtures/sanitizers/phase10m_sanitizer_matrix.json`
+      - `tools/ci/generate_phase10m_sanitizer_matrix_artifacts.py`
+      - `tools/ci/run_phase10m_sanitizer_matrix.sh`
+    - added nightly thread-race lane and workflow scheduling/artifact wiring:
+      - `tools/ci/run_phase10m_thread_race_nightly.sh`
+      - `.github/workflows/phase4-sanitizers.yml`
+  - completed 10M.2 differential backend parity matrix:
+    - added backend contract matrix tool + artifact gate:
+      - `tools/backend_contract_matrix.m`
+      - `tools/ci/generate_phase10m_backend_parity_artifacts.py`
+      - `tools/ci/run_phase10m_backend_parity_matrix.sh`
+    - added make target: `make ci-backend-parity-matrix`
+  - completed 10M.3 protocol adversarial corpus gate:
+    - added strict-limit corpus fixture + probe + gate:
+      - `tests/fixtures/protocol/phase10m_protocol_adversarial_cases.json`
+      - `tools/ci/protocol_adversarial_probe.py`
+      - `tools/ci/run_phase10m_protocol_adversarial.sh`
+    - added make target: `make ci-protocol-adversarial`
+  - completed 10M.4 syscall fault-injection resilience:
+    - expanded runtime harness scenarios and fixture:
+      - `tests/fixtures/fault_injection/phase10m_syscall_fault_scenarios.json`
+      - `tools/ci/runtime_fault_injection.py`
+      - `tools/ci/run_phase10m_syscall_fault_injection.sh`
+    - hardened transient syscall retry + one-shot fault seams in:
+      - `src/Arlen/HTTP/ALNHTTPServer.m`
+    - added make target: `make ci-syscall-faults`
+  - completed 10M.5 allocation-failure resilience:
+    - added deterministic allocation failpoint seams and hard-failure recovery paths in:
+      - `src/Arlen/HTTP/ALNHTTPServer.m`
+      - `src/Arlen/HTTP/ALNRequest.m`
+      - `src/Arlen/HTTP/ALNResponse.m`
+    - added fixture + gate:
+      - `tests/fixtures/fault_injection/phase10m_allocation_fault_scenarios.json`
+      - `tools/ci/runtime_fault_injection.py`
+      - `tools/ci/run_phase10m_allocation_fault_injection.sh`
+    - added make target: `make ci-allocation-faults`
+  - completed 10M.6 long-run soak lane:
+    - added thresholds + artifact generator + gate:
+      - `tests/fixtures/performance/phase10m_soak_thresholds.json`
+      - `tools/ci/generate_phase10m_soak_artifacts.py`
+      - `tools/ci/run_phase10m_soak.sh`
+    - added make target: `make ci-soak`
+  - completed 10M.7 chaos/restart lane:
+    - added thresholds + artifact generator + gate:
+      - `tests/fixtures/runtime/phase10m_chaos_restart_thresholds.json`
+      - `tools/ci/generate_phase10m_chaos_restart_artifacts.py`
+      - `tools/ci/run_phase10m_chaos_restart.sh`
+    - added make target: `make ci-chaos-restart`
+  - completed 10M.8 static analysis/security lint lane:
+    - added policy + artifact generator + gate:
+      - `tests/fixtures/static_analysis/phase10m_static_analysis_policy.json`
+      - `tools/ci/generate_phase10m_static_analysis_artifacts.py`
+      - `tools/ci/run_phase10m_static_analysis.sh`
+    - added make target: `make ci-static-analysis`
+  - extended sanitizer matrix + workflow artifact wiring for 10M.5-10M.8 lanes:
+    - `tests/fixtures/sanitizers/phase10m_sanitizer_matrix.json`
+    - `tools/ci/run_phase10m_sanitizer_matrix.sh`
+    - `.github/workflows/phase4-sanitizers.yml`
+  - added deployment/build-policy regression coverage for new 10M gates:
+    - `tests/integration/DeploymentIntegrationTests.m`
+    - `tests/unit/BuildPolicyTests.m`
+  - completed 10M.9 throughput hardening follow-on for `H_blob_large`:
+    - `NSData` return fast-path + `renderData:contentType:` helper
+    - blob payload generation/caching optimization + legacy-string comparison lane
+    - explicit sendfile transport-isolation benchmark coverage
+    - split perf gate + confidence artifacts (`make ci-blob-throughput`)
 
 ## Completed Today (2026-02-25)
 

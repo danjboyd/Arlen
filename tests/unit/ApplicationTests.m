@@ -116,6 +116,20 @@
   };
 }
 
+- (id)binary:(ALNContext *)ctx {
+  (void)ctx;
+  const unsigned char bytes[] = { 0x41, 0x00, 0x42, 0x43 };
+  return [NSData dataWithBytes:bytes length:sizeof(bytes)];
+}
+
+- (id)binaryRendered:(ALNContext *)ctx {
+  (void)ctx;
+  const unsigned char bytes[] = { 0x31, 0x32, 0x33, 0x34 };
+  NSData *payload = [NSData dataWithBytes:bytes length:sizeof(bytes)];
+  [self renderData:payload contentType:@"application/x-phase10m-binary"];
+  return @"ignored";
+}
+
 @end
 
 @interface AppInvalidActionController : ALNController
@@ -262,6 +276,16 @@
            controllerClass:[AppJSONController class]
                guardAction:nil
                     action:@"report"];
+  [app registerRouteMethod:@"GET"
+                      path:@"/binary"
+                      name:@"binary"
+           controllerClass:[AppJSONController class]
+                    action:@"binary"];
+  [app registerRouteMethod:@"GET"
+                      path:@"/binary-rendered"
+                      name:@"binary_rendered"
+           controllerClass:[AppJSONController class]
+                    action:@"binaryRendered"];
 
   if (useHalting) {
     [app addMiddleware:[[AppHaltingMiddleware alloc] init]];
@@ -363,6 +387,34 @@
   XCTAssertEqual((NSInteger)200, response.statusCode);
   XCTAssertEqualObjects(@"application/json; charset=utf-8",
                         [response headerForName:@"Content-Type"]);
+}
+
+- (void)testImplicitBinaryForNSDataReturn {
+  ALNApplication *app = [self buildAppWithHaltingMiddleware:NO];
+  ALNResponse *response = [app dispatchRequest:[self requestForPath:@"/binary"]];
+  XCTAssertEqual((NSInteger)200, response.statusCode);
+  XCTAssertEqualObjects(@"application/octet-stream", [response headerForName:@"Content-Type"]);
+  XCTAssertEqual((NSUInteger)4, [response.bodyData length]);
+  const unsigned char *bytes = [response.bodyData bytes];
+  XCTAssertTrue(bytes != NULL);
+  if (bytes == NULL) {
+    return;
+  }
+  XCTAssertEqual((unsigned char)0x41, bytes[0]);
+  XCTAssertEqual((unsigned char)0x00, bytes[1]);
+  XCTAssertEqual((unsigned char)0x42, bytes[2]);
+  XCTAssertEqual((unsigned char)0x43, bytes[3]);
+}
+
+- (void)testRenderDataBypassesImplicitFallback {
+  ALNApplication *app = [self buildAppWithHaltingMiddleware:NO];
+  ALNResponse *response = [app dispatchRequest:[self requestForPath:@"/binary-rendered"]];
+  XCTAssertEqual((NSInteger)200, response.statusCode);
+  XCTAssertEqualObjects(@"application/x-phase10m-binary",
+                        [response headerForName:@"Content-Type"]);
+  NSString *body = [[NSString alloc] initWithData:response.bodyData
+                                         encoding:NSUTF8StringEncoding];
+  XCTAssertEqualObjects(@"1234", body);
 }
 
 - (void)testExplicitJSONTakesPrecedence {
@@ -607,6 +659,27 @@
   XCTAssertNotEqualObjects(incomingTraceparent, traceparent);
 }
 
+- (void)testTraceparentUsesFirstMemberWhenCommaSeparated {
+  ALNApplication *app = [self buildAppWithHaltingMiddleware:NO];
+  NSString *firstMember =
+      @"00-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-bbbbbbbbbbbbbbbb-01";
+  NSString *secondMember =
+      @"00-cccccccccccccccccccccccccccccccc-dddddddddddddddd-01";
+  NSString *incomingTraceparent =
+      [NSString stringWithFormat:@"  %@, %@  ", firstMember, secondMember];
+
+  ALNResponse *response = [app dispatchRequest:[self requestForPath:@"/dict"
+                                                         queryString:@""
+                                                             headers:@{
+                                                               @"traceparent" : incomingTraceparent,
+                                                             }]];
+  XCTAssertEqual((NSInteger)200, response.statusCode);
+  XCTAssertEqualObjects(@"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                        [response headerForName:@"X-Trace-Id"]);
+  XCTAssertEqualObjects(@"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                        [self traceIDFromTraceparent:[response headerForName:@"traceparent"]]);
+}
+
 - (void)testRequestAndTraceIDsUseDeterministicLowerHexShape {
   ALNApplication *app = [self buildAppWithHaltingMiddleware:NO];
   ALNResponse *response = [app dispatchRequest:[self requestForPath:@"/dict"
@@ -628,6 +701,26 @@
   XCTAssertTrue([self isLowerHexString:requestID length:32]);
   XCTAssertTrue([self isLowerHexString:traceID length:32]);
   XCTAssertTrue([self isLowerHexString:spanID length:16]);
+}
+
+- (void)testMalformedTraceparentFallsBackToGeneratedLowerHexTraceID {
+  ALNApplication *app = [self buildAppWithHaltingMiddleware:NO];
+  NSMutableString *malformed = [NSMutableString stringWithString:@"00-"];
+  for (NSUInteger idx = 0; idx < 2048; idx++) {
+    [malformed appendString:@"z"];
+  }
+  [malformed appendString:@"-invalid-invalid"];
+
+  ALNResponse *response = [app dispatchRequest:[self requestForPath:@"/dict"
+                                                         queryString:@""
+                                                             headers:@{
+                                                               @"traceparent" : malformed,
+                                                             }]];
+  XCTAssertEqual((NSInteger)200, response.statusCode);
+  NSString *traceID = [response headerForName:@"X-Trace-Id"];
+  NSString *traceparent = [response headerForName:@"traceparent"];
+  XCTAssertTrue([self isLowerHexString:traceID length:32]);
+  XCTAssertEqualObjects(traceID, [self traceIDFromTraceparent:traceparent]);
 }
 
 - (void)testTracePropagationCanBeDisabledByConfig {

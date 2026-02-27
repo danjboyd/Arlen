@@ -1,0 +1,23 @@
+{
+  "version": "phase10m-chaos-restart-thresholds-v1",
+  "lastUpdated": "2026-02-26",
+  "workers": 2,
+  "churnCycles": 2,
+  "loadThreads": 6,
+  "loadDurationSeconds": 5,
+  "startupTimeoutSeconds": 60,
+  "cycleReadinessTimeoutSeconds": 25,
+  "maxNon200Responses": 8,
+  "maxLoadErrors": 8,
+  "allowedManagerExitCodes": [0, -15],
+  "requiredLifecycleTokens": [
+    "event=manager_started",
+    "event=worker_started",
+    "event=manager_reload_requested",
+    "signal=HUP",
+    "event=manager_shutdown_requested",
+    "signal=TERM",
+    "event=http_worker_stopped",
+    "event=manager_stopped"
+  ]
+}

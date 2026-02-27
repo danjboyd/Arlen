@@ -26,6 +26,7 @@
 #include <objc/runtime.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <sys/time.h>
 #include <time.h>
 #include <unistd.h>
@@ -40,6 +41,17 @@ typedef NS_ENUM(NSUInteger, ALNRuntimeInvocationMode) {
   ALNRuntimeInvocationModeCachedIMP = 0,
   ALNRuntimeInvocationModeSelector = 1,
 };
+
+typedef struct {
+  BOOL enabled;
+  BOOL hasTraceID;
+  BOOL hasParentSpanID;
+  char traceID[33];
+  char spanID[17];
+  char parentSpanID[17];
+  char flags[3];
+  char traceparent[56];
+} ALNRequestTraceContext;
 
 static BOOL ALNRequestPrefersJSON(ALNRequest *request, BOOL apiOnly);
 static void ALNSetStructuredErrorResponse(ALNResponse *response,
@@ -1448,124 +1460,264 @@ static NSString *ALNHeaderValue(NSDictionary *headers, NSString *name) {
   return @"";
 }
 
-static BOOL ALNStringIsHexOfLength(NSString *value, NSUInteger expectedLength) {
-  if (![value isKindOfClass:[NSString class]] || [value length] != expectedLength) {
+static BOOL ALNIsASCIIWhitespace(unsigned char byte) {
+  return byte == ' ' || byte == '\t' || byte == '\r' || byte == '\n' ||
+         byte == '\f' || byte == '\v';
+}
+
+static BOOL ALNIsASCIIHexCharacter(unsigned char byte) {
+  return (byte >= '0' && byte <= '9') || (byte >= 'a' && byte <= 'f') ||
+         (byte >= 'A' && byte <= 'F');
+}
+
+static char ALNLowerASCIIHexCharacter(unsigned char byte) {
+  if (byte >= 'A' && byte <= 'F') {
+    return (char)(byte - 'A' + 'a');
+  }
+  return (char)byte;
+}
+
+static BOOL ALNAllHexCharactersAreZero(const char *value, size_t expectedLength) {
+  if (value == NULL) {
+    return YES;
+  }
+  for (size_t idx = 0; idx < expectedLength; idx++) {
+    if (value[idx] != '0') {
+      return NO;
+    }
+  }
+  return YES;
+}
+
+static BOOL ALNParseLowerHexSegment(const char *input,
+                                    size_t inputLength,
+                                    size_t *offset,
+                                    size_t segmentLength,
+                                    char *output) {
+  if (input == NULL || offset == NULL || output == NULL) {
     return NO;
   }
-  NSCharacterSet *nonHex = [[NSCharacterSet characterSetWithCharactersInString:@"0123456789abcdefABCDEF"] invertedSet];
-  return [value rangeOfCharacterFromSet:nonHex].location == NSNotFound;
-}
-
-static NSString *ALNRandomHexString(NSUInteger length) {
-  return ALNFastRandomHexString(length);
-}
-
-static NSString *ALNNormalizedTraceIDCandidate(NSString *value) {
-  if (![value isKindOfClass:[NSString class]] || [value length] == 0) {
-    return @"";
+  if (*offset + segmentLength > inputLength) {
+    return NO;
   }
+  for (size_t idx = 0; idx < segmentLength; idx++) {
+    unsigned char byte = (unsigned char)input[*offset + idx];
+    if (!ALNIsASCIIHexCharacter(byte)) {
+      return NO;
+    }
+    output[idx] = ALNLowerASCIIHexCharacter(byte);
+  }
+  output[segmentLength] = '\0';
+  *offset += segmentLength;
+  return YES;
+}
+
+static BOOL ALNParseTraceparentMember(const char *memberStart,
+                                      size_t memberLength,
+                                      char traceIDOut[33],
+                                      char parentSpanIDOut[17],
+                                      char flagsOut[3]) {
+  if (memberStart == NULL || memberLength == 0 ||
+      traceIDOut == NULL || parentSpanIDOut == NULL || flagsOut == NULL) {
+    return NO;
+  }
+
+  size_t offset = 0;
+  char version[3] = {0};
+  if (!ALNParseLowerHexSegment(memberStart, memberLength, &offset, 2, version)) {
+    return NO;
+  }
+  if (offset >= memberLength || memberStart[offset] != '-') {
+    return NO;
+  }
+  offset += 1;
+
+  if (!ALNParseLowerHexSegment(memberStart, memberLength, &offset, 32, traceIDOut)) {
+    return NO;
+  }
+  if (offset >= memberLength || memberStart[offset] != '-') {
+    return NO;
+  }
+  offset += 1;
+
+  if (!ALNParseLowerHexSegment(memberStart, memberLength, &offset, 16, parentSpanIDOut)) {
+    return NO;
+  }
+  if (offset >= memberLength || memberStart[offset] != '-') {
+    return NO;
+  }
+  offset += 1;
+
+  if (!ALNParseLowerHexSegment(memberStart, memberLength, &offset, 2, flagsOut)) {
+    return NO;
+  }
+  if (offset != memberLength) {
+    return NO;
+  }
+  if (ALNAllHexCharactersAreZero(traceIDOut, 32) ||
+      ALNAllHexCharactersAreZero(parentSpanIDOut, 16)) {
+    return NO;
+  }
+  return YES;
+}
+
+static BOOL ALNParseTraceparentHeader(NSString *headerValue,
+                                      char traceIDOut[33],
+                                      char parentSpanIDOut[17],
+                                      char flagsOut[3]) {
+  if (![headerValue isKindOfClass:[NSString class]] || [headerValue length] == 0 ||
+      traceIDOut == NULL || parentSpanIDOut == NULL || flagsOut == NULL) {
+    return NO;
+  }
+  const char *raw = [headerValue UTF8String];
+  if (raw == NULL || raw[0] == '\0') {
+    return NO;
+  }
+
+  const char *cursor = raw;
+  while (*cursor != '\0' && ALNIsASCIIWhitespace((unsigned char)*cursor)) {
+    cursor++;
+  }
+  const char *memberStart = cursor;
+  while (*cursor != '\0' && *cursor != ',') {
+    cursor++;
+  }
+  const char *memberEnd = cursor;
+  while (memberEnd > memberStart &&
+         ALNIsASCIIWhitespace((unsigned char)*(memberEnd - 1))) {
+    memberEnd--;
+  }
+  if (memberEnd <= memberStart) {
+    return NO;
+  }
+  size_t memberLength = (size_t)(memberEnd - memberStart);
+  return ALNParseTraceparentMember(memberStart,
+                                   memberLength,
+                                   traceIDOut,
+                                   parentSpanIDOut,
+                                   flagsOut);
+}
+
+static BOOL ALNNormalizeTraceIDCandidate(NSString *value, char traceIDOut[33]) {
+  if (traceIDOut == NULL) {
+    return NO;
+  }
+  traceIDOut[0] = '\0';
+  if (![value isKindOfClass:[NSString class]] || [value length] == 0) {
+    return NO;
+  }
+
   NSString *trimmed =
       [value stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
   if ([trimmed length] == 0) {
-    return @"";
+    return NO;
   }
 
-  NSMutableString *hex = [NSMutableString stringWithCapacity:32];
-  NSUInteger length = [trimmed length];
-  for (NSUInteger idx = 0; idx < length && [hex length] < 32; idx++) {
-    unichar ch = [trimmed characterAtIndex:idx];
-    if ((ch >= '0' && ch <= '9') || (ch >= 'a' && ch <= 'f') ||
-        (ch >= 'A' && ch <= 'F')) {
-      [hex appendFormat:@"%c", (char)tolower((int)ch)];
+  const char *raw = [trimmed UTF8String];
+  if (raw == NULL || raw[0] == '\0') {
+    return NO;
+  }
+
+  size_t writeIndex = 0;
+  const unsigned char *cursor = (const unsigned char *)raw;
+  while (*cursor != '\0' && writeIndex < 32) {
+    if (ALNIsASCIIHexCharacter(*cursor)) {
+      traceIDOut[writeIndex++] = ALNLowerASCIIHexCharacter(*cursor);
     }
+    cursor++;
   }
-
-  if ([hex length] != 32) {
-    return @"";
+  if (writeIndex != 32) {
+    traceIDOut[0] = '\0';
+    return NO;
   }
-  NSString *normalized = [hex copy];
-  if ([normalized isEqualToString:@"00000000000000000000000000000000"]) {
-    return @"";
+  traceIDOut[32] = '\0';
+  if (ALNAllHexCharactersAreZero(traceIDOut, 32)) {
+    traceIDOut[0] = '\0';
+    return NO;
   }
-  return normalized;
+  return YES;
 }
 
-static NSDictionary *ALNParsedTraceparentHeader(NSString *headerValue) {
-  if (![headerValue isKindOfClass:[NSString class]] || [headerValue length] == 0) {
-    return @{};
+static void ALNFillRandomLowerHex(char *output, size_t hexLength) {
+  if (output == NULL || hexLength == 0) {
+    return;
   }
 
-  NSArray *members = [headerValue componentsSeparatedByString:@","];
-  NSString *firstMember = [members count] > 0 ? members[0] : @"";
-  NSString *trimmedFirstMember =
-      [firstMember stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
-  NSArray *segments = [trimmedFirstMember componentsSeparatedByString:@"-"];
-  if ([segments count] != 4) {
-    return @{};
+  size_t byteLength = (hexLength + 1) / 2;
+  unsigned char randomBytes[32];
+  if (byteLength > sizeof(randomBytes)) {
+    output[0] = '\0';
+    return;
   }
+  arc4random_buf(randomBytes, byteLength);
 
-  NSString *version = [segments[0] lowercaseString];
-  NSString *traceID = [segments[1] lowercaseString];
-  NSString *parentSpanID = [segments[2] lowercaseString];
-  NSString *flags = [segments[3] lowercaseString];
-
-  if (!ALNStringIsHexOfLength(version, 2) ||
-      !ALNStringIsHexOfLength(traceID, 32) ||
-      !ALNStringIsHexOfLength(parentSpanID, 16) ||
-      !ALNStringIsHexOfLength(flags, 2)) {
-    return @{};
+  static const char *kHex = "0123456789abcdef";
+  for (size_t idx = 0; idx < hexLength; idx++) {
+    unsigned char byte = randomBytes[idx / 2];
+    unsigned char nibble = (idx % 2 == 0) ? (unsigned char)((byte >> 4) & 0x0F)
+                                          : (unsigned char)(byte & 0x0F);
+    output[idx] = kHex[nibble];
   }
-  if ([traceID isEqualToString:@"00000000000000000000000000000000"] ||
-      [parentSpanID isEqualToString:@"0000000000000000"]) {
-    return @{};
-  }
-
-  return @{
-    @"version" : version,
-    @"trace_id" : traceID,
-    @"parent_span_id" : parentSpanID,
-    @"flags" : flags,
-  };
+  output[hexLength] = '\0';
 }
 
-static NSDictionary *ALNBuildRequestTraceContext(ALNRequest *request,
-                                                 BOOL tracePropagationEnabled) {
+static NSString *ALNStringFromTraceBuffer(const char *value) {
+  if (value == NULL || value[0] == '\0') {
+    return @"";
+  }
+  NSString *stringValue = [NSString stringWithUTF8String:value];
+  return [stringValue isKindOfClass:[NSString class]] ? stringValue : @"";
+}
+
+static ALNRequestTraceContext ALNBuildRequestTraceContext(ALNRequest *request,
+                                                          BOOL tracePropagationEnabled) {
+  ALNRequestTraceContext context;
+  memset(&context, 0, sizeof(context));
   if (!tracePropagationEnabled) {
-    return @{};
+    return context;
   }
 
-  NSString *incomingTraceparent = ALNHeaderValue(request.headers, @"traceparent");
-  NSDictionary *parsedTraceparent = ALNParsedTraceparentHeader(incomingTraceparent);
+  context.enabled = YES;
+  context.flags[0] = '0';
+  context.flags[1] = '1';
+  context.flags[2] = '\0';
 
-  NSString *traceID = [parsedTraceparent[@"trace_id"] isKindOfClass:[NSString class]]
-                          ? parsedTraceparent[@"trace_id"]
-                          : @"";
-  if ([traceID length] == 0) {
-    traceID = ALNNormalizedTraceIDCandidate(ALNHeaderValue(request.headers, @"x-trace-id"));
-  }
-  if ([traceID length] == 0) {
-    traceID = ALNRandomHexString(32);
-  }
-
-  NSString *parentSpanID = [parsedTraceparent[@"parent_span_id"] isKindOfClass:[NSString class]]
-                               ? parsedTraceparent[@"parent_span_id"]
-                               : @"";
-  NSString *flags = [parsedTraceparent[@"flags"] isKindOfClass:[NSString class]]
-                        ? parsedTraceparent[@"flags"]
-                        : @"01";
-  if (!ALNStringIsHexOfLength(flags, 2)) {
-    flags = @"01";
+  if (ALNParseTraceparentHeader(ALNHeaderValue(request.headers, @"traceparent"),
+                                context.traceID,
+                                context.parentSpanID,
+                                context.flags)) {
+    context.hasTraceID = YES;
+    context.hasParentSpanID = YES;
   }
 
-  NSString *spanID = ALNRandomHexString(16);
-  NSString *traceparent = [NSString stringWithFormat:@"00-%@-%@-%@", traceID, spanID, flags];
+  if (!context.hasTraceID) {
+    context.hasTraceID =
+        ALNNormalizeTraceIDCandidate(ALNHeaderValue(request.headers, @"x-trace-id"),
+                                     context.traceID);
+  }
 
-  return @{
-    @"trace_id" : traceID ?: @"",
-    @"span_id" : spanID ?: @"",
-    @"parent_span_id" : parentSpanID ?: @"",
-    @"traceparent" : traceparent ?: @"",
-  };
+  if (!context.hasTraceID) {
+    ALNFillRandomLowerHex(context.traceID, 32);
+    context.hasTraceID = (context.traceID[0] != '\0');
+  }
+
+  ALNFillRandomLowerHex(context.spanID, 16);
+  const char *flags = (context.flags[0] != '\0') ? context.flags : "01";
+  (void)snprintf(context.traceparent,
+                 sizeof(context.traceparent),
+                 "00-%s-%s-%s",
+                 context.traceID,
+                 context.spanID,
+                 flags);
+  return context;
+}
+
+static BOOL ALNTraceContextHasTraceID(const ALNRequestTraceContext *context) {
+  return (context != NULL && context->enabled && context->traceID[0] != '\0');
+}
+
+static BOOL ALNTraceContextHasParentSpanID(const ALNRequestTraceContext *context) {
+  return (context != NULL && context->enabled && context->parentSpanID[0] != '\0');
 }
 
 static NSDictionary *ALNObservabilityConfig(ALNApplication *application) {
@@ -1628,7 +1780,7 @@ static NSDictionary *ALNClusterQuorumSummary(ALNApplication *application) {
 
 static NSDictionary *ALNTraceExportPayload(ALNPerfTrace *trace,
                                            NSString *requestID,
-                                           NSDictionary *traceContext,
+                                           const ALNRequestTraceContext *traceContext,
                                            ALNRequest *request,
                                            ALNResponse *response,
                                            NSString *routeName,
@@ -1646,29 +1798,17 @@ static NSDictionary *ALNTraceExportPayload(ALNPerfTrace *trace,
   payload[@"controller"] = controllerName ?: @"";
   payload[@"action"] = actionName ?: @"";
 
-  NSString *traceID = [traceContext[@"trace_id"] isKindOfClass:[NSString class]]
-                          ? traceContext[@"trace_id"]
-                          : @"";
-  NSString *spanID = [traceContext[@"span_id"] isKindOfClass:[NSString class]]
-                         ? traceContext[@"span_id"]
-                         : @"";
-  NSString *parentSpanID = [traceContext[@"parent_span_id"] isKindOfClass:[NSString class]]
-                               ? traceContext[@"parent_span_id"]
-                               : @"";
-  NSString *traceparent = [traceContext[@"traceparent"] isKindOfClass:[NSString class]]
-                              ? traceContext[@"traceparent"]
-                              : @"";
-  if ([traceID length] > 0) {
-    payload[@"trace_id"] = traceID;
-  }
-  if ([spanID length] > 0) {
-    payload[@"span_id"] = spanID;
-  }
-  if ([parentSpanID length] > 0) {
-    payload[@"parent_span_id"] = parentSpanID;
-  }
-  if ([traceparent length] > 0) {
-    payload[@"traceparent"] = traceparent;
+  if (ALNTraceContextHasTraceID(traceContext)) {
+    payload[@"trace_id"] = ALNStringFromTraceBuffer(traceContext->traceID);
+    if (traceContext->spanID[0] != '\0') {
+      payload[@"span_id"] = ALNStringFromTraceBuffer(traceContext->spanID);
+    }
+    if (ALNTraceContextHasParentSpanID(traceContext)) {
+      payload[@"parent_span_id"] = ALNStringFromTraceBuffer(traceContext->parentSpanID);
+    }
+    if (traceContext->traceparent[0] != '\0') {
+      payload[@"traceparent"] = ALNStringFromTraceBuffer(traceContext->traceparent);
+    }
   }
   return payload;
 }
@@ -2470,7 +2610,7 @@ static void ALNFinalizeResponse(ALNApplication *application,
                                 ALNPerfTrace *trace,
                                 ALNRequest *request,
                                 NSString *requestID,
-                                NSDictionary *traceContext,
+                                const ALNRequestTraceContext *traceContext,
                                 BOOL performanceLogging) {
   if (performanceLogging && [trace isEnabled]) {
     [trace setStage:@"parse" durationMilliseconds:request.parseDurationMilliseconds >= 0.0
@@ -2506,18 +2646,11 @@ static void ALNFinalizeResponse(ALNApplication *application,
     [response setHeader:@"X-Correlation-Id" value:requestID];
   }
 
-  if (ALNTracePropagationEnabled(application)) {
-    NSString *traceID = [traceContext[@"trace_id"] isKindOfClass:[NSString class]]
-                            ? traceContext[@"trace_id"]
-                            : @"";
-    NSString *traceparent = [traceContext[@"traceparent"] isKindOfClass:[NSString class]]
-                                ? traceContext[@"traceparent"]
-                                : @"";
-    if ([traceID length] > 0) {
-      [response setHeader:@"X-Trace-Id" value:traceID];
-    }
-    if ([traceparent length] > 0) {
-      [response setHeader:@"traceparent" value:traceparent];
+  if (ALNTraceContextHasTraceID(traceContext)) {
+    [response setHeader:@"X-Trace-Id" value:ALNStringFromTraceBuffer(traceContext->traceID)];
+    if (traceContext->traceparent[0] != '\0') {
+      [response setHeader:@"traceparent"
+                    value:ALNStringFromTraceBuffer(traceContext->traceparent)];
     }
   }
 
@@ -3108,21 +3241,9 @@ static void ALNFinalizeResponse(ALNApplication *application,
   [response setHeader:@"X-Request-Id" value:requestID];
 
   BOOL performanceLogging = ALNBoolConfigValue(self.config[@"performanceLogging"], YES);
-  BOOL tracePropagationEnabled = ALNTracePropagationEnabled(self);
   BOOL infoLoggingEnabled = [self.logger shouldLogLevel:ALNLogLevelInfo];
-  NSDictionary *traceContext = ALNBuildRequestTraceContext(request, tracePropagationEnabled);
-  NSString *traceID = [traceContext[@"trace_id"] isKindOfClass:[NSString class]]
-                          ? traceContext[@"trace_id"]
-                          : @"";
-  NSString *spanID = [traceContext[@"span_id"] isKindOfClass:[NSString class]]
-                         ? traceContext[@"span_id"]
-                         : @"";
-  NSString *parentSpanID = [traceContext[@"parent_span_id"] isKindOfClass:[NSString class]]
-                               ? traceContext[@"parent_span_id"]
-                               : @"";
-  NSString *traceparent = [traceContext[@"traceparent"] isKindOfClass:[NSString class]]
-                              ? traceContext[@"traceparent"]
-                              : @"";
+  ALNRequestTraceContext traceContext =
+      ALNBuildRequestTraceContext(request, ALNTracePropagationEnabled(self));
   BOOL apiOnly = ALNBoolConfigValue(self.config[@"apiOnly"], NO);
   ALNPerfTrace *trace = [[ALNPerfTrace alloc] initWithEnabled:performanceLogging];
   [trace startStage:@"total"];
@@ -3162,7 +3283,7 @@ static void ALNFinalizeResponse(ALNApplication *application,
                         trace,
                         request,
                         requestID,
-                        traceContext,
+                        &traceContext,
                         performanceLogging);
     ALNRecordRequestMetrics(self, response, trace);
     [self.metrics addGauge:@"http_requests_active" delta:-1.0];
@@ -3171,7 +3292,7 @@ static void ALNFinalizeResponse(ALNApplication *application,
       @try {
         [self.traceExporter exportTrace:ALNTraceExportPayload(trace,
                                                               requestID,
-                                                              traceContext,
+                                                              &traceContext,
                                                               request,
                                                               response,
                                                               @"",
@@ -3199,13 +3320,13 @@ static void ALNFinalizeResponse(ALNApplication *application,
       fields[@"event"] = @"http.request.completed";
       fields[@"request_id"] = requestID ?: @"";
       fields[@"correlation_id"] = requestID ?: @"";
-      if (tracePropagationEnabled && [traceID length] > 0) {
-        fields[@"trace_id"] = traceID;
-        fields[@"span_id"] = spanID ?: @"";
-        if ([parentSpanID length] > 0) {
-          fields[@"parent_span_id"] = parentSpanID;
+      if (ALNTraceContextHasTraceID(&traceContext)) {
+        fields[@"trace_id"] = ALNStringFromTraceBuffer(traceContext.traceID);
+        fields[@"span_id"] = ALNStringFromTraceBuffer(traceContext.spanID);
+        if (ALNTraceContextHasParentSpanID(&traceContext)) {
+          fields[@"parent_span_id"] = ALNStringFromTraceBuffer(traceContext.parentSpanID);
         }
-        fields[@"traceparent"] = traceparent ?: @"";
+        fields[@"traceparent"] = ALNStringFromTraceBuffer(traceContext.traceparent);
       }
       if (performanceLogging) {
         fields[@"timings"] = [trace dictionaryRepresentation];
@@ -3217,13 +3338,13 @@ static void ALNFinalizeResponse(ALNApplication *application,
 
   NSMutableDictionary *stash = [NSMutableDictionary dictionary];
   stash[@"request_id"] = requestID ?: @"";
-  if (tracePropagationEnabled && [traceID length] > 0) {
-    stash[@"aln.trace_id"] = traceID;
-    stash[@"aln.span_id"] = spanID ?: @"";
-    if ([parentSpanID length] > 0) {
-      stash[@"aln.parent_span_id"] = parentSpanID;
+  if (ALNTraceContextHasTraceID(&traceContext)) {
+    stash[@"aln.trace_id"] = ALNStringFromTraceBuffer(traceContext.traceID);
+    stash[@"aln.span_id"] = ALNStringFromTraceBuffer(traceContext.spanID);
+    if (ALNTraceContextHasParentSpanID(&traceContext)) {
+      stash[@"aln.parent_span_id"] = ALNStringFromTraceBuffer(traceContext.parentSpanID);
     }
-    stash[@"aln.traceparent"] = traceparent ?: @"";
+    stash[@"aln.traceparent"] = ALNStringFromTraceBuffer(traceContext.traceparent);
   }
   stash[ALNContextRequestFormatStashKey] = requestFormat ?: @"";
   if (self.jobsAdapter != nil) {
@@ -3477,6 +3598,15 @@ static void ALNFinalizeResponse(ALNApplication *application,
       [response setTextBody:returnValue];
       [response setHeader:@"Content-Type" value:@"text/plain; charset=utf-8"];
       response.committed = YES;
+    } else if ([returnValue isKindOfClass:[NSData class]]) {
+      if (response.statusCode == 0) {
+        response.statusCode = 200;
+      }
+      NSString *existingContentType = [response headerForName:@"Content-Type"];
+      [response setDataBody:returnValue
+                contentType:[existingContentType length] > 0 ? existingContentType
+                                                              : @"application/octet-stream"];
+      response.committed = YES;
     } else if (returnValue != nil) {
       [response setTextBody:[returnValue description]];
       [response setHeader:@"Content-Type" value:@"text/plain; charset=utf-8"];
@@ -3529,7 +3659,7 @@ static void ALNFinalizeResponse(ALNApplication *application,
                       trace,
                       request,
                       requestID,
-                      traceContext,
+                      &traceContext,
                       performanceLogging);
   ALNRecordRequestMetrics(self, response, trace);
   [self.metrics addGauge:@"http_requests_active" delta:-1.0];
@@ -3538,7 +3668,7 @@ static void ALNFinalizeResponse(ALNApplication *application,
     @try {
       [self.traceExporter exportTrace:ALNTraceExportPayload(trace,
                                                             requestID,
-                                                            traceContext,
+                                                            &traceContext,
                                                             request,
                                                             response,
                                                             context.routeName ?: @"",
@@ -3566,13 +3696,13 @@ static void ALNFinalizeResponse(ALNApplication *application,
     logFields[@"event"] = @"http.request.completed";
     logFields[@"request_id"] = requestID ?: @"";
     logFields[@"correlation_id"] = requestID ?: @"";
-    if (tracePropagationEnabled && [traceID length] > 0) {
-      logFields[@"trace_id"] = traceID;
-      logFields[@"span_id"] = spanID ?: @"";
-      if ([parentSpanID length] > 0) {
-        logFields[@"parent_span_id"] = parentSpanID;
+    if (ALNTraceContextHasTraceID(&traceContext)) {
+      logFields[@"trace_id"] = ALNStringFromTraceBuffer(traceContext.traceID);
+      logFields[@"span_id"] = ALNStringFromTraceBuffer(traceContext.spanID);
+      if (ALNTraceContextHasParentSpanID(&traceContext)) {
+        logFields[@"parent_span_id"] = ALNStringFromTraceBuffer(traceContext.parentSpanID);
       }
-      logFields[@"traceparent"] = traceparent ?: @"";
+      logFields[@"traceparent"] = ALNStringFromTraceBuffer(traceContext.traceparent);
     }
     logFields[@"route"] = context.routeName ?: @"";
     logFields[@"controller"] = context.controllerName ?: @"";

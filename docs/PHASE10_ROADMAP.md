@@ -1,6 +1,6 @@
 # Arlen Phase 10 Roadmap
 
-Status: Active (10A/10B/10C/10D/10E/10F/10G/10H/10I/10J/10K complete)  
+Status: Complete (10A/10B/10C/10D/10E/10F/10G/10H/10I/10J/10K/10L/10M complete)  
 Last updated: 2026-02-26
 
 Related docs:
@@ -58,6 +58,8 @@ Key findings:
 9. Phase 10I: compile-time feature toggles for JSON/parser backends.
 10. Phase 10J: HTTP runtime hot-path memory/throughput optimization tranche.
 11. Phase 10K: benchmark-driven write/parse/baseline overhead optimization pass.
+12. Phase 10L: targeted native C hot-path optimization follow-on.
+13. Phase 10M: C-path reliability/safety hardening gates + large-body response throughput hardening follow-on.
 
 ## 4. Milestones
 
@@ -341,6 +343,164 @@ Acceptance (required):
 - `A_json_status` shows measurable reduction in baseline framework overhead while preserving logging/trace/security contracts.
 - Long-run stress/fault/sanitizer lanes show no new memory safety or lifecycle regressions.
 
+## 4.12 Phase 10L: Targeted Native C Hot-Path Follow-On
+
+Status: Complete (2026-02-26)
+
+Deliverables:
+
+- 10L.1 quick win: cache peer address once per connection lifecycle:
+  - compute remote address once before keep-alive request loop and reuse per request.
+  - preserve trusted-proxy effective-address semantics.
+- 10L.2 request-read/head parser C state machine:
+  - replace current Objective-C read/append/re-parse flow with incremental C parser state and reusable per-connection buffer.
+  - retain existing request limit and malformed-request status behavior contracts.
+- 10L.3 static large-file path optimization with safe caching:
+  - add static metadata/path cache (and optional bounded fd cache with strict invalidation).
+  - preserve static mount security constraints (prefix/path traversal/allowlist semantics).
+- 10L.4 response header serialization refinement:
+  - first eliminate repeated dynamic key-sort work via stable header layout.
+  - only introduce C header builder path if benchmark evidence still shows serializer overhead in hot routes.
+- 10L.5 query/cookie parsing path refinement:
+  - remove avoidable lock overhead in lazy query/cookie access.
+  - add optional byte-level parser path with lazy Foundation materialization if profiling confirms continued hotspot.
+- 10L.6 route matcher native-path investigation gate:
+  - add large-route-table benchmark profile and flamegraph evidence capture.
+  - only proceed to compiled C trie/segment matcher when measured win justifies complexity/regression surface.
+
+Acceptance (required):
+
+- Benchmark confidence artifacts show measurable improvement for `A_json_status`, `E_http_parse_large_path`, `F_http_parse_many_headers`, and `H_blob_large` against 10K baseline.
+- No request/response contract regressions for headers/query/cookies/static mount behavior/routing semantics.
+- Long-run concurrency/restart/fault/sanitizer lanes remain clean (no new memory safety or lifecycle regressions).
+- Any optional native-C matcher/caching step lands only with benchmark evidence and dedicated regression coverage.
+
+Implemented in this tranche:
+
+- 10L.1 complete:
+  - remote peer address is now computed once per connection and reused across keep-alive request handling.
+- 10L.2 complete:
+  - request read path now uses an incremental C state machine (`ALNConnectionReadState`) with a reusable per-connection buffer and single-pass head metadata parsing.
+  - leftover bytes are preserved across keep-alive/pipelined requests via prefix-consume compaction.
+- 10L.3 complete:
+  - static file serving now includes safe bounded fd caching with strict `(device,inode,size,mtime)` validation before reuse.
+  - static fd cache is worker-lifecycle-reset aware and preserves existing static mount security/allowlist semantics.
+- 10L.4 complete:
+  - response header serialization now uses a maintained stable ordered-key layout instead of per-serialize key sorting.
+  - no-op `setHeader` updates no longer invalidate cached serialized headers.
+- 10L.5 complete:
+  - lazy `queryParams`/`cookies` materialization removed `@synchronized` monitor contention and uses lock-free atomic cached fields.
+  - lazy parse semantics and request contract behavior are preserved.
+- 10L.6 complete:
+  - added large-route-table benchmark tool: `tools/route_match_perf_bench.m`.
+  - added Phase 10L investigation gate and artifact generator:
+    - `tools/ci/run_phase10l_route_match_investigation.sh`
+    - `tools/ci/generate_phase10l_route_match_artifacts.py`
+    - threshold fixture `tests/fixtures/performance/phase10l_route_match_thresholds.json`
+  - added deployment regression for artifact-pack generation:
+    - `tests/integration/DeploymentIntegrationTests.m` (`testPhase10LRouteMatchInvestigationGeneratorProducesExpectedPack`)
+
+## 4.13 Phase 10M: C-Path Reliability and Safety Gates
+
+Status: Complete (10M.1/10M.2/10M.3/10M.4/10M.5/10M.6/10M.7/10M.8/10M.9 complete)
+
+Deliverables:
+
+- 10M.1 sanitizer matrix hardening (complete):
+  - new sanitizer matrix fixture + generator + runner:
+    - `tests/fixtures/sanitizers/phase10m_sanitizer_matrix.json`
+    - `tools/ci/generate_phase10m_sanitizer_matrix_artifacts.py`
+    - `tools/ci/run_phase10m_sanitizer_matrix.sh`
+  - added nightly thread-race lane (`TSan` first, `Helgrind` fallback):
+    - `tools/ci/run_phase10m_thread_race_nightly.sh`
+  - `.github/workflows/phase4-sanitizers.yml` now runs phase10m matrix and scheduled nightly thread-race artifacts.
+- 10M.2 differential backend parity matrix (complete):
+  - added matrix tool and CI gate:
+    - `tools/backend_contract_matrix.m`
+    - `tools/ci/generate_phase10m_backend_parity_artifacts.py`
+    - `tools/ci/run_phase10m_backend_parity_matrix.sh`
+  - wired make/CI target: `make ci-backend-parity-matrix`.
+- 10M.3 protocol adversarial + boundary corpus (complete):
+  - added fixture + probe + CI gate:
+    - `tests/fixtures/protocol/phase10m_protocol_adversarial_cases.json`
+    - `tools/ci/protocol_adversarial_probe.py`
+    - `tools/ci/run_phase10m_protocol_adversarial.sh`
+  - wired make/CI target: `make ci-protocol-adversarial`.
+- 10M.4 syscall/fault-injection resilience (complete):
+  - extended runtime fault harness for syscall seam coverage (`EINTR`, `EAGAIN`, short-write, sendfile fallback, static open/stat retry):
+    - `tests/fixtures/fault_injection/phase10m_syscall_fault_scenarios.json`
+    - `tools/ci/runtime_fault_injection.py`
+    - `tools/ci/run_phase10m_syscall_fault_injection.sh`
+  - runtime now includes deterministic syscall fault seam env toggles + retry paths in:
+    - `src/Arlen/HTTP/ALNHTTPServer.m`
+  - wired make/CI target: `make ci-syscall-faults`.
+- 10M.5 allocation-failure resilience (complete):
+  - added allocation failpoint seams and hardened fault paths for request read-state growth, parser header-name allocation, and response header serialization:
+    - `src/Arlen/HTTP/ALNHTTPServer.m`
+    - `src/Arlen/HTTP/ALNRequest.m`
+    - `src/Arlen/HTTP/ALNResponse.m`
+  - added allocation scenario fixture + CI gate:
+    - `tests/fixtures/fault_injection/phase10m_allocation_fault_scenarios.json`
+    - `tools/ci/runtime_fault_injection.py`
+    - `tools/ci/run_phase10m_allocation_fault_injection.sh`
+  - wired make/CI target: `make ci-allocation-faults`.
+- 10M.6 long-run leak and lifecycle soak (complete):
+  - added soak threshold fixture + artifact generator + CI gate:
+    - `tests/fixtures/performance/phase10m_soak_thresholds.json`
+    - `tools/ci/generate_phase10m_soak_artifacts.py`
+    - `tools/ci/run_phase10m_soak.sh`
+  - gate emits bounded-RSS/fd/socket deltas with restart-cycle assertions and manifest pack.
+  - wired make/CI target: `make ci-soak`.
+- 10M.7 chaos/restart under live traffic (complete):
+  - added churn threshold fixture + chaos artifact generator + CI gate:
+    - `tests/fixtures/runtime/phase10m_chaos_restart_thresholds.json`
+    - `tools/ci/generate_phase10m_chaos_restart_artifacts.py`
+    - `tools/ci/run_phase10m_chaos_restart.sh`
+  - gate validates repeated worker kill/reload/shutdown under load plus required lifecycle diagnostics tokens.
+  - wired make/CI target: `make ci-chaos-restart`.
+- 10M.8 static analysis + security lint lane (complete):
+  - added static-analysis policy fixture + artifact generator + CI gate:
+    - `tests/fixtures/static_analysis/phase10m_static_analysis_policy.json`
+    - `tools/ci/generate_phase10m_static_analysis_artifacts.py`
+    - `tools/ci/run_phase10m_static_analysis.sh`
+  - high-severity checker classes are release-blocking in the gate policy.
+  - wired make/CI target: `make ci-static-analysis`.
+- 10M.9 large-body response throughput hardening (complete):
+  - added binary response fast path + explicit binary render helper:
+    - `src/Arlen/Core/ALNApplication.m` (`NSData` implicit return handling)
+    - `src/Arlen/HTTP/ALNResponse.h`
+    - `src/Arlen/HTTP/ALNResponse.m`
+    - `src/Arlen/MVC/Controller/ALNController.h`
+    - `src/Arlen/MVC/Controller/ALNController.m`
+  - optimized benchmark blob route to generate/cache `NSData` payloads and added a legacy-string comparison mode:
+    - `tools/boomhauer.m`
+  - added file-backed/sendfile blob variant (`mode=sendfile`) to isolate transport-dominant path cost in the same endpoint.
+  - added split large-body benchmark coverage profile:
+    - `tests/performance/profiles/phase10m_blob_large.sh`
+    - `tests/performance/policies/phase10m_blob_large.json`
+    - scenarios:
+      - `blob_legacy_string_e2e` (legacy generation+dispatch+write)
+      - `blob_binary_e2e` (optimized generation+dispatch+write)
+      - `blob_binary_sendfile` (transport-dominant send path)
+  - added release-confidence gate + thresholds + CI/make wiring:
+    - `tests/fixtures/performance/phase10m_blob_throughput_thresholds.json`
+    - `tools/ci/run_phase10m_blob_throughput.sh`
+    - `tools/ci/generate_phase10m_blob_throughput_artifacts.py`
+    - `GNUmakefile` (`make ci-blob-throughput`)
+  - added regression coverage for runtime behavior and gate pack generation:
+    - `tests/unit/ApplicationTests.m`
+    - `tests/unit/ResponseTests.m`
+    - `tests/integration/HTTPIntegrationTests.m`
+    - `tests/integration/DeploymentIntegrationTests.m`
+
+Acceptance (required):
+
+- Sanitizer/fault/fuzz/soak lanes are green on default and backend-matrix builds.
+- Differential matrix reports no unresolved parser/JSON contract drift between backends.
+- Long-run leak gates show bounded RSS/fd/socket behavior with no crash/restart churn regressions.
+- Release confidence pack includes Phase 10M artifacts and explicit gate status for sanitizer/fault/parity/soak lanes.
+- Large-body profile (`H_blob_large`) has explicit isolated benchmarks and no unresolved regression in req/s or p95 after binary fast-path changes.
+
 ## 5. Test Strategy
 
 Minimum mandatory test layers:
@@ -369,6 +529,8 @@ Minimum mandatory test layers:
 9. 10I compile-time backend toggle hardening for controlled feature-disable builds.
 10. 10J HTTP runtime hot-path memory/throughput optimization and reliability-gated dispatch policy.
 11. 10K benchmark-driven write/parse/baseline overhead optimization pass with reliability gates.
+12. 10L targeted native C hot-path follow-on with benchmark-evidence gates.
+13. 10M C-path reliability/safety hardening gates before Phase 10 release finalization.
 
 ## 7. Explicit Non-Goals (Phase 10)
 

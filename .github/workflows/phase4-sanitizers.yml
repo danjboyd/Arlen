@@ -4,6 +4,8 @@ on:
   push:
     branches: ["main"]
   pull_request:
+  schedule:
+    - cron: "15 4 * * *"
   workflow_dispatch:
 
 jobs:
@@ -28,25 +30,34 @@ jobs:
             gnustep-base-runtime \
             libgnustep-base-dev
 
-      - name: Run Phase 5E sanitizer gate
+      - name: Run Phase 10M sanitizer matrix gate
         env:
           GNUSTEP_USER_ROOT: ${{ github.workspace }}/.gnustep
+          ARLEN_PHASE10M_INCLUDE_THREAD_NIGHTLY: "0"
         run: |
-          bash ./tools/ci/run_phase5e_sanitizers.sh
+          bash ./tools/ci/run_phase10m_sanitizer_matrix.sh
 
       - name: Upload sanitizer confidence artifacts
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: phase9h-sanitizer-confidence
+          name: phase10m-sanitizer-confidence
           path: |
-            build/release_confidence/phase9h/**
-            build/sanitizers/tsan/**
+            build/release_confidence/phase10m/sanitizers/**
+            build/release_confidence/phase10m/backend_parity/**
+            build/release_confidence/phase10m/protocol_adversarial/**
+            build/release_confidence/phase10m/syscall_faults/**
+            build/release_confidence/phase10m/allocation_faults/**
+            build/release_confidence/phase10m/soak/**
+            build/release_confidence/phase10m/chaos_restart/**
+            build/release_confidence/phase10m/static_analysis/**
+            build/sanitizers/phase10m_thread_race/**
           if-no-files-found: warn
 
-  tsan-experimental:
+  thread-race-nightly:
     runs-on: ubuntu-latest
     continue-on-error: true
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -66,16 +77,16 @@ jobs:
             gnustep-base-runtime \
             libgnustep-base-dev
 
-      - name: Run TSAN experimental profile
+      - name: Run Phase 10M nightly thread-race lane
         env:
           GNUSTEP_USER_ROOT: ${{ github.workspace }}/.gnustep
         run: |
-          bash ./tools/ci/run_phase5e_tsan_experimental.sh
+          bash ./tools/ci/run_phase10m_thread_race_nightly.sh
 
-      - name: Upload TSAN experimental artifacts
+      - name: Upload thread-race nightly artifacts
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: phase9h-tsan-experimental
-          path: build/sanitizers/tsan/**
+          name: phase10m-thread-race-nightly
+          path: build/sanitizers/phase10m_thread_race/**
           if-no-files-found: warn

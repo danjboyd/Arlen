@@ -1,0 +1,17 @@
+{
+  "version": "phase10l-route-match-thresholds-v1",
+  "min_ops_per_sec_default": 1000.0,
+  "max_p95_us_default": 10000.0,
+  "min_ops_per_sec_by_scenario": {
+    "static_hit": 1000.0,
+    "param_hit": 1000.0,
+    "wildcard_hit": 1000.0,
+    "miss": 1000.0
+  },
+  "max_p95_us_by_scenario": {
+    "static_hit": 10000.0,
+    "param_hit": 10000.0,
+    "wildcard_hit": 10000.0,
+    "miss": 10000.0
+  }
+}

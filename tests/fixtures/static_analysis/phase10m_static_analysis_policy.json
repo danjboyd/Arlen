@@ -1,0 +1,16 @@
+{
+  "version": "phase10m-static-analysis-policy-v1",
+  "lastUpdated": "2026-02-26",
+  "hotFiles": [
+    "src/Arlen/HTTP/ALNHTTPServer.m",
+    "src/Arlen/HTTP/ALNRequest.m",
+    "src/Arlen/HTTP/ALNResponse.m",
+    "src/Arlen/Support/ALNJSONSerialization.m"
+  ],
+  "highSeverityCheckers": [
+    "core.",
+    "unix.Malloc",
+    "security."
+  ],
+  "allowWarnings": true
+}

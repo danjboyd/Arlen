@@ -70,24 +70,31 @@ static NSString *ALNNormalizedMethodName(NSString *method) {
 
 static ALNRouteMatch *ALNBestRouteMatchInCandidates(NSArray *candidates,
                                                      NSString *path,
-                                                     NSArray *pathSegments,
                                                      NSString *format) {
   ALNRoute *bestRoute = nil;
-  NSDictionary *bestParams = nil;
+  BOOL bestRouteNeedsPathSegments = NO;
+  NSArray *lazyPathSegments = nil;
 
   for (ALNRoute *route in candidates) {
     if (![route matchesFormat:format]) {
       continue;
     }
 
-    NSDictionary *params = [route matchPath:path pathSegments:pathSegments];
-    if (params == nil) {
+    BOOL useFastPath = [route usesParameterizedFastPath];
+    NSArray *candidateSegments = nil;
+    if (!useFastPath) {
+      if (lazyPathSegments == nil) {
+        lazyPathSegments = [ALNRoute pathSegmentsForPath:path];
+      }
+      candidateSegments = lazyPathSegments;
+    }
+    if (![route matchesPath:path pathSegments:candidateSegments]) {
       continue;
     }
 
     if (bestRoute == nil) {
       bestRoute = route;
-      bestParams = params;
+      bestRouteNeedsPathSegments = !useFastPath;
       continue;
     }
 
@@ -105,11 +112,16 @@ static ALNRouteMatch *ALNBestRouteMatchInCandidates(NSArray *candidates,
 
     if (shouldReplace) {
       bestRoute = route;
-      bestParams = params;
+      bestRouteNeedsPathSegments = !useFastPath;
     }
   }
 
   if (bestRoute == nil) {
+    return nil;
+  }
+  NSArray *paramsSegments = bestRouteNeedsPathSegments ? lazyPathSegments : nil;
+  NSDictionary *bestParams = [bestRoute paramsForPath:path pathSegments:paramsSegments];
+  if (bestParams == nil) {
     return nil;
   }
   return [[ALNRouteMatch alloc] initWithRoute:bestRoute params:bestParams];
@@ -199,7 +211,6 @@ static ALNRouteMatch *ALNBestRouteMatchInCandidates(NSArray *candidates,
   NSString *requestMethod = ALNNormalizedMethodName(method);
   NSString *normalizedPath =
       ([path isKindOfClass:[NSString class]] && [path length] > 0) ? path : @"/";
-  NSArray *pathSegments = [ALNRoute pathSegmentsForPath:normalizedPath];
   NSArray *methodCandidates =
       [self.routesByMethod[requestMethod] isKindOfClass:[NSArray class]]
           ? self.routesByMethod[requestMethod]
@@ -210,11 +221,11 @@ static ALNRouteMatch *ALNBestRouteMatchInCandidates(NSArray *candidates,
           : @[];
 
   ALNRouteMatch *methodMatch =
-      ALNBestRouteMatchInCandidates(methodCandidates, normalizedPath, pathSegments, format);
+      ALNBestRouteMatchInCandidates(methodCandidates, normalizedPath, format);
   if (methodMatch != nil || [requestMethod isEqualToString:@"ANY"]) {
     return methodMatch;
   }
-  return ALNBestRouteMatchInCandidates(anyCandidates, normalizedPath, pathSegments, format);
+  return ALNBestRouteMatchInCandidates(anyCandidates, normalizedPath, format);
 }
 
 - (void)beginRouteGroupWithPrefix:(NSString *)prefix

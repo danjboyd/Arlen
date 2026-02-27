@@ -1,0 +1,50 @@
+{
+  "version": "phase10m-syscall-fault-scenarios-v1",
+  "lastUpdated": "2026-02-26",
+  "seams": [
+    {
+      "id": "syscall_write_path",
+      "description": "writev/send fallback behavior under transient errno and short-write conditions"
+    },
+    {
+      "id": "syscall_read_path",
+      "description": "recv/read loops recover from EINTR without corrupting connection state"
+    },
+    {
+      "id": "static_sendfile_path",
+      "description": "sendfile fallback + static open/stat retry behavior under transient faults"
+    }
+  ],
+  "scenarios": [
+    {
+      "id": "syscall_writev_eagain_keepalive",
+      "seam": "syscall_write_path",
+      "description": "Inject one writev EAGAIN and verify keep-alive health responses remain valid"
+    },
+    {
+      "id": "syscall_writev_short_keepalive",
+      "seam": "syscall_write_path",
+      "description": "Inject one short writev write and verify write-loop accounting remains correct"
+    },
+    {
+      "id": "syscall_recv_eintr_keepalive",
+      "seam": "syscall_read_path",
+      "description": "Inject one recv EINTR and verify request read loop recovers"
+    },
+    {
+      "id": "syscall_sendfile_fallback_keepalive",
+      "seam": "static_sendfile_path",
+      "description": "Inject one sendfile fallback fault and verify static payload + keep-alive health integrity"
+    },
+    {
+      "id": "syscall_static_open_retry",
+      "seam": "static_sendfile_path",
+      "description": "Inject one static open EINTR and verify retry path serves payload"
+    },
+    {
+      "id": "syscall_static_stat_retry",
+      "seam": "static_sendfile_path",
+      "description": "Inject one static stat EINTR and verify retry path serves payload"
+    }
+  ]
+}

@@ -180,6 +180,11 @@ static NSDictionary *ALNEnvelopePayload(ALNContext *context, id data, NSDictiona
   self.context.response.committed = YES;
 }
 
+- (void)renderData:(NSData *)data contentType:(NSString *)contentType {
+  [self.context.response setDataBody:(data ?: [NSData data]) contentType:contentType];
+  self.context.response.committed = YES;
+}
+
 - (void)renderSSEEvents:(NSArray *)events {
   NSMutableString *body = [NSMutableString string];
   for (id value in events ?: @[]) {

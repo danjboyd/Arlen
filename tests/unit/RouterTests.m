@@ -45,6 +45,36 @@
   XCTAssertEqualObjects(match.params[@"name"], @"hank");
 }
 
+- (void)testParameterizedRouteFastPathHandlesTrailingSlashAndLongSegments {
+  ALNRouter *router = [[ALNRouter alloc] init];
+  [router addRouteMethod:@"GET"
+                    path:@"/api/echo/:name"
+                    name:@"api_echo"
+         controllerClass:[RouterDummyController class]
+                  action:@"index"];
+
+  NSMutableString *segment = [NSMutableString string];
+  for (NSUInteger idx = 0; idx < 1024; idx++) {
+    [segment appendString:@"ab"];
+  }
+  NSString *path = [NSString stringWithFormat:@"/api/echo/%@/", segment];
+  ALNRouteMatch *match = [router matchMethod:@"GET" path:path];
+  XCTAssertNotNil(match);
+  XCTAssertEqualObjects(segment, match.params[@"name"]);
+}
+
+- (void)testParameterizedRouteFastPathRejectsMissingTailSegment {
+  ALNRouter *router = [[ALNRouter alloc] init];
+  [router addRouteMethod:@"GET"
+                    path:@"/api/echo/:name"
+                    name:@"api_echo"
+         controllerClass:[RouterDummyController class]
+                  action:@"index"];
+
+  ALNRouteMatch *match = [router matchMethod:@"GET" path:@"/api/echo/"];
+  XCTAssertNil(match);
+}
+
 - (void)testWildcardRouteMatchesTail {
   ALNRouter *router = [[ALNRouter alloc] init];
   [router addRouteMethod:@"GET"

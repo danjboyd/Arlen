@@ -297,4 +297,92 @@
   XCTAssertEqualObjects(@"abc123", legacy.cookies[@"sid"]);
 }
 
+- (void)testBufferedLLHTTPParserReturnsNilUntilRequestComplete {
+  if (![ALNRequest isLLHTTPAvailable]) {
+    return;
+  }
+
+  NSString *partialRaw = @"GET /healthz HTTP/1.1\r\nHost: localhost\r\n";
+  NSData *partialData = [partialRaw dataUsingEncoding:NSUTF8StringEncoding];
+  NSUInteger consumedLength = 999;
+  BOOL headersComplete = YES;
+  NSInteger contentLength = -1;
+  NSError *partialError = nil;
+  ALNRequest *partialRequest = [ALNRequest requestFromBufferedData:partialData
+                                                           backend:ALNHTTPParserBackendLLHTTP
+                                                    consumedLength:&consumedLength
+                                                   headersComplete:&headersComplete
+                                                     contentLength:&contentLength
+                                                             error:&partialError];
+  XCTAssertNil(partialRequest);
+  XCTAssertNil(partialError);
+  XCTAssertEqual((NSUInteger)0, consumedLength);
+  XCTAssertFalse(headersComplete);
+
+  NSString *completeRaw = [partialRaw stringByAppendingString:@"\r\n"];
+  NSData *completeData = [completeRaw dataUsingEncoding:NSUTF8StringEncoding];
+  consumedLength = 0;
+  headersComplete = NO;
+  contentLength = -1;
+  NSError *completeError = nil;
+  ALNRequest *completeRequest = [ALNRequest requestFromBufferedData:completeData
+                                                            backend:ALNHTTPParserBackendLLHTTP
+                                                     consumedLength:&consumedLength
+                                                    headersComplete:&headersComplete
+                                                      contentLength:&contentLength
+                                                              error:&completeError];
+  XCTAssertNil(completeError);
+  XCTAssertNotNil(completeRequest);
+  XCTAssertEqualObjects(@"GET", completeRequest.method);
+  XCTAssertEqualObjects(@"/healthz", completeRequest.path);
+  XCTAssertTrue(headersComplete);
+  XCTAssertEqual((NSInteger)0, contentLength);
+  XCTAssertEqual([completeData length], consumedLength);
+}
+
+- (void)testBufferedLLHTTPParserReportsConsumedLengthForPipelinedRequests {
+  if (![ALNRequest isLLHTTPAvailable]) {
+    return;
+  }
+
+  NSString *firstRaw = @"GET /one HTTP/1.1\r\nHost: localhost\r\n\r\n";
+  NSString *secondRaw = @"GET /two HTTP/1.1\r\nHost: localhost\r\n\r\n";
+  NSData *buffer = [[firstRaw stringByAppendingString:secondRaw] dataUsingEncoding:NSUTF8StringEncoding];
+  NSUInteger consumedLength = 0;
+  BOOL headersComplete = NO;
+  NSInteger contentLength = -1;
+  NSError *error = nil;
+  ALNRequest *first = [ALNRequest requestFromBufferedData:buffer
+                                                  backend:ALNHTTPParserBackendLLHTTP
+                                           consumedLength:&consumedLength
+                                          headersComplete:&headersComplete
+                                            contentLength:&contentLength
+                                                    error:&error];
+  XCTAssertNil(error);
+  XCTAssertNotNil(first);
+  XCTAssertEqualObjects(@"/one", first.path);
+  XCTAssertTrue(headersComplete);
+  XCTAssertEqual((NSInteger)0, contentLength);
+  XCTAssertTrue(consumedLength > 0);
+  XCTAssertTrue(consumedLength < [buffer length]);
+
+  NSData *remainder = [buffer subdataWithRange:NSMakeRange(consumedLength, [buffer length] - consumedLength)];
+  NSUInteger secondConsumedLength = 0;
+  BOOL secondHeadersComplete = NO;
+  NSInteger secondContentLength = -1;
+  NSError *secondError = nil;
+  ALNRequest *second = [ALNRequest requestFromBufferedData:remainder
+                                                   backend:ALNHTTPParserBackendLLHTTP
+                                            consumedLength:&secondConsumedLength
+                                           headersComplete:&secondHeadersComplete
+                                             contentLength:&secondContentLength
+                                                     error:&secondError];
+  XCTAssertNil(secondError);
+  XCTAssertNotNil(second);
+  XCTAssertEqualObjects(@"/two", second.path);
+  XCTAssertTrue(secondHeadersComplete);
+  XCTAssertEqual((NSInteger)0, secondContentLength);
+  XCTAssertEqual([remainder length], secondConsumedLength);
+}
+
 @end

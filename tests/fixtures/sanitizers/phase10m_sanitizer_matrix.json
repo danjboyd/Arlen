@@ -1,0 +1,56 @@
+{
+  "version": "phase10m-sanitizer-matrix-v1",
+  "lastUpdated": "2026-02-26",
+  "lanes": [
+    {
+      "id": "asan_ubsan_unit",
+      "blocking": true,
+      "description": "ASan+UBSan unit suite"
+    },
+    {
+      "id": "asan_ubsan_runtime_probe",
+      "blocking": true,
+      "description": "ASan+UBSan runtime concurrency probe"
+    },
+    {
+      "id": "asan_ubsan_backend_parity",
+      "blocking": true,
+      "description": "ASan+UBSan backend parity matrix"
+    },
+    {
+      "id": "asan_ubsan_protocol_adversarial",
+      "blocking": true,
+      "description": "ASan+UBSan adversarial protocol corpus gate"
+    },
+    {
+      "id": "asan_ubsan_syscall_fault_injection",
+      "blocking": true,
+      "description": "ASan+UBSan syscall fault-injection matrix"
+    },
+    {
+      "id": "asan_ubsan_allocation_fault_injection",
+      "blocking": true,
+      "description": "ASan+UBSan allocation fault-injection matrix"
+    },
+    {
+      "id": "asan_ubsan_long_run_soak",
+      "blocking": true,
+      "description": "ASan+UBSan long-run soak lane"
+    },
+    {
+      "id": "asan_ubsan_chaos_restart",
+      "blocking": true,
+      "description": "ASan+UBSan chaos restart lane under load"
+    },
+    {
+      "id": "asan_ubsan_static_analysis",
+      "blocking": true,
+      "description": "Static analyzer lane for C/Objective-C hot files"
+    },
+    {
+      "id": "thread_race_nightly",
+      "blocking": false,
+      "description": "Nightly TSAN or Helgrind targeted race lane"
+    }
+  ]
+}

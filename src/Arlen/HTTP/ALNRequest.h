@@ -51,6 +51,14 @@ typedef NS_ENUM(NSUInteger, ALNHTTPParserBackend) {
 + (nullable ALNRequest *)requestFromRawData:(NSData *)data
                                     backend:(ALNHTTPParserBackend)backend
                                       error:(NSError *_Nullable *_Nullable)error;
+// Streaming parse entrypoint for server connection buffers.
+// Returns nil + nil error when the buffer holds an incomplete request.
++ (nullable ALNRequest *)requestFromBufferedData:(NSData *)data
+                                         backend:(ALNHTTPParserBackend)backend
+                                  consumedLength:(NSUInteger *_Nullable)consumedLength
+                                 headersComplete:(BOOL *_Nullable)headersComplete
+                                   contentLength:(NSInteger *_Nullable)contentLength
+                                           error:(NSError *_Nullable *_Nullable)error;
 + (ALNHTTPParserBackend)resolvedParserBackend;
 + (NSString *)resolvedParserBackendName;
 + (NSString *)parserBackendNameForBackend:(ALNHTTPParserBackend)backend;

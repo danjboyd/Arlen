@@ -120,6 +120,15 @@
   XCTAssertTrue([makefile containsString:@"ci-json-perf:"]);
   XCTAssertTrue([makefile containsString:@"ci-dispatch-perf:"]);
   XCTAssertTrue([makefile containsString:@"ci-http-parse-perf:"]);
+  XCTAssertTrue([makefile containsString:@"ci-route-match-perf:"]);
+  XCTAssertTrue([makefile containsString:@"ci-backend-parity-matrix:"]);
+  XCTAssertTrue([makefile containsString:@"ci-protocol-adversarial:"]);
+  XCTAssertTrue([makefile containsString:@"ci-syscall-faults:"]);
+  XCTAssertTrue([makefile containsString:@"ci-allocation-faults:"]);
+  XCTAssertTrue([makefile containsString:@"ci-soak:"]);
+  XCTAssertTrue([makefile containsString:@"ci-chaos-restart:"]);
+  XCTAssertTrue([makefile containsString:@"ci-static-analysis:"]);
+  XCTAssertTrue([makefile containsString:@"ci-blob-throughput:"]);
   XCTAssertTrue([makefile containsString:@"check: ci-json-abstraction"]);
 }
 
@@ -132,6 +141,7 @@
   XCTAssertTrue([script containsString:@"run_phase10e_json_performance.sh"]);
   XCTAssertTrue([script containsString:@"run_phase10g_dispatch_performance.sh"]);
   XCTAssertTrue([script containsString:@"run_phase10h_http_parse_performance.sh"]);
+  XCTAssertTrue([script containsString:@"run_phase10m_blob_throughput.sh"]);
 }
 
 @end

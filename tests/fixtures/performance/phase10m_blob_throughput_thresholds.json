@@ -1,0 +1,24 @@
+{
+  "version": "phase10m-blob-throughput-thresholds-v1",
+  "scenario_names": {
+    "legacy_e2e": "blob_legacy_string_e2e",
+    "binary_e2e": "blob_binary_e2e",
+    "binary_sendfile": "blob_binary_sendfile"
+  },
+  "binary_vs_legacy": {
+    "min_req_per_sec_ratio": 1.2,
+    "max_p95_ratio": 0.9
+  },
+  "sendfile_vs_binary": {
+    "min_req_per_sec_ratio": 0.9,
+    "max_p95_ratio": 1.75
+  },
+  "min_req_per_sec": {
+    "blob_binary_e2e": 50.0,
+    "blob_binary_sendfile": 50.0
+  },
+  "max_p95_ms": {
+    "blob_binary_e2e": 250.0,
+    "blob_binary_sendfile": 250.0
+  }
+}

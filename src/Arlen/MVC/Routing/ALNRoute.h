@@ -75,8 +75,14 @@ typedef NS_ENUM(NSUInteger, ALNRouteInvocationReturnKind) {
              registrationIndex:(NSUInteger)registrationIndex;
 
 - (nullable NSDictionary *)matchPath:(NSString *)path;
+- (BOOL)matchesPath:(NSString *)path;
+- (BOOL)matchesPath:(NSString *)path
+       pathSegments:(nullable NSArray *)pathSegments;
 - (nullable NSDictionary *)matchPath:(NSString *)path
                         pathSegments:(nullable NSArray *)pathSegments;
+- (nullable NSDictionary *)paramsForPath:(NSString *)path
+                            pathSegments:(nullable NSArray *)pathSegments;
+- (BOOL)usesParameterizedFastPath;
 + (NSArray *)pathSegmentsForPath:(NSString *)path;
 - (BOOL)matchesFormat:(nullable NSString *)format;
 - (NSDictionary *)dictionaryRepresentation;

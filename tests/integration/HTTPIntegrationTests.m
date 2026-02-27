@@ -571,6 +571,56 @@
   }
 }
 
+- (void)testKeepAliveSupportsPipelinedRequestsOnSingleConnection {
+  int port = [self randomPort];
+  NSTask *server = [[NSTask alloc] init];
+  server.launchPath = @"./build/boomhauer";
+  server.arguments = @[ @"--port", [NSString stringWithFormat:@"%d", port] ];
+  server.standardOutput = [NSPipe pipe];
+  server.standardError = [NSPipe pipe];
+  [server launch];
+
+  @try {
+    BOOL ready = NO;
+    (void)[self requestPathWithRetries:@"/healthz" port:port attempts:60 success:&ready];
+    XCTAssertTrue(ready);
+
+    NSString *script = [NSString stringWithFormat:
+                                         @"import socket\n"
+                                         @"PORT=%d\n"
+                                         @"sock = socket.create_connection(('127.0.0.1', PORT), timeout=5)\n"
+                                         @"sock.settimeout(5)\n"
+                                         @"payload = (\n"
+                                         @"    f'GET /healthz HTTP/1.1\\r\\nHost: 127.0.0.1:{PORT}\\r\\nConnection: keep-alive\\r\\n\\r\\n'\n"
+                                         @"    f'GET /healthz HTTP/1.1\\r\\nHost: 127.0.0.1:{PORT}\\r\\nConnection: close\\r\\n\\r\\n'\n"
+                                         @").encode('utf-8')\n"
+                                         @"sock.sendall(payload)\n"
+                                         @"data = b''\n"
+                                         @"while True:\n"
+                                         @"    chunk = sock.recv(8192)\n"
+                                         @"    if not chunk:\n"
+                                         @"        break\n"
+                                         @"    data += chunk\n"
+                                         @"sock.close()\n"
+                                         @"text = data.decode('utf-8', 'replace')\n"
+                                         @"if text.count('HTTP/1.1 200 OK') != 2:\n"
+                                         @"    raise RuntimeError('expected two HTTP 200 responses')\n"
+                                         @"if text.count('\\r\\n\\r\\nok\\n') != 2:\n"
+                                         @"    raise RuntimeError('expected two health bodies')\n"
+                                         @"print('ok')\n",
+                                         port];
+    int pyCode = 0;
+    NSString *output = [self runPythonScript:script exitCode:&pyCode];
+    XCTAssertEqual(0, pyCode, @"%@", output);
+    XCTAssertTrue([output containsString:@"ok"]);
+  } @finally {
+    if ([server isRunning]) {
+      (void)kill(server.processIdentifier, SIGTERM);
+      [server waitUntilExit];
+    }
+  }
+}
+
 - (void)testKeepAliveRequestChurnDoesNotShowUnboundedRSSGrowth {
   const char *enabled = getenv("ARLEN_ENABLE_PHASE10J_RSS_CHURN");
   if (!(enabled != NULL && strcmp(enabled, "1") == 0)) {
@@ -2070,6 +2120,27 @@
   XCTAssertTrue([apiBody containsString:@"\"embedded-app\""]);
 }
 
+- (void)testBlobEndpointDefaultsToBinaryResponseFastPath {
+  int curlCode = 0;
+  int serverCode = 0;
+  NSString *headers = [self requestWithServerEnv:nil
+                                     serverBinary:@"./build/boomhauer"
+                                        curlBody:@"curl -sS -D - -o /dev/null http://127.0.0.1:%d/api/blob?size=4096"
+                                        curlCode:&curlCode
+                                       serverCode:&serverCode];
+  XCTAssertEqual(0, curlCode);
+  XCTAssertEqual(0, serverCode);
+  XCTAssertTrue([headers containsString:@"Content-Type: application/octet-stream\r\n"], @"%@", headers);
+  XCTAssertTrue([headers containsString:@"Content-Length: 4096\r\n"], @"%@", headers);
+}
+
+- (void)testBlobEndpointSendfileModeMatchesBinaryPayload {
+  NSString *binaryBody = [self simpleRequestPath:@"/api/blob?size=8192"];
+  NSString *sendfileBody = [self simpleRequestPath:@"/api/blob?size=8192&mode=sendfile"];
+  XCTAssertEqual((NSUInteger)8192, [binaryBody length]);
+  XCTAssertEqualObjects(binaryBody, sendfileBody);
+}
+
 - (void)testStaticAssetEndpointInDevelopment {
   NSString *body = [self simpleRequestPath:@"/static/sample.txt"];
   XCTAssertEqualObjects(@"static ok\n", body);
@@ -2147,6 +2218,75 @@
     XCTAssertEqualObjects(payload, body);
   } @finally {
     (void)[[NSFileManager defaultManager] removeItemAtPath:downloadPath error:nil];
+    (void)[[NSFileManager defaultManager] removeItemAtPath:assetDir error:nil];
+  }
+}
+
+- (void)testStaticFileUpdatesAreVisibleAcrossRequests {
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *token = [[[NSUUID UUID] UUIDString] lowercaseString];
+  NSString *relativeRoot = [NSString stringWithFormat:@"phase10l-static-%@",
+                                                      [token stringByReplacingOccurrencesOfString:@"-"
+                                                                                       withString:@""]];
+  NSString *assetDir = [repoRoot stringByAppendingPathComponent:
+                                   [NSString stringWithFormat:@"public/%@", relativeRoot]];
+  NSString *assetPath = [assetDir stringByAppendingPathComponent:@"cache.txt"];
+  NSError *setupError = nil;
+  BOOL created = [[NSFileManager defaultManager] createDirectoryAtPath:assetDir
+                                            withIntermediateDirectories:YES
+                                                             attributes:nil
+                                                                  error:&setupError];
+  XCTAssertTrue(created);
+  XCTAssertNil(setupError);
+
+  NSString *firstContent = @"static-cache-v1\n";
+  NSString *secondContent = @"static-cache-version-two\n";
+  XCTAssertTrue([firstContent writeToFile:assetPath
+                               atomically:YES
+                                 encoding:NSUTF8StringEncoding
+                                    error:&setupError]);
+  XCTAssertNil(setupError);
+
+  int port = [self randomPort];
+  NSTask *server = [[NSTask alloc] init];
+  server.launchPath = @"./build/boomhauer";
+  server.arguments = @[ @"--port", [NSString stringWithFormat:@"%d", port] ];
+  server.standardOutput = [NSPipe pipe];
+  server.standardError = [NSPipe pipe];
+  [server launch];
+
+  @try {
+    BOOL ready = NO;
+    (void)[self requestPathWithRetries:@"/healthz" port:port attempts:60 success:&ready];
+    XCTAssertTrue(ready);
+
+    int curlCode = 0;
+    NSString *firstBody = [self runShellCapture:[NSString stringWithFormat:
+                                                              @"curl -fsS http://127.0.0.1:%d/static/%@/cache.txt",
+                                                              port,
+                                                              relativeRoot]
+                                       exitCode:&curlCode];
+    XCTAssertEqual(0, curlCode);
+    XCTAssertEqualObjects(firstContent, firstBody);
+
+    XCTAssertTrue([secondContent writeToFile:assetPath
+                                  atomically:YES
+                                    encoding:NSUTF8StringEncoding
+                                       error:&setupError]);
+    XCTAssertNil(setupError);
+
+    NSString *secondBody = [self runShellCapture:[NSString stringWithFormat:
+                                                               @"curl -fsS http://127.0.0.1:%d/static/%@/cache.txt",
+                                                               port,
+                                                               relativeRoot]
+                                        exitCode:&curlCode];
+    XCTAssertEqual(0, curlCode);
+    XCTAssertEqualObjects(secondContent, secondBody);
+  } @finally {
+    if ([server isRunning]) {
+      (void)kill(server.processIdentifier, SIGTERM);
+      [server waitUntilExit];
+    }
     (void)[[NSFileManager defaultManager] removeItemAtPath:assetDir error:nil];
   }
 }

@@ -1,0 +1,6 @@
+{
+  "latency_regression_ratio": 1.25,
+  "throughput_floor_ratio": 0.75,
+  "memory_growth_kb_max": 65536,
+  "memory_growth_ratio": 2.0
+}

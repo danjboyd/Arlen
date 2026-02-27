@@ -1,6 +1,8 @@
 #import <Foundation/Foundation.h>
+#import <sys/stat.h>
 #import <stdio.h>
 #import <stdlib.h>
+#import <string.h>
 
 #import "ArlenServer.h"
 #import "ALNJSONSerialization.h"
@@ -151,6 +153,89 @@ static NSDictionary *BenchmarkDBErrorPayload(NSString *code, NSString *message) 
   };
 }
 
+static NSUInteger BenchmarkBlobDefaultSize(void) {
+  return 262144;
+}
+
+static NSUInteger BenchmarkBlobMaximumSize(void) {
+  return 2097152;
+}
+
+static NSCache *BenchmarkBlobPayloadCache(void) {
+  static NSCache *cache = nil;
+  static NSLock *lock = nil;
+  if (cache != nil) {
+    return cache;
+  }
+  @synchronized([NSProcessInfo processInfo]) {
+    if (lock == nil) {
+      lock = [[NSLock alloc] init];
+    }
+  }
+  [lock lock];
+  if (cache == nil) {
+    cache = [[NSCache alloc] init];
+    cache.countLimit = 32;
+    cache.totalCostLimit = 64 * 1024 * 1024;
+  }
+  [lock unlock];
+  return cache;
+}
+
+static NSData *BenchmarkBlobPayloadData(NSUInteger size) {
+  NSCache *cache = BenchmarkBlobPayloadCache();
+  NSNumber *key = @(size);
+  NSData *cached = [cache objectForKey:key];
+  if (cached != nil) {
+    return cached;
+  }
+
+  NSMutableData *payload = [NSMutableData dataWithLength:size];
+  if (payload != nil && size > 0) {
+    memset([payload mutableBytes], 'x', size);
+  }
+  NSData *finalPayload = [NSData dataWithData:(payload ?: [NSMutableData data])];
+  [cache setObject:finalPayload forKey:key cost:size];
+  return finalPayload;
+}
+
+static NSString *BenchmarkBlobCacheDirectory(void) {
+  NSString *directory =
+      [NSTemporaryDirectory() stringByAppendingPathComponent:@"arlen-boomhauer-blob-cache"];
+  NSError *error = nil;
+  BOOL ok = [[NSFileManager defaultManager] createDirectoryAtPath:directory
+                                       withIntermediateDirectories:YES
+                                                        attributes:nil
+                                                             error:&error];
+  if (!ok || error != nil) {
+    return nil;
+  }
+  return directory;
+}
+
+static NSString *BenchmarkBlobFilePath(NSUInteger size) {
+  NSString *cacheDirectory = BenchmarkBlobCacheDirectory();
+  if ([cacheDirectory length] == 0) {
+    return nil;
+  }
+  NSString *path =
+      [cacheDirectory stringByAppendingPathComponent:[NSString stringWithFormat:@"blob-%lu.bin",
+                                                                                (unsigned long)size]];
+  struct stat existingStat;
+  if (stat([path fileSystemRepresentation], &existingStat) == 0 && S_ISREG(existingStat.st_mode) &&
+      (unsigned long long)existingStat.st_size == (unsigned long long)size) {
+    return path;
+  }
+
+  NSData *payload = BenchmarkBlobPayloadData(size);
+  NSError *error = nil;
+  BOOL wrote = [payload writeToFile:path options:NSDataWritingAtomic error:&error];
+  if (!wrote || error != nil) {
+    return nil;
+  }
+  return path;
+}
+
 static NSDictionary *BenchmarkDBParseRequestObject(ALNContext *ctx, NSError **error) {
   NSData *body = [ctx.request.body isKindOfClass:[NSData class]] ? ctx.request.body : [NSData data];
   if ([body length] == 0) {
@@ -259,27 +344,68 @@ static NSDictionary *BenchmarkDBParseRequestObject(ALNContext *ctx, NSError **er
 }
 
 - (id)blob:(ALNContext *)ctx {
-  NSInteger size = 262144;
+  NSInteger size = (NSInteger)BenchmarkBlobDefaultSize();
   NSNumber *requested = [ctx queryIntegerForName:@"size"];
   if (requested != nil) {
     NSInteger parsed = [requested integerValue];
-    if (parsed > 0 && parsed <= 2097152) {
+    if (parsed > 0 && parsed <= (NSInteger)BenchmarkBlobMaximumSize()) {
       size = parsed;
     }
   }
 
-  static NSString *chunk =
-      @"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx";
-  NSMutableString *payload = [NSMutableString stringWithCapacity:(NSUInteger)size];
-  while ((NSInteger)[payload length] < size) {
-    NSInteger remaining = size - (NSInteger)[payload length];
-    if (remaining >= (NSInteger)[chunk length]) {
-      [payload appendString:chunk];
-    } else {
-      [payload appendString:[chunk substringToIndex:(NSUInteger)remaining]];
+  NSString *mode = [[ctx queryValueForName:@"mode"] lowercaseString];
+  BOOL useSendfileMode = [mode isEqualToString:@"sendfile"] || [mode isEqualToString:@"file"];
+  if (useSendfileMode) {
+    NSString *path = BenchmarkBlobFilePath((NSUInteger)size);
+    if ([path length] == 0) {
+      [self setStatus:500];
+      [self renderText:@"blob cache write failed\n"];
+      return nil;
     }
+
+    struct stat fileStat;
+    if (stat([path fileSystemRepresentation], &fileStat) != 0 || !S_ISREG(fileStat.st_mode)) {
+      [self setStatus:500];
+      [self renderText:@"blob cache stat failed\n"];
+      return nil;
+    }
+
+    ctx.response.statusCode = 200;
+    [ctx.response setHeader:@"Content-Type" value:@"application/octet-stream"];
+    [ctx.response setHeader:@"Cache-Control" value:@"no-store"];
+    ctx.response.fileBodyPath = path;
+    ctx.response.fileBodyLength = (unsigned long long)fileStat.st_size;
+    ctx.response.fileBodyDevice = (unsigned long long)fileStat.st_dev;
+    ctx.response.fileBodyInode = (unsigned long long)fileStat.st_ino;
+    ctx.response.fileBodyMTimeSeconds = (long long)fileStat.st_mtime;
+#if defined(__APPLE__) || defined(__MACH__)
+    ctx.response.fileBodyMTimeNanoseconds = fileStat.st_mtimespec.tv_nsec;
+#elif defined(__linux__)
+    ctx.response.fileBodyMTimeNanoseconds = fileStat.st_mtim.tv_nsec;
+#else
+    ctx.response.fileBodyMTimeNanoseconds = 0;
+#endif
+    ctx.response.committed = YES;
+    return nil;
   }
-  return payload;
+
+  NSString *impl = [[ctx queryValueForName:@"impl"] lowercaseString];
+  if ([impl isEqualToString:@"legacy-string"]) {
+    static NSString *chunk =
+        @"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx";
+    NSMutableString *payload = [NSMutableString stringWithCapacity:(NSUInteger)size];
+    while ((NSInteger)[payload length] < size) {
+      NSInteger remaining = size - (NSInteger)[payload length];
+      if (remaining >= (NSInteger)[chunk length]) {
+        [payload appendString:chunk];
+      } else {
+        [payload appendString:[chunk substringToIndex:(NSUInteger)remaining]];
+      }
+    }
+    return payload;
+  }
+
+  return BenchmarkBlobPayloadData((NSUInteger)size);
 }
 
 - (id)dbItemsRead:(ALNContext *)ctx {

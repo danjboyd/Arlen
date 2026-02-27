@@ -27,6 +27,17 @@ static NSString *ALNNormalizeRouteFormat(NSString *value) {
   return ([trimmed length] > 0) ? trimmed : nil;
 }
 
+static NSString *ALNNormalizedPathForFastMatch(NSString *path) {
+  if (![path isKindOfClass:[NSString class]] || [path length] == 0) {
+    return @"/";
+  }
+  NSString *normalized = [path copy];
+  while ([normalized hasSuffix:@"/"] && [normalized length] > 1) {
+    normalized = [normalized substringToIndex:[normalized length] - 1];
+  }
+  return ([normalized length] > 0) ? normalized : @"/";
+}
+
 @interface ALNRoute ()
 
 @property(nonatomic, copy, readwrite) NSString *method;
@@ -42,6 +53,9 @@ static NSString *ALNNormalizeRouteFormat(NSString *value) {
 @property(nonatomic, assign, readwrite) ALNRouteKind kind;
 @property(nonatomic, assign, readwrite) NSUInteger staticSegmentCount;
 @property(nonatomic, strong) NSArray *segments;
+@property(nonatomic, assign) BOOL parameterizedFastPathEnabled;
+@property(nonatomic, copy) NSString *parameterizedFastPathPrefix;
+@property(nonatomic, copy) NSString *parameterizedFastPathParamName;
 
 @end
 
@@ -147,6 +161,39 @@ static NSString *ALNNormalizeRouteFormat(NSString *value) {
       _kind = ALNRouteKindStatic;
     }
     _staticSegmentCount = staticCount;
+
+    _parameterizedFastPathEnabled = NO;
+    _parameterizedFastPathPrefix = @"";
+    _parameterizedFastPathParamName = @"";
+    if (!hasWildcard && hasParam && [_segments count] > 0) {
+      NSUInteger parameterCount = 0;
+      BOOL allStaticBeforeTail = YES;
+      NSString *tailParamName = nil;
+      NSUInteger tailSegmentLength = 0;
+      NSUInteger lastIndex = [_segments count] - 1;
+      for (NSUInteger idx = 0; idx < [_segments count]; idx++) {
+        NSString *segment = _segments[idx];
+        if ([segment hasPrefix:@":"]) {
+          parameterCount += 1;
+          if (idx == lastIndex) {
+            tailParamName = [segment substringFromIndex:1];
+            tailSegmentLength = [segment length];
+          } else {
+            allStaticBeforeTail = NO;
+          }
+        } else if ([segment hasPrefix:@"*"]) {
+          allStaticBeforeTail = NO;
+        } else if (idx == lastIndex) {
+          allStaticBeforeTail = NO;
+        }
+      }
+      if (parameterCount == 1 && allStaticBeforeTail && [tailParamName length] > 0) {
+        NSString *prefix = [_pathPattern substringToIndex:[_pathPattern length] - tailSegmentLength];
+        _parameterizedFastPathEnabled = YES;
+        _parameterizedFastPathPrefix = [prefix copy] ?: @"";
+        _parameterizedFastPathParamName = [tailParamName copy] ?: @"";
+      }
+    }
   }
   return self;
 }
@@ -155,7 +202,84 @@ static NSString *ALNNormalizeRouteFormat(NSString *value) {
   return [self matchPath:path pathSegments:nil];
 }
 
-- (NSDictionary *)matchPath:(NSString *)path pathSegments:(NSArray *)pathSegments {
+- (BOOL)usesParameterizedFastPath {
+  return self.parameterizedFastPathEnabled;
+}
+
+- (BOOL)matchesPath:(NSString *)path {
+  return [self matchesPath:path pathSegments:nil];
+}
+
+- (BOOL)matchesPath:(NSString *)path pathSegments:(NSArray *)pathSegments {
+  if (self.parameterizedFastPathEnabled && ![pathSegments isKindOfClass:[NSArray class]]) {
+    NSString *normalizedPath = ALNNormalizedPathForFastMatch(path);
+    if (![normalizedPath hasPrefix:self.parameterizedFastPathPrefix]) {
+      return NO;
+    }
+    if ([normalizedPath length] <= [self.parameterizedFastPathPrefix length]) {
+      return NO;
+    }
+    NSString *tail = [normalizedPath substringFromIndex:[self.parameterizedFastPathPrefix length]];
+    return ([tail length] > 0 && [tail rangeOfString:@"/"].location == NSNotFound);
+  }
+
+  NSArray *incoming = [pathSegments isKindOfClass:[NSArray class]]
+                          ? pathSegments
+                          : ALNSplitPathSegments(path);
+  NSUInteger patternCount = [self.segments count];
+  NSUInteger incomingCount = [incoming count];
+
+  for (NSUInteger idx = 0; idx < patternCount; idx++) {
+    NSString *patternSegment = self.segments[idx];
+    BOOL isWildcard = [patternSegment hasPrefix:@"*"];
+    BOOL isParam = [patternSegment hasPrefix:@":"];
+
+    if (isWildcard) {
+      return YES;
+    }
+
+    if (idx >= incomingCount) {
+      return NO;
+    }
+
+    NSString *incomingSegment = incoming[idx];
+    if (isParam) {
+      NSString *name = [patternSegment substringFromIndex:1];
+      if ([name length] == 0) {
+        return NO;
+      }
+      continue;
+    }
+
+    if (![patternSegment isEqualToString:incomingSegment]) {
+      return NO;
+    }
+  }
+
+  if (incomingCount != patternCount) {
+    return NO;
+  }
+  return YES;
+}
+
+- (NSDictionary *)paramsForPath:(NSString *)path pathSegments:(NSArray *)pathSegments {
+  if (self.parameterizedFastPathEnabled && ![pathSegments isKindOfClass:[NSArray class]]) {
+    NSString *normalizedPath = ALNNormalizedPathForFastMatch(path);
+    if (![normalizedPath hasPrefix:self.parameterizedFastPathPrefix]) {
+      return nil;
+    }
+    if ([normalizedPath length] <= [self.parameterizedFastPathPrefix length]) {
+      return nil;
+    }
+    NSString *tail = [normalizedPath substringFromIndex:[self.parameterizedFastPathPrefix length]];
+    if ([tail length] == 0 || [tail rangeOfString:@"/"].location != NSNotFound) {
+      return nil;
+    }
+    return @{
+      self.parameterizedFastPathParamName : tail
+    };
+  }
+
   NSArray *incoming = [pathSegments isKindOfClass:[NSArray class]]
                           ? pathSegments
                           : ALNSplitPathSegments(path);
@@ -206,6 +330,10 @@ static NSString *ALNNormalizeRouteFormat(NSString *value) {
     return nil;
   }
   return params;
+}
+
+- (NSDictionary *)matchPath:(NSString *)path pathSegments:(NSArray *)pathSegments {
+  return [self paramsForPath:path pathSegments:pathSegments];
 }
 
 + (NSArray *)pathSegmentsForPath:(NSString *)path {

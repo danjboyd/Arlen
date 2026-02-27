@@ -18,6 +18,8 @@ ARLEN_TOOL := $(BUILD_DIR)/arlen
 JSON_PERF_BENCH_TOOL := $(BUILD_DIR)/json-perf-bench
 DISPATCH_PERF_BENCH_TOOL := $(BUILD_DIR)/dispatch-perf-bench
 HTTP_PARSE_PERF_BENCH_TOOL := $(BUILD_DIR)/http-parse-perf-bench
+ROUTE_MATCH_PERF_BENCH_TOOL := $(BUILD_DIR)/route-match-perf-bench
+BACKEND_CONTRACT_MATRIX_TOOL := $(BUILD_DIR)/backend-contract-matrix
 
 TEMPLATE_ROOT := $(ROOT_DIR)/templates
 TEMPLATE_FILES := $(shell find $(TEMPLATE_ROOT) -type f -name '*.html.eoc' | sort)
@@ -75,7 +77,7 @@ ifneq ($(findstring -fno-objc-arc,$(OBJC_FLAGS)),)
 $(error OBJC_FLAGS cannot disable ARC)
 endif
 
-.PHONY: all eocc transpile tech-demo-transpile generated-compile arlen boomhauer tech-demo-server api-reference-server migration-sample-server arlen-data-example json-perf-bench dispatch-perf-bench http-parse-perf-bench test-data-layer dev-server tech-demo smoke-render smoke routes build-tests test test-unit test-integration perf perf-fast parity-phaseb perf-phasec perf-phased deploy-smoke phase5e-confidence ci-quality ci-sanitizers ci-fault-injection ci-release-certification ci-json-abstraction ci-json-perf ci-dispatch-perf ci-http-parse-perf ci-docs check docs-api docs-html docs-serve clean
+.PHONY: all eocc transpile tech-demo-transpile generated-compile arlen boomhauer tech-demo-server api-reference-server migration-sample-server arlen-data-example json-perf-bench dispatch-perf-bench http-parse-perf-bench route-match-perf-bench backend-contract-matrix test-data-layer dev-server tech-demo smoke-render smoke routes build-tests test test-unit test-integration perf perf-fast parity-phaseb perf-phasec perf-phased deploy-smoke phase5e-confidence ci-quality ci-sanitizers ci-fault-injection ci-release-certification ci-json-abstraction ci-json-perf ci-dispatch-perf ci-http-parse-perf ci-route-match-perf ci-backend-parity-matrix ci-protocol-adversarial ci-syscall-faults ci-allocation-faults ci-soak ci-chaos-restart ci-static-analysis ci-blob-throughput ci-docs check docs-api docs-html docs-serve clean
 
 all: eocc transpile generated-compile arlen boomhauer
 
@@ -122,6 +124,16 @@ $(HTTP_PARSE_PERF_BENCH_TOOL): tools/http_parse_perf_bench.m src/Arlen/HTTP/ALNR
 >source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) tools/http_parse_perf_bench.m src/Arlen/HTTP/ALNRequest.m src/Arlen/Support/ALNJSONSerialization.m $(THIRD_PARTY_C_SRCS) -o $(HTTP_PARSE_PERF_BENCH_TOOL) $$(gnustep-config --base-libs) -ldl -lcrypto
 
 http-parse-perf-bench: $(HTTP_PARSE_PERF_BENCH_TOOL)
+
+$(ROUTE_MATCH_PERF_BENCH_TOOL): tools/route_match_perf_bench.m src/Arlen/MVC/Routing/ALNRoute.m src/Arlen/MVC/Routing/ALNRouter.m src/Arlen/Support/ALNJSONSerialization.m $(YYJSON_C_SRCS) | $(BUILD_DIR)
+>source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) tools/route_match_perf_bench.m src/Arlen/MVC/Routing/ALNRoute.m src/Arlen/MVC/Routing/ALNRouter.m src/Arlen/Support/ALNJSONSerialization.m $(YYJSON_C_SRCS) -o $(ROUTE_MATCH_PERF_BENCH_TOOL) $$(gnustep-config --base-libs) -ldl -lcrypto
+
+route-match-perf-bench: $(ROUTE_MATCH_PERF_BENCH_TOOL)
+
+$(BACKEND_CONTRACT_MATRIX_TOOL): tools/backend_contract_matrix.m src/Arlen/HTTP/ALNRequest.m src/Arlen/Support/ALNJSONSerialization.m $(THIRD_PARTY_C_SRCS) | $(BUILD_DIR)
+>source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) tools/backend_contract_matrix.m src/Arlen/HTTP/ALNRequest.m src/Arlen/Support/ALNJSONSerialization.m $(THIRD_PARTY_C_SRCS) -o $(BACKEND_CONTRACT_MATRIX_TOOL) $$(gnustep-config --base-libs) -ldl -lcrypto
+
+backend-contract-matrix: $(BACKEND_CONTRACT_MATRIX_TOOL)
 
 $(BOOMHAUER_TOOL): tools/boomhauer.m $(FRAMEWORK_SRCS) transpile
 >source $(GNUSTEP_SH) && generated_files="$$(find $(GEN_DIR) -type f -name '*.m' | sort)"; \
@@ -226,7 +238,7 @@ ci-quality:
 >bash ./tools/ci/run_phase5e_quality.sh
 
 ci-sanitizers:
->bash ./tools/ci/run_phase5e_sanitizers.sh
+>bash ./tools/ci/run_phase10m_sanitizer_matrix.sh
 
 ci-fault-injection:
 >bash ./tools/ci/run_phase9i_fault_injection.sh
@@ -245,6 +257,33 @@ ci-dispatch-perf:
 
 ci-http-parse-perf:
 >bash ./tools/ci/run_phase10h_http_parse_performance.sh
+
+ci-route-match-perf:
+>bash ./tools/ci/run_phase10l_route_match_investigation.sh
+
+ci-backend-parity-matrix:
+>bash ./tools/ci/run_phase10m_backend_parity_matrix.sh
+
+ci-protocol-adversarial:
+>bash ./tools/ci/run_phase10m_protocol_adversarial.sh
+
+ci-syscall-faults:
+>bash ./tools/ci/run_phase10m_syscall_fault_injection.sh
+
+ci-allocation-faults:
+>bash ./tools/ci/run_phase10m_allocation_fault_injection.sh
+
+ci-soak:
+>bash ./tools/ci/run_phase10m_soak.sh
+
+ci-chaos-restart:
+>bash ./tools/ci/run_phase10m_chaos_restart.sh
+
+ci-static-analysis:
+>bash ./tools/ci/run_phase10m_static_analysis.sh
+
+ci-blob-throughput:
+>bash ./tools/ci/run_phase10m_blob_throughput.sh
 
 ci-docs:
 >bash ./tools/ci/run_docs_quality.sh
