@@ -33,6 +33,8 @@ typedef NS_ENUM(NSUInteger, ALNHTTPParserBackend) {
 @property(nonatomic, assign) double parseDurationMilliseconds;
 @property(nonatomic, assign) double responseWriteDurationMilliseconds;
 
+- (NSString *)headerValueForName:(NSString *)name;
+
 - (instancetype)initWithMethod:(NSString *)method
                           path:(NSString *)path
                    queryString:(NSString *)queryString

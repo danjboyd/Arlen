@@ -161,11 +161,11 @@ with `X-Arlen-Backpressure-Reason: realtime_channel_subscriber_limit`.
 Request dispatch mode override:
 
 ```bash
-ARLEN_REQUEST_DISPATCH_MODE=concurrent ./bin/boomhauer --env production
+ARLEN_REQUEST_DISPATCH_MODE=serialized ./bin/boomhauer --env production
 ```
 
 `requestDispatchMode` accepts `concurrent` or `serialized`.
-Default is `serialized` in `production` and `concurrent` in non-production environments.
+Default is `concurrent`.
 `serialized` mode preserves deterministic in-process dispatch ordering while still honoring HTTP
 keep-alive negotiation.
 

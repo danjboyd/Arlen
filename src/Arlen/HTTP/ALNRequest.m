@@ -12,6 +12,13 @@
 
 NSString *const ALNRequestErrorDomain = @"Arlen.HTTP.Request.Error";
 
+@interface ALNRequest (ALNInternalDeferredHeaders)
+
+- (void)aln_setDeferredHeaderNameData:(NSArray *)nameData
+                     deferredValueData:(NSArray *)valueData;
+
+@end
+
 static NSLock *gALNRequestFaultInjectionLock = nil;
 static NSMutableSet *gALNRequestFaultInjectionConsumed = nil;
 
@@ -195,14 +202,16 @@ const char *_headerValueStart;
 size_t _headerValueLength;
 NSMutableData *_headerValueData;
 
-const char *_bodyStart;
-size_t _bodyLength;
-NSMutableData *_bodyData;
+	const char *_bodyStart;
+	size_t _bodyLength;
+	NSMutableData *_bodyData;
 
-NSMutableDictionary *_headers;
-NSString *_errorMessage;
-BOOL _headersComplete;
-BOOL _messageComplete;
+	NSMutableDictionary *_headers;
+	NSMutableArray *_deferredHeaderNameData;
+	NSMutableArray *_deferredHeaderValueData;
+	NSString *_errorMessage;
+	BOOL _headersComplete;
+	BOOL _messageComplete;
 }
 
 - (void)resetForNextParse;
@@ -227,6 +236,8 @@ BOOL _messageComplete;
     _bodyLength = 0;
     _bodyData = nil;
     _headers = [NSMutableDictionary dictionary];
+    _deferredHeaderNameData = nil;
+    _deferredHeaderValueData = nil;
     _errorMessage = @"";
     _headersComplete = NO;
     _messageComplete = NO;
@@ -248,6 +259,8 @@ BOOL _messageComplete;
   _bodyLength = 0;
   _bodyData = nil;
   [_headers removeAllObjects];
+  _deferredHeaderNameData = nil;
+  _deferredHeaderValueData = nil;
   _errorMessage = @"";
   _headersComplete = NO;
   _messageComplete = NO;
@@ -419,6 +432,100 @@ static NSString *ALNLLHTTPHeaderValueString(const unsigned char *bytes, size_t l
   return [[NSString alloc] initWithBytes:bytes length:length encoding:NSUTF8StringEncoding];
 }
 
+static BOOL ALNLLHTTPASCIIEqualsIgnoreCase(const unsigned char *bytes,
+                                           size_t length,
+                                           const char *literal) {
+  if (bytes == NULL || literal == NULL) {
+    return NO;
+  }
+  size_t literalLength = strlen(literal);
+  if (literalLength != length) {
+    return NO;
+  }
+  for (size_t idx = 0; idx < length; idx++) {
+    unsigned char left = bytes[idx];
+    unsigned char right = (unsigned char)literal[idx];
+    if (left >= 'A' && left <= 'Z') {
+      left = (unsigned char)(left + ('a' - 'A'));
+    }
+    if (right >= 'A' && right <= 'Z') {
+      right = (unsigned char)(right + ('a' - 'A'));
+    }
+    if (left != right) {
+      return NO;
+    }
+  }
+  return YES;
+}
+
+static BOOL ALNLLHTTPHeaderNameBytesAreASCII(const unsigned char *bytes, size_t length) {
+  if (bytes == NULL || length == 0) {
+    return NO;
+  }
+  for (size_t idx = 0; idx < length; idx++) {
+    if (bytes[idx] > 127) {
+      return NO;
+    }
+  }
+  return YES;
+}
+
+static NSString *ALNLLHTTPHotHeaderKey(const unsigned char *bytes, size_t length) {
+  if (ALNLLHTTPASCIIEqualsIgnoreCase(bytes, length, "content-length")) {
+    return @"content-length";
+  }
+  if (ALNLLHTTPASCIIEqualsIgnoreCase(bytes, length, "connection")) {
+    return @"connection";
+  }
+  if (ALNLLHTTPASCIIEqualsIgnoreCase(bytes, length, "upgrade")) {
+    return @"upgrade";
+  }
+  if (ALNLLHTTPASCIIEqualsIgnoreCase(bytes, length, "sec-websocket-key")) {
+    return @"sec-websocket-key";
+  }
+  if (ALNLLHTTPASCIIEqualsIgnoreCase(bytes, length, "traceparent")) {
+    return @"traceparent";
+  }
+  if (ALNLLHTTPASCIIEqualsIgnoreCase(bytes, length, "x-trace-id")) {
+    return @"x-trace-id";
+  }
+  if (ALNLLHTTPASCIIEqualsIgnoreCase(bytes, length, "x-forwarded-for")) {
+    return @"x-forwarded-for";
+  }
+  if (ALNLLHTTPASCIIEqualsIgnoreCase(bytes, length, "x-forwarded-proto")) {
+    return @"x-forwarded-proto";
+  }
+  if (ALNLLHTTPASCIIEqualsIgnoreCase(bytes, length, "accept")) {
+    return @"accept";
+  }
+  if (ALNLLHTTPASCIIEqualsIgnoreCase(bytes, length, "cookie")) {
+    return @"cookie";
+  }
+  return nil;
+}
+
+static BOOL ALNASCIIBytesEqualLowercaseCString(const unsigned char *bytes,
+                                               size_t length,
+                                               const char *lowercaseName) {
+  if (bytes == NULL || lowercaseName == NULL) {
+    return NO;
+  }
+  size_t literalLength = strlen(lowercaseName);
+  if (literalLength != length) {
+    return NO;
+  }
+  for (size_t idx = 0; idx < length; idx++) {
+    unsigned char byte = bytes[idx];
+    if (byte >= 'A' && byte <= 'Z') {
+      byte = (unsigned char)(byte + ('a' - 'A'));
+    }
+    if (byte != (unsigned char)lowercaseName[idx]) {
+      return NO;
+    }
+  }
+  return YES;
+}
+
 static NSData *ALNLLHTTPCopyDataFromSpan(const char *start, size_t length, NSData *data) {
   if (data != nil) {
     return [data copy];
@@ -465,12 +572,9 @@ static int ALNLLHTTPFinalizeHeader(llhttp_t *parser) {
                            &fieldBytes,
                            &fieldByteLength);
   ALNLLHTTPTrimOWS(&fieldBytes, &fieldByteLength);
-  NSString *name = ALNLLHTTPLowercasedASCIIHeaderName(fieldBytes, fieldByteLength);
-  if (name == nil) {
+  NSString *hotKey = ALNLLHTTPHotHeaderKey(fieldBytes, fieldByteLength);
+  if (!ALNLLHTTPHeaderNameBytesAreASCII(fieldBytes, fieldByteLength)) {
     return ALNLLHTTPSetError(parser, @"Request header is not valid UTF-8");
-  }
-  if ([name length] == 0) {
-    return ALNLLHTTPSetError(parser, @"Invalid header field");
   }
 
   const unsigned char *valueBytes = NULL;
@@ -486,7 +590,21 @@ static int ALNLLHTTPFinalizeHeader(llhttp_t *parser) {
     return ALNLLHTTPSetError(parser, @"Request header is not valid UTF-8");
   }
 
-  state->_headers[name] = value ?: @"";
+  if (hotKey != nil) {
+    state->_headers[hotKey] = value ?: @"";
+  } else {
+    NSData *deferredName = [NSData dataWithBytes:fieldBytes length:fieldByteLength];
+    NSData *deferredValue = [NSData dataWithBytes:valueBytes length:valueByteLength];
+    if (deferredName == nil || deferredValue == nil) {
+      return ALNLLHTTPSetError(parser, @"Request header parse ran out of memory");
+    }
+    if (state->_deferredHeaderNameData == nil) {
+      state->_deferredHeaderNameData = [NSMutableArray arrayWithCapacity:4];
+      state->_deferredHeaderValueData = [NSMutableArray arrayWithCapacity:4];
+    }
+    [state->_deferredHeaderNameData addObject:deferredName];
+    [state->_deferredHeaderValueData addObject:deferredValue];
+  }
   ALNLLHTTPResetSpan(&state->_headerFieldStart, &state->_headerFieldLength, &state->_headerFieldData);
   ALNLLHTTPResetSpan(&state->_headerValueStart, &state->_headerValueLength, &state->_headerValueData);
   return 0;
@@ -832,37 +950,13 @@ static NSInteger ALNLLHTTPErrorCodeForMessage(NSString *message) {
   return 3;
 }
 
-static NSInteger ALNLLHTTPParsedContentLength(ALNLLHTTPParseState *state) {
-  NSString *rawValue = [state->_headers[@"content-length"] isKindOfClass:[NSString class]]
-                           ? state->_headers[@"content-length"]
-                           : nil;
-  if (![rawValue isKindOfClass:[NSString class]] || [rawValue length] == 0) {
+static NSInteger ALNLLHTTPParsedContentLength(llhttp_t *parser) {
+  if (parser == NULL || (parser->flags & F_CONTENT_LENGTH) == 0) {
     return 0;
   }
-  NSString *trimmed =
-      [rawValue stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
-  if ([trimmed length] == 0) {
-    return -1;
-  }
-
-  const char *bytes = [trimmed UTF8String];
-  if (bytes == NULL || bytes[0] == '\0') {
-    return -1;
-  }
-  unsigned long long parsed = 0ULL;
-  for (const unsigned char *cursor = (const unsigned char *)bytes; *cursor != '\0'; cursor++) {
-    if (*cursor < '0' || *cursor > '9') {
-      return -1;
-    }
-    unsigned long long digit = (unsigned long long)(*cursor - '0');
-    if (parsed > (ULLONG_MAX / 10ULL) ||
-        (parsed == (ULLONG_MAX / 10ULL) && digit > (ULLONG_MAX % 10ULL))) {
-      return NSIntegerMax;
-    }
-    parsed = (parsed * 10ULL) + digit;
-    if (parsed > (unsigned long long)NSIntegerMax) {
-      return NSIntegerMax;
-    }
+  uint64_t parsed = parser->content_length;
+  if (parsed > (uint64_t)NSIntegerMax) {
+    return NSIntegerMax;
   }
   return (NSInteger)parsed;
 }
@@ -952,12 +1046,18 @@ static ALNRequest *ALNBuildRequestFromLLHTTPState(NSData *sourceData,
   }
 
   NSData *body = ALNLLHTTPCopyDataFromSpan(state->_bodyStart, state->_bodyLength, state->_bodyData);
-  return [[ALNRequest alloc] initWithMethod:method
-                                       path:path
-                                queryString:query
-                                httpVersion:httpVersion
-                                    headers:state->_headers
-                                       body:body];
+  ALNRequest *request = [[ALNRequest alloc] initWithMethod:method
+                                                      path:path
+                                               queryString:query
+                                               httpVersion:httpVersion
+                                                   headers:state->_headers
+                                                      body:body];
+  if ([state->_deferredHeaderNameData count] > 0 &&
+      [state->_deferredHeaderNameData count] == [state->_deferredHeaderValueData count]) {
+    [request aln_setDeferredHeaderNameData:state->_deferredHeaderNameData
+                         deferredValueData:state->_deferredHeaderValueData];
+  }
+  return request;
 }
 
 static ALNRequest *ALNRequestFromRawDataLLHTTPOnce(NSData *data, NSError **error) {
@@ -1043,7 +1143,7 @@ static ALNRequest *ALNRequestFromBufferedDataLLHTTP(NSData *data,
     *headersComplete = state->_headersComplete;
   }
   if (contentLength != NULL) {
-    *contentLength = ALNLLHTTPParsedContentLength(state);
+    *contentLength = ALNLLHTTPParsedContentLength(&parser);
   }
 
   if (parseError == HPE_PAUSED && state->_messageComplete) {
@@ -1112,8 +1212,66 @@ static ALNRequest *ALNRequestFromRawDataLLHTTP(NSData *data, NSError **error) {
 @property(nonatomic, strong, readwrite) NSData *body;
 @property(nonatomic, copy) NSDictionary *cachedQueryParams;
 @property(nonatomic, copy) NSDictionary *cachedCookies;
+@property(nonatomic, copy) NSArray *deferredHeaderNameData;
+@property(nonatomic, copy) NSArray *deferredHeaderValueData;
+@property(nonatomic, assign) BOOL headersMaterialized;
+
+- (void)aln_setDeferredHeaderNameData:(NSArray *)nameData
+                      deferredValueData:(NSArray *)valueData;
 
 @end
+
+static NSString *ALNDeferredHeaderName(NSData *nameData) {
+  if (![nameData isKindOfClass:[NSData class]] || [nameData length] == 0) {
+    return nil;
+  }
+#if ARLEN_ENABLE_LLHTTP
+  const unsigned char *bytes = [nameData bytes];
+  return ALNLLHTTPLowercasedASCIIHeaderName(bytes, [nameData length]);
+#else
+  NSString *raw = [[NSString alloc] initWithData:nameData encoding:NSASCIIStringEncoding];
+  if (![raw isKindOfClass:[NSString class]]) {
+    return nil;
+  }
+  return [raw lowercaseString];
+#endif
+}
+
+static NSString *ALNDeferredHeaderValue(NSData *valueData) {
+  if (![valueData isKindOfClass:[NSData class]]) {
+    return nil;
+  }
+#if ARLEN_ENABLE_LLHTTP
+  const unsigned char *bytes = [valueData bytes];
+  return ALNLLHTTPHeaderValueString(bytes, [valueData length]);
+#else
+  return [[NSString alloc] initWithData:valueData encoding:NSUTF8StringEncoding];
+#endif
+}
+
+#if !ARLEN_ENABLE_LLHTTP
+static BOOL ALNASCIIBytesEqualLowercaseCString(const unsigned char *bytes,
+                                               size_t length,
+                                               const char *lowercaseName) {
+  if (bytes == NULL || lowercaseName == NULL) {
+    return NO;
+  }
+  size_t literalLength = strlen(lowercaseName);
+  if (literalLength != length) {
+    return NO;
+  }
+  for (size_t idx = 0; idx < length; idx++) {
+    unsigned char byte = bytes[idx];
+    if (byte >= 'A' && byte <= 'Z') {
+      byte = (unsigned char)(byte + ('a' - 'A'));
+    }
+    if (byte != (unsigned char)lowercaseName[idx]) {
+      return NO;
+    }
+  }
+  return YES;
+}
+#endif
 
 @implementation ALNRequest
 
@@ -1129,7 +1287,7 @@ static ALNRequest *ALNRequestFromRawDataLLHTTP(NSData *data, NSError **error) {
     _path = [path copy];
     _queryString = [queryString copy] ?: @"";
     _httpVersion = [httpVersion copy] ?: @"HTTP/1.1";
-    _headers = [NSDictionary dictionaryWithDictionary:headers ?: @{}];
+    _headers = [headers isKindOfClass:[NSDictionary class]] ? [headers copy] : @{};
     _body = body ?: [NSData data];
     _routeParams = @{};
     _remoteAddress = @"";
@@ -1137,6 +1295,9 @@ static ALNRequest *ALNRequestFromRawDataLLHTTP(NSData *data, NSError **error) {
     _scheme = @"http";
     _parseDurationMilliseconds = 0.0;
     _responseWriteDurationMilliseconds = 0.0;
+    _headersMaterialized = YES;
+    _deferredHeaderNameData = nil;
+    _deferredHeaderValueData = nil;
   }
   return self;
 }
@@ -1152,6 +1313,96 @@ static ALNRequest *ALNRequestFromRawDataLLHTTP(NSData *data, NSError **error) {
                   httpVersion:@"HTTP/1.1"
                       headers:headers
                          body:body];
+}
+
+- (void)aln_setDeferredHeaderNameData:(NSArray *)nameData
+                     deferredValueData:(NSArray *)valueData {
+  if ([nameData count] == 0 || [nameData count] != [valueData count]) {
+    self.deferredHeaderNameData = nil;
+    self.deferredHeaderValueData = nil;
+    self.headersMaterialized = YES;
+    return;
+  }
+  self.deferredHeaderNameData = [nameData copy];
+  self.deferredHeaderValueData = [valueData copy];
+  self.headersMaterialized = NO;
+}
+
+- (NSDictionary *)headers {
+  if (self.headersMaterialized || [self.deferredHeaderNameData count] == 0) {
+    return _headers ?: @{};
+  }
+
+  NSMutableDictionary *materialized =
+      [NSMutableDictionary dictionaryWithDictionary:_headers ?: @{}];
+  NSUInteger count =
+      MIN([self.deferredHeaderNameData count], [self.deferredHeaderValueData count]);
+  for (NSUInteger idx = 0; idx < count; idx++) {
+    NSString *name = ALNDeferredHeaderName(self.deferredHeaderNameData[idx]);
+    if ([name length] == 0) {
+      continue;
+    }
+    NSString *value = ALNDeferredHeaderValue(self.deferredHeaderValueData[idx]);
+    if (value == nil) {
+      continue;
+    }
+    materialized[name] = value;
+  }
+
+  _headers = [materialized copy];
+  self.headersMaterialized = YES;
+  self.deferredHeaderNameData = nil;
+  self.deferredHeaderValueData = nil;
+  return _headers ?: @{};
+}
+
+- (NSString *)headerValueForName:(NSString *)name {
+  if (![name isKindOfClass:[NSString class]] || [name length] == 0) {
+    return @"";
+  }
+
+  id direct = _headers[name];
+  if ([direct isKindOfClass:[NSString class]]) {
+    return direct;
+  }
+
+  NSString *lower = [name lowercaseString];
+  id lowered = _headers[lower];
+  if ([lowered isKindOfClass:[NSString class]]) {
+    return lowered;
+  }
+
+  if (!self.headersMaterialized && [self.deferredHeaderNameData count] > 0) {
+    const char *target = [lower UTF8String];
+    if (target != NULL && target[0] != '\0') {
+      NSUInteger count =
+          MIN([self.deferredHeaderNameData count], [self.deferredHeaderValueData count]);
+      for (NSUInteger idx = 0; idx < count; idx++) {
+        NSData *nameData = self.deferredHeaderNameData[idx];
+        if (![nameData isKindOfClass:[NSData class]]) {
+          continue;
+        }
+        if (!ALNASCIIBytesEqualLowercaseCString([nameData bytes], [nameData length], target)) {
+          continue;
+        }
+        NSString *value = ALNDeferredHeaderValue(self.deferredHeaderValueData[idx]);
+        if ([value isKindOfClass:[NSString class]]) {
+          return value;
+        }
+      }
+    }
+  }
+
+  NSDictionary *headers = [self headers];
+  id fallback = headers[name];
+  if ([fallback isKindOfClass:[NSString class]]) {
+    return fallback;
+  }
+  fallback = headers[lower];
+  if ([fallback isKindOfClass:[NSString class]]) {
+    return fallback;
+  }
+  return @"";
 }
 
 - (NSDictionary *)queryParams {
@@ -1172,7 +1423,7 @@ static ALNRequest *ALNRequestFromRawDataLLHTTP(NSData *data, NSError **error) {
   if (cached != nil) {
     return cached;
   }
-  NSDictionary *parsed = [ALNParseCookies(_headers[@"cookie"]) copy];
+  NSDictionary *parsed = [ALNParseCookies([self headerValueForName:@"cookie"]) copy];
   if (parsed == nil) {
     parsed = @{};
   }

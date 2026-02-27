@@ -216,7 +216,7 @@ Behavior:
 - in app-root watch mode, build failures are captured and rendered as development diagnostics
 - concurrent HTTP sessions are bounded by `runtimeLimits.maxConcurrentHTTPSessions` (default `256`)
 - websocket session upgrades are bounded by `runtimeLimits.maxConcurrentWebSocketSessions` (default `256`)
-- request dispatch mode is controlled by `requestDispatchMode` (`serialized` default in `production`, `concurrent` otherwise)
+- request dispatch mode is controlled by `requestDispatchMode` (`concurrent` default)
   - `serialized` mode keeps dispatch execution deterministic while still honoring HTTP keep-alive negotiation
 - HTTP session limit violations return deterministic overload diagnostics:
   - status `503 Service Unavailable`
@@ -292,7 +292,7 @@ Environment:
 - `ARLEN_MAX_QUEUED_HTTP_CONNECTIONS` (runtime HTTP worker queue depth; legacy `MOJOOBJC_MAX_QUEUED_HTTP_CONNECTIONS` also accepted)
 - `ARLEN_MAX_REALTIME_SUBSCRIBERS` (runtime global realtime subscriber cap; legacy `MOJOOBJC_MAX_REALTIME_SUBSCRIBERS` also accepted)
 - `ARLEN_MAX_REALTIME_SUBSCRIBERS_PER_CHANNEL` (runtime per-channel realtime subscriber cap; legacy `MOJOOBJC_MAX_REALTIME_SUBSCRIBERS_PER_CHANNEL` also accepted)
-- `ARLEN_REQUEST_DISPATCH_MODE` (`concurrent` or `serialized`; defaults to `serialized` in `production`, `concurrent` otherwise; legacy `MOJOOBJC_REQUEST_DISPATCH_MODE` also accepted)
+- `ARLEN_REQUEST_DISPATCH_MODE` (`concurrent` or `serialized`; defaults to `concurrent`; legacy `MOJOOBJC_REQUEST_DISPATCH_MODE` also accepted)
 - `ARLEN_JSON_BACKEND` (`yyjson` default, `foundation`/`nsjson` fallback for A/B validation; foundation fallback deprecation target: `2026-04-30`)
 - `ARLEN_HTTP_PARSER_BACKEND` (`llhttp` default when compiled in; `legacy` fallback/override)
 - `ARLEN_ENABLE_YYJSON` (compile-time toggle for app-root builds via `bin/boomhauer`; `1` default, set `0` to compile without yyjson)
@@ -346,7 +346,7 @@ Async worker environment fallbacks:
 - `ARLEN_CLUSTER_NODE_ID`
 - `ARLEN_CLUSTER_EXPECTED_NODES`
 - `ARLEN_CLUSTER_OBSERVED_NODES`
-- `ARLEN_REQUEST_DISPATCH_MODE` (`serialized` by default in production workers)
+- `ARLEN_REQUEST_DISPATCH_MODE` (`concurrent` by default in workers)
 
 Signals:
 

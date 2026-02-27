@@ -557,9 +557,9 @@ static BOOL ALNRequestIsWebSocketUpgrade(ALNRequest *request) {
   if (request == nil || ![request.method isEqualToString:@"GET"]) {
     return NO;
   }
-  NSString *upgrade = request.headers[@"upgrade"];
-  NSString *connection = request.headers[@"connection"];
-  NSString *key = request.headers[@"sec-websocket-key"];
+  NSString *upgrade = [request headerValueForName:@"upgrade"];
+  NSString *connection = [request headerValueForName:@"connection"];
+  NSString *key = [request headerValueForName:@"sec-websocket-key"];
   if (!ALNHeaderContainsToken(upgrade, @"websocket")) {
     return NO;
   }
@@ -582,7 +582,7 @@ static BOOL ALNShouldKeepAliveForRequest(ALNRequest *request, ALNResponse *respo
     return YES;
   }
 
-  NSString *requestConnection = [request.headers[@"connection"] lowercaseString];
+  NSString *requestConnection = [[request headerValueForName:@"connection"] lowercaseString];
   if (ALNHeaderContainsToken(requestConnection, @"close")) {
     return NO;
   }
@@ -1416,46 +1416,6 @@ static ALNRequest *ALNReadHTTPRequestLLHTTP(int clientFd,
   }
 
   while (1) {
-    size_t separatorLocation = SIZE_MAX;
-    BOOL separatorFound = NO;
-    BOOL metadataReady = NO;
-    ALNRequestHeadMetadata parsedMetadata;
-    memset(&parsedMetadata, 0, sizeof(parsedMetadata));
-
-    if (readState->length > 0) {
-      separatorLocation =
-          ALNFindHeaderTerminator(readState->bytes, readState->length, readState->scanOffset);
-      separatorFound = (separatorLocation != SIZE_MAX);
-      if (separatorFound) {
-        size_t headerBytes = separatorLocation + 4;
-        if (headerBytes > limits.maxHeaderBytes) {
-          if (statusCode != NULL) {
-            *statusCode = 431;
-          }
-          return nil;
-        }
-        metadataReady = ALNParseRequestHeadMetadataBytes(readState->bytes,
-                                                         headerBytes,
-                                                         limits,
-                                                         &parsedMetadata);
-        if (!metadataReady && parsedMetadata.statusCode != 0) {
-          if (statusCode != NULL) {
-            *statusCode = parsedMetadata.statusCode;
-          }
-          return nil;
-        }
-        readState->scanOffset = separatorLocation + 1;
-      } else {
-        readState->scanOffset = readState->length;
-        if (readState->length > limits.maxHeaderBytes) {
-          if (statusCode != NULL) {
-            *statusCode = 431;
-          }
-          return nil;
-        }
-      }
-    }
-
     NSUInteger consumedLength = 0;
     BOOL headersComplete = NO;
     NSInteger contentLength = 0;
@@ -1472,25 +1432,33 @@ static ALNRequest *ALNReadHTTPRequestLLHTTP(int clientFd,
                                                 contentLength:&contentLength
                                                         error:&requestError];
     if (requestError != nil) {
-      NSInteger derivedStatus = 400;
-      if (separatorFound && parsedMetadata.statusCode != 0) {
-        derivedStatus = parsedMetadata.statusCode;
-      } else if (readState->length > limits.maxHeaderBytes) {
-        derivedStatus = 431;
+      NSInteger mappedStatus = (readState->length > limits.maxHeaderBytes) ? 431 : 400;
+      size_t separatorLocation = ALNFindHeaderTerminator(readState->bytes, readState->length, 0);
+      if (separatorLocation != SIZE_MAX) {
+        ALNRequestHeadMetadata parsedMetadata;
+        memset(&parsedMetadata, 0, sizeof(parsedMetadata));
+        if (!ALNParseRequestHeadMetadataBytes(readState->bytes,
+                                              separatorLocation + 4,
+                                              limits,
+                                              &parsedMetadata) &&
+            parsedMetadata.statusCode != 0) {
+          mappedStatus = parsedMetadata.statusCode;
+        }
       }
       if (statusCode != NULL) {
-        *statusCode = derivedStatus;
+        *statusCode = mappedStatus;
       }
       return nil;
     }
 
-    if (headersComplete) {
-      if (!separatorFound) {
+    if (!headersComplete) {
+      if (readState->length > limits.maxHeaderBytes) {
         if (statusCode != NULL) {
-          *statusCode = 400;
+          *statusCode = 431;
         }
         return nil;
       }
+    } else {
       if (contentLength < 0) {
         if (statusCode != NULL) {
           *statusCode = 400;
@@ -1519,6 +1487,17 @@ static ALNRequest *ALNReadHTTPRequestLLHTTP(int clientFd,
     }
 
     if (request != nil) {
+      NSUInteger parsedBodyBytes = [request.body length];
+      NSUInteger parsedHeaderBytes = 0;
+      if (consumedLength >= parsedBodyBytes) {
+        parsedHeaderBytes = consumedLength - parsedBodyBytes;
+      }
+      if (parsedHeaderBytes > limits.maxHeaderBytes) {
+        if (statusCode != NULL) {
+          *statusCode = 431;
+        }
+        return nil;
+      }
       if ((NSUInteger)[request.body length] > limits.maxBodyBytes) {
         if (statusCode != NULL) {
           *statusCode = 413;
@@ -1642,8 +1621,8 @@ static void ALNApplyProxyMetadata(ALNRequest *request, NSDictionary *config) {
     return;
   }
 
-  NSString *forwardedFor = request.headers[@"x-forwarded-for"];
-  NSString *forwardedProto = request.headers[@"x-forwarded-proto"];
+  NSString *forwardedFor = [request headerValueForName:@"x-forwarded-for"];
+  NSString *forwardedProto = [request headerValueForName:@"x-forwarded-proto"];
 
   NSString *effectiveAddress = ALNFirstForwardedFor(forwardedFor);
   if ([effectiveAddress length] > 0) {
@@ -2445,7 +2424,7 @@ static NSString *ALNRealtimeBackpressureReasonForSubscriptionRejection(NSString 
 - (BOOL)sendWebSocketHandshakeForRequest:(ALNRequest *)request
                                 response:(ALNResponse *)response
                                 clientFd:(int)clientFd {
-  NSString *clientKey = request.headers[@"sec-websocket-key"];
+  NSString *clientKey = [request headerValueForName:@"sec-websocket-key"];
   NSString *acceptKey = ALNWebSocketAcceptKey(clientKey);
   if ([acceptKey length] == 0) {
     return NO;

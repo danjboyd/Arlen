@@ -1487,40 +1487,6 @@ static NSString *ALNISO8601Now(void) {
   return [formatted length] > 0 ? formatted : @"1970-01-01T00:00:00.000Z";
 }
 
-static NSString *ALNHeaderValue(NSDictionary *headers, NSString *name) {
-  if (![headers isKindOfClass:[NSDictionary class]] ||
-      ![name isKindOfClass:[NSString class]] ||
-      [name length] == 0) {
-    return @"";
-  }
-
-  id direct = headers[name];
-  if ([direct isKindOfClass:[NSString class]]) {
-    return direct;
-  }
-
-  NSString *lowerName = [name lowercaseString];
-  id lowered = headers[lowerName];
-  if ([lowered isKindOfClass:[NSString class]]) {
-    return lowered;
-  }
-
-  for (id key in headers) {
-    if (![key isKindOfClass:[NSString class]]) {
-      continue;
-    }
-    NSString *candidateName = [(NSString *)key lowercaseString];
-    if (![candidateName isEqualToString:lowerName]) {
-      continue;
-    }
-    id value = headers[key];
-    if ([value isKindOfClass:[NSString class]]) {
-      return value;
-    }
-  }
-  return @"";
-}
-
 static BOOL ALNIsASCIIWhitespace(unsigned char byte) {
   return byte == ' ' || byte == '\t' || byte == '\r' || byte == '\n' ||
          byte == '\f' || byte == '\v';
@@ -1743,7 +1709,8 @@ static ALNRequestTraceContext ALNBuildRequestTraceContext(ALNRequest *request,
   context.flags[1] = '1';
   context.flags[2] = '\0';
 
-  if (ALNParseTraceparentHeader(ALNHeaderValue(request.headers, @"traceparent"),
+  NSString *traceparentHeader = [request headerValueForName:@"traceparent"];
+  if (ALNParseTraceparentHeader(traceparentHeader,
                                 context.traceID,
                                 context.parentSpanID,
                                 context.flags)) {
@@ -1752,9 +1719,8 @@ static ALNRequestTraceContext ALNBuildRequestTraceContext(ALNRequest *request,
   }
 
   if (!context.hasTraceID) {
-    context.hasTraceID =
-        ALNNormalizeTraceIDCandidate(ALNHeaderValue(request.headers, @"x-trace-id"),
-                                     context.traceID);
+    context.hasTraceID = ALNNormalizeTraceIDCandidate([request headerValueForName:@"x-trace-id"],
+                                                      context.traceID);
   }
 
   if (!context.hasTraceID) {
@@ -1929,9 +1895,7 @@ static NSString *ALNExtractPathFormat(NSString *path, NSString **strippedPath) {
 static NSString *ALNRequestPreferredFormatWithoutPathExtension(ALNRequest *request,
                                                                BOOL apiOnly,
                                                                NSString *resolvedPath) {
-  NSString *accept = [request.headers[@"accept"] isKindOfClass:[NSString class]]
-                         ? [request.headers[@"accept"] lowercaseString]
-                         : @"";
+  NSString *accept = [[request headerValueForName:@"accept"] lowercaseString];
   if ([accept containsString:@"application/json"] || [accept containsString:@"text/json"]) {
     return @"json";
   }
@@ -2112,7 +2076,7 @@ static BOOL ALNRequestMethodIsReadOnly(ALNRequest *request) {
 }
 
 static BOOL ALNHeaderPrefersJSON(ALNRequest *request) {
-  NSString *accept = [ALNHeaderValue(request.headers, @"accept") lowercaseString];
+  NSString *accept = [[request headerValueForName:@"accept"] lowercaseString];
   return [accept containsString:@"application/json"] ||
          [accept containsString:@"text/json"];
 }

@@ -186,7 +186,7 @@
   XCTAssertEqual((NSInteger)0, [runtimeLimits[@"maxRealtimeChannelSubscribers"] integerValue]);
 }
 
-- (void)testProductionDefaultsToSerializedRequestDispatchMode {
+- (void)testProductionDefaultsToConcurrentRequestDispatchMode {
   NSString *root = [self prepareConfigTree];
   XCTAssertNotNil(root);
 
@@ -195,7 +195,7 @@
                                          environment:@"production"
                                                error:&error];
   XCTAssertNil(error);
-  XCTAssertEqualObjects(@"serialized", config[@"requestDispatchMode"]);
+  XCTAssertEqualObjects(@"concurrent", config[@"requestDispatchMode"]);
 }
 
 - (void)testClusterEmitHeadersDefaultsToEnabledWhenClusterModeIsEnabled {

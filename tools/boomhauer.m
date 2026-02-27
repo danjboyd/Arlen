@@ -3,6 +3,7 @@
 #import <stdio.h>
 #import <stdlib.h>
 #import <string.h>
+#import <strings.h>
 
 #import "ArlenServer.h"
 #import "ALNJSONSerialization.h"
@@ -13,6 +14,30 @@ static NSString *EnvString(const char *name) {
     return nil;
   }
   return [NSString stringWithUTF8String:raw];
+}
+
+static BOOL EnvFlagEnabled(const char *name) {
+  const char *raw = getenv(name);
+  if (raw == NULL || raw[0] == '\0') {
+    return NO;
+  }
+  if (strcmp(raw, "0") == 0) {
+    return NO;
+  }
+  if (strcasecmp(raw, "false") == 0 ||
+      strcasecmp(raw, "off") == 0 ||
+      strcasecmp(raw, "no") == 0) {
+    return NO;
+  }
+  return YES;
+}
+
+static BOOL BenchmarkProfileEnabled(void) {
+  return EnvFlagEnabled("ARLEN_BENCHMARK_PROFILE");
+}
+
+static BOOL BenchmarkMinimalRoutesEnabled(void) {
+  return EnvFlagEnabled("ARLEN_BENCH_MINIMAL_ROUTES") || BenchmarkProfileEnabled();
 }
 
 static NSString *TrimmedStringValue(id value) {
@@ -285,6 +310,30 @@ static NSDictionary *BenchmarkDBParseRequestObject(ALNContext *ctx, NSError **er
                                                 error.localizedDescription ?: @"unknown"]];
   }
   return nil;
+}
+
+- (id)benchStaticHTML:(ALNContext *)ctx {
+  (void)ctx;
+  static NSString *const kStaticHTML =
+      @"<h1>Arlen Static HTML</h1>\n\n"
+      "<p class=\"template-note\">template:static-ok</p>\n"
+      "<nav>\n"
+      "  <a href=\"/\">Home</a>\n"
+      "  <a href=\"/about\">About</a>\n"
+      "</nav>\n\n"
+      "<ul>\n\n"
+      "  <li>render pipeline ok</li>\n\n"
+      "  <li>request path: /bench/static-html</li>\n\n"
+      "  <li>unsafe sample: &lt;unsafe&gt;</li>\n\n"
+      "</ul>\n";
+  [self.context.response setHeader:@"Content-Type" value:@"text/html; charset=utf-8"];
+  [self.context.response setTextBody:kStaticHTML];
+  self.context.response.committed = YES;
+  return nil;
+}
+
+- (id)benchTemplate:(ALNContext *)ctx {
+  return [self index:ctx];
 }
 
 - (id)about:(ALNContext *)ctx {
@@ -1110,6 +1159,8 @@ static ALNApplication *BuildApplication(NSString *environment) {
                                                 locale:@"es"
                                                  error:NULL];
 
+  BOOL minimalBenchmarkRoutes = BenchmarkMinimalRoutesEnabled();
+
   [app registerRouteMethod:@"GET"
                       path:@"/"
                       name:@"home"
@@ -1120,6 +1171,16 @@ static ALNApplication *BuildApplication(NSString *environment) {
                       name:@"about"
            controllerClass:[HomeController class]
                     action:@"about"];
+  [app registerRouteMethod:@"GET"
+                      path:@"/bench/static-html"
+                      name:@"bench_static_html"
+           controllerClass:[HomeController class]
+                    action:@"benchStaticHTML"];
+  [app registerRouteMethod:@"GET"
+                      path:@"/bench/template"
+                      name:@"bench_template"
+           controllerClass:[HomeController class]
+                    action:@"benchTemplate"];
   [app registerRouteMethod:@"GET"
                       path:@"/api/status"
                       name:@"api_status"
@@ -1145,6 +1206,7 @@ static ALNApplication *BuildApplication(NSString *environment) {
                       name:@"api_blob"
            controllerClass:[ApiController class]
                     action:@"blob"];
+  if (!minimalBenchmarkRoutes) {
   [app registerRouteMethod:@"GET"
                       path:@"/api/db/items"
                       name:@"api_db_items_read"
@@ -1217,6 +1279,7 @@ static ALNApplication *BuildApplication(NSString *environment) {
                    controllerClass:[EmbeddedController class]
                             action:@"apiStatus"];
   (void)[app mountApplication:embeddedApp atPrefix:@"/embedded"];
+  }
   return app;
 }
 
@@ -1290,6 +1353,10 @@ int main(int argc, const char *argv[]) {
         fprintf(stderr, "Unknown argument: %s\n", argv[idx]);
         return 2;
       }
+    }
+
+    if (BenchmarkProfileEnabled() && getenv("ARLEN_METRICS_ENABLED") == NULL) {
+      setenv("ARLEN_METRICS_ENABLED", "0", 0);
     }
 
     BOOL buildErrorMode = ([EnvString("ARLEN_BOOMHAUER_BUILD_ERROR_FILE") length] > 0);

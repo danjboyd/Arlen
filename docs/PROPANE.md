@@ -36,15 +36,16 @@ Runtime socket controls:
 listenBacklog = 128;
 connectionTimeoutSeconds = 30;
 enableReusePort = NO;
-requestDispatchMode = "serialized";
+requestDispatchMode = "concurrent";
 runtimeLimits = {
   maxConcurrentHTTPSessions = 256;
   maxConcurrentWebSocketSessions = 256;
 };
 ```
 
-`requestDispatchMode = "serialized"` keeps the stable serialized execution path by default while
-still honoring HTTP keep-alive negotiation.
+`requestDispatchMode` defaults to `"concurrent"`.
+Set `requestDispatchMode = "serialized"` to keep deterministic serialized execution while still
+honoring HTTP keep-alive negotiation.
 
 When `workerCount > 1`, `propane` enables `SO_REUSEPORT` automatically for worker binds.
 When HTTP session limit is exceeded, workers return deterministic overload diagnostics
@@ -105,7 +106,7 @@ Environment fallbacks:
 - `ARLEN_CLUSTER_EXPECTED_NODES`
 - `ARLEN_MAX_HTTP_SESSIONS`
 - `ARLEN_MAX_WEBSOCKET_SESSIONS`
-- `ARLEN_REQUEST_DISPATCH_MODE` (`serialized` by default in production; set `concurrent` to opt in)
+- `ARLEN_REQUEST_DISPATCH_MODE` (`concurrent` by default; set `serialized` to force deterministic serialized dispatch)
 
 `propane` exports resolved cluster values to worker processes, so CLI overrides are consistently applied at runtime.
 

@@ -38,7 +38,7 @@ Externally this presents as intermittent or sustained `502 Bad Gateway` from ngi
 - Final fix behavior in serialized mode:
   - force one request per HTTP connection (`Connection: close`)
   - disable detached per-connection background thread handling
-  - preserve explicit concurrent behavior as opt-in (`requestDispatchMode=concurrent`)
+  - preserve explicit serialized behavior as opt-in (`requestDispatchMode=serialized`)
 - Regression coverage:
   - `HTTPIntegrationTests::testProductionSerializedDispatchClosesHTTPConnections`
   - existing production serialization/concurrent-override tests remained passing
@@ -53,7 +53,7 @@ Externally this presents as intermittent or sustained `502 Bad Gateway` from ngi
 
 ### Post-resolution watchpoints
 
-1. Keep serialized-mode connection lifecycle deterministic in production defaults.
+1. Keep serialized-mode connection lifecycle deterministic when explicitly configured.
 2. Require integration coverage for any future changes to HTTP connection persistence + worker dispatch interaction.
 3. Re-run ASAN/UBSAN + endpoint traffic smoke during future runtime concurrency refactors.
 4. Keep `tools/ci/run_runtime_concurrency_gate.sh` in pre-merge validation for HTTP/runtime lifecycle changes.

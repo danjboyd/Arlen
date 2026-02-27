@@ -798,8 +798,7 @@ static NSDictionary *ALNSecurityProfileDefaults(NSString *profileName) {
   }
   if (![config[@"requestDispatchMode"] isKindOfClass:[NSString class]] ||
       [config[@"requestDispatchMode"] length] == 0) {
-    config[@"requestDispatchMode"] =
-        [env isEqualToString:@"production"] ? @"serialized" : @"concurrent";
+    config[@"requestDispatchMode"] = @"concurrent";
   }
 
   NSMutableDictionary *finalAccessories =
@@ -1062,8 +1061,7 @@ static NSDictionary *ALNSecurityProfileDefaults(NSString *profileName) {
   NSString *resolvedRequestDispatchMode =
       ALNNormalizedRequestDispatchMode(config[@"requestDispatchMode"]);
   if ([resolvedRequestDispatchMode length] == 0) {
-    resolvedRequestDispatchMode =
-        [env isEqualToString:@"production"] ? @"serialized" : @"concurrent";
+    resolvedRequestDispatchMode = @"concurrent";
   }
   config[@"requestDispatchMode"] = resolvedRequestDispatchMode;
 

@@ -11,7 +11,7 @@ bash ./tools/ci/run_runtime_concurrency_gate.sh
 The gate builds `boomhauer` and runs `tools/ci/runtime_concurrency_probe.py` against:
 
 1. `concurrent` dispatch mode
-2. `serialized` dispatch mode (production default)
+2. `serialized` dispatch mode
 
 Each mode validates:
 

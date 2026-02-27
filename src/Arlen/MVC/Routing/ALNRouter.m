@@ -4,6 +4,7 @@
 
 @property(nonatomic, strong) NSMutableArray *routes;
 @property(nonatomic, strong) NSMutableDictionary *routesByMethod;
+@property(nonatomic, strong) NSMutableDictionary *staticRoutesByMethodAndPath;
 @property(nonatomic, strong) NSMutableArray *routeGroups;
 @property(nonatomic, assign) NSUInteger routeCounter;
 @property(nonatomic, assign, readwrite) BOOL hasFormatConstrainedRoutes;
@@ -69,6 +70,17 @@ static NSString *ALNNormalizedMethodName(NSString *method) {
   return [[method uppercaseString] copy];
 }
 
+static NSString *ALNNormalizedPathForStaticLookup(NSString *path) {
+  if (![path isKindOfClass:[NSString class]] || [path length] == 0) {
+    return @"/";
+  }
+  NSString *normalized = [path copy];
+  while ([normalized length] > 1 && [normalized hasSuffix:@"/"]) {
+    normalized = [normalized substringToIndex:[normalized length] - 1];
+  }
+  return ([normalized length] > 0) ? normalized : @"/";
+}
+
 static BOOL ALNRouteShouldReplace(ALNRoute *candidate, ALNRoute *bestRoute) {
   if (bestRoute == nil) {
     return YES;
@@ -125,11 +137,52 @@ static ALNRouteMatch *ALNBestRouteMatchInCandidates(NSArray *candidates,
   return [[ALNRouteMatch alloc] initWithRoute:bestRoute params:bestParams];
 }
 
+static void ALNIndexStaticRoute(NSMutableDictionary *index, ALNRoute *route) {
+  if (![index isKindOfClass:[NSMutableDictionary class]] ||
+      ![route isKindOfClass:[ALNRoute class]] ||
+      route.kind != ALNRouteKindStatic) {
+    return;
+  }
+  NSString *methodKey = ALNNormalizedMethodName(route.method);
+  NSString *pathKey = ALNNormalizedPathForStaticLookup(route.pathPattern);
+  NSMutableDictionary *methodBucket =
+      [index[methodKey] isKindOfClass:[NSMutableDictionary class]]
+          ? index[methodKey]
+          : [NSMutableDictionary dictionary];
+  NSMutableArray *pathBucket =
+      [methodBucket[pathKey] isKindOfClass:[NSMutableArray class]]
+          ? methodBucket[pathKey]
+          : [NSMutableArray array];
+  [pathBucket addObject:route];
+  methodBucket[pathKey] = pathBucket;
+  index[methodKey] = methodBucket;
+}
+
+static NSArray *ALNStaticCandidatesForPath(NSDictionary *index,
+                                           NSString *method,
+                                           NSString *path) {
+  if (![index isKindOfClass:[NSDictionary class]]) {
+    return @[];
+  }
+  NSString *methodKey = ALNNormalizedMethodName(method);
+  NSString *pathKey = ALNNormalizedPathForStaticLookup(path);
+  NSDictionary *methodBucket =
+      [index[methodKey] isKindOfClass:[NSDictionary class]]
+          ? index[methodKey]
+          : @{};
+  NSArray *candidates =
+      [methodBucket[pathKey] isKindOfClass:[NSArray class]]
+          ? methodBucket[pathKey]
+          : @[];
+  return candidates;
+}
+
 - (instancetype)init {
   self = [super init];
   if (self) {
     _routes = [NSMutableArray array];
     _routesByMethod = [NSMutableDictionary dictionary];
+    _staticRoutesByMethodAndPath = [NSMutableDictionary dictionary];
     _routeGroups = [NSMutableArray array];
     _routeCounter = 0;
     _hasFormatConstrainedRoutes = NO;
@@ -200,6 +253,7 @@ static ALNRouteMatch *ALNBestRouteMatchInCandidates(NSArray *candidates,
           : [NSMutableArray array];
   [bucket addObject:route];
   self.routesByMethod[bucketKey] = bucket;
+  ALNIndexStaticRoute(self.staticRoutesByMethodAndPath, route);
   return route;
 }
 
@@ -211,8 +265,25 @@ static ALNRouteMatch *ALNBestRouteMatchInCandidates(NSArray *candidates,
                           path:(NSString *)path
                         format:(NSString *)format {
   NSString *requestMethod = ALNNormalizedMethodName(method);
-  NSString *normalizedPath =
-      ([path isKindOfClass:[NSString class]] && [path length] > 0) ? path : @"/";
+  NSString *normalizedPath = ALNNormalizedPathForStaticLookup(path);
+
+  NSArray *staticMethodCandidates =
+      ALNStaticCandidatesForPath(self.staticRoutesByMethodAndPath, requestMethod, normalizedPath);
+  ALNRouteMatch *staticMethodMatch =
+      ALNBestRouteMatchInCandidates(staticMethodCandidates, normalizedPath, format);
+  if (staticMethodMatch != nil) {
+    return staticMethodMatch;
+  }
+  if (![requestMethod isEqualToString:@"ANY"]) {
+    NSArray *staticAnyCandidates =
+        ALNStaticCandidatesForPath(self.staticRoutesByMethodAndPath, @"ANY", normalizedPath);
+    ALNRouteMatch *staticAnyMatch =
+        ALNBestRouteMatchInCandidates(staticAnyCandidates, normalizedPath, format);
+    if (staticAnyMatch != nil) {
+      return staticAnyMatch;
+    }
+  }
+
   NSArray *methodCandidates =
       [self.routesByMethod[requestMethod] isKindOfClass:[NSArray class]]
           ? self.routesByMethod[requestMethod]
