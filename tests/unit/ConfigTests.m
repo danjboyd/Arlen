@@ -116,6 +116,7 @@
   XCTAssertEqualObjects(@(NO), csrf[@"enabled"]);
   XCTAssertEqualObjects(@"x-csrf-token", csrf[@"headerName"]);
   XCTAssertEqualObjects(@"csrf_token", csrf[@"queryParamName"]);
+  XCTAssertEqualObjects(@(NO), csrf[@"allowQueryParamFallback"]);
 
   NSDictionary *rateLimit = config[@"rateLimit"];
   XCTAssertEqualObjects(@(NO), rateLimit[@"enabled"]);
@@ -252,6 +253,7 @@
   setenv("ARLEN_CSRF_ENABLED", "1", 1);
   setenv("ARLEN_CSRF_HEADER_NAME", "x-my-csrf", 1);
   setenv("ARLEN_CSRF_QUERY_PARAM_NAME", "_csrf", 1);
+  setenv("ARLEN_CSRF_ALLOW_QUERY_FALLBACK", "1", 1);
   setenv("ARLEN_RATE_LIMIT_ENABLED", "1", 1);
   setenv("ARLEN_RATE_LIMIT_REQUESTS", "42", 1);
   setenv("ARLEN_RATE_LIMIT_WINDOW_SECONDS", "7", 1);
@@ -321,6 +323,7 @@
   unsetenv("ARLEN_CSRF_ENABLED");
   unsetenv("ARLEN_CSRF_HEADER_NAME");
   unsetenv("ARLEN_CSRF_QUERY_PARAM_NAME");
+  unsetenv("ARLEN_CSRF_ALLOW_QUERY_FALLBACK");
   unsetenv("ARLEN_RATE_LIMIT_ENABLED");
   unsetenv("ARLEN_RATE_LIMIT_REQUESTS");
   unsetenv("ARLEN_RATE_LIMIT_WINDOW_SECONDS");
@@ -398,6 +401,7 @@
   XCTAssertEqualObjects(@(YES), csrf[@"enabled"]);
   XCTAssertEqualObjects(@"x-my-csrf", csrf[@"headerName"]);
   XCTAssertEqualObjects(@"_csrf", csrf[@"queryParamName"]);
+  XCTAssertEqualObjects(@(YES), csrf[@"allowQueryParamFallback"]);
 
   NSDictionary *rateLimit = config[@"rateLimit"];
   XCTAssertEqualObjects(@(YES), rateLimit[@"enabled"]);

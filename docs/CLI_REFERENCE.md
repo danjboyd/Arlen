@@ -238,7 +238,11 @@ Behavior:
   - status `503 Service Unavailable`
   - header `Retry-After: 1`
   - header `X-Arlen-Backpressure-Reason: realtime_total_subscriber_limit`
-- security misconfiguration now fails startup deterministically (for example missing `session.secret` when `session.enabled=YES`)
+- security misconfiguration now fails startup deterministically:
+  - missing `session.secret` when `session.enabled=YES`
+  - weak `session.secret` values (minimum 32 characters required when `session.enabled=YES`)
+  - `csrf.enabled=YES` without session middleware
+  - query-string CSRF fallback is disabled by default; opt in with `ARLEN_CSRF_ALLOW_QUERY_FALLBACK=1`
 - route compile validation now fails startup deterministically when enabled (`routing.compileOnStart=YES`):
   - invalid action/guard signatures
   - invalid route schema transformer/type readiness

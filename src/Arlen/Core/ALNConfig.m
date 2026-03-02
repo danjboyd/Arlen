@@ -335,6 +335,9 @@ static NSDictionary *ALNSecurityProfileDefaults(NSString *profileName) {
       ALNEnvValueCompat("ARLEN_CSRF_HEADER_NAME", "MOJOOBJC_CSRF_HEADER_NAME");
   NSString *csrfQueryParamName =
       ALNEnvValueCompat("ARLEN_CSRF_QUERY_PARAM_NAME", "MOJOOBJC_CSRF_QUERY_PARAM_NAME");
+  NSString *csrfAllowQueryParamFallback =
+      ALNEnvValueCompat("ARLEN_CSRF_ALLOW_QUERY_FALLBACK",
+                        "MOJOOBJC_CSRF_ALLOW_QUERY_FALLBACK");
 
   NSString *rateLimitEnabled =
       ALNEnvValueCompat("ARLEN_RATE_LIMIT_ENABLED", "MOJOOBJC_RATE_LIMIT_ENABLED");
@@ -538,6 +541,10 @@ static NSDictionary *ALNSecurityProfileDefaults(NSString *profileName) {
   }
   if ([csrfQueryParamName length] > 0) {
     csrf[@"queryParamName"] = csrfQueryParamName;
+  }
+  NSNumber *csrfAllowQueryParamFallbackValue = ALNParseBooleanString(csrfAllowQueryParamFallback);
+  if (csrfAllowQueryParamFallbackValue != nil) {
+    csrf[@"allowQueryParamFallback"] = csrfAllowQueryParamFallbackValue;
   }
   config[@"csrf"] = csrf;
 
@@ -858,6 +865,9 @@ static NSDictionary *ALNSecurityProfileDefaults(NSString *profileName) {
   if (finalCSRF[@"queryParamName"] == nil) {
     finalCSRF[@"queryParamName"] = @"csrf_token";
   }
+  if (finalCSRF[@"allowQueryParamFallback"] == nil) {
+    finalCSRF[@"allowQueryParamFallback"] = @(NO);
+  }
   config[@"csrf"] = finalCSRF;
 
   NSMutableDictionary *finalRateLimit =
@@ -1123,6 +1133,8 @@ static NSDictionary *ALNSecurityProfileDefaults(NSString *profileName) {
   if ([finalCSRF[@"headerName"] isKindOfClass:[NSString class]]) {
     finalCSRF[@"headerName"] = [finalCSRF[@"headerName"] lowercaseString];
   }
+  finalCSRF[@"allowQueryParamFallback"] =
+      @([finalCSRF[@"allowQueryParamFallback"] boolValue]);
   config[@"csrf"] = finalCSRF;
 
   finalRateLimit[@"enabled"] = @([finalRateLimit[@"enabled"] boolValue]);

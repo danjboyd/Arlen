@@ -1,7 +1,7 @@
 # Arlen Phase 2 + Phase 3 Roadmap Index
 
-Status: Active (Phase 2A-2D complete; Phase 3A-3H complete; Phase 4A-4E complete; Phase 5A-5E complete; Phase 7A/7B/7C/7D/7E/7F/7G/7H initial slices implemented; Phase 7 follow-on active; Phase 8A complete; Phase 8B complete; Phase 9A/9B/9C/9D/9E/9F/9G/9H/9I/9J complete; Phase 10 complete with 10A-10M delivered)  
-Last updated: 2026-02-26
+Status: Active (Phase 2A-2D complete; Phase 3A-3H complete; Phase 4A-4E complete; Phase 5A-5E complete; Phase 7A/7B/7C/7D/7E/7F/7G/7H initial slices implemented; Phase 7 follow-on active; Phase 8A complete; Phase 8B complete; Phase 9A/9B/9C/9D/9E/9F/9G/9H/9I/9J complete; Phase 10 complete with 10A-10M delivered; Phase 11 planned)  
+Last updated: 2026-03-02
 
 This index points to the current roadmap documents:
 
@@ -12,6 +12,8 @@ This index points to the current roadmap documents:
 - `docs/PHASE7_ROADMAP.md`
 - `docs/PHASE8_ROADMAP.md`
 - `docs/PHASE9_ROADMAP.md`
+- `docs/PHASE10_ROADMAP.md`
+- `docs/PHASE11_ROADMAP.md`
 - `docs/FEATURE_PARITY_MATRIX.md`
 
 ## Summary
@@ -140,6 +142,12 @@ Phase 10 execution is tracked in `docs/PHASE10_ROADMAP.md` (complete; 10A/10B/10
 - yyjson-backed JSON serialization migration with parity-focused testing before cutover
 - runtime + CLI/tooling JSON call-site migration behind a deterministic backend switch
 - release confidence gates for JSON behavior equivalence and performance deltas
+
+Phase 11 execution/planning is defined in `docs/PHASE11_ROADMAP.md`, focused on:
+
+- security and protocol-correctness hardening on session/header/websocket/static/attachment trust boundaries
+- OpenBSD-style correctness tightening for hostile-input handling and deterministic rejection behavior
+- expanded second-pass verification plan covering fuzzing, sanitizer matrix growth, and live adversarial traffic probes
 
 Scope guardrails remain unchanged:
 - admin/backoffice and full account-product surfaces remain outside Arlen core and are expected to ship as optional modules/products.

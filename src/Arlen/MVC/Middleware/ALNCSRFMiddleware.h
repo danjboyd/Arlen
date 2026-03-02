@@ -12,6 +12,10 @@ NS_ASSUME_NONNULL_BEGIN
 - (instancetype)initWithHeaderName:(nullable NSString *)headerName
                     queryParamName:(nullable NSString *)queryParamName;
 
+- (instancetype)initWithHeaderName:(nullable NSString *)headerName
+                    queryParamName:(nullable NSString *)queryParamName
+         allowQueryParamFallback:(BOOL)allowQueryParamFallback;
+
 @end
 
 NS_ASSUME_NONNULL_END

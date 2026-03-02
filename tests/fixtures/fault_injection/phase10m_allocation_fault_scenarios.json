@@ -24,7 +24,7 @@
     {
       "id": "alloc_parser_headername_malloc_once",
       "seam": "allocation_parser_path",
-      "description": "Inject one parser header-name malloc ENOMEM and verify 400 fault path plus healthy recovery"
+      "description": "Inject one parser header-name malloc ENOMEM and verify graceful 200/400 handling plus healthy recovery"
     },
     {
       "id": "alloc_response_serialize_once",

@@ -477,7 +477,8 @@
     NSString *releaseBuild = [self
         runShellCapture:[NSString stringWithFormat:
                                       @"%s/tools/deploy/build_release.sh --app-root %s "
-                                       "--framework-root %s --releases-dir %s --release-id frontend-1",
+                                       "--framework-root %s --releases-dir %s --release-id frontend-1 "
+                                       "--allow-missing-certification",
                                       [repoRoot UTF8String], [appA UTF8String], [repoRoot UTF8String],
                                       [releasesDir UTF8String]]
                exitCode:&code];
@@ -590,7 +591,7 @@
         [self runShellCapture:[NSString stringWithFormat:
                                             @"%s/tools/deploy/build_release.sh --app-root %s "
                                              "--framework-root %s --releases-dir %s --release-id agent-dx-1 "
-                                             "--dry-run --json",
+                                             "--allow-missing-certification --dry-run --json",
                                             [repoRoot UTF8String], [appRoot UTF8String],
                                             [repoRoot UTF8String],
                                             [[workRoot stringByAppendingPathComponent:@"releases"] UTF8String]]

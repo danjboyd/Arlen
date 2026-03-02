@@ -131,6 +131,12 @@
   return @"ignored";
 }
 
+- (id)redirectUnsafe:(ALNContext *)ctx {
+  NSString *location = [ctx queryValueForName:@"to"];
+  [self redirectTo:location status:302];
+  return nil;
+}
+
 @end
 
 @interface AppInvalidActionController : ALNController
@@ -287,6 +293,11 @@
                       name:@"binary_rendered"
            controllerClass:[AppJSONController class]
                     action:@"binaryRendered"];
+  [app registerRouteMethod:@"GET"
+                      path:@"/redir"
+                      name:@"redirect_unsafe"
+           controllerClass:[AppJSONController class]
+                    action:@"redirectUnsafe"];
 
   if (useHalting) {
     [app addMiddleware:[[AppHaltingMiddleware alloc] init]];
@@ -425,6 +436,19 @@
                                          encoding:NSUTF8StringEncoding];
   XCTAssertTrue([body containsString:@"\"explicit\""]);
   XCTAssertFalse([body containsString:@"ignored"]);
+}
+
+- (void)testRedirectRejectsHeaderInjectionInLocation {
+  ALNApplication *app = [self buildAppWithHaltingMiddleware:NO];
+  ALNResponse *response =
+      [app dispatchRequest:[self requestForPath:@"/redir"
+                                    queryString:@"to=%2Fsafe%0D%0AX-Injected%3A%20true"
+                                        headers:@{}]];
+  XCTAssertEqual((NSInteger)302, response.statusCode);
+  XCTAssertEqualObjects(@"/", [response headerForName:@"Location"]);
+  NSString *serialized =
+      [[NSString alloc] initWithData:[response serializedHeaderData] encoding:NSUTF8StringEncoding];
+  XCTAssertFalse([serialized containsString:@"X-Injected: true"]);
 }
 
 - (void)testMiddlewareCanShortCircuitRequest {
@@ -1445,6 +1469,26 @@
   XCTAssertTrue([startError.localizedDescription containsString:@"csrf.enabled requires session.enabled"]);
 }
 
+- (void)testStartFailsFastWhenSessionSecretIsWeak {
+  ALNApplication *app = [[ALNApplication alloc] initWithConfig:@{
+    @"environment" : @"test",
+    @"logFormat" : @"json",
+    @"session" : @{
+      @"enabled" : @(YES),
+      @"secret" : @"short-secret",
+    },
+  }];
+
+  NSError *startError = nil;
+  BOOL started = [app startWithError:&startError];
+  XCTAssertFalse(started);
+  XCTAssertNotNil(startError);
+  XCTAssertEqualObjects(@"Arlen.Application.Error", startError.domain);
+  XCTAssertEqual((NSInteger)337, startError.code);
+  XCTAssertTrue([startError.localizedDescription
+      containsString:@"session.secret must be at least 32 characters"]);
+}
+
 - (void)testStartFailsFastWhenAuthEnabledWithoutBearerSecret {
   ALNApplication *app = [[ALNApplication alloc] initWithConfig:@{
     @"environment" : @"test",
@@ -1471,7 +1515,7 @@
     @"securityProfile" : @"strict",
     @"session" : @{
       @"enabled" : @(YES),
-      @"secret" : @"strict-profile-secret",
+      @"secret" : @"strict-profile-secret-0123456789abcdef",
     },
     @"csrf" : @{
       @"enabled" : @(YES),

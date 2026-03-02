@@ -18,10 +18,54 @@ static BOOL ALNIsSafeMethod(NSString *method) {
          [upper isEqualToString:@"OPTIONS"] || [upper isEqualToString:@"TRACE"];
 }
 
+static NSString *ALNURLFormDecodedComponent(NSString *component) {
+  if (![component isKindOfClass:[NSString class]] || [component length] == 0) {
+    return @"";
+  }
+  NSString *plusDecoded = [component stringByReplacingOccurrencesOfString:@"+" withString:@" "];
+  NSString *percentDecoded = [plusDecoded stringByRemovingPercentEncoding];
+  return [percentDecoded isKindOfClass:[NSString class]] ? percentDecoded : plusDecoded;
+}
+
+static NSString *ALNCSRFTokenFromFormBody(ALNRequest *request, NSString *queryParamName) {
+  if (request == nil || ![queryParamName isKindOfClass:[NSString class]] ||
+      [queryParamName length] == 0 || [request.body length] == 0) {
+    return nil;
+  }
+  NSString *contentType = [[request headerValueForName:@"content-type"] lowercaseString];
+  if (![contentType containsString:@"application/x-www-form-urlencoded"]) {
+    return nil;
+  }
+  NSString *bodyString = [[NSString alloc] initWithData:request.body encoding:NSUTF8StringEncoding];
+  if (![bodyString isKindOfClass:[NSString class]] || [bodyString length] == 0) {
+    return nil;
+  }
+  NSArray *pairs = [bodyString componentsSeparatedByString:@"&"];
+  for (NSString *pair in pairs) {
+    if (![pair isKindOfClass:[NSString class]] || [pair length] == 0) {
+      continue;
+    }
+    NSRange equalsRange = [pair rangeOfString:@"="];
+    NSString *rawName = (equalsRange.location == NSNotFound) ? pair : [pair substringToIndex:equalsRange.location];
+    NSString *rawValue =
+        (equalsRange.location == NSNotFound) ? @"" : [pair substringFromIndex:(equalsRange.location + 1)];
+    NSString *name = ALNURLFormDecodedComponent(rawName);
+    if (![name isEqualToString:queryParamName]) {
+      continue;
+    }
+    NSString *value = ALNURLFormDecodedComponent(rawValue);
+    if ([value length] > 0) {
+      return value;
+    }
+  }
+  return nil;
+}
+
 @interface ALNCSRFMiddleware ()
 
 @property(nonatomic, copy) NSString *headerName;
 @property(nonatomic, copy) NSString *queryParamName;
+@property(nonatomic, assign) BOOL allowQueryParamFallback;
 
 @end
 
@@ -29,6 +73,14 @@ static BOOL ALNIsSafeMethod(NSString *method) {
 
 - (instancetype)initWithHeaderName:(NSString *)headerName
                     queryParamName:(NSString *)queryParamName {
+  return [self initWithHeaderName:headerName
+                   queryParamName:queryParamName
+        allowQueryParamFallback:NO];
+}
+
+- (instancetype)initWithHeaderName:(NSString *)headerName
+                    queryParamName:(NSString *)queryParamName
+         allowQueryParamFallback:(BOOL)allowQueryParamFallback {
   self = [super init];
   if (self) {
     NSString *resolvedHeader = [[headerName lowercaseString] copy];
@@ -41,6 +93,7 @@ static BOOL ALNIsSafeMethod(NSString *method) {
     if ([_queryParamName length] == 0) {
       _queryParamName = @"csrf_token";
     }
+    _allowQueryParamFallback = allowQueryParamFallback;
   }
   return self;
 }
@@ -61,9 +114,14 @@ static BOOL ALNIsSafeMethod(NSString *method) {
     return YES;
   }
 
-  NSString *provided = context.request.headers[self.headerName];
+  NSString *provided = [context.request headerValueForName:self.headerName];
   if ([provided length] == 0) {
-    provided = context.request.queryParams[self.queryParamName];
+    provided = ALNCSRFTokenFromFormBody(context.request, self.queryParamName);
+  }
+  if ([provided length] == 0) {
+    if (self.allowQueryParamFallback) {
+      provided = context.request.queryParams[self.queryParamName];
+    }
   }
 
   if ([provided isKindOfClass:[NSString class]] && [provided isEqualToString:token]) {

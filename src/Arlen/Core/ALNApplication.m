@@ -938,6 +938,10 @@ static NSString *ALNTrimmedStringConfigValue(id value) {
   return [(NSString *)value stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
 }
 
+static BOOL ALNSessionSecretMeetsMinimumStrength(NSString *secret) {
+  return [secret length] >= 32;
+}
+
 static NSError *ALNSecurityConfigValidationError(NSInteger code,
                                                  NSString *message,
                                                  NSString *configKey,
@@ -971,6 +975,14 @@ static NSError *ALNValidateSecurityConfiguration(NSDictionary *config) {
         @"Invalid security configuration: session.enabled requires session.secret",
         @"session.secret",
         @"missing_required_secret",
+        securityProfile);
+  }
+  if (sessionEnabled && !ALNSessionSecretMeetsMinimumStrength(sessionSecret)) {
+    return ALNSecurityConfigValidationError(
+        337,
+        @"Invalid security configuration: session.secret must be at least 32 characters when session.enabled is YES",
+        @"session.secret",
+        @"weak_secret",
         securityProfile);
   }
 
@@ -3187,11 +3199,16 @@ static void ALNFinalizeResponse(ALNApplication *application,
   BOOL sessionEnabled = ALNBoolConfigValue(session[@"enabled"], NO);
   BOOL sessionMiddlewareActive = NO;
   if (sessionEnabled) {
-    NSString *secret = ALNStringConfigValue(session[@"secret"], nil);
+    NSString *secret = ALNTrimmedStringConfigValue(session[@"secret"]);
     if ([secret length] == 0) {
       [self.logger warn:@"session middleware disabled"
                  fields:@{
                    @"reason" : @"missing session.secret",
+                 }];
+    } else if (!ALNSessionSecretMeetsMinimumStrength(secret)) {
+      [self.logger warn:@"session middleware disabled"
+                 fields:@{
+                   @"reason" : @"session.secret must be at least 32 characters",
                  }];
     } else {
       NSString *cookieName = ALNStringConfigValue(session[@"cookieName"], @"arlen_session");
@@ -3219,8 +3236,11 @@ static void ALNFinalizeResponse(ALNApplication *application,
     } else {
       NSString *headerName = ALNStringConfigValue(csrf[@"headerName"], @"x-csrf-token");
       NSString *queryParam = ALNStringConfigValue(csrf[@"queryParamName"], @"csrf_token");
+      BOOL allowQueryParamFallback =
+          ALNBoolConfigValue(csrf[@"allowQueryParamFallback"], NO);
       [self addMiddleware:[[ALNCSRFMiddleware alloc] initWithHeaderName:headerName
-                                                         queryParamName:queryParam]];
+                                                         queryParamName:queryParam
+                                              allowQueryParamFallback:allowQueryParamFallback]];
     }
   }
 

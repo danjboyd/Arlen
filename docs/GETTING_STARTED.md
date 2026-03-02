@@ -203,6 +203,7 @@ ARLEN_SECURITY_PROFILE=strict ./bin/boomhauer
 ```
 
 `strict` profile requires valid security secrets/config; startup fails fast if required values are missing.
+For session middleware, `session.secret` must be at least 32 characters when `session.enabled=YES`.
 
 Strict readiness startup gating override:
 
@@ -511,7 +512,9 @@ Framework/app runtime:
 - `ARLEN_DB_ADAPTER`
 - `ARLEN_DB_POOL_SIZE`
 - `ARLEN_SESSION_ENABLED`
+- `ARLEN_SESSION_SECRET`
 - `ARLEN_CSRF_ENABLED`
+- `ARLEN_CSRF_ALLOW_QUERY_FALLBACK` (default `0`; unsafe-method query token fallback is opt-in)
 - `ARLEN_RATE_LIMIT_ENABLED`
 - `ARLEN_RATE_LIMIT_REQUESTS`
 - `ARLEN_RATE_LIMIT_WINDOW_SECONDS`

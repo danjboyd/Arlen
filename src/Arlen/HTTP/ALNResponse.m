@@ -1,6 +1,7 @@
 #import "ALNResponse.h"
 
 #import "ALNJSONSerialization.h"
+#include <ctype.h>
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
@@ -77,6 +78,56 @@ static NSUInteger ALNInsertionIndexForSortedHeaderKeys(NSArray *keys, NSString *
   return low;
 }
 
+static NSString *ALNNormalizedHeaderKey(NSString *name) {
+  if (![name isKindOfClass:[NSString class]]) {
+    return nil;
+  }
+  NSString *trimmed =
+      [name stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+  if ([trimmed length] == 0) {
+    return nil;
+  }
+  return [trimmed lowercaseString];
+}
+
+static BOOL ALNHeaderNameIsValid(NSString *name) {
+  if (![name isKindOfClass:[NSString class]] || [name length] == 0) {
+    return NO;
+  }
+  const char *bytes = [name UTF8String];
+  if (bytes == NULL) {
+    return NO;
+  }
+  for (const unsigned char *cursor = (const unsigned char *)bytes; *cursor != '\0'; cursor++) {
+    unsigned char c = *cursor;
+    if (c > 127) {
+      return NO;
+    }
+    BOOL isAlphaNum = (BOOL)(isalnum(c) != 0);
+    BOOL isTokenSymbol = (c == '!' || c == '#' || c == '$' || c == '%' || c == '&' || c == '\'' ||
+                          c == '*' || c == '+' || c == '-' || c == '.' || c == '^' || c == '_' ||
+                          c == '`' || c == '|' || c == '~');
+    if (!isAlphaNum && !isTokenSymbol) {
+      return NO;
+    }
+  }
+  return YES;
+}
+
+static BOOL ALNHeaderValueContainsForbiddenBytes(NSString *value) {
+  if (![value isKindOfClass:[NSString class]]) {
+    return YES;
+  }
+  NSUInteger length = [value length];
+  for (NSUInteger idx = 0; idx < length; idx++) {
+    unichar c = [value characterAtIndex:idx];
+    if (c == '\r' || c == '\n' || c == '\0') {
+      return YES;
+    }
+  }
+  return NO;
+}
+
 static NSString *ALNStatusText(NSInteger statusCode) {
   switch (statusCode) {
   case 101:
@@ -125,6 +176,7 @@ static NSString *ALNStatusText(NSInteger statusCode) {
 @property(nonatomic, strong, readwrite) NSMutableDictionary *headers;
 @property(nonatomic, strong, readwrite) NSMutableData *bodyData;
 @property(nonatomic, strong) NSMutableArray *orderedHeaderKeys;
+@property(nonatomic, strong) NSMutableDictionary *headerNamesByNormalizedKey;
 @property(nonatomic, strong) NSData *cachedHeaderData;
 @property(nonatomic, assign) BOOL serializedHeadersDirty;
 
@@ -139,6 +191,7 @@ static NSString *ALNStatusText(NSInteger statusCode) {
     _headers = [NSMutableDictionary dictionary];
     _bodyData = [NSMutableData data];
     _orderedHeaderKeys = [NSMutableArray array];
+    _headerNamesByNormalizedKey = [NSMutableDictionary dictionary];
     _committed = NO;
     _fileBodyPath = nil;
     _fileBodyLength = 0;
@@ -167,32 +220,45 @@ static NSString *ALNStatusText(NSInteger statusCode) {
   [self.orderedHeaderKeys addObjectsFromArray:sorted];
 }
 
-- (void)insertOrderedHeaderKeyIfNeeded:(NSString *)name {
-  if ([name length] == 0) {
+- (void)insertOrderedHeaderKeyIfNeeded:(NSString *)normalizedKey {
+  if ([normalizedKey length] == 0) {
     return;
   }
-  if ([self.orderedHeaderKeys containsObject:name]) {
+  if ([self.orderedHeaderKeys containsObject:normalizedKey]) {
     return;
   }
-  NSUInteger insertion = ALNInsertionIndexForSortedHeaderKeys(self.orderedHeaderKeys, name);
-  [self.orderedHeaderKeys insertObject:name atIndex:insertion];
+  NSUInteger insertion =
+      ALNInsertionIndexForSortedHeaderKeys(self.orderedHeaderKeys, normalizedKey);
+  [self.orderedHeaderKeys insertObject:normalizedKey atIndex:insertion];
 }
 
 - (BOOL)setHeaderInternal:(NSString *)name
                     value:(NSString *)value
                invalidate:(BOOL)invalidate {
-  if ([name length] == 0) {
+  NSString *normalizedKey = ALNNormalizedHeaderKey(name);
+  if ([normalizedKey length] == 0 || !ALNHeaderNameIsValid(normalizedKey)) {
     return NO;
   }
   NSString *resolvedValue = value ?: @"";
-  NSString *currentValue = [self.headers[name] isKindOfClass:[NSString class]] ? self.headers[name] : nil;
+  if (ALNHeaderValueContainsForbiddenBytes(resolvedValue)) {
+    return NO;
+  }
+  NSString *displayName = [name stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+  if ([displayName length] == 0) {
+    return NO;
+  }
+  NSString *currentValue = [self.headers[normalizedKey] isKindOfClass:[NSString class]]
+                               ? self.headers[normalizedKey]
+                               : nil;
   if (currentValue != nil && [currentValue isEqualToString:resolvedValue]) {
+    self.headerNamesByNormalizedKey[normalizedKey] = displayName;
     return NO;
   }
   if (currentValue == nil) {
-    [self insertOrderedHeaderKeyIfNeeded:name];
+    [self insertOrderedHeaderKeyIfNeeded:normalizedKey];
   }
-  self.headers[name] = resolvedValue;
+  self.headers[normalizedKey] = resolvedValue;
+  self.headerNamesByNormalizedKey[normalizedKey] = displayName;
   if (invalidate) {
     [self invalidateSerializedHeaders];
   }
@@ -260,14 +326,16 @@ static NSString *ALNStatusText(NSInteger statusCode) {
     if (![rawName isKindOfClass:[NSString class]]) {
       continue;
     }
-    NSString *name = (NSString *)rawName;
-    if ([name length] == 0) {
+    NSString *name = [(NSString *)rawName
+        stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    NSString *normalizedKey = ALNNormalizedHeaderKey(name);
+    if ([normalizedKey length] == 0) {
       continue;
     }
-    if ([self.headers[name] isKindOfClass:[NSString class]]) {
+    if ([self.headers[normalizedKey] isKindOfClass:[NSString class]]) {
       continue;
     }
-    id rawValue = headers[name];
+    id rawValue = headers[rawName];
     NSString *value = [rawValue isKindOfClass:[NSString class]] ? rawValue : @"";
     if ([self setHeaderInternal:name value:value invalidate:NO]) {
       mutated = YES;
@@ -279,7 +347,12 @@ static NSString *ALNStatusText(NSInteger statusCode) {
 }
 
 - (NSString *)headerForName:(NSString *)name {
-  return self.headers[name];
+  NSString *normalizedKey = ALNNormalizedHeaderKey(name);
+  if ([normalizedKey length] == 0) {
+    return nil;
+  }
+  id value = self.headers[normalizedKey];
+  return [value isKindOfClass:[NSString class]] ? value : nil;
 }
 
 - (void)appendData:(NSData *)data {
@@ -374,7 +447,7 @@ static NSString *ALNStatusText(NSInteger statusCode) {
     return nil;
   }
 
-  if (![self.headers[@"Content-Length"] isKindOfClass:[NSString class]]) {
+  if ([self headerForName:@"Content-Length"] == nil) {
     unsigned long long bodyLength = [self.bodyData length];
     if ([self.fileBodyPath length] > 0) {
       bodyLength = self.fileBodyLength;
@@ -384,7 +457,7 @@ static NSString *ALNStatusText(NSInteger statusCode) {
                        invalidate:NO];
   }
 
-  if (![self.headers[@"Content-Type"] isKindOfClass:[NSString class]]) {
+  if ([self headerForName:@"Content-Type"] == nil) {
     (void)[self setHeaderInternal:@"Content-Type"
                             value:@"text/plain; charset=utf-8"
                        invalidate:NO];
@@ -398,12 +471,15 @@ static NSString *ALNStatusText(NSInteger statusCode) {
   [head appendString:@" "];
   [head appendString:ALNStatusText(self.statusCode)];
   [head appendString:@"\r\n"];
-  for (NSString *key in self.orderedHeaderKeys) {
-    NSString *value = self.headers[key];
+  for (NSString *normalizedKey in self.orderedHeaderKeys) {
+    NSString *value = self.headers[normalizedKey];
     if (![value isKindOfClass:[NSString class]]) {
       continue;
     }
-    [head appendString:key];
+    NSString *displayName = [self.headerNamesByNormalizedKey[normalizedKey] isKindOfClass:[NSString class]]
+                                ? self.headerNamesByNormalizedKey[normalizedKey]
+                                : normalizedKey;
+    [head appendString:displayName];
     [head appendString:@": "];
     [head appendString:value];
     [head appendString:@"\r\n"];

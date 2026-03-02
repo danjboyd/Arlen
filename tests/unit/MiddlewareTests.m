@@ -39,12 +39,34 @@
 
 - (ALNRequest *)requestWithMethod:(NSString *)method
                              path:(NSString *)path
+                      queryString:(NSString *)queryString
                           headers:(NSDictionary *)headers {
   return [[ALNRequest alloc] initWithMethod:method
                                       path:path
-                               queryString:@""
+                               queryString:queryString ?: @""
                                    headers:headers ?: @{}
                                       body:[NSData data]];
+}
+
+- (ALNRequest *)requestWithMethod:(NSString *)method
+                             path:(NSString *)path
+                          headers:(NSDictionary *)headers {
+  return [self requestWithMethod:method
+                            path:path
+                     queryString:@""
+                         headers:headers];
+}
+
+- (ALNRequest *)requestWithMethod:(NSString *)method
+                             path:(NSString *)path
+                      queryString:(NSString *)queryString
+                          headers:(NSDictionary *)headers
+                             body:(NSData *)body {
+  return [[ALNRequest alloc] initWithMethod:method
+                                      path:path
+                               queryString:queryString ?: @""
+                                   headers:headers ?: @{}
+                                      body:body ?: [NSData data]];
 }
 
 - (NSDictionary *)jsonFromResponse:(ALNResponse *)response {
@@ -69,7 +91,7 @@
     @"logFormat" : @"json",
     @"session" : @{
       @"enabled" : @(YES),
-      @"secret" : @"unit-test-secret-value",
+      @"secret" : @"unit-test-secret-value-0123456789abcdef",
       @"cookieName" : @"arlen_session",
       @"maxAgeSeconds" : @(600),
       @"secure" : @(NO),
@@ -121,7 +143,7 @@
     @"logFormat" : @"json",
     @"session" : @{
       @"enabled" : @(YES),
-      @"secret" : @"unit-test-secret-value",
+      @"secret" : @"unit-test-secret-value-0123456789abcdef",
     },
     @"csrf" : @{ @"enabled" : @(YES) }
   }];
@@ -144,6 +166,131 @@
                                               path:@"/submit"
                                            headers:@{ @"cookie" : cookiePair }]];
   XCTAssertEqual((NSInteger)403, submitResponse.statusCode);
+}
+
+- (void)testSessionMiddlewareRejectsTamperedCookie {
+  ALNApplication *app = [[ALNApplication alloc] initWithConfig:@{
+    @"environment" : @"test",
+    @"logFormat" : @"json",
+    @"session" : @{
+      @"enabled" : @(YES),
+      @"secret" : @"unit-test-secret-value-0123456789abcdef",
+    },
+    @"csrf" : @{ @"enabled" : @(YES) }
+  }];
+  [app registerRouteMethod:@"GET"
+                      path:@"/form"
+                      name:@"form"
+           controllerClass:[MiddlewareFormController class]
+                    action:@"form"];
+  [app registerRouteMethod:@"POST"
+                      path:@"/submit"
+                      name:@"submit"
+           controllerClass:[MiddlewareFormController class]
+                    action:@"submit"];
+
+  ALNResponse *formResponse =
+      [app dispatchRequest:[self requestWithMethod:@"GET" path:@"/form" headers:@{}]];
+  NSString *setCookie = [formResponse headerForName:@"Set-Cookie"];
+  NSString *cookiePair = [self cookiePairFromSetCookie:setCookie];
+  NSDictionary *formJSON = [self jsonFromResponse:formResponse];
+  NSString *token = formJSON[@"csrf"];
+  XCTAssertTrue([token length] > 0);
+
+  NSMutableString *tamperedCookie = [cookiePair mutableCopy];
+  if ([tamperedCookie length] > 2) {
+    unichar last = [tamperedCookie characterAtIndex:[tamperedCookie length] - 1];
+    unichar replacement = (last == 'a') ? 'b' : 'a';
+    [tamperedCookie replaceCharactersInRange:NSMakeRange([tamperedCookie length] - 1, 1)
+                                  withString:[NSString stringWithFormat:@"%C", replacement]];
+  }
+
+  ALNResponse *submitResponse =
+      [app dispatchRequest:[self requestWithMethod:@"POST"
+                                              path:@"/submit"
+                                           headers:@{
+                                             @"cookie" : tamperedCookie ?: @"",
+                                             @"x-csrf-token" : token,
+                                           }]];
+  XCTAssertEqual((NSInteger)403, submitResponse.statusCode);
+}
+
+- (void)testCSRFMiddlewareRejectsUnsafeQueryTokenByDefault {
+  ALNApplication *app = [[ALNApplication alloc] initWithConfig:@{
+    @"environment" : @"test",
+    @"logFormat" : @"json",
+    @"session" : @{
+      @"enabled" : @(YES),
+      @"secret" : @"unit-test-secret-value-0123456789abcdef",
+    },
+    @"csrf" : @{ @"enabled" : @(YES) }
+  }];
+  [app registerRouteMethod:@"GET"
+                      path:@"/form"
+                      name:@"form"
+           controllerClass:[MiddlewareFormController class]
+                    action:@"form"];
+  [app registerRouteMethod:@"POST"
+                      path:@"/submit"
+                      name:@"submit"
+           controllerClass:[MiddlewareFormController class]
+                    action:@"submit"];
+
+  ALNResponse *formResponse =
+      [app dispatchRequest:[self requestWithMethod:@"GET" path:@"/form" headers:@{}]];
+  NSString *cookiePair = [self cookiePairFromSetCookie:[formResponse headerForName:@"Set-Cookie"]];
+  NSDictionary *formJSON = [self jsonFromResponse:formResponse];
+  NSString *token = formJSON[@"csrf"];
+  XCTAssertTrue([token length] > 0);
+
+  NSString *queryString = [NSString stringWithFormat:@"csrf_token=%@", token];
+  ALNResponse *submitResponse =
+      [app dispatchRequest:[self requestWithMethod:@"POST"
+                                              path:@"/submit"
+                                       queryString:queryString
+                                           headers:@{ @"cookie" : cookiePair ?: @"" }]];
+  XCTAssertEqual((NSInteger)403, submitResponse.statusCode);
+}
+
+- (void)testCSRFMiddlewareAllowsUnsafeFormBodyToken {
+  ALNApplication *app = [[ALNApplication alloc] initWithConfig:@{
+    @"environment" : @"test",
+    @"logFormat" : @"json",
+    @"session" : @{
+      @"enabled" : @(YES),
+      @"secret" : @"unit-test-secret-value-0123456789abcdef",
+    },
+    @"csrf" : @{ @"enabled" : @(YES) }
+  }];
+  [app registerRouteMethod:@"GET"
+                      path:@"/form"
+                      name:@"form"
+           controllerClass:[MiddlewareFormController class]
+                    action:@"form"];
+  [app registerRouteMethod:@"POST"
+                      path:@"/submit"
+                      name:@"submit"
+           controllerClass:[MiddlewareFormController class]
+                    action:@"submit"];
+
+  ALNResponse *formResponse =
+      [app dispatchRequest:[self requestWithMethod:@"GET" path:@"/form" headers:@{}]];
+  NSString *cookiePair = [self cookiePairFromSetCookie:[formResponse headerForName:@"Set-Cookie"]];
+  NSDictionary *formJSON = [self jsonFromResponse:formResponse];
+  NSString *token = formJSON[@"csrf"];
+  NSData *body =
+      [[NSString stringWithFormat:@"csrf_token=%@", token] dataUsingEncoding:NSUTF8StringEncoding];
+
+  ALNResponse *submitResponse =
+      [app dispatchRequest:[self requestWithMethod:@"POST"
+                                              path:@"/submit"
+                                       queryString:@""
+                                           headers:@{
+                                             @"cookie" : cookiePair ?: @"",
+                                             @"content-type" : @"application/x-www-form-urlencoded",
+                                           }
+                                              body:body]];
+  XCTAssertEqual((NSInteger)200, submitResponse.statusCode);
 }
 
 - (void)testRateLimitMiddlewareRejectsAfterLimit {

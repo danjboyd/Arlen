@@ -76,6 +76,21 @@ static NSDictionary *ALNEnvelopePayload(ALNContext *context, id data, NSDictiona
   return [NSDictionary dictionaryWithDictionary:payload];
 }
 
+static NSString *ALNSafeRedirectLocation(NSString *location) {
+  NSString *candidate = [location isKindOfClass:[NSString class]] ? location : @"";
+  if ([candidate length] == 0) {
+    return @"/";
+  }
+  NSUInteger length = [candidate length];
+  for (NSUInteger idx = 0; idx < length; idx++) {
+    unichar c = [candidate characterAtIndex:idx];
+    if (c == '\r' || c == '\n' || c == '\0') {
+      return @"/";
+    }
+  }
+  return candidate;
+}
+
 + (NSJSONWritingOptions)jsonWritingOptions {
   return 0;
 }
@@ -260,7 +275,7 @@ static NSDictionary *ALNEnvelopePayload(ALNContext *context, id data, NSDictiona
 - (void)redirectTo:(NSString *)location status:(NSInteger)statusCode {
   NSInteger code = (statusCode == 0) ? 302 : statusCode;
   self.context.response.statusCode = code;
-  [self.context.response setHeader:@"Location" value:location ?: @"/"];
+  [self.context.response setHeader:@"Location" value:ALNSafeRedirectLocation(location)];
   self.context.response.committed = YES;
 }
 

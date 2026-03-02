@@ -181,6 +181,7 @@ Specifications and roadmaps:
 - [Phase 8 Roadmap](docs/PHASE8_ROADMAP.md)
 - [Phase 9 Roadmap](docs/PHASE9_ROADMAP.md)
 - [Phase 10 Roadmap](docs/PHASE10_ROADMAP.md)
+- [Phase 11 Roadmap](docs/PHASE11_ROADMAP.md)
 - [Competitive Benchmark Roadmap](docs/COMPETITIVE_BENCHMARK_ROADMAP.md)
 - [Phase B Parity Checklist (FastAPI)](docs/PHASEB_PARITY_CHECKLIST_FASTAPI.md)
 - [Phase C Benchmark Protocol](docs/PHASEC_BENCHMARK_PROTOCOL.md)

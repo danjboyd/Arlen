@@ -125,4 +125,37 @@
   XCTAssertEqualObjects(@"application/custom", [response headerForName:@"Content-Type"]);
 }
 
+- (void)testSetHeaderRejectsCRLFInjectionValue {
+  ALNResponse *response = [[ALNResponse alloc] init];
+  [response setHeader:@"X-Test" value:@"ok\r\nX-Evil: injected"];
+  XCTAssertNil([response headerForName:@"X-Test"]);
+
+  NSString *serialized =
+      [[NSString alloc] initWithData:[response serializedHeaderData] encoding:NSUTF8StringEncoding];
+  XCTAssertFalse([serialized containsString:@"X-Evil: injected"]);
+}
+
+- (void)testSetHeaderRejectsInvalidHeaderName {
+  ALNResponse *response = [[ALNResponse alloc] init];
+  [response setHeader:@"Bad Name" value:@"x"];
+  XCTAssertNil([response headerForName:@"Bad Name"]);
+}
+
+- (void)testContentLengthHeaderIsCaseInsensitiveCanonicalized {
+  ALNResponse *response = [[ALNResponse alloc] init];
+  [response appendText:@"hello"];
+  [response setHeader:@"content-length" value:@"5"];
+
+  NSString *serialized =
+      [[NSString alloc] initWithData:[response serializedHeaderData] encoding:NSUTF8StringEncoding];
+  NSArray *lines = [serialized componentsSeparatedByString:@"\r\n"];
+  NSUInteger contentLengthLineCount = 0;
+  for (NSString *line in lines) {
+    if ([[line lowercaseString] hasPrefix:@"content-length:"]) {
+      contentLengthLineCount += 1;
+    }
+  }
+  XCTAssertEqual((NSUInteger)1, contentLengthLineCount);
+}
+
 @end

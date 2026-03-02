@@ -824,9 +824,11 @@ def scenario_alloc_parser_headername_malloc_once(binary: str, mode: str, rng: ra
             "Connection: close\r\n\r\n"
         ).encode("utf-8")
         response = _raw_roundtrip_request(port, request)
-        if "400" not in response["status"]:
+        # LLHTTP now defers non-hot header materialization; allocation faults may
+        # surface as graceful header omission (200) instead of parse rejection (400).
+        if "400" not in response["status"] and "200" not in response["status"]:
             raise RuntimeError(
-                f"allocation parser-header scenario expected 400, got {response}"
+                f"allocation parser-header scenario expected 200/400, got {response}"
             )
         recovery = _single_roundtrip(port, "/healthz")
         if "200" not in recovery["status"] or recovery["body"] != "ok\n":

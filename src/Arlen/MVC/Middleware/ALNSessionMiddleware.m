@@ -5,21 +5,28 @@
 #import "ALNRequest.h"
 #import "ALNResponse.h"
 
-static NSString *const ALNSessionVersion = @"v1";
+#import <openssl/evp.h>
+#import <openssl/hmac.h>
 
-static NSString *ALNHexStringFromUInt64(uint64_t value) {
-  return [NSString stringWithFormat:@"%016llx", (unsigned long long)value];
-}
+static NSString *const ALNSessionVersion = @"v2";
 
-static uint64_t ALNFNV1aHash(NSData *data, uint64_t seed) {
-  const unsigned char *bytes = [data bytes];
-  NSUInteger length = [data length];
-  uint64_t hash = 1469598103934665603ULL ^ seed;
-  for (NSUInteger idx = 0; idx < length; idx++) {
-    hash ^= (uint64_t)bytes[idx];
-    hash *= 1099511628211ULL;
+static NSData *ALNHMACSHA256(NSData *input, NSData *key) {
+  if ([input length] == 0 || [key length] == 0) {
+    return nil;
   }
-  return hash;
+  unsigned int digestLength = 0;
+  unsigned char digest[EVP_MAX_MD_SIZE];
+  unsigned char *hmacResult = HMAC(EVP_sha256(),
+                                   [key bytes],
+                                   (int)[key length],
+                                   [input bytes],
+                                   (size_t)[input length],
+                                   digest,
+                                   &digestLength);
+  if (hmacResult == NULL || digestLength == 0) {
+    return nil;
+  }
+  return [NSData dataWithBytes:digest length:(NSUInteger)digestLength];
 }
 
 static NSString *ALNBase64URLFromData(NSData *data) {
@@ -45,29 +52,23 @@ static NSData *ALNDataFromBase64URL(NSString *value) {
   return [[NSData alloc] initWithBase64EncodedString:base64 options:0];
 }
 
-static NSData *ALNXORCipher(NSData *input, NSData *key, NSData *nonce) {
-  if ([input length] == 0) {
-    return [NSData data];
+static BOOL ALNConstantTimeDataEqual(NSData *lhs, NSData *rhs) {
+  if (![lhs isKindOfClass:[NSData class]] || ![rhs isKindOfClass:[NSData class]]) {
+    return NO;
   }
 
-  NSUInteger keyLength = [key length];
-  NSUInteger nonceLength = [nonce length];
-  if (keyLength == 0 || nonceLength == 0) {
-    return nil;
+  NSUInteger lhsLength = [lhs length];
+  NSUInteger rhsLength = [rhs length];
+  const unsigned char *lhsBytes = [lhs bytes];
+  const unsigned char *rhsBytes = [rhs bytes];
+  NSUInteger maxLength = (lhsLength > rhsLength) ? lhsLength : rhsLength;
+  unsigned char diff = (unsigned char)(lhsLength ^ rhsLength);
+  for (NSUInteger idx = 0; idx < maxLength; idx++) {
+    unsigned char lhsByte = (idx < lhsLength) ? lhsBytes[idx] : 0;
+    unsigned char rhsByte = (idx < rhsLength) ? rhsBytes[idx] : 0;
+    diff |= (unsigned char)(lhsByte ^ rhsByte);
   }
-
-  const unsigned char *inputBytes = [input bytes];
-  const unsigned char *keyBytes = [key bytes];
-  const unsigned char *nonceBytes = [nonce bytes];
-  NSMutableData *output = [NSMutableData dataWithLength:[input length]];
-  unsigned char *outputBytes = [output mutableBytes];
-
-  for (NSUInteger idx = 0; idx < [input length]; idx++) {
-    unsigned char mask = keyBytes[idx % keyLength] ^ nonceBytes[idx % nonceLength] ^
-                         (unsigned char)((idx * 31U) & 0xFFU);
-    outputBytes[idx] = inputBytes[idx] ^ mask;
-  }
-  return output;
+  return (diff == 0);
 }
 
 @interface ALNSessionMiddleware ()
@@ -90,10 +91,9 @@ static NSData *ALNXORCipher(NSData *input, NSData *key, NSData *nonce) {
                       sameSite:(NSString *)sameSite {
   self = [super init];
   if (self) {
-    _secret = [secret copy];
-    if ([_secret length] == 0) {
-      _secret = @"arlen-insecure-default-secret";
-    }
+    NSString *normalizedSecret = secret ?: @"";
+    _secret = [normalizedSecret
+        stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
     _secretData = [_secret dataUsingEncoding:NSUTF8StringEncoding];
     if (_secretData == nil) {
       _secretData = [NSData data];
@@ -129,12 +129,21 @@ static NSData *ALNXORCipher(NSData *input, NSData *key, NSData *nonce) {
 }
 
 - (NSString *)signatureForPrefix:(NSString *)prefix {
+  if ([self.secretData length] == 0) {
+    return @"";
+  }
   NSData *prefixData = [prefix dataUsingEncoding:NSUTF8StringEncoding];
-  uint64_t hash = ALNFNV1aHash(prefixData, ALNFNV1aHash(self.secretData, 0x9e3779b97f4a7c15ULL));
-  return ALNHexStringFromUInt64(hash);
+  NSData *digest = ALNHMACSHA256(prefixData, self.secretData);
+  if ([digest length] == 0) {
+    return @"";
+  }
+  return ALNBase64URLFromData(digest);
 }
 
 - (NSString *)encodeSessionDictionary:(NSDictionary *)session {
+  if ([self.secretData length] == 0) {
+    return nil;
+  }
   NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
   NSDictionary *payload = @{
     @"iat" : @((NSInteger)now),
@@ -148,45 +157,38 @@ static NSData *ALNXORCipher(NSData *input, NSData *key, NSData *nonce) {
     return nil;
   }
 
-  uint64_t nonceValue = (((uint64_t)arc4random()) << 32) | (uint64_t)arc4random();
-  NSData *nonceData = [NSData dataWithBytes:&nonceValue length:sizeof(nonceValue)];
-  NSData *ciphertext = ALNXORCipher(plaintext, self.secretData, nonceData);
-  if (ciphertext == nil) {
+  NSString *payloadPart = ALNBase64URLFromData(plaintext);
+  NSString *prefix = [NSString stringWithFormat:@"%@.%@", ALNSessionVersion, payloadPart];
+  NSString *signature = [self signatureForPrefix:prefix];
+  if ([signature length] == 0) {
     return nil;
   }
-
-  NSString *noncePart = ALNBase64URLFromData(nonceData);
-  NSString *cipherPart = ALNBase64URLFromData(ciphertext);
-  NSString *prefix =
-      [NSString stringWithFormat:@"%@.%@.%@", ALNSessionVersion, noncePart, cipherPart];
-  NSString *signature = [self signatureForPrefix:prefix];
   return [NSString stringWithFormat:@"%@.%@", prefix, signature];
 }
 
 - (nullable NSMutableDictionary *)decodeSessionToken:(NSString *)token {
+  if ([self.secretData length] == 0) {
+    return nil;
+  }
   NSArray *parts = [token componentsSeparatedByString:@"."];
-  if ([parts count] != 4) {
+  if ([parts count] != 3) {
     return nil;
   }
   if (![parts[0] isEqualToString:ALNSessionVersion]) {
     return nil;
   }
 
-  NSString *prefix = [NSString stringWithFormat:@"%@.%@.%@", parts[0], parts[1], parts[2]];
+  NSString *prefix = [NSString stringWithFormat:@"%@.%@", parts[0], parts[1]];
   NSString *expectedSignature = [self signatureForPrefix:prefix];
-  NSString *providedSignature = [parts[3] lowercaseString];
-  if (![expectedSignature isEqualToString:providedSignature]) {
+  NSData *expectedSignatureData = ALNDataFromBase64URL(expectedSignature);
+  NSData *providedSignatureData = ALNDataFromBase64URL(parts[2]);
+  if ([expectedSignatureData length] == 0 || [providedSignatureData length] == 0 ||
+      !ALNConstantTimeDataEqual(expectedSignatureData, providedSignatureData)) {
     return nil;
   }
 
-  NSData *nonceData = ALNDataFromBase64URL(parts[1]);
-  NSData *cipherData = ALNDataFromBase64URL(parts[2]);
-  if ([nonceData length] == 0 || [cipherData length] == 0) {
-    return nil;
-  }
-
-  NSData *plaintext = ALNXORCipher(cipherData, self.secretData, nonceData);
-  if (plaintext == nil) {
+  NSData *plaintext = ALNDataFromBase64URL(parts[1]);
+  if ([plaintext length] == 0) {
     return nil;
   }
 
