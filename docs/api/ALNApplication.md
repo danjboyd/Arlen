@@ -53,6 +53,7 @@ if (![app startWithError:&error]) {
 | `clusterObservedNodes` | `NSUInteger` | `nonatomic, assign, readonly` | Cluster/runtime metadata exposed for diagnostics and routing behavior. |
 | `clusterEmitHeaders` | `BOOL` | `nonatomic, assign, readonly` | Cluster/runtime metadata exposed for diagnostics and routing behavior. |
 | `started` | `BOOL` | `nonatomic, assign, readonly, getter=isStarted` | Lifecycle flag that indicates whether startup has completed. |
+| `runtimeInvocationMode` | `NSString *` | `nonatomic, copy, readonly` | Public `runtimeInvocationMode` property available on `ALNApplication`. |
 | `traceExporter` | `id<ALNTraceExporter>` | `nonatomic, strong, nullable` | Optional request-trace exporter invoked after route dispatch. |
 
 ## Methods

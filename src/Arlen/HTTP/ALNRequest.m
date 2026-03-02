@@ -717,7 +717,7 @@ static const llhttp_settings_t *ALNLLHTTPStreamingSettings(void) {
 
 static void ALNLLHTTPThreadStateRelease(void *value) {
   if (value != NULL) {
-    CFBridgingRelease(value);
+    (void)(__bridge_transfer id)value;
   }
 }
 
@@ -732,7 +732,7 @@ static ALNLLHTTPParseState *ALNLLHTTPThreadState(void) {
       (stored != NULL) ? (__bridge ALNLLHTTPParseState *)stored : nil;
   if (state == nil) {
     state = [[ALNLLHTTPParseState alloc] init];
-    pthread_setspecific(gALNLLHTTPStateKey, CFBridgingRetain(state));
+    pthread_setspecific(gALNLLHTTPStateKey, (__bridge_retained void *)state);
   }
   [state resetForNextParse];
   return state;

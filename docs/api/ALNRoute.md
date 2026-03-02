@@ -31,6 +31,10 @@ Single route descriptor containing method/path pattern/controller/action and mat
 | `includeInOpenAPI` | `BOOL` | `nonatomic, assign` | Public `includeInOpenAPI` property available on `ALNRoute`. |
 | `compiledActionSignature` | `NSMethodSignature *` | `nonatomic, strong, nullable` | Public `compiledActionSignature` property available on `ALNRoute`. |
 | `compiledGuardSignature` | `NSMethodSignature *` | `nonatomic, strong, nullable` | Public `compiledGuardSignature` property available on `ALNRoute`. |
+| `compiledActionIMP` | `IMP` | `nonatomic, assign, nullable` | Public `compiledActionIMP` property available on `ALNRoute`. |
+| `compiledGuardIMP` | `IMP` | `nonatomic, assign, nullable` | Public `compiledGuardIMP` property available on `ALNRoute`. |
+| `compiledActionReturnKind` | `ALNRouteInvocationReturnKind` | `nonatomic, assign` | Public `compiledActionReturnKind` property available on `ALNRoute`. |
+| `compiledGuardReturnKind` | `ALNRouteInvocationReturnKind` | `nonatomic, assign` | Public `compiledGuardReturnKind` property available on `ALNRoute`. |
 | `compiledInvocationMetadata` | `BOOL` | `nonatomic, assign` | Public `compiledInvocationMetadata` property available on `ALNRoute`. |
 
 ## Methods
@@ -40,5 +44,11 @@ Single route descriptor containing method/path pattern/controller/action and mat
 | `initWithMethod:pathPattern:name:controllerClass:actionName:registrationIndex:` | `- (instancetype)initWithMethod:(NSString *)method pathPattern:(NSString *)pathPattern name:(nullable NSString *)name controllerClass:(Class)controllerClass actionName:(NSString *)actionName registrationIndex:(NSUInteger)registrationIndex;` | Initialize and return a new `ALNRoute` instance. | Use as `[[Class alloc] init...]`; treat `nil` as initialization failure. This method is chainable; continue composing and call `build`/`buildSQL` to finalize. |
 | `initWithMethod:pathPattern:name:formats:controllerClass:guardActionName:actionName:registrationIndex:` | `- (instancetype)initWithMethod:(NSString *)method pathPattern:(NSString *)pathPattern name:(nullable NSString *)name formats:(nullable NSArray *)formats controllerClass:(Class)controllerClass guardActionName:(nullable NSString *)guardActionName actionName:(NSString *)actionName registrationIndex:(NSUInteger)registrationIndex;` | Initialize and return a new `ALNRoute` instance. | Use as `[[Class alloc] init...]`; treat `nil` as initialization failure. This method is chainable; continue composing and call `build`/`buildSQL` to finalize. |
 | `matchPath:` | `- (nullable NSDictionary *)matchPath:(NSString *)path;` | Match one path against this route pattern and return extracted params. | Treat returned collection values as snapshots unless the API documents mutability. |
+| `matchesPath:` | `- (BOOL)matchesPath:(NSString *)path;` | Match input against the configured pattern set. | Check the return value to confirm the operation succeeded. |
+| `matchesPath:pathSegments:` | `- (BOOL)matchesPath:(NSString *)path pathSegments:(nullable NSArray *)pathSegments;` | Match input against the configured pattern set. | Check the return value to confirm the operation succeeded. |
+| `matchPath:pathSegments:` | `- (nullable NSDictionary *)matchPath:(NSString *)path pathSegments:(nullable NSArray *)pathSegments;` | Match input against the configured pattern set. | Treat returned collection values as snapshots unless the API documents mutability. |
+| `paramsForPath:pathSegments:` | `- (nullable NSDictionary *)paramsForPath:(NSString *)path pathSegments:(nullable NSArray *)pathSegments;` | Perform `params for path` for `ALNRoute`. | Treat returned collection values as snapshots unless the API documents mutability. |
+| `usesParameterizedFastPath` | `- (BOOL)usesParameterizedFastPath;` | Perform `uses parameterized fast path` for `ALNRoute`. | Check the return value to confirm the operation succeeded. |
+| `pathSegmentsForPath:` | `+ (NSArray *)pathSegmentsForPath:(NSString *)path;` | Perform `path segments for path` for `ALNRoute`. | Call on the class type, not on an instance. |
 | `matchesFormat:` | `- (BOOL)matchesFormat:(nullable NSString *)format;` | Return whether route allows this negotiated/requested format. | Check the return value to confirm the operation succeeded. |
 | `dictionaryRepresentation` | `- (NSDictionary *)dictionaryRepresentation;` | Return this object as a stable dictionary payload. | Read this value when you need current runtime/request state. |

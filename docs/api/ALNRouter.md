@@ -5,6 +5,12 @@
 
 Route registry and matcher with support for route grouping, guard actions, and format constraints.
 
+## Properties
+
+| Property | Type | Attributes | Purpose |
+| --- | --- | --- | --- |
+| `hasFormatConstrainedRoutes` | `BOOL` | `nonatomic, assign, readonly` | Public `hasFormatConstrainedRoutes` property available on `ALNRouter`. |
+
 ## Methods
 
 | Selector | Signature | Purpose | How to use |
