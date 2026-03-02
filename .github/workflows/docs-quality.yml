@@ -8,7 +8,7 @@ on:
 
 jobs:
   docs-gate:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64, arlen, iep-apt]
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -23,7 +23,7 @@ jobs:
             make \
             pandoc \
             python3 \
-            tools-xctest \
+            gnustep-clang-tools-xctest \
             gnustep-make \
             gnustep-base-runtime \
             libgnustep-base-dev

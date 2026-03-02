@@ -10,7 +10,7 @@ on:
 
 jobs:
   sanitizer-gate:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64, arlen, iep-apt]
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -25,7 +25,7 @@ jobs:
             make \
             pandoc \
             python3 \
-            tools-xctest \
+            gnustep-clang-tools-xctest \
             gnustep-make \
             gnustep-base-runtime \
             libgnustep-base-dev
@@ -55,7 +55,7 @@ jobs:
           if-no-files-found: warn
 
   thread-race-nightly:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64, arlen, iep-apt]
     continue-on-error: true
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     steps:
@@ -72,7 +72,7 @@ jobs:
             make \
             pandoc \
             python3 \
-            tools-xctest \
+            gnustep-clang-tools-xctest \
             gnustep-make \
             gnustep-base-runtime \
             libgnustep-base-dev
