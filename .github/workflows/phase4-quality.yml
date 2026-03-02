@@ -26,9 +26,8 @@ jobs:
             pandoc \
             python3 \
             gnustep-clang-tools-xctest \
-            gnustep-make \
-            gnustep-base-runtime \
-            libgnustep-base-dev
+            gnustep-clang-make \
+            gnustep-clang-libs-base
 
       - name: Run Phase 5E quality gate
         env:
