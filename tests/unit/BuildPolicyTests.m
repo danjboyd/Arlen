@@ -23,7 +23,8 @@
   XCTAssertTrue([makefile containsString:@"ARC_REQUIRED_FLAG := -fobjc-arc"]);
   XCTAssertTrue([makefile containsString:
                               @"override OBJC_FLAGS := $$(gnustep-config --objc-flags) "
-                               "$(ARC_REQUIRED_FLAG) $(FEATURE_FLAGS) $(EXTRA_OBJC_FLAGS)"]);
+                               "$(ARC_REQUIRED_FLAG) $(FEATURE_FLAGS) "
+                               "$(THIRD_PARTY_FEATURE_FLAGS) $(EXTRA_OBJC_FLAGS)"]);
   XCTAssertTrue([makefile containsString:@"EXTRA_OBJC_FLAGS cannot contain -fno-objc-arc"]);
   XCTAssertTrue([makefile containsString:@"OBJC_FLAGS cannot disable ARC"]);
 }
@@ -89,6 +90,12 @@
   XCTAssertTrue([makefile containsString:@"LLHTTP_C_SRCS := src/Arlen/Support/third_party/llhttp/llhttp.c"]);
   XCTAssertTrue([makefile containsString:@"src/Arlen/Support/third_party/llhttp/api.c"]);
   XCTAssertTrue([makefile containsString:@"src/Arlen/Support/third_party/llhttp/http.c"]);
+  XCTAssertTrue([makefile containsString:@"ARGON2_C_SRCS := src/Arlen/Support/third_party/argon2/src/argon2.c"]);
+  XCTAssertTrue([makefile containsString:@"src/Arlen/Support/third_party/argon2/src/core.c"]);
+  XCTAssertTrue([makefile containsString:@"src/Arlen/Support/third_party/argon2/src/encoding.c"]);
+  XCTAssertTrue([makefile containsString:@"src/Arlen/Support/third_party/argon2/src/ref.c"]);
+  XCTAssertTrue([makefile containsString:@"src/Arlen/Support/third_party/argon2/src/blake2/blake2b.c"]);
+  XCTAssertTrue([makefile containsString:@"THIRD_PARTY_FEATURE_FLAGS := -DARGON2_NO_THREADS=1"]);
   XCTAssertTrue([makefile containsString:@"FRAMEWORK_SRCS += $(THIRD_PARTY_C_SRCS)"]);
   XCTAssertTrue([makefile containsString:
                               @"JSON_SERIALIZATION_SRCS := src/Arlen/Support/ALNJSONSerialization.m $(YYJSON_C_SRCS)"]);
@@ -107,8 +114,11 @@
                 @"boomhauer app compile path must include yyjson C source");
   XCTAssertTrue([script containsString:@"find \"$framework_root/src/Arlen/Support/third_party/llhttp\" -type f -name '*.c'"],
                 @"boomhauer app compile path must include llhttp C sources");
+  XCTAssertTrue([script containsString:@"find \"$framework_root/src/Arlen/Support/third_party/argon2\" -type f -name '*.c'"],
+                @"boomhauer app compile path must include argon2 C sources");
   XCTAssertTrue([script containsString:@"-DARLEN_ENABLE_YYJSON=\"$enable_yyjson\""]);
   XCTAssertTrue([script containsString:@"-DARLEN_ENABLE_LLHTTP=\"$enable_llhttp\""]);
+  XCTAssertTrue([script containsString:@"-DARGON2_NO_THREADS=1"]);
 }
 
 - (void)testGNUmakefileIncludesJSONReliabilityGateTargets {

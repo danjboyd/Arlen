@@ -108,6 +108,10 @@
     "ALNAuth": {
       "summary": "Authentication and authorization helpers for bearer token extraction, JWT verification, and scope/role checks."
     },
+    "ALNPasswordHash": {
+      "summary": "Argon2id password hashing helpers that emit PHC strings, verify candidate passwords, and report when stored hashes should be rehashed.",
+      "usage_example": "NSError *error = nil;\nALNArgon2idOptions options = [ALNPasswordHash defaultArgon2idOptions];\nNSString *encodedHash = [ALNPasswordHash hashPasswordString:@\"correct horse battery staple\"\n                                                   options:options\n                                                     error:&error];\nif (encodedHash == nil) {\n  NSLog(@\"password hash failed: %@\", error);\n  return;\n}\n\nBOOL verified = [ALNPasswordHash verifyPasswordString:@\"correct horse battery staple\"\n                                    againstEncodedHash:encodedHash\n                                                 error:&error];"
+    },
     "ALNLogger": {
       "summary": "Structured logger with configurable output format and level-specific convenience methods."
     },
@@ -205,5 +209,34 @@
       "purpose": "Node identifier used for distributed-runtime diagnostics and headers."
     }
   },
-  "methods": {}
+  "methods": {
+    "ALNPasswordHash|defaultArgon2idOptions": {
+      "purpose": "Return Arlen's default Argon2id cost, salt-length, and digest-length policy.",
+      "usage": "Use as the baseline policy, then copy and raise costs to match deployment hardware."
+    },
+    "ALNPasswordHash|hashPasswordString:options:error:": {
+      "purpose": "Hash a UTF-8 password string and return a PHC-formatted Argon2id string suitable for storage.",
+      "usage": "Store the returned PHC string directly; on `nil`, inspect the `NSError` for validation or hashing failures."
+    },
+    "ALNPasswordHash|hashPasswordData:options:error:": {
+      "purpose": "Hash raw password bytes and return a PHC-formatted Argon2id string.",
+      "usage": "Prefer this overload when your auth layer already manages password bytes as `NSData`."
+    },
+    "ALNPasswordHash|verifyPasswordString:againstEncodedHash:error:": {
+      "purpose": "Verify a UTF-8 password string against a stored Argon2id PHC string.",
+      "usage": "Treat `NO` with `error == nil` as a normal password mismatch; inspect `NSError` only for malformed or unsupported stored hashes."
+    },
+    "ALNPasswordHash|verifyPasswordData:againstEncodedHash:error:": {
+      "purpose": "Verify raw password bytes against a stored Argon2id PHC string.",
+      "usage": "Use this overload when you want byte-level control over password handling in the caller."
+    },
+    "ALNPasswordHash|encodedHashNeedsRehash:options:error:": {
+      "purpose": "Report whether a stored Argon2id PHC string is older or weaker than the supplied policy.",
+      "usage": "Call after a successful login and replace the stored hash when this returns `YES`."
+    },
+    "ALNPasswordHash|argon2Version": {
+      "purpose": "Return the vendored Argon2 upstream version identifier used by this Arlen build.",
+      "usage": "Use for diagnostics, support bundles, or build provenance reporting."
+    }
+  }
 }

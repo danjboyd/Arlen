@@ -9,10 +9,10 @@ python3 tools/docs/generate_api_reference.py
 ```
 
 - Generated from source headers and metadata (deterministic output)
-- Public headers: `38`
-- Symbols: `61`
-- Public methods: `423`
-- Public properties: `159`
+- Public headers: `39`
+- Symbols: `62`
+- Public methods: `435`
+- Public properties: `161`
 
 ## API Surface Boundary
 
@@ -101,6 +101,7 @@ python3 tools/docs/generate_api_reference.py
 - [ALNMailAdapter](api/ALNMailAdapter.md): Mail adapter protocol for outbound delivery and delivery snapshot diagnostics.
 - [ALNMailMessage](api/ALNMailMessage.md): Mail payload model containing sender/recipients/content/headers/metadata fields.
 - [ALNMetricsRegistry](api/ALNMetricsRegistry.md): In-memory metrics registry for counters, gauges, timings, snapshots, and Prometheus text output.
+- [ALNPasswordHash](api/ALNPasswordHash.md): Argon2id password hashing helpers that emit PHC strings, verify candidate passwords, and report when stored hashes should be rehashed.
 - [ALNPerfTrace](api/ALNPerfTrace.md): Per-request performance stage recorder used for internal timing diagnostics and perf event export.
 - [ALNRealtimeHub](api/ALNRealtimeHub.md): In-process pub/sub hub used for websocket channel fanout and simple realtime event routing.
 - [ALNRealtimeSubscriber](api/ALNRealtimeSubscriber.md): Realtime callback protocol implemented by websocket/session subscribers.
@@ -146,6 +147,7 @@ python3 tools/docs/generate_api_reference.py
 - `src/Arlen/Support/ALNAuth.h`
 - `src/Arlen/Support/ALNLogger.h`
 - `src/Arlen/Support/ALNMetrics.h`
+- `src/Arlen/Support/ALNPasswordHash.h`
 - `src/Arlen/Support/ALNPerf.h`
 - `src/Arlen/Support/ALNRealtime.h`
 - `src/Arlen/Support/ALNServices.h`

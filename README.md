@@ -135,6 +135,7 @@ High-value guides:
 - [CLI Reference](docs/CLI_REFERENCE.md)
 - [Core Concepts](docs/CORE_CONCEPTS.md)
 - [Deployment Guide](docs/DEPLOYMENT.md)
+- [Password Hashing](docs/PASSWORD_HASHING.md)
 - [Realtime and Composition](docs/REALTIME_COMPOSITION.md)
 - [Ecosystem Services](docs/ECOSYSTEM_SERVICES.md)
 - [ArlenData Reuse Guide](docs/ARLEN_DATA.md)

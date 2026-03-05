@@ -25,6 +25,7 @@ Open `build/docs/index.html` in your browser, or use `make docs-serve` for local
 - [CLI Reference](CLI_REFERENCE.md): command reference for `arlen`, `boomhauer`, and helper scripts.
 - [Core Concepts](CORE_CONCEPTS.md): runtime architecture and request lifecycle.
 - [Deployment Guide](DEPLOYMENT.md): deployment model and production guidance.
+- [Password Hashing](PASSWORD_HASHING.md): Argon2id password hashing API, defaults, and rehash workflow.
 - [Realtime and Composition](REALTIME_COMPOSITION.md): websocket/SSE contracts, pubsub hub, and app mounting.
 - [Ecosystem Services](ECOSYSTEM_SERVICES.md): jobs/cache/i18n/mail/attachment adapter contracts and plugin wiring.
 - [ArlenData Reuse Guide](ARLEN_DATA.md): standalone data-layer packaging, checkout, and versioning policy.

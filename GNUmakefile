@@ -47,7 +47,8 @@ LLHTTP_C_SRCS := src/Arlen/Support/third_party/llhttp/llhttp.c src/Arlen/Support
 else
 LLHTTP_C_SRCS :=
 endif
-THIRD_PARTY_C_SRCS := $(YYJSON_C_SRCS) $(LLHTTP_C_SRCS)
+ARGON2_C_SRCS := src/Arlen/Support/third_party/argon2/src/argon2.c src/Arlen/Support/third_party/argon2/src/core.c src/Arlen/Support/third_party/argon2/src/encoding.c src/Arlen/Support/third_party/argon2/src/ref.c src/Arlen/Support/third_party/argon2/src/blake2/blake2b.c
+THIRD_PARTY_C_SRCS := $(YYJSON_C_SRCS) $(LLHTTP_C_SRCS) $(ARGON2_C_SRCS)
 FRAMEWORK_SRCS += $(THIRD_PARTY_C_SRCS)
 ARLEN_DATA_SRCS := $(shell find src/Arlen/Data -type f -name '*.m' | sort)
 JSON_SERIALIZATION_SRCS := src/Arlen/Support/ALNJSONSerialization.m $(YYJSON_C_SRCS)
@@ -62,14 +63,15 @@ GNUSTEP_TEST_HOME := $(ROOT_DIR)/.gnustep-home
 UNIT_TEST_SRCS := $(shell find tests/unit -type f -name '*.m' | sort)
 INTEGRATION_TEST_SRCS := $(shell find tests/integration -type f -name '*.m' | sort)
 
-INCLUDE_FLAGS := -Isrc/Arlen -Isrc/Arlen/Core -Isrc/Arlen/Data -Isrc/Arlen/HTTP -Isrc/Arlen/MVC/Controller -Isrc/Arlen/MVC/Middleware -Isrc/Arlen/MVC/Routing -Isrc/Arlen/MVC/Template -Isrc/Arlen/MVC/View -Isrc/Arlen/Support -Isrc/MojoObjc -Isrc/MojoObjc/Core -Isrc/MojoObjc/Data -Isrc/MojoObjc/HTTP -Isrc/MojoObjc/MVC/Controller -Isrc/MojoObjc/MVC/Middleware -Isrc/MojoObjc/MVC/Routing -Isrc/MojoObjc/MVC/Template -Isrc/MojoObjc/MVC/View -Isrc/MojoObjc/Support -I/usr/include/postgresql
+INCLUDE_FLAGS := -Isrc/Arlen -Isrc/Arlen/Core -Isrc/Arlen/Data -Isrc/Arlen/HTTP -Isrc/Arlen/MVC/Controller -Isrc/Arlen/MVC/Middleware -Isrc/Arlen/MVC/Routing -Isrc/Arlen/MVC/Template -Isrc/Arlen/MVC/View -Isrc/Arlen/Support -Isrc/Arlen/Support/third_party/argon2/include -Isrc/Arlen/Support/third_party/argon2/src -Isrc/MojoObjc -Isrc/MojoObjc/Core -Isrc/MojoObjc/Data -Isrc/MojoObjc/HTTP -Isrc/MojoObjc/MVC/Controller -Isrc/MojoObjc/MVC/Middleware -Isrc/MojoObjc/MVC/Routing -Isrc/MojoObjc/MVC/Template -Isrc/MojoObjc/MVC/View -Isrc/MojoObjc/Support -I/usr/include/postgresql
 EXTRA_OBJC_FLAGS ?=
 ARC_REQUIRED_FLAG := -fobjc-arc
 FEATURE_FLAGS := -DARLEN_ENABLE_YYJSON=$(ARLEN_ENABLE_YYJSON) -DARLEN_ENABLE_LLHTTP=$(ARLEN_ENABLE_LLHTTP)
+THIRD_PARTY_FEATURE_FLAGS := -DARGON2_NO_THREADS=1
 ifneq ($(findstring -fno-objc-arc,$(EXTRA_OBJC_FLAGS)),)
 $(error EXTRA_OBJC_FLAGS cannot contain -fno-objc-arc; Arlen enforces ARC across all first-party Objective-C compile paths)
 endif
-override OBJC_FLAGS := $$(gnustep-config --objc-flags) $(ARC_REQUIRED_FLAG) $(FEATURE_FLAGS) $(EXTRA_OBJC_FLAGS)
+override OBJC_FLAGS := $$(gnustep-config --objc-flags) $(ARC_REQUIRED_FLAG) $(FEATURE_FLAGS) $(THIRD_PARTY_FEATURE_FLAGS) $(EXTRA_OBJC_FLAGS)
 ifneq ($(findstring $(ARC_REQUIRED_FLAG),$(OBJC_FLAGS)),$(ARC_REQUIRED_FLAG))
 $(error OBJC_FLAGS must include -fobjc-arc)
 endif

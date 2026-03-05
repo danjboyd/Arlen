@@ -33,6 +33,8 @@ Single route descriptor containing method/path pattern/controller/action and mat
 | `compiledGuardSignature` | `NSMethodSignature *` | `nonatomic, strong, nullable` | Public `compiledGuardSignature` property available on `ALNRoute`. |
 | `compiledActionIMP` | `IMP` | `nonatomic, assign, nullable` | Public `compiledActionIMP` property available on `ALNRoute`. |
 | `compiledGuardIMP` | `IMP` | `nonatomic, assign, nullable` | Public `compiledGuardIMP` property available on `ALNRoute`. |
+| `compiledFastActionSelector` | `SEL` | `nonatomic, assign, nullable` | Public `compiledFastActionSelector` property available on `ALNRoute`. |
+| `compiledFastActionIMP` | `IMP` | `nonatomic, assign, nullable` | Public `compiledFastActionIMP` property available on `ALNRoute`. |
 | `compiledActionReturnKind` | `ALNRouteInvocationReturnKind` | `nonatomic, assign` | Public `compiledActionReturnKind` property available on `ALNRoute`. |
 | `compiledGuardReturnKind` | `ALNRouteInvocationReturnKind` | `nonatomic, assign` | Public `compiledGuardReturnKind` property available on `ALNRoute`. |
 | `compiledInvocationMetadata` | `BOOL` | `nonatomic, assign` | Public `compiledInvocationMetadata` property available on `ALNRoute`. |
