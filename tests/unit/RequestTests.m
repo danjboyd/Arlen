@@ -186,6 +186,51 @@
   }
 }
 
+- (void)testQueryValueForNameReturnsDecodedLastValueAcrossBackends {
+  NSString *raw = @"GET /items/list?name=Peggy+Hill&empty&encoded%20key=value+two&name=Bobby HTTP/1.1\r\n"
+                  "Host: localhost\r\n\r\n";
+  NSData *data = [raw dataUsingEncoding:NSUTF8StringEncoding];
+
+  for (NSNumber *backendValue in [self allBackends]) {
+    ALNHTTPParserBackend backend = (ALNHTTPParserBackend)[backendValue unsignedIntegerValue];
+    NSError *error = nil;
+    ALNRequest *request = [ALNRequest requestFromRawData:data backend:backend error:&error];
+    XCTAssertNil(error, @"backend=%@", [self backendName:backend]);
+    XCTAssertNotNil(request, @"backend=%@", [self backendName:backend]);
+    if (request == nil) {
+      continue;
+    }
+
+    XCTAssertEqualObjects(@"Bobby", [request queryValueForName:@"name"], @"backend=%@", [self backendName:backend]);
+    XCTAssertEqualObjects(@"", [request queryValueForName:@"empty"], @"backend=%@", [self backendName:backend]);
+    XCTAssertEqualObjects(@"value two", [request queryValueForName:@"encoded key"], @"backend=%@", [self backendName:backend]);
+    XCTAssertNil([request queryValueForName:@"missing"], @"backend=%@", [self backendName:backend]);
+  }
+}
+
+- (void)testHeaderValueForNameFindsDeferredHeadersAcrossBackends {
+  NSString *raw = @"GET /items/list HTTP/1.1\r\n"
+                  "Host: localhost\r\n"
+                  "X-Custom-Trace: trace-value\r\n"
+                  "X-Another-Header: another-value\r\n\r\n";
+  NSData *data = [raw dataUsingEncoding:NSUTF8StringEncoding];
+
+  for (NSNumber *backendValue in [self allBackends]) {
+    ALNHTTPParserBackend backend = (ALNHTTPParserBackend)[backendValue unsignedIntegerValue];
+    NSError *error = nil;
+    ALNRequest *request = [ALNRequest requestFromRawData:data backend:backend error:&error];
+    XCTAssertNil(error, @"backend=%@", [self backendName:backend]);
+    XCTAssertNotNil(request, @"backend=%@", [self backendName:backend]);
+    if (request == nil) {
+      continue;
+    }
+
+    XCTAssertEqualObjects(@"trace-value", [request headerValueForName:@"X-Custom-Trace"], @"backend=%@", [self backendName:backend]);
+    XCTAssertEqualObjects(@"trace-value", [request headerValueForName:@"x-custom-trace"], @"backend=%@", [self backendName:backend]);
+    XCTAssertEqualObjects(@"another-value", [request headerValueForName:@"X-Another-Header"], @"backend=%@", [self backendName:backend]);
+  }
+}
+
 - (void)testResolvedParserBackendDefaultsToLLHTTPAndAllowsLegacyOverride {
   unsetenv("ARLEN_HTTP_PARSER_BACKEND");
   ALNHTTPParserBackend expectedDefaultBackend =

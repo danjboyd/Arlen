@@ -1,5 +1,6 @@
 #import "ALNConfig.h"
 
+#import <arpa/inet.h>
 #import <stdlib.h>
 
 static NSString *const ALNConfigErrorDomain = @"Arlen.Config.Error";
@@ -127,6 +128,75 @@ static NSArray *ALNParseCSVExtensions(NSString *value) {
   return ALNNormalizeExtensionList(parts);
 }
 
+static NSString *ALNIPv4StringFromHostAddress(uint32_t value) {
+  return [NSString stringWithFormat:@"%u.%u.%u.%u",
+                                    (unsigned int)((value >> 24) & 0xFF),
+                                    (unsigned int)((value >> 16) & 0xFF),
+                                    (unsigned int)((value >> 8) & 0xFF),
+                                    (unsigned int)(value & 0xFF)];
+}
+
+static NSString *ALNNormalizeTrustedProxyCIDREntry(id rawValue) {
+  if (![rawValue isKindOfClass:[NSString class]]) {
+    return nil;
+  }
+  NSString *trimmed = [(NSString *)rawValue
+      stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+  if ([trimmed length] == 0) {
+    return nil;
+  }
+
+  NSString *addressPart = trimmed;
+  NSInteger prefixLength = 32;
+  NSRange slash = [trimmed rangeOfString:@"/"];
+  if (slash.location != NSNotFound) {
+    addressPart = [trimmed substringToIndex:slash.location];
+    NSString *prefixPart = [trimmed substringFromIndex:(slash.location + 1)];
+    if ([prefixPart length] == 0) {
+      return nil;
+    }
+    NSScanner *scanner = [NSScanner scannerWithString:prefixPart];
+    NSInteger parsedPrefix = -1;
+    if (![scanner scanInteger:&parsedPrefix] || ![scanner isAtEnd] ||
+        parsedPrefix < 0 || parsedPrefix > 32) {
+      return nil;
+    }
+    prefixLength = parsedPrefix;
+  }
+
+  struct in_addr address;
+  if (inet_pton(AF_INET, [addressPart UTF8String], &address) != 1) {
+    return nil;
+  }
+
+  uint32_t hostAddress = ntohl(address.s_addr);
+  uint32_t mask = (prefixLength == 0) ? 0u : (0xFFFFFFFFu << (32 - (uint32_t)prefixLength));
+  uint32_t networkAddress = hostAddress & mask;
+  return [NSString stringWithFormat:@"%@/%ld",
+                                    ALNIPv4StringFromHostAddress(networkAddress),
+                                    (long)prefixLength];
+}
+
+static NSArray *ALNNormalizeTrustedProxyCIDRList(NSArray *values) {
+  NSMutableArray *normalized = [NSMutableArray array];
+  for (id value in values ?: @[]) {
+    NSString *entry = ALNNormalizeTrustedProxyCIDREntry(value);
+    if ([entry length] == 0 || [normalized containsObject:entry]) {
+      continue;
+    }
+    [normalized addObject:entry];
+  }
+  return [NSArray arrayWithArray:normalized];
+}
+
+static NSArray *ALNParseCSVTrustedProxyCIDRs(NSString *value) {
+  if (![value isKindOfClass:[NSString class]] || [value length] == 0) {
+    return @[];
+  }
+  NSArray *parts = [value componentsSeparatedByString:@","];
+  return ALNNormalizeTrustedProxyCIDRList(parts);
+}
+
 static NSString *ALNDefaultClusterNodeID(void) {
   NSString *host = [[[NSProcessInfo processInfo] hostName] lowercaseString];
   host = [host stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
@@ -185,6 +255,7 @@ static NSDictionary *ALNSecurityProfileDefaults(NSString *profileName) {
   if ([normalized isEqualToString:@"strict"]) {
     return @{
       @"trustedProxy" : @(NO),
+      @"trustedProxyCIDRs" : @[],
       @"sessionEnabled" : @(YES),
       @"csrfEnabled" : @(YES),
       @"securityHeadersEnabled" : @(YES),
@@ -193,6 +264,7 @@ static NSDictionary *ALNSecurityProfileDefaults(NSString *profileName) {
   if ([normalized isEqualToString:@"edge"]) {
     return @{
       @"trustedProxy" : @(YES),
+      @"trustedProxyCIDRs" : @[ @"127.0.0.1/32" ],
       @"sessionEnabled" : @(NO),
       @"csrfEnabled" : @(NO),
       @"securityHeadersEnabled" : @(YES),
@@ -200,6 +272,7 @@ static NSDictionary *ALNSecurityProfileDefaults(NSString *profileName) {
   }
   return @{
     @"trustedProxy" : @(NO),
+    @"trustedProxyCIDRs" : @[],
     @"sessionEnabled" : @(NO),
     @"csrfEnabled" : @(NO),
     @"securityHeadersEnabled" : @(YES),
@@ -246,11 +319,16 @@ static NSDictionary *ALNSecurityProfileDefaults(NSString *profileName) {
   NSString *logLevel = ALNEnvValueCompat("ARLEN_LOG_LEVEL", "MOJOOBJC_LOG_LEVEL");
   NSString *trustedProxy =
       ALNEnvValueCompat("ARLEN_TRUSTED_PROXY", "MOJOOBJC_TRUSTED_PROXY");
+  NSString *trustedProxyCIDRs =
+      ALNEnvValueCompat("ARLEN_TRUSTED_PROXY_CIDRS", "MOJOOBJC_TRUSTED_PROXY_CIDRS");
   NSString *performanceLogging = ALNEnvValueCompat("ARLEN_PERFORMANCE_LOGGING",
                                                    "MOJOOBJC_PERFORMANCE_LOGGING");
   NSString *tracePropagationEnabled =
       ALNEnvValueCompat("ARLEN_TRACE_PROPAGATION_ENABLED",
                         "MOJOOBJC_TRACE_PROPAGATION_ENABLED");
+  NSString *responseIdentityHeadersEnabled =
+      ALNEnvValueCompat("ARLEN_RESPONSE_IDENTITY_HEADERS_ENABLED",
+                        "MOJOOBJC_RESPONSE_IDENTITY_HEADERS_ENABLED");
   NSString *healthDetailsEnabled =
       ALNEnvValueCompat("ARLEN_HEALTH_DETAILS_ENABLED",
                         "MOJOOBJC_HEALTH_DETAILS_ENABLED");
@@ -416,6 +494,9 @@ static NSDictionary *ALNSecurityProfileDefaults(NSString *profileName) {
   NSNumber *trustedProxyValue = ALNParseBooleanString(trustedProxy);
   if (trustedProxyValue != nil) {
     config[@"trustedProxy"] = trustedProxyValue;
+  }
+  if ([trustedProxyCIDRs length] > 0) {
+    config[@"trustedProxyCIDRs"] = ALNParseCSVTrustedProxyCIDRs(trustedProxyCIDRs);
   }
   NSNumber *performanceLoggingValue = ALNParseBooleanString(performanceLogging);
   if (performanceLoggingValue != nil) {
@@ -643,6 +724,11 @@ static NSDictionary *ALNSecurityProfileDefaults(NSString *profileName) {
   if (tracePropagationEnabledValue != nil) {
     observability[@"tracePropagationEnabled"] = tracePropagationEnabledValue;
   }
+  NSNumber *responseIdentityHeadersEnabledValue =
+      ALNParseBooleanString(responseIdentityHeadersEnabled);
+  if (responseIdentityHeadersEnabledValue != nil) {
+    observability[@"responseIdentityHeadersEnabled"] = responseIdentityHeadersEnabledValue;
+  }
   NSNumber *healthDetailsEnabledValue = ALNParseBooleanString(healthDetailsEnabled);
   if (healthDetailsEnabledValue != nil) {
     observability[@"healthDetailsEnabled"] = healthDetailsEnabledValue;
@@ -773,6 +859,26 @@ static NSDictionary *ALNSecurityProfileDefaults(NSString *profileName) {
 
   if (config[@"trustedProxy"] == nil) {
     config[@"trustedProxy"] = securityProfileDefaults[@"trustedProxy"] ?: @(NO);
+  }
+  NSArray *configuredTrustedProxyCIDRs =
+      [config[@"trustedProxyCIDRs"] isKindOfClass:[NSArray class]]
+          ? ALNNormalizeTrustedProxyCIDRList(config[@"trustedProxyCIDRs"])
+          : @[];
+  if ([configuredTrustedProxyCIDRs count] == 0) {
+    NSArray *defaultTrustedProxyCIDRs =
+        [securityProfileDefaults[@"trustedProxyCIDRs"] isKindOfClass:[NSArray class]]
+            ? ALNNormalizeTrustedProxyCIDRList(securityProfileDefaults[@"trustedProxyCIDRs"])
+            : @[];
+    if ([config[@"trustedProxy"] boolValue]) {
+      if ([defaultTrustedProxyCIDRs count] == 0) {
+        defaultTrustedProxyCIDRs = @[ @"127.0.0.1/32" ];
+      }
+      config[@"trustedProxyCIDRs"] = defaultTrustedProxyCIDRs;
+    } else {
+      config[@"trustedProxyCIDRs"] = @[];
+    }
+  } else {
+    config[@"trustedProxyCIDRs"] = configuredTrustedProxyCIDRs;
   }
   if (config[@"performanceLogging"] == nil) {
     config[@"performanceLogging"] = @(YES);
@@ -993,6 +1099,9 @@ static NSDictionary *ALNSecurityProfileDefaults(NSString *profileName) {
   if (finalObservability[@"tracePropagationEnabled"] == nil) {
     finalObservability[@"tracePropagationEnabled"] = @(YES);
   }
+  if (finalObservability[@"responseIdentityHeadersEnabled"] == nil) {
+    finalObservability[@"responseIdentityHeadersEnabled"] = @(YES);
+  }
   if (finalObservability[@"healthDetailsEnabled"] == nil) {
     finalObservability[@"healthDetailsEnabled"] = @(YES);
   }
@@ -1051,6 +1160,14 @@ static NSDictionary *ALNSecurityProfileDefaults(NSString *profileName) {
   config[@"logLevel"] = resolvedLogLevel;
   config[@"securityProfile"] = ALNNormalizedSecurityProfileName(config[@"securityProfile"]);
   config[@"trustedProxy"] = @([config[@"trustedProxy"] boolValue]);
+  NSArray *normalizedTrustedProxyCIDRs =
+      ALNNormalizeTrustedProxyCIDRList([config[@"trustedProxyCIDRs"] isKindOfClass:[NSArray class]]
+                                           ? config[@"trustedProxyCIDRs"]
+                                           : @[]);
+  if ([normalizedTrustedProxyCIDRs count] == 0 && [config[@"trustedProxy"] boolValue]) {
+    normalizedTrustedProxyCIDRs = @[ @"127.0.0.1/32" ];
+  }
+  config[@"trustedProxyCIDRs"] = normalizedTrustedProxyCIDRs;
   config[@"performanceLogging"] = @([config[@"performanceLogging"] boolValue]);
   config[@"serveStatic"] = @([config[@"serveStatic"] boolValue]);
   NSArray *normalizedStaticAllowExtensions =
@@ -1222,6 +1339,8 @@ static NSDictionary *ALNSecurityProfileDefaults(NSString *profileName) {
 
   finalObservability[@"tracePropagationEnabled"] =
       @([finalObservability[@"tracePropagationEnabled"] boolValue]);
+  finalObservability[@"responseIdentityHeadersEnabled"] =
+      @([finalObservability[@"responseIdentityHeadersEnabled"] boolValue]);
   finalObservability[@"healthDetailsEnabled"] =
       @([finalObservability[@"healthDetailsEnabled"] boolValue]);
   finalObservability[@"readinessRequiresStartup"] =

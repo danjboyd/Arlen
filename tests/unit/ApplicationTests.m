@@ -59,6 +59,12 @@
   };
 }
 
+- (id)requestIDFromStash:(ALNContext *)ctx {
+  return @{
+    @"request_id" : ctx.stash[@"request_id"] ?: @"",
+  };
+}
+
 - (id)array:(ALNContext *)ctx {
   (void)ctx;
   return @[ @"a", @"b" ];
@@ -178,6 +184,67 @@
 
 @end
 
+static NSUInteger AppFastPathControllerInitCount = 0;
+static NSUInteger AppFastPathControllerSlowInvocationCount = 0;
+
+@interface AppFastPathController : ALNController
+
++ (void)resetCounters;
++ (NSUInteger)initCount;
++ (NSUInteger)slowInvocationCount;
+
+@end
+
+@implementation AppFastPathController
+
++ (void)resetCounters {
+  AppFastPathControllerInitCount = 0;
+  AppFastPathControllerSlowInvocationCount = 0;
+}
+
++ (NSUInteger)initCount {
+  return AppFastPathControllerInitCount;
+}
+
++ (NSUInteger)slowInvocationCount {
+  return AppFastPathControllerSlowInvocationCount;
+}
+
+- (instancetype)init {
+  self = [super init];
+  if (self) {
+    AppFastPathControllerInitCount++;
+  }
+  return self;
+}
+
++ (BOOL)aln_fastRoute_pingRequest:(ALNRequest *)request
+                         response:(ALNResponse *)response
+                           params:(NSDictionary *)params {
+  NSString *name = [params[@"name"] isKindOfClass:[NSString class]] ? params[@"name"] : @"";
+  NSString *path = [request.path isKindOfClass:[NSString class]] ? request.path : @"";
+  NSString *json = [NSString stringWithFormat:@"{\"mode\":\"fast\",\"name\":\"%@\",\"path\":\"%@\"}",
+                                              name,
+                                              path];
+  NSData *payload = [json dataUsingEncoding:NSUTF8StringEncoding];
+  [response setDataBody:payload ?: [NSData data] contentType:@"application/json; charset=utf-8"];
+  [response setHeader:@"X-Fast-Path" value:@"yes"];
+  response.statusCode = 200;
+  response.committed = YES;
+  return YES;
+}
+
+- (id)ping:(ALNContext *)ctx {
+  AppFastPathControllerSlowInvocationCount++;
+  return @{
+    @"mode" : @"slow",
+    @"name" : [ctx.params[@"name"] isKindOfClass:[NSString class]] ? ctx.params[@"name"] : @"",
+    @"path" : [ctx.request.path isKindOfClass:[NSString class]] ? ctx.request.path : @"",
+  };
+}
+
+@end
+
 @interface AppTraceCaptureExporter : NSObject <ALNTraceExporter>
 
 @property(nonatomic, strong) NSDictionary *lastTrace;
@@ -245,6 +312,11 @@
                       name:@"array"
            controllerClass:[AppJSONController class]
                     action:@"array"];
+  [app registerRouteMethod:@"GET"
+                      path:@"/request-id"
+                      name:@"request_id"
+           controllerClass:[AppJSONController class]
+                    action:@"requestIDFromStash"];
   [app registerRouteMethod:@"GET"
                       path:@"/explicit"
                       name:@"explicit"
@@ -831,6 +903,146 @@
   XCTAssertTrue([[response headerForName:@"X-Correlation-Id"] length] > 0);
   XCTAssertNil([response headerForName:@"X-Trace-Id"]);
   XCTAssertNil([response headerForName:@"traceparent"]);
+}
+
+- (void)testResponseIdentityHeadersCanBeDisabledByConfig {
+  ALNApplication *app = [[ALNApplication alloc] initWithConfig:@{
+    @"environment" : @"test",
+    @"logFormat" : @"json",
+    @"observability" : @{
+      @"tracePropagationEnabled" : @(NO),
+      @"responseIdentityHeadersEnabled" : @(NO),
+    },
+  }];
+  [app registerRouteMethod:@"GET"
+                      path:@"/dict"
+                      name:@"dict"
+           controllerClass:[AppJSONController class]
+                    action:@"dict"];
+
+  ALNResponse *response = [app dispatchRequest:[self requestForPath:@"/dict"]];
+  XCTAssertEqual((NSInteger)200, response.statusCode);
+  XCTAssertNil([response headerForName:@"X-Request-Id"]);
+  XCTAssertNil([response headerForName:@"X-Correlation-Id"]);
+}
+
+- (void)testRequestIDRemainsAvailableInStashWhenIdentityHeadersDisabled {
+  ALNApplication *app = [[ALNApplication alloc] initWithConfig:@{
+    @"environment" : @"test",
+    @"logFormat" : @"json",
+    @"observability" : @{
+      @"tracePropagationEnabled" : @(NO),
+      @"responseIdentityHeadersEnabled" : @(NO),
+    },
+  }];
+  [app registerRouteMethod:@"GET"
+                      path:@"/request-id"
+                      name:@"request_id"
+           controllerClass:[AppJSONController class]
+                    action:@"requestIDFromStash"];
+
+  ALNResponse *response = [app dispatchRequest:[self requestForPath:@"/request-id"]];
+  XCTAssertEqual((NSInteger)200, response.statusCode);
+  XCTAssertNil([response headerForName:@"X-Request-Id"]);
+  XCTAssertNil([response headerForName:@"X-Correlation-Id"]);
+
+  NSError *error = nil;
+  NSDictionary *json = [NSJSONSerialization JSONObjectWithData:response.bodyData
+                                                       options:0
+                                                         error:&error];
+  XCTAssertNil(error);
+  NSString *requestID = [json[@"request_id"] isKindOfClass:[NSString class]] ? json[@"request_id"] : @"";
+  XCTAssertTrue([self isLowerHexString:requestID length:32]);
+}
+
+- (void)testFastRouteSkipsPerRequestControllerAllocationWhenRouteIsEligible {
+  [AppFastPathController resetCounters];
+
+  ALNApplication *app = [[ALNApplication alloc] initWithConfig:@{
+    @"environment" : @"test",
+    @"logFormat" : @"json",
+    @"performanceLogging" : @(NO),
+    @"securityHeaders" : @{
+      @"enabled" : @(NO),
+    },
+    @"observability" : @{
+      @"tracePropagationEnabled" : @(NO),
+      @"responseIdentityHeadersEnabled" : @(NO),
+    },
+  }];
+  [app registerRouteMethod:@"GET"
+                      path:@"/fast/:name"
+                      name:@"fast_ping"
+           controllerClass:[AppFastPathController class]
+                    action:@"ping"];
+
+  ALNResponse *first = [app dispatchRequest:[self requestForPath:@"/fast/bob"]];
+  XCTAssertEqual((NSInteger)200, first.statusCode);
+  XCTAssertEqualObjects(@"yes", [first headerForName:@"X-Fast-Path"]);
+  XCTAssertEqualObjects(@"application/json; charset=utf-8", [first headerForName:@"Content-Type"]);
+
+  NSError *error = nil;
+  NSDictionary *firstJSON = [NSJSONSerialization JSONObjectWithData:first.bodyData
+                                                            options:0
+                                                              error:&error];
+  XCTAssertNil(error);
+  XCTAssertEqualObjects(@"fast", firstJSON[@"mode"]);
+  XCTAssertEqualObjects(@"bob", firstJSON[@"name"]);
+  XCTAssertEqualObjects(@"/fast/bob", firstJSON[@"path"]);
+  XCTAssertEqual((NSUInteger)1, [AppFastPathController initCount]);
+  XCTAssertEqual((NSUInteger)0, [AppFastPathController slowInvocationCount]);
+
+  ALNResponse *second = [app dispatchRequest:[self requestForPath:@"/fast/alice"]];
+  XCTAssertEqual((NSInteger)200, second.statusCode);
+  XCTAssertEqualObjects(@"yes", [second headerForName:@"X-Fast-Path"]);
+
+  error = nil;
+  NSDictionary *secondJSON = [NSJSONSerialization JSONObjectWithData:second.bodyData
+                                                             options:0
+                                                               error:&error];
+  XCTAssertNil(error);
+  XCTAssertEqualObjects(@"fast", secondJSON[@"mode"]);
+  XCTAssertEqualObjects(@"alice", secondJSON[@"name"]);
+  XCTAssertEqual((NSUInteger)1, [AppFastPathController initCount]);
+  XCTAssertEqual((NSUInteger)0, [AppFastPathController slowInvocationCount]);
+}
+
+- (void)testFastRouteFallsBackToSlowPathWhenMiddlewareIsPresent {
+  [AppFastPathController resetCounters];
+
+  ALNApplication *app = [[ALNApplication alloc] initWithConfig:@{
+    @"environment" : @"test",
+    @"logFormat" : @"json",
+    @"performanceLogging" : @(NO),
+    @"securityHeaders" : @{
+      @"enabled" : @(NO),
+    },
+    @"observability" : @{
+      @"tracePropagationEnabled" : @(NO),
+      @"responseIdentityHeadersEnabled" : @(NO),
+    },
+  }];
+  [app registerRouteMethod:@"GET"
+                      path:@"/fast/:name"
+                      name:@"fast_ping"
+           controllerClass:[AppFastPathController class]
+                    action:@"ping"];
+  [app addMiddleware:[[AppHeaderMiddleware alloc] init]];
+
+  ALNResponse *response = [app dispatchRequest:[self requestForPath:@"/fast/bob"]];
+  XCTAssertEqual((NSInteger)200, response.statusCode);
+  XCTAssertNil([response headerForName:@"X-Fast-Path"]);
+  XCTAssertEqualObjects(@"ran", [response headerForName:@"X-Middleware"]);
+
+  NSError *error = nil;
+  NSDictionary *json = [NSJSONSerialization JSONObjectWithData:response.bodyData
+                                                       options:0
+                                                         error:&error];
+  XCTAssertNil(error);
+  XCTAssertEqualObjects(@"slow", json[@"mode"]);
+  XCTAssertEqualObjects(@"bob", json[@"name"]);
+  XCTAssertEqual((NSUInteger)2, [AppFastPathController initCount]);
+  XCTAssertEqual((NSUInteger)1, [AppFastPathController slowInvocationCount]);
 }
 
 - (void)testHealthzJSONPayloadIncludesDeterministicSignalChecks {

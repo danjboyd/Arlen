@@ -109,7 +109,11 @@ static BOOL ALNConfigBool(NSDictionary *config, NSString *key, BOOL defaultValue
 }
 
 static double ALNNowMilliseconds(void) {
-  return [[NSDate date] timeIntervalSinceReferenceDate] * 1000.0;
+  struct timeval tv;
+  if (gettimeofday(&tv, NULL) != 0) {
+    return 0.0;
+  }
+  return ((double)tv.tv_sec * 1000.0) + ((double)tv.tv_usec / 1000.0);
 }
 
 static NSUInteger ALNConfigUInt(NSDictionary *dict, NSString *key, NSUInteger defaultValue) {
@@ -1662,12 +1666,100 @@ static NSString *ALNFirstForwardedFor(NSString *value) {
   return ALNTrimmedString(parts[0]);
 }
 
+static BOOL ALNParseIPv4HostAddress(NSString *value, uint32_t *hostAddressOut) {
+  if (![value isKindOfClass:[NSString class]] || [value length] == 0) {
+    return NO;
+  }
+  struct in_addr address;
+  if (inet_pton(AF_INET, [value UTF8String], &address) != 1) {
+    return NO;
+  }
+  if (hostAddressOut != NULL) {
+    *hostAddressOut = ntohl(address.s_addr);
+  }
+  return YES;
+}
+
+static BOOL ALNParseTrustedProxyCIDR(NSString *value,
+                                     uint32_t *networkAddressOut,
+                                     NSUInteger *prefixLengthOut) {
+  if (![value isKindOfClass:[NSString class]] || [value length] == 0) {
+    return NO;
+  }
+  NSString *trimmed =
+      [value stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+  if ([trimmed length] == 0) {
+    return NO;
+  }
+
+  NSString *addressPart = trimmed;
+  NSInteger prefixLength = 32;
+  NSRange slash = [trimmed rangeOfString:@"/"];
+  if (slash.location != NSNotFound) {
+    addressPart = [trimmed substringToIndex:slash.location];
+    NSString *prefixPart = [trimmed substringFromIndex:(slash.location + 1)];
+    NSScanner *scanner = [NSScanner scannerWithString:prefixPart];
+    NSInteger parsedPrefix = -1;
+    if (![scanner scanInteger:&parsedPrefix] || ![scanner isAtEnd] ||
+        parsedPrefix < 0 || parsedPrefix > 32) {
+      return NO;
+    }
+    prefixLength = parsedPrefix;
+  }
+
+  uint32_t hostAddress = 0;
+  if (!ALNParseIPv4HostAddress(addressPart, &hostAddress)) {
+    return NO;
+  }
+
+  uint32_t mask =
+      (prefixLength == 0) ? 0u : (0xFFFFFFFFu << (32 - (uint32_t)prefixLength));
+  if (networkAddressOut != NULL) {
+    *networkAddressOut = hostAddress & mask;
+  }
+  if (prefixLengthOut != NULL) {
+    *prefixLengthOut = (NSUInteger)prefixLength;
+  }
+  return YES;
+}
+
+static BOOL ALNRemoteAddressMatchesTrustedProxyCIDRs(NSString *remoteAddress, NSArray *trustedProxyCIDRs) {
+  if (![trustedProxyCIDRs isKindOfClass:[NSArray class]] || [trustedProxyCIDRs count] == 0) {
+    return NO;
+  }
+  uint32_t remoteHostAddress = 0;
+  if (!ALNParseIPv4HostAddress(remoteAddress, &remoteHostAddress)) {
+    return NO;
+  }
+
+  for (id value in trustedProxyCIDRs) {
+    uint32_t networkAddress = 0;
+    NSUInteger prefixLength = 32;
+    if (!ALNParseTrustedProxyCIDR(value, &networkAddress, &prefixLength)) {
+      continue;
+    }
+    uint32_t mask =
+        (prefixLength == 0) ? 0u : (0xFFFFFFFFu << (32 - (uint32_t)prefixLength));
+    if ((remoteHostAddress & mask) == networkAddress) {
+      return YES;
+    }
+  }
+  return NO;
+}
+
 static void ALNApplyProxyMetadata(ALNRequest *request, NSDictionary *config) {
   request.effectiveRemoteAddress = request.remoteAddress ?: @"";
   request.scheme = @"http";
 
   BOOL trustedProxy = ALNConfigBool(config, @"trustedProxy", NO);
   if (!trustedProxy) {
+    return;
+  }
+
+  NSArray *trustedProxyCIDRs = [config[@"trustedProxyCIDRs"] isKindOfClass:[NSArray class]]
+                                   ? config[@"trustedProxyCIDRs"]
+                                   : @[];
+  if (!ALNRemoteAddressMatchesTrustedProxyCIDRs(request.remoteAddress, trustedProxyCIDRs)) {
     return;
   }
 
@@ -1790,12 +1882,34 @@ static NSString *ALNResolvedStaticDirectory(NSString *directory, NSString *publi
   return [[base stringByAppendingPathComponent:trimmed] stringByStandardizingPath];
 }
 
+static NSString *ALNCanonicalStaticPath(NSString *path) {
+  if (![path isKindOfClass:[NSString class]] || [path length] == 0) {
+    return nil;
+  }
+  NSString *canonical = [[path stringByResolvingSymlinksInPath] stringByStandardizingPath];
+  return ([canonical length] > 0) ? canonical : nil;
+}
+
 static BOOL ALNStaticCandidateWithinRoot(NSString *candidate, NSString *root) {
   if ([candidate length] == 0 || [root length] == 0) {
     return NO;
   }
   return [candidate isEqualToString:root] ||
          [candidate hasPrefix:[root stringByAppendingString:@"/"]];
+}
+
+static BOOL ALNResolveStaticCandidateWithinRoot(NSString *candidatePath,
+                                                NSString *canonicalRoot,
+                                                NSString **resolvedCandidateOut) {
+  NSString *canonicalCandidate = ALNCanonicalStaticPath(candidatePath);
+  if ([canonicalCandidate length] == 0 ||
+      !ALNStaticCandidateWithinRoot(canonicalCandidate, canonicalRoot)) {
+    return NO;
+  }
+  if (resolvedCandidateOut != NULL) {
+    *resolvedCandidateOut = canonicalCandidate;
+  }
+  return YES;
 }
 
 static BOOL ALNPathWithinStaticPrefix(NSString *requestPath,
@@ -1889,16 +2003,16 @@ static ALNResponse *ALNStaticResponseForMount(ALNRequest *request,
   }
 
   NSString *standardRoot = ALNResolvedStaticDirectory(directory, publicRoot);
-  if ([standardRoot length] == 0) {
+  NSString *canonicalRoot = ALNCanonicalStaticPath(standardRoot);
+  if ([canonicalRoot length] == 0) {
     return ALNStaticNotFoundResponse();
   }
 
   NSString *candidatePath = ([relativePath length] > 0)
                                 ? [standardRoot stringByAppendingPathComponent:relativePath]
                                 : standardRoot;
-  NSString *standardCandidate = [candidatePath stringByStandardizingPath];
-
-  if (!ALNStaticCandidateWithinRoot(standardCandidate, standardRoot)) {
+  NSString *standardCandidate = nil;
+  if (!ALNResolveStaticCandidateWithinRoot(candidatePath, canonicalRoot, &standardCandidate)) {
     return ALNStaticNotFoundResponse();
   }
 
@@ -1934,6 +2048,12 @@ static ALNResponse *ALNStaticResponseForMount(ALNRequest *request,
     }
     resolvedFilePath = standardCandidate;
   }
+
+  NSString *canonicalResolvedFilePath = nil;
+  if (!ALNResolveStaticCandidateWithinRoot(resolvedFilePath, canonicalRoot, &canonicalResolvedFilePath)) {
+    return ALNStaticNotFoundResponse();
+  }
+  resolvedFilePath = canonicalResolvedFilePath;
 
   if (![resolvedFilePath length] || !ALNStaticExtensionAllowed(resolvedFilePath, allowExtensions)) {
     return ALNStaticNotFoundResponse();
@@ -2028,8 +2148,8 @@ static double ALNSendResponse(int clientFd, ALNResponse *response, BOOL performa
 
   double writeStart = ALNNowMilliseconds();
   NSUInteger headerLength = [headerData length];
-  NSData *bodyData = response.bodyData ?: [NSData data];
-  NSUInteger bodyLength = [bodyData length];
+  NSData *bodyData = [response bodyDataForTransmission];
+  NSUInteger bodyLength = [response bodyLength];
   NSString *fileBodyPath = response.fileBodyPath;
   unsigned long long fileBodyLength = response.fileBodyLength;
   unsigned long long fileBodyDevice = response.fileBodyDevice;

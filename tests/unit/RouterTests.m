@@ -45,6 +45,24 @@
   XCTAssertEqualObjects(match.params[@"name"], @"hank");
 }
 
+- (void)testDirectMatchAPIProvidesRouteAndParams {
+  ALNRouter *router = [[ALNRouter alloc] init];
+  [router addRouteMethod:@"GET"
+                    path:@"/api/echo/:name"
+                    name:@"api_echo"
+         controllerClass:[RouterDummyController class]
+                  action:@"index"];
+
+  NSDictionary *params = nil;
+  ALNRoute *route = [router matchMethod:@"GET"
+                                   path:@"/api/echo/hank"
+                                 format:nil
+                                 params:&params];
+  XCTAssertNotNil(route);
+  XCTAssertEqualObjects(@"api_echo", route.name);
+  XCTAssertEqualObjects(@"hank", params[@"name"]);
+}
+
 - (void)testParameterizedRouteFastPathHandlesTrailingSlashAndLongSegments {
   ALNRouter *router = [[ALNRouter alloc] init];
   [router addRouteMethod:@"GET"

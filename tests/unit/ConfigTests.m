@@ -89,6 +89,7 @@
   XCTAssertEqualObjects(@"development", config[@"environment"]);
   XCTAssertEqualObjects(@"balanced", config[@"securityProfile"]);
   XCTAssertEqualObjects(@(NO), config[@"trustedProxy"]);
+  XCTAssertEqualObjects((@[]), config[@"trustedProxyCIDRs"]);
   XCTAssertEqualObjects(@(YES), config[@"serveStatic"]);
   XCTAssertEqual((NSInteger)128, [config[@"listenBacklog"] integerValue]);
   XCTAssertEqual((NSInteger)30, [config[@"connectionTimeoutSeconds"] integerValue]);
@@ -146,6 +147,7 @@
 
   NSDictionary *observability = config[@"observability"];
   XCTAssertEqualObjects(@(YES), observability[@"tracePropagationEnabled"]);
+  XCTAssertEqualObjects(@(YES), observability[@"responseIdentityHeadersEnabled"]);
   XCTAssertEqualObjects(@(YES), observability[@"healthDetailsEnabled"]);
   XCTAssertEqualObjects(@(NO), observability[@"readinessRequiresStartup"]);
   XCTAssertEqualObjects(@(NO), observability[@"readinessRequiresClusterQuorum"]);
@@ -232,6 +234,7 @@
   setenv("ARLEN_MAX_REALTIME_SUBSCRIBERS", "41", 1);
   setenv("ARLEN_MAX_REALTIME_SUBSCRIBERS_PER_CHANNEL", "7", 1);
   setenv("ARLEN_TRUSTED_PROXY", "true", 1);
+  setenv("ARLEN_TRUSTED_PROXY_CIDRS", "127.0.0.1, 10.1.2.3/8", 1);
   setenv("ARLEN_SERVE_STATIC", "0", 1);
   setenv("ARLEN_LISTEN_BACKLOG", "2222", 1);
   setenv("ARLEN_CONNECTION_TIMEOUT_SECONDS", "45", 1);
@@ -273,6 +276,7 @@
   setenv("ARLEN_I18N_FALLBACK_LOCALE", "en", 1);
   setenv("ARLEN_PAGE_STATE_COMPAT_ENABLED", "1", 1);
   setenv("ARLEN_TRACE_PROPAGATION_ENABLED", "0", 1);
+  setenv("ARLEN_RESPONSE_IDENTITY_HEADERS_ENABLED", "0", 1);
   setenv("ARLEN_HEALTH_DETAILS_ENABLED", "0", 1);
   setenv("ARLEN_READINESS_REQUIRES_STARTUP", "1", 1);
   setenv("ARLEN_READINESS_REQUIRES_CLUSTER_QUORUM", "1", 1);
@@ -302,6 +306,7 @@
   unsetenv("ARLEN_MAX_REALTIME_SUBSCRIBERS");
   unsetenv("ARLEN_MAX_REALTIME_SUBSCRIBERS_PER_CHANNEL");
   unsetenv("ARLEN_TRUSTED_PROXY");
+  unsetenv("ARLEN_TRUSTED_PROXY_CIDRS");
   unsetenv("ARLEN_SERVE_STATIC");
   unsetenv("ARLEN_LISTEN_BACKLOG");
   unsetenv("ARLEN_CONNECTION_TIMEOUT_SECONDS");
@@ -343,6 +348,7 @@
   unsetenv("ARLEN_I18N_FALLBACK_LOCALE");
   unsetenv("ARLEN_PAGE_STATE_COMPAT_ENABLED");
   unsetenv("ARLEN_TRACE_PROPAGATION_ENABLED");
+  unsetenv("ARLEN_RESPONSE_IDENTITY_HEADERS_ENABLED");
   unsetenv("ARLEN_HEALTH_DETAILS_ENABLED");
   unsetenv("ARLEN_READINESS_REQUIRES_STARTUP");
   unsetenv("ARLEN_READINESS_REQUIRES_CLUSTER_QUORUM");
@@ -371,6 +377,7 @@
   XCTAssertEqualObjects(@"strict", config[@"securityProfile"]);
   XCTAssertEqualObjects(@"warn", config[@"logLevel"]);
   XCTAssertEqualObjects(@(YES), config[@"trustedProxy"]);
+  XCTAssertEqualObjects((@[ @"127.0.0.1/32", @"10.0.0.0/8" ]), config[@"trustedProxyCIDRs"]);
   XCTAssertEqualObjects(@(NO), config[@"serveStatic"]);
   XCTAssertEqual((NSInteger)2222, [config[@"listenBacklog"] integerValue]);
   XCTAssertEqual((NSInteger)45, [config[@"connectionTimeoutSeconds"] integerValue]);
@@ -431,6 +438,7 @@
 
   NSDictionary *observability = config[@"observability"];
   XCTAssertEqualObjects(@(NO), observability[@"tracePropagationEnabled"]);
+  XCTAssertEqualObjects(@(NO), observability[@"responseIdentityHeadersEnabled"]);
   XCTAssertEqualObjects(@(NO), observability[@"healthDetailsEnabled"]);
   XCTAssertEqualObjects(@(YES), observability[@"readinessRequiresStartup"]);
   XCTAssertEqualObjects(@(YES), observability[@"readinessRequiresClusterQuorum"]);
@@ -477,6 +485,7 @@
   setenv("MOJOOBJC_MAX_QUEUED_HTTP_CONNECTIONS", "9", 1);
   setenv("MOJOOBJC_MAX_REALTIME_SUBSCRIBERS", "17", 1);
   setenv("MOJOOBJC_MAX_REALTIME_SUBSCRIBERS_PER_CHANNEL", "4", 1);
+  setenv("MOJOOBJC_TRUSTED_PROXY_CIDRS", "127.0.0.1/32,192.0.2.8", 1);
   setenv("MOJOOBJC_LISTEN_BACKLOG", "9004", 1);
   setenv("MOJOOBJC_CONNECTION_TIMEOUT_SECONDS", "31", 1);
   setenv("MOJOOBJC_ENABLE_REUSEPORT", "1", 1);
@@ -491,6 +500,7 @@
   setenv("MOJOOBJC_RATE_LIMIT_ENABLED", "1", 1);
   setenv("MOJOOBJC_RATE_LIMIT_REQUESTS", "55", 1);
   setenv("MOJOOBJC_TRACE_PROPAGATION_ENABLED", "0", 1);
+  setenv("MOJOOBJC_RESPONSE_IDENTITY_HEADERS_ENABLED", "0", 1);
   setenv("MOJOOBJC_HEALTH_DETAILS_ENABLED", "0", 1);
   setenv("MOJOOBJC_READINESS_REQUIRES_STARTUP", "1", 1);
   setenv("MOJOOBJC_READINESS_REQUIRES_CLUSTER_QUORUM", "1", 1);
@@ -522,6 +532,7 @@
   unsetenv("MOJOOBJC_MAX_QUEUED_HTTP_CONNECTIONS");
   unsetenv("MOJOOBJC_MAX_REALTIME_SUBSCRIBERS");
   unsetenv("MOJOOBJC_MAX_REALTIME_SUBSCRIBERS_PER_CHANNEL");
+  unsetenv("MOJOOBJC_TRUSTED_PROXY_CIDRS");
   unsetenv("MOJOOBJC_LISTEN_BACKLOG");
   unsetenv("MOJOOBJC_CONNECTION_TIMEOUT_SECONDS");
   unsetenv("MOJOOBJC_ENABLE_REUSEPORT");
@@ -536,6 +547,7 @@
   unsetenv("MOJOOBJC_RATE_LIMIT_ENABLED");
   unsetenv("MOJOOBJC_RATE_LIMIT_REQUESTS");
   unsetenv("MOJOOBJC_TRACE_PROPAGATION_ENABLED");
+  unsetenv("MOJOOBJC_RESPONSE_IDENTITY_HEADERS_ENABLED");
   unsetenv("MOJOOBJC_HEALTH_DETAILS_ENABLED");
   unsetenv("MOJOOBJC_READINESS_REQUIRES_STARTUP");
   unsetenv("MOJOOBJC_READINESS_REQUIRES_CLUSTER_QUORUM");
@@ -566,6 +578,7 @@
   XCTAssertEqual((NSInteger)17, [runtimeLimits[@"maxRealtimeTotalSubscribers"] integerValue]);
   XCTAssertEqual((NSInteger)4, [runtimeLimits[@"maxRealtimeChannelSubscribers"] integerValue]);
   XCTAssertEqualObjects(@(YES), config[@"trustedProxy"]);
+  XCTAssertEqualObjects((@[ @"127.0.0.1/32", @"192.0.2.8/32" ]), config[@"trustedProxyCIDRs"]);
   XCTAssertEqual((NSInteger)9004, [config[@"listenBacklog"] integerValue]);
   XCTAssertEqual((NSInteger)31, [config[@"connectionTimeoutSeconds"] integerValue]);
   XCTAssertEqualObjects(@(YES), config[@"enableReusePort"]);
@@ -586,6 +599,7 @@
   XCTAssertEqual((NSInteger)55, [rateLimit[@"requests"] integerValue]);
   NSDictionary *observability = config[@"observability"];
   XCTAssertEqualObjects(@(NO), observability[@"tracePropagationEnabled"]);
+  XCTAssertEqualObjects(@(NO), observability[@"responseIdentityHeadersEnabled"]);
   XCTAssertEqualObjects(@(NO), observability[@"healthDetailsEnabled"]);
   XCTAssertEqualObjects(@(YES), observability[@"readinessRequiresStartup"]);
   XCTAssertEqualObjects(@(YES), observability[@"readinessRequiresClusterQuorum"]);
@@ -665,6 +679,7 @@
   XCTAssertNil(error);
   XCTAssertEqualObjects(@"strict", strictConfig[@"securityProfile"]);
   XCTAssertEqualObjects(@(NO), strictConfig[@"trustedProxy"]);
+  XCTAssertEqualObjects((@[]), strictConfig[@"trustedProxyCIDRs"]);
   NSDictionary *strictSession = strictConfig[@"session"];
   NSDictionary *strictCSRF = strictConfig[@"csrf"];
   NSDictionary *strictSecurityHeaders = strictConfig[@"securityHeaders"];
@@ -682,6 +697,7 @@
   XCTAssertNil(error);
   XCTAssertEqualObjects(@"edge", edgeConfig[@"securityProfile"]);
   XCTAssertEqualObjects(@(YES), edgeConfig[@"trustedProxy"]);
+  XCTAssertEqualObjects((@[ @"127.0.0.1/32" ]), edgeConfig[@"trustedProxyCIDRs"]);
   NSDictionary *edgeSession = edgeConfig[@"session"];
   NSDictionary *edgeCSRF = edgeConfig[@"csrf"];
   NSDictionary *edgeSecurityHeaders = edgeConfig[@"securityHeaders"];
@@ -699,6 +715,7 @@
   XCTAssertNil(error);
   XCTAssertEqualObjects(@"balanced", fallbackConfig[@"securityProfile"]);
   XCTAssertEqualObjects(@(NO), fallbackConfig[@"trustedProxy"]);
+  XCTAssertEqualObjects((@[]), fallbackConfig[@"trustedProxyCIDRs"]);
   NSDictionary *fallbackSession = fallbackConfig[@"session"];
   NSDictionary *fallbackCSRF = fallbackConfig[@"csrf"];
   NSDictionary *fallbackSecurityHeaders = fallbackConfig[@"securityHeaders"];

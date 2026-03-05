@@ -238,19 +238,14 @@ static BOOL ALNETagListMatches(NSString *ifNoneMatchHeader, NSString *etag) {
   if ([name length] == 0) {
     return nil;
   }
-  return ALNStringFromValue(self.request.queryParams[name]);
+  return ALNStringFromValue([self.request queryValueForName:name]);
 }
 
 - (NSString *)headerValueForName:(NSString *)name {
   if ([name length] == 0) {
     return nil;
   }
-  NSString *normalized = [[name lowercaseString] copy];
-  id value = self.request.headers[normalized];
-  if (value == nil) {
-    value = self.request.headers[name];
-  }
-  return ALNStringFromValue(value);
+  return ALNStringFromValue([self.request headerValueForName:name]);
 }
 
 - (NSNumber *)queryIntegerForName:(NSString *)name {
@@ -337,7 +332,7 @@ static BOOL ALNETagListMatches(NSString *ifNoneMatchHeader, NSString *etag) {
   }
 
   self.response.statusCode = 304;
-  [self.response.bodyData setLength:0];
+  [self.response clearBody];
   self.response.committed = YES;
   return YES;
 }

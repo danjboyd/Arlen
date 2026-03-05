@@ -99,6 +99,36 @@
   XCTAssertTrue(first == second);
 }
 
+- (void)testSharedSerializedHeaderCacheReusesStandardHeaderBlocksAcrossResponses {
+  ALNResponse *first = [[ALNResponse alloc] init];
+  [first appendText:@"ok"];
+  [first setHeader:@"Connection" value:@"keep-alive"];
+
+  ALNResponse *second = [[ALNResponse alloc] init];
+  [second appendText:@"ok"];
+  [second setHeader:@"Connection" value:@"keep-alive"];
+
+  NSData *firstHeader = [first serializedHeaderData];
+  NSData *secondHeader = [second serializedHeaderData];
+  XCTAssertTrue(firstHeader == secondHeader);
+}
+
+- (void)testSharedSerializedHeaderCacheDoesNotApplyToCustomHeaderLayouts {
+  ALNResponse *first = [[ALNResponse alloc] init];
+  [first appendText:@"ok"];
+  [first setHeader:@"Connection" value:@"keep-alive"];
+  [first setHeader:@"X-Test" value:@"1"];
+
+  ALNResponse *second = [[ALNResponse alloc] init];
+  [second appendText:@"ok"];
+  [second setHeader:@"Connection" value:@"keep-alive"];
+  [second setHeader:@"X-Test" value:@"1"];
+
+  NSData *firstHeader = [first serializedHeaderData];
+  NSData *secondHeader = [second serializedHeaderData];
+  XCTAssertFalse(firstHeader == secondHeader);
+}
+
 - (void)testSetDataBodySetsBinaryContentTypeAndLength {
   ALNResponse *response = [[ALNResponse alloc] init];
   const unsigned char bytes[] = { 0x01, 0x02, 0x03, 0x04 };
@@ -123,6 +153,31 @@
   XCTAssertNil(response.fileBodyPath);
   XCTAssertEqual((unsigned long long)0, response.fileBodyLength);
   XCTAssertEqualObjects(@"application/custom", [response headerForName:@"Content-Type"]);
+}
+
+- (void)testSetDataBodyStillSupportsMutableBodyAccess {
+  ALNResponse *response = [[ALNResponse alloc] init];
+  NSData *payload = [@"ok" dataUsingEncoding:NSUTF8StringEncoding];
+  [response setDataBody:payload contentType:@"text/plain; charset=utf-8"];
+
+  [response.bodyData appendData:[@"!" dataUsingEncoding:NSUTF8StringEncoding]];
+
+  XCTAssertEqual((NSUInteger)3, [response bodyLength]);
+  NSString *body = [[NSString alloc] initWithData:[response bodyDataForTransmission]
+                                         encoding:NSUTF8StringEncoding];
+  XCTAssertEqualObjects(@"ok!", body);
+}
+
+- (void)testClearBodyRemovesDirectBodyStorage {
+  ALNResponse *response = [[ALNResponse alloc] init];
+  BOOL ok = [response setJSONBody:@{ @"ok" : @YES } options:0 error:NULL];
+  XCTAssertTrue(ok);
+  XCTAssertTrue([response bodyLength] > 0);
+
+  [response clearBody];
+
+  XCTAssertEqual((NSUInteger)0, [response bodyLength]);
+  XCTAssertEqual((NSUInteger)0, [[response bodyDataForTransmission] length]);
 }
 
 - (void)testSetHeaderRejectsCRLFInjectionValue {

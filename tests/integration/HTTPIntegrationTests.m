@@ -54,6 +54,66 @@
   return YES;
 }
 
+- (BOOL)writeLiteAppEntrypointAtRoot:(NSString *)appRoot {
+  return [self writeFile:[appRoot stringByAppendingPathComponent:@"app_lite.m"]
+                 content:@"#import <Foundation/Foundation.h>\n"
+                         "#import <stdio.h>\n"
+                         "#import <stdlib.h>\n"
+                         "#import \"ArlenServer.h\"\n"
+                         "static void PrintUsage(void) {\n"
+                         "  fprintf(stdout, \"Usage: boomhauer [--port <port>] [--host <addr>] [--env <env>] [--once] [--print-routes]\\n\");\n"
+                         "}\n"
+                         "int main(int argc, const char *argv[]) {\n"
+                         "  @autoreleasepool {\n"
+                         "    int portOverride = 0;\n"
+                         "    NSString *host = nil;\n"
+                         "    NSString *environment = @\"development\";\n"
+                         "    BOOL once = NO;\n"
+                         "    BOOL printRoutes = NO;\n"
+                         "    for (int idx = 1; idx < argc; idx++) {\n"
+                         "      NSString *arg = [NSString stringWithUTF8String:argv[idx]];\n"
+                         "      if ([arg isEqualToString:@\"--port\"]) {\n"
+                         "        if ((idx + 1) >= argc) { PrintUsage(); return 2; }\n"
+                         "        portOverride = atoi(argv[++idx]);\n"
+                         "      } else if ([arg isEqualToString:@\"--host\"]) {\n"
+                         "        if ((idx + 1) >= argc) { PrintUsage(); return 2; }\n"
+                         "        host = [NSString stringWithUTF8String:argv[++idx]];\n"
+                         "      } else if ([arg isEqualToString:@\"--env\"]) {\n"
+                         "        if ((idx + 1) >= argc) { PrintUsage(); return 2; }\n"
+                         "        environment = [NSString stringWithUTF8String:argv[++idx]];\n"
+                         "      } else if ([arg isEqualToString:@\"--once\"]) {\n"
+                         "        once = YES;\n"
+                         "      } else if ([arg isEqualToString:@\"--print-routes\"]) {\n"
+                         "        printRoutes = YES;\n"
+                         "      } else if ([arg isEqualToString:@\"--help\"] || [arg isEqualToString:@\"-h\"]) {\n"
+                         "        PrintUsage();\n"
+                         "        return 0;\n"
+                         "      } else {\n"
+                         "        fprintf(stderr, \"Unknown argument: %s\\n\", argv[idx]);\n"
+                         "        return 2;\n"
+                         "      }\n"
+                         "    }\n"
+                         "    NSString *appRootCurrent = [[[NSProcessInfo processInfo] environment] objectForKey:@\"ARLEN_APP_ROOT\"];\n"
+                         "    if ([appRootCurrent length] == 0) {\n"
+                         "      appRootCurrent = [[NSFileManager defaultManager] currentDirectoryPath];\n"
+                         "    }\n"
+                         "    NSError *error = nil;\n"
+                         "    ALNApplication *app = [[ALNApplication alloc] initWithEnvironment:environment\n"
+                         "                                                           configRoot:appRootCurrent\n"
+                         "                                                                error:&error];\n"
+                         "    if (app == nil) {\n"
+                         "      fprintf(stderr, \"failed loading config: %s\\n\", [[error localizedDescription] UTF8String]);\n"
+                         "      return 1;\n"
+                         "    }\n"
+                         "    ALNHTTPServer *server = [[ALNHTTPServer alloc] initWithApplication:app\n"
+                         "                                                        publicRoot:[appRootCurrent stringByAppendingPathComponent:@\"public\"]];\n"
+                         "    server.serverName = @\"boomhauer\";\n"
+                         "    if (printRoutes) { [server printRoutesToFile:stdout]; return 0; }\n"
+                         "    return [server runWithHost:host portOverride:portOverride once:once];\n"
+                         "  }\n"
+                         "}\n"];
+}
+
 - (NSString *)runShellCapture:(NSString *)command exitCode:(int *)exitCode {
   NSTask *task = [[NSTask alloc] init];
   task.launchPath = @"/bin/bash";
@@ -2739,7 +2799,7 @@
   int curlCode = 0;
   int serverCode = 0;
   NSString *body =
-      [self requestWithServerEnv:@"ARLEN_TRUSTED_PROXY=1"
+      [self requestWithServerEnv:@"ARLEN_TRUSTED_PROXY=1 ARLEN_TRUSTED_PROXY_CIDRS=127.0.0.1/32"
                      serverBinary:@"./build/boomhauer"
                         curlBody:@"curl -fsS -H 'X-Forwarded-For: 203.0.113.9' "
                                  "-H 'X-Forwarded-Proto: https' "
@@ -2751,6 +2811,93 @@
   XCTAssertTrue([body containsString:@"203.0.113.9"]);
   XCTAssertTrue([body containsString:@"\"scheme\""]);
   XCTAssertTrue([body containsString:@"https"]);
+}
+
+- (void)testUntrustedPeerIgnoresForwardedProxyMetadata {
+  int curlCode = 0;
+  int serverCode = 0;
+  NSString *body =
+      [self requestWithServerEnv:@"ARLEN_TRUSTED_PROXY=1 ARLEN_TRUSTED_PROXY_CIDRS=192.0.2.0/24"
+                     serverBinary:@"./build/boomhauer"
+                        curlBody:@"curl -fsS -H 'X-Forwarded-For: 203.0.113.9' "
+                                 "-H 'X-Forwarded-Proto: https' "
+                                 "http://127.0.0.1:%d/api/request-meta"
+                        curlCode:&curlCode
+                       serverCode:&serverCode];
+  XCTAssertEqual(0, curlCode);
+  XCTAssertEqual(0, serverCode);
+  XCTAssertFalse([body containsString:@"203.0.113.9"]);
+  XCTAssertTrue([body containsString:@"127.0.0.1"]);
+  XCTAssertTrue([body containsString:@"http"]);
+}
+
+- (void)testStaticMountRejectsSymlinkEscape {
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *appRoot = [self createTempDirectoryWithPrefix:@"arlen-static-symlink"];
+  XCTAssertNotNil(appRoot);
+  if (appRoot == nil) {
+    return;
+  }
+
+  @try {
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"config/app.plist"]
+                          content:@"{\n"
+                                  "  host = \"127.0.0.1\";\n"
+                                  "  port = 3000;\n"
+                                  "  logFormat = \"text\";\n"
+                                  "  serveStatic = YES;\n"
+                                  "  staticMounts = (\n"
+                                  "    {\n"
+                                  "      prefix = \"/assets\";\n"
+                                  "      directory = \"public/assets\";\n"
+                                  "      allowExtensions = (\"txt\");\n"
+                                  "    }\n"
+                                  "  );\n"
+                                  "}\n"]);
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"config/environments/development.plist"]
+                          content:@"{\n  logFormat = \"text\";\n}\n"]);
+    XCTAssertTrue([self writeLiteAppEntrypointAtRoot:appRoot]);
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"public/assets/inside.txt"]
+                          content:@"inside\n"]);
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"private/secret.txt"]
+                          content:@"secret\n"]);
+
+    NSError *symlinkError = nil;
+    BOOL linked = [[NSFileManager defaultManager]
+        createSymbolicLinkAtPath:[appRoot stringByAppendingPathComponent:@"public/assets/escape.txt"]
+             withDestinationPath:@"../../private/secret.txt"
+                           error:&symlinkError];
+    XCTAssertTrue(linked);
+    XCTAssertNil(symlinkError);
+
+    NSString *envPrefix =
+        [NSString stringWithFormat:@"ARLEN_FRAMEWORK_ROOT='%@' ARLEN_APP_ROOT='%@'", repoRoot, appRoot];
+
+    int curlCode = 0;
+    int serverCode = 0;
+    NSString *insideBody =
+        [self requestWithServerEnv:envPrefix
+                       serverBinary:@"./bin/boomhauer"
+                          curlBody:@"curl -fsS http://127.0.0.1:%d/assets/inside.txt"
+                          curlCode:&curlCode
+                         serverCode:&serverCode];
+    XCTAssertEqual(0, curlCode);
+    XCTAssertEqual(0, serverCode);
+    XCTAssertEqualObjects(@"inside\n", insideBody);
+
+    NSString *escapeBody =
+        [self requestWithServerEnv:envPrefix
+                       serverBinary:@"./bin/boomhauer"
+                          curlBody:@"curl -sS -o - -w '\\n%{http_code}' http://127.0.0.1:%d/assets/escape.txt"
+                          curlCode:&curlCode
+                         serverCode:&serverCode];
+    XCTAssertEqual(0, curlCode);
+    XCTAssertEqual(0, serverCode);
+    XCTAssertTrue([escapeBody hasSuffix:@"\n404"]);
+    XCTAssertFalse([escapeBody containsString:@"secret"]);
+  } @finally {
+    [[NSFileManager defaultManager] removeItemAtPath:appRoot error:nil];
+  }
 }
 
 - (void)testTechDemoLandingPageRendersLayoutAndContent {

@@ -1,11 +1,14 @@
 #import <Foundation/Foundation.h>
 #import <XCTest/XCTest.h>
 
+#import <openssl/hmac.h>
+
 #import "ALNApplication.h"
 #import "ALNContext.h"
 #import "ALNController.h"
 #import "ALNRequest.h"
 #import "ALNResponse.h"
+#import "ALNSessionMiddleware.h"
 
 @interface MiddlewareFormController : ALNController
 @end
@@ -33,6 +36,11 @@
 @end
 
 @interface MiddlewareTests : XCTestCase
+@end
+
+@interface ALNSessionMiddleware (MiddlewareTestsAccess)
+- (NSString *)encodeSessionDictionary:(NSDictionary *)session;
+- (NSMutableDictionary *)decodeSessionToken:(NSString *)token requiresRefresh:(BOOL *)requiresRefresh;
 @end
 
 @implementation MiddlewareTests
@@ -83,6 +91,51 @@
     return @"";
   }
   return [parts[0] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+}
+
+- (NSString *)base64URLFromData:(NSData *)data {
+  NSString *base64 = [data base64EncodedStringWithOptions:0];
+  base64 = [base64 stringByReplacingOccurrencesOfString:@"+" withString:@"-"];
+  base64 = [base64 stringByReplacingOccurrencesOfString:@"/" withString:@"_"];
+  base64 = [base64 stringByReplacingOccurrencesOfString:@"=" withString:@""];
+  return base64;
+}
+
+- (NSData *)hmacSHA256:(NSData *)input key:(NSData *)key {
+  if ([input length] == 0 || [key length] == 0) {
+    return nil;
+  }
+  unsigned int digestLength = 0;
+  unsigned char digest[EVP_MAX_MD_SIZE];
+  unsigned char *result = HMAC(EVP_sha256(),
+                               [key bytes],
+                               (int)[key length],
+                               [input bytes],
+                               (size_t)[input length],
+                               digest,
+                               &digestLength);
+  if (result == NULL || digestLength == 0) {
+    return nil;
+  }
+  return [NSData dataWithBytes:digest length:(NSUInteger)digestLength];
+}
+
+- (NSString *)legacySessionTokenForSession:(NSDictionary *)session
+                                    secret:(NSString *)secret
+                             maxAgeSeconds:(NSUInteger)maxAgeSeconds {
+  NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
+  NSDictionary *payload = @{
+    @"iat" : @((NSInteger)now),
+    @"exp" : @((NSInteger)(now + (NSTimeInterval)maxAgeSeconds)),
+    @"data" : session ?: @{},
+  };
+  NSData *plaintext = [NSJSONSerialization dataWithJSONObject:payload options:0 error:NULL];
+  NSString *payloadPart = [self base64URLFromData:plaintext];
+  NSString *prefix = [NSString stringWithFormat:@"v2.%@", payloadPart];
+  NSData *signature =
+      [self hmacSHA256:[prefix dataUsingEncoding:NSUTF8StringEncoding]
+                   key:[secret dataUsingEncoding:NSUTF8StringEncoding]];
+  return [NSString stringWithFormat:@"%@.%@", prefix, [self base64URLFromData:signature]];
 }
 
 - (void)testSessionAndCSRFMiddlewareAllowValidUnsafeRequest {
@@ -213,6 +266,49 @@
                                              @"x-csrf-token" : token,
                                            }]];
   XCTAssertEqual((NSInteger)403, submitResponse.statusCode);
+}
+
+- (void)testSessionMiddlewareEncryptsCookiePayloadAndRoundTrips {
+  NSString *secret = @"unit-test-secret-value-0123456789abcdef";
+  ALNSessionMiddleware *middleware = [[ALNSessionMiddleware alloc] initWithSecret:secret
+                                                                       cookieName:@"arlen_session"
+                                                                    maxAgeSeconds:600
+                                                                           secure:NO
+                                                                         sameSite:@"Lax"];
+
+  NSString *token = [middleware encodeSessionDictionary:@{
+    @"user" : @"alice",
+    @"role" : @"admin",
+  }];
+  XCTAssertTrue([token length] > 0);
+  XCTAssertFalse([token containsString:@"alice"]);
+
+  NSArray *parts = [token componentsSeparatedByString:@"."];
+  XCTAssertEqual((NSUInteger)4, [parts count]);
+  XCTAssertEqualObjects(@"v3", parts[0]);
+
+  BOOL requiresRefresh = YES;
+  NSMutableDictionary *decoded = [middleware decodeSessionToken:token requiresRefresh:&requiresRefresh];
+  XCTAssertFalse(requiresRefresh);
+  XCTAssertEqualObjects(@"alice", decoded[@"user"]);
+  XCTAssertEqualObjects(@"admin", decoded[@"role"]);
+}
+
+- (void)testSessionMiddlewareDecodesLegacySignedCookiesAndMarksRefresh {
+  NSString *secret = @"unit-test-secret-value-0123456789abcdef";
+  ALNSessionMiddleware *middleware = [[ALNSessionMiddleware alloc] initWithSecret:secret
+                                                                       cookieName:@"arlen_session"
+                                                                    maxAgeSeconds:600
+                                                                           secure:NO
+                                                                         sameSite:@"Lax"];
+  NSString *legacyToken = [self legacySessionTokenForSession:@{ @"user" : @"legacy" }
+                                                      secret:secret
+                                               maxAgeSeconds:600];
+
+  BOOL requiresRefresh = NO;
+  NSMutableDictionary *decoded = [middleware decodeSessionToken:legacyToken requiresRefresh:&requiresRefresh];
+  XCTAssertTrue(requiresRefresh);
+  XCTAssertEqualObjects(@"legacy", decoded[@"user"]);
 }
 
 - (void)testCSRFMiddlewareRejectsUnsafeQueryTokenByDefault {

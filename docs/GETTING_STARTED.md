@@ -204,6 +204,18 @@ ARLEN_SECURITY_PROFILE=strict ./bin/boomhauer
 
 `strict` profile requires valid security secrets/config; startup fails fast if required values are missing.
 For session middleware, `session.secret` must be at least 32 characters when `session.enabled=YES`.
+Session cookies are encrypted and authenticated by default.
+
+Trusted proxy allowlist override:
+
+```bash
+ARLEN_TRUSTED_PROXY=1 ARLEN_TRUSTED_PROXY_CIDRS=127.0.0.1/32 ./bin/boomhauer
+```
+
+Forwarded headers are honored only when `ARLEN_TRUSTED_PROXY=1` and the peer IP matches
+`ARLEN_TRUSTED_PROXY_CIDRS`. The `edge` security profile defaults this allowlist to
+`127.0.0.1/32`. If you run behind a remote load balancer or ingress proxy, set the CIDR list
+explicitly to the proxy network ranges instead of trusting all peers.
 
 Strict readiness startup gating override:
 
@@ -497,10 +509,12 @@ Framework/app runtime:
 - `ARLEN_LOG_LEVEL` (`debug`, `info`, `warn`, or `error`)
 - `ARLEN_SECURITY_PROFILE` (`balanced`, `strict`, or `edge`)
 - `ARLEN_TRUSTED_PROXY`
+- `ARLEN_TRUSTED_PROXY_CIDRS`
 - `ARLEN_SERVE_STATIC`
 - `ARLEN_API_ONLY`
 - `ARLEN_PERFORMANCE_LOGGING`
 - `ARLEN_TRACE_PROPAGATION_ENABLED`
+- `ARLEN_RESPONSE_IDENTITY_HEADERS_ENABLED`
 - `ARLEN_HEALTH_DETAILS_ENABLED`
 - `ARLEN_READINESS_REQUIRES_STARTUP`
 - `ARLEN_MAX_REQUEST_LINE_BYTES`

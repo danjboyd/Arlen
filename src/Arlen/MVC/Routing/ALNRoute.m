@@ -136,6 +136,8 @@ static NSString *ALNNormalizedPathForFastMatch(NSString *path) {
     _compiledGuardSignature = nil;
     _compiledActionIMP = NULL;
     _compiledGuardIMP = NULL;
+    _compiledFastActionSelector = NULL;
+    _compiledFastActionIMP = NULL;
     _compiledActionReturnKind = ALNRouteInvocationReturnKindUnknown;
     _compiledGuardReturnKind = ALNRouteInvocationReturnKindUnknown;
     _compiledInvocationMetadata = NO;

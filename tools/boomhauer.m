@@ -1,5 +1,6 @@
 #import <Foundation/Foundation.h>
 #import <sys/stat.h>
+#import <sys/time.h>
 #import <stdio.h>
 #import <stdlib.h>
 #import <string.h>
@@ -7,6 +8,8 @@
 
 #import "ArlenServer.h"
 #import "ALNJSONSerialization.h"
+
+static NSData *BenchmarkStaticHTMLData(void);
 
 static NSString *EnvString(const char *name) {
   const char *raw = getenv(name);
@@ -186,6 +189,182 @@ static NSUInteger BenchmarkBlobMaximumSize(void) {
   return 2097152;
 }
 
+static double BenchmarkUnixTimestamp(void) {
+  struct timeval tv;
+  if (gettimeofday(&tv, NULL) != 0) {
+    return 0.0;
+  }
+  return (double)tv.tv_sec + ((double)tv.tv_usec / 1000000.0);
+}
+
+static void BenchmarkAppendASCIIBytes(NSMutableData *data, const char *bytes) {
+  if (data == nil || bytes == NULL || bytes[0] == '\0') {
+    return;
+  }
+  [data appendBytes:bytes length:strlen(bytes)];
+}
+
+static BOOL BenchmarkJSONStringNeedsSlowPath(NSString *value) {
+  if (![value isKindOfClass:[NSString class]] || [value length] == 0) {
+    return NO;
+  }
+  NSUInteger length = [value length];
+  for (NSUInteger idx = 0; idx < length; idx++) {
+    unichar c = [value characterAtIndex:idx];
+    if (c == '"' || c == '\\' || c < 0x20 || c > 0x7F) {
+      return YES;
+    }
+  }
+  return NO;
+}
+
+static void BenchmarkAppendJSONStringLiteral(NSMutableData *data, NSString *value) {
+  NSString *resolved = [value isKindOfClass:[NSString class]] ? value : @"";
+  if (BenchmarkJSONStringNeedsSlowPath(resolved)) {
+    NSData *literal = [ALNJSONSerialization dataWithJSONObject:resolved options:0 error:NULL];
+    if (literal != nil) {
+      [data appendData:literal];
+      return;
+    }
+  }
+
+  [data appendBytes:"\"" length:1];
+  const char *utf8 = [resolved UTF8String];
+  if (utf8 != NULL && utf8[0] != '\0') {
+    [data appendBytes:utf8 length:strlen(utf8)];
+  }
+  [data appendBytes:"\"" length:1];
+}
+
+static void BenchmarkRenderJSONResponseData(ALNResponse *response, NSData *data) {
+  if (response.statusCode == 0) {
+    response.statusCode = 200;
+  }
+  [response setDataBody:(data ?: [NSData data]) contentType:@"application/json; charset=utf-8"];
+  response.committed = YES;
+}
+
+static NSData *BenchmarkStatusJSONData(void) {
+  char timestampBuffer[32];
+  int timestampLength =
+      snprintf(timestampBuffer, sizeof(timestampBuffer), "%.6f", BenchmarkUnixTimestamp());
+  if (timestampLength < 0) {
+    timestampLength = 0;
+  }
+
+  NSMutableData *data = [NSMutableData dataWithCapacity:96];
+  BenchmarkAppendASCIIBytes(data, "{\"ok\":true,\"server\":\"boomhauer\",\"timestamp\":");
+  if (timestampLength > 0) {
+    [data appendBytes:timestampBuffer length:(NSUInteger)timestampLength];
+  } else {
+    BenchmarkAppendASCIIBytes(data, "0");
+  }
+  BenchmarkAppendASCIIBytes(data, "}");
+  return data;
+}
+
+static NSData *BenchmarkEchoJSONData(NSString *name, NSString *path) {
+  NSMutableData *data = [NSMutableData dataWithCapacity:64];
+  BenchmarkAppendASCIIBytes(data, "{\"name\":");
+  BenchmarkAppendJSONStringLiteral(data, name ?: @"");
+  BenchmarkAppendASCIIBytes(data, ",\"path\":");
+  BenchmarkAppendJSONStringLiteral(data, path ?: @"");
+  BenchmarkAppendASCIIBytes(data, "}");
+  return data;
+}
+
+static NSData *BenchmarkRequestMetaJSONData(ALNRequest *request) {
+  NSMutableData *data = [NSMutableData dataWithCapacity:128];
+  BenchmarkAppendASCIIBytes(data, "{\"remoteAddress\":");
+  BenchmarkAppendJSONStringLiteral(data, request.remoteAddress ?: @"");
+  BenchmarkAppendASCIIBytes(data, ",\"effectiveRemoteAddress\":");
+  BenchmarkAppendJSONStringLiteral(data, request.effectiveRemoteAddress ?: @"");
+  BenchmarkAppendASCIIBytes(data, ",\"scheme\":");
+  BenchmarkAppendJSONStringLiteral(data, request.scheme ?: @"http");
+  BenchmarkAppendASCIIBytes(data, "}");
+  return data;
+}
+
+static NSData *BenchmarkSleepJSONData(NSInteger delayMs) {
+  char delayBuffer[32];
+  int delayLength = snprintf(delayBuffer, sizeof(delayBuffer), "%ld", (long)delayMs);
+  if (delayLength < 0) {
+    delayLength = 0;
+  }
+
+  NSMutableData *data = [NSMutableData dataWithCapacity:48];
+  BenchmarkAppendASCIIBytes(data, "{\"ok\":true,\"sleep_ms\":");
+  if (delayLength > 0) {
+    [data appendBytes:delayBuffer length:(NSUInteger)delayLength];
+  } else {
+    BenchmarkAppendASCIIBytes(data, "0");
+  }
+  BenchmarkAppendASCIIBytes(data, "}");
+  return data;
+}
+
+static NSInteger BenchmarkQueryIntegerValue(ALNRequest *request,
+                                            NSString *name,
+                                            NSInteger fallbackValue,
+                                            NSInteger minimumValue,
+                                            NSInteger maximumValue) {
+  NSInteger parsed = fallbackValue;
+  if (ParseStrictIntegerValue([request queryValueForName:name], &parsed) &&
+      parsed >= minimumValue &&
+      parsed <= maximumValue) {
+    return parsed;
+  }
+  return fallbackValue;
+}
+
+static BOOL BenchmarkRenderStaticHTMLResponse(ALNResponse *response) {
+  if (response == nil) {
+    return NO;
+  }
+  [response setDataBody:BenchmarkStaticHTMLData() contentType:@"text/html; charset=utf-8"];
+  response.committed = YES;
+  return YES;
+}
+
+static BOOL BenchmarkRenderStatusResponse(ALNResponse *response) {
+  if (response == nil) {
+    return NO;
+  }
+  BenchmarkRenderJSONResponseData(response, BenchmarkStatusJSONData());
+  return YES;
+}
+
+static BOOL BenchmarkRenderEchoResponse(ALNRequest *request,
+                                        NSDictionary *params,
+                                        ALNResponse *response) {
+  if (request == nil || response == nil) {
+    return NO;
+  }
+  NSString *name = [params[@"name"] isKindOfClass:[NSString class]] ? params[@"name"] : @"unknown";
+  BenchmarkRenderJSONResponseData(response, BenchmarkEchoJSONData(name, request.path ?: @""));
+  return YES;
+}
+
+static BOOL BenchmarkRenderRequestMetaResponse(ALNRequest *request, ALNResponse *response) {
+  if (request == nil || response == nil) {
+    return NO;
+  }
+  BenchmarkRenderJSONResponseData(response, BenchmarkRequestMetaJSONData(request));
+  return YES;
+}
+
+static BOOL BenchmarkRenderSleepResponse(ALNRequest *request, ALNResponse *response) {
+  if (request == nil || response == nil) {
+    return NO;
+  }
+  NSInteger delayMs = BenchmarkQueryIntegerValue(request, @"ms", 250, 0, 10000);
+  if (delayMs > 0) {
+    [NSThread sleepForTimeInterval:((double)delayMs) / 1000.0];
+  }
+  BenchmarkRenderJSONResponseData(response, BenchmarkSleepJSONData(delayMs));
+  return YES;
+}
+
 static NSCache *BenchmarkBlobPayloadCache(void) {
   static NSCache *cache = nil;
   static NSLock *lock = nil;
@@ -222,6 +401,37 @@ static NSData *BenchmarkBlobPayloadData(NSUInteger size) {
   NSData *finalPayload = [NSData dataWithData:(payload ?: [NSMutableData data])];
   [cache setObject:finalPayload forKey:key cost:size];
   return finalPayload;
+}
+
+static NSData *BenchmarkStaticHTMLData(void) {
+  static NSData *cached = nil;
+  static NSLock *lock = nil;
+  if (cached != nil) {
+    return cached;
+  }
+  @synchronized([NSProcessInfo processInfo]) {
+    if (lock == nil) {
+      lock = [[NSLock alloc] init];
+    }
+  }
+  [lock lock];
+  if (cached == nil) {
+    static NSString *const kStaticHTML =
+        @"<h1>Arlen Static HTML</h1>\n\n"
+        "<p class=\"template-note\">template:static-ok</p>\n"
+        "<nav>\n"
+        "  <a href=\"/\">Home</a>\n"
+        "  <a href=\"/about\">About</a>\n"
+        "</nav>\n\n"
+        "<ul>\n\n"
+        "  <li>render pipeline ok</li>\n\n"
+        "  <li>request path: /bench/static-html</li>\n\n"
+        "  <li>unsafe sample: &lt;unsafe&gt;</li>\n\n"
+        "</ul>\n";
+    cached = [kStaticHTML dataUsingEncoding:NSUTF8StringEncoding] ?: [NSData data];
+  }
+  [lock unlock];
+  return cached;
 }
 
 static NSString *BenchmarkBlobCacheDirectory(void) {
@@ -261,6 +471,85 @@ static NSString *BenchmarkBlobFilePath(NSUInteger size) {
   return path;
 }
 
+static BOOL BenchmarkRenderBlobResponse(ALNRequest *request, ALNResponse *response) {
+  if (request == nil || response == nil) {
+    return NO;
+  }
+
+  NSInteger size = BenchmarkQueryIntegerValue(request,
+                                              @"size",
+                                              (NSInteger)BenchmarkBlobDefaultSize(),
+                                              1,
+                                              (NSInteger)BenchmarkBlobMaximumSize());
+
+  NSString *mode = [[request queryValueForName:@"mode"] lowercaseString];
+  BOOL useSendfileMode = [mode isEqualToString:@"sendfile"] || [mode isEqualToString:@"file"];
+  if (!useSendfileMode && BenchmarkProfileEnabled() && [mode length] == 0 && size >= 65536) {
+    useSendfileMode = YES;
+  }
+  if (useSendfileMode) {
+    NSString *path = BenchmarkBlobFilePath((NSUInteger)size);
+    if ([path length] == 0) {
+      response.statusCode = 500;
+      [response setTextBody:@"blob cache write failed\n"];
+      [response setHeader:@"Content-Type" value:@"text/plain; charset=utf-8"];
+      response.committed = YES;
+      return YES;
+    }
+
+    struct stat fileStat;
+    if (stat([path fileSystemRepresentation], &fileStat) != 0 || !S_ISREG(fileStat.st_mode)) {
+      response.statusCode = 500;
+      [response setTextBody:@"blob cache stat failed\n"];
+      [response setHeader:@"Content-Type" value:@"text/plain; charset=utf-8"];
+      response.committed = YES;
+      return YES;
+    }
+
+    response.statusCode = 200;
+    [response setHeader:@"Content-Type" value:@"application/octet-stream"];
+    [response setHeader:@"Cache-Control" value:@"no-store"];
+    response.fileBodyPath = path;
+    response.fileBodyLength = (unsigned long long)fileStat.st_size;
+    response.fileBodyDevice = (unsigned long long)fileStat.st_dev;
+    response.fileBodyInode = (unsigned long long)fileStat.st_ino;
+    response.fileBodyMTimeSeconds = (long long)fileStat.st_mtime;
+#if defined(__APPLE__) || defined(__MACH__)
+    response.fileBodyMTimeNanoseconds = fileStat.st_mtimespec.tv_nsec;
+#elif defined(__linux__)
+    response.fileBodyMTimeNanoseconds = fileStat.st_mtim.tv_nsec;
+#else
+    response.fileBodyMTimeNanoseconds = 0;
+#endif
+    response.committed = YES;
+    return YES;
+  }
+
+  NSString *impl = [[request queryValueForName:@"impl"] lowercaseString];
+  if ([impl isEqualToString:@"legacy-string"]) {
+    static NSString *chunk =
+        @"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx";
+    NSMutableString *payload = [NSMutableString stringWithCapacity:(NSUInteger)size];
+    while ((NSInteger)[payload length] < size) {
+      NSInteger remaining = size - (NSInteger)[payload length];
+      if (remaining >= (NSInteger)[chunk length]) {
+        [payload appendString:chunk];
+      } else {
+        [payload appendString:[chunk substringToIndex:(NSUInteger)remaining]];
+      }
+    }
+    [response setTextBody:payload];
+    [response setHeader:@"Content-Type" value:@"text/plain; charset=utf-8"];
+    response.committed = YES;
+    return YES;
+  }
+
+  [response setDataBody:BenchmarkBlobPayloadData((NSUInteger)size)
+            contentType:@"application/octet-stream"];
+  response.committed = YES;
+  return YES;
+}
+
 static NSDictionary *BenchmarkDBParseRequestObject(ALNContext *ctx, NSError **error) {
   NSData *body = [ctx.request.body isKindOfClass:[NSData class]] ? ctx.request.body : [NSData data];
   if ([body length] == 0) {
@@ -292,6 +581,18 @@ static NSDictionary *BenchmarkDBParseRequestObject(ALNContext *ctx, NSError **er
 
 @implementation HomeController
 
+- (BOOL)renderBenchStaticHTMLResponse {
+  return BenchmarkRenderStaticHTMLResponse(self.context.response);
+}
+
++ (BOOL)aln_fastRoute_benchStaticHTMLRequest:(ALNRequest *)request
+                                   response:(ALNResponse *)response
+                                     params:(NSDictionary *)params {
+  (void)request;
+  (void)params;
+  return BenchmarkRenderStaticHTMLResponse(response);
+}
+
 - (id)index:(ALNContext *)ctx {
   NSDictionary *viewContext = @{
     @"title" : @"Arlen EOC Dev Server",
@@ -314,21 +615,7 @@ static NSDictionary *BenchmarkDBParseRequestObject(ALNContext *ctx, NSError **er
 
 - (id)benchStaticHTML:(ALNContext *)ctx {
   (void)ctx;
-  static NSString *const kStaticHTML =
-      @"<h1>Arlen Static HTML</h1>\n\n"
-      "<p class=\"template-note\">template:static-ok</p>\n"
-      "<nav>\n"
-      "  <a href=\"/\">Home</a>\n"
-      "  <a href=\"/about\">About</a>\n"
-      "</nav>\n\n"
-      "<ul>\n\n"
-      "  <li>render pipeline ok</li>\n\n"
-      "  <li>request path: /bench/static-html</li>\n\n"
-      "  <li>unsafe sample: &lt;unsafe&gt;</li>\n\n"
-      "</ul>\n";
-  [self.context.response setHeader:@"Content-Type" value:@"text/html; charset=utf-8"];
-  [self.context.response setTextBody:kStaticHTML];
-  self.context.response.committed = YES;
+  (void)[self renderBenchStaticHTMLResponse];
   return nil;
 }
 
@@ -349,112 +636,73 @@ static NSDictionary *BenchmarkDBParseRequestObject(ALNContext *ctx, NSError **er
 
 @implementation ApiController
 
++ (BOOL)aln_fastRoute_statusRequest:(ALNRequest *)request
+                           response:(ALNResponse *)response
+                             params:(NSDictionary *)params {
+  (void)request;
+  (void)params;
+  return BenchmarkRenderStatusResponse(response);
+}
+
++ (BOOL)aln_fastRoute_echoRequest:(ALNRequest *)request
+                         response:(ALNResponse *)response
+                           params:(NSDictionary *)params {
+  return BenchmarkRenderEchoResponse(request, params, response);
+}
+
++ (BOOL)aln_fastRoute_requestMetaRequest:(ALNRequest *)request
+                                response:(ALNResponse *)response
+                                  params:(NSDictionary *)params {
+  (void)params;
+  return BenchmarkRenderRequestMetaResponse(request, response);
+}
+
++ (BOOL)aln_fastRoute_sleepRequest:(ALNRequest *)request
+                          response:(ALNResponse *)response
+                            params:(NSDictionary *)params {
+  (void)params;
+  return BenchmarkRenderSleepResponse(request, response);
+}
+
++ (BOOL)aln_fastRoute_blobRequest:(ALNRequest *)request
+                         response:(ALNResponse *)response
+                           params:(NSDictionary *)params {
+  (void)params;
+  return BenchmarkRenderBlobResponse(request, response);
+}
+
 - (id)status:(ALNContext *)ctx {
   (void)ctx;
-  return @{
-    @"ok" : @(YES),
-    @"server" : @"boomhauer",
-    @"timestamp" : @([[NSDate date] timeIntervalSince1970]),
-  };
+  (void)[[self class] aln_fastRoute_statusRequest:nil response:self.context.response params:nil];
+  return nil;
 }
 
 - (id)echo:(ALNContext *)ctx {
-  NSString *name = ctx.params[@"name"] ?: @"unknown";
-  return @{
-    @"name" : name,
-    @"path" : ctx.request.path ?: @"",
-  };
+  (void)[[self class] aln_fastRoute_echoRequest:ctx.request
+                                       response:self.context.response
+                                         params:ctx.params];
+  return nil;
 }
 
 - (id)requestMeta:(ALNContext *)ctx {
-  return @{
-    @"remoteAddress" : ctx.request.remoteAddress ?: @"",
-    @"effectiveRemoteAddress" : ctx.request.effectiveRemoteAddress ?: @"",
-    @"scheme" : ctx.request.scheme ?: @"http",
-  };
+  (void)[[self class] aln_fastRoute_requestMetaRequest:ctx.request
+                                              response:self.context.response
+                                                params:ctx.params];
+  return nil;
 }
 
 - (id)sleep:(ALNContext *)ctx {
-  NSInteger delayMs = 250;
-  NSNumber *requested = [ctx queryIntegerForName:@"ms"];
-  if (requested != nil) {
-    NSInteger parsed = [requested integerValue];
-    if (parsed >= 0 && parsed <= 10000) {
-      delayMs = parsed;
-    }
-  }
-  if (delayMs > 0) {
-    [NSThread sleepForTimeInterval:((double)delayMs) / 1000.0];
-  }
-  return @{
-    @"ok" : @(YES),
-    @"sleep_ms" : @(delayMs),
-  };
+  (void)[[self class] aln_fastRoute_sleepRequest:ctx.request
+                                        response:self.context.response
+                                          params:ctx.params];
+  return nil;
 }
 
 - (id)blob:(ALNContext *)ctx {
-  NSInteger size = (NSInteger)BenchmarkBlobDefaultSize();
-  NSNumber *requested = [ctx queryIntegerForName:@"size"];
-  if (requested != nil) {
-    NSInteger parsed = [requested integerValue];
-    if (parsed > 0 && parsed <= (NSInteger)BenchmarkBlobMaximumSize()) {
-      size = parsed;
-    }
-  }
-
-  NSString *mode = [[ctx queryValueForName:@"mode"] lowercaseString];
-  BOOL useSendfileMode = [mode isEqualToString:@"sendfile"] || [mode isEqualToString:@"file"];
-  if (useSendfileMode) {
-    NSString *path = BenchmarkBlobFilePath((NSUInteger)size);
-    if ([path length] == 0) {
-      [self setStatus:500];
-      [self renderText:@"blob cache write failed\n"];
-      return nil;
-    }
-
-    struct stat fileStat;
-    if (stat([path fileSystemRepresentation], &fileStat) != 0 || !S_ISREG(fileStat.st_mode)) {
-      [self setStatus:500];
-      [self renderText:@"blob cache stat failed\n"];
-      return nil;
-    }
-
-    ctx.response.statusCode = 200;
-    [ctx.response setHeader:@"Content-Type" value:@"application/octet-stream"];
-    [ctx.response setHeader:@"Cache-Control" value:@"no-store"];
-    ctx.response.fileBodyPath = path;
-    ctx.response.fileBodyLength = (unsigned long long)fileStat.st_size;
-    ctx.response.fileBodyDevice = (unsigned long long)fileStat.st_dev;
-    ctx.response.fileBodyInode = (unsigned long long)fileStat.st_ino;
-    ctx.response.fileBodyMTimeSeconds = (long long)fileStat.st_mtime;
-#if defined(__APPLE__) || defined(__MACH__)
-    ctx.response.fileBodyMTimeNanoseconds = fileStat.st_mtimespec.tv_nsec;
-#elif defined(__linux__)
-    ctx.response.fileBodyMTimeNanoseconds = fileStat.st_mtim.tv_nsec;
-#else
-    ctx.response.fileBodyMTimeNanoseconds = 0;
-#endif
-    ctx.response.committed = YES;
-    return nil;
-  }
-
-  NSString *impl = [[ctx queryValueForName:@"impl"] lowercaseString];
-  if ([impl isEqualToString:@"legacy-string"]) {
-    static NSString *chunk =
-        @"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx";
-    NSMutableString *payload = [NSMutableString stringWithCapacity:(NSUInteger)size];
-    while ((NSInteger)[payload length] < size) {
-      NSInteger remaining = size - (NSInteger)[payload length];
-      if (remaining >= (NSInteger)[chunk length]) {
-        [payload appendString:chunk];
-      } else {
-        [payload appendString:[chunk substringToIndex:(NSUInteger)remaining]];
-      }
-    }
-    return payload;
-  }
-
-  return BenchmarkBlobPayloadData((NSUInteger)size);
+  (void)[[self class] aln_fastRoute_blobRequest:ctx.request
+                                       response:self.context.response
+                                         params:ctx.params];
+  return nil;
 }
 
 - (id)dbItemsRead:(ALNContext *)ctx {

@@ -100,9 +100,10 @@ static BOOL ALNRouteShouldReplace(ALNRoute *candidate, ALNRoute *bestRoute) {
   return NO;
 }
 
-static ALNRouteMatch *ALNBestRouteMatchInCandidates(NSArray *candidates,
-                                                     NSString *path,
-                                                     NSString *format) {
+static ALNRoute *ALNBestRouteInCandidates(NSArray *candidates,
+                                          NSString *path,
+                                          NSString *format,
+                                          NSDictionary **paramsOut) {
   ALNRoute *bestRoute = nil;
   NSDictionary *bestParams = nil;
   NSArray *lazyPathSegments = nil;
@@ -134,7 +135,10 @@ static ALNRouteMatch *ALNBestRouteMatchInCandidates(NSArray *candidates,
   if (bestRoute == nil || bestParams == nil) {
     return nil;
   }
-  return [[ALNRouteMatch alloc] initWithRoute:bestRoute params:bestParams];
+  if (paramsOut != NULL) {
+    *paramsOut = bestParams;
+  }
+  return bestRoute;
 }
 
 static void ALNIndexStaticRoute(NSMutableDictionary *index, ALNRoute *route) {
@@ -264,21 +268,36 @@ static NSArray *ALNStaticCandidatesForPath(NSDictionary *index,
 - (ALNRouteMatch *)matchMethod:(NSString *)method
                           path:(NSString *)path
                         format:(NSString *)format {
+  NSDictionary *params = nil;
+  ALNRoute *route = [self matchMethod:method path:path format:format params:&params];
+  if (route == nil) {
+    return nil;
+  }
+  return [[ALNRouteMatch alloc] initWithRoute:route params:params ?: @{}];
+}
+
+- (ALNRoute *)matchMethod:(NSString *)method
+                     path:(NSString *)path
+                   format:(NSString *)format
+                   params:(NSDictionary **)params {
   NSString *requestMethod = ALNNormalizedMethodName(method);
   NSString *normalizedPath = ALNNormalizedPathForStaticLookup(path);
+  if (params != NULL) {
+    *params = nil;
+  }
 
   NSArray *staticMethodCandidates =
       ALNStaticCandidatesForPath(self.staticRoutesByMethodAndPath, requestMethod, normalizedPath);
-  ALNRouteMatch *staticMethodMatch =
-      ALNBestRouteMatchInCandidates(staticMethodCandidates, normalizedPath, format);
+  ALNRoute *staticMethodMatch =
+      ALNBestRouteInCandidates(staticMethodCandidates, normalizedPath, format, params);
   if (staticMethodMatch != nil) {
     return staticMethodMatch;
   }
   if (![requestMethod isEqualToString:@"ANY"]) {
     NSArray *staticAnyCandidates =
         ALNStaticCandidatesForPath(self.staticRoutesByMethodAndPath, @"ANY", normalizedPath);
-    ALNRouteMatch *staticAnyMatch =
-        ALNBestRouteMatchInCandidates(staticAnyCandidates, normalizedPath, format);
+    ALNRoute *staticAnyMatch =
+        ALNBestRouteInCandidates(staticAnyCandidates, normalizedPath, format, params);
     if (staticAnyMatch != nil) {
       return staticAnyMatch;
     }
@@ -293,12 +312,11 @@ static NSArray *ALNStaticCandidatesForPath(NSDictionary *index,
           ? self.routesByMethod[@"ANY"]
           : @[];
 
-  ALNRouteMatch *methodMatch =
-      ALNBestRouteMatchInCandidates(methodCandidates, normalizedPath, format);
+  ALNRoute *methodMatch = ALNBestRouteInCandidates(methodCandidates, normalizedPath, format, params);
   if (methodMatch != nil || [requestMethod isEqualToString:@"ANY"]) {
     return methodMatch;
   }
-  return ALNBestRouteMatchInCandidates(anyCandidates, normalizedPath, format);
+  return ALNBestRouteInCandidates(anyCandidates, normalizedPath, format, params);
 }
 
 - (void)beginRouteGroupWithPrefix:(NSString *)prefix

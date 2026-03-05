@@ -25,6 +25,9 @@ extern NSString *const ALNResponseErrorDomain;
 - (nullable NSString *)headerForName:(NSString *)name;
 - (void)appendData:(NSData *)data;
 - (void)appendText:(NSString *)text;
+- (void)clearBody;
+- (NSUInteger)bodyLength;
+- (NSData *)bodyDataForTransmission;
 - (void)setTextBody:(NSString *)text;
 - (void)setDataBody:(NSData *)data contentType:(nullable NSString *)contentType;
 - (BOOL)setJSONBody:(id)object

@@ -36,6 +36,11 @@ NSString *const ALNApplicationErrorDomain = @"Arlen.Application.Error";
 typedef id (*ALNContextObjectIMP)(id target, SEL selector, ALNContext *context);
 typedef void (*ALNContextVoidIMP)(id target, SEL selector, ALNContext *context);
 typedef BOOL (*ALNContextBoolIMP)(id target, SEL selector, ALNContext *context);
+typedef BOOL (*ALNFastRouteIMP)(id target,
+                                SEL selector,
+                                ALNRequest *request,
+                                ALNResponse *response,
+                                NSDictionary *params);
 
 typedef NS_ENUM(NSUInteger, ALNRuntimeInvocationMode) {
   ALNRuntimeInvocationModeCachedIMP = 0,
@@ -57,6 +62,172 @@ static BOOL ALNRequestPrefersJSON(ALNRequest *request, BOOL apiOnly);
 static void ALNSetStructuredErrorResponse(ALNResponse *response,
                                           NSInteger statusCode,
                                           NSDictionary *payload);
+static NSString *ALNStringFromTraceBuffer(const char *value);
+static NSString *ALNGenerateRequestID(void);
+
+@interface ALNRequestIdentity : NSObject
+
+- (NSString *)value;
+- (BOOL)hasValue;
+
+@end
+
+@implementation ALNRequestIdentity {
+  NSString *_cachedValue;
+}
+
+- (NSString *)value {
+  if (_cachedValue == nil) {
+    _cachedValue = ALNGenerateRequestID();
+  }
+  return _cachedValue ?: @"";
+}
+
+- (BOOL)hasValue {
+  return ([_cachedValue length] > 0);
+}
+
+@end
+
+@interface ALNRequestLazyStash : NSMutableDictionary
+
+- (instancetype)initWithBaseValues:(NSMutableDictionary *)baseValues
+                   requestIdentity:(nullable ALNRequestIdentity *)requestIdentity
+                      traceContext:(const ALNRequestTraceContext *)traceContext;
+
+@end
+
+@implementation ALNRequestLazyStash {
+  NSMutableDictionary *_storage;
+  NSMutableSet *_suppressedKeys;
+  ALNRequestIdentity *_requestIdentity;
+  char _traceID[33];
+  char _spanID[17];
+  char _parentSpanID[17];
+  char _traceparent[56];
+}
+
+- (instancetype)initWithBaseValues:(NSMutableDictionary *)baseValues
+                   requestIdentity:(ALNRequestIdentity *)requestIdentity
+                      traceContext:(const ALNRequestTraceContext *)traceContext {
+  self = [super init];
+  if (self) {
+    _storage = [baseValues isKindOfClass:[NSMutableDictionary class]]
+                   ? baseValues
+                   : [NSMutableDictionary dictionary];
+    _suppressedKeys = [NSMutableSet set];
+    _requestIdentity = requestIdentity;
+    memset(_traceID, 0, sizeof(_traceID));
+    memset(_spanID, 0, sizeof(_spanID));
+    memset(_parentSpanID, 0, sizeof(_parentSpanID));
+    memset(_traceparent, 0, sizeof(_traceparent));
+    if (traceContext != NULL) {
+      if (traceContext->traceID[0] != '\0') {
+        memcpy(_traceID, traceContext->traceID, sizeof(_traceID));
+      }
+      if (traceContext->spanID[0] != '\0') {
+        memcpy(_spanID, traceContext->spanID, sizeof(_spanID));
+      }
+      if (traceContext->parentSpanID[0] != '\0') {
+        memcpy(_parentSpanID, traceContext->parentSpanID, sizeof(_parentSpanID));
+      }
+      if (traceContext->traceparent[0] != '\0') {
+        memcpy(_traceparent, traceContext->traceparent, sizeof(_traceparent));
+      }
+    }
+  }
+  return self;
+}
+
+- (NSArray *)visibleKeys {
+  NSMutableArray *keys = [NSMutableArray arrayWithArray:[_storage allKeys] ?: @[]];
+  if (_requestIdentity != nil && !_storage[@"request_id"] &&
+      ![_suppressedKeys containsObject:@"request_id"]) {
+    [keys addObject:@"request_id"];
+  }
+  if (_traceID[0] != '\0' && !_storage[@"aln.trace_id"] &&
+      ![_suppressedKeys containsObject:@"aln.trace_id"]) {
+    [keys addObject:@"aln.trace_id"];
+  }
+  if (_spanID[0] != '\0' && !_storage[@"aln.span_id"] &&
+      ![_suppressedKeys containsObject:@"aln.span_id"]) {
+    [keys addObject:@"aln.span_id"];
+  }
+  if (_parentSpanID[0] != '\0' && !_storage[@"aln.parent_span_id"] &&
+      ![_suppressedKeys containsObject:@"aln.parent_span_id"]) {
+    [keys addObject:@"aln.parent_span_id"];
+  }
+  if (_traceparent[0] != '\0' && !_storage[@"aln.traceparent"] &&
+      ![_suppressedKeys containsObject:@"aln.traceparent"]) {
+    [keys addObject:@"aln.traceparent"];
+  }
+  return keys;
+}
+
+- (id)lazyValueForKey:(NSString *)key {
+  if (![key isKindOfClass:[NSString class]] || [_suppressedKeys containsObject:key]) {
+    return nil;
+  }
+  if ([key isEqualToString:@"request_id"] && _requestIdentity != nil) {
+    return [_requestIdentity value];
+  }
+  if ([key isEqualToString:@"aln.trace_id"] && _traceID[0] != '\0') {
+    return ALNStringFromTraceBuffer(_traceID);
+  }
+  if ([key isEqualToString:@"aln.span_id"] && _spanID[0] != '\0') {
+    return ALNStringFromTraceBuffer(_spanID);
+  }
+  if ([key isEqualToString:@"aln.parent_span_id"] && _parentSpanID[0] != '\0') {
+    return ALNStringFromTraceBuffer(_parentSpanID);
+  }
+  if ([key isEqualToString:@"aln.traceparent"] && _traceparent[0] != '\0') {
+    return ALNStringFromTraceBuffer(_traceparent);
+  }
+  return nil;
+}
+
+- (NSUInteger)count {
+  return [[self visibleKeys] count];
+}
+
+- (NSEnumerator *)keyEnumerator {
+  return [[self visibleKeys] objectEnumerator];
+}
+
+- (id)objectForKey:(id)aKey {
+  id value = [_storage objectForKey:aKey];
+  if (value != nil) {
+    return value;
+  }
+  if (![aKey isKindOfClass:[NSString class]]) {
+    return nil;
+  }
+  value = [self lazyValueForKey:(NSString *)aKey];
+  if (value != nil) {
+    _storage[aKey] = value;
+  }
+  return value;
+}
+
+- (void)setObject:(id)anObject forKey:(id<NSCopying>)aKey {
+  if (anObject == nil || aKey == nil) {
+    return;
+  }
+  id keyObject = (id)aKey;
+  if ([keyObject isKindOfClass:[NSString class]]) {
+    [_suppressedKeys removeObject:(NSString *)keyObject];
+  }
+  [_storage setObject:anObject forKey:aKey];
+}
+
+- (void)removeObjectForKey:(id)aKey {
+  if ([aKey isKindOfClass:[NSString class]]) {
+    [_suppressedKeys addObject:(NSString *)aKey];
+  }
+  [_storage removeObjectForKey:aKey];
+}
+
+@end
 
 static const char *ALNObjCTypeWithoutQualifiers(const char *typeEncoding) {
   if (typeEncoding == NULL) {
@@ -132,6 +303,58 @@ static BOOL ALNRouteInvocationResultToBool(id value) {
     return [value boolValue];
   }
   return (value != nil);
+}
+
+static SEL ALNFastRouteSelectorForActionName(NSString *actionName) {
+  if (![actionName isKindOfClass:[NSString class]] || [actionName length] == 0) {
+    return NULL;
+  }
+  NSString *selectorName =
+      [NSString stringWithFormat:@"aln_fastRoute_%@Request:response:params:", actionName];
+  return NSSelectorFromString(selectorName);
+}
+
+static BOOL ALNFastRouteSignatureIsValid(NSMethodSignature *signature) {
+  if (signature == nil || [signature numberOfArguments] != 5) {
+    return NO;
+  }
+  return (ALNReturnKindForSignature(signature) == ALNRouteInvocationReturnKindBool);
+}
+
+static BOOL ALNRouteCanUseCompiledFastAction(ALNApplication *application, ALNRoute *route) {
+  if (application == nil || route == nil) {
+    return NO;
+  }
+  if (route.compiledFastActionSelector == NULL || route.compiledFastActionIMP == NULL) {
+    return NO;
+  }
+  if ([[application middlewares] count] > 0) {
+    return NO;
+  }
+  if (route.guardSelector != NULL) {
+    return NO;
+  }
+  if ([route.requestSchema count] > 0 || [route.responseSchema count] > 0) {
+    return NO;
+  }
+  if ([route.requiredScopes count] > 0 || [route.requiredRoles count] > 0) {
+    return NO;
+  }
+  return YES;
+}
+
+static BOOL ALNInvokeCompiledFastRouteAction(ALNRoute *route,
+                                             ALNRequest *request,
+                                             ALNResponse *response,
+                                             NSDictionary *params) {
+  if (route == nil || route.compiledFastActionSelector == NULL || route.compiledFastActionIMP == NULL) {
+    return NO;
+  }
+  return ((ALNFastRouteIMP)route.compiledFastActionIMP)(route.controllerClass,
+                                                        route.compiledFastActionSelector,
+                                                        request,
+                                                        response,
+                                                        params ?: @{});
 }
 
 static BOOL ALNInvokeRouteGuard(id controller,
@@ -256,6 +479,7 @@ static BOOL ALNInvokeRouteAction(id controller,
 @property(nonatomic, assign, readwrite) BOOL clusterEmitHeaders;
 @property(nonatomic, assign) BOOL metricsEnabled;
 @property(nonatomic, assign) BOOL tracePropagationEnabled;
+@property(nonatomic, assign) BOOL responseIdentityHeadersEnabled;
 @property(nonatomic, assign) BOOL apiOnly;
 @property(nonatomic, assign) BOOL performanceLoggingEnabled;
 @property(nonatomic, assign) BOOL eocStrictLocalsEnabled;
@@ -388,6 +612,11 @@ static BOOL ALNInvokeRouteAction(id controller,
     _tracePropagationEnabled = [tracePropagationEnabledValue respondsToSelector:@selector(boolValue)]
                                    ? [tracePropagationEnabledValue boolValue]
                                    : YES;
+    id responseIdentityHeadersEnabledValue = observability[@"responseIdentityHeadersEnabled"];
+    _responseIdentityHeadersEnabled =
+        [responseIdentityHeadersEnabledValue respondsToSelector:@selector(boolValue)]
+            ? [responseIdentityHeadersEnabledValue boolValue]
+            : YES;
     id apiOnlyValue = _config[@"apiOnly"];
     _apiOnly = [apiOnlyValue respondsToSelector:@selector(boolValue)]
                    ? [apiOnlyValue boolValue]
@@ -712,7 +941,7 @@ static BOOL ALNInvokeRouteAction(id controller,
 }
 
 static BOOL ALNResponseHasBody(ALNResponse *response) {
-  return [response.bodyData length] > 0;
+  return [response bodyLength] > 0;
 }
 
 static NSDictionary *ALNDictionaryConfigValue(NSDictionary *config, NSString *key) {
@@ -1467,6 +1696,10 @@ static NSString *ALNGenerateRequestID(void) {
   return ALNFastRandomHexString(32);
 }
 
+static NSString *ALNResolvedRequestID(ALNRequestIdentity *requestIdentity) {
+  return requestIdentity != nil ? [requestIdentity value] : @"";
+}
+
 static NSString *ALNISO8601Now(void) {
   struct timeval tv;
   if (gettimeofday(&tv, NULL) != 0) {
@@ -2097,9 +2330,7 @@ static BOOL ALNBuiltInEndpointPrefersJSON(ALNRequest *request) {
   if (ALNHeaderPrefersJSON(request)) {
     return YES;
   }
-  NSString *format = [request.queryParams[@"format"] isKindOfClass:[NSString class]]
-                         ? [request.queryParams[@"format"] lowercaseString]
-                         : @"";
+  NSString *format = [[request queryValueForName:@"format"] lowercaseString];
   return [format isEqualToString:@"json"];
 }
 
@@ -2158,7 +2389,7 @@ static BOOL ALNApplyBuiltInResponse(ALNApplication *application,
         [response setHeader:@"Content-Type" value:@"text/plain; charset=utf-8"];
         [response setTextBody:@"health status serialization failed\n"];
       } else if (headRequest) {
-        [response.bodyData setLength:0];
+        [response clearBody];
       }
     } else {
       [response setHeader:@"Content-Type" value:@"text/plain; charset=utf-8"];
@@ -2604,9 +2835,9 @@ static BOOL ALNValidateResponseContractIfNeeded(ALNApplication *application,
     NSString *contentType = [[response headerForName:@"Content-Type"] lowercaseString] ?: @"";
     BOOL jsonLike = [contentType containsString:@"application/json"] ||
                     [contentType containsString:@"text/json"];
-    if (jsonLike && [response.bodyData length] > 0) {
+    if (jsonLike && [response bodyLength] > 0) {
       NSError *jsonError = nil;
-      payload = [ALNJSONSerialization JSONObjectWithData:response.bodyData
+      payload = [ALNJSONSerialization JSONObjectWithData:[response bodyDataForTransmission]
                                                  options:0
                                                    error:&jsonError];
       if (jsonError != nil) {
@@ -2649,7 +2880,7 @@ static void ALNFinalizeResponse(ALNApplication *application,
                                 ALNResponse *response,
                                 ALNPerfTrace *trace,
                                 ALNRequest *request,
-                                NSString *requestID,
+                                ALNRequestIdentity *requestIdentity,
                                 const ALNRequestTraceContext *traceContext,
                                 BOOL performanceLogging) {
   if (performanceLogging && [trace isEnabled]) {
@@ -2681,9 +2912,12 @@ static void ALNFinalizeResponse(ALNApplication *application,
                   value:[NSString stringWithFormat:@"%.3f", [responseWrite doubleValue]]];
   }
 
-  if ([requestID length] > 0) {
-    [response setHeader:@"X-Request-Id" value:requestID];
-    [response setHeader:@"X-Correlation-Id" value:requestID];
+  if (application.responseIdentityHeadersEnabled) {
+    NSString *requestID = ALNResolvedRequestID(requestIdentity);
+    if ([requestID length] > 0) {
+      [response setHeader:@"X-Request-Id" value:requestID];
+      [response setHeader:@"X-Correlation-Id" value:requestID];
+    }
   }
 
   if (ALNTraceContextHasTraceID(traceContext)) {
@@ -2839,6 +3073,8 @@ static void ALNFinalizeResponse(ALNApplication *application,
   route.compiledGuardSignature = nil;
   route.compiledActionIMP = NULL;
   route.compiledGuardIMP = NULL;
+  route.compiledFastActionSelector = NULL;
+  route.compiledFastActionIMP = NULL;
   route.compiledActionReturnKind = ALNRouteInvocationReturnKindUnknown;
   route.compiledGuardReturnKind = ALNRouteInvocationReturnKindUnknown;
   route.compiledInvocationMetadata = NO;
@@ -2870,6 +3106,8 @@ static void ALNFinalizeResponse(ALNApplication *application,
   route.compiledGuardSignature = nil;
   route.compiledActionIMP = NULL;
   route.compiledGuardIMP = NULL;
+  route.compiledFastActionSelector = NULL;
+  route.compiledFastActionIMP = NULL;
   route.compiledActionReturnKind = ALNRouteInvocationReturnKindUnknown;
   route.compiledGuardReturnKind = ALNRouteInvocationReturnKindUnknown;
   route.compiledInvocationMetadata = NO;
@@ -2955,6 +3193,28 @@ static void ALNFinalizeResponse(ALNApplication *application,
     }
   }
 
+  SEL fastActionSelector = ALNFastRouteSelectorForActionName(route.actionName);
+  IMP fastActionIMP = NULL;
+  if (fastActionSelector != NULL) {
+    NSMethodSignature *fastActionSignature =
+        [route.controllerClass methodSignatureForSelector:fastActionSelector];
+    Method fastActionMethod = class_getClassMethod(route.controllerClass, fastActionSelector);
+    if (fastActionMethod != NULL) {
+      fastActionIMP = method_getImplementation(fastActionMethod);
+      if (!ALNFastRouteSignatureIsValid(fastActionSignature) || fastActionIMP == NULL) {
+        if (error != NULL) {
+          *error = ALNRouteCompileError(338,
+                                        @"route_fast_action_signature_invalid",
+                                        @"invalid_fast_action_signature",
+                                        @"Fast action must accept ALNRequest *, ALNResponse *, NSDictionary * and return BOOL",
+                                        route,
+                                        @[]);
+        }
+        return NO;
+      }
+    }
+  }
+
   NSMutableArray *diagnostics = [NSMutableArray array];
   [diagnostics addObjectsFromArray:ALNRouteSchemaDiagnosticsForSchema(route.requestSchema, @"request")];
   [diagnostics addObjectsFromArray:ALNRouteSchemaDiagnosticsForSchema(route.responseSchema, @"response")];
@@ -3011,6 +3271,8 @@ static void ALNFinalizeResponse(ALNApplication *application,
   route.compiledGuardSignature = guardSignature;
   route.compiledActionIMP = actionIMP;
   route.compiledGuardIMP = guardIMP;
+  route.compiledFastActionSelector = fastActionSelector;
+  route.compiledFastActionIMP = fastActionIMP;
   route.compiledActionReturnKind = actionReturnKind;
   route.compiledGuardReturnKind = guardReturnKind;
   route.compiledInvocationMetadata = YES;
@@ -3285,8 +3547,7 @@ static void ALNFinalizeResponse(ALNApplication *application,
   }
 
   ALNResponse *response = [[ALNResponse alloc] init];
-  NSString *requestID = ALNGenerateRequestID();
-  [response setHeader:@"X-Request-Id" value:requestID];
+  ALNRequestIdentity *requestIdentity = [[ALNRequestIdentity alloc] init];
 
   BOOL performanceLogging = self.performanceLoggingEnabled;
   BOOL metricsEnabled = self.metricsEnabled;
@@ -3318,17 +3579,20 @@ static void ALNFinalizeResponse(ALNApplication *application,
   }
   NSString *retryStrippedPath = nil;
   NSString *retryPathFormat = nil;
-  ALNRouteMatch *match =
+  NSDictionary *matchedParams = nil;
+  ALNRoute *matchedRoute =
       [self.router matchMethod:request.method ?: @"GET"
                           path:routePath
-                        format:requestFormat];
-  if (match == nil && !routerNeedsFormatExtraction) {
+                        format:requestFormat
+                        params:&matchedParams];
+  if (matchedRoute == nil && !routerNeedsFormatExtraction) {
     retryPathFormat = ALNExtractPathFormat(routePath, &retryStrippedPath);
     if ([retryStrippedPath length] > 0 && ![retryStrippedPath isEqualToString:routePath]) {
-      match = [self.router matchMethod:request.method ?: @"GET"
-                                  path:retryStrippedPath
-                                format:nil];
-      if (match != nil) {
+      matchedRoute = [self.router matchMethod:request.method ?: @"GET"
+                                         path:retryStrippedPath
+                                       format:nil
+                                       params:&matchedParams];
+      if (matchedRoute != nil) {
         routePath = retryStrippedPath;
         requestFormat = retryPathFormat;
       }
@@ -3338,7 +3602,7 @@ static void ALNFinalizeResponse(ALNApplication *application,
     [trace endStage:@"route"];
   }
 
-  if (match == nil) {
+  if (matchedRoute == nil) {
     NSString *builtInPath = routePath;
     if (!routerNeedsFormatExtraction && [retryStrippedPath length] > 0) {
       builtInPath = retryStrippedPath;
@@ -3356,7 +3620,7 @@ static void ALNFinalizeResponse(ALNApplication *application,
       NSDictionary *payload = ALNStructuredErrorPayload(404,
                                                         @"not_found",
                                                         @"Not Found",
-                                                        requestID,
+                                                        ALNResolvedRequestID(requestIdentity),
                                                         @{});
       ALNSetStructuredErrorResponse(response, 404, payload);
     } else if (!handledBuiltIn) {
@@ -3369,7 +3633,7 @@ static void ALNFinalizeResponse(ALNApplication *application,
                         response,
                         trace,
                         request,
-                        requestID,
+                        requestIdentity,
                         &traceContext,
                         performanceLogging);
     ALNRecordRequestMetrics(self, response, trace);
@@ -3380,7 +3644,7 @@ static void ALNFinalizeResponse(ALNApplication *application,
     if (self.traceExporter != nil) {
       @try {
         [self.traceExporter exportTrace:ALNTraceExportPayload(trace,
-                                                              requestID,
+                                                              ALNResolvedRequestID(requestIdentity),
                                                               &traceContext,
                                                               request,
                                                               response,
@@ -3395,7 +3659,7 @@ static void ALNFinalizeResponse(ALNApplication *application,
       } @catch (NSException *exception) {
         [self.logger warn:@"trace exporter failed"
                    fields:@{
-                     @"request_id" : requestID ?: @"",
+                     @"request_id" : ALNResolvedRequestID(requestIdentity),
                      @"exception" : exception.reason ?: @"",
                    }];
       }
@@ -3407,8 +3671,8 @@ static void ALNFinalizeResponse(ALNApplication *application,
       fields[@"path"] = request.path ?: @"";
       fields[@"status"] = @(response.statusCode);
       fields[@"event"] = @"http.request.completed";
-      fields[@"request_id"] = requestID ?: @"";
-      fields[@"correlation_id"] = requestID ?: @"";
+      fields[@"request_id"] = ALNResolvedRequestID(requestIdentity);
+      fields[@"correlation_id"] = ALNResolvedRequestID(requestIdentity);
       if (ALNTraceContextHasTraceID(&traceContext)) {
         fields[@"trace_id"] = ALNStringFromTraceBuffer(traceContext.traceID);
         fields[@"span_id"] = ALNStringFromTraceBuffer(traceContext.spanID);
@@ -3429,57 +3693,18 @@ static void ALNFinalizeResponse(ALNApplication *application,
     requestFormat = ALNRequestPreferredFormatWithoutPathExtension(request, apiOnly, routePath);
   }
   BOOL prefersJSON = [requestFormat isEqualToString:@"json"];
-
-  NSMutableDictionary *stash = [NSMutableDictionary dictionaryWithCapacity:12];
-  stash[@"request_id"] = requestID ?: @"";
-  if (ALNTraceContextHasTraceID(&traceContext)) {
-    stash[@"aln.trace_id"] = ALNStringFromTraceBuffer(traceContext.traceID);
-    stash[@"aln.span_id"] = ALNStringFromTraceBuffer(traceContext.spanID);
-    if (ALNTraceContextHasParentSpanID(&traceContext)) {
-      stash[@"aln.parent_span_id"] = ALNStringFromTraceBuffer(traceContext.parentSpanID);
-    }
-    stash[@"aln.traceparent"] = ALNStringFromTraceBuffer(traceContext.traceparent);
-  }
-  stash[ALNContextRequestFormatStashKey] = requestFormat ?: @"";
-  if (self.jobsAdapter != nil) {
-    stash[ALNContextJobsAdapterStashKey] = self.jobsAdapter;
-  }
-  if (self.cacheAdapter != nil) {
-    stash[ALNContextCacheAdapterStashKey] = self.cacheAdapter;
-  }
-  if (self.localizationAdapter != nil) {
-    stash[ALNContextLocalizationAdapterStashKey] = self.localizationAdapter;
-  }
-  if (self.mailAdapter != nil) {
-    stash[ALNContextMailAdapterStashKey] = self.mailAdapter;
-  }
-  if (self.attachmentAdapter != nil) {
-    stash[ALNContextAttachmentAdapterStashKey] = self.attachmentAdapter;
-  }
-  stash[ALNContextI18nDefaultLocaleStashKey] = self.i18nDefaultLocale ?: @"en";
-  stash[ALNContextI18nFallbackLocaleStashKey] =
-      self.i18nFallbackLocale ?: self.i18nDefaultLocale ?: @"en";
-  stash[ALNContextEOCStrictLocalsStashKey] = @(self.eocStrictLocalsEnabled);
-  stash[ALNContextEOCStrictStringifyStashKey] = @(self.eocStrictStringifyEnabled);
-  stash[ALNContextPageStateEnabledStashKey] = @(self.pageStateEnabled);
-  request.routeParams = match.params ?: @{};
-  ALNContext *context = [[ALNContext alloc] initWithRequest:request
-                                                   response:response
-                                                     params:request.routeParams
-                                                      stash:stash
-                                                     logger:self.logger
-                                                  perfTrace:trace
-                                                  routeName:match.route.name ?: @""
-                                             controllerName:NSStringFromClass(match.route.controllerClass)
-                                                 actionName:match.route.actionName ?: @""];
+  request.routeParams = matchedParams ?: @{};
+  NSString *resolvedRouteName = matchedRoute.name ?: @"";
+  NSString *resolvedControllerName = NSStringFromClass(matchedRoute.controllerClass) ?: @"";
+  NSString *resolvedActionName = matchedRoute.actionName ?: @"";
 
   id returnValue = nil;
   NSError *routeCompileError = nil;
   BOOL routeReady = YES;
-  if (!match.route.compiledInvocationMetadata) {
+  if (!matchedRoute.compiledInvocationMetadata) {
     [self.routeCompilationLock lock];
     @try {
-      routeReady = [self compileRoute:match.route
+      routeReady = [self compileRoute:matchedRoute
                          controllerMap:nil
                       warningsAsErrors:[self routingRouteCompileWarningsAsErrorsEnabled]
                                  error:&routeCompileError];
@@ -3492,16 +3717,158 @@ static void ALNFinalizeResponse(ALNApplication *application,
     ALNApplyInternalErrorResponse(self,
                                   request,
                                   response,
-                                  requestID,
+                                  ALNResolvedRequestID(requestIdentity),
                                   500,
                                   ALNRouteCompileResponseErrorCode(routeCompileError),
                                   @"Internal Server Error",
                                   routeCompileError.localizedDescription ?: @"route compile failed",
                                   details);
   }
+  if (routeReady && ALNRouteCanUseCompiledFastAction(self, matchedRoute) && !response.committed) {
+    BOOL fastHandled = NO;
+    [trace startStage:@"controller"];
+    @try {
+      fastHandled = ALNInvokeCompiledFastRouteAction(matchedRoute, request, response, request.routeParams);
+      if (fastHandled && !response.committed) {
+        if (ALNResponseHasBody(response)) {
+          if (response.statusCode == 0) {
+            response.statusCode = 200;
+          }
+        } else if (response.statusCode == 0) {
+          response.statusCode = 204;
+        }
+        response.committed = YES;
+      }
+    } @catch (NSException *exception) {
+      NSDictionary *details = ALNErrorDetailsFromException(exception);
+      ALNApplyInternalErrorResponse(self,
+                                    request,
+                                    response,
+                                    ALNResolvedRequestID(requestIdentity),
+                                    500,
+                                    @"controller_exception",
+                                    @"Internal Server Error",
+                                    exception.reason ?: @"controller exception",
+                                    details);
+      [self.logger error:@"controller exception"
+                  fields:@{
+                    @"request_id" : ALNResolvedRequestID(requestIdentity),
+                    @"controller" : resolvedControllerName,
+                    @"action" : resolvedActionName,
+                    @"exception" : exception.description ?: @""
+                  }];
+      fastHandled = YES;
+    }
+    [trace endStage:@"controller"];
+
+    if (fastHandled) {
+      ALNFinalizeResponse(self,
+                          response,
+                          trace,
+                          request,
+                          requestIdentity,
+                          &traceContext,
+                          performanceLogging);
+      ALNRecordRequestMetrics(self, response, trace);
+      if (metricsEnabled) {
+        [self.metrics addGauge:@"http_requests_active" delta:-1.0];
+      }
+
+      if (self.traceExporter != nil) {
+        @try {
+          [self.traceExporter exportTrace:ALNTraceExportPayload(trace,
+                                                                ALNResolvedRequestID(requestIdentity),
+                                                                &traceContext,
+                                                                request,
+                                                                response,
+                                                                resolvedRouteName,
+                                                                resolvedControllerName,
+                                                                resolvedActionName)
+                                  request:request
+                                 response:response
+                                routeName:resolvedRouteName
+                           controllerName:resolvedControllerName
+                               actionName:resolvedActionName];
+        } @catch (NSException *exception) {
+          [self.logger warn:@"trace exporter failed"
+                     fields:@{
+                       @"request_id" : ALNResolvedRequestID(requestIdentity),
+                       @"exception" : exception.reason ?: @"",
+                     }];
+        }
+      }
+
+      if (infoLoggingEnabled) {
+        NSMutableDictionary *logFields = [NSMutableDictionary dictionary];
+        logFields[@"method"] = request.method ?: @"";
+        logFields[@"path"] = request.path ?: @"";
+        logFields[@"status"] = @(response.statusCode);
+        logFields[@"event"] = @"http.request.completed";
+        logFields[@"request_id"] = ALNResolvedRequestID(requestIdentity);
+        logFields[@"correlation_id"] = ALNResolvedRequestID(requestIdentity);
+        if (ALNTraceContextHasTraceID(&traceContext)) {
+          logFields[@"trace_id"] = ALNStringFromTraceBuffer(traceContext.traceID);
+          logFields[@"span_id"] = ALNStringFromTraceBuffer(traceContext.spanID);
+          if (ALNTraceContextHasParentSpanID(&traceContext)) {
+            logFields[@"parent_span_id"] = ALNStringFromTraceBuffer(traceContext.parentSpanID);
+          }
+          logFields[@"traceparent"] = ALNStringFromTraceBuffer(traceContext.traceparent);
+        }
+        logFields[@"route"] = resolvedRouteName;
+        logFields[@"controller"] = resolvedControllerName;
+        logFields[@"action"] = resolvedActionName;
+        if (performanceLogging) {
+          logFields[@"timings"] = [trace dictionaryRepresentation];
+        }
+        [self.logger info:@"request" fields:logFields];
+      }
+      return response;
+    }
+  }
+
+  NSMutableDictionary *baseStash = [NSMutableDictionary dictionaryWithCapacity:11];
+  baseStash[ALNContextRequestFormatStashKey] = requestFormat ?: @"";
+  if (self.jobsAdapter != nil) {
+    baseStash[ALNContextJobsAdapterStashKey] = self.jobsAdapter;
+  }
+  if (self.cacheAdapter != nil) {
+    baseStash[ALNContextCacheAdapterStashKey] = self.cacheAdapter;
+  }
+  if (self.localizationAdapter != nil) {
+    baseStash[ALNContextLocalizationAdapterStashKey] = self.localizationAdapter;
+  }
+  if (self.mailAdapter != nil) {
+    baseStash[ALNContextMailAdapterStashKey] = self.mailAdapter;
+  }
+  if (self.attachmentAdapter != nil) {
+    baseStash[ALNContextAttachmentAdapterStashKey] = self.attachmentAdapter;
+  }
+  baseStash[ALNContextI18nDefaultLocaleStashKey] = self.i18nDefaultLocale ?: @"en";
+  baseStash[ALNContextI18nFallbackLocaleStashKey] =
+      self.i18nFallbackLocale ?: self.i18nDefaultLocale ?: @"en";
+  baseStash[ALNContextEOCStrictLocalsStashKey] = @(self.eocStrictLocalsEnabled);
+  baseStash[ALNContextEOCStrictStringifyStashKey] = @(self.eocStrictStringifyEnabled);
+  baseStash[ALNContextPageStateEnabledStashKey] = @(self.pageStateEnabled);
+  NSMutableDictionary *stash =
+      (NSMutableDictionary *)[[ALNRequestLazyStash alloc] initWithBaseValues:baseStash
+                                                             requestIdentity:requestIdentity
+                                                                 traceContext:&traceContext];
+  ALNContext *context = [[ALNContext alloc] initWithRequest:request
+                                                   response:response
+                                                     params:request.routeParams
+                                                      stash:stash
+                                                     logger:self.logger
+                                                  perfTrace:trace
+                                                  routeName:resolvedRouteName
+                                             controllerName:resolvedControllerName
+                                                 actionName:resolvedActionName];
   BOOL shouldDispatchController =
-      routeReady &&
-      ALNApplyRequestContractIfNeeded(self, request, response, context, match.route, requestID);
+      routeReady && ALNApplyRequestContractIfNeeded(self,
+                                                    request,
+                                                    response,
+                                                    context,
+                                                    matchedRoute,
+                                                    ALNResolvedRequestID(requestIdentity));
   NSMutableArray *executedMiddlewares = nil;
   if (shouldDispatchController && [self.mutableMiddlewares count] > 0) {
     executedMiddlewares = [NSMutableArray arrayWithCapacity:[self.mutableMiddlewares count]];
@@ -3518,7 +3885,7 @@ static void ALNFinalizeResponse(ALNApplication *application,
             ALNApplyInternalErrorResponse(self,
                                           request,
                                           response,
-                                          requestID,
+                                          ALNResolvedRequestID(requestIdentity),
                                           500,
                                           @"middleware_failure",
                                           @"Internal Server Error",
@@ -3534,7 +3901,7 @@ static void ALNFinalizeResponse(ALNApplication *application,
         if (middlewareError != nil) {
           [self.logger error:@"middleware failure"
                       fields:@{
-                        @"request_id" : requestID ?: @"",
+                        @"request_id" : ALNResolvedRequestID(requestIdentity),
                         @"controller" : context.controllerName ?: @"",
                         @"action" : context.actionName ?: @"",
                         @"error" : middlewareError.localizedDescription ?: @""
@@ -3548,20 +3915,25 @@ static void ALNFinalizeResponse(ALNApplication *application,
 
   if (shouldDispatchController && !response.committed) {
     shouldDispatchController =
-        ALNApplyAuthContractIfNeeded(self, request, response, context, match.route, requestID);
+        ALNApplyAuthContractIfNeeded(self,
+                                     request,
+                                     response,
+                                     context,
+                                     matchedRoute,
+                                     ALNResolvedRequestID(requestIdentity));
   }
 
   if (shouldDispatchController) {
     [trace startStage:@"controller"];
     @try {
-      id controller = [[match.route.controllerClass alloc] init];
+      id controller = [[matchedRoute.controllerClass alloc] init];
       if ([controller isKindOfClass:[ALNController class]]) {
         ((ALNController *)controller).context = context;
       }
       BOOL guardPassed = YES;
-      if (match.route.guardSelector != NULL) {
+      if (matchedRoute.guardSelector != NULL) {
         BOOL guardInvocationOK = ALNInvokeRouteGuard(controller,
-                                                     match.route,
+                                                     matchedRoute,
                                                      context,
                                                      response,
                                                      self.runtimeInvocationModeKind,
@@ -3569,13 +3941,13 @@ static void ALNFinalizeResponse(ALNApplication *application,
         if (!guardInvocationOK) {
           NSDictionary *details = @{
             @"controller" : context.controllerName ?: @"",
-            @"guard" : match.route.guardActionName ?: @"",
+            @"guard" : matchedRoute.guardActionName ?: @"",
             @"reason" : @"Guard must accept exactly one ALNContext * parameter and return bool/object/void"
           };
           ALNApplyInternalErrorResponse(self,
                                         request,
                                         response,
-                                        requestID,
+                                        ALNResolvedRequestID(requestIdentity),
                                         500,
                                         @"invalid_guard_signature",
                                         @"Internal Server Error",
@@ -3590,7 +3962,7 @@ static void ALNFinalizeResponse(ALNApplication *application,
           NSDictionary *payload = ALNStructuredErrorPayload(403,
                                                             @"forbidden",
                                                             @"Forbidden",
-                                                            requestID,
+                                                            ALNResolvedRequestID(requestIdentity),
                                                             @{});
           ALNSetStructuredErrorResponse(response, 403, payload);
         } else {
@@ -3603,7 +3975,7 @@ static void ALNFinalizeResponse(ALNApplication *application,
 
       if (guardPassed && !response.committed) {
         BOOL actionInvocationOK = ALNInvokeRouteAction(controller,
-                                                       match.route,
+                                                       matchedRoute,
                                                        context,
                                                        self.runtimeInvocationModeKind,
                                                        &returnValue);
@@ -3616,7 +3988,7 @@ static void ALNFinalizeResponse(ALNApplication *application,
           ALNApplyInternalErrorResponse(self,
                                         request,
                                         response,
-                                        requestID,
+                                        ALNResolvedRequestID(requestIdentity),
                                         500,
                                         @"invalid_action_signature",
                                         @"Internal Server Error",
@@ -3629,7 +4001,7 @@ static void ALNFinalizeResponse(ALNApplication *application,
       ALNApplyInternalErrorResponse(self,
                                     request,
                                     response,
-                                    requestID,
+                                    ALNResolvedRequestID(requestIdentity),
                                     500,
                                     @"controller_exception",
                                     @"Internal Server Error",
@@ -3637,7 +4009,7 @@ static void ALNFinalizeResponse(ALNApplication *application,
                                     details);
       [self.logger error:@"controller exception"
                   fields:@{
-                    @"request_id" : requestID ?: @"",
+                    @"request_id" : ALNResolvedRequestID(requestIdentity),
                     @"controller" : context.controllerName ?: @"",
                     @"action" : context.actionName ?: @"",
                     @"exception" : exception.description ?: @""
@@ -3649,7 +4021,7 @@ static void ALNFinalizeResponse(ALNApplication *application,
   if (!response.committed) {
     if ([returnValue isKindOfClass:[NSDictionary class]] ||
         [returnValue isKindOfClass:[NSArray class]]) {
-      Class controllerClass = match.route.controllerClass;
+      Class controllerClass = matchedRoute.controllerClass;
       NSJSONWritingOptions options = 0;
       if ([controllerClass respondsToSelector:@selector(jsonWritingOptions)]) {
         options = (NSJSONWritingOptions)[controllerClass jsonWritingOptions];
@@ -3662,7 +4034,7 @@ static void ALNFinalizeResponse(ALNApplication *application,
         ALNApplyInternalErrorResponse(self,
                                       request,
                                       response,
-                                      requestID,
+                                      ALNResolvedRequestID(requestIdentity),
                                       500,
                                       @"json_serialization_failed",
                                       @"Internal Server Error",
@@ -3670,7 +4042,7 @@ static void ALNFinalizeResponse(ALNApplication *application,
                                       details);
         [self.logger error:@"implicit json serialization failed"
                     fields:@{
-                      @"request_id" : requestID ?: @"",
+                      @"request_id" : ALNResolvedRequestID(requestIdentity),
                       @"controller" : context.controllerName ?: @"",
                       @"action" : context.actionName ?: @"",
                       @"error" : jsonError.localizedDescription ?: @""
@@ -3717,7 +4089,7 @@ static void ALNFinalizeResponse(ALNApplication *application,
         ALNApplyInternalErrorResponse(self,
                                       request,
                                       response,
-                                      requestID,
+                                      ALNResolvedRequestID(requestIdentity),
                                       500,
                                       @"middleware_finalize_failure",
                                       @"Internal Server Error",
@@ -3726,7 +4098,7 @@ static void ALNFinalizeResponse(ALNApplication *application,
       }
       [self.logger error:@"middleware finalize failure"
                   fields:@{
-                    @"request_id" : requestID ?: @"",
+                    @"request_id" : ALNResolvedRequestID(requestIdentity),
                     @"controller" : context.controllerName ?: @"",
                     @"action" : context.actionName ?: @"",
                     @"exception" : exception.description ?: @""
@@ -3737,15 +4109,15 @@ static void ALNFinalizeResponse(ALNApplication *application,
   (void)ALNValidateResponseContractIfNeeded(self,
                                             request,
                                             response,
-                                            match.route,
+                                            matchedRoute,
                                             returnValue,
-                                            requestID);
+                                            ALNResolvedRequestID(requestIdentity));
 
   ALNFinalizeResponse(self,
                       response,
                       trace,
                       request,
-                      requestID,
+                      requestIdentity,
                       &traceContext,
                       performanceLogging);
   ALNRecordRequestMetrics(self, response, trace);
@@ -3756,22 +4128,22 @@ static void ALNFinalizeResponse(ALNApplication *application,
   if (self.traceExporter != nil) {
     @try {
       [self.traceExporter exportTrace:ALNTraceExportPayload(trace,
-                                                            requestID,
+                                                            ALNResolvedRequestID(requestIdentity),
                                                             &traceContext,
                                                             request,
                                                             response,
-                                                            context.routeName ?: @"",
-                                                            context.controllerName ?: @"",
-                                                            context.actionName ?: @"")
+                                                            resolvedRouteName,
+                                                            resolvedControllerName,
+                                                            resolvedActionName)
                               request:request
                              response:response
-                            routeName:context.routeName ?: @""
-                       controllerName:context.controllerName ?: @""
-                           actionName:context.actionName ?: @""];
+                            routeName:resolvedRouteName
+                       controllerName:resolvedControllerName
+                           actionName:resolvedActionName];
     } @catch (NSException *exception) {
       [self.logger warn:@"trace exporter failed"
                  fields:@{
-                   @"request_id" : requestID ?: @"",
+                   @"request_id" : ALNResolvedRequestID(requestIdentity),
                    @"exception" : exception.reason ?: @"",
                  }];
     }
@@ -3783,8 +4155,8 @@ static void ALNFinalizeResponse(ALNApplication *application,
     logFields[@"path"] = request.path ?: @"";
     logFields[@"status"] = @(response.statusCode);
     logFields[@"event"] = @"http.request.completed";
-    logFields[@"request_id"] = requestID ?: @"";
-    logFields[@"correlation_id"] = requestID ?: @"";
+    logFields[@"request_id"] = ALNResolvedRequestID(requestIdentity);
+    logFields[@"correlation_id"] = ALNResolvedRequestID(requestIdentity);
     if (ALNTraceContextHasTraceID(&traceContext)) {
       logFields[@"trace_id"] = ALNStringFromTraceBuffer(traceContext.traceID);
       logFields[@"span_id"] = ALNStringFromTraceBuffer(traceContext.spanID);
@@ -3793,9 +4165,9 @@ static void ALNFinalizeResponse(ALNApplication *application,
       }
       logFields[@"traceparent"] = ALNStringFromTraceBuffer(traceContext.traceparent);
     }
-    logFields[@"route"] = context.routeName ?: @"";
-    logFields[@"controller"] = context.controllerName ?: @"";
-    logFields[@"action"] = context.actionName ?: @"";
+    logFields[@"route"] = resolvedRouteName;
+    logFields[@"controller"] = resolvedControllerName;
+    logFields[@"action"] = resolvedActionName;
     if (performanceLogging) {
       logFields[@"timings"] = [trace dictionaryRepresentation];
     }

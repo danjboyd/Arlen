@@ -55,6 +55,8 @@ typedef NS_ENUM(NSUInteger, ALNRouteInvocationReturnKind) {
 @property(nonatomic, strong, nullable) NSMethodSignature *compiledGuardSignature;
 @property(nonatomic, assign, nullable) IMP compiledActionIMP;
 @property(nonatomic, assign, nullable) IMP compiledGuardIMP;
+@property(nonatomic, assign, nullable) SEL compiledFastActionSelector;
+@property(nonatomic, assign, nullable) IMP compiledFastActionIMP;
 @property(nonatomic, assign) ALNRouteInvocationReturnKind compiledActionReturnKind;
 @property(nonatomic, assign) ALNRouteInvocationReturnKind compiledGuardReturnKind;
 @property(nonatomic, assign) BOOL compiledInvocationMetadata;

@@ -243,12 +243,17 @@ Behavior:
   - weak `session.secret` values (minimum 32 characters required when `session.enabled=YES`)
   - `csrf.enabled=YES` without session middleware
   - query-string CSRF fallback is disabled by default; opt in with `ARLEN_CSRF_ALLOW_QUERY_FALLBACK=1`
+- session middleware stores cookies as encrypted and authenticated tokens by default
+- forwarded proxy headers are honored only when `trustedProxy=YES` and the peer IP matches `trustedProxyCIDRs`
+  - `edge` profile defaults `trustedProxyCIDRs` to `127.0.0.1/32`
+  - when `trustedProxy=YES` and no CIDRs are configured explicitly, Arlen falls back to `127.0.0.1/32`
 - route compile validation now fails startup deterministically when enabled (`routing.compileOnStart=YES`):
   - invalid action/guard signatures
   - invalid route schema transformer/type readiness
-- request responses emit correlation/trace headers:
+- request responses emit correlation/trace headers by default:
   - `X-Request-Id`
   - `X-Correlation-Id`
+  - disable request/correlation headers with `ARLEN_RESPONSE_IDENTITY_HEADERS_ENABLED=0`
   - `X-Trace-Id` + `traceparent` (when trace propagation is enabled)
 - built-in health/readiness probes support JSON signal payloads when requested:
   - `GET /healthz` with `Accept: application/json` (or `?format=json`)
@@ -290,6 +295,8 @@ Environment:
 - `ARLEN_APP_ROOT`
 - `ARLEN_FRAMEWORK_ROOT`
 - `ARLEN_SECURITY_PROFILE` (`balanced`, `strict`, or `edge`; legacy `MOJOOBJC_SECURITY_PROFILE` also accepted)
+- `ARLEN_TRUSTED_PROXY` (`1` to enable forwarded header handling; legacy `MOJOOBJC_TRUSTED_PROXY` also accepted)
+- `ARLEN_TRUSTED_PROXY_CIDRS` (comma-separated IPv4 CIDR allowlist for trusted reverse proxies; legacy `MOJOOBJC_TRUSTED_PROXY_CIDRS` also accepted)
 - `ARLEN_MAX_HTTP_SESSIONS` (runtime HTTP session limit; legacy `MOJOOBJC_MAX_HTTP_SESSIONS` also accepted)
 - `ARLEN_MAX_WEBSOCKET_SESSIONS` (runtime websocket session limit; legacy `MOJOOBJC_MAX_WEBSOCKET_SESSIONS` also accepted)
 - `ARLEN_MAX_HTTP_WORKERS` (runtime HTTP worker pool size; legacy `MOJOOBJC_MAX_HTTP_WORKERS` also accepted)
@@ -302,6 +309,7 @@ Environment:
 - `ARLEN_ENABLE_YYJSON` (compile-time toggle for app-root builds via `bin/boomhauer`; `1` default, set `0` to compile without yyjson)
 - `ARLEN_ENABLE_LLHTTP` (compile-time toggle for app-root builds via `bin/boomhauer`; `1` default, set `0` to compile without llhttp)
 - `ARLEN_TRACE_PROPAGATION_ENABLED` (default `1`; legacy `MOJOOBJC_TRACE_PROPAGATION_ENABLED` also accepted)
+- `ARLEN_RESPONSE_IDENTITY_HEADERS_ENABLED` (default `1`; disables `X-Request-Id`/`X-Correlation-Id` emission when set to `0`; legacy `MOJOOBJC_RESPONSE_IDENTITY_HEADERS_ENABLED` also accepted)
 - `ARLEN_METRICS_ENABLED` (default `1`; disables hot-path metrics writes when set to `0`; legacy `MOJOOBJC_METRICS_ENABLED` also accepted)
 - `ARLEN_HEALTH_DETAILS_ENABLED` (default `1`; legacy `MOJOOBJC_HEALTH_DETAILS_ENABLED` also accepted)
 - `ARLEN_READINESS_REQUIRES_STARTUP` (default `0`; legacy `MOJOOBJC_READINESS_REQUIRES_STARTUP` also accepted)

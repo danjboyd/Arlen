@@ -80,12 +80,14 @@
   if (![self responseLooksLikeJSON:response]) {
     return;
   }
-  if ([response.bodyData length] == 0) {
+  if ([response bodyLength] == 0) {
     return;
   }
 
   NSError *parseError = nil;
-  id parsed = [ALNJSONSerialization JSONObjectWithData:response.bodyData options:0 error:&parseError];
+  id parsed = [ALNJSONSerialization JSONObjectWithData:[response bodyDataForTransmission]
+                                               options:0
+                                                 error:&parseError];
   if (parseError != nil || parsed == nil) {
     return;
   }

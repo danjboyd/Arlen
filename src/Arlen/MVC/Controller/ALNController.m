@@ -250,7 +250,7 @@ static NSString *ALNSafeRedirectLocation(NSString *location) {
   [self.context.response setHeader:@"Upgrade" value:@"websocket"];
   [self.context.response setHeader:@"X-Arlen-WebSocket-Mode" value:@"echo"];
   [self.context.response setHeader:@"Content-Type" value:@""];
-  [self.context.response.bodyData setLength:0];
+  [self.context.response clearBody];
   self.context.response.committed = YES;
 }
 
@@ -268,7 +268,7 @@ static NSString *ALNSafeRedirectLocation(NSString *location) {
   [self.context.response setHeader:@"X-Arlen-WebSocket-Mode" value:@"channel"];
   [self.context.response setHeader:@"X-Arlen-WebSocket-Channel" value:[normalized lowercaseString]];
   [self.context.response setHeader:@"Content-Type" value:@""];
-  [self.context.response.bodyData setLength:0];
+  [self.context.response clearBody];
   self.context.response.committed = YES;
 }
 

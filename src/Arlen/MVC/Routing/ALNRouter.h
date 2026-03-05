@@ -27,6 +27,10 @@ NS_ASSUME_NONNULL_BEGIN
 - (nullable ALNRouteMatch *)matchMethod:(NSString *)method
                                    path:(NSString *)path
                                  format:(nullable NSString *)format;
+- (nullable ALNRoute *)matchMethod:(NSString *)method
+                               path:(NSString *)path
+                             format:(nullable NSString *)format
+                             params:(NSDictionary *_Nullable *_Nullable)params;
 - (void)beginRouteGroupWithPrefix:(NSString *)prefix
                       guardAction:(nullable NSString *)guardAction
                           formats:(nullable NSArray *)formats;
