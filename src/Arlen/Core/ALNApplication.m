@@ -1171,6 +1171,10 @@ static BOOL ALNSessionSecretMeetsMinimumStrength(NSString *secret) {
   return [secret length] >= 32;
 }
 
+static BOOL ALNAuthBearerSecretMeetsMinimumStrength(NSString *secret) {
+  return [secret length] >= 32;
+}
+
 static NSError *ALNSecurityConfigValidationError(NSInteger code,
                                                  NSString *message,
                                                  NSString *configKey,
@@ -1233,6 +1237,14 @@ static NSError *ALNValidateSecurityConfiguration(NSDictionary *config) {
         @"Invalid security configuration: auth.enabled requires auth.bearerSecret",
         @"auth.bearerSecret",
         @"missing_required_secret",
+        securityProfile);
+  }
+  if (authEnabled && !ALNAuthBearerSecretMeetsMinimumStrength(authBearerSecret)) {
+    return ALNSecurityConfigValidationError(
+        338,
+        @"Invalid security configuration: auth.bearerSecret must be at least 32 characters when auth.enabled is YES",
+        @"auth.bearerSecret",
+        @"weak_secret",
         securityProfile);
   }
 

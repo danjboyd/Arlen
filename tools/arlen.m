@@ -3464,6 +3464,11 @@ static int CommandMigrate(NSArray *args) {
                                                 error:&error];
   if (!ok) {
     fprintf(stderr, "arlen migrate: %s\n", [[error localizedDescription] UTF8String]);
+    NSString *detail =
+        [error.userInfo[@"detail"] isKindOfClass:[NSString class]] ? error.userInfo[@"detail"] : @"";
+    if ([detail length] > 0) {
+      fprintf(stderr, "detail: %s\n", [detail UTF8String]);
+    }
     return 1;
   }
 

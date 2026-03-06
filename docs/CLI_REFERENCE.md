@@ -79,6 +79,11 @@ Apply SQL migrations from `db/migrations` to PostgreSQL.
 - per-target migration directory: `db/migrations/<target>` (for non-default targets)
 - per-target migration state table: `arlen_schema_migrations__<target>`
 - target-specific env override: `ARLEN_DATABASE_URL_<TARGET>`
+- migration files are executed as raw PostgreSQL scripts inside one transaction per file
+- normal multi-statement `.sql` migration files are supported
+- empty/comment-only migration files are rejected
+- top-level transaction control statements such as `BEGIN`, `COMMIT`, `ROLLBACK`, and `SAVEPOINT` are rejected
+- PostgreSQL commands that are disallowed inside transaction blocks still fail under `arlen migrate`
 
 ### `arlen schema-codegen [--env <name>] [--database <target>] [--dsn <connection_string>] [--output-dir <path>] [--manifest <path>] [--prefix <ClassPrefix>] [--typed-contracts] [--force]`
 
@@ -241,12 +246,18 @@ Behavior:
 - security misconfiguration now fails startup deterministically:
   - missing `session.secret` when `session.enabled=YES`
   - weak `session.secret` values (minimum 32 characters required when `session.enabled=YES`)
+  - weak `auth.bearerSecret` values (minimum 32 characters required when `auth.enabled=YES`)
   - `csrf.enabled=YES` without session middleware
   - query-string CSRF fallback is disabled by default; opt in with `ARLEN_CSRF_ALLOW_QUERY_FALLBACK=1`
+- when `webSocket.allowedOrigins` is configured, websocket upgrades require a matching `Origin` header or return `403`
+- the legacy HTTP parser backend rejects duplicate `Content-Length` headers and all `Transfer-Encoding` requests
 - session middleware stores cookies as encrypted and authenticated tokens by default
-- forwarded proxy headers are honored only when `trustedProxy=YES` and the peer IP matches `trustedProxyCIDRs`
+- forwarded proxy headers are honored only when the peer IP matches `trustedProxyCIDRs`
+  - specifying `trustedProxyCIDRs` alone enables forwarded-header handling
+  - `trustedProxy=YES` remains as a compatibility toggle and seeds a loopback CIDR allowlist when no explicit CIDRs are configured
   - `edge` profile defaults `trustedProxyCIDRs` to `127.0.0.1/32`
-  - when `trustedProxy=YES` and no CIDRs are configured explicitly, Arlen falls back to `127.0.0.1/32`
+- text logger output escapes newline/tab/control characters in text mode
+- filesystem job/mail/attachment adapters enforce private `0700` directories and `0600` files; filesystem attachment IDs must be framework-generated `att-<32 hex>` values
 - route compile validation now fails startup deterministically when enabled (`routing.compileOnStart=YES`):
   - invalid action/guard signatures
   - invalid route schema transformer/type readiness
@@ -295,10 +306,11 @@ Environment:
 - `ARLEN_APP_ROOT`
 - `ARLEN_FRAMEWORK_ROOT`
 - `ARLEN_SECURITY_PROFILE` (`balanced`, `strict`, or `edge`; legacy `MOJOOBJC_SECURITY_PROFILE` also accepted)
-- `ARLEN_TRUSTED_PROXY` (`1` to enable forwarded header handling; legacy `MOJOOBJC_TRUSTED_PROXY` also accepted)
-- `ARLEN_TRUSTED_PROXY_CIDRS` (comma-separated IPv4 CIDR allowlist for trusted reverse proxies; legacy `MOJOOBJC_TRUSTED_PROXY_CIDRS` also accepted)
+- `ARLEN_TRUSTED_PROXY` (legacy compatibility toggle for forwarded-header handling; when set to `1` with no explicit CIDRs, Arlen falls back to `127.0.0.1/32`; legacy `MOJOOBJC_TRUSTED_PROXY` also accepted)
+- `ARLEN_TRUSTED_PROXY_CIDRS` (comma-separated IPv4 CIDR allowlist for trusted reverse proxies; setting this list alone enables forwarded-header handling; legacy `MOJOOBJC_TRUSTED_PROXY_CIDRS` also accepted)
 - `ARLEN_MAX_HTTP_SESSIONS` (runtime HTTP session limit; legacy `MOJOOBJC_MAX_HTTP_SESSIONS` also accepted)
 - `ARLEN_MAX_WEBSOCKET_SESSIONS` (runtime websocket session limit; legacy `MOJOOBJC_MAX_WEBSOCKET_SESSIONS` also accepted)
+- `ARLEN_WEBSOCKET_ALLOWED_ORIGINS` (comma-separated websocket `Origin` allowlist; normalized to scheme/host/port; legacy `MOJOOBJC_WEBSOCKET_ALLOWED_ORIGINS` also accepted)
 - `ARLEN_MAX_HTTP_WORKERS` (runtime HTTP worker pool size; legacy `MOJOOBJC_MAX_HTTP_WORKERS` also accepted)
 - `ARLEN_MAX_QUEUED_HTTP_CONNECTIONS` (runtime HTTP worker queue depth; legacy `MOJOOBJC_MAX_QUEUED_HTTP_CONNECTIONS` also accepted)
 - `ARLEN_MAX_REALTIME_SUBSCRIBERS` (runtime global realtime subscriber cap; legacy `MOJOOBJC_MAX_REALTIME_SUBSCRIBERS` also accepted)
@@ -385,6 +397,11 @@ Lifecycle diagnostics:
 - `make ci-json-perf`: run Phase 10E JSON backend microbenchmark gate and generate artifacts under `build/release_confidence/phase10e`
 - `make ci-dispatch-perf`: run Phase 10G dispatch invocation benchmark gate and generate artifacts under `build/release_confidence/phase10g`
 - `make ci-http-parse-perf`: run Phase 10H HTTP parser benchmark gate and generate artifacts under `build/release_confidence/phase10h`
+- `make ci-phase11-protocol-adversarial`: run the Phase 11 hostile protocol corpus and generate artifacts under `build/release_confidence/phase11/protocol_adversarial`
+- `make ci-phase11-fuzz`: run the Phase 11 deterministic protocol mutation harness and generate artifacts under `build/release_confidence/phase11/protocol_fuzz`
+- `make ci-phase11-live-adversarial`: run the Phase 11 mixed hostile HTTP/websocket probe and generate artifacts under `build/release_confidence/phase11/live_adversarial`
+- `make ci-phase11-sanitizers`: run the Phase 11 ASan/UBSan hostile-traffic matrix and generate artifacts under `build/release_confidence/phase11/sanitizers`
+- `make ci-phase11`: run the full Phase 11 confidence pack (protocol corpus + fuzz + live probe + sanitizer matrix)
 - `make phase5e-confidence`: generate Phase 5E release confidence artifacts in `build/release_confidence/phase5e`
 - `tools/ci/run_phase5e_quality.sh`: explicit Phase 5E CI gate entrypoint
 - `tools/ci/run_phase5e_sanitizers.sh`: explicit Phase 5E sanitizer CI gate entrypoint
@@ -422,6 +439,19 @@ Lifecycle diagnostics:
   - `ARLEN_PHASE10H_OUTPUT_DIR` overrides artifact output directory
   - `ARLEN_PHASE10H_FIXTURES_DIR` overrides fixture corpus directory
   - `ARLEN_PHASE10H_THRESHOLDS` overrides threshold policy fixture path
+- `tools/ci/run_phase11_protocol_adversarial.sh`: explicit Phase 11 hostile protocol corpus gate entrypoint
+  - `ARLEN_PHASE11_PROTOCOL_OUTPUT_DIR` overrides artifact output directory
+  - `ARLEN_PHASE11_PROTOCOL_BACKENDS` selects parser backends (default `llhttp,legacy`)
+- `tools/ci/run_phase11_protocol_fuzz.sh`: explicit Phase 11 deterministic protocol mutation gate entrypoint
+  - `ARLEN_PHASE11_FUZZ_OUTPUT_DIR` overrides artifact output directory
+  - `ARLEN_PHASE11_FUZZ_BACKENDS` selects parser backends (default `llhttp,legacy`)
+- `tools/ci/run_phase11_live_adversarial.sh`: explicit Phase 11 mixed hostile-traffic probe entrypoint
+  - `ARLEN_PHASE11_LIVE_OUTPUT_DIR` overrides artifact output directory
+  - `ARLEN_PHASE11_LIVE_MODES` selects dispatch modes (default `serialized,concurrent`)
+  - `ARLEN_PHASE11_LIVE_ROUNDS` controls probe rounds (default `2`)
+- `tools/ci/run_phase11_sanitizer_matrix.sh`: explicit Phase 11 sanitizer hostile-traffic matrix entrypoint
+  - `ARLEN_PHASE11_SANITIZER_OUTPUT_DIR` overrides artifact output directory
+  - `ARLEN_PHASE11_SANITIZER_LANES` selects sanitizer lanes
   - threshold policy supports global + fixture-size classes:
     - global: `parse_ops_ratio_min`, `parse_p95_ratio_max`, expected-improvement keys
     - small fixture class: `small_request_bytes_max`, `small_parse_ops_ratio_min`, `small_parse_p95_ratio_max`

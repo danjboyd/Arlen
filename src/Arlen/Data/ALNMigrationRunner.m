@@ -5,6 +5,19 @@
 NSString *const ALNMigrationRunnerErrorDomain = @"Arlen.Data.MigrationRunner.Error";
 NSString *const ALNMigrationRunnerDefaultDatabaseTarget = @"default";
 
+@interface ALNPgConnection (ALNMigrationRunnerScripts)
+- (BOOL)executeScript:(NSString *)sql error:(NSError **)error;
+@end
+
+typedef NS_ENUM(NSUInteger, ALNMigrationSQLScanState) {
+  ALNMigrationSQLScanStateDefault = 0,
+  ALNMigrationSQLScanStateSingleQuote = 1,
+  ALNMigrationSQLScanStateDoubleQuote = 2,
+  ALNMigrationSQLScanStateLineComment = 3,
+  ALNMigrationSQLScanStateBlockComment = 4,
+  ALNMigrationSQLScanStateDollarQuote = 5,
+};
+
 static NSError *ALNMigrationError(NSString *message, NSString *detail) {
   NSMutableDictionary *userInfo = [NSMutableDictionary dictionary];
   userInfo[NSLocalizedDescriptionKey] = message ?: @"migration error";
@@ -12,6 +25,343 @@ static NSError *ALNMigrationError(NSString *message, NSString *detail) {
     userInfo[@"detail"] = detail;
   }
   return [NSError errorWithDomain:ALNMigrationRunnerErrorDomain code:1 userInfo:userInfo];
+}
+
+static NSString *ALNMigrationComposedDetail(NSError *error) {
+  if (![error isKindOfClass:[NSError class]]) {
+    return nil;
+  }
+
+  NSMutableArray<NSString *> *parts = [NSMutableArray array];
+  NSString *localized = [error localizedDescription];
+  if ([localized length] > 0) {
+    [parts addObject:localized];
+  }
+
+  NSString *detail =
+      [error.userInfo[@"detail"] isKindOfClass:[NSString class]] ? error.userInfo[@"detail"] : @"";
+  if ([detail length] > 0 && ![detail isEqualToString:localized]) {
+    [parts addObject:detail];
+  }
+
+  if ([parts count] == 0) {
+    return nil;
+  }
+  return [parts componentsJoinedByString:@": "];
+}
+
+static BOOL ALNMigrationIsIdentifierStart(unichar character) {
+  return ([[NSCharacterSet letterCharacterSet] characterIsMember:character] || character == '_');
+}
+
+static BOOL ALNMigrationIsIdentifierBody(unichar character) {
+  return ([[NSCharacterSet alphanumericCharacterSet] characterIsMember:character] || character == '_');
+}
+
+static NSString *ALNMigrationDollarQuoteTagAtIndex(NSString *sql,
+                                                   NSUInteger index,
+                                                   NSUInteger *tagLength) {
+  NSUInteger length = [sql length];
+  if (index >= length || [sql characterAtIndex:index] != '$') {
+    return nil;
+  }
+
+  NSUInteger cursor = index + 1;
+  if (cursor < length && [sql characterAtIndex:cursor] == '$') {
+    if (tagLength != NULL) {
+      *tagLength = 2;
+    }
+    return @"$$";
+  }
+
+  if (cursor >= length || !ALNMigrationIsIdentifierStart([sql characterAtIndex:cursor])) {
+    return nil;
+  }
+
+  while (cursor < length) {
+    unichar character = [sql characterAtIndex:cursor];
+    if (character == '$') {
+      NSUInteger lengthValue = (cursor - index) + 1;
+      if (tagLength != NULL) {
+        *tagLength = lengthValue;
+      }
+      return [sql substringWithRange:NSMakeRange(index, lengthValue)];
+    }
+    if (!ALNMigrationIsIdentifierBody(character)) {
+      return nil;
+    }
+    cursor += 1;
+  }
+
+  return nil;
+}
+
+static NSString *ALNMigrationNextIdentifierToken(NSString *statement, NSUInteger *cursor) {
+  if (![statement isKindOfClass:[NSString class]]) {
+    return nil;
+  }
+
+  NSUInteger index = (cursor != NULL) ? *cursor : 0;
+  NSUInteger length = [statement length];
+  while (index < length) {
+    unichar character = [statement characterAtIndex:index];
+    if ([[NSCharacterSet whitespaceAndNewlineCharacterSet] characterIsMember:character]) {
+      index += 1;
+      continue;
+    }
+    if (character == '-' && (index + 1) < length && [statement characterAtIndex:(index + 1)] == '-') {
+      index += 2;
+      while (index < length) {
+        unichar lineCharacter = [statement characterAtIndex:index];
+        index += 1;
+        if (lineCharacter == '\n') {
+          break;
+        }
+      }
+      continue;
+    }
+    if (character == '/' && (index + 1) < length && [statement characterAtIndex:(index + 1)] == '*') {
+      NSUInteger depth = 1;
+      index += 2;
+      while (index < length && depth > 0) {
+        unichar blockCharacter = [statement characterAtIndex:index];
+        if (blockCharacter == '/' && (index + 1) < length &&
+            [statement characterAtIndex:(index + 1)] == '*') {
+          depth += 1;
+          index += 2;
+          continue;
+        }
+        if (blockCharacter == '*' && (index + 1) < length &&
+            [statement characterAtIndex:(index + 1)] == '/') {
+          depth -= 1;
+          index += 2;
+          continue;
+        }
+        index += 1;
+      }
+      continue;
+    }
+    break;
+  }
+
+  if (cursor != NULL) {
+    *cursor = index;
+  }
+  if (index >= length) {
+    return nil;
+  }
+
+  unichar firstCharacter = [statement characterAtIndex:index];
+  if (!ALNMigrationIsIdentifierStart(firstCharacter)) {
+    return nil;
+  }
+
+  NSUInteger start = index;
+  index += 1;
+  while (index < length && ALNMigrationIsIdentifierBody([statement characterAtIndex:index])) {
+    index += 1;
+  }
+
+  if (cursor != NULL) {
+    *cursor = index;
+  }
+  return [[statement substringWithRange:NSMakeRange(start, index - start)] uppercaseString];
+}
+
+static NSArray<NSString *> *ALNMigrationTopLevelStatements(NSString *sql) {
+  if (![sql isKindOfClass:[NSString class]] || [sql length] == 0) {
+    return @[];
+  }
+
+  NSMutableArray<NSString *> *statements = [NSMutableArray array];
+  NSMutableString *current = [NSMutableString string];
+  ALNMigrationSQLScanState state = ALNMigrationSQLScanStateDefault;
+  NSUInteger blockCommentDepth = 0;
+  NSString *dollarTag = nil;
+  NSUInteger index = 0;
+  NSUInteger length = [sql length];
+
+  while (index < length) {
+    if (state == ALNMigrationSQLScanStateDollarQuote) {
+      NSUInteger tagLength = [dollarTag length];
+      if (tagLength > 0 && (index + tagLength) <= length &&
+          [[sql substringWithRange:NSMakeRange(index, tagLength)] isEqualToString:dollarTag]) {
+        [current appendString:dollarTag];
+        index += tagLength;
+        state = ALNMigrationSQLScanStateDefault;
+        dollarTag = nil;
+        continue;
+      }
+      [current appendFormat:@"%C", [sql characterAtIndex:index]];
+      index += 1;
+      continue;
+    }
+
+    unichar character = [sql characterAtIndex:index];
+    if (state == ALNMigrationSQLScanStateDefault) {
+      if (character == ';') {
+        NSUInteger cursor = 0;
+        if ([ALNMigrationNextIdentifierToken(current, &cursor) length] > 0) {
+          [statements addObject:[NSString stringWithString:current]];
+        }
+        [current setString:@""];
+        index += 1;
+        continue;
+      }
+      if (character == '-' && (index + 1) < length && [sql characterAtIndex:(index + 1)] == '-') {
+        [current appendString:@"--"];
+        index += 2;
+        state = ALNMigrationSQLScanStateLineComment;
+        continue;
+      }
+      if (character == '/' && (index + 1) < length && [sql characterAtIndex:(index + 1)] == '*') {
+        [current appendString:@"/*"];
+        index += 2;
+        blockCommentDepth = 1;
+        state = ALNMigrationSQLScanStateBlockComment;
+        continue;
+      }
+      if (character == '\'') {
+        [current appendString:@"'"];
+        index += 1;
+        state = ALNMigrationSQLScanStateSingleQuote;
+        continue;
+      }
+      if (character == '"') {
+        [current appendString:@"\""];
+        index += 1;
+        state = ALNMigrationSQLScanStateDoubleQuote;
+        continue;
+      }
+      NSUInteger tagLength = 0;
+      NSString *tag = ALNMigrationDollarQuoteTagAtIndex(sql, index, &tagLength);
+      if ([tag length] > 0) {
+        [current appendString:tag];
+        index += tagLength;
+        state = ALNMigrationSQLScanStateDollarQuote;
+        dollarTag = tag;
+        continue;
+      }
+      [current appendFormat:@"%C", character];
+      index += 1;
+      continue;
+    }
+
+    if (state == ALNMigrationSQLScanStateSingleQuote) {
+      [current appendFormat:@"%C", character];
+      index += 1;
+      if (character == '\'') {
+        if (index < length && [sql characterAtIndex:index] == '\'') {
+          [current appendString:@"'"];
+          index += 1;
+        } else {
+          state = ALNMigrationSQLScanStateDefault;
+        }
+      }
+      continue;
+    }
+
+    if (state == ALNMigrationSQLScanStateDoubleQuote) {
+      [current appendFormat:@"%C", character];
+      index += 1;
+      if (character == '"') {
+        if (index < length && [sql characterAtIndex:index] == '"') {
+          [current appendString:@"\""];
+          index += 1;
+        } else {
+          state = ALNMigrationSQLScanStateDefault;
+        }
+      }
+      continue;
+    }
+
+    if (state == ALNMigrationSQLScanStateLineComment) {
+      [current appendFormat:@"%C", character];
+      index += 1;
+      if (character == '\n') {
+        state = ALNMigrationSQLScanStateDefault;
+      }
+      continue;
+    }
+
+    [current appendFormat:@"%C", character];
+    if (character == '/' && (index + 1) < length && [sql characterAtIndex:(index + 1)] == '*') {
+      [current appendString:@"*"];
+      index += 2;
+      blockCommentDepth += 1;
+      continue;
+    }
+    if (character == '*' && (index + 1) < length && [sql characterAtIndex:(index + 1)] == '/') {
+      [current appendString:@"/"];
+      index += 2;
+      if (blockCommentDepth > 0) {
+        blockCommentDepth -= 1;
+      }
+      if (blockCommentDepth == 0) {
+        state = ALNMigrationSQLScanStateDefault;
+      }
+      continue;
+    }
+    index += 1;
+  }
+
+  NSUInteger cursor = 0;
+  if ([ALNMigrationNextIdentifierToken(current, &cursor) length] > 0) {
+    [statements addObject:[NSString stringWithString:current]];
+  }
+  return statements;
+}
+
+static NSString *ALNMigrationForbiddenTransactionControlToken(NSString *statement) {
+  NSUInteger cursor = 0;
+  NSString *firstToken = ALNMigrationNextIdentifierToken(statement, &cursor);
+  if ([firstToken length] == 0) {
+    return nil;
+  }
+
+  NSSet *forbiddenTokens = [NSSet setWithArray:@[
+    @"ABORT",
+    @"BEGIN",
+    @"COMMIT",
+    @"END",
+    @"RELEASE",
+    @"ROLLBACK",
+    @"SAVEPOINT",
+  ]];
+  if ([forbiddenTokens containsObject:firstToken]) {
+    return firstToken;
+  }
+
+  if ([firstToken isEqualToString:@"START"]) {
+    NSString *secondToken = ALNMigrationNextIdentifierToken(statement, &cursor);
+    if ([secondToken isEqualToString:@"TRANSACTION"] || [secondToken isEqualToString:@"WORK"]) {
+      return [NSString stringWithFormat:@"%@ %@", firstToken, secondToken];
+    }
+  }
+  return nil;
+}
+
+static NSError *ALNMigrationApplyError(NSString *migrationPath, NSError *underlyingError) {
+  NSString *name = [[migrationPath lastPathComponent] length] > 0 ? [migrationPath lastPathComponent]
+                                                                  : (migrationPath ?: @"migration");
+  NSString *message = [NSString stringWithFormat:@"failed applying migration %@", name];
+  NSString *detail = ALNMigrationComposedDetail(underlyingError);
+  NSMutableDictionary *userInfo = [NSMutableDictionary dictionary];
+  userInfo[NSLocalizedDescriptionKey] = message;
+  if ([detail length] > 0) {
+    userInfo[@"detail"] = detail;
+  }
+  userInfo[@"path"] = migrationPath ?: @"";
+  if (underlyingError != nil) {
+    userInfo[NSUnderlyingErrorKey] = underlyingError;
+  }
+  return [NSError errorWithDomain:ALNMigrationRunnerErrorDomain code:1 userInfo:userInfo];
+}
+
+static NSError *ALNMigrationValidationError(NSString *migrationPath,
+                                            NSString *message,
+                                            NSString *detail) {
+  return ALNMigrationApplyError(migrationPath, ALNMigrationError(message, detail));
 }
 
 @implementation ALNMigrationRunner
@@ -177,6 +527,39 @@ static NSError *ALNMigrationError(NSString *message, NSString *detail) {
   return pending;
 }
 
++ (BOOL)validateMigrationSQL:(NSString *)sql
+                migrationPath:(NSString *)migrationPath
+                        error:(NSError **)error {
+  NSArray<NSString *> *statements = ALNMigrationTopLevelStatements(sql);
+  if ([statements count] == 0) {
+    if (error != NULL) {
+      *error = ALNMigrationValidationError(migrationPath,
+                                           @"migration file does not contain executable SQL",
+                                           nil);
+    }
+    return NO;
+  }
+
+  for (NSString *statement in statements) {
+    NSString *forbiddenToken = ALNMigrationForbiddenTransactionControlToken(statement);
+    if ([forbiddenToken length] == 0) {
+      continue;
+    }
+    if (error != NULL) {
+      NSString *detail = [NSString stringWithFormat:
+                                        @"top-level transaction control statement detected: %@",
+                                        forbiddenToken];
+      *error = ALNMigrationValidationError(
+          migrationPath,
+          @"migration file must not include top-level transaction control statements",
+          detail);
+    }
+    return NO;
+  }
+
+  return YES;
+}
+
 + (BOOL)applyMigrationsAtPath:(NSString *)migrationsPath
                      database:(ALNPg *)database
                databaseTarget:(NSString *)databaseTarget
@@ -215,13 +598,15 @@ static NSError *ALNMigrationError(NSString *message, NSString *detail) {
       }
       return NO;
     }
+    if (![self validateMigrationSQL:sql migrationPath:migrationPath error:error]) {
+      return NO;
+    }
 
     NSString *version = [self versionForMigrationFile:migrationPath];
     __block NSError *transactionError = nil;
     NSString *insertSQL = [NSString stringWithFormat:@"INSERT INTO %@ (version) VALUES ($1)", tableName];
     BOOL appliedOK = [database withTransaction:^BOOL(ALNPgConnection *connection, NSError **blockError) {
-      NSInteger affected = [connection executeCommand:sql parameters:@[] error:blockError];
-      if (affected < 0) {
+      if (![connection executeScript:sql error:blockError]) {
         return NO;
       }
 
@@ -236,7 +621,7 @@ static NSError *ALNMigrationError(NSString *message, NSString *detail) {
 
     if (!appliedOK) {
       if (error != NULL) {
-        *error = transactionError ?: ALNMigrationError(@"failed applying migration", migrationPath);
+        *error = ALNMigrationApplyError(migrationPath, transactionError);
       }
       return NO;
     }

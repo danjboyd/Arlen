@@ -53,6 +53,11 @@
   return result;
 }
 
+- (NSString *)uniqueMigrationVersionPrefix {
+  NSString *value = [[[NSUUID UUID] UUIDString] lowercaseString];
+  return [value stringByReplacingOccurrencesOfString:@"-" withString:@""];
+}
+
 - (nullable NSDictionary *)firstGeneratedClassContractFromHeader:(NSString *)header {
   if (![header isKindOfClass:[NSString class]] || [header length] == 0) {
     return nil;
@@ -95,6 +100,23 @@
     };
   }
 
+  return nil;
+}
+
+- (nullable NSDictionary *)tableContractForSchema:(NSString *)schema
+                                            table:(NSString *)table
+                                       inManifest:(NSDictionary *)manifest {
+  NSArray *tables = [manifest[@"tables"] isKindOfClass:[NSArray class]] ? manifest[@"tables"] : @[];
+  for (NSDictionary *entry in tables) {
+    if (![entry isKindOfClass:[NSDictionary class]]) {
+      continue;
+    }
+    NSString *entrySchema = [entry[@"schema"] isKindOfClass:[NSString class]] ? entry[@"schema"] : @"";
+    NSString *entryTable = [entry[@"table"] isKindOfClass:[NSString class]] ? entry[@"table"] : @"";
+    if ([entrySchema isEqualToString:(schema ?: @"")] && [entryTable isEqualToString:(table ?: @"")]) {
+      return entry;
+    }
+  }
   return nil;
 }
 
@@ -150,7 +172,11 @@
                                error:&error]);
   XCTAssertNil(error);
 
-  NSString *migrationPath = [appRoot stringByAppendingPathComponent:@"db/migrations/2026021801_create_table.sql"];
+  NSString *migrationVersion =
+      [NSString stringWithFormat:@"%@_create_table", [self uniqueMigrationVersionPrefix]];
+  NSString *migrationPath =
+      [appRoot stringByAppendingPathComponent:[NSString stringWithFormat:@"db/migrations/%@.sql",
+                                                                        migrationVersion]];
   NSString *migrationSQL =
       [NSString stringWithFormat:@"CREATE TABLE %@(id SERIAL PRIMARY KEY, name TEXT);\n"
                                  "INSERT INTO %@ (name) VALUES ('boomhauer');\n",
@@ -444,15 +470,14 @@
   XCTAssertNotNil(manifest);
   XCTAssertNil(error);
   XCTAssertEqualObjects(@YES, manifest[@"typed_contracts"]);
-  NSArray *tables = [manifest[@"tables"] isKindOfClass:[NSArray class]] ? manifest[@"tables"] : @[];
-  XCTAssertTrue([tables count] > 0);
-  NSDictionary *firstTable = [tables firstObject];
+  NSDictionary *generatedTable = [self tableContractForSchema:@"public" table:table inManifest:manifest];
+  XCTAssertNotNil(generatedTable);
   NSString *className =
-      [firstTable[@"class_name"] isKindOfClass:[NSString class]] ? firstTable[@"class_name"] : nil;
+      [generatedTable[@"class_name"] isKindOfClass:[NSString class]] ? generatedTable[@"class_name"] : nil;
   NSString *rowClassName =
-      [firstTable[@"row_class_name"] isKindOfClass:[NSString class]] ? firstTable[@"row_class_name"] : nil;
+      [generatedTable[@"row_class_name"] isKindOfClass:[NSString class]] ? generatedTable[@"row_class_name"] : nil;
   NSString *insertClassName =
-      [firstTable[@"insert_class_name"] isKindOfClass:[NSString class]] ? firstTable[@"insert_class_name"] : nil;
+      [generatedTable[@"insert_class_name"] isKindOfClass:[NSString class]] ? generatedTable[@"insert_class_name"] : nil;
   XCTAssertNotNil(className);
   XCTAssertNotNil(rowClassName);
   XCTAssertNotNil(insertClassName);
@@ -539,8 +564,9 @@
 
   NSString *brokenCompile = [NSString stringWithFormat:
       @"source /usr/GNUstep/System/Library/Makefiles/GNUstep.sh && clang $(gnustep-config --objc-flags) "
-       "-fobjc-arc -I%@/src/Generated %@ %@ -o %@.broken $(gnustep-config --base-libs) -ldl -lcrypto",
-      appRoot, brokenSourcePath, implPath, smokeBinaryPath];
+       "-fobjc-arc -I%@/src/Arlen -I%@/src/Arlen/Data -I%@/src/Generated %@ %@ "
+       "-o %@.broken $(gnustep-config --base-libs) -ldl -lcrypto",
+      repoRoot, repoRoot, appRoot, brokenSourcePath, implPath, smokeBinaryPath];
   NSString *brokenCompileOutput = [self runShellCapture:brokenCompile exitCode:&code];
   XCTAssertNotEqual(0, code);
   XCTAssertTrue([brokenCompileOutput containsString:@"fieldDoesNotExist"], @"%@", brokenCompileOutput);
@@ -751,8 +777,11 @@
                                error:&error]);
   XCTAssertNil(error);
 
+  NSString *migrationPrefix = [self uniqueMigrationVersionPrefix];
   NSString *primaryMigration1 =
-      [appRoot stringByAppendingPathComponent:@"db/migrations/primary/2026022301_create_primary_table.sql"];
+      [appRoot stringByAppendingPathComponent:
+                   [NSString stringWithFormat:@"db/migrations/primary/%@_01_create_primary_table.sql",
+                                              migrationPrefix]];
   NSString *primarySQL1 =
       [NSString stringWithFormat:@"CREATE TABLE %@(id SERIAL PRIMARY KEY, value TEXT NOT NULL);\n"
                                  "INSERT INTO %@ (value) VALUES ('seed-1');\n",
@@ -764,7 +793,9 @@
   XCTAssertNil(error);
 
   NSString *primaryMigration2 =
-      [appRoot stringByAppendingPathComponent:@"db/migrations/primary/2026022302_insert_primary_row.sql"];
+      [appRoot stringByAppendingPathComponent:
+                   [NSString stringWithFormat:@"db/migrations/primary/%@_02_insert_primary_row.sql",
+                                              migrationPrefix]];
   NSString *primarySQL2 =
       [NSString stringWithFormat:@"INSERT INTO %@ (value) VALUES ('seed-2');\n", primaryTable];
   XCTAssertTrue([primarySQL2 writeToFile:primaryMigration2
@@ -774,7 +805,9 @@
   XCTAssertNil(error);
 
   NSString *analyticsMigration1 =
-      [appRoot stringByAppendingPathComponent:@"db/migrations/analytics/2026022301_create_analytics_table.sql"];
+      [appRoot stringByAppendingPathComponent:
+                   [NSString stringWithFormat:@"db/migrations/analytics/%@_01_create_analytics_table.sql",
+                                              migrationPrefix]];
   NSString *analyticsSQL1 =
       [NSString stringWithFormat:@"CREATE TABLE %@(id SERIAL PRIMARY KEY, event_name TEXT NOT NULL);\n"
                                  "INSERT INTO %@ (event_name) VALUES ('opened');\n",
@@ -786,7 +819,9 @@
   XCTAssertNil(error);
 
   NSString *analyticsMigration2 =
-      [appRoot stringByAppendingPathComponent:@"db/migrations/analytics/2026022302_bad_analytics_row.sql"];
+      [appRoot stringByAppendingPathComponent:
+                   [NSString stringWithFormat:@"db/migrations/analytics/%@_02_bad_analytics_row.sql",
+                                              migrationPrefix]];
   NSString *badAnalyticsSQL = [NSString stringWithFormat:@"INSER INTO %@ (event_name) VALUES ('broken');\n",
                                                          analyticsTable];
   XCTAssertTrue([badAnalyticsSQL writeToFile:analyticsMigration2
@@ -819,6 +854,10 @@
   NSString *analyticsFirst = [self runShellCapture:analyticsCommand exitCode:&code];
   XCTAssertNotEqual(0, code, @"%@", analyticsFirst);
   XCTAssertTrue([analyticsFirst containsString:@"arlen migrate:"], @"%@", analyticsFirst);
+  NSString *analyticsFailureMessage =
+      [NSString stringWithFormat:@"failed applying migration %@",
+                                 [analyticsMigration2 lastPathComponent]];
+  XCTAssertTrue([analyticsFirst containsString:analyticsFailureMessage], @"%@", analyticsFirst);
 
   NSString *primaryCountOutput =
       [self runShellCapture:[NSString stringWithFormat:@"psql %s -Atc \"SELECT COUNT(*) FROM %@\"",

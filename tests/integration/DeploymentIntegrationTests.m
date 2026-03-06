@@ -1550,6 +1550,171 @@
   }
 }
 
+- (void)testPhase11ProtocolAdversarialProbeProducesExpectedPack {
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *outputRoot = [self createTempDirectoryWithPrefix:@"arlen-phase11-protocol-adversarial"];
+  XCTAssertNotNil(outputRoot);
+  if (outputRoot == nil) {
+    return;
+  }
+
+  @try {
+    int code = 0;
+    NSString *command = [NSString stringWithFormat:
+                                      @"cd %@ && ARLEN_PHASE11_PROTOCOL_OUTPUT_DIR=%@ "
+                                       "ARLEN_PHASE11_PROTOCOL_BACKENDS=llhttp "
+                                       "bash ./tools/ci/run_phase11_protocol_adversarial.sh",
+                                      repoRoot, outputRoot];
+    NSString *output = [self runShellCapture:command exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", output);
+
+    NSString *manifestPath = [outputRoot stringByAppendingPathComponent:@"manifest.json"];
+    NSError *error = nil;
+    NSData *manifestData = [NSData dataWithContentsOfFile:manifestPath];
+    XCTAssertNotNil(manifestData);
+    if (manifestData == nil) {
+      return;
+    }
+    NSDictionary *manifest = [NSJSONSerialization JSONObjectWithData:manifestData options:0 error:&error];
+    XCTAssertNotNil(manifest);
+    XCTAssertNil(error);
+    if (![manifest isKindOfClass:[NSDictionary class]]) {
+      return;
+    }
+
+    XCTAssertEqualObjects(@"phase11-protocol-adversarial-v1", manifest[@"version"]);
+    XCTAssertEqualObjects(@"pass", manifest[@"status"]);
+    NSArray *artifacts = [manifest[@"artifacts"] isKindOfClass:[NSArray class]] ? manifest[@"artifacts"] : @[];
+    XCTAssertTrue([artifacts containsObject:@"protocol_adversarial_results.json"]);
+    XCTAssertTrue([artifacts containsObject:@"phase11_protocol_adversarial.md"]);
+  } @finally {
+    [[NSFileManager defaultManager] removeItemAtPath:outputRoot error:nil];
+  }
+}
+
+- (void)testPhase11ProtocolFuzzAndLiveProbeProduceExpectedPacks {
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *fuzzOutputRoot = [self createTempDirectoryWithPrefix:@"arlen-phase11-protocol-fuzz"];
+  NSString *liveOutputRoot = [self createTempDirectoryWithPrefix:@"arlen-phase11-live-adversarial"];
+  XCTAssertNotNil(fuzzOutputRoot);
+  XCTAssertNotNil(liveOutputRoot);
+  if (fuzzOutputRoot == nil || liveOutputRoot == nil) {
+    return;
+  }
+
+  @try {
+    int code = 0;
+    NSString *fuzzCommand = [NSString stringWithFormat:
+                                          @"cd %@ && ARLEN_PHASE11_FUZZ_OUTPUT_DIR=%@ "
+                                           "ARLEN_PHASE11_FUZZ_BACKENDS=llhttp "
+                                           "bash ./tools/ci/run_phase11_protocol_fuzz.sh",
+                                          repoRoot, fuzzOutputRoot];
+    NSString *fuzzOutput = [self runShellCapture:fuzzCommand exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", fuzzOutput);
+
+    NSString *fuzzManifestPath = [fuzzOutputRoot stringByAppendingPathComponent:@"manifest.json"];
+    NSError *error = nil;
+    NSData *fuzzManifestData = [NSData dataWithContentsOfFile:fuzzManifestPath];
+    XCTAssertNotNil(fuzzManifestData);
+    if (fuzzManifestData == nil) {
+      return;
+    }
+    NSDictionary *fuzzManifest =
+        [NSJSONSerialization JSONObjectWithData:fuzzManifestData options:0 error:&error];
+    XCTAssertNotNil(fuzzManifest);
+    XCTAssertNil(error);
+    if (![fuzzManifest isKindOfClass:[NSDictionary class]]) {
+      return;
+    }
+    XCTAssertEqualObjects(@"phase11-protocol-fuzz-v1", fuzzManifest[@"version"]);
+    XCTAssertEqualObjects(@"pass", fuzzManifest[@"status"]);
+    NSArray *fuzzArtifacts =
+        [fuzzManifest[@"artifacts"] isKindOfClass:[NSArray class]] ? fuzzManifest[@"artifacts"] : @[];
+    XCTAssertTrue([fuzzArtifacts containsObject:@"protocol_fuzz_results.json"]);
+    XCTAssertTrue([fuzzArtifacts containsObject:@"phase11_protocol_fuzz.md"]);
+
+    NSString *liveCommand = [NSString stringWithFormat:
+                                          @"cd %@ && ARLEN_PHASE11_LIVE_OUTPUT_DIR=%@ "
+                                           "ARLEN_PHASE11_LIVE_MODES=serialized "
+                                           "ARLEN_PHASE11_LIVE_ROUNDS=1 "
+                                           "ARLEN_WEBSOCKET_READ_TIMEOUT_MS=200 "
+                                           "bash ./tools/ci/run_phase11_live_adversarial.sh",
+                                          repoRoot, liveOutputRoot];
+    NSString *liveOutput = [self runShellCapture:liveCommand exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", liveOutput);
+
+    NSString *liveManifestPath = [liveOutputRoot stringByAppendingPathComponent:@"manifest.json"];
+    NSData *liveManifestData = [NSData dataWithContentsOfFile:liveManifestPath];
+    XCTAssertNotNil(liveManifestData);
+    if (liveManifestData == nil) {
+      return;
+    }
+    NSDictionary *liveManifest =
+        [NSJSONSerialization JSONObjectWithData:liveManifestData options:0 error:&error];
+    XCTAssertNotNil(liveManifest);
+    XCTAssertNil(error);
+    if (![liveManifest isKindOfClass:[NSDictionary class]]) {
+      return;
+    }
+    XCTAssertEqualObjects(@"phase11-live-adversarial-v1", liveManifest[@"version"]);
+    XCTAssertEqualObjects(@"pass", liveManifest[@"status"]);
+    NSArray *liveArtifacts =
+        [liveManifest[@"artifacts"] isKindOfClass:[NSArray class]] ? liveManifest[@"artifacts"] : @[];
+    XCTAssertTrue([liveArtifacts containsObject:@"live_adversarial_results.json"]);
+    XCTAssertTrue([liveArtifacts containsObject:@"phase11_live_adversarial.md"]);
+  } @finally {
+    [[NSFileManager defaultManager] removeItemAtPath:fuzzOutputRoot error:nil];
+    [[NSFileManager defaultManager] removeItemAtPath:liveOutputRoot error:nil];
+  }
+}
+
+- (void)testPhase11SanitizerMatrixProducesExpectedPack {
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *outputRoot = [self createTempDirectoryWithPrefix:@"arlen-phase11-sanitizers"];
+  XCTAssertNotNil(outputRoot);
+  if (outputRoot == nil) {
+    return;
+  }
+
+  @try {
+    int code = 0;
+    NSString *command = [NSString stringWithFormat:
+                                      @"cd %@ && ARLEN_PHASE11_SANITIZER_OUTPUT_DIR=%@ "
+                                       "ARLEN_PHASE11_PROTOCOL_BACKENDS=llhttp "
+                                       "ARLEN_PHASE11_FUZZ_BACKENDS=llhttp "
+                                       "ARLEN_PHASE11_LIVE_MODES=serialized "
+                                       "ARLEN_PHASE11_LIVE_ROUNDS=1 "
+                                       "ARLEN_WEBSOCKET_READ_TIMEOUT_MS=200 "
+                                       "bash ./tools/ci/run_phase11_sanitizer_matrix.sh",
+                                      repoRoot, outputRoot];
+    NSString *output = [self runShellCapture:command exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", output);
+
+    NSString *manifestPath = [outputRoot stringByAppendingPathComponent:@"manifest.json"];
+    NSError *error = nil;
+    NSData *manifestData = [NSData dataWithContentsOfFile:manifestPath];
+    XCTAssertNotNil(manifestData);
+    if (manifestData == nil) {
+      return;
+    }
+    NSDictionary *manifest = [NSJSONSerialization JSONObjectWithData:manifestData options:0 error:&error];
+    XCTAssertNotNil(manifest);
+    XCTAssertNil(error);
+    if (![manifest isKindOfClass:[NSDictionary class]]) {
+      return;
+    }
+
+    XCTAssertEqualObjects(@"phase11-sanitizer-matrix-v1", manifest[@"version"]);
+    XCTAssertEqualObjects(@"pass", manifest[@"status"]);
+    NSArray *artifacts = [manifest[@"artifacts"] isKindOfClass:[NSArray class]] ? manifest[@"artifacts"] : @[];
+    XCTAssertTrue([artifacts containsObject:@"sanitizer_lane_status.json"]);
+    XCTAssertTrue([artifacts containsObject:@"sanitizer_matrix_summary.json"]);
+    XCTAssertTrue([artifacts containsObject:@"phase11_sanitizer_matrix.md"]);
+  } @finally {
+    [[NSFileManager defaultManager] removeItemAtPath:outputRoot error:nil];
+  }
+}
+
 - (void)testPhase10MSyscallFaultInjectionHarnessProducesExpectedPack {
   NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
   NSString *outputRoot = [self createTempDirectoryWithPrefix:@"arlen-phase10m-syscall-faults"];

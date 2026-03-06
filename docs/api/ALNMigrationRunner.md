@@ -3,7 +3,10 @@
 - Kind: `interface`
 - Header: `src/Arlen/Data/ALNMigrationRunner.h`
 
-Migration discovery and migration execution runner for SQL migration directories.
+Migration discovery and migration execution runner for SQL migration directories. Each migration file is
+executed as one raw PostgreSQL script inside a transaction, so normal multi-statement `.sql` files are
+supported. Empty/comment-only files and top-level transaction control statements are rejected before
+execution.
 
 ## Methods
 

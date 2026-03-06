@@ -204,6 +204,9 @@
   XCTAssertTrue([header containsString:@"+ (nullable ALNDBPublicUsersRow *)decodeTypedRow:(NSDictionary<NSString *, id> *)row"]);
 
   XCTAssertTrue([implementation containsString:@"Arlen.Data.SchemaCodegen.TypedDecode.ALNDBSchema"]);
+  XCTAssertTrue([implementation containsString:@"@synthesize columnId = _columnId;"]);
+  XCTAssertTrue([implementation containsString:@"@synthesize columnAge = _columnAge;"]);
+  XCTAssertFalse([implementation containsString:@"@property(nonatomic, copy, readwrite) NSString * columnId;"]);
   XCTAssertTrue([implementation containsString:@"+ (ALNSQLBuilder *)insertContract:(ALNDBPublicUsersInsert *)contractValues {"]);
   XCTAssertTrue([implementation containsString:@"+ (nullable ALNDBPublicUsersRow *)decodeTypedRow:(NSDictionary<NSString *, id> *)row"]);
   XCTAssertTrue([implementation containsString:@"missing required field"]);

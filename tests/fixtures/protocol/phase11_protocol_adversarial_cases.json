@@ -1,0 +1,47 @@
+{
+  "version": "phase11-protocol-adversarial-v1",
+  "lastUpdated": "2026-03-06",
+  "limits": {
+    "maxRequestLineBytes": 256,
+    "maxHeaderBytes": 2048,
+    "maxBodyBytes": 1024
+  },
+  "cases": [
+    {
+      "id": "valid_small_request",
+      "description": "Nominal health request stays healthy under the Phase 11 corpus",
+      "request": "GET /healthz HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n",
+      "expectedStatus": 200
+    },
+    {
+      "id": "duplicate_content_length",
+      "description": "Duplicate content-length headers are rejected fail-closed",
+      "request": "POST /healthz HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Length: 5\r\nContent-Length: 5\r\n\r\nhello",
+      "expectedStatus": 400
+    },
+    {
+      "id": "content_length_plus_transfer_encoding",
+      "description": "Mixed content-length and transfer-encoding requests are rejected",
+      "request": "POST /healthz HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Length: 5\r\nTransfer-Encoding: chunked\r\n\r\nhello",
+      "expectedStatus": 400
+    },
+    {
+      "id": "websocket_invalid_version",
+      "description": "WebSocket upgrades require version 13",
+      "request": "GET /ws/echo HTTP/1.1\r\nHost: 127.0.0.1\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 12\r\nOrigin: https://allowed.example\r\n\r\n",
+      "expectedStatus": 400
+    },
+    {
+      "id": "websocket_invalid_key",
+      "description": "WebSocket upgrades require a valid 16-byte base64 nonce",
+      "request": "GET /ws/echo HTTP/1.1\r\nHost: 127.0.0.1\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: invalid-key\r\nSec-WebSocket-Version: 13\r\nOrigin: https://allowed.example\r\n\r\n",
+      "expectedStatus": 400
+    },
+    {
+      "id": "websocket_blocked_origin",
+      "description": "Configured origin allowlist rejects unexpected origins",
+      "request": "GET /ws/echo HTTP/1.1\r\nHost: 127.0.0.1\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\nOrigin: https://blocked.example\r\n\r\n",
+      "expectedStatus": 403
+    }
+  ]
+}

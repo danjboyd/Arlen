@@ -1,7 +1,7 @@
 # Arlen Phase 2 + Phase 3 Roadmap Index
 
-Status: Active (Phase 2A-2D complete; Phase 3A-3H complete; Phase 4A-4E complete; Phase 5A-5E complete; Phase 7A/7B/7C/7D/7E/7F/7G/7H initial slices implemented; Phase 7 follow-on active; Phase 8A complete; Phase 8B complete; Phase 9A/9B/9C/9D/9E/9F/9G/9H/9I/9J complete; Phase 10 complete with 10A-10M delivered; Phase 11 planned)  
-Last updated: 2026-03-02
+Status: Active (Phase 2A-2D complete; Phase 3A-3H complete; Phase 4A-4E complete; Phase 5A-5E complete; Phase 7A/7B/7C/7D/7E/7F/7G/7H initial slices implemented; Phase 7 follow-on active; Phase 8A complete; Phase 8B complete; Phase 9A/9B/9C/9D/9E/9F/9G/9H/9I/9J complete; Phase 10 complete with 10A-10M delivered; Phase 11 complete with 11A-11F delivered)  
+Last updated: 2026-03-06
 
 This index points to the current roadmap documents:
 
@@ -145,9 +145,18 @@ Phase 10 execution is tracked in `docs/PHASE10_ROADMAP.md` (complete; 10A/10B/10
 
 Phase 11 execution/planning is defined in `docs/PHASE11_ROADMAP.md`, focused on:
 
-- security and protocol-correctness hardening on session/header/websocket/static/attachment trust boundaries
-- OpenBSD-style correctness tightening for hostile-input handling and deterministic rejection behavior
-- expanded second-pass verification plan covering fuzzing, sanitizer matrix growth, and live adversarial traffic probes
+- security and protocol-correctness hardening on session/bearer-auth/header/request-boundary/websocket/filesystem/proxy trust boundaries
+- OpenBSD-style correctness tightening for ambiguous transfer semantics, websocket origin policy, attachment containment, private on-disk adapter permissions, and deterministic rejection behavior
+- expanded second-pass verification plan covering duplicate `Content-Length`/`Transfer-Encoding` probes, websocket origin cases, traversal/symlink fixtures, sanitizer matrix growth, and live adversarial traffic probes
+
+Current delivery state:
+
+- Phase 11A complete: session/bearer secret startup validation, session-cookie cryptography hardening, and CSRF header/body-first enforcement
+- Phase 11B complete: response-header validation/canonicalization plus fail-closed legacy framing rejection for duplicate `Content-Length`, unsupported `Transfer-Encoding`, and mixed `Content-Length` + `Transfer-Encoding`
+- Phase 11C complete: websocket handshake validation, optional `Origin` allowlist enforcement, unmasked-frame rejection, and stalled-frame timeout closure
+- Phase 11D complete: static/attachment filesystem confinement, strict attachment IDs, symlink-safe file access, and private file-backed adapter permissions
+- Phase 11E complete: trusted proxy CIDR boundary enforcement and text-log control-character escaping
+- Phase 11F complete: Phase 11 protocol adversarial corpus, deterministic fuzz/live probes, and sanitizer confidence artifact lanes
 
 Scope guardrails remain unchanged:
 - admin/backoffice and full account-product surfaces remain outside Arlen core and are expected to ship as optional modules/products.

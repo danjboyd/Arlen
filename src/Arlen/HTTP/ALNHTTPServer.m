@@ -204,6 +204,15 @@ static ALNHTTPParserBackend ALNHTTPParserBackendFromConfig(NSDictionary *config)
   return [ALNRequest resolvedParserBackend];
 }
 
+static NSArray *ALNWebSocketAllowedOriginsFromConfig(NSDictionary *config) {
+  NSDictionary *webSocket = [config[@"webSocket"] isKindOfClass:[NSDictionary class]]
+                                ? config[@"webSocket"]
+                                : @{};
+  return [webSocket[@"allowedOrigins"] isKindOfClass:[NSArray class]]
+             ? webSocket[@"allowedOrigins"]
+             : @[];
+}
+
 static void ALNApplyClientSocketTimeout(int clientFd, NSUInteger timeoutSeconds) {
   if (timeoutSeconds == 0) {
     return;
@@ -461,6 +470,7 @@ static BOOL ALNParseRequestHeadMetadataBytes(const uint8_t *bytes,
   }
 
   NSInteger contentLength = 0;
+  BOOL sawContentLength = NO;
   size_t lineStart = (size_t)requestLineBytes;
   if (lineStart + 1 < separatorLocation &&
       bytes[lineStart] == '\r' &&
@@ -499,6 +509,13 @@ static BOOL ALNParseRequestHeadMetadataBytes(const uint8_t *bytes,
         nameEnd -= 1;
       }
       if (ALNAsciiEqualsIgnoreCase(bytes + nameStart, (NSUInteger)(nameEnd - nameStart), "content-length")) {
+        if (sawContentLength) {
+          metadata.statusCode = 400;
+          if (metadataOut != NULL) {
+            *metadataOut = metadata;
+          }
+          return NO;
+        }
         NSInteger parsedContentLength = 0;
         if (!ALNParseContentLengthBytes(bytes + colon + 1,
                                         (NSUInteger)(lineEnd - (colon + 1)),
@@ -509,8 +526,16 @@ static BOOL ALNParseRequestHeadMetadataBytes(const uint8_t *bytes,
           }
           return NO;
         }
+        sawContentLength = YES;
         contentLength = parsedContentLength;
-        break;
+      } else if (ALNAsciiEqualsIgnoreCase(bytes + nameStart,
+                                          (NSUInteger)(nameEnd - nameStart),
+                                          "transfer-encoding")) {
+        metadata.statusCode = 400;
+        if (metadataOut != NULL) {
+          *metadataOut = metadata;
+        }
+        return NO;
       }
     }
     lineStart = lineEnd + 2;
@@ -555,6 +580,67 @@ static BOOL ALNHeaderContainsToken(NSString *value, NSString *needleLower) {
     }
   }
   return NO;
+}
+
+static NSString *ALNOriginHostDisplayString(NSString *host) {
+  if (![host isKindOfClass:[NSString class]] || [host length] == 0) {
+    return @"";
+  }
+  if ([host rangeOfString:@":"].location != NSNotFound && ![host hasPrefix:@"["]) {
+    return [NSString stringWithFormat:@"[%@]", host];
+  }
+  return host;
+}
+
+static NSString *ALNNormalizedOriginString(NSString *origin) {
+  if (![origin isKindOfClass:[NSString class]]) {
+    return nil;
+  }
+  NSString *trimmed = [origin stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+  if ([trimmed length] == 0) {
+    return nil;
+  }
+
+  NSURLComponents *components = [NSURLComponents componentsWithString:trimmed];
+  NSString *scheme = [[components scheme] lowercaseString];
+  NSString *host = [[components host] lowercaseString];
+  NSNumber *port = [components port];
+  NSString *path = [components path];
+  if ([scheme length] == 0 || [host length] == 0) {
+    return nil;
+  }
+  if ([[components user] length] > 0 || [[components password] length] > 0 ||
+      [[components query] length] > 0 || [[components fragment] length] > 0) {
+    return nil;
+  }
+  if ([path length] > 0 && ![path isEqualToString:@"/"]) {
+    return nil;
+  }
+
+  BOOL omitPort = NO;
+  if (port != nil) {
+    NSInteger portValue = [port integerValue];
+    omitPort = ([scheme isEqualToString:@"http"] && portValue == 80) ||
+               ([scheme isEqualToString:@"https"] && portValue == 443);
+  }
+  if (port != nil && !omitPort) {
+    return [NSString stringWithFormat:@"%@://%@:%ld",
+                                      scheme,
+                                      ALNOriginHostDisplayString(host),
+                                      (long)[port integerValue]];
+  }
+  return [NSString stringWithFormat:@"%@://%@", scheme, ALNOriginHostDisplayString(host)];
+}
+
+static BOOL ALNWebSocketOriginAllowed(ALNRequest *request, NSArray *allowedOrigins) {
+  if ([allowedOrigins count] == 0) {
+    return YES;
+  }
+  NSString *origin = ALNNormalizedOriginString([request headerValueForName:@"origin"]);
+  if ([origin length] == 0) {
+    return NO;
+  }
+  return [allowedOrigins containsObject:origin];
 }
 
 static NSUInteger ALNWebSocketReadTimeoutMilliseconds(void) {
@@ -1033,6 +1119,9 @@ static int ALNStaticFileFDForPath(NSString *path,
   int openFlags = O_RDONLY;
 #ifdef O_CLOEXEC
   openFlags |= O_CLOEXEC;
+#endif
+#ifdef O_NOFOLLOW
+  openFlags |= O_NOFOLLOW;
 #endif
 
   ALNEnsureStaticFileFDCache();
@@ -1747,18 +1836,23 @@ static BOOL ALNRemoteAddressMatchesTrustedProxyCIDRs(NSString *remoteAddress, NS
   return NO;
 }
 
+static BOOL ALNProxyForwardingEnabled(NSDictionary *config, NSArray *trustedProxyCIDRs) {
+  if ([trustedProxyCIDRs isKindOfClass:[NSArray class]] && [trustedProxyCIDRs count] > 0) {
+    return YES;
+  }
+  return ALNConfigBool(config, @"trustedProxy", NO);
+}
+
 static void ALNApplyProxyMetadata(ALNRequest *request, NSDictionary *config) {
   request.effectiveRemoteAddress = request.remoteAddress ?: @"";
   request.scheme = @"http";
 
-  BOOL trustedProxy = ALNConfigBool(config, @"trustedProxy", NO);
-  if (!trustedProxy) {
-    return;
-  }
-
   NSArray *trustedProxyCIDRs = [config[@"trustedProxyCIDRs"] isKindOfClass:[NSArray class]]
                                    ? config[@"trustedProxyCIDRs"]
                                    : @[];
+  if (!ALNProxyForwardingEnabled(config, trustedProxyCIDRs)) {
+    return;
+  }
   if (!ALNRemoteAddressMatchesTrustedProxyCIDRs(request.remoteAddress, trustedProxyCIDRs)) {
     return;
   }
@@ -1886,8 +1980,29 @@ static NSString *ALNCanonicalStaticPath(NSString *path) {
   if (![path isKindOfClass:[NSString class]] || [path length] == 0) {
     return nil;
   }
+  char resolvedPath[PATH_MAX];
+  const char *filesystemPath = [path fileSystemRepresentation];
+  if (filesystemPath != NULL && realpath(filesystemPath, resolvedPath) != NULL) {
+    NSString *canonical = [[NSFileManager defaultManager]
+        stringWithFileSystemRepresentation:resolvedPath
+                                    length:strlen(resolvedPath)];
+    canonical = [canonical stringByStandardizingPath];
+    return ([canonical length] > 0) ? canonical : nil;
+  }
   NSString *canonical = [[path stringByResolvingSymlinksInPath] stringByStandardizingPath];
   return ([canonical length] > 0) ? canonical : nil;
+}
+
+static BOOL ALNStaticPathIsSymbolicLink(NSString *path) {
+  if (![path isKindOfClass:[NSString class]] || [path length] == 0) {
+    return NO;
+  }
+  struct stat info;
+  const char *filesystemPath = [path fileSystemRepresentation];
+  if (filesystemPath == NULL || lstat(filesystemPath, &info) != 0) {
+    return NO;
+  }
+  return S_ISLNK(info.st_mode);
 }
 
 static BOOL ALNStaticCandidateWithinRoot(NSString *candidate, NSString *root) {
@@ -2011,6 +2126,9 @@ static ALNResponse *ALNStaticResponseForMount(ALNRequest *request,
   NSString *candidatePath = ([relativePath length] > 0)
                                 ? [standardRoot stringByAppendingPathComponent:relativePath]
                                 : standardRoot;
+  if (ALNStaticPathIsSymbolicLink(candidatePath)) {
+    return ALNStaticNotFoundResponse();
+  }
   NSString *standardCandidate = nil;
   if (!ALNResolveStaticCandidateWithinRoot(candidatePath, canonicalRoot, &standardCandidate)) {
     return ALNStaticNotFoundResponse();
@@ -2037,6 +2155,9 @@ static ALNResponse *ALNStaticResponseForMount(ALNRequest *request,
       return ALNStaticRedirectResponse(ALNPathWithTrailingSlash(request.path));
     }
     resolvedFilePath = hasIndexHTML ? indexHTML : indexHTM;
+    if (ALNStaticPathIsSymbolicLink(resolvedFilePath)) {
+      return ALNStaticNotFoundResponse();
+    }
   } else {
     NSString *filename = [[standardCandidate lastPathComponent] lowercaseString];
     if ([filename isEqualToString:@"index.html"] || [filename isEqualToString:@"index.htm"]) {
@@ -2295,6 +2416,7 @@ static NSString *ALNRealtimeBackpressureReasonForSubscriptionRejection(NSString 
 @property(atomic, assign) int serverSocketFD;
 @property(nonatomic, strong) NSLock *staticMountCacheLock;
 @property(nonatomic, copy) NSArray *cachedStaticMounts;
+@property(nonatomic, copy) NSArray *webSocketAllowedOrigins;
 
 @end
 
@@ -2325,6 +2447,7 @@ static NSString *ALNRealtimeBackpressureReasonForSubscriptionRejection(NSString 
     _serverSocketFD = -1;
     _staticMountCacheLock = [[NSLock alloc] init];
     _cachedStaticMounts = nil;
+    _webSocketAllowedOrigins = @[];
   }
   return self;
 }
@@ -2802,6 +2925,16 @@ static NSString *ALNRealtimeBackpressureReasonForSubscriptionRejection(NSString 
         }
         BOOL webSocketUpgrade = webSocketRequestValid && responseWantsWebSocket;
         if (webSocketUpgrade) {
+          if (!ALNWebSocketOriginAllowed(request, self.webSocketAllowedOrigins)) {
+            ALNResponse *originDenied = ALNErrorResponse(403, @"websocket origin not allowed\n");
+            [originDenied setHeader:@"Connection" value:@"close"];
+            ALNEnsurePerformanceHeaders(originDenied,
+                                        performanceLogging,
+                                        parseMs,
+                                        ALNNowMilliseconds() - requestStartMs);
+            (void)ALNSendResponse(clientFd, originDenied, performanceLogging);
+            return;
+          }
           ALNWebSocketClientSession *webSocketSession = nil;
           ALNRealtimeSubscription *channelSubscription = nil;
           NSString *webSocketChannel = @"";
@@ -2915,6 +3048,7 @@ static NSString *ALNRealtimeBackpressureReasonForSubscriptionRejection(NSString 
     ALNRuntimeLimits runtimeLimits = ALNRuntimeLimitsFromConfig(config);
     NSString *requestDispatchMode = ALNRequestDispatchModeFromConfig(config);
     self.requestParserBackend = ALNHTTPParserBackendFromConfig(config);
+    self.webSocketAllowedOrigins = ALNWebSocketAllowedOriginsFromConfig(config);
     self.serializeRequestDispatch = [requestDispatchMode isEqualToString:@"serialized"];
     self.maxConcurrentHTTPSessions = runtimeLimits.maxConcurrentHTTPSessions;
     self.maxConcurrentWebSocketSessions = runtimeLimits.maxConcurrentWebSocketSessions;

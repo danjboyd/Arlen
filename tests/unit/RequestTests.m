@@ -231,6 +231,36 @@
   }
 }
 
+- (void)testLegacyParserRejectsDuplicateContentLengthHeader {
+  NSString *raw = @"POST /upload HTTP/1.1\r\n"
+                  "Host: localhost\r\n"
+                  "Content-Length: 5\r\n"
+                  "Content-Length: 5\r\n\r\n"
+                  "hello";
+  NSData *data = [raw dataUsingEncoding:NSUTF8StringEncoding];
+  NSError *error = nil;
+  ALNRequest *request = [ALNRequest requestFromRawData:data
+                                               backend:ALNHTTPParserBackendLegacy
+                                                 error:&error];
+  XCTAssertNil(request);
+  XCTAssertNotNil(error);
+  XCTAssertTrue([error.localizedDescription containsString:@"Duplicate Content-Length"]);
+}
+
+- (void)testLegacyParserRejectsTransferEncodingHeader {
+  NSString *raw = @"POST /upload HTTP/1.1\r\n"
+                  "Host: localhost\r\n"
+                  "Transfer-Encoding: chunked\r\n\r\n";
+  NSData *data = [raw dataUsingEncoding:NSUTF8StringEncoding];
+  NSError *error = nil;
+  ALNRequest *request = [ALNRequest requestFromRawData:data
+                                               backend:ALNHTTPParserBackendLegacy
+                                                 error:&error];
+  XCTAssertNil(request);
+  XCTAssertNotNil(error);
+  XCTAssertTrue([error.localizedDescription containsString:@"Unsupported Transfer-Encoding"]);
+}
+
 - (void)testResolvedParserBackendDefaultsToLLHTTPAndAllowsLegacyOverride {
   unsetenv("ARLEN_HTTP_PARSER_BACKEND");
   ALNHTTPParserBackend expectedDefaultBackend =

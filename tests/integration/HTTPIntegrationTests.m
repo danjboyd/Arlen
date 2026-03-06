@@ -1904,6 +1904,70 @@
   }
 }
 
+- (void)testWebSocketOriginAllowlistRejectsUnexpectedOrigins {
+  int port = [self randomPort];
+  NSTask *server = [[NSTask alloc] init];
+  server.launchPath = @"/bin/bash";
+  server.arguments = @[
+    @"-lc",
+    [NSString stringWithFormat:
+                  @"ARLEN_WEBSOCKET_ALLOWED_ORIGINS='https://allowed.example:443/' "
+                   @"./build/boomhauer --port %d",
+                  port]
+  ];
+  server.standardOutput = [NSPipe pipe];
+  server.standardError = [NSPipe pipe];
+  [server launch];
+
+  @try {
+    BOOL ready = NO;
+    (void)[self requestPathWithRetries:@"/healthz" port:port attempts:60 success:&ready];
+    XCTAssertTrue(ready);
+
+    NSString *script = [NSString stringWithFormat:
+                                         @"import base64, os, socket\n"
+                                         @"PORT=%d\n"
+                                         @"def handshake(origin=None):\n"
+                                         @"    key = base64.b64encode(os.urandom(16)).decode('ascii')\n"
+                                         @"    request = [\n"
+                                         @"        f'GET /ws/echo HTTP/1.1',\n"
+                                         @"        f'Host: 127.0.0.1:{PORT}',\n"
+                                         @"        'Upgrade: websocket',\n"
+                                         @"        'Connection: Upgrade',\n"
+                                         @"        f'Sec-WebSocket-Key: {key}',\n"
+                                         @"        'Sec-WebSocket-Version: 13',\n"
+                                         @"    ]\n"
+                                         @"    if origin is not None:\n"
+                                         @"        request.append(f'Origin: {origin}')\n"
+                                         @"    payload = ('\\r\\n'.join(request) + '\\r\\n\\r\\n').encode('utf-8')\n"
+                                         @"    sock = socket.create_connection(('127.0.0.1', PORT), timeout=4)\n"
+                                         @"    sock.settimeout(4)\n"
+                                         @"    sock.sendall(payload)\n"
+                                         @"    response = sock.recv(4096).decode('utf-8', 'replace')\n"
+                                         @"    sock.close()\n"
+                                         @"    return response.split('\\r\\n', 1)[0]\n"
+                                         @"print(handshake('https://allowed.example'))\n"
+                                         @"print(handshake('https://blocked.example'))\n"
+                                         @"print(handshake())\n",
+                                         port];
+    int pyCode = 0;
+    NSString *output = [self runPythonScript:script exitCode:&pyCode];
+    XCTAssertEqual(0, pyCode);
+    NSArray *lines =
+        [[output stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]]
+            componentsSeparatedByCharactersInSet:[NSCharacterSet newlineCharacterSet]];
+    XCTAssertGreaterThanOrEqual([lines count], 3u);
+    XCTAssertTrue([lines[0] containsString:@" 101 "], @"%@", output);
+    XCTAssertTrue([lines[1] containsString:@" 403 "], @"%@", output);
+    XCTAssertTrue([lines[2] containsString:@" 403 "], @"%@", output);
+  } @finally {
+    if ([server isRunning]) {
+      (void)kill(server.processIdentifier, SIGTERM);
+      [server waitUntilExit];
+    }
+  }
+}
+
 - (void)testWebSocketSessionLimitReturns503UnderBackpressure {
   int port = [self randomPort];
   NSTask *server = [[NSTask alloc] init];
@@ -2795,6 +2859,84 @@
   }
 }
 
+- (void)testLegacyParserRejectsAmbiguousFramingHeaders {
+  int port = [self randomPort];
+  NSTask *server = [[NSTask alloc] init];
+  server.launchPath = @"/bin/bash";
+  server.arguments = @[
+    @"-lc",
+    [NSString stringWithFormat:@"ARLEN_HTTP_PARSER_BACKEND=legacy ./build/boomhauer --port %d", port]
+  ];
+  server.standardOutput = [NSPipe pipe];
+  server.standardError = [NSPipe pipe];
+  [server launch];
+
+  @try {
+    BOOL ready = NO;
+    (void)[self requestPathWithRetries:@"/healthz" port:port attempts:60 success:&ready];
+    XCTAssertTrue(ready);
+
+    NSString *script = [NSString stringWithFormat:
+                                         @"import socket\n"
+                                         @"PORT=%d\n"
+                                         @"def read_status_line(request_bytes):\n"
+                                         @"    sock = socket.create_connection(('127.0.0.1', PORT), timeout=3)\n"
+                                         @"    sock.settimeout(3)\n"
+                                         @"    sock.sendall(request_bytes)\n"
+                                         @"    response = b''\n"
+                                         @"    while b'\\r\\n' not in response:\n"
+                                         @"        chunk = sock.recv(4096)\n"
+                                         @"        if not chunk:\n"
+                                         @"            break\n"
+                                         @"        response += chunk\n"
+                                         @"        if len(response) > 16384:\n"
+                                         @"            break\n"
+                                         @"    sock.close()\n"
+                                         @"    return response.split(b'\\r\\n', 1)[0].decode('ascii', 'replace')\n"
+                                         @"duplicate_same = read_status_line(\n"
+                                         @"    b'POST /healthz HTTP/1.1\\r\\n'\n"
+                                         @"    b'Host: 127.0.0.1\\r\\n'\n"
+                                         @"    b'Content-Length: 5\\r\\n'\n"
+                                         @"    b'Content-Length: 5\\r\\n'\n"
+                                         @"    b'\\r\\n'\n"
+                                         @"    b'hello'\n"
+                                         @")\n"
+                                         @"transfer_encoding = read_status_line(\n"
+                                         @"    b'POST /healthz HTTP/1.1\\r\\n'\n"
+                                         @"    b'Host: 127.0.0.1\\r\\n'\n"
+                                         @"    b'Transfer-Encoding: chunked\\r\\n'\n"
+                                         @"    b'\\r\\n'\n"
+                                         @")\n"
+                                         @"cl_te = read_status_line(\n"
+                                         @"    b'POST /healthz HTTP/1.1\\r\\n'\n"
+                                         @"    b'Host: 127.0.0.1\\r\\n'\n"
+                                         @"    b'Content-Length: 5\\r\\n'\n"
+                                         @"    b'Transfer-Encoding: chunked\\r\\n'\n"
+                                         @"    b'\\r\\n'\n"
+                                         @"    b'hello'\n"
+                                         @")\n"
+                                         @"print(duplicate_same)\n"
+                                         @"print(transfer_encoding)\n"
+                                         @"print(cl_te)\n",
+                                         port];
+    int pyCode = 0;
+    NSString *output = [self runPythonScript:script exitCode:&pyCode];
+    XCTAssertEqual(0, pyCode);
+    NSArray *lines =
+        [[output stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]]
+            componentsSeparatedByCharactersInSet:[NSCharacterSet newlineCharacterSet]];
+    XCTAssertGreaterThanOrEqual([lines count], 3u);
+    XCTAssertTrue([lines[0] containsString:@" 400 "], @"%@", output);
+    XCTAssertTrue([lines[1] containsString:@" 400 "], @"%@", output);
+    XCTAssertTrue([lines[2] containsString:@" 400 "], @"%@", output);
+  } @finally {
+    if ([server isRunning]) {
+      (void)kill(server.processIdentifier, SIGTERM);
+      [server waitUntilExit];
+    }
+  }
+}
+
 - (void)testTrustedProxyMetadata {
   int curlCode = 0;
   int serverCode = 0;
@@ -2810,6 +2952,23 @@
   XCTAssertEqual(0, serverCode);
   XCTAssertTrue([body containsString:@"203.0.113.9"]);
   XCTAssertTrue([body containsString:@"\"scheme\""]);
+  XCTAssertTrue([body containsString:@"https"]);
+}
+
+- (void)testTrustedProxyCIDRListEnablesForwardedMetadataWithoutLegacyToggle {
+  int curlCode = 0;
+  int serverCode = 0;
+  NSString *body =
+      [self requestWithServerEnv:@"ARLEN_TRUSTED_PROXY_CIDRS=127.0.0.1/32"
+                     serverBinary:@"./build/boomhauer"
+                        curlBody:@"curl -fsS -H 'X-Forwarded-For: 203.0.113.9' "
+                                 "-H 'X-Forwarded-Proto: https' "
+                                 "http://127.0.0.1:%d/api/request-meta"
+                        curlCode:&curlCode
+                       serverCode:&serverCode];
+  XCTAssertEqual(0, curlCode);
+  XCTAssertEqual(0, serverCode);
+  XCTAssertTrue([body containsString:@"203.0.113.9"]);
   XCTAssertTrue([body containsString:@"https"]);
 }
 
@@ -2873,11 +3032,21 @@
     NSString *envPrefix =
         [NSString stringWithFormat:@"ARLEN_FRAMEWORK_ROOT='%@' ARLEN_APP_ROOT='%@'", repoRoot, appRoot];
 
+    int prepareCode = 0;
+    NSString *prepareOutput =
+        [self runShellCapture:[NSString stringWithFormat:@"%@ ./bin/boomhauer --prepare-only 2>&1",
+                                                         envPrefix]
+                     exitCode:&prepareCode];
+    XCTAssertEqual(0, prepareCode, @"%@", prepareOutput);
+    NSString *preparedBinary =
+        [appRoot stringByAppendingPathComponent:@".boomhauer/build/boomhauer-app"];
+    XCTAssertTrue([[NSFileManager defaultManager] isExecutableFileAtPath:preparedBinary]);
+
     int curlCode = 0;
     int serverCode = 0;
     NSString *insideBody =
         [self requestWithServerEnv:envPrefix
-                       serverBinary:@"./bin/boomhauer"
+                       serverBinary:preparedBinary
                           curlBody:@"curl -fsS http://127.0.0.1:%d/assets/inside.txt"
                           curlCode:&curlCode
                          serverCode:&serverCode];
@@ -2887,7 +3056,7 @@
 
     NSString *escapeBody =
         [self requestWithServerEnv:envPrefix
-                       serverBinary:@"./bin/boomhauer"
+                       serverBinary:preparedBinary
                           curlBody:@"curl -sS -o - -w '\\n%{http_code}' http://127.0.0.1:%d/assets/escape.txt"
                           curlCode:&curlCode
                          serverCode:&serverCode];

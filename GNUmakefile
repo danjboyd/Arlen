@@ -79,7 +79,7 @@ ifneq ($(findstring -fno-objc-arc,$(OBJC_FLAGS)),)
 $(error OBJC_FLAGS cannot disable ARC)
 endif
 
-.PHONY: all eocc transpile tech-demo-transpile generated-compile arlen boomhauer tech-demo-server api-reference-server migration-sample-server arlen-data-example json-perf-bench dispatch-perf-bench http-parse-perf-bench route-match-perf-bench backend-contract-matrix test-data-layer dev-server tech-demo smoke-render smoke routes build-tests test test-unit test-integration perf perf-fast parity-phaseb perf-phasec perf-phased deploy-smoke phase5e-confidence ci-quality ci-sanitizers ci-fault-injection ci-release-certification ci-json-abstraction ci-json-perf ci-dispatch-perf ci-http-parse-perf ci-route-match-perf ci-backend-parity-matrix ci-protocol-adversarial ci-syscall-faults ci-allocation-faults ci-soak ci-chaos-restart ci-static-analysis ci-blob-throughput ci-docs check docs-api docs-html docs-serve clean
+.PHONY: all eocc transpile tech-demo-transpile generated-compile arlen boomhauer tech-demo-server api-reference-server migration-sample-server arlen-data-example json-perf-bench dispatch-perf-bench http-parse-perf-bench route-match-perf-bench backend-contract-matrix test-data-layer dev-server tech-demo smoke-render smoke routes build-tests test test-unit test-integration perf perf-fast parity-phaseb perf-phasec perf-phased deploy-smoke phase5e-confidence ci-quality ci-sanitizers ci-fault-injection ci-release-certification ci-json-abstraction ci-json-perf ci-dispatch-perf ci-http-parse-perf ci-route-match-perf ci-backend-parity-matrix ci-protocol-adversarial ci-syscall-faults ci-allocation-faults ci-soak ci-chaos-restart ci-static-analysis ci-blob-throughput ci-phase11-protocol-adversarial ci-phase11-fuzz ci-phase11-live-adversarial ci-phase11-sanitizers ci-phase11 ci-docs check docs-api docs-html docs-serve clean
 
 all: eocc transpile generated-compile arlen boomhauer
 
@@ -286,6 +286,21 @@ ci-static-analysis:
 
 ci-blob-throughput:
 >bash ./tools/ci/run_phase10m_blob_throughput.sh
+
+ci-phase11-protocol-adversarial:
+>bash ./tools/ci/run_phase11_protocol_adversarial.sh
+
+ci-phase11-fuzz:
+>bash ./tools/ci/run_phase11_protocol_fuzz.sh
+
+ci-phase11-live-adversarial:
+>bash ./tools/ci/run_phase11_live_adversarial.sh
+
+ci-phase11-sanitizers:
+>bash ./tools/ci/run_phase11_sanitizer_matrix.sh
+
+ci-phase11:
+>bash ./tools/ci/run_phase11_confidence.sh
 
 ci-docs:
 >bash ./tools/ci/run_docs_quality.sh

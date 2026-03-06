@@ -61,6 +61,36 @@ static NSDictionary *ALNMergedFields(NSString *message, ALNLogLevel level,
   return merged;
 }
 
+static NSString *ALNEscapedTextLogComponent(NSString *value) {
+  NSString *input = [value isKindOfClass:[NSString class]] ? value : @"";
+  NSMutableString *escaped = [NSMutableString stringWithCapacity:[input length] + 8];
+  for (NSUInteger idx = 0; idx < [input length]; idx++) {
+    unichar ch = [input characterAtIndex:idx];
+    switch (ch) {
+    case '\\':
+      [escaped appendString:@"\\\\"];
+      break;
+    case '\n':
+      [escaped appendString:@"\\n"];
+      break;
+    case '\r':
+      [escaped appendString:@"\\r"];
+      break;
+    case '\t':
+      [escaped appendString:@"\\t"];
+      break;
+    default:
+      if (ch < 0x20 || ch == 0x7F) {
+        [escaped appendFormat:@"\\u%04x", ch];
+      } else {
+        [escaped appendFormat:@"%C", ch];
+      }
+      break;
+    }
+  }
+  return escaped;
+}
+
 @implementation ALNLogger
 
 - (instancetype)initWithFormat:(NSString *)format {
@@ -108,7 +138,9 @@ static NSDictionary *ALNMergedFields(NSString *message, ALNLogLevel level,
   for (NSString *key in keys) {
     id value = merged[key];
     NSString *stringValue = (value == nil) ? @"" : [value description];
-    [pairs addObject:[NSString stringWithFormat:@"%@=%@", key, stringValue]];
+    [pairs addObject:[NSString stringWithFormat:@"%@=%@",
+                                                ALNEscapedTextLogComponent(key),
+                                                ALNEscapedTextLogComponent(stringValue)]];
   }
   NSString *line = [pairs componentsJoinedByString:@" "];
   fprintf(stderr, "%s\n", [line UTF8String]);

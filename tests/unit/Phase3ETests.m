@@ -231,6 +231,12 @@ static NSInteger gPhase3EPluginDidStopCount = 0;
   return [baseDirectory stringByAppendingPathComponent:name];
 }
 
+- (NSUInteger)posixPermissionsAtPath:(NSString *)path {
+  NSDictionary *attributes =
+      [[NSFileManager defaultManager] attributesOfItemAtPath:path error:NULL];
+  return [attributes[NSFilePosixPermissions] unsignedIntegerValue] & 0777;
+}
+
 - (NSDictionary *)jsonFromResponse:(ALNResponse *)response {
   NSError *error = nil;
   id value = [NSJSONSerialization JSONObjectWithData:response.bodyData options:0 error:&error];
@@ -457,6 +463,74 @@ static NSInteger gPhase3EPluginDidStopCount = 0;
   (void)[[NSFileManager defaultManager] removeItemAtPath:rootPath error:NULL];
 }
 
+- (void)testFileSystemAttachmentAdapterRejectsInvalidIDsAndSymlinkEscapes {
+  NSString *rootPath = [self temporaryPathWithPrefix:@"arlen-phase3e-attachments"];
+  NSError *adapterError = nil;
+  ALNFileSystemAttachmentAdapter *adapter =
+      [[ALNFileSystemAttachmentAdapter alloc] initWithRootDirectory:rootPath
+                                                        adapterName:@"filesystem_test_attachment"
+                                                              error:&adapterError];
+  XCTAssertNotNil(adapter);
+  XCTAssertNil(adapterError);
+  if (adapter == nil) {
+    return;
+  }
+
+  NSError *invalidError = nil;
+  XCTAssertNil([adapter attachmentMetadataForID:@"../outside" error:&invalidError]);
+  XCTAssertNotNil(invalidError);
+  XCTAssertEqual((NSInteger)568, invalidError.code);
+
+  NSError *absolutePathError = nil;
+  XCTAssertNil([adapter attachmentMetadataForID:@"/tmp/outside" error:&absolutePathError]);
+  XCTAssertNotNil(absolutePathError);
+  XCTAssertEqual((NSInteger)568, absolutePathError.code);
+
+  NSString *outsideRoot = [self temporaryPathWithPrefix:@"arlen-phase3e-outside"];
+  XCTAssertTrue([[NSFileManager defaultManager] createDirectoryAtPath:outsideRoot
+                                          withIntermediateDirectories:YES
+                                                           attributes:nil
+                                                                error:NULL]);
+  NSString *outsideDataPath = [outsideRoot stringByAppendingPathComponent:@"outside.bin"];
+  NSString *outsideMetadataPath = [outsideRoot stringByAppendingPathComponent:@"outside.plist"];
+  NSData *outsideData = [@"outside-secret" dataUsingEncoding:NSUTF8StringEncoding];
+  XCTAssertTrue([outsideData writeToFile:outsideDataPath atomically:YES]);
+  NSData *outsideMetadata =
+      [NSPropertyListSerialization dataWithPropertyList:@{
+        @"attachmentID" : @"att-0123456789abcdef0123456789abcdef",
+        @"name" : @"outside.txt",
+        @"contentType" : @"text/plain",
+        @"sizeBytes" : @([outsideData length]),
+        @"createdAt" : @([[NSDate date] timeIntervalSince1970]),
+        @"metadata" : @{},
+      }
+                                                 format:NSPropertyListBinaryFormat_v1_0
+                                                options:0
+                                                  error:NULL];
+  XCTAssertNotNil(outsideMetadata);
+  XCTAssertTrue([outsideMetadata writeToFile:outsideMetadataPath atomically:YES]);
+
+  NSString *symlinkID = @"att-0123456789abcdef0123456789abcdef";
+  NSString *linkedDataPath =
+      [rootPath stringByAppendingPathComponent:[NSString stringWithFormat:@"%@.bin", symlinkID]];
+  NSString *linkedMetadataPath =
+      [rootPath stringByAppendingPathComponent:[NSString stringWithFormat:@"%@.plist", symlinkID]];
+  XCTAssertTrue([[NSFileManager defaultManager] createSymbolicLinkAtPath:linkedDataPath
+                                                     withDestinationPath:outsideDataPath
+                                                                   error:NULL]);
+  XCTAssertTrue([[NSFileManager defaultManager] createSymbolicLinkAtPath:linkedMetadataPath
+                                                     withDestinationPath:outsideMetadataPath
+                                                                   error:NULL]);
+
+  NSError *symlinkError = nil;
+  XCTAssertNil([adapter attachmentDataForID:symlinkID metadata:NULL error:&symlinkError]);
+  XCTAssertNotNil(symlinkError);
+  XCTAssertTrue(symlinkError.code == 569 || symlinkError.code == 570);
+
+  (void)[[NSFileManager defaultManager] removeItemAtPath:outsideRoot error:NULL];
+  (void)[[NSFileManager defaultManager] removeItemAtPath:rootPath error:NULL];
+}
+
 - (void)testFileJobAdapterConformanceSuite {
   NSString *rootPath = [self temporaryPathWithPrefix:@"arlen-phase3f-jobs"];
   NSString *storagePath = [rootPath stringByAppendingPathComponent:@"jobs/state.plist"];
@@ -497,6 +571,62 @@ static NSInteger gPhase3EPluginDidStopCount = 0;
   XCTAssertNil(suiteError);
   XCTAssertEqual((NSUInteger)0, [[adapter deliveriesSnapshot] count]);
   (void)[[NSFileManager defaultManager] removeItemAtPath:rootPath error:NULL];
+}
+
+- (void)testFileBackedServiceAdaptersPersistPrivatePermissions {
+  NSString *attachmentRoot = [self temporaryPathWithPrefix:@"arlen-phase3e-attachment-perms"];
+  ALNFileSystemAttachmentAdapter *attachmentAdapter =
+      [[ALNFileSystemAttachmentAdapter alloc] initWithRootDirectory:attachmentRoot
+                                                        adapterName:@"filesystem_test_attachment"
+                                                              error:NULL];
+  XCTAssertNotNil(attachmentAdapter);
+  NSString *attachmentID = [attachmentAdapter saveAttachmentNamed:@"note.txt"
+                                                     contentType:@"text/plain"
+                                                            data:[@"hello" dataUsingEncoding:NSUTF8StringEncoding]
+                                                        metadata:nil
+                                                           error:NULL];
+  XCTAssertTrue([attachmentID hasPrefix:@"att-"]);
+  NSString *attachmentDataPath =
+      [attachmentRoot stringByAppendingPathComponent:[NSString stringWithFormat:@"%@.bin", attachmentID]];
+  NSString *attachmentMetadataPath =
+      [attachmentRoot stringByAppendingPathComponent:[NSString stringWithFormat:@"%@.plist", attachmentID]];
+  XCTAssertEqual((NSUInteger)0700, [self posixPermissionsAtPath:attachmentRoot]);
+  XCTAssertEqual((NSUInteger)0600, [self posixPermissionsAtPath:attachmentDataPath]);
+  XCTAssertEqual((NSUInteger)0600, [self posixPermissionsAtPath:attachmentMetadataPath]);
+
+  NSString *jobsRoot = [self temporaryPathWithPrefix:@"arlen-phase3e-job-perms"];
+  NSString *storagePath = [jobsRoot stringByAppendingPathComponent:@"jobs/state.plist"];
+  ALNFileJobAdapter *jobAdapter = [[ALNFileJobAdapter alloc] initWithStoragePath:storagePath
+                                                                      adapterName:@"file_test_jobs"
+                                                                            error:NULL];
+  XCTAssertNotNil(jobAdapter);
+  XCTAssertEqual((NSUInteger)0700, [self posixPermissionsAtPath:[storagePath stringByDeletingLastPathComponent]]);
+  XCTAssertEqual((NSUInteger)0600, [self posixPermissionsAtPath:storagePath]);
+
+  NSString *mailRoot = [self temporaryPathWithPrefix:@"arlen-phase3e-mail-perms"];
+  ALNFileMailAdapter *mailAdapter = [[ALNFileMailAdapter alloc] initWithStorageDirectory:mailRoot
+                                                                              adapterName:@"file_test_mail"
+                                                                                    error:NULL];
+  XCTAssertNotNil(mailAdapter);
+  ALNMailMessage *message = [[ALNMailMessage alloc] initWithFrom:@"sender@example.com"
+                                                              to:@[ @"dest@example.com" ]
+                                                              cc:nil
+                                                             bcc:nil
+                                                         subject:@"hello"
+                                                        textBody:@"body"
+                                                        htmlBody:@""
+                                                         headers:nil
+                                                        metadata:nil];
+  NSString *deliveryID = [mailAdapter deliverMessage:message error:NULL];
+  XCTAssertTrue([deliveryID hasPrefix:@"mail-"]);
+  NSString *deliveryPath =
+      [mailRoot stringByAppendingPathComponent:[NSString stringWithFormat:@"%@.plist", deliveryID]];
+  XCTAssertEqual((NSUInteger)0700, [self posixPermissionsAtPath:mailRoot]);
+  XCTAssertEqual((NSUInteger)0600, [self posixPermissionsAtPath:deliveryPath]);
+
+  (void)[[NSFileManager defaultManager] removeItemAtPath:attachmentRoot error:NULL];
+  (void)[[NSFileManager defaultManager] removeItemAtPath:jobsRoot error:NULL];
+  (void)[[NSFileManager defaultManager] removeItemAtPath:mailRoot error:NULL];
 }
 
 @end

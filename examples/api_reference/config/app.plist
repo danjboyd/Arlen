@@ -7,7 +7,7 @@
 
   auth = {
     enabled = YES;
-    bearerSecret = "api-reference-secret";
+    bearerSecret = "api-reference-secret-0123456789ab";
     issuer = "";
     audience = "";
   };

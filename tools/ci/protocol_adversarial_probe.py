@@ -14,7 +14,10 @@ from pathlib import Path
 from typing import Any, Dict, List
 
 
-VERSION = "phase10m-protocol-adversarial-v1"
+DEFAULT_VERSION = "phase10m-protocol-adversarial-v1"
+DEFAULT_MARKDOWN_TITLE = "Phase 10M Protocol Adversarial Probe"
+DEFAULT_MARKDOWN_FILENAME = "phase10m_protocol_adversarial.md"
+DEFAULT_PRINT_LABEL = "phase10m-protocol-adversarial"
 
 
 def load_json(path: Path) -> Dict[str, Any]:
@@ -158,9 +161,9 @@ def stop_server(process: subprocess.Popen[str] | None) -> None:
         process.wait(timeout=5)
 
 
-def make_markdown(payload: Dict[str, Any], output_dir: Path) -> str:
+def make_markdown(payload: Dict[str, Any], output_dir: Path, title: str) -> str:
     lines: List[str] = []
-    lines.append("# Phase 10M Protocol Adversarial Probe")
+    lines.append(f"# {title}")
     lines.append("")
     lines.append(f"Generated at: `{payload['generated_at']}`")
     lines.append(f"Git commit: `{payload['commit']}`")
@@ -225,6 +228,10 @@ def main() -> int:
     )
     parser.add_argument("--output-dir", default="build/release_confidence/phase10m/protocol_adversarial")
     parser.add_argument("--backends", default="llhttp,legacy")
+    parser.add_argument("--version-label", default=DEFAULT_VERSION)
+    parser.add_argument("--markdown-title", default=DEFAULT_MARKDOWN_TITLE)
+    parser.add_argument("--markdown-filename", default=DEFAULT_MARKDOWN_FILENAME)
+    parser.add_argument("--print-label", default=DEFAULT_PRINT_LABEL)
     parser.add_argument("--allow-fail", action="store_true")
     args = parser.parse_args()
 
@@ -237,7 +244,8 @@ def main() -> int:
         raise SystemExit(f"binary not found: {binary}")
 
     fixture_payload = load_json(fixture)
-    if fixture_payload.get("version") != VERSION:
+    version_label = str(args.version_label or DEFAULT_VERSION)
+    if fixture_payload.get("version") != version_label:
         raise SystemExit("protocol adversarial fixture version mismatch")
 
     raw_backends = [item.strip() for item in args.backends.split(",") if item.strip()]
@@ -310,7 +318,7 @@ def main() -> int:
 
     generated_at = datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
     payload = {
-        "version": VERSION,
+        "version": version_label,
         "generated_at": generated_at,
         "commit": git_commit(repo_root),
         "fixture": str(fixture),
@@ -329,21 +337,22 @@ def main() -> int:
 
     output_dir.mkdir(parents=True, exist_ok=True)
     write_json(output_dir / "protocol_adversarial_results.json", payload)
-    markdown = make_markdown(payload, output_dir)
-    (output_dir / "phase10m_protocol_adversarial.md").write_text(markdown, encoding="utf-8")
+    markdown = make_markdown(payload, output_dir, str(args.markdown_title or DEFAULT_MARKDOWN_TITLE))
+    markdown_filename = str(args.markdown_filename or DEFAULT_MARKDOWN_FILENAME)
+    (output_dir / markdown_filename).write_text(markdown, encoding="utf-8")
     manifest = {
-        "version": VERSION,
+        "version": version_label,
         "generated_at": generated_at,
         "commit": payload["commit"],
         "status": status,
         "artifacts": [
             "protocol_adversarial_results.json",
-            "phase10m_protocol_adversarial.md",
+            markdown_filename,
         ],
     }
     write_json(output_dir / "manifest.json", manifest)
 
-    print(f"phase10m-protocol-adversarial: generated artifacts in {output_dir} (status={status})")
+    print(f"{str(args.print_label or DEFAULT_PRINT_LABEL)}: generated artifacts in {output_dir} (status={status})")
     if status != "pass" and not args.allow_fail:
         return 1
     return 0

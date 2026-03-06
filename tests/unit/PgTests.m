@@ -205,6 +205,65 @@
   [database releaseConnection:connection];
 }
 
+- (void)testCommandsWithReturningReportAffectedRowsForDirectAndPreparedExecution {
+  NSString *dsn = [self pgTestDSN];
+  if ([dsn length] == 0) {
+    return;
+  }
+
+  NSError *error = nil;
+  ALNPg *database = [[ALNPg alloc] initWithConnectionString:dsn maxConnections:2 error:&error];
+  XCTAssertNil(error);
+  XCTAssertNotNil(database);
+  if (database == nil) {
+    return;
+  }
+
+  NSString *table = [self uniqueNameWithPrefix:@"arlen_cmd_returning"];
+  ALNPgConnection *connection = [database acquireConnection:&error];
+  XCTAssertNil(error);
+  XCTAssertNotNil(connection);
+  if (connection == nil) {
+    return;
+  }
+
+  NSString *createSQL =
+      [NSString stringWithFormat:@"CREATE TABLE %@(id SERIAL PRIMARY KEY, name TEXT NOT NULL)", table];
+  XCTAssertGreaterThanOrEqual([connection executeCommand:createSQL parameters:@[] error:&error], 0);
+  XCTAssertNil(error);
+
+  NSString *insertReturningSQL =
+      [NSString stringWithFormat:@"INSERT INTO %@ (name) VALUES ($1) RETURNING id", table];
+  NSInteger directAffected = [connection executeCommand:insertReturningSQL parameters:@[ @"peggy" ] error:&error];
+  XCTAssertEqual((NSInteger)1, directAffected);
+  XCTAssertNil(error);
+
+  BOOL prepared = [connection prepareStatementNamed:@"insert_returning_name"
+                                                sql:insertReturningSQL
+                                     parameterCount:1
+                                              error:&error];
+  XCTAssertTrue(prepared);
+  XCTAssertNil(error);
+
+  NSInteger preparedAffected = [connection executePreparedCommandNamed:@"insert_returning_name"
+                                                            parameters:@[ @"bobby" ]
+                                                                 error:&error];
+  XCTAssertEqual((NSInteger)1, preparedAffected);
+  XCTAssertNil(error);
+
+  NSDictionary *countRow =
+      [[connection executeQuery:[NSString stringWithFormat:@"SELECT COUNT(*) AS count FROM %@", table]
+                     parameters:@[]
+                          error:&error] firstObject];
+  XCTAssertNil(error);
+  XCTAssertEqualObjects(@"2", countRow[@"count"]);
+
+  (void)[connection executeCommand:[NSString stringWithFormat:@"DROP TABLE IF EXISTS %@", table]
+                        parameters:@[]
+                             error:nil];
+  [database releaseConnection:connection];
+}
+
 - (void)testTransactionHelperCommitAndRollback {
   NSString *dsn = [self pgTestDSN];
   if ([dsn length] == 0) {
@@ -614,7 +673,7 @@
     @"CREATE TEMP TABLE users (id TEXT NOT NULL, score INTEGER NOT NULL)",
     @"CREATE TEMP TABLE thresholds (value INTEGER NOT NULL, category TEXT NOT NULL)",
     @"CREATE TEMP TABLE minima (min_score INTEGER NOT NULL, enabled INTEGER NOT NULL)",
-    @"CREATE TEMP TABLE queue_jobs (id INTEGER NOT NULL, state TEXT NOT NULL, attempt_count INTEGER NOT NULL, updated_at TEXT NOT NULL)",
+    @"CREATE TEMP TABLE queue_jobs (id INTEGER PRIMARY KEY, state TEXT NOT NULL, attempt_count INTEGER NOT NULL, updated_at TEXT NOT NULL)",
   ];
   for (NSString *statement in createStatements) {
     XCTAssertGreaterThanOrEqual([connection executeCommand:statement parameters:@[] error:&error], (NSInteger)0);
@@ -1842,7 +1901,7 @@
   XCTAssertFalse([compileEvents[0][ALNPgQueryEventCacheHitKey] boolValue]);
   XCTAssertFalse([compileEvents[1][ALNPgQueryEventCacheHitKey] boolValue]);
   XCTAssertFalse([executeEvents[0][ALNPgQueryEventCacheHitKey] boolValue]);
-  XCTAssertFalse([executeEvents[1][ALNPgQueryEventCacheHitKey] boolValue]);
+  XCTAssertTrue([executeEvents[1][ALNPgQueryEventCacheHitKey] boolValue]);
 
   for (NSUInteger idx = 2; idx < [compileEvents count]; idx++) {
     NSDictionary *compileEvent = compileEvents[idx];
@@ -1960,6 +2019,421 @@
                                              error:&error] firstObject];
   XCTAssertNil(error);
   XCTAssertEqualObjects(@"1", countRow[@"count"]);
+
+  (void)[database executeCommand:[NSString stringWithFormat:@"DROP TABLE IF EXISTS %@", table]
+                      parameters:@[]
+                           error:nil];
+}
+
+- (void)testMigrationRunnerAppliesMultiStatementFile {
+  NSString *dsn = [self pgTestDSN];
+  if ([dsn length] == 0) {
+    return;
+  }
+
+  NSError *error = nil;
+  ALNPg *database = [[ALNPg alloc] initWithConnectionString:dsn maxConnections:2 error:&error];
+  XCTAssertNil(error);
+  XCTAssertNotNil(database);
+  if (database == nil) {
+    return;
+  }
+
+  NSString *table = [self uniqueNameWithPrefix:@"arlen_mig_multi"];
+  NSString *root = [self createTempDirectory];
+  XCTAssertNotNil(root);
+  if (root == nil) {
+    return;
+  }
+
+  NSString *migrationsDir = [root stringByAppendingPathComponent:@"db/migrations"];
+  NSError *fsError = nil;
+  XCTAssertTrue([[NSFileManager defaultManager] createDirectoryAtPath:migrationsDir
+                                          withIntermediateDirectories:YES
+                                                           attributes:nil
+                                                                error:&fsError]);
+  XCTAssertNil(fsError);
+
+  NSString *file =
+      [migrationsDir stringByAppendingPathComponent:[NSString stringWithFormat:@"2026021901_multi_%@.sql",
+                                                                               table]];
+  NSString *migrationSQL =
+      [NSString stringWithFormat:@"CREATE TABLE %@(id SERIAL PRIMARY KEY, name TEXT NOT NULL);\n"
+                                 "INSERT INTO %@ (name) VALUES ('dale');\n",
+                                 table, table];
+  XCTAssertTrue([migrationSQL writeToFile:file
+                               atomically:YES
+                                 encoding:NSUTF8StringEncoding
+                                    error:&fsError]);
+  XCTAssertNil(fsError);
+
+  NSArray *applied = nil;
+  XCTAssertTrue([ALNMigrationRunner applyMigrationsAtPath:migrationsDir
+                                                 database:database
+                                                   dryRun:NO
+                                             appliedFiles:&applied
+                                                    error:&error]);
+  XCTAssertNil(error);
+  XCTAssertEqual((NSUInteger)1, [applied count]);
+  XCTAssertEqualObjects([file lastPathComponent], [[applied firstObject] lastPathComponent]);
+
+  NSDictionary *countRow = [[database executeQuery:[NSString stringWithFormat:@"SELECT COUNT(*) AS count FROM %@",
+                                                                             table]
+                                        parameters:@[]
+                                             error:&error] firstObject];
+  XCTAssertNil(error);
+  XCTAssertEqualObjects(@"1", countRow[@"count"]);
+
+  NSDictionary *trackingRow =
+      [[database executeQuery:@"SELECT COUNT(*) AS count FROM arlen_schema_migrations WHERE version = $1"
+                  parameters:@[ [ALNMigrationRunner versionForMigrationFile:file] ]
+                       error:&error] firstObject];
+  XCTAssertNil(error);
+  XCTAssertEqualObjects(@"1", trackingRow[@"count"]);
+
+  (void)[database executeCommand:[NSString stringWithFormat:@"DROP TABLE IF EXISTS %@", table]
+                      parameters:@[]
+                           error:nil];
+  (void)[database executeCommand:@"DELETE FROM arlen_schema_migrations WHERE version = $1"
+                      parameters:@[ [ALNMigrationRunner versionForMigrationFile:file] ]
+                           error:nil];
+}
+
+- (void)testMigrationRunnerRollsBackFailedMultiStatementFileAndReportsFileName {
+  NSString *dsn = [self pgTestDSN];
+  if ([dsn length] == 0) {
+    return;
+  }
+
+  NSError *error = nil;
+  ALNPg *database = [[ALNPg alloc] initWithConnectionString:dsn maxConnections:2 error:&error];
+  XCTAssertNil(error);
+  XCTAssertNotNil(database);
+  if (database == nil) {
+    return;
+  }
+
+  NSString *table = [self uniqueNameWithPrefix:@"arlen_mig_fail"];
+  NSString *missingTable = [table stringByAppendingString:@"_missing"];
+  NSString *root = [self createTempDirectory];
+  XCTAssertNotNil(root);
+  if (root == nil) {
+    return;
+  }
+
+  NSString *migrationsDir = [root stringByAppendingPathComponent:@"db/migrations"];
+  NSError *fsError = nil;
+  XCTAssertTrue([[NSFileManager defaultManager] createDirectoryAtPath:migrationsDir
+                                          withIntermediateDirectories:YES
+                                                           attributes:nil
+                                                                error:&fsError]);
+  XCTAssertNil(fsError);
+
+  NSString *file =
+      [migrationsDir stringByAppendingPathComponent:[NSString stringWithFormat:@"2026021902_broken_%@.sql",
+                                                                               table]];
+  NSString *migrationSQL =
+      [NSString stringWithFormat:@"CREATE TABLE %@(id SERIAL PRIMARY KEY, name TEXT NOT NULL);\n"
+                                 "INSERT INTO %@ (name) VALUES ('broken');\n",
+                                 table, missingTable];
+  XCTAssertTrue([migrationSQL writeToFile:file
+                               atomically:YES
+                                 encoding:NSUTF8StringEncoding
+                                    error:&fsError]);
+  XCTAssertNil(fsError);
+
+  NSArray *applied = nil;
+  XCTAssertFalse([ALNMigrationRunner applyMigrationsAtPath:migrationsDir
+                                                  database:database
+                                                    dryRun:NO
+                                              appliedFiles:&applied
+                                                     error:&error]);
+  XCTAssertNotNil(error);
+  XCTAssertEqualObjects(ALNMigrationRunnerErrorDomain, error.domain);
+  XCTAssertTrue([[error localizedDescription] containsString:[file lastPathComponent]], @"%@", error);
+  XCTAssertEqualObjects(file, error.userInfo[@"path"]);
+  NSString *detail = [error.userInfo[@"detail"] isKindOfClass:[NSString class]] ? error.userInfo[@"detail"] : @"";
+  XCTAssertTrue([detail containsString:@"script execution failed"], @"%@", detail);
+
+  NSDictionary *tableRow =
+      [[database executeQuery:@"SELECT to_regclass($1) AS regclass"
+                  parameters:@[ table ]
+                       error:&fsError] firstObject];
+  XCTAssertNil(fsError);
+  XCTAssertEqualObjects([NSNull null], tableRow[@"regclass"]);
+
+  NSDictionary *trackingRow =
+      [[database executeQuery:@"SELECT COUNT(*) AS count FROM arlen_schema_migrations WHERE version = $1"
+                  parameters:@[ [ALNMigrationRunner versionForMigrationFile:file] ]
+                       error:&fsError] firstObject];
+  XCTAssertNil(fsError);
+  XCTAssertEqualObjects(@"0", trackingRow[@"count"]);
+
+  (void)[database executeCommand:[NSString stringWithFormat:@"DROP TABLE IF EXISTS %@", table]
+                      parameters:@[]
+                           error:nil];
+  (void)[database executeCommand:@"DELETE FROM arlen_schema_migrations WHERE version = $1"
+                      parameters:@[ [ALNMigrationRunner versionForMigrationFile:file] ]
+                           error:nil];
+}
+
+- (void)testMigrationRunnerRejectsCommentOnlyFile {
+  NSString *dsn = [self pgTestDSN];
+  if ([dsn length] == 0) {
+    return;
+  }
+
+  NSError *error = nil;
+  ALNPg *database = [[ALNPg alloc] initWithConnectionString:dsn maxConnections:2 error:&error];
+  XCTAssertNil(error);
+  XCTAssertNotNil(database);
+  if (database == nil) {
+    return;
+  }
+
+  NSString *root = [self createTempDirectory];
+  XCTAssertNotNil(root);
+  if (root == nil) {
+    return;
+  }
+
+  NSString *migrationsDir = [root stringByAppendingPathComponent:@"db/migrations"];
+  NSError *fsError = nil;
+  XCTAssertTrue([[NSFileManager defaultManager] createDirectoryAtPath:migrationsDir
+                                          withIntermediateDirectories:YES
+                                                           attributes:nil
+                                                                error:&fsError]);
+  XCTAssertNil(fsError);
+
+  NSString *file = [migrationsDir stringByAppendingPathComponent:@"2026021903_comments_only.sql"];
+  NSString *migrationSQL = @"-- comment only\n/* and another comment */\n";
+  XCTAssertTrue([migrationSQL writeToFile:file
+                               atomically:YES
+                                 encoding:NSUTF8StringEncoding
+                                    error:&fsError]);
+  XCTAssertNil(fsError);
+
+  NSArray *applied = nil;
+  XCTAssertFalse([ALNMigrationRunner applyMigrationsAtPath:migrationsDir
+                                                  database:database
+                                                    dryRun:NO
+                                              appliedFiles:&applied
+                                                     error:&error]);
+  XCTAssertNotNil(error);
+  XCTAssertEqualObjects(ALNMigrationRunnerErrorDomain, error.domain);
+  XCTAssertTrue([[error localizedDescription] containsString:[file lastPathComponent]], @"%@", error);
+  NSString *detail = [error.userInfo[@"detail"] isKindOfClass:[NSString class]] ? error.userInfo[@"detail"] : @"";
+  XCTAssertTrue([detail containsString:@"does not contain executable SQL"], @"%@", detail);
+
+  NSDictionary *trackingRow =
+      [[database executeQuery:@"SELECT COUNT(*) AS count FROM arlen_schema_migrations WHERE version = $1"
+                  parameters:@[ [ALNMigrationRunner versionForMigrationFile:file] ]
+                       error:&fsError] firstObject];
+  XCTAssertNil(fsError);
+  XCTAssertEqualObjects(@"0", trackingRow[@"count"]);
+}
+
+- (void)testMigrationRunnerRejectsTopLevelTransactionControlStatements {
+  NSString *dsn = [self pgTestDSN];
+  if ([dsn length] == 0) {
+    return;
+  }
+
+  NSError *error = nil;
+  ALNPg *database = [[ALNPg alloc] initWithConnectionString:dsn maxConnections:2 error:&error];
+  XCTAssertNil(error);
+  XCTAssertNotNil(database);
+  if (database == nil) {
+    return;
+  }
+
+  NSString *table = [self uniqueNameWithPrefix:@"arlen_mig_guard"];
+  NSString *root = [self createTempDirectory];
+  XCTAssertNotNil(root);
+  if (root == nil) {
+    return;
+  }
+
+  NSString *migrationsDir = [root stringByAppendingPathComponent:@"db/migrations"];
+  NSError *fsError = nil;
+  XCTAssertTrue([[NSFileManager defaultManager] createDirectoryAtPath:migrationsDir
+                                          withIntermediateDirectories:YES
+                                                           attributes:nil
+                                                                error:&fsError]);
+  XCTAssertNil(fsError);
+
+  NSString *file =
+      [migrationsDir stringByAppendingPathComponent:[NSString stringWithFormat:@"2026021904_guard_%@.sql",
+                                                                               table]];
+  NSString *migrationSQL =
+      [NSString stringWithFormat:@"BEGIN;\n"
+                                 "CREATE TABLE %@(id SERIAL PRIMARY KEY, name TEXT NOT NULL);\n"
+                                 "COMMIT;\n",
+                                 table];
+  XCTAssertTrue([migrationSQL writeToFile:file
+                               atomically:YES
+                                 encoding:NSUTF8StringEncoding
+                                    error:&fsError]);
+  XCTAssertNil(fsError);
+
+  NSArray *applied = nil;
+  XCTAssertFalse([ALNMigrationRunner applyMigrationsAtPath:migrationsDir
+                                                  database:database
+                                                    dryRun:NO
+                                              appliedFiles:&applied
+                                                     error:&error]);
+  XCTAssertNotNil(error);
+  XCTAssertEqualObjects(ALNMigrationRunnerErrorDomain, error.domain);
+  XCTAssertTrue([[error localizedDescription] containsString:[file lastPathComponent]], @"%@", error);
+  NSString *detail = [error.userInfo[@"detail"] isKindOfClass:[NSString class]] ? error.userInfo[@"detail"] : @"";
+  XCTAssertTrue([detail containsString:@"transaction control"], @"%@", detail);
+  XCTAssertTrue([detail containsString:@"BEGIN"], @"%@", detail);
+
+  NSDictionary *tableRow =
+      [[database executeQuery:@"SELECT to_regclass($1) AS regclass"
+                  parameters:@[ table ]
+                       error:&fsError] firstObject];
+  XCTAssertNil(fsError);
+  XCTAssertEqualObjects([NSNull null], tableRow[@"regclass"]);
+
+  NSDictionary *trackingRow =
+      [[database executeQuery:@"SELECT COUNT(*) AS count FROM arlen_schema_migrations WHERE version = $1"
+                  parameters:@[ [ALNMigrationRunner versionForMigrationFile:file] ]
+                       error:&fsError] firstObject];
+  XCTAssertNil(fsError);
+  XCTAssertEqualObjects(@"0", trackingRow[@"count"]);
+}
+
+- (void)testMigrationRunnerAllowsDoBlockContainingBeginEndKeywords {
+  NSString *dsn = [self pgTestDSN];
+  if ([dsn length] == 0) {
+    return;
+  }
+
+  NSError *error = nil;
+  ALNPg *database = [[ALNPg alloc] initWithConnectionString:dsn maxConnections:2 error:&error];
+  XCTAssertNil(error);
+  XCTAssertNotNil(database);
+  if (database == nil) {
+    return;
+  }
+
+  NSString *table = [self uniqueNameWithPrefix:@"arlen_mig_do"];
+  NSString *root = [self createTempDirectory];
+  XCTAssertNotNil(root);
+  if (root == nil) {
+    return;
+  }
+
+  NSString *migrationsDir = [root stringByAppendingPathComponent:@"db/migrations"];
+  NSError *fsError = nil;
+  XCTAssertTrue([[NSFileManager defaultManager] createDirectoryAtPath:migrationsDir
+                                          withIntermediateDirectories:YES
+                                                           attributes:nil
+                                                                error:&fsError]);
+  XCTAssertNil(fsError);
+
+  NSString *file =
+      [migrationsDir stringByAppendingPathComponent:[NSString stringWithFormat:@"2026021905_do_%@.sql",
+                                                                               table]];
+  NSString *migrationSQL =
+      [NSString stringWithFormat:@"DO $$ BEGIN PERFORM 1; END $$;\n"
+                                 "CREATE TABLE %@(id SERIAL PRIMARY KEY, name TEXT NOT NULL);\n"
+                                 "INSERT INTO %@ (name) VALUES ('dale');\n",
+                                 table, table];
+  XCTAssertTrue([migrationSQL writeToFile:file
+                               atomically:YES
+                                 encoding:NSUTF8StringEncoding
+                                    error:&fsError]);
+  XCTAssertNil(fsError);
+
+  NSArray *applied = nil;
+  XCTAssertTrue([ALNMigrationRunner applyMigrationsAtPath:migrationsDir
+                                                 database:database
+                                                   dryRun:NO
+                                             appliedFiles:&applied
+                                                    error:&error]);
+  XCTAssertNil(error);
+  XCTAssertEqual((NSUInteger)1, [applied count]);
+
+  NSDictionary *countRow = [[database executeQuery:[NSString stringWithFormat:@"SELECT COUNT(*) AS count FROM %@",
+                                                                             table]
+                                        parameters:@[]
+                                             error:&fsError] firstObject];
+  XCTAssertNil(fsError);
+  XCTAssertEqualObjects(@"1", countRow[@"count"]);
+
+  (void)[database executeCommand:[NSString stringWithFormat:@"DROP TABLE IF EXISTS %@", table]
+                      parameters:@[]
+                           error:nil];
+  (void)[database executeCommand:@"DELETE FROM arlen_schema_migrations WHERE version = $1"
+                      parameters:@[ [ALNMigrationRunner versionForMigrationFile:file] ]
+                           error:nil];
+}
+
+- (void)testMigrationRunnerPreservesFileContextForCommandsForbiddenInsideTransactions {
+  NSString *dsn = [self pgTestDSN];
+  if ([dsn length] == 0) {
+    return;
+  }
+
+  NSError *error = nil;
+  ALNPg *database = [[ALNPg alloc] initWithConnectionString:dsn maxConnections:2 error:&error];
+  XCTAssertNil(error);
+  XCTAssertNotNil(database);
+  if (database == nil) {
+    return;
+  }
+
+  NSString *table = [self uniqueNameWithPrefix:@"arlen_mig_vacuum"];
+  NSString *createTableSQL =
+      [NSString stringWithFormat:@"CREATE TABLE %@(id SERIAL PRIMARY KEY, name TEXT NOT NULL)", table];
+  NSInteger created = [database executeCommand:createTableSQL parameters:@[] error:&error];
+  XCTAssertGreaterThanOrEqual(created, (NSInteger)0);
+  XCTAssertNil(error);
+
+  NSString *root = [self createTempDirectory];
+  XCTAssertNotNil(root);
+  if (root == nil) {
+    return;
+  }
+
+  NSString *migrationsDir = [root stringByAppendingPathComponent:@"db/migrations"];
+  NSError *fsError = nil;
+  XCTAssertTrue([[NSFileManager defaultManager] createDirectoryAtPath:migrationsDir
+                                          withIntermediateDirectories:YES
+                                                           attributes:nil
+                                                                error:&fsError]);
+  XCTAssertNil(fsError);
+
+  NSString *file =
+      [migrationsDir stringByAppendingPathComponent:[NSString stringWithFormat:@"2026021906_vacuum_%@.sql",
+                                                                               table]];
+  NSString *migrationSQL = [NSString stringWithFormat:@"VACUUM %@;\n", table];
+  XCTAssertTrue([migrationSQL writeToFile:file
+                               atomically:YES
+                                 encoding:NSUTF8StringEncoding
+                                    error:&fsError]);
+  XCTAssertNil(fsError);
+
+  NSArray *applied = nil;
+  XCTAssertFalse([ALNMigrationRunner applyMigrationsAtPath:migrationsDir
+                                                  database:database
+                                                    dryRun:NO
+                                              appliedFiles:&applied
+                                                     error:&error]);
+  XCTAssertNotNil(error);
+  XCTAssertEqualObjects(ALNMigrationRunnerErrorDomain, error.domain);
+  XCTAssertTrue([[error localizedDescription] containsString:[file lastPathComponent]], @"%@", error);
+  NSString *detail = [error.userInfo[@"detail"] isKindOfClass:[NSString class]] ? error.userInfo[@"detail"] : @"";
+  XCTAssertTrue([detail containsString:@"transaction block"], @"%@", detail);
+
+  NSDictionary *trackingRow =
+      [[database executeQuery:@"SELECT COUNT(*) AS count FROM arlen_schema_migrations WHERE version = $1"
+                  parameters:@[ [ALNMigrationRunner versionForMigrationFile:file] ]
+                       error:&fsError] firstObject];
+  XCTAssertNil(fsError);
+  XCTAssertEqualObjects(@"0", trackingRow[@"count"]);
 
   (void)[database executeCommand:[NSString stringWithFormat:@"DROP TABLE IF EXISTS %@", table]
                       parameters:@[]

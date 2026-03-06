@@ -1,6 +1,6 @@
 # Arlen Status Checkpoint
 
-Last updated: 2026-02-26
+Last updated: 2026-03-06
 
 ## Benchmark Handoff (2026-02-24 EOD)
 
@@ -54,6 +54,12 @@ Last updated: 2026-02-26
 - Phase 9I: complete (2026-02-25)
 - Phase 9J: complete (2026-02-25)
 - Phase 10: complete (10A/10B/10C/10D/10E/10F/10G/10H/10I/10J/10K/10L/10M complete on 2026-02-26)
+- Phase 11A: complete (2026-03-06)
+- Phase 11B: complete (2026-03-06)
+- Phase 11C: complete (2026-03-06)
+- Phase 11D: complete (2026-03-06)
+- Phase 11E: complete (2026-03-06)
+- Phase 11F: complete (2026-03-06)
 
 ## Phase 10M Completion (2026-02-26)
 
@@ -178,6 +184,7 @@ Last updated: 2026-02-26
     - added make target: `make ci-backend-parity-matrix`
   - completed 10M.3 protocol adversarial corpus gate:
     - added strict-limit corpus fixture + probe + gate:
+
       - `tests/fixtures/protocol/phase10m_protocol_adversarial_cases.json`
       - `tools/ci/protocol_adversarial_probe.py`
       - `tools/ci/run_phase10m_protocol_adversarial.sh`
@@ -230,6 +237,32 @@ Last updated: 2026-02-26
     - blob payload generation/caching optimization + legacy-string comparison lane
     - explicit sendfile transport-isolation benchmark coverage
     - split perf gate + confidence artifacts (`make ci-blob-throughput`)
+
+## Completed Today (2026-03-06)
+
+- Completed Phase 11A session/bearer/CSRF hardening:
+  - fail-fast startup validation for weak or missing `session.secret` and weak `auth.bearerSecret`
+  - encrypted session-cookie payload round-trip with standard crypto primitives and constant-time signature verification
+  - CSRF unsafe-method verification now defaults to header/body-first with query fallback opt-in only
+- Completed Phase 11B HTTP header and parser-boundary hardening:
+  - response-header validation rejects invalid names plus CRLF/NUL injection payloads
+  - content header canonicalization is deterministic and case-insensitive
+  - legacy parser rejects duplicate `Content-Length`, unsupported `Transfer-Encoding`, and mixed `Content-Length` + `Transfer-Encoding`
+- Completed Phase 11C websocket hardening:
+  - strict websocket version/key validation for upgrades
+  - optional websocket `Origin` allowlist enforcement
+  - unmasked-frame rejection and bounded stalled-frame timeout closure
+- Completed Phase 11D filesystem containment hardening:
+  - static asset serving now denies symlink-backed leaf paths and opens files with nofollow semantics
+  - filesystem attachment IDs are strict `att-<32 hex>` values with root-constrained, nofollow-backed reads
+  - file-backed job/mail/attachment adapters enforce private `0700` directories and `0600` files
+- Completed Phase 11E proxy/log hardening:
+  - forwarded proxy headers now activate from an explicit trusted CIDR list even without the legacy boolean toggle
+  - text logger escapes newline/tab/control characters to prevent log-forging payloads
+- Completed Phase 11F hostile-traffic verification expansion:
+  - added Phase 11 adversarial protocol corpus and deterministic mutation harness
+  - added mixed hostile HTTP/websocket live probe with release-confidence artifacts under `build/release_confidence/phase11`
+  - added Phase 11 sanitizer matrix lane wiring plus deployment-pack artifact verification
 
 ## Completed Today (2026-02-25)
 

@@ -135,6 +135,9 @@
   XCTAssertEqualObjects(@"", auth[@"issuer"]);
   XCTAssertEqualObjects(@"", auth[@"audience"]);
 
+  NSDictionary *webSocket = config[@"webSocket"];
+  XCTAssertEqualObjects((@[]), webSocket[@"allowedOrigins"]);
+
   NSDictionary *openapi = config[@"openapi"];
   XCTAssertEqualObjects(@(YES), openapi[@"enabled"]);
   XCTAssertEqualObjects(@(YES), openapi[@"docsUIEnabled"]);
@@ -266,6 +269,9 @@
   setenv("ARLEN_AUTH_BEARER_SECRET", "jwt-secret", 1);
   setenv("ARLEN_AUTH_ISSUER", "issuer-a", 1);
   setenv("ARLEN_AUTH_AUDIENCE", "audience-a", 1);
+  setenv("ARLEN_WEBSOCKET_ALLOWED_ORIGINS",
+         "https://allowed.example, HTTP://Example.com:80/, https://allowed.example",
+         1);
   setenv("ARLEN_OPENAPI_ENABLED", "0", 1);
   setenv("ARLEN_OPENAPI_DOCS_UI_ENABLED", "0", 1);
   setenv("ARLEN_OPENAPI_DOCS_UI_STYLE", "viewer", 1);
@@ -338,6 +344,7 @@
   unsetenv("ARLEN_AUTH_BEARER_SECRET");
   unsetenv("ARLEN_AUTH_ISSUER");
   unsetenv("ARLEN_AUTH_AUDIENCE");
+  unsetenv("ARLEN_WEBSOCKET_ALLOWED_ORIGINS");
   unsetenv("ARLEN_OPENAPI_ENABLED");
   unsetenv("ARLEN_OPENAPI_DOCS_UI_ENABLED");
   unsetenv("ARLEN_OPENAPI_DOCS_UI_STYLE");
@@ -426,6 +433,10 @@
   XCTAssertEqualObjects(@"issuer-a", auth[@"issuer"]);
   XCTAssertEqualObjects(@"audience-a", auth[@"audience"]);
 
+  NSDictionary *webSocket = config[@"webSocket"];
+  XCTAssertEqualObjects((@[ @"https://allowed.example", @"http://example.com" ]),
+                        webSocket[@"allowedOrigins"]);
+
   NSDictionary *openapi = config[@"openapi"];
   XCTAssertEqualObjects(@(NO), openapi[@"enabled"]);
   XCTAssertEqualObjects(@(NO), openapi[@"docsUIEnabled"]);
@@ -499,6 +510,7 @@
   setenv("MOJOOBJC_CSRF_ENABLED", "1", 1);
   setenv("MOJOOBJC_RATE_LIMIT_ENABLED", "1", 1);
   setenv("MOJOOBJC_RATE_LIMIT_REQUESTS", "55", 1);
+  setenv("MOJOOBJC_WEBSOCKET_ALLOWED_ORIGINS", "https://legacy.example:443/", 1);
   setenv("MOJOOBJC_TRACE_PROPAGATION_ENABLED", "0", 1);
   setenv("MOJOOBJC_RESPONSE_IDENTITY_HEADERS_ENABLED", "0", 1);
   setenv("MOJOOBJC_HEALTH_DETAILS_ENABLED", "0", 1);
@@ -546,6 +558,7 @@
   unsetenv("MOJOOBJC_CSRF_ENABLED");
   unsetenv("MOJOOBJC_RATE_LIMIT_ENABLED");
   unsetenv("MOJOOBJC_RATE_LIMIT_REQUESTS");
+  unsetenv("MOJOOBJC_WEBSOCKET_ALLOWED_ORIGINS");
   unsetenv("MOJOOBJC_TRACE_PROPAGATION_ENABLED");
   unsetenv("MOJOOBJC_RESPONSE_IDENTITY_HEADERS_ENABLED");
   unsetenv("MOJOOBJC_HEALTH_DETAILS_ENABLED");
@@ -597,6 +610,8 @@
   NSDictionary *rateLimit = config[@"rateLimit"];
   XCTAssertEqualObjects(@(YES), rateLimit[@"enabled"]);
   XCTAssertEqual((NSInteger)55, [rateLimit[@"requests"] integerValue]);
+  NSDictionary *webSocket = config[@"webSocket"];
+  XCTAssertEqualObjects((@[ @"https://legacy.example" ]), webSocket[@"allowedOrigins"]);
   NSDictionary *observability = config[@"observability"];
   XCTAssertEqualObjects(@(NO), observability[@"tracePropagationEnabled"]);
   XCTAssertEqualObjects(@(NO), observability[@"responseIdentityHeadersEnabled"]);

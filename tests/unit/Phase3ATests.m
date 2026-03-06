@@ -185,7 +185,7 @@ static NSInteger gPhase3APluginStopCount = 0;
     @"apiOnly" : @(YES),
     @"auth" : @{
       @"enabled" : @(YES),
-      @"bearerSecret" : @"phase3a-secret",
+      @"bearerSecret" : @"phase3a-secret-0123456789abcdef0",
       @"issuer" : @"",
       @"audience" : @"",
     },
@@ -262,7 +262,7 @@ static NSInteger gPhase3APluginStopCount = 0;
   ALNApplication *app = [self buildAppWithPluginConfig:NO];
   NSString *token = [self jwtTokenWithScopes:@[ @"users:read" ]
                                        roles:@[ @"admin" ]
-                                      secret:@"phase3a-secret"];
+                                      secret:@"phase3a-secret-0123456789abcdef0"];
   ALNResponse *response = [app dispatchRequest:[self requestWithMethod:@"GET"
                                                                   path:@"/api/users/42"
                                                            queryString:@"verbose=true"
@@ -282,7 +282,7 @@ static NSInteger gPhase3APluginStopCount = 0;
   ALNApplication *app = [self buildAppWithPluginConfig:NO];
   NSString *token = [self jwtTokenWithScopes:@[ @"users:read" ]
                                        roles:@[]
-                                      secret:@"phase3a-secret"];
+                                      secret:@"phase3a-secret-0123456789abcdef0"];
   ALNResponse *response = [app dispatchRequest:[self requestWithMethod:@"GET"
                                                                   path:@"/api/users/not-an-int"
                                                            queryString:@"verbose=true"
@@ -307,7 +307,7 @@ static NSInteger gPhase3APluginStopCount = 0;
   ALNApplication *app = [self buildAppWithPluginConfig:NO];
   NSString *token = [self jwtTokenWithScopes:@[ @"users:write" ]
                                        roles:@[]
-                                      secret:@"phase3a-secret"];
+                                      secret:@"phase3a-secret-0123456789abcdef0"];
   ALNResponse *response = [app dispatchRequest:[self requestWithMethod:@"GET"
                                                                   path:@"/api/users/7"
                                                            queryString:@""
@@ -361,7 +361,7 @@ static NSInteger gPhase3APluginStopCount = 0;
   ALNApplication *app = [self buildAppWithPluginConfig:NO];
   NSString *token = [self jwtTokenWithScopes:@[ @"users:read" ]
                                        roles:@[]
-                                      secret:@"phase3a-secret"];
+                                      secret:@"phase3a-secret-0123456789abcdef0"];
   (void)[app dispatchRequest:[self requestWithMethod:@"GET"
                                                 path:@"/api/users/9"
                                          queryString:@""

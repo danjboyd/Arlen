@@ -69,6 +69,7 @@ static NSError *ALNPgMakeError(ALNPgErrorCode code,
                                NSString *message,
                                NSString *detail,
                                NSString *sql);
+static void ALNPgClearError(NSError **error);
 static NSError *ALNPgMakeErrorWithDiagnostics(ALNPgErrorCode code,
                                               NSString *message,
                                               NSString *detail,
@@ -92,6 +93,7 @@ static PGconn *(*ALNPQconnectdb)(const char *conninfo) = NULL;
 static int (*ALNPQstatus)(const PGconn *conn) = NULL;
 static void (*ALNPQfinish)(PGconn *conn) = NULL;
 static char *(*ALNPQerrorMessage)(const PGconn *conn) = NULL;
+static PGresult *(*ALNPQexec)(PGconn *conn, const char *query) = NULL;
 static PGresult *(*ALNPQprepare)(PGconn *conn,
                                  const char *stmtName,
                                  const char *query,
@@ -188,6 +190,7 @@ static BOOL ALNLoadLibpq(NSError **error) {
     ok = ok && ALNBindLibpqSymbol((void **)&ALNPQstatus, handle, "PQstatus");
     ok = ok && ALNBindLibpqSymbol((void **)&ALNPQfinish, handle, "PQfinish");
     ok = ok && ALNBindLibpqSymbol((void **)&ALNPQerrorMessage, handle, "PQerrorMessage");
+    ok = ok && ALNBindLibpqSymbol((void **)&ALNPQexec, handle, "PQexec");
     ok = ok && ALNBindLibpqSymbol((void **)&ALNPQprepare, handle, "PQprepare");
     ok = ok && ALNBindLibpqSymbol((void **)&ALNPQexecParams, handle, "PQexecParams");
     ok = ok && ALNBindLibpqSymbol((void **)&ALNPQexecPrepared, handle, "PQexecPrepared");
@@ -226,6 +229,12 @@ static NSError *ALNPgMakeError(ALNPgErrorCode code,
                                NSString *detail,
                                NSString *sql) {
   return ALNPgMakeErrorWithDiagnostics(code, message, detail, sql, nil);
+}
+
+static void ALNPgClearError(NSError **error) {
+  if (error != NULL) {
+    *error = nil;
+  }
 }
 
 static NSError *ALNPgMakeErrorWithDiagnostics(ALNPgErrorCode code,
@@ -799,6 +808,8 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result, int rowIndex) {
     return nil;
   }
 
+  ALNPgClearError(error);
+
   if ([connectionString length] == 0) {
     if (error != NULL) {
       *error = ALNPgMakeError(ALNPgErrorInvalidArgument,
@@ -875,6 +886,12 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result, int rowIndex) {
 }
 
 - (void)resetExecutionCaches {
+  if (_conn != NULL && self.isOpen) {
+    PGresult *result = ALNPQexec(_conn, "DEALLOCATE ALL");
+    if (result != NULL) {
+      ALNPQclear(result);
+    }
+  }
   [self.builderCompilationCache removeAllObjects];
   [self.builderCompilationCacheOrder removeAllObjects];
   [self.preparedStatementNamesByKey removeAllObjects];
@@ -932,6 +949,7 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result, int rowIndex) {
 - (nullable NSDictionary *)compiledBuilder:(ALNSQLBuilder *)builder
                                   cacheHit:(BOOL *)cacheHit
                                      error:(NSError **)error {
+  ALNPgClearError(error);
   if (![builder isKindOfClass:[ALNSQLBuilder class]]) {
     if (error != NULL) {
       *error = ALNPgMakeError(ALNPgErrorInvalidArgument,
@@ -1009,6 +1027,7 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result, int rowIndex) {
                                            cacheHit:(BOOL *)cacheHit
                                           cacheFull:(BOOL *)cacheFull
                                               error:(NSError **)error {
+  ALNPgClearError(error);
   if (cacheHit != NULL) {
     *cacheHit = NO;
   }
@@ -1065,6 +1084,7 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result, int rowIndex) {
                           sql:(NSString *)sql
                parameterCount:(NSInteger)parameterCount
                         error:(NSError **)error {
+  ALNPgClearError(error);
   NSError *openError = [self checkOpenError];
   if (openError != nil) {
     if (error != NULL) {
@@ -1118,6 +1138,7 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result, int rowIndex) {
 - (PGresult *)runExecParamsSQL:(NSString *)sql
                     parameters:(NSArray *)parameters
                          error:(NSError **)error {
+  ALNPgClearError(error);
   NSError *openError = [self checkOpenError];
   if (openError != nil) {
     if (error != NULL) {
@@ -1165,9 +1186,44 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result, int rowIndex) {
   return result;
 }
 
+- (PGresult *)runExecScriptSQL:(NSString *)sql error:(NSError **)error {
+  ALNPgClearError(error);
+  NSError *openError = [self checkOpenError];
+  if (openError != nil) {
+    if (error != NULL) {
+      *error = openError;
+    }
+    return NULL;
+  }
+  if ([sql length] == 0) {
+    if (error != NULL) {
+      *error = ALNPgMakeError(ALNPgErrorInvalidArgument,
+                              @"sql script must not be empty",
+                              nil,
+                              sql);
+    }
+    return NULL;
+  }
+
+  PGresult *result = ALNPQexec(_conn, [sql UTF8String]);
+  if (result == NULL) {
+    if (error != NULL) {
+      NSString *detail = [NSString stringWithUTF8String:ALNPQerrorMessage(_conn) ?: ""];
+      *error = ALNPgMakeError(ALNPgErrorQueryFailed,
+                              @"script execution failed",
+                              detail,
+                              sql);
+    }
+    return NULL;
+  }
+
+  return result;
+}
+
 - (PGresult *)runExecPreparedNamed:(NSString *)name
                         parameters:(NSArray *)parameters
                              error:(NSError **)error {
+  ALNPgClearError(error);
   NSError *openError = [self checkOpenError];
   if (openError != nil) {
     if (error != NULL) {
@@ -1222,6 +1278,7 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result, int rowIndex) {
 - (NSArray<NSDictionary *> *)executeQuery:(NSString *)sql
                                parameters:(NSArray *)parameters
                                     error:(NSError **)error {
+  ALNPgClearError(error);
   PGresult *result = [self runExecParamsSQL:sql parameters:parameters ?: @[] error:error];
   if (result == NULL) {
     return nil;
@@ -1250,6 +1307,7 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result, int rowIndex) {
 - (NSDictionary *)executeQueryOne:(NSString *)sql
                        parameters:(NSArray *)parameters
                             error:(NSError **)error {
+  ALNPgClearError(error);
   NSArray *rows = [self executeQuery:sql parameters:parameters error:error];
   if (rows == nil || [rows count] == 0) {
     return nil;
@@ -1260,13 +1318,14 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result, int rowIndex) {
 - (NSInteger)executeCommand:(NSString *)sql
                  parameters:(NSArray *)parameters
                       error:(NSError **)error {
+  ALNPgClearError(error);
   PGresult *result = [self runExecParamsSQL:sql parameters:parameters ?: @[] error:error];
   if (result == NULL) {
     return -1;
   }
 
   ALNExecStatusType status = ALNPQresultStatus(result);
-  if (status != ALNPGRES_COMMAND_OK) {
+  if (status != ALNPGRES_COMMAND_OK && status != ALNPGRES_TUPLES_OK) {
     NSString *detail = [NSString stringWithUTF8String:ALNPQresultErrorMessage(result) ?: ""];
     NSDictionary *diagnostics = ALNPgDiagnosticsFromResult(result);
     ALNPQclear(result);
@@ -1284,6 +1343,8 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result, int rowIndex) {
   NSInteger affected = 0;
   if (tuples != NULL && tuples[0] != '\0') {
     affected = (NSInteger)strtol(tuples, NULL, 10);
+  } else if (status == ALNPGRES_TUPLES_OK) {
+    affected = (NSInteger)ALNPQntuples(result);
   }
   ALNPQclear(result);
   return affected;
@@ -1292,6 +1353,7 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result, int rowIndex) {
 - (NSArray<NSDictionary *> *)executePreparedQueryNamed:(NSString *)name
                                             parameters:(NSArray *)parameters
                                                  error:(NSError **)error {
+  ALNPgClearError(error);
   PGresult *result = [self runExecPreparedNamed:name parameters:parameters ?: @[] error:error];
   if (result == NULL) {
     return nil;
@@ -1320,13 +1382,14 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result, int rowIndex) {
 - (NSInteger)executePreparedCommandNamed:(NSString *)name
                               parameters:(NSArray *)parameters
                                    error:(NSError **)error {
+  ALNPgClearError(error);
   PGresult *result = [self runExecPreparedNamed:name parameters:parameters ?: @[] error:error];
   if (result == NULL) {
     return -1;
   }
 
   ALNExecStatusType status = ALNPQresultStatus(result);
-  if (status != ALNPGRES_COMMAND_OK) {
+  if (status != ALNPGRES_COMMAND_OK && status != ALNPGRES_TUPLES_OK) {
     NSString *detail = [NSString stringWithUTF8String:ALNPQresultErrorMessage(result) ?: ""];
     NSDictionary *diagnostics = ALNPgDiagnosticsFromResult(result);
     ALNPQclear(result);
@@ -1344,13 +1407,42 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result, int rowIndex) {
   NSInteger affected = 0;
   if (tuples != NULL && tuples[0] != '\0') {
     affected = (NSInteger)strtol(tuples, NULL, 10);
+  } else if (status == ALNPGRES_TUPLES_OK) {
+    affected = (NSInteger)ALNPQntuples(result);
   }
   ALNPQclear(result);
   return affected;
 }
 
+- (BOOL)executeScript:(NSString *)sql error:(NSError **)error {
+  ALNPgClearError(error);
+  PGresult *result = [self runExecScriptSQL:sql error:error];
+  if (result == NULL) {
+    return NO;
+  }
+
+  ALNExecStatusType status = ALNPQresultStatus(result);
+  if (status == ALNPGRES_COMMAND_OK || status == ALNPGRES_TUPLES_OK) {
+    ALNPQclear(result);
+    return YES;
+  }
+
+  NSString *detail = [NSString stringWithUTF8String:ALNPQresultErrorMessage(result) ?: ""];
+  NSDictionary *diagnostics = ALNPgDiagnosticsFromResult(result);
+  ALNPQclear(result);
+  if (error != NULL) {
+    NSString *message = (status == ALNPGRES_EMPTY_QUERY) ? @"script does not contain executable SQL"
+                                                         : @"script execution failed";
+    ALNPgErrorCode code =
+        (status == ALNPGRES_EMPTY_QUERY) ? ALNPgErrorInvalidArgument : ALNPgErrorQueryFailed;
+    *error = ALNPgMakeErrorWithDiagnostics(code, message, detail, sql, diagnostics);
+  }
+  return NO;
+}
+
 - (NSArray<NSDictionary *> *)executeBuilderQuery:(ALNSQLBuilder *)builder
                                             error:(NSError **)error {
+  ALNPgClearError(error);
   NSArray *normalizedParameters = @[];
   NSString *sql = @"";
   NSError *compileError = nil;
@@ -1515,6 +1607,7 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result, int rowIndex) {
 
 - (NSInteger)executeBuilderCommand:(ALNSQLBuilder *)builder
                              error:(NSError **)error {
+  ALNPgClearError(error);
   NSArray *normalizedParameters = @[];
   NSString *sql = @"";
   NSError *compileError = nil;
@@ -1671,11 +1764,13 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result, int rowIndex) {
 }
 
 - (BOOL)runTransactionSQL:(NSString *)sql error:(NSError **)error {
+  ALNPgClearError(error);
   NSInteger affected = [self executeCommand:sql parameters:@[] error:error];
   return (affected >= 0);
 }
 
 - (BOOL)beginTransaction:(NSError **)error {
+  ALNPgClearError(error);
   if (_inTransaction) {
     if (error != NULL) {
       *error = ALNPgMakeError(ALNPgErrorTransactionFailed,
@@ -1699,6 +1794,7 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result, int rowIndex) {
 }
 
 - (BOOL)commitTransaction:(NSError **)error {
+  ALNPgClearError(error);
   if (!_inTransaction) {
     if (error != NULL) {
       *error = ALNPgMakeError(ALNPgErrorTransactionFailed,
@@ -1719,6 +1815,7 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result, int rowIndex) {
 }
 
 - (BOOL)rollbackTransaction:(NSError **)error {
+  ALNPgClearError(error);
   if (!_inTransaction) {
     if (error != NULL) {
       *error = ALNPgMakeError(ALNPgErrorTransactionFailed,
@@ -1784,6 +1881,8 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result, int rowIndex) {
     return nil;
   }
 
+  ALNPgClearError(error);
+
   if ([connectionString length] == 0) {
     if (error != NULL) {
       *error = ALNPgMakeError(ALNPgErrorInvalidArgument,
@@ -1817,6 +1916,7 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result, int rowIndex) {
 }
 
 - (ALNPgConnection *)acquireConnection:(NSError **)error {
+  ALNPgClearError(error);
   @synchronized(self) {
     if ([self.idleConnections count] > 0) {
       ALNPgConnection *connection = [self.idleConnections lastObject];
@@ -1891,6 +1991,7 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result, int rowIndex) {
 - (NSArray<NSDictionary *> *)executeQuery:(NSString *)sql
                                parameters:(NSArray *)parameters
                                     error:(NSError **)error {
+  ALNPgClearError(error);
   NSError *acquireError = nil;
   ALNPgConnection *connection = [self acquireConnection:&acquireError];
   if (connection == nil) {
@@ -1911,6 +2012,7 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result, int rowIndex) {
 
 - (NSArray<NSDictionary *> *)executeBuilderQuery:(ALNSQLBuilder *)builder
                                             error:(NSError **)error {
+  ALNPgClearError(error);
   NSError *acquireError = nil;
   ALNPgConnection *connection = [self acquireConnection:&acquireError];
   if (connection == nil) {
@@ -1932,6 +2034,7 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result, int rowIndex) {
 - (NSInteger)executeCommand:(NSString *)sql
                  parameters:(NSArray *)parameters
                       error:(NSError **)error {
+  ALNPgClearError(error);
   NSError *acquireError = nil;
   ALNPgConnection *connection = [self acquireConnection:&acquireError];
   if (connection == nil) {
@@ -1952,6 +2055,7 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result, int rowIndex) {
 
 - (NSInteger)executeBuilderCommand:(ALNSQLBuilder *)builder
                              error:(NSError **)error {
+  ALNPgClearError(error);
   NSError *acquireError = nil;
   ALNPgConnection *connection = [self acquireConnection:&acquireError];
   if (connection == nil) {
@@ -1972,6 +2076,7 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result, int rowIndex) {
 
 - (BOOL)withTransaction:(BOOL (^)(ALNPgConnection *connection, NSError **error))block
                   error:(NSError **)error {
+  ALNPgClearError(error);
   if (block == nil) {
     if (error != NULL) {
       *error = ALNPgMakeError(ALNPgErrorInvalidArgument,
@@ -2028,6 +2133,7 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result, int rowIndex) {
 - (BOOL)withTransactionUsingBlock:(BOOL (^)(id<ALNDatabaseConnection> connection,
                                             NSError **error))block
                             error:(NSError **)error {
+  ALNPgClearError(error);
   if (block == nil) {
     if (error != NULL) {
       *error = ALNPgMakeError(ALNPgErrorInvalidArgument,

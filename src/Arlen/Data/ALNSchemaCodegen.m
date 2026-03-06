@@ -558,12 +558,7 @@ static NSString *ALNSchemaCodegenJSONEscape(NSString *value) {
       [implementation appendFormat:@"@implementation %@\n\n", rowClassName];
       for (NSDictionary *column in columns) {
         NSString *propertyName = column[@"propertyName"];
-        NSString *objcType = column[@"objcType"];
-        NSString *propertyAttribute = column[@"propertyAttribute"];
-        [implementation appendFormat:@"@property(nonatomic, %@, readwrite) %@ %@;\n",
-                                     propertyAttribute,
-                                     objcType,
-                                     propertyName];
+        [implementation appendFormat:@"@synthesize %@ = _%@;\n", propertyName, propertyName];
       }
       [implementation appendString:@"\n"];
       [implementation appendString:@"- (instancetype)init"];
@@ -594,6 +589,11 @@ static NSString *ALNSchemaCodegenJSONEscape(NSString *value) {
       [implementation appendString:@"@end\n\n"];
 
       [implementation appendFormat:@"@implementation %@\n\n", insertClassName];
+      for (NSDictionary *column in columns) {
+        NSString *propertyName = column[@"propertyName"];
+        [implementation appendFormat:@"@synthesize %@ = _%@;\n", propertyName, propertyName];
+      }
+      [implementation appendString:@"\n"];
       [implementation appendString:@"- (NSDictionary<NSString *, id> *)builderValues {\n"];
       [implementation appendString:@"  NSMutableDictionary *values = [NSMutableDictionary dictionary];\n"];
       for (NSDictionary *column in columns) {
@@ -608,6 +608,11 @@ static NSString *ALNSchemaCodegenJSONEscape(NSString *value) {
       [implementation appendString:@"@end\n\n"];
 
       [implementation appendFormat:@"@implementation %@\n\n", updateClassName];
+      for (NSDictionary *column in columns) {
+        NSString *propertyName = column[@"propertyName"];
+        [implementation appendFormat:@"@synthesize %@ = _%@;\n", propertyName, propertyName];
+      }
+      [implementation appendString:@"\n"];
       [implementation appendString:@"- (NSDictionary<NSString *, id> *)builderValues {\n"];
       [implementation appendString:@"  NSMutableDictionary *values = [NSMutableDictionary dictionary];\n"];
       for (NSDictionary *column in columns) {

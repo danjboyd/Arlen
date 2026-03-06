@@ -131,6 +131,14 @@ ARLEN_MAX_WEBSOCKET_SESSIONS=1 ./bin/boomhauer
 With this limit, a second concurrent websocket upgrade receives `503 Service Unavailable` with
 `X-Arlen-Backpressure-Reason: websocket_session_limit`.
 
+WebSocket origin allowlist:
+
+```bash
+ARLEN_WEBSOCKET_ALLOWED_ORIGINS=https://app.example.com,https://admin.example.com ./bin/boomhauer
+```
+
+With an allowlist configured, websocket upgrades without a matching `Origin` header receive `403 Forbidden`.
+
 Runtime HTTP session backpressure limit override:
 
 ```bash
@@ -209,13 +217,15 @@ Session cookies are encrypted and authenticated by default.
 Trusted proxy allowlist override:
 
 ```bash
-ARLEN_TRUSTED_PROXY=1 ARLEN_TRUSTED_PROXY_CIDRS=127.0.0.1/32 ./bin/boomhauer
+ARLEN_TRUSTED_PROXY_CIDRS=127.0.0.1/32 ./bin/boomhauer
 ```
 
-Forwarded headers are honored only when `ARLEN_TRUSTED_PROXY=1` and the peer IP matches
-`ARLEN_TRUSTED_PROXY_CIDRS`. The `edge` security profile defaults this allowlist to
-`127.0.0.1/32`. If you run behind a remote load balancer or ingress proxy, set the CIDR list
-explicitly to the proxy network ranges instead of trusting all peers.
+Forwarded headers are honored only when the peer IP matches `ARLEN_TRUSTED_PROXY_CIDRS`.
+Setting the CIDR list alone enables forwarded-header handling; `ARLEN_TRUSTED_PROXY=1`
+remains as a compatibility toggle that seeds a loopback allowlist when you do not provide an
+explicit CIDR list. The `edge` security profile defaults this allowlist to `127.0.0.1/32`.
+If you run behind a remote load balancer or ingress proxy, set the CIDR list explicitly to the
+proxy network ranges instead of trusting all peers.
 
 Strict readiness startup gating override:
 
@@ -522,6 +532,7 @@ Framework/app runtime:
 - `ARLEN_MAX_BODY_BYTES`
 - `ARLEN_MAX_HTTP_SESSIONS`
 - `ARLEN_MAX_WEBSOCKET_SESSIONS`
+- `ARLEN_WEBSOCKET_ALLOWED_ORIGINS`
 - `ARLEN_DATABASE_URL`
 - `ARLEN_DB_ADAPTER`
 - `ARLEN_DB_POOL_SIZE`
@@ -533,7 +544,7 @@ Framework/app runtime:
 - `ARLEN_RATE_LIMIT_REQUESTS`
 - `ARLEN_RATE_LIMIT_WINDOW_SECONDS`
 - `ARLEN_AUTH_ENABLED`
-- `ARLEN_AUTH_BEARER_SECRET`
+- `ARLEN_AUTH_BEARER_SECRET` (minimum 32 characters when `ARLEN_AUTH_ENABLED=1`)
 - `ARLEN_AUTH_ISSUER`
 - `ARLEN_AUTH_AUDIENCE`
 - `ARLEN_OPENAPI_ENABLED`
@@ -582,6 +593,14 @@ Named database target (uses `db/migrations/<target>`):
 ```bash
 /path/to/Arlen/bin/arlen migrate --env development --database analytics
 ```
+
+Migration file behavior:
+
+- each `.sql` file is executed as one PostgreSQL script inside a transaction
+- multi-statement migration files are supported
+- empty/comment-only migration files are rejected
+- top-level transaction control statements such as `BEGIN`/`COMMIT` are rejected
+- commands PostgreSQL disallows inside transactions still fail
 
 ## 15. Generate Typed DB Helpers (Phase 4C)
 
@@ -687,6 +706,22 @@ ARLEN_SANITIZER_INCLUDE_TSAN=1 make ci-sanitizers
 ```
 
 TSAN artifacts are retained at `build/sanitizers/tsan` for triage.
+
+Phase 11 hostile-traffic confidence gates:
+
+```bash
+make ci-phase11-protocol-adversarial
+make ci-phase11-fuzz
+make ci-phase11-live-adversarial
+make ci-phase11-sanitizers
+make ci-phase11
+```
+
+Phase 11 artifacts are written under `build/release_confidence/phase11/`:
+- `protocol_adversarial/`
+- `protocol_fuzz/`
+- `live_adversarial/`
+- `sanitizers/`
 
 Fault-injection gate seed replay:
 

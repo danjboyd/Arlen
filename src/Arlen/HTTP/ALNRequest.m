@@ -90,6 +90,23 @@ static NSError *ALNRequestError(NSInteger code, NSString *message) {
                          }];
 }
 
+static BOOL ALNParseContentLengthHeaderValue(NSString *value) {
+  if (![value isKindOfClass:[NSString class]]) {
+    return NO;
+  }
+  NSString *trimmed = [value stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+  if ([trimmed length] == 0) {
+    return NO;
+  }
+  for (NSUInteger idx = 0; idx < [trimmed length]; idx++) {
+    unichar ch = [trimmed characterAtIndex:idx];
+    if (ch < '0' || ch > '9') {
+      return NO;
+    }
+  }
+  return YES;
+}
+
 static NSString *ALNURLDecode(NSString *value) {
   NSString *plusNormalized = [value stringByReplacingOccurrencesOfString:@"+" withString:@" "];
   NSString *decoded = [plusNormalized stringByRemovingPercentEncoding];
@@ -1039,6 +1056,7 @@ static ALNRequest *ALNRequestFromRawDataLegacy(NSData *data, NSError **error) {
   ALNSplitURI(uri, &path, &query);
 
   NSMutableDictionary *headers = [NSMutableDictionary dictionary];
+  BOOL sawContentLength = NO;
   for (NSUInteger idx = 1; idx < [lines count]; idx++) {
     NSString *line = lines[idx];
     if ([line length] == 0) {
@@ -1051,6 +1069,26 @@ static ALNRequest *ALNRequestFromRawDataLegacy(NSData *data, NSError **error) {
     NSString *name = [[line substringToIndex:colon.location] lowercaseString];
     NSString *value = [[line substringFromIndex:colon.location + 1]
         stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
+    if ([name isEqualToString:@"content-length"]) {
+      if (sawContentLength) {
+        if (error != NULL) {
+          *error = ALNRequestError(3, @"Duplicate Content-Length header");
+        }
+        return nil;
+      }
+      sawContentLength = YES;
+      if (!ALNParseContentLengthHeaderValue(value)) {
+        if (error != NULL) {
+          *error = ALNRequestError(3, @"Invalid Content-Length header");
+        }
+        return nil;
+      }
+    } else if ([name isEqualToString:@"transfer-encoding"]) {
+      if (error != NULL) {
+        *error = ALNRequestError(3, @"Unsupported Transfer-Encoding header");
+      }
+      return nil;
+    }
     headers[name] = value;
   }
 

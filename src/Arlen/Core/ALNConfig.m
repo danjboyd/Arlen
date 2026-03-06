@@ -128,6 +128,76 @@ static NSArray *ALNParseCSVExtensions(NSString *value) {
   return ALNNormalizeExtensionList(parts);
 }
 
+static NSString *ALNOriginHostDisplayString(NSString *host) {
+  if (![host isKindOfClass:[NSString class]] || [host length] == 0) {
+    return @"";
+  }
+  if ([host rangeOfString:@":"].location != NSNotFound && ![host hasPrefix:@"["]) {
+    return [NSString stringWithFormat:@"[%@]", host];
+  }
+  return host;
+}
+
+static NSString *ALNNormalizeOriginEntry(id rawValue) {
+  if (![rawValue isKindOfClass:[NSString class]]) {
+    return nil;
+  }
+  NSString *trimmed = [(NSString *)rawValue
+      stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+  if ([trimmed length] == 0) {
+    return nil;
+  }
+
+  NSURLComponents *components = [NSURLComponents componentsWithString:trimmed];
+  NSString *scheme = [[components scheme] lowercaseString];
+  NSString *host = [[components host] lowercaseString];
+  NSNumber *port = [components port];
+  NSString *path = [components path];
+  if ([scheme length] == 0 || [host length] == 0) {
+    return nil;
+  }
+  if ([[components user] length] > 0 || [[components password] length] > 0 ||
+      [[components query] length] > 0 || [[components fragment] length] > 0) {
+    return nil;
+  }
+  if ([path length] > 0 && ![path isEqualToString:@"/"]) {
+    return nil;
+  }
+
+  BOOL omitPort = NO;
+  if (port != nil) {
+    NSInteger portValue = [port integerValue];
+    omitPort = ([scheme isEqualToString:@"http"] && portValue == 80) ||
+               ([scheme isEqualToString:@"https"] && portValue == 443);
+  }
+  if (port != nil && !omitPort) {
+    return [NSString stringWithFormat:@"%@://%@:%ld",
+                                      scheme,
+                                      ALNOriginHostDisplayString(host),
+                                      (long)[port integerValue]];
+  }
+  return [NSString stringWithFormat:@"%@://%@", scheme, ALNOriginHostDisplayString(host)];
+}
+
+static NSArray *ALNNormalizeOriginList(NSArray *values) {
+  NSMutableArray *normalized = [NSMutableArray array];
+  for (id value in values ?: @[]) {
+    NSString *origin = ALNNormalizeOriginEntry(value);
+    if ([origin length] == 0 || [normalized containsObject:origin]) {
+      continue;
+    }
+    [normalized addObject:origin];
+  }
+  return [NSArray arrayWithArray:normalized];
+}
+
+static NSArray *ALNParseCSVOrigins(NSString *value) {
+  if (![value isKindOfClass:[NSString class]] || [value length] == 0) {
+    return @[];
+  }
+  return ALNNormalizeOriginList([value componentsSeparatedByString:@","]);
+}
+
 static NSString *ALNIPv4StringFromHostAddress(uint32_t value) {
   return [NSString stringWithFormat:@"%u.%u.%u.%u",
                                     (unsigned int)((value >> 24) & 0xFF),
@@ -376,6 +446,9 @@ static NSDictionary *ALNSecurityProfileDefaults(NSString *profileName) {
       ALNEnvValueCompat("ARLEN_ENABLE_REUSEPORT", "MOJOOBJC_ENABLE_REUSEPORT");
   NSString *requestDispatchMode =
       ALNEnvValueCompat("ARLEN_REQUEST_DISPATCH_MODE", "MOJOOBJC_REQUEST_DISPATCH_MODE");
+  NSString *webSocketAllowedOrigins =
+      ALNEnvValueCompat("ARLEN_WEBSOCKET_ALLOWED_ORIGINS",
+                        "MOJOOBJC_WEBSOCKET_ALLOWED_ORIGINS");
 
   NSString *propaneWorkers =
       ALNEnvValueCompat("ARLEN_PROPANE_WORKERS", "MOJOOBJC_PROPANE_WORKERS");
@@ -666,6 +739,14 @@ static NSDictionary *ALNSecurityProfileDefaults(NSString *profileName) {
     auth[@"audience"] = authAudience;
   }
   config[@"auth"] = auth;
+
+  NSMutableDictionary *webSocket =
+      [NSMutableDictionary dictionaryWithDictionary:config[@"webSocket"] ?: @{}];
+  NSArray *allowedOriginsValue = ALNParseCSVOrigins(webSocketAllowedOrigins);
+  if ([allowedOriginsValue count] > 0) {
+    webSocket[@"allowedOrigins"] = allowedOriginsValue;
+  }
+  config[@"webSocket"] = webSocket;
 
   NSMutableDictionary *openapi =
       [NSMutableDictionary dictionaryWithDictionary:config[@"openapi"] ?: @{}];
@@ -1015,6 +1096,13 @@ static NSDictionary *ALNSecurityProfileDefaults(NSString *profileName) {
   }
   config[@"auth"] = finalAuth;
 
+  NSMutableDictionary *finalWebSocket =
+      [NSMutableDictionary dictionaryWithDictionary:config[@"webSocket"] ?: @{}];
+  if (finalWebSocket[@"allowedOrigins"] == nil) {
+    finalWebSocket[@"allowedOrigins"] = @[];
+  }
+  config[@"webSocket"] = finalWebSocket;
+
   NSMutableDictionary *finalOpenAPI =
       [NSMutableDictionary dictionaryWithDictionary:config[@"openapi"] ?: @{}];
   if (finalOpenAPI[@"enabled"] == nil) {
@@ -1273,6 +1361,13 @@ static NSDictionary *ALNSecurityProfileDefaults(NSString *profileName) {
     finalAuth[@"audience"] = @"";
   }
   config[@"auth"] = finalAuth;
+
+  if (![finalWebSocket[@"allowedOrigins"] isKindOfClass:[NSArray class]]) {
+    finalWebSocket[@"allowedOrigins"] = @[];
+  } else {
+    finalWebSocket[@"allowedOrigins"] = ALNNormalizeOriginList(finalWebSocket[@"allowedOrigins"]);
+  }
+  config[@"webSocket"] = finalWebSocket;
 
   finalOpenAPI[@"enabled"] = @([finalOpenAPI[@"enabled"] boolValue]);
   finalOpenAPI[@"docsUIEnabled"] = @([finalOpenAPI[@"docsUIEnabled"] boolValue]);

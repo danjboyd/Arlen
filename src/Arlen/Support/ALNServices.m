@@ -1,12 +1,17 @@
 #import "ALNServices.h"
 
+#include <fcntl.h>
 #include <errno.h>
 #include <netdb.h>
+#include <string.h>
 #include <sys/socket.h>
+#include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>
 
 NSString *const ALNServiceErrorDomain = @"Arlen.Services.Error";
+
+static BOOL ALNPathIsSymbolicLink(NSString *path);
 
 static NSError *ALNServiceError(NSInteger code, NSString *message, NSError *underlying) {
   NSMutableDictionary *userInfo = [NSMutableDictionary dictionary];
@@ -29,6 +34,313 @@ static NSString *ALNNonEmptyString(NSString *value, NSString *defaultValue) {
   return trimmed;
 }
 
+static NSDictionary *ALNPermissionsAttributes(NSUInteger mode) {
+  return @{ NSFilePosixPermissions : @(mode) };
+}
+
+static NSError *ALNPOSIXErrorForPath(NSString *path, NSString *message) {
+  int errorCode = errno;
+  NSMutableDictionary *userInfo = [NSMutableDictionary dictionary];
+  userInfo[NSLocalizedDescriptionKey] = message ?: @"filesystem operation failed";
+  if ([path length] > 0) {
+    userInfo[NSFilePathErrorKey] = path;
+  }
+  return [NSError errorWithDomain:NSPOSIXErrorDomain code:errorCode userInfo:userInfo];
+}
+
+static BOOL ALNEnsurePrivateDirectory(NSFileManager *fileManager, NSString *path, NSError **error) {
+  if (![path isKindOfClass:[NSString class]] || [path length] == 0) {
+    if (error != NULL) {
+      *error = [NSError errorWithDomain:ALNServiceErrorDomain
+                                   code:1
+                               userInfo:@{
+                                 NSLocalizedDescriptionKey : @"directory path is required"
+                               }];
+    }
+    return NO;
+  }
+
+  NSError *directoryError = nil;
+  if (![fileManager createDirectoryAtPath:path
+              withIntermediateDirectories:YES
+                               attributes:ALNPermissionsAttributes(0700)
+                                    error:&directoryError]) {
+    if (error != NULL) {
+      *error = directoryError;
+    }
+    return NO;
+  }
+
+  NSError *permissionsError = nil;
+  if (![fileManager setAttributes:ALNPermissionsAttributes(0700)
+                     ofItemAtPath:path
+                            error:&permissionsError]) {
+    if (error != NULL) {
+      *error = permissionsError;
+    }
+    return NO;
+  }
+  return YES;
+}
+
+static BOOL ALNEnsurePrivateRegularFile(NSFileManager *fileManager, NSString *path, NSError **error) {
+  BOOL isDirectory = NO;
+  if (![fileManager fileExistsAtPath:path isDirectory:&isDirectory]) {
+    return YES;
+  }
+  if (isDirectory) {
+    if (error != NULL) {
+      *error = [NSError errorWithDomain:ALNServiceErrorDomain
+                                   code:2
+                               userInfo:@{
+                                 NSLocalizedDescriptionKey : @"expected file but found directory",
+                                 NSFilePathErrorKey : path ?: @"",
+                               }];
+    }
+    return NO;
+  }
+
+  NSError *permissionsError = nil;
+  if (![fileManager setAttributes:ALNPermissionsAttributes(0600)
+                     ofItemAtPath:path
+                            error:&permissionsError]) {
+    if (error != NULL) {
+      *error = permissionsError;
+    }
+    return NO;
+  }
+  return YES;
+}
+
+static BOOL ALNHardenRegularFilesInDirectory(NSFileManager *fileManager,
+                                             NSString *directoryPath,
+                                             NSArray *suffixes,
+                                             NSError **error) {
+  NSError *listError = nil;
+  NSArray *contents = [fileManager contentsOfDirectoryAtPath:directoryPath error:&listError];
+  if (contents == nil) {
+    if (error != NULL) {
+      *error = listError;
+    }
+    return NO;
+  }
+
+  for (NSString *item in contents) {
+    NSString *path = [directoryPath stringByAppendingPathComponent:item ?: @""];
+    if (ALNPathIsSymbolicLink(path)) {
+      if (error != NULL) {
+        *error = [NSError errorWithDomain:ALNServiceErrorDomain
+                                     code:3
+                                 userInfo:@{
+                                   NSLocalizedDescriptionKey : @"symbolic links are not allowed in private storage directories",
+                                   NSFilePathErrorKey : path ?: @"",
+                                 }];
+      }
+      return NO;
+    }
+    BOOL isDirectory = NO;
+    if (![fileManager fileExistsAtPath:path isDirectory:&isDirectory] || isDirectory) {
+      continue;
+    }
+    BOOL matchesSuffix = ([suffixes count] == 0);
+    for (NSString *suffix in suffixes ?: @[]) {
+      if ([item hasSuffix:suffix]) {
+        matchesSuffix = YES;
+        break;
+      }
+    }
+    if (!matchesSuffix) {
+      continue;
+    }
+    NSError *permissionsError = nil;
+    if (!ALNEnsurePrivateRegularFile(fileManager, path, &permissionsError)) {
+      if (error != NULL) {
+        *error = permissionsError;
+      }
+      return NO;
+    }
+  }
+  return YES;
+}
+
+static NSData *ALNReadRegularFileNoFollow(NSString *path, NSError **error) {
+  const char *filesystemPath = [path fileSystemRepresentation];
+  if (filesystemPath == NULL) {
+    if (error != NULL) {
+      *error = [NSError errorWithDomain:ALNServiceErrorDomain
+                                   code:4
+                               userInfo:@{
+                                 NSLocalizedDescriptionKey : @"file path is invalid",
+                                 NSFilePathErrorKey : path ?: @"",
+                               }];
+    }
+    return nil;
+  }
+
+  int openFlags = O_RDONLY;
+#ifdef O_CLOEXEC
+  openFlags |= O_CLOEXEC;
+#endif
+#ifdef O_NOFOLLOW
+  openFlags |= O_NOFOLLOW;
+#endif
+
+  int fd = -1;
+  do {
+    fd = open(filesystemPath, openFlags);
+  } while (fd < 0 && errno == EINTR);
+  if (fd < 0) {
+    if (error != NULL) {
+      *error = ALNPOSIXErrorForPath(path, @"file could not be opened");
+    }
+    return nil;
+  }
+
+  struct stat info;
+  if (fstat(fd, &info) != 0) {
+    if (error != NULL) {
+      *error = ALNPOSIXErrorForPath(path, @"file metadata could not be read");
+    }
+    (void)close(fd);
+    return nil;
+  }
+  if (!S_ISREG(info.st_mode)) {
+    if (error != NULL) {
+      *error = [NSError errorWithDomain:ALNServiceErrorDomain
+                                   code:5
+                               userInfo:@{
+                                 NSLocalizedDescriptionKey : @"expected regular file",
+                                 NSFilePathErrorKey : path ?: @"",
+                               }];
+    }
+    (void)close(fd);
+    return nil;
+  }
+
+  NSMutableData *data = [NSMutableData dataWithCapacity:(NSUInteger)MAX((off_t)0, info.st_size)];
+  unsigned char buffer[16384];
+  while (YES) {
+    ssize_t readBytes = read(fd, buffer, sizeof(buffer));
+    if (readBytes < 0) {
+      if (errno == EINTR) {
+        continue;
+      }
+      if (error != NULL) {
+        *error = ALNPOSIXErrorForPath(path, @"file payload could not be read");
+      }
+      (void)close(fd);
+      return nil;
+    }
+    if (readBytes == 0) {
+      break;
+    }
+    [data appendBytes:buffer length:(NSUInteger)readBytes];
+  }
+
+  if (close(fd) != 0) {
+    if (error != NULL) {
+      *error = ALNPOSIXErrorForPath(path, @"file could not be closed");
+    }
+    return nil;
+  }
+
+  return [NSData dataWithData:data];
+}
+
+static BOOL ALNWriteAllToFileDescriptor(int fd, const void *bytes, NSUInteger length) {
+  const uint8_t *cursor = (const uint8_t *)bytes;
+  NSUInteger remaining = length;
+  while (remaining > 0) {
+    ssize_t written = write(fd, cursor, (size_t)remaining);
+    if (written < 0) {
+      if (errno == EINTR) {
+        continue;
+      }
+      return NO;
+    }
+    if (written == 0) {
+      errno = EIO;
+      return NO;
+    }
+    cursor += written;
+    remaining -= (NSUInteger)written;
+  }
+  return YES;
+}
+
+static BOOL ALNWriteDataAtomicallyWithMode(NSData *data,
+                                           NSString *path,
+                                           mode_t mode,
+                                           NSError **error) {
+  NSData *payload = [data isKindOfClass:[NSData class]] ? data : [NSData data];
+  NSString *directory = [path stringByDeletingLastPathComponent];
+  NSError *directoryError = nil;
+  if (!ALNEnsurePrivateDirectory([NSFileManager defaultManager], directory, &directoryError)) {
+    if (error != NULL) {
+      *error = directoryError;
+    }
+    return NO;
+  }
+
+  NSString *templatePath = [directory stringByAppendingPathComponent:@".arlen-write-XXXXXX"];
+  char *templateBuffer = strdup([templatePath fileSystemRepresentation]);
+  if (templateBuffer == NULL) {
+    if (error != NULL) {
+      *error = ALNPOSIXErrorForPath(path, @"temporary file path allocation failed");
+    }
+    return NO;
+  }
+
+  BOOL ok = NO;
+  int fd = mkstemp(templateBuffer);
+  if (fd < 0) {
+    if (error != NULL) {
+      *error = ALNPOSIXErrorForPath(path, @"temporary file could not be created");
+    }
+    free(templateBuffer);
+    return NO;
+  }
+
+  if (fchmod(fd, mode) != 0) {
+    if (error != NULL) {
+      *error = ALNPOSIXErrorForPath(path, @"temporary file permissions could not be set");
+    }
+    goto cleanup;
+  }
+  if (!ALNWriteAllToFileDescriptor(fd, [payload bytes], [payload length])) {
+    if (error != NULL) {
+      *error = ALNPOSIXErrorForPath(path, @"file payload could not be written");
+    }
+    goto cleanup;
+  }
+  if (close(fd) != 0) {
+    fd = -1;
+    if (error != NULL) {
+      *error = ALNPOSIXErrorForPath(path, @"temporary file could not be closed");
+    }
+    goto cleanup;
+  }
+  fd = -1;
+
+  if (rename(templateBuffer, [path fileSystemRepresentation]) != 0) {
+    if (error != NULL) {
+      *error = ALNPOSIXErrorForPath(path, @"temporary file could not be renamed into place");
+    }
+    goto cleanup;
+  }
+  ok = YES;
+
+cleanup:
+  if (fd >= 0) {
+    (void)close(fd);
+  }
+  if (!ok) {
+    (void)unlink(templateBuffer);
+  }
+  free(templateBuffer);
+  return ok;
+}
+
 static NSArray *ALNNormalizeStringArray(NSArray *values) {
   NSMutableArray *normalized = [NSMutableArray array];
   for (id value in values ?: @[]) {
@@ -46,6 +358,45 @@ static NSArray *ALNNormalizeStringArray(NSArray *values) {
 
 static NSDictionary *ALNNormalizeDictionary(NSDictionary *value) {
   return [value isKindOfClass:[NSDictionary class]] ? value : @{};
+}
+
+static NSString *ALNNormalizedAttachmentID(NSString *attachmentID) {
+  NSString *normalized = [[ALNNonEmptyString(attachmentID, @"") lowercaseString] copy];
+  if ([normalized length] != 36 || ![normalized hasPrefix:@"att-"]) {
+    return nil;
+  }
+  for (NSUInteger idx = 4; idx < [normalized length]; idx++) {
+    unichar ch = [normalized characterAtIndex:idx];
+    BOOL isDigit = (ch >= '0' && ch <= '9');
+    BOOL isLowerHex = (ch >= 'a' && ch <= 'f');
+    if (!isDigit && !isLowerHex) {
+      return nil;
+    }
+  }
+  return normalized;
+}
+
+static BOOL ALNPathIsWithinDirectory(NSString *path, NSString *directoryPath) {
+  if (![path isKindOfClass:[NSString class]] || ![directoryPath isKindOfClass:[NSString class]]) {
+    return NO;
+  }
+  if ([path isEqualToString:directoryPath]) {
+    return YES;
+  }
+  NSString *prefix = [directoryPath hasSuffix:@"/"] ? directoryPath
+                                                    : [directoryPath stringByAppendingString:@"/"];
+  return [path hasPrefix:prefix];
+}
+
+static BOOL ALNPathIsSymbolicLink(NSString *path) {
+  if (![path isKindOfClass:[NSString class]] || [path length] == 0) {
+    return NO;
+  }
+  struct stat info;
+  if (lstat([path fileSystemRepresentation], &info) != 0) {
+    return NO;
+  }
+  return S_ISLNK(info.st_mode);
 }
 
 static NSString *ALNNormalizeLocale(NSString *locale) {
@@ -644,10 +995,7 @@ static ALNJobEnvelope *ALNJobEnvelopeFromDictionary(id value) {
 
   NSString *directory = [_storagePath stringByDeletingLastPathComponent];
   NSError *directoryError = nil;
-  if (![_fileManager createDirectoryAtPath:directory
-               withIntermediateDirectories:YES
-                                attributes:nil
-                                     error:&directoryError]) {
+  if (!ALNEnsurePrivateDirectory(_fileManager, directory, &directoryError)) {
     if (error != NULL) {
       *error = ALNServiceError(121, @"job adapter storage directory could not be created", directoryError);
     }
@@ -666,6 +1014,14 @@ static ALNJobEnvelope *ALNJobEnvelopeFromDictionary(id value) {
                error:&writeError]) {
       if (error != NULL) {
         *error = writeError;
+      }
+      return nil;
+    }
+  } else {
+    NSError *permissionsError = nil;
+    if (!ALNEnsurePrivateRegularFile(_fileManager, _storagePath, &permissionsError)) {
+      if (error != NULL) {
+        *error = ALNServiceError(124, @"job adapter storage permissions could not be enforced", permissionsError);
       }
       return nil;
     }
@@ -701,7 +1057,7 @@ static ALNJobEnvelope *ALNJobEnvelopeFromDictionary(id value) {
   }
 
   NSError *writeError = nil;
-  if (![payload writeToFile:self.storagePath options:NSDataWritingAtomic error:&writeError]) {
+  if (!ALNWriteDataAtomicallyWithMode(payload, self.storagePath, 0600, &writeError)) {
     if (error != NULL) {
       *error = ALNServiceError(123, @"job adapter state could not be persisted", writeError);
     }
@@ -2379,12 +2735,16 @@ static int ALNRedisOpenSocketConnection(NSString *host,
   _nextDeliveryID = 0;
 
   NSError *directoryError = nil;
-  if (![_fileManager createDirectoryAtPath:_storageDirectory
-               withIntermediateDirectories:YES
-                                attributes:nil
-                                     error:&directoryError]) {
+  if (!ALNEnsurePrivateDirectory(_fileManager, _storageDirectory, &directoryError)) {
     if (error != NULL) {
       *error = ALNServiceError(421, @"mail storage directory could not be created", directoryError);
+    }
+    return nil;
+  }
+  NSError *permissionsError = nil;
+  if (!ALNHardenRegularFilesInDirectory(_fileManager, _storageDirectory, @[ @".plist" ], &permissionsError)) {
+    if (error != NULL) {
+      *error = ALNServiceError(426, @"mail storage directory permissions could not be enforced", permissionsError);
     }
     return nil;
   }
@@ -2452,9 +2812,8 @@ static int ALNRedisOpenSocketConnection(NSString *host,
   }
 
   NSError *writeError = nil;
-  BOOL wrote = [payload writeToFile:[self deliveryPathForID:deliveryID]
-                            options:NSDataWritingAtomic
-                              error:&writeError];
+  BOOL wrote =
+      ALNWriteDataAtomicallyWithMode(payload, [self deliveryPathForID:deliveryID], 0600, &writeError);
   [self.lock unlock];
   if (!wrote) {
     if (error != NULL) {
@@ -2805,6 +3164,7 @@ static int ALNRedisOpenSocketConnection(NSString *host,
 
 @property(nonatomic, copy) NSString *adapterNameValue;
 @property(nonatomic, copy) NSString *rootDirectory;
+@property(nonatomic, copy) NSString *resolvedRootDirectory;
 @property(nonatomic, strong) NSFileManager *fileManager;
 @property(nonatomic, strong) NSLock *lock;
 
@@ -2835,13 +3195,21 @@ static int ALNRedisOpenSocketConnection(NSString *host,
   _lock = [[NSLock alloc] init];
 
   NSError *directoryError = nil;
-  BOOL created = [_fileManager createDirectoryAtPath:_rootDirectory
-                         withIntermediateDirectories:YES
-                                          attributes:nil
-                                               error:&directoryError];
+  BOOL created = ALNEnsurePrivateDirectory(_fileManager, _rootDirectory, &directoryError);
   if (!created) {
     if (error != NULL) {
       *error = ALNServiceError(551, @"attachment root directory could not be created", directoryError);
+    }
+    return nil;
+  }
+  _resolvedRootDirectory = [[_rootDirectory stringByResolvingSymlinksInPath] copy];
+  NSError *permissionsError = nil;
+  if (!ALNHardenRegularFilesInDirectory(_fileManager,
+                                        _rootDirectory,
+                                        @[ @".bin", @".plist" ],
+                                        &permissionsError)) {
+    if (error != NULL) {
+      *error = ALNServiceError(571, @"attachment root directory permissions could not be enforced", permissionsError);
     }
     return nil;
   }
@@ -2858,6 +3226,48 @@ static int ALNRedisOpenSocketConnection(NSString *host,
 
 - (NSString *)attachmentMetadataPathForID:(NSString *)attachmentID {
   return [self.rootDirectory stringByAppendingPathComponent:[NSString stringWithFormat:@"%@.plist", attachmentID ?: @""]];
+}
+
+- (NSString *)validatedAttachmentID:(NSString *)attachmentID
+                          errorCode:(NSInteger)errorCode
+                              error:(NSError **)error {
+  NSString *normalizedID = ALNNormalizedAttachmentID(attachmentID);
+  if ([normalizedID length] > 0) {
+    return normalizedID;
+  }
+  if (error != NULL) {
+    *error = ALNServiceError(errorCode, @"attachment ID format is invalid", nil);
+  }
+  return nil;
+}
+
+- (NSString *)validatedExistingAttachmentPathForID:(NSString *)attachmentID
+                                         extension:(NSString *)extension
+                                         errorCode:(NSInteger)errorCode
+                                             error:(NSError **)error {
+  NSString *normalizedID = [self validatedAttachmentID:attachmentID errorCode:errorCode error:error];
+  if ([normalizedID length] == 0) {
+    return nil;
+  }
+
+  NSString *candidate = [self.rootDirectory stringByAppendingPathComponent:
+      [NSString stringWithFormat:@"%@.%@", normalizedID, extension ?: @""]];
+  if (ALNPathIsSymbolicLink(candidate)) {
+    if (error != NULL) {
+      *error = ALNServiceError(570, @"symbolic link attachments are not allowed", nil);
+    }
+    return nil;
+  }
+
+  NSString *resolvedCandidate = [candidate stringByResolvingSymlinksInPath];
+  NSString *resolvedRoot = self.resolvedRootDirectory ?: self.rootDirectory;
+  if (!ALNPathIsWithinDirectory(resolvedCandidate, resolvedRoot)) {
+    if (error != NULL) {
+      *error = ALNServiceError(569, @"attachment path escapes configured root directory", nil);
+    }
+    return nil;
+  }
+  return candidate;
 }
 
 - (NSString *)nextAttachmentID {
@@ -2880,15 +3290,20 @@ static int ALNRedisOpenSocketConnection(NSString *host,
 }
 
 - (NSDictionary *)metadataEntryForAttachmentID:(NSString *)attachmentID error:(NSError **)error {
-  NSString *metadataPath = [self attachmentMetadataPathForID:attachmentID];
+  NSString *metadataPath =
+      [self validatedExistingAttachmentPathForID:attachmentID extension:@"plist" errorCode:568 error:error];
+  if ([metadataPath length] == 0) {
+    return nil;
+  }
   if (![self.fileManager fileExistsAtPath:metadataPath]) {
     return nil;
   }
 
-  NSData *metadataData = [NSData dataWithContentsOfFile:metadataPath];
+  NSError *readError = nil;
+  NSData *metadataData = ALNReadRegularFileNoFollow(metadataPath, &readError);
   if (metadataData == nil) {
     if (error != NULL) {
-      *error = ALNServiceError(552, @"attachment metadata could not be read", nil);
+      *error = ALNServiceError(552, @"attachment metadata could not be read", readError);
     }
     return nil;
   }
@@ -2955,21 +3370,23 @@ static int ALNRedisOpenSocketConnection(NSString *host,
   NSString *metadataPath = [self attachmentMetadataPathForID:attachmentID];
 
   [self.lock lock];
-  BOOL wroteData = [data writeToFile:dataPath atomically:YES];
+  NSError *writeError = nil;
+  BOOL wroteData = ALNWriteDataAtomicallyWithMode(data, dataPath, 0600, &writeError);
   if (!wroteData) {
     [self.lock unlock];
     if (error != NULL) {
-      *error = ALNServiceError(557, @"attachment data could not be persisted", nil);
+      *error = ALNServiceError(557, @"attachment data could not be persisted", writeError);
     }
     return nil;
   }
 
-  BOOL wroteMetadata = [metadataData writeToFile:metadataPath atomically:YES];
+  writeError = nil;
+  BOOL wroteMetadata = ALNWriteDataAtomicallyWithMode(metadataData, metadataPath, 0600, &writeError);
   if (!wroteMetadata) {
     (void)[self.fileManager removeItemAtPath:dataPath error:NULL];
     [self.lock unlock];
     if (error != NULL) {
-      *error = ALNServiceError(558, @"attachment metadata could not be persisted", nil);
+      *error = ALNServiceError(558, @"attachment metadata could not be persisted", writeError);
     }
     return nil;
   }
@@ -2980,11 +3397,8 @@ static int ALNRedisOpenSocketConnection(NSString *host,
 - (NSData *)attachmentDataForID:(NSString *)attachmentID
                        metadata:(NSDictionary **)metadata
                           error:(NSError **)error {
-  NSString *normalizedID = ALNNonEmptyString(attachmentID, @"");
+  NSString *normalizedID = [self validatedAttachmentID:attachmentID errorCode:568 error:error];
   if ([normalizedID length] == 0) {
-    if (error != NULL) {
-      *error = ALNServiceError(559, @"attachment ID is required", nil);
-    }
     return nil;
   }
 
@@ -2999,12 +3413,18 @@ static int ALNRedisOpenSocketConnection(NSString *host,
     return nil;
   }
 
-  NSString *dataPath = [self attachmentDataPathForID:normalizedID];
-  NSData *data = [NSData dataWithContentsOfFile:dataPath];
+  NSString *dataPath =
+      [self validatedExistingAttachmentPathForID:normalizedID extension:@"bin" errorCode:568 error:error];
+  if ([dataPath length] == 0) {
+    [self.lock unlock];
+    return nil;
+  }
+  NSError *pathReadError = nil;
+  NSData *data = ALNReadRegularFileNoFollow(dataPath, &pathReadError);
   if (data == nil) {
     [self.lock unlock];
     if (error != NULL) {
-      *error = ALNServiceError(560, @"attachment data could not be read", nil);
+      *error = ALNServiceError(560, @"attachment data could not be read", pathReadError);
     }
     return nil;
   }
@@ -3017,11 +3437,8 @@ static int ALNRedisOpenSocketConnection(NSString *host,
 }
 
 - (NSDictionary *)attachmentMetadataForID:(NSString *)attachmentID error:(NSError **)error {
-  NSString *normalizedID = ALNNonEmptyString(attachmentID, @"");
+  NSString *normalizedID = [self validatedAttachmentID:attachmentID errorCode:568 error:error];
   if ([normalizedID length] == 0) {
-    if (error != NULL) {
-      *error = ALNServiceError(561, @"attachment ID is required", nil);
-    }
     return nil;
   }
 
@@ -3039,16 +3456,21 @@ static int ALNRedisOpenSocketConnection(NSString *host,
 }
 
 - (BOOL)deleteAttachmentID:(NSString *)attachmentID error:(NSError **)error {
-  NSString *normalizedID = ALNNonEmptyString(attachmentID, @"");
+  NSString *normalizedID = [self validatedAttachmentID:attachmentID errorCode:568 error:error];
   if ([normalizedID length] == 0) {
-    if (error != NULL) {
-      *error = ALNServiceError(562, @"attachment ID is required", nil);
-    }
     return NO;
   }
 
-  NSString *dataPath = [self attachmentDataPathForID:normalizedID];
-  NSString *metadataPath = [self attachmentMetadataPathForID:normalizedID];
+  NSString *dataPath =
+      [self validatedExistingAttachmentPathForID:normalizedID extension:@"bin" errorCode:568 error:error];
+  if ([dataPath length] == 0) {
+    return NO;
+  }
+  NSString *metadataPath =
+      [self validatedExistingAttachmentPathForID:normalizedID extension:@"plist" errorCode:568 error:error];
+  if ([metadataPath length] == 0) {
+    return NO;
+  }
 
   [self.lock lock];
   BOOL hadData = [self.fileManager fileExistsAtPath:dataPath];

@@ -38,6 +38,12 @@ Arlen is designed to solve the same class of problems as frameworks like Mojolic
 - Phase 7G: initial slice implemented (coding-agent JSON workflow contracts, fix-it diagnostics, and deploy/build/check planning payloads).
 - Phase 7H: initial slice implemented (quorum-gated readiness, expanded `/clusterz` coordination contracts, and distributed-runtime diagnostics headers).
 - Phase 9: complete (documentation platform, generated API reference, onboarding tracks/migration guides, and enterprise release certification hardening track).
+- Phase 11A: complete (session/bearer/CSRF hardening).
+- Phase 11B: complete (HTTP header and parser-boundary hardening).
+- Phase 11C: complete (websocket handshake/origin/stall hardening).
+- Phase 11D: complete (static/attachment filesystem containment and private on-disk adapter permissions).
+- Phase 11E: complete (trusted proxy CIDR boundaries and text-log control-character escaping).
+- Phase 11F: complete (hostile protocol corpus, deterministic fuzz/live probes, and Phase 11 sanitizer confidence lanes).
 
 ## Quick Start
 
@@ -93,6 +99,7 @@ make perf-phased
 make ci-quality
 make ci-fault-injection
 make ci-release-certification
+make ci-phase11
 make test-data-layer
 ```
 

@@ -1,0 +1,26 @@
+{
+  "version": "phase11-sanitizer-matrix-v1",
+  "lastUpdated": "2026-03-06",
+  "lanes": [
+    {
+      "id": "asan_ubsan_phase11_protocol_adversarial",
+      "blocking": true,
+      "description": "ASan+UBSan Phase 11 hostile protocol corpus"
+    },
+    {
+      "id": "asan_ubsan_phase11_protocol_fuzz",
+      "blocking": true,
+      "description": "ASan+UBSan deterministic Phase 11 protocol mutation lane"
+    },
+    {
+      "id": "asan_ubsan_phase11_live_adversarial",
+      "blocking": true,
+      "description": "ASan+UBSan live hostile mixed-traffic lane"
+    },
+    {
+      "id": "thread_phase11_live_adversarial",
+      "blocking": false,
+      "description": "Optional thread-race hostile mixed-traffic lane"
+    }
+  ]
+}

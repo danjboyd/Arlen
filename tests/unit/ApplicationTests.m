@@ -1720,6 +1720,26 @@ static NSUInteger AppFastPathControllerSlowInvocationCount = 0;
   XCTAssertTrue([startError.localizedDescription containsString:@"auth.enabled requires auth.bearerSecret"]);
 }
 
+- (void)testStartFailsFastWhenAuthBearerSecretIsWeak {
+  ALNApplication *app = [[ALNApplication alloc] initWithConfig:@{
+    @"environment" : @"test",
+    @"logFormat" : @"json",
+    @"auth" : @{
+      @"enabled" : @(YES),
+      @"bearerSecret" : @"short-secret",
+    },
+  }];
+
+  NSError *startError = nil;
+  BOOL started = [app startWithError:&startError];
+  XCTAssertFalse(started);
+  XCTAssertNotNil(startError);
+  XCTAssertEqualObjects(@"Arlen.Application.Error", startError.domain);
+  XCTAssertEqual((NSInteger)338, startError.code);
+  XCTAssertTrue([startError.localizedDescription
+      containsString:@"auth.bearerSecret must be at least 32 characters"]);
+}
+
 - (void)testStartSucceedsForStrictProfileWhenRequiredSecretsConfigured {
   ALNApplication *app = [[ALNApplication alloc] initWithConfig:@{
     @"environment" : @"test",
