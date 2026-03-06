@@ -9,10 +9,10 @@ python3 tools/docs/generate_api_reference.py
 ```
 
 - Generated from source headers and metadata (deterministic output)
-- Public headers: `39`
-- Symbols: `62`
-- Public methods: `435`
-- Public properties: `161`
+- Public headers: `43`
+- Symbols: `66`
+- Public methods: `481`
+- Public properties: `164`
 
 ## API Surface Boundary
 
@@ -82,6 +82,7 @@ python3 tools/docs/generate_api_reference.py
 
 - [ALNAttachmentAdapter](api/ALNAttachmentAdapter.md): Attachment adapter protocol for save/read/delete/list operations on binary blobs + metadata.
 - [ALNAuth](api/ALNAuth.md): Authentication and authorization helpers for bearer token extraction, JWT verification, and scope/role checks.
+- [ALNAuthSession](api/ALNAuthSession.md): Support services for auth, metrics, logging, performance, realtime, and adapters.
 - [ALNCacheAdapter](api/ALNCacheAdapter.md): Cache adapter protocol for set/get/remove/clear operations with optional TTL semantics.
 - [ALNFileJobAdapter](api/ALNFileJobAdapter.md): Filesystem-backed job queue adapter for durable local/edge deployments.
 - [ALNFileMailAdapter](api/ALNFileMailAdapter.md): Filesystem-backed mail adapter that writes deliveries to disk for auditing/testing.
@@ -106,9 +107,12 @@ python3 tools/docs/generate_api_reference.py
 - [ALNRealtimeHub](api/ALNRealtimeHub.md): In-process pub/sub hub used for websocket channel fanout and simple realtime event routing.
 - [ALNRealtimeSubscriber](api/ALNRealtimeSubscriber.md): Realtime callback protocol implemented by websocket/session subscribers.
 - [ALNRealtimeSubscription](api/ALNRealtimeSubscription.md): Subscription token returned by realtime hub subscribe calls and used for unsubscribe operations.
+- [ALNRecoveryCodes](api/ALNRecoveryCodes.md): Support services for auth, metrics, logging, performance, realtime, and adapters.
 - [ALNRedisCacheAdapter](api/ALNRedisCacheAdapter.md): Redis-backed cache adapter implementation compatible with `ALNCacheAdapter` semantics.
 - [ALNRetryingAttachmentAdapter](api/ALNRetryingAttachmentAdapter.md): Retry-wrapper adapter implementation with deterministic retry semantics.
 - [ALNRetryingMailAdapter](api/ALNRetryingMailAdapter.md): Retry-wrapper adapter implementation with deterministic retry semantics.
+- [ALNTOTP](api/ALNTOTP.md): Support services for auth, metrics, logging, performance, realtime, and adapters.
+- [ALNWebAuthn](api/ALNWebAuthn.md): Support services for auth, metrics, logging, performance, realtime, and adapters.
 
 ## Public Header List
 
@@ -145,9 +149,13 @@ python3 tools/docs/generate_api_reference.py
 - `src/Arlen/MVC/Template/ALNEOCTranspiler.h`
 - `src/Arlen/MVC/View/ALNView.h`
 - `src/Arlen/Support/ALNAuth.h`
+- `src/Arlen/Support/ALNAuthSession.h`
 - `src/Arlen/Support/ALNLogger.h`
 - `src/Arlen/Support/ALNMetrics.h`
 - `src/Arlen/Support/ALNPasswordHash.h`
 - `src/Arlen/Support/ALNPerf.h`
 - `src/Arlen/Support/ALNRealtime.h`
+- `src/Arlen/Support/ALNRecoveryCodes.h`
 - `src/Arlen/Support/ALNServices.h`
+- `src/Arlen/Support/ALNTOTP.h`
+- `src/Arlen/Support/ALNWebAuthn.h`

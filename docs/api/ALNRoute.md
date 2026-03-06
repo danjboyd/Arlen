@@ -28,6 +28,9 @@ Single route descriptor containing method/path pattern/controller/action and mat
 | `tags` | `NSArray *` | `nonatomic, copy` | Public `tags` property available on `ALNRoute`. |
 | `requiredScopes` | `NSArray *` | `nonatomic, copy` | Public `requiredScopes` property available on `ALNRoute`. |
 | `requiredRoles` | `NSArray *` | `nonatomic, copy` | Public `requiredRoles` property available on `ALNRoute`. |
+| `minimumAuthAssuranceLevel` | `NSUInteger` | `nonatomic, assign` | Public `minimumAuthAssuranceLevel` property available on `ALNRoute`. |
+| `maximumAuthenticationAgeSeconds` | `NSUInteger` | `nonatomic, assign` | Public `maximumAuthenticationAgeSeconds` property available on `ALNRoute`. |
+| `stepUpPath` | `NSString *` | `nonatomic, copy` | Public `stepUpPath` property available on `ALNRoute`. |
 | `includeInOpenAPI` | `BOOL` | `nonatomic, assign` | Public `includeInOpenAPI` property available on `ALNRoute`. |
 | `compiledActionSignature` | `NSMethodSignature *` | `nonatomic, strong, nullable` | Public `compiledActionSignature` property available on `ALNRoute`. |
 | `compiledGuardSignature` | `NSMethodSignature *` | `nonatomic, strong, nullable` | Public `compiledGuardSignature` property available on `ALNRoute`. |

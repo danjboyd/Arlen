@@ -12,6 +12,7 @@
 #import "ALNResponse.h"
 #import "ALNRoute.h"
 #import "ALNRouter.h"
+#import "ALNAuthSession.h"
 
 @interface AppHeaderMiddleware : NSObject <ALNMiddleware>
 @end
@@ -141,6 +142,94 @@
   NSString *location = [ctx queryValueForName:@"to"];
   [self redirectTo:location status:302];
   return nil;
+}
+
+@end
+
+@interface AppAuthAssuranceController : ALNController
+@end
+
+@implementation AppAuthAssuranceController
+
+- (id)login:(ALNContext *)ctx {
+  (void)ctx;
+  NSError *error = nil;
+  BOOL ok = [self startAuthenticatedSessionForSubject:@"user-123"
+                                             provider:@"local"
+                                              methods:@[ @"pwd" ]
+                                                error:&error];
+  if (!ok || error != nil) {
+    [self setStatus:500];
+    [self renderText:error.localizedDescription ?: @"login failed\n"];
+    return nil;
+  }
+  return @{
+    @"subject" : [self authSubject] ?: @"",
+    @"provider" : [self authProvider] ?: @"",
+    @"aal" : @([self authAssuranceLevel]),
+    @"session_id" : [self authSessionIdentifier] ?: @"",
+    @"methods" : [self authMethods] ?: @[],
+  };
+}
+
+- (id)loginStale:(ALNContext *)ctx {
+  NSError *error = nil;
+  NSDate *staleDate = [NSDate dateWithTimeIntervalSinceNow:-7200.0];
+  BOOL ok = [ALNAuthSession establishAuthenticatedSessionForSubject:@"user-123"
+                                                           provider:@"local"
+                                                            methods:@[ @"pwd" ]
+                                                     assuranceLevel:1
+                                                    authenticatedAt:staleDate
+                                                            context:ctx
+                                                              error:&error];
+  if (!ok || error != nil) {
+    [self setStatus:500];
+    [self renderText:error.localizedDescription ?: @"stale login failed\n"];
+    return nil;
+  }
+  return @{
+    @"aal" : @([self authAssuranceLevel]),
+    @"session_id" : [self authSessionIdentifier] ?: @"",
+  };
+}
+
+- (id)stepUpTotp:(ALNContext *)ctx {
+  (void)ctx;
+  NSError *error = nil;
+  BOOL ok = [self completeStepUpWithMethod:@"totp" assuranceLevel:2 error:&error];
+  if (!ok || error != nil) {
+    [self setStatus:500];
+    [self renderText:error.localizedDescription ?: @"step-up failed\n"];
+    return nil;
+  }
+  return @{
+    @"aal" : @([self authAssuranceLevel]),
+    @"mfa" : @([self isMFAAuthenticated]),
+    @"session_id" : [self authSessionIdentifier] ?: @"",
+    @"methods" : [self authMethods] ?: @[],
+  };
+}
+
+- (id)secure:(ALNContext *)ctx {
+  (void)ctx;
+  return @{
+    @"subject" : [self authSubject] ?: @"",
+    @"provider" : [self authProvider] ?: @"",
+    @"aal" : @([self authAssuranceLevel]),
+    @"mfa" : @([self isMFAAuthenticated]),
+    @"session_id" : [self authSessionIdentifier] ?: @"",
+    @"methods" : [self authMethods] ?: @[],
+  };
+}
+
+- (id)logoutSession:(ALNContext *)ctx {
+  (void)ctx;
+  [self clearAuthenticatedSession];
+  return @{
+    @"subject" : [self authSubject] ?: @"",
+    @"aal" : @([self authAssuranceLevel]),
+    @"session_id" : [self authSessionIdentifier] ?: @"",
+  };
 }
 
 @end
@@ -379,6 +468,77 @@ static NSUInteger AppFastPathControllerSlowInvocationCount = 0;
   return app;
 }
 
+- (ALNApplication *)buildAppWithAuthAssuranceRoutes {
+  ALNApplication *app = [[ALNApplication alloc] initWithConfig:@{
+    @"environment" : @"test",
+    @"logFormat" : @"json",
+    @"csrf" : @{
+      @"enabled" : @(NO),
+    },
+    @"session" : @{
+      @"enabled" : @(YES),
+      @"secret" : @"auth-assurance-secret-0123456789abcdef",
+      @"cookieName" : @"arlen_session",
+      @"maxAgeSeconds" : @(1800),
+      @"secure" : @(NO),
+      @"sameSite" : @"Lax",
+    },
+  }];
+
+  [app registerRouteMethod:@"GET"
+                      path:@"/login"
+                      name:@"auth_login"
+           controllerClass:[AppAuthAssuranceController class]
+                    action:@"login"];
+  [app registerRouteMethod:@"GET"
+                      path:@"/login-stale"
+                      name:@"auth_login_stale"
+           controllerClass:[AppAuthAssuranceController class]
+                    action:@"loginStale"];
+  [app registerRouteMethod:@"GET"
+                      path:@"/step-up"
+                      name:@"auth_step_up"
+           controllerClass:[AppAuthAssuranceController class]
+                    action:@"stepUpTotp"];
+  [app registerRouteMethod:@"GET"
+                      path:@"/secure"
+                      name:@"auth_secure"
+           controllerClass:[AppAuthAssuranceController class]
+                    action:@"secure"];
+  [app registerRouteMethod:@"GET"
+                      path:@"/recent"
+                      name:@"auth_recent"
+           controllerClass:[AppAuthAssuranceController class]
+                    action:@"secure"];
+  [app registerRouteMethod:@"GET"
+                      path:@"/logout"
+                      name:@"auth_logout"
+           controllerClass:[AppAuthAssuranceController class]
+                    action:@"logoutSession"];
+  [app registerRouteMethod:@"GET"
+                      path:@"/mfa/challenge"
+                      name:@"auth_challenge"
+           controllerClass:[AppAuthAssuranceController class]
+                    action:@"secure"];
+  [app registerRouteMethod:@"GET"
+                      path:@"/mfa/reauth"
+                      name:@"auth_reauth"
+           controllerClass:[AppAuthAssuranceController class]
+                    action:@"secure"];
+
+  XCTAssertTrue([app configureAuthAssuranceForRouteNamed:@"auth_secure"
+                               minimumAuthAssuranceLevel:2
+                         maximumAuthenticationAgeSeconds:0
+                                              stepUpPath:@"/mfa/challenge"
+                                                   error:NULL]);
+  XCTAssertTrue([app configureAuthAssuranceForRouteNamed:@"auth_recent"
+                               minimumAuthAssuranceLevel:1
+                         maximumAuthenticationAgeSeconds:60
+                                              stepUpPath:@"/mfa/reauth"
+                                                   error:NULL]);
+  return app;
+}
+
 - (ALNRequest *)requestForPath:(NSString *)path {
   return [self requestForPath:path queryString:@"" headers:@{}];
 }
@@ -391,6 +551,24 @@ static NSUInteger AppFastPathControllerSlowInvocationCount = 0;
                                queryString:queryString ?: @""
                                    headers:headers ?: @{}
                                       body:[NSData data]];
+}
+
+- (NSDictionary *)JSONObjectFromResponse:(ALNResponse *)response {
+  NSError *error = nil;
+  NSDictionary *json = [NSJSONSerialization JSONObjectWithData:response.bodyData
+                                                       options:0
+                                                         error:&error];
+  XCTAssertNil(error);
+  XCTAssertTrue([json isKindOfClass:[NSDictionary class]]);
+  return [json isKindOfClass:[NSDictionary class]] ? json : @{};
+}
+
+- (NSString *)cookiePairFromSetCookie:(NSString *)setCookie {
+  NSArray *parts = [setCookie componentsSeparatedByString:@";"];
+  if ([parts count] == 0) {
+    return @"";
+  }
+  return [parts[0] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
 }
 
 - (void)concurrentDispatchWorker:(NSMutableDictionary *)state {
@@ -574,6 +752,132 @@ static NSUInteger AppFastPathControllerSlowInvocationCount = 0;
                                                          error:&error];
   XCTAssertNil(error);
   XCTAssertEqualObjects(@"admin_audit", json[@"route"]);
+}
+
+- (void)testConfigureAuthAssuranceForRouteNamedStoresRouteMetadata {
+  ALNApplication *app = [self buildAppWithAuthAssuranceRoutes];
+  ALNRoute *route = [app.router routeNamed:@"auth_secure"];
+  XCTAssertEqual((NSUInteger)2, route.minimumAuthAssuranceLevel);
+  XCTAssertEqual((NSUInteger)0, route.maximumAuthenticationAgeSeconds);
+  XCTAssertEqualObjects(@"/mfa/challenge", route.stepUpPath);
+}
+
+- (void)testProtectedHTMLRouteRedirectsToStepUpPathWhenMFAIsMissing {
+  ALNApplication *app = [self buildAppWithAuthAssuranceRoutes];
+  ALNResponse *loginResponse = [app dispatchRequest:[self requestForPath:@"/login"]];
+  NSString *cookiePair = [self cookiePairFromSetCookie:[loginResponse headerForName:@"Set-Cookie"]];
+
+  ALNResponse *secureResponse = [app dispatchRequest:[self requestForPath:@"/secure"
+                                                              queryString:@""
+                                                                  headers:@{
+                                                                    @"cookie" : cookiePair,
+                                                                    @"accept" : @"text/html",
+                                                                  }]];
+  XCTAssertEqual((NSInteger)302, secureResponse.statusCode);
+  XCTAssertEqualObjects(@"1", [secureResponse headerForName:@"X-Arlen-Step-Up-Required"]);
+  NSString *location = [secureResponse headerForName:@"Location"];
+  XCTAssertTrue([location hasPrefix:@"/mfa/challenge?"]);
+  XCTAssertTrue([location containsString:@"reason=step_up_required"]);
+  XCTAssertTrue([location containsString:@"return_to=%2Fsecure"]);
+}
+
+- (void)testProtectedAPIRouteReturnsStructuredStepUpRequiredPayload {
+  ALNApplication *app = [self buildAppWithAuthAssuranceRoutes];
+  ALNResponse *loginResponse = [app dispatchRequest:[self requestForPath:@"/login"]];
+  NSString *cookiePair = [self cookiePairFromSetCookie:[loginResponse headerForName:@"Set-Cookie"]];
+
+  ALNResponse *secureResponse = [app dispatchRequest:[self requestForPath:@"/secure"
+                                                              queryString:@""
+                                                                  headers:@{
+                                                                    @"cookie" : cookiePair,
+                                                                    @"accept" : @"application/json",
+                                                                  }]];
+  XCTAssertEqual((NSInteger)403, secureResponse.statusCode);
+  NSDictionary *json = [self JSONObjectFromResponse:secureResponse];
+  XCTAssertEqualObjects(@"step_up_required", json[@"error"][@"code"]);
+  NSArray *details = [json[@"details"] isKindOfClass:[NSArray class]] ? json[@"details"] : @[];
+  NSDictionary *entry =
+      [[details firstObject] isKindOfClass:[NSDictionary class]] ? [details firstObject] : @{};
+  NSDictionary *meta = [entry[@"meta"] isKindOfClass:[NSDictionary class]] ? entry[@"meta"] : @{};
+  XCTAssertEqualObjects(@2, meta[@"minimum_auth_assurance_level"]);
+  XCTAssertEqualObjects(@1, meta[@"current_auth_assurance_level"]);
+}
+
+- (void)testAuthSessionRotationOccursOnStepUpAndProtectedRouteThenSucceeds {
+  ALNApplication *app = [self buildAppWithAuthAssuranceRoutes];
+  ALNResponse *loginResponse = [app dispatchRequest:[self requestForPath:@"/login"]];
+  NSDictionary *loginJSON = [self JSONObjectFromResponse:loginResponse];
+  NSString *loginSessionID = loginJSON[@"session_id"];
+  NSString *cookiePair = [self cookiePairFromSetCookie:[loginResponse headerForName:@"Set-Cookie"]];
+
+  ALNResponse *stepUpResponse = [app dispatchRequest:[self requestForPath:@"/step-up"
+                                                              queryString:@""
+                                                                  headers:@{
+                                                                    @"cookie" : cookiePair,
+                                                                    @"accept" : @"application/json",
+                                                                  }]];
+  XCTAssertEqual((NSInteger)200, stepUpResponse.statusCode);
+  NSDictionary *stepUpJSON = [self JSONObjectFromResponse:stepUpResponse];
+  XCTAssertEqualObjects(@2, stepUpJSON[@"aal"]);
+  XCTAssertEqualObjects(@(YES), stepUpJSON[@"mfa"]);
+  XCTAssertNotEqualObjects(loginSessionID, stepUpJSON[@"session_id"]);
+  XCTAssertTrue([stepUpJSON[@"methods"] containsObject:@"totp"]);
+
+  NSString *elevatedCookie =
+      [self cookiePairFromSetCookie:[stepUpResponse headerForName:@"Set-Cookie"]];
+  ALNResponse *secureResponse = [app dispatchRequest:[self requestForPath:@"/secure"
+                                                              queryString:@""
+                                                                  headers:@{
+                                                                    @"cookie" : elevatedCookie,
+                                                                    @"accept" : @"application/json",
+                                                                  }]];
+  XCTAssertEqual((NSInteger)200, secureResponse.statusCode);
+  NSDictionary *secureJSON = [self JSONObjectFromResponse:secureResponse];
+  XCTAssertEqualObjects(@2, secureJSON[@"aal"]);
+  XCTAssertEqualObjects(@(YES), secureJSON[@"mfa"]);
+  XCTAssertEqualObjects(@"user-123", secureJSON[@"subject"]);
+}
+
+- (void)testRecentAuthenticationWindowRejectsStaleSessionDeterministically {
+  ALNApplication *app = [self buildAppWithAuthAssuranceRoutes];
+  ALNResponse *loginResponse = [app dispatchRequest:[self requestForPath:@"/login-stale"]];
+  NSString *cookiePair = [self cookiePairFromSetCookie:[loginResponse headerForName:@"Set-Cookie"]];
+
+  ALNResponse *recentResponse = [app dispatchRequest:[self requestForPath:@"/recent"
+                                                              queryString:@""
+                                                                  headers:@{
+                                                                    @"cookie" : cookiePair,
+                                                                    @"accept" : @"application/json",
+                                                                  }]];
+  XCTAssertEqual((NSInteger)403, recentResponse.statusCode);
+  NSDictionary *json = [self JSONObjectFromResponse:recentResponse];
+  XCTAssertEqualObjects(@"step_up_required", json[@"error"][@"code"]);
+  NSArray *details = [json[@"details"] isKindOfClass:[NSArray class]] ? json[@"details"] : @[];
+  NSDictionary *entry =
+      [[details firstObject] isKindOfClass:[NSDictionary class]] ? [details firstObject] : @{};
+  NSDictionary *meta = [entry[@"meta"] isKindOfClass:[NSDictionary class]] ? entry[@"meta"] : @{};
+  XCTAssertEqualObjects(@60, meta[@"maximum_authentication_age_seconds"]);
+  XCTAssertTrue([meta[@"authentication_age_seconds"] integerValue] >= 3600);
+}
+
+- (void)testClearAuthenticatedSessionEmitsCookieDeletionWhenSessionBecomesEmpty {
+  ALNApplication *app = [self buildAppWithAuthAssuranceRoutes];
+  ALNResponse *loginResponse = [app dispatchRequest:[self requestForPath:@"/login"]];
+  NSString *cookiePair = [self cookiePairFromSetCookie:[loginResponse headerForName:@"Set-Cookie"]];
+
+  ALNResponse *logoutResponse = [app dispatchRequest:[self requestForPath:@"/logout"
+                                                              queryString:@""
+                                                                  headers:@{
+                                                                    @"cookie" : cookiePair,
+                                                                    @"accept" : @"application/json",
+                                                                  }]];
+  XCTAssertEqual((NSInteger)200, logoutResponse.statusCode);
+  NSDictionary *logoutJSON = [self JSONObjectFromResponse:logoutResponse];
+  XCTAssertEqualObjects(@"", logoutJSON[@"subject"]);
+  XCTAssertEqualObjects(@0, logoutJSON[@"aal"]);
+  XCTAssertEqualObjects(@"", logoutJSON[@"session_id"]);
+  NSString *setCookie = [logoutResponse headerForName:@"Set-Cookie"];
+  XCTAssertTrue([setCookie containsString:@"Max-Age=0"]);
 }
 
 - (void)testFormatConditionSelectsJSONRouteWhenRequested {

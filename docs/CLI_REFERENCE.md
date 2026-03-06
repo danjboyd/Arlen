@@ -252,6 +252,16 @@ Behavior:
 - when `webSocket.allowedOrigins` is configured, websocket upgrades require a matching `Origin` header or return `403`
 - the legacy HTTP parser backend rejects duplicate `Content-Length` headers and all `Transfer-Encoding` requests
 - session middleware stores cookies as encrypted and authenticated tokens by default
+- route-level auth assurance can be configured with `configureAuthAssuranceForRouteNamed:minimumAuthAssuranceLevel:maximumAuthenticationAgeSeconds:stepUpPath:error:`
+- browser requests that fail an auth-assurance requirement return `302` to the configured step-up path with:
+  - header `X-Arlen-Step-Up-Required: 1`
+  - query params `reason=step_up_required` and `return_to=<original path>`
+- JSON/API requests that fail an auth-assurance requirement return structured `403 step_up_required`
+- Phase 12A-12C public helper surface:
+  - `ALNAuthSession`
+  - `ALNTOTP`
+  - `ALNRecoveryCodes`
+  - `ALNWebAuthn`
 - forwarded proxy headers are honored only when the peer IP matches `trustedProxyCIDRs`
   - specifying `trustedProxyCIDRs` alone enables forwarded-header handling
   - `trustedProxy=YES` remains as a compatibility toggle and seeds a loopback CIDR allowlist when no explicit CIDRs are configured

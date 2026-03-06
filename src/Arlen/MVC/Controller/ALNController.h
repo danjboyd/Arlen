@@ -73,6 +73,21 @@ NS_ASSUME_NONNULL_BEGIN
 - (NSArray *)authScopes;
 - (NSArray *)authRoles;
 - (nullable NSString *)authSubject;
+- (nullable NSString *)authProvider;
+- (NSArray *)authMethods;
+- (NSUInteger)authAssuranceLevel;
+- (nullable NSDate *)authPrimaryAuthenticatedAt;
+- (nullable NSDate *)authMFASatisfiedAt;
+- (nullable NSString *)authSessionIdentifier;
+- (BOOL)isMFAAuthenticated;
+- (BOOL)startAuthenticatedSessionForSubject:(NSString *)subject
+                                   provider:(nullable NSString *)provider
+                                    methods:(nullable NSArray *)methods
+                                      error:(NSError *_Nullable *_Nullable)error;
+- (BOOL)completeStepUpWithMethod:(NSString *)method
+                  assuranceLevel:(NSUInteger)assuranceLevel
+                           error:(NSError *_Nullable *_Nullable)error;
+- (void)clearAuthenticatedSession;
 - (nullable id<ALNJobAdapter>)jobsAdapter;
 - (nullable id<ALNCacheAdapter>)cacheAdapter;
 - (nullable id<ALNLocalizationAdapter>)localizationAdapter;

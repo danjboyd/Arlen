@@ -122,6 +122,12 @@ NS_ASSUME_NONNULL_BEGIN
                    includeInOpenAPI:(BOOL)includeInOpenAPI
                              error:(NSError *_Nullable *_Nullable)error;
 
+- (BOOL)configureAuthAssuranceForRouteNamed:(NSString *)routeName
+                  minimumAuthAssuranceLevel:(NSUInteger)minimumAuthAssuranceLevel
+            maximumAuthenticationAgeSeconds:(NSUInteger)maximumAuthenticationAgeSeconds
+                                 stepUpPath:(nullable NSString *)stepUpPath
+                                      error:(NSError *_Nullable *_Nullable)error;
+
 - (ALNResponse *)dispatchRequest:(ALNRequest *)request;
 - (NSArray *)routeTable;
 - (NSDictionary *)openAPISpecification;

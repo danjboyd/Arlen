@@ -44,6 +44,7 @@ Arlen is designed to solve the same class of problems as frameworks like Mojolic
 - Phase 11D: complete (static/attachment filesystem containment and private on-disk adapter permissions).
 - Phase 11E: complete (trusted proxy CIDR boundaries and text-log control-character escaping).
 - Phase 11F: complete (hostile protocol corpus, deterministic fuzz/live probes, and Phase 11 sanitizer confidence lanes).
+- Phase 12: active (12A-12C complete: auth-assurance/step-up primitives, TOTP/recovery helpers, and WebAuthn/passkey MFA baseline; 12D-12F planned).
 
 ## Quick Start
 

@@ -131,6 +131,9 @@ static NSString *ALNNormalizedPathForFastMatch(NSString *path) {
     _tags = @[];
     _requiredScopes = @[];
     _requiredRoles = @[];
+    _minimumAuthAssuranceLevel = 0;
+    _maximumAuthenticationAgeSeconds = 0;
+    _stepUpPath = @"";
     _includeInOpenAPI = YES;
     _compiledActionSignature = nil;
     _compiledGuardSignature = nil;
@@ -390,6 +393,15 @@ static NSString *ALNNormalizedPathForFastMatch(NSString *path) {
   }
   if ([self.requiredRoles count] > 0) {
     representation[@"requiredRoles"] = self.requiredRoles;
+  }
+  if (self.minimumAuthAssuranceLevel > 0) {
+    representation[@"minimumAuthAssuranceLevel"] = @(self.minimumAuthAssuranceLevel);
+  }
+  if (self.maximumAuthenticationAgeSeconds > 0) {
+    representation[@"maximumAuthenticationAgeSeconds"] = @(self.maximumAuthenticationAgeSeconds);
+  }
+  if ([self.stepUpPath length] > 0) {
+    representation[@"stepUpPath"] = self.stepUpPath;
   }
   if ([self.requestSchema count] > 0) {
     representation[@"requestSchema"] = self.requestSchema;

@@ -60,6 +60,13 @@ if (userID == nil) {
 | `authScopes` | `- (NSArray *)authScopes;` | Return authenticated scopes for authorization checks. | Read this value when you need current runtime/request state. |
 | `authRoles` | `- (NSArray *)authRoles;` | Return authenticated roles for authorization checks. | Read this value when you need current runtime/request state. |
 | `authSubject` | `- (nullable NSString *)authSubject;` | Return the authenticated subject identifier (`sub`). | Read this value when you need current runtime/request state. |
+| `authProvider` | `- (nullable NSString *)authProvider;` | Perform `auth provider` for `ALNContext`. | Read this value when you need current runtime/request state. |
+| `authMethods` | `- (NSArray *)authMethods;` | Perform `auth methods` for `ALNContext`. | Read this value when you need current runtime/request state. |
+| `authAssuranceLevel` | `- (NSUInteger)authAssuranceLevel;` | Perform `auth assurance level` for `ALNContext`. | Read this value when you need current runtime/request state. |
+| `authPrimaryAuthenticatedAt` | `- (nullable NSDate *)authPrimaryAuthenticatedAt;` | Perform `auth primary authenticated at` for `ALNContext`. | Read this value when you need current runtime/request state. |
+| `authMFASatisfiedAt` | `- (nullable NSDate *)authMFASatisfiedAt;` | Perform `auth mfa satisfied at` for `ALNContext`. | Read this value when you need current runtime/request state. |
+| `authSessionIdentifier` | `- (nullable NSString *)authSessionIdentifier;` | Perform `auth session identifier` for `ALNContext`. | Read this value when you need current runtime/request state. |
+| `isMFAAuthenticated` | `- (BOOL)isMFAAuthenticated;` | Return whether `ALNContext` currently satisfies this condition. | Check the return value to confirm the operation succeeded. |
 | `jobsAdapter` | `- (nullable id<ALNJobAdapter>)jobsAdapter;` | Return the configured jobs adapter for the current application/context. | Read this value when you need current runtime/request state. |
 | `cacheAdapter` | `- (nullable id<ALNCacheAdapter>)cacheAdapter;` | Return the configured cache adapter for the current application/context. | Read this value when you need current runtime/request state. |
 | `localizationAdapter` | `- (nullable id<ALNLocalizationAdapter>)localizationAdapter;` | Return the configured localization adapter for the current application/context. | Read this value when you need current runtime/request state. |

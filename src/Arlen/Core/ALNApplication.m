@@ -19,6 +19,7 @@
 #import "ALNPerf.h"
 #import "ALNMetrics.h"
 #import "ALNAuth.h"
+#import "ALNAuthSession.h"
 
 #include <ctype.h>
 #include <math.h>
@@ -2763,6 +2764,64 @@ static void ALNApplyForbiddenResponse(ALNApplication *application,
   }
 }
 
+static NSString *ALNPercentEncodedQueryValue(NSString *value) {
+  NSString *candidate = [value isKindOfClass:[NSString class]] ? value : @"";
+  NSMutableCharacterSet *allowed = [NSMutableCharacterSet alphanumericCharacterSet];
+  [allowed addCharactersInString:@"-._~"];
+  return [candidate stringByAddingPercentEncodingWithAllowedCharacters:allowed] ?: @"";
+}
+
+static NSString *ALNStepUpRedirectLocation(ALNRequest *request,
+                                           NSString *stepUpPath,
+                                           NSString *reason) {
+  NSString *basePath = [stepUpPath isKindOfClass:[NSString class]] ? stepUpPath : @"";
+  if ([basePath length] == 0) {
+    return @"";
+  }
+
+  NSString *returnTo = [request.path isKindOfClass:[NSString class]] ? request.path : @"/";
+  if ([request.queryString isKindOfClass:[NSString class]] && [request.queryString length] > 0) {
+    returnTo = [NSString stringWithFormat:@"%@?%@", returnTo, request.queryString];
+  }
+
+  NSString *separator = [basePath containsString:@"?"] ? @"&" : @"?";
+  return [NSString stringWithFormat:@"%@%@reason=%@&return_to=%@",
+                                    basePath,
+                                    separator,
+                                    ALNPercentEncodedQueryValue(reason ?: @"step_up_required"),
+                                    ALNPercentEncodedQueryValue(returnTo)];
+}
+
+static void ALNApplyStepUpRequiredResponse(ALNApplication *application,
+                                           ALNRequest *request,
+                                           ALNResponse *response,
+                                           NSString *requestID,
+                                           NSString *message,
+                                           NSDictionary *details,
+                                           NSString *stepUpPath) {
+  BOOL apiOnly = ALNBoolConfigValue(application.config[@"apiOnly"], NO);
+  BOOL prefersJSON = apiOnly || ALNRequestPrefersJSON(request, apiOnly);
+  [response setHeader:@"X-Arlen-Step-Up-Required" value:@"1"];
+
+  if (!prefersJSON && [stepUpPath length] > 0) {
+    response.statusCode = 302;
+    [response setHeader:@"Location"
+                  value:ALNStepUpRedirectLocation(request, stepUpPath, @"step_up_required")];
+    response.committed = YES;
+    return;
+  }
+
+  NSDictionary *payload = ALNStructuredErrorPayload(403,
+                                                    @"step_up_required",
+                                                    message ?: @"Step-up authentication required",
+                                                    requestID,
+                                                    @[ ALNErrorDetailEntry(@"auth",
+                                                                           @"step_up_required",
+                                                                           message ?: @"Step-up authentication required",
+                                                                           details ?: @{}) ]);
+  ALNSetStructuredErrorResponse(response, 403, payload);
+}
+
 static BOOL ALNApplyAuthContractIfNeeded(ALNApplication *application,
                                          ALNRequest *request,
                                          ALNResponse *response,
@@ -2771,32 +2830,46 @@ static BOOL ALNApplyAuthContractIfNeeded(ALNApplication *application,
                                          NSString *requestID) {
   NSArray *requiredScopes = ALNNormalizedUniqueStrings(route.requiredScopes);
   NSArray *requiredRoles = ALNNormalizedUniqueStrings(route.requiredRoles);
-  if ([requiredScopes count] == 0 && [requiredRoles count] == 0) {
+  NSUInteger minimumAssuranceLevel = route.minimumAuthAssuranceLevel;
+  NSUInteger maximumAuthenticationAgeSeconds = route.maximumAuthenticationAgeSeconds;
+  BOOL requiresRoleOrScope = ([requiredScopes count] > 0 || [requiredRoles count] > 0);
+  BOOL requiresAssurance = (minimumAssuranceLevel > 0 || maximumAuthenticationAgeSeconds > 0);
+  if (!requiresRoleOrScope && !requiresAssurance) {
     return YES;
   }
 
-  NSDictionary *authConfig = ALNAuthConfig(application.config);
-  NSError *authError = nil;
-  BOOL authenticated = [ALNAuth authenticateContext:context
-                                         authConfig:authConfig
-                                              error:&authError];
-  if (!authenticated) {
-    [application.logger warn:@"request auth rejected"
-                      fields:@{
-                        @"request_id" : requestID ?: @"",
-                        @"error" : authError.localizedDescription ?: @"missing bearer token",
-                        @"route" : route.name ?: @"",
-                      }];
-    ALNApplyUnauthorizedResponse(application,
-                                 request,
-                                 response,
-                                 requestID,
-                                 @"Unauthorized",
-                                 requiredScopes);
-    return NO;
+  NSString *authorizationHeader = [request.headers[@"authorization"] isKindOfClass:[NSString class]]
+                                      ? request.headers[@"authorization"]
+                                      : @"";
+  BOOL hasAuthorizationHeader = ([authorizationHeader length] > 0);
+  BOOL shouldAttemptBearerAuth = requiresRoleOrScope ||
+                                 (requiresAssurance &&
+                                  [[ALNAuthSession subjectFromContext:context] length] == 0 &&
+                                  hasAuthorizationHeader);
+  if (shouldAttemptBearerAuth) {
+    NSDictionary *authConfig = ALNAuthConfig(application.config);
+    NSError *authError = nil;
+    BOOL authenticated = [ALNAuth authenticateContext:context
+                                           authConfig:authConfig
+                                                error:&authError];
+    if (!authenticated) {
+      [application.logger warn:@"request auth rejected"
+                        fields:@{
+                          @"request_id" : requestID ?: @"",
+                          @"error" : authError.localizedDescription ?: @"missing bearer token",
+                          @"route" : route.name ?: @"",
+                        }];
+      ALNApplyUnauthorizedResponse(application,
+                                   request,
+                                   response,
+                                   requestID,
+                                   @"Unauthorized",
+                                   requiredScopes);
+      return NO;
+    }
   }
 
-  if (![ALNAuth context:context hasRequiredScopes:requiredScopes]) {
+  if (requiresRoleOrScope && ![ALNAuth context:context hasRequiredScopes:requiredScopes]) {
     ALNApplyForbiddenResponse(application,
                               request,
                               response,
@@ -2808,7 +2881,7 @@ static BOOL ALNApplyAuthContractIfNeeded(ALNApplication *application,
                               });
     return NO;
   }
-  if (![ALNAuth context:context hasRequiredRoles:requiredRoles]) {
+  if (requiresRoleOrScope && ![ALNAuth context:context hasRequiredRoles:requiredRoles]) {
     ALNApplyForbiddenResponse(application,
                               request,
                               response,
@@ -2818,6 +2891,62 @@ static BOOL ALNApplyAuthContractIfNeeded(ALNApplication *application,
                                 @"required_roles" : requiredRoles,
                                 @"granted_roles" : [context authRoles] ?: @[],
                               });
+    return NO;
+  }
+
+  if (!requiresAssurance) {
+    return YES;
+  }
+
+  NSString *subject = [ALNAuthSession subjectFromContext:context];
+  if ([subject length] == 0) {
+    ALNApplyUnauthorizedResponse(application,
+                                 request,
+                                 response,
+                                 requestID,
+                                 @"Authentication required",
+                                 @[]);
+    return NO;
+  }
+
+  BOOL satisfiesAssurance =
+      [ALNAuthSession context:context
+          satisfiesMinimumAssuranceLevel:minimumAssuranceLevel
+        maximumAuthenticationAgeSeconds:maximumAuthenticationAgeSeconds
+                           referenceDate:nil];
+  if (!satisfiesAssurance) {
+    NSUInteger currentAssuranceLevel = [ALNAuthSession assuranceLevelFromContext:context];
+    NSDate *relevantAuthDate = (minimumAssuranceLevel >= 2)
+                                   ? [ALNAuthSession mfaAuthenticatedAtFromContext:context]
+                                   : nil;
+    if (relevantAuthDate == nil) {
+      relevantAuthDate = [ALNAuthSession primaryAuthenticatedAtFromContext:context];
+    }
+    NSInteger authAgeSeconds = -1;
+    if (relevantAuthDate != nil) {
+      authAgeSeconds = (NSInteger)floor([[NSDate date] timeIntervalSinceDate:relevantAuthDate]);
+    }
+
+    NSMutableDictionary *details = [NSMutableDictionary dictionary];
+    details[@"minimum_auth_assurance_level"] = @(minimumAssuranceLevel);
+    details[@"current_auth_assurance_level"] = @(currentAssuranceLevel);
+    if (maximumAuthenticationAgeSeconds > 0) {
+      details[@"maximum_authentication_age_seconds"] = @(maximumAuthenticationAgeSeconds);
+    }
+    if (authAgeSeconds >= 0) {
+      details[@"authentication_age_seconds"] = @(authAgeSeconds);
+    }
+
+    NSString *message = (currentAssuranceLevel < minimumAssuranceLevel)
+                            ? @"Step-up authentication required"
+                            : @"Recent reauthentication required";
+    ALNApplyStepUpRequiredResponse(application,
+                                   request,
+                                   response,
+                                   requestID,
+                                   message,
+                                   details,
+                                   route.stepUpPath);
     return NO;
   }
   return YES;
@@ -3090,6 +3219,30 @@ static void ALNFinalizeResponse(ALNApplication *application,
   route.compiledActionReturnKind = ALNRouteInvocationReturnKindUnknown;
   route.compiledGuardReturnKind = ALNRouteInvocationReturnKindUnknown;
   route.compiledInvocationMetadata = NO;
+  return YES;
+}
+
+- (BOOL)configureAuthAssuranceForRouteNamed:(NSString *)routeName
+                  minimumAuthAssuranceLevel:(NSUInteger)minimumAuthAssuranceLevel
+            maximumAuthenticationAgeSeconds:(NSUInteger)maximumAuthenticationAgeSeconds
+                                 stepUpPath:(NSString *)stepUpPath
+                                      error:(NSError **)error {
+  ALNRoute *route = [self.router routeNamed:routeName];
+  if (route == nil) {
+    if (error != NULL) {
+      *error = [NSError errorWithDomain:ALNApplicationErrorDomain
+                                   code:305
+                               userInfo:@{
+                                 NSLocalizedDescriptionKey :
+                                     [NSString stringWithFormat:@"route not found: %@", routeName ?: @""]
+                               }];
+    }
+    return NO;
+  }
+
+  route.minimumAuthAssuranceLevel = minimumAuthAssuranceLevel;
+  route.maximumAuthenticationAgeSeconds = maximumAuthenticationAgeSeconds;
+  route.stepUpPath = [stepUpPath isKindOfClass:[NSString class]] ? [stepUpPath copy] : @"";
   return YES;
 }
 

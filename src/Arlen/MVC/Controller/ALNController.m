@@ -1,5 +1,6 @@
 #import "ALNController.h"
 
+#import "ALNAuthSession.h"
 #import "ALNContext.h"
 #import "ALNJSONSerialization.h"
 #import "ALNPageState.h"
@@ -426,6 +427,61 @@ static NSString *ALNSafeRedirectLocation(NSString *location) {
 
 - (NSString *)authSubject {
   return [self.context authSubject];
+}
+
+- (NSString *)authProvider {
+  return [self.context authProvider];
+}
+
+- (NSArray *)authMethods {
+  return [self.context authMethods];
+}
+
+- (NSUInteger)authAssuranceLevel {
+  return [self.context authAssuranceLevel];
+}
+
+- (NSDate *)authPrimaryAuthenticatedAt {
+  return [self.context authPrimaryAuthenticatedAt];
+}
+
+- (NSDate *)authMFASatisfiedAt {
+  return [self.context authMFASatisfiedAt];
+}
+
+- (NSString *)authSessionIdentifier {
+  return [self.context authSessionIdentifier];
+}
+
+- (BOOL)isMFAAuthenticated {
+  return [self.context isMFAAuthenticated];
+}
+
+- (BOOL)startAuthenticatedSessionForSubject:(NSString *)subject
+                                   provider:(NSString *)provider
+                                    methods:(NSArray *)methods
+                                      error:(NSError **)error {
+  return [ALNAuthSession establishAuthenticatedSessionForSubject:subject
+                                                        provider:provider
+                                                         methods:methods
+                                                  assuranceLevel:1
+                                                 authenticatedAt:nil
+                                                         context:self.context
+                                                           error:error];
+}
+
+- (BOOL)completeStepUpWithMethod:(NSString *)method
+                  assuranceLevel:(NSUInteger)assuranceLevel
+                           error:(NSError **)error {
+  return [ALNAuthSession elevateAuthenticatedSessionForMethod:method
+                                               assuranceLevel:assuranceLevel
+                                              authenticatedAt:nil
+                                                      context:self.context
+                                                        error:error];
+}
+
+- (void)clearAuthenticatedSession {
+  [ALNAuthSession clearAuthenticatedSessionForContext:self.context];
 }
 
 - (id<ALNJobAdapter>)jobsAdapter {

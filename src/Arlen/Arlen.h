@@ -35,7 +35,11 @@
 #import "Support/ALNMetrics.h"
 #import "Support/ALNPerf.h"
 #import "Support/ALNAuth.h"
+#import "Support/ALNAuthSession.h"
 #import "Support/ALNPasswordHash.h"
+#import "Support/ALNRecoveryCodes.h"
+#import "Support/ALNTOTP.h"
+#import "Support/ALNWebAuthn.h"
 #import "Support/ALNRealtime.h"
 #import "Support/ALNServices.h"
 

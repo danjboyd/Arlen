@@ -5,6 +5,7 @@
 #import "ALNLogger.h"
 #import "ALNPerf.h"
 #import "ALNPageState.h"
+#import "ALNAuthSession.h"
 
 NSString *const ALNContextSessionStashKey = @"aln.session";
 NSString *const ALNContextSessionDirtyStashKey = @"aln.session.dirty";
@@ -426,16 +427,35 @@ static BOOL ALNETagListMatches(NSString *ifNoneMatchHeader, NSString *etag) {
 }
 
 - (NSString *)authSubject {
-  id value = self.stash[ALNContextAuthSubjectStashKey];
-  if ([value isKindOfClass:[NSString class]] && [value length] > 0) {
-    return value;
-  }
-  NSDictionary *claims = [self authClaims];
-  id subject = claims[@"sub"];
-  if ([subject isKindOfClass:[NSString class]] && [subject length] > 0) {
-    return subject;
-  }
-  return nil;
+  return [ALNAuthSession subjectFromContext:self];
+}
+
+- (NSString *)authProvider {
+  return [ALNAuthSession providerFromContext:self];
+}
+
+- (NSArray *)authMethods {
+  return [ALNAuthSession authenticationMethodsFromContext:self];
+}
+
+- (NSUInteger)authAssuranceLevel {
+  return [ALNAuthSession assuranceLevelFromContext:self];
+}
+
+- (NSDate *)authPrimaryAuthenticatedAt {
+  return [ALNAuthSession primaryAuthenticatedAtFromContext:self];
+}
+
+- (NSDate *)authMFASatisfiedAt {
+  return [ALNAuthSession mfaAuthenticatedAtFromContext:self];
+}
+
+- (NSString *)authSessionIdentifier {
+  return [ALNAuthSession sessionIdentifierFromContext:self];
+}
+
+- (BOOL)isMFAAuthenticated {
+  return [ALNAuthSession isMFAAuthenticatedForContext:self];
 }
 
 - (id<ALNJobAdapter>)jobsAdapter {

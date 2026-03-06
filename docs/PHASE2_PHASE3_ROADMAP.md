@@ -1,6 +1,6 @@
 # Arlen Phase 2 + Phase 3 Roadmap Index
 
-Status: Active (Phase 2A-2D complete; Phase 3A-3H complete; Phase 4A-4E complete; Phase 5A-5E complete; Phase 7A/7B/7C/7D/7E/7F/7G/7H initial slices implemented; Phase 7 follow-on active; Phase 8A complete; Phase 8B complete; Phase 9A/9B/9C/9D/9E/9F/9G/9H/9I/9J complete; Phase 10 complete with 10A-10M delivered; Phase 11 complete with 11A-11F delivered)  
+Status: Active (Phase 2A-2D complete; Phase 3A-3H complete; Phase 4A-4E complete; Phase 5A-5E complete; Phase 7A/7B/7C/7D/7E/7F/7G/7H initial slices implemented; Phase 7 follow-on active; Phase 8A complete; Phase 8B complete; Phase 9A/9B/9C/9D/9E/9F/9G/9H/9I/9J complete; Phase 10 complete with 10A-10M delivered; Phase 11 complete with 11A-11F delivered; Phase 12 active with 12A-12C complete)
 Last updated: 2026-03-06
 
 This index points to the current roadmap documents:
@@ -14,6 +14,7 @@ This index points to the current roadmap documents:
 - `docs/PHASE9_ROADMAP.md`
 - `docs/PHASE10_ROADMAP.md`
 - `docs/PHASE11_ROADMAP.md`
+- `docs/PHASE12_ROADMAP.md`
 - `docs/FEATURE_PARITY_MATRIX.md`
 
 ## Summary
@@ -157,6 +158,13 @@ Current delivery state:
 - Phase 11D complete: static/attachment filesystem confinement, strict attachment IDs, symlink-safe file access, and private file-backed adapter permissions
 - Phase 11E complete: trusted proxy CIDR boundary enforcement and text-log control-character escaping
 - Phase 11F complete: Phase 11 protocol adversarial corpus, deterministic fuzz/live probes, and sanitizer confidence artifact lanes
+
+Phase 12 execution is defined in `docs/PHASE12_ROADMAP.md`, with current delivery state:
+
+- Phase 12A complete: session-native auth-assurance inspection, route-level step-up policy, session rotation helpers, and deterministic HTML/API step-up rejection behavior
+- Phase 12B complete: `ALNTOTP`, `ALNRecoveryCodes`, and session-upgrade helpers for local MFA flows
+- Phase 12C complete: `ALNWebAuthn` registration/assertion helpers with origin/RP/challenge/sign-count verification and AAL2 session upgrade integration
+- Phase 12D-12F planned: OIDC-first federation client/presets plus hostile-input/confidence expansion
 
 Scope guardrails remain unchanged:
 - admin/backoffice and full account-product surfaces remain outside Arlen core and are expected to ship as optional modules/products.

@@ -60,6 +60,7 @@ Last updated: 2026-03-06
 - Phase 11D: complete (2026-03-06)
 - Phase 11E: complete (2026-03-06)
 - Phase 11F: complete (2026-03-06)
+- Phase 12: active (12A/12B/12C complete on 2026-03-06; 12D/12E/12F planned)
 
 ## Phase 10M Completion (2026-02-26)
 

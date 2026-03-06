@@ -251,10 +251,15 @@
   XCTAssertTrue([token length] > 0);
 
   NSMutableString *tamperedCookie = [cookiePair mutableCopy];
-  if ([tamperedCookie length] > 2) {
-    unichar last = [tamperedCookie characterAtIndex:[tamperedCookie length] - 1];
-    unichar replacement = (last == 'a') ? 'b' : 'a';
-    [tamperedCookie replaceCharactersInRange:NSMakeRange([tamperedCookie length] - 1, 1)
+  NSRange equalsRange = [tamperedCookie rangeOfString:@"="];
+  NSUInteger tamperIndex =
+      (equalsRange.location != NSNotFound && equalsRange.location + 1 < [tamperedCookie length])
+          ? (equalsRange.location + 1)
+          : NSNotFound;
+  if (tamperIndex != NSNotFound) {
+    unichar current = [tamperedCookie characterAtIndex:tamperIndex];
+    unichar replacement = (current == 'a') ? 'b' : 'a';
+    [tamperedCookie replaceCharactersInRange:NSMakeRange(tamperIndex, 1)
                                   withString:[NSString stringWithFormat:@"%C", replacement]];
   }
 

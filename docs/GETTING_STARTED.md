@@ -214,6 +214,38 @@ ARLEN_SECURITY_PROFILE=strict ./bin/boomhauer
 For session middleware, `session.secret` must be at least 32 characters when `session.enabled=YES`.
 Session cookies are encrypted and authenticated by default.
 
+Auth assurance + MFA helpers:
+
+```objc
+NSError *error = nil;
+[app configureAuthAssuranceForRouteNamed:@"payments_transfer"
+               minimumAuthAssuranceLevel:2
+         maximumAuthenticationAgeSeconds:900
+                              stepUpPath:@"/mfa/challenge"
+                                   error:&error];
+
+// Primary login.
+[self startAuthenticatedSessionForSubject:userID
+                                 provider:@"local"
+                                  methods:@[ @"pwd" ]
+                                    error:&error];
+
+// Step-up after a verified TOTP or WebAuthn assertion.
+[self completeStepUpWithMethod:@"totp" assuranceLevel:2 error:&error];
+```
+
+Use `ALNContext`/`ALNController` auth helpers (`authSubject`, `authMethods`, `authAssuranceLevel`,
+`isMFAAuthenticated`, `authPrimaryAuthenticatedAt`, `authMFASatisfiedAt`) instead of reading raw
+session state. Browser requests that miss a route's assurance requirement redirect to the configured
+step-up path with `X-Arlen-Step-Up-Required: 1`; JSON/API requests receive structured
+`403 step_up_required`.
+
+Local MFA helpers shipped in Phase 12A-12C:
+
+- `ALNTOTP` for secrets, provisioning URIs, and bounded-skew code verification
+- `ALNRecoveryCodes` for generation, Argon2id hash-at-rest, and single-use consume
+- `ALNWebAuthn` for registration/assertion option generation and deterministic verification
+
 Trusted proxy allowlist override:
 
 ```bash
