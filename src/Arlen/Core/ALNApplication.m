@@ -102,6 +102,7 @@ static NSString *ALNGenerateRequestID(void);
   NSMutableDictionary *_storage;
   NSMutableSet *_suppressedKeys;
   ALNRequestIdentity *_requestIdentity;
+  NSUInteger _mutationCount;
   char _traceID[33];
   char _spanID[17];
   char _parentSpanID[17];
@@ -210,6 +211,40 @@ static NSString *ALNGenerateRequestID(void);
   return value;
 }
 
+- (NSUInteger)countByEnumeratingWithState:(NSFastEnumerationState *)state
+                                  objects:(id __unsafe_unretained [])buffer
+                                    count:(NSUInteger)len {
+  if (state == NULL || buffer == NULL || len == 0) {
+    return 0;
+  }
+
+  NSArray *keys = nil;
+  if (state->state == 0) {
+    keys = [self visibleKeys];
+    state->extra[0] = (unsigned long)(__bridge_retained void *)keys;
+    state->mutationsPtr = (unsigned long *)&_mutationCount;
+  } else {
+    keys = (__bridge NSArray *)(void *)state->extra[0];
+  }
+
+  NSUInteger total = [keys count];
+  if (state->state >= total) {
+    if (state->extra[0] != 0) {
+      CFBridgingRelease((void *)state->extra[0]);
+      state->extra[0] = 0;
+    }
+    return 0;
+  }
+
+  NSUInteger batchCount = MIN(len, total - state->state);
+  for (NSUInteger idx = 0; idx < batchCount; idx++) {
+    buffer[idx] = keys[state->state + idx];
+  }
+  state->itemsPtr = buffer;
+  state->state += batchCount;
+  return batchCount;
+}
+
 - (void)setObject:(id)anObject forKey:(id<NSCopying>)aKey {
   if (anObject == nil || aKey == nil) {
     return;
@@ -219,6 +254,7 @@ static NSString *ALNGenerateRequestID(void);
     [_suppressedKeys removeObject:(NSString *)keyObject];
   }
   [_storage setObject:anObject forKey:aKey];
+  _mutationCount++;
 }
 
 - (void)removeObjectForKey:(id)aKey {
@@ -226,6 +262,7 @@ static NSString *ALNGenerateRequestID(void);
     [_suppressedKeys addObject:(NSString *)aKey];
   }
   [_storage removeObjectForKey:aKey];
+  _mutationCount++;
 }
 
 @end
