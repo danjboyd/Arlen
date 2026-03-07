@@ -66,6 +66,8 @@ This builds:
 
 `boomhauer` and `make` compile first-party Objective-C sources with `-fobjc-arc` by default.
 `EXTRA_OBJC_FLAGS` is allowed for additive flags (for example sanitizers), but cannot disable ARC.
+For app-root launches, the first run compiles into `.boomhauer/build/boomhauer-app`; later `--no-watch`
+or `--prepare-only` runs reuse that cached binary when app/framework build inputs are unchanged.
 
 Check endpoints:
 
@@ -400,7 +402,10 @@ Run app dev server:
 /path/to/Arlen/bin/arlen boomhauer --port 3000
 ```
 
-By default, `boomhauer` watches source/template/config/public changes and rebuilds.
+By default, `boomhauer` watches source/template/config/public changes and rebuilds when build
+inputs change. Config/public changes restart the app without a rebuild.
+On the first watch-mode build failure in a session, `boomhauer` builds the fallback error server
+on demand before serving diagnostics.
 
 If watched reload fails to transpile/compile, `boomhauer` stays up and serves diagnostics:
 

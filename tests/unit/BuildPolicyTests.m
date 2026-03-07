@@ -121,6 +121,21 @@
   XCTAssertTrue([script containsString:@"-DARGON2_NO_THREADS=1"]);
 }
 
+- (void)testBoomhauerWatchModeBuildsFallbackServerLazily {
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *scriptPath = [repoRoot stringByAppendingPathComponent:@"bin/boomhauer"];
+  NSString *script = [self readFile:scriptPath];
+
+  XCTAssertTrue([script containsString:@"ensure_error_server_built() {"]);
+  XCTAssertTrue([script containsString:@"if ! ensure_error_server_built; then"]);
+  XCTAssertFalse([script containsString:
+                              @"if ! make -C \"$framework_root\" boomhauer >/dev/null; then\n"
+                               "  echo \"boomhauer: failed to build fallback dev error server\" >&2\n"
+                               "  exit 1\n"
+                               "fi"],
+                 @"watch mode should not build the fallback error server eagerly at startup");
+}
+
 - (void)testGNUmakefileIncludesJSONReliabilityGateTargets {
   NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
   NSString *makefilePath = [repoRoot stringByAppendingPathComponent:@"GNUmakefile"];

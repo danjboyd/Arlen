@@ -127,6 +127,9 @@ Build and run `boomhauer` for the current app root.
 
 - delegates to framework `bin/boomhauer` with `ARLEN_APP_ROOT` + `ARLEN_FRAMEWORK_ROOT`
 - defaults to watch mode (same as direct `bin/boomhauer`)
+- app-root non-watch and `--prepare-only` runs reuse `.boomhauer/build/boomhauer-app` when build inputs are unchanged
+- app-root watch mode restarts on config/public changes and rebuilds only when app/framework build inputs change
+- watch mode builds the fallback dev error server lazily on the first build failure instead of eagerly at startup
 - transpile/compile failures in watch mode do not terminate supervisor; diagnostics are served until next successful rebuild
 - server args are passed through (`--watch`, `--no-watch`, `--prepare-only`, `--port`, `--host`, `--env`, `--once`, `--print-routes`)
 
@@ -214,6 +217,11 @@ boomhauer [options]
 Behavior:
 
 - if run inside app root (`config/app.plist` plus `src/main.m` or `app_lite.m`), compiles and runs that app
+- app-root builds are cached at `.boomhauer/build/boomhauer-app` with a persistent fingerprint
+- unchanged app-root build inputs skip template transpile/clang on subsequent `--no-watch` / `--prepare-only` launches
+- watch mode restarts on config/public changes without forcing a rebuild when the cached app binary is still current
+- watch mode builds the fallback framework error server only when it needs to serve a build-failure page
+- current build fingerprint covers app `src/`, `templates/`, `app_lite.m`, framework `src/`, framework `GNUmakefile`, `tools/eocc.m`, and compile toggles `ARLEN_ENABLE_YYJSON` / `ARLEN_ENABLE_LLHTTP`
 - compile path enforces `-fobjc-arc` for app/framework/generated Objective-C sources
 - repository build pipeline enforces ARC across first-party Objective-C compile paths (GNUmakefile + boomhauer)
 - `EXTRA_OBJC_FLAGS` may add flags (for example sanitizers) but may not include `-fno-objc-arc`
