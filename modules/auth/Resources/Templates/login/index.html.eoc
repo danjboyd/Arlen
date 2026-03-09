@@ -1,4 +1,4 @@
-<% NSArray *errors = [ctx objectForKey:@"errors"]; NSDictionary *formData = [ctx objectForKey:@"formData"]; %>
+<% NSArray *errors = [ctx objectForKey:@"errors"]; NSDictionary *formData = [ctx objectForKey:@"formData"]; NSArray *authProviders = [ctx objectForKey:@"authProviders"]; %>
 <% if ([errors count] > 0) { %>
   <ul class="auth-errors">
   <% for (NSDictionary *entry in errors) { %>
@@ -25,6 +25,10 @@
   </div>
 </form>
 
-<div class="auth-actions">
-  <a class="auth-link" href="<%= [ctx objectForKey:@"authPrefix"] %>/provider/stub/login">Continue with Stub OIDC</a>
-</div>
+<% if ([authProviders count] > 0) { %>
+  <div class="auth-actions">
+  <% for (NSDictionary *provider in authProviders) { %>
+    <a class="auth-link" href="<%= [provider objectForKey:@"loginPath"] ?: @"" %>"><%= [provider objectForKey:@"ctaLabel"] ?: @"Continue" %></a>
+  <% } %>
+  </div>
+<% } %>

@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title><%= $pageTitle ?: @"Arlen Jobs" %></title>
+    <link rel="stylesheet" href="/modules/jobs/jobs.css">
+  </head>
+  <body>
+    <header class="jobs-shell__header">
+      <div>
+        <p class="jobs-shell__eyebrow">Arlen</p>
+        <h1 class="jobs-shell__title"><%= $pageHeading ?: @"Jobs" %></h1>
+      </div>
+      <nav class="jobs-shell__nav">
+        <a href="<%= $jobsPrefix ?: @"/jobs" %>">Jobs</a>
+        <a href="<%= $authLogoutPath ?: @"/auth/logout" %>">Logout</a>
+      </nav>
+    </header>
+    <main class="jobs-shell__main">
+      <%== $content %>
+    </main>
+  </body>
+</html>

@@ -62,9 +62,28 @@ Last updated: 2026-03-09
 - Phase 11F: complete (2026-03-06)
 - Phase 12: complete (12A/12B/12C complete on 2026-03-06; 12D/12E/12F complete on 2026-03-09)
 - Phase 13: complete (13A/13B/13C/13D/13E/13F/13G/13H/13I complete on 2026-03-09)
+- Phase 14: active (14A/14B/14C complete; 14D/14E/14F/14G/14H/14I remaining)
 
 ## Completed Today (2026-03-09)
 
+- Completed Phase 14A jobs module foundation:
+  - added vendored `modules/jobs/` with deterministic job-definition and schedule-provider contracts on top of `ALNJobAdapter`/`ALNJobWorker`
+  - added protected `/jobs` HTML dashboard plus `/jobs/api/...` JSON/OpenAPI routes for definitions, schedules, queues, pending/leased/dead-letter inspection, enqueue, scheduler, worker, replay, and queue pause/resume
+  - added `Phase14ATests` coverage for deterministic registration/config contracts and combined jobs/notifications integration coverage in `Phase14JobsNotificationsIntegrationTests.m`
+- Completed Phase 14B jobs scheduler and queue operations surface:
+  - added cron-like and interval-like scheduler normalization with deterministic worker execution through the shared job runtime
+  - added dead-letter replay, leased-job inspection, and default-queue pause/resume support
+  - added HTML + JSON jobs operator flows guarded by shared auth/admin/AAL2 contracts and included in module OpenAPI output
+- Completed Phase 14C notifications module foundation:
+  - added vendored `modules/notifications/` with deterministic notification-definition/provider contracts on top of mail + jobs
+  - added async dispatch through the system `notifications.dispatch` job plus `/notifications/api/...` JSON routes for definitions, outbox, inbox, and queueing
+  - added `Phase14CTests` coverage for registration order, unsupported-channel rejection, and jobs-backed delivery behavior
+- Added `docs/PHASE14_ROADMAP.md` planning the next five first-party modules on top of the Phase 13 module system:
+  - `jobs`
+  - `notifications`
+  - `storage`
+  - `ops`
+  - `search`
 - Completed Phase 13A module contract and loader:
   - added `ALNModule`, manifest-backed `ALNModuleDefinition`, deterministic dependency ordering, version compatibility checks, principal-class validation, and runtime module loading
   - integrated module loading into `ALNApplication` and config resolution via `ALNModuleSystem`

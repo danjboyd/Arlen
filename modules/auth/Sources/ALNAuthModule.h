@@ -80,6 +80,7 @@ typedef NS_ENUM(NSInteger, ALNAuthModuleErrorCode) {
 @property(nonatomic, copy, readonly) NSString *providerStubAuthorizePath;
 @property(nonatomic, copy, readonly) NSString *providerStubCallbackPath;
 @property(nonatomic, copy, readonly) NSString *defaultRedirect;
+@property(nonatomic, copy, readonly) NSArray<NSDictionary *> *loginProviders;
 
 + (instancetype)sharedRuntime;
 
@@ -102,6 +103,7 @@ typedef NS_ENUM(NSInteger, ALNAuthModuleErrorCode) {
 - (NSString *)postLoginRedirectForContext:(ALNContext *)context
                                      user:(NSDictionary *)user
                           defaultRedirect:(NSString *)defaultRedirect;
+- (BOOL)isProviderEnabled:(NSString *)identifier;
 - (nullable NSDictionary *)currentUserForSubject:(NSString *)subject
                                            error:(NSError *_Nullable *_Nullable)error;
 - (nullable NSDictionary *)currentUserForContext:(ALNContext *)context

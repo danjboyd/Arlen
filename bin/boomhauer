@@ -111,6 +111,20 @@ error_meta_file="$state_root/last_build_error.meta"
 build_fingerprint_file="$state_root/last_build_fingerprint"
 mkdir -p "$gen_root"
 
+normalized_non_negative_integer() {
+  local raw="$1"
+  local fallback="$2"
+  if [[ "$raw" =~ ^[0-9]+$ ]]; then
+    printf '%s\n' "$raw"
+    return
+  fi
+  printf '%s\n' "$fallback"
+}
+
+build_error_retry_seconds="$(normalized_non_negative_integer "${ARLEN_BOOMHAUER_BUILD_ERROR_RETRY_SECONDS:-2}" 2)"
+build_error_auto_refresh_seconds="$(normalized_non_negative_integer "${ARLEN_BOOMHAUER_BUILD_ERROR_AUTO_REFRESH_SECONDS:-3}" 3)"
+build_error_recovery_hint="${ARLEN_BOOMHAUER_BUILD_ERROR_RECOVERY_HINT:-Fix the compile error and save a watched file. Boomhauer retries automatically every ${build_error_retry_seconds} seconds while the diagnostic server is active.}"
+
 append_fingerprint_entries() {
   local base="$1"
   local label="$2"
@@ -297,6 +311,20 @@ compile_app() {
     } | sort
   )
   mapfile -t app_sources < <(find "$app_root/src" -type f -name '*.m' 2>/dev/null | sort)
+  mapfile -t framework_module_source_dirs < <(
+    find "$framework_root/modules" -mindepth 2 -maxdepth 2 -type d -name 'Sources' 2>/dev/null | sort
+  )
+  mapfile -t app_module_source_dirs < <(
+    find "$app_root/modules" -mindepth 2 -maxdepth 2 -type d -name 'Sources' 2>/dev/null | sort
+  )
+  framework_module_include_args=()
+  for module_source_dir in "${framework_module_source_dirs[@]}"; do
+    framework_module_include_args+=("-I$module_source_dir")
+  done
+  app_module_include_args=()
+  for module_source_dir in "${app_module_source_dirs[@]}"; do
+    app_module_include_args+=("-I$module_source_dir")
+  done
   mapfile -t module_sources < <(find "$app_root/modules" -path '*/Sources/*.m' -type f 2>/dev/null | sort)
   mapfile -t module_generated_sources < <(find "$gen_root/modules" -type f -name '*.m' 2>/dev/null | sort)
   mapfile -t app_generated_sources < <(find "$gen_root/app" -type f -name '*.m' 2>/dev/null | sort)
@@ -344,6 +372,8 @@ compile_app() {
       -I"$framework_root/src/Arlen/Support/third_party/argon2/include" \
       -I"$framework_root/src/Arlen/Support/third_party/argon2/src" \
       -I"$app_root/src" \
+      "${framework_module_include_args[@]}" \
+      "${app_module_include_args[@]}" \
       "${app_sources[@]}" \
       "${framework_sources[@]}" \
       "${generated_sources[@]}" \
@@ -380,6 +410,7 @@ child_pid=""
 child_mode=""
 stop_requested=0
 error_server_ready=0
+next_build_retry_at=0
 
 ensure_error_server_built() {
   if [[ $error_server_ready -eq 1 && -x "$framework_root/build/boomhauer" ]]; then
@@ -413,6 +444,7 @@ trap on_signal INT TERM
 
 start_app_child() {
   export ARLEN_APP_ROOT="$app_root"
+  next_build_retry_at=0
   "$app_binary" "${server_args[@]}" &
   child_pid="$!"
   child_mode="app"
@@ -425,6 +457,14 @@ start_error_child() {
   export ARLEN_APP_ROOT="$app_root"
   export ARLEN_BOOMHAUER_BUILD_ERROR_FILE="$error_output_file"
   export ARLEN_BOOMHAUER_BUILD_ERROR_META_FILE="$error_meta_file"
+  export ARLEN_BOOMHAUER_BUILD_ERROR_RETRY_SECONDS="$build_error_retry_seconds"
+  export ARLEN_BOOMHAUER_BUILD_ERROR_AUTO_REFRESH_SECONDS="$build_error_auto_refresh_seconds"
+  export ARLEN_BOOMHAUER_BUILD_ERROR_RECOVERY_HINT="$build_error_recovery_hint"
+  if [[ "$build_error_retry_seconds" -gt 0 ]]; then
+    next_build_retry_at=$(( $(date +%s) + build_error_retry_seconds ))
+  else
+    next_build_retry_at=0
+  fi
   "$framework_root/build/boomhauer" "${server_args[@]}" &
   child_pid="$!"
   child_mode="build_error"
@@ -471,16 +511,26 @@ while [[ $stop_requested -eq 0 ]]; do
     fi
   fi
 
-  restart_for_change=0
+  restart_reason=""
   while [[ $stop_requested -eq 0 ]] && [[ -n "$child_pid" ]] && kill -0 "$child_pid" 2>/dev/null; do
     sleep 1
     current_runtime_fingerprint="$(runtime_fingerprint)"
     if [[ "$current_runtime_fingerprint" != "$last_runtime_fingerprint" ]]; then
       last_runtime_fingerprint="$current_runtime_fingerprint"
       echo "boomhauer: change detected, restarting..."
-      restart_for_change=1
+      restart_reason="change"
       stop_child
       break
+    fi
+    if [[ "$child_mode" == "build_error" && "$build_error_retry_seconds" -gt 0 ]]; then
+      current_epoch="$(date +%s)"
+      if [[ "$current_epoch" -ge "$next_build_retry_at" ]]; then
+        next_build_retry_at=$(( current_epoch + build_error_retry_seconds ))
+        echo "boomhauer: retrying failed build..."
+        restart_reason="build_retry"
+        stop_child
+        break
+      fi
     fi
   done
 
@@ -496,7 +546,7 @@ while [[ $stop_requested -eq 0 ]]; do
     child_pid=""
     previous_mode="$child_mode"
     child_mode=""
-    if [[ $restart_for_change -eq 0 && $child_status -ne 0 ]]; then
+    if [[ -z "$restart_reason" && $child_status -ne 0 ]]; then
       echo "boomhauer: server exited with status $child_status" >&2
       if [[ "$previous_mode" == "build_error" && -f "$error_output_file" ]]; then
         cat "$error_output_file" >&2 || true

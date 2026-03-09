@@ -910,4 +910,139 @@
   }
 }
 
+- (void)testAuthModuleHidesAndUnregistersDisabledProviderAffordances {
+  NSString *dsn = [self pgTestDSN];
+  if ([dsn length] == 0) {
+    return;
+  }
+
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *quotedRepoRoot = [self shellQuoted:repoRoot];
+  NSString *quotedArlenBinary = [self shellQuoted:[repoRoot stringByAppendingPathComponent:@"build/arlen"]];
+  NSString *quotedBoomhauer = [self shellQuoted:[repoRoot stringByAppendingPathComponent:@"bin/boomhauer"]];
+  NSString *appRoot = [self createTempDirectoryWithPrefix:@"phase13-auth-disabled-provider"];
+  NSString *cookieJar = [self createTempFilePathWithPrefix:@"phase13-disabled-provider-cookie" suffix:@".txt"];
+  NSString *serverLog = [self createTempFilePathWithPrefix:@"phase13-disabled-provider-server" suffix:@".log"];
+  int port = [self randomPort];
+  XCTAssertNotNil(appRoot);
+  if (appRoot == nil) {
+    return;
+  }
+
+  NSTask *server = nil;
+
+  @try {
+    NSString *configContents =
+        [NSString stringWithFormat:@"{\n"
+                                   "  host = \"127.0.0.1\";\n"
+                                   "  port = %d;\n"
+                                   "  session = {\n"
+                                   "    enabled = YES;\n"
+                                   "    secret = \"phase13-auth-disabled-provider-session-secret-0123456789abcdef\";\n"
+                                   "  };\n"
+                                   "  csrf = {\n"
+                                   "    enabled = YES;\n"
+                                   "    allowQueryParamFallback = YES;\n"
+                                   "  };\n"
+                                   "  database = {\n"
+                                   "    connectionString = \"%@\";\n"
+                                   "  };\n"
+                                   "  authModule = {\n"
+                                   "    providers = {\n"
+                                   "      stub = {\n"
+                                   "        enabled = NO;\n"
+                                   "      };\n"
+                                   "    };\n"
+                                   "  };\n"
+                                   "}\n",
+                                   port,
+                                   [dsn stringByReplacingOccurrencesOfString:@"\"" withString:@"\\\""]];
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"config/app.plist"] content:configContents]);
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"config/environments/development.plist"]
+                          content:@"{}\n"]);
+    XCTAssertTrue([self writeLiteAppAtRoot:appRoot]);
+
+    int exitCode = 0;
+    NSString *buildOutput =
+        [self runShellCapture:[NSString stringWithFormat:@"cd %@ && source /usr/GNUstep/System/Library/Makefiles/GNUstep.sh && make arlen eocc",
+                                                         quotedRepoRoot]
+                     exitCode:&exitCode];
+    XCTAssertEqual(0, exitCode, @"%@", buildOutput);
+
+    NSString *addAuth = [self runShellCapture:[NSString stringWithFormat:
+        @"cd %@ && ARLEN_FRAMEWORK_ROOT=%@ %@ module add auth --json",
+        [self shellQuoted:appRoot], quotedRepoRoot, quotedArlenBinary]
+                                      exitCode:&exitCode];
+    XCTAssertEqual(0, exitCode, @"%@", addAuth);
+    XCTAssertEqualObjects(@"ok", [self parseJSONDictionary:addAuth][@"status"]);
+
+    server = [[NSTask alloc] init];
+    server.launchPath = @"/bin/bash";
+    server.arguments = @[ @"-lc",
+                          [NSString stringWithFormat:@"cd %@ && ARLEN_FRAMEWORK_ROOT=%@ %@ --no-watch --port %d >%@ 2>&1",
+                                                     [self shellQuoted:appRoot],
+                                                     quotedRepoRoot,
+                                                     quotedBoomhauer,
+                                                     port,
+                                                     [self shellQuoted:serverLog]] ];
+    [server launch];
+    XCTAssertTrue([self waitForServerOnPort:port path:@"/auth/api/session"]);
+
+    NSDictionary *loginPage = [self curlJSONAtPort:port
+                                              path:@"/auth/login"
+                                            method:@"GET"
+                                         cookieJar:cookieJar
+                                         csrfToken:nil
+                                           payload:nil
+                                   followRedirects:NO
+                                          exitCode:&exitCode];
+    XCTAssertEqual(0, exitCode);
+    XCTAssertEqual((NSInteger)200, [loginPage[@"status"] integerValue]);
+    XCTAssertFalse([loginPage[@"body"] containsString:@"Continue with Stub OIDC"]);
+
+    NSDictionary *sessionResponse = [self curlJSONAtPort:port
+                                                    path:@"/auth/api/session"
+                                                  method:@"GET"
+                                               cookieJar:cookieJar
+                                               csrfToken:nil
+                                                 payload:nil
+                                         followRedirects:NO
+                                                exitCode:&exitCode];
+    XCTAssertEqual(0, exitCode);
+    XCTAssertEqual((NSInteger)200, [sessionResponse[@"status"] integerValue]);
+    NSDictionary *sessionPayload = [self parseJSONDictionary:sessionResponse[@"body"]];
+    XCTAssertEqualObjects((@[]), sessionPayload[@"login_providers"]);
+
+    NSDictionary *providerStart = [self curlJSONAtPort:port
+                                                  path:@"/auth/provider/stub/login"
+                                                method:@"GET"
+                                             cookieJar:cookieJar
+                                             csrfToken:nil
+                                               payload:nil
+                                       followRedirects:NO
+                                              exitCode:&exitCode];
+    XCTAssertEqual(0, exitCode);
+    XCTAssertEqual((NSInteger)404, [providerStart[@"status"] integerValue]);
+
+    NSDictionary *providerAPIStart = [self curlJSONAtPort:port
+                                                     path:@"/auth/api/provider/stub/login"
+                                                   method:@"GET"
+                                                cookieJar:cookieJar
+                                                csrfToken:nil
+                                                  payload:nil
+                                          followRedirects:NO
+                                                 exitCode:&exitCode];
+    XCTAssertEqual(0, exitCode);
+    XCTAssertEqual((NSInteger)404, [providerAPIStart[@"status"] integerValue]);
+  } @finally {
+    if (server != nil && [server isRunning]) {
+      kill(server.processIdentifier, SIGTERM);
+      [server waitUntilExit];
+    }
+    [[NSFileManager defaultManager] removeItemAtPath:cookieJar error:nil];
+    [[NSFileManager defaultManager] removeItemAtPath:serverLog error:nil];
+    [[NSFileManager defaultManager] removeItemAtPath:appRoot error:nil];
+  }
+}
+
 @end

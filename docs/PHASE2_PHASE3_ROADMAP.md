@@ -1,6 +1,6 @@
 # Arlen Phase 2 + Phase 3 Roadmap Index
 
-Status: Active (Phase 2A-2D complete; Phase 3A-3H complete; Phase 4A-4E complete; Phase 5A-5E complete; Phase 7A/7B/7C/7D/7E/7F/7G/7H initial slices implemented; Phase 7 follow-on active; Phase 8A complete; Phase 8B complete; Phase 9A/9B/9C/9D/9E/9F/9G/9H/9I/9J complete; Phase 10 complete with 10A-10M delivered; Phase 11 complete with 11A-11F delivered; Phase 12 complete with 12A-12F delivered; Phase 13 active with 13A-13G delivered)
+Status: Active (Phase 2A-2D complete; Phase 3A-3H complete; Phase 4A-4E complete; Phase 5A-5E complete; Phase 7A/7B/7C/7D/7E/7F/7G/7H initial slices implemented; Phase 7 follow-on active; Phase 8A complete; Phase 8B complete; Phase 9A/9B/9C/9D/9E/9F/9G/9H/9I/9J complete; Phase 10 complete with 10A-10M delivered; Phase 11 complete with 11A-11F delivered; Phase 12 complete with 12A-12F delivered; Phase 13 complete with 13A-13I delivered; Phase 14 active with 14A/14B/14C delivered)
 Last updated: 2026-03-09
 
 This index points to the current roadmap documents:
@@ -16,6 +16,7 @@ This index points to the current roadmap documents:
 - `docs/PHASE11_ROADMAP.md`
 - `docs/PHASE12_ROADMAP.md`
 - `docs/PHASE13_ROADMAP.md`
+- `docs/PHASE14_ROADMAP.md`
 - `docs/FEATURE_PARITY_MATRIX.md`
 
 ## Summary
@@ -177,6 +178,21 @@ Phase 13 execution is defined in `docs/PHASE13_ROADMAP.md`, with current deliver
 - a metadata-driven admin resource registry for app-owned backoffice resources
 - one auth/admin domain contract supporting both EOC-rendered HTML and SPA-friendly JSON surfaces without bundling a React frontend
 - sample app, module docs, and `make phase13-confidence` confidence artifacts
+
+Phase 14 execution is defined in `docs/PHASE14_ROADMAP.md`, with current delivery state:
+
+- Phase 14A complete:
+  - first-party `jobs` module productization on top of the Phase 3 job adapter and Phase 13 module system
+  - deterministic job definitions, schedule providers, protected `/jobs` HTML, and `/jobs/api` JSON/OpenAPI operator routes
+- Phase 14B complete:
+  - scheduler execution, dead-letter replay, leased-job inspection, and default-queue pause/resume flows through the shared worker contract
+- Phase 14C complete:
+  - first-party `notifications` foundation on top of mail + jobs with `/notifications/api` queue/definitions/outbox/inbox routes
+- remaining 14D-14I:
+  - richer notifications product surfaces
+- first-party `storage` productization on top of attachment/upload contracts
+- first-party `ops` productization of protected dashboards and JSON runtime diagnostics
+- first-party `search` productization with database-first indexing and admin integration
 
 Scope guardrails remain unchanged:
 - admin/backoffice and full account-product surfaces remain outside Arlen core and are expected to ship as optional modules/products.

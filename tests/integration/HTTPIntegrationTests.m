@@ -3878,20 +3878,77 @@
                                 "}\n"]);
   XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"config/environments/development.plist"]
                         content:@"{\n  logFormat = \"text\";\n}\n"]);
-  XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"app_lite.m"]
-                        content:@"#import <Foundation/Foundation.h>\n"
-                                "#import \"ArlenServer.h\"\n"
-                                "@interface BrokenController : ALNController @end\n"
-                                "@implementation BrokenController\n"
-                                "- (id)index:(ALNContext *)ctx {\n"
-                                "  (void)ctx\n"
-                                "  [self renderText:@\"broken\\n\"];\n"
-                                "  return nil;\n"
-                                "}\n"
-                                "@end\n"
-                                "int main(int argc, const char *argv[]) {\n"
-                                "  (void)argc; (void)argv; return 0;\n"
-                                "}\n"]);
+  NSString *brokenAppSource = @"#import <Foundation/Foundation.h>\n"
+                              "#import <stdio.h>\n"
+                              "#import <stdlib.h>\n"
+                              "#import \"ArlenServer.h\"\n"
+                              "@interface LiteController : ALNControxxer @end\n"
+                              "@implementation LiteController\n"
+                              "- (id)index:(ALNContext *)ctx {\n"
+                              "  (void)ctx;\n"
+                              "  [self renderText:@\"hello from lite mode\\n\"];\n"
+                              "  return nil;\n"
+                              "}\n"
+                              "@end\n"
+                              "static void PrintUsage(void) {\n"
+                              "  fprintf(stdout, \"Usage: boomhauer [--port <port>] [--host <addr>] [--env <env>] [--once] [--print-routes]\\\\n\");\n"
+                              "}\n"
+                              "int main(int argc, const char *argv[]) {\n"
+                              "  @autoreleasepool {\n"
+                              "    int portOverride = 0;\n"
+                              "    NSString *host = nil;\n"
+                              "    NSString *environment = @\"development\";\n"
+                              "    BOOL once = NO;\n"
+                              "    BOOL printRoutes = NO;\n"
+                              "    for (int idx = 1; idx < argc; idx++) {\n"
+                              "      NSString *arg = [NSString stringWithUTF8String:argv[idx]];\n"
+                              "      if ([arg isEqualToString:@\"--port\"]) {\n"
+                              "        if ((idx + 1) >= argc) { PrintUsage(); return 2; }\n"
+                              "        portOverride = atoi(argv[++idx]);\n"
+                              "      } else if ([arg isEqualToString:@\"--host\"]) {\n"
+                              "        if ((idx + 1) >= argc) { PrintUsage(); return 2; }\n"
+                              "        host = [NSString stringWithUTF8String:argv[++idx]];\n"
+                              "      } else if ([arg isEqualToString:@\"--env\"]) {\n"
+                              "        if ((idx + 1) >= argc) { PrintUsage(); return 2; }\n"
+                              "        environment = [NSString stringWithUTF8String:argv[++idx]];\n"
+                              "      } else if ([arg isEqualToString:@\"--once\"]) {\n"
+                              "        once = YES;\n"
+                              "      } else if ([arg isEqualToString:@\"--print-routes\"]) {\n"
+                              "        printRoutes = YES;\n"
+                              "      } else if ([arg isEqualToString:@\"--help\"] || [arg isEqualToString:@\"-h\"]) {\n"
+                              "        PrintUsage();\n"
+                              "        return 0;\n"
+                              "      } else {\n"
+                              "        fprintf(stderr, \"Unknown argument: %s\\\\n\", argv[idx]);\n"
+                              "        return 2;\n"
+                              "      }\n"
+                              "    }\n"
+                              "    NSString *appRootCurrent = [[NSFileManager defaultManager] currentDirectoryPath];\n"
+                              "    NSError *error = nil;\n"
+                              "    ALNApplication *app = [[ALNApplication alloc] initWithEnvironment:environment\n"
+                              "                                                           configRoot:appRootCurrent\n"
+                              "                                                                error:&error];\n"
+                              "    if (app == nil) {\n"
+                              "      fprintf(stderr, \"failed loading config: %s\\\\n\", [[error localizedDescription] UTF8String]);\n"
+                              "      return 1;\n"
+                              "    }\n"
+                              "    [app registerRouteMethod:@\"GET\" path:@\"/\" name:@\"home\" controllerClass:[LiteController class] action:@\"index\"];\n"
+                              "    ALNHTTPServer *server = [[ALNHTTPServer alloc] initWithApplication:app\n"
+                              "                                                        publicRoot:[appRootCurrent stringByAppendingPathComponent:@\"public\"]];\n"
+                              "    server.serverName = @\"boomhauer\";\n"
+                              "    if (printRoutes) { [server printRoutesToFile:stdout]; return 0; }\n"
+                              "    return [server runWithHost:host portOverride:portOverride once:once];\n"
+                              "  }\n"
+                              "}\n";
+  NSString *fixedAppSource = [brokenAppSource stringByReplacingOccurrencesOfString:@"ALNControxxer"
+                                                                        withString:@"ALNController"];
+  XCTAssertEqual([brokenAppSource length], [fixedAppSource length]);
+  NSString *appSourcePath = [appRoot stringByAppendingPathComponent:@"app_lite.m"];
+  XCTAssertTrue([self writeFile:appSourcePath content:brokenAppSource]);
+  NSDictionary *initialAttributes =
+      [[NSFileManager defaultManager] attributesOfItemAtPath:appSourcePath error:nil];
+  NSDate *initialModifiedDate = initialAttributes[NSFileModificationDate];
+  XCTAssertNotNil(initialModifiedDate);
 
   int port = [self randomPort];
   NSTask *server = [[NSTask alloc] init];
@@ -3902,6 +3959,8 @@
       [NSMutableDictionary dictionaryWithDictionary:[[NSProcessInfo processInfo] environment]];
   env[@"ARLEN_FRAMEWORK_ROOT"] = repoRoot;
   env[@"ARLEN_APP_ROOT"] = appRoot;
+  env[@"ARLEN_BOOMHAUER_BUILD_ERROR_RETRY_SECONDS"] = @"1";
+  env[@"ARLEN_BOOMHAUER_BUILD_ERROR_AUTO_REFRESH_SECONDS"] = @"1";
   server.environment = env;
   server.standardOutput = [NSPipe pipe];
   server.standardError = [NSPipe pipe];
@@ -3914,6 +3973,9 @@
       NSString *body = [self runShellCapture:[NSString stringWithFormat:@"curl -sS http://127.0.0.1:%d/", port]
                                     exitCode:&curlCode];
       if (curlCode == 0 && [body containsString:@"Boomhauer Build Failed"]) {
+        XCTAssertTrue([body containsString:@"http-equiv='refresh'"]);
+        XCTAssertTrue([body containsString:@"Boomhauer retries automatically every 1 seconds"]);
+        XCTAssertTrue([body containsString:@"Last failed at:"]);
         errorPageSeen = YES;
         break;
       }
@@ -3929,7 +3991,10 @@
                                                      port]
                                         exitCode:&jsonCurlCode];
       if (jsonCurlCode == 0 && [jsonBody containsString:@"dev_build_failed"] &&
-          [jsonBody containsString:@"stage"]) {
+          [jsonBody containsString:@"stage"] &&
+          [jsonBody containsString:@"timestamp_utc"] &&
+          [jsonBody containsString:@"recovery_hint"] &&
+          [jsonBody containsString:@"auto_retry_seconds"]) {
         jsonErrorSeen = YES;
         break;
       }
@@ -3937,72 +4002,15 @@
     }
     XCTAssertTrue(jsonErrorSeen);
 
-    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"app_lite.m"]
-                          content:@"#import <Foundation/Foundation.h>\n"
-                                  "#import <stdio.h>\n"
-                                  "#import <stdlib.h>\n"
-                                  "#import \"ArlenServer.h\"\n"
-                                  "@interface LiteController : ALNController @end\n"
-                                  "@implementation LiteController\n"
-                                  "- (id)index:(ALNContext *)ctx {\n"
-                                  "  (void)ctx;\n"
-                                  "  [self renderText:@\"hello from lite mode\\n\"];\n"
-                                  "  return nil;\n"
-                                  "}\n"
-                                  "@end\n"
-                                  "static void PrintUsage(void) {\n"
-                                  "  fprintf(stdout, \"Usage: boomhauer [--port <port>] [--host <addr>] [--env <env>] [--once] [--print-routes]\\\\n\");\n"
-                                  "}\n"
-                                  "int main(int argc, const char *argv[]) {\n"
-                                  "  @autoreleasepool {\n"
-                                  "    int portOverride = 0;\n"
-                                  "    NSString *host = nil;\n"
-                                  "    NSString *environment = @\"development\";\n"
-                                  "    BOOL once = NO;\n"
-                                  "    BOOL printRoutes = NO;\n"
-                                  "    for (int idx = 1; idx < argc; idx++) {\n"
-                                  "      NSString *arg = [NSString stringWithUTF8String:argv[idx]];\n"
-                                  "      if ([arg isEqualToString:@\"--port\"]) {\n"
-                                  "        if ((idx + 1) >= argc) { PrintUsage(); return 2; }\n"
-                                  "        portOverride = atoi(argv[++idx]);\n"
-                                  "      } else if ([arg isEqualToString:@\"--host\"]) {\n"
-                                  "        if ((idx + 1) >= argc) { PrintUsage(); return 2; }\n"
-                                  "        host = [NSString stringWithUTF8String:argv[++idx]];\n"
-                                  "      } else if ([arg isEqualToString:@\"--env\"]) {\n"
-                                  "        if ((idx + 1) >= argc) { PrintUsage(); return 2; }\n"
-                                  "        environment = [NSString stringWithUTF8String:argv[++idx]];\n"
-                                  "      } else if ([arg isEqualToString:@\"--once\"]) {\n"
-                                  "        once = YES;\n"
-                                  "      } else if ([arg isEqualToString:@\"--print-routes\"]) {\n"
-                                  "        printRoutes = YES;\n"
-                                  "      } else if ([arg isEqualToString:@\"--help\"] || [arg isEqualToString:@\"-h\"]) {\n"
-                                  "        PrintUsage();\n"
-                                  "        return 0;\n"
-                                  "      } else {\n"
-                                  "        fprintf(stderr, \"Unknown argument: %s\\\\n\", argv[idx]);\n"
-                                  "        return 2;\n"
-                                  "      }\n"
-                                  "    }\n"
-                                  "    NSString *appRootCurrent = [[NSFileManager defaultManager] currentDirectoryPath];\n"
-                                  "    NSError *error = nil;\n"
-                                  "    ALNApplication *app = [[ALNApplication alloc] initWithEnvironment:environment\n"
-                                  "                                                           configRoot:appRootCurrent\n"
-                                  "                                                                error:&error];\n"
-                                  "    if (app == nil) {\n"
-                                  "      fprintf(stderr, \"failed loading config: %s\\\\n\", [[error localizedDescription] UTF8String]);\n"
-                                  "      return 1;\n"
-                                  "    }\n"
-                                  "    [app registerRouteMethod:@\"GET\" path:@\"/\" name:@\"home\" controllerClass:[LiteController class] action:@\"index\"];\n"
-                                  "    ALNHTTPServer *server = [[ALNHTTPServer alloc] initWithApplication:app\n"
-                                  "                                                        publicRoot:[appRootCurrent stringByAppendingPathComponent:@\"public\"]];\n"
-                                  "    server.serverName = @\"boomhauer\";\n"
-                                  "    if (printRoutes) { [server printRoutesToFile:stdout]; return 0; }\n"
-                                  "    return [server runWithHost:host portOverride:portOverride once:once];\n"
-                                  "  }\n"
-                                  "}\n"]);
+    XCTAssertTrue([self writeFile:appSourcePath content:fixedAppSource]);
+    NSError *touchError = nil;
+    XCTAssertTrue([[NSFileManager defaultManager] setAttributes:@{ NSFileModificationDate : initialModifiedDate }
+                                                   ofItemAtPath:appSourcePath
+                                                          error:&touchError],
+                  @"failed restoring app_lite.m mtime: %@", touchError.localizedDescription);
 
     BOOL recovered = NO;
-    for (NSInteger attempt = 0; attempt < 240; attempt++) {
+    for (NSInteger attempt = 0; attempt < 120; attempt++) {
       int curlCode = 0;
       NSString *body = [self runShellCapture:[NSString stringWithFormat:@"curl -fsS http://127.0.0.1:%d/", port]
                                     exitCode:&curlCode];

@@ -21,6 +21,8 @@ Modules are:
 ```bash
 ./build/arlen module add auth --json
 ./build/arlen module add admin-ui --json
+./build/arlen module add jobs --json
+./build/arlen module add notifications --json
 ./build/arlen module migrate --env development --json
 ```
 
@@ -30,6 +32,13 @@ Useful commands:
 - `arlen module doctor`
 - `arlen module assets`
 - `arlen module upgrade`
+
+Current first-party modules in-tree:
+
+- `auth`
+- `admin-ui`
+- `jobs`
+- `notifications`
 
 ## Override Model
 

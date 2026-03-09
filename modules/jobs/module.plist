@@ -1,0 +1,30 @@
+{
+  identifier = "jobs";
+  version = "1.0.0";
+  principalClass = "ALNJobsModule";
+  compatibility = {
+    arlenVersion = ">= 0.1.0";
+  };
+  config = {
+    defaults = {
+      jobsModule = {
+        paths = {
+          prefix = "/jobs";
+          apiPrefix = "/api";
+        };
+        worker = {
+          maxJobsPerRun = 50;
+          retryDelaySeconds = 5;
+        };
+        providers = {
+          classes = ();
+        };
+        schedules = {
+          classes = ();
+        };
+      };
+    };
+    requiredKeys = (
+    );
+  };
+}

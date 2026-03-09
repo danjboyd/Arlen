@@ -27,6 +27,8 @@ Open `build/docs/index.html` in your browser, or use `make docs-serve` for local
 - [Modules](MODULES.md): first-class module architecture, install flow, and override model.
 - [Auth Module](AUTH_MODULE.md): first-party auth product routes, hooks, and `/auth/api` surface.
 - [Admin UI Module](ADMIN_UI_MODULE.md): first-party admin resource contract and `/admin/api` surface.
+- [Jobs Module](JOBS_MODULE.md): first-party jobs runtime contracts plus protected `/jobs` HTML and `/jobs/api` JSON surfaces.
+- [Notifications Module](NOTIFICATIONS_MODULE.md): first-party notifications foundation on jobs + mail with `/notifications/api` JSON endpoints.
 - [Deployment Guide](DEPLOYMENT.md): deployment model and production guidance.
 - [Password Hashing](PASSWORD_HASHING.md): Argon2id password hashing API, defaults, and rehash workflow.
 - [Realtime and Composition](REALTIME_COMPOSITION.md): websocket/SSE contracts, pubsub hub, and app mounting.
@@ -89,6 +91,7 @@ Open `build/docs/index.html` in your browser, or use `make docs-serve` for local
 - [Phase 11 Roadmap](PHASE11_ROADMAP.md)
 - [Phase 12 Roadmap](PHASE12_ROADMAP.md)
 - [Phase 13 Roadmap](PHASE13_ROADMAP.md)
+- [Phase 14 Roadmap](PHASE14_ROADMAP.md)
 - [Competitive Benchmark Roadmap](COMPETITIVE_BENCHMARK_ROADMAP.md)
 - [Phase B Parity Checklist (FastAPI)](PHASEB_PARITY_CHECKLIST_FASTAPI.md)
 - [Phase C Benchmark Protocol](PHASEC_BENCHMARK_PROTOCOL.md)

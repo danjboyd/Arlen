@@ -1,0 +1,80 @@
+<section class="jobs-grid">
+  <article class="jobs-card jobs-card--actions">
+    <h2>Runbooks</h2>
+    <form method="post" action="<%= $jobsPrefix ?: @"/jobs" %>/run-scheduler">
+      <input type="hidden" name="csrf_token" value="<%= $csrfToken ?: @"" %>">
+      <button type="submit">Run scheduler</button>
+    </form>
+    <form method="post" action="<%= $jobsPrefix ?: @"/jobs" %>/run-worker">
+      <input type="hidden" name="csrf_token" value="<%= $csrfToken ?: @"" %>">
+      <button type="submit">Run worker</button>
+    </form>
+  </article>
+
+  <article class="jobs-card">
+    <h2>Totals</h2>
+    <dl>
+      <dt>Definitions</dt>
+      <dd><%= [$summary[@"totals"][@"definitions"] stringValue] %></dd>
+      <dt>Schedules</dt>
+      <dd><%= [$summary[@"totals"][@"schedules"] stringValue] %></dd>
+      <dt>Pending</dt>
+      <dd><%= [$summary[@"totals"][@"pending"] stringValue] %></dd>
+      <dt>Leased</dt>
+      <dd><%= [$summary[@"totals"][@"leased"] stringValue] %></dd>
+      <dt>Dead letters</dt>
+      <dd><%= [$summary[@"totals"][@"deadLetters"] stringValue] %></dd>
+    </dl>
+  </article>
+
+  <article class="jobs-card">
+    <h2>Queues</h2>
+    <% for (NSDictionary *queue in $summary[@"queues"] ?: @[]) { %>
+      <div class="jobs-item">
+        <strong><%= queue[@"name"] ?: @"default" %></strong>
+        <span>pending <%= [queue[@"pendingCount"] stringValue] %></span>
+        <span>leased <%= [queue[@"leasedCount"] stringValue] %></span>
+        <span>dead <%= [queue[@"deadLetterCount"] stringValue] %></span>
+        <span><%= [queue[@"paused"] boolValue] ? @"paused" : @"active" %></span>
+      </div>
+    <% } %>
+  </article>
+
+  <article class="jobs-card jobs-card--wide">
+    <h2>Job Definitions</h2>
+    <% for (NSDictionary *definition in $summary[@"definitions"] ?: @[]) { %>
+      <div class="jobs-item">
+        <strong><%= definition[@"title"] ?: definition[@"identifier"] ?: @"job" %></strong>
+        <span><code><%= definition[@"identifier"] ?: @"" %></code></span>
+        <span>queue <%= definition[@"queue"] ?: @"default" %></span>
+        <span>max attempts <%= [definition[@"maxAttempts"] stringValue] %></span>
+      </div>
+    <% } %>
+  </article>
+
+  <article class="jobs-card jobs-card--wide">
+    <h2>Schedules</h2>
+    <% for (NSDictionary *schedule in $summary[@"schedules"] ?: @[]) { %>
+      <div class="jobs-item">
+        <strong><%= schedule[@"identifier"] ?: @"schedule" %></strong>
+        <span>job <%= schedule[@"job"] ?: @"" %></span>
+        <% if ([schedule[@"intervalSeconds"] doubleValue] > 0.0) { %>
+          <span>every <%= [schedule[@"intervalSeconds"] stringValue] %>s</span>
+        <% } else { %>
+          <span>cron <%= schedule[@"cron"] ?: @"" %></span>
+        <% } %>
+      </div>
+    <% } %>
+  </article>
+
+  <article class="jobs-card jobs-card--wide">
+    <h2>Dead Letters</h2>
+    <% for (NSDictionary *job in $summary[@"deadLetterJobs"] ?: @[]) { %>
+      <div class="jobs-item">
+        <strong><%= job[@"job"] ?: @"job" %></strong>
+        <span><%= job[@"jobID"] ?: @"" %></span>
+        <span>attempt <%= [job[@"attempt"] stringValue] %>/<%= [job[@"maxAttempts"] stringValue] %></span>
+      </div>
+    <% } %>
+  </article>
+</section>

@@ -176,6 +176,13 @@ static NSArray *AMNormalizedEmailArray(id rawValues) {
   return [NSArray arrayWithArray:normalized];
 }
 
+static BOOL AMConfigBool(id value, BOOL fallbackValue) {
+  if ([value respondsToSelector:@selector(boolValue)]) {
+    return [value boolValue];
+  }
+  return fallbackValue;
+}
+
 static NSDictionary *AMUserDictionaryFromRow(NSDictionary *row) {
   if (![row isKindOfClass:[NSDictionary class]]) {
     return nil;
@@ -235,6 +242,7 @@ static NSString *AMStubHS256JWT(NSDictionary *claims, NSString *sharedSecret) {
 @property(nonatomic, copy, readwrite) NSString *providerStubAuthorizePath;
 @property(nonatomic, copy, readwrite) NSString *providerStubCallbackPath;
 @property(nonatomic, copy, readwrite) NSString *defaultRedirect;
+@property(nonatomic, copy, readwrite) NSArray<NSDictionary *> *loginProviders;
 @property(nonatomic, copy) NSString *stubProviderEmail;
 @property(nonatomic, copy) NSString *stubProviderDisplayName;
 @property(nonatomic, copy) NSString *stubProviderSharedSecret;
@@ -367,6 +375,13 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
     _providerStubAuthorizePath = @"/auth/provider/stub/authorize";
     _providerStubCallbackPath = @"/auth/provider/stub/callback";
     _defaultRedirect = @"/";
+    _loginProviders = @[ @{
+      @"identifier" : @"stub",
+      @"kind" : @"oidc",
+      @"ctaLabel" : @"Continue with Stub OIDC",
+      @"loginPath" : @"/auth/provider/stub/login",
+      @"apiLoginPath" : @"/auth/api/provider/stub/login",
+    } ];
     _stubProviderEmail = @"stub-user@example.test";
     _stubProviderDisplayName = @"Stub Provider User";
     _stubProviderSharedSecret = @"auth-module-stub-provider-secret-0123456789abcdef";
@@ -405,6 +420,7 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
                                 ? self.moduleConfig[@"providers"]
                                 : @{};
   NSDictionary *stubProvider = [providers[@"stub"] isKindOfClass:[NSDictionary class]] ? providers[@"stub"] : @{};
+  BOOL stubEnabled = AMConfigBool(stubProvider[@"enabled"], YES);
   NSString *stubEmail = AMLowerTrimmedString(stubProvider[@"email"]);
   if ([stubEmail length] > 0) {
     self.stubProviderEmail = stubEmail;
@@ -416,6 +432,17 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
   NSString *sharedSecret = AMTrimmedString(stubProvider[@"clientSecret"]);
   if ([sharedSecret length] > 0) {
     self.stubProviderSharedSecret = sharedSecret;
+  }
+  if (stubEnabled) {
+    self.loginProviders = @[ @{
+      @"identifier" : @"stub",
+      @"kind" : @"oidc",
+      @"ctaLabel" : @"Continue with Stub OIDC",
+      @"loginPath" : self.providerStubLoginPath ?: @"/auth/provider/stub/login",
+      @"apiLoginPath" : AMPathJoin(self.apiPrefix, @"provider/stub/login"),
+    } ];
+  } else {
+    self.loginProviders = @[];
   }
 
   self.bootstrapAdminEmails = AMNormalizedEmailArray(self.moduleConfig[@"bootstrapAdminEmails"]);
@@ -494,6 +521,7 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
 - (NSDictionary *)resolvedHookSummary {
   NSMutableDictionary *summary = [NSMutableDictionary dictionary];
   summary[@"apiPrefix"] = self.apiPrefix ?: @"/auth/api";
+  summary[@"loginProviders"] = self.loginProviders ?: @[];
   summary[@"registrationPolicy"] = self.registrationPolicyHook ? NSStringFromClass([self.registrationPolicyHook class]) : @"";
   summary[@"passwordPolicy"] = self.passwordPolicyHook ? NSStringFromClass([self.passwordPolicyHook class]) : @"";
   summary[@"userProvisioning"] = self.userProvisioningHook ? NSStringFromClass([self.userProvisioningHook class]) : @"";
@@ -501,6 +529,20 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
   summary[@"sessionPolicy"] = self.sessionPolicyHook ? NSStringFromClass([self.sessionPolicyHook class]) : @"";
   summary[@"providerMapping"] = self.providerMappingHook ? NSStringFromClass([self.providerMappingHook class]) : @"";
   return summary;
+}
+
+- (BOOL)isProviderEnabled:(NSString *)identifier {
+  NSString *providerID = AMLowerTrimmedString(identifier);
+  if ([providerID length] == 0) {
+    return NO;
+  }
+  for (NSDictionary *descriptor in self.loginProviders ?: @[]) {
+    NSString *configuredID = AMLowerTrimmedString(descriptor[@"identifier"]);
+    if ([configuredID isEqualToString:providerID]) {
+      return YES;
+    }
+  }
+  return NO;
 }
 
 - (BOOL)registrationAllowedForRequest:(NSDictionary *)registrationRequest
@@ -1185,6 +1227,7 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
   payload[@"roles"] = [context authRoles] ?: @[];
   payload[@"session_id"] = [context authSessionIdentifier] ?: @"";
   payload[@"csrf_token"] = [context csrfToken] ?: @"";
+  payload[@"login_providers"] = self.loginProviders ?: @[];
   if (includeUser && [subject length] > 0) {
     NSDictionary *user = [self currentUserForSubject:subject error:error];
     if (user != nil) {
@@ -1321,6 +1364,7 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
   context[@"authForgotPasswordPath"] = self.runtime.forgotPasswordPath ?: @"/auth/password/forgot";
   context[@"authResetPasswordPath"] = self.runtime.resetPasswordPath ?: @"/auth/password/reset";
   context[@"authTOTPPath"] = self.runtime.totpPath ?: @"/auth/mfa/totp";
+  context[@"authProviders"] = self.runtime.loginProviders ?: @[];
   if ([extraCtx isKindOfClass:[NSDictionary class]]) {
     [context addEntriesFromDictionary:extraCtx];
   }
@@ -1719,6 +1763,10 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
 }
 
 - (id)providerStubLogin:(ALNContext *)ctx {
+  if (![self.runtime isProviderEnabled:@"stub"]) {
+    [self setStatus:404];
+    return [self shouldReturnJSON:ctx] ? @{ @"status" : @"error", @"message" : @"Provider not found" } : nil;
+  }
   NSString *baseURL = [self requestBaseURL:ctx];
   NSDictionary *providerConfiguration = [self.runtime stubProviderConfigurationForBaseURL:baseURL];
   NSString *state = AMRandomToken(12);
@@ -1745,6 +1793,10 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
 }
 
 - (id)providerStubAuthorize:(ALNContext *)ctx {
+  if (![self.runtime isProviderEnabled:@"stub"]) {
+    [self setStatus:404];
+    return [self shouldReturnJSON:ctx] ? @{ @"status" : @"error", @"message" : @"Provider not found" } : nil;
+  }
   NSString *state = AMTrimmedString([self requestParameters][@"state"]);
   NSString *callbackURL = [NSString stringWithFormat:@"%@?code=stub-code&state=%@", self.runtime.providerStubCallbackPath, state ?: @""];
   if ([self shouldReturnJSON:ctx]) {
@@ -1758,6 +1810,10 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
 }
 
 - (id)providerStubCallback:(ALNContext *)ctx {
+  if (![self.runtime isProviderEnabled:@"stub"]) {
+    [self setStatus:404];
+    return [self shouldReturnJSON:ctx] ? @{ @"status" : @"error", @"message" : @"Provider not found" } : nil;
+  }
   NSDictionary *callbackState = [ctx.session[ALNAuthModuleProviderStateSessionKey] isKindOfClass:[NSDictionary class]]
                                     ? ctx.session[ALNAuthModuleProviderStateSessionKey]
                                     : @{};
@@ -1914,21 +1970,23 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
                               name:@"auth_totp_verify"
                    controllerClass:[ALNAuthModuleController class]
                              action:@"totpVerify"];
-  [application registerRouteMethod:@"GET"
-                              path:runtime.providerStubLoginPath
-                              name:@"auth_provider_stub_login"
-                   controllerClass:[ALNAuthModuleController class]
-                             action:@"providerStubLogin"];
-  [application registerRouteMethod:@"GET"
-                              path:runtime.providerStubAuthorizePath
-                              name:@"auth_provider_stub_authorize"
-                   controllerClass:[ALNAuthModuleController class]
-                             action:@"providerStubAuthorize"];
-  [application registerRouteMethod:@"GET"
-                              path:runtime.providerStubCallbackPath
-                              name:@"auth_provider_stub_callback"
-                   controllerClass:[ALNAuthModuleController class]
-                             action:@"providerStubCallback"];
+  if ([runtime isProviderEnabled:@"stub"]) {
+    [application registerRouteMethod:@"GET"
+                                path:runtime.providerStubLoginPath
+                                name:@"auth_provider_stub_login"
+                     controllerClass:[ALNAuthModuleController class]
+                               action:@"providerStubLogin"];
+    [application registerRouteMethod:@"GET"
+                                path:runtime.providerStubAuthorizePath
+                                name:@"auth_provider_stub_authorize"
+                     controllerClass:[ALNAuthModuleController class]
+                               action:@"providerStubAuthorize"];
+    [application registerRouteMethod:@"GET"
+                                path:runtime.providerStubCallbackPath
+                                name:@"auth_provider_stub_callback"
+                     controllerClass:[ALNAuthModuleController class]
+                               action:@"providerStubCallback"];
+  }
   [application beginRouteGroupWithPrefix:runtime.apiPrefix guardAction:nil formats:nil];
   [application registerRouteMethod:@"GET"
                               path:@"/session"
@@ -1980,21 +2038,23 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
                               name:@"auth_api_totp_verify"
                    controllerClass:[ALNAuthModuleController class]
                              action:@"totpVerify"];
-  [application registerRouteMethod:@"GET"
-                              path:@"/provider/stub/login"
-                              name:@"auth_api_provider_stub_login"
-                   controllerClass:[ALNAuthModuleController class]
-                             action:@"providerStubLogin"];
-  [application registerRouteMethod:@"GET"
-                              path:@"/provider/stub/authorize"
-                              name:@"auth_api_provider_stub_authorize"
-                   controllerClass:[ALNAuthModuleController class]
-                             action:@"providerStubAuthorize"];
-  [application registerRouteMethod:@"GET"
-                              path:@"/provider/stub/callback"
-                              name:@"auth_api_provider_stub_callback"
-                   controllerClass:[ALNAuthModuleController class]
-                             action:@"providerStubCallback"];
+  if ([runtime isProviderEnabled:@"stub"]) {
+    [application registerRouteMethod:@"GET"
+                                path:@"/provider/stub/login"
+                                name:@"auth_api_provider_stub_login"
+                     controllerClass:[ALNAuthModuleController class]
+                               action:@"providerStubLogin"];
+    [application registerRouteMethod:@"GET"
+                                path:@"/provider/stub/authorize"
+                                name:@"auth_api_provider_stub_authorize"
+                     controllerClass:[ALNAuthModuleController class]
+                               action:@"providerStubAuthorize"];
+    [application registerRouteMethod:@"GET"
+                                path:@"/provider/stub/callback"
+                                name:@"auth_api_provider_stub_callback"
+                     controllerClass:[ALNAuthModuleController class]
+                               action:@"providerStubCallback"];
+  }
   [application endRouteGroup];
 
   NSError *routeError = nil;
@@ -2080,7 +2140,10 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
       },
       @"response" : @{ @"type" : @"object" },
     },
-    @"auth_api_provider_stub_login" : @{
+  };
+  if ([runtime isProviderEnabled:@"stub"]) {
+    NSMutableDictionary *mutableRouteSchemas = [NSMutableDictionary dictionaryWithDictionary:apiRouteSchemas];
+    mutableRouteSchemas[@"auth_api_provider_stub_login"] = @{
       @"request" : @{
         @"type" : @"object",
         @"properties" : @{
@@ -2088,8 +2151,8 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
         },
       },
       @"response" : @{ @"type" : @"object" },
-    },
-    @"auth_api_provider_stub_authorize" : @{
+    };
+    mutableRouteSchemas[@"auth_api_provider_stub_authorize"] = @{
       @"request" : @{
         @"type" : @"object",
         @"properties" : @{
@@ -2097,8 +2160,8 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
         },
       },
       @"response" : @{ @"type" : @"object" },
-    },
-    @"auth_api_provider_stub_callback" : @{
+    };
+    mutableRouteSchemas[@"auth_api_provider_stub_callback"] = @{
       @"request" : @{
         @"type" : @"object",
         @"properties" : @{
@@ -2107,8 +2170,9 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
         },
       },
       @"response" : @{ @"type" : @"object" },
-    },
-  };
+    };
+    apiRouteSchemas = [NSDictionary dictionaryWithDictionary:mutableRouteSchemas];
+  }
   for (NSString *routeName in [apiRouteSchemas allKeys]) {
     NSDictionary *schema = apiRouteSchemas[routeName];
     NSDictionary *requestSchema = [schema[@"request"] isKindOfClass:[NSDictionary class]] ? schema[@"request"] : nil;

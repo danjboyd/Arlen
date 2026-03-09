@@ -1,0 +1,5 @@
+<section class="jobs-card jobs-card--result">
+  <h2><%= $pageHeading ?: @"Jobs" %></h2>
+  <p><%= $message ?: @"" %></p>
+  <p><a href="<%= $jobsPrefix ?: @"/jobs" %>">Back to jobs</a></p>
+</section>

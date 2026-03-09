@@ -116,6 +116,10 @@
                 @"boomhauer app compile path must include llhttp C sources");
   XCTAssertTrue([script containsString:@"find \"$framework_root/src/Arlen/Support/third_party/argon2\" -type f -name '*.c'"],
                 @"boomhauer app compile path must include argon2 C sources");
+  XCTAssertTrue([script containsString:@"find \"$framework_root/modules\" -mindepth 2 -maxdepth 2 -type d -name 'Sources'"],
+                @"boomhauer app compile path must include first-party framework module headers");
+  XCTAssertTrue([script containsString:@"find \"$app_root/modules\" -mindepth 2 -maxdepth 2 -type d -name 'Sources'"],
+                @"boomhauer app compile path must include vendored app module headers");
   XCTAssertTrue([script containsString:@"-DARLEN_ENABLE_YYJSON=\"$enable_yyjson\""]);
   XCTAssertTrue([script containsString:@"-DARLEN_ENABLE_LLHTTP=\"$enable_llhttp\""]);
   XCTAssertTrue([script containsString:@"-DARGON2_NO_THREADS=1"]);
@@ -134,6 +138,21 @@
                                "  exit 1\n"
                                "fi"],
                  @"watch mode should not build the fallback error server eagerly at startup");
+}
+
+- (void)testBoomhauerWatchModeAdvertisesAndRetriesBuildErrors {
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *scriptPath = [repoRoot stringByAppendingPathComponent:@"bin/boomhauer"];
+  NSString *script = [self readFile:scriptPath];
+
+  XCTAssertTrue([script containsString:@"ARLEN_BOOMHAUER_BUILD_ERROR_RETRY_SECONDS"],
+                @"watch mode should export retry cadence to the fallback server");
+  XCTAssertTrue([script containsString:@"ARLEN_BOOMHAUER_BUILD_ERROR_AUTO_REFRESH_SECONDS"],
+                @"watch mode should export browser auto-refresh cadence to the fallback server");
+  XCTAssertTrue([script containsString:@"ARLEN_BOOMHAUER_BUILD_ERROR_RECOVERY_HINT"],
+                @"watch mode should export a recovery hint to the fallback server");
+  XCTAssertTrue([script containsString:@"boomhauer: retrying failed build..."],
+                @"watch mode should periodically retry failed builds");
 }
 
 - (void)testGNUmakefileIncludesJSONReliabilityGateTargets {

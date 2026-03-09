@@ -1,7 +1,11 @@
 #import <Foundation/Foundation.h>
 #import <XCTest/XCTest.h>
 
+#import <stdlib.h>
+
+#import "ALNApplication.h"
 #import "ALNAuthModule.h"
+#import "ALNRouter.h"
 
 static NSUInteger gPhase13EPasswordPolicyCalls = 0;
 static NSUInteger gPhase13EProvisioningCalls = 0;
@@ -73,6 +77,35 @@ static NSUInteger gPhase13EPostLoginRedirectCalls = 0;
 
 @implementation Phase13ETests
 
+- (NSString *)pgTestDSN {
+  const char *value = getenv("ARLEN_PG_TEST_DSN");
+  if (value == NULL || value[0] == '\0') {
+    return nil;
+  }
+  return [NSString stringWithUTF8String:value];
+}
+
+- (ALNApplication *)applicationWithConfig:(NSDictionary *)extraConfig {
+  NSString *dsn = [self pgTestDSN];
+  NSMutableDictionary *config = [NSMutableDictionary dictionaryWithDictionary:@{
+    @"environment" : @"test",
+    @"logFormat" : @"json",
+    @"session" : @{
+      @"enabled" : @YES,
+      @"secret" : @"phase13e-session-secret-0123456789abcdef",
+    },
+    @"csrf" : @{
+      @"enabled" : @YES,
+      @"allowQueryParamFallback" : @YES,
+    },
+    @"database" : @{
+      @"connectionString" : dsn ?: @"",
+    },
+  }];
+  [config addEntriesFromDictionary:extraConfig ?: @{}];
+  return [[ALNApplication alloc] initWithConfig:config];
+}
+
 - (void)setUp {
   [super setUp];
   gPhase13EPasswordPolicyCalls = 0;
@@ -103,6 +136,17 @@ static NSUInteger gPhase13EPostLoginRedirectCalls = 0;
   XCTAssertEqualObjects(@"/auth/provider/stub/login", runtime.providerStubLoginPath);
   XCTAssertEqualObjects(@"/", runtime.defaultRedirect);
   XCTAssertEqualObjects(@"/auth/api", summary[@"apiPrefix"]);
+  XCTAssertEqual((NSUInteger)1, runtime.loginProviders.count);
+  XCTAssertEqualObjects(@"stub", runtime.loginProviders[0][@"identifier"]);
+  XCTAssertTrue([runtime isProviderEnabled:@"stub"]);
+  XCTAssertEqualObjects((@[ @{
+                         @"identifier" : @"stub",
+                         @"kind" : @"oidc",
+                         @"ctaLabel" : @"Continue with Stub OIDC",
+                         @"loginPath" : @"/auth/provider/stub/login",
+                         @"apiLoginPath" : @"/auth/api/provider/stub/login",
+                       } ]),
+                       summary[@"loginProviders"]);
   XCTAssertEqualObjects(@"", summary[@"passwordPolicy"]);
   XCTAssertEqualObjects(@"", summary[@"userProvisioning"]);
   XCTAssertEqualObjects(@"", summary[@"sessionPolicy"]);
@@ -185,6 +229,48 @@ static NSUInteger gPhase13EPostLoginRedirectCalls = 0;
                                             defaultRedirect:@"/"];
   XCTAssertEqualObjects(@"/module/home", redirect);
   XCTAssertEqual((NSUInteger)1, gPhase13EPostLoginRedirectCalls);
+}
+
+- (void)testDisabledProviderIsRemovedFromRuntimeLoginProviderList {
+  ALNAuthModuleRuntime *runtime = [ALNAuthModuleRuntime sharedRuntime];
+  NSError *error = nil;
+  NSDictionary *config = @{
+    @"providers" : @{
+      @"stub" : @{
+        @"enabled" : @NO,
+      },
+    },
+  };
+  XCTAssertTrue([runtime configureHooksWithModuleConfig:config error:&error]);
+  XCTAssertNil(error);
+  XCTAssertEqual((NSUInteger)0, runtime.loginProviders.count);
+  XCTAssertFalse([runtime isProviderEnabled:@"stub"]);
+  XCTAssertEqualObjects((@[]), [runtime resolvedHookSummary][@"loginProviders"]);
+}
+
+- (void)testDisabledProviderIsNotRegisteredAsRoute {
+  if ([[self pgTestDSN] length] == 0) {
+    return;
+  }
+  ALNApplication *app = [self applicationWithConfig:@{
+    @"authModule" : @{
+      @"providers" : @{
+        @"stub" : @{
+          @"enabled" : @NO,
+        },
+      },
+    },
+  }];
+  NSError *error = nil;
+  XCTAssertTrue([[[ALNAuthModule alloc] init] registerWithApplication:app error:&error]);
+  XCTAssertNil(error);
+
+  XCTAssertNil([app.router routeNamed:@"auth_provider_stub_login"]);
+  XCTAssertNil([app.router routeNamed:@"auth_provider_stub_authorize"]);
+  XCTAssertNil([app.router routeNamed:@"auth_provider_stub_callback"]);
+  XCTAssertNil([app.router routeNamed:@"auth_api_provider_stub_login"]);
+  XCTAssertNil([app.router routeNamed:@"auth_api_provider_stub_authorize"]);
+  XCTAssertNil([app.router routeNamed:@"auth_api_provider_stub_callback"]);
 }
 
 @end

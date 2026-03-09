@@ -38,6 +38,11 @@ Headless aliases:
 - `POST /auth/api/mfa/totp/verify`
 - `GET /auth/api/provider/stub/login`
 
+Provider CTAs and provider API routes are driven by the enabled provider set in
+`authModule.providers`. If `authModule.providers.stub.enabled = NO`, the
+`/auth/login` page no longer renders the stub-provider CTA and the stub routes
+are not registered.
+
 ## Customization
 
 Use hook classes in `authModule.hooks` for:
@@ -56,4 +61,6 @@ the module while leaving policy and branding with the app.
 
 SPA clients should use `/auth/api/...` rather than scraping the HTML routes.
 Those endpoints are intended to back React or other frontend clients without
-shipping a bundled frontend inside the module.
+shipping a bundled frontend inside the module. Session payloads also expose
+`login_providers` so SPA clients can discover enabled provider-login affordances
+without hard-coding them.

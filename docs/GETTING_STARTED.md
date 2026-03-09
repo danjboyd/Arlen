@@ -253,15 +253,16 @@ Phase 12 public auth helper surface:
 
 The sample app in [examples/auth_primitives/README.md](/home/danboyd/git/Arlen/examples/auth_primitives/README.md) demonstrates the local TOTP step-up path plus a stub OIDC provider flow built directly on these core contracts.
 
-Phase 13 first-party module quick path:
+Phase 13/14 first-party module quick path:
 
 ```bash
 ./build/arlen module add auth
 ./build/arlen module add admin-ui
+./build/arlen module add jobs
+./build/arlen module add notifications
 ./build/arlen module doctor --json
 ./build/arlen module assets --output-dir build/module_assets
 ./build/arlen module migrate --env development
-make phase13-confidence
 ```
 
 Vendored modules live under `modules/<id>/`. `boomhauer` automatically compiles
@@ -275,6 +276,11 @@ endpoints under `/auth/api/...`. The first-party `admin-ui` module mounts a defa
 `/admin` HTML surface and `/admin/api` JSON surface on top of the shared auth/session
 contracts. See [examples/auth_admin_demo/README.md](/home/danboyd/git/Arlen/examples/auth_admin_demo/README.md)
 for a sample app that registers an app-owned admin resource into the shared module system.
+
+Phase 14 adds the first-party `jobs` module with a protected `/jobs` HTML dashboard and
+`/jobs/api/...` JSON/OpenAPI surface, plus the first-party `notifications` module with
+`/notifications/api/...` endpoints for definition inspection, queueing, outbox, and inbox
+flows built on the shared jobs/mail contracts.
 
 Trusted proxy allowlist override:
 
@@ -435,7 +441,10 @@ Run app dev server:
 By default, `boomhauer` watches source/template/config/public changes and rebuilds when build
 inputs change. Config/public changes restart the app without a rebuild.
 On the first watch-mode build failure in a session, `boomhauer` builds the fallback error server
-on demand before serving diagnostics.
+on demand before serving diagnostics. While that fallback server is active, `boomhauer` retries
+the failed build automatically on a short backoff and the HTML error page refreshes itself unless
+you disable that behavior with `ARLEN_BOOMHAUER_BUILD_ERROR_RETRY_SECONDS=0` or
+`ARLEN_BOOMHAUER_BUILD_ERROR_AUTO_REFRESH_SECONDS=0`.
 
 If watched reload fails to transpile/compile, `boomhauer` stays up and serves diagnostics:
 
@@ -445,6 +454,8 @@ curl -sS -H 'Accept: application/json' http://127.0.0.1:3000/api/dev/build-error
 ```
 
 Fixing the source and triggering a successful rebuild resumes normal responses automatically.
+Fallback diagnostics include the last failure timestamp, the recovery hint, and a JSON view at
+`/api/dev/build-error`.
 
 Lite scaffold remains available:
 

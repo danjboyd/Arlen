@@ -77,6 +77,14 @@ static BOOL ParseStrictIntegerValue(id value, NSInteger *parsedOut) {
   return YES;
 }
 
+static NSInteger EnvNonNegativeInteger(const char *name, NSInteger fallbackValue) {
+  NSInteger parsed = fallbackValue;
+  if (ParseStrictIntegerValue(EnvString(name), &parsed) && parsed >= 0) {
+    return parsed;
+  }
+  return fallbackValue;
+}
+
 static NSString *NormalizedDBIdentifier(NSString *value, NSString *fallback) {
   NSString *trimmed = TrimmedStringValue(value);
   if ([trimmed length] == 0) {
@@ -1226,6 +1234,19 @@ static NSArray *WarningLines(NSString *output) {
   return warnings;
 }
 
+static NSString *BuildFailureRecoveryHint(NSInteger autoRetrySeconds) {
+  NSString *explicit = EnvString("ARLEN_BOOMHAUER_BUILD_ERROR_RECOVERY_HINT");
+  if ([explicit length] > 0) {
+    return explicit;
+  }
+  if (autoRetrySeconds > 0) {
+    return [NSString stringWithFormat:
+                         @"Fix the compile error and save a watched file. Boomhauer retries automatically every %ld seconds while this page is active.",
+                         (long)autoRetrySeconds];
+  }
+  return @"Fix the compile error, then save a watched file or restart boomhauer to retry.";
+}
+
 static NSDictionary *BuildFailurePayload(NSString *requestID) {
   NSString *metaFile = EnvString("ARLEN_BOOMHAUER_BUILD_ERROR_META_FILE");
   NSString *outputFile = EnvString("ARLEN_BOOMHAUER_BUILD_ERROR_FILE");
@@ -1233,9 +1254,15 @@ static NSDictionary *BuildFailurePayload(NSString *requestID) {
   NSDictionary *meta = ParseMetadataFile(metaFile);
   NSString *stage = [meta[@"stage"] isKindOfClass:[NSString class]] ? meta[@"stage"] : @"compile";
   NSString *command = [meta[@"command"] isKindOfClass:[NSString class]] ? meta[@"command"] : @"";
+  NSString *timestampUTC =
+      [meta[@"timestamp_utc"] isKindOfClass:[NSString class]] ? meta[@"timestamp_utc"] : @"";
   NSInteger exitCode = [meta[@"exit_code"] respondsToSelector:@selector(integerValue)]
                            ? [meta[@"exit_code"] integerValue]
                            : 1;
+  NSInteger autoRetrySeconds = EnvNonNegativeInteger("ARLEN_BOOMHAUER_BUILD_ERROR_RETRY_SECONDS", 2);
+  NSInteger autoRefreshSeconds =
+      EnvNonNegativeInteger("ARLEN_BOOMHAUER_BUILD_ERROR_AUTO_REFRESH_SECONDS", 3);
+  NSString *recoveryHint = BuildFailureRecoveryHint(autoRetrySeconds);
 
   NSString *output = ReadTextFile(outputFile);
   NSDictionary *diagnostic = ExtractPrimaryDiagnostic(output);
@@ -1246,6 +1273,10 @@ static NSDictionary *BuildFailurePayload(NSString *requestID) {
   details[@"stage"] = stage ?: @"compile";
   details[@"command"] = command ?: @"";
   details[@"exit_code"] = @(exitCode);
+  details[@"timestamp_utc"] = timestampUTC ?: @"";
+  details[@"recovery_hint"] = recoveryHint ?: @"";
+  details[@"auto_retry_seconds"] = @(autoRetrySeconds);
+  details[@"auto_refresh_seconds"] = @(autoRefreshSeconds);
   if ([diagnostic count] > 0) {
     [details addEntriesFromDictionary:diagnostic];
   }
@@ -1286,23 +1317,65 @@ static BOOL RequestPrefersJSON(ALNRequest *request) {
   return NO;
 }
 
+static void ApplyBuildErrorResponseHeaders(ALNResponse *response, NSInteger autoRefreshSeconds) {
+  if (response == nil) {
+    return;
+  }
+  [response setHeader:@"Cache-Control" value:@"no-store, max-age=0"];
+  [response setHeader:@"Pragma" value:@"no-cache"];
+  [response setHeader:@"Expires" value:@"0"];
+  if (autoRefreshSeconds > 0) {
+    [response setHeader:@"Refresh" value:[NSString stringWithFormat:@"%ld", (long)autoRefreshSeconds]];
+  }
+}
+
 static NSString *BuildFailureHTML(NSDictionary *payload) {
   NSDictionary *error = [payload[@"error"] isKindOfClass:[NSDictionary class]] ? payload[@"error"] : @{};
   NSDictionary *details = [payload[@"details"] isKindOfClass:[NSDictionary class]] ? payload[@"details"] : @{};
   NSString *requestID = [error[@"request_id"] isKindOfClass:[NSString class]] ? error[@"request_id"] : @"";
   NSString *message = [error[@"message"] isKindOfClass:[NSString class]] ? error[@"message"] : @"Build failed";
+  NSString *timestampUTC =
+      [details[@"timestamp_utc"] isKindOfClass:[NSString class]] ? details[@"timestamp_utc"] : @"";
+  NSString *recoveryHint =
+      [details[@"recovery_hint"] isKindOfClass:[NSString class]] ? details[@"recovery_hint"] : @"";
+  NSInteger autoRetrySeconds = [details[@"auto_retry_seconds"] respondsToSelector:@selector(integerValue)]
+                                   ? [details[@"auto_retry_seconds"] integerValue]
+                                   : 0;
+  NSInteger autoRefreshSeconds =
+      [details[@"auto_refresh_seconds"] respondsToSelector:@selector(integerValue)]
+          ? [details[@"auto_refresh_seconds"] integerValue]
+          : 0;
 
   NSMutableString *html = [NSMutableString string];
   [html appendString:@"<!doctype html><html><head><meta charset='utf-8'>"];
   [html appendString:@"<title>Boomhauer Build Error</title>"];
-  [html appendString:@"<style>body{font-family:Menlo,Consolas,monospace;background:#111;color:#eee;padding:24px;}h1{margin-top:0;}pre{background:#1b1b1b;border:1px solid #333;padding:12px;overflow:auto;}code{background:#1b1b1b;padding:2px 4px;}table{border-collapse:collapse;width:100%;}td{border:1px solid #333;padding:6px;vertical-align:top;}details{margin-top:12px;}</style>"];
+  if (autoRefreshSeconds > 0) {
+    [html appendFormat:@"<meta http-equiv='refresh' content='%ld'>", (long)autoRefreshSeconds];
+  }
+  [html appendString:@"<style>body{font-family:Menlo,Consolas,monospace;background:#111;color:#eee;padding:24px;}h1{margin-top:0;}pre{background:#1b1b1b;border:1px solid #333;padding:12px;overflow:auto;}code{background:#1b1b1b;padding:2px 4px;}table{border-collapse:collapse;width:100%;}td{border:1px solid #333;padding:6px;vertical-align:top;}.callout{background:#161616;border:1px solid #3a3a3a;padding:12px;margin:16px 0;}.muted{color:#bbb;}details{margin-top:12px;}</style>"];
   [html appendString:@"</head><body>"];
   [html appendString:@"<h1>Boomhauer Build Failed</h1>"];
   [html appendFormat:@"<p>%@</p>", EscapeHTML(message)];
   [html appendFormat:@"<p><strong>Request ID:</strong> <code>%@</code></p>", EscapeHTML(requestID)];
+  if ([timestampUTC length] > 0) {
+    [html appendFormat:@"<p class='muted'><strong>Last failed at:</strong> <code>%@</code></p>",
+                       EscapeHTML(timestampUTC)];
+  }
+  if ([recoveryHint length] > 0) {
+    [html appendFormat:@"<div class='callout'><strong>Recovery:</strong> %@</div>",
+                       EscapeHTML(recoveryHint)];
+  }
+  if (autoRefreshSeconds > 0) {
+    [html appendFormat:@"<p class='muted'>This page refreshes automatically every %ld seconds.</p>",
+                       (long)autoRefreshSeconds];
+  } else if (autoRetrySeconds > 0) {
+    [html appendFormat:@"<p class='muted'>Boomhauer retries failed builds every %ld seconds.</p>",
+                       (long)autoRetrySeconds];
+  }
   [html appendString:@"<table>"];
 
-  NSArray *orderedKeys = @[ @"stage", @"command", @"exit_code", @"file", @"line", @"column", @"message" ];
+  NSArray *orderedKeys =
+      @[ @"timestamp_utc", @"stage", @"command", @"exit_code", @"file", @"line", @"column", @"severity", @"message" ];
   for (NSString *key in orderedKeys) {
     id value = details[key];
     if (value == nil) {
@@ -1355,6 +1428,12 @@ static NSString *BuildFailureHTML(NSDictionary *payload) {
                             ? ctx.stash[@"request_id"]
                             : @"";
   NSDictionary *payload = BuildFailurePayload(requestID);
+  NSDictionary *details =
+      [payload[@"details"] isKindOfClass:[NSDictionary class]] ? payload[@"details"] : @{};
+  NSInteger autoRefreshSeconds = [details[@"auto_refresh_seconds"] respondsToSelector:@selector(integerValue)]
+                                     ? [details[@"auto_refresh_seconds"] integerValue]
+                                     : 0;
+  ApplyBuildErrorResponseHeaders(ctx.response, autoRefreshSeconds);
   NSError *error = nil;
   if (![self renderJSON:payload error:&error]) {
     [self setStatus:500];
@@ -1370,6 +1449,11 @@ static NSString *BuildFailureHTML(NSDictionary *payload) {
                             ? ctx.stash[@"request_id"]
                             : @"";
   NSDictionary *payload = BuildFailurePayload(requestID);
+  NSDictionary *details =
+      [payload[@"details"] isKindOfClass:[NSDictionary class]] ? payload[@"details"] : @{};
+  NSInteger autoRefreshSeconds = [details[@"auto_refresh_seconds"] respondsToSelector:@selector(integerValue)]
+                                     ? [details[@"auto_refresh_seconds"] integerValue]
+                                     : 0;
 
   if (RequestPrefersJSON(ctx.request)) {
     return [self json:ctx];
@@ -1377,6 +1461,7 @@ static NSString *BuildFailureHTML(NSDictionary *payload) {
 
   NSString *html = BuildFailureHTML(payload);
   [self setStatus:500];
+  ApplyBuildErrorResponseHeaders(ctx.response, autoRefreshSeconds);
   [ctx.response setHeader:@"Content-Type" value:@"text/html; charset=utf-8"];
   [ctx.response setTextBody:html ?: @"Build failed\n"];
   ctx.response.committed = YES;

@@ -46,5 +46,9 @@
 #import "Support/ALNWebAuthn.h"
 #import "Support/ALNRealtime.h"
 #import "Support/ALNServices.h"
+#import "ALNAuthModule.h"
+#import "ALNAdminUIModule.h"
+#import "ALNJobsModule.h"
+#import "ALNNotificationsModule.h"
 
 #endif

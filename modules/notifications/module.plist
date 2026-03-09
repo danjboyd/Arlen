@@ -1,0 +1,27 @@
+{
+  identifier = "notifications";
+  version = "1.0.0";
+  principalClass = "ALNNotificationsModule";
+  dependencies = (
+    { identifier = "jobs"; version = ">= 1.0.0"; }
+  );
+  compatibility = {
+    arlenVersion = ">= 0.1.0";
+  };
+  config = {
+    defaults = {
+      notificationsModule = {
+        sender = "notifications@example.test";
+        paths = {
+          prefix = "/notifications";
+          apiPrefix = "/api";
+        };
+        providers = {
+          classes = ();
+        };
+      };
+    };
+    requiredKeys = (
+    );
+  };
+}

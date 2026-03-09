@@ -46,6 +46,7 @@ Arlen is designed to solve the same class of problems as frameworks like Mojolic
 - Phase 11F: complete (hostile protocol corpus, deterministic fuzz/live probes, and Phase 11 sanitizer confidence lanes).
 - Phase 12: complete (12A-12F delivered: auth-assurance/step-up primitives, TOTP/recovery helpers, WebAuthn/passkey MFA baseline, OIDC/provider-login primitives, and Phase 12 confidence artifacts).
 - Phase 13: complete (13A-13I delivered: first-class module substrate, first-party `auth` and `admin-ui` modules, Django-inspired admin resources, `/auth/api` + `/admin/api` surfaces, sample app, and Phase 13 confidence gate).
+- Phase 14: active (14A/14B/14C complete: first-party `jobs` module, protected `/jobs` HTML + JSON/OpenAPI surface, and first-party `notifications` foundation on jobs/mail; 14D-14I remaining).
 
 ## Quick Start
 
@@ -90,20 +91,23 @@ cd MyApp
 /path/to/Arlen/bin/arlen boomhauer --port 3000
 ```
 
-Phase 13 modules quick path:
+Phase 13/14 modules quick path:
 
 ```bash
 /path/to/Arlen/build/arlen module add auth
 /path/to/Arlen/build/arlen module add admin-ui
+/path/to/Arlen/build/arlen module add jobs
+/path/to/Arlen/build/arlen module add notifications
 /path/to/Arlen/build/arlen module doctor --json
 /path/to/Arlen/build/arlen module assets --output-dir build/module_assets
 /path/to/Arlen/build/arlen module migrate --env development
-make phase13-confidence
 ```
 
-Phase 13 surfaces:
+First-party module surfaces:
 - `auth` ships HTML under `/auth/...` and JSON under `/auth/api/...`
 - `admin-ui` ships HTML under `/admin/...` and JSON under `/admin/api/...`
+- `jobs` ships protected HTML under `/jobs/...` and JSON under `/jobs/api/...`
+- `notifications` ships JSON under `/notifications/api/...` in the 14C foundation slice
 
 Run tests and quality gate:
 
@@ -158,6 +162,11 @@ High-value guides:
 - [Toolchain Matrix](docs/TOOLCHAIN_MATRIX.md)
 - [CLI Reference](docs/CLI_REFERENCE.md)
 - [Core Concepts](docs/CORE_CONCEPTS.md)
+- [Modules](docs/MODULES.md)
+- [Auth Module](docs/AUTH_MODULE.md)
+- [Admin UI Module](docs/ADMIN_UI_MODULE.md)
+- [Jobs Module](docs/JOBS_MODULE.md)
+- [Notifications Module](docs/NOTIFICATIONS_MODULE.md)
 - [Deployment Guide](docs/DEPLOYMENT.md)
 - [Password Hashing](docs/PASSWORD_HASHING.md)
 - [Realtime and Composition](docs/REALTIME_COMPOSITION.md)
@@ -209,6 +218,7 @@ Specifications and roadmaps:
 - [Phase 11 Roadmap](docs/PHASE11_ROADMAP.md)
 - [Phase 12 Roadmap](docs/PHASE12_ROADMAP.md)
 - [Phase 13 Roadmap](docs/PHASE13_ROADMAP.md)
+- [Phase 14 Roadmap](docs/PHASE14_ROADMAP.md)
 - [Competitive Benchmark Roadmap](docs/COMPETITIVE_BENCHMARK_ROADMAP.md)
 - [Phase B Parity Checklist (FastAPI)](docs/PHASEB_PARITY_CHECKLIST_FASTAPI.md)
 - [Phase C Benchmark Protocol](docs/PHASEC_BENCHMARK_PROTOCOL.md)

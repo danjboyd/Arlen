@@ -99,6 +99,8 @@ Manage first-class vendored modules installed in `config/modules.plist` and `mod
 - first-party modules currently available in-tree:
   - `auth`
   - `admin-ui`
+  - `jobs`
+  - `notifications`
 
 `arlen module remove <name> [--keep-files] [--json]`
 
@@ -133,6 +135,8 @@ Example first-party bootstrap:
 ```bash
 ./build/arlen module add auth
 ./build/arlen module add admin-ui
+./build/arlen module add jobs
+./build/arlen module add notifications
 ./build/arlen module migrate --env development
 ```
 
@@ -140,6 +144,8 @@ First-party module surfaces after install:
 
 - `auth`: HTML under `/auth/...`, JSON under `/auth/api/...`
 - `admin-ui`: HTML under `/admin/...`, JSON under `/admin/api/...`
+- `jobs`: protected HTML under `/jobs/...`, JSON under `/jobs/api/...`
+- `notifications`: JSON under `/notifications/api/...` in the 14C foundation slice
 
 ### `arlen schema-codegen [--env <name>] [--database <target>] [--dsn <connection_string>] [--output-dir <path>] [--manifest <path>] [--prefix <ClassPrefix>] [--typed-contracts] [--force]`
 
@@ -189,6 +195,7 @@ Build and run `boomhauer` for the current app root.
 - app templates under `templates/modules/<id>/...` override vendored module templates with the same logical path
 - watch mode builds the fallback dev error server lazily on the first build failure instead of eagerly at startup
 - transpile/compile failures in watch mode do not terminate supervisor; diagnostics are served until next successful rebuild
+- while the fallback diagnostic server is active, `boomhauer` retries failed builds on a short backoff and the HTML error page advertises that recovery behavior
 - server args are passed through (`--watch`, `--no-watch`, `--prepare-only`, `--port`, `--host`, `--env`, `--once`, `--print-routes`)
 
 ### `arlen propane [manager args...]`
@@ -285,6 +292,8 @@ Behavior:
 - `EXTRA_OBJC_FLAGS` may add flags (for example sanitizers) but may not include `-fno-objc-arc`
 - defaults to watch mode
 - in app-root watch mode, build failures are captured and rendered as development diagnostics
+- fallback build-error responses include last-failure timestamp, recovery hint, no-store cache headers, and browser auto-refresh metadata
+- watch mode retries failed builds automatically (`ARLEN_BOOMHAUER_BUILD_ERROR_RETRY_SECONDS`, default `2`) even when no additional watched-file fingerprint change is observed
 - concurrent HTTP sessions are bounded by `runtimeLimits.maxConcurrentHTTPSessions` (default `256`)
 - websocket session upgrades are bounded by `runtimeLimits.maxConcurrentWebSocketSessions` (default `256`)
 - request dispatch mode is controlled by `requestDispatchMode` (`concurrent` default)
@@ -400,6 +409,9 @@ Environment:
 - `ARLEN_HTTP_PARSER_BACKEND` (`llhttp` default when compiled in; `legacy` fallback/override)
 - `ARLEN_ENABLE_YYJSON` (compile-time toggle for app-root builds via `bin/boomhauer`; `1` default, set `0` to compile without yyjson)
 - `ARLEN_ENABLE_LLHTTP` (compile-time toggle for app-root builds via `bin/boomhauer`; `1` default, set `0` to compile without llhttp)
+- `ARLEN_BOOMHAUER_BUILD_ERROR_RETRY_SECONDS` (watch-mode fallback retry cadence in seconds; default `2`; set `0` to disable automatic retry)
+- `ARLEN_BOOMHAUER_BUILD_ERROR_AUTO_REFRESH_SECONDS` (fallback HTML auto-refresh cadence in seconds; default `3`; set `0` to disable automatic refresh)
+- `ARLEN_BOOMHAUER_BUILD_ERROR_RECOVERY_HINT` (optional custom recovery text shown on the fallback HTML page and JSON diagnostics)
 - `ARLEN_TRACE_PROPAGATION_ENABLED` (default `1`; legacy `MOJOOBJC_TRACE_PROPAGATION_ENABLED` also accepted)
 - `ARLEN_RESPONSE_IDENTITY_HEADERS_ENABLED` (default `1`; disables `X-Request-Id`/`X-Correlation-Id` emission when set to `0`; legacy `MOJOOBJC_RESPONSE_IDENTITY_HEADERS_ENABLED` also accepted)
 - `ARLEN_METRICS_ENABLED` (default `1`; disables hot-path metrics writes when set to `0`; legacy `MOJOOBJC_METRICS_ENABLED` also accepted)

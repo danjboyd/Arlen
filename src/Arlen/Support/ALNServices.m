@@ -941,6 +941,22 @@ static ALNJobEnvelope *ALNJobEnvelopeFromDictionary(id value) {
   return snapshot;
 }
 
+- (NSArray *)leasedJobsSnapshot {
+  [self.lock lock];
+  NSArray *keys = [[self.leasedByID allKeys] sortedArrayUsingSelector:@selector(compare:)];
+  NSMutableArray *snapshot = [NSMutableArray array];
+  for (NSString *key in keys) {
+    ALNJobEnvelope *envelope = [self.leasedByID[key] isKindOfClass:[ALNJobEnvelope class]]
+                                   ? self.leasedByID[key]
+                                   : nil;
+    if (envelope != nil) {
+      [snapshot addObject:[envelope copy]];
+    }
+  }
+  [self.lock unlock];
+  return snapshot;
+}
+
 - (NSArray *)deadLetterJobsSnapshot {
   [self.lock lock];
   NSArray *snapshot = [NSArray arrayWithArray:self.deadLetters];
@@ -1566,6 +1582,22 @@ static ALNJobEnvelope *ALNJobEnvelopeFromDictionary(id value) {
   NSArray *snapshot = [self sortedPendingFromState:state ?: @{}];
   [self.lock unlock];
   return snapshot ?: @[];
+}
+
+- (NSArray *)leasedJobsSnapshot {
+  [self.lock lock];
+  NSDictionary *state = [self readState:NULL];
+  NSMutableDictionary *leased = [self mutableLeasedMapFromState:state ?: @{}];
+  NSArray *keys = [[leased allKeys] sortedArrayUsingSelector:@selector(compare:)];
+  NSMutableArray *snapshot = [NSMutableArray array];
+  for (NSString *key in keys) {
+    ALNJobEnvelope *envelope = [leased[key] isKindOfClass:[ALNJobEnvelope class]] ? leased[key] : nil;
+    if (envelope != nil) {
+      [snapshot addObject:[envelope copy]];
+    }
+  }
+  [self.lock unlock];
+  return snapshot;
 }
 
 - (NSArray *)deadLetterJobsSnapshot {
