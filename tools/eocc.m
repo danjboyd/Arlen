@@ -38,7 +38,7 @@ static NSString *RegistrySource(NSArray *entries) {
                          entry[@"symbol"]];
   }
 
-  [source appendString:@"\nvoid ALNEOCRegisterBuiltInTemplates(void) {\n"];
+  [source appendString:@"\nstatic void ALNEOCRegisterBuiltInTemplates(void) {\n"];
   [source appendString:@"  static BOOL didRegister = NO;\n"];
   [source appendString:@"  if (didRegister) {\n"];
   [source appendString:@"    return;\n"];
