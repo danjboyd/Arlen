@@ -1,0 +1,25 @@
+{
+  host = "127.0.0.1";
+  port = 3135;
+  apiOnly = YES;
+  serveStatic = NO;
+  logFormat = "json";
+
+  session = {
+    enabled = YES;
+    secret = "phase12-auth-primitives-session-secret-0123456789abcdef";
+    cookieName = "auth_primitives_session";
+    maxAgeSeconds = 1800;
+    secure = NO;
+    sameSite = "Lax";
+  };
+
+  csrf = {
+    enabled = NO;
+  };
+
+  openapi = {
+    enabled = NO;
+    docsUIEnabled = NO;
+  };
+}

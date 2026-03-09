@@ -18,11 +18,25 @@ extern NSString *const ALNMigrationRunnerDefaultDatabaseTarget;
 + (nullable NSArray<NSString *> *)pendingMigrationFilesAtPath:(NSString *)migrationsPath
                                                       database:(ALNPg *)database
                                                 databaseTarget:(nullable NSString *)databaseTarget
+                                              versionNamespace:(nullable NSString *)versionNamespace
+                                                         error:(NSError *_Nullable *_Nullable)error;
+
++ (nullable NSArray<NSString *> *)pendingMigrationFilesAtPath:(NSString *)migrationsPath
+                                                      database:(ALNPg *)database
+                                                databaseTarget:(nullable NSString *)databaseTarget
                                                          error:(NSError *_Nullable *_Nullable)error;
 
 + (nullable NSArray<NSString *> *)pendingMigrationFilesAtPath:(NSString *)migrationsPath
                                                       database:(ALNPg *)database
                                                          error:(NSError *_Nullable *_Nullable)error;
+
++ (BOOL)applyMigrationsAtPath:(NSString *)migrationsPath
+                     database:(ALNPg *)database
+               databaseTarget:(nullable NSString *)databaseTarget
+             versionNamespace:(nullable NSString *)versionNamespace
+                       dryRun:(BOOL)dryRun
+                 appliedFiles:(NSArray<NSString *> *_Nullable *_Nullable)appliedFiles
+                        error:(NSError *_Nullable *_Nullable)error;
 
 + (BOOL)applyMigrationsAtPath:(NSString *)migrationsPath
                      database:(ALNPg *)database
@@ -38,6 +52,8 @@ extern NSString *const ALNMigrationRunnerDefaultDatabaseTarget;
                         error:(NSError *_Nullable *_Nullable)error;
 
 + (NSString *)versionForMigrationFile:(NSString *)filePath;
++ (NSString *)versionForMigrationFile:(NSString *)filePath
+                     versionNamespace:(nullable NSString *)versionNamespace;
 
 @end
 

@@ -1,0 +1,6 @@
+<section class="admin-panel">
+  <p><%= [ctx objectForKey:@"message"] %></p>
+  <div class="admin-actions">
+    <a href="<%= [ctx objectForKey:@"resultActionPath"] %>"><%= [ctx objectForKey:@"resultActionLabel"] %></a>
+  </div>
+</section>

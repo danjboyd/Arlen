@@ -1,0 +1,31 @@
+{
+  host = "127.0.0.1";
+  port = 4110;
+  session = {
+    enabled = YES;
+    secret = "auth-admin-demo-session-secret-0123456789abcdef";
+  };
+  csrf = {
+    enabled = YES;
+    allowQueryParamFallback = YES;
+  };
+  database = {
+    connectionString = "__ARLEN_PG_DSN__";
+  };
+  authModule = {
+    bootstrapAdminEmails = ("demo-admin@example.test");
+    providers = {
+      stub = {
+        enabled = YES;
+        email = "provider-admin@example.test";
+        displayName = "Provider Admin";
+        clientSecret = "auth-module-stub-provider-secret-0123456789abcdef";
+      };
+    };
+  };
+  adminUI = {
+    resourceProviders = {
+      classes = ("AuthAdminDemoOrdersProvider");
+    };
+  };
+}

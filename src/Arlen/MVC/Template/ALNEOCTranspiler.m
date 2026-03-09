@@ -69,22 +69,42 @@ NSString *const ALNEOCLintDiagnosticColumnKey = @"column";
 
 - (NSString *)logicalPathForTemplatePath:(NSString *)templatePath
                              templateRoot:(NSString *)templateRoot {
+  return [self logicalPathForTemplatePath:templatePath
+                              templateRoot:templateRoot
+                             logicalPrefix:nil];
+}
+
+- (NSString *)logicalPathForTemplatePath:(NSString *)templatePath
+                             templateRoot:(NSString *)templateRoot
+                            logicalPrefix:(NSString *)logicalPrefix {
   NSString *fullTemplate =
       [ALNEOCCanonicalTemplatePath([templatePath stringByStandardizingPath]) copy];
+  NSString *resolved = nil;
   if (templateRoot == nil || [templateRoot length] == 0) {
-    return [templatePath lastPathComponent];
+    resolved = [templatePath lastPathComponent];
+  } else {
+    NSString *fullRoot =
+        [ALNEOCCanonicalTemplatePath([templateRoot stringByStandardizingPath]) copy];
+    NSString *rootWithSlash =
+        [fullRoot hasSuffix:@"/"] ? fullRoot : [fullRoot stringByAppendingString:@"/"];
+    if (![fullTemplate hasPrefix:rootWithSlash]) {
+      resolved = [templatePath lastPathComponent];
+    } else {
+      NSString *relative = [fullTemplate substringFromIndex:[rootWithSlash length]];
+      resolved = ALNEOCCanonicalTemplatePath(relative);
+    }
   }
 
-  NSString *fullRoot =
-      [ALNEOCCanonicalTemplatePath([templateRoot stringByStandardizingPath]) copy];
-  NSString *rootWithSlash =
-      [fullRoot hasSuffix:@"/"] ? fullRoot : [fullRoot stringByAppendingString:@"/"];
-  if (![fullTemplate hasPrefix:rootWithSlash]) {
-    return [templatePath lastPathComponent];
+  NSString *prefix = [(logicalPrefix ?: @"")
+      stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+  if ([prefix length] == 0) {
+    return resolved;
   }
-
-  NSString *relative = [fullTemplate substringFromIndex:[rootWithSlash length]];
-  return ALNEOCCanonicalTemplatePath(relative);
+  prefix = ALNEOCCanonicalTemplatePath(prefix);
+  if ([resolved length] == 0) {
+    return prefix;
+  }
+  return [NSString stringWithFormat:@"%@/%@", prefix, resolved];
 }
 
 - (NSArray<NSDictionary *> *)lintDiagnosticsForTemplateString:(NSString *)templateText
@@ -230,6 +250,18 @@ NSString *const ALNEOCLintDiagnosticColumnKey = @"column";
                    templateRoot:(NSString *)templateRoot
                      outputPath:(NSString *)outputPath
                           error:(NSError **)error {
+  return [self transpileTemplateAtPath:templatePath
+                          templateRoot:templateRoot
+                         logicalPrefix:nil
+                            outputPath:outputPath
+                                 error:error];
+}
+
+- (BOOL)transpileTemplateAtPath:(NSString *)templatePath
+                   templateRoot:(NSString *)templateRoot
+                  logicalPrefix:(NSString *)logicalPrefix
+                     outputPath:(NSString *)outputPath
+                          error:(NSError **)error {
   NSError *readError = nil;
   NSString *template = [NSString stringWithContentsOfFile:templatePath
                                                  encoding:NSUTF8StringEncoding
@@ -250,7 +282,9 @@ NSString *const ALNEOCLintDiagnosticColumnKey = @"column";
   }
 
   NSString *logicalPath =
-      [self logicalPathForTemplatePath:templatePath templateRoot:templateRoot];
+      [self logicalPathForTemplatePath:templatePath
+                           templateRoot:templateRoot
+                          logicalPrefix:logicalPrefix];
   NSString *generated = [self transpiledSourceForTemplateString:template
                                                     logicalPath:logicalPath
                                                           error:error];

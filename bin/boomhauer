@@ -154,7 +154,7 @@ build_fingerprint() {
     printf 'framework_root|%s\n' "$framework_root"
     printf 'enable_yyjson|%s\n' "${ARLEN_ENABLE_YYJSON:-1}"
     printf 'enable_llhttp|%s\n' "${ARLEN_ENABLE_LLHTTP:-1}"
-    append_fingerprint_entries "$app_root" "app" src templates app_lite.m
+    append_fingerprint_entries "$app_root" "app" src templates modules app_lite.m config/modules.plist
     append_fingerprint_entries "$framework_root" "framework" src GNUmakefile tools/eocc.m
   } | hash_fingerprint_stream
 }
@@ -165,7 +165,7 @@ runtime_fingerprint() {
     printf 'framework_root|%s\n' "$framework_root"
     printf 'enable_yyjson|%s\n' "${ARLEN_ENABLE_YYJSON:-1}"
     printf 'enable_llhttp|%s\n' "${ARLEN_ENABLE_LLHTTP:-1}"
-    append_fingerprint_entries "$app_root" "app" src templates config public app_lite.m
+    append_fingerprint_entries "$app_root" "app" src templates modules config public app_lite.m config/modules.plist
     append_fingerprint_entries "$framework_root" "framework" src GNUmakefile tools/eocc.m
   } | hash_fingerprint_stream
 }
@@ -183,23 +183,42 @@ cached_build_is_current() {
 }
 
 transpile_templates() {
+  rm -rf "$gen_root"
+  mkdir -p "$gen_root"
+
+  if [[ -d "$app_root/modules" ]]; then
+    while IFS= read -r module_root; do
+      local module_id module_template_root module_output_root
+      module_id="$(basename "$module_root")"
+      module_template_root="$module_root/Resources/Templates"
+      module_output_root="$gen_root/modules/$module_id"
+      if [[ ! -d "$module_template_root" ]]; then
+        continue
+      fi
+      mapfile -t module_template_files < <(find "$module_template_root" -type f -name '*.html.eoc' | sort)
+      if [[ ${#module_template_files[@]} -eq 0 ]]; then
+        continue
+      fi
+      "$framework_root/build/eocc" \
+        --template-root "$module_template_root" \
+        --output-dir "$module_output_root" \
+        --logical-prefix "modules/$module_id" \
+        "${module_template_files[@]}"
+    done < <(find "$app_root/modules" -mindepth 1 -maxdepth 1 -type d | sort)
+  fi
+
   if [[ ! -d "$app_root/templates" ]]; then
-    rm -rf "$gen_root"
-    mkdir -p "$gen_root"
     return
   fi
 
   mapfile -t template_files < <(find "$app_root/templates" -type f -name '*.html.eoc' | sort)
-  rm -rf "$gen_root"
-  mkdir -p "$gen_root"
-
   if [[ ${#template_files[@]} -eq 0 ]]; then
     return
   fi
 
   "$framework_root/build/eocc" \
     --template-root "$app_root/templates" \
-    --output-dir "$gen_root" \
+    --output-dir "$gen_root/app" \
     "${template_files[@]}"
 }
 
@@ -278,10 +297,16 @@ compile_app() {
     } | sort
   )
   mapfile -t app_sources < <(find "$app_root/src" -type f -name '*.m' 2>/dev/null | sort)
-  mapfile -t generated_sources < <(find "$gen_root" -type f -name '*.m' 2>/dev/null | sort)
+  mapfile -t module_sources < <(find "$app_root/modules" -path '*/Sources/*.m' -type f 2>/dev/null | sort)
+  mapfile -t module_generated_sources < <(find "$gen_root/modules" -type f -name '*.m' 2>/dev/null | sort)
+  mapfile -t app_generated_sources < <(find "$gen_root/app" -type f -name '*.m' 2>/dev/null | sort)
+  generated_sources=("${module_generated_sources[@]}" "${app_generated_sources[@]}")
 
   if [[ -f "$app_root/app_lite.m" ]]; then
     app_sources+=("$app_root/app_lite.m")
+  fi
+  if [[ ${#module_sources[@]} -gt 0 ]]; then
+    app_sources+=("${module_sources[@]}")
   fi
 
   if [[ ${#app_sources[@]} -eq 0 ]]; then

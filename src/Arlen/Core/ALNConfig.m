@@ -1,4 +1,5 @@
 #import "ALNConfig.h"
+#import "ALNModuleSystem.h"
 
 #import <arpa/inet.h>
 #import <stdlib.h>
@@ -354,6 +355,13 @@ static NSDictionary *ALNSecurityProfileDefaults(NSString *profileName) {
 + (NSDictionary *)loadConfigAtRoot:(NSString *)rootPath
                        environment:(NSString *)environment
                              error:(NSError **)error {
+  return [self loadConfigAtRoot:rootPath environment:environment includeModules:YES error:error];
+}
+
++ (NSDictionary *)loadConfigAtRoot:(NSString *)rootPath
+                       environment:(NSString *)environment
+                    includeModules:(BOOL)includeModules
+                             error:(NSError **)error {
   NSString *env = ([environment length] > 0) ? environment : @"development";
   NSString *configRoot = [rootPath stringByAppendingPathComponent:@"config"];
   NSString *basePath = [configRoot stringByAppendingPathComponent:@"app.plist"];
@@ -382,6 +390,7 @@ static NSDictionary *ALNSecurityProfileDefaults(NSString *profileName) {
   NSMutableDictionary *config =
       [NSMutableDictionary dictionaryWithDictionary:ALNMergeDictionaries(base, overlay)];
   config[@"environment"] = env;
+  config[@"appRoot"] = [[rootPath ?: @"" stringByStandardizingPath] copy];
 
   NSString *host = ALNEnvValueCompat("ARLEN_HOST", "MOJOOBJC_HOST");
   NSString *port = ALNEnvValueCompat("ARLEN_PORT", "MOJOOBJC_PORT");
@@ -1478,7 +1487,20 @@ static NSDictionary *ALNSecurityProfileDefaults(NSString *profileName) {
   finalCluster[@"nodeID"] = normalizedNodeID;
   config[@"cluster"] = finalCluster;
 
-  return [NSDictionary dictionaryWithDictionary:config];
+  NSDictionary *normalized = [NSDictionary dictionaryWithDictionary:config];
+  if (!includeModules) {
+    return normalized;
+  }
+
+  NSDictionary *resolved = [ALNModuleSystem configByApplyingModuleDefaultsToConfig:normalized
+                                                                           appRoot:config[@"appRoot"]
+                                                                            strict:YES
+                                                                       diagnostics:NULL
+                                                                             error:error];
+  if (resolved == nil) {
+    return nil;
+  }
+  return resolved;
 }
 
 @end

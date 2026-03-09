@@ -1,0 +1,30 @@
+<% NSArray *errors = [ctx objectForKey:@"errors"]; NSDictionary *formData = [ctx objectForKey:@"formData"]; %>
+<% if ([errors count] > 0) { %>
+  <ul class="auth-errors">
+  <% for (NSDictionary *entry in errors) { %>
+    <li><%= [entry objectForKey:@"message"] %></li>
+  <% } %>
+  </ul>
+<% } %>
+
+<form method="post" action="<%= [ctx objectForKey:@"authLoginPath"] %>">
+  <input type="hidden" name="csrf_token" value="<%= [ctx objectForKey:@"csrfToken"] %>">
+  <input type="hidden" name="return_to" value="<%= [formData objectForKey:@"return_to"] ?: @"" %>">
+  <label class="auth-field">
+    <span>Email</span>
+    <input type="email" name="email" value="<%= [formData objectForKey:@"email"] ?: @"" %>" autocomplete="email">
+  </label>
+  <label class="auth-field">
+    <span>Password</span>
+    <input type="password" name="password" autocomplete="current-password">
+  </label>
+  <div class="auth-actions">
+    <button class="auth-button" type="submit">Sign In</button>
+    <a class="auth-link" href="<%= [ctx objectForKey:@"authRegisterPath"] %>">Create account</a>
+    <a class="auth-link" href="<%= [ctx objectForKey:@"authForgotPasswordPath"] %>">Forgot password</a>
+  </div>
+</form>
+
+<div class="auth-actions">
+  <a class="auth-link" href="<%= [ctx objectForKey:@"authPrefix"] %>/provider/stub/login">Continue with Stub OIDC</a>
+</div>

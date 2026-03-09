@@ -406,6 +406,7 @@ copy_if_exists() {
 copy_if_exists "$app_root/config" "$release_dir/app/config"
 copy_if_exists "$app_root/public" "$release_dir/app/public"
 copy_if_exists "$app_root/templates" "$release_dir/app/templates"
+copy_if_exists "$app_root/modules" "$release_dir/app/modules"
 copy_if_exists "$app_root/src" "$release_dir/app/src"
 copy_if_exists "$app_root/app_lite.m" "$release_dir/app/app_lite.m"
 

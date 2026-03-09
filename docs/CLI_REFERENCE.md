@@ -85,6 +85,62 @@ Apply SQL migrations from `db/migrations` to PostgreSQL.
 - top-level transaction control statements such as `BEGIN`, `COMMIT`, `ROLLBACK`, and `SAVEPOINT` are rejected
 - PostgreSQL commands that are disallowed inside transaction blocks still fail under `arlen migrate`
 
+### `arlen module <add|remove|list|doctor|migrate|assets|upgrade> [options]`
+
+Manage first-class vendored modules installed in `config/modules.plist` and `modules/<id>/`.
+
+`arlen module add <name> [--source <path>] [--force] [--json]`
+
+- installs a local vendored module into `modules/<identifier>`
+- updates `config/modules.plist` deterministically
+- `--source <path>` points at a module directory containing `module.plist`
+- `--force` replaces an existing install in place
+- `--json` emits machine-readable workflow output
+- first-party modules currently available in-tree:
+  - `auth`
+  - `admin-ui`
+
+`arlen module remove <name> [--keep-files] [--json]`
+
+- removes the module lock entry
+- deletes vendored files unless `--keep-files` is passed
+
+`arlen module list [--json]`
+
+- lists installed module identifiers, versions, principal classes, and install paths
+
+`arlen module doctor [--env <name>] [--json]`
+
+- validates manifests, dependency ordering, compatibility, required config keys, and app-vs-module public mount precedence
+
+`arlen module migrate [--env <name>] [--database <target>] [--dsn <connection_string>] [--dry-run] [--json]`
+
+- applies vendored module migrations in dependency order
+- records namespaced migration versions (`<module>::<migration>`) in the normal Arlen migrations table for the selected target
+- respects `migrations.databaseTarget` in each module manifest
+
+`arlen module assets [--output-dir <path>] [--json]`
+
+- stages module public assets into a deterministic output directory (default `build/module_assets`)
+- app overrides under `public/modules/<id>/...` win over module defaults
+
+`arlen module upgrade <name> --source <path> [--force] [--json]`
+
+- replaces the vendored module files and updates the modules lock entry version metadata
+
+Example first-party bootstrap:
+
+```bash
+./build/arlen module add auth
+./build/arlen module add admin-ui
+./build/arlen module migrate --env development
+```
+
+First-party module surfaces after install:
+
+- `auth`: HTML under `/auth/...`, JSON under `/auth/api/...`
+- `admin-ui`: HTML under `/admin/...`, JSON under `/admin/api/...`
+
 ### `arlen schema-codegen [--env <name>] [--database <target>] [--dsn <connection_string>] [--output-dir <path>] [--manifest <path>] [--prefix <ClassPrefix>] [--typed-contracts] [--force]`
 
 Introspect PostgreSQL schema metadata and generate typed table/column helper APIs.
@@ -129,6 +185,8 @@ Build and run `boomhauer` for the current app root.
 - defaults to watch mode (same as direct `bin/boomhauer`)
 - app-root non-watch and `--prepare-only` runs reuse `.boomhauer/build/boomhauer-app` when build inputs are unchanged
 - app-root watch mode restarts on config/public changes and rebuilds only when app/framework build inputs change
+- vendored module sources under `modules/*/Sources` and module templates under `modules/*/Resources/Templates` are compiled automatically
+- app templates under `templates/modules/<id>/...` override vendored module templates with the same logical path
 - watch mode builds the fallback dev error server lazily on the first build failure instead of eagerly at startup
 - transpile/compile failures in watch mode do not terminate supervisor; diagnostics are served until next successful rebuild
 - server args are passed through (`--watch`, `--no-watch`, `--prepare-only`, `--port`, `--host`, `--env`, `--once`, `--print-routes`)
@@ -265,11 +323,15 @@ Behavior:
   - header `X-Arlen-Step-Up-Required: 1`
   - query params `reason=step_up_required` and `return_to=<original path>`
 - JSON/API requests that fail an auth-assurance requirement return structured `403 step_up_required`
-- Phase 12A-12C public helper surface:
+- Phase 12 public helper surface:
   - `ALNAuthSession`
   - `ALNTOTP`
   - `ALNRecoveryCodes`
   - `ALNWebAuthn`
+  - `ALNOIDCClient`
+  - `ALNAuthProviderPresets`
+  - `ALNAuthProviderSessionBridge`
+- `make phase12-confidence` runs the Phase 12 auth confidence gate and writes artifacts under `build/release_confidence/phase12`
 - forwarded proxy headers are honored only when the peer IP matches `trustedProxyCIDRs`
   - specifying `trustedProxyCIDRs` alone enables forwarded-header handling
   - `trustedProxy=YES` remains as a compatibility toggle and seeds a loopback CIDR allowlist when no explicit CIDRs are configured

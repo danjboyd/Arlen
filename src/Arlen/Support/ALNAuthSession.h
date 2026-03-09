@@ -20,6 +20,8 @@ typedef NS_ENUM(NSInteger, ALNAuthSessionErrorCode) {
 + (nullable NSString *)subjectFromContext:(ALNContext *)context;
 + (nullable NSString *)providerFromContext:(ALNContext *)context;
 + (NSArray *)authenticationMethodsFromContext:(ALNContext *)context;
++ (NSArray *)scopesFromContext:(ALNContext *)context;
++ (NSArray *)rolesFromContext:(ALNContext *)context;
 + (NSUInteger)assuranceLevelFromContext:(ALNContext *)context;
 + (nullable NSDate *)primaryAuthenticatedAtFromContext:(ALNContext *)context;
 + (nullable NSDate *)mfaAuthenticatedAtFromContext:(ALNContext *)context;
@@ -30,6 +32,16 @@ typedef NS_ENUM(NSInteger, ALNAuthSessionErrorCode) {
     satisfiesMinimumAssuranceLevel:(NSUInteger)minimumAssuranceLevel
   maximumAuthenticationAgeSeconds:(NSUInteger)maximumAuthenticationAgeSeconds
                      referenceDate:(nullable NSDate *)referenceDate;
+
++ (BOOL)establishAuthenticatedSessionForSubject:(NSString *)subject
+                                       provider:(nullable NSString *)provider
+                                        methods:(nullable NSArray *)methods
+                                         scopes:(nullable NSArray *)scopes
+                                          roles:(nullable NSArray *)roles
+                                 assuranceLevel:(NSUInteger)assuranceLevel
+                                authenticatedAt:(nullable NSDate *)authenticatedAt
+                                        context:(ALNContext *)context
+                                          error:(NSError *_Nullable *_Nullable)error;
 
 + (BOOL)establishAuthenticatedSessionForSubject:(NSString *)subject
                                        provider:(nullable NSString *)provider

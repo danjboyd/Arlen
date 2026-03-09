@@ -1,0 +1,32 @@
+<form class="admin-toolbar" method="get" action="<%= [ctx objectForKey:@"adminUsersPath"] %>">
+  <label>
+    <span>Search</span>
+    <input type="search" name="q" value="<%= [ctx objectForKey:@"query"] %>" placeholder="email, display name, subject">
+  </label>
+  <button type="submit">Filter</button>
+</form>
+
+<table class="admin-table">
+  <thead>
+    <tr>
+      <th>Email</th>
+      <th>Display</th>
+      <th>Roles</th>
+      <th>Verified</th>
+      <th>MFA</th>
+    </tr>
+  </thead>
+  <tbody>
+    <% for (NSDictionary *user in ([ctx objectForKey:@"users"] ?: @[])) { %>
+      <tr>
+        <td>
+          <a href="<%= [ctx objectForKey:@"adminUsersPath"] %>/<%= [user objectForKey:@"subject"] %>"><%= [user objectForKey:@"email"] %></a>
+        </td>
+        <td><%= [user objectForKey:@"display_name"] %></td>
+        <td><%= [[user objectForKey:@"roles"] componentsJoinedByString:@", "] %></td>
+        <td><%= [[user objectForKey:@"email_verified"] boolValue] ? @"Yes" : @"No" %></td>
+        <td><%= [[user objectForKey:@"mfa_enabled"] boolValue] ? @"Enabled" : @"No" %></td>
+      </tr>
+    <% } %>
+  </tbody>
+</table>

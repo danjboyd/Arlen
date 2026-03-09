@@ -459,8 +459,18 @@ static NSError *ALNMigrationValidationError(NSString *migrationPath,
 }
 
 + (NSString *)versionForMigrationFile:(NSString *)filePath {
+  return [self versionForMigrationFile:filePath versionNamespace:nil];
+}
+
++ (NSString *)versionForMigrationFile:(NSString *)filePath
+                     versionNamespace:(NSString *)versionNamespace {
   NSString *name = [[filePath lastPathComponent] stringByDeletingPathExtension];
-  return [name copy] ?: @"";
+  NSString *trimmedNamespace =
+      [versionNamespace stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+  if ([trimmedNamespace length] == 0) {
+    return [name copy] ?: @"";
+  }
+  return [NSString stringWithFormat:@"%@::%@", trimmedNamespace, name ?: @""];
 }
 
 + (BOOL)ensureMigrationsTableWithDatabase:(ALNPg *)database
@@ -497,7 +507,8 @@ static NSError *ALNMigrationValidationError(NSString *migrationPath,
 + (NSArray<NSString *> *)pendingMigrationFilesAtPath:(NSString *)migrationsPath
                                              database:(ALNPg *)database
                                        databaseTarget:(NSString *)databaseTarget
-                                                error:(NSError **)error {
+                                    versionNamespace:(NSString *)versionNamespace
+                                               error:(NSError **)error {
   NSArray *allMigrations = [self migrationFilesAtPath:migrationsPath error:error];
   if (allMigrations == nil) {
     return nil;
@@ -519,12 +530,23 @@ static NSError *ALNMigrationValidationError(NSString *migrationPath,
 
   NSMutableArray *pending = [NSMutableArray array];
   for (NSString *file in allMigrations) {
-    NSString *version = [self versionForMigrationFile:file];
+    NSString *version = [self versionForMigrationFile:file versionNamespace:versionNamespace];
     if (![applied containsObject:version]) {
       [pending addObject:file];
     }
   }
   return pending;
+}
+
++ (NSArray<NSString *> *)pendingMigrationFilesAtPath:(NSString *)migrationsPath
+                                             database:(ALNPg *)database
+                                       databaseTarget:(NSString *)databaseTarget
+                                                error:(NSError **)error {
+  return [self pendingMigrationFilesAtPath:migrationsPath
+                                  database:database
+                            databaseTarget:databaseTarget
+                         versionNamespace:nil
+                                     error:error];
 }
 
 + (BOOL)validateMigrationSQL:(NSString *)sql
@@ -563,12 +585,14 @@ static NSError *ALNMigrationValidationError(NSString *migrationPath,
 + (BOOL)applyMigrationsAtPath:(NSString *)migrationsPath
                      database:(ALNPg *)database
                databaseTarget:(NSString *)databaseTarget
+             versionNamespace:(NSString *)versionNamespace
                        dryRun:(BOOL)dryRun
                  appliedFiles:(NSArray<NSString *> **)appliedFiles
                         error:(NSError **)error {
   NSArray *pending = [self pendingMigrationFilesAtPath:migrationsPath
                                               database:database
                                         databaseTarget:databaseTarget
+                                      versionNamespace:versionNamespace
                                                  error:error];
   if (pending == nil) {
     return NO;
@@ -602,7 +626,8 @@ static NSError *ALNMigrationValidationError(NSString *migrationPath,
       return NO;
     }
 
-    NSString *version = [self versionForMigrationFile:migrationPath];
+    NSString *version = [self versionForMigrationFile:migrationPath
+                                     versionNamespace:versionNamespace];
     __block NSError *transactionError = nil;
     NSString *insertSQL = [NSString stringWithFormat:@"INSERT INTO %@ (version) VALUES ($1)", tableName];
     BOOL appliedOK = [database withTransaction:^BOOL(ALNPgConnection *connection, NSError **blockError) {
@@ -632,6 +657,21 @@ static NSError *ALNMigrationValidationError(NSString *migrationPath,
     *appliedFiles = applied;
   }
   return YES;
+}
+
++ (BOOL)applyMigrationsAtPath:(NSString *)migrationsPath
+                     database:(ALNPg *)database
+               databaseTarget:(NSString *)databaseTarget
+                       dryRun:(BOOL)dryRun
+                 appliedFiles:(NSArray<NSString *> **)appliedFiles
+                        error:(NSError **)error {
+  return [self applyMigrationsAtPath:migrationsPath
+                            database:database
+                      databaseTarget:databaseTarget
+                   versionNamespace:nil
+                              dryRun:dryRun
+                        appliedFiles:appliedFiles
+                               error:error];
 }
 
 + (nullable NSArray<NSString *> *)pendingMigrationFilesAtPath:(NSString *)migrationsPath

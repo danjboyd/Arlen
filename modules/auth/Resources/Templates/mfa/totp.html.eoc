@@ -1,0 +1,21 @@
+<% NSArray *errors = [ctx objectForKey:@"errors"]; NSDictionary *formData = [ctx objectForKey:@"formData"]; %>
+<p class="auth-code"><%= [ctx objectForKey:@"otpauthURI"] %></p>
+<% if ([errors count] > 0) { %>
+  <ul class="auth-errors">
+  <% for (NSDictionary *entry in errors) { %>
+    <li><%= [entry objectForKey:@"message"] %></li>
+  <% } %>
+  </ul>
+<% } %>
+<form method="post" action="<%= [ctx objectForKey:@"authPrefix"] %>/mfa/totp/verify">
+  <input type="hidden" name="csrf_token" value="<%= [ctx objectForKey:@"csrfToken"] %>">
+  <input type="hidden" name="return_to" value="<%= [formData objectForKey:@"return_to"] ?: @"" %>">
+  <label class="auth-field">
+    <span>Authenticator code</span>
+    <input type="text" name="code" inputmode="numeric" autocomplete="one-time-code">
+  </label>
+  <div class="auth-actions">
+    <button class="auth-button" type="submit">Verify code</button>
+    <a class="auth-link" href="<%= [ctx objectForKey:@"authLoginPath"] %>">Back</a>
+  </div>
+</form>

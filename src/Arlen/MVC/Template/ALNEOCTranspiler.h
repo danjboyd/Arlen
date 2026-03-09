@@ -17,6 +17,9 @@ extern NSString *const ALNEOCLintDiagnosticColumnKey;
 - (NSString *)symbolNameForLogicalPath:(NSString *)logicalPath;
 - (NSString *)logicalPathForTemplatePath:(NSString *)templatePath
                              templateRoot:(nullable NSString *)templateRoot;
+- (NSString *)logicalPathForTemplatePath:(NSString *)templatePath
+                             templateRoot:(nullable NSString *)templateRoot
+                            logicalPrefix:(nullable NSString *)logicalPrefix;
 - (nullable NSArray<NSDictionary *> *)lintDiagnosticsForTemplateString:(NSString *)templateText
                                                             logicalPath:(NSString *)logicalPath
                                                                   error:
@@ -27,6 +30,11 @@ extern NSString *const ALNEOCLintDiagnosticColumnKey;
                                                         (NSError *_Nullable *_Nullable)error;
 - (BOOL)transpileTemplateAtPath:(NSString *)templatePath
                    templateRoot:(nullable NSString *)templateRoot
+                     outputPath:(NSString *)outputPath
+                          error:(NSError *_Nullable *_Nullable)error;
+- (BOOL)transpileTemplateAtPath:(NSString *)templatePath
+                   templateRoot:(nullable NSString *)templateRoot
+                  logicalPrefix:(nullable NSString *)logicalPrefix
                      outputPath:(NSString *)outputPath
                           error:(NSError *_Nullable *_Nullable)error;
 

@@ -1,0 +1,63 @@
+<% NSDictionary *summary = [ctx objectForKey:@"summary"] ?: @{}; %>
+<% NSArray *cards = [summary objectForKey:@"cards"] ?: @[]; %>
+<section class="admin-metric-grid">
+  <% for (NSDictionary *card in cards) { %>
+    <article class="admin-metric-card">
+      <p><%= [card objectForKey:@"label"] %></p>
+      <strong><%= [card objectForKey:@"value"] %></strong>
+    </article>
+  <% } %>
+</section>
+
+<section class="admin-panel">
+  <div class="admin-panel-heading">
+    <h3>Resources</h3>
+    <span>Shared HTML and JSON contracts</span>
+  </div>
+  <div class="admin-resource-grid">
+    <% for (NSDictionary *resource in ([summary objectForKey:@"resources"] ?: @[])) { %>
+      <% NSDictionary *paths = [resource objectForKey:@"paths"] ?: @{}; %>
+      <article class="admin-panel">
+        <h4><a href="<%= [paths objectForKey:@"html_index"] %>"><%= [resource objectForKey:@"label"] %></a></h4>
+        <p><%= [resource objectForKey:@"summary"] %></p>
+        <p class="admin-note">JSON: <code><%= [paths objectForKey:@"api_items"] %></code></p>
+      </article>
+    <% } %>
+  </div>
+</section>
+
+<% for (NSDictionary *highlight in ([summary objectForKey:@"highlights"] ?: @[])) { %>
+  <section class="admin-panel">
+    <div class="admin-panel-heading">
+      <h3><%= [highlight objectForKey:@"title"] %></h3>
+      <% NSDictionary *resource = nil; %>
+      <% for (NSDictionary *entry in ([summary objectForKey:@"resources"] ?: @[])) { %>
+        <% if ([[entry objectForKey:@"identifier"] isEqual:[highlight objectForKey:@"resource"]]) { resource = entry; break; } %>
+      <% } %>
+      <% if ([resource isKindOfClass:[NSDictionary class]]) { %>
+        <a href="<%= [[resource objectForKey:@"paths"] objectForKey:@"html_index"] %>">Open full list</a>
+      <% } %>
+    </div>
+    <table class="admin-table">
+      <thead>
+        <tr>
+          <th>Email</th>
+          <th>Display</th>
+          <th>Roles</th>
+          <th>MFA</th>
+        </tr>
+      </thead>
+      <tbody>
+        <% for (NSDictionary *user in ([highlight objectForKey:@"items"] ?: @[])) { %>
+          <tr>
+            <td><%= [user objectForKey:@"email"] %></td>
+            <td><%= [user objectForKey:@"display_name"] %></td>
+            <td><%= [[user objectForKey:@"roles"] componentsJoinedByString:@", "] %></td>
+            <td><%= [[user objectForKey:@"mfa_enabled"] boolValue] ? @"Enabled" : @"Pending" %></td>
+          </tr>
+        <% } %>
+      </tbody>
+    </table>
+  </section>
+<% } %>
+</section>

@@ -1,0 +1,25 @@
+{
+  "version": "phase12-oidc-v1",
+  "scenarios": [
+    {
+      "id": "callback_tampered_state",
+      "kind": "callback",
+      "expected_error": "ALNOIDCClientErrorCallbackStateMismatch"
+    },
+    {
+      "id": "nonce_mismatch",
+      "kind": "id_token",
+      "expected_error": "ALNOIDCClientErrorNonceMismatch"
+    },
+    {
+      "id": "jwks_rotation_miss",
+      "kind": "id_token",
+      "expected_error": "ALNOIDCClientErrorJWKNotFound"
+    },
+    {
+      "id": "jwks_expired",
+      "kind": "id_token",
+      "expected_error": "ALNOIDCClientErrorJWKSExpired"
+    }
+  ]
+}

@@ -92,6 +92,7 @@ md_files+=(
   examples/tech_demo/README.md
   examples/basic_app/README.md
   examples/api_reference/README.md
+  examples/auth_primitives/README.md
   examples/gsweb_migration/README.md
   examples/arlen_data/README.md
 )

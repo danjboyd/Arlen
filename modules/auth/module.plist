@@ -1,0 +1,41 @@
+{
+  identifier = "auth";
+  version = "1.0.0";
+  principalClass = "ALNAuthModule";
+  compatibility = {
+    arlenVersion = ">= 0.1.0";
+  };
+  config = {
+    defaults = {
+      session = {
+        enabled = YES;
+      };
+      csrf = {
+        enabled = YES;
+        allowQueryParamFallback = YES;
+      };
+      authModule = {
+        defaultRedirect = "/";
+        bootstrapAdminEmails = ();
+        paths = {
+          prefix = "/auth";
+          apiPrefix = "api";
+        };
+        providers = {
+          stub = {
+            enabled = YES;
+            email = "stub-user@example.test";
+            displayName = "Stub Provider User";
+            clientSecret = "auth-module-stub-provider-secret-0123456789abcdef";
+          };
+        };
+        hooks = {
+        };
+      };
+    };
+    requiredKeys = (
+      "session.secret",
+      "database.connectionString"
+    );
+  };
+}

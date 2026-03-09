@@ -24,6 +24,9 @@ Open `build/docs/index.html` in your browser, or use `make docs-serve` for local
 - [Toolchain Matrix](TOOLCHAIN_MATRIX.md): known-good onboarding/runtime toolchain baseline.
 - [CLI Reference](CLI_REFERENCE.md): command reference for `arlen`, `boomhauer`, and helper scripts.
 - [Core Concepts](CORE_CONCEPTS.md): runtime architecture and request lifecycle.
+- [Modules](MODULES.md): first-class module architecture, install flow, and override model.
+- [Auth Module](AUTH_MODULE.md): first-party auth product routes, hooks, and `/auth/api` surface.
+- [Admin UI Module](ADMIN_UI_MODULE.md): first-party admin resource contract and `/admin/api` surface.
 - [Deployment Guide](DEPLOYMENT.md): deployment model and production guidance.
 - [Password Hashing](PASSWORD_HASHING.md): Argon2id password hashing API, defaults, and rehash workflow.
 - [Realtime and Composition](REALTIME_COMPOSITION.md): websocket/SSE contracts, pubsub hub, and app mounting.
@@ -85,6 +88,7 @@ Open `build/docs/index.html` in your browser, or use `make docs-serve` for local
 - [Phase 10 Roadmap](PHASE10_ROADMAP.md)
 - [Phase 11 Roadmap](PHASE11_ROADMAP.md)
 - [Phase 12 Roadmap](PHASE12_ROADMAP.md)
+- [Phase 13 Roadmap](PHASE13_ROADMAP.md)
 - [Competitive Benchmark Roadmap](COMPETITIVE_BENCHMARK_ROADMAP.md)
 - [Phase B Parity Checklist (FastAPI)](PHASEB_PARITY_CHECKLIST_FASTAPI.md)
 - [Phase C Benchmark Protocol](PHASEC_BENCHMARK_PROTOCOL.md)
@@ -100,5 +104,7 @@ Open `build/docs/index.html` in your browser, or use `make docs-serve` for local
 - [Tech Demo](../examples/tech_demo/README.md)
 - [Basic App Smoke Guide](../examples/basic_app/README.md)
 - [API-First Reference App](../examples/api_reference/README.md)
+- [Auth Primitives Example](../examples/auth_primitives/README.md)
+- [Auth + Admin Demo](../examples/auth_admin_demo/README.md)
 - [GSWeb Migration Sample](../examples/gsweb_migration/README.md)
 - [ArlenData Standalone Example](../examples/arlen_data/README.md)

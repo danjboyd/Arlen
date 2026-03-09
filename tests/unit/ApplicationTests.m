@@ -5,6 +5,7 @@
 #import <unistd.h>
 
 #import "ALNApplication.h"
+#import "ALNAuthProviderPresets.h"
 #import "ALNContext.h"
 #import "ALNController.h"
 #import "ALNMetrics.h"
@@ -878,6 +879,28 @@ static NSUInteger AppFastPathControllerSlowInvocationCount = 0;
   XCTAssertEqualObjects(@"", logoutJSON[@"session_id"]);
   NSString *setCookie = [logoutResponse headerForName:@"Set-Cookie"];
   XCTAssertTrue([setCookie containsString:@"Max-Age=0"]);
+}
+
+- (void)testProviderPresetConfigMergesDeterministicallyWithExplicitOverrides {
+  NSError *error = nil;
+  NSDictionary *provider =
+      [ALNAuthProviderPresets providerConfigurationFromPresetNamed:@"google"
+                                                         overrides:@{
+                                                           @"clientID" : @"google-client",
+                                                           @"clientSecret" : @"google-secret",
+                                                           @"defaultScopes" : @[ @"openid", @"email" ],
+                                                           @"extraAuthorizationParameters" : @{
+                                                             @"prompt" : @"consent",
+                                                           },
+                                                         }
+                                                             error:&error];
+  XCTAssertNil(error);
+  XCTAssertEqualObjects(@"google", provider[@"identifier"]);
+  XCTAssertEqualObjects(@"https://oauth2.googleapis.com/token", provider[@"tokenEndpoint"]);
+  NSArray *expectedScopes = @[ @"openid", @"email" ];
+  XCTAssertEqualObjects(expectedScopes, provider[@"defaultScopes"]);
+  XCTAssertEqualObjects(@"consent",
+                        provider[@"extraAuthorizationParameters"][@"prompt"]);
 }
 
 - (void)testFormatConditionSelectsJSONRouteWhenRequested {

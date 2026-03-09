@@ -1,0 +1,11 @@
+<form method="post" action="<%= [ctx objectForKey:@"authForgotPasswordPath"] %>">
+  <input type="hidden" name="csrf_token" value="<%= [ctx objectForKey:@"csrfToken"] %>">
+  <label class="auth-field">
+    <span>Email</span>
+    <input type="email" name="email" autocomplete="email">
+  </label>
+  <div class="auth-actions">
+    <button class="auth-button" type="submit">Send reset link</button>
+    <a class="auth-link" href="<%= [ctx objectForKey:@"authLoginPath"] %>">Back to sign in</a>
+  </div>
+</form>

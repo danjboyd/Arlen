@@ -2,6 +2,7 @@
 #define ALN_APPLICATION_H
 
 #import <Foundation/Foundation.h>
+#import "ALNModuleSystem.h"
 #import "ALNServices.h"
 
 @class ALNRequest;
@@ -54,6 +55,7 @@ NS_ASSUME_NONNULL_BEGIN
 @property(nonatomic, strong, readonly) ALNMetricsRegistry *metrics;
 @property(nonatomic, copy, readonly) NSArray *middlewares;
 @property(nonatomic, copy, readonly) NSArray *plugins;
+@property(nonatomic, copy, readonly) NSArray *modules;
 @property(nonatomic, copy, readonly) NSArray *lifecycleHooks;
 @property(nonatomic, copy, readonly) NSArray *staticMounts;
 @property(nonatomic, strong, readonly) id<ALNJobAdapter> jobsAdapter;

@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title><%= [ctx objectForKey:@"pageTitle"] %></title>
+    <link rel="stylesheet" href="/modules/admin-ui/admin.css">
+  </head>
+  <body>
+    <div class="admin-shell">
+      <aside class="admin-sidebar">
+        <p class="admin-kicker">Module</p>
+        <h1><%= [ctx objectForKey:@"adminTitle"] %></h1>
+        <nav class="admin-nav">
+          <% for (NSDictionary *entry in ([ctx objectForKey:@"navigation"] ?: @[])) { %>
+            <a href="<%= [entry objectForKey:@"href"] %>"><%= [entry objectForKey:@"label"] %></a>
+          <% } %>
+        </nav>
+        <% NSDictionary *currentUser = [ctx objectForKey:@"currentUser"]; %>
+        <% if ([[currentUser objectForKey:@"email"] length] > 0) { %>
+          <div class="admin-current-user">
+            <p>Signed in as</p>
+            <strong><%= [currentUser objectForKey:@"email"] %></strong>
+            <form method="post" action="<%= [ctx objectForKey:@"authLogoutPath"] %>">
+              <input type="hidden" name="csrf_token" value="<%= [ctx objectForKey:@"csrfToken"] %>">
+              <button type="submit">Sign out</button>
+            </form>
+          </div>
+        <% } %>
+      </aside>
+      <main class="admin-main">
+        <header class="admin-header">
+          <p class="admin-kicker">Backoffice</p>
+          <h2><%= [ctx objectForKey:@"pageHeading"] %></h2>
+        </header>
+        <% if ([[ctx objectForKey:@"message"] length] > 0) { %>
+          <p class="admin-note"><%= [ctx objectForKey:@"message"] %></p>
+        <% } %>
+        <% NSArray *errors = [ctx objectForKey:@"errors"]; %>
+        <% if ([errors count] > 0) { %>
+          <ul class="admin-errors">
+          <% for (NSDictionary *entry in errors) { %>
+            <li><%= [entry objectForKey:@"message"] %></li>
+          <% } %>
+          </ul>
+        <% } %>
+        <%== [ctx objectForKey:@"content"] %>
+      </main>
+    </div>
+  </body>
+</html>

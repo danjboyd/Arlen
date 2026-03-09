@@ -12,6 +12,7 @@ SMOKE_RENDER_TOOL := $(BUILD_DIR)/eoc-smoke-render
 BOOMHAUER_TOOL := $(BUILD_DIR)/boomhauer
 TECH_DEMO_SERVER_TOOL := $(BUILD_DIR)/tech-demo-server
 API_REFERENCE_SERVER_TOOL := $(BUILD_DIR)/api-reference-server
+AUTH_PRIMITIVES_SERVER_TOOL := $(BUILD_DIR)/auth-primitives-server
 MIGRATION_SAMPLE_SERVER_TOOL := $(BUILD_DIR)/migration-sample-server
 ARLEN_DATA_EXAMPLE_TOOL := $(BUILD_DIR)/arlen-data-example
 ARLEN_TOOL := $(BUILD_DIR)/arlen
@@ -29,6 +30,7 @@ TECH_DEMO_TEMPLATE_ROOT := $(TECH_DEMO_ROOT)/templates
 TECH_DEMO_TEMPLATE_FILES := $(shell find $(TECH_DEMO_TEMPLATE_ROOT) -type f -name '*.html.eoc' | sort)
 
 FRAMEWORK_SRCS := $(shell find src -type f -name '*.m' | sort)
+MODULE_SRCS := $(shell find modules -type f -path '*/Sources/*.m' 2>/dev/null | sort)
 ARLEN_ENABLE_YYJSON ?= 1
 ARLEN_ENABLE_LLHTTP ?= 1
 ifneq ($(filter $(ARLEN_ENABLE_YYJSON),0 1),$(ARLEN_ENABLE_YYJSON))
@@ -63,7 +65,7 @@ GNUSTEP_TEST_HOME := $(ROOT_DIR)/.gnustep-home
 UNIT_TEST_SRCS := $(shell find tests/unit -type f -name '*.m' | sort)
 INTEGRATION_TEST_SRCS := $(shell find tests/integration -type f -name '*.m' | sort)
 
-INCLUDE_FLAGS := -Isrc/Arlen -Isrc/Arlen/Core -Isrc/Arlen/Data -Isrc/Arlen/HTTP -Isrc/Arlen/MVC/Controller -Isrc/Arlen/MVC/Middleware -Isrc/Arlen/MVC/Routing -Isrc/Arlen/MVC/Template -Isrc/Arlen/MVC/View -Isrc/Arlen/Support -Isrc/Arlen/Support/third_party/argon2/include -Isrc/Arlen/Support/third_party/argon2/src -Isrc/MojoObjc -Isrc/MojoObjc/Core -Isrc/MojoObjc/Data -Isrc/MojoObjc/HTTP -Isrc/MojoObjc/MVC/Controller -Isrc/MojoObjc/MVC/Middleware -Isrc/MojoObjc/MVC/Routing -Isrc/MojoObjc/MVC/Template -Isrc/MojoObjc/MVC/View -Isrc/MojoObjc/Support -I/usr/include/postgresql
+INCLUDE_FLAGS := -Isrc/Arlen -Isrc/Arlen/Core -Isrc/Arlen/Data -Isrc/Arlen/HTTP -Isrc/Arlen/MVC/Controller -Isrc/Arlen/MVC/Middleware -Isrc/Arlen/MVC/Routing -Isrc/Arlen/MVC/Template -Isrc/Arlen/MVC/View -Isrc/Arlen/Support -Isrc/Arlen/Support/third_party/argon2/include -Isrc/Arlen/Support/third_party/argon2/src -Isrc/MojoObjc -Isrc/MojoObjc/Core -Isrc/MojoObjc/Data -Isrc/MojoObjc/HTTP -Isrc/MojoObjc/MVC/Controller -Isrc/MojoObjc/MVC/Middleware -Isrc/MojoObjc/MVC/Routing -Isrc/MojoObjc/MVC/Template -Isrc/MojoObjc/MVC/View -Isrc/MojoObjc/Support -Imodules/auth/Sources -Imodules/admin-ui/Sources -I/usr/include/postgresql
 EXTRA_OBJC_FLAGS ?=
 ARC_REQUIRED_FLAG := -fobjc-arc
 FEATURE_FLAGS := -DARLEN_ENABLE_YYJSON=$(ARLEN_ENABLE_YYJSON) -DARLEN_ENABLE_LLHTTP=$(ARLEN_ENABLE_LLHTTP)
@@ -79,7 +81,7 @@ ifneq ($(findstring -fno-objc-arc,$(OBJC_FLAGS)),)
 $(error OBJC_FLAGS cannot disable ARC)
 endif
 
-.PHONY: all eocc transpile tech-demo-transpile generated-compile arlen boomhauer tech-demo-server api-reference-server migration-sample-server arlen-data-example json-perf-bench dispatch-perf-bench http-parse-perf-bench route-match-perf-bench backend-contract-matrix test-data-layer dev-server tech-demo smoke-render smoke routes build-tests test test-unit test-integration perf perf-fast parity-phaseb perf-phasec perf-phased deploy-smoke phase5e-confidence ci-quality ci-sanitizers ci-fault-injection ci-release-certification ci-json-abstraction ci-json-perf ci-dispatch-perf ci-http-parse-perf ci-route-match-perf ci-backend-parity-matrix ci-protocol-adversarial ci-syscall-faults ci-allocation-faults ci-soak ci-chaos-restart ci-static-analysis ci-blob-throughput ci-phase11-protocol-adversarial ci-phase11-fuzz ci-phase11-live-adversarial ci-phase11-sanitizers ci-phase11 ci-docs check docs-api docs-html docs-serve clean
+.PHONY: all eocc transpile tech-demo-transpile generated-compile arlen boomhauer tech-demo-server api-reference-server auth-primitives-server migration-sample-server arlen-data-example json-perf-bench dispatch-perf-bench http-parse-perf-bench route-match-perf-bench backend-contract-matrix test-data-layer dev-server tech-demo smoke-render smoke routes build-tests test test-unit test-integration perf perf-fast parity-phaseb perf-phasec perf-phased deploy-smoke phase5e-confidence phase12-confidence phase13-confidence ci-quality ci-sanitizers ci-fault-injection ci-release-certification ci-json-abstraction ci-json-perf ci-dispatch-perf ci-http-parse-perf ci-route-match-perf ci-backend-parity-matrix ci-protocol-adversarial ci-syscall-faults ci-allocation-faults ci-soak ci-chaos-restart ci-static-analysis ci-blob-throughput ci-phase11-protocol-adversarial ci-phase11-fuzz ci-phase11-live-adversarial ci-phase11-sanitizers ci-phase11 ci-docs check docs-api docs-html docs-serve clean
 
 all: eocc transpile generated-compile arlen boomhauer
 
@@ -107,8 +109,8 @@ generated-compile: transpile
 >fi; \
 >clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) $$generated_files $(FRAMEWORK_SRCS) -shared -fPIC -o $(BUILD_DIR)/libArlenFramework.so $$(gnustep-config --base-libs) -ldl -lcrypto
 
-$(ARLEN_TOOL): tools/arlen.m src/Arlen/Core/ALNConfig.m src/Arlen/Data/ALNMigrationRunner.m src/Arlen/Data/ALNPg.m src/Arlen/Data/ALNSQLBuilder.m src/Arlen/Data/ALNSchemaCodegen.m $(JSON_SERIALIZATION_SRCS) | $(BUILD_DIR)
->source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) tools/arlen.m src/Arlen/Core/ALNConfig.m src/Arlen/Data/ALNMigrationRunner.m src/Arlen/Data/ALNPg.m src/Arlen/Data/ALNSQLBuilder.m src/Arlen/Data/ALNSchemaCodegen.m $(JSON_SERIALIZATION_SRCS) -o $(ARLEN_TOOL) $$(gnustep-config --base-libs) -ldl -lcrypto
+$(ARLEN_TOOL): tools/arlen.m src/Arlen/Core/ALNConfig.m src/Arlen/Core/ALNModuleSystem.m src/Arlen/Data/ALNMigrationRunner.m src/Arlen/Data/ALNPg.m src/Arlen/Data/ALNSQLBuilder.m src/Arlen/Data/ALNSchemaCodegen.m $(JSON_SERIALIZATION_SRCS) | $(BUILD_DIR)
+>source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) tools/arlen.m src/Arlen/Core/ALNConfig.m src/Arlen/Core/ALNModuleSystem.m src/Arlen/Data/ALNMigrationRunner.m src/Arlen/Data/ALNPg.m src/Arlen/Data/ALNSQLBuilder.m src/Arlen/Data/ALNSchemaCodegen.m $(JSON_SERIALIZATION_SRCS) -o $(ARLEN_TOOL) $$(gnustep-config --base-libs) -ldl -lcrypto
 
 arlen: $(ARLEN_TOOL)
 
@@ -163,6 +165,11 @@ $(API_REFERENCE_SERVER_TOOL): examples/api_reference/src/api_reference_server.m 
 
 api-reference-server: $(API_REFERENCE_SERVER_TOOL)
 
+$(AUTH_PRIMITIVES_SERVER_TOOL): examples/auth_primitives/src/auth_primitives_server.m $(FRAMEWORK_SRCS)
+>source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) examples/auth_primitives/src/auth_primitives_server.m $(FRAMEWORK_SRCS) -o $(AUTH_PRIMITIVES_SERVER_TOOL) $$(gnustep-config --base-libs) -ldl -lcrypto
+
+auth-primitives-server: $(AUTH_PRIMITIVES_SERVER_TOOL)
+
 $(MIGRATION_SAMPLE_SERVER_TOOL): examples/gsweb_migration/src/migration_sample_server.m $(FRAMEWORK_SRCS)
 >source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) examples/gsweb_migration/src/migration_sample_server.m $(FRAMEWORK_SRCS) -o $(MIGRATION_SAMPLE_SERVER_TOOL) $$(gnustep-config --base-libs) -ldl -lcrypto
 
@@ -189,15 +196,15 @@ $(SMOKE_RENDER_TOOL): tools/eoc_smoke_render.m transpile
 
 smoke-render: $(SMOKE_RENDER_TOOL)
 
-$(UNIT_TEST_BIN): $(UNIT_TEST_SRCS) $(FRAMEWORK_SRCS) transpile
+$(UNIT_TEST_BIN): $(UNIT_TEST_SRCS) $(FRAMEWORK_SRCS) $(MODULE_SRCS) transpile
 >mkdir -p $(UNIT_TEST_BUNDLE)/Resources
 >source $(GNUSTEP_SH) && generated_files="$$(find $(GEN_DIR) -type f -name '*.m' | sort)"; \
->clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) $(UNIT_TEST_SRCS) $(FRAMEWORK_SRCS) $$generated_files -shared -fPIC -o $(UNIT_TEST_BIN) $$(gnustep-config --base-libs) -ldl -lcrypto -lXCTest
+>clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) $(UNIT_TEST_SRCS) $(FRAMEWORK_SRCS) $(MODULE_SRCS) $$generated_files -shared -fPIC -o $(UNIT_TEST_BIN) $$(gnustep-config --base-libs) -ldl -lcrypto -lXCTest
 >cp tests/Info-gnustep-unit.plist $(UNIT_TEST_BUNDLE)/Resources/Info-gnustep.plist
 
-$(INTEGRATION_TEST_BIN): $(INTEGRATION_TEST_SRCS) boomhauer tech-demo-server api-reference-server migration-sample-server
+$(INTEGRATION_TEST_BIN): $(INTEGRATION_TEST_SRCS) $(FRAMEWORK_SRCS) $(MODULE_SRCS) boomhauer tech-demo-server api-reference-server auth-primitives-server migration-sample-server
 >mkdir -p $(INTEGRATION_TEST_BUNDLE)/Resources
->source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) $(INTEGRATION_TEST_SRCS) -shared -fPIC -o $(INTEGRATION_TEST_BIN) $$(gnustep-config --base-libs) -ldl -lcrypto -lXCTest
+>source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) $(INTEGRATION_TEST_SRCS) $(FRAMEWORK_SRCS) $(MODULE_SRCS) -shared -fPIC -o $(INTEGRATION_TEST_BIN) $$(gnustep-config --base-libs) -ldl -lcrypto -lXCTest
 >cp tests/Info-gnustep-integration.plist $(INTEGRATION_TEST_BUNDLE)/Resources/Info-gnustep.plist
 
 build-tests: $(UNIT_TEST_BIN) $(INTEGRATION_TEST_BIN)
@@ -235,6 +242,12 @@ deploy-smoke:
 
 phase5e-confidence:
 >python3 ./tools/ci/generate_phase5e_confidence_artifacts.py --repo-root $(ROOT_DIR) --output-dir $(ROOT_DIR)/build/release_confidence/phase5e
+
+phase12-confidence:
+>bash ./tools/ci/run_phase12_confidence.sh
+
+phase13-confidence:
+>bash ./tools/ci/run_phase13_confidence.sh
 
 ci-quality:
 >bash ./tools/ci/run_phase5e_quality.sh

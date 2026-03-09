@@ -1,12 +1,13 @@
 # Arlen Phase 12 Roadmap
 
-Status: Active (Phase 12A-12C complete on 2026-03-06; Phase 12D-12F planned)  
-Last updated: 2026-03-06
+Status: Complete (Phase 12A-12F delivered on 2026-03-09)  
+Last updated: 2026-03-09
 
 Related docs:
 - `docs/PHASE11_ROADMAP.md`
 - `docs/PHASE3_ROADMAP.md`
 - `docs/PHASE2_PHASE3_ROADMAP.md`
+- `docs/PHASE13_ROADMAP.md`
 - `docs/FEATURE_PARITY_MATRIX.md`
 - `docs/PASSWORD_HASHING.md`
 - `docs/GETTING_STARTED.md`
@@ -24,6 +25,8 @@ Phase 12 focuses on:
 
 Phase 12 is additive to existing `ALNAuth` bearer/JWT verification and session middleware. It does not replace Arlen's current API auth baseline.
 
+Phase 12 is the reusable auth substrate for future optional modules, especially Phase 13 `auth` and `admin-ui`. Core Arlen owns the primitives and contracts; the product-layer modules own default schemas, routes, templates, and full end-user/admin workflows.
+
 ## 1.1 Entry Context
 
 Phase 11 closed the major hostile-input and trust-boundary gaps in sessions, request framing, websocket handling, filesystem boundaries, and proxy trust. The next missing layer is application-facing authentication ergonomics:
@@ -31,6 +34,7 @@ Phase 11 closed the major hostile-input and trust-boundary gaps in sessions, req
 1. Local MFA currently requires each app to hand-roll assurance state, step-up policy, TOTP math, recovery-code handling, and session upgrade behavior.
 2. External-login support for common providers should be easier than wiring raw OAuth/OIDC flows by hand, but Arlen should still avoid becoming a full account-management product.
 3. MFA and external login need one shared assurance model so route policy stays explicit and deterministic.
+4. The upcoming module system should be able to consume these primitives directly, so Phase 12 should stabilize contracts instead of drifting into built-in account-product behavior.
 
 ## 2. Scope Summary
 
@@ -38,8 +42,8 @@ Phase 11 closed the major hostile-input and trust-boundary gaps in sessions, req
 2. Phase 12B: TOTP and recovery-code MFA baseline.
 3. Phase 12C: WebAuthn/passkey MFA and phishing-resistant assurance path.
 4. Phase 12D: generic OIDC/OAuth2 client foundation.
-5. Phase 12E: provider presets and session/login bridge ergonomics.
-6. Phase 12F: hardening, fixtures, docs, scaffolds, and release confidence.
+5. Phase 12E: provider presets and session/login bridge contracts.
+6. Phase 12F: hardening, module-facing DX contracts, docs, and release confidence.
 
 Execution order is intentional: Arlen should establish one request/session assurance contract first, land local MFA before federation-specific ergonomics, then layer provider helpers onto the same route-policy and session-upgrade rules.
 
@@ -52,6 +56,9 @@ Execution order is intentional: Arlen should establish one request/session assur
   - account-linking dashboards
   - admin/backoffice identity management
 - Core may ship middleware, helpers, protocols, controller utilities, and scaffolds, but not a mandatory product opinion.
+- Treat Phase 12 deliverables as module-facing primitives first:
+  - stable session/auth contracts belong in core
+  - default account/admin product flows belong in optional modules
 - Prefer OIDC over raw OAuth2 for login/federation wherever provider support exists.
 - Keep bearer/JWT resource-server verification in `ALNAuth` first-class; federation/login support is additive.
 - Do not add SMS MFA to Arlen core.
@@ -171,7 +178,7 @@ Implemented in current tree:
 
 ## 4.4 Phase 12D: OIDC / OAuth2 Client Foundation
 
-Status: Planned
+Status: Complete (2026-03-09)
 
 Deliverables:
 
@@ -184,6 +191,10 @@ Deliverables:
 - Keep a generic OAuth2 fallback path for providers that do not support full OIDC login semantics.
 - Normalize provider identity into a stable claim shape separate from raw provider payloads.
 - Add deterministic timeout/error/redaction behavior for provider HTTP interactions.
+- Keep this layer product-neutral so future modules can consume it:
+  - no built-in registration/reset/account UX
+  - no provider-specific controller pages in core
+  - no mandatory persistence model beyond explicit contracts
 
 Acceptance (required):
 
@@ -194,9 +205,16 @@ Acceptance (required):
 - `tests/fixtures/auth/phase12_oidc_cases.json`:
   - callback tamper, nonce mismatch, key rotation, and timeout scenarios
 
-## 4.5 Phase 12E: Provider Presets + Session/Login Bridge
+Implemented in current tree:
 
-Status: Planned
+- `ALNOIDCClient` provides authorization-code + PKCE request generation, callback validation, token-exchange request shaping, token-response parsing, ID-token verification, and normalized provider identity output.
+- ID-token verification supports HS256 and RS256 flows with issuer/audience/exp/nbf/nonce enforcement plus JWKS freshness checks.
+- `tests/unit/OIDCClientTests.m` covers PKCE/state/nonce generation, tampered callback rejection, client-secret redaction, RS256 key verification, nonce mismatch, JWKS rotation miss, JWKS expiry, and HS256 normalization.
+- `tests/fixtures/auth/phase12_oidc_cases.json` captures the hostile-input fixture baseline for callback tamper, nonce mismatch, and JWKS rotation/expiry scenarios.
+
+## 4.5 Phase 12E: Provider Presets + Session/Login Bridge Contracts
+
+Status: Complete (2026-03-09)
 
 Deliverables:
 
@@ -206,25 +224,35 @@ Deliverables:
   - Microsoft
   - Apple
   - generic OIDC providers such as Okta/Auth0-style deployments
-- Add session bootstrap/login bridge helpers:
-  - app callback maps provider identity to local user/account through app-owned hook/protocol
-  - successful provider login establishes Arlen session state without apps reimplementing callback plumbing
+- Add session bootstrap/login bridge helpers and protocols:
+  - app or module callback maps provider identity to local user/account through an explicit hook/protocol
+  - successful provider login establishes Arlen session state without apps or future modules reimplementing callback plumbing
 - Ensure local assurance policy composes with external login:
   - provider login can satisfy primary authentication
   - AAL2 routes may still require local step-up unless stronger assurance is explicitly established
 - Add deterministic account-linking hooks without shipping a full product UI.
+- Keep this milestone product-neutral:
+  - provider presets and session bootstrap live in core
+  - module-owned login/register/callback UX lives in Phase 13 `auth`
 
 Acceptance (required):
 
 - `tests/integration/HTTPIntegrationTests.m`:
-  - stub-provider login flow completes and establishes session state
+  - stub-provider login bridge flow completes and establishes session state
   - AAL2-protected route still triggers local step-up after provider login when required by policy
 - `tests/unit/ApplicationTests.m`:
   - provider preset config merges deterministically with explicit overrides
 
-## 4.6 Phase 12F: Hardening + DX + Confidence Artifacts
+Implemented in current tree:
 
-Status: Planned
+- `ALNAuthProviderPresets` ships deterministic first-party provider defaults for Google, GitHub, Microsoft, Apple, Okta, and Auth0-style OIDC deployments.
+- `ALNAuthProviderSessionBridge` provides explicit provider-identity resolution and local session-bootstrap hooks without embedding product-specific account UX in core.
+- `tests/unit/ApplicationTests.m` verifies deterministic provider preset merging with explicit overrides.
+- `tests/integration/HTTPIntegrationTests.m` adds the stub provider login/session bootstrap and local step-up-after-provider-login coverage expected for future module consumers.
+
+## 4.6 Phase 12F: Hardening + Module-Facing DX Contracts + Confidence Artifacts
+
+Status: Complete (2026-03-09)
 
 Deliverables:
 
@@ -237,17 +265,23 @@ Deliverables:
   - base32/TOTP secret parsing
   - JWT/JWK parsing
   - WebAuthn JSON/CBOR fixture ingestion
-- Add first-party docs and scaffolds:
-  - getting-started guidance for local MFA and provider login
+- Add first-party docs and module-facing integration contracts:
+  - getting-started guidance for local MFA and provider login primitives
   - API reference updates for new auth-assurance/MFA/OIDC surfaces
-  - a minimal sample app showing TOTP MFA plus one OIDC provider flow
-  - optional CLI scaffold for app-owned auth hooks/store wiring if the interface is stable enough
+  - a minimal sample app showing TOTP MFA plus one OIDC provider flow on top of core primitives
+  - explicit integration guidance for future Phase 13 auth-module hooks/store wiring instead of a built-in account-product scaffold
 
 Acceptance (required):
 
-- new artifacts under `build/release_confidence/phase12/`
-- `make test` remains green with Phase 12 coverage enabled
-- new docs/sample app are validated by CI and referenced from the docs index
+- `make phase12-confidence` writes artifacts under `build/release_confidence/phase12/`
+- new docs/sample app are validated by the Phase 12 confidence gate and referenced from the docs index
+- unit and integration coverage for OIDC/provider flows are present in the standard XCTest suites
+
+Implemented in current tree:
+
+- `examples/auth_primitives/` demonstrates local TOTP step-up plus a stub OIDC provider flow on top of the core Phase 12 contracts.
+- `tools/ci/run_phase12_confidence.sh` and `tools/ci/generate_phase12_confidence_artifacts.py` generate a dedicated Phase 12 confidence artifact pack under `build/release_confidence/phase12/`.
+- `docs/GETTING_STARTED.md`, `docs/CLI_REFERENCE.md`, `docs/README.md`, and `README.md` now reference the new helper surface, sample app, and confidence gate.
 
 ## 5. Recommended Execution Sequence
 
@@ -255,7 +289,7 @@ Acceptance (required):
 2. Ship TOTP + recovery codes as the default-first MFA path.
 3. Add WebAuthn on top of the same assurance/session contract instead of building a separate passkey stack.
 4. Add generic OIDC/OAuth2 client primitives before any provider presets.
-5. Layer provider presets and login bridge ergonomics only after the generic client contracts are stable.
+5. Layer provider presets and session/login bridge contracts only after the generic client contracts are stable.
 6. Make Phase 12 release confidence depend on fixture, hostile-input, and sample-flow coverage, not just happy-path tests.
 
 ## 6. Explicit Non-Goals
@@ -264,3 +298,4 @@ Acceptance (required):
 - SMS/voice MFA in Arlen core.
 - Provider-specific SDK sprawl or one-off controller logic embedded in the framework.
 - Replacing current bearer/JWT API auth helpers with a login-product abstraction.
+- Shipping the full Phase 13 `auth` or `admin-ui` module experience inside core Arlen.

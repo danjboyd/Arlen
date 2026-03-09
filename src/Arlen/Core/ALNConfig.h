@@ -10,6 +10,10 @@ NS_ASSUME_NONNULL_BEGIN
 + (NSDictionary *)loadConfigAtRoot:(NSString *)rootPath
                        environment:(NSString *)environment
                              error:(NSError *_Nullable *_Nullable)error;
++ (NSDictionary *)loadConfigAtRoot:(NSString *)rootPath
+                       environment:(NSString *)environment
+                    includeModules:(BOOL)includeModules
+                             error:(NSError *_Nullable *_Nullable)error;
 
 @end
 

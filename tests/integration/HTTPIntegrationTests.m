@@ -4022,4 +4022,131 @@
   }
 }
 
+- (void)testAuthPrimitivesStubProviderLoginCompletesAndEstablishesSession {
+  int port = [self randomPort];
+  NSTask *server = [[NSTask alloc] init];
+  server.launchPath = @"/bin/bash";
+  server.arguments = @[
+    @"-lc",
+    [NSString stringWithFormat:@"ARLEN_APP_ROOT=examples/auth_primitives ./build/auth-primitives-server --port %d",
+                               port]
+  ];
+  server.standardOutput = [NSPipe pipe];
+  server.standardError = [NSPipe pipe];
+  [server launch];
+
+  @try {
+    BOOL ready = NO;
+    (void)[self requestPathWithRetries:@"/healthz" port:port attempts:60 success:&ready];
+    XCTAssertTrue(ready);
+
+    NSString *script =
+        [NSString stringWithFormat:
+                      @"import json, http.cookiejar, urllib.request\n"
+                       @"PORT=%d\n"
+                       @"jar = http.cookiejar.CookieJar()\n"
+                       @"opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(jar))\n"
+                       @"login = json.loads(opener.open(f'http://127.0.0.1:{PORT}/auth/provider/stub/login', timeout=5).read().decode('utf-8'))\n"
+                       @"session = json.loads(opener.open(f'http://127.0.0.1:{PORT}/auth/session', timeout=5).read().decode('utf-8'))\n"
+                       @"print(json.dumps({'login': login, 'session': session}))\n",
+                      port];
+    int pyCode = 0;
+    NSString *output = [self runPythonScript:script exitCode:&pyCode];
+    XCTAssertEqual(0, pyCode, @"%@", output);
+
+    NSData *data = [output dataUsingEncoding:NSUTF8StringEncoding];
+    NSError *error = nil;
+    NSDictionary *payload = [NSJSONSerialization JSONObjectWithData:data options:0 error:&error];
+    XCTAssertNil(error);
+    NSDictionary *session = [payload[@"session"] isKindOfClass:[NSDictionary class]] ? payload[@"session"] : @{};
+    XCTAssertEqualObjects(@"user:oidc-user@example.com", session[@"subject"]);
+    XCTAssertEqualObjects(@"stub_oidc", session[@"provider"]);
+    XCTAssertEqualObjects(@1, session[@"aal"]);
+    NSArray *methods = [session[@"methods"] isKindOfClass:[NSArray class]] ? session[@"methods"] : @[];
+    XCTAssertTrue([methods containsObject:@"federated"]);
+  } @finally {
+    if ([server isRunning]) {
+      (void)kill(server.processIdentifier, SIGTERM);
+      [server waitUntilExit];
+    }
+  }
+}
+
+- (void)testAuthPrimitivesProviderLoginStillRequiresLocalStepUpForAAL2Routes {
+  int port = [self randomPort];
+  NSTask *server = [[NSTask alloc] init];
+  server.launchPath = @"/bin/bash";
+  server.arguments = @[
+    @"-lc",
+    [NSString stringWithFormat:@"ARLEN_APP_ROOT=examples/auth_primitives ./build/auth-primitives-server --port %d",
+                               port]
+  ];
+  server.standardOutput = [NSPipe pipe];
+  server.standardError = [NSPipe pipe];
+  [server launch];
+
+  @try {
+    BOOL ready = NO;
+    (void)[self requestPathWithRetries:@"/healthz" port:port attempts:60 success:&ready];
+    XCTAssertTrue(ready);
+
+    NSString *script =
+        [NSString stringWithFormat:
+                      @"import base64, hashlib, hmac, http.cookiejar, json, struct, time, urllib.error, urllib.request\n"
+                       @"PORT=%d\n"
+                       @"SECRET='JBSWY3DPEHPK3PXP'\n"
+                       @"jar = http.cookiejar.CookieJar()\n"
+                       @"opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(jar))\n"
+                       @"def request_json(url):\n"
+                       @"    try:\n"
+                       @"        response = opener.open(url, timeout=5)\n"
+                       @"        return response.getcode(), json.loads(response.read().decode('utf-8'))\n"
+                       @"    except urllib.error.HTTPError as exc:\n"
+                       @"        return exc.code, json.loads(exc.read().decode('utf-8'))\n"
+                       @"def totp(secret):\n"
+                       @"    key = base64.b32decode(secret, casefold=True)\n"
+                       @"    counter = int(time.time() // 30)\n"
+                       @"    digest = hmac.new(key, struct.pack('>Q', counter), hashlib.sha1).digest()\n"
+                       @"    offset = digest[-1] & 0x0f\n"
+                       @"    value = ((digest[offset] & 0x7f) << 24) | ((digest[offset + 1] & 0xff) << 16) | ((digest[offset + 2] & 0xff) << 8) | (digest[offset + 3] & 0xff)\n"
+                       @"    return f'{value %% 1000000:06d}'\n"
+                       @"login_status, login = request_json(f'http://127.0.0.1:{PORT}/auth/provider/stub/login')\n"
+                       @"if login_status != 200:\n"
+                       @"    raise RuntimeError(login)\n"
+                       @"secure_status, secure = request_json(f'http://127.0.0.1:{PORT}/auth/provider/secure')\n"
+                       @"if secure_status != 403 or secure.get('error', {}).get('code') != 'step_up_required':\n"
+                       @"    raise RuntimeError({'status': secure_status, 'body': secure})\n"
+                       @"step_status, step = request_json(f'http://127.0.0.1:{PORT}/auth/local/totp/verify?code={totp(SECRET)}')\n"
+                       @"if step_status != 200 or step.get('session', {}).get('aal') != 2:\n"
+                       @"    raise RuntimeError({'status': step_status, 'body': step})\n"
+                       @"secure2_status, secure2 = request_json(f'http://127.0.0.1:{PORT}/auth/provider/secure')\n"
+                       @"if secure2_status != 200 or secure2.get('session', {}).get('aal') != 2:\n"
+                       @"    raise RuntimeError({'status': secure2_status, 'body': secure2})\n"
+                       @"print(json.dumps({'secure_before': secure, 'step_up': step, 'secure_after': secure2}))\n",
+                      port];
+    int pyCode = 0;
+    NSString *output = [self runPythonScript:script exitCode:&pyCode];
+    XCTAssertEqual(0, pyCode, @"%@", output);
+
+    NSData *data = [output dataUsingEncoding:NSUTF8StringEncoding];
+    NSError *error = nil;
+    NSDictionary *payload = [NSJSONSerialization JSONObjectWithData:data options:0 error:&error];
+    XCTAssertNil(error);
+    NSDictionary *secureBefore =
+        [payload[@"secure_before"] isKindOfClass:[NSDictionary class]] ? payload[@"secure_before"] : @{};
+    NSDictionary *stepUp =
+        [payload[@"step_up"] isKindOfClass:[NSDictionary class]] ? payload[@"step_up"] : @{};
+    NSDictionary *secureAfter =
+        [payload[@"secure_after"] isKindOfClass:[NSDictionary class]] ? payload[@"secure_after"] : @{};
+    XCTAssertEqualObjects(@"step_up_required", secureBefore[@"error"][@"code"]);
+    XCTAssertEqualObjects(@2, stepUp[@"session"][@"aal"]);
+    XCTAssertEqualObjects(@2, secureAfter[@"session"][@"aal"]);
+  } @finally {
+    if ([server isRunning]) {
+      (void)kill(server.processIdentifier, SIGTERM);
+      [server waitUntilExit];
+    }
+  }
+}
+
 @end

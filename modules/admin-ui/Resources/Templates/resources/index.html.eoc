@@ -1,0 +1,57 @@
+<% NSDictionary *resource = [ctx objectForKey:@"resource"] ?: @{}; %>
+<% NSDictionary *paths = [resource objectForKey:@"paths"] ?: @{}; %>
+<% NSArray *fields = [resource objectForKey:@"fields"] ?: @[]; %>
+<% NSArray *filters = [resource objectForKey:@"filters"] ?: @[]; %>
+<% NSArray *records = [ctx objectForKey:@"records"] ?: @[]; %>
+<% NSMutableArray *listFields = [NSMutableArray array]; %>
+<% for (NSDictionary *field in fields) { if ([[field objectForKey:@"list"] boolValue]) { [listFields addObject:field]; } } %>
+
+<form class="admin-toolbar" method="get" action="<%= [paths objectForKey:@"html_index"] %>">
+  <% for (NSDictionary *filter in filters) { %>
+    <% if ([[filter objectForKey:@"type"] isEqual:@"search"]) { %>
+      <label>
+        <span><%= [filter objectForKey:@"label"] %></span>
+        <input type="search"
+               name="<%= [filter objectForKey:@"name"] %>"
+               value="<%= [ctx objectForKey:@"query"] %>"
+               placeholder="<%= [filter objectForKey:@"placeholder"] %>">
+      </label>
+    <% } %>
+  <% } %>
+  <button type="submit">Filter</button>
+</form>
+
+<table class="admin-table">
+  <thead>
+    <tr>
+      <% for (NSDictionary *field in listFields) { %>
+        <th><%= [field objectForKey:@"label"] %></th>
+      <% } %>
+    </tr>
+  </thead>
+  <tbody>
+    <% NSString *identifierField = [resource objectForKey:@"identifierField"] ?: @"id"; %>
+    <% NSString *primaryField = [resource objectForKey:@"primaryField"] ?: identifierField; %>
+    <% for (NSDictionary *record in records) { %>
+      <tr>
+        <% NSUInteger columnIndex = 0; %>
+        <% for (NSDictionary *field in listFields) { %>
+          <% NSString *name = [field objectForKey:@"name"]; %>
+          <% id value = [record objectForKey:name] ?: @""; %>
+          <td>
+            <% if (columnIndex == 0) { %>
+              <a href="<%= [paths objectForKey:@"html_index"] %>/<%= [record objectForKey:identifierField] %>"><%= [record objectForKey:primaryField] ?: value %></a>
+            <% } else if ([value isKindOfClass:[NSArray class]]) { %>
+              <%= [value componentsJoinedByString:@", "] %>
+            <% } else if ([value respondsToSelector:@selector(boolValue)]) { %>
+              <%= [value boolValue] ? @"Yes" : @"No" %>
+            <% } else { %>
+              <%= value %>
+            <% } %>
+          </td>
+          <% columnIndex += 1; %>
+        <% } %>
+      </tr>
+    <% } %>
+  </tbody>
+</table>

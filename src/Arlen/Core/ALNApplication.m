@@ -501,6 +501,7 @@ static BOOL ALNInvokeRouteAction(id controller,
 @property(nonatomic, strong, readwrite) ALNMetricsRegistry *metrics;
 @property(nonatomic, strong) NSMutableArray *mutableMiddlewares;
 @property(nonatomic, strong) NSMutableArray *mutablePlugins;
+@property(nonatomic, strong) NSMutableArray *mutableModules;
 @property(nonatomic, strong) NSMutableArray *mutableLifecycleHooks;
 @property(nonatomic, strong) NSMutableArray *mutableMounts;
 @property(nonatomic, strong) NSMutableArray *mutableStaticMounts;
@@ -533,6 +534,7 @@ static BOOL ALNInvokeRouteAction(id controller,
 @property(nonatomic, strong) NSLock *routeCompilationLock;
 
 - (void)loadConfiguredPlugins;
+- (void)loadConfiguredModules;
 - (void)loadConfiguredStaticMounts;
 - (BOOL)compileRegisteredRoutesWithWarningsAsErrors:(BOOL)warningsAsErrors
                                               error:(NSError *_Nullable *_Nullable)error;
@@ -575,6 +577,7 @@ static BOOL ALNInvokeRouteAction(id controller,
     _metrics = [[ALNMetricsRegistry alloc] init];
     _mutableMiddlewares = [NSMutableArray array];
     _mutablePlugins = [NSMutableArray array];
+    _mutableModules = [NSMutableArray array];
     _mutableLifecycleHooks = [NSMutableArray array];
     _mutableMounts = [NSMutableArray array];
     _mutableStaticMounts = [NSMutableArray array];
@@ -694,6 +697,7 @@ static BOOL ALNInvokeRouteAction(id controller,
     [self registerBuiltInMiddlewares];
     [self loadConfiguredStaticMounts];
     [self loadConfiguredPlugins];
+    [self loadConfiguredModules];
   }
   return self;
 }
@@ -868,6 +872,10 @@ static BOOL ALNInvokeRouteAction(id controller,
 
 - (NSArray *)plugins {
   return [NSArray arrayWithArray:self.mutablePlugins];
+}
+
+- (NSArray *)modules {
+  return [NSArray arrayWithArray:self.mutableModules];
 }
 
 - (NSArray *)lifecycleHooks {
@@ -2879,10 +2887,8 @@ static BOOL ALNApplyAuthContractIfNeeded(ALNApplication *application,
                                       ? request.headers[@"authorization"]
                                       : @"";
   BOOL hasAuthorizationHeader = ([authorizationHeader length] > 0);
-  BOOL shouldAttemptBearerAuth = requiresRoleOrScope ||
-                                 (requiresAssurance &&
-                                  [[ALNAuthSession subjectFromContext:context] length] == 0 &&
-                                  hasAuthorizationHeader);
+  BOOL shouldAttemptBearerAuth =
+      hasAuthorizationHeader && (requiresRoleOrScope || requiresAssurance);
   if (shouldAttemptBearerAuth) {
     NSDictionary *authConfig = ALNAuthConfig(application.config);
     NSError *authError = nil;
@@ -2904,6 +2910,17 @@ static BOOL ALNApplyAuthContractIfNeeded(ALNApplication *application,
                                    requiredScopes);
       return NO;
     }
+  }
+
+  NSString *subject = [ALNAuthSession subjectFromContext:context];
+  if (requiresRoleOrScope && [subject length] == 0) {
+    ALNApplyUnauthorizedResponse(application,
+                                 request,
+                                 response,
+                                 requestID,
+                                 @"Authentication required",
+                                 requiredScopes);
+    return NO;
   }
 
   if (requiresRoleOrScope && ![ALNAuth context:context hasRequiredScopes:requiredScopes]) {
@@ -2935,7 +2952,6 @@ static BOOL ALNApplyAuthContractIfNeeded(ALNApplication *application,
     return YES;
   }
 
-  NSString *subject = [ALNAuthSession subjectFromContext:context];
   if ([subject length] == 0) {
     ALNApplyUnauthorizedResponse(application,
                                  request,
@@ -3147,6 +3163,39 @@ static void ALNFinalizeResponse(ALNApplication *application,
                    @"error" : error.localizedDescription ?: @"unknown",
                  }];
     }
+  }
+}
+
+- (void)loadConfiguredModules {
+  NSError *error = nil;
+  NSArray<id<ALNModule>> *modules = [ALNModuleSystem loadModulesForApplication:self error:&error];
+  if (modules == nil) {
+    if (error != nil) {
+      [self.logger warn:@"module load skipped"
+                 fields:@{
+                   @"error" : error.localizedDescription ?: @"unknown",
+                 }];
+    }
+    return;
+  }
+
+  for (id<ALNModule> module in modules) {
+    NSString *identifier = [module moduleIdentifier] ?: @"";
+    BOOL alreadyLoaded = NO;
+    for (id<ALNModule> existing in self.mutableModules) {
+      if ([[existing moduleIdentifier] isEqualToString:identifier]) {
+        alreadyLoaded = YES;
+        break;
+      }
+    }
+    if (alreadyLoaded) {
+      continue;
+    }
+    [self.mutableModules addObject:module];
+    [self.logger info:@"module loaded"
+               fields:@{
+                 @"module" : identifier ?: @"",
+               }];
   }
 }
 

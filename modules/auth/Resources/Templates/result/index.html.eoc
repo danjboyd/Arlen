@@ -1,0 +1,5 @@
+<h2><%= [ctx objectForKey:@"resultTitle"] %></h2>
+<p><%= [ctx objectForKey:@"message"] %></p>
+<div class="auth-actions">
+  <a class="auth-link" href="<%= [ctx objectForKey:@"resultActionPath"] %>"><%= [ctx objectForKey:@"resultActionLabel"] %></a>
+</div>

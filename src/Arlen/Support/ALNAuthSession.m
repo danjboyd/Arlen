@@ -9,6 +9,8 @@ static NSString *const ALNAuthSessionStateKey = @"_auth";
 static NSString *const ALNAuthSessionSubjectKey = @"subject";
 static NSString *const ALNAuthSessionProviderKey = @"provider";
 static NSString *const ALNAuthSessionMethodsKey = @"amr";
+static NSString *const ALNAuthSessionScopesKey = @"scope";
+static NSString *const ALNAuthSessionRolesKey = @"roles";
 static NSString *const ALNAuthSessionAssuranceLevelKey = @"aal";
 static NSString *const ALNAuthSessionAuthenticatedAtKey = @"auth_time";
 static NSString *const ALNAuthSessionMFASatisfiedAtKey = @"mfa_time";
@@ -55,6 +57,30 @@ static NSArray *ALNNormalizedMethodsArray(id rawMethods) {
   return [NSArray arrayWithArray:normalized];
 }
 
+static NSArray *ALNNormalizedStringClaimsArray(id rawValues) {
+  NSMutableArray *normalized = [NSMutableArray array];
+  NSArray *source = nil;
+  if ([rawValues isKindOfClass:[NSArray class]]) {
+    source = rawValues;
+  } else if ([rawValues isKindOfClass:[NSString class]]) {
+    source = @[ rawValues ];
+  } else {
+    source = @[];
+  }
+  for (id value in source) {
+    NSString *entry = ALNTrimmedString(value);
+    if ([entry length] == 0) {
+      continue;
+    }
+    entry = [entry lowercaseString];
+    if ([normalized containsObject:entry]) {
+      continue;
+    }
+    [normalized addObject:entry];
+  }
+  return [NSArray arrayWithArray:normalized];
+}
+
 static NSDate *ALNDateFromUnixValue(id value) {
   if (![value respondsToSelector:@selector(doubleValue)]) {
     return nil;
@@ -79,6 +105,21 @@ static NSDictionary *ALNClaimsBackedAuthState(ALNContext *context) {
 
   NSString *provider = ALNTrimmedString(claims[@"iss"]);
   NSArray *methods = ALNNormalizedMethodsArray(claims[@"amr"]);
+  NSArray *scopes = ALNNormalizedStringClaimsArray(context.stash[ALNContextAuthScopesStashKey]);
+  if ([scopes count] == 0) {
+    scopes = ALNNormalizedStringClaimsArray(claims[@"scp"]);
+  }
+  if ([scopes count] == 0) {
+    NSString *scopeString = ALNTrimmedString(claims[@"scope"]);
+    if ([scopeString length] > 0) {
+      scopes = ALNNormalizedStringClaimsArray([scopeString componentsSeparatedByCharactersInSet:
+                                                             [NSCharacterSet whitespaceAndNewlineCharacterSet]]);
+    }
+  }
+  NSArray *roles = ALNNormalizedStringClaimsArray(context.stash[ALNContextAuthRolesStashKey]);
+  if ([roles count] == 0) {
+    roles = ALNNormalizedStringClaimsArray(claims[@"roles"]);
+  }
   NSUInteger assuranceLevel = 1;
   id aal = claims[@"aal"];
   if ([aal respondsToSelector:@selector(integerValue)] && [aal integerValue] > 0) {
@@ -91,6 +132,8 @@ static NSDictionary *ALNClaimsBackedAuthState(ALNContext *context) {
     state[ALNAuthSessionProviderKey] = provider;
   }
   state[ALNAuthSessionMethodsKey] = methods;
+  state[ALNAuthSessionScopesKey] = scopes ?: @[];
+  state[ALNAuthSessionRolesKey] = roles ?: @[];
   state[ALNAuthSessionAssuranceLevelKey] = @(assuranceLevel);
   NSDate *authenticatedAt = ALNDateFromUnixValue(claims[@"auth_time"]);
   if (authenticatedAt == nil) {
@@ -145,6 +188,16 @@ static NSString *ALNNewSessionIdentifier(void) {
 + (NSArray *)authenticationMethodsFromContext:(ALNContext *)context {
   NSDictionary *state = ALNResolvedAuthState(context);
   return ALNNormalizedMethodsArray(state[ALNAuthSessionMethodsKey]);
+}
+
++ (NSArray *)scopesFromContext:(ALNContext *)context {
+  NSDictionary *state = ALNResolvedAuthState(context);
+  return ALNNormalizedStringClaimsArray(state[ALNAuthSessionScopesKey]);
+}
+
++ (NSArray *)rolesFromContext:(ALNContext *)context {
+  NSDictionary *state = ALNResolvedAuthState(context);
+  return ALNNormalizedStringClaimsArray(state[ALNAuthSessionRolesKey]);
 }
 
 + (NSUInteger)assuranceLevelFromContext:(ALNContext *)context {
@@ -212,6 +265,8 @@ static NSString *ALNNewSessionIdentifier(void) {
 + (BOOL)establishAuthenticatedSessionForSubject:(NSString *)subject
                                        provider:(NSString *)provider
                                         methods:(NSArray *)methods
+                                         scopes:(NSArray *)scopes
+                                          roles:(NSArray *)roles
                                  assuranceLevel:(NSUInteger)assuranceLevel
                                 authenticatedAt:(NSDate *)authenticatedAt
                                         context:(ALNContext *)context
@@ -230,6 +285,8 @@ static NSString *ALNNewSessionIdentifier(void) {
   if ([normalizedMethods count] == 0) {
     normalizedMethods = @[ @"pwd" ];
   }
+  NSArray *normalizedScopes = ALNNormalizedStringClaimsArray(scopes);
+  NSArray *normalizedRoles = ALNNormalizedStringClaimsArray(roles);
   NSDate *timestamp = authenticatedAt ?: [NSDate date];
   NSString *sessionID = ALNNewSessionIdentifier();
   if ([sessionID length] == 0) {
@@ -247,6 +304,8 @@ static NSString *ALNNewSessionIdentifier(void) {
     state[ALNAuthSessionProviderKey] = normalizedProvider;
   }
   state[ALNAuthSessionMethodsKey] = normalizedMethods;
+  state[ALNAuthSessionScopesKey] = normalizedScopes ?: @[];
+  state[ALNAuthSessionRolesKey] = normalizedRoles ?: @[];
   state[ALNAuthSessionAssuranceLevelKey] = @(normalizedLevel);
   state[ALNAuthSessionAuthenticatedAtKey] = @([timestamp timeIntervalSince1970]);
   if (normalizedLevel >= 2) {
@@ -258,6 +317,24 @@ static NSString *ALNNewSessionIdentifier(void) {
   session[ALNAuthSessionStateKey] = state;
   [context markSessionDirty];
   return YES;
+}
+
++ (BOOL)establishAuthenticatedSessionForSubject:(NSString *)subject
+                                       provider:(NSString *)provider
+                                        methods:(NSArray *)methods
+                                 assuranceLevel:(NSUInteger)assuranceLevel
+                                authenticatedAt:(NSDate *)authenticatedAt
+                                        context:(ALNContext *)context
+                                          error:(NSError **)error {
+  return [self establishAuthenticatedSessionForSubject:subject
+                                              provider:provider
+                                               methods:methods
+                                                scopes:nil
+                                                 roles:nil
+                                        assuranceLevel:assuranceLevel
+                                       authenticatedAt:authenticatedAt
+                                               context:context
+                                                 error:error];
 }
 
 + (BOOL)elevateAuthenticatedSessionForMethod:(NSString *)method

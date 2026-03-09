@@ -1,7 +1,7 @@
 # Arlen Phase 2 + Phase 3 Roadmap Index
 
-Status: Active (Phase 2A-2D complete; Phase 3A-3H complete; Phase 4A-4E complete; Phase 5A-5E complete; Phase 7A/7B/7C/7D/7E/7F/7G/7H initial slices implemented; Phase 7 follow-on active; Phase 8A complete; Phase 8B complete; Phase 9A/9B/9C/9D/9E/9F/9G/9H/9I/9J complete; Phase 10 complete with 10A-10M delivered; Phase 11 complete with 11A-11F delivered; Phase 12 active with 12A-12C complete)
-Last updated: 2026-03-06
+Status: Active (Phase 2A-2D complete; Phase 3A-3H complete; Phase 4A-4E complete; Phase 5A-5E complete; Phase 7A/7B/7C/7D/7E/7F/7G/7H initial slices implemented; Phase 7 follow-on active; Phase 8A complete; Phase 8B complete; Phase 9A/9B/9C/9D/9E/9F/9G/9H/9I/9J complete; Phase 10 complete with 10A-10M delivered; Phase 11 complete with 11A-11F delivered; Phase 12 complete with 12A-12F delivered; Phase 13 active with 13A-13G delivered)
+Last updated: 2026-03-09
 
 This index points to the current roadmap documents:
 
@@ -15,6 +15,7 @@ This index points to the current roadmap documents:
 - `docs/PHASE10_ROADMAP.md`
 - `docs/PHASE11_ROADMAP.md`
 - `docs/PHASE12_ROADMAP.md`
+- `docs/PHASE13_ROADMAP.md`
 - `docs/FEATURE_PARITY_MATRIX.md`
 
 ## Summary
@@ -164,7 +165,18 @@ Phase 12 execution is defined in `docs/PHASE12_ROADMAP.md`, with current deliver
 - Phase 12A complete: session-native auth-assurance inspection, route-level step-up policy, session rotation helpers, and deterministic HTML/API step-up rejection behavior
 - Phase 12B complete: `ALNTOTP`, `ALNRecoveryCodes`, and session-upgrade helpers for local MFA flows
 - Phase 12C complete: `ALNWebAuthn` registration/assertion helpers with origin/RP/challenge/sign-count verification and AAL2 session upgrade integration
-- Phase 12D-12F planned: OIDC-first federation client/presets plus hostile-input/confidence expansion
+- Phase 12D complete: `ALNOIDCClient` authorization-code + PKCE helpers, callback validation, token parsing, HS256/RS256 ID-token verification, and normalized provider identity output
+- Phase 12E complete: `ALNAuthProviderPresets`, `ALNAuthProviderSessionBridge`, deterministic provider config merging, and provider-login session bootstrap hooks that preserve local AAL2 step-up policy
+- Phase 12F complete: OIDC hostile-input fixture coverage, `OIDCClientTests`, `auth_primitives` sample app, and `make phase12-confidence` confidence artifacts under `build/release_confidence/phase12`
+
+Phase 13 execution is defined in `docs/PHASE13_ROADMAP.md`, with current delivery state:
+
+- a first-class Objective-C-native module system layered above plugins
+- source-vendored, bundle-ready module packaging/config/migration/override contracts
+- first-party optional `auth` and `admin-ui` modules with complete product flows
+- a metadata-driven admin resource registry for app-owned backoffice resources
+- one auth/admin domain contract supporting both EOC-rendered HTML and SPA-friendly JSON surfaces without bundling a React frontend
+- sample app, module docs, and `make phase13-confidence` confidence artifacts
 
 Scope guardrails remain unchanged:
 - admin/backoffice and full account-product surfaces remain outside Arlen core and are expected to ship as optional modules/products.

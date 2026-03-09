@@ -1,0 +1,35 @@
+<% NSDictionary *user = [ctx objectForKey:@"userRecord"] ?: @{}; %>
+<section class="admin-detail-grid">
+  <article class="admin-panel">
+    <h3>Account</h3>
+    <dl class="admin-definition-list">
+      <dt>Email</dt>
+      <dd><%= [user objectForKey:@"email"] %></dd>
+      <dt>Subject</dt>
+      <dd><%= [user objectForKey:@"subject"] %></dd>
+      <dt>Roles</dt>
+      <dd><%= [[user objectForKey:@"roles"] componentsJoinedByString:@", "] %></dd>
+      <dt>Email verified</dt>
+      <dd><%= [[user objectForKey:@"email_verified"] boolValue] ? @"Yes" : @"No" %></dd>
+      <dt>MFA enabled</dt>
+      <dd><%= [[user objectForKey:@"mfa_enabled"] boolValue] ? @"Yes" : @"No" %></dd>
+      <dt>Provider identities</dt>
+      <dd><%= [[user objectForKey:@"provider_identity_count"] description] %></dd>
+    </dl>
+  </article>
+
+  <article class="admin-panel">
+    <h3>Edit display name</h3>
+    <form method="post" action="<%= [ctx objectForKey:@"adminUsersPath"] %>/<%= [user objectForKey:@"subject"] %>">
+      <input type="hidden" name="csrf_token" value="<%= [ctx objectForKey:@"csrfToken"] %>">
+      <label>
+        <span>Display name</span>
+        <input type="text" name="display_name" value="<%= [user objectForKey:@"display_name"] %>">
+      </label>
+      <div class="admin-actions">
+        <button type="submit">Save</button>
+        <a href="<%= [ctx objectForKey:@"adminUsersPath"] %>">Back to users</a>
+      </div>
+    </form>
+  </article>
+</section>

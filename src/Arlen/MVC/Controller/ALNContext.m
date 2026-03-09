@@ -415,7 +415,7 @@ static BOOL ALNETagListMatches(NSString *ifNoneMatchHeader, NSString *etag) {
   if ([value isKindOfClass:[NSArray class]]) {
     return value;
   }
-  return @[];
+  return [ALNAuthSession scopesFromContext:self];
 }
 
 - (NSArray *)authRoles {
@@ -423,7 +423,7 @@ static BOOL ALNETagListMatches(NSString *ifNoneMatchHeader, NSString *etag) {
   if ([value isKindOfClass:[NSArray class]]) {
     return value;
   }
-  return @[];
+  return [ALNAuthSession rolesFromContext:self];
 }
 
 - (NSString *)authSubject {

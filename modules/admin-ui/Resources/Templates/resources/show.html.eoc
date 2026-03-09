@@ -1,0 +1,64 @@
+<% NSDictionary *resource = [ctx objectForKey:@"resource"] ?: @{}; %>
+<% NSDictionary *record = [ctx objectForKey:@"record"] ?: @{}; %>
+<% NSDictionary *paths = [resource objectForKey:@"paths"] ?: @{}; %>
+<% NSArray *fields = [resource objectForKey:@"fields"] ?: @[]; %>
+<% NSArray *actions = [resource objectForKey:@"actions"] ?: @[]; %>
+<% NSString *identifierField = [resource objectForKey:@"identifierField"] ?: @"id"; %>
+<% NSMutableArray *editableFields = [NSMutableArray array]; %>
+<% for (NSDictionary *field in fields) { if ([[field objectForKey:@"editable"] boolValue]) { [editableFields addObject:field]; } } %>
+
+<section class="admin-detail-grid">
+  <article class="admin-panel">
+    <h3><%= [resource objectForKey:@"singularLabel"] %></h3>
+    <dl class="admin-definition-list">
+      <% for (NSDictionary *field in fields) { %>
+        <% if (![[field objectForKey:@"detail"] boolValue]) { continue; } %>
+        <% id value = [record objectForKey:[field objectForKey:@"name"]] ?: @""; %>
+        <dt><%= [field objectForKey:@"label"] %></dt>
+        <dd>
+          <% if ([value isKindOfClass:[NSArray class]]) { %>
+            <%= [value componentsJoinedByString:@", "] %>
+          <% } else if ([value respondsToSelector:@selector(boolValue)] && [[[field objectForKey:@"kind"] lowercaseString] isEqual:@"boolean"]) { %>
+            <%= [value boolValue] ? @"Yes" : @"No" %>
+          <% } else { %>
+            <%= value %>
+          <% } %>
+        </dd>
+      <% } %>
+    </dl>
+  </article>
+
+  <% if ([editableFields count] > 0) { %>
+    <article class="admin-panel">
+      <h3>Edit</h3>
+      <form method="post" action="<%= [paths objectForKey:@"html_index"] %>/<%= [record objectForKey:identifierField] %>">
+        <input type="hidden" name="csrf_token" value="<%= [ctx objectForKey:@"csrfToken"] %>">
+        <% for (NSDictionary *field in editableFields) { %>
+          <% NSString *fieldName = [field objectForKey:@"name"]; %>
+          <label>
+            <span><%= [field objectForKey:@"label"] %></span>
+            <input type="text" name="<%= fieldName %>" value="<%= [record objectForKey:fieldName] ?: @"" %>">
+          </label>
+        <% } %>
+        <div class="admin-actions">
+          <button type="submit">Save</button>
+          <a href="<%= [paths objectForKey:@"html_index"] %>">Back to list</a>
+        </div>
+      </form>
+    </article>
+  <% } %>
+</section>
+
+<% if ([actions count] > 0) { %>
+  <section class="admin-panel">
+    <h3>Actions</h3>
+    <div class="admin-actions">
+      <% for (NSDictionary *action in actions) { %>
+        <form method="post" action="<%= [paths objectForKey:@"html_index"] %>/<%= [record objectForKey:identifierField] %>/actions/<%= [action objectForKey:@"name"] %>">
+          <input type="hidden" name="csrf_token" value="<%= [ctx objectForKey:@"csrfToken"] %>">
+          <button type="submit"><%= [action objectForKey:@"label"] %></button>
+        </form>
+      <% } %>
+    </div>
+  </section>
+<% } %>

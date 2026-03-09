@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title><%= [ctx objectForKey:@"pageTitle"] %></title>
+    <link rel="stylesheet" href="/modules/auth/auth.css">
+  </head>
+  <body>
+    <main class="auth-shell">
+      <section class="auth-card">
+        <h1><%= [ctx objectForKey:@"pageTitle"] %></h1>
+        <% if ([[ctx objectForKey:@"message"] length] > 0) { %>
+          <p class="auth-note"><%= [ctx objectForKey:@"message"] %></p>
+        <% } %>
+        <%== [ctx objectForKey:@"content"] %>
+      </section>
+    </main>
+  </body>
+</html>

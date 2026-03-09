@@ -242,11 +242,39 @@ session state. Browser requests that miss a route's assurance requirement redire
 step-up path with `X-Arlen-Step-Up-Required: 1`; JSON/API requests receive structured
 `403 step_up_required`.
 
-Local MFA helpers shipped in Phase 12A-12C:
+Phase 12 public auth helper surface:
 
 - `ALNTOTP` for secrets, provisioning URIs, and bounded-skew code verification
 - `ALNRecoveryCodes` for generation, Argon2id hash-at-rest, and single-use consume
 - `ALNWebAuthn` for registration/assertion option generation and deterministic verification
+- `ALNOIDCClient` for authorization-code + PKCE request generation, callback validation, token parsing, and ID-token verification
+- `ALNAuthProviderPresets` for deterministic provider defaults plus explicit config overrides
+- `ALNAuthProviderSessionBridge` for provider-identity normalization and local session bootstrap hooks
+
+The sample app in [examples/auth_primitives/README.md](/home/danboyd/git/Arlen/examples/auth_primitives/README.md) demonstrates the local TOTP step-up path plus a stub OIDC provider flow built directly on these core contracts.
+
+Phase 13 first-party module quick path:
+
+```bash
+./build/arlen module add auth
+./build/arlen module add admin-ui
+./build/arlen module doctor --json
+./build/arlen module assets --output-dir build/module_assets
+./build/arlen module migrate --env development
+make phase13-confidence
+```
+
+Vendored modules live under `modules/<id>/`. `boomhauer` automatically compiles
+module Objective-C sources from `modules/*/Sources` and module templates from
+`modules/*/Resources/Templates`. App overrides for module templates live under
+`templates/modules/<id>/...`; app overrides for module public assets live under
+`public/modules/<id>/...`.
+
+The first-party `auth` module ships default account flows plus SPA-friendly auth/session
+endpoints under `/auth/api/...`. The first-party `admin-ui` module mounts a default
+`/admin` HTML surface and `/admin/api` JSON surface on top of the shared auth/session
+contracts. See [examples/auth_admin_demo/README.md](/home/danboyd/git/Arlen/examples/auth_admin_demo/README.md)
+for a sample app that registers an app-owned admin resource into the shared module system.
 
 Trusted proxy allowlist override:
 
@@ -320,6 +348,7 @@ make ci-json-abstraction
 make ci-json-perf
 make ci-dispatch-perf
 make ci-http-parse-perf
+make phase12-confidence
 make ci-fault-injection
 make ci-release-certification
 make phase5e-confidence
@@ -335,6 +364,7 @@ make phase5e-confidence
 `make ci-json-perf` runs the Phase 10E JSON backend microbenchmark gate and writes artifacts under `build/release_confidence/phase10e`.
 `make ci-dispatch-perf` runs the Phase 10G dispatch benchmark gate and writes artifacts under `build/release_confidence/phase10g`.
 `make ci-http-parse-perf` runs the Phase 10H HTTP parser benchmark gate and writes artifacts under `build/release_confidence/phase10h`.
+`make phase12-confidence` runs the Phase 12 auth confidence gate and writes artifacts under `build/release_confidence/phase12`.
 `make ci-fault-injection` runs the Phase 9I runtime seam fault matrix and writes artifacts under `build/release_confidence/phase9i`.
 `make ci-release-certification` runs the Phase 9J release checklist and writes certification artifacts under `build/release_confidence/phase9j`.
 `make test-unit` and `make test-integration` run with a repo-local GNUstep test home (`.gnustep-home`) to keep defaults/lock files isolated.

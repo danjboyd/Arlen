@@ -1,0 +1,26 @@
+{
+  identifier = "admin-ui";
+  version = "1.0.0";
+  principalClass = "ALNAdminUIModule";
+  dependencies = (
+    { identifier = "auth"; version = ">= 1.0.0"; }
+  );
+  compatibility = {
+    arlenVersion = ">= 0.1.0";
+  };
+  config = {
+    defaults = {
+      adminUI = {
+        title = "Arlen Admin";
+        paths = {
+          prefix = "/admin";
+          apiPrefix = "/api";
+        };
+      };
+    };
+    requiredKeys = (
+      "database.connectionString",
+      "session.secret"
+    );
+  };
+}

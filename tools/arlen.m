@@ -4,6 +4,7 @@
 
 #import "ALNConfig.h"
 #import "ALNJSONSerialization.h"
+#import "ALNModuleSystem.h"
 #import "ALNMigrationRunner.h"
 #import "ALNPg.h"
 #import "ALNSchemaCodegen.h"
@@ -18,6 +19,7 @@ static void PrintUsage(void) {
           "  boomhauer [server args...]\n"
           "  propane [manager args...]\n"
           "  migrate [--env <name>] [--database <target>] [--dsn <connection_string>] [--dry-run]\n"
+          "  module <add|remove|list|doctor|migrate|assets|upgrade> [options]\n"
           "  schema-codegen [--env <name>] [--database <target>] [--dsn <connection_string>] [--output-dir <path>] [--manifest <path>] [--prefix <ClassPrefix>] [--typed-contracts] [--force]\n"
           "  typed-sql-codegen [--input-dir <path>] [--output-dir <path>] [--manifest <path>] [--prefix <ClassPrefix>] [--force]\n"
           "  routes\n"
@@ -62,6 +64,20 @@ static void PrintCheckUsage(void) {
   fprintf(stdout, "Usage: arlen check [--dry-run] [--json]\n");
 }
 
+static void PrintModuleUsage(void) {
+  fprintf(stdout,
+          "Usage: arlen module <subcommand> [options]\n"
+          "\n"
+          "Subcommands:\n"
+          "  add <name> [--source <path>] [--force] [--json]\n"
+          "  remove <name> [--keep-files] [--json]\n"
+          "  list [--json]\n"
+          "  doctor [--env <name>] [--json]\n"
+          "  migrate [--env <name>] [--database <target>] [--dsn <connection_string>] [--dry-run] [--json]\n"
+          "  assets [--output-dir <path>] [--json]\n"
+          "  upgrade <name> --source <path> [--force] [--json]\n");
+}
+
 static NSString *AgentContractVersion(void) {
   return @"phase7g-agent-dx-contracts-v1";
 }
@@ -74,6 +90,8 @@ static BOOL ArgsContainFlag(NSArray *args, NSString *flag) {
   }
   return NO;
 }
+
+static NSString *ResolvePathFromRoot(NSString *root, NSString *rawPath);
 
 static NSString *RelativePathFromRoot(NSString *root, NSString *path) {
   NSString *standardRoot = [[root ?: @"" stringByStandardizingPath] copy];
@@ -390,6 +408,118 @@ static BOOL AddPluginClassToAppConfig(NSString *root, NSString *pluginClassName,
     return NO;
   }
   return [serialized writeToFile:configPath options:NSDataWritingAtomic error:error];
+}
+
+static BOOL RemoveItemIfExists(NSString *path, NSError **error) {
+  if (![[NSFileManager defaultManager] fileExistsAtPath:path]) {
+    return YES;
+  }
+  return [[NSFileManager defaultManager] removeItemAtPath:path error:error];
+}
+
+static BOOL CopyDirectoryTree(NSString *sourcePath, NSString *destinationPath, NSError **error) {
+  NSFileManager *fm = [NSFileManager defaultManager];
+  if (![fm fileExistsAtPath:sourcePath]) {
+    if (error != NULL) {
+      *error = [NSError errorWithDomain:@"Arlen.Error"
+                                   code:14
+                               userInfo:@{
+                                 NSLocalizedDescriptionKey :
+                                     [NSString stringWithFormat:@"source path not found: %@", sourcePath ?: @""]
+                               }];
+    }
+    return NO;
+  }
+  NSString *destinationParent = [destinationPath stringByDeletingLastPathComponent];
+  if ([destinationParent length] > 0 &&
+      ![fm createDirectoryAtPath:destinationParent
+      withIntermediateDirectories:YES
+                       attributes:nil
+                            error:error]) {
+    return NO;
+  }
+  [fm removeItemAtPath:destinationPath error:nil];
+  return [fm copyItemAtPath:sourcePath toPath:destinationPath error:error];
+}
+
+static NSMutableArray<NSDictionary *> *MutableModuleLockEntriesAtAppRoot(NSString *appRoot, NSError **error) {
+  NSDictionary *document = [ALNModuleSystem modulesLockDocumentAtAppRoot:appRoot error:error];
+  if (document == nil) {
+    return nil;
+  }
+  NSMutableArray<NSDictionary *> *entries = [NSMutableArray array];
+  for (NSDictionary *entry in ([document[@"modules"] isKindOfClass:[NSArray class]] ? document[@"modules"] : @[])) {
+    if (![entry isKindOfClass:[NSDictionary class]]) {
+      continue;
+    }
+    [entries addObject:[NSDictionary dictionaryWithDictionary:entry]];
+  }
+  return entries;
+}
+
+static BOOL WriteModuleLockEntriesAtAppRoot(NSString *appRoot,
+                                            NSArray<NSDictionary *> *entries,
+                                            NSError **error) {
+  return [ALNModuleSystem writeModulesLockDocument:@{ @"modules" : entries ?: @[] }
+                                           appRoot:appRoot
+                                             error:error];
+}
+
+static NSInteger ModuleLockEntryIndex(NSArray<NSDictionary *> *entries, NSString *identifier) {
+  for (NSUInteger idx = 0; idx < [entries count]; idx++) {
+    NSDictionary *entry = entries[idx];
+    if ([[entry[@"identifier"] description] isEqualToString:(identifier ?: @"")]) {
+      return (NSInteger)idx;
+    }
+  }
+  return -1;
+}
+
+static NSDictionary *ModuleLockEntryForDefinition(ALNModuleDefinition *definition, NSString *relativePath) {
+  return @{
+    @"identifier" : definition.identifier ?: @"",
+    @"path" : relativePath ?: [NSString stringWithFormat:@"modules/%@", definition.identifier ?: @""],
+    @"version" : definition.version ?: @"",
+    @"enabled" : @(YES),
+  };
+}
+
+static NSString *ResolveModuleSourcePath(NSString *appRoot,
+                                         NSString *frameworkRoot,
+                                         NSString *name,
+                                         NSString *sourceOption) {
+  NSString *candidate = Trimmed(sourceOption);
+  if ([candidate length] > 0) {
+    return ResolvePathFromRoot(appRoot, candidate);
+  }
+
+  NSString *nameAsPath = ResolvePathFromRoot(appRoot, name);
+  BOOL isDirectory = NO;
+  if ([[NSFileManager defaultManager] fileExistsAtPath:nameAsPath isDirectory:&isDirectory] && isDirectory) {
+    return nameAsPath;
+  }
+
+  NSString *frameworkCandidate =
+      [[frameworkRoot stringByAppendingPathComponent:@"modules"] stringByAppendingPathComponent:name ?: @""];
+  if ([[NSFileManager defaultManager] fileExistsAtPath:frameworkCandidate isDirectory:&isDirectory] && isDirectory) {
+    return [frameworkCandidate stringByStandardizingPath];
+  }
+  return nil;
+}
+
+static NSDictionary *ModuleJSONDictionary(ALNModuleDefinition *definition, NSString *installPath, NSString *status) {
+  NSMutableDictionary *payload = [NSMutableDictionary dictionaryWithDictionary:[definition dictionaryRepresentation]];
+  if ([installPath length] > 0) {
+    payload[@"installPath"] = installPath;
+  }
+  if ([status length] > 0) {
+    payload[@"status"] = status;
+  }
+  return payload;
+}
+
+static NSDictionary *LoadRawConfigForModuleCommand(NSString *appRoot, NSString *environment, NSError **error) {
+  return [ALNConfig loadConfigAtRoot:appRoot environment:environment includeModules:NO error:error];
 }
 
 static BOOL ScaffoldFullApp(NSString *root, BOOL force, NSError **error) {
@@ -3489,6 +3619,676 @@ static int CommandMigrate(NSArray *args) {
   return 0;
 }
 
+static int CommandModuleAddOrUpgrade(NSArray *args, BOOL upgradeMode) {
+  BOOL asJSON = ArgsContainFlag(args, @"--json");
+  NSString *name = nil;
+  NSString *sourceOption = nil;
+  BOOL force = NO;
+
+  for (NSUInteger idx = 0; idx < [args count]; idx++) {
+    NSString *arg = args[idx];
+    if ([arg isEqualToString:@"--source"]) {
+      if (idx + 1 >= [args count]) {
+        return asJSON ? EmitMachineError(@"module", upgradeMode ? @"upgrade" : @"add",
+                                         @"missing_source",
+                                         @"arlen module: --source requires a value",
+                                         @"Pass a local module directory after --source.",
+                                         @"arlen module add auth --source ../auth --json", 2)
+                      : 2;
+      }
+      sourceOption = args[++idx];
+    } else if ([arg isEqualToString:@"--force"]) {
+      force = YES;
+    } else if ([arg isEqualToString:@"--json"]) {
+      asJSON = YES;
+    } else if ([arg isEqualToString:@"--help"] || [arg isEqualToString:@"-h"]) {
+      PrintModuleUsage();
+      return 0;
+    } else if ([arg hasPrefix:@"-"]) {
+      return asJSON ? EmitMachineError(@"module", upgradeMode ? @"upgrade" : @"add",
+                                       @"unknown_option",
+                                       [NSString stringWithFormat:@"arlen module: unknown option %@", arg ?: @""],
+                                       @"Use only supported flags for this subcommand.",
+                                       @"arlen module add auth --source ../auth --json", 2)
+                    : 2;
+    } else if (name == nil) {
+      name = arg;
+    } else {
+      return asJSON ? EmitMachineError(@"module", upgradeMode ? @"upgrade" : @"add",
+                                       @"unexpected_argument",
+                                       [NSString stringWithFormat:@"arlen module: unexpected argument %@", arg ?: @""],
+                                       @"Pass only one module name.",
+                                       @"arlen module add auth --source ../auth --json", 2)
+                    : 2;
+    }
+  }
+
+  if ([name length] == 0) {
+    return asJSON ? EmitMachineError(@"module", upgradeMode ? @"upgrade" : @"add",
+                                     @"missing_module_name",
+                                     @"arlen module: missing module name",
+                                     @"Pass the module name immediately after the subcommand.",
+                                     @"arlen module add auth --source ../auth --json", 2)
+                  : 2;
+  }
+  if (upgradeMode && [Trimmed(sourceOption) length] == 0) {
+    return asJSON ? EmitMachineError(@"module", @"upgrade",
+                                     @"missing_source",
+                                     @"arlen module upgrade: --source is required",
+                                     @"Point --source at the upgraded module directory.",
+                                     @"arlen module upgrade auth --source ../auth-v2 --json", 2)
+                  : 2;
+  }
+
+  NSString *appRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *frameworkRoot = EnvValue("ARLEN_FRAMEWORK_ROOT");
+  if ([frameworkRoot length] == 0) {
+    frameworkRoot = FindFrameworkRoot(appRoot);
+  }
+  NSString *sourcePath = ResolveModuleSourcePath(appRoot, frameworkRoot ?: @"", name, sourceOption);
+  if ([sourcePath length] == 0) {
+    return asJSON ? EmitMachineError(@"module", upgradeMode ? @"upgrade" : @"add",
+                                     @"module_source_not_found",
+                                     [NSString stringWithFormat:@"unable to resolve module source for %@", name ?: @""],
+                                     @"Pass --source <path> or set ARLEN_FRAMEWORK_ROOT to a checkout containing modules/<name>.",
+                                     @"arlen module add auth --source ../auth --json", 1)
+                  : 1;
+  }
+
+  NSError *error = nil;
+  ALNModuleDefinition *definition = [ALNModuleSystem moduleDefinitionAtPath:sourcePath error:&error];
+  if (definition == nil) {
+    if (asJSON) {
+      return EmitMachineError(@"module", upgradeMode ? @"upgrade" : @"add",
+                              @"module_manifest_invalid",
+                              error.localizedDescription ?: @"invalid module manifest",
+                              @"Fix module.plist before installing the module.",
+                              @"arlen module add auth --source ../auth --json", 1);
+    }
+    fprintf(stderr, "arlen module: %s\n", [[error localizedDescription] UTF8String]);
+    return 1;
+  }
+
+  NSMutableArray<NSDictionary *> *entries = MutableModuleLockEntriesAtAppRoot(appRoot, &error);
+  if (entries == nil) {
+    if (asJSON) {
+      return EmitMachineError(@"module", upgradeMode ? @"upgrade" : @"add",
+                              @"module_lock_invalid",
+                              error.localizedDescription ?: @"invalid modules lock",
+                              @"Fix config/modules.plist or remove it and retry.",
+                              @"rm -f config/modules.plist && arlen module add auth --source ../auth --json", 1);
+    }
+    fprintf(stderr, "arlen module: %s\n", [[error localizedDescription] UTF8String]);
+    return 1;
+  }
+
+  NSString *relativeInstallPath = [NSString stringWithFormat:@"modules/%@", definition.identifier ?: @""];
+  NSString *destinationPath = [appRoot stringByAppendingPathComponent:relativeInstallPath];
+  NSInteger existingIndex = ModuleLockEntryIndex(entries, definition.identifier);
+  NSString *status = @"ok";
+
+  if (upgradeMode && existingIndex < 0) {
+    return asJSON ? EmitMachineError(@"module", @"upgrade",
+                                     @"module_not_installed",
+                                     [NSString stringWithFormat:@"module %@ is not installed", definition.identifier ?: @""],
+                                     @"Install the module first with `arlen module add`.",
+                                     [NSString stringWithFormat:@"arlen module add %@ --source %@ --json",
+                                                                definition.identifier ?: @"",
+                                                                sourcePath ?: @""], 1)
+                  : 1;
+  }
+  if (!upgradeMode && existingIndex >= 0) {
+    NSDictionary *existing = entries[(NSUInteger)existingIndex];
+    if ([[Trimmed(existing[@"version"]) lowercaseString] isEqualToString:[[definition.version lowercaseString] copy]]) {
+      status = @"noop";
+    } else if (!force) {
+      return asJSON ? EmitMachineError(@"module", @"add",
+                                       @"module_already_installed",
+                                       [NSString stringWithFormat:@"module %@ is already installed", definition.identifier ?: @""],
+                                       @"Use `arlen module upgrade` or re-run with --force to replace the vendored files.",
+                                       [NSString stringWithFormat:@"arlen module upgrade %@ --source %@ --json",
+                                                                  definition.identifier ?: @"",
+                                                                  sourcePath ?: @""], 1)
+                    : 1;
+    } else {
+      status = @"replaced";
+    }
+  }
+  if (upgradeMode && existingIndex >= 0) {
+    NSDictionary *existing = entries[(NSUInteger)existingIndex];
+    if ([Trimmed(existing[@"version"]) isEqualToString:definition.version] && !force) {
+      status = @"noop";
+    } else {
+      status = @"updated";
+    }
+  }
+
+  if (![status isEqualToString:@"noop"]) {
+    if (!RemoveItemIfExists(destinationPath, &error)) {
+      if (asJSON) {
+        return EmitMachineError(@"module", upgradeMode ? @"upgrade" : @"add",
+                                @"module_remove_failed",
+                                error.localizedDescription ?: @"failed removing existing module directory",
+                                @"Inspect file permissions and retry.",
+                                @"ls -la modules", 1);
+      }
+      fprintf(stderr, "arlen module: %s\n", [[error localizedDescription] UTF8String]);
+      return 1;
+    }
+    if (!CopyDirectoryTree(sourcePath, destinationPath, &error)) {
+      if (asJSON) {
+        return EmitMachineError(@"module", upgradeMode ? @"upgrade" : @"add",
+                                @"module_copy_failed",
+                                error.localizedDescription ?: @"failed copying module into app",
+                                @"Inspect source and destination permissions, then retry.",
+                                @"ls -la modules", 1);
+      }
+      fprintf(stderr, "arlen module: %s\n", [[error localizedDescription] UTF8String]);
+      return 1;
+    }
+  }
+
+  NSDictionary *lockEntry = ModuleLockEntryForDefinition(definition, relativeInstallPath);
+  if (existingIndex >= 0) {
+    entries[(NSUInteger)existingIndex] = lockEntry;
+  } else {
+    [entries addObject:lockEntry];
+  }
+  if (!WriteModuleLockEntriesAtAppRoot(appRoot, entries, &error)) {
+    if (asJSON) {
+      return EmitMachineError(@"module", upgradeMode ? @"upgrade" : @"add",
+                              @"module_lock_write_failed",
+                              error.localizedDescription ?: @"failed writing modules lock",
+                              @"Fix config/ permissions and retry.",
+                              @"mkdir -p config", 1);
+    }
+    fprintf(stderr, "arlen module: %s\n", [[error localizedDescription] UTF8String]);
+    return 1;
+  }
+
+  if (asJSON) {
+    NSDictionary *payload = @{
+      @"version" : AgentContractVersion(),
+      @"command" : @"module",
+      @"workflow" : upgradeMode ? @"upgrade" : @"add",
+      @"status" : status,
+      @"module" : ModuleJSONDictionary(definition, relativeInstallPath, status),
+    };
+    PrintJSONPayload(stdout, payload);
+    return 0;
+  }
+
+  fprintf(stdout, "%s module %s at %s\n",
+          upgradeMode ? "Upgraded" : "Installed",
+          [definition.identifier UTF8String],
+          [relativeInstallPath UTF8String]);
+  return 0;
+}
+
+static int CommandModuleRemove(NSArray *args) {
+  BOOL asJSON = ArgsContainFlag(args, @"--json");
+  NSString *name = nil;
+  BOOL keepFiles = NO;
+
+  for (NSUInteger idx = 0; idx < [args count]; idx++) {
+    NSString *arg = args[idx];
+    if ([arg isEqualToString:@"--keep-files"]) {
+      keepFiles = YES;
+    } else if ([arg isEqualToString:@"--json"]) {
+      asJSON = YES;
+    } else if ([arg isEqualToString:@"--help"] || [arg isEqualToString:@"-h"]) {
+      PrintModuleUsage();
+      return 0;
+    } else if ([arg hasPrefix:@"-"]) {
+      return asJSON ? EmitMachineError(@"module", @"remove", @"unknown_option",
+                                       [NSString stringWithFormat:@"unknown option %@", arg ?: @""],
+                                       @"Use only supported flags for `arlen module remove`.",
+                                       @"arlen module remove auth --json", 2)
+                    : 2;
+    } else if (name == nil) {
+      name = arg;
+    } else {
+      return 2;
+    }
+  }
+
+  if ([name length] == 0) {
+    return asJSON ? EmitMachineError(@"module", @"remove", @"missing_module_name",
+                                     @"arlen module remove: missing module name",
+                                     @"Pass the installed module identifier after `remove`.",
+                                     @"arlen module remove auth --json", 2)
+                  : 2;
+  }
+
+  NSString *appRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSError *error = nil;
+  NSMutableArray<NSDictionary *> *entries = MutableModuleLockEntriesAtAppRoot(appRoot, &error);
+  if (entries == nil) {
+    return asJSON ? EmitMachineError(@"module", @"remove", @"module_lock_invalid",
+                                     error.localizedDescription ?: @"invalid modules lock",
+                                     @"Fix config/modules.plist and retry.",
+                                     @"arlen module list --json", 1)
+                  : 1;
+  }
+
+  NSInteger index = ModuleLockEntryIndex(entries, name);
+  NSString *status = @"noop";
+  NSDictionary *removedEntry = nil;
+  if (index >= 0) {
+    removedEntry = entries[(NSUInteger)index];
+    [entries removeObjectAtIndex:(NSUInteger)index];
+    status = @"ok";
+  }
+
+  if (![status isEqualToString:@"noop"] &&
+      !WriteModuleLockEntriesAtAppRoot(appRoot, entries, &error)) {
+    return asJSON ? EmitMachineError(@"module", @"remove", @"module_lock_write_failed",
+                                     error.localizedDescription ?: @"failed writing modules lock",
+                                     @"Fix config/ permissions and retry.",
+                                     @"arlen module list --json", 1)
+                  : 1;
+  }
+
+  if (![status isEqualToString:@"noop"] && !keepFiles) {
+    NSString *relativePath = Trimmed(removedEntry[@"path"]);
+    if ([relativePath length] == 0) {
+      relativePath = [NSString stringWithFormat:@"modules/%@", name];
+    }
+    NSString *absolutePath = [appRoot stringByAppendingPathComponent:relativePath];
+    if (!RemoveItemIfExists(absolutePath, &error)) {
+      return asJSON ? EmitMachineError(@"module", @"remove", @"module_remove_failed",
+                                       error.localizedDescription ?: @"failed removing vendored module files",
+                                       @"Inspect file permissions and retry.",
+                                       @"ls -la modules", 1)
+                    : 1;
+    }
+  }
+
+  if (asJSON) {
+    NSDictionary *payload = @{
+      @"version" : AgentContractVersion(),
+      @"command" : @"module",
+      @"workflow" : @"remove",
+      @"status" : status,
+      @"module" : @{
+        @"identifier" : name ?: @"",
+        @"keepFiles" : @(keepFiles),
+      },
+    };
+    PrintJSONPayload(stdout, payload);
+    return 0;
+  }
+
+  fprintf(stdout, "%s module %s\n",
+          [status isEqualToString:@"noop"] ? "No-op for" : "Removed",
+          [name UTF8String]);
+  return 0;
+}
+
+static int CommandModuleList(NSArray *args) {
+  BOOL asJSON = ArgsContainFlag(args, @"--json");
+  for (NSString *arg in args) {
+    if ([arg isEqualToString:@"--json"]) {
+      continue;
+    }
+    if ([arg isEqualToString:@"--help"] || [arg isEqualToString:@"-h"]) {
+      PrintModuleUsage();
+      return 0;
+    }
+    return 2;
+  }
+
+  NSString *appRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSError *error = nil;
+  NSArray<ALNModuleDefinition *> *definitions = [ALNModuleSystem moduleDefinitionsAtAppRoot:appRoot error:&error];
+  if (definitions == nil) {
+    return asJSON ? EmitMachineError(@"module", @"list", @"module_manifest_invalid",
+                                     error.localizedDescription ?: @"invalid module state",
+                                     @"Fix the modules lock or installed module manifests and retry.",
+                                     @"arlen module doctor --json", 1)
+                  : 1;
+  }
+
+  NSMutableArray *modules = [NSMutableArray array];
+  for (ALNModuleDefinition *definition in definitions) {
+    [modules addObject:[definition dictionaryRepresentation]];
+  }
+  [modules sortUsingComparator:^NSComparisonResult(NSDictionary *left, NSDictionary *right) {
+    return [left[@"identifier"] compare:right[@"identifier"]];
+  }];
+
+  if (asJSON) {
+    NSDictionary *payload = @{
+      @"version" : AgentContractVersion(),
+      @"command" : @"module",
+      @"workflow" : @"list",
+      @"status" : @"ok",
+      @"modules" : modules ?: @[],
+    };
+    PrintJSONPayload(stdout, payload);
+    return 0;
+  }
+
+  fprintf(stdout, "Installed modules: %lu\n", (unsigned long)[modules count]);
+  for (NSDictionary *entry in modules) {
+    fprintf(stdout, "  %s %s\n",
+            [entry[@"identifier"] UTF8String],
+            [entry[@"version"] UTF8String]);
+  }
+  return 0;
+}
+
+static int CommandModuleDoctor(NSArray *args) {
+  BOOL asJSON = ArgsContainFlag(args, @"--json");
+  NSString *environment = @"development";
+
+  for (NSUInteger idx = 0; idx < [args count]; idx++) {
+    NSString *arg = args[idx];
+    if ([arg isEqualToString:@"--env"]) {
+      if (idx + 1 >= [args count]) {
+        return asJSON ? EmitMachineError(@"module", @"doctor", @"missing_env",
+                                         @"arlen module doctor: --env requires a value",
+                                         @"Pass an environment name after --env.",
+                                         @"arlen module doctor --env production --json", 2)
+                      : 2;
+      }
+      environment = args[++idx];
+    } else if ([arg isEqualToString:@"--json"]) {
+      asJSON = YES;
+    } else if ([arg isEqualToString:@"--help"] || [arg isEqualToString:@"-h"]) {
+      PrintModuleUsage();
+      return 0;
+    } else {
+      return 2;
+    }
+  }
+
+  NSString *appRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSError *error = nil;
+  NSDictionary *rawConfig = LoadRawConfigForModuleCommand(appRoot, environment, &error);
+  if (rawConfig == nil) {
+    return asJSON ? EmitMachineError(@"module", @"doctor", @"config_load_failed",
+                                     error.localizedDescription ?: @"failed loading config",
+                                     @"Fix malformed plist values or the requested environment file.",
+                                     @"arlen config --env development --json", 1)
+                  : 1;
+  }
+
+  NSArray<NSDictionary *> *diagnostics =
+      [ALNModuleSystem doctorDiagnosticsAtAppRoot:appRoot config:rawConfig error:&error];
+  BOOL hasErrors = NO;
+  for (NSDictionary *entry in diagnostics ?: @[]) {
+    if ([entry[@"status"] isEqualToString:@"error"]) {
+      hasErrors = YES;
+      break;
+    }
+  }
+
+  if (asJSON) {
+    NSDictionary *payload = @{
+      @"version" : AgentContractVersion(),
+      @"command" : @"module",
+      @"workflow" : @"doctor",
+      @"status" : hasErrors ? @"error" : @"ok",
+      @"environment" : environment ?: @"development",
+      @"diagnostics" : diagnostics ?: @[],
+    };
+    PrintJSONPayload(stdout, payload);
+    return hasErrors ? 1 : 0;
+  }
+
+  fprintf(stdout, "Module doctor (%s)\n", [environment UTF8String]);
+  for (NSDictionary *entry in diagnostics ?: @[]) {
+    fprintf(stdout, "  [%s] %s\n",
+            [entry[@"status"] UTF8String],
+            [entry[@"message"] UTF8String]);
+  }
+  return hasErrors ? 1 : 0;
+}
+
+static int CommandModuleAssets(NSArray *args) {
+  BOOL asJSON = ArgsContainFlag(args, @"--json");
+  NSString *outputDirArg = @"build/module_assets";
+
+  for (NSUInteger idx = 0; idx < [args count]; idx++) {
+    NSString *arg = args[idx];
+    if ([arg isEqualToString:@"--output-dir"]) {
+      if (idx + 1 >= [args count]) {
+        return asJSON ? EmitMachineError(@"module", @"assets", @"missing_output_dir",
+                                         @"arlen module assets: --output-dir requires a value",
+                                         @"Pass a staging directory after --output-dir.",
+                                         @"arlen module assets --output-dir build/module_assets --json", 2)
+                      : 2;
+      }
+      outputDirArg = args[++idx];
+    } else if ([arg isEqualToString:@"--json"]) {
+      asJSON = YES;
+    } else if ([arg isEqualToString:@"--help"] || [arg isEqualToString:@"-h"]) {
+      PrintModuleUsage();
+      return 0;
+    } else {
+      return 2;
+    }
+  }
+
+  NSString *appRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *outputDir = ResolvePathFromRoot(appRoot, outputDirArg);
+  NSError *error = nil;
+  NSArray<NSString *> *stagedFiles = nil;
+  BOOL ok = [ALNModuleSystem stagePublicAssetsAtAppRoot:appRoot
+                                              outputDir:outputDir
+                                            stagedFiles:&stagedFiles
+                                                  error:&error];
+  if (!ok) {
+    return asJSON ? EmitMachineError(@"module", @"assets", @"module_asset_stage_failed",
+                                     error.localizedDescription ?: @"failed staging module assets",
+                                     @"Inspect module public directories and retry.",
+                                     @"arlen module doctor --json", 1)
+                  : 1;
+  }
+
+  if (asJSON) {
+    NSDictionary *payload = @{
+      @"version" : AgentContractVersion(),
+      @"command" : @"module",
+      @"workflow" : @"assets",
+      @"status" : @"ok",
+      @"output_dir" : outputDir ?: @"",
+      @"staged_files" : stagedFiles ?: @[],
+    };
+    PrintJSONPayload(stdout, payload);
+    return 0;
+  }
+
+  fprintf(stdout, "Staged module assets: %lu\n", (unsigned long)[stagedFiles count]);
+  fprintf(stdout, "  output: %s\n", [outputDir UTF8String]);
+  return 0;
+}
+
+static int CommandModuleMigrate(NSArray *args) {
+  BOOL asJSON = ArgsContainFlag(args, @"--json");
+  NSString *environment = @"development";
+  NSString *databaseTarget = @"default";
+  NSString *dsnOverride = nil;
+  BOOL dryRun = NO;
+
+  for (NSUInteger idx = 0; idx < [args count]; idx++) {
+    NSString *arg = args[idx];
+    if ([arg isEqualToString:@"--env"]) {
+      if (idx + 1 >= [args count]) {
+        return 2;
+      }
+      environment = args[++idx];
+    } else if ([arg isEqualToString:@"--dsn"]) {
+      if (idx + 1 >= [args count]) {
+        return 2;
+      }
+      dsnOverride = args[++idx];
+    } else if ([arg isEqualToString:@"--database"]) {
+      if (idx + 1 >= [args count]) {
+        return 2;
+      }
+      databaseTarget = NormalizeDatabaseTarget(args[++idx]);
+      if (!DatabaseTargetIsValid(databaseTarget)) {
+        return 2;
+      }
+    } else if ([arg isEqualToString:@"--dry-run"]) {
+      dryRun = YES;
+    } else if ([arg isEqualToString:@"--json"]) {
+      asJSON = YES;
+    } else if ([arg isEqualToString:@"--help"] || [arg isEqualToString:@"-h"]) {
+      PrintModuleUsage();
+      return 0;
+    } else {
+      return 2;
+    }
+  }
+
+  NSString *appRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSError *error = nil;
+  NSDictionary *config = [ALNConfig loadConfigAtRoot:appRoot
+                                         environment:environment
+                                      includeModules:YES
+                                               error:&error];
+  if (config == nil) {
+    return asJSON ? EmitMachineError(@"module", @"migrate", @"config_load_failed",
+                                     error.localizedDescription ?: @"failed loading config",
+                                     @"Fix config or module validation errors, then retry.",
+                                     @"arlen module doctor --env development --json", 1)
+                  : 1;
+  }
+
+  NSString *dsn = dsnOverride;
+  if ([dsn length] == 0) {
+    dsn = DatabaseConnectionStringFromEnvironmentForTarget(databaseTarget);
+  }
+  if ([dsn length] == 0) {
+    dsn = DatabaseConnectionStringFromConfigForTarget(config, databaseTarget);
+  }
+  if ([dsn length] == 0) {
+    return asJSON ? EmitMachineError(@"module", @"migrate", @"missing_database_dsn",
+                                     @"arlen module migrate: no database connection string configured",
+                                     @"Set --dsn or configure database.connectionString.",
+                                     @"arlen module migrate --dsn postgres://... --json", 1)
+                  : 1;
+  }
+
+  NSUInteger poolSize = DatabasePoolSizeFromConfigForTarget(config, databaseTarget);
+  ALNPg *database = [[ALNPg alloc] initWithConnectionString:dsn maxConnections:poolSize error:&error];
+  if (database == nil) {
+    return asJSON ? EmitMachineError(@"module", @"migrate", @"database_init_failed",
+                                     error.localizedDescription ?: @"failed initializing database adapter",
+                                     @"Check the DSN and Postgres availability.",
+                                     @"arlen module migrate --dsn postgres://... --json", 1)
+                  : 1;
+  }
+
+  NSArray<NSDictionary *> *plans = [ALNModuleSystem migrationPlansAtAppRoot:appRoot config:config error:&error];
+  if (plans == nil) {
+    return asJSON ? EmitMachineError(@"module", @"migrate", @"module_migration_plan_failed",
+                                     error.localizedDescription ?: @"failed resolving module migration plans",
+                                     @"Fix module manifests and retry.",
+                                     @"arlen module doctor --json", 1)
+                  : 1;
+  }
+
+  NSMutableArray<NSDictionary *> *selectedPlans = [NSMutableArray array];
+  for (NSDictionary *plan in plans) {
+    NSString *planTarget = plan[@"databaseTarget"];
+    if ([NormalizeDatabaseTarget(planTarget) isEqualToString:databaseTarget]) {
+      [selectedPlans addObject:plan];
+    }
+  }
+
+  NSMutableArray<NSString *> *applied = [NSMutableArray array];
+  for (NSDictionary *plan in selectedPlans) {
+    NSString *planPath = plan[@"path"];
+    NSString *moduleID = plan[@"identifier"];
+    NSString *namespace = plan[@"namespace"];
+    NSArray<NSString *> *files = nil;
+    BOOL ok = dryRun
+                  ? ((files = [ALNMigrationRunner pendingMigrationFilesAtPath:planPath
+                                                                      database:database
+                                                                databaseTarget:databaseTarget
+                                                             versionNamespace:namespace
+                                                                         error:&error]) != nil)
+                  : [ALNMigrationRunner applyMigrationsAtPath:planPath
+                                                     database:database
+                                               databaseTarget:databaseTarget
+                                            versionNamespace:namespace
+                                                       dryRun:NO
+                                                 appliedFiles:&files
+                                                        error:&error];
+    if (!ok) {
+      return asJSON ? EmitMachineError(@"module", @"migrate", @"module_migration_failed",
+                                       error.localizedDescription ?: @"module migration failed",
+                                       @"Inspect the module migration SQL and database state.",
+                                       @"arlen module migrate --dry-run --json", 1)
+                    : 1;
+    }
+    for (NSString *file in files ?: @[]) {
+      [applied addObject:[NSString stringWithFormat:@"%@:%@", moduleID ?: @"", [file lastPathComponent]]];
+    }
+  }
+
+  if (asJSON) {
+    NSDictionary *payload = @{
+      @"version" : AgentContractVersion(),
+      @"command" : @"module",
+      @"workflow" : @"migrate",
+      @"status" : @"ok",
+      @"environment" : environment ?: @"development",
+      @"database_target" : databaseTarget ?: @"default",
+      @"dry_run" : @(dryRun),
+      @"plans" : selectedPlans ?: @[],
+      @"files" : applied ?: @[],
+    };
+    PrintJSONPayload(stdout, payload);
+    return 0;
+  }
+
+  fprintf(stdout, "Database target: %s\n", [databaseTarget UTF8String]);
+  fprintf(stdout, "%s module migrations: %lu\n",
+          dryRun ? "Pending" : "Applied",
+          (unsigned long)[applied count]);
+  for (NSString *entry in applied) {
+    fprintf(stdout, "  %s\n", [entry UTF8String]);
+  }
+  return 0;
+}
+
+static int CommandModule(NSArray *args) {
+  if ([args count] == 0) {
+    PrintModuleUsage();
+    return 2;
+  }
+  NSString *subcommand = args[0];
+  NSArray *subArgs = ([args count] > 1) ? [args subarrayWithRange:NSMakeRange(1, [args count] - 1)] : @[];
+  if ([subcommand isEqualToString:@"add"]) {
+    return CommandModuleAddOrUpgrade(subArgs, NO);
+  }
+  if ([subcommand isEqualToString:@"remove"]) {
+    return CommandModuleRemove(subArgs);
+  }
+  if ([subcommand isEqualToString:@"list"]) {
+    return CommandModuleList(subArgs);
+  }
+  if ([subcommand isEqualToString:@"doctor"]) {
+    return CommandModuleDoctor(subArgs);
+  }
+  if ([subcommand isEqualToString:@"migrate"]) {
+    return CommandModuleMigrate(subArgs);
+  }
+  if ([subcommand isEqualToString:@"assets"]) {
+    return CommandModuleAssets(subArgs);
+  }
+  if ([subcommand isEqualToString:@"upgrade"]) {
+    return CommandModuleAddOrUpgrade(subArgs, YES);
+  }
+  PrintModuleUsage();
+  return 2;
+}
+
 int main(int argc, const char *argv[]) {
   @autoreleasepool {
     if (argc < 2) {
@@ -3516,6 +4316,9 @@ int main(int argc, const char *argv[]) {
     }
     if ([command isEqualToString:@"migrate"]) {
       return CommandMigrate(args);
+    }
+    if ([command isEqualToString:@"module"]) {
+      return CommandModule(args);
     }
     if ([command isEqualToString:@"schema-codegen"]) {
       return CommandSchemaCodegen(args);

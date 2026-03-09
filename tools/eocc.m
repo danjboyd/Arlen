@@ -7,7 +7,8 @@ static void PrintUsage(void) {
   fprintf(stderr,
           "Usage:\n"
           "  eocc --template-root <dir> --output-dir <dir> "
-          "[--registry-out <file>] <template1.html.eoc> [template2 ...]\n");
+          "[--registry-out <file>] [--logical-prefix <prefix>] "
+          "<template1.html.eoc> [template2 ...]\n");
 }
 
 static BOOL EnsureDirectory(NSString *path, NSError **error) {
@@ -60,6 +61,7 @@ int main(int argc, const char *argv[]) {
     NSString *templateRoot = nil;
     NSString *outputDir = nil;
     NSString *registryOut = nil;
+    NSString *logicalPrefix = nil;
     NSMutableArray *templatePaths = [NSMutableArray array];
 
     for (int idx = 1; idx < argc; idx++) {
@@ -85,6 +87,12 @@ int main(int argc, const char *argv[]) {
           return 2;
         }
         registryOut = [NSString stringWithUTF8String:argv[++idx]];
+      } else if ([arg isEqualToString:@"--logical-prefix"]) {
+        if (idx + 1 >= argc) {
+          PrintUsage();
+          return 2;
+        }
+        logicalPrefix = [NSString stringWithUTF8String:argv[++idx]];
       } else {
         [templatePaths addObject:arg];
       }
@@ -108,12 +116,15 @@ int main(int argc, const char *argv[]) {
 
     for (NSString *templatePath in templatePaths) {
       NSString *logicalPath =
-          [transpiler logicalPathForTemplatePath:templatePath templateRoot:templateRoot];
+          [transpiler logicalPathForTemplatePath:templatePath
+                                     templateRoot:templateRoot
+                                    logicalPrefix:logicalPrefix];
       NSString *outFile = JoinPath(outputDir, [logicalPath stringByAppendingString:@".m"]);
 
       NSError *transpileError = nil;
       BOOL ok = [transpiler transpileTemplateAtPath:templatePath
                                        templateRoot:templateRoot
+                                      logicalPrefix:logicalPrefix
                                          outputPath:outFile
                                               error:&transpileError];
       if (!ok) {

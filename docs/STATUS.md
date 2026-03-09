@@ -1,6 +1,6 @@
 # Arlen Status Checkpoint
 
-Last updated: 2026-03-06
+Last updated: 2026-03-09
 
 ## Benchmark Handoff (2026-02-24 EOD)
 
@@ -60,7 +60,61 @@ Last updated: 2026-03-06
 - Phase 11D: complete (2026-03-06)
 - Phase 11E: complete (2026-03-06)
 - Phase 11F: complete (2026-03-06)
-- Phase 12: active (12A/12B/12C complete on 2026-03-06; 12D/12E/12F planned)
+- Phase 12: complete (12A/12B/12C complete on 2026-03-06; 12D/12E/12F complete on 2026-03-09)
+- Phase 13: complete (13A/13B/13C/13D/13E/13F/13G/13H/13I complete on 2026-03-09)
+
+## Completed Today (2026-03-09)
+
+- Completed Phase 13A module contract and loader:
+  - added `ALNModule`, manifest-backed `ALNModuleDefinition`, deterministic dependency ordering, version compatibility checks, principal-class validation, and runtime module loading
+  - integrated module loading into `ALNApplication` and config resolution via `ALNModuleSystem`
+  - added Phase 13A unit coverage for malformed manifests, duplicate identifiers, dependency ordering, and protocol validation
+- Completed Phase 13B packaging, resources, and overrides:
+  - added vendored `modules/<id>/...` build support in `bin/boomhauer` for module Objective-C sources and namespaced EOC templates
+  - added release packaging support for vendored `modules/`
+  - added asset staging with app override precedence and unit coverage for override/collision behavior
+- Completed Phase 13C module CLI and lifecycle:
+  - added `arlen module add/remove/list/doctor/migrate/assets/upgrade`
+  - added plist-backed deterministic modules lock handling and JSON workflow payloads for module operations
+  - added integration coverage for install/list/doctor/assets/upgrade plus boomhauer/release packaging workflow
+- Completed Phase 13D config, migrations, compatibility, and diagnostics:
+  - added module config-default merging, required-config diagnostics, Arlen-version compatibility checks, and module-specific doctor output
+  - added module-aware migration planning plus namespaced migration application in `ALNMigrationRunner`
+  - added Postgres integration coverage for module migration apply and upgrade paths
+- Completed Phase 13E auth module foundation:
+  - added vendored `modules/auth/` with default account schema, namespaced migrations, EOC templates, and JSON session/bootstrap endpoints
+  - added deterministic hook seams for registration policy, password policy, user provisioning, notification customization, provider mapping, and post-login/session policy
+  - added `Phase13ETests` coverage for stable defaults and deterministic hook invocation
+- Completed Phase 13F auth product flows and provider bridge:
+  - shipped first-party registration, login/logout, password reset/change, email verification, TOTP enrollment/step-up, and stub provider-login flows
+  - kept provider-login sessions on the same local auth-assurance model used by local auth
+  - added `Phase13FTests` hook coverage plus `Phase13AuthAdminIntegrationTests.m` for end-to-end auth/admin install + flow coverage when `ARLEN_PG_TEST_DSN` is set
+- Completed Phase 13G admin UI module foundation:
+  - added vendored `modules/admin-ui/` mounted child app with default `/admin` HTML routes and `/admin/api` JSON routes
+  - enforced shared admin policy defaults: authenticated session, `admin` role, and AAL2 step-up
+  - added default admin dashboard/user screens plus `Phase13GTests` route-contract coverage
+- Completed Phase 13H admin resource system and headless API:
+  - refactored `admin-ui` around `ALNAdminUIResource` and `ALNAdminUIResourceProvider` contracts instead of hard-coded `/users` handlers
+  - added machine-readable resource metadata, generic HTML/JSON resource routes, custom action support, and per-resource policy hooks
+  - added `/auth/api/...` aliases for the auth module so SPA clients can consume the same auth contract via a stable headless namespace
+  - added `Phase13HTests` plus expanded end-to-end auth/admin integration coverage for a registered app-owned `orders` resource
+- Completed Phase 13I docs, sample app, and confidence artifacts:
+  - added `examples/auth_admin_demo/` showing module install flow plus app-owned admin resource registration
+  - added `docs/MODULES.md`, `docs/AUTH_MODULE.md`, and `docs/ADMIN_UI_MODULE.md`
+  - added `make phase13-confidence` and artifact generation under `build/release_confidence/phase13/`
+- Completed Phase 12D OIDC/OAuth2 client foundation:
+  - added `ALNOIDCClient` for authorization-code + PKCE request generation, callback validation, token parsing, and HS256/RS256 ID-token verification
+  - added hostile-input fixture coverage in `tests/fixtures/auth/phase12_oidc_cases.json`
+  - added `tests/unit/OIDCClientTests.m` for PKCE/state/nonce, callback tamper, nonce mismatch, JWKS rotation/expiry, token redaction, and normalized identity coverage
+- Completed Phase 12E provider presets and session/login bridge contracts:
+  - added `ALNAuthProviderPresets` first-party provider defaults (Google, GitHub, Microsoft, Apple, Okta, Auth0-style OIDC)
+  - added `ALNAuthProviderSessionBridge` for provider-identity resolution plus local session bootstrap hooks
+  - added provider preset merge regression coverage in `tests/unit/ApplicationTests.m`
+  - added auth-provider login/step-up integration coverage in `tests/integration/HTTPIntegrationTests.m`
+- Completed Phase 12F hardening, DX contracts, and confidence artifacts:
+  - added `examples/auth_primitives/` sample app showing provider login plus local TOTP step-up on top of core primitives
+  - added `make phase12-confidence` with artifact generation under `build/release_confidence/phase12/`
+  - updated docs and examples index to reference the new helper surface and sample app
 
 ## Phase 10M Completion (2026-02-26)
 
