@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title><%= $pageTitle ?: @"Arlen Ops" %></title>
+    <link rel="stylesheet" href="/modules/ops/ops.css">
+  </head>
+  <body>
+    <header class="ops-shell__header">
+      <div>
+        <p class="ops-shell__eyebrow">Arlen</p>
+        <h1 class="ops-shell__title"><%= $pageHeading ?: @"Operations" %></h1>
+      </div>
+      <nav class="ops-shell__nav">
+        <a href="<%= $opsPrefix ?: @"/ops" %>">Overview</a>
+        <a href="<%= $authLogoutPath ?: @"/auth/logout" %>">Logout</a>
+      </nav>
+    </header>
+    <main class="ops-shell__main">
+      <%== $content %>
+    </main>
+  </body>
+</html>

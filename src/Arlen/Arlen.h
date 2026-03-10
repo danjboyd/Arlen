@@ -50,5 +50,8 @@
 #import "ALNAdminUIModule.h"
 #import "ALNJobsModule.h"
 #import "ALNNotificationsModule.h"
+#import "ALNOpsModule.h"
+#import "ALNSearchModule.h"
+#import "ALNStorageModule.h"
 
 #endif

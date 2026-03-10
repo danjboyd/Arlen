@@ -1,0 +1,8 @@
+<% NSArray *errors = [ctx objectForKey:@"errors"] ?: @[]; %>
+<% if ([errors count] > 0) { %>
+  <ul class="auth-errors">
+  <% for (NSDictionary *entry in errors) { %>
+    <li><%= [entry objectForKey:@"message"] %></li>
+  <% } %>
+  </ul>
+<% } %>

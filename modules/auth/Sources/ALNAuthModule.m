@@ -13,6 +13,8 @@
 #import "ALNServices.h"
 #import "ALNTOTP.h"
 
+#include <ctype.h>
+
 NSString *const ALNAuthModuleErrorDomain = @"Arlen.Modules.Auth.Error";
 
 static NSString *const ALNAuthModuleProviderStateSessionKey = @"aln.auth_module.stub_provider_state";
@@ -183,6 +185,165 @@ static BOOL AMConfigBool(id value, BOOL fallbackValue) {
   return fallbackValue;
 }
 
+static NSString *AMNormalizedTemplateIdentifier(id value) {
+  NSString *raw = AMTrimmedString(value);
+  if ([raw length] == 0) {
+    return @"";
+  }
+  NSMutableString *normalized = [NSMutableString string];
+  unichar previous = 0;
+  for (NSUInteger idx = 0; idx < [raw length]; idx++) {
+    unichar c = [raw characterAtIndex:idx];
+    if ([[NSCharacterSet uppercaseLetterCharacterSet] characterIsMember:c]) {
+      if ([normalized length] > 0 && previous != '_') {
+        [normalized appendString:@"_"];
+      }
+      [normalized appendFormat:@"%c", (char)tolower((int)c)];
+      previous = '_';
+      continue;
+    }
+    if ([[NSCharacterSet alphanumericCharacterSet] characterIsMember:c]) {
+      [normalized appendFormat:@"%c", (char)tolower((int)c)];
+      previous = c;
+      continue;
+    }
+    if ([normalized length] > 0 && previous != '_') {
+      [normalized appendString:@"_"];
+      previous = '_';
+    }
+  }
+  NSString *candidate = [normalized copy];
+  while ([candidate hasPrefix:@"_"]) {
+    candidate = [candidate substringFromIndex:1];
+  }
+  while ([candidate hasSuffix:@"_"]) {
+    candidate = [candidate substringToIndex:([candidate length] - 1)];
+  }
+  while ([candidate containsString:@"__"]) {
+    candidate = [candidate stringByReplacingOccurrencesOfString:@"__" withString:@"_"];
+  }
+  return candidate ?: @"";
+}
+
+static NSString *AMNormalizedTemplatePrefix(id value) {
+  NSString *prefix = AMTrimmedString(value);
+  while ([prefix hasPrefix:@"/"]) {
+    prefix = [prefix substringFromIndex:1];
+  }
+  while ([prefix hasSuffix:@"/"]) {
+    prefix = [prefix substringToIndex:([prefix length] - 1)];
+  }
+  return ([prefix length] > 0) ? prefix : @"auth";
+}
+
+static NSString *AMModulePageTemplatePathForIdentifier(NSString *pageIdentifier) {
+  NSString *normalized = AMNormalizedTemplateIdentifier(pageIdentifier);
+  if ([normalized isEqualToString:@"login"]) {
+    return @"modules/auth/login/index";
+  }
+  if ([normalized isEqualToString:@"register"]) {
+    return @"modules/auth/register/index";
+  }
+  if ([normalized isEqualToString:@"forgot_password"]) {
+    return @"modules/auth/password/forgot";
+  }
+  if ([normalized isEqualToString:@"reset_password"]) {
+    return @"modules/auth/password/reset";
+  }
+  if ([normalized isEqualToString:@"totp_challenge"]) {
+    return @"modules/auth/mfa/totp";
+  }
+  return @"modules/auth/result/index";
+}
+
+static NSString *AMGeneratedPageTemplatePath(NSString *prefix, NSString *pageIdentifier) {
+  NSString *normalizedPrefix = AMNormalizedTemplatePrefix(prefix);
+  NSString *normalized = AMNormalizedTemplateIdentifier(pageIdentifier);
+  if ([normalized isEqualToString:@"login"]) {
+    return [NSString stringWithFormat:@"%@/login", normalizedPrefix];
+  }
+  if ([normalized isEqualToString:@"register"]) {
+    return [NSString stringWithFormat:@"%@/register", normalizedPrefix];
+  }
+  if ([normalized isEqualToString:@"forgot_password"]) {
+    return [NSString stringWithFormat:@"%@/password/forgot", normalizedPrefix];
+  }
+  if ([normalized isEqualToString:@"reset_password"]) {
+    return [NSString stringWithFormat:@"%@/password/reset", normalizedPrefix];
+  }
+  if ([normalized isEqualToString:@"totp_challenge"]) {
+    return [NSString stringWithFormat:@"%@/mfa/totp", normalizedPrefix];
+  }
+  return [NSString stringWithFormat:@"%@/result", normalizedPrefix];
+}
+
+static NSString *AMModuleBodyTemplatePathForIdentifier(NSString *pageIdentifier) {
+  NSString *normalized = AMNormalizedTemplateIdentifier(pageIdentifier);
+  if ([normalized isEqualToString:@"login"]) {
+    return @"modules/auth/partials/bodies/login_body";
+  }
+  if ([normalized isEqualToString:@"register"]) {
+    return @"modules/auth/partials/bodies/register_body";
+  }
+  if ([normalized isEqualToString:@"forgot_password"]) {
+    return @"modules/auth/partials/bodies/forgot_password_body";
+  }
+  if ([normalized isEqualToString:@"reset_password"]) {
+    return @"modules/auth/partials/bodies/reset_password_body";
+  }
+  if ([normalized isEqualToString:@"totp_challenge"]) {
+    return @"modules/auth/partials/bodies/totp_challenge_body";
+  }
+  return @"modules/auth/partials/bodies/result_body";
+}
+
+static NSString *AMGeneratedBodyTemplatePath(NSString *prefix, NSString *pageIdentifier) {
+  return [NSString stringWithFormat:@"%@/partials/bodies/%@",
+                                    AMNormalizedTemplatePrefix(prefix),
+                                    [AMNormalizedTemplateIdentifier(pageIdentifier) isEqualToString:@"forgot_password"]
+                                        ? @"forgot_password_body"
+                                        : [AMNormalizedTemplateIdentifier(pageIdentifier) isEqualToString:@"reset_password"]
+                                              ? @"reset_password_body"
+                                              : [AMNormalizedTemplateIdentifier(pageIdentifier) isEqualToString:@"totp_challenge"]
+                                                    ? @"totp_challenge_body"
+                                                    : [AMNormalizedTemplateIdentifier(pageIdentifier) isEqualToString:@"result"] ? @"result_body"
+                                                    : [AMNormalizedTemplateIdentifier(pageIdentifier) isEqualToString:@"verify_result"] ? @"result_body"
+                                                    : [AMNormalizedTemplateIdentifier(pageIdentifier) isEqualToString:@"provider_result"] ? @"result_body"
+                                                    : [AMNormalizedTemplateIdentifier(pageIdentifier) isEqualToString:@"register"] ? @"register_body"
+                                                    : [AMNormalizedTemplateIdentifier(pageIdentifier) isEqualToString:@"login"] ? @"login_body"
+                                                    : @"result_body"];
+}
+
+static NSString *AMModulePartialTemplatePathForIdentifier(NSString *partialIdentifier) {
+  NSString *normalized = AMNormalizedTemplateIdentifier(partialIdentifier);
+  if ([normalized length] == 0) {
+    return @"";
+  }
+  return [NSString stringWithFormat:@"modules/auth/partials/%@", normalized];
+}
+
+static NSString *AMGeneratedPartialTemplatePath(NSString *prefix, NSString *partialIdentifier) {
+  NSString *normalized = AMNormalizedTemplateIdentifier(partialIdentifier);
+  if ([normalized length] == 0) {
+    return @"";
+  }
+  return [NSString stringWithFormat:@"%@/partials/%@", AMNormalizedTemplatePrefix(prefix), normalized];
+}
+
+static NSDictionary *AMNormalizedTemplateOverrideMap(id value) {
+  NSDictionary *raw = [value isKindOfClass:[NSDictionary class]] ? value : @{};
+  NSMutableDictionary *normalized = [NSMutableDictionary dictionary];
+  for (id key in raw) {
+    NSString *normalizedKey = AMNormalizedTemplateIdentifier(key);
+    NSString *path = AMTrimmedString(raw[key]);
+    if ([normalizedKey length] == 0 || [path length] == 0) {
+      continue;
+    }
+    normalized[normalizedKey] = path;
+  }
+  return [NSDictionary dictionaryWithDictionary:normalized];
+}
+
 static NSDictionary *AMUserDictionaryFromRow(NSDictionary *row) {
   if (![row isKindOfClass:[NSDictionary class]]) {
     return nil;
@@ -243,6 +404,10 @@ static NSString *AMStubHS256JWT(NSDictionary *claims, NSString *sharedSecret) {
 @property(nonatomic, copy, readwrite) NSString *providerStubCallbackPath;
 @property(nonatomic, copy, readwrite) NSString *defaultRedirect;
 @property(nonatomic, copy, readwrite) NSArray<NSDictionary *> *loginProviders;
+@property(nonatomic, copy, readwrite) NSString *uiMode;
+@property(nonatomic, copy, readwrite) NSString *layoutTemplate;
+@property(nonatomic, copy, readwrite) NSString *generatedPagePrefix;
+@property(nonatomic, copy) NSDictionary *partialTemplateOverrides;
 @property(nonatomic, copy) NSString *stubProviderEmail;
 @property(nonatomic, copy) NSString *stubProviderDisplayName;
 @property(nonatomic, copy) NSString *stubProviderSharedSecret;
@@ -253,6 +418,7 @@ static NSString *AMStubHS256JWT(NSDictionary *claims, NSString *sharedSecret) {
 @property(nonatomic, strong) id<ALNAuthModuleNotificationHook> notificationHook;
 @property(nonatomic, strong) id<ALNAuthModuleSessionPolicyHook> sessionPolicyHook;
 @property(nonatomic, strong) id<ALNAuthModuleProviderMappingHook> providerMappingHook;
+@property(nonatomic, strong) id<ALNAuthModuleUIContextHook> uiContextHook;
 
 - (nullable NSDictionary *)loadUserBySQL:(NSString *)sql
                               parameters:(NSArray *)parameters
@@ -382,6 +548,10 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
       @"loginPath" : @"/auth/provider/stub/login",
       @"apiLoginPath" : @"/auth/api/provider/stub/login",
     } ];
+    _uiMode = @"module-ui";
+    _layoutTemplate = @"modules/auth/layouts/main";
+    _generatedPagePrefix = @"auth";
+    _partialTemplateOverrides = @{};
     _stubProviderEmail = @"stub-user@example.test";
     _stubProviderDisplayName = @"Stub Provider User";
     _stubProviderSharedSecret = @"auth-module-stub-provider-secret-0123456789abcdef";
@@ -415,6 +585,16 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
   if ([self.defaultRedirect length] == 0) {
     self.defaultRedirect = @"/";
   }
+  NSDictionary *uiConfig = [self.moduleConfig[@"ui"] isKindOfClass:[NSDictionary class]] ? self.moduleConfig[@"ui"] : @{};
+  NSString *uiMode = AMLowerTrimmedString(uiConfig[@"mode"]);
+  if (![uiMode isEqualToString:@"headless"] && ![uiMode isEqualToString:@"generated-app-ui"]) {
+    uiMode = @"module-ui";
+  }
+  self.uiMode = uiMode;
+  NSString *layoutTemplate = AMTrimmedString(uiConfig[@"layout"]);
+  self.layoutTemplate = ([layoutTemplate length] > 0) ? layoutTemplate : @"modules/auth/layouts/main";
+  self.generatedPagePrefix = AMNormalizedTemplatePrefix(uiConfig[@"generatedPagePrefix"]);
+  self.partialTemplateOverrides = AMNormalizedTemplateOverrideMap(uiConfig[@"partials"]);
 
   NSDictionary *providers = [self.moduleConfig[@"providers"] isKindOfClass:[NSDictionary class]]
                                 ? self.moduleConfig[@"providers"]
@@ -483,6 +663,11 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
   if (self.providerMappingHook == nil && error != NULL && *error != NULL) {
     return NO;
   }
+  self.uiContextHook =
+      AMInstantiateHookClass(uiConfig, @"contextClass", @protocol(ALNAuthModuleUIContextHook), error);
+  if (self.uiContextHook == nil && error != NULL && *error != NULL) {
+    return NO;
+  }
   return YES;
 }
 
@@ -528,6 +713,13 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
   summary[@"notification"] = self.notificationHook ? NSStringFromClass([self.notificationHook class]) : @"";
   summary[@"sessionPolicy"] = self.sessionPolicyHook ? NSStringFromClass([self.sessionPolicyHook class]) : @"";
   summary[@"providerMapping"] = self.providerMappingHook ? NSStringFromClass([self.providerMappingHook class]) : @"";
+  summary[@"ui"] = @{
+    @"mode" : self.uiMode ?: @"module-ui",
+    @"layout" : self.layoutTemplate ?: @"modules/auth/layouts/main",
+    @"generatedPagePrefix" : self.generatedPagePrefix ?: @"auth",
+    @"partials" : self.partialTemplateOverrides ?: @{},
+    @"contextHook" : self.uiContextHook ? NSStringFromClass([self.uiContextHook class]) : @"",
+  };
   return summary;
 }
 
@@ -619,6 +811,78 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
     }
   }
   return fallback;
+}
+
+- (BOOL)isHeadlessUIMode {
+  return [[self.uiMode lowercaseString] isEqualToString:@"headless"];
+}
+
+- (NSString *)pageTemplatePathForIdentifier:(NSString *)pageIdentifier
+                                defaultPath:(NSString *)defaultPath {
+  NSString *normalized = AMNormalizedTemplateIdentifier(pageIdentifier);
+  if ([normalized length] == 0) {
+    return defaultPath ?: AMModulePageTemplatePathForIdentifier(@"result");
+  }
+  if ([[self.uiMode lowercaseString] isEqualToString:@"generated-app-ui"]) {
+    return AMGeneratedPageTemplatePath(self.generatedPagePrefix, normalized);
+  }
+  return ([AMTrimmedString(defaultPath) length] > 0) ? defaultPath : AMModulePageTemplatePathForIdentifier(normalized);
+}
+
+- (NSString *)bodyTemplatePathForIdentifier:(NSString *)pageIdentifier
+                                defaultPath:(NSString *)defaultPath {
+  NSString *normalized = AMNormalizedTemplateIdentifier(pageIdentifier);
+  if ([normalized length] == 0) {
+    return defaultPath ?: AMModuleBodyTemplatePathForIdentifier(@"result");
+  }
+  if ([[self.uiMode lowercaseString] isEqualToString:@"generated-app-ui"]) {
+    return AMGeneratedBodyTemplatePath(self.generatedPagePrefix, normalized);
+  }
+  return ([AMTrimmedString(defaultPath) length] > 0) ? defaultPath : AMModuleBodyTemplatePathForIdentifier(normalized);
+}
+
+- (NSString *)partialTemplatePathForIdentifier:(NSString *)partialIdentifier
+                                   defaultPath:(NSString *)defaultPath {
+  NSString *normalized = AMNormalizedTemplateIdentifier(partialIdentifier);
+  NSString *explicitOverride = AMTrimmedString(self.partialTemplateOverrides[normalized]);
+  if ([explicitOverride length] > 0) {
+    return explicitOverride;
+  }
+  if ([[self.uiMode lowercaseString] isEqualToString:@"generated-app-ui"]) {
+    return AMGeneratedPartialTemplatePath(self.generatedPagePrefix, normalized);
+  }
+  return ([AMTrimmedString(defaultPath) length] > 0) ? defaultPath : AMModulePartialTemplatePathForIdentifier(normalized);
+}
+
+- (NSString *)layoutTemplateForPage:(NSString *)pageIdentifier
+                            context:(ALNContext *)context {
+  NSString *defaultLayout = ([AMTrimmedString(self.layoutTemplate) length] > 0) ? self.layoutTemplate : @"modules/auth/layouts/main";
+  if (self.uiContextHook != nil &&
+      [self.uiContextHook respondsToSelector:@selector(authModuleUILayoutForPage:defaultLayout:context:)]) {
+    NSString *override = [self.uiContextHook authModuleUILayoutForPage:AMNormalizedTemplateIdentifier(pageIdentifier)
+                                                         defaultLayout:defaultLayout
+                                                               context:context];
+    if ([AMTrimmedString(override) length] > 0) {
+      return override;
+    }
+  }
+  return defaultLayout;
+}
+
+- (NSDictionary *)uiContextForPage:(NSString *)pageIdentifier
+                    defaultContext:(NSDictionary *)defaultContext
+                           context:(ALNContext *)context {
+  NSMutableDictionary *resolved = [NSMutableDictionary dictionaryWithDictionary:defaultContext ?: @{}];
+  if (self.uiContextHook != nil &&
+      [self.uiContextHook respondsToSelector:@selector(authModuleUIContextForPage:defaultContext:context:)]) {
+    NSDictionary *override = [self.uiContextHook authModuleUIContextForPage:AMNormalizedTemplateIdentifier(pageIdentifier)
+                                                             defaultContext:defaultContext ?: @{}
+                                                                    context:context];
+    if ([override isKindOfClass:[NSDictionary class]]) {
+      [resolved addEntriesFromDictionary:override];
+    }
+  }
+  return [NSDictionary dictionaryWithDictionary:resolved];
 }
 
 - (NSDictionary *)loadUserBySQL:(NSString *)sql
@@ -918,6 +1182,13 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
   }
   NSString *eventName = AMTrimmedString(event);
   NSString *path = [eventName isEqualToString:@"password_reset"] ? self.resetPasswordPath : self.verifyPath;
+  if ([self isHeadlessUIMode]) {
+    if ([eventName isEqualToString:@"password_reset"]) {
+      path = AMPathJoin(self.apiPrefix, @"password/reset");
+    } else {
+      path = AMPathJoin(self.apiPrefix, @"verify");
+    }
+  }
   NSString *link = [NSString stringWithFormat:@"%@%@?token=%@", baseURL ?: @"", path ?: @"", token ?: @""];
   NSString *subject = [eventName isEqualToString:@"password_reset"] ? @"Reset your password" : @"Verify your email";
   NSString *body = [eventName isEqualToString:@"password_reset"]
@@ -1228,6 +1499,7 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
   payload[@"session_id"] = [context authSessionIdentifier] ?: @"";
   payload[@"csrf_token"] = [context csrfToken] ?: @"";
   payload[@"login_providers"] = self.loginProviders ?: @[];
+  payload[@"ui_mode"] = self.uiMode ?: @"module-ui";
   if (includeUser && [subject length] > 0) {
     NSDictionary *user = [self currentUserForSubject:subject error:error];
     if (user != nil) {
@@ -1240,10 +1512,10 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
 - (BOOL)isAdminContext:(ALNContext *)context
                  error:(NSError **)error {
   NSDictionary *user = [self currentUserForContext:context error:error];
-  if (user == nil) {
-    return NO;
+  if (user != nil) {
+    return [[user[@"roles"] isKindOfClass:[NSArray class]] ? user[@"roles"] : @[] containsObject:@"admin"];
   }
-  return [[user[@"roles"] isKindOfClass:[NSArray class]] ? user[@"roles"] : @[] containsObject:@"admin"];
+  return [[context authRoles] containsObject:@"admin"];
 }
 
 - (NSDictionary *)resolveSessionDescriptorForNormalizedIdentity:(NSDictionary *)normalizedIdentity
@@ -1346,13 +1618,27 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
   return [NSString stringWithFormat:@"%@://%@", scheme, host];
 }
 
-- (NSDictionary *)pageContextWithTitle:(NSString *)title
-                               message:(NSString *)message
-                                errors:(NSArray *)errors
-                              formData:(NSDictionary *)formData
-                              extraCtx:(NSDictionary *)extraCtx {
+- (BOOL)shouldPreferJSONForHeadlessRequest:(ALNContext *)ctx {
+  return ([self shouldReturnJSON:ctx] || [self.runtime isHeadlessUIMode]);
+}
+
+- (NSString *)stylesheetPathForRuntime {
+  if ([[self.runtime.uiMode lowercaseString] isEqualToString:@"generated-app-ui"]) {
+    return [NSString stringWithFormat:@"/%@/auth.css", self.runtime.generatedPagePrefix ?: @"auth"];
+  }
+  return @"/modules/auth/auth.css";
+}
+
+- (NSDictionary *)pageContextForIdentifier:(NSString *)pageIdentifier
+                                     title:(NSString *)title
+                                   message:(NSString *)message
+                                    errors:(NSArray *)errors
+                                  formData:(NSDictionary *)formData
+                                  extraCtx:(NSDictionary *)extraCtx {
   NSMutableDictionary *context = [NSMutableDictionary dictionary];
+  NSString *normalizedIdentifier = AMNormalizedTemplateIdentifier(pageIdentifier);
   context[@"pageTitle"] = title ?: @"Auth";
+  context[@"authPageIdentifier"] = normalizedIdentifier ?: @"result";
   context[@"message"] = message ?: @"";
   context[@"errors"] = [errors isKindOfClass:[NSArray class]] ? errors : @[];
   context[@"formData"] = [formData isKindOfClass:[NSDictionary class]] ? formData : @{};
@@ -1365,10 +1651,56 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
   context[@"authResetPasswordPath"] = self.runtime.resetPasswordPath ?: @"/auth/password/reset";
   context[@"authTOTPPath"] = self.runtime.totpPath ?: @"/auth/mfa/totp";
   context[@"authProviders"] = self.runtime.loginProviders ?: @[];
+  context[@"authUIMode"] = self.runtime.uiMode ?: @"module-ui";
+  context[@"authStylesheetPath"] = [self stylesheetPathForRuntime];
+  context[@"authPageBodyTemplate"] =
+      [self.runtime bodyTemplatePathForIdentifier:normalizedIdentifier
+                                      defaultPath:AMModuleBodyTemplatePathForIdentifier(normalizedIdentifier)];
+  context[@"authPartialPageWrapper"] =
+      [self.runtime partialTemplatePathForIdentifier:@"page_wrapper"
+                                         defaultPath:AMModulePartialTemplatePathForIdentifier(@"page_wrapper")];
+  context[@"authPartialMessageBlock"] =
+      [self.runtime partialTemplatePathForIdentifier:@"message_block"
+                                         defaultPath:AMModulePartialTemplatePathForIdentifier(@"message_block")];
+  context[@"authPartialErrorBlock"] =
+      [self.runtime partialTemplatePathForIdentifier:@"error_block"
+                                         defaultPath:AMModulePartialTemplatePathForIdentifier(@"error_block")];
+  context[@"authPartialFormShell"] =
+      [self.runtime partialTemplatePathForIdentifier:@"form_shell"
+                                         defaultPath:AMModulePartialTemplatePathForIdentifier(@"form_shell")];
+  context[@"authPartialFieldRow"] =
+      [self.runtime partialTemplatePathForIdentifier:@"field_row"
+                                         defaultPath:AMModulePartialTemplatePathForIdentifier(@"field_row")];
+  context[@"authPartialProviderRow"] =
+      [self.runtime partialTemplatePathForIdentifier:@"provider_row"
+                                         defaultPath:AMModulePartialTemplatePathForIdentifier(@"provider_row")];
+  context[@"authPartialResultActions"] =
+      [self.runtime partialTemplatePathForIdentifier:@"result_actions"
+                                         defaultPath:AMModulePartialTemplatePathForIdentifier(@"result_actions")];
   if ([extraCtx isKindOfClass:[NSDictionary class]]) {
     [context addEntriesFromDictionary:extraCtx];
   }
-  return context;
+  return [self.runtime uiContextForPage:normalizedIdentifier defaultContext:context context:self.context];
+}
+
+- (BOOL)renderAuthPageIdentifier:(NSString *)pageIdentifier
+                           title:(NSString *)title
+                         message:(NSString *)message
+                          errors:(NSArray *)errors
+                        formData:(NSDictionary *)formData
+                        extraCtx:(NSDictionary *)extraCtx
+                           error:(NSError **)error {
+  NSString *normalizedIdentifier = AMNormalizedTemplateIdentifier(pageIdentifier);
+  NSString *defaultTemplate = AMModulePageTemplatePathForIdentifier(normalizedIdentifier);
+  NSString *templateName = [self.runtime pageTemplatePathForIdentifier:normalizedIdentifier defaultPath:defaultTemplate];
+  NSString *layoutName = [self.runtime layoutTemplateForPage:normalizedIdentifier context:self.context];
+  NSDictionary *context = [self pageContextForIdentifier:normalizedIdentifier
+                                                   title:title
+                                                 message:message
+                                                  errors:errors
+                                                formData:formData
+                                                extraCtx:extraCtx];
+  return [self renderTemplate:templateName context:context layout:layoutName error:error];
 }
 
 - (NSArray *)errorEntriesForError:(NSError *)error
@@ -1384,7 +1716,7 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
 
 - (id)sessionState:(ALNContext *)ctx {
   NSDictionary *payload = [self.runtime sessionPayloadForContext:ctx includeUser:YES error:NULL] ?: @{};
-  if ([self shouldReturnJSON:ctx]) {
+  if ([self shouldPreferJSONForHeadlessRequest:ctx]) {
     return payload;
   }
   if ([[ctx authSubject] length] > 0) {
@@ -1397,14 +1729,49 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
 
 - (id)loginForm:(ALNContext *)ctx {
   NSDictionary *parameters = [self requestParameters];
-  BOOL rendered = [self renderTemplate:@"modules/auth/login/index"
-                               context:[self pageContextWithTitle:@"Sign In"
-                                                       message:AMTrimmedString(ctx.session[ALNAuthModuleVerificationNoticeSessionKey])
-                                                        errors:nil
-                                                      formData:@{ @"return_to" : AMTrimmedString(parameters[@"return_to"]) }
-                                                      extraCtx:nil]
-                                layout:@"modules/auth/layouts/main"
-                                 error:NULL];
+  NSDictionary *extraCtx = @{
+    @"authFormDescriptor" : @{
+      @"action" : self.runtime.loginPath ?: @"/auth/login",
+      @"method" : @"post",
+      @"submitLabel" : @"Sign In",
+      @"hidden" : @[ @{
+        @"name" : @"return_to",
+        @"value" : AMTrimmedString(parameters[@"return_to"]),
+      } ],
+      @"fields" : @[
+        @{
+          @"name" : @"email",
+          @"label" : @"Email",
+          @"type" : @"email",
+          @"autocomplete" : @"email",
+          @"value" : @"",
+        },
+        @{
+          @"name" : @"password",
+          @"label" : @"Password",
+          @"type" : @"password",
+          @"autocomplete" : @"current-password",
+        },
+      ],
+      @"links" : @[
+        @{
+          @"label" : @"Create account",
+          @"href" : self.runtime.registerPath ?: @"/auth/register",
+        },
+        @{
+          @"label" : @"Forgot password",
+          @"href" : self.runtime.forgotPasswordPath ?: @"/auth/password/forgot",
+        },
+      ],
+    },
+  };
+  BOOL rendered = [self renderAuthPageIdentifier:@"login"
+                                           title:@"Sign In"
+                                         message:AMTrimmedString(ctx.session[ALNAuthModuleVerificationNoticeSessionKey])
+                                          errors:nil
+                                        formData:@{ @"return_to" : AMTrimmedString(parameters[@"return_to"]) }
+                                        extraCtx:extraCtx
+                                           error:NULL];
   [ctx.session removeObjectForKey:ALNAuthModuleVerificationNoticeSessionKey];
   if (!rendered) {
     [self setStatus:500];
@@ -1424,17 +1791,51 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
     [self setStatus:401];
     NSArray *errors = [self errorEntriesForError:(error ?: AMError(ALNAuthModuleErrorAuthenticationFailed, @"Invalid email or password", nil))
                                            field:@"email"];
-    if ([self shouldReturnJSON:ctx]) {
+    if ([self shouldPreferJSONForHeadlessRequest:ctx]) {
       return @{ @"status" : @"error", @"errors" : errors };
     }
-    [self renderTemplate:@"modules/auth/login/index"
-                 context:[self pageContextWithTitle:@"Sign In"
-                                         message:@""
-                                          errors:errors
-                                        formData:@{ @"email" : email ?: @"", @"return_to" : returnTo ?: @"" }
-                                        extraCtx:nil]
-                  layout:@"modules/auth/layouts/main"
-                   error:NULL];
+    [self renderAuthPageIdentifier:@"login"
+                             title:@"Sign In"
+                           message:@""
+                            errors:errors
+                          formData:@{ @"email" : email ?: @"", @"return_to" : returnTo ?: @"" }
+                          extraCtx:@{
+                            @"authFormDescriptor" : @{
+                              @"action" : self.runtime.loginPath ?: @"/auth/login",
+                              @"method" : @"post",
+                              @"submitLabel" : @"Sign In",
+                              @"hidden" : @[ @{
+                                @"name" : @"return_to",
+                                @"value" : returnTo ?: @"",
+                              } ],
+                              @"fields" : @[
+                                @{
+                                  @"name" : @"email",
+                                  @"label" : @"Email",
+                                  @"type" : @"email",
+                                  @"autocomplete" : @"email",
+                                  @"value" : email ?: @"",
+                                },
+                                @{
+                                  @"name" : @"password",
+                                  @"label" : @"Password",
+                                  @"type" : @"password",
+                                  @"autocomplete" : @"current-password",
+                                },
+                              ],
+                              @"links" : @[
+                                @{
+                                  @"label" : @"Create account",
+                                  @"href" : self.runtime.registerPath ?: @"/auth/register",
+                                },
+                                @{
+                                  @"label" : @"Forgot password",
+                                  @"href" : self.runtime.forgotPasswordPath ?: @"/auth/password/forgot",
+                                },
+                              ],
+                            },
+                          }
+                             error:NULL];
     return nil;
   }
   NSDictionary *session = [self.runtime startSessionForUser:user provider:@"local" methods:@[ @"pwd" ] context:ctx error:&error];
@@ -1445,7 +1846,7 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
   NSString *redirectTarget = [self.runtime postLoginRedirectForContext:ctx
                                                                   user:user
                                                        defaultRedirect:returnTo];
-  if ([self shouldReturnJSON:ctx]) {
+  if ([self shouldPreferJSONForHeadlessRequest:ctx]) {
     NSMutableDictionary *payload = [NSMutableDictionary dictionaryWithDictionary:session];
     payload[@"redirect_to"] = redirectTarget ?: self.runtime.defaultRedirect;
     return payload;
@@ -1457,7 +1858,7 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
 - (id)logout:(ALNContext *)ctx {
   (void)ctx;
   [self clearAuthenticatedSession];
-  if ([self shouldReturnJSON:self.context]) {
+  if ([self shouldPreferJSONForHeadlessRequest:self.context]) {
     return @{ @"status" : @"ok" };
   }
   [self redirectTo:self.runtime.loginPath status:302];
@@ -1466,14 +1867,49 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
 
 - (id)registerForm:(ALNContext *)ctx {
   NSDictionary *parameters = [self requestParameters];
-  BOOL rendered = [self renderTemplate:@"modules/auth/register/index"
-                               context:[self pageContextWithTitle:@"Create Account"
-                                                       message:@""
-                                                        errors:nil
-                                                      formData:@{ @"return_to" : AMTrimmedString(parameters[@"return_to"]) }
-                                                      extraCtx:nil]
-                                layout:@"modules/auth/layouts/main"
-                                 error:NULL];
+  BOOL rendered = [self renderAuthPageIdentifier:@"register"
+                                           title:@"Create Account"
+                                         message:@""
+                                          errors:nil
+                                        formData:@{ @"return_to" : AMTrimmedString(parameters[@"return_to"]) }
+                                        extraCtx:@{
+                                          @"authFormDescriptor" : @{
+                                            @"action" : self.runtime.registerPath ?: @"/auth/register",
+                                            @"method" : @"post",
+                                            @"submitLabel" : @"Create Account",
+                                            @"hidden" : @[ @{
+                                              @"name" : @"return_to",
+                                              @"value" : AMTrimmedString(parameters[@"return_to"]),
+                                            } ],
+                                            @"fields" : @[
+                                              @{
+                                                @"name" : @"email",
+                                                @"label" : @"Email",
+                                                @"type" : @"email",
+                                                @"autocomplete" : @"email",
+                                              },
+                                              @{
+                                                @"name" : @"display_name",
+                                                @"label" : @"Display Name",
+                                                @"type" : @"text",
+                                                @"autocomplete" : @"name",
+                                              },
+                                              @{
+                                                @"name" : @"password",
+                                                @"label" : @"Password",
+                                                @"type" : @"password",
+                                                @"autocomplete" : @"new-password",
+                                              },
+                                            ],
+                                            @"links" : @[
+                                              @{
+                                                @"label" : @"Back to sign in",
+                                                @"href" : self.runtime.loginPath ?: @"/auth/login",
+                                              },
+                                            ],
+                                          },
+                                        }
+                                           error:NULL];
   if (!rendered) {
     [self setStatus:500];
     [self renderText:@"render failed\n"];
@@ -1494,21 +1930,58 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
     [self setStatus:422];
     NSArray *errors = [self errorEntriesForError:(error ?: AMError(ALNAuthModuleErrorValidationFailed, @"Registration failed", nil))
                                            field:AMTrimmedString(error.userInfo[@"field"])];
-    if ([self shouldReturnJSON:ctx]) {
+    if ([self shouldPreferJSONForHeadlessRequest:ctx]) {
       return @{ @"status" : @"error", @"errors" : errors };
     }
-    [self renderTemplate:@"modules/auth/register/index"
-                 context:[self pageContextWithTitle:@"Create Account"
-                                         message:@""
-                                          errors:errors
-                                        formData:@{
-                                          @"email" : email ?: @"",
-                                          @"display_name" : displayName ?: @"",
-                                          @"return_to" : returnTo ?: @"",
-                                        }
-                                        extraCtx:nil]
-                  layout:@"modules/auth/layouts/main"
-                   error:NULL];
+    [self renderAuthPageIdentifier:@"register"
+                             title:@"Create Account"
+                           message:@""
+                            errors:errors
+                          formData:@{
+                            @"email" : email ?: @"",
+                            @"display_name" : displayName ?: @"",
+                            @"return_to" : returnTo ?: @"",
+                          }
+                          extraCtx:@{
+                            @"authFormDescriptor" : @{
+                              @"action" : self.runtime.registerPath ?: @"/auth/register",
+                              @"method" : @"post",
+                              @"submitLabel" : @"Create Account",
+                              @"hidden" : @[ @{
+                                @"name" : @"return_to",
+                                @"value" : returnTo ?: @"",
+                              } ],
+                              @"fields" : @[
+                                @{
+                                  @"name" : @"email",
+                                  @"label" : @"Email",
+                                  @"type" : @"email",
+                                  @"autocomplete" : @"email",
+                                  @"value" : email ?: @"",
+                                },
+                                @{
+                                  @"name" : @"display_name",
+                                  @"label" : @"Display Name",
+                                  @"type" : @"text",
+                                  @"autocomplete" : @"name",
+                                  @"value" : displayName ?: @"",
+                                },
+                                @{
+                                  @"name" : @"password",
+                                  @"label" : @"Password",
+                                  @"type" : @"password",
+                                  @"autocomplete" : @"new-password",
+                                },
+                              ],
+                              @"links" : @[
+                                @{
+                                  @"label" : @"Back to sign in",
+                                  @"href" : self.runtime.loginPath ?: @"/auth/login",
+                                },
+                              ],
+                            },
+                          }
+                             error:NULL];
     return nil;
   }
 
@@ -1528,7 +2001,7 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
   NSString *redirectTarget = [self.runtime postLoginRedirectForContext:ctx user:user defaultRedirect:returnTo];
   ctx.session[ALNAuthModuleVerificationNoticeSessionKey] = @"Account created. Check your email for a verification link.";
   [ctx markSessionDirty];
-  if ([self shouldReturnJSON:ctx]) {
+  if ([self shouldPreferJSONForHeadlessRequest:ctx]) {
     NSMutableDictionary *payload = [NSMutableDictionary dictionaryWithDictionary:session];
     payload[@"verification_required"] = @YES;
     payload[@"redirect_to"] = redirectTarget ?: self.runtime.defaultRedirect;
@@ -1544,7 +2017,7 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
   NSDictionary *user = nil;
   BOOL ok = [self.runtime consumeVerificationToken:parameters[@"token"] user:&user error:&error];
   NSString *message = ok ? @"Your email address has been verified." : (error.localizedDescription ?: @"Verification failed.");
-  if ([self shouldReturnJSON:ctx]) {
+  if ([self shouldPreferJSONForHeadlessRequest:ctx]) {
     [self setStatus:ok ? 200 : 422];
     return @{
       @"status" : ok ? @"ok" : @"error",
@@ -1552,30 +2025,50 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
       @"user" : user ?: @{},
     };
   }
-  [self renderTemplate:@"modules/auth/result/index"
-               context:[self pageContextWithTitle:@"Email Verification"
-                                       message:message
-                                        errors:nil
-                                      formData:nil
-                                      extraCtx:@{
-                                        @"resultTitle" : ok ? @"Email verified" : @"Verification failed",
-                                        @"resultActionPath" : self.runtime.loginPath ?: @"/auth/login",
-                                        @"resultActionLabel" : @"Back to sign in",
-                                      }]
-                layout:@"modules/auth/layouts/main"
-                 error:NULL];
+  [self renderAuthPageIdentifier:@"verify_result"
+                           title:@"Email Verification"
+                         message:message
+                          errors:nil
+                        formData:nil
+                        extraCtx:@{
+                          @"authResultActions" : @[ @{
+                            @"label" : @"Back to sign in",
+                            @"href" : self.runtime.loginPath ?: @"/auth/login",
+                          } ],
+                          @"resultTitle" : ok ? @"Email verified" : @"Verification failed",
+                        }
+                           error:NULL];
   return nil;
 }
 
 - (id)forgotPasswordForm:(ALNContext *)ctx {
-  [self renderTemplate:@"modules/auth/password/forgot"
-               context:[self pageContextWithTitle:@"Reset Password"
-                                       message:AMTrimmedString(ctx.session[ALNAuthModuleResetNoticeSessionKey])
-                                        errors:nil
-                                      formData:nil
-                                      extraCtx:nil]
-                layout:@"modules/auth/layouts/main"
-                 error:NULL];
+  [self renderAuthPageIdentifier:@"forgot_password"
+                           title:@"Reset Password"
+                         message:AMTrimmedString(ctx.session[ALNAuthModuleResetNoticeSessionKey])
+                          errors:nil
+                        formData:nil
+                        extraCtx:@{
+                          @"authFormDescriptor" : @{
+                            @"action" : self.runtime.forgotPasswordPath ?: @"/auth/password/forgot",
+                            @"method" : @"post",
+                            @"submitLabel" : @"Send Reset Link",
+                            @"fields" : @[
+                              @{
+                                @"name" : @"email",
+                                @"label" : @"Email",
+                                @"type" : @"email",
+                                @"autocomplete" : @"email",
+                              },
+                            ],
+                            @"links" : @[
+                              @{
+                                @"label" : @"Back to sign in",
+                                @"href" : self.runtime.loginPath ?: @"/auth/login",
+                              },
+                            ],
+                          },
+                        }
+                           error:NULL];
   [ctx.session removeObjectForKey:ALNAuthModuleResetNoticeSessionKey];
   [ctx markSessionDirty];
   return nil;
@@ -1597,7 +2090,7 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
     }
   }
   NSString *message = @"If the account exists, a reset link has been issued.";
-  if ([self shouldReturnJSON:ctx]) {
+  if ([self shouldPreferJSONForHeadlessRequest:ctx]) {
     return @{ @"status" : @"ok", @"message" : message };
   }
   ctx.session[ALNAuthModuleResetNoticeSessionKey] = message;
@@ -1608,14 +2101,38 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
 
 - (id)resetPasswordForm:(ALNContext *)ctx {
   NSDictionary *parameters = [self requestParameters];
-  [self renderTemplate:@"modules/auth/password/reset"
-               context:[self pageContextWithTitle:@"Set a New Password"
-                                       message:AMTrimmedString(ctx.session[ALNAuthModuleResetNoticeSessionKey])
-                                        errors:nil
-                                      formData:@{ @"token" : AMTrimmedString(parameters[@"token"]) }
-                                      extraCtx:nil]
-                layout:@"modules/auth/layouts/main"
-                 error:NULL];
+  if ([self shouldReturnJSON:ctx]) {
+    return @{
+      @"status" : @"ok",
+      @"token" : AMTrimmedString(parameters[@"token"]),
+      @"message" : @"Submit the token and new password to complete reset.",
+    };
+  }
+  [self renderAuthPageIdentifier:@"reset_password"
+                           title:@"Set a New Password"
+                         message:AMTrimmedString(ctx.session[ALNAuthModuleResetNoticeSessionKey])
+                          errors:nil
+                        formData:@{ @"token" : AMTrimmedString(parameters[@"token"]) }
+                        extraCtx:@{
+                          @"authFormDescriptor" : @{
+                            @"action" : self.runtime.resetPasswordPath ?: @"/auth/password/reset",
+                            @"method" : @"post",
+                            @"submitLabel" : @"Update Password",
+                            @"hidden" : @[ @{
+                              @"name" : @"token",
+                              @"value" : AMTrimmedString(parameters[@"token"]),
+                            } ],
+                            @"fields" : @[
+                              @{
+                                @"name" : @"password",
+                                @"label" : @"New Password",
+                                @"type" : @"password",
+                                @"autocomplete" : @"new-password",
+                              },
+                            ],
+                          },
+                        }
+                           error:NULL];
   [ctx.session removeObjectForKey:ALNAuthModuleResetNoticeSessionKey];
   [ctx markSessionDirty];
   return nil;
@@ -1632,21 +2149,38 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
   if (!ok) {
     [self setStatus:422];
     NSArray *errors = [self errorEntriesForError:error field:@"password"];
-    if ([self shouldReturnJSON:ctx]) {
+    if ([self shouldPreferJSONForHeadlessRequest:ctx]) {
       return @{ @"status" : @"error", @"errors" : errors };
     }
-    [self renderTemplate:@"modules/auth/password/reset"
-                 context:[self pageContextWithTitle:@"Set a New Password"
-                                         message:@""
-                                          errors:errors
-                                        formData:@{ @"token" : AMTrimmedString(parameters[@"token"]) }
-                                        extraCtx:nil]
-                  layout:@"modules/auth/layouts/main"
-                   error:NULL];
+    [self renderAuthPageIdentifier:@"reset_password"
+                             title:@"Set a New Password"
+                           message:@""
+                            errors:errors
+                          formData:@{ @"token" : AMTrimmedString(parameters[@"token"]) }
+                          extraCtx:@{
+                            @"authFormDescriptor" : @{
+                              @"action" : self.runtime.resetPasswordPath ?: @"/auth/password/reset",
+                              @"method" : @"post",
+                              @"submitLabel" : @"Update Password",
+                              @"hidden" : @[ @{
+                                @"name" : @"token",
+                                @"value" : AMTrimmedString(parameters[@"token"]),
+                              } ],
+                              @"fields" : @[
+                                @{
+                                  @"name" : @"password",
+                                  @"label" : @"New Password",
+                                  @"type" : @"password",
+                                  @"autocomplete" : @"new-password",
+                                },
+                              ],
+                            },
+                          }
+                             error:NULL];
     return nil;
   }
   NSDictionary *session = [self.runtime startSessionForUser:user provider:@"local" methods:@[ @"pwd" ] context:ctx error:NULL];
-  if ([self shouldReturnJSON:ctx]) {
+  if ([self shouldPreferJSONForHeadlessRequest:ctx]) {
     return session ?: @{ @"status" : @"ok" };
   }
   [self redirectTo:[self.runtime postLoginRedirectForContext:ctx user:user defaultRedirect:@""]
@@ -1694,7 +2228,7 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
 - (id)totpForm:(ALNContext *)ctx {
   NSDictionary *user = [self.runtime currentUserForContext:ctx error:NULL];
   if (user == nil) {
-    if ([self shouldReturnJSON:ctx]) {
+    if ([self shouldPreferJSONForHeadlessRequest:ctx]) {
       [self setStatus:401];
       return @{ @"status" : @"error", @"message" : @"Authentication required" };
     }
@@ -1702,26 +2236,42 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
     return nil;
   }
   NSDictionary *payload = [self.runtime provisioningPayloadForUser:user error:NULL] ?: @{};
-  if ([self shouldReturnJSON:ctx]) {
+  if ([self shouldPreferJSONForHeadlessRequest:ctx]) {
     return @{
       @"status" : @"ok",
       @"provisioning" : payload,
       @"session" : [self.runtime sessionPayloadForContext:ctx includeUser:YES error:NULL] ?: @{},
     };
   }
-  [self renderTemplate:@"modules/auth/mfa/totp"
-               context:[self pageContextWithTitle:@"TOTP Security"
-                                       message:@"Use your authenticator app to complete step-up authentication."
-                                        errors:nil
-                                      formData:@{
-                                        @"return_to" : AMTrimmedString([self requestParameters][@"return_to"]),
-                                      }
-                                      extraCtx:@{
-                                        @"otpauthURI" : AMTrimmedString(payload[@"otpauth_uri"]),
-                                        @"totpVerified" : payload[@"verified"] ?: @NO,
-                                      }]
-                layout:@"modules/auth/layouts/main"
-                 error:NULL];
+  [self renderAuthPageIdentifier:@"totp_challenge"
+                           title:@"TOTP Security"
+                         message:@"Use your authenticator app to complete step-up authentication."
+                          errors:nil
+                        formData:@{
+                          @"return_to" : AMTrimmedString([self requestParameters][@"return_to"]),
+                        }
+                        extraCtx:@{
+                          @"otpauthURI" : AMTrimmedString(payload[@"otpauth_uri"]),
+                          @"totpVerified" : payload[@"verified"] ?: @NO,
+                          @"authFormDescriptor" : @{
+                            @"action" : self.runtime.totpVerifyPath ?: @"/auth/mfa/totp/verify",
+                            @"method" : @"post",
+                            @"submitLabel" : @"Verify TOTP",
+                            @"hidden" : @[ @{
+                              @"name" : @"return_to",
+                              @"value" : AMTrimmedString([self requestParameters][@"return_to"]),
+                            } ],
+                            @"fields" : @[
+                              @{
+                                @"name" : @"code",
+                                @"label" : @"TOTP Code",
+                                @"type" : @"text",
+                                @"autocomplete" : @"one-time-code",
+                              },
+                            ],
+                          },
+                        }
+                           error:NULL];
   return nil;
 }
 
@@ -1738,24 +2288,40 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
   if (payload == nil) {
     [self setStatus:422];
     NSArray *errors = [self errorEntriesForError:error field:@"code"];
-    if ([self shouldReturnJSON:ctx]) {
+    if ([self shouldPreferJSONForHeadlessRequest:ctx]) {
       return @{ @"status" : @"error", @"errors" : errors };
     }
     NSDictionary *provisioning = [self.runtime provisioningPayloadForUser:user error:NULL] ?: @{};
-    [self renderTemplate:@"modules/auth/mfa/totp"
-                 context:[self pageContextWithTitle:@"TOTP Security"
-                                         message:@""
-                                          errors:errors
-                                        formData:@{ @"return_to" : returnTo ?: @"" }
-                                        extraCtx:@{
-                                          @"otpauthURI" : AMTrimmedString(provisioning[@"otpauth_uri"]),
-                                          @"totpVerified" : provisioning[@"verified"] ?: @NO,
-                                        }]
-                  layout:@"modules/auth/layouts/main"
-                   error:NULL];
+    [self renderAuthPageIdentifier:@"totp_challenge"
+                             title:@"TOTP Security"
+                           message:@""
+                            errors:errors
+                          formData:@{ @"return_to" : returnTo ?: @"" }
+                          extraCtx:@{
+                            @"otpauthURI" : AMTrimmedString(provisioning[@"otpauth_uri"]),
+                            @"totpVerified" : provisioning[@"verified"] ?: @NO,
+                            @"authFormDescriptor" : @{
+                              @"action" : self.runtime.totpVerifyPath ?: @"/auth/mfa/totp/verify",
+                              @"method" : @"post",
+                              @"submitLabel" : @"Verify TOTP",
+                              @"hidden" : @[ @{
+                                @"name" : @"return_to",
+                                @"value" : returnTo ?: @"",
+                              } ],
+                              @"fields" : @[
+                                @{
+                                  @"name" : @"code",
+                                  @"label" : @"TOTP Code",
+                                  @"type" : @"text",
+                                  @"autocomplete" : @"one-time-code",
+                                },
+                              ],
+                            },
+                          }
+                             error:NULL];
     return nil;
   }
-  if ([self shouldReturnJSON:ctx]) {
+  if ([self shouldPreferJSONForHeadlessRequest:ctx]) {
     return payload;
   }
   [self redirectTo:([returnTo length] > 0 ? returnTo : self.runtime.defaultRedirect) status:302];
@@ -1854,21 +2420,22 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
                                                                                      error:&error];
   if (result == nil) {
     [self setStatus:422];
-    if ([self shouldReturnJSON:ctx]) {
+    if ([self shouldPreferJSONForHeadlessRequest:ctx]) {
       return @{ @"status" : @"error", @"message" : error.localizedDescription ?: @"Provider login failed" };
     }
-    [self renderTemplate:@"modules/auth/result/index"
-                 context:[self pageContextWithTitle:@"Provider Login"
-                                         message:error.localizedDescription ?: @"Provider login failed"
-                                          errors:nil
-                                        formData:nil
-                                        extraCtx:@{
-                                          @"resultTitle" : @"Provider login failed",
-                                          @"resultActionPath" : self.runtime.loginPath ?: @"/auth/login",
-                                          @"resultActionLabel" : @"Back to sign in",
-                                        }]
-                  layout:@"modules/auth/layouts/main"
-                   error:NULL];
+    [self renderAuthPageIdentifier:@"provider_result"
+                             title:@"Provider Login"
+                           message:error.localizedDescription ?: @"Provider login failed"
+                            errors:nil
+                          formData:nil
+                          extraCtx:@{
+                            @"resultTitle" : @"Provider login failed",
+                            @"authResultActions" : @[ @{
+                              @"label" : @"Back to sign in",
+                              @"href" : self.runtime.loginPath ?: @"/auth/login",
+                            } ],
+                          }
+                             error:NULL];
     return nil;
   }
   NSDictionary *user = [self.runtime currentUserForContext:ctx error:NULL] ?: @{};
@@ -1900,11 +2467,13 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
     return NO;
   }
 
-  [application registerRouteMethod:@"GET"
-                              path:runtime.loginPath
-                              name:@"auth_login_form"
-                   controllerClass:[ALNAuthModuleController class]
-                             action:@"loginForm"];
+  if (![runtime isHeadlessUIMode]) {
+    [application registerRouteMethod:@"GET"
+                                path:runtime.loginPath
+                                name:@"auth_login_form"
+                     controllerClass:[ALNAuthModuleController class]
+                               action:@"loginForm"];
+  }
   [application registerRouteMethod:@"POST"
                               path:runtime.loginPath
                               name:@"auth_login"
@@ -1915,11 +2484,13 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
                               name:@"auth_logout"
                    controllerClass:[ALNAuthModuleController class]
                              action:@"logout"];
-  [application registerRouteMethod:@"GET"
-                              path:runtime.registerPath
-                              name:@"auth_register_form"
-                   controllerClass:[ALNAuthModuleController class]
-                             action:@"registerForm"];
+  if (![runtime isHeadlessUIMode]) {
+    [application registerRouteMethod:@"GET"
+                                path:runtime.registerPath
+                                name:@"auth_register_form"
+                     controllerClass:[ALNAuthModuleController class]
+                               action:@"registerForm"];
+  }
   [application registerRouteMethod:@"POST"
                               path:runtime.registerPath
                               name:@"auth_register"
@@ -1935,21 +2506,25 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
                               name:@"auth_verify"
                    controllerClass:[ALNAuthModuleController class]
                              action:@"verifyEmail"];
-  [application registerRouteMethod:@"GET"
-                              path:runtime.forgotPasswordPath
-                              name:@"auth_password_forgot_form"
-                   controllerClass:[ALNAuthModuleController class]
-                             action:@"forgotPasswordForm"];
+  if (![runtime isHeadlessUIMode]) {
+    [application registerRouteMethod:@"GET"
+                                path:runtime.forgotPasswordPath
+                                name:@"auth_password_forgot_form"
+                     controllerClass:[ALNAuthModuleController class]
+                               action:@"forgotPasswordForm"];
+  }
   [application registerRouteMethod:@"POST"
                               path:runtime.forgotPasswordPath
                               name:@"auth_password_forgot"
                    controllerClass:[ALNAuthModuleController class]
                              action:@"forgotPassword"];
-  [application registerRouteMethod:@"GET"
-                              path:runtime.resetPasswordPath
-                              name:@"auth_password_reset_form"
-                   controllerClass:[ALNAuthModuleController class]
-                             action:@"resetPasswordForm"];
+  if (![runtime isHeadlessUIMode]) {
+    [application registerRouteMethod:@"GET"
+                                path:runtime.resetPasswordPath
+                                name:@"auth_password_reset_form"
+                     controllerClass:[ALNAuthModuleController class]
+                               action:@"resetPasswordForm"];
+  }
   [application registerRouteMethod:@"POST"
                               path:runtime.resetPasswordPath
                               name:@"auth_password_reset"
@@ -1960,11 +2535,13 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
                               name:@"auth_password_change"
                    controllerClass:[ALNAuthModuleController class]
                              action:@"changePassword"];
-  [application registerRouteMethod:@"GET"
-                              path:runtime.totpPath
-                              name:@"auth_totp_form"
-                   controllerClass:[ALNAuthModuleController class]
-                             action:@"totpForm"];
+  if (![runtime isHeadlessUIMode]) {
+    [application registerRouteMethod:@"GET"
+                                path:runtime.totpPath
+                                name:@"auth_totp_form"
+                     controllerClass:[ALNAuthModuleController class]
+                               action:@"totpForm"];
+  }
   [application registerRouteMethod:@"POST"
                               path:runtime.totpVerifyPath
                               name:@"auth_totp_verify"
@@ -2018,6 +2595,11 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
                               name:@"auth_api_password_forgot"
                    controllerClass:[ALNAuthModuleController class]
                              action:@"forgotPassword"];
+  [application registerRouteMethod:@"GET"
+                              path:@"/password/reset"
+                              name:@"auth_api_password_reset_form"
+                   controllerClass:[ALNAuthModuleController class]
+                             action:@"resetPasswordForm"];
   [application registerRouteMethod:@"POST"
                               path:@"/password/reset"
                               name:@"auth_api_password_reset"
@@ -2114,6 +2696,15 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
           @"password" : @{ @"type" : @"string", @"source" : @"body" },
         },
         @"required" : @[ @"token", @"password" ],
+      },
+      @"response" : @{ @"type" : @"object" },
+    },
+    @"auth_api_password_reset_form" : @{
+      @"request" : @{
+        @"type" : @"object",
+        @"properties" : @{
+          @"token" : @{ @"type" : @"string", @"source" : @"query" },
+        },
       },
       @"response" : @{ @"type" : @"object" },
     },

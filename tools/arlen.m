@@ -75,6 +75,7 @@ static void PrintModuleUsage(void) {
           "  doctor [--env <name>] [--json]\n"
           "  migrate [--env <name>] [--database <target>] [--dsn <connection_string>] [--dry-run] [--json]\n"
           "  assets [--output-dir <path>] [--json]\n"
+          "  eject auth-ui [--force] [--json]\n"
           "  upgrade <name> --source <path> [--force] [--json]\n");
 }
 
@@ -520,6 +521,93 @@ static NSDictionary *ModuleJSONDictionary(ALNModuleDefinition *definition, NSStr
 
 static NSDictionary *LoadRawConfigForModuleCommand(NSString *appRoot, NSString *environment, NSError **error) {
   return [ALNConfig loadConfigAtRoot:appRoot environment:environment includeModules:NO error:error];
+}
+
+static NSString *ReadUTF8File(NSString *path, NSError **error) {
+  NSData *data = [NSData dataWithContentsOfFile:path options:0 error:error];
+  if (data == nil) {
+    return nil;
+  }
+  NSString *content = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
+  if (content == nil && error != NULL) {
+    *error = [NSError errorWithDomain:@"Arlen.Error"
+                                 code:15
+                             userInfo:@{
+                               NSLocalizedDescriptionKey :
+                                   [NSString stringWithFormat:@"failed decoding UTF-8 file: %@", path ?: @""]
+                             }];
+  }
+  return content;
+}
+
+static BOOL CopyUTF8TextFile(NSString *sourcePath,
+                             NSString *destinationPath,
+                             BOOL force,
+                             NSString **status,
+                             NSError **error) {
+  BOOL existed = [[NSFileManager defaultManager] fileExistsAtPath:destinationPath];
+  NSString *content = ReadUTF8File(sourcePath, error);
+  if (content == nil) {
+    return NO;
+  }
+  if (!WriteTextFile(destinationPath, content, force, error)) {
+    return NO;
+  }
+  if (status != NULL) {
+    *status = existed ? @"updated" : @"created";
+  }
+  return YES;
+}
+
+static BOOL ConfigureGeneratedAuthUIAtAppRoot(NSString *appRoot,
+                                              NSString *layoutName,
+                                              NSString *pagePrefix,
+                                              NSError **error) {
+  NSString *configPath = [appRoot stringByAppendingPathComponent:@"config/app.plist"];
+  NSData *data = [NSData dataWithContentsOfFile:configPath options:0 error:error];
+  if (data == nil) {
+    return NO;
+  }
+
+  NSPropertyListFormat format = NSPropertyListOpenStepFormat;
+  id parsed = [NSPropertyListSerialization propertyListWithData:data
+                                                        options:NSPropertyListMutableContainersAndLeaves
+                                                         format:&format
+                                                          error:error];
+  if (![parsed isKindOfClass:[NSMutableDictionary class]]) {
+    if (error != NULL && *error == nil) {
+      *error = [NSError errorWithDomain:@"Arlen.Error"
+                                   code:16
+                               userInfo:@{
+                                 NSLocalizedDescriptionKey : @"config/app.plist must be a dictionary"
+                               }];
+    }
+    return NO;
+  }
+
+  NSMutableDictionary *config = parsed;
+  NSMutableDictionary *authModule = [config[@"authModule"] isKindOfClass:[NSMutableDictionary class]]
+                                        ? config[@"authModule"]
+                                        : [NSMutableDictionary dictionaryWithDictionary:
+                                              ([config[@"authModule"] isKindOfClass:[NSDictionary class]] ? config[@"authModule"] : @{})];
+  NSMutableDictionary *ui = [authModule[@"ui"] isKindOfClass:[NSMutableDictionary class]]
+                                ? authModule[@"ui"]
+                                : [NSMutableDictionary dictionaryWithDictionary:
+                                      ([authModule[@"ui"] isKindOfClass:[NSDictionary class]] ? authModule[@"ui"] : @{})];
+  ui[@"mode"] = @"generated-app-ui";
+  ui[@"layout"] = [Trimmed(layoutName) length] > 0 ? Trimmed(layoutName) : @"layouts/auth_generated";
+  ui[@"generatedPagePrefix"] = [Trimmed(pagePrefix) length] > 0 ? Trimmed(pagePrefix) : @"auth";
+  authModule[@"ui"] = ui;
+  config[@"authModule"] = authModule;
+
+  NSData *serialized = [NSPropertyListSerialization dataWithPropertyList:config
+                                                                   format:NSPropertyListOpenStepFormat
+                                                                  options:0
+                                                                    error:error];
+  if (serialized == nil) {
+    return NO;
+  }
+  return [serialized writeToFile:configPath options:NSDataWritingAtomic error:error];
 }
 
 static BOOL ScaffoldFullApp(NSString *root, BOOL force, NSError **error) {
@@ -4105,6 +4193,212 @@ static int CommandModuleAssets(NSArray *args) {
   return 0;
 }
 
+static int CommandModuleEject(NSArray *args) {
+  BOOL asJSON = ArgsContainFlag(args, @"--json");
+  BOOL force = NO;
+  NSString *target = nil;
+
+  for (NSUInteger idx = 0; idx < [args count]; idx++) {
+    NSString *arg = args[idx];
+    if ([arg isEqualToString:@"--force"]) {
+      force = YES;
+    } else if ([arg isEqualToString:@"--json"]) {
+      asJSON = YES;
+    } else if ([arg isEqualToString:@"--help"] || [arg isEqualToString:@"-h"]) {
+      PrintModuleUsage();
+      return 0;
+    } else if ([arg hasPrefix:@"-"]) {
+      return asJSON ? EmitMachineError(@"module", @"eject", @"unknown_option",
+                                       [NSString stringWithFormat:@"unknown option %@", arg ?: @""],
+                                       @"Use only supported flags for `arlen module eject`.",
+                                       @"arlen module eject auth-ui --json", 2)
+                    : 2;
+    } else if (target == nil) {
+      target = arg;
+    } else {
+      return asJSON ? EmitMachineError(@"module", @"eject", @"unexpected_argument",
+                                       [NSString stringWithFormat:@"unexpected argument %@", arg ?: @""],
+                                       @"Pass only one eject target.",
+                                       @"arlen module eject auth-ui --json", 2)
+                    : 2;
+    }
+  }
+
+  if (![target isEqualToString:@"auth-ui"]) {
+    return asJSON ? EmitMachineError(@"module", @"eject", @"unsupported_target",
+                                     @"arlen module eject currently supports only `auth-ui`",
+                                     @"Use `arlen module eject auth-ui`.",
+                                     @"arlen module eject auth-ui --json", 2)
+                  : 2;
+  }
+
+  NSString *appRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *frameworkRoot = EnvValue("ARLEN_FRAMEWORK_ROOT");
+  if ([frameworkRoot length] == 0) {
+    frameworkRoot = FindFrameworkRoot(appRoot);
+  }
+  NSString *moduleRoot = [appRoot stringByAppendingPathComponent:@"modules/auth"];
+  BOOL isDirectory = NO;
+  if (![[NSFileManager defaultManager] fileExistsAtPath:moduleRoot isDirectory:&isDirectory] || !isDirectory) {
+    moduleRoot = ResolveModuleSourcePath(appRoot, frameworkRoot ?: @"", @"auth", nil);
+  }
+  if ([moduleRoot length] == 0) {
+    return asJSON ? EmitMachineError(@"module", @"eject", @"module_source_not_found",
+                                     @"unable to resolve auth module source for auth-ui eject",
+                                     @"Install the auth module first or set ARLEN_FRAMEWORK_ROOT.",
+                                     @"arlen module add auth --json", 1)
+                  : 1;
+  }
+
+  NSArray<NSDictionary *> *mappings = @[
+    @{
+      @"source" : @"Resources/Templates/login/index.html.eoc",
+      @"destination" : @"templates/auth/login.html.eoc",
+    },
+    @{
+      @"source" : @"Resources/Templates/register/index.html.eoc",
+      @"destination" : @"templates/auth/register.html.eoc",
+    },
+    @{
+      @"source" : @"Resources/Templates/password/forgot.html.eoc",
+      @"destination" : @"templates/auth/password/forgot.html.eoc",
+    },
+    @{
+      @"source" : @"Resources/Templates/password/reset.html.eoc",
+      @"destination" : @"templates/auth/password/reset.html.eoc",
+    },
+    @{
+      @"source" : @"Resources/Templates/mfa/totp.html.eoc",
+      @"destination" : @"templates/auth/mfa/totp.html.eoc",
+    },
+    @{
+      @"source" : @"Resources/Templates/result/index.html.eoc",
+      @"destination" : @"templates/auth/result.html.eoc",
+    },
+    @{
+      @"source" : @"Resources/Templates/partials/page_wrapper.html.eoc",
+      @"destination" : @"templates/auth/partials/page_wrapper.html.eoc",
+    },
+    @{
+      @"source" : @"Resources/Templates/partials/message_block.html.eoc",
+      @"destination" : @"templates/auth/partials/message_block.html.eoc",
+    },
+    @{
+      @"source" : @"Resources/Templates/partials/error_block.html.eoc",
+      @"destination" : @"templates/auth/partials/error_block.html.eoc",
+    },
+    @{
+      @"source" : @"Resources/Templates/partials/form_shell.html.eoc",
+      @"destination" : @"templates/auth/partials/form_shell.html.eoc",
+    },
+    @{
+      @"source" : @"Resources/Templates/partials/field_row.html.eoc",
+      @"destination" : @"templates/auth/partials/field_row.html.eoc",
+    },
+    @{
+      @"source" : @"Resources/Templates/partials/provider_row.html.eoc",
+      @"destination" : @"templates/auth/partials/provider_row.html.eoc",
+    },
+    @{
+      @"source" : @"Resources/Templates/partials/result_actions.html.eoc",
+      @"destination" : @"templates/auth/partials/result_actions.html.eoc",
+    },
+    @{
+      @"source" : @"Resources/Templates/partials/bodies/login_body.html.eoc",
+      @"destination" : @"templates/auth/partials/bodies/login_body.html.eoc",
+    },
+    @{
+      @"source" : @"Resources/Templates/partials/bodies/register_body.html.eoc",
+      @"destination" : @"templates/auth/partials/bodies/register_body.html.eoc",
+    },
+    @{
+      @"source" : @"Resources/Templates/partials/bodies/forgot_password_body.html.eoc",
+      @"destination" : @"templates/auth/partials/bodies/forgot_password_body.html.eoc",
+    },
+    @{
+      @"source" : @"Resources/Templates/partials/bodies/reset_password_body.html.eoc",
+      @"destination" : @"templates/auth/partials/bodies/reset_password_body.html.eoc",
+    },
+    @{
+      @"source" : @"Resources/Templates/partials/bodies/totp_challenge_body.html.eoc",
+      @"destination" : @"templates/auth/partials/bodies/totp_challenge_body.html.eoc",
+    },
+    @{
+      @"source" : @"Resources/Templates/partials/bodies/result_body.html.eoc",
+      @"destination" : @"templates/auth/partials/bodies/result_body.html.eoc",
+    },
+    @{
+      @"source" : @"Resources/Templates/layouts/main.html.eoc",
+      @"destination" : @"templates/layouts/auth_generated.html.eoc",
+    },
+    @{
+      @"source" : @"Resources/Public/auth.css",
+      @"destination" : @"public/auth/auth.css",
+    },
+  ];
+
+  NSMutableArray *createdFiles = [NSMutableArray array];
+  NSMutableArray *updatedFiles = [NSMutableArray array];
+  NSError *error = nil;
+  for (NSDictionary *mapping in mappings) {
+    NSString *sourcePath = [moduleRoot stringByAppendingPathComponent:mapping[@"source"] ?: @""];
+    NSString *destinationPath = [appRoot stringByAppendingPathComponent:mapping[@"destination"] ?: @""];
+    NSString *status = nil;
+    if (!CopyUTF8TextFile(sourcePath, destinationPath, force, &status, &error)) {
+      return asJSON ? EmitMachineError(@"module", @"eject", @"file_copy_failed",
+                                       error.localizedDescription ?: @"failed copying auth-ui scaffold file",
+                                       @"Use --force to overwrite existing files or remove conflicting files.",
+                                       @"arlen module eject auth-ui --force --json", 1)
+                    : 1;
+    }
+    NSString *relative = RelativePathFromRoot(appRoot, destinationPath);
+    if ([status isEqualToString:@"updated"]) {
+      [updatedFiles addObject:relative ?: destinationPath];
+    } else {
+      [createdFiles addObject:relative ?: destinationPath];
+    }
+  }
+
+  if (!ConfigureGeneratedAuthUIAtAppRoot(appRoot, @"layouts/auth_generated", @"auth", &error)) {
+    return asJSON ? EmitMachineError(@"module", @"eject", @"config_update_failed",
+                                     error.localizedDescription ?: @"failed updating config/app.plist",
+                                     @"Inspect config/app.plist and retry.",
+                                     @"arlen module eject auth-ui --json", 1)
+                  : 1;
+  }
+  [updatedFiles addObject:@"config/app.plist"];
+
+  NSArray *nextSteps = @[
+    @"Edit templates/auth/... to own the auth presentation while keeping the module backend routes.",
+    @"Run boomhauer and verify /auth/login still boots under generated-app-ui mode.",
+    @"Adjust authModule.ui.layout if you want a different app-owned guest shell.",
+  ];
+
+  if (asJSON) {
+    NSDictionary *payload = @{
+      @"version" : AgentContractVersion(),
+      @"command" : @"module",
+      @"workflow" : @"eject",
+      @"status" : @"ok",
+      @"target" : @"auth-ui",
+      @"created_files" : createdFiles ?: @[],
+      @"updated_files" : updatedFiles ?: @[],
+      @"next_steps" : nextSteps,
+    };
+    PrintJSONPayload(stdout, payload);
+    return 0;
+  }
+
+  fprintf(stdout, "Ejected auth-ui templates into the app tree.\n");
+  for (NSString *path in createdFiles) {
+    fprintf(stdout, "  created %s\n", [path UTF8String]);
+  }
+  for (NSString *path in updatedFiles) {
+    fprintf(stdout, "  updated %s\n", [path UTF8String]);
+  }
+  return 0;
+}
+
 static int CommandModuleMigrate(NSArray *args) {
   BOOL asJSON = ArgsContainFlag(args, @"--json");
   NSString *environment = @"development";
@@ -4281,6 +4575,9 @@ static int CommandModule(NSArray *args) {
   }
   if ([subcommand isEqualToString:@"assets"]) {
     return CommandModuleAssets(subArgs);
+  }
+  if ([subcommand isEqualToString:@"eject"]) {
+    return CommandModuleEject(subArgs);
   }
   if ([subcommand isEqualToString:@"upgrade"]) {
     return CommandModuleAddOrUpgrade(subArgs, YES);

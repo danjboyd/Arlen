@@ -211,7 +211,10 @@
   XCTAssertNil(error);
   XCTAssertEqualObjects(@1, workerSummary[@"acknowledgedCount"]);
 
-  XCTAssertEqual((NSUInteger)1, [[runtime outboxSnapshot] count]);
+  NSArray<NSDictionary *> *outbox = [runtime outboxSnapshot];
+  XCTAssertEqual((NSUInteger)2, [outbox count]);
+  XCTAssertEqualObjects(@"email", outbox[0][@"channel"]);
+  XCTAssertEqualObjects(@"in_app", outbox[1][@"channel"]);
   XCTAssertEqual((NSUInteger)1, [[runtime inboxSnapshotForRecipient:@"user-1"] count]);
   XCTAssertEqual((NSUInteger)1, [[app.mailAdapter deliveriesSnapshot] count]);
 }

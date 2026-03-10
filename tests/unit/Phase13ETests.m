@@ -2,6 +2,8 @@
 #import <XCTest/XCTest.h>
 
 #import <stdlib.h>
+#import <string.h>
+#import <unistd.h>
 
 #import "ALNApplication.h"
 #import "ALNAuthModule.h"
@@ -11,6 +13,7 @@ static NSUInteger gPhase13EPasswordPolicyCalls = 0;
 static NSUInteger gPhase13EProvisioningCalls = 0;
 static NSUInteger gPhase13ESessionDescriptorCalls = 0;
 static NSUInteger gPhase13EPostLoginRedirectCalls = 0;
+static NSUInteger gPhase15UIContextCalls = 0;
 
 @interface Phase13EPasswordPolicyHook : NSObject <ALNAuthModulePasswordPolicy>
 @end
@@ -72,6 +75,36 @@ static NSUInteger gPhase13EPostLoginRedirectCalls = 0;
 
 @end
 
+@interface Phase15UIContextHook : NSObject <ALNAuthModuleUIContextHook>
+@end
+
+@implementation Phase15UIContextHook
+
+- (NSString *)authModuleUILayoutForPage:(NSString *)pageIdentifier
+                          defaultLayout:(NSString *)defaultLayout
+                                context:(ALNContext *)context {
+  (void)defaultLayout;
+  (void)context;
+  if ([pageIdentifier isEqualToString:@"login"]) {
+    return @"layouts/test_guest";
+  }
+  return nil;
+}
+
+- (NSDictionary *)authModuleUIContextForPage:(NSString *)pageIdentifier
+                              defaultContext:(NSDictionary *)defaultContext
+                                     context:(ALNContext *)context {
+  (void)defaultContext;
+  (void)context;
+  gPhase15UIContextCalls += 1;
+  return @{
+    @"phase15_page" : pageIdentifier ?: @"",
+    @"brand_name" : @"Phase15 Brand",
+  };
+}
+
+@end
+
 @interface Phase13ETests : XCTestCase
 @end
 
@@ -106,12 +139,67 @@ static NSUInteger gPhase13EPostLoginRedirectCalls = 0;
   return [[ALNApplication alloc] initWithConfig:config];
 }
 
+- (NSString *)repoRoot {
+  return [[NSFileManager defaultManager] currentDirectoryPath];
+}
+
+- (NSString *)shellQuoted:(NSString *)value {
+  NSString *string = value ?: @"";
+  return [NSString stringWithFormat:@"'%@'", [string stringByReplacingOccurrencesOfString:@"'" withString:@"'\"'\"'"]];
+}
+
+- (NSString *)createTempDirectoryWithPrefix:(NSString *)prefix {
+  NSString *templatePath =
+      [NSTemporaryDirectory() stringByAppendingPathComponent:[NSString stringWithFormat:@"%@-XXXXXX", prefix ?: @"phase15"]];
+  char *buffer = strdup([templatePath fileSystemRepresentation]);
+  char *created = mkdtemp(buffer);
+  NSString *result = created ? [[NSFileManager defaultManager] stringWithFileSystemRepresentation:created
+                                                                                             length:strlen(created)]
+                             : nil;
+  free(buffer);
+  return result;
+}
+
+- (NSString *)runShellCapture:(NSString *)command exitCode:(int *)exitCode {
+  NSTask *task = [[NSTask alloc] init];
+  task.launchPath = @"/bin/bash";
+  task.arguments = @[ @"-lc", command ?: @"" ];
+  NSPipe *stdoutPipe = [NSPipe pipe];
+  NSPipe *stderrPipe = [NSPipe pipe];
+  task.standardOutput = stdoutPipe;
+  task.standardError = stderrPipe;
+  [task launch];
+  [task waitUntilExit];
+  if (exitCode != NULL) {
+    *exitCode = task.terminationStatus;
+  }
+  NSData *stdoutData = [[stdoutPipe fileHandleForReading] readDataToEndOfFile];
+  NSData *stderrData = [[stderrPipe fileHandleForReading] readDataToEndOfFile];
+  NSMutableData *combined = [NSMutableData dataWithData:stdoutData ?: [NSData data]];
+  if ([stderrData length] > 0) {
+    [combined appendData:stderrData];
+  }
+  NSString *output = [[NSString alloc] initWithData:combined encoding:NSUTF8StringEncoding];
+  return output ?: @"";
+}
+
+- (NSDictionary *)parseJSONDictionary:(NSString *)output {
+  NSString *trimmed = [output stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+  NSData *data = [trimmed dataUsingEncoding:NSUTF8StringEncoding];
+  NSError *error = nil;
+  NSDictionary *payload = [NSJSONSerialization JSONObjectWithData:data options:0 error:&error];
+  XCTAssertNil(error, @"invalid JSON: %@\n%@", error.localizedDescription, output);
+  XCTAssertTrue([payload isKindOfClass:[NSDictionary class]]);
+  return payload ?: @{};
+}
+
 - (void)setUp {
   [super setUp];
   gPhase13EPasswordPolicyCalls = 0;
   gPhase13EProvisioningCalls = 0;
   gPhase13ESessionDescriptorCalls = 0;
   gPhase13EPostLoginRedirectCalls = 0;
+  gPhase15UIContextCalls = 0;
   NSError *error = nil;
   XCTAssertTrue([[ALNAuthModuleRuntime sharedRuntime] configureHooksWithModuleConfig:@{} error:&error]);
   XCTAssertNil(error);
@@ -147,6 +235,9 @@ static NSUInteger gPhase13EPostLoginRedirectCalls = 0;
                          @"apiLoginPath" : @"/auth/api/provider/stub/login",
                        } ]),
                        summary[@"loginProviders"]);
+  XCTAssertEqualObjects(@"module-ui", summary[@"ui"][@"mode"]);
+  XCTAssertEqualObjects(@"modules/auth/layouts/main", summary[@"ui"][@"layout"]);
+  XCTAssertEqualObjects(@"auth", summary[@"ui"][@"generatedPagePrefix"]);
   XCTAssertEqualObjects(@"", summary[@"passwordPolicy"]);
   XCTAssertEqualObjects(@"", summary[@"userProvisioning"]);
   XCTAssertEqualObjects(@"", summary[@"sessionPolicy"]);
@@ -248,6 +339,48 @@ static NSUInteger gPhase13EPostLoginRedirectCalls = 0;
   XCTAssertEqualObjects((@[]), [runtime resolvedHookSummary][@"loginProviders"]);
 }
 
+- (void)testAuthUIConfigurationResolvesGeneratedPathsAndContextHooks {
+  ALNAuthModuleRuntime *runtime = [ALNAuthModuleRuntime sharedRuntime];
+  NSError *error = nil;
+  NSDictionary *config = @{
+    @"ui" : @{
+      @"mode" : @"generated-app-ui",
+      @"layout" : @"layouts/guest",
+      @"generatedPagePrefix" : @"accounts/auth",
+      @"partials" : @{
+        @"pageWrapper" : @"auth/partials/custom_page_wrapper",
+      },
+      @"contextClass" : @"Phase15UIContextHook",
+    },
+  };
+  XCTAssertTrue([runtime configureHooksWithModuleConfig:config error:&error]);
+  XCTAssertNil(error);
+
+  XCTAssertEqualObjects(@"generated-app-ui", runtime.uiMode);
+  XCTAssertEqualObjects(@"layouts/guest", runtime.layoutTemplate);
+  XCTAssertEqualObjects(@"accounts/auth", runtime.generatedPagePrefix);
+  XCTAssertFalse([runtime isHeadlessUIMode]);
+  XCTAssertEqualObjects(@"accounts/auth/login", [runtime pageTemplatePathForIdentifier:@"login" defaultPath:@""]);
+  XCTAssertEqualObjects(@"accounts/auth/password/reset",
+                        [runtime pageTemplatePathForIdentifier:@"reset_password" defaultPath:@""]);
+  XCTAssertEqualObjects(@"accounts/auth/partials/bodies/login_body",
+                        [runtime bodyTemplatePathForIdentifier:@"login" defaultPath:@""]);
+  XCTAssertEqualObjects(@"auth/partials/custom_page_wrapper",
+                        [runtime partialTemplatePathForIdentifier:@"page_wrapper" defaultPath:@""]);
+  XCTAssertEqualObjects(@"accounts/auth/partials/provider_row",
+                        [runtime partialTemplatePathForIdentifier:@"provider_row" defaultPath:@""]);
+
+  ALNContext *fakeContext = (ALNContext *)(id)[NSObject new];
+  XCTAssertEqualObjects(@"layouts/test_guest", [runtime layoutTemplateForPage:@"login" context:fakeContext]);
+  NSDictionary *uiContext = [runtime uiContextForPage:@"login"
+                                       defaultContext:@{ @"existing" : @"ok" }
+                                              context:fakeContext];
+  XCTAssertEqualObjects(@"ok", uiContext[@"existing"]);
+  XCTAssertEqualObjects(@"login", uiContext[@"phase15_page"]);
+  XCTAssertEqualObjects(@"Phase15 Brand", uiContext[@"brand_name"]);
+  XCTAssertEqual((NSUInteger)1, gPhase15UIContextCalls);
+}
+
 - (void)testDisabledProviderIsNotRegisteredAsRoute {
   if ([[self pgTestDSN] length] == 0) {
     return;
@@ -271,6 +404,79 @@ static NSUInteger gPhase13EPostLoginRedirectCalls = 0;
   XCTAssertNil([app.router routeNamed:@"auth_api_provider_stub_login"]);
   XCTAssertNil([app.router routeNamed:@"auth_api_provider_stub_authorize"]);
   XCTAssertNil([app.router routeNamed:@"auth_api_provider_stub_callback"]);
+}
+
+- (void)testHeadlessModeDoesNotRegisterInteractiveHTMLRoutes {
+  if ([[self pgTestDSN] length] == 0) {
+    return;
+  }
+  ALNApplication *app = [self applicationWithConfig:@{
+    @"authModule" : @{
+      @"ui" : @{
+        @"mode" : @"headless",
+      },
+    },
+  }];
+  NSError *error = nil;
+  XCTAssertTrue([[[ALNAuthModule alloc] init] registerWithApplication:app error:&error]);
+  XCTAssertNil(error);
+
+  XCTAssertNil([app.router routeNamed:@"auth_login_form"]);
+  XCTAssertNil([app.router routeNamed:@"auth_register_form"]);
+  XCTAssertNil([app.router routeNamed:@"auth_password_forgot_form"]);
+  XCTAssertNil([app.router routeNamed:@"auth_password_reset_form"]);
+  XCTAssertNil([app.router routeNamed:@"auth_totp_form"]);
+
+  XCTAssertNotNil([app.router routeNamed:@"auth_login"]);
+  XCTAssertNotNil([app.router routeNamed:@"auth_register"]);
+  XCTAssertNotNil([app.router routeNamed:@"auth_session"]);
+  XCTAssertNotNil([app.router routeNamed:@"auth_verify"]);
+  XCTAssertNotNil([app.router routeNamed:@"auth_api_password_reset_form"]);
+}
+
+- (void)testModuleEjectAuthUIScaffoldsGeneratedTemplatesAndConfig {
+  NSString *repoRoot = [self repoRoot];
+  NSString *tempApp = [self createTempDirectoryWithPrefix:@"phase15-auth-eject"];
+  XCTAssertNotNil(tempApp);
+
+  NSError *error = nil;
+  XCTAssertTrue([[NSFileManager defaultManager] createDirectoryAtPath:[tempApp stringByAppendingPathComponent:@"config"]
+                                          withIntermediateDirectories:YES
+                                                           attributes:nil
+                                                                error:&error]);
+  XCTAssertNil(error);
+  XCTAssertTrue([@"{}\n" writeToFile:[tempApp stringByAppendingPathComponent:@"config/app.plist"]
+                          atomically:YES
+                            encoding:NSUTF8StringEncoding
+                               error:&error]);
+  XCTAssertNil(error);
+
+  NSString *command = [NSString stringWithFormat:@"cd %@ && source /usr/GNUstep/System/Library/Makefiles/GNUstep.sh && rm -f build/arlen && make arlen >/dev/null && cd %@ && ARLEN_FRAMEWORK_ROOT=%@ %@ module eject auth-ui --json",
+                                                 [self shellQuoted:repoRoot],
+                                                 [self shellQuoted:tempApp],
+                                                 [self shellQuoted:repoRoot],
+                                                 [self shellQuoted:[repoRoot stringByAppendingPathComponent:@"build/arlen"]]];
+  int exitCode = 0;
+  NSString *output = [self runShellCapture:command exitCode:&exitCode];
+  XCTAssertEqual(0, exitCode, @"%@", output);
+
+  NSDictionary *payload = [self parseJSONDictionary:output];
+  XCTAssertEqualObjects(@"ok", payload[@"status"]);
+  XCTAssertEqualObjects(@"eject", payload[@"workflow"]);
+  XCTAssertEqualObjects(@"auth-ui", payload[@"target"]);
+  XCTAssertTrue([payload[@"created_files"] containsObject:@"templates/auth/login.html.eoc"]);
+  XCTAssertTrue([payload[@"created_files"] containsObject:@"public/auth/auth.css"]);
+  XCTAssertTrue([payload[@"updated_files"] containsObject:@"config/app.plist"]);
+
+  NSString *configText = [NSString stringWithContentsOfFile:[tempApp stringByAppendingPathComponent:@"config/app.plist"]
+                                                   encoding:NSUTF8StringEncoding
+                                                      error:&error];
+  XCTAssertNil(error);
+  XCTAssertTrue([configText containsString:@"generated-app-ui"]);
+  XCTAssertTrue([configText containsString:@"layouts/auth_generated"]);
+  XCTAssertTrue([configText containsString:@"generatedPagePrefix = auth"]);
+  XCTAssertTrue([[NSFileManager defaultManager] fileExistsAtPath:[tempApp stringByAppendingPathComponent:@"templates/auth/partials/page_wrapper.html.eoc"]]);
+  XCTAssertTrue([[NSFileManager defaultManager] fileExistsAtPath:[tempApp stringByAppendingPathComponent:@"templates/layouts/auth_generated.html.eoc"]]);
 }
 
 @end

@@ -1,7 +1,7 @@
 # Arlen Phase 2 + Phase 3 Roadmap Index
 
-Status: Active (Phase 2A-2D complete; Phase 3A-3H complete; Phase 4A-4E complete; Phase 5A-5E complete; Phase 7A/7B/7C/7D/7E/7F/7G/7H initial slices implemented; Phase 7 follow-on active; Phase 8A complete; Phase 8B complete; Phase 9A/9B/9C/9D/9E/9F/9G/9H/9I/9J complete; Phase 10 complete with 10A-10M delivered; Phase 11 complete with 11A-11F delivered; Phase 12 complete with 12A-12F delivered; Phase 13 complete with 13A-13I delivered; Phase 14 active with 14A/14B/14C delivered)
-Last updated: 2026-03-09
+Status: Active (Phase 2A-2D complete; Phase 3A-3H complete; Phase 4A-4E complete; Phase 5A-5E complete; Phase 7A/7B/7C/7D/7E/7F/7G/7H initial slices implemented; Phase 7 follow-on active; Phase 8A complete; Phase 8B complete; Phase 9A/9B/9C/9D/9E/9F/9G/9H/9I/9J complete; Phase 10 complete with 10A-10M delivered; Phase 11 complete with 11A-11F delivered; Phase 12 complete with 12A-12F delivered; Phase 13 complete with 13A-13I delivered; Phase 14 complete with 14A-14I delivered; Phase 15 complete with 15A-15E delivered)
+Last updated: 2026-03-10
 
 This index points to the current roadmap documents:
 
@@ -188,11 +188,25 @@ Phase 14 execution is defined in `docs/PHASE14_ROADMAP.md`, with current deliver
   - scheduler execution, dead-letter replay, leased-job inspection, and default-queue pause/resume flows through the shared worker contract
 - Phase 14C complete:
   - first-party `notifications` foundation on top of mail + jobs with `/notifications/api` queue/definitions/outbox/inbox routes
-- remaining 14D-14I:
-  - richer notifications product surfaces
-- first-party `storage` productization on top of attachment/upload contracts
-- first-party `ops` productization of protected dashboards and JSON runtime diagnostics
-- first-party `search` productization with database-first indexing and admin integration
+- Phase 14D complete:
+  - notifications inbox/outbox/preferences plus preview/test-send and shared admin resources
+- Phase 14E complete:
+  - first-party `storage` foundation with signed upload/download tokens and deterministic collection registration
+- Phase 14F complete:
+  - direct-upload, variant processing, storage-management HTML/JSON surfaces, and shared admin resource integration
+- Phase 14G complete:
+  - first-party `ops` dashboard and `/ops/api` runtime diagnostics/OpenAPI summary surface
+- Phase 14H complete:
+  - first-party `search` module with job-backed reindexing, admin auto-resource indexing, and ops/admin visibility
+- Phase 14I complete:
+  - sample app, module docs, and `make phase14-confidence` artifact gate
+
+Phase 15 execution is defined in `docs/PHASE15_ROADMAP.md`, with current delivery state:
+
+- explicit `headless`, `module-ui`, and `generated-app-ui` auth UI ownership modes shipped
+- app-owned guest-shell layout/context hook and partial override model shipped
+- `arlen module eject auth-ui --json` shipped for `generated-app-ui`
+- docs, examples, focused HTTP coverage, and `make phase15-confidence` shipped
 
 Scope guardrails remain unchanged:
 - admin/backoffice and full account-product surfaces remain outside Arlen core and are expected to ship as optional modules/products.

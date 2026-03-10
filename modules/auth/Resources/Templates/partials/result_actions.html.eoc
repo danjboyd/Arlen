@@ -1,0 +1,8 @@
+<% NSArray *actions = [ctx objectForKey:@"authResultActions"] ?: @[]; %>
+<% if ([actions count] > 0) { %>
+  <div class="auth-actions">
+  <% for (NSDictionary *action in actions) { %>
+    <a class="auth-link" href="<%= [action objectForKey:@"href"] ?: @"" %>"><%= [action objectForKey:@"label"] ?: @"Continue" %></a>
+  <% } %>
+  </div>
+<% } %>

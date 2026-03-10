@@ -1,0 +1,3 @@
+<% if ([[ctx objectForKey:@"message"] length] > 0) { %>
+  <p class="auth-note"><%= [ctx objectForKey:@"message"] %></p>
+<% } %>

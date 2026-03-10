@@ -23,6 +23,9 @@ Modules are:
 ./build/arlen module add admin-ui --json
 ./build/arlen module add jobs --json
 ./build/arlen module add notifications --json
+./build/arlen module add storage --json
+./build/arlen module add ops --json
+./build/arlen module add search --json
 ./build/arlen module migrate --env development --json
 ```
 
@@ -39,6 +42,9 @@ Current first-party modules in-tree:
 - `admin-ui`
 - `jobs`
 - `notifications`
+- `storage`
+- `ops`
+- `search`
 
 ## Override Model
 
@@ -47,6 +53,7 @@ Apps should customize modules through explicit seams, not by forking internals:
 - config defaults and path overrides
 - hook classes
 - resource provider classes
+- module-owned `adminUI.resourceProviderClass` registration for shared admin surfaces
 - template and asset override precedence
 
 That keeps module upgrades tractable while still letting the app own its product decisions.

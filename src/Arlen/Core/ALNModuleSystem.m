@@ -920,13 +920,15 @@ static NSDictionary *ALNModuleNormalizedDependency(id rawDependency,
 + (NSArray<NSDictionary *> *)doctorDiagnosticsAtAppRoot:(NSString *)appRoot
                                                  config:(NSDictionary *)config
                                                   error:(NSError **)error {
-  NSMutableArray<NSDictionary *> *diagnostics = [NSMutableArray array];
+  NSArray<NSDictionary *> *baseDiagnostics = nil;
   NSError *moduleError = nil;
   NSDictionary *merged = [self configByApplyingModuleDefaultsToConfig:config
                                                               appRoot:appRoot
                                                                strict:NO
-                                                          diagnostics:&diagnostics
+                                                          diagnostics:&baseDiagnostics
                                                                 error:&moduleError];
+  NSMutableArray<NSDictionary *> *diagnostics =
+      [NSMutableArray arrayWithArray:baseDiagnostics ?: @[]];
   if (merged == nil) {
     if (moduleError != nil) {
       ALNModuleAppendDiagnostic(diagnostics,

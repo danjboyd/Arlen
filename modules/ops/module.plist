@@ -1,0 +1,24 @@
+{
+  identifier = "ops";
+  version = "1.0.0";
+  principalClass = "ALNOpsModule";
+  compatibility = {
+    arlenVersion = ">= 0.1.0";
+  };
+  config = {
+    defaults = {
+      opsModule = {
+        paths = {
+          prefix = "/ops";
+          apiPrefix = "/api";
+        };
+        access = {
+          roles = ("operator", "admin");
+          minimumAuthAssuranceLevel = 2;
+        };
+      };
+    };
+    requiredKeys = (
+    );
+  };
+}

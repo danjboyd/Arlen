@@ -1,0 +1,40 @@
+<% NSDictionary *collection = [ctx objectForKey:@"collection"] ?: @{}; %>
+<% NSArray *objects = [ctx objectForKey:@"objects"] ?: @[]; %>
+<% NSString *query = [ctx objectForKey:@"query"] ?: @""; %>
+<section class="storage-panel">
+  <p><%= [collection objectForKey:@"description"] %></p>
+  <p class="storage-note">Accepted: <%= [[collection objectForKey:@"acceptedContentTypes"] componentsJoinedByString:@", "] %></p>
+  <p class="storage-note">Max bytes: <%= [collection objectForKey:@"maxBytes"] %></p>
+</section>
+
+<form class="storage-toolbar" method="get" action="<%= [$storagePrefix stringByAppendingFormat:@"/collections/%@", [collection objectForKey:@"identifier"]] %>">
+  <label>
+    <span>Search</span>
+    <input type="search" name="q" value="<%= query %>" placeholder="name or content type">
+  </label>
+  <button type="submit">Filter</button>
+</form>
+
+<table class="storage-table">
+  <thead>
+    <tr>
+      <th>Name</th>
+      <th>Type</th>
+      <th>Size</th>
+      <th>Visibility</th>
+      <th>Variants</th>
+    </tr>
+  </thead>
+  <tbody>
+    <% for (NSDictionary *object in objects) { %>
+      <% NSDictionary *paths = [object objectForKey:@"paths"] ?: @{}; %>
+      <tr>
+        <td><a href="<%= [paths objectForKey:@"html"] %>"><%= [object objectForKey:@"name"] %></a></td>
+        <td><%= [object objectForKey:@"contentType"] %></td>
+        <td><%= [object objectForKey:@"sizeBytes"] %></td>
+        <td><%= [object objectForKey:@"visibility"] %></td>
+        <td><%= [object objectForKey:@"variantState"] %></td>
+      </tr>
+    <% } %>
+  </tbody>
+</table>

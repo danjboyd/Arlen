@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title><%= $pageTitle ?: @"Arlen Search" %></title>
+    <link rel="stylesheet" href="/modules/search/search.css">
+  </head>
+  <body>
+    <header class="search-shell__header">
+      <div>
+        <p class="search-shell__eyebrow">Arlen</p>
+        <h1 class="search-shell__title"><%= $pageHeading ?: @"Search" %></h1>
+      </div>
+      <nav class="search-shell__nav">
+        <a href="<%= $searchPrefix ?: @"/search" %>">Search</a>
+        <a href="<%= $authLogoutPath ?: @"/auth/logout" %>">Logout</a>
+      </nav>
+    </header>
+    <main class="search-shell__main">
+      <%== $content %>
+    </main>
+  </body>
+</html>

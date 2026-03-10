@@ -62,6 +62,16 @@ typedef NS_ENUM(NSInteger, ALNAuthModuleErrorCode) {
                                                                (NSDictionary *)defaultDescriptor;
 @end
 
+@protocol ALNAuthModuleUIContextHook <NSObject>
+@optional
+- (nullable NSString *)authModuleUILayoutForPage:(NSString *)pageIdentifier
+                                   defaultLayout:(NSString *)defaultLayout
+                                         context:(ALNContext *)context;
+- (nullable NSDictionary *)authModuleUIContextForPage:(NSString *)pageIdentifier
+                                       defaultContext:(NSDictionary *)defaultContext
+                                              context:(ALNContext *)context;
+@end
+
 @interface ALNAuthModuleRuntime : NSObject <ALNAuthProviderSessionResolver>
 
 @property(nonatomic, copy, readonly) NSString *prefix;
@@ -81,6 +91,9 @@ typedef NS_ENUM(NSInteger, ALNAuthModuleErrorCode) {
 @property(nonatomic, copy, readonly) NSString *providerStubCallbackPath;
 @property(nonatomic, copy, readonly) NSString *defaultRedirect;
 @property(nonatomic, copy, readonly) NSArray<NSDictionary *> *loginProviders;
+@property(nonatomic, copy, readonly) NSString *uiMode;
+@property(nonatomic, copy, readonly) NSString *layoutTemplate;
+@property(nonatomic, copy, readonly) NSString *generatedPagePrefix;
 
 + (instancetype)sharedRuntime;
 
@@ -103,7 +116,19 @@ typedef NS_ENUM(NSInteger, ALNAuthModuleErrorCode) {
 - (NSString *)postLoginRedirectForContext:(ALNContext *)context
                                      user:(NSDictionary *)user
                           defaultRedirect:(NSString *)defaultRedirect;
+- (BOOL)isHeadlessUIMode;
 - (BOOL)isProviderEnabled:(NSString *)identifier;
+- (NSString *)pageTemplatePathForIdentifier:(NSString *)pageIdentifier
+                                defaultPath:(NSString *)defaultPath;
+- (NSString *)bodyTemplatePathForIdentifier:(NSString *)pageIdentifier
+                                defaultPath:(NSString *)defaultPath;
+- (NSString *)partialTemplatePathForIdentifier:(NSString *)partialIdentifier
+                                   defaultPath:(NSString *)defaultPath;
+- (NSString *)layoutTemplateForPage:(NSString *)pageIdentifier
+                            context:(ALNContext *)context;
+- (NSDictionary *)uiContextForPage:(NSString *)pageIdentifier
+                    defaultContext:(NSDictionary *)defaultContext
+                           context:(ALNContext *)context;
 - (nullable NSDictionary *)currentUserForSubject:(NSString *)subject
                                            error:(NSError *_Nullable *_Nullable)error;
 - (nullable NSDictionary *)currentUserForContext:(ALNContext *)context

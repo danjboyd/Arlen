@@ -1,0 +1,2 @@
+<% NSDictionary *provider = [ctx objectForKey:@"authProvider"] ?: @{}; %>
+<a class="auth-link" href="<%= [provider objectForKey:@"loginPath"] ?: @"" %>"><%= [provider objectForKey:@"ctaLabel"] ?: @"Continue" %></a>

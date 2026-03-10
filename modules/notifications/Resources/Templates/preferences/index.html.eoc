@@ -1,0 +1,28 @@
+<% NSDictionary *preferences = [ctx objectForKey:@"preferences"] ?: @{}; %>
+<form class="notifications-panel" method="post" action="<%= [$notificationsPrefix stringByAppendingString:@"/preferences"] %>">
+  <input type="hidden" name="csrf_token" value="<%= [ctx objectForKey:@"csrfToken"] %>">
+  <p class="notifications-note">Recipient: <code><%= [ctx objectForKey:@"recipient"] ?: @"" %></code></p>
+  <table class="notifications-table">
+    <thead>
+      <tr>
+        <th>Notification</th>
+        <th>Email</th>
+        <th>In-App</th>
+      </tr>
+    </thead>
+    <tbody>
+      <% for (NSDictionary *definition in ([ctx objectForKey:@"definitions"] ?: @[])) { %>
+        <% NSString *identifier = [definition objectForKey:@"identifier"] ?: @""; %>
+        <% NSDictionary *stored = [preferences objectForKey:identifier] ?: @{}; %>
+        <tr>
+          <td><%= [definition objectForKey:@"title"] ?: identifier %></td>
+          <td><input type="checkbox" name="pref__<%= identifier %>__email" value="1" <%= [[[stored objectForKey:@"email"] description] isEqualToString:@"1"] || [[stored objectForKey:@"email"] boolValue] ? @"checked" : @"" %>></td>
+          <td><input type="checkbox" name="pref__<%= identifier %>__in_app" value="1" <%= [[[stored objectForKey:@"in_app"] description] isEqualToString:@"1"] || [[stored objectForKey:@"in_app"] boolValue] ? @"checked" : @"" %>></td>
+        </tr>
+      <% } %>
+    </tbody>
+  </table>
+  <div class="notifications-actions">
+    <button type="submit">Save preferences</button>
+  </div>
+</form>

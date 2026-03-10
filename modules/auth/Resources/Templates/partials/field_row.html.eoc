@@ -1,0 +1,8 @@
+<% NSDictionary *field = [ctx objectForKey:@"authField"] ?: @{}; %>
+<label class="auth-field">
+  <span><%= [field objectForKey:@"label"] ?: @"" %></span>
+  <input type="<%= [field objectForKey:@"type"] ?: @"text" %>"
+         name="<%= [field objectForKey:@"name"] ?: @"" %>"
+         value="<%= [field objectForKey:@"value"] ?: [[ctx objectForKey:@"formData"] objectForKey:[field objectForKey:@"name"]] ?: @"" %>"
+         autocomplete="<%= [field objectForKey:@"autocomplete"] ?: @"" %>">
+</label>

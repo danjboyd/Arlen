@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title><%= $pageTitle ?: @"Arlen Storage" %></title>
+    <link rel="stylesheet" href="/modules/storage/storage.css">
+  </head>
+  <body>
+    <header class="storage-shell__header">
+      <div>
+        <p class="storage-shell__eyebrow">Arlen</p>
+        <h1 class="storage-shell__title"><%= $pageHeading ?: @"Storage" %></h1>
+      </div>
+      <nav class="storage-shell__nav">
+        <a href="<%= $storagePrefix ?: @"/storage" %>">Storage</a>
+        <a href="<%= $authLogoutPath ?: @"/auth/logout" %>">Logout</a>
+      </nav>
+    </header>
+    <main class="storage-shell__main">
+      <%== $content %>
+    </main>
+  </body>
+</html>

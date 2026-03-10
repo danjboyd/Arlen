@@ -1,0 +1,55 @@
+<% NSDictionary *summary = [ctx objectForKey:@"summary"] ?: @{}; %>
+<section class="storage-metric-grid">
+  <% for (NSDictionary *card in ([summary objectForKey:@"cards"] ?: @[])) { %>
+    <article class="storage-metric-card">
+      <p><%= [card objectForKey:@"label"] %></p>
+      <strong><%= [card objectForKey:@"value"] %></strong>
+    </article>
+  <% } %>
+</section>
+
+<section class="storage-panel">
+  <div class="storage-panel-heading">
+    <h3>Collections</h3>
+    <span>Registered storage contracts</span>
+  </div>
+  <div class="storage-resource-grid">
+    <% for (NSDictionary *collection in ([summary objectForKey:@"collections"] ?: @[])) { %>
+      <article class="storage-panel">
+        <h4><a href="<%= [$storagePrefix stringByAppendingFormat:@"/collections/%@", [collection objectForKey:@"identifier"]] %>"><%= [collection objectForKey:@"title"] %></a></h4>
+        <p><%= [collection objectForKey:@"description"] %></p>
+        <p class="storage-note"><%= [[collection objectForKey:@"acceptedContentTypes"] componentsJoinedByString:@", "] %></p>
+      </article>
+    <% } %>
+  </div>
+</section>
+
+<section class="storage-panel">
+  <div class="storage-panel-heading">
+    <h3>Recent Objects</h3>
+    <span>Latest uploads and variant state</span>
+  </div>
+  <table class="storage-table">
+    <thead>
+      <tr>
+        <th>Name</th>
+        <th>Collection</th>
+        <th>Type</th>
+        <th>Size</th>
+        <th>Variants</th>
+      </tr>
+    </thead>
+    <tbody>
+      <% for (NSDictionary *object in ([summary objectForKey:@"recentObjects"] ?: @[])) { %>
+        <% NSDictionary *paths = [object objectForKey:@"paths"] ?: @{}; %>
+        <tr>
+          <td><a href="<%= [paths objectForKey:@"html"] %>"><%= [object objectForKey:@"name"] %></a></td>
+          <td><%= [object objectForKey:@"collection"] %></td>
+          <td><%= [object objectForKey:@"contentType"] %></td>
+          <td><%= [object objectForKey:@"sizeBytes"] %></td>
+          <td><%= [object objectForKey:@"variantState"] %></td>
+        </tr>
+      <% } %>
+    </tbody>
+  </table>
+</section>

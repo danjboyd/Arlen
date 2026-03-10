@@ -1,0 +1,34 @@
+{
+  identifier = "search";
+  version = "1.0.0";
+  principalClass = "ALNSearchModule";
+  dependencies = (
+    { identifier = "jobs"; version = ">= 1.0.0"; }
+  );
+  compatibility = {
+    arlenVersion = ">= 0.1.0";
+  };
+  config = {
+    defaults = {
+      searchModule = {
+        paths = {
+          prefix = "/search";
+          apiPrefix = "/api";
+        };
+        providers = {
+          classes = ();
+        };
+        access = {
+          roles = ("operator", "admin");
+          minimumAuthAssuranceLevel = 2;
+        };
+        adminUI = {
+          autoResources = YES;
+          resourceProviderClass = "ALNSearchAdminResourceProvider";
+        };
+      };
+    };
+    requiredKeys = (
+    );
+  };
+}

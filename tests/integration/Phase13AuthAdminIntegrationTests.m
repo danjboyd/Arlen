@@ -326,6 +326,32 @@
                          "}\n"];
 }
 
+- (BOOL)writeBasicAppAtRoot:(NSString *)appRoot
+               extraClasses:(NSString *)extraClasses
+                   homeText:(NSString *)homeText {
+  NSString *content =
+      [NSString stringWithFormat:@"#import <Foundation/Foundation.h>\n"
+                                 "#import \"ALNAuthModule.h\"\n"
+                                 "#import \"ALNContext.h\"\n"
+                                 "#import \"ALNController.h\"\n"
+                                 "#import \"ArlenServer.h\"\n\n"
+                                 "%@\n"
+                                 "@interface Phase15AuthUIController : ALNController\n"
+                                 "@end\n\n"
+                                 "@implementation Phase15AuthUIController\n"
+                                 "- (id)home:(ALNContext *)ctx { (void)ctx; [self renderText:@\"%@\\n\"]; return nil; }\n"
+                                 "@end\n\n"
+                                 "static void RegisterRoutes(ALNApplication *app) {\n"
+                                 "  [app registerRouteMethod:@\"GET\" path:@\"/\" name:@\"home\" controllerClass:[Phase15AuthUIController class] action:@\"home\"];\n"
+                                 "}\n\n"
+                                 "int main(int argc, const char *argv[]) {\n"
+                                 "  @autoreleasepool { return ALNRunAppMain(argc, argv, &RegisterRoutes); }\n"
+                                 "}\n",
+                                 extraClasses ?: @"",
+                                 homeText ?: @"ok"];
+  return [self writeFile:[appRoot stringByAppendingPathComponent:@"app_lite.m"] content:content];
+}
+
 - (void)testAuthAndAdminModulesInstallMigrateAndServeSharedFlows {
   NSString *dsn = [self pgTestDSN];
   if ([dsn length] == 0) {
@@ -1034,6 +1060,321 @@
                                                  exitCode:&exitCode];
     XCTAssertEqual(0, exitCode);
     XCTAssertEqual((NSInteger)404, [providerAPIStart[@"status"] integerValue]);
+  } @finally {
+    if (server != nil && [server isRunning]) {
+      kill(server.processIdentifier, SIGTERM);
+      [server waitUntilExit];
+    }
+    [[NSFileManager defaultManager] removeItemAtPath:cookieJar error:nil];
+    [[NSFileManager defaultManager] removeItemAtPath:serverLog error:nil];
+    [[NSFileManager defaultManager] removeItemAtPath:appRoot error:nil];
+  }
+}
+
+- (void)testAuthModuleHeadlessModeKeepsAPIAndProviderRoutesWhileSuppressingHTMLPages {
+  NSString *dsn = [self pgTestDSN];
+  if ([dsn length] == 0) {
+    return;
+  }
+
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *quotedRepoRoot = [self shellQuoted:repoRoot];
+  NSString *quotedArlenBinary = [self shellQuoted:[repoRoot stringByAppendingPathComponent:@"build/arlen"]];
+  NSString *quotedBoomhauer = [self shellQuoted:[repoRoot stringByAppendingPathComponent:@"bin/boomhauer"]];
+  NSString *appRoot = [self createTempDirectoryWithPrefix:@"phase15-auth-headless"];
+  NSString *cookieJar = [self createTempFilePathWithPrefix:@"phase15-auth-headless-cookie" suffix:@".txt"];
+  NSString *serverLog = [self createTempFilePathWithPrefix:@"phase15-auth-headless-server" suffix:@".log"];
+  int port = [self randomPort];
+  XCTAssertNotNil(appRoot);
+  if (appRoot == nil) {
+    return;
+  }
+
+  NSTask *server = nil;
+
+  @try {
+    NSString *configContents =
+        [NSString stringWithFormat:@"{\n"
+                                   "  host = \"127.0.0.1\";\n"
+                                   "  port = %d;\n"
+                                   "  session = {\n"
+                                   "    enabled = YES;\n"
+                                   "    secret = \"phase15-auth-headless-session-secret-0123456789abcdef\";\n"
+                                   "  };\n"
+                                   "  csrf = {\n"
+                                   "    enabled = YES;\n"
+                                   "    allowQueryParamFallback = YES;\n"
+                                   "  };\n"
+                                   "  database = {\n"
+                                   "    connectionString = \"%@\";\n"
+                                   "  };\n"
+                                   "  authModule = {\n"
+                                   "    ui = {\n"
+                                   "      mode = \"headless\";\n"
+                                   "    };\n"
+                                   "  };\n"
+                                   "}\n",
+                                   port,
+                                   [dsn stringByReplacingOccurrencesOfString:@"\"" withString:@"\\\""]];
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"config/app.plist"] content:configContents]);
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"config/environments/development.plist"]
+                          content:@"{}\n"]);
+    XCTAssertTrue([self writeBasicAppAtRoot:appRoot extraClasses:nil homeText:@"phase15-headless"]);
+
+    int exitCode = 0;
+    NSString *buildOutput =
+        [self runShellCapture:[NSString stringWithFormat:@"cd %@ && source /usr/GNUstep/System/Library/Makefiles/GNUstep.sh && make arlen eocc",
+                                                         quotedRepoRoot]
+                     exitCode:&exitCode];
+    XCTAssertEqual(0, exitCode, @"%@", buildOutput);
+
+    NSString *addAuth = [self runShellCapture:[NSString stringWithFormat:
+        @"cd %@ && ARLEN_FRAMEWORK_ROOT=%@ %@ module add auth --json",
+        [self shellQuoted:appRoot], quotedRepoRoot, quotedArlenBinary]
+                                      exitCode:&exitCode];
+    XCTAssertEqual(0, exitCode, @"%@", addAuth);
+    XCTAssertEqualObjects(@"ok", [self parseJSONDictionary:addAuth][@"status"]);
+
+    server = [[NSTask alloc] init];
+    server.launchPath = @"/bin/bash";
+    server.arguments = @[ @"-lc",
+                          [NSString stringWithFormat:@"cd %@ && ARLEN_FRAMEWORK_ROOT=%@ %@ --no-watch --port %d >%@ 2>&1",
+                                                     [self shellQuoted:appRoot],
+                                                     quotedRepoRoot,
+                                                     quotedBoomhauer,
+                                                     port,
+                                                     [self shellQuoted:serverLog]] ];
+    [server launch];
+    XCTAssertTrue([self waitForServerOnPort:port path:@"/auth/api/session"]);
+
+    NSDictionary *loginPage = [self curlJSONAtPort:port
+                                              path:@"/auth/login"
+                                            method:@"GET"
+                                         cookieJar:cookieJar
+                                         csrfToken:nil
+                                           payload:nil
+                                   followRedirects:NO
+                                          exitCode:&exitCode];
+    XCTAssertEqual(0, exitCode);
+    XCTAssertEqual((NSInteger)404, [loginPage[@"status"] integerValue]);
+
+    NSDictionary *registerPage = [self curlJSONAtPort:port
+                                                 path:@"/auth/register"
+                                               method:@"GET"
+                                            cookieJar:cookieJar
+                                            csrfToken:nil
+                                              payload:nil
+                                      followRedirects:NO
+                                             exitCode:&exitCode];
+    XCTAssertEqual(0, exitCode);
+    XCTAssertEqual((NSInteger)404, [registerPage[@"status"] integerValue]);
+
+    NSDictionary *sessionResponse = [self curlJSONAtPort:port
+                                                    path:@"/auth/api/session"
+                                                  method:@"GET"
+                                               cookieJar:cookieJar
+                                               csrfToken:nil
+                                                 payload:nil
+                                         followRedirects:NO
+                                                exitCode:&exitCode];
+    XCTAssertEqual(0, exitCode);
+    XCTAssertEqual((NSInteger)200, [sessionResponse[@"status"] integerValue]);
+    NSDictionary *sessionPayload = [self parseJSONDictionary:sessionResponse[@"body"]];
+    XCTAssertEqualObjects(@"headless", sessionPayload[@"ui_mode"]);
+    XCTAssertEqualObjects(@NO, sessionPayload[@"authenticated"]);
+
+    NSDictionary *providerStart = [self curlJSONAtPort:port
+                                                  path:@"/auth/api/provider/stub/login"
+                                                method:@"GET"
+                                             cookieJar:cookieJar
+                                             csrfToken:nil
+                                               payload:nil
+                                       followRedirects:NO
+                                              exitCode:&exitCode];
+    XCTAssertEqual(0, exitCode);
+    XCTAssertEqual((NSInteger)200, [providerStart[@"status"] integerValue]);
+    NSDictionary *providerPayload = [self parseJSONDictionary:providerStart[@"body"]];
+    XCTAssertTrue([[providerPayload[@"authorize_url"] description] containsString:@"/auth/api/provider/stub/authorize"]);
+  } @finally {
+    if (server != nil && [server isRunning]) {
+      kill(server.processIdentifier, SIGTERM);
+      [server waitUntilExit];
+    }
+    [[NSFileManager defaultManager] removeItemAtPath:cookieJar error:nil];
+    [[NSFileManager defaultManager] removeItemAtPath:serverLog error:nil];
+    [[NSFileManager defaultManager] removeItemAtPath:appRoot error:nil];
+  }
+}
+
+- (void)testAuthModuleModuleUIUsesAppLayoutHookAndPartialOverrides {
+  NSString *dsn = [self pgTestDSN];
+  if ([dsn length] == 0) {
+    return;
+  }
+
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *quotedRepoRoot = [self shellQuoted:repoRoot];
+  NSString *quotedArlenBinary = [self shellQuoted:[repoRoot stringByAppendingPathComponent:@"build/arlen"]];
+  NSString *quotedBoomhauer = [self shellQuoted:[repoRoot stringByAppendingPathComponent:@"bin/boomhauer"]];
+  NSString *appRoot = [self createTempDirectoryWithPrefix:@"phase15-auth-module-ui"];
+  NSString *cookieJar = [self createTempFilePathWithPrefix:@"phase15-auth-module-ui-cookie" suffix:@".txt"];
+  NSString *serverLog = [self createTempFilePathWithPrefix:@"phase15-auth-module-ui-server" suffix:@".log"];
+  int port = [self randomPort];
+  XCTAssertNotNil(appRoot);
+  if (appRoot == nil) {
+    return;
+  }
+
+  NSTask *server = nil;
+
+  @try {
+    NSString *configContents =
+        [NSString stringWithFormat:@"{\n"
+                                   "  host = \"127.0.0.1\";\n"
+                                   "  port = %d;\n"
+                                   "  session = {\n"
+                                   "    enabled = YES;\n"
+                                   "    secret = \"phase15-auth-module-ui-session-secret-0123456789abcdef\";\n"
+                                   "  };\n"
+                                   "  csrf = {\n"
+                                   "    enabled = YES;\n"
+                                   "    allowQueryParamFallback = YES;\n"
+                                   "  };\n"
+                                   "  database = {\n"
+                                   "    connectionString = \"%@\";\n"
+                                   "  };\n"
+                                   "  authModule = {\n"
+                                   "    ui = {\n"
+                                   "      mode = \"module-ui\";\n"
+                                   "      layout = \"layouts/phase15_default_guest\";\n"
+                                   "      contextClass = \"Phase15AuthUIIntegrationHook\";\n"
+                                   "      partials = {\n"
+                                   "        providerRow = \"auth/partials/custom_provider_row\";\n"
+                                   "      };\n"
+                                   "    };\n"
+                                   "  };\n"
+                                   "}\n",
+                                   port,
+                                   [dsn stringByReplacingOccurrencesOfString:@"\"" withString:@"\\\""]];
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"config/app.plist"] content:configContents]);
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"config/environments/development.plist"]
+                          content:@"{}\n"]);
+    XCTAssertTrue([self writeBasicAppAtRoot:appRoot
+                               extraClasses:
+                                           @"@interface Phase15AuthUIIntegrationHook : NSObject <ALNAuthModuleUIContextHook>\n"
+                                            "@end\n\n"
+                                            "@implementation Phase15AuthUIIntegrationHook\n"
+                                            "- (NSString *)authModuleUILayoutForPage:(NSString *)pageIdentifier\n"
+                                            "                          defaultLayout:(NSString *)defaultLayout\n"
+                                            "                                context:(ALNContext *)context {\n"
+                                            "  (void)defaultLayout;\n"
+                                            "  (void)context;\n"
+                                            "  if ([pageIdentifier isEqualToString:@\"login\"]) {\n"
+                                            "    return @\"layouts/phase15_login_guest\";\n"
+                                            "  }\n"
+                                            "  return nil;\n"
+                                            "}\n\n"
+                                            "- (NSDictionary *)authModuleUIContextForPage:(NSString *)pageIdentifier\n"
+                                            "                              defaultContext:(NSDictionary *)defaultContext\n"
+                                            "                                     context:(ALNContext *)context {\n"
+                                            "  (void)context;\n"
+                                            "  NSMutableDictionary *uiContext = [NSMutableDictionary dictionaryWithDictionary:defaultContext ?: @{}];\n"
+                                            "  uiContext[@\"brand_name\"] = @\"Phase15 Hook Brand\";\n"
+                                            "  uiContext[@\"guest_subtitle\"] = [NSString stringWithFormat:@\"context:%@\", pageIdentifier ?: @\"\"];\n"
+                                            "  return uiContext;\n"
+                                            "}\n"
+                                            "@end\n"
+                                   homeText:@"phase15-module-ui"]);
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"templates/layouts/phase15_default_guest.html.eoc"]
+                          content:@"<!doctype html>\n"
+                                  "<html lang=\"en\">\n"
+                                  "  <body data-phase15-layout=\"default\">\n"
+                                  "    <div class=\"phase15-brand\"><%= [ctx objectForKey:@\"brand_name\"] ?: @\"\" %></div>\n"
+                                  "    <div class=\"phase15-subtitle\"><%= [ctx objectForKey:@\"guest_subtitle\"] ?: @\"\" %></div>\n"
+                                  "    <%== [ctx objectForKey:@\"content\"] %>\n"
+                                  "  </body>\n"
+                                  "</html>\n"]);
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"templates/layouts/phase15_login_guest.html.eoc"]
+                          content:@"<!doctype html>\n"
+                                  "<html lang=\"en\">\n"
+                                  "  <body data-phase15-layout=\"hooked\">\n"
+                                  "    <div class=\"phase15-brand\"><%= [ctx objectForKey:@\"brand_name\"] ?: @\"\" %></div>\n"
+                                  "    <div class=\"phase15-subtitle\"><%= [ctx objectForKey:@\"guest_subtitle\"] ?: @\"\" %></div>\n"
+                                  "    <%== [ctx objectForKey:@\"content\"] %>\n"
+                                  "  </body>\n"
+                                  "</html>\n"]);
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"templates/auth/partials/custom_provider_row.html.eoc"]
+                          content:@"<% NSDictionary *provider = [ctx objectForKey:@\"authProvider\"] ?: @{}; %>\n"
+                                  "<a class=\"phase15-provider\" data-phase15-provider=\"<%= [provider objectForKey:@\"identifier\"] ?: @\"\" %>\" href=\"<%= [provider objectForKey:@\"loginPath\"] ?: @\"\" %>\"><%= [provider objectForKey:@\"ctaLabel\"] ?: @\"Continue\" %></a>\n"]);
+
+    int exitCode = 0;
+    NSString *buildOutput =
+        [self runShellCapture:[NSString stringWithFormat:@"cd %@ && source /usr/GNUstep/System/Library/Makefiles/GNUstep.sh && make arlen eocc",
+                                                         quotedRepoRoot]
+                     exitCode:&exitCode];
+    XCTAssertEqual(0, exitCode, @"%@", buildOutput);
+
+    NSString *addAuth = [self runShellCapture:[NSString stringWithFormat:
+        @"cd %@ && ARLEN_FRAMEWORK_ROOT=%@ %@ module add auth --json",
+        [self shellQuoted:appRoot], quotedRepoRoot, quotedArlenBinary]
+                                      exitCode:&exitCode];
+    XCTAssertEqual(0, exitCode, @"%@", addAuth);
+    XCTAssertEqualObjects(@"ok", [self parseJSONDictionary:addAuth][@"status"]);
+
+    server = [[NSTask alloc] init];
+    server.launchPath = @"/bin/bash";
+    server.arguments = @[ @"-lc",
+                          [NSString stringWithFormat:@"cd %@ && ARLEN_FRAMEWORK_ROOT=%@ %@ --no-watch --port %d >%@ 2>&1",
+                                                     [self shellQuoted:appRoot],
+                                                     quotedRepoRoot,
+                                                     quotedBoomhauer,
+                                                     port,
+                                                     [self shellQuoted:serverLog]] ];
+    [server launch];
+    XCTAssertTrue([self waitForServerOnPort:port path:@"/auth/api/session"]);
+
+    NSDictionary *sessionResponse = [self curlJSONAtPort:port
+                                                    path:@"/auth/api/session"
+                                                  method:@"GET"
+                                               cookieJar:cookieJar
+                                               csrfToken:nil
+                                                 payload:nil
+                                         followRedirects:NO
+                                                exitCode:&exitCode];
+    XCTAssertEqual(0, exitCode);
+    XCTAssertEqual((NSInteger)200, [sessionResponse[@"status"] integerValue]);
+    NSDictionary *sessionPayload = [self parseJSONDictionary:sessionResponse[@"body"]];
+    XCTAssertEqualObjects(@"module-ui", sessionPayload[@"ui_mode"]);
+
+    NSDictionary *loginPage = [self curlJSONAtPort:port
+                                              path:@"/auth/login"
+                                            method:@"GET"
+                                         cookieJar:cookieJar
+                                         csrfToken:nil
+                                           payload:nil
+                                   followRedirects:NO
+                                          exitCode:&exitCode];
+    XCTAssertEqual(0, exitCode);
+    XCTAssertEqual((NSInteger)200, [loginPage[@"status"] integerValue]);
+    XCTAssertTrue([loginPage[@"body"] containsString:@"data-phase15-layout=\"hooked\""]);
+    XCTAssertTrue([loginPage[@"body"] containsString:@"Phase15 Hook Brand"]);
+    XCTAssertTrue([loginPage[@"body"] containsString:@"context:login"]);
+    XCTAssertTrue([loginPage[@"body"] containsString:@"data-phase15-provider=\"stub\""]);
+    XCTAssertTrue([loginPage[@"body"] containsString:@"auth-card"]);
+
+    NSDictionary *registerPage = [self curlJSONAtPort:port
+                                                 path:@"/auth/register"
+                                               method:@"GET"
+                                            cookieJar:cookieJar
+                                            csrfToken:nil
+                                              payload:nil
+                                      followRedirects:NO
+                                             exitCode:&exitCode];
+    XCTAssertEqual(0, exitCode);
+    XCTAssertEqual((NSInteger)200, [registerPage[@"status"] integerValue]);
+    XCTAssertTrue([registerPage[@"body"] containsString:@"data-phase15-layout=\"default\""]);
+    XCTAssertTrue([registerPage[@"body"] containsString:@"Phase15 Hook Brand"]);
+    XCTAssertTrue([registerPage[@"body"] containsString:@"context:register"]);
   } @finally {
     if (server != nil && [server isRunning]) {
       kill(server.processIdentifier, SIGTERM);

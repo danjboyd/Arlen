@@ -1,0 +1,91 @@
+.notifications-shell__header {
+  align-items: center;
+  background: #1d4ed8;
+  color: #eff6ff;
+  display: flex;
+  justify-content: space-between;
+  padding: 1.25rem 1.5rem;
+}
+
+.notifications-shell__eyebrow {
+  font-size: 0.75rem;
+  letter-spacing: 0.12em;
+  margin: 0;
+  text-transform: uppercase;
+}
+
+.notifications-shell__title {
+  margin: 0.25rem 0 0;
+}
+
+.notifications-shell__nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.notifications-shell__nav a,
+.notifications-actions a {
+  color: inherit;
+}
+
+.notifications-shell__main {
+  background: #dbeafe;
+  min-height: 100vh;
+  padding: 1.5rem;
+}
+
+.notifications-panel {
+  background: #fff;
+  border: 1px solid #93c5fd;
+  border-radius: 0.75rem;
+  margin-bottom: 1rem;
+  padding: 1rem;
+}
+
+.notifications-table {
+  border-collapse: collapse;
+  width: 100%;
+}
+
+.notifications-table th,
+.notifications-table td {
+  border-bottom: 1px solid #bfdbfe;
+  padding: 0.75rem;
+  text-align: left;
+}
+
+.notifications-form,
+.notifications-actions,
+.notifications-detail-grid {
+  display: grid;
+  gap: 1rem;
+}
+
+.notifications-form {
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+}
+
+.notifications-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.notifications-detail-grid {
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+}
+
+.notifications-definition-list {
+  display: grid;
+  gap: 0.5rem 1rem;
+  grid-template-columns: max-content 1fr;
+}
+
+.notifications-definition-list dt {
+  font-weight: 700;
+}
+
+.notifications-note {
+  color: #1e3a8a;
+}

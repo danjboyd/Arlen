@@ -1,0 +1,22 @@
+<% NSArray *inbox = [ctx objectForKey:@"inbox"] ?: @[]; %>
+<section class="notifications-panel">
+  <p class="notifications-note">Recipient: <code><%= [ctx objectForKey:@"recipient"] ?: @"" %></code></p>
+  <table class="notifications-table">
+    <thead>
+      <tr>
+        <th>Notification</th>
+        <th>Title</th>
+        <th>Body</th>
+      </tr>
+    </thead>
+    <tbody>
+      <% for (NSDictionary *entry in inbox) { %>
+        <tr>
+          <td><%= [entry objectForKey:@"notification"] %></td>
+          <td><%= [entry objectForKey:@"title"] %></td>
+          <td><%= [entry objectForKey:@"body"] %></td>
+        </tr>
+      <% } %>
+    </tbody>
+  </table>
+</section>

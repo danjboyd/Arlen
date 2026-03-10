@@ -26,9 +26,13 @@ Open `build/docs/index.html` in your browser, or use `make docs-serve` for local
 - [Core Concepts](CORE_CONCEPTS.md): runtime architecture and request lifecycle.
 - [Modules](MODULES.md): first-class module architecture, install flow, and override model.
 - [Auth Module](AUTH_MODULE.md): first-party auth product routes, hooks, and `/auth/api` surface.
+- [Auth UI Integration Modes](AUTH_UI_INTEGRATION_MODES.md): `headless`, `module-ui`, and `generated-app-ui` contract for app-shell auth integration.
 - [Admin UI Module](ADMIN_UI_MODULE.md): first-party admin resource contract and `/admin/api` surface.
 - [Jobs Module](JOBS_MODULE.md): first-party jobs runtime contracts plus protected `/jobs` HTML and `/jobs/api` JSON surfaces.
-- [Notifications Module](NOTIFICATIONS_MODULE.md): first-party notifications foundation on jobs + mail with `/notifications/api` JSON endpoints.
+- [Notifications Module](NOTIFICATIONS_MODULE.md): first-party notifications product flows on jobs + mail with inbox/preferences, preview/test-send, and `/notifications/api` surfaces.
+- [Storage Module](STORAGE_MODULE.md): first-party storage collections, direct uploads, signed downloads, variants, and `/storage/api` management surfaces.
+- [Ops Module](OPS_MODULE.md): protected operational dashboard and `/ops/api` JSON/OpenAPI summary surfaces.
+- [Search Module](SEARCH_MODULE.md): searchable-resource contracts, job-backed reindex flows, and shared admin/ops integration.
 - [Deployment Guide](DEPLOYMENT.md): deployment model and production guidance.
 - [Password Hashing](PASSWORD_HASHING.md): Argon2id password hashing API, defaults, and rehash workflow.
 - [Realtime and Composition](REALTIME_COMPOSITION.md): websocket/SSE contracts, pubsub hub, and app mounting.
@@ -92,6 +96,7 @@ Open `build/docs/index.html` in your browser, or use `make docs-serve` for local
 - [Phase 12 Roadmap](PHASE12_ROADMAP.md)
 - [Phase 13 Roadmap](PHASE13_ROADMAP.md)
 - [Phase 14 Roadmap](PHASE14_ROADMAP.md)
+- [Phase 15 Roadmap](PHASE15_ROADMAP.md)
 - [Competitive Benchmark Roadmap](COMPETITIVE_BENCHMARK_ROADMAP.md)
 - [Phase B Parity Checklist (FastAPI)](PHASEB_PARITY_CHECKLIST_FASTAPI.md)
 - [Phase C Benchmark Protocol](PHASEC_BENCHMARK_PROTOCOL.md)
@@ -109,5 +114,7 @@ Open `build/docs/index.html` in your browser, or use `make docs-serve` for local
 - [API-First Reference App](../examples/api_reference/README.md)
 - [Auth Primitives Example](../examples/auth_primitives/README.md)
 - [Auth + Admin Demo](../examples/auth_admin_demo/README.md)
+- [Auth UI Modes](../examples/auth_ui_modes/README.md)
+- [Phase 14 Modules Demo](../examples/phase14_modules_demo/README.md)
 - [GSWeb Migration Sample](../examples/gsweb_migration/README.md)
 - [ArlenData Standalone Example](../examples/arlen_data/README.md)

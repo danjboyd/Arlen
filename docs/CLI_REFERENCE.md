@@ -85,7 +85,7 @@ Apply SQL migrations from `db/migrations` to PostgreSQL.
 - top-level transaction control statements such as `BEGIN`, `COMMIT`, `ROLLBACK`, and `SAVEPOINT` are rejected
 - PostgreSQL commands that are disallowed inside transaction blocks still fail under `arlen migrate`
 
-### `arlen module <add|remove|list|doctor|migrate|assets|upgrade> [options]`
+### `arlen module <add|remove|list|doctor|migrate|assets|upgrade|eject> [options]`
 
 Manage first-class vendored modules installed in `config/modules.plist` and `modules/<id>/`.
 
@@ -101,6 +101,9 @@ Manage first-class vendored modules installed in `config/modules.plist` and `mod
   - `admin-ui`
   - `jobs`
   - `notifications`
+  - `storage`
+  - `ops`
+  - `search`
 
 `arlen module remove <name> [--keep-files] [--json]`
 
@@ -130,6 +133,18 @@ Manage first-class vendored modules installed in `config/modules.plist` and `mod
 
 - replaces the vendored module files and updates the modules lock entry version metadata
 
+`arlen module eject auth-ui [--force] [--json]`
+
+- scaffolds app-owned auth pages under `templates/auth/...`
+- scaffolds auth partials under `templates/auth/partials/...`
+- scaffolds `templates/layouts/auth_generated.html.eoc` and `public/auth/auth.css`
+- updates `config/app.plist` to use:
+  - `authModule.ui.mode = "generated-app-ui"`
+  - `authModule.ui.layout = "layouts/auth_generated"`
+  - `authModule.ui.generatedPagePrefix = "auth"`
+- `--force` overwrites existing generated auth UI files
+- `--json` emits machine-readable workflow output with `created_files`, `updated_files`, and `next_steps`
+
 Example first-party bootstrap:
 
 ```bash
@@ -137,15 +152,21 @@ Example first-party bootstrap:
 ./build/arlen module add admin-ui
 ./build/arlen module add jobs
 ./build/arlen module add notifications
+./build/arlen module add storage
+./build/arlen module add ops
+./build/arlen module add search
 ./build/arlen module migrate --env development
 ```
 
 First-party module surfaces after install:
 
-- `auth`: HTML under `/auth/...`, JSON under `/auth/api/...`
+- `auth`: stable JSON under `/auth/api/...`; HTML ownership under `/auth/...` is controlled by `authModule.ui.mode` (`module-ui`, `headless`, or `generated-app-ui`)
 - `admin-ui`: HTML under `/admin/...`, JSON under `/admin/api/...`
 - `jobs`: protected HTML under `/jobs/...`, JSON under `/jobs/api/...`
-- `notifications`: JSON under `/notifications/api/...` in the 14C foundation slice
+- `notifications`: authenticated inbox/preferences plus admin preview/outbox/test-send under `/notifications/...` and `/notifications/api/...`
+- `storage`: protected HTML under `/storage/...`, JSON/OpenAPI under `/storage/api/...`, and signed download fetches under `/storage/api/download/:token`
+- `ops`: protected HTML under `/ops/...`, JSON/OpenAPI under `/ops/api/...`
+- `search`: public query HTML/JSON under `/search/...` plus protected reindex routes under `/search/api/...`
 
 ### `arlen schema-codegen [--env <name>] [--database <target>] [--dsn <connection_string>] [--output-dir <path>] [--manifest <path>] [--prefix <ClassPrefix>] [--typed-contracts] [--force]`
 
@@ -495,6 +516,7 @@ Lifecycle diagnostics:
 - `make ci-phase11-sanitizers`: run the Phase 11 ASan/UBSan hostile-traffic matrix and generate artifacts under `build/release_confidence/phase11/sanitizers`
 - `make ci-phase11`: run the full Phase 11 confidence pack (protocol corpus + fuzz + live probe + sanitizer matrix)
 - `make phase5e-confidence`: generate Phase 5E release confidence artifacts in `build/release_confidence/phase5e`
+- `make phase14-confidence`: run the Phase 14 module confidence gate and generate artifacts in `build/release_confidence/phase14`
 - `tools/ci/run_phase5e_quality.sh`: explicit Phase 5E CI gate entrypoint
 - `tools/ci/run_phase5e_sanitizers.sh`: explicit Phase 5E sanitizer CI gate entrypoint
   - set `ARLEN_SANITIZER_INCLUDE_INTEGRATION=1` to include full integration suite (default is `0`)

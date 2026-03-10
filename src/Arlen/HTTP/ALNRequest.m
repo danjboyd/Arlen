@@ -1616,6 +1616,19 @@ static BOOL ALNASCIIBytesEqualLowercaseCString(const unsigned char *bytes,
   if ([fallback isKindOfClass:[NSString class]]) {
     return fallback;
   }
+  for (id key in headers) {
+    if (![key isKindOfClass:[NSString class]]) {
+      continue;
+    }
+    NSString *headerName = [(NSString *)key lowercaseString];
+    if (![headerName isEqualToString:lower]) {
+      continue;
+    }
+    id value = headers[key];
+    if ([value isKindOfClass:[NSString class]]) {
+      return value;
+    }
+  }
   return @"";
 }
 

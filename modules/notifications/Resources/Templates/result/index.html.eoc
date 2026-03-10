@@ -1,0 +1,7 @@
+<section class="notifications-panel">
+  <h2><%= [ctx objectForKey:@"pageHeading"] ?: @"Notifications" %></h2>
+  <p><%= [ctx objectForKey:@"message"] ?: @"" %></p>
+  <div class="notifications-actions">
+    <a href="<%= [ctx objectForKey:@"resultActionPath"] ?: @"/notifications" %>"><%= [ctx objectForKey:@"resultActionLabel"] ?: @"Back to notifications" %></a>
+  </div>
+</section>

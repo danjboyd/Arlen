@@ -1,0 +1,32 @@
+{
+  identifier = "storage";
+  version = "1.0.0";
+  principalClass = "ALNStorageModule";
+  dependencies = (
+    { identifier = "jobs"; version = ">= 1.0.0"; }
+  );
+  compatibility = {
+    arlenVersion = ">= 0.1.0";
+  };
+  config = {
+    defaults = {
+      storageModule = {
+        paths = {
+          prefix = "/storage";
+          apiPrefix = "/api";
+        };
+        uploadSessionTTLSeconds = 900;
+        downloadTokenTTLSeconds = 300;
+        signingSecret = "storage-module-signing-secret";
+        collections = {
+          classes = ();
+        };
+        adminUI = {
+          resourceProviderClass = "ALNStorageAdminResourceProvider";
+        };
+      };
+    };
+    requiredKeys = (
+    );
+  };
+}

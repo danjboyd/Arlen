@@ -46,7 +46,8 @@ Arlen is designed to solve the same class of problems as frameworks like Mojolic
 - Phase 11F: complete (hostile protocol corpus, deterministic fuzz/live probes, and Phase 11 sanitizer confidence lanes).
 - Phase 12: complete (12A-12F delivered: auth-assurance/step-up primitives, TOTP/recovery helpers, WebAuthn/passkey MFA baseline, OIDC/provider-login primitives, and Phase 12 confidence artifacts).
 - Phase 13: complete (13A-13I delivered: first-class module substrate, first-party `auth` and `admin-ui` modules, Django-inspired admin resources, `/auth/api` + `/admin/api` surfaces, sample app, and Phase 13 confidence gate).
-- Phase 14: active (14A/14B/14C complete: first-party `jobs` module, protected `/jobs` HTML + JSON/OpenAPI surface, and first-party `notifications` foundation on jobs/mail; 14D-14I remaining).
+- Phase 14: complete (14A-14I delivered: first-party `jobs`, `notifications`, `storage`, `ops`, and `search` modules, Phase 14 sample app, and `phase14-confidence` gate).
+- Phase 15: complete (15A-15E delivered on 2026-03-10: `headless`, `module-ui`, `generated-app-ui`, auth UI examples, and `phase15-confidence`).
 
 ## Quick Start
 
@@ -91,23 +92,34 @@ cd MyApp
 /path/to/Arlen/bin/arlen boomhauer --port 3000
 ```
 
-Phase 13/14 modules quick path:
+Phase 13/14/15 modules quick path:
 
 ```bash
 /path/to/Arlen/build/arlen module add auth
 /path/to/Arlen/build/arlen module add admin-ui
 /path/to/Arlen/build/arlen module add jobs
 /path/to/Arlen/build/arlen module add notifications
+/path/to/Arlen/build/arlen module add storage
+/path/to/Arlen/build/arlen module add ops
+/path/to/Arlen/build/arlen module add search
 /path/to/Arlen/build/arlen module doctor --json
 /path/to/Arlen/build/arlen module assets --output-dir build/module_assets
 /path/to/Arlen/build/arlen module migrate --env development
 ```
 
 First-party module surfaces:
-- `auth` ships HTML under `/auth/...` and JSON under `/auth/api/...`
+- `auth` keeps `/auth/api/...` stable and lets apps choose `headless`, `module-ui`, or `generated-app-ui` ownership for `/auth/...`
 - `admin-ui` ships HTML under `/admin/...` and JSON under `/admin/api/...`
 - `jobs` ships protected HTML under `/jobs/...` and JSON under `/jobs/api/...`
-- `notifications` ships JSON under `/notifications/api/...` in the 14C foundation slice
+- `notifications` ships user HTML under `/notifications/...`, admin HTML under `/notifications/...`, and JSON under `/notifications/api/...`
+- `storage` ships protected HTML under `/storage/...`, JSON/OpenAPI under `/storage/api/...`, and signed downloads under `/storage/api/download/:token`
+- `ops` ships protected HTML under `/ops/...` and JSON/OpenAPI under `/ops/api/...`
+- `search` ships public query HTML/JSON under `/search/...` and protected reindex routes under `/search/api/...`
+
+Auth UI ownership quick path:
+- `module-ui`: default stock auth pages with optional app layout/context hook
+- `headless`: set `authModule.ui.mode = "headless"` and use `/auth/api/...` from your SPA or native client
+- `generated-app-ui`: run `/path/to/Arlen/build/arlen module eject auth-ui --json` to scaffold `templates/auth/...` and `public/auth/auth.css`
 
 Run tests and quality gate:
 
@@ -121,6 +133,8 @@ make ci-quality
 make ci-fault-injection
 make ci-release-certification
 make ci-phase11
+make phase14-confidence
+make phase15-confidence
 make test-data-layer
 ```
 
@@ -164,9 +178,13 @@ High-value guides:
 - [Core Concepts](docs/CORE_CONCEPTS.md)
 - [Modules](docs/MODULES.md)
 - [Auth Module](docs/AUTH_MODULE.md)
+- [Auth UI Integration Modes](docs/AUTH_UI_INTEGRATION_MODES.md)
 - [Admin UI Module](docs/ADMIN_UI_MODULE.md)
 - [Jobs Module](docs/JOBS_MODULE.md)
 - [Notifications Module](docs/NOTIFICATIONS_MODULE.md)
+- [Storage Module](docs/STORAGE_MODULE.md)
+- [Ops Module](docs/OPS_MODULE.md)
+- [Search Module](docs/SEARCH_MODULE.md)
 - [Deployment Guide](docs/DEPLOYMENT.md)
 - [Password Hashing](docs/PASSWORD_HASHING.md)
 - [Realtime and Composition](docs/REALTIME_COMPOSITION.md)
@@ -219,6 +237,7 @@ Specifications and roadmaps:
 - [Phase 12 Roadmap](docs/PHASE12_ROADMAP.md)
 - [Phase 13 Roadmap](docs/PHASE13_ROADMAP.md)
 - [Phase 14 Roadmap](docs/PHASE14_ROADMAP.md)
+- [Phase 15 Roadmap](docs/PHASE15_ROADMAP.md)
 - [Competitive Benchmark Roadmap](docs/COMPETITIVE_BENCHMARK_ROADMAP.md)
 - [Phase B Parity Checklist (FastAPI)](docs/PHASEB_PARITY_CHECKLIST_FASTAPI.md)
 - [Phase C Benchmark Protocol](docs/PHASEC_BENCHMARK_PROTOCOL.md)

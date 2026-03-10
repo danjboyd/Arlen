@@ -213,11 +213,24 @@ transpile_templates() {
       if [[ ${#module_template_files[@]} -eq 0 ]]; then
         continue
       fi
+      local filtered_module_template_files=()
+      local relative_template_path override_template_path
+      for template_path in "${module_template_files[@]}"; do
+        relative_template_path="${template_path#"$module_template_root"/}"
+        override_template_path="$app_root/templates/modules/$module_id/$relative_template_path"
+        if [[ -f "$override_template_path" ]]; then
+          continue
+        fi
+        filtered_module_template_files+=("$template_path")
+      done
+      if [[ ${#filtered_module_template_files[@]} -eq 0 ]]; then
+        continue
+      fi
       "$framework_root/build/eocc" \
         --template-root "$module_template_root" \
         --output-dir "$module_output_root" \
         --logical-prefix "modules/$module_id" \
-        "${module_template_files[@]}"
+        "${filtered_module_template_files[@]}"
     done < <(find "$app_root/modules" -mindepth 1 -maxdepth 1 -type d | sort)
   fi
 

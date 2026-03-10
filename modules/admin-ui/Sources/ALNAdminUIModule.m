@@ -323,6 +323,7 @@ static NSDictionary *AUAdminMetadataActionSchema(void) {
 
 @property(nonatomic, strong, readwrite) ALNPg *database;
 @property(nonatomic, copy) NSDictionary *moduleConfig;
+@property(nonatomic, copy) NSDictionary *applicationConfig;
 @property(nonatomic, copy, readwrite) NSString *mountPrefix;
 @property(nonatomic, copy, readwrite) NSString *apiPrefix;
 @property(nonatomic, copy, readwrite) NSString *dashboardTitle;
@@ -672,6 +673,7 @@ static NSDictionary *AUAdminMetadataActionSchema(void) {
   self = [super init];
   if (self != nil) {
     _moduleConfig = @{};
+    _applicationConfig = @{};
     _mountPrefix = @"/admin";
     _apiPrefix = @"/api";
     _dashboardTitle = @"Arlen Admin";
@@ -696,6 +698,33 @@ static NSDictionary *AUAdminMetadataActionSchema(void) {
       continue;
     }
     [classNames addObject:className];
+  }
+  NSArray *topLevelKeys = [[self.applicationConfig allKeys] sortedArrayUsingSelector:@selector(compare:)];
+  for (NSString *key in topLevelKeys) {
+    NSDictionary *moduleEntry = [self.applicationConfig[key] isKindOfClass:[NSDictionary class]] ? self.applicationConfig[key] : nil;
+    NSDictionary *moduleAdminUI = [moduleEntry[@"adminUI"] isKindOfClass:[NSDictionary class]] ? moduleEntry[@"adminUI"] : @{};
+    NSDictionary *moduleResourceProviders =
+        [moduleAdminUI[@"resourceProviders"] isKindOfClass:[NSDictionary class]] ? moduleAdminUI[@"resourceProviders"] : @{};
+    NSMutableArray *moduleClasses = [NSMutableArray array];
+    NSString *singleClass = AUTrimmedString(moduleAdminUI[@"resourceProviderClass"]);
+    if ([singleClass length] > 0) {
+      [moduleClasses addObject:singleClass];
+    }
+    NSArray *flatModuleClasses = [moduleAdminUI[@"resourceProviderClasses"] isKindOfClass:[NSArray class]]
+                                     ? moduleAdminUI[@"resourceProviderClasses"]
+                                     : @[];
+    NSArray *nestedModuleClasses = [moduleResourceProviders[@"classes"] isKindOfClass:[NSArray class]]
+                                       ? moduleResourceProviders[@"classes"]
+                                       : @[];
+    [moduleClasses addObjectsFromArray:flatModuleClasses];
+    [moduleClasses addObjectsFromArray:nestedModuleClasses];
+    for (id entry in moduleClasses) {
+      NSString *className = AUTrimmedString(entry);
+      if ([className length] == 0 || [classNames containsObject:className]) {
+        continue;
+      }
+      [classNames addObject:className];
+    }
   }
   return [NSArray arrayWithArray:classNames];
 }
@@ -830,6 +859,7 @@ static NSDictionary *AUAdminMetadataActionSchema(void) {
 
 - (BOOL)configureWithApplication:(ALNApplication *)application
                            error:(NSError **)error {
+  self.applicationConfig = [application.config isKindOfClass:[NSDictionary class]] ? application.config : @{};
   NSDictionary *moduleConfig = [application.config[@"adminUI"] isKindOfClass:[NSDictionary class]]
                                    ? application.config[@"adminUI"]
                                    : @{};

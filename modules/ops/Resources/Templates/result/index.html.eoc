@@ -1,0 +1,5 @@
+<section class="ops-panel">
+  <h2><%= [ctx objectForKey:@"pageHeading"] ?: @"Ops" %></h2>
+  <p><%= [ctx objectForKey:@"message"] ?: @"" %></p>
+  <p><a href="<%= [ctx objectForKey:@"opsPrefix"] ?: @"/ops" %>">Back to ops</a></p>
+</section>

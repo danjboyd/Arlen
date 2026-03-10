@@ -1,0 +1,4 @@
+<% if ([[ctx objectForKey:@"resultTitle"] length] > 0) { %>
+  <p class="auth-result-title"><%= [ctx objectForKey:@"resultTitle"] %></p>
+<% } %>
+<% if (!ALNEOCInclude(out, ctx, [ctx objectForKey:@"authPartialResultActions"], error)) { return nil; } %>

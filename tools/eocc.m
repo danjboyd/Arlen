@@ -28,7 +28,41 @@ static NSString *JoinPath(NSString *base, NSString *suffix) {
   return [base stringByAppendingPathComponent:suffix];
 }
 
-static NSString *RegistrySource(NSArray *entries) {
+static NSString *RegistryIdentifierComponent(NSString *value) {
+  NSString *candidate = [value isKindOfClass:[NSString class]] ? value : @"";
+  NSMutableString *identifier = [NSMutableString string];
+  for (NSUInteger idx = 0; idx < [candidate length]; idx++) {
+    unichar ch = [candidate characterAtIndex:idx];
+    BOOL alnum = ((ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') ||
+                  (ch >= '0' && ch <= '9'));
+    [identifier appendString:alnum ? [NSString stringWithCharacters:&ch length:1] : @"_"];
+  }
+  while ([identifier containsString:@"__"]) {
+    [identifier replaceOccurrencesOfString:@"__"
+                                withString:@"_"
+                                   options:0
+                                     range:NSMakeRange(0, [identifier length])];
+  }
+  if ([identifier length] == 0) {
+    [identifier appendString:@"registry"];
+  }
+  unichar first = [identifier characterAtIndex:0];
+  if (first >= '0' && first <= '9') {
+    [identifier insertString:@"r_" atIndex:0];
+  }
+  return identifier;
+}
+
+static NSString *RegistrySymbolSuffix(NSString *registryOut, NSString *logicalPrefix) {
+  NSString *seed = ([logicalPrefix length] > 0) ? logicalPrefix : [registryOut lastPathComponent];
+  return RegistryIdentifierComponent(seed);
+}
+
+static NSString *RegistrySource(NSArray *entries, NSString *symbolSuffix) {
+  NSString *registerSymbol =
+      [NSString stringWithFormat:@"ALNEOCRegisterBuiltInTemplates_%@", RegistryIdentifierComponent(symbolSuffix)];
+  NSString *constructorSymbol =
+      [NSString stringWithFormat:@"ALNEOCAutoRegisterBuiltInTemplates_%@", RegistryIdentifierComponent(symbolSuffix)];
   NSMutableString *source = [NSMutableString string];
   [source appendString:@"#import <Foundation/Foundation.h>\n"];
   [source appendString:@"#import \"ALNEOCRuntime.h\"\n\n"];
@@ -38,7 +72,7 @@ static NSString *RegistrySource(NSArray *entries) {
                          entry[@"symbol"]];
   }
 
-  [source appendString:@"\nstatic void ALNEOCRegisterBuiltInTemplates(void) {\n"];
+  [source appendFormat:@"\nvoid %@ (void) {\n", registerSymbol];
   [source appendString:@"  static BOOL didRegister = NO;\n"];
   [source appendString:@"  if (didRegister) {\n"];
   [source appendString:@"    return;\n"];
@@ -50,8 +84,8 @@ static NSString *RegistrySource(NSArray *entries) {
   }
   [source appendString:@"}\n\n"];
   [source appendString:@"__attribute__((constructor))\n"];
-  [source appendString:@"static void ALNEOCAutoRegisterBuiltInTemplates(void) {\n"];
-  [source appendString:@"  ALNEOCRegisterBuiltInTemplates();\n"];
+  [source appendFormat:@"static void %@ (void) {\n", constructorSymbol];
+  [source appendFormat:@"  %@();\n", registerSymbol];
   [source appendString:@"}\n"];
   return source;
 }
@@ -198,7 +232,8 @@ int main(int argc, const char *argv[]) {
       return 1;
     }
 
-    NSString *registrySource = RegistrySource(registryEntries);
+    NSString *registrySource = RegistrySource(registryEntries,
+                                             RegistrySymbolSuffix(registryOut, logicalPrefix));
     NSError *writeError = nil;
     BOOL wrote = [registrySource writeToFile:registryOut
                                   atomically:YES

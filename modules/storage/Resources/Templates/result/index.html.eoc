@@ -1,0 +1,7 @@
+<section class="storage-panel">
+  <h2><%= [ctx objectForKey:@"pageHeading"] ?: @"Storage" %></h2>
+  <p><%= [ctx objectForKey:@"message"] ?: @"" %></p>
+  <div class="storage-actions">
+    <a href="<%= [ctx objectForKey:@"resultActionPath"] ?: @"/storage" %>"><%= [ctx objectForKey:@"resultActionLabel"] ?: @"Back to storage" %></a>
+  </div>
+</section>

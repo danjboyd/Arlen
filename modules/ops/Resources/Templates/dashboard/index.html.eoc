@@ -1,0 +1,64 @@
+<section class="ops-card-grid">
+  <% for (NSDictionary *card in ($summary[@"cards"] ?: @[])) { %>
+    <article class="ops-card">
+      <p><%= card[@"label"] ?: @"Metric" %></p>
+      <strong><%= card[@"value"] ?: @"0" %></strong>
+    </article>
+  <% } %>
+</section>
+
+<section class="ops-panel">
+  <h2>Signals</h2>
+  <dl class="ops-kv">
+    <dt>Health</dt>
+    <dd><%= [($summary[@"signals"][@"health"][@"statusCode"] ?: @0) stringValue] %></dd>
+    <dt>Readiness</dt>
+    <dd><%= [($summary[@"signals"][@"ready"][@"statusCode"] ?: @0) stringValue] %></dd>
+    <dt>Live</dt>
+    <dd><%= [($summary[@"signals"][@"live"][@"statusCode"] ?: @0) stringValue] %></dd>
+  </dl>
+</section>
+
+<section class="ops-panel">
+  <h2>Queues</h2>
+  <% for (NSDictionary *queue in ($summary[@"jobs"][@"queues"] ?: @[])) { %>
+    <div class="ops-row">
+      <strong><%= queue[@"name"] ?: @"default" %></strong>
+      <span>pending <%= [queue[@"pendingCount"] stringValue] %></span>
+      <span>dead <%= [queue[@"deadLetterCount"] stringValue] %></span>
+      <span><%= [queue[@"paused"] boolValue] ? @"paused" : @"active" %></span>
+    </div>
+  <% } %>
+</section>
+
+<section class="ops-panel">
+  <h2>Notifications</h2>
+  <% for (NSDictionary *entry in ($summary[@"notifications"][@"recentOutbox"] ?: @[])) { %>
+    <div class="ops-row">
+      <strong><%= entry[@"notification"] ?: @"notification" %></strong>
+      <span><%= entry[@"channel"] ?: @"" %></span>
+      <span><%= entry[@"state"] ?: @"" %></span>
+    </div>
+  <% } %>
+</section>
+
+<section class="ops-panel">
+  <h2>Storage</h2>
+  <% for (NSDictionary *object in ($summary[@"storage"][@"recentObjects"] ?: @[])) { %>
+    <div class="ops-row">
+      <strong><%= object[@"name"] ?: @"object" %></strong>
+      <span><%= object[@"collection"] ?: @"" %></span>
+      <span><%= object[@"variantState"] ?: @"" %></span>
+    </div>
+  <% } %>
+</section>
+
+<section class="ops-panel">
+  <h2>Automation</h2>
+  <dl class="ops-kv">
+    <dt>Metrics</dt>
+    <dd><code><%= $summary[@"automation"][@"metricsPath"] ?: @"/metrics" %></code></dd>
+    <dt>OpenAPI Paths</dt>
+    <dd><%= [($summary[@"automation"][@"openAPI"][@"pathCount"] ?: @0) stringValue] %></dd>
+  </dl>
+</section>

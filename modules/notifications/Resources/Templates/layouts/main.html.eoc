@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title><%= $pageTitle ?: @"Arlen Notifications" %></title>
+    <link rel="stylesheet" href="/modules/notifications/notifications.css">
+  </head>
+  <body>
+    <header class="notifications-shell__header">
+      <div>
+        <p class="notifications-shell__eyebrow">Arlen</p>
+        <h1 class="notifications-shell__title"><%= $pageHeading ?: @"Notifications" %></h1>
+      </div>
+      <nav class="notifications-shell__nav">
+        <a href="<%= [$notificationsPrefix stringByAppendingString:@"/inbox"] %>">Inbox</a>
+        <a href="<%= [$notificationsPrefix stringByAppendingString:@"/preferences"] %>">Preferences</a>
+        <a href="<%= [$notificationsPrefix stringByAppendingString:@"/outbox"] %>">Outbox</a>
+        <a href="<%= [$notificationsPrefix stringByAppendingString:@"/preview"] %>">Preview</a>
+        <a href="<%= $authLogoutPath ?: @"/auth/logout" %>">Logout</a>
+      </nav>
+    </header>
+    <main class="notifications-shell__main">
+      <%== $content %>
+    </main>
+  </body>
+</html>

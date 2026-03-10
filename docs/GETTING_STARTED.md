@@ -253,13 +253,16 @@ Phase 12 public auth helper surface:
 
 The sample app in [examples/auth_primitives/README.md](/home/danboyd/git/Arlen/examples/auth_primitives/README.md) demonstrates the local TOTP step-up path plus a stub OIDC provider flow built directly on these core contracts.
 
-Phase 13/14 first-party module quick path:
+Phase 13/14/15 first-party module quick path:
 
 ```bash
 ./build/arlen module add auth
 ./build/arlen module add admin-ui
 ./build/arlen module add jobs
 ./build/arlen module add notifications
+./build/arlen module add storage
+./build/arlen module add ops
+./build/arlen module add search
 ./build/arlen module doctor --json
 ./build/arlen module assets --output-dir build/module_assets
 ./build/arlen module migrate --env development
@@ -271,16 +274,25 @@ module Objective-C sources from `modules/*/Sources` and module templates from
 `templates/modules/<id>/...`; app overrides for module public assets live under
 `public/modules/<id>/...`.
 
-The first-party `auth` module ships default account flows plus SPA-friendly auth/session
-endpoints under `/auth/api/...`. The first-party `admin-ui` module mounts a default
-`/admin` HTML surface and `/admin/api` JSON surface on top of the shared auth/session
-contracts. See [examples/auth_admin_demo/README.md](/home/danboyd/git/Arlen/examples/auth_admin_demo/README.md)
+The first-party `auth` module keeps `/auth/api/...` stable and supports three
+presentation modes:
+
+- `module-ui`: the default stock auth pages with an app-owned layout/context hook
+- `headless`: no module-owned auth HTML, JSON/API-only consumption through `/auth/api/...`
+- `generated-app-ui`: app-owned auth templates scaffolded into `templates/auth/...`
+
+Run `./build/arlen module eject auth-ui --json` to scaffold the `generated-app-ui`
+mode. See [examples/auth_ui_modes/README.md](/home/danboyd/git/Arlen/examples/auth_ui_modes/README.md)
+for the mode-by-mode config and template layout, and
+[examples/auth_admin_demo/README.md](/home/danboyd/git/Arlen/examples/auth_admin_demo/README.md)
 for a sample app that registers an app-owned admin resource into the shared module system.
 
 Phase 14 adds the first-party `jobs` module with a protected `/jobs` HTML dashboard and
-`/jobs/api/...` JSON/OpenAPI surface, plus the first-party `notifications` module with
-`/notifications/api/...` endpoints for definition inspection, queueing, outbox, and inbox
-flows built on the shared jobs/mail contracts.
+`/jobs/api/...` JSON/OpenAPI surface, expands the first-party `notifications` module with
+authenticated inbox/preferences plus admin preview/outbox/test-send flows under
+`/notifications/...` and `/notifications/api/...`, and adds the first-party `storage`
+module with protected `/storage/...` management views plus `/storage/api/...` direct-upload
+and signed-download contracts built on the shared jobs/mail/attachment services.
 
 Trusted proxy allowlist override:
 
@@ -355,6 +367,8 @@ make ci-json-perf
 make ci-dispatch-perf
 make ci-http-parse-perf
 make phase12-confidence
+make phase14-confidence
+make phase15-confidence
 make ci-fault-injection
 make ci-release-certification
 make phase5e-confidence
@@ -371,6 +385,8 @@ make phase5e-confidence
 `make ci-dispatch-perf` runs the Phase 10G dispatch benchmark gate and writes artifacts under `build/release_confidence/phase10g`.
 `make ci-http-parse-perf` runs the Phase 10H HTTP parser benchmark gate and writes artifacts under `build/release_confidence/phase10h`.
 `make phase12-confidence` runs the Phase 12 auth confidence gate and writes artifacts under `build/release_confidence/phase12`.
+`make phase14-confidence` runs the Phase 14 module confidence gate and writes artifacts under `build/release_confidence/phase14`.
+`make phase15-confidence` runs the Phase 15 auth UI confidence gate and writes artifacts under `build/release_confidence/phase15`.
 `make ci-fault-injection` runs the Phase 9I runtime seam fault matrix and writes artifacts under `build/release_confidence/phase9i`.
 `make ci-release-certification` runs the Phase 9J release checklist and writes certification artifacts under `build/release_confidence/phase9j`.
 `make test-unit` and `make test-integration` run with a repo-local GNUstep test home (`.gnustep-home`) to keep defaults/lock files isolated.

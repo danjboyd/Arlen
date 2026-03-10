@@ -1,0 +1,5 @@
+<section class="search-panel">
+  <h2><%= [ctx objectForKey:@"pageHeading"] ?: @"Search" %></h2>
+  <p><%= [ctx objectForKey:@"message"] ?: @"" %></p>
+  <p><a href="<%= [ctx objectForKey:@"searchPrefix"] ?: @"/search" %>">Back to search</a></p>
+</section>

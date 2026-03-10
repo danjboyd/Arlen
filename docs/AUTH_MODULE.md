@@ -1,14 +1,18 @@
 # Auth Module
 
-The first-party `auth` module ships one auth product with two surfaces:
+The first-party `auth` module ships one auth backend contract with three UI
+ownership modes:
 
-- HTML-first account flows under `/auth/...`
-- headless JSON endpoints under `/auth/api/...`
+- `headless`
+- `module-ui`
+- `generated-app-ui`
 
-Both surfaces use the same underlying session, provider, MFA, verification, and
-password-reset contracts.
+All three modes keep the same session, provider-login, MFA, verification, and
+password-reset behavior. The UI mode only changes who owns the HTML surface.
 
-## Default Paths
+## Route Contract
+
+Interactive HTML routes:
 
 - `GET /auth/login`
 - `POST /auth/login`
@@ -24,7 +28,7 @@ password-reset contracts.
 - `POST /auth/mfa/totp/verify`
 - `GET /auth/provider/stub/login`
 
-Headless aliases:
+Stable API-first aliases:
 
 - `GET /auth/api/session`
 - `POST /auth/api/login`
@@ -38,14 +42,62 @@ Headless aliases:
 - `POST /auth/api/mfa/totp/verify`
 - `GET /auth/api/provider/stub/login`
 
+Mode behavior:
+
+- `headless` keeps `/auth/api/...` and provider completion routes active, but
+  suppresses module-owned HTML form/result pages.
+- `module-ui` serves stock auth page bodies through a module-owned default UI,
+  with app-owned layout and partial hooks available.
+- `generated-app-ui` keeps the same backend routes but resolves HTML from
+  app-owned templates under `templates/auth/...` by default.
+
 Provider CTAs and provider API routes are driven by the enabled provider set in
 `authModule.providers`. If `authModule.providers.stub.enabled = NO`, the
-`/auth/login` page no longer renders the stub-provider CTA and the stub routes
-are not registered.
+provider CTA disappears and the stub provider routes are not registered.
 
-## Customization
+## UI Configuration
 
-Use hook classes in `authModule.hooks` for:
+```plist
+authModule = {
+  ui = {
+    mode = "module-ui";
+    layout = "layouts/guest";
+    generatedPagePrefix = "auth";
+    partials = {
+      providerRow = "auth/partials/provider_row";
+      errorBlock = "auth/partials/error_block";
+    };
+    contextClass = "APPAuthUIContextHook";
+  };
+};
+```
+
+Config semantics:
+
+- `ui.mode`
+  - `module-ui` is the default
+  - `headless` disables module-owned HTML routes
+  - `generated-app-ui` resolves page and partial templates from the app prefix
+- `ui.layout`
+  - default `modules/auth/layouts/main`
+  - used by `module-ui`
+  - can be overridden per page through `ALNAuthModuleUIContextHook`
+- `ui.generatedPagePrefix`
+  - default `auth`
+  - used by `generated-app-ui`
+- `ui.partials`
+  - optional fine-grained partial override map such as `providerRow`,
+    `errorBlock`, or `pageWrapper`
+- `ui.contextClass`
+  - optional Objective-C hook class for page-level layout and context injection
+
+Session payloads expose both `ui_mode` and `login_providers`, so app-owned or
+SPA clients can discover the active presentation mode and provider affordances
+without hard-coding them.
+
+## Customization Hooks
+
+Use `authModule.hooks` for auth behavior and policy seams:
 
 - registration policy
 - password policy
@@ -54,13 +106,28 @@ Use hook classes in `authModule.hooks` for:
 - session policy
 - provider mapping
 
-The default-first path keeps schema, routes, templates, and session wiring in
-the module while leaving policy and branding with the app.
+Use `ALNAuthModuleUIContextHook` for page-level UI ownership in `module-ui`:
+
+```objc
+@protocol ALNAuthModuleUIContextHook <NSObject>
+@optional
+- (nullable NSString *)authModuleUILayoutForPage:(NSString *)pageIdentifier
+                                   defaultLayout:(NSString *)defaultLayout
+                                         context:(ALNContext *)context;
+- (nullable NSDictionary *)authModuleUIContextForPage:(NSString *)pageIdentifier
+                                       defaultContext:(NSDictionary *)defaultContext
+                                              context:(ALNContext *)context;
+@end
+```
 
 ## SPA Notes
 
-SPA clients should use `/auth/api/...` rather than scraping the HTML routes.
-Those endpoints are intended to back React or other frontend clients without
-shipping a bundled frontend inside the module. Session payloads also expose
-`login_providers` so SPA clients can discover enabled provider-login affordances
-without hard-coding them.
+SPA or native clients should target `/auth/api/...` directly rather than
+scraping HTML routes. That API surface is the stable headless contract across
+all UI modes.
+
+## Example References
+
+- `headless`: `examples/auth_ui_modes/headless/README.md`
+- `module-ui`: `examples/auth_ui_modes/module_ui/README.md`
+- `generated-app-ui`: `examples/auth_ui_modes/generated_app_ui/README.md`

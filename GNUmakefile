@@ -5,6 +5,7 @@ ROOT_DIR := $(CURDIR)
 GNUSTEP_SH := /usr/GNUstep/System/Library/Makefiles/GNUstep.sh
 BUILD_DIR := $(ROOT_DIR)/build
 GEN_DIR := $(BUILD_DIR)/gen/templates
+MODULE_GEN_DIR := $(BUILD_DIR)/gen/module_templates
 TECH_DEMO_GEN_DIR := $(BUILD_DIR)/gen/tech_demo_templates
 
 EOC_TOOL := $(BUILD_DIR)/eocc
@@ -65,7 +66,7 @@ GNUSTEP_TEST_HOME := $(ROOT_DIR)/.gnustep-home
 UNIT_TEST_SRCS := $(shell find tests/unit -type f -name '*.m' | sort)
 INTEGRATION_TEST_SRCS := $(shell find tests/integration -type f -name '*.m' | sort)
 
-INCLUDE_FLAGS := -Isrc/Arlen -Isrc/Arlen/Core -Isrc/Arlen/Data -Isrc/Arlen/HTTP -Isrc/Arlen/MVC/Controller -Isrc/Arlen/MVC/Middleware -Isrc/Arlen/MVC/Routing -Isrc/Arlen/MVC/Template -Isrc/Arlen/MVC/View -Isrc/Arlen/Support -Isrc/Arlen/Support/third_party/argon2/include -Isrc/Arlen/Support/third_party/argon2/src -Isrc/MojoObjc -Isrc/MojoObjc/Core -Isrc/MojoObjc/Data -Isrc/MojoObjc/HTTP -Isrc/MojoObjc/MVC/Controller -Isrc/MojoObjc/MVC/Middleware -Isrc/MojoObjc/MVC/Routing -Isrc/MojoObjc/MVC/Template -Isrc/MojoObjc/MVC/View -Isrc/MojoObjc/Support -Imodules/auth/Sources -Imodules/admin-ui/Sources -Imodules/jobs/Sources -Imodules/notifications/Sources -I/usr/include/postgresql
+INCLUDE_FLAGS := -Isrc/Arlen -Isrc/Arlen/Core -Isrc/Arlen/Data -Isrc/Arlen/HTTP -Isrc/Arlen/MVC/Controller -Isrc/Arlen/MVC/Middleware -Isrc/Arlen/MVC/Routing -Isrc/Arlen/MVC/Template -Isrc/Arlen/MVC/View -Isrc/Arlen/Support -Isrc/Arlen/Support/third_party/argon2/include -Isrc/Arlen/Support/third_party/argon2/src -Isrc/MojoObjc -Isrc/MojoObjc/Core -Isrc/MojoObjc/Data -Isrc/MojoObjc/HTTP -Isrc/MojoObjc/MVC/Controller -Isrc/MojoObjc/MVC/Middleware -Isrc/MojoObjc/MVC/Routing -Isrc/MojoObjc/MVC/Template -Isrc/MojoObjc/MVC/View -Isrc/MojoObjc/Support -Imodules/auth/Sources -Imodules/admin-ui/Sources -Imodules/jobs/Sources -Imodules/notifications/Sources -Imodules/storage/Sources -Imodules/ops/Sources -Imodules/search/Sources -I/usr/include/postgresql
 EXTRA_OBJC_FLAGS ?=
 ARC_REQUIRED_FLAG := -fobjc-arc
 FEATURE_FLAGS := -DARLEN_ENABLE_YYJSON=$(ARLEN_ENABLE_YYJSON) -DARLEN_ENABLE_LLHTTP=$(ARLEN_ENABLE_LLHTTP)
@@ -81,7 +82,7 @@ ifneq ($(findstring -fno-objc-arc,$(OBJC_FLAGS)),)
 $(error OBJC_FLAGS cannot disable ARC)
 endif
 
-.PHONY: all eocc transpile tech-demo-transpile generated-compile arlen boomhauer tech-demo-server api-reference-server auth-primitives-server migration-sample-server arlen-data-example json-perf-bench dispatch-perf-bench http-parse-perf-bench route-match-perf-bench backend-contract-matrix test-data-layer dev-server tech-demo smoke-render smoke routes build-tests test test-unit test-integration perf perf-fast parity-phaseb perf-phasec perf-phased deploy-smoke phase5e-confidence phase12-confidence phase13-confidence ci-quality ci-sanitizers ci-fault-injection ci-release-certification ci-json-abstraction ci-json-perf ci-dispatch-perf ci-http-parse-perf ci-route-match-perf ci-backend-parity-matrix ci-protocol-adversarial ci-syscall-faults ci-allocation-faults ci-soak ci-chaos-restart ci-static-analysis ci-blob-throughput ci-phase11-protocol-adversarial ci-phase11-fuzz ci-phase11-live-adversarial ci-phase11-sanitizers ci-phase11 ci-docs check docs-api docs-html docs-serve clean
+.PHONY: all eocc transpile module-transpile tech-demo-transpile generated-compile arlen boomhauer tech-demo-server api-reference-server auth-primitives-server migration-sample-server arlen-data-example json-perf-bench dispatch-perf-bench http-parse-perf-bench route-match-perf-bench backend-contract-matrix test-data-layer dev-server tech-demo smoke-render smoke routes build-tests test test-unit test-integration perf perf-fast parity-phaseb perf-phasec perf-phased deploy-smoke phase5e-confidence phase12-confidence phase13-confidence phase14-confidence phase15-confidence ci-quality ci-sanitizers ci-fault-injection ci-release-certification ci-json-abstraction ci-json-perf ci-dispatch-perf ci-http-parse-perf ci-route-match-perf ci-backend-parity-matrix ci-protocol-adversarial ci-syscall-faults ci-allocation-faults ci-soak ci-chaos-restart ci-static-analysis ci-blob-throughput ci-phase11-protocol-adversarial ci-phase11-fuzz ci-phase11-live-adversarial ci-phase11-sanitizers ci-phase11 ci-docs check docs-api docs-html docs-serve clean
 
 all: eocc transpile generated-compile arlen boomhauer
 
@@ -96,6 +97,25 @@ eocc: $(EOC_TOOL)
 transpile: eocc
 >mkdir -p $(GEN_DIR)
 >$(EOC_TOOL) --template-root $(TEMPLATE_ROOT) --output-dir $(GEN_DIR) $(TEMPLATE_FILES)
+
+module-transpile: eocc
+>rm -rf $(MODULE_GEN_DIR)
+>mkdir -p $(MODULE_GEN_DIR)
+>if [ -d modules ]; then \
+>  while IFS= read -r module_root; do \
+>    module_id="$$(basename "$$module_root")"; \
+>    module_template_root="$$module_root/Resources/Templates"; \
+>    module_output_root="$(MODULE_GEN_DIR)/$$module_id"; \
+>    if [ ! -d "$$module_template_root" ]; then \
+>      continue; \
+>    fi; \
+>    mapfile -t module_template_files < <(find "$$module_template_root" -type f -name '*.html.eoc' | sort); \
+>    if [ $${#module_template_files[@]} -eq 0 ]; then \
+>      continue; \
+>    fi; \
+>    $(EOC_TOOL) --template-root "$$module_template_root" --output-dir "$$module_output_root" --logical-prefix "modules/$$module_id" "$${module_template_files[@]}"; \
+>  done < <(find modules -mindepth 1 -maxdepth 1 -type d | sort); \
+>fi
 
 tech-demo-transpile: eocc
 >mkdir -p $(TECH_DEMO_GEN_DIR)
@@ -196,26 +216,29 @@ $(SMOKE_RENDER_TOOL): tools/eoc_smoke_render.m transpile
 
 smoke-render: $(SMOKE_RENDER_TOOL)
 
-$(UNIT_TEST_BIN): $(UNIT_TEST_SRCS) $(FRAMEWORK_SRCS) $(MODULE_SRCS) transpile
+$(UNIT_TEST_BIN): $(UNIT_TEST_SRCS) $(FRAMEWORK_SRCS) $(MODULE_SRCS) transpile module-transpile
 >mkdir -p $(UNIT_TEST_BUNDLE)/Resources
 >source $(GNUSTEP_SH) && generated_files="$$(find $(GEN_DIR) -type f -name '*.m' | sort)"; \
->clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) $(UNIT_TEST_SRCS) $(FRAMEWORK_SRCS) $(MODULE_SRCS) $$generated_files -shared -fPIC -o $(UNIT_TEST_BIN) $$(gnustep-config --base-libs) -ldl -lcrypto -lXCTest
+>module_generated_files="$$(find $(MODULE_GEN_DIR) -type f -name '*.m' 2>/dev/null | sort)"; \
+>clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) $(UNIT_TEST_SRCS) $(FRAMEWORK_SRCS) $(MODULE_SRCS) $$generated_files $$module_generated_files -shared -fPIC -o $(UNIT_TEST_BIN) $$(gnustep-config --base-libs) -ldl -lcrypto -lXCTest
 >cp tests/Info-gnustep-unit.plist $(UNIT_TEST_BUNDLE)/Resources/Info-gnustep.plist
 
-$(INTEGRATION_TEST_BIN): $(INTEGRATION_TEST_SRCS) $(FRAMEWORK_SRCS) $(MODULE_SRCS) boomhauer tech-demo-server api-reference-server auth-primitives-server migration-sample-server
+$(INTEGRATION_TEST_BIN): $(INTEGRATION_TEST_SRCS) $(FRAMEWORK_SRCS) $(MODULE_SRCS) transpile module-transpile boomhauer tech-demo-server api-reference-server auth-primitives-server migration-sample-server
 >mkdir -p $(INTEGRATION_TEST_BUNDLE)/Resources
->source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) $(INTEGRATION_TEST_SRCS) $(FRAMEWORK_SRCS) $(MODULE_SRCS) -shared -fPIC -o $(INTEGRATION_TEST_BIN) $$(gnustep-config --base-libs) -ldl -lcrypto -lXCTest
+>source $(GNUSTEP_SH) && generated_files="$$(find $(GEN_DIR) -type f -name '*.m' | sort)"; \
+>module_generated_files="$$(find $(MODULE_GEN_DIR) -type f -name '*.m' 2>/dev/null | sort)"; \
+>clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) $(INTEGRATION_TEST_SRCS) $(FRAMEWORK_SRCS) $(MODULE_SRCS) $$generated_files $$module_generated_files -shared -fPIC -o $(INTEGRATION_TEST_BIN) $$(gnustep-config --base-libs) -ldl -lcrypto -lXCTest
 >cp tests/Info-gnustep-integration.plist $(INTEGRATION_TEST_BUNDLE)/Resources/Info-gnustep.plist
 
 build-tests: $(UNIT_TEST_BIN) $(INTEGRATION_TEST_BIN)
 
 test-unit: $(UNIT_TEST_BIN)
 >mkdir -p $(GNUSTEP_TEST_HOME)/GNUstep/Defaults/.lck
->HOME="$(GNUSTEP_TEST_HOME)" source $(GNUSTEP_SH) && LD_PRELOAD="$(XCTEST_LD_PRELOAD)" ASAN_OPTIONS="$(ASAN_OPTIONS)" UBSAN_OPTIONS="$(UBSAN_OPTIONS)" xctest $(UNIT_TEST_BUNDLE)
+>export HOME="$(GNUSTEP_TEST_HOME)"; export GNUSTEP_USER_ROOT="$(GNUSTEP_TEST_HOME)/GNUstep"; source $(GNUSTEP_SH) && LD_PRELOAD="$(XCTEST_LD_PRELOAD)" ASAN_OPTIONS="$(ASAN_OPTIONS)" UBSAN_OPTIONS="$(UBSAN_OPTIONS)" xctest $(UNIT_TEST_BUNDLE)
 
 test-integration: $(INTEGRATION_TEST_BIN)
 >mkdir -p $(GNUSTEP_TEST_HOME)/GNUstep/Defaults/.lck
->HOME="$(GNUSTEP_TEST_HOME)" source $(GNUSTEP_SH) && LD_PRELOAD="$(XCTEST_LD_PRELOAD)" ASAN_OPTIONS="$(ASAN_OPTIONS)" UBSAN_OPTIONS="$(UBSAN_OPTIONS)" xctest $(INTEGRATION_TEST_BUNDLE)
+>export HOME="$(GNUSTEP_TEST_HOME)"; export GNUSTEP_USER_ROOT="$(GNUSTEP_TEST_HOME)/GNUstep"; source $(GNUSTEP_SH) && LD_PRELOAD="$(XCTEST_LD_PRELOAD)" ASAN_OPTIONS="$(ASAN_OPTIONS)" UBSAN_OPTIONS="$(UBSAN_OPTIONS)" xctest $(INTEGRATION_TEST_BUNDLE)
 
 test: test-unit test-integration
 
@@ -248,6 +271,12 @@ phase12-confidence:
 
 phase13-confidence:
 >bash ./tools/ci/run_phase13_confidence.sh
+
+phase14-confidence:
+>bash ./tools/ci/run_phase14_confidence.sh
+
+phase15-confidence:
+>bash ./tools/ci/run_phase15_confidence.sh
 
 ci-quality:
 >bash ./tools/ci/run_phase5e_quality.sh

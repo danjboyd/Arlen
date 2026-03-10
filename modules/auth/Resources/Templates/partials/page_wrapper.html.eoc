@@ -1,0 +1,11 @@
+<section class="auth-card" data-auth-page="<%= [ctx objectForKey:@"authPageIdentifier"] ?: @"" %>">
+  <header class="auth-page-header">
+    <h1><%= [ctx objectForKey:@"pageTitle"] %></h1>
+  </header>
+  <% if (!ALNEOCInclude(out, ctx, [ctx objectForKey:@"authPartialMessageBlock"], error)) { return nil; } %>
+  <% if (!ALNEOCInclude(out, ctx, [ctx objectForKey:@"authPartialErrorBlock"], error)) { return nil; } %>
+  <% NSString *bodyTemplate = [ctx objectForKey:@"authPageBodyTemplate"] ?: @""; %>
+  <% if ([bodyTemplate length] > 0) { %>
+    <% if (!ALNEOCInclude(out, ctx, bodyTemplate, error)) { return nil; } %>
+  <% } %>
+</section>

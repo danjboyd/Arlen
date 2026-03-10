@@ -141,6 +141,50 @@
   }
 }
 
+- (void)testDoctorDiagnosticsRemainAppendableAfterConfigMerge {
+  NSString *appRoot = [self createTempDirectoryWithPrefix:@"phase13d-doctor"];
+  XCTAssertNotNil(appRoot);
+  if (appRoot == nil) {
+    return;
+  }
+
+  @try {
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"config/modules.plist"]
+                          content:@"{\n"
+                                  "  modules = (\n"
+                                  "    { identifier = \"alpha\"; path = \"modules/alpha\"; enabled = YES; },\n"
+                                  "    { identifier = \"beta\"; path = \"modules/beta\"; enabled = YES; }\n"
+                                  "  );\n"
+                                  "}\n"]);
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"modules/alpha/module.plist"]
+                          content:@"{\n"
+                                  "  identifier = \"alpha\";\n"
+                                  "  version = \"1.0.0\";\n"
+                                  "  principalClass = \"Phase13AAlphaModule\";\n"
+                                  "}\n"]);
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"modules/beta/module.plist"]
+                          content:@"{\n"
+                                  "  identifier = \"beta\";\n"
+                                  "  version = \"1.0.0\";\n"
+                                  "  principalClass = \"Phase13ABetaModule\";\n"
+                                  "  dependencies = (\n"
+                                  "    { identifier = \"alpha\"; version = \">= 1.0.0\"; }\n"
+                                  "  );\n"
+                                  "}\n"]);
+
+    NSError *error = nil;
+    NSArray<NSDictionary *> *diagnostics =
+        [ALNModuleSystem doctorDiagnosticsAtAppRoot:appRoot
+                                             config:@{ @"appRoot" : appRoot }
+                                              error:&error];
+    XCTAssertNotNil(diagnostics);
+    XCTAssertNil(error);
+    XCTAssertTrue([[diagnostics valueForKey:@"code"] containsObject:@"modules_loaded"]);
+  } @finally {
+    [[NSFileManager defaultManager] removeItemAtPath:appRoot error:nil];
+  }
+}
+
 - (void)testCompatibilityChecksFailClosed {
   NSString *appRoot = [self createTempDirectoryWithPrefix:@"phase13d-compat"];
   XCTAssertNotNil(appRoot);

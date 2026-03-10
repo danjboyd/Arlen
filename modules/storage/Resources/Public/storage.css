@@ -1,0 +1,99 @@
+.storage-shell__header {
+  align-items: center;
+  background: #0f172a;
+  color: #f8fafc;
+  display: flex;
+  justify-content: space-between;
+  padding: 1.25rem 1.5rem;
+}
+
+.storage-shell__eyebrow {
+  font-size: 0.75rem;
+  letter-spacing: 0.12em;
+  margin: 0;
+  text-transform: uppercase;
+}
+
+.storage-shell__title {
+  margin: 0.25rem 0 0;
+}
+
+.storage-shell__nav {
+  display: flex;
+  gap: 1rem;
+}
+
+.storage-shell__nav a,
+.storage-actions a {
+  color: inherit;
+}
+
+.storage-shell__main {
+  background: #e2e8f0;
+  min-height: 100vh;
+  padding: 1.5rem;
+}
+
+.storage-metric-grid,
+.storage-resource-grid,
+.storage-detail-grid {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+}
+
+.storage-panel,
+.storage-metric-card {
+  background: #fff;
+  border: 1px solid #cbd5e1;
+  border-radius: 0.75rem;
+  padding: 1rem;
+}
+
+.storage-panel-heading {
+  align-items: baseline;
+  display: flex;
+  justify-content: space-between;
+}
+
+.storage-table {
+  border-collapse: collapse;
+  margin-top: 1rem;
+  width: 100%;
+}
+
+.storage-table th,
+.storage-table td {
+  border-bottom: 1px solid #cbd5e1;
+  padding: 0.75rem;
+  text-align: left;
+}
+
+.storage-toolbar,
+.storage-actions {
+  align-items: end;
+  display: flex;
+  gap: 0.75rem;
+  margin: 1rem 0;
+}
+
+.storage-toolbar label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.storage-note {
+  color: #475569;
+  font-size: 0.9rem;
+}
+
+.storage-definition-list {
+  display: grid;
+  gap: 0.5rem 1rem;
+  grid-template-columns: max-content 1fr;
+}
+
+.storage-definition-list dt {
+  font-weight: 700;
+}

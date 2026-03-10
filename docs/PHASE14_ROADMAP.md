@@ -1,7 +1,7 @@
 # Arlen Phase 14 Roadmap
 
-Status: Active  
-Last updated: 2026-03-09
+Status: Complete
+Last updated: 2026-03-10
 
 Related docs:
 - `docs/PHASE13_ROADMAP.md`
@@ -65,7 +65,12 @@ Phase 14 starts from the current tree reality:
 - `14A` complete: first-party `jobs` module foundation shipped.
 - `14B` complete: scheduler, queue operations, protected `/jobs` HTML, and `/jobs/api` JSON/OpenAPI surface shipped.
 - `14C` complete: first-party `notifications` foundation on top of jobs + mail shipped.
-- `14D` through `14I` remain.
+- `14D` complete: notification inbox/outbox HTML, preview/test-send flows, preferences, and `admin-ui` resources shipped.
+- `14E` complete: first-party `storage` collection/runtime foundation and signed token flows shipped.
+- `14F` complete: direct-upload flows, variant jobs, storage-management HTML/JSON surfaces, and `admin-ui` storage resources shipped.
+- `14G` complete: first-party `ops` module shipped with protected dashboard, JSON diagnostics, and OpenAPI summary surface.
+- `14H` complete: first-party `search` module shipped with job-backed reindexing, admin auto-resource indexing, and ops/admin visibility.
+- `14I` complete: Phase 14 docs, sample app, and `phase14-confidence` artifact gate shipped.
 
 ## 2. Design Principles
 
@@ -249,7 +254,7 @@ Acceptance (required):
 
 ## 5.4 Phase 14D: Notifications Channels + Previews + Preferences + Admin Integration
 
-Status: Planned
+Status: Complete
 
 Deliverables:
 
@@ -266,6 +271,15 @@ Deliverables:
   - per-user preferences
 - Integrate notification history and preview into `admin-ui`.
 
+Delivered:
+
+- expanded the first-party `notifications` module with default email and in-app delivery product flows
+- added preview and test-send runtime APIs that reuse the same definition/payload contract as actual delivery
+- added per-recipient preference persistence plus the optional `ALNNotificationPreferenceHook` seam
+- shipped protected HTML routes under `/notifications/...` for inbox, preferences, outbox, preview, and test-send flows
+- shipped protected JSON routes under `/notifications/api/...` for definitions, inbox, queueing, preview, test-send, outbox, and preferences
+- added `admin-ui` resources for notification outbox history and notification-definition inspection
+
 Acceptance (required):
 
 - `tests/unit/Phase14DTests.m`:
@@ -277,7 +291,7 @@ Acceptance (required):
 
 ## 5.5 Phase 14E: Storage Module Foundation
 
-Status: Planned
+Status: Complete
 
 Deliverables:
 
@@ -293,6 +307,14 @@ Deliverables:
 - Add signed upload/download URL or token contracts suitable for browser and API clients.
 - Add config defaults for local development roots, public/private collections, and cleanup windows.
 
+Delivered:
+
+- vendored `modules/storage/` with `ALNStorageCollectionDefinition` and `ALNStorageCollectionProvider` contracts on top of `ALNAttachmentAdapter`
+- added deterministic collection metadata normalization for content-type limits, size limits, retention metadata, visibility, and variant definitions
+- added runtime-managed object catalog, upload-session state, and signed upload/download token flows through `ALNSecurityPrimitives`
+- shipped runtime APIs for collection registration, upload-session creation, direct object persistence, signed download-token issuance, object deletion, and dashboard summaries
+- registered default `admin-ui` resource metadata so installed apps can browse storage objects without custom admin wiring
+
 Acceptance (required):
 
 - `tests/unit/Phase14ETests.m`:
@@ -304,7 +326,7 @@ Acceptance (required):
 
 ## 5.6 Phase 14F: Uploads + Media Variants + Storage Management UX
 
-Status: Planned
+Status: Complete
 
 Deliverables:
 
@@ -322,6 +344,14 @@ Deliverables:
 - Add HTML and JSON surfaces plus OpenAPI for upload and management flows.
 - Integrate storage collections into `admin-ui` through shared resource metadata.
 
+Delivered:
+
+- added protected HTML storage-management routes under `/storage/...` for dashboard, collection listing, object detail, delete, and variant-regeneration flows
+- added `/storage/api/...` JSON/OpenAPI routes for collections, object inspection, upload-session creation, browser-style direct upload, delete, variant regeneration, and download-token issuance
+- added async variant generation through the shared jobs runtime via `storage.generate_variant`
+- added signed download handling under `/storage/api/download/:token` so browser and API clients can fetch stored objects with token-based access
+- integrated storage records into `admin-ui` with list/detail metadata plus `delete` and `regenerate_variants` actions
+
 Acceptance (required):
 
 - `tests/unit/Phase14FTests.m`:
@@ -333,7 +363,7 @@ Acceptance (required):
 
 ## 5.7 Phase 14G: Ops Module Foundation + Protected Runtime Dashboard
 
-Status: Planned
+Status: Complete
 
 Deliverables:
 
@@ -349,6 +379,12 @@ Deliverables:
 - Add OpenAPI output and machine-readable diagnostics for automation.
 - Keep `ops` additive to existing low-level endpoints such as `/healthz`, `/readyz`, `/metrics`, and `/clusterz`.
 
+Delivered:
+
+- vendored `modules/ops/` with protected `/ops` HTML and `/ops/api/{summary,signals,metrics,openapi}` JSON/OpenAPI routes
+- shared operator/admin + AAL2 guard behavior for both HTML and JSON surfaces
+- dashboard summary composition for health/readiness/live, metrics, jobs, notifications, storage, optional search, and OpenAPI metadata
+
 Acceptance (required):
 
 - `tests/unit/Phase14GTests.m`:
@@ -360,7 +396,7 @@ Acceptance (required):
 
 ## 5.8 Phase 14H: Search Module Foundation + Admin/Search Integration
 
-Status: Planned
+Status: Complete
 
 Deliverables:
 
@@ -379,6 +415,13 @@ Deliverables:
   - reindex controls for operators/admins
 - Integrate search with `admin-ui` resource metadata so admin resources can opt into indexing without separate duplicate registration when practical.
 
+Delivered:
+
+- vendored `modules/search/` with `ALNSearchResourceDefinition` and `ALNSearchResourceProvider`
+- job-backed `search.reindex` execution through the shared jobs module runtime
+- public search query routes, protected reindex routes, and generated OpenAPI exposure
+- `admin-ui` auto-resource indexing plus shared `search_indexes` admin resource and ops summary integration
+
 Acceptance (required):
 
 - `tests/unit/Phase14HTests.m`:
@@ -390,7 +433,7 @@ Acceptance (required):
 
 ## 5.9 Phase 14I: Hardening + Docs + Sample App + Confidence
 
-Status: Planned
+Status: Complete
 
 Deliverables:
 
@@ -414,6 +457,12 @@ Deliverables:
   - asset packaging
   - dashboard protection
   - JSON/OpenAPI contract generation
+
+Delivered:
+
+- `examples/phase14_modules_demo/` sample app installing `auth`, `admin-ui`, `jobs`, `notifications`, `storage`, `ops`, and `search`
+- `docs/OPS_MODULE.md` and `docs/SEARCH_MODULE.md` plus updated bootstrap/reference docs
+- `make phase14-confidence` and artifact generation under `build/release_confidence/phase14/`
 
 Acceptance (required):
 

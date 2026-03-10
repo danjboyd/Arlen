@@ -19,6 +19,10 @@ body {
   padding: 1.5rem;
 }
 
+.auth-page-header h1 {
+  margin: 0;
+}
+
 .auth-actions {
   display: flex;
   gap: 0.75rem;
@@ -82,6 +86,11 @@ body {
   border-radius: 14px;
   background: #edf6f0;
   color: #275742;
+}
+
+.auth-result-title {
+  margin-top: 1rem;
+  font-weight: 700;
 }
 
 .auth-code {

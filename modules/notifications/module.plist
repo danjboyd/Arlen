@@ -19,6 +19,12 @@
         providers = {
           classes = ();
         };
+        preferences = {
+          hookClass = "";
+        };
+        adminUI = {
+          resourceProviderClass = "ALNNotificationsAdminResourceProvider";
+        };
       };
     };
     requiredKeys = (

@@ -38,9 +38,14 @@
         <% for (NSDictionary *field in listFields) { %>
           <% NSString *name = [field objectForKey:@"name"]; %>
           <% id value = [record objectForKey:name] ?: @""; %>
+          <% NSString *kind = [[field objectForKey:@"kind"] lowercaseString]; %>
           <td>
             <% if (columnIndex == 0) { %>
               <a href="<%= [paths objectForKey:@"html_index"] %>/<%= [record objectForKey:identifierField] %>"><%= [record objectForKey:primaryField] ?: value %></a>
+            <% } else if ([kind isEqual:@"link"] && [value isKindOfClass:[NSDictionary class]]) { %>
+              <a href="<%= [value objectForKey:@"href"] ?: @"#" %>"><%= [value objectForKey:@"label"] ?: [value objectForKey:@"href"] ?: @"" %></a>
+            <% } else if ([kind isEqual:@"link"] && [value isKindOfClass:[NSString class]]) { %>
+              <a href="<%= value %>"><%= value %></a>
             <% } else if ([value isKindOfClass:[NSArray class]]) { %>
               <%= [value componentsJoinedByString:@", "] %>
             <% } else if ([value respondsToSelector:@selector(boolValue)]) { %>

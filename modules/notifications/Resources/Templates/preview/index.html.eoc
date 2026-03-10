@@ -1,0 +1,66 @@
+<% NSDictionary *preview = [ctx objectForKey:@"preview"] ?: @{}; %>
+<% NSDictionary *form = [ctx objectForKey:@"previewForm"] ?: @{}; %>
+<section class="notifications-panel">
+  <form class="notifications-form" method="get" action="<%= [$notificationsPrefix stringByAppendingString:@"/preview"] %>">
+    <label>
+      <span>Notification</span>
+      <select name="notification">
+        <% for (NSDictionary *definition in ([ctx objectForKey:@"definitions"] ?: @[])) { %>
+          <% NSString *identifier = [definition objectForKey:@"identifier"] ?: @""; %>
+          <option value="<%= identifier %>" <%= [identifier isEqual:[ctx objectForKey:@"selectedNotification"]] ? @"selected" : @"" %>><%= [definition objectForKey:@"title"] ?: identifier %></option>
+        <% } %>
+      </select>
+    </label>
+    <label>
+      <span>Recipient Subject</span>
+      <input type="text" name="recipient" value="<%= [form objectForKey:@"recipient"] ?: @"" %>">
+    </label>
+    <label>
+      <span>Email</span>
+      <input type="email" name="email" value="<%= [form objectForKey:@"email"] ?: @"" %>">
+    </label>
+    <label>
+      <span>Name</span>
+      <input type="text" name="name" value="<%= [form objectForKey:@"name"] ?: @"" %>">
+    </label>
+    <button type="submit">Render preview</button>
+  </form>
+</section>
+
+<section class="notifications-detail-grid">
+  <article class="notifications-panel">
+    <h3>Email Preview</h3>
+    <dl class="notifications-definition-list">
+      <dt>Subject</dt>
+      <dd><%= [[preview objectForKey:@"email"] objectForKey:@"subject"] ?: @"" %></dd>
+      <dt>Text Body</dt>
+      <dd><%= [[preview objectForKey:@"email"] objectForKey:@"textBody"] ?: @"" %></dd>
+      <dt>Recipients</dt>
+      <dd><%= [[[preview objectForKey:@"email"] objectForKey:@"to"] ?: @[] componentsJoinedByString:@", "] %></dd>
+    </dl>
+  </article>
+
+  <article class="notifications-panel">
+    <h3>In-App Preview</h3>
+    <dl class="notifications-definition-list">
+      <dt>Title</dt>
+      <dd><%= [[preview objectForKey:@"in_app"] objectForKey:@"title"] ?: @"" %></dd>
+      <dt>Body</dt>
+      <dd><%= [[preview objectForKey:@"in_app"] objectForKey:@"body"] ?: @"" %></dd>
+      <dt>Recipients</dt>
+      <dd><%= [[preview objectForKey:@"recipients"] ?: @[] componentsJoinedByString:@", "] %></dd>
+    </dl>
+  </article>
+</section>
+
+<section class="notifications-panel">
+  <h3>Test Send</h3>
+  <form class="notifications-form" method="post" action="<%= [$notificationsPrefix stringByAppendingString:@"/test-send"] %>">
+    <input type="hidden" name="csrf_token" value="<%= [ctx objectForKey:@"csrfToken"] %>">
+    <input type="hidden" name="notification" value="<%= [ctx objectForKey:@"selectedNotification"] ?: @"" %>">
+    <input type="hidden" name="recipient" value="<%= [form objectForKey:@"recipient"] ?: @"" %>">
+    <input type="hidden" name="email" value="<%= [form objectForKey:@"email"] ?: @"" %>">
+    <input type="hidden" name="name" value="<%= [form objectForKey:@"name"] ?: @"" %>">
+    <button type="submit">Run test send</button>
+  </form>
+</section>

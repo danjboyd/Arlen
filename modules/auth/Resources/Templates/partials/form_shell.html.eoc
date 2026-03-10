@@ -1,0 +1,25 @@
+<% NSDictionary *form = [ctx objectForKey:@"authFormDescriptor"] ?: @{}; %>
+<% NSString *method = [[form objectForKey:@"method"] ?: @"post" lowercaseString]; %>
+<% NSString *action = [form objectForKey:@"action"] ?: @""; %>
+<form method="<%= method %>" action="<%= action %>">
+  <% if (![method isEqualToString:@"get"]) { %>
+    <input type="hidden" name="csrf_token" value="<%= [ctx objectForKey:@"csrfToken"] ?: @"" %>">
+  <% } %>
+  <% NSArray *hiddenFields = [form objectForKey:@"hidden"] ?: @[]; %>
+  <% for (NSDictionary *field in hiddenFields) { %>
+    <input type="hidden" name="<%= [field objectForKey:@"name"] ?: @"" %>" value="<%= [field objectForKey:@"value"] ?: @"" %>">
+  <% } %>
+  <% NSArray *fields = [form objectForKey:@"fields"] ?: @[]; %>
+  <% for (NSDictionary *field in fields) { %>
+    <% NSMutableDictionary *fieldCtx = [NSMutableDictionary dictionaryWithDictionary:(NSDictionary *)ctx]; %>
+    <% [fieldCtx setObject:(field ?: @{}) forKey:@"authField"]; %>
+    <% if (!ALNEOCInclude(out, fieldCtx, [ctx objectForKey:@"authPartialFieldRow"], error)) { return nil; } %>
+  <% } %>
+  <div class="auth-actions">
+    <button class="auth-button" type="submit"><%= [form objectForKey:@"submitLabel"] ?: @"Continue" %></button>
+    <% NSArray *links = [form objectForKey:@"links"] ?: @[]; %>
+    <% for (NSDictionary *link in links) { %>
+      <a class="auth-link" href="<%= [link objectForKey:@"href"] ?: @"" %>"><%= [link objectForKey:@"label"] ?: @"Continue" %></a>
+    <% } %>
+  </div>
+</form>

@@ -1,0 +1,49 @@
+<section class="search-panel">
+  <form method="get" action="<%= [$activeResource length] > 0 ? [NSString stringWithFormat:@"%@/resources/%@", $searchPrefix ?: @"/search", $activeResource] : ($searchPrefix ?: @"/search") %>">
+    <label for="q">Query</label>
+    <input id="q" type="text" name="q" value="<%= $query ?: @"" %>" placeholder="Search indexed records">
+    <button type="submit">Search</button>
+  </form>
+  <% if ([[$searchAdminAllowed description] boolValue]) { %>
+    <form method="post" action="<%= [$activeResource length] > 0 ? [NSString stringWithFormat:@"%@/resources/%@/reindex", $searchPrefix ?: @"/search", $activeResource] : [NSString stringWithFormat:@"%@/reindex", $searchPrefix ?: @"/search"] %>">
+      <input type="hidden" name="csrf_token" value="<%= $csrfToken ?: @"" %>">
+      <button type="submit">Queue reindex</button>
+    </form>
+  <% } %>
+</section>
+
+<section class="search-panel">
+  <h2>Resources</h2>
+  <% for (NSDictionary *resource in ($searchResources ?: @[])) { %>
+    <div class="search-row">
+      <strong><a href="<%= [NSString stringWithFormat:@"%@/resources/%@", $searchPrefix ?: @"/search", resource[@"identifier"] ?: @""] %>"><%= resource[@"label"] ?: resource[@"identifier"] ?: @"resource" %></a></strong>
+      <span><code><%= resource[@"identifier"] ?: @"" %></code></span>
+      <% if ([resource[@"adminIntegrated"] boolValue]) { %>
+        <span>admin-integrated</span>
+      <% } %>
+    </div>
+  <% } %>
+</section>
+
+<section class="search-panel">
+  <h2>Results</h2>
+  <% if ([$errors count] > 0) { %>
+    <% for (NSString *entry in ($errors ?: @[])) { %>
+      <p class="search-error"><%= entry %></p>
+    <% } %>
+  <% } %>
+  <p><%= [[($searchResult[@"total"] ?: @0) stringValue] ?: @"0" copy] %> indexed matches</p>
+  <% for (NSDictionary *result in ($searchResult[@"results"] ?: @[])) { %>
+    <article class="search-result">
+      <h3>
+        <% if ([result[@"path"] length] > 0) { %>
+          <a href="<%= result[@"path"] %>"><%= result[@"title"] ?: result[@"recordID"] ?: @"result" %></a>
+        <% } else { %>
+          <%= result[@"title"] ?: result[@"recordID"] ?: @"result" %>
+        <% } %>
+      </h3>
+      <p><%= result[@"summary"] ?: @"" %></p>
+      <p class="search-meta"><code><%= result[@"resource"] ?: @"" %></code> score <%= [result[@"score"] stringValue] %></p>
+    </article>
+  <% } %>
+</section>

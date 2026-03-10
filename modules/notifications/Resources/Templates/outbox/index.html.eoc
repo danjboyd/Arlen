@@ -1,0 +1,25 @@
+<% NSArray *outbox = [ctx objectForKey:@"outbox"] ?: @[]; %>
+<section class="notifications-panel">
+  <table class="notifications-table">
+    <thead>
+      <tr>
+        <th>Notification</th>
+        <th>Channel</th>
+        <th>Recipient</th>
+        <th>Status</th>
+        <th>Delivery</th>
+      </tr>
+    </thead>
+    <tbody>
+      <% for (NSDictionary *entry in outbox) { %>
+        <tr>
+          <td><%= [entry objectForKey:@"notification"] %></td>
+          <td><%= [entry objectForKey:@"channel"] %></td>
+          <td><%= [entry objectForKey:@"recipient"] %></td>
+          <td><%= [entry objectForKey:@"status"] %></td>
+          <td><%= [entry objectForKey:@"deliveryID"] %></td>
+        </tr>
+      <% } %>
+    </tbody>
+  </table>
+</section>

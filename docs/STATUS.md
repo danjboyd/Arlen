@@ -1,6 +1,6 @@
 # Arlen Status Checkpoint
 
-Last updated: 2026-03-09
+Last updated: 2026-03-10
 
 ## Benchmark Handoff (2026-02-24 EOD)
 
@@ -62,9 +62,53 @@ Last updated: 2026-03-09
 - Phase 11F: complete (2026-03-06)
 - Phase 12: complete (12A/12B/12C complete on 2026-03-06; 12D/12E/12F complete on 2026-03-09)
 - Phase 13: complete (13A/13B/13C/13D/13E/13F/13G/13H/13I complete on 2026-03-09)
-- Phase 14: active (14A/14B/14C complete; 14D/14E/14F/14G/14H/14I remaining)
+- Phase 14: complete (14A/14B/14C/14D/14E/14F/14G/14H/14I complete on 2026-03-10)
+- Phase 15: complete (15A/15B/15C/15D/15E complete on 2026-03-10)
+
+## Completed Today (2026-03-10)
+
+- Completed Phase 15 auth UI integration closeout:
+  - finished the Phase 15 docs/status pass across `README.md`, `docs/README.md`, `docs/CLI_REFERENCE.md`, `docs/GETTING_STARTED.md`, `docs/AUTH_MODULE.md`, and `docs/AUTH_UI_INTEGRATION_MODES.md`
+  - added `examples/auth_ui_modes/` covering `headless`, `module-ui`, and `generated-app-ui`
+  - added `make phase15-confidence` with artifacts under `build/release_confidence/phase15/`
+  - added focused HTTP integration coverage for the auth UI mode split in `tests/integration/Phase13AuthAdminIntegrationTests.m`
+- Completed Phase 14G ops module foundation and protected runtime dashboard:
+  - added vendored `modules/ops/` with protected `/ops` HTML plus `/ops/api/{summary,signals,metrics,openapi}` JSON/OpenAPI routes
+  - composed runtime health/readiness/live signals, metrics, jobs, notifications, storage, and search summaries into one operator/admin surface
+  - added `Phase14GTests.m` and `Phase14OpsIntegrationTests.m` coverage for deterministic summaries and protected operator flows
+- Completed Phase 14H search module foundation and admin/search integration:
+  - added vendored `modules/search/` with explicit searchable-resource contracts, public query routes, and protected reindex routes
+  - added job-backed `search.reindex` execution, `admin-ui` auto-resource indexing, shared `search_indexes` admin resource, and ops summary integration
+  - added `Phase14HTests.m` and `Phase14SearchIntegrationTests.m` coverage for metadata normalization, fail-closed query parsing, and reindex/admin/ops visibility
+- Completed Phase 14I docs, sample app, and confidence artifacts:
+  - added `examples/phase14_modules_demo/` showing `auth`, `admin-ui`, `jobs`, `notifications`, `storage`, `ops`, and `search` installed together
+  - added `docs/OPS_MODULE.md` and `docs/SEARCH_MODULE.md` and updated the module/bootstrap documentation path
+  - added `make phase14-confidence` with artifact generation under `build/release_confidence/phase14/`
+- Completed Phase 14D notifications channels, previews, preferences, and admin integration:
+  - expanded `modules/notifications/` with inbox/preferences/outbox/preview/test-send HTML routes plus matching JSON routes
+  - added deterministic preview/test-send runtime APIs, per-recipient preference storage, and optional `ALNNotificationPreferenceHook`
+  - added `admin-ui` resources for notification outbox history and notification-definition inspection
+  - added `Phase14DTests.m` and `Phase14NotificationsIntegrationTests.m` coverage for preview/delivery parity, preference evaluation, inbox access control, and admin preview/test-send flows
+- Completed Phase 14E storage module foundation:
+  - added vendored `modules/storage/` with deterministic collection/provider contracts on top of `ALNAttachmentAdapter`
+  - added signed upload/download token flows, runtime-managed object metadata, and collection policy validation
+  - added `Phase14ETests.m` coverage for deterministic collection metadata and fail-closed signed download-token behavior
+- Completed Phase 14F uploads, media variants, and storage-management UX:
+  - added protected `/storage` HTML routes plus `/storage/api/...` JSON/OpenAPI routes for collections, objects, direct uploads, download tokens, delete, and variant regeneration
+  - added async variant generation through the shared jobs runtime via `storage.generate_variant`
+  - integrated storage records into `admin-ui` with list/detail metadata plus delete/regenerate actions
+  - added `Phase14FTests.m` and `Phase14StorageIntegrationTests.m` coverage for direct-upload tamper/expiry rejection, signed downloads, variant processing, and storage-management surfaces
+- Tightened Phase 14 auth coverage and regressions:
+  - required authenticated user context for the notifications user JSON routes and preserved admin/AAL2 requirements for privileged notification and storage routes
+  - updated `Phase14JobsNotificationsIntegrationTests.m` to inject auth state explicitly under the current route protections
+  - updated `Phase14CTests.m` so outbox expectations match the shipped in-app plus email delivery recording model
 
 ## Completed Today (2026-03-09)
+
+- Planned Phase 15 as the next roadmap phase:
+  - added `docs/PHASE15_ROADMAP.md` for auth UI integration modes
+  - made the sequencing explicit: Phase 15 lands before resuming Phase 14D-14I
+  - linked the supporting design contract in `docs/AUTH_UI_INTEGRATION_MODES.md`
 
 - Completed Phase 14A jobs module foundation:
   - added vendored `modules/jobs/` with deterministic job-definition and schedule-provider contracts on top of `ALNJobAdapter`/`ALNJobWorker`

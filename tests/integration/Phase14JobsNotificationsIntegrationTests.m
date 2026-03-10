@@ -2,6 +2,7 @@
 #import <XCTest/XCTest.h>
 
 #import "ALNApplication.h"
+#import "ALNContext.h"
 #import "ALNJobsModule.h"
 #import "ALNNotificationsModule.h"
 #import "ALNRequest.h"
@@ -15,6 +16,29 @@ static NSMutableArray<NSString *> *Phase14IntegrationExecutions(void) {
   }
   return gPhase14IntegrationExecutions;
 }
+
+@interface Phase14IntegrationAuthMiddleware : NSObject <ALNMiddleware>
+@end
+
+@implementation Phase14IntegrationAuthMiddleware
+
+- (BOOL)processContext:(ALNContext *)context error:(NSError **)error {
+  (void)error;
+  NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
+  context.stash[ALNContextAuthSubjectStashKey] = @"user-77";
+  context.stash[ALNContextAuthRolesStashKey] = @[ @"admin" ];
+  context.stash[ALNContextAuthClaimsStashKey] = @{
+    @"sub" : @"user-77",
+    @"roles" : @[ @"admin" ],
+    @"aal" : @2,
+    @"amr" : @[ @"otp" ],
+    @"iat" : @((NSInteger)now),
+    @"auth_time" : @((NSInteger)now),
+  };
+  return YES;
+}
+
+@end
 
 @interface Phase14IntegrationJob : NSObject <ALNJobsJobDefinition>
 @end
@@ -198,6 +222,7 @@ static NSMutableArray<NSString *> *Phase14IntegrationExecutions(void) {
 
 - (void)testJobsAndNotificationsModulesWorkTogether {
   ALNApplication *app = [self application];
+  [app addMiddleware:[[Phase14IntegrationAuthMiddleware alloc] init]];
   NSError *error = nil;
   XCTAssertTrue([[[ALNJobsModule alloc] init] registerWithApplication:app error:&error]);
   XCTAssertNil(error);
@@ -241,7 +266,7 @@ static NSMutableArray<NSString *> *Phase14IntegrationExecutions(void) {
       [app dispatchRequest:[self requestWithMethod:@"GET" path:@"/notifications/api/outbox" headers:@{} body:nil]];
   NSDictionary *outboxJSON = [self JSONObjectFromResponse:outboxResponse];
   NSArray *outbox = [outboxJSON[@"data"][@"outbox"] isKindOfClass:[NSArray class]] ? outboxJSON[@"data"][@"outbox"] : @[];
-  XCTAssertEqual((NSUInteger)1, [outbox count]);
+  XCTAssertEqual((NSUInteger)2, [outbox count]);
 
   ALNResponse *inboxResponse =
       [app dispatchRequest:[self requestWithMethod:@"GET"
