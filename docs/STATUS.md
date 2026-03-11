@@ -65,9 +65,14 @@ Last updated: 2026-03-11
 - Phase 14: complete (14A/14B/14C/14D/14E/14F/14G/14H/14I complete on 2026-03-10)
 - Phase 15: complete (15A/15B/15C/15D/15E complete on 2026-03-10)
 - Phase 16: complete (`16A/16B/16C` complete on 2026-03-10; `16D/16E/16F/16G` complete on 2026-03-11)
+- Phase 17: planned (`17A-17D` scoped on 2026-03-11 for optional MSSQL support and backend-neutral data-layer seams)
 
 ## Completed Today (2026-03-11)
 
+- Planned Phase 17 as the next roadmap step:
+  - added `docs/PHASE17_ROADMAP.md` for backend-neutral data-layer seams plus optional MSSQL support
+  - made the dependency boundary explicit: no hard dependency on Microsoft's ODBC driver in core Arlen
+  - scoped the work around dialect/migration refactoring first, then an optional MSSQL adapter target, then docs/conformance closeout
 - Triaged new `MusicianApp` Arlen filings against the current workspace:
   - kept `ARLEN-BUG-009` open as a narrower watch-recovery follow-up rather than a broad missing-recovery claim
   - identified `ARLEN-BUG-010` (`admin-ui` `legacyPath` HTML action/update parity) as a current framework bug to fix
