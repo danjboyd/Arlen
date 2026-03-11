@@ -1,4 +1,5 @@
 #import "ALNServices.h"
+#import "ALNJSONSerialization.h"
 
 #include <fcntl.h>
 #include <errno.h>
@@ -638,6 +639,15 @@ static ALNJobEnvelope *ALNJobEnvelopeFromDictionary(id value) {
     }
 
     NSTimeInterval retryDelay = (self.retryDelaySeconds > 0.0) ? self.retryDelaySeconds : 0.0;
+    if ([runtime respondsToSelector:@selector(jobWorker:retryDelayForJob:handlerError:baseRetryDelay:)]) {
+      retryDelay = [runtime jobWorker:self
+                     retryDelayForJob:job
+                         handlerError:handlerError
+                       baseRetryDelay:retryDelay];
+      if (retryDelay < 0.0) {
+        retryDelay = 0.0;
+      }
+    }
     NSError *retryError = nil;
     if (![self.jobsAdapter retryJob:job delaySeconds:retryDelay error:&retryError]) {
       if (error != NULL) {
@@ -2909,6 +2919,93 @@ static int ALNRedisOpenSocketConnection(NSString *host,
 
 @end
 
+@interface ALNInMemoryWebhookAdapter ()
+
+@property(nonatomic, copy) NSString *adapterNameValue;
+@property(nonatomic, strong) NSMutableArray *deliveries;
+@property(nonatomic, strong) NSLock *lock;
+@property(nonatomic, assign) NSUInteger nextDeliveryID;
+
+@end
+
+@implementation ALNInMemoryWebhookAdapter
+
+- (instancetype)init {
+  return [self initWithAdapterName:nil];
+}
+
+- (instancetype)initWithAdapterName:(NSString *)adapterName {
+  self = [super init];
+  if (self) {
+    _adapterNameValue = [ALNNonEmptyString(adapterName, @"in_memory_webhook") copy];
+    _deliveries = [NSMutableArray array];
+    _lock = [[NSLock alloc] init];
+    _nextDeliveryID = 0;
+  }
+  return self;
+}
+
+- (NSString *)adapterName {
+  return self.adapterNameValue ?: @"in_memory_webhook";
+}
+
+- (NSString *)deliverRequest:(NSDictionary *)request error:(NSError **)error {
+  NSDictionary *normalizedRequest = ALNNormalizeDictionary(request);
+  NSString *url = ALNNonEmptyString(normalizedRequest[@"url"], @"");
+  if ([url length] == 0) {
+    if (error != NULL) {
+      *error = ALNServiceError(4280, @"webhook request URL is required", nil);
+    }
+    return nil;
+  }
+
+  NSString *method = [[ALNNonEmptyString(normalizedRequest[@"method"], @"POST") uppercaseString] copy];
+  NSDictionary *headers = ALNNormalizeDictionary(normalizedRequest[@"headers"]);
+  id bodyValue = normalizedRequest[@"body"];
+  NSString *bodyText = @"";
+  if ([bodyValue isKindOfClass:[NSData class]]) {
+    bodyText = [[NSString alloc] initWithData:bodyValue encoding:NSUTF8StringEncoding] ?: @"";
+  } else if ([bodyValue isKindOfClass:[NSString class]]) {
+    bodyText = bodyValue;
+  } else if ([bodyValue isKindOfClass:[NSDictionary class]] || [bodyValue isKindOfClass:[NSArray class]]) {
+    NSData *jsonData = [ALNJSONSerialization dataWithJSONObject:bodyValue options:0 error:NULL];
+    bodyText = (jsonData != nil) ? ([[NSString alloc] initWithData:jsonData encoding:NSUTF8StringEncoding] ?: @"") : @"";
+  }
+
+  [self.lock lock];
+  self.nextDeliveryID += 1;
+  NSString *deliveryID = [NSString stringWithFormat:@"webhook-%lu", (unsigned long)self.nextDeliveryID];
+  [self.deliveries addObject:@{
+    @"deliveryID" : deliveryID,
+    @"timestamp" : @([[NSDate date] timeIntervalSince1970]),
+    @"request" : @{
+      @"url" : url,
+      @"method" : method ?: @"POST",
+      @"headers" : headers ?: @{},
+      @"body" : bodyText ?: @"",
+      @"metadata" : ALNNormalizeDictionary(normalizedRequest[@"metadata"]),
+    },
+  }];
+  [self.lock unlock];
+  return deliveryID;
+}
+
+- (NSArray *)deliveriesSnapshot {
+  [self.lock lock];
+  NSArray *snapshot = [NSArray arrayWithArray:self.deliveries];
+  [self.lock unlock];
+  return snapshot ?: @[];
+}
+
+- (void)reset {
+  [self.lock lock];
+  [self.deliveries removeAllObjects];
+  self.nextDeliveryID = 0;
+  [self.lock unlock];
+}
+
+@end
+
 @interface ALNInMemoryAttachmentAdapter ()
 
 @property(nonatomic, copy) NSString *adapterNameValue;
@@ -2937,6 +3034,15 @@ static int ALNRedisOpenSocketConnection(NSString *host,
 
 - (NSString *)adapterName {
   return self.adapterNameValue ?: @"in_memory_attachment";
+}
+
+- (NSDictionary *)attachmentAdapterCapabilities {
+  return @{
+    @"temporaryDownloadURL" : @NO,
+    @"readOnly" : @NO,
+    @"scoped" : @NO,
+    @"mirroring" : @NO,
+  };
 }
 
 - (NSString *)saveAttachmentNamed:(NSString *)name
@@ -3184,6 +3290,16 @@ static int ALNRedisOpenSocketConnection(NSString *host,
   return [self.baseAdapter listAttachmentMetadata] ?: @[];
 }
 
+- (NSDictionary *)attachmentAdapterCapabilities {
+  NSDictionary *baseCapabilities =
+      [self.baseAdapter respondsToSelector:@selector(attachmentAdapterCapabilities)]
+          ? [self.baseAdapter attachmentAdapterCapabilities]
+          : @{};
+  NSMutableDictionary *capabilities = [NSMutableDictionary dictionaryWithDictionary:baseCapabilities ?: @{}];
+  capabilities[@"retrying"] = @YES;
+  return [NSDictionary dictionaryWithDictionary:capabilities];
+}
+
 - (void)reset {
   if (self.baseAdapter != nil) {
     [self.baseAdapter reset];
@@ -3250,6 +3366,15 @@ static int ALNRedisOpenSocketConnection(NSString *host,
 
 - (NSString *)adapterName {
   return self.adapterNameValue ?: @"filesystem_attachment";
+}
+
+- (NSDictionary *)attachmentAdapterCapabilities {
+  return @{
+    @"temporaryDownloadURL" : @NO,
+    @"readOnly" : @NO,
+    @"scoped" : @YES,
+    @"mirroring" : @NO,
+  };
 }
 
 - (NSString *)attachmentDataPathForID:(NSString *)attachmentID {

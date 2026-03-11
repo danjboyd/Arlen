@@ -1,6 +1,6 @@
 # Arlen Status Checkpoint
 
-Last updated: 2026-03-10
+Last updated: 2026-03-11
 
 ## Benchmark Handoff (2026-02-24 EOD)
 
@@ -64,9 +64,61 @@ Last updated: 2026-03-10
 - Phase 13: complete (13A/13B/13C/13D/13E/13F/13G/13H/13I complete on 2026-03-09)
 - Phase 14: complete (14A/14B/14C/14D/14E/14F/14G/14H/14I complete on 2026-03-10)
 - Phase 15: complete (15A/15B/15C/15D/15E complete on 2026-03-10)
+- Phase 16: complete (`16A/16B/16C` complete on 2026-03-10; `16D/16E/16F/16G` complete on 2026-03-11)
+
+## Completed Today (2026-03-11)
+
+- Triaged new `MusicianApp` Arlen filings against the current workspace:
+  - kept `ARLEN-BUG-009` open as a narrower watch-recovery follow-up rather than a broad missing-recovery claim
+  - identified `ARLEN-BUG-010` (`admin-ui` `legacyPath` HTML action/update parity) as a current framework bug to fix
+  - identified `ARLEN-FR-004` (safer module path defaults and clearer `*.paths.*` config) as a current open enhancement after restoring `modules/jobs/`
+  - identified `ARLEN-FR-005` (first-class invite-claim/email-link acquisition flow) as a legitimate open auth enhancement
+  - marked `ARLEN-FR-002` and `ARLEN-FR-003` as already addressed by the shipped Phase 16 notifications surface and `arlen jobs worker`
+  - reclassified `ARLEN-BUG-011` under `ARLEN-FR-005` unless the same delivery failure reproduces through the supported forgot-password flow
+- Executed the remaining `MusicianApp` queue items (`ARLEN-BUG-009`, `ARLEN-BUG-010`, `ARLEN-FR-004`, `ARLEN-FR-005`):
+  - fixed `boomhauer` watch-mode stale recovery by invalidating the prior build fingerprint after EOC compile failures and added regression coverage for the stale-after-fix case
+  - fixed `admin-ui` `legacyPath` parity so provider-defined legacy aliases keep list/detail/update/action/export/autocomplete coverage across both HTML and JSON surfaces
+  - restored the safer first-party jobs module path default (`jobsModule.paths.apiPrefix = "api"`) and documented the nested `jobsModule.paths.*` override contract
+  - added a supported public auth runtime primitive for trusted email claim / invite acquisition flows, including optional password-setup email issuance and session claim via `email_link`
+  - re-applied the missing Phase 16A jobs runtime behavior that had been dropped when `modules/jobs/` was restored from an older snapshot, including persisted operator state, per-job retry backoff, uniqueness-derived idempotency, and scheduled-at worker context
+- Completed Phase 16D search engine and indexing maturity:
+  - expanded `modules/search/` with durable index/generation state, a stronger `ALNSearchEngine` boundary, full-reindex swap activation, incremental sync paths, richer filter/sort/pagination metadata, and protected resource drilldowns
+  - added shared admin integration through the `search_indexes` resource plus stronger ops-ready reindex history and failure visibility
+  - added `Phase16DTests.m` and `Phase16ModuleIntegrationTests.m` coverage for generation persistence, incremental sync, fail-closed query validation, and admin/search/ops composition
+- Completed Phase 16E ops drilldown and historical visibility:
+  - expanded `modules/ops/` with persisted history snapshots, `/ops/modules/:module` and `/ops/api/modules/:module` drilldowns, contributed card/widget seams, and stronger `healthy/degraded/failing/informational` status shaping
+  - kept the dashboard useful when only a subset of the shipped modules is installed by scoping summaries to the active application runtime
+  - added `Phase16ETests.m` coverage for persistence, drilldown payloads, card/widget contribution, and subset-runtime behavior
+- Completed Phase 16F admin UI productivity maturity:
+  - expanded `modules/admin-ui/` with typed filter metadata, stable pagination/sort descriptors, bulk actions, JSON/CSV export routes, autocomplete hooks, and richer shared list/detail templates
+  - made the built-in `users` resource conditional on a configured database while keeping provider-only app resources valid without a database connection
+  - added `Phase16FTests.m` and focused integration coverage for bulk actions, exports, typed filters, autocomplete, and resource metadata parity
+- Completed Phase 16G docs, example app, and confidence closeout:
+  - added `examples/phase16_modules_demo/` as the canonical matured-module reference app spanning `auth`, `admin-ui`, `jobs`, `notifications`, `storage`, `ops`, and `search`
+  - added `make phase16-confidence` plus deterministic artifact generation under `build/release_confidence/phase16/`
+  - finished the Phase 16 docs/status pass across the top-level onboarding path and the `search`, `ops`, and `admin-ui` module guides
+- Tightened mounted admin runtime behavior and stale expectations uncovered by the new confidence path:
+  - made the mounted `admin-ui` child app inherit parent middleware classes so app auth/session middleware continues to apply on `/admin/...`
+  - updated `Phase14JobsNotificationsIntegrationTests.m` so its outbox expectations match the shipped queued-plus-delivered audit trail from Phase 16B
 
 ## Completed Today (2026-03-10)
 
+- Completed Phase 16A jobs maturity pass:
+  - expanded `modules/jobs/` with persisted operator history, multi-queue pause/resume state, richer queue summaries, and explicit system schedule registration
+  - added deterministic enqueue metadata for queue priority, tags, retry backoff, and uniqueness-derived idempotency keys
+  - added `Phase16ATests.m` coverage for persisted operator metadata and uniqueness-derived enqueue behavior
+- Completed Phase 16B notifications durability and channel maturity:
+  - expanded `modules/notifications/` with persisted inbox/outbox/preferences state, realtime inbox fanout tracking, and first-party webhook delivery support
+  - added channel-policy metadata for per-channel queue and retry routing plus queued delivery audit entries on the split-channel path
+  - added `Phase16BTests.m` coverage for durable notification state, realtime fanout, and split-channel queueing
+- Completed Phase 16C storage durability and media maturity:
+  - expanded `modules/storage/` with persisted object/upload-session/activity state, cleanup scheduling, attachment capability summaries, and retention-aware maintenance jobs
+  - added transform-based variant generation with explicit failure state, recovery, and cleanup activity tracking
+  - added `Phase16CTests.m` coverage for durable catalog state, transform-backed variants, and cleanup-surface registration
+- Planned Phase 16 as the next module roadmap phase:
+  - added `docs/PHASE16_ROADMAP.md` for the first post-Phase-15 maturity pass
+  - scoped the follow-on around `jobs`, `notifications`, `storage`, `search`, `ops`, and `admin-ui`
+  - made the sequencing explicit: `jobs` first, `admin-ui` polish late, and docs/examples/confidence as the closeout
 - Completed Phase 15 auth UI integration closeout:
   - finished the Phase 15 docs/status pass across `README.md`, `docs/README.md`, `docs/CLI_REFERENCE.md`, `docs/GETTING_STARTED.md`, `docs/AUTH_MODULE.md`, and `docs/AUTH_UI_INTEGRATION_MODES.md`
   - added `examples/auth_ui_modes/` covering `headless`, `module-ui`, and `generated-app-ui`
@@ -102,6 +154,22 @@ Last updated: 2026-03-10
   - required authenticated user context for the notifications user JSON routes and preserved admin/AAL2 requirements for privileged notification and storage routes
   - updated `Phase14JobsNotificationsIntegrationTests.m` to inject auth state explicitly under the current route protections
   - updated `Phase14CTests.m` so outbox expectations match the shipped in-app plus email delivery recording model
+
+## Open Follow-up
+
+- No remaining open items from the current `MusicianApp` queue review.
+- `ARLEN-BUG-011` remains folded into `ARLEN-FR-005` unless the same delivery failure reproduces through the supported forgot-password path on current Arlen.
+
+## Triage Notes
+
+- `ARLEN-FR-002` is already addressed in the current Arlen workspace:
+  - Phase 16B added durable inbox/outbox/preferences state, read/unread mutations, deep-link metadata, and first-party HTML inbox surfaces
+- `ARLEN-FR-003` is already addressed in the current Arlen workspace:
+  - Arlen now ships `arlen jobs worker`, documents it in the CLI reference, and includes a first-party `bin/jobs-worker` entrypoint
+- `ARLEN-BUG-011` is reclassified for now:
+  - the app report relies on `ALNAuthModuleRuntime` methods that exist in implementation but are not part of the public runtime header, so this is not yet a clear framework bug on a supported surface
+- `ARLEN-BUG-009` is now fixed on the current workspace:
+  - `boomhauer` clears the last successful build fingerprint after template compile failures, so watch mode rebuilds once the template is fixed instead of reusing the prior successful binary
 
 ## Completed Today (2026-03-09)
 

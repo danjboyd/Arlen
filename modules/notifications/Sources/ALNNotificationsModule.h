@@ -40,6 +40,11 @@ typedef NS_ENUM(NSInteger, ALNNotificationsModuleErrorCode) {
                                                                  (NSError *_Nullable *_Nullable)error;
 
 @optional
+- (nullable NSDictionary *)notificationsModuleWebhookRequestForPayload:(NSDictionary *)payload
+                                                               runtime:
+                                                                   (ALNNotificationsModuleRuntime *)runtime
+                                                                 error:
+                                                                     (NSError *_Nullable *_Nullable)error;
 - (NSArray<NSString *> *)notificationsModuleDefaultChannels;
 
 @end
@@ -96,6 +101,13 @@ typedef NS_ENUM(NSInteger, ALNNotificationsModuleErrorCode) {
 - (NSArray<NSDictionary *> *)outboxSnapshot;
 - (nullable NSDictionary *)outboxEntryForIdentifier:(NSString *)entryID;
 - (NSArray<NSDictionary *> *)inboxSnapshotForRecipient:(NSString *)recipient;
+- (NSDictionary *)inboxSummaryForRecipient:(NSString *)recipient;
+- (nullable NSDictionary *)markInboxEntryID:(NSString *)entryID
+                                       read:(BOOL)read
+                               forRecipient:(NSString *)recipient
+                                      error:(NSError *_Nullable *_Nullable)error;
+- (nullable NSDictionary *)markAllInboxEntriesReadForRecipient:(NSString *)recipient
+                                                         error:(NSError *_Nullable *_Nullable)error;
 - (NSDictionary *)notificationPreferencesForRecipient:(NSString *)recipient;
 - (nullable NSDictionary *)updateNotificationPreferences:(NSDictionary *)preferences
                                             forRecipient:(NSString *)recipient

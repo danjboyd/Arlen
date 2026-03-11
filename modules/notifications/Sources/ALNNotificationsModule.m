@@ -7,6 +7,7 @@
 #import "ALNController.h"
 #import "ALNContext.h"
 #import "ALNRequest.h"
+#import "ALNRealtime.h"
 
 NSString *const ALNNotificationsModuleErrorDomain = @"Arlen.Modules.Notifications.Error";
 
@@ -29,6 +30,159 @@ static NSDictionary *NMNormalizeDictionary(id value) {
 
 static NSArray *NMNormalizeArray(id value) {
   return [value isKindOfClass:[NSArray class]] ? value : @[];
+}
+
+static id NMPropertyListValue(id value) {
+  if (value == nil || value == [NSNull null]) {
+    return @"";
+  }
+  if ([value isKindOfClass:[NSString class]] || [value isKindOfClass:[NSNumber class]] ||
+      [value isKindOfClass:[NSData class]] || [value isKindOfClass:[NSDate class]]) {
+    return value;
+  }
+  if ([value isKindOfClass:[NSArray class]]) {
+    NSMutableArray *items = [NSMutableArray array];
+    for (id entry in (NSArray *)value) {
+      [items addObject:NMPropertyListValue(entry)];
+    }
+    return items;
+  }
+  if ([value isKindOfClass:[NSDictionary class]]) {
+    NSMutableDictionary *dictionary = [NSMutableDictionary dictionary];
+    for (id rawKey in [(NSDictionary *)value allKeys]) {
+      NSString *key = NMTrimmedString(rawKey);
+      if ([key length] == 0) {
+        continue;
+      }
+      dictionary[key] = NMPropertyListValue([(NSDictionary *)value objectForKey:rawKey]);
+    }
+    return dictionary;
+  }
+  return [value description] ?: @"";
+}
+
+static NSString *NMResolvedPersistencePath(ALNApplication *application, NSDictionary *moduleConfig) {
+  NSDictionary *persistence = [moduleConfig[@"persistence"] isKindOfClass:[NSDictionary class]]
+                                  ? moduleConfig[@"persistence"]
+                                  : @{};
+  BOOL enabled = ![persistence[@"enabled"] respondsToSelector:@selector(boolValue)] ||
+                 [persistence[@"enabled"] boolValue];
+  if (!enabled) {
+    return @"";
+  }
+  NSString *configured = NMTrimmedString(persistence[@"path"]);
+  if ([configured length] > 0) {
+    if ([configured hasPrefix:@"/"]) {
+      return configured;
+    }
+    NSString *cwd = [[NSFileManager defaultManager] currentDirectoryPath] ?: NSTemporaryDirectory();
+    return [cwd stringByAppendingPathComponent:configured];
+  }
+  NSString *environment = NMLowerTrimmedString(application.environment);
+  if ([environment isEqualToString:@"test"]) {
+    return @"";
+  }
+  NSString *cwd = [[NSFileManager defaultManager] currentDirectoryPath] ?: NSTemporaryDirectory();
+  return [cwd stringByAppendingPathComponent:
+                   [NSString stringWithFormat:@"var/module_state/notifications-%@.plist",
+                                              ([environment length] > 0) ? environment : @"development"]];
+}
+
+static NSDictionary *NMReadPropertyListAtPath(NSString *path, NSError **error) {
+  NSString *statePath = NMTrimmedString(path);
+  if ([statePath length] == 0 || ![[NSFileManager defaultManager] fileExistsAtPath:statePath]) {
+    return nil;
+  }
+  NSData *data = [NSData dataWithContentsOfFile:statePath options:0 error:error];
+  if (data == nil) {
+    return nil;
+  }
+  NSPropertyListFormat format = NSPropertyListBinaryFormat_v1_0;
+  id object = [NSPropertyListSerialization propertyListWithData:data
+                                                        options:NSPropertyListMutableContainersAndLeaves
+                                                         format:&format
+                                                          error:error];
+  return [object isKindOfClass:[NSDictionary class]] ? object : nil;
+}
+
+static BOOL NMWritePropertyListAtPath(NSString *path, NSDictionary *payload, NSError **error) {
+  NSString *statePath = NMTrimmedString(path);
+  if ([statePath length] == 0) {
+    return YES;
+  }
+  NSString *parent = [statePath stringByDeletingLastPathComponent];
+  if ([parent length] > 0 &&
+      ![[NSFileManager defaultManager] createDirectoryAtPath:parent
+                                 withIntermediateDirectories:YES
+                                                  attributes:nil
+                                                       error:error]) {
+    return NO;
+  }
+  NSData *data = [NSPropertyListSerialization dataWithPropertyList:NMPropertyListValue(payload)
+                                                            format:NSPropertyListBinaryFormat_v1_0
+                                                           options:0
+                                                             error:error];
+  if (data == nil) {
+    return NO;
+  }
+  return [data writeToFile:statePath options:NSDataWritingAtomic error:error];
+}
+
+static NSString *NMFanoutChannelForRecipient(NSString *recipient) {
+  NSString *normalized = NMTrimmedString(recipient);
+  if ([normalized length] == 0) {
+    return @"notifications.inbox";
+  }
+  return [NSString stringWithFormat:@"notifications.inbox.%@", normalized];
+}
+
+static NSDictionary *NMNormalizedInboxEntry(id value) {
+  NSDictionary *entry = [value isKindOfClass:[NSDictionary class]] ? value : @{};
+  id rawReadAt = entry[@"readAt"];
+  NSNumber *readAt = nil;
+  if ([rawReadAt isKindOfClass:[NSDate class]]) {
+    readAt = @([(NSDate *)rawReadAt timeIntervalSince1970]);
+  } else if ([rawReadAt respondsToSelector:@selector(doubleValue)]) {
+    double readAtSeconds = [rawReadAt doubleValue];
+    if (readAtSeconds > 0.0) {
+      readAt = @(readAtSeconds);
+    }
+  }
+  BOOL read = [entry[@"read"] respondsToSelector:@selector(boolValue)] ? [entry[@"read"] boolValue] : NO;
+  if (!read && readAt != nil) {
+    read = YES;
+  }
+
+  NSMutableDictionary *normalized = [NSMutableDictionary dictionary];
+  normalized[@"entryID"] = NMTrimmedString(entry[@"entryID"]);
+  normalized[@"notification"] = NMTrimmedString(entry[@"notification"]);
+  normalized[@"recipient"] = NMTrimmedString(entry[@"recipient"]);
+  normalized[@"timestamp"] = [entry[@"timestamp"] respondsToSelector:@selector(doubleValue)]
+                                 ? @([entry[@"timestamp"] doubleValue])
+                                 : @(0);
+  normalized[@"title"] = NMTrimmedString(entry[@"title"]);
+  normalized[@"body"] = NMTrimmedString(entry[@"body"]);
+  normalized[@"metadata"] = NMNormalizeDictionary(entry[@"metadata"]);
+  normalized[@"read"] = @(read);
+  if (readAt != nil) {
+    normalized[@"readAt"] = readAt;
+  }
+  return normalized;
+}
+
+static NSDictionary *NMInboxSummary(NSString *recipient, NSArray<NSDictionary *> *entries) {
+  NSUInteger unreadCount = 0;
+  for (NSDictionary *entry in entries ?: @[]) {
+    if (![entry[@"read"] boolValue]) {
+      unreadCount += 1;
+    }
+  }
+  return @{
+    @"recipient" : NMTrimmedString(recipient),
+    @"entries" : entries ?: @[],
+    @"totalCount" : @([entries count]),
+    @"unreadCount" : @(unreadCount),
+  };
 }
 
 static NSError *NMError(ALNNotificationsModuleErrorCode code, NSString *message, NSDictionary *details) {
@@ -131,6 +285,60 @@ static NSArray<NSString *> *NMNormalizedChannelArray(id rawValue) {
   return channels;
 }
 
+static NSDictionary *NMNormalizedRetryBackoff(id rawValue) {
+  NSDictionary *rawBackoff = [rawValue isKindOfClass:[NSDictionary class]] ? rawValue : @{};
+  NSString *strategy = NMLowerTrimmedString(rawBackoff[@"strategy"]);
+  if (![strategy isEqualToString:@"linear"] && ![strategy isEqualToString:@"exponential"]) {
+    strategy = @"fixed";
+  }
+  NSTimeInterval baseSeconds = [rawBackoff[@"baseSeconds"] respondsToSelector:@selector(doubleValue)]
+                                   ? [rawBackoff[@"baseSeconds"] doubleValue]
+                                   : 5.0;
+  if (baseSeconds < 0.0) {
+    baseSeconds = 0.0;
+  }
+  double multiplier = [rawBackoff[@"multiplier"] respondsToSelector:@selector(doubleValue)]
+                          ? [rawBackoff[@"multiplier"] doubleValue]
+                          : 2.0;
+  if (multiplier < 1.0) {
+    multiplier = 1.0;
+  }
+  NSTimeInterval maxSeconds = [rawBackoff[@"maxSeconds"] respondsToSelector:@selector(doubleValue)]
+                                  ? [rawBackoff[@"maxSeconds"] doubleValue]
+                                  : MAX(baseSeconds, 60.0);
+  if (maxSeconds < baseSeconds) {
+    maxSeconds = baseSeconds;
+  }
+  return @{
+    @"strategy" : strategy,
+    @"baseSeconds" : @(baseSeconds),
+    @"multiplier" : @(multiplier),
+    @"maxSeconds" : @(maxSeconds),
+  };
+}
+
+static NSDictionary *NMNormalizedChannelPolicies(id rawValue) {
+  NSDictionary *rawPolicies = [rawValue isKindOfClass:[NSDictionary class]] ? rawValue : @{};
+  NSMutableDictionary *normalized = [NSMutableDictionary dictionary];
+  for (id rawChannel in rawPolicies) {
+    NSString *channel = NMLowerTrimmedString(rawChannel);
+    NSDictionary *policy = [rawPolicies[rawChannel] isKindOfClass:[NSDictionary class]] ? rawPolicies[rawChannel] : nil;
+    if ([channel length] == 0 || policy == nil) {
+      continue;
+    }
+    NSString *queue = NMTrimmedString(policy[@"queue"]);
+    NSUInteger maxAttempts = [policy[@"maxAttempts"] respondsToSelector:@selector(unsignedIntegerValue)]
+                                 ? [policy[@"maxAttempts"] unsignedIntegerValue]
+                                 : 0;
+    normalized[channel] = @{
+      @"queue" : queue ?: @"",
+      @"maxAttempts" : @(maxAttempts),
+      @"retryBackoff" : NMNormalizedRetryBackoff(policy[@"retryBackoff"]),
+    };
+  }
+  return [NSDictionary dictionaryWithDictionary:normalized];
+}
+
 static BOOL NMChannelsAreSubsetOfSupported(NSArray<NSString *> *requested,
                                            NSArray<NSString *> *supported) {
   NSSet *supportedSet = [NSSet setWithArray:supported ?: @[]];
@@ -140,6 +348,82 @@ static BOOL NMChannelsAreSubsetOfSupported(NSArray<NSString *> *requested,
     }
   }
   return YES;
+}
+
+static NSDictionary *NMNormalizedWebhookRequest(NSDictionary *request,
+                                                NSDictionary *fallbackPayload,
+                                                NSError **error) {
+  NSDictionary *rawRequest = [request isKindOfClass:[NSDictionary class]] ? request : @{};
+  NSString *url = NMTrimmedString(rawRequest[@"url"]);
+  if ([url length] == 0) {
+    if (error != NULL) {
+      *error = NMError(ALNNotificationsModuleErrorDeliveryFailed,
+                       @"webhook notifications require a target URL",
+                       nil);
+    }
+    return nil;
+  }
+  if (![url hasPrefix:@"http://"] && ![url hasPrefix:@"https://"]) {
+    if (error != NULL) {
+      *error = NMError(ALNNotificationsModuleErrorValidationFailed,
+                       @"webhook URL must use http or https",
+                       @{ @"url" : url });
+    }
+    return nil;
+  }
+
+  NSMutableDictionary *headers = [NSMutableDictionary dictionary];
+  NSDictionary *rawHeaders = [rawRequest[@"headers"] isKindOfClass:[NSDictionary class]] ? rawRequest[@"headers"] : @{};
+  for (id rawHeaderKey in rawHeaders) {
+    NSString *key = NMTrimmedString(rawHeaderKey);
+    NSString *value = NMTrimmedString(rawHeaders[rawHeaderKey]);
+    if ([key length] == 0 || [value length] == 0) {
+      continue;
+    }
+    headers[key] = value;
+  }
+
+  id bodyValue = rawRequest[@"body"];
+  NSData *bodyData = nil;
+  if ([bodyValue isKindOfClass:[NSData class]]) {
+    bodyData = bodyValue;
+  } else if ([bodyValue isKindOfClass:[NSString class]]) {
+    bodyData = [bodyValue dataUsingEncoding:NSUTF8StringEncoding];
+  } else if ([bodyValue isKindOfClass:[NSDictionary class]] || [bodyValue isKindOfClass:[NSArray class]]) {
+    bodyData = [NSJSONSerialization dataWithJSONObject:bodyValue options:0 error:NULL];
+    if (headers[@"Content-Type"] == nil) {
+      headers[@"Content-Type"] = @"application/json";
+    }
+  } else {
+    bodyData = [NSJSONSerialization dataWithJSONObject:NMNormalizeDictionary(fallbackPayload) options:0 error:NULL];
+    if (headers[@"Content-Type"] == nil) {
+      headers[@"Content-Type"] = @"application/json";
+    }
+  }
+
+  NSString *method = [NMTrimmedString(rawRequest[@"method"]) length] > 0
+                         ? [[NMTrimmedString(rawRequest[@"method"]) uppercaseString] copy]
+                         : @"POST";
+  return @{
+    @"url" : url,
+    @"method" : method,
+    @"headers" : headers ?: @{},
+    @"body" : bodyData ?: [NSData data],
+    @"metadata" : NMNormalizeDictionary(rawRequest[@"metadata"]),
+  };
+}
+
+static NSDictionary *NMWebhookPreviewRepresentation(NSDictionary *request) {
+  NSDictionary *normalized = [request isKindOfClass:[NSDictionary class]] ? request : @{};
+  NSData *bodyData = [normalized[@"body"] isKindOfClass:[NSData class]] ? normalized[@"body"] : nil;
+  NSString *bodyText = (bodyData != nil) ? ([[NSString alloc] initWithData:bodyData encoding:NSUTF8StringEncoding] ?: @"") : @"";
+  return @{
+    @"url" : NMTrimmedString(normalized[@"url"]),
+    @"method" : NMTrimmedString(normalized[@"method"]),
+    @"headers" : NMNormalizeDictionary(normalized[@"headers"]),
+    @"body" : bodyText ?: @"",
+    @"metadata" : NMNormalizeDictionary(normalized[@"metadata"]),
+  };
 }
 
 static NSArray<NSString *> *NMRecipientsFromInAppEntry(NSDictionary *entry) {
@@ -225,6 +509,7 @@ static NSArray<NSString *> *NMPreferenceRecipientsFromPayloadAndEntry(NSDictiona
 
 @property(nonatomic, strong, readwrite) ALNApplication *application;
 @property(nonatomic, strong, readwrite) id<ALNMailAdapter> mailAdapter;
+@property(nonatomic, strong) id<ALNWebhookAdapter> webhookAdapter;
 @property(nonatomic, copy, readwrite) NSString *prefix;
 @property(nonatomic, copy, readwrite) NSString *apiPrefix;
 @property(nonatomic, copy) NSString *senderAddress;
@@ -236,6 +521,10 @@ static NSArray<NSString *> *NMPreferenceRecipientsFromPayloadAndEntry(NSDictiona
 @property(nonatomic, strong) NSMutableDictionary<NSString *, NSDictionary *> *preferencesByRecipient;
 @property(nonatomic, assign) NSUInteger nextEntrySequence;
 @property(nonatomic, strong) id<ALNNotificationPreferenceHook> preferenceHook;
+@property(nonatomic, strong) NSMutableArray<NSDictionary *> *recentFanoutEvents;
+@property(nonatomic, strong) ALNRealtimeHub *realtimeHub;
+@property(nonatomic, assign) BOOL persistenceEnabled;
+@property(nonatomic, copy) NSString *statePath;
 
 - (BOOL)registerNotificationDefinition:(id<ALNNotificationDefinition>)definition
                                 source:(NSString *)source
@@ -248,6 +537,25 @@ static NSArray<NSString *> *NMPreferenceRecipientsFromPayloadAndEntry(NSDictiona
     enabledForRecipient:(NSString *)recipient
  notificationIdentifier:(NSString *)identifier
           defaultEnabled:(BOOL)defaultEnabled;
+- (BOOL)loadPersistedStateWithError:(NSError *_Nullable *_Nullable)error;
+- (BOOL)persistStateWithError:(NSError *_Nullable *_Nullable)error;
+- (NSDictionary *)appendOutboxEntryForNotification:(NSString *)identifier
+                                           channel:(NSString *)channel
+                                         recipient:(NSString *)recipient
+                                            status:(NSString *)status
+                                             jobID:(NSString *)jobID
+                                             queue:(NSString *)queue
+                                        deliveryID:(NSString *)deliveryID
+                                           message:(NSDictionary *)message
+                                      errorMessage:(NSString *)errorMessage;
+- (void)recordFanoutForRecipient:(NSString *)recipient
+                    notification:(NSString *)identifier
+                           entry:(NSDictionary *)entry;
+- (nullable NSDictionary *)queueNotificationSummaryForIdentifier:(NSString *)identifier
+                                                         payload:(NSDictionary *)payload
+                                                        channels:(NSArray<NSString *> *)channels
+                                                           error:(NSError **)error;
+- (NSDictionary *)inboxSummaryLockedForRecipient:(NSString *)recipient;
 
 @end
 
@@ -275,6 +583,10 @@ static NSArray<NSString *> *NMPreferenceRecipientsFromPayloadAndEntry(NSDictiona
     _inboxByRecipient = [NSMutableDictionary dictionary];
     _preferencesByRecipient = [NSMutableDictionary dictionary];
     _nextEntrySequence = 0;
+    _recentFanoutEvents = [NSMutableArray array];
+    _realtimeHub = [ALNRealtimeHub sharedHub];
+    _persistenceEnabled = NO;
+    _statePath = @"";
   }
   return self;
 }
@@ -314,6 +626,7 @@ static NSArray<NSString *> *NMPreferenceRecipientsFromPayloadAndEntry(NSDictiona
   [self.lock lock];
   self.application = application;
   self.mailAdapter = application.mailAdapter;
+  self.webhookAdapter = application.webhookAdapter;
   self.prefix = NMConfiguredPath(moduleConfig, @"prefix", @"");
   self.apiPrefix = NMConfiguredPath(moduleConfig, @"apiPrefix", @"api");
   self.senderAddress = [NMTrimmedString(moduleConfig[@"sender"]) length] > 0
@@ -324,9 +637,16 @@ static NSArray<NSString *> *NMPreferenceRecipientsFromPayloadAndEntry(NSDictiona
   [self.outboxEntries removeAllObjects];
   [self.inboxByRecipient removeAllObjects];
   [self.preferencesByRecipient removeAllObjects];
+  [self.recentFanoutEvents removeAllObjects];
   self.preferenceHook = nil;
   self.nextEntrySequence = 0;
+  self.statePath = NMResolvedPersistencePath(application, moduleConfig);
+  self.persistenceEnabled = ([self.statePath length] > 0);
   [self.lock unlock];
+
+  if (![self loadPersistedStateWithError:error]) {
+    return NO;
+  }
 
   if ([preferenceHookClass length] > 0) {
     Class klass = NSClassFromString(preferenceHookClass);
@@ -389,6 +709,125 @@ static NSArray<NSString *> *NMPreferenceRecipientsFromPayloadAndEntry(NSDictiona
   return YES;
 }
 
+- (BOOL)loadPersistedStateWithError:(NSError **)error {
+  if (!self.persistenceEnabled || [self.statePath length] == 0) {
+    return YES;
+  }
+  NSError *readError = nil;
+  NSDictionary *state = NMReadPropertyListAtPath(self.statePath, &readError);
+  if (state == nil) {
+    if (readError != nil && error != NULL) {
+      *error = readError;
+      return NO;
+    }
+    return YES;
+  }
+  [self.lock lock];
+  NSArray *outbox = [state[@"outboxEntries"] isKindOfClass:[NSArray class]] ? state[@"outboxEntries"] : @[];
+  [self.outboxEntries addObjectsFromArray:outbox];
+  NSDictionary *inboxByRecipient = [state[@"inboxByRecipient"] isKindOfClass:[NSDictionary class]]
+                                       ? state[@"inboxByRecipient"]
+                                       : @{};
+  for (NSString *recipient in inboxByRecipient) {
+    NSArray *entries = [inboxByRecipient[recipient] isKindOfClass:[NSArray class]] ? inboxByRecipient[recipient] : @[];
+    NSMutableArray *normalizedEntries = [NSMutableArray array];
+    for (id rawEntry in entries) {
+      [normalizedEntries addObject:NMNormalizedInboxEntry(rawEntry)];
+    }
+    self.inboxByRecipient[recipient] = normalizedEntries;
+  }
+  NSDictionary *preferences = [state[@"preferencesByRecipient"] isKindOfClass:[NSDictionary class]]
+                                  ? state[@"preferencesByRecipient"]
+                                  : @{};
+  [self.preferencesByRecipient addEntriesFromDictionary:preferences];
+  NSArray *fanout = [state[@"recentFanoutEvents"] isKindOfClass:[NSArray class]] ? state[@"recentFanoutEvents"] : @[];
+  [self.recentFanoutEvents addObjectsFromArray:fanout];
+  self.nextEntrySequence = [state[@"nextEntrySequence"] respondsToSelector:@selector(unsignedIntegerValue)]
+                               ? [state[@"nextEntrySequence"] unsignedIntegerValue]
+                               : self.nextEntrySequence;
+  [self.lock unlock];
+  return YES;
+}
+
+- (BOOL)persistStateWithError:(NSError **)error {
+  if (!self.persistenceEnabled || [self.statePath length] == 0) {
+    return YES;
+  }
+  NSDictionary *payload = nil;
+  [self.lock lock];
+  NSMutableDictionary *inbox = [NSMutableDictionary dictionary];
+  for (NSString *recipient in self.inboxByRecipient) {
+    inbox[recipient] = [[NSArray alloc] initWithArray:self.inboxByRecipient[recipient] ?: @[] copyItems:YES] ?: @[];
+  }
+  payload = @{
+    @"version" : @1,
+    @"nextEntrySequence" : @(self.nextEntrySequence),
+    @"outboxEntries" : [[NSArray alloc] initWithArray:self.outboxEntries copyItems:YES] ?: @[],
+    @"inboxByRecipient" : inbox,
+    @"preferencesByRecipient" : [NSDictionary dictionaryWithDictionary:self.preferencesByRecipient ?: @{}],
+    @"recentFanoutEvents" : [[NSArray alloc] initWithArray:self.recentFanoutEvents copyItems:YES] ?: @[],
+  };
+  [self.lock unlock];
+  return NMWritePropertyListAtPath(self.statePath, payload, error);
+}
+
+- (NSDictionary *)appendOutboxEntryForNotification:(NSString *)identifier
+                                           channel:(NSString *)channel
+                                         recipient:(NSString *)recipient
+                                            status:(NSString *)status
+                                             jobID:(NSString *)jobID
+                                             queue:(NSString *)queue
+                                        deliveryID:(NSString *)deliveryID
+                                           message:(NSDictionary *)message
+                                      errorMessage:(NSString *)errorMessage {
+  [self.lock lock];
+  self.nextEntrySequence += 1;
+  NSDictionary *entry = @{
+    @"entryID" : [NSString stringWithFormat:@"notification-%lu", (unsigned long)self.nextEntrySequence],
+    @"notification" : NMTrimmedString(identifier),
+    @"channel" : NMLowerTrimmedString(channel),
+    @"recipient" : NMTrimmedString(recipient),
+    @"jobID" : NMTrimmedString(jobID),
+    @"queue" : NMTrimmedString(queue),
+    @"deliveryID" : NMTrimmedString(deliveryID),
+    @"status" : NMLowerTrimmedString(status),
+    @"timestamp" : @([[NSDate date] timeIntervalSince1970]),
+    @"message" : NMNormalizeDictionary(message),
+    @"error" : NMTrimmedString(errorMessage),
+  };
+  [self.outboxEntries addObject:entry];
+  [self.lock unlock];
+  return entry;
+}
+
+- (void)recordFanoutForRecipient:(NSString *)recipient
+                    notification:(NSString *)identifier
+                           entry:(NSDictionary *)entry {
+  NSString *channel = NMFanoutChannelForRecipient(recipient);
+  NSDictionary *payload = @{
+    @"type" : @"notification.in_app",
+    @"notification" : NMTrimmedString(identifier),
+    @"recipient" : NMTrimmedString(recipient),
+    @"entry" : entry ?: @{},
+  };
+  NSData *jsonData = [NSJSONSerialization dataWithJSONObject:payload options:0 error:NULL];
+  NSString *message = (jsonData != nil) ? [[NSString alloc] initWithData:jsonData encoding:NSUTF8StringEncoding] : @"{}";
+  NSUInteger subscribers = [self.realtimeHub publishMessage:message ?: @"{}" onChannel:channel];
+  [self.lock lock];
+  [self.recentFanoutEvents addObject:@{
+    @"notification" : NMTrimmedString(identifier),
+    @"recipient" : NMTrimmedString(recipient),
+    @"channel" : channel,
+    @"entryID" : NMTrimmedString(entry[@"entryID"]),
+    @"subscriberCount" : @(subscribers),
+    @"timestamp" : @([[NSDate date] timeIntervalSince1970]),
+  }];
+  while ([self.recentFanoutEvents count] > 20) {
+    [self.recentFanoutEvents removeObjectAtIndex:0];
+  }
+  [self.lock unlock];
+}
+
 - (NSDictionary *)resolvedConfigSummary {
   [self.lock lock];
   NSDictionary *summary = @{
@@ -400,6 +839,10 @@ static NSArray<NSString *> *NMPreferenceRecipientsFromPayloadAndEntry(NSDictiona
     @"inboxRecipientCount" : @([self.inboxByRecipient count]),
     @"preferenceRecipientCount" : @([self.preferencesByRecipient count]),
     @"preferenceHookClass" : self.preferenceHook ? NSStringFromClass([(NSObject *)self.preferenceHook class]) : @"",
+    @"webhookAdapter" : (self.webhookAdapter != nil) ? [self.webhookAdapter adapterName] : @"",
+    @"fanoutEventCount" : @([self.recentFanoutEvents count]),
+    @"persistenceEnabled" : @(self.persistenceEnabled),
+    @"statePath" : self.statePath ?: @"",
   };
   [self.lock unlock];
   return summary;
@@ -446,11 +889,13 @@ static NSArray<NSString *> *NMPreferenceRecipientsFromPayloadAndEntry(NSDictiona
       [definition respondsToSelector:@selector(notificationsModuleDefaultChannels)]
           ? NMNormalizedChannelArray([definition notificationsModuleDefaultChannels])
           : NMNormalizedChannelArray(rawMetadata[@"channels"]);
+  NSDictionary *channelPolicies = NMNormalizedChannelPolicies(rawMetadata[@"channelPolicies"]);
   NSDictionary *metadata = @{
     @"identifier" : identifier,
     @"title" : [NMTrimmedString(rawMetadata[@"title"]) length] > 0 ? NMTrimmedString(rawMetadata[@"title"]) : identifier,
     @"description" : NMTrimmedString(rawMetadata[@"description"]),
     @"channels" : channels ?: @[],
+    @"channelPolicies" : channelPolicies ?: @{},
     @"source" : NMTrimmedString(source),
   };
 
@@ -536,6 +981,7 @@ static NSArray<NSString *> *NMPreferenceRecipientsFromPayloadAndEntry(NSDictiona
 
   ALNMailMessage *message = nil;
   NSDictionary *inAppEntry = nil;
+  NSDictionary *webhookRequest = nil;
   if ([normalizedChannels containsObject:@"email"]) {
     NSError *mailError = nil;
     message = [definition notificationsModuleMailMessageForPayload:normalizedPayload runtime:self error:&mailError];
@@ -568,6 +1014,28 @@ static NSArray<NSString *> *NMPreferenceRecipientsFromPayloadAndEntry(NSDictiona
       return nil;
     }
   }
+  if ([normalizedChannels containsObject:@"webhook"]) {
+    NSError *webhookError = nil;
+    if (![definition respondsToSelector:@selector(notificationsModuleWebhookRequestForPayload:runtime:error:)]) {
+      if (error != NULL) {
+        *error = NMError(ALNNotificationsModuleErrorValidationFailed,
+                         @"notification does not support the webhook channel",
+                         @{ @"identifier" : notificationID });
+      }
+      return nil;
+    }
+    NSDictionary *rawRequest =
+        [definition notificationsModuleWebhookRequestForPayload:normalizedPayload runtime:self error:&webhookError];
+    webhookRequest = NMNormalizedWebhookRequest(rawRequest, normalizedPayload, &webhookError);
+    if (webhookRequest == nil) {
+      if (error != NULL) {
+        *error = webhookError ?: NMError(ALNNotificationsModuleErrorDeliveryFailed,
+                                         @"notification did not produce a webhook request",
+                                         @{ @"identifier" : notificationID });
+      }
+      return nil;
+    }
+  }
 
   return @{
     @"identifier" : notificationID,
@@ -576,6 +1044,112 @@ static NSArray<NSString *> *NMPreferenceRecipientsFromPayloadAndEntry(NSDictiona
     @"channels" : normalizedChannels,
     @"message" : message ?: [NSNull null],
     @"inAppEntry" : inAppEntry ?: [NSNull null],
+    @"webhook" : webhookRequest ?: [NSNull null],
+  };
+}
+
+- (NSDictionary *)queueNotificationSummaryForIdentifier:(NSString *)identifier
+                                                 payload:(NSDictionary *)payload
+                                                channels:(NSArray<NSString *> *)channels
+                                                   error:(NSError **)error {
+  NSDictionary *artifacts = [self artifactsForNotificationIdentifier:identifier payload:payload channels:channels error:error];
+  if (artifacts == nil) {
+    return nil;
+  }
+  NSDictionary *metadata = [artifacts[@"metadata"] isKindOfClass:[NSDictionary class]] ? artifacts[@"metadata"] : @{};
+  NSDictionary *channelPolicies =
+      [metadata[@"channelPolicies"] isKindOfClass:[NSDictionary class]] ? metadata[@"channelPolicies"] : @{};
+  NSDictionary *normalizedPayload = [artifacts[@"payload"] isKindOfClass:[NSDictionary class]] ? artifacts[@"payload"] : @{};
+  NSArray<NSString *> *requestedChannels = [artifacts[@"channels"] isKindOfClass:[NSArray class]] ? artifacts[@"channels"] : @[];
+  ALNMailMessage *message = [artifacts[@"message"] isKindOfClass:[ALNMailMessage class]] ? artifacts[@"message"] : nil;
+  NSDictionary *inAppEntry = [artifacts[@"inAppEntry"] isKindOfClass:[NSDictionary class]] ? artifacts[@"inAppEntry"] : nil;
+  NSDictionary *webhookRequest = [artifacts[@"webhook"] isKindOfClass:[NSDictionary class]] ? artifacts[@"webhook"] : nil;
+  NSArray<NSString *> *preferenceRecipients = NMPreferenceRecipientsFromPayloadAndEntry(normalizedPayload, inAppEntry ?: @{});
+
+  NSMutableArray *jobIDs = [NSMutableArray array];
+  NSMutableArray *channelJobs = [NSMutableArray array];
+  for (NSString *channel in requestedChannels) {
+    NSDictionary *policy = [channelPolicies[channel] isKindOfClass:[NSDictionary class]] ? channelPolicies[channel] : @{};
+    NSString *queue = [NMTrimmedString(policy[@"queue"]) length] > 0 ? NMTrimmedString(policy[@"queue"]) : @"default";
+    NSUInteger maxAttempts = [policy[@"maxAttempts"] respondsToSelector:@selector(unsignedIntegerValue)]
+                                 ? [policy[@"maxAttempts"] unsignedIntegerValue]
+                                 : 0;
+    NSDictionary *jobPayload = @{
+      @"identifier" : artifacts[@"identifier"] ?: @"",
+      @"payload" : normalizedPayload,
+      @"channels" : @[ channel ],
+    };
+    NSMutableDictionary *options = [@{
+      @"queue" : queue,
+      @"source" : @"notification",
+    } mutableCopy];
+    if (maxAttempts > 0) {
+      options[@"maxAttempts"] = @(maxAttempts);
+    }
+    if ([policy[@"retryBackoff"] isKindOfClass:[NSDictionary class]]) {
+      options[@"retryBackoff"] = policy[@"retryBackoff"];
+    }
+    NSError *enqueueError = nil;
+    NSString *jobID = [[ALNJobsModuleRuntime sharedRuntime] enqueueJobIdentifier:ALNNotificationsDispatchJobIdentifier
+                                                                         payload:jobPayload
+                                                                         options:options
+                                                                           error:&enqueueError];
+    if ([jobID length] == 0) {
+      if (error != NULL) {
+        *error = enqueueError;
+      }
+      return nil;
+    }
+    [jobIDs addObject:jobID];
+    [channelJobs addObject:@{
+      @"channel" : channel,
+      @"jobID" : jobID,
+      @"queue" : queue,
+      @"maxAttempts" : @(maxAttempts),
+    }];
+
+    if ([channel isEqualToString:@"email"] && message != nil) {
+      [self appendOutboxEntryForNotification:artifacts[@"identifier"]
+                                     channel:channel
+                                   recipient:([preferenceRecipients count] > 0) ? preferenceRecipients[0] : @""
+                                      status:@"queued"
+                                       jobID:jobID
+                                       queue:queue
+                                  deliveryID:@""
+                                     message:[message dictionaryRepresentation]
+                                errorMessage:nil];
+    } else if ([channel isEqualToString:@"in_app"] && inAppEntry != nil) {
+      for (NSString *recipient in NMRecipientsFromInAppEntry(inAppEntry)) {
+        [self appendOutboxEntryForNotification:artifacts[@"identifier"]
+                                       channel:channel
+                                     recipient:recipient
+                                        status:@"queued"
+                                         jobID:jobID
+                                         queue:queue
+                                    deliveryID:@""
+                                       message:inAppEntry
+                                  errorMessage:nil];
+      }
+    } else if ([channel isEqualToString:@"webhook"] && webhookRequest != nil) {
+      [self appendOutboxEntryForNotification:artifacts[@"identifier"]
+                                     channel:channel
+                                   recipient:([preferenceRecipients count] > 0) ? preferenceRecipients[0] : NMTrimmedString(webhookRequest[@"url"])
+                                      status:@"queued"
+                                       jobID:jobID
+                                       queue:queue
+                                  deliveryID:@""
+                                     message:NMWebhookPreviewRepresentation(webhookRequest)
+                                errorMessage:nil];
+    }
+  }
+  if (![self persistStateWithError:error]) {
+    return nil;
+  }
+  return @{
+    @"notification" : artifacts[@"identifier"] ?: @"",
+    @"jobID" : ([jobIDs count] > 0) ? jobIDs[0] : @"",
+    @"jobIDs" : jobIDs ?: @[],
+    @"channelJobs" : channelJobs ?: @[],
   };
 }
 
@@ -583,22 +1157,29 @@ static NSArray<NSString *> *NMPreferenceRecipientsFromPayloadAndEntry(NSDictiona
                                   payload:(NSDictionary *)payload
                                  channels:(NSArray<NSString *> *)channels
                                     error:(NSError **)error {
-  NSDictionary *artifacts = [self artifactsForNotificationIdentifier:identifier payload:payload channels:channels error:error];
-  if (artifacts == nil) {
-    return nil;
+  if ([channels count] == 0) {
+    NSDictionary *artifacts = [self artifactsForNotificationIdentifier:identifier
+                                                               payload:payload
+                                                              channels:channels
+                                                                 error:error];
+    if (artifacts == nil) {
+      return nil;
+    }
+    NSDictionary *jobPayload = @{
+      @"identifier" : artifacts[@"identifier"] ?: @"",
+      @"payload" : [artifacts[@"payload"] isKindOfClass:[NSDictionary class]] ? artifacts[@"payload"] : @{},
+      @"channels" : [artifacts[@"channels"] isKindOfClass:[NSArray class]] ? artifacts[@"channels"] : @[],
+    };
+    return [[ALNJobsModuleRuntime sharedRuntime] enqueueJobIdentifier:ALNNotificationsDispatchJobIdentifier
+                                                              payload:jobPayload
+                                                              options:@{ @"queue" : @"default", @"source" : @"notification" }
+                                                                error:error];
   }
-  NSDictionary *jobPayload = @{
-    @"identifier" : artifacts[@"identifier"] ?: @"",
-    @"payload" : artifacts[@"payload"] ?: @{},
-    @"channels" : artifacts[@"channels"] ?: @[],
-  };
-  return [[ALNJobsModuleRuntime sharedRuntime] enqueueJobIdentifier:ALNNotificationsDispatchJobIdentifier
-                                                            payload:jobPayload
-                                                            options:@{
-                                                              @"queue" : @"default",
-                                                              @"source" : @"notification",
-                                                            }
-                                                              error:error];
+  NSDictionary *summary = [self queueNotificationSummaryForIdentifier:identifier
+                                                              payload:payload
+                                                             channels:channels
+                                                                error:error];
+  return [summary[@"jobID"] isKindOfClass:[NSString class]] ? summary[@"jobID"] : nil;
 }
 
 - (BOOL)channel:(NSString *)channel
@@ -645,11 +1226,13 @@ notificationIdentifier:(NSString *)identifier
   }
   ALNMailMessage *message = [artifacts[@"message"] isKindOfClass:[ALNMailMessage class]] ? artifacts[@"message"] : nil;
   NSDictionary *inAppEntry = [artifacts[@"inAppEntry"] isKindOfClass:[NSDictionary class]] ? artifacts[@"inAppEntry"] : nil;
+  NSDictionary *webhookRequest = [artifacts[@"webhook"] isKindOfClass:[NSDictionary class]] ? artifacts[@"webhook"] : nil;
   return @{
     @"notification" : artifacts[@"identifier"] ?: @"",
     @"channels" : artifacts[@"channels"] ?: @[],
     @"email" : message ? [message dictionaryRepresentation] : @{},
     @"in_app" : inAppEntry ?: @{},
+    @"webhook" : webhookRequest ? NMWebhookPreviewRepresentation(webhookRequest) : @{},
     @"recipients" : NMPreferenceRecipientsFromPayloadAndEntry(artifacts[@"payload"], inAppEntry ?: @{}),
   };
 }
@@ -669,6 +1252,7 @@ notificationIdentifier:(NSString *)identifier
   NSArray<NSString *> *channels = artifacts[@"channels"] ?: @[];
   ALNMailMessage *message = [artifacts[@"message"] isKindOfClass:[ALNMailMessage class]] ? artifacts[@"message"] : nil;
   NSDictionary *inAppEntry = [artifacts[@"inAppEntry"] isKindOfClass:[NSDictionary class]] ? artifacts[@"inAppEntry"] : nil;
+  NSDictionary *webhookRequest = [artifacts[@"webhook"] isKindOfClass:[NSDictionary class]] ? artifacts[@"webhook"] : nil;
   NSArray<NSString *> *preferenceRecipients = NMPreferenceRecipientsFromPayloadAndEntry(payload, inAppEntry ?: @{});
 
   NSMutableArray *deliveredChannels = [NSMutableArray array];
@@ -690,6 +1274,16 @@ notificationIdentifier:(NSString *)identifier
       NSError *mailError = nil;
       NSString *deliveryID = [self.mailAdapter deliverMessage:message error:&mailError];
       if ([deliveryID length] == 0) {
+        [self appendOutboxEntryForNotification:identifier
+                                       channel:@"email"
+                                     recipient:([preferenceRecipients count] > 0) ? preferenceRecipients[0] : @""
+                                        status:@"failed"
+                                         jobID:@""
+                                         queue:@""
+                                    deliveryID:@""
+                                       message:[message dictionaryRepresentation]
+                                  errorMessage:mailError.localizedDescription ?: @"mail delivery failed"];
+        (void)[self persistStateWithError:NULL];
         if (error != NULL) {
           *error = mailError ?: NMError(ALNNotificationsModuleErrorDeliveryFailed,
                                         @"mail delivery failed",
@@ -697,22 +1291,27 @@ notificationIdentifier:(NSString *)identifier
         }
         return nil;
       }
-      [self.lock lock];
-      self.nextEntrySequence += 1;
-      [self.outboxEntries addObject:@{
-        @"entryID" : [NSString stringWithFormat:@"notification-%lu", (unsigned long)self.nextEntrySequence],
-        @"notification" : identifier,
-        @"channel" : @"email",
-        @"recipient" : ([preferenceRecipients count] > 0) ? preferenceRecipients[0] : @"",
-        @"deliveryID" : deliveryID,
-        @"status" : @"delivered",
-        @"timestamp" : @([[NSDate date] timeIntervalSince1970]),
-        @"message" : [message dictionaryRepresentation],
-      }];
-      [self.lock unlock];
+      [self appendOutboxEntryForNotification:identifier
+                                     channel:@"email"
+                                   recipient:([preferenceRecipients count] > 0) ? preferenceRecipients[0] : @""
+                                      status:@"delivered"
+                                       jobID:@""
+                                       queue:@""
+                                  deliveryID:deliveryID
+                                     message:[message dictionaryRepresentation]
+                                errorMessage:nil];
       [deliveredChannels addObject:@"email"];
       [deliveryIDs addObject:deliveryID];
     } else {
+      [self appendOutboxEntryForNotification:identifier
+                                     channel:@"email"
+                                   recipient:([preferenceRecipients count] > 0) ? preferenceRecipients[0] : @""
+                                      status:@"suppressed"
+                                       jobID:@""
+                                       queue:@""
+                                  deliveryID:@""
+                                     message:[message dictionaryRepresentation]
+                                errorMessage:@"suppressed by preference policy"];
       [skippedChannels addObject:@"email"];
     }
   }
@@ -740,36 +1339,106 @@ notificationIdentifier:(NSString *)identifier
         @"title" : NMTrimmedString(inAppEntry[@"title"]),
         @"body" : NMTrimmedString(inAppEntry[@"body"]),
         @"metadata" : NMNormalizeDictionary(inAppEntry[@"metadata"]),
+        @"read" : @NO,
       };
       [inbox addObject:record];
       self.inboxByRecipient[recipient] = inbox;
-      self.nextEntrySequence += 1;
-      [self.outboxEntries addObject:@{
-        @"entryID" : [NSString stringWithFormat:@"notification-%lu", (unsigned long)self.nextEntrySequence],
-        @"notification" : identifier,
-        @"channel" : @"in_app",
-        @"recipient" : recipient,
-        @"deliveryID" : @"",
-        @"status" : @"delivered",
-        @"timestamp" : @([[NSDate date] timeIntervalSince1970]),
-        @"message" : record,
-      }];
       [self.lock unlock];
+      [self appendOutboxEntryForNotification:identifier
+                                     channel:@"in_app"
+                                   recipient:recipient
+                                      status:@"delivered"
+                                       jobID:@""
+                                       queue:@""
+                                  deliveryID:@""
+                                     message:record
+                                errorMessage:nil];
+      [self recordFanoutForRecipient:recipient notification:identifier entry:record];
       deliveredRecipientCount += 1;
     }
     if (deliveredRecipientCount > 0) {
       [deliveredChannels addObject:@"in_app"];
     } else {
+      [self appendOutboxEntryForNotification:identifier
+                                     channel:@"in_app"
+                                   recipient:([entryRecipients count] > 0) ? entryRecipients[0] : @""
+                                      status:@"suppressed"
+                                       jobID:@""
+                                       queue:@""
+                                  deliveryID:@""
+                                     message:inAppEntry
+                                errorMessage:@"suppressed by preference policy"];
       [skippedChannels addObject:@"in_app"];
     }
   }
 
-  return @{
+  if ([channels containsObject:@"webhook"] && [webhookRequest isKindOfClass:[NSDictionary class]]) {
+    BOOL webhookEnabled = YES;
+    for (NSString *recipient in preferenceRecipients) {
+      if (![self channel:@"webhook"
+       enabledForRecipient:recipient
+     notificationIdentifier:identifier
+             defaultEnabled:YES]) {
+        webhookEnabled = NO;
+        break;
+      }
+    }
+    if (webhookEnabled) {
+      NSError *webhookError = nil;
+      NSString *deliveryID = [self.webhookAdapter deliverRequest:webhookRequest error:&webhookError];
+      if ([deliveryID length] == 0) {
+        [self appendOutboxEntryForNotification:identifier
+                                       channel:@"webhook"
+                                     recipient:([preferenceRecipients count] > 0) ? preferenceRecipients[0] : NMTrimmedString(webhookRequest[@"url"])
+                                        status:@"failed"
+                                         jobID:@""
+                                         queue:@""
+                                    deliveryID:@""
+                                       message:NMWebhookPreviewRepresentation(webhookRequest)
+                                  errorMessage:webhookError.localizedDescription ?: @"webhook delivery failed"];
+        (void)[self persistStateWithError:NULL];
+        if (error != NULL) {
+          *error = webhookError ?: NMError(ALNNotificationsModuleErrorDeliveryFailed,
+                                           @"webhook delivery failed",
+                                           @{ @"identifier" : identifier });
+        }
+        return nil;
+      }
+      [self appendOutboxEntryForNotification:identifier
+                                     channel:@"webhook"
+                                   recipient:([preferenceRecipients count] > 0) ? preferenceRecipients[0] : NMTrimmedString(webhookRequest[@"url"])
+                                      status:@"delivered"
+                                       jobID:@""
+                                       queue:@""
+                                  deliveryID:deliveryID
+                                     message:NMWebhookPreviewRepresentation(webhookRequest)
+                                errorMessage:nil];
+      [deliveredChannels addObject:@"webhook"];
+      [deliveryIDs addObject:deliveryID];
+    } else {
+      [self appendOutboxEntryForNotification:identifier
+                                     channel:@"webhook"
+                                   recipient:([preferenceRecipients count] > 0) ? preferenceRecipients[0] : NMTrimmedString(webhookRequest[@"url"])
+                                      status:@"suppressed"
+                                       jobID:@""
+                                       queue:@""
+                                  deliveryID:@""
+                                     message:NMWebhookPreviewRepresentation(webhookRequest)
+                                errorMessage:@"suppressed by preference policy"];
+      [skippedChannels addObject:@"webhook"];
+    }
+  }
+
+  NSDictionary *summary = @{
     @"notification" : identifier,
     @"channels" : deliveredChannels,
     @"skippedChannels" : skippedChannels,
     @"deliveryIDs" : deliveryIDs,
   };
+  if (![self persistStateWithError:error]) {
+    return nil;
+  }
+  return summary;
 }
 
 - (NSDictionary *)testSendNotificationIdentifier:(NSString *)identifier
@@ -808,10 +1477,138 @@ notificationIdentifier:(NSString *)identifier
 - (NSArray<NSDictionary *> *)inboxSnapshotForRecipient:(NSString *)recipient {
   NSString *normalizedRecipient = NMTrimmedString(recipient);
   [self.lock lock];
-  NSArray *inbox = self.inboxByRecipient[normalizedRecipient];
-  NSArray *snapshot = [[NSArray alloc] initWithArray:inbox ?: @[] copyItems:YES];
+  NSArray *storedInbox = self.inboxByRecipient[normalizedRecipient];
+  NSMutableArray *snapshot = [NSMutableArray array];
+  for (id rawEntry in storedInbox ?: @[]) {
+    [snapshot addObject:NMNormalizedInboxEntry(rawEntry)];
+  }
   [self.lock unlock];
   return snapshot ?: @[];
+}
+
+- (NSDictionary *)inboxSummaryLockedForRecipient:(NSString *)recipient {
+  NSMutableArray *entries = [NSMutableArray array];
+  NSArray *storedInbox = self.inboxByRecipient[NMTrimmedString(recipient)];
+  for (id rawEntry in storedInbox ?: @[]) {
+    [entries addObject:NMNormalizedInboxEntry(rawEntry)];
+  }
+  return NMInboxSummary(recipient, entries);
+}
+
+- (NSDictionary *)inboxSummaryForRecipient:(NSString *)recipient {
+  NSString *normalizedRecipient = NMTrimmedString(recipient);
+  [self.lock lock];
+  NSDictionary *summary = [self inboxSummaryLockedForRecipient:normalizedRecipient];
+  [self.lock unlock];
+  return summary ?: NMInboxSummary(normalizedRecipient, @[]);
+}
+
+- (NSDictionary *)markInboxEntryID:(NSString *)entryID
+                              read:(BOOL)read
+                      forRecipient:(NSString *)recipient
+                             error:(NSError **)error {
+  NSString *normalizedRecipient = NMTrimmedString(recipient);
+  NSString *normalizedEntryID = NMTrimmedString(entryID);
+  if ([normalizedRecipient length] == 0 || [normalizedEntryID length] == 0) {
+    if (error != NULL) {
+      *error = NMError(ALNNotificationsModuleErrorValidationFailed,
+                       @"recipient and entry ID are required",
+                       @{ @"recipient" : normalizedRecipient ?: @"", @"entryID" : normalizedEntryID ?: @"" });
+    }
+    return nil;
+  }
+
+  NSDictionary *result = nil;
+  [self.lock lock];
+  NSMutableArray *storedInbox = [self.inboxByRecipient[normalizedRecipient] isKindOfClass:[NSMutableArray class]]
+                                    ? self.inboxByRecipient[normalizedRecipient]
+                                    : nil;
+  NSUInteger matchIndex = NSNotFound;
+  for (NSUInteger idx = 0; idx < [storedInbox count]; idx++) {
+    NSDictionary *entry = NMNormalizedInboxEntry(storedInbox[idx]);
+    if ([entry[@"entryID"] isEqualToString:normalizedEntryID]) {
+      matchIndex = idx;
+      break;
+    }
+  }
+  if (matchIndex == NSNotFound) {
+    [self.lock unlock];
+    if (error != NULL) {
+      *error = NMError(ALNNotificationsModuleErrorNotFound,
+                       @"inbox entry not found",
+                       @{ @"recipient" : normalizedRecipient, @"entryID" : normalizedEntryID });
+    }
+    return nil;
+  }
+
+  NSMutableDictionary *updatedEntry =
+      [NSMutableDictionary dictionaryWithDictionary:NMNormalizedInboxEntry(storedInbox[matchIndex])];
+  updatedEntry[@"read"] = @(read);
+  if (read) {
+    updatedEntry[@"readAt"] = @([[NSDate date] timeIntervalSince1970]);
+  } else {
+    [updatedEntry removeObjectForKey:@"readAt"];
+  }
+  storedInbox[matchIndex] = updatedEntry;
+  self.inboxByRecipient[normalizedRecipient] = storedInbox;
+  NSDictionary *summary = [self inboxSummaryLockedForRecipient:normalizedRecipient];
+  result = @{
+    @"recipient" : normalizedRecipient,
+    @"entry" : [updatedEntry copy],
+    @"totalCount" : summary[@"totalCount"] ?: @0,
+    @"unreadCount" : summary[@"unreadCount"] ?: @0,
+  };
+  [self.lock unlock];
+
+  if (![self persistStateWithError:error]) {
+    return nil;
+  }
+  return result;
+}
+
+- (NSDictionary *)markAllInboxEntriesReadForRecipient:(NSString *)recipient
+                                                error:(NSError **)error {
+  NSString *normalizedRecipient = NMTrimmedString(recipient);
+  if ([normalizedRecipient length] == 0) {
+    if (error != NULL) {
+      *error = NMError(ALNNotificationsModuleErrorValidationFailed,
+                       @"recipient is required",
+                       @{ @"field" : @"recipient" });
+    }
+    return nil;
+  }
+
+  NSDictionary *result = nil;
+  [self.lock lock];
+  NSMutableArray *storedInbox = [self.inboxByRecipient[normalizedRecipient] isKindOfClass:[NSMutableArray class]]
+                                    ? self.inboxByRecipient[normalizedRecipient]
+                                    : [NSMutableArray array];
+  NSUInteger updatedCount = 0;
+  NSNumber *readAt = @([[NSDate date] timeIntervalSince1970]);
+  for (NSUInteger idx = 0; idx < [storedInbox count]; idx++) {
+    NSMutableDictionary *entry =
+        [NSMutableDictionary dictionaryWithDictionary:NMNormalizedInboxEntry(storedInbox[idx])];
+    if (![entry[@"read"] boolValue]) {
+      entry[@"read"] = @YES;
+      entry[@"readAt"] = readAt;
+      updatedCount += 1;
+    }
+    storedInbox[idx] = entry;
+  }
+  self.inboxByRecipient[normalizedRecipient] = storedInbox;
+  NSDictionary *summary = [self inboxSummaryLockedForRecipient:normalizedRecipient];
+  result = @{
+    @"recipient" : normalizedRecipient,
+    @"updatedCount" : @(updatedCount),
+    @"totalCount" : summary[@"totalCount"] ?: @0,
+    @"unreadCount" : summary[@"unreadCount"] ?: @0,
+  };
+  [self.lock unlock];
+
+  if (![self persistStateWithError:error]) {
+    return nil;
+  }
+  return result;
 }
 
 - (NSDictionary *)notificationPreferencesForRecipient:(NSString *)recipient {
@@ -859,23 +1656,39 @@ notificationIdentifier:(NSString *)identifier
   self.preferencesByRecipient[normalizedRecipient] = [NSDictionary dictionaryWithDictionary:normalized];
   NSDictionary *stored = [self.preferencesByRecipient[normalizedRecipient] copy];
   [self.lock unlock];
-  return @{
+  NSDictionary *result = @{
     @"recipient" : normalizedRecipient,
     @"preferences" : stored ?: @{},
   };
+  if (![self persistStateWithError:error]) {
+    return nil;
+  }
+  return result;
 }
 
 - (NSDictionary *)dashboardSummary {
   NSArray *definitions = [self registeredNotifications];
   NSArray *outbox = [self outboxSnapshot];
+  NSUInteger unreadInboxCount = 0;
+  [self.lock lock];
+  for (NSString *recipient in self.inboxByRecipient) {
+    NSDictionary *summary = [self inboxSummaryLockedForRecipient:recipient];
+    unreadInboxCount += [summary[@"unreadCount"] respondsToSelector:@selector(unsignedIntegerValue)]
+                            ? [summary[@"unreadCount"] unsignedIntegerValue]
+                            : 0;
+  }
+  [self.lock unlock];
   return @{
     @"cards" : @[
       @{ @"label" : @"Definitions", @"value" : @([definitions count]) },
       @{ @"label" : @"Outbox", @"value" : @([outbox count]) },
       @{ @"label" : @"Inbox Recipients", @"value" : @([self.inboxByRecipient count]) },
+      @{ @"label" : @"Unread Inbox", @"value" : @(unreadInboxCount) },
       @{ @"label" : @"Preference Recipients", @"value" : @([self.preferencesByRecipient count]) },
+      @{ @"label" : @"Realtime fanout", @"value" : @([self.recentFanoutEvents count]) },
     ],
     @"recentOutbox" : ([outbox count] > 10) ? [outbox subarrayWithRange:NSMakeRange(MAX((NSInteger)[outbox count] - 10, 0), 10)] : outbox,
+    @"recentFanout" : ([[NSArray alloc] initWithArray:self.recentFanoutEvents copyItems:YES] ?: @[]),
   };
 }
 
@@ -888,6 +1701,9 @@ notificationIdentifier:(NSString *)identifier
 
 - (BOOL)requireNotificationsUserHTML:(ALNContext *)ctx;
 - (BOOL)requireNotificationsAdminHTML:(ALNContext *)ctx;
+- (id)renderInboxPageForContext:(ALNContext *)ctx
+                        message:(NSString *)message
+                         errors:(NSArray *)errors;
 
 @end
 
@@ -1008,18 +1824,74 @@ notificationIdentifier:(NSString *)identifier
 }
 
 - (id)inboxHTML:(ALNContext *)ctx {
+  return [self renderInboxPageForContext:ctx message:@"" errors:nil];
+}
+
+- (id)renderInboxPageForContext:(ALNContext *)ctx
+                        message:(NSString *)message
+                         errors:(NSArray *)errors {
   NSString *recipient = [ctx authSubject] ?: @"";
+  NSDictionary *inboxSummary = [self.runtime inboxSummaryForRecipient:recipient] ?: @{};
   [self renderTemplate:@"modules/notifications/inbox/index"
                context:[self pageContextWithTitle:@"Notifications"
                                           heading:@"Inbox"
-                                          message:@""
-                                           errors:nil
+                                          message:message
+                                           errors:errors
                                             extra:@{
                                               @"recipient" : recipient,
-                                              @"inbox" : [self.runtime inboxSnapshotForRecipient:recipient] ?: @[],
+                                              @"inbox" : inboxSummary[@"entries"] ?: @[],
+                                              @"inboxSummary" : inboxSummary,
                                             }]
                 layout:@"modules/notifications/layouts/main"
                  error:NULL];
+  return nil;
+}
+
+- (id)markInboxEntryReadHTML:(ALNContext *)ctx {
+  NSString *recipient = [ctx authSubject] ?: @"";
+  NSError *error = nil;
+  NSDictionary *result = [self.runtime markInboxEntryID:[self stringParamForName:@"entryID"] ?: @""
+                                                   read:YES
+                                           forRecipient:recipient
+                                                  error:&error];
+  if (result == nil) {
+    [self setStatus:(error.code == ALNNotificationsModuleErrorNotFound) ? 404 : 422];
+    return [self renderInboxPageForContext:ctx
+                                   message:@""
+                                    errors:@[ @{ @"message" : error.localizedDescription ?: @"Inbox update failed" } ]];
+  }
+  [self redirectTo:[NSString stringWithFormat:@"%@/inbox", self.runtime.prefix ?: @"/notifications"] status:302];
+  return nil;
+}
+
+- (id)markInboxEntryUnreadHTML:(ALNContext *)ctx {
+  NSString *recipient = [ctx authSubject] ?: @"";
+  NSError *error = nil;
+  NSDictionary *result = [self.runtime markInboxEntryID:[self stringParamForName:@"entryID"] ?: @""
+                                                   read:NO
+                                           forRecipient:recipient
+                                                  error:&error];
+  if (result == nil) {
+    [self setStatus:(error.code == ALNNotificationsModuleErrorNotFound) ? 404 : 422];
+    return [self renderInboxPageForContext:ctx
+                                   message:@""
+                                    errors:@[ @{ @"message" : error.localizedDescription ?: @"Inbox update failed" } ]];
+  }
+  [self redirectTo:[NSString stringWithFormat:@"%@/inbox", self.runtime.prefix ?: @"/notifications"] status:302];
+  return nil;
+}
+
+- (id)markAllInboxReadHTML:(ALNContext *)ctx {
+  NSString *recipient = [ctx authSubject] ?: @"";
+  NSError *error = nil;
+  NSDictionary *result = [self.runtime markAllInboxEntriesReadForRecipient:recipient error:&error];
+  if (result == nil) {
+    [self setStatus:422];
+    return [self renderInboxPageForContext:ctx
+                                   message:@""
+                                    errors:@[ @{ @"message" : error.localizedDescription ?: @"Inbox update failed" } ]];
+  }
+  [self redirectTo:[NSString stringWithFormat:@"%@/inbox", self.runtime.prefix ?: @"/notifications"] status:302];
   return nil;
 }
 
@@ -1178,7 +2050,58 @@ notificationIdentifier:(NSString *)identifier
 
 - (id)apiInbox:(ALNContext *)ctx {
   NSString *recipient = [[ctx authSubject] length] > 0 ? [ctx authSubject] : ([self stringParamForName:@"recipient"] ?: @"");
-  [self renderJSONEnvelopeWithData:@{ @"inbox" : [self.runtime inboxSnapshotForRecipient:recipient] ?: @[] } meta:nil error:NULL];
+  NSDictionary *summary = [self.runtime inboxSummaryForRecipient:recipient] ?: @{};
+  [self renderJSONEnvelopeWithData:@{
+    @"recipient" : recipient ?: @"",
+    @"inbox" : summary[@"entries"] ?: @[],
+    @"totalCount" : summary[@"totalCount"] ?: @0,
+    @"unreadCount" : summary[@"unreadCount"] ?: @0,
+  } meta:nil error:NULL];
+  return nil;
+}
+
+- (id)apiMarkInboxEntryRead:(ALNContext *)ctx {
+  NSString *recipient = [ctx authSubject] ?: @"";
+  NSError *error = nil;
+  NSDictionary *result = [self.runtime markInboxEntryID:[self stringParamForName:@"entryID"] ?: @""
+                                                   read:YES
+                                           forRecipient:recipient
+                                                  error:&error];
+  if (result == nil) {
+    [self setStatus:(error.code == ALNNotificationsModuleErrorNotFound) ? 404 : 422];
+    [self renderJSONEnvelopeWithData:nil meta:@{ @"error" : error.localizedDescription ?: @"inbox update failed" } error:NULL];
+    return nil;
+  }
+  [self renderJSONEnvelopeWithData:result meta:nil error:NULL];
+  return nil;
+}
+
+- (id)apiMarkInboxEntryUnread:(ALNContext *)ctx {
+  NSString *recipient = [ctx authSubject] ?: @"";
+  NSError *error = nil;
+  NSDictionary *result = [self.runtime markInboxEntryID:[self stringParamForName:@"entryID"] ?: @""
+                                                   read:NO
+                                           forRecipient:recipient
+                                                  error:&error];
+  if (result == nil) {
+    [self setStatus:(error.code == ALNNotificationsModuleErrorNotFound) ? 404 : 422];
+    [self renderJSONEnvelopeWithData:nil meta:@{ @"error" : error.localizedDescription ?: @"inbox update failed" } error:NULL];
+    return nil;
+  }
+  [self renderJSONEnvelopeWithData:result meta:nil error:NULL];
+  return nil;
+}
+
+- (id)apiReadAllInbox:(ALNContext *)ctx {
+  NSString *recipient = [ctx authSubject] ?: @"";
+  NSError *error = nil;
+  NSDictionary *result = [self.runtime markAllInboxEntriesReadForRecipient:recipient error:&error];
+  if (result == nil) {
+    [self setStatus:422];
+    [self renderJSONEnvelopeWithData:nil meta:@{ @"error" : error.localizedDescription ?: @"inbox update failed" } error:NULL];
+    return nil;
+  }
+  [self renderJSONEnvelopeWithData:result meta:nil error:NULL];
   return nil;
 }
 
@@ -1186,16 +2109,17 @@ notificationIdentifier:(NSString *)identifier
   (void)ctx;
   NSDictionary *parameters = [self requestParameters];
   NSError *error = nil;
-  NSString *jobID = [self.runtime queueNotificationIdentifier:NMTrimmedString(parameters[@"notification"])
-                                                      payload:NMNormalizeDictionary(parameters[@"payload"])
-                                                     channels:NMNormalizeArray(parameters[@"channels"])
-                                                        error:&error];
-  if ([jobID length] == 0) {
+  NSDictionary *summary =
+      [self.runtime queueNotificationSummaryForIdentifier:NMTrimmedString(parameters[@"notification"])
+                                                  payload:NMNormalizeDictionary(parameters[@"payload"])
+                                                 channels:NMNormalizeArray(parameters[@"channels"])
+                                                    error:&error];
+  if (summary == nil) {
     [self setStatus:422];
     [self renderJSONEnvelopeWithData:nil meta:@{ @"error" : error.localizedDescription ?: @"queue failed" } error:NULL];
     return nil;
   }
-  [self renderJSONEnvelopeWithData:@{ @"jobID" : jobID } meta:nil error:NULL];
+  [self renderJSONEnvelopeWithData:summary meta:nil error:NULL];
   return nil;
 }
 
@@ -1468,6 +2392,21 @@ notificationIdentifier:(NSString *)identifier
                               name:@"notifications_inbox"
                    controllerClass:[ALNNotificationsModuleController class]
                             action:@"inboxHTML"];
+  [application registerRouteMethod:@"POST"
+                              path:@"/inbox/read-all"
+                              name:@"notifications_inbox_read_all"
+                   controllerClass:[ALNNotificationsModuleController class]
+                            action:@"markAllInboxReadHTML"];
+  [application registerRouteMethod:@"POST"
+                              path:@"/inbox/:entryID/read"
+                              name:@"notifications_inbox_mark_read"
+                   controllerClass:[ALNNotificationsModuleController class]
+                            action:@"markInboxEntryReadHTML"];
+  [application registerRouteMethod:@"POST"
+                              path:@"/inbox/:entryID/unread"
+                              name:@"notifications_inbox_mark_unread"
+                   controllerClass:[ALNNotificationsModuleController class]
+                            action:@"markInboxEntryUnreadHTML"];
   [application registerRouteMethod:@"GET"
                               path:@"/preferences"
                               name:@"notifications_preferences"
@@ -1525,6 +2464,21 @@ notificationIdentifier:(NSString *)identifier
                    controllerClass:[ALNNotificationsModuleController class]
                             action:@"apiInbox"];
   [application registerRouteMethod:@"POST"
+                              path:@"/inbox/read-all"
+                              name:@"notifications_api_inbox_read_all"
+                   controllerClass:[ALNNotificationsModuleController class]
+                            action:@"apiReadAllInbox"];
+  [application registerRouteMethod:@"POST"
+                              path:@"/inbox/:entryID/read"
+                              name:@"notifications_api_inbox_mark_read"
+                   controllerClass:[ALNNotificationsModuleController class]
+                            action:@"apiMarkInboxEntryRead"];
+  [application registerRouteMethod:@"POST"
+                              path:@"/inbox/:entryID/unread"
+                              name:@"notifications_api_inbox_mark_unread"
+                   controllerClass:[ALNNotificationsModuleController class]
+                            action:@"apiMarkInboxEntryUnread"];
+  [application registerRouteMethod:@"POST"
                               path:@"/queue"
                               name:@"notifications_api_queue"
                    controllerClass:[ALNNotificationsModuleController class]
@@ -1579,6 +2533,9 @@ notificationIdentifier:(NSString *)identifier
     @"notifications_api_definitions",
     @"notifications_api_inbox_self",
     @"notifications_api_inbox",
+    @"notifications_api_inbox_read_all",
+    @"notifications_api_inbox_mark_read",
+    @"notifications_api_inbox_mark_unread",
     @"notifications_api_queue",
     @"notifications_api_preferences",
     @"notifications_api_preferences_update",

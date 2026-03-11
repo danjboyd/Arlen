@@ -10,7 +10,7 @@
       opsModule = {
         paths = {
           prefix = "/ops";
-          apiPrefix = "/api";
+          apiPrefix = "api";
         };
         access = {
           roles = ("operator", "admin");

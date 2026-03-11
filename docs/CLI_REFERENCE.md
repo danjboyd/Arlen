@@ -219,6 +219,14 @@ Build and run `boomhauer` for the current app root.
 - while the fallback diagnostic server is active, `boomhauer` retries failed builds on a short backoff and the HTML error page advertises that recovery behavior
 - server args are passed through (`--watch`, `--no-watch`, `--prepare-only`, `--port`, `--host`, `--env`, `--once`, `--print-routes`)
 
+### `arlen jobs worker [worker args...]`
+
+Build and run the first-party jobs worker loop for the current app root.
+
+- delegates to framework `bin/jobs-worker` with `ARLEN_APP_ROOT` + `ARLEN_FRAMEWORK_ROOT`
+- compiles the app through `bin/boomhauer --no-watch --prepare-only` and then runs `.boomhauer/build/boomhauer-app` in jobs-worker mode
+- worker args are passed through (`--env`, `--once`, `--limit`, `--poll-interval-seconds`, `--run-scheduler`, `--scheduler-interval-seconds`)
+
 ### `arlen propane [manager args...]`
 
 Run production manager (`propane`) for the current app root.
@@ -443,6 +451,37 @@ Environment:
 - `ARLEN_ROUTING_COMPILE_ON_START` (default `1`; legacy `MOJOOBJC_ROUTING_COMPILE_ON_START` also accepted)
 - `ARLEN_ROUTING_ROUTE_COMPILE_WARNINGS_AS_ERRORS` (default `0`; legacy `MOJOOBJC_ROUTING_ROUTE_COMPILE_WARNINGS_AS_ERRORS` also accepted)
 
+## `jobs-worker` Script (`bin/jobs-worker`)
+
+Usage:
+
+```text
+jobs-worker [options]
+```
+
+Behavior:
+
+- compiles the current app root through `bin/boomhauer --no-watch --prepare-only`
+- launches `.boomhauer/build/boomhauer-app` in first-party jobs-worker mode
+- compiled app binaries now honor `ARLEN_APP_ROOT`, so `arlen jobs worker`, `bin/jobs-worker`, and `propane` all resolve the correct config/public roots even when invoked from the framework checkout
+
+Options:
+
+- `--env <name>`
+- `--app-root <path>`
+- `--framework-root <path>`
+- `--once`
+- `--limit <n>`
+- `--poll-interval-seconds <seconds>`
+- `--run-scheduler`
+- `--scheduler-interval-seconds <seconds>`
+- `--help` / `-h`
+
+Environment:
+
+- `ARLEN_APP_ROOT`
+- `ARLEN_FRAMEWORK_ROOT`
+
 ## `propane` Script (`bin/propane`)
 
 Usage:
@@ -501,6 +540,7 @@ Lifecycle diagnostics:
 - `bin/test`: run test suite (`make test`)
 - `bin/tech-demo`: run technology demo app
 - `bin/dev`: alias for `bin/boomhauer`
+- `bin/jobs-worker`: build current app and run the first-party jobs worker loop
 - `make test-unit` / `make test-integration`: run XCTest bundles with repo-local GNUstep defaults home (`.gnustep-home`)
 - `make ci-quality`: run unit + integration + multi-profile perf quality gate plus runtime concurrency, JSON abstraction/performance gates, and Phase 9I fault-injection checks
 - `make ci-sanitizers`: run Phase 9H blocking sanitizer gate (ASan/UBSan + runtime probe + data-layer checks), validate suppression registry, and generate sanitizer confidence artifacts under `build/release_confidence/phase9h`
@@ -517,6 +557,8 @@ Lifecycle diagnostics:
 - `make ci-phase11`: run the full Phase 11 confidence pack (protocol corpus + fuzz + live probe + sanitizer matrix)
 - `make phase5e-confidence`: generate Phase 5E release confidence artifacts in `build/release_confidence/phase5e`
 - `make phase14-confidence`: run the Phase 14 module confidence gate and generate artifacts in `build/release_confidence/phase14`
+- `make phase15-confidence`: run the Phase 15 auth UI confidence gate and generate artifacts in `build/release_confidence/phase15`
+- `make phase16-confidence`: run the Phase 16 module-maturity confidence gate and generate artifacts in `build/release_confidence/phase16`
 - `tools/ci/run_phase5e_quality.sh`: explicit Phase 5E CI gate entrypoint
 - `tools/ci/run_phase5e_sanitizers.sh`: explicit Phase 5E sanitizer CI gate entrypoint
   - set `ARLEN_SANITIZER_INCLUDE_INTEGRATION=1` to include full integration suite (default is `0`)

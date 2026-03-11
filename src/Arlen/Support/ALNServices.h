@@ -5,6 +5,8 @@
 
 NS_ASSUME_NONNULL_BEGIN
 
+@class ALNJobWorker;
+
 extern NSString *const ALNServiceErrorDomain;
 
 @interface ALNJobEnvelope : NSObject <NSCopying>
@@ -59,6 +61,11 @@ typedef NS_ENUM(NSUInteger, ALNJobWorkerDisposition) {
 
 - (ALNJobWorkerDisposition)handleJob:(ALNJobEnvelope *)job
                                error:(NSError *_Nullable *_Nullable)error;
+@optional
+- (NSTimeInterval)jobWorker:(ALNJobWorker *)worker
+           retryDelayForJob:(ALNJobEnvelope *)job
+               handlerError:(NSError *_Nullable)handlerError
+             baseRetryDelay:(NSTimeInterval)baseRetryDelay;
 
 @end
 
@@ -215,6 +222,22 @@ typedef NS_ENUM(NSUInteger, ALNJobWorkerDisposition) {
 
 @end
 
+@protocol ALNWebhookAdapter <NSObject>
+
+- (NSString *)adapterName;
+- (nullable NSString *)deliverRequest:(NSDictionary *)request
+                                error:(NSError *_Nullable *_Nullable)error;
+- (NSArray *)deliveriesSnapshot;
+- (void)reset;
+
+@end
+
+@interface ALNInMemoryWebhookAdapter : NSObject <ALNWebhookAdapter>
+
+- (instancetype)initWithAdapterName:(nullable NSString *)adapterName;
+
+@end
+
 @protocol ALNAttachmentAdapter <NSObject>
 
 - (NSString *)adapterName;
@@ -232,6 +255,8 @@ typedef NS_ENUM(NSUInteger, ALNJobWorkerDisposition) {
                      error:(NSError *_Nullable *_Nullable)error;
 - (NSArray *)listAttachmentMetadata;
 - (void)reset;
+@optional
+- (NSDictionary *)attachmentAdapterCapabilities;
 
 @end
 

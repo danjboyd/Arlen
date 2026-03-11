@@ -266,7 +266,11 @@ static NSMutableArray<NSString *> *Phase14IntegrationExecutions(void) {
       [app dispatchRequest:[self requestWithMethod:@"GET" path:@"/notifications/api/outbox" headers:@{} body:nil]];
   NSDictionary *outboxJSON = [self JSONObjectFromResponse:outboxResponse];
   NSArray *outbox = [outboxJSON[@"data"][@"outbox"] isKindOfClass:[NSArray class]] ? outboxJSON[@"data"][@"outbox"] : @[];
-  XCTAssertEqual((NSUInteger)2, [outbox count]);
+  XCTAssertEqual((NSUInteger)4, [outbox count]);
+  NSPredicate *queuedPredicate = [NSPredicate predicateWithFormat:@"status == %@", @"queued"];
+  NSPredicate *deliveredPredicate = [NSPredicate predicateWithFormat:@"status == %@", @"delivered"];
+  XCTAssertEqual((NSUInteger)2, [[outbox filteredArrayUsingPredicate:queuedPredicate] count]);
+  XCTAssertEqual((NSUInteger)2, [[outbox filteredArrayUsingPredicate:deliveredPredicate] count]);
 
   ALNResponse *inboxResponse =
       [app dispatchRequest:[self requestWithMethod:@"GET"

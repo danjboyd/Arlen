@@ -94,6 +94,8 @@ cluster = {
 
 Async worker options supervise non-HTTP background processes under the same manager.
 
+For first-party jobs module deployments, point `--job-worker-cmd` or `ARLEN_PROPANE_JOB_WORKER_COMMAND` at `framework/bin/jobs-worker` so the supervised process reuses Arlen's app-root build and worker-mode contracts.
+
 Environment fallbacks:
 
 - `ARLEN_PROPANE_JOB_WORKER_COMMAND`

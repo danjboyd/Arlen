@@ -38,6 +38,10 @@ typedef NS_ENUM(NSInteger, ALNAdminUIModuleErrorCode) {
                                                        error:(NSError *_Nullable *_Nullable)error;
 
 @optional
+- (nullable NSArray<NSDictionary *> *)adminUIListRecordsWithParameters:(NSDictionary *)parameters
+                                                                  limit:(NSUInteger)limit
+                                                                 offset:(NSUInteger)offset
+                                                                  error:(NSError *_Nullable *_Nullable)error;
 - (nullable NSDictionary *)adminUIDashboardSummaryWithError:(NSError *_Nullable *_Nullable)error;
 - (BOOL)adminUIResourceAllowsOperation:(NSString *)operation
                             identifier:(nullable NSString *)identifier
@@ -47,6 +51,14 @@ typedef NS_ENUM(NSInteger, ALNAdminUIModuleErrorCode) {
                                           identifier:(NSString *)identifier
                                           parameters:(NSDictionary *)parameters
                                                error:(NSError *_Nullable *_Nullable)error;
+- (nullable NSDictionary *)adminUIPerformBulkActionNamed:(NSString *)actionName
+                                              identifiers:(NSArray<NSString *> *)identifiers
+                                               parameters:(NSDictionary *)parameters
+                                                    error:(NSError *_Nullable *_Nullable)error;
+- (nullable NSArray<NSDictionary *> *)adminUIAutocompleteSuggestionsForFieldNamed:(NSString *)fieldName
+                                                                             query:(nullable NSString *)query
+                                                                             limit:(NSUInteger)limit
+                                                                             error:(NSError *_Nullable *_Nullable)error;
 
 @end
 
@@ -79,6 +91,11 @@ typedef NS_ENUM(NSInteger, ALNAdminUIModuleErrorCode) {
                                                                  limit:(NSUInteger)limit
                                                                 offset:(NSUInteger)offset
                                                                  error:(NSError *_Nullable *_Nullable)error;
+- (nullable NSArray<NSDictionary *> *)listRecordsForResourceIdentifier:(NSString *)identifier
+                                                             parameters:(NSDictionary *)parameters
+                                                                  limit:(NSUInteger)limit
+                                                                 offset:(NSUInteger)offset
+                                                                  error:(NSError *_Nullable *_Nullable)error;
 - (nullable NSDictionary *)recordDetailForResourceIdentifier:(NSString *)identifier
                                                  recordID:(NSString *)recordID
                                                      error:(NSError *_Nullable *_Nullable)error;
@@ -91,6 +108,20 @@ typedef NS_ENUM(NSInteger, ALNAdminUIModuleErrorCode) {
                                      recordID:(NSString *)recordID
                                    parameters:(NSDictionary *)parameters
                                         error:(NSError *_Nullable *_Nullable)error;
+- (nullable NSDictionary *)performBulkActionNamed:(NSString *)actionName
+                            forResourceIdentifier:(NSString *)identifier
+                                        recordIDs:(NSArray<NSString *> *)recordIDs
+                                       parameters:(NSDictionary *)parameters
+                                            error:(NSError *_Nullable *_Nullable)error;
+- (nullable NSDictionary *)exportPayloadForResourceIdentifier:(NSString *)identifier
+                                                       format:(NSString *)format
+                                                   parameters:(NSDictionary *)parameters
+                                                        error:(NSError *_Nullable *_Nullable)error;
+- (nullable NSArray<NSDictionary *> *)autocompleteSuggestionsForResourceIdentifier:(NSString *)identifier
+                                                                          fieldName:(NSString *)fieldName
+                                                                              query:(nullable NSString *)query
+                                                                              limit:(NSUInteger)limit
+                                                                              error:(NSError *_Nullable *_Nullable)error;
 - (BOOL)resourceIdentifier:(NSString *)identifier
              allowsOperation:(NSString *)operation
                    recordID:(nullable NSString *)recordID

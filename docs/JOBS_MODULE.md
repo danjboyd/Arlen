@@ -1,6 +1,6 @@
 # Jobs Module
 
-The first-party `jobs` module productizes queue and scheduler workflows on top of the Phase 3 `ALNJobAdapter` and `ALNJobWorker` contracts.
+The first-party `jobs` module productizes queue and scheduler workflows on top of the Phase 3 `ALNJobAdapter` and `ALNJobWorker` contracts, with durable operator metadata, multi-queue controls, and deterministic retry/idempotency semantics.
 
 ## Install
 
@@ -24,6 +24,14 @@ Configure provider classes in app config:
 
 ```plist
 jobsModule = {
+  paths = {
+    prefix = "/jobs";
+    apiPrefix = "api";
+  };
+  persistence = {
+    enabled = YES;
+    path = "var/module_state/jobs-development.plist";
+  };
   providers = {
     classes = ( "MyAppJobsProvider" );
   };
@@ -33,7 +41,37 @@ jobsModule = {
 };
 ```
 
+Path overrides live under `jobsModule.paths.*`. Keep `apiPrefix` relative, such as
+`"api"`, when you want the module API under `/jobs/api`. Setting `apiPrefix` to an
+absolute path such as `"/api"` bypasses the jobs prefix and can collide with other
+module APIs.
+
 Runtime access is available through `ALNJobsModuleRuntime`.
+
+## Worker Runner
+
+Arlen now ships a first-party jobs worker entrypoint for vendored apps:
+
+```bash
+./build/arlen jobs worker --env development --once --limit 25
+# or the framework script directly
+ARLEN_APP_ROOT=/path/to/app ARLEN_FRAMEWORK_ROOT=/path/to/Arlen /path/to/Arlen/bin/jobs-worker --env production
+```
+
+Use `--run-scheduler` when you want the same process to advance schedule definitions as well as dequeue jobs. In production, `propane` async worker supervision can point `jobWorkerCommand` or `ARLEN_PROPANE_JOB_WORKER_COMMAND` at `framework/bin/jobs-worker`.
+
+## Definition Metadata
+
+Job definitions may publish operator-facing metadata such as:
+
+- `queue`
+- `queuePriority`
+- `maxAttempts`
+- `retryBackoff`
+- `tags`
+- `uniqueness`
+
+The runtime surfaces this metadata through the definitions JSON payloads, pending/leased/dead-letter job snapshots, and the module-owned dashboard summary.
 
 ## Surfaces
 
@@ -60,6 +98,13 @@ JSON:
 
 The JSON routes are included in module OpenAPI output.
 
+The queue and dashboard surfaces now expose:
+
+- all known queues, not only `default`
+- queue depth and queue state (`active`, `paused`, `draining`)
+- recent scheduler/worker run history when module persistence is enabled
+- job metadata such as queue priority, tags, retry backoff, and uniqueness
+
 ## Protection
 
 The operator surfaces are protected by the shared auth/admin contracts:
@@ -78,9 +123,10 @@ Manifest defaults:
 - API prefix: `/jobs/api`
 - worker max jobs per run: `50`
 - worker retry delay: `5` seconds
+- persistence: enabled outside `test`, with an auto-resolved module state path when no explicit path is provided
 
 ## Current Limits
 
-- Queue pause/resume currently supports the `default` queue only.
-- Persistence is adapter-backed; there is no separate jobs-module metadata schema in the 14A/14B slice.
+- Job execution ordering remains adapter-backed; the module does not impose a supervisor or balancing layer above the configured `ALNJobAdapter`.
+- Tags, queue priority, and retry metadata are operator-facing contracts; adapters are not required to implement native queue-priority semantics.
 - The dashboard is module-owned HTML, not yet embedded into `admin-ui` navigation.

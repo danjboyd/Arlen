@@ -253,7 +253,7 @@ Phase 12 public auth helper surface:
 
 The sample app in [examples/auth_primitives/README.md](/home/danboyd/git/Arlen/examples/auth_primitives/README.md) demonstrates the local TOTP step-up path plus a stub OIDC provider flow built directly on these core contracts.
 
-Phase 13/14/15 first-party module quick path:
+Phase 13/14/15/16 first-party module quick path:
 
 ```bash
 ./build/arlen module add auth
@@ -274,6 +274,14 @@ module Objective-C sources from `modules/*/Sources` and module templates from
 `templates/modules/<id>/...`; app overrides for module public assets live under
 `public/modules/<id>/...`.
 
+For first-party background work, use the dedicated worker runner instead of inventing an app-local wrapper:
+
+```bash
+./build/arlen jobs worker --env development --once --limit 25
+```
+
+The underlying framework script is `bin/jobs-worker`. Add `--run-scheduler` if you want that worker process to advance schedule definitions too.
+
 The first-party `auth` module keeps `/auth/api/...` stable and supports three
 presentation modes:
 
@@ -293,6 +301,14 @@ authenticated inbox/preferences plus admin preview/outbox/test-send flows under
 `/notifications/...` and `/notifications/api/...`, and adds the first-party `storage`
 module with protected `/storage/...` management views plus `/storage/api/...` direct-upload
 and signed-download contracts built on the shared jobs/mail/attachment services.
+
+Phase 16 matures that module stack instead of widening it: `search` now persists
+index state and exposes protected drilldowns alongside public query routes,
+`ops` adds historical snapshots plus `/ops/modules/:module` drilldowns and
+app/module-contributed widgets, and `admin-ui` now ships bulk actions, JSON/CSV
+exports, typed list filters, stable sorts, and autocomplete hooks from the same
+resource metadata. The reference app for that stack lives at
+[examples/phase16_modules_demo/README.md](/home/danboyd/git/Arlen/examples/phase16_modules_demo/README.md).
 
 Trusted proxy allowlist override:
 
@@ -369,6 +385,7 @@ make ci-http-parse-perf
 make phase12-confidence
 make phase14-confidence
 make phase15-confidence
+make phase16-confidence
 make ci-fault-injection
 make ci-release-certification
 make phase5e-confidence
@@ -387,6 +404,7 @@ make phase5e-confidence
 `make phase12-confidence` runs the Phase 12 auth confidence gate and writes artifacts under `build/release_confidence/phase12`.
 `make phase14-confidence` runs the Phase 14 module confidence gate and writes artifacts under `build/release_confidence/phase14`.
 `make phase15-confidence` runs the Phase 15 auth UI confidence gate and writes artifacts under `build/release_confidence/phase15`.
+`make phase16-confidence` runs the Phase 16 module-maturity confidence gate and writes artifacts under `build/release_confidence/phase16`.
 `make ci-fault-injection` runs the Phase 9I runtime seam fault matrix and writes artifacts under `build/release_confidence/phase9i`.
 `make ci-release-certification` runs the Phase 9J release checklist and writes certification artifacts under `build/release_confidence/phase9j`.
 `make test-unit` and `make test-integration` run with a repo-local GNUstep test home (`.gnustep-home`) to keep defaults/lock files isolated.

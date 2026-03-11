@@ -260,4 +260,98 @@
   }
 }
 
+- (void)testJobsWorkerCLIExecutesQueuedJobFromAppRoot {
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *appRoot = [self createTempDirectoryWithPrefix:@"phase13-jobs-worker-app"];
+  XCTAssertNotNil(appRoot);
+  if (appRoot == nil) {
+    return;
+  }
+
+  @try {
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"config/app.plist"]
+                          content:@"{\n"
+                                  "  host = \"127.0.0.1\";\n"
+                                  "  port = 3000;\n"
+                                  "  jobsModule = {\n"
+                                  "    providers = { classes = (\"Phase13JobsWorkerProvider\"); };\n"
+                                  "    persistence = { enabled = NO; path = \"\"; };\n"
+                                  "  };\n"
+                                  "}\n"]);
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"config/environments/development.plist"]
+                          content:@"{}\n"]);
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"app_lite.m"]
+                          content:@"#import <Foundation/Foundation.h>\n"
+                                  "#import \"ArlenServer.h\"\n"
+                                  "#import \"ALNJobsModule.h\"\n\n"
+                                  "@interface Phase13JobsWorkerJob : NSObject <ALNJobsJobDefinition>\n"
+                                  "@end\n\n"
+                                  "@implementation Phase13JobsWorkerJob\n"
+                                  "- (NSString *)jobsModuleJobIdentifier { return @\"phase13.jobs_worker\"; }\n"
+                                  "- (NSDictionary *)jobsModuleJobMetadata { return @{ @\"title\" : @\"Phase13 Jobs Worker\" }; }\n"
+                                  "- (BOOL)jobsModuleValidatePayload:(NSDictionary *)payload error:(NSError **)error {\n"
+                                  "  if ([payload[@\"markerPath\"] isKindOfClass:[NSString class]] && [payload[@\"markerPath\"] length] > 0) { return YES; }\n"
+                                  "  if (error != NULL) {\n"
+                                  "    *error = [NSError errorWithDomain:@\"Phase13JobsWorker\" code:1 userInfo:@{ NSLocalizedDescriptionKey : @\"markerPath is required\" }];\n"
+                                  "  }\n"
+                                  "  return NO;\n"
+                                  "}\n"
+                                  "- (BOOL)jobsModulePerformPayload:(NSDictionary *)payload context:(NSDictionary *)context error:(NSError **)error {\n"
+                                  "  (void)context;\n"
+                                  "  NSError *writeError = nil;\n"
+                                  "  BOOL ok = [@\"worker-ok\\n\" writeToFile:payload[@\"markerPath\"] atomically:YES encoding:NSUTF8StringEncoding error:&writeError];\n"
+                                  "  if (!ok && error != NULL) { *error = writeError; }\n"
+                                  "  return ok;\n"
+                                  "}\n"
+                                  "@end\n\n"
+                                  "@interface Phase13JobsWorkerProvider : NSObject <ALNJobsJobProvider>\n"
+                                  "@end\n\n"
+                                  "@implementation Phase13JobsWorkerProvider\n"
+                                  "- (NSArray<id<ALNJobsJobDefinition>> *)jobsModuleJobDefinitionsForRuntime:(ALNJobsModuleRuntime *)runtime error:(NSError **)error {\n"
+                                  "  (void)runtime; (void)error; return @[ [[Phase13JobsWorkerJob alloc] init] ];\n"
+                                  "}\n"
+                                  "@end\n\n"
+                                  "static void RegisterRoutes(ALNApplication *app) {\n"
+                                  "  (void)app;\n"
+                                  "  NSString *markerPath = [[[NSProcessInfo processInfo] environment] objectForKey:@\"PHASE13_QUEUE_JOB_ON_BOOT\"];\n"
+                                  "  if ([markerPath length] > 0) {\n"
+                                  "    [[ALNJobsModuleRuntime sharedRuntime] enqueueJobIdentifier:@\"phase13.jobs_worker\"\n"
+                                  "                                                       payload:@{ @\"markerPath\" : markerPath }\n"
+                                  "                                                       options:nil\n"
+                                  "                                                         error:NULL];\n"
+                                  "  }\n"
+                                  "}\n\n"
+                                  "int main(int argc, const char *argv[]) {\n"
+                                  "  @autoreleasepool { return ALNRunAppMain(argc, argv, &RegisterRoutes); }\n"
+                                  "}\n"]);
+
+    int code = 0;
+    NSString *addJobsOutput = [self runShellCapture:[NSString stringWithFormat:
+        @"cd %@ && ARLEN_FRAMEWORK_ROOT=%@ %@/build/arlen module add jobs --json",
+        appRoot, repoRoot, repoRoot]
+                                           exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", addJobsOutput);
+
+    NSString *markerPath = [appRoot stringByAppendingPathComponent:@"tmp/jobs-worker-marker.txt"];
+    NSError *directoryError = nil;
+    XCTAssertTrue([[NSFileManager defaultManager] createDirectoryAtPath:[markerPath stringByDeletingLastPathComponent]
+                                            withIntermediateDirectories:YES
+                                                             attributes:nil
+                                                                  error:&directoryError],
+                  @"%@", directoryError.localizedDescription);
+    NSString *workerOutput = [self runShellCapture:[NSString stringWithFormat:
+        @"cd %@ && PHASE13_QUEUE_JOB_ON_BOOT='%@' ARLEN_FRAMEWORK_ROOT=%@ %@/build/arlen jobs worker --env development --once --limit 1",
+        appRoot, markerPath, repoRoot, repoRoot]
+                                          exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", workerOutput);
+
+    NSString *markerContents = [NSString stringWithContentsOfFile:markerPath
+                                                         encoding:NSUTF8StringEncoding
+                                                            error:nil];
+    XCTAssertEqualObjects(@"worker-ok\n", markerContents);
+  } @finally {
+    [[NSFileManager defaultManager] removeItemAtPath:appRoot error:nil];
+  }
+}
+
 @end

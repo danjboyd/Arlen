@@ -74,6 +74,8 @@ typedef NS_ENUM(NSInteger, ALNJobsModuleErrorCode) {
 - (nullable NSDictionary *)jobDefinitionMetadataForIdentifier:(NSString *)identifier;
 - (BOOL)registerSystemJobDefinition:(id<ALNJobsJobDefinition>)definition
                               error:(NSError *_Nullable *_Nullable)error;
+- (BOOL)registerSystemScheduleDefinition:(NSDictionary *)schedule
+                                   error:(NSError *_Nullable *_Nullable)error;
 - (nullable NSString *)enqueueJobIdentifier:(NSString *)identifier
                                     payload:(nullable NSDictionary *)payload
                                     options:(nullable NSDictionary *)options

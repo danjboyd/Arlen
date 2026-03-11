@@ -19,6 +19,29 @@ typedef NS_ENUM(NSInteger, ALNSearchModuleErrorCode) {
   ALNSearchModuleErrorExecutionFailed = 4,
 };
 
+@protocol ALNSearchEngine <NSObject>
+
+- (nullable NSDictionary *)searchModuleSnapshotForMetadata:(NSDictionary *)metadata
+                                                   records:(NSArray<NSDictionary *> *)records
+                                                generation:(NSUInteger)generation
+                                                     error:(NSError *_Nullable *_Nullable)error;
+- (nullable NSDictionary *)searchModuleApplyOperation:(NSString *)operation
+                                               record:(nullable NSDictionary *)record
+                                             metadata:(NSDictionary *)metadata
+                                      existingSnapshot:(nullable NSDictionary *)snapshot
+                                                error:(NSError *_Nullable *_Nullable)error;
+- (nullable NSDictionary *)searchModuleExecuteQuery:(nullable NSString *)query
+                                     resourceMetadata:(NSArray<NSDictionary *> *)resourceMetadata
+                                  snapshotsByResource:(NSDictionary<NSString *, NSDictionary *> *)snapshotsByResource
+                                              filters:(nullable NSDictionary *)filters
+                                                 sort:(nullable NSString *)sort
+                                                limit:(NSUInteger)limit
+                                               offset:(NSUInteger)offset
+                                                error:(NSError *_Nullable *_Nullable)error;
+- (NSDictionary *)searchModuleCapabilities;
+
+@end
+
 @protocol ALNSearchResourceDefinition <NSObject>
 
 - (NSString *)searchModuleResourceIdentifier;
@@ -54,15 +77,20 @@ typedef NS_ENUM(NSInteger, ALNSearchModuleErrorCode) {
 - (nullable NSDictionary *)resourceMetadataForIdentifier:(NSString *)identifier;
 - (nullable NSDictionary *)queueReindexForResourceIdentifier:(nullable NSString *)identifier
                                                        error:(NSError *_Nullable *_Nullable)error;
+- (nullable NSDictionary *)queueIncrementalSyncForResourceIdentifier:(NSString *)identifier
+                                                               record:(nullable NSDictionary *)record
+                                                            operation:(NSString *)operation
+                                                                error:(NSError *_Nullable *_Nullable)error;
 - (nullable NSDictionary *)processReindexJobPayload:(NSDictionary *)payload
                                               error:(NSError *_Nullable *_Nullable)error;
 - (nullable NSDictionary *)searchQuery:(nullable NSString *)query
                     resourceIdentifier:(nullable NSString *)resourceIdentifier
                                filters:(nullable NSDictionary *)filters
                                   sort:(nullable NSString *)sort
-                                 limit:(NSUInteger)limit
-                                offset:(NSUInteger)offset
+                                limit:(NSUInteger)limit
+                               offset:(NSUInteger)offset
                                  error:(NSError *_Nullable *_Nullable)error;
+- (nullable NSDictionary *)resourceDrilldownForIdentifier:(nullable NSString *)identifier;
 - (NSDictionary *)dashboardSummary;
 
 @end

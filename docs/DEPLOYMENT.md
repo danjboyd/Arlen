@@ -172,6 +172,23 @@ Recommended systemd behavior:
 - `TimeoutStopSec` aligned with propane graceful shutdown accessories
 - pre-start migrate step via separate unit or deployment orchestration
 
+Reference files now ship under `tools/deploy/systemd/`:
+
+- `arlen@.service`
+- `arlen-debug.conf`
+- `site.env.example`
+- `site.debug.env.example`
+
+Recommended pattern:
+
+- keep one base production unit template
+- enable incident-only debug mode with a drop-in plus a second env file
+- avoid maintaining separate long-lived "normal" and "debug" service units
+
+Detailed steps:
+
+- `docs/SYSTEMD_RUNBOOK.md`
+
 ## 8. Rollback Workflow
 
 Rollback to specific release:

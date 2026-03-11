@@ -12,6 +12,8 @@
 NSString *const ALNStorageModuleErrorDomain = @"Arlen.Modules.Storage.Error";
 
 static NSString *const ALNStorageVariantJobIdentifier = @"storage.generate_variant";
+static NSString *const ALNStorageCleanupJobIdentifier = @"storage.cleanup";
+static NSUInteger const ALNStorageActivityLimit = 30;
 
 static NSString *SMTrimmedString(id value) {
   if (![value isKindOfClass:[NSString class]]) {
@@ -30,6 +32,102 @@ static NSDictionary *SMNormalizeDictionary(id value) {
 
 static NSArray *SMNormalizeArray(id value) {
   return [value isKindOfClass:[NSArray class]] ? value : @[];
+}
+
+static id SMPropertyListValue(id value) {
+  if (value == nil || value == [NSNull null]) {
+    return @"";
+  }
+  if ([value isKindOfClass:[NSString class]] || [value isKindOfClass:[NSNumber class]] ||
+      [value isKindOfClass:[NSData class]] || [value isKindOfClass:[NSDate class]]) {
+    return value;
+  }
+  if ([value isKindOfClass:[NSArray class]]) {
+    NSMutableArray *items = [NSMutableArray array];
+    for (id entry in (NSArray *)value) {
+      [items addObject:SMPropertyListValue(entry)];
+    }
+    return items;
+  }
+  if ([value isKindOfClass:[NSDictionary class]]) {
+    NSMutableDictionary *dictionary = [NSMutableDictionary dictionary];
+    for (id rawKey in [(NSDictionary *)value allKeys]) {
+      NSString *key = SMTrimmedString(rawKey);
+      if ([key length] == 0) {
+        continue;
+      }
+      dictionary[key] = SMPropertyListValue([(NSDictionary *)value objectForKey:rawKey]);
+    }
+    return dictionary;
+  }
+  return [value description] ?: @"";
+}
+
+static NSString *SMResolvedPersistencePath(ALNApplication *application, NSDictionary *moduleConfig) {
+  NSDictionary *persistence = [moduleConfig[@"persistence"] isKindOfClass:[NSDictionary class]]
+                                  ? moduleConfig[@"persistence"]
+                                  : @{};
+  BOOL enabled = ![persistence[@"enabled"] respondsToSelector:@selector(boolValue)] ||
+                 [persistence[@"enabled"] boolValue];
+  if (!enabled) {
+    return @"";
+  }
+  NSString *configured = SMTrimmedString(persistence[@"path"]);
+  if ([configured length] > 0) {
+    if ([configured hasPrefix:@"/"]) {
+      return configured;
+    }
+    NSString *cwd = [[NSFileManager defaultManager] currentDirectoryPath] ?: NSTemporaryDirectory();
+    return [cwd stringByAppendingPathComponent:configured];
+  }
+  NSString *environment = SMLowerTrimmedString(application.environment);
+  if ([environment isEqualToString:@"test"]) {
+    return @"";
+  }
+  NSString *cwd = [[NSFileManager defaultManager] currentDirectoryPath] ?: NSTemporaryDirectory();
+  return [cwd stringByAppendingPathComponent:
+                   [NSString stringWithFormat:@"var/module_state/storage-%@.plist",
+                                              ([environment length] > 0) ? environment : @"development"]];
+}
+
+static NSDictionary *SMReadPropertyListAtPath(NSString *path, NSError **error) {
+  NSString *statePath = SMTrimmedString(path);
+  if ([statePath length] == 0 || ![[NSFileManager defaultManager] fileExistsAtPath:statePath]) {
+    return nil;
+  }
+  NSData *data = [NSData dataWithContentsOfFile:statePath options:0 error:error];
+  if (data == nil) {
+    return nil;
+  }
+  NSPropertyListFormat format = NSPropertyListBinaryFormat_v1_0;
+  id object = [NSPropertyListSerialization propertyListWithData:data
+                                                        options:NSPropertyListMutableContainersAndLeaves
+                                                         format:&format
+                                                          error:error];
+  return [object isKindOfClass:[NSDictionary class]] ? object : nil;
+}
+
+static BOOL SMWritePropertyListAtPath(NSString *path, NSDictionary *payload, NSError **error) {
+  NSString *statePath = SMTrimmedString(path);
+  if ([statePath length] == 0) {
+    return YES;
+  }
+  NSString *parent = [statePath stringByDeletingLastPathComponent];
+  if ([parent length] > 0 &&
+      ![[NSFileManager defaultManager] createDirectoryAtPath:parent
+                                 withIntermediateDirectories:YES
+                                                  attributes:nil
+                                                       error:error]) {
+    return NO;
+  }
+  NSData *data = [NSPropertyListSerialization dataWithPropertyList:SMPropertyListValue(payload)
+                                                            format:NSPropertyListBinaryFormat_v1_0
+                                                           options:0
+                                                             error:error];
+  if (data == nil) {
+    return NO;
+  }
+  return [data writeToFile:statePath options:NSDataWritingAtomic error:error];
 }
 
 static NSError *SMError(ALNStorageModuleErrorCode code, NSString *message, NSDictionary *details) {
@@ -219,6 +317,64 @@ static NSString *SMCreateSignedToken(NSDictionary *payload, NSData *keyData) {
   return [NSString stringWithFormat:@"%@.%@", payloadPart, signaturePart];
 }
 
+static NSDictionary *SMAnalyzeObjectData(NSString *name,
+                                         NSString *contentType,
+                                         NSData *data,
+                                         NSDictionary *metadata,
+                                         NSArray<NSDictionary *> *variants) {
+  NSString *normalizedName = SMTrimmedString(name);
+  NSString *normalizedContentType = ([SMLowerTrimmedString(contentType) length] > 0)
+                                        ? SMLowerTrimmedString(contentType)
+                                        : @"application/octet-stream";
+  NSString *extension = [[[normalizedName pathExtension] lowercaseString] copy] ?: @"";
+  BOOL previewable = [normalizedContentType hasPrefix:@"image/"] || [normalizedContentType isEqualToString:@"application/pdf"];
+  NSMutableDictionary *analysis = [@{
+    @"sizeBytes" : @([data length]),
+    @"checksumSHA256" : ALNLowercaseHexStringFromData(ALNSHA256(data ?: [NSData data])) ?: @"",
+    @"fileExtension" : extension ?: @"",
+    @"previewable" : @(previewable),
+    @"variantCapable" : @([(variants ?: @[]) count] > 0),
+    @"contentType" : normalizedContentType,
+  } mutableCopy];
+  NSNumber *width = [metadata[@"width"] respondsToSelector:@selector(integerValue)] ? metadata[@"width"] : nil;
+  NSNumber *height = [metadata[@"height"] respondsToSelector:@selector(integerValue)] ? metadata[@"height"] : nil;
+  if (width != nil || height != nil) {
+    analysis[@"dimensions"] = @{
+      @"width" : width ?: @0,
+      @"height" : height ?: @0,
+    };
+  }
+  return [NSDictionary dictionaryWithDictionary:analysis];
+}
+
+static NSDictionary *SMAttachmentAdapterCapabilities(id<ALNAttachmentAdapter> adapter) {
+  NSDictionary *capabilities =
+      [adapter respondsToSelector:@selector(attachmentAdapterCapabilities)]
+          ? [adapter attachmentAdapterCapabilities]
+          : nil;
+  if (![capabilities isKindOfClass:[NSDictionary class]]) {
+    capabilities = @{};
+  }
+  NSMutableDictionary *normalized = [NSMutableDictionary dictionaryWithDictionary:@{
+    @"temporaryDownloadURL" : @NO,
+    @"readOnly" : @NO,
+    @"scoped" : @NO,
+    @"mirroring" : @NO,
+  }];
+  [normalized addEntriesFromDictionary:capabilities];
+  return [NSDictionary dictionaryWithDictionary:normalized];
+}
+
+@interface ALNStorageModuleRuntime (JobSupport)
+
+- (nullable NSDictionary *)runMaintenanceAt:(NSDate *)timestamp
+                                      error:(NSError **)error;
+- (nullable NSDictionary *)processVariantJobPayload:(NSDictionary *)payload
+                                         jobContext:(NSDictionary *)jobContext
+                                              error:(NSError **)error;
+
+@end
+
 @interface ALNStorageVariantJob : NSObject <ALNJobsJobDefinition>
 @end
 
@@ -251,8 +407,43 @@ static NSString *SMCreateSignedToken(NSDictionary *payload, NSData *keyData) {
 }
 
 - (BOOL)jobsModulePerformPayload:(NSDictionary *)payload context:(NSDictionary *)context error:(NSError **)error {
-  (void)context;
-  return ([[ALNStorageModuleRuntime sharedRuntime] processVariantJobPayload:payload error:error] != nil);
+  return ([[ALNStorageModuleRuntime sharedRuntime] processVariantJobPayload:payload
+                                                                  jobContext:context
+                                                                       error:error] != nil);
+}
+
+@end
+
+@interface ALNStorageCleanupJob : NSObject <ALNJobsJobDefinition>
+@end
+
+@implementation ALNStorageCleanupJob
+
+- (NSString *)jobsModuleJobIdentifier {
+  return ALNStorageCleanupJobIdentifier;
+}
+
+- (NSDictionary *)jobsModuleJobMetadata {
+  return @{
+    @"title" : @"Storage cleanup",
+    @"description" : @"Prunes expired upload sessions and retention-expired objects",
+    @"queue" : @"maintenance",
+    @"maxAttempts" : @2,
+    @"allowManualEnqueue" : @NO,
+    @"tags" : @[ @"storage", @"maintenance" ],
+  };
+}
+
+- (BOOL)jobsModuleValidatePayload:(NSDictionary *)payload error:(NSError **)error {
+  (void)payload;
+  (void)error;
+  return YES;
+}
+
+- (BOOL)jobsModulePerformPayload:(NSDictionary *)payload context:(NSDictionary *)context error:(NSError **)error {
+  NSDate *now = [context[@"scheduledAt"] isKindOfClass:[NSDate class]] ? context[@"scheduledAt"] : [NSDate date];
+  id runtime = [ALNStorageModuleRuntime sharedRuntime];
+  return ([runtime runMaintenanceAt:now error:error] != nil);
 }
 
 @end
@@ -265,6 +456,7 @@ static NSString *SMCreateSignedToken(NSDictionary *payload, NSData *keyData) {
 @property(nonatomic, copy, readwrite) NSString *apiPrefix;
 @property(nonatomic, assign, readwrite) NSTimeInterval defaultUploadSessionTTLSeconds;
 @property(nonatomic, assign, readwrite) NSTimeInterval defaultDownloadTokenTTLSeconds;
+@property(nonatomic, assign) NSTimeInterval defaultCleanupIntervalSeconds;
 @property(nonatomic, copy) NSDictionary *moduleConfig;
 @property(nonatomic, strong) NSData *signingKeyData;
 @property(nonatomic, strong) NSLock *lock;
@@ -274,6 +466,9 @@ static NSString *SMCreateSignedToken(NSDictionary *payload, NSData *keyData) {
 @property(nonatomic, strong) NSMutableDictionary<NSString *, NSDictionary *> *objectsByIdentifier;
 @property(nonatomic, strong) NSMutableDictionary<NSString *, NSDictionary *> *uploadSessionsByIdentifier;
 @property(nonatomic, assign) NSUInteger nextSequence;
+@property(nonatomic, strong) NSMutableArray<NSDictionary *> *activityLog;
+@property(nonatomic, assign) BOOL persistenceEnabled;
+@property(nonatomic, copy) NSString *statePath;
 
 - (nullable NSDictionary *)normalizedCollectionMetadataForDefinition:(id<ALNStorageCollectionDefinition>)definition
                                                                error:(NSError **)error;
@@ -288,6 +483,19 @@ static NSString *SMCreateSignedToken(NSDictionary *payload, NSData *keyData) {
                                    expectedField:(NSString *)expectedField
                                    expectedValue:(NSString *)expectedValue
                                            error:(NSError **)error;
+- (BOOL)loadPersistedStateWithError:(NSError **)error;
+- (BOOL)persistStateWithError:(NSError **)error;
+- (void)recordActivityNamed:(NSString *)event details:(NSDictionary *)details;
+- (NSUInteger)pruneExpiredUploadSessionsAt:(NSDate *)timestamp
+                            recordActivity:(BOOL)recordActivity;
+- (BOOL)deleteObjectIdentifier:(NSString *)objectID
+                        reason:(NSString *)reason
+                         error:(NSError **)error;
+- (nullable NSDictionary *)runMaintenanceAt:(NSDate *)timestamp
+                                       error:(NSError **)error;
+- (nullable NSDictionary *)processVariantJobPayload:(NSDictionary *)payload
+                                         jobContext:(NSDictionary *)jobContext
+                                              error:(NSError **)error;
 
 @end
 
@@ -309,6 +517,7 @@ static NSString *SMCreateSignedToken(NSDictionary *payload, NSData *keyData) {
     _apiPrefix = @"/storage/api";
     _defaultUploadSessionTTLSeconds = 900.0;
     _defaultDownloadTokenTTLSeconds = 300.0;
+    _defaultCleanupIntervalSeconds = 300.0;
     _moduleConfig = @{};
     _signingKeyData = [@"storage-module-signing-secret" dataUsingEncoding:NSUTF8StringEncoding];
     _lock = [[NSLock alloc] init];
@@ -318,6 +527,9 @@ static NSString *SMCreateSignedToken(NSDictionary *payload, NSData *keyData) {
     _objectsByIdentifier = [NSMutableDictionary dictionary];
     _uploadSessionsByIdentifier = [NSMutableDictionary dictionary];
     _nextSequence = 0;
+    _activityLog = [NSMutableArray array];
+    _persistenceEnabled = NO;
+    _statePath = @"";
   }
   return self;
 }
@@ -367,6 +579,15 @@ static NSString *SMCreateSignedToken(NSDictionary *payload, NSData *keyData) {
   if (self.defaultDownloadTokenTTLSeconds <= 0.0) {
     self.defaultDownloadTokenTTLSeconds = 300.0;
   }
+  NSDictionary *cleanupConfig =
+      [moduleConfig[@"cleanup"] isKindOfClass:[NSDictionary class]] ? moduleConfig[@"cleanup"] : @{};
+  self.defaultCleanupIntervalSeconds =
+      [cleanupConfig[@"intervalSeconds"] respondsToSelector:@selector(doubleValue)]
+          ? [cleanupConfig[@"intervalSeconds"] doubleValue]
+          : 300.0;
+  if (self.defaultCleanupIntervalSeconds <= 0.0) {
+    self.defaultCleanupIntervalSeconds = 300.0;
+  }
   self.signingKeyData = [[signingSecret length] > 0 ? signingSecret : @"storage-module-signing-secret"
       dataUsingEncoding:NSUTF8StringEncoding];
   [self.collectionDefinitionsByIdentifier removeAllObjects];
@@ -374,10 +595,29 @@ static NSString *SMCreateSignedToken(NSDictionary *payload, NSData *keyData) {
   [self.objectIDsByCollection removeAllObjects];
   [self.objectsByIdentifier removeAllObjects];
   [self.uploadSessionsByIdentifier removeAllObjects];
+  [self.activityLog removeAllObjects];
   self.nextSequence = 0;
+  self.statePath = SMResolvedPersistencePath(application, moduleConfig);
+  self.persistenceEnabled = ([self.statePath length] > 0);
   [self.lock unlock];
 
+  if (![self loadPersistedStateWithError:error]) {
+    return NO;
+  }
+
   if (![jobsRuntime registerSystemJobDefinition:[[ALNStorageVariantJob alloc] init] error:error]) {
+    return NO;
+  }
+  if (![jobsRuntime registerSystemJobDefinition:[[ALNStorageCleanupJob alloc] init] error:error]) {
+    return NO;
+  }
+  if (![jobsRuntime registerSystemScheduleDefinition:@{
+        @"identifier" : @"storage.cleanup.default",
+        @"job" : ALNStorageCleanupJobIdentifier,
+        @"intervalSeconds" : @(self.defaultCleanupIntervalSeconds),
+        @"queue" : @"maintenance",
+      }
+                                        error:error]) {
     return NO;
   }
 
@@ -413,17 +653,158 @@ static NSString *SMCreateSignedToken(NSDictionary *payload, NSData *keyData) {
       }
     }
   }
+  [self.lock lock];
+  NSSet *knownCollections = [NSSet setWithArray:[self.collectionMetadataByIdentifier allKeys]];
+  NSArray *storedObjectIDs = [NSArray arrayWithArray:[self.objectsByIdentifier allKeys]];
+  for (NSString *objectID in storedObjectIDs) {
+    NSDictionary *record = [self.objectsByIdentifier[objectID] isKindOfClass:[NSDictionary class]]
+                               ? self.objectsByIdentifier[objectID]
+                               : nil;
+    if (record == nil || ![knownCollections containsObject:SMLowerTrimmedString(record[@"collection"])]) {
+      [self.objectsByIdentifier removeObjectForKey:objectID];
+    }
+  }
+  NSArray *sessionIDs = [NSArray arrayWithArray:[self.uploadSessionsByIdentifier allKeys]];
+  for (NSString *sessionID in sessionIDs) {
+    NSDictionary *session = [self.uploadSessionsByIdentifier[sessionID] isKindOfClass:[NSDictionary class]]
+                                ? self.uploadSessionsByIdentifier[sessionID]
+                                : nil;
+    if (session == nil || ![knownCollections containsObject:SMLowerTrimmedString(session[@"collection"])]) {
+      [self.uploadSessionsByIdentifier removeObjectForKey:sessionID];
+    }
+  }
+  for (NSString *collection in [NSArray arrayWithArray:[self.objectIDsByCollection allKeys]]) {
+    if (![knownCollections containsObject:collection]) {
+      [self.objectIDsByCollection removeObjectForKey:collection];
+    }
+  }
+  [self.lock unlock];
+  [self pruneExpiredUploadSessionsAt:[NSDate date] recordActivity:YES];
+  if (![self persistStateWithError:error]) {
+    return NO;
+  }
   return YES;
 }
 
+- (BOOL)loadPersistedStateWithError:(NSError **)error {
+  if (!self.persistenceEnabled || [self.statePath length] == 0) {
+    return YES;
+  }
+  NSError *readError = nil;
+  NSDictionary *state = SMReadPropertyListAtPath(self.statePath, &readError);
+  if (state == nil) {
+    if (readError != nil && error != NULL) {
+      *error = readError;
+      return NO;
+    }
+    return YES;
+  }
+  [self.lock lock];
+  NSDictionary *objects = [state[@"objectsByIdentifier"] isKindOfClass:[NSDictionary class]] ? state[@"objectsByIdentifier"] : @{};
+  NSDictionary *sessions = [state[@"uploadSessionsByIdentifier"] isKindOfClass:[NSDictionary class]] ? state[@"uploadSessionsByIdentifier"] : @{};
+  NSDictionary *objectIDsByCollection = [state[@"objectIDsByCollection"] isKindOfClass:[NSDictionary class]] ? state[@"objectIDsByCollection"] : @{};
+  for (NSString *collection in objectIDsByCollection) {
+    NSArray *objectIDs = [objectIDsByCollection[collection] isKindOfClass:[NSArray class]] ? objectIDsByCollection[collection] : @[];
+    self.objectIDsByCollection[collection] = [NSMutableArray arrayWithArray:objectIDs];
+  }
+  [self.objectsByIdentifier addEntriesFromDictionary:objects];
+  [self.uploadSessionsByIdentifier addEntriesFromDictionary:sessions];
+  NSArray *activity = [state[@"activityLog"] isKindOfClass:[NSArray class]] ? state[@"activityLog"] : @[];
+  [self.activityLog addObjectsFromArray:activity];
+  self.nextSequence = [state[@"nextSequence"] respondsToSelector:@selector(unsignedIntegerValue)]
+                          ? [state[@"nextSequence"] unsignedIntegerValue]
+                          : self.nextSequence;
+  [self.lock unlock];
+  return YES;
+}
+
+- (BOOL)persistStateWithError:(NSError **)error {
+  if (!self.persistenceEnabled || [self.statePath length] == 0) {
+    return YES;
+  }
+  NSDictionary *payload = nil;
+  [self.lock lock];
+  NSMutableDictionary *objectIDsByCollection = [NSMutableDictionary dictionary];
+  for (NSString *collection in self.objectIDsByCollection) {
+    objectIDsByCollection[collection] = [[NSArray alloc] initWithArray:self.objectIDsByCollection[collection] ?: @[] copyItems:YES] ?: @[];
+  }
+  payload = @{
+    @"version" : @1,
+    @"nextSequence" : @(self.nextSequence),
+    @"objectIDsByCollection" : objectIDsByCollection,
+    @"objectsByIdentifier" : [NSDictionary dictionaryWithDictionary:self.objectsByIdentifier ?: @{}],
+    @"uploadSessionsByIdentifier" : [NSDictionary dictionaryWithDictionary:self.uploadSessionsByIdentifier ?: @{}],
+    @"activityLog" : [[NSArray alloc] initWithArray:self.activityLog copyItems:YES] ?: @[],
+  };
+  [self.lock unlock];
+  return SMWritePropertyListAtPath(self.statePath, payload, error);
+}
+
+- (void)recordActivityNamed:(NSString *)event details:(NSDictionary *)details {
+  [self.lock lock];
+  [self.activityLog addObject:@{
+    @"event" : SMLowerTrimmedString(event),
+    @"timestamp" : @([[NSDate date] timeIntervalSince1970]),
+    @"details" : SMNormalizeDictionary(details),
+  }];
+  while ([self.activityLog count] > ALNStorageActivityLimit) {
+    [self.activityLog removeObjectAtIndex:0];
+  }
+  [self.lock unlock];
+}
+
+- (NSUInteger)pruneExpiredUploadSessionsAt:(NSDate *)timestamp
+                            recordActivity:(BOOL)recordActivity {
+  NSDate *now = timestamp ?: [NSDate date];
+  NSMutableArray<NSString *> *expired = [NSMutableArray array];
+  [self.lock lock];
+  for (NSString *sessionID in [self.uploadSessionsByIdentifier allKeys]) {
+    NSDictionary *session = [self.uploadSessionsByIdentifier[sessionID] isKindOfClass:[NSDictionary class]]
+                                ? self.uploadSessionsByIdentifier[sessionID]
+                                : nil;
+    if (session == nil || ![[session[@"status"] description] isEqualToString:@"pending"]) {
+      continue;
+    }
+    NSTimeInterval expiresAt = [session[@"expiresAt"] respondsToSelector:@selector(doubleValue)]
+                                   ? [session[@"expiresAt"] doubleValue]
+                                   : 0.0;
+    if (expiresAt > 0.0 && expiresAt <= [now timeIntervalSince1970]) {
+      [expired addObject:sessionID];
+    }
+  }
+  for (NSString *sessionID in expired) {
+    [self.uploadSessionsByIdentifier removeObjectForKey:sessionID];
+  }
+  [self.lock unlock];
+  if (recordActivity) {
+    for (NSString *sessionID in expired) {
+      [self recordActivityNamed:@"upload_session_expired" details:@{ @"sessionID" : sessionID ?: @"" }];
+    }
+  }
+  if ([expired count] > 0) {
+    (void)[self persistStateWithError:NULL];
+  }
+  return [expired count];
+}
+
 - (NSDictionary *)resolvedConfigSummary {
+  [self pruneExpiredUploadSessionsAt:[NSDate date] recordActivity:NO];
   return @{
     @"prefix" : self.prefix ?: @"/storage",
     @"apiPrefix" : self.apiPrefix ?: @"/storage/api",
     @"uploadSessionTTLSeconds" : @(self.defaultUploadSessionTTLSeconds),
     @"downloadTokenTTLSeconds" : @(self.defaultDownloadTokenTTLSeconds),
+    @"cleanupIntervalSeconds" : @(self.defaultCleanupIntervalSeconds),
     @"collections" : [self registeredCollections],
     @"objectCount" : @([[self listObjectsForCollection:nil query:nil] count]),
+    @"uploadSessionCount" : @([self.uploadSessionsByIdentifier count]),
+    @"activityCount" : @([self.activityLog count]),
+    @"attachmentAdapter" : @{
+      @"name" : (self.attachmentAdapter != nil) ? [self.attachmentAdapter adapterName] : @"",
+      @"capabilities" : SMAttachmentAdapterCapabilities(self.attachmentAdapter),
+    },
+    @"persistenceEnabled" : @(self.persistenceEnabled),
+    @"statePath" : self.statePath ?: @"",
   };
 }
 
@@ -492,7 +873,9 @@ static NSString *SMCreateSignedToken(NSDictionary *payload, NSData *keyData) {
   }
   self.collectionDefinitionsByIdentifier[identifier] = definition;
   self.collectionMetadataByIdentifier[identifier] = [NSDictionary dictionaryWithDictionary:storedMetadata];
-  self.objectIDsByCollection[identifier] = [NSMutableArray array];
+  if (![self.objectIDsByCollection[identifier] isKindOfClass:[NSMutableArray class]]) {
+    self.objectIDsByCollection[identifier] = [NSMutableArray array];
+  }
   [self.lock unlock];
   return YES;
 }
@@ -671,6 +1054,7 @@ static NSString *SMCreateSignedToken(NSDictionary *payload, NSData *keyData) {
                                           metadata:(NSDictionary *)metadata
                                          expiresIn:(NSTimeInterval)expiresIn
                                              error:(NSError **)error {
+  [self pruneExpiredUploadSessionsAt:[NSDate date] recordActivity:YES];
   if (![self validateCollection:collection
                            name:name
                     contentType:contentType
@@ -696,6 +1080,15 @@ static NSString *SMCreateSignedToken(NSDictionary *payload, NSData *keyData) {
   };
   self.uploadSessionsByIdentifier[sessionID] = session;
   [self.lock unlock];
+  [self recordActivityNamed:@"upload_session_created"
+                    details:@{
+                      @"sessionID" : sessionID ?: @"",
+                      @"collection" : SMLowerTrimmedString(collection),
+                      @"name" : SMTrimmedString(name),
+                    }];
+  if (![self persistStateWithError:error]) {
+    return nil;
+  }
   NSString *token = SMCreateSignedToken(@{
     @"purpose" : @"upload",
     @"sessionID" : sessionID,
@@ -750,10 +1143,12 @@ static NSString *SMCreateSignedToken(NSDictionary *payload, NSData *keyData) {
       @"contentType" : SMTrimmedString(variant[@"contentType"]),
       @"strategy" : SMTrimmedString(variant[@"strategy"]),
       @"status" : @"pending",
+      @"error" : @"",
       @"attachmentID" : @"",
       @"sizeBytes" : @0,
     } mutableCopy]];
   }
+  NSDictionary *analysis = SMAnalyzeObjectData(name, contentType, data ?: [NSData data], metadata ?: @{}, variantDefinitions);
 
   NSDictionary *record = nil;
   [self.lock lock];
@@ -769,6 +1164,7 @@ static NSString *SMCreateSignedToken(NSDictionary *payload, NSData *keyData) {
     @"visibility" : collectionMetadata[@"visibility"] ?: @"private",
     @"attachmentID" : attachmentID ?: @"",
     @"metadata" : SMNormalizeDictionary(metadata),
+    @"analysis" : analysis ?: @{},
     @"createdAt" : @([[NSDate date] timeIntervalSince1970]),
     @"variantState" : ([variants count] > 0) ? @"pending" : @"none",
     @"variants" : [NSArray arrayWithArray:variants],
@@ -781,6 +1177,15 @@ static NSString *SMCreateSignedToken(NSDictionary *payload, NSData *keyData) {
   }
   [collectionIDs addObject:objectID];
   [self.lock unlock];
+  [self recordActivityNamed:@"object_stored"
+                    details:@{
+                      @"objectID" : record[@"objectID"] ?: @"",
+                      @"collection" : record[@"collection"] ?: @"",
+                      @"name" : record[@"name"] ?: @"",
+                    }];
+  if (![self persistStateWithError:error]) {
+    return nil;
+  }
 
   if ([variants count] > 0) {
     (void)[self queueVariantGenerationForObjectID:record[@"objectID"] error:NULL];
@@ -825,6 +1230,7 @@ static NSString *SMCreateSignedToken(NSDictionary *payload, NSData *keyData) {
                                token:(NSString *)token
                                error:(NSError **)error {
   NSString *normalizedSessionID = SMTrimmedString(sessionID);
+  [self pruneExpiredUploadSessionsAt:[NSDate date] recordActivity:YES];
   NSDictionary *tokenPayload = [self validatedTokenPayload:token
                                                    purpose:@"upload"
                                              expectedField:@"sessionID"
@@ -876,6 +1282,14 @@ static NSString *SMCreateSignedToken(NSDictionary *payload, NSData *keyData) {
   updatedSession[@"objectID"] = object[@"objectID"] ?: @"";
   self.uploadSessionsByIdentifier[normalizedSessionID] = [NSDictionary dictionaryWithDictionary:updatedSession];
   [self.lock unlock];
+  [self recordActivityNamed:@"upload_session_completed"
+                    details:@{
+                      @"sessionID" : normalizedSessionID ?: @"",
+                      @"objectID" : object[@"objectID"] ?: @"",
+                    }];
+  if (![self persistStateWithError:error]) {
+    return nil;
+  }
   NSMutableDictionary *result = [NSMutableDictionary dictionaryWithDictionary:object];
   result[@"sessionID"] = normalizedSessionID;
   return [NSDictionary dictionaryWithDictionary:result];
@@ -931,6 +1345,12 @@ static NSString *SMCreateSignedToken(NSDictionary *payload, NSData *keyData) {
 
 - (BOOL)deleteObjectIdentifier:(NSString *)objectID
                          error:(NSError **)error {
+  return [self deleteObjectIdentifier:objectID reason:@"manual" error:error];
+}
+
+- (BOOL)deleteObjectIdentifier:(NSString *)objectID
+                        reason:(NSString *)reason
+                         error:(NSError **)error {
   NSString *normalizedObjectID = SMTrimmedString(objectID);
   [self.lock lock];
   NSDictionary *record = self.objectsByIdentifier[normalizedObjectID];
@@ -961,7 +1381,57 @@ static NSString *SMCreateSignedToken(NSDictionary *payload, NSData *keyData) {
   NSMutableArray *collectionIDs = self.objectIDsByCollection[SMLowerTrimmedString(record[@"collection"])];
   [collectionIDs removeObject:normalizedObjectID];
   [self.lock unlock];
-  return YES;
+  [self recordActivityNamed:@"object_deleted"
+                    details:@{
+                      @"objectID" : normalizedObjectID ?: @"",
+                      @"collection" : SMLowerTrimmedString(record[@"collection"]),
+                      @"reason" : SMLowerTrimmedString(reason),
+                    }];
+  return [self persistStateWithError:error];
+}
+
+- (NSDictionary *)runMaintenanceAt:(NSDate *)timestamp
+                              error:(NSError **)error {
+  NSDate *now = timestamp ?: [NSDate date];
+  NSUInteger expiredSessions = [self pruneExpiredUploadSessionsAt:now recordActivity:YES];
+  NSArray *objects = [self listObjectsForCollection:nil query:nil];
+  NSUInteger deletedObjects = 0;
+  for (NSDictionary *record in objects) {
+    NSString *collectionID = SMLowerTrimmedString(record[@"collection"]);
+    NSDictionary *collection = [self collectionMetadataForIdentifier:collectionID] ?: @{};
+    NSInteger retentionDays = [collection[@"retentionDays"] respondsToSelector:@selector(integerValue)]
+                                  ? [collection[@"retentionDays"] integerValue]
+                                  : 0;
+    if (retentionDays <= 0) {
+      continue;
+    }
+    NSTimeInterval createdAt = [record[@"createdAt"] respondsToSelector:@selector(doubleValue)]
+                                   ? [record[@"createdAt"] doubleValue]
+                                   : 0.0;
+    if (createdAt <= 0.0) {
+      continue;
+    }
+    NSTimeInterval retentionAge = (NSTimeInterval)retentionDays * 86400.0;
+    if ((createdAt + retentionAge) > [now timeIntervalSince1970]) {
+      continue;
+    }
+    NSError *deleteError = nil;
+    if ([self deleteObjectIdentifier:record[@"objectID"] reason:@"retention_expired" error:&deleteError]) {
+      deletedObjects += 1;
+    } else if (error != NULL && *error == nil) {
+      *error = deleteError;
+    }
+  }
+  NSDictionary *summary = @{
+    @"expiredUploadSessions" : @(expiredSessions),
+    @"deletedObjects" : @(deletedObjects),
+    @"timestamp" : @([now timeIntervalSince1970]),
+  };
+  [self recordActivityNamed:@"maintenance_completed" details:summary];
+  if (![self persistStateWithError:error]) {
+    return nil;
+  }
+  return summary;
 }
 
 - (NSDictionary *)queueVariantGenerationForObjectID:(NSString *)objectID
@@ -974,6 +1444,19 @@ static NSString *SMCreateSignedToken(NSDictionary *payload, NSData *keyData) {
   if ([variants count] == 0) {
     return @{ @"objectID" : record[@"objectID"] ?: @"", @"queuedCount" : @0, @"status" : @"no_variants" };
   }
+  NSMutableArray *resetVariants = [NSMutableArray array];
+  for (NSDictionary *variant in variants) {
+    NSMutableDictionary *mutableVariant = [NSMutableDictionary dictionaryWithDictionary:variant];
+    mutableVariant[@"status"] = @"pending";
+    mutableVariant[@"error"] = @"";
+    [resetVariants addObject:mutableVariant];
+  }
+  NSMutableDictionary *mutableRecord = [NSMutableDictionary dictionaryWithDictionary:record];
+  mutableRecord[@"variants"] = [NSArray arrayWithArray:resetVariants];
+  mutableRecord[@"variantState"] = @"pending";
+  [self.lock lock];
+  self.objectsByIdentifier[record[@"objectID"]] = [NSDictionary dictionaryWithDictionary:mutableRecord];
+  [self.lock unlock];
   NSUInteger queuedCount = 0;
   for (NSDictionary *variant in variants) {
     NSString *variantID = SMTrimmedString(variant[@"identifier"]);
@@ -991,11 +1474,24 @@ static NSString *SMCreateSignedToken(NSDictionary *payload, NSData *keyData) {
       *error = jobError;
     }
   }
-  return @{ @"objectID" : record[@"objectID"] ?: @"", @"queuedCount" : @(queuedCount), @"status" : @"queued" };
+  NSDictionary *summary = @{ @"objectID" : record[@"objectID"] ?: @"", @"queuedCount" : @(queuedCount), @"status" : @"queued" };
+  [self recordActivityNamed:@"variant_generation_queued"
+                    details:@{
+                      @"objectID" : record[@"objectID"] ?: @"",
+                      @"queuedCount" : @(queuedCount),
+                    }];
+  (void)[self persistStateWithError:NULL];
+  return summary;
 }
 
 - (NSDictionary *)processVariantJobPayload:(NSDictionary *)payload
                                      error:(NSError **)error {
+  return [self processVariantJobPayload:payload jobContext:@{} error:error];
+}
+
+- (NSDictionary *)processVariantJobPayload:(NSDictionary *)payload
+                                 jobContext:(NSDictionary *)jobContext
+                                      error:(NSError **)error {
   NSString *objectID = SMTrimmedString(payload[@"objectID"]);
   NSString *variantID = SMLowerTrimmedString(payload[@"variant"]);
   [self.lock lock];
@@ -1012,28 +1508,73 @@ static NSString *SMCreateSignedToken(NSDictionary *payload, NSData *keyData) {
   if (data == nil) {
     return nil;
   }
+  NSString *collectionID = SMLowerTrimmedString(record[@"collection"]);
+  id<ALNStorageCollectionDefinition> definition = self.collectionDefinitionsByIdentifier[collectionID];
   NSMutableArray *updatedVariants = [NSMutableArray array];
   BOOL found = NO;
   NSString *generatedAttachmentID = nil;
+  NSError *processingError = nil;
   for (NSDictionary *variant in (record[@"variants"] ?: @[])) {
     NSMutableDictionary *mutableVariant = [NSMutableDictionary dictionaryWithDictionary:variant];
     if ([SMLowerTrimmedString(variant[@"identifier"]) isEqualToString:variantID]) {
       found = YES;
-      generatedAttachmentID = [self.attachmentAdapter saveAttachmentNamed:[NSString stringWithFormat:@"%@-%@", record[@"name"] ?: @"object", variantID]
-                                                              contentType:([SMLowerTrimmedString(variant[@"contentType"]) length] > 0) ? SMLowerTrimmedString(variant[@"contentType"]) : SMLowerTrimmedString(record[@"contentType"])
-                                                                     data:data
-                                                                 metadata:@{
-                                                                   @"sourceObjectID" : objectID ?: @"",
-                                                                   @"variant" : variantID ?: @"",
-                                                                 }
-                                                                    error:error];
-      if ([generatedAttachmentID length] == 0) {
-        return nil;
+      NSData *variantData = data;
+      NSString *variantContentType = ([SMLowerTrimmedString(variant[@"contentType"]) length] > 0)
+                                         ? SMLowerTrimmedString(variant[@"contentType"])
+                                         : SMLowerTrimmedString(record[@"contentType"]);
+      NSDictionary *variantMetadata = @{
+        @"sourceObjectID" : objectID ?: @"",
+        @"variant" : variantID ?: @"",
+      };
+      if (definition != nil &&
+          [definition respondsToSelector:@selector(storageModuleVariantRepresentationForObject:variantDefinition:originalData:originalMetadata:runtime:error:)]) {
+        NSDictionary *representation =
+            [definition storageModuleVariantRepresentationForObject:[self publicObjectRecordFromInternalRecord:record]
+                                                 variantDefinition:variant
+                                                      originalData:data
+                                                  originalMetadata:originalMetadata ?: @{}
+                                                           runtime:self
+                                                             error:&processingError];
+        if ([representation isKindOfClass:[NSDictionary class]]) {
+          NSData *candidateData = [representation[@"data"] isKindOfClass:[NSData class]] ? representation[@"data"] : nil;
+          if (candidateData != nil) {
+            variantData = candidateData;
+          }
+          NSString *candidateContentType = SMLowerTrimmedString(representation[@"contentType"]);
+          if ([candidateContentType length] > 0) {
+            variantContentType = candidateContentType;
+          }
+          NSDictionary *candidateMetadata = [representation[@"metadata"] isKindOfClass:[NSDictionary class]]
+                                                ? representation[@"metadata"]
+                                                : nil;
+          if (candidateMetadata != nil) {
+            NSMutableDictionary *mergedMetadata = [NSMutableDictionary dictionaryWithDictionary:variantMetadata];
+            [mergedMetadata addEntriesFromDictionary:candidateMetadata];
+            variantMetadata = mergedMetadata;
+          }
+        } else if (representation == nil && processingError != nil) {
+          mutableVariant[@"status"] = @"failed";
+          mutableVariant[@"error"] = processingError.localizedDescription ?: @"variant generation failed";
+        }
       }
-      mutableVariant[@"status"] = @"ready";
-      mutableVariant[@"attachmentID"] = generatedAttachmentID;
-      mutableVariant[@"sizeBytes"] = @([data length]);
-      mutableVariant[@"generatedAt"] = @([[NSDate date] timeIntervalSince1970]);
+      if (processingError == nil) {
+        generatedAttachmentID = [self.attachmentAdapter saveAttachmentNamed:[NSString stringWithFormat:@"%@-%@", record[@"name"] ?: @"object", variantID]
+                                                                contentType:variantContentType
+                                                                       data:variantData
+                                                                   metadata:variantMetadata
+                                                                      error:&processingError];
+        if ([generatedAttachmentID length] == 0) {
+          mutableVariant[@"status"] = @"failed";
+          mutableVariant[@"error"] = processingError.localizedDescription ?: @"variant generation failed";
+        }
+      }
+      if (processingError == nil) {
+        mutableVariant[@"status"] = @"ready";
+        mutableVariant[@"attachmentID"] = generatedAttachmentID;
+        mutableVariant[@"sizeBytes"] = @([variantData length]);
+        mutableVariant[@"generatedAt"] = @([[NSDate date] timeIntervalSince1970]);
+        mutableVariant[@"error"] = @"";
+      }
     }
     [updatedVariants addObject:mutableVariant];
   }
@@ -1046,27 +1587,66 @@ static NSString *SMCreateSignedToken(NSDictionary *payload, NSData *keyData) {
     return nil;
   }
   BOOL allReady = YES;
+  BOOL anyFailed = NO;
   for (NSDictionary *variant in updatedVariants) {
     if (![SMTrimmedString(variant[@"status"]) isEqualToString:@"ready"]) {
       allReady = NO;
-      break;
+    }
+    if ([SMTrimmedString(variant[@"status"]) isEqualToString:@"failed"]) {
+      anyFailed = YES;
     }
   }
   NSMutableDictionary *updatedRecord = [NSMutableDictionary dictionaryWithDictionary:record];
   updatedRecord[@"variants"] = [NSArray arrayWithArray:updatedVariants];
-  updatedRecord[@"variantState"] = allReady ? @"ready" : @"pending";
+  updatedRecord[@"variantState"] = allReady ? @"ready" : (anyFailed ? @"failed" : @"pending");
+  updatedRecord[@"analysis"] = SMAnalyzeObjectData(updatedRecord[@"name"],
+                                                   updatedRecord[@"contentType"],
+                                                   data ?: [NSData data],
+                                                   updatedRecord[@"metadata"] ?: @{},
+                                                   updatedVariants);
   [self.lock lock];
   self.objectsByIdentifier[objectID] = [NSDictionary dictionaryWithDictionary:updatedRecord];
   [self.lock unlock];
-  return @{
+  NSUInteger attempt = [jobContext[@"attempt"] respondsToSelector:@selector(unsignedIntegerValue)]
+                           ? [jobContext[@"attempt"] unsignedIntegerValue]
+                           : 1;
+  NSUInteger maxAttempts = [jobContext[@"maxAttempts"] respondsToSelector:@selector(unsignedIntegerValue)]
+                               ? [jobContext[@"maxAttempts"] unsignedIntegerValue]
+                               : 1;
+  if (processingError != nil) {
+    [self recordActivityNamed:@"variant_failed"
+                      details:@{
+                        @"objectID" : objectID ?: @"",
+                        @"variant" : variantID ?: @"",
+                        @"attempt" : @(attempt),
+                        @"maxAttempts" : @(maxAttempts),
+                        @"error" : processingError.localizedDescription ?: @"variant generation failed",
+                      }];
+    (void)[self persistStateWithError:NULL];
+    if (error != NULL) {
+      *error = processingError;
+    }
+    return nil;
+  }
+  NSDictionary *summary = @{
     @"objectID" : objectID ?: @"",
     @"variant" : variantID ?: @"",
     @"status" : @"ready",
     @"attachmentID" : generatedAttachmentID ?: @"",
   };
+  [self recordActivityNamed:@"variant_ready"
+                    details:@{
+                      @"objectID" : objectID ?: @"",
+                      @"variant" : variantID ?: @"",
+                    }];
+  if (![self persistStateWithError:error]) {
+    return nil;
+  }
+  return summary;
 }
 
 - (NSDictionary *)dashboardSummary {
+  [self pruneExpiredUploadSessionsAt:[NSDate date] recordActivity:NO];
   NSArray *collections = [self registeredCollections];
   NSArray *allObjects = [self listObjectsForCollection:nil query:nil];
   NSUInteger pendingVariantCount = 0;
@@ -1083,9 +1663,15 @@ static NSString *SMCreateSignedToken(NSDictionary *payload, NSData *keyData) {
       @{ @"label" : @"Objects", @"value" : @([allObjects count]) },
       @{ @"label" : @"Upload sessions", @"value" : @([self.uploadSessionsByIdentifier count]) },
       @{ @"label" : @"Pending variants", @"value" : @(pendingVariantCount) },
+      @{ @"label" : @"Activity", @"value" : @([self.activityLog count]) },
     ],
     @"collections" : collections ?: @[],
+    @"attachmentAdapter" : @{
+      @"name" : (self.attachmentAdapter != nil) ? [self.attachmentAdapter adapterName] : @"",
+      @"capabilities" : SMAttachmentAdapterCapabilities(self.attachmentAdapter),
+    },
     @"recentObjects" : ([allObjects count] > 5) ? [allObjects subarrayWithRange:NSMakeRange(0, 5)] : allObjects,
+    @"recentActivity" : ([[NSArray alloc] initWithArray:self.activityLog copyItems:YES] ?: @[]),
   };
 }
 

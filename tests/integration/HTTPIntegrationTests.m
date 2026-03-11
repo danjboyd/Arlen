@@ -4030,6 +4030,175 @@
   }
 }
 
+- (void)testBoomhauerWatchRebuildsAfterTemplateFailureEvenWhenFixedTemplateMatchesOldFingerprint {
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *appRoot = [self createTempDirectoryWithPrefix:@"arlen-boomhauer-template-watch"];
+  XCTAssertNotNil(appRoot);
+  if (appRoot == nil) {
+    return;
+  }
+
+  XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"config/app.plist"]
+                        content:@"{\n"
+                                "  host = \"127.0.0.1\";\n"
+                                "  port = 3000;\n"
+                                "  logFormat = \"text\";\n"
+                                "  serveStatic = NO;\n"
+                                "  performanceLogging = YES;\n"
+                                "}\n"]);
+  XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"config/environments/development.plist"]
+                        content:@"{\n  logFormat = \"text\";\n}\n"]);
+
+  NSString *templateAppSource =
+      @"#import <Foundation/Foundation.h>\n"
+      "#import <stdio.h>\n"
+      "#import <stdlib.h>\n"
+      "#import \"ArlenServer.h\"\n"
+      "@interface TemplateController : ALNController @end\n"
+      "@implementation TemplateController\n"
+      "- (id)index:(ALNContext *)ctx {\n"
+      "  (void)ctx;\n"
+      "  [self renderTemplate:@\"home/index\" context:@{} layout:nil error:NULL];\n"
+      "  return nil;\n"
+      "}\n"
+      "@end\n"
+      "static void PrintUsage(void) {\n"
+      "  fprintf(stdout, \"Usage: boomhauer [--port <port>] [--host <addr>] [--env <env>] [--once] [--print-routes]\\\\n\");\n"
+      "}\n"
+      "int main(int argc, const char *argv[]) {\n"
+      "  @autoreleasepool {\n"
+      "    int portOverride = 0;\n"
+      "    NSString *host = nil;\n"
+      "    NSString *environment = @\"development\";\n"
+      "    BOOL once = NO;\n"
+      "    BOOL printRoutes = NO;\n"
+      "    for (int idx = 1; idx < argc; idx++) {\n"
+      "      NSString *arg = [NSString stringWithUTF8String:argv[idx]];\n"
+      "      if ([arg isEqualToString:@\"--port\"]) {\n"
+      "        if ((idx + 1) >= argc) { PrintUsage(); return 2; }\n"
+      "        portOverride = atoi(argv[++idx]);\n"
+      "      } else if ([arg isEqualToString:@\"--host\"]) {\n"
+      "        if ((idx + 1) >= argc) { PrintUsage(); return 2; }\n"
+      "        host = [NSString stringWithUTF8String:argv[++idx]];\n"
+      "      } else if ([arg isEqualToString:@\"--env\"]) {\n"
+      "        if ((idx + 1) >= argc) { PrintUsage(); return 2; }\n"
+      "        environment = [NSString stringWithUTF8String:argv[++idx]];\n"
+      "      } else if ([arg isEqualToString:@\"--once\"]) {\n"
+      "        once = YES;\n"
+      "      } else if ([arg isEqualToString:@\"--print-routes\"]) {\n"
+      "        printRoutes = YES;\n"
+      "      } else if ([arg isEqualToString:@\"--help\"] || [arg isEqualToString:@\"-h\"]) {\n"
+      "        PrintUsage();\n"
+      "        return 0;\n"
+      "      } else {\n"
+      "        fprintf(stderr, \"Unknown argument: %s\\\\n\", argv[idx]);\n"
+      "        return 2;\n"
+      "      }\n"
+      "    }\n"
+      "    NSString *appRootCurrent = [[NSFileManager defaultManager] currentDirectoryPath];\n"
+      "    NSError *error = nil;\n"
+      "    ALNApplication *app = [[ALNApplication alloc] initWithEnvironment:environment\n"
+      "                                                           configRoot:appRootCurrent\n"
+      "                                                                error:&error];\n"
+      "    if (app == nil) {\n"
+      "      fprintf(stderr, \"failed loading config: %s\\\\n\", [[error localizedDescription] UTF8String]);\n"
+      "      return 1;\n"
+      "    }\n"
+      "    [app registerRouteMethod:@\"GET\" path:@\"/\" name:@\"home\" controllerClass:[TemplateController class] action:@\"index\"];\n"
+      "    ALNHTTPServer *server = [[ALNHTTPServer alloc] initWithApplication:app\n"
+      "                                                        publicRoot:[appRootCurrent stringByAppendingPathComponent:@\"public\"]];\n"
+      "    server.serverName = @\"boomhauer\";\n"
+      "    if (printRoutes) { [server printRoutesToFile:stdout]; return 0; }\n"
+      "    return [server runWithHost:host portOverride:portOverride once:once];\n"
+      "  }\n"
+      "}\n";
+  XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"app_lite.m"] content:templateAppSource]);
+
+  NSString *templatePath = [appRoot stringByAppendingPathComponent:@"templates/home/index.html.eoc"];
+  NSString *initialTemplate = @"<% NSString *word = @\"alpha\"; %><%= word %>\n";
+  NSString *fixedTemplate = @"<% NSString *word = @\"bravo\"; %><%= word %>\n";
+  NSString *brokenTemplate = @"<% NSString *word = @\"error\"; %><%= word %\n";
+  XCTAssertEqual([initialTemplate length], [fixedTemplate length]);
+  XCTAssertTrue([self writeFile:templatePath content:initialTemplate]);
+  NSDictionary *initialAttributes =
+      [[NSFileManager defaultManager] attributesOfItemAtPath:templatePath error:nil];
+  NSDate *initialModifiedDate = initialAttributes[NSFileModificationDate];
+  XCTAssertNotNil(initialModifiedDate);
+
+  int port = [self randomPort];
+  NSTask *server = [[NSTask alloc] init];
+  server.launchPath = [repoRoot stringByAppendingPathComponent:@"bin/boomhauer"];
+  server.currentDirectoryPath = appRoot;
+  server.arguments = @[ @"--watch", @"--port", [NSString stringWithFormat:@"%d", port] ];
+  NSMutableDictionary *env =
+      [NSMutableDictionary dictionaryWithDictionary:[[NSProcessInfo processInfo] environment]];
+  env[@"ARLEN_FRAMEWORK_ROOT"] = repoRoot;
+  env[@"ARLEN_APP_ROOT"] = appRoot;
+  env[@"ARLEN_BOOMHAUER_BUILD_ERROR_RETRY_SECONDS"] = @"1";
+  env[@"ARLEN_BOOMHAUER_BUILD_ERROR_AUTO_REFRESH_SECONDS"] = @"1";
+  server.environment = env;
+  server.standardOutput = [NSPipe pipe];
+  server.standardError = [NSPipe pipe];
+  [server launch];
+
+  @try {
+    BOOL ready = NO;
+    for (NSInteger attempt = 0; attempt < 240; attempt++) {
+      int curlCode = 0;
+      NSString *body = [self runShellCapture:[NSString stringWithFormat:@"curl -fsS http://127.0.0.1:%d/", port]
+                                    exitCode:&curlCode];
+      if (curlCode == 0 && [body containsString:@"alpha"]) {
+        ready = YES;
+        break;
+      }
+      usleep(250000);
+    }
+    XCTAssertTrue(ready);
+
+    XCTAssertTrue([self writeFile:templatePath content:brokenTemplate]);
+
+    BOOL errorPageSeen = NO;
+    for (NSInteger attempt = 0; attempt < 240; attempt++) {
+      int curlCode = 0;
+      NSString *body = [self runShellCapture:[NSString stringWithFormat:@"curl -sS http://127.0.0.1:%d/", port]
+                                    exitCode:&curlCode];
+      if (curlCode == 0 && [body containsString:@"Boomhauer Build Failed"]) {
+        errorPageSeen = YES;
+        break;
+      }
+      usleep(250000);
+    }
+    XCTAssertTrue(errorPageSeen);
+
+    XCTAssertTrue([self writeFile:templatePath content:fixedTemplate]);
+    NSError *touchError = nil;
+    XCTAssertTrue([[NSFileManager defaultManager] setAttributes:@{ NSFileModificationDate : initialModifiedDate }
+                                                   ofItemAtPath:templatePath
+                                                          error:&touchError],
+                  @"failed restoring template mtime: %@", touchError.localizedDescription);
+
+    BOOL recovered = NO;
+    for (NSInteger attempt = 0; attempt < 160; attempt++) {
+      int curlCode = 0;
+      NSString *body = [self runShellCapture:[NSString stringWithFormat:@"curl -fsS http://127.0.0.1:%d/", port]
+                                    exitCode:&curlCode];
+      if (curlCode == 0 && [body containsString:@"bravo"]) {
+        XCTAssertFalse([body containsString:@"alpha"]);
+        recovered = YES;
+        break;
+      }
+      usleep(250000);
+    }
+    XCTAssertTrue(recovered);
+  } @finally {
+    if ([server isRunning]) {
+      (void)kill(server.processIdentifier, SIGTERM);
+      [server waitUntilExit];
+    }
+    [[NSFileManager defaultManager] removeItemAtPath:appRoot error:nil];
+  }
+}
+
 - (void)testAuthPrimitivesStubProviderLoginCompletesAndEstablishesSession {
   int port = [self randomPort];
   NSTask *server = [[NSTask alloc] init];

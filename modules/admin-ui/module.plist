@@ -14,12 +14,11 @@
         title = "Arlen Admin";
         paths = {
           prefix = "/admin";
-          apiPrefix = "/api";
+          apiPrefix = "api";
         };
       };
     };
     requiredKeys = (
-      "database.connectionString",
       "session.secret"
     );
   };

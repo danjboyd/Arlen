@@ -1,20 +1,49 @@
-<% NSArray *inbox = [ctx objectForKey:@"inbox"] ?: @[]; %>
+<% NSDictionary *inboxSummary = [ctx objectForKey:@"inboxSummary"] ?: @{}; %>
+<% NSArray *inbox = [inboxSummary objectForKey:@"entries"] ?: ([ctx objectForKey:@"inbox"] ?: @[]); %>
 <section class="notifications-panel">
   <p class="notifications-note">Recipient: <code><%= [ctx objectForKey:@"recipient"] ?: @"" %></code></p>
+  <p class="notifications-note">Unread: <strong><%= [inboxSummary objectForKey:@"unreadCount"] ?: @0 %></strong> of <%= [inboxSummary objectForKey:@"totalCount"] ?: @0 %></p>
+  <% if ([inbox count] > 0) { %>
+    <form class="notifications-actions notifications-actions--inline" method="post" action="<%= [$notificationsPrefix stringByAppendingString:@"/inbox/read-all"] %>">
+      <input type="hidden" name="csrf_token" value="<%= [ctx objectForKey:@"csrfToken"] %>">
+      <button type="submit">Mark all read</button>
+    </form>
+  <% } %>
   <table class="notifications-table">
     <thead>
       <tr>
         <th>Notification</th>
+        <th>Status</th>
         <th>Title</th>
         <th>Body</th>
+        <th>Link</th>
+        <th>Actions</th>
       </tr>
     </thead>
     <tbody>
       <% for (NSDictionary *entry in inbox) { %>
-        <tr>
+        <% NSDictionary *metadata = [entry objectForKey:@"metadata"] ?: @{}; %>
+        <% id rawDestination = [metadata objectForKey:@"href"] ?: ([metadata objectForKey:@"path"] ?: @""); %>
+        <% NSString *destination = [rawDestination isKindOfClass:[NSString class]] ? rawDestination : @""; %>
+        <% BOOL isRead = [[entry objectForKey:@"read"] boolValue]; %>
+        <tr class="<%= isRead ? @"is-read" : @"is-unread" %>">
           <td><%= [entry objectForKey:@"notification"] %></td>
+          <td><span class="notifications-status <%= isRead ? @"notifications-status--read" : @"notifications-status--unread" %>"><%= isRead ? @"Read" : @"Unread" %></span></td>
           <td><%= [entry objectForKey:@"title"] %></td>
           <td><%= [entry objectForKey:@"body"] %></td>
+          <td>
+            <% if ([destination length] > 0) { %>
+              <a href="<%= destination %>">Open</a>
+            <% } else { %>
+              <span class="notifications-muted">-</span>
+            <% } %>
+          </td>
+          <td>
+            <form class="notifications-actions notifications-actions--inline" method="post" action="<%= [$notificationsPrefix stringByAppendingFormat:@"/inbox/%@/%@", [entry objectForKey:@"entryID"] ?: @"", isRead ? @"unread" : @"read"] %>">
+              <input type="hidden" name="csrf_token" value="<%= [ctx objectForKey:@"csrfToken"] %>">
+              <button type="submit"><%= isRead ? @"Mark unread" : @"Mark read" %></button>
+            </form>
+          </td>
         </tr>
       <% } %>
     </tbody>

@@ -126,6 +126,34 @@ SPA or native clients should target `/auth/api/...` directly rather than
 scraping HTML routes. That API surface is the stable headless contract across
 all UI modes.
 
+## Trusted Email Claim Flow
+
+Apps that already proved email ownership outside the stock auth UI can now use
+`ALNAuthModuleRuntime` to claim a session directly:
+
+```objc
+NSDictionary *result = [[ALNAuthModuleRuntime sharedRuntime]
+    claimTrustedEmail:@"invitee@example.com"
+          displayName:@"Invitee"
+               source:@"invite_claim"
+sendPasswordSetupEmail:YES
+              baseURL:@"https://example.com"
+              context:ctx
+                error:&error];
+```
+
+This flow is intended for app-owned invite-claim or verified email-link pages.
+It will:
+
+- find or create the local user for the claimed email
+- mark the email as verified
+- start an authenticated session using the `email_link` method
+- optionally issue the stock password-setup email so the claimed user can set a
+  reusable local password
+
+The result payload includes `user`, `session`, `created_user`,
+`email_verified`, `password_setup_issued`, and `source`.
+
 ## Example References
 
 - `headless`: `examples/auth_ui_modes/headless/README.md`

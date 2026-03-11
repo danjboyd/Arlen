@@ -251,6 +251,53 @@
   XCTAssertEqual((NSUInteger)1, [inbox count]);
   XCTAssertEqualObjects(@"Phase14 Inbox", inbox[0][@"title"]);
   XCTAssertEqualObjects(@"user-phase14", inbox[0][@"recipient"]);
+  XCTAssertEqualObjects(@1, json[@"data"][@"unreadCount"]);
+  NSString *entryID = [inbox[0][@"entryID"] isKindOfClass:[NSString class]] ? inbox[0][@"entryID"] : @"";
+  XCTAssertTrue([entryID length] > 0);
+
+  ALNResponse *markReadResponse =
+      [app dispatchRequest:[self requestWithMethod:@"POST"
+                                              path:[NSString stringWithFormat:@"/notifications/api/inbox/%@/read", entryID]
+                                       queryString:@""
+                                           headers:@{ @"Accept" : @"application/json" }
+                                              body:nil]];
+  XCTAssertEqual((NSInteger)200, markReadResponse.statusCode);
+  NSDictionary *markReadJSON = [self JSONObjectFromResponse:markReadResponse];
+  XCTAssertEqualObjects(@0, markReadJSON[@"data"][@"unreadCount"]);
+  XCTAssertEqualObjects(@YES, markReadJSON[@"data"][@"entry"][@"read"]);
+
+  ALNResponse *markUnreadResponse =
+      [app dispatchRequest:[self requestWithMethod:@"POST"
+                                              path:[NSString stringWithFormat:@"/notifications/api/inbox/%@/unread", entryID]
+                                       queryString:@""
+                                           headers:@{ @"Accept" : @"application/json" }
+                                              body:nil]];
+  XCTAssertEqual((NSInteger)200, markUnreadResponse.statusCode);
+  NSDictionary *markUnreadJSON = [self JSONObjectFromResponse:markUnreadResponse];
+  XCTAssertEqualObjects(@1, markUnreadJSON[@"data"][@"unreadCount"]);
+  XCTAssertEqualObjects(@NO, markUnreadJSON[@"data"][@"entry"][@"read"]);
+
+  ALNResponse *readAllResponse =
+      [app dispatchRequest:[self requestWithMethod:@"POST"
+                                              path:@"/notifications/inbox/read-all"
+                                       queryString:@""
+                                           headers:@{}
+                                              body:nil]];
+  XCTAssertEqual((NSInteger)302, readAllResponse.statusCode);
+  XCTAssertTrue([([readAllResponse headerForName:@"Location"] ?: @"") containsString:@"/notifications/inbox"]);
+
+  ALNResponse *jsonAfterReadAll =
+      [app dispatchRequest:[self requestWithMethod:@"GET"
+                                              path:@"/notifications/api/inbox"
+                                       queryString:@""
+                                           headers:@{ @"Accept" : @"application/json" }
+                                              body:nil]];
+  XCTAssertEqual((NSInteger)200, jsonAfterReadAll.statusCode);
+  NSDictionary *jsonAfterReadAllPayload = [self JSONObjectFromResponse:jsonAfterReadAll];
+  XCTAssertEqualObjects(@0, jsonAfterReadAllPayload[@"data"][@"unreadCount"]);
+  NSArray *inboxAfterReadAll =
+      [jsonAfterReadAllPayload[@"data"][@"inbox"] isKindOfClass:[NSArray class]] ? jsonAfterReadAllPayload[@"data"][@"inbox"] : @[];
+  XCTAssertEqualObjects(@YES, inboxAfterReadAll[0][@"read"]);
 }
 
 - (void)testAdminCanPreviewAndTestSendNotification {

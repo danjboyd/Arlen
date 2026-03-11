@@ -13,11 +13,18 @@
       storageModule = {
         paths = {
           prefix = "/storage";
-          apiPrefix = "/api";
+          apiPrefix = "api";
         };
         uploadSessionTTLSeconds = 900;
         downloadTokenTTLSeconds = 300;
+        cleanup = {
+          intervalSeconds = 300;
+        };
         signingSecret = "storage-module-signing-secret";
+        persistence = {
+          enabled = YES;
+          path = "";
+        };
         collections = {
           classes = ();
         };

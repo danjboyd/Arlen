@@ -3,12 +3,41 @@
     <article class="ops-card">
       <p><%= card[@"label"] ?: @"Metric" %></p>
       <strong><%= card[@"value"] ?: @"0" %></strong>
+      <% if ([card[@"summary"] length] > 0) { %>
+        <small><%= card[@"summary"] %></small>
+      <% } %>
+      <% if ([card[@"href"] length] > 0) { %>
+        <p><a href="<%= card[@"href"] %>">Open</a></p>
+      <% } %>
     </article>
   <% } %>
 </section>
 
+<% if ([($summary[@"widgets"] ?: @[]) count] > 0) { %>
+  <section class="ops-panel">
+    <h2>Widgets</h2>
+    <div class="ops-card-grid">
+      <% for (NSDictionary *widget in ($summary[@"widgets"] ?: @[])) { %>
+        <article class="ops-card">
+          <p><%= widget[@"title"] ?: @"Widget" %></p>
+          <% if ([widget[@"value"] length] > 0) { %>
+            <strong><%= widget[@"value"] %></strong>
+          <% } %>
+          <% if ([widget[@"body"] length] > 0) { %>
+            <small><%= widget[@"body"] %></small>
+          <% } %>
+          <% if ([widget[@"href"] length] > 0) { %>
+            <p><a href="<%= widget[@"href"] %>">Open</a></p>
+          <% } %>
+        </article>
+      <% } %>
+    </div>
+  </section>
+<% } %>
+
 <section class="ops-panel">
   <h2>Signals</h2>
+  <p class="ops-row"><strong>Overall</strong> <span><%= $summary[@"status"] ?: @"healthy" %></span></p>
   <dl class="ops-kv">
     <dt>Health</dt>
     <dd><%= [($summary[@"signals"][@"health"][@"statusCode"] ?: @0) stringValue] %></dd>
@@ -20,7 +49,10 @@
 </section>
 
 <section class="ops-panel">
-  <h2>Queues</h2>
+  <div class="ops-row">
+    <h2>Jobs</h2>
+    <a href="<%= $summary[@"drilldowns"][@"jobs"][@"html"] ?: @"#" %>">Drill down</a>
+  </div>
   <% for (NSDictionary *queue in ($summary[@"jobs"][@"queues"] ?: @[])) { %>
     <div class="ops-row">
       <strong><%= queue[@"name"] ?: @"default" %></strong>
@@ -32,7 +64,10 @@
 </section>
 
 <section class="ops-panel">
-  <h2>Notifications</h2>
+  <div class="ops-row">
+    <h2>Notifications</h2>
+    <a href="<%= $summary[@"drilldowns"][@"notifications"][@"html"] ?: @"#" %>">Drill down</a>
+  </div>
   <% for (NSDictionary *entry in ($summary[@"notifications"][@"recentOutbox"] ?: @[])) { %>
     <div class="ops-row">
       <strong><%= entry[@"notification"] ?: @"notification" %></strong>
@@ -43,12 +78,30 @@
 </section>
 
 <section class="ops-panel">
-  <h2>Storage</h2>
+  <div class="ops-row">
+    <h2>Storage</h2>
+    <a href="<%= $summary[@"drilldowns"][@"storage"][@"html"] ?: @"#" %>">Drill down</a>
+  </div>
   <% for (NSDictionary *object in ($summary[@"storage"][@"recentObjects"] ?: @[])) { %>
     <div class="ops-row">
       <strong><%= object[@"name"] ?: @"object" %></strong>
       <span><%= object[@"collection"] ?: @"" %></span>
       <span><%= object[@"variantState"] ?: @"" %></span>
+    </div>
+  <% } %>
+</section>
+
+<section class="ops-panel">
+  <div class="ops-row">
+    <h2>Search</h2>
+    <a href="<%= $summary[@"drilldowns"][@"search"][@"html"] ?: @"#" %>">Drill down</a>
+  </div>
+  <% for (NSDictionary *resource in ($summary[@"search"][@"resources"] ?: @[])) { %>
+    <div class="ops-row">
+      <strong><%= resource[@"label"] ?: resource[@"identifier"] ?: @"resource" %></strong>
+      <span><%= resource[@"indexState"] ?: @"idle" %></span>
+      <span><%= [resource[@"documentCount"] stringValue] ?: @"0" %> docs</span>
+      <span>gen <%= [resource[@"activeGeneration"] stringValue] ?: @"0" %></span>
     </div>
   <% } %>
 </section>
@@ -61,4 +114,17 @@
     <dt>OpenAPI Paths</dt>
     <dd><%= [($summary[@"automation"][@"openAPI"][@"pathCount"] ?: @0) stringValue] %></dd>
   </dl>
+</section>
+
+<section class="ops-panel">
+  <h2>Recent history</h2>
+  <% for (NSDictionary *entry in ($summary[@"history"] ?: @[])) { %>
+    <div class="ops-row">
+      <strong><%= entry[@"overallStatus"] ?: @"healthy" %></strong>
+      <span>jobs <%= entry[@"jobs"][@"status"] ?: @"informational" %></span>
+      <span>notifications <%= entry[@"notifications"][@"status"] ?: @"informational" %></span>
+      <span>storage <%= entry[@"storage"][@"status"] ?: @"informational" %></span>
+      <span>search <%= entry[@"search"][@"status"] ?: @"informational" %></span>
+    </div>
+  <% } %>
 </section>

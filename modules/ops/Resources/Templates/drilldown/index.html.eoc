@@ -1,0 +1,118 @@
+<% NSDictionary *drilldown = [ctx objectForKey:@"drilldown"] ?: @{}; %>
+<% NSDictionary *summary = [drilldown objectForKey:@"summary"] ?: @{}; %>
+
+<section class="ops-panel">
+  <div class="ops-row">
+    <h2><%= [drilldown objectForKey:@"label"] ?: @"Module" %></h2>
+    <span><%= [drilldown objectForKey:@"status"] ?: @"informational" %></span>
+  </div>
+  <p class="ops-row">
+    <a href="<%= [drilldown objectForKey:@"paths"][@"api"] ?: @"#" %>">API</a>
+    <a href="<%= [ctx objectForKey:@"opsPrefix"] ?: @"/ops" %>">Back to dashboard</a>
+  </p>
+</section>
+
+<% if ([[drilldown objectForKey:@"identifier"] isEqual:@"jobs"]) { %>
+  <section class="ops-panel">
+    <h2>Queues</h2>
+    <% for (NSDictionary *queue in ([summary objectForKey:@"queues"] ?: @[])) { %>
+      <div class="ops-row">
+        <strong><%= queue[@"name"] ?: @"default" %></strong>
+        <span>pending <%= [queue[@"pendingCount"] stringValue] %></span>
+        <span>dead <%= [queue[@"deadLetterCount"] stringValue] %></span>
+        <span><%= [queue[@"paused"] boolValue] ? @"paused" : @"active" %></span>
+      </div>
+    <% } %>
+  </section>
+  <section class="ops-panel">
+    <h2>Recent runs</h2>
+    <% for (NSDictionary *entry in ([summary objectForKey:@"recentRuns"] ?: @[])) { %>
+      <div class="ops-row">
+        <strong><%= entry[@"source"] ?: @"worker" %></strong>
+        <span><%= entry[@"status"] ?: @"ok" %></span>
+        <span><%= entry[@"job"] ?: @"" %></span>
+      </div>
+    <% } %>
+  </section>
+<% } %>
+
+<% if ([[drilldown objectForKey:@"identifier"] isEqual:@"notifications"]) { %>
+  <section class="ops-panel">
+    <h2>Recent outbox</h2>
+    <% for (NSDictionary *entry in ([summary objectForKey:@"recentOutbox"] ?: @[])) { %>
+      <div class="ops-row">
+        <strong><%= entry[@"notification"] ?: @"notification" %></strong>
+        <span><%= entry[@"channel"] ?: @"" %></span>
+        <span><%= entry[@"state"] ?: @"" %></span>
+        <span><%= entry[@"recipient"] ?: @"" %></span>
+      </div>
+    <% } %>
+  </section>
+  <section class="ops-panel">
+    <h2>Realtime fanout</h2>
+    <% for (NSDictionary *entry in ([summary objectForKey:@"recentFanout"] ?: @[])) { %>
+      <div class="ops-row">
+        <strong><%= entry[@"recipient"] ?: @"recipient" %></strong>
+        <span><%= entry[@"notification"] ?: @"" %></span>
+      </div>
+    <% } %>
+  </section>
+<% } %>
+
+<% if ([[drilldown objectForKey:@"identifier"] isEqual:@"storage"]) { %>
+  <section class="ops-panel">
+    <h2>Recent objects</h2>
+    <% for (NSDictionary *record in ([summary objectForKey:@"recentObjects"] ?: @[])) { %>
+      <div class="ops-row">
+        <strong><%= record[@"name"] ?: @"object" %></strong>
+        <span><%= record[@"collection"] ?: @"" %></span>
+        <span><%= record[@"variantState"] ?: @"" %></span>
+      </div>
+    <% } %>
+  </section>
+  <section class="ops-panel">
+    <h2>Recent activity</h2>
+    <% for (NSDictionary *entry in ([summary objectForKey:@"recentActivity"] ?: @[])) { %>
+      <div class="ops-row">
+        <strong><%= entry[@"name"] ?: @"activity" %></strong>
+        <span><%= entry[@"details"][@"objectID"] ?: @"" %></span>
+        <span><%= entry[@"details"][@"variant"] ?: @"" %></span>
+      </div>
+    <% } %>
+  </section>
+<% } %>
+
+<% if ([[drilldown objectForKey:@"identifier"] isEqual:@"search"]) { %>
+  <section class="ops-panel">
+    <h2>Resources</h2>
+    <% for (NSDictionary *resource in ([summary objectForKey:@"resources"] ?: @[])) { %>
+      <div class="ops-row">
+        <strong><%= resource[@"label"] ?: resource[@"identifier"] ?: @"resource" %></strong>
+        <span><%= resource[@"indexState"] ?: @"idle" %></span>
+        <span><%= [resource[@"documentCount"] stringValue] ?: @"0" %> docs</span>
+        <span>gen <%= [resource[@"activeGeneration"] stringValue] ?: @"0" %></span>
+      </div>
+    <% } %>
+  </section>
+  <section class="ops-panel">
+    <h2>Reindex history</h2>
+    <% for (NSDictionary *entry in ([summary objectForKey:@"history"] ?: @[])) { %>
+      <div class="ops-row">
+        <strong><%= entry[@"resource"] ?: @"resource" %></strong>
+        <span><%= entry[@"mode"] ?: @"full" %></span>
+        <span><%= entry[@"status"] ?: @"unknown" %></span>
+        <span><%= entry[@"operation"] ?: @"" %></span>
+      </div>
+    <% } %>
+  </section>
+<% } %>
+
+<section class="ops-panel">
+  <h2>Snapshot history</h2>
+  <% for (NSDictionary *entry in ([drilldown objectForKey:@"history"] ?: @[])) { %>
+    <div class="ops-row">
+      <strong><%= entry[@"overallStatus"] ?: @"healthy" %></strong>
+      <span><%= entry[@"module"][@"status"] ?: @"informational" %></span>
+    </div>
+  <% } %>
+</section>

@@ -14,7 +14,11 @@
         sender = "notifications@example.test";
         paths = {
           prefix = "/notifications";
-          apiPrefix = "/api";
+          apiPrefix = "api";
+        };
+        persistence = {
+          enabled = YES;
+          path = "";
         };
         providers = {
           classes = ();

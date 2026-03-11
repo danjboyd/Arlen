@@ -16,3 +16,4 @@ Attachment adapter protocol for save/read/delete/list operations on binary blobs
 | `deleteAttachmentID:error:` | `- (BOOL)deleteAttachmentID:(NSString *)attachmentID error:(NSError *_Nullable *_Nullable)error;` | Delete one attachment by ID. | Check the returned `BOOL`; on `NO`, inspect the `error` out-parameter. |
 | `listAttachmentMetadata` | `- (NSArray *)listAttachmentMetadata;` | Return metadata list for all stored attachments. | Read this value when you need current runtime/request state. |
 | `reset` | `- (void)reset;` | Reset state to a clean baseline for testing or maintenance. | Call for side effects; this method does not return a value. |
+| `attachmentAdapterCapabilities` | `- (NSDictionary *)attachmentAdapterCapabilities;` | Perform `attachment adapter capabilities` for `ALNAttachmentAdapter`. | Read this value when you need current runtime/request state. |

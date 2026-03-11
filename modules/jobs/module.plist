@@ -10,7 +10,7 @@
       jobsModule = {
         paths = {
           prefix = "/jobs";
-          apiPrefix = "/api";
+          apiPrefix = "api";
         };
         worker = {
           maxJobsPerRun = 50;

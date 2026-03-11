@@ -1,0 +1,43 @@
+[Unit]
+Description=Arlen site %i
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# Reference template: adjust User/Group and /srv/arlen/%i paths if your host
+# layout differs.
+User=arlen
+Group=arlen
+WorkingDirectory=/srv/arlen/%i/releases/current/app
+
+Environment=ARLEN_APP_ROOT=/srv/arlen/%i/releases/current/app
+Environment=ARLEN_FRAMEWORK_ROOT=/srv/arlen/%i/releases/current/framework
+Environment=ARLEN_LOG_FORMAT=json
+Environment=ARLEN_LOG_LEVEL=info
+Environment=ARLEN_PERFORMANCE_LOGGING=1
+Environment=ARLEN_TRACE_PROPAGATION_ENABLED=1
+Environment=ARLEN_RESPONSE_IDENTITY_HEADERS_ENABLED=1
+Environment=ARLEN_HEALTH_DETAILS_ENABLED=1
+Environment=ARLEN_READINESS_REQUIRES_STARTUP=1
+Environment=ARLEN_METRICS_ENABLED=1
+EnvironmentFile=-/etc/arlen/%i.env
+
+ExecStart=/srv/arlen/%i/releases/current/framework/bin/propane --env production
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=always
+RestartSec=1
+TimeoutStopSec=15
+KillSignal=SIGTERM
+UMask=0027
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=arlen-%i
+
+NoNewPrivileges=yes
+PrivateTmp=yes
+LimitCORE=infinity
+
+[Install]
+WantedBy=multi-user.target

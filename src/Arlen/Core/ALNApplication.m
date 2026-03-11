@@ -509,6 +509,7 @@ static BOOL ALNInvokeRouteAction(id controller,
 @property(nonatomic, strong, readwrite) id<ALNCacheAdapter> cacheAdapter;
 @property(nonatomic, strong, readwrite) id<ALNLocalizationAdapter> localizationAdapter;
 @property(nonatomic, strong, readwrite) id<ALNMailAdapter> mailAdapter;
+@property(nonatomic, strong, readwrite) id<ALNWebhookAdapter> webhookAdapter;
 @property(nonatomic, strong, readwrite) id<ALNAttachmentAdapter> attachmentAdapter;
 @property(nonatomic, assign, readwrite) BOOL clusterEnabled;
 @property(nonatomic, copy, readwrite) NSString *clusterName;
@@ -585,6 +586,7 @@ static BOOL ALNInvokeRouteAction(id controller,
     _cacheAdapter = [[ALNInMemoryCacheAdapter alloc] init];
     _localizationAdapter = [[ALNInMemoryLocalizationAdapter alloc] init];
     _mailAdapter = [[ALNInMemoryMailAdapter alloc] init];
+    _webhookAdapter = [[ALNInMemoryWebhookAdapter alloc] init];
     _attachmentAdapter = [[ALNInMemoryAttachmentAdapter alloc] init];
     NSDictionary *services = [_config[@"services"] isKindOfClass:[NSDictionary class]] ? _config[@"services"] : @{};
     NSDictionary *i18nConfig =
@@ -846,6 +848,13 @@ static BOOL ALNInvokeRouteAction(id controller,
     return;
   }
   _mailAdapter = adapter;
+}
+
+- (void)setWebhookAdapter:(id<ALNWebhookAdapter>)adapter {
+  if (adapter == nil) {
+    return;
+  }
+  _webhookAdapter = adapter;
 }
 
 - (void)setAttachmentAdapter:(id<ALNAttachmentAdapter>)adapter {
@@ -3029,9 +3038,10 @@ static BOOL ALNValidateResponseContractIfNeeded(ALNApplication *application,
     NSString *contentType = [[response headerForName:@"Content-Type"] lowercaseString] ?: @"";
     BOOL jsonLike = [contentType containsString:@"application/json"] ||
                     [contentType containsString:@"text/json"];
-    if (jsonLike && [response bodyLength] > 0) {
+    NSData *bodyData = ([response bodyLength] > 0) ? [response bodyDataForTransmission] : nil;
+    if (jsonLike && [bodyData length] > 0) {
       NSError *jsonError = nil;
-      payload = [ALNJSONSerialization JSONObjectWithData:[response bodyDataForTransmission]
+      payload = [ALNJSONSerialization JSONObjectWithData:bodyData
                                                  options:0
                                                    error:&jsonError];
       if (jsonError != nil) {
@@ -3046,6 +3056,18 @@ static BOOL ALNValidateResponseContractIfNeeded(ALNApplication *application,
                                       @"Failed parsing response payload for contract validation",
                                       details);
         return NO;
+      }
+    } else if ([bodyData length] > 0) {
+      BOOL textual = [contentType hasPrefix:@"text/"] ||
+                     [contentType containsString:@"xml"] ||
+                     [contentType containsString:@"csv"] ||
+                     [contentType containsString:@"yaml"] ||
+                     [contentType containsString:@"javascript"] ||
+                     [contentType containsString:@"x-www-form-urlencoded"];
+      if (textual) {
+        payload = [[NSString alloc] initWithData:bodyData encoding:NSUTF8StringEncoding];
+      } else {
+        payload = bodyData;
       }
     }
   }

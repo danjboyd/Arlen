@@ -7,6 +7,7 @@
 #import "ALNController.h"
 #import "ALNPg.h"
 #import "ALNRequest.h"
+#import "ALNResponse.h"
 
 NSString *const ALNAdminUIModuleErrorDomain = @"Arlen.Modules.AdminUI.Error";
 
@@ -19,6 +20,14 @@ static NSString *AUTrimmedString(id value) {
 
 static NSString *AULowerTrimmedString(id value) {
   return [[AUTrimmedString(value) lowercaseString] copy];
+}
+
+static NSDictionary *AUNormalizeDictionary(id value) {
+  return [value isKindOfClass:[NSDictionary class]] ? value : @{};
+}
+
+static NSArray *AUNormalizeArray(id value) {
+  return [value isKindOfClass:[NSArray class]] ? value : @[];
 }
 
 static BOOL AUBoolValue(id value, BOOL fallbackValue) {
@@ -180,8 +189,115 @@ static NSDictionary *AUUserDictionaryFromRow(NSDictionary *row) {
   };
 }
 
+static NSString *AUStringifyValue(id value) {
+  if ([value isKindOfClass:[NSString class]]) {
+    return value;
+  }
+  if ([value respondsToSelector:@selector(stringValue)]) {
+    return [value stringValue];
+  }
+  if ([value isKindOfClass:[NSArray class]]) {
+    NSMutableArray *parts = [NSMutableArray array];
+    for (id entry in (NSArray *)value) {
+      NSString *piece = AUStringifyValue(entry);
+      if ([piece length] > 0) {
+        [parts addObject:piece];
+      }
+    }
+    return [parts componentsJoinedByString:@", "];
+  }
+  if ([value isKindOfClass:[NSDictionary class]]) {
+    NSString *label = AUTrimmedString(value[@"label"]);
+    if ([label length] > 0) {
+      return label;
+    }
+    return AUTrimmedString(value[@"value"]);
+  }
+  return @"";
+}
+
+static NSArray<NSDictionary *> *AUNormalizedChoiceArray(id rawChoices) {
+  NSMutableArray *normalized = [NSMutableArray array];
+  NSMutableSet *seenValues = [NSMutableSet set];
+  for (id entry in AUNormalizeArray(rawChoices)) {
+    NSString *value = @"";
+    NSString *label = @"";
+    if ([entry isKindOfClass:[NSDictionary class]]) {
+      value = AUTrimmedString(entry[@"value"]);
+      label = AUTrimmedString(entry[@"label"]);
+    } else {
+      value = AUTrimmedString(entry);
+    }
+    if ([value length] == 0 || [seenValues containsObject:value]) {
+      continue;
+    }
+    [seenValues addObject:value];
+    [normalized addObject:@{
+      @"value" : value,
+      @"label" : ([label length] > 0) ? label : value,
+    }];
+  }
+  return [NSArray arrayWithArray:normalized];
+}
+
+static NSArray<NSString *> *AUNormalizedStringValueArray(id rawValues) {
+  NSMutableArray<NSString *> *normalized = [NSMutableArray array];
+  for (id entry in AUNormalizeArray(rawValues)) {
+    NSString *value = AULowerTrimmedString([entry isKindOfClass:[NSDictionary class]] ? entry[@"value"] : entry);
+    if ([value length] == 0 || [normalized containsObject:value]) {
+      continue;
+    }
+    [normalized addObject:value];
+  }
+  return [NSArray arrayWithArray:normalized];
+}
+
+static NSArray<NSNumber *> *AUNormalizedPositiveIntegerArray(id rawValues) {
+  NSMutableArray<NSNumber *> *normalized = [NSMutableArray array];
+  NSMutableSet<NSNumber *> *seenValues = [NSMutableSet set];
+  for (id entry in AUNormalizeArray(rawValues)) {
+    NSUInteger value = 0U;
+    if ([entry respondsToSelector:@selector(unsignedIntegerValue)]) {
+      value = [entry unsignedIntegerValue];
+    } else {
+      NSString *stringValue = AUTrimmedString([entry isKindOfClass:[NSDictionary class]] ? entry[@"value"] : entry);
+      value = (NSUInteger)[stringValue integerValue];
+    }
+    if (value == 0U) {
+      continue;
+    }
+    NSNumber *boxedValue = @(value);
+    if ([seenValues containsObject:boxedValue]) {
+      continue;
+    }
+    [seenValues addObject:boxedValue];
+    [normalized addObject:boxedValue];
+  }
+  return [NSArray arrayWithArray:normalized];
+}
+
+static NSString *AUResolvedFilterInputType(NSString *type) {
+  NSString *normalizedType = AULowerTrimmedString(type);
+  if ([normalizedType isEqualToString:@"search"]) {
+    return @"search";
+  }
+  if ([normalizedType isEqualToString:@"date"] || [normalizedType isEqualToString:@"email"] ||
+      [normalizedType isEqualToString:@"month"] || [normalizedType isEqualToString:@"week"] ||
+      [normalizedType isEqualToString:@"time"]) {
+    return normalizedType;
+  }
+  if ([normalizedType isEqualToString:@"datetime"] || [normalizedType isEqualToString:@"datetime-local"]) {
+    return @"datetime-local";
+  }
+  if ([normalizedType isEqualToString:@"integer"] || [normalizedType isEqualToString:@"decimal"] ||
+      [normalizedType isEqualToString:@"number"] || [normalizedType isEqualToString:@"range"]) {
+    return @"number";
+  }
+  return @"text";
+}
+
 static NSArray<NSDictionary *> *AUNormalizedFieldArray(id rawFields) {
-  NSArray *fields = [rawFields isKindOfClass:[NSArray class]] ? rawFields : @[];
+  NSArray *fields = AUNormalizeArray(rawFields);
   NSMutableArray *normalized = [NSMutableArray array];
   NSMutableSet *seenNames = [NSMutableSet set];
   for (id entry in fields) {
@@ -193,20 +309,42 @@ static NSArray<NSDictionary *> *AUNormalizedFieldArray(id rawFields) {
       continue;
     }
     [seenNames addObject:name];
+    NSString *kind = ([AULowerTrimmedString(entry[@"kind"]) length] > 0) ? AULowerTrimmedString(entry[@"kind"]) : @"string";
+    NSString *inputType = AULowerTrimmedString(entry[@"inputType"]);
+    if ([inputType length] == 0) {
+      inputType = ([kind isEqualToString:@"boolean"])
+                      ? @"checkbox"
+                      : (([kind isEqualToString:@"integer"] || [kind isEqualToString:@"number"]) ? @"number"
+                                                                                                : (([kind isEqualToString:@"date"] || [kind isEqualToString:@"datetime"])
+                                                                                                       ? kind
+                                                                                                       : (([kind isEqualToString:@"email"]) ? @"email" : @"text")));
+    }
+    NSDictionary *autocomplete = AUNormalizeDictionary(entry[@"autocomplete"]);
     [normalized addObject:@{
       @"name" : name,
       @"label" : ([AUTrimmedString(entry[@"label"]) length] > 0) ? AUTrimmedString(entry[@"label"]) : AUTitleCaseIdentifier(name),
-      @"kind" : ([AULowerTrimmedString(entry[@"kind"]) length] > 0) ? AULowerTrimmedString(entry[@"kind"]) : @"string",
+      @"kind" : kind,
+      @"inputType" : inputType,
       @"list" : @(AUBoolValue(entry[@"list"], YES)),
       @"detail" : @(AUBoolValue(entry[@"detail"], YES)),
       @"editable" : @(AUBoolValue(entry[@"editable"], NO)),
+      @"required" : @(AUBoolValue(entry[@"required"], NO)),
+      @"multiline" : @(AUBoolValue(entry[@"multiline"], NO)),
+      @"placeholder" : AUTrimmedString(entry[@"placeholder"]),
+      @"choices" : AUNormalizedChoiceArray(entry[@"choices"]),
+      @"autocomplete" : @{
+        @"enabled" : @(AUBoolValue(autocomplete[@"enabled"], [autocomplete count] > 0)),
+        @"minQueryLength" : @([autocomplete[@"minQueryLength"] respondsToSelector:@selector(unsignedIntegerValue)]
+                                  ? [autocomplete[@"minQueryLength"] unsignedIntegerValue]
+                                  : 1U),
+      },
     }];
   }
   return [NSArray arrayWithArray:normalized];
 }
 
 static NSArray<NSDictionary *> *AUNormalizedFilterArray(id rawFilters) {
-  NSArray *filters = [rawFilters isKindOfClass:[NSArray class]] ? rawFilters : @[];
+  NSArray *filters = AUNormalizeArray(rawFilters);
   NSMutableArray *normalized = [NSMutableArray array];
   NSMutableSet *seenNames = [NSMutableSet set];
   for (id entry in filters) {
@@ -222,14 +360,21 @@ static NSArray<NSDictionary *> *AUNormalizedFilterArray(id rawFilters) {
       @"name" : name,
       @"label" : ([AUTrimmedString(entry[@"label"]) length] > 0) ? AUTrimmedString(entry[@"label"]) : AUTitleCaseIdentifier(name),
       @"type" : ([AULowerTrimmedString(entry[@"type"]) length] > 0) ? AULowerTrimmedString(entry[@"type"]) : @"search",
+      @"inputType" : AUResolvedFilterInputType(entry[@"type"]),
       @"placeholder" : AUTrimmedString(entry[@"placeholder"]),
+      @"operators" : AUNormalizedStringValueArray(entry[@"operators"]),
+      @"field" : ([AULowerTrimmedString(entry[@"field"]) length] > 0) ? AULowerTrimmedString(entry[@"field"]) : name,
+      @"choices" : AUNormalizedChoiceArray(entry[@"choices"]),
+      @"min" : AUTrimmedString(entry[@"min"]),
+      @"max" : AUTrimmedString(entry[@"max"]),
+      @"step" : AUTrimmedString(entry[@"step"]),
     }];
   }
   return [NSArray arrayWithArray:normalized];
 }
 
 static NSArray<NSDictionary *> *AUNormalizedSortArray(id rawSorts) {
-  NSArray *sorts = [rawSorts isKindOfClass:[NSArray class]] ? rawSorts : @[];
+  NSArray *sorts = AUNormalizeArray(rawSorts);
   NSMutableArray *normalized = [NSMutableArray array];
   NSMutableSet *seenNames = [NSMutableSet set];
   for (id entry in sorts) {
@@ -245,13 +390,15 @@ static NSArray<NSDictionary *> *AUNormalizedSortArray(id rawSorts) {
       @"name" : name,
       @"label" : ([AUTrimmedString(entry[@"label"]) length] > 0) ? AUTrimmedString(entry[@"label"]) : AUTitleCaseIdentifier(name),
       @"default" : @(AUBoolValue(entry[@"default"], NO)),
+      @"direction" : ([AULowerTrimmedString(entry[@"direction"]) length] > 0) ? AULowerTrimmedString(entry[@"direction"]) : @"asc",
+      @"optional" : @(AUBoolValue(entry[@"optional"], YES)),
     }];
   }
   return [NSArray arrayWithArray:normalized];
 }
 
 static NSArray<NSDictionary *> *AUNormalizedActionArray(id rawActions) {
-  NSArray *actions = [rawActions isKindOfClass:[NSArray class]] ? rawActions : @[];
+  NSArray *actions = AUNormalizeArray(rawActions);
   NSMutableArray *normalized = [NSMutableArray array];
   NSMutableSet *seenNames = [NSMutableSet set];
   for (id entry in actions) {
@@ -270,6 +417,57 @@ static NSArray<NSDictionary *> *AUNormalizedActionArray(id rawActions) {
       @"method" : ([AULowerTrimmedString(entry[@"method"]) length] > 0) ? [AULowerTrimmedString(entry[@"method"]) uppercaseString] : @"POST",
       @"requires_aal2" : @(AUBoolValue(entry[@"requires_aal2"], YES)),
     }];
+  }
+  return [NSArray arrayWithArray:normalized];
+}
+
+static NSArray<NSDictionary *> *AUNormalizedBulkActionArray(id rawActions) {
+  NSArray *actions = AUNormalizeArray(rawActions);
+  NSMutableArray *normalized = [NSMutableArray array];
+  NSMutableSet *seenNames = [NSMutableSet set];
+  for (id entry in actions) {
+    if (![entry isKindOfClass:[NSDictionary class]]) {
+      continue;
+    }
+    NSString *name = AULowerTrimmedString(entry[@"name"]);
+    if ([name length] == 0 || [seenNames containsObject:name]) {
+      continue;
+    }
+    [seenNames addObject:name];
+    [normalized addObject:@{
+      @"name" : name,
+      @"label" : ([AUTrimmedString(entry[@"label"]) length] > 0) ? AUTrimmedString(entry[@"label"]) : AUTitleCaseIdentifier(name),
+      @"method" : ([AULowerTrimmedString(entry[@"method"]) length] > 0) ? [AULowerTrimmedString(entry[@"method"]) uppercaseString] : @"POST",
+      @"requires_aal2" : @(AUBoolValue(entry[@"requires_aal2"], YES)),
+    }];
+  }
+  return [NSArray arrayWithArray:normalized];
+}
+
+static NSArray<NSDictionary *> *AUNormalizedExportArray(id rawExports) {
+  NSArray *exports = AUNormalizeArray(rawExports);
+  NSMutableArray *normalized = [NSMutableArray array];
+  NSMutableSet *seenFormats = [NSMutableSet set];
+  for (id entry in exports) {
+    NSString *format = @"";
+    NSString *label = @"";
+    if ([entry isKindOfClass:[NSDictionary class]]) {
+      format = AULowerTrimmedString(entry[@"format"]);
+      label = AUTrimmedString(entry[@"label"]);
+    } else {
+      format = AULowerTrimmedString(entry);
+    }
+    if ((![format isEqualToString:@"json"] && ![format isEqualToString:@"csv"]) || [seenFormats containsObject:format]) {
+      continue;
+    }
+    [seenFormats addObject:format];
+    [normalized addObject:@{
+      @"format" : format,
+      @"label" : ([label length] > 0) ? label : [format uppercaseString],
+    }];
+  }
+  if ([normalized count] == 0) {
+    return @[ @{ @"format" : @"json", @"label" : @"JSON" }, @{ @"format" : @"csv", @"label" : @"CSV" } ];
   }
   return [NSArray arrayWithArray:normalized];
 }
@@ -301,6 +499,39 @@ static NSDictionary *AUAdminMetadataActionSchema(void) {
   };
 }
 
+static NSArray<NSString *> *AUNormalizedIdentifierArray(id values) {
+  NSMutableArray<NSString *> *identifiers = [NSMutableArray array];
+  for (id entry in AUNormalizeArray(values)) {
+    NSString *identifier = AUTrimmedString(entry);
+    if ([identifier length] == 0 || [identifiers containsObject:identifier]) {
+      continue;
+    }
+    [identifiers addObject:identifier];
+  }
+  return [NSArray arrayWithArray:identifiers];
+}
+
+static void AUNotifySearchIncrementalSync(NSString *resourceIdentifier, NSDictionary *record, NSString *operation) {
+  Class runtimeClass = NSClassFromString(@"ALNSearchModuleRuntime");
+  if (runtimeClass == Nil || ![runtimeClass respondsToSelector:@selector(sharedRuntime)]) {
+    return;
+  }
+  id (*sharedRuntimeIMP)(id, SEL) = (id (*)(id, SEL))[runtimeClass methodForSelector:@selector(sharedRuntime)];
+  id runtime = sharedRuntimeIMP(runtimeClass, @selector(sharedRuntime));
+  if (![runtime respondsToSelector:@selector(application)] || [runtime valueForKey:@"application"] == nil) {
+    return;
+  }
+  SEL selector = @selector(queueIncrementalSyncForResourceIdentifier:record:operation:error:);
+  if (![runtime respondsToSelector:selector]) {
+    return;
+  }
+  NSDictionary *safeRecord = [record isKindOfClass:[NSDictionary class]] ? record : @{};
+  NSError *error = nil;
+  NSDictionary *(*syncIMP)(id, SEL, NSString *, NSDictionary *, NSString *, NSError **) =
+      (NSDictionary *(*)(id, SEL, NSString *, NSDictionary *, NSString *, NSError **))[runtime methodForSelector:selector];
+  (void)syncIMP(runtime, selector, AUTrimmedString(resourceIdentifier), safeRecord, AULowerTrimmedString(operation), &error);
+}
+
 @interface ALNAdminUIResourceDescriptor : NSObject
 
 @property(nonatomic, strong) id<ALNAdminUIResource> resource;
@@ -330,6 +561,7 @@ static NSDictionary *AUAdminMetadataActionSchema(void) {
 @property(nonatomic, strong, readwrite) ALNApplication *mountedApplication;
 @property(nonatomic, copy) NSArray<ALNAdminUIResourceDescriptor *> *resourceDescriptors;
 @property(nonatomic, copy) NSDictionary<NSString *, ALNAdminUIResourceDescriptor *> *resourceDescriptorMap;
+@property(nonatomic, copy) NSDictionary<NSString *, ALNAdminUIResourceDescriptor *> *legacyResourceDescriptorMap;
 
 - (nullable ALNAdminUIResourceDescriptor *)descriptorForIdentifier:(NSString *)identifier;
 - (nullable NSDictionary *)normalizedMetadataForResource:(id<ALNAdminUIResource>)resource
@@ -364,10 +596,29 @@ static NSDictionary *AUAdminMetadataActionSchema(void) {
     @"primaryField" : @"email",
     @"identifierField" : @"subject",
     @"legacyPath" : @"users",
+    @"pageSize" : @25,
+    @"pageSizes" : @[ @25, @50, @100 ],
     @"fields" : @[
       @{ @"name" : @"email", @"label" : @"Email", @"kind" : @"email", @"list" : @YES, @"detail" : @YES },
-      @{ @"name" : @"display_name", @"label" : @"Display", @"kind" : @"string", @"list" : @YES, @"detail" : @YES, @"editable" : @YES },
-      @{ @"name" : @"roles", @"label" : @"Roles", @"kind" : @"array", @"list" : @YES, @"detail" : @YES },
+      @{
+        @"name" : @"display_name",
+        @"label" : @"Display",
+        @"kind" : @"string",
+        @"list" : @YES,
+        @"detail" : @YES,
+        @"editable" : @YES,
+        @"required" : @YES,
+        @"placeholder" : @"Display name",
+      },
+      @{
+        @"name" : @"roles",
+        @"label" : @"Roles",
+        @"kind" : @"array",
+        @"list" : @YES,
+        @"detail" : @YES,
+        @"choices" : @[ @"user", @"admin" ],
+        @"autocomplete" : @{ @"enabled" : @YES, @"minQueryLength" : @1 },
+      },
       @{ @"name" : @"email_verified", @"label" : @"Verified", @"kind" : @"boolean", @"list" : @YES, @"detail" : @YES },
       @{ @"name" : @"mfa_enabled", @"label" : @"MFA", @"kind" : @"boolean", @"list" : @YES, @"detail" : @YES },
       @{ @"name" : @"provider_identity_count", @"label" : @"Providers", @"kind" : @"integer", @"detail" : @YES, @"list" : @NO },
@@ -382,8 +633,42 @@ static NSDictionary *AUAdminMetadataActionSchema(void) {
         @"type" : @"search",
         @"placeholder" : @"email, display name, subject",
       },
+      @{
+        @"name" : @"roles",
+        @"label" : @"Role",
+        @"type" : @"select",
+        @"choices" : @[ @"user", @"admin" ],
+      },
+      @{
+        @"name" : @"email_verified",
+        @"label" : @"Verified",
+        @"type" : @"select",
+        @"choices" : @[
+          @{ @"value" : @"true", @"label" : @"Verified" },
+          @{ @"value" : @"false", @"label" : @"Unverified" },
+        ],
+      },
+      @{
+        @"name" : @"mfa_enabled",
+        @"label" : @"MFA",
+        @"type" : @"select",
+        @"choices" : @[
+          @{ @"value" : @"true", @"label" : @"Enabled" },
+          @{ @"value" : @"false", @"label" : @"Disabled" },
+        ],
+      },
     ],
-    @"sorts" : @[ @{ @"name" : @"created_at_desc", @"label" : @"Newest first", @"default" : @YES } ],
+    @"sorts" : @[
+      @{ @"name" : @"created_at", @"label" : @"Created", @"default" : @YES, @"direction" : @"desc" },
+      @{ @"name" : @"updated_at", @"label" : @"Updated", @"direction" : @"desc" },
+      @{ @"name" : @"email", @"label" : @"Email" },
+      @{ @"name" : @"display_name", @"label" : @"Display name" },
+    ],
+    @"bulkActions" : @[
+      @{ @"name" : @"grant_admin", @"label" : @"Grant admin", @"method" : @"POST" },
+      @{ @"name" : @"revoke_admin", @"label" : @"Revoke admin", @"method" : @"POST" },
+    ],
+    @"exports" : @[ @"json", @"csv" ],
     @"actions" : @[
       @{ @"name" : @"grant_admin", @"label" : @"Grant admin", @"scope" : @"row", @"method" : @"POST" },
       @{ @"name" : @"revoke_admin", @"label" : @"Revoke admin", @"scope" : @"row", @"method" : @"POST" },
@@ -408,30 +693,90 @@ static NSDictionary *AUAdminMetadataActionSchema(void) {
                                                   limit:(NSUInteger)limit
                                                  offset:(NSUInteger)offset
                                                   error:(NSError **)error {
+  return [self adminUIListRecordsWithParameters:@{ @"q" : query ?: @"" } limit:limit offset:offset error:error];
+}
+
+- (NSArray<NSDictionary *> *)adminUIListRecordsWithParameters:(NSDictionary *)parameters
+                                                        limit:(NSUInteger)limit
+                                                       offset:(NSUInteger)offset
+                                                        error:(NSError **)error {
   if (self.runtime.database == nil) {
     if (error != NULL) {
       *error = AUError(ALNAdminUIModuleErrorDatabaseUnavailable, @"admin-ui database is not configured", nil);
     }
     return nil;
   }
-  NSString *search = AULowerTrimmedString(query);
+  NSString *search = AULowerTrimmedString(parameters[@"q"]);
   NSString *like = ([search length] > 0) ? [NSString stringWithFormat:@"%%%@%%", search] : @"";
-  NSArray *rows = [self.runtime.database
-      executeQuery:@"SELECT u.id::text AS id, u.subject, u.email, "
-                   "COALESCE(u.display_name, '') AS display_name, "
-                   "COALESCE(u.roles_json, '[]') AS roles_json, "
-                   "CASE WHEN u.email_verified_at IS NULL THEN 'f' ELSE 't' END AS email_verified, "
-                   "CASE WHEN EXISTS (SELECT 1 FROM auth_mfa_enrollments m WHERE m.user_id = u.id AND m.enabled = TRUE) "
-                   "THEN 't' ELSE 'f' END AS mfa_enabled, "
-                   "(SELECT COUNT(*)::text FROM auth_provider_identities p WHERE p.user_id = u.id) AS provider_identity_count, "
-                   "COALESCE(u.created_at::text, '') AS created_at, "
-                   "COALESCE(u.updated_at::text, '') AS updated_at "
-                   "FROM auth_users u "
-                   "WHERE ($1 = '' OR lower(u.email) LIKE $2 OR lower(COALESCE(u.display_name, '')) LIKE $2 "
-                   "       OR lower(u.subject) LIKE $2) "
-                   "ORDER BY u.created_at DESC, u.id DESC LIMIT $3 OFFSET $4"
-        parameters:@[ search ?: @"", like ?: @"", @(limit), @(offset) ]
-             error:error];
+  NSString *role = AULowerTrimmedString(parameters[@"roles"]);
+  NSString *verified = AULowerTrimmedString(parameters[@"email_verified"]);
+  NSString *mfaEnabled = AULowerTrimmedString(parameters[@"mfa_enabled"]);
+  NSString *sort = AULowerTrimmedString(parameters[@"sort"]);
+  NSString *orderBy = @"u.created_at DESC, u.id DESC";
+  if ([sort isEqualToString:@"email"]) {
+    orderBy = @"lower(u.email) ASC, u.id DESC";
+  } else if ([sort isEqualToString:@"-email"]) {
+    orderBy = @"lower(u.email) DESC, u.id DESC";
+  } else if ([sort isEqualToString:@"display_name"]) {
+    orderBy = @"lower(COALESCE(u.display_name, '')) ASC, u.id DESC";
+  } else if ([sort isEqualToString:@"-display_name"]) {
+    orderBy = @"lower(COALESCE(u.display_name, '')) DESC, u.id DESC";
+  } else if ([sort isEqualToString:@"updated_at"]) {
+    orderBy = @"u.updated_at ASC, u.id DESC";
+  } else if ([sort isEqualToString:@"-updated_at"]) {
+    orderBy = @"u.updated_at DESC, u.id DESC";
+  } else if ([sort isEqualToString:@"created_at"]) {
+    orderBy = @"u.created_at ASC, u.id DESC";
+  }
+
+  NSMutableString *sql = [NSMutableString stringWithString:
+      @"SELECT u.id::text AS id, u.subject, u.email, "
+       "COALESCE(u.display_name, '') AS display_name, "
+       "COALESCE(u.roles_json, '[]') AS roles_json, "
+       "CASE WHEN u.email_verified_at IS NULL THEN 'f' ELSE 't' END AS email_verified, "
+       "CASE WHEN EXISTS (SELECT 1 FROM auth_mfa_enrollments m WHERE m.user_id = u.id AND m.enabled = TRUE) "
+       "THEN 't' ELSE 'f' END AS mfa_enabled, "
+       "(SELECT COUNT(*)::text FROM auth_provider_identities p WHERE p.user_id = u.id) AS provider_identity_count, "
+       "COALESCE(u.created_at::text, '') AS created_at, "
+       "COALESCE(u.updated_at::text, '') AS updated_at "
+       "FROM auth_users u WHERE 1 = 1 "];
+  NSMutableArray *sqlParameters = [NSMutableArray array];
+  NSUInteger parameterIndex = 1U;
+  if ([search length] > 0) {
+    [sql appendFormat:@"AND ($%lu = '' OR lower(u.email) LIKE $%lu OR lower(COALESCE(u.display_name, '')) LIKE $%lu OR lower(u.subject) LIKE $%lu) ",
+                      (unsigned long)parameterIndex,
+                      (unsigned long)(parameterIndex + 1U),
+                      (unsigned long)(parameterIndex + 1U),
+                      (unsigned long)(parameterIndex + 1U)];
+    [sqlParameters addObject:search ?: @""];
+    [sqlParameters addObject:like ?: @""];
+    parameterIndex += 2U;
+  }
+  if ([role length] > 0) {
+    [sql appendFormat:@"AND lower(COALESCE(u.roles_json, '[]')) LIKE $%lu ", (unsigned long)parameterIndex];
+    [sqlParameters addObject:[NSString stringWithFormat:@"%%\"%@\"%%", role]];
+    parameterIndex += 1U;
+  }
+  if ([verified isEqualToString:@"true"] || [verified isEqualToString:@"false"]) {
+    [sql appendFormat:@"AND (CASE WHEN u.email_verified_at IS NULL THEN 'false' ELSE 'true' END) = $%lu ",
+                      (unsigned long)parameterIndex];
+    [sqlParameters addObject:verified];
+    parameterIndex += 1U;
+  }
+  if ([mfaEnabled isEqualToString:@"true"] || [mfaEnabled isEqualToString:@"false"]) {
+    [sql appendFormat:@"AND (CASE WHEN EXISTS (SELECT 1 FROM auth_mfa_enrollments m WHERE m.user_id = u.id AND m.enabled = TRUE) THEN 'true' ELSE 'false' END) = $%lu ",
+                      (unsigned long)parameterIndex];
+    [sqlParameters addObject:mfaEnabled];
+    parameterIndex += 1U;
+  }
+  [sql appendFormat:@"ORDER BY %@ LIMIT $%lu OFFSET $%lu",
+                    orderBy,
+                    (unsigned long)parameterIndex,
+                    (unsigned long)(parameterIndex + 1U)];
+  [sqlParameters addObject:@(limit)];
+  [sqlParameters addObject:@(offset)];
+
+  NSArray *rows = [self.runtime.database executeQuery:sql parameters:sqlParameters error:error];
   if (rows == nil) {
     return nil;
   }
@@ -655,6 +1000,51 @@ static NSDictionary *AUAdminMetadataActionSchema(void) {
   return (updated != nil) ? @{ @"record" : updated, @"message" : message ?: @"" } : nil;
 }
 
+- (NSDictionary *)adminUIPerformBulkActionNamed:(NSString *)actionName
+                                     identifiers:(NSArray<NSString *> *)identifiers
+                                      parameters:(NSDictionary *)parameters
+                                           error:(NSError **)error {
+  NSMutableArray *records = [NSMutableArray array];
+  for (NSString *identifier in identifiers ?: @[]) {
+    NSDictionary *result = [self adminUIPerformActionNamed:actionName identifier:identifier parameters:parameters error:error];
+    if (result == nil) {
+      return nil;
+    }
+    if ([result[@"record"] isKindOfClass:[NSDictionary class]]) {
+      [records addObject:result[@"record"]];
+    }
+  }
+  return @{
+    @"count" : @([records count]),
+    @"records" : records,
+    @"message" : [NSString stringWithFormat:@"Updated %lu users.", (unsigned long)[records count]],
+  };
+}
+
+- (NSArray<NSDictionary *> *)adminUIAutocompleteSuggestionsForFieldNamed:(NSString *)fieldName
+                                                                   query:(NSString *)query
+                                                                   limit:(NSUInteger)limit
+                                                                   error:(NSError **)error {
+  (void)error;
+  if (![AULowerTrimmedString(fieldName) isEqualToString:@"roles"]) {
+    return @[];
+  }
+  NSString *needle = AULowerTrimmedString(query);
+  NSMutableArray *matches = [NSMutableArray array];
+  for (NSDictionary *choice in @[ @{ @"value" : @"user", @"label" : @"user" }, @{ @"value" : @"admin", @"label" : @"admin" } ]) {
+    if ([needle length] > 0 &&
+        [AULowerTrimmedString(choice[@"value"]) rangeOfString:needle].location == NSNotFound &&
+        [AULowerTrimmedString(choice[@"label"]) rangeOfString:needle].location == NSNotFound) {
+      continue;
+    }
+    [matches addObject:choice];
+    if ([matches count] >= MAX((NSUInteger)1U, limit)) {
+      break;
+    }
+  }
+  return matches;
+}
+
 @end
 
 @implementation ALNAdminUIModuleRuntime
@@ -761,23 +1151,104 @@ static NSDictionary *AUAdminMetadataActionSchema(void) {
     primaryField = identifierField;
   }
   NSString *legacyPath = AUTrimmedString(rawMetadata[@"legacyPath"]);
-  NSString *htmlIndexPath = ([legacyPath length] > 0) ? [self mountedPathForChildPath:legacyPath]
-                                                      : [self mountedPathForChildPath:[NSString stringWithFormat:@"resources/%@", identifier]];
   NSString *htmlIndexGenericPath = [self mountedPathForChildPath:[NSString stringWithFormat:@"resources/%@", identifier]];
+  NSString *htmlIndexPath = htmlIndexGenericPath;
+  NSString *legacyHTMLIndexPath = @"";
+  if ([legacyPath length] > 0) {
+    legacyHTMLIndexPath = [self mountedPathForChildPath:legacyPath];
+    htmlIndexPath = legacyHTMLIndexPath;
+  }
   NSString *apiMetadataPath = [self mountedPathForChildPath:[NSString stringWithFormat:@"%@/resources/%@", self.apiPrefix, identifier]];
   NSString *apiItemsPath = [self mountedPathForChildPath:[NSString stringWithFormat:@"%@/resources/%@/items", self.apiPrefix, identifier]];
+  NSString *apiExportPath = [self mountedPathForChildPath:[NSString stringWithFormat:@"%@/resources/%@/export", self.apiPrefix, identifier]];
+  NSString *apiAutocompletePath =
+      [self mountedPathForChildPath:[NSString stringWithFormat:@"%@/resources/%@/autocomplete", self.apiPrefix, identifier]];
+  NSString *htmlExportPath = [NSString stringWithFormat:@"%@/export", htmlIndexPath];
   NSMutableDictionary *paths = [NSMutableDictionary dictionaryWithDictionary:@{
     @"html_index" : htmlIndexPath,
     @"html_index_generic" : htmlIndexGenericPath,
     @"html_detail_template" : [NSString stringWithFormat:@"%@/:identifier", htmlIndexPath],
+    @"html_bulk_action_template" : [NSString stringWithFormat:@"%@/bulk-actions/:action", htmlIndexPath],
+    @"html_export_json" : [NSString stringWithFormat:@"%@/json", htmlExportPath],
+    @"html_export_csv" : [NSString stringWithFormat:@"%@/csv", htmlExportPath],
     @"api_metadata" : apiMetadataPath,
     @"api_items" : apiItemsPath,
     @"api_item_template" : [NSString stringWithFormat:@"%@/:identifier", apiItemsPath],
     @"api_action_template" : [NSString stringWithFormat:@"%@/:identifier/actions/:action", apiItemsPath],
+    @"api_bulk_action_template" : [NSString stringWithFormat:@"%@/bulk-actions/:action", apiMetadataPath],
+    @"api_export_template" : [NSString stringWithFormat:@"%@/:format", apiExportPath],
+    @"api_export_json" : [NSString stringWithFormat:@"%@/json", apiExportPath],
+    @"api_export_csv" : [NSString stringWithFormat:@"%@/csv", apiExportPath],
+    @"api_autocomplete_template" : [NSString stringWithFormat:@"%@/:field", apiAutocompletePath],
   }];
   if ([legacyPath length] > 0) {
-    paths[@"legacy_html_index"] = htmlIndexPath;
-    paths[@"legacy_api_items"] = [self mountedPathForChildPath:[NSString stringWithFormat:@"%@/%@", self.apiPrefix, legacyPath]];
+    NSString *legacyAPIItemsPath = [self mountedPathForChildPath:[NSString stringWithFormat:@"%@/%@", self.apiPrefix, legacyPath]];
+    paths[@"legacy_html_index"] = legacyHTMLIndexPath;
+    paths[@"legacy_html_detail_template"] = [NSString stringWithFormat:@"%@/:identifier", legacyHTMLIndexPath];
+    paths[@"legacy_html_bulk_action_template"] = [NSString stringWithFormat:@"%@/bulk-actions/:action", legacyHTMLIndexPath];
+    paths[@"legacy_html_export_json"] = [NSString stringWithFormat:@"%@/export/json", legacyHTMLIndexPath];
+    paths[@"legacy_html_export_csv"] = [NSString stringWithFormat:@"%@/export/csv", legacyHTMLIndexPath];
+    paths[@"legacy_api_items"] = legacyAPIItemsPath;
+    paths[@"legacy_api_item_template"] = [NSString stringWithFormat:@"%@/:identifier", legacyAPIItemsPath];
+    paths[@"legacy_api_action_template"] = [NSString stringWithFormat:@"%@/:identifier/actions/:action", legacyAPIItemsPath];
+    paths[@"legacy_api_bulk_action_template"] = [NSString stringWithFormat:@"%@/bulk-actions/:action", legacyAPIItemsPath];
+    paths[@"legacy_api_export_template"] = [NSString stringWithFormat:@"%@/export/:format", legacyAPIItemsPath];
+    paths[@"legacy_api_export_json"] = [NSString stringWithFormat:@"%@/export/json", legacyAPIItemsPath];
+    paths[@"legacy_api_export_csv"] = [NSString stringWithFormat:@"%@/export/csv", legacyAPIItemsPath];
+    paths[@"legacy_api_autocomplete_template"] = [NSString stringWithFormat:@"%@/autocomplete/:field", legacyAPIItemsPath];
+  }
+  NSArray *normalizedActions = AUNormalizedActionArray(rawMetadata[@"actions"]);
+  NSMutableArray *rowActions = [NSMutableArray array];
+  NSMutableArray *bulkActions = [NSMutableArray arrayWithArray:AUNormalizedBulkActionArray(rawMetadata[@"bulkActions"])];
+  for (NSDictionary *action in normalizedActions) {
+    if ([AULowerTrimmedString(action[@"scope"]) isEqualToString:@"bulk"]) {
+      [bulkActions addObject:@{
+        @"name" : action[@"name"] ?: @"",
+        @"label" : action[@"label"] ?: @"",
+        @"method" : action[@"method"] ?: @"POST",
+        @"requires_aal2" : action[@"requires_aal2"] ?: @YES,
+      }];
+    } else {
+      [rowActions addObject:action];
+    }
+  }
+  NSMutableArray *fields = ([AUNormalizedFieldArray(rawMetadata[@"fields"]) mutableCopy] ?: [NSMutableArray array]);
+  for (NSUInteger index = 0; index < [fields count]; index++) {
+    NSMutableDictionary *field = ([fields[index] mutableCopy] ?: [NSMutableDictionary dictionary]);
+    NSMutableDictionary *autocomplete =
+        [field[@"autocomplete"] isKindOfClass:[NSDictionary class]] ? [field[@"autocomplete"] mutableCopy] : [NSMutableDictionary dictionary];
+    if ([autocomplete[@"enabled"] boolValue]) {
+      autocomplete[@"path"] = [apiAutocompletePath stringByAppendingPathComponent:(field[@"name"] ?: @"field")];
+    }
+    field[@"autocomplete"] = autocomplete;
+    fields[index] = field;
+  }
+  NSUInteger pageSize = [rawMetadata[@"pageSize"] respondsToSelector:@selector(unsignedIntegerValue)] ? [rawMetadata[@"pageSize"] unsignedIntegerValue] : 50U;
+  if (pageSize == 0U) {
+    pageSize = 50U;
+  }
+  NSUInteger maxPageSize = [rawMetadata[@"maxPageSize"] respondsToSelector:@selector(unsignedIntegerValue)]
+                               ? [rawMetadata[@"maxPageSize"] unsignedIntegerValue]
+                               : MAX(pageSize, 200U);
+  if (maxPageSize < pageSize) {
+    maxPageSize = pageSize;
+  }
+  NSMutableArray *numericPageSizes = [AUNormalizedPositiveIntegerArray(rawMetadata[@"pageSizes"]) mutableCopy];
+  if (numericPageSizes == nil) {
+    numericPageSizes = [NSMutableArray array];
+  }
+  if ([numericPageSizes count] == 0) {
+    numericPageSizes = [@[ @(pageSize), @(MIN(maxPageSize, MAX((NSUInteger)100U, pageSize * 2U))) ] mutableCopy];
+  }
+  NSString *defaultSort = @"";
+  for (NSDictionary *sort in AUNormalizedSortArray(rawMetadata[@"sorts"])) {
+    if ([sort[@"default"] boolValue]) {
+      defaultSort = [sort[@"name"] ?: @"" copy];
+      if ([AULowerTrimmedString(sort[@"direction"]) isEqualToString:@"desc"]) {
+        defaultSort = [@"-" stringByAppendingString:defaultSort];
+      }
+      break;
+    }
   }
   return @{
     @"identifier" : identifier,
@@ -786,11 +1257,19 @@ static NSDictionary *AUAdminMetadataActionSchema(void) {
     @"summary" : summary ?: @"",
     @"identifierField" : identifierField,
     @"primaryField" : primaryField,
-    @"fields" : AUNormalizedFieldArray(rawMetadata[@"fields"]),
+    @"fields" : fields,
     @"filters" : AUNormalizedFilterArray(rawMetadata[@"filters"]),
     @"sorts" : AUNormalizedSortArray(rawMetadata[@"sorts"]),
-    @"actions" : AUNormalizedActionArray(rawMetadata[@"actions"]),
-    @"pageSize" : @([rawMetadata[@"pageSize"] respondsToSelector:@selector(integerValue)] ? [rawMetadata[@"pageSize"] integerValue] : 50),
+    @"actions" : rowActions,
+    @"bulkActions" : bulkActions,
+    @"exports" : AUNormalizedExportArray(rawMetadata[@"exports"]),
+    @"defaultSort" : defaultSort ?: @"",
+    @"pageSize" : @(pageSize),
+    @"pagination" : @{
+      @"defaultLimit" : @(pageSize),
+      @"maxLimit" : @(maxPageSize),
+      @"pageSizes" : numericPageSizes,
+    },
     @"legacyPath" : legacyPath ?: @"",
     @"paths" : paths,
   };
@@ -798,7 +1277,9 @@ static NSDictionary *AUAdminMetadataActionSchema(void) {
 
 - (BOOL)loadResourceRegistryWithError:(NSError **)error {
   NSMutableArray<id<ALNAdminUIResource>> *resources = [NSMutableArray array];
-  [resources addObject:[[ALNAdminUIUsersResource alloc] initWithRuntime:self]];
+  if (self.database != nil) {
+    [resources addObject:[[ALNAdminUIUsersResource alloc] initWithRuntime:self]];
+  }
 
   for (NSString *className in [self configuredResourceProviderClassNames]) {
     Class klass = NSClassFromString(className);
@@ -832,6 +1313,7 @@ static NSDictionary *AUAdminMetadataActionSchema(void) {
 
   NSMutableArray *descriptors = [NSMutableArray array];
   NSMutableDictionary *map = [NSMutableDictionary dictionary];
+  NSMutableDictionary *legacyMap = [NSMutableDictionary dictionary];
   for (id<ALNAdminUIResource> resource in resources) {
     NSDictionary *metadata = [self normalizedMetadataForResource:resource error:error];
     if (metadata == nil) {
@@ -851,9 +1333,22 @@ static NSDictionary *AUAdminMetadataActionSchema(void) {
     descriptor.metadata = metadata;
     [descriptors addObject:descriptor];
     map[identifier] = descriptor;
+    NSString *legacyPath = AULowerTrimmedString(metadata[@"legacyPath"]);
+    if ([legacyPath length] > 0) {
+      if (legacyMap[legacyPath] != nil || ([map objectForKey:legacyPath] != nil && ![legacyPath isEqualToString:identifier])) {
+        if (error != NULL) {
+          *error = AUError(ALNAdminUIModuleErrorInvalidConfiguration,
+                           [NSString stringWithFormat:@"duplicate admin legacy path %@", legacyPath ?: @""],
+                           @{ @"legacyPath" : legacyPath ?: @"", @"identifier" : identifier ?: @"" });
+        }
+        return NO;
+      }
+      legacyMap[legacyPath] = descriptor;
+    }
   }
   self.resourceDescriptors = [NSArray arrayWithArray:descriptors];
   self.resourceDescriptorMap = [NSDictionary dictionaryWithDictionary:map];
+  self.legacyResourceDescriptorMap = [NSDictionary dictionaryWithDictionary:legacyMap];
   return YES;
 }
 
@@ -866,8 +1361,10 @@ static NSDictionary *AUAdminMetadataActionSchema(void) {
   self.moduleConfig = moduleConfig;
 
   NSDictionary *paths = [moduleConfig[@"paths"] isKindOfClass:[NSDictionary class]] ? moduleConfig[@"paths"] : @{};
-  self.mountPrefix = AUPathJoin(AUTrimmedString(paths[@"prefix"]), @"");
-  self.apiPrefix = AUPathJoin(AUTrimmedString(paths[@"apiPrefix"]), @"");
+  NSString *mountPrefix = AUTrimmedString(paths[@"prefix"]);
+  NSString *apiPrefix = AUTrimmedString(paths[@"apiPrefix"]);
+  self.mountPrefix = AUPathJoin(([mountPrefix length] > 0) ? mountPrefix : @"/admin", @"");
+  self.apiPrefix = AUPathJoin(([apiPrefix length] > 0) ? apiPrefix : @"/api", @"");
   NSString *dashboardTitle = AUTrimmedString(moduleConfig[@"title"]);
   self.dashboardTitle = ([dashboardTitle length] > 0) ? dashboardTitle : @"Arlen Admin";
 
@@ -875,23 +1372,18 @@ static NSDictionary *AUAdminMetadataActionSchema(void) {
                                ? application.config[@"database"]
                                : @{};
   NSString *connectionString = AUTrimmedString(database[@"connectionString"]);
-  if ([connectionString length] == 0) {
-    if (error != NULL) {
-      *error = AUError(ALNAdminUIModuleErrorInvalidConfiguration,
-                       @"admin-ui module requires database.connectionString",
-                       @{ @"key_path" : @"database.connectionString" });
+  self.database = nil;
+  if ([connectionString length] > 0) {
+    NSError *dbError = nil;
+    self.database = [[ALNPg alloc] initWithConnectionString:connectionString maxConnections:4 error:&dbError];
+    if (self.database == nil) {
+      if (error != NULL) {
+        *error = dbError ?: AUError(ALNAdminUIModuleErrorDatabaseUnavailable,
+                                    @"failed to initialize admin-ui database adapter",
+                                    nil);
+      }
+      return NO;
     }
-    return NO;
-  }
-  NSError *dbError = nil;
-  self.database = [[ALNPg alloc] initWithConnectionString:connectionString maxConnections:4 error:&dbError];
-  if (self.database == nil) {
-    if (error != NULL) {
-      *error = dbError ?: AUError(ALNAdminUIModuleErrorDatabaseUnavailable,
-                                  @"failed to initialize admin-ui database adapter",
-                                  nil);
-    }
-    return NO;
   }
 
   NSMutableDictionary *childConfig = [NSMutableDictionary dictionary];
@@ -913,6 +1405,26 @@ static NSDictionary *AUAdminMetadataActionSchema(void) {
   self.mountedApplication = [[ALNApplication alloc] initWithConfig:childConfig];
   if (self.mountedApplication == nil) {
     return NO;
+  }
+  NSMutableSet<NSString *> *childMiddlewareClasses = [NSMutableSet set];
+  for (id middleware in [self.mountedApplication middlewares] ?: @[]) {
+    NSString *className = NSStringFromClass([(NSObject *)middleware class]);
+    if ([className length] > 0) {
+      [childMiddlewareClasses addObject:className];
+    }
+  }
+  for (id middleware in [application middlewares] ?: @[]) {
+    if (middleware == nil) {
+      continue;
+    }
+    NSString *className = NSStringFromClass([(NSObject *)middleware class]);
+    if ([className length] > 0 && [childMiddlewareClasses containsObject:className]) {
+      continue;
+    }
+    [self.mountedApplication addMiddleware:middleware];
+    if ([className length] > 0) {
+      [childMiddlewareClasses addObject:className];
+    }
   }
   return [self loadResourceRegistryWithError:error];
 }
@@ -945,7 +1457,12 @@ static NSDictionary *AUAdminMetadataActionSchema(void) {
 }
 
 - (ALNAdminUIResourceDescriptor *)descriptorForIdentifier:(NSString *)identifier {
-  return self.resourceDescriptorMap[AULowerTrimmedString(identifier)];
+  NSString *normalized = AULowerTrimmedString(identifier);
+  ALNAdminUIResourceDescriptor *descriptor = self.resourceDescriptorMap[normalized];
+  if (descriptor != nil) {
+    return descriptor;
+  }
+  return self.legacyResourceDescriptorMap[normalized];
 }
 
 - (NSDictionary *)resourceMetadataForIdentifier:(NSString *)identifier {
@@ -990,6 +1507,18 @@ static NSDictionary *AUAdminMetadataActionSchema(void) {
                                                         limit:(NSUInteger)limit
                                                        offset:(NSUInteger)offset
                                                         error:(NSError **)error {
+  return [self listRecordsForResourceIdentifier:identifier
+                                     parameters:@{ @"q" : query ?: @"" }
+                                          limit:limit
+                                         offset:offset
+                                          error:error];
+}
+
+- (NSArray<NSDictionary *> *)listRecordsForResourceIdentifier:(NSString *)identifier
+                                                    parameters:(NSDictionary *)parameters
+                                                         limit:(NSUInteger)limit
+                                                        offset:(NSUInteger)offset
+                                                         error:(NSError **)error {
   ALNAdminUIResourceDescriptor *descriptor = [self descriptorForIdentifier:identifier];
   if (descriptor == nil) {
     if (error != NULL) {
@@ -999,6 +1528,13 @@ static NSDictionary *AUAdminMetadataActionSchema(void) {
     }
     return nil;
   }
+  if ([descriptor.resource respondsToSelector:@selector(adminUIListRecordsWithParameters:limit:offset:error:)]) {
+    return [descriptor.resource adminUIListRecordsWithParameters:(parameters ?: @{})
+                                                           limit:limit
+                                                          offset:offset
+                                                           error:error];
+  }
+  NSString *query = AUTrimmedString(parameters[@"q"]);
   return [descriptor.resource adminUIListRecordsMatching:query limit:limit offset:offset error:error];
 }
 
@@ -1030,7 +1566,11 @@ static NSDictionary *AUAdminMetadataActionSchema(void) {
     }
     return nil;
   }
-  return [descriptor.resource adminUIUpdateRecordWithIdentifier:recordID parameters:(parameters ?: @{}) error:error];
+  NSDictionary *record = [descriptor.resource adminUIUpdateRecordWithIdentifier:recordID parameters:(parameters ?: @{}) error:error];
+  if (record != nil) {
+    AUNotifySearchIncrementalSync(identifier, record, @"upsert");
+  }
+  return record;
 }
 
 - (NSDictionary *)performActionNamed:(NSString *)actionName
@@ -1055,7 +1595,206 @@ static NSDictionary *AUAdminMetadataActionSchema(void) {
     }
     return nil;
   }
-  return [descriptor.resource adminUIPerformActionNamed:actionName identifier:recordID parameters:(parameters ?: @{}) error:error];
+  NSDictionary *result = [descriptor.resource adminUIPerformActionNamed:actionName identifier:recordID parameters:(parameters ?: @{}) error:error];
+  if (result != nil) {
+    NSDictionary *record = [result[@"record"] isKindOfClass:[NSDictionary class]] ? result[@"record"] : @{};
+    NSString *operation = ([AULowerTrimmedString(actionName) containsString:@"delete"] || [record count] == 0) ? @"delete" : @"upsert";
+    NSMutableDictionary *searchRecord = [record mutableCopy] ?: [NSMutableDictionary dictionary];
+    if ([searchRecord count] == 0) {
+      NSString *identifierField = descriptor.metadata[@"identifierField"] ?: @"id";
+      searchRecord[identifierField] = AUTrimmedString(recordID);
+    }
+    AUNotifySearchIncrementalSync(identifier, searchRecord, operation);
+  }
+  return result;
+}
+
+- (NSDictionary *)performBulkActionNamed:(NSString *)actionName
+                   forResourceIdentifier:(NSString *)identifier
+                               recordIDs:(NSArray<NSString *> *)recordIDs
+                              parameters:(NSDictionary *)parameters
+                                   error:(NSError **)error {
+  ALNAdminUIResourceDescriptor *descriptor = [self descriptorForIdentifier:identifier];
+  if (descriptor == nil) {
+    if (error != NULL) {
+      *error = AUError(ALNAdminUIModuleErrorNotFound,
+                       [NSString stringWithFormat:@"unknown admin resource %@", identifier ?: @""],
+                       @{ @"resource" : AUTrimmedString(identifier) });
+    }
+    return nil;
+  }
+  NSArray<NSString *> *identifiers = AUNormalizedIdentifierArray(recordIDs);
+  if ([identifiers count] == 0) {
+    if (error != NULL) {
+      *error = AUError(ALNAdminUIModuleErrorValidationFailed, @"at least one record identifier is required", nil);
+    }
+    return nil;
+  }
+  if ([descriptor.resource respondsToSelector:@selector(adminUIPerformBulkActionNamed:identifiers:parameters:error:)]) {
+    NSDictionary *result = [descriptor.resource adminUIPerformBulkActionNamed:actionName
+                                                                   identifiers:identifiers
+                                                                    parameters:(parameters ?: @{})
+                                                                         error:error];
+    if (result != nil) {
+      NSString *operation = [AULowerTrimmedString(actionName) containsString:@"delete"] ? @"delete" : @"upsert";
+      NSArray *records = [result[@"records"] isKindOfClass:[NSArray class]] ? result[@"records"] : @[];
+      if ([records count] > 0) {
+        for (NSDictionary *record in records) {
+          AUNotifySearchIncrementalSync(identifier, record, operation);
+        }
+      } else {
+        NSString *identifierField = descriptor.metadata[@"identifierField"] ?: @"id";
+        for (NSString *recordID in identifiers) {
+          AUNotifySearchIncrementalSync(identifier, @{ identifierField : recordID ?: @"" }, operation);
+        }
+      }
+    }
+    return result;
+  }
+  NSMutableArray *records = [NSMutableArray array];
+  NSMutableArray *messages = [NSMutableArray array];
+  for (NSString *recordID in identifiers) {
+    NSDictionary *result = [self performActionNamed:actionName
+                              forResourceIdentifier:identifier
+                                           recordID:recordID
+                                         parameters:parameters
+                                              error:error];
+    if (result == nil) {
+      return nil;
+    }
+    if ([result[@"record"] isKindOfClass:[NSDictionary class]]) {
+      [records addObject:result[@"record"]];
+    }
+    if ([AUTrimmedString(result[@"message"]) length] > 0) {
+      [messages addObject:AUTrimmedString(result[@"message"])];
+    }
+  }
+  return @{
+    @"count" : @([identifiers count]),
+    @"records" : records,
+    @"message" : ([messages count] > 0)
+                     ? [NSString stringWithFormat:@"%@ (%lu records)", messages[0], (unsigned long)[identifiers count]]
+                     : [NSString stringWithFormat:@"Bulk action completed for %lu records.", (unsigned long)[identifiers count]],
+  };
+}
+
+- (NSDictionary *)exportPayloadForResourceIdentifier:(NSString *)identifier
+                                              format:(NSString *)format
+                                          parameters:(NSDictionary *)parameters
+                                               error:(NSError **)error {
+  NSDictionary *resource = [self resourceMetadataForIdentifier:identifier];
+  if (resource == nil) {
+    if (error != NULL) {
+      *error = AUError(ALNAdminUIModuleErrorNotFound,
+                       @"resource not found",
+                       @{ @"resource" : AUTrimmedString(identifier) });
+    }
+    return nil;
+  }
+  NSString *normalizedFormat = AULowerTrimmedString(format);
+  if (![normalizedFormat isEqualToString:@"json"] && ![normalizedFormat isEqualToString:@"csv"]) {
+    if (error != NULL) {
+      *error = AUError(ALNAdminUIModuleErrorValidationFailed,
+                       @"unsupported export format",
+                       @{ @"format" : normalizedFormat ?: @"" });
+    }
+    return nil;
+  }
+  NSUInteger maxLimit = [resource[@"pagination"][@"maxLimit"] respondsToSelector:@selector(unsignedIntegerValue)]
+                            ? [resource[@"pagination"][@"maxLimit"] unsignedIntegerValue]
+                            : 200U;
+  NSUInteger exportLimit = [parameters[@"exportLimit"] respondsToSelector:@selector(unsignedIntegerValue)]
+                               ? [parameters[@"exportLimit"] unsignedIntegerValue]
+                               : MIN((NSUInteger)1000U, MAX((NSUInteger)1U, maxLimit));
+  exportLimit = MIN(exportLimit, MAX((NSUInteger)1U, maxLimit));
+  NSArray *records = [self listRecordsForResourceIdentifier:identifier parameters:(parameters ?: @{}) limit:exportLimit offset:0 error:error];
+  if (records == nil) {
+    return nil;
+  }
+  NSArray *fields = [resource[@"fields"] isKindOfClass:[NSArray class]] ? resource[@"fields"] : @[];
+  NSMutableArray *exportFields = [NSMutableArray array];
+  for (NSDictionary *field in fields) {
+    if ([field[@"list"] boolValue]) {
+      [exportFields addObject:field];
+    }
+  }
+  if ([exportFields count] == 0) {
+    exportFields = [fields mutableCopy] ?: [NSMutableArray array];
+  }
+  NSData *bodyData = [NSData data];
+  NSString *contentType = @"application/octet-stream";
+  if ([normalizedFormat isEqualToString:@"json"]) {
+    bodyData = [NSJSONSerialization dataWithJSONObject:records ?: @[] options:NSJSONWritingPrettyPrinted error:NULL] ?: [NSData data];
+    contentType = @"application/json";
+  } else {
+    NSMutableArray<NSString *> *rows = [NSMutableArray array];
+    NSMutableArray<NSString *> *headers = [NSMutableArray array];
+    for (NSDictionary *field in exportFields) {
+      [headers addObject:[AUTrimmedString(field[@"label"]) length] > 0 ? AUTrimmedString(field[@"label"]) : AUTrimmedString(field[@"name"])];
+    }
+    [rows addObject:[headers componentsJoinedByString:@","]];
+    for (NSDictionary *record in records) {
+      NSMutableArray<NSString *> *values = [NSMutableArray array];
+      for (NSDictionary *field in exportFields) {
+        NSString *value = [AUStringifyValue(record[field[@"name"]]) copy];
+        NSString *escaped = [[value stringByReplacingOccurrencesOfString:@"\"" withString:@"\"\""] copy];
+        [values addObject:[NSString stringWithFormat:@"\"%@\"", escaped ?: @""]];
+      }
+      [rows addObject:[values componentsJoinedByString:@","]];
+    }
+    bodyData = [[rows componentsJoinedByString:@"\n"] dataUsingEncoding:NSUTF8StringEncoding] ?: [NSData data];
+    contentType = @"text/csv; charset=utf-8";
+  }
+  return @{
+    @"format" : normalizedFormat,
+    @"contentType" : contentType,
+    @"filename" : [NSString stringWithFormat:@"%@.%@", identifier ?: @"resource", normalizedFormat],
+    @"bodyData" : bodyData ?: [NSData data],
+    @"count" : @([records count]),
+  };
+}
+
+- (NSArray<NSDictionary *> *)autocompleteSuggestionsForResourceIdentifier:(NSString *)identifier
+                                                                 fieldName:(NSString *)fieldName
+                                                                     query:(NSString *)query
+                                                                     limit:(NSUInteger)limit
+                                                                     error:(NSError **)error {
+  ALNAdminUIResourceDescriptor *descriptor = [self descriptorForIdentifier:identifier];
+  if (descriptor == nil) {
+    if (error != NULL) {
+      *error = AUError(ALNAdminUIModuleErrorNotFound,
+                       @"resource not found",
+                       @{ @"resource" : AUTrimmedString(identifier) });
+    }
+    return nil;
+  }
+  if ([descriptor.resource respondsToSelector:@selector(adminUIAutocompleteSuggestionsForFieldNamed:query:limit:error:)]) {
+    return [descriptor.resource adminUIAutocompleteSuggestionsForFieldNamed:fieldName query:query limit:limit error:error];
+  }
+  NSDictionary *resource = descriptor.metadata ?: @{};
+  NSDictionary *field = nil;
+  for (NSDictionary *entry in [resource[@"fields"] isKindOfClass:[NSArray class]] ? resource[@"fields"] : @[]) {
+    if ([AULowerTrimmedString(entry[@"name"]) isEqualToString:AULowerTrimmedString(fieldName)]) {
+      field = entry;
+      break;
+    }
+  }
+  NSArray *choices = [field[@"choices"] isKindOfClass:[NSArray class]] ? field[@"choices"] : @[];
+  NSString *needle = AULowerTrimmedString(query);
+  NSMutableArray *matches = [NSMutableArray array];
+  for (NSDictionary *choice in choices) {
+    NSString *label = AULowerTrimmedString(choice[@"label"]);
+    NSString *value = AULowerTrimmedString(choice[@"value"]);
+    if ([needle length] > 0 && [label rangeOfString:needle].location == NSNotFound &&
+        [value rangeOfString:needle].location == NSNotFound) {
+      continue;
+    }
+    [matches addObject:choice];
+    if ([matches count] >= MAX((NSUInteger)1U, limit)) {
+      break;
+    }
+  }
+  return matches;
 }
 
 - (NSDictionary *)dashboardSummaryWithError:(NSError **)error {
@@ -1278,6 +2017,98 @@ static NSDictionary *AUAdminMetadataActionSchema(void) {
                  error:NULL];
 }
 
+- (NSDictionary *)listContextForResource:(NSDictionary *)resource
+                               identifier:(NSString *)resourceID
+                               parameters:(NSDictionary *)parameters
+                                    error:(NSError **)error {
+  NSDictionary *pagination = [resource[@"pagination"] isKindOfClass:[NSDictionary class]] ? resource[@"pagination"] : @{};
+  NSUInteger defaultLimit = [pagination[@"defaultLimit"] respondsToSelector:@selector(unsignedIntegerValue)]
+                                ? [pagination[@"defaultLimit"] unsignedIntegerValue]
+                                : 50U;
+  NSUInteger maxLimit = [pagination[@"maxLimit"] respondsToSelector:@selector(unsignedIntegerValue)]
+                            ? [pagination[@"maxLimit"] unsignedIntegerValue]
+                            : MAX((NSUInteger)50U, defaultLimit);
+  if (defaultLimit == 0U) {
+    defaultLimit = 50U;
+  }
+  if (maxLimit < defaultLimit) {
+    maxLimit = defaultLimit;
+  }
+  NSUInteger limit = [parameters[@"limit"] respondsToSelector:@selector(unsignedIntegerValue)]
+                         ? [parameters[@"limit"] unsignedIntegerValue]
+                         : defaultLimit;
+  if (limit == 0U) {
+    limit = defaultLimit;
+  }
+  limit = MIN(MAX((NSUInteger)1U, limit), maxLimit);
+  NSUInteger page = [parameters[@"page"] respondsToSelector:@selector(unsignedIntegerValue)]
+                        ? [parameters[@"page"] unsignedIntegerValue]
+                        : 1U;
+  if (page == 0U) {
+    page = 1U;
+  }
+  NSUInteger offset = (page - 1U) * limit;
+  NSArray *fetched = [self.runtime listRecordsForResourceIdentifier:resourceID
+                                                         parameters:(parameters ?: @{})
+                                                              limit:(limit + 1U)
+                                                             offset:offset
+                                                              error:error];
+  if (fetched == nil) {
+    return nil;
+  }
+  BOOL hasNext = [fetched count] > limit;
+  NSArray *records = hasNext ? [fetched subarrayWithRange:NSMakeRange(0, limit)] : fetched;
+  return @{
+    @"records" : records ?: @[],
+    @"parameters" : parameters ?: @{},
+    @"pagination" : @{
+      @"page" : @(page),
+      @"limit" : @(limit),
+      @"offset" : @(offset),
+      @"hasPrevious" : @(page > 1U),
+      @"hasNext" : @(hasNext),
+      @"previousPage" : @(page > 1U ? (page - 1U) : 1U),
+      @"nextPage" : @(page + 1U),
+      @"pageSizes" : [pagination[@"pageSizes"] isKindOfClass:[NSArray class]] ? pagination[@"pageSizes"] : @[ @(defaultLimit) ],
+    },
+  };
+}
+
+- (NSArray<NSString *> *)selectedRecordIDsFromParameters:(NSDictionary *)parameters {
+  NSMutableArray<NSString *> *identifiers = [NSMutableArray array];
+  if ([parameters[@"identifiers"] isKindOfClass:[NSArray class]]) {
+    [identifiers addObjectsFromArray:AUNormalizedIdentifierArray(parameters[@"identifiers"])];
+  } else {
+    NSString *csvIdentifiers = AUTrimmedString(parameters[@"identifiers"]);
+    if ([csvIdentifiers length] > 0) {
+      [identifiers addObjectsFromArray:AUNormalizedIdentifierArray([csvIdentifiers componentsSeparatedByString:@","])];
+    }
+  }
+  for (NSString *key in [parameters allKeys]) {
+    if (![key hasPrefix:@"selected__"]) {
+      continue;
+    }
+    if (!AUBoolValue(parameters[key], NO)) {
+      continue;
+    }
+    NSString *identifier = [key substringFromIndex:[@"selected__" length]];
+    if ([identifier length] == 0 || [identifiers containsObject:identifier]) {
+      continue;
+    }
+    [identifiers addObject:identifier];
+  }
+  return [NSArray arrayWithArray:identifiers];
+}
+
+- (void)renderExportPayload:(NSDictionary *)payload {
+  NSString *filename = AUTrimmedString(payload[@"filename"]);
+  if ([filename length] > 0) {
+    [self.context.response setHeader:@"Content-Disposition" value:[NSString stringWithFormat:@"attachment; filename=\"%@\"", filename]];
+  }
+  [self renderData:[payload[@"bodyData"] isKindOfClass:[NSData class]] ? payload[@"bodyData"] : [NSData data]
+       contentType:AUTrimmedString(payload[@"contentType"])];
+}
+
 - (id)dashboard:(ALNContext *)ctx {
   NSError *error = nil;
   NSDictionary *summary = [self.runtime dashboardSummaryWithError:&error] ?: @{};
@@ -1302,7 +2133,10 @@ static NSDictionary *AUAdminMetadataActionSchema(void) {
   return nil;
 }
 
-- (id)renderResourceIndexForIdentifier:(NSString *)resourceID context:(ALNContext *)ctx {
+- (id)renderResourceIndexForIdentifier:(NSString *)resourceID
+                               context:(ALNContext *)ctx
+                               message:(NSString *)message
+                                errors:(NSArray *)errors {
   NSError *resourceError = nil;
   NSDictionary *resource = [self resourceMetadataForIdentifier:resourceID error:&resourceError];
   if (resource == nil) {
@@ -1330,23 +2164,28 @@ static NSDictionary *AUAdminMetadataActionSchema(void) {
     return nil;
   }
   NSDictionary *parameters = [self requestParameters];
-  NSString *query = AUTrimmedString(parameters[@"q"]);
-  NSUInteger limit = [resource[@"pageSize"] respondsToSelector:@selector(unsignedIntegerValue)] ? [resource[@"pageSize"] unsignedIntegerValue] : 50U;
   NSError *listError = nil;
-  NSArray *records = [self.runtime listRecordsForResourceIdentifier:resourceID query:query limit:limit offset:0 error:&listError] ?: @[];
+  NSDictionary *listContext = [self listContextForResource:resource identifier:resourceID parameters:parameters error:&listError] ?: @{};
   NSDictionary *currentUser = [self.authRuntime currentUserForContext:ctx error:NULL] ?: @{};
+  NSMutableArray *allErrors = [NSMutableArray array];
+  for (NSDictionary *entry in [errors isKindOfClass:[NSArray class]] ? errors : @[]) {
+    [allErrors addObject:entry];
+  }
+  if (listError != nil) {
+    [allErrors addObject:@{ @"message" : listError.localizedDescription ?: @"Failed loading records" }];
+  }
   BOOL rendered = [self renderTemplate:@"modules/admin-ui/resources/index"
                                context:[self pageContextWithTitle:resource[@"label"]
                                                        heading:resource[@"label"]
-                                                       message:@""
-                                                        errors:(listError != nil)
-                                                                   ? @[ @{ @"message" : listError.localizedDescription ?: @"Failed loading records" } ]
-                                                                   : nil
+                                                       message:message ?: @""
+                                                        errors:([allErrors count] > 0) ? allErrors : nil
                                                        current:currentUser
                                                       extraCtx:@{
                                                         @"resource" : resource,
-                                                        @"records" : records ?: @[],
-                                                        @"query" : query ?: @"",
+                                                        @"records" : listContext[@"records"] ?: @[],
+                                                        @"query" : AUTrimmedString(parameters[@"q"]),
+                                                        @"parameters" : parameters ?: @{},
+                                                        @"pagination" : listContext[@"pagination"] ?: @{},
                                                       }]
                                 layout:@"modules/admin-ui/layouts/main"
                                  error:NULL];
@@ -1355,6 +2194,10 @@ static NSDictionary *AUAdminMetadataActionSchema(void) {
     [self renderText:@"render failed\n"];
   }
   return nil;
+}
+
+- (id)renderResourceIndexForIdentifier:(NSString *)resourceID context:(ALNContext *)ctx {
+  return [self renderResourceIndexForIdentifier:resourceID context:ctx message:nil errors:nil];
 }
 
 - (id)resourceIndex:(ALNContext *)ctx {
@@ -1546,6 +2389,113 @@ static NSDictionary *AUAdminMetadataActionSchema(void) {
                                               context:ctx];
 }
 
+- (id)performResourceBulkActionHTMLForIdentifier:(NSString *)resourceID
+                                      actionName:(NSString *)actionName
+                                         context:(ALNContext *)ctx {
+  NSDictionary *parameters = [self requestParameters];
+  NSArray<NSString *> *recordIDs = [self selectedRecordIDsFromParameters:parameters];
+  if ([recordIDs count] == 0) {
+    [self setStatus:422];
+    return [self renderResourceIndexForIdentifier:resourceID
+                                          context:ctx
+                                          message:@""
+                                           errors:@[ @{ @"message" : @"Select at least one record before running a bulk action." } ]];
+  }
+  NSString *operation = [NSString stringWithFormat:@"action:%@", AULowerTrimmedString(actionName)];
+  for (NSString *recordID in recordIDs) {
+    if (![self ensureResourceOperation:operation
+                            resourceID:resourceID
+                              recordID:recordID
+                               context:ctx
+                            errorBlock:^BOOL(NSError *error) {
+                              [self renderResourceResultWithStatus:403
+                                                             title:@"Access denied"
+                                                           heading:@"Access denied"
+                                                           message:error.localizedDescription ?: @"Access denied."
+                                                        actionPath:self.runtime.mountPrefix
+                                                       actionLabel:@"Back to admin"];
+                              return NO;
+                            }]) {
+      return nil;
+    }
+  }
+  NSError *error = nil;
+  NSDictionary *result = [self.runtime performBulkActionNamed:actionName
+                                        forResourceIdentifier:resourceID
+                                                    recordIDs:recordIDs
+                                                   parameters:parameters
+                                                        error:&error];
+  if (result == nil) {
+    [self setStatus:(error.code == ALNAdminUIModuleErrorNotFound) ? 404 : 422];
+    return [self renderResourceIndexForIdentifier:resourceID
+                                          context:ctx
+                                          message:@""
+                                           errors:@[ @{ @"message" : error.localizedDescription ?: @"Bulk action failed" } ]];
+  }
+  return [self renderResourceIndexForIdentifier:resourceID
+                                        context:ctx
+                                        message:AUTrimmedString(result[@"message"])
+                                         errors:nil];
+}
+
+- (id)resourceBulkActionHTML:(ALNContext *)ctx {
+  return [self performResourceBulkActionHTMLForIdentifier:[self paramValueForName:@"resource"]
+                                               actionName:[self paramValueForName:@"action"]
+                                                  context:ctx];
+}
+
+- (id)userBulkActionHTML:(ALNContext *)ctx {
+  return [self performResourceBulkActionHTMLForIdentifier:@"users"
+                                               actionName:[self paramValueForName:@"action"]
+                                                  context:ctx];
+}
+
+- (id)exportResourceHTMLForIdentifier:(NSString *)resourceID
+                               format:(NSString *)format
+                              context:(ALNContext *)ctx {
+  if (![self ensureResourceOperation:@"list"
+                          resourceID:resourceID
+                            recordID:nil
+                             context:ctx
+                          errorBlock:^BOOL(NSError *error) {
+                            [self renderResourceResultWithStatus:403
+                                                           title:@"Access denied"
+                                                         heading:@"Access denied"
+                                                         message:error.localizedDescription ?: @"Access denied."
+                                                      actionPath:self.runtime.mountPrefix
+                                                     actionLabel:@"Back to admin"];
+                            return NO;
+                          }]) {
+    return nil;
+  }
+  NSError *error = nil;
+  NSDictionary *payload = [self.runtime exportPayloadForResourceIdentifier:resourceID
+                                                                    format:format
+                                                                parameters:[self requestParameters]
+                                                                     error:&error];
+  if (payload == nil) {
+    [self renderResourceResultWithStatus:(error.code == ALNAdminUIModuleErrorNotFound) ? 404 : 422
+                                   title:@"Export failed"
+                                 heading:@"Export failed"
+                                 message:error.localizedDescription ?: @"Export failed."
+                              actionPath:self.runtime.mountPrefix
+                             actionLabel:@"Back to admin"];
+    return nil;
+  }
+  [self renderExportPayload:payload];
+  return nil;
+}
+
+- (id)resourceExportHTML:(ALNContext *)ctx {
+  return [self exportResourceHTMLForIdentifier:[self paramValueForName:@"resource"]
+                                        format:[self paramValueForName:@"format"]
+                                       context:ctx];
+}
+
+- (id)userExportHTML:(ALNContext *)ctx {
+  return [self exportResourceHTMLForIdentifier:@"users" format:[self paramValueForName:@"format"] context:ctx];
+}
+
 - (id)apiSession:(ALNContext *)ctx {
   NSDictionary *session = [self.authRuntime sessionPayloadForContext:ctx includeUser:YES error:NULL] ?: @{};
   NSDictionary *dashboard = [self.runtime dashboardSummaryWithError:NULL] ?: @{};
@@ -1596,11 +2546,9 @@ static NSDictionary *AUAdminMetadataActionSchema(void) {
   }
   NSDictionary *resource = [self.runtime resourceMetadataForIdentifier:resourceID] ?: @{};
   NSDictionary *parameters = [self requestParameters];
-  NSString *query = AUTrimmedString(parameters[@"q"]);
-  NSUInteger limit = [resource[@"pageSize"] respondsToSelector:@selector(unsignedIntegerValue)] ? [resource[@"pageSize"] unsignedIntegerValue] : 50U;
   NSError *error = nil;
-  NSArray *records = [self.runtime listRecordsForResourceIdentifier:resourceID query:query limit:limit offset:0 error:&error];
-  if (records == nil) {
+  NSDictionary *listContext = [self listContextForResource:resource identifier:resourceID parameters:parameters error:&error];
+  if (listContext == nil) {
     [self setStatus:500];
     return @{
       @"status" : @"error",
@@ -1610,8 +2558,10 @@ static NSDictionary *AUAdminMetadataActionSchema(void) {
   return @{
     @"status" : @"ok",
     @"resource" : resource,
-    @"items" : records,
-    @"query" : query ?: @"",
+    @"items" : listContext[@"records"] ?: @[],
+    @"query" : AUTrimmedString(parameters[@"q"]),
+    @"parameters" : parameters ?: @{},
+    @"pagination" : listContext[@"pagination"] ?: @{},
   };
 }
 
@@ -1763,6 +2713,161 @@ static NSDictionary *AUAdminMetadataActionSchema(void) {
                                           context:ctx];
 }
 
+- (id)apiResourceBulkActionForIdentifier:(NSString *)resourceID
+                              actionName:(NSString *)actionName
+                                 context:(ALNContext *)ctx {
+  NSDictionary *parameters = [self requestParameters];
+  NSArray<NSString *> *recordIDs = [self selectedRecordIDsFromParameters:parameters];
+  if ([recordIDs count] == 0) {
+    [self setStatus:422];
+    return @{
+      @"status" : @"error",
+      @"message" : @"At least one identifier is required",
+    };
+  }
+  NSString *operation = [NSString stringWithFormat:@"action:%@", AULowerTrimmedString(actionName)];
+  for (NSString *recordID in recordIDs) {
+    if (![self ensureResourceOperation:operation
+                            resourceID:resourceID
+                              recordID:recordID
+                               context:ctx
+                            errorBlock:^BOOL(NSError *error) {
+                              [self setStatus:403];
+                              return NO;
+                            }]) {
+      return @{
+        @"status" : @"error",
+        @"message" : @"Access denied",
+      };
+    }
+  }
+  NSError *error = nil;
+  NSDictionary *result = [self.runtime performBulkActionNamed:actionName
+                                        forResourceIdentifier:resourceID
+                                                    recordIDs:recordIDs
+                                                   parameters:parameters
+                                                        error:&error];
+  if (result == nil) {
+    [self setStatus:(error.code == ALNAdminUIModuleErrorNotFound) ? 404 : 422];
+    return @{
+      @"status" : @"error",
+      @"message" : error.localizedDescription ?: @"Bulk action failed",
+    };
+  }
+  return @{
+    @"status" : @"ok",
+    @"resource" : [self.runtime resourceMetadataForIdentifier:resourceID] ?: @{},
+    @"result" : result,
+  };
+}
+
+- (id)apiResourceBulkAction:(ALNContext *)ctx {
+  return [self apiResourceBulkActionForIdentifier:[self paramValueForName:@"resource"]
+                                       actionName:[self paramValueForName:@"action"]
+                                          context:ctx];
+}
+
+- (id)apiUsersBulkAction:(ALNContext *)ctx {
+  return [self apiResourceBulkActionForIdentifier:@"users"
+                                       actionName:[self paramValueForName:@"action"]
+                                          context:ctx];
+}
+
+- (id)apiResourceExportForIdentifier:(NSString *)resourceID
+                              format:(NSString *)format
+                             context:(ALNContext *)ctx {
+  if (![self ensureResourceOperation:@"list"
+                          resourceID:resourceID
+                            recordID:nil
+                             context:ctx
+                          errorBlock:^BOOL(NSError *error) {
+                            [self setStatus:403];
+                            return NO;
+                          }]) {
+    return @{
+      @"status" : @"error",
+      @"message" : @"Access denied",
+    };
+  }
+  NSError *error = nil;
+  NSDictionary *payload = [self.runtime exportPayloadForResourceIdentifier:resourceID
+                                                                    format:format
+                                                                parameters:[self requestParameters]
+                                                                     error:&error];
+  if (payload == nil) {
+    [self setStatus:(error.code == ALNAdminUIModuleErrorNotFound) ? 404 : 422];
+    return @{
+      @"status" : @"error",
+      @"message" : error.localizedDescription ?: @"Export failed",
+    };
+  }
+  [self renderExportPayload:payload];
+  return nil;
+}
+
+- (id)apiResourceExport:(ALNContext *)ctx {
+  return [self apiResourceExportForIdentifier:[self paramValueForName:@"resource"]
+                                       format:[self paramValueForName:@"format"]
+                                      context:ctx];
+}
+
+- (id)apiUsersExport:(ALNContext *)ctx {
+  return [self apiResourceExportForIdentifier:@"users" format:[self paramValueForName:@"format"] context:ctx];
+}
+
+- (id)apiResourceAutocompleteForIdentifier:(NSString *)resourceID
+                                 fieldName:(NSString *)fieldName
+                                   context:(ALNContext *)ctx {
+  if (![self ensureResourceOperation:@"list"
+                          resourceID:resourceID
+                            recordID:nil
+                             context:ctx
+                          errorBlock:^BOOL(NSError *error) {
+                            [self setStatus:403];
+                            return NO;
+                          }]) {
+    return @{
+      @"status" : @"error",
+      @"message" : @"Access denied",
+    };
+  }
+  NSDictionary *parameters = [self requestParameters];
+  NSUInteger limit = [parameters[@"limit"] respondsToSelector:@selector(unsignedIntegerValue)]
+                         ? [parameters[@"limit"] unsignedIntegerValue]
+                         : 10U;
+  NSError *error = nil;
+  NSArray *suggestions = [self.runtime autocompleteSuggestionsForResourceIdentifier:resourceID
+                                                                          fieldName:fieldName
+                                                                              query:parameters[@"q"]
+                                                                              limit:limit
+                                                                              error:&error];
+  if (suggestions == nil) {
+    [self setStatus:(error.code == ALNAdminUIModuleErrorNotFound) ? 404 : 422];
+    return @{
+      @"status" : @"error",
+      @"message" : error.localizedDescription ?: @"Autocomplete failed",
+    };
+  }
+  return @{
+    @"status" : @"ok",
+    @"resource" : [self.runtime resourceMetadataForIdentifier:resourceID] ?: @{},
+    @"field" : AULowerTrimmedString(fieldName),
+    @"suggestions" : suggestions,
+  };
+}
+
+- (id)apiResourceAutocomplete:(ALNContext *)ctx {
+  return [self apiResourceAutocompleteForIdentifier:[self paramValueForName:@"resource"]
+                                          fieldName:[self paramValueForName:@"field"]
+                                            context:ctx];
+}
+
+- (id)apiUsersAutocomplete:(ALNContext *)ctx {
+  return [self apiResourceAutocompleteForIdentifier:@"users"
+                                          fieldName:[self paramValueForName:@"field"]
+                                            context:ctx];
+}
+
 @end
 
 @implementation ALNAdminUIModule
@@ -1812,6 +2917,16 @@ static NSDictionary *AUAdminMetadataActionSchema(void) {
                         name:@"admin_resource_action"
              controllerClass:[ALNAdminUIController class]
                       action:@"resourceActionHTML"];
+  [child registerRouteMethod:@"POST"
+                        path:@"/resources/:resource/bulk-actions/:action"
+                        name:@"admin_resource_bulk_action"
+             controllerClass:[ALNAdminUIController class]
+                      action:@"resourceBulkActionHTML"];
+  [child registerRouteMethod:@"GET"
+                        path:@"/resources/:resource/export/:format"
+                        name:@"admin_resource_export"
+             controllerClass:[ALNAdminUIController class]
+                      action:@"resourceExportHTML"];
   [child registerRouteMethod:@"GET"
                         path:@"/users"
                         name:@"admin_users"
@@ -1832,6 +2947,46 @@ static NSDictionary *AUAdminMetadataActionSchema(void) {
                         name:@"admin_user_action"
              controllerClass:[ALNAdminUIController class]
                       action:@"userActionHTML"];
+  [child registerRouteMethod:@"POST"
+                        path:@"/users/bulk-actions/:action"
+                        name:@"admin_user_bulk_action"
+             controllerClass:[ALNAdminUIController class]
+                      action:@"userBulkActionHTML"];
+  [child registerRouteMethod:@"GET"
+                        path:@"/users/export/:format"
+                        name:@"admin_user_export"
+             controllerClass:[ALNAdminUIController class]
+                      action:@"userExportHTML"];
+  [child registerRouteMethod:@"GET"
+                        path:@"/:resource/export/:format"
+                        name:@"admin_resource_legacy_export"
+             controllerClass:[ALNAdminUIController class]
+                      action:@"resourceExportHTML"];
+  [child registerRouteMethod:@"POST"
+                        path:@"/:resource/bulk-actions/:action"
+                        name:@"admin_resource_legacy_bulk_action"
+             controllerClass:[ALNAdminUIController class]
+                      action:@"resourceBulkActionHTML"];
+  [child registerRouteMethod:@"POST"
+                        path:@"/:resource/:identifier/actions/:action"
+                        name:@"admin_resource_legacy_action"
+             controllerClass:[ALNAdminUIController class]
+                      action:@"resourceActionHTML"];
+  [child registerRouteMethod:@"GET"
+                        path:@"/:resource/:identifier"
+                        name:@"admin_resource_legacy_detail"
+             controllerClass:[ALNAdminUIController class]
+                      action:@"resourceDetail"];
+  [child registerRouteMethod:@"POST"
+                        path:@"/:resource/:identifier"
+                        name:@"admin_resource_legacy_update"
+             controllerClass:[ALNAdminUIController class]
+                      action:@"updateResourceHTML"];
+  [child registerRouteMethod:@"GET"
+                        path:@"/:resource"
+                        name:@"admin_resource_legacy_index"
+             controllerClass:[ALNAdminUIController class]
+                      action:@"resourceIndex"];
   [child endRouteGroup];
 
   [child beginRouteGroupWithPrefix:runtime.apiPrefix guardAction:nil formats:nil];
@@ -1870,6 +3025,21 @@ static NSDictionary *AUAdminMetadataActionSchema(void) {
                         name:@"admin_api_resource_item_action"
              controllerClass:[ALNAdminUIController class]
                       action:@"apiResourceItemAction"];
+  [child registerRouteMethod:@"POST"
+                        path:@"/resources/:resource/bulk-actions/:action"
+                        name:@"admin_api_resource_bulk_action"
+             controllerClass:[ALNAdminUIController class]
+                      action:@"apiResourceBulkAction"];
+  [child registerRouteMethod:@"GET"
+                        path:@"/resources/:resource/export/:format"
+                        name:@"admin_api_resource_export"
+             controllerClass:[ALNAdminUIController class]
+                      action:@"apiResourceExport"];
+  [child registerRouteMethod:@"GET"
+                        path:@"/resources/:resource/autocomplete/:field"
+                        name:@"admin_api_resource_autocomplete"
+             controllerClass:[ALNAdminUIController class]
+                      action:@"apiResourceAutocomplete"];
   [child registerRouteMethod:@"GET"
                         path:@"/users"
                         name:@"admin_api_users"
@@ -1890,10 +3060,60 @@ static NSDictionary *AUAdminMetadataActionSchema(void) {
                         name:@"admin_api_user_action"
              controllerClass:[ALNAdminUIController class]
                       action:@"apiUserAction"];
+  [child registerRouteMethod:@"POST"
+                        path:@"/users/bulk-actions/:action"
+                        name:@"admin_api_users_bulk_action"
+             controllerClass:[ALNAdminUIController class]
+                      action:@"apiUsersBulkAction"];
+  [child registerRouteMethod:@"GET"
+                        path:@"/users/export/:format"
+                        name:@"admin_api_users_export"
+             controllerClass:[ALNAdminUIController class]
+                      action:@"apiUsersExport"];
+  [child registerRouteMethod:@"GET"
+                        path:@"/users/autocomplete/:field"
+                        name:@"admin_api_users_autocomplete"
+             controllerClass:[ALNAdminUIController class]
+                      action:@"apiUsersAutocomplete"];
+  [child registerRouteMethod:@"GET"
+                        path:@"/:resource/export/:format"
+                        name:@"admin_api_resource_legacy_export"
+             controllerClass:[ALNAdminUIController class]
+                      action:@"apiResourceExport"];
+  [child registerRouteMethod:@"GET"
+                        path:@"/:resource/autocomplete/:field"
+                        name:@"admin_api_resource_legacy_autocomplete"
+             controllerClass:[ALNAdminUIController class]
+                      action:@"apiResourceAutocomplete"];
+  [child registerRouteMethod:@"POST"
+                        path:@"/:resource/bulk-actions/:action"
+                        name:@"admin_api_resource_legacy_bulk_action"
+             controllerClass:[ALNAdminUIController class]
+                      action:@"apiResourceBulkAction"];
+  [child registerRouteMethod:@"POST"
+                        path:@"/:resource/:identifier/actions/:action"
+                        name:@"admin_api_resource_legacy_action"
+             controllerClass:[ALNAdminUIController class]
+                      action:@"apiResourceItemAction"];
+  [child registerRouteMethod:@"GET"
+                        path:@"/:resource/:identifier"
+                        name:@"admin_api_resource_legacy_detail"
+             controllerClass:[ALNAdminUIController class]
+                      action:@"apiResourceItemDetail"];
+  [child registerRouteMethod:@"POST"
+                        path:@"/:resource/:identifier"
+                        name:@"admin_api_resource_legacy_update"
+             controllerClass:[ALNAdminUIController class]
+                      action:@"apiResourceItemUpdate"];
+  [child registerRouteMethod:@"GET"
+                        path:@"/:resource"
+                        name:@"admin_api_resource_legacy_items"
+             controllerClass:[ALNAdminUIController class]
+                      action:@"apiResourceItemsIndex"];
   [child endRouteGroup];
 
   NSError *routeError = nil;
-  NSDictionary *routeSchemas = @{
+  NSMutableDictionary *routeSchemas = [NSMutableDictionary dictionaryWithDictionary:@{
     @"admin_api_session" : @{ @"request" : [NSNull null], @"response" : @{ @"type" : @"object" } },
     @"admin_api_resources" : @{ @"request" : [NSNull null], @"response" : @{ @"type" : @"object" } },
     @"admin_api_resource_metadata" : @{
@@ -1938,6 +3158,42 @@ static NSDictionary *AUAdminMetadataActionSchema(void) {
       @"request" : AUAdminMetadataActionSchema(),
       @"response" : @{ @"type" : @"object" },
     },
+    @"admin_api_resource_bulk_action" : @{
+      @"request" : @{
+        @"type" : @"object",
+        @"properties" : @{
+          @"resource" : @{ @"type" : @"string", @"source" : @"path" },
+          @"action" : @{ @"type" : @"string", @"source" : @"path" },
+          @"identifiers" : @{ @"type" : @"array", @"items" : @{ @"type" : @"string" }, @"source" : @"body" },
+        },
+        @"required" : @[ @"resource", @"action" ],
+      },
+      @"response" : @{ @"type" : @"object" },
+    },
+    @"admin_api_resource_export" : @{
+      @"request" : @{
+        @"type" : @"object",
+        @"properties" : @{
+          @"resource" : @{ @"type" : @"string", @"source" : @"path" },
+          @"format" : @{ @"type" : @"string", @"source" : @"path" },
+        },
+        @"required" : @[ @"resource", @"format" ],
+      },
+      @"response" : @{ @"type" : @"string" },
+    },
+    @"admin_api_resource_autocomplete" : @{
+      @"request" : @{
+        @"type" : @"object",
+        @"properties" : @{
+          @"resource" : @{ @"type" : @"string", @"source" : @"path" },
+          @"field" : @{ @"type" : @"string", @"source" : @"path" },
+          @"q" : @{ @"type" : @"string", @"source" : @"query" },
+          @"limit" : @{ @"type" : @"integer", @"source" : @"query" },
+        },
+        @"required" : @[ @"resource", @"field" ],
+      },
+      @"response" : @{ @"type" : @"object" },
+    },
     @"admin_api_users" : @{
       @"request" : @{
         @"type" : @"object",
@@ -1975,7 +3231,47 @@ static NSDictionary *AUAdminMetadataActionSchema(void) {
       },
       @"response" : @{ @"type" : @"object" },
     },
-  };
+    @"admin_api_users_bulk_action" : @{
+      @"request" : @{
+        @"type" : @"object",
+        @"properties" : @{
+          @"action" : @{ @"type" : @"string", @"source" : @"path" },
+          @"identifiers" : @{ @"type" : @"array", @"items" : @{ @"type" : @"string" }, @"source" : @"body" },
+        },
+        @"required" : @[ @"action" ],
+      },
+      @"response" : @{ @"type" : @"object" },
+    },
+    @"admin_api_users_export" : @{
+      @"request" : @{
+        @"type" : @"object",
+        @"properties" : @{
+          @"format" : @{ @"type" : @"string", @"source" : @"path" },
+        },
+        @"required" : @[ @"format" ],
+      },
+      @"response" : @{ @"type" : @"string" },
+    },
+    @"admin_api_users_autocomplete" : @{
+      @"request" : @{
+        @"type" : @"object",
+        @"properties" : @{
+          @"field" : @{ @"type" : @"string", @"source" : @"path" },
+          @"q" : @{ @"type" : @"string", @"source" : @"query" },
+          @"limit" : @{ @"type" : @"integer", @"source" : @"query" },
+        },
+        @"required" : @[ @"field" ],
+      },
+      @"response" : @{ @"type" : @"object" },
+    },
+  }];
+  routeSchemas[@"admin_api_resource_legacy_items"] = routeSchemas[@"admin_api_resource_items"];
+  routeSchemas[@"admin_api_resource_legacy_detail"] = routeSchemas[@"admin_api_resource_item_detail"];
+  routeSchemas[@"admin_api_resource_legacy_update"] = routeSchemas[@"admin_api_resource_item_update"];
+  routeSchemas[@"admin_api_resource_legacy_action"] = routeSchemas[@"admin_api_resource_item_action"];
+  routeSchemas[@"admin_api_resource_legacy_bulk_action"] = routeSchemas[@"admin_api_resource_bulk_action"];
+  routeSchemas[@"admin_api_resource_legacy_export"] = routeSchemas[@"admin_api_resource_export"];
+  routeSchemas[@"admin_api_resource_legacy_autocomplete"] = routeSchemas[@"admin_api_resource_autocomplete"];
 
   NSArray<NSString *> *apiRouteNames = [routeSchemas allKeys];
   for (NSString *routeName in apiRouteNames) {

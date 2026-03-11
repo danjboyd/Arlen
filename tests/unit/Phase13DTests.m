@@ -40,6 +40,15 @@
   return YES;
 }
 
+- (NSString *)readFile:(NSString *)path {
+  NSError *error = nil;
+  NSString *contents =
+      [NSString stringWithContentsOfFile:path encoding:NSUTF8StringEncoding error:&error];
+  XCTAssertNotNil(contents, @"failed reading %@: %@", path, error.localizedDescription);
+  XCTAssertNil(error);
+  return contents ?: @"";
+}
+
 - (void)testModuleConfigDefaultsAreMergedAndAppValuesWin {
   NSString *appRoot = [self createTempDirectoryWithPrefix:@"phase13d-config"];
   XCTAssertNotNil(appRoot);
@@ -180,6 +189,65 @@
     XCTAssertNotNil(diagnostics);
     XCTAssertNil(error);
     XCTAssertTrue([[diagnostics valueForKey:@"code"] containsObject:@"modules_loaded"]);
+  } @finally {
+    [[NSFileManager defaultManager] removeItemAtPath:appRoot error:nil];
+  }
+}
+
+- (void)testFirstPartyModuleDefaultsUseRelativeAPIPathsAndDoctorDoesNotCrash {
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *appRoot = [self createTempDirectoryWithPrefix:@"phase13d-first-party-doctor"];
+  XCTAssertNotNil(appRoot);
+  if (appRoot == nil) {
+    return;
+  }
+
+  @try {
+    NSArray<NSString *> *moduleIDs = @[ @"auth", @"admin-ui", @"jobs", @"notifications" ];
+    NSMutableArray<NSString *> *entries = [NSMutableArray array];
+    for (NSString *moduleID in moduleIDs) {
+      [entries addObject:[NSString stringWithFormat:@"    { identifier = \"%@\"; path = \"modules/%@\"; enabled = YES; }",
+                                                    moduleID, moduleID]];
+      NSString *sourcePath =
+          [repoRoot stringByAppendingPathComponent:[NSString stringWithFormat:@"modules/%@/module.plist", moduleID]];
+      NSString *targetPath =
+          [appRoot stringByAppendingPathComponent:[NSString stringWithFormat:@"modules/%@/module.plist", moduleID]];
+      XCTAssertTrue([self writeFile:targetPath content:[self readFile:sourcePath]]);
+    }
+
+    NSString *modulesConfig = [NSString stringWithFormat:@"{\n"
+                                                           "  modules = (\n"
+                                                           "%@\n"
+                                                           "  );\n"
+                                                           "}\n",
+                                                           [entries componentsJoinedByString:@",\n"]];
+    NSString *modulesConfigPath = [appRoot stringByAppendingPathComponent:@"config/modules.plist"];
+    XCTAssertTrue([self writeFile:modulesConfigPath content:modulesConfig]);
+
+    NSArray<NSDictionary *> *diagnostics = nil;
+    NSDictionary *merged = [ALNModuleSystem configByApplyingModuleDefaultsToConfig:@{
+      @"appRoot" : appRoot,
+      @"session" : @{ @"secret" : @"phase13d-secret" },
+      @"database" : @{ @"connectionString" : @"postgres://phase13d:test@localhost/phase13d" },
+    }
+                                                                   appRoot:appRoot
+                                                                    strict:NO
+                                                               diagnostics:&diagnostics
+                                                                     error:NULL];
+    XCTAssertNotNil(merged);
+    XCTAssertEqualObjects(@"api", merged[@"authModule"][@"paths"][@"apiPrefix"]);
+    XCTAssertEqualObjects(@"api", merged[@"adminUI"][@"paths"][@"apiPrefix"]);
+    XCTAssertEqualObjects(@"api", merged[@"jobsModule"][@"paths"][@"apiPrefix"]);
+    XCTAssertEqualObjects(@"api", merged[@"notificationsModule"][@"paths"][@"apiPrefix"]);
+
+    NSError *__autoreleasing error = nil;
+    NSArray<NSDictionary *> *doctorDiagnostics =
+        [ALNModuleSystem doctorDiagnosticsAtAppRoot:appRoot
+                                             config:merged
+                                              error:&error];
+    XCTAssertNotNil(doctorDiagnostics);
+    XCTAssertNil(error);
+    XCTAssertTrue([[doctorDiagnostics valueForKey:@"code"] containsObject:@"modules_loaded"]);
   } @finally {
     [[NSFileManager defaultManager] removeItemAtPath:appRoot error:nil];
   }

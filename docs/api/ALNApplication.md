@@ -39,12 +39,14 @@ if (![app startWithError:&error]) {
 | `metrics` | `ALNMetricsRegistry *` | `nonatomic, strong, readonly` | Application-wide metrics registry used for counters/gauges/timings and `/metrics` export. |
 | `middlewares` | `NSArray *` | `nonatomic, copy, readonly` | Ordered middleware list executed for request pre/post processing. |
 | `plugins` | `NSArray *` | `nonatomic, copy, readonly` | Registered plugin instances that extended this app during bootstrap. |
+| `modules` | `NSArray *` | `nonatomic, copy, readonly` | Public `modules` property available on `ALNApplication`. |
 | `lifecycleHooks` | `NSArray *` | `nonatomic, copy, readonly` | Registered lifecycle hooks invoked around startup and shutdown. |
 | `staticMounts` | `NSArray *` | `nonatomic, copy, readonly` | Configured static mount definitions used by the HTTP server static-file path. |
 | `jobsAdapter` | `id<ALNJobAdapter>` | `nonatomic, strong, readonly` | Adapter used by this runtime for the corresponding service concern. |
 | `cacheAdapter` | `id<ALNCacheAdapter>` | `nonatomic, strong, readonly` | Adapter used by this runtime for the corresponding service concern. |
 | `localizationAdapter` | `id<ALNLocalizationAdapter>` | `nonatomic, strong, readonly` | Adapter used by this runtime for the corresponding service concern. |
 | `mailAdapter` | `id<ALNMailAdapter>` | `nonatomic, strong, readonly` | Adapter used by this runtime for the corresponding service concern. |
+| `webhookAdapter` | `id<ALNWebhookAdapter>` | `nonatomic, strong, readonly` | Adapter used by this runtime for the corresponding service concern. |
 | `attachmentAdapter` | `id<ALNAttachmentAdapter>` | `nonatomic, strong, readonly` | Adapter used by this runtime for the corresponding service concern. |
 | `clusterEnabled` | `BOOL` | `nonatomic, assign, readonly` | Cluster/runtime metadata exposed for diagnostics and routing behavior. |
 | `clusterName` | `NSString *` | `nonatomic, copy, readonly` | Cluster identifier used for distributed-runtime diagnostics and headers. |
@@ -73,6 +75,7 @@ if (![app startWithError:&error]) {
 | `setCacheAdapter:` | `- (void)setCacheAdapter:(id<ALNCacheAdapter>)adapter;` | Set or override the current value for this concern. | Call before downstream behavior that depends on this updated value. |
 | `setLocalizationAdapter:` | `- (void)setLocalizationAdapter:(id<ALNLocalizationAdapter>)adapter;` | Set or override the current value for this concern. | Call before downstream behavior that depends on this updated value. |
 | `setMailAdapter:` | `- (void)setMailAdapter:(id<ALNMailAdapter>)adapter;` | Set or override the current value for this concern. | Call before downstream behavior that depends on this updated value. |
+| `setWebhookAdapter:` | `- (void)setWebhookAdapter:(id<ALNWebhookAdapter>)adapter;` | Set or override the current value for this concern. | Call before downstream behavior that depends on this updated value. |
 | `setAttachmentAdapter:` | `- (void)setAttachmentAdapter:(id<ALNAttachmentAdapter>)adapter;` | Set or override the current value for this concern. | Call before downstream behavior that depends on this updated value. |
 | `localizedStringForKey:locale:fallbackLocale:defaultValue:arguments:` | `- (NSString *)localizedStringForKey:(NSString *)key locale:(nullable NSString *)locale fallbackLocale:(nullable NSString *)fallbackLocale defaultValue:(nullable NSString *)defaultValue arguments:(nullable NSDictionary *)arguments;` | Resolve localized string with fallback/default and interpolation args. | Capture the returned value and propagate errors/validation as needed. |
 | `registerLifecycleHook:` | `- (BOOL)registerLifecycleHook:(id<ALNLifecycleHook>)hook;` | Register this component so it participates in runtime behavior. | Call during bootstrap/setup before this behavior is exercised. |

@@ -3,60 +3,180 @@
 <% NSArray *fields = [resource objectForKey:@"fields"] ?: @[]; %>
 <% NSArray *filters = [resource objectForKey:@"filters"] ?: @[]; %>
 <% NSArray *records = [ctx objectForKey:@"records"] ?: @[]; %>
+<% NSDictionary *parameters = [ctx objectForKey:@"parameters"] ?: @{}; %>
+<% NSDictionary *pagination = [ctx objectForKey:@"pagination"] ?: @{}; %>
+<% NSArray *sorts = [resource objectForKey:@"sorts"] ?: @[]; %>
+<% NSArray *bulkActions = [resource objectForKey:@"bulkActions"] ?: @[]; %>
+<% NSArray *exports = [resource objectForKey:@"exports"] ?: @[]; %>
 <% NSMutableArray *listFields = [NSMutableArray array]; %>
 <% for (NSDictionary *field in fields) { if ([[field objectForKey:@"list"] boolValue]) { [listFields addObject:field]; } } %>
+<% NSString *identifierField = [resource objectForKey:@"identifierField"] ?: @"id"; %>
+<% NSString *primaryField = [resource objectForKey:@"primaryField"] ?: identifierField; %>
 
 <form class="admin-toolbar" method="get" action="<%= [paths objectForKey:@"html_index"] %>">
   <% for (NSDictionary *filter in filters) { %>
-    <% if ([[filter objectForKey:@"type"] isEqual:@"search"]) { %>
+    <% NSString *type = [[filter objectForKey:@"type"] lowercaseString]; %>
+    <% NSString *name = [filter objectForKey:@"name"] ?: @""; %>
+    <% if ([type isEqual:@"search"]) { %>
       <label>
-        <span><%= [filter objectForKey:@"label"] %></span>
+        <span><%= [filter objectForKey:@"label"] ?: name %></span>
         <input type="search"
-               name="<%= [filter objectForKey:@"name"] %>"
-               value="<%= [ctx objectForKey:@"query"] %>"
+               name="<%= name %>"
+               value="<%= [parameters objectForKey:name] ?: [ctx objectForKey:@"query"] ?: @"" %>"
                placeholder="<%= [filter objectForKey:@"placeholder"] %>">
       </label>
+    <% } else if ([[filter objectForKey:@"choices"] count] > 0) { %>
+      <label>
+        <span><%= [filter objectForKey:@"label"] ?: name %></span>
+        <select name="<%= name %>">
+          <option value="">Any</option>
+          <% for (NSDictionary *choice in ([filter objectForKey:@"choices"] ?: @[])) { %>
+            <% NSString *value = [choice objectForKey:@"value"] ?: @""; %>
+            <option value="<%= value %>" <%= [[[parameters objectForKey:name] description] isEqual:value] ? @"selected" : @"" %>><%= [choice objectForKey:@"label"] ?: value %></option>
+          <% } %>
+        </select>
+      </label>
+    <% } else { %>
+      <label>
+        <span><%= [filter objectForKey:@"label"] ?: name %></span>
+        <input type="<%= [filter objectForKey:@"inputType"] ?: @"text" %>"
+               name="<%= name %>"
+               value="<%= [parameters objectForKey:name] ?: @"" %>"
+               placeholder="<%= [filter objectForKey:@"placeholder"] ?: @"" %>"
+               <%= [[filter objectForKey:@"min"] length] > 0 ? [NSString stringWithFormat:@"min=\"%@\"", [filter objectForKey:@"min"]] : @"" %>
+               <%= [[filter objectForKey:@"max"] length] > 0 ? [NSString stringWithFormat:@"max=\"%@\"", [filter objectForKey:@"max"]] : @"" %>
+               <%= [[filter objectForKey:@"step"] length] > 0 ? [NSString stringWithFormat:@"step=\"%@\"", [filter objectForKey:@"step"]] : @"" %>>
+      </label>
     <% } %>
+  <% } %>
+  <% if ([sorts count] > 0) { %>
+    <label>
+      <span>Sort</span>
+      <select name="sort">
+        <option value="">Default</option>
+        <% for (NSDictionary *sort in sorts) { %>
+          <% NSString *name = [sort objectForKey:@"name"] ?: @""; %>
+          <% NSString *direction = [[sort objectForKey:@"direction"] lowercaseString]; %>
+          <% NSString *ascendingValue = [name copy]; %>
+          <% NSString *descendingValue = [@"-" stringByAppendingString:name]; %>
+          <option value="<%= ascendingValue %>" <%= [[[parameters objectForKey:@"sort"] description] isEqual:ascendingValue] ? @"selected" : @"" %>><%= [sort objectForKey:@"label"] ?: name %> (asc)</option>
+          <% if (![direction isEqual:@"asc"]) { %>
+            <option value="<%= descendingValue %>" <%= [[[parameters objectForKey:@"sort"] description] isEqual:descendingValue] ? @"selected" : @"" %>><%= [sort objectForKey:@"label"] ?: name %> (desc)</option>
+          <% } %>
+        <% } %>
+      </select>
+    </label>
+  <% } %>
+  <% if ([[pagination objectForKey:@"pageSizes"] count] > 0) { %>
+    <label>
+      <span>Page size</span>
+      <select name="limit">
+        <% for (NSNumber *pageSize in ([pagination objectForKey:@"pageSizes"] ?: @[])) { %>
+          <option value="<%= [pageSize stringValue] %>" <%= [[[parameters objectForKey:@"limit"] description] isEqual:[pageSize stringValue]] ? @"selected" : @"" %>><%= [pageSize stringValue] %></option>
+        <% } %>
+      </select>
+    </label>
   <% } %>
   <button type="submit">Filter</button>
 </form>
 
-<table class="admin-table">
-  <thead>
-    <tr>
-      <% for (NSDictionary *field in listFields) { %>
-        <th><%= [field objectForKey:@"label"] %></th>
+<section class="admin-actions">
+  <% for (NSDictionary *exportEntry in exports) { %>
+    <% NSString *format = [exportEntry objectForKey:@"format"] ?: @"json"; %>
+    <form method="get" action="<%= [[paths objectForKey:[NSString stringWithFormat:@"html_export_%@", format]] length] > 0 ? [paths objectForKey:[NSString stringWithFormat:@"html_export_%@", format]] : [NSString stringWithFormat:@"%@/%@", [paths objectForKey:@"html_export_json"], format] %>">
+      <% for (NSString *key in [parameters allKeys]) { %>
+        <% if ([key hasPrefix:@"selected__"]) { continue; } %>
+        <input type="hidden" name="<%= key %>" value="<%= [parameters objectForKey:key] ?: @"" %>">
       <% } %>
-    </tr>
-  </thead>
-  <tbody>
-    <% NSString *identifierField = [resource objectForKey:@"identifierField"] ?: @"id"; %>
-    <% NSString *primaryField = [resource objectForKey:@"primaryField"] ?: identifierField; %>
-    <% for (NSDictionary *record in records) { %>
+      <button type="submit">Export <%= [exportEntry objectForKey:@"label"] ?: [format uppercaseString] %></button>
+    </form>
+  <% } %>
+</section>
+
+<form method="post">
+  <input type="hidden" name="csrf_token" value="<%= [ctx objectForKey:@"csrfToken"] %>">
+  <% for (NSString *key in [parameters allKeys]) { %>
+    <% if ([key hasPrefix:@"selected__"]) { continue; } %>
+    <input type="hidden" name="<%= key %>" value="<%= [parameters objectForKey:key] ?: @"" %>">
+  <% } %>
+  <table class="admin-table">
+    <thead>
       <tr>
-        <% NSUInteger columnIndex = 0; %>
+        <% if ([bulkActions count] > 0) { %>
+          <th>Select</th>
+        <% } %>
         <% for (NSDictionary *field in listFields) { %>
-          <% NSString *name = [field objectForKey:@"name"]; %>
-          <% id value = [record objectForKey:name] ?: @""; %>
-          <% NSString *kind = [[field objectForKey:@"kind"] lowercaseString]; %>
-          <td>
-            <% if (columnIndex == 0) { %>
-              <a href="<%= [paths objectForKey:@"html_index"] %>/<%= [record objectForKey:identifierField] %>"><%= [record objectForKey:primaryField] ?: value %></a>
-            <% } else if ([kind isEqual:@"link"] && [value isKindOfClass:[NSDictionary class]]) { %>
-              <a href="<%= [value objectForKey:@"href"] ?: @"#" %>"><%= [value objectForKey:@"label"] ?: [value objectForKey:@"href"] ?: @"" %></a>
-            <% } else if ([kind isEqual:@"link"] && [value isKindOfClass:[NSString class]]) { %>
-              <a href="<%= value %>"><%= value %></a>
-            <% } else if ([value isKindOfClass:[NSArray class]]) { %>
-              <%= [value componentsJoinedByString:@", "] %>
-            <% } else if ([value respondsToSelector:@selector(boolValue)]) { %>
-              <%= [value boolValue] ? @"Yes" : @"No" %>
-            <% } else { %>
-              <%= value %>
-            <% } %>
-          </td>
-          <% columnIndex += 1; %>
+          <th><%= [field objectForKey:@"label"] %></th>
         <% } %>
       </tr>
-    <% } %>
-  </tbody>
-</table>
+    </thead>
+    <tbody>
+      <% for (NSDictionary *record in records) { %>
+        <tr>
+          <% NSString *recordID = [[record objectForKey:identifierField] description] ?: @""; %>
+          <% if ([bulkActions count] > 0) { %>
+            <td><input type="checkbox" name="selected__<%= recordID %>" value="1"></td>
+          <% } %>
+          <% NSUInteger columnIndex = 0; %>
+          <% for (NSDictionary *field in listFields) { %>
+            <% NSString *name = [field objectForKey:@"name"]; %>
+            <% id value = [record objectForKey:name] ?: @""; %>
+            <% NSString *kind = [[field objectForKey:@"kind"] lowercaseString]; %>
+            <td>
+              <% if (columnIndex == 0) { %>
+                <a href="<%= [paths objectForKey:@"html_index"] %>/<%= recordID %>"><%= [record objectForKey:primaryField] ?: value %></a>
+              <% } else if ([kind isEqual:@"link"] && [value isKindOfClass:[NSDictionary class]]) { %>
+                <a href="<%= [value objectForKey:@"href"] ?: @"#" %>"><%= [value objectForKey:@"label"] ?: [value objectForKey:@"href"] ?: @"" %></a>
+              <% } else if ([kind isEqual:@"link"] && [value isKindOfClass:[NSString class]]) { %>
+                <a href="<%= value %>"><%= value %></a>
+              <% } else if ([value isKindOfClass:[NSArray class]]) { %>
+                <%= [value componentsJoinedByString:@", "] %>
+              <% } else if ([value respondsToSelector:@selector(boolValue)] && [kind isEqual:@"boolean"]) { %>
+                <%= [value boolValue] ? @"Yes" : @"No" %>
+              <% } else { %>
+                <%= value %>
+              <% } %>
+            </td>
+            <% columnIndex += 1; %>
+          <% } %>
+        </tr>
+      <% } %>
+    </tbody>
+  </table>
+  <% if ([records count] == 0) { %>
+    <p class="admin-note">No records matched the current filters.</p>
+  <% } %>
+  <% if ([bulkActions count] > 0) { %>
+    <section class="admin-actions">
+      <% for (NSDictionary *action in bulkActions) { %>
+        <button type="submit"
+                formaction="<%= [[paths objectForKey:@"html_bulk_action_template"] stringByReplacingOccurrencesOfString:@":action" withString:([action objectForKey:@"name"] ?: @"")] %>"
+                formmethod="post"><%= [action objectForKey:@"label"] %></button>
+      <% } %>
+    </section>
+  <% } %>
+</form>
+
+<section class="admin-actions">
+  <% if ([[pagination objectForKey:@"hasPrevious"] boolValue]) { %>
+    <form method="get" action="<%= [paths objectForKey:@"html_index"] %>">
+      <% for (NSString *key in [parameters allKeys]) { %>
+        <% if ([key isEqual:@"page"] || [key hasPrefix:@"selected__"]) { continue; } %>
+        <input type="hidden" name="<%= key %>" value="<%= [parameters objectForKey:key] ?: @"" %>">
+      <% } %>
+      <input type="hidden" name="page" value="<%= [[pagination objectForKey:@"previousPage"] stringValue] %>">
+      <button type="submit">Previous</button>
+    </form>
+  <% } %>
+  <span>Page <%= [[pagination objectForKey:@"page"] stringValue] ?: @"1" %></span>
+  <% if ([[pagination objectForKey:@"hasNext"] boolValue]) { %>
+    <form method="get" action="<%= [paths objectForKey:@"html_index"] %>">
+      <% for (NSString *key in [parameters allKeys]) { %>
+        <% if ([key isEqual:@"page"] || [key hasPrefix:@"selected__"]) { continue; } %>
+        <input type="hidden" name="<%= key %>" value="<%= [parameters objectForKey:key] ?: @"" %>">
+      <% } %>
+      <input type="hidden" name="page" value="<%= [[pagination objectForKey:@"nextPage"] stringValue] %>">
+      <button type="submit">Next</button>
+    </form>
+  <% } %>
+</section>

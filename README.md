@@ -48,6 +48,7 @@ Arlen is designed to solve the same class of problems as frameworks like Mojolic
 - Phase 13: complete (13A-13I delivered: first-class module substrate, first-party `auth` and `admin-ui` modules, Django-inspired admin resources, `/auth/api` + `/admin/api` surfaces, sample app, and Phase 13 confidence gate).
 - Phase 14: complete (14A-14I delivered: first-party `jobs`, `notifications`, `storage`, `ops`, and `search` modules, Phase 14 sample app, and `phase14-confidence` gate).
 - Phase 15: complete (15A-15E delivered on 2026-03-10: `headless`, `module-ui`, `generated-app-ui`, auth UI examples, and `phase15-confidence`).
+- Phase 16: complete (`16A-16G` delivered on 2026-03-11: `jobs`, `notifications`, `storage`, `search`, `ops`, and `admin-ui` maturity; `examples/phase16_modules_demo` and `phase16-confidence` included. See `docs/PHASE16_ROADMAP.md`).
 
 ## Quick Start
 
@@ -92,7 +93,7 @@ cd MyApp
 /path/to/Arlen/bin/arlen boomhauer --port 3000
 ```
 
-Phase 13/14/15 modules quick path:
+Phase 13/14/15/16 modules quick path:
 
 ```bash
 /path/to/Arlen/build/arlen module add auth
@@ -106,6 +107,10 @@ Phase 13/14/15 modules quick path:
 /path/to/Arlen/build/arlen module assets --output-dir build/module_assets
 /path/to/Arlen/build/arlen module migrate --env development
 ```
+
+See `examples/phase16_modules_demo/README.md` for the canonical app-owned
+`admin-ui` + `search` + `ops` composition path on top of the matured Phase 16
+module stack.
 
 First-party module surfaces:
 - `auth` keeps `/auth/api/...` stable and lets apps choose `headless`, `module-ui`, or `generated-app-ui` ownership for `/auth/...`
@@ -135,6 +140,7 @@ make ci-release-certification
 make ci-phase11
 make phase14-confidence
 make phase15-confidence
+make phase16-confidence
 make test-data-layer
 ```
 
@@ -186,6 +192,7 @@ High-value guides:
 - [Ops Module](docs/OPS_MODULE.md)
 - [Search Module](docs/SEARCH_MODULE.md)
 - [Deployment Guide](docs/DEPLOYMENT.md)
+- [Systemd Runbook](docs/SYSTEMD_RUNBOOK.md)
 - [Password Hashing](docs/PASSWORD_HASHING.md)
 - [Realtime and Composition](docs/REALTIME_COMPOSITION.md)
 - [Ecosystem Services](docs/ECOSYSTEM_SERVICES.md)
@@ -238,6 +245,7 @@ Specifications and roadmaps:
 - [Phase 13 Roadmap](docs/PHASE13_ROADMAP.md)
 - [Phase 14 Roadmap](docs/PHASE14_ROADMAP.md)
 - [Phase 15 Roadmap](docs/PHASE15_ROADMAP.md)
+- [Phase 16 Roadmap](docs/PHASE16_ROADMAP.md)
 - [Competitive Benchmark Roadmap](docs/COMPETITIVE_BENCHMARK_ROADMAP.md)
 - [Phase B Parity Checklist (FastAPI)](docs/PHASEB_PARITY_CHECKLIST_FASTAPI.md)
 - [Phase C Benchmark Protocol](docs/PHASEC_BENCHMARK_PROTOCOL.md)

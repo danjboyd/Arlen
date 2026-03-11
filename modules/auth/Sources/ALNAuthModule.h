@@ -136,6 +136,13 @@ typedef NS_ENUM(NSInteger, ALNAuthModuleErrorCode) {
 - (nullable NSDictionary *)sessionPayloadForContext:(ALNContext *)context
                                         includeUser:(BOOL)includeUser
                                               error:(NSError *_Nullable *_Nullable)error;
+- (nullable NSDictionary *)claimTrustedEmail:(NSString *)email
+                                 displayName:(nullable NSString *)displayName
+                                      source:(nullable NSString *)source
+                      sendPasswordSetupEmail:(BOOL)sendPasswordSetupEmail
+                                     baseURL:(nullable NSString *)baseURL
+                                     context:(ALNContext *)context
+                                       error:(NSError *_Nullable *_Nullable)error;
 - (BOOL)isAdminContext:(ALNContext *)context
                  error:(NSError *_Nullable *_Nullable)error;
 

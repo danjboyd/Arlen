@@ -1,0 +1,119 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+print_usage() {
+  cat <<'USAGE'
+Usage: jobs-worker [options]
+
+Builds the current Arlen app and runs the first-party jobs worker loop.
+
+Options:
+  --env <name>                           Environment name (default: production)
+  --app-root <path>                      App root (default: ARLEN_APP_ROOT or cwd)
+  --framework-root <path>                Framework root (default: ARLEN_FRAMEWORK_ROOT or script root)
+  --once                                 Run one scheduler/worker cycle and exit
+  --limit <n>                            Override jobs worker max jobs per run
+  --poll-interval-seconds <seconds>      Idle sleep between worker polls (default: 5)
+  --run-scheduler                        Run the jobs scheduler inside this worker loop
+  --scheduler-interval-seconds <seconds> Scheduler cadence when --run-scheduler is enabled (default: 60)
+  --help, -h                             Show this help
+USAGE
+}
+
+script_path="${BASH_SOURCE[0]}"
+if resolved="$(readlink -f "$script_path" 2>/dev/null)"; then
+  script_path="$resolved"
+fi
+script_dir="$(cd "$(dirname "$script_path")" && pwd)"
+default_framework_root="$(cd "$script_dir/.." && pwd)"
+
+framework_root="${ARLEN_FRAMEWORK_ROOT:-$default_framework_root}"
+app_root="${ARLEN_APP_ROOT:-$PWD}"
+environment="production"
+
+worker_args=(--jobs-worker)
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --env)
+      [[ $# -ge 2 ]] || { echo "jobs-worker: --env requires a value" >&2; exit 2; }
+      environment="$2"
+      shift 2
+      ;;
+    --app-root)
+      [[ $# -ge 2 ]] || { echo "jobs-worker: --app-root requires a value" >&2; exit 2; }
+      app_root="$2"
+      shift 2
+      ;;
+    --framework-root)
+      [[ $# -ge 2 ]] || { echo "jobs-worker: --framework-root requires a value" >&2; exit 2; }
+      framework_root="$2"
+      shift 2
+      ;;
+    --once)
+      worker_args+=(--jobs-worker-once)
+      shift
+      ;;
+    --limit)
+      [[ $# -ge 2 ]] || { echo "jobs-worker: --limit requires a value" >&2; exit 2; }
+      worker_args+=(--jobs-worker-limit "$2")
+      shift 2
+      ;;
+    --poll-interval-seconds)
+      [[ $# -ge 2 ]] || { echo "jobs-worker: --poll-interval-seconds requires a value" >&2; exit 2; }
+      worker_args+=(--jobs-worker-poll-interval-seconds "$2")
+      shift 2
+      ;;
+    --run-scheduler)
+      worker_args+=(--jobs-worker-run-scheduler)
+      shift
+      ;;
+    --scheduler-interval-seconds)
+      [[ $# -ge 2 ]] || { echo "jobs-worker: --scheduler-interval-seconds requires a value" >&2; exit 2; }
+      worker_args+=(--jobs-worker-scheduler-interval-seconds "$2")
+      shift 2
+      ;;
+    --help|-h)
+      print_usage
+      exit 0
+      ;;
+    *)
+      echo "jobs-worker: unknown argument: $1" >&2
+      exit 2
+      ;;
+  esac
+done
+
+if [[ ! "$framework_root" = /* ]]; then
+  framework_root="$PWD/$framework_root"
+fi
+framework_root="$(cd "$framework_root" && pwd)"
+
+if [[ ! "$app_root" = /* ]]; then
+  app_root="$PWD/$app_root"
+fi
+app_root="$(cd "$app_root" && pwd)"
+
+if [[ ! -f "$framework_root/GNUmakefile" || ! -d "$framework_root/src/Arlen" ]]; then
+  echo "jobs-worker: invalid framework root: $framework_root" >&2
+  exit 1
+fi
+
+if [[ ! -f "$app_root/config/app.plist" ]] || [[ ! -f "$app_root/src/main.m" && ! -f "$app_root/app_lite.m" ]]; then
+  echo "jobs-worker: invalid app root: $app_root" >&2
+  exit 1
+fi
+
+ARLEN_APP_ROOT="$app_root" ARLEN_FRAMEWORK_ROOT="$framework_root" \
+  "$framework_root/bin/boomhauer" --env "$environment" --no-watch --prepare-only >/dev/null
+
+app_binary="$app_root/.boomhauer/build/boomhauer-app"
+if [[ ! -x "$app_binary" ]]; then
+  echo "jobs-worker: expected compiled app binary at $app_binary" >&2
+  exit 1
+fi
+
+export ARLEN_APP_ROOT="$app_root"
+export ARLEN_FRAMEWORK_ROOT="$framework_root"
+
+exec "$app_binary" --env "$environment" "${worker_args[@]}"

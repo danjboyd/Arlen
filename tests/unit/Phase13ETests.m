@@ -6,8 +6,13 @@
 #import <unistd.h>
 
 #import "ALNApplication.h"
+#import "ALNController.h"
 #import "ALNAuthModule.h"
+#import "ALNContext.h"
+#import "ALNRequest.h"
+#import "ALNResponse.h"
 #import "ALNRouter.h"
+#import "ALNServices.h"
 
 static NSUInteger gPhase13EPasswordPolicyCalls = 0;
 static NSUInteger gPhase13EProvisioningCalls = 0;
@@ -105,6 +110,39 @@ static NSUInteger gPhase15UIContextCalls = 0;
 
 @end
 
+@interface Phase16TrustedEmailClaimController : ALNController
+@end
+
+@implementation Phase16TrustedEmailClaimController
+
+- (id)claim:(ALNContext *)ctx {
+  NSDictionary *payload = [NSJSONSerialization JSONObjectWithData:ctx.request.body options:0 error:NULL];
+  payload = [payload isKindOfClass:[NSDictionary class]] ? payload : @{};
+  NSError *error = nil;
+  NSDictionary *result = [[ALNAuthModuleRuntime sharedRuntime]
+      claimTrustedEmail:payload[@"email"]
+            displayName:payload[@"display_name"]
+                 source:payload[@"source"]
+ sendPasswordSetupEmail:[payload[@"send_password_setup_email"] boolValue]
+                baseURL:@"http://claim.example.test"
+                context:ctx
+                  error:&error];
+  if (result == nil) {
+    NSInteger status = (error.code == ALNAuthModuleErrorInvalidConfiguration) ? 500 : 422;
+    [self setStatus:status];
+    return @{
+      @"status" : @"error",
+      @"message" : error.localizedDescription ?: @"claim failed",
+    };
+  }
+  return @{
+    @"status" : @"ok",
+    @"result" : result,
+  };
+}
+
+@end
+
 @interface Phase13ETests : XCTestCase
 @end
 
@@ -191,6 +229,22 @@ static NSUInteger gPhase15UIContextCalls = 0;
   XCTAssertNil(error, @"invalid JSON: %@\n%@", error.localizedDescription, output);
   XCTAssertTrue([payload isKindOfClass:[NSDictionary class]]);
   return payload ?: @{};
+}
+
+- (ALNRequest *)requestWithMethod:(NSString *)method
+                             path:(NSString *)path
+                          headers:(NSDictionary *)headers
+                             body:(NSData *)body {
+  return [[ALNRequest alloc] initWithMethod:method ?: @"GET"
+                                      path:path ?: @"/"
+                               queryString:@""
+                                   headers:headers ?: @{}
+                                      body:body ?: [NSData data]];
+}
+
+- (NSDictionary *)JSONResponseBody:(ALNResponse *)response {
+  NSString *body = [[NSString alloc] initWithData:response.bodyData encoding:NSUTF8StringEncoding] ?: @"";
+  return [self parseJSONDictionary:body];
 }
 
 - (void)setUp {
@@ -432,6 +486,64 @@ static NSUInteger gPhase15UIContextCalls = 0;
   XCTAssertNotNil([app.router routeNamed:@"auth_session"]);
   XCTAssertNotNil([app.router routeNamed:@"auth_verify"]);
   XCTAssertNotNil([app.router routeNamed:@"auth_api_password_reset_form"]);
+}
+
+- (void)testTrustedEmailClaimCreatesSessionAndDeliversReusableSignInEmail {
+  if ([[self pgTestDSN] length] == 0) {
+    return;
+  }
+  ALNApplication *app = [self applicationWithConfig:@{
+    @"csrf" : @{ @"enabled" : @NO },
+  }];
+  ALNInMemoryMailAdapter *mailAdapter =
+      [[ALNInMemoryMailAdapter alloc] initWithAdapterName:@"phase13e_claim_mail"];
+  [app setMailAdapter:mailAdapter];
+
+  NSError *error = nil;
+  XCTAssertTrue([[[ALNAuthModule alloc] init] registerWithApplication:app error:&error]);
+  XCTAssertNil(error);
+  [app registerRouteMethod:@"POST"
+                      path:@"/claim"
+                      name:@"phase13e_claim"
+           controllerClass:[Phase16TrustedEmailClaimController class]
+                     action:@"claim"];
+
+  NSString *email = [NSString stringWithFormat:@"claimed-%@@example.test", [[NSUUID UUID] UUIDString].lowercaseString];
+  NSData *body = [NSJSONSerialization dataWithJSONObject:@{
+    @"email" : email,
+    @"display_name" : @"Claimed Musician",
+    @"send_password_setup_email" : @YES,
+  }
+                                             options:0
+                                               error:NULL];
+  ALNResponse *response = [app dispatchRequest:[self requestWithMethod:@"POST"
+                                                                  path:@"/claim"
+                                                               headers:@{
+                                                                 @"Accept" : @"application/json",
+                                                                 @"Content-Type" : @"application/json",
+                                                               }
+                                                                  body:body]];
+  XCTAssertEqual((NSInteger)200, response.statusCode);
+  NSDictionary *payload = [self JSONResponseBody:response];
+  XCTAssertEqualObjects(@"ok", payload[@"status"]);
+  NSDictionary *result = [payload[@"result"] isKindOfClass:[NSDictionary class]] ? payload[@"result"] : @{};
+  NSDictionary *session = [result[@"session"] isKindOfClass:[NSDictionary class]] ? result[@"session"] : @{};
+  NSDictionary *user = [result[@"user"] isKindOfClass:[NSDictionary class]] ? result[@"user"] : @{};
+  XCTAssertEqualObjects(@YES, result[@"created_user"]);
+  XCTAssertEqualObjects(@YES, result[@"email_verified"]);
+  XCTAssertEqualObjects(@YES, result[@"password_setup_issued"]);
+  XCTAssertEqualObjects(@YES, session[@"authenticated"]);
+  XCTAssertEqualObjects(@"email_link", session[@"provider"]);
+  XCTAssertEqualObjects((@[ @"email_link" ]), session[@"methods"]);
+  XCTAssertEqualObjects(email, [user[@"email"] lowercaseString]);
+  XCTAssertTrue([((NSString *)user[@"email_verified_at"]) length] > 0);
+
+  NSArray *deliveries = [mailAdapter deliveriesSnapshot];
+  XCTAssertEqual((NSUInteger)1, [deliveries count]);
+  NSDictionary *delivery = [deliveries[0] isKindOfClass:[NSDictionary class]] ? deliveries[0] : @{};
+  NSDictionary *message = [delivery[@"message"] isKindOfClass:[NSDictionary class]] ? delivery[@"message"] : @{};
+  XCTAssertEqualObjects(@"Reset your password", message[@"subject"]);
+  XCTAssertTrue([message[@"textBody"] containsString:@"/auth/password/reset?token="]);
 }
 
 - (void)testModuleEjectAuthUIScaffoldsGeneratedTemplatesAndConfig {

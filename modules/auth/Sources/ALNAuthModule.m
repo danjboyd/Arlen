@@ -440,6 +440,10 @@ static NSString *AMStubHS256JWT(NSDictionary *claims, NSString *sharedSecret) {
                                            password:(NSString *)password
                                              source:(NSString *)source
                                               error:(NSError **)error;
+- (nullable NSDictionary *)createTrustedEmailClaimUserWithEmail:(NSString *)email
+                                                    displayName:(NSString *)displayName
+                                                         source:(NSString *)source
+                                                          error:(NSError **)error;
 - (nullable NSDictionary *)createFederatedUserForIdentity:(NSDictionary *)normalizedIdentity
                                                     error:(NSError **)error;
 - (nullable NSDictionary *)authenticateLocalEmail:(NSString *)email
@@ -459,6 +463,8 @@ static NSString *AMStubHS256JWT(NSDictionary *claims, NSString *sharedSecret) {
                                                  error:(NSError **)error;
 - (nullable NSString *)issuePasswordResetTokenForUserID:(NSString *)userID
                                                   error:(NSError **)error;
+- (BOOL)markEmailVerifiedForUserID:(NSString *)userID
+                             error:(NSError **)error;
 - (BOOL)consumeVerificationToken:(NSString *)token
                             user:(NSDictionary *_Nullable *_Nullable)user
                            error:(NSError **)error;
@@ -1067,6 +1073,97 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
   return ok ? createdUser : nil;
 }
 
+- (NSDictionary *)createTrustedEmailClaimUserWithEmail:(NSString *)email
+                                           displayName:(NSString *)displayName
+                                                source:(NSString *)source
+                                                 error:(NSError **)error {
+  NSString *normalizedEmail = AMLowerTrimmedString(email);
+  if ([normalizedEmail length] == 0) {
+    if (error != NULL) {
+      *error = AMError(ALNAuthModuleErrorValidationFailed, @"Email is required", @{ @"field" : @"email" });
+    }
+    return nil;
+  }
+  if (![self registrationAllowedForRequest:@{
+        @"email" : normalizedEmail,
+        @"display_name" : AMTrimmedString(displayName),
+        @"source" : source ?: @"trusted_email_claim",
+      }
+                                 error:error]) {
+    if (error != NULL && *error == NULL) {
+      *error = AMError(ALNAuthModuleErrorPolicyRejected, @"Registration was rejected by policy", nil);
+    }
+    return nil;
+  }
+  if ([self userForEmail:normalizedEmail error:error] != nil) {
+    if (error != NULL) {
+      *error = AMError(ALNAuthModuleErrorValidationFailed, @"Email is already registered", @{ @"field" : @"email" });
+    }
+    return nil;
+  }
+
+  NSString *subject = [NSString stringWithFormat:@"user:%@", [[NSUUID UUID] UUIDString].lowercaseString];
+  NSMutableArray *roles = [NSMutableArray arrayWithObject:@"user"];
+  if ([self.bootstrapAdminEmails containsObject:normalizedEmail] && ![roles containsObject:@"admin"]) {
+    [roles addObject:@"admin"];
+  }
+  NSDictionary *proposedValues = @{
+    @"subject" : subject,
+    @"email" : normalizedEmail,
+    @"display_name" : AMTrimmedString(displayName),
+    @"roles" : roles,
+  };
+  NSDictionary *userValues = [self provisionedUserValuesForEvent:(source ?: @"trusted_email_claim")
+                                                  proposedValues:proposedValues];
+  NSString *finalSubject = AMTrimmedString(userValues[@"subject"]);
+  if ([finalSubject length] == 0) {
+    finalSubject = subject;
+  }
+  NSString *finalEmail = AMLowerTrimmedString(userValues[@"email"]);
+  if ([finalEmail length] == 0) {
+    finalEmail = normalizedEmail;
+  }
+  NSString *finalDisplayName = AMTrimmedString(userValues[@"display_name"]);
+  NSArray *finalRoles = AMJSONArrayFromJSONString(AMJSONString(userValues[@"roles"] ?: roles));
+
+  NSError *hashError = nil;
+  NSString *encodedHash = [ALNPasswordHash hashPasswordString:AMRandomToken(32)
+                                                      options:[ALNPasswordHash defaultArgon2idOptions]
+                                                        error:&hashError];
+  if ([encodedHash length] == 0) {
+    if (error != NULL) {
+      *error = hashError ?: AMError(ALNAuthModuleErrorValidationFailed, @"Failed to provision claim credential", nil);
+    }
+    return nil;
+  }
+
+  __block NSDictionary *createdUser = nil;
+  BOOL ok = [self.database withTransaction:^BOOL(ALNPgConnection *connection, NSError **txError) {
+    NSDictionary *row = [connection executeQueryOne:@"INSERT INTO auth_users "
+                                                 "(subject, email, display_name, roles_json, created_at, updated_at) "
+                                                 "VALUES ($1, $2, $3, $4, NOW(), NOW()) "
+                                                 "RETURNING id::text AS id, subject, email, COALESCE(display_name, '') AS display_name, "
+                                                 "COALESCE(roles_json, '[]') AS roles_json, '' AS email_verified_at"
+                                       parameters:@[ finalSubject, finalEmail, finalDisplayName ?: @"", AMJSONString(finalRoles ?: @[]) ]
+                                            error:txError];
+    if (row == nil) {
+      return NO;
+    }
+    NSString *userID = AMTrimmedString(row[@"id"]);
+    NSInteger insertedCredential = [connection executeCommand:@"INSERT INTO auth_local_credentials "
+                                                         "(user_id, password_hash, created_at, updated_at) "
+                                                         "VALUES ($1, $2, NOW(), NOW())"
+                                                   parameters:@[ userID ?: @"", encodedHash ]
+                                                        error:txError];
+    if (insertedCredential < 0) {
+      return NO;
+    }
+    createdUser = AMUserDictionaryFromRow(row);
+    return (createdUser != nil);
+  } error:error];
+  return ok ? createdUser : nil;
+}
+
 - (NSDictionary *)createFederatedUserForIdentity:(NSDictionary *)normalizedIdentity
                                            error:(NSError **)error {
   NSString *email = AMLowerTrimmedString(normalizedIdentity[@"email"]);
@@ -1244,6 +1341,23 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
   return (result >= 0) ? token : nil;
 }
 
+- (BOOL)markEmailVerifiedForUserID:(NSString *)userID
+                             error:(NSError **)error {
+  NSString *normalizedUserID = AMTrimmedString(userID);
+  if ([normalizedUserID length] == 0) {
+    if (error != NULL) {
+      *error = AMError(ALNAuthModuleErrorValidationFailed, @"User identifier is required", @{ @"field" : @"user_id" });
+    }
+    return NO;
+  }
+  NSInteger updated = [self.database executeCommand:@"UPDATE auth_users "
+                                                "SET email_verified_at = COALESCE(email_verified_at, NOW()), updated_at = NOW() "
+                                                "WHERE id = $1"
+                                          parameters:@[ normalizedUserID ]
+                                               error:error];
+  return (updated >= 0);
+}
+
 - (BOOL)consumeVerificationToken:(NSString *)token
                             user:(NSDictionary **)user
                            error:(NSError **)error {
@@ -1331,9 +1445,11 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
     if (marked < 0) {
       return NO;
     }
-    NSInteger updated = [connection executeCommand:@"UPDATE auth_local_credentials "
-                                               "SET password_hash = $2, updated_at = NOW() "
-                                               "WHERE user_id = $1"
+    NSInteger updated = [connection executeCommand:@"INSERT INTO auth_local_credentials "
+                                               "(user_id, password_hash, created_at, updated_at) "
+                                               "VALUES ($1, $2, NOW(), NOW()) "
+                                               "ON CONFLICT (user_id) DO UPDATE "
+                                               "SET password_hash = EXCLUDED.password_hash, updated_at = NOW()"
                                          parameters:@[ userID, encodedHash ]
                                               error:txError];
     return (updated >= 0);
@@ -1507,6 +1623,110 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
     }
   }
   return payload;
+}
+
+- (NSDictionary *)claimTrustedEmail:(NSString *)email
+                        displayName:(NSString *)displayName
+                             source:(NSString *)source
+             sendPasswordSetupEmail:(BOOL)sendPasswordSetupEmail
+                            baseURL:(NSString *)baseURL
+                            context:(ALNContext *)context
+                              error:(NSError **)error {
+  NSString *normalizedEmail = AMLowerTrimmedString(email);
+  if ([normalizedEmail length] == 0) {
+    if (error != NULL) {
+      *error = AMError(ALNAuthModuleErrorValidationFailed, @"Email is required", @{ @"field" : @"email" });
+    }
+    return nil;
+  }
+  if (context == nil) {
+    if (error != NULL) {
+      *error = AMError(ALNAuthModuleErrorValidationFailed, @"Context is required for email-link session claim", nil);
+    }
+    return nil;
+  }
+  NSString *claimSource = ([AMTrimmedString(source) length] > 0) ? AMTrimmedString(source) : @"trusted_email_claim";
+  NSError *lookupError = nil;
+  NSDictionary *user = [self userForEmail:normalizedEmail error:&lookupError];
+  BOOL createdUser = NO;
+  if (user == nil) {
+    if (lookupError != nil) {
+      if (error != NULL) {
+        *error = lookupError;
+      }
+      return nil;
+    }
+    user = [self createTrustedEmailClaimUserWithEmail:normalizedEmail
+                                          displayName:displayName
+                                               source:claimSource
+                                                error:error];
+    if (user == nil) {
+      return nil;
+    }
+    createdUser = YES;
+  }
+
+  NSString *userID = AMTrimmedString(user[@"id"]);
+  if ([userID length] == 0) {
+    if (error != NULL) {
+      *error = AMError(ALNAuthModuleErrorNotFound, @"Unable to resolve claimed user", @{ @"email" : normalizedEmail });
+    }
+    return nil;
+  }
+  if (![self markEmailVerifiedForUserID:userID error:error]) {
+    return nil;
+  }
+  user = [self userForSubject:AMTrimmedString(user[@"subject"]) error:error] ?: user;
+
+  BOOL passwordSetupIssued = NO;
+  if (sendPasswordSetupEmail) {
+    if (self.mailAdapter == nil) {
+      if (error != NULL) {
+        *error = AMError(ALNAuthModuleErrorInvalidConfiguration,
+                         @"Mail adapter is required when sendPasswordSetupEmail is enabled",
+                         nil);
+      }
+      return nil;
+    }
+    NSString *resolvedBaseURL = AMTrimmedString(baseURL);
+    if ([resolvedBaseURL length] == 0) {
+      if (error != NULL) {
+        *error = AMError(ALNAuthModuleErrorValidationFailed,
+                         @"baseURL is required when sending a password setup email",
+                         @{ @"field" : @"baseURL" });
+      }
+      return nil;
+    }
+    NSString *token = [self issuePasswordResetTokenForUserID:userID error:error];
+    if ([token length] == 0) {
+      return nil;
+    }
+    if (![self sendNotificationEvent:@"password_reset"
+                                user:user
+                               token:token
+                             baseURL:resolvedBaseURL
+                               error:error]) {
+      return nil;
+    }
+    passwordSetupIssued = YES;
+  }
+
+  NSDictionary *session = [self startSessionForUser:user
+                                           provider:@"email_link"
+                                            methods:@[ @"email_link" ]
+                                            context:context
+                                              error:error];
+  if (session == nil) {
+    return nil;
+  }
+  return @{
+    @"user" : user ?: @{},
+    @"session" : session ?: @{},
+    @"created_user" : @(createdUser),
+    @"email_verified" : @([AMTrimmedString(user[@"email_verified_at"]) length] > 0),
+    @"password_setup_issued" : @(passwordSetupIssued),
+    @"source" : claimSource,
+  };
 }
 
 - (BOOL)isAdminContext:(ALNContext *)context

@@ -1,6 +1,6 @@
 # Storage Module
 
-The first-party `storage` module productizes collection registration, direct uploads, signed downloads, and variant processing on top of `ALNAttachmentAdapter` and the `jobs` module.
+The first-party `storage` module productizes collection registration, direct uploads, signed downloads, persistent object catalogs, and transform-backed variant processing on top of `ALNAttachmentAdapter` and the `jobs` module.
 
 ## Install
 
@@ -24,6 +24,13 @@ Configure provider classes in app config:
 
 ```plist
 storageModule = {
+  persistence = {
+    enabled = YES;
+    path = "var/module_state/storage-development.plist";
+  };
+  cleanup = {
+    intervalSeconds = 300;
+  };
   collections = {
     classes = ( "MyAppStorageCollectionProvider" );
   };
@@ -45,6 +52,7 @@ Each collection definition supplies metadata such as:
 - `variants`
 
 Definitions may also implement the optional validation hook `storageModuleValidateObjectNamed:contentType:sizeBytes:metadata:runtime:error:` for app-specific policy checks.
+Definitions may implement `storageModuleVariantRepresentationForObject:variantDefinition:originalData:originalMetadata:runtime:error:` to generate first-party transformed variants rather than copy-only derivatives.
 
 ## Surfaces
 
@@ -82,7 +90,7 @@ The management JSON routes are included in module OpenAPI output.
 ## Upload and Download Flow
 
 - `POST /storage/api/upload-sessions` validates collection policy and issues a signed upload token
-- `POST /storage/api/upload-sessions/:sessionID/upload` persists the object through the configured attachment adapter
+- `POST /storage/api/upload-sessions/:sessionID/upload` persists the object through the configured attachment adapter and durable module state
 - `POST /storage/api/collections/:collection/objects/:objectID/download-token` issues a signed download token
 - `GET /storage/api/download/:token` streams the stored object if the token is valid and unexpired
 
@@ -90,6 +98,7 @@ Config knobs:
 
 - `storageModule.uploadSessionTTLSeconds`
 - `storageModule.downloadTokenTTLSeconds`
+- `storageModule.cleanup.intervalSeconds`
 - `storageModule.signingSecret`
 
 ## Variants
@@ -97,7 +106,19 @@ Config knobs:
 - collection metadata can declare variant definitions
 - storing an object with variants marks the object `variantState = pending`
 - the module queues `storage.generate_variant` jobs through the shared jobs runtime
+- failed variant jobs mark the variant and object state as `failed` with persisted error metadata
 - admin HTML, admin JSON, and shared `admin-ui` actions can trigger variant regeneration
+
+## Lifecycle And Adapter Capabilities
+
+- the module registers the maintenance job `storage.cleanup`
+- the default schedule `storage.cleanup.default` runs on the `maintenance` queue
+- object deletion, upload-session expiry, variant success/failure, and maintenance runs are recorded in the module activity log
+- dashboard/config summaries expose attachment adapter capability metadata for:
+  - `temporaryDownloadURL`
+  - `readOnly`
+  - `scoped`
+  - `mirroring`
 
 ## Admin UI Integration
 
@@ -117,10 +138,12 @@ Manifest defaults:
 - API prefix: `/storage/api`
 - upload session TTL: `900` seconds
 - download token TTL: `300` seconds
+- cleanup interval: `300` seconds
 - signing secret: `storage-module-signing-secret`
+- persistence: enabled outside `test`, with an auto-resolved module state path when no explicit path is provided
 
 ## Current Limits
 
-- object catalog and upload-session state are runtime-managed rather than backed by dedicated module tables
-- the current first-party variant processor copies the original attachment bytes into variant attachments and tracks readiness/state transitions
+- first-party analysis metadata is deterministic but lightweight; dimensions depend on available object metadata and the configured transform hook rather than a built-in media analyzer stack
+- first-party preview/variant support is image-first; PDF/video-specific representation hooks remain future work
 - collection filtering is simple search over collection, name, type, and object identifier

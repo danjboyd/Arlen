@@ -51,6 +51,15 @@
   XCTAssertTrue(clangRecipeCount > 0, @"expected at least one clang recipe in GNUmakefile");
 }
 
+- (void)testGNUmakefileCentralizesLinkLibrariesWithDispatch {
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *makefilePath = [repoRoot stringByAppendingPathComponent:@"GNUmakefile"];
+  NSString *makefile = [self readFile:makefilePath];
+
+  XCTAssertTrue([makefile containsString:@"BASE_LINK_LIBS := $$(gnustep-config --base-libs) -ldl -lcrypto -ldispatch"]);
+  XCTAssertTrue([makefile containsString:@"XCTEST_LINK_LIBS := $(BASE_LINK_LIBS) -lXCTest"]);
+}
+
 - (void)testBoomhauerCompilePathEnforcesARC {
   NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
   NSString *scriptPath = [repoRoot stringByAppendingPathComponent:@"bin/boomhauer"];
@@ -123,6 +132,21 @@
   XCTAssertTrue([script containsString:@"-DARLEN_ENABLE_YYJSON=\"$enable_yyjson\""]);
   XCTAssertTrue([script containsString:@"-DARLEN_ENABLE_LLHTTP=\"$enable_llhttp\""]);
   XCTAssertTrue([script containsString:@"-DARGON2_NO_THREADS=1"]);
+  XCTAssertTrue([script containsString:@"-ldispatch"]);
+}
+
+- (void)testJobsWorkerCLIAndScriptAreShipped {
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *toolPath = [repoRoot stringByAppendingPathComponent:@"tools/arlen.m"];
+  NSString *tool = [self readFile:toolPath];
+  NSString *scriptPath = [repoRoot stringByAppendingPathComponent:@"bin/jobs-worker"];
+  NSString *script = [self readFile:scriptPath];
+
+  XCTAssertTrue([tool containsString:@"jobs worker [worker args...]"]);
+  XCTAssertTrue([tool containsString:@"./bin/jobs-worker"]);
+  XCTAssertTrue([script containsString:@"--run-scheduler"]);
+  XCTAssertTrue([script containsString:@"--jobs-worker"]);
+  XCTAssertTrue([script containsString:@"--no-watch --prepare-only"]);
 }
 
 - (void)testBoomhauerWatchModeBuildsFallbackServerLazily {

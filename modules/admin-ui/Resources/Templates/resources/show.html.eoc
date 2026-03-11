@@ -40,9 +40,41 @@
         <input type="hidden" name="csrf_token" value="<%= [ctx objectForKey:@"csrfToken"] %>">
         <% for (NSDictionary *field in editableFields) { %>
           <% NSString *fieldName = [field objectForKey:@"name"]; %>
+          <% NSString *inputType = [field objectForKey:@"inputType"] ?: @"text"; %>
+          <% NSArray *choices = [field objectForKey:@"choices"] ?: @[]; %>
+          <% NSDictionary *autocomplete = [field objectForKey:@"autocomplete"] ?: @{}; %>
+          <% BOOL autocompleteEnabled = [[autocomplete objectForKey:@"enabled"] boolValue]; %>
+          <% NSString *datalistID = [NSString stringWithFormat:@"field-%@-choices", fieldName]; %>
           <label>
             <span><%= [field objectForKey:@"label"] %></span>
-            <input type="text" name="<%= fieldName %>" value="<%= [record objectForKey:fieldName] ?: @"" %>">
+            <% if ([[field objectForKey:@"multiline"] boolValue]) { %>
+              <textarea name="<%= fieldName %>" placeholder="<%= [field objectForKey:@"placeholder"] ?: @"" %>" <%= [[field objectForKey:@"required"] boolValue] ? @"required" : @"" %>><%= [record objectForKey:fieldName] ?: @"" %></textarea>
+            <% } else if (autocompleteEnabled) { %>
+              <input type="<%= inputType %>"
+                     name="<%= fieldName %>"
+                     value="<%= [record objectForKey:fieldName] ?: @"" %>"
+                     placeholder="<%= [field objectForKey:@"placeholder"] ?: @"" %>"
+                     <%= [[field objectForKey:@"required"] boolValue] ? @"required" : @"" %>
+                     <%== [NSString stringWithFormat:@"list=\"%@\" data-autocomplete-path=\"%@\"", datalistID, [autocomplete objectForKey:@"path"] ?: @""] %>>
+              <datalist id="<%= datalistID %>">
+                <% for (NSDictionary *choice in choices) { %>
+                  <option value="<%= [choice objectForKey:@"value"] ?: @"" %>"><%= [choice objectForKey:@"label"] ?: [choice objectForKey:@"value"] ?: @"" %></option>
+                <% } %>
+              </datalist>
+            <% } else if ([choices count] > 0) { %>
+              <select name="<%= fieldName %>" <%= [[field objectForKey:@"required"] boolValue] ? @"required" : @"" %>>
+                <% for (NSDictionary *choice in choices) { %>
+                  <% NSString *value = [choice objectForKey:@"value"] ?: @""; %>
+                  <option value="<%= value %>" <%= [[[record objectForKey:fieldName] description] isEqual:value] ? @"selected" : @"" %>><%= [choice objectForKey:@"label"] ?: value %></option>
+                <% } %>
+              </select>
+            <% } else { %>
+              <input type="<%= inputType %>"
+                     name="<%= fieldName %>"
+                     value="<%= [record objectForKey:fieldName] ?: @"" %>"
+                     placeholder="<%= [field objectForKey:@"placeholder"] ?: @"" %>"
+                     <%= [[field objectForKey:@"required"] boolValue] ? @"required" : @"" %>>
+            <% } %>
           </label>
         <% } %>
         <div class="admin-actions">

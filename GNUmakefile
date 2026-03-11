@@ -81,8 +81,10 @@ endif
 ifneq ($(findstring -fno-objc-arc,$(OBJC_FLAGS)),)
 $(error OBJC_FLAGS cannot disable ARC)
 endif
+BASE_LINK_LIBS := $$(gnustep-config --base-libs) -ldl -lcrypto -ldispatch
+XCTEST_LINK_LIBS := $(BASE_LINK_LIBS) -lXCTest
 
-.PHONY: all eocc transpile module-transpile tech-demo-transpile generated-compile arlen boomhauer tech-demo-server api-reference-server auth-primitives-server migration-sample-server arlen-data-example json-perf-bench dispatch-perf-bench http-parse-perf-bench route-match-perf-bench backend-contract-matrix test-data-layer dev-server tech-demo smoke-render smoke routes build-tests test test-unit test-integration perf perf-fast parity-phaseb perf-phasec perf-phased deploy-smoke phase5e-confidence phase12-confidence phase13-confidence phase14-confidence phase15-confidence ci-quality ci-sanitizers ci-fault-injection ci-release-certification ci-json-abstraction ci-json-perf ci-dispatch-perf ci-http-parse-perf ci-route-match-perf ci-backend-parity-matrix ci-protocol-adversarial ci-syscall-faults ci-allocation-faults ci-soak ci-chaos-restart ci-static-analysis ci-blob-throughput ci-phase11-protocol-adversarial ci-phase11-fuzz ci-phase11-live-adversarial ci-phase11-sanitizers ci-phase11 ci-docs check docs-api docs-html docs-serve clean
+.PHONY: all eocc transpile module-transpile tech-demo-transpile generated-compile arlen boomhauer tech-demo-server api-reference-server auth-primitives-server migration-sample-server arlen-data-example json-perf-bench dispatch-perf-bench http-parse-perf-bench route-match-perf-bench backend-contract-matrix test-data-layer dev-server tech-demo smoke-render smoke routes build-tests test test-unit test-integration perf perf-fast parity-phaseb perf-phasec perf-phased deploy-smoke phase5e-confidence phase12-confidence phase13-confidence phase14-confidence phase15-confidence phase16-confidence ci-quality ci-sanitizers ci-fault-injection ci-release-certification ci-json-abstraction ci-json-perf ci-dispatch-perf ci-http-parse-perf ci-route-match-perf ci-backend-parity-matrix ci-protocol-adversarial ci-syscall-faults ci-allocation-faults ci-soak ci-chaos-restart ci-static-analysis ci-blob-throughput ci-phase11-protocol-adversarial ci-phase11-fuzz ci-phase11-live-adversarial ci-phase11-sanitizers ci-phase11 ci-docs check docs-api docs-html docs-serve clean
 
 all: eocc transpile generated-compile arlen boomhauer
 
@@ -90,7 +92,7 @@ $(BUILD_DIR):
 >mkdir -p $(BUILD_DIR)
 
 $(EOC_TOOL): tools/eocc.m $(EOC_RUNTIME_SRCS) | $(BUILD_DIR)
->source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) tools/eocc.m $(EOC_RUNTIME_SRCS) -o $(EOC_TOOL) $$(gnustep-config --base-libs) -ldl -lcrypto
+>source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) tools/eocc.m $(EOC_RUNTIME_SRCS) -o $(EOC_TOOL) $(BASE_LINK_LIBS)
 
 eocc: $(EOC_TOOL)
 
@@ -127,35 +129,35 @@ generated-compile: transpile
 >  echo "No generated template sources found in $(GEN_DIR)"; \
 >  exit 1; \
 >fi; \
->clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) $$generated_files $(FRAMEWORK_SRCS) -shared -fPIC -o $(BUILD_DIR)/libArlenFramework.so $$(gnustep-config --base-libs) -ldl -lcrypto
+>clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) $$generated_files $(FRAMEWORK_SRCS) -shared -fPIC -o $(BUILD_DIR)/libArlenFramework.so $(BASE_LINK_LIBS)
 
 $(ARLEN_TOOL): tools/arlen.m src/Arlen/Core/ALNConfig.m src/Arlen/Core/ALNModuleSystem.m src/Arlen/Data/ALNMigrationRunner.m src/Arlen/Data/ALNPg.m src/Arlen/Data/ALNSQLBuilder.m src/Arlen/Data/ALNSchemaCodegen.m $(JSON_SERIALIZATION_SRCS) | $(BUILD_DIR)
->source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) tools/arlen.m src/Arlen/Core/ALNConfig.m src/Arlen/Core/ALNModuleSystem.m src/Arlen/Data/ALNMigrationRunner.m src/Arlen/Data/ALNPg.m src/Arlen/Data/ALNSQLBuilder.m src/Arlen/Data/ALNSchemaCodegen.m $(JSON_SERIALIZATION_SRCS) -o $(ARLEN_TOOL) $$(gnustep-config --base-libs) -ldl -lcrypto
+>source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) tools/arlen.m src/Arlen/Core/ALNConfig.m src/Arlen/Core/ALNModuleSystem.m src/Arlen/Data/ALNMigrationRunner.m src/Arlen/Data/ALNPg.m src/Arlen/Data/ALNSQLBuilder.m src/Arlen/Data/ALNSchemaCodegen.m $(JSON_SERIALIZATION_SRCS) -o $(ARLEN_TOOL) $(BASE_LINK_LIBS)
 
 arlen: $(ARLEN_TOOL)
 
 $(JSON_PERF_BENCH_TOOL): tools/json_perf_bench.m $(JSON_SERIALIZATION_SRCS) | $(BUILD_DIR)
->source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) tools/json_perf_bench.m $(JSON_SERIALIZATION_SRCS) -o $(JSON_PERF_BENCH_TOOL) $$(gnustep-config --base-libs) -ldl -lcrypto
+>source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) tools/json_perf_bench.m $(JSON_SERIALIZATION_SRCS) -o $(JSON_PERF_BENCH_TOOL) $(BASE_LINK_LIBS)
 
 json-perf-bench: $(JSON_PERF_BENCH_TOOL)
 
 $(DISPATCH_PERF_BENCH_TOOL): tools/dispatch_perf_bench.m $(FRAMEWORK_SRCS) | $(BUILD_DIR)
->source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) tools/dispatch_perf_bench.m $(FRAMEWORK_SRCS) -o $(DISPATCH_PERF_BENCH_TOOL) $$(gnustep-config --base-libs) -ldl -lcrypto
+>source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) tools/dispatch_perf_bench.m $(FRAMEWORK_SRCS) -o $(DISPATCH_PERF_BENCH_TOOL) $(BASE_LINK_LIBS)
 
 dispatch-perf-bench: $(DISPATCH_PERF_BENCH_TOOL)
 
 $(HTTP_PARSE_PERF_BENCH_TOOL): tools/http_parse_perf_bench.m src/Arlen/HTTP/ALNRequest.m src/Arlen/Support/ALNJSONSerialization.m $(THIRD_PARTY_C_SRCS) | $(BUILD_DIR)
->source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) tools/http_parse_perf_bench.m src/Arlen/HTTP/ALNRequest.m src/Arlen/Support/ALNJSONSerialization.m $(THIRD_PARTY_C_SRCS) -o $(HTTP_PARSE_PERF_BENCH_TOOL) $$(gnustep-config --base-libs) -ldl -lcrypto
+>source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) tools/http_parse_perf_bench.m src/Arlen/HTTP/ALNRequest.m src/Arlen/Support/ALNJSONSerialization.m $(THIRD_PARTY_C_SRCS) -o $(HTTP_PARSE_PERF_BENCH_TOOL) $(BASE_LINK_LIBS)
 
 http-parse-perf-bench: $(HTTP_PARSE_PERF_BENCH_TOOL)
 
 $(ROUTE_MATCH_PERF_BENCH_TOOL): tools/route_match_perf_bench.m src/Arlen/MVC/Routing/ALNRoute.m src/Arlen/MVC/Routing/ALNRouter.m src/Arlen/Support/ALNJSONSerialization.m $(YYJSON_C_SRCS) | $(BUILD_DIR)
->source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) tools/route_match_perf_bench.m src/Arlen/MVC/Routing/ALNRoute.m src/Arlen/MVC/Routing/ALNRouter.m src/Arlen/Support/ALNJSONSerialization.m $(YYJSON_C_SRCS) -o $(ROUTE_MATCH_PERF_BENCH_TOOL) $$(gnustep-config --base-libs) -ldl -lcrypto
+>source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) tools/route_match_perf_bench.m src/Arlen/MVC/Routing/ALNRoute.m src/Arlen/MVC/Routing/ALNRouter.m src/Arlen/Support/ALNJSONSerialization.m $(YYJSON_C_SRCS) -o $(ROUTE_MATCH_PERF_BENCH_TOOL) $(BASE_LINK_LIBS)
 
 route-match-perf-bench: $(ROUTE_MATCH_PERF_BENCH_TOOL)
 
 $(BACKEND_CONTRACT_MATRIX_TOOL): tools/backend_contract_matrix.m src/Arlen/HTTP/ALNRequest.m src/Arlen/Support/ALNJSONSerialization.m $(THIRD_PARTY_C_SRCS) | $(BUILD_DIR)
->source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) tools/backend_contract_matrix.m src/Arlen/HTTP/ALNRequest.m src/Arlen/Support/ALNJSONSerialization.m $(THIRD_PARTY_C_SRCS) -o $(BACKEND_CONTRACT_MATRIX_TOOL) $$(gnustep-config --base-libs) -ldl -lcrypto
+>source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) tools/backend_contract_matrix.m src/Arlen/HTTP/ALNRequest.m src/Arlen/Support/ALNJSONSerialization.m $(THIRD_PARTY_C_SRCS) -o $(BACKEND_CONTRACT_MATRIX_TOOL) $(BASE_LINK_LIBS)
 
 backend-contract-matrix: $(BACKEND_CONTRACT_MATRIX_TOOL)
 
@@ -165,7 +167,7 @@ $(BOOMHAUER_TOOL): tools/boomhauer.m $(FRAMEWORK_SRCS) transpile
 >  echo "No generated template sources found in $(GEN_DIR)"; \
 >  exit 1; \
 >fi; \
->clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) tools/boomhauer.m $(FRAMEWORK_SRCS) $$generated_files -o $(BOOMHAUER_TOOL) $$(gnustep-config --base-libs) -ldl -lcrypto
+>clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) tools/boomhauer.m $(FRAMEWORK_SRCS) $$generated_files -o $(BOOMHAUER_TOOL) $(BASE_LINK_LIBS)
 
 boomhauer: $(BOOMHAUER_TOOL)
 dev-server: boomhauer
@@ -176,27 +178,27 @@ $(TECH_DEMO_SERVER_TOOL): examples/tech_demo/src/tech_demo_server.m $(FRAMEWORK_
 >  echo "No generated template sources found in $(TECH_DEMO_GEN_DIR)"; \
 >  exit 1; \
 >fi; \
->clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) examples/tech_demo/src/tech_demo_server.m $(FRAMEWORK_SRCS) $$generated_files -o $(TECH_DEMO_SERVER_TOOL) $$(gnustep-config --base-libs) -ldl -lcrypto
+>clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) examples/tech_demo/src/tech_demo_server.m $(FRAMEWORK_SRCS) $$generated_files -o $(TECH_DEMO_SERVER_TOOL) $(BASE_LINK_LIBS)
 
 tech-demo-server: $(TECH_DEMO_SERVER_TOOL)
 
 $(API_REFERENCE_SERVER_TOOL): examples/api_reference/src/api_reference_server.m $(FRAMEWORK_SRCS)
->source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) examples/api_reference/src/api_reference_server.m $(FRAMEWORK_SRCS) -o $(API_REFERENCE_SERVER_TOOL) $$(gnustep-config --base-libs) -ldl -lcrypto
+>source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) examples/api_reference/src/api_reference_server.m $(FRAMEWORK_SRCS) -o $(API_REFERENCE_SERVER_TOOL) $(BASE_LINK_LIBS)
 
 api-reference-server: $(API_REFERENCE_SERVER_TOOL)
 
 $(AUTH_PRIMITIVES_SERVER_TOOL): examples/auth_primitives/src/auth_primitives_server.m $(FRAMEWORK_SRCS)
->source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) examples/auth_primitives/src/auth_primitives_server.m $(FRAMEWORK_SRCS) -o $(AUTH_PRIMITIVES_SERVER_TOOL) $$(gnustep-config --base-libs) -ldl -lcrypto
+>source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) examples/auth_primitives/src/auth_primitives_server.m $(FRAMEWORK_SRCS) -o $(AUTH_PRIMITIVES_SERVER_TOOL) $(BASE_LINK_LIBS)
 
 auth-primitives-server: $(AUTH_PRIMITIVES_SERVER_TOOL)
 
 $(MIGRATION_SAMPLE_SERVER_TOOL): examples/gsweb_migration/src/migration_sample_server.m $(FRAMEWORK_SRCS)
->source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) examples/gsweb_migration/src/migration_sample_server.m $(FRAMEWORK_SRCS) -o $(MIGRATION_SAMPLE_SERVER_TOOL) $$(gnustep-config --base-libs) -ldl -lcrypto
+>source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) examples/gsweb_migration/src/migration_sample_server.m $(FRAMEWORK_SRCS) -o $(MIGRATION_SAMPLE_SERVER_TOOL) $(BASE_LINK_LIBS)
 
 migration-sample-server: $(MIGRATION_SAMPLE_SERVER_TOOL)
 
 $(ARLEN_DATA_EXAMPLE_TOOL): examples/arlen_data/src/arlen_data_example.m
->source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) -Isrc examples/arlen_data/src/arlen_data_example.m $(ARLEN_DATA_SRCS) $(JSON_SERIALIZATION_SRCS) -o $(ARLEN_DATA_EXAMPLE_TOOL) $$(gnustep-config --base-libs) -ldl -lcrypto
+>source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) -Isrc examples/arlen_data/src/arlen_data_example.m $(ARLEN_DATA_SRCS) $(JSON_SERIALIZATION_SRCS) -o $(ARLEN_DATA_EXAMPLE_TOOL) $(BASE_LINK_LIBS)
 
 arlen-data-example: $(ARLEN_DATA_EXAMPLE_TOOL)
 
@@ -212,7 +214,7 @@ $(SMOKE_RENDER_TOOL): tools/eoc_smoke_render.m transpile
 >  echo "No generated template sources found in $(GEN_DIR)"; \
 >  exit 1; \
 >fi; \
->clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) tools/eoc_smoke_render.m src/Arlen/MVC/Template/ALNEOCRuntime.m $$generated_files -o $(SMOKE_RENDER_TOOL) $$(gnustep-config --base-libs) -ldl -lcrypto
+>clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) tools/eoc_smoke_render.m src/Arlen/MVC/Template/ALNEOCRuntime.m $$generated_files -o $(SMOKE_RENDER_TOOL) $(BASE_LINK_LIBS)
 
 smoke-render: $(SMOKE_RENDER_TOOL)
 
@@ -220,14 +222,14 @@ $(UNIT_TEST_BIN): $(UNIT_TEST_SRCS) $(FRAMEWORK_SRCS) $(MODULE_SRCS) transpile m
 >mkdir -p $(UNIT_TEST_BUNDLE)/Resources
 >source $(GNUSTEP_SH) && generated_files="$$(find $(GEN_DIR) -type f -name '*.m' | sort)"; \
 >module_generated_files="$$(find $(MODULE_GEN_DIR) -type f -name '*.m' 2>/dev/null | sort)"; \
->clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) $(UNIT_TEST_SRCS) $(FRAMEWORK_SRCS) $(MODULE_SRCS) $$generated_files $$module_generated_files -shared -fPIC -o $(UNIT_TEST_BIN) $$(gnustep-config --base-libs) -ldl -lcrypto -lXCTest
+>clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) $(UNIT_TEST_SRCS) $(FRAMEWORK_SRCS) $(MODULE_SRCS) $$generated_files $$module_generated_files -shared -fPIC -o $(UNIT_TEST_BIN) $(XCTEST_LINK_LIBS)
 >cp tests/Info-gnustep-unit.plist $(UNIT_TEST_BUNDLE)/Resources/Info-gnustep.plist
 
 $(INTEGRATION_TEST_BIN): $(INTEGRATION_TEST_SRCS) $(FRAMEWORK_SRCS) $(MODULE_SRCS) transpile module-transpile boomhauer tech-demo-server api-reference-server auth-primitives-server migration-sample-server
 >mkdir -p $(INTEGRATION_TEST_BUNDLE)/Resources
 >source $(GNUSTEP_SH) && generated_files="$$(find $(GEN_DIR) -type f -name '*.m' | sort)"; \
 >module_generated_files="$$(find $(MODULE_GEN_DIR) -type f -name '*.m' 2>/dev/null | sort)"; \
->clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) $(INTEGRATION_TEST_SRCS) $(FRAMEWORK_SRCS) $(MODULE_SRCS) $$generated_files $$module_generated_files -shared -fPIC -o $(INTEGRATION_TEST_BIN) $$(gnustep-config --base-libs) -ldl -lcrypto -lXCTest
+>clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) $(INTEGRATION_TEST_SRCS) $(FRAMEWORK_SRCS) $(MODULE_SRCS) $$generated_files $$module_generated_files -shared -fPIC -o $(INTEGRATION_TEST_BIN) $(XCTEST_LINK_LIBS)
 >cp tests/Info-gnustep-integration.plist $(INTEGRATION_TEST_BUNDLE)/Resources/Info-gnustep.plist
 
 build-tests: $(UNIT_TEST_BIN) $(INTEGRATION_TEST_BIN)
@@ -277,6 +279,9 @@ phase14-confidence:
 
 phase15-confidence:
 >bash ./tools/ci/run_phase15_confidence.sh
+
+phase16-confidence:
+>bash ./tools/ci/run_phase16_confidence.sh
 
 ci-quality:
 >bash ./tools/ci/run_phase5e_quality.sh

@@ -1,6 +1,6 @@
 # Arlen Phase 2 + Phase 3 Roadmap Index
 
-Status: Active (Phase 2A-2D complete; Phase 3A-3H complete; Phase 4A-4E complete; Phase 5A-5E complete; Phase 7A/7B/7C/7D/7E/7F/7G/7H initial slices implemented; Phase 7 follow-on active; Phase 8A complete; Phase 8B complete; Phase 9A/9B/9C/9D/9E/9F/9G/9H/9I/9J complete; Phase 10 complete with 10A-10M delivered; Phase 11 complete with 11A-11F delivered; Phase 12 complete with 12A-12F delivered; Phase 13 complete with 13A-13I delivered; Phase 14 complete with 14A-14I delivered; Phase 15 complete with 15A-15E delivered)
+Status: Active (Phase 2A-2D complete; Phase 3A-3H complete; Phase 4A-4E complete; Phase 5A-5E complete; Phase 7A/7B/7C/7D/7E/7F/7G/7H initial slices implemented; Phase 7 follow-on active; Phase 8A complete; Phase 8B complete; Phase 9A/9B/9C/9D/9E/9F/9G/9H/9I/9J complete; Phase 10 complete with 10A-10M delivered; Phase 11 complete with 11A-11F delivered; Phase 12 complete with 12A-12F delivered; Phase 13 complete with 13A-13I delivered; Phase 14 complete with 14A-14I delivered; Phase 15 complete with 15A-15E delivered; Phase 16 planned)
 Last updated: 2026-03-10
 
 This index points to the current roadmap documents:
@@ -207,6 +207,13 @@ Phase 15 execution is defined in `docs/PHASE15_ROADMAP.md`, with current deliver
 - app-owned guest-shell layout/context hook and partial override model shipped
 - `arlen module eject auth-ui --json` shipped for `generated-app-ui`
 - docs, examples, focused HTTP coverage, and `make phase15-confidence` shipped
+
+Phase 16 execution is defined in `docs/PHASE16_ROADMAP.md`, with planned delivery state:
+
+- a deliberate maturity pass across `jobs`, `notifications`, `storage`, `search`, `ops`, and `admin-ui`
+- durable module-owned state where runtime snapshots are no longer sufficient
+- stronger operator/admin ergonomics, drilldowns, and export/bulk-action flows
+- docs, examples, and `make phase16-confidence` as the closeout gate
 
 Scope guardrails remain unchanged:
 - admin/backoffice and full account-product surfaces remain outside Arlen core and are expected to ship as optional modules/products.

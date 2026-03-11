@@ -1,7 +1,65 @@
+<% NSDictionary *parameters = $parameters ?: @{}; %>
+<% NSDictionary *activeMetadata = $activeResourceMetadata ?: @{}; %>
+<% NSDictionary *drilldown = $searchDrilldown ?: @{}; %>
+<% NSDictionary *resourceRow = [drilldown objectForKey:@"resource"] ?: @{}; %>
+
 <section class="search-panel">
   <form method="get" action="<%= [$activeResource length] > 0 ? [NSString stringWithFormat:@"%@/resources/%@", $searchPrefix ?: @"/search", $activeResource] : ($searchPrefix ?: @"/search") %>">
     <label for="q">Query</label>
     <input id="q" type="text" name="q" value="<%= $query ?: @"" %>" placeholder="Search indexed records">
+    <% if ([activeMetadata count] > 0) { %>
+      <% for (NSDictionary *filter in ([activeMetadata objectForKey:@"filters"] ?: @[])) { %>
+        <% NSString *filterName = [filter objectForKey:@"name"] ?: @""; %>
+        <% if ([filterName isEqual:@"q"]) { continue; } %>
+        <% NSString *parameterName = [NSString stringWithFormat:@"filter.%@", filterName]; %>
+        <% NSArray *choices = [filter objectForKey:@"choices"] ?: @[]; %>
+        <label>
+          <span><%= [filter objectForKey:@"label"] ?: filterName %></span>
+          <% if ([choices count] > 0) { %>
+            <select name="<%= parameterName %>">
+              <option value="">Any</option>
+              <% for (NSDictionary *choice in choices) { %>
+                <% NSString *value = [choice objectForKey:@"value"] ?: @""; %>
+                <option value="<%= value %>" <%= [[parameters objectForKey:parameterName] isEqual:value] ? @"selected" : @"" %>><%= [choice objectForKey:@"label"] ?: value %></option>
+              <% } %>
+            </select>
+          <% } else { %>
+            <input type="text"
+                   name="<%= parameterName %>"
+                   value="<%= [parameters objectForKey:parameterName] ?: @"" %>"
+                   placeholder="<%= [filter objectForKey:@"placeholder"] ?: @"" %>">
+          <% } %>
+        </label>
+      <% } %>
+      <% NSArray *sorts = [activeMetadata objectForKey:@"sorts"] ?: @[]; %>
+      <% if ([sorts count] > 0) { %>
+        <label>
+          <span>Sort</span>
+          <select name="sort">
+            <option value="">Relevance / default</option>
+            <% for (NSDictionary *sort in sorts) { %>
+              <% NSString *name = [sort objectForKey:@"name"] ?: @""; %>
+              <% NSString *direction = [[sort objectForKey:@"direction"] lowercaseString]; %>
+              <% NSString *ascendingValue = [name copy]; %>
+              <% NSString *descendingValue = [@"-" stringByAppendingString:name]; %>
+              <option value="<%= ascendingValue %>" <%= [[parameters objectForKey:@"sort"] isEqual:ascendingValue] ? @"selected" : @"" %>><%= [sort objectForKey:@"label"] ?: name %> (asc)</option>
+              <% if (![direction isEqual:@"asc"]) { %>
+                <option value="<%= descendingValue %>" <%= [[parameters objectForKey:@"sort"] isEqual:descendingValue] ? @"selected" : @"" %>><%= [sort objectForKey:@"label"] ?: name %> (desc)</option>
+              <% } %>
+            <% } %>
+          </select>
+        </label>
+      <% } %>
+      <label>
+        <span>Limit</span>
+        <select name="limit">
+          <% NSArray *pageSizes = [activeMetadata objectForKey:@"pagination"][@"pageSizes"] ?: @[]; %>
+          <% for (NSNumber *pageSize in pageSizes) { %>
+            <option value="<%= [pageSize stringValue] %>" <%= [[[parameters objectForKey:@"limit"] description] isEqual:[pageSize stringValue]] ? @"selected" : @"" %>><%= [pageSize stringValue] %></option>
+          <% } %>
+        </select>
+      </label>
+    <% } %>
     <button type="submit">Search</button>
   </form>
   <% if ([[$searchAdminAllowed description] boolValue]) { %>
@@ -14,16 +72,65 @@
 
 <section class="search-panel">
   <h2>Resources</h2>
-  <% for (NSDictionary *resource in ($searchResources ?: @[])) { %>
+  <% for (NSDictionary *resource in ($searchSummary[@"resources"] ?: $searchResources ?: @[])) { %>
     <div class="search-row">
       <strong><a href="<%= [NSString stringWithFormat:@"%@/resources/%@", $searchPrefix ?: @"/search", resource[@"identifier"] ?: @""] %>"><%= resource[@"label"] ?: resource[@"identifier"] ?: @"resource" %></a></strong>
       <span><code><%= resource[@"identifier"] ?: @"" %></code></span>
+      <span><%= resource[@"indexState"] ?: resource[@"status"] ?: @"idle" %></span>
+      <span><%= [resource[@"documentCount"] stringValue] ?: @"0" %> docs</span>
+      <span>gen <%= [resource[@"activeGeneration"] stringValue] ?: @"0" %></span>
       <% if ([resource[@"adminIntegrated"] boolValue]) { %>
         <span>admin-integrated</span>
       <% } %>
     </div>
   <% } %>
 </section>
+
+<% if ([resourceRow count] > 0) { %>
+  <section class="search-panel">
+    <h2>Resource status</h2>
+    <dl class="search-meta">
+      <dt>State</dt>
+      <dd><%= [resourceRow objectForKey:@"indexState"] ?: @"idle" %></dd>
+      <dt>Engine</dt>
+      <dd><%= [resourceRow objectForKey:@"engine"] ?: @"" %></dd>
+      <dt>Documents</dt>
+      <dd><%= [[resourceRow objectForKey:@"documentCount"] stringValue] ?: @"0" %></dd>
+      <dt>Generation</dt>
+      <dd><%= [[resourceRow objectForKey:@"activeGeneration"] stringValue] ?: @"0" %></dd>
+      <dt>Last sync</dt>
+      <dd><%= [resourceRow objectForKey:@"lastSyncOperation"] ?: @"" %></dd>
+      <dt>Last error</dt>
+      <dd><%= [resourceRow objectForKey:@"lastError"] ?: @"" %></dd>
+    </dl>
+    <% if ([[$searchAdminAllowed description] boolValue]) { %>
+      <p class="search-meta">API drilldown: <code><%= [resourceRow objectForKey:@"paths"][@"api"] ?: @"" %></code></p>
+    <% } %>
+    <% if ([([resourceRow objectForKey:@"generationHistory"] ?: @[]) count] > 0) { %>
+      <h3>Generations</h3>
+      <% for (NSDictionary *entry in ([resourceRow objectForKey:@"generationHistory"] ?: @[])) { %>
+        <div class="search-row">
+          <strong>Generation <%= [[entry objectForKey:@"generation"] stringValue] ?: @"0" %></strong>
+          <span><%= [entry objectForKey:@"mode"] ?: @"" %></span>
+          <span><%= [[entry objectForKey:@"documentCount"] stringValue] ?: @"0" %> docs</span>
+          <span><%= [entry objectForKey:@"status"] ?: @"" %></span>
+        </div>
+      <% } %>
+    <% } %>
+    <% if ([([drilldown objectForKey:@"history"] ?: @[]) count] > 0) { %>
+      <h3>Recent jobs</h3>
+      <% for (NSDictionary *entry in ([drilldown objectForKey:@"history"] ?: @[])) { %>
+        <div class="search-row">
+          <strong><%= [entry objectForKey:@"mode"] ?: @"full" %></strong>
+          <span><%= [entry objectForKey:@"status"] ?: @"unknown" %></span>
+          <span><%= [entry objectForKey:@"operation"] ?: @"" %></span>
+          <span>gen <%= [[entry objectForKey:@"generation"] stringValue] ?: @"0" %></span>
+          <span><%= [entry objectForKey:@"error"] ?: @"" %></span>
+        </div>
+      <% } %>
+    <% } %>
+  </section>
+<% } %>
 
 <section class="search-panel">
   <h2>Results</h2>
@@ -43,7 +150,10 @@
         <% } %>
       </h3>
       <p><%= result[@"summary"] ?: @"" %></p>
-      <p class="search-meta"><code><%= result[@"resource"] ?: @"" %></code> score <%= [result[@"score"] stringValue] %></p>
+      <% for (NSString *highlight in (result[@"highlights"] ?: @[])) { %>
+        <p class="search-meta"><%= highlight %></p>
+      <% } %>
+      <p class="search-meta"><code><%= result[@"resource"] ?: @"" %></code> score <%= [result[@"score"] stringValue] %> generation <%= [result[@"generation"] stringValue] %></p>
     </article>
   <% } %>
 </section>

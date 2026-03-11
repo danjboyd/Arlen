@@ -17,6 +17,7 @@ static void PrintUsage(void) {
           "  new <AppName> [--full|--lite] [--force] [--json]\n"
           "  generate <controller|endpoint|model|migration|test|plugin|frontend> <Name> [options] [--json]\n"
           "  boomhauer [server args...]\n"
+          "  jobs worker [worker args...]\n"
           "  propane [manager args...]\n"
           "  migrate [--env <name>] [--database <target>] [--dsn <connection_string>] [--dry-run]\n"
           "  module <add|remove|list|doctor|migrate|assets|upgrade> [options]\n"
@@ -58,6 +59,13 @@ static void PrintGenerateUsage(void) {
 
 static void PrintBuildUsage(void) {
   fprintf(stdout, "Usage: arlen build [--dry-run] [--json]\n");
+}
+
+static void PrintJobsUsage(void) {
+  fprintf(stdout,
+          "Usage: arlen jobs worker [worker args...]\n"
+          "\n"
+          "Delegates to framework bin/jobs-worker with ARLEN_APP_ROOT and ARLEN_FRAMEWORK_ROOT resolved.\n");
 }
 
 static void PrintCheckUsage(void) {
@@ -2089,6 +2097,37 @@ static int CommandPropane(NSArray *args) {
   NSString *command = [NSString
       stringWithFormat:@"cd %@ && ARLEN_APP_ROOT=%@ ARLEN_FRAMEWORK_ROOT=%@ ./bin/propane%@",
                        ShellQuote(frameworkRoot), ShellQuote(appRoot), ShellQuote(frameworkRoot), suffix];
+  return RunShellCommand(command);
+}
+
+static int CommandJobs(NSArray *args) {
+  if ([args count] == 0) {
+    PrintJobsUsage();
+    return 2;
+  }
+
+  NSString *subcommand = args[0];
+  NSArray *subArgs = ([args count] > 1) ? [args subarrayWithRange:NSMakeRange(1, [args count] - 1)] : @[];
+  if (![subcommand isEqualToString:@"worker"]) {
+    PrintJobsUsage();
+    return 2;
+  }
+
+  NSString *appRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *frameworkRoot = ResolveFrameworkRootForCommand(@"jobs");
+  if ([frameworkRoot length] == 0) {
+    return 1;
+  }
+
+  NSMutableArray *quoted = [NSMutableArray array];
+  for (NSString *arg in subArgs ?: @[]) {
+    [quoted addObject:ShellQuote(arg)];
+  }
+  NSString *suffix = ([quoted count] > 0) ? [NSString stringWithFormat:@" %@", [quoted componentsJoinedByString:@" "]] : @"";
+
+  NSString *command =
+      [NSString stringWithFormat:@"cd %@ && ARLEN_APP_ROOT=%@ ARLEN_FRAMEWORK_ROOT=%@ ./bin/jobs-worker%@",
+                                 ShellQuote(frameworkRoot), ShellQuote(appRoot), ShellQuote(frameworkRoot), suffix];
   return RunShellCommand(command);
 }
 
@@ -4607,6 +4646,9 @@ int main(int argc, const char *argv[]) {
     }
     if ([command isEqualToString:@"boomhauer"]) {
       return CommandBoomhauer(args);
+    }
+    if ([command isEqualToString:@"jobs"]) {
+      return CommandJobs(args);
     }
     if ([command isEqualToString:@"propane"]) {
       return CommandPropane(args);

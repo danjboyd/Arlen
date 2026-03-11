@@ -13,7 +13,7 @@
       searchModule = {
         paths = {
           prefix = "/search";
-          apiPrefix = "/api";
+          apiPrefix = "api";
         };
         providers = {
           classes = ();

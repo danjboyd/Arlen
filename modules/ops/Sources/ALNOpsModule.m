@@ -109,6 +109,210 @@ static BOOL OTRolesAllowAccess(NSArray *grantedRoles, NSArray *configuredRoles) 
   return NO;
 }
 
+static NSDictionary *OTNormalizeDictionary(id value) {
+  return [value isKindOfClass:[NSDictionary class]] ? value : @{};
+}
+
+static NSArray *OTNormalizeArray(id value) {
+  return [value isKindOfClass:[NSArray class]] ? value : @[];
+}
+
+static id OTPropertyListValue(id value) {
+  if (value == nil || value == [NSNull null]) {
+    return @"";
+  }
+  if ([value isKindOfClass:[NSString class]] || [value isKindOfClass:[NSNumber class]]) {
+    return value;
+  }
+  if ([value isKindOfClass:[NSArray class]]) {
+    NSMutableArray *normalized = [NSMutableArray array];
+    for (id entry in (NSArray *)value) {
+      [normalized addObject:OTPropertyListValue(entry)];
+    }
+    return normalized;
+  }
+  if ([value isKindOfClass:[NSDictionary class]]) {
+    NSMutableDictionary *normalized = [NSMutableDictionary dictionary];
+    for (id key in (NSDictionary *)value) {
+      if (![key isKindOfClass:[NSString class]]) {
+        continue;
+      }
+      normalized[key] = OTPropertyListValue(((NSDictionary *)value)[key]);
+    }
+    return normalized;
+  }
+  return OTTrimmedString([value description]);
+}
+
+static NSDictionary *OTReadPropertyListAtPath(NSString *path) {
+  NSString *resolvedPath = OTTrimmedString(path);
+  if ([resolvedPath length] == 0) {
+    return @{};
+  }
+  NSData *data = [NSData dataWithContentsOfFile:resolvedPath];
+  if ([data length] == 0) {
+    return @{};
+  }
+  id object = [NSPropertyListSerialization propertyListWithData:data options:NSPropertyListMutableContainers format:NULL error:NULL];
+  return [object isKindOfClass:[NSDictionary class]] ? object : @{};
+}
+
+static BOOL OTWritePropertyListAtPath(NSString *path, NSDictionary *payload, NSError **error) {
+  NSString *resolvedPath = OTTrimmedString(path);
+  if ([resolvedPath length] == 0) {
+    return YES;
+  }
+  NSString *directory = [resolvedPath stringByDeletingLastPathComponent];
+  if ([directory length] > 0 &&
+      ![[NSFileManager defaultManager] fileExistsAtPath:directory] &&
+      ![[NSFileManager defaultManager] createDirectoryAtPath:directory withIntermediateDirectories:YES attributes:nil error:error]) {
+    return NO;
+  }
+  NSData *data = [NSPropertyListSerialization dataWithPropertyList:OTPropertyListValue(payload ?: @{})
+                                                            format:NSPropertyListXMLFormat_v1_0
+                                                           options:0
+                                                             error:error];
+  if (data == nil) {
+    return NO;
+  }
+  return [data writeToFile:resolvedPath options:NSDataWritingAtomic error:error];
+}
+
+static NSString *OTResolvedStatus(id value, NSString *fallback) {
+  NSString *status = OTLowerTrimmedString(value);
+  NSSet *allowed = [NSSet setWithArray:@[ @"healthy", @"degraded", @"failing", @"informational" ]];
+  if ([allowed containsObject:status]) {
+    return status;
+  }
+  return ([OTLowerTrimmedString(fallback) length] > 0) ? OTLowerTrimmedString(fallback) : @"informational";
+}
+
+static NSDictionary *OTStatusCard(NSString *label, NSString *value, NSString *status, NSString *href, NSString *summary) {
+  NSMutableDictionary *card = [NSMutableDictionary dictionary];
+  card[@"label"] = label ?: @"Metric";
+  card[@"value"] = value ?: @"0";
+  card[@"status"] = OTResolvedStatus(status, @"informational");
+  if ([OTTrimmedString(href) length] > 0) {
+    card[@"href"] = OTTrimmedString(href);
+  }
+  if ([OTTrimmedString(summary) length] > 0) {
+    card[@"summary"] = OTTrimmedString(summary);
+  }
+  return card;
+}
+
+static NSDictionary *OTStatusWidget(NSString *title, NSString *value, NSString *body, NSString *status, NSString *href) {
+  NSMutableDictionary *widget = [NSMutableDictionary dictionary];
+  widget[@"title"] = title ?: @"Widget";
+  widget[@"status"] = OTResolvedStatus(status, @"informational");
+  if ([OTTrimmedString(value) length] > 0) {
+    widget[@"value"] = OTTrimmedString(value);
+  }
+  if ([OTTrimmedString(body) length] > 0) {
+    widget[@"body"] = OTTrimmedString(body);
+  }
+  if ([OTTrimmedString(href) length] > 0) {
+    widget[@"href"] = OTTrimmedString(href);
+  }
+  return widget;
+}
+
+static NSString *OTSignalStatus(NSDictionary *signal) {
+  NSInteger statusCode = [signal[@"statusCode"] respondsToSelector:@selector(integerValue)] ? [signal[@"statusCode"] integerValue] : 0;
+  if (statusCode == 0 || statusCode >= 500) {
+    return @"failing";
+  }
+  if (statusCode >= 400) {
+    return @"degraded";
+  }
+  return @"healthy";
+}
+
+static NSString *OTJobsStatus(NSDictionary *summary) {
+  if (![summary[@"available"] boolValue]) {
+    return @"informational";
+  }
+  NSDictionary *totals = OTNormalizeDictionary(summary[@"totals"]);
+  if ([totals[@"deadLetters"] integerValue] > 0) {
+    return @"failing";
+  }
+  for (NSDictionary *queue in OTNormalizeArray(summary[@"queues"])) {
+    if ([queue[@"paused"] boolValue]) {
+      return @"degraded";
+    }
+  }
+  return @"healthy";
+}
+
+static NSString *OTNotificationsStatus(NSDictionary *summary) {
+  if (![summary[@"available"] boolValue]) {
+    return @"informational";
+  }
+  for (NSDictionary *entry in OTNormalizeArray(summary[@"recentOutbox"])) {
+    NSString *state = OTLowerTrimmedString(entry[@"state"]);
+    if ([state isEqualToString:@"failed"]) {
+      return @"degraded";
+    }
+  }
+  return @"healthy";
+}
+
+static NSString *OTStorageStatus(NSDictionary *summary) {
+  if (![summary[@"available"] boolValue]) {
+    return @"informational";
+  }
+  for (NSDictionary *entry in OTNormalizeArray(summary[@"recentActivity"])) {
+    if ([OTLowerTrimmedString(entry[@"name"]) containsString:@"failed"]) {
+      return @"degraded";
+    }
+  }
+  for (NSDictionary *record in OTNormalizeArray(summary[@"recentObjects"])) {
+    if ([OTLowerTrimmedString(record[@"variantState"]) isEqualToString:@"failed"]) {
+      return @"degraded";
+    }
+  }
+  return @"healthy";
+}
+
+static NSString *OTSearchStatus(NSDictionary *summary) {
+  if (![summary[@"available"] boolValue]) {
+    return @"informational";
+  }
+  return OTResolvedStatus(summary[@"status"], @"healthy");
+}
+
+static NSString *OTOverallStatus(NSDictionary *signals,
+                                 NSDictionary *jobs,
+                                 NSDictionary *notifications,
+                                 NSDictionary *storage,
+                                 NSDictionary *search,
+                                 NSDictionary *metrics) {
+  for (NSDictionary *signal in @[ signals[@"health"] ?: @{}, signals[@"ready"] ?: @{}, signals[@"live"] ?: @{} ]) {
+    NSString *status = OTSignalStatus(signal);
+    if ([status isEqualToString:@"failing"]) {
+      return @"failing";
+    }
+    if ([status isEqualToString:@"degraded"]) {
+      return @"degraded";
+    }
+  }
+  for (NSString *status in @[ OTJobsStatus(jobs), OTNotificationsStatus(notifications), OTStorageStatus(storage), OTSearchStatus(search) ]) {
+    if ([status isEqualToString:@"failing"]) {
+      return @"failing";
+    }
+    if ([status isEqualToString:@"degraded"]) {
+      return @"degraded";
+    }
+  }
+  double errorRate = [metrics[@"errorRate"] respondsToSelector:@selector(doubleValue)] ? [metrics[@"errorRate"] doubleValue] : 0.0;
+  if (errorRate >= 0.1) {
+    return @"degraded";
+  }
+  return @"healthy";
+}
+
+static NSUInteger const ALNOpsSnapshotHistoryLimit = 48U;
+
 @interface ALNOpsModuleRuntime ()
 
 @property(nonatomic, copy, readwrite) NSString *prefix;
@@ -117,6 +321,19 @@ static BOOL OTRolesAllowAccess(NSArray *grantedRoles, NSArray *configuredRoles) 
 @property(nonatomic, assign, readwrite) NSUInteger minimumAuthAssuranceLevel;
 @property(nonatomic, strong, readwrite, nullable) ALNApplication *application;
 @property(nonatomic, copy) NSDictionary *moduleConfig;
+@property(nonatomic, strong) NSMutableArray<NSDictionary *> *historySnapshots;
+@property(nonatomic, strong) NSArray<id<ALNOpsCardProvider>> *cardProviders;
+@property(nonatomic, assign) BOOL persistenceEnabled;
+@property(nonatomic, copy) NSString *statePath;
+@property(nonatomic, strong) NSLock *lock;
+
+- (BOOL)loadPersistedStateWithError:(NSError **)error;
+- (BOOL)persistStateWithError:(NSError **)error;
+- (NSArray<NSString *> *)configuredCardProviderClassNames;
+- (BOOL)loadCardProvidersWithError:(NSError **)error;
+- (NSArray<NSDictionary *> *)contributedCardsWithError:(NSError **)error;
+- (NSArray<NSDictionary *> *)contributedWidgetsWithError:(NSError **)error;
+- (NSDictionary *)recordSnapshotFromSummary:(NSDictionary *)summary;
 
 @end
 
@@ -146,6 +363,11 @@ static BOOL OTRolesAllowAccess(NSArray *grantedRoles, NSArray *configuredRoles) 
     _accessRoles = @[ @"operator", @"admin" ];
     _minimumAuthAssuranceLevel = 2;
     _moduleConfig = @{};
+    _historySnapshots = [NSMutableArray array];
+    _cardProviders = @[];
+    _persistenceEnabled = NO;
+    _statePath = @"";
+    _lock = [[NSLock alloc] init];
   }
   return self;
 }
@@ -187,7 +409,19 @@ static BOOL OTRolesAllowAccess(NSArray *grantedRoles, NSArray *configuredRoles) 
   if (self.minimumAuthAssuranceLevel == 0) {
     self.minimumAuthAssuranceLevel = 2;
   }
-  return YES;
+  NSDictionary *persistence = [moduleConfig[@"persistence"] isKindOfClass:[NSDictionary class]] ? moduleConfig[@"persistence"] : @{};
+  self.statePath = OTTrimmedString(persistence[@"path"]);
+  self.persistenceEnabled = ([self.statePath length] > 0);
+  [self.lock lock];
+  [self.historySnapshots removeAllObjects];
+  [self.lock unlock];
+  if (![self loadCardProvidersWithError:error]) {
+    return NO;
+  }
+  if (![self loadPersistedStateWithError:error]) {
+    return NO;
+  }
+  return [self persistStateWithError:error];
 }
 
 - (NSDictionary *)resolvedConfigSummary {
@@ -196,7 +430,128 @@ static BOOL OTRolesAllowAccess(NSArray *grantedRoles, NSArray *configuredRoles) 
     @"apiPrefix" : self.apiPrefix ?: @"/ops/api",
     @"accessRoles" : self.accessRoles ?: @[ @"operator", @"admin" ],
     @"minimumAuthAssuranceLevel" : @(self.minimumAuthAssuranceLevel),
+    @"persistenceEnabled" : @(self.persistenceEnabled),
+    @"statePath" : self.statePath ?: @"",
+    @"cardProviderCount" : @([self.cardProviders count]),
   };
+}
+
+- (NSArray<NSString *> *)configuredCardProviderClassNames {
+  NSDictionary *providers = [self.moduleConfig[@"cardProviders"] isKindOfClass:[NSDictionary class]] ? self.moduleConfig[@"cardProviders"] : @{};
+  NSArray *rawClasses = [providers[@"classes"] isKindOfClass:[NSArray class]] ? providers[@"classes"] : @[];
+  NSMutableArray *classNames = [NSMutableArray array];
+  for (id entry in rawClasses) {
+    NSString *className = OTTrimmedString(entry);
+    if ([className length] == 0 || [classNames containsObject:className]) {
+      continue;
+    }
+    [classNames addObject:className];
+  }
+  return [NSArray arrayWithArray:classNames];
+}
+
+- (BOOL)loadCardProvidersWithError:(NSError **)error {
+  NSMutableArray *providers = [NSMutableArray array];
+  for (NSString *className in [self configuredCardProviderClassNames]) {
+    Class klass = NSClassFromString(className);
+    if (klass == Nil) {
+      if (error != NULL) {
+        *error = OTError(ALNOpsModuleErrorInvalidConfiguration,
+                         [NSString stringWithFormat:@"ops card provider class %@ could not be resolved", className],
+                         @{ @"class" : className ?: @"" });
+      }
+      return NO;
+    }
+    if (![klass conformsToProtocol:@protocol(ALNOpsCardProvider)]) {
+      if (error != NULL) {
+        *error = OTError(ALNOpsModuleErrorInvalidConfiguration,
+                         [NSString stringWithFormat:@"%@ must conform to ALNOpsCardProvider", className],
+                         @{ @"class" : className ?: @"" });
+      }
+      return NO;
+    }
+    [providers addObject:[[klass alloc] init]];
+  }
+  self.cardProviders = [NSArray arrayWithArray:providers];
+  return YES;
+}
+
+- (BOOL)loadPersistedStateWithError:(NSError **)error {
+  (void)error;
+  if (!self.persistenceEnabled) {
+    return YES;
+  }
+  NSDictionary *payload = OTReadPropertyListAtPath(self.statePath);
+  [self.lock lock];
+  self.historySnapshots = ([OTNormalizeArray(payload[@"historySnapshots"]) mutableCopy] ?: [NSMutableArray array]);
+  while ([self.historySnapshots count] > ALNOpsSnapshotHistoryLimit) {
+    [self.historySnapshots removeObjectAtIndex:0];
+  }
+  [self.lock unlock];
+  return YES;
+}
+
+- (BOOL)persistStateWithError:(NSError **)error {
+  if (!self.persistenceEnabled) {
+    return YES;
+  }
+  NSDictionary *payload = nil;
+  [self.lock lock];
+  payload = @{
+    @"historySnapshots" : [NSArray arrayWithArray:self.historySnapshots ?: @[]],
+  };
+  [self.lock unlock];
+  return OTWritePropertyListAtPath(self.statePath, payload, error);
+}
+
+- (NSArray<NSDictionary *> *)contributedCardsWithError:(NSError **)error {
+  NSMutableArray *cards = [NSMutableArray array];
+  for (id<ALNOpsCardProvider> provider in self.cardProviders ?: @[]) {
+    NSError *providerError = nil;
+    NSArray *entries = [provider opsModuleCardsForRuntime:self error:&providerError];
+    if (entries == nil && providerError != nil) {
+      if (error != NULL) {
+        *error = providerError;
+      }
+      continue;
+    }
+    for (NSDictionary *entry in OTNormalizeArray(entries)) {
+      NSString *label = OTTrimmedString(entry[@"label"]);
+      NSString *value = OTTrimmedString([entry[@"value"] description]);
+      if ([label length] == 0 || [value length] == 0) {
+        continue;
+      }
+      [cards addObject:OTStatusCard(label, value, entry[@"status"], entry[@"href"], entry[@"summary"])];
+    }
+  }
+  return [NSArray arrayWithArray:cards];
+}
+
+- (NSArray<NSDictionary *> *)contributedWidgetsWithError:(NSError **)error {
+  NSMutableArray *widgets = [NSMutableArray array];
+  for (id<ALNOpsCardProvider> provider in self.cardProviders ?: @[]) {
+    if (![provider respondsToSelector:@selector(opsModuleWidgetsForRuntime:error:)]) {
+      continue;
+    }
+    NSError *providerError = nil;
+    NSArray *entries = [provider opsModuleWidgetsForRuntime:self error:&providerError];
+    if (entries == nil && providerError != nil) {
+      if (error != NULL) {
+        *error = providerError;
+      }
+      continue;
+    }
+    for (NSDictionary *entry in OTNormalizeArray(entries)) {
+      NSString *title = OTTrimmedString(entry[@"title"]);
+      NSString *value = OTTrimmedString([entry[@"value"] description]);
+      NSString *body = OTTrimmedString(entry[@"body"]);
+      if ([title length] == 0 || ([value length] == 0 && [body length] == 0)) {
+        continue;
+      }
+      [widgets addObject:OTStatusWidget(title, value, body, entry[@"status"], entry[@"href"])];
+    }
+  }
+  return [NSArray arrayWithArray:widgets];
 }
 
 - (NSDictionary *)signalSummaryForPath:(NSString *)path {
@@ -255,66 +610,83 @@ static BOOL OTRolesAllowAccess(NSArray *grantedRoles, NSArray *configuredRoles) 
 
 - (NSDictionary *)jobsSummary {
   ALNJobsModuleRuntime *runtime = [ALNJobsModuleRuntime sharedRuntime];
-  if (runtime.application == nil) {
-    return @{ @"available" : @NO };
+  if (runtime.application == nil || runtime.application != self.application) {
+    return @{ @"available" : @NO, @"status" : @"informational" };
   }
   NSDictionary *summary = [runtime dashboardSummary];
-  return @{
+  NSMutableDictionary *result = [NSMutableDictionary dictionaryWithDictionary:@{
     @"available" : @YES,
     @"totals" : [summary[@"totals"] isKindOfClass:[NSDictionary class]] ? summary[@"totals"] : @{},
     @"queues" : [summary[@"queues"] isKindOfClass:[NSArray class]] ? summary[@"queues"] : @[],
     @"recentRuns" : OTTailArray(summary[@"recentRuns"], 5),
-  };
+    @"pendingJobs" : [runtime pendingJobs] ?: @[],
+    @"leasedJobs" : [runtime leasedJobs] ?: @[],
+    @"deadLetterJobs" : [runtime deadLetterJobs] ?: @[],
+  }];
+  result[@"status"] = OTJobsStatus(result);
+  return result;
 }
 
 - (NSDictionary *)notificationsSummary {
   ALNNotificationsModuleRuntime *runtime = [ALNNotificationsModuleRuntime sharedRuntime];
-  if (runtime.application == nil) {
-    return @{ @"available" : @NO };
+  if (runtime.application == nil || runtime.application != self.application) {
+    return @{ @"available" : @NO, @"status" : @"informational" };
   }
   NSDictionary *summary = [runtime dashboardSummary];
   NSArray *cards = [summary[@"cards"] isKindOfClass:[NSArray class]] ? summary[@"cards"] : @[];
   NSArray *recent = [summary[@"recentOutbox"] isKindOfClass:[NSArray class]] ? summary[@"recentOutbox"] : @[];
-  return @{
+  NSMutableDictionary *result = [NSMutableDictionary dictionaryWithDictionary:@{
     @"available" : @YES,
     @"cards" : cards,
     @"recentOutbox" : OTTailArray(recent, 5),
-  };
+    @"recentFanout" : [summary[@"recentFanout"] isKindOfClass:[NSArray class]] ? summary[@"recentFanout"] : @[],
+  }];
+  result[@"status"] = OTNotificationsStatus(result);
+  return result;
 }
 
 - (NSDictionary *)storageSummary {
   ALNStorageModuleRuntime *runtime = [ALNStorageModuleRuntime sharedRuntime];
-  if (runtime.application == nil) {
-    return @{ @"available" : @NO };
+  if (runtime.application == nil || runtime.application != self.application) {
+    return @{ @"available" : @NO, @"status" : @"informational" };
   }
   NSDictionary *summary = [runtime dashboardSummary];
   NSArray *collections = [summary[@"collections"] isKindOfClass:[NSArray class]] ? summary[@"collections"] : @[];
   NSArray *recent = [summary[@"recentObjects"] isKindOfClass:[NSArray class]] ? summary[@"recentObjects"] : @[];
-  return @{
+  NSMutableDictionary *result = [NSMutableDictionary dictionaryWithDictionary:@{
     @"available" : @YES,
     @"cards" : [summary[@"cards"] isKindOfClass:[NSArray class]] ? summary[@"cards"] : @[],
     @"collections" : collections,
     @"recentObjects" : OTTailArray(recent, 5),
-  };
+    @"recentActivity" : [summary[@"recentActivity"] isKindOfClass:[NSArray class]] ? summary[@"recentActivity"] : @[],
+    @"attachmentAdapter" : [summary[@"attachmentAdapter"] isKindOfClass:[NSDictionary class]] ? summary[@"attachmentAdapter"] : @{},
+  }];
+  result[@"status"] = OTStorageStatus(result);
+  return result;
 }
 
 - (NSDictionary *)searchSummary {
   Class runtimeClass = NSClassFromString(@"ALNSearchModuleRuntime");
   if (runtimeClass == Nil || ![runtimeClass respondsToSelector:@selector(sharedRuntime)]) {
-    return @{ @"available" : @NO };
+    return @{ @"available" : @NO, @"status" : @"informational" };
   }
   id (*sharedRuntimeIMP)(id, SEL) = (id (*)(id, SEL))[runtimeClass methodForSelector:@selector(sharedRuntime)];
   id runtime = sharedRuntimeIMP(runtimeClass, @selector(sharedRuntime));
-  if (![runtime respondsToSelector:@selector(application)] || [runtime valueForKey:@"application"] == nil) {
-    return @{ @"available" : @NO };
+  if (![runtime respondsToSelector:@selector(application)]) {
+    return @{ @"available" : @NO, @"status" : @"informational" };
+  }
+  ALNApplication *mountedApplication = [runtime valueForKey:@"application"];
+  if (mountedApplication == nil || mountedApplication != self.application) {
+    return @{ @"available" : @NO, @"status" : @"informational" };
   }
   if (![runtime respondsToSelector:@selector(dashboardSummary)]) {
-    return @{ @"available" : @NO };
+    return @{ @"available" : @NO, @"status" : @"informational" };
   }
   NSDictionary *(*dashboardIMP)(id, SEL) = (NSDictionary *(*)(id, SEL))[runtime methodForSelector:@selector(dashboardSummary)];
   NSDictionary *summary = dashboardIMP(runtime, @selector(dashboardSummary));
   NSMutableDictionary *result = [NSMutableDictionary dictionaryWithDictionary:summary ?: @{}];
   result[@"available"] = @YES;
+  result[@"status"] = OTSearchStatus(result);
   return result;
 }
 
@@ -336,6 +708,96 @@ static BOOL OTRolesAllowAccess(NSArray *grantedRoles, NSArray *configuredRoles) 
   };
 }
 
+- (NSDictionary *)recordSnapshotFromSummary:(NSDictionary *)summary {
+  NSDictionary *jobs = OTNormalizeDictionary(summary[@"jobs"]);
+  NSDictionary *notifications = OTNormalizeDictionary(summary[@"notifications"]);
+  NSDictionary *storage = OTNormalizeDictionary(summary[@"storage"]);
+  NSDictionary *search = OTNormalizeDictionary(summary[@"search"]);
+  NSDictionary *metrics = OTNormalizeDictionary(summary[@"metrics"]);
+  NSDictionary *snapshot = @{
+    @"recordedAt" : @([[NSDate date] timeIntervalSince1970]),
+    @"overallStatus" : OTResolvedStatus(summary[@"status"], @"healthy"),
+    @"jobs" : @{
+      @"status" : OTResolvedStatus(jobs[@"status"], @"informational"),
+      @"pending" : jobs[@"totals"][@"pending"] ?: @0,
+      @"deadLetters" : jobs[@"totals"][@"deadLetters"] ?: @0,
+    },
+    @"notifications" : @{
+      @"status" : OTResolvedStatus(notifications[@"status"], @"informational"),
+      @"recentOutboxCount" : @([OTNormalizeArray(notifications[@"recentOutbox"]) count]),
+    },
+    @"storage" : @{
+      @"status" : OTResolvedStatus(storage[@"status"], @"informational"),
+      @"recentObjectCount" : @([OTNormalizeArray(storage[@"recentObjects"]) count]),
+    },
+    @"search" : @{
+      @"status" : OTResolvedStatus(search[@"status"], @"informational"),
+      @"documents" : search[@"totals"][@"documents"] ?: @0,
+      @"resources" : search[@"totals"][@"resources"] ?: @0,
+    },
+    @"metrics" : @{
+      @"requestsTotal" : metrics[@"requestsTotal"] ?: @0,
+      @"errorsTotal" : metrics[@"errorsTotal"] ?: @0,
+      @"errorRate" : metrics[@"errorRate"] ?: @0,
+    },
+  };
+  [self.lock lock];
+  [self.historySnapshots addObject:snapshot];
+  while ([self.historySnapshots count] > ALNOpsSnapshotHistoryLimit) {
+    [self.historySnapshots removeObjectAtIndex:0];
+  }
+  [self.lock unlock];
+  (void)[self persistStateWithError:NULL];
+  return snapshot;
+}
+
+- (nullable NSDictionary *)moduleDrilldownForIdentifier:(NSString *)identifier {
+  NSString *moduleID = OTLowerTrimmedString(identifier);
+  NSDictionary *summary = [self dashboardSummary];
+  NSDictionary *moduleSummary = nil;
+  NSString *label = @"";
+  if ([moduleID isEqualToString:@"jobs"]) {
+    moduleSummary = summary[@"jobs"];
+    label = @"Jobs";
+  } else if ([moduleID isEqualToString:@"notifications"]) {
+    moduleSummary = summary[@"notifications"];
+    label = @"Notifications";
+  } else if ([moduleID isEqualToString:@"storage"]) {
+    moduleSummary = summary[@"storage"];
+    label = @"Storage";
+  } else if ([moduleID isEqualToString:@"search"]) {
+    moduleSummary = summary[@"search"];
+    label = @"Search";
+  } else {
+    return nil;
+  }
+  NSMutableArray *history = [NSMutableArray array];
+  [self.lock lock];
+  for (NSDictionary *entry in self.historySnapshots ?: @[]) {
+    NSDictionary *moduleEntry = [entry[moduleID] isKindOfClass:[NSDictionary class]] ? entry[moduleID] : nil;
+    if (moduleEntry == nil) {
+      continue;
+    }
+    [history addObject:@{
+      @"recordedAt" : entry[@"recordedAt"] ?: @0,
+      @"overallStatus" : entry[@"overallStatus"] ?: @"informational",
+      @"module" : moduleEntry,
+    }];
+  }
+  [self.lock unlock];
+  return @{
+    @"identifier" : moduleID,
+    @"label" : label,
+    @"status" : OTResolvedStatus(moduleSummary[@"status"], @"informational"),
+    @"summary" : moduleSummary ?: @{},
+    @"history" : history ?: @[],
+    @"paths" : @{
+      @"html" : [NSString stringWithFormat:@"%@/modules/%@", self.prefix ?: @"/ops", moduleID ?: @""],
+      @"api" : [NSString stringWithFormat:@"%@/modules/%@", self.apiPrefix ?: @"/ops/api", moduleID ?: @""],
+    },
+  };
+}
+
 - (NSDictionary *)dashboardSummary {
   NSDictionary *signals = @{
     @"health" : [self signalSummaryForPath:@"/healthz"],
@@ -347,15 +809,46 @@ static BOOL OTRolesAllowAccess(NSArray *grantedRoles, NSArray *configuredRoles) 
   NSDictionary *notifications = [self notificationsSummary];
   NSDictionary *storage = [self storageSummary];
   NSDictionary *search = [self searchSummary];
-  NSArray *cards = @[
-    @{ @"label" : @"Requests", @"value" : [[OTNumberValue(metrics[@"requestsTotal"]) stringValue] ?: @"0" copy] },
-    @{ @"label" : @"Errors", @"value" : [[OTNumberValue(metrics[@"errorsTotal"]) stringValue] ?: @"0" copy] },
-    @{ @"label" : @"Pending Jobs", @"value" : [[OTNumberValue(jobs[@"totals"][@"pending"]) stringValue] ?: @"0" copy] },
-    @{ @"label" : @"Dead Letters", @"value" : [[OTNumberValue(jobs[@"totals"][@"deadLetters"]) stringValue] ?: @"0" copy] },
-    @{ @"label" : @"Notifications", @"value" : [NSString stringWithFormat:@"%lu", (unsigned long)[notifications[@"recentOutbox"] count]] },
-    @{ @"label" : @"Storage Objects", @"value" : [NSString stringWithFormat:@"%lu", (unsigned long)[storage[@"recentObjects"] count]] },
-  ];
-  return @{
+  NSDictionary *automation = [self automationSummary];
+  NSString *overallStatus = OTOverallStatus(signals, jobs, notifications, storage, search, metrics);
+  NSMutableArray *cards = [NSMutableArray arrayWithArray:@[
+    OTStatusCard(@"Requests",
+                 [[OTNumberValue(metrics[@"requestsTotal"]) stringValue] ?: @"0" copy],
+                 @"informational",
+                 @"",
+                 @""),
+    OTStatusCard(@"Errors",
+                 [[OTNumberValue(metrics[@"errorsTotal"]) stringValue] ?: @"0" copy],
+                 ([OTNumberValue(metrics[@"errorsTotal"]) integerValue] > 0) ? @"degraded" : @"healthy",
+                 @"",
+                 @""),
+    OTStatusCard(@"Jobs",
+                 [[OTNumberValue(jobs[@"totals"][@"pending"]) stringValue] ?: @"0" copy],
+                 jobs[@"status"],
+                 [NSString stringWithFormat:@"%@/modules/jobs", self.prefix ?: @"/ops"],
+                 @"pending jobs"),
+    OTStatusCard(@"Notifications",
+                 [NSString stringWithFormat:@"%lu", (unsigned long)[OTNormalizeArray(notifications[@"recentOutbox"]) count]],
+                 notifications[@"status"],
+                 [NSString stringWithFormat:@"%@/modules/notifications", self.prefix ?: @"/ops"],
+                 @"recent outbox"),
+    OTStatusCard(@"Storage",
+                 [NSString stringWithFormat:@"%lu", (unsigned long)[OTNormalizeArray(storage[@"recentObjects"]) count]],
+                 storage[@"status"],
+                 [NSString stringWithFormat:@"%@/modules/storage", self.prefix ?: @"/ops"],
+                 @"recent objects"),
+    OTStatusCard(@"Search",
+                 [[OTNumberValue(search[@"totals"][@"documents"]) stringValue] ?: @"0" copy],
+                 search[@"status"],
+                 [NSString stringWithFormat:@"%@/modules/search", self.prefix ?: @"/ops"],
+                 @"indexed documents"),
+  ]];
+  NSError *providerError = nil;
+  [cards addObjectsFromArray:[self contributedCardsWithError:&providerError] ?: @[]];
+  NSError *widgetProviderError = nil;
+  NSArray *widgets = [self contributedWidgetsWithError:&widgetProviderError] ?: @[];
+  NSError *resolvedProviderError = providerError ?: widgetProviderError;
+  NSDictionary *summary = @{
     @"config" : [self resolvedConfigSummary],
     @"signals" : signals,
     @"metrics" : metrics,
@@ -363,9 +856,37 @@ static BOOL OTRolesAllowAccess(NSArray *grantedRoles, NSArray *configuredRoles) 
     @"notifications" : notifications,
     @"storage" : storage,
     @"search" : search,
-    @"automation" : [self automationSummary],
+    @"automation" : automation,
+    @"status" : overallStatus ?: @"healthy",
+    @"providerError" : (resolvedProviderError != nil) ? (resolvedProviderError.localizedDescription ?: @"provider error") : @"",
+    @"drilldowns" : @{
+      @"jobs" : @{
+        @"html" : [NSString stringWithFormat:@"%@/modules/jobs", self.prefix ?: @"/ops"],
+        @"api" : [NSString stringWithFormat:@"%@/modules/jobs", self.apiPrefix ?: @"/ops/api"],
+      },
+      @"notifications" : @{
+        @"html" : [NSString stringWithFormat:@"%@/modules/notifications", self.prefix ?: @"/ops"],
+        @"api" : [NSString stringWithFormat:@"%@/modules/notifications", self.apiPrefix ?: @"/ops/api"],
+      },
+      @"storage" : @{
+        @"html" : [NSString stringWithFormat:@"%@/modules/storage", self.prefix ?: @"/ops"],
+        @"api" : [NSString stringWithFormat:@"%@/modules/storage", self.apiPrefix ?: @"/ops/api"],
+      },
+      @"search" : @{
+        @"html" : [NSString stringWithFormat:@"%@/modules/search", self.prefix ?: @"/ops"],
+        @"api" : [NSString stringWithFormat:@"%@/modules/search", self.apiPrefix ?: @"/ops/api"],
+      },
+    },
     @"cards" : cards,
+    @"widgets" : widgets,
   };
+  [self recordSnapshotFromSummary:summary];
+  [self.lock lock];
+  NSArray *history = [NSArray arrayWithArray:self.historySnapshots ?: @[]];
+  [self.lock unlock];
+  NSMutableDictionary *response = [summary mutableCopy];
+  response[@"history"] = history ?: @[];
+  return response;
 }
 
 @end
@@ -499,9 +1020,46 @@ static BOOL OTRolesAllowAccess(NSArray *grantedRoles, NSArray *configuredRoles) 
   return nil;
 }
 
+- (id)moduleDrilldown:(ALNContext *)ctx {
+  NSString *identifier = OTLowerTrimmedString([ctx paramValueForName:@"module"]);
+  NSDictionary *drilldown = [self.runtime moduleDrilldownForIdentifier:identifier];
+  if (drilldown == nil) {
+    [self setStatus:404];
+    [self renderTemplate:@"modules/ops/result/index"
+                 context:[self pageContextWithTitle:@"Ops Module"
+                                            heading:@"Module not found"
+                                            message:@"The requested ops drilldown is not available."
+                                             errors:nil
+                                              extra:nil]
+                  layout:@"modules/ops/layouts/main"
+                   error:NULL];
+    return nil;
+  }
+  [self renderTemplate:@"modules/ops/drilldown/index"
+               context:[self pageContextWithTitle:[NSString stringWithFormat:@"%@ Ops", drilldown[@"label"] ?: @"Module"]
+                                          heading:drilldown[@"label"] ?: @"Module"
+                                          message:@""
+                                           errors:nil
+                                            extra:@{ @"drilldown" : drilldown ?: @{} }]
+                layout:@"modules/ops/layouts/main"
+                 error:NULL];
+  return nil;
+}
+
 - (id)apiSummary:(ALNContext *)ctx {
   (void)ctx;
   [self renderJSONEnvelopeWithData:[self.runtime dashboardSummary] meta:nil error:NULL];
+  return nil;
+}
+
+- (id)apiModuleDrilldown:(ALNContext *)ctx {
+  NSString *identifier = OTLowerTrimmedString([ctx paramValueForName:@"module"]);
+  NSDictionary *drilldown = [self.runtime moduleDrilldownForIdentifier:identifier];
+  if (drilldown == nil) {
+    [self renderAPIErrorWithStatus:404 code:@"not_found" message:@"ops module drilldown not found" meta:@{ @"module" : identifier ?: @"" }];
+    return nil;
+  }
+  [self renderJSONEnvelopeWithData:drilldown meta:nil error:NULL];
   return nil;
 }
 
@@ -552,6 +1110,11 @@ static BOOL OTRolesAllowAccess(NSArray *grantedRoles, NSArray *configuredRoles) 
                               name:@"ops_dashboard"
                    controllerClass:[ALNOpsModuleController class]
                             action:@"dashboard"];
+  [application registerRouteMethod:@"GET"
+                              path:@"/modules/:module"
+                              name:@"ops_module_drilldown"
+                   controllerClass:[ALNOpsModuleController class]
+                            action:@"moduleDrilldown"];
   [application endRouteGroup];
 
   [application beginRouteGroupWithPrefix:runtime.apiPrefix guardAction:@"requireOpsAPI" formats:nil];
@@ -560,6 +1123,11 @@ static BOOL OTRolesAllowAccess(NSArray *grantedRoles, NSArray *configuredRoles) 
                               name:@"ops_api_summary"
                    controllerClass:[ALNOpsModuleController class]
                             action:@"apiSummary"];
+  [application registerRouteMethod:@"GET"
+                              path:@"/modules/:module"
+                              name:@"ops_api_module_drilldown"
+                   controllerClass:[ALNOpsModuleController class]
+                            action:@"apiModuleDrilldown"];
   [application registerRouteMethod:@"GET"
                               path:@"/signals"
                               name:@"ops_api_signals"
@@ -577,7 +1145,7 @@ static BOOL OTRolesAllowAccess(NSArray *grantedRoles, NSArray *configuredRoles) 
                             action:@"apiOpenAPI"];
   [application endRouteGroup];
 
-  for (NSString *routeName in @[ @"ops_api_summary", @"ops_api_signals", @"ops_api_metrics", @"ops_api_openapi" ]) {
+  for (NSString *routeName in @[ @"ops_api_summary", @"ops_api_module_drilldown", @"ops_api_signals", @"ops_api_metrics", @"ops_api_openapi" ]) {
     [application configureRouteNamed:routeName
                        requestSchema:nil
                       responseSchema:nil

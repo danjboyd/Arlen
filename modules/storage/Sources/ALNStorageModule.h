@@ -34,6 +34,12 @@ typedef NS_ENUM(NSInteger, ALNStorageModuleErrorCode) {
                                 metadata:(NSDictionary *)metadata
                                  runtime:(ALNStorageModuleRuntime *)runtime
                                    error:(NSError *_Nullable *_Nullable)error;
+- (nullable NSDictionary *)storageModuleVariantRepresentationForObject:(NSDictionary *)objectRecord
+                                                     variantDefinition:(NSDictionary *)variantDefinition
+                                                          originalData:(NSData *)originalData
+                                                      originalMetadata:(NSDictionary *)originalMetadata
+                                                               runtime:(ALNStorageModuleRuntime *)runtime
+                                                                 error:(NSError *_Nullable *_Nullable)error;
 
 @end
 

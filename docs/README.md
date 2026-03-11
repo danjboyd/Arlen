@@ -27,13 +27,14 @@ Open `build/docs/index.html` in your browser, or use `make docs-serve` for local
 - [Modules](MODULES.md): first-class module architecture, install flow, and override model.
 - [Auth Module](AUTH_MODULE.md): first-party auth product routes, hooks, and `/auth/api` surface.
 - [Auth UI Integration Modes](AUTH_UI_INTEGRATION_MODES.md): `headless`, `module-ui`, and `generated-app-ui` contract for app-shell auth integration.
-- [Admin UI Module](ADMIN_UI_MODULE.md): first-party admin resource contract and `/admin/api` surface.
+- [Admin UI Module](ADMIN_UI_MODULE.md): first-party admin resource contract with bulk actions, exports, typed filters, autocomplete, and `/admin/api` surface.
 - [Jobs Module](JOBS_MODULE.md): first-party jobs runtime contracts plus protected `/jobs` HTML and `/jobs/api` JSON surfaces.
 - [Notifications Module](NOTIFICATIONS_MODULE.md): first-party notifications product flows on jobs + mail with inbox/preferences, preview/test-send, and `/notifications/api` surfaces.
 - [Storage Module](STORAGE_MODULE.md): first-party storage collections, direct uploads, signed downloads, variants, and `/storage/api` management surfaces.
-- [Ops Module](OPS_MODULE.md): protected operational dashboard and `/ops/api` JSON/OpenAPI summary surfaces.
-- [Search Module](SEARCH_MODULE.md): searchable-resource contracts, job-backed reindex flows, and shared admin/ops integration.
+- [Ops Module](OPS_MODULE.md): protected operational dashboard with history, drilldowns, app/module cards/widgets, and `/ops/api` JSON/OpenAPI surfaces.
+- [Search Module](SEARCH_MODULE.md): durable searchable-resource contracts, job-backed reindex + incremental-sync flows, and shared admin/ops integration.
 - [Deployment Guide](DEPLOYMENT.md): deployment model and production guidance.
+- [Systemd Runbook](SYSTEMD_RUNBOOK.md): reference `systemd` unit template, debug drop-in workflow, and incident collection steps.
 - [Password Hashing](PASSWORD_HASHING.md): Argon2id password hashing API, defaults, and rehash workflow.
 - [Realtime and Composition](REALTIME_COMPOSITION.md): websocket/SSE contracts, pubsub hub, and app mounting.
 - [Ecosystem Services](ECOSYSTEM_SERVICES.md): jobs/cache/i18n/mail/attachment adapter contracts and plugin wiring.
@@ -97,6 +98,7 @@ Open `build/docs/index.html` in your browser, or use `make docs-serve` for local
 - [Phase 13 Roadmap](PHASE13_ROADMAP.md)
 - [Phase 14 Roadmap](PHASE14_ROADMAP.md)
 - [Phase 15 Roadmap](PHASE15_ROADMAP.md)
+- [Phase 16 Roadmap](PHASE16_ROADMAP.md)
 - [Competitive Benchmark Roadmap](COMPETITIVE_BENCHMARK_ROADMAP.md)
 - [Phase B Parity Checklist (FastAPI)](PHASEB_PARITY_CHECKLIST_FASTAPI.md)
 - [Phase C Benchmark Protocol](PHASEC_BENCHMARK_PROTOCOL.md)
@@ -116,5 +118,6 @@ Open `build/docs/index.html` in your browser, or use `make docs-serve` for local
 - [Auth + Admin Demo](../examples/auth_admin_demo/README.md)
 - [Auth UI Modes](../examples/auth_ui_modes/README.md)
 - [Phase 14 Modules Demo](../examples/phase14_modules_demo/README.md)
+- [Phase 16 Modules Demo](../examples/phase16_modules_demo/README.md)
 - [GSWeb Migration Sample](../examples/gsweb_migration/README.md)
 - [ArlenData Standalone Example](../examples/arlen_data/README.md)

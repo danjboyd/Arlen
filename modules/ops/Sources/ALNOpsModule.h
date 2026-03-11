@@ -6,6 +6,7 @@
 #import "ALNModuleSystem.h"
 
 @class ALNApplication;
+@class ALNOpsModuleRuntime;
 
 NS_ASSUME_NONNULL_BEGIN
 
@@ -15,6 +16,17 @@ typedef NS_ENUM(NSInteger, ALNOpsModuleErrorCode) {
   ALNOpsModuleErrorInvalidConfiguration = 1,
   ALNOpsModuleErrorPolicyRejected = 2,
 };
+
+@protocol ALNOpsCardProvider <NSObject>
+
+- (nullable NSArray<NSDictionary *> *)opsModuleCardsForRuntime:(ALNOpsModuleRuntime *)runtime
+                                                         error:(NSError *_Nullable *_Nullable)error;
+
+@optional
+- (nullable NSArray<NSDictionary *> *)opsModuleWidgetsForRuntime:(ALNOpsModuleRuntime *)runtime
+                                                           error:(NSError *_Nullable *_Nullable)error;
+
+@end
 
 @interface ALNOpsModuleRuntime : NSObject
 
@@ -30,6 +42,7 @@ typedef NS_ENUM(NSInteger, ALNOpsModuleErrorCode) {
                            error:(NSError *_Nullable *_Nullable)error;
 - (NSDictionary *)resolvedConfigSummary;
 - (NSDictionary *)dashboardSummary;
+- (nullable NSDictionary *)moduleDrilldownForIdentifier:(NSString *)identifier;
 
 @end
 

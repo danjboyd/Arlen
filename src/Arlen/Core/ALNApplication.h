@@ -62,6 +62,7 @@ NS_ASSUME_NONNULL_BEGIN
 @property(nonatomic, strong, readonly) id<ALNCacheAdapter> cacheAdapter;
 @property(nonatomic, strong, readonly) id<ALNLocalizationAdapter> localizationAdapter;
 @property(nonatomic, strong, readonly) id<ALNMailAdapter> mailAdapter;
+@property(nonatomic, strong, readonly) id<ALNWebhookAdapter> webhookAdapter;
 @property(nonatomic, strong, readonly) id<ALNAttachmentAdapter> attachmentAdapter;
 @property(nonatomic, assign, readonly) BOOL clusterEnabled;
 @property(nonatomic, copy, readonly) NSString *clusterName;
@@ -103,6 +104,7 @@ NS_ASSUME_NONNULL_BEGIN
 - (void)setCacheAdapter:(id<ALNCacheAdapter>)adapter;
 - (void)setLocalizationAdapter:(id<ALNLocalizationAdapter>)adapter;
 - (void)setMailAdapter:(id<ALNMailAdapter>)adapter;
+- (void)setWebhookAdapter:(id<ALNWebhookAdapter>)adapter;
 - (void)setAttachmentAdapter:(id<ALNAttachmentAdapter>)adapter;
 - (NSString *)localizedStringForKey:(NSString *)key
                               locale:(nullable NSString *)locale

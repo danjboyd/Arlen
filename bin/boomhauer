@@ -256,6 +256,7 @@ record_build_failure() {
   local output_file="$4"
 
   command="${command//$'\n'/ }"
+  rm -f "$build_fingerprint_file"
   cp "$output_file" "$error_output_file"
   {
     printf 'stage=%s\n' "$stage"
@@ -393,7 +394,8 @@ compile_app() {
       -o "$app_binary" \
       $(gnustep-config --base-libs) \
       -ldl \
-      -lcrypto
+      -lcrypto \
+      -ldispatch
   } >"$tmp_output" 2>&1; then
     :
   else

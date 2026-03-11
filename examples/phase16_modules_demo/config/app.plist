@@ -1,0 +1,81 @@
+{
+  host = "127.0.0.1";
+  port = 4160;
+  session = {
+    enabled = YES;
+    secret = "phase16-modules-demo-session-secret-0123456789abcdef";
+  };
+  csrf = {
+    enabled = YES;
+    allowQueryParamFallback = YES;
+  };
+  database = {
+    connectionString = "__ARLEN_PG_DSN__";
+  };
+  openapi = {
+    title = "Phase16 Modules Demo";
+    version = "0.1.0";
+  };
+  authModule = {
+    bootstrapAdminEmails = ("demo-admin@example.test");
+  };
+  adminUI = {
+    resourceProviders = {
+      classes = ("Phase16DemoOrdersProvider");
+    };
+  };
+  jobsModule = {
+    persistence = {
+      enabled = YES;
+      path = "var/module_state/jobs-development.plist";
+    };
+    providers = {
+      classes = ("Phase16DemoJobProvider");
+    };
+    schedules = {
+      classes = ("Phase16DemoScheduleProvider");
+    };
+  };
+  notificationsModule = {
+    sender = "phase16-demo@example.test";
+    persistence = {
+      enabled = YES;
+      path = "var/module_state/notifications-development.plist";
+    };
+    providers = {
+      classes = ("Phase16DemoNotificationsProvider");
+    };
+  };
+  storageModule = {
+    persistence = {
+      enabled = YES;
+      path = "var/module_state/storage-development.plist";
+    };
+    collections = {
+      classes = ("Phase16DemoStorageCollectionProvider");
+    };
+    cleanup = {
+      intervalSeconds = 300;
+    };
+    uploadSessionTTLSeconds = 120;
+    downloadTokenTTLSeconds = 120;
+  };
+  opsModule = {
+    persistence = {
+      path = "var/module_state/ops-development.plist";
+    };
+    cardProviders = {
+      classes = ("Phase16DemoOpsCardProvider");
+    };
+  };
+  searchModule = {
+    persistence = {
+      enabled = YES;
+      path = "var/module_state/search-development.plist";
+    };
+    adminUI = {
+      autoResources = YES;
+      resourceProviderClass = "ALNSearchAdminResourceProvider";
+    };
+  };
+}

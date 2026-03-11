@@ -139,6 +139,13 @@
   return @"ignored";
 }
 
+- (id)renderedCSV:(ALNContext *)ctx {
+  (void)ctx;
+  NSData *payload = [@"id,status\n1,ready\n" dataUsingEncoding:NSUTF8StringEncoding];
+  [self renderData:payload contentType:@"text/csv; charset=utf-8"];
+  return nil;
+}
+
 - (id)redirectUnsafe:(ALNContext *)ctx {
   NSString *location = [ctx queryValueForName:@"to"];
   [self redirectTo:location status:302];
@@ -678,6 +685,37 @@ static NSUInteger AppFastPathControllerSlowInvocationCount = 0;
   NSString *body = [[NSString alloc] initWithData:response.bodyData
                                          encoding:NSUTF8StringEncoding];
   XCTAssertEqualObjects(@"1234", body);
+}
+
+- (void)testResponseContractValidatesRenderedTextBodies {
+  ALNApplication *app = [self buildAppWithHaltingMiddleware:NO];
+  [app registerRouteMethod:@"GET"
+                      path:@"/exports/orders-csv"
+                      name:@"rendered_csv_contract"
+           controllerClass:[AppJSONController class]
+                    action:@"renderedCSV"];
+
+  NSError *configureError = nil;
+  BOOL configured = [app configureRouteNamed:@"rendered_csv_contract"
+                               requestSchema:nil
+                              responseSchema:@{ @"type" : @"string" }
+                                     summary:nil
+                                 operationID:nil
+                                        tags:nil
+                               requiredScopes:nil
+                                requiredRoles:nil
+                              includeInOpenAPI:YES
+                                        error:&configureError];
+  XCTAssertTrue(configured);
+  XCTAssertNil(configureError);
+
+  ALNResponse *response = [app dispatchRequest:[self requestForPath:@"/exports/orders-csv"]];
+  XCTAssertEqual((NSInteger)200, response.statusCode);
+  XCTAssertEqualObjects(@"text/csv; charset=utf-8", [response headerForName:@"Content-Type"]);
+  NSString *body = [[NSString alloc] initWithData:response.bodyData
+                                         encoding:NSUTF8StringEncoding];
+  XCTAssertTrue([body containsString:@"id,status"]);
+  XCTAssertTrue([body containsString:@"1,ready"]);
 }
 
 - (void)testExplicitJSONTakesPrecedence {
