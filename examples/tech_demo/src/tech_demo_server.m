@@ -57,10 +57,7 @@ static NSString *ALNResolveAppRoot(void) {
   };
 
   NSError *error = nil;
-  BOOL rendered = [self renderTemplate:@"home/index"
-                               context:viewContext
-                                layout:@"layouts/main"
-                                 error:&error];
+  BOOL rendered = [self renderTemplate:@"home/index" context:viewContext error:&error];
   if (!rendered) {
     [self setStatus:500];
     [self renderText:[NSString stringWithFormat:@"tech demo render failed: %@",
@@ -95,10 +92,7 @@ static NSString *ALNResolveAppRoot(void) {
   };
 
   NSError *error = nil;
-  BOOL rendered = [self renderTemplate:@"dashboard/index"
-                               context:viewContext
-                                layout:@"layouts/main"
-                                 error:&error];
+  BOOL rendered = [self renderTemplate:@"dashboard/index" context:viewContext error:&error];
   if (!rendered) {
     [self setStatus:500];
     [self renderText:[NSString stringWithFormat:@"dashboard render failed: %@",
@@ -121,10 +115,7 @@ static NSString *ALNResolveAppRoot(void) {
   };
 
   NSError *error = nil;
-  BOOL rendered = [self renderTemplate:@"users/show"
-                               context:viewContext
-                                layout:@"layouts/main"
-                                 error:&error];
+  BOOL rendered = [self renderTemplate:@"users/show" context:viewContext error:&error];
   if (!rendered) {
     [self setStatus:500];
     [self renderText:[NSString stringWithFormat:@"user render failed: %@",

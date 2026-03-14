@@ -61,10 +61,13 @@ UNIT_TEST_BUNDLE := $(BUILD_DIR)/tests/ArlenUnitTests.xctest
 UNIT_TEST_BIN := $(UNIT_TEST_BUNDLE)/ArlenUnitTests
 INTEGRATION_TEST_BUNDLE := $(BUILD_DIR)/tests/ArlenIntegrationTests.xctest
 INTEGRATION_TEST_BIN := $(INTEGRATION_TEST_BUNDLE)/ArlenIntegrationTests
+BROWSER_ERROR_AUDIT_TEST_BUNDLE := $(BUILD_DIR)/tests/ArlenBrowserErrorAudit.xctest
+BROWSER_ERROR_AUDIT_TEST_BIN := $(BROWSER_ERROR_AUDIT_TEST_BUNDLE)/ArlenBrowserErrorAudit
 GNUSTEP_TEST_HOME := $(ROOT_DIR)/.gnustep-home
 
 UNIT_TEST_SRCS := $(shell find tests/unit -type f -name '*.m' | sort)
 INTEGRATION_TEST_SRCS := $(shell find tests/integration -type f -name '*.m' | sort)
+BROWSER_ERROR_AUDIT_SRCS := $(shell find tests/browser_error_audit -type f -name '*.m' | sort)
 
 INCLUDE_FLAGS := -Isrc/Arlen -Isrc/Arlen/Core -Isrc/Arlen/Data -Isrc/Arlen/HTTP -Isrc/Arlen/MVC/Controller -Isrc/Arlen/MVC/Middleware -Isrc/Arlen/MVC/Routing -Isrc/Arlen/MVC/Template -Isrc/Arlen/MVC/View -Isrc/Arlen/Support -Isrc/Arlen/Support/third_party/argon2/include -Isrc/Arlen/Support/third_party/argon2/src -Isrc/MojoObjc -Isrc/MojoObjc/Core -Isrc/MojoObjc/Data -Isrc/MojoObjc/HTTP -Isrc/MojoObjc/MVC/Controller -Isrc/MojoObjc/MVC/Middleware -Isrc/MojoObjc/MVC/Routing -Isrc/MojoObjc/MVC/Template -Isrc/MojoObjc/MVC/View -Isrc/MojoObjc/Support -Imodules/auth/Sources -Imodules/admin-ui/Sources -Imodules/jobs/Sources -Imodules/notifications/Sources -Imodules/storage/Sources -Imodules/ops/Sources -Imodules/search/Sources -I/usr/include/postgresql
 EXTRA_OBJC_FLAGS ?=
@@ -84,7 +87,7 @@ endif
 BASE_LINK_LIBS := $$(gnustep-config --base-libs) -ldl -lcrypto -ldispatch
 XCTEST_LINK_LIBS := $(BASE_LINK_LIBS) -lXCTest
 
-.PHONY: all eocc transpile module-transpile tech-demo-transpile generated-compile arlen boomhauer tech-demo-server api-reference-server auth-primitives-server migration-sample-server arlen-data-example json-perf-bench dispatch-perf-bench http-parse-perf-bench route-match-perf-bench backend-contract-matrix test-data-layer dev-server tech-demo smoke-render smoke routes build-tests test test-unit test-integration perf perf-fast parity-phaseb perf-phasec perf-phased deploy-smoke phase5e-confidence phase12-confidence phase13-confidence phase14-confidence phase15-confidence phase16-confidence ci-quality ci-sanitizers ci-fault-injection ci-release-certification ci-json-abstraction ci-json-perf ci-dispatch-perf ci-http-parse-perf ci-route-match-perf ci-backend-parity-matrix ci-protocol-adversarial ci-syscall-faults ci-allocation-faults ci-soak ci-chaos-restart ci-static-analysis ci-blob-throughput ci-phase11-protocol-adversarial ci-phase11-fuzz ci-phase11-live-adversarial ci-phase11-sanitizers ci-phase11 ci-docs check docs-api docs-html docs-serve clean
+.PHONY: all eocc transpile module-transpile tech-demo-transpile generated-compile arlen boomhauer tech-demo-server api-reference-server auth-primitives-server migration-sample-server arlen-data-example json-perf-bench dispatch-perf-bench http-parse-perf-bench route-match-perf-bench backend-contract-matrix test-data-layer dev-server tech-demo smoke-render smoke routes build-tests test test-unit test-integration browser-error-audit perf perf-fast parity-phaseb perf-phasec perf-phased deploy-smoke phase5e-confidence phase12-confidence phase13-confidence phase14-confidence phase15-confidence phase16-confidence ci-quality ci-sanitizers ci-fault-injection ci-release-certification ci-json-abstraction ci-json-perf ci-dispatch-perf ci-http-parse-perf ci-route-match-perf ci-backend-parity-matrix ci-protocol-adversarial ci-syscall-faults ci-allocation-faults ci-soak ci-chaos-restart ci-static-analysis ci-blob-throughput ci-phase11-protocol-adversarial ci-phase11-fuzz ci-phase11-live-adversarial ci-phase11-sanitizers ci-phase11 ci-docs check docs-api docs-html docs-serve clean
 
 all: eocc transpile generated-compile arlen boomhauer
 
@@ -131,8 +134,8 @@ generated-compile: transpile
 >fi; \
 >clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) $$generated_files $(FRAMEWORK_SRCS) -shared -fPIC -o $(BUILD_DIR)/libArlenFramework.so $(BASE_LINK_LIBS)
 
-$(ARLEN_TOOL): tools/arlen.m src/Arlen/Core/ALNConfig.m src/Arlen/Core/ALNModuleSystem.m src/Arlen/Data/ALNMigrationRunner.m src/Arlen/Data/ALNPg.m src/Arlen/Data/ALNSQLBuilder.m src/Arlen/Data/ALNSchemaCodegen.m $(JSON_SERIALIZATION_SRCS) | $(BUILD_DIR)
->source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) tools/arlen.m src/Arlen/Core/ALNConfig.m src/Arlen/Core/ALNModuleSystem.m src/Arlen/Data/ALNMigrationRunner.m src/Arlen/Data/ALNPg.m src/Arlen/Data/ALNSQLBuilder.m src/Arlen/Data/ALNSchemaCodegen.m $(JSON_SERIALIZATION_SRCS) -o $(ARLEN_TOOL) $(BASE_LINK_LIBS)
+$(ARLEN_TOOL): tools/arlen.m src/Arlen/Core/ALNConfig.m src/Arlen/Core/ALNModuleSystem.m $(ARLEN_DATA_SRCS) $(JSON_SERIALIZATION_SRCS) | $(BUILD_DIR)
+>source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) tools/arlen.m src/Arlen/Core/ALNConfig.m src/Arlen/Core/ALNModuleSystem.m $(ARLEN_DATA_SRCS) $(JSON_SERIALIZATION_SRCS) -o $(ARLEN_TOOL) $(BASE_LINK_LIBS)
 
 arlen: $(ARLEN_TOOL)
 
@@ -214,7 +217,7 @@ $(SMOKE_RENDER_TOOL): tools/eoc_smoke_render.m transpile
 >  echo "No generated template sources found in $(GEN_DIR)"; \
 >  exit 1; \
 >fi; \
->clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) tools/eoc_smoke_render.m src/Arlen/MVC/Template/ALNEOCRuntime.m $$generated_files -o $(SMOKE_RENDER_TOOL) $(BASE_LINK_LIBS)
+>clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) tools/eoc_smoke_render.m src/Arlen/MVC/Template/ALNEOCRuntime.m src/Arlen/MVC/View/ALNView.m $$generated_files -o $(SMOKE_RENDER_TOOL) $(BASE_LINK_LIBS)
 
 smoke-render: $(SMOKE_RENDER_TOOL)
 
@@ -232,15 +235,25 @@ $(INTEGRATION_TEST_BIN): $(INTEGRATION_TEST_SRCS) $(FRAMEWORK_SRCS) $(MODULE_SRC
 >clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) $(INTEGRATION_TEST_SRCS) $(FRAMEWORK_SRCS) $(MODULE_SRCS) $$generated_files $$module_generated_files -shared -fPIC -o $(INTEGRATION_TEST_BIN) $(XCTEST_LINK_LIBS)
 >cp tests/Info-gnustep-integration.plist $(INTEGRATION_TEST_BUNDLE)/Resources/Info-gnustep.plist
 
+$(BROWSER_ERROR_AUDIT_TEST_BIN): $(BROWSER_ERROR_AUDIT_SRCS) boomhauer
+>mkdir -p $(BROWSER_ERROR_AUDIT_TEST_BUNDLE)/Resources
+>source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) $(BROWSER_ERROR_AUDIT_SRCS) -shared -fPIC -o $(BROWSER_ERROR_AUDIT_TEST_BIN) $(XCTEST_LINK_LIBS)
+>cp tests/Info-gnustep-browser-error-audit.plist $(BROWSER_ERROR_AUDIT_TEST_BUNDLE)/Resources/Info-gnustep.plist
+
 build-tests: $(UNIT_TEST_BIN) $(INTEGRATION_TEST_BIN)
 
 test-unit: $(UNIT_TEST_BIN)
 >mkdir -p $(GNUSTEP_TEST_HOME)/GNUstep/Defaults/.lck
->export HOME="$(GNUSTEP_TEST_HOME)"; export GNUSTEP_USER_ROOT="$(GNUSTEP_TEST_HOME)/GNUstep"; source $(GNUSTEP_SH) && LD_PRELOAD="$(XCTEST_LD_PRELOAD)" ASAN_OPTIONS="$(ASAN_OPTIONS)" UBSAN_OPTIONS="$(UBSAN_OPTIONS)" xctest $(UNIT_TEST_BUNDLE)
+>source $(GNUSTEP_SH) && export HOME="$(GNUSTEP_TEST_HOME)" GNUSTEP_USER_DIR="$(GNUSTEP_TEST_HOME)/GNUstep" GNUSTEP_USER_ROOT="$(GNUSTEP_TEST_HOME)/GNUstep" GNUSTEP_USER_DEFAULTS_DIR="$(GNUSTEP_TEST_HOME)/GNUstep/Defaults" && LD_PRELOAD="$(XCTEST_LD_PRELOAD)" ASAN_OPTIONS="$(ASAN_OPTIONS)" UBSAN_OPTIONS="$(UBSAN_OPTIONS)" xctest $(UNIT_TEST_BUNDLE)
 
 test-integration: $(INTEGRATION_TEST_BIN)
 >mkdir -p $(GNUSTEP_TEST_HOME)/GNUstep/Defaults/.lck
->export HOME="$(GNUSTEP_TEST_HOME)"; export GNUSTEP_USER_ROOT="$(GNUSTEP_TEST_HOME)/GNUstep"; source $(GNUSTEP_SH) && LD_PRELOAD="$(XCTEST_LD_PRELOAD)" ASAN_OPTIONS="$(ASAN_OPTIONS)" UBSAN_OPTIONS="$(UBSAN_OPTIONS)" xctest $(INTEGRATION_TEST_BUNDLE)
+>source $(GNUSTEP_SH) && export HOME="$(GNUSTEP_TEST_HOME)" GNUSTEP_USER_DIR="$(GNUSTEP_TEST_HOME)/GNUstep" GNUSTEP_USER_ROOT="$(GNUSTEP_TEST_HOME)/GNUstep" GNUSTEP_USER_DEFAULTS_DIR="$(GNUSTEP_TEST_HOME)/GNUstep/Defaults" && LD_PRELOAD="$(XCTEST_LD_PRELOAD)" ASAN_OPTIONS="$(ASAN_OPTIONS)" UBSAN_OPTIONS="$(UBSAN_OPTIONS)" xctest $(INTEGRATION_TEST_BUNDLE)
+
+browser-error-audit: $(BROWSER_ERROR_AUDIT_TEST_BIN)
+>mkdir -p $(GNUSTEP_TEST_HOME)/GNUstep/Defaults/.lck
+>source $(GNUSTEP_SH) && export HOME="$(GNUSTEP_TEST_HOME)" GNUSTEP_USER_DIR="$(GNUSTEP_TEST_HOME)/GNUstep" GNUSTEP_USER_ROOT="$(GNUSTEP_TEST_HOME)/GNUstep" GNUSTEP_USER_DEFAULTS_DIR="$(GNUSTEP_TEST_HOME)/GNUstep/Defaults" ARLEN_BROWSER_ERROR_AUDIT_OUTPUT_DIR="$(ROOT_DIR)/build/browser-error-audit" && LD_PRELOAD="$(XCTEST_LD_PRELOAD)" ASAN_OPTIONS="$(ASAN_OPTIONS)" UBSAN_OPTIONS="$(UBSAN_OPTIONS)" xctest $(BROWSER_ERROR_AUDIT_TEST_BUNDLE)
+>@echo "browser-error-audit: open $(ROOT_DIR)/build/browser-error-audit/index.html"
 
 test: test-unit test-integration
 

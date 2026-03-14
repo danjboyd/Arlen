@@ -1,6 +1,6 @@
 #import <Foundation/Foundation.h>
 
-#import "ALNEOCRuntime.h"
+#import "ALNView.h"
 
 static NSDictionary *BuildSmokeContext(void) {
   return @{
@@ -15,7 +15,10 @@ int main(int argc, const char *argv[]) {
 
   @autoreleasepool {
     NSError *error = nil;
-    NSString *rendered = ALNEOCRenderTemplate(@"index.html.eoc", BuildSmokeContext(), &error);
+    NSString *rendered = [ALNView renderTemplate:@"index"
+                                         context:BuildSmokeContext()
+                                          layout:nil
+                                           error:&error];
     if (rendered == nil) {
       fprintf(stderr, "eoc-smoke-render: render failed: %s\n",
               [[error localizedDescription] UTF8String]);

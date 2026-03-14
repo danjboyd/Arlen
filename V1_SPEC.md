@@ -19,14 +19,14 @@ v1 is focused on correctness, diagnostics, and build integration. It is not yet 
 - Build-time integration with `gnustep-make`.
 - HTML escaping by default for expression output.
 - Optional raw output for trusted content.
-- Template partial includes.
+- First-class layout, slot, partial-include, and collection-render directives.
 - Configurable strict render modes for missing locals and output stringification.
 - Error mapping from generated code back to template file and line.
 
 ### Out of Scope (v1)
 
 - Runtime compilation/reload server mode.
-- Automatic layout inheritance system.
+- Implicit or deep automatic layout inheritance system.
 - Sandbox or untrusted-template execution model.
 - Full HTTP routing/controller framework.
 
@@ -40,6 +40,7 @@ Supported tags:
 - `<%= expr %>`: Evaluate expression and append HTML-escaped output.
 - `<%== expr %>`: Evaluate expression and append raw output.
 - `<%# comment %>`: Template comment, ignored.
+- `<%@ directive %>`: Composition or contract directive.
 
 ### 3.1 Sigil Locals
 
@@ -100,6 +101,16 @@ Context model:
   - missing keys/segments resolve to `nil` unless strict locals mode is enabled
 - Optional helper protocol(s) may be added later, but v1 does not require strict protocol conformance.
 
+### 4.1 Composition Contract
+
+EOC composition is additive and explicit.
+
+- Layouts are declared inside the template with `<%@ layout "layouts/application" %>`.
+- Layouts render through named yields rather than template inheritance trees.
+- Slots are captured by child templates and consumed by layouts.
+- Partials and collection rendering may overlay explicit locals on top of the current `ctx`.
+- Composition state is per-render and shared across nested template renders so page, partial, and layout output can coordinate deterministically.
+
 ## 5. Escaping Rules
 
 - `<%= expr %>` must HTML-escape `&`, `<`, `>`, `"`, and `'`.
@@ -127,21 +138,82 @@ v1 supports opt-in strict modes to catch template mistakes early.
 
 Escaping helper (v1) will live in runtime support code, called by generated templates.
 
-## 6. Partials
+## 6. Composition Directives
 
-v1 supports partial include through generated helper calls.
+v1 supports first-class composition directives through `<%@ ... %>`.
 
-Template usage example:
+### 6.1 Layouts and Slots
+
+Layout templates declare yield points:
 
 ```html
-<% ALNEOCInclude(out, ctx, @"partials/_nav.html.eoc", error); %>
+<main><%@ yield %></main>
+<aside><%@ yield "sidebar" %></aside>
+```
+
+Page templates opt into a layout and may fill named slots:
+
+```html
+<%@ layout "layouts/application" %>
+<%@ slot "sidebar" %>
+  <p>Sidebar content</p>
+<%@ endslot %>
+<h1><%= $title %></h1>
+```
+
+Behavior:
+
+- `yield` defaults to the `content` slot.
+- `slot` captures rendered output until the matching `endslot`.
+- Body output is exposed as the `content` slot when a layout is rendered through `ALNView`.
+- Layout paths are normalized to `.html.eoc`.
+
+### 6.2 Required Locals
+
+Templates may declare required locals:
+
+```html
+<%@ requires title, rows %>
+```
+
+Behavior:
+
+- Required locals are checked at render time before template output continues.
+- Missing required locals fail render with `ALNEOCErrorTemplateExecutionFailed`.
+- `eocc` records required-local metadata for static analysis and future tooling.
+
+### 6.3 Partials
+
+Preferred partial syntax:
+
+```html
+<%@ include "partials/_nav" %>
+<%@ include "partials/_summary" with @{ @"title" : $title } %>
 ```
 
 Behavior:
 
 - Include resolves using configured template root.
-- Include shares the same `ctx`.
+- Include shares the current `ctx` by default.
+- `with` overlays explicit locals on top of the current `ctx`.
 - Include failure bubbles up via `error`.
+- Direct `ALNEOCInclude(...)` helper calls remain available for trusted imperative code, but directives are the preferred composition surface.
+
+### 6.4 Collection Rendering
+
+Templates may render collections through a partial:
+
+```html
+<%@ render "partials/_row" collection:$rows as:"row" %>
+<%@ render "partials/_row" collection:$rows as:"row" empty:"partials/_empty" with @{ @"title" : $title } %>
+```
+
+Behavior:
+
+- `collection:` accepts any Objective-C enumerable object except strings/data.
+- `as:` declares the local name bound to each element while rendering the partial.
+- `empty:` renders a fallback partial when the collection is empty.
+- `with` overlays additional locals on each item render.
 
 ## 7. Transpiler Behavior
 
@@ -162,6 +234,7 @@ Implementation requirements:
   - `$name` -> `ALNEOCLocal(...)`
   - `$user.profile.email` -> `ALNEOCLocalPath(...)`
 - Emit `#line` directives before generated chunks to preserve template file/line diagnostics.
+- Extract deterministic template metadata for layout path, required locals, yield slots, filled slots, and static composition dependencies.
 
 Parsing errors must include:
 
@@ -178,6 +251,7 @@ v1 build pipeline:
 2. Run transpiler to emit generated `.m` into a build directory (for example `build/gen/templates`).
 3. Add generated `.m` files to normal Objective-C compilation inputs.
 4. Link with runtime support module (escape helpers, include dispatch).
+5. Register generated templates and static layout metadata.
 
 Rules:
 
@@ -222,6 +296,11 @@ Implications:
 - Strict locals mode reports unresolved locals with template path and location.
 - Strict stringify mode reports non-string-like direct output (for example `<%= $myObject %>` when conversion rules are not satisfied).
 - Partial include works.
+- Layouts and named slots render deterministically.
+- Required locals fail fast with template location metadata.
+- Partial local overlays and collection rendering work.
+- `eocc` rejects unknown static composition dependencies and static composition cycles.
+- `eocc` warns when slots are filled without a layout or never yielded by the selected layout.
 - Compiler/transpiler errors point to original template lines.
 - Example app template compiles and runs through GNUstep build.
 

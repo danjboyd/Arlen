@@ -66,11 +66,19 @@ Last updated: 2026-03-13
 - Phase 15: complete (15A/15B/15C/15D/15E complete on 2026-03-10)
 - Phase 16: complete (`16A/16B/16C` complete on 2026-03-10; `16D/16E/16F/16G` complete on 2026-03-11)
 - Phase 17: complete (`17A-17D` delivered on 2026-03-12 for backend-neutral data-layer seams and optional MSSQL support)
-- Phase 18: complete (2026-03-13)
+- Phase 18: complete (`18A-18G` delivered on 2026-03-13 for fragment-first MFA
+  UI, headless MFA contracts, and optional SMS/Twilio Verify support)
 
 ## Completed Today (2026-03-13)
 
-- Completed Phase 18 auth module reuse maturity:
+- Completed Phase 18E-18G optional SMS MFA and factor-management follow-on:
+  - added disabled-by-default SMS MFA via Twilio Verify with policy-gated route
+    registration, resend/verify limits, and test-code seams
+  - added stock factor-management pages/fragments so users can manage
+    authenticator-app and SMS factors together while keeping TOTP preferred
+  - extended generated-app-ui eject, docs/examples, and confidence coverage for
+    SMS enrollment, challenge, removal, and headless `/auth/api/mfa` discovery
+- Completed Phase 18A-18D auth module reuse maturity:
   - promoted coarse embeddable auth fragments for server-rendered EOC apps and
     refactored the stock auth UI to consume those same fragments
   - split TOTP HTML into enrollment, challenge, and recovery-code completion

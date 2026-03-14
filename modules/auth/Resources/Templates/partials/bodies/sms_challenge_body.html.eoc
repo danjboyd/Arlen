@@ -1,0 +1,2 @@
+<% NSString *challengeTemplate = [ctx objectForKey:@"authFragmentMFASMSChallengeForm"] ?: @"modules/auth/fragments/mfa_sms_challenge_form"; %>
+<% if (!ALNEOCInclude(out, ctx, challengeTemplate, error)) { return nil; } %>

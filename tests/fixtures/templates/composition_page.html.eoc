@@ -1,0 +1,12 @@
+<%@ layout "layouts/application" %>
+<%@ requires title, rows %>
+<%@ slot "sidebar" %>
+<p class="sidebar"><%= $title %></p>
+<%@ endslot %>
+<section>
+  <h1><%= $title %></h1>
+  <%@ include "partials/_summary" with @{ @"title" : $title } %>
+  <ul>
+    <%@ render "partials/_row" collection:$rows as:"row" empty:"partials/_empty" with @{ @"title" : $title } %>
+  </ul>
+</section>

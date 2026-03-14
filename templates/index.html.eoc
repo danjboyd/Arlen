@@ -1,12 +1,11 @@
-<h1><%= [ctx objectForKey:@"title"] %></h1>
+<%@ layout "layouts/main" %>
 <%
 NSString *templateNote =
     [NSString stringWithFormat:@"%@:%@", @"template", @"multiline-ok"];
 %>
+<%@ slot "sidebar" %>
 <p class="template-note"><%= templateNote %></p>
-<% if (!ALNEOCInclude(out, ctx, @"partials/_nav.html.eoc", error)) { return nil; } %>
+<%@ endslot %>
 <ul>
-<% for (NSString *item in [ctx objectForKey:@"items"]) { %>
-  <li><%= item %></li>
-<% } %>
+  <%@ render "partials/_item" collection:$items as:"item" %>
 </ul>

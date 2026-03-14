@@ -1364,6 +1364,13 @@
                                    "    ui = {\n"
                                    "      mode = \"module-ui\";\n"
                                    "    };\n"
+                                   "    mfa = {\n"
+                                   "      sms = {\n"
+                                   "        enabled = YES;\n"
+                                   "        allowPrimaryFactor = YES;\n"
+                                   "        testVerificationCode = \"123456\";\n"
+                                   "      };\n"
+                                   "    };\n"
                                    "  };\n"
                                    "}\n",
                                    port,
@@ -1383,9 +1390,9 @@
                                   "- (id)home:(ALNContext *)ctx { (void)ctx; [self renderText:@\"phase18-home\\n\"]; return nil; }\n"
                                   "- (id)security:(ALNContext *)ctx {\n"
                                   "  NSError *error = nil;\n"
-                                  "  NSDictionary *authContext = [[ALNAuthModuleRuntime sharedRuntime] totpFragmentContextForCurrentUserInContext:ctx\n"
-                                  "                                                                                                         returnTo:@\"/account/security\"\n"
-                                  "                                                                                                            error:&error];\n"
+                                  "  NSDictionary *authContext = [[ALNAuthModuleRuntime sharedRuntime] mfaManagementFragmentContextForCurrentUserInContext:ctx\n"
+                                  "                                                                                                                  returnTo:@\"/account/security\"\n"
+                                  "                                                                                                                     error:&error];\n"
                                   "  if (authContext == nil) {\n"
                                   "    [self setStatus:401];\n"
                                   "    [self renderText:@\"authentication required\\n\"];\n"
@@ -1410,9 +1417,13 @@
     XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"templates/account/security.html.eoc"]
                           content:@"<section class=\"phase18-account-security\">\n"
                                   "  <h1>Account Security</h1>\n"
-                                  "  <% NSString *flow = [ctx objectForKey:@\"authMFAFlowState\"] ?: @\"\"; %>\n"
-                                  "  <% NSString *fragment = [flow isEqualToString:@\"challenge\"] ? @\"modules/auth/fragments/mfa_challenge_form\" : @\"modules/auth/fragments/mfa_enrollment_panel\"; %>\n"
-                                  "  <% if (!ALNEOCInclude(out, ctx, fragment, error)) { return nil; } %>\n"
+                                  "  <% if (!ALNEOCInclude(out, ctx, @\"modules/auth/fragments/mfa_factor_inventory_panel\", error)) { return nil; } %>\n"
+                                  "  <% if ([[ctx objectForKey:@\"authTOTPNeedsEnrollment\"] boolValue]) { %>\n"
+                                  "    <% if (!ALNEOCInclude(out, ctx, @\"modules/auth/fragments/mfa_enrollment_panel\", error)) { return nil; } %>\n"
+                                  "  <% } %>\n"
+                                  "  <% if ([[[ctx objectForKey:@\"authSMSState\"] objectForKey:@\"enabled\"] boolValue]) { %>\n"
+                                  "    <% if (!ALNEOCInclude(out, ctx, @\"modules/auth/fragments/mfa_sms_enrollment_panel\", error)) { return nil; } %>\n"
+                                  "  <% } %>\n"
                                   "</section>\n"]);
 
     int exitCode = 0;
@@ -1486,8 +1497,10 @@
     XCTAssertEqual(0, curlExitCode);
     XCTAssertEqual((NSInteger)200, [securityPage[@"status"] integerValue]);
     XCTAssertTrue([securityPage[@"body"] containsString:@"Account Security"]);
-    XCTAssertTrue([securityPage[@"body"] containsString:@"data-auth-mfa-flow=\"enrollment\""]);
+    XCTAssertTrue([securityPage[@"body"] containsString:@"Authenticator app"]);
+    XCTAssertTrue([securityPage[@"body"] containsString:@"SMS"]);
     XCTAssertTrue([securityPage[@"body"] containsString:@"Manual setup key"]);
+    XCTAssertTrue([securityPage[@"body"] containsString:@"data-auth-mfa-flow=\"sms_manage\""]);
 
     NSString *secret = [self sqlScalar:[NSString stringWithFormat:
         @"SELECT m.secret FROM auth_mfa_enrollments m JOIN auth_users u ON u.id = m.user_id "
@@ -1533,8 +1546,491 @@
                                exitCode:&curlExitCode];
     XCTAssertEqual(0, curlExitCode);
     XCTAssertEqual((NSInteger)200, [securityPage[@"status"] integerValue]);
-    XCTAssertTrue([securityPage[@"body"] containsString:@"data-auth-mfa-flow=\"challenge\""]);
+    XCTAssertTrue([securityPage[@"body"] containsString:@"Authenticator app"]);
+    XCTAssertTrue([securityPage[@"body"] containsString:@"SMS"]);
     XCTAssertFalse([securityPage[@"body"] containsString:@"Manual setup key"]);
+  } @finally {
+    if (server != nil && [server isRunning]) {
+      kill(server.processIdentifier, SIGTERM);
+      [server waitUntilExit];
+    }
+    (void)[self deleteUserByEmail:userEmail dsn:dsn];
+    [[NSFileManager defaultManager] removeItemAtPath:cookieJar error:nil];
+    [[NSFileManager defaultManager] removeItemAtPath:serverLog error:nil];
+    [[NSFileManager defaultManager] removeItemAtPath:appRoot error:nil];
+  }
+}
+
+- (void)testAuthModuleHidesSMSSurfacesWhenDisabledByDefault {
+  NSString *dsn = [self pgTestDSN];
+  if ([dsn length] == 0) {
+    return;
+  }
+
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *quotedRepoRoot = [self shellQuoted:repoRoot];
+  NSString *quotedArlenBinary = [self shellQuoted:[repoRoot stringByAppendingPathComponent:@"build/arlen"]];
+  NSString *quotedBoomhauer = [self shellQuoted:[repoRoot stringByAppendingPathComponent:@"bin/boomhauer"]];
+  NSString *appRoot = [self createTempDirectoryWithPrefix:@"phase18-auth-sms-disabled"];
+  NSString *cookieJar = [self createTempFilePathWithPrefix:@"phase18-auth-sms-disabled-cookie" suffix:@".txt"];
+  NSString *serverLog = [self createTempFilePathWithPrefix:@"phase18-auth-sms-disabled-server" suffix:@".log"];
+  NSString *userEmail = [NSString stringWithFormat:@"phase18-sms-disabled-%@@example.test", [[NSUUID UUID] UUIDString].lowercaseString];
+  NSString *password = @"module-password-ok";
+  int port = [self randomPort];
+  XCTAssertNotNil(appRoot);
+  if (appRoot == nil) {
+    return;
+  }
+
+  NSTask *server = nil;
+
+  @try {
+    NSString *configContents =
+        [NSString stringWithFormat:@"{\n"
+                                   "  host = \"127.0.0.1\";\n"
+                                   "  port = %d;\n"
+                                   "  session = {\n"
+                                   "    enabled = YES;\n"
+                                   "    secret = \"phase18-auth-sms-disabled-session-secret-0123456789abcdef\";\n"
+                                   "  };\n"
+                                   "  csrf = {\n"
+                                   "    enabled = YES;\n"
+                                   "    allowQueryParamFallback = YES;\n"
+                                   "  };\n"
+                                   "  database = {\n"
+                                   "    connectionString = \"%@\";\n"
+                                   "  };\n"
+                                   "}\n",
+                                   port,
+                                   [dsn stringByReplacingOccurrencesOfString:@"\"" withString:@"\\\""]];
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"config/app.plist"] content:configContents]);
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"config/environments/development.plist"] content:@"{}\n"]);
+    XCTAssertTrue([self writeBasicAppAtRoot:appRoot extraClasses:nil homeText:@"phase18-sms-disabled"]);
+
+    int exitCode = 0;
+    NSString *buildOutput =
+        [self runShellCapture:[NSString stringWithFormat:@"cd %@ && source /usr/GNUstep/System/Library/Makefiles/GNUstep.sh && make arlen eocc",
+                                                         quotedRepoRoot]
+                     exitCode:&exitCode];
+    XCTAssertEqual(0, exitCode, @"%@", buildOutput);
+
+    NSString *addAuth = [self runShellCapture:[NSString stringWithFormat:@"cd %@ && ARLEN_FRAMEWORK_ROOT=%@ %@ module add auth --json",
+                                                                        [self shellQuoted:appRoot],
+                                                                        quotedRepoRoot,
+                                                                        quotedArlenBinary]
+                                      exitCode:&exitCode];
+    XCTAssertEqual(0, exitCode, @"%@", addAuth);
+    XCTAssertEqualObjects(@"ok", [self parseJSONDictionary:addAuth][@"status"]);
+
+    server = [[NSTask alloc] init];
+    server.launchPath = @"/bin/bash";
+    server.arguments = @[ @"-lc",
+                          [NSString stringWithFormat:@"cd %@ && ARLEN_FRAMEWORK_ROOT=%@ %@ --no-watch --port %d >%@ 2>&1",
+                                                     [self shellQuoted:appRoot],
+                                                     quotedRepoRoot,
+                                                     quotedBoomhauer,
+                                                     port,
+                                                     [self shellQuoted:serverLog]] ];
+    [server launch];
+    XCTAssertTrue([self waitForServerOnPort:port path:@"/auth/api/session"]);
+
+    NSDictionary *sessionResponse = [self curlJSONAtPort:port
+                                                    path:@"/auth/api/session"
+                                                  method:@"GET"
+                                               cookieJar:cookieJar
+                                               csrfToken:nil
+                                                 payload:nil
+                                         followRedirects:NO
+                                                exitCode:&exitCode];
+    XCTAssertEqual(0, exitCode);
+    NSString *csrfToken = [self parseJSONDictionary:sessionResponse[@"body"]][@"csrf_token"] ?: @"";
+
+    NSDictionary *registerResponse = [self curlJSONAtPort:port
+                                                     path:@"/auth/api/register"
+                                                   method:@"POST"
+                                                cookieJar:cookieJar
+                                                csrfToken:csrfToken
+                                                  payload:@{
+                                                    @"email" : userEmail,
+                                                    @"display_name" : @"Phase 18 SMS Disabled",
+                                                    @"password" : password,
+                                                  }
+                                          followRedirects:NO
+                                                 exitCode:&exitCode];
+    XCTAssertEqual(0, exitCode);
+    XCTAssertEqual((NSInteger)200, [registerResponse[@"status"] integerValue]);
+
+    NSDictionary *mfaResponse = [self curlJSONAtPort:port
+                                                path:@"/auth/api/mfa"
+                                              method:@"GET"
+                                           cookieJar:cookieJar
+                                           csrfToken:nil
+                                             payload:nil
+                                     followRedirects:NO
+                                            exitCode:&exitCode];
+    XCTAssertEqual(0, exitCode);
+    XCTAssertEqual((NSInteger)200, [mfaResponse[@"status"] integerValue]);
+    NSDictionary *mfaPayload = [self parseJSONDictionary:mfaResponse[@"body"]];
+    XCTAssertEqualObjects(@NO, mfaPayload[@"policy"][@"sms"][@"enabled"]);
+    XCTAssertEqualObjects(@"", mfaPayload[@"paths"][@"sms"]);
+    XCTAssertEqual((NSUInteger)1, [mfaPayload[@"factors"] count]);
+
+    NSDictionary *mfaPage = [self curlTextAtPort:port
+                                            path:@"/auth/mfa"
+                                          method:@"GET"
+                                       cookieJar:cookieJar
+                                       csrfToken:nil
+                                      formFields:nil
+                                 followRedirects:NO
+                                        exitCode:&exitCode];
+    XCTAssertEqual(0, exitCode);
+    XCTAssertEqual((NSInteger)200, [mfaPage[@"status"] integerValue]);
+    XCTAssertTrue([mfaPage[@"body"] containsString:@"Authenticator app"]);
+    XCTAssertFalse([mfaPage[@"body"] containsString:@"SMS can be useful as a fallback"]);
+    XCTAssertFalse([mfaPage[@"body"] containsString:@"data-auth-mfa-flow=\"sms_manage\""]);
+
+    NSDictionary *missingSMSAPI = [self curlJSONAtPort:port
+                                                  path:@"/auth/api/mfa/sms"
+                                                method:@"GET"
+                                             cookieJar:cookieJar
+                                             csrfToken:nil
+                                               payload:nil
+                                       followRedirects:NO
+                                              exitCode:&exitCode];
+    XCTAssertEqual(0, exitCode);
+    XCTAssertEqual((NSInteger)404, [missingSMSAPI[@"status"] integerValue]);
+  } @finally {
+    if (server != nil && [server isRunning]) {
+      kill(server.processIdentifier, SIGTERM);
+      [server waitUntilExit];
+    }
+    (void)[self deleteUserByEmail:userEmail dsn:dsn];
+    [[NSFileManager defaultManager] removeItemAtPath:cookieJar error:nil];
+    [[NSFileManager defaultManager] removeItemAtPath:serverLog error:nil];
+    [[NSFileManager defaultManager] removeItemAtPath:appRoot error:nil];
+  }
+}
+
+- (void)testAuthModuleSupportsSMSFactorManagementAndKeepsTOTPPreferred {
+  NSString *dsn = [self pgTestDSN];
+  if ([dsn length] == 0) {
+    return;
+  }
+
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *quotedRepoRoot = [self shellQuoted:repoRoot];
+  NSString *quotedArlenBinary = [self shellQuoted:[repoRoot stringByAppendingPathComponent:@"build/arlen"]];
+  NSString *quotedBoomhauer = [self shellQuoted:[repoRoot stringByAppendingPathComponent:@"bin/boomhauer"]];
+  NSString *appRoot = [self createTempDirectoryWithPrefix:@"phase18-auth-sms-enabled"];
+  NSString *cookieJar = [self createTempFilePathWithPrefix:@"phase18-auth-sms-enabled-cookie" suffix:@".txt"];
+  NSString *serverLog = [self createTempFilePathWithPrefix:@"phase18-auth-sms-enabled-server" suffix:@".log"];
+  NSString *userEmail = [NSString stringWithFormat:@"phase18-sms-enabled-%@@example.test", [[NSUUID UUID] UUIDString].lowercaseString];
+  NSString *password = @"module-password-ok";
+  NSString *smsCode = @"123456";
+  NSString *phoneNumber = @"+15555550199";
+  int port = [self randomPort];
+  XCTAssertNotNil(appRoot);
+  if (appRoot == nil) {
+    return;
+  }
+
+  NSTask *server = nil;
+
+  @try {
+    NSString *configContents =
+        [NSString stringWithFormat:@"{\n"
+                                   "  host = \"127.0.0.1\";\n"
+                                   "  port = %d;\n"
+                                   "  session = {\n"
+                                   "    enabled = YES;\n"
+                                   "    secret = \"phase18-auth-sms-enabled-session-secret-0123456789abcdef\";\n"
+                                   "  };\n"
+                                   "  csrf = {\n"
+                                   "    enabled = YES;\n"
+                                   "    allowQueryParamFallback = YES;\n"
+                                   "  };\n"
+                                   "  database = {\n"
+                                   "    connectionString = \"%@\";\n"
+                                   "  };\n"
+                                   "  authModule = {\n"
+                                   "    mfa = {\n"
+                                   "      sms = {\n"
+                                   "        enabled = YES;\n"
+                                   "        allowPrimaryFactor = YES;\n"
+                                   "        testVerificationCode = \"%@\";\n"
+                                   "      };\n"
+                                   "    };\n"
+                                   "  };\n"
+                                   "}\n",
+                                   port,
+                                   [dsn stringByReplacingOccurrencesOfString:@"\"" withString:@"\\\""],
+                                   smsCode];
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"config/app.plist"] content:configContents]);
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"config/environments/development.plist"] content:@"{}\n"]);
+    XCTAssertTrue([self writeBasicAppAtRoot:appRoot extraClasses:nil homeText:@"phase18-sms-enabled"]);
+
+    int exitCode = 0;
+    NSString *buildOutput =
+        [self runShellCapture:[NSString stringWithFormat:@"cd %@ && source /usr/GNUstep/System/Library/Makefiles/GNUstep.sh && make arlen eocc",
+                                                         quotedRepoRoot]
+                     exitCode:&exitCode];
+    XCTAssertEqual(0, exitCode, @"%@", buildOutput);
+
+    NSString *addAuth = [self runShellCapture:[NSString stringWithFormat:@"cd %@ && ARLEN_FRAMEWORK_ROOT=%@ %@ module add auth --json",
+                                                                        [self shellQuoted:appRoot],
+                                                                        quotedRepoRoot,
+                                                                        quotedArlenBinary]
+                                      exitCode:&exitCode];
+    XCTAssertEqual(0, exitCode, @"%@", addAuth);
+    XCTAssertEqualObjects(@"ok", [self parseJSONDictionary:addAuth][@"status"]);
+
+    server = [[NSTask alloc] init];
+    server.launchPath = @"/bin/bash";
+    server.arguments = @[ @"-lc",
+                          [NSString stringWithFormat:@"cd %@ && ARLEN_FRAMEWORK_ROOT=%@ %@ --no-watch --port %d >%@ 2>&1",
+                                                     [self shellQuoted:appRoot],
+                                                     quotedRepoRoot,
+                                                     quotedBoomhauer,
+                                                     port,
+                                                     [self shellQuoted:serverLog]] ];
+    [server launch];
+    XCTAssertTrue([self waitForServerOnPort:port path:@"/auth/api/session"]);
+
+    NSDictionary *sessionResponse = [self curlJSONAtPort:port
+                                                    path:@"/auth/api/session"
+                                                  method:@"GET"
+                                               cookieJar:cookieJar
+                                               csrfToken:nil
+                                                 payload:nil
+                                         followRedirects:NO
+                                                exitCode:&exitCode];
+    XCTAssertEqual(0, exitCode);
+    NSString *csrfToken = [self parseJSONDictionary:sessionResponse[@"body"]][@"csrf_token"] ?: @"";
+
+    NSDictionary *registerResponse = [self curlJSONAtPort:port
+                                                     path:@"/auth/api/register"
+                                                   method:@"POST"
+                                                cookieJar:cookieJar
+                                                csrfToken:csrfToken
+                                                  payload:@{
+                                                    @"email" : userEmail,
+                                                    @"display_name" : @"Phase 18 SMS Enabled",
+                                                    @"password" : password,
+                                                  }
+                                          followRedirects:NO
+                                                 exitCode:&exitCode];
+    XCTAssertEqual(0, exitCode);
+    XCTAssertEqual((NSInteger)200, [registerResponse[@"status"] integerValue]);
+
+    NSDictionary *mfaPage = [self curlTextAtPort:port
+                                            path:@"/auth/mfa"
+                                          method:@"GET"
+                                       cookieJar:cookieJar
+                                       csrfToken:nil
+                                      formFields:nil
+                                 followRedirects:NO
+                                        exitCode:&exitCode];
+    XCTAssertEqual(0, exitCode);
+    XCTAssertEqual((NSInteger)200, [mfaPage[@"status"] integerValue]);
+    XCTAssertTrue([mfaPage[@"body"] containsString:@"Authenticator app"]);
+    XCTAssertTrue([mfaPage[@"body"] containsString:@"SMS"]);
+    XCTAssertTrue([mfaPage[@"body"] containsString:@"SMS can be useful as a fallback"]);
+
+    NSDictionary *mfaState = [self curlJSONAtPort:port
+                                             path:@"/auth/api/mfa"
+                                           method:@"GET"
+                                        cookieJar:cookieJar
+                                        csrfToken:nil
+                                          payload:nil
+                                  followRedirects:NO
+                                         exitCode:&exitCode];
+    XCTAssertEqual(0, exitCode);
+    XCTAssertEqual((NSInteger)200, [mfaState[@"status"] integerValue]);
+    NSDictionary *mfaPayload = [self parseJSONDictionary:mfaState[@"body"]];
+    XCTAssertEqualObjects(@YES, mfaPayload[@"policy"][@"sms"][@"enabled"]);
+    XCTAssertEqualObjects(@"totp", mfaPayload[@"preferred_factor"]);
+    XCTAssertEqualObjects(@YES, mfaPayload[@"mfa"][@"sms"][@"management_allowed"]);
+    XCTAssertEqual((NSUInteger)2, [mfaPayload[@"factors"] count]);
+
+    sessionResponse = [self curlJSONAtPort:port
+                                      path:@"/auth/api/session"
+                                    method:@"GET"
+                                 cookieJar:cookieJar
+                                 csrfToken:nil
+                                   payload:nil
+                           followRedirects:NO
+                                  exitCode:&exitCode];
+    csrfToken = [self parseJSONDictionary:sessionResponse[@"body"]][@"csrf_token"] ?: @"";
+
+    NSDictionary *smsStart = [self curlJSONAtPort:port
+                                             path:@"/auth/api/mfa/sms/start"
+                                           method:@"POST"
+                                        cookieJar:cookieJar
+                                        csrfToken:csrfToken
+                                          payload:@{
+                                            @"phone_number" : phoneNumber,
+                                            @"return_to" : @"/account/security",
+                                          }
+                                  followRedirects:NO
+                                         exitCode:&exitCode];
+    XCTAssertEqual(0, exitCode);
+    XCTAssertEqual((NSInteger)200, [smsStart[@"status"] integerValue]);
+    XCTAssertTrue([[self parseJSONDictionary:smsStart[@"body"]][@"message"] containsString:@"We sent a code"]);
+
+    sessionResponse = [self curlJSONAtPort:port
+                                      path:@"/auth/api/session"
+                                    method:@"GET"
+                                 cookieJar:cookieJar
+                                 csrfToken:nil
+                                   payload:nil
+                           followRedirects:NO
+                                  exitCode:&exitCode];
+    csrfToken = [self parseJSONDictionary:sessionResponse[@"body"]][@"csrf_token"] ?: @"";
+
+    NSDictionary *smsVerify = [self curlJSONAtPort:port
+                                              path:@"/auth/api/mfa/sms/verify"
+                                            method:@"POST"
+                                         cookieJar:cookieJar
+                                         csrfToken:csrfToken
+                                           payload:@{
+                                             @"code" : smsCode,
+                                             @"return_to" : @"/account/security",
+                                           }
+                                   followRedirects:NO
+                                          exitCode:&exitCode];
+    XCTAssertEqual(0, exitCode);
+    XCTAssertEqual((NSInteger)200, [smsVerify[@"status"] integerValue]);
+    NSDictionary *smsVerifyPayload = [self parseJSONDictionary:smsVerify[@"body"]];
+    XCTAssertEqualObjects(@"ok", smsVerifyPayload[@"status"]);
+    XCTAssertEqualObjects(@"sms", smsVerifyPayload[@"flow"][@"factor"]);
+    XCTAssertEqualObjects(@YES, smsVerifyPayload[@"enrollment_completed"]);
+
+    NSDictionary *totpState = [self curlJSONAtPort:port
+                                              path:@"/auth/api/mfa/totp"
+                                            method:@"GET"
+                                         cookieJar:cookieJar
+                                         csrfToken:nil
+                                           payload:nil
+                                   followRedirects:NO
+                                          exitCode:&exitCode];
+    XCTAssertEqual(0, exitCode);
+    XCTAssertEqual((NSInteger)200, [totpState[@"status"] integerValue]);
+    NSDictionary *totpPayload = [self parseJSONDictionary:totpState[@"body"]];
+    XCTAssertEqualObjects(@"enrollment", totpPayload[@"flow"][@"state"]);
+
+    NSString *secret = [self sqlScalar:[NSString stringWithFormat:
+        @"SELECT m.secret FROM auth_mfa_enrollments m JOIN auth_users u ON u.id = m.user_id "
+         "WHERE lower(u.email) = lower('%@') AND m.type = 'totp' ORDER BY m.id DESC LIMIT 1;",
+        [userEmail stringByReplacingOccurrencesOfString:@"'" withString:@"''"]]
+                                  dsn:dsn];
+    XCTAssertTrue([secret length] > 0);
+    NSString *totpCode = [ALNTOTP codeForSecret:secret atDate:[NSDate date] error:nil];
+    XCTAssertTrue([totpCode length] > 0);
+
+    sessionResponse = [self curlJSONAtPort:port
+                                      path:@"/auth/api/session"
+                                    method:@"GET"
+                                 cookieJar:cookieJar
+                                 csrfToken:nil
+                                   payload:nil
+                           followRedirects:NO
+                                  exitCode:&exitCode];
+    csrfToken = [self parseJSONDictionary:sessionResponse[@"body"]][@"csrf_token"] ?: @"";
+
+    NSDictionary *totpVerify = [self curlJSONAtPort:port
+                                               path:@"/auth/api/mfa/totp/verify"
+                                             method:@"POST"
+                                          cookieJar:cookieJar
+                                          csrfToken:csrfToken
+                                            payload:@{
+                                              @"code" : totpCode,
+                                              @"return_to" : @"/account/security",
+                                            }
+                                    followRedirects:NO
+                                           exitCode:&exitCode];
+    XCTAssertEqual(0, exitCode);
+    XCTAssertEqual((NSInteger)200, [totpVerify[@"status"] integerValue]);
+    NSDictionary *totpVerifyPayload = [self parseJSONDictionary:totpVerify[@"body"]];
+    XCTAssertEqualObjects(@"recovery_codes", totpVerifyPayload[@"flow"][@"state"]);
+    XCTAssertEqualObjects(@YES, totpVerifyPayload[@"mfa"][@"recovery_codes_present"]);
+
+    mfaState = [self curlJSONAtPort:port
+                               path:@"/auth/api/mfa"
+                             method:@"GET"
+                          cookieJar:cookieJar
+                          csrfToken:nil
+                            payload:nil
+                    followRedirects:NO
+                           exitCode:&exitCode];
+    XCTAssertEqual(0, exitCode);
+    XCTAssertEqual((NSInteger)200, [mfaState[@"status"] integerValue]);
+    mfaPayload = [self parseJSONDictionary:mfaState[@"body"]];
+    XCTAssertEqualObjects(@"totp", mfaPayload[@"preferred_factor"]);
+    XCTAssertTrue([mfaPayload[@"available_challenge_factors"] containsObject:@"totp"]);
+    XCTAssertTrue([mfaPayload[@"available_challenge_factors"] containsObject:@"sms"]);
+    XCTAssertEqualObjects(@YES, mfaPayload[@"mfa"][@"sms"][@"verified"]);
+
+    NSDictionary *totpChallengePage = [self curlTextAtPort:port
+                                                      path:@"/auth/mfa/totp?return_to=/account/security"
+                                                    method:@"GET"
+                                                 cookieJar:cookieJar
+                                                 csrfToken:nil
+                                                formFields:nil
+                                           followRedirects:NO
+                                                  exitCode:&exitCode];
+    XCTAssertEqual(0, exitCode);
+    XCTAssertEqual((NSInteger)200, [totpChallengePage[@"status"] integerValue]);
+    XCTAssertTrue([totpChallengePage[@"body"] containsString:@"Use SMS instead"]);
+
+    NSDictionary *smsChallengePage = [self curlTextAtPort:port
+                                                     path:@"/auth/mfa/sms?return_to=/account/security"
+                                                   method:@"GET"
+                                                cookieJar:cookieJar
+                                                csrfToken:nil
+                                               formFields:nil
+                                          followRedirects:NO
+                                                 exitCode:&exitCode];
+    XCTAssertEqual(0, exitCode);
+    XCTAssertEqual((NSInteger)200, [smsChallengePage[@"status"] integerValue]);
+    XCTAssertTrue([smsChallengePage[@"body"] containsString:@"Use authenticator app instead"]);
+
+    sessionResponse = [self curlJSONAtPort:port
+                                      path:@"/auth/api/session"
+                                    method:@"GET"
+                                 cookieJar:cookieJar
+                                 csrfToken:nil
+                                   payload:nil
+                           followRedirects:NO
+                                  exitCode:&exitCode];
+    csrfToken = [self parseJSONDictionary:sessionResponse[@"body"]][@"csrf_token"] ?: @"";
+
+    NSDictionary *smsRemove = [self curlJSONAtPort:port
+                                              path:@"/auth/api/mfa/sms/remove"
+                                            method:@"POST"
+                                         cookieJar:cookieJar
+                                         csrfToken:csrfToken
+                                           payload:@{
+                                             @"return_to" : @"/account/security",
+                                           }
+                                   followRedirects:NO
+                                          exitCode:&exitCode];
+    XCTAssertEqual(0, exitCode);
+    XCTAssertEqual((NSInteger)200, [smsRemove[@"status"] integerValue]);
+    XCTAssertTrue([[self parseJSONDictionary:smsRemove[@"body"]][@"message"] containsString:@"removed"]);
+
+    mfaState = [self curlJSONAtPort:port
+                               path:@"/auth/api/mfa"
+                             method:@"GET"
+                          cookieJar:cookieJar
+                          csrfToken:nil
+                            payload:nil
+                    followRedirects:NO
+                           exitCode:&exitCode];
+    XCTAssertEqual(0, exitCode);
+    XCTAssertEqual((NSInteger)200, [mfaState[@"status"] integerValue]);
+    mfaPayload = [self parseJSONDictionary:mfaState[@"body"]];
+    XCTAssertEqualObjects(@NO, mfaPayload[@"mfa"][@"sms"][@"enrolled"]);
+    XCTAssertEqualObjects(@NO, mfaPayload[@"mfa"][@"sms"][@"verified"]);
   } @finally {
     if (server != nil && [server isRunning]) {
       kill(server.processIdentifier, SIGTERM);

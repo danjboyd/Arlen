@@ -1,0 +1,31 @@
+<%@ requires authSMSState, authSMSStartFormDescriptor, authSMSVerifyFormDescriptor, authSMSResendFormDescriptor, authSMSRemoveFormDescriptor %>
+<% NSDictionary *smsState = $authSMSState ?: @{}; %>
+<% NSString *formShellTemplate = [ctx objectForKey:@"authPartialFormShell"] ?: @"modules/auth/partials/form_shell"; %>
+<section class="auth-mfa-panel auth-mfa-panel--sms" data-auth-mfa-flow="sms_manage">
+  <div class="auth-note auth-note--warning">SMS can be useful as a fallback, but it is weaker than an authenticator app.</div>
+  <% if (![smsState[@"management_allowed"] boolValue] && ![smsState[@"pending_enrollment"] boolValue]) { %>
+    <div class="auth-errors"><%= smsState[@"management_guard_message"] ?: @"Recent MFA verification is required before changing SMS settings." %></div>
+  <% } else if ([smsState[@"pending_enrollment"] boolValue]) { %>
+    <div class="auth-note">Enter the code sent to <strong><%= smsState[@"pending_masked_phone"] ?: @"your phone" %></strong> to finish enabling SMS MFA.</div>
+    <% NSMutableDictionary *verifyCtx = [NSMutableDictionary dictionaryWithDictionary:(NSDictionary *)ctx]; %>
+    <% [verifyCtx setObject:($authSMSVerifyFormDescriptor ?: @{}) forKey:@"authFormDescriptor"]; %>
+    <% if (!ALNEOCInclude(out, verifyCtx, formShellTemplate, error)) { return nil; } %>
+    <% NSMutableDictionary *resendCtx = [NSMutableDictionary dictionaryWithDictionary:(NSDictionary *)ctx]; %>
+    <% [resendCtx setObject:($authSMSResendFormDescriptor ?: @{}) forKey:@"authFormDescriptor"]; %>
+    <% if (!ALNEOCInclude(out, resendCtx, formShellTemplate, error)) { return nil; } %>
+  <% } else { %>
+    <% if ([smsState[@"verified"] boolValue]) { %>
+      <div class="auth-note">SMS fallback is enabled for <strong><%= smsState[@"masked_phone"] ?: @"your phone" %></strong>.</div>
+    <% } else { %>
+      <div class="auth-note">Add a phone number if your app allows SMS fallback. Authenticator apps remain the stronger option.</div>
+    <% } %>
+    <% NSMutableDictionary *startCtx = [NSMutableDictionary dictionaryWithDictionary:(NSDictionary *)ctx]; %>
+    <% [startCtx setObject:($authSMSStartFormDescriptor ?: @{}) forKey:@"authFormDescriptor"]; %>
+    <% if (!ALNEOCInclude(out, startCtx, formShellTemplate, error)) { return nil; } %>
+    <% if ([smsState[@"verified"] boolValue]) { %>
+      <% NSMutableDictionary *removeCtx = [NSMutableDictionary dictionaryWithDictionary:(NSDictionary *)ctx]; %>
+      <% [removeCtx setObject:($authSMSRemoveFormDescriptor ?: @{}) forKey:@"authFormDescriptor"]; %>
+      <% if (!ALNEOCInclude(out, removeCtx, formShellTemplate, error)) { return nil; } %>
+    <% } %>
+  <% } %>
+</section>

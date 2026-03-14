@@ -1,8 +1,11 @@
 #import <Foundation/Foundation.h>
 #import <XCTest/XCTest.h>
 
+#import <arpa/inet.h>
+#import <netinet/in.h>
 #import <stdlib.h>
 #import <string.h>
+#import <sys/socket.h>
 
 @interface DeploymentIntegrationTests : XCTestCase
 @end
@@ -10,6 +13,28 @@
 @implementation DeploymentIntegrationTests
 
 - (int)randomPort {
+  int fd = socket(AF_INET, SOCK_STREAM, 0);
+  if (fd >= 0) {
+    int port = 0;
+    struct sockaddr_in address;
+    memset(&address, 0, sizeof(address));
+    address.sin_family = AF_INET;
+    address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    address.sin_port = 0;
+
+    if (bind(fd, (struct sockaddr *)&address, sizeof(address)) == 0) {
+      socklen_t length = sizeof(address);
+      if (getsockname(fd, (struct sockaddr *)&address, &length) == 0) {
+        port = (int)ntohs(address.sin_port);
+      }
+    }
+
+    close(fd);
+    if (port > 0) {
+      return port;
+    }
+  }
+
   return 34000 + (int)arc4random_uniform(2000);
 }
 
@@ -62,6 +87,19 @@
   NSString *stdoutText = [[NSString alloc] initWithData:stdoutData encoding:NSUTF8StringEncoding] ?: @"";
   NSString *stderrText = [[NSString alloc] initWithData:stderrData encoding:NSUTF8StringEncoding] ?: @"";
   return [stdoutText stringByAppendingString:stderrText];
+}
+
+- (NSString *)runEOCCCaptureAtRepoRoot:(NSString *)repoRoot
+                              workRoot:(NSString *)workRoot
+                             arguments:(NSString *)arguments
+                              exitCode:(int *)exitCode {
+  NSString *gnuHome = [workRoot stringByAppendingPathComponent:@"gnu-home"];
+  NSString *command = [NSString stringWithFormat:
+      @"mkdir -p %@/GNUstep/Defaults/.lck && cd %@ && "
+       "export HOME=%@ GNUSTEP_USER_DIR=%@/GNUstep GNUSTEP_USER_ROOT=%@/GNUstep "
+       "GNUSTEP_USER_DEFAULTS_DIR=%@/GNUstep/Defaults && ./build/eocc %@",
+      gnuHome, repoRoot, gnuHome, gnuHome, gnuHome, gnuHome, arguments];
+  return [self runShellCapture:command exitCode:exitCode];
 }
 
 - (NSDictionary *)parseJSONDictionaryFromOutput:(NSString *)output context:(NSString *)context {
@@ -524,8 +562,29 @@
                                 ? newPayload[@"created_files"]
                                 : @[];
     XCTAssertTrue([createdFiles containsObject:@"config/app.plist"]);
+    XCTAssertTrue([createdFiles containsObject:@"templates/layouts/main.html.eoc"]);
+    XCTAssertTrue([createdFiles containsObject:@"templates/partials/_nav.html.eoc"]);
+    XCTAssertTrue([createdFiles containsObject:@"templates/partials/_feature.html.eoc"]);
 
     NSString *appRoot = [workRoot stringByAppendingPathComponent:@"AgentDX"];
+    NSError *readError = nil;
+    NSString *scaffoldIndex =
+        [NSString stringWithContentsOfFile:[appRoot stringByAppendingPathComponent:@"templates/index.html.eoc"]
+                                  encoding:NSUTF8StringEncoding
+                                     error:&readError];
+    XCTAssertNotNil(scaffoldIndex);
+    XCTAssertNil(readError);
+    XCTAssertTrue([scaffoldIndex containsString:@"<%@ layout \"layouts/main\" %>"]);
+    XCTAssertTrue([scaffoldIndex containsString:@"<%@ render \"partials/_feature\" collection:$items as:\"item\" %>"]);
+
+    NSString *scaffoldLayout =
+        [NSString stringWithContentsOfFile:[appRoot stringByAppendingPathComponent:@"templates/layouts/main.html.eoc"]
+                                  encoding:NSUTF8StringEncoding
+                                     error:&readError];
+    XCTAssertNotNil(scaffoldLayout);
+    XCTAssertNil(readError);
+    XCTAssertTrue([scaffoldLayout containsString:@"<%@ include \"partials/_nav\" %>"]);
+    XCTAssertTrue([scaffoldLayout containsString:@"<%@ yield %>"]);
     NSString *generateOutput =
         [self runShellCapture:[NSString stringWithFormat:@"cd %@ && ARLEN_FRAMEWORK_ROOT=%@ %@/build/arlen "
                                                       "generate endpoint AgentStatus --route /agent/status "
@@ -547,6 +606,30 @@
                                  : @[];
     XCTAssertTrue([modifiedFiles containsObject:@"src/main.m"]);
 
+    NSString *htmlGenerateOutput =
+        [self runShellCapture:[NSString stringWithFormat:@"cd %@ && ARLEN_FRAMEWORK_ROOT=%@ %@/build/arlen "
+                                                      "generate endpoint AgentPage --route /agent/page "
+                                                      "--template pages/agent_page --json",
+                                                      appRoot, repoRoot, repoRoot]
+                     exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", htmlGenerateOutput);
+    NSDictionary *htmlGeneratePayload =
+        [self parseJSONDictionaryFromOutput:htmlGenerateOutput context:@"arlen generate html endpoint --json"];
+    XCTAssertEqualObjects(@"generate", htmlGeneratePayload[@"command"]);
+    XCTAssertEqualObjects(@"ok", htmlGeneratePayload[@"status"]);
+    NSArray *htmlGeneratedFiles = [htmlGeneratePayload[@"generated_files"] isKindOfClass:[NSArray class]]
+                                      ? htmlGeneratePayload[@"generated_files"]
+                                      : @[];
+    XCTAssertTrue([htmlGeneratedFiles containsObject:@"templates/pages/agent_page.html.eoc"]);
+
+    NSString *generatedTemplate =
+        [NSString stringWithContentsOfFile:[appRoot stringByAppendingPathComponent:@"templates/pages/agent_page.html.eoc"]
+                                  encoding:NSUTF8StringEncoding
+                                     error:&readError];
+    XCTAssertNotNil(generatedTemplate);
+    XCTAssertNil(readError);
+    XCTAssertTrue([generatedTemplate containsString:@"<%@ layout \"layouts/main\" %>"]);
+
     NSString *invalidGenerateOutput =
         [self runShellCapture:[NSString stringWithFormat:@"cd %@ && ARLEN_FRAMEWORK_ROOT=%@ %@/build/arlen "
                                                       "generate endpoint MissingRoute --json",
@@ -557,11 +640,12 @@
         [self parseJSONDictionaryFromOutput:invalidGenerateOutput
                                     context:@"arlen generate missing route --json"];
     XCTAssertEqualObjects(@"error", invalidPayload[@"status"]);
-    NSDictionary *error = [invalidPayload[@"error"] isKindOfClass:[NSDictionary class]]
-                              ? invalidPayload[@"error"]
-                              : @{};
-    XCTAssertEqualObjects(@"missing_route", error[@"code"]);
-    NSDictionary *fixit = [error[@"fixit"] isKindOfClass:[NSDictionary class]] ? error[@"fixit"] : @{};
+    NSDictionary *errorObject = [invalidPayload[@"error"] isKindOfClass:[NSDictionary class]]
+                                    ? invalidPayload[@"error"]
+                                    : @{};
+    XCTAssertEqualObjects(@"missing_route", errorObject[@"code"]);
+    NSDictionary *fixit =
+        [errorObject[@"fixit"] isKindOfClass:[NSDictionary class]] ? errorObject[@"fixit"] : @{};
     NSString *fixitExample = [fixit[@"example"] isKindOfClass:[NSString class]] ? fixit[@"example"] : @"";
     XCTAssertTrue([fixitExample containsString:@"--route"]);
 
@@ -608,6 +692,29 @@
   }
 }
 
+- (void)testSmokeRenderOutputsComposedLayoutPartialsAndEscapedItems {
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+
+  int code = 0;
+  NSString *buildOutput =
+      [self runShellCapture:[NSString stringWithFormat:@"cd %@ && source /usr/GNUstep/System/Library/Makefiles/GNUstep.sh && make smoke-render",
+                                                      repoRoot]
+                   exitCode:&code];
+  XCTAssertEqual(0, code, @"%@", buildOutput);
+
+  NSString *renderOutput =
+      [self runShellCapture:[NSString stringWithFormat:@"cd %@ && ./build/eoc-smoke-render", repoRoot]
+                   exitCode:&code];
+  XCTAssertEqual(0, code, @"%@", renderOutput);
+  XCTAssertTrue([renderOutput containsString:@"<title>EOC Smoke Test</title>"], @"%@", renderOutput);
+  XCTAssertTrue([renderOutput containsString:@"<nav>"], @"%@", renderOutput);
+  XCTAssertTrue([renderOutput containsString:@"<a href=\"/about\">About</a>"], @"%@", renderOutput);
+  XCTAssertTrue([renderOutput containsString:@"<li>alpha</li>"], @"%@", renderOutput);
+  XCTAssertTrue([renderOutput containsString:@"gamma &lt;unsafe&gt;"], @"%@", renderOutput);
+  XCTAssertTrue([renderOutput containsString:@"<p class=\"template-note\">template:multiline-ok</p>"],
+                @"%@", renderOutput);
+}
+
 - (void)testEOCCEmitsDeterministicLintDiagnosticsForUnguardedInclude {
   NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
   NSString *workRoot = [self createTempDirectoryWithPrefix:@"arlen-eocc-lint"];
@@ -633,22 +740,135 @@
                                   "</main>\n"]);
 
     int code = 0;
-    NSString *output =
-        [self runShellCapture:[NSString stringWithFormat:
-                                            @"cd %@ && ./build/eocc --template-root %@ --output-dir %@ %@ %@",
-                                            repoRoot,
-                                            templateRoot,
-                                            outputRoot,
-                                            [templateRoot
-                                                stringByAppendingPathComponent:@"lint_unguarded_include.html.eoc"],
-                                            [templateRoot
-                                                stringByAppendingPathComponent:@"lint_guarded_include.html.eoc"]]
-                     exitCode:&code];
+    NSString *output = [self runEOCCCaptureAtRepoRoot:repoRoot
+                                             workRoot:workRoot
+                                            arguments:[NSString stringWithFormat:
+                                                                  @"--template-root %@ --output-dir %@ %@ %@",
+                                                                  templateRoot,
+                                                                  outputRoot,
+                                                                  [templateRoot
+                                                                      stringByAppendingPathComponent:@"lint_unguarded_include.html.eoc"],
+                                                                  [templateRoot
+                                                                      stringByAppendingPathComponent:@"lint_guarded_include.html.eoc"]]
+                                             exitCode:&code];
     XCTAssertEqual(0, code, @"%@", output);
     XCTAssertTrue([output containsString:@"code=unguarded_include"], @"%@", output);
     XCTAssertTrue([output containsString:@"path=lint_unguarded_include.html.eoc line=2 column=4"],
                   @"%@", output);
     XCTAssertFalse([output containsString:@"path=lint_guarded_include.html.eoc"], @"%@", output);
+  } @finally {
+    [[NSFileManager defaultManager] removeItemAtPath:workRoot error:nil];
+  }
+}
+
+- (void)testEOCCRejectsUnknownStaticCompositionDependency {
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *workRoot = [self createTempDirectoryWithPrefix:@"arlen-eocc-missing-dependency"];
+  XCTAssertNotNil(workRoot);
+  if (workRoot == nil) {
+    return;
+  }
+
+  @try {
+    NSString *templateRoot = [workRoot stringByAppendingPathComponent:@"templates"];
+    NSString *outputRoot = [workRoot stringByAppendingPathComponent:@"generated"];
+
+    XCTAssertTrue([self writeFile:[templateRoot stringByAppendingPathComponent:@"missing_dep.html.eoc"]
+                          content:@"<%@ include \"partials/_missing\" %>\n"]);
+
+    int code = 0;
+    NSString *output = [self runEOCCCaptureAtRepoRoot:repoRoot
+                                             workRoot:workRoot
+                                            arguments:[NSString stringWithFormat:
+                                                                  @"--template-root %@ --output-dir %@ %@",
+                                                                  templateRoot,
+                                                                  outputRoot,
+                                                                  [templateRoot stringByAppendingPathComponent:@"missing_dep.html.eoc"]]
+                                             exitCode:&code];
+    XCTAssertEqual(1, code, @"%@", output);
+    XCTAssertTrue([output containsString:@"Unknown static EOC include: partials/_missing.html.eoc"],
+                  @"%@", output);
+    XCTAssertTrue([output containsString:@"path=missing_dep.html.eoc line=1 column=4"],
+                  @"%@", output);
+  } @finally {
+    [[NSFileManager defaultManager] removeItemAtPath:workRoot error:nil];
+  }
+}
+
+- (void)testEOCCRejectsStaticCompositionCycles {
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *workRoot = [self createTempDirectoryWithPrefix:@"arlen-eocc-cycle"];
+  XCTAssertNotNil(workRoot);
+  if (workRoot == nil) {
+    return;
+  }
+
+  @try {
+    NSString *templateRoot = [workRoot stringByAppendingPathComponent:@"templates"];
+    NSString *outputRoot = [workRoot stringByAppendingPathComponent:@"generated"];
+
+    XCTAssertTrue([self writeFile:[templateRoot stringByAppendingPathComponent:@"a.html.eoc"]
+                          content:@"<%@ include \"b\" %>\n"]);
+    XCTAssertTrue([self writeFile:[templateRoot stringByAppendingPathComponent:@"b.html.eoc"]
+                          content:@"<%@ include \"a\" %>\n"]);
+
+    int code = 0;
+    NSString *output = [self runEOCCCaptureAtRepoRoot:repoRoot
+                                             workRoot:workRoot
+                                            arguments:[NSString stringWithFormat:
+                                                                  @"--template-root %@ --output-dir %@ %@ %@",
+                                                                  templateRoot,
+                                                                  outputRoot,
+                                                                  [templateRoot stringByAppendingPathComponent:@"a.html.eoc"],
+                                                                  [templateRoot stringByAppendingPathComponent:@"b.html.eoc"]]
+                                             exitCode:&code];
+    XCTAssertEqual(1, code, @"%@", output);
+    XCTAssertTrue([output containsString:
+                               @"Static EOC composition cycle detected: a.html.eoc -> b.html.eoc -> a.html.eoc"],
+                  @"%@", output);
+    XCTAssertTrue([output containsString:@"path=b.html.eoc line=1 column=4"], @"%@", output);
+  } @finally {
+    [[NSFileManager defaultManager] removeItemAtPath:workRoot error:nil];
+  }
+}
+
+- (void)testEOCCEmitsCompositionSlotWarnings {
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *workRoot = [self createTempDirectoryWithPrefix:@"arlen-eocc-slot-warnings"];
+  XCTAssertNotNil(workRoot);
+  if (workRoot == nil) {
+    return;
+  }
+
+  @try {
+    NSString *templateRoot = [workRoot stringByAppendingPathComponent:@"templates"];
+    NSString *outputRoot = [workRoot stringByAppendingPathComponent:@"generated"];
+
+    XCTAssertTrue([self writeFile:[templateRoot stringByAppendingPathComponent:@"layouts/application.html.eoc"]
+                          content:@"<main><%@ yield %></main>\n"]);
+    XCTAssertTrue([self writeFile:[templateRoot stringByAppendingPathComponent:@"pages/show.html.eoc"]
+                          content:@"<%@ layout \"layouts/application\" %>\n"
+                                  "<%@ slot \"sidebar\" %>nav<%@ endslot %>\n"
+                                  "<p>body</p>\n"]);
+    XCTAssertTrue([self writeFile:[templateRoot stringByAppendingPathComponent:@"pages/orphan.html.eoc"]
+                          content:@"<%@ slot \"sidebar\" %>nav<%@ endslot %>\n"]);
+
+    int code = 0;
+    NSString *output = [self runEOCCCaptureAtRepoRoot:repoRoot
+                                             workRoot:workRoot
+                                            arguments:[NSString stringWithFormat:
+                                                                  @"--template-root %@ --output-dir %@ %@ %@ %@",
+                                                                  templateRoot,
+                                                                  outputRoot,
+                                                                  [templateRoot stringByAppendingPathComponent:@"layouts/application.html.eoc"],
+                                                                  [templateRoot stringByAppendingPathComponent:@"pages/show.html.eoc"],
+                                                                  [templateRoot stringByAppendingPathComponent:@"pages/orphan.html.eoc"]]
+                                             exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", output);
+    XCTAssertTrue([output containsString:@"code=unused_slot_fill"], @"%@", output);
+    XCTAssertTrue([output containsString:@"path=pages/show.html.eoc line=2 column=4"], @"%@", output);
+    XCTAssertTrue([output containsString:@"code=slot_without_layout"], @"%@", output);
+    XCTAssertTrue([output containsString:@"path=pages/orphan.html.eoc line=1 column=4"], @"%@", output);
   } @finally {
     [[NSFileManager defaultManager] removeItemAtPath:workRoot error:nil];
   }

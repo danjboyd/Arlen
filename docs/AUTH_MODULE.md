@@ -10,12 +10,16 @@ ownership modes:
 All three modes keep the same session, provider-login, MFA, verification, and
 password-reset behavior. The UI mode only changes who owns the HTML surface.
 
-Phase 18 in [docs/PHASE18_ROADMAP.md](PHASE18_ROADMAP.md) is now delivered
+Phase 18A-18D in [docs/PHASE18_ROADMAP.md](PHASE18_ROADMAP.md) are delivered
 around three explicit reuse paths:
 
 - stock full-page auth UI
 - reusable server-rendered auth fragments for EOC apps
 - strengthened headless `/auth/api/...` contracts for React/native clients
+
+Phase 18E-18G are also delivered. Optional SMS MFA through Twilio Verify is
+available as a disabled-by-default secondary factor without changing the core
+TOTP-first auth/session contract.
 
 ## Route Contract
 
@@ -31,9 +35,16 @@ Interactive HTML routes:
 - `POST /auth/password/forgot`
 - `POST /auth/password/reset`
 - `POST /auth/password/change`
+- `GET /auth/mfa`
 - `GET /auth/mfa/totp`
 - `POST /auth/mfa/totp/verify`
 - `GET /auth/provider/stub/login`
+- when `authModule.mfa.sms.enabled = YES`:
+  - `GET /auth/mfa/sms`
+  - `POST /auth/mfa/sms/start`
+  - `POST /auth/mfa/sms/verify`
+  - `POST /auth/mfa/sms/resend`
+  - `POST /auth/mfa/sms/remove`
 
 Stable API-first aliases:
 
@@ -45,9 +56,16 @@ Stable API-first aliases:
 - `POST /auth/api/password/forgot`
 - `POST /auth/api/password/reset`
 - `POST /auth/api/password/change`
+- `GET /auth/api/mfa`
 - `GET /auth/api/mfa/totp`
 - `POST /auth/api/mfa/totp/verify`
 - `GET /auth/api/provider/stub/login`
+- when `authModule.mfa.sms.enabled = YES`:
+  - `GET /auth/api/mfa/sms`
+  - `POST /auth/api/mfa/sms/start`
+  - `POST /auth/api/mfa/sms/verify`
+  - `POST /auth/api/mfa/sms/resend`
+  - `POST /auth/api/mfa/sms/remove`
 
 Mode behavior:
 
@@ -64,12 +82,22 @@ provider CTA disappears and the stub provider routes are not registered.
 
 TOTP route behavior:
 
+- `GET /auth/mfa` and `GET /auth/api/mfa` expose factor inventory, preferred
+  challenge factor, and policy-gated management affordances
 - `GET /auth/mfa/totp` renders either enrollment or challenge based on factor
   state
 - first successful HTML enrollment verification renders a recovery-code
   completion page before redirecting back to the app
 - `GET /auth/api/mfa/totp` and `POST /auth/api/mfa/totp/verify` expose the same
   backend flow through explicit JSON `flow` and `mfa` payloads
+
+Current MFA factor scope:
+
+- authenticator-app TOTP remains the recommended and preferred factor
+- optional SMS/Twilio Verify is implemented as a disabled-by-default fallback
+  factor
+- when SMS is disabled, no SMS routes are registered and the stock HTML factor
+  management UI hides SMS affordances entirely
 
 ## UI Configuration
 
@@ -117,8 +145,11 @@ Phase 18 promotes a small coarse fragment contract for server-rendered EOC
 apps. These are the supported fragment identifiers:
 
 - `provider_login_buttons`
+- `mfa_factor_inventory_panel`
 - `mfa_enrollment_panel`
 - `mfa_challenge_form`
+- `mfa_sms_enrollment_panel`
+- `mfa_sms_challenge_form`
 - `mfa_recovery_codes_panel`
 
 The stock full-page auth UI uses these same fragments internally, so the
@@ -133,17 +164,29 @@ Useful runtime helpers for app-owned server-rendered pages:
 
 ```objc
 NSDictionary *fragmentContext = [[ALNAuthModuleRuntime sharedRuntime]
-    totpFragmentContextForCurrentUserInContext:ctx
+    mfaManagementFragmentContextForCurrentUserInContext:ctx
                                       returnTo:@"/account/security"
                                          error:&error];
 ```
 
-That helper returns the context expected by the MFA fragments, including:
+That helper returns the context expected by the factor-management fragments,
+including:
 
-- `authMFAFlowState`
+- `authMFAFactors`
+- `authMFAPolicy`
 - `authTOTPProvisioning`
-- `authTOTPFormDescriptor`
-- `authTOTPQRCodeScriptPath`
+- `authSMSState`
+- `authSMSStartFormDescriptor`
+- `authSMSVerifyFormDescriptor`
+
+For a dedicated SMS challenge surface, use:
+
+```objc
+NSDictionary *smsContext = [[ALNAuthModuleRuntime sharedRuntime]
+    smsChallengeFragmentContextForCurrentUserInContext:ctx
+                                              returnTo:@"/account/security"
+                                                 error:&error];
+```
 
 The intended reuse target is app-owned account/security pages and other
 server-rendered auth surfaces that want to embed framework-provided MFA/auth UI
@@ -182,11 +225,22 @@ all UI modes.
 
 Phase 18 makes the MFA JSON surface explicit:
 
+- `GET /auth/api/mfa`
+  - returns `status`, `preferred_factor`, `available_challenge_factors`,
+    `factors`, `policy`, `mfa`, `paths`, and `session`
+  - `mfa.sms.enabled` plus `paths.sms*` let React/native clients detect whether
+    SMS is enabled without probing route existence
 - `GET /auth/api/mfa/totp`
   - returns `status`, `flow`, `mfa`, and `session`
   - `flow.state` is `enrollment` or `challenge`
   - `mfa.provisioning` is populated during enrollment and empty during the
     steady-state challenge path
+- when SMS is enabled:
+  - `GET /auth/api/mfa/sms` returns challenge state for the enrolled SMS factor
+  - `POST /auth/api/mfa/sms/start` starts phone verification or replacement
+  - `POST /auth/api/mfa/sms/verify` completes enrollment or step-up challenge
+  - `POST /auth/api/mfa/sms/resend` issues another Verify challenge
+  - `POST /auth/api/mfa/sms/remove` removes the SMS factor after recent MFA
 - `POST /auth/api/mfa/totp/verify`
   - returns top-level session fields for compatibility plus structured `flow`
     and `mfa`
@@ -196,7 +250,9 @@ Phase 18 makes the MFA JSON surface explicit:
     verify
 
 React/native apps should build their MFA UI from those JSON fields rather than
-inferring flow state from the stock HTML behavior.
+inferring flow state from the stock HTML behavior. When both factors are
+enrolled, the stock and headless contracts keep TOTP preferred and expose SMS
+only as an explicit fallback path.
 
 ## Trusted Email Claim Flow
 

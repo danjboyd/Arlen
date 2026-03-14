@@ -15,6 +15,13 @@ NS_ASSUME_NONNULL_BEGIN
 + (nullable NSString *)renderTemplate:(NSString *)templateName
                               context:(nullable NSDictionary *)context
                                layout:(nullable NSString *)layoutName
+                 defaultLayoutEnabled:(BOOL)defaultLayoutEnabled
+                         strictLocals:(BOOL)strictLocals
+                      strictStringify:(BOOL)strictStringify
+                                error:(NSError *_Nullable *_Nullable)error;
++ (nullable NSString *)renderTemplate:(NSString *)templateName
+                              context:(nullable NSDictionary *)context
+                               layout:(nullable NSString *)layoutName
                          strictLocals:(BOOL)strictLocals
                       strictStringify:(BOOL)strictStringify
                                 error:(NSError *_Nullable *_Nullable)error;

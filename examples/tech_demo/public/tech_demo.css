@@ -27,6 +27,14 @@ header {
   padding: 1.6rem 0 1rem;
 }
 
+.eyebrow {
+  margin: 0 0 0.35rem;
+  font-size: 0.78rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #7d6450;
+}
+
 h1 {
   margin: 0;
 }
@@ -51,11 +59,21 @@ h1 {
   font-size: 0.9rem;
 }
 
-main {
+.layout-grid {
+  display: grid;
+  gap: 1rem;
+}
+
+main,
+.sidebar {
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: 10px;
   padding: 1rem 1.1rem;
+}
+
+.sidebar {
+  align-self: start;
 }
 
 .callout {
@@ -88,4 +106,10 @@ code {
   background: #f0e7db;
   padding: 0.05rem 0.35rem;
   border-radius: 4px;
+}
+
+@media (min-width: 860px) {
+  .layout-grid {
+    grid-template-columns: minmax(0, 2.2fr) minmax(240px, 0.9fr);
+  }
 }

@@ -1,0 +1,10 @@
+<% NSString *inventoryTemplate = [ctx objectForKey:@"authFragmentMFAFactorInventoryPanel"] ?: @"modules/auth/fragments/mfa_factor_inventory_panel"; %>
+<% NSString *totpTemplate = [ctx objectForKey:@"authFragmentMFAEnrollmentPanel"] ?: @"modules/auth/fragments/mfa_enrollment_panel"; %>
+<% NSString *smsTemplate = [ctx objectForKey:@"authFragmentMFASMSEnrollmentPanel"] ?: @"modules/auth/fragments/mfa_sms_enrollment_panel"; %>
+<% if (!ALNEOCInclude(out, ctx, inventoryTemplate, error)) { return nil; } %>
+<% if ([[ctx objectForKey:@"authTOTPNeedsEnrollment"] boolValue]) { %>
+  <% if (!ALNEOCInclude(out, ctx, totpTemplate, error)) { return nil; } %>
+<% } %>
+<% if ([[[ctx objectForKey:@"authSMSState"] objectForKey:@"enabled"] boolValue]) { %>
+  <% if (!ALNEOCInclude(out, ctx, smsTemplate, error)) { return nil; } %>
+<% } %>

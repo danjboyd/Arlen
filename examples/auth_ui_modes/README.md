@@ -9,6 +9,9 @@ Common contract across all three modes:
   password-reset behavior
 - the same stable `/auth/api/...` JSON surface
 - the same module-owned auth runtime and migrations
+- the same Phase 18 MFA fragment contract for server-rendered EOC apps
+- the same optional disabled-by-default SMS/Twilio Verify factor surface when
+  app policy enables it
 
 What changes by mode is who owns the HTML under `/auth/...`.
 

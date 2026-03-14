@@ -1114,6 +1114,374 @@ static NSString *EscapeHTML(NSString *value) {
   return [safe stringByReplacingOccurrencesOfString:@"'" withString:@"&#39;"];
 }
 
+typedef NS_ENUM(NSInteger, ANSIColorMode) {
+  ANSIColorModeNone = 0,
+  ANSIColorModeBasic = 1,
+  ANSIColorModePalette = 2,
+  ANSIColorModeRGB = 3,
+};
+
+typedef struct {
+  BOOL bold;
+  BOOL dim;
+  BOOL italic;
+  BOOL underline;
+  ANSIColorMode fgMode;
+  NSInteger fgValue1;
+  NSInteger fgValue2;
+  NSInteger fgValue3;
+  ANSIColorMode bgMode;
+  NSInteger bgValue1;
+  NSInteger bgValue2;
+  NSInteger bgValue3;
+} ANSIStyleState;
+
+static ANSIStyleState ANSIStyleStateDefault(void) {
+  ANSIStyleState state;
+  state.bold = NO;
+  state.dim = NO;
+  state.italic = NO;
+  state.underline = NO;
+  state.fgMode = ANSIColorModeNone;
+  state.fgValue1 = 0;
+  state.fgValue2 = 0;
+  state.fgValue3 = 0;
+  state.bgMode = ANSIColorModeNone;
+  state.bgValue1 = 0;
+  state.bgValue2 = 0;
+  state.bgValue3 = 0;
+  return state;
+}
+
+static BOOL ANSIIsControlSequenceFinal(unichar ch) {
+  return (ch >= 0x40 && ch <= 0x7E);
+}
+
+static NSString *StripANSIEscapeSequences(NSString *value) {
+  if ([value length] == 0) {
+    return @"";
+  }
+
+  NSMutableString *plain = [NSMutableString stringWithCapacity:[value length]];
+  NSUInteger idx = 0;
+  NSUInteger length = [value length];
+  while (idx < length) {
+    unichar ch = [value characterAtIndex:idx];
+    if (ch == 0x1B && (idx + 1) < length && [value characterAtIndex:(idx + 1)] == '[') {
+      idx += 2;
+      while (idx < length) {
+        unichar final = [value characterAtIndex:idx];
+        idx += 1;
+        if (ANSIIsControlSequenceFinal(final)) {
+          break;
+        }
+      }
+      continue;
+    }
+    [plain appendFormat:@"%C", ch];
+    idx += 1;
+  }
+  return plain;
+}
+
+static void AppendEscapedHTMLCharacter(NSMutableString *html, unichar ch) {
+  switch (ch) {
+    case '&':
+      [html appendString:@"&amp;"];
+      break;
+    case '<':
+      [html appendString:@"&lt;"];
+      break;
+    case '>':
+      [html appendString:@"&gt;"];
+      break;
+    case '"':
+      [html appendString:@"&quot;"];
+      break;
+    case '\'':
+      [html appendString:@"&#39;"];
+      break;
+    default:
+      [html appendFormat:@"%C", ch];
+      break;
+  }
+}
+
+static NSArray *ANSIParametersFromString(NSString *parameters) {
+  if ([parameters length] == 0) {
+    return @[ @0 ];
+  }
+
+  NSMutableArray *codes = [NSMutableArray array];
+  NSArray *parts = [parameters componentsSeparatedByString:@";"];
+  for (NSString *part in parts) {
+    if ([part length] == 0) {
+      [codes addObject:@0];
+      continue;
+    }
+    NSInteger code = [part integerValue];
+    [codes addObject:@(code)];
+  }
+  if ([codes count] == 0) {
+    [codes addObject:@0];
+  }
+  return codes;
+}
+
+static void ANSISetExtendedColor(ANSIStyleState *state,
+                                 BOOL background,
+                                 ANSIColorMode mode,
+                                 NSInteger value1,
+                                 NSInteger value2,
+                                 NSInteger value3) {
+  if (state == NULL) {
+    return;
+  }
+  if (background) {
+    state->bgMode = mode;
+    state->bgValue1 = value1;
+    state->bgValue2 = value2;
+    state->bgValue3 = value3;
+  } else {
+    state->fgMode = mode;
+    state->fgValue1 = value1;
+    state->fgValue2 = value2;
+    state->fgValue3 = value3;
+  }
+}
+
+static void ApplyANSISGRCodes(NSArray *codes, ANSIStyleState *state) {
+  if (state == NULL) {
+    return;
+  }
+
+  for (NSUInteger idx = 0; idx < [codes count]; idx++) {
+    NSInteger code = [codes[idx] integerValue];
+    if ((code == 38 || code == 48) && (idx + 1) < [codes count]) {
+      NSInteger mode = [codes[idx + 1] integerValue];
+      if (mode == 5 && (idx + 2) < [codes count]) {
+        ANSISetExtendedColor(state, code == 48, ANSIColorModePalette, [codes[idx + 2] integerValue], 0, 0);
+        idx += 2;
+        continue;
+      }
+      if (mode == 2 && (idx + 4) < [codes count]) {
+        ANSISetExtendedColor(state,
+                             code == 48,
+                             ANSIColorModeRGB,
+                             [codes[idx + 2] integerValue],
+                             [codes[idx + 3] integerValue],
+                             [codes[idx + 4] integerValue]);
+        idx += 4;
+        continue;
+      }
+    }
+
+    switch (code) {
+      case 0:
+        *state = ANSIStyleStateDefault();
+        break;
+      case 1:
+        state->bold = YES;
+        break;
+      case 2:
+        state->dim = YES;
+        break;
+      case 3:
+        state->italic = YES;
+        break;
+      case 4:
+        state->underline = YES;
+        break;
+      case 22:
+        state->bold = NO;
+        state->dim = NO;
+        break;
+      case 23:
+        state->italic = NO;
+        break;
+      case 24:
+        state->underline = NO;
+        break;
+      case 39:
+        state->fgMode = ANSIColorModeNone;
+        state->fgValue1 = 0;
+        state->fgValue2 = 0;
+        state->fgValue3 = 0;
+        break;
+      case 49:
+        state->bgMode = ANSIColorModeNone;
+        state->bgValue1 = 0;
+        state->bgValue2 = 0;
+        state->bgValue3 = 0;
+        break;
+      default:
+        if ((code >= 30 && code <= 37) || (code >= 90 && code <= 97)) {
+          ANSISetExtendedColor(state, NO, ANSIColorModeBasic, code, 0, 0);
+        } else if ((code >= 40 && code <= 47) || (code >= 100 && code <= 107)) {
+          ANSISetExtendedColor(state, YES, ANSIColorModeBasic, code, 0, 0);
+        }
+        break;
+    }
+  }
+}
+
+static NSString *XtermColorHexForIndex(NSInteger index) {
+  static NSString *const baseColors[] = {
+    @"#202631", @"#ff6b68", @"#8bd450", @"#e6b450",
+    @"#7aa2f7", @"#d3869b", @"#7bdff2", @"#e6edf3",
+    @"#6e7681", @"#ffa198", @"#b7f59f", @"#ffd67a",
+    @"#9ec1ff", @"#f2a7d8", @"#9ceef8", @"#ffffff",
+  };
+
+  if (index >= 0 && index <= 15) {
+    return baseColors[index];
+  }
+  if (index >= 16 && index <= 231) {
+    NSInteger cube = index - 16;
+    NSInteger red = cube / 36;
+    NSInteger green = (cube / 6) % 6;
+    NSInteger blue = cube % 6;
+    NSInteger steps[] = { 0, 95, 135, 175, 215, 255 };
+    return [NSString stringWithFormat:@"#%02lx%02lx%02lx",
+                                      (long)steps[red],
+                                      (long)steps[green],
+                                      (long)steps[blue]];
+  }
+  if (index >= 232 && index <= 255) {
+    NSInteger level = 8 + ((index - 232) * 10);
+    return [NSString stringWithFormat:@"#%02lx%02lx%02lx",
+                                      (long)level,
+                                      (long)level,
+                                      (long)level];
+  }
+  return nil;
+}
+
+static NSString *ANSIHexColorForMode(ANSIColorMode mode, NSInteger value1, NSInteger value2, NSInteger value3) {
+  switch (mode) {
+    case ANSIColorModeBasic:
+      if (value1 >= 30 && value1 <= 37) {
+        return XtermColorHexForIndex(value1 - 30);
+      }
+      if (value1 >= 90 && value1 <= 97) {
+        return XtermColorHexForIndex((value1 - 90) + 8);
+      }
+      if (value1 >= 40 && value1 <= 47) {
+        return XtermColorHexForIndex(value1 - 40);
+      }
+      if (value1 >= 100 && value1 <= 107) {
+        return XtermColorHexForIndex((value1 - 100) + 8);
+      }
+      return nil;
+    case ANSIColorModePalette:
+      return XtermColorHexForIndex(value1);
+    case ANSIColorModeRGB: {
+      NSInteger red = MAX(0, MIN(255, value1));
+      NSInteger green = MAX(0, MIN(255, value2));
+      NSInteger blue = MAX(0, MIN(255, value3));
+      return [NSString stringWithFormat:@"#%02lx%02lx%02lx",
+                                        (long)red,
+                                        (long)green,
+                                        (long)blue];
+    }
+    case ANSIColorModeNone:
+    default:
+      return nil;
+  }
+}
+
+static BOOL ANSIStyleStateHasPresentation(ANSIStyleState state) {
+  return state.bold || state.dim || state.italic || state.underline ||
+         state.fgMode != ANSIColorModeNone || state.bgMode != ANSIColorModeNone;
+}
+
+static NSString *HTMLStyleForANSIState(ANSIStyleState state) {
+  NSMutableArray *parts = [NSMutableArray array];
+  if (state.bold) {
+    [parts addObject:@"font-weight:700"];
+  }
+  if (state.dim) {
+    [parts addObject:@"opacity:0.82"];
+  }
+  if (state.italic) {
+    [parts addObject:@"font-style:italic"];
+  }
+  if (state.underline) {
+    [parts addObject:@"text-decoration:underline"];
+  }
+  NSString *foreground = ANSIHexColorForMode(state.fgMode, state.fgValue1, state.fgValue2, state.fgValue3);
+  if ([foreground length] > 0) {
+    [parts addObject:[NSString stringWithFormat:@"color:%@", foreground]];
+  }
+  NSString *background = ANSIHexColorForMode(state.bgMode, state.bgValue1, state.bgValue2, state.bgValue3);
+  if ([background length] > 0) {
+    [parts addObject:[NSString stringWithFormat:@"background-color:%@", background]];
+  }
+  return [parts componentsJoinedByString:@";"];
+}
+
+static void EnsureANSIStyleSpanOpen(NSMutableString *html, ANSIStyleState state, BOOL *spanOpen) {
+  if (html == nil || spanOpen == NULL || *spanOpen || !ANSIStyleStateHasPresentation(state)) {
+    return;
+  }
+  NSString *style = HTMLStyleForANSIState(state);
+  if ([style length] > 0) {
+    [html appendFormat:@"<span class='ansi-segment' style='%@'>", EscapeHTML(style)];
+  } else {
+    [html appendString:@"<span class='ansi-segment'>"];
+  }
+  *spanOpen = YES;
+}
+
+static NSString *HTMLFragmentForANSIText(NSString *value) {
+  if ([value length] == 0) {
+    return @"";
+  }
+  if ([value rangeOfString:[NSString stringWithFormat:@"%c", 0x1B]].location == NSNotFound) {
+    return EscapeHTML(value);
+  }
+
+  NSMutableString *html = [NSMutableString stringWithCapacity:[value length] + 128];
+  ANSIStyleState state = ANSIStyleStateDefault();
+  BOOL spanOpen = NO;
+  NSUInteger idx = 0;
+  NSUInteger length = [value length];
+
+  while (idx < length) {
+    unichar ch = [value characterAtIndex:idx];
+    if (ch == 0x1B && (idx + 1) < length && [value characterAtIndex:(idx + 1)] == '[') {
+      idx += 2;
+      NSUInteger parameterStart = idx;
+      while (idx < length && !ANSIIsControlSequenceFinal([value characterAtIndex:idx])) {
+        idx += 1;
+      }
+      if (idx >= length) {
+        break;
+      }
+      unichar final = [value characterAtIndex:idx];
+      NSString *parameters = [value substringWithRange:NSMakeRange(parameterStart, idx - parameterStart)];
+      idx += 1;
+      if (final == 'm') {
+        if (spanOpen) {
+          [html appendString:@"</span>"];
+          spanOpen = NO;
+        }
+        ApplyANSISGRCodes(ANSIParametersFromString(parameters), &state);
+      }
+      continue;
+    }
+
+    EnsureANSIStyleSpanOpen(html, state, &spanOpen);
+    AppendEscapedHTMLCharacter(html, ch);
+    idx += 1;
+  }
+
+  if (spanOpen) {
+    [html appendString:@"</span>"];
+  }
+  return html;
+}
+
 static NSDictionary *ParseMetadataFile(NSString *path) {
   NSString *content = ReadTextFile(path);
   if ([content length] == 0) {
@@ -1264,7 +1632,12 @@ static NSDictionary *BuildFailurePayload(NSString *requestID) {
       EnvNonNegativeInteger("ARLEN_BOOMHAUER_BUILD_ERROR_AUTO_REFRESH_SECONDS", 3);
   NSString *recoveryHint = BuildFailureRecoveryHint(autoRetrySeconds);
 
-  NSString *output = ReadTextFile(outputFile);
+  NSString *rawOutput = ReadTextFile(outputFile);
+  if ([rawOutput length] > 0) {
+    NSUInteger limit = MIN((NSUInteger)16000, [rawOutput length]);
+    rawOutput = [rawOutput substringToIndex:limit];
+  }
+  NSString *output = StripANSIEscapeSequences(rawOutput);
   NSDictionary *diagnostic = ExtractPrimaryDiagnostic(output);
   NSString *snippet = SourceSnippetForDiagnostic(diagnostic);
   NSArray *warnings = WarningLines(output);
@@ -1287,8 +1660,10 @@ static NSDictionary *BuildFailurePayload(NSString *requestID) {
     details[@"warnings"] = warnings;
   }
   if ([output length] > 0) {
-    NSUInteger limit = MIN((NSUInteger)16000, [output length]);
-    details[@"output"] = [output substringToIndex:limit];
+    details[@"output"] = output;
+  }
+  if ([rawOutput length] > 0 && [rawOutput isEqualToString:output] == NO) {
+    details[@"output_ansi"] = rawOutput;
   }
 
   return @{
@@ -1352,7 +1727,14 @@ static NSString *BuildFailureHTML(NSDictionary *payload) {
   if (autoRefreshSeconds > 0) {
     [html appendFormat:@"<meta http-equiv='refresh' content='%ld'>", (long)autoRefreshSeconds];
   }
-  [html appendString:@"<style>body{font-family:Menlo,Consolas,monospace;background:#111;color:#eee;padding:24px;}h1{margin-top:0;}pre{background:#1b1b1b;border:1px solid #333;padding:12px;overflow:auto;}code{background:#1b1b1b;padding:2px 4px;}table{border-collapse:collapse;width:100%;}td{border:1px solid #333;padding:6px;vertical-align:top;}.callout{background:#161616;border:1px solid #3a3a3a;padding:12px;margin:16px 0;}.muted{color:#bbb;}details{margin-top:12px;}</style>"];
+  [html appendString:@"<style>"
+                      "body{font-family:Menlo,Consolas,monospace;background:#111;color:#eee;padding:24px;line-height:1.45;}"
+                      "h1{margin-top:0;}pre{background:#151922;border:1px solid #333c4a;padding:12px;overflow:auto;white-space:pre-wrap;word-break:break-word;}"
+                      "code{background:#1b1b1b;padding:2px 4px;}table{border-collapse:collapse;width:100%;}"
+                      "td{border:1px solid #333;padding:6px;vertical-align:top;}"
+                      ".callout{background:#161616;border:1px solid #3a3a3a;padding:12px;margin:16px 0;}"
+                      ".muted{color:#bbb;}details{margin-top:12px;}.diagnostic-output{background:#0d1117;border-color:#3f4b5e;}"
+                      ".snippet-output{background:#161616;}.ansi-segment{font-variant-ligatures:none;}</style>"];
   [html appendString:@"</head><body>"];
   [html appendString:@"<h1>Boomhauer Build Failed</h1>"];
   [html appendFormat:@"<p>%@</p>", EscapeHTML(message)];
@@ -1388,14 +1770,15 @@ static NSString *BuildFailureHTML(NSDictionary *payload) {
 
   NSString *snippet = [details[@"snippet"] isKindOfClass:[NSString class]] ? details[@"snippet"] : @"";
   if ([snippet length] > 0) {
-    [html appendFormat:@"<tr><td><strong>snippet</strong></td><td><pre>%@</pre></td></tr>",
+    [html appendFormat:@"<tr><td><strong>snippet</strong></td><td><pre class='snippet-output'>%@</pre></td></tr>",
                        EscapeHTML(snippet)];
   }
 
   NSString *output = [details[@"output"] isKindOfClass:[NSString class]] ? details[@"output"] : @"";
+  NSString *ansiOutput = [details[@"output_ansi"] isKindOfClass:[NSString class]] ? details[@"output_ansi"] : output;
   if ([output length] > 0) {
-    [html appendFormat:@"<tr><td><strong>output</strong></td><td><pre>%@</pre></td></tr>",
-                       EscapeHTML(output)];
+    [html appendFormat:@"<tr><td><strong>output</strong></td><td><pre class='diagnostic-output'>%@</pre></td></tr>",
+                       HTMLFragmentForANSIText(ansiOutput)];
   }
   [html appendString:@"</table>"];
 
@@ -1427,9 +1810,15 @@ static NSString *BuildFailureHTML(NSDictionary *payload) {
   NSString *requestID = [ctx.stash[@"request_id"] isKindOfClass:[NSString class]]
                             ? ctx.stash[@"request_id"]
                             : @"";
-  NSDictionary *payload = BuildFailurePayload(requestID);
-  NSDictionary *details =
-      [payload[@"details"] isKindOfClass:[NSDictionary class]] ? payload[@"details"] : @{};
+  NSMutableDictionary *payload = [BuildFailurePayload(requestID) mutableCopy];
+  if (payload == nil) {
+    payload = [NSMutableDictionary dictionary];
+  }
+  NSMutableDictionary *details =
+      [payload[@"details"] isKindOfClass:[NSDictionary class]] ? [payload[@"details"] mutableCopy]
+                                                               : [NSMutableDictionary dictionary];
+  [details removeObjectForKey:@"output_ansi"];
+  payload[@"details"] = details ?: @{};
   NSInteger autoRefreshSeconds = [details[@"auto_refresh_seconds"] respondsToSelector:@selector(integerValue)]
                                      ? [details[@"auto_refresh_seconds"] integerValue]
                                      : 0;

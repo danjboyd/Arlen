@@ -22,11 +22,20 @@ NS_ASSUME_NONNULL_BEGIN
                context:(nullable NSDictionary *)context
                 layout:(nullable NSString *)layoutName
                  error:(NSError *_Nullable *_Nullable)error;
+- (BOOL)renderTemplateWithoutLayout:(NSString *)templateName
+                            context:(nullable NSDictionary *)context
+                              error:(NSError *_Nullable *_Nullable)error;
 - (BOOL)renderTemplate:(NSString *)templateName
                  error:(NSError *_Nullable *_Nullable)error;
 - (BOOL)renderTemplate:(NSString *)templateName
                 layout:(nullable NSString *)layoutName
                  error:(NSError *_Nullable *_Nullable)error;
+- (BOOL)renderTemplateWithoutLayout:(NSString *)templateName
+                              error:(NSError *_Nullable *_Nullable)error;
+- (NSDictionary *)templateContext;
+- (void)useTemplateLayout:(nullable NSString *)layoutName;
+- (void)disableTemplateLayout;
+- (void)clearTemplateLayoutPreference;
 - (void)stashValue:(nullable id)value forKey:(NSString *)key;
 - (void)stashValues:(NSDictionary *)values;
 - (nullable id)stashValueForKey:(NSString *)key;

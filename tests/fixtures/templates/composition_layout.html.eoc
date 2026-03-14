@@ -1,0 +1,7 @@
+<!doctype html>
+<html>
+  <body>
+    <main><%@ yield %></main>
+    <aside><%@ yield "sidebar" %></aside>
+  </body>
+</html>

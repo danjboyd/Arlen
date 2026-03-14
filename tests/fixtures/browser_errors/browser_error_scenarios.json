@@ -1,0 +1,196 @@
+{
+  "schema": "browser_error_audit_v1",
+  "title": "Arlen Browser Error Audit",
+  "review_checklist": [
+    "Is the primary failure obvious within one screen?",
+    "Does the browser response show a concrete next step or fix location when the framework knows one?",
+    "Are secondary details visually subordinate to the main error instead of burying it?",
+    "Do browser requests get an intentional HTML experience when that would help developer triage?",
+    "Are production responses redacted while development responses stay actionable?"
+  ],
+  "scenarios": [
+    {
+      "id": "boomhauer_objc_compile_failure",
+      "title": "Boomhauer Objective-C Compile Failure",
+      "description": "Watch-mode fallback page after an app-root Objective-C compile error.",
+      "mode": "boomhauer_watch_compile_failure",
+      "build_failure_mode": "objc",
+      "source_surface": "boomhauer watch-mode build failure page",
+      "request": {
+        "path": "/",
+        "accept": "text/html"
+      },
+      "expected_status": 500,
+      "expected_content_type_prefix": "text/html",
+      "expected_body_contains": [
+        "Boomhauer Build Failed",
+        "ALNControxxer",
+        "Recovery:"
+      ],
+      "review_focus": [
+        "Can you identify the failing symbol and likely fix without opening the server log first?",
+        "Does the recovery guidance feel specific to the watch-mode workflow?",
+        "Are warnings and verbose output visually secondary to the primary compiler error?"
+      ]
+    },
+    {
+      "id": "boomhauer_eoc_transpile_failure",
+      "title": "Boomhauer EOC Transpile Failure",
+      "description": "Watch-mode fallback page after an app-root template syntax failure.",
+      "mode": "boomhauer_watch_compile_failure",
+      "build_failure_mode": "eoc",
+      "source_surface": "boomhauer watch-mode build failure page",
+      "request": {
+        "path": "/",
+        "accept": "text/html"
+      },
+      "expected_status": 500,
+      "expected_content_type_prefix": "text/html",
+      "expected_body_contains": [
+        "Boomhauer Build Failed",
+        "Unclosed EOC tag",
+        "line"
+      ],
+      "review_focus": [
+        "Is the template path and line/column easy to spot?",
+        "Does the page make template syntax failures feel first-class rather than generic compile noise?",
+        "Is the source snippet prominent enough to resolve the error quickly?"
+      ]
+    },
+    {
+      "id": "runtime_dev_controller_exception_html",
+      "title": "Development Controller Exception",
+      "description": "Browser request against a development app route that raises an uncaught exception.",
+      "mode": "runtime_capture",
+      "environment": "development",
+      "source_surface": "ALNApplication development exception page",
+      "request": {
+        "path": "/explode",
+        "accept": "text/html"
+      },
+      "expected_status": 500,
+      "expected_content_type_prefix": "text/html",
+      "expected_body_contains": [
+        "Arlen Development Exception",
+        "Request ID",
+        "AuditRuntimeControllerException"
+      ],
+      "review_focus": [
+        "Is the exception reason immediately visible?",
+        "Does the page provide enough context to fix the route without hunting through logs?",
+        "Does the page feel intentionally designed, or merely dumped diagnostics in a table?"
+      ]
+    },
+    {
+      "id": "runtime_dev_validation_failure_422",
+      "title": "Development Browser Validation Failure",
+      "description": "Browser request that fails request-schema validation before controller execution.",
+      "mode": "runtime_capture",
+      "environment": "development",
+      "source_surface": "ALNApplication browser validation fallback",
+      "request": {
+        "path": "/schema-validate",
+        "accept": "text/html"
+      },
+      "expected_status": 422,
+      "expected_content_type_prefix": "text/plain",
+      "expected_body_contains": [
+        "validation failed"
+      ],
+      "review_focus": [
+        "Would a browser-based developer know which field failed and why?",
+        "Should this remain plain text, or graduate to a first-class HTML page?",
+        "Does the current fallback match the rest of the development error experience?"
+      ]
+    },
+    {
+      "id": "runtime_dev_unauthorized_401",
+      "title": "Development Browser Unauthorized",
+      "description": "Browser request against a route with required scopes but no authenticated subject.",
+      "mode": "runtime_capture",
+      "environment": "development",
+      "source_surface": "ALNApplication browser auth fallback",
+      "request": {
+        "path": "/auth-required",
+        "accept": "text/html"
+      },
+      "expected_status": 401,
+      "expected_content_type_prefix": "text/plain",
+      "expected_body_contains": [
+        "unauthorized"
+      ],
+      "review_focus": [
+        "Is the browser response clear about what sort of auth problem occurred?",
+        "Would a developer know whether the issue is missing login, missing token, or missing scope?",
+        "Does the plain-text fallback feel acceptable for a browser surface?"
+      ]
+    },
+    {
+      "id": "runtime_dev_forbidden_403",
+      "title": "Development Browser Forbidden",
+      "description": "Browser request blocked by a guard action.",
+      "mode": "runtime_capture",
+      "environment": "development",
+      "source_surface": "ALNApplication browser guard fallback",
+      "request": {
+        "path": "/guarded",
+        "accept": "text/html"
+      },
+      "expected_status": 403,
+      "expected_content_type_prefix": "text/plain",
+      "expected_body_contains": [
+        "forbidden"
+      ],
+      "review_focus": [
+        "Does the browser response communicate enough about why the guard failed?",
+        "Should browser-facing guard failures expose more actionable developer context in development?",
+        "Is the current presentation consistent with other auth and validation failures?"
+      ]
+    },
+    {
+      "id": "runtime_dev_not_found_404",
+      "title": "Development Browser Not Found",
+      "description": "Browser request to an unknown route in development.",
+      "mode": "runtime_capture",
+      "environment": "development",
+      "source_surface": "ALNApplication browser not-found fallback",
+      "request": {
+        "path": "/missing",
+        "accept": "text/html"
+      },
+      "expected_status": 404,
+      "expected_content_type_prefix": "text/plain",
+      "expected_body_contains": [
+        "not found"
+      ],
+      "review_focus": [
+        "Would a developer know whether they hit a missing route, wrong verb, or format mismatch?",
+        "Should HTML requests get a real 404 page in development?",
+        "How much route context is appropriate on this surface?"
+      ]
+    },
+    {
+      "id": "runtime_production_internal_error_json",
+      "title": "Production Browser Internal Error",
+      "description": "Browser request against a production app route that raises an uncaught exception.",
+      "mode": "runtime_capture",
+      "environment": "production",
+      "source_surface": "ALNApplication production internal error response",
+      "request": {
+        "path": "/explode",
+        "accept": "text/html"
+      },
+      "expected_status": 500,
+      "expected_content_type_prefix": "application/json",
+      "expected_body_contains": [
+        "controller_exception",
+        "Internal Server Error"
+      ],
+      "review_focus": [
+        "Is raw JSON the right production browser experience for HTML requests?",
+        "Does the response stay properly redacted while remaining debuggable through correlation IDs?",
+        "Should production browser requests negotiate a branded HTML error page instead?"
+      ]
+    }
+  ]
+}

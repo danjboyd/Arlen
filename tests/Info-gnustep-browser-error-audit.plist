@@ -1,0 +1,6 @@
+{
+  NOTE = "Arlen XCTest Browser Error Audit Bundle";
+  NSExecutable = "ArlenBrowserErrorAudit";
+  NSMainNibFile = "";
+  NSPrincipalClass = "NSObject";
+}

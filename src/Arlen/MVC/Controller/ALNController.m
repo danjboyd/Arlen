@@ -9,6 +9,16 @@
 #import "ALNView.h"
 #import "ALNPerf.h"
 
+@interface ALNController ()
+
+- (BOOL)renderTemplate:(NSString *)templateName
+               context:(nullable NSDictionary *)context
+                layout:(nullable NSString *)layoutName
+  defaultLayoutEnabled:(BOOL)defaultLayoutEnabled
+                 error:(NSError *_Nullable *_Nullable)error;
+
+@end
+
 @implementation ALNController
 
 static NSDictionary *ALNTemplateContextFromStash(NSDictionary *stash) {
@@ -92,6 +102,15 @@ static NSString *ALNSafeRedirectLocation(NSString *location) {
   return candidate;
 }
 
+static NSString *ALNTrimmedLayoutName(id value) {
+  if (![value isKindOfClass:[NSString class]]) {
+    return nil;
+  }
+  NSString *trimmed =
+      [(NSString *)value stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+  return ([trimmed length] > 0) ? trimmed : nil;
+}
+
 + (NSJSONWritingOptions)jsonWritingOptions {
   return 0;
 }
@@ -104,13 +123,46 @@ static NSString *ALNSafeRedirectLocation(NSString *location) {
 
 - (BOOL)renderTemplate:(NSString *)templateName error:(NSError **)error {
   return [self renderTemplate:templateName
-                      context:ALNTemplateContextFromStash(self.context.stash)
+                      context:[self templateContext]
                         error:error];
 }
 
 - (BOOL)renderTemplate:(NSString *)templateName
                context:(NSDictionary *)context
                 layout:(NSString *)layoutName
+                 error:(NSError **)error {
+  NSString *effectiveLayout = ALNTrimmedLayoutName(layoutName);
+  BOOL defaultLayoutEnabled = YES;
+  if ([effectiveLayout length] == 0) {
+    NSString *preferredLayout =
+        ALNTrimmedLayoutName(self.context.stash[ALNContextEOCTemplateLayoutStashKey]);
+    if ([preferredLayout length] > 0) {
+      effectiveLayout = preferredLayout;
+    } else if ([self.context.stash[ALNContextEOCDisableLayoutStashKey] boolValue]) {
+      defaultLayoutEnabled = NO;
+    }
+  }
+  return [self renderTemplate:templateName
+                      context:context
+                       layout:effectiveLayout
+         defaultLayoutEnabled:defaultLayoutEnabled
+                        error:error];
+}
+
+- (BOOL)renderTemplateWithoutLayout:(NSString *)templateName
+                            context:(NSDictionary *)context
+                              error:(NSError **)error {
+  return [self renderTemplate:templateName
+                      context:context
+                       layout:nil
+         defaultLayoutEnabled:NO
+                        error:error];
+}
+
+- (BOOL)renderTemplate:(NSString *)templateName
+               context:(NSDictionary *)context
+                layout:(NSString *)layoutName
+  defaultLayoutEnabled:(BOOL)defaultLayoutEnabled
                  error:(NSError **)error {
   BOOL strictLocals =
       [self.context.stash[ALNContextEOCStrictLocalsStashKey] boolValue];
@@ -120,6 +172,7 @@ static NSString *ALNSafeRedirectLocation(NSString *location) {
   NSString *rendered = [ALNView renderTemplate:templateName
                                        context:context
                                         layout:layoutName
+                          defaultLayoutEnabled:defaultLayoutEnabled
                                   strictLocals:strictLocals
                                strictStringify:strictStringify
                                          error:error];
@@ -137,9 +190,40 @@ static NSString *ALNSafeRedirectLocation(NSString *location) {
                 layout:(NSString *)layoutName
                  error:(NSError **)error {
   return [self renderTemplate:templateName
-                      context:ALNTemplateContextFromStash(self.context.stash)
+                      context:[self templateContext]
                        layout:layoutName
                         error:error];
+}
+
+- (BOOL)renderTemplateWithoutLayout:(NSString *)templateName
+                              error:(NSError **)error {
+  return [self renderTemplateWithoutLayout:templateName
+                                   context:[self templateContext]
+                                     error:error];
+}
+
+- (NSDictionary *)templateContext {
+  return ALNTemplateContextFromStash(self.context.stash);
+}
+
+- (void)useTemplateLayout:(NSString *)layoutName {
+  NSString *trimmed = ALNTrimmedLayoutName(layoutName);
+  [self.context.stash removeObjectForKey:ALNContextEOCDisableLayoutStashKey];
+  if ([trimmed length] == 0) {
+    [self.context.stash removeObjectForKey:ALNContextEOCTemplateLayoutStashKey];
+    return;
+  }
+  self.context.stash[ALNContextEOCTemplateLayoutStashKey] = trimmed;
+}
+
+- (void)disableTemplateLayout {
+  [self.context.stash removeObjectForKey:ALNContextEOCTemplateLayoutStashKey];
+  self.context.stash[ALNContextEOCDisableLayoutStashKey] = @(YES);
+}
+
+- (void)clearTemplateLayoutPreference {
+  [self.context.stash removeObjectForKey:ALNContextEOCTemplateLayoutStashKey];
+  [self.context.stash removeObjectForKey:ALNContextEOCDisableLayoutStashKey];
 }
 
 - (void)stashValue:(id)value forKey:(NSString *)key {
@@ -177,7 +261,7 @@ static NSString *ALNSafeRedirectLocation(NSString *location) {
     id payload = jsonObject ?: context ?: @{};
     return [self renderJSON:payload error:error];
   }
-  NSDictionary *effectiveContext = context ?: ALNTemplateContextFromStash(self.context.stash);
+  NSDictionary *effectiveContext = context ?: [self templateContext];
   return [self renderTemplate:templateName context:effectiveContext error:error];
 }
 

@@ -1,0 +1,184 @@
+#import <Foundation/Foundation.h>
+#import <stdio.h>
+#import <stdlib.h>
+#import "ArlenServer.h"
+
+@interface AuditRuntimeController : ALNController
+@end
+
+@implementation AuditRuntimeController
+
+- (id)ok:(ALNContext *)ctx {
+  (void)ctx;
+  [self renderText:@"ok\n"];
+  return nil;
+}
+
+- (id)explode:(ALNContext *)ctx {
+  (void)ctx;
+  [NSException raise:@"AuditRuntimeControllerException"
+              format:@"boom from audit route"];
+  return nil;
+}
+
+- (id)guarded:(ALNContext *)ctx {
+  (void)ctx;
+  [self renderText:@"guarded ok\n"];
+  return nil;
+}
+
+- (BOOL)requireAdmin:(ALNContext *)ctx {
+  NSString *role = [ctx stringParamForName:@"role"];
+  return [role isEqualToString:@"admin"];
+}
+
+@end
+
+static void PrintUsage(void) {
+  fprintf(stdout, "Usage: boomhauer [--port <port>] [--host <addr>] [--env <env>] [--once] [--print-routes]\n");
+}
+
+static BOOL ConfigureAuditRoutes(ALNApplication *app) {
+  NSError *error = nil;
+
+  [app registerRouteMethod:@"GET"
+                      path:@"/ok"
+                      name:@"ok"
+           controllerClass:[AuditRuntimeController class]
+                    action:@"ok"];
+  [app registerRouteMethod:@"GET"
+                      path:@"/explode"
+                      name:@"explode"
+           controllerClass:[AuditRuntimeController class]
+                    action:@"explode"];
+  [app registerRouteMethod:@"GET"
+                      path:@"/schema-validate"
+                      name:@"schema_validate"
+           controllerClass:[AuditRuntimeController class]
+                    action:@"ok"];
+  if (![app configureRouteNamed:@"schema_validate"
+                  requestSchema:@{
+                    @"type" : @"object",
+                    @"properties" : @{
+                      @"name" : @{
+                        @"type" : @"string",
+                        @"source" : @"query",
+                        @"required" : @(YES),
+                      },
+                    },
+                  }
+                 responseSchema:nil
+                        summary:nil
+                    operationID:nil
+                           tags:nil
+                 requiredScopes:nil
+                  requiredRoles:nil
+                includeInOpenAPI:NO
+                          error:&error]) {
+    fprintf(stderr, "failed configuring schema_validate route: %s\n",
+            [[error localizedDescription] UTF8String]);
+    return NO;
+  }
+
+  error = nil;
+  [app registerRouteMethod:@"GET"
+                      path:@"/auth-required"
+                      name:@"auth_required"
+           controllerClass:[AuditRuntimeController class]
+                    action:@"ok"];
+  if (![app configureRouteNamed:@"auth_required"
+                  requestSchema:nil
+                 responseSchema:nil
+                        summary:nil
+                    operationID:nil
+                           tags:nil
+                 requiredScopes:@[ @"audit:read" ]
+                  requiredRoles:nil
+                includeInOpenAPI:NO
+                          error:&error]) {
+    fprintf(stderr, "failed configuring auth_required route: %s\n",
+            [[error localizedDescription] UTF8String]);
+    return NO;
+  }
+
+  [app registerRouteMethod:@"GET"
+                      path:@"/guarded"
+                      name:@"guarded"
+                   formats:nil
+           controllerClass:[AuditRuntimeController class]
+               guardAction:@"requireAdmin"
+                    action:@"guarded"];
+
+  return YES;
+}
+
+int main(int argc, const char *argv[]) {
+  @autoreleasepool {
+    int portOverride = 0;
+    NSString *host = nil;
+    NSString *environment = @"development";
+    BOOL once = NO;
+    BOOL printRoutes = NO;
+
+    for (int idx = 1; idx < argc; idx++) {
+      NSString *arg = [NSString stringWithUTF8String:argv[idx]];
+      if ([arg isEqualToString:@"--port"]) {
+        if ((idx + 1) >= argc) {
+          PrintUsage();
+          return 2;
+        }
+        portOverride = atoi(argv[++idx]);
+      } else if ([arg isEqualToString:@"--host"]) {
+        if ((idx + 1) >= argc) {
+          PrintUsage();
+          return 2;
+        }
+        host = [NSString stringWithUTF8String:argv[++idx]];
+      } else if ([arg isEqualToString:@"--env"]) {
+        if ((idx + 1) >= argc) {
+          PrintUsage();
+          return 2;
+        }
+        environment = [NSString stringWithUTF8String:argv[++idx]];
+      } else if ([arg isEqualToString:@"--once"]) {
+        once = YES;
+      } else if ([arg isEqualToString:@"--print-routes"]) {
+        printRoutes = YES;
+      } else if ([arg isEqualToString:@"--help"] || [arg isEqualToString:@"-h"]) {
+        PrintUsage();
+        return 0;
+      } else {
+        fprintf(stderr, "Unknown argument: %s\n", argv[idx]);
+        return 2;
+      }
+    }
+
+    NSString *appRootCurrent = [[[NSProcessInfo processInfo] environment] objectForKey:@"ARLEN_APP_ROOT"];
+    if ([appRootCurrent length] == 0) {
+      appRootCurrent = [[NSFileManager defaultManager] currentDirectoryPath];
+    }
+
+    NSError *error = nil;
+    ALNApplication *app = [[ALNApplication alloc] initWithEnvironment:environment
+                                                           configRoot:appRootCurrent
+                                                                error:&error];
+    if (app == nil) {
+      fprintf(stderr, "failed loading config: %s\n",
+              [[error localizedDescription] UTF8String]);
+      return 1;
+    }
+
+    if (!ConfigureAuditRoutes(app)) {
+      return 1;
+    }
+
+    ALNHTTPServer *server = [[ALNHTTPServer alloc] initWithApplication:app
+                                                            publicRoot:[appRootCurrent stringByAppendingPathComponent:@"public"]];
+    server.serverName = @"boomhauer";
+    if (printRoutes) {
+      [server printRoutesToFile:stdout];
+      return 0;
+    }
+    return [server runWithHost:host portOverride:portOverride once:once];
+  }
+}

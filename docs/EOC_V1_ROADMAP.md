@@ -1,7 +1,7 @@
 # EOC v1 Implementation Roadmap
 
 Status: Active  
-Last updated: 2026-02-23
+Last updated: 2026-03-13
 
 Related documents:
 
@@ -12,7 +12,7 @@ Related documents:
 - `docs/PHASE3_ROADMAP.md` (Phase 3 trend analysis and expanded performance maturity work)
 - `V1_SPEC.md` (EOC template engine v1 details)
 
-## Implementation Status (2026-02-23)
+## Implementation Status (2026-03-13)
 
 - Completed: Phase 2 runtime support scaffolding (`ALNEOCRuntime`).
 - Completed: Phase 3 `eocc` transpiler CLI with state-machine parser and `#line` output.
@@ -24,6 +24,7 @@ Related documents:
 - Completed: troubleshooting workflow docs for deterministic transpile/lint repair loops.
 - Completed: initial basic-app capability checks (`eoc-smoke-render`, `boomhauer`, `bin/smoke`).
 - In progress: richer routing/controller layers and integration-level MVC examples.
+- Completed: Phase 9 first-class template composition ergonomics for layouts, slots, partial locals, collection rendering, controller/view layout controls, and composition-first scaffold/example coverage.
 
 ## Cross-Cutting Rollout Alignment (2026-02-19)
 
@@ -195,6 +196,87 @@ Exit criteria:
 
 - v1 is stable for early adopters and internal expansion.
 
+## Phase 9: First-Class Template Composition
+
+Target: 3 days
+
+Goal:
+
+Turn layouts and partials from low-level runtime helper usage into a first-class
+EOC composition system that is more ergonomic than raw `ALNEOCInclude(...)`
+calls while preserving deterministic behavior, explicit control flow, and
+GNUstep-friendly build integration.
+
+Completed groundwork already in repo:
+
+- `ALNEOCInclude(...)`, template registry dispatch, and canonical logical-path
+  resolution are already implemented.
+- `ALNView` already supports explicit layout rendering by rendering a body
+  template, injecting `content`, and rendering a second layout template.
+- strict locals and strict stringify modes already provide useful failure
+  behavior for template composition mistakes.
+- `eocc` already emits deterministic lint diagnostics and location metadata,
+  providing the base for richer composition lint rules.
+- fixture coverage already exists for multiline tags, nested control flow,
+  malformed sigils, and guarded/unguarded include contracts.
+- module auth UI work already demonstrates real pressure for reusable partials,
+  page wrappers, and app-owned layout/partial override hooks.
+
+Completed phase steps:
+
+1. Defined additive EOC syntax in `V1_SPEC.md` for first-class composition:
+   - file-level layout directive
+   - named slot/yield contract
+   - partial include syntax with local overlays
+   - collection-rendering shorthand
+2. Implemented runtime helpers for composition:
+   - overlay locals without mutating the caller context
+   - render named slots deterministically
+   - keep raw/escaped output boundaries explicit
+3. Extended `ALNEOCTranspiler` and `eocc`:
+   - parse new composition directives with the existing state-machine approach
+   - rewrite directives into deterministic runtime helper calls
+   - preserve `#line` diagnostics and location fidelity
+4. Added composition lint and validation:
+   - unknown static layout/partial paths
+   - missing required locals for static calls
+   - slot declared but never yielded
+   - slot filled but never consumed
+   - layout/include cycle detection where statically knowable
+5. Expanded render ergonomics in `ALNView` and controller helpers:
+   - default layout resolution model
+   - page-level layout override and no-layout behavior
+   - compatibility path for explicit existing render APIs
+6. Added tests, fixtures, and examples:
+   - layout + slot happy paths
+   - nested partials with local overlays
+   - collection rendering and empty-state coverage
+   - regression cases for composition diagnostics
+7. Updated developer-facing docs and generators:
+   - `README.md`
+   - `docs/GETTING_STARTED.md`
+   - `docs/CLI_REFERENCE.md`
+   - example templates and scaffold output where composition defaults change
+
+Non-goals for Phase 9:
+
+- deep multi-level template inheritance trees
+- implicit magic that obscures render order or output escaping
+- runtime-only composition behavior that bypasses transpile-time validation
+
+Exit criteria:
+
+- page templates can declare or inherit a default layout without manual
+  `"content"` plumbing in application templates
+- layouts can define named slots and pages can fill them deterministically
+- partials can receive explicit local overlays instead of relying only on the
+  shared root context
+- collection rendering is ergonomic enough to replace common loop + include
+  boilerplate
+- static composition mistakes fail at transpile time when possible, otherwise at
+  render time with deterministic path/line/column diagnostics
+- docs, fixtures, and at least one example app demonstrate the composition model
+
 ## Architecture Recommendations
 
 - Implement `eocc` as an Objective-C CLI tool for single-language consistency.
@@ -212,6 +294,9 @@ Exit criteria:
 
 ## Suggested Immediate Next Steps
 
-1. Implement runtime helper interfaces in `src/Arlen/MVC/Template/`.
-2. Create first `eocc` parser/transpiler prototype in `tools/`.
-3. Add initial fixtures under `tests/fixtures/templates/` to drive development.
+1. Add missing-required-local static validation for composition calls when
+   `requires` declarations and call-site locals are both statically known.
+2. Decide whether named-slot defaults should remain layout-owned only or gain a
+   compact fallback syntax in EOC itself.
+3. Keep the scaffold and example apps on the composition-first path as future
+   template helpers/components land.

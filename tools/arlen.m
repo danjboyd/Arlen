@@ -4460,6 +4460,14 @@ static int CommandModuleEject(NSArray *args) {
       @"destination" : @"templates/auth/password/reset.html.eoc",
     },
     @{
+      @"source" : @"Resources/Templates/mfa/manage.html.eoc",
+      @"destination" : @"templates/auth/mfa/manage.html.eoc",
+    },
+    @{
+      @"source" : @"Resources/Templates/mfa/sms.html.eoc",
+      @"destination" : @"templates/auth/mfa/sms.html.eoc",
+    },
+    @{
       @"source" : @"Resources/Templates/mfa/totp.html.eoc",
       @"destination" : @"templates/auth/mfa/totp.html.eoc",
     },
@@ -4508,12 +4516,24 @@ static int CommandModuleEject(NSArray *args) {
       @"destination" : @"templates/auth/fragments/provider_login_buttons.html.eoc",
     },
     @{
+      @"source" : @"Resources/Templates/fragments/mfa_factor_inventory_panel.html.eoc",
+      @"destination" : @"templates/auth/fragments/mfa_factor_inventory_panel.html.eoc",
+    },
+    @{
       @"source" : @"Resources/Templates/fragments/mfa_enrollment_panel.html.eoc",
       @"destination" : @"templates/auth/fragments/mfa_enrollment_panel.html.eoc",
     },
     @{
       @"source" : @"Resources/Templates/fragments/mfa_challenge_form.html.eoc",
       @"destination" : @"templates/auth/fragments/mfa_challenge_form.html.eoc",
+    },
+    @{
+      @"source" : @"Resources/Templates/fragments/mfa_sms_enrollment_panel.html.eoc",
+      @"destination" : @"templates/auth/fragments/mfa_sms_enrollment_panel.html.eoc",
+    },
+    @{
+      @"source" : @"Resources/Templates/fragments/mfa_sms_challenge_form.html.eoc",
+      @"destination" : @"templates/auth/fragments/mfa_sms_challenge_form.html.eoc",
     },
     @{
       @"source" : @"Resources/Templates/fragments/mfa_recovery_codes_panel.html.eoc",
@@ -4534,6 +4554,14 @@ static int CommandModuleEject(NSArray *args) {
     @{
       @"source" : @"Resources/Templates/partials/bodies/reset_password_body.html.eoc",
       @"destination" : @"templates/auth/partials/bodies/reset_password_body.html.eoc",
+    },
+    @{
+      @"source" : @"Resources/Templates/partials/bodies/mfa_manage_body.html.eoc",
+      @"destination" : @"templates/auth/partials/bodies/mfa_manage_body.html.eoc",
+    },
+    @{
+      @"source" : @"Resources/Templates/partials/bodies/sms_challenge_body.html.eoc",
+      @"destination" : @"templates/auth/partials/bodies/sms_challenge_body.html.eoc",
     },
     @{
       @"source" : @"Resources/Templates/partials/bodies/totp_enrollment_body.html.eoc",

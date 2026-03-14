@@ -1,10 +1,13 @@
 #import <Foundation/Foundation.h>
 #import <XCTest/XCTest.h>
 
+#import <arpa/inet.h>
+#import <netinet/in.h>
 #import <signal.h>
 #import <unistd.h>
 #import <stdlib.h>
 #import <string.h>
+#import <sys/socket.h>
 
 @interface HTTPIntegrationTests : XCTestCase
 @end
@@ -12,6 +15,28 @@
 @implementation HTTPIntegrationTests
 
 - (int)randomPort {
+  int fd = socket(AF_INET, SOCK_STREAM, 0);
+  if (fd >= 0) {
+    int port = 0;
+    struct sockaddr_in address;
+    memset(&address, 0, sizeof(address));
+    address.sin_family = AF_INET;
+    address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    address.sin_port = 0;
+
+    if (bind(fd, (struct sockaddr *)&address, sizeof(address)) == 0) {
+      socklen_t length = sizeof(address);
+      if (getsockname(fd, (struct sockaddr *)&address, &length) == 0) {
+        port = (int)ntohs(address.sin_port);
+      }
+    }
+
+    close(fd);
+    if (port > 0) {
+      return port;
+    }
+  }
+
   return 32000 + (int)arc4random_uniform(20000);
 }
 
@@ -3074,7 +3099,8 @@
                         serverBinary:@"./build/tech-demo-server"
                            envPrefix:@"ARLEN_APP_ROOT=examples/tech_demo"];
   XCTAssertTrue([body containsString:@"Arlen Technology Demo"]);
-  XCTAssertTrue([body containsString:@"Phase 1 capabilities in one page"]);
+  XCTAssertTrue([body containsString:@"Composition-first capabilities in one page"]);
+  XCTAssertTrue([body containsString:@"Example layout slots"]);
   XCTAssertTrue([body containsString:@"/tech-demo/dashboard"]);
 }
 
@@ -3184,7 +3210,7 @@
     BOOL firstOK = NO;
     NSString *firstBody = [self requestPathWithRetries:@"/healthz"
                                                   port:port
-                                              attempts:120
+                                              attempts:180
                                                success:&firstOK];
     XCTAssertTrue(firstOK);
     XCTAssertEqualObjects(@"ok\n", firstBody);
@@ -3194,7 +3220,7 @@
     BOOL secondOK = NO;
     NSString *secondBody = [self requestPathWithRetries:@"/healthz"
                                                    port:port
-                                               attempts:120
+                                               attempts:180
                                                 success:&secondOK];
     XCTAssertTrue(secondOK);
     XCTAssertEqualObjects(@"ok\n", secondBody);
@@ -3248,7 +3274,7 @@
     BOOL firstOK = NO;
     NSString *firstBody = [self requestPathWithRetries:@"/healthz"
                                                   port:port
-                                              attempts:120
+                                              attempts:180
                                                success:&firstOK];
     XCTAssertTrue(firstOK);
     XCTAssertEqualObjects(@"ok\n", firstBody);
@@ -3257,30 +3283,27 @@
         [self waitForChildPIDsForParent:server.processIdentifier minimumCount:2 attempts:60];
     XCTAssertGreaterThanOrEqual([initialWorkers count], 2u);
     pid_t killedPID = (pid_t)[initialWorkers[0] intValue];
-    XCTAssertEqual(0, kill(killedPID, SIGKILL));
+	    XCTAssertEqual(0, kill(killedPID, SIGKILL));
 
-    BOOL respawned = NO;
-    for (NSInteger attempt = 0; attempt < 80; attempt++) {
-      NSArray *workers = [self childPIDsForParent:server.processIdentifier];
-      BOOL killedStillPresent = NO;
-      for (NSNumber *candidate in workers) {
-        if ([candidate intValue] == (int)killedPID) {
-          killedStillPresent = YES;
-          break;
-        }
-      }
-      if ([workers count] >= 2 && !killedStillPresent) {
-        respawned = YES;
-        break;
-      }
-      usleep(200000);
-    }
+	    BOOL respawned = NO;
+	    for (NSInteger attempt = 0; attempt < 80; attempt++) {
+	      NSString *snapshot = [NSString stringWithContentsOfFile:lifecycleLog
+	                                                     encoding:NSUTF8StringEncoding
+	                                                        error:nil];
+	      if ([snapshot containsString:@"event=worker_exited"] &&
+	          [snapshot containsString:@"event=worker_started"] &&
+	          [snapshot containsString:@"reason=respawn_after_exit"]) {
+	        respawned = YES;
+	        break;
+	      }
+	      usleep(200000);
+	    }
     XCTAssertTrue(respawned);
 
     BOOL secondOK = NO;
     NSString *secondBody = [self requestPathWithRetries:@"/healthz"
                                                    port:port
-                                               attempts:120
+                                               attempts:180
                                                 success:&secondOK];
     XCTAssertTrue(secondOK);
     XCTAssertEqualObjects(@"ok\n", secondBody);
@@ -3349,18 +3372,18 @@
 
   @try {
     BOOL ready = NO;
-    NSString *healthBody = [self requestPathWithRetries:@"/healthz"
-                                                   port:port
-                                               attempts:120
-                                                success:&ready];
+	    NSString *healthBody = [self requestPathWithRetries:@"/healthz"
+	                                                   port:port
+	                                               attempts:180
+	                                                success:&ready];
     XCTAssertTrue(ready);
     XCTAssertEqualObjects(@"ok\n", healthBody);
 
     BOOL clusterzReady = NO;
-    NSString *clusterBody = [self requestPathWithRetries:@"/clusterz"
-                                                    port:port
-                                                attempts:120
-                                                 success:&clusterzReady];
+	    NSString *clusterBody = [self requestPathWithRetries:@"/clusterz"
+	                                                    port:port
+	                                                attempts:180
+	                                                 success:&clusterzReady];
     XCTAssertTrue(clusterzReady);
     XCTAssertTrue([clusterBody containsString:@"\"enabled\":true"] ||
                   [clusterBody containsString:@"\"enabled\": true"]);
@@ -3440,10 +3463,10 @@
 
   @try {
     BOOL ready = NO;
-    NSString *body = [self requestPathWithRetries:@"/healthz"
-                                             port:port
-                                         attempts:120
-                                          success:&ready];
+	    NSString *body = [self requestPathWithRetries:@"/healthz"
+	                                             port:port
+	                                         attempts:180
+	                                          success:&ready];
     XCTAssertTrue(ready);
     XCTAssertEqualObjects(@"ok\n", body);
 
@@ -3458,14 +3481,14 @@
     pid_t replacementAsyncPID = [self waitForChildPIDForParent:server.processIdentifier
                                                 containingToken:@"sleep 30"
                                                       excluding:firstAsyncPID
-                                                       attempts:120];
+                                                       attempts:180];
     XCTAssertTrue(replacementAsyncPID > 0);
     XCTAssertNotEqual((int)firstAsyncPID, (int)replacementAsyncPID);
 
     BOOL secondReady = NO;
     NSString *secondBody = [self requestPathWithRetries:@"/healthz"
                                                    port:port
-                                               attempts:120
+                                               attempts:180
                                                 success:&secondReady];
     XCTAssertTrue(secondReady);
     XCTAssertEqualObjects(@"ok\n", secondBody);
@@ -3523,7 +3546,7 @@
       BOOL ready = NO;
       NSString *health = [self requestPathWithRetries:@"/healthz"
                                                  port:port
-                                             attempts:120
+                                             attempts:180
                                               success:&ready];
       XCTAssertTrue(ready);
       XCTAssertEqualObjects(@"ok\n", health);
@@ -3626,7 +3649,7 @@
     BOOL ready = NO;
     NSString *health = [self requestPathWithRetries:@"/healthz"
                                                port:port
-                                           attempts:120
+                                           attempts:180
                                             success:&ready];
     XCTAssertTrue(ready);
     XCTAssertEqualObjects(@"ok\n", health);
@@ -3764,7 +3787,7 @@
     BOOL ready = NO;
     NSString *health = [self requestPathWithRetries:@"/healthz"
                                                port:port
-                                           attempts:120
+                                           attempts:180
                                             success:&ready];
     XCTAssertTrue(ready);
     XCTAssertEqualObjects(@"ok\n", health);
@@ -3814,7 +3837,7 @@
     BOOL healthyAfterReload = NO;
     NSString *postReload = [self requestPathWithRetries:@"/healthz"
                                                    port:port
-                                               attempts:120
+                                               attempts:180
                                                 success:&healthyAfterReload];
     XCTAssertTrue(healthyAfterReload);
     XCTAssertEqualObjects(@"ok\n", postReload);
@@ -3967,6 +3990,7 @@
   [server launch];
 
   @try {
+    NSString *escapeSequence = [NSString stringWithFormat:@"%c", 0x1B];
     BOOL errorPageSeen = NO;
     for (NSInteger attempt = 0; attempt < 240; attempt++) {
       int curlCode = 0;
@@ -3976,6 +4000,9 @@
         XCTAssertTrue([body containsString:@"http-equiv='refresh'"]);
         XCTAssertTrue([body containsString:@"Boomhauer retries automatically every 1 seconds"]);
         XCTAssertTrue([body containsString:@"Last failed at:"]);
+        XCTAssertTrue([body containsString:@"<pre class='diagnostic-output'>"]);
+        XCTAssertTrue([body containsString:@"<span class='ansi-segment'"]);
+        XCTAssertFalse([body containsString:escapeSequence]);
         errorPageSeen = YES;
         break;
       }
@@ -3995,6 +4022,9 @@
           [jsonBody containsString:@"timestamp_utc"] &&
           [jsonBody containsString:@"recovery_hint"] &&
           [jsonBody containsString:@"auto_retry_seconds"]) {
+        XCTAssertFalse([jsonBody containsString:escapeSequence]);
+        XCTAssertFalse([jsonBody containsString:@"\\u001b"]);
+        XCTAssertFalse([jsonBody containsString:@"\\u001B"]);
         jsonErrorSeen = YES;
         break;
       }

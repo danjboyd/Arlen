@@ -1,0 +1,31 @@
+<%@ requires authMFAFactors %>
+<section class="auth-mfa-panel auth-mfa-panel--inventory">
+  <div class="auth-note">Use an authenticator app when possible. SMS is optional and weaker when enabled by app policy.</div>
+  <div class="auth-factor-grid">
+  <% for (NSDictionary *factor in $authMFAFactors) { %>
+    <% BOOL recommended = [[factor objectForKey:@"recommended"] boolValue]; %>
+    <% BOOL weaker = [[factor objectForKey:@"weaker"] boolValue]; %>
+    <% BOOL verified = [[factor objectForKey:@"verified"] boolValue]; %>
+    <% NSString *maskedPhone = [factor objectForKey:@"masked_phone"] ?: @""; %>
+    <article class="auth-factor-card">
+      <header class="auth-factor-card-header">
+        <div>
+          <h2><%= [factor objectForKey:@"label"] ?: @"Factor" %></h2>
+          <p class="auth-muted"><%= [factor objectForKey:@"summary"] ?: @"" %></p>
+        </div>
+        <% if (recommended) { %>
+          <span class="auth-factor-pill auth-factor-pill--recommended">Recommended</span>
+        <% } else if (weaker) { %>
+          <span class="auth-factor-pill auth-factor-pill--weaker">Fallback</span>
+        <% } %>
+      </header>
+      <div class="auth-factor-status">
+        <strong><%= verified ? @"Enabled" : ([[factor objectForKey:@"enabled"] boolValue] ? @"Available" : @"Disabled") %></strong>
+        <% if ([maskedPhone length] > 0) { %>
+          <span><%= maskedPhone %></span>
+        <% } %>
+      </div>
+    </article>
+  <% } %>
+  </div>
+</section>

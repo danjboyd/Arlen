@@ -19,6 +19,8 @@ extern NSString *const ALNContextCSRFTokenStashKey;
 extern NSString *const ALNContextValidationErrorsStashKey;
 extern NSString *const ALNContextEOCStrictLocalsStashKey;
 extern NSString *const ALNContextEOCStrictStringifyStashKey;
+extern NSString *const ALNContextEOCTemplateLayoutStashKey;
+extern NSString *const ALNContextEOCDisableLayoutStashKey;
 extern NSString *const ALNContextRequestFormatStashKey;
 extern NSString *const ALNContextValidatedParamsStashKey;
 extern NSString *const ALNContextAuthClaimsStashKey;

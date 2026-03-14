@@ -1,7 +1,15 @@
+<%@ layout "layouts/main" %>
+<%@ slot "sidebar" %>
+<div class="callout">
+  <strong>Request recap</strong>
+  <p>Route param: <code><%= $name %></code></p>
+  <p>Query flag: <code><%= $flag %></code></p>
+</div>
+<%@ endslot %>
 <section>
   <h2>User route demo</h2>
-  <p>User from path param: <strong><%= [ctx objectForKey:@"name"] %></strong></p>
-  <p>Flag from query param: <strong><%= [ctx objectForKey:@"flag"] %></strong></p>
-  <p>Request path: <code><%= [ctx objectForKey:@"path"] %></code></p>
-  <p>Raw query: <code><%= [ctx objectForKey:@"query"] %></code></p>
+  <p>User from path param: <strong><%= $name %></strong></p>
+  <p>Flag from query param: <strong><%= $flag %></strong></p>
+  <p>Request path: <code><%= $path %></code></p>
+  <p>Raw query: <code><%= $query %></code></p>
 </section>

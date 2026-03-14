@@ -13,11 +13,19 @@ make docs-serve
 
 Open `build/docs/index.html` in your browser, or use `make docs-serve` for local hosting.
 
+Audit browser-facing error surfaces:
+
+```bash
+make browser-error-audit
+```
+
+Then open `build/browser-error-audit/index.html`.
+
 ## Start Here
 
 - [Current Status](STATUS.md): latest checkpoint and verified milestone state.
-- [First App Guide](FIRST_APP_GUIDE.md): fastest path to scaffold, run, and extend your first app.
-- [Getting Started](GETTING_STARTED.md): prerequisites, framework build, tests, and workflow overview.
+- [First App Guide](FIRST_APP_GUIDE.md): fastest path to scaffold, run, and extend your first app with the composition-first EOC layout/partial defaults.
+- [Getting Started](GETTING_STARTED.md): prerequisites, framework build, tests, and workflow overview, including the default `layout` / `yield` / `render` scaffold path.
 - [Getting Started Tracks](GETTING_STARTED_TRACKS.md): quickstart, API-first, HTML-first, and data-layer onboarding paths.
 - [API Reference](API_REFERENCE.md): generated public API docs with per-method purpose and usage guidance.
 - [Arlen for X Migration Guides](ARLEN_FOR_X_INDEX.md): framework-by-framework migration playbooks.
@@ -25,8 +33,8 @@ Open `build/docs/index.html` in your browser, or use `make docs-serve` for local
 - [CLI Reference](CLI_REFERENCE.md): command reference for `arlen`, `boomhauer`, and helper scripts.
 - [Core Concepts](CORE_CONCEPTS.md): runtime architecture and request lifecycle.
 - [Modules](MODULES.md): first-class module architecture, install flow, and override model.
-- [Auth Module](AUTH_MODULE.md): first-party auth product routes, hooks, and `/auth/api` surface.
-- [Auth UI Integration Modes](AUTH_UI_INTEGRATION_MODES.md): `headless`, `module-ui`, and `generated-app-ui` contract for app-shell auth integration.
+- [Auth Module](AUTH_MODULE.md): first-party auth product routes, embeddable fragment contract, runtime helpers, `/auth/api` surface, and optional disabled-by-default SMS/Twilio Verify MFA.
+- [Auth UI Integration Modes](AUTH_UI_INTEGRATION_MODES.md): `headless`, `module-ui`, and `generated-app-ui` contract plus the Phase 18 fragment-first MFA/UI refinements.
 - [Admin UI Module](ADMIN_UI_MODULE.md): first-party admin resource contract with bulk actions, exports, typed filters, autocomplete, and `/admin/api` surface.
 - [Jobs Module](JOBS_MODULE.md): first-party jobs runtime contracts plus protected `/jobs` HTML and `/jobs/api` JSON surfaces.
 - [Notifications Module](NOTIFICATIONS_MODULE.md): first-party notifications product flows on jobs + mail with inbox/preferences, preview/test-send, and `/notifications/api` surfaces.
@@ -38,7 +46,7 @@ Open `build/docs/index.html` in your browser, or use `make docs-serve` for local
 - [Password Hashing](PASSWORD_HASHING.md): Argon2id password hashing API, defaults, and rehash workflow.
 - [Realtime and Composition](REALTIME_COMPOSITION.md): websocket/SSE contracts, pubsub hub, and app mounting.
 - [Ecosystem Services](ECOSYSTEM_SERVICES.md): jobs/cache/i18n/mail/attachment adapter contracts and plugin wiring.
-- [ArlenData Reuse Guide](ARLEN_DATA.md): standalone data-layer packaging, checkout, and versioning policy.
+- [ArlenData Reuse Guide](ARLEN_DATA.md): standalone data-layer packaging, PostgreSQL/MSSQL dialect usage, and versioning policy.
 - [SQL Builder Conformance Matrix](SQL_BUILDER_CONFORMANCE_MATRIX.md): phase-4 SQL snapshot matrix and regression gate map.
 - [Phase 5A Reliability Contracts](PHASE5A_RELIABILITY_CONTRACTS.md): contract map, external regression intake workflow, and adapter capability metadata baselines.
 - [Phase 5B Runtime Routing](PHASE5B_RUNTIME_ROUTING.md): multi-database read/write routing, scoped stickiness, and diagnostics contracts.
@@ -100,6 +108,7 @@ Open `build/docs/index.html` in your browser, or use `make docs-serve` for local
 - [Phase 15 Roadmap](PHASE15_ROADMAP.md)
 - [Phase 16 Roadmap](PHASE16_ROADMAP.md)
 - [Phase 17 Roadmap](PHASE17_ROADMAP.md)
+- [Phase 18 Roadmap](PHASE18_ROADMAP.md)
 - [Competitive Benchmark Roadmap](COMPETITIVE_BENCHMARK_ROADMAP.md)
 - [Phase B Parity Checklist (FastAPI)](PHASEB_PARITY_CHECKLIST_FASTAPI.md)
 - [Phase C Benchmark Protocol](PHASEC_BENCHMARK_PROTOCOL.md)

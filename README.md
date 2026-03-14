@@ -49,6 +49,7 @@ Arlen is designed to solve the same class of problems as frameworks like Mojolic
 - Phase 14: complete (14A-14I delivered: first-party `jobs`, `notifications`, `storage`, `ops`, and `search` modules, Phase 14 sample app, and `phase14-confidence` gate).
 - Phase 15: complete (15A-15E delivered on 2026-03-10: `headless`, `module-ui`, `generated-app-ui`, auth UI examples, and `phase15-confidence`).
 - Phase 16: complete (`16A-16G` delivered on 2026-03-11: `jobs`, `notifications`, `storage`, `search`, `ops`, and `admin-ui` maturity; `examples/phase16_modules_demo` and `phase16-confidence` included. See `docs/PHASE16_ROADMAP.md`).
+- Phase 17: complete (`17A-17D` delivered on 2026-03-12: backend-neutral SQL dialect/migration seams, optional MSSQL adapter + dialect, configured `migrate` / `module migrate` backend selection, and updated data-layer docs. See `docs/PHASE17_ROADMAP.md`).
 
 ## Quick Start
 
@@ -93,6 +94,11 @@ cd MyApp
 /path/to/Arlen/bin/arlen boomhauer --port 3000
 ```
 
+Full-mode scaffolds now default to composition-first EOC:
+- `templates/layouts/main.html.eoc` owns the app shell
+- `templates/index.html.eoc` opts into that shell with `<%@ layout "layouts/main" %>`
+- `templates/partials/_nav.html.eoc` and `templates/partials/_feature.html.eoc` demonstrate partial includes and collection rendering
+
 Phase 13/14/15/16 modules quick path:
 
 ```bash
@@ -113,7 +119,7 @@ See `examples/phase16_modules_demo/README.md` for the canonical app-owned
 module stack.
 
 First-party module surfaces:
-- `auth` keeps `/auth/api/...` stable and lets apps choose `headless`, `module-ui`, or `generated-app-ui` ownership for `/auth/...`
+- `auth` keeps `/auth/api/...` stable, now exposes explicit MFA `flow`/`mfa` JSON plus `/auth/api/mfa` factor discovery for headless clients, supports optional disabled-by-default SMS/Twilio Verify MFA, and lets apps choose `headless`, `module-ui`, or `generated-app-ui` ownership for `/auth/...`
 - `admin-ui` ships HTML under `/admin/...` and JSON under `/admin/api/...`
 - `jobs` ships protected HTML under `/jobs/...` and JSON under `/jobs/api/...`
 - `notifications` ships user HTML under `/notifications/...`, admin HTML under `/notifications/...`, and JSON under `/notifications/api/...`
@@ -123,8 +129,9 @@ First-party module surfaces:
 
 Auth UI ownership quick path:
 - `module-ui`: default stock auth pages with optional app layout/context hook
+- server-rendered EOC apps can now also embed coarse auth fragments such as the MFA enrollment/challenge/recovery panels inside app-owned pages
 - `headless`: set `authModule.ui.mode = "headless"` and use `/auth/api/...` from your SPA or native client
-- `generated-app-ui`: run `/path/to/Arlen/build/arlen module eject auth-ui --json` to scaffold `templates/auth/...` and `public/auth/auth.css`
+- `generated-app-ui`: run `/path/to/Arlen/build/arlen module eject auth-ui --json` to scaffold `templates/auth/...`, `templates/auth/fragments/...`, factor-management pages, and `public/auth/auth.css` plus the local QR asset
 
 Run tests and quality gate:
 
@@ -142,7 +149,11 @@ make phase14-confidence
 make phase15-confidence
 make phase16-confidence
 make test-data-layer
+make browser-error-audit
 ```
+
+`make browser-error-audit` generates a browser-reviewable gallery of representative
+build/runtime error surfaces under `build/browser-error-audit/index.html`.
 
 Run the technology demo:
 

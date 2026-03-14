@@ -12,8 +12,81 @@ static NSString *const ALNEOCThreadOptionsKey = @"aln.eoc.render_options";
 static NSString *const ALNEOCThreadStrictLocalsKey = @"strict_locals";
 static NSString *const ALNEOCThreadStrictStringifyKey = @"strict_stringify";
 static NSString *const ALNEOCThreadOptionsStackKey = @"aln.eoc.render_options_stack";
+static NSString *const ALNEOCThreadCompositionStackKey = @"aln.eoc.composition_stack";
+static NSString *const ALNEOCCompositionSlotsKey = @"slots";
+
+static id ALNEOCLookupValueOnObject(id object, NSString *name, BOOL *found);
+
+@interface ALNEOCOverlayContext : NSObject
+
+- (instancetype)initWithBaseContext:(id)baseContext locals:(id)locals;
+- (id)objectForKey:(id)key;
+- (id)valueForKey:(NSString *)key;
+
+@end
+
+@implementation ALNEOCOverlayContext {
+  id _baseContext;
+  id _locals;
+}
+
+- (instancetype)initWithBaseContext:(id)baseContext locals:(id)locals {
+  self = [super init];
+  if (self != nil) {
+    _baseContext = baseContext;
+    _locals = locals;
+  }
+  return self;
+}
+
+- (id)objectForKey:(id)key {
+  NSString *name = [key isKindOfClass:[NSString class]] ? key : @"";
+  BOOL found = NO;
+  id value = ALNEOCLookupValueOnObject(_locals, name, &found);
+  if (found) {
+    return value;
+  }
+  return ALNEOCLookupValueOnObject(_baseContext, name, NULL);
+}
+
+- (id)valueForKey:(NSString *)key {
+  return [self objectForKey:key];
+}
+
+- (BOOL)respondsToSelector:(SEL)selector {
+  if (selector == @selector(objectForKey:) || selector == @selector(valueForKey:)) {
+    return YES;
+  }
+  return [super respondsToSelector:selector] || [_baseContext respondsToSelector:selector];
+}
+
+- (id)forwardingTargetForSelector:(SEL)selector {
+  if (selector == @selector(objectForKey:) || selector == @selector(valueForKey:)) {
+    return nil;
+  }
+  if ([_baseContext respondsToSelector:selector]) {
+    return _baseContext;
+  }
+  return [super forwardingTargetForSelector:selector];
+}
+
+- (NSString *)description {
+  return [_baseContext description] ?: [super description];
+}
+
+@end
 
 static NSMutableDictionary *ALNEOCTemplateRegistry(void) {
+  static NSMutableDictionary *registry = nil;
+  @synchronized([NSThread class]) {
+    if (registry == nil) {
+      registry = [[NSMutableDictionary alloc] init];
+    }
+    return registry;
+  }
+}
+
+static NSMutableDictionary *ALNEOCTemplateLayoutRegistry(void) {
   static NSMutableDictionary *registry = nil;
   @synchronized([NSThread class]) {
     if (registry == nil) {
@@ -45,6 +118,36 @@ static NSMutableArray *ALNEOCThreadOptionStack(void) {
   NSMutableArray *stack = [NSMutableArray array];
   threadDictionary[ALNEOCThreadOptionsStackKey] = stack;
   return stack;
+}
+
+static NSMutableArray *ALNEOCThreadCompositionStack(void) {
+  NSMutableDictionary *threadDictionary = [[NSThread currentThread] threadDictionary];
+  id current = threadDictionary[ALNEOCThreadCompositionStackKey];
+  if ([current isKindOfClass:[NSMutableArray class]]) {
+    return current;
+  }
+  NSMutableArray *stack = [NSMutableArray array];
+  threadDictionary[ALNEOCThreadCompositionStackKey] = stack;
+  return stack;
+}
+
+static BOOL ALNEOCCompositionStateIsActive(void) {
+  return [ALNEOCThreadCompositionStack() count] > 0;
+}
+
+static NSMutableDictionary *ALNEOCCurrentCompositionState(void) {
+  NSMutableArray *stack = ALNEOCThreadCompositionStack();
+  id current = [stack lastObject];
+  return [current isKindOfClass:[NSMutableDictionary class]] ? current : nil;
+}
+
+static NSMutableDictionary *ALNEOCCurrentSlotMap(void) {
+  NSMutableDictionary *state = ALNEOCCurrentCompositionState();
+  id current = state[ALNEOCCompositionSlotsKey];
+  if ([current isKindOfClass:[NSMutableDictionary class]]) {
+    return current;
+  }
+  return nil;
 }
 
 BOOL ALNEOCStrictLocalsEnabled(void) {
@@ -96,6 +199,25 @@ void ALNEOCPopRenderOptions(NSDictionary *token) {
   }
 }
 
+NSDictionary *ALNEOCPushCompositionState(void) {
+  NSMutableDictionary *state = [NSMutableDictionary dictionary];
+  state[ALNEOCCompositionSlotsKey] = [NSMutableDictionary dictionary];
+  [ALNEOCThreadCompositionStack() addObject:state];
+  return state;
+}
+
+void ALNEOCPopCompositionState(NSDictionary *token) {
+  (void)token;
+  NSMutableArray *stack = ALNEOCThreadCompositionStack();
+  if ([stack count] == 0) {
+    return;
+  }
+  [stack removeLastObject];
+  if ([stack count] == 0) {
+    [[[NSThread currentThread] threadDictionary] removeObjectForKey:ALNEOCThreadCompositionStackKey];
+  }
+}
+
 static NSError *ALNEOCTemplateExecutionError(NSString *message,
                                              NSString *templatePath,
                                              NSUInteger line,
@@ -125,6 +247,26 @@ static NSError *ALNEOCTemplateExecutionError(NSString *message,
   }
   return [NSError errorWithDomain:ALNEOCErrorDomain
                              code:ALNEOCErrorTemplateExecutionFailed
+                         userInfo:userInfo];
+}
+
+static NSError *ALNEOCInvalidArgumentError(NSString *message,
+                                           NSString *templatePath,
+                                           NSUInteger line,
+                                           NSUInteger column) {
+  NSMutableDictionary *userInfo = [NSMutableDictionary dictionary];
+  userInfo[NSLocalizedDescriptionKey] = message ?: @"Invalid EOC argument";
+  if ([templatePath length] > 0) {
+    userInfo[ALNEOCErrorPathKey] = templatePath;
+  }
+  if (line > 0) {
+    userInfo[ALNEOCErrorLineKey] = @(line);
+  }
+  if (column > 0) {
+    userInfo[ALNEOCErrorColumnKey] = @(column);
+  }
+  return [NSError errorWithDomain:ALNEOCErrorDomain
+                             code:ALNEOCErrorInvalidArgument
                          userInfo:userInfo];
 }
 
@@ -214,6 +356,36 @@ static id ALNEOCLookupValueOnObject(id object, NSString *name, BOOL *found) {
 
 static id ALNEOCLookupLocal(id ctx, NSString *name, BOOL *found) {
   return ALNEOCLookupValueOnObject(ctx, name, found);
+}
+
+static id ALNEOCContextWithLocals(id ctx,
+                                  id locals,
+                                  NSString *templatePath,
+                                  NSUInteger line,
+                                  NSUInteger column,
+                                  NSError **error) {
+  if (locals == nil || locals == [NSNull null]) {
+    return ctx;
+  }
+  if ([locals isKindOfClass:[NSDictionary class]] ||
+      [locals respondsToSelector:@selector(objectForKey:)]) {
+    return [[ALNEOCOverlayContext alloc] initWithBaseContext:ctx locals:locals];
+  }
+  if (error != NULL) {
+    *error = ALNEOCInvalidArgumentError(
+        @"EOC locals overlay must be dictionary-like", templatePath, line, column);
+  }
+  return nil;
+}
+
+static BOOL ALNEOCIsEnumerableCollection(id value) {
+  if (value == nil || value == [NSNull null]) {
+    return YES;
+  }
+  if ([value isKindOfClass:[NSString class]] || [value isKindOfClass:[NSData class]]) {
+    return NO;
+  }
+  return [value respondsToSelector:@selector(countByEnumeratingWithState:objects:count:)];
 }
 
 id ALNEOCLocal(id ctx,
@@ -312,6 +484,17 @@ NSString *ALNEOCCanonicalTemplatePath(NSString *path) {
     result = [result substringFromIndex:1];
   }
   return result;
+}
+
+NSString *ALNEOCNormalizeTemplateReference(NSString *path) {
+  NSString *canonical = ALNEOCCanonicalTemplatePath(path);
+  if ([canonical length] == 0) {
+    return @"";
+  }
+  if (![canonical hasSuffix:@".html.eoc"]) {
+    canonical = [canonical stringByAppendingString:@".html.eoc"];
+  }
+  return canonical;
 }
 
 NSString *ALNEOCEscapeHTMLString(NSString *input) {
@@ -416,9 +599,96 @@ BOOL ALNEOCAppendRawChecked(NSMutableString *out,
   return ALNEOCAppendChecked(out, value, NO, templatePath, line, column, error);
 }
 
+BOOL ALNEOCEnsureRequiredLocals(id ctx,
+                                NSArray<NSString *> *requiredLocals,
+                                NSString *templatePath,
+                                NSUInteger line,
+                                NSUInteger column,
+                                NSError **error) {
+  for (id rawName in requiredLocals ?: @[]) {
+    NSString *name = [rawName isKindOfClass:[NSString class]] ? rawName : @"";
+    if ([name length] == 0) {
+      continue;
+    }
+    BOOL found = NO;
+    (void)ALNEOCLookupLocal(ctx, name, &found);
+    if (!found) {
+      if (error != NULL) {
+        NSString *message =
+            [NSString stringWithFormat:@"Missing required EOC local: $%@", name];
+        *error = ALNEOCTemplateExecutionError(
+            message, templatePath, line, column, name, nil, nil);
+      }
+      return NO;
+    }
+  }
+  return YES;
+}
+
+BOOL ALNEOCSetSlot(id ctx,
+                   NSString *slotName,
+                   NSString *content,
+                   NSString *templatePath,
+                   NSUInteger line,
+                   NSUInteger column,
+                   NSError **error) {
+  (void)ctx;
+  if ([slotName length] == 0) {
+    if (error != NULL) {
+      *error = ALNEOCInvalidArgumentError(
+          @"EOC slot name cannot be empty", templatePath, line, column);
+    }
+    return NO;
+  }
+  NSMutableDictionary *slots = ALNEOCCurrentSlotMap();
+  if (slots == nil) {
+    if (error != NULL) {
+      *error = ALNEOCInvalidArgumentError(
+          @"EOC composition state is not active", templatePath, line, column);
+    }
+    return NO;
+  }
+  slots[slotName] = content ?: @"";
+  return YES;
+}
+
+void ALNEOCSetSlotContent(NSString *slotName, NSString *content) {
+  if ([slotName length] == 0) {
+    return;
+  }
+  NSMutableDictionary *slots = ALNEOCCurrentSlotMap();
+  if (slots == nil) {
+    return;
+  }
+  slots[slotName] = content ?: @"";
+}
+
+BOOL ALNEOCAppendYield(NSMutableString *out,
+                       id ctx,
+                       NSString *slotName,
+                       NSString *templatePath,
+                       NSUInteger line,
+                       NSUInteger column,
+                       NSError **error) {
+  NSString *resolvedSlot = ([slotName length] > 0) ? slotName : @"content";
+  NSMutableDictionary *slots = ALNEOCCurrentSlotMap();
+  id value = slots[resolvedSlot];
+  if (value == nil) {
+    BOOL found = NO;
+    value = ALNEOCLookupValueOnObject(ctx, resolvedSlot, &found);
+    if (!found) {
+      value = @"";
+    }
+  }
+  return ALNEOCAppendRawChecked(out, value, templatePath, line, column, error);
+}
+
 void ALNEOCClearTemplateRegistry(void) {
   @synchronized(ALNEOCTemplateRegistry()) {
     [ALNEOCTemplateRegistry() removeAllObjects];
+  }
+  @synchronized(ALNEOCTemplateLayoutRegistry()) {
+    [ALNEOCTemplateLayoutRegistry() removeAllObjects];
   }
 }
 
@@ -431,6 +701,34 @@ void ALNEOCRegisterTemplate(NSString *logicalPath, ALNEOCRenderFunction function
   @synchronized(ALNEOCTemplateRegistry()) {
     ALNEOCTemplateRegistry()[canonical] = [NSValue valueWithPointer:function];
   }
+}
+
+void ALNEOCRegisterTemplateLayout(NSString *logicalPath, NSString *layoutLogicalPath) {
+  NSString *canonical = ALNEOCCanonicalTemplatePath(logicalPath);
+  NSString *normalizedLayout = ALNEOCNormalizeTemplateReference(layoutLogicalPath);
+  if ([canonical length] == 0 || [normalizedLayout length] == 0) {
+    return;
+  }
+
+  @synchronized(ALNEOCTemplateLayoutRegistry()) {
+    ALNEOCTemplateLayoutRegistry()[canonical] = normalizedLayout;
+  }
+}
+
+NSString *ALNEOCResolveTemplateLayout(NSString *logicalPath) {
+  NSString *canonical = ALNEOCCanonicalTemplatePath(logicalPath);
+  if ([canonical length] == 0) {
+    return nil;
+  }
+
+  NSString *layout = nil;
+  @synchronized(ALNEOCTemplateLayoutRegistry()) {
+    id current = ALNEOCTemplateLayoutRegistry()[canonical];
+    if ([current isKindOfClass:[NSString class]]) {
+      layout = current;
+    }
+  }
+  return layout;
 }
 
 ALNEOCRenderFunction ALNEOCResolveTemplate(NSString *logicalPath) {
@@ -467,8 +765,17 @@ NSString *ALNEOCRenderTemplate(NSString *logicalPath, id ctx, NSError **error) {
     return nil;
   }
 
+  BOOL ownsCompositionState = !ALNEOCCompositionStateIsActive();
+  NSDictionary *compositionToken = ownsCompositionState ? ALNEOCPushCompositionState() : nil;
   NSError *innerError = nil;
-  NSString *rendered = function(ctx, &innerError);
+  NSString *rendered = nil;
+  @try {
+    rendered = function(ctx, &innerError);
+  } @finally {
+    if (ownsCompositionState) {
+      ALNEOCPopCompositionState(compositionToken);
+    }
+  }
   if (rendered == nil) {
     if (error != NULL) {
       if (innerError != nil) {
@@ -497,5 +804,87 @@ BOOL ALNEOCInclude(NSMutableString *out, id ctx, NSString *logicalPath, NSError 
     return NO;
   }
   [out appendString:rendered];
+  return YES;
+}
+
+BOOL ALNEOCIncludeWithLocals(NSMutableString *out,
+                             id ctx,
+                             NSString *logicalPath,
+                             id locals,
+                             NSString *templatePath,
+                             NSUInteger line,
+                             NSUInteger column,
+                             NSError **error) {
+  NSString *normalizedPath = ALNEOCNormalizeTemplateReference(logicalPath);
+  id effectiveContext =
+      ALNEOCContextWithLocals(ctx, locals, templatePath, line, column, error);
+  if (effectiveContext == nil && locals != nil && locals != [NSNull null]) {
+    return NO;
+  }
+  return ALNEOCInclude(out, effectiveContext, normalizedPath, error);
+}
+
+BOOL ALNEOCRenderCollection(NSMutableString *out,
+                            id ctx,
+                            NSString *logicalPath,
+                            id collection,
+                            NSString *itemLocalName,
+                            NSString *emptyLogicalPath,
+                            id locals,
+                            NSString *templatePath,
+                            NSUInteger line,
+                            NSUInteger column,
+                            NSError **error) {
+  if ([itemLocalName length] == 0) {
+    if (error != NULL) {
+      *error = ALNEOCInvalidArgumentError(
+          @"EOC collection render requires a non-empty item local name",
+          templatePath,
+          line,
+          column);
+    }
+    return NO;
+  }
+
+  if (!ALNEOCIsEnumerableCollection(collection)) {
+    if (error != NULL) {
+      *error = ALNEOCInvalidArgumentError(
+          @"EOC collection render requires an enumerable collection",
+          templatePath,
+          line,
+          column);
+    }
+    return NO;
+  }
+
+  NSString *normalizedPath = ALNEOCNormalizeTemplateReference(logicalPath);
+  NSString *normalizedEmptyPath = ALNEOCNormalizeTemplateReference(emptyLogicalPath ?: @"");
+
+  BOOL renderedAny = NO;
+  for (id item in collection ?: @[]) {
+    renderedAny = YES;
+    id overlayContext =
+        ALNEOCContextWithLocals(ctx, locals, templatePath, line, column, error);
+    if (overlayContext == nil && locals != nil && locals != [NSNull null]) {
+      return NO;
+    }
+    overlayContext = [[ALNEOCOverlayContext alloc]
+        initWithBaseContext:overlayContext
+                     locals:@{ itemLocalName : item ?: [NSNull null] }];
+    if (!ALNEOCInclude(out, overlayContext, normalizedPath, error)) {
+      return NO;
+    }
+  }
+
+  if (!renderedAny && [normalizedEmptyPath length] > 0) {
+    return ALNEOCIncludeWithLocals(out,
+                                   ctx,
+                                   normalizedEmptyPath,
+                                   locals,
+                                   templatePath,
+                                   line,
+                                   column,
+                                   error);
+  }
   return YES;
 }

@@ -295,6 +295,17 @@ for the mode-by-mode config and template layout, and
 [examples/auth_admin_demo/README.md](/home/danboyd/git/Arlen/examples/auth_admin_demo/README.md)
 for a sample app that registers an app-owned admin resource into the shared module system.
 
+Phase 18 makes the auth module reusable below the full-page level too:
+
+- server-rendered EOC apps can embed coarse auth fragments such as
+  `mfa_factor_inventory_panel`, `mfa_enrollment_panel`, and
+  `mfa_recovery_codes_panel`
+- React/native clients can build MFA UX from `/auth/api/mfa`,
+  `/auth/api/mfa/totp`, and `/auth/api/mfa/totp/verify` using explicit JSON
+  `flow`, `mfa`, and factor-inventory payloads
+- optional SMS/Twilio Verify MFA is available as a disabled-by-default factor
+  under `authModule.mfa.sms`
+
 Phase 14 adds the first-party `jobs` module with a protected `/jobs` HTML dashboard and
 `/jobs/api/...` JSON/OpenAPI surface, expands the first-party `notifications` module with
 authenticated inbox/preferences plus admin preview/outbox/test-send flows under
@@ -373,6 +384,7 @@ make test
 make test-unit
 make test-integration
 make test-data-layer
+make browser-error-audit
 make parity-phaseb
 make perf-phasec
 make perf-phased
@@ -393,6 +405,7 @@ make phase5e-confidence
 
 `make check` runs unit + integration + perf gates.
 `make test-data-layer` validates standalone `ArlenData` consumption outside the full runtime stack.
+`make browser-error-audit` runs the dedicated browser error audit bundle and writes a review gallery to `build/browser-error-audit/index.html`.
 `make parity-phaseb` runs the Arlen-vs-FastAPI Phase B parity gate and writes `build/perf/parity_fastapi_latest.json`.
 `make perf-phasec` runs the Phase C warmup/concurrency-ladder protocol and writes `build/perf/phasec/latest_protocol_report.json`.
 `make perf-phased` runs the Phase D baseline campaign (parity + comparison matrix) and writes `build/perf/phased/latest_campaign_report.json`.
@@ -466,6 +479,13 @@ cd ~/arlen-apps
 cd MyApp
 ```
 
+Full-mode scaffolds now ship with a composition-first template shell:
+
+- `templates/layouts/main.html.eoc`
+- `templates/index.html.eoc` with `<%@ layout "layouts/main" %>`
+- `templates/partials/_nav.html.eoc`
+- `templates/partials/_feature.html.eoc`
+
 Run app dev server:
 
 ```bash
@@ -488,7 +508,8 @@ curl -sS -H 'Accept: application/json' http://127.0.0.1:3000/api/dev/build-error
 ```
 
 Fixing the source and triggering a successful rebuild resumes normal responses automatically.
-Fallback diagnostics include the last failure timestamp, the recovery hint, and a JSON view at
+Fallback diagnostics include the last failure timestamp, the recovery hint, a browser HTML page that
+preserves Clang-style colorized compiler output, and a plain-text-safe JSON view at
 `/api/dev/build-error`.
 
 Lite scaffold remains available:
@@ -511,6 +532,8 @@ From app root:
 ```
 
 This scaffolds controller/action/template and auto-wires route registration.
+
+When `templates/layouts/main.html.eoc` already exists, generated HTML templates opt into it automatically with `<%@ layout "layouts/main" %>`.
 
 Run full app quality gate from app root:
 
@@ -592,14 +615,30 @@ Run targeted transpile/lint checks when templates fail to compile or behave unex
 
 - syntax failure location:
   - `eocc: location path=<path> line=<line> column=<column>`
+- static composition validation failures stop transpilation before code generation:
+  - unknown static `layout` / `include` / `render` dependencies
+  - static composition cycles
 - lint warning shape:
   - `eocc: warning path=<path> line=<line> column=<column> code=<code> message=<message>`
 
-Current lint rule:
+Composition directives:
+
+- `<%@ layout "layouts/application" %>`
+- `<%@ requires title, rows %>`
+- `<%@ yield %>` / `<%@ yield "sidebar" %>`
+- `<%@ slot "sidebar" %>` ... `<%@ endslot %>`
+- `<%@ include "partials/_summary" with @{ @"title" : $title } %>`
+- `<%@ render "partials/_row" collection:$rows as:"row" empty:"partials/_empty" with @{ @"title" : $title } %>`
+
+Current lint rules:
 
 - `unguarded_include`
   - update include calls to guard return values:
     - `if (!ALNEOCInclude(out, ctx, @\"partials/_nav.html.eoc\", error)) { return nil; }`
+- `slot_without_layout`
+  - add a static `<%@ layout "..." %>` directive or remove the slot fill
+- `unused_slot_fill`
+  - add a matching `<%@ yield "slot_name" %>` in the selected layout or remove the slot fill
 
 Sigil locals support both root and dotted keypath forms:
 
@@ -903,6 +942,8 @@ Scaffold and generator workflows can emit machine-readable payloads:
 /path/to/Arlen/bin/arlen new AgentApp --full --json
 /path/to/Arlen/bin/arlen generate endpoint Health --route /healthz --json
 ```
+
+The scaffold payload now includes the default layout/partial files, and generated HTML endpoints inherit the app shell when `templates/layouts/main.html.eoc` is present.
 
 Build/check planning workflows:
 

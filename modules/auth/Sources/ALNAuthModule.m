@@ -20,6 +20,7 @@ NSString *const ALNAuthModuleErrorDomain = @"Arlen.Modules.Auth.Error";
 static NSString *const ALNAuthModuleProviderStateSessionKey = @"aln.auth_module.stub_provider_state";
 static NSString *const ALNAuthModuleVerificationNoticeSessionKey = @"aln.auth_module.notice.verify";
 static NSString *const ALNAuthModuleResetNoticeSessionKey = @"aln.auth_module.notice.reset";
+static NSString *const ALNAuthModuleSMSStateSessionKey = @"aln.auth_module.sms_state";
 
 static NSString *AMTrimmedString(id value) {
   if (![value isKindOfClass:[NSString class]]) {
@@ -185,6 +186,96 @@ static BOOL AMConfigBool(id value, BOOL fallbackValue) {
   return fallbackValue;
 }
 
+static NSUInteger AMConfigUnsignedInteger(id value, NSUInteger fallbackValue) {
+  if ([value respondsToSelector:@selector(unsignedIntegerValue)]) {
+    NSUInteger converted = [value unsignedIntegerValue];
+    return (converted > 0U) ? converted : fallbackValue;
+  }
+  return fallbackValue;
+}
+
+static NSString *AMNormalizePhoneNumber(id value) {
+  NSString *raw = AMTrimmedString(value);
+  if ([raw length] == 0) {
+    return @"";
+  }
+  NSMutableString *digits = [NSMutableString string];
+  for (NSUInteger index = 0; index < [raw length]; index++) {
+    unichar c = [raw characterAtIndex:index];
+    if ([[NSCharacterSet decimalDigitCharacterSet] characterIsMember:c]) {
+      [digits appendFormat:@"%C", c];
+    }
+  }
+  if ([digits length] < 8 || [digits length] > 15) {
+    return @"";
+  }
+  return [@"+" stringByAppendingString:digits];
+}
+
+static NSString *AMMaskedPhoneNumber(id value) {
+  NSString *phone = AMNormalizePhoneNumber(value);
+  if ([phone length] == 0) {
+    return @"";
+  }
+  NSString *digits = [phone substringFromIndex:1];
+  if ([digits length] <= 4) {
+    return phone;
+  }
+  NSString *suffix = [digits substringFromIndex:([digits length] - 4)];
+  NSMutableString *masked = [NSMutableString stringWithString:@"+"];
+  NSUInteger visiblePrefixLength = ([digits length] > 10) ? ([digits length] - 10) : 1U;
+  [masked appendString:[digits substringToIndex:visiblePrefixLength]];
+  [masked appendString:@" "];
+  NSUInteger hiddenDigits = [digits length] - visiblePrefixLength - 4U;
+  for (NSUInteger index = 0; index < hiddenDigits; index++) {
+    [masked appendString:@"•"];
+    if ((index + 1U) % 3U == 0U && index + 1U < hiddenDigits) {
+      [masked appendString:@" "];
+    }
+  }
+  [masked appendFormat:@" %@", suffix];
+  return masked;
+}
+
+static NSString *AMFormURLEncodedString(NSDictionary *parameters) {
+  NSDictionary *source = [parameters isKindOfClass:[NSDictionary class]] ? parameters : @{};
+  NSMutableArray<NSString *> *pairs = [NSMutableArray array];
+  NSCharacterSet *allowed = [[NSCharacterSet characterSetWithCharactersInString:@"-._~"] invertedSet];
+  for (id rawKey in [[source allKeys] sortedArrayUsingSelector:@selector(compare:)]) {
+    NSString *key = AMTrimmedString(rawKey);
+    NSString *value = AMTrimmedString(source[rawKey]);
+    if ([key length] == 0) {
+      continue;
+    }
+    NSString *encodedKey = [key stringByAddingPercentEncodingWithAllowedCharacters:[allowed invertedSet]] ?: @"";
+    NSString *encodedValue = [(value ?: @"") stringByAddingPercentEncodingWithAllowedCharacters:[allowed invertedSet]] ?: @"";
+    [pairs addObject:[NSString stringWithFormat:@"%@=%@", encodedKey, encodedValue]];
+  }
+  return [pairs componentsJoinedByString:@"&"];
+}
+
+static NSDictionary *AMSMSSessionState(ALNContext *context) {
+  if (context == nil) {
+    return @{};
+  }
+  NSDictionary *state = [context.session[ALNAuthModuleSMSStateSessionKey] isKindOfClass:[NSDictionary class]]
+                            ? context.session[ALNAuthModuleSMSStateSessionKey]
+                            : @{};
+  return state ?: @{};
+}
+
+static void AMSetSMSSessionState(ALNContext *context, NSDictionary *state) {
+  if (context == nil) {
+    return;
+  }
+  if ([state isKindOfClass:[NSDictionary class]] && [state count] > 0) {
+    context.session[ALNAuthModuleSMSStateSessionKey] = state;
+  } else {
+    [context.session removeObjectForKey:ALNAuthModuleSMSStateSessionKey];
+  }
+  [context markSessionDirty];
+}
+
 static NSString *AMNormalizedTemplateIdentifier(id value) {
   NSString *raw = AMTrimmedString(value);
   if ([raw length] == 0) {
@@ -250,11 +341,17 @@ static NSString *AMModulePageTemplatePathForIdentifier(NSString *pageIdentifier)
   if ([normalized isEqualToString:@"reset_password"]) {
     return @"modules/auth/password/reset";
   }
+  if ([normalized isEqualToString:@"mfa_manage"]) {
+    return @"modules/auth/mfa/manage";
+  }
   if ([normalized isEqualToString:@"totp_enrollment"]) {
     return @"modules/auth/mfa/totp_enrollment";
   }
   if ([normalized isEqualToString:@"totp_challenge"]) {
     return @"modules/auth/mfa/totp";
+  }
+  if ([normalized isEqualToString:@"sms_challenge"]) {
+    return @"modules/auth/mfa/sms";
   }
   if ([normalized isEqualToString:@"totp_recovery_codes"]) {
     return @"modules/auth/mfa/totp_recovery_codes";
@@ -277,11 +374,17 @@ static NSString *AMGeneratedPageTemplatePath(NSString *prefix, NSString *pageIde
   if ([normalized isEqualToString:@"reset_password"]) {
     return [NSString stringWithFormat:@"%@/password/reset", normalizedPrefix];
   }
+  if ([normalized isEqualToString:@"mfa_manage"]) {
+    return [NSString stringWithFormat:@"%@/mfa/manage", normalizedPrefix];
+  }
   if ([normalized isEqualToString:@"totp_enrollment"]) {
     return [NSString stringWithFormat:@"%@/mfa/totp_enrollment", normalizedPrefix];
   }
   if ([normalized isEqualToString:@"totp_challenge"]) {
     return [NSString stringWithFormat:@"%@/mfa/totp", normalizedPrefix];
+  }
+  if ([normalized isEqualToString:@"sms_challenge"]) {
+    return [NSString stringWithFormat:@"%@/mfa/sms", normalizedPrefix];
   }
   if ([normalized isEqualToString:@"totp_recovery_codes"]) {
     return [NSString stringWithFormat:@"%@/mfa/totp_recovery_codes", normalizedPrefix];
@@ -303,11 +406,17 @@ static NSString *AMModuleBodyTemplatePathForIdentifier(NSString *pageIdentifier)
   if ([normalized isEqualToString:@"reset_password"]) {
     return @"modules/auth/partials/bodies/reset_password_body";
   }
+  if ([normalized isEqualToString:@"mfa_manage"]) {
+    return @"modules/auth/partials/bodies/mfa_manage_body";
+  }
   if ([normalized isEqualToString:@"totp_enrollment"]) {
     return @"modules/auth/partials/bodies/totp_enrollment_body";
   }
   if ([normalized isEqualToString:@"totp_challenge"]) {
     return @"modules/auth/partials/bodies/totp_challenge_body";
+  }
+  if ([normalized isEqualToString:@"sms_challenge"]) {
+    return @"modules/auth/partials/bodies/sms_challenge_body";
   }
   if ([normalized isEqualToString:@"totp_recovery_codes"]) {
     return @"modules/auth/partials/bodies/totp_recovery_codes_body";
@@ -322,10 +431,14 @@ static NSString *AMGeneratedBodyTemplatePath(NSString *prefix, NSString *pageIde
                                         ? @"forgot_password_body"
                                         : [AMNormalizedTemplateIdentifier(pageIdentifier) isEqualToString:@"reset_password"]
                                               ? @"reset_password_body"
+                                              : [AMNormalizedTemplateIdentifier(pageIdentifier) isEqualToString:@"mfa_manage"]
+                                                    ? @"mfa_manage_body"
                                               : [AMNormalizedTemplateIdentifier(pageIdentifier) isEqualToString:@"totp_enrollment"]
                                                     ? @"totp_enrollment_body"
                                               : [AMNormalizedTemplateIdentifier(pageIdentifier) isEqualToString:@"totp_challenge"]
                                                     ? @"totp_challenge_body"
+                                              : [AMNormalizedTemplateIdentifier(pageIdentifier) isEqualToString:@"sms_challenge"]
+                                                    ? @"sms_challenge_body"
                                               : [AMNormalizedTemplateIdentifier(pageIdentifier) isEqualToString:@"totp_recovery_codes"]
                                                     ? @"totp_recovery_codes_body"
                                                     : [AMNormalizedTemplateIdentifier(pageIdentifier) isEqualToString:@"result"] ? @"result_body"
@@ -420,6 +533,27 @@ static NSString *AMStubHS256JWT(NSDictionary *claims, NSString *sharedSecret) {
   return [NSString stringWithFormat:@"%@.%@.%@", headerPart, payloadPart, signaturePart];
 }
 
+@interface ALNAuthModuleTwilioVerifyClient : NSObject
+
+@property(nonatomic, copy) NSString *accountSID;
+@property(nonatomic, copy) NSString *authToken;
+@property(nonatomic, copy) NSString *apiKeySID;
+@property(nonatomic, copy) NSString *apiKeySecret;
+@property(nonatomic, copy) NSString *verifyServiceSID;
+@property(nonatomic, copy) NSString *defaultLocale;
+@property(nonatomic, copy) NSString *testVerificationCode;
+
+- (BOOL)isConfigured;
+- (BOOL)sendVerificationToPhoneNumber:(NSString *)phoneNumber
+                               locale:(nullable NSString *)locale
+                                error:(NSError **)error;
+- (BOOL)checkVerificationCode:(NSString *)code
+                  phoneNumber:(NSString *)phoneNumber
+                     approved:(BOOL *)approved
+                        error:(NSError **)error;
+
+@end
+
 @interface ALNAuthModuleRuntime ()
 
 @property(nonatomic, strong) ALNPg *database;
@@ -435,8 +569,14 @@ static NSString *AMStubHS256JWT(NSDictionary *claims, NSString *sharedSecret) {
 @property(nonatomic, copy, readwrite) NSString *forgotPasswordPath;
 @property(nonatomic, copy, readwrite) NSString *resetPasswordPath;
 @property(nonatomic, copy, readwrite) NSString *changePasswordPath;
+@property(nonatomic, copy, readwrite) NSString *mfaManagePath;
 @property(nonatomic, copy, readwrite) NSString *totpPath;
 @property(nonatomic, copy, readwrite) NSString *totpVerifyPath;
+@property(nonatomic, copy, readwrite) NSString *smsPath;
+@property(nonatomic, copy, readwrite) NSString *smsStartPath;
+@property(nonatomic, copy, readwrite) NSString *smsVerifyPath;
+@property(nonatomic, copy, readwrite) NSString *smsResendPath;
+@property(nonatomic, copy, readwrite) NSString *smsRemovePath;
 @property(nonatomic, copy, readwrite) NSString *providerStubLoginPath;
 @property(nonatomic, copy, readwrite) NSString *providerStubAuthorizePath;
 @property(nonatomic, copy, readwrite) NSString *providerStubCallbackPath;
@@ -445,6 +585,17 @@ static NSString *AMStubHS256JWT(NSDictionary *claims, NSString *sharedSecret) {
 @property(nonatomic, copy, readwrite) NSString *uiMode;
 @property(nonatomic, copy, readwrite) NSString *layoutTemplate;
 @property(nonatomic, copy, readwrite) NSString *generatedPagePrefix;
+@property(nonatomic, assign, readwrite) BOOL smsEnabled;
+@property(nonatomic, assign) BOOL smsAllowEnrollment;
+@property(nonatomic, assign) BOOL smsAllowChallenge;
+@property(nonatomic, assign) BOOL smsAllowPrimaryFactor;
+@property(nonatomic, assign) BOOL smsPhoneManagementRequiresMFA;
+@property(nonatomic, assign) NSUInteger smsRecentMFAMaxAgeSeconds;
+@property(nonatomic, assign) NSUInteger smsResendCooldownSeconds;
+@property(nonatomic, assign) NSUInteger smsMaxSendAttemptsPerSession;
+@property(nonatomic, assign) NSUInteger smsMaxVerifyAttemptsPerSession;
+@property(nonatomic, copy) NSString *smsLocale;
+@property(nonatomic, strong) ALNAuthModuleTwilioVerifyClient *smsVerifyClient;
 @property(nonatomic, copy) NSDictionary *partialTemplateOverrides;
 @property(nonatomic, copy) NSString *stubProviderEmail;
 @property(nonatomic, copy) NSString *stubProviderDisplayName;
@@ -512,11 +663,38 @@ static NSString *AMStubHS256JWT(NSDictionary *claims, NSString *sharedSecret) {
                             error:(NSError **)error;
 - (nullable NSDictionary *)totpEnrollmentForUserID:(NSString *)userID
                                              error:(NSError **)error;
+- (nullable NSDictionary *)smsEnrollmentForUserID:(NSString *)userID
+                                            error:(NSError **)error;
 - (nullable NSDictionary *)totpProvisioningPayloadForUser:(NSDictionary *)user
                                                     error:(NSError **)error;
 - (nullable NSDictionary *)totpFragmentContextForUser:(NSDictionary *)user
                                              returnTo:(NSString *)returnTo
                                                 error:(NSError **)error;
+- (NSDictionary *)mfaFactorStateForUser:(NSDictionary *)user
+                                context:(ALNContext *)context
+                               returnTo:(NSString *)returnTo
+                                  error:(NSError **)error;
+- (nullable NSDictionary *)mfaManagementFragmentContextForUser:(NSDictionary *)user
+                                                       context:(ALNContext *)context
+                                                      returnTo:(NSString *)returnTo
+                                                         error:(NSError **)error;
+- (nullable NSDictionary *)smsChallengeFragmentContextForUser:(NSDictionary *)user
+                                                      context:(ALNContext *)context
+                                                     returnTo:(NSString *)returnTo
+                                                     autoSend:(BOOL)autoSend
+                                                        error:(NSError **)error;
+- (nullable NSDictionary *)issueSMSVerificationForUser:(NSDictionary *)user
+                                                 phone:(nullable NSString *)phoneNumber
+                                               purpose:(NSString *)purpose
+                                               context:(ALNContext *)context
+                                                 error:(NSError **)error;
+- (nullable NSDictionary *)verifySMSCode:(NSString *)code
+                                     user:(NSDictionary *)user
+                                  context:(ALNContext *)context
+                                    error:(NSError **)error;
+- (BOOL)removeSMSEnrollmentForUser:(NSDictionary *)user
+                           context:(ALNContext *)context
+                             error:(NSError **)error;
 - (nullable NSDictionary *)verifyTOTPCode:(NSString *)code
                                       user:(NSDictionary *)user
                                    context:(ALNContext *)context
@@ -558,6 +736,147 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
   return [[klass alloc] init];
 }
 
+@implementation ALNAuthModuleTwilioVerifyClient
+
+- (BOOL)isConfigured {
+  if ([AMTrimmedString(self.testVerificationCode) length] > 0) {
+    return YES;
+  }
+  if ([AMTrimmedString(self.verifyServiceSID) length] == 0) {
+    return NO;
+  }
+  BOOL hasAccountCredentials = ([AMTrimmedString(self.accountSID) length] > 0 && [AMTrimmedString(self.authToken) length] > 0);
+  BOOL hasAPIKeyCredentials = ([AMTrimmedString(self.apiKeySID) length] > 0 && [AMTrimmedString(self.apiKeySecret) length] > 0);
+  return (hasAccountCredentials || hasAPIKeyCredentials);
+}
+
+- (NSDictionary *)performRequestWithPath:(NSString *)path
+                              parameters:(NSDictionary *)parameters
+                                   error:(NSError **)error {
+  if ([AMTrimmedString(self.testVerificationCode) length] > 0) {
+    return @{ @"status" : @"pending", @"sid" : @"VE_TEST" };
+  }
+  NSString *serviceSID = AMTrimmedString(self.verifyServiceSID);
+  NSString *endpoint = [NSString stringWithFormat:@"https://verify.twilio.com/v2/Services/%@/%@",
+                                                  serviceSID ?: @"",
+                                                  AMTrimmedString(path) ?: @""];
+  NSURL *url = [NSURL URLWithString:endpoint];
+  if (url == nil) {
+    if (error != NULL) {
+      *error = AMError(ALNAuthModuleErrorInvalidConfiguration, @"Twilio Verify endpoint is invalid", nil);
+    }
+    return nil;
+  }
+  NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:url];
+  [request setHTTPMethod:@"POST"];
+  [request setValue:@"application/x-www-form-urlencoded" forHTTPHeaderField:@"Content-Type"];
+  [request setValue:@"application/json" forHTTPHeaderField:@"Accept"];
+  NSString *username = [AMTrimmedString(self.apiKeySID) length] > 0 ? AMTrimmedString(self.apiKeySID) : AMTrimmedString(self.accountSID);
+  NSString *password = [AMTrimmedString(self.apiKeySecret) length] > 0 ? AMTrimmedString(self.apiKeySecret) : AMTrimmedString(self.authToken);
+  NSString *credentials = [NSString stringWithFormat:@"%@:%@", username ?: @"", password ?: @""];
+  NSData *credentialsData = [credentials dataUsingEncoding:NSUTF8StringEncoding];
+  NSString *base64 = [credentialsData base64EncodedStringWithOptions:0] ?: @"";
+  [request setValue:[NSString stringWithFormat:@"Basic %@", base64] forHTTPHeaderField:@"Authorization"];
+  NSString *bodyText = AMFormURLEncodedString(parameters);
+  [request setHTTPBody:[bodyText dataUsingEncoding:NSUTF8StringEncoding]];
+
+  NSHTTPURLResponse *response = nil;
+  NSError *requestError = nil;
+  NSData *bodyData = [NSURLConnection sendSynchronousRequest:request returningResponse:&response error:&requestError];
+  if (bodyData == nil) {
+    if (error != NULL) {
+      *error = requestError ?: AMError(ALNAuthModuleErrorPolicyRejected, @"Twilio Verify request failed", nil);
+    }
+    return nil;
+  }
+  NSDictionary *json = [NSJSONSerialization JSONObjectWithData:bodyData options:0 error:NULL];
+  NSInteger statusCode = response.statusCode;
+  if (statusCode < 200 || statusCode >= 300) {
+    NSString *message = AMTrimmedString(json[@"message"]);
+    if ([message length] == 0) {
+      message = @"Twilio Verify rejected the request";
+    }
+    if (error != NULL) {
+      *error = AMError(ALNAuthModuleErrorPolicyRejected, message, @{
+        @"status_code" : @(statusCode),
+        @"provider" : @"twilio_verify",
+      });
+    }
+    return nil;
+  }
+  return [json isKindOfClass:[NSDictionary class]] ? json : @{};
+}
+
+- (BOOL)sendVerificationToPhoneNumber:(NSString *)phoneNumber
+                               locale:(NSString *)locale
+                                error:(NSError **)error {
+  if (![self isConfigured]) {
+    if (error != NULL) {
+      *error = AMError(ALNAuthModuleErrorInvalidConfiguration, @"SMS MFA is not configured", nil);
+    }
+    return NO;
+  }
+  if ([AMTrimmedString(self.testVerificationCode) length] > 0) {
+    return YES;
+  }
+  NSMutableDictionary *parameters = [NSMutableDictionary dictionaryWithDictionary:@{
+    @"To" : AMNormalizePhoneNumber(phoneNumber) ?: @"",
+    @"Channel" : @"sms",
+  }];
+  NSString *resolvedLocale = [AMTrimmedString(locale) length] > 0 ? AMTrimmedString(locale) : AMTrimmedString(self.defaultLocale);
+  if ([resolvedLocale length] > 0) {
+    parameters[@"Locale"] = resolvedLocale;
+  }
+  NSDictionary *response = [self performRequestWithPath:@"Verifications" parameters:parameters error:error];
+  return (response != nil);
+}
+
+- (BOOL)checkVerificationCode:(NSString *)code
+                  phoneNumber:(NSString *)phoneNumber
+                     approved:(BOOL *)approved
+                        error:(NSError **)error {
+  if (approved != NULL) {
+    *approved = NO;
+  }
+  if (![self isConfigured]) {
+    if (error != NULL) {
+      *error = AMError(ALNAuthModuleErrorInvalidConfiguration, @"SMS MFA is not configured", nil);
+    }
+    return NO;
+  }
+  NSString *normalizedCode = AMTrimmedString(code);
+  if ([AMTrimmedString(self.testVerificationCode) length] > 0) {
+    BOOL ok = [normalizedCode isEqualToString:AMTrimmedString(self.testVerificationCode)];
+    if (approved != NULL) {
+      *approved = ok;
+    }
+    if (!ok && error != NULL) {
+      *error = AMError(ALNAuthModuleErrorAuthenticationFailed, @"The verification code is invalid", nil);
+    }
+    return ok;
+  }
+  NSDictionary *response = [self performRequestWithPath:@"VerificationCheck"
+                                             parameters:@{
+                                               @"To" : AMNormalizePhoneNumber(phoneNumber) ?: @"",
+                                               @"Code" : normalizedCode ?: @"",
+                                             }
+                                                  error:error];
+  if (response == nil) {
+    return NO;
+  }
+  BOOL ok = [AMLowerTrimmedString(response[@"status"]) isEqualToString:@"approved"] ||
+            [AMLowerTrimmedString(response[@"valid"]) isEqualToString:@"true"];
+  if (approved != NULL) {
+    *approved = ok;
+  }
+  if (!ok && error != NULL) {
+    *error = AMError(ALNAuthModuleErrorAuthenticationFailed, @"The verification code is invalid", nil);
+  }
+  return ok;
+}
+
+@end
+
 @implementation ALNAuthModuleRuntime
 
 + (instancetype)sharedRuntime {
@@ -584,8 +903,14 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
     _forgotPasswordPath = @"/auth/password/forgot";
     _resetPasswordPath = @"/auth/password/reset";
     _changePasswordPath = @"/auth/password/change";
+    _mfaManagePath = @"/auth/mfa";
     _totpPath = @"/auth/mfa/totp";
     _totpVerifyPath = @"/auth/mfa/totp/verify";
+    _smsPath = @"/auth/mfa/sms";
+    _smsStartPath = @"/auth/mfa/sms/start";
+    _smsVerifyPath = @"/auth/mfa/sms/verify";
+    _smsResendPath = @"/auth/mfa/sms/resend";
+    _smsRemovePath = @"/auth/mfa/sms/remove";
     _providerStubLoginPath = @"/auth/provider/stub/login";
     _providerStubAuthorizePath = @"/auth/provider/stub/authorize";
     _providerStubCallbackPath = @"/auth/provider/stub/callback";
@@ -600,6 +925,17 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
     _uiMode = @"module-ui";
     _layoutTemplate = @"modules/auth/layouts/main";
     _generatedPagePrefix = @"auth";
+    _smsEnabled = NO;
+    _smsAllowEnrollment = YES;
+    _smsAllowChallenge = YES;
+    _smsAllowPrimaryFactor = NO;
+    _smsPhoneManagementRequiresMFA = YES;
+    _smsRecentMFAMaxAgeSeconds = 900U;
+    _smsResendCooldownSeconds = 30U;
+    _smsMaxSendAttemptsPerSession = 5U;
+    _smsMaxVerifyAttemptsPerSession = 8U;
+    _smsLocale = @"";
+    _smsVerifyClient = [[ALNAuthModuleTwilioVerifyClient alloc] init];
     _partialTemplateOverrides = @{};
     _stubProviderEmail = @"stub-user@example.test";
     _stubProviderDisplayName = @"Stub Provider User";
@@ -623,8 +959,14 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
   self.forgotPasswordPath = AMConfiguredPath(self.moduleConfig, @"forgotPassword", @"password/forgot");
   self.resetPasswordPath = AMConfiguredPath(self.moduleConfig, @"resetPassword", @"password/reset");
   self.changePasswordPath = AMConfiguredPath(self.moduleConfig, @"changePassword", @"password/change");
+  self.mfaManagePath = AMConfiguredPath(self.moduleConfig, @"mfa", @"mfa");
   self.totpPath = AMConfiguredPath(self.moduleConfig, @"totp", @"mfa/totp");
   self.totpVerifyPath = AMConfiguredPath(self.moduleConfig, @"totpVerify", @"mfa/totp/verify");
+  self.smsPath = AMConfiguredPath(self.moduleConfig, @"sms", @"mfa/sms");
+  self.smsStartPath = AMConfiguredPath(self.moduleConfig, @"smsStart", @"mfa/sms/start");
+  self.smsVerifyPath = AMConfiguredPath(self.moduleConfig, @"smsVerify", @"mfa/sms/verify");
+  self.smsResendPath = AMConfiguredPath(self.moduleConfig, @"smsResend", @"mfa/sms/resend");
+  self.smsRemovePath = AMConfiguredPath(self.moduleConfig, @"smsRemove", @"mfa/sms/remove");
   self.providerStubLoginPath = AMConfiguredPath(self.moduleConfig, @"providerStubLogin", @"provider/stub/login");
   self.providerStubAuthorizePath =
       AMConfiguredPath(self.moduleConfig, @"providerStubAuthorize", @"provider/stub/authorize");
@@ -644,6 +986,34 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
   self.layoutTemplate = ([layoutTemplate length] > 0) ? layoutTemplate : @"modules/auth/layouts/main";
   self.generatedPagePrefix = AMNormalizedTemplatePrefix(uiConfig[@"generatedPagePrefix"]);
   self.partialTemplateOverrides = AMNormalizedTemplateOverrideMap(uiConfig[@"partials"]);
+
+  NSDictionary *mfaConfig = [self.moduleConfig[@"mfa"] isKindOfClass:[NSDictionary class]] ? self.moduleConfig[@"mfa"] : @{};
+  NSDictionary *smsConfig = [mfaConfig[@"sms"] isKindOfClass:[NSDictionary class]] ? mfaConfig[@"sms"] : @{};
+  self.smsEnabled = AMConfigBool(smsConfig[@"enabled"], NO);
+  self.smsAllowEnrollment = AMConfigBool(smsConfig[@"allowEnrollment"], YES);
+  self.smsAllowChallenge = AMConfigBool(smsConfig[@"allowChallenge"], YES);
+  self.smsAllowPrimaryFactor = AMConfigBool(smsConfig[@"allowPrimaryFactor"], NO);
+  self.smsPhoneManagementRequiresMFA = AMConfigBool(smsConfig[@"phoneManagementRequiresMFA"], YES);
+  self.smsRecentMFAMaxAgeSeconds = AMConfigUnsignedInteger(smsConfig[@"recentMFAMaxAgeSeconds"], 900U);
+  self.smsResendCooldownSeconds = AMConfigUnsignedInteger(smsConfig[@"resendCooldownSeconds"], 30U);
+  self.smsMaxSendAttemptsPerSession = AMConfigUnsignedInteger(smsConfig[@"maxSendAttemptsPerSession"], 5U);
+  self.smsMaxVerifyAttemptsPerSession = AMConfigUnsignedInteger(smsConfig[@"maxVerifyAttemptsPerSession"], 8U);
+  self.smsLocale = AMTrimmedString(smsConfig[@"locale"]) ?: @"";
+  self.smsVerifyClient.accountSID = AMTrimmedString(smsConfig[@"accountSID"]) ?: @"";
+  self.smsVerifyClient.authToken = AMTrimmedString(smsConfig[@"authToken"]) ?: @"";
+  self.smsVerifyClient.apiKeySID = AMTrimmedString(smsConfig[@"apiKeySID"]) ?: @"";
+  self.smsVerifyClient.apiKeySecret = AMTrimmedString(smsConfig[@"apiKeySecret"]) ?: @"";
+  self.smsVerifyClient.verifyServiceSID = AMTrimmedString(smsConfig[@"verifyServiceSID"]) ?: @"";
+  self.smsVerifyClient.defaultLocale = self.smsLocale ?: @"";
+  self.smsVerifyClient.testVerificationCode = AMTrimmedString(smsConfig[@"testVerificationCode"]) ?: @"";
+  if (self.smsEnabled && ![self.smsVerifyClient isConfigured]) {
+    if (error != NULL) {
+      *error = AMError(ALNAuthModuleErrorInvalidConfiguration,
+                       @"SMS MFA requires Twilio Verify credentials or authModule.mfa.sms.testVerificationCode",
+                       @{ @"key_path" : @"authModule.mfa.sms" });
+    }
+    return NO;
+  }
 
   NSDictionary *providers = [self.moduleConfig[@"providers"] isKindOfClass:[NSDictionary class]]
                                 ? self.moduleConfig[@"providers"]
@@ -768,6 +1138,20 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
     @"generatedPagePrefix" : self.generatedPagePrefix ?: @"auth",
     @"partials" : self.partialTemplateOverrides ?: @{},
     @"contextHook" : self.uiContextHook ? NSStringFromClass([self.uiContextHook class]) : @"",
+  };
+  summary[@"mfa"] = @{
+    @"sms" : @{
+      @"enabled" : @(self.smsEnabled),
+      @"allowEnrollment" : @(self.smsAllowEnrollment),
+      @"allowChallenge" : @(self.smsAllowChallenge),
+      @"allowPrimaryFactor" : @(self.smsAllowPrimaryFactor),
+      @"phoneManagementRequiresMFA" : @(self.smsPhoneManagementRequiresMFA),
+      @"recentMFAMaxAgeSeconds" : @(self.smsRecentMFAMaxAgeSeconds),
+      @"resendCooldownSeconds" : @(self.smsResendCooldownSeconds),
+      @"maxSendAttemptsPerSession" : @(self.smsMaxSendAttemptsPerSession),
+      @"maxVerifyAttemptsPerSession" : @(self.smsMaxVerifyAttemptsPerSession),
+      @"locale" : self.smsLocale ?: @"",
+    },
   };
   return summary;
 }
@@ -1548,6 +1932,29 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
   };
 }
 
+- (NSDictionary *)smsEnrollmentForUserID:(NSString *)userID
+                                   error:(NSError **)error {
+  NSArray *rows = [self.database executeQuery:@"SELECT id::text AS id, secret AS phone_number, "
+                                         "CASE WHEN verified_at IS NULL THEN '' ELSE verified_at::text END AS verified_at, "
+                                         "CASE WHEN enabled THEN 't' ELSE 'f' END AS enabled "
+                                         "FROM auth_mfa_enrollments WHERE user_id = $1 AND type = 'sms' "
+                                         "ORDER BY id DESC LIMIT 1"
+                                   parameters:@[ userID ?: @"" ]
+                                        error:error];
+  NSDictionary *row = [rows firstObject];
+  if (row == nil) {
+    return nil;
+  }
+  NSString *phoneNumber = AMNormalizePhoneNumber(row[@"phone_number"]);
+  return @{
+    @"id" : AMTrimmedString(row[@"id"]),
+    @"phone_number" : phoneNumber ?: @"",
+    @"masked_phone" : AMMaskedPhoneNumber(phoneNumber),
+    @"verified_at" : AMTrimmedString(row[@"verified_at"]),
+    @"enabled" : @(AMBoolFromDatabaseValue(row[@"enabled"])),
+  };
+}
+
 - (NSDictionary *)totpProvisioningPayloadForUser:(NSDictionary *)user
                                            error:(NSError **)error {
   NSString *userID = AMTrimmedString(user[@"id"]);
@@ -1602,6 +2009,17 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
   }
   BOOL verified = [provisioning[@"verified"] boolValue];
   NSString *normalizedReturnTo = AMTrimmedString(returnTo);
+  NSDictionary *smsEnrollment = [self smsEnrollmentForUserID:AMTrimmedString(user[@"id"]) error:NULL] ?: @{};
+  BOOL smsChallengeAvailable = self.smsEnabled && self.smsAllowChallenge &&
+                               ([AMTrimmedString(smsEnrollment[@"phone_number"]) length] > 0) &&
+                               ([AMTrimmedString(smsEnrollment[@"verified_at"]) length] > 0 || [smsEnrollment[@"enabled"] boolValue]);
+  NSMutableArray *links = [NSMutableArray array];
+  if (smsChallengeAvailable) {
+    [links addObject:@{
+      @"label" : @"Use SMS instead",
+      @"href" : [NSString stringWithFormat:@"%@?return_to=%@", self.smsPath ?: @"/auth/mfa/sms", normalizedReturnTo ?: @""],
+    }];
+  }
   return @{
     @"authMFAFactor" : @"totp",
     @"authMFAFlowState" : verified ? @"challenge" : @"enrollment",
@@ -1618,6 +2036,7 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
         @"name" : @"return_to",
         @"value" : normalizedReturnTo ?: @"",
       } ],
+      @"links" : links,
       @"fields" : @[
         @{
           @"name" : @"code",
@@ -1749,6 +2168,531 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
     return nil;
   }
   return [self totpFragmentContextForUser:user returnTo:returnTo error:error];
+}
+
+- (NSDictionary *)mfaFactorStateForUser:(NSDictionary *)user
+                                context:(ALNContext *)context
+                               returnTo:(NSString *)returnTo
+                                  error:(NSError **)error {
+  NSString *userID = AMTrimmedString(user[@"id"]);
+  NSDictionary *totpProvisioning = [self totpProvisioningPayloadForUser:user error:NULL] ?: @{};
+  BOOL totpVerified = [totpProvisioning[@"verified"] boolValue];
+  BOOL totpEnrolled = [totpProvisioning[@"enrolled"] boolValue];
+
+  NSDictionary *smsEnrollment = [self smsEnrollmentForUserID:userID error:error] ?: @{};
+  NSString *smsPhone = AMNormalizePhoneNumber(smsEnrollment[@"phone_number"]);
+  BOOL smsEnrolled = ([smsPhone length] > 0);
+  BOOL smsVerified = ([AMTrimmedString(smsEnrollment[@"verified_at"]) length] > 0 || [smsEnrollment[@"enabled"] boolValue]);
+
+  NSDictionary *smsSession = AMSMSSessionState(context);
+  NSString *pendingPurpose = AMLowerTrimmedString(smsSession[@"purpose"]);
+  NSString *pendingPhone = AMNormalizePhoneNumber(smsSession[@"phone"]);
+  NSString *maskedPendingPhone = AMMaskedPhoneNumber(pendingPhone);
+  BOOL pendingEnrollment = ([pendingPhone length] > 0 && [pendingPurpose isEqualToString:@"enrollment"]);
+  BOOL pendingChallenge = ([pendingPhone length] > 0 && [pendingPurpose isEqualToString:@"challenge"]);
+  BOOL recentMFA = [ALNAuthSession context:context
+             satisfiesMinimumAssuranceLevel:2
+           maximumAuthenticationAgeSeconds:self.smsRecentMFAMaxAgeSeconds
+                              referenceDate:nil];
+
+  BOOL canManageSMS = NO;
+  NSString *smsManagementGuardMessage = @"";
+  if (self.smsEnabled && self.smsAllowEnrollment) {
+    if (!self.smsPhoneManagementRequiresMFA || recentMFA) {
+      canManageSMS = YES;
+    } else if (!totpVerified && !smsVerified && self.smsAllowPrimaryFactor) {
+      canManageSMS = YES;
+    } else {
+      smsManagementGuardMessage = @"Verify an existing MFA factor before adding, changing, or removing a phone number.";
+    }
+  }
+
+  BOOL smsChallengeAvailable = (self.smsEnabled && self.smsAllowChallenge && smsVerified);
+  NSString *preferredFactor = totpVerified ? @"totp" : (smsChallengeAvailable ? @"sms" : @"totp");
+  NSMutableArray *availableChallengeFactors = [NSMutableArray array];
+  if (totpVerified) {
+    [availableChallengeFactors addObject:@"totp"];
+  }
+  if (smsChallengeAvailable) {
+    [availableChallengeFactors addObject:@"sms"];
+  }
+
+  NSString *normalizedReturnTo = AMTrimmedString(returnTo);
+  NSString *smsFallbackHref = [NSString stringWithFormat:@"%@?return_to=%@",
+                                                         self.smsPath ?: @"/auth/mfa/sms",
+                                                         normalizedReturnTo ?: @""];
+  NSString *totpFallbackHref = [NSString stringWithFormat:@"%@?return_to=%@",
+                                                          self.totpPath ?: @"/auth/mfa/totp",
+                                                          normalizedReturnTo ?: @""];
+
+  NSDictionary *totpFactor = @{
+    @"identifier" : @"totp",
+    @"label" : @"Authenticator app",
+    @"kind" : @"authenticator_app",
+    @"recommended" : @YES,
+    @"weaker" : @NO,
+    @"enrolled" : @(totpEnrolled),
+    @"verified" : @(totpVerified),
+    @"preferred_for_step_up" : @([preferredFactor isEqualToString:@"totp"]),
+    @"challenge_available" : @(totpVerified),
+    @"manage_path" : self.mfaManagePath ?: @"/auth/mfa",
+    @"challenge_path" : self.totpPath ?: @"/auth/mfa/totp",
+    @"summary" : totpVerified ? @"Ready for step-up authentication." : @"Recommended. Set up an authenticator app for stronger MFA.",
+  };
+  NSDictionary *smsFactor = @{
+    @"identifier" : @"sms",
+    @"label" : @"SMS",
+    @"kind" : @"sms",
+    @"recommended" : @NO,
+    @"weaker" : @YES,
+    @"enabled" : @(self.smsEnabled),
+    @"enrolled" : @(smsEnrolled),
+    @"verified" : @(smsVerified),
+    @"preferred_for_step_up" : @([preferredFactor isEqualToString:@"sms"]),
+    @"challenge_available" : @(smsChallengeAvailable),
+    @"manage_path" : self.mfaManagePath ?: @"/auth/mfa",
+    @"challenge_path" : smsFallbackHref,
+    @"masked_phone" : AMMaskedPhoneNumber(smsPhone),
+    @"pending_enrollment" : @(pendingEnrollment),
+    @"pending_challenge" : @(pendingChallenge),
+    @"pending_masked_phone" : maskedPendingPhone ?: @"",
+    @"management_allowed" : @(canManageSMS),
+    @"management_guard_message" : smsManagementGuardMessage ?: @"",
+    @"summary" : self.smsEnabled ? (smsVerified ? @"Available as a weaker fallback factor." : @"Optional fallback factor. Disabled by default.") : @"SMS MFA is disabled by app policy.",
+  };
+  NSMutableArray *factors = [NSMutableArray arrayWithObject:totpFactor];
+  if (self.smsEnabled) {
+    [factors addObject:smsFactor];
+  }
+  return @{
+    @"preferred_factor" : preferredFactor ?: @"totp",
+    @"available_challenge_factors" : availableChallengeFactors,
+    @"factors" : factors,
+    @"policy" : @{
+      @"sms" : @{
+        @"enabled" : @(self.smsEnabled),
+        @"allow_enrollment" : @(self.smsAllowEnrollment),
+        @"allow_challenge" : @(self.smsAllowChallenge),
+        @"allow_primary_factor" : @(self.smsAllowPrimaryFactor),
+        @"phone_management_requires_recent_mfa" : @(self.smsPhoneManagementRequiresMFA),
+        @"recent_mfa_max_age_seconds" : @(self.smsRecentMFAMaxAgeSeconds),
+        @"resend_cooldown_seconds" : @(self.smsResendCooldownSeconds),
+      },
+    },
+    @"totp" : @{
+      @"enrolled" : @(totpEnrolled),
+      @"verified" : @(totpVerified),
+      @"provisioning" : totpProvisioning ?: @{},
+      @"fallback_href" : smsChallengeAvailable ? smsFallbackHref : @"",
+    },
+    @"sms" : @{
+      @"enabled" : @(self.smsEnabled),
+      @"enrolled" : @(smsEnrolled),
+      @"verified" : @(smsVerified),
+      @"challenge_available" : @(smsChallengeAvailable),
+      @"phone_number" : smsPhone ?: @"",
+      @"masked_phone" : AMMaskedPhoneNumber(smsPhone),
+      @"pending_enrollment" : @(pendingEnrollment),
+      @"pending_challenge" : @(pendingChallenge),
+      @"pending_phone" : pendingPhone ?: @"",
+      @"pending_masked_phone" : maskedPendingPhone ?: @"",
+      @"management_allowed" : @(canManageSMS),
+      @"management_guard_message" : smsManagementGuardMessage ?: @"",
+      @"fallback_href" : totpVerified ? totpFallbackHref : @"",
+    },
+  };
+}
+
+- (NSDictionary *)mfaManagementFragmentContextForUser:(NSDictionary *)user
+                                              context:(ALNContext *)context
+                                             returnTo:(NSString *)returnTo
+                                                error:(NSError **)error {
+  NSDictionary *factorState = [self mfaFactorStateForUser:user context:context returnTo:returnTo error:error] ?: @{};
+  NSDictionary *totpState = [factorState[@"totp"] isKindOfClass:[NSDictionary class]] ? factorState[@"totp"] : @{};
+  NSDictionary *smsState = [factorState[@"sms"] isKindOfClass:[NSDictionary class]] ? factorState[@"sms"] : @{};
+  NSDictionary *policyState = [factorState[@"policy"] isKindOfClass:[NSDictionary class]] ? factorState[@"policy"] : @{};
+  BOOL totpVerified = [totpState[@"verified"] boolValue];
+  NSString *normalizedReturnTo = AMTrimmedString(returnTo);
+
+  NSMutableDictionary *contextValues = [NSMutableDictionary dictionaryWithDictionary:@{
+    @"authMFAFactors" : factorState[@"factors"] ?: @[],
+    @"authMFAPreferredFactor" : factorState[@"preferred_factor"] ?: @"totp",
+    @"authMFAAvailableChallengeFactors" : factorState[@"available_challenge_factors"] ?: @[],
+    @"authMFAPolicy" : policyState ?: @{},
+    @"authTOTPNeedsEnrollment" : @(!totpVerified),
+    @"authTOTPVerified" : @(totpVerified),
+    @"authSMSState" : smsState ?: @{},
+    @"authSMSPolicy" : [policyState[@"sms"] isKindOfClass:[NSDictionary class]] ? policyState[@"sms"] : @{},
+    @"authSMSPath" : self.smsPath ?: @"/auth/mfa/sms",
+    @"authSMSStartPath" : self.smsStartPath ?: @"/auth/mfa/sms/start",
+    @"authSMSVerifyPath" : self.smsVerifyPath ?: @"/auth/mfa/sms/verify",
+    @"authSMSResendPath" : self.smsResendPath ?: @"/auth/mfa/sms/resend",
+    @"authSMSRemovePath" : self.smsRemovePath ?: @"/auth/mfa/sms/remove",
+    @"authMFAManagePath" : self.mfaManagePath ?: @"/auth/mfa",
+    @"authSMSStartFormDescriptor" : @{
+      @"action" : self.smsStartPath ?: @"/auth/mfa/sms/start",
+      @"method" : @"post",
+      @"submitLabel" : ([smsState[@"verified"] boolValue] ? @"Verify New Number" : @"Send SMS Code"),
+      @"hidden" : @[ @{
+        @"name" : @"return_to",
+        @"value" : normalizedReturnTo ?: @"",
+      } ],
+      @"fields" : @[ @{
+        @"name" : @"phone_number",
+        @"label" : ([smsState[@"verified"] boolValue] ? @"Replace phone number" : @"Mobile phone number"),
+        @"type" : @"tel",
+        @"autocomplete" : @"tel",
+      } ],
+    },
+    @"authSMSVerifyFormDescriptor" : @{
+      @"action" : self.smsVerifyPath ?: @"/auth/mfa/sms/verify",
+      @"method" : @"post",
+      @"submitLabel" : @"Verify SMS Code",
+      @"hidden" : @[ @{
+        @"name" : @"return_to",
+        @"value" : normalizedReturnTo ?: @"",
+      } ],
+      @"fields" : @[ @{
+        @"name" : @"code",
+        @"label" : @"Text message code",
+        @"type" : @"text",
+        @"autocomplete" : @"one-time-code",
+        @"inputmode" : @"numeric",
+      } ],
+    },
+    @"authSMSResendFormDescriptor" : @{
+      @"action" : self.smsResendPath ?: @"/auth/mfa/sms/resend",
+      @"method" : @"post",
+      @"submitLabel" : @"Send another code",
+      @"hidden" : @[ @{
+        @"name" : @"return_to",
+        @"value" : normalizedReturnTo ?: @"",
+      } ],
+      @"fields" : @[],
+    },
+    @"authSMSRemoveFormDescriptor" : @{
+      @"action" : self.smsRemovePath ?: @"/auth/mfa/sms/remove",
+      @"method" : @"post",
+      @"submitLabel" : @"Remove SMS factor",
+      @"hidden" : @[ @{
+        @"name" : @"return_to",
+        @"value" : normalizedReturnTo ?: @"",
+      } ],
+      @"fields" : @[],
+    },
+  }];
+
+  if (!totpVerified) {
+    NSDictionary *totpContext = [self totpFragmentContextForUser:user returnTo:returnTo error:NULL] ?: @{};
+    [contextValues addEntriesFromDictionary:totpContext];
+  }
+  return contextValues;
+}
+
+- (NSDictionary *)mfaManagementFragmentContextForCurrentUserInContext:(ALNContext *)context
+                                                             returnTo:(NSString *)returnTo
+                                                                error:(NSError **)error {
+  NSDictionary *user = [self currentUserForContext:context error:error];
+  if (user == nil) {
+    if (error != NULL && *error == nil) {
+      *error = AMError(ALNAuthModuleErrorAuthenticationFailed, @"Authentication required", nil);
+    }
+    return nil;
+  }
+  return [self mfaManagementFragmentContextForUser:user context:context returnTo:returnTo error:error];
+}
+
+- (NSDictionary *)issueSMSVerificationForUser:(NSDictionary *)user
+                                        phone:(NSString *)phoneNumber
+                                      purpose:(NSString *)purpose
+                                      context:(ALNContext *)context
+                                        error:(NSError **)error {
+  if (!self.smsEnabled) {
+    if (error != NULL) {
+      *error = AMError(ALNAuthModuleErrorPolicyRejected, @"SMS MFA is disabled", nil);
+    }
+    return nil;
+  }
+  NSString *normalizedPurpose = AMLowerTrimmedString(purpose);
+  NSString *userID = AMTrimmedString(user[@"id"]);
+  NSDictionary *smsEnrollment = [self smsEnrollmentForUserID:userID error:NULL] ?: @{};
+  NSDictionary *totpEnrollment = [self totpEnrollmentForUserID:userID error:NULL] ?: @{};
+  BOOL totpVerified = ([AMTrimmedString(totpEnrollment[@"verified_at"]) length] > 0 || [totpEnrollment[@"enabled"] boolValue]);
+  BOOL smsVerified = ([AMTrimmedString(smsEnrollment[@"verified_at"]) length] > 0 || [smsEnrollment[@"enabled"] boolValue]);
+  BOOL recentMFA = [ALNAuthSession context:context
+             satisfiesMinimumAssuranceLevel:2
+           maximumAuthenticationAgeSeconds:self.smsRecentMFAMaxAgeSeconds
+                              referenceDate:nil];
+
+  NSString *resolvedPhone = @"";
+  if ([normalizedPurpose isEqualToString:@"challenge"]) {
+    if (!self.smsAllowChallenge) {
+      if (error != NULL) {
+        *error = AMError(ALNAuthModuleErrorPolicyRejected, @"SMS step-up is disabled", nil);
+      }
+      return nil;
+    }
+    resolvedPhone = AMNormalizePhoneNumber(smsEnrollment[@"phone_number"]);
+    if ([resolvedPhone length] == 0 || !smsVerified) {
+      if (error != NULL) {
+        *error = AMError(ALNAuthModuleErrorNotFound, @"No verified SMS factor is available", nil);
+      }
+      return nil;
+    }
+  } else {
+    if (!self.smsAllowEnrollment) {
+      if (error != NULL) {
+        *error = AMError(ALNAuthModuleErrorPolicyRejected, @"SMS enrollment is disabled", nil);
+      }
+      return nil;
+    }
+    resolvedPhone = AMNormalizePhoneNumber(phoneNumber);
+    if ([resolvedPhone length] == 0) {
+      if (error != NULL) {
+        *error = AMError(ALNAuthModuleErrorValidationFailed, @"Enter a valid mobile phone number in international format", nil);
+      }
+      return nil;
+    }
+    BOOL allowed = (!self.smsPhoneManagementRequiresMFA || recentMFA ||
+                    (!totpVerified && !smsVerified && self.smsAllowPrimaryFactor));
+    if (!allowed) {
+      if (error != NULL) {
+        *error = AMError(ALNAuthModuleErrorPolicyRejected,
+                         @"Verify an existing MFA factor before adding or changing a phone number",
+                         nil);
+      }
+      return nil;
+    }
+  }
+
+  NSDictionary *existingState = AMSMSSessionState(context);
+  NSString *existingPhone = AMNormalizePhoneNumber(existingState[@"phone"]);
+  NSString *existingPurpose = AMLowerTrimmedString(existingState[@"purpose"]);
+  NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
+  NSTimeInterval lastSend = [existingState[@"last_send_at"] respondsToSelector:@selector(doubleValue)]
+                                ? [existingState[@"last_send_at"] doubleValue]
+                                : 0.0;
+  NSUInteger sendCount = [existingState[@"send_count"] respondsToSelector:@selector(unsignedIntegerValue)]
+                             ? [existingState[@"send_count"] unsignedIntegerValue]
+                             : 0U;
+  NSUInteger verifyCount = [existingState[@"verify_count"] respondsToSelector:@selector(unsignedIntegerValue)]
+                               ? [existingState[@"verify_count"] unsignedIntegerValue]
+                               : 0U;
+  BOOL sameFlow = ([existingPhone isEqualToString:resolvedPhone] && [existingPurpose isEqualToString:normalizedPurpose]);
+  if (!sameFlow) {
+    sendCount = 0U;
+    verifyCount = 0U;
+    lastSend = 0.0;
+  }
+  if (sameFlow && self.smsResendCooldownSeconds > 0U && (now - lastSend) < (NSTimeInterval)self.smsResendCooldownSeconds) {
+    if (error != NULL) {
+      *error = AMError(ALNAuthModuleErrorPolicyRejected,
+                       @"A text message was sent recently. Please wait a moment before requesting another code.",
+                       nil);
+    }
+    return nil;
+  }
+  if (sendCount >= self.smsMaxSendAttemptsPerSession) {
+    if (error != NULL) {
+      *error = AMError(ALNAuthModuleErrorPolicyRejected, @"Too many SMS codes were requested in this session", nil);
+    }
+    return nil;
+  }
+  if (![self.smsVerifyClient sendVerificationToPhoneNumber:resolvedPhone locale:self.smsLocale error:error]) {
+    return nil;
+  }
+  NSString *normalizedReturnTo = AMTrimmedString([context stringParamForName:@"return_to"]);
+  NSDictionary *state = @{
+    @"purpose" : normalizedPurpose ?: @"challenge",
+    @"phone" : resolvedPhone ?: @"",
+    @"masked_phone" : AMMaskedPhoneNumber(resolvedPhone),
+    @"send_count" : @(sendCount + 1U),
+    @"verify_count" : @(verifyCount),
+    @"last_send_at" : @(now),
+    @"return_to" : normalizedReturnTo ?: @"",
+  };
+  AMSetSMSSessionState(context, state);
+  return state;
+}
+
+- (NSDictionary *)smsChallengeFragmentContextForUser:(NSDictionary *)user
+                                             context:(ALNContext *)context
+                                            returnTo:(NSString *)returnTo
+                                            autoSend:(BOOL)autoSend
+                                               error:(NSError **)error {
+  NSDictionary *factorState = [self mfaFactorStateForUser:user context:context returnTo:returnTo error:error] ?: @{};
+  NSDictionary *smsState = [factorState[@"sms"] isKindOfClass:[NSDictionary class]] ? factorState[@"sms"] : @{};
+  if (![smsState[@"challenge_available"] boolValue]) {
+    if (error != NULL) {
+      *error = AMError(ALNAuthModuleErrorNotFound, @"No verified SMS factor is available", nil);
+    }
+    return nil;
+  }
+  NSDictionary *challengeState = AMSMSSessionState(context);
+  if (autoSend) {
+    NSDictionary *issued = [self issueSMSVerificationForUser:user phone:nil purpose:@"challenge" context:context error:error];
+    if (issued != nil) {
+      challengeState = issued;
+    }
+  }
+  NSString *normalizedReturnTo = AMTrimmedString(returnTo);
+  NSMutableArray *links = [NSMutableArray array];
+  NSDictionary *totpState = [factorState[@"totp"] isKindOfClass:[NSDictionary class]] ? factorState[@"totp"] : @{};
+  if ([totpState[@"verified"] boolValue]) {
+    [links addObject:@{
+      @"label" : @"Use authenticator app instead",
+      @"href" : [NSString stringWithFormat:@"%@?return_to=%@", self.totpPath ?: @"/auth/mfa/totp", normalizedReturnTo ?: @""],
+    }];
+  }
+  return @{
+    @"authMFAFactor" : @"sms",
+    @"authMFAFlowState" : @"challenge",
+    @"authSMSState" : smsState ?: @{},
+    @"authSMSChallengeMessage" : [NSString stringWithFormat:@"Enter the code sent to %@.",
+                                                            AMTrimmedString(challengeState[@"masked_phone"]) ?: (smsState[@"masked_phone"] ?: @"your phone")],
+    @"authSMSVerifyFormDescriptor" : @{
+      @"action" : self.smsVerifyPath ?: @"/auth/mfa/sms/verify",
+      @"method" : @"post",
+      @"submitLabel" : @"Verify SMS Code",
+      @"hidden" : @[ @{
+        @"name" : @"return_to",
+        @"value" : normalizedReturnTo ?: @"",
+      } ],
+      @"links" : links,
+      @"fields" : @[ @{
+        @"name" : @"code",
+        @"label" : @"Text message code",
+        @"type" : @"text",
+        @"autocomplete" : @"one-time-code",
+        @"inputmode" : @"numeric",
+      } ],
+    },
+    @"authSMSResendFormDescriptor" : @{
+      @"action" : self.smsResendPath ?: @"/auth/mfa/sms/resend",
+      @"method" : @"post",
+      @"submitLabel" : @"Send another code",
+      @"hidden" : @[ @{
+        @"name" : @"return_to",
+        @"value" : normalizedReturnTo ?: @"",
+      } ],
+      @"fields" : @[],
+    },
+  };
+}
+
+- (NSDictionary *)smsChallengeFragmentContextForCurrentUserInContext:(ALNContext *)context
+                                                            returnTo:(NSString *)returnTo
+                                                               error:(NSError **)error {
+  NSDictionary *user = [self currentUserForContext:context error:error];
+  if (user == nil) {
+    if (error != NULL && *error == nil) {
+      *error = AMError(ALNAuthModuleErrorAuthenticationFailed, @"Authentication required", nil);
+    }
+    return nil;
+  }
+  return [self smsChallengeFragmentContextForUser:user context:context returnTo:returnTo autoSend:NO error:error];
+}
+
+- (NSDictionary *)verifySMSCode:(NSString *)code
+                            user:(NSDictionary *)user
+                         context:(ALNContext *)context
+                           error:(NSError **)error {
+  NSDictionary *state = AMSMSSessionState(context);
+  NSString *purpose = AMLowerTrimmedString(state[@"purpose"]);
+  NSString *phone = AMNormalizePhoneNumber(state[@"phone"]);
+  if ([purpose length] == 0 || [phone length] == 0) {
+    if (error != NULL) {
+      *error = AMError(ALNAuthModuleErrorNotFound, @"Request a text message code before verifying", nil);
+    }
+    return nil;
+  }
+  NSUInteger verifyCount = [state[@"verify_count"] respondsToSelector:@selector(unsignedIntegerValue)]
+                               ? [state[@"verify_count"] unsignedIntegerValue]
+                               : 0U;
+  if (verifyCount >= self.smsMaxVerifyAttemptsPerSession) {
+    if (error != NULL) {
+      *error = AMError(ALNAuthModuleErrorPolicyRejected, @"Too many SMS verification attempts were made in this session", nil);
+    }
+    return nil;
+  }
+
+  BOOL approved = NO;
+  NSError *providerError = nil;
+  BOOL ok = [self.smsVerifyClient checkVerificationCode:code phoneNumber:phone approved:&approved error:&providerError];
+  if (!ok || !approved) {
+    NSMutableDictionary *updatedState = [state mutableCopy] ?: [NSMutableDictionary dictionary];
+    updatedState[@"verify_count"] = @(verifyCount + 1U);
+    AMSetSMSSessionState(context, updatedState);
+    if (error != NULL) {
+      *error = providerError ?: AMError(ALNAuthModuleErrorAuthenticationFailed, @"The verification code is invalid", nil);
+    }
+    return nil;
+  }
+
+  NSString *userID = AMTrimmedString(user[@"id"]);
+  if ([purpose isEqualToString:@"enrollment"]) {
+    NSDictionary *existing = [self smsEnrollmentForUserID:userID error:NULL];
+    NSInteger result = 0;
+    if (existing != nil) {
+      result = [self.database executeCommand:@"UPDATE auth_mfa_enrollments "
+                                             "SET secret = $2, enabled = TRUE, verified_at = NOW(), updated_at = NOW() "
+                                             "WHERE id = $1"
+                                       parameters:@[ AMTrimmedString(existing[@"id"]), phone ]
+                                            error:error];
+    } else {
+      result = [self.database executeCommand:@"INSERT INTO auth_mfa_enrollments "
+                                             "(user_id, type, secret, recovery_codes_json, enabled, verified_at, created_at, updated_at) "
+                                             "VALUES ($1, 'sms', $2, '[]', TRUE, NOW(), NOW(), NOW())"
+                                       parameters:@[ userID ?: @"", phone ]
+                                            error:error];
+    }
+    if (result < 0) {
+      return nil;
+    }
+  }
+
+  AMSetSMSSessionState(context, nil);
+  if (![ALNAuthSession elevateAuthenticatedSessionForMethod:@"sms"
+                                             assuranceLevel:2
+                                            authenticatedAt:nil
+                                                    context:context
+                                                      error:error]) {
+    return nil;
+  }
+  NSMutableDictionary *payload =
+      [NSMutableDictionary dictionaryWithDictionary:[self sessionPayloadForContext:context includeUser:YES error:NULL] ?: @{}];
+  payload[@"factor"] = @"sms";
+  payload[@"phone_masked"] = AMMaskedPhoneNumber(phone);
+  payload[@"enrollment_completed"] = @([purpose isEqualToString:@"enrollment"]);
+  return payload;
+}
+
+- (BOOL)removeSMSEnrollmentForUser:(NSDictionary *)user
+                           context:(ALNContext *)context
+                             error:(NSError **)error {
+  if (!self.smsEnabled) {
+    return YES;
+  }
+  BOOL recentMFA = [ALNAuthSession context:context
+             satisfiesMinimumAssuranceLevel:2
+           maximumAuthenticationAgeSeconds:self.smsRecentMFAMaxAgeSeconds
+                              referenceDate:nil];
+  if (self.smsPhoneManagementRequiresMFA && !recentMFA) {
+    if (error != NULL) {
+      *error = AMError(ALNAuthModuleErrorPolicyRejected,
+                       @"Verify an existing MFA factor before removing the SMS factor",
+                       nil);
+    }
+    return NO;
+  }
+  NSInteger deleted = [self.database executeCommand:@"DELETE FROM auth_mfa_enrollments WHERE user_id = $1 AND type = 'sms'"
+                                         parameters:@[ AMTrimmedString(user[@"id"]) ?: @"" ]
+                                              error:error];
+  if (deleted < 0) {
+    return NO;
+  }
+  AMSetSMSSessionState(context, nil);
+  return YES;
 }
 
 - (NSDictionary *)sessionPayloadForContext:(ALNContext *)context
@@ -2018,7 +2962,13 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
   context[@"authRegisterPath"] = self.runtime.registerPath ?: @"/auth/register";
   context[@"authForgotPasswordPath"] = self.runtime.forgotPasswordPath ?: @"/auth/password/forgot";
   context[@"authResetPasswordPath"] = self.runtime.resetPasswordPath ?: @"/auth/password/reset";
+  context[@"authMFAManagePath"] = self.runtime.mfaManagePath ?: @"/auth/mfa";
   context[@"authTOTPPath"] = self.runtime.totpPath ?: @"/auth/mfa/totp";
+  context[@"authSMSPath"] = self.runtime.smsPath ?: @"/auth/mfa/sms";
+  context[@"authSMSStartPath"] = self.runtime.smsStartPath ?: @"/auth/mfa/sms/start";
+  context[@"authSMSVerifyPath"] = self.runtime.smsVerifyPath ?: @"/auth/mfa/sms/verify";
+  context[@"authSMSResendPath"] = self.runtime.smsResendPath ?: @"/auth/mfa/sms/resend";
+  context[@"authSMSRemovePath"] = self.runtime.smsRemovePath ?: @"/auth/mfa/sms/remove";
   context[@"authProviders"] = self.runtime.loginProviders ?: @[];
   context[@"authUIMode"] = self.runtime.uiMode ?: @"module-ui";
   context[@"authStylesheetPath"] = [self stylesheetPathForRuntime];
@@ -2059,6 +3009,15 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
   context[@"authFragmentMFARecoveryCodesPanel"] =
       [self.runtime fragmentTemplatePathForIdentifier:@"mfa_recovery_codes_panel"
                                           defaultPath:AMModuleFragmentTemplatePathForIdentifier(@"mfa_recovery_codes_panel")];
+  context[@"authFragmentMFAFactorInventoryPanel"] =
+      [self.runtime fragmentTemplatePathForIdentifier:@"mfa_factor_inventory_panel"
+                                          defaultPath:AMModuleFragmentTemplatePathForIdentifier(@"mfa_factor_inventory_panel")];
+  context[@"authFragmentMFASMSEnrollmentPanel"] =
+      [self.runtime fragmentTemplatePathForIdentifier:@"mfa_sms_enrollment_panel"
+                                          defaultPath:AMModuleFragmentTemplatePathForIdentifier(@"mfa_sms_enrollment_panel")];
+  context[@"authFragmentMFASMSChallengeForm"] =
+      [self.runtime fragmentTemplatePathForIdentifier:@"mfa_sms_challenge_form"
+                                          defaultPath:AMModuleFragmentTemplatePathForIdentifier(@"mfa_sms_challenge_form")];
   if ([extraCtx isKindOfClass:[NSDictionary class]]) {
     [context addEntriesFromDictionary:extraCtx];
   }
@@ -2067,6 +3026,30 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
 
 - (NSString *)apiTOTPVerifyPath {
   return AMPathJoin(self.runtime.apiPrefix, @"mfa/totp/verify");
+}
+
+- (NSString *)apiMFAPath {
+  return AMPathJoin(self.runtime.apiPrefix, @"mfa");
+}
+
+- (NSString *)apiSMSPath {
+  return AMPathJoin(self.runtime.apiPrefix, @"mfa/sms");
+}
+
+- (NSString *)apiSMSStartPath {
+  return AMPathJoin(self.runtime.apiPrefix, @"mfa/sms/start");
+}
+
+- (NSString *)apiSMSVerifyPath {
+  return AMPathJoin(self.runtime.apiPrefix, @"mfa/sms/verify");
+}
+
+- (NSString *)apiSMSResendPath {
+  return AMPathJoin(self.runtime.apiPrefix, @"mfa/sms/resend");
+}
+
+- (NSString *)apiSMSRemovePath {
+  return AMPathJoin(self.runtime.apiPrefix, @"mfa/sms/remove");
 }
 
 - (NSDictionary *)totpJSONFlowForProvisioning:(NSDictionary *)provisioning
@@ -2099,6 +3082,68 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
     @"status" : @"ok",
     @"flow" : [self totpJSONFlowForProvisioning:(provisioning ?: @{}) returnTo:returnTo],
     @"mfa" : [self totpJSONStateForProvisioning:(provisioning ?: @{})],
+    @"session" : [self.runtime sessionPayloadForContext:ctx includeUser:YES error:NULL] ?: @{},
+  };
+}
+
+- (NSDictionary *)mfaJSONResponseForContext:(ALNContext *)ctx
+                                   returnTo:(NSString *)returnTo {
+  NSDictionary *user = [self.runtime currentUserForContext:ctx error:NULL];
+  NSDictionary *factorState = (user != nil) ? ([self.runtime mfaFactorStateForUser:user context:ctx returnTo:returnTo error:NULL] ?: @{}) : @{};
+  NSDictionary *paths = @{
+    @"manage" : [self apiMFAPath],
+    @"totp" : AMPathJoin(self.runtime.apiPrefix, @"mfa/totp"),
+    @"totp_verify" : [self apiTOTPVerifyPath],
+    @"sms" : self.runtime.smsEnabled ? [self apiSMSPath] : @"",
+    @"sms_start" : self.runtime.smsEnabled ? [self apiSMSStartPath] : @"",
+    @"sms_verify" : self.runtime.smsEnabled ? [self apiSMSVerifyPath] : @"",
+    @"sms_resend" : self.runtime.smsEnabled ? [self apiSMSResendPath] : @"",
+    @"sms_remove" : self.runtime.smsEnabled ? [self apiSMSRemovePath] : @"",
+  };
+  return @{
+    @"status" : @"ok",
+    @"preferred_factor" : factorState[@"preferred_factor"] ?: @"totp",
+    @"available_challenge_factors" : factorState[@"available_challenge_factors"] ?: @[],
+    @"factors" : factorState[@"factors"] ?: @[],
+    @"policy" : factorState[@"policy"] ?: @{},
+    @"mfa" : @{
+      @"totp" : [factorState[@"totp"] isKindOfClass:[NSDictionary class]] ? factorState[@"totp"] : @{},
+      @"sms" : [factorState[@"sms"] isKindOfClass:[NSDictionary class]] ? factorState[@"sms"] : @{},
+    },
+    @"paths" : paths,
+    @"session" : [self.runtime sessionPayloadForContext:ctx includeUser:YES error:NULL] ?: @{},
+  };
+}
+
+- (NSDictionary *)smsJSONChallengeResponseForContext:(ALNContext *)ctx
+                                            returnTo:(NSString *)returnTo
+                                             autoSend:(BOOL)autoSend
+                                               error:(NSError **)error {
+  NSDictionary *user = [self.runtime currentUserForContext:ctx error:error];
+  if (user == nil) {
+    return nil;
+  }
+  NSDictionary *fragmentCtx = [self.runtime smsChallengeFragmentContextForUser:user
+                                                                       context:ctx
+                                                                      returnTo:returnTo
+                                                                      autoSend:autoSend
+                                                                         error:error];
+  if (fragmentCtx == nil) {
+    return nil;
+  }
+  return @{
+    @"status" : @"ok",
+    @"flow" : @{
+      @"factor" : @"sms",
+      @"state" : @"challenge",
+      @"return_to" : AMTrimmedString(returnTo) ?: @"",
+      @"verify_path" : [self apiSMSVerifyPath],
+      @"resend_path" : [self apiSMSResendPath],
+    },
+    @"mfa" : @{
+      @"factor" : @"sms",
+      @"challenge" : [fragmentCtx[@"authSMSState"] isKindOfClass:[NSDictionary class]] ? fragmentCtx[@"authSMSState"] : @{},
+    },
     @"session" : [self.runtime sessionPayloadForContext:ctx includeUser:YES error:NULL] ?: @{},
   };
 }
@@ -2671,6 +3716,323 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
   return @{ @"status" : @"ok" };
 }
 
+- (id)mfaManage:(ALNContext *)ctx {
+  NSDictionary *user = [self.runtime currentUserForContext:ctx error:NULL];
+  if (user == nil) {
+    if ([self shouldPreferJSONForHeadlessRequest:ctx]) {
+      [self setStatus:401];
+      return @{ @"status" : @"error", @"message" : @"Authentication required" };
+    }
+    [self redirectTo:[NSString stringWithFormat:@"%@?return_to=%@", self.runtime.loginPath, self.runtime.mfaManagePath] status:302];
+    return nil;
+  }
+  NSString *returnTo = AMTrimmedString([self requestParameters][@"return_to"]);
+  if ([self shouldPreferJSONForHeadlessRequest:ctx]) {
+    return [self mfaJSONResponseForContext:ctx returnTo:returnTo];
+  }
+  NSDictionary *fragmentCtx = [self.runtime mfaManagementFragmentContextForUser:user context:ctx returnTo:returnTo error:NULL] ?: @{};
+  [self renderAuthPageIdentifier:@"mfa_manage"
+                           title:@"Security Factors"
+                         message:@"Manage your authentication factors. Authenticator apps are recommended; SMS is optional and weaker when enabled."
+                          errors:nil
+                        formData:@{ @"return_to" : returnTo ?: @"" }
+                        extraCtx:fragmentCtx
+                           error:NULL];
+  return nil;
+}
+
+- (id)smsForm:(ALNContext *)ctx {
+  NSDictionary *user = [self.runtime currentUserForContext:ctx error:NULL];
+  if (user == nil) {
+    if ([self shouldPreferJSONForHeadlessRequest:ctx]) {
+      [self setStatus:401];
+      return @{ @"status" : @"error", @"message" : @"Authentication required" };
+    }
+    [self redirectTo:[NSString stringWithFormat:@"%@?return_to=%@", self.runtime.loginPath, self.runtime.smsPath] status:302];
+    return nil;
+  }
+  NSString *returnTo = AMTrimmedString([self requestParameters][@"return_to"]);
+  NSError *error = nil;
+  if ([self shouldPreferJSONForHeadlessRequest:ctx]) {
+    NSDictionary *payload = [self smsJSONChallengeResponseForContext:ctx returnTo:returnTo autoSend:NO error:&error];
+    if (payload == nil) {
+      [self setStatus:404];
+      return @{ @"status" : @"error", @"message" : error.localizedDescription ?: @"SMS factor unavailable" };
+    }
+    return payload;
+  }
+  NSDictionary *fragmentCtx = [self.runtime smsChallengeFragmentContextForUser:user
+                                                                       context:ctx
+                                                                      returnTo:returnTo
+                                                                      autoSend:YES
+                                                                         error:&error] ?: @{};
+  if ([fragmentCtx count] == 0) {
+    [self setStatus:404];
+    [self renderAuthPageIdentifier:@"provider_result"
+                             title:@"SMS Challenge"
+                           message:error.localizedDescription ?: @"SMS factor unavailable"
+                            errors:nil
+                          formData:nil
+                          extraCtx:@{
+                            @"resultTitle" : @"SMS Challenge Unavailable",
+                            @"authResultActions" : @[ @{
+                              @"label" : @"Manage factors",
+                              @"href" : self.runtime.mfaManagePath ?: @"/auth/mfa",
+                            } ],
+                          }
+                             error:NULL];
+    return nil;
+  }
+  [self renderAuthPageIdentifier:@"sms_challenge"
+                           title:@"Verify by Text Message"
+                         message:(error != nil
+                                      ? (error.localizedDescription ?: @"Use the code we sent to your phone.")
+                                      : ([fragmentCtx[@"authSMSChallengeMessage"] isKindOfClass:[NSString class]]
+                                             ? fragmentCtx[@"authSMSChallengeMessage"]
+                                             : @"Use the code we sent to your phone."))
+                          errors:nil
+                        formData:@{ @"return_to" : returnTo ?: @"" }
+                        extraCtx:fragmentCtx
+                           error:NULL];
+  return nil;
+}
+
+- (id)smsStart:(ALNContext *)ctx {
+  NSDictionary *user = [self.runtime currentUserForContext:ctx error:NULL];
+  if (user == nil) {
+    [self setStatus:401];
+    return [self shouldPreferJSONForHeadlessRequest:ctx] ? @{ @"status" : @"error", @"message" : @"Authentication required" } : nil;
+  }
+  NSDictionary *parameters = [self requestParameters];
+  NSString *returnTo = AMTrimmedString(parameters[@"return_to"]);
+  NSError *error = nil;
+  NSDictionary *state = [self.runtime issueSMSVerificationForUser:user
+                                                            phone:parameters[@"phone_number"]
+                                                          purpose:@"enrollment"
+                                                          context:ctx
+                                                            error:&error];
+  if (state == nil) {
+    [self setStatus:422];
+    if ([self shouldPreferJSONForHeadlessRequest:ctx]) {
+      NSMutableDictionary *payload = [[self mfaJSONResponseForContext:ctx returnTo:returnTo] mutableCopy];
+      payload[@"status"] = @"error";
+      payload[@"message"] = error.localizedDescription ?: @"Unable to send SMS code";
+      return payload;
+    }
+    NSDictionary *fragmentCtx = [self.runtime mfaManagementFragmentContextForUser:user context:ctx returnTo:returnTo error:NULL] ?: @{};
+    [self renderAuthPageIdentifier:@"mfa_manage"
+                             title:@"Security Factors"
+                           message:@""
+                            errors:[self errorEntriesForError:error field:@"phone_number"]
+                          formData:@{ @"phone_number" : AMTrimmedString(parameters[@"phone_number"]) ?: @"", @"return_to" : returnTo ?: @"" }
+                          extraCtx:fragmentCtx
+                             error:NULL];
+    return nil;
+  }
+  if ([self shouldPreferJSONForHeadlessRequest:ctx]) {
+    NSMutableDictionary *payload = [[self mfaJSONResponseForContext:ctx returnTo:returnTo] mutableCopy];
+    payload[@"message"] = [NSString stringWithFormat:@"We sent a code to %@.", state[@"masked_phone"] ?: @"your phone"];
+    return payload;
+  }
+  NSDictionary *fragmentCtx = [self.runtime mfaManagementFragmentContextForUser:user context:ctx returnTo:returnTo error:NULL] ?: @{};
+  [self renderAuthPageIdentifier:@"mfa_manage"
+                           title:@"Security Factors"
+                         message:[NSString stringWithFormat:@"We sent a code to %@. Enter it below to finish adding SMS MFA.",
+                                                            state[@"masked_phone"] ?: @"your phone"]
+                          errors:nil
+                        formData:@{ @"return_to" : returnTo ?: @"" }
+                        extraCtx:fragmentCtx
+                           error:NULL];
+  return nil;
+}
+
+- (id)smsResend:(ALNContext *)ctx {
+  NSDictionary *user = [self.runtime currentUserForContext:ctx error:NULL];
+  if (user == nil) {
+    [self setStatus:401];
+    return [self shouldPreferJSONForHeadlessRequest:ctx] ? @{ @"status" : @"error", @"message" : @"Authentication required" } : nil;
+  }
+  NSDictionary *smsState = AMSMSSessionState(ctx);
+  NSString *purpose = AMLowerTrimmedString(smsState[@"purpose"]);
+  NSString *phone = AMNormalizePhoneNumber(smsState[@"phone"]);
+  NSString *returnTo = AMTrimmedString([self requestParameters][@"return_to"]);
+  NSError *error = nil;
+  NSDictionary *state = [self.runtime issueSMSVerificationForUser:user
+                                                            phone:([purpose isEqualToString:@"enrollment"] ? phone : nil)
+                                                          purpose:([purpose length] > 0 ? purpose : @"challenge")
+                                                          context:ctx
+                                                            error:&error];
+  if (state == nil) {
+    [self setStatus:422];
+    if ([self shouldPreferJSONForHeadlessRequest:ctx]) {
+      NSMutableDictionary *payload = [[self mfaJSONResponseForContext:ctx returnTo:returnTo] mutableCopy];
+      payload[@"status"] = @"error";
+      payload[@"message"] = error.localizedDescription ?: @"Unable to resend SMS code";
+      return payload;
+    }
+    NSDictionary *fragmentCtx = nil;
+    NSString *pageIdentifier = @"mfa_manage";
+    if ([purpose isEqualToString:@"challenge"]) {
+      fragmentCtx = [self.runtime smsChallengeFragmentContextForUser:user context:ctx returnTo:returnTo autoSend:NO error:NULL];
+      pageIdentifier = @"sms_challenge";
+    } else {
+      fragmentCtx = [self.runtime mfaManagementFragmentContextForUser:user context:ctx returnTo:returnTo error:NULL];
+    }
+    [self renderAuthPageIdentifier:pageIdentifier
+                             title:([pageIdentifier isEqualToString:@"sms_challenge"] ? @"Verify by Text Message" : @"Security Factors")
+                           message:@""
+                            errors:[self errorEntriesForError:error field:@"code"]
+                          formData:@{ @"return_to" : returnTo ?: @"" }
+                          extraCtx:(fragmentCtx ?: @{})
+                             error:NULL];
+    return nil;
+  }
+  if ([self shouldPreferJSONForHeadlessRequest:ctx]) {
+    NSDictionary *basePayload = [purpose isEqualToString:@"challenge"]
+                                    ? [self smsJSONChallengeResponseForContext:ctx returnTo:returnTo autoSend:NO error:NULL]
+                                    : [self mfaJSONResponseForContext:ctx returnTo:returnTo];
+    NSMutableDictionary *payload = [(basePayload ?: @{}) mutableCopy];
+    payload[@"message"] = [NSString stringWithFormat:@"We sent another code to %@.", state[@"masked_phone"] ?: @"your phone"];
+    return payload;
+  }
+  if ([purpose isEqualToString:@"challenge"]) {
+    NSDictionary *fragmentCtx = [self.runtime smsChallengeFragmentContextForUser:user context:ctx returnTo:returnTo autoSend:NO error:NULL] ?: @{};
+    [self renderAuthPageIdentifier:@"sms_challenge"
+                             title:@"Verify by Text Message"
+                           message:[NSString stringWithFormat:@"We sent another code to %@.", state[@"masked_phone"] ?: @"your phone"]
+                            errors:nil
+                          formData:@{ @"return_to" : returnTo ?: @"" }
+                          extraCtx:fragmentCtx
+                             error:NULL];
+    return nil;
+  }
+  NSDictionary *fragmentCtx = [self.runtime mfaManagementFragmentContextForUser:user context:ctx returnTo:returnTo error:NULL] ?: @{};
+  [self renderAuthPageIdentifier:@"mfa_manage"
+                           title:@"Security Factors"
+                         message:[NSString stringWithFormat:@"We sent another code to %@.", state[@"masked_phone"] ?: @"your phone"]
+                          errors:nil
+                        formData:@{ @"return_to" : returnTo ?: @"" }
+                        extraCtx:fragmentCtx
+                           error:NULL];
+  return nil;
+}
+
+- (id)smsVerify:(ALNContext *)ctx {
+  NSDictionary *user = [self.runtime currentUserForContext:ctx error:NULL];
+  if (user == nil) {
+    [self setStatus:401];
+    return [self shouldPreferJSONForHeadlessRequest:ctx] ? @{ @"status" : @"error", @"message" : @"Authentication required" } : nil;
+  }
+  NSDictionary *parameters = [self requestParameters];
+  NSString *returnTo = AMTrimmedString(parameters[@"return_to"]);
+  NSString *purpose = AMLowerTrimmedString(AMSMSSessionState(ctx)[@"purpose"]);
+  NSError *error = nil;
+  NSDictionary *payload = [self.runtime verifySMSCode:parameters[@"code"] user:user context:ctx error:&error];
+  if (payload == nil) {
+    [self setStatus:422];
+    if ([self shouldPreferJSONForHeadlessRequest:ctx]) {
+      NSMutableDictionary *response = [[([purpose isEqualToString:@"challenge"] ? [self smsJSONChallengeResponseForContext:ctx returnTo:returnTo autoSend:NO error:NULL]
+                                                                                : [self mfaJSONResponseForContext:ctx returnTo:returnTo]) mutableCopy] ?: [NSMutableDictionary dictionary] mutableCopy];
+      response[@"status"] = @"error";
+      response[@"errors"] = [self errorEntriesForError:error field:@"code"];
+      return response;
+    }
+    if ([purpose isEqualToString:@"challenge"]) {
+      NSDictionary *fragmentCtx = [self.runtime smsChallengeFragmentContextForUser:user context:ctx returnTo:returnTo autoSend:NO error:NULL] ?: @{};
+      [self renderAuthPageIdentifier:@"sms_challenge"
+                               title:@"Verify by Text Message"
+                             message:@""
+                              errors:[self errorEntriesForError:error field:@"code"]
+                            formData:@{ @"return_to" : returnTo ?: @"" }
+                            extraCtx:fragmentCtx
+                               error:NULL];
+      return nil;
+    }
+    NSDictionary *fragmentCtx = [self.runtime mfaManagementFragmentContextForUser:user context:ctx returnTo:returnTo error:NULL] ?: @{};
+    [self renderAuthPageIdentifier:@"mfa_manage"
+                             title:@"Security Factors"
+                           message:@""
+                            errors:[self errorEntriesForError:error field:@"code"]
+                          formData:@{ @"return_to" : returnTo ?: @"" }
+                          extraCtx:fragmentCtx
+                             error:NULL];
+    return nil;
+  }
+
+  BOOL enrollmentCompleted = [payload[@"enrollment_completed"] boolValue];
+  NSString *continueTarget = ([returnTo length] > 0) ? returnTo : (self.runtime.defaultRedirect ?: @"/");
+  if ([self shouldPreferJSONForHeadlessRequest:ctx]) {
+    NSMutableDictionary *response = [NSMutableDictionary dictionaryWithDictionary:payload ?: @{}];
+    response[@"status"] = @"ok";
+    response[@"flow"] = @{
+      @"factor" : @"sms",
+      @"state" : @"complete",
+      @"return_to" : returnTo ?: @"",
+      @"continue_to" : continueTarget,
+      @"verify_path" : [self apiSMSVerifyPath],
+    };
+    response[@"mfa"] = [self mfaJSONResponseForContext:ctx returnTo:returnTo][@"mfa"] ?: @{};
+    return response;
+  }
+
+  if (enrollmentCompleted) {
+    NSDictionary *fragmentCtx = [self.runtime mfaManagementFragmentContextForUser:user context:ctx returnTo:returnTo error:NULL] ?: @{};
+    [self renderAuthPageIdentifier:@"mfa_manage"
+                             title:@"Security Factors"
+                           message:[NSString stringWithFormat:@"SMS MFA is now enabled for %@.", payload[@"phone_masked"] ?: @"your phone"]
+                            errors:nil
+                          formData:@{ @"return_to" : returnTo ?: @"" }
+                          extraCtx:fragmentCtx
+                             error:NULL];
+    return nil;
+  }
+  [self redirectTo:continueTarget status:302];
+  return nil;
+}
+
+- (id)smsRemove:(ALNContext *)ctx {
+  NSDictionary *user = [self.runtime currentUserForContext:ctx error:NULL];
+  if (user == nil) {
+    [self setStatus:401];
+    return [self shouldPreferJSONForHeadlessRequest:ctx] ? @{ @"status" : @"error", @"message" : @"Authentication required" } : nil;
+  }
+  NSString *returnTo = AMTrimmedString([self requestParameters][@"return_to"]);
+  NSError *error = nil;
+  BOOL ok = [self.runtime removeSMSEnrollmentForUser:user context:ctx error:&error];
+  if (!ok) {
+    [self setStatus:422];
+    if ([self shouldPreferJSONForHeadlessRequest:ctx]) {
+      NSMutableDictionary *payload = [[self mfaJSONResponseForContext:ctx returnTo:returnTo] mutableCopy];
+      payload[@"status"] = @"error";
+      payload[@"message"] = error.localizedDescription ?: @"Unable to remove SMS factor";
+      return payload;
+    }
+    NSDictionary *fragmentCtx = [self.runtime mfaManagementFragmentContextForUser:user context:ctx returnTo:returnTo error:NULL] ?: @{};
+    [self renderAuthPageIdentifier:@"mfa_manage"
+                             title:@"Security Factors"
+                           message:@""
+                            errors:[self errorEntriesForError:error field:@"sms"]
+                          formData:@{ @"return_to" : returnTo ?: @"" }
+                          extraCtx:fragmentCtx
+                             error:NULL];
+    return nil;
+  }
+  if ([self shouldPreferJSONForHeadlessRequest:ctx]) {
+    NSMutableDictionary *payload = [[self mfaJSONResponseForContext:ctx returnTo:returnTo] mutableCopy];
+    payload[@"message"] = @"SMS MFA was removed.";
+    return payload;
+  }
+  NSDictionary *fragmentCtx = [self.runtime mfaManagementFragmentContextForUser:user context:ctx returnTo:returnTo error:NULL] ?: @{};
+  [self renderAuthPageIdentifier:@"mfa_manage"
+                           title:@"Security Factors"
+                         message:@"SMS MFA was removed."
+                          errors:nil
+                        formData:@{ @"return_to" : returnTo ?: @"" }
+                        extraCtx:fragmentCtx
+                           error:NULL];
+  return nil;
+}
+
 - (id)totpForm:(ALNContext *)ctx {
   NSDictionary *user = [self.runtime currentUserForContext:ctx error:NULL];
   if (user == nil) {
@@ -2963,10 +4325,44 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
                              action:@"changePassword"];
   if (![runtime isHeadlessUIMode]) {
     [application registerRouteMethod:@"GET"
+                                path:runtime.mfaManagePath
+                                name:@"auth_mfa_manage"
+                     controllerClass:[ALNAuthModuleController class]
+                               action:@"mfaManage"];
+    if (runtime.smsEnabled) {
+      [application registerRouteMethod:@"GET"
+                                  path:runtime.smsPath
+                                  name:@"auth_sms_form"
+                       controllerClass:[ALNAuthModuleController class]
+                                 action:@"smsForm"];
+    }
+    [application registerRouteMethod:@"GET"
                                 path:runtime.totpPath
                                 name:@"auth_totp_form"
                      controllerClass:[ALNAuthModuleController class]
                                action:@"totpForm"];
+  }
+  if (runtime.smsEnabled) {
+    [application registerRouteMethod:@"POST"
+                                path:runtime.smsStartPath
+                                name:@"auth_sms_start"
+                     controllerClass:[ALNAuthModuleController class]
+                               action:@"smsStart"];
+    [application registerRouteMethod:@"POST"
+                                path:runtime.smsVerifyPath
+                                name:@"auth_sms_verify"
+                     controllerClass:[ALNAuthModuleController class]
+                               action:@"smsVerify"];
+    [application registerRouteMethod:@"POST"
+                                path:runtime.smsResendPath
+                                name:@"auth_sms_resend"
+                     controllerClass:[ALNAuthModuleController class]
+                               action:@"smsResend"];
+    [application registerRouteMethod:@"POST"
+                                path:runtime.smsRemovePath
+                                name:@"auth_sms_remove"
+                     controllerClass:[ALNAuthModuleController class]
+                               action:@"smsRemove"];
   }
   [application registerRouteMethod:@"POST"
                               path:runtime.totpVerifyPath
@@ -3037,6 +4433,38 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
                    controllerClass:[ALNAuthModuleController class]
                              action:@"changePassword"];
   [application registerRouteMethod:@"GET"
+                              path:@"/mfa"
+                              name:@"auth_api_mfa"
+                   controllerClass:[ALNAuthModuleController class]
+                             action:@"mfaManage"];
+  if (runtime.smsEnabled) {
+    [application registerRouteMethod:@"GET"
+                                path:@"/mfa/sms"
+                                name:@"auth_api_sms"
+                     controllerClass:[ALNAuthModuleController class]
+                               action:@"smsForm"];
+    [application registerRouteMethod:@"POST"
+                                path:@"/mfa/sms/start"
+                                name:@"auth_api_sms_start"
+                     controllerClass:[ALNAuthModuleController class]
+                               action:@"smsStart"];
+    [application registerRouteMethod:@"POST"
+                                path:@"/mfa/sms/verify"
+                                name:@"auth_api_sms_verify"
+                     controllerClass:[ALNAuthModuleController class]
+                               action:@"smsVerify"];
+    [application registerRouteMethod:@"POST"
+                                path:@"/mfa/sms/resend"
+                                name:@"auth_api_sms_resend"
+                     controllerClass:[ALNAuthModuleController class]
+                               action:@"smsResend"];
+    [application registerRouteMethod:@"POST"
+                                path:@"/mfa/sms/remove"
+                                name:@"auth_api_sms_remove"
+                     controllerClass:[ALNAuthModuleController class]
+                               action:@"smsRemove"];
+  }
+  [application registerRouteMethod:@"GET"
                               path:@"/mfa/totp"
                               name:@"auth_api_totp"
                    controllerClass:[ALNAuthModuleController class]
@@ -3066,7 +4494,7 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
   [application endRouteGroup];
 
   NSError *routeError = nil;
-  NSDictionary *apiRouteSchemas = @{
+  NSMutableDictionary *apiRouteSchemas = [NSMutableDictionary dictionaryWithDictionary:@{
     @"auth_api_session" : @{ @"request" : [NSNull null], @"response" : @{ @"type" : @"object" } },
     @"auth_api_login" : @{
       @"request" : @{
@@ -3145,6 +4573,7 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
       },
       @"response" : @{ @"type" : @"object" },
     },
+    @"auth_api_mfa" : @{ @"request" : [NSNull null], @"response" : @{ @"type" : @"object" } },
     @"auth_api_totp" : @{ @"request" : [NSNull null], @"response" : @{ @"type" : @"object" } },
     @"auth_api_totp_verify" : @{
       @"request" : @{
@@ -3157,10 +4586,52 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
       },
       @"response" : @{ @"type" : @"object" },
     },
-  };
+  }];
+  if (runtime.smsEnabled) {
+    apiRouteSchemas[@"auth_api_sms"] = @{ @"request" : [NSNull null], @"response" : @{ @"type" : @"object" } };
+    apiRouteSchemas[@"auth_api_sms_start"] = @{
+      @"request" : @{
+        @"type" : @"object",
+        @"properties" : @{
+          @"phone_number" : @{ @"type" : @"string", @"source" : @"body" },
+          @"return_to" : @{ @"type" : @"string", @"source" : @"body" },
+        },
+        @"required" : @[ @"phone_number" ],
+      },
+      @"response" : @{ @"type" : @"object" },
+    };
+    apiRouteSchemas[@"auth_api_sms_verify"] = @{
+      @"request" : @{
+        @"type" : @"object",
+        @"properties" : @{
+          @"code" : @{ @"type" : @"string", @"source" : @"body" },
+          @"return_to" : @{ @"type" : @"string", @"source" : @"body" },
+        },
+        @"required" : @[ @"code" ],
+      },
+      @"response" : @{ @"type" : @"object" },
+    };
+    apiRouteSchemas[@"auth_api_sms_resend"] = @{
+      @"request" : @{
+        @"type" : @"object",
+        @"properties" : @{
+          @"return_to" : @{ @"type" : @"string", @"source" : @"body" },
+        },
+      },
+      @"response" : @{ @"type" : @"object" },
+    };
+    apiRouteSchemas[@"auth_api_sms_remove"] = @{
+      @"request" : @{
+        @"type" : @"object",
+        @"properties" : @{
+          @"return_to" : @{ @"type" : @"string", @"source" : @"body" },
+        },
+      },
+      @"response" : @{ @"type" : @"object" },
+    };
+  }
   if ([runtime isProviderEnabled:@"stub"]) {
-    NSMutableDictionary *mutableRouteSchemas = [NSMutableDictionary dictionaryWithDictionary:apiRouteSchemas];
-    mutableRouteSchemas[@"auth_api_provider_stub_login"] = @{
+    apiRouteSchemas[@"auth_api_provider_stub_login"] = @{
       @"request" : @{
         @"type" : @"object",
         @"properties" : @{
@@ -3169,7 +4640,7 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
       },
       @"response" : @{ @"type" : @"object" },
     };
-    mutableRouteSchemas[@"auth_api_provider_stub_authorize"] = @{
+    apiRouteSchemas[@"auth_api_provider_stub_authorize"] = @{
       @"request" : @{
         @"type" : @"object",
         @"properties" : @{
@@ -3178,7 +4649,7 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
       },
       @"response" : @{ @"type" : @"object" },
     };
-    mutableRouteSchemas[@"auth_api_provider_stub_callback"] = @{
+    apiRouteSchemas[@"auth_api_provider_stub_callback"] = @{
       @"request" : @{
         @"type" : @"object",
         @"properties" : @{
@@ -3188,7 +4659,6 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
       },
       @"response" : @{ @"type" : @"object" },
     };
-    apiRouteSchemas = [NSDictionary dictionaryWithDictionary:mutableRouteSchemas];
   }
   for (NSString *routeName in [apiRouteSchemas allKeys]) {
     NSDictionary *schema = apiRouteSchemas[routeName];

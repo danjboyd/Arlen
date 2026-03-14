@@ -42,11 +42,15 @@ The `auth` module now provides:
 - generated app-owned auth templates under `templates/auth/...` for
   `generated-app-ui`
 
-Phase 18 follow-on work in `docs/PHASE18_ROADMAP.md` is now delivered with:
+Phase 18A-18D follow-on work in `docs/PHASE18_ROADMAP.md` is delivered with:
 
 - fragment-first stock auth pages
 - supported coarse embeddable auth fragments for server-rendered EOC apps
 - stronger MFA-focused headless JSON contracts for React/native clients
+
+Phase 18E-18G are also delivered with optional SMS MFA through Twilio Verify,
+while keeping SMS disabled by default and preserving the same UI ownership
+model.
 
 ## 3. Design Goals
 
@@ -234,8 +238,11 @@ Phase 18 refinement:
   and targeted overrides
 - the supported embeddable fragment contract is now:
   - `provider_login_buttons`
+  - `mfa_factor_inventory_panel`
   - `mfa_enrollment_panel`
   - `mfa_challenge_form`
+  - `mfa_sms_enrollment_panel`
+  - `mfa_sms_challenge_form`
   - `mfa_recovery_codes_panel`
 - stock full-page auth UI now renders through those coarse fragments so the
   default pages and embeddable surfaces stay aligned
@@ -259,8 +266,13 @@ Important constraint:
 
 Phase 18 extends this by making MFA-specific headless contracts explicit:
 
+- `GET /auth/api/mfa` returns factor inventory, policy, preferred factor, and
+  enabled-path discovery for React/native clients
 - `GET /auth/api/mfa/totp` returns `flow`, `mfa`, and `session`
 - `flow.state` is `enrollment` or `challenge`
+- when SMS is enabled, `GET /auth/api/mfa/sms` plus
+  `POST /auth/api/mfa/sms/{start,verify,resend,remove}` expose the same SMS
+  factor-management contract the stock HTML UI uses
 - `POST /auth/api/mfa/totp/verify` returns `flow.state = recovery_codes` on the
   first successful enrollment verify and `complete` on later step-up verifies
 - `mfa.provisioning` is populated only during enrollment
@@ -309,6 +321,8 @@ Recommended initial scaffold targets:
 - `templates/auth/register.html.eoc`
 - `templates/auth/password/forgot.html.eoc`
 - `templates/auth/password/reset.html.eoc`
+- `templates/auth/mfa/manage.html.eoc`
+- `templates/auth/mfa/sms.html.eoc`
 - `templates/auth/mfa/totp.html.eoc`
 - `templates/auth/mfa/totp_enrollment.html.eoc`
 - `templates/auth/mfa/totp_recovery_codes.html.eoc`

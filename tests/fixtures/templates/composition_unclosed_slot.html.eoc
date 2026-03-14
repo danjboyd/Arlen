@@ -1,0 +1,2 @@
+<%@ slot "sidebar" %>
+<p>missing endslot</p>

@@ -14,6 +14,11 @@ If transpilation fails, `eocc` prints deterministic location data:
 - `line=<line>`
 - `column=<column>`
 
+Static composition validation also fails the transpile before code generation when:
+
+- a `layout`, `include`, `render`, or `empty:` partial path does not exist in the current template set
+- layouts/includes/renders create a static composition cycle
+
 ## 2. Interpret Common Errors
 
 - `Unclosed EOC tag`
@@ -22,6 +27,10 @@ If transpilation fails, `eocc` prints deterministic location data:
   - ensure `<%= ... %>` and `<%== ... %>` contain a non-empty expression.
 - `Invalid sigil local`
   - ensure sigil usage follows `$identifier` with `[A-Za-z_][A-Za-z0-9_]*`.
+- `Multiple layout directives are not allowed`
+  - keep each template to one static `<%@ layout "..." %>` declaration.
+- `Unclosed slot directive`
+  - ensure every `<%@ slot "..." %>` has a matching `<%@ endslot %>`.
 
 ## 3. Address Lint Warnings
 
@@ -36,6 +45,10 @@ Current lint rule:
     - `ALNEOCInclude(out, ctx, @"partials/_nav.html.eoc", error);`
   - to:
     - `if (!ALNEOCInclude(out, ctx, @"partials/_nav.html.eoc", error)) { return nil; }`
+- `slot_without_layout`
+  - add a static `<%@ layout "..." %>` declaration or remove the slot fill.
+- `unused_slot_fill`
+  - add a matching `<%@ yield "slot_name" %>` in the selected layout or remove the slot fill.
 
 ## 4. Re-Run Unit and Integration Gates
 

@@ -1,14 +1,19 @@
+<%@ layout "layouts/main" %>
+<%@ slot "sidebar" %>
+<div class="callout">
+  <strong>Example layout slots</strong>
+  <p>This sidebar is filled from the page template while the shell stays in the layout.</p>
+</div>
+<%@ endslot %>
 <section>
-  <h2>Phase 1 capabilities in one page</h2>
+  <h2>Composition-first capabilities in one page</h2>
   <ul>
-  <% for (NSString *item in [ctx objectForKey:@"items"]) { %>
-    <li><%= item %></li>
-  <% } %>
+    <%@ render "partials/_capability" collection:$items as:"item" empty:"partials/_empty_list" %>
   </ul>
 
   <p>
     Effective client address seen by the app:
-    <code><%= [ctx objectForKey:@"effectiveRemoteAddress"] %></code>
+    <code><%= $effectiveRemoteAddress %></code>
   </p>
 
   <div class="callout">

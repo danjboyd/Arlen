@@ -1,0 +1,11 @@
+<%@ requires authSMSVerifyFormDescriptor, authSMSResendFormDescriptor %>
+<% NSString *formShellTemplate = [ctx objectForKey:@"authPartialFormShell"] ?: @"modules/auth/partials/form_shell"; %>
+<section class="auth-mfa-panel auth-mfa-panel--challenge" data-auth-mfa-flow="sms_challenge">
+  <div class="auth-note"><%= [ctx objectForKey:@"authSMSChallengeMessage"] ?: @"Enter the code we sent to your phone." %></div>
+  <% NSMutableDictionary *verifyCtx = [NSMutableDictionary dictionaryWithDictionary:(NSDictionary *)ctx]; %>
+  <% [verifyCtx setObject:($authSMSVerifyFormDescriptor ?: @{}) forKey:@"authFormDescriptor"]; %>
+  <% if (!ALNEOCInclude(out, verifyCtx, formShellTemplate, error)) { return nil; } %>
+  <% NSMutableDictionary *resendCtx = [NSMutableDictionary dictionaryWithDictionary:(NSDictionary *)ctx]; %>
+  <% [resendCtx setObject:($authSMSResendFormDescriptor ?: @{}) forKey:@"authFormDescriptor"]; %>
+  <% if (!ALNEOCInclude(out, resendCtx, formShellTemplate, error)) { return nil; } %>
+</section>

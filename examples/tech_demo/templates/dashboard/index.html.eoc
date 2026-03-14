@@ -1,6 +1,13 @@
+<%@ layout "layouts/main" %>
+<%@ slot "sidebar" %>
+<div class="callout">
+  <strong>Active tab</strong>
+  <p><%= $activeTab %></p>
+</div>
+<%@ endslot %>
 <section>
   <h2>Dashboard</h2>
-  <p>Active tab: <strong><%= [ctx objectForKey:@"activeTab"] %></strong></p>
+  <p>Active tab: <strong><%= $activeTab %></strong></p>
 
   <table class="grid">
     <thead>
@@ -11,13 +18,7 @@
       </tr>
     </thead>
     <tbody>
-    <% for (NSDictionary *row in [ctx objectForKey:@"metrics"]) { %>
-      <tr>
-        <td><%= [row objectForKey:@"name"] %></td>
-        <td><%= [row objectForKey:@"value"] %></td>
-        <td><%= [row objectForKey:@"notes"] %></td>
-      </tr>
-    <% } %>
+      <%@ render "partials/_metric_row" collection:$metrics as:"row" empty:"partials/_metric_empty" %>
     </tbody>
   </table>
 </section>

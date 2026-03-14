@@ -1,6 +1,6 @@
 # Arlen Phase 18 Roadmap
 
-Status: Complete on 2026-03-13
+Status: complete on 2026-03-13 (`18A-18G`)
 Last updated: 2026-03-13
 
 Related docs:
@@ -18,6 +18,9 @@ same backend auth contract supports three presentation layers cleanly:
 - full-page default auth UI for server-rendered apps
 - reusable server-rendered auth fragments for app-owned EOC pages
 - strengthened headless JSON contracts for React/native clients
+
+Phase 18 now also tracks an additive MFA follow-on: optional SMS support through
+Twilio Verify, while keeping authenticator-app flows first-class and preferred.
 
 Phase 18 does not replace the existing Phase 15 model. It builds on it.
 
@@ -53,6 +56,12 @@ Phase 18 closes that gap.
 - Do not require SPA frameworks inside the auth module.
 - Prefer small browser-native assets over server-side image pipelines for MFA QR
   rendering.
+- Keep SMS MFA disabled by default and policy-gated.
+- Prefer stronger factors such as passkeys/WebAuthn and TOTP over SMS.
+- Treat SMS as an optional secondary factor or fallback, not the default MFA
+  path.
+- Use Twilio Verify as the delivery/verification provider seam rather than
+  baking raw carrier delivery semantics into core auth logic.
 
 ## 3. Scope Summary
 
@@ -60,6 +69,9 @@ Phase 18 closes that gap.
 2. Phase 18B: MFA enrollment/challenge/recovery UI maturation.
 3. Phase 18C: headless MFA/API contract maturity for React/native clients.
 4. Phase 18D: docs, examples, and confidence coverage.
+5. Phase 18E: optional SMS MFA factor integration through Twilio Verify.
+6. Phase 18F: factor-management GUI and multi-factor enrollment UX.
+7. Phase 18G: docs, examples, and confidence coverage for SMS/Twilio Verify.
 
 ## 4. Scope Guardrails
 
@@ -69,6 +81,10 @@ Phase 18 closes that gap.
 - Do not force React/native clients to consume HTML or scrape auth pages.
 - Do not publish every low-level auth partial as a stable public API.
 - Do not split backend auth semantics by presentation mode.
+- Do not make SMS the default or only recommended MFA factor in stock UI.
+- Do not require Twilio Verify credentials for TOTP-only applications.
+- Do not allow phone add/change/remove flows to bypass recent reauthentication
+  and existing-factor checks.
 
 ## 5. Milestones
 
@@ -82,6 +98,11 @@ Delivered on 2026-03-13:
   local QR asset
 - confidence coverage now includes stock HTML MFA states, embeddable fragment
   render paths, and the new headless MFA JSON shape
+- optional SMS MFA through Twilio Verify as a disabled-by-default factor
+- factor-management UX that lets users enroll both authenticator app and SMS
+  when app policy allows it
+- headless and server-rendered coverage for multi-factor inventory, SMS
+  enrollment, SMS challenge, and phone-change safeguards
 
 ## 5.1 Phase 18A: Reusable Auth Fragment Contract
 
@@ -178,6 +199,93 @@ Acceptance (required):
   example-backed
 - regressions in MFA flow shape are caught by automated tests
 
+## 5.5 Phase 18E: Optional SMS MFA via Twilio Verify
+
+Deliverables:
+
+- Add an optional SMS MFA factor backed by Twilio Verify.
+- Keep SMS support disabled by default unless the app config explicitly enables
+  it and provides the required Twilio Verify credentials.
+- Add config/runtime seams for:
+  - Verify service SID
+  - account credentials / auth token material
+  - message locale or template options where appropriate
+  - app policy toggles for whether SMS can be used for enrollment, challenge,
+    or fallback only
+- Model SMS as a separately enrolled factor, not as an implicit substitute for
+  TOTP.
+- Require recent authentication plus an existing verified factor to add,
+  replace, or remove a phone-based factor.
+- Add attempt limits, resend cooldowns, audit hooks, and generic error shaping
+  around SMS challenge issuance and verification.
+
+Acceptance (required):
+
+- TOTP-only apps remain unaffected and require no Twilio configuration.
+- When SMS MFA is disabled, no SMS enrollment or challenge routes/CTAs appear.
+- When SMS MFA is enabled, apps can bind a phone factor through Twilio Verify
+  without changing the core auth session semantics.
+- Phone-factor lifecycle operations are guarded strongly enough for MFA use.
+
+## 5.6 Phase 18F: Factor-Management GUI and Multi-Factor UX
+
+Deliverables:
+
+- Add stock full-page and embeddable auth fragments for MFA factor management,
+  including factor inventory and SMS enrollment/challenge panels where useful.
+- Keep authenticator app enrollment visually primary and recommended in the
+  stock UI.
+- Present SMS as a weaker optional factor or fallback with clear labeling.
+- Let users enroll both an authenticator app and SMS on the same account when
+  policy allows it; do not force a single-factor choice.
+- Keep factor-management actions explicit:
+  - add phone
+  - verify phone
+  - resend SMS code
+  - remove phone
+  - rotate or reset only after strong reauthentication
+- During step-up, prefer the strongest enrolled factor allowed by policy and
+  only offer SMS fallback when explicitly enabled.
+- Expose factor inventory and preferred challenge state through headless JSON so
+  React/native clients can own the same UX.
+
+Acceptance (required):
+
+- Stock UI hides SMS completely when disabled.
+- Enabled apps can present both authenticator-app and SMS enrollment paths on
+  the same account-security surface.
+- Stock UI clearly communicates that SMS is weaker than authenticator-app MFA.
+- Step-up flows do not silently downgrade to SMS when a stronger factor is
+  enrolled and allowed.
+
+## 5.7 Phase 18G: Docs, Examples, and Confidence for SMS MFA
+
+Deliverables:
+
+- Update:
+  - `docs/AUTH_MODULE.md`
+  - `docs/AUTH_UI_INTEGRATION_MODES.md`
+  - `docs/CLI_REFERENCE.md`
+  - `docs/GETTING_STARTED.md`
+- Add one server-rendered example showing app-owned account/security pages with
+  both TOTP and optional SMS factor management.
+- Add one headless example or fixture set covering the JSON contract for SMS
+  enrollment and challenge using Twilio Verify-friendly test seams/mocks.
+- Extend confidence/integration coverage for:
+  - disabled-by-default behavior
+  - SMS enrollment and verification
+  - factor inventory showing both TOTP and SMS
+  - preferred stronger-factor challenge behavior
+  - guarded phone add/change/remove flows
+
+Acceptance (required):
+
+- Apps can discover the SMS factor contract from docs without reverse
+  engineering Twilio-specific behavior.
+- The server-rendered and headless SMS flows are example-backed.
+- Regression coverage catches changes to factor inventory, SMS challenge state,
+  and policy gating.
+
 ## 6. Completion Criteria
 
 Phase 18 is complete when:
@@ -190,6 +298,10 @@ Phase 18 is complete when:
 4. MFA enrollment, challenge, and recovery-code completion are all represented
    coherently in both stock UI and headless contracts
 5. docs, examples, and confidence coverage reflect the new split
+6. optional SMS MFA can be enabled through Twilio Verify without weakening the
+   default TOTP-first posture
+7. stock UI and headless clients can both manage multiple enrolled MFA factors,
+   including authenticator app plus optional SMS
 
 ## 7. Expected Outcome
 
@@ -200,5 +312,5 @@ paths:
 2. server-rendered app-owned pages that embed reusable auth fragments
 3. React/native app-owned UI built entirely on `/auth/api/...`
 
-That is the maturity bar for treating the `auth` module as a reusable framework
-component rather than only a default-first starter surface.
+That backend should stay TOTP-first while optionally supporting SMS through
+Twilio Verify as a policy-controlled secondary factor.

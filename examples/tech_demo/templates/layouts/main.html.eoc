@@ -3,19 +3,25 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title><%= [ctx objectForKey:@"pageTitle"] %></title>
+    <title><%= $pageTitle %></title>
     <link rel="stylesheet" href="/static/tech_demo.css">
   </head>
   <body>
     <header class="shell">
-      <h1><%= [ctx objectForKey:@"pageTitle"] %></h1>
-      <p class="tagline"><%= [ctx objectForKey:@"tagline"] %></p>
-      <% if (!ALNEOCInclude(out, ctx, @"partials/_nav.html.eoc", error)) { return nil; } %>
+      <p class="eyebrow">Composition-first EOC demo</p>
+      <h1><%= $pageTitle %></h1>
+      <p class="tagline"><%= $tagline %></p>
+      <%@ include "partials/_nav" %>
     </header>
 
-    <main class="shell">
-      <%== [ctx objectForKey:@"content"] %>
-    </main>
+    <div class="shell layout-grid">
+      <main>
+        <%@ yield %>
+      </main>
+      <aside class="sidebar">
+        <%@ yield "sidebar" %>
+      </aside>
+    </div>
 
     <footer class="shell footer">
       <p>Arlen tech demo. This page is rendered from compiled <code>.html.eoc</code> templates.</p>

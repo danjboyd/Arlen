@@ -19,6 +19,50 @@ static NSString *RenderFailure(id ctx, NSError **error) {
   return nil;
 }
 
+static NSString *RenderOverlayPartial(id ctx, NSError **error) {
+  NSError *localError = nil;
+  NSString *name = ALNEOCLocal(ctx, @"name", @"partials/_overlay.html.eoc", 1, 1, &localError);
+  if (localError != nil) {
+    if (error != NULL) {
+      *error = localError;
+    }
+    return nil;
+  }
+  NSString *shared = ALNEOCLocal(ctx, @"shared", @"partials/_overlay.html.eoc", 1, 10, &localError);
+  if (localError != nil) {
+    if (error != NULL) {
+      *error = localError;
+    }
+    return nil;
+  }
+  return [NSString stringWithFormat:@"%@/%@", name ?: @"", shared ?: @""];
+}
+
+static NSString *RenderCollectionRow(id ctx, NSError **error) {
+  NSError *localError = nil;
+  NSString *title = ALNEOCLocal(ctx, @"title", @"partials/_row.html.eoc", 1, 1, &localError);
+  if (localError != nil) {
+    if (error != NULL) {
+      *error = localError;
+    }
+    return nil;
+  }
+  NSString *row = ALNEOCLocal(ctx, @"row", @"partials/_row.html.eoc", 1, 10, &localError);
+  if (localError != nil) {
+    if (error != NULL) {
+      *error = localError;
+    }
+    return nil;
+  }
+  return [NSString stringWithFormat:@"<li>%@:%@</li>", title ?: @"", row ?: @""];
+}
+
+static NSString *RenderCollectionEmpty(id ctx, NSError **error) {
+  (void)ctx;
+  (void)error;
+  return @"<li>empty</li>";
+}
+
 @interface RuntimeStringValueObject : NSObject
 @end
 
@@ -235,6 +279,235 @@ static NSString *RenderFailure(id ctx, NSError **error) {
   ALNEOCPopRenderOptions(outer);
   XCTAssertFalse(ALNEOCStrictLocalsEnabled());
   XCTAssertFalse(ALNEOCStrictStringifyEnabled());
+}
+
+- (void)testEnsureRequiredLocalsRejectsMissingLocal {
+  NSError *error = nil;
+  BOOL ok = ALNEOCEnsureRequiredLocals(@{ @"title" : @"Inbox" },
+                                       @[ @"title", @"rows" ],
+                                       @"pages/show.html.eoc",
+                                       2,
+                                       4,
+                                       &error);
+  XCTAssertFalse(ok);
+  XCTAssertNotNil(error);
+  XCTAssertEqualObjects(ALNEOCErrorDomain, error.domain);
+  XCTAssertEqual((NSInteger)ALNEOCErrorTemplateExecutionFailed, [error code]);
+  XCTAssertEqualObjects(@"Missing required EOC local: $rows", error.localizedDescription);
+  XCTAssertEqualObjects(@"rows", error.userInfo[ALNEOCErrorLocalNameKey]);
+  XCTAssertEqualObjects(@"pages/show.html.eoc", error.userInfo[ALNEOCErrorPathKey]);
+}
+
+- (void)testIncludeWithLocalsOverlaysContext {
+  ALNEOCRegisterTemplate(@"partials/_overlay.html.eoc", &RenderOverlayPartial);
+
+  NSMutableString *out = [NSMutableString string];
+  NSError *error = nil;
+  BOOL included = ALNEOCIncludeWithLocals(out,
+                                          @{ @"shared" : @"base" },
+                                          @"partials/_overlay",
+                                          @{ @"name" : @"local" },
+                                          @"pages/show.html.eoc",
+                                          4,
+                                          2,
+                                          &error);
+  XCTAssertTrue(included);
+  XCTAssertNil(error);
+  XCTAssertEqualObjects(@"local/base", out);
+}
+
+- (void)testIncludeWithLocalsRejectsNonDictionaryLikeLocals {
+  NSMutableString *out = [NSMutableString string];
+  NSError *error = nil;
+  BOOL included = ALNEOCIncludeWithLocals(out,
+                                          @{ @"shared" : @"base" },
+                                          @"partials/_overlay",
+                                          @"bad-locals",
+                                          @"pages/show.html.eoc",
+                                          4,
+                                          2,
+                                          &error);
+  XCTAssertFalse(included);
+  XCTAssertNotNil(error);
+  XCTAssertEqual((NSInteger)ALNEOCErrorInvalidArgument, [error code]);
+  XCTAssertEqualObjects(@"pages/show.html.eoc", error.userInfo[ALNEOCErrorPathKey]);
+}
+
+- (void)testRenderCollectionUsesOverlayAndBaseContext {
+  ALNEOCRegisterTemplate(@"partials/_row.html.eoc", &RenderCollectionRow);
+
+  NSMutableString *out = [NSMutableString string];
+  NSError *error = nil;
+  BOOL rendered = ALNEOCRenderCollection(out,
+                                         @{ @"title" : @"Inbox" },
+                                         @"partials/_row",
+                                         @[ @"first", @"second" ],
+                                         @"row",
+                                         nil,
+                                         nil,
+                                         @"pages/show.html.eoc",
+                                         9,
+                                         4,
+                                         &error);
+  XCTAssertTrue(rendered);
+  XCTAssertNil(error);
+  XCTAssertEqualObjects(@"<li>Inbox:first</li><li>Inbox:second</li>", out);
+}
+
+- (void)testRenderCollectionUsesEmptyTemplateForEmptyCollections {
+  ALNEOCRegisterTemplate(@"partials/_row.html.eoc", &RenderCollectionRow);
+  ALNEOCRegisterTemplate(@"partials/_empty.html.eoc", &RenderCollectionEmpty);
+
+  NSMutableString *out = [NSMutableString string];
+  NSError *error = nil;
+  BOOL rendered = ALNEOCRenderCollection(out,
+                                         @{ @"title" : @"Inbox" },
+                                         @"partials/_row",
+                                         @[],
+                                         @"row",
+                                         @"partials/_empty",
+                                         nil,
+                                         @"pages/show.html.eoc",
+                                         12,
+                                         4,
+                                         &error);
+  XCTAssertTrue(rendered);
+  XCTAssertNil(error);
+  XCTAssertEqualObjects(@"<li>empty</li>", out);
+}
+
+- (void)testRenderCollectionRejectsEmptyItemLocalName {
+  NSMutableString *out = [NSMutableString string];
+  NSError *error = nil;
+  BOOL rendered = ALNEOCRenderCollection(out,
+                                         @{ @"title" : @"Inbox" },
+                                         @"partials/_row",
+                                         @[ @"first" ],
+                                         @"",
+                                         nil,
+                                         nil,
+                                         @"pages/show.html.eoc",
+                                         14,
+                                         3,
+                                         &error);
+  XCTAssertFalse(rendered);
+  XCTAssertNotNil(error);
+  XCTAssertEqual((NSInteger)ALNEOCErrorInvalidArgument, [error code]);
+  XCTAssertEqualObjects(@"EOC collection render requires a non-empty item local name",
+                        error.localizedDescription);
+}
+
+- (void)testRenderCollectionRejectsNonEnumerableCollection {
+  NSMutableString *out = [NSMutableString string];
+  NSError *error = nil;
+  BOOL rendered = ALNEOCRenderCollection(out,
+                                         @{ @"title" : @"Inbox" },
+                                         @"partials/_row",
+                                         @(42),
+                                         @"row",
+                                         nil,
+                                         nil,
+                                         @"pages/show.html.eoc",
+                                         15,
+                                         3,
+                                         &error);
+  XCTAssertFalse(rendered);
+  XCTAssertNotNil(error);
+  XCTAssertEqual((NSInteger)ALNEOCErrorInvalidArgument, [error code]);
+  XCTAssertEqualObjects(@"EOC collection render requires an enumerable collection",
+                        error.localizedDescription);
+}
+
+- (void)testRenderCollectionRejectsInvalidOverlayLocals {
+  NSMutableString *out = [NSMutableString string];
+  NSError *error = nil;
+  BOOL rendered = ALNEOCRenderCollection(out,
+                                         @{ @"title" : @"Inbox" },
+                                         @"partials/_row",
+                                         @[ @"first" ],
+                                         @"row",
+                                         nil,
+                                         @"bad-locals",
+                                         @"pages/show.html.eoc",
+                                         16,
+                                         3,
+                                         &error);
+  XCTAssertFalse(rendered);
+  XCTAssertNotNil(error);
+  XCTAssertEqual((NSInteger)ALNEOCErrorInvalidArgument, [error code]);
+  XCTAssertEqualObjects(@"pages/show.html.eoc", error.userInfo[ALNEOCErrorPathKey]);
+}
+
+- (void)testSetSlotRejectsEmptySlotName {
+  NSError *error = nil;
+  BOOL ok = ALNEOCSetSlot(nil, @"", @"nav", @"pages/show.html.eoc", 6, 2, &error);
+  XCTAssertFalse(ok);
+  XCTAssertNotNil(error);
+  XCTAssertEqual((NSInteger)ALNEOCErrorInvalidArgument, [error code]);
+  XCTAssertEqualObjects(@"EOC slot name cannot be empty", error.localizedDescription);
+}
+
+- (void)testSetSlotRejectsInactiveCompositionState {
+  NSError *error = nil;
+  BOOL ok = ALNEOCSetSlot(nil, @"sidebar", @"nav", @"pages/show.html.eoc", 7, 2, &error);
+  XCTAssertFalse(ok);
+  XCTAssertNotNil(error);
+  XCTAssertEqual((NSInteger)ALNEOCErrorInvalidArgument, [error code]);
+  XCTAssertEqualObjects(@"EOC composition state is not active", error.localizedDescription);
+}
+
+- (void)testCompositionStateStoresAndYieldsNamedSlots {
+  NSDictionary *token = ALNEOCPushCompositionState();
+  @try {
+    NSError *error = nil;
+    XCTAssertTrue(ALNEOCSetSlot(nil,
+                                @"sidebar",
+                                @"nav",
+                                @"pages/show.html.eoc",
+                                3,
+                                1,
+                                &error));
+    XCTAssertNil(error);
+
+    NSMutableString *out = [NSMutableString string];
+    XCTAssertTrue(ALNEOCAppendYield(out,
+                                    @{},
+                                    @"sidebar",
+                                    @"layouts/application.html.eoc",
+                                    2,
+                                    1,
+                                    &error));
+    XCTAssertNil(error);
+    XCTAssertEqualObjects(@"nav", out);
+  } @finally {
+    ALNEOCPopCompositionState(token);
+  }
+}
+
+- (void)testAppendYieldDefaultsToContentSlot {
+  NSDictionary *token = ALNEOCPushCompositionState();
+  @try {
+    ALNEOCSetSlotContent(@"content", @"body");
+    NSMutableString *out = [NSMutableString string];
+    NSError *error = nil;
+    XCTAssertTrue(ALNEOCAppendYield(out,
+                                    @{},
+                                    @"",
+                                    @"layouts/application.html.eoc",
+                                    2,
+                                    1,
+                                    &error));
+    XCTAssertNil(error);
+    XCTAssertEqualObjects(@"body", out);
+  } @finally {
+    ALNEOCPopCompositionState(token);
+  }
+}
+
+- (void)testTemplateLayoutRegistryResolvesRegisteredLayout {
+  ALNEOCRegisterTemplateLayout(@"pages/show.html.eoc", @"layouts/application");
+  XCTAssertEqualObjects(@"layouts/application.html.eoc",
+                        ALNEOCResolveTemplateLayout(@"pages/show.html.eoc"));
 }
 
 @end

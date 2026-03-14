@@ -1,0 +1,6 @@
+<%@ requires row %>
+<tr>
+  <td><%= $row.name %></td>
+  <td><%= $row.value %></td>
+  <td><%= $row.notes %></td>
+</tr>

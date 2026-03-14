@@ -33,3 +33,32 @@ authModule = {
 
 This is the default-first path when the app wants branding and shell ownership
 without fully forking the auth pages.
+
+## Embedding MFA Fragments In App Pages
+
+Phase 18 adds a coarse embeddable fragment contract for server-rendered EOC
+apps. A typical account/security controller can ask the runtime for fragment
+context:
+
+```objc
+NSDictionary *fragmentContext = [[ALNAuthModuleRuntime sharedRuntime]
+    mfaManagementFragmentContextForCurrentUserInContext:ctx
+                                      returnTo:@"/account/security"
+                                         error:&error];
+```
+
+Then an app-owned template can render the stock factor inventory plus the
+appropriate MFA fragments:
+
+```eoc
+<% if (!ALNEOCInclude(out, ctx, @"modules/auth/fragments/mfa_factor_inventory_panel", error)) { return nil; } %>
+<% if ([[ctx objectForKey:@"authTOTPNeedsEnrollment"] boolValue]) { %>
+  <% if (!ALNEOCInclude(out, ctx, @"modules/auth/fragments/mfa_enrollment_panel", error)) { return nil; } %>
+<% } %>
+<% if ([[[ctx objectForKey:@"authSMSState"] objectForKey:@"enabled"] boolValue]) { %>
+  <% if (!ALNEOCInclude(out, ctx, @"modules/auth/fragments/mfa_sms_enrollment_panel", error)) { return nil; } %>
+<% } %>
+```
+
+That keeps the MFA UI aligned with the stock auth module pages without forcing
+the app to adopt the full `/auth/...` page surface.

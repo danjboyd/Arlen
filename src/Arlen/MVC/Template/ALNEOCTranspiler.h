@@ -11,6 +11,11 @@ extern NSString *const ALNEOCLintDiagnosticMessageKey;
 extern NSString *const ALNEOCLintDiagnosticPathKey;
 extern NSString *const ALNEOCLintDiagnosticLineKey;
 extern NSString *const ALNEOCLintDiagnosticColumnKey;
+extern NSString *const ALNEOCTemplateMetadataLayoutPathKey;
+extern NSString *const ALNEOCTemplateMetadataRequiredLocalsKey;
+extern NSString *const ALNEOCTemplateMetadataYieldSlotsKey;
+extern NSString *const ALNEOCTemplateMetadataFilledSlotsKey;
+extern NSString *const ALNEOCTemplateMetadataStaticDependenciesKey;
 
 @interface ALNEOCTranspiler : NSObject
 
@@ -24,6 +29,10 @@ extern NSString *const ALNEOCLintDiagnosticColumnKey;
                                                             logicalPath:(NSString *)logicalPath
                                                                   error:
                                                                       (NSError *_Nullable *_Nullable)error;
+- (nullable NSDictionary *)templateMetadataForTemplateString:(NSString *)templateText
+                                                  logicalPath:(NSString *)logicalPath
+                                                        error:
+                                                            (NSError *_Nullable *_Nullable)error;
 - (nullable NSString *)transpiledSourceForTemplateString:(NSString *)templateText
                                               logicalPath:(NSString *)logicalPath
                                                     error:

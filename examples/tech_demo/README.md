@@ -29,11 +29,11 @@ This imports the POSIX networking headers plus the main Arlen framework headers.
 ## Demo Endpoints
 
 - `GET /tech-demo`
-  - landing page with layout + partial + list rendering
+  - landing page with template-owned layout, named slot, and collection partial rendering
 - `GET /tech-demo/dashboard?tab=router`
-  - table rendering with looped data
+  - table rendering through collection partials
 - `GET /tech-demo/users/peggy?flag=admin`
-  - route param + query param rendering
+  - route param + query param rendering with slot-filled request recap
 - `GET /tech-demo/api/catalog`
   - implicit JSON from `NSArray`
 - `GET /tech-demo/api/summary?view=full`
@@ -46,7 +46,7 @@ This imports the POSIX networking headers plus the main Arlen framework headers.
 It exercises the pieces needed for real apps:
 
 - route dispatch and controller actions
-- template rendering with layouts and partials
+- template rendering with first-class layouts, named slots, and partial collections
 - implicit JSON API responses
 - static asset serving in dev mode
 - request metadata and query handling

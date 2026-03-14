@@ -273,8 +273,15 @@ static NSUInteger gPhase15UIContextCalls = 0;
   XCTAssertEqualObjects(@"/auth/password/forgot", runtime.forgotPasswordPath);
   XCTAssertEqualObjects(@"/auth/password/reset", runtime.resetPasswordPath);
   XCTAssertEqualObjects(@"/auth/password/change", runtime.changePasswordPath);
+  XCTAssertEqualObjects(@"/auth/mfa", runtime.mfaManagePath);
   XCTAssertEqualObjects(@"/auth/mfa/totp", runtime.totpPath);
   XCTAssertEqualObjects(@"/auth/mfa/totp/verify", runtime.totpVerifyPath);
+  XCTAssertEqualObjects(@"/auth/mfa/sms", runtime.smsPath);
+  XCTAssertEqualObjects(@"/auth/mfa/sms/start", runtime.smsStartPath);
+  XCTAssertEqualObjects(@"/auth/mfa/sms/verify", runtime.smsVerifyPath);
+  XCTAssertEqualObjects(@"/auth/mfa/sms/resend", runtime.smsResendPath);
+  XCTAssertEqualObjects(@"/auth/mfa/sms/remove", runtime.smsRemovePath);
+  XCTAssertFalse(runtime.smsEnabled);
   XCTAssertEqualObjects(@"/auth/provider/stub/login", runtime.providerStubLoginPath);
   XCTAssertEqualObjects(@"/", runtime.defaultRedirect);
   XCTAssertEqualObjects(@"/auth/api", summary[@"apiPrefix"]);
@@ -295,6 +302,8 @@ static NSUInteger gPhase15UIContextCalls = 0;
   XCTAssertEqualObjects(@"modules/auth/fragments/mfa_challenge_form",
                         [runtime fragmentTemplatePathForIdentifier:@"mfa_challenge_form" defaultPath:@""]);
   XCTAssertEqualObjects(@"/modules/auth/auth_totp_qr.js", [runtime authUIAssetPathForFilename:@"auth_totp_qr.js"]);
+  XCTAssertEqualObjects(@NO, summary[@"mfa"][@"sms"][@"enabled"]);
+  XCTAssertEqualObjects(@NO, summary[@"mfa"][@"sms"][@"allowPrimaryFactor"]);
   XCTAssertEqualObjects(@"", summary[@"passwordPolicy"]);
   XCTAssertEqualObjects(@"", summary[@"userProvisioning"]);
   XCTAssertEqualObjects(@"", summary[@"sessionPolicy"]);
@@ -396,6 +405,40 @@ static NSUInteger gPhase15UIContextCalls = 0;
   XCTAssertEqualObjects((@[]), [runtime resolvedHookSummary][@"loginProviders"]);
 }
 
+- (void)testSMSConfigurationRequiresProviderSeamWhenEnabled {
+  ALNAuthModuleRuntime *runtime = [ALNAuthModuleRuntime sharedRuntime];
+  NSError *error = nil;
+  NSDictionary *config = @{
+    @"mfa" : @{
+      @"sms" : @{
+        @"enabled" : @YES,
+      },
+    },
+  };
+  XCTAssertFalse([runtime configureHooksWithModuleConfig:config error:&error]);
+  XCTAssertNotNil(error);
+  XCTAssertEqual((NSInteger)ALNAuthModuleErrorInvalidConfiguration, error.code);
+}
+
+- (void)testSMSConfigurationAcceptsTestVerificationCodeOverride {
+  ALNAuthModuleRuntime *runtime = [ALNAuthModuleRuntime sharedRuntime];
+  NSError *error = nil;
+  NSDictionary *config = @{
+    @"mfa" : @{
+      @"sms" : @{
+        @"enabled" : @YES,
+        @"allowPrimaryFactor" : @YES,
+        @"testVerificationCode" : @"123456",
+      },
+    },
+  };
+  XCTAssertTrue([runtime configureHooksWithModuleConfig:config error:&error]);
+  XCTAssertNil(error);
+  XCTAssertTrue(runtime.smsEnabled);
+  XCTAssertEqualObjects(@YES, [runtime resolvedHookSummary][@"mfa"][@"sms"][@"enabled"]);
+  XCTAssertEqualObjects(@YES, [runtime resolvedHookSummary][@"mfa"][@"sms"][@"allowPrimaryFactor"]);
+}
+
 - (void)testAuthUIConfigurationResolvesGeneratedPathsAndContextHooks {
   ALNAuthModuleRuntime *runtime = [ALNAuthModuleRuntime sharedRuntime];
   NSError *error = nil;
@@ -420,10 +463,16 @@ static NSUInteger gPhase15UIContextCalls = 0;
   XCTAssertEqualObjects(@"accounts/auth/login", [runtime pageTemplatePathForIdentifier:@"login" defaultPath:@""]);
   XCTAssertEqualObjects(@"accounts/auth/password/reset",
                         [runtime pageTemplatePathForIdentifier:@"reset_password" defaultPath:@""]);
+  XCTAssertEqualObjects(@"accounts/auth/mfa/manage", [runtime pageTemplatePathForIdentifier:@"mfa_manage" defaultPath:@""]);
+  XCTAssertEqualObjects(@"accounts/auth/mfa/sms", [runtime pageTemplatePathForIdentifier:@"sms_challenge" defaultPath:@""]);
   XCTAssertEqualObjects(@"accounts/auth/partials/bodies/login_body",
                         [runtime bodyTemplatePathForIdentifier:@"login" defaultPath:@""]);
+  XCTAssertEqualObjects(@"accounts/auth/partials/bodies/mfa_manage_body",
+                        [runtime bodyTemplatePathForIdentifier:@"mfa_manage" defaultPath:@""]);
   XCTAssertEqualObjects(@"accounts/auth/fragments/mfa_enrollment_panel",
                         [runtime fragmentTemplatePathForIdentifier:@"mfa_enrollment_panel" defaultPath:@""]);
+  XCTAssertEqualObjects(@"accounts/auth/fragments/mfa_factor_inventory_panel",
+                        [runtime fragmentTemplatePathForIdentifier:@"mfa_factor_inventory_panel" defaultPath:@""]);
   XCTAssertEqualObjects(@"auth/partials/custom_page_wrapper",
                         [runtime partialTemplatePathForIdentifier:@"page_wrapper" defaultPath:@""]);
   XCTAssertEqualObjects(@"accounts/auth/partials/provider_row",
@@ -465,6 +514,59 @@ static NSUInteger gPhase15UIContextCalls = 0;
   XCTAssertNil([app.router routeNamed:@"auth_api_provider_stub_login"]);
   XCTAssertNil([app.router routeNamed:@"auth_api_provider_stub_authorize"]);
   XCTAssertNil([app.router routeNamed:@"auth_api_provider_stub_callback"]);
+}
+
+- (void)testSMSRoutesAreNotRegisteredWhenSMSIsDisabled {
+  if ([[self pgTestDSN] length] == 0) {
+    return;
+  }
+  ALNApplication *app = [self applicationWithConfig:@{}];
+  NSError *error = nil;
+  XCTAssertTrue([[[ALNAuthModule alloc] init] registerWithApplication:app error:&error]);
+  XCTAssertNil(error);
+
+  XCTAssertNotNil([app.router routeNamed:@"auth_mfa_manage"]);
+  XCTAssertNotNil([app.router routeNamed:@"auth_api_mfa"]);
+  XCTAssertNil([app.router routeNamed:@"auth_sms_form"]);
+  XCTAssertNil([app.router routeNamed:@"auth_sms_start"]);
+  XCTAssertNil([app.router routeNamed:@"auth_sms_verify"]);
+  XCTAssertNil([app.router routeNamed:@"auth_sms_resend"]);
+  XCTAssertNil([app.router routeNamed:@"auth_sms_remove"]);
+  XCTAssertNil([app.router routeNamed:@"auth_api_sms"]);
+  XCTAssertNil([app.router routeNamed:@"auth_api_sms_start"]);
+  XCTAssertNil([app.router routeNamed:@"auth_api_sms_verify"]);
+  XCTAssertNil([app.router routeNamed:@"auth_api_sms_resend"]);
+  XCTAssertNil([app.router routeNamed:@"auth_api_sms_remove"]);
+}
+
+- (void)testSMSRoutesRegisterWhenEnabled {
+  if ([[self pgTestDSN] length] == 0) {
+    return;
+  }
+  ALNApplication *app = [self applicationWithConfig:@{
+    @"authModule" : @{
+      @"mfa" : @{
+        @"sms" : @{
+          @"enabled" : @YES,
+          @"testVerificationCode" : @"123456",
+        },
+      },
+    },
+  }];
+  NSError *error = nil;
+  XCTAssertTrue([[[ALNAuthModule alloc] init] registerWithApplication:app error:&error]);
+  XCTAssertNil(error);
+
+  XCTAssertNotNil([app.router routeNamed:@"auth_sms_form"]);
+  XCTAssertNotNil([app.router routeNamed:@"auth_sms_start"]);
+  XCTAssertNotNil([app.router routeNamed:@"auth_sms_verify"]);
+  XCTAssertNotNil([app.router routeNamed:@"auth_sms_resend"]);
+  XCTAssertNotNil([app.router routeNamed:@"auth_sms_remove"]);
+  XCTAssertNotNil([app.router routeNamed:@"auth_api_sms"]);
+  XCTAssertNotNil([app.router routeNamed:@"auth_api_sms_start"]);
+  XCTAssertNotNil([app.router routeNamed:@"auth_api_sms_verify"]);
+  XCTAssertNotNil([app.router routeNamed:@"auth_api_sms_resend"]);
+  XCTAssertNotNil([app.router routeNamed:@"auth_api_sms_remove"]);
 }
 
 - (void)testHeadlessModeDoesNotRegisterInteractiveHTMLRoutes {
@@ -585,7 +687,12 @@ static NSUInteger gPhase15UIContextCalls = 0;
   XCTAssertEqualObjects(@"auth-ui", payload[@"target"]);
   XCTAssertTrue([payload[@"created_files"] containsObject:@"templates/auth/login.html.eoc"]);
   XCTAssertTrue([payload[@"created_files"] containsObject:@"public/auth/auth.css"]);
+  XCTAssertTrue([payload[@"created_files"] containsObject:@"templates/auth/mfa/manage.html.eoc"]);
+  XCTAssertTrue([payload[@"created_files"] containsObject:@"templates/auth/mfa/sms.html.eoc"]);
+  XCTAssertTrue([payload[@"created_files"] containsObject:@"templates/auth/fragments/mfa_factor_inventory_panel.html.eoc"]);
   XCTAssertTrue([payload[@"created_files"] containsObject:@"templates/auth/fragments/mfa_enrollment_panel.html.eoc"]);
+  XCTAssertTrue([payload[@"created_files"] containsObject:@"templates/auth/fragments/mfa_sms_enrollment_panel.html.eoc"]);
+  XCTAssertTrue([payload[@"created_files"] containsObject:@"templates/auth/fragments/mfa_sms_challenge_form.html.eoc"]);
   XCTAssertTrue([payload[@"created_files"] containsObject:@"templates/auth/mfa/totp_enrollment.html.eoc"]);
   XCTAssertTrue([payload[@"created_files"] containsObject:@"public/auth/auth_totp_qr.js"]);
   XCTAssertTrue([payload[@"updated_files"] containsObject:@"config/app.plist"]);
@@ -599,6 +706,8 @@ static NSUInteger gPhase15UIContextCalls = 0;
   XCTAssertTrue([configText containsString:@"generatedPagePrefix = auth"]);
   XCTAssertTrue([[NSFileManager defaultManager] fileExistsAtPath:[tempApp stringByAppendingPathComponent:@"templates/auth/partials/page_wrapper.html.eoc"]]);
   XCTAssertTrue([[NSFileManager defaultManager] fileExistsAtPath:[tempApp stringByAppendingPathComponent:@"templates/auth/fragments/mfa_challenge_form.html.eoc"]]);
+  XCTAssertTrue([[NSFileManager defaultManager] fileExistsAtPath:[tempApp stringByAppendingPathComponent:@"templates/auth/partials/bodies/mfa_manage_body.html.eoc"]]);
+  XCTAssertTrue([[NSFileManager defaultManager] fileExistsAtPath:[tempApp stringByAppendingPathComponent:@"templates/auth/partials/bodies/sms_challenge_body.html.eoc"]]);
   XCTAssertTrue([[NSFileManager defaultManager] fileExistsAtPath:[tempApp stringByAppendingPathComponent:@"templates/auth/mfa/totp_recovery_codes.html.eoc"]]);
   XCTAssertTrue([[NSFileManager defaultManager] fileExistsAtPath:[tempApp stringByAppendingPathComponent:@"templates/layouts/auth_generated.html.eoc"]]);
 }

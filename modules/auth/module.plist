@@ -17,6 +17,26 @@
       authModule = {
         defaultRedirect = "/";
         bootstrapAdminEmails = ();
+        mfa = {
+          sms = {
+            enabled = NO;
+            allowEnrollment = YES;
+            allowChallenge = YES;
+            allowPrimaryFactor = NO;
+            phoneManagementRequiresMFA = YES;
+            recentMFAMaxAgeSeconds = 900;
+            resendCooldownSeconds = 30;
+            maxSendAttemptsPerSession = 5;
+            maxVerifyAttemptsPerSession = 8;
+            locale = "";
+            accountSID = "";
+            authToken = "";
+            apiKeySID = "";
+            apiKeySecret = "";
+            verifyServiceSID = "";
+            testVerificationCode = "";
+          };
+        };
         paths = {
           prefix = "/auth";
           apiPrefix = "api";

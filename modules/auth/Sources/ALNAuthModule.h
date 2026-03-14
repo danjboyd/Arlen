@@ -84,8 +84,14 @@ typedef NS_ENUM(NSInteger, ALNAuthModuleErrorCode) {
 @property(nonatomic, copy, readonly) NSString *forgotPasswordPath;
 @property(nonatomic, copy, readonly) NSString *resetPasswordPath;
 @property(nonatomic, copy, readonly) NSString *changePasswordPath;
+@property(nonatomic, copy, readonly) NSString *mfaManagePath;
 @property(nonatomic, copy, readonly) NSString *totpPath;
 @property(nonatomic, copy, readonly) NSString *totpVerifyPath;
+@property(nonatomic, copy, readonly) NSString *smsPath;
+@property(nonatomic, copy, readonly) NSString *smsStartPath;
+@property(nonatomic, copy, readonly) NSString *smsVerifyPath;
+@property(nonatomic, copy, readonly) NSString *smsResendPath;
+@property(nonatomic, copy, readonly) NSString *smsRemovePath;
 @property(nonatomic, copy, readonly) NSString *providerStubLoginPath;
 @property(nonatomic, copy, readonly) NSString *providerStubAuthorizePath;
 @property(nonatomic, copy, readonly) NSString *providerStubCallbackPath;
@@ -94,6 +100,7 @@ typedef NS_ENUM(NSInteger, ALNAuthModuleErrorCode) {
 @property(nonatomic, copy, readonly) NSString *uiMode;
 @property(nonatomic, copy, readonly) NSString *layoutTemplate;
 @property(nonatomic, copy, readonly) NSString *generatedPagePrefix;
+@property(nonatomic, assign, readonly) BOOL smsEnabled;
 
 + (instancetype)sharedRuntime;
 
@@ -141,6 +148,12 @@ typedef NS_ENUM(NSInteger, ALNAuthModuleErrorCode) {
 - (nullable NSDictionary *)totpFragmentContextForCurrentUserInContext:(ALNContext *)context
                                                              returnTo:(nullable NSString *)returnTo
                                                                 error:(NSError *_Nullable *_Nullable)error;
+- (nullable NSDictionary *)mfaManagementFragmentContextForCurrentUserInContext:(ALNContext *)context
+                                                                      returnTo:(nullable NSString *)returnTo
+                                                                         error:(NSError *_Nullable *_Nullable)error;
+- (nullable NSDictionary *)smsChallengeFragmentContextForCurrentUserInContext:(ALNContext *)context
+                                                                     returnTo:(nullable NSString *)returnTo
+                                                                        error:(NSError *_Nullable *_Nullable)error;
 - (nullable NSDictionary *)verifyTOTPCode:(NSString *)code
                                      user:(NSDictionary *)user
                                   context:(ALNContext *)context

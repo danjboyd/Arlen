@@ -8,7 +8,7 @@
 #import <sys/socket.h>
 #import <unistd.h>
 
-#import "ALNEOCRuntime.h"
+#import "ALNView.h"
 
 static volatile sig_atomic_t gShouldRun = 1;
 
@@ -121,8 +121,10 @@ static void HandleClient(int clientFd) {
 
   if ([path isEqualToString:@"/"]) {
     NSError *renderError = nil;
-    NSString *body = ALNEOCRenderTemplate(@"index.html.eoc", BuildRequestContext(path),
-                                           &renderError);
+    NSString *body = [ALNView renderTemplate:@"index"
+                                     context:BuildRequestContext(path)
+                                      layout:nil
+                                       error:&renderError];
     if (body == nil) {
       NSString *msg = [NSString stringWithFormat:@"render failed: %@",
                                                  [renderError localizedDescription]];

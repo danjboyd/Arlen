@@ -21,6 +21,11 @@ Create a new app scaffold.
 - `--force`: overwrite existing files where allowed
 - `--json`: emit machine-readable scaffold payload (`phase7g-agent-dx-contracts-v1`)
 - `--help` / `-h`: show command usage
+- full-mode scaffold defaults:
+  - `templates/layouts/main.html.eoc`
+  - `templates/index.html.eoc` with `<%@ layout "layouts/main" %>`
+  - `templates/partials/_nav.html.eoc`
+  - `templates/partials/_feature.html.eoc`
 
 ### `arlen doctor [--env <name>] [--json]`
 
@@ -67,23 +72,33 @@ Notes:
 
 - placeholder routes are supported (for example `/user/admin/:id`)
 - endpoint generator can create route + action + optional template in one command
+- when `templates/layouts/main.html.eoc` exists, generated HTML templates opt into it automatically unless the target logical path is under `layouts/` or `partials/`
 
 ### `arlen migrate [--env <name>] [--database <target>] [--dsn <connection_string>] [--dry-run]`
 
-Apply SQL migrations from `db/migrations` to PostgreSQL.
+Apply SQL migrations from `db/migrations` using the configured adapter for the
+selected database target.
 
 - `--env <name>`: select runtime environment (default: `development`)
 - `--database <target>`: select migration target (default: `default`)
 - `--dsn <connection_string>`: override config DSN
 - `--dry-run`: list pending migrations without applying
+- supported adapters:
+  - `postgresql` (default)
+  - `gdl2` (fallback compatibility wrapper over PostgreSQL)
+  - `mssql` / `sqlserver` (optional SQL Server path via ODBC connection string)
 - per-target migration directory: `db/migrations/<target>` (for non-default targets)
 - per-target migration state table: `arlen_schema_migrations__<target>`
 - target-specific env override: `ARLEN_DATABASE_URL_<TARGET>`
-- migration files are executed as raw PostgreSQL scripts inside one transaction per file
+- migration files are executed as raw SQL inside one transaction per file
 - normal multi-statement `.sql` migration files are supported
+- for MSSQL migrations, standalone `GO` batch separator lines are normalized as
+  file-local statement boundaries before execution
 - empty/comment-only migration files are rejected
-- top-level transaction control statements such as `BEGIN`, `COMMIT`, `ROLLBACK`, and `SAVEPOINT` are rejected
-- PostgreSQL commands that are disallowed inside transaction blocks still fail under `arlen migrate`
+- top-level transaction control statements such as `BEGIN`, `COMMIT`, `ROLLBACK`, `SAVEPOINT`, and `SAVE TRANSACTION` are rejected
+- PostgreSQL-specific commands that are disallowed inside transaction blocks still fail under `arlen migrate`
+- MSSQL requires an installed ODBC manager/runtime client plus a SQL Server
+  driver; core Arlen does not link to Microsoft's driver
 
 ### `arlen module <add|remove|list|doctor|migrate|assets|upgrade|eject> [options]`
 
@@ -123,6 +138,8 @@ Manage first-class vendored modules installed in `config/modules.plist` and `mod
 - applies vendored module migrations in dependency order
 - records namespaced migration versions (`<module>::<migration>`) in the normal Arlen migrations table for the selected target
 - respects `migrations.databaseTarget` in each module manifest
+- uses the configured adapter for the selected target (`postgresql`, `gdl2`, or
+  optional `mssql`)
 
 `arlen module assets [--output-dir <path>] [--json]`
 
@@ -136,8 +153,12 @@ Manage first-class vendored modules installed in `config/modules.plist` and `mod
 `arlen module eject auth-ui [--force] [--json]`
 
 - scaffolds app-owned auth pages under `templates/auth/...`
+- scaffolds app-owned auth fragments under `templates/auth/fragments/...`
 - scaffolds auth partials under `templates/auth/partials/...`
-- scaffolds `templates/layouts/auth_generated.html.eoc` and `public/auth/auth.css`
+- scaffolds factor-management pages such as `templates/auth/mfa/manage.html.eoc`
+  and `templates/auth/mfa/sms.html.eoc`
+- scaffolds `templates/layouts/auth_generated.html.eoc`, `public/auth/auth.css`,
+  and `public/auth/auth_totp_qr.js`
 - updates `config/app.plist` to use:
   - `authModule.ui.mode = "generated-app-ui"`
   - `authModule.ui.layout = "layouts/auth_generated"`
@@ -160,7 +181,7 @@ Example first-party bootstrap:
 
 First-party module surfaces after install:
 
-- `auth`: stable JSON under `/auth/api/...`; HTML ownership under `/auth/...` is controlled by `authModule.ui.mode` (`module-ui`, `headless`, or `generated-app-ui`)
+- `auth`: stable JSON under `/auth/api/...`; HTML ownership under `/auth/...` is controlled by `authModule.ui.mode` (`module-ui`, `headless`, or `generated-app-ui`). Phase 18 also adds embeddable server-rendered MFA fragments, `/auth/api/mfa` factor discovery, and optional disabled-by-default SMS/Twilio Verify MFA support.
 - `admin-ui`: HTML under `/admin/...`, JSON under `/admin/api/...`
 - `jobs`: protected HTML under `/jobs/...`, JSON under `/jobs/api/...`
 - `notifications`: authenticated inbox/preferences plus admin preview/outbox/test-send under `/notifications/...` and `/notifications/api/...`
@@ -171,6 +192,9 @@ First-party module surfaces after install:
 ### `arlen schema-codegen [--env <name>] [--database <target>] [--dsn <connection_string>] [--output-dir <path>] [--manifest <path>] [--prefix <ClassPrefix>] [--typed-contracts] [--force]`
 
 Introspect PostgreSQL schema metadata and generate typed table/column helper APIs.
+
+- current backend scope: PostgreSQL only (`ALNPg`)
+- Phase 17 does not add MSSQL schema introspection/codegen
 
 - `--env <name>`: select runtime environment (default: `development`)
 - `--database <target>`: select codegen target (default: `default`)
@@ -278,20 +302,33 @@ Template transpiler used by `make`/`boomhauer` pipelines.
 Usage:
 
 ```text
-build/eocc --template-root <dir> --output-dir <dir> [--registry-out <file>] <template1.html.eoc> [template2 ...]
+build/eocc --template-root <dir> --output-dir <dir> [--registry-out <file>] [--logical-prefix <prefix>] <template1.html.eoc> [template2 ...]
 ```
 
 Diagnostics behavior:
 
 - syntax/transpile failures return non-zero and emit deterministic location metadata:
   - `eocc: location path=<path> line=<line> column=<column>`
+- static composition validation failures return non-zero before code generation:
+  - unknown `layout` / `include` / `render` dependencies
+  - static composition cycles across layouts/includes/renders
 - lint warnings are emitted during successful transpile:
   - `eocc: warning path=<path> line=<line> column=<column> code=<code> message=<message>`
-  - current lint code: `unguarded_include` (include return value should be checked)
+  - current lint codes:
+    - `unguarded_include`
+    - `slot_without_layout`
+    - `unused_slot_fill`
 - lint warnings are non-fatal in this phase slice
 - sigil local grammar supports:
   - `$identifier`
   - `$identifier(.identifier)*` (dotted keypaths)
+- composition directives support:
+  - `<%@ layout "layouts/application" %>`
+  - `<%@ requires title, rows %>`
+  - `<%@ yield %>` / `<%@ yield "sidebar" %>`
+  - `<%@ slot "sidebar" %>` ... `<%@ endslot %>`
+  - `<%@ include "partials/_row" with @{ ... } %>`
+  - `<%@ render "partials/_row" collection:$rows as:"row" empty:"partials/_empty" with @{ ... } %>`
 
 ### `arlen config [--env <name>] [--json]`
 
@@ -440,7 +477,7 @@ Environment:
 - `ARLEN_ENABLE_LLHTTP` (compile-time toggle for app-root builds via `bin/boomhauer`; `1` default, set `0` to compile without llhttp)
 - `ARLEN_BOOMHAUER_BUILD_ERROR_RETRY_SECONDS` (watch-mode fallback retry cadence in seconds; default `2`; set `0` to disable automatic retry)
 - `ARLEN_BOOMHAUER_BUILD_ERROR_AUTO_REFRESH_SECONDS` (fallback HTML auto-refresh cadence in seconds; default `3`; set `0` to disable automatic refresh)
-- `ARLEN_BOOMHAUER_BUILD_ERROR_RECOVERY_HINT` (optional custom recovery text shown on the fallback HTML page and JSON diagnostics)
+- `ARLEN_BOOMHAUER_BUILD_ERROR_RECOVERY_HINT` (optional custom recovery text shown on the fallback HTML page and JSON diagnostics; compile failures keep Clang-style color highlighting in the browser page while JSON stays plain-text-safe)
 - `ARLEN_TRACE_PROPAGATION_ENABLED` (default `1`; legacy `MOJOOBJC_TRACE_PROPAGATION_ENABLED` also accepted)
 - `ARLEN_RESPONSE_IDENTITY_HEADERS_ENABLED` (default `1`; disables `X-Request-Id`/`X-Correlation-Id` emission when set to `0`; legacy `MOJOOBJC_RESPONSE_IDENTITY_HEADERS_ENABLED` also accepted)
 - `ARLEN_METRICS_ENABLED` (default `1`; disables hot-path metrics writes when set to `0`; legacy `MOJOOBJC_METRICS_ENABLED` also accepted)
@@ -542,6 +579,9 @@ Lifecycle diagnostics:
 - `bin/dev`: alias for `bin/boomhauer`
 - `bin/jobs-worker`: build current app and run the first-party jobs worker loop
 - `make test-unit` / `make test-integration`: run XCTest bundles with repo-local GNUstep defaults home (`.gnustep-home`)
+- `make browser-error-audit`: run the dedicated browser error audit bundle and generate a review gallery at `build/browser-error-audit/index.html`
+  - captures representative build/runtime/browser error scenarios into browsable HTML artifacts
+  - preserves raw responses plus wrapped review pages so plain-text/JSON browser fallbacks are easy to inspect
 - `make ci-quality`: run unit + integration + multi-profile perf quality gate plus runtime concurrency, JSON abstraction/performance gates, and Phase 9I fault-injection checks
 - `make ci-sanitizers`: run Phase 9H blocking sanitizer gate (ASan/UBSan + runtime probe + data-layer checks), validate suppression registry, and generate sanitizer confidence artifacts under `build/release_confidence/phase9h`
 - `make ci-fault-injection`: run Phase 9I runtime seam fault-injection matrix and generate artifacts under `build/release_confidence/phase9i`
