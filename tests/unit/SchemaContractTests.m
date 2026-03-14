@@ -18,6 +18,18 @@
                                       body:[NSData data]];
 }
 
+- (ALNRequest *)requestWithJSONObject:(id)object {
+  NSError *error = nil;
+  NSData *body = [NSJSONSerialization dataWithJSONObject:object ?: @{} options:0 error:&error];
+  XCTAssertNotNil(body);
+  XCTAssertNil(error);
+  return [[ALNRequest alloc] initWithMethod:@"POST"
+                                      path:@"/"
+                               queryString:@""
+                                   headers:@{ @"content-type" : @"application/json" }
+                                      body:body ?: [NSData data]];
+}
+
 - (void)testSchemaCoercionAppliesNamedTransformerBeforeTypeValidation {
   NSDictionary *schema = @{
     @"type" : @"object",
@@ -115,6 +127,55 @@
   XCTAssertEqualObjects(@"age", entry[@"field"]);
   XCTAssertEqualObjects(@"invalid_transform", entry[@"code"]);
   XCTAssertEqualObjects(@"to_integer", entry[@"meta"][@"transformer"]);
+}
+
+- (void)testSchemaCoercionPreservesNestedObjectItemsInsideBodyArrays {
+  NSDictionary *schema = @{
+    @"type" : @"object",
+    @"properties" : @{
+      @"corrections" : @{
+        @"type" : @"array",
+        @"source" : @"body",
+        @"required" : @(YES),
+        @"items" : @{
+          @"field" : @"string",
+          @"before" : @"string",
+          @"after" : @"string",
+          @"metadata" : @{
+            @"reason" : @"string",
+          },
+        },
+      },
+    },
+  };
+
+  NSArray *errors = nil;
+  NSDictionary *coerced = ALNSchemaCoerceRequestValues(
+      schema,
+      [self requestWithJSONObject:@{
+        @"corrections" : @[
+          @{
+            @"field" : @"status",
+            @"before" : @"draft",
+            @"after" : @"active",
+            @"metadata" : @{ @"reason" : @"human review" },
+          },
+        ],
+      }],
+      @{},
+      &errors);
+  XCTAssertNotNil(coerced);
+  XCTAssertEqual((NSUInteger)0, [errors count]);
+
+  NSArray *corrections = [coerced[@"corrections"] isKindOfClass:[NSArray class]] ? coerced[@"corrections"] : @[];
+  XCTAssertEqual((NSUInteger)1, [corrections count]);
+  NSDictionary *entry = [corrections[0] isKindOfClass:[NSDictionary class]] ? corrections[0] : nil;
+  XCTAssertNotNil(entry);
+  XCTAssertEqualObjects(@"status", entry[@"field"]);
+  XCTAssertEqualObjects(@"draft", entry[@"before"]);
+  XCTAssertEqualObjects(@"active", entry[@"after"]);
+  XCTAssertTrue([entry[@"metadata"] isKindOfClass:[NSDictionary class]]);
+  XCTAssertEqualObjects(@"human review", entry[@"metadata"][@"reason"]);
 }
 
 - (void)testSchemaReadinessDiagnosticsReportUnknownTransformerAsError {

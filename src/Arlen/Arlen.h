@@ -11,15 +11,25 @@
 #import "Data/ALNAdapterConformance.h"
 #import "Data/ALNDatabaseAdapter.h"
 #import "Data/ALNDisplayGroup.h"
+#if __has_include("Data/ALNMSSQL.h")
 #import "Data/ALNMSSQL.h"
+#endif
+#if __has_include("Data/ALNMSSQLDialect.h")
 #import "Data/ALNMSSQLDialect.h"
+#endif
+#if __has_include("Data/ALNMSSQLSQLBuilder.h")
 #import "Data/ALNMSSQLSQLBuilder.h"
+#endif
 #import "Data/ALNGDL2Adapter.h"
 #import "Data/ALNMigrationRunner.h"
 #import "Data/ALNPg.h"
+#if __has_include("Data/ALNPostgresDialect.h")
 #import "Data/ALNPostgresDialect.h"
+#endif
 #import "Data/ALNPostgresSQLBuilder.h"
+#if __has_include("Data/ALNSQLDialect.h")
 #import "Data/ALNSQLDialect.h"
+#endif
 #import "Data/ALNSQLBuilder.h"
 #import "HTTP/ALNHTTPServer.h"
 #import "HTTP/ALNRequest.h"

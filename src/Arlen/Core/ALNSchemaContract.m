@@ -100,7 +100,7 @@ static NSString *ALNSchemaType(NSDictionary *descriptor) {
   if ([type length] > 0) {
     return type;
   }
-  if ([[descriptor[@"properties"] allKeys] count] > 0) {
+  if ([[ALNSchemaProperties(descriptor) allKeys] count] > 0) {
     return @"object";
   }
   if ([descriptor[@"items"] isKindOfClass:[NSDictionary class]] ||

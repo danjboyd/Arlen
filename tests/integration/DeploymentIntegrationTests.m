@@ -211,6 +211,50 @@
   }
 }
 
+- (void)testArlenUmbrellaHeaderCompilesAgainstTrackedSourceTreeOnly {
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *workRoot = [self createTempDirectoryWithPrefix:@"arlen-umbrella-header-smoke"];
+  XCTAssertNotNil(workRoot);
+  if (workRoot == nil) {
+    return;
+  }
+
+  @try {
+    NSString *exportRoot = [workRoot stringByAppendingPathComponent:@"tracked-export"];
+    NSString *sourcePath = [workRoot stringByAppendingPathComponent:@"umbrella-header-smoke.m"];
+    XCTAssertTrue([self writeFile:sourcePath
+                          content:@"#import <Foundation/Foundation.h>\n"
+                                  "#import \"Arlen.h\"\n"
+                                  "int main(int argc, const char *argv[]) {\n"
+                                  "  (void)argc;\n"
+                                  "  (void)argv;\n"
+                                  "  return 0;\n"
+                                  "}\n"]);
+
+    int code = 0;
+    NSString *compileOutput = [self runShellCapture:[NSString stringWithFormat:
+        @"set -euo pipefail && "
+         "repo_root='%@' && export_root='%@' && source_path='%@' && "
+         "rm -rf \"$export_root\" && mkdir -p \"$export_root\" && "
+         "cd \"$repo_root\" && "
+         "git ls-files -z src/Arlen modules/*/Sources | while IFS= read -r -d '' path; do "
+         "  mkdir -p \"$export_root/$(dirname \"$path\")\"; "
+         "  cp \"$path\" \"$export_root/$path\"; "
+         "done && "
+         "source /usr/GNUstep/System/Library/Makefiles/GNUstep.sh && "
+         "include_flags=\"-I$export_root/src/Arlen\" && "
+         "for dir in \"$export_root\"/src/Arlen/* \"$export_root\"/modules/*/Sources; do "
+         "  if [ -d \"$dir\" ]; then include_flags=\"$include_flags -I$dir\"; fi; "
+         "done && "
+         "clang $(gnustep-config --objc-flags) -fobjc-arc -fsyntax-only $include_flags \"$source_path\"",
+        repoRoot, exportRoot, sourcePath]
+                                       exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", compileOutput);
+  } @finally {
+    [[NSFileManager defaultManager] removeItemAtPath:workRoot error:nil];
+  }
+}
+
 - (void)testReleaseBuildActivateAndRollbackScripts {
   NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
   NSString *appRoot = [self createTempDirectoryWithPrefix:@"arlen-release-app"];
