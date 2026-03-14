@@ -260,6 +260,86 @@
   }
 }
 
+- (void)testBoomhauerIgnoresStaleGeneratedModuleSourcesOutsideCurrentTemplateInventory {
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *appRoot = [self createTempDirectoryWithPrefix:@"phase13-stale-generated-module-app"];
+  XCTAssertNotNil(appRoot);
+  if (appRoot == nil) {
+    return;
+  }
+
+  @try {
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"config/app.plist"]
+                          content:@"{\n"
+                                  "  host = \"127.0.0.1\";\n"
+                                  "  port = 3000;\n"
+                                  "}\n"]);
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"config/environments/development.plist"]
+                          content:@"{}\n"]);
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"app_lite.m"]
+                          content:@"#import <Foundation/Foundation.h>\n"
+                                  "#import \"ArlenServer.h\"\n"
+                                  "#import \"ALNContext.h\"\n"
+                                  "#import \"ALNController.h\"\n\n"
+                                  "@interface Phase13StaleTemplateController : ALNController\n"
+                                  "@end\n\n"
+                                  "@implementation Phase13StaleTemplateController\n"
+                                  "- (id)index:(ALNContext *)ctx { (void)ctx; [self renderText:@\"ok\\n\"]; return nil; }\n"
+                                  "@end\n\n"
+                                  "static void RegisterRoutes(ALNApplication *app) {\n"
+                                  "  [app registerRouteMethod:@\"GET\" path:@\"/\" name:@\"home\" controllerClass:[Phase13StaleTemplateController class] action:@\"index\"];\n"
+                                  "}\n\n"
+                                  "int main(int argc, const char *argv[]) {\n"
+                                  "  @autoreleasepool { return ALNRunAppMain(argc, argv, &RegisterRoutes); }\n"
+                                  "}\n"]);
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"modules/demo/Resources/Templates/dashboard/index.html.eoc"]
+                          content:@"<section>module dashboard</section>\n"]);
+
+    int code = 0;
+    NSString *buildOutput = [self runShellCapture:[NSString stringWithFormat:
+        @"cd %@ && source /usr/GNUstep/System/Library/Makefiles/GNUstep.sh && make arlen eocc",
+        repoRoot]
+                                         exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", buildOutput);
+
+    NSString *prepareCommand = [NSString stringWithFormat:
+        @"cd %@ && ARLEN_FRAMEWORK_ROOT=%@ %@/bin/boomhauer --prepare-only",
+        appRoot, repoRoot, repoRoot];
+    NSString *firstPrepareOutput = [self runShellCapture:prepareCommand exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", firstPrepareOutput);
+
+    NSString *currentGeneratedPath =
+        [appRoot stringByAppendingPathComponent:@".boomhauer/build/gen/templates/modules/demo/dashboard/index.html.eoc.m"];
+    NSString *staleGeneratedPath =
+        [appRoot stringByAppendingPathComponent:@".boomhauer/build/gen/templates/modules/demo/modules/demo/dashboard/index.html.eoc.m"];
+    NSError *readError = nil;
+    NSString *generatedSource = [NSString stringWithContentsOfFile:currentGeneratedPath
+                                                          encoding:NSUTF8StringEncoding
+                                                             error:&readError];
+    XCTAssertNotNil(generatedSource, @"%@", readError.localizedDescription ?: @"missing generated source");
+    XCTAssertNil(readError);
+    if (generatedSource == nil) {
+      return;
+    }
+    XCTAssertTrue([self writeFile:staleGeneratedPath content:generatedSource ?: @""]);
+
+    NSString *secondPrepareOutput = [self runShellCapture:prepareCommand exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", secondPrepareOutput);
+
+    NSString *appMakefilePath = [appRoot stringByAppendingPathComponent:@".boomhauer/build/AppGNUmakefile"];
+    readError = nil;
+    NSString *appMakefile = [NSString stringWithContentsOfFile:appMakefilePath
+                                                      encoding:NSUTF8StringEncoding
+                                                         error:&readError];
+    XCTAssertNotNil(appMakefile);
+    XCTAssertNil(readError);
+    XCTAssertTrue([appMakefile containsString:currentGeneratedPath], @"%@", appMakefile ?: @"");
+    XCTAssertFalse([appMakefile containsString:staleGeneratedPath], @"%@", appMakefile ?: @"");
+  } @finally {
+    [[NSFileManager defaultManager] removeItemAtPath:appRoot error:nil];
+  }
+}
+
 - (void)testJobsWorkerCLIExecutesQueuedJobFromAppRoot {
   NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
   NSString *appRoot = [self createTempDirectoryWithPrefix:@"phase13-jobs-worker-app"];

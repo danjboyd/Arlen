@@ -524,7 +524,9 @@ int main(int argc, const char *argv[]) {
     NSMutableArray<NSDictionary *> *entries = [NSMutableArray array];
     NSMutableDictionary<NSString *, NSDictionary *> *entriesByPath = [NSMutableDictionary dictionary];
     NSMutableSet<NSString *> *currentTemplatePaths = [NSMutableSet set];
+    NSMutableSet<NSString *> *currentOutputPaths = [NSMutableSet set];
     NSMutableSet<NSString *> *changedTemplatePaths = [NSMutableSet set];
+    NSMutableSet<NSString *> *staleOutputsToRemove = [NSMutableSet set];
     NSUInteger transpiledCount = 0;
     NSUInteger reusedCount = 0;
     NSUInteger removedCount = 0;
@@ -557,6 +559,7 @@ int main(int argc, const char *argv[]) {
                                      templateRoot:templateRoot
                                     logicalPrefix:logicalPrefix];
       NSString *outFile = JoinPath(outputDir, [logicalPath stringByAppendingString:@".m"]);
+      [currentOutputPaths addObject:outFile];
 
       NSError *readError = nil;
       NSString *templateText = [NSString stringWithContentsOfFile:templatePath
@@ -578,6 +581,20 @@ int main(int argc, const char *argv[]) {
 
       NSString *templateHash = TemplateHash(templateText);
       NSDictionary *cachedEntry = cachedEntriesByTemplatePath[templatePath];
+      if (cachedEntry != nil) {
+        NSString *previousOutput =
+            [cachedEntry[@"output_path"] isKindOfClass:[NSString class]] ? cachedEntry[@"output_path"] : @"";
+        if ([previousOutput length] == 0) {
+          NSString *previousLogicalPath =
+              [cachedEntry[@"logical_path"] isKindOfClass:[NSString class]] ? cachedEntry[@"logical_path"] : @"";
+          if ([previousLogicalPath length] > 0) {
+            previousOutput = JoinPath(outputDir, [previousLogicalPath stringByAppendingString:@".m"]);
+          }
+        }
+        if ([previousOutput length] > 0 && ![previousOutput isEqualToString:outFile]) {
+          [staleOutputsToRemove addObject:previousOutput];
+        }
+      }
       BOOL canReuse = NO;
       NSDictionary *metadata = nil;
       NSArray<NSDictionary *> *diagnostics = nil;
@@ -694,8 +711,16 @@ int main(int argc, const char *argv[]) {
           staleOutput = JoinPath(outputDir, [staleLogicalPath stringByAppendingString:@".m"]);
         }
       }
-      if ([staleOutput length] > 0 &&
-          [[NSFileManager defaultManager] fileExistsAtPath:staleOutput] &&
+      if ([staleOutput length] > 0) {
+        [staleOutputsToRemove addObject:staleOutput];
+      }
+    }
+
+    for (NSString *staleOutput in staleOutputsToRemove) {
+      if ([staleOutput length] == 0 || [currentOutputPaths containsObject:staleOutput]) {
+        continue;
+      }
+      if ([[NSFileManager defaultManager] fileExistsAtPath:staleOutput] &&
           [[NSFileManager defaultManager] removeItemAtPath:staleOutput error:nil]) {
         removedCount += 1;
       }

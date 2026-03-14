@@ -281,6 +281,36 @@ transpile_templates() {
     "${template_files[@]}"
 }
 
+list_current_generated_sources() {
+  local template_path relative_template_path override_template_path
+
+  if [[ -d "$app_root/templates" ]]; then
+    while IFS= read -r template_path; do
+      relative_template_path="${template_path#"$app_root/templates"/}"
+      printf '%s\n' "$app_template_root/${relative_template_path}.m"
+    done < <(find "$app_root/templates" -type f -name '*.html.eoc' 2>/dev/null | sort)
+  fi
+
+  if [[ -d "$app_root/modules" ]]; then
+    while IFS= read -r module_root; do
+      local module_id module_template_root
+      module_id="$(basename "$module_root")"
+      module_template_root="$module_root/Resources/Templates"
+      if [[ ! -d "$module_template_root" ]]; then
+        continue
+      fi
+      while IFS= read -r template_path; do
+        relative_template_path="${template_path#"$module_template_root"/}"
+        override_template_path="$app_root/templates/modules/$module_id/$relative_template_path"
+        if [[ -f "$override_template_path" ]]; then
+          continue
+        fi
+        printf '%s\n' "$gen_root/modules/$module_id/${relative_template_path}.m"
+      done < <(find "$module_template_root" -type f -name '*.html.eoc' 2>/dev/null | sort)
+    done < <(find "$app_root/modules" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | sort)
+  fi
+}
+
 record_build_failure() {
   local stage="$1"
   local command="$2"
@@ -312,7 +342,7 @@ emit_app_makefile() {
     find "$app_root/modules" -mindepth 2 -maxdepth 2 -type d -name 'Sources' 2>/dev/null | sort
   )
   mapfile -t app_module_sources < <(find "$app_root/modules" -path '*/Sources/*.m' -type f 2>/dev/null | sort)
-  mapfile -t generated_sources < <(find "$build_root/gen" -type f -name '*.m' 2>/dev/null | sort)
+  mapfile -t generated_sources < <(list_current_generated_sources)
   local -a include_args
   local -a app_objects
   local source_path object_path dep_path

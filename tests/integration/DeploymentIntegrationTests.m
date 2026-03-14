@@ -902,6 +902,57 @@
   }
 }
 
+- (void)testEOCCRemovesStaleOutputWhenLogicalDestinationChanges {
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *workRoot = [self createTempDirectoryWithPrefix:@"arlen-eocc-stale-output"];
+  XCTAssertNotNil(workRoot);
+  if (workRoot == nil) {
+    return;
+  }
+
+  @try {
+    NSString *templateRoot = [workRoot stringByAppendingPathComponent:@"templates"];
+    NSString *outputRoot = [workRoot stringByAppendingPathComponent:@"generated"];
+    NSString *manifestPath = [outputRoot stringByAppendingPathComponent:@"manifest.json"];
+    NSString *templatePath = [templateRoot stringByAppendingPathComponent:@"auth/login.html.eoc"];
+    NSString *legacyOutputPath = [outputRoot stringByAppendingPathComponent:@"legacy/auth/login.html.eoc.m"];
+    NSString *currentOutputPath = [outputRoot stringByAppendingPathComponent:@"current/auth/login.html.eoc.m"];
+
+    XCTAssertTrue([self writeFile:templatePath content:@"<p>login</p>\n"]);
+
+    int code = 0;
+    NSString *firstOutput = [self runEOCCCaptureAtRepoRoot:repoRoot
+                                                  workRoot:workRoot
+                                                 arguments:[NSString stringWithFormat:
+                                                                       @"--template-root %@ --output-dir %@ --manifest %@ --logical-prefix legacy %@",
+                                                                       templateRoot,
+                                                                       outputRoot,
+                                                                       manifestPath,
+                                                                       templatePath]
+                                                  exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", firstOutput);
+    XCTAssertTrue([[NSFileManager defaultManager] fileExistsAtPath:legacyOutputPath]);
+
+    NSString *secondOutput = [self runEOCCCaptureAtRepoRoot:repoRoot
+                                                   workRoot:workRoot
+                                                  arguments:[NSString stringWithFormat:
+                                                                        @"--template-root %@ --output-dir %@ --manifest %@ --logical-prefix current %@",
+                                                                        templateRoot,
+                                                                        outputRoot,
+                                                                        manifestPath,
+                                                                        templatePath]
+                                                   exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", secondOutput);
+    XCTAssertFalse([[NSFileManager defaultManager] fileExistsAtPath:legacyOutputPath],
+                   @"%@", secondOutput);
+    XCTAssertTrue([[NSFileManager defaultManager] fileExistsAtPath:currentOutputPath],
+                  @"%@", secondOutput);
+    XCTAssertTrue([secondOutput containsString:@"removed 1"], @"%@", secondOutput);
+  } @finally {
+    [[NSFileManager defaultManager] removeItemAtPath:workRoot error:nil];
+  }
+}
+
 - (void)testEOCCRejectsUnknownStaticCompositionDependency {
   NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
   NSString *workRoot = [self createTempDirectoryWithPrefix:@"arlen-eocc-missing-dependency"];
