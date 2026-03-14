@@ -99,3 +99,96 @@ body {
   border-radius: 12px;
   padding: 0.75rem;
 }
+
+.auth-code-inline {
+  display: inline-block;
+  margin-top: 0.5rem;
+  font-size: 0.95rem;
+}
+
+.auth-mfa-panel {
+  margin-top: 1rem;
+}
+
+.auth-qr-layout {
+  display: grid;
+  gap: 1rem;
+  margin-top: 1rem;
+}
+
+.auth-qr-frame {
+  background: #f3f1ea;
+  border: 1px solid #d7d4c8;
+  border-radius: 18px;
+  padding: 1rem;
+}
+
+.auth-qr-surface {
+  width: min(100%, 240px);
+  min-height: 240px;
+  display: grid;
+  place-items: center;
+  margin: 0 auto;
+}
+
+.auth-qr-surface svg {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+
+.auth-qr-placeholder {
+  color: #5a6456;
+  font-size: 0.95rem;
+}
+
+.auth-manual-setup h2 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.auth-muted {
+  margin: 0.5rem 0 0;
+  color: #5a6456;
+}
+
+.auth-metadata {
+  margin: 0.75rem 0 0;
+}
+
+.auth-metadata div + div {
+  margin-top: 0.4rem;
+}
+
+.auth-metadata dt {
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: #5a6456;
+}
+
+.auth-metadata dd {
+  margin: 0.15rem 0 0;
+}
+
+.auth-recovery-grid {
+  display: grid;
+  gap: 0.75rem;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  margin-top: 1rem;
+}
+
+.auth-recovery-code {
+  display: block;
+  padding: 0.85rem 1rem;
+  border-radius: 14px;
+  background: #f3f1ea;
+  border: 1px solid #d7d4c8;
+  font-size: 0.95rem;
+}
+
+@media (min-width: 700px) {
+  .auth-qr-layout {
+    grid-template-columns: minmax(240px, 260px) minmax(0, 1fr);
+    align-items: start;
+  }
+}

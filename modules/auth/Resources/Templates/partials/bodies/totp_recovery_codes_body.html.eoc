@@ -1,0 +1,2 @@
+<% NSString *recoveryTemplate = [ctx objectForKey:@"authFragmentMFARecoveryCodesPanel"] ?: @"modules/auth/fragments/mfa_recovery_codes_panel"; %>
+<% if (!ALNEOCInclude(out, ctx, recoveryTemplate, error)) { return nil; } %>

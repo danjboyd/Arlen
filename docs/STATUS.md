@@ -1,6 +1,6 @@
 # Arlen Status Checkpoint
 
-Last updated: 2026-03-11
+Last updated: 2026-03-13
 
 ## Benchmark Handoff (2026-02-24 EOD)
 
@@ -65,7 +65,37 @@ Last updated: 2026-03-11
 - Phase 14: complete (14A/14B/14C/14D/14E/14F/14G/14H/14I complete on 2026-03-10)
 - Phase 15: complete (15A/15B/15C/15D/15E complete on 2026-03-10)
 - Phase 16: complete (`16A/16B/16C` complete on 2026-03-10; `16D/16E/16F/16G` complete on 2026-03-11)
-- Phase 17: planned (`17A-17D` scoped on 2026-03-11 for optional MSSQL support and backend-neutral data-layer seams)
+- Phase 17: complete (`17A-17D` delivered on 2026-03-12 for backend-neutral data-layer seams and optional MSSQL support)
+- Phase 18: complete (2026-03-13)
+
+## Completed Today (2026-03-13)
+
+- Completed Phase 18 auth module reuse maturity:
+  - promoted coarse embeddable auth fragments for server-rendered EOC apps and
+    refactored the stock auth UI to consume those same fragments
+  - split TOTP HTML into enrollment, challenge, and recovery-code completion
+    states with local browser-side QR rendering and manual-entry fallback
+  - strengthened `/auth/api/mfa/totp` and `/auth/api/mfa/totp/verify` with
+    explicit `flow` and `mfa` payloads for React/native clients
+  - extended `generated-app-ui` eject, examples, and confidence coverage around
+    the fragment-first MFA contract
+
+## Completed Today (2026-03-12)
+
+- Completed Phase 17 backend-neutral data-layer seams and optional MSSQL support:
+  - added `ALNSQLDialect`, `ALNPostgresDialect`, and `ALNMSSQLDialect` as the explicit SQL dialect/capability seam
+  - added `ALNSQLBuilder buildWithDialect:` / `buildSQLWithDialect:` / `buildParametersWithDialect:` while preserving PostgreSQL-default `build:`
+  - refactored `ALNMigrationRunner` to use `id<ALNDatabaseAdapter>` plus adapter-provided dialect metadata instead of `ALNPg *` in its public API
+  - normalized MSSQL `GO` batch separators during migration execution and rejected top-level `SAVE TRANSACTION` alongside the existing transaction-control checks
+- Completed Phase 17 optional MSSQL adapter transport + compiler support:
+  - added `ALNMSSQL` with runtime ODBC transport loading so core Arlen does not hard-link to Microsoft’s driver
+  - added MSSQL SQL compilation for identifier quoting, `OUTPUT INSERTED/DELETED` return semantics, and `OFFSET ... FETCH` pagination
+  - made unsupported PostgreSQL-only builder features fail closed on MSSQL with explicit diagnostics (`ON CONFLICT`, `ILIKE`, `NULLS FIRST/LAST`, lateral joins, `JOIN ... USING`, and PostgreSQL row-lock clauses)
+- Completed Phase 17 tooling/docs/conformance closeout:
+  - updated `arlen migrate` and `arlen module migrate` to instantiate the configured adapter for the selected target (`postgresql`, `gdl2`, or optional `mssql`)
+  - kept `arlen schema-codegen` PostgreSQL-only and documented that scope explicitly
+  - expanded the shared adapter conformance harness to emit dialect-appropriate DDL/placeholder SQL for PostgreSQL/GDL2 and MSSQL
+  - added `Phase17ATests.m` and `Phase17BTests.m` coverage for generic migration execution, MSSQL SQL compilation, and adapter initialization/conformance hooks
 
 ## Completed Today (2026-03-11)
 

@@ -1,0 +1,12 @@
+<%@ requires authRecoveryCodes, authRecoveryContinuePath %>
+<section class="auth-mfa-panel auth-mfa-panel--recovery" data-auth-mfa-flow="recovery_codes">
+  <div class="auth-note">Save these recovery codes now. Each code can be used once if you lose access to your authenticator app.</div>
+  <div class="auth-recovery-grid">
+  <% for (NSString *code in $authRecoveryCodes) { %>
+    <code class="auth-recovery-code"><%= code %></code>
+  <% } %>
+  </div>
+  <div class="auth-actions">
+    <a class="auth-button" href="<%= $authRecoveryContinuePath ?: @"/" %>">Continue</a>
+  </div>
+</section>

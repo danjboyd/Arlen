@@ -1,0 +1,39 @@
+<%@ requires authTOTPProvisioning, authTOTPFormDescriptor %>
+<% NSDictionary *provisioning = $authTOTPProvisioning ?: @{}; %>
+<% NSString *otpauthURI = [provisioning objectForKey:@"otpauth_uri"] ?: @""; %>
+<% NSString *manualKey = [provisioning objectForKey:@"manual_entry_key"] ?: @""; %>
+<% NSString *accountName = [provisioning objectForKey:@"account_name"] ?: @""; %>
+<% NSString *issuer = [provisioning objectForKey:@"issuer"] ?: @""; %>
+<% NSString *formShellTemplate = [ctx objectForKey:@"authPartialFormShell"] ?: @"modules/auth/partials/form_shell"; %>
+<% NSString *qrScriptPath = [ctx objectForKey:@"authTOTPQRCodeScriptPath"] ?: @"/modules/auth/auth_totp_qr.js"; %>
+<section class="auth-mfa-panel auth-mfa-panel--enrollment" data-auth-mfa-flow="enrollment">
+  <div class="auth-note">Scan the QR code with your authenticator app, then enter the 6-digit code to finish setup.</div>
+  <div class="auth-qr-layout">
+    <div class="auth-qr-frame">
+      <div class="auth-qr-surface" data-auth-qr data-auth-otpauth-uri="<%= otpauthURI %>">
+        <span class="auth-qr-placeholder">QR code loading...</span>
+      </div>
+    </div>
+    <div class="auth-manual-setup">
+      <h2>Manual setup key</h2>
+      <p class="auth-muted">If scanning is unavailable, enter this key in your authenticator app.</p>
+      <dl class="auth-metadata">
+        <div>
+          <dt>Issuer</dt>
+          <dd><%= issuer %></dd>
+        </div>
+        <div>
+          <dt>Account</dt>
+          <dd><%= accountName %></dd>
+        </div>
+      </dl>
+      <code class="auth-code auth-code-inline"><%= manualKey %></code>
+    </div>
+  </div>
+  <% NSMutableDictionary *formCtx = [NSMutableDictionary dictionaryWithDictionary:(NSDictionary *)ctx]; %>
+  <% [formCtx setObject:($authTOTPFormDescriptor ?: @{}) forKey:@"authFormDescriptor"]; %>
+  <% if (!ALNEOCInclude(out, formCtx, formShellTemplate, error)) { return nil; } %>
+  <% if ([qrScriptPath length] > 0) { %>
+    <script src="<%= qrScriptPath %>"></script>
+  <% } %>
+</section>

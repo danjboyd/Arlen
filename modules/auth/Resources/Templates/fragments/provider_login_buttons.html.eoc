@@ -1,0 +1,11 @@
+<%@ requires authProviders %>
+<% NSString *providerRowTemplate = [ctx objectForKey:@"authPartialProviderRow"] ?: @"modules/auth/partials/provider_row"; %>
+<% if ([$authProviders count] > 0) { %>
+  <div class="auth-actions auth-provider-actions">
+  <% for (NSDictionary *provider in $authProviders) { %>
+    <% NSMutableDictionary *providerCtx = [NSMutableDictionary dictionaryWithDictionary:(NSDictionary *)ctx]; %>
+    <% [providerCtx setObject:(provider ?: @{}) forKey:@"authProvider"]; %>
+    <% if (!ALNEOCInclude(out, providerCtx, providerRowTemplate, error)) { return nil; } %>
+  <% } %>
+  </div>
+<% } %>

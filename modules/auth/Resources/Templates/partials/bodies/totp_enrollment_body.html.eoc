@@ -1,0 +1,2 @@
+<% NSString *enrollmentTemplate = [ctx objectForKey:@"authFragmentMFAEnrollmentPanel"] ?: @"modules/auth/fragments/mfa_enrollment_panel"; %>
+<% if (!ALNEOCInclude(out, ctx, enrollmentTemplate, error)) { return nil; } %>

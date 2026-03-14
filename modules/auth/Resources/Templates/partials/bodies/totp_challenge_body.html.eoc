@@ -1,7 +1,2 @@
-<% NSString *otpauthURI = [ctx objectForKey:@"otpauthURI"] ?: @""; %>
-<% NSNumber *totpVerified = [ctx objectForKey:@"totpVerified"] ?: @NO; %>
-<% if ([otpauthURI length] > 0) { %>
-  <p class="auth-note"><%= [totpVerified boolValue] ? @"TOTP is already enabled for this account." : @"Scan or paste this provisioning URI into your authenticator app." %></p>
-  <pre class="auth-code"><%= otpauthURI %></pre>
-<% } %>
-<% if (!ALNEOCInclude(out, ctx, [ctx objectForKey:@"authPartialFormShell"], error)) { return nil; } %>
+<% NSString *challengeTemplate = [ctx objectForKey:@"authFragmentMFAChallengeForm"] ?: @"modules/auth/fragments/mfa_challenge_form"; %>
+<% if (!ALNEOCInclude(out, ctx, challengeTemplate, error)) { return nil; } %>

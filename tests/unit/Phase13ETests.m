@@ -292,6 +292,9 @@ static NSUInteger gPhase15UIContextCalls = 0;
   XCTAssertEqualObjects(@"module-ui", summary[@"ui"][@"mode"]);
   XCTAssertEqualObjects(@"modules/auth/layouts/main", summary[@"ui"][@"layout"]);
   XCTAssertEqualObjects(@"auth", summary[@"ui"][@"generatedPagePrefix"]);
+  XCTAssertEqualObjects(@"modules/auth/fragments/mfa_challenge_form",
+                        [runtime fragmentTemplatePathForIdentifier:@"mfa_challenge_form" defaultPath:@""]);
+  XCTAssertEqualObjects(@"/modules/auth/auth_totp_qr.js", [runtime authUIAssetPathForFilename:@"auth_totp_qr.js"]);
   XCTAssertEqualObjects(@"", summary[@"passwordPolicy"]);
   XCTAssertEqualObjects(@"", summary[@"userProvisioning"]);
   XCTAssertEqualObjects(@"", summary[@"sessionPolicy"]);
@@ -419,10 +422,14 @@ static NSUInteger gPhase15UIContextCalls = 0;
                         [runtime pageTemplatePathForIdentifier:@"reset_password" defaultPath:@""]);
   XCTAssertEqualObjects(@"accounts/auth/partials/bodies/login_body",
                         [runtime bodyTemplatePathForIdentifier:@"login" defaultPath:@""]);
+  XCTAssertEqualObjects(@"accounts/auth/fragments/mfa_enrollment_panel",
+                        [runtime fragmentTemplatePathForIdentifier:@"mfa_enrollment_panel" defaultPath:@""]);
   XCTAssertEqualObjects(@"auth/partials/custom_page_wrapper",
                         [runtime partialTemplatePathForIdentifier:@"page_wrapper" defaultPath:@""]);
   XCTAssertEqualObjects(@"accounts/auth/partials/provider_row",
                         [runtime partialTemplatePathForIdentifier:@"provider_row" defaultPath:@""]);
+  XCTAssertEqualObjects(@"/accounts/auth/auth.css", [runtime authUIAssetPathForFilename:@"auth.css"]);
+  XCTAssertEqualObjects(@"/accounts/auth/auth_totp_qr.js", [runtime authUIAssetPathForFilename:@"auth_totp_qr.js"]);
 
   ALNContext *fakeContext = (ALNContext *)(id)[NSObject new];
   XCTAssertEqualObjects(@"layouts/test_guest", [runtime layoutTemplateForPage:@"login" context:fakeContext]);
@@ -578,6 +585,9 @@ static NSUInteger gPhase15UIContextCalls = 0;
   XCTAssertEqualObjects(@"auth-ui", payload[@"target"]);
   XCTAssertTrue([payload[@"created_files"] containsObject:@"templates/auth/login.html.eoc"]);
   XCTAssertTrue([payload[@"created_files"] containsObject:@"public/auth/auth.css"]);
+  XCTAssertTrue([payload[@"created_files"] containsObject:@"templates/auth/fragments/mfa_enrollment_panel.html.eoc"]);
+  XCTAssertTrue([payload[@"created_files"] containsObject:@"templates/auth/mfa/totp_enrollment.html.eoc"]);
+  XCTAssertTrue([payload[@"created_files"] containsObject:@"public/auth/auth_totp_qr.js"]);
   XCTAssertTrue([payload[@"updated_files"] containsObject:@"config/app.plist"]);
 
   NSString *configText = [NSString stringWithContentsOfFile:[tempApp stringByAppendingPathComponent:@"config/app.plist"]
@@ -588,6 +598,8 @@ static NSUInteger gPhase15UIContextCalls = 0;
   XCTAssertTrue([configText containsString:@"layouts/auth_generated"]);
   XCTAssertTrue([configText containsString:@"generatedPagePrefix = auth"]);
   XCTAssertTrue([[NSFileManager defaultManager] fileExistsAtPath:[tempApp stringByAppendingPathComponent:@"templates/auth/partials/page_wrapper.html.eoc"]]);
+  XCTAssertTrue([[NSFileManager defaultManager] fileExistsAtPath:[tempApp stringByAppendingPathComponent:@"templates/auth/fragments/mfa_challenge_form.html.eoc"]]);
+  XCTAssertTrue([[NSFileManager defaultManager] fileExistsAtPath:[tempApp stringByAppendingPathComponent:@"templates/auth/mfa/totp_recovery_codes.html.eoc"]]);
   XCTAssertTrue([[NSFileManager defaultManager] fileExistsAtPath:[tempApp stringByAppendingPathComponent:@"templates/layouts/auth_generated.html.eoc"]]);
 }
 

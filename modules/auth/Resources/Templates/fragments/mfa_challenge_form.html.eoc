@@ -1,0 +1,8 @@
+<%@ requires authTOTPFormDescriptor %>
+<% NSString *formShellTemplate = [ctx objectForKey:@"authPartialFormShell"] ?: @"modules/auth/partials/form_shell"; %>
+<section class="auth-mfa-panel auth-mfa-panel--challenge" data-auth-mfa-flow="challenge">
+  <div class="auth-note">Enter the 6-digit code from your authenticator app to continue.</div>
+  <% NSMutableDictionary *formCtx = [NSMutableDictionary dictionaryWithDictionary:(NSDictionary *)ctx]; %>
+  <% [formCtx setObject:($authTOTPFormDescriptor ?: @{}) forKey:@"authFormDescriptor"]; %>
+  <% if (!ALNEOCInclude(out, formCtx, formShellTemplate, error)) { return nil; } %>
+</section>

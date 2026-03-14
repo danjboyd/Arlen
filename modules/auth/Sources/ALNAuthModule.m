@@ -250,8 +250,14 @@ static NSString *AMModulePageTemplatePathForIdentifier(NSString *pageIdentifier)
   if ([normalized isEqualToString:@"reset_password"]) {
     return @"modules/auth/password/reset";
   }
+  if ([normalized isEqualToString:@"totp_enrollment"]) {
+    return @"modules/auth/mfa/totp_enrollment";
+  }
   if ([normalized isEqualToString:@"totp_challenge"]) {
     return @"modules/auth/mfa/totp";
+  }
+  if ([normalized isEqualToString:@"totp_recovery_codes"]) {
+    return @"modules/auth/mfa/totp_recovery_codes";
   }
   return @"modules/auth/result/index";
 }
@@ -271,8 +277,14 @@ static NSString *AMGeneratedPageTemplatePath(NSString *prefix, NSString *pageIde
   if ([normalized isEqualToString:@"reset_password"]) {
     return [NSString stringWithFormat:@"%@/password/reset", normalizedPrefix];
   }
+  if ([normalized isEqualToString:@"totp_enrollment"]) {
+    return [NSString stringWithFormat:@"%@/mfa/totp_enrollment", normalizedPrefix];
+  }
   if ([normalized isEqualToString:@"totp_challenge"]) {
     return [NSString stringWithFormat:@"%@/mfa/totp", normalizedPrefix];
+  }
+  if ([normalized isEqualToString:@"totp_recovery_codes"]) {
+    return [NSString stringWithFormat:@"%@/mfa/totp_recovery_codes", normalizedPrefix];
   }
   return [NSString stringWithFormat:@"%@/result", normalizedPrefix];
 }
@@ -291,8 +303,14 @@ static NSString *AMModuleBodyTemplatePathForIdentifier(NSString *pageIdentifier)
   if ([normalized isEqualToString:@"reset_password"]) {
     return @"modules/auth/partials/bodies/reset_password_body";
   }
+  if ([normalized isEqualToString:@"totp_enrollment"]) {
+    return @"modules/auth/partials/bodies/totp_enrollment_body";
+  }
   if ([normalized isEqualToString:@"totp_challenge"]) {
     return @"modules/auth/partials/bodies/totp_challenge_body";
+  }
+  if ([normalized isEqualToString:@"totp_recovery_codes"]) {
+    return @"modules/auth/partials/bodies/totp_recovery_codes_body";
   }
   return @"modules/auth/partials/bodies/result_body";
 }
@@ -304,14 +322,34 @@ static NSString *AMGeneratedBodyTemplatePath(NSString *prefix, NSString *pageIde
                                         ? @"forgot_password_body"
                                         : [AMNormalizedTemplateIdentifier(pageIdentifier) isEqualToString:@"reset_password"]
                                               ? @"reset_password_body"
+                                              : [AMNormalizedTemplateIdentifier(pageIdentifier) isEqualToString:@"totp_enrollment"]
+                                                    ? @"totp_enrollment_body"
                                               : [AMNormalizedTemplateIdentifier(pageIdentifier) isEqualToString:@"totp_challenge"]
                                                     ? @"totp_challenge_body"
+                                              : [AMNormalizedTemplateIdentifier(pageIdentifier) isEqualToString:@"totp_recovery_codes"]
+                                                    ? @"totp_recovery_codes_body"
                                                     : [AMNormalizedTemplateIdentifier(pageIdentifier) isEqualToString:@"result"] ? @"result_body"
                                                     : [AMNormalizedTemplateIdentifier(pageIdentifier) isEqualToString:@"verify_result"] ? @"result_body"
                                                     : [AMNormalizedTemplateIdentifier(pageIdentifier) isEqualToString:@"provider_result"] ? @"result_body"
                                                     : [AMNormalizedTemplateIdentifier(pageIdentifier) isEqualToString:@"register"] ? @"register_body"
                                                     : [AMNormalizedTemplateIdentifier(pageIdentifier) isEqualToString:@"login"] ? @"login_body"
                                                     : @"result_body"];
+}
+
+static NSString *AMModuleFragmentTemplatePathForIdentifier(NSString *fragmentIdentifier) {
+  NSString *normalized = AMNormalizedTemplateIdentifier(fragmentIdentifier);
+  if ([normalized length] == 0) {
+    return @"";
+  }
+  return [NSString stringWithFormat:@"modules/auth/fragments/%@", normalized];
+}
+
+static NSString *AMGeneratedFragmentTemplatePath(NSString *prefix, NSString *fragmentIdentifier) {
+  NSString *normalized = AMNormalizedTemplateIdentifier(fragmentIdentifier);
+  if ([normalized length] == 0) {
+    return @"";
+  }
+  return [NSString stringWithFormat:@"%@/fragments/%@", AMNormalizedTemplatePrefix(prefix), normalized];
 }
 
 static NSString *AMModulePartialTemplatePathForIdentifier(NSString *partialIdentifier) {
@@ -474,12 +512,17 @@ static NSString *AMStubHS256JWT(NSDictionary *claims, NSString *sharedSecret) {
                             error:(NSError **)error;
 - (nullable NSDictionary *)totpEnrollmentForUserID:(NSString *)userID
                                              error:(NSError **)error;
-- (nullable NSDictionary *)provisioningPayloadForUser:(NSDictionary *)user
+- (nullable NSDictionary *)totpProvisioningPayloadForUser:(NSDictionary *)user
+                                                    error:(NSError **)error;
+- (nullable NSDictionary *)totpFragmentContextForUser:(NSDictionary *)user
+                                             returnTo:(NSString *)returnTo
                                                 error:(NSError **)error;
 - (nullable NSDictionary *)verifyTOTPCode:(NSString *)code
                                       user:(NSDictionary *)user
                                    context:(ALNContext *)context
                                      error:(NSError **)error;
+- (NSDictionary *)totpRecoveryCodesFragmentContextWithCodes:(NSArray<NSString *> *)recoveryCodes
+                                                   returnTo:(NSString *)returnTo;
 - (NSDictionary *)stubProviderConfigurationForBaseURL:(NSString *)baseURL;
 
 @end
@@ -847,6 +890,18 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
   return ([AMTrimmedString(defaultPath) length] > 0) ? defaultPath : AMModuleBodyTemplatePathForIdentifier(normalized);
 }
 
+- (NSString *)fragmentTemplatePathForIdentifier:(NSString *)fragmentIdentifier
+                                    defaultPath:(NSString *)defaultPath {
+  NSString *normalized = AMNormalizedTemplateIdentifier(fragmentIdentifier);
+  if ([normalized length] == 0) {
+    return defaultPath ?: @"";
+  }
+  if ([[self.uiMode lowercaseString] isEqualToString:@"generated-app-ui"]) {
+    return AMGeneratedFragmentTemplatePath(self.generatedPagePrefix, normalized);
+  }
+  return ([AMTrimmedString(defaultPath) length] > 0) ? defaultPath : AMModuleFragmentTemplatePathForIdentifier(normalized);
+}
+
 - (NSString *)partialTemplatePathForIdentifier:(NSString *)partialIdentifier
                                    defaultPath:(NSString *)defaultPath {
   NSString *normalized = AMNormalizedTemplateIdentifier(partialIdentifier);
@@ -858,6 +913,17 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
     return AMGeneratedPartialTemplatePath(self.generatedPagePrefix, normalized);
   }
   return ([AMTrimmedString(defaultPath) length] > 0) ? defaultPath : AMModulePartialTemplatePathForIdentifier(normalized);
+}
+
+- (NSString *)authUIAssetPathForFilename:(NSString *)filename {
+  NSString *normalized = AMTrimmedString(filename);
+  if ([normalized length] == 0) {
+    return @"";
+  }
+  if ([[self.uiMode lowercaseString] isEqualToString:@"generated-app-ui"]) {
+    return [NSString stringWithFormat:@"/%@/%@", self.generatedPagePrefix ?: @"auth", normalized];
+  }
+  return [NSString stringWithFormat:@"/modules/auth/%@", normalized];
 }
 
 - (NSString *)layoutTemplateForPage:(NSString *)pageIdentifier
@@ -1482,8 +1548,8 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
   };
 }
 
-- (NSDictionary *)provisioningPayloadForUser:(NSDictionary *)user
-                                       error:(NSError **)error {
+- (NSDictionary *)totpProvisioningPayloadForUser:(NSDictionary *)user
+                                           error:(NSError **)error {
   NSString *userID = AMTrimmedString(user[@"id"]);
   NSDictionary *enrollment = [self totpEnrollmentForUserID:userID error:error];
   NSString *secret = AMTrimmedString(enrollment[@"secret"]);
@@ -1500,18 +1566,68 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
     if (inserted < 0) {
       return nil;
     }
+    enrollment = [self totpEnrollmentForUserID:userID error:error];
   }
-  NSString *uri = [ALNTOTP provisioningURIForSecret:secret
-                                        accountName:AMTrimmedString(user[@"email"])
-                                             issuer:@"Arlen Auth Module"
-                                              error:error];
-  if ([uri length] == 0) {
+  NSString *accountName = AMTrimmedString(user[@"email"]);
+  NSString *issuer = @"Arlen Auth Module";
+  BOOL factorVerified = ([AMTrimmedString(enrollment[@"verified_at"]) length] > 0 || AMBoolFromDatabaseValue(enrollment[@"enabled"]));
+  NSString *uri = @"";
+  if (!factorVerified) {
+    uri = [ALNTOTP provisioningURIForSecret:secret accountName:accountName issuer:issuer error:error];
+    if ([uri length] == 0) {
+      return nil;
+    }
+  }
+  NSArray *configuredRecoveryCodes = [AMJSONArrayFromJSONString(enrollment[@"recovery_codes_json"]) copy];
+  return @{
+    @"factor" : @"totp",
+    @"secret" : factorVerified ? @"" : secret,
+    @"manual_entry_key" : factorVerified ? @"" : secret,
+    @"account_name" : accountName ?: @"",
+    @"issuer" : issuer,
+    @"otpauth_uri" : uri ?: @"",
+    @"enrolled" : @YES,
+    @"verified" : @(factorVerified),
+    @"recovery_codes_configured" : @([configuredRecoveryCodes count] > 0),
+    @"enrollment_id" : AMTrimmedString(enrollment[@"id"]),
+  };
+}
+
+- (NSDictionary *)totpFragmentContextForUser:(NSDictionary *)user
+                                     returnTo:(NSString *)returnTo
+                                        error:(NSError **)error {
+  NSDictionary *provisioning = [self totpProvisioningPayloadForUser:user error:error];
+  if (provisioning == nil) {
     return nil;
   }
+  BOOL verified = [provisioning[@"verified"] boolValue];
+  NSString *normalizedReturnTo = AMTrimmedString(returnTo);
   return @{
-    @"secret" : secret,
-    @"otpauth_uri" : uri,
-    @"verified" : @([AMTrimmedString(enrollment[@"verified_at"]) length] > 0 || AMBoolFromDatabaseValue(enrollment[@"enabled"])),
+    @"authMFAFactor" : @"totp",
+    @"authMFAFlowState" : verified ? @"challenge" : @"enrollment",
+    @"authMFAVerified" : provisioning[@"verified"] ?: @NO,
+    @"authTOTPPath" : self.totpPath ?: @"/auth/mfa/totp",
+    @"authTOTPVerifyPath" : self.totpVerifyPath ?: @"/auth/mfa/totp/verify",
+    @"authTOTPProvisioning" : provisioning,
+    @"authTOTPQRCodeScriptPath" : [self authUIAssetPathForFilename:@"auth_totp_qr.js"],
+    @"authTOTPFormDescriptor" : @{
+      @"action" : self.totpVerifyPath ?: @"/auth/mfa/totp/verify",
+      @"method" : @"post",
+      @"submitLabel" : verified ? @"Verify TOTP" : @"Finish Setup",
+      @"hidden" : @[ @{
+        @"name" : @"return_to",
+        @"value" : normalizedReturnTo ?: @"",
+      } ],
+      @"fields" : @[
+        @{
+          @"name" : @"code",
+          @"label" : verified ? @"Authenticator Code" : @"Enter the 6-digit code from your app",
+          @"type" : @"text",
+          @"autocomplete" : @"one-time-code",
+          @"inputmode" : @"numeric",
+        },
+      ],
+    },
   };
 }
 
@@ -1575,6 +1691,29 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
   return payload;
 }
 
+- (NSDictionary *)totpRecoveryCodesFragmentContextWithCodes:(NSArray<NSString *> *)recoveryCodes
+                                                   returnTo:(NSString *)returnTo {
+  NSMutableArray *normalizedCodes = [NSMutableArray array];
+  for (id value in recoveryCodes ?: @[]) {
+    NSString *code = AMTrimmedString(value);
+    if ([code length] == 0) {
+      continue;
+    }
+    [normalizedCodes addObject:code];
+  }
+  NSString *continueTarget = ([AMTrimmedString(returnTo) length] > 0) ? AMTrimmedString(returnTo) : (self.defaultRedirect ?: @"/");
+  return @{
+    @"authMFAFactor" : @"totp",
+    @"authMFAFlowState" : @"recovery_codes",
+    @"authRecoveryCodes" : [NSArray arrayWithArray:normalizedCodes],
+    @"authRecoveryContinuePath" : continueTarget,
+    @"authResultActions" : @[ @{
+      @"label" : @"Continue",
+      @"href" : continueTarget,
+    } ],
+  };
+}
+
 - (NSDictionary *)stubProviderConfigurationForBaseURL:(NSString *)baseURL {
   return @{
     @"identifier" : @"stub",
@@ -1597,6 +1736,19 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
 - (NSDictionary *)currentUserForContext:(ALNContext *)context
                                   error:(NSError **)error {
   return [self userForSubject:[context authSubject] error:error];
+}
+
+- (NSDictionary *)totpFragmentContextForCurrentUserInContext:(ALNContext *)context
+                                                    returnTo:(NSString *)returnTo
+                                                       error:(NSError **)error {
+  NSDictionary *user = [self currentUserForContext:context error:error];
+  if (user == nil) {
+    if (error != NULL && *error == nil) {
+      *error = AMError(ALNAuthModuleErrorAuthenticationFailed, @"Authentication required", nil);
+    }
+    return nil;
+  }
+  return [self totpFragmentContextForUser:user returnTo:returnTo error:error];
 }
 
 - (NSDictionary *)sessionPayloadForContext:(ALNContext *)context
@@ -1843,10 +1995,7 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
 }
 
 - (NSString *)stylesheetPathForRuntime {
-  if ([[self.runtime.uiMode lowercaseString] isEqualToString:@"generated-app-ui"]) {
-    return [NSString stringWithFormat:@"/%@/auth.css", self.runtime.generatedPagePrefix ?: @"auth"];
-  }
-  return @"/modules/auth/auth.css";
+  return [self.runtime authUIAssetPathForFilename:@"auth.css"];
 }
 
 - (NSDictionary *)pageContextForIdentifier:(NSString *)pageIdentifier
@@ -1873,6 +2022,7 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
   context[@"authProviders"] = self.runtime.loginProviders ?: @[];
   context[@"authUIMode"] = self.runtime.uiMode ?: @"module-ui";
   context[@"authStylesheetPath"] = [self stylesheetPathForRuntime];
+  context[@"authTOTPQRCodeScriptPath"] = [self.runtime authUIAssetPathForFilename:@"auth_totp_qr.js"];
   context[@"authPageBodyTemplate"] =
       [self.runtime bodyTemplatePathForIdentifier:normalizedIdentifier
                                       defaultPath:AMModuleBodyTemplatePathForIdentifier(normalizedIdentifier)];
@@ -1897,10 +2047,86 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
   context[@"authPartialResultActions"] =
       [self.runtime partialTemplatePathForIdentifier:@"result_actions"
                                          defaultPath:AMModulePartialTemplatePathForIdentifier(@"result_actions")];
+  context[@"authFragmentProviderLoginButtons"] =
+      [self.runtime fragmentTemplatePathForIdentifier:@"provider_login_buttons"
+                                          defaultPath:AMModuleFragmentTemplatePathForIdentifier(@"provider_login_buttons")];
+  context[@"authFragmentMFAEnrollmentPanel"] =
+      [self.runtime fragmentTemplatePathForIdentifier:@"mfa_enrollment_panel"
+                                          defaultPath:AMModuleFragmentTemplatePathForIdentifier(@"mfa_enrollment_panel")];
+  context[@"authFragmentMFAChallengeForm"] =
+      [self.runtime fragmentTemplatePathForIdentifier:@"mfa_challenge_form"
+                                          defaultPath:AMModuleFragmentTemplatePathForIdentifier(@"mfa_challenge_form")];
+  context[@"authFragmentMFARecoveryCodesPanel"] =
+      [self.runtime fragmentTemplatePathForIdentifier:@"mfa_recovery_codes_panel"
+                                          defaultPath:AMModuleFragmentTemplatePathForIdentifier(@"mfa_recovery_codes_panel")];
   if ([extraCtx isKindOfClass:[NSDictionary class]]) {
     [context addEntriesFromDictionary:extraCtx];
   }
   return [self.runtime uiContextForPage:normalizedIdentifier defaultContext:context context:self.context];
+}
+
+- (NSString *)apiTOTPVerifyPath {
+  return AMPathJoin(self.runtime.apiPrefix, @"mfa/totp/verify");
+}
+
+- (NSDictionary *)totpJSONFlowForProvisioning:(NSDictionary *)provisioning
+                                     returnTo:(NSString *)returnTo {
+  BOOL verified = [provisioning[@"verified"] boolValue];
+  NSString *normalizedReturnTo = AMTrimmedString(returnTo);
+  return @{
+    @"factor" : @"totp",
+    @"state" : verified ? @"challenge" : @"enrollment",
+    @"return_to" : normalizedReturnTo ?: @"",
+    @"verify_path" : [self apiTOTPVerifyPath],
+  };
+}
+
+- (NSDictionary *)totpJSONStateForProvisioning:(NSDictionary *)provisioning {
+  BOOL verified = [provisioning[@"verified"] boolValue];
+  return @{
+    @"factor" : @"totp",
+    @"enrolled" : provisioning[@"enrolled"] ?: @NO,
+    @"verified" : provisioning[@"verified"] ?: @NO,
+    @"recovery_codes_configured" : provisioning[@"recovery_codes_configured"] ?: @NO,
+    @"provisioning" : verified ? @{} : (provisioning ?: @{}),
+  };
+}
+
+- (NSDictionary *)totpJSONResponseForContext:(ALNContext *)ctx
+                                 provisioning:(NSDictionary *)provisioning
+                                     returnTo:(NSString *)returnTo {
+  return @{
+    @"status" : @"ok",
+    @"flow" : [self totpJSONFlowForProvisioning:(provisioning ?: @{}) returnTo:returnTo],
+    @"mfa" : [self totpJSONStateForProvisioning:(provisioning ?: @{})],
+    @"session" : [self.runtime sessionPayloadForContext:ctx includeUser:YES error:NULL] ?: @{},
+  };
+}
+
+- (NSDictionary *)totpJSONSuccessPayloadFromSessionPayload:(NSDictionary *)sessionPayload
+                                                  returnTo:(NSString *)returnTo {
+  NSArray *recoveryCodes = [sessionPayload[@"recovery_codes"] isKindOfClass:[NSArray class]] ? sessionPayload[@"recovery_codes"] : @[];
+  NSString *continueTarget =
+      ([AMTrimmedString(returnTo) length] > 0) ? AMTrimmedString(returnTo) : (self.runtime.defaultRedirect ?: @"/");
+  NSMutableDictionary *payload = [NSMutableDictionary dictionaryWithDictionary:sessionPayload ?: @{}];
+  payload[@"status"] = @"ok";
+  payload[@"session"] = sessionPayload ?: @{};
+  payload[@"flow"] = @{
+    @"factor" : @"totp",
+    @"state" : ([recoveryCodes count] > 0) ? @"recovery_codes" : @"complete",
+    @"return_to" : AMTrimmedString(returnTo) ?: @"",
+    @"continue_to" : continueTarget,
+    @"verify_path" : [self apiTOTPVerifyPath],
+  };
+  payload[@"mfa"] = @{
+    @"factor" : @"totp",
+    @"enrolled" : @YES,
+    @"verified" : @YES,
+    @"recovery_codes_configured" : @YES,
+    @"recovery_codes_present" : @([recoveryCodes count] > 0),
+    @"recovery_codes" : recoveryCodes ?: @[],
+  };
+  return payload;
 }
 
 - (BOOL)renderAuthPageIdentifier:(NSString *)pageIdentifier
@@ -2455,42 +2681,20 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
     [self redirectTo:[NSString stringWithFormat:@"%@?return_to=%@", self.runtime.loginPath, self.runtime.totpPath] status:302];
     return nil;
   }
-  NSDictionary *payload = [self.runtime provisioningPayloadForUser:user error:NULL] ?: @{};
+  NSString *returnTo = AMTrimmedString([self requestParameters][@"return_to"]);
+  NSDictionary *payload = [self.runtime totpProvisioningPayloadForUser:user error:NULL] ?: @{};
   if ([self shouldPreferJSONForHeadlessRequest:ctx]) {
-    return @{
-      @"status" : @"ok",
-      @"provisioning" : payload,
-      @"session" : [self.runtime sessionPayloadForContext:ctx includeUser:YES error:NULL] ?: @{},
-    };
+    return [self totpJSONResponseForContext:ctx provisioning:payload returnTo:returnTo];
   }
-  [self renderAuthPageIdentifier:@"totp_challenge"
-                           title:@"TOTP Security"
-                         message:@"Use your authenticator app to complete step-up authentication."
+  NSDictionary *fragmentCtx = [self.runtime totpFragmentContextForUser:user returnTo:returnTo error:NULL] ?: @{};
+  BOOL verified = [payload[@"verified"] boolValue];
+  [self renderAuthPageIdentifier:(verified ? @"totp_challenge" : @"totp_enrollment")
+                           title:(verified ? @"Verify Your Authenticator" : @"Set Up Authenticator")
+                         message:(verified ? @"Use your authenticator app to complete step-up authentication."
+                                           : @"Scan the QR code or use the manual setup key, then enter the 6-digit code to finish setup.")
                           errors:nil
-                        formData:@{
-                          @"return_to" : AMTrimmedString([self requestParameters][@"return_to"]),
-                        }
-                        extraCtx:@{
-                          @"otpauthURI" : AMTrimmedString(payload[@"otpauth_uri"]),
-                          @"totpVerified" : payload[@"verified"] ?: @NO,
-                          @"authFormDescriptor" : @{
-                            @"action" : self.runtime.totpVerifyPath ?: @"/auth/mfa/totp/verify",
-                            @"method" : @"post",
-                            @"submitLabel" : @"Verify TOTP",
-                            @"hidden" : @[ @{
-                              @"name" : @"return_to",
-                              @"value" : AMTrimmedString([self requestParameters][@"return_to"]),
-                            } ],
-                            @"fields" : @[
-                              @{
-                                @"name" : @"code",
-                                @"label" : @"TOTP Code",
-                                @"type" : @"text",
-                                @"autocomplete" : @"one-time-code",
-                              },
-                            ],
-                          },
-                        }
+                        formData:@{ @"return_to" : returnTo ?: @"" }
+                        extraCtx:fragmentCtx
                            error:NULL];
   return nil;
 }
@@ -2498,8 +2702,12 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
 - (id)totpVerify:(ALNContext *)ctx {
   NSDictionary *user = [self.runtime currentUserForContext:ctx error:NULL];
   if (user == nil) {
-    [self setStatus:401];
-    return @{ @"status" : @"error", @"message" : @"Authentication required" };
+    if ([self shouldPreferJSONForHeadlessRequest:ctx]) {
+      [self setStatus:401];
+      return @{ @"status" : @"error", @"message" : @"Authentication required" };
+    }
+    [self redirectTo:[NSString stringWithFormat:@"%@?return_to=%@", self.runtime.loginPath, self.runtime.totpPath] status:302];
+    return nil;
   }
   NSDictionary *parameters = [self requestParameters];
   NSError *error = nil;
@@ -2508,41 +2716,39 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
   if (payload == nil) {
     [self setStatus:422];
     NSArray *errors = [self errorEntriesForError:error field:@"code"];
+    NSDictionary *provisioning = [self.runtime totpProvisioningPayloadForUser:user error:NULL] ?: @{};
     if ([self shouldPreferJSONForHeadlessRequest:ctx]) {
-      return @{ @"status" : @"error", @"errors" : errors };
+      return @{
+        @"status" : @"error",
+        @"errors" : errors,
+        @"flow" : [self totpJSONFlowForProvisioning:provisioning returnTo:returnTo],
+        @"mfa" : [self totpJSONStateForProvisioning:provisioning],
+      };
     }
-    NSDictionary *provisioning = [self.runtime provisioningPayloadForUser:user error:NULL] ?: @{};
-    [self renderAuthPageIdentifier:@"totp_challenge"
-                             title:@"TOTP Security"
+    NSDictionary *fragmentCtx = [self.runtime totpFragmentContextForUser:user returnTo:returnTo error:NULL] ?: @{};
+    BOOL verified = [provisioning[@"verified"] boolValue];
+    [self renderAuthPageIdentifier:(verified ? @"totp_challenge" : @"totp_enrollment")
+                             title:(verified ? @"Verify Your Authenticator" : @"Set Up Authenticator")
                            message:@""
                             errors:errors
                           formData:@{ @"return_to" : returnTo ?: @"" }
-                          extraCtx:@{
-                            @"otpauthURI" : AMTrimmedString(provisioning[@"otpauth_uri"]),
-                            @"totpVerified" : provisioning[@"verified"] ?: @NO,
-                            @"authFormDescriptor" : @{
-                              @"action" : self.runtime.totpVerifyPath ?: @"/auth/mfa/totp/verify",
-                              @"method" : @"post",
-                              @"submitLabel" : @"Verify TOTP",
-                              @"hidden" : @[ @{
-                                @"name" : @"return_to",
-                                @"value" : returnTo ?: @"",
-                              } ],
-                              @"fields" : @[
-                                @{
-                                  @"name" : @"code",
-                                  @"label" : @"TOTP Code",
-                                  @"type" : @"text",
-                                  @"autocomplete" : @"one-time-code",
-                                },
-                              ],
-                            },
-                          }
+                          extraCtx:fragmentCtx
                              error:NULL];
     return nil;
   }
   if ([self shouldPreferJSONForHeadlessRequest:ctx]) {
-    return payload;
+    return [self totpJSONSuccessPayloadFromSessionPayload:payload returnTo:returnTo];
+  }
+  NSArray *recoveryCodes = [payload[@"recovery_codes"] isKindOfClass:[NSArray class]] ? payload[@"recovery_codes"] : @[];
+  if ([recoveryCodes count] > 0) {
+    [self renderAuthPageIdentifier:@"totp_recovery_codes"
+                             title:@"Save Your Recovery Codes"
+                           message:@"Keep these one-time recovery codes somewhere safe. Each code can be used once if you lose access to your authenticator app."
+                            errors:nil
+                          formData:@{ @"return_to" : returnTo ?: @"" }
+                          extraCtx:[self.runtime totpRecoveryCodesFragmentContextWithCodes:recoveryCodes returnTo:returnTo]
+                             error:NULL];
+    return nil;
   }
   [self redirectTo:([returnTo length] > 0 ? returnTo : self.runtime.defaultRedirect) status:302];
   return nil;

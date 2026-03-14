@@ -1,10 +1,11 @@
 # Auth UI Integration Modes
 
 Status: Complete (Phase 15 delivered on 2026-03-10)  
-Last updated: 2026-03-10
+Last updated: 2026-03-13
 
 Related docs:
 - `docs/AUTH_MODULE.md`
+- `docs/PHASE18_ROADMAP.md`
 - `docs/MODULES.md`
 - `docs/PHASE13_ROADMAP.md`
 - `docs/PHASE14_ROADMAP.md`
@@ -40,6 +41,12 @@ The `auth` module now provides:
 - deterministic partial override resolution through `authModule.ui.partials`
 - generated app-owned auth templates under `templates/auth/...` for
   `generated-app-ui`
+
+Phase 18 follow-on work in `docs/PHASE18_ROADMAP.md` is now delivered with:
+
+- fragment-first stock auth pages
+- supported coarse embeddable auth fragments for server-rendered EOC apps
+- stronger MFA-focused headless JSON contracts for React/native clients
 
 ## 3. Design Goals
 
@@ -198,7 +205,9 @@ Module page identifiers should be stable and documented:
 - `forgot_password`
 - `reset_password`
 - `verify_result`
+- `totp_enrollment`
 - `totp_challenge`
+- `totp_recovery_codes`
 - `provider_result`
 
 Module partial identifiers should also be stable:
@@ -219,6 +228,20 @@ Resolution precedence in `module-ui` should be deterministic:
 
 That gives the app a supported middle path before full ejection.
 
+Phase 18 refinement:
+
+- the current low-level partial contract remains useful for stock page assembly
+  and targeted overrides
+- the supported embeddable fragment contract is now:
+  - `provider_login_buttons`
+  - `mfa_enrollment_panel`
+  - `mfa_challenge_form`
+  - `mfa_recovery_codes_panel`
+- stock full-page auth UI now renders through those coarse fragments so the
+  default pages and embeddable surfaces stay aligned
+- app-owned EOC pages can assemble those fragments through the Phase 9 EOC
+  composition model plus `ALNAuthModuleRuntime`
+
 ## 9. Route and Rendering Contract
 
 Mode matrix:
@@ -234,6 +257,14 @@ Important constraint:
 - JSON/session/provider backend behavior must not diverge by UI mode.
 - HTML mode changes presentation ownership, not auth semantics.
 
+Phase 18 extends this by making MFA-specific headless contracts explicit:
+
+- `GET /auth/api/mfa/totp` returns `flow`, `mfa`, and `session`
+- `flow.state` is `enrollment` or `challenge`
+- `POST /auth/api/mfa/totp/verify` returns `flow.state = recovery_codes` on the
+  first successful enrollment verify and `complete` on later step-up verifies
+- `mfa.provisioning` is populated only during enrollment
+
 ## 10. CLI Workflow
 
 Available first-class workflow:
@@ -246,6 +277,7 @@ Current behavior:
 
 - scaffold app-owned auth templates and partials
 - scaffold any module-owned auth CSS/assets that the app should own in this mode
+- scaffold fragment-first MFA templates and the local TOTP QR asset
 - set or suggest:
 
 ```plist
@@ -273,11 +305,14 @@ authModule = {
 Recommended initial scaffold targets:
 
 - `templates/auth/layouts/guest.html.eoc`
-- `templates/auth/login/index.html.eoc`
-- `templates/auth/register/index.html.eoc`
+- `templates/auth/login.html.eoc`
+- `templates/auth/register.html.eoc`
 - `templates/auth/password/forgot.html.eoc`
 - `templates/auth/password/reset.html.eoc`
 - `templates/auth/mfa/totp.html.eoc`
+- `templates/auth/mfa/totp_enrollment.html.eoc`
+- `templates/auth/mfa/totp_recovery_codes.html.eoc`
+- `templates/auth/fragments/...`
 - `templates/auth/partials/...`
 
 `arlen auth scaffold` can exist later as a higher-level alias if it materially

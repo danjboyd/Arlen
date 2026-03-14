@@ -1,9 +1,12 @@
 #import <Foundation/Foundation.h>
 #import <XCTest/XCTest.h>
 
+#import <arpa/inet.h>
+#import <netinet/in.h>
 #import <signal.h>
 #import <stdlib.h>
 #import <string.h>
+#import <sys/socket.h>
 #import <unistd.h>
 
 #import "ALNTOTP.h"
@@ -22,6 +25,28 @@
 }
 
 - (int)randomPort {
+  int fd = socket(AF_INET, SOCK_STREAM, 0);
+  if (fd >= 0) {
+    int port = 0;
+    struct sockaddr_in address;
+    memset(&address, 0, sizeof(address));
+    address.sin_family = AF_INET;
+    address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    address.sin_port = 0;
+
+    if (bind(fd, (struct sockaddr *)&address, sizeof(address)) == 0) {
+      socklen_t length = sizeof(address);
+      if (getsockname(fd, (struct sockaddr *)&address, &length) == 0) {
+        port = (int)ntohs(address.sin_port);
+      }
+    }
+
+    close(fd);
+    if (port > 0) {
+      return port;
+    }
+  }
+
   return 32000 + (int)arc4random_uniform(20000);
 }
 
@@ -140,6 +165,52 @@
     [[NSFileManager defaultManager] removeItemAtPath:payloadFile error:nil];
   }
 
+  NSRange separator = [output rangeOfString:@"\n" options:NSBackwardsSearch];
+  NSString *body = output;
+  NSInteger statusCode = 0;
+  if (separator.location != NSNotFound) {
+    body = [output substringToIndex:separator.location];
+    statusCode = [[output substringFromIndex:(separator.location + 1)] integerValue];
+  }
+  return @{
+    @"body" : body ?: @"",
+    @"status" : @(statusCode),
+  };
+}
+
+- (NSDictionary *)curlTextAtPort:(int)port
+                            path:(NSString *)path
+                          method:(NSString *)method
+                       cookieJar:(NSString *)cookieJar
+                       csrfToken:(NSString *)csrfToken
+                      formFields:(nullable NSDictionary *)formFields
+                 followRedirects:(BOOL)followRedirects
+                        exitCode:(int *)exitCode {
+  NSMutableArray<NSString *> *parts = [NSMutableArray array];
+  [parts addObject:@"curl -sS"];
+  if (followRedirects) {
+    [parts addObject:@"-L"];
+  }
+  [parts addObject:@"-w '\\n%{http_code}'"];
+  [parts addObject:[NSString stringWithFormat:@"-X %@", method ?: @"GET"]];
+  if ([cookieJar length] > 0) {
+    NSString *quotedJar = [self shellQuoted:cookieJar];
+    [parts addObject:[NSString stringWithFormat:@"-b %@", quotedJar]];
+    [parts addObject:[NSString stringWithFormat:@"-c %@", quotedJar]];
+  }
+  NSDictionary *fields = [formFields isKindOfClass:[NSDictionary class]] ? formFields : @{};
+  NSMutableDictionary *mergedFields = [NSMutableDictionary dictionaryWithDictionary:fields];
+  if ([csrfToken length] > 0) {
+    mergedFields[@"csrf_token"] = csrfToken;
+  }
+  NSArray<NSString *> *sortedKeys = [[mergedFields allKeys] sortedArrayUsingSelector:@selector(compare:)];
+  for (NSString *key in sortedKeys) {
+    NSString *pair = [NSString stringWithFormat:@"%@=%@", key ?: @"", [mergedFields[key] description] ?: @""];
+    [parts addObject:[NSString stringWithFormat:@"--data-urlencode %@", [self shellQuoted:pair]]];
+  }
+  [parts addObject:[self shellQuoted:[NSString stringWithFormat:@"http://127.0.0.1:%d%@", port, path ?: @"/"]]];
+
+  NSString *output = [self runShellCapture:[parts componentsJoinedByString:@" "] exitCode:exitCode];
   NSRange separator = [output rangeOfString:@"\n" options:NSBackwardsSearch];
   NSString *body = output;
   NSInteger statusCode = 0;
@@ -518,15 +589,20 @@
     XCTAssertEqual((NSInteger)403, [preStepUpAdmin[@"status"] integerValue]);
     XCTAssertTrue([preStepUpAdmin[@"body"] containsString:@"step_up_required"]);
 
-    (void)[self curlJSONAtPort:port
-                          path:@"/auth/api/mfa/totp"
-                        method:@"GET"
-                     cookieJar:cookieJar
-                     csrfToken:nil
-                       payload:nil
-               followRedirects:NO
-                      exitCode:&exitCode];
+    NSDictionary *totpEnrollmentPage = [self curlTextAtPort:port
+                                                       path:@"/auth/mfa/totp?return_to=/admin"
+                                                     method:@"GET"
+                                                  cookieJar:cookieJar
+                                                  csrfToken:nil
+                                                 formFields:nil
+                                            followRedirects:NO
+                                                   exitCode:&exitCode];
     XCTAssertEqual(0, exitCode);
+    XCTAssertEqual((NSInteger)200, [totpEnrollmentPage[@"status"] integerValue]);
+    XCTAssertTrue([totpEnrollmentPage[@"body"] containsString:@"data-auth-mfa-flow=\"enrollment\""]);
+    XCTAssertTrue([totpEnrollmentPage[@"body"] containsString:@"Manual setup key"]);
+    XCTAssertTrue([totpEnrollmentPage[@"body"] containsString:@"auth_totp_qr.js"]);
+    XCTAssertFalse([totpEnrollmentPage[@"body"] containsString:@"otpauth://"]);
     NSString *localSecret = [self sqlScalar:[NSString stringWithFormat:
         @"SELECT m.secret FROM auth_mfa_enrollments m JOIN auth_users u ON u.id = m.user_id "
          "WHERE lower(u.email) = lower('%@') ORDER BY m.id DESC LIMIT 1;",
@@ -546,20 +622,21 @@
                                   exitCode:&exitCode];
     csrfToken = [self parseJSONDictionary:sessionResponse[@"body"]][@"csrf_token"] ?: @"";
 
-    NSDictionary *totpResponse = [self curlJSONAtPort:port
-                                                 path:@"/auth/api/mfa/totp/verify"
+    NSDictionary *totpResponse = [self curlTextAtPort:port
+                                                 path:@"/auth/mfa/totp/verify"
                                                method:@"POST"
                                             cookieJar:cookieJar
                                             csrfToken:csrfToken
-                                              payload:@{
-                                                @"code" : localCode,
-                                              }
+                                           formFields:@{
+                                             @"code" : localCode,
+                                             @"return_to" : @"/admin",
+                                           }
                                       followRedirects:NO
                                              exitCode:&exitCode];
     XCTAssertEqual(0, exitCode);
     XCTAssertEqual((NSInteger)200, [totpResponse[@"status"] integerValue]);
-    NSDictionary *totpPayload = [self parseJSONDictionary:totpResponse[@"body"]];
-    XCTAssertEqualObjects(@2, totpPayload[@"aal"]);
+    XCTAssertTrue([totpResponse[@"body"] containsString:@"data-auth-mfa-flow=\"recovery_codes\""]);
+    XCTAssertTrue([totpResponse[@"body"] containsString:@"Save Your Recovery Codes"]);
 
     NSDictionary *adminSession = [self curlJSONAtPort:port
                                                  path:@"/admin/api/session"
@@ -573,6 +650,20 @@
     XCTAssertEqual((NSInteger)200, [adminSession[@"status"] integerValue]);
     NSDictionary *adminSessionPayload = [self parseJSONDictionary:adminSession[@"body"]];
     XCTAssertEqualObjects(@2, adminSessionPayload[@"session"][@"aal"]);
+
+    NSDictionary *totpChallengePage = [self curlTextAtPort:port
+                                                      path:@"/auth/mfa/totp?return_to=/admin"
+                                                    method:@"GET"
+                                                 cookieJar:cookieJar
+                                                 csrfToken:nil
+                                                formFields:nil
+                                           followRedirects:NO
+                                                  exitCode:&exitCode];
+    XCTAssertEqual(0, exitCode);
+    XCTAssertEqual((NSInteger)200, [totpChallengePage[@"status"] integerValue]);
+    XCTAssertTrue([totpChallengePage[@"body"] containsString:@"data-auth-mfa-flow=\"challenge\""]);
+    XCTAssertFalse([totpChallengePage[@"body"] containsString:@"Manual setup key"]);
+    XCTAssertFalse([totpChallengePage[@"body"] containsString:@"otpauth://"]);
 
     NSDictionary *resourceCatalog = [self curlJSONAtPort:port
                                                     path:@"/admin/api/resources"
@@ -869,15 +960,21 @@
     XCTAssertEqual((NSInteger)403, [preStepUpAdmin[@"status"] integerValue]);
     XCTAssertTrue([preStepUpAdmin[@"body"] containsString:@"step_up_required"]);
 
-    (void)[self curlJSONAtPort:port
-                          path:@"/auth/api/mfa/totp"
-                        method:@"GET"
-                     cookieJar:cookieJar
-                     csrfToken:nil
-                       payload:nil
-               followRedirects:NO
-                      exitCode:&exitCode];
+    NSDictionary *providerTOTPState = [self curlJSONAtPort:port
+                                                      path:@"/auth/api/mfa/totp"
+                                                    method:@"GET"
+                                                 cookieJar:cookieJar
+                                                 csrfToken:nil
+                                                   payload:nil
+                                           followRedirects:NO
+                                                  exitCode:&exitCode];
     XCTAssertEqual(0, exitCode);
+    XCTAssertEqual((NSInteger)200, [providerTOTPState[@"status"] integerValue]);
+    NSDictionary *providerTOTPStatePayload = [self parseJSONDictionary:providerTOTPState[@"body"]];
+    XCTAssertEqualObjects(@"enrollment", providerTOTPStatePayload[@"flow"][@"state"]);
+    XCTAssertEqualObjects(@"totp", providerTOTPStatePayload[@"mfa"][@"factor"]);
+    XCTAssertTrue([[providerTOTPStatePayload[@"mfa"][@"provisioning"][@"manual_entry_key"] description] length] > 0);
+    XCTAssertTrue([[providerTOTPStatePayload[@"mfa"][@"provisioning"][@"otpauth_uri"] description] length] > 0);
     NSString *providerSecret = [self sqlScalar:[NSString stringWithFormat:
         @"SELECT m.secret FROM auth_mfa_enrollments m JOIN auth_users u ON u.id = m.user_id "
          "WHERE lower(u.email) = lower('%@') ORDER BY m.id DESC LIMIT 1;",
@@ -909,6 +1006,24 @@
                                exitCode:&exitCode];
     XCTAssertEqual(0, exitCode);
     XCTAssertEqual((NSInteger)200, [totpResponse[@"status"] integerValue]);
+    NSDictionary *providerVerifyPayload = [self parseJSONDictionary:totpResponse[@"body"]];
+    XCTAssertEqualObjects(@"recovery_codes", providerVerifyPayload[@"flow"][@"state"]);
+    XCTAssertEqualObjects(@YES, providerVerifyPayload[@"mfa"][@"recovery_codes_present"]);
+    XCTAssertEqual((NSUInteger)6, [providerVerifyPayload[@"mfa"][@"recovery_codes"] count]);
+
+    providerTOTPState = [self curlJSONAtPort:port
+                                        path:@"/auth/api/mfa/totp"
+                                      method:@"GET"
+                                   cookieJar:cookieJar
+                                   csrfToken:nil
+                                     payload:nil
+                             followRedirects:NO
+                                    exitCode:&exitCode];
+    XCTAssertEqual(0, exitCode);
+    XCTAssertEqual((NSInteger)200, [providerTOTPState[@"status"] integerValue]);
+    providerTOTPStatePayload = [self parseJSONDictionary:providerTOTPState[@"body"]];
+    XCTAssertEqualObjects(@"challenge", providerTOTPStatePayload[@"flow"][@"state"]);
+    XCTAssertEqual((NSUInteger)0, [providerTOTPStatePayload[@"mfa"][@"provisioning"] count]);
 
     adminSession = [self curlJSONAtPort:port
                                    path:@"/admin/api/session"
@@ -1200,6 +1315,232 @@
       kill(server.processIdentifier, SIGTERM);
       [server waitUntilExit];
     }
+    [[NSFileManager defaultManager] removeItemAtPath:cookieJar error:nil];
+    [[NSFileManager defaultManager] removeItemAtPath:serverLog error:nil];
+    [[NSFileManager defaultManager] removeItemAtPath:appRoot error:nil];
+  }
+}
+
+- (void)testAuthModuleFragmentsRenderInsideAppOwnedAccountSecurityPage {
+  NSString *dsn = [self pgTestDSN];
+  if ([dsn length] == 0) {
+    return;
+  }
+
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *quotedRepoRoot = [self shellQuoted:repoRoot];
+  NSString *quotedArlenBinary = [self shellQuoted:[repoRoot stringByAppendingPathComponent:@"build/arlen"]];
+  NSString *quotedBoomhauer = [self shellQuoted:[repoRoot stringByAppendingPathComponent:@"bin/boomhauer"]];
+  NSString *appRoot = [self createTempDirectoryWithPrefix:@"phase18-auth-fragments"];
+  NSString *cookieJar = [self createTempFilePathWithPrefix:@"phase18-auth-fragments-cookie" suffix:@".txt"];
+  NSString *serverLog = [self createTempFilePathWithPrefix:@"phase18-auth-fragments-server" suffix:@".log"];
+  NSString *userEmail = [NSString stringWithFormat:@"phase18-fragments-%@@example.test", [[NSUUID UUID] UUIDString].lowercaseString];
+  NSString *password = @"module-password-ok";
+  int port = [self randomPort];
+  XCTAssertNotNil(appRoot);
+  if (appRoot == nil) {
+    return;
+  }
+
+  NSTask *server = nil;
+
+  @try {
+    NSString *configContents =
+        [NSString stringWithFormat:@"{\n"
+                                   "  host = \"127.0.0.1\";\n"
+                                   "  port = %d;\n"
+                                   "  session = {\n"
+                                   "    enabled = YES;\n"
+                                   "    secret = \"phase18-auth-fragments-session-secret-0123456789abcdef\";\n"
+                                   "  };\n"
+                                   "  csrf = {\n"
+                                   "    enabled = YES;\n"
+                                   "    allowQueryParamFallback = YES;\n"
+                                   "  };\n"
+                                   "  database = {\n"
+                                   "    connectionString = \"%@\";\n"
+                                   "  };\n"
+                                   "  authModule = {\n"
+                                   "    ui = {\n"
+                                   "      mode = \"module-ui\";\n"
+                                   "    };\n"
+                                   "  };\n"
+                                   "}\n",
+                                   port,
+                                   [dsn stringByReplacingOccurrencesOfString:@"\"" withString:@"\\\""]];
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"config/app.plist"] content:configContents]);
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"config/environments/development.plist"]
+                          content:@"{}\n"]);
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"app_lite.m"]
+                          content:@"#import <Foundation/Foundation.h>\n"
+                                  "#import \"ALNAuthModule.h\"\n"
+                                  "#import \"ALNContext.h\"\n"
+                                  "#import \"ALNController.h\"\n"
+                                  "#import \"ArlenServer.h\"\n\n"
+                                  "@interface Phase18SecurityController : ALNController\n"
+                                  "@end\n\n"
+                                  "@implementation Phase18SecurityController\n"
+                                  "- (id)home:(ALNContext *)ctx { (void)ctx; [self renderText:@\"phase18-home\\n\"]; return nil; }\n"
+                                  "- (id)security:(ALNContext *)ctx {\n"
+                                  "  NSError *error = nil;\n"
+                                  "  NSDictionary *authContext = [[ALNAuthModuleRuntime sharedRuntime] totpFragmentContextForCurrentUserInContext:ctx\n"
+                                  "                                                                                                         returnTo:@\"/account/security\"\n"
+                                  "                                                                                                            error:&error];\n"
+                                  "  if (authContext == nil) {\n"
+                                  "    [self setStatus:401];\n"
+                                  "    [self renderText:@\"authentication required\\n\"];\n"
+                                  "    return nil;\n"
+                                  "  }\n"
+                                  "  NSMutableDictionary *renderContext = [NSMutableDictionary dictionaryWithDictionary:authContext ?: @{}];\n"
+                                  "  renderContext[@\"csrfToken\"] = [self csrfToken] ?: @\"\";\n"
+                                  "  if (![self renderTemplate:@\"account/security\" context:renderContext layout:nil error:&error]) {\n"
+                                  "    [self setStatus:500];\n"
+                                  "    [self renderText:[[error localizedDescription] ?: @\"render failed\" stringByAppendingString:@\"\\n\"]];\n"
+                                  "  }\n"
+                                  "  return nil;\n"
+                                  "}\n"
+                                  "@end\n\n"
+                                  "static void RegisterRoutes(ALNApplication *app) {\n"
+                                  "  [app registerRouteMethod:@\"GET\" path:@\"/\" name:@\"home\" controllerClass:[Phase18SecurityController class] action:@\"home\"];\n"
+                                  "  [app registerRouteMethod:@\"GET\" path:@\"/account/security\" name:@\"account_security\" controllerClass:[Phase18SecurityController class] action:@\"security\"];\n"
+                                  "}\n\n"
+                                  "int main(int argc, const char *argv[]) {\n"
+                                  "  @autoreleasepool { return ALNRunAppMain(argc, argv, &RegisterRoutes); }\n"
+                                  "}\n"]);
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"templates/account/security.html.eoc"]
+                          content:@"<section class=\"phase18-account-security\">\n"
+                                  "  <h1>Account Security</h1>\n"
+                                  "  <% NSString *flow = [ctx objectForKey:@\"authMFAFlowState\"] ?: @\"\"; %>\n"
+                                  "  <% NSString *fragment = [flow isEqualToString:@\"challenge\"] ? @\"modules/auth/fragments/mfa_challenge_form\" : @\"modules/auth/fragments/mfa_enrollment_panel\"; %>\n"
+                                  "  <% if (!ALNEOCInclude(out, ctx, fragment, error)) { return nil; } %>\n"
+                                  "</section>\n"]);
+
+    int exitCode = 0;
+    NSString *buildOutput =
+        [self runShellCapture:[NSString stringWithFormat:@"cd %@ && source /usr/GNUstep/System/Library/Makefiles/GNUstep.sh && make arlen eocc",
+                                                         quotedRepoRoot]
+                     exitCode:&exitCode];
+    XCTAssertEqual(0, exitCode, @"%@", buildOutput);
+
+    NSString *addAuth = [self runShellCapture:[NSString stringWithFormat:
+        @"cd %@ && ARLEN_FRAMEWORK_ROOT=%@ %@ module add auth --json",
+        [self shellQuoted:appRoot], quotedRepoRoot, quotedArlenBinary]
+                                      exitCode:&exitCode];
+    XCTAssertEqual(0, exitCode, @"%@", addAuth);
+    XCTAssertEqualObjects(@"ok", [self parseJSONDictionary:addAuth][@"status"]);
+
+    NSString *migrate = [self runShellCapture:[NSString stringWithFormat:
+        @"cd %@ && %@ module migrate --env development --json",
+        [self shellQuoted:appRoot], quotedArlenBinary]
+                                      exitCode:&exitCode];
+    XCTAssertEqual(0, exitCode, @"%@", migrate);
+    XCTAssertEqualObjects(@"ok", [self parseJSONDictionary:migrate][@"status"]);
+
+    server = [[NSTask alloc] init];
+    server.launchPath = @"/bin/bash";
+    server.arguments = @[ @"-lc",
+                          [NSString stringWithFormat:@"cd %@ && ARLEN_FRAMEWORK_ROOT=%@ %@ --no-watch --port %d >%@ 2>&1",
+                                                     [self shellQuoted:appRoot],
+                                                     quotedRepoRoot,
+                                                     quotedBoomhauer,
+                                                     port,
+                                                     [self shellQuoted:serverLog]] ];
+    [server launch];
+    XCTAssertTrue([self waitForServerOnPort:port path:@"/auth/api/session"]);
+
+    int curlExitCode = 0;
+    NSDictionary *sessionResponse = [self curlJSONAtPort:port
+                                                    path:@"/auth/api/session"
+                                                  method:@"GET"
+                                               cookieJar:cookieJar
+                                               csrfToken:nil
+                                                 payload:nil
+                                         followRedirects:NO
+                                                exitCode:&curlExitCode];
+    XCTAssertEqual(0, curlExitCode);
+    NSString *csrfToken = [self parseJSONDictionary:sessionResponse[@"body"]][@"csrf_token"] ?: @"";
+
+    NSDictionary *registerResponse = [self curlJSONAtPort:port
+                                                     path:@"/auth/api/register"
+                                                   method:@"POST"
+                                                cookieJar:cookieJar
+                                                csrfToken:csrfToken
+                                                  payload:@{
+                                                    @"email" : userEmail,
+                                                    @"display_name" : @"Phase18 Fragment User",
+                                                    @"password" : password,
+                                                  }
+                                          followRedirects:NO
+                                                 exitCode:&curlExitCode];
+    XCTAssertEqual(0, curlExitCode);
+    XCTAssertEqual((NSInteger)200, [registerResponse[@"status"] integerValue]);
+
+    NSDictionary *securityPage = [self curlTextAtPort:port
+                                                 path:@"/account/security"
+                                               method:@"GET"
+                                            cookieJar:cookieJar
+                                            csrfToken:nil
+                                           formFields:nil
+                                      followRedirects:NO
+                                             exitCode:&curlExitCode];
+    XCTAssertEqual(0, curlExitCode);
+    XCTAssertEqual((NSInteger)200, [securityPage[@"status"] integerValue]);
+    XCTAssertTrue([securityPage[@"body"] containsString:@"Account Security"]);
+    XCTAssertTrue([securityPage[@"body"] containsString:@"data-auth-mfa-flow=\"enrollment\""]);
+    XCTAssertTrue([securityPage[@"body"] containsString:@"Manual setup key"]);
+
+    NSString *secret = [self sqlScalar:[NSString stringWithFormat:
+        @"SELECT m.secret FROM auth_mfa_enrollments m JOIN auth_users u ON u.id = m.user_id "
+         "WHERE lower(u.email) = lower('%@') ORDER BY m.id DESC LIMIT 1;",
+        [userEmail stringByReplacingOccurrencesOfString:@"'" withString:@"''"]]
+                                  dsn:dsn];
+    XCTAssertTrue([secret length] > 0);
+    NSString *code = [ALNTOTP codeForSecret:secret atDate:[NSDate date] error:nil];
+    XCTAssertTrue([code length] > 0);
+
+    sessionResponse = [self curlJSONAtPort:port
+                                      path:@"/auth/api/session"
+                                    method:@"GET"
+                                 cookieJar:cookieJar
+                                 csrfToken:nil
+                                   payload:nil
+                           followRedirects:NO
+                                  exitCode:&curlExitCode];
+    XCTAssertEqual(0, curlExitCode);
+    csrfToken = [self parseJSONDictionary:sessionResponse[@"body"]][@"csrf_token"] ?: @"";
+
+    NSDictionary *verifyResponse = [self curlJSONAtPort:port
+                                                   path:@"/auth/api/mfa/totp/verify"
+                                                 method:@"POST"
+                                              cookieJar:cookieJar
+                                              csrfToken:csrfToken
+                                                payload:@{
+                                                  @"code" : code,
+                                                  @"return_to" : @"/account/security",
+                                                }
+                                        followRedirects:NO
+                                               exitCode:&curlExitCode];
+    XCTAssertEqual(0, curlExitCode);
+    XCTAssertEqual((NSInteger)200, [verifyResponse[@"status"] integerValue]);
+
+    securityPage = [self curlTextAtPort:port
+                                   path:@"/account/security"
+                                 method:@"GET"
+                              cookieJar:cookieJar
+                              csrfToken:nil
+                             formFields:nil
+                        followRedirects:NO
+                               exitCode:&curlExitCode];
+    XCTAssertEqual(0, curlExitCode);
+    XCTAssertEqual((NSInteger)200, [securityPage[@"status"] integerValue]);
+    XCTAssertTrue([securityPage[@"body"] containsString:@"data-auth-mfa-flow=\"challenge\""]);
+    XCTAssertFalse([securityPage[@"body"] containsString:@"Manual setup key"]);
+  } @finally {
+    if (server != nil && [server isRunning]) {
+      kill(server.processIdentifier, SIGTERM);
+      [server waitUntilExit];
+    }
+    (void)[self deleteUserByEmail:userEmail dsn:dsn];
     [[NSFileManager defaultManager] removeItemAtPath:cookieJar error:nil];
     [[NSFileManager defaultManager] removeItemAtPath:serverLog error:nil];
     [[NSFileManager defaultManager] removeItemAtPath:appRoot error:nil];

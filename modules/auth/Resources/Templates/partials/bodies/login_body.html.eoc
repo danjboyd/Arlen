@@ -1,11 +1,6 @@
 <% if (!ALNEOCInclude(out, ctx, [ctx objectForKey:@"authPartialFormShell"], error)) { return nil; } %>
 <% NSArray *authProviders = [ctx objectForKey:@"authProviders"] ?: @[]; %>
 <% if ([authProviders count] > 0) { %>
-  <div class="auth-actions">
-  <% for (NSDictionary *provider in authProviders) { %>
-    <% NSMutableDictionary *providerCtx = [NSMutableDictionary dictionaryWithDictionary:(NSDictionary *)ctx]; %>
-    <% [providerCtx setObject:(provider ?: @{}) forKey:@"authProvider"]; %>
-    <% if (!ALNEOCInclude(out, providerCtx, [ctx objectForKey:@"authPartialProviderRow"], error)) { return nil; } %>
-  <% } %>
-  </div>
+  <% NSString *providerButtonsTemplate = [ctx objectForKey:@"authFragmentProviderLoginButtons"] ?: @"modules/auth/fragments/provider_login_buttons"; %>
+  <% if (!ALNEOCInclude(out, ctx, providerButtonsTemplate, error)) { return nil; } %>
 <% } %>

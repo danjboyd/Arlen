@@ -122,8 +122,11 @@ typedef NS_ENUM(NSInteger, ALNAuthModuleErrorCode) {
                                 defaultPath:(NSString *)defaultPath;
 - (NSString *)bodyTemplatePathForIdentifier:(NSString *)pageIdentifier
                                 defaultPath:(NSString *)defaultPath;
+- (NSString *)fragmentTemplatePathForIdentifier:(NSString *)fragmentIdentifier
+                                    defaultPath:(NSString *)defaultPath;
 - (NSString *)partialTemplatePathForIdentifier:(NSString *)partialIdentifier
                                    defaultPath:(NSString *)defaultPath;
+- (NSString *)authUIAssetPathForFilename:(NSString *)filename;
 - (NSString *)layoutTemplateForPage:(NSString *)pageIdentifier
                             context:(ALNContext *)context;
 - (NSDictionary *)uiContextForPage:(NSString *)pageIdentifier
@@ -133,6 +136,17 @@ typedef NS_ENUM(NSInteger, ALNAuthModuleErrorCode) {
                                            error:(NSError *_Nullable *_Nullable)error;
 - (nullable NSDictionary *)currentUserForContext:(ALNContext *)context
                                            error:(NSError *_Nullable *_Nullable)error;
+- (nullable NSDictionary *)totpProvisioningPayloadForUser:(NSDictionary *)user
+                                                    error:(NSError *_Nullable *_Nullable)error;
+- (nullable NSDictionary *)totpFragmentContextForCurrentUserInContext:(ALNContext *)context
+                                                             returnTo:(nullable NSString *)returnTo
+                                                                error:(NSError *_Nullable *_Nullable)error;
+- (nullable NSDictionary *)verifyTOTPCode:(NSString *)code
+                                     user:(NSDictionary *)user
+                                  context:(ALNContext *)context
+                                    error:(NSError *_Nullable *_Nullable)error;
+- (NSDictionary *)totpRecoveryCodesFragmentContextWithCodes:(NSArray<NSString *> *)recoveryCodes
+                                                   returnTo:(nullable NSString *)returnTo;
 - (nullable NSDictionary *)sessionPayloadForContext:(ALNContext *)context
                                         includeUser:(BOOL)includeUser
                                               error:(NSError *_Nullable *_Nullable)error;
