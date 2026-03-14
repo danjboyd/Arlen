@@ -2,7 +2,8 @@
 
 Phase 7G defines machine-readable developer-experience contracts for coding-agent workflows so scaffold/build/check/deploy loops are deterministic and automatable.
 
-This document captures the initial 7G implementation slice completed on 2026-02-23.
+This document captures the delivered 7G coding-agent DX contract set for the
+currently supported first-party workflows.
 
 ## 1. Scope (Initial Slice)
 
@@ -43,6 +44,12 @@ tools/deploy/build_release.sh \
 Shared contract version in JSON payloads:
 
 - `phase7g-agent-dx-contracts-v1`
+
+Additional implemented machine-readable workflows in the current tree:
+
+- `arlen module migrate --json`
+- `arlen module assets --json`
+- `arlen config --json`
 
 ## 3. Deterministic Scaffold Conventions
 
@@ -96,8 +103,8 @@ Verification coverage:
 - `tests/unit/Phase7GTests.m`
   - `testCodingAgentDXContractFixtureSchemaAndTestCoverage`
 
-## 7. Remaining 7G Follow-On
+## 7. Future Expansion
 
-- Expand machine contracts to additional workflows (`migrate`, `schema-codegen`, typed SQL codegen).
-- Add richer agent replay fixtures (multi-step repair loops and idempotent retry scenarios).
-- Add versioned schema docs for JSON payload evolution and compatibility policy.
+Additional JSON contracts can still be added for more specialized workflows
+such as schema/codegen surfaces, but the current scaffold/build/check/deploy,
+module, and config automation paths satisfy the delivered 7G acceptance bar.

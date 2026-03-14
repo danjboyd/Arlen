@@ -136,6 +136,22 @@ static NSString *RenderCollectionEmpty(id ctx, NSError **error) {
   XCTAssertEqualObjects(out, @"Before Hello World");
 }
 
+- (void)testRenderAndIncludeNormalizeUnsuffixedTemplateReferences {
+  ALNEOCRegisterTemplate(@"partials/_greeting.html.eoc", &RenderGreeting);
+
+  NSError *renderError = nil;
+  NSString *rendered = ALNEOCRenderTemplate(@"partials/_greeting", @"World", &renderError);
+  XCTAssertNil(renderError);
+  XCTAssertEqualObjects(rendered, @"Hello World");
+
+  NSMutableString *out = [NSMutableString stringWithString:@"Before "];
+  NSError *includeError = nil;
+  BOOL included = ALNEOCInclude(out, @"World", @"partials/_greeting", &includeError);
+  XCTAssertTrue(included);
+  XCTAssertNil(includeError);
+  XCTAssertEqualObjects(out, @"Before Hello World");
+}
+
 - (void)testMissingTemplateReturnsTemplateNotFoundError {
   NSError *error = nil;
   NSString *rendered = ALNEOCRenderTemplate(@"missing.html.eoc", nil, &error);

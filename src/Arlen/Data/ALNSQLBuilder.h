@@ -3,6 +3,8 @@
 
 #import <Foundation/Foundation.h>
 
+#import "ALNSQLDialect.h"
+
 NS_ASSUME_NONNULL_BEGIN
 
 extern NSString *const ALNSQLBuilderErrorDomain;
@@ -269,6 +271,12 @@ typedef NS_ENUM(NSInteger, ALNSQLBuilderKind) {
 - (instancetype)returningField:(NSString *)field;
 - (instancetype)returningFields:(NSArray<NSString *> *)fields;
 
+- (nullable NSDictionary *)buildWithDialect:(nullable id<ALNSQLDialect>)dialect
+                                      error:(NSError *_Nullable *_Nullable)error;
+- (nullable NSString *)buildSQLWithDialect:(nullable id<ALNSQLDialect>)dialect
+                                     error:(NSError *_Nullable *_Nullable)error;
+- (NSArray *)buildParametersWithDialect:(nullable id<ALNSQLDialect>)dialect
+                                  error:(NSError *_Nullable *_Nullable)error;
 - (nullable NSDictionary *)build:(NSError *_Nullable *_Nullable)error;
 - (nullable NSString *)buildSQL:(NSError *_Nullable *_Nullable)error;
 - (NSArray *)buildParameters:(NSError *_Nullable *_Nullable)error;

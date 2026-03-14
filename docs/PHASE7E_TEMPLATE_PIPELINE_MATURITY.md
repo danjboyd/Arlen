@@ -2,7 +2,9 @@
 
 Phase 7E defines deterministic compile-time diagnostics and stronger regression coverage for EOC template parsing and render-path behavior.
 
-This document captures the initial 7E implementation slice completed on 2026-02-23.
+This document captures the delivered 7E template-pipeline contract set. The
+initial slice landed on 2026-02-23, and later lint/watch-path work closed the
+remaining acceptance items for the current first-party surface.
 
 ## 1. Scope (Initial Slice)
 
@@ -26,12 +28,16 @@ Diagnostic payload keys:
 - `line`
 - `column`
 
-Initial rule implemented:
+Implemented lint rules:
 
 - `unguarded_include`
   - emitted when template code calls `ALNEOCInclude(...)` without guarding the return value.
   - recommended pattern:
     - `if (!ALNEOCInclude(out, ctx, @"partials/_nav.html.eoc", error)) { return nil; }`
+- `slot_without_layout`
+  - emitted when a template fills a named slot without an active layout/yield contract.
+- `unused_slot_fill`
+  - emitted when a template fills a slot that no active layout consumes.
 
 `eocc` now emits deterministic lint warnings during transpilation:
 
@@ -67,6 +73,7 @@ Integration coverage now validates:
 
 - root render includes expected partial output
 - `eocc` emits deterministic lint warning for unguarded include and no warning for guarded include
+- watch-mode template-failure recovery paths rebuild and return to healthy output
 
 ## 5. Troubleshooting Workflow
 
@@ -91,10 +98,9 @@ Verification coverage:
 - `tests/unit/Phase7ETests.m`
   - contract fixture schema/reference integrity checks
 
-## 7. Remaining 7E Follow-On
+## 7. Closeout Notes
 
-The broader 7E roadmap still includes:
-
-- richer lint/diagnostic rule expansion beyond include-guard checks
-- additional render-path failure/recovery scenarios under watch/deploy flows
-- deeper template troubleshooting automation tied to coding-agent fix-it workflows
+The current tree closes the main 7E follow-on bar through additional lint rules,
+watch-mode template failure/recovery coverage, and updated troubleshooting docs.
+Further lint-rule expansion remains possible, but it is no longer tracked as an
+active Phase 7 blocker.

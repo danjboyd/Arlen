@@ -1,6 +1,6 @@
 # Arlen Toolchain Matrix
 
-Last updated: 2026-02-20
+Last updated: 2026-03-14
 
 This document records known-good local toolchain baselines for Arlen onboarding and CI parity.
 
@@ -26,6 +26,12 @@ make test-integration
 | GNUstep config tool | `source GNUstep.sh && command -v gnustep-config` | `/usr/GNUstep/System/Tools/gnustep-config` |
 | XCTest runner | `command -v xctest` | `/usr/GNUstep/System/Tools/xctest` |
 
+Optional contributor override:
+
+- set `ARLEN_XCTEST=/path/to/patched/xctest` to use a filter-capable runner for `make test-unit-filter` / `make test-integration-filter`
+- if that runner comes from a local uninstalled `tools-xctest` build, also set `ARLEN_XCTEST_LD_LIBRARY_PATH=/path/to/tools-xctest/XCTest/obj`
+- stock Debian `xctest` remains the baseline for the normal unfiltered test and confidence commands
+
 ## Doctor Check Mapping
 
 `bin/arlen-doctor` currently validates:
@@ -45,4 +51,3 @@ Update this matrix when:
 - CI base images change materially.
 - Arlen adds new hard toolchain/runtime dependencies.
 - `arlen doctor` check set changes.
-

@@ -3,6 +3,8 @@
 
 #import <Foundation/Foundation.h>
 
+#import "ALNSQLDialect.h"
+
 NS_ASSUME_NONNULL_BEGIN
 
 extern NSString *const ALNDatabaseAdapterErrorDomain;
@@ -47,6 +49,7 @@ typedef NS_ENUM(NSInteger, ALNDatabaseAdapterErrorCode) {
 
 @optional
 
+- (nullable id<ALNSQLDialect>)sqlDialect;
 - (NSDictionary<NSString *, id> *)capabilityMetadata;
 
 @end

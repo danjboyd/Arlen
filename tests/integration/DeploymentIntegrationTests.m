@@ -121,33 +121,128 @@
   return parsed;
 }
 
-- (void)testBoomhauerBuildCompilePathEnforcesARC {
+- (NSString *)shellQuoted:(NSString *)value {
+  NSString *safeValue = value ?: @"";
+  return [NSString stringWithFormat:@"'%@'",
+                                    [safeValue stringByReplacingOccurrencesOfString:@"'"
+                                                                            withString:@"'\"'\"'"]];
+}
+
+- (NSString *)runMakeAtRepoRoot:(NSString *)repoRoot
+                         target:(NSString *)target
+                       exitCode:(int *)exitCode {
+  NSString *command = [NSString stringWithFormat:
+      @"source /usr/GNUstep/System/Library/Makefiles/GNUstep.sh && cd %@ && make %@",
+      [self shellQuoted:repoRoot], target ?: @""];
+  return [self runShellCapture:command exitCode:exitCode];
+}
+
+- (NSString *)runMakeDryRunAtRepoRoot:(NSString *)repoRoot
+                               target:(NSString *)target
+                          touchingPath:(NSString *)path
+                              exitCode:(int *)exitCode {
+  NSString *command = [NSString stringWithFormat:
+      @"set -euo pipefail && cd %@ && "
+       "path=%@ && original_mtime=$(stat -c %%Y \"$path\") && "
+       "restore() { touch -d \"@$original_mtime\" \"$path\"; }; "
+       "trap restore EXIT && "
+       "touch \"$path\" && make -n %@",
+      [self shellQuoted:repoRoot], [self shellQuoted:path], target ?: @""];
+  return [self runShellCapture:command exitCode:exitCode];
+}
+
+- (void)testFrameworkSourceTouchRebuildsOneObjectArchiveAndDependentLinks {
   NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
-  NSString *scriptPath = [repoRoot stringByAppendingPathComponent:@"bin/boomhauer"];
+  NSString *frameworkSource = [repoRoot stringByAppendingPathComponent:@"src/Arlen/MVC/View/ALNView.m"];
+  int code = 0;
+  NSString *buildOutput = [self runMakeAtRepoRoot:repoRoot target:@"build-tests" exitCode:&code];
+  XCTAssertEqual(0, code, @"%@", buildOutput);
 
-  NSError *error = nil;
-  NSString *script =
-      [NSString stringWithContentsOfFile:scriptPath encoding:NSUTF8StringEncoding error:&error];
-  XCTAssertNotNil(script);
-  XCTAssertNil(error);
-  if (script == nil || error != nil) {
-    return;
-  }
+  NSString *dryRun =
+      [self runMakeDryRunAtRepoRoot:repoRoot
+                             target:@"build-tests"
+                        touchingPath:frameworkSource
+                            exitCode:&code];
+  NSString *archiveCommand =
+      [NSString stringWithFormat:@"ar rcs %@/build/lib/libArlenFramework.a", repoRoot];
+  NSString *frameworkCompileCommand = [NSString
+      stringWithFormat:@"-c src/Arlen/MVC/View/ALNView.m -o %@/build/obj/src/Arlen/MVC/View/ALNView.o",
+                       repoRoot];
+  NSString *generatedIndexCompileCommand = [NSString
+      stringWithFormat:@"-c build/gen/templates/index.html.eoc.m -o %@/build/obj/build/gen/templates/index.html.eoc.o",
+                       repoRoot];
+  NSString *unitCompileCommand = [NSString
+      stringWithFormat:@"-c tests/unit/BuildPolicyTests.m -o %@/build/obj/tests/unit/BuildPolicyTests.o",
+                       repoRoot];
+  XCTAssertEqual(0, code, @"%@", dryRun);
+  XCTAssertTrue([dryRun containsString:frameworkCompileCommand], @"%@", dryRun);
+  XCTAssertTrue([dryRun containsString:archiveCommand], @"%@", dryRun);
+  XCTAssertTrue([dryRun containsString:@"build/tests/ArlenUnitTests.xctest/ArlenUnitTests"], @"%@", dryRun);
+  XCTAssertTrue([dryRun containsString:@"build/tests/ArlenIntegrationTests.xctest/ArlenIntegrationTests"],
+                @"%@", dryRun);
+  XCTAssertFalse([dryRun containsString:generatedIndexCompileCommand], @"%@", dryRun);
+  XCTAssertFalse([dryRun containsString:unitCompileCommand], @"%@", dryRun);
+}
 
-  NSRegularExpression *regex =
-      [NSRegularExpression regularExpressionWithPattern:
-                               @"clang\\s+\\$\\(gnustep-config --objc-flags\\)(?:\\s+|\\\\\\n)+-fobjc-arc"
-                                                options:0
-                                                  error:&error];
-  XCTAssertNotNil(regex);
-  XCTAssertNil(error);
-  if (regex == nil || error != nil) {
-    return;
-  }
+- (void)testTemplateTouchRetranspilesOneGeneratedObjectAndDependentLinks {
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *templatePath = [repoRoot stringByAppendingPathComponent:@"templates/index.html.eoc"];
+  int code = 0;
+  NSString *buildOutput = [self runMakeAtRepoRoot:repoRoot target:@"build-tests" exitCode:&code];
+  XCTAssertEqual(0, code, @"%@", buildOutput);
 
-  NSUInteger matches =
-      [regex numberOfMatchesInString:script options:0 range:NSMakeRange(0, [script length])];
-  XCTAssertTrue(matches > 0, @"boomhauer compile path must enforce -fobjc-arc");
+  NSString *dryRun =
+      [self runMakeDryRunAtRepoRoot:repoRoot
+                             target:@"build-tests"
+                        touchingPath:templatePath
+                            exitCode:&code];
+  NSString *transpileCommand = [NSString stringWithFormat:
+      @"%@/build/eocc --template-root %@/templates "
+       "--output-dir %@/build/gen/templates "
+      "--manifest %@/build/gen/templates/manifest.json",
+      repoRoot, repoRoot, repoRoot, repoRoot];
+  NSString *generatedIndexCompileCommand = [NSString
+      stringWithFormat:@"-c build/gen/templates/index.html.eoc.m -o %@/build/obj/build/gen/templates/index.html.eoc.o",
+                       repoRoot];
+  NSString *generatedLayoutCompileCommand = [NSString
+      stringWithFormat:@"-c build/gen/templates/layouts/main.html.eoc.m -o %@/build/obj/build/gen/templates/layouts/main.html.eoc.o",
+                       repoRoot];
+  NSString *frameworkCompileCommand = [NSString
+      stringWithFormat:@"-c src/Arlen/MVC/View/ALNView.m -o %@/build/obj/src/Arlen/MVC/View/ALNView.o",
+                       repoRoot];
+  XCTAssertEqual(0, code, @"%@", dryRun);
+  XCTAssertTrue([dryRun containsString:transpileCommand], @"%@", dryRun);
+  XCTAssertTrue([dryRun containsString:generatedIndexCompileCommand], @"%@", dryRun);
+  XCTAssertFalse([dryRun containsString:generatedLayoutCompileCommand], @"%@",
+                 dryRun);
+  XCTAssertFalse([dryRun containsString:frameworkCompileCommand], @"%@", dryRun);
+  XCTAssertTrue([dryRun containsString:@"build/tests/ArlenUnitTests.xctest/ArlenUnitTests"], @"%@", dryRun);
+  XCTAssertTrue([dryRun containsString:@"build/tests/ArlenIntegrationTests.xctest/ArlenIntegrationTests"],
+                @"%@", dryRun);
+}
+
+- (void)testUnitTestTouchDoesNotRebuildFrameworkOrIntegrationBundle {
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *unitTestPath = [repoRoot stringByAppendingPathComponent:@"tests/unit/BuildPolicyTests.m"];
+  int code = 0;
+  NSString *buildOutput = [self runMakeAtRepoRoot:repoRoot target:@"build-tests" exitCode:&code];
+  XCTAssertEqual(0, code, @"%@", buildOutput);
+
+  NSString *dryRun =
+      [self runMakeDryRunAtRepoRoot:repoRoot
+                             target:@"build-tests"
+                        touchingPath:unitTestPath
+                            exitCode:&code];
+  NSString *unitCompileCommand = [NSString
+      stringWithFormat:@"-c tests/unit/BuildPolicyTests.m -o %@/build/obj/tests/unit/BuildPolicyTests.o",
+                       repoRoot];
+  XCTAssertEqual(0, code, @"%@", dryRun);
+  XCTAssertTrue([dryRun containsString:unitCompileCommand], @"%@", dryRun);
+  XCTAssertTrue([dryRun containsString:@"build/tests/ArlenUnitTests.xctest/ArlenUnitTests"], @"%@", dryRun);
+  XCTAssertFalse([dryRun containsString:@"build/tests/ArlenIntegrationTests.xctest/ArlenIntegrationTests"],
+                 @"%@", dryRun);
+  XCTAssertFalse([dryRun containsString:@"build/lib/libArlenFramework.a"], @"%@", dryRun);
+  XCTAssertFalse([dryRun containsString:@"/build/eocc --template-root"], @"%@", dryRun);
 }
 
 - (void)testCompileTimeFeatureFlagsCanDisableYYJSONAndLLHTTP {
@@ -241,7 +336,9 @@
          "  mkdir -p \"$export_root/$(dirname \"$path\")\"; "
          "  cp \"$path\" \"$export_root/$path\"; "
          "done && "
+         "set +u && "
          "source /usr/GNUstep/System/Library/Makefiles/GNUstep.sh && "
+         "set -u && "
          "include_flags=\"-I$export_root/src/Arlen\" && "
          "for dir in \"$export_root\"/src/Arlen/* \"$export_root\"/modules/*/Sources; do "
          "  if [ -d \"$dir\" ]; then include_flags=\"$include_flags -I$dir\"; fi; "

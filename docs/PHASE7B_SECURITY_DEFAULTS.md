@@ -2,7 +2,9 @@
 
 Phase 7B defines security-default presets and fail-fast misconfiguration behavior.
 
-This document captures the initial 7B implementation slice completed on 2026-02-23.
+This document captures the delivered 7B baseline. The initial slice landed on
+2026-02-23, and later security hardening closed the remaining default-policy
+acceptance work.
 
 ## 1. Security Profile Presets
 
@@ -91,3 +93,8 @@ Deployment checklist for this 7B slice:
 2. If enabling sessions or auth, set required secrets before startup.
 3. Validate merged config with `arlen config --json` in CI/deploy checks.
 4. Treat startup validation failures as release blockers, not runtime warnings.
+
+Later hardening in the current tree also enforces stronger secret-length
+validation, trusted-proxy CIDR boundaries, websocket origin policy, and secure
+request-boundary defaults such as disabled query-string CSRF fallback unless
+explicitly re-enabled.

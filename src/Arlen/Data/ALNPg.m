@@ -1,5 +1,6 @@
 #import "ALNPg.h"
 #import "ALNJSONSerialization.h"
+#import "ALNPostgresDialect.h"
 #import "ALNSQLBuilder.h"
 
 #import <dlfcn.h>
@@ -976,7 +977,7 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result, int rowIndex) {
   }
 
   NSError *buildError = nil;
-  NSDictionary *built = [builder build:&buildError];
+  NSDictionary *built = [builder buildWithDialect:[ALNPostgresDialect sharedDialect] error:&buildError];
   if (built == nil) {
     if (error != NULL) {
       *error = buildError ?: ALNPgMakeError(ALNPgErrorQueryFailed,
@@ -1856,6 +1857,12 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result, int rowIndex) {
   return @{
     @"adapter" : @"postgresql",
     @"dialect" : @"postgresql",
+    @"supports_transactions" : @YES,
+    @"returning_mode" : @"returning",
+    @"pagination_syntax" : @"limit_offset",
+    @"supports_upsert" : @YES,
+    @"conflict_resolution_mode" : @"on_conflict",
+    @"json_feature_family" : @"jsonb_ops",
     @"supports_builder_compilation_cache" : @YES,
     @"supports_builder_diagnostics" : @YES,
     @"supports_cte" : @YES,
@@ -1871,6 +1878,10 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result, int rowIndex) {
 
 - (NSString *)adapterName {
   return @"postgresql";
+}
+
+- (id<ALNSQLDialect>)sqlDialect {
+  return [ALNPostgresDialect sharedDialect];
 }
 
 - (instancetype)initWithConnectionString:(NSString *)connectionString

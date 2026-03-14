@@ -366,23 +366,8 @@ static BOOL ALNValidateJSONObjectRecursive(id obj, NSUInteger depth) {
 
 @implementation ALNJSONSerialization
 
-+ (ALNJSONBackend)backendFromEnvironment {
-  const char *rawValue = getenv("ARLEN_JSON_BACKEND");
-  NSString *raw = (rawValue != NULL) ? [[NSString stringWithUTF8String:rawValue] lowercaseString] : @"";
-  if ([raw length] == 0) {
++ (ALNJSONBackend)defaultBackend {
 #if ARLEN_ENABLE_YYJSON
-    return ALNJSONBackendYYJSON;
-#else
-    return ALNJSONBackendFoundation;
-#endif
-  }
-  if ([raw isEqualToString:@"foundation"] || [raw isEqualToString:@"nsjson"]) {
-    return ALNJSONBackendFoundation;
-  }
-#if ARLEN_ENABLE_YYJSON
-  if ([raw isEqualToString:@"yyjson"]) {
-    return ALNJSONBackendYYJSON;
-  }
   return ALNJSONBackendYYJSON;
 #else
   return ALNJSONBackendFoundation;
@@ -394,7 +379,7 @@ static BOOL ALNValidateJSONObjectRecursive(id obj, NSUInteger depth) {
     if (gALNJSONBackendInitialized) {
       return;
     }
-    gALNJSONBackend = [self backendFromEnvironment];
+    gALNJSONBackend = [self defaultBackend];
     gALNJSONBackendInitialized = YES;
   }
 }
@@ -429,10 +414,6 @@ static BOOL ALNValidateJSONObjectRecursive(id obj, NSUInteger depth) {
 #endif
 }
 
-+ (NSString *)foundationFallbackDeprecationDate {
-  return @"2026-04-30";
-}
-
 + (void)setBackendForTesting:(ALNJSONBackend)backend {
   ALNJSONBackend effectiveBackend = backend;
   if (effectiveBackend == ALNJSONBackendYYJSON && ![self isYYJSONAvailable]) {
@@ -447,11 +428,7 @@ static BOOL ALNValidateJSONObjectRecursive(id obj, NSUInteger depth) {
 + (void)resetBackendForTesting {
   @synchronized(self) {
     gALNJSONBackendInitialized = NO;
-#if ARLEN_ENABLE_YYJSON
-    gALNJSONBackend = ALNJSONBackendYYJSON;
-#else
-    gALNJSONBackend = ALNJSONBackendFoundation;
-#endif
+    gALNJSONBackend = [self defaultBackend];
   }
 }
 

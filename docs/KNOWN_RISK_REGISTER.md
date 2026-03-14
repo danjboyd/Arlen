@@ -14,7 +14,6 @@ Last updated: 2026-03-13
 | --- | --- | --- | --- | --- | --- |
 | `phase9j-risk-tsan-nonblocking` | TSAN lane remains non-blocking while false-positive budget is stabilized | medium | runtime-core | 2026-03-31 | Promote TSAN to blocking after two consecutive deterministic pass cycles. |
 | `phase9j-risk-benchmark-ladder` | Middleware-heavy benchmark concurrency ladder remains constrained to 1,4 | low | performance-core | 2026-03-15 | Phase E benchmark follow-on validates higher concurrency confidence. |
-| `phase10f-risk-foundation-json-fallback` | Temporary foundation JSON backend fallback remains enabled during cutover window | low | runtime-core | 2026-04-30 | Remove fallback after one release cycle once yyjson default rollout confidence remains stable. |
 
 ## Mitigated Risks
 

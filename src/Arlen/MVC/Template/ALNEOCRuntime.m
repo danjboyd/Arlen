@@ -749,10 +749,12 @@ ALNEOCRenderFunction ALNEOCResolveTemplate(NSString *logicalPath) {
 }
 
 NSString *ALNEOCRenderTemplate(NSString *logicalPath, id ctx, NSError **error) {
-  ALNEOCRenderFunction function = ALNEOCResolveTemplate(logicalPath);
+  NSString *normalizedPath = ALNEOCNormalizeTemplateReference(logicalPath);
+  NSString *resolvedPath = ([normalizedPath length] > 0) ? normalizedPath : logicalPath;
+  ALNEOCRenderFunction function = ALNEOCResolveTemplate(resolvedPath);
   if (function == NULL) {
     if (error != NULL) {
-      NSString *canonical = ALNEOCCanonicalTemplatePath(logicalPath);
+      NSString *canonical = ALNEOCCanonicalTemplatePath(resolvedPath);
       *error = [NSError errorWithDomain:ALNEOCErrorDomain
                                    code:ALNEOCErrorTemplateNotFound
                                userInfo:@{
@@ -781,7 +783,7 @@ NSString *ALNEOCRenderTemplate(NSString *logicalPath, id ctx, NSError **error) {
       if (innerError != nil) {
         *error = innerError;
       } else {
-        NSString *canonical = ALNEOCCanonicalTemplatePath(logicalPath);
+        NSString *canonical = ALNEOCCanonicalTemplatePath(resolvedPath);
         *error = [NSError
             errorWithDomain:ALNEOCErrorDomain
                        code:ALNEOCErrorTemplateExecutionFailed

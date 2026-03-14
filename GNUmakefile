@@ -4,8 +4,11 @@ SHELL := /bin/bash
 ROOT_DIR := $(CURDIR)
 GNUSTEP_SH := /usr/GNUstep/System/Library/Makefiles/GNUstep.sh
 BUILD_DIR := $(ROOT_DIR)/build
+OBJ_DIR := $(BUILD_DIR)/obj
+LIB_DIR := $(BUILD_DIR)/lib
 GEN_DIR := $(BUILD_DIR)/gen/templates
 MODULE_GEN_DIR := $(BUILD_DIR)/gen/module_templates
+MODULE_GEN_MANIFEST_DIR := $(MODULE_GEN_DIR)/manifests
 TECH_DEMO_GEN_DIR := $(BUILD_DIR)/gen/tech_demo_templates
 
 EOC_TOOL := $(BUILD_DIR)/eocc
@@ -22,18 +25,26 @@ DISPATCH_PERF_BENCH_TOOL := $(BUILD_DIR)/dispatch-perf-bench
 HTTP_PARSE_PERF_BENCH_TOOL := $(BUILD_DIR)/http-parse-perf-bench
 ROUTE_MATCH_PERF_BENCH_TOOL := $(BUILD_DIR)/route-match-perf-bench
 BACKEND_CONTRACT_MATRIX_TOOL := $(BUILD_DIR)/backend-contract-matrix
+ARLEN_FRAMEWORK_LIB := $(LIB_DIR)/libArlenFramework.a
 
 TEMPLATE_ROOT := $(ROOT_DIR)/templates
-TEMPLATE_FILES := $(shell find $(TEMPLATE_ROOT) -type f -name '*.html.eoc' | sort)
-GENERATED_TEMPLATE_SRCS := $(shell find $(GEN_DIR) -type f -name '*.m' 2>/dev/null | sort)
+TEMPLATE_FILES := $(shell find $(TEMPLATE_ROOT) -type f -name '*.html.eoc' 2>/dev/null | sort)
+ROOT_TEMPLATE_DIRS := $(shell if [ -d $(TEMPLATE_ROOT) ]; then find $(TEMPLATE_ROOT) -type d | sort; fi)
 TECH_DEMO_ROOT := $(ROOT_DIR)/examples/tech_demo
 TECH_DEMO_TEMPLATE_ROOT := $(TECH_DEMO_ROOT)/templates
-TECH_DEMO_TEMPLATE_FILES := $(shell find $(TECH_DEMO_TEMPLATE_ROOT) -type f -name '*.html.eoc' | sort)
+TECH_DEMO_TEMPLATE_FILES := $(shell find $(TECH_DEMO_TEMPLATE_ROOT) -type f -name '*.html.eoc' 2>/dev/null | sort)
+TECH_DEMO_TEMPLATE_DIRS := $(shell if [ -d $(TECH_DEMO_TEMPLATE_ROOT) ]; then find $(TECH_DEMO_TEMPLATE_ROOT) -type d | sort; fi)
+MODULE_TEMPLATE_FILES := $(shell find modules -type f -path '*/Resources/Templates/*.html.eoc' 2>/dev/null | sort)
+MODULE_TEMPLATE_DIRS := $(shell if [ -d modules ]; then find modules -type d | sort; fi)
 
-FRAMEWORK_SRCS := $(shell find src -type f -name '*.m' | sort)
+FRAMEWORK_OBJC_SRCS := $(shell find src -type f -name '*.m' | sort)
 MODULE_SRCS := $(shell find modules -type f -path '*/Sources/*.m' 2>/dev/null | sort)
 ARLEN_ENABLE_YYJSON ?= 1
 ARLEN_ENABLE_LLHTTP ?= 1
+ARLEN_XCTEST ?= xctest
+ARLEN_XCTEST_LD_LIBRARY_PATH ?=
+TEST ?=
+SKIP_TEST ?=
 ifneq ($(filter $(ARLEN_ENABLE_YYJSON),0 1),$(ARLEN_ENABLE_YYJSON))
 $(error ARLEN_ENABLE_YYJSON must be 0 or 1)
 endif
@@ -51,16 +62,18 @@ else
 LLHTTP_C_SRCS :=
 endif
 ARGON2_C_SRCS := src/Arlen/Support/third_party/argon2/src/argon2.c src/Arlen/Support/third_party/argon2/src/core.c src/Arlen/Support/third_party/argon2/src/encoding.c src/Arlen/Support/third_party/argon2/src/ref.c src/Arlen/Support/third_party/argon2/src/blake2/blake2b.c
-THIRD_PARTY_C_SRCS := $(YYJSON_C_SRCS) $(LLHTTP_C_SRCS) $(ARGON2_C_SRCS)
-FRAMEWORK_SRCS += $(THIRD_PARTY_C_SRCS)
+FRAMEWORK_C_SRCS := $(YYJSON_C_SRCS) $(LLHTTP_C_SRCS) $(ARGON2_C_SRCS)
+FRAMEWORK_SRCS := $(FRAMEWORK_OBJC_SRCS) $(FRAMEWORK_C_SRCS)
 ARLEN_DATA_SRCS := $(shell find src/Arlen/Data -type f -name '*.m' | sort)
 JSON_SERIALIZATION_SRCS := src/Arlen/Support/ALNJSONSerialization.m $(YYJSON_C_SRCS)
 EOC_RUNTIME_SRCS := src/Arlen/MVC/Template/ALNEOCRuntime.m src/Arlen/MVC/Template/ALNEOCTranspiler.m
 
 UNIT_TEST_BUNDLE := $(BUILD_DIR)/tests/ArlenUnitTests.xctest
 UNIT_TEST_BIN := $(UNIT_TEST_BUNDLE)/ArlenUnitTests
+UNIT_TEST_TARGET_NAME := $(notdir $(basename $(UNIT_TEST_BUNDLE)))
 INTEGRATION_TEST_BUNDLE := $(BUILD_DIR)/tests/ArlenIntegrationTests.xctest
 INTEGRATION_TEST_BIN := $(INTEGRATION_TEST_BUNDLE)/ArlenIntegrationTests
+INTEGRATION_TEST_TARGET_NAME := $(notdir $(basename $(INTEGRATION_TEST_BUNDLE)))
 BROWSER_ERROR_AUDIT_TEST_BUNDLE := $(BUILD_DIR)/tests/ArlenBrowserErrorAudit.xctest
 BROWSER_ERROR_AUDIT_TEST_BIN := $(BROWSER_ERROR_AUDIT_TEST_BUNDLE)/ArlenBrowserErrorAudit
 GNUSTEP_TEST_HOME := $(ROOT_DIR)/.gnustep-home
@@ -69,15 +82,19 @@ UNIT_TEST_SRCS := $(shell find tests/unit -type f -name '*.m' | sort)
 INTEGRATION_TEST_SRCS := $(shell find tests/integration -type f -name '*.m' | sort)
 BROWSER_ERROR_AUDIT_SRCS := $(shell find tests/browser_error_audit -type f -name '*.m' | sort)
 
-INCLUDE_FLAGS := -Isrc/Arlen -Isrc/Arlen/Core -Isrc/Arlen/Data -Isrc/Arlen/HTTP -Isrc/Arlen/MVC/Controller -Isrc/Arlen/MVC/Middleware -Isrc/Arlen/MVC/Routing -Isrc/Arlen/MVC/Template -Isrc/Arlen/MVC/View -Isrc/Arlen/Support -Isrc/Arlen/Support/third_party/argon2/include -Isrc/Arlen/Support/third_party/argon2/src -Isrc/MojoObjc -Isrc/MojoObjc/Core -Isrc/MojoObjc/Data -Isrc/MojoObjc/HTTP -Isrc/MojoObjc/MVC/Controller -Isrc/MojoObjc/MVC/Middleware -Isrc/MojoObjc/MVC/Routing -Isrc/MojoObjc/MVC/Template -Isrc/MojoObjc/MVC/View -Isrc/MojoObjc/Support -Imodules/auth/Sources -Imodules/admin-ui/Sources -Imodules/jobs/Sources -Imodules/notifications/Sources -Imodules/storage/Sources -Imodules/ops/Sources -Imodules/search/Sources -I/usr/include/postgresql
+FRAMEWORK_MODULE_INCLUDE_FLAGS := $(addprefix -I,$(shell find modules -mindepth 2 -maxdepth 2 -type d -name 'Sources' 2>/dev/null | sort))
+INCLUDE_FLAGS := -Isrc -Isrc/Arlen -Isrc/Arlen/Core -Isrc/Arlen/Data -Isrc/Arlen/HTTP -Isrc/Arlen/MVC/Controller -Isrc/Arlen/MVC/Middleware -Isrc/Arlen/MVC/Routing -Isrc/Arlen/MVC/Template -Isrc/Arlen/MVC/View -Isrc/Arlen/Support -Isrc/Arlen/Support/third_party/argon2/include -Isrc/Arlen/Support/third_party/argon2/src -Isrc/MojoObjc -Isrc/MojoObjc/Core -Isrc/MojoObjc/Data -Isrc/MojoObjc/HTTP -Isrc/MojoObjc/MVC/Controller -Isrc/MojoObjc/MVC/Middleware -Isrc/MojoObjc/MVC/Routing -Isrc/MojoObjc/MVC/Template -Isrc/MojoObjc/MVC/View -Isrc/MojoObjc/Support $(FRAMEWORK_MODULE_INCLUDE_FLAGS) -I/usr/include/postgresql
 EXTRA_OBJC_FLAGS ?=
 ARC_REQUIRED_FLAG := -fobjc-arc
+PIC_FLAG := -fPIC
 FEATURE_FLAGS := -DARLEN_ENABLE_YYJSON=$(ARLEN_ENABLE_YYJSON) -DARLEN_ENABLE_LLHTTP=$(ARLEN_ENABLE_LLHTTP)
 THIRD_PARTY_FEATURE_FLAGS := -DARGON2_NO_THREADS=1
+COMMON_COMPILE_FLAGS := $(FEATURE_FLAGS) $(THIRD_PARTY_FEATURE_FLAGS) $(PIC_FLAG) $(EXTRA_OBJC_FLAGS)
 ifneq ($(findstring -fno-objc-arc,$(EXTRA_OBJC_FLAGS)),)
 $(error EXTRA_OBJC_FLAGS cannot contain -fno-objc-arc; Arlen enforces ARC across all first-party Objective-C compile paths)
 endif
-override OBJC_FLAGS := $$(gnustep-config --objc-flags) $(ARC_REQUIRED_FLAG) $(FEATURE_FLAGS) $(THIRD_PARTY_FEATURE_FLAGS) $(EXTRA_OBJC_FLAGS)
+override OBJC_FLAGS := $$(gnustep-config --objc-flags) $(ARC_REQUIRED_FLAG) $(COMMON_COMPILE_FLAGS)
+override C_COMPILE_FLAGS := $$(gnustep-config --objc-flags) $(COMMON_COMPILE_FLAGS)
 ifneq ($(findstring $(ARC_REQUIRED_FLAG),$(OBJC_FLAGS)),$(ARC_REQUIRED_FLAG))
 $(error OBJC_FLAGS must include -fobjc-arc)
 endif
@@ -87,121 +104,314 @@ endif
 BASE_LINK_LIBS := $$(gnustep-config --base-libs) -ldl -lcrypto -ldispatch
 XCTEST_LINK_LIBS := $(BASE_LINK_LIBS) -lXCTest
 
-.PHONY: all eocc transpile module-transpile tech-demo-transpile generated-compile arlen boomhauer tech-demo-server api-reference-server auth-primitives-server migration-sample-server arlen-data-example json-perf-bench dispatch-perf-bench http-parse-perf-bench route-match-perf-bench backend-contract-matrix test-data-layer dev-server tech-demo smoke-render smoke routes build-tests test test-unit test-integration browser-error-audit perf perf-fast parity-phaseb perf-phasec perf-phased deploy-smoke phase5e-confidence phase12-confidence phase13-confidence phase14-confidence phase15-confidence phase16-confidence ci-quality ci-sanitizers ci-fault-injection ci-release-certification ci-json-abstraction ci-json-perf ci-dispatch-perf ci-http-parse-perf ci-route-match-perf ci-backend-parity-matrix ci-protocol-adversarial ci-syscall-faults ci-allocation-faults ci-soak ci-chaos-restart ci-static-analysis ci-blob-throughput ci-phase11-protocol-adversarial ci-phase11-fuzz ci-phase11-live-adversarial ci-phase11-sanitizers ci-phase11 ci-docs check docs-api docs-html docs-serve clean
+ROOT_TEMPLATE_MANIFEST := $(GEN_DIR)/manifest.json
+ROOT_TRANSPILE_STATE := $(GEN_DIR)/.transpile.state
+MODULE_TRANSPILE_STATE := $(MODULE_GEN_DIR)/.transpile.state
+TECH_DEMO_TRANSPILE_STATE := $(TECH_DEMO_GEN_DIR)/.transpile.state
+TECH_DEMO_TEMPLATE_MANIFEST := $(TECH_DEMO_GEN_DIR)/manifest.json
+
+define obj_path
+$(OBJ_DIR)/$(patsubst %.m,%.o,$(patsubst %.c,%.o,$(patsubst $(ROOT_DIR)/%,%,$(1))))
+endef
+
+define objs_from
+$(foreach src,$(1),$(call obj_path,$(src)))
+endef
+
+define repo_relative_path
+$(patsubst $(ROOT_DIR)/%,%,$(1))
+endef
+
+define module_generated_source_for
+$(shell path='$(1)'; \
+  module_id="$${path#modules/}"; \
+  module_id="$${module_id%%/*}"; \
+  relative_path="$${path#modules/$$module_id/Resources/Templates/}"; \
+  printf '%s/modules/%s/%s.m\n' "$(MODULE_GEN_DIR)" "$$module_id" "$$relative_path")
+endef
+
+define root_generated_source_for
+$(patsubst $(TEMPLATE_ROOT)/%.html.eoc,$(GEN_DIR)/%.html.eoc.m,$(1))
+endef
+
+define tech_demo_generated_source_for
+$(patsubst $(TECH_DEMO_TEMPLATE_ROOT)/%.html.eoc,$(TECH_DEMO_GEN_DIR)/%.html.eoc.m,$(1))
+endef
+
+define root_generated_object_for
+$(call obj_path,$(call root_generated_source_for,$(1)))
+endef
+
+define tech_demo_generated_object_for
+$(call obj_path,$(call tech_demo_generated_source_for,$(1)))
+endef
+
+define xctest_filter_args
+$(if $(strip $(TEST)),-only-testing:$(1)/$(strip $(TEST))) $(if $(strip $(SKIP_TEST)),-skip-testing:$(1)/$(strip $(SKIP_TEST)))
+endef
+
+define xctest_runtime_env
+LD_PRELOAD="$(XCTEST_LD_PRELOAD)" $(if $(strip $(ARLEN_XCTEST_LD_LIBRARY_PATH)),LD_LIBRARY_PATH="$(ARLEN_XCTEST_LD_LIBRARY_PATH)$${LD_LIBRARY_PATH:+:$$LD_LIBRARY_PATH}" )ASAN_OPTIONS="$(ASAN_OPTIONS)" UBSAN_OPTIONS="$(UBSAN_OPTIONS)"
+endef
+
+define root_generated_source_rel_for
+$(call repo_relative_path,$(call root_generated_source_for,$(1)))
+endef
+
+define tech_demo_generated_source_rel_for
+$(call repo_relative_path,$(call tech_demo_generated_source_for,$(1)))
+endef
+
+define module_generated_object_for
+$(call obj_path,$(call module_generated_source_for,$(1)))
+endef
+
+define module_generated_source_rel_for
+$(call repo_relative_path,$(call module_generated_source_for,$(1)))
+endef
+
+ROOT_GENERATED_SRCS := $(patsubst $(TEMPLATE_ROOT)/%.html.eoc,$(GEN_DIR)/%.html.eoc.m,$(TEMPLATE_FILES))
+TECH_DEMO_GENERATED_SRCS := $(patsubst $(TECH_DEMO_TEMPLATE_ROOT)/%.html.eoc,$(TECH_DEMO_GEN_DIR)/%.html.eoc.m,$(TECH_DEMO_TEMPLATE_FILES))
+MODULE_GENERATED_SRCS := $(shell if [ -d modules ]; then \
+  find modules -type f -path '*/Resources/Templates/*.html.eoc' | sort | \
+  while IFS= read -r path; do \
+    module_id="$${path#modules/}"; \
+    module_id="$${module_id%%/*}"; \
+    relative_path="$${path#modules/$$module_id/Resources/Templates/}"; \
+    printf '%s/modules/%s/%s.m\n' "$(MODULE_GEN_DIR)" "$$module_id" "$$relative_path"; \
+  done; \
+fi)
+
+FRAMEWORK_OBJS := $(call objs_from,$(FRAMEWORK_SRCS))
+MODULE_OBJS := $(call objs_from,$(MODULE_SRCS))
+ROOT_GENERATED_OBJS := $(call objs_from,$(ROOT_GENERATED_SRCS))
+TECH_DEMO_GENERATED_OBJS := $(call objs_from,$(TECH_DEMO_GENERATED_SRCS))
+MODULE_GENERATED_OBJS := $(call objs_from,$(MODULE_GENERATED_SRCS))
+
+EOCC_ENTRY_OBJS := $(call objs_from,tools/eocc.m)
+EOC_RUNTIME_OBJS := $(call objs_from,$(EOC_RUNTIME_SRCS))
+ARLEN_ENTRY_OBJS := $(call objs_from,tools/arlen.m)
+BOOMHAUER_ENTRY_OBJS := $(call objs_from,tools/boomhauer.m)
+SMOKE_RENDER_ENTRY_OBJS := $(call objs_from,tools/eoc_smoke_render.m)
+TECH_DEMO_SERVER_ENTRY_OBJS := $(call objs_from,examples/tech_demo/src/tech_demo_server.m)
+API_REFERENCE_SERVER_ENTRY_OBJS := $(call objs_from,examples/api_reference/src/api_reference_server.m)
+AUTH_PRIMITIVES_SERVER_ENTRY_OBJS := $(call objs_from,examples/auth_primitives/src/auth_primitives_server.m)
+MIGRATION_SAMPLE_SERVER_ENTRY_OBJS := $(call objs_from,examples/gsweb_migration/src/migration_sample_server.m)
+ARLEN_DATA_EXAMPLE_ENTRY_OBJS := $(call objs_from,examples/arlen_data/src/arlen_data_example.m)
+JSON_PERF_BENCH_ENTRY_OBJS := $(call objs_from,tools/json_perf_bench.m)
+DISPATCH_PERF_BENCH_ENTRY_OBJS := $(call objs_from,tools/dispatch_perf_bench.m)
+HTTP_PARSE_PERF_BENCH_ENTRY_OBJS := $(call objs_from,tools/http_parse_perf_bench.m)
+ROUTE_MATCH_PERF_BENCH_ENTRY_OBJS := $(call objs_from,tools/route_match_perf_bench.m)
+BACKEND_CONTRACT_MATRIX_ENTRY_OBJS := $(call objs_from,tools/backend_contract_matrix.m)
+UNIT_TEST_OBJS := $(call objs_from,$(UNIT_TEST_SRCS))
+INTEGRATION_TEST_OBJS := $(call objs_from,$(INTEGRATION_TEST_SRCS))
+BROWSER_ERROR_AUDIT_TEST_OBJS := $(call objs_from,$(BROWSER_ERROR_AUDIT_SRCS))
+
+ALL_OBJECTS := $(sort $(FRAMEWORK_OBJS) $(MODULE_OBJS) $(ROOT_GENERATED_OBJS) $(TECH_DEMO_GENERATED_OBJS) $(MODULE_GENERATED_OBJS) $(EOCC_ENTRY_OBJS) $(ARLEN_ENTRY_OBJS) $(BOOMHAUER_ENTRY_OBJS) $(SMOKE_RENDER_ENTRY_OBJS) $(TECH_DEMO_SERVER_ENTRY_OBJS) $(API_REFERENCE_SERVER_ENTRY_OBJS) $(AUTH_PRIMITIVES_SERVER_ENTRY_OBJS) $(MIGRATION_SAMPLE_SERVER_ENTRY_OBJS) $(ARLEN_DATA_EXAMPLE_ENTRY_OBJS) $(JSON_PERF_BENCH_ENTRY_OBJS) $(DISPATCH_PERF_BENCH_ENTRY_OBJS) $(HTTP_PARSE_PERF_BENCH_ENTRY_OBJS) $(ROUTE_MATCH_PERF_BENCH_ENTRY_OBJS) $(BACKEND_CONTRACT_MATRIX_ENTRY_OBJS) $(UNIT_TEST_OBJS) $(INTEGRATION_TEST_OBJS) $(BROWSER_ERROR_AUDIT_TEST_OBJS))
+ALL_DEPFILES := $(ALL_OBJECTS:.o=.d)
+
+.PHONY: all framework-artifacts eocc transpile module-transpile tech-demo-transpile generated-compile arlen boomhauer tech-demo-server api-reference-server auth-primitives-server migration-sample-server arlen-data-example json-perf-bench dispatch-perf-bench http-parse-perf-bench route-match-perf-bench backend-contract-matrix test-data-layer dev-server tech-demo smoke-render smoke routes build-tests test test-unit test-unit-filter test-integration test-integration-filter browser-error-audit perf perf-fast parity-phaseb perf-phasec perf-phased deploy-smoke phase5e-confidence phase12-confidence phase13-confidence phase14-confidence phase15-confidence phase16-confidence phase19-confidence ci-quality ci-sanitizers ci-fault-injection ci-release-certification ci-json-abstraction ci-json-perf ci-dispatch-perf ci-http-parse-perf ci-route-match-perf ci-backend-parity-matrix ci-protocol-adversarial ci-syscall-faults ci-allocation-faults ci-soak ci-chaos-restart ci-static-analysis ci-blob-throughput ci-phase11-protocol-adversarial ci-phase11-fuzz ci-phase11-live-adversarial ci-phase11-sanitizers ci-phase11 ci-docs check docs-api docs-html docs-serve clean
 
 all: eocc transpile generated-compile arlen boomhauer
 
 $(BUILD_DIR):
 >mkdir -p $(BUILD_DIR)
 
-$(EOC_TOOL): tools/eocc.m $(EOC_RUNTIME_SRCS) | $(BUILD_DIR)
->source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) tools/eocc.m $(EOC_RUNTIME_SRCS) -o $(EOC_TOOL) $(BASE_LINK_LIBS)
+$(OBJ_DIR):
+>mkdir -p $(OBJ_DIR)
 
-eocc: $(EOC_TOOL)
+$(LIB_DIR):
+>mkdir -p $(LIB_DIR)
 
-transpile: eocc
+$(GEN_DIR):
 >mkdir -p $(GEN_DIR)
->$(EOC_TOOL) --template-root $(TEMPLATE_ROOT) --output-dir $(GEN_DIR) $(TEMPLATE_FILES)
 
-module-transpile: eocc
->rm -rf $(MODULE_GEN_DIR)
+$(MODULE_GEN_DIR):
 >mkdir -p $(MODULE_GEN_DIR)
->if [ -d modules ]; then \
+
+$(MODULE_GEN_MANIFEST_DIR):
+>mkdir -p $(MODULE_GEN_MANIFEST_DIR)
+
+$(TECH_DEMO_GEN_DIR):
+>mkdir -p $(TECH_DEMO_GEN_DIR)
+
+$(ROOT_TRANSPILE_STATE): $(EOC_TOOL) $(TEMPLATE_FILES) $(ROOT_TEMPLATE_DIRS) | $(GEN_DIR)
+>@if [ -n "$(strip $(TEMPLATE_FILES))" ]; then \
+>  $(EOC_TOOL) --template-root $(TEMPLATE_ROOT) --output-dir $(GEN_DIR) --manifest $(ROOT_TEMPLATE_MANIFEST) $(TEMPLATE_FILES); \
+>else \
+>  find $(GEN_DIR) -mindepth 1 -maxdepth 1 ! -name '.transpile.state' -exec rm -rf {} + 2>/dev/null || true; \
+>fi
+>@touch $@
+
+$(MODULE_TRANSPILE_STATE): $(EOC_TOOL) $(MODULE_TEMPLATE_FILES) $(MODULE_TEMPLATE_DIRS) | $(MODULE_GEN_DIR) $(MODULE_GEN_MANIFEST_DIR)
+>@mkdir -p $(MODULE_GEN_DIR)/modules
+>@if [ -d $(MODULE_GEN_DIR)/modules ]; then \
+>  while IFS= read -r existing_dir; do \
+>    module_id="$$(basename "$$existing_dir")"; \
+>    if [ ! -d "modules/$$module_id" ]; then \
+>      rm -rf "$$existing_dir" "$(MODULE_GEN_MANIFEST_DIR)/$$module_id.json"; \
+>    fi; \
+>  done < <(find $(MODULE_GEN_DIR)/modules -mindepth 1 -maxdepth 1 -type d 2>/dev/null | sort); \
+>fi
+>@if [ -d modules ]; then \
 >  while IFS= read -r module_root; do \
 >    module_id="$$(basename "$$module_root")"; \
 >    module_template_root="$$module_root/Resources/Templates"; \
->    module_output_root="$(MODULE_GEN_DIR)/$$module_id"; \
 >    if [ ! -d "$$module_template_root" ]; then \
+>      rm -rf "$(MODULE_GEN_DIR)/modules/$$module_id" "$(MODULE_GEN_MANIFEST_DIR)/$$module_id.json"; \
 >      continue; \
 >    fi; \
 >    mapfile -t module_template_files < <(find "$$module_template_root" -type f -name '*.html.eoc' | sort); \
 >    if [ $${#module_template_files[@]} -eq 0 ]; then \
+>      rm -rf "$(MODULE_GEN_DIR)/modules/$$module_id" "$(MODULE_GEN_MANIFEST_DIR)/$$module_id.json"; \
 >      continue; \
 >    fi; \
->    $(EOC_TOOL) --template-root "$$module_template_root" --output-dir "$$module_output_root" --logical-prefix "modules/$$module_id" "$${module_template_files[@]}"; \
+>    $(EOC_TOOL) --template-root "$$module_template_root" --output-dir "$(MODULE_GEN_DIR)" --manifest "$(MODULE_GEN_MANIFEST_DIR)/$$module_id.json" --logical-prefix "modules/$$module_id" "$${module_template_files[@]}"; \
 >  done < <(find modules -mindepth 1 -maxdepth 1 -type d | sort); \
 >fi
+>@touch $@
 
-tech-demo-transpile: eocc
->mkdir -p $(TECH_DEMO_GEN_DIR)
->$(EOC_TOOL) --template-root $(TECH_DEMO_TEMPLATE_ROOT) --output-dir $(TECH_DEMO_GEN_DIR) $(TECH_DEMO_TEMPLATE_FILES)
+$(TECH_DEMO_TRANSPILE_STATE): $(EOC_TOOL) $(TECH_DEMO_TEMPLATE_FILES) $(TECH_DEMO_TEMPLATE_DIRS) | $(TECH_DEMO_GEN_DIR)
+>@if [ -n "$(strip $(TECH_DEMO_TEMPLATE_FILES))" ]; then \
+>  $(EOC_TOOL) --template-root $(TECH_DEMO_TEMPLATE_ROOT) --output-dir $(TECH_DEMO_GEN_DIR) --manifest $(TECH_DEMO_TEMPLATE_MANIFEST) $(TECH_DEMO_TEMPLATE_FILES); \
+>else \
+>  find $(TECH_DEMO_GEN_DIR) -mindepth 1 -maxdepth 1 ! -name '.transpile.state' -exec rm -rf {} + 2>/dev/null || true; \
+>fi
+>@touch $@
 
-generated-compile: transpile
->source $(GNUSTEP_SH) && generated_files="$$(find $(GEN_DIR) -type f -name '*.m' | sort)"; \
->if [ -z "$$generated_files" ]; then \
->  echo "No generated template sources found in $(GEN_DIR)"; \
->  exit 1; \
->fi; \
->clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) $$generated_files $(FRAMEWORK_SRCS) -shared -fPIC -o $(BUILD_DIR)/libArlenFramework.so $(BASE_LINK_LIBS)
+$(GEN_DIR)/%.html.eoc.m: $(TEMPLATE_ROOT)/%.html.eoc | $(ROOT_TRANSPILE_STATE)
+>@test -f $@
 
-$(ARLEN_TOOL): tools/arlen.m src/Arlen/Core/ALNConfig.m src/Arlen/Core/ALNModuleSystem.m $(ARLEN_DATA_SRCS) $(JSON_SERIALIZATION_SRCS) | $(BUILD_DIR)
->source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) tools/arlen.m src/Arlen/Core/ALNConfig.m src/Arlen/Core/ALNModuleSystem.m $(ARLEN_DATA_SRCS) $(JSON_SERIALIZATION_SRCS) -o $(ARLEN_TOOL) $(BASE_LINK_LIBS)
+$(TECH_DEMO_GEN_DIR)/%.html.eoc.m: $(TECH_DEMO_TEMPLATE_ROOT)/%.html.eoc | $(TECH_DEMO_TRANSPILE_STATE)
+>@test -f $@
+
+define module_generated_rule
+$(call module_generated_source_for,$(1)): $(1) | $(MODULE_TRANSPILE_STATE)
+>@test -f $$@
+endef
+
+$(foreach module_template,$(MODULE_TEMPLATE_FILES),$(eval $(call module_generated_rule,$(module_template))))
+
+define root_generated_object_rule
+$(call root_generated_object_for,$(1)): $(call root_generated_source_for,$(1)) $(1)
+>@mkdir -p $$(@D)
+>@source $$(GNUSTEP_SH) && clang $$(OBJC_FLAGS) $$(INCLUDE_FLAGS) -MMD -MP -MF $$(@:.o=.d) -c $(call root_generated_source_rel_for,$(1)) -o $$@
+endef
+
+define tech_demo_generated_object_rule
+$(call tech_demo_generated_object_for,$(1)): $(call tech_demo_generated_source_for,$(1)) $(1)
+>@mkdir -p $$(@D)
+>@source $$(GNUSTEP_SH) && clang $$(OBJC_FLAGS) $$(INCLUDE_FLAGS) -MMD -MP -MF $$(@:.o=.d) -c $(call tech_demo_generated_source_rel_for,$(1)) -o $$@
+endef
+
+define module_generated_object_rule
+$(call module_generated_object_for,$(1)): $(call module_generated_source_for,$(1)) $(1)
+>@mkdir -p $$(@D)
+>@source $$(GNUSTEP_SH) && clang $$(OBJC_FLAGS) $$(INCLUDE_FLAGS) -MMD -MP -MF $$(@:.o=.d) -c $(call module_generated_source_rel_for,$(1)) -o $$@
+endef
+
+$(foreach root_template,$(TEMPLATE_FILES),$(eval $(call root_generated_object_rule,$(root_template))))
+$(foreach tech_demo_template,$(TECH_DEMO_TEMPLATE_FILES),$(eval $(call tech_demo_generated_object_rule,$(tech_demo_template))))
+$(foreach module_template,$(MODULE_TEMPLATE_FILES),$(eval $(call module_generated_object_rule,$(module_template))))
+
+$(OBJ_DIR)/%.o: %.m
+>@mkdir -p $(@D)
+>@source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) -MMD -MP -MF $(@:.o=.d) -c $< -o $@
+
+$(OBJ_DIR)/%.o: %.c
+>@mkdir -p $(@D)
+>@source $(GNUSTEP_SH) && clang $(C_COMPILE_FLAGS) $(INCLUDE_FLAGS) -MMD -MP -MF $(@:.o=.d) -c $< -o $@
+
+$(ARLEN_FRAMEWORK_LIB): $(FRAMEWORK_OBJS) | $(LIB_DIR)
+>@rm -f $@
+>@ar rcs $@ $(FRAMEWORK_OBJS)
+
+framework-artifacts: eocc $(ARLEN_FRAMEWORK_LIB)
+
+$(EOC_TOOL): $(EOCC_ENTRY_OBJS) $(EOC_RUNTIME_OBJS) | $(BUILD_DIR)
+>@mkdir -p $(@D)
+>@source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) $(EOCC_ENTRY_OBJS) $(EOC_RUNTIME_OBJS) -o $(EOC_TOOL) $(BASE_LINK_LIBS)
+
+eocc: $(EOC_TOOL)
+
+transpile: $(ROOT_TRANSPILE_STATE)
+
+module-transpile: $(MODULE_TRANSPILE_STATE)
+
+tech-demo-transpile: $(TECH_DEMO_TRANSPILE_STATE)
+
+generated-compile: $(ROOT_TRANSPILE_STATE) $(ROOT_GENERATED_OBJS)
+
+$(ARLEN_TOOL): $(ARLEN_ENTRY_OBJS) $(ARLEN_FRAMEWORK_LIB) | $(BUILD_DIR)
+>@mkdir -p $(@D)
+>@source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) $(ARLEN_ENTRY_OBJS) $(ARLEN_FRAMEWORK_LIB) -o $(ARLEN_TOOL) $(BASE_LINK_LIBS)
 
 arlen: $(ARLEN_TOOL)
 
-$(JSON_PERF_BENCH_TOOL): tools/json_perf_bench.m $(JSON_SERIALIZATION_SRCS) | $(BUILD_DIR)
->source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) tools/json_perf_bench.m $(JSON_SERIALIZATION_SRCS) -o $(JSON_PERF_BENCH_TOOL) $(BASE_LINK_LIBS)
+$(JSON_PERF_BENCH_TOOL): $(JSON_PERF_BENCH_ENTRY_OBJS) $(ARLEN_FRAMEWORK_LIB) | $(BUILD_DIR)
+>@mkdir -p $(@D)
+>@source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) $(JSON_PERF_BENCH_ENTRY_OBJS) $(ARLEN_FRAMEWORK_LIB) -o $(JSON_PERF_BENCH_TOOL) $(BASE_LINK_LIBS)
 
 json-perf-bench: $(JSON_PERF_BENCH_TOOL)
 
-$(DISPATCH_PERF_BENCH_TOOL): tools/dispatch_perf_bench.m $(FRAMEWORK_SRCS) | $(BUILD_DIR)
->source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) tools/dispatch_perf_bench.m $(FRAMEWORK_SRCS) -o $(DISPATCH_PERF_BENCH_TOOL) $(BASE_LINK_LIBS)
+$(DISPATCH_PERF_BENCH_TOOL): $(DISPATCH_PERF_BENCH_ENTRY_OBJS) $(ARLEN_FRAMEWORK_LIB) | $(BUILD_DIR)
+>@mkdir -p $(@D)
+>@source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) $(DISPATCH_PERF_BENCH_ENTRY_OBJS) $(ARLEN_FRAMEWORK_LIB) -o $(DISPATCH_PERF_BENCH_TOOL) $(BASE_LINK_LIBS)
 
 dispatch-perf-bench: $(DISPATCH_PERF_BENCH_TOOL)
 
-$(HTTP_PARSE_PERF_BENCH_TOOL): tools/http_parse_perf_bench.m src/Arlen/HTTP/ALNRequest.m src/Arlen/Support/ALNJSONSerialization.m $(THIRD_PARTY_C_SRCS) | $(BUILD_DIR)
->source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) tools/http_parse_perf_bench.m src/Arlen/HTTP/ALNRequest.m src/Arlen/Support/ALNJSONSerialization.m $(THIRD_PARTY_C_SRCS) -o $(HTTP_PARSE_PERF_BENCH_TOOL) $(BASE_LINK_LIBS)
+$(HTTP_PARSE_PERF_BENCH_TOOL): $(HTTP_PARSE_PERF_BENCH_ENTRY_OBJS) $(ARLEN_FRAMEWORK_LIB) | $(BUILD_DIR)
+>@mkdir -p $(@D)
+>@source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) $(HTTP_PARSE_PERF_BENCH_ENTRY_OBJS) $(ARLEN_FRAMEWORK_LIB) -o $(HTTP_PARSE_PERF_BENCH_TOOL) $(BASE_LINK_LIBS)
 
 http-parse-perf-bench: $(HTTP_PARSE_PERF_BENCH_TOOL)
 
-$(ROUTE_MATCH_PERF_BENCH_TOOL): tools/route_match_perf_bench.m src/Arlen/MVC/Routing/ALNRoute.m src/Arlen/MVC/Routing/ALNRouter.m src/Arlen/Support/ALNJSONSerialization.m $(YYJSON_C_SRCS) | $(BUILD_DIR)
->source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) tools/route_match_perf_bench.m src/Arlen/MVC/Routing/ALNRoute.m src/Arlen/MVC/Routing/ALNRouter.m src/Arlen/Support/ALNJSONSerialization.m $(YYJSON_C_SRCS) -o $(ROUTE_MATCH_PERF_BENCH_TOOL) $(BASE_LINK_LIBS)
+$(ROUTE_MATCH_PERF_BENCH_TOOL): $(ROUTE_MATCH_PERF_BENCH_ENTRY_OBJS) $(ARLEN_FRAMEWORK_LIB) | $(BUILD_DIR)
+>@mkdir -p $(@D)
+>@source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) $(ROUTE_MATCH_PERF_BENCH_ENTRY_OBJS) $(ARLEN_FRAMEWORK_LIB) -o $(ROUTE_MATCH_PERF_BENCH_TOOL) $(BASE_LINK_LIBS)
 
 route-match-perf-bench: $(ROUTE_MATCH_PERF_BENCH_TOOL)
 
-$(BACKEND_CONTRACT_MATRIX_TOOL): tools/backend_contract_matrix.m src/Arlen/HTTP/ALNRequest.m src/Arlen/Support/ALNJSONSerialization.m $(THIRD_PARTY_C_SRCS) | $(BUILD_DIR)
->source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) tools/backend_contract_matrix.m src/Arlen/HTTP/ALNRequest.m src/Arlen/Support/ALNJSONSerialization.m $(THIRD_PARTY_C_SRCS) -o $(BACKEND_CONTRACT_MATRIX_TOOL) $(BASE_LINK_LIBS)
+$(BACKEND_CONTRACT_MATRIX_TOOL): $(BACKEND_CONTRACT_MATRIX_ENTRY_OBJS) $(ARLEN_FRAMEWORK_LIB) | $(BUILD_DIR)
+>@mkdir -p $(@D)
+>@source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) $(BACKEND_CONTRACT_MATRIX_ENTRY_OBJS) $(ARLEN_FRAMEWORK_LIB) -o $(BACKEND_CONTRACT_MATRIX_TOOL) $(BASE_LINK_LIBS)
 
 backend-contract-matrix: $(BACKEND_CONTRACT_MATRIX_TOOL)
 
-$(BOOMHAUER_TOOL): tools/boomhauer.m $(FRAMEWORK_SRCS) transpile
->source $(GNUSTEP_SH) && generated_files="$$(find $(GEN_DIR) -type f -name '*.m' | sort)"; \
->if [ -z "$$generated_files" ]; then \
->  echo "No generated template sources found in $(GEN_DIR)"; \
->  exit 1; \
->fi; \
->clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) tools/boomhauer.m $(FRAMEWORK_SRCS) $$generated_files -o $(BOOMHAUER_TOOL) $(BASE_LINK_LIBS)
+$(BOOMHAUER_TOOL): $(BOOMHAUER_ENTRY_OBJS) $(ARLEN_FRAMEWORK_LIB) $(ROOT_GENERATED_OBJS) | $(BUILD_DIR) $(ROOT_TRANSPILE_STATE)
+>@mkdir -p $(@D)
+>@source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) $(BOOMHAUER_ENTRY_OBJS) $(ROOT_GENERATED_OBJS) $(ARLEN_FRAMEWORK_LIB) -o $(BOOMHAUER_TOOL) $(BASE_LINK_LIBS)
 
 boomhauer: $(BOOMHAUER_TOOL)
 dev-server: boomhauer
 
-$(TECH_DEMO_SERVER_TOOL): examples/tech_demo/src/tech_demo_server.m $(FRAMEWORK_SRCS) tech-demo-transpile
->source $(GNUSTEP_SH) && generated_files="$$(find $(TECH_DEMO_GEN_DIR) -type f -name '*.m' | sort)"; \
->if [ -z "$$generated_files" ]; then \
->  echo "No generated template sources found in $(TECH_DEMO_GEN_DIR)"; \
->  exit 1; \
->fi; \
->clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) examples/tech_demo/src/tech_demo_server.m $(FRAMEWORK_SRCS) $$generated_files -o $(TECH_DEMO_SERVER_TOOL) $(BASE_LINK_LIBS)
+$(TECH_DEMO_SERVER_TOOL): $(TECH_DEMO_SERVER_ENTRY_OBJS) $(ARLEN_FRAMEWORK_LIB) $(MODULE_OBJS) $(TECH_DEMO_GENERATED_OBJS) | $(BUILD_DIR) $(MODULE_TRANSPILE_STATE) $(TECH_DEMO_TRANSPILE_STATE)
+>@mkdir -p $(@D)
+>@source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) $(TECH_DEMO_SERVER_ENTRY_OBJS) $(MODULE_OBJS) $(TECH_DEMO_GENERATED_OBJS) $(ARLEN_FRAMEWORK_LIB) -o $(TECH_DEMO_SERVER_TOOL) $(BASE_LINK_LIBS)
 
 tech-demo-server: $(TECH_DEMO_SERVER_TOOL)
 
-$(API_REFERENCE_SERVER_TOOL): examples/api_reference/src/api_reference_server.m $(FRAMEWORK_SRCS)
->source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) examples/api_reference/src/api_reference_server.m $(FRAMEWORK_SRCS) -o $(API_REFERENCE_SERVER_TOOL) $(BASE_LINK_LIBS)
+$(API_REFERENCE_SERVER_TOOL): $(API_REFERENCE_SERVER_ENTRY_OBJS) $(ARLEN_FRAMEWORK_LIB) $(MODULE_OBJS) | $(BUILD_DIR)
+>@mkdir -p $(@D)
+>@source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) $(API_REFERENCE_SERVER_ENTRY_OBJS) $(MODULE_OBJS) $(ARLEN_FRAMEWORK_LIB) -o $(API_REFERENCE_SERVER_TOOL) $(BASE_LINK_LIBS)
 
 api-reference-server: $(API_REFERENCE_SERVER_TOOL)
 
-$(AUTH_PRIMITIVES_SERVER_TOOL): examples/auth_primitives/src/auth_primitives_server.m $(FRAMEWORK_SRCS)
->source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) examples/auth_primitives/src/auth_primitives_server.m $(FRAMEWORK_SRCS) -o $(AUTH_PRIMITIVES_SERVER_TOOL) $(BASE_LINK_LIBS)
+$(AUTH_PRIMITIVES_SERVER_TOOL): $(AUTH_PRIMITIVES_SERVER_ENTRY_OBJS) $(ARLEN_FRAMEWORK_LIB) $(MODULE_OBJS) | $(BUILD_DIR)
+>@mkdir -p $(@D)
+>@source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) $(AUTH_PRIMITIVES_SERVER_ENTRY_OBJS) $(MODULE_OBJS) $(ARLEN_FRAMEWORK_LIB) -o $(AUTH_PRIMITIVES_SERVER_TOOL) $(BASE_LINK_LIBS)
 
 auth-primitives-server: $(AUTH_PRIMITIVES_SERVER_TOOL)
 
-$(MIGRATION_SAMPLE_SERVER_TOOL): examples/gsweb_migration/src/migration_sample_server.m $(FRAMEWORK_SRCS)
->source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) examples/gsweb_migration/src/migration_sample_server.m $(FRAMEWORK_SRCS) -o $(MIGRATION_SAMPLE_SERVER_TOOL) $(BASE_LINK_LIBS)
+$(MIGRATION_SAMPLE_SERVER_TOOL): $(MIGRATION_SAMPLE_SERVER_ENTRY_OBJS) $(ARLEN_FRAMEWORK_LIB) $(MODULE_OBJS) | $(BUILD_DIR)
+>@mkdir -p $(@D)
+>@source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) $(MIGRATION_SAMPLE_SERVER_ENTRY_OBJS) $(MODULE_OBJS) $(ARLEN_FRAMEWORK_LIB) -o $(MIGRATION_SAMPLE_SERVER_TOOL) $(BASE_LINK_LIBS)
 
 migration-sample-server: $(MIGRATION_SAMPLE_SERVER_TOOL)
 
-$(ARLEN_DATA_EXAMPLE_TOOL): examples/arlen_data/src/arlen_data_example.m
->source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) -Isrc examples/arlen_data/src/arlen_data_example.m $(ARLEN_DATA_SRCS) $(JSON_SERIALIZATION_SRCS) -o $(ARLEN_DATA_EXAMPLE_TOOL) $(BASE_LINK_LIBS)
+$(ARLEN_DATA_EXAMPLE_TOOL): $(ARLEN_DATA_EXAMPLE_ENTRY_OBJS) $(ARLEN_FRAMEWORK_LIB) | $(BUILD_DIR)
+>@mkdir -p $(@D)
+>@source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) $(ARLEN_DATA_EXAMPLE_ENTRY_OBJS) $(ARLEN_FRAMEWORK_LIB) -o $(ARLEN_DATA_EXAMPLE_TOOL) $(BASE_LINK_LIBS)
 
 arlen-data-example: $(ARLEN_DATA_EXAMPLE_TOOL)
 
@@ -211,48 +421,50 @@ test-data-layer: arlen-data-example
 tech-demo: tech-demo-server
 >TECH_DEMO_PORT="$${TECH_DEMO_PORT:-3110}" ./bin/tech-demo
 
-$(SMOKE_RENDER_TOOL): tools/eoc_smoke_render.m transpile
->source $(GNUSTEP_SH) && generated_files="$$(find $(GEN_DIR) -type f -name '*.m' | sort)"; \
->if [ -z "$$generated_files" ]; then \
->  echo "No generated template sources found in $(GEN_DIR)"; \
->  exit 1; \
->fi; \
->clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) tools/eoc_smoke_render.m src/Arlen/MVC/Template/ALNEOCRuntime.m src/Arlen/MVC/View/ALNView.m $$generated_files -o $(SMOKE_RENDER_TOOL) $(BASE_LINK_LIBS)
+$(SMOKE_RENDER_TOOL): $(SMOKE_RENDER_ENTRY_OBJS) $(ARLEN_FRAMEWORK_LIB) $(ROOT_GENERATED_OBJS) | $(BUILD_DIR) $(ROOT_TRANSPILE_STATE)
+>@mkdir -p $(@D)
+>@source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) $(SMOKE_RENDER_ENTRY_OBJS) $(ROOT_GENERATED_OBJS) $(ARLEN_FRAMEWORK_LIB) -o $(SMOKE_RENDER_TOOL) $(BASE_LINK_LIBS)
 
 smoke-render: $(SMOKE_RENDER_TOOL)
 
-$(UNIT_TEST_BIN): $(UNIT_TEST_SRCS) $(FRAMEWORK_SRCS) $(MODULE_SRCS) transpile module-transpile
->mkdir -p $(UNIT_TEST_BUNDLE)/Resources
->source $(GNUSTEP_SH) && generated_files="$$(find $(GEN_DIR) -type f -name '*.m' | sort)"; \
->module_generated_files="$$(find $(MODULE_GEN_DIR) -type f -name '*.m' 2>/dev/null | sort)"; \
->clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) $(UNIT_TEST_SRCS) $(FRAMEWORK_SRCS) $(MODULE_SRCS) $$generated_files $$module_generated_files -shared -fPIC -o $(UNIT_TEST_BIN) $(XCTEST_LINK_LIBS)
->cp tests/Info-gnustep-unit.plist $(UNIT_TEST_BUNDLE)/Resources/Info-gnustep.plist
+$(UNIT_TEST_BIN): $(UNIT_TEST_OBJS) $(ARLEN_FRAMEWORK_LIB) $(MODULE_OBJS) $(ROOT_GENERATED_OBJS) $(MODULE_GENERATED_OBJS) | $(ROOT_TRANSPILE_STATE) $(MODULE_TRANSPILE_STATE)
+>@mkdir -p $(UNIT_TEST_BUNDLE)/Resources
+>@source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) $(UNIT_TEST_OBJS) $(MODULE_OBJS) $(ROOT_GENERATED_OBJS) $(MODULE_GENERATED_OBJS) $(ARLEN_FRAMEWORK_LIB) -shared -fPIC -o $(UNIT_TEST_BIN) $(XCTEST_LINK_LIBS)
+>@cp tests/Info-gnustep-unit.plist $(UNIT_TEST_BUNDLE)/Resources/Info-gnustep.plist
 
-$(INTEGRATION_TEST_BIN): $(INTEGRATION_TEST_SRCS) $(FRAMEWORK_SRCS) $(MODULE_SRCS) transpile module-transpile boomhauer tech-demo-server api-reference-server auth-primitives-server migration-sample-server
->mkdir -p $(INTEGRATION_TEST_BUNDLE)/Resources
->source $(GNUSTEP_SH) && generated_files="$$(find $(GEN_DIR) -type f -name '*.m' | sort)"; \
->module_generated_files="$$(find $(MODULE_GEN_DIR) -type f -name '*.m' 2>/dev/null | sort)"; \
->clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) $(INTEGRATION_TEST_SRCS) $(FRAMEWORK_SRCS) $(MODULE_SRCS) $$generated_files $$module_generated_files -shared -fPIC -o $(INTEGRATION_TEST_BIN) $(XCTEST_LINK_LIBS)
->cp tests/Info-gnustep-integration.plist $(INTEGRATION_TEST_BUNDLE)/Resources/Info-gnustep.plist
+$(INTEGRATION_TEST_BIN): $(INTEGRATION_TEST_OBJS) $(ARLEN_FRAMEWORK_LIB) $(MODULE_OBJS) $(ROOT_GENERATED_OBJS) $(MODULE_GENERATED_OBJS) $(BOOMHAUER_TOOL) $(TECH_DEMO_SERVER_TOOL) $(API_REFERENCE_SERVER_TOOL) $(AUTH_PRIMITIVES_SERVER_TOOL) $(MIGRATION_SAMPLE_SERVER_TOOL) | $(ROOT_TRANSPILE_STATE) $(MODULE_TRANSPILE_STATE)
+>@mkdir -p $(INTEGRATION_TEST_BUNDLE)/Resources
+>@source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) $(INTEGRATION_TEST_OBJS) $(MODULE_OBJS) $(ROOT_GENERATED_OBJS) $(MODULE_GENERATED_OBJS) $(ARLEN_FRAMEWORK_LIB) -shared -fPIC -o $(INTEGRATION_TEST_BIN) $(XCTEST_LINK_LIBS)
+>@cp tests/Info-gnustep-integration.plist $(INTEGRATION_TEST_BUNDLE)/Resources/Info-gnustep.plist
 
-$(BROWSER_ERROR_AUDIT_TEST_BIN): $(BROWSER_ERROR_AUDIT_SRCS) boomhauer
->mkdir -p $(BROWSER_ERROR_AUDIT_TEST_BUNDLE)/Resources
->source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) $(BROWSER_ERROR_AUDIT_SRCS) -shared -fPIC -o $(BROWSER_ERROR_AUDIT_TEST_BIN) $(XCTEST_LINK_LIBS)
->cp tests/Info-gnustep-browser-error-audit.plist $(BROWSER_ERROR_AUDIT_TEST_BUNDLE)/Resources/Info-gnustep.plist
+$(BROWSER_ERROR_AUDIT_TEST_BIN): $(BROWSER_ERROR_AUDIT_TEST_OBJS)
+>@mkdir -p $(BROWSER_ERROR_AUDIT_TEST_BUNDLE)/Resources
+>@source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) $(BROWSER_ERROR_AUDIT_TEST_OBJS) -shared -fPIC -o $(BROWSER_ERROR_AUDIT_TEST_BIN) $(XCTEST_LINK_LIBS)
+>@cp tests/Info-gnustep-browser-error-audit.plist $(BROWSER_ERROR_AUDIT_TEST_BUNDLE)/Resources/Info-gnustep.plist
 
 build-tests: $(UNIT_TEST_BIN) $(INTEGRATION_TEST_BIN)
 
 test-unit: $(UNIT_TEST_BIN)
 >mkdir -p $(GNUSTEP_TEST_HOME)/GNUstep/Defaults/.lck
->source $(GNUSTEP_SH) && export HOME="$(GNUSTEP_TEST_HOME)" GNUSTEP_USER_DIR="$(GNUSTEP_TEST_HOME)/GNUstep" GNUSTEP_USER_ROOT="$(GNUSTEP_TEST_HOME)/GNUstep" GNUSTEP_USER_DEFAULTS_DIR="$(GNUSTEP_TEST_HOME)/GNUstep/Defaults" && LD_PRELOAD="$(XCTEST_LD_PRELOAD)" ASAN_OPTIONS="$(ASAN_OPTIONS)" UBSAN_OPTIONS="$(UBSAN_OPTIONS)" xctest $(UNIT_TEST_BUNDLE)
+>source $(GNUSTEP_SH) && export HOME="$(GNUSTEP_TEST_HOME)" GNUSTEP_USER_DIR="$(GNUSTEP_TEST_HOME)/GNUstep" GNUSTEP_USER_ROOT="$(GNUSTEP_TEST_HOME)/GNUstep" GNUSTEP_USER_DEFAULTS_DIR="$(GNUSTEP_TEST_HOME)/GNUstep/Defaults" && $(xctest_runtime_env) "$(ARLEN_XCTEST)" $(UNIT_TEST_BUNDLE)
+
+test-unit-filter: $(UNIT_TEST_BIN)
+>if [ -z "$(strip $(TEST)$(SKIP_TEST))" ]; then echo "test-unit-filter: set TEST=TestClass[/testMethod] or SKIP_TEST=TestClass[/testMethod]" >&2; exit 2; fi
+>mkdir -p $(GNUSTEP_TEST_HOME)/GNUstep/Defaults/.lck
+>source $(GNUSTEP_SH) && export HOME="$(GNUSTEP_TEST_HOME)" GNUSTEP_USER_DIR="$(GNUSTEP_TEST_HOME)/GNUstep" GNUSTEP_USER_ROOT="$(GNUSTEP_TEST_HOME)/GNUstep" GNUSTEP_USER_DEFAULTS_DIR="$(GNUSTEP_TEST_HOME)/GNUstep/Defaults" && $(xctest_runtime_env) "$(ARLEN_XCTEST)" $(UNIT_TEST_BUNDLE) $(call xctest_filter_args,$(UNIT_TEST_TARGET_NAME))
 
 test-integration: $(INTEGRATION_TEST_BIN)
 >mkdir -p $(GNUSTEP_TEST_HOME)/GNUstep/Defaults/.lck
->source $(GNUSTEP_SH) && export HOME="$(GNUSTEP_TEST_HOME)" GNUSTEP_USER_DIR="$(GNUSTEP_TEST_HOME)/GNUstep" GNUSTEP_USER_ROOT="$(GNUSTEP_TEST_HOME)/GNUstep" GNUSTEP_USER_DEFAULTS_DIR="$(GNUSTEP_TEST_HOME)/GNUstep/Defaults" && LD_PRELOAD="$(XCTEST_LD_PRELOAD)" ASAN_OPTIONS="$(ASAN_OPTIONS)" UBSAN_OPTIONS="$(UBSAN_OPTIONS)" xctest $(INTEGRATION_TEST_BUNDLE)
+>source $(GNUSTEP_SH) && export HOME="$(GNUSTEP_TEST_HOME)" GNUSTEP_USER_DIR="$(GNUSTEP_TEST_HOME)/GNUstep" GNUSTEP_USER_ROOT="$(GNUSTEP_TEST_HOME)/GNUstep" GNUSTEP_USER_DEFAULTS_DIR="$(GNUSTEP_TEST_HOME)/GNUstep/Defaults" && $(xctest_runtime_env) "$(ARLEN_XCTEST)" $(INTEGRATION_TEST_BUNDLE)
 
-browser-error-audit: $(BROWSER_ERROR_AUDIT_TEST_BIN)
+test-integration-filter: $(INTEGRATION_TEST_BIN)
+>if [ -z "$(strip $(TEST)$(SKIP_TEST))" ]; then echo "test-integration-filter: set TEST=TestClass[/testMethod] or SKIP_TEST=TestClass[/testMethod]" >&2; exit 2; fi
 >mkdir -p $(GNUSTEP_TEST_HOME)/GNUstep/Defaults/.lck
->source $(GNUSTEP_SH) && export HOME="$(GNUSTEP_TEST_HOME)" GNUSTEP_USER_DIR="$(GNUSTEP_TEST_HOME)/GNUstep" GNUSTEP_USER_ROOT="$(GNUSTEP_TEST_HOME)/GNUstep" GNUSTEP_USER_DEFAULTS_DIR="$(GNUSTEP_TEST_HOME)/GNUstep/Defaults" ARLEN_BROWSER_ERROR_AUDIT_OUTPUT_DIR="$(ROOT_DIR)/build/browser-error-audit" && LD_PRELOAD="$(XCTEST_LD_PRELOAD)" ASAN_OPTIONS="$(ASAN_OPTIONS)" UBSAN_OPTIONS="$(UBSAN_OPTIONS)" xctest $(BROWSER_ERROR_AUDIT_TEST_BUNDLE)
+>source $(GNUSTEP_SH) && export HOME="$(GNUSTEP_TEST_HOME)" GNUSTEP_USER_DIR="$(GNUSTEP_TEST_HOME)/GNUstep" GNUSTEP_USER_ROOT="$(GNUSTEP_TEST_HOME)/GNUstep" GNUSTEP_USER_DEFAULTS_DIR="$(GNUSTEP_TEST_HOME)/GNUstep/Defaults" && $(xctest_runtime_env) "$(ARLEN_XCTEST)" $(INTEGRATION_TEST_BUNDLE) $(call xctest_filter_args,$(INTEGRATION_TEST_TARGET_NAME))
+
+browser-error-audit: $(BROWSER_ERROR_AUDIT_TEST_BIN) boomhauer
+>mkdir -p $(GNUSTEP_TEST_HOME)/GNUstep/Defaults/.lck
+>source $(GNUSTEP_SH) && export HOME="$(GNUSTEP_TEST_HOME)" GNUSTEP_USER_DIR="$(GNUSTEP_TEST_HOME)/GNUstep" GNUSTEP_USER_ROOT="$(GNUSTEP_TEST_HOME)/GNUstep" GNUSTEP_USER_DEFAULTS_DIR="$(GNUSTEP_TEST_HOME)/GNUstep/Defaults" ARLEN_BROWSER_ERROR_AUDIT_OUTPUT_DIR="$(ROOT_DIR)/build/browser-error-audit" && $(xctest_runtime_env) "$(ARLEN_XCTEST)" $(BROWSER_ERROR_AUDIT_TEST_BUNDLE)
 >@echo "browser-error-audit: open $(ROOT_DIR)/build/browser-error-audit/index.html"
 
 test: test-unit test-integration
@@ -295,6 +507,9 @@ phase15-confidence:
 
 phase16-confidence:
 >bash ./tools/ci/run_phase16_confidence.sh
+
+phase19-confidence:
+>bash ./tools/ci/run_phase19_confidence.sh
 
 ci-quality:
 >bash ./tools/ci/run_phase5e_quality.sh
@@ -367,7 +582,6 @@ ci-docs:
 
 check: ci-json-abstraction test-unit test-integration perf
 
-
 docs-html:
 >bash ./tools/build_docs_html.sh
 
@@ -382,3 +596,5 @@ smoke: smoke-render boomhauer
 
 clean:
 >rm -rf $(BUILD_DIR) $(ROOT_DIR)/.gnustep $(ROOT_DIR)/.gnustep-home
+
+-include $(wildcard $(ALL_DEPFILES))

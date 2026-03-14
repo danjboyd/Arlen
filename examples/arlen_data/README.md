@@ -9,4 +9,15 @@ source /usr/GNUstep/System/Library/Makefiles/GNUstep.sh
 make test-data-layer
 ```
 
-The executable (`build/arlen-data-example`) composes CTE/join/group queries and a PostgreSQL upsert snapshot using `ArlenData/ArlenData.h`.
+The executable (`build/arlen-data-example`) composes CTE/join/group queries and a
+PostgreSQL upsert snapshot using `ArlenData/ArlenData.h`.
+
+Phase 17 note:
+
+- `ArlenData` now also exposes `ALNSQLDialect`, `ALNPostgresDialect`,
+  `ALNMSSQLDialect`, and the optional `ALNMSSQL` adapter
+- `ALNSQLBuilder build:` remains PostgreSQL-default
+- use `buildWithDialect:[ALNMSSQLDialect sharedDialect]` for SQL Server
+  compilation
+- runtime MSSQL usage requires an ODBC manager/runtime client plus a SQL Server
+  driver; core Arlen does not hard-link to Microsoft’s driver

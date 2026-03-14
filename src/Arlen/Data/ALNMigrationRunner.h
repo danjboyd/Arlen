@@ -3,7 +3,7 @@
 
 #import <Foundation/Foundation.h>
 
-@class ALNPg;
+#import "ALNDatabaseAdapter.h"
 
 NS_ASSUME_NONNULL_BEGIN
 
@@ -16,22 +16,22 @@ extern NSString *const ALNMigrationRunnerDefaultDatabaseTarget;
                                                  error:(NSError *_Nullable *_Nullable)error;
 
 + (nullable NSArray<NSString *> *)pendingMigrationFilesAtPath:(NSString *)migrationsPath
-                                                      database:(ALNPg *)database
+                                                      database:(id<ALNDatabaseAdapter>)database
                                                 databaseTarget:(nullable NSString *)databaseTarget
                                               versionNamespace:(nullable NSString *)versionNamespace
                                                          error:(NSError *_Nullable *_Nullable)error;
 
 + (nullable NSArray<NSString *> *)pendingMigrationFilesAtPath:(NSString *)migrationsPath
-                                                      database:(ALNPg *)database
+                                                      database:(id<ALNDatabaseAdapter>)database
                                                 databaseTarget:(nullable NSString *)databaseTarget
                                                          error:(NSError *_Nullable *_Nullable)error;
 
 + (nullable NSArray<NSString *> *)pendingMigrationFilesAtPath:(NSString *)migrationsPath
-                                                      database:(ALNPg *)database
+                                                      database:(id<ALNDatabaseAdapter>)database
                                                          error:(NSError *_Nullable *_Nullable)error;
 
 + (BOOL)applyMigrationsAtPath:(NSString *)migrationsPath
-                     database:(ALNPg *)database
+                     database:(id<ALNDatabaseAdapter>)database
                databaseTarget:(nullable NSString *)databaseTarget
              versionNamespace:(nullable NSString *)versionNamespace
                        dryRun:(BOOL)dryRun
@@ -39,14 +39,14 @@ extern NSString *const ALNMigrationRunnerDefaultDatabaseTarget;
                         error:(NSError *_Nullable *_Nullable)error;
 
 + (BOOL)applyMigrationsAtPath:(NSString *)migrationsPath
-                     database:(ALNPg *)database
+                     database:(id<ALNDatabaseAdapter>)database
                databaseTarget:(nullable NSString *)databaseTarget
                        dryRun:(BOOL)dryRun
                  appliedFiles:(NSArray<NSString *> *_Nullable *_Nullable)appliedFiles
                         error:(NSError *_Nullable *_Nullable)error;
 
 + (BOOL)applyMigrationsAtPath:(NSString *)migrationsPath
-                     database:(ALNPg *)database
+                     database:(id<ALNDatabaseAdapter>)database
                        dryRun:(BOOL)dryRun
                  appliedFiles:(NSArray<NSString *> *_Nullable *_Nullable)appliedFiles
                         error:(NSError *_Nullable *_Nullable)error;

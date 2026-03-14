@@ -3,7 +3,8 @@
 Phase 7H extends Arlen's baseline clustering/runtime primitives with deterministic
 multi-node failure-signal contracts for operational triage.
 
-This document captures the initial 7H implementation slice completed on 2026-02-23.
+This document captures the delivered 7H distributed-runtime contract set for the
+current static-membership clustering model.
 
 ## 1. Scope (Initial Slice)
 
@@ -115,10 +116,8 @@ Verification coverage:
 - `tests/unit/Phase7HTests.m`
   - `testDistributedRuntimeDepthContractFixtureSchemaAndTestCoverage`
 
-## 8. Remaining 7H Follow-On
+## 8. Future Expansion
 
-The broader 7H roadmap still includes:
-
-- dynamic membership-source contracts (beyond static config)
-- deeper failure-injection scenarios for node churn and transient partitions
-- expanded deploy runbook automation for distributed failure drills
+Dynamic membership sources and deeper distributed failure-drill automation can
+still be added later, but they are outside the completed 7H acceptance bar for
+the current static-membership model.

@@ -196,12 +196,27 @@ NSString *const ALNEOCTemplateMetadataStaticDependenciesKey = @"static_dependenc
   if (tokens == nil) {
     return nil;
   }
+  NSDictionary *metadata = [self templateMetadataForTokens:tokens
+                                               logicalPath:logicalPath
+                                                     error:error];
+  if (metadata == nil) {
+    return nil;
+  }
 
   NSString *symbol = [self symbolNameForLogicalPath:logicalPath];
   NSString *escapedPath = [logicalPath stringByReplacingOccurrencesOfString:@"\\"
                                                                   withString:@"\\\\"];
   escapedPath =
       [escapedPath stringByReplacingOccurrencesOfString:@"\"" withString:@"\\\""];
+  NSString *layoutPath = [metadata[ALNEOCTemplateMetadataLayoutPathKey] isKindOfClass:[NSString class]]
+                             ? metadata[ALNEOCTemplateMetadataLayoutPathKey]
+                             : @"";
+  NSString *escapedLayoutPath = [layoutPath stringByReplacingOccurrencesOfString:@"\\"
+                                                                      withString:@"\\\\"];
+  escapedLayoutPath =
+      [escapedLayoutPath stringByReplacingOccurrencesOfString:@"\"" withString:@"\\\""];
+  NSString *registrationSymbol =
+      [NSString stringWithFormat:@"ALNEOCAutoRegister_%@", symbol];
 
   NSMutableString *source = [NSMutableString string];
   NSMutableArray<NSDictionary *> *slotStack = [NSMutableArray array];
@@ -506,6 +521,15 @@ NSString *const ALNEOCTemplateMetadataStaticDependenciesKey = @"static_dependenc
   }
 
   [source appendString:@"  return [NSString stringWithString:out];\n"];
+  [source appendString:@"}\n\n"];
+  [source appendString:@"__attribute__((constructor))\n"];
+  [source appendFormat:@"static void %@ (void) {\n", registrationSymbol];
+  [source appendFormat:@"  ALNEOCRegisterTemplate(@\"%@\", &%@);\n", escapedPath, symbol];
+  if ([escapedLayoutPath length] > 0) {
+    [source appendFormat:@"  ALNEOCRegisterTemplateLayout(@\"%@\", @\"%@\");\n",
+                         escapedPath,
+                         escapedLayoutPath];
+  }
   [source appendString:@"}\n"];
   return source;
 }

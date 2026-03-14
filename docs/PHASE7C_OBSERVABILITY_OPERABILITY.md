@@ -2,7 +2,9 @@
 
 Phase 7C defines deterministic observability and operability contracts for runtime request flows and deployment probes.
 
-This document captures the initial 7C implementation slice completed on 2026-02-23.
+This document captures the delivered 7C observability and operability contract
+set. The initial slice landed on 2026-02-23, and later operator-facing work
+closed the broader acceptance bar.
 
 ## 1. Scope (Initial Slice)
 
@@ -119,10 +121,12 @@ Runtime/config/deploy verification:
 - `tests/unit/Phase7CTests.m`
   - `testObservabilityAndOperabilityContractFixtureSchemaAndTestCoverage`
 
-## 7. Remaining 7C Follow-On
+## 7. Closeout Notes
 
-The broader 7C roadmap still includes:
+Later work in the current tree extends 7C beyond the original slice with:
 
-- broader stable event-shape contracts across async job/runtime supervision paths
-- stronger trace/span propagation across distributed runtime boundaries
-- richer operational diagnostics artifact packs for release confidence review workflows
+- stable `http.request.completed` request log fields and trace-export metadata
+- deterministic `propane` lifecycle diagnostics for reload, churn, respawn, and
+  shutdown supervision paths
+- release-confidence and operability artifact generation wired into deploy and
+  certification workflows

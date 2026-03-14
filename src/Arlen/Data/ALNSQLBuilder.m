@@ -2329,7 +2329,7 @@ static NSSet *ALNSQLBuilderAllowedJoinOperators(void) {
   return [NSString stringWithString:composed];
 }
 
-- (nullable NSDictionary *)build:(NSError **)error {
+- (nullable NSDictionary *)aln_buildDefaultDialect:(NSError **)error {
   if (![self validateTableName:error]) {
     return nil;
   }
@@ -2501,6 +2501,27 @@ static NSSet *ALNSQLBuilderAllowedJoinOperators(void) {
     @"sql" : [NSString stringWithString:sql],
     @"parameters" : [NSArray arrayWithArray:parameters]
   };
+}
+
+- (NSDictionary *)buildWithDialect:(id<ALNSQLDialect>)dialect error:(NSError **)error {
+  if (dialect == nil) {
+    return [self aln_buildDefaultDialect:error];
+  }
+  return [dialect compileBuilder:self error:error];
+}
+
+- (NSDictionary *)build:(NSError **)error {
+  return [self aln_buildDefaultDialect:error];
+}
+
+- (NSString *)buildSQLWithDialect:(id<ALNSQLDialect>)dialect error:(NSError **)error {
+  NSDictionary *built = [self buildWithDialect:dialect error:error];
+  return [built[@"sql"] isKindOfClass:[NSString class]] ? built[@"sql"] : nil;
+}
+
+- (NSArray *)buildParametersWithDialect:(id<ALNSQLDialect>)dialect error:(NSError **)error {
+  NSDictionary *built = [self buildWithDialect:dialect error:error];
+  return [built[@"parameters"] isKindOfClass:[NSArray class]] ? built[@"parameters"] : @[];
 }
 
 - (NSString *)buildSQL:(NSError **)error {

@@ -2,7 +2,9 @@
 
 Phase 7A defines runtime hardening contracts for `boomhauer` and `propane` worker paths.
 
-This document captures the initial 7A implementation slice completed on 2026-02-23.
+This document captures the delivered 7A contract set. The initial slice landed
+on 2026-02-23, and later runtime hardening work closed the remaining 7A
+acceptance bar.
 
 ## 1. Scope (Initial Slice)
 
@@ -72,10 +74,11 @@ Runtime/config verification:
 - `tests/unit/Phase7ATests.m`:
   - `testRuntimeHardeningContractFixtureSchemaAndTestCoverage`
 
-## 5. Remaining 7A Follow-On
+## 5. Closeout Notes
 
-The broader 7A roadmap still includes:
+Later runtime hardening work in the current tree also covers the broader 7A
+acceptance bar through:
 
-- stronger timeout contracts (read/write/header/body/idle)
-- additional graceful reload/shutdown hardening contracts
-- additional crash-loop and slow-downstream failure-mode regression coverage
+- bounded request/websocket timeout and parser-boundary enforcement
+- graceful `propane` reload/shutdown drain behavior with lifecycle diagnostics
+- crash/respawn, fault-injection, chaos-restart, and concurrency-gate coverage

@@ -21,15 +21,6 @@
       "notes": "Phase E benchmark follow-on must validate stability and confidence at higher concurrency levels."
     },
     {
-      "id": "phase10f-risk-foundation-json-fallback",
-      "title": "Temporary foundation JSON backend fallback remains enabled during cutover window",
-      "status": "active",
-      "severity": "low",
-      "owner": "runtime-core",
-      "targetDate": "2026-04-30",
-      "notes": "Remove foundation fallback after one release cycle once yyjson default rollout confidence remains stable."
-    },
-    {
       "id": "phase9j-risk-sanitizer-suppression-governance",
       "title": "Suppression registry maintenance policy maturity",
       "status": "mitigated",

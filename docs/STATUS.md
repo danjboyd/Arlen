@@ -1,6 +1,6 @@
 # Arlen Status Checkpoint
 
-Last updated: 2026-03-13
+Last updated: 2026-03-14
 
 ## Benchmark Handoff (2026-02-24 EOD)
 
@@ -68,9 +68,51 @@ Last updated: 2026-03-13
 - Phase 17: complete (`17A-17D` delivered on 2026-03-12 for backend-neutral data-layer seams and optional MSSQL support)
 - Phase 18: complete (`18A-18G` delivered on 2026-03-13 for fragment-first MFA
   UI, headless MFA contracts, and optional SMS/Twilio Verify support)
+- Phase 19: complete (`19A-19F` delivered on 2026-03-14 for incremental
+  GNUmake/GNUstep build-graph narrowing, generated-template object reuse, and
+  clearer `boomhauer` build scope/progress)
+
+## Completed Today (2026-03-14)
+
+- Added optional XCTest runner override + focused rerun helpers:
+  - `make test-unit`, `make test-integration`, and the Phase 12-16 confidence scripts now honor `ARLEN_XCTEST` instead of hardcoding `xctest`
+  - added optional `ARLEN_XCTEST_LD_LIBRARY_PATH` support so a local uninstalled `tools-xctest` checkout can load its matching patched `libXCTest`
+  - added `make test-unit-filter` and `make test-integration-filter` for Apple-style `-only-testing` / `-skip-testing` reruns using `TEST=TestClass[/testMethod]` plus optional `SKIP_TEST=...`
+  - kept stock Debian `tools-xctest` as the default baseline for normal unfiltered verification
+- Completed Phase 19 incremental build-graph narrowing:
+  - refactored `GNUmakefile` around deterministic object/dependency outputs
+    under `build/obj/...` plus shared framework reuse through
+    `build/lib/libArlenFramework.a`
+  - narrowed template invalidation to per-template generated object rebuilds
+    while keeping manifest-backed garbage collection for removed template
+    outputs
+  - tightened integration bundle prerequisites to concrete example binaries
+    instead of phony targets so warm `make build-tests` can stay no-op
+- Completed Phase 19 app-root `boomhauer` scope/progress UX:
+  - `--prepare-only` and `--print-routes` now emit explicit `[1/4]` through
+    `[4/4]` build stages and mode banners that distinguish route inspection
+    from normal server startup
+  - app-root `.boomhauer/build/` artifacts now reuse warm objects/binaries
+    instead of recompiling every non-watch launch
+- Completed Phase 19 confidence + measurement closeout:
+  - added `make phase19-confidence` / `tools/ci/run_phase19_confidence.sh`
+    with reproducible timing + rebuild-scope artifacts under
+    `build/release_confidence/phase19`
+  - current confidence baseline records `make build-tests` at `70.99s` cold
+    and `0.37s` warm, `make test-unit` at `3.30s`, and app-root
+    `boomhauer --prepare-only` / `--print-routes` at `0.89s` cold,
+    `0.43s` warm, and `0.44s`
 
 ## Completed Today (2026-03-13)
 
+- Planned Phase 19 as the next roadmap phase:
+  - added `docs/PHASE19_ROADMAP.md` for GNUmake/GNUstep-friendly incremental
+    build graph work
+  - scoped the work around object-file compilation, shared framework artifact
+    reuse, incremental EOC transpilation, `boomhauer` scope/progress UX, and
+    narrower test prerequisites
+  - made the acceptance bar explicit: faster incremental rebuilds without
+    weakening deterministic `eocc` diagnostics or app-root correctness
 - Completed Phase 18E-18G optional SMS MFA and factor-management follow-on:
   - added disabled-by-default SMS MFA via Twilio Verify with policy-gated route
     registration, resend/verify limits, and test-code seams

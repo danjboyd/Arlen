@@ -12,7 +12,10 @@ This guide defines how to consume Arlen's data layer independently of the HTTP/M
 Primary contracts:
 
 - `ALNSQLBuilder` (v2 query builder with expression selects/predicates/order clauses, subquery+lateral joins, and tuple-friendly cursor predicates)
+- `ALNSQLDialect` / `ALNPostgresDialect` / `ALNMSSQLDialect` (backend-neutral dialect seam plus shipped PostgreSQL and MSSQL dialect implementations)
+- `ALNMSSQLSQLBuilder` (thin MSSQL-named builder surface over the dialect compiler)
 - `ALNPostgresSQLBuilder` (PostgreSQL dialect extension for conflict/upsert, including expression-based `DO UPDATE SET` and optional `DO UPDATE ... WHERE`)
+- `ALNMSSQL` (optional SQL Server adapter with runtime ODBC loading; no hard core dependency on Microsoft's driver)
 - `ALNSchemaCodegen` (deterministic typed schema helper artifact rendering)
 - `ALNPg` builder execution/caching/diagnostics APIs (`executeBuilderQuery`, `executeBuilderCommand`, query stage listener events)
 - `ALNDatabaseAdapter` / `ALNDatabaseConnection`
@@ -75,8 +78,70 @@ Compatibility contract:
 - Changes to SQL rendering behavior require deterministic snapshot updates in unit tests.
 - Data-layer standalone validation (`make test-data-layer`) must pass in CI.
 - Dialect-specific additions must remain in explicit dialect modules (`ALNPostgresSQLBuilder`) and not leak into base builder requirements.
+- `ALNSQLBuilder build:` remains PostgreSQL-default for backward compatibility; cross-dialect compilation should use `buildWithDialect:` / `buildSQLWithDialect:` / `buildParametersWithDialect:`.
 
-## 6. CI Enforcement
+## 6. Phase 17 Dialect + Backend Portability
+
+Phase 17 adds a backend-neutral seam around SQL compilation and migrations:
+
+- `ALNSQLBuilder` now exposes:
+  - `buildWithDialect:error:`
+  - `buildSQLWithDialect:error:`
+  - `buildParametersWithDialect:error:`
+- `ALNMigrationRunner` now accepts any `id<ALNDatabaseAdapter>` that exposes
+  `sqlDialect`
+- shipped dialects:
+  - `ALNPostgresDialect`
+  - `ALNMSSQLDialect`
+
+Default behavior is intentionally unchanged:
+
+- `build:` still emits PostgreSQL SQL
+- `ALNPg` still compiles/executes builders as a first-class default path
+
+Optional MSSQL path:
+
+- instantiate `ALNMSSQL` with an ODBC connection string
+- compile explicitly for SQL Server with `ALNMSSQLDialect`
+- core Arlen/ArlenData does not link to Microsoft’s driver
+- runtime MSSQL use requires an installed ODBC manager (`unixODBC` or `iODBC`)
+  plus an appropriate SQL Server driver/runtime client
+
+Example:
+
+```objc
+NSError *error = nil;
+ALNSQLBuilder *builder = [[[ALNSQLBuilder selectFrom:@"users"
+                                              columns:@[@"id", @"email"]]
+                           whereField:@"status" equals:@"active"]
+                           orderByField:@"id" descending:NO];
+NSDictionary *compiled =
+    [builder buildWithDialect:[ALNMSSQLDialect sharedDialect] error:&error];
+ALNMSSQL *database =
+    [[ALNMSSQL alloc] initWithConnectionString:odbcConnectionString
+                                 maxConnections:4
+                                          error:&error];
+NSArray *rows = [database executeBuilderQuery:builder error:&error];
+```
+
+Current MSSQL builder subset:
+
+- supported:
+  - select/insert/update/delete
+  - CTEs and recursive CTEs
+  - set operations
+  - window clauses
+  - `OUTPUT INSERTED/DELETED`-style returning semantics
+  - `OFFSET ... FETCH` pagination (requires explicit `ORDER BY`)
+- fail-closed unsupported features:
+  - PostgreSQL `ON CONFLICT`
+  - `ILIKE`
+  - `NULLS FIRST/LAST`
+  - lateral joins
+  - `JOIN ... USING (...)`
+  - PostgreSQL-style `FOR UPDATE` / `SKIP LOCKED`
+
+## 7. CI Enforcement
 
 ArlenData reuse remains continuously validated by CI via:
 
@@ -85,7 +150,7 @@ ArlenData reuse remains continuously validated by CI via:
 - Phase 4A safety/IR regressions in `tests/unit/Phase4ATests.m`
 - PostgreSQL execution regression for identifier-bound templates in `tests/unit/PgTests.m`
 
-## 7. Expression Template Safety Contracts (Phase 4A)
+## 8. Expression Template Safety Contracts (Phase 4A)
 
 Expression-capable builder APIs now route through a trusted-template IR (`trusted-template-v1`) with explicit contracts:
 
@@ -102,7 +167,7 @@ These contracts apply to:
 - `orderByExpression:...identifierBindings:parameters:`
 - subquery/lateral join `onExpression` APIs with `identifierBindings`
 
-## 8. Typed Schema Codegen Workflow (Phase 4C)
+## 9. Typed Schema Codegen Workflow (Phase 4C)
 
 Use the CLI in an app root with PostgreSQL config:
 
@@ -123,7 +188,7 @@ Generated table APIs expose:
 
 Consumers can include generated files in non-Arlen builds as long as `ALNSQLBuilder` is linked.
 
-## 9. Phase 4D Query Execution Diagnostics + Caching
+## 10. Phase 4D Query Execution Diagnostics + Caching
 
 `ALNPgConnection`/`ALNPg` now expose builder-driven execution helpers:
 
@@ -142,7 +207,7 @@ Runtime controls:
   - `emitDiagnosticsEventsToStderr`
   - `includeSQLInDiagnosticsEvents` (default off; redaction-safe metadata remains default)
 
-## 10. Phase 4E Conformance + Migration Hardening
+## 11. Phase 4E Conformance + Migration Hardening
 
 Conformance matrix:
 
@@ -155,7 +220,7 @@ Migration/deprecation docs:
 - `docs/SQL_BUILDER_PHASE4_MIGRATION.md`
 - `docs/RELEASE_PROCESS.md` (phase-4 transitional API lifecycle)
 
-## 11. Phase 5B Multi-Database Runtime Routing
+## 12. Phase 5B Multi-Database Runtime Routing
 
 `ALNDatabaseRouter` provides operation-aware target selection on top of adapter contracts:
 
@@ -170,7 +235,7 @@ Primary reference:
 
 - `docs/PHASE5B_RUNTIME_ROUTING.md`
 
-## 12. Phase 5C Target-Aware Migration + Codegen Tooling
+## 13. Phase 5C Target-Aware Migration + Codegen Tooling
 
 CLI workflows now support explicit target selection:
 
@@ -184,13 +249,19 @@ Target-aware defaults:
 - schema output dir: `src/Generated/<target>`
 - schema manifest path: `db/schema/arlen_schema_<target>.json`
 
+Phase 17 note:
+
+- `arlen migrate` / `arlen module migrate` now select the configured adapter for
+  the target (`postgresql`, `gdl2`, or optional `mssql`)
+- `arlen schema-codegen` remains PostgreSQL-only in the current slice
+
 Schema manifests include `database_target` metadata for deterministic per-target artifact tracking.
 
 Primary reference:
 
 - `docs/PHASE5C_MULTI_DATABASE_TOOLING.md`
 
-## 13. Phase 5D Typed Data Contracts + Typed SQL
+## 14. Phase 5D Typed Data Contracts + Typed SQL
 
 Schema codegen now supports optional typed contract output:
 
@@ -213,7 +284,7 @@ Primary reference:
 
 - `docs/PHASE5D_TYPED_CONTRACTS.md`
 
-## 14. Phase 5E Hardening + Confidence Artifacts
+## 15. Phase 5E Hardening + Confidence Artifacts
 
 Phase 5E adds explicit hardening and release-evidence workflows for the data layer:
 

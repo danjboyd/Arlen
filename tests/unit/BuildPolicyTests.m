@@ -21,10 +21,16 @@
   NSString *makefile = [self readFile:makefilePath];
 
   XCTAssertTrue([makefile containsString:@"ARC_REQUIRED_FLAG := -fobjc-arc"]);
+  XCTAssertTrue([makefile containsString:@"PIC_FLAG := -fPIC"]);
+  XCTAssertTrue([makefile containsString:
+                              @"COMMON_COMPILE_FLAGS := $(FEATURE_FLAGS) $(THIRD_PARTY_FEATURE_FLAGS) "
+                               "$(PIC_FLAG) $(EXTRA_OBJC_FLAGS)"]);
   XCTAssertTrue([makefile containsString:
                               @"override OBJC_FLAGS := $$(gnustep-config --objc-flags) "
-                               "$(ARC_REQUIRED_FLAG) $(FEATURE_FLAGS) "
-                               "$(THIRD_PARTY_FEATURE_FLAGS) $(EXTRA_OBJC_FLAGS)"]);
+                               "$(ARC_REQUIRED_FLAG) $(COMMON_COMPILE_FLAGS)"]);
+  XCTAssertTrue([makefile containsString:
+                              @"override C_COMPILE_FLAGS := $$(gnustep-config --objc-flags) "
+                               "$(COMMON_COMPILE_FLAGS)"]);
   XCTAssertTrue([makefile containsString:@"EXTRA_OBJC_FLAGS cannot contain -fno-objc-arc"]);
   XCTAssertTrue([makefile containsString:@"OBJC_FLAGS cannot disable ARC"]);
 }
@@ -42,8 +48,9 @@
       continue;
     }
     clangRecipeCount += 1;
-    XCTAssertTrue([trimmed containsString:@"$(OBJC_FLAGS)"],
-                  @"clang recipe must compile with $(OBJC_FLAGS): %@", trimmed);
+    XCTAssertTrue([trimmed containsString:@"$(OBJC_FLAGS)"] ||
+                      [trimmed containsString:@"$(C_COMPILE_FLAGS)"],
+                  @"clang recipe must compile or link with central flags: %@", trimmed);
     XCTAssertFalse([trimmed containsString:@"$(gnustep-config --objc-flags)"],
                    @"clang recipe must not bypass ARC policy flags directly: %@", trimmed);
   }
@@ -56,30 +63,67 @@
   NSString *makefilePath = [repoRoot stringByAppendingPathComponent:@"GNUmakefile"];
   NSString *makefile = [self readFile:makefilePath];
 
+  XCTAssertTrue([makefile containsString:@"ARLEN_XCTEST ?= xctest"]);
+  XCTAssertTrue([makefile containsString:@"ARLEN_XCTEST_LD_LIBRARY_PATH ?="]);
   XCTAssertTrue([makefile containsString:@"BASE_LINK_LIBS := $$(gnustep-config --base-libs) -ldl -lcrypto -ldispatch"]);
   XCTAssertTrue([makefile containsString:@"XCTEST_LINK_LIBS := $(BASE_LINK_LIBS) -lXCTest"]);
+  XCTAssertTrue([makefile containsString:@"UNIT_TEST_TARGET_NAME := $(notdir $(basename $(UNIT_TEST_BUNDLE)))"]);
+  XCTAssertTrue([makefile containsString:@"INTEGRATION_TEST_TARGET_NAME := $(notdir $(basename $(INTEGRATION_TEST_BUNDLE)))"]);
+  XCTAssertTrue([makefile containsString:@"define xctest_filter_args"]);
+  XCTAssertTrue([makefile containsString:@"define xctest_runtime_env"]);
+  XCTAssertTrue([makefile containsString:@"test-unit-filter: $(UNIT_TEST_BIN)"]);
+  XCTAssertTrue([makefile containsString:@"test-integration-filter: $(INTEGRATION_TEST_BIN)"]);
+  XCTAssertTrue([makefile containsString:@"$(xctest_runtime_env) \"$(ARLEN_XCTEST)\" $(UNIT_TEST_BUNDLE)"]);
+  XCTAssertTrue([makefile containsString:@"$(xctest_runtime_env) \"$(ARLEN_XCTEST)\" $(INTEGRATION_TEST_BUNDLE)"]);
+  XCTAssertTrue([makefile containsString:@"$(xctest_runtime_env) \"$(ARLEN_XCTEST)\" $(BROWSER_ERROR_AUDIT_TEST_BUNDLE)"]);
+  XCTAssertTrue([makefile containsString:@"-only-testing:$(1)/$(strip $(TEST))"]);
+  XCTAssertTrue([makefile containsString:@"-skip-testing:$(1)/$(strip $(SKIP_TEST))"]);
+  XCTAssertTrue([makefile containsString:@"LD_LIBRARY_PATH=\"$(ARLEN_XCTEST_LD_LIBRARY_PATH)$${LD_LIBRARY_PATH:+:$$LD_LIBRARY_PATH}\""]);
+  XCTAssertTrue([makefile containsString:@"$(call xctest_filter_args,$(UNIT_TEST_TARGET_NAME))"]);
+  XCTAssertTrue([makefile containsString:@"$(call xctest_filter_args,$(INTEGRATION_TEST_TARGET_NAME))"]);
 }
 
-- (void)testBoomhauerCompilePathEnforcesARC {
+- (void)testGNUmakefileUsesIncrementalObjectsDepfilesAndManifestedTemplates {
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *makefilePath = [repoRoot stringByAppendingPathComponent:@"GNUmakefile"];
+  NSString *makefile = [self readFile:makefilePath];
+
+  XCTAssertTrue([makefile containsString:@"OBJ_DIR := $(BUILD_DIR)/obj"]);
+  XCTAssertTrue([makefile containsString:@"LIB_DIR := $(BUILD_DIR)/lib"]);
+  XCTAssertTrue([makefile containsString:@"ARLEN_FRAMEWORK_LIB := $(LIB_DIR)/libArlenFramework.a"]);
+  XCTAssertTrue([makefile containsString:@"ROOT_TEMPLATE_MANIFEST := $(GEN_DIR)/manifest.json"]);
+  XCTAssertTrue([makefile containsString:@"TECH_DEMO_TEMPLATE_MANIFEST := $(TECH_DEMO_GEN_DIR)/manifest.json"]);
+  XCTAssertTrue([makefile containsString:@"ROOT_TRANSPILE_STATE := $(GEN_DIR)/.transpile.state"]);
+  XCTAssertTrue([makefile containsString:@"MODULE_TRANSPILE_STATE := $(MODULE_GEN_DIR)/.transpile.state"]);
+  XCTAssertTrue([makefile containsString:@"ROOT_TEMPLATE_DIRS := $(shell if [ -d $(TEMPLATE_ROOT) ]; then find $(TEMPLATE_ROOT) -type d | sort; fi)"]);
+  XCTAssertTrue([makefile containsString:@"framework-artifacts: eocc $(ARLEN_FRAMEWORK_LIB)"]);
+  XCTAssertTrue([makefile containsString:@"-MMD -MP -MF $(@:.o=.d) -c $< -o $@"]);
+  XCTAssertTrue([makefile containsString:
+                              @"$(EOC_TOOL) --template-root $(TEMPLATE_ROOT) --output-dir $(GEN_DIR) "
+                               "--manifest $(ROOT_TEMPLATE_MANIFEST) $(TEMPLATE_FILES);"]);
+  XCTAssertTrue([makefile containsString:@"$(GEN_DIR)/%.html.eoc.m: $(TEMPLATE_ROOT)/%.html.eoc | $(ROOT_TRANSPILE_STATE)"]);
+  XCTAssertTrue([makefile containsString:@"$(TECH_DEMO_GEN_DIR)/%.html.eoc.m: $(TECH_DEMO_TEMPLATE_ROOT)/%.html.eoc | $(TECH_DEMO_TRANSPILE_STATE)"]);
+  XCTAssertTrue([makefile containsString:@"$(call module_generated_source_for,$(1)): $(1) | $(MODULE_TRANSPILE_STATE)"]);
+  XCTAssertFalse([makefile containsString:@"FORCE:"]);
+}
+
+- (void)testBoomhauerGeneratedAppMakefileEnforcesARCAndFrameworkReuse {
   NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
   NSString *scriptPath = [repoRoot stringByAppendingPathComponent:@"bin/boomhauer"];
   NSString *script = [self readFile:scriptPath];
 
-  NSError *error = nil;
-  NSRegularExpression *regex =
-      [NSRegularExpression regularExpressionWithPattern:
-                               @"clang\\s+\\$\\(gnustep-config --objc-flags\\)(?:\\s+|\\\\\\n)+-fobjc-arc"
-                                                options:0
-                                                  error:&error];
-  XCTAssertNotNil(regex);
-  XCTAssertNil(error);
-  if (regex == nil || error != nil) {
-    return;
-  }
-
-  NSUInteger matches =
-      [regex numberOfMatchesInString:script options:0 range:NSMakeRange(0, [script length])];
-  XCTAssertTrue(matches > 0, @"boomhauer compile path must enforce -fobjc-arc");
+  XCTAssertTrue([script containsString:@"printf 'FRAMEWORK_LIB := %s\\n' \"$framework_lib\""]);
+  XCTAssertTrue([script containsString:@"printf 'GNUSTEP_OBJC_FLAGS := %s\\n' \"$gnustep_objc_flags\""]);
+  XCTAssertTrue([script containsString:
+                             @"printf 'OBJC_FLAGS := $(GNUSTEP_OBJC_FLAGS) -fobjc-arc -fPIC "
+                              "-DARLEN_ENABLE_YYJSON=%s -DARLEN_ENABLE_LLHTTP=%s "
+                              "-DARGON2_NO_THREADS=1\\n'"]);
+  XCTAssertTrue([script containsString:
+                             @"printf '>source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) "
+                              "$(ALL_OBJECTS) $(FRAMEWORK_LIB) -o $(APP_BINARY) $(BASE_LINK_LIBS)\\n\\n'"]);
+  XCTAssertTrue([script containsString:
+                             @"printf '>source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) "
+                              "-MMD -MP -MF %s -c %s -o %s\\n\\n'"]);
 }
 
 - (void)testGNUmakefileIncludesYYJSONCSourceInFrameworkBuilds {
@@ -105,12 +149,14 @@
   XCTAssertTrue([makefile containsString:@"src/Arlen/Support/third_party/argon2/src/ref.c"]);
   XCTAssertTrue([makefile containsString:@"src/Arlen/Support/third_party/argon2/src/blake2/blake2b.c"]);
   XCTAssertTrue([makefile containsString:@"THIRD_PARTY_FEATURE_FLAGS := -DARGON2_NO_THREADS=1"]);
-  XCTAssertTrue([makefile containsString:@"FRAMEWORK_SRCS += $(THIRD_PARTY_C_SRCS)"]);
+  XCTAssertTrue([makefile containsString:
+                              @"FRAMEWORK_C_SRCS := $(YYJSON_C_SRCS) $(LLHTTP_C_SRCS) $(ARGON2_C_SRCS)"]);
+  XCTAssertTrue([makefile containsString:@"FRAMEWORK_SRCS := $(FRAMEWORK_OBJC_SRCS) $(FRAMEWORK_C_SRCS)"]);
   XCTAssertTrue([makefile containsString:
                               @"JSON_SERIALIZATION_SRCS := src/Arlen/Support/ALNJSONSerialization.m $(YYJSON_C_SRCS)"]);
 }
 
-- (void)testBoomhauerCompilePathIncludesYYJSONCSource {
+- (void)testBoomhauerAppBuildUsesFeatureFlagsAndFrameworkArtifacts {
   NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
   NSString *scriptPath = [repoRoot stringByAppendingPathComponent:@"bin/boomhauer"];
   NSString *script = [self readFile:scriptPath];
@@ -119,20 +165,30 @@
   XCTAssertTrue([script containsString:@"local enable_llhttp=\"${ARLEN_ENABLE_LLHTTP:-1}\""]);
   XCTAssertTrue([script containsString:@"ARLEN_ENABLE_YYJSON must be 0 or 1"]);
   XCTAssertTrue([script containsString:@"ARLEN_ENABLE_LLHTTP must be 0 or 1"]);
-  XCTAssertTrue([script containsString:@"find \"$framework_root/src/Arlen/Support/third_party/yyjson\" -type f -name '*.c'"],
-                @"boomhauer app compile path must include yyjson C source");
-  XCTAssertTrue([script containsString:@"find \"$framework_root/src/Arlen/Support/third_party/llhttp\" -type f -name '*.c'"],
-                @"boomhauer app compile path must include llhttp C sources");
-  XCTAssertTrue([script containsString:@"find \"$framework_root/src/Arlen/Support/third_party/argon2\" -type f -name '*.c'"],
-                @"boomhauer app compile path must include argon2 C sources");
+  XCTAssertTrue([script containsString:@"framework_lib=\"$framework_root/build/lib/libArlenFramework.a\""]);
+  XCTAssertTrue([script containsString:@"framework_artifacts_are_current() {"]);
+  XCTAssertTrue([script containsString:@"make -q -C \"$framework_root\" \"$framework_root/build/eocc\" \"$framework_lib\""]);
   XCTAssertTrue([script containsString:@"find \"$framework_root/modules\" -mindepth 2 -maxdepth 2 -type d -name 'Sources'"],
-                @"boomhauer app compile path must include first-party framework module headers");
+                @"boomhauer app build must include first-party framework module headers");
   XCTAssertTrue([script containsString:@"find \"$app_root/modules\" -mindepth 2 -maxdepth 2 -type d -name 'Sources'"],
-                @"boomhauer app compile path must include vendored app module headers");
-  XCTAssertTrue([script containsString:@"-DARLEN_ENABLE_YYJSON=\"$enable_yyjson\""]);
-  XCTAssertTrue([script containsString:@"-DARLEN_ENABLE_LLHTTP=\"$enable_llhttp\""]);
+                @"boomhauer app build must include vendored app module headers");
+  XCTAssertTrue([script containsString:@"-DARLEN_ENABLE_YYJSON=%s -DARLEN_ENABLE_LLHTTP=%s"]);
   XCTAssertTrue([script containsString:@"-DARGON2_NO_THREADS=1"]);
+  XCTAssertTrue([script containsString:@"printf 'BASE_LINK_LIBS := %s -ldl -lcrypto -ldispatch\\n' \"$gnustep_base_libs\""]);
   XCTAssertTrue([script containsString:@"-ldispatch"]);
+}
+
+- (void)testBoomhauerReportsPhase19BuildStagesAndScopeModes {
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *scriptPath = [repoRoot stringByAppendingPathComponent:@"bin/boomhauer"];
+  NSString *script = [self readFile:scriptPath];
+
+  XCTAssertTrue([script containsString:@"boomhauer: prepare-only mode; building app artifacts without starting the server"]);
+  XCTAssertTrue([script containsString:@"boomhauer: route inspection mode; ensuring artifacts are current before printing routes"]);
+  XCTAssertTrue([script containsString:@"boomhauer: [1/4]"]);
+  XCTAssertTrue([script containsString:@"boomhauer: [2/4] transpiling templates"]);
+  XCTAssertTrue([script containsString:@"boomhauer: [3/4]"]);
+  XCTAssertTrue([script containsString:@"boomhauer: [4/4]"]);
 }
 
 - (void)testJobsWorkerCLIAndScriptAreShipped {

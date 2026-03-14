@@ -346,6 +346,21 @@
   XCTAssertTrue([source containsString:@"ALNEOCAppendYield(out, ctx, @\"sidebar\""]);
 }
 
+- (void)testGeneratedTemplatesSelfRegisterRenderFunctionAndLayout {
+  ALNEOCTranspiler *transpiler = [[ALNEOCTranspiler alloc] init];
+  NSString *templateText = [self loadFixture:@"composition_page.html.eoc"];
+
+  NSError *error = nil;
+  NSString *source = [transpiler transpiledSourceForTemplateString:templateText
+                                                       logicalPath:@"pages/show.html.eoc"
+                                                             error:&error];
+  XCTAssertNil(error);
+  XCTAssertNotNil(source);
+  XCTAssertTrue([source containsString:@"__attribute__((constructor))"]);
+  XCTAssertTrue([source containsString:@"ALNEOCRegisterTemplate(@\"pages/show.html.eoc\""]);
+  XCTAssertTrue([source containsString:@"ALNEOCRegisterTemplateLayout(@\"pages/show.html.eoc\", @\"layouts/application.html.eoc\")"]);
+}
+
 - (void)testTemplateMetadataRejectsMultipleLayoutDirectives {
   ALNEOCTranspiler *transpiler = [[ALNEOCTranspiler alloc] init];
   NSString *templateText = [self loadFixture:@"composition_multiple_layouts.html.eoc"];

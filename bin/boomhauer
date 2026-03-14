@@ -51,6 +51,7 @@ app_root="$(cd "$app_root" && pwd)"
 
 watch_mode=1
 prepare_only=0
+print_routes_requested=0
 server_args=()
 for arg in "$@"; do
   case "$arg" in
@@ -74,6 +75,7 @@ for arg in "$@"; do
       ;;
     --print-routes)
       watch_mode=0
+      print_routes_requested=1
       server_args+=("$arg")
       ;;
     *)
@@ -94,6 +96,12 @@ if [[ $is_app_root -eq 0 ]]; then
     exec "$framework_root/build/arlen" boomhauer --watch "${server_args[@]}"
   fi
 
+  if [[ $prepare_only -eq 1 ]]; then
+    echo "boomhauer: prepare-only mode; building app artifacts without starting the server"
+  elif [[ $print_routes_requested -eq 1 ]]; then
+    echo "boomhauer: route inspection mode; ensuring artifacts are current before printing routes"
+  fi
+
   make boomhauer >/dev/null
   if [[ $prepare_only -eq 1 ]]; then
     exit 0
@@ -105,11 +113,14 @@ fi
 state_root="$app_root/.boomhauer"
 build_root="$state_root/build"
 app_binary="$build_root/boomhauer-app"
+app_makefile="$build_root/AppGNUmakefile"
+framework_lib="$framework_root/build/lib/libArlenFramework.a"
 gen_root="$build_root/gen/templates"
+module_manifest_root="$gen_root/manifests"
+app_template_root="$gen_root/app"
 error_output_file="$state_root/last_build_error.log"
 error_meta_file="$state_root/last_build_error.meta"
-build_fingerprint_file="$state_root/last_build_fingerprint"
-mkdir -p "$gen_root"
+mkdir -p "$gen_root" "$module_manifest_root"
 
 normalized_non_negative_integer() {
   local raw="$1"
@@ -164,17 +175,6 @@ hash_fingerprint_stream() {
   sort | sha256sum | awk '{print $1}'
 }
 
-build_fingerprint() {
-  {
-    printf 'app_root|%s\n' "$app_root"
-    printf 'framework_root|%s\n' "$framework_root"
-    printf 'enable_yyjson|%s\n' "${ARLEN_ENABLE_YYJSON:-1}"
-    printf 'enable_llhttp|%s\n' "${ARLEN_ENABLE_LLHTTP:-1}"
-    append_fingerprint_entries "$app_root" "app" src templates modules app_lite.m config/modules.plist
-    append_fingerprint_entries "$framework_root" "framework" src GNUmakefile tools/eocc.m
-  } | hash_fingerprint_stream
-}
-
 runtime_fingerprint() {
   {
     printf 'app_root|%s\n' "$app_root"
@@ -186,33 +186,58 @@ runtime_fingerprint() {
   } | hash_fingerprint_stream
 }
 
-cached_build_is_current() {
-  local current_fingerprint="$1"
-  local cached_fingerprint
-
-  if [[ ! -x "$app_binary" || ! -f "$build_fingerprint_file" ]]; then
-    return 1
+move_file_if_changed() {
+  local tmp_path="$1"
+  local final_path="$2"
+  mkdir -p "$(dirname "$final_path")"
+  if [[ ! -f "$final_path" ]] || ! cmp -s "$tmp_path" "$final_path"; then
+    mv "$tmp_path" "$final_path"
+    return
   fi
+  rm -f "$tmp_path"
+}
 
-  cached_fingerprint="$(<"$build_fingerprint_file")"
-  [[ -n "$cached_fingerprint" && "$cached_fingerprint" == "$current_fingerprint" ]]
+object_path_for_app_source() {
+  local source_path="$1"
+  local relative_path
+  if [[ "$source_path" == "$app_root/"* ]]; then
+    relative_path="${source_path#"$app_root"/}"
+    printf '%s\n' "$build_root/obj/app/${relative_path%.m}.o"
+    return
+  fi
+  if [[ "$source_path" == "$build_root/"* ]]; then
+    relative_path="${source_path#"$build_root"/}"
+    printf '%s\n' "$build_root/obj/${relative_path%.m}.o"
+    return
+  fi
+  printf '%s\n' "$build_root/obj/misc/${source_path##*/}.o"
 }
 
 transpile_templates() {
-  rm -rf "$gen_root"
-  mkdir -p "$gen_root"
+  mkdir -p "$app_template_root" "$gen_root/modules" "$module_manifest_root"
+
+  if [[ -d "$gen_root/modules" ]]; then
+    while IFS= read -r existing_dir; do
+      local module_id
+      module_id="$(basename "$existing_dir")"
+      if [[ ! -d "$app_root/modules/$module_id" ]]; then
+        rm -rf "$existing_dir" "$module_manifest_root/$module_id.json"
+      fi
+    done < <(find "$gen_root/modules" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | sort)
+  fi
 
   if [[ -d "$app_root/modules" ]]; then
     while IFS= read -r module_root; do
-      local module_id module_template_root module_output_root
+      local module_id module_template_root
       module_id="$(basename "$module_root")"
       module_template_root="$module_root/Resources/Templates"
-      module_output_root="$gen_root/modules/$module_id"
       if [[ ! -d "$module_template_root" ]]; then
+        rm -rf "$gen_root/modules/$module_id" "$module_manifest_root/$module_id.json"
         continue
       fi
       mapfile -t module_template_files < <(find "$module_template_root" -type f -name '*.html.eoc' | sort)
       if [[ ${#module_template_files[@]} -eq 0 ]]; then
+        rm -rf "$gen_root/modules/$module_id" "$module_manifest_root/$module_id.json"
         continue
       fi
       local filtered_module_template_files=()
@@ -226,28 +251,33 @@ transpile_templates() {
         filtered_module_template_files+=("$template_path")
       done
       if [[ ${#filtered_module_template_files[@]} -eq 0 ]]; then
+        rm -rf "$gen_root/modules/$module_id" "$module_manifest_root/$module_id.json"
         continue
       fi
       "$framework_root/build/eocc" \
         --template-root "$module_template_root" \
-        --output-dir "$module_output_root" \
+        --output-dir "$gen_root" \
+        --manifest "$module_manifest_root/$module_id.json" \
         --logical-prefix "modules/$module_id" \
         "${filtered_module_template_files[@]}"
     done < <(find "$app_root/modules" -mindepth 1 -maxdepth 1 -type d | sort)
   fi
 
   if [[ ! -d "$app_root/templates" ]]; then
+    rm -rf "$app_template_root"
     return
   fi
 
   mapfile -t template_files < <(find "$app_root/templates" -type f -name '*.html.eoc' | sort)
   if [[ ${#template_files[@]} -eq 0 ]]; then
+    rm -rf "$app_template_root"
     return
   fi
 
   "$framework_root/build/eocc" \
     --template-root "$app_root/templates" \
-    --output-dir "$gen_root/app" \
+    --output-dir "$app_template_root" \
+    --manifest "$app_template_root/manifest.json" \
     "${template_files[@]}"
 }
 
@@ -258,7 +288,6 @@ record_build_failure() {
   local output_file="$4"
 
   command="${command//$'\n'/ }"
-  rm -f "$build_fingerprint_file"
   cp "$output_file" "$error_output_file"
   {
     printf 'stage=%s\n' "$stage"
@@ -272,16 +301,159 @@ clear_build_failure_state() {
   rm -f "$error_output_file" "$error_meta_file"
 }
 
-compile_app() {
-  local build_cache_key="${1:-}"
-  local tmp_output
-  tmp_output="$(mktemp)"
+emit_app_makefile() {
   local enable_yyjson="${ARLEN_ENABLE_YYJSON:-1}"
   local enable_llhttp="${ARLEN_ENABLE_LLHTTP:-1}"
+  local gnustep_objc_flags
+  local gnustep_base_libs
+  mapfile -t app_sources < <(find "$app_root/src" -type f -name '*.m' 2>/dev/null | sort)
+  mapfile -t framework_module_source_dirs < <(find "$framework_root/modules" -mindepth 2 -maxdepth 2 -type d -name 'Sources' 2>/dev/null | sort)
+  mapfile -t app_module_source_dirs < <(
+    find "$app_root/modules" -mindepth 2 -maxdepth 2 -type d -name 'Sources' 2>/dev/null | sort
+  )
+  mapfile -t app_module_sources < <(find "$app_root/modules" -path '*/Sources/*.m' -type f 2>/dev/null | sort)
+  mapfile -t generated_sources < <(find "$build_root/gen" -type f -name '*.m' 2>/dev/null | sort)
+  local -a include_args
+  local -a app_objects
+  local source_path object_path dep_path
+  local tmp_makefile
 
-  if [[ -z "$build_cache_key" ]]; then
-    build_cache_key="$(build_fingerprint)"
+  if [[ -f "$app_root/app_lite.m" ]]; then
+    app_sources+=("$app_root/app_lite.m")
   fi
+  if [[ ${#app_module_sources[@]} -gt 0 ]]; then
+    app_sources+=("${app_module_sources[@]}")
+  fi
+  if [[ ${#app_sources[@]} -eq 0 ]]; then
+    echo "boomhauer: no app source files found under $app_root" >&2
+    echo "boomhauer: expected src/main.m (full mode) or app_lite.m (lite mode)" >&2
+    return 1
+  fi
+
+  include_args=(
+    "-I$framework_root/src"
+    "-I$framework_root/src/Arlen"
+    "-I$framework_root/src/Arlen/Core"
+    "-I$framework_root/src/Arlen/Data"
+    "-I$framework_root/src/Arlen/HTTP"
+    "-I$framework_root/src/Arlen/MVC/Controller"
+    "-I$framework_root/src/Arlen/MVC/Middleware"
+    "-I$framework_root/src/Arlen/MVC/Routing"
+    "-I$framework_root/src/Arlen/MVC/Template"
+    "-I$framework_root/src/Arlen/MVC/View"
+    "-I$framework_root/src/Arlen/Support"
+    "-I$framework_root/src/Arlen/Support/third_party/argon2/include"
+    "-I$framework_root/src/Arlen/Support/third_party/argon2/src"
+    "-I$framework_root/src/MojoObjc"
+    "-I$framework_root/src/MojoObjc/Core"
+    "-I$framework_root/src/MojoObjc/Data"
+    "-I$framework_root/src/MojoObjc/HTTP"
+    "-I$framework_root/src/MojoObjc/MVC/Controller"
+    "-I$framework_root/src/MojoObjc/MVC/Middleware"
+    "-I$framework_root/src/MojoObjc/MVC/Routing"
+    "-I$framework_root/src/MojoObjc/MVC/Template"
+    "-I$framework_root/src/MojoObjc/MVC/View"
+    "-I$framework_root/src/MojoObjc/Support"
+    "-I$app_root/src"
+    "-I/usr/include/postgresql"
+  )
+  for module_source_dir in "${framework_module_source_dirs[@]}"; do
+    include_args+=("-I$module_source_dir")
+  done
+  for module_source_dir in "${app_module_source_dirs[@]}"; do
+    include_args+=("-I$module_source_dir")
+  done
+
+  set +u
+  # shellcheck disable=SC1090
+  source "$gnustep_sh"
+  set -u
+  gnustep_objc_flags="$(gnustep-config --objc-flags)"
+  gnustep_base_libs="$(gnustep-config --base-libs)"
+
+  tmp_makefile="$(mktemp)"
+  {
+    printf 'SHELL := /bin/bash\n'
+    printf '.RECIPEPREFIX = >\n\n'
+    printf 'GNUSTEP_SH := %s\n' "$gnustep_sh"
+    printf 'APP_BINARY := %s\n' "$app_binary"
+    printf 'OBJECTS_READY := %s\n' "$build_root/.objects-ready"
+    printf 'FRAMEWORK_LIB := %s\n' "$framework_lib"
+    printf 'GNUSTEP_OBJC_FLAGS := %s\n' "$gnustep_objc_flags"
+    printf 'BASE_LINK_LIBS := %s -ldl -lcrypto -ldispatch\n' "$gnustep_base_libs"
+    printf 'OBJC_FLAGS := $(GNUSTEP_OBJC_FLAGS) -fobjc-arc -fPIC -DARLEN_ENABLE_YYJSON=%s -DARLEN_ENABLE_LLHTTP=%s -DARGON2_NO_THREADS=1\n' "$enable_yyjson" "$enable_llhttp"
+    printf 'INCLUDE_FLAGS :='
+    for source_path in "${include_args[@]}"; do
+      printf ' %s' "$source_path"
+    done
+    printf '\n'
+    printf 'ALL_OBJECTS :='
+    for source_path in "${app_sources[@]}" "${generated_sources[@]}"; do
+      object_path="$(object_path_for_app_source "$source_path")"
+      app_objects+=("$object_path")
+      printf ' %s' "$object_path"
+    done
+    printf '\n'
+    printf 'ALL_DEPFILES := $(ALL_OBJECTS:.o=.d)\n\n'
+    printf '$(OBJECTS_READY): $(ALL_OBJECTS) $(lastword $(MAKEFILE_LIST))\n'
+    printf '>mkdir -p $(@D)\n'
+    printf '>touch $@\n\n'
+    printf '$(APP_BINARY): $(OBJECTS_READY) $(FRAMEWORK_LIB) $(lastword $(MAKEFILE_LIST))\n'
+    printf '>mkdir -p $(@D)\n'
+    printf '>source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) $(ALL_OBJECTS) $(FRAMEWORK_LIB) -o $(APP_BINARY) $(BASE_LINK_LIBS)\n\n'
+    for source_path in "${app_sources[@]}" "${generated_sources[@]}"; do
+      object_path="$(object_path_for_app_source "$source_path")"
+      dep_path="${object_path%.o}.d"
+      printf '%s: %s $(lastword $(MAKEFILE_LIST))\n' "$object_path" "$source_path"
+      printf '>mkdir -p $(@D)\n'
+      printf '>source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) -MMD -MP -MF %s -c %s -o %s\n\n' \
+        "$dep_path" "$source_path" "$object_path"
+    done
+    printf -- '-include $(wildcard $(ALL_DEPFILES))\n'
+  } >"$tmp_makefile"
+
+  move_file_if_changed "$tmp_makefile" "$app_makefile"
+  return 0
+}
+
+framework_artifacts_are_current() {
+  make -q -C "$framework_root" "$framework_root/build/eocc" "$framework_lib" >/dev/null 2>&1
+}
+
+run_app_make_target() {
+  local target="$1"
+  local reuse_message="$2"
+  local build_message="$3"
+  local failure_stage="$4"
+  local failure_command="$5"
+  local tmp_output
+  tmp_output="$(mktemp)"
+
+  if make -s -C "$build_root" -f "$app_makefile" -q "$target" >/dev/null 2>&1; then
+    echo "$reuse_message"
+    rm -f "$tmp_output"
+    return 0
+  fi
+
+  echo "$build_message"
+  if make -s -C "$build_root" -f "$app_makefile" "$target" >"$tmp_output" 2>&1; then
+    if [[ -s "$tmp_output" ]]; then
+      cat "$tmp_output"
+    fi
+    rm -f "$tmp_output"
+    return 0
+  fi
+  local status=$?
+  record_build_failure "$failure_stage" "$failure_command" "$status" "$tmp_output"
+  rm -f "$tmp_output"
+  return "$status"
+}
+
+compile_app() {
+  local enable_yyjson="${ARLEN_ENABLE_YYJSON:-1}"
+  local enable_llhttp="${ARLEN_ENABLE_LLHTTP:-1}"
+  local tmp_output
+  tmp_output="$(mktemp)"
 
   if [[ "$enable_yyjson" != "0" && "$enable_yyjson" != "1" ]]; then
     printf 'boomhauer: ARLEN_ENABLE_YYJSON must be 0 or 1 (got %s)\n' "$enable_yyjson" >"$tmp_output"
@@ -296,132 +468,66 @@ compile_app() {
     return 2
   fi
 
-  if make -C "$framework_root" eocc >"$tmp_output" 2>&1; then
-    :
+  if framework_artifacts_are_current; then
+    echo "boomhauer: [1/4] reusing current framework tools and libraries"
   else
-    local status=$?
-    record_build_failure "tooling" "make -C $framework_root eocc" "$status" "$tmp_output"
-    rm -f "$tmp_output"
-    return "$status"
+    echo "boomhauer: [1/4] checking tool freshness and building framework artifacts"
+    if make -C "$framework_root" "$framework_root/build/eocc" "$framework_lib" >"$tmp_output" 2>&1; then
+      if [[ -s "$tmp_output" ]]; then
+        cat "$tmp_output"
+      fi
+    else
+      local status=$?
+      record_build_failure "tooling" "make -C $framework_root $framework_root/build/eocc $framework_lib" "$status" "$tmp_output"
+      rm -f "$tmp_output"
+      return "$status"
+    fi
   fi
 
+  echo "boomhauer: [2/4] transpiling templates"
   if transpile_templates >"$tmp_output" 2>&1; then
-    :
+    if [[ -s "$tmp_output" ]]; then
+      cat "$tmp_output"
+    fi
   else
     local status=$?
-    record_build_failure "template_transpile" "$framework_root/build/eocc --template-root $app_root/templates --output-dir $gen_root ..." "$status" "$tmp_output"
+    record_build_failure "template_transpile" "$framework_root/build/eocc --manifest ... --output-dir $gen_root" "$status" "$tmp_output"
     rm -f "$tmp_output"
     return "$status"
   fi
 
-  mapfile -t framework_sources < <(
-    {
-      find "$framework_root/src" -type f -name '*.m'
-      if [[ "$enable_yyjson" == "1" ]]; then
-        find "$framework_root/src/Arlen/Support/third_party/yyjson" -type f -name '*.c' 2>/dev/null
-      fi
-      if [[ "$enable_llhttp" == "1" ]]; then
-        find "$framework_root/src/Arlen/Support/third_party/llhttp" -type f -name '*.c' 2>/dev/null
-      fi
-      find "$framework_root/src/Arlen/Support/third_party/argon2" -type f -name '*.c' 2>/dev/null
-    } | sort
-  )
-  mapfile -t app_sources < <(find "$app_root/src" -type f -name '*.m' 2>/dev/null | sort)
-  mapfile -t framework_module_source_dirs < <(
-    find "$framework_root/modules" -mindepth 2 -maxdepth 2 -type d -name 'Sources' 2>/dev/null | sort
-  )
-  mapfile -t app_module_source_dirs < <(
-    find "$app_root/modules" -mindepth 2 -maxdepth 2 -type d -name 'Sources' 2>/dev/null | sort
-  )
-  framework_module_include_args=()
-  for module_source_dir in "${framework_module_source_dirs[@]}"; do
-    framework_module_include_args+=("-I$module_source_dir")
-  done
-  app_module_include_args=()
-  for module_source_dir in "${app_module_source_dirs[@]}"; do
-    app_module_include_args+=("-I$module_source_dir")
-  done
-  mapfile -t module_sources < <(find "$app_root/modules" -path '*/Sources/*.m' -type f 2>/dev/null | sort)
-  mapfile -t module_generated_sources < <(find "$gen_root/modules" -type f -name '*.m' 2>/dev/null | sort)
-  mapfile -t app_generated_sources < <(find "$gen_root/app" -type f -name '*.m' 2>/dev/null | sort)
-  generated_sources=("${module_generated_sources[@]}" "${app_generated_sources[@]}")
-
-  if [[ -f "$app_root/app_lite.m" ]]; then
-    app_sources+=("$app_root/app_lite.m")
-  fi
-  if [[ ${#module_sources[@]} -gt 0 ]]; then
-    app_sources+=("${module_sources[@]}")
-  fi
-
-  if [[ ${#app_sources[@]} -eq 0 ]]; then
-    {
-      echo "boomhauer: no app source files found under $app_root"
-      echo "boomhauer: expected src/main.m (full mode) or app_lite.m (lite mode)"
-    } >"$tmp_output"
-    record_build_failure "app_discovery" "discover app sources" 1 "$tmp_output"
+  if ! emit_app_makefile >"$tmp_output" 2>&1; then
+    local status=$?
+    record_build_failure "app_discovery" "emit incremental app makefile" "$status" "$tmp_output"
     rm -f "$tmp_output"
+    return "$status"
+  fi
+  rm -f "$tmp_output"
+
+  if ! run_app_make_target \
+      "$build_root/.objects-ready" \
+      "boomhauer: [3/4] reusing current app objects" \
+      "boomhauer: [3/4] compiling app objects" \
+      "compile_objects" \
+      "make -C $build_root -f $app_makefile $build_root/.objects-ready"; then
     return 1
   fi
 
-  mkdir -p "$build_root"
-
-  if {
-    set +u
-    # shellcheck disable=SC1090
-    source "$gnustep_sh"
-    set -u
-    clang $(gnustep-config --objc-flags) \
-      -fobjc-arc \
-      -fcolor-diagnostics \
-      -DARLEN_ENABLE_YYJSON="$enable_yyjson" \
-      -DARLEN_ENABLE_LLHTTP="$enable_llhttp" \
-      -DARGON2_NO_THREADS=1 \
-      -I"$framework_root/src/Arlen" \
-      -I"$framework_root/src/Arlen/Core" \
-      -I"$framework_root/src/Arlen/Data" \
-      -I"$framework_root/src/Arlen/HTTP" \
-      -I"$framework_root/src/Arlen/MVC/Controller" \
-      -I"$framework_root/src/Arlen/MVC/Middleware" \
-      -I"$framework_root/src/Arlen/MVC/Routing" \
-      -I"$framework_root/src/Arlen/MVC/Template" \
-      -I"$framework_root/src/Arlen/MVC/View" \
-      -I"$framework_root/src/Arlen/Support" \
-      -I"$framework_root/src/Arlen/Support/third_party/argon2/include" \
-      -I"$framework_root/src/Arlen/Support/third_party/argon2/src" \
-      -I"$app_root/src" \
-      "${framework_module_include_args[@]}" \
-      "${app_module_include_args[@]}" \
-      "${app_sources[@]}" \
-      "${framework_sources[@]}" \
-      "${generated_sources[@]}" \
-      -o "$app_binary" \
-      $(gnustep-config --base-libs) \
-      -ldl \
-      -lcrypto \
-      -ldispatch
-  } >"$tmp_output" 2>&1; then
-    :
-  else
-    local status=$?
-    record_build_failure "compile" "clang (app/framework/generated sources) -o $app_binary" "$status" "$tmp_output"
-    rm -f "$tmp_output"
-    return "$status"
+  if ! run_app_make_target \
+      "$app_binary" \
+      "boomhauer: [4/4] reusing current app binary" \
+      "boomhauer: [4/4] linking app binary" \
+      "link" \
+      "make -C $build_root -f $app_makefile $app_binary"; then
+    return 1
   fi
 
-  rm -f "$tmp_output"
   clear_build_failure_state
-  printf '%s\n' "$build_cache_key" >"$build_fingerprint_file"
   return 0
 }
 
 ensure_app_built() {
-  local current_build_fingerprint
-  current_build_fingerprint="$(build_fingerprint)"
-  if cached_build_is_current "$current_build_fingerprint"; then
-    clear_build_failure_state
-    return 0
-  fi
-  compile_app "$current_build_fingerprint"
+  compile_app
 }
 
 child_pid=""
@@ -489,6 +595,11 @@ start_error_child() {
 }
 
 run_once() {
+  if [[ $prepare_only -eq 1 ]]; then
+    echo "boomhauer: prepare-only mode; building app artifacts without starting the server"
+  elif [[ $print_routes_requested -eq 1 ]]; then
+    echo "boomhauer: route inspection mode; ensuring artifacts are current before printing routes"
+  fi
   if ! ensure_app_built; then
     cat "$error_output_file" >&2 || true
     exit 1

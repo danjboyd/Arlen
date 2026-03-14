@@ -5,6 +5,8 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$repo_root"
 
 output_dir="${ARLEN_PHASE16_OUTPUT_DIR:-$repo_root/build/release_confidence/phase16}"
+xctest_runner="${ARLEN_XCTEST:-xctest}"
+xctest_ld_library_path="${ARLEN_XCTEST_LD_LIBRARY_PATH:-}"
 unit_bundle="${ARLEN_PHASE16_UNIT_BUNDLE:-$repo_root/build/tests/ArlenUnitTests.xctest}"
 unit_bin="$unit_bundle/ArlenUnitTests"
 focused_bundle="${ARLEN_PHASE16_FOCUSED_BUNDLE:-$repo_root/build/tests/Phase16ModulesOnly.xctest}"
@@ -20,8 +22,16 @@ set +u
 source /usr/GNUstep/System/Library/Makefiles/GNUstep.sh
 set -u
 
+run_xctest() {
+  if [[ -n "$xctest_ld_library_path" ]]; then
+    LD_LIBRARY_PATH="$xctest_ld_library_path${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" "$xctest_runner" "$@"
+  else
+    "$xctest_runner" "$@"
+  fi
+}
+
 make "$unit_bin"
-xctest "$unit_bundle" >"$unit_log" 2>&1
+run_xctest "$unit_bundle" >"$unit_log" 2>&1
 
 mapfile -t framework_srcs < <(find "$repo_root/src" -type f -name '*.m' | sort)
 mapfile -t module_srcs < <(find "$repo_root/modules" -type f -path '*/Sources/*.m' | sort)
@@ -96,7 +106,7 @@ clang \
   -lXCTest
 
 cp "$repo_root/tests/Info-gnustep-integration.plist" "$focused_bundle/Resources/Info-gnustep.plist"
-xctest "$focused_bundle" >"$integration_log" 2>&1
+run_xctest "$focused_bundle" >"$integration_log" 2>&1
 
 python3 ./tools/ci/generate_phase16_confidence_artifacts.py \
   --repo-root "$repo_root" \

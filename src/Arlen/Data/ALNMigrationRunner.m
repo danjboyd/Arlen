@@ -1,13 +1,7 @@
 #import "ALNMigrationRunner.h"
 
-#import "ALNPg.h"
-
 NSString *const ALNMigrationRunnerErrorDomain = @"Arlen.Data.MigrationRunner.Error";
 NSString *const ALNMigrationRunnerDefaultDatabaseTarget = @"default";
-
-@interface ALNPgConnection (ALNMigrationRunnerScripts)
-- (BOOL)executeScript:(NSString *)sql error:(NSError **)error;
-@end
 
 typedef NS_ENUM(NSUInteger, ALNMigrationSQLScanState) {
   ALNMigrationSQLScanStateDefault = 0,
@@ -338,7 +332,61 @@ static NSString *ALNMigrationForbiddenTransactionControlToken(NSString *statemen
       return [NSString stringWithFormat:@"%@ %@", firstToken, secondToken];
     }
   }
+  if ([firstToken isEqualToString:@"SAVE"]) {
+    NSString *secondToken = ALNMigrationNextIdentifierToken(statement, &cursor);
+    if ([secondToken isEqualToString:@"TRAN"] || [secondToken isEqualToString:@"TRANSACTION"]) {
+      return [NSString stringWithFormat:@"%@ %@", firstToken, secondToken];
+    }
+  }
   return nil;
+}
+
+static id<ALNSQLDialect> ALNMigrationDialectForDatabase(id<ALNDatabaseAdapter> database,
+                                                        NSError **error) {
+  if (database != nil && [database respondsToSelector:@selector(sqlDialect)]) {
+    id<ALNSQLDialect> dialect = [database sqlDialect];
+    if (dialect != nil) {
+      return dialect;
+    }
+  }
+
+  if (error != NULL) {
+    *error = ALNMigrationError(
+        @"database adapter does not expose a SQL dialect",
+        @"implement ALNDatabaseAdapter -sqlDialect to enable generic migration workflows");
+  }
+  return nil;
+}
+
+static NSString *ALNMigrationNormalizeSQLForDialect(NSString *sql, id<ALNSQLDialect> dialect) {
+  NSString *dialectName =
+      [dialect respondsToSelector:@selector(dialectName)] ? [dialect dialectName] : @"";
+  if (![dialectName isEqualToString:@"mssql"]) {
+    return sql ?: @"";
+  }
+
+  NSMutableArray<NSString *> *lines = [NSMutableArray array];
+  NSArray<NSString *> *rawLines =
+      [(sql ?: @"") componentsSeparatedByCharactersInSet:[NSCharacterSet newlineCharacterSet]];
+  NSRegularExpression *goRegex =
+      [NSRegularExpression regularExpressionWithPattern:@"^\\s*GO(?:\\s+[0-9]+)?\\s*(?:--.*)?$"
+                                                options:NSRegularExpressionCaseInsensitive
+                                                  error:nil];
+  for (NSString *line in rawLines) {
+    NSString *normalizedLine = line ?: @"";
+    NSRange fullRange = NSMakeRange(0, [normalizedLine length]);
+    if ([goRegex numberOfMatchesInString:normalizedLine options:0 range:fullRange] > 0) {
+      [lines addObject:@";"];
+    } else {
+      [lines addObject:normalizedLine];
+    }
+  }
+  return [lines componentsJoinedByString:@"\n"];
+}
+
+static NSArray<NSString *> *ALNMigrationStatementsForDialect(NSString *sql,
+                                                             id<ALNSQLDialect> dialect) {
+  return ALNMigrationTopLevelStatements(ALNMigrationNormalizeSQLForDialect(sql, dialect));
 }
 
 static NSError *ALNMigrationApplyError(NSString *migrationPath, NSError *underlyingError) {
@@ -473,22 +521,26 @@ static NSError *ALNMigrationValidationError(NSString *migrationPath,
   return [NSString stringWithFormat:@"%@::%@", trimmedNamespace, name ?: @""];
 }
 
-+ (BOOL)ensureMigrationsTableWithDatabase:(ALNPg *)database
++ (BOOL)ensureMigrationsTableWithDatabase:(id<ALNDatabaseAdapter>)database
+                                  dialect:(id<ALNSQLDialect>)dialect
                                 tableName:(NSString *)tableName
                                     error:(NSError **)error {
-  NSString *sql = [NSString stringWithFormat:@"CREATE TABLE IF NOT EXISTS %@ ("
-                                              "version TEXT PRIMARY KEY,"
-                                              "applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW()"
-                                              ")",
-                                             tableName];
+  NSString *sql = [dialect migrationStateTableCreateSQLForTableName:tableName error:error];
+  if ([sql length] == 0) {
+    return NO;
+  }
   NSInteger affected = [database executeCommand:sql parameters:@[] error:error];
   return (affected >= 0);
 }
 
-+ (nullable NSSet *)appliedVersionSetWithDatabase:(ALNPg *)database
-                                         tableName:(NSString *)tableName
-                                             error:(NSError **)error {
-  NSString *sql = [NSString stringWithFormat:@"SELECT version FROM %@ ORDER BY version", tableName];
++ (nullable NSSet *)appliedVersionSetWithDatabase:(id<ALNDatabaseAdapter>)database
+                                          dialect:(id<ALNSQLDialect>)dialect
+                                        tableName:(NSString *)tableName
+                                            error:(NSError **)error {
+  NSString *sql = [dialect migrationVersionsSelectSQLForTableName:tableName error:error];
+  if ([sql length] == 0) {
+    return nil;
+  }
   NSArray *rows = [database executeQuery:sql parameters:@[] error:error];
   if (rows == nil) {
     return nil;
@@ -505,7 +557,7 @@ static NSError *ALNMigrationValidationError(NSString *migrationPath,
 }
 
 + (NSArray<NSString *> *)pendingMigrationFilesAtPath:(NSString *)migrationsPath
-                                             database:(ALNPg *)database
+                                             database:(id<ALNDatabaseAdapter>)database
                                        databaseTarget:(NSString *)databaseTarget
                                     versionNamespace:(NSString *)versionNamespace
                                                error:(NSError **)error {
@@ -519,11 +571,22 @@ static NSError *ALNMigrationValidationError(NSString *migrationPath,
     return nil;
   }
 
-  if (![self ensureMigrationsTableWithDatabase:database tableName:tableName error:error]) {
+  id<ALNSQLDialect> dialect = ALNMigrationDialectForDatabase(database, error);
+  if (dialect == nil) {
     return nil;
   }
 
-  NSSet *applied = [self appliedVersionSetWithDatabase:database tableName:tableName error:error];
+  if (![self ensureMigrationsTableWithDatabase:database
+                                       dialect:dialect
+                                     tableName:tableName
+                                         error:error]) {
+    return nil;
+  }
+
+  NSSet *applied = [self appliedVersionSetWithDatabase:database
+                                               dialect:dialect
+                                             tableName:tableName
+                                                 error:error];
   if (applied == nil) {
     return nil;
   }
@@ -539,7 +602,7 @@ static NSError *ALNMigrationValidationError(NSString *migrationPath,
 }
 
 + (NSArray<NSString *> *)pendingMigrationFilesAtPath:(NSString *)migrationsPath
-                                             database:(ALNPg *)database
+                                             database:(id<ALNDatabaseAdapter>)database
                                        databaseTarget:(NSString *)databaseTarget
                                                 error:(NSError **)error {
   return [self pendingMigrationFilesAtPath:migrationsPath
@@ -551,8 +614,9 @@ static NSError *ALNMigrationValidationError(NSString *migrationPath,
 
 + (BOOL)validateMigrationSQL:(NSString *)sql
                 migrationPath:(NSString *)migrationPath
+                     dialect:(id<ALNSQLDialect>)dialect
                         error:(NSError **)error {
-  NSArray<NSString *> *statements = ALNMigrationTopLevelStatements(sql);
+  NSArray<NSString *> *statements = ALNMigrationStatementsForDialect(sql, dialect);
   if ([statements count] == 0) {
     if (error != NULL) {
       *error = ALNMigrationValidationError(migrationPath,
@@ -583,7 +647,7 @@ static NSError *ALNMigrationValidationError(NSString *migrationPath,
 }
 
 + (BOOL)applyMigrationsAtPath:(NSString *)migrationsPath
-                     database:(ALNPg *)database
+                     database:(id<ALNDatabaseAdapter>)database
                databaseTarget:(NSString *)databaseTarget
              versionNamespace:(NSString *)versionNamespace
                        dryRun:(BOOL)dryRun
@@ -603,6 +667,11 @@ static NSError *ALNMigrationValidationError(NSString *migrationPath,
     return NO;
   }
 
+  id<ALNSQLDialect> dialect = ALNMigrationDialectForDatabase(database, error);
+  if (dialect == nil) {
+    return NO;
+  }
+
   if (dryRun) {
     if (appliedFiles != NULL) {
       *appliedFiles = pending;
@@ -611,6 +680,10 @@ static NSError *ALNMigrationValidationError(NSString *migrationPath,
   }
 
   NSMutableArray *applied = [NSMutableArray array];
+  NSString *insertSQL = [dialect migrationVersionInsertSQLForTableName:tableName error:error];
+  if ([insertSQL length] == 0) {
+    return NO;
+  }
   for (NSString *migrationPath in pending) {
     NSError *readError = nil;
     NSString *sql = [NSString stringWithContentsOfFile:migrationPath
@@ -622,22 +695,25 @@ static NSError *ALNMigrationValidationError(NSString *migrationPath,
       }
       return NO;
     }
-    if (![self validateMigrationSQL:sql migrationPath:migrationPath error:error]) {
+    if (![self validateMigrationSQL:sql migrationPath:migrationPath dialect:dialect error:error]) {
       return NO;
     }
 
     NSString *version = [self versionForMigrationFile:migrationPath
                                      versionNamespace:versionNamespace];
-    __block NSError *transactionError = nil;
-    NSString *insertSQL = [NSString stringWithFormat:@"INSERT INTO %@ (version) VALUES ($1)", tableName];
-    BOOL appliedOK = [database withTransaction:^BOOL(ALNPgConnection *connection, NSError **blockError) {
-      if (![connection executeScript:sql error:blockError]) {
-        return NO;
+    NSArray<NSString *> *statements = ALNMigrationStatementsForDialect(sql, dialect);
+    NSError *transactionError = nil;
+    BOOL appliedOK = [database withTransactionUsingBlock:^BOOL(id<ALNDatabaseConnection> connection,
+                                                               NSError **blockError) {
+      for (NSString *statement in statements) {
+        NSInteger executed = [connection executeCommand:statement parameters:@[] error:blockError];
+        if (executed < 0) {
+          return NO;
+        }
       }
 
-      NSInteger inserted = [connection executeCommand:insertSQL
-                                           parameters:@[ version ]
-                                                error:blockError];
+      NSInteger inserted =
+          [connection executeCommand:insertSQL parameters:@[ version ] error:blockError];
       if (inserted < 0) {
         return NO;
       }
@@ -660,7 +736,7 @@ static NSError *ALNMigrationValidationError(NSString *migrationPath,
 }
 
 + (BOOL)applyMigrationsAtPath:(NSString *)migrationsPath
-                     database:(ALNPg *)database
+                     database:(id<ALNDatabaseAdapter>)database
                databaseTarget:(NSString *)databaseTarget
                        dryRun:(BOOL)dryRun
                  appliedFiles:(NSArray<NSString *> **)appliedFiles
@@ -675,7 +751,7 @@ static NSError *ALNMigrationValidationError(NSString *migrationPath,
 }
 
 + (nullable NSArray<NSString *> *)pendingMigrationFilesAtPath:(NSString *)migrationsPath
-                                                      database:(ALNPg *)database
+                                                      database:(id<ALNDatabaseAdapter>)database
                                                          error:(NSError **)error {
   return [self pendingMigrationFilesAtPath:migrationsPath
                                   database:database
@@ -684,7 +760,7 @@ static NSError *ALNMigrationValidationError(NSString *migrationPath,
 }
 
 + (BOOL)applyMigrationsAtPath:(NSString *)migrationsPath
-                     database:(ALNPg *)database
+                     database:(id<ALNDatabaseAdapter>)database
                        dryRun:(BOOL)dryRun
                  appliedFiles:(NSArray<NSString *> **)appliedFiles
                         error:(NSError **)error {

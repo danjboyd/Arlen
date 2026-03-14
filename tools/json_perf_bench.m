@@ -4,7 +4,7 @@
 
 static void PrintUsage(void) {
   fprintf(stderr,
-          "Usage: json_perf_bench [--fixtures-dir <path>] [--iterations <count>] [--warmup <count>]\n");
+          "Usage: json_perf_bench [--fixtures-dir <path>] [--iterations <count>] [--warmup <count>] [--backend <yyjson|foundation>]\n");
 }
 
 static NSDictionary *TimingSummaryFromSamples(NSArray<NSNumber *> *samplesMicros) {
@@ -170,6 +170,7 @@ int main(int argc, const char *argv[]) {
     NSString *fixturesDir = @"tests/fixtures/performance/json";
     NSUInteger iterations = 1500;
     NSUInteger warmup = 200;
+    NSString *requestedBackend = nil;
 
     NSMutableArray<NSString *> *args = [NSMutableArray arrayWithCapacity:(NSUInteger)MAX(argc - 1, 0)];
     for (int idx = 1; idx < argc; idx++) {
@@ -200,11 +201,36 @@ int main(int argc, const char *argv[]) {
         NSInteger parsed = [args[idx + 1] integerValue];
         idx += 1;
         warmup = (parsed > 0) ? (NSUInteger)parsed : 0;
+      } else if ([arg isEqualToString:@"--backend"]) {
+        if (idx + 1 >= [args count]) {
+          PrintUsage();
+          return 2;
+        }
+        requestedBackend = [[args[idx + 1] lowercaseString] copy];
+        idx += 1;
       } else if ([arg isEqualToString:@"--help"] || [arg isEqualToString:@"-h"]) {
         PrintUsage();
         return 0;
       } else {
         fprintf(stderr, "json_perf_bench: unknown option %s\n", [arg UTF8String]);
+        PrintUsage();
+        return 2;
+      }
+    }
+
+    [ALNJSONSerialization resetBackendForTesting];
+    if ([requestedBackend length] > 0) {
+      if ([requestedBackend isEqualToString:@"foundation"] ||
+          [requestedBackend isEqualToString:@"nsjson"]) {
+        [ALNJSONSerialization setBackendForTesting:ALNJSONBackendFoundation];
+      } else if ([requestedBackend isEqualToString:@"yyjson"]) {
+        if (![ALNJSONSerialization isYYJSONAvailable]) {
+          fprintf(stderr, "json_perf_bench: yyjson backend is unavailable in this build\n");
+          return 2;
+        }
+        [ALNJSONSerialization setBackendForTesting:ALNJSONBackendYYJSON];
+      } else {
+        fprintf(stderr, "json_perf_bench: unsupported backend %s\n", [requestedBackend UTF8String]);
         PrintUsage();
         return 2;
       }

@@ -62,6 +62,13 @@
   return @"gdl2";
 }
 
+- (id<ALNSQLDialect>)sqlDialect {
+  if ([self.fallbackAdapter respondsToSelector:@selector(sqlDialect)]) {
+    return [self.fallbackAdapter sqlDialect];
+  }
+  return nil;
+}
+
 - (id<ALNDatabaseConnection>)acquireAdapterConnection:(NSError **)error {
   return (id<ALNDatabaseConnection>)[self.fallbackAdapter acquireConnection:error];
 }

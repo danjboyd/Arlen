@@ -2,7 +2,8 @@
 
 Phase 7F defines deterministic frontend starter workflows that keep Arlen's core runtime slim while giving users practical static-asset + API wiring paths.
 
-This document captures the initial 7F implementation slice completed on 2026-02-23.
+This document captures the delivered 7F starter contract set for the current
+first-party scope.
 
 ## 1. Scope (Initial Slice)
 
@@ -86,10 +87,8 @@ Verification coverage:
 - `tests/unit/Phase7FTests.m`
   - `testFrontendStarterContractFixtureSchemaAndTestCoverage`
 
-## 7. Remaining 7F Follow-On
+## 7. Future Expansion
 
-The broader 7F roadmap still includes:
-
-- framework-specific starter variants (e.g., Vite/React/Vue/Svelte integration references)
-- richer CI smoke checks that build/bundle starter variants end-to-end
-- starter migration utilities for cross-version upgrade automation
+Additional framework-specific starter variants or bundle-oriented smoke checks
+can still be added later, but they are outside the completed 7F acceptance bar
+for the current first-party starter set.

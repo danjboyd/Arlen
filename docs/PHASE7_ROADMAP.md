@@ -1,7 +1,7 @@
 # Arlen Phase 7 Roadmap
 
-Status: Active (Phase 7A, 7B, 7C, 7D, 7E, 7F, 7G, and 7H initial slices implemented; follow-on in progress)  
-Last updated: 2026-02-23
+Status: Complete for current first-party scope (initial slices landed 2026-02-23; closeout verified 2026-03-13)
+Last updated: 2026-03-13
 
 Related docs:
 - `docs/PHASE5_ROADMAP.md`
@@ -45,11 +45,33 @@ Phase 7 intentionally keeps current scope guardrails:
 7. Add coding-agent-first DX contracts and machine-readable workflows.
 8. Deepen distributed runtime/cluster correctness contracts.
 
+## 2.1 Closeout Summary
+
+Phase 7 began as a set of initial slices on 2026-02-23, but its follow-on
+acceptance work landed incrementally across later runtime, hardening, and
+operability phases. In the current tree:
+
+- runtime hardening expectations are backed by overload, timeout/boundary,
+  graceful reload/shutdown, crash/respawn, fault-injection, chaos-restart, and
+  concurrency-gate coverage
+- security-default scope is backed by stronger secret validation, trusted-proxy
+  CIDR enforcement, websocket origin policy, and hardened request/parser
+  boundaries
+- observability and operability scope is backed by stable request and propane
+  lifecycle diagnostics, JSON health/readiness contracts, deploy-runbook
+  validation, and release-confidence artifact generation
+- ecosystem durability, template-pipeline maturity, frontend starters,
+  coding-agent DX, and distributed-runtime contracts all have executable
+  fixture/test coverage in the current tree
+
+Future expansion is still possible, but the Phase 7 acceptance bar for the
+currently supported first-party surface is met.
+
 ## 3. Components
 
 ## 3.1 Phase 7A: Runtime Hardening (`boomhauer` + `propane`)
 
-Status: Initial slice implemented (2026-02-23); remaining 7A deliverables in progress
+Status: Complete for current first-party scope (initial slice 2026-02-23; closeout verified 2026-03-13)
 
 Deliverables:
 
@@ -89,7 +111,7 @@ Implementation notes (initial slice, 2026-02-23):
 
 ## 3.2 Phase 7B: Security Defaults + Policy Contracts
 
-Status: Initial slice implemented (2026-02-23); remaining 7B deliverables in progress
+Status: Complete for current first-party scope (initial slice 2026-02-23; closeout verified 2026-03-13)
 
 Deliverables:
 
@@ -126,7 +148,7 @@ Implementation notes (initial slice, 2026-02-23):
 
 ## 3.3 Phase 7C: Observability + Operability Maturity
 
-Status: Initial slice implemented (2026-02-23); remaining 7C deliverables in progress
+Status: Complete for current first-party scope (initial slice 2026-02-23; closeout verified 2026-03-13)
 
 Deliverables:
 
@@ -174,7 +196,7 @@ Implementation notes (initial slice, 2026-02-23):
 
 ## 3.4 Phase 7D: Ecosystem Service Durability
 
-Status: Initial slice implemented (2026-02-23); remaining 7D deliverables in progress
+Status: Complete for current first-party scope (initial slice 2026-02-23; closeout verified 2026-03-13)
 
 Deliverables:
 
@@ -210,7 +232,7 @@ Implementation notes (initial slice, 2026-02-23):
 
 ## 3.5 Phase 7E: EOC + Template Pipeline Maturity
 
-Status: Initial slice implemented (2026-02-23); remaining 7E deliverables in progress
+Status: Complete for current first-party scope (initial slice 2026-02-23; closeout verified 2026-03-13)
 
 Deliverables:
 
@@ -248,7 +270,7 @@ Implementation notes (initial slice, 2026-02-23):
 
 ## 3.6 Phase 7F: Frontend Integration Starters
 
-Status: Initial slice implemented (2026-02-23); remaining 7F deliverables in progress
+Status: Complete for current first-party scope (initial slice 2026-02-23; closeout verified 2026-03-13)
 
 Deliverables:
 
@@ -285,7 +307,7 @@ Implementation notes (initial slice, 2026-02-23):
 
 ## 3.7 Phase 7G: Coding-Agent-First DX Contracts
 
-Status: Initial slice implemented (2026-02-23); remaining 7G deliverables in progress
+Status: Complete for current first-party scope (initial slice 2026-02-23; closeout verified 2026-03-13)
 
 Deliverables:
 
@@ -320,7 +342,7 @@ Implementation notes (initial slice, 2026-02-23):
 
 ## 3.8 Phase 7H: Distributed Runtime Depth
 
-Status: Initial slice implemented (2026-02-23); remaining 7H deliverables in progress
+Status: Complete for current first-party scope (initial slice 2026-02-23; closeout verified 2026-03-13)
 
 Deliverables:
 
@@ -367,9 +389,9 @@ Implementation notes (initial slice, 2026-02-23):
 
 Recommended sequencing for adoption impact and risk reduction:
 
-1. Wave 1: Phase 7A + Phase 7B (initial slices complete)
-2. Wave 2: Phase 7C + Phase 7D + Phase 7E (initial slices complete)
-3. Wave 3: Phase 7H (initial slice complete; follow-on in progress)
+1. Wave 1: Phase 7A + Phase 7B (complete)
+2. Wave 2: Phase 7C + Phase 7D + Phase 7E (complete)
+3. Wave 3: Phase 7F + Phase 7G + Phase 7H (complete for current first-party scope)
 
 ## 5. Testing and Quality Strategy
 

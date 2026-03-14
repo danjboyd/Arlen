@@ -127,6 +127,14 @@ NSString *ALNDatabaseRouteOperationClassName(ALNDatabaseRouteOperationClass oper
   return @"router";
 }
 
+- (id<ALNSQLDialect>)sqlDialect {
+  id<ALNDatabaseAdapter> adapter = self.targets[self.defaultWriteTarget];
+  if (adapter != nil && [adapter respondsToSelector:@selector(sqlDialect)]) {
+    return [adapter sqlDialect];
+  }
+  return nil;
+}
+
 - (id<ALNDatabaseConnection>)acquireAdapterConnection:(NSError **)error {
   id<ALNDatabaseAdapter> adapter = self.targets[self.defaultWriteTarget];
   if (adapter == nil) {

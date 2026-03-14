@@ -1,7 +1,7 @@
 # Arlen Phase 18 Roadmap
 
-Status: complete on 2026-03-13 (`18A-18G`)
-Last updated: 2026-03-13
+Status: complete on 2026-03-13 (`18A-18G`); downstream follow-up `18H` queued
+Last updated: 2026-03-14
 
 Related docs:
 - `docs/AUTH_MODULE.md`
@@ -72,6 +72,8 @@ Phase 18 closes that gap.
 5. Phase 18E: optional SMS MFA factor integration through Twilio Verify.
 6. Phase 18F: factor-management GUI and multi-factor enrollment UX.
 7. Phase 18G: docs, examples, and confidence coverage for SMS/Twilio Verify.
+8. Phase 18H: generated-app-ui include-path normalization and auth-page render
+   confidence.
 
 ## 4. Scope Guardrails
 
@@ -103,6 +105,14 @@ Delivered on 2026-03-13:
   when app policy allows it
 - headless and server-rendered coverage for multi-factor inventory, SMS
   enrollment, SMS challenge, and phone-change safeguards
+
+Delivered on 2026-03-14:
+
+- generated-app-ui auth templates now render through unsuffixed nested include
+  targets the same way top-level view renders do
+- regression coverage now includes direct runtime normalization checks plus a
+  generated-app-ui auth-page scaffold regression that executes when
+  `ARLEN_PG_TEST_DSN` is configured
 
 ## 5.1 Phase 18A: Reusable Auth Fragment Contract
 
@@ -286,6 +296,35 @@ Acceptance (required):
 - Regression coverage catches changes to factor inventory, SMS challenge state,
   and policy gating.
 
+## 5.8 Phase 18H: Generated-App-UI Include-Path Normalization
+
+Delivered on 2026-03-14 in response to a downstream bug report after
+`MusicianApp` validated a real generated-app-ui auth regression on current
+Arlen head.
+
+Deliverables:
+
+- Normalize unsuffixed logical include targets so `ALNEOCInclude(...)` resolves
+  auth-generated partial/body/fragment paths the same way top-level
+  `ALNView`/`ALNEOCRenderTemplate(...)` page renders do.
+- Preserve the current generated-app-ui contract where auth page/body/partial
+  helpers may return logical paths such as `auth/partials/page_wrapper` without
+  forcing every caller to append `.html.eoc` manually.
+- Add regression coverage that boots generated-app-ui auth pages end-to-end and
+  exercises nested `ALNEOCInclude(...)` calls through real stock auth templates
+  rather than only direct template lookups. The end-to-end scaffold regression
+  remains gated on `ARLEN_PG_TEST_DSN` because the auth module currently
+  requires `database.connectionString` at startup.
+
+Acceptance (required):
+
+- generated-app-ui stock auth pages such as `/auth/login` and `/auth/register`
+  render successfully without local app patches to append `.html.eoc`.
+- include resolution semantics are consistent between top-level page renders and
+  nested `ALNEOCInclude(...)` calls.
+- MFA/body/fragment auth templates are covered by real generated-app-ui
+  integration confidence, not only unit-level path-resolution checks.
+
 ## 6. Completion Criteria
 
 Phase 18 is complete when:
@@ -302,6 +341,12 @@ Phase 18 is complete when:
    default TOTP-first posture
 7. stock UI and headless clients can both manage multiple enrolled MFA factors,
    including authenticator app plus optional SMS
+
+Downstream note:
+
+`18A-18G` shipped on 2026-03-13, and `18H` shipped on 2026-03-14 to restore the
+generated-app-ui auth-page render path after a real downstream regression was
+reported that same day.
 
 ## 7. Expected Outcome
 

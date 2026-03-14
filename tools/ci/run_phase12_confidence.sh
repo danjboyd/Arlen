@@ -5,6 +5,8 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$repo_root"
 
 output_dir="${ARLEN_PHASE12_OUTPUT_DIR:-$repo_root/build/release_confidence/phase12}"
+xctest_runner="${ARLEN_XCTEST:-xctest}"
+xctest_ld_library_path="${ARLEN_XCTEST_LD_LIBRARY_PATH:-}"
 unit_bundle="${ARLEN_PHASE12_UNIT_BUNDLE:-$repo_root/build/tests/ArlenUnitTests.xctest}"
 fixture_path="${ARLEN_PHASE12_FIXTURE:-$repo_root/tests/fixtures/auth/phase12_oidc_cases.json}"
 server_binary="${ARLEN_PHASE12_SERVER_BINARY:-$repo_root/build/auth-primitives-server}"
@@ -19,9 +21,17 @@ set +u
 source /usr/GNUstep/System/Library/Makefiles/GNUstep.sh
 set -u
 
+run_xctest() {
+  if [[ -n "$xctest_ld_library_path" ]]; then
+    LD_LIBRARY_PATH="$xctest_ld_library_path${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" "$xctest_runner" "$@"
+  else
+    "$xctest_runner" "$@"
+  fi
+}
+
 make build-tests auth-primitives-server
 
-xctest "$unit_bundle" >"$unit_log" 2>&1
+run_xctest "$unit_bundle" >"$unit_log" 2>&1
 cp "$fixture_path" "$output_dir/phase12_oidc_cases.json"
 
 port="$(

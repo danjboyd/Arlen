@@ -14,6 +14,8 @@ Choose a focused path if you prefer guided onboarding:
 
 - GNUstep development toolchain
 - `tools-xctest` package (`xctest` command)
+- optional for contributors: set `ARLEN_XCTEST=/path/to/patched/xctest` if you want Apple-style `-only-testing` / `-skip-testing` filtered reruns
+- when using a local uninstalled `tools-xctest` checkout, also set `ARLEN_XCTEST_LD_LIBRARY_PATH=/path/to/tools-xctest/XCTest/obj`
 
 Initialize GNUstep tooling in your shell:
 
@@ -68,6 +70,9 @@ This builds:
 `EXTRA_OBJC_FLAGS` is allowed for additive flags (for example sanitizers), but cannot disable ARC.
 For app-root launches, the first run compiles into `.boomhauer/build/boomhauer-app`; later `--no-watch`
 or `--prepare-only` runs reuse that cached binary when app/framework build inputs are unchanged.
+App-root `--prepare-only` and `--print-routes` runs also print explicit `[1/4]` through `[4/4]`
+build phases so you can tell whether Arlen is reusing framework/app artifacts, transpiling templates,
+or linking a fresh binary.
 
 Check endpoints:
 
@@ -188,14 +193,13 @@ ARLEN_METRICS_ENABLED=0 ./bin/boomhauer --env production
 With this setting, request-path metrics counter/gauge/timing updates are bypassed (the `/metrics`
 endpoint remains available but reflects only explicitly recorded metrics).
 
-JSON backend override (A/B validation only):
+JSON backend behavior:
 
-```bash
-ARLEN_JSON_BACKEND=foundation ./bin/boomhauer --env production
-```
-
-Default backend is `yyjson`. Foundation fallback remains available temporarily for rollout verification
-and is scheduled for removal after `2026-04-30`.
+- `yyjson` is the default runtime backend when compiled in.
+- set compile-time toggle `ARLEN_ENABLE_YYJSON=0` before build/prepare steps to
+  force Foundation-only builds.
+- test and benchmark tooling can still select `foundation` explicitly through
+  their own non-runtime flags.
 
 HTTP parser backend override:
 
@@ -398,6 +402,7 @@ make phase12-confidence
 make phase14-confidence
 make phase15-confidence
 make phase16-confidence
+make phase19-confidence
 make ci-fault-injection
 make ci-release-certification
 make phase5e-confidence
@@ -418,9 +423,21 @@ make phase5e-confidence
 `make phase14-confidence` runs the Phase 14 module confidence gate and writes artifacts under `build/release_confidence/phase14`.
 `make phase15-confidence` runs the Phase 15 auth UI confidence gate and writes artifacts under `build/release_confidence/phase15`.
 `make phase16-confidence` runs the Phase 16 module-maturity confidence gate and writes artifacts under `build/release_confidence/phase16`.
+`make phase19-confidence` runs the Phase 19 incremental build-graph confidence gate and writes timing + rebuild-scope artifacts under `build/release_confidence/phase19`.
 `make ci-fault-injection` runs the Phase 9I runtime seam fault matrix and writes artifacts under `build/release_confidence/phase9i`.
 `make ci-release-certification` runs the Phase 9J release checklist and writes certification artifacts under `build/release_confidence/phase9j`.
 `make test-unit` and `make test-integration` run with a repo-local GNUstep test home (`.gnustep-home`) to keep defaults/lock files isolated.
+`make test-unit-filter` and `make test-integration-filter` accept `TEST=TestClass[/testMethod]` and optional `SKIP_TEST=TestClass[/testMethod]`; they auto-prefix the bundle target name and honor `ARLEN_XCTEST`.
+When the selected runner is a local uninstalled `tools-xctest` build, set `ARLEN_XCTEST_LD_LIBRARY_PATH` to the matching `XCTest/obj` directory so the patched runner loads the patched `libXCTest`.
+Filtered reruns require an XCTest runner that understands Apple-style `-only-testing` / `-skip-testing` arguments. Stock Debian `tools-xctest` remains fine for the normal unfiltered `make test-*` path.
+
+Focused rerun examples:
+
+```bash
+ARLEN_XCTEST=/path/to/patched/xctest ARLEN_XCTEST_LD_LIBRARY_PATH=/path/to/tools-xctest/XCTest/obj make test-unit-filter TEST=RuntimeTests/testRenderAndIncludeNormalizeUnsuffixedTemplateReferences
+ARLEN_XCTEST=/path/to/patched/xctest ARLEN_XCTEST_LD_LIBRARY_PATH=/path/to/tools-xctest/XCTest/obj make test-integration-filter TEST=Phase13AuthAdminIntegrationTests/testGeneratedAppUIAuthPagesRenderAfterEjectScaffold
+ARLEN_XCTEST=/path/to/patched/xctest ARLEN_XCTEST_LD_LIBRARY_PATH=/path/to/tools-xctest/XCTest/obj make test-integration-filter TEST=Phase13AuthAdminIntegrationTests SKIP_TEST=Phase13AuthAdminIntegrationTests/testGeneratedAppUIAuthPagesRenderAfterEjectScaffold
+```
 
 Soak iteration override:
 

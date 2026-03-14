@@ -47,8 +47,6 @@ def run_benchmark(
     warmup: int,
     backend: str,
 ) -> Dict[str, Any]:
-    env = os.environ.copy()
-    env["ARLEN_JSON_BACKEND"] = backend
     command = [
         str(benchmark_binary),
         "--fixtures-dir",
@@ -57,12 +55,13 @@ def run_benchmark(
         str(iterations),
         "--warmup",
         str(warmup),
+        "--backend",
+        backend,
     ]
     result = subprocess.run(
         command,
         capture_output=True,
         text=True,
-        env=env,
         check=False,
     )
     if result.returncode != 0:

@@ -9,10 +9,10 @@ python3 tools/docs/generate_api_reference.py
 ```
 
 - Generated from source headers and metadata (deterministic output)
-- Public headers: `47`
-- Symbols: `80`
-- Public methods: `531`
-- Public properties: `184`
+- Public headers: `52`
+- Symbols: `86`
+- Public methods: `568`
+- Public properties: `188`
 
 ## API Surface Boundary
 
@@ -79,11 +79,17 @@ python3 tools/docs/generate_api_reference.py
 - [ALNDatabaseRouter](api/ALNDatabaseRouter.md): Read/write routing layer that selects database targets by operation class and routing context.
 - [ALNDisplayGroup](api/ALNDisplayGroup.md): DisplayGroup-style query helper that builds list fetches from filter and sort descriptors.
 - [ALNGDL2Adapter](api/ALNGDL2Adapter.md): Optional GDL2 compatibility adapter with fallback behavior when native GDL2 runtime is unavailable.
+- [ALNMSSQL](api/ALNMSSQL.md): Data-layer APIs for SQL composition, adapters, and migration/runtime operations.
+- [ALNMSSQLConnection](api/ALNMSSQLConnection.md): Data-layer APIs for SQL composition, adapters, and migration/runtime operations.
+- [ALNMSSQLDialect](api/ALNMSSQLDialect.md): Data-layer APIs for SQL composition, adapters, and migration/runtime operations.
+- [ALNMSSQLSQLBuilder](api/ALNMSSQLSQLBuilder.md): Data-layer APIs for SQL composition, adapters, and migration/runtime operations.
 - [ALNMigrationRunner](api/ALNMigrationRunner.md): Migration discovery and migration execution runner for SQL migration directories.
 - [ALNPg](api/ALNPg.md): PostgreSQL adapter with pooled connections and adapter-compatible query/command/transaction APIs.
 - [ALNPgConnection](api/ALNPgConnection.md): PostgreSQL connection wrapper with SQL execution, prepared statements, transactions, and builder execution helpers.
+- [ALNPostgresDialect](api/ALNPostgresDialect.md): Data-layer APIs for SQL composition, adapters, and migration/runtime operations.
 - [ALNPostgresSQLBuilder](api/ALNPostgresSQLBuilder.md): PostgreSQL dialect extension for `ALNSQLBuilder` covering `ON CONFLICT` upsert behaviors.
 - [ALNSQLBuilder](api/ALNSQLBuilder.md): Fluent SQL builder for `SELECT`/`INSERT`/`UPDATE`/`DELETE` with expression-safe composition and deterministic SQL output.
+- [ALNSQLDialect](api/ALNSQLDialect.md): Protocol contract exported as part of the `ALNSQLDialect` API surface.
 - [ALNSchemaCodegen](api/ALNSchemaCodegen.md): Schema artifact generator for typed table/column contracts and optional typed decode helpers.
 
 ### Support
@@ -142,10 +148,15 @@ python3 tools/docs/generate_api_reference.py
 - `src/Arlen/Data/ALNDatabaseRouter.h`
 - `src/Arlen/Data/ALNDisplayGroup.h`
 - `src/Arlen/Data/ALNGDL2Adapter.h`
+- `src/Arlen/Data/ALNMSSQL.h`
+- `src/Arlen/Data/ALNMSSQLDialect.h`
+- `src/Arlen/Data/ALNMSSQLSQLBuilder.h`
 - `src/Arlen/Data/ALNMigrationRunner.h`
 - `src/Arlen/Data/ALNPg.h`
+- `src/Arlen/Data/ALNPostgresDialect.h`
 - `src/Arlen/Data/ALNPostgresSQLBuilder.h`
 - `src/Arlen/Data/ALNSQLBuilder.h`
+- `src/Arlen/Data/ALNSQLDialect.h`
 - `src/Arlen/Data/ALNSchemaCodegen.h`
 - `src/Arlen/HTTP/ALNHTTPServer.h`
 - `src/Arlen/HTTP/ALNRequest.h`

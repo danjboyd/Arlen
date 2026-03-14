@@ -2223,4 +2223,137 @@
   }
 }
 
+- (void)testGeneratedAppUIAuthPagesRenderAfterEjectScaffold {
+  NSString *dsn = [self pgTestDSN];
+  if ([dsn length] == 0) {
+    return;
+  }
+
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *quotedRepoRoot = [self shellQuoted:repoRoot];
+  NSString *quotedArlenBinary = [self shellQuoted:[repoRoot stringByAppendingPathComponent:@"build/arlen"]];
+  NSString *quotedBoomhauer = [self shellQuoted:[repoRoot stringByAppendingPathComponent:@"bin/boomhauer"]];
+  NSString *appRoot = [self createTempDirectoryWithPrefix:@"phase18-generated-app-ui"];
+  NSString *cookieJar = [self createTempFilePathWithPrefix:@"phase18-generated-app-ui-cookie" suffix:@".txt"];
+  NSString *serverLog = [self createTempFilePathWithPrefix:@"phase18-generated-app-ui-server" suffix:@".log"];
+  int port = [self randomPort];
+  XCTAssertNotNil(appRoot);
+  if (appRoot == nil) {
+    return;
+  }
+
+  NSTask *server = nil;
+
+  @try {
+    NSString *configContents =
+        [NSString stringWithFormat:@"{\n"
+                                   "  host = \"127.0.0.1\";\n"
+                                   "  port = %d;\n"
+                                   "  session = {\n"
+                                   "    enabled = YES;\n"
+                                   "    secret = \"phase18-generated-auth-session-secret-0123456789abcdef\";\n"
+                                   "  };\n"
+                                   "  csrf = {\n"
+                                   "    enabled = YES;\n"
+                                   "    allowQueryParamFallback = YES;\n"
+                                   "  };\n"
+                                   "  database = {\n"
+                                   "    connectionString = \"%@\";\n"
+                                   "  };\n"
+                                   "}\n",
+                                   port,
+                                   [dsn stringByReplacingOccurrencesOfString:@"\"" withString:@"\\\""]];
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"config/app.plist"] content:configContents]);
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"config/environments/development.plist"]
+                          content:@"{}\n"]);
+    XCTAssertTrue([self writeBasicAppAtRoot:appRoot extraClasses:nil homeText:@"phase18-generated-app-ui"]);
+
+    int exitCode = 0;
+    NSString *buildOutput =
+        [self runShellCapture:[NSString stringWithFormat:@"cd %@ && source /usr/GNUstep/System/Library/Makefiles/GNUstep.sh && make arlen eocc",
+                                                         quotedRepoRoot]
+                     exitCode:&exitCode];
+    XCTAssertEqual(0, exitCode, @"%@", buildOutput);
+
+    NSString *addAuth = [self runShellCapture:[NSString stringWithFormat:
+        @"cd %@ && ARLEN_FRAMEWORK_ROOT=%@ %@ module add auth --json",
+        [self shellQuoted:appRoot], quotedRepoRoot, quotedArlenBinary]
+                                      exitCode:&exitCode];
+    XCTAssertEqual(0, exitCode, @"%@", addAuth);
+    XCTAssertEqualObjects(@"ok", [self parseJSONDictionary:addAuth][@"status"]);
+
+    NSString *ejectAuth = [self runShellCapture:[NSString stringWithFormat:
+        @"cd %@ && ARLEN_FRAMEWORK_ROOT=%@ %@ module eject auth-ui --force --json",
+        [self shellQuoted:appRoot], quotedRepoRoot, quotedArlenBinary]
+                                        exitCode:&exitCode];
+    XCTAssertEqual(0, exitCode, @"%@", ejectAuth);
+    NSDictionary *ejectPayload = [self parseJSONDictionary:ejectAuth];
+    XCTAssertEqualObjects(@"ok", ejectPayload[@"status"]);
+    XCTAssertEqualObjects(@"eject", ejectPayload[@"workflow"]);
+    XCTAssertTrue([ejectPayload[@"created_files"] containsObject:@"templates/auth/login.html.eoc"]);
+    XCTAssertTrue([ejectPayload[@"created_files"] containsObject:@"templates/auth/partials/bodies/login_body.html.eoc"]);
+
+    server = [[NSTask alloc] init];
+    server.launchPath = @"/bin/bash";
+    server.arguments = @[ @"-lc",
+                          [NSString stringWithFormat:@"cd %@ && ARLEN_FRAMEWORK_ROOT=%@ %@ --no-watch --port %d >%@ 2>&1",
+                                                     [self shellQuoted:appRoot],
+                                                     quotedRepoRoot,
+                                                     quotedBoomhauer,
+                                                     port,
+                                                     [self shellQuoted:serverLog]] ];
+    [server launch];
+    XCTAssertTrue([self waitForServerOnPort:port path:@"/auth/api/session"]);
+
+    NSDictionary *sessionResponse = [self curlJSONAtPort:port
+                                                    path:@"/auth/api/session"
+                                                  method:@"GET"
+                                               cookieJar:cookieJar
+                                               csrfToken:nil
+                                                 payload:nil
+                                         followRedirects:NO
+                                                exitCode:&exitCode];
+    XCTAssertEqual(0, exitCode);
+    XCTAssertEqual((NSInteger)200, [sessionResponse[@"status"] integerValue]);
+    NSDictionary *sessionPayload = [self parseJSONDictionary:sessionResponse[@"body"]];
+    XCTAssertEqualObjects(@"generated-app-ui", sessionPayload[@"ui_mode"]);
+
+    NSDictionary *loginPage = [self curlJSONAtPort:port
+                                              path:@"/auth/login"
+                                            method:@"GET"
+                                         cookieJar:cookieJar
+                                         csrfToken:nil
+                                           payload:nil
+                                   followRedirects:NO
+                                          exitCode:&exitCode];
+    XCTAssertEqual(0, exitCode);
+    XCTAssertEqual((NSInteger)200, [loginPage[@"status"] integerValue]);
+    XCTAssertFalse([loginPage[@"body"] containsString:@"render failed"]);
+    XCTAssertFalse([loginPage[@"body"] containsString:@"Template not found"]);
+    XCTAssertTrue([loginPage[@"body"] containsString:@"auth-card"]);
+
+    NSDictionary *registerPage = [self curlJSONAtPort:port
+                                                 path:@"/auth/register"
+                                               method:@"GET"
+                                            cookieJar:cookieJar
+                                            csrfToken:nil
+                                              payload:nil
+                                      followRedirects:NO
+                                             exitCode:&exitCode];
+    XCTAssertEqual(0, exitCode);
+    XCTAssertEqual((NSInteger)200, [registerPage[@"status"] integerValue]);
+    XCTAssertFalse([registerPage[@"body"] containsString:@"render failed"]);
+    XCTAssertFalse([registerPage[@"body"] containsString:@"Template not found"]);
+    XCTAssertTrue([registerPage[@"body"] containsString:@"auth-card"]);
+  } @finally {
+    if (server != nil && [server isRunning]) {
+      kill(server.processIdentifier, SIGTERM);
+      [server waitUntilExit];
+    }
+    [[NSFileManager defaultManager] removeItemAtPath:cookieJar error:nil];
+    [[NSFileManager defaultManager] removeItemAtPath:serverLog error:nil];
+    [[NSFileManager defaultManager] removeItemAtPath:appRoot error:nil];
+  }
+}
+
 @end

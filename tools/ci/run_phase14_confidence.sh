@@ -5,6 +5,8 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$repo_root"
 
 output_dir="${ARLEN_PHASE14_OUTPUT_DIR:-$repo_root/build/release_confidence/phase14}"
+xctest_runner="${ARLEN_XCTEST:-xctest}"
+xctest_ld_library_path="${ARLEN_XCTEST_LD_LIBRARY_PATH:-}"
 unit_bundle="${ARLEN_PHASE14_UNIT_BUNDLE:-$repo_root/build/tests/ArlenUnitTests.xctest}"
 example_root="${ARLEN_PHASE14_EXAMPLE_ROOT:-$repo_root/examples/phase14_modules_demo}"
 unit_log="$output_dir/phase14_unit.log"
@@ -22,8 +24,16 @@ set +u
 source /usr/GNUstep/System/Library/Makefiles/GNUstep.sh
 set -u
 
+run_xctest() {
+  if [[ -n "$xctest_ld_library_path" ]]; then
+    LD_LIBRARY_PATH="$xctest_ld_library_path${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" "$xctest_runner" "$@"
+  else
+    "$xctest_runner" "$@"
+  fi
+}
+
 make build-tests arlen boomhauer
-xctest "$unit_bundle" >"$unit_log" 2>&1
+run_xctest "$unit_bundle" >"$unit_log" 2>&1
 
 if [[ -z "${ARLEN_PG_TEST_DSN:-}" ]]; then
   python3 ./tools/ci/generate_phase14_confidence_artifacts.py \

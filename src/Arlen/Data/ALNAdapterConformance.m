@@ -25,6 +25,40 @@ static NSError *ALNConformanceStepError(NSString *step,
                          userInfo:userInfo];
 }
 
+static NSDictionary<NSString *, NSString *> *ALNConformanceSQLForAdapter(id<ALNDatabaseAdapter> adapter,
+                                                                         NSString *table) {
+  NSString *dialectName = @"postgresql";
+  if (adapter != nil && [adapter respondsToSelector:@selector(sqlDialect)]) {
+    id<ALNSQLDialect> dialect = [adapter sqlDialect];
+    if (dialect != nil && [[dialect dialectName] length] > 0) {
+      dialectName = [dialect dialectName];
+    }
+  }
+
+  if ([dialectName isEqualToString:@"mssql"]) {
+    NSString *quotedTable = ALNSQLDialectBracketQuoteIdentifier(table ?: @"");
+    return @{
+      @"create" : [NSString stringWithFormat:
+                                  @"CREATE TABLE %@([id] INT IDENTITY(1,1) PRIMARY KEY, [name] NVARCHAR(255) NOT NULL)",
+                                quotedTable],
+      @"insert" : [NSString stringWithFormat:@"INSERT INTO %@ ([name]) VALUES (?)", quotedTable],
+      @"count" : [NSString stringWithFormat:@"SELECT COUNT(*) AS [count] FROM %@", quotedTable],
+      @"drop" : [NSString stringWithFormat:@"IF OBJECT_ID(N'%@', N'U') IS NOT NULL DROP TABLE %@",
+                                              quotedTable,
+                                              quotedTable],
+    };
+  }
+
+  NSString *quotedTable = ALNSQLDialectDoubleQuoteIdentifier(table ?: @"");
+  return @{
+    @"create" : [NSString stringWithFormat:@"CREATE TABLE %@(\"id\" SERIAL PRIMARY KEY, \"name\" TEXT NOT NULL)",
+                                quotedTable],
+    @"insert" : [NSString stringWithFormat:@"INSERT INTO %@ (\"name\") VALUES ($1)", quotedTable],
+    @"count" : [NSString stringWithFormat:@"SELECT COUNT(*) AS \"count\" FROM %@", quotedTable],
+    @"drop" : [NSString stringWithFormat:@"DROP TABLE IF EXISTS %@", quotedTable],
+  };
+}
+
 NSDictionary *_Nullable ALNAdapterConformanceReport(id<ALNDatabaseAdapter> adapter,
                                                      NSError **error) {
   if (adapter == nil) {
@@ -40,14 +74,13 @@ NSDictionary *_Nullable ALNAdapterConformanceReport(id<ALNDatabaseAdapter> adapt
 
   NSString *adapterName = [adapter adapterName] ?: @"";
   NSString *table = ALNConformanceUniqueTableName();
+  NSDictionary<NSString *, NSString *> *sql = ALNConformanceSQLForAdapter(adapter, table);
   NSMutableDictionary *report = [NSMutableDictionary dictionary];
   report[@"adapter"] = adapterName;
   report[@"table"] = table;
 
   NSError *stepError = nil;
-  NSString *createSQL =
-      [NSString stringWithFormat:@"CREATE TABLE %@(id SERIAL PRIMARY KEY, name TEXT NOT NULL)", table];
-  NSInteger createResult = [adapter executeCommand:createSQL parameters:@[] error:&stepError];
+  NSInteger createResult = [adapter executeCommand:sql[@"create"] parameters:@[] error:&stepError];
   if (createResult < 0) {
     if (error != NULL) {
       *error = ALNConformanceStepError(@"create_table", adapterName, stepError);
@@ -59,15 +92,12 @@ NSDictionary *_Nullable ALNAdapterConformanceReport(id<ALNDatabaseAdapter> adapt
   __block NSString *insertedName = @"hank";
   BOOL insertCommitted = [adapter withTransactionUsingBlock:^BOOL(id<ALNDatabaseConnection> connection,
                                                                    NSError **blockError) {
-    NSInteger inserted = [connection executeCommand:[NSString stringWithFormat:@"INSERT INTO %@ (name) VALUES ($1)", table]
-                                         parameters:@[ insertedName ]
-                                              error:blockError];
+    NSInteger inserted =
+        [connection executeCommand:sql[@"insert"] parameters:@[ insertedName ] error:blockError];
     return (inserted >= 0);
   } error:&stepError];
   if (!insertCommitted) {
-    (void)[adapter executeCommand:[NSString stringWithFormat:@"DROP TABLE IF EXISTS %@", table]
-                       parameters:@[]
-                            error:nil];
+    (void)[adapter executeCommand:sql[@"drop"] parameters:@[] error:nil];
     if (error != NULL) {
       *error = ALNConformanceStepError(@"transaction_commit", adapterName, stepError);
     }
@@ -75,14 +105,10 @@ NSDictionary *_Nullable ALNAdapterConformanceReport(id<ALNDatabaseAdapter> adapt
   }
   report[@"transaction_commit"] = @"ok";
 
-  NSArray *rows = [adapter executeQuery:[NSString stringWithFormat:@"SELECT COUNT(*) AS count FROM %@", table]
-                             parameters:@[]
-                                  error:&stepError];
+  NSArray *rows = [adapter executeQuery:sql[@"count"] parameters:@[] error:&stepError];
   NSString *count = [[rows firstObject][@"count"] description];
   if (rows == nil || ![count isEqualToString:@"1"]) {
-    (void)[adapter executeCommand:[NSString stringWithFormat:@"DROP TABLE IF EXISTS %@", table]
-                       parameters:@[]
-                            error:nil];
+    (void)[adapter executeCommand:sql[@"drop"] parameters:@[] error:nil];
     if (error != NULL) {
       *error = ALNConformanceStepError(@"count_after_commit", adapterName, stepError);
     }
@@ -97,7 +123,7 @@ NSDictionary *_Nullable ALNAdapterConformanceReport(id<ALNDatabaseAdapter> adapt
                                               }];
   BOOL rollbackResult = [adapter withTransactionUsingBlock:^BOOL(id<ALNDatabaseConnection> connection,
                                                                   NSError **blockError) {
-    NSInteger inserted = [connection executeCommand:[NSString stringWithFormat:@"INSERT INTO %@ (name) VALUES ($1)", table]
+    NSInteger inserted = [connection executeCommand:sql[@"insert"]
                                          parameters:@[ @"rollback-me" ]
                                               error:blockError];
     if (inserted < 0) {
@@ -110,9 +136,7 @@ NSDictionary *_Nullable ALNAdapterConformanceReport(id<ALNDatabaseAdapter> adapt
   } error:&stepError];
   if (rollbackResult || ![stepError.domain isEqualToString:ALNAdapterConformanceErrorDomain] ||
       stepError.code != 999) {
-    (void)[adapter executeCommand:[NSString stringWithFormat:@"DROP TABLE IF EXISTS %@", table]
-                       parameters:@[]
-                            error:nil];
+    (void)[adapter executeCommand:sql[@"drop"] parameters:@[] error:nil];
     if (error != NULL) {
       *error = ALNConformanceStepError(@"transaction_rollback", adapterName, stepError);
     }
@@ -120,14 +144,10 @@ NSDictionary *_Nullable ALNAdapterConformanceReport(id<ALNDatabaseAdapter> adapt
   }
   report[@"transaction_rollback"] = @"ok";
 
-  rows = [adapter executeQuery:[NSString stringWithFormat:@"SELECT COUNT(*) AS count FROM %@", table]
-                    parameters:@[]
-                         error:&stepError];
+  rows = [adapter executeQuery:sql[@"count"] parameters:@[] error:&stepError];
   count = [[rows firstObject][@"count"] description];
   if (rows == nil || ![count isEqualToString:@"1"]) {
-    (void)[adapter executeCommand:[NSString stringWithFormat:@"DROP TABLE IF EXISTS %@", table]
-                       parameters:@[]
-                            error:nil];
+    (void)[adapter executeCommand:sql[@"drop"] parameters:@[] error:nil];
     if (error != NULL) {
       *error = ALNConformanceStepError(@"count_after_rollback", adapterName, stepError);
     }
@@ -135,10 +155,7 @@ NSDictionary *_Nullable ALNAdapterConformanceReport(id<ALNDatabaseAdapter> adapt
   }
   report[@"count_after_rollback"] = count ?: @"";
 
-  NSInteger dropResult =
-      [adapter executeCommand:[NSString stringWithFormat:@"DROP TABLE IF EXISTS %@", table]
-                   parameters:@[]
-                        error:&stepError];
+  NSInteger dropResult = [adapter executeCommand:sql[@"drop"] parameters:@[] error:&stepError];
   if (dropResult < 0) {
     if (error != NULL) {
       *error = ALNConformanceStepError(@"drop_table", adapterName, stepError);

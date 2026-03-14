@@ -235,6 +235,13 @@ Build and run `boomhauer` for the current app root.
 - delegates to framework `bin/boomhauer` with `ARLEN_APP_ROOT` + `ARLEN_FRAMEWORK_ROOT`
 - defaults to watch mode (same as direct `bin/boomhauer`)
 - app-root non-watch and `--prepare-only` runs reuse `.boomhauer/build/boomhauer-app` when build inputs are unchanged
+- app-root non-watch flows emit explicit build phases:
+  - `[1/4]` framework tools + libraries
+  - `[2/4]` template transpilation
+  - `[3/4]` app-object compile/reuse
+  - `[4/4]` app-binary link/reuse
+- `--prepare-only` prints a prepare-only scope banner and exits after the app is current
+- `--print-routes` prints a route-inspection scope banner, refreshes artifacts if needed, and then prints resolved routes without entering watch/server mode
 - app-root watch mode restarts on config/public changes and rebuilds only when app/framework build inputs change
 - vendored module sources under `modules/*/Sources` and module templates under `modules/*/Resources/Templates` are compiled automatically
 - app templates under `templates/modules/<id>/...` override vendored module templates with the same logical path
@@ -471,7 +478,6 @@ Environment:
 - `ARLEN_MAX_REALTIME_SUBSCRIBERS` (runtime global realtime subscriber cap; legacy `MOJOOBJC_MAX_REALTIME_SUBSCRIBERS` also accepted)
 - `ARLEN_MAX_REALTIME_SUBSCRIBERS_PER_CHANNEL` (runtime per-channel realtime subscriber cap; legacy `MOJOOBJC_MAX_REALTIME_SUBSCRIBERS_PER_CHANNEL` also accepted)
 - `ARLEN_REQUEST_DISPATCH_MODE` (`concurrent` or `serialized`; defaults to `concurrent`; legacy `MOJOOBJC_REQUEST_DISPATCH_MODE` also accepted)
-- `ARLEN_JSON_BACKEND` (`yyjson` default, `foundation`/`nsjson` fallback for A/B validation; foundation fallback deprecation target: `2026-04-30`)
 - `ARLEN_HTTP_PARSER_BACKEND` (`llhttp` default when compiled in; `legacy` fallback/override)
 - `ARLEN_ENABLE_YYJSON` (compile-time toggle for app-root builds via `bin/boomhauer`; `1` default, set `0` to compile without yyjson)
 - `ARLEN_ENABLE_LLHTTP` (compile-time toggle for app-root builds via `bin/boomhauer`; `1` default, set `0` to compile without llhttp)
@@ -578,7 +584,16 @@ Lifecycle diagnostics:
 - `bin/tech-demo`: run technology demo app
 - `bin/dev`: alias for `bin/boomhauer`
 - `bin/jobs-worker`: build current app and run the first-party jobs worker loop
+- `make build-tests`: build unit + integration bundles through the incremental
+  object/archive/template graph without running XCTest
 - `make test-unit` / `make test-integration`: run XCTest bundles with repo-local GNUstep defaults home (`.gnustep-home`)
+  - honor `ARLEN_XCTEST` as the runner override (default `xctest`)
+  - honor `ARLEN_XCTEST_LD_LIBRARY_PATH` when the selected runner needs a non-system `libXCTest`
+- `make test-unit-filter` / `make test-integration-filter`: focused XCTest reruns using `TEST=TestClass[/testMethod]` and optional `SKIP_TEST=TestClass[/testMethod]`
+  - Arlen prepends the bundle target name automatically, so you do not include `ArlenUnitTests/` or `ArlenIntegrationTests/` in `TEST`
+  - require an XCTest runner that supports Apple-style `-only-testing` / `-skip-testing` arguments; stock Debian `tools-xctest` may not provide those flags yet
+  - if the patched runner comes from a local `tools-xctest` build tree, also set `ARLEN_XCTEST_LD_LIBRARY_PATH=/path/to/tools-xctest/XCTest/obj`
+  - example: `ARLEN_XCTEST=/path/to/patched/xctest ARLEN_XCTEST_LD_LIBRARY_PATH=/path/to/tools-xctest/XCTest/obj make test-unit-filter TEST=RuntimeTests/testRenderAndIncludeNormalizeUnsuffixedTemplateReferences`
 - `make browser-error-audit`: run the dedicated browser error audit bundle and generate a review gallery at `build/browser-error-audit/index.html`
   - captures representative build/runtime/browser error scenarios into browsable HTML artifacts
   - preserves raw responses plus wrapped review pages so plain-text/JSON browser fallbacks are easy to inspect
@@ -599,6 +614,7 @@ Lifecycle diagnostics:
 - `make phase14-confidence`: run the Phase 14 module confidence gate and generate artifacts in `build/release_confidence/phase14`
 - `make phase15-confidence`: run the Phase 15 auth UI confidence gate and generate artifacts in `build/release_confidence/phase15`
 - `make phase16-confidence`: run the Phase 16 module-maturity confidence gate and generate artifacts in `build/release_confidence/phase16`
+- `make phase19-confidence`: run the Phase 19 incremental build-graph confidence gate and generate artifacts in `build/release_confidence/phase19`
 - `tools/ci/run_phase5e_quality.sh`: explicit Phase 5E CI gate entrypoint
 - `tools/ci/run_phase5e_sanitizers.sh`: explicit Phase 5E sanitizer CI gate entrypoint
   - set `ARLEN_SANITIZER_INCLUDE_INTEGRATION=1` to include full integration suite (default is `0`)

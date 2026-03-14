@@ -1,8 +1,9 @@
 # Phase 7D: Service Durability
 
-Status: Initial slice implemented (2026-02-23)
+Status: Complete for current first-party scope (initial slice 2026-02-23; closeout verified 2026-03-13)
 
-This document defines the first durability contract slice for ecosystem services (jobs/cache/mail/attachments).
+This document defines the delivered durability contract set for ecosystem
+services (jobs/cache/mail/attachments).
 
 ## 1. Scope
 
@@ -96,3 +97,5 @@ Conformance and compatibility coverage:
 - `tests/unit/Phase3ETests.m`
   - `testPluginWiresAdaptersAndRunsCompatibilitySuites`
   - `testFileJobAdapterConformanceSuite`
+  - `testFileMailAdapterConformanceSuite`
+  - `testFileSystemAttachmentAdapterConformanceSuite`

@@ -3063,6 +3063,15 @@
                                                          envPrefix]
                      exitCode:&prepareCode];
     XCTAssertEqual(0, prepareCode, @"%@", prepareOutput);
+    XCTAssertTrue([prepareOutput containsString:
+                                  @"boomhauer: prepare-only mode; building app artifacts without starting the server"],
+                  @"%@", prepareOutput);
+    XCTAssertTrue([prepareOutput containsString:@"boomhauer: [1/4]"], @"%@", prepareOutput);
+    XCTAssertTrue([prepareOutput containsString:@"boomhauer: [2/4] transpiling templates"], @"%@",
+                  prepareOutput);
+    XCTAssertTrue([prepareOutput containsString:@"boomhauer: [3/4]"], @"%@", prepareOutput);
+    XCTAssertTrue([prepareOutput containsString:@"boomhauer: [4/4]"], @"%@", prepareOutput);
+    XCTAssertFalse([prepareOutput containsString:@"boomhauer: watching"], @"%@", prepareOutput);
     NSString *preparedBinary =
         [appRoot stringByAppendingPathComponent:@".boomhauer/build/boomhauer-app"];
     XCTAssertTrue([[NSFileManager defaultManager] isExecutableFileAtPath:preparedBinary]);

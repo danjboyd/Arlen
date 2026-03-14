@@ -7,24 +7,16 @@
 #import "ALNJSONSerialization.h"
 
 @interface JSONSerializationTests : XCTestCase
-@property(nonatomic, copy) NSString *originalBackendEnv;
 @end
 
 @implementation JSONSerializationTests
 
 - (void)setUp {
   [super setUp];
-  const char *raw = getenv("ARLEN_JSON_BACKEND");
-  self.originalBackendEnv = (raw != NULL) ? [NSString stringWithUTF8String:raw] : nil;
   [ALNJSONSerialization resetBackendForTesting];
 }
 
 - (void)tearDown {
-  if (self.originalBackendEnv != nil) {
-    setenv("ARLEN_JSON_BACKEND", [self.originalBackendEnv UTF8String], 1);
-  } else {
-    unsetenv("ARLEN_JSON_BACKEND");
-  }
   [ALNJSONSerialization resetBackendForTesting];
   [super tearDown];
 }
@@ -47,28 +39,23 @@
 }
 
 - (void)testBackendSelectionFromEnvironment {
-  setenv("ARLEN_JSON_BACKEND", "foundation", 1);
   [ALNJSONSerialization resetBackendForTesting];
+  ALNJSONBackend expectedDefaultBackend =
+      [ALNJSONSerialization isYYJSONAvailable] ? ALNJSONBackendYYJSON : ALNJSONBackendFoundation;
+  XCTAssertEqual(expectedDefaultBackend, [ALNJSONSerialization backend]);
+  XCTAssertEqualObjects([ALNJSONSerialization isYYJSONAvailable] ? @"yyjson" : @"foundation",
+                        [ALNJSONSerialization backendName]);
+
+  [ALNJSONSerialization setBackendForTesting:ALNJSONBackendFoundation];
   XCTAssertEqual(ALNJSONBackendFoundation, [ALNJSONSerialization backend]);
   XCTAssertEqualObjects(@"foundation", [ALNJSONSerialization backendName]);
 
-  setenv("ARLEN_JSON_BACKEND", "nsjson", 1);
-  [ALNJSONSerialization resetBackendForTesting];
-  XCTAssertEqual(ALNJSONBackendFoundation, [ALNJSONSerialization backend]);
-
-  setenv("ARLEN_JSON_BACKEND", "yyjson", 1);
-  [ALNJSONSerialization resetBackendForTesting];
+  [ALNJSONSerialization setBackendForTesting:ALNJSONBackendYYJSON];
   ALNJSONBackend expectedYYJSONBackend =
       [ALNJSONSerialization isYYJSONAvailable] ? ALNJSONBackendYYJSON : ALNJSONBackendFoundation;
   XCTAssertEqual(expectedYYJSONBackend, [ALNJSONSerialization backend]);
   XCTAssertEqualObjects([ALNJSONSerialization isYYJSONAvailable] ? @"yyjson" : @"foundation",
                         [ALNJSONSerialization backendName]);
-
-  setenv("ARLEN_JSON_BACKEND", "unknown", 1);
-  [ALNJSONSerialization resetBackendForTesting];
-  ALNJSONBackend expectedUnknownBackend =
-      [ALNJSONSerialization isYYJSONAvailable] ? ALNJSONBackendYYJSON : ALNJSONBackendFoundation;
-  XCTAssertEqual(expectedUnknownBackend, [ALNJSONSerialization backend]);
 }
 
 - (void)testYYJSONVersionMetadataIsAvailable {
@@ -91,12 +78,6 @@
   }
   NSUInteger matches = [regex numberOfMatchesInString:version options:0 range:NSMakeRange(0, [version length])];
   XCTAssertEqual((NSUInteger)1, matches);
-}
-
-- (void)testFoundationFallbackDeprecationDateIsPublished {
-  NSString *deprecationDate = [ALNJSONSerialization foundationFallbackDeprecationDate];
-  XCTAssertNotNil(deprecationDate);
-  XCTAssertEqualObjects(@"2026-04-30", deprecationDate);
 }
 
 - (void)testRoundTripParityAcrossBackends {

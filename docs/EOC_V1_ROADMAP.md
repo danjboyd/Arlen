@@ -23,7 +23,7 @@ Related documents:
 - Completed: template lint diagnostics for unguarded include calls (`eocc` warning contract: path/line/column/code/message).
 - Completed: troubleshooting workflow docs for deterministic transpile/lint repair loops.
 - Completed: initial basic-app capability checks (`eoc-smoke-render`, `boomhauer`, `bin/smoke`).
-- In progress: richer routing/controller layers and integration-level MVC examples.
+- Completed: richer routing/controller layers and integration-level MVC examples (`ALNRouter`, `ALNController`, `ALNView`, `examples/basic_app`, `examples/tech_demo`, and integration coverage).
 - Completed: Phase 9 first-class template composition ergonomics for layouts, slots, partial locals, collection rendering, controller/view layout controls, and composition-first scaffold/example coverage.
 
 ## Cross-Cutting Rollout Alignment (2026-02-19)
