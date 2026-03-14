@@ -5,11 +5,17 @@
 #import "ALNConfig.h"
 #import "ALNGDL2Adapter.h"
 #import "ALNJSONSerialization.h"
-#import "ALNMSSQL.h"
 #import "ALNModuleSystem.h"
 #import "ALNMigrationRunner.h"
 #import "ALNPg.h"
 #import "ALNSchemaCodegen.h"
+
+#if __has_include("ALNMSSQL.h")
+#import "ALNMSSQL.h"
+#define ARLEN_HAS_MSSQL 1
+#else
+#define ARLEN_HAS_MSSQL 0
+#endif
 
 static void PrintUsage(void) {
   fprintf(stderr,
@@ -2827,7 +2833,19 @@ static id<ALNDatabaseAdapter> DatabaseAdapterForTarget(NSDictionary *config,
     return [[ALNGDL2Adapter alloc] initWithConnectionString:dsn maxConnections:poolSize error:error];
   }
   if ([adapterName isEqualToString:@"mssql"] || [adapterName isEqualToString:@"sqlserver"]) {
+#if ARLEN_HAS_MSSQL
     return [[ALNMSSQL alloc] initWithConnectionString:dsn maxConnections:poolSize error:error];
+#else
+    if (error != NULL) {
+      *error = [NSError errorWithDomain:ALNDatabaseAdapterErrorDomain
+                                   code:ALNDatabaseAdapterErrorUnsupported
+                               userInfo:@{
+                                 NSLocalizedDescriptionKey : @"mssql adapter support is unavailable in this checkout",
+                                 @"adapter" : adapterName ?: @"",
+                               }];
+    }
+    return nil;
+#endif
   }
 
   if (error != NULL) {

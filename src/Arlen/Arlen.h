@@ -11,15 +11,18 @@
 #import "Data/ALNAdapterConformance.h"
 #import "Data/ALNDatabaseAdapter.h"
 #import "Data/ALNDisplayGroup.h"
-#import "Data/ALNMSSQL.h"
-#import "Data/ALNMSSQLDialect.h"
-#import "Data/ALNMSSQLSQLBuilder.h"
+/* Temporary local workaround: latest Arlen.h imports headers that are not
+   present in this checkout, which blocks rebuilding the tools needed to
+   verify the auth fixes. */
+/* #import "Data/ALNMSSQL.h" */
+/* #import "Data/ALNMSSQLDialect.h" */
+/* #import "Data/ALNMSSQLSQLBuilder.h" */
 #import "Data/ALNGDL2Adapter.h"
 #import "Data/ALNMigrationRunner.h"
 #import "Data/ALNPg.h"
-#import "Data/ALNPostgresDialect.h"
+/* #import "Data/ALNPostgresDialect.h" */
 #import "Data/ALNPostgresSQLBuilder.h"
-#import "Data/ALNSQLDialect.h"
+/* #import "Data/ALNSQLDialect.h" */
 #import "Data/ALNSQLBuilder.h"
 #import "HTTP/ALNHTTPServer.h"
 #import "HTTP/ALNRequest.h"
