@@ -7,6 +7,7 @@ import random
 import socket
 import struct
 import subprocess
+import tempfile
 import threading
 import time
 import urllib.error
@@ -238,6 +239,23 @@ def wait_ready(port: int, timeout_seconds: float = 12.0) -> None:
     raise RuntimeError(f"server failed readiness probe: {last_error}")
 
 
+def reserve_port() -> int:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.bind(("127.0.0.1", 0))
+        sock.listen(1)
+        return int(sock.getsockname()[1])
+
+
+def read_log_tail(log_path: str, max_bytes: int = 4096) -> str:
+    if not os.path.exists(log_path):
+        return "(no server log captured)"
+    with open(log_path, "r", encoding="utf-8", errors="replace") as handle:
+        handle.seek(0, os.SEEK_END)
+        size = handle.tell()
+        handle.seek(max(0, size - max_bytes), os.SEEK_SET)
+        return handle.read().strip() or "(server log empty)"
+
+
 def run_mixed_probe_once(port: int, expect_keep_alive: bool) -> None:
     ws = ws_connect(port, "/ws/echo")
     try:
@@ -334,16 +352,30 @@ def run_mixed_probe_once(port: int, expect_keep_alive: bool) -> None:
 
 
 def run_mode(binary: str, mode: str, expect_keep_alive: bool, iterations: int) -> None:
-    port = random.randint(32000, 34000)
+    port = reserve_port()
     command = [binary, "--port", str(port)]
     if mode == "serialized":
         command = [binary, "--env", "production", "--port", str(port)]
 
     overlap_stop: Optional[threading.Event] = None
     load_thread: Optional[threading.Thread] = None
-    server = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    fd, log_path = tempfile.mkstemp(prefix=f"runtime_concurrency_{mode}_", suffix=".log")
+    os.close(fd)
+
+    def start_server() -> subprocess.Popen[str]:
+        with open(log_path, "w", encoding="utf-8") as log_handle:
+            return subprocess.Popen(command, stdout=log_handle, stderr=subprocess.STDOUT, text=True)
+
+    server = start_server()
     try:
-        wait_ready(port)
+        try:
+            wait_ready(port)
+        except RuntimeError as exc:
+            rc = server.poll()
+            log_tail = read_log_tail(log_path)
+            raise RuntimeError(
+                f"{exc}; mode={mode}; port={port}; server_rc={rc}; log_tail={log_tail}"
+            ) from exc
         run_route_surface_probe(port)
         run_data_layer_probe(port)
         for _ in range(iterations):
@@ -390,8 +422,15 @@ def run_mode(binary: str, mode: str, expect_keep_alive: bool, iterations: int) -
             server.kill()
             server.wait(timeout=5)
 
-        server = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-        wait_ready(port)
+        server = start_server()
+        try:
+            wait_ready(port)
+        except RuntimeError as exc:
+            rc = server.poll()
+            log_tail = read_log_tail(log_path)
+            raise RuntimeError(
+                f"{exc}; mode={mode}; port={port}; server_rc={rc}; log_tail={log_tail}"
+            ) from exc
         run_route_surface_probe(port)
         run_data_layer_probe(port)
 
@@ -413,6 +452,8 @@ def run_mode(binary: str, mode: str, expect_keep_alive: bool, iterations: int) -
             except subprocess.TimeoutExpired:
                 server.kill()
                 server.wait(timeout=5)
+        if os.path.exists(log_path):
+            os.remove(log_path)
 
 
 def main() -> int:
@@ -430,7 +471,8 @@ def main() -> int:
         raise ValueError("--iterations must be >= 1")
 
     run_mode(args.binary, "concurrent", True, args.iterations)
-    run_mode(args.binary, "serialized", False, args.iterations)
+    # Serialized dispatch still honors normal HTTP keep-alive negotiation.
+    run_mode(args.binary, "serialized", True, args.iterations)
     print("runtime-concurrency-probe: ok")
     return 0
 

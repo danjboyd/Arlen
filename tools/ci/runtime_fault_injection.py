@@ -602,9 +602,9 @@ def _keepalive_roundtrip(port: int, paths: List[str], keepalive: bool = True) ->
         for idx, path in enumerate(paths):
             connection_header = "close" if idx == len(paths) - 1 else "keep-alive"
             request = (
-                f"GET {path} HTTP/1.1\\r\\n"
-                f"Host: 127.0.0.1:{port}\\r\\n"
-                f"Connection: {connection_header}\\r\\n\\r\\n"
+                f"GET {path} HTTP/1.1\r\n"
+                f"Host: 127.0.0.1:{port}\r\n"
+                f"Connection: {connection_header}\r\n\r\n"
             ).encode("utf-8")
             sock.sendall(request)
             status, _, body = read_http_response(sock)

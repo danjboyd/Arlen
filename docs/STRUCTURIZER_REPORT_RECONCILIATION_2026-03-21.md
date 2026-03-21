@@ -9,14 +9,14 @@ Ownership rule:
 
 - Arlen records upstream status only.
 - `Structurizer` keeps app-level closure authority.
-- Statuses below should be read as `fixed upstream` or `awaiting downstream
-  revalidation`, not as downstream closure.
+- Statuses below should be read as the upstream status/evidence trail. The
+  downstream confirmation note records Structurizer's own closure decision.
 
 ## Current Upstream Assessment
 
 | Structurizer report | Upstream status | Evidence |
 | --- | --- | --- |
-| local `ARLEN_FRAMEWORK_ROOT` override can reuse sanitizer-instrumented `libArlenFramework.a` and fail linking | fixed in current workspace; awaiting downstream revalidation | `bin/boomhauer`, `tests/unit/BuildPolicyTests.m`, `tests/integration/HTTPIntegrationTests.m`, `docs/CLI_REFERENCE.md` |
+| local `ARLEN_FRAMEWORK_ROOT` override can reuse sanitizer-instrumented `libArlenFramework.a` and fail linking | fixed upstream; downstream confirmed resolved on `2026-03-21` | `bin/boomhauer`, `tests/unit/BuildPolicyTests.m`, `tests/integration/HTTPIntegrationTests.m`, `docs/CLI_REFERENCE.md` |
 
 ## Notes
 
@@ -28,5 +28,8 @@ Ownership rule:
   `build/lib/libArlenFramework.a`, forces a clean framework rebuild before the
   app link step, and fails early with a targeted diagnostic if the rebuilt
   archive still contains sanitizer symbols.
-- This note does not close the issue for `Structurizer`; downstream should
-  close it only after retesting its own local-override workflow.
+- Downstream confirmation:
+  - `Structurizer` has since retested the external `ARLEN_FRAMEWORK_ROOT`
+    override workflow and confirmed the issue resolved on `2026-03-21`.
+  - This note now serves as the upstream evidence trail for that downstream
+    closure.

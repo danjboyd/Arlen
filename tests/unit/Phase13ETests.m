@@ -688,7 +688,7 @@ static NSUInteger gPhase15UIContextCalls = 0;
                                error:&error]);
   XCTAssertNil(error);
 
-  NSString *command = [NSString stringWithFormat:@"cd %@ && source /usr/GNUstep/System/Library/Makefiles/GNUstep.sh && rm -f build/arlen && make arlen >/dev/null && cd %@ && ARLEN_FRAMEWORK_ROOT=%@ %@ module eject auth-ui --json",
+  NSString *command = [NSString stringWithFormat:@"cd %@ && source /usr/GNUstep/System/Library/Makefiles/GNUstep.sh && rm -f build/arlen && LD_PRELOAD='' make arlen >/dev/null && cd %@ && LD_PRELOAD='' ARLEN_FRAMEWORK_ROOT=%@ %@ module eject auth-ui --json",
                                                  [self shellQuoted:repoRoot],
                                                  [self shellQuoted:tempApp],
                                                  [self shellQuoted:repoRoot],

@@ -75,6 +75,14 @@ entries, not current plan-of-record items.
 
 ## Completed Today (2026-03-21)
 
+- Recorded downstream confirmation for the two app-reported issues we closed
+  upstream this session:
+  - `Structurizer` confirmed the external `ARLEN_FRAMEWORK_ROOT` sanitizer
+    reuse issue is resolved; upstream note updated in
+    `docs/STRUCTURIZER_REPORT_RECONCILIATION_2026-03-21.md`
+  - `MusicianApp` confirmed the earlier upstream-fixed report set is resolved on
+    its branch/config; upstream note updated in
+    `docs/MUSICIANAPP_REPORT_RECONCILIATION_2026-03-21.md`
 - Reconciled the `Structurizer` external-framework override report against the
   current Arlen workspace:
   - recorded the upstream-only status note in

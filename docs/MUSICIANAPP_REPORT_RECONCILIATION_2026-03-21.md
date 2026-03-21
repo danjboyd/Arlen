@@ -3,14 +3,16 @@
 Date: `2026-03-21`
 
 This note records the upstream Arlen assessment of `MusicianApp` reports that
-are still marked open in `../MusicianApp/docs/ARLEN_BUG_REPORT_LOG.md`.
+were still marked open in `../MusicianApp/docs/ARLEN_BUG_REPORT_LOG.md` during
+the 2026-03-21 reconciliation pass.
 
 Ownership rule:
 
 - Arlen records upstream status only.
 - `MusicianApp` keeps app-level closure authority.
-- Statuses below should be read as `fixed/implemented upstream` or
-  `awaiting downstream revalidation`, not as downstream closure.
+- Statuses below should be read as historical upstream status snapshots plus the
+  later downstream confirmation note; Arlen does not close issues on
+  `MusicianApp`'s behalf.
 
 ## Current Upstream Assessment
 
@@ -41,5 +43,11 @@ Ownership rule:
 - `ARLEN-BUG-011` is not kept as a separate upstream bug because the supported
   public claim flow now issues the reusable password-setup email directly and is
   covered by focused unit regression.
-- The statuses above do not close anything in `MusicianApp`; they only record
-  upstream Arlen's current assessment and evidence trail.
+- Downstream confirmation:
+  - `MusicianApp` has since confirmed the upstream-fixed items discussed in this
+    note are resolved on its own branch/config as of `2026-03-21`.
+  - That includes the earlier `awaiting downstream revalidation` items in this
+    table plus the later form-parameter/auth-migration fixes shipped in commit
+    `16084b8`.
+  - This note now serves as the upstream evidence trail for those confirmed
+    downstream closures.

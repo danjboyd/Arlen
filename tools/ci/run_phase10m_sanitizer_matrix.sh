@@ -28,6 +28,7 @@ export ASAN_OPTIONS="${ASAN_OPTIONS:-detect_leaks=0:halt_on_error=1:strict_strin
 export UBSAN_OPTIONS="${UBSAN_OPTIONS:-print_stacktrace=1:halt_on_error=1}"
 export XCTEST_LD_PRELOAD="$asan_so:$ubsan_so"
 
+make clean
 tmp_dir="$(mktemp -d)"
 trap 'rm -rf "$tmp_dir"' EXIT
 lane_tsv="$tmp_dir/lane_results.tsv"

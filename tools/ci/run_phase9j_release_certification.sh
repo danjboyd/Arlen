@@ -8,10 +8,46 @@ phase9j_output_dir="${ARLEN_PHASE9J_OUTPUT_DIR:-$repo_root/build/release_confide
 phase9j_release_id="${ARLEN_PHASE9J_RELEASE_ID:-rc-$(date -u +%Y%m%dT%H%M%SZ)}"
 phase9j_skip_gates="${ARLEN_PHASE9J_SKIP_GATES:-0}"
 phase9j_allow_incomplete="${ARLEN_PHASE9J_ALLOW_INCOMPLETE:-0}"
+phase9j_artifact_stash="$(mktemp -d)"
+
+cleanup() {
+  rm -rf "$phase9j_artifact_stash"
+}
+trap cleanup EXIT
+
+stash_release_artifact_dir() {
+  local name="$1"
+  local source_dir="$repo_root/build/release_confidence/$name"
+  local stash_dir="$phase9j_artifact_stash/$name"
+  if [[ -d "$source_dir" ]]; then
+    rm -rf "$stash_dir"
+    cp -R "$source_dir" "$stash_dir"
+  fi
+}
+
+restore_release_artifact_dir() {
+  local name="$1"
+  local stash_dir="$phase9j_artifact_stash/$name"
+  local dest_dir="$repo_root/build/release_confidence/$name"
+  if [[ -d "$stash_dir" ]]; then
+    mkdir -p "$(dirname "$dest_dir")"
+    rm -rf "$dest_dir"
+    cp -R "$stash_dir" "$dest_dir"
+  fi
+}
 
 if [[ "$phase9j_skip_gates" != "1" ]]; then
+  # Release certification must rebuild from a clean tree so earlier sanitizer
+  # lanes cannot leak instrumented binaries into the quality gate.
+  make clean
   bash ./tools/ci/run_phase5e_quality.sh
+  # The sanitizer lane does its own clean rebuild, so preserve the earlier
+  # quality/fault-injection evidence that Phase 9J still needs to certify.
+  stash_release_artifact_dir phase5e
+  stash_release_artifact_dir phase9i
   bash ./tools/ci/run_phase5e_sanitizers.sh
+  restore_release_artifact_dir phase5e
+  restore_release_artifact_dir phase9i
   bash ./tools/deploy/smoke_release.sh \
     --app-root "$repo_root/examples/tech_demo" \
     --framework-root "$repo_root" \

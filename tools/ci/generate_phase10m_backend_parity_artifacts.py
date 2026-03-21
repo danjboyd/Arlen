@@ -164,6 +164,25 @@ def main() -> int:
 
     for yyjson_enabled, llhttp_enabled in combos:
         combo_label = f"{yyjson_enabled}:{llhttp_enabled}"
+        clean = run_command(["make", "clean"], repo_root)
+        if clean.returncode != 0:
+            results.append(
+                {
+                    "combo": combo_label,
+                    "build_status": "fail",
+                    "build_stdout": clean.stdout,
+                    "build_stderr": clean.stderr,
+                    "build_return_code": clean.returncode,
+                    "contract_status": "skipped",
+                    "contract_return_code": None,
+                    "parser_backend_count": 0,
+                    "json_backend_count": 0,
+                    "status": "fail",
+                    "payload": {},
+                }
+            )
+            violations.append(f"combo {combo_label}: clean failed (rc={clean.returncode})")
+            continue
         make_command = [
             "make",
             "backend-contract-matrix",

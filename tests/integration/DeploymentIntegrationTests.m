@@ -2174,6 +2174,56 @@
   }
 }
 
+- (void)testPhase10MSyscallFaultInjectionConcurrentKeepAliveScenarioPasses {
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *outputRoot = [self createTempDirectoryWithPrefix:@"arlen-phase10m-syscall-concurrent"];
+  XCTAssertNotNil(outputRoot);
+  if (outputRoot == nil) {
+    return;
+  }
+
+  @try {
+    int code = 0;
+    NSString *command = [NSString stringWithFormat:
+                                      @"cd %@ && ARLEN_PHASE10M_SYSCALL_OUTPUT_DIR=%@ "
+                                       "ARLEN_PHASE10M_SYSCALL_MODES=concurrent "
+                                       "ARLEN_PHASE10M_SYSCALL_SCENARIOS=syscall_writev_eagain_keepalive "
+                                       "bash ./tools/ci/run_phase10m_syscall_fault_injection.sh",
+                                      repoRoot, outputRoot];
+    NSString *output = [self runShellCapture:command exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", output);
+
+    NSString *resultsPath = [outputRoot stringByAppendingPathComponent:@"fault_injection_results.json"];
+    NSData *resultsData = [NSData dataWithContentsOfFile:resultsPath];
+    XCTAssertNotNil(resultsData);
+    if (resultsData == nil) {
+      return;
+    }
+
+    NSError *error = nil;
+    NSDictionary *resultsPayload = [NSJSONSerialization JSONObjectWithData:resultsData options:0 error:&error];
+    XCTAssertNotNil(resultsPayload);
+    XCTAssertNil(error);
+    if (![resultsPayload isKindOfClass:[NSDictionary class]]) {
+      return;
+    }
+
+    NSDictionary *summary = [resultsPayload[@"summary"] isKindOfClass:[NSDictionary class]]
+                                ? resultsPayload[@"summary"]
+                                : @{};
+    XCTAssertEqualObjects(@0, summary[@"failed"]);
+
+    NSArray *results = [resultsPayload[@"results"] isKindOfClass:[NSArray class]] ? resultsPayload[@"results"] : @[];
+    XCTAssertEqual((NSUInteger)1, [results count]);
+    NSDictionary *row = [results[0] isKindOfClass:[NSDictionary class]] ? results[0] : @{};
+    XCTAssertEqualObjects(@"pass", row[@"status"]);
+    XCTAssertEqualObjects(@"concurrent", row[@"mode"]);
+    XCTAssertEqualObjects(@"syscall_writev_eagain_keepalive", row[@"scenario_id"]);
+  } @finally {
+    [[NSFileManager defaultManager] removeItemAtPath:outputRoot error:nil];
+  }
+}
+
 - (void)testPhase10MAllocationFaultInjectionHarnessProducesExpectedPack {
   NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
   NSString *outputRoot = [self createTempDirectoryWithPrefix:@"arlen-phase10m-allocation-faults"];

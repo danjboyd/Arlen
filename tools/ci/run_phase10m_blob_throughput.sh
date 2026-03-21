@@ -8,8 +8,8 @@ output_dir="${ARLEN_PHASE10M_BLOB_OUTPUT_DIR:-$repo_root/build/release_confidenc
 thresholds_path="${ARLEN_PHASE10M_BLOB_THRESHOLDS:-$repo_root/tests/fixtures/performance/phase10m_blob_throughput_thresholds.json}"
 profile="${ARLEN_PHASE10M_BLOB_PROFILE:-phase10m_blob_large}"
 concurrency="${ARLEN_PHASE10M_BLOB_CONCURRENCY:-32}"
-repeats="${ARLEN_PHASE10M_BLOB_REPEATS:-3}"
-requests="${ARLEN_PHASE10M_BLOB_REQUESTS:-120}"
+repeats="${ARLEN_PHASE10M_BLOB_REPEATS:-5}"
+requests="${ARLEN_PHASE10M_BLOB_REQUESTS:-180}"
 fast_mode="${ARLEN_PHASE10M_BLOB_FAST:-0}"
 allow_fail="${ARLEN_PHASE10M_BLOB_ALLOW_FAIL:-0}"
 

@@ -302,6 +302,15 @@
   XCTAssertTrue([script containsString:@"run_phase10m_blob_throughput.sh"]);
 }
 
+- (void)testPhase10MBlobThroughputGateUsesHighSampleDefaults {
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *scriptPath = [repoRoot stringByAppendingPathComponent:@"tools/ci/run_phase10m_blob_throughput.sh"];
+  NSString *script = [self readFile:scriptPath];
+
+  XCTAssertTrue([script containsString:@"repeats=\"${ARLEN_PHASE10M_BLOB_REPEATS:-5}\""]);
+  XCTAssertTrue([script containsString:@"requests=\"${ARLEN_PHASE10M_BLOB_REQUESTS:-180}\""]);
+}
+
 - (void)testGNUmakefileIncludesPerfSmokeTarget {
   NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
   NSString *makefilePath = [repoRoot stringByAppendingPathComponent:@"GNUmakefile"];
@@ -320,6 +329,11 @@
   XCTAssertTrue([script containsString:@"run_perf_profile template_heavy"]);
   XCTAssertTrue([script containsString:@"run_perf_profile api_reference"]);
   XCTAssertTrue([script containsString:@"run_perf_profile migration_sample"]);
+  XCTAssertTrue([script containsString:@"capture_perf_artifacts() {\n  local profile=\"$1\"\n  mkdir -p build/perf/ci"]);
+  XCTAssertTrue([script containsString:@"perf_cooldown_seconds=\"${ARLEN_PERF_COOLDOWN_SECONDS:-15}\""]);
+  XCTAssertTrue([script containsString:@"perf_retry_count=\"${ARLEN_PERF_RETRY_COUNT:-2}\""]);
+  XCTAssertTrue([script containsString:@"retrying after cooldown"]);
+  XCTAssertTrue([script containsString:@"sleep \"$perf_cooldown_seconds\""]);
 }
 
 - (void)testPerfSmokeScriptDefaultsToTriageProfiles {
@@ -346,6 +360,64 @@
   NSString *makefile = [self readFile:makefilePath];
 
   XCTAssertTrue([makefile containsString:@"ci-benchmark-contracts:"]);
+}
+
+- (void)testSanitizerScriptsForceCleanBuildsBeforeInstrumentedLanes {
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *phase4Script =
+      [self readFile:[repoRoot stringByAppendingPathComponent:@"tools/ci/run_phase4_sanitizers.sh"]];
+  NSString *phase5eScript =
+      [self readFile:[repoRoot stringByAppendingPathComponent:@"tools/ci/run_phase5e_tsan_experimental.sh"]];
+  NSString *phase10mScript = [self
+      readFile:[repoRoot stringByAppendingPathComponent:@"tools/ci/run_phase10m_sanitizer_matrix.sh"]];
+
+  XCTAssertTrue([phase4Script containsString:@"make clean"]);
+  XCTAssertTrue([phase5eScript containsString:@"make clean"]);
+  XCTAssertTrue([phase10mScript containsString:@"make clean"]);
+}
+
+- (void)testBackendParityArtifactsRebuildPerFeatureCombo {
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *script = [self
+      readFile:[repoRoot stringByAppendingPathComponent:@"tools/ci/generate_phase10m_backend_parity_artifacts.py"]];
+
+  XCTAssertTrue([script containsString:@"run_command([\"make\", \"clean\"], repo_root)"]);
+}
+
+- (void)testRuntimeConcurrencyProbeKeepsSerializedModeOnKeepAliveContract {
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *script =
+      [self readFile:[repoRoot stringByAppendingPathComponent:@"tools/ci/runtime_concurrency_probe.py"]];
+
+  XCTAssertTrue([script containsString:@"run_mode(args.binary, \"serialized\", True, args.iterations)"]);
+  XCTAssertTrue([script containsString:@"def reserve_port() -> int:"]);
+  XCTAssertTrue([script containsString:@"sock.bind((\"127.0.0.1\", 0))"]);
+  XCTAssertTrue([script containsString:@"log_tail = read_log_tail(log_path)"]);
+  XCTAssertTrue([script containsString:@"server failed readiness probe"]);
+}
+
+- (void)testRuntimeFaultInjectionKeepAliveUsesRealCRLFRequests {
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *script =
+      [self readFile:[repoRoot stringByAppendingPathComponent:@"tools/ci/runtime_fault_injection.py"]];
+
+  XCTAssertTrue([script containsString:@"f\"GET {path} HTTP/1.1\\r\\n\""]);
+  XCTAssertTrue([script containsString:@"f\"Connection: {connection_header}\\r\\n\\r\\n\""]);
+  XCTAssertFalse([script containsString:@"f\"GET {path} HTTP/1.1\\\\r\\\\n\""]);
+  XCTAssertFalse([script containsString:@"f\"Connection: {connection_header}\\\\r\\\\n\\\\r\\\\n\""]);
+}
+
+- (void)testReleaseCertificationStartsFromCleanBuildTree {
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *script = [self
+      readFile:[repoRoot stringByAppendingPathComponent:@"tools/ci/run_phase9j_release_certification.sh"]];
+
+  XCTAssertTrue([script containsString:@"make clean"]);
+  XCTAssertTrue([script containsString:@"bash ./tools/ci/run_phase5e_quality.sh"]);
+  XCTAssertTrue([script containsString:@"stash_release_artifact_dir phase5e"]);
+  XCTAssertTrue([script containsString:@"stash_release_artifact_dir phase9i"]);
+  XCTAssertTrue([script containsString:@"restore_release_artifact_dir phase5e"]);
+  XCTAssertTrue([script containsString:@"restore_release_artifact_dir phase9i"]);
 }
 
 @end

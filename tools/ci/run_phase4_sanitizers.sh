@@ -26,6 +26,7 @@ if [[ -z "$ubsan_so" || ! -f "$ubsan_so" ]]; then
 fi
 export XCTEST_LD_PRELOAD="$asan_so:$ubsan_so"
 
+make clean
 make test-unit
 if [[ "${ARLEN_SANITIZER_INCLUDE_INTEGRATION:-0}" == "1" ]]; then
   make test-integration

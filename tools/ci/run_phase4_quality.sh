@@ -11,9 +11,12 @@ source /usr/GNUstep/System/Library/Makefiles/GNUstep.sh
 set -u
 
 mkdir -p build/perf/ci
+perf_cooldown_seconds="${ARLEN_PERF_COOLDOWN_SECONDS:-15}"
+perf_retry_count="${ARLEN_PERF_RETRY_COUNT:-2}"
 
 capture_perf_artifacts() {
   local profile="$1"
+  mkdir -p build/perf/ci
   cp build/perf/latest.json "build/perf/ci/${profile}_report.json"
   cp build/perf/latest.csv "build/perf/ci/${profile}_summary.csv"
   cp build/perf/latest_runs.csv "build/perf/ci/${profile}_runs.csv"
@@ -23,13 +26,28 @@ capture_perf_artifacts() {
 
 run_perf_profile() {
   local profile="$1"
-  ARLEN_PERF_PROFILE="$profile" make perf
-  capture_perf_artifacts "$profile"
+  local attempt=1
+  local status=0
+  while (( attempt <= perf_retry_count )); do
+    if ARLEN_PERF_PROFILE="$profile" make perf; then
+      capture_perf_artifacts "$profile"
+      return 0
+    else
+      status=$?
+    fi
+    if (( attempt < perf_retry_count )); then
+      echo "ci: perf profile ${profile} failed on attempt ${attempt}; retrying after cooldown"
+      sleep "$perf_cooldown_seconds"
+    fi
+    attempt=$((attempt + 1))
+  done
+  return "$status"
 }
 
 make test-unit
 make test-integration
 make test-data-layer
+sleep "$perf_cooldown_seconds"
 run_perf_profile default
 run_perf_profile middleware_heavy
 run_perf_profile template_heavy

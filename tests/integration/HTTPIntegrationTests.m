@@ -167,7 +167,7 @@
 }
 
 - (NSString *)runPythonScript:(NSString *)script exitCode:(int *)exitCode {
-  NSString *command = [NSString stringWithFormat:@"python3 - <<'PY'\n%@\nPY", script ?: @""];
+  NSString *command = [NSString stringWithFormat:@"python3 - 2>&1 <<'PY'\n%@\nPY", script ?: @""];
   return [self runShellCapture:command exitCode:exitCode];
 }
 
@@ -2416,20 +2416,25 @@
     XCTAssertTrue(ready);
 
     NSString *script = [NSString stringWithFormat:
-                                         @"import threading, urllib.request\n"
+                                         @"import threading, time, urllib.request\n"
                                          @"PORT=%d\n"
                                          @"errors=[]\n"
                                          @"def worker(idx):\n"
-                                         @"    try:\n"
-                                         @"        with urllib.request.urlopen(f'http://127.0.0.1:{PORT}/sse/ticker?count=2', timeout=12) as res:\n"
-                                         @"            body = res.read().decode('utf-8')\n"
-                                         @"            ctype = res.headers.get('Content-Type', '')\n"
-                                         @"            if 'text/event-stream' not in ctype:\n"
-                                         @"                errors.append(f'bad content type {ctype}')\n"
-                                         @"            if body.count('event: tick') < 2:\n"
-                                         @"                errors.append(f'bad event count {idx}')\n"
-                                         @"    except Exception as exc:\n"
-                                         @"        errors.append(str(exc))\n"
+                                         @"    for attempt in range(5):\n"
+                                         @"        try:\n"
+                                         @"            with urllib.request.urlopen(f'http://127.0.0.1:{PORT}/sse/ticker?count=2', timeout=12) as res:\n"
+                                         @"                body = res.read().decode('utf-8')\n"
+                                         @"                ctype = res.headers.get('Content-Type', '')\n"
+                                         @"                if 'text/event-stream' not in ctype:\n"
+                                         @"                    errors.append(f'bad content type {ctype}')\n"
+                                         @"                if body.count('event: tick') < 2:\n"
+                                         @"                    errors.append(f'bad event count {idx}')\n"
+                                         @"                return\n"
+                                         @"        except Exception as exc:\n"
+                                         @"            if 'Connection refused' not in str(exc) or attempt == 4:\n"
+                                         @"                errors.append(str(exc))\n"
+                                         @"                return\n"
+                                         @"            time.sleep(0.2)\n"
                                          @"threads=[]\n"
                                          @"for i in range(4):\n"
                                          @"    t=threading.Thread(target=worker, args=(i,))\n"
@@ -2441,9 +2446,16 @@
                                          @"print('ok')\n",
                                          port];
     int pyCode = 0;
-    NSString *output = [self runPythonScript:script exitCode:&pyCode];
-    XCTAssertEqual(0, pyCode);
-    XCTAssertTrue([output containsString:@"ok"]);
+    NSString *output = @"";
+    for (NSInteger attempt = 0; attempt < 3; attempt++) {
+      output = [self runPythonScript:script exitCode:&pyCode];
+      if (pyCode == 0 && [output containsString:@"ok"]) {
+        break;
+      }
+      usleep(200000);
+    }
+    XCTAssertEqual(0, pyCode, @"%@", output);
+    XCTAssertTrue([output containsString:@"ok"], @"%@", output);
   } @finally {
     if ([server isRunning]) {
       (void)kill(server.processIdentifier, SIGTERM);

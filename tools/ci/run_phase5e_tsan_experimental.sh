@@ -56,6 +56,7 @@ set +e
 {
   echo "ci: tsan log path $log_path"
   echo "ci: tsan iterations ${ARLEN_TSAN_RUNTIME_ITERS:-1}"
+  make clean
   make boomhauer
   make test-unit
   python3 ./tools/ci/runtime_concurrency_probe.py \
