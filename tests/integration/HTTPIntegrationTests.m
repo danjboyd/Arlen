@@ -3125,8 +3125,10 @@
 - (void)testBoomhauerPrintRoutesRebuildsSanitizedExternalFrameworkArtifacts {
   NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
   NSString *appRoot = [self createTempDirectoryWithPrefix:@"arlen-boomhauer-sanitized-override"];
+  NSString *frameworkRoot = [self createTempDirectoryWithPrefix:@"arlen-framework-root"];
   XCTAssertNotNil(appRoot);
-  if (appRoot == nil) {
+  XCTAssertNotNil(frameworkRoot);
+  if (appRoot == nil || frameworkRoot == nil) {
     return;
   }
 
@@ -3143,13 +3145,16 @@
 
     int poisonCode = 0;
     NSString *poisonCommand = [NSString
-        stringWithFormat:@"source /usr/GNUstep/System/Library/Makefiles/GNUstep.sh && cd %@ && "
+        stringWithFormat:@"git -C %@ worktree add --detach %@ HEAD >/dev/null 2>&1 && "
+                         "source /usr/GNUstep/System/Library/Makefiles/GNUstep.sh && cd %@ && "
                          "make clean >/dev/null && "
                          "EXTRA_OBJC_FLAGS='-fsanitize=address,undefined -fno-omit-frame-pointer' "
                          "make %@/build/eocc %@/build/lib/libArlenFramework.a 2>&1",
                          [self shellQuoted:repoRoot],
-                         [self shellQuoted:repoRoot],
-                         [self shellQuoted:repoRoot]];
+                         [self shellQuoted:frameworkRoot],
+                         [self shellQuoted:frameworkRoot],
+                         [self shellQuoted:frameworkRoot],
+                         [self shellQuoted:frameworkRoot]];
     NSString *poisonOutput = [self runShellCapture:poisonCommand exitCode:&poisonCode];
     XCTAssertEqual(0, poisonCode, @"%@", poisonOutput);
 
@@ -3161,7 +3166,7 @@
                                              "cd %@ && ARLEN_FRAMEWORK_ROOT=%@ ARLEN_APP_ROOT=%@ %@ "
                                              "--no-watch --print-routes 2>&1",
                                              [self shellQuoted:appRoot],
-                                             [self shellQuoted:repoRoot],
+                                             [self shellQuoted:frameworkRoot],
                                              [self shellQuoted:appRoot],
                                              [self shellQuoted:scriptPath]]
              exitCode:&code];
@@ -3178,6 +3183,16 @@
         isExecutableFileAtPath:[appRoot stringByAppendingPathComponent:@".boomhauer/build/boomhauer-app"]]);
   } @finally {
     [[NSFileManager defaultManager] removeItemAtPath:appRoot error:nil];
+    if ([[NSFileManager defaultManager] fileExistsAtPath:frameworkRoot]) {
+      int removeCode = 0;
+      (void)[self runShellCapture:[NSString stringWithFormat:@"git -C %@ worktree remove --force %@ >/dev/null 2>&1",
+                                                             [self shellQuoted:repoRoot],
+                                                             [self shellQuoted:frameworkRoot]]
+                         exitCode:&removeCode];
+      if (removeCode != 0) {
+        [[NSFileManager defaultManager] removeItemAtPath:frameworkRoot error:nil];
+      }
+    }
   }
 }
 
