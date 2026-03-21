@@ -456,6 +456,88 @@ framework_artifacts_are_current() {
   make -q -C "$framework_root" "$framework_root/build/eocc" "$framework_lib" >/dev/null 2>&1
 }
 
+framework_archive_contains_sanitizers() {
+  local archive_path="${1:-$framework_lib}"
+  local symbol_dump
+  [[ -f "$archive_path" ]] || return 1
+  symbol_dump="$(mktemp)"
+  if ! nm -A "$archive_path" >"$symbol_dump" 2>/dev/null; then
+    rm -f "$symbol_dump"
+    return 1
+  fi
+
+  if grep -Eq '(__asan_|__ubsan_)' "$symbol_dump"; then
+    rm -f "$symbol_dump"
+    return 0
+  fi
+
+  rm -f "$symbol_dump"
+  return 1
+}
+
+emit_framework_link_mode_diagnostic() {
+  local output_file="$1"
+
+  cat >"$output_file" <<EOF
+boomhauer: selected framework root contains sanitizer-instrumented framework artifacts:
+  $framework_lib
+boomhauer: app-root builds link libArlenFramework.a without sanitizer runtimes, so this archive cannot be reused here.
+boomhauer: rebuild $framework_root cleanly without sanitizer flags before using ARLEN_FRAMEWORK_ROOT for app-root boomhauer commands.
+EOF
+}
+
+ensure_framework_artifacts_ready() {
+  local output_file="$1"
+
+  if framework_artifacts_are_current; then
+    if framework_archive_contains_sanitizers; then
+      echo "boomhauer: [1/4] detected sanitizer-instrumented framework artifacts; rebuilding clean framework artifacts"
+      if {
+        make -C "$framework_root" clean &&
+          make -C "$framework_root" "$framework_root/build/eocc" "$framework_lib"
+      } >"$output_file" 2>&1; then
+        if [[ -s "$output_file" ]]; then
+          cat "$output_file"
+        fi
+      else
+        local status=$?
+        record_build_failure \
+          "tooling" \
+          "make -C $framework_root clean && make -C $framework_root $framework_root/build/eocc $framework_lib" \
+          "$status" \
+          "$output_file"
+        return "$status"
+      fi
+    else
+      echo "boomhauer: [1/4] reusing current framework tools and libraries"
+    fi
+  else
+    echo "boomhauer: [1/4] checking tool freshness and building framework artifacts"
+    if make -C "$framework_root" "$framework_root/build/eocc" "$framework_lib" >"$output_file" 2>&1; then
+      if [[ -s "$output_file" ]]; then
+        cat "$output_file"
+      fi
+    else
+      local status=$?
+      record_build_failure "tooling" "make -C $framework_root $framework_root/build/eocc $framework_lib" "$status" "$output_file"
+      return "$status"
+    fi
+  fi
+
+  if framework_archive_contains_sanitizers; then
+    emit_framework_link_mode_diagnostic "$output_file"
+    record_build_failure \
+      "framework_link_mode" \
+      "verify $framework_lib is free of sanitizer instrumentation" \
+      2 \
+      "$output_file"
+    return 2
+  fi
+
+  : >"$output_file"
+  return 0
+}
+
 run_app_make_target() {
   local target="$1"
   local reuse_message="$2"
@@ -505,20 +587,10 @@ compile_app() {
     return 2
   fi
 
-  if framework_artifacts_are_current; then
-    echo "boomhauer: [1/4] reusing current framework tools and libraries"
-  else
-    echo "boomhauer: [1/4] checking tool freshness and building framework artifacts"
-    if make -C "$framework_root" "$framework_root/build/eocc" "$framework_lib" >"$tmp_output" 2>&1; then
-      if [[ -s "$tmp_output" ]]; then
-        cat "$tmp_output"
-      fi
-    else
-      local status=$?
-      record_build_failure "tooling" "make -C $framework_root $framework_root/build/eocc $framework_lib" "$status" "$tmp_output"
-      rm -f "$tmp_output"
-      return "$status"
-    fi
+  if ! ensure_framework_artifacts_ready "$tmp_output"; then
+    local status=$?
+    rm -f "$tmp_output"
+    return "$status"
   fi
 
   echo "boomhauer: [2/4] transpiling templates"

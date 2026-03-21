@@ -73,6 +73,10 @@ or `--prepare-only` runs reuse that cached binary when app/framework build input
 App-root `--prepare-only` and `--print-routes` runs also print explicit `[1/4]` through `[4/4]`
 build phases so you can tell whether Arlen is reusing framework/app artifacts, transpiling templates,
 or linking a fresh binary.
+If `ARLEN_FRAMEWORK_ROOT` points at an external Arlen checkout whose cached framework archive was last
+built under ASan/UBSan, `boomhauer` now forces a clean framework rebuild before linking the app; if the
+archive still contains sanitizer symbols afterward, the command fails early with a targeted diagnostic
+instead of a late raw linker error.
 
 Check endpoints:
 

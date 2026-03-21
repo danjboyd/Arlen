@@ -246,6 +246,7 @@ Build and run `boomhauer` for the current app root.
   - `[4/4]` app-binary link/reuse
 - `--prepare-only` prints a prepare-only scope banner and exits after the app is current
 - `--print-routes` prints a route-inspection scope banner, refreshes artifacts if needed, and then prints resolved routes without entering watch/server mode
+- when `ARLEN_FRAMEWORK_ROOT` points at an external checkout whose cached `libArlenFramework.a` still contains ASan/UBSan objects, `boomhauer` rebuilds that framework cleanly before app linking; if sanitizer symbols remain, it fails early with a targeted diagnostic instead of a late raw linker error
 - app-root watch mode restarts on config/public changes and rebuilds only when app/framework build inputs change
 - vendored module sources under `modules/*/Sources` and module templates under `modules/*/Resources/Templates` are compiled automatically
 - app templates under `templates/modules/<id>/...` override vendored module templates with the same logical path
@@ -361,6 +362,7 @@ Behavior:
 - if run inside app root (`config/app.plist` plus `src/main.m` or `app_lite.m`), compiles and runs that app
 - app-root builds are cached at `.boomhauer/build/boomhauer-app` with a persistent fingerprint
 - unchanged app-root build inputs skip template transpile/clang on subsequent `--no-watch` / `--prepare-only` launches
+- if an external `ARLEN_FRAMEWORK_ROOT` points at cached ASan/UBSan framework artifacts, `boomhauer` forces a clean framework rebuild before app linking and otherwise emits an explicit compatibility diagnostic
 - watch mode restarts on config/public changes without forcing a rebuild when the cached app binary is still current
 - watch mode builds the fallback framework error server only when it needs to serve a build-failure page
 - current build fingerprint covers app `src/`, `templates/`, `app_lite.m`, framework `src/`, framework `GNUmakefile`, `tools/eocc.m`, and compile toggles `ARLEN_ENABLE_YYJSON` / `ARLEN_ENABLE_LLHTTP`

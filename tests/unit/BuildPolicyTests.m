@@ -178,6 +178,25 @@
   XCTAssertTrue([script containsString:@"-ldispatch"]);
 }
 
+- (void)testBoomhauerRebuildsOrRejectsSanitizedExternalFrameworkArtifacts {
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *scriptPath = [repoRoot stringByAppendingPathComponent:@"bin/boomhauer"];
+  NSString *script = [self readFile:scriptPath];
+
+  XCTAssertTrue([script containsString:@"framework_archive_contains_sanitizers() {"]);
+  XCTAssertTrue([script containsString:@"symbol_dump=\"$(mktemp)\""]);
+  XCTAssertTrue([script containsString:@"nm -A \"$archive_path\" >\"$symbol_dump\" 2>/dev/null"]);
+  XCTAssertTrue([script containsString:@"grep -Eq '(__asan_|__ubsan_)' \"$symbol_dump\""]);
+  XCTAssertTrue([script containsString:
+                             @"boomhauer: [1/4] detected sanitizer-instrumented framework artifacts; rebuilding clean framework artifacts"]);
+  XCTAssertTrue([script containsString:
+                             @"make -C \"$framework_root\" clean &&"]);
+  XCTAssertTrue([script containsString:
+                             @"boomhauer: selected framework root contains sanitizer-instrumented framework artifacts:"]);
+  XCTAssertTrue([script containsString:@"app-root builds link libArlenFramework.a without sanitizer runtimes"]);
+  XCTAssertTrue([script containsString:@"framework_link_mode"]);
+}
+
 - (void)testBoomhauerReportsPhase19BuildStagesAndScopeModes {
   NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
   NSString *scriptPath = [repoRoot stringByAppendingPathComponent:@"bin/boomhauer"];

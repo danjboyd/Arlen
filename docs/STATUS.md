@@ -75,6 +75,16 @@ entries, not current plan-of-record items.
 
 ## Completed Today (2026-03-21)
 
+- Reconciled the `Structurizer` external-framework override report against the
+  current Arlen workspace:
+  - recorded the upstream-only status note in
+    `docs/STRUCTURIZER_REPORT_RECONCILIATION_2026-03-21.md`
+  - kept closure ownership explicit: Arlen records `fixed upstream` or
+    `awaiting downstream revalidation`, while `Structurizer` keeps app-level
+    closure authority
+  - fixed app-root `boomhauer` so an external `ARLEN_FRAMEWORK_ROOT` no longer
+    reuses sanitizer-contaminated framework archives through to a late raw
+    linker failure
 - Reconciled the remaining `MusicianApp`-reported open items against the
   current Arlen workspace:
   - recorded the upstream-only status matrix in

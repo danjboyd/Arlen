@@ -38,9 +38,9 @@ if (userID == nil) {
 | `session` | `- (NSMutableDictionary *)session;` | Return the mutable session map for the current request. | Read this value when you need current runtime/request state. |
 | `markSessionDirty` | `- (void)markSessionDirty;` | Mark session state as modified so middleware persists it. | Call for side effects; this method does not return a value. |
 | `csrfToken` | `- (nullable NSString *)csrfToken;` | Return the CSRF token associated with the current request/session. | Read this value when you need current runtime/request state. |
-| `allParams` | `- (NSDictionary *)allParams;` | Return merged request parameters (query string, `application/x-www-form-urlencoded` body fields, route params, then validated values). | Read this value when you need current runtime/request state. |
-| `paramValueForName:` | `- (nullable id)paramValueForName:(NSString *)name;` | Return a raw parameter value from the merged request parameter set. | Capture the returned value and propagate errors/validation as needed. |
-| `stringParamForName:` | `- (nullable NSString *)stringParamForName:(NSString *)name;` | Return a merged request parameter coerced to string when possible. | Capture the returned value and propagate errors/validation as needed. |
+| `allParams` | `- (NSDictionary *)allParams;` | Return merged request parameters (route, query, and body). | Read this value when you need current runtime/request state. |
+| `paramValueForName:` | `- (nullable id)paramValueForName:(NSString *)name;` | Return a raw parameter value by key. | Capture the returned value and propagate errors/validation as needed. |
+| `stringParamForName:` | `- (nullable NSString *)stringParamForName:(NSString *)name;` | Return a parameter coerced to string when possible. | Capture the returned value and propagate errors/validation as needed. |
 | `queryValueForName:` | `- (nullable NSString *)queryValueForName:(NSString *)name;` | Return a query-string parameter by key. | Capture the returned value and propagate errors/validation as needed. |
 | `headerValueForName:` | `- (nullable NSString *)headerValueForName:(NSString *)name;` | Return a request header value by key. | Capture the returned value and propagate errors/validation as needed. |
 | `queryIntegerForName:` | `- (nullable NSNumber *)queryIntegerForName:(NSString *)name;` | Return a query parameter parsed as an integer. | Prefer this over manual parsing to avoid repeated validation boilerplate. |

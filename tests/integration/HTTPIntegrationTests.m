@@ -139,6 +139,13 @@
                          "}\n"];
 }
 
+- (NSString *)shellQuoted:(NSString *)value {
+  NSString *safeValue = value ?: @"";
+  return [NSString stringWithFormat:@"'%@'",
+                                    [safeValue stringByReplacingOccurrencesOfString:@"'"
+                                                                            withString:@"'\"'\"'"]];
+}
+
 - (NSString *)runShellCapture:(NSString *)command exitCode:(int *)exitCode {
   NSTask *task = [[NSTask alloc] init];
   task.launchPath = @"/bin/bash";
@@ -3098,6 +3105,65 @@
     XCTAssertEqual(0, serverCode);
     XCTAssertTrue([escapeBody hasSuffix:@"\n404"]);
     XCTAssertFalse([escapeBody containsString:@"secret"]);
+  } @finally {
+    [[NSFileManager defaultManager] removeItemAtPath:appRoot error:nil];
+  }
+}
+
+- (void)testBoomhauerPrintRoutesRebuildsSanitizedExternalFrameworkArtifacts {
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *appRoot = [self createTempDirectoryWithPrefix:@"arlen-boomhauer-sanitized-override"];
+  XCTAssertNotNil(appRoot);
+  if (appRoot == nil) {
+    return;
+  }
+
+  @try {
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"config/app.plist"]
+                          content:@"{\n"
+                                  "  host = \"127.0.0.1\";\n"
+                                  "  port = 3000;\n"
+                                  "  logFormat = \"text\";\n"
+                                  "}\n"]);
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"config/environments/development.plist"]
+                          content:@"{\n  logFormat = \"text\";\n}\n"]);
+    XCTAssertTrue([self writeLiteAppEntrypointAtRoot:appRoot]);
+
+    int poisonCode = 0;
+    NSString *poisonCommand = [NSString
+        stringWithFormat:@"source /usr/GNUstep/System/Library/Makefiles/GNUstep.sh && cd %@ && "
+                         "make clean >/dev/null && "
+                         "EXTRA_OBJC_FLAGS='-fsanitize=address,undefined -fno-omit-frame-pointer' "
+                         "make %@/build/eocc %@/build/lib/libArlenFramework.a 2>&1",
+                         [self shellQuoted:repoRoot],
+                         [self shellQuoted:repoRoot],
+                         [self shellQuoted:repoRoot]];
+    NSString *poisonOutput = [self runShellCapture:poisonCommand exitCode:&poisonCode];
+    XCTAssertEqual(0, poisonCode, @"%@", poisonOutput);
+
+    NSString *scriptPath = [repoRoot stringByAppendingPathComponent:@"bin/boomhauer"];
+    int code = 0;
+    NSString *output = [self
+        runShellCapture:[NSString
+                            stringWithFormat:@"source /usr/GNUstep/System/Library/Makefiles/GNUstep.sh && "
+                                             "cd %@ && ARLEN_FRAMEWORK_ROOT=%@ ARLEN_APP_ROOT=%@ %@ "
+                                             "--no-watch --print-routes 2>&1",
+                                             [self shellQuoted:appRoot],
+                                             [self shellQuoted:repoRoot],
+                                             [self shellQuoted:appRoot],
+                                             [self shellQuoted:scriptPath]]
+             exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", output);
+    XCTAssertTrue([output containsString:
+                                  @"boomhauer: route inspection mode; ensuring artifacts are current before printing routes"],
+                  @"%@", output);
+    XCTAssertTrue([output containsString:
+                                  @"boomhauer: [1/4] detected sanitizer-instrumented framework artifacts; rebuilding clean framework artifacts"],
+                  @"%@", output);
+    XCTAssertFalse([output containsString:@"undefined reference to `__asan_"], @"%@", output);
+    XCTAssertFalse([output containsString:@"undefined reference to `__ubsan_"], @"%@", output);
+    XCTAssertTrue([[NSFileManager defaultManager]
+        isExecutableFileAtPath:[appRoot stringByAppendingPathComponent:@".boomhauer/build/boomhauer-app"]]);
   } @finally {
     [[NSFileManager defaultManager] removeItemAtPath:appRoot error:nil];
   }
