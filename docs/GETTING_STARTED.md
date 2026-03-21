@@ -272,6 +272,10 @@ Phase 13/14/15/16 first-party module quick path:
 ./build/arlen module migrate --env development
 ```
 
+Run `./build/arlen module migrate --env <env>` before the first local `auth`
+registration or login attempt. If the auth module tables are missing, Arlen now
+surfaces that exact fix command instead of a generic database error.
+
 Vendored modules live under `modules/<id>/`. `boomhauer` automatically compiles
 module Objective-C sources from `modules/*/Sources` and module templates from
 `modules/*/Resources/Templates`. App overrides for module templates live under

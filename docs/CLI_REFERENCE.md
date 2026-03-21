@@ -179,6 +179,10 @@ Example first-party bootstrap:
 ./build/arlen module migrate --env development
 ```
 
+Run `arlen module migrate --env <env>` before the first local `auth`
+registration or login attempt. If the auth module tables are missing, Arlen
+surfaces that setup guidance directly instead of a generic database error.
+
 First-party module surfaces after install:
 
 - `auth`: stable JSON under `/auth/api/...`; HTML ownership under `/auth/...` is controlled by `authModule.ui.mode` (`module-ui`, `headless`, or `generated-app-ui`). Phase 18 also adds embeddable server-rendered MFA fragments, `/auth/api/mfa` factor discovery, and optional disabled-by-default SMS/Twilio Verify MFA support.

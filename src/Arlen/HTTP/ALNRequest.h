@@ -25,6 +25,7 @@ typedef NS_ENUM(NSUInteger, ALNHTTPParserBackend) {
 @property(nonatomic, copy, readonly) NSDictionary *headers;
 @property(nonatomic, strong, readonly) NSData *body;
 @property(nonatomic, copy, readonly) NSDictionary *queryParams;
+@property(nonatomic, copy, readonly) NSDictionary *formParams;
 @property(nonatomic, copy, readonly) NSDictionary *cookies;
 @property(nonatomic, copy) NSDictionary *routeParams;
 @property(nonatomic, copy) NSString *remoteAddress;

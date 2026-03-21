@@ -39,6 +39,54 @@ static NSError *AMError(ALNAuthModuleErrorCode code, NSString *message, NSDictio
   return [NSError errorWithDomain:ALNAuthModuleErrorDomain code:code userInfo:userInfo];
 }
 
+static NSString *AMEffectiveEnvironmentName(NSString *environmentName) {
+  NSString *trimmed = AMTrimmedString(environmentName);
+  return ([trimmed length] > 0) ? trimmed : @"development";
+}
+
+static BOOL AMErrorLooksLikeMissingAuthModuleTables(NSError *error) {
+  if (![error isKindOfClass:[NSError class]] ||
+      ![error.domain isEqualToString:ALNPgErrorDomain]) {
+    return NO;
+  }
+
+  NSString *sqlState = AMTrimmedString(error.userInfo[ALNPgErrorSQLStateKey]);
+  if ([sqlState isEqualToString:@"42P01"]) {
+    return YES;
+  }
+
+  NSString *serverTable = AMLowerTrimmedString(error.userInfo[ALNPgErrorServerTableKey]);
+  if ([serverTable hasPrefix:@"auth_"]) {
+    return YES;
+  }
+
+  NSString *detail = AMLowerTrimmedString(error.userInfo[@"detail"]);
+  NSString *serverDetail = AMLowerTrimmedString(error.userInfo[ALNPgErrorServerDetailKey]);
+  return ([detail containsString:@"relation \"auth_"] ||
+          [serverDetail containsString:@"relation \"auth_"]);
+}
+
+static NSError *AMTranslateMissingAuthModuleTablesError(NSError *error,
+                                                        NSString *environmentName) {
+  if (!AMErrorLooksLikeMissingAuthModuleTables(error)) {
+    return error;
+  }
+
+  NSString *environment = AMEffectiveEnvironmentName(environmentName);
+  NSString *fixCommand =
+      [NSString stringWithFormat:@"./bin/arlen module migrate --env %@", environment];
+  NSMutableDictionary *details = [NSMutableDictionary dictionaryWithDictionary:@{
+    @"environment" : environment,
+    @"fix_command" : fixCommand,
+  }];
+  if ([error isKindOfClass:[NSError class]]) {
+    details[NSUnderlyingErrorKey] = error;
+  }
+  return AMError(ALNAuthModuleErrorInvalidConfiguration,
+                 [NSString stringWithFormat:@"Auth module tables are missing. Run %@.", fixCommand],
+                 details);
+}
+
 static NSString *AMJSONString(id object) {
   if (object == nil) {
     return @"{}";
@@ -81,44 +129,6 @@ static BOOL AMBoolFromDatabaseValue(id value) {
 static NSString *AMRandomToken(NSUInteger byteCount) {
   NSData *random = ALNSecureRandomData(byteCount);
   return ALNLowercaseHexStringFromData(random) ?: @"";
-}
-
-static NSString *AMQueryDecodeComponent(NSString *component) {
-  NSString *withSpaces = [[component ?: @"" stringByReplacingOccurrencesOfString:@"+" withString:@" "]
-      stringByRemovingPercentEncoding];
-  return withSpaces ?: @"";
-}
-
-static NSDictionary *AMFormParametersFromBody(NSData *body) {
-  if ([body length] == 0) {
-    return @{};
-  }
-  NSString *raw = [[NSString alloc] initWithData:body encoding:NSUTF8StringEncoding];
-  if ([raw length] == 0) {
-    return @{};
-  }
-  NSMutableDictionary *parameters = [NSMutableDictionary dictionary];
-  for (NSString *pair in [raw componentsSeparatedByString:@"&"]) {
-    if ([pair length] == 0) {
-      continue;
-    }
-    NSRange separator = [pair rangeOfString:@"="];
-    NSString *name = nil;
-    NSString *value = nil;
-    if (separator.location == NSNotFound) {
-      name = pair;
-      value = @"";
-    } else {
-      name = [pair substringToIndex:separator.location];
-      value = [pair substringFromIndex:(separator.location + 1)];
-    }
-    NSString *decodedName = AMQueryDecodeComponent(name);
-    if ([decodedName length] == 0) {
-      continue;
-    }
-    parameters[decodedName] = AMQueryDecodeComponent(value);
-  }
-  return parameters;
 }
 
 static NSDictionary *AMJSONParametersFromBody(NSData *body) {
@@ -559,6 +569,7 @@ static NSString *AMStubHS256JWT(NSDictionary *claims, NSString *sharedSecret) {
 @property(nonatomic, strong) ALNPg *database;
 @property(nonatomic, strong) id<ALNMailAdapter> mailAdapter;
 @property(nonatomic, copy) NSDictionary *moduleConfig;
+@property(nonatomic, copy) NSString *environmentName;
 @property(nonatomic, copy, readwrite) NSString *prefix;
 @property(nonatomic, copy, readwrite) NSString *apiPrefix;
 @property(nonatomic, copy, readwrite) NSString *loginPath;
@@ -941,6 +952,7 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
     _stubProviderDisplayName = @"Stub Provider User";
     _stubProviderSharedSecret = @"auth-module-stub-provider-secret-0123456789abcdef";
     _bootstrapAdminEmails = @[];
+    _environmentName = @"development";
   }
   return self;
 }
@@ -1098,6 +1110,7 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
   if (![self configureHooksWithModuleConfig:moduleConfig error:error]) {
     return NO;
   }
+  self.environmentName = AMEffectiveEnvironmentName(application.environment);
   NSDictionary *database = [application.config[@"database"] isKindOfClass:[NSDictionary class]]
                                ? application.config[@"database"]
                                : @{};
@@ -1351,6 +1364,9 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
     return nil;
   }
   NSArray *rows = [self.database executeQuery:(sql ?: @"") parameters:(parameters ?: @[]) error:error];
+  if (rows == nil && error != NULL && *error != NULL) {
+    *error = AMTranslateMissingAuthModuleTablesError(*error, self.environmentName);
+  }
   NSDictionary *row = [rows firstObject];
   return AMUserDictionaryFromRow(row);
 }
@@ -1454,7 +1470,15 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
     }
     return nil;
   }
-  if ([self userForEmail:normalizedEmail error:error] != nil) {
+  NSError *lookupError = nil;
+  NSDictionary *existingUser = [self userForEmail:normalizedEmail error:&lookupError];
+  if (lookupError != nil) {
+    if (error != NULL) {
+      *error = lookupError;
+    }
+    return nil;
+  }
+  if (existingUser != nil) {
     if (error != NULL) {
       *error = AMError(ALNAuthModuleErrorValidationFailed, @"Email is already registered", @{ @"field" : @"email" });
     }
@@ -1520,6 +1544,9 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
     createdUser = AMUserDictionaryFromRow(row);
     return (createdUser != nil);
   } error:error];
+  if (!ok && error != NULL && *error != NULL) {
+    *error = AMTranslateMissingAuthModuleTablesError(*error, self.environmentName);
+  }
   return ok ? createdUser : nil;
 }
 
@@ -1545,7 +1572,15 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
     }
     return nil;
   }
-  if ([self userForEmail:normalizedEmail error:error] != nil) {
+  NSError *lookupError = nil;
+  NSDictionary *existingUser = [self userForEmail:normalizedEmail error:&lookupError];
+  if (lookupError != nil) {
+    if (error != NULL) {
+      *error = lookupError;
+    }
+    return nil;
+  }
+  if (existingUser != nil) {
     if (error != NULL) {
       *error = AMError(ALNAuthModuleErrorValidationFailed, @"Email is already registered", @{ @"field" : @"email" });
     }
@@ -1611,6 +1646,9 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
     createdUser = AMUserDictionaryFromRow(row);
     return (createdUser != nil);
   } error:error];
+  if (!ok && error != NULL && *error != NULL) {
+    *error = AMTranslateMissingAuthModuleTablesError(*error, self.environmentName);
+  }
   return ok ? createdUser : nil;
 }
 
@@ -2913,7 +2951,7 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
   if ([contentType containsString:@"application/json"]) {
     bodyParameters = AMJSONParametersFromBody(self.context.request.body);
   } else if ([contentType containsString:@"application/x-www-form-urlencoded"]) {
-    bodyParameters = AMFormParametersFromBody(self.context.request.body);
+    bodyParameters = self.context.request.formParams;
   }
   [parameters addEntriesFromDictionary:bodyParameters ?: @{}];
   return parameters;

@@ -115,6 +115,13 @@ static NSString *ALNURLDecode(NSString *value) {
 
 static NSDictionary *ALNParseQueryString(NSString *query);
 
+static BOOL ALNContentTypeIsFormURLEncoded(NSString *contentType) {
+  if (![contentType isKindOfClass:[NSString class]] || [contentType length] == 0) {
+    return NO;
+  }
+  return [[contentType lowercaseString] containsString:@"application/x-www-form-urlencoded"];
+}
+
 static BOOL ALNQueryBytesNeedDecoding(const char *bytes, size_t length) {
   if (bytes == NULL || length == 0) {
     return NO;
@@ -1372,6 +1379,7 @@ static ALNRequest *ALNRequestFromRawDataLLHTTP(NSData *data, NSError **error) {
 @property(nonatomic, copy, readwrite) NSDictionary *headers;
 @property(nonatomic, strong, readwrite) NSData *body;
 @property(nonatomic, copy) NSDictionary *cachedQueryParams;
+@property(nonatomic, copy) NSDictionary *cachedFormParams;
 @property(nonatomic, copy) NSDictionary *cachedCookies;
 @property(nonatomic, copy) NSArray *deferredHeaderNames;
 @property(nonatomic, copy) NSArray *deferredHeaderValues;
@@ -1657,6 +1665,28 @@ static BOOL ALNASCIIBytesEqualLowercaseCString(const unsigned char *bytes,
   }
   self.cachedQueryParams = parsed;
   return self.cachedQueryParams ?: parsed;
+}
+
+- (NSDictionary *)formParams {
+  NSDictionary *cached = self.cachedFormParams;
+  if (cached != nil) {
+    return cached;
+  }
+
+  NSDictionary *parsed = @{};
+  if (ALNContentTypeIsFormURLEncoded([self headerValueForName:@"content-type"]) &&
+      [_body length] > 0) {
+    NSString *bodyString = [[NSString alloc] initWithData:_body encoding:NSUTF8StringEncoding];
+    if ([bodyString isKindOfClass:[NSString class]] && [bodyString length] > 0) {
+      parsed = [ALNParseQueryString(bodyString) copy];
+      if (parsed == nil) {
+        parsed = @{};
+      }
+    }
+  }
+
+  self.cachedFormParams = parsed ?: @{};
+  return self.cachedFormParams ?: @{};
 }
 
 - (NSDictionary *)cookies {

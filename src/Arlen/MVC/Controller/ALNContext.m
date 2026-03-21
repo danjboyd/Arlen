@@ -216,6 +216,7 @@ static BOOL ALNETagListMatches(NSString *ifNoneMatchHeader, NSString *etag) {
 - (NSDictionary *)allParams {
   NSMutableDictionary *combined =
       [NSMutableDictionary dictionaryWithDictionary:self.request.queryParams ?: @{}];
+  [combined addEntriesFromDictionary:self.request.formParams ?: @{}];
   [combined addEntriesFromDictionary:self.params ?: @{}];
   id validated = self.stash[ALNContextValidatedParamsStashKey];
   if ([validated isKindOfClass:[NSDictionary class]]) {

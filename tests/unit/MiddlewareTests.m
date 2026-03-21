@@ -27,6 +27,15 @@
   return nil;
 }
 
+- (id)submitEcho:(ALNContext *)ctx {
+  (void)ctx;
+  return @{
+    @"name" : [self stringParamForName:@"name"] ?: @"",
+    @"csrf" : [self stringParamForName:@"csrf_token"] ?: @"",
+    @"all_params" : [self params] ?: @{},
+  };
+}
+
 - (id)ping:(ALNContext *)ctx {
   (void)ctx;
   [self renderText:@"pong\n"];
@@ -392,6 +401,56 @@
                                            }
                                               body:body]];
   XCTAssertEqual((NSInteger)200, submitResponse.statusCode);
+}
+
+- (void)testControllerHelpersExposeURLFormBodyParametersAfterCSRFSucceeds {
+  ALNApplication *app = [[ALNApplication alloc] initWithConfig:@{
+    @"environment" : @"test",
+    @"logFormat" : @"json",
+    @"session" : @{
+      @"enabled" : @(YES),
+      @"secret" : @"unit-test-secret-value-0123456789abcdef",
+    },
+    @"csrf" : @{ @"enabled" : @(YES) }
+  }];
+  [app registerRouteMethod:@"GET"
+                      path:@"/form"
+                      name:@"form"
+           controllerClass:[MiddlewareFormController class]
+                    action:@"form"];
+  [app registerRouteMethod:@"POST"
+                      path:@"/submit-echo"
+                      name:@"submit_echo"
+           controllerClass:[MiddlewareFormController class]
+                    action:@"submitEcho"];
+
+  ALNResponse *formResponse =
+      [app dispatchRequest:[self requestWithMethod:@"GET" path:@"/form" headers:@{}]];
+  NSString *cookiePair = [self cookiePairFromSetCookie:[formResponse headerForName:@"Set-Cookie"]];
+  NSDictionary *formJSON = [self jsonFromResponse:formResponse];
+  NSString *token = formJSON[@"csrf"];
+  NSData *body =
+      [[NSString stringWithFormat:@"csrf_token=%@&name=Peggy", token ?: @""]
+          dataUsingEncoding:NSUTF8StringEncoding];
+
+  ALNResponse *submitResponse =
+      [app dispatchRequest:[self requestWithMethod:@"POST"
+                                              path:@"/submit-echo"
+                                       queryString:@""
+                                           headers:@{
+                                             @"cookie" : cookiePair ?: @"",
+                                             @"content-type" : @"application/x-www-form-urlencoded",
+                                           }
+                                              body:body]];
+  XCTAssertEqual((NSInteger)200, submitResponse.statusCode);
+  NSDictionary *payload = [self jsonFromResponse:submitResponse];
+  XCTAssertEqualObjects(@"Peggy", payload[@"name"]);
+  XCTAssertEqualObjects(token, payload[@"csrf"]);
+  NSDictionary *allParams = [payload[@"all_params"] isKindOfClass:[NSDictionary class]]
+                                ? payload[@"all_params"]
+                                : @{};
+  XCTAssertEqualObjects(@"Peggy", allParams[@"name"]);
+  XCTAssertEqualObjects(token, allParams[@"csrf_token"]);
 }
 
 - (void)testRateLimitMiddlewareRejectsAfterLimit {

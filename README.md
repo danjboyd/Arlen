@@ -113,6 +113,10 @@ Phase 13/14/15/16 modules quick path:
 /path/to/Arlen/build/arlen module migrate --env development
 ```
 
+Run `module migrate --env <env>` before the first local `auth` registration or
+login attempt. Missing auth tables now surface an actionable module-migrate
+message instead of a generic database error.
+
 See `examples/phase16_modules_demo/README.md` for the canonical app-owned
 `admin-ui` + `search` + `ops` composition path on top of the matured Phase 16
 module stack.

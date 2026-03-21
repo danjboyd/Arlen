@@ -16,6 +16,7 @@ Immutable HTTP request model containing method/path/query/headers/body and parse
 | `headers` | `NSDictionary *` | `nonatomic, copy, readonly` | Public `headers` property available on `ALNRequest`. |
 | `body` | `NSData *` | `nonatomic, strong, readonly` | Public `body` property available on `ALNRequest`. |
 | `queryParams` | `NSDictionary *` | `nonatomic, copy, readonly` | Public `queryParams` property available on `ALNRequest`. |
+| `formParams` | `NSDictionary *` | `nonatomic, copy, readonly` | Public `formParams` property available on `ALNRequest`. |
 | `cookies` | `NSDictionary *` | `nonatomic, copy, readonly` | Public `cookies` property available on `ALNRequest`. |
 | `routeParams` | `NSDictionary *` | `nonatomic, copy` | Public `routeParams` property available on `ALNRequest`. |
 | `remoteAddress` | `NSString *` | `nonatomic, copy` | Public `remoteAddress` property available on `ALNRequest`. |

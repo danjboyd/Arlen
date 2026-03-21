@@ -18,47 +18,13 @@ static BOOL ALNIsSafeMethod(NSString *method) {
          [upper isEqualToString:@"OPTIONS"] || [upper isEqualToString:@"TRACE"];
 }
 
-static NSString *ALNURLFormDecodedComponent(NSString *component) {
-  if (![component isKindOfClass:[NSString class]] || [component length] == 0) {
-    return @"";
-  }
-  NSString *plusDecoded = [component stringByReplacingOccurrencesOfString:@"+" withString:@" "];
-  NSString *percentDecoded = [plusDecoded stringByRemovingPercentEncoding];
-  return [percentDecoded isKindOfClass:[NSString class]] ? percentDecoded : plusDecoded;
-}
-
 static NSString *ALNCSRFTokenFromFormBody(ALNRequest *request, NSString *queryParamName) {
   if (request == nil || ![queryParamName isKindOfClass:[NSString class]] ||
-      [queryParamName length] == 0 || [request.body length] == 0) {
+      [queryParamName length] == 0) {
     return nil;
   }
-  NSString *contentType = [[request headerValueForName:@"content-type"] lowercaseString];
-  if (![contentType containsString:@"application/x-www-form-urlencoded"]) {
-    return nil;
-  }
-  NSString *bodyString = [[NSString alloc] initWithData:request.body encoding:NSUTF8StringEncoding];
-  if (![bodyString isKindOfClass:[NSString class]] || [bodyString length] == 0) {
-    return nil;
-  }
-  NSArray *pairs = [bodyString componentsSeparatedByString:@"&"];
-  for (NSString *pair in pairs) {
-    if (![pair isKindOfClass:[NSString class]] || [pair length] == 0) {
-      continue;
-    }
-    NSRange equalsRange = [pair rangeOfString:@"="];
-    NSString *rawName = (equalsRange.location == NSNotFound) ? pair : [pair substringToIndex:equalsRange.location];
-    NSString *rawValue =
-        (equalsRange.location == NSNotFound) ? @"" : [pair substringFromIndex:(equalsRange.location + 1)];
-    NSString *name = ALNURLFormDecodedComponent(rawName);
-    if (![name isEqualToString:queryParamName]) {
-      continue;
-    }
-    NSString *value = ALNURLFormDecodedComponent(rawValue);
-    if ([value length] > 0) {
-      return value;
-    }
-  }
-  return nil;
+  NSString *value = request.formParams[queryParamName];
+  return [value isKindOfClass:[NSString class]] ? value : nil;
 }
 
 @interface ALNCSRFMiddleware ()
