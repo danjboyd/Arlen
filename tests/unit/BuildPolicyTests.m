@@ -235,6 +235,21 @@
                 @"watch mode should periodically retry failed builds");
 }
 
+- (void)testBoomhauerWatchFingerprintUsesHighResolutionMetadataAndModuleHeaders {
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *scriptPath = [repoRoot stringByAppendingPathComponent:@"bin/boomhauer"];
+  NSString *script = [self readFile:scriptPath];
+
+  XCTAssertTrue([script containsString:@"file_fingerprint_fields() {"]);
+  XCTAssertTrue([script containsString:@"stat -c %y \"$path\""],
+                @"watch mode should keep sub-second mtime precision");
+  XCTAssertTrue([script containsString:@"stat -c %z \"$path\""],
+                @"watch mode should keep sub-second ctime precision");
+  XCTAssertTrue([script containsString:
+                              @"append_fingerprint_entries \"$framework_root\" \"framework\" src modules GNUmakefile tools/eocc.m"],
+                @"watch mode should invalidate on framework module header changes");
+}
+
 - (void)testGNUmakefileIncludesJSONReliabilityGateTargets {
   NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
   NSString *makefilePath = [repoRoot stringByAppendingPathComponent:@"GNUmakefile"];
@@ -266,6 +281,52 @@
   XCTAssertTrue([script containsString:@"run_phase10g_dispatch_performance.sh"]);
   XCTAssertTrue([script containsString:@"run_phase10h_http_parse_performance.sh"]);
   XCTAssertTrue([script containsString:@"run_phase10m_blob_throughput.sh"]);
+}
+
+- (void)testGNUmakefileIncludesPerfSmokeTarget {
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *makefilePath = [repoRoot stringByAppendingPathComponent:@"GNUmakefile"];
+  NSString *makefile = [self readFile:makefilePath];
+
+  XCTAssertTrue([makefile containsString:@"ci-perf-smoke:"]);
+}
+
+- (void)testPhase4QualityPipelineRunsBroaderMacroPerfProfiles {
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *scriptPath = [repoRoot stringByAppendingPathComponent:@"tools/ci/run_phase4_quality.sh"];
+  NSString *script = [self readFile:scriptPath];
+
+  XCTAssertTrue([script containsString:@"run_perf_profile default"]);
+  XCTAssertTrue([script containsString:@"run_perf_profile middleware_heavy"]);
+  XCTAssertTrue([script containsString:@"run_perf_profile template_heavy"]);
+  XCTAssertTrue([script containsString:@"run_perf_profile api_reference"]);
+  XCTAssertTrue([script containsString:@"run_perf_profile migration_sample"]);
+}
+
+- (void)testPerfSmokeScriptDefaultsToTriageProfiles {
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *scriptPath = [repoRoot stringByAppendingPathComponent:@"tools/ci/run_perf_smoke.sh"];
+  NSString *script = [self readFile:scriptPath];
+
+  XCTAssertTrue([script containsString:@"ARLEN_PERF_SMOKE_PROFILES:-default,template_heavy"]);
+  XCTAssertTrue([script containsString:@"make perf"]);
+}
+
+- (void)testDocsQualityPipelineIncludesRoadmapConsistencyCheck {
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *scriptPath = [repoRoot stringByAppendingPathComponent:@"tools/ci/run_docs_quality.sh"];
+  NSString *script = [self readFile:scriptPath];
+
+  XCTAssertTrue([script containsString:@"check_roadmap_consistency.py"]);
+  XCTAssertTrue([script containsString:@"check_benchmark_contracts.py"]);
+}
+
+- (void)testGNUmakefileIncludesBenchmarkContractTarget {
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *makefilePath = [repoRoot stringByAppendingPathComponent:@"GNUmakefile"];
+  NSString *makefile = [self readFile:makefilePath];
+
+  XCTAssertTrue([makefile containsString:@"ci-benchmark-contracts:"]);
 }
 
 @end

@@ -105,8 +105,8 @@ def start_server(binary: Path, mode: str, port: int) -> subprocess.Popen[str]:
         command = [str(binary), "--env", "production", "--port", str(port)]
     process = subprocess.Popen(
         command,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
         text=True,
     )
     try:

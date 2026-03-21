@@ -25,6 +25,18 @@ Default gate:
 make perf
 ```
 
+CI smoke gate:
+
+```bash
+make ci-perf-smoke
+```
+
+This runs the checked-in `default` and `template_heavy` profiles with the same
+baseline/policy comparison logic as `make perf`, then archives artifacts under
+`build/perf/ci_smoke/`. It is a lighter standalone subset of the broader
+multi-profile macro perf coverage already exercised by `make ci-quality`, so it
+remains a local/manual triage lane rather than a separate GitHub workflow.
+
 Specific profile:
 
 ```bash
@@ -35,6 +47,12 @@ Fast local path:
 
 ```bash
 ARLEN_PERF_FAST=1 ARLEN_PERF_SKIP_GATE=0 ARLEN_PERF_REQUESTS=40 make perf
+```
+
+Smoke-gate overrides:
+
+```bash
+ARLEN_PERF_SMOKE_PROFILES=default,template_heavy ARLEN_PERF_SMOKE_REPEATS=3 make ci-perf-smoke
 ```
 
 External comparison path (production-style config, reduced logging overhead, concurrent clients):

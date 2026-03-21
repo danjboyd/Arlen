@@ -46,7 +46,36 @@ When applicable, update:
 - If behavior is planned but not implemented, label clearly as planned.
 - Remove or mark stale guidance immediately when behavior changes.
 
-## 6. Review Checklist for Documentation Changes
+## 6. Upstream vs. Downstream Issue Ownership
+
+Arlen is an upstream framework and may receive bug reports or feature requests
+from downstream apps such as `MusicianApp`.
+
+Documentation should preserve that ownership split:
+
+- Arlen docs record upstream truth:
+  - report received
+  - reproduced or not reproduced upstream
+  - fix landed or not landed upstream
+  - commit/date/test evidence
+  - whether downstream revalidation is still pending
+- Downstream app docs record downstream truth:
+  - app impact
+  - app workaround
+  - app rollout decision
+  - app-level revalidation
+  - final downstream closure
+- Upstream should not mark a downstream app issue fully closed on the app's
+  behalf unless the downstream repo has explicitly revalidated and adopted that
+  closure.
+- Preferred upstream statuses for downstream-reported issues are:
+  - `fixed upstream`
+  - `not reproduced upstream`
+  - `awaiting downstream revalidation`
+- When cross-linking between repos, link the related report/fix rather than
+  duplicating ownership. Each repo should keep its own status language.
+
+## 7. Review Checklist for Documentation Changes
 
 1. Is the first-time developer path still clear?
 2. Are commands copy/paste runnable?
@@ -56,8 +85,10 @@ When applicable, update:
 6. Can a new developer reach "first running app" by following `docs/FIRST_APP_GUIDE.md` exactly?
 7. If public headers changed, were API docs regenerated with `python3 tools/docs/generate_api_reference.py`?
 8. Did the docs quality gate pass (`make ci-docs`)?
+9. If comparative benchmark contract fixtures changed, do `tests/fixtures/benchmarking/*` and `docs/COMPARATIVE_BENCHMARKING.md` still describe the same source-of-truth split?
+10. If the change references a downstream-reported issue, does the wording keep upstream and downstream closure ownership distinct?
 
-## 7. Browser Docs Build Check
+## 8. Browser Docs Build Check
 
 When documentation content changes, run:
 
@@ -73,6 +104,7 @@ Validate that:
 - newly added pages are rendered
 - API reference pages under `build/docs/docs/api/` render and link correctly
 - generated API reference markdown (`docs/API_REFERENCE.md` + `docs/api/*.md`) is up to date with no uncommitted generator diff
+- imported comparative benchmark contract fixtures remain consistent with `docs/COMPARATIVE_BENCHMARKING.md`
 
 Automated gate entrypoint:
 
@@ -81,8 +113,10 @@ bash ./tools/ci/run_docs_quality.sh
 ```
 
 This command is CI-enforced and is the source of truth for docs quality pass/fail.
+It also validates roadmap/status summary consistency across `README.md`,
+`docs/STATUS.md`, and the historical aggregate/index docs.
 
-## 8. Ongoing Maintenance Cadence
+## 9. Ongoing Maintenance Cadence
 
 - Update docs in the same change set as feature code whenever possible.
 - Run periodic docs audits at phase boundaries.

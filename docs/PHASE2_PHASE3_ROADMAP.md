@@ -1,7 +1,11 @@
 # Arlen Phase 2 + Phase 3 Roadmap Index
 
-Status: Active (Phase 2A-2D complete; Phase 3A-3H complete; Phase 4A-4E complete; Phase 5A-5E complete; Phase 7A/7B/7C/7D/7E/7F/7G/7H initial slices implemented; Phase 7 follow-on active; Phase 8A complete; Phase 8B complete; Phase 9A/9B/9C/9D/9E/9F/9G/9H/9I/9J complete; Phase 10 complete with 10A-10M delivered; Phase 11 complete with 11A-11F delivered; Phase 12 complete with 12A-12F delivered; Phase 13 complete with 13A-13I delivered; Phase 14 complete with 14A-14I delivered; Phase 15 complete with 15A-15E delivered; Phase 16 planned)
-Last updated: 2026-03-10
+Status: Historical aggregate index (authoritative current status lives in the individual phase roadmaps; delivery is complete through Phase 19, and Phase 7 is complete for current first-party scope)
+Last updated: 2026-03-21
+
+This file is a rolled-up historical index. It preserves the original rollout
+sequencing for Phases 2-19, but the current source of truth for status is the
+individual `docs/PHASE*_ROADMAP.md` files plus the top-level `README.md`.
 
 This index points to the current roadmap documents:
 
@@ -53,7 +57,7 @@ Phase 3 is focused on platform maturity:
 - Phase 4D complete: builder execution caching + prepared statement reuse policy + structured/redacted query diagnostics
 - Phase 4E complete: SQL conformance matrix + property/long-run regression hardening + migration/deprecation policy finalization
 
-## Planned Next Phases (Post-4E)
+## Rolled-Out Phases (Post-4E)
 
 Phase 4 rollout is complete in `docs/PHASE4_ROADMAP.md`.
 
@@ -96,11 +100,9 @@ Phase 7 execution/planning is defined in `docs/PHASE7_ROADMAP.md`, including:
   - quorum-gated readiness contract (`readinessRequiresClusterQuorum` + observed/expected node controls)
   - expanded `/clusterz` quorum + coordination capability-matrix payload
   - deterministic cluster diagnostics headers (`X-Arlen-Cluster-Status`, observed/expected node counts)
-- remaining 7A/7B/7C/7D/7E/7F/7G/7H follow-on:
-  - additional runtime hardening for `boomhauer`/`propane`
-  - security defaults and policy contracts
-  - deeper observability/operability maturity and coding-agent-first DX contracts
-  - ecosystem service durability, frontend integration starters, and distributed-runtime depth
+- Phase 7 closeout for current first-party scope:
+  - follow-on runtime/security/operability and ecosystem-depth work landed across later hardening phases
+  - current authoritative closeout status is `docs/PHASE7_ROADMAP.md` (`Complete for current first-party scope`)
 
 Phase 8 execution/planning is defined in `docs/PHASE8_ROADMAP.md`, including:
 
@@ -208,9 +210,9 @@ Phase 15 execution is defined in `docs/PHASE15_ROADMAP.md`, with current deliver
 - `arlen module eject auth-ui --json` shipped for `generated-app-ui`
 - docs, examples, focused HTTP coverage, and `make phase15-confidence` shipped
 
-Phase 16 execution is defined in `docs/PHASE16_ROADMAP.md`, with planned delivery state:
+Phase 16 execution is defined in `docs/PHASE16_ROADMAP.md`, with delivered state:
 
-- a deliberate maturity pass across `jobs`, `notifications`, `storage`, `search`, `ops`, and `admin-ui`
+- maturity pass across `jobs`, `notifications`, `storage`, `search`, `ops`, and `admin-ui`
 - durable module-owned state where runtime snapshots are no longer sufficient
 - stronger operator/admin ergonomics, drilldowns, and export/bulk-action flows
 - docs, examples, and `make phase16-confidence` as the closeout gate

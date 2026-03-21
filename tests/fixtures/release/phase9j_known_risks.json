@@ -1,6 +1,6 @@
 {
   "version": "phase9j-known-risk-register-v1",
-  "lastUpdated": "2026-03-13",
+  "lastUpdated": "2026-03-21",
   "risks": [
     {
       "id": "phase9j-risk-tsan-nonblocking",
@@ -14,11 +14,11 @@
     {
       "id": "phase9j-risk-benchmark-ladder",
       "title": "Middleware-heavy benchmark concurrency ladder remains constrained to 1,4",
-      "status": "active",
+      "status": "mitigated",
       "severity": "low",
       "owner": "performance-core",
-      "targetDate": "2026-03-15",
-      "notes": "Phase E benchmark follow-on must validate stability and confidence at higher concurrency levels."
+      "targetDate": "2026-03-21",
+      "notes": "Deferred benchmark roadmap removes this from active release-risk scope; higher-concurrency middleware-heavy validation now lives in the parked comparative benchmark follow-on."
     },
     {
       "id": "phase9j-risk-sanitizer-suppression-governance",

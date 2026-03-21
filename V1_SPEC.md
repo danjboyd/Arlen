@@ -167,6 +167,9 @@ Behavior:
 - `slot` captures rendered output until the matching `endslot`.
 - Body output is exposed as the `content` slot when a layout is rendered through `ALNView`.
 - Layout paths are normalized to `.html.eoc`.
+- Named-slot fallback/default content remains layout-owned in v1; callers either fill a
+  slot or let the layout render its own fallback markup around the corresponding `yield`
+  site.
 
 ### 6.2 Required Locals
 

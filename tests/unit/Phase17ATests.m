@@ -242,6 +242,44 @@
   XCTAssertEqualObjects(@"STATE INSERT arlen_schema_migrations__analytics", insertEntry[@"sql"]);
 }
 
+- (void)testMigrationRunnerExecutesMultipleTopLevelStatementsForGenericDialects {
+  NSString *root = [self temporaryDirectoryNamed:@"multi"];
+  NSString *migrationPath = [root stringByAppendingPathComponent:@"001_bootstrap.sql"];
+  NSString *sql =
+      @"CREATE EXTENSION IF NOT EXISTS pg_trgm;\n"
+       "CREATE TABLE example (id INT PRIMARY KEY, body TEXT);\n"
+       "INSERT INTO example (id, body) VALUES (1, $$semi;colon$$);\n";
+  XCTAssertTrue([sql writeToFile:migrationPath
+                      atomically:YES
+                        encoding:NSUTF8StringEncoding
+                           error:nil]);
+
+  Phase17AFakeDialect *dialect = [[Phase17AFakeDialect alloc] init];
+  dialect.dialectNameValue = @"postgres";
+  Phase17AFakeAdapter *adapter = [[Phase17AFakeAdapter alloc] init];
+  adapter.sqlDialectImpl = dialect;
+
+  NSError *error = nil;
+  NSArray<NSString *> *appliedFiles = nil;
+  BOOL ok = [ALNMigrationRunner applyMigrationsAtPath:root
+                                             database:adapter
+                                       databaseTarget:@"default"
+                                    versionNamespace:nil
+                                               dryRun:NO
+                                         appliedFiles:&appliedFiles
+                                                error:&error];
+  XCTAssertTrue(ok, @"%@", error);
+  XCTAssertNil(error);
+  XCTAssertEqualObjects((@[ migrationPath ]), appliedFiles);
+  XCTAssertEqualObjects((@[ @"001_bootstrap" ]), [adapter.appliedVersions array]);
+
+  NSArray<NSString *> *executed = [NSArray arrayWithArray:adapter.executedStatements];
+  XCTAssertEqual((NSUInteger)3, [executed count]);
+  XCTAssertEqualObjects(@"CREATE EXTENSION IF NOT EXISTS pg_trgm", executed[0]);
+  XCTAssertEqualObjects(@"\nCREATE TABLE example (id INT PRIMARY KEY, body TEXT)", executed[1]);
+  XCTAssertEqualObjects(@"\nINSERT INTO example (id, body) VALUES (1, $$semi;colon$$)", executed[2]);
+}
+
 - (void)testMigrationRunnerRejectsSaveTransactionStatementsForGenericDialects {
   NSString *root = [self temporaryDirectoryNamed:@"forbidden"];
   NSString *migrationPath = [root stringByAppendingPathComponent:@"001_bad.sql"];

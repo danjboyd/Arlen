@@ -1,0 +1,36 @@
+{
+  "schema_version": 1,
+  "name": "arlen_comparative_db_scenarios_v1",
+  "source_program": "../ArlenBenchmarking",
+  "scenarios": [
+    {
+      "id": "E_db_read",
+      "description": "Indexed database read endpoint with deterministic category filter and limit",
+      "method": "GET",
+      "path": "/api/db/items?category=alpha&limit=50",
+      "contract": {
+        "type": "json",
+        "required_keys": ["items", "count", "category", "limit"]
+      },
+      "expected_status": 200,
+      "enabled": true
+    },
+    {
+      "id": "E_db_write",
+      "description": "Transactional insert endpoint with deterministic payload shape",
+      "method": "POST",
+      "path": "/api/db/items",
+      "request_body": {
+        "name": "phase7-write-sample",
+        "amount": 777,
+        "category": "omega"
+      },
+      "contract": {
+        "type": "json",
+        "required_keys": ["id", "name", "amount", "category", "created"]
+      },
+      "expected_status": 201,
+      "enabled": true
+    }
+  ]
+}

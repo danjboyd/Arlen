@@ -1,9 +1,10 @@
 # Phase D Baseline Campaign
 
 Status: Complete (2026-02-24)  
-Last updated: 2026-02-24
+Last updated: 2026-03-21
 
 Related docs:
+- `docs/COMPARATIVE_BENCHMARKING.md`
 - `docs/COMPETITIVE_BENCHMARK_ROADMAP.md`
 - `docs/PHASEB_PARITY_CHECKLIST_FASTAPI.md`
 - `docs/PHASEC_BENCHMARK_PROTOCOL.md`
@@ -30,7 +31,7 @@ Pair definitions:
 - `comparison_http`: Arlen `comparison_http` vs FastAPI `fastapi_comparison_http`
 - `middleware_heavy`: Arlen `middleware_heavy` vs FastAPI `fastapi_middleware_heavy` (pair ladder override: `1,4`)
 
-The middleware-heavy ladder is intentionally constrained pending Phase E triage of higher-concurrency stability behavior in Arlen.
+The middleware-heavy ladder was intentionally constrained in the archived 2026-02-24 baseline run. Treat that constraint as historical campaign context; the later comparative optimization/publication track moved to the sibling benchmark repo.
 
 Claim targets:
 

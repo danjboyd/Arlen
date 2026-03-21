@@ -392,6 +392,8 @@ make browser-error-audit
 make parity-phaseb
 make perf-phasec
 make perf-phased
+make ci-perf-smoke
+make ci-benchmark-contracts
 make check
 make ci-quality
 make ci-json-abstraction
@@ -414,7 +416,9 @@ make phase5e-confidence
 `make parity-phaseb` runs the Arlen-vs-FastAPI Phase B parity gate and writes `build/perf/parity_fastapi_latest.json`.
 `make perf-phasec` runs the Phase C warmup/concurrency-ladder protocol and writes `build/perf/phasec/latest_protocol_report.json`.
 `make perf-phased` runs the Phase D baseline campaign (parity + comparison matrix) and writes `build/perf/phased/latest_campaign_report.json`.
-`make ci-quality` runs the Phase 5E quality gate (including soak/fault tests, runtime concurrency checks, JSON abstraction/performance gates, Phase 9I fault injection, and confidence artifact generation).
+`make ci-perf-smoke` runs a lighter local/manual macro perf smoke lane for the checked-in `default` and `template_heavy` profiles using the same baseline/policy gate as `make perf`, and archives artifacts under `build/perf/ci_smoke`. It stays standalone because `make ci-quality` already exercises the broader multi-profile macro perf matrix in CI.
+`make ci-benchmark-contracts` validates the imported lightweight comparative benchmark manifests/config under `tests/fixtures/benchmarking/` against the documented source-of-truth split in `docs/COMPARATIVE_BENCHMARKING.md`.
+`make ci-quality` runs the Phase 5E quality gate (including unit/integration coverage, the broader multi-profile macro perf gate, soak/fault tests, runtime concurrency checks, JSON abstraction/performance gates, Phase 9I fault injection, and confidence artifact generation).
 `make ci-json-abstraction` blocks direct runtime `NSJSONSerialization` usage outside `ALNJSONSerialization`.
 `make ci-json-perf` runs the Phase 10E JSON backend microbenchmark gate and writes artifacts under `build/release_confidence/phase10e`.
 `make ci-dispatch-perf` runs the Phase 10G dispatch benchmark gate and writes artifacts under `build/release_confidence/phase10g`.
@@ -453,6 +457,7 @@ ARLEN_PERF_PROFILE=template_heavy make perf
 ARLEN_PERF_PROFILE=api_reference make perf
 ARLEN_PERF_PROFILE=migration_sample make perf
 ARLEN_PERF_PROFILE=comparison_http ARLEN_PERF_SKIP_GATE=1 make perf
+ARLEN_PERF_SMOKE_PROFILES=default,template_heavy ARLEN_PERF_SMOKE_REPEATS=3 make ci-perf-smoke
 ```
 
 ## 5. Run Tech Demo
@@ -864,13 +869,22 @@ Sanitizer gate command:
 make ci-sanitizers
 ```
 
-`make ci-sanitizers` runs the Phase 9H blocking lane (ASan/UBSan), validates suppression registry
+`make ci-sanitizers` runs the Phase 10M ASan/UBSan sanitizer matrix and writes matrix artifacts
+under `build/release_confidence/phase10m/sanitizers`.
+
+Explicit Phase 9H-style blocking lane:
+
+```bash
+bash ./tools/ci/run_phase5e_sanitizers.sh
+```
+
+That entrypoint runs the narrower ASan/UBSan blocking gate, validates suppression registry
 contracts, and generates confidence artifacts under `build/release_confidence/phase9h`.
 
 Optional TSAN experimental lane:
 
 ```bash
-ARLEN_SANITIZER_INCLUDE_TSAN=1 make ci-sanitizers
+ARLEN_SANITIZER_INCLUDE_TSAN=1 bash ./tools/ci/run_phase5e_sanitizers.sh
 ```
 
 TSAN artifacts are retained at `build/sanitizers/tsan` for triage.

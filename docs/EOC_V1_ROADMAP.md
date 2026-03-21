@@ -1,7 +1,7 @@
 # EOC v1 Implementation Roadmap
 
-Status: Active  
-Last updated: 2026-03-13
+Status: Complete with follow-on backlog
+Last updated: 2026-03-21
 
 Related documents:
 
@@ -292,11 +292,18 @@ Exit criteria:
 - Unit/integration tests pass.
 - Example app demonstrates end-to-end workflow.
 
-## Suggested Immediate Next Steps
+## Post-v1 Follow-On Backlog
 
-1. Add missing-required-local static validation for composition calls when
-   `requires` declarations and call-site locals are both statically known.
-2. Decide whether named-slot defaults should remain layout-owned only or gain a
-   compact fallback syntax in EOC itself.
-3. Keep the scaffold and example apps on the composition-first path as future
-   template helpers/components land.
+1. Deferred beyond v1: sound static missing-required-local validation for
+   composition calls would require a stronger locals contract than the current
+   inheritance model provides. Because includes/layouts/render calls overlay on
+   ambient context instead of replacing it, `eocc` cannot prove absence without
+   false positives unless a future revision adds explicit context-isolation or
+   guaranteed-input declarations at call sites.
+
+Resolved follow-on decisions:
+
+- Named-slot defaults remain layout-owned only in v1; EOC does not add a
+  caller-side fallback slot syntax.
+- The scaffold and example apps stay on the composition-first path, and that
+  path is already enforced by generated-app/example integration coverage.

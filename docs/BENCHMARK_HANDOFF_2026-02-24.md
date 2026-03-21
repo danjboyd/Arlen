@@ -1,10 +1,23 @@
 # Benchmark Handoff (2026-02-24 EOD)
 
+Historical handoff note:
+
+This document preserves the original Phase D checkpoint. The current benchmark
+roadmap state is archived as complete via the external comparative benchmark
+program described in `docs/COMPARATIVE_BENCHMARKING.md` and
+`docs/COMPETITIVE_BENCHMARK_ROADMAP.md`.
+
 Status snapshot:
 
 - Competitive benchmark phases complete: `A`, `B`, `C`, `D`
-- Remaining phases: `E`, `F`
-- Roadmap state: `docs/COMPETITIVE_BENCHMARK_ROADMAP.md` reflects Phase D complete and Phase E-F pending
+- Remaining phases at handoff time: `E`, `F`
+- Current roadmap state: `docs/COMPETITIVE_BENCHMARK_ROADMAP.md` is archived; the sibling `../ArlenBenchmarking` program now carries the comparative optimization/reporting/publication track
+
+Current resolution:
+
+- sibling comparative benchmark program: `../ArlenBenchmarking`
+- external status snapshot: non-DB `Phase 5 PACKAGE COMPLETE` and DB `Phase 9 PACKAGE COMPLETE` on 2026-02-25
+- remaining work: external marketing/engineering approval sign-off, not missing benchmark-suite implementation in Arlen
 
 ## Latest Verified Run
 
@@ -33,13 +46,13 @@ Primary artifacts:
   - Arlen p95 `1.187 ms`, FastAPI p95 `2.476 ms`
   - Arlen `553.52 req/s`, FastAPI `486.05 req/s`
 
-## Known Risk / Phase E Entry Point
+## Historical Known Risk / Planned Phase E Entry Point
 
 - `middleware_heavy` at higher concurrency caused Arlen server segfault during baseline execution.
 - Temporary protocol guardrail applied: pair ladder constrained to `1,4` in `tests/performance/protocols/phased_baseline_campaign.json`.
-- This issue is queued for Phase E triage before claim finalization for higher-concurrency middleware-heavy scenarios.
+- At handoff time, this issue was queued for Phase E triage before claim finalization for higher-concurrency middleware-heavy scenarios.
 
-## Morning Resume Checklist
+## Historical Morning Resume Checklist
 
 1. Reproduce and isolate the `middleware_heavy` high-concurrency crash (`c>=8`) under the same Phase D harness.
 2. Implement and validate runtime fix in Arlen.

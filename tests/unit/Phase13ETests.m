@@ -655,6 +655,22 @@ static NSUInteger gPhase15UIContextCalls = 0;
   XCTAssertTrue([message[@"textBody"] containsString:@"/auth/password/reset?token="]);
 }
 
+- (void)testAuthStylesheetNormalizesSharedActionTypography {
+  NSString *repoRoot = [self repoRoot];
+  NSString *stylesheetPath =
+      [repoRoot stringByAppendingPathComponent:@"modules/auth/Resources/Public/auth.css"];
+  NSError *error = nil;
+  NSString *stylesheet = [NSString stringWithContentsOfFile:stylesheetPath
+                                                   encoding:NSUTF8StringEncoding
+                                                      error:&error];
+  XCTAssertNil(error);
+  XCTAssertNotNil(stylesheet);
+  XCTAssertTrue([stylesheet containsString:@".auth-button,\n.auth-link {"]);
+  XCTAssertTrue([stylesheet containsString:@"font-family: inherit;"]);
+  XCTAssertTrue([stylesheet containsString:@"font-size: 1rem;"]);
+  XCTAssertTrue([stylesheet containsString:@"line-height: 1.2;"]);
+}
+
 - (void)testModuleEjectAuthUIScaffoldsGeneratedTemplatesAndConfig {
   NSString *repoRoot = [self repoRoot];
   NSString *tempApp = [self createTempDirectoryWithPrefix:@"phase15-auth-eject"];

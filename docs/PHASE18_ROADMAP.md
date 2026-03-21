@@ -1,7 +1,7 @@
 # Arlen Phase 18 Roadmap
 
-Status: complete on 2026-03-13 (`18A-18G`); downstream follow-up `18H` queued
-Last updated: 2026-03-14
+Status: complete on 2026-03-14 (`18A-18H`)
+Last updated: 2026-03-21
 
 Related docs:
 - `docs/AUTH_MODULE.md`

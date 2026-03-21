@@ -56,7 +56,7 @@ Convenience targets:
 
 ```bash
 make ci-quality
-make ci-sanitizers
+bash ./tools/ci/run_phase5e_sanitizers.sh
 make phase5e-confidence
 ```
 

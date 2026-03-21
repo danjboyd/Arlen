@@ -56,7 +56,7 @@ tests/gates include:
 - Blocking lane (`asan_ubsan_blocking`) runs via:
 
 ```bash
-make ci-sanitizers
+bash ./tools/ci/run_phase5e_sanitizers.sh
 ```
 
 The gate now enforces:

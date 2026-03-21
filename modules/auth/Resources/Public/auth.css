@@ -57,6 +57,9 @@ body {
   border-radius: 999px;
   padding: 0.7rem 1.1rem;
   text-decoration: none;
+  font-family: inherit;
+  font-size: 1rem;
+  line-height: 1.2;
   font-weight: 700;
 }
 

@@ -597,8 +597,10 @@ Lifecycle diagnostics:
 - `make browser-error-audit`: run the dedicated browser error audit bundle and generate a review gallery at `build/browser-error-audit/index.html`
   - captures representative build/runtime/browser error scenarios into browsable HTML artifacts
   - preserves raw responses plus wrapped review pages so plain-text/JSON browser fallbacks are easy to inspect
+- `make ci-perf-smoke`: run the lighter standalone macro perf smoke lane for the checked-in `default` and `template_heavy` profiles and archive artifacts under `build/perf/ci_smoke`
+  - intended for local/manual perf triage; `make ci-quality` already covers the broader multi-profile macro perf matrix in CI
 - `make ci-quality`: run unit + integration + multi-profile perf quality gate plus runtime concurrency, JSON abstraction/performance gates, and Phase 9I fault-injection checks
-- `make ci-sanitizers`: run Phase 9H blocking sanitizer gate (ASan/UBSan + runtime probe + data-layer checks), validate suppression registry, and generate sanitizer confidence artifacts under `build/release_confidence/phase9h`
+- `make ci-sanitizers`: run the Phase 10M ASan/UBSan sanitizer matrix (unit, runtime probe, backend parity, fault injection, soak, chaos restart, static analysis) and generate artifacts under `build/release_confidence/phase10m/sanitizers`
 - `make ci-fault-injection`: run Phase 9I runtime seam fault-injection matrix and generate artifacts under `build/release_confidence/phase9i`
 - `make ci-release-certification`: run Phase 9J enterprise release checklist and generate certification artifacts under `build/release_confidence/phase9j`
 - `make ci-json-abstraction`: fail when runtime sources bypass `ALNJSONSerialization`
@@ -617,6 +619,7 @@ Lifecycle diagnostics:
 - `make phase19-confidence`: run the Phase 19 incremental build-graph confidence gate and generate artifacts in `build/release_confidence/phase19`
 - `tools/ci/run_phase5e_quality.sh`: explicit Phase 5E CI gate entrypoint
 - `tools/ci/run_phase5e_sanitizers.sh`: explicit Phase 5E sanitizer CI gate entrypoint
+  - remains the explicit Phase 9H-style blocking lane for ASan/UBSan unit + runtime/data-layer checks plus Phase 9H confidence artifact generation under `build/release_confidence/phase9h`
   - set `ARLEN_SANITIZER_INCLUDE_INTEGRATION=1` to include full integration suite (default is `0`)
   - set `ARLEN_SANITIZER_INCLUDE_TSAN=1` to run TSAN experimental lane (non-blocking)
 - `tools/ci/run_phase5e_tsan_experimental.sh`: execute TSAN experimental lane directly and retain artifacts in `build/sanitizers/tsan`
@@ -631,6 +634,13 @@ Lifecycle diagnostics:
   - `ARLEN_PHASE9J_OUTPUT_DIR` overrides artifact output directory
   - `ARLEN_PHASE9J_SKIP_GATES=1` skips gate execution and regenerates certification from existing artifacts
   - `ARLEN_PHASE9J_ALLOW_INCOMPLETE=1` emits an incomplete pack without failing the command
+- `tools/ci/run_perf_smoke.sh`: explicit macro perf-smoke entrypoint used by `make ci-perf-smoke`
+  - kept standalone because the self-hosted Phase 5E quality workflow already runs the fuller macro perf matrix
+  - `ARLEN_PERF_SMOKE_PROFILES` selects the checked-in macro perf profiles to gate (default `default,template_heavy`)
+  - `ARLEN_PERF_SMOKE_REQUESTS` overrides requests per scenario (default `120`)
+  - `ARLEN_PERF_SMOKE_REPEATS` overrides median-aggregation repeats (default `3`)
+  - `ARLEN_PERF_SMOKE_OUTPUT_DIR` overrides the artifact output directory
+  - `ARLEN_PERF_SMOKE_SKIP_BUILD=1` reuses already-built binaries across profiles
 - `tools/ci/run_phase10e_json_performance.sh`: explicit Phase 10E JSON backend performance gate entrypoint
   - `ARLEN_PHASE10E_ITERATIONS` controls benchmark iterations (default `1500`)
   - `ARLEN_PHASE10E_WARMUP` controls warmup iterations (default `200`)
@@ -681,8 +691,11 @@ Lifecycle diagnostics:
   - use `--json-performance-manifest <path>` to override JSON performance manifest location
   - use `--allow-missing-certification` only for non-RC smoke/local packaging flows
 - `arlen generate frontend <Name> --preset <vanilla-spa|progressive-mpa>`: scaffold frontend starter templates with built-in API wiring examples
-- `make ci-docs`: run docs quality gate (API docs regen consistency + HTML artifact/link checks)
+- `make ci-docs`: run docs quality gate (API docs regen consistency + roadmap summary consistency + imported comparative benchmark-contract consistency + HTML artifact/link checks)
+- `make ci-benchmark-contracts`: validate the imported lightweight comparative benchmark fixtures under `tests/fixtures/benchmarking/`
 - `tools/ci/run_docs_quality.sh`: docs-quality CI entrypoint used by `make ci-docs` and workflow gate
+- `tools/ci/check_roadmap_consistency.py`: validates that `README.md`, `docs/STATUS.md`, and historical aggregate/index docs stay aligned with the authoritative per-phase roadmap headers
+- `tools/ci/check_benchmark_contracts.py`: validates the imported comparative benchmark manifests/config contract pack and the source-of-truth bridge notes in `docs/COMPARATIVE_BENCHMARKING.md`
 - `make docs-api`: regenerate API reference markdown from `Arlen.h` / `ArlenData.h` exports
 - `make docs-html`: generate browser-friendly docs under `build/docs`
 - `make docs-serve`: serve generated docs locally (default `http://127.0.0.1:4173`, override via `DOCS_PORT`)

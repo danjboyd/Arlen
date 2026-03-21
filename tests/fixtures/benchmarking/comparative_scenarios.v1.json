@@ -1,0 +1,80 @@
+{
+  "schema_version": 1,
+  "name": "arlen_comparative_http_api_scenarios_v1",
+  "source_program": "../ArlenBenchmarking",
+  "scenarios": [
+    {
+      "id": "A_json_status",
+      "description": "Minimal JSON status endpoint",
+      "method": "GET",
+      "path": "/api/status",
+      "contract": {
+        "type": "json",
+        "required_keys": ["server", "ok", "timestamp"]
+      },
+      "expected_status": 200
+    },
+    {
+      "id": "B_json_transform",
+      "description": "JSON transform-style endpoint using moderate path payload",
+      "method": "GET",
+      "path": "/api/echo/{name}",
+      "path_params": {
+        "name": "benchmark_payload_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "contract": {
+        "type": "json",
+        "required_keys": ["name", "path"]
+      },
+      "expected_status": 200
+    },
+    {
+      "id": "C_middleware_heavy",
+      "description": "Middleware-heavy API path contract (security + trace headers)",
+      "method": "GET",
+      "path": "/api/status",
+      "contract": {
+        "required_headers": [
+          "content-security-policy",
+          "cross-origin-opener-policy",
+          "cross-origin-resource-policy",
+          "referrer-policy",
+          "x-content-type-options",
+          "x-frame-options",
+          "x-permitted-cross-domain-policies",
+          "x-request-id",
+          "x-correlation-id",
+          "x-trace-id",
+          "traceparent"
+        ]
+      },
+      "expected_status": 200
+    },
+    {
+      "id": "D_template",
+      "description": "Template/render endpoint",
+      "method": "GET",
+      "path": "/",
+      "contract": {
+        "type": "html",
+        "required_substrings": [
+          "<h1>Arlen EOC Dev Server</h1>",
+          "template:multiline-ok",
+          "<a href=\"/\">Home</a>",
+          "<a href=\"/about\">About</a>"
+        ]
+      },
+      "expected_status": 200
+    },
+    {
+      "id": "E_db_read",
+      "description": "Database read benchmark path placeholder",
+      "enabled": false
+    },
+    {
+      "id": "E_db_write",
+      "description": "Database write benchmark path placeholder",
+      "enabled": false
+    }
+  ]
+}

@@ -14,7 +14,8 @@ The registry is validated by:
 python3 ./tools/ci/check_sanitizer_suppressions.py
 ```
 
-This check is part of `make ci-sanitizers` and must pass for release candidates.
+This check is part of the explicit Phase 9H-style sanitizer entrypoint
+`bash ./tools/ci/run_phase5e_sanitizers.sh` and must pass for release candidates.
 
 ## Required Fields
 

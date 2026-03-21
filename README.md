@@ -29,14 +29,7 @@ Arlen is designed to solve the same class of problems as frameworks like Mojolic
 - Phase 5C: complete (target-aware multi-database migration/schema-codegen tooling and deterministic per-target state).
 - Phase 5D: complete (typed row/insert/update schema contracts, typed decode helpers, and typed SQL codegen workflow).
 - Phase 5E: complete (data-layer soak/fault hardening gates and release confidence artifact pack generation).
-- Phase 7A: initial slice implemented (websocket runtime backpressure boundary + deterministic overload diagnostics).
-- Phase 7B: initial slice implemented (security profile presets + fail-fast security misconfiguration startup diagnostics).
-- Phase 7C: initial slice implemented (trace/correlation propagation headers, JSON health/readiness signal payloads, and deploy operability validation script integration).
-- Phase 7D: initial slice implemented (jobs idempotency-key durability contracts, cache expiry/removal conformance hardening, and retry-policy wrappers for mail/attachments).
-- Phase 7E: initial slice implemented (template lint diagnostics, expanded multiline/nested fixture coverage, and include/render path hardening integration checks).
-- Phase 7F: initial slice implemented (frontend starter generation presets, static-asset/API wiring templates, and reproducibility/deploy-packaging validation).
-- Phase 7G: initial slice implemented (coding-agent JSON workflow contracts, fix-it diagnostics, and deploy/build/check planning payloads).
-- Phase 7H: initial slice implemented (quorum-gated readiness, expanded `/clusterz` coordination contracts, and distributed-runtime diagnostics headers).
+- Phase 7: complete for current first-party scope (runtime hardening, security defaults, observability/operability, ecosystem durability, template pipeline maturity, frontend starters, coding-agent DX, and distributed-runtime contracts; closeout verified 2026-03-13).
 - Phase 9: complete (documentation platform, generated API reference, onboarding tracks/migration guides, and enterprise release certification hardening track).
 - Phase 11A: complete (session/bearer/CSRF hardening).
 - Phase 11B: complete (HTTP header and parser-boundary hardening).
@@ -147,6 +140,8 @@ make check
 make parity-phaseb
 make perf-phasec
 make perf-phased
+make ci-perf-smoke
+make ci-benchmark-contracts
 make ci-quality
 make ci-fault-injection
 make ci-release-certification
@@ -157,6 +152,10 @@ make phase16-confidence
 make test-data-layer
 make browser-error-audit
 ```
+
+`make ci-perf-smoke` is the lighter local/manual macro perf subset. The
+self-hosted quality workflow already runs the broader multi-profile macro perf
+matrix through `make ci-quality`.
 
 `make browser-error-audit` generates a browser-reviewable gallery of representative
 build/runtime error surfaces under `build/browser-error-audit/index.html`.
@@ -239,7 +238,9 @@ High-value guides:
 - [Arlen for Django](docs/ARLEN_FOR_DJANGO.md)
 - [Arlen for Laravel](docs/ARLEN_FOR_LARAVEL.md)
 - [Arlen for FastAPI](docs/ARLEN_FOR_FASTAPI.md)
-- [Competitive Benchmark Roadmap](docs/COMPETITIVE_BENCHMARK_ROADMAP.md)
+- [Comparative Benchmarking](docs/COMPARATIVE_BENCHMARKING.md)
+- [Competitive Benchmark Roadmap (Historical In-Repo Track)](docs/COMPETITIVE_BENCHMARK_ROADMAP.md)
+- [Benchmark Handoff (Historical 2026-02-24 EOD)](docs/BENCHMARK_HANDOFF_2026-02-24.md)
 - [Phase B Parity Checklist (FastAPI)](docs/PHASEB_PARITY_CHECKLIST_FASTAPI.md)
 - [Phase C Benchmark Protocol](docs/PHASEC_BENCHMARK_PROTOCOL.md)
 - [Phase D Baseline Campaign](docs/PHASED_BASELINE_CAMPAIGN.md)
@@ -264,6 +265,7 @@ Specifications and roadmaps:
 - [Phase 15 Roadmap](docs/PHASE15_ROADMAP.md)
 - [Phase 16 Roadmap](docs/PHASE16_ROADMAP.md)
 - [Phase 17 Roadmap](docs/PHASE17_ROADMAP.md)
+- [Comparative Benchmarking](docs/COMPARATIVE_BENCHMARKING.md)
 - [Competitive Benchmark Roadmap](docs/COMPETITIVE_BENCHMARK_ROADMAP.md)
 - [Phase B Parity Checklist (FastAPI)](docs/PHASEB_PARITY_CHECKLIST_FASTAPI.md)
 - [Phase C Benchmark Protocol](docs/PHASEC_BENCHMARK_PROTOCOL.md)

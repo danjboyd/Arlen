@@ -1,9 +1,10 @@
 # Competitive Benchmark Roadmap
 
-Status: Active (Phase A complete; Phase B complete; Phase C complete; Phase D complete; Phase E-F pending)  
-Last updated: 2026-02-24
+Status: Archived as complete via external benchmark program (in-repo Phase A-D complete on 2026-02-24; original Phase E-F objectives closed by the sibling `ArlenBenchmarking` program, which reached `Phase 5 PACKAGE COMPLETE` and DB `Phase 9 PACKAGE COMPLETE` on 2026-02-25; approval/sign-off remains external)
+Last updated: 2026-03-21
 
 Related docs:
+- `docs/COMPARATIVE_BENCHMARKING.md`
 - `docs/PERFORMANCE_PROFILES.md`
 - `docs/PHASE7A_RUNTIME_HARDENING.md`
 - `docs/RELEASE_PROCESS.md`
@@ -15,11 +16,20 @@ Related docs:
 
 Deliver reproducible, publishable benchmark evidence for where Arlen outperforms widely used frameworks (starting with FastAPI) in scenarios that reflect realistic production behavior.
 
+This document is preserved as the historical in-repo comparative benchmark track that preceded the broader sibling `ArlenBenchmarking` program.
+
 Primary outcomes:
 
 - credible performance claims for Arlen website/marketing usage
 - clear methodology and raw artifacts suitable for technical review
 - fast feedback loop for identifying and fixing Arlen bottlenecks when Arlen loses
+
+Current disposition:
+
+- Phase D baseline artifacts remain the latest verified comparative benchmark pack stored in this repo.
+- This roadmap is archived rather than active.
+- The original Phase E/F follow-on is considered closed via the sibling `ArlenBenchmarking` program.
+- Arlen keeps regression gates and historical comparative artifacts in-repo; comparative reporting/publication now lives under `docs/COMPARATIVE_BENCHMARKING.md` and `../ArlenBenchmarking`.
 
 ## 2. Scope
 
@@ -171,7 +181,7 @@ Implementation notes (completed):
 - Added fixed Phase D campaign protocol:
   - `tests/performance/protocols/phased_baseline_campaign.json`
 - Captured a stability guardrail in protocol:
-  - `middleware_heavy` pair currently uses ladder `1,4` (higher concurrency reproducibly crashed Arlen in baseline run and is queued for Phase E triage)
+  - `middleware_heavy` pair currently uses ladder `1,4` (higher concurrency reproducibly crashed Arlen in the archived baseline run; this remained historical run context after the comparative program moved to the sibling benchmark repo)
 - Added executable campaign runner:
   - `tests/performance/run_phased_campaign.py`
   - enforces Phase B parity check before timing
@@ -191,6 +201,8 @@ Implementation notes (completed):
 
 ## 4.5 Phase E: Arlen Optimization Loop
 
+Status: Closed via external benchmark program (2026-02-25)
+
 For scenarios where Arlen underperforms:
 
 1. profile and isolate bottleneck
@@ -202,7 +214,15 @@ Exit criteria:
 
 - either Arlen improves to target band or scenario is downgraded/removed from claims
 
+Current disposition:
+
+- This follow-on no longer lives on Arlen's active roadmap.
+- The sibling `ArlenBenchmarking` program now owns comparative optimization/reporting refreshes.
+- The archived `middleware_heavy` ladder constraint in the in-repo Phase D pack remains historical evidence, not an active Arlen release blocker.
+
 ## 4.6 Phase F: Marketing Publication Pack
+
+Status: Closed via external benchmark program (2026-02-25)
 
 Publish only validated results.
 
@@ -217,6 +237,12 @@ Exit criteria:
 
 - technical and marketing review approval
 - claims are reproducible from committed benchmark assets
+
+Current disposition:
+
+- Website-ready publication packaging is now handled in the sibling `ArlenBenchmarking` repo.
+- That program reached `Phase 5 PACKAGE COMPLETE` and DB `Phase 9 PACKAGE COMPLETE` on 2026-02-25.
+- Remaining approvals are external sign-off work, not missing implementation in this repo.
 
 ## 5. Readiness Gate (Go/No-Go)
 
@@ -233,10 +259,10 @@ No-Go if any are true:
 - parity differences remain unresolved
 - variance is too high to make defensible claims
 
-## 6. Immediate Next Actions
+## 6. Historical Immediate Next Actions
 
 1. Completed: freeze claim matrix and scenario list for v1 comparison set.
 2. Completed: add parity checklist docs and executable parity validation for v1 scenarios (Arlen/FastAPI).
 3. Completed: execute first baseline campaign matrix for Arlen vs FastAPI with parity gate and artifact package.
-4. Triage losses and patch Arlen only where deltas are material.
-5. Produce first publication-ready benchmark report draft.
+4. Closed via external program: comparative optimization/reporting/publication work moved to the sibling `ArlenBenchmarking` repo on 2026-02-25.
+5. Ongoing approvals and future comparative refreshes are tracked outside Arlen's roadmap.

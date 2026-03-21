@@ -76,8 +76,9 @@ Then open `build/browser-error-audit/index.html`.
 - [Arlen for Django](ARLEN_FOR_DJANGO.md): concept and architecture migration path from Django.
 - [Arlen for Laravel](ARLEN_FOR_LARAVEL.md): concept and architecture migration path from Laravel.
 - [Arlen for FastAPI](ARLEN_FOR_FASTAPI.md): concept and architecture migration path from FastAPI.
-- [Competitive Benchmark Roadmap](COMPETITIVE_BENCHMARK_ROADMAP.md): scenario-driven, reproducible benchmark plan for publishable Arlen-vs-framework claims.
-- [Benchmark Handoff (2026-02-24 EOD)](BENCHMARK_HANDOFF_2026-02-24.md): checkpoint log with latest run ids, artifacts, blocker notes, and morning resume steps.
+- [Comparative Benchmarking](COMPARATIVE_BENCHMARKING.md): source-of-truth split between Arlen's in-repo perf regression gates and the sibling comparative/publication benchmark program.
+- [Competitive Benchmark Roadmap](COMPETITIVE_BENCHMARK_ROADMAP.md): historical in-repo benchmark track that seeded the later external comparative benchmark program.
+- [Benchmark Handoff (2026-02-24 EOD)](BENCHMARK_HANDOFF_2026-02-24.md): historical checkpoint log for the in-repo Phase D campaign handoff.
 - [Phase B Parity Checklist (FastAPI)](PHASEB_PARITY_CHECKLIST_FASTAPI.md): executable parity gate for frozen v1 benchmark scenarios.
 - [Phase C Benchmark Protocol](PHASEC_BENCHMARK_PROTOCOL.md): warmup + concurrency-ladder benchmark protocol with reproducibility artifacts.
 - [Phase D Baseline Campaign](PHASED_BASELINE_CAMPAIGN.md): full Arlen-vs-FastAPI baseline matrix execution with comparison tables and artifact bundle.
@@ -110,11 +111,12 @@ Then open `build/browser-error-audit/index.html`.
 - [Phase 17 Roadmap](PHASE17_ROADMAP.md)
 - [Phase 18 Roadmap](PHASE18_ROADMAP.md)
 - [Phase 19 Roadmap](PHASE19_ROADMAP.md)
+- [Comparative Benchmarking](COMPARATIVE_BENCHMARKING.md)
 - [Competitive Benchmark Roadmap](COMPETITIVE_BENCHMARK_ROADMAP.md)
 - [Phase B Parity Checklist (FastAPI)](PHASEB_PARITY_CHECKLIST_FASTAPI.md)
 - [Phase C Benchmark Protocol](PHASEC_BENCHMARK_PROTOCOL.md)
 - [Phase D Baseline Campaign](PHASED_BASELINE_CAMPAIGN.md)
-- [Combined Roadmap Index](PHASE2_PHASE3_ROADMAP.md)
+- [Combined Roadmap Index (Historical Aggregate)](PHASE2_PHASE3_ROADMAP.md)
 - [Feature Parity Matrix](FEATURE_PARITY_MATRIX.md)
 - [EOC v1 Roadmap](EOC_V1_ROADMAP.md)
 - [EOC v1 Spec](../V1_SPEC.md)

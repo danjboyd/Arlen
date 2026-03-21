@@ -299,7 +299,7 @@ Phase 5E adds explicit hardening and release-evidence workflows for the data lay
 Key gates:
 
 - `make ci-quality`
-- `make ci-sanitizers`
+- `bash ./tools/ci/run_phase5e_sanitizers.sh`
 - `make phase5e-confidence`
 
 Soak loop count override:

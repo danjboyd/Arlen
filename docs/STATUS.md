@@ -1,12 +1,20 @@
 # Arlen Status Checkpoint
 
-Last updated: 2026-03-14
+Last updated: 2026-03-21
+
+This document is a running checkpoint log. For authoritative current roadmap
+status, prefer the individual phase roadmap docs and `README.md`. Historical
+"Next Session Focus" notes below are preserved as contemporaneous checkpoint
+entries, not current plan-of-record items.
 
 ## Benchmark Handoff (2026-02-24 EOD)
 
 - Added end-of-day checkpoint for benchmark work:
   - `docs/BENCHMARK_HANDOFF_2026-02-24.md`
-  - includes latest verified Phase D run (`20260224T233744Z`), artifact paths, known Phase E blocker, and morning resume checklist
+  - preserves latest verified in-repo Phase D run (`20260224T233744Z`), artifact paths, and the original 2026-02-24 handoff notes
+- Current comparative benchmark source of truth:
+  - `docs/COMPARATIVE_BENCHMARKING.md`
+  - sibling program `../ArlenBenchmarking` now owns comparative reporting/publication work
 
 ## Current Milestone State
 
@@ -33,14 +41,7 @@ Last updated: 2026-03-14
 - Phase 5C: complete (2026-02-23)
 - Phase 5D: complete (2026-02-23)
 - Phase 5E: complete (2026-02-23)
-- Phase 7A: initial slice implemented (2026-02-23)
-- Phase 7B: initial slice implemented (2026-02-23)
-- Phase 7C: initial slice implemented (2026-02-23)
-- Phase 7D: initial slice implemented (2026-02-23)
-- Phase 7E: initial slice implemented (2026-02-23)
-- Phase 7F: initial slice implemented (2026-02-23)
-- Phase 7G: initial slice implemented (2026-02-23)
-- Phase 7H: initial slice implemented (2026-02-23)
+- Phase 7: complete for current first-party scope (initial slices landed 2026-02-23; closeout verified 2026-03-13)
 - Phase 8A: complete (2026-02-24)
 - Phase 8B: complete (2026-02-24)
 - Phase 9A: complete (2026-02-24)
@@ -66,11 +67,32 @@ Last updated: 2026-03-14
 - Phase 15: complete (15A/15B/15C/15D/15E complete on 2026-03-10)
 - Phase 16: complete (`16A/16B/16C` complete on 2026-03-10; `16D/16E/16F/16G` complete on 2026-03-11)
 - Phase 17: complete (`17A-17D` delivered on 2026-03-12 for backend-neutral data-layer seams and optional MSSQL support)
-- Phase 18: complete (`18A-18G` delivered on 2026-03-13 for fragment-first MFA
-  UI, headless MFA contracts, and optional SMS/Twilio Verify support)
+- Phase 18: complete (`18A-18H` delivered on 2026-03-14 for fragment-first MFA
+  UI, headless MFA contracts, optional SMS/Twilio Verify support, and generated-app-ui include-path hardening)
 - Phase 19: complete (`19A-19F` delivered on 2026-03-14 for incremental
   GNUmake/GNUstep build-graph narrowing, generated-template object reuse, and
   clearer `boomhauer` build scope/progress)
+
+## Completed Today (2026-03-21)
+
+- Reconciled the remaining `MusicianApp`-reported open items against the
+  current Arlen workspace:
+  - recorded the upstream-only status matrix in
+    `docs/MUSICIANAPP_REPORT_RECONCILIATION_2026-03-21.md`
+  - kept closure ownership explicit: Arlen records `fixed/implemented upstream`
+    or `awaiting downstream revalidation`, while `MusicianApp` keeps app-level
+    closure authority
+  - confirmed that most still-open downstream filings are already satisfied by
+    current upstream work from Phases 15-18 plus the current workspace
+    `boomhauer` recovery fixes
+- Closed the remaining direct upstream bug from that open set:
+  - normalized shared auth action typography across `<button>` and `<a>`
+    controls in the stock auth stylesheet
+  - added focused regression coverage for the shared auth stylesheet contract
+- Added focused migration coverage for the original `MusicianApp`
+  multi-statement SQL report:
+  - verified generic migration execution handles multiple top-level statements,
+    including dollar-quoted content with embedded semicolons
 
 ## Completed Today (2026-03-14)
 
@@ -690,7 +712,7 @@ Last updated: 2026-03-14
 - Completed Phase D baseline campaign execution:
   - FastAPI benchmark profiles for pair parity (`tests/performance/profiles/fastapi_comparison_http.sh`, `tests/performance/profiles/fastapi_middleware_heavy.sh`)
   - fixed campaign protocol contract (`tests/performance/protocols/phased_baseline_campaign.json`)
-  - middleware-heavy pair currently constrained to ladder `1,4` pending Phase E stability/perf triage at higher concurrency
+  - middleware-heavy pair was constrained to ladder `1,4` in the archived in-repo baseline pack; later comparative follow-on moved to the sibling benchmark repo
   - executable campaign runner (`tests/performance/run_phased_campaign.py`, `make perf-phased`)
   - generated deliverables: framework summary + per-scenario comparison table + methodology note + raw artifact bundle
   - campaign artifact entrypoint (`build/perf/phased/latest_campaign_report.json`)
@@ -961,11 +983,19 @@ Last updated: 2026-03-14
 
 ## Next Session Focus
 
+Historical note: this focus list was captured before the later Phase 7 closeout
+work landed. It is preserved for checkpoint provenance and is not the current
+roadmap plan.
+
 1. Continue Phase 7H follow-on distributed-runtime depth (dynamic membership/failure-drill automation) (`docs/PHASE7_ROADMAP.md`).
 2. Continue remaining Phase 7D ecosystem service durability depth (production-adapter failure/recovery integration coverage) (`docs/PHASE7_ROADMAP.md`).
 3. Continue Phase 7G follow-on coding-agent contract coverage and Phase 7E lint/diagnostic follow-on depth (`docs/PHASE7_ROADMAP.md`).
 
 ## Planned Phase Mapping (Post-4C)
+
+Historical note: the mapping below preserves the original rollout narrative.
+Current authoritative status is reflected in the milestone summary above and in
+the individual roadmap documents.
 
 - Phase 3F (complete):
   - onboarding and diagnostics (`arlen doctor`, compatibility matrix)

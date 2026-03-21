@@ -54,7 +54,7 @@ If you need to run checklist gates individually:
 
 ```bash
 make ci-quality
-make ci-sanitizers
+bash ./tools/ci/run_phase5e_sanitizers.sh
 make ci-fault-injection
 make deploy-smoke
 make docs-html

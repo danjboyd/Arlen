@@ -233,6 +233,8 @@
                              target:@"build-tests"
                         touchingPath:unitTestPath
                             exitCode:&code];
+  NSString *frameworkArchiveCommand =
+      [NSString stringWithFormat:@"ar rcs %@/build/lib/libArlenFramework.a", repoRoot];
   NSString *unitCompileCommand = [NSString
       stringWithFormat:@"-c tests/unit/BuildPolicyTests.m -o %@/build/obj/tests/unit/BuildPolicyTests.o",
                        repoRoot];
@@ -241,7 +243,7 @@
   XCTAssertTrue([dryRun containsString:@"build/tests/ArlenUnitTests.xctest/ArlenUnitTests"], @"%@", dryRun);
   XCTAssertFalse([dryRun containsString:@"build/tests/ArlenIntegrationTests.xctest/ArlenIntegrationTests"],
                  @"%@", dryRun);
-  XCTAssertFalse([dryRun containsString:@"build/lib/libArlenFramework.a"], @"%@", dryRun);
+  XCTAssertFalse([dryRun containsString:frameworkArchiveCommand], @"%@", dryRun);
   XCTAssertFalse([dryRun containsString:@"/build/eocc --template-root"], @"%@", dryRun);
 }
 
