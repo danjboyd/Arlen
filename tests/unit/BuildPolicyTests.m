@@ -376,6 +376,57 @@
   XCTAssertTrue([phase10mScript containsString:@"make clean"]);
 }
 
+- (void)testTSANScriptStagesArtifactsOutsideCleanBuildTree {
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *script = [self
+      readFile:[repoRoot stringByAppendingPathComponent:@"tools/ci/run_phase5e_tsan_experimental.sh"]];
+
+  XCTAssertTrue([script containsString:@"staging_dir=\"$(mktemp -d)\""]);
+  XCTAssertTrue([script containsString:@"staged_log_path=\"$staging_dir/tsan.log\""]);
+  XCTAssertTrue([script containsString:@"staged_summary_path=\"$staging_dir/summary.json\""]);
+  XCTAssertTrue([script containsString:@"finalize_artifacts() {"]);
+  XCTAssertTrue([script containsString:@"mkdir -p \"$artifact_dir\""]);
+  XCTAssertTrue([script containsString:@"cp \"$staged_log_path\" \"$log_path\""]);
+  XCTAssertTrue([script containsString:@"cp \"$staged_summary_path\" \"$summary_path\""]);
+  XCTAssertTrue([script containsString:@"trap cleanup EXIT"]);
+  XCTAssertTrue([script containsString:@"second_deadlock_stack=1"]);
+}
+
+- (void)testCIToolchainInstallerSupportsClangGNUstepStrategies {
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *script = [self
+      readFile:[repoRoot stringByAppendingPathComponent:@"tools/ci/install_ci_dependencies.sh"]];
+
+  XCTAssertTrue([script containsString:@"ARLEN_CI_GNUSTEP_STRATEGY"]);
+  XCTAssertTrue([script containsString:@"case \"$strategy\" in"]);
+  XCTAssertTrue([script containsString:@"apt)"]);
+  XCTAssertTrue([script containsString:@"preinstalled)"]);
+  XCTAssertTrue([script containsString:@"bootstrap)"]);
+  XCTAssertTrue([script containsString:@"ARLEN_CI_GNUSTEP_BOOTSTRAP_SCRIPT"]);
+  XCTAssertTrue([script containsString:@"gnustep-clang-tools-xctest"]);
+  XCTAssertTrue([script containsString:@"gnustep-clang-make"]);
+  XCTAssertTrue([script containsString:@"gnustep-clang-libs-base"]);
+  XCTAssertTrue([script containsString:@"-fobjc-runtime=gnustep-2.2"]);
+}
+
+- (void)testGitHubWorkflowsUseCentralCIToolchainInstaller {
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSArray<NSString *> *workflowPaths = @[
+    @".github/workflows/phase3c-quality.yml",
+    @".github/workflows/phase4-quality.yml",
+    @".github/workflows/phase4-sanitizers.yml",
+    @".github/workflows/docs-quality.yml",
+  ];
+
+  for (NSString *relativePath in workflowPaths) {
+    NSString *workflow = [self readFile:[repoRoot stringByAppendingPathComponent:relativePath]];
+    XCTAssertTrue([workflow containsString:@"ARLEN_CI_GNUSTEP_STRATEGY: apt"],
+                  @"workflow should declare clang GNUstep strategy: %@", relativePath);
+    XCTAssertTrue([workflow containsString:@"bash ./tools/ci/install_ci_dependencies.sh"],
+                  @"workflow should use central CI dependency installer: %@", relativePath);
+  }
+}
+
 - (void)testBackendParityArtifactsRebuildPerFeatureCombo {
   NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
   NSString *script = [self

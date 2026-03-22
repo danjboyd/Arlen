@@ -20,6 +20,8 @@ This repository is in early scaffold stage. Priority is delivering a stable v1 t
 - Keep changes incremental and verifiable.
 - Prefer deterministic behavior over convenience shortcuts.
 - Preserve compatibility with GNUstep build tooling.
+- Preserve the clang-based GNUstep requirement; do not relax CI or docs toward generic GCC-oriented GNUstep stacks.
+- If CI provisioning changes, keep the supported toolchain installed at `/usr/GNUstep` or update the repo-wide bootstrap contract deliberately.
 
 ## Git and Release Workflow
 

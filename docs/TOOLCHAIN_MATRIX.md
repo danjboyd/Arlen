@@ -1,6 +1,6 @@
 # Arlen Toolchain Matrix
 
-Last updated: 2026-03-14
+Last updated: 2026-03-21
 
 This document records known-good local toolchain baselines for Arlen onboarding and CI parity.
 
@@ -25,6 +25,31 @@ make test-integration
 | GNUstep tooling script | `/usr/GNUstep/System/Library/Makefiles/GNUstep.sh` | Present |
 | GNUstep config tool | `source GNUstep.sh && command -v gnustep-config` | `/usr/GNUstep/System/Tools/gnustep-config` |
 | XCTest runner | `command -v xctest` | `/usr/GNUstep/System/Tools/xctest` |
+
+## CI Toolchain Contract
+
+Arlen CI requires a clang-built GNUstep stack. In practice that means:
+
+- `gnustep-config --objc-flags` includes `-fobjc-runtime=gnustep-2.2`
+- `clang`, `gnustep-config`, and `xctest` are all available after sourcing `GNUstep.sh`
+- the toolchain is installed at `/usr/GNUstep` unless a workflow explicitly overrides `GNUSTEP_SH`
+
+The workflow bootstrap entry point is:
+
+- `tools/ci/install_ci_dependencies.sh`
+
+Supported CI bootstrap strategies:
+
+- `ARLEN_CI_GNUSTEP_STRATEGY=apt`
+  - current default on `iep-apt` self-hosted runners
+  - installs `gnustep-clang-tools-xctest`, `gnustep-clang-make`, and `gnustep-clang-libs-base`
+- `ARLEN_CI_GNUSTEP_STRATEGY=preinstalled`
+  - validates a runner image that already has the clang-built GNUstep stack installed
+- `ARLEN_CI_GNUSTEP_STRATEGY=bootstrap`
+  - runs `ARLEN_CI_GNUSTEP_BOOTSTRAP_SCRIPT` before validation
+  - use this when the runner must build/install its own GNUstep stack
+
+If CI migrates to a first-party source-built GNUstep toolchain, install it into `/usr/GNUstep` so the existing build scripts, tests, and shell-generated probes continue to work without per-file path rewrites.
 
 Optional contributor override:
 

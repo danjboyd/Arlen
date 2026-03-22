@@ -5,17 +5,37 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$repo_root"
 
 artifact_dir="${ARLEN_TSAN_ARTIFACT_DIR:-$repo_root/build/sanitizers/tsan}"
-mkdir -p "$artifact_dir"
 log_path="$artifact_dir/tsan.log"
 summary_path="$artifact_dir/summary.json"
-rm -f "$log_path"
-touch "$log_path"
+staging_dir="$(mktemp -d)"
+staged_log_path="$staging_dir/tsan.log"
+staged_summary_path="$staging_dir/summary.json"
+
+finalize_artifacts() {
+  mkdir -p "$artifact_dir"
+  if [[ -f "$staged_log_path" ]]; then
+    cp "$staged_log_path" "$log_path"
+  fi
+  if [[ -f "$staged_summary_path" ]]; then
+    cp "$staged_summary_path" "$summary_path"
+  fi
+}
+
+cleanup() {
+  finalize_artifacts
+  rm -rf "$staging_dir"
+}
+
+trap cleanup EXIT
+
+rm -f "$staged_log_path"
+touch "$staged_log_path"
 
 write_summary() {
   local status="$1"
   local exit_code="$2"
   local reason="${3:-}"
-  python3 - "$summary_path" "$status" "$exit_code" "$reason" "$log_path" <<'PY'
+  python3 - "$staged_summary_path" "$status" "$exit_code" "$reason" "$log_path" <<'PY'
 import json
 import sys
 from datetime import datetime, timezone
@@ -43,13 +63,13 @@ set -u
 
 tsan_so="$(clang -print-file-name=libtsan.so)"
 if [[ -z "$tsan_so" || ! -f "$tsan_so" ]]; then
-  echo "ci: tsan experimental skipped (libtsan.so unavailable)" | tee -a "$log_path"
+  echo "ci: tsan experimental skipped (libtsan.so unavailable)" | tee -a "$staged_log_path"
   write_summary "skipped" "0" "libtsan_unavailable"
   exit 0
 fi
 
 export EXTRA_OBJC_FLAGS="${EXTRA_OBJC_FLAGS:--fsanitize=thread -fno-omit-frame-pointer}"
-export TSAN_OPTIONS="${TSAN_OPTIONS:-halt_on_error=1:history_size=7}"
+export TSAN_OPTIONS="${TSAN_OPTIONS:-halt_on_error=1:history_size=7:second_deadlock_stack=1}"
 export XCTEST_LD_PRELOAD="$tsan_so"
 
 set +e
@@ -62,7 +82,7 @@ set +e
   python3 ./tools/ci/runtime_concurrency_probe.py \
     --binary ./build/boomhauer \
     --iterations "${ARLEN_TSAN_RUNTIME_ITERS:-1}"
-} 2>&1 | tee -a "$log_path"
+} 2>&1 | tee -a "$staged_log_path"
 tsan_rc=${PIPESTATUS[0]}
 set -e
 

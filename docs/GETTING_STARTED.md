@@ -12,7 +12,7 @@ Choose a focused path if you prefer guided onboarding:
 
 ## 1. Prerequisites
 
-- GNUstep development toolchain
+- clang-built GNUstep development toolchain
 - `tools-xctest` package (`xctest` command)
 - optional for contributors: set `ARLEN_XCTEST=/path/to/patched/xctest` if you want Apple-style `-only-testing` / `-skip-testing` filtered reruns
 - when using a local uninstalled `tools-xctest` checkout, also set `ARLEN_XCTEST_LD_LIBRARY_PATH=/path/to/tools-xctest/XCTest/obj`
@@ -38,6 +38,13 @@ Use JSON output for tooling/CI integrations:
 Reference known-good baselines:
 
 - `docs/TOOLCHAIN_MATRIX.md`
+
+CI/runtime parity note:
+
+- Arlen expects a clang-built GNUstep toolchain (`gnustep-config --objc-flags` should include `-fobjc-runtime=gnustep-2.2`).
+- The CI bootstrap entry point is `tools/ci/install_ci_dependencies.sh`.
+- Current self-hosted CI uses `ARLEN_CI_GNUSTEP_STRATEGY=apt` with `gnustep-clang-*` packages.
+- If CI moves to a source-built toolchain, keep it installed at `/usr/GNUstep` so the repo’s build/test scripts and generated shell probes keep working.
 
 ## 2. Build Arlen
 

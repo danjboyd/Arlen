@@ -49,7 +49,7 @@ Arlen is designed to solve the same class of problems as frameworks like Mojolic
 ## Quick Start
 
 Prerequisites:
-- GNUstep toolchain installed
+- clang-built GNUstep toolchain installed
 - `tools-xctest` installed (provides `xctest`)
 
 Optional contributor fast path:
@@ -67,6 +67,12 @@ Run bootstrap diagnostics before building:
 ```bash
 ./bin/arlen doctor
 ```
+
+CI note:
+- Arlen CI expects a clang-built GNUstep toolchain, not a generic GCC-oriented distro stack.
+- The workflow bootstrap entry point is `tools/ci/install_ci_dependencies.sh`.
+- Current self-hosted runners use `ARLEN_CI_GNUSTEP_STRATEGY=apt` with `gnustep-clang-*` packages.
+- If CI moves to a source-built toolchain, install it into `/usr/GNUstep` and switch to `ARLEN_CI_GNUSTEP_STRATEGY=preinstalled` or `bootstrap`.
 
 Build framework tools and dev server:
 
