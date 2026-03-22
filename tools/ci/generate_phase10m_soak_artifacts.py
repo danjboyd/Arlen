@@ -459,6 +459,9 @@ def main() -> int:
     write_json(output_dir / "manifest.json", manifest)
 
     print(f"phase10m-soak: generated artifacts in {output_dir} (status={status})")
+    if violations:
+        for violation in violations:
+            print(f"phase10m-soak: violation: {violation}")
     if status != "pass" and not args.allow_fail:
         return 1
     return 0

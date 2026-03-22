@@ -337,6 +337,18 @@
   XCTAssertTrue([script containsString:@"sleep \"$perf_cooldown_seconds\""]);
 }
 
+- (void)testPhase10MLongRunSoakScriptRetriesAfterCooldown {
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *scriptPath = [repoRoot stringByAppendingPathComponent:@"tools/ci/run_phase10m_soak.sh"];
+  NSString *script = [self readFile:scriptPath];
+
+  XCTAssertTrue([script containsString:@"perf_cooldown_seconds=\"${ARLEN_PERF_COOLDOWN_SECONDS:-15}\""]);
+  XCTAssertTrue([script containsString:@"perf_retry_count=\"${ARLEN_PERF_RETRY_COUNT:-2}\""]);
+  XCTAssertTrue([script containsString:@"while (( attempt <= perf_retry_count )); do"]);
+  XCTAssertTrue([script containsString:@"phase10m long-run soak failed on attempt"]);
+  XCTAssertTrue([script containsString:@"sleep \"$perf_cooldown_seconds\""]);
+}
+
 - (void)testGNUmakefileIncludesPerfSmokeTarget {
   NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
   NSString *makefilePath = [repoRoot stringByAppendingPathComponent:@"GNUmakefile"];
