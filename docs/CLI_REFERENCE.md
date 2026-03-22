@@ -369,6 +369,7 @@ Behavior:
 - compile path enforces `-fobjc-arc` for app/framework/generated Objective-C sources
 - repository build pipeline enforces ARC across first-party Objective-C compile paths (GNUmakefile + boomhauer)
 - `EXTRA_OBJC_FLAGS` may add flags (for example sanitizers) but may not include `-fno-objc-arc`
+- repository build artifacts are invalidated when compile toggles or `EXTRA_OBJC_FLAGS` change so sanitizer-built tools are not reused in normal lanes
 - defaults to watch mode
 - in app-root watch mode, build failures are captured and rendered as development diagnostics
 - fallback build-error responses include last-failure timestamp, recovery hint, no-store cache headers, and browser auto-refresh metadata

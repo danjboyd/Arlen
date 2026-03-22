@@ -107,6 +107,28 @@
   XCTAssertFalse([makefile containsString:@"FORCE:"]);
 }
 
+- (void)testGNUmakefileInvalidatesRepoArtifactsWhenCompileFlagsChange {
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *makefilePath = [repoRoot stringByAppendingPathComponent:@"GNUmakefile"];
+  NSString *makefile = [self readFile:makefilePath];
+
+  XCTAssertTrue([makefile containsString:
+                              @"BUILD_FLAGS_SENTINEL_INPUT := GNUSTEP_SH=$(GNUSTEP_SH)|"
+                               "ARC_REQUIRED_FLAG=$(ARC_REQUIRED_FLAG)|PIC_FLAG=$(PIC_FLAG)|"
+                               "FEATURE_FLAGS=$(FEATURE_FLAGS)|THIRD_PARTY_FEATURE_FLAGS="
+                               "$(THIRD_PARTY_FEATURE_FLAGS)|EXTRA_OBJC_FLAGS=$(EXTRA_OBJC_FLAGS)"]);
+  XCTAssertTrue([makefile containsString:
+                              @"BUILD_FLAGS_SENTINEL := $(BUILD_DIR)/.build-flags."
+                               "$(BUILD_FLAGS_SENTINEL_HASH)"]);
+  XCTAssertTrue([makefile containsString:@"$(BUILD_FLAGS_SENTINEL): | $(BUILD_DIR)"]);
+  XCTAssertTrue([makefile containsString:@"@rm -f $(BUILD_DIR)/.build-flags.*"]);
+  XCTAssertTrue([makefile containsString:
+                              @"$(call root_generated_object_for,$(1)): $(BUILD_FLAGS_SENTINEL) "
+                               "$(call root_generated_source_for,$(1)) $(1)"]);
+  XCTAssertTrue([makefile containsString:@"$(OBJ_DIR)/%.o: %.m $(BUILD_FLAGS_SENTINEL)"]);
+  XCTAssertTrue([makefile containsString:@"$(OBJ_DIR)/%.o: %.c $(BUILD_FLAGS_SENTINEL)"]);
+}
+
 - (void)testBoomhauerGeneratedAppMakefileEnforcesARCAndFrameworkReuse {
   NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
   NSString *scriptPath = [repoRoot stringByAppendingPathComponent:@"bin/boomhauer"];
@@ -336,6 +358,19 @@
   XCTAssertTrue([script containsString:@"sleep \"$perf_cooldown_seconds\""]);
 }
 
+- (void)testPhase10GDispatchPerformanceScriptRetriesAfterCooldown {
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *scriptPath =
+      [repoRoot stringByAppendingPathComponent:@"tools/ci/run_phase10g_dispatch_performance.sh"];
+  NSString *script = [self readFile:scriptPath];
+
+  XCTAssertTrue([script containsString:@"perf_cooldown_seconds=\"${ARLEN_PERF_COOLDOWN_SECONDS:-15}\""]);
+  XCTAssertTrue([script containsString:@"perf_retry_count=\"${ARLEN_PERF_RETRY_COUNT:-2}\""]);
+  XCTAssertTrue([script containsString:@"while (( attempt <= perf_retry_count )); do"]);
+  XCTAssertTrue([script containsString:@"phase10g dispatch performance failed on attempt"]);
+  XCTAssertTrue([script containsString:@"sleep \"$perf_cooldown_seconds\""]);
+}
+
 - (void)testPerfSmokeScriptDefaultsToTriageProfiles {
   NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
   NSString *scriptPath = [repoRoot stringByAppendingPathComponent:@"tools/ci/run_perf_smoke.sh"];
@@ -420,7 +455,7 @@
 
   for (NSString *relativePath in workflowPaths) {
     NSString *workflow = [self readFile:[repoRoot stringByAppendingPathComponent:relativePath]];
-    XCTAssertTrue([workflow containsString:@"ARLEN_CI_GNUSTEP_STRATEGY: apt"],
+    XCTAssertTrue([workflow containsString:@"ARLEN_CI_GNUSTEP_STRATEGY: preinstalled"],
                   @"workflow should declare clang GNUstep strategy: %@", relativePath);
     XCTAssertTrue([workflow containsString:@"bash ./tools/ci/install_ci_dependencies.sh"],
                   @"workflow should use central CI dependency installer: %@", relativePath);

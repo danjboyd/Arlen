@@ -71,8 +71,8 @@ Run bootstrap diagnostics before building:
 CI note:
 - Arlen CI expects a clang-built GNUstep toolchain, not a generic GCC-oriented distro stack.
 - The workflow bootstrap entry point is `tools/ci/install_ci_dependencies.sh`.
-- Current self-hosted runners use `ARLEN_CI_GNUSTEP_STRATEGY=apt` with `gnustep-clang-*` packages.
-- If CI moves to a source-built toolchain, install it into `/usr/GNUstep` and switch to `ARLEN_CI_GNUSTEP_STRATEGY=preinstalled` or `bootstrap`.
+- Current self-hosted runners use `ARLEN_CI_GNUSTEP_STRATEGY=preinstalled` with the clang-built GNUstep toolchain installed at `/usr/GNUstep`.
+- Use `ARLEN_CI_GNUSTEP_STRATEGY=apt` or `bootstrap` only when provisioning a runner that does not already carry that toolchain.
 
 Build framework tools and dev server:
 
@@ -82,6 +82,7 @@ make all
 
 Build policy: Arlen enforces ARC across first-party Objective-C compile paths (`-fobjc-arc` required).
 `EXTRA_OBJC_FLAGS` is additive only and cannot disable ARC.
+Changing compile toggles or `EXTRA_OBJC_FLAGS` invalidates cached repo build artifacts so sanitizer-built tools are not silently reused in normal lanes.
 
 Run the built-in development server:
 

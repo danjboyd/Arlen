@@ -15,7 +15,7 @@ jobs:
 
       - name: Install build dependencies
         env:
-          ARLEN_CI_GNUSTEP_STRATEGY: apt
+          ARLEN_CI_GNUSTEP_STRATEGY: preinstalled
         run: |
           bash ./tools/ci/install_ci_dependencies.sh
 

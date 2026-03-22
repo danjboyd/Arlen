@@ -90,6 +90,9 @@ PIC_FLAG := -fPIC
 FEATURE_FLAGS := -DARLEN_ENABLE_YYJSON=$(ARLEN_ENABLE_YYJSON) -DARLEN_ENABLE_LLHTTP=$(ARLEN_ENABLE_LLHTTP)
 THIRD_PARTY_FEATURE_FLAGS := -DARGON2_NO_THREADS=1
 COMMON_COMPILE_FLAGS := $(FEATURE_FLAGS) $(THIRD_PARTY_FEATURE_FLAGS) $(PIC_FLAG) $(EXTRA_OBJC_FLAGS)
+BUILD_FLAGS_SENTINEL_INPUT := GNUSTEP_SH=$(GNUSTEP_SH)|ARC_REQUIRED_FLAG=$(ARC_REQUIRED_FLAG)|PIC_FLAG=$(PIC_FLAG)|FEATURE_FLAGS=$(FEATURE_FLAGS)|THIRD_PARTY_FEATURE_FLAGS=$(THIRD_PARTY_FEATURE_FLAGS)|EXTRA_OBJC_FLAGS=$(EXTRA_OBJC_FLAGS)
+BUILD_FLAGS_SENTINEL_HASH := $(shell printf '%s\n' '$(BUILD_FLAGS_SENTINEL_INPUT)' | sha256sum | awk '{print $$1}')
+BUILD_FLAGS_SENTINEL := $(BUILD_DIR)/.build-flags.$(BUILD_FLAGS_SENTINEL_HASH)
 ifneq ($(findstring -fno-objc-arc,$(EXTRA_OBJC_FLAGS)),)
 $(error EXTRA_OBJC_FLAGS cannot contain -fno-objc-arc; Arlen enforces ARC across all first-party Objective-C compile paths)
 endif
@@ -217,6 +220,10 @@ all: eocc transpile generated-compile arlen boomhauer
 $(BUILD_DIR):
 >mkdir -p $(BUILD_DIR)
 
+$(BUILD_FLAGS_SENTINEL): | $(BUILD_DIR)
+>@rm -f $(BUILD_DIR)/.build-flags.*
+>@touch $@
+
 $(OBJ_DIR):
 >mkdir -p $(OBJ_DIR)
 
@@ -293,19 +300,19 @@ endef
 $(foreach module_template,$(MODULE_TEMPLATE_FILES),$(eval $(call module_generated_rule,$(module_template))))
 
 define root_generated_object_rule
-$(call root_generated_object_for,$(1)): $(call root_generated_source_for,$(1)) $(1)
+$(call root_generated_object_for,$(1)): $(BUILD_FLAGS_SENTINEL) $(call root_generated_source_for,$(1)) $(1)
 >@mkdir -p $$(@D)
 >@source $$(GNUSTEP_SH) && clang $$(OBJC_FLAGS) $$(INCLUDE_FLAGS) -MMD -MP -MF $$(@:.o=.d) -c $(call root_generated_source_rel_for,$(1)) -o $$@
 endef
 
 define tech_demo_generated_object_rule
-$(call tech_demo_generated_object_for,$(1)): $(call tech_demo_generated_source_for,$(1)) $(1)
+$(call tech_demo_generated_object_for,$(1)): $(BUILD_FLAGS_SENTINEL) $(call tech_demo_generated_source_for,$(1)) $(1)
 >@mkdir -p $$(@D)
 >@source $$(GNUSTEP_SH) && clang $$(OBJC_FLAGS) $$(INCLUDE_FLAGS) -MMD -MP -MF $$(@:.o=.d) -c $(call tech_demo_generated_source_rel_for,$(1)) -o $$@
 endef
 
 define module_generated_object_rule
-$(call module_generated_object_for,$(1)): $(call module_generated_source_for,$(1)) $(1)
+$(call module_generated_object_for,$(1)): $(BUILD_FLAGS_SENTINEL) $(call module_generated_source_for,$(1)) $(1)
 >@mkdir -p $$(@D)
 >@source $$(GNUSTEP_SH) && clang $$(OBJC_FLAGS) $$(INCLUDE_FLAGS) -MMD -MP -MF $$(@:.o=.d) -c $(call module_generated_source_rel_for,$(1)) -o $$@
 endef
@@ -314,11 +321,11 @@ $(foreach root_template,$(TEMPLATE_FILES),$(eval $(call root_generated_object_ru
 $(foreach tech_demo_template,$(TECH_DEMO_TEMPLATE_FILES),$(eval $(call tech_demo_generated_object_rule,$(tech_demo_template))))
 $(foreach module_template,$(MODULE_TEMPLATE_FILES),$(eval $(call module_generated_object_rule,$(module_template))))
 
-$(OBJ_DIR)/%.o: %.m
+$(OBJ_DIR)/%.o: %.m $(BUILD_FLAGS_SENTINEL)
 >@mkdir -p $(@D)
 >@source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) -MMD -MP -MF $(@:.o=.d) -c $< -o $@
 
-$(OBJ_DIR)/%.o: %.c
+$(OBJ_DIR)/%.o: %.c $(BUILD_FLAGS_SENTINEL)
 >@mkdir -p $(@D)
 >@source $(GNUSTEP_SH) && clang $(C_COMPILE_FLAGS) $(INCLUDE_FLAGS) -MMD -MP -MF $(@:.o=.d) -c $< -o $@
 

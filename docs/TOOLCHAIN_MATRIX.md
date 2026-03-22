@@ -1,6 +1,6 @@
 # Arlen Toolchain Matrix
 
-Last updated: 2026-03-21
+Last updated: 2026-03-22
 
 This document records known-good local toolchain baselines for Arlen onboarding and CI parity.
 
@@ -41,9 +41,9 @@ The workflow bootstrap entry point is:
 Supported CI bootstrap strategies:
 
 - `ARLEN_CI_GNUSTEP_STRATEGY=apt`
-  - current default on `iep-apt` self-hosted runners
   - installs `gnustep-clang-tools-xctest`, `gnustep-clang-make`, and `gnustep-clang-libs-base`
 - `ARLEN_CI_GNUSTEP_STRATEGY=preinstalled`
+  - current default on `iep-apt` self-hosted runners
   - validates a runner image that already has the clang-built GNUstep stack installed
 - `ARLEN_CI_GNUSTEP_STRATEGY=bootstrap`
   - runs `ARLEN_CI_GNUSTEP_BOOTSTRAP_SCRIPT` before validation

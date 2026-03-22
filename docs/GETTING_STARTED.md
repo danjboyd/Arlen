@@ -43,8 +43,8 @@ CI/runtime parity note:
 
 - Arlen expects a clang-built GNUstep toolchain (`gnustep-config --objc-flags` should include `-fobjc-runtime=gnustep-2.2`).
 - The CI bootstrap entry point is `tools/ci/install_ci_dependencies.sh`.
-- Current self-hosted CI uses `ARLEN_CI_GNUSTEP_STRATEGY=apt` with `gnustep-clang-*` packages.
-- If CI moves to a source-built toolchain, keep it installed at `/usr/GNUstep` so the repo’s build/test scripts and generated shell probes keep working.
+- Current self-hosted CI uses `ARLEN_CI_GNUSTEP_STRATEGY=preinstalled` with the clang-built GNUstep stack installed at `/usr/GNUstep`.
+- Use `ARLEN_CI_GNUSTEP_STRATEGY=apt` or `bootstrap` only when provisioning a runner that does not already carry that toolchain.
 
 ## 2. Build Arlen
 
@@ -75,6 +75,7 @@ This builds:
 
 `boomhauer` and `make` compile first-party Objective-C sources with `-fobjc-arc` by default.
 `EXTRA_OBJC_FLAGS` is allowed for additive flags (for example sanitizers), but cannot disable ARC.
+Changing compile toggles or `EXTRA_OBJC_FLAGS` invalidates cached repo build artifacts so sanitizer-instrumented tools are rebuilt before normal lanes run.
 For app-root launches, the first run compiles into `.boomhauer/build/boomhauer-app`; later `--no-watch`
 or `--prepare-only` runs reuse that cached binary when app/framework build inputs are unchanged.
 App-root `--prepare-only` and `--print-routes` runs also print explicit `[1/4]` through `[4/4]`

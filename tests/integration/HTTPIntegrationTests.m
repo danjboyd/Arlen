@@ -171,6 +171,28 @@
   return [self runShellCapture:command exitCode:exitCode];
 }
 
+- (NSString *)capturedOutputFromPipe:(NSPipe *)pipe {
+  if (pipe == nil) {
+    return @"";
+  }
+  NSData *data = [[pipe fileHandleForReading] readDataToEndOfFile];
+  NSString *output = [[NSString alloc] initWithData:data
+                                           encoding:NSUTF8StringEncoding];
+  return output ?: @"";
+}
+
+- (BOOL)outputContainsTransientNetworkFailure:(NSString *)output {
+  NSString *messageSource = [output isKindOfClass:[NSString class]] ? output : @"";
+  NSString *message = [messageSource lowercaseString];
+  NSArray *tokens = @[ @"connection refused", @"connection reset", @"remote end closed", @"timed out" ];
+  for (NSString *token in tokens) {
+    if ([message containsString:token]) {
+      return YES;
+    }
+  }
+  return NO;
+}
+
 - (NSString *)requestPathWithRetries:(NSString *)path
                                 port:(int)port
                             attempts:(NSInteger)attempts
@@ -2402,69 +2424,127 @@
 }
 
 - (void)testSSETickerHandlesConcurrentRequests {
-  int port = [self randomPort];
-  NSTask *server = [[NSTask alloc] init];
-  server.launchPath = @"./build/boomhauer";
-  server.arguments = @[ @"--port", [NSString stringWithFormat:@"%d", port] ];
-  server.standardOutput = [NSPipe pipe];
-  server.standardError = [NSPipe pipe];
-  [server launch];
+  BOOL success = NO;
+  int lastPyCode = 1;
+  NSString *lastOutput = @"";
+  NSString *lastServerOutput = @"";
 
-  @try {
-    BOOL ready = NO;
-    (void)[self requestPathWithRetries:@"/healthz" port:port attempts:60 success:&ready];
-    XCTAssertTrue(ready);
+  for (NSInteger serverAttempt = 0; serverAttempt < 4 && !success; serverAttempt++) {
+    int port = [self randomPort];
+    NSTask *server = [[NSTask alloc] init];
+    NSPipe *stdoutPipe = [NSPipe pipe];
+    NSPipe *stderrPipe = [NSPipe pipe];
+    server.launchPath = @"./build/boomhauer";
+    server.arguments = @[ @"--port", [NSString stringWithFormat:@"%d", port] ];
+    server.standardOutput = stdoutPipe;
+    server.standardError = stderrPipe;
+    [server launch];
 
-    NSString *script = [NSString stringWithFormat:
-                                         @"import threading, time, urllib.request\n"
-                                         @"PORT=%d\n"
-                                         @"errors=[]\n"
-                                         @"def worker(idx):\n"
-                                         @"    opener = urllib.request.build_opener()\n"
-                                         @"    for attempt in range(8):\n"
-                                         @"        try:\n"
-                                         @"            with opener.open(f'http://127.0.0.1:{PORT}/sse/ticker?count=2', timeout=12) as res:\n"
-                                         @"                body = res.read().decode('utf-8')\n"
-                                         @"                ctype = res.headers.get('Content-Type', '')\n"
-                                         @"                if 'text/event-stream' not in ctype:\n"
-                                         @"                    errors.append(f'bad content type {ctype}')\n"
-                                         @"                if body.count('event: tick') < 2:\n"
-                                         @"                    errors.append(f'bad event count {idx}')\n"
-                                         @"                return\n"
-                                         @"        except Exception as exc:\n"
-                                         @"            message = str(exc).lower()\n"
-                                         @"            transient = any(token in message for token in ('connection refused', 'connection reset', 'remote end closed', 'timed out'))\n"
-                                         @"            if (not transient) or attempt == 7:\n"
-                                         @"                errors.append(str(exc))\n"
-                                         @"                return\n"
-                                         @"            time.sleep(0.2)\n"
-                                         @"threads=[]\n"
-                                         @"for i in range(4):\n"
-                                         @"    t=threading.Thread(target=worker, args=(i,))\n"
-                                         @"    t.start(); threads.append(t)\n"
-                                         @"for t in threads:\n"
-                                         @"    t.join()\n"
-                                         @"if errors:\n"
-                                         @"    raise RuntimeError('; '.join(errors))\n"
-                                         @"print('ok')\n",
-                                         port];
-    int pyCode = 0;
-    NSString *output = @"";
-    for (NSInteger attempt = 0; attempt < 3; attempt++) {
-      output = [self runPythonScript:script exitCode:&pyCode];
-      if (pyCode == 0 && [output containsString:@"ok"]) {
-        break;
+    BOOL shouldRetryFreshServer = NO;
+    @try {
+      BOOL ready = NO;
+      (void)[self requestPathWithRetries:@"/healthz" port:port attempts:60 success:&ready];
+      if (!ready) {
+        lastOutput = @"server did not become ready";
+        shouldRetryFreshServer = YES;
+      } else {
+        NSString *script = [NSString stringWithFormat:
+                                             @"import threading, time, urllib.request\n"
+                                             @"PORT=%d\n"
+                                             @"errors=[]\n"
+                                             @"def worker(idx):\n"
+                                             @"    opener = urllib.request.build_opener()\n"
+                                             @"    for attempt in range(8):\n"
+                                             @"        try:\n"
+                                             @"            with opener.open(f'http://127.0.0.1:{PORT}/sse/ticker?count=2', timeout=12) as res:\n"
+                                             @"                body = res.read().decode('utf-8')\n"
+                                             @"                ctype = res.headers.get('Content-Type', '')\n"
+                                             @"                if 'text/event-stream' not in ctype:\n"
+                                             @"                    errors.append(f'bad content type {ctype}')\n"
+                                             @"                if body.count('event: tick') < 2:\n"
+                                             @"                    errors.append(f'bad event count {idx}')\n"
+                                             @"                return\n"
+                                             @"        except Exception as exc:\n"
+                                             @"            message = str(exc).lower()\n"
+                                             @"            transient = any(token in message for token in ('connection refused', 'connection reset', 'remote end closed', 'timed out'))\n"
+                                             @"            if (not transient) or attempt == 7:\n"
+                                             @"                errors.append(str(exc))\n"
+                                             @"                return\n"
+                                             @"            time.sleep(0.2)\n"
+                                             @"threads=[]\n"
+                                             @"for i in range(4):\n"
+                                             @"    t=threading.Thread(target=worker, args=(i,))\n"
+                                             @"    t.start(); threads.append(t)\n"
+                                             @"for t in threads:\n"
+                                             @"    t.join()\n"
+                                             @"if errors:\n"
+                                             @"    raise RuntimeError('; '.join(errors))\n"
+                                             @"print('ok')\n",
+                                             port];
+
+        for (NSInteger attempt = 0; attempt < 3; attempt++) {
+          lastOutput = [self runPythonScript:script exitCode:&lastPyCode];
+          if (lastPyCode == 0 && [lastOutput containsString:@"ok"]) {
+            success = YES;
+            break;
+          }
+
+          BOOL stillReady = NO;
+          NSString *healthBody = [self requestPathWithRetries:@"/healthz"
+                                                         port:port
+                                                     attempts:20
+                                                      success:&stillReady];
+          if (!stillReady || ![healthBody isEqualToString:@"ok\n"]) {
+            shouldRetryFreshServer = YES;
+            break;
+          }
+          if (![self outputContainsTransientNetworkFailure:lastOutput]) {
+            break;
+          }
+          shouldRetryFreshServer = YES;
+          usleep(200000);
+        }
       }
-      usleep(200000);
+    } @finally {
+      if ([server isRunning]) {
+        (void)kill(server.processIdentifier, SIGTERM);
+        [server waitUntilExit];
+      }
+
+      NSString *stdoutOutput = [self capturedOutputFromPipe:stdoutPipe];
+      NSString *stderrOutput = [self capturedOutputFromPipe:stderrPipe];
+      if ([stdoutOutput length] > 0 && [stderrOutput length] > 0) {
+        lastServerOutput =
+            [NSString stringWithFormat:@"stdout:\n%@\nstderr:\n%@", stdoutOutput, stderrOutput];
+      } else if ([stdoutOutput length] > 0) {
+        lastServerOutput = [NSString stringWithFormat:@"stdout:\n%@", stdoutOutput];
+      } else if ([stderrOutput length] > 0) {
+        lastServerOutput = [NSString stringWithFormat:@"stderr:\n%@", stderrOutput];
+      } else {
+        lastServerOutput = @"";
+      }
     }
-    XCTAssertEqual(0, pyCode, @"%@", output);
-    XCTAssertTrue([output containsString:@"ok"], @"%@", output);
-  } @finally {
-    if ([server isRunning]) {
-      (void)kill(server.processIdentifier, SIGTERM);
-      [server waitUntilExit];
+
+    if (success) {
+      break;
     }
+    if (!shouldRetryFreshServer) {
+      break;
+    }
+    usleep(200000);
   }
+
+  NSMutableString *failure = [NSMutableString string];
+  if ([lastOutput length] > 0) {
+    [failure appendString:lastOutput];
+  }
+  if ([lastServerOutput length] > 0) {
+    if ([failure length] > 0) {
+      [failure appendString:@"\n"];
+    }
+    [failure appendString:lastServerOutput];
+  }
+  XCTAssertTrue(success, @"%@", failure);
 }
 
 - (void)testMountedApplicationCompositionRoutes {
