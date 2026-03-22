@@ -1,4 +1,5 @@
 #import <Foundation/Foundation.h>
+#import <Foundation/NSByteOrder.h>
 #import <XCTest/XCTest.h>
 
 #import <openssl/bio.h>
@@ -33,7 +34,7 @@ static NSData *WACBOREncodedLength(uint8_t majorType, uint64_t value) {
 
   if (value <= UINT16_MAX) {
     uint8_t prefix = (uint8_t)((majorType << 5) | 25);
-    uint16_t encoded = CFSwapInt16HostToBig((uint16_t)value);
+    uint16_t encoded = NSSwapHostShortToBig((uint16_t)value);
     [data appendBytes:&prefix length:1];
     [data appendBytes:&encoded length:2];
     return data;
@@ -41,14 +42,14 @@ static NSData *WACBOREncodedLength(uint8_t majorType, uint64_t value) {
 
   if (value <= UINT32_MAX) {
     uint8_t prefix = (uint8_t)((majorType << 5) | 26);
-    uint32_t encoded = CFSwapInt32HostToBig((uint32_t)value);
+    uint32_t encoded = NSSwapHostIntToBig((uint32_t)value);
     [data appendBytes:&prefix length:1];
     [data appendBytes:&encoded length:4];
     return data;
   }
 
   uint8_t prefix = (uint8_t)((majorType << 5) | 27);
-  uint64_t encoded = CFSwapInt64HostToBig(value);
+  uint64_t encoded = NSSwapHostLongLongToBig(value);
   [data appendBytes:&prefix length:1];
   [data appendBytes:&encoded length:8];
   return data;
@@ -165,11 +166,11 @@ static NSData *WAAttestationObjectForRPID(NSString *rpID,
   [authData appendData:WASHA256String(rpID) ?: [NSData data]];
   uint8_t flags = (uint8_t)(0x01 | 0x40 | (userVerified ? 0x04 : 0x00));
   [authData appendBytes:&flags length:1];
-  uint32_t encodedSignCount = CFSwapInt32HostToBig(signCount);
+  uint32_t encodedSignCount = NSSwapHostIntToBig(signCount);
   [authData appendBytes:&encodedSignCount length:4];
   unsigned char aaguid[16] = { 0 };
   [authData appendBytes:aaguid length:sizeof(aaguid)];
-  uint16_t credentialLength = CFSwapInt16HostToBig((uint16_t)[credentialID length]);
+  uint16_t credentialLength = NSSwapHostShortToBig((uint16_t)[credentialID length]);
   [authData appendBytes:&credentialLength length:2];
   [authData appendData:credentialID ?: [NSData data]];
   [authData appendData:WACOSEKeyFromMaterial(keyMaterial)];
@@ -186,7 +187,7 @@ static NSData *WAAuthenticatorDataForRPID(NSString *rpID, BOOL userVerified, uin
   [authData appendData:WASHA256String(rpID) ?: [NSData data]];
   uint8_t flags = (uint8_t)(0x01 | (userVerified ? 0x04 : 0x00));
   [authData appendBytes:&flags length:1];
-  uint32_t encodedSignCount = CFSwapInt32HostToBig(signCount);
+  uint32_t encodedSignCount = NSSwapHostIntToBig(signCount);
   [authData appendBytes:&encodedSignCount length:4];
   return authData;
 }
