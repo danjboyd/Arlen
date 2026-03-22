@@ -88,6 +88,7 @@ Then open `build/browser-error-audit/index.html`.
 ## Documentation Process
 
 - [Documentation Policy](DOCUMENTATION_POLICY.md): standards for keeping docs current as features evolve.
+- [Session Handoff (2026-03-21 EOD)](SESSION_HANDOFF_2026-03-21.md): exact end-of-day resume point for the cross-repo GNUstep CI/toolchain work.
 
 ## Downstream Reports
 

@@ -7,6 +7,17 @@ status, prefer the individual phase roadmap docs and `README.md`. Historical
 "Next Session Focus" notes below are preserved as contemporaneous checkpoint
 entries, not current plan-of-record items.
 
+## Session Handoff (2026-03-21 EOD)
+
+- Added explicit end-of-day handoff note for the cross-repo CI/toolchain work:
+  - `docs/SESSION_HANDOFF_2026-03-21.md`
+- Resume point recorded there includes:
+  - clean Arlen HEAD at `c699d39`
+  - clean `apt_portstree` HEAD at `93e1f83`
+  - verified shared GNUstep images built on `iep-apt`
+  - next task: add a generic GitHub Actions runner image on top of the shared
+    GNUstep CI image, then retry TSAN on that runner path
+
 ## Benchmark Handoff (2026-02-24 EOD)
 
 - Added end-of-day checkpoint for benchmark work:
