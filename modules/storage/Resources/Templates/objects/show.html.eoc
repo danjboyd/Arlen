@@ -1,0 +1,65 @@
+<% NSDictionary *object = [ctx objectForKey:@"object"] ?: @{}; %>
+<% NSDictionary *paths = [object objectForKey:@"paths"] ?: @{}; %>
+<section class="storage-detail-grid">
+  <article class="storage-panel">
+    <h3>Object</h3>
+    <dl class="storage-definition-list">
+      <dt>Object ID</dt>
+      <dd><%= [object objectForKey:@"objectID"] %></dd>
+      <dt>Collection</dt>
+      <dd><%= [object objectForKey:@"collection"] %></dd>
+      <dt>Content Type</dt>
+      <dd><%= [object objectForKey:@"contentType"] %></dd>
+      <dt>Size</dt>
+      <dd><%= [object objectForKey:@"sizeBytes"] %></dd>
+      <dt>Visibility</dt>
+      <dd><%= [object objectForKey:@"visibility"] %></dd>
+      <dt>Variant State</dt>
+      <dd><%= [object objectForKey:@"variantState"] %></dd>
+      <dt>Download Token API</dt>
+      <dd><code><%= [paths objectForKey:@"download_token"] %></code></dd>
+    </dl>
+  </article>
+
+  <article class="storage-panel">
+    <h3>Actions</h3>
+    <div class="storage-actions">
+      <form method="post" action="<%= [$storagePrefix stringByAppendingFormat:@"/collections/%@/objects/%@/regenerate-variants", [object objectForKey:@"collection"], [object objectForKey:@"objectID"]] %>">
+        <input type="hidden" name="csrf_token" value="<%= [ctx objectForKey:@"csrfToken"] %>">
+        <button type="submit">Regenerate variants</button>
+      </form>
+      <form method="post" action="<%= [$storagePrefix stringByAppendingFormat:@"/collections/%@/objects/%@/delete", [object objectForKey:@"collection"], [object objectForKey:@"objectID"]] %>">
+        <input type="hidden" name="csrf_token" value="<%= [ctx objectForKey:@"csrfToken"] %>">
+        <button type="submit">Delete object</button>
+      </form>
+      <a href="<%= [$storagePrefix stringByAppendingFormat:@"/collections/%@", [object objectForKey:@"collection"]] %>">Back to collection</a>
+    </div>
+  </article>
+</section>
+
+<section class="storage-panel">
+  <div class="storage-panel-heading">
+    <h3>Variants</h3>
+    <span>Job-backed variant state</span>
+  </div>
+  <table class="storage-table">
+    <thead>
+      <tr>
+        <th>Identifier</th>
+        <th>Label</th>
+        <th>Type</th>
+        <th>Status</th>
+      </tr>
+    </thead>
+    <tbody>
+      <% for (NSDictionary *variant in ([object objectForKey:@"variants"] ?: @[])) { %>
+        <tr>
+          <td><%= [variant objectForKey:@"identifier"] %></td>
+          <td><%= [variant objectForKey:@"label"] %></td>
+          <td><%= [variant objectForKey:@"contentType"] %></td>
+          <td><%= [variant objectForKey:@"status"] %></td>
+        </tr>
+      <% } %>
+    </tbody>
+  </table>
+</section>

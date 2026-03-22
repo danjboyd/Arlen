@@ -2,7 +2,7 @@
 build/
 dist/
 obj/
-obj*/
+/obj*/
 .deps/
 .libs/
 *.o
