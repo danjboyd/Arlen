@@ -230,7 +230,7 @@ static NSString *ALNGenerateRequestID(void);
   NSUInteger total = [keys count];
   if (state->state >= total) {
     if (state->extra[0] != 0) {
-      CFBridgingRelease((void *)state->extra[0]);
+      (void)(__bridge_transfer id)(void *)state->extra[0];
       state->extra[0] = 0;
     }
     return 0;
