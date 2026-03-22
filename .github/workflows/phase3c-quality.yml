@@ -24,6 +24,7 @@ jobs:
       - name: Run Phase 3C quality gate
         env:
           GNUSTEP_USER_ROOT: ${{ github.workspace }}/.gnustep
+          ARLEN_PERF_BASELINE_ROOT: tests/performance/baselines/iep-apt
         run: |
           bash ./tools/ci/run_phase3c_quality.sh
 

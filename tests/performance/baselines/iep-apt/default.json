@@ -1,0 +1,261 @@
+{
+  "baseline_metadata": {
+    "created_utc": "2026-03-22T18:59:32Z",
+    "update_policy": "Set ARLEN_PERF_UPDATE_BASELINE=1 (or --update-baseline) for intentional baseline refreshes.",
+    "updated_utc": "2026-03-22T18:59:32Z"
+  },
+  "host": "127.0.0.1",
+  "machine": {
+    "cpu_count": 4,
+    "platform": "Linux-6.12.74+deb13+1-amd64-x86_64-with-glibc2.41",
+    "python": "3.13.5"
+  },
+  "memory": {
+    "after_kb": 28080,
+    "before_kb": 26412,
+    "growth_kb": 1668
+  },
+  "policy": {
+    "latency_regression_ratio": 1.25,
+    "memory_growth_kb_max": 16384,
+    "memory_growth_ratio": 1.5,
+    "throughput_floor_ratio": 0.75
+  },
+  "port": 3301,
+  "profile": "default",
+  "repeats": 3,
+  "scenarios": {
+    "api_status": {
+      "duration_s": 1.535116,
+      "max_ms": 1.622,
+      "p50_ms": 1.26,
+      "p95_ms": 1.439,
+      "p99_ms": 1.502,
+      "profile": "default",
+      "repeats": 3,
+      "req_per_sec": 78.17,
+      "requests": 120,
+      "runs": [
+        {
+          "duration_s": 1.599639,
+          "max_ms": 1.629,
+          "p50_ms": 1.312,
+          "p95_ms": 1.544,
+          "p99_ms": 1.615,
+          "profile": "default",
+          "req_per_sec": 75.02,
+          "requests": 120,
+          "run": 1
+        },
+        {
+          "duration_s": 1.535116,
+          "max_ms": 1.598,
+          "p50_ms": 1.26,
+          "p95_ms": 1.439,
+          "p99_ms": 1.502,
+          "profile": "default",
+          "req_per_sec": 78.17,
+          "requests": 120,
+          "run": 2
+        },
+        {
+          "duration_s": 1.491137,
+          "max_ms": 1.622,
+          "p50_ms": 1.179,
+          "p95_ms": 1.401,
+          "p99_ms": 1.473,
+          "profile": "default",
+          "req_per_sec": 80.48,
+          "requests": 120,
+          "run": 3
+        }
+      ]
+    },
+    "healthz": {
+      "duration_s": 1.526618,
+      "max_ms": 1.326,
+      "p50_ms": 1.09,
+      "p95_ms": 1.251,
+      "p99_ms": 1.283,
+      "profile": "default",
+      "repeats": 3,
+      "req_per_sec": 78.61,
+      "requests": 120,
+      "runs": [
+        {
+          "duration_s": 1.529883,
+          "max_ms": 2.433,
+          "p50_ms": 1.111,
+          "p95_ms": 1.355,
+          "p99_ms": 1.503,
+          "profile": "default",
+          "req_per_sec": 78.44,
+          "requests": 120,
+          "run": 1
+        },
+        {
+          "duration_s": 1.526618,
+          "max_ms": 1.326,
+          "p50_ms": 1.09,
+          "p95_ms": 1.251,
+          "p99_ms": 1.283,
+          "profile": "default",
+          "req_per_sec": 78.61,
+          "requests": 120,
+          "run": 2
+        },
+        {
+          "duration_s": 1.453124,
+          "max_ms": 1.21,
+          "p50_ms": 0.976,
+          "p95_ms": 1.135,
+          "p99_ms": 1.199,
+          "profile": "default",
+          "req_per_sec": 82.58,
+          "requests": 120,
+          "run": 3
+        }
+      ]
+    },
+    "openapi_docs": {
+      "duration_s": 1.519225,
+      "max_ms": 1.476,
+      "p50_ms": 1.077,
+      "p95_ms": 1.288,
+      "p99_ms": 1.387,
+      "profile": "default",
+      "repeats": 3,
+      "req_per_sec": 78.99,
+      "requests": 120,
+      "runs": [
+        {
+          "duration_s": 1.519225,
+          "max_ms": 1.317,
+          "p50_ms": 1.054,
+          "p95_ms": 1.25,
+          "p99_ms": 1.269,
+          "profile": "default",
+          "req_per_sec": 78.99,
+          "requests": 120,
+          "run": 1
+        },
+        {
+          "duration_s": 1.490971,
+          "max_ms": 1.476,
+          "p50_ms": 1.077,
+          "p95_ms": 1.295,
+          "p99_ms": 1.387,
+          "profile": "default",
+          "req_per_sec": 80.48,
+          "requests": 120,
+          "run": 2
+        },
+        {
+          "duration_s": 1.549503,
+          "max_ms": 1.629,
+          "p50_ms": 1.112,
+          "p95_ms": 1.288,
+          "p99_ms": 1.445,
+          "profile": "default",
+          "req_per_sec": 77.44,
+          "requests": 120,
+          "run": 3
+        }
+      ]
+    },
+    "openapi_json": {
+      "duration_s": 1.567354,
+      "max_ms": 1.961,
+      "p50_ms": 1.517,
+      "p95_ms": 1.763,
+      "p99_ms": 1.809,
+      "profile": "default",
+      "repeats": 3,
+      "req_per_sec": 76.56,
+      "requests": 120,
+      "runs": [
+        {
+          "duration_s": 1.603471,
+          "max_ms": 1.961,
+          "p50_ms": 1.584,
+          "p95_ms": 1.763,
+          "p99_ms": 1.809,
+          "profile": "default",
+          "req_per_sec": 74.84,
+          "requests": 120,
+          "run": 1
+        },
+        {
+          "duration_s": 1.547668,
+          "max_ms": 1.948,
+          "p50_ms": 1.517,
+          "p95_ms": 1.713,
+          "p99_ms": 1.779,
+          "profile": "default",
+          "req_per_sec": 77.54,
+          "requests": 120,
+          "run": 2
+        },
+        {
+          "duration_s": 1.567354,
+          "max_ms": 2.138,
+          "p50_ms": 1.513,
+          "p95_ms": 1.769,
+          "p99_ms": 1.844,
+          "profile": "default",
+          "req_per_sec": 76.56,
+          "requests": 120,
+          "run": 3
+        }
+      ]
+    },
+    "root": {
+      "duration_s": 1.572536,
+      "max_ms": 1.748,
+      "p50_ms": 1.459,
+      "p95_ms": 1.659,
+      "p99_ms": 1.675,
+      "profile": "default",
+      "repeats": 3,
+      "req_per_sec": 76.31,
+      "requests": 120,
+      "runs": [
+        {
+          "duration_s": 1.577206,
+          "max_ms": 1.748,
+          "p50_ms": 1.509,
+          "p95_ms": 1.668,
+          "p99_ms": 1.71,
+          "profile": "default",
+          "req_per_sec": 76.08,
+          "requests": 120,
+          "run": 1
+        },
+        {
+          "duration_s": 1.545563,
+          "max_ms": 1.698,
+          "p50_ms": 1.436,
+          "p95_ms": 1.659,
+          "p99_ms": 1.675,
+          "profile": "default",
+          "req_per_sec": 77.64,
+          "requests": 120,
+          "run": 2
+        },
+        {
+          "duration_s": 1.572536,
+          "max_ms": 2.208,
+          "p50_ms": 1.459,
+          "p95_ms": 1.638,
+          "p99_ms": 1.649,
+          "profile": "default",
+          "req_per_sec": 76.31,
+          "requests": 120,
+          "run": 3
+        }
+      ]
+    }
+  },
+  "schema_version": 2,
+  "timestamp_utc": "2026-03-22T18:59:32Z"
+}

@@ -476,6 +476,10 @@ ARLEN_PERF_PROFILE=comparison_http ARLEN_PERF_SKIP_GATE=1 make perf
 ARLEN_PERF_SMOKE_PROFILES=default,template_heavy ARLEN_PERF_SMOKE_REPEATS=3 make ci-perf-smoke
 ```
 
+The self-hosted `iep-apt` GitHub perf lanes pin `ARLEN_PERF_BASELINE_ROOT=tests/performance/baselines/iep-apt`
+so the runner uses hardware-matched perf baselines instead of the broader local
+developer baseline set.
+
 ## 5. Run Tech Demo
 
 ```bash
@@ -760,6 +764,8 @@ Framework/app runtime:
 - `ARLEN_JOB_WORKER_INTERVAL_SECONDS` (plugin template hook)
 - `ARLEN_JOB_WORKER_RETRY_DELAY_SECONDS` (plugin template hook)
 - `ARLEN_PERF_CONCURRENCY` (perf harness request concurrency override)
+- `ARLEN_PERF_BASELINE_ROOT` (optional perf baseline directory override)
+- `ARLEN_PERF_POLICY_ROOT` (optional perf policy directory override)
 
 Legacy compatibility fallback (`MOJOOBJC_*`) is supported but transitional.
 

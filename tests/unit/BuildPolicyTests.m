@@ -478,6 +478,42 @@
   }
 }
 
+- (void)testPerfHarnessSupportsPinnedBaselineAndPolicyRoots {
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *script =
+      [self readFile:[repoRoot stringByAppendingPathComponent:@"tests/performance/run_perf.sh"]];
+
+  XCTAssertTrue([script containsString:
+                            @"baseline_root=\"${ARLEN_PERF_BASELINE_ROOT:-tests/performance/"
+                             @"baselines}\""]);
+  XCTAssertTrue([script containsString:
+                            @"policy_root=\"${ARLEN_PERF_POLICY_ROOT:-tests/performance/"
+                             @"policies}\""]);
+  XCTAssertTrue([script containsString:
+                            @"baseline_file=\"${ARLEN_PERF_BASELINE:-${baseline_root}/"
+                             @"${PROFILE_NAME}.json}\""]);
+  XCTAssertTrue([script containsString:
+                            @"policy_file=\"${ARLEN_PERF_POLICY:-${policy_root}/${PROFILE_NAME}."
+                             @"json}\""]);
+  XCTAssertTrue([script containsString:
+                            @"if [[ ! -f \"$policy_file\" && -f \"${policy_root}/policy.json\" ]]; "
+                             @"then"]);
+}
+
+- (void)testPerfGitHubWorkflowsPinSelfHostedBaselineRoot {
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSArray<NSString *> *workflowPaths = @[
+    @".github/workflows/phase3c-quality.yml",
+    @".github/workflows/phase4-quality.yml",
+  ];
+
+  for (NSString *relativePath in workflowPaths) {
+    NSString *workflow = [self readFile:[repoRoot stringByAppendingPathComponent:relativePath]];
+    XCTAssertTrue([workflow containsString:@"ARLEN_PERF_BASELINE_ROOT: tests/performance/baselines/iep-apt"],
+                  @"workflow should pin iep-apt perf baselines: %@", relativePath);
+  }
+}
+
 - (void)testBackendParityArtifactsRebuildPerFeatureCombo {
   NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
   NSString *script = [self

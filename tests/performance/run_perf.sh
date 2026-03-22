@@ -48,9 +48,13 @@ if [[ "$PROFILE_NAME" == "default" && "$concurrency" == "1" ]]; then
   echo "perf: note: default profile is CI regression-oriented. For external comparisons use ARLEN_PERF_PROFILE=comparison_http."
 fi
 
-baseline_file="${ARLEN_PERF_BASELINE:-tests/performance/baselines/${PROFILE_NAME}.json}"
-policy_file="${ARLEN_PERF_POLICY:-tests/performance/policies/${PROFILE_NAME}.json}"
-if [[ ! -f "$policy_file" && -f "tests/performance/policy.json" ]]; then
+baseline_root="${ARLEN_PERF_BASELINE_ROOT:-tests/performance/baselines}"
+policy_root="${ARLEN_PERF_POLICY_ROOT:-tests/performance/policies}"
+baseline_file="${ARLEN_PERF_BASELINE:-${baseline_root}/${PROFILE_NAME}.json}"
+policy_file="${ARLEN_PERF_POLICY:-${policy_root}/${PROFILE_NAME}.json}"
+if [[ ! -f "$policy_file" && -f "${policy_root}/policy.json" ]]; then
+  policy_file="${policy_root}/policy.json"
+elif [[ ! -f "$policy_file" && -f "tests/performance/policy.json" ]]; then
   policy_file="tests/performance/policy.json"
 fi
 history_dir="${ARLEN_PERF_HISTORY_DIR:-build/perf/history/${PROFILE_NAME}}"

@@ -289,6 +289,8 @@ Profile selection is environment-driven:
 - `ARLEN_PERF_PROFILE=default|middleware_heavy|template_heavy|api_reference|migration_sample`
 - `ARLEN_PERF_PROFILE=default|middleware_heavy|template_heavy|api_reference|migration_sample|comparison_http`
 - `ARLEN_PERF_CONCURRENCY=<n>` (optional concurrent request fanout per scenario)
+- `ARLEN_PERF_BASELINE_ROOT=<path>` (optional per-profile baseline directory root)
+- `ARLEN_PERF_POLICY_ROOT=<path>` (optional per-profile policy directory root)
 
 ### `arlen check [--dry-run] [--json]`
 

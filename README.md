@@ -166,7 +166,8 @@ make browser-error-audit
 
 `make ci-perf-smoke` is the lighter local/manual macro perf subset. The
 self-hosted quality workflow already runs the broader multi-profile macro perf
-matrix through `make ci-quality`.
+matrix through `make ci-quality`, pinned to
+`tests/performance/baselines/iep-apt` on the current `iep-apt` runner.
 
 `make browser-error-audit` generates a browser-reviewable gallery of representative
 build/runtime error surfaces under `build/browser-error-audit/index.html`.

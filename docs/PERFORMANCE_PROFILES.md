@@ -88,10 +88,17 @@ Campaign contract and artifacts are documented in `docs/PHASED_BASELINE_CAMPAIGN
 Per-profile baseline files:
 
 - `tests/performance/baselines/<profile>.json`
+- `tests/performance/baselines/iep-apt/<profile>.json` for the current
+  self-hosted runner hardware
 
 Per-profile policy files:
 
 - `tests/performance/policies/<profile>.json`
+
+Optional harness overrides:
+
+- `ARLEN_PERF_BASELINE_ROOT=<path>` swaps the per-profile baseline directory
+- `ARLEN_PERF_POLICY_ROOT=<path>` swaps the per-profile policy directory
 
 ## 4. Trend Outputs
 
