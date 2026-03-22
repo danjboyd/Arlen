@@ -21,6 +21,13 @@ This repository is in early scaffold stage. Priority is delivering a stable v1 t
 - Prefer deterministic behavior over convenience shortcuts.
 - Preserve compatibility with GNUstep build tooling.
 
+## Git and Release Workflow
+
+- When verified changes are intended to ship, commit them rather than leaving them local-only unless the user explicitly asks to hold them back.
+- Before pushing, verify `gh auth status` shows the `danjboyd` account as active for `github.com`.
+- If `dboyd-invitoep` or another account is active, switch with `gh auth switch -u danjboyd` before pushing.
+- After switching GitHub CLI accounts, run `gh auth setup-git` so `git push` uses the active `gh` credentials.
+
 ## Repository Layout
 
 - `src/Arlen/`: library source code.
