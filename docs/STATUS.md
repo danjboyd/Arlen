@@ -1,11 +1,25 @@
 # Arlen Status Checkpoint
 
-Last updated: 2026-03-21
+Last updated: 2026-03-22
 
 This document is a running checkpoint log. For authoritative current roadmap
 status, prefer the individual phase roadmap docs and `README.md`. Historical
 "Next Session Focus" notes below are preserved as contemporaneous checkpoint
 entries, not current plan-of-record items.
+
+## Session Handoff (2026-03-22 EOD)
+
+- Added explicit end-of-day handoff note for the self-hosted GitHub CI
+  recovery work:
+  - `docs/SESSION_HANDOFF_2026-03-22.md`
+- Resume point recorded there includes:
+  - clean Arlen HEAD at `d40c0b4`
+  - self-hosted runner `iep-apt-arlen` stable and working again
+  - `phase5e-quality`, `docs-quality`, and `phase3c-quality` green on
+    `d40c0b4`
+  - `phase5e-sanitizers` still in progress at stand-down
+  - checked-in `iep-apt` perf baselines now pin the 4-core self-hosted perf
+    gate to host-matched thresholds
 
 ## Session Handoff (2026-03-21 EOD)
 
