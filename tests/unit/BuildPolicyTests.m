@@ -331,6 +331,10 @@
 
   XCTAssertTrue([script containsString:@"repeats=\"${ARLEN_PHASE10M_BLOB_REPEATS:-5}\""]);
   XCTAssertTrue([script containsString:@"requests=\"${ARLEN_PHASE10M_BLOB_REQUESTS:-180}\""]);
+  XCTAssertTrue([script containsString:@"perf_cooldown_seconds=\"${ARLEN_PERF_COOLDOWN_SECONDS:-15}\""]);
+  XCTAssertTrue([script containsString:@"perf_retry_count=\"${ARLEN_PERF_RETRY_COUNT:-2}\""]);
+  XCTAssertTrue([script containsString:@"phase10m blob throughput failed on attempt"]);
+  XCTAssertTrue([script containsString:@"sleep \"$perf_cooldown_seconds\""]);
 }
 
 - (void)testGNUmakefileIncludesPerfSmokeTarget {

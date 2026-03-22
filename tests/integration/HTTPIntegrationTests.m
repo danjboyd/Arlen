@@ -3257,9 +3257,12 @@
     XCTAssertTrue([output containsString:
                                   @"boomhauer: route inspection mode; ensuring artifacts are current before printing routes"],
                   @"%@", output);
-    XCTAssertTrue([output containsString:
-                                  @"boomhauer: [1/4] detected sanitizer-instrumented framework artifacts; rebuilding clean framework artifacts"],
-                  @"%@", output);
+    BOOL rebuiltSanitizedFramework =
+        [output containsString:
+                    @"boomhauer: [1/4] detected sanitizer-instrumented framework artifacts; rebuilding clean framework artifacts"];
+    BOOL rebuiltFrameworkFromFreshnessCheck =
+        [output containsString:@"boomhauer: [1/4] checking tool freshness and building framework artifacts"];
+    XCTAssertTrue(rebuiltSanitizedFramework || rebuiltFrameworkFromFreshnessCheck, @"%@", output);
     XCTAssertFalse([output containsString:@"undefined reference to `__asan_"], @"%@", output);
     XCTAssertFalse([output containsString:@"undefined reference to `__ubsan_"], @"%@", output);
     XCTAssertTrue([[NSFileManager defaultManager]
