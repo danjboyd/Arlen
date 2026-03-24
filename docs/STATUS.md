@@ -74,6 +74,19 @@ entries, not current plan-of-record items.
   - added focused regression coverage for a forced app-root framework-build
     failure in `tests/integration/HTTPIntegrationTests.m`
 
+## Session Handoff (2026-03-24 EOD)
+
+- Added explicit end-of-day handoff note for the TSAN/runtime-toolchain
+  follow-up and the freshly pushed `3037bbc` GitHub run set:
+  - `docs/SESSION_HANDOFF_2026-03-24.md`
+- Resume point recorded there includes:
+  - clean Arlen HEAD at `3037bbc`
+  - local TSAN helper path verified green
+  - pushed GitHub runs on `3037bbc` still settling at stand-down
+  - remaining open blocker is TSAN promotion against GNUstep
+    `libobjc` runtime/toolchain false positives in standalone instrumented
+    `arlen`
+
 ## Session Handoff (2026-03-22 EOD)
 
 - Added explicit end-of-day handoff note for the self-hosted GitHub CI
