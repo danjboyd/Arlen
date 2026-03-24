@@ -9,6 +9,32 @@ entries, not current plan-of-record items.
 
 ## Completed Today (2026-03-24)
 
+- Stabilized the experimental `phase5e` TSAN lane locally without promoting
+  TSAN to blocking:
+  - bootstrapped `eocc` unsanitized and held that binary old for the
+    instrumented `boomhauer` / `arlen` / `test-unit` builds so template
+    transpilation no longer trips the GNUstep `libobjc` startup signature
+    before the sanitizer lane reaches Arlen code
+  - replaced TSAN-hot-path `@synchronized` usage in `ALNResponse`,
+    `ALNPg`, and the pg loader concurrency test with explicit `dispatch_once`
+    and `NSLock` coordination
+  - added repo-managed `phase9h_tsan.supp` suppressions plus lifecycle
+    metadata for the current GNUstep `libobjc` / `libgnustep-base`
+    deadlock-and-monitor false-positive budget
+  - fixed `tools/ci/run_phase5e_tsan_experimental.sh` so it preserves the
+    first failing non-zero exit code instead of falling through to the runtime
+    probe after a failed `test-unit`, and so it stages its TSAN artifacts
+    outside the clean build tree
+  - kept nested shell/tooling assertions out of the active TSAN runtime:
+    the build-policy fixture wrappers and the auth-ui eject scaffolding test
+    now bail out when the outer unit process is already instrumented, because
+    standalone `arlen` still emits GNUstep `libobjc` lock-order-inversion
+    noise that pollutes stderr-bound JSON/script assertions even though the
+    lane itself is otherwise green
+  - verified a fresh serial `tools/ci/run_phase5e_tsan_experimental.sh` pass
+    now completes through `runtime-concurrency-probe`, but TSAN promotion
+    remains blocked until the remaining GNUstep runtime/toolchain false
+    positives are resolved and two deterministic pass cycles are observed
 - Revisited the remaining TSAN/thread-race follow-up from the 2026-03-22
   self-hosted CI handoff:
   - confirmed the scheduled 2026-03-23 and 2026-03-24 `thread-race-nightly`

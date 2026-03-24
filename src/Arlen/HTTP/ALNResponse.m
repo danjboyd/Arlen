@@ -1,6 +1,7 @@
 #import "ALNResponse.h"
 
 #import "ALNJSONSerialization.h"
+#import <dispatch/dispatch.h>
 #include <ctype.h>
 #include <stdlib.h>
 #include <string.h>
@@ -10,6 +11,7 @@ NSString *const ALNResponseErrorDomain = @"Arlen.HTTP.Response.Error";
 
 static NSLock *gALNResponseFaultInjectionLock = nil;
 static NSMutableSet *gALNResponseFaultInjectionConsumed = nil;
+static NSLock *gALNResponseFaultInjectionStateLock = nil;
 
 static BOOL ALNResponseEnvFlagEnabled(const char *name) {
   if (name == NULL || name[0] == '\0') {
@@ -29,17 +31,29 @@ static BOOL ALNResponseEnvFlagEnabled(const char *name) {
   return YES;
 }
 
+static NSLock *ALNResponseFaultInjectionStateLock(void) {
+  static dispatch_once_t onceToken;
+  dispatch_once(&onceToken, ^{
+    gALNResponseFaultInjectionStateLock = [[NSLock alloc] init];
+  });
+  return gALNResponseFaultInjectionStateLock;
+}
+
 static void ALNEnsureResponseFaultInjectionState(void) {
   if (gALNResponseFaultInjectionLock != nil && gALNResponseFaultInjectionConsumed != nil) {
     return;
   }
-  @synchronized([NSProcessInfo processInfo]) {
+  NSLock *stateLock = ALNResponseFaultInjectionStateLock();
+  [stateLock lock];
+  @try {
     if (gALNResponseFaultInjectionLock == nil) {
       gALNResponseFaultInjectionLock = [[NSLock alloc] init];
     }
     if (gALNResponseFaultInjectionConsumed == nil) {
       gALNResponseFaultInjectionConsumed = [NSMutableSet set];
     }
+  } @finally {
+    [stateLock unlock];
   }
 }
 
@@ -185,16 +199,11 @@ static NSString *ALNStatusText(NSInteger statusCode) {
 
 static NSCache *ALNSharedSerializedHeaderCache(void) {
   static NSCache *cache = nil;
-  if (cache != nil) {
-    return cache;
-  }
-
-  @synchronized([ALNResponse class]) {
-    if (cache == nil) {
-      cache = [[NSCache alloc] init];
-      [cache setCountLimit:512];
-    }
-  }
+  static dispatch_once_t onceToken;
+  dispatch_once(&onceToken, ^{
+    cache = [[NSCache alloc] init];
+    [cache setCountLimit:512];
+  });
   return cache;
 }
 

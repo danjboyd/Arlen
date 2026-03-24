@@ -3,6 +3,7 @@
 #import "ALNPostgresDialect.h"
 #import "ALNSQLBuilder.h"
 
+#import <dispatch/dispatch.h>
 #import <dlfcn.h>
 #import <stdlib.h>
 #import <stdint.h>
@@ -135,18 +136,19 @@ static void ALNBindOptionalLibpqSymbol(void **target, void *handle, const char *
   *target = dlsym(handle, symbolName);
 }
 
-static NSObject *ALNLibpqLoadLockToken(void) {
-  static NSObject *token = nil;
-  @synchronized([ALNPg class]) {
-    if (token == nil) {
-      token = [[NSObject alloc] init];
-    }
-  }
-  return token;
+static NSLock *ALNLibpqLoadLock(void) {
+  static NSLock *lock = nil;
+  static dispatch_once_t onceToken;
+  dispatch_once(&onceToken, ^{
+    lock = [[NSLock alloc] init];
+  });
+  return lock;
 }
 
 static BOOL ALNLoadLibpq(NSError **error) {
-  @synchronized(ALNLibpqLoadLockToken()) {
+  NSLock *loadLock = ALNLibpqLoadLock();
+  [loadLock lock];
+  @try {
     if (gLibpqHandle != NULL) {
       return YES;
     }
@@ -222,6 +224,8 @@ static BOOL ALNLoadLibpq(NSError **error) {
 
     gLibpqHandle = handle;
     return YES;
+  } @finally {
+    [loadLock unlock];
   }
 }
 

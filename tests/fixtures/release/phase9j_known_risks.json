@@ -9,7 +9,7 @@
       "severity": "medium",
       "owner": "runtime-core",
       "targetDate": "2026-03-31",
-      "notes": "Nightly TSAN runs on 2026-03-23 and 2026-03-24 still reproduced the GNUstep libobjc lock-order-inversion signature during TSAN-instrumented eocc transpilation; keep tsan_experimental non-blocking until that runtime/toolchain issue is resolved and two consecutive deterministic pass cycles are observed."
+      "notes": "A fresh local tsan_experimental run now passes after unsanitized eocc bootstrap, GNUstep suppression wiring, and TSAN-only quarantine of nested CLI/script assertion tests, but the 2026-03-23 and 2026-03-24 nightlies still reproduced the GNUstep libobjc lock-order-inversion signature and standalone instrumented arlen still emits the same runtime/toolchain noise; keep tsan_experimental non-blocking until that stack is resolved and two consecutive deterministic pass cycles are observed."
     },
     {
       "id": "phase9j-risk-benchmark-ladder",

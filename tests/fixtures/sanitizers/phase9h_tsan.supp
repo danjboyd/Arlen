@@ -1,0 +1,18 @@
+# GNUstep libobjc can report a startup-time lock-order inversion under TSAN
+# before Arlen application code begins executing. Keep this suppression
+# temporary and tracked in the registry while the runtime/toolchain issue is
+# investigated.
+deadlock:libobjc.so
+
+# GNUstep base/XCTest can also surface the same startup-time lock ordering
+# issue while the unit bundle initializes worker threads.
+deadlock:libgnustep-base.so
+
+# GNUstep's objc monitor implementation currently reports TSAN races through
+# objc_sync_enter on lock bookkeeping state. Keep this temporary while the
+# runtime/toolchain behavior is investigated.
+race:libobjc.so
+
+# GNUstep base can also report teardown-time mutex races while XCTest worker
+# threads are still unwinding.
+race:libgnustep-base.so

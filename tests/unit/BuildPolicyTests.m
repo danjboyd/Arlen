@@ -6,6 +6,11 @@
 
 @implementation BuildPolicyTests
 
+- (BOOL)isThreadSanitizerRuntimeActive {
+  NSString *ldPreload = [[[NSProcessInfo processInfo] environment] objectForKey:@"LD_PRELOAD"];
+  return [ldPreload length] > 0;
+}
+
 - (NSString *)readFile:(NSString *)path {
   NSError *error = nil;
   NSString *contents =
@@ -507,11 +512,325 @@
   XCTAssertTrue([script containsString:@"mkdir -p \"$artifact_dir\""]);
   XCTAssertTrue([script containsString:@"cp \"$staged_log_path\" \"$log_path\""]);
   XCTAssertTrue([script containsString:@"cp \"$staged_summary_path\" \"$summary_path\""]);
+  XCTAssertTrue([script containsString:
+                              @"tsan_suppressions_file=\"${ARLEN_TSAN_SUPPRESSIONS_FILE:-$repo_root/tests/fixtures/sanitizers/phase9h_tsan.supp}\""]);
+  XCTAssertTrue([script containsString:@"suppressions=$tsan_suppressions_file"]);
   XCTAssertTrue([script containsString:@"trap cleanup EXIT"]);
   XCTAssertTrue([script containsString:@"second_deadlock_stack=1"]);
 }
 
+- (void)testTSANHotPathsAvoidObjCSynchronizedMonitors {
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *response =
+      [self readFile:[repoRoot stringByAppendingPathComponent:@"src/Arlen/HTTP/ALNResponse.m"]];
+  NSString *pg = [self readFile:[repoRoot stringByAppendingPathComponent:@"src/Arlen/Data/ALNPg.m"]];
+  NSString *pgTests = [self readFile:[repoRoot stringByAppendingPathComponent:@"tests/unit/PgTests.m"]];
+
+  XCTAssertTrue([response containsString:@"dispatch_once(&onceToken, ^{"]);
+  XCTAssertTrue([response containsString:@"ALNResponseFaultInjectionStateLock(void)"]);
+  XCTAssertFalse([response containsString:@"@synchronized([NSProcessInfo processInfo])"]);
+  XCTAssertFalse([response containsString:@"@synchronized([ALNResponse class])"]);
+
+  XCTAssertTrue([pg containsString:@"static NSLock *ALNLibpqLoadLock(void)"]);
+  XCTAssertTrue([pg containsString:@"[loadLock lock];"]);
+  XCTAssertFalse([pg containsString:@"@synchronized([ALNPg class])"]);
+  XCTAssertFalse([pg containsString:@"@synchronized(ALNLibpqLoadLockToken())"]);
+
+  XCTAssertTrue([pgTests containsString:@"NSLock *stateLock = [[NSLock alloc] init];"]);
+  XCTAssertFalse([pgTests containsString:@"@synchronized(state)"]);
+}
+
+- (void)testTSANScriptBootstrapsEOCCUnsanitizedBeforeInstrumentedBuilds {
+  if ([self isThreadSanitizerRuntimeActive]) {
+    return;
+  }
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *fixtureRoot = [self createTempDirectoryWithPrefix:@"arlen-tsan-fixture"];
+  NSString *fakeBin = [self createTempDirectoryWithPrefix:@"arlen-tsan-fakebin"];
+  XCTAssertNotNil(fixtureRoot);
+  XCTAssertNotNil(fakeBin);
+  if (fixtureRoot == nil || fakeBin == nil) {
+    return;
+  }
+
+  @try {
+    NSString *toolsDir = [fixtureRoot stringByAppendingPathComponent:@"tools/ci"];
+    NSError *error = nil;
+    XCTAssertTrue([[NSFileManager defaultManager] createDirectoryAtPath:toolsDir
+                                            withIntermediateDirectories:YES
+                                                             attributes:nil
+                                                                  error:&error]);
+    XCTAssertNil(error);
+
+    NSString *sourceScript =
+        [repoRoot stringByAppendingPathComponent:@"tools/ci/run_phase5e_tsan_experimental.sh"];
+    NSString *targetScript = [toolsDir stringByAppendingPathComponent:@"run_phase5e_tsan_experimental.sh"];
+    XCTAssertTrue([[NSFileManager defaultManager] copyItemAtPath:sourceScript
+                                                          toPath:targetScript
+                                                           error:&error]);
+    XCTAssertNil(error);
+    XCTAssertTrue([self makeExecutableAtPath:targetScript]);
+
+    NSString *probeScript = [toolsDir stringByAppendingPathComponent:@"runtime_concurrency_probe.py"];
+    XCTAssertTrue([self writeFile:probeScript
+                          content:@"import argparse\n"
+                                  "import os\n"
+                                  "import sys\n"
+                                  "\n"
+                                  "parser = argparse.ArgumentParser()\n"
+                                  "parser.add_argument('--binary', required=True)\n"
+                                  "parser.add_argument('--iterations', required=True)\n"
+                                  "args = parser.parse_args()\n"
+                                  "if not os.path.exists(args.binary):\n"
+                                  "    sys.stderr.write('missing boomhauer binary\\n')\n"
+                                  "    sys.exit(61)\n"
+                                  "print(f'probe ok {args.binary} {args.iterations}')\n"]);
+
+    NSString *dummyTSAN = [fakeBin stringByAppendingPathComponent:@"libtsan.so"];
+    XCTAssertTrue([self writeFile:dummyTSAN content:@""]);
+
+    NSString *fakeMake = [fakeBin stringByAppendingPathComponent:@"make"];
+    XCTAssertTrue([self writeFile:fakeMake
+                          content:@"#!/usr/bin/env bash\n"
+                                  "set -euo pipefail\n"
+                                  "repo_root=\"$(pwd)\"\n"
+                                  "log_path=\"$repo_root/make.log\"\n"
+                                  "bootstrap_eocc=\"\"\n"
+                                  "make_extra_flags=\"${EXTRA_OBJC_FLAGS-}\"\n"
+                                  "args=(\"$@\")\n"
+                                  "for arg in \"${args[@]}\"; do\n"
+                                  "  case \"$arg\" in\n"
+                                  "    EOC_TOOL=*) bootstrap_eocc=\"${arg#EOC_TOOL=}\" ;;\n"
+                                  "    EXTRA_OBJC_FLAGS=*) make_extra_flags=\"${arg#EXTRA_OBJC_FLAGS=}\" ;;\n"
+                                  "  esac\n"
+                                  "done\n"
+                                  "printf 'MAKE_EXTRA_OBJC_FLAGS=%s ARGS=%s\\n' \"$make_extra_flags\" \"$*\" >>\"$log_path\"\n"
+                                  "if [[ \" $* \" == *\" clean \"* ]]; then\n"
+                                  "  rm -rf \"$repo_root/build\" \"$repo_root/.gnustep\" \"$repo_root/.gnustep-home\"\n"
+                                  "  exit 0\n"
+                                  "fi\n"
+                                  "if [[ \" $* \" == *\" eocc \"* ]]; then\n"
+                                  "  if [[ -n \"$make_extra_flags\" ]]; then\n"
+                                  "    echo \"bootstrap_eocc_should_be_unsanitized\" >&2\n"
+                                  "    exit 91\n"
+                                  "  fi\n"
+                                  "  if [[ -z \"$bootstrap_eocc\" ]]; then\n"
+                                  "    echo \"missing_bootstrap_eocc\" >&2\n"
+                                  "    exit 92\n"
+                                  "  fi\n"
+                                  "  mkdir -p \"$(dirname \"$bootstrap_eocc\")\" \"$repo_root/build/gen/templates\" \"$repo_root/build/gen/module_templates\"\n"
+                                  "  : >\"$bootstrap_eocc\"\n"
+                                  "  : >\"$repo_root/build/gen/templates/.transpile.state\"\n"
+                                  "  : >\"$repo_root/build/gen/module_templates/.transpile.state\"\n"
+                                  "  exit 0\n"
+                                  "fi\n"
+                                  "if [[ \" $* \" == *\" boomhauer \"* || \" $* \" == *\" arlen \"* || \" $* \" == *\" test-unit \"* ]]; then\n"
+                                  "  if [[ \"$make_extra_flags\" != *\"-fsanitize=thread\"* ]]; then\n"
+                                  "    echo \"sanitized_make_missing_flag\" >&2\n"
+                                  "    exit 93\n"
+                                  "  fi\n"
+                                  "  if [[ -z \"$bootstrap_eocc\" ]]; then\n"
+                                  "    echo \"missing_sanitized_eocc_assignment\" >&2\n"
+                                  "    exit 94\n"
+                                  "  fi\n"
+                                  "  saw_hold_old=0\n"
+                                  "  prev=\"\"\n"
+                                  "  for arg in \"${args[@]}\"; do\n"
+                                  "    if [[ \"$prev\" == \"-o\" && \"$arg\" == \"$bootstrap_eocc\" ]]; then\n"
+                                  "      saw_hold_old=1\n"
+                                  "      break\n"
+                                  "    fi\n"
+                                  "    prev=\"$arg\"\n"
+                                  "  done\n"
+                                  "  if [[ \"$saw_hold_old\" -ne 1 ]]; then\n"
+                                  "    echo \"missing_make_hold_old\" >&2\n"
+                                  "    exit 95\n"
+                                  "  fi\n"
+                                  "  mkdir -p \"$repo_root/build\" \"$repo_root/build/tests\"\n"
+                                  "  if [[ \" $* \" == *\" boomhauer \"* ]]; then\n"
+                                  "    : >\"$repo_root/build/boomhauer\"\n"
+                                  "  fi\n"
+                                  "  if [[ \" $* \" == *\" arlen \"* ]]; then\n"
+                                  "    : >\"$repo_root/build/arlen\"\n"
+                                  "    chmod 755 \"$repo_root/build/arlen\"\n"
+                                  "  fi\n"
+                                  "  exit 0\n"
+                                  "fi\n"
+                                  "echo \"unexpected_make_args: $*\" >&2\n"
+                                  "exit 96\n"]);
+    XCTAssertTrue([self makeExecutableAtPath:fakeMake]);
+
+    NSString *fakeClang = [fakeBin stringByAppendingPathComponent:@"clang"];
+    NSString *fakeClangContents =
+        [NSString stringWithFormat:@"#!/usr/bin/env bash\n"
+                                   "if [[ \"${1:-}\" == \"-print-file-name=libtsan.so\" ]]; then\n"
+                                   "  printf '%%s\\n' %@\n"
+                                   "  exit 0\n"
+                                   "fi\n"
+                                   "exec /usr/bin/clang \"$@\"\n",
+                                   [self shellQuoted:dummyTSAN]];
+    XCTAssertTrue([self writeFile:fakeClang content:fakeClangContents]);
+    XCTAssertTrue([self makeExecutableAtPath:fakeClang]);
+
+    NSString *command = [NSString
+        stringWithFormat:@"cd %@ && LD_PRELOAD='' PATH=%@:$PATH bash ./tools/ci/run_phase5e_tsan_experimental.sh 2>&1",
+                         [self shellQuoted:fixtureRoot],
+                         [self shellQuoted:fakeBin]];
+    int exitCode = 0;
+    NSString *output = [self runShellCapture:command exitCode:&exitCode];
+
+    XCTAssertEqual(0, exitCode, @"%@", output);
+    XCTAssertTrue([output containsString:@"ci: tsan bootstrap eocc "], @"%@", output);
+    XCTAssertTrue([output containsString:@"ci: phase5e tsan experimental run complete"], @"%@", output);
+
+    NSString *makeLog = [self readFile:[fixtureRoot stringByAppendingPathComponent:@"make.log"]];
+    XCTAssertTrue([makeLog containsString:@"ARGS=clean"], @"%@", makeLog);
+    XCTAssertTrue([makeLog containsString:@"MAKE_EXTRA_OBJC_FLAGS= ARGS=EXTRA_OBJC_FLAGS= EOC_TOOL="],
+                  @"%@", makeLog);
+    XCTAssertTrue([makeLog containsString:@"eocc transpile module-transpile"], @"%@", makeLog);
+    XCTAssertTrue([makeLog containsString:@"MAKE_EXTRA_OBJC_FLAGS=-fsanitize=thread -fno-omit-frame-pointer ARGS=EXTRA_OBJC_FLAGS=-fsanitize=thread -fno-omit-frame-pointer EOC_TOOL="],
+                  @"%@", makeLog);
+    XCTAssertTrue([makeLog containsString:@" -o "], @"%@", makeLog);
+    XCTAssertTrue([makeLog containsString:@"arlen"], @"%@", makeLog);
+    XCTAssertTrue([makeLog containsString:@"boomhauer"], @"%@", makeLog);
+    XCTAssertTrue([makeLog containsString:@"test-unit"], @"%@", makeLog);
+
+    NSString *artifactRoot = [fixtureRoot stringByAppendingPathComponent:@"build/sanitizers/tsan"];
+    NSString *summary = [self readFile:[artifactRoot stringByAppendingPathComponent:@"summary.json"]];
+    XCTAssertTrue([summary containsString:@"\"status\": \"pass\""], @"%@", summary);
+    XCTAssertTrue([summary containsString:@"\"exit_code\": 0"], @"%@", summary);
+
+    NSString *tsanLog = [self readFile:[artifactRoot stringByAppendingPathComponent:@"tsan.log"]];
+    XCTAssertTrue([tsanLog containsString:@"ci: tsan bootstrap eocc "], @"%@", tsanLog);
+    XCTAssertTrue([tsanLog containsString:@"probe ok ./build/boomhauer 1"], @"%@", tsanLog);
+  } @finally {
+    [[NSFileManager defaultManager] removeItemAtPath:fixtureRoot error:nil];
+    [[NSFileManager defaultManager] removeItemAtPath:fakeBin error:nil];
+  }
+}
+
+- (void)testTSANScriptStopsOnInstrumentedFailureBeforeRuntimeProbe {
+  if ([self isThreadSanitizerRuntimeActive]) {
+    return;
+  }
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *fixtureRoot = [self createTempDirectoryWithPrefix:@"arlen-tsan-fail-fixture"];
+  NSString *fakeBin = [self createTempDirectoryWithPrefix:@"arlen-tsan-fail-fakebin"];
+  XCTAssertNotNil(fixtureRoot);
+  XCTAssertNotNil(fakeBin);
+  if (fixtureRoot == nil || fakeBin == nil) {
+    return;
+  }
+
+  @try {
+    NSString *toolsDir = [fixtureRoot stringByAppendingPathComponent:@"tools/ci"];
+    NSError *error = nil;
+    XCTAssertTrue([[NSFileManager defaultManager] createDirectoryAtPath:toolsDir
+                                            withIntermediateDirectories:YES
+                                                             attributes:nil
+                                                                  error:&error]);
+    XCTAssertNil(error);
+
+    NSString *sourceScript =
+        [repoRoot stringByAppendingPathComponent:@"tools/ci/run_phase5e_tsan_experimental.sh"];
+    NSString *targetScript = [toolsDir stringByAppendingPathComponent:@"run_phase5e_tsan_experimental.sh"];
+    XCTAssertTrue([[NSFileManager defaultManager] copyItemAtPath:sourceScript
+                                                          toPath:targetScript
+                                                           error:&error]);
+    XCTAssertNil(error);
+    XCTAssertTrue([self makeExecutableAtPath:targetScript]);
+
+    NSString *probeScript = [toolsDir stringByAppendingPathComponent:@"runtime_concurrency_probe.py"];
+    XCTAssertTrue([self writeFile:probeScript
+                          content:@"import pathlib\n"
+                                  "(pathlib.Path('probe-ran.txt')).write_text('ran\\n', encoding='utf-8')\n"
+                                  "print('probe ran')\n"]);
+
+    NSString *dummyTSAN = [fakeBin stringByAppendingPathComponent:@"libtsan.so"];
+    XCTAssertTrue([self writeFile:dummyTSAN content:@""]);
+
+    NSString *fakeMake = [fakeBin stringByAppendingPathComponent:@"make"];
+    XCTAssertTrue([self writeFile:fakeMake
+                          content:@"#!/usr/bin/env bash\n"
+                                  "set -euo pipefail\n"
+                                  "repo_root=\"$(pwd)\"\n"
+                                  "bootstrap_eocc=\"\"\n"
+                                  "make_extra_flags=\"${EXTRA_OBJC_FLAGS-}\"\n"
+                                  "args=(\"$@\")\n"
+                                  "for arg in \"${args[@]}\"; do\n"
+                                  "  case \"$arg\" in\n"
+                                  "    EOC_TOOL=*) bootstrap_eocc=\"${arg#EOC_TOOL=}\" ;;\n"
+                                  "    EXTRA_OBJC_FLAGS=*) make_extra_flags=\"${arg#EXTRA_OBJC_FLAGS=}\" ;;\n"
+                                  "  esac\n"
+                                  "done\n"
+                                  "if [[ \" $* \" == *\" clean \"* ]]; then\n"
+                                  "  rm -rf \"$repo_root/build\" \"$repo_root/.gnustep\" \"$repo_root/.gnustep-home\"\n"
+                                  "  exit 0\n"
+                                  "fi\n"
+                                  "if [[ \" $* \" == *\" eocc \"* ]]; then\n"
+                                  "  mkdir -p \"$(dirname \"$bootstrap_eocc\")\" \"$repo_root/build/gen/templates\" \"$repo_root/build/gen/module_templates\"\n"
+                                  "  : >\"$bootstrap_eocc\"\n"
+                                  "  : >\"$repo_root/build/gen/templates/.transpile.state\"\n"
+                                  "  : >\"$repo_root/build/gen/module_templates/.transpile.state\"\n"
+                                  "  exit 0\n"
+                                  "fi\n"
+                                  "if [[ \" $* \" == *\" boomhauer \"* || \" $* \" == *\" arlen \"* ]]; then\n"
+                                  "  mkdir -p \"$repo_root/build\"\n"
+                                  "  : >\"$repo_root/build/boomhauer\"\n"
+                                  "  if [[ \" $* \" == *\" arlen \"* ]]; then\n"
+                                  "    : >\"$repo_root/build/arlen\"\n"
+                                  "    chmod 755 \"$repo_root/build/arlen\"\n"
+                                  "  fi\n"
+                                  "  exit 0\n"
+                                  "fi\n"
+                                  "if [[ \" $* \" == *\" test-unit \"* ]]; then\n"
+                                  "  echo \"stub test-unit failure\"\n"
+                                  "  exit 88\n"
+                                  "fi\n"
+                                  "echo \"unexpected_make_args: $*\" >&2\n"
+                                  "exit 96\n"]);
+    XCTAssertTrue([self makeExecutableAtPath:fakeMake]);
+
+    NSString *fakeClang = [fakeBin stringByAppendingPathComponent:@"clang"];
+    NSString *fakeClangContents =
+        [NSString stringWithFormat:@"#!/usr/bin/env bash\n"
+                                   "if [[ \"${1:-}\" == \"-print-file-name=libtsan.so\" ]]; then\n"
+                                   "  printf '%%s\\n' %@\n"
+                                   "  exit 0\n"
+                                   "fi\n"
+                                   "exec /usr/bin/clang \"$@\"\n",
+                                   [self shellQuoted:dummyTSAN]];
+    XCTAssertTrue([self writeFile:fakeClang content:fakeClangContents]);
+    XCTAssertTrue([self makeExecutableAtPath:fakeClang]);
+
+    NSString *command = [NSString
+        stringWithFormat:@"cd %@ && LD_PRELOAD='' PATH=%@:$PATH bash ./tools/ci/run_phase5e_tsan_experimental.sh 2>&1",
+                         [self shellQuoted:fixtureRoot],
+                         [self shellQuoted:fakeBin]];
+    int exitCode = 0;
+    NSString *output = [self runShellCapture:command exitCode:&exitCode];
+
+    XCTAssertEqual(88, exitCode, @"%@", output);
+    XCTAssertTrue([output containsString:@"stub test-unit failure"], @"%@", output);
+    XCTAssertFalse([output containsString:@"ci: phase5e tsan experimental run complete"], @"%@", output);
+
+    NSString *probeMarker = [fixtureRoot stringByAppendingPathComponent:@"probe-ran.txt"];
+    XCTAssertFalse([[NSFileManager defaultManager] fileExistsAtPath:probeMarker]);
+
+    NSString *summary =
+        [self readFile:[fixtureRoot stringByAppendingPathComponent:@"build/sanitizers/tsan/summary.json"]];
+    XCTAssertTrue([summary containsString:@"\"status\": \"fail\""], @"%@", summary);
+    XCTAssertTrue([summary containsString:@"\"exit_code\": 88"], @"%@", summary);
+  } @finally {
+    [[NSFileManager defaultManager] removeItemAtPath:fixtureRoot error:nil];
+    [[NSFileManager defaultManager] removeItemAtPath:fakeBin error:nil];
+  }
+}
+
 - (void)testThreadRaceNightlyPropagatesUnderlyingTSANFailureExitCodeAndPreservesLog {
+  if ([self isThreadSanitizerRuntimeActive]) {
+    return;
+  }
   NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
   NSString *fixtureRoot = [self createTempDirectoryWithPrefix:@"arlen-thread-race-fixture"];
   NSString *fakeBin = [self createTempDirectoryWithPrefix:@"arlen-thread-race-fakebin"];
@@ -584,7 +903,7 @@
     XCTAssertTrue([self makeExecutableAtPath:fakeClang]);
 
     NSString *command = [NSString
-        stringWithFormat:@"cd %@ && PATH=%@:$PATH bash ./tools/ci/run_phase10m_thread_race_nightly.sh 2>&1",
+        stringWithFormat:@"cd %@ && LD_PRELOAD='' PATH=%@:$PATH bash ./tools/ci/run_phase10m_thread_race_nightly.sh 2>&1",
                          [self shellQuoted:fixtureRoot],
                          [self shellQuoted:fakeBin]];
     int exitCode = 0;

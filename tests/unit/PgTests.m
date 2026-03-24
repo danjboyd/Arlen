@@ -92,20 +92,26 @@
   return result;
 }
 
-- (void)pgLoaderConcurrencyWorker:(NSMutableDictionary *)state {
+- (void)pgLoaderConcurrencyWorker:(NSDictionary *)context {
   @autoreleasepool {
+    NSMutableDictionary *state =
+        [context[@"state"] isKindOfClass:[NSMutableDictionary class]] ? context[@"state"] : nil;
+    NSLock *stateLock = [context[@"lock"] isKindOfClass:[NSLock class]] ? context[@"lock"] : nil;
     NSError *error = nil;
     ALNPg *database = [[ALNPg alloc]
         initWithConnectionString:@"host=127.0.0.1 port=1 dbname=arlen_loader_test connect_timeout=1"
                   maxConnections:1
                            error:&error];
-    @synchronized(state) {
+    [stateLock lock];
+    @try {
       NSInteger completed = [state[@"completed"] integerValue];
       state[@"completed"] = @(completed + 1);
       if (database == nil && error == nil) {
         NSInteger nilOutcomes = [state[@"nilOutcomes"] integerValue];
         state[@"nilOutcomes"] = @(nilOutcomes + 1);
       }
+    } @finally {
+      [stateLock unlock];
     }
   }
 }
@@ -115,19 +121,27 @@
     @"completed" : @(0),
     @"nilOutcomes" : @(0),
   } mutableCopy];
+  NSLock *stateLock = [[NSLock alloc] init];
+  NSDictionary *workerContext = @{
+    @"state" : state,
+    @"lock" : stateLock,
+  };
 
   NSInteger workers = 10;
   for (NSInteger idx = 0; idx < workers; idx++) {
     [NSThread detachNewThreadSelector:@selector(pgLoaderConcurrencyWorker:)
                              toTarget:self
-                           withObject:state];
+                           withObject:workerContext];
   }
 
   NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:8.0];
   while ([[NSDate date] compare:deadline] == NSOrderedAscending) {
     NSInteger completed = 0;
-    @synchronized(state) {
+    [stateLock lock];
+    @try {
       completed = [state[@"completed"] integerValue];
+    } @finally {
+      [stateLock unlock];
     }
     if (completed >= workers) {
       break;
@@ -137,9 +151,12 @@
 
   NSInteger completed = 0;
   NSInteger nilOutcomes = 0;
-  @synchronized(state) {
+  [stateLock lock];
+  @try {
     completed = [state[@"completed"] integerValue];
     nilOutcomes = [state[@"nilOutcomes"] integerValue];
+  } @finally {
+    [stateLock unlock];
   }
   XCTAssertEqual(workers, completed);
   XCTAssertEqual((NSInteger)0, nilOutcomes);

@@ -672,7 +672,12 @@ static NSUInteger gPhase15UIContextCalls = 0;
 }
 
 - (void)testModuleEjectAuthUIScaffoldsGeneratedTemplatesAndConfig {
+  NSString *ldPreload = [[[NSProcessInfo processInfo] environment] objectForKey:@"LD_PRELOAD"];
+  if ([ldPreload length] > 0) {
+    return;
+  }
   NSString *repoRoot = [self repoRoot];
+  NSString *arlenPath = [repoRoot stringByAppendingPathComponent:@"build/arlen"];
   NSString *tempApp = [self createTempDirectoryWithPrefix:@"phase15-auth-eject"];
   XCTAssertNotNil(tempApp);
 
@@ -688,12 +693,16 @@ static NSUInteger gPhase15UIContextCalls = 0;
                                error:&error]);
   XCTAssertNil(error);
 
-  NSString *command = [NSString stringWithFormat:@"cd %@ && source /usr/GNUstep/System/Library/Makefiles/GNUstep.sh && rm -f build/arlen && LD_PRELOAD='' make arlen >/dev/null && cd %@ && LD_PRELOAD='' ARLEN_FRAMEWORK_ROOT=%@ %@ module eject auth-ui --json",
-                                                 [self shellQuoted:repoRoot],
+  int exitCode = 0;
+  NSString *buildCommand = [NSString stringWithFormat:@"cd %@ && source /usr/GNUstep/System/Library/Makefiles/GNUstep.sh && rm -f build/arlen && LD_PRELOAD='' make arlen >/dev/null && chmod 755 build/arlen",
+                                                     [self shellQuoted:repoRoot]];
+  NSString *buildOutput = [self runShellCapture:buildCommand exitCode:&exitCode];
+  XCTAssertEqual(0, exitCode, @"%@", buildOutput);
+
+  NSString *command = [NSString stringWithFormat:@"cd %@ && LD_PRELOAD='' ARLEN_FRAMEWORK_ROOT=%@ %@ module eject auth-ui --json",
                                                  [self shellQuoted:tempApp],
                                                  [self shellQuoted:repoRoot],
-                                                 [self shellQuoted:[repoRoot stringByAppendingPathComponent:@"build/arlen"]]];
-  int exitCode = 0;
+                                                 [self shellQuoted:arlenPath]];
   NSString *output = [self runShellCapture:command exitCode:&exitCode];
   XCTAssertEqual(0, exitCode, @"%@", output);
 
