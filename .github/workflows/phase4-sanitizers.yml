@@ -25,6 +25,7 @@ jobs:
         env:
           GNUSTEP_USER_ROOT: ${{ github.workspace }}/.gnustep
           ARLEN_PHASE10M_INCLUDE_THREAD_NIGHTLY: "0"
+          ARLEN_PERF_RETRY_COUNT: "3"
         run: |
           bash ./tools/ci/run_phase10m_sanitizer_matrix.sh
 

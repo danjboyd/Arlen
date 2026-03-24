@@ -9,6 +9,15 @@ entries, not current plan-of-record items.
 
 ## Completed Today (2026-03-24)
 
+- Resumed the 2026-03-22 self-hosted GitHub CI handoff and closed the open
+  sanitizer follow-up:
+  - confirmed the failed March 22 push-triggered sanitizer runs were isolated
+    to the `phase10m` soak lane on `iep-apt`, while later reruns of the same
+    self-hosted path passed
+  - hardened only the sanitizer workflow by raising its self-hosted soak retry
+    budget from `2` to `3` without changing shared perf-script defaults
+  - added build-policy coverage so the workflow-scoped retry override remains
+    pinned in repo policy
 - Reconciled the `StateCompulsoryPoolingAPI` `boomhauer --prepare-only`
   report against the current Arlen workspace:
   - recorded the upstream-only status note in

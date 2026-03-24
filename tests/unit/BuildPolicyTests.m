@@ -514,6 +514,15 @@
   }
 }
 
+- (void)testSanitizerWorkflowRaisesSelfHostedSoakRetryBudget {
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *workflow = [self
+      readFile:[repoRoot stringByAppendingPathComponent:@".github/workflows/phase4-sanitizers.yml"]];
+
+  XCTAssertTrue([workflow containsString:@"Run Phase 10M sanitizer matrix gate"]);
+  XCTAssertTrue([workflow containsString:@"ARLEN_PERF_RETRY_COUNT: \"3\""]);
+}
+
 - (void)testBackendParityArtifactsRebuildPerFeatureCombo {
   NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
   NSString *script = [self
