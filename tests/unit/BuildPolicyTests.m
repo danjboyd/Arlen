@@ -15,6 +15,74 @@
   return contents ?: @"";
 }
 
+- (NSString *)createTempDirectoryWithPrefix:(NSString *)prefix {
+  NSString *path = [NSTemporaryDirectory()
+      stringByAppendingPathComponent:[NSString stringWithFormat:@"%@-%@",
+                                                               prefix ?: @"arlen",
+                                                               [[NSUUID UUID] UUIDString]]];
+  NSError *error = nil;
+  BOOL created = [[NSFileManager defaultManager] createDirectoryAtPath:path
+                                           withIntermediateDirectories:YES
+                                                            attributes:nil
+                                                                 error:&error];
+  XCTAssertTrue(created, @"failed creating temp dir %@: %@", path, error.localizedDescription);
+  XCTAssertNil(error);
+  return created ? path : nil;
+}
+
+- (BOOL)writeFile:(NSString *)path content:(NSString *)content {
+  NSString *dir = [path stringByDeletingLastPathComponent];
+  NSError *error = nil;
+  if (![[NSFileManager defaultManager] createDirectoryAtPath:dir
+                                 withIntermediateDirectories:YES
+                                                  attributes:nil
+                                                       error:&error]) {
+    XCTFail(@"failed creating directory %@: %@", dir, error.localizedDescription);
+    return NO;
+  }
+  if (![content writeToFile:path atomically:YES encoding:NSUTF8StringEncoding error:&error]) {
+    XCTFail(@"failed writing file %@: %@", path, error.localizedDescription);
+    return NO;
+  }
+  return YES;
+}
+
+- (BOOL)makeExecutableAtPath:(NSString *)path {
+  NSError *error = nil;
+  BOOL updated = [[NSFileManager defaultManager] setAttributes:@{ NSFilePosixPermissions : @0755 }
+                                                  ofItemAtPath:path
+                                                         error:&error];
+  XCTAssertTrue(updated, @"failed marking %@ executable: %@", path, error.localizedDescription);
+  XCTAssertNil(error);
+  return updated;
+}
+
+- (NSString *)shellQuoted:(NSString *)value {
+  NSString *safeValue = value ?: @"";
+  return [NSString stringWithFormat:@"'%@'",
+                                    [safeValue stringByReplacingOccurrencesOfString:@"'"
+                                                                            withString:@"'\"'\"'"]];
+}
+
+- (NSString *)runShellCapture:(NSString *)command exitCode:(int *)exitCode {
+  NSTask *task = [[NSTask alloc] init];
+  task.launchPath = @"/bin/bash";
+  task.arguments = @[ @"-lc", command ?: @"" ];
+  NSPipe *stdoutPipe = [NSPipe pipe];
+  NSPipe *stderrPipe = [NSPipe pipe];
+  task.standardOutput = stdoutPipe;
+  task.standardError = stderrPipe;
+  [task launch];
+  [task waitUntilExit];
+
+  if (exitCode != NULL) {
+    *exitCode = task.terminationStatus;
+  }
+  NSData *stdoutData = [[stdoutPipe fileHandleForReading] readDataToEndOfFile];
+  NSString *output = [[NSString alloc] initWithData:stdoutData encoding:NSUTF8StringEncoding];
+  return output ?: @"";
+}
+
 - (void)testGNUmakefileEnforcesARCFlagsAndRejectsOptOut {
   NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
   NSString *makefilePath = [repoRoot stringByAppendingPathComponent:@"GNUmakefile"];
@@ -441,6 +509,113 @@
   XCTAssertTrue([script containsString:@"cp \"$staged_summary_path\" \"$summary_path\""]);
   XCTAssertTrue([script containsString:@"trap cleanup EXIT"]);
   XCTAssertTrue([script containsString:@"second_deadlock_stack=1"]);
+}
+
+- (void)testThreadRaceNightlyPropagatesUnderlyingTSANFailureExitCodeAndPreservesLog {
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *fixtureRoot = [self createTempDirectoryWithPrefix:@"arlen-thread-race-fixture"];
+  NSString *fakeBin = [self createTempDirectoryWithPrefix:@"arlen-thread-race-fakebin"];
+  XCTAssertNotNil(fixtureRoot);
+  XCTAssertNotNil(fakeBin);
+  if (fixtureRoot == nil || fakeBin == nil) {
+    return;
+  }
+
+  @try {
+    NSString *toolsDir = [fixtureRoot stringByAppendingPathComponent:@"tools/ci"];
+    NSError *error = nil;
+    XCTAssertTrue([[NSFileManager defaultManager] createDirectoryAtPath:toolsDir
+                                            withIntermediateDirectories:YES
+                                                             attributes:nil
+                                                                  error:&error]);
+    XCTAssertNil(error);
+
+    NSString *sourceScript =
+        [repoRoot stringByAppendingPathComponent:@"tools/ci/run_phase10m_thread_race_nightly.sh"];
+    NSString *targetScript =
+        [toolsDir stringByAppendingPathComponent:@"run_phase10m_thread_race_nightly.sh"];
+    XCTAssertTrue([[NSFileManager defaultManager] copyItemAtPath:sourceScript
+                                                          toPath:targetScript
+                                                           error:&error]);
+    XCTAssertNil(error);
+    XCTAssertTrue([self makeExecutableAtPath:targetScript]);
+
+    NSString *stubTSAN = [toolsDir stringByAppendingPathComponent:@"run_phase5e_tsan_experimental.sh"];
+    XCTAssertTrue([self writeFile:stubTSAN
+                          content:@"#!/usr/bin/env bash\n"
+                                  "set -euo pipefail\n"
+                                  "repo_root=\"$(cd \"$(dirname \"${BASH_SOURCE[0]}\")/../..\" && pwd)\"\n"
+                                  "artifact_dir=\"${ARLEN_TSAN_ARTIFACT_DIR:?}\"\n"
+                                  "rm -rf \"$repo_root/build\"\n"
+                                  "mkdir -p \"$artifact_dir\"\n"
+                                  "printf 'stub tsan failure\\n' >\"$artifact_dir/tsan.log\"\n"
+                                  "cat >\"$artifact_dir/summary.json\" <<'EOF'\n"
+                                  "{\n"
+                                  "  \"version\": \"phase9h-tsan-run-v1\",\n"
+                                  "  \"status\": \"fail\",\n"
+                                  "  \"exit_code\": 77,\n"
+                                  "  \"reason\": \"tsan_lane_failure\",\n"
+                                  "  \"log_path\": \"stub-tsan.log\"\n"
+                                  "}\n"
+                                  "EOF\n"
+                                  "echo \"stub tsan failure\"\n"
+                                  "exit 77\n"]);
+    XCTAssertTrue([self makeExecutableAtPath:stubTSAN]);
+
+    NSString *dummyTSAN = [fakeBin stringByAppendingPathComponent:@"libtsan.so"];
+    XCTAssertTrue([self writeFile:dummyTSAN content:@""]);
+
+    NSString *fakeMake = [fakeBin stringByAppendingPathComponent:@"make"];
+    XCTAssertTrue([self writeFile:fakeMake
+                          content:@"#!/usr/bin/env bash\n"
+                                  "exit 0\n"]);
+    XCTAssertTrue([self makeExecutableAtPath:fakeMake]);
+
+    NSString *fakeClang = [fakeBin stringByAppendingPathComponent:@"clang"];
+    NSString *fakeClangContents =
+        [NSString stringWithFormat:@"#!/usr/bin/env bash\n"
+                                   "if [[ \"${1:-}\" == \"-print-file-name=libtsan.so\" ]]; then\n"
+                                   "  printf '%%s\\n' %@\n"
+                                   "  exit 0\n"
+                                   "fi\n"
+                                   "exec /usr/bin/clang \"$@\"\n",
+                                   [self shellQuoted:dummyTSAN]];
+    XCTAssertTrue([self writeFile:fakeClang content:fakeClangContents]);
+    XCTAssertTrue([self makeExecutableAtPath:fakeClang]);
+
+    NSString *command = [NSString
+        stringWithFormat:@"cd %@ && PATH=%@:$PATH bash ./tools/ci/run_phase10m_thread_race_nightly.sh 2>&1",
+                         [self shellQuoted:fixtureRoot],
+                         [self shellQuoted:fakeBin]];
+    int exitCode = 0;
+    NSString *output = [self runShellCapture:command exitCode:&exitCode];
+
+    XCTAssertEqual(77, exitCode, @"%@", output);
+    XCTAssertTrue([output containsString:@"phase10m-thread-race: engine=tsan"], @"%@", output);
+    XCTAssertTrue([output containsString:@"ci: phase10m thread-race nightly failed (tsan)"],
+                  @"%@", output);
+
+    NSString *artifactRoot =
+        [fixtureRoot stringByAppendingPathComponent:@"build/sanitizers/phase10m_thread_race"];
+    NSString *summary = [self readFile:[artifactRoot stringByAppendingPathComponent:@"summary.json"]];
+    XCTAssertTrue([summary containsString:@"\"status\": \"fail\""], @"%@", summary);
+    XCTAssertTrue([summary containsString:@"\"engine\": \"tsan\""], @"%@", summary);
+    XCTAssertTrue([summary containsString:@"\"exit_code\": 77"], @"%@", summary);
+    XCTAssertTrue([summary containsString:@"\"reason\": \"tsan_lane_failure\""], @"%@", summary);
+
+    NSString *threadLog = [self readFile:[artifactRoot stringByAppendingPathComponent:@"thread_race.log"]];
+    XCTAssertTrue([threadLog containsString:@"phase10m-thread-race: engine=tsan"], @"%@", threadLog);
+    XCTAssertTrue([threadLog containsString:@"stub tsan failure"], @"%@", threadLog);
+    XCTAssertTrue([threadLog containsString:@"ci: phase10m thread-race nightly failed (tsan)"],
+                  @"%@", threadLog);
+
+    NSString *tsanSummary =
+        [self readFile:[artifactRoot stringByAppendingPathComponent:@"tsan/summary.json"]];
+    XCTAssertTrue([tsanSummary containsString:@"\"exit_code\": 77"], @"%@", tsanSummary);
+  } @finally {
+    [[NSFileManager defaultManager] removeItemAtPath:fixtureRoot error:nil];
+    [[NSFileManager defaultManager] removeItemAtPath:fakeBin error:nil];
+  }
 }
 
 - (void)testCIToolchainInstallerSupportsClangGNUstepStrategies {

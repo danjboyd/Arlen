@@ -9,6 +9,20 @@ entries, not current plan-of-record items.
 
 ## Completed Today (2026-03-24)
 
+- Revisited the remaining TSAN/thread-race follow-up from the 2026-03-22
+  self-hosted CI handoff:
+  - confirmed the scheduled 2026-03-23 and 2026-03-24 `thread-race-nightly`
+    lanes still reproduce the same GNUstep `libobjc` lock-order-inversion
+    signature during TSAN-instrumented `eocc` transpilation, so TSAN
+    promotion remains blocked on the runtime/toolchain stack rather than an
+    Arlen race report
+  - fixed `tools/ci/run_phase10m_thread_race_nightly.sh` so TSAN failures
+    preserve the real non-zero exit code instead of reporting `0`
+  - staged thread-race summary/log artifacts outside the clean build tree so
+    `make clean` inside the TSAN helper no longer deletes the outer
+    `thread_race.log` before it can be retained
+  - added focused regression coverage for nightly wrapper failure propagation
+    and retained-log preservation
 - Resumed the 2026-03-22 self-hosted GitHub CI handoff and closed the open
   sanitizer follow-up:
   - confirmed the failed March 22 push-triggered sanitizer runs were isolated

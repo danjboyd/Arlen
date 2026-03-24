@@ -6,13 +6,13 @@ Source of truth fixture:
 
 - `tests/fixtures/release/phase9j_known_risks.json`
 
-Last updated: 2026-03-21
+Last updated: 2026-03-24
 
 ## Active Risks
 
 | ID | Title | Severity | Owner | Target Date | Notes |
 | --- | --- | --- | --- | --- | --- |
-| `phase9j-risk-tsan-nonblocking` | TSAN lane remains non-blocking while false-positive budget is stabilized | medium | runtime-core | 2026-03-31 | Promote TSAN to blocking after two consecutive deterministic pass cycles. |
+| `phase9j-risk-tsan-nonblocking` | TSAN lane remains non-blocking while false-positive budget is stabilized | medium | runtime-core | 2026-03-31 | Nightly TSAN runs on 2026-03-23 and 2026-03-24 still reproduced the GNUstep `libobjc` lock-order-inversion signature during TSAN-instrumented `eocc` transpilation; keep TSAN non-blocking until that runtime/toolchain issue is resolved and two consecutive deterministic pass cycles are observed. |
 
 ## Mitigated Risks
 
