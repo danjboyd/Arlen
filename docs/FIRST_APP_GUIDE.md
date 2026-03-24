@@ -22,7 +22,9 @@ cd MyApp
 Scaffold highlights:
 - `src/main.m`: app entrypoint and route registration
 - `src/Controllers/HomeController.m`: controller for `/`
-- `templates/index.html.eoc`: initial template
+- `templates/layouts/main.html.eoc`: default app shell
+- `templates/index.html.eoc`: initial page template with `<%@ layout "layouts/main" %>`
+- `templates/partials/_nav.html.eoc` and `templates/partials/_feature.html.eoc`: composition-first partial examples
 - `config/app.plist`: app config defaults
 
 ## 3. Run the App

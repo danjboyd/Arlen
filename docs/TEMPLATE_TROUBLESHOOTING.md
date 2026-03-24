@@ -5,7 +5,11 @@ Use this workflow when `.html.eoc` transpilation or rendering does not behave as
 ## 1. Run Targeted Transpile
 
 ```bash
-./build/eocc --template-root templates --output-dir build/gen/templates templates/index.html.eoc
+./build/eocc \
+  --template-root templates \
+  --output-dir build/gen/templates \
+  --manifest build/gen/templates/manifest.json \
+  templates/index.html.eoc
 ```
 
 If transpilation fails, `eocc` prints deterministic location data:
@@ -14,10 +18,18 @@ If transpilation fails, `eocc` prints deterministic location data:
 - `line=<line>`
 - `column=<column>`
 
+Useful tooling notes:
+
+- `--manifest` turns on manifest-backed incremental transpilation so unchanged outputs are reused and stale generated files are removed
+- manifest-backed runs print `transpiled <n> templates (reused <n>, removed <n>)`
+- if you need explicit registry output from a direct `eocc` run, add `--registry-out <path>`
+- if you are checking module template trees, add `--logical-prefix modules/<module_id>` so logical paths match runtime lookup
+
 Static composition validation also fails the transpile before code generation when:
 
 - a `layout`, `include`, `render`, or `empty:` partial path does not exist in the current template set
 - layouts/includes/renders create a static composition cycle
+- template references are normalized to `.html.eoc`, so unsuffixed logical names are the intended form in directives and `ALNView` calls
 
 ## 2. Interpret Common Errors
 

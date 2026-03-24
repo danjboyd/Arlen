@@ -53,7 +53,8 @@
       "summary": "EOC template compiler/transpiler with lint diagnostics and deterministic symbol/path resolution."
     },
     "ALNView": {
-      "summary": "Template renderer that executes transpiled EOC templates with optional strict locals/stringify behavior."
+      "summary": "EOC view renderer that normalizes logical template names, resolves default layouts, and can enforce strict locals/stringify behavior during render.",
+      "usage_example": "NSError *error = nil;\nNSString *html = [ALNView renderTemplate:@\"dashboard\"\n                                       context:@{ @\"title\": @\"Home\" }\n                                        layout:nil\n                          defaultLayoutEnabled:YES\n                                  strictLocals:NO\n                               strictStringify:NO\n                                         error:&error];\nif (html == nil) {\n  NSLog(@\"template render failed: %@\", error);\n}"
     },
     "ALNCSRFMiddleware": {
       "summary": "CSRF validation middleware for state-changing requests using token headers/query params."
@@ -213,6 +214,22 @@
     "ALNPasswordHash|defaultArgon2idOptions": {
       "purpose": "Return Arlen's default Argon2id cost, salt-length, and digest-length policy.",
       "usage": "Use as the baseline policy, then copy and raise costs to match deployment hardware."
+    },
+    "ALNView|normalizeTemplateLogicalPath:": {
+      "purpose": "Normalize one logical template reference by stripping leading `/` characters and appending `.html.eoc` when needed.",
+      "usage": "Pass logical names such as `dashboard` or `layouts/main`; use this when you need the exact runtime key used for EOC registry lookups."
+    },
+    "ALNView|renderTemplate:context:layout:error:": {
+      "purpose": "Render one EOC template with explicit locals and either an explicit layout or the default layout resolved for that template.",
+      "usage": "Pass unsuffixed logical names for `templateName` and `layoutName`. Use `layout:nil` to allow the template's default static layout; when a layout renders, the body is also exposed through the `content` slot."
+    },
+    "ALNView|renderTemplate:context:layout:defaultLayoutEnabled:strictLocals:strictStringify:error:": {
+      "purpose": "Render one EOC template with full control over default-layout lookup and strict locals/stringify runtime enforcement.",
+      "usage": "Set `defaultLayoutEnabled:NO` to suppress implicit layout resolution when `layoutName` is `nil`. Use `strictLocals:YES` to fail missing locals and `strictStringify:YES` to fail values that cannot be deterministically stringified."
+    },
+    "ALNView|renderTemplate:context:layout:strictLocals:strictStringify:error:": {
+      "purpose": "Render one EOC template with default-layout lookup enabled plus strict locals/stringify controls.",
+      "usage": "Use this overload when you want strict rendering checks but still want Arlen to resolve the template's default static layout when `layoutName` is `nil`."
     },
     "ALNPasswordHash|hashPasswordString:options:error:": {
       "purpose": "Hash a UTF-8 password string and return a PHC-formatted Argon2id string suitable for storage.",

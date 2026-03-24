@@ -657,7 +657,11 @@ Reference guide:
 Run targeted transpile/lint checks when templates fail to compile or behave unexpectedly:
 
 ```bash
-./build/eocc --template-root templates --output-dir build/gen/templates templates/index.html.eoc
+./build/eocc \
+  --template-root templates \
+  --output-dir build/gen/templates \
+  --manifest build/gen/templates/manifest.json \
+  templates/index.html.eoc
 ```
 
 `eocc` emits deterministic syntax/lint metadata:
@@ -669,6 +673,10 @@ Run targeted transpile/lint checks when templates fail to compile or behave unex
   - static composition cycles
 - lint warning shape:
   - `eocc: warning path=<path> line=<line> column=<column> code=<code> message=<message>`
+- manifest-backed runs also report incremental scope:
+  - `eocc: transpiled <n> templates (reused <n>, removed <n>)`
+- when you omit both `--manifest` and `--registry-out`, `eocc` writes `build/gen/templates/EOCRegistry.m`
+- `--logical-prefix <prefix>` is available for advanced/module template trees where logical paths must stay namespaced
 
 Composition directives:
 
@@ -695,6 +703,12 @@ Sigil locals support both root and dotted keypath forms:
 - `$user.profile.email`
 
 Invalid sigil keypath syntax (for example trailing dots) fails transpilation deterministically with location metadata.
+
+Template-reference normalization is runtime-friendly and suffix-optional:
+
+- `layout`, `include`, `render`, and `empty:` targets normalize to `.html.eoc`
+- `ALNView` render calls also normalize unsuffixed logical names such as `dashboard` or `layouts/main`
+- use unsuffixed logical names in application code unless you are debugging raw generated output paths
 
 Schema request/response descriptors can optionally apply named transformers before type validation:
 

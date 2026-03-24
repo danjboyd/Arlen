@@ -70,7 +70,7 @@ python3 tools/docs/generate_api_reference.py
 
 ### View
 
-- [ALNView](api/ALNView.md): Template renderer that executes transpiled EOC templates with optional strict locals/stringify behavior.
+- [ALNView](api/ALNView.md): EOC view renderer that normalizes logical template names, resolves default layouts, and can enforce strict locals/stringify behavior during render.
 
 ### Data
 

@@ -24,11 +24,21 @@ Use controller rendering helpers:
 
 - `renderTemplate:context:error:`
 - `renderTemplate:context:layout:error:`
+- `renderTemplate:context:layout:strictLocals:strictStringify:error:`
+- `renderTemplate:context:layout:defaultLayoutEnabled:strictLocals:strictStringify:error:`
 
 Use stash/context patterns for view model data:
 
 - `stashValue:forKey:`
 - `stashValues:`
+
+EOC render behavior:
+
+- template and layout names normalize to logical `.html.eoc` paths, so `dashboard` and `layouts/main` are valid inputs
+- when `layout:nil` and `defaultLayoutEnabled:YES`, `ALNView` resolves the template's registered static layout automatically
+- when a layout is rendered, the page body is exposed as the `content` slot and named slots/yields remain available for composition
+- `strictLocals:YES` fails on unresolved sigil locals and missing keypath segments
+- `strictStringify:YES` fails when expression output is not clearly string-convertible
 
 ## 4. Validate Form Input
 
@@ -57,7 +67,10 @@ Use EOC tooling for deterministic compile diagnostics:
 ```bash
 make eocc
 make transpile
+./build/eocc --template-root templates --output-dir build/gen/templates --manifest build/gen/templates/manifest.json templates/index.html.eoc
 ```
+
+The direct `eocc` workflow supports manifest-backed incremental reuse/removal accounting and optional custom logical-path prefixes/registry output when you are debugging app or module template trees.
 
 For API-level details see:
 

@@ -319,8 +319,23 @@ Template transpiler used by `make`/`boomhauer` pipelines.
 Usage:
 
 ```text
-build/eocc --template-root <dir> --output-dir <dir> [--registry-out <file>] [--logical-prefix <prefix>] <template1.html.eoc> [template2 ...]
+build/eocc --template-root <dir> --output-dir <dir> [--manifest <file>] [--registry-out <file>] [--logical-prefix <prefix>] <template1.html.eoc> [template2 ...]
 ```
+
+Behavior:
+
+- `--template-root <dir>`: base tree used to compute deterministic logical template paths
+- `--output-dir <dir>`: destination root for generated Objective-C files (`<output-dir>/<logical_path>.m`)
+- `--manifest <file>`: enable manifest-backed incremental transpilation
+  - records `template_path`, `logical_path`, `output_path`, `template_hash`, metadata, and diagnostics
+  - unchanged generated outputs are reused when the manifest and output file still match
+  - stale generated outputs are removed when templates move or disappear
+  - stdout switches to `eocc: transpiled <n> templates (reused <n>, removed <n>)`
+- `--registry-out <file>`: emit registry source mapping logical template paths to render symbols
+  - if neither `--manifest` nor `--registry-out` is supplied, `eocc` writes `<output-dir>/EOCRegistry.m`
+  - if `--manifest` is supplied without `--registry-out`, `eocc` skips registry generation and removes a stale default `EOCRegistry.m` if present
+- `--logical-prefix <prefix>`: prepend a deterministic logical-path prefix before output-path generation
+  - used by Arlen's module template pipeline so module templates register under `modules/<module_id>/...`
 
 Diagnostics behavior:
 
