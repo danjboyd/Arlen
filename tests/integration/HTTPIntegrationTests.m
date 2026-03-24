@@ -3205,6 +3205,77 @@
   }
 }
 
+- (void)testBoomhauerPrepareOnlyPropagatesUnderlyingBuildFailureExitCode {
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *appRoot = [self createTempDirectoryWithPrefix:@"arlen-boomhauer-prepare-fail"];
+  NSString *fakeBin = [self createTempDirectoryWithPrefix:@"arlen-boomhauer-fakebin"];
+  XCTAssertNotNil(appRoot);
+  XCTAssertNotNil(fakeBin);
+  if (appRoot == nil || fakeBin == nil) {
+    return;
+  }
+
+  @try {
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"config/app.plist"]
+                          content:@"{\n"
+                                  "  host = \"127.0.0.1\";\n"
+                                  "  port = 3000;\n"
+                                  "  logFormat = \"text\";\n"
+                                  "}\n"]);
+    XCTAssertTrue([self writeLiteAppEntrypointAtRoot:appRoot]);
+
+    NSString *fakeMakePath = [fakeBin stringByAppendingPathComponent:@"make"];
+    XCTAssertTrue([self writeFile:fakeMakePath
+                          content:@"#!/usr/bin/env bash\n"
+                                  "echo \"fake make failing: $*\" >&2\n"
+                                  "exit 42\n"]);
+    NSError *chmodError = nil;
+    XCTAssertTrue([[NSFileManager defaultManager] setAttributes:@{ NSFilePosixPermissions : @0755 }
+                                                   ofItemAtPath:fakeMakePath
+                                                          error:&chmodError]);
+    XCTAssertNil(chmodError);
+
+    NSString *command = [NSString
+        stringWithFormat:@"PATH=%@:$PATH ARLEN_FRAMEWORK_ROOT=%@ ARLEN_APP_ROOT=%@ %@ --prepare-only 2>&1",
+                         [self shellQuoted:fakeBin],
+                         [self shellQuoted:repoRoot],
+                         [self shellQuoted:appRoot],
+                         [self shellQuoted:[repoRoot stringByAppendingPathComponent:@"bin/boomhauer"]]];
+    int exitCode = 0;
+    NSString *output = [self runShellCapture:command exitCode:&exitCode];
+
+    XCTAssertEqual(42, exitCode, @"%@", output);
+    XCTAssertTrue([output containsString:
+                              @"boomhauer: prepare-only mode; building app artifacts without starting the server"],
+                  @"%@", output);
+    XCTAssertTrue([output containsString:@"boomhauer: [1/4] checking tool freshness and building framework artifacts"],
+                  @"%@", output);
+    XCTAssertTrue([output containsString:@"fake make failing:"], @"%@", output);
+
+    NSString *metaPath = [appRoot stringByAppendingPathComponent:@".boomhauer/last_build_error.meta"];
+    NSString *logPath = [appRoot stringByAppendingPathComponent:@".boomhauer/last_build_error.log"];
+    NSError *readError = nil;
+    NSString *meta = [NSString stringWithContentsOfFile:metaPath
+                                               encoding:NSUTF8StringEncoding
+                                                  error:&readError];
+    XCTAssertNotNil(meta);
+    XCTAssertNil(readError);
+    XCTAssertTrue([meta containsString:@"stage=tooling"], @"%@", meta);
+    XCTAssertTrue([meta containsString:@"exit_code=42"], @"%@", meta);
+
+    readError = nil;
+    NSString *logOutput = [NSString stringWithContentsOfFile:logPath
+                                                    encoding:NSUTF8StringEncoding
+                                                       error:&readError];
+    XCTAssertNotNil(logOutput);
+    XCTAssertNil(readError);
+    XCTAssertTrue([logOutput containsString:@"fake make failing:"], @"%@", logOutput);
+  } @finally {
+    [[NSFileManager defaultManager] removeItemAtPath:appRoot error:nil];
+    [[NSFileManager defaultManager] removeItemAtPath:fakeBin error:nil];
+  }
+}
+
 - (void)testBoomhauerPrintRoutesRebuildsSanitizedExternalFrameworkArtifacts {
   NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
   NSString *appRoot = [self createTempDirectoryWithPrefix:@"arlen-boomhauer-sanitized-override"];

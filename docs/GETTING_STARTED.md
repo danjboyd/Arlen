@@ -81,6 +81,10 @@ or `--prepare-only` runs reuse that cached binary when app/framework build input
 App-root `--prepare-only` and `--print-routes` runs also print explicit `[1/4]` through `[4/4]`
 build phases so you can tell whether Arlen is reusing framework/app artifacts, transpiling templates,
 or linking a fresh binary.
+If an app-root non-watch build fails, `boomhauer` writes
+`.boomhauer/last_build_error.log` and `.boomhauer/last_build_error.meta`, and
+`--prepare-only` / `--print-routes` exit with the underlying non-zero build
+status instead of reporting success against a stale binary.
 If `ARLEN_FRAMEWORK_ROOT` points at an external Arlen checkout whose cached framework archive was last
 built under ASan/UBSan, `boomhauer` now forces a clean framework rebuild before linking the app; if the
 archive still contains sanitizer symbols afterward, the command fails early with a targeted diagnostic
@@ -301,6 +305,9 @@ For first-party background work, use the dedicated worker runner instead of inve
 ```
 
 The underlying framework script is `bin/jobs-worker`. Add `--run-scheduler` if you want that worker process to advance schedule definitions too.
+Both `bin/jobs-worker` and `propane` rely on the same app-root prepare step, so
+they now stop immediately on prepare failures and point at
+`.boomhauer/last_build_error.log` instead of reusing an existing app binary.
 
 The first-party `auth` module keeps `/auth/api/...` stable and supports three
 presentation modes:

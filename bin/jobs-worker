@@ -104,8 +104,14 @@ if [[ ! -f "$app_root/config/app.plist" ]] || [[ ! -f "$app_root/src/main.m" && 
   exit 1
 fi
 
-ARLEN_APP_ROOT="$app_root" ARLEN_FRAMEWORK_ROOT="$framework_root" \
-  "$framework_root/bin/boomhauer" --env "$environment" --no-watch --prepare-only >/dev/null
+if ARLEN_APP_ROOT="$app_root" ARLEN_FRAMEWORK_ROOT="$framework_root" \
+    "$framework_root/bin/boomhauer" --env "$environment" --no-watch --prepare-only >/dev/null; then
+  :
+else
+  status=$?
+  echo "jobs-worker: app prepare step failed; see $app_root/.boomhauer/last_build_error.log" >&2
+  exit "$status"
+fi
 
 app_binary="$app_root/.boomhauer/build/boomhauer-app"
 if [[ ! -x "$app_binary" ]]; then

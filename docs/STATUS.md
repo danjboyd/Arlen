@@ -1,11 +1,29 @@
 # Arlen Status Checkpoint
 
-Last updated: 2026-03-22
+Last updated: 2026-03-24
 
 This document is a running checkpoint log. For authoritative current roadmap
 status, prefer the individual phase roadmap docs and `README.md`. Historical
 "Next Session Focus" notes below are preserved as contemporaneous checkpoint
 entries, not current plan-of-record items.
+
+## Completed Today (2026-03-24)
+
+- Reconciled the `StateCompulsoryPoolingAPI` `boomhauer --prepare-only`
+  report against the current Arlen workspace:
+  - recorded the upstream-only status note in
+    `docs/STATECOMPULSORYPOOLINGAPI_REPORT_RECONCILIATION_2026-03-24.md`
+  - kept closure ownership explicit: Arlen records `fixed in current
+    workspace; awaiting downstream revalidation`, while
+    `StateCompulsoryPoolingAPI` keeps app-level closure authority
+  - fixed app-root `boomhauer --prepare-only` / `--print-routes` so they
+    preserve the underlying non-zero build exit status instead of reporting
+    success against a failed build
+  - hardened `propane` and `jobs-worker` to stop on failed prepare steps and
+    point operators at `.boomhauer/last_build_error.log` instead of reusing an
+    existing app binary
+  - added focused regression coverage for a forced app-root framework-build
+    failure in `tests/integration/HTTPIntegrationTests.m`
 
 ## Session Handoff (2026-03-22 EOD)
 

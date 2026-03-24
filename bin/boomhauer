@@ -587,7 +587,9 @@ compile_app() {
     return 2
   fi
 
-  if ! ensure_framework_artifacts_ready "$tmp_output"; then
+  if ensure_framework_artifacts_ready "$tmp_output"; then
+    :
+  else
     local status=$?
     rm -f "$tmp_output"
     return "$status"
@@ -605,7 +607,9 @@ compile_app() {
     return "$status"
   fi
 
-  if ! emit_app_makefile >"$tmp_output" 2>&1; then
+  if emit_app_makefile >"$tmp_output" 2>&1; then
+    :
+  else
     local status=$?
     record_build_failure "app_discovery" "emit incremental app makefile" "$status" "$tmp_output"
     rm -f "$tmp_output"
@@ -709,9 +713,12 @@ run_once() {
   elif [[ $print_routes_requested -eq 1 ]]; then
     echo "boomhauer: route inspection mode; ensuring artifacts are current before printing routes"
   fi
-  if ! ensure_app_built; then
+  if ensure_app_built; then
+    :
+  else
+    local status=$?
     cat "$error_output_file" >&2 || true
-    exit 1
+    exit "$status"
   fi
   if [[ $prepare_only -eq 1 ]]; then
     exit 0

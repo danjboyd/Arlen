@@ -83,6 +83,10 @@ make all
 Build policy: Arlen enforces ARC across first-party Objective-C compile paths (`-fobjc-arc` required).
 `EXTRA_OBJC_FLAGS` is additive only and cannot disable ARC.
 Changing compile toggles or `EXTRA_OBJC_FLAGS` invalidates cached repo build artifacts so sanitizer-built tools are not silently reused in normal lanes.
+For app-root non-watch flows, `boomhauer --prepare-only` and `--print-routes`
+now preserve the underlying non-zero build exit status and write diagnostics to
+`.boomhauer/last_build_error.log` plus `.boomhauer/last_build_error.meta` so
+automation does not treat stale binaries as a successful prepare.
 
 Run the built-in development server:
 

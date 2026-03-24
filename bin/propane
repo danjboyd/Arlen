@@ -437,8 +437,14 @@ if [[ -f "$app_root/config/app.plist" ]] && ([[ -f "$app_root/src/main.m" ]] || 
 fi
 
 if (( is_app_root == 1 )); then
-  ARLEN_APP_ROOT="$app_root" ARLEN_FRAMEWORK_ROOT="$framework_root" \
-    "$framework_root/bin/boomhauer" --no-watch --prepare-only >/dev/null
+  if ARLEN_APP_ROOT="$app_root" ARLEN_FRAMEWORK_ROOT="$framework_root" \
+      "$framework_root/bin/boomhauer" --no-watch --prepare-only >/dev/null; then
+    :
+  else
+    status=$?
+    echo "propane: app prepare step failed; see $app_root/.boomhauer/last_build_error.log" >&2
+    exit "$status"
+  fi
   app_binary="$app_root/.boomhauer/build/boomhauer-app"
 else
   make -C "$framework_root" boomhauer >/dev/null

@@ -94,6 +94,7 @@ Then open `build/browser-error-audit/index.html`.
 
 - [MusicianApp Report Reconciliation (2026-03-21)](MUSICIANAPP_REPORT_RECONCILIATION_2026-03-21.md): upstream-only assessment of the current `MusicianApp` report set and ownership split.
 - [Structurizer Report Reconciliation (2026-03-21)](STRUCTURIZER_REPORT_RECONCILIATION_2026-03-21.md): upstream-only assessment of the external `ARLEN_FRAMEWORK_ROOT` sanitizer-artifact report and downstream revalidation status.
+- [StateCompulsoryPoolingAPI Report Reconciliation (2026-03-24)](STATECOMPULSORYPOOLINGAPI_REPORT_RECONCILIATION_2026-03-24.md): upstream-only assessment of the `boomhauer --prepare-only` exit-status report and downstream revalidation status.
 
 ## Specs and Plans
 
