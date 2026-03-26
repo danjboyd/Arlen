@@ -224,14 +224,21 @@ entries, not current plan-of-record items.
 - Phase 19: complete (`19A-19F` delivered on 2026-03-14 for incremental
   GNUmake/GNUstep build-graph narrowing, generated-template object reuse, and
   clearer `boomhauer` build scope/progress)
-- Phase 20: complete (`20A-20K` complete on 2026-03-26 for typed codecs/live
+- Phase 20: extended (`20A-20K` complete on 2026-03-26 for typed codecs/live
   rows, recursive nested dialect compilation, result/savepoint ergonomics,
   reflection/codegen alignment, routing/pool hardening, relation-kind-safe
   reflection, richer type parity, inspector-v2 metadata, backend support
-  tiers, and MSSQL operational baseline hardening)
+  tiers, and MSSQL operational baseline hardening; `20L-20N` are planned for
+  MSSQL native transport tightening, result row-order semantics, and optional
+  broader reflection if cross-backend tooling becomes a goal)
 
 ## Completed Today (2026-03-26)
 
+- Extended the Phase 20 roadmap with follow-on substeps:
+  - added `20L` for MSSQL native bind/result transport tightening
+  - added `20M` for result row-order and projection semantics
+  - added `20N` as an explicit optional broader-reflection slice only if
+    cross-backend tooling becomes a product goal
 - Completed Phase 20 reflection/tooling, routing/pool hardening, and closeout:
   - added `ALNDatabaseInspector` / `ALNPostgresInspector` and moved
     `arlen schema-codegen` onto one normalized reflection contract

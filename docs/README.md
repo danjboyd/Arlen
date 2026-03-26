@@ -53,7 +53,7 @@ Then open `build/browser-error-audit/index.html`.
 - [Phase 5C Multi-Database Tooling](PHASE5C_MULTI_DATABASE_TOOLING.md): target-aware migrate/schema-codegen flows and deterministic per-target migration state.
 - [Phase 5D Typed Data Contracts](PHASE5D_TYPED_CONTRACTS.md): typed row/insert/update generation, decode helpers, and typed SQL artifacts.
 - [Phase 5E Hardening + Confidence](PHASE5E_HARDENING_CONFIDENCE.md): soak/fault gates and release confidence artifact pack workflow.
-- [Phase 20 Roadmap](PHASE20_ROADMAP.md): completed data-layer depth pass; `20A-20K` deliver typed codecs, result/savepoint ergonomics, inspector/codegen depth, and backend support-tier hardening.
+- [Phase 20 Roadmap](PHASE20_ROADMAP.md): delivered `20A-20K` data-layer depth work plus planned `20L-20N` follow-ons for MSSQL transport tightening, result row-order semantics, and optional broader reflection.
 - [Phase 7A Runtime Hardening](PHASE7A_RUNTIME_HARDENING.md): websocket backpressure safety limit contract and deterministic overload diagnostics.
 - [Phase 7B Security Defaults](PHASE7B_SECURITY_DEFAULTS.md): security profile presets, fail-fast startup validation, and policy contracts.
 - [Phase 7C Observability + Operability](PHASE7C_OBSERVABILITY_OPERABILITY.md): trace/correlation propagation, JSON health/readiness signal contracts, and deploy operability validation script.

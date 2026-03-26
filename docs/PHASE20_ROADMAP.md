@@ -108,6 +108,9 @@ does not include ORM features.
 10. Phase 20J: lightweight result-set objects, batch execution, and savepoint
     ergonomics.
 11. Phase 20K: backend parity contracts and MSSQL operational depth baseline.
+12. Phase 20L: MSSQL native bind/result transport tightening.
+13. Phase 20M: result row ordering and projection semantics.
+14. Phase 20N: optional broader reflection depth for cross-backend tooling.
 
 ## 3.1 Current Delivery Status
 
@@ -175,6 +178,18 @@ does not include ORM features.
   - raised MSSQL to a clearer operational subset with checkout liveness checks,
     pooled rollback-on-release behavior, and phase20 confidence artifacts that
     show backend tiers directly
+- `20L`: pending
+  - tighten MSSQL bind/result transport so the documented common subset is less
+    text-only in practice
+  - prioritize explicit binary support and native-path handling where ODBC can
+    support it honestly
+- `20M`: pending
+  - preserve result column order in `ALNDatabaseRow` / `ALNDatabaseResult`
+  - improve projection semantics without replacing the dictionary-backed base
+    contract
+- `20N`: pending if broader cross-backend schema tooling becomes a product goal
+  - widen reflection only behind explicit scope, starting from concrete
+    tooling/reporting needs instead of chasing SQLAlchemy-style metadata breadth
 
 ## 4. Scope Guardrails
 
@@ -549,3 +564,78 @@ Acceptance (required):
 - MSSQL subset behavior is explicit, testable, and operationally less
   surprising
 - PostgreSQL remains first-class without hiding backend asymmetry
+
+## 5.12 Phase 20L: MSSQL Native Bind/Result Transport Tightening
+
+Status: planned
+
+Deliverables:
+
+- Reduce text-only transport on the supported MSSQL path where ODBC can support
+  a more honest native bind/fetch mode.
+- Add explicit support for the highest-value missing transport cases first:
+  - binary / `NSData` bind and result handling
+  - native-path bind/fetch coverage for the documented common scalar subset
+- Keep unsupported parameter/result families explicit:
+  - do not silently invent array semantics for MSSQL
+  - do not broaden the supported subset without docs and coverage
+- Expand DSN-gated MSSQL coverage so the supported subset is proven by live
+  execution instead of only inferred from conversion helpers.
+
+Acceptance (required):
+
+- documented supported MSSQL types no longer depend entirely on text transport
+  where the driver can support a native path
+- binary payloads round-trip predictably for the documented subset
+- unsupported MSSQL shapes still fail with explicit diagnostics instead of
+  silent stringification
+
+## 5.13 Phase 20M: Result Row Ordering + Projection Semantics
+
+Status: planned
+
+Deliverables:
+
+- Preserve query column order in `ALNDatabaseRow` / `ALNDatabaseResult` instead
+  of alphabetizing row keys for presentation.
+- Add a small amount of extra result ergonomics only where it improves
+  correctness expectations:
+  - stable ordered column names
+  - optional ordered row access helpers if needed
+- Keep the underlying `NSArray<NSDictionary *>` execution contract intact.
+- Keep streaming cursors, tuple-model APIs, and ORM-style row objects out of
+  scope.
+
+Acceptance (required):
+
+- `ALNDatabaseRow.columns` reflects select-list order rather than sorted key
+  order
+- existing dictionary-backed access remains backward compatible
+- common scalar and single-row helpers continue to work without new magic
+
+## 5.14 Phase 20N: Optional Broader Reflection Depth for Cross-Backend Tooling
+
+Status: planned only if cross-backend schema tooling becomes a product goal
+
+Deliverables:
+
+- Decide explicitly whether reflection remains PostgreSQL-first tooling or grows
+  into a wider backend contract.
+- If broader tooling is required, widen the reflection contract in a bounded
+  way around concrete needs such as:
+  - schema enumeration
+  - check constraints
+  - view definitions
+  - comments or other audit-relevant metadata
+- Define the backend bar before adding more codegen promises:
+  - do not advertise cross-backend reflection unless at least one non-Postgres
+    backend reaches the same deterministic contract quality
+- Keep full SQLAlchemy-style metadata graphs, schema authoring objects, and ORM
+  behavior out of scope.
+
+Acceptance (required):
+
+- docs stay explicit about whether reflection is PostgreSQL-only or truly
+  cross-backend
+- any widened reflection payload remains deterministic and tooling-oriented
+- schema/codegen promises do not outrun the actual supported backend contracts
