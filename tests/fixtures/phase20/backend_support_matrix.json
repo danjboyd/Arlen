@@ -1,0 +1,37 @@
+{
+  "version": "phase20-backend-support-v1",
+  "backends": {
+    "gdl2": {
+      "adapter": "gdl2",
+      "notes": "Compatibility adapter that delegates execution depth to the PostgreSQL fallback path.",
+      "support_tier": "supported_subset"
+    },
+    "mssql_build_available": {
+      "adapter": "mssql",
+      "batch_execution_mode": "sequential_same_connection",
+      "savepoint_release_mode": "no_op",
+      "support_tier": "supported_subset",
+      "supports_connection_liveness_checks": true,
+      "supports_result_wrappers": true,
+      "supports_savepoints": true,
+      "transport_available": true
+    },
+    "mssql_build_unavailable": {
+      "adapter": "mssql",
+      "support_tier": "unavailable_at_build_time",
+      "supports_connection_liveness_checks": false,
+      "supports_result_wrappers": true,
+      "supports_savepoints": false,
+      "transport_available": false
+    },
+    "postgresql": {
+      "adapter": "postgresql",
+      "batch_execution_mode": "sequential_same_connection",
+      "savepoint_release_mode": "explicit",
+      "support_tier": "first_class",
+      "supports_connection_liveness_checks": true,
+      "supports_result_wrappers": true,
+      "supports_savepoints": true
+    }
+  }
+}

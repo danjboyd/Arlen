@@ -246,6 +246,48 @@ static void ALNPgClearError(NSError **error) {
   }
 }
 
+static NSString *ALNPgValidatedSavepointName(NSString *name, NSError **error) {
+  ALNPgClearError(error);
+  NSString *trimmed = [name isKindOfClass:[NSString class]]
+                          ? [name stringByTrimmingCharactersInSet:
+                                       [NSCharacterSet whitespaceAndNewlineCharacterSet]]
+                          : @"";
+  if ([trimmed length] == 0) {
+    if (error != NULL) {
+      *error = ALNPgMakeError(ALNPgErrorInvalidArgument,
+                              @"savepoint name is required",
+                              nil,
+                              nil);
+    }
+    return nil;
+  }
+
+  unichar first = [trimmed characterAtIndex:0];
+  if (!(first == '_' || (first >= 'A' && first <= 'Z') || (first >= 'a' && first <= 'z'))) {
+    if (error != NULL) {
+      *error = ALNPgMakeError(ALNPgErrorInvalidArgument,
+                              @"savepoint name must start with a letter or underscore",
+                              nil,
+                              nil);
+    }
+    return nil;
+  }
+  for (NSUInteger idx = 1; idx < [trimmed length]; idx++) {
+    unichar ch = [trimmed characterAtIndex:idx];
+    if (!(ch == '_' || (ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z') ||
+          (ch >= '0' && ch <= '9'))) {
+      if (error != NULL) {
+        *error = ALNPgMakeError(ALNPgErrorInvalidArgument,
+                                @"savepoint name must contain only letters, digits, and underscores",
+                                nil,
+                                nil);
+      }
+      return nil;
+    }
+  }
+  return trimmed;
+}
+
 static NSError *ALNPgMakeErrorWithDiagnostics(ALNPgErrorCode code,
                                               NSString *message,
                                               NSString *detail,
@@ -2253,6 +2295,16 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result, int rowIndex, NSError 
   return rows[0];
 }
 
+- (ALNDatabaseResult *)executeQueryResult:(NSString *)sql
+                               parameters:(NSArray *)parameters
+                                    error:(NSError **)error {
+  NSArray<NSDictionary *> *rows = [self executeQuery:sql parameters:parameters error:error];
+  if (rows == nil) {
+    return nil;
+  }
+  return ALNDatabaseResultFromRows(rows);
+}
+
 - (NSInteger)executeCommand:(NSString *)sql
                  parameters:(NSArray *)parameters
                       error:(NSError **)error {
@@ -2350,6 +2402,40 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result, int rowIndex, NSError 
   }
   ALNPQclear(result);
   return affected;
+}
+
+- (NSInteger)executeCommandBatch:(NSString *)sql
+                   parameterSets:(NSArray<NSArray *> *)parameterSets
+                           error:(NSError **)error {
+  ALNPgClearError(error);
+  if (parameterSets != nil && ![parameterSets isKindOfClass:[NSArray class]]) {
+    if (error != NULL) {
+      *error = ALNPgMakeError(ALNPgErrorInvalidArgument,
+                              @"batch parameter sets must be an array",
+                              nil,
+                              nil);
+    }
+    return -1;
+  }
+
+  NSInteger totalAffected = 0;
+  for (id item in parameterSets ?: @[]) {
+    if (![item isKindOfClass:[NSArray class]]) {
+      if (error != NULL) {
+        *error = ALNPgMakeError(ALNPgErrorInvalidArgument,
+                                @"each batch parameter set must be an array",
+                                nil,
+                                nil);
+      }
+      return -1;
+    }
+    NSInteger affected = [self executeCommand:sql parameters:item error:error];
+    if (affected < 0) {
+      return -1;
+    }
+    totalAffected += affected;
+  }
+  return totalAffected;
 }
 
 - (BOOL)executeScript:(NSString *)sql error:(NSError **)error {
@@ -2779,6 +2865,101 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result, int rowIndex, NSError 
   return ok;
 }
 
+- (BOOL)createSavepointNamed:(NSString *)name error:(NSError **)error {
+  ALNPgClearError(error);
+  NSString *validatedName = ALNPgValidatedSavepointName(name, error);
+  if (validatedName == nil) {
+    return NO;
+  }
+  if (!_inTransaction) {
+    if (error != NULL) {
+      *error = ALNPgMakeError(ALNPgErrorTransactionFailed,
+                              @"savepoints require an active transaction",
+                              nil,
+                              nil);
+    }
+    return NO;
+  }
+  return [self runTransactionSQL:[NSString stringWithFormat:@"SAVEPOINT %@", validatedName]
+                           error:error];
+}
+
+- (BOOL)rollbackToSavepointNamed:(NSString *)name error:(NSError **)error {
+  ALNPgClearError(error);
+  NSString *validatedName = ALNPgValidatedSavepointName(name, error);
+  if (validatedName == nil) {
+    return NO;
+  }
+  if (!_inTransaction) {
+    if (error != NULL) {
+      *error = ALNPgMakeError(ALNPgErrorTransactionFailed,
+                              @"savepoints require an active transaction",
+                              nil,
+                              nil);
+    }
+    return NO;
+  }
+  return [self runTransactionSQL:[NSString stringWithFormat:@"ROLLBACK TO SAVEPOINT %@", validatedName]
+                           error:error];
+}
+
+- (BOOL)releaseSavepointNamed:(NSString *)name error:(NSError **)error {
+  ALNPgClearError(error);
+  NSString *validatedName = ALNPgValidatedSavepointName(name, error);
+  if (validatedName == nil) {
+    return NO;
+  }
+  if (!_inTransaction) {
+    if (error != NULL) {
+      *error = ALNPgMakeError(ALNPgErrorTransactionFailed,
+                              @"savepoints require an active transaction",
+                              nil,
+                              nil);
+    }
+    return NO;
+  }
+  return [self runTransactionSQL:[NSString stringWithFormat:@"RELEASE SAVEPOINT %@", validatedName]
+                           error:error];
+}
+
+- (BOOL)withSavepointNamed:(NSString *)name
+                usingBlock:(BOOL (^)(NSError **error))block
+                     error:(NSError **)error {
+  ALNPgClearError(error);
+  if (block == nil) {
+    if (error != NULL) {
+      *error = ALNPgMakeError(ALNPgErrorInvalidArgument,
+                              @"savepoint block is required",
+                              nil,
+                              nil);
+    }
+    return NO;
+  }
+  if (![self createSavepointNamed:name error:error]) {
+    return NO;
+  }
+
+  NSError *blockError = nil;
+  BOOL success = block(&blockError);
+  if (success) {
+    NSError *releaseError = nil;
+    if (![self releaseSavepointNamed:name error:&releaseError]) {
+      if (error != NULL) {
+        *error = releaseError;
+      }
+      return NO;
+    }
+    return YES;
+  }
+
+  NSError *rollbackError = nil;
+  (void)[self rollbackToSavepointNamed:name error:&rollbackError];
+  if (error != NULL) {
+    *error = blockError ?: rollbackError;
+  }
+  return NO;
+}
+
 @end
 
 @interface ALNPg ()
@@ -2809,18 +2990,25 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result, int rowIndex, NSError 
     @"supports_upsert" : @YES,
     @"conflict_resolution_mode" : @"on_conflict",
     @"json_feature_family" : @"jsonb_ops",
+    @"support_tier" : @"first_class",
     @"supports_builder_compilation_cache" : @YES,
     @"supports_builder_diagnostics" : @YES,
+    @"supports_batch_execution" : @YES,
     @"supports_connection_liveness_checks" : @YES,
     @"supports_cte" : @YES,
     @"supports_for_update" : @YES,
     @"supports_lateral_join" : @YES,
     @"supports_on_conflict" : @YES,
     @"supports_recursive_cte" : @YES,
+    @"supports_result_wrappers" : @YES,
+    @"supports_savepoints" : @YES,
+    @"supports_savepoint_release" : @YES,
     @"supports_set_operations" : @YES,
     @"supports_skip_locked" : @YES,
     @"supports_window_clauses" : @YES,
+    @"batch_execution_mode" : @"sequential_same_connection",
     @"prepared_statement_cache_eviction" : @"lru",
+    @"savepoint_release_mode" : @"explicit",
   };
 }
 
@@ -2983,6 +3171,16 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result, int rowIndex, NSError 
   return rows;
 }
 
+- (ALNDatabaseResult *)executeQueryResult:(NSString *)sql
+                               parameters:(NSArray *)parameters
+                                    error:(NSError **)error {
+  NSArray<NSDictionary *> *rows = [self executeQuery:sql parameters:parameters error:error];
+  if (rows == nil) {
+    return nil;
+  }
+  return ALNDatabaseResultFromRows(rows);
+}
+
 - (NSArray<NSDictionary *> *)executeBuilderQuery:(ALNSQLBuilder *)builder
                                             error:(NSError **)error {
   ALNPgClearError(error);
@@ -3020,6 +3218,28 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result, int rowIndex, NSError 
   NSInteger affected = -1;
   @try {
     affected = [connection executeCommand:sql parameters:parameters ?: @[] error:error];
+  } @finally {
+    [self releaseConnection:connection];
+  }
+  return affected;
+}
+
+- (NSInteger)executeCommandBatch:(NSString *)sql
+                   parameterSets:(NSArray<NSArray *> *)parameterSets
+                           error:(NSError **)error {
+  ALNPgClearError(error);
+  NSError *acquireError = nil;
+  ALNPgConnection *connection = [self acquireConnection:&acquireError];
+  if (connection == nil) {
+    if (error != NULL) {
+      *error = acquireError;
+    }
+    return -1;
+  }
+
+  NSInteger affected = -1;
+  @try {
+    affected = [connection executeCommandBatch:sql parameterSets:parameterSets error:error];
   } @finally {
     [self releaseConnection:connection];
   }

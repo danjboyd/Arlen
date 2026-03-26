@@ -16,6 +16,7 @@
   metadata[@"adapter"] = @"gdl2";
   metadata[@"dialect"] = @"compat_fallback_pg";
   metadata[@"compatibility_mode"] = @"fallback_pg";
+  metadata[@"support_tier"] = @"supported_subset";
   return [NSDictionary dictionaryWithDictionary:metadata];
 }
 

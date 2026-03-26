@@ -50,6 +50,50 @@ static NSError *ALNMSSQLMakeError(ALNMSSQLErrorCode code,
   return [NSError errorWithDomain:ALNMSSQLErrorDomain code:code userInfo:userInfo];
 }
 
+static NSString *ALNMSSQLValidatedSavepointName(NSString *name, NSError **error) {
+  if (error != NULL) {
+    *error = nil;
+  }
+  NSString *trimmed = [name isKindOfClass:[NSString class]]
+                          ? [name stringByTrimmingCharactersInSet:
+                                       [NSCharacterSet whitespaceAndNewlineCharacterSet]]
+                          : @"";
+  if ([trimmed length] == 0) {
+    if (error != NULL) {
+      *error = ALNMSSQLMakeError(ALNMSSQLErrorInvalidArgument,
+                                 @"savepoint name is required",
+                                 nil,
+                                 nil);
+    }
+    return nil;
+  }
+
+  unichar first = [trimmed characterAtIndex:0];
+  if (!(first == '_' || (first >= 'A' && first <= 'Z') || (first >= 'a' && first <= 'z'))) {
+    if (error != NULL) {
+      *error = ALNMSSQLMakeError(ALNMSSQLErrorInvalidArgument,
+                                 @"savepoint name must start with a letter or underscore",
+                                 nil,
+                                 nil);
+    }
+    return nil;
+  }
+  for (NSUInteger idx = 1; idx < [trimmed length]; idx++) {
+    unichar ch = [trimmed characterAtIndex:idx];
+    if (!(ch == '_' || (ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z') ||
+          (ch >= '0' && ch <= '9'))) {
+      if (error != NULL) {
+        *error = ALNMSSQLMakeError(ALNMSSQLErrorInvalidArgument,
+                                   @"savepoint name must contain only letters, digits, and underscores",
+                                   nil,
+                                   nil);
+      }
+      return nil;
+    }
+  }
+  return trimmed;
+}
+
 #if !ALN_MSSQL_ODBC_HEADERS_AVAILABLE
 
 @interface ALNMSSQLConnection ()
@@ -94,9 +138,27 @@ static NSError *ALNMSSQLMakeError(ALNMSSQLErrorCode code,
   return [[self executeQuery:sql parameters:parameters error:error] firstObject];
 }
 
+- (ALNDatabaseResult *)executeQueryResult:(NSString *)sql
+                               parameters:(NSArray *)parameters
+                                    error:(NSError **)error {
+  NSArray<NSDictionary *> *rows = [self executeQuery:sql parameters:parameters error:error];
+  if (rows == nil) {
+    return nil;
+  }
+  return ALNDatabaseResultFromRows(rows);
+}
+
 - (NSInteger)executeCommand:(NSString *)sql parameters:(NSArray *)parameters error:(NSError **)error {
   (void)[self executeQuery:sql parameters:parameters error:error];
   return -1;
+}
+
+- (NSInteger)executeCommandBatch:(NSString *)sql
+                   parameterSets:(NSArray<NSArray *> *)parameterSets
+                           error:(NSError **)error {
+  (void)sql;
+  (void)parameterSets;
+  return [self executeCommand:@"" parameters:@[] error:error];
 }
 
 - (BOOL)beginTransaction:(NSError **)error {
@@ -114,6 +176,29 @@ static NSError *ALNMSSQLMakeError(ALNMSSQLErrorCode code,
 }
 
 - (BOOL)rollbackTransaction:(NSError **)error {
+  return [self beginTransaction:error];
+}
+
+- (BOOL)createSavepointNamed:(NSString *)name error:(NSError **)error {
+  (void)name;
+  return [self beginTransaction:error];
+}
+
+- (BOOL)rollbackToSavepointNamed:(NSString *)name error:(NSError **)error {
+  (void)name;
+  return [self beginTransaction:error];
+}
+
+- (BOOL)releaseSavepointNamed:(NSString *)name error:(NSError **)error {
+  (void)name;
+  return [self beginTransaction:error];
+}
+
+- (BOOL)withSavepointNamed:(NSString *)name
+                usingBlock:(BOOL (^)(NSError **error))block
+                     error:(NSError **)error {
+  (void)name;
+  (void)block;
   return [self beginTransaction:error];
 }
 
@@ -140,14 +225,20 @@ static NSError *ALNMSSQLMakeError(ALNMSSQLErrorCode code,
   return @{
     @"adapter" : @"mssql",
     @"dialect" : @"mssql",
+    @"support_tier" : @"unavailable_at_build_time",
     @"supports_transactions" : @YES,
     @"returning_mode" : @"output",
     @"pagination_syntax" : @"offset_fetch",
     @"supports_upsert" : @NO,
     @"conflict_resolution_mode" : @"unsupported",
     @"json_feature_family" : @"json_value_openjson",
+    @"supports_batch_execution" : @NO,
     @"supports_builder_compilation_cache" : @NO,
     @"supports_builder_diagnostics" : @NO,
+    @"supports_connection_liveness_checks" : @NO,
+    @"supports_result_wrappers" : @YES,
+    @"supports_savepoints" : @NO,
+    @"supports_savepoint_release" : @NO,
     @"transport" : @"odbc",
     @"transport_available" : @NO,
   };
@@ -178,7 +269,10 @@ static NSError *ALNMSSQLMakeError(ALNMSSQLErrorCode code,
 }
 
 - (NSDictionary<NSString *, id> *)capabilityMetadata {
-  return [[self class] capabilityMetadata];
+  NSMutableDictionary<NSString *, id> *metadata =
+      [NSMutableDictionary dictionaryWithDictionary:[[self class] capabilityMetadata]];
+  metadata[@"connection_liveness_checks_enabled"] = @(self.connectionLivenessChecksEnabled);
+  return [NSDictionary dictionaryWithDictionary:metadata];
 }
 
 - (ALNMSSQLConnection *)acquireConnection:(NSError **)error {
@@ -210,9 +304,29 @@ static NSError *ALNMSSQLMakeError(ALNMSSQLErrorCode code,
   return [connection executeQuery:sql parameters:parameters error:error];
 }
 
+- (ALNDatabaseResult *)executeQueryResult:(NSString *)sql
+                               parameters:(NSArray *)parameters
+                                    error:(NSError **)error {
+  NSArray<NSDictionary *> *rows = [self executeQuery:sql parameters:parameters error:error];
+  if (rows == nil) {
+    return nil;
+  }
+  return ALNDatabaseResultFromRows(rows);
+}
+
 - (NSInteger)executeCommand:(NSString *)sql parameters:(NSArray *)parameters error:(NSError **)error {
   ALNMSSQLConnection *connection = [self acquireConnection:error];
   return [connection executeCommand:sql parameters:parameters error:error];
+}
+
+- (NSInteger)executeCommandBatch:(NSString *)sql
+                   parameterSets:(NSArray<NSArray *> *)parameterSets
+                           error:(NSError **)error {
+  ALNMSSQLConnection *connection = [self acquireConnection:error];
+  if (connection == nil) {
+    return -1;
+  }
+  return [connection executeCommandBatch:sql parameterSets:parameterSets error:error];
 }
 
 - (NSArray<NSDictionary *> *)executeBuilderQuery:(ALNSQLBuilder *)builder error:(NSError **)error {
@@ -929,6 +1043,8 @@ static id ALNMSSQLFetchColumnValue(SQLHSTMT statement,
 @property(nonatomic, assign) SQLHENV environmentHandle;
 @property(nonatomic, assign) SQLHDBC connectionHandle;
 
+- (BOOL)checkConnectionLiveness:(NSError **)error;
+
 @end
 
 @implementation ALNMSSQLConnection
@@ -1045,6 +1161,32 @@ static id ALNMSSQLFetchColumnValue(SQLHSTMT statement,
     _environmentHandle = SQL_NULL_HENV;
   }
   _open = NO;
+}
+
+- (BOOL)checkConnectionLiveness:(NSError **)error {
+  if (![self isOpen]) {
+    if (error != NULL) {
+      *error = ALNMSSQLMakeError(ALNMSSQLErrorConnectionFailed,
+                                 @"MSSQL connection is not open",
+                                 nil,
+                                 nil);
+    }
+    return NO;
+  }
+
+  NSArray<NSDictionary *> *rows = [self executeQuery:@"SELECT 1 AS liveness_probe"
+                                          parameters:@[]
+                                               error:error];
+  if (rows == nil) {
+    if (error != NULL && *error == nil) {
+      *error = ALNMSSQLMakeError(ALNMSSQLErrorConnectionFailed,
+                                 @"MSSQL connection liveness check failed",
+                                 nil,
+                                 nil);
+    }
+    return NO;
+  }
+  return YES;
 }
 
 - (NSArray<NSDictionary *> *)executeQuery:(NSString *)sql
@@ -1165,6 +1307,16 @@ static id ALNMSSQLFetchColumnValue(SQLHSTMT statement,
   return [[self executeQuery:sql parameters:parameters error:error] firstObject];
 }
 
+- (ALNDatabaseResult *)executeQueryResult:(NSString *)sql
+                               parameters:(NSArray *)parameters
+                                    error:(NSError **)error {
+  NSArray<NSDictionary *> *rows = [self executeQuery:sql parameters:parameters error:error];
+  if (rows == nil) {
+    return nil;
+  }
+  return ALNDatabaseResultFromRows(rows);
+}
+
 - (NSInteger)executeCommand:(NSString *)sql parameters:(NSArray *)parameters error:(NSError **)error {
   if (![self isOpen]) {
     if (error != NULL) {
@@ -1205,6 +1357,42 @@ static id ALNMSSQLFetchColumnValue(SQLHSTMT statement,
 
   ALNSQLFreeHandle(SQL_HANDLE_STMT, statement);
   return (NSInteger)MAX((SQLLEN)0, affectedRows);
+}
+
+- (NSInteger)executeCommandBatch:(NSString *)sql
+                   parameterSets:(NSArray<NSArray *> *)parameterSets
+                           error:(NSError **)error {
+  if (error != NULL) {
+    *error = nil;
+  }
+  if (parameterSets != nil && ![parameterSets isKindOfClass:[NSArray class]]) {
+    if (error != NULL) {
+      *error = ALNMSSQLMakeError(ALNMSSQLErrorInvalidArgument,
+                                 @"batch parameter sets must be an array",
+                                 nil,
+                                 nil);
+    }
+    return -1;
+  }
+
+  NSInteger totalAffected = 0;
+  for (id item in parameterSets ?: @[]) {
+    if (![item isKindOfClass:[NSArray class]]) {
+      if (error != NULL) {
+        *error = ALNMSSQLMakeError(ALNMSSQLErrorInvalidArgument,
+                                   @"each batch parameter set must be an array",
+                                   nil,
+                                   nil);
+      }
+      return -1;
+    }
+    NSInteger affected = [self executeCommand:sql parameters:item error:error];
+    if (affected < 0) {
+      return -1;
+    }
+    totalAffected += affected;
+  }
+  return totalAffected;
 }
 
 - (BOOL)beginTransaction:(NSError **)error {
@@ -1317,6 +1505,99 @@ static id ALNMSSQLFetchColumnValue(SQLHSTMT statement,
   return YES;
 }
 
+- (BOOL)createSavepointNamed:(NSString *)name error:(NSError **)error {
+  NSString *validatedName = ALNMSSQLValidatedSavepointName(name, error);
+  if (validatedName == nil) {
+    return NO;
+  }
+  if (!self.inTransaction) {
+    if (error != NULL) {
+      *error = ALNMSSQLMakeError(ALNMSSQLErrorTransactionFailed,
+                                 @"savepoints require an active MSSQL transaction",
+                                 nil,
+                                 nil);
+    }
+    return NO;
+  }
+  NSString *sql = [NSString stringWithFormat:@"SAVE TRANSACTION %@", validatedName];
+  return ([self executeCommand:sql parameters:@[] error:error] >= 0);
+}
+
+- (BOOL)rollbackToSavepointNamed:(NSString *)name error:(NSError **)error {
+  NSString *validatedName = ALNMSSQLValidatedSavepointName(name, error);
+  if (validatedName == nil) {
+    return NO;
+  }
+  if (!self.inTransaction) {
+    if (error != NULL) {
+      *error = ALNMSSQLMakeError(ALNMSSQLErrorTransactionFailed,
+                                 @"savepoints require an active MSSQL transaction",
+                                 nil,
+                                 nil);
+    }
+    return NO;
+  }
+  NSString *sql = [NSString stringWithFormat:@"ROLLBACK TRANSACTION %@", validatedName];
+  return ([self executeCommand:sql parameters:@[] error:error] >= 0);
+}
+
+- (BOOL)releaseSavepointNamed:(NSString *)name error:(NSError **)error {
+  NSString *validatedName = ALNMSSQLValidatedSavepointName(name, error);
+  if (validatedName == nil) {
+    return NO;
+  }
+  if (!self.inTransaction) {
+    if (error != NULL) {
+      *error = ALNMSSQLMakeError(ALNMSSQLErrorTransactionFailed,
+                                 @"savepoints require an active MSSQL transaction",
+                                 nil,
+                                 nil);
+    }
+    return NO;
+  }
+  if (error != NULL) {
+    *error = nil;
+  }
+  return YES;
+}
+
+- (BOOL)withSavepointNamed:(NSString *)name
+                usingBlock:(BOOL (^)(NSError **error))block
+                     error:(NSError **)error {
+  if (block == nil) {
+    if (error != NULL) {
+      *error = ALNMSSQLMakeError(ALNMSSQLErrorInvalidArgument,
+                                 @"savepoint block is required",
+                                 nil,
+                                 nil);
+    }
+    return NO;
+  }
+  if (![self createSavepointNamed:name error:error]) {
+    return NO;
+  }
+
+  NSError *blockError = nil;
+  BOOL success = block(&blockError);
+  if (success) {
+    NSError *releaseError = nil;
+    if (![self releaseSavepointNamed:name error:&releaseError]) {
+      if (error != NULL) {
+        *error = releaseError;
+      }
+      return NO;
+    }
+    return YES;
+  }
+
+  NSError *rollbackError = nil;
+  (void)[self rollbackToSavepointNamed:name error:&rollbackError];
+  if (error != NULL) {
+    *error = blockError ?: rollbackError;
+  }
+  return NO;
+}
+
 - (NSArray<NSDictionary *> *)executeBuilderQuery:(ALNSQLBuilder *)builder error:(NSError **)error {
   NSDictionary *compiled = [builder buildWithDialect:[ALNMSSQLDialect sharedDialect] error:error];
   if (compiled == nil) {
@@ -1350,21 +1631,32 @@ static id ALNMSSQLFetchColumnValue(SQLHSTMT statement,
   return @{
     @"adapter" : @"mssql",
     @"dialect" : @"mssql",
+    @"support_tier" : @"supported_subset",
     @"supports_transactions" : @YES,
     @"returning_mode" : @"output",
     @"pagination_syntax" : @"offset_fetch",
     @"supports_upsert" : @NO,
     @"conflict_resolution_mode" : @"unsupported",
     @"json_feature_family" : @"json_value_openjson",
+    @"supports_batch_execution" : @YES,
     @"supports_builder_compilation_cache" : @NO,
     @"supports_builder_diagnostics" : @NO,
+    @"supports_connection_liveness_checks" : @YES,
+    @"supports_result_wrappers" : @YES,
+    @"supports_savepoints" : @YES,
+    @"supports_savepoint_release" : @YES,
+    @"batch_execution_mode" : @"sequential_same_connection",
+    @"savepoint_release_mode" : @"no_op",
     @"transport" : @"odbc",
     @"transport_available" : @YES,
   };
 }
 
 - (NSDictionary<NSString *, id> *)capabilityMetadata {
-  return [[self class] capabilityMetadata];
+  NSMutableDictionary<NSString *, id> *metadata =
+      [NSMutableDictionary dictionaryWithDictionary:[[self class] capabilityMetadata]];
+  metadata[@"connection_liveness_checks_enabled"] = @(self.connectionLivenessChecksEnabled);
+  return [NSDictionary dictionaryWithDictionary:metadata];
 }
 
 - (NSString *)adapterName {
@@ -1399,6 +1691,7 @@ static id ALNMSSQLFetchColumnValue(SQLHSTMT statement,
   _maxConnections = (maxConnections > 0) ? maxConnections : 8;
   _idleConnections = [NSMutableArray array];
   _inUseConnections = 0;
+  _connectionLivenessChecksEnabled = NO;
   return self;
 }
 
@@ -1413,9 +1706,16 @@ static id ALNMSSQLFetchColumnValue(SQLHSTMT statement,
 
 - (ALNMSSQLConnection *)acquireConnection:(NSError **)error {
   @synchronized(self) {
-    if ([self.idleConnections count] > 0) {
+    while ([self.idleConnections count] > 0) {
       ALNMSSQLConnection *connection = [self.idleConnections lastObject];
       [self.idleConnections removeLastObject];
+      if (self.connectionLivenessChecksEnabled) {
+        NSError *livenessError = nil;
+        if (![connection checkConnectionLiveness:&livenessError]) {
+          [connection close];
+          continue;
+        }
+      }
       self.inUseConnections += 1;
       return connection;
     }
@@ -1449,6 +1749,12 @@ static id ALNMSSQLFetchColumnValue(SQLHSTMT statement,
     if (self.inUseConnections > 0) {
       self.inUseConnections -= 1;
     }
+    if ([connection isOpen] && connection.inTransaction) {
+      NSError *rollbackError = nil;
+      if (![connection rollbackTransaction:&rollbackError]) {
+        [connection close];
+      }
+    }
     if ([connection isOpen]) {
       [self.idleConnections addObject:connection];
     } else {
@@ -1481,6 +1787,16 @@ static id ALNMSSQLFetchColumnValue(SQLHSTMT statement,
   return rows;
 }
 
+- (ALNDatabaseResult *)executeQueryResult:(NSString *)sql
+                               parameters:(NSArray *)parameters
+                                    error:(NSError **)error {
+  NSArray<NSDictionary *> *rows = [self executeQuery:sql parameters:parameters error:error];
+  if (rows == nil) {
+    return nil;
+  }
+  return ALNDatabaseResultFromRows(rows);
+}
+
 - (NSInteger)executeCommand:(NSString *)sql parameters:(NSArray *)parameters error:(NSError **)error {
   ALNMSSQLConnection *connection = [self acquireConnection:error];
   if (connection == nil) {
@@ -1489,6 +1805,22 @@ static id ALNMSSQLFetchColumnValue(SQLHSTMT statement,
   NSInteger affected = -1;
   @try {
     affected = [connection executeCommand:sql parameters:parameters ?: @[] error:error];
+  } @finally {
+    [self releaseConnection:connection];
+  }
+  return affected;
+}
+
+- (NSInteger)executeCommandBatch:(NSString *)sql
+                   parameterSets:(NSArray<NSArray *> *)parameterSets
+                           error:(NSError **)error {
+  ALNMSSQLConnection *connection = [self acquireConnection:error];
+  if (connection == nil) {
+    return -1;
+  }
+  NSInteger affected = -1;
+  @try {
+    affected = [connection executeCommandBatch:sql parameterSets:parameterSets error:error];
   } @finally {
     [self releaseConnection:connection];
   }

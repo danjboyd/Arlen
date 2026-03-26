@@ -121,6 +121,16 @@ Use transactions for write workflows:
 
 - `withTransaction:error:`
 - `withTransactionUsingBlock:error:`
+- `ALNDatabaseWithSavepoint(...)` for nested write scopes on supported adapters
+
+Convenience result helpers:
+
+- `ALNDatabaseExecuteQueryResult(...)`
+- `ALNDatabaseResult.first`
+- `ALNDatabaseResult.one:error:`
+- `ALNDatabaseResult.oneOrNil:error:`
+- `ALNDatabaseResult.scalarValueForColumn:error:`
+- `ALNDatabaseExecuteCommandBatch(...)`
 
 Adapter examples:
 
@@ -156,3 +166,6 @@ Routing/liveness note:
 - `ALNDatabaseRouter` now defaults read fallback to connectivity-only errors.
 - `ALNPg.connectionLivenessChecksEnabled = YES` enables pre-query checkout
   liveness checks for recycled pooled connections.
+- `ALNMSSQL.connectionLivenessChecksEnabled = YES` enables the same
+  checkout-time probe for pooled ODBC connections when transport support is
+  present.

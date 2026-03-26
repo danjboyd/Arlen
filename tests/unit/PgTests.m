@@ -274,6 +274,35 @@
   XCTAssertEqualObjects(@2, scalar);
 }
 
+- (void)testDatabaseResultWrapperProvidesExpectedConvenienceHelpers {
+  NSArray<NSDictionary *> *rows = @[ @{ @"id" : @7, @"name" : @"hank" } ];
+  ALNDatabaseResult *result = ALNDatabaseResultFromRows(rows);
+  XCTAssertEqual((NSUInteger)1, result.count);
+
+  ALNDatabaseRow *first = [result first];
+  XCTAssertNotNil(first);
+  XCTAssertEqualObjects(@7, [first objectForColumn:@"id"]);
+  XCTAssertEqualObjects(@"hank", first[@"name"]);
+  XCTAssertEqualObjects(rows[0], first.dictionaryRepresentation);
+
+  NSError *error = nil;
+  XCTAssertEqualObjects(@7, [result scalarValueForColumn:@"id" error:&error]);
+  XCTAssertNil(error);
+  XCTAssertNotNil([result one:&error]);
+  XCTAssertNil(error);
+  XCTAssertNotNil([result oneOrNil:&error]);
+  XCTAssertNil(error);
+
+  ALNDatabaseResult *empty = ALNDatabaseResultFromRows(@[]);
+  XCTAssertNil([empty oneOrNil:&error]);
+  XCTAssertNil(error);
+
+  ALNDatabaseResult *many = ALNDatabaseResultFromRows(@[ @{ @"id" : @1 }, @{ @"id" : @2 } ]);
+  XCTAssertNil([many one:&error]);
+  XCTAssertNotNil(error);
+  XCTAssertEqualObjects(ALNDatabaseAdapterErrorDomain, error.domain);
+}
+
 - (void)testPostgresRowsMaterializeTypedValuesForSupportedScalarColumns {
   NSString *dsn = [self pgTestDSN];
   if ([dsn length] == 0) {
@@ -529,6 +558,98 @@
                           error:&error] firstObject];
   XCTAssertNil(error);
   XCTAssertEqualObjects(@2, countRow[@"count"]);
+
+  (void)[connection executeCommand:[NSString stringWithFormat:@"DROP TABLE IF EXISTS %@", table]
+                        parameters:@[]
+                             error:nil];
+  [database releaseConnection:connection];
+}
+
+- (void)testPostgresResultWrappersBatchExecutionAndSavepointsAgainstLiveConnection {
+  NSString *dsn = [self pgTestDSN];
+  if ([dsn length] == 0) {
+    return;
+  }
+
+  NSError *error = nil;
+  ALNPg *database = [[ALNPg alloc] initWithConnectionString:dsn maxConnections:2 error:&error];
+  XCTAssertNil(error);
+  XCTAssertNotNil(database);
+  if (database == nil) {
+    return;
+  }
+
+  ALNDatabaseResult *adapterResult =
+      [database executeQueryResult:@"SELECT 7::integer AS total, 'hank'::text AS name"
+                       parameters:@[]
+                            error:&error];
+  XCTAssertNil(error);
+  XCTAssertNotNil(adapterResult);
+  XCTAssertEqualObjects(@7, [adapterResult scalarValueForColumn:@"total" error:&error]);
+  XCTAssertNil(error);
+  XCTAssertEqualObjects(@"hank", [[adapterResult first] objectForColumn:@"name"]);
+
+  ALNPgConnection *connection = [database acquireConnection:&error];
+  XCTAssertNil(error);
+  XCTAssertNotNil(connection);
+  if (connection == nil) {
+    return;
+  }
+  XCTAssertTrue(ALNDatabaseConnectionSupportsSavepoints((id<ALNDatabaseConnection>)connection));
+
+  NSString *table = [self uniqueNameWithPrefix:@"arlen_phase20jk"];
+  NSString *createSQL =
+      [NSString stringWithFormat:@"CREATE TABLE %@(id SERIAL PRIMARY KEY, name TEXT NOT NULL)", table];
+  XCTAssertGreaterThanOrEqual([connection executeCommand:createSQL parameters:@[] error:&error], 0);
+  XCTAssertNil(error);
+
+  NSString *insertSQL = [NSString stringWithFormat:@"INSERT INTO %@ (name) VALUES ($1)", table];
+  NSInteger affected = ALNDatabaseExecuteCommandBatch((id<ALNDatabaseConnection>)connection,
+                                                      insertSQL,
+                                                      @[ @[ @"hank" ], @[ @"dale" ] ],
+                                                      &error);
+  XCTAssertNil(error);
+  XCTAssertEqual((NSInteger)2, affected);
+
+  BOOL began = [connection beginTransaction:&error];
+  XCTAssertTrue(began);
+  XCTAssertNil(error);
+
+  NSError *savepointError = nil;
+  BOOL savepointOK = ALNDatabaseWithSavepoint((id<ALNDatabaseConnection>)connection,
+                                              @"phase20_inner",
+                                              ^BOOL(NSError **blockError) {
+                                                NSInteger innerAffected =
+                                                    [connection executeCommand:insertSQL
+                                                                    parameters:@[ @"bill" ]
+                                                                         error:blockError];
+                                                XCTAssertEqual((NSInteger)1, innerAffected);
+                                                if (blockError != NULL) {
+                                                  *blockError = ALNDatabaseAdapterMakeError(
+                                                      ALNDatabaseAdapterErrorInvalidResult,
+                                                      @"intentional savepoint rollback",
+                                                      nil);
+                                                }
+                                                return NO;
+                                              },
+                                              &savepointError);
+  XCTAssertFalse(savepointOK);
+  XCTAssertNotNil(savepointError);
+
+  XCTAssertEqual((NSInteger)1,
+                 [connection executeCommand:insertSQL parameters:@[ @"boomhauer" ] error:&error]);
+  XCTAssertNil(error);
+  XCTAssertTrue([connection commitTransaction:&error]);
+  XCTAssertNil(error);
+
+  ALNDatabaseResult *countResult =
+      ALNDatabaseExecuteQueryResult((id<ALNDatabaseConnection>)connection,
+                                    [NSString stringWithFormat:@"SELECT COUNT(*) AS count FROM %@", table],
+                                    @[],
+                                    &error);
+  XCTAssertNil(error);
+  XCTAssertEqualObjects(@3, [countResult scalarValueForColumn:@"count" error:&error]);
+  XCTAssertNil(error);
 
   (void)[connection executeCommand:[NSString stringWithFormat:@"DROP TABLE IF EXISTS %@", table]
                         parameters:@[]

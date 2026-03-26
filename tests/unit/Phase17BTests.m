@@ -19,6 +19,12 @@
   return [NSString stringWithUTF8String:value];
 }
 
+- (NSString *)uniqueTempTableName {
+  NSString *uuid = [[[NSUUID UUID] UUIDString] lowercaseString];
+  uuid = [uuid stringByReplacingOccurrencesOfString:@"-" withString:@""];
+  return [NSString stringWithFormat:@"#arlen_%@", uuid];
+}
+
 - (void)testMSSQLDialectCompilesPaginationAndOutputReturning {
   NSError *error = nil;
 
@@ -113,9 +119,15 @@
   NSDictionary *metadata = [ALNMSSQL capabilityMetadata];
   XCTAssertEqualObjects(@"mssql", metadata[@"adapter"]);
   XCTAssertEqualObjects(@"mssql", metadata[@"dialect"]);
+  XCTAssertEqualObjects([metadata[@"transport_available"] boolValue] ? @"supported_subset"
+                                                                     : @"unavailable_at_build_time",
+                        metadata[@"support_tier"]);
   XCTAssertEqualObjects(@"output", metadata[@"returning_mode"]);
   XCTAssertEqualObjects(@"offset_fetch", metadata[@"pagination_syntax"]);
   XCTAssertEqualObjects(@(NO), metadata[@"supports_upsert"]);
+  XCTAssertEqualObjects(@(YES), metadata[@"supports_result_wrappers"]);
+  XCTAssertEqualObjects([metadata[@"transport_available"] boolValue] ? @(YES) : @(NO),
+                        metadata[@"supports_connection_liveness_checks"]);
 
   NSError *error = nil;
   ALNMSSQL *adapter = [[ALNMSSQL alloc]
@@ -201,6 +213,96 @@
   XCTAssertEqualObjects(@7, row[@"total"]);
   XCTAssertEqualObjects(@YES, row[@"enabled"]);
   XCTAssertEqualObjects([[actorID UUIDString] uppercaseString], [row[@"actor_id"] uppercaseString]);
+}
+
+- (void)testMSSQLResultWrappersBatchExecutionAndSavepointsWhenExplicitTestDSNIsProvided {
+  NSString *dsn = [self mssqlTestDSN];
+  if ([dsn length] == 0) {
+    return;
+  }
+
+  NSError *error = nil;
+  ALNMSSQL *adapter = [[ALNMSSQL alloc] initWithConnectionString:dsn
+                                                   maxConnections:2
+                                                            error:&error];
+  XCTAssertNil(error);
+  XCTAssertNotNil(adapter);
+  if (adapter == nil) {
+    return;
+  }
+
+  ALNDatabaseResult *result =
+      [adapter executeQueryResult:@"SELECT CAST(7 AS INT) AS total, CAST('hank' AS NVARCHAR(32)) AS name"
+                       parameters:@[]
+                            error:&error];
+  XCTAssertNil(error);
+  XCTAssertNotNil(result);
+  XCTAssertEqualObjects(@7, [result scalarValueForColumn:@"total" error:&error]);
+  XCTAssertNil(error);
+  XCTAssertEqualObjects(@"hank", [[result first] objectForColumn:@"name"]);
+
+  NSString *tempTable = [self uniqueTempTableName];
+  BOOL succeeded = [adapter withTransaction:^BOOL(ALNMSSQLConnection *connection, NSError **txError) {
+    XCTAssertTrue(ALNDatabaseConnectionSupportsSavepoints((id<ALNDatabaseConnection>)connection));
+
+    NSInteger createAffected =
+        [connection executeCommand:[NSString stringWithFormat:@"CREATE TABLE %@ (name NVARCHAR(64) NOT NULL)",
+                                                              tempTable]
+                        parameters:@[]
+                             error:txError];
+    XCTAssertGreaterThanOrEqual(createAffected, (NSInteger)0);
+    XCTAssertNil(*txError);
+
+    NSInteger batchAffected = ALNDatabaseExecuteCommandBatch((id<ALNDatabaseConnection>)connection,
+                                                             [NSString stringWithFormat:@"INSERT INTO %@ (name) VALUES (?)",
+                                                                                        tempTable],
+                                                             @[ @[ @"hank" ], @[ @"dale" ] ],
+                                                             txError);
+    XCTAssertEqual((NSInteger)2, batchAffected);
+    XCTAssertNil(*txError);
+
+    NSError *savepointError = nil;
+    BOOL savepointOK = ALNDatabaseWithSavepoint((id<ALNDatabaseConnection>)connection,
+                                                @"phase20_inner",
+                                                ^BOOL(NSError **blockError) {
+                                                  NSInteger innerAffected =
+                                                      [connection executeCommand:[NSString stringWithFormat:@"INSERT INTO %@ (name) VALUES (?)",
+                                                                                                        tempTable]
+                                                                      parameters:@[ @"bill" ]
+                                                                           error:blockError];
+                                                  XCTAssertEqual((NSInteger)1, innerAffected);
+                                                  if (blockError != NULL) {
+                                                    *blockError = ALNDatabaseAdapterMakeError(
+                                                        ALNDatabaseAdapterErrorInvalidResult,
+                                                        @"intentional savepoint rollback",
+                                                        nil);
+                                                  }
+                                                  return NO;
+                                                },
+                                                &savepointError);
+    XCTAssertFalse(savepointOK);
+    XCTAssertNotNil(savepointError);
+
+    NSInteger finalAffected =
+        [connection executeCommand:[NSString stringWithFormat:@"INSERT INTO %@ (name) VALUES (?)", tempTable]
+                        parameters:@[ @"boomhauer" ]
+                             error:txError];
+    XCTAssertEqual((NSInteger)1, finalAffected);
+    XCTAssertNil(*txError);
+
+    ALNDatabaseResult *countResult =
+        ALNDatabaseExecuteQueryResult((id<ALNDatabaseConnection>)connection,
+                                      [NSString stringWithFormat:@"SELECT COUNT(*) AS count FROM %@", tempTable],
+                                      @[],
+                                      txError);
+    XCTAssertNotNil(countResult);
+    XCTAssertEqualObjects(@3, [countResult scalarValueForColumn:@"count" error:txError]);
+    XCTAssertNil(*txError);
+    return YES;
+  } error:&error];
+
+  XCTAssertTrue(succeeded);
+  XCTAssertNil(error);
 }
 
 @end

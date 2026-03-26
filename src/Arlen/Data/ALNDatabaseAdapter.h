@@ -16,6 +16,9 @@ typedef NS_ENUM(NSInteger, ALNDatabaseAdapterErrorCode) {
   ALNDatabaseAdapterErrorInvalidResult = 4,
 };
 
+@class ALNDatabaseRow;
+@class ALNDatabaseResult;
+
 @interface ALNDatabaseJSONValue : NSObject
 
 @property(nonatomic, strong, readonly) id object;
@@ -36,6 +39,35 @@ typedef NS_ENUM(NSInteger, ALNDatabaseAdapterErrorCode) {
 
 @end
 
+@interface ALNDatabaseRow : NSObject
+
+@property(nonatomic, copy, readonly) NSDictionary<NSString *, id> *dictionaryRepresentation;
+@property(nonatomic, copy, readonly) NSArray<NSString *> *columns;
+
++ (instancetype)rowWithDictionary:(nullable NSDictionary<NSString *, id> *)dictionary;
+- (instancetype)init NS_UNAVAILABLE;
+- (instancetype)initWithDictionary:(nullable NSDictionary<NSString *, id> *)dictionary NS_DESIGNATED_INITIALIZER;
+- (nullable id)objectForColumn:(NSString *)columnName;
+- (nullable id)objectForKeyedSubscript:(NSString *)columnName;
+
+@end
+
+@interface ALNDatabaseResult : NSObject
+
+@property(nonatomic, copy, readonly) NSArray<NSDictionary<NSString *, id> *> *rows;
+@property(nonatomic, assign, readonly) NSUInteger count;
+
++ (instancetype)resultWithRows:(nullable NSArray<NSDictionary<NSString *, id> *> *)rows;
+- (instancetype)init NS_UNAVAILABLE;
+- (instancetype)initWithRows:(nullable NSArray<NSDictionary<NSString *, id> *> *)rows NS_DESIGNATED_INITIALIZER;
+- (nullable ALNDatabaseRow *)first;
+- (nullable ALNDatabaseRow *)rowAtIndex:(NSUInteger)index;
+- (nullable ALNDatabaseRow *)one:(NSError *_Nullable *_Nullable)error;
+- (nullable ALNDatabaseRow *)oneOrNil:(NSError *_Nullable *_Nullable)error;
+- (nullable id)scalarValueForColumn:(nullable NSString *)columnName error:(NSError *_Nullable *_Nullable)error;
+
+@end
+
 @protocol ALNDatabaseConnection <NSObject>
 
 - (nullable NSArray<NSDictionary *> *)executeQuery:(NSString *)sql
@@ -47,6 +79,21 @@ typedef NS_ENUM(NSInteger, ALNDatabaseAdapterErrorCode) {
 - (NSInteger)executeCommand:(NSString *)sql
                  parameters:(NSArray *)parameters
                       error:(NSError *_Nullable *_Nullable)error;
+
+@optional
+
+- (nullable ALNDatabaseResult *)executeQueryResult:(NSString *)sql
+                                        parameters:(NSArray *)parameters
+                                             error:(NSError *_Nullable *_Nullable)error;
+- (NSInteger)executeCommandBatch:(NSString *)sql
+                   parameterSets:(NSArray<NSArray *> *)parameterSets
+                           error:(NSError *_Nullable *_Nullable)error;
+- (BOOL)createSavepointNamed:(NSString *)name error:(NSError *_Nullable *_Nullable)error;
+- (BOOL)rollbackToSavepointNamed:(NSString *)name error:(NSError *_Nullable *_Nullable)error;
+- (BOOL)releaseSavepointNamed:(NSString *)name error:(NSError *_Nullable *_Nullable)error;
+- (BOOL)withSavepointNamed:(NSString *)name
+                usingBlock:(BOOL (^)(NSError *_Nullable *_Nullable error))block
+                     error:(NSError *_Nullable *_Nullable)error;
 
 @end
 
@@ -70,6 +117,12 @@ typedef NS_ENUM(NSInteger, ALNDatabaseAdapterErrorCode) {
 
 @optional
 
+- (nullable ALNDatabaseResult *)executeQueryResult:(NSString *)sql
+                                        parameters:(NSArray *)parameters
+                                             error:(NSError *_Nullable *_Nullable)error;
+- (NSInteger)executeCommandBatch:(NSString *)sql
+                   parameterSets:(NSArray<NSArray *> *)parameterSets
+                           error:(NSError *_Nullable *_Nullable)error;
 - (nullable id<ALNSQLDialect>)sqlDialect;
 - (NSDictionary<NSString *, id> *)capabilityMetadata;
 
@@ -81,6 +134,8 @@ FOUNDATION_EXPORT NSError *ALNDatabaseAdapterMakeError(ALNDatabaseAdapterErrorCo
 FOUNDATION_EXPORT BOOL ALNDatabaseErrorIsConnectivityFailure(NSError *_Nullable error);
 FOUNDATION_EXPORT ALNDatabaseJSONValue *ALNDatabaseJSONParameter(id _Nullable object);
 FOUNDATION_EXPORT ALNDatabaseArrayValue *ALNDatabaseArrayParameter(NSArray *_Nullable items);
+FOUNDATION_EXPORT ALNDatabaseResult *_Nonnull ALNDatabaseResultFromRows(
+    NSArray<NSDictionary *> *_Nullable rows);
 FOUNDATION_EXPORT NSDictionary<NSString *, id> *_Nullable ALNDatabaseFirstRow(
     NSArray<NSDictionary *> *_Nullable rows);
 FOUNDATION_EXPORT id _Nullable ALNDatabaseScalarValueFromRow(
@@ -96,6 +151,31 @@ FOUNDATION_EXPORT id _Nullable ALNDatabaseExecuteScalarQuery(id<ALNDatabaseConne
                                                              NSArray *_Nullable parameters,
                                                              NSString *_Nullable columnName,
                                                              NSError *_Nullable *_Nullable error);
+FOUNDATION_EXPORT ALNDatabaseResult *_Nullable ALNDatabaseExecuteQueryResult(
+    id<ALNDatabaseConnection> connection,
+    NSString *sql,
+    NSArray *_Nullable parameters,
+    NSError *_Nullable *_Nullable error);
+FOUNDATION_EXPORT NSInteger ALNDatabaseExecuteCommandBatch(id<ALNDatabaseConnection> connection,
+                                                           NSString *sql,
+                                                           NSArray<NSArray *> *_Nullable parameterSets,
+                                                           NSError *_Nullable *_Nullable error);
+FOUNDATION_EXPORT BOOL ALNDatabaseConnectionSupportsSavepoints(
+    id<ALNDatabaseConnection> connection);
+FOUNDATION_EXPORT BOOL ALNDatabaseCreateSavepoint(id<ALNDatabaseConnection> connection,
+                                                  NSString *name,
+                                                  NSError *_Nullable *_Nullable error);
+FOUNDATION_EXPORT BOOL ALNDatabaseRollbackToSavepoint(id<ALNDatabaseConnection> connection,
+                                                      NSString *name,
+                                                      NSError *_Nullable *_Nullable error);
+FOUNDATION_EXPORT BOOL ALNDatabaseReleaseSavepoint(id<ALNDatabaseConnection> connection,
+                                                   NSString *name,
+                                                   NSError *_Nullable *_Nullable error);
+FOUNDATION_EXPORT BOOL ALNDatabaseWithSavepoint(
+    id<ALNDatabaseConnection> connection,
+    NSString *name,
+    BOOL (^block)(NSError *_Nullable *_Nullable error),
+    NSError *_Nullable *_Nullable error);
 
 NS_ASSUME_NONNULL_END
 

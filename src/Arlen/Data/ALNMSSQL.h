@@ -32,9 +32,21 @@ typedef NS_ENUM(NSInteger, ALNMSSQLErrorCode) {
                                             error:(NSError *_Nullable *_Nullable)error;
 
 - (void)close;
+- (nullable ALNDatabaseResult *)executeQueryResult:(NSString *)sql
+                                        parameters:(NSArray *)parameters
+                                             error:(NSError *_Nullable *_Nullable)error;
+- (NSInteger)executeCommandBatch:(NSString *)sql
+                   parameterSets:(NSArray<NSArray *> *)parameterSets
+                           error:(NSError *_Nullable *_Nullable)error;
 - (BOOL)beginTransaction:(NSError *_Nullable *_Nullable)error;
 - (BOOL)commitTransaction:(NSError *_Nullable *_Nullable)error;
 - (BOOL)rollbackTransaction:(NSError *_Nullable *_Nullable)error;
+- (BOOL)createSavepointNamed:(NSString *)name error:(NSError *_Nullable *_Nullable)error;
+- (BOOL)rollbackToSavepointNamed:(NSString *)name error:(NSError *_Nullable *_Nullable)error;
+- (BOOL)releaseSavepointNamed:(NSString *)name error:(NSError *_Nullable *_Nullable)error;
+- (BOOL)withSavepointNamed:(NSString *)name
+                usingBlock:(BOOL (^)(NSError *_Nullable *_Nullable error))block
+                     error:(NSError *_Nullable *_Nullable)error;
 - (nullable NSArray<NSDictionary *> *)executeBuilderQuery:(ALNSQLBuilder *)builder
                                                     error:(NSError *_Nullable *_Nullable)error;
 - (NSInteger)executeBuilderCommand:(ALNSQLBuilder *)builder
@@ -46,6 +58,7 @@ typedef NS_ENUM(NSInteger, ALNMSSQLErrorCode) {
 
 @property(nonatomic, copy, readonly) NSString *connectionString;
 @property(nonatomic, assign, readonly) NSUInteger maxConnections;
+@property(nonatomic, assign) BOOL connectionLivenessChecksEnabled;
 
 + (NSDictionary<NSString *, id> *)capabilityMetadata;
 
@@ -56,6 +69,12 @@ typedef NS_ENUM(NSInteger, ALNMSSQLErrorCode) {
 - (nullable ALNMSSQLConnection *)acquireConnection:(NSError *_Nullable *_Nullable)error;
 - (void)releaseConnection:(ALNMSSQLConnection *)connection;
 
+- (nullable ALNDatabaseResult *)executeQueryResult:(NSString *)sql
+                                        parameters:(NSArray *)parameters
+                                             error:(NSError *_Nullable *_Nullable)error;
+- (NSInteger)executeCommandBatch:(NSString *)sql
+                   parameterSets:(NSArray<NSArray *> *)parameterSets
+                           error:(NSError *_Nullable *_Nullable)error;
 - (nullable NSArray<NSDictionary *> *)executeBuilderQuery:(ALNSQLBuilder *)builder
                                                     error:(NSError *_Nullable *_Nullable)error;
 - (NSInteger)executeBuilderCommand:(ALNSQLBuilder *)builder

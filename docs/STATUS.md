@@ -4,6 +4,15 @@ Last updated: 2026-03-26
 
 ## Completed Today (2026-03-26)
 
+- Completed the Phase 20J-20K execution-ergonomics and backend-tier closeout:
+  - added `ALNDatabaseResult` / `ALNDatabaseRow` and generic
+    query-result/batch/savepoint helpers without replacing the existing row
+    array contract
+  - exposed bounded batch execution and explicit savepoints on PostgreSQL and
+    MSSQL connections, plus adapter-level result convenience methods
+  - added backend `support_tier` metadata, MSSQL checkout liveness checks,
+    rollback-on-release pool hygiene, and backend-split phase20 confidence
+    artifacts
 - Completed the Phase 20G-20I follow-on depth slice:
   - preserved relation kind/read-only metadata end-to-end and made generated
     schema codegen view-safe on the write path
@@ -215,11 +224,11 @@ entries, not current plan-of-record items.
 - Phase 19: complete (`19A-19F` delivered on 2026-03-14 for incremental
   GNUmake/GNUstep build-graph narrowing, generated-template object reuse, and
   clearer `boomhauer` build scope/progress)
-- Phase 20: extended (`20A-20I` complete on 2026-03-26 for typed codecs/live
-  rows, recursive nested dialect compilation, lightweight result helpers,
+- Phase 20: complete (`20A-20K` complete on 2026-03-26 for typed codecs/live
+  rows, recursive nested dialect compilation, result/savepoint ergonomics,
   reflection/codegen alignment, routing/pool hardening, relation-kind-safe
-  reflection, richer type parity, and inspector-v2 metadata; `20J-20K`
-  planned for result/savepoint ergonomics and backend support-tier hardening)
+  reflection, richer type parity, inspector-v2 metadata, backend support
+  tiers, and MSSQL operational baseline hardening)
 
 ## Completed Today (2026-03-26)
 

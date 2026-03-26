@@ -82,6 +82,9 @@ typedef void (^ALNPgQueryDiagnosticsListener)(NSDictionary<NSString *, id> *even
 - (nullable NSArray<NSDictionary *> *)executeQuery:(NSString *)sql
                                          parameters:(NSArray *)parameters
                                               error:(NSError *_Nullable *_Nullable)error;
+- (nullable ALNDatabaseResult *)executeQueryResult:(NSString *)sql
+                                        parameters:(NSArray *)parameters
+                                             error:(NSError *_Nullable *_Nullable)error;
 
 - (nullable NSDictionary *)executeQueryOne:(NSString *)sql
                                 parameters:(NSArray *)parameters
@@ -90,6 +93,9 @@ typedef void (^ALNPgQueryDiagnosticsListener)(NSDictionary<NSString *, id> *even
 - (NSInteger)executeCommand:(NSString *)sql
                  parameters:(NSArray *)parameters
                       error:(NSError *_Nullable *_Nullable)error;
+- (NSInteger)executeCommandBatch:(NSString *)sql
+                   parameterSets:(NSArray<NSArray *> *)parameterSets
+                           error:(NSError *_Nullable *_Nullable)error;
 
 - (nullable NSArray<NSDictionary *> *)executePreparedQueryNamed:(NSString *)name
                                                      parameters:(NSArray *)parameters
@@ -102,6 +108,12 @@ typedef void (^ALNPgQueryDiagnosticsListener)(NSDictionary<NSString *, id> *even
 - (BOOL)beginTransaction:(NSError *_Nullable *_Nullable)error;
 - (BOOL)commitTransaction:(NSError *_Nullable *_Nullable)error;
 - (BOOL)rollbackTransaction:(NSError *_Nullable *_Nullable)error;
+- (BOOL)createSavepointNamed:(NSString *)name error:(NSError *_Nullable *_Nullable)error;
+- (BOOL)rollbackToSavepointNamed:(NSString *)name error:(NSError *_Nullable *_Nullable)error;
+- (BOOL)releaseSavepointNamed:(NSString *)name error:(NSError *_Nullable *_Nullable)error;
+- (BOOL)withSavepointNamed:(NSString *)name
+                usingBlock:(BOOL (^)(NSError *_Nullable *_Nullable error))block
+                     error:(NSError *_Nullable *_Nullable)error;
 
 - (nullable NSArray<NSDictionary *> *)executeBuilderQuery:(ALNSQLBuilder *)builder
                                                      error:(NSError *_Nullable *_Nullable)error;
@@ -138,12 +150,18 @@ typedef void (^ALNPgQueryDiagnosticsListener)(NSDictionary<NSString *, id> *even
 - (nullable NSArray<NSDictionary *> *)executeQuery:(NSString *)sql
                                          parameters:(NSArray *)parameters
                                               error:(NSError *_Nullable *_Nullable)error;
+- (nullable ALNDatabaseResult *)executeQueryResult:(NSString *)sql
+                                        parameters:(NSArray *)parameters
+                                             error:(NSError *_Nullable *_Nullable)error;
 - (nullable NSArray<NSDictionary *> *)executeBuilderQuery:(ALNSQLBuilder *)builder
                                                      error:(NSError *_Nullable *_Nullable)error;
 
 - (NSInteger)executeCommand:(NSString *)sql
                  parameters:(NSArray *)parameters
                       error:(NSError *_Nullable *_Nullable)error;
+- (NSInteger)executeCommandBatch:(NSString *)sql
+                   parameterSets:(NSArray<NSArray *> *)parameterSets
+                           error:(NSError *_Nullable *_Nullable)error;
 - (NSInteger)executeBuilderCommand:(ALNSQLBuilder *)builder
                               error:(NSError *_Nullable *_Nullable)error;
 

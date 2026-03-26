@@ -414,6 +414,11 @@ metadata or lifecycle behavior.
 
 New internal seams and defaults:
 
+- result/execution helpers now include:
+  - `ALNDatabaseResult` / `ALNDatabaseRow`
+  - `ALNDatabaseExecuteQueryResult`
+  - `ALNDatabaseExecuteCommandBatch`
+  - `ALNDatabaseWithSavepoint`
 - reflection/codegen now go through `ALNDatabaseInspector`
   - PostgreSQL-first implementation: `ALNPostgresInspector`
   - normalized column fields:
@@ -432,6 +437,11 @@ New internal seams and defaults:
   - checkout liveness checks via `connectionLivenessChecksEnabled`
   - stale idle connection recycle behavior
   - prepared-statement cache eviction instead of permanent saturation
+- `ALNMSSQL` now supports:
+  - bounded batch execution on one acquired connection
+  - explicit savepoints with no-op release normalization for SQL Server
+  - optional checkout liveness checks when ODBC transport is present
+  - support-tier metadata that makes the subset-vs-unavailable distinction explicit
 
 Focused examples:
 
@@ -460,6 +470,21 @@ router.readFallbackPolicy = ALNDatabaseReadFallbackPolicyConnectivityErrors;
 db.connectionLivenessChecksEnabled = YES;
 ```
 
+```objc
+NSError *error = nil;
+ALNDatabaseResult *result =
+    ALNDatabaseExecuteQueryResult(connection,
+                                  @"SELECT COUNT(*) AS count FROM users WHERE status = $1",
+                                  @[ @"active" ],
+                                  &error);
+NSNumber *count = [result scalarValueForColumn:@"count" error:&error];
+BOOL ok = ALNDatabaseWithSavepoint(connection, @"phase20_inner", ^BOOL(NSError **blockError) {
+  return ([connection executeCommand:@"INSERT INTO users (name) VALUES ($1)"
+                          parameters:@[ @"hank" ]
+                               error:blockError] >= 0);
+}, &error);
+```
+
 Confidence pack:
 
 - `make phase20-confidence`
@@ -467,3 +492,4 @@ Confidence pack:
 - machine fixtures:
   - `tests/fixtures/phase20/postgres_reflection_contract.json`
   - `tests/fixtures/phase20/postgres_type_codec_contract.json`
+  - `tests/fixtures/phase20/backend_support_matrix.json`

@@ -660,7 +660,7 @@ Lifecycle diagnostics:
 - `make phase15-confidence`: run the Phase 15 auth UI confidence gate and generate artifacts in `build/release_confidence/phase15`
 - `make phase16-confidence`: run the Phase 16 module-maturity confidence gate and generate artifacts in `build/release_confidence/phase16`
 - `make phase19-confidence`: run the Phase 19 incremental build-graph confidence gate and generate artifacts in `build/release_confidence/phase19`
-- `make phase20-confidence`: generate Phase 20 reflection/type-codec/routing hardening confidence artifacts in `build/release_confidence/phase20`
+- `make phase20-confidence`: generate Phase 20 reflection/type-codec/backend-tier confidence artifacts in `build/release_confidence/phase20`
 - `tools/ci/run_phase5e_quality.sh`: explicit Phase 5E CI gate entrypoint
 - `tools/ci/run_phase5e_sanitizers.sh`: explicit Phase 5E sanitizer CI gate entrypoint
   - remains the explicit Phase 9H-style blocking lane for ASan/UBSan unit + runtime/data-layer checks plus Phase 9H confidence artifact generation under `build/release_confidence/phase9h`

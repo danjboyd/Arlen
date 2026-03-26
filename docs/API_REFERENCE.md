@@ -10,9 +10,9 @@ python3 tools/docs/generate_api_reference.py
 
 - Generated from source headers and metadata (deterministic output)
 - Public headers: `53`
-- Symbols: `90`
-- Public methods: `579`
-- Public properties: `193`
+- Symbols: `92`
+- Public methods: `616`
+- Public properties: `198`
 
 ## API Surface Boundary
 
@@ -79,7 +79,9 @@ python3 tools/docs/generate_api_reference.py
 - [ALNDatabaseConnection](api/ALNDatabaseConnection.md): Database-connection protocol defining query/command primitives used by adapters and routers.
 - [ALNDatabaseInspector](api/ALNDatabaseInspector.md): Data-layer APIs for SQL composition, adapters, and migration/runtime operations.
 - [ALNDatabaseJSONValue](api/ALNDatabaseJSONValue.md): Data-layer APIs for SQL composition, adapters, and migration/runtime operations.
+- [ALNDatabaseResult](api/ALNDatabaseResult.md): Data-layer APIs for SQL composition, adapters, and migration/runtime operations.
 - [ALNDatabaseRouter](api/ALNDatabaseRouter.md): Read/write routing layer that selects database targets by operation class and routing context.
+- [ALNDatabaseRow](api/ALNDatabaseRow.md): Data-layer APIs for SQL composition, adapters, and migration/runtime operations.
 - [ALNDisplayGroup](api/ALNDisplayGroup.md): DisplayGroup-style query helper that builds list fetches from filter and sort descriptors.
 - [ALNGDL2Adapter](api/ALNGDL2Adapter.md): Optional GDL2 compatibility adapter with fallback behavior when native GDL2 runtime is unavailable.
 - [ALNMSSQL](api/ALNMSSQL.md): Data-layer APIs for SQL composition, adapters, and migration/runtime operations.

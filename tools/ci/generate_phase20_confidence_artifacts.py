@@ -131,6 +131,33 @@ def summarize_capabilities(capability_fixture: Dict[str, Any]) -> Dict[str, Any]
     }
 
 
+def summarize_backend_support_matrix(matrix_fixture: Dict[str, Any]) -> Dict[str, Any]:
+    backends = matrix_fixture.get("backends", {})
+    if not isinstance(backends, dict):
+        backends = {}
+
+    summary: Dict[str, Any] = {}
+    for name, metadata in sorted(backends.items()):
+        if not isinstance(metadata, dict):
+            continue
+        summary[name] = {
+            "adapter": metadata.get("adapter", ""),
+            "support_tier": metadata.get("support_tier", ""),
+            "transport_available": metadata.get("transport_available"),
+            "supports_connection_liveness_checks": metadata.get(
+                "supports_connection_liveness_checks"
+            ),
+            "supports_result_wrappers": metadata.get("supports_result_wrappers"),
+            "supports_savepoints": metadata.get("supports_savepoints"),
+            "batch_execution_mode": metadata.get("batch_execution_mode", ""),
+            "savepoint_release_mode": metadata.get("savepoint_release_mode", ""),
+        }
+    return {
+        "version": matrix_fixture.get("version", ""),
+        "backends": summary,
+    }
+
+
 def run_live_probe(dsn: str | None) -> Dict[str, Any]:
     if not dsn:
         return {
@@ -191,6 +218,7 @@ def render_markdown(
     reflection_summary: Dict[str, Any],
     codec_summary: Dict[str, Any],
     capability_summary: Dict[str, Any],
+    backend_support_summary: Dict[str, Any],
     live_probe: Dict[str, Any],
     output_dir: Path,
 ) -> str:
@@ -205,6 +233,7 @@ def render_markdown(
     lines.append("- `reflection_contract_summary.json`")
     lines.append("- `type_codec_contract_summary.json`")
     lines.append("- `data_layer_capability_phase20_snapshot.json`")
+    lines.append("- `backend_support_matrix_snapshot.json`")
     lines.append("- `live_probe_status.json`")
     lines.append("- `phase20_release_confidence.md`")
     lines.append("")
@@ -227,6 +256,16 @@ def render_markdown(
           f"- `{name}`: liveness=`{metadata.get('supports_connection_liveness_checks')}`, "
           f"prepared-cache-eviction=`{metadata.get('prepared_statement_cache_eviction', '')}`"
       )
+    lines.append("")
+    lines.append("## Backend Support Tiers")
+    lines.append("")
+    for name, metadata in sorted(backend_support_summary.get("backends", {}).items()):
+        lines.append(
+            f"- `{name}`: tier=`{metadata.get('support_tier', '')}`, "
+            f"savepoints=`{metadata.get('supports_savepoints')}`, "
+            f"result-wrappers=`{metadata.get('supports_result_wrappers')}`, "
+            f"liveness=`{metadata.get('supports_connection_liveness_checks')}`"
+        )
     lines.append("")
     lines.append("## Live Probe")
     lines.append("")
@@ -277,10 +316,14 @@ def main() -> int:
     capability_fixture = load_json(
         repo_root / "tests/fixtures/phase5a/adapter_capabilities.json"
     )
+    backend_support_fixture = load_json(
+        repo_root / "tests/fixtures/phase20/backend_support_matrix.json"
+    )
 
     reflection_summary = summarize_reflection(reflection_fixture)
     codec_summary = summarize_codecs(codec_fixture)
     capability_summary = summarize_capabilities(capability_fixture)
+    backend_support_summary = summarize_backend_support_matrix(backend_support_fixture)
     live_probe = run_live_probe(args.dsn)
 
     generated_at = datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
@@ -305,6 +348,12 @@ def main() -> int:
         "commit": commit_sha,
         **capability_summary,
     }
+    backend_support_payload = {
+        "version": version,
+        "generated_at": generated_at,
+        "commit": commit_sha,
+        **backend_support_summary,
+    }
     live_probe_payload = {
         "version": version,
         "generated_at": generated_at,
@@ -316,6 +365,7 @@ def main() -> int:
     reflection_path = output_dir / "reflection_contract_summary.json"
     codec_path = output_dir / "type_codec_contract_summary.json"
     capability_path = output_dir / "data_layer_capability_phase20_snapshot.json"
+    backend_support_path = output_dir / "backend_support_matrix_snapshot.json"
     live_probe_path = output_dir / "live_probe_status.json"
     markdown_path = output_dir / "phase20_release_confidence.md"
     manifest_path = output_dir / "manifest.json"
@@ -323,6 +373,7 @@ def main() -> int:
     write_json(reflection_path, reflection_payload)
     write_json(codec_path, codec_payload)
     write_json(capability_path, capability_payload)
+    write_json(backend_support_path, backend_support_payload)
     write_json(live_probe_path, live_probe_payload)
 
     markdown = render_markdown(
@@ -331,6 +382,7 @@ def main() -> int:
         reflection_summary,
         codec_summary,
         capability_summary,
+        backend_support_summary,
         live_probe,
         output_dir,
     )
@@ -344,6 +396,7 @@ def main() -> int:
             reflection_path.name,
             codec_path.name,
             capability_path.name,
+            backend_support_path.name,
             live_probe_path.name,
             markdown_path.name,
         ],

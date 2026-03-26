@@ -1,6 +1,6 @@
 # Arlen Phase 20 Roadmap
 
-Status: Extended (`20A-20I` delivered on 2026-03-26; `20J-20K` planned)
+Status: Complete (`20A-20K` delivered on 2026-03-26)
 Last updated: 2026-03-26
 
 Related docs:
@@ -163,12 +163,18 @@ does not include ORM features.
   - widened `ALNDatabaseInspector` to inspector-v2 metadata for relations,
     primary keys, unique constraints, foreign keys, and indexes
   - added deterministic fixtures/tests for the expanded normalized metadata
-- `20J`: planned
-  - add lightweight result/execution ergonomics without widening Arlen into an
-    ORM or streaming-heavy API
-- `20K`: planned
-  - make PostgreSQL-vs-MSSQL support tiers and minimum operational guarantees
-    explicit, tested, and less surprising
+- `20J`: complete on 2026-03-26
+  - added `ALNDatabaseResult` / `ALNDatabaseRow` plus generic
+    query-result/scalar/savepoint helpers without changing the underlying
+    `NSArray<NSDictionary *>` contract
+  - added bounded batch execution helpers on Pg and MSSQL and explicit
+    savepoint helpers on both connections
+- `20K`: complete on 2026-03-26
+  - added explicit backend `support_tier` capability metadata and documented
+    savepoint/liveness asymmetry between PostgreSQL, GDL2 fallback, and MSSQL
+  - raised MSSQL to a clearer operational subset with checkout liveness checks,
+    pooled rollback-on-release behavior, and phase20 confidence artifacts that
+    show backend tiers directly
 
 ## 4. Scope Guardrails
 
@@ -461,7 +467,7 @@ Acceptance (required):
 
 ## 5.10 Phase 20J: Result Objects + Execution Ergonomics
 
-Status: planned
+Status: complete on 2026-03-26
 
 Deliverables:
 
@@ -480,6 +486,20 @@ Deliverables:
 - Keep streaming cursors, ORM-style identity tracking, and lazy unit-of-work
   behavior out of scope for this phase.
 
+Delivered:
+
+- added `ALNDatabaseResult` and `ALNDatabaseRow` on top of row arrays, with
+  `first`, `one`, `oneOrNil`, `scalarValueForColumn:error:`, keyed row access,
+  and dictionary passthrough
+- added generic helpers
+  `ALNDatabaseExecuteQueryResult`, `ALNDatabaseExecuteCommandBatch`,
+  `ALNDatabaseCreateSavepoint`, `ALNDatabaseRollbackToSavepoint`,
+  `ALNDatabaseReleaseSavepoint`, and `ALNDatabaseWithSavepoint`
+- exposed concrete convenience methods on `ALNPg`, `ALNPgConnection`,
+  `ALNMSSQL`, and `ALNMSSQLConnection` for result objects, bounded batch
+  execution, and savepoints
+- kept the underlying `NSArray<NSDictionary *>` execution contract unchanged
+
 Acceptance (required):
 
 - common single-row and scalar flows no longer require manual array/dictionary
@@ -491,7 +511,7 @@ Acceptance (required):
 
 ## 5.11 Phase 20K: Backend Parity Contracts + MSSQL Operational Baseline
 
-Status: planned
+Status: complete on 2026-03-26
 
 Deliverables:
 
@@ -507,6 +527,20 @@ Deliverables:
   subset guarantees are independently visible.
 - Tighten docs and release gates so unsupported or unavailable MSSQL features
   fail loudly instead of reading like silent omissions.
+
+Delivered:
+
+- added `support_tier`, savepoint, batch, result-wrapper, and liveness
+  metadata to the shipped backend capability contracts
+- marked PostgreSQL as `first_class`, GDL2 fallback as `supported_subset`,
+  MSSQL as `supported_subset` when ODBC transport is present, and
+  `unavailable_at_build_time` when it is not
+- added MSSQL pooled checkout liveness checks plus rollback-on-release of
+  active pooled transactions so the documented subset is operationally less
+  surprising
+- extended `phase20-confidence` with `backend_support_matrix_snapshot.json`
+  so PostgreSQL depth and MSSQL/GDL2 subset guarantees are visible alongside
+  the reflection/type-codec artifacts
 
 Acceptance (required):
 
