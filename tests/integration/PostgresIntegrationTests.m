@@ -491,9 +491,11 @@
   NSString *implPath = [appRoot stringByAppendingPathComponent:@"src/Generated/ALNDBSchema.m"];
   NSString *smokeSourcePath = [appRoot stringByAppendingPathComponent:@"phase5d_typed_contracts_smoke.m"];
   NSString *smokeBinaryPath = [appRoot stringByAppendingPathComponent:@"phase5d_typed_contracts_smoke"];
+  NSString *escapedDSN = [dsn stringByReplacingOccurrencesOfString:@"\"" withString:@"\\\""];
   NSString *smokeSource =
       [NSString stringWithFormat:
                     @"#import <Foundation/Foundation.h>\n"
+                     "#import \"ALNPg.h\"\n"
                      "#import \"ALNSQLBuilder.h\"\n"
                      "#import \"ALNDBSchema.h\"\n"
                      "\n"
@@ -508,23 +510,39 @@
                      "    if (built == nil || error != nil) {\n"
                      "      return 1;\n"
                      "    }\n"
-                     "    %@ *decoded = [%@ decodeTypedRow:@{ @\"id\" : @\"u-1\", @\"age\" : @42 } error:&error];\n"
-                     "    if (decoded == nil || error != nil) {\n"
+                     "    ALNPg *database = [[ALNPg alloc] initWithConnectionString:@\"%@\" maxConnections:2 error:&error];\n"
+                     "    if (database == nil || error != nil) {\n"
                      "      return 2;\n"
+                     "    }\n"
+                     "    NSInteger inserted = [database executeCommand:@\"INSERT INTO %@ (id, age) VALUES ($1, $2)\"\n"
+                     "                                      parameters:@[ @\"u-1\", @42 ]\n"
+                     "                                           error:&error];\n"
+                     "    if (inserted != 1 || error != nil) {\n"
+                     "      return 3;\n"
+                     "    }\n"
+                     "    NSArray<NSDictionary *> *rows = [database executeQuery:@\"SELECT id, age FROM %@ WHERE id = $1\"\n"
+                     "                                                 parameters:@[ @\"u-1\" ]\n"
+                     "                                                      error:&error];\n"
+                     "    if (rows == nil || error != nil) {\n"
+                     "      return 4;\n"
+                     "    }\n"
+                     "    %@ *decoded = [%@ decodeTypedFirstRowFromRows:rows error:&error];\n"
+                     "    if (decoded == nil || error != nil || ![decoded.columnAge isEqual:@42]) {\n"
+                     "      return 5;\n"
                      "    }\n"
                      "    error = nil;\n"
                      "    decoded = [%@ decodeTypedRow:@{ @\"id\" : @42 } error:&error];\n"
                      "    if (decoded != nil || error == nil) {\n"
-                     "      return 3;\n"
+                     "      return 6;\n"
                      "    }\n"
                      "    if (![error.domain isEqualToString:ALNDBSchemaTypedDecodeErrorDomain]) {\n"
-                     "      return 4;\n"
+                     "      return 7;\n"
                      "    }\n"
                      "    fprintf(stdout, \"phase5d-typed-contracts-ok\\n\");\n"
                      "  }\n"
                      "  return 0;\n"
                      "}\n",
-                    insertClassName, insertClassName, className, rowClassName, className, className];
+                    insertClassName, insertClassName, className, escapedDSN, table, table, rowClassName, className, className];
   XCTAssertTrue([smokeSource writeToFile:smokeSourcePath
                               atomically:YES
                                 encoding:NSUTF8StringEncoding
@@ -532,10 +550,14 @@
   XCTAssertNil(error);
 
   NSString *compileCommand = [NSString stringWithFormat:
-      @"source /usr/GNUstep/System/Library/Makefiles/GNUstep.sh && clang $(gnustep-config --objc-flags) "
-       "-fobjc-arc -I%@/src/Arlen -I%@/src/Arlen/Data -I%@/src/Generated %@ %@ %@/src/Arlen/Data/ALNSQLBuilder.m "
+       @"source /usr/GNUstep/System/Library/Makefiles/GNUstep.sh && clang $(gnustep-config --objc-flags) "
+       "-fobjc-arc -I%@/src/Arlen -I%@/src/Arlen/Data -I%@/src/Arlen/Support -I%@/src/Generated %@ %@ "
+       "%@/src/Arlen/Data/ALNDatabaseAdapter.m %@/src/Arlen/Data/ALNPg.m %@/src/Arlen/Data/ALNSQLBuilder.m "
+       "%@/src/Arlen/Data/ALNPostgresDialect.m %@/src/Arlen/Support/ALNJSONSerialization.m "
+       "%@/src/Arlen/Support/third_party/yyjson/yyjson.c "
        "-o %@ $(gnustep-config --base-libs) -ldl -lcrypto",
-      repoRoot, repoRoot, appRoot, smokeSourcePath, implPath, repoRoot, smokeBinaryPath];
+      repoRoot, repoRoot, repoRoot, appRoot, smokeSourcePath, implPath, repoRoot, repoRoot, repoRoot, repoRoot, repoRoot,
+      repoRoot, smokeBinaryPath];
   NSString *compileOutput = [self runShellCapture:compileCommand exitCode:&code];
   XCTAssertEqual(0, code, @"%@", compileOutput);
 

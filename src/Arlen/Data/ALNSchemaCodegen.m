@@ -108,9 +108,16 @@ static NSDictionary<NSString *, NSString *> *ALNSchemaCodegenTypeDescriptor(NSSt
       @"displayType" : normalized,
     };
   }
+  if ([normalized hasPrefix:@"timestamp"] || [normalized isEqualToString:@"date"]) {
+    return @{
+      @"objcType" : @"NSDate *",
+      @"runtimeClass" : @"NSDate",
+      @"propertyAttribute" : @"copy",
+      @"displayType" : ([normalized length] > 0 ? normalized : @"date"),
+    };
+  }
   if ([normalized isEqualToString:@"uuid"] || [normalized isEqualToString:@"text"] ||
       [normalized hasPrefix:@"character"] || [normalized hasSuffix:@"time zone"] ||
-      [normalized hasPrefix:@"timestamp"] || [normalized isEqualToString:@"date"] ||
       [normalized isEqualToString:@"time"] || [normalized isEqualToString:@"inet"] ||
       [normalized isEqualToString:@"cidr"] || [normalized isEqualToString:@"macaddr"]) {
     return @{
@@ -543,6 +550,9 @@ static NSString *ALNSchemaCodegenJSONEscape(NSString *value) {
       [header appendFormat:@"+ (nullable %@ *)decodeTypedRow:(NSDictionary<NSString *, id> *)row\n",
                            rowClassName];
       [header appendString:@"                            error:(NSError *_Nullable *_Nullable)error;\n"];
+      [header appendFormat:@"+ (nullable %@ *)decodeTypedFirstRowFromRows:(NSArray<NSDictionary<NSString *, id> *> *)rows\n",
+                           rowClassName];
+      [header appendString:@"                                      error:(NSError *_Nullable *_Nullable)error;\n"];
       [header appendFormat:@"+ (nullable NSArray<%@ *> *)decodeTypedRows:(NSArray<NSDictionary<NSString *, id> *> *)rows\n",
                            rowClassName];
       [header appendString:@"                                      error:(NSError *_Nullable *_Nullable)error;\n"];
@@ -745,6 +755,22 @@ static NSString *ALNSchemaCodegenJSONEscape(NSString *value) {
         decodeInitIndex += 1;
       }
       [implementation appendString:@"];\n"];
+      [implementation appendString:@"}\n\n"];
+      [implementation appendFormat:@"+ (nullable %@ *)decodeTypedFirstRowFromRows:(NSArray<NSDictionary<NSString *, id> *> *)rows\n",
+                                   rowClassName];
+      [implementation appendString:@"                                      error:(NSError **)error {\n"];
+      [implementation appendString:@"  if (![rows isKindOfClass:[NSArray class]]) {\n"];
+      [implementation appendString:@"    if (error != NULL) {\n"];
+      [implementation appendFormat:@"      *error = %@( %@InvalidType, @\"rows\", @\"NSArray\", @\"typed rows must be an array\");\n",
+                                   typedDecodeErrorFunctionName,
+                                   typedDecodeErrorEnumName];
+      [implementation appendString:@"    }\n"];
+      [implementation appendString:@"    return nil;\n"];
+      [implementation appendString:@"  }\n"];
+      [implementation appendString:@"  if ([rows count] == 0) {\n"];
+      [implementation appendString:@"    return nil;\n"];
+      [implementation appendString:@"  }\n"];
+      [implementation appendString:@"  return [self decodeTypedRow:rows[0] error:error];\n"];
       [implementation appendString:@"}\n\n"];
       [implementation appendFormat:@"+ (nullable NSArray<%@ *> *)decodeTypedRows:(NSArray<NSDictionary<NSString *, id> *> *)rows\n",
                                    rowClassName];

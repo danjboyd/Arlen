@@ -46,7 +46,7 @@ Then open `build/browser-error-audit/index.html`.
 - [Password Hashing](PASSWORD_HASHING.md): Argon2id password hashing API, defaults, and rehash workflow.
 - [Realtime and Composition](REALTIME_COMPOSITION.md): websocket/SSE contracts, pubsub hub, and app mounting.
 - [Ecosystem Services](ECOSYSTEM_SERVICES.md): jobs/cache/i18n/mail/attachment adapter contracts and plugin wiring.
-- [ArlenData Reuse Guide](ARLEN_DATA.md): standalone data-layer packaging, PostgreSQL/MSSQL dialect usage, and versioning policy.
+- [ArlenData Reuse Guide](ARLEN_DATA.md): standalone data-layer packaging, PostgreSQL/MSSQL dialect usage, typed PostgreSQL result materialization, and result-helper guidance.
 - [SQL Builder Conformance Matrix](SQL_BUILDER_CONFORMANCE_MATRIX.md): phase-4 SQL snapshot matrix and regression gate map.
 - [Phase 5A Reliability Contracts](PHASE5A_RELIABILITY_CONTRACTS.md): contract map, external regression intake workflow, and adapter capability metadata baselines.
 - [Phase 5B Runtime Routing](PHASE5B_RUNTIME_ROUTING.md): multi-database read/write routing, scoped stickiness, and diagnostics contracts.
@@ -118,6 +118,7 @@ Then open `build/browser-error-audit/index.html`.
 - [Phase 17 Roadmap](PHASE17_ROADMAP.md)
 - [Phase 18 Roadmap](PHASE18_ROADMAP.md)
 - [Phase 19 Roadmap](PHASE19_ROADMAP.md)
+- [Phase 20 Roadmap](PHASE20_ROADMAP.md): current data-layer depth pass; `20A-20C` delivered and `20D-20F` remain pending.
 - [Comparative Benchmarking](COMPARATIVE_BENCHMARKING.md)
 - [Competitive Benchmark Roadmap](COMPETITIVE_BENCHMARK_ROADMAP.md)
 - [Phase B Parity Checklist (FastAPI)](PHASEB_PARITY_CHECKLIST_FASTAPI.md)

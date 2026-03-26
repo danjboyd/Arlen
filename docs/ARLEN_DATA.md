@@ -17,7 +17,7 @@ Primary contracts:
 - `ALNPostgresSQLBuilder` (PostgreSQL dialect extension for conflict/upsert, including expression-based `DO UPDATE SET` and optional `DO UPDATE ... WHERE`)
 - `ALNMSSQL` (optional SQL Server adapter with runtime ODBC loading; no hard core dependency on Microsoft's driver)
 - `ALNSchemaCodegen` (deterministic typed schema helper artifact rendering)
-- `ALNPg` builder execution/caching/diagnostics APIs (`executeBuilderQuery`, `executeBuilderCommand`, query stage listener events)
+- `ALNPg` builder execution/caching/diagnostics and typed PostgreSQL bind/result APIs (`executeBuilderQuery`, `executeBuilderCommand`, query stage listener events)
 - `ALNDatabaseAdapter` / `ALNDatabaseConnection`
 - `ALNDatabaseRouter` (multi-target runtime routing with stickiness and diagnostics)
 - `ALNDisplayGroup`
@@ -185,10 +185,84 @@ Generated table APIs expose:
 
 - typed table-level builder entrypoints (`selectAll`, `selectColumns`, `insertValues`, `updateValues`, `deleteBuilder`)
 - typed column accessor methods (`columnX`, `qualifiedColumnX`)
+- typed decode helpers (`decodeTypedRow`, `decodeTypedFirstRowFromRows`, `decodeTypedRows`)
 
 Consumers can include generated files in non-Arlen builds as long as `ALNSQLBuilder` is linked.
 
-## 10. Phase 4D Query Execution Diagnostics + Caching
+## 10. Phase 20A-C Typed Materialization + Result Helpers
+
+PostgreSQL runtime materialization now aligns with the generated typed-contract
+surface for the supported scalar baseline.
+
+Bind values accepted by `ALNPg`:
+
+- `NSString`
+- `NSNumber` (`BOOL`, integer, float/numeric inputs)
+- `NSDate`
+- `NSData`
+- `NSArray` / `NSDictionary` (JSON-encoded)
+- `NSNull`
+
+Result values returned by `ALNPg` for supported PostgreSQL column types:
+
+- `BOOL`, `smallint`, `integer`, `bigint`, `real`, `double precision`:
+  `NSNumber`
+- `numeric`: `NSDecimalNumber`
+- `date`, `timestamp`, `timestamp with time zone`: `NSDate`
+- `bytea`: `NSData`
+- `json`, `jsonb`: Foundation collection/object decoded from JSON
+- text-like and unmapped runtime types: `NSString`
+
+For mapped scalar types, decode failures now surface an explicit `NSError`
+instead of silently returning a mismatched runtime class.
+
+Common fetch helpers:
+
+```objc
+NSError *error = nil;
+NSArray<NSDictionary *> *rows =
+    [db executeQuery:@"SELECT id, created_at FROM users WHERE id = $1"
+          parameters:@[ @"u-1" ]
+               error:&error];
+NSDictionary *first = ALNDatabaseFirstRow(rows);
+id total = ALNDatabaseScalarValueFromRows(@[ @{ @"count" : @3 } ], nil, &error);
+```
+
+Contract-aware typed decode from live rows:
+
+```objc
+NSError *error = nil;
+NSArray<NSDictionary *> *rows =
+    [db executeQuery:@"SELECT id, created_at FROM users WHERE id = $1"
+          parameters:@[ @"u-1" ]
+               error:&error];
+ALNDBPublicUsersRow *user =
+    [ALNDBPublicUsersRow decodeTypedFirstRowFromRows:rows error:&error];
+```
+
+Explicit scalar execution through a pooled connection:
+
+```objc
+NSError *error = nil;
+ALNPgConnection *connection = [db acquireConnection:&error];
+NSNumber *count =
+    ALNDatabaseExecuteScalarQuery(connection,
+                                  @"SELECT COUNT(*) AS count FROM users WHERE status = $1",
+                                  @[ @"active" ],
+                                  @"count",
+                                  &error);
+[db releaseConnection:connection];
+```
+
+Nested dialect compilation is also recursive now:
+
+- `buildWithDialect:` applies the active dialect when compiling nested
+  subqueries/CTEs/set-op fragments
+- MSSQL fail-closed validation now catches unsupported nested constructs such
+  as `ILIKE`, PostgreSQL pagination syntax, and related PostgreSQL-only forms
+  inside subqueries instead of only at the root builder
+
+## 11. Phase 4D Query Execution Diagnostics + Caching
 
 `ALNPgConnection`/`ALNPg` now expose builder-driven execution helpers:
 
@@ -207,7 +281,7 @@ Runtime controls:
   - `emitDiagnosticsEventsToStderr`
   - `includeSQLInDiagnosticsEvents` (default off; redaction-safe metadata remains default)
 
-## 11. Phase 4E Conformance + Migration Hardening
+## 12. Phase 4E Conformance + Migration Hardening
 
 Conformance matrix:
 
@@ -218,6 +292,13 @@ Conformance matrix:
 Migration/deprecation docs:
 
 - `docs/SQL_BUILDER_PHASE4_MIGRATION.md`
+
+Phase 20A-20C regression coverage extends the data-layer contract with:
+
+- `tests/unit/SchemaCodegenTests.m`
+- `tests/unit/Phase17BTests.m`
+- `tests/unit/PgTests.m`
+- `tests/integration/PostgresIntegrationTests.m`
 - `docs/RELEASE_PROCESS.md` (phase-4 transitional API lifecycle)
 
 ## 12. Phase 5B Multi-Database Runtime Routing

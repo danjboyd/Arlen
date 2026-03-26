@@ -78,6 +78,37 @@
   XCTAssertTrue([[error localizedDescription] containsString:@"ILIKE"]);
 }
 
+- (void)testMSSQLDialectAppliesNestedPaginationRecursively {
+  NSError *error = nil;
+  ALNSQLBuilder *latestEvent = [ALNSQLBuilder selectFrom:@"events" columns:@[ @"user_id" ]];
+  [latestEvent orderByField:@"created_at" descending:YES];
+  [latestEvent limit:1];
+
+  ALNSQLBuilder *builder = [ALNSQLBuilder selectFrom:@"users" columns:@[ @"id" ]];
+  [builder whereField:@"id" inSubquery:latestEvent];
+
+  NSDictionary *built = [builder buildWithDialect:[ALNMSSQLDialect sharedDialect] error:&error];
+  XCTAssertNil(error);
+  XCTAssertEqualObjects(
+      @"SELECT [id] FROM [users] WHERE [id] IN (SELECT [user_id] FROM [events] ORDER BY [created_at] DESC OFFSET 0 ROWS FETCH NEXT 1 ROWS ONLY)",
+      built[@"sql"]);
+  XCTAssertEqualObjects((@[]), built[@"parameters"]);
+}
+
+- (void)testMSSQLDialectRejectsUnsupportedNestedFeatures {
+  NSError *error = nil;
+  ALNSQLBuilder *subquery = [ALNSQLBuilder selectFrom:@"events" columns:@[ @"user_id" ]];
+  [subquery whereField:@"title" operator:@"ilike" value:@"%ops%"];
+
+  ALNSQLBuilder *builder = [ALNSQLBuilder selectFrom:@"users" columns:@[ @"id" ]];
+  [builder whereField:@"id" inSubquery:subquery];
+
+  NSDictionary *built = [builder buildWithDialect:[ALNMSSQLDialect sharedDialect] error:&error];
+  XCTAssertNil(built);
+  XCTAssertEqualObjects(ALNSQLBuilderErrorDomain, error.domain);
+  XCTAssertTrue([[error localizedDescription] containsString:@"ILIKE"]);
+}
+
 - (void)testMSSQLAdapterCapabilityMetadataAndInitializationFailureAreExplicit {
   NSDictionary *metadata = [ALNMSSQL capabilityMetadata];
   XCTAssertEqualObjects(@"mssql", metadata[@"adapter"]);

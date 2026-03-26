@@ -6,6 +6,8 @@
 
 @interface ALNSQLBuilder (ALNDefaultDialectCompile)
 - (nullable NSDictionary *)aln_buildDefaultDialect:(NSError *_Nullable *_Nullable)error;
+- (nullable NSDictionary *)aln_buildDefaultDialectWithDialectContext:(nullable id<ALNSQLDialect>)dialect
+                                                               error:(NSError *_Nullable *_Nullable)error;
 @end
 
 static NSError *ALNPostgresDialectMigrationError(NSString *message, NSString *identifier) {
@@ -64,7 +66,11 @@ static NSError *ALNPostgresDialectMigrationError(NSString *message, NSString *id
     }
     return nil;
   }
-  return [builder aln_buildDefaultDialect:error];
+  return [builder aln_buildDefaultDialectWithDialectContext:self error:error];
+}
+
+- (NSDictionary *)aln_compileNestedBuilder:(ALNSQLBuilder *)builder error:(NSError **)error {
+  return [builder aln_buildDefaultDialectWithDialectContext:self error:error];
 }
 
 - (NSString *)migrationStateTableCreateSQLForTableName:(NSString *)tableName

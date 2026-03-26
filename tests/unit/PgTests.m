@@ -179,7 +179,7 @@
   NSArray *rows = [database executeQuery:@"SELECT 1::int AS value" parameters:@[] error:&error];
   XCTAssertNil(error);
   XCTAssertEqual((NSUInteger)1, [rows count]);
-  XCTAssertEqualObjects(@"1", rows[0][@"value"]);
+  XCTAssertEqualObjects(@1, rows[0][@"value"]);
 
   NSString *table = [self uniqueNameWithPrefix:@"arlen_pg_test"];
   ALNPgConnection *connection = [database acquireConnection:&error];
@@ -219,6 +219,76 @@
   (void)[connection executeCommand:[NSString stringWithFormat:@"DROP TABLE IF EXISTS %@", table]
                         parameters:@[]
                              error:nil];
+  [database releaseConnection:connection];
+}
+
+- (void)testDatabaseScalarHelpersProvideFirstRowAndExplicitColumnDiagnostics {
+  NSError *error = nil;
+  id scalar = ALNDatabaseScalarValueFromRows(@[ @{ @"count" : @3 } ], nil, &error);
+  XCTAssertNil(error);
+  XCTAssertEqualObjects(@3, scalar);
+
+  error = nil;
+  scalar = ALNDatabaseScalarValueFromRow(@{ @"left" : @1, @"right" : @2 }, nil, &error);
+  XCTAssertNil(scalar);
+  XCTAssertNotNil(error);
+  XCTAssertEqualObjects(ALNDatabaseAdapterErrorDomain, error.domain);
+  XCTAssertEqual((NSInteger)ALNDatabaseAdapterErrorInvalidResult, error.code);
+
+  error = nil;
+  scalar = ALNDatabaseScalarValueFromRow(@{ @"left" : @1, @"right" : @2 }, @"right", &error);
+  XCTAssertNil(error);
+  XCTAssertEqualObjects(@2, scalar);
+}
+
+- (void)testPostgresRowsMaterializeTypedValuesForSupportedScalarColumns {
+  NSString *dsn = [self pgTestDSN];
+  if ([dsn length] == 0) {
+    return;
+  }
+
+  NSError *error = nil;
+  ALNPg *database = [[ALNPg alloc] initWithConnectionString:dsn maxConnections:2 error:&error];
+  XCTAssertNil(error);
+  XCTAssertNotNil(database);
+  if (database == nil) {
+    return;
+  }
+
+  NSArray<NSDictionary *> *rows =
+      [database executeQuery:@"SELECT 42::integer AS age, TRUE AS is_active, 19.75::numeric AS balance, "
+                              "'2026-03-26T12:34:56Z'::timestamptz AS created_at, "
+                              "'2026-03-26'::date AS birthday, "
+                              "'{\"name\":\"hank\"}'::jsonb AS profile, "
+                              "decode('6869', 'hex')::bytea AS payload"
+                 parameters:@[]
+                      error:&error];
+  XCTAssertNil(error);
+  XCTAssertEqual((NSUInteger)1, [rows count]);
+  NSDictionary *row = rows.firstObject;
+  XCTAssertTrue([row[@"age"] isKindOfClass:[NSNumber class]]);
+  XCTAssertEqualObjects(@42, row[@"age"]);
+  XCTAssertTrue([row[@"is_active"] isKindOfClass:[NSNumber class]]);
+  XCTAssertEqualObjects(@YES, row[@"is_active"]);
+  XCTAssertTrue([row[@"balance"] isKindOfClass:[NSNumber class]]);
+  XCTAssertEqualObjects([NSDecimalNumber decimalNumberWithString:@"19.75"], row[@"balance"]);
+  XCTAssertTrue([row[@"created_at"] isKindOfClass:[NSDate class]]);
+  XCTAssertTrue([row[@"birthday"] isKindOfClass:[NSDate class]]);
+  XCTAssertTrue([row[@"profile"] isKindOfClass:[NSDictionary class]]);
+  XCTAssertEqualObjects(@"hank", row[@"profile"][@"name"]);
+  XCTAssertTrue([row[@"payload"] isKindOfClass:[NSData class]]);
+  XCTAssertEqualObjects([@"hi" dataUsingEncoding:NSUTF8StringEncoding], row[@"payload"]);
+
+  error = nil;
+  ALNPgConnection *connection = [database acquireConnection:&error];
+  XCTAssertNil(error);
+  XCTAssertNotNil(connection);
+  if (connection == nil) {
+    return;
+  }
+  id ageScalar = ALNDatabaseExecuteScalarQuery(connection, @"SELECT 7::integer AS total", @[], nil, &error);
+  XCTAssertNil(error);
+  XCTAssertEqualObjects(@7, ageScalar);
   [database releaseConnection:connection];
 }
 
@@ -273,7 +343,7 @@
                      parameters:@[]
                           error:&error] firstObject];
   XCTAssertNil(error);
-  XCTAssertEqualObjects(@"2", countRow[@"count"]);
+  XCTAssertEqualObjects(@2, countRow[@"count"]);
 
   (void)[connection executeCommand:[NSString stringWithFormat:@"DROP TABLE IF EXISTS %@", table]
                         parameters:@[]
@@ -333,7 +403,7 @@
                                         parameters:@[]
                                              error:&error] firstObject];
   XCTAssertNil(error);
-  XCTAssertEqualObjects(@"1", countRow[@"count"]);
+  XCTAssertEqualObjects(@1, countRow[@"count"]);
 
   (void)[database executeCommand:[NSString stringWithFormat:@"DROP TABLE IF EXISTS %@", table]
                       parameters:@[]
@@ -363,8 +433,8 @@
   XCTAssertEqual((NSUInteger)1, [rows count]);
   NSDictionary *row = [rows firstObject];
   XCTAssertEqualObjects(@"hank", row[@"text_value"]);
-  XCTAssertEqualObjects(@"12", row[@"int_value"]);
-  XCTAssertEqualObjects(@"1", row[@"is_null"]);
+  XCTAssertEqualObjects(@12, row[@"int_value"]);
+  XCTAssertEqualObjects(@1, row[@"is_null"]);
 
   ALNPgConnection *connection = [database acquireConnection:&error];
   XCTAssertNil(error);
@@ -387,7 +457,7 @@
   XCTAssertEqual((NSUInteger)1, [preparedRows count]);
   NSDictionary *preparedRow = [preparedRows firstObject];
   XCTAssertEqualObjects(@"select-ok", preparedRow[@"token"]);
-  XCTAssertEqualObjects(@"42", preparedRow[@"doubled"]);
+  XCTAssertEqualObjects(@42, preparedRow[@"doubled"]);
 
   [database releaseConnection:connection];
 }
@@ -605,7 +675,7 @@
                                             parameters:@[]
                                                  error:&error];
   XCTAssertNil(error);
-  NSString *expectedCount = [NSString stringWithFormat:@"%ld", (long)total];
+  NSNumber *expectedCount = @(total);
   XCTAssertEqualObjects(expectedCount, countRow[@"count"]);
 
   NSString *probeSQL = [NSString stringWithFormat:@"SELECT token, note FROM %@ WHERE token = $1", table];
@@ -871,9 +941,9 @@
   for (NSDictionary *row in windowRows) {
     windowRankByUser[row[@"user_id"]] = row[@"row_num"];
   }
-  XCTAssertEqualObjects(@"1", windowRankByUser[@"u1"]);
-  XCTAssertEqualObjects(@"2", windowRankByUser[@"u2"]);
-  XCTAssertEqualObjects(@"1", windowRankByUser[@"u3"]);
+  XCTAssertEqualObjects(@1, windowRankByUser[@"u1"]);
+  XCTAssertEqualObjects(@2, windowRankByUser[@"u2"]);
+  XCTAssertEqualObjects(@1, windowRankByUser[@"u3"]);
 
   NSDictionary *predicateScenario = scenarios[@"exists_any_all"];
   NSArray *predicateRows = [connection executeQuery:predicateScenario[@"sql"]
@@ -889,7 +959,7 @@
                                             error:&error];
   XCTAssertNil(error);
   XCTAssertEqual((NSUInteger)1, [lockingRows count]);
-  XCTAssertEqualObjects(@"1", lockingRows[0][@"id"]);
+  XCTAssertEqualObjects(@1, lockingRows[0][@"id"]);
 
   NSDictionary *upsertScenario = scenarios[@"postgres_upsert_expression"];
   NSInteger upserted = [connection executeCommand:upsertScenario[@"sql"]
@@ -904,7 +974,7 @@
                             error:&error];
   XCTAssertNil(error);
   XCTAssertEqualObjects(@"queued", upsertRow[@"state"]);
-  XCTAssertEqualObjects(@"3", upsertRow[@"attempt_count"]);
+  XCTAssertEqualObjects(@3, upsertRow[@"attempt_count"]);
   XCTAssertEqualObjects(@"2026-01-02T00:00:00Z", upsertRow[@"updated_at"]);
 
   [database releaseConnection:connection];
@@ -1223,7 +1293,7 @@
                              error:&error];
   XCTAssertNil(error);
   XCTAssertEqualObjects(@"done", first[@"state"]);
-  XCTAssertEqualObjects(@"3", first[@"attempt_count"]);
+  XCTAssertEqualObjects(@3, first[@"attempt_count"]);
   XCTAssertEqualObjects(@"2026-01-03T00:00:00Z", first[@"updated_at"]);
 
   NSDictionary *secondBuilt = [upsert build:&error];
@@ -1243,7 +1313,7 @@
                              error:&error];
   XCTAssertNil(error);
   XCTAssertEqualObjects(@"done", second[@"state"]);
-  XCTAssertEqualObjects(@"3", second[@"attempt_count"]);
+  XCTAssertEqualObjects(@3, second[@"attempt_count"]);
   XCTAssertEqualObjects(@"2026-01-03T00:00:00Z", second[@"updated_at"]);
 
   (void)[connection executeCommand:[NSString stringWithFormat:@"DROP TABLE IF EXISTS %@", table]
@@ -1451,9 +1521,9 @@
   for (NSDictionary *row in windowRows) {
     rankByUser[row[@"user_id"]] = row[@"row_num"];
   }
-  XCTAssertEqualObjects(@"1", rankByUser[@"u1"]);
-  XCTAssertEqualObjects(@"2", rankByUser[@"u2"]);
-  XCTAssertEqualObjects(@"1", rankByUser[@"u3"]);
+  XCTAssertEqualObjects(@1, rankByUser[@"u1"]);
+  XCTAssertEqualObjects(@2, rankByUser[@"u2"]);
+  XCTAssertEqualObjects(@1, rankByUser[@"u3"]);
 
   ALNSQLBuilder *eventProbe = [ALNSQLBuilder selectFrom:eventsTable alias:@"e" columns:@[ @"e.user_id" ]];
   [eventProbe whereExpression:@"e.user_id = u.id" parameters:nil];
@@ -1492,7 +1562,7 @@
   NSArray *joinRows = [connection executeQuery:joinBuilt[@"sql"] parameters:joinBuilt[@"parameters"] error:&error];
   XCTAssertNil(error);
   XCTAssertEqual((NSUInteger)1, [joinRows count]);
-  XCTAssertEqualObjects(@"1", joinRows[0][@"user_id"]);
+  XCTAssertEqualObjects(@1, joinRows[0][@"user_id"]);
   XCTAssertEqualObjects(@"default", joinRows[0][@"kind"]);
 
   ALNSQLBuilder *recentReady = [ALNSQLBuilder selectFrom:eventsTable columns:@[ @"user_id" ]];
@@ -1519,7 +1589,7 @@
   NSArray *lockRows = [connection executeQuery:lockBuilt[@"sql"] parameters:lockBuilt[@"parameters"] error:&error];
   XCTAssertNil(error);
   XCTAssertEqual((NSUInteger)1, [lockRows count]);
-  XCTAssertEqualObjects(@"1", lockRows[0][@"id"]);
+  XCTAssertEqualObjects(@1, lockRows[0][@"id"]);
 
   NSArray *dropStatements = @[
     [NSString stringWithFormat:@"DROP TABLE IF EXISTS %@", jobsTable],
@@ -1754,7 +1824,7 @@
   NSArray *recoveredRows = [recovered executeQuery:@"SELECT 1 AS value" parameters:@[] error:&error];
   XCTAssertNil(error);
   XCTAssertEqual((NSUInteger)1, [recoveredRows count]);
-  XCTAssertEqualObjects(@"1", recoveredRows[0][@"value"]);
+  XCTAssertEqualObjects(@1, recoveredRows[0][@"value"]);
   [database releaseConnection:recovered];
 }
 
@@ -1806,7 +1876,7 @@
                                                parameters:@[]
                                                     error:&error] firstObject];
   XCTAssertNil(error);
-  XCTAssertEqualObjects(@"0", countAfterAbort[@"count"]);
+  XCTAssertEqualObjects(@0, countAfterAbort[@"count"]);
 
   NSInteger insertedAfterRollback = [database executeCommand:insertSQL parameters:@[ @"ok-after-abort" ] error:&error];
   XCTAssertEqual((NSInteger)1, insertedAfterRollback);
@@ -2035,7 +2105,7 @@
                                         parameters:@[]
                                              error:&error] firstObject];
   XCTAssertNil(error);
-  XCTAssertEqualObjects(@"1", countRow[@"count"]);
+  XCTAssertEqualObjects(@1, countRow[@"count"]);
 
   (void)[database executeCommand:[NSString stringWithFormat:@"DROP TABLE IF EXISTS %@", table]
                       parameters:@[]
@@ -2099,14 +2169,14 @@
                                         parameters:@[]
                                              error:&error] firstObject];
   XCTAssertNil(error);
-  XCTAssertEqualObjects(@"1", countRow[@"count"]);
+  XCTAssertEqualObjects(@1, countRow[@"count"]);
 
   NSDictionary *trackingRow =
       [[database executeQuery:@"SELECT COUNT(*) AS count FROM arlen_schema_migrations WHERE version = $1"
                   parameters:@[ [ALNMigrationRunner versionForMigrationFile:file] ]
                        error:&error] firstObject];
   XCTAssertNil(error);
-  XCTAssertEqualObjects(@"1", trackingRow[@"count"]);
+  XCTAssertEqualObjects(@1, trackingRow[@"count"]);
 
   (void)[database executeCommand:[NSString stringWithFormat:@"DROP TABLE IF EXISTS %@", table]
                       parameters:@[]
@@ -2170,7 +2240,7 @@
   XCTAssertTrue([[error localizedDescription] containsString:[file lastPathComponent]], @"%@", error);
   XCTAssertEqualObjects(file, error.userInfo[@"path"]);
   NSString *detail = [error.userInfo[@"detail"] isKindOfClass:[NSString class]] ? error.userInfo[@"detail"] : @"";
-  XCTAssertTrue([detail containsString:@"script execution failed"], @"%@", detail);
+  XCTAssertTrue([detail containsString:missingTable], @"%@", detail);
 
   NSDictionary *tableRow =
       [[database executeQuery:@"SELECT to_regclass($1) AS regclass"
@@ -2184,7 +2254,7 @@
                   parameters:@[ [ALNMigrationRunner versionForMigrationFile:file] ]
                        error:&fsError] firstObject];
   XCTAssertNil(fsError);
-  XCTAssertEqualObjects(@"0", trackingRow[@"count"]);
+  XCTAssertEqualObjects(@0, trackingRow[@"count"]);
 
   (void)[database executeCommand:[NSString stringWithFormat:@"DROP TABLE IF EXISTS %@", table]
                       parameters:@[]
@@ -2247,7 +2317,7 @@
                   parameters:@[ [ALNMigrationRunner versionForMigrationFile:file] ]
                        error:&fsError] firstObject];
   XCTAssertNil(fsError);
-  XCTAssertEqualObjects(@"0", trackingRow[@"count"]);
+  XCTAssertEqualObjects(@0, trackingRow[@"count"]);
 }
 
 - (void)testMigrationRunnerRejectsTopLevelTransactionControlStatements {
@@ -2318,7 +2388,7 @@
                   parameters:@[ [ALNMigrationRunner versionForMigrationFile:file] ]
                        error:&fsError] firstObject];
   XCTAssertNil(fsError);
-  XCTAssertEqualObjects(@"0", trackingRow[@"count"]);
+  XCTAssertEqualObjects(@0, trackingRow[@"count"]);
 }
 
 - (void)testMigrationRunnerAllowsDoBlockContainingBeginEndKeywords {
@@ -2378,7 +2448,7 @@
                                         parameters:@[]
                                              error:&fsError] firstObject];
   XCTAssertNil(fsError);
-  XCTAssertEqualObjects(@"1", countRow[@"count"]);
+  XCTAssertEqualObjects(@1, countRow[@"count"]);
 
   (void)[database executeCommand:[NSString stringWithFormat:@"DROP TABLE IF EXISTS %@", table]
                       parameters:@[]
@@ -2450,7 +2520,7 @@
                   parameters:@[ [ALNMigrationRunner versionForMigrationFile:file] ]
                        error:&fsError] firstObject];
   XCTAssertNil(fsError);
-  XCTAssertEqualObjects(@"0", trackingRow[@"count"]);
+  XCTAssertEqualObjects(@0, trackingRow[@"count"]);
 
   (void)[database executeCommand:[NSString stringWithFormat:@"DROP TABLE IF EXISTS %@", table]
                       parameters:@[]

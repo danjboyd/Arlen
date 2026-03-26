@@ -5,6 +5,22 @@
 
 PostgreSQL adapter with pooled connections and adapter-compatible query/command/transaction APIs.
 
+## Result Materialization
+
+`ALNPg` now materializes the supported PostgreSQL scalar baseline as typed
+Objective-C values instead of returning string-only rows for those columns:
+
+- `BOOL`, integer, and float families: `NSNumber`
+- `numeric`: `NSDecimalNumber`
+- `date`, `timestamp`, `timestamp with time zone`: `NSDate`
+- `bytea`: `NSData`
+- `json`, `jsonb`: Foundation objects decoded from JSON
+- text-like and unmapped types: `NSString`
+
+Supported bind inputs include `NSString`, `NSNumber`, `NSDate`, `NSData`,
+`NSArray`, `NSDictionary`, and `NSNull`. For mapped scalar result types,
+runtime decode failures surface an explicit `NSError`.
+
 ## Typical Usage
 
 ```objc

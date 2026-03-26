@@ -5,6 +5,22 @@
 
 Database-adapter protocol defining connection lifecycle, query primitives, transactions, and capability metadata.
 
+## Helper Functions
+
+`src/Arlen/Data/ALNDatabaseAdapter.h` also exposes small result helpers that
+preserve the dictionary-row contract while removing common scalar/first-row
+boilerplate:
+
+| Symbol | Signature | Purpose |
+| --- | --- | --- |
+| `ALNDatabaseFirstRow` | `NSDictionary<NSString *, id> *_Nullable ALNDatabaseFirstRow(NSArray<NSDictionary *> *_Nullable rows);` | Return the first dictionary row or `nil`. |
+| `ALNDatabaseScalarValueFromRow` | `id _Nullable ALNDatabaseScalarValueFromRow(NSDictionary<NSString *, id> *_Nullable row, NSString *_Nullable columnName, NSError *_Nullable *_Nullable error);` | Extract a scalar from one row, with explicit diagnostics when the row is empty, ambiguous, or missing the requested column. |
+| `ALNDatabaseScalarValueFromRows` | `id _Nullable ALNDatabaseScalarValueFromRows(NSArray<NSDictionary *> *_Nullable rows, NSString *_Nullable columnName, NSError *_Nullable *_Nullable error);` | Extract a scalar from the first row of a result set. |
+| `ALNDatabaseExecuteScalarQuery` | `id _Nullable ALNDatabaseExecuteScalarQuery(id<ALNDatabaseConnection> connection, NSString *sql, NSArray *_Nullable parameters, NSString *_Nullable columnName, NSError *_Nullable *_Nullable error);` | Execute a query through a connection and return a single scalar value. |
+
+Additional adapter-helper diagnostics use `ALNDatabaseAdapterErrorInvalidResult`
+when a row shape cannot honestly satisfy the requested scalar contract.
+
 ## Methods
 
 | Selector | Signature | Purpose | How to use |

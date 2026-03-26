@@ -4,6 +4,7 @@
 #import "ALNSQLBuilder.h"
 
 #import <dispatch/dispatch.h>
+#import <ctype.h>
 #import <dlfcn.h>
 #import <stdlib.h>
 #import <stdint.h>
@@ -45,6 +46,7 @@ NSString *const ALNPgQueryEventSQLKey = @"sql";
 
 typedef struct pg_conn PGconn;
 typedef struct pg_result PGresult;
+typedef unsigned int ALNOid;
 
 typedef enum {
   ALNConnectionOK = 0,
@@ -123,6 +125,7 @@ static void (*ALNPQclear)(PGresult *res) = NULL;
 static int (*ALNPQnfields)(const PGresult *res) = NULL;
 static int (*ALNPQntuples)(const PGresult *res) = NULL;
 static char *(*ALNPQfname)(const PGresult *res, int columnNumber) = NULL;
+static ALNOid (*ALNPQftype)(const PGresult *res, int columnNumber) = NULL;
 static int (*ALNPQgetisnull)(const PGresult *res, int rowNumber, int columnNumber) = NULL;
 static char *(*ALNPQgetvalue)(const PGresult *res, int rowNumber, int columnNumber) = NULL;
 static char *(*ALNPQcmdTuples)(PGresult *res) = NULL;
@@ -203,6 +206,7 @@ static BOOL ALNLoadLibpq(NSError **error) {
     ok = ok && ALNBindLibpqSymbol((void **)&ALNPQnfields, handle, "PQnfields");
     ok = ok && ALNBindLibpqSymbol((void **)&ALNPQntuples, handle, "PQntuples");
     ok = ok && ALNBindLibpqSymbol((void **)&ALNPQfname, handle, "PQfname");
+    ok = ok && ALNBindLibpqSymbol((void **)&ALNPQftype, handle, "PQftype");
     ok = ok && ALNBindLibpqSymbol((void **)&ALNPQgetisnull, handle, "PQgetisnull");
     ok = ok && ALNBindLibpqSymbol((void **)&ALNPQgetvalue, handle, "PQgetvalue");
     ok = ok && ALNBindLibpqSymbol((void **)&ALNPQcmdTuples, handle, "PQcmdTuples");
@@ -624,7 +628,80 @@ static void ALNPgEmitEventToStderr(NSDictionary *event) {
   }
 }
 
-static NSString *ALNPgStringFromParam(id value) {
+enum {
+  ALNPGOIDOID_NAME = 19,
+  ALNPGOIDOID_BOOL = 16,
+  ALNPGOIDOID_BYTEA = 17,
+  ALNPGOIDOID_INT8 = 20,
+  ALNPGOIDOID_INT2 = 21,
+  ALNPGOIDOID_INT4 = 23,
+  ALNPGOIDOID_TEXT = 25,
+  ALNPGOIDOID_JSON = 114,
+  ALNPGOIDOID_FLOAT4 = 700,
+  ALNPGOIDOID_FLOAT8 = 701,
+  ALNPGOIDOID_BPCHAR = 1042,
+  ALNPGOIDOID_VARCHAR = 1043,
+  ALNPGOIDOID_DATE = 1082,
+  ALNPGOIDOID_TIME = 1083,
+  ALNPGOIDOID_TIMESTAMP = 1114,
+  ALNPGOIDOID_TIMESTAMPTZ = 1184,
+  ALNPGOIDOID_NUMERIC = 1700,
+  ALNPGOIDOID_UUID = 2950,
+  ALNPGOIDOID_JSONB = 3802,
+};
+
+static BOOL ALNPgNSNumberLooksBoolean(NSNumber *value) {
+  if (value == nil) {
+    return NO;
+  }
+  const char *type = [value objCType];
+  if (type == NULL) {
+    return NO;
+  }
+  return (strcmp(type, @encode(BOOL)) == 0 || strcmp(type, "B") == 0);
+}
+
+static NSString *ALNPgHexStringFromData(NSData *data) {
+  if (![data isKindOfClass:[NSData class]]) {
+    return @"";
+  }
+  const unsigned char *bytes = [data bytes];
+  NSUInteger length = [data length];
+  NSMutableString *hex = [NSMutableString stringWithCapacity:(length * 2) + 2];
+  [hex appendString:@"\\x"];
+  for (NSUInteger idx = 0; idx < length; idx++) {
+    [hex appendFormat:@"%02x", bytes[idx]];
+  }
+  return hex;
+}
+
+static NSString *ALNPgTimestampStringFromDate(NSDate *value) {
+  if (![value isKindOfClass:[NSDate class]]) {
+    return @"";
+  }
+  NSDateFormatter *formatter = [[NSDateFormatter alloc] init];
+  formatter.locale = [[NSLocale alloc] initWithLocaleIdentifier:@"en_US_POSIX"];
+  formatter.timeZone = [NSTimeZone timeZoneForSecondsFromGMT:0];
+  formatter.dateFormat = @"yyyy-MM-dd'T'HH:mm:ss.SSS'Z'";
+  return [formatter stringFromDate:value] ?: @"";
+}
+
+static NSString *ALNPgJSONStringFromObject(id value, NSError **error) {
+  NSData *jsonData = [ALNJSONSerialization dataWithJSONObject:value options:0 error:error];
+  if (jsonData == nil) {
+    return nil;
+  }
+  NSString *json = [[NSString alloc] initWithData:jsonData encoding:NSUTF8StringEncoding];
+  if (json == nil && error != NULL) {
+    *error = ALNPgMakeError(ALNPgErrorInvalidArgument,
+                            @"failed to encode query parameter as JSON",
+                            @"JSON payload was not valid UTF-8",
+                            nil);
+  }
+  return json;
+}
+
+static NSString *ALNPgStringFromParam(id value, NSError **error) {
   if (value == nil || value == [NSNull null]) {
     return nil;
   }
@@ -632,15 +709,365 @@ static NSString *ALNPgStringFromParam(id value) {
     return value;
   }
   if ([value isKindOfClass:[NSNumber class]]) {
+    if (ALNPgNSNumberLooksBoolean((NSNumber *)value)) {
+      return [((NSNumber *)value) boolValue] ? @"true" : @"false";
+    }
     return [value stringValue];
   }
   if ([value isKindOfClass:[NSDate class]]) {
-    return [NSString stringWithFormat:@"%.3f", [(NSDate *)value timeIntervalSince1970]];
+    return ALNPgTimestampStringFromDate((NSDate *)value);
   }
   if ([value isKindOfClass:[NSData class]]) {
-    return [(NSData *)value base64EncodedStringWithOptions:0];
+    return ALNPgHexStringFromData((NSData *)value);
+  }
+  if ([value isKindOfClass:[NSArray class]] || [value isKindOfClass:[NSDictionary class]]) {
+    return ALNPgJSONStringFromObject(value, error);
   }
   return [value description];
+}
+
+static NSNumber *ALNPgIntegerNumberFromString(NSString *value) {
+  if (![value isKindOfClass:[NSString class]] || [value length] == 0) {
+    return nil;
+  }
+  NSScanner *scanner = [NSScanner scannerWithString:value];
+  long long parsed = 0;
+  if (![scanner scanLongLong:&parsed] || ![scanner isAtEnd]) {
+    return nil;
+  }
+  return @(parsed);
+}
+
+static NSNumber *ALNPgDoubleNumberFromString(NSString *value) {
+  if (![value isKindOfClass:[NSString class]] || [value length] == 0) {
+    return nil;
+  }
+  NSScanner *scanner = [NSScanner scannerWithString:value];
+  double parsed = 0;
+  if (![scanner scanDouble:&parsed] || ![scanner isAtEnd]) {
+    return nil;
+  }
+  return @(parsed);
+}
+
+static NSDecimalNumber *ALNPgDecimalNumberFromString(NSString *value) {
+  if (![value isKindOfClass:[NSString class]] || [value length] == 0) {
+    return nil;
+  }
+  NSDecimalNumber *number = [NSDecimalNumber decimalNumberWithString:value];
+  return [number isEqualToNumber:[NSDecimalNumber notANumber]] ? nil : number;
+}
+
+static NSNumber *ALNPgBoolNumberFromString(NSString *value) {
+  NSString *normalized = [[value lowercaseString] stringByTrimmingCharactersInSet:
+                                                     [NSCharacterSet whitespaceAndNewlineCharacterSet]];
+  if ([normalized isEqualToString:@"t"] || [normalized isEqualToString:@"true"] ||
+      [normalized isEqualToString:@"1"]) {
+    return @YES;
+  }
+  if ([normalized isEqualToString:@"f"] || [normalized isEqualToString:@"false"] ||
+      [normalized isEqualToString:@"0"]) {
+    return @NO;
+  }
+  return nil;
+}
+
+static BOOL ALNPgParseFixedWidthNumber(const char *cursor,
+                                       NSUInteger digitCount,
+                                       NSInteger *valueOut);
+static NSDate *ALNPgUTCDate(NSInteger year,
+                            NSInteger month,
+                            NSInteger day,
+                            NSInteger hour,
+                            NSInteger minute,
+                            NSInteger second,
+                            double fractionalSeconds);
+
+static NSDate *ALNPgDateFromDateString(NSString *value) {
+  if (![value isKindOfClass:[NSString class]] || [value length] == 0) {
+    return nil;
+  }
+
+  NSString *trimmed =
+      [value stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+  const char *cursor = [trimmed UTF8String];
+  if (cursor == NULL) {
+    return nil;
+  }
+
+  NSInteger year = 0;
+  NSInteger month = 0;
+  NSInteger day = 0;
+  if (!ALNPgParseFixedWidthNumber(cursor, 4, &year) || cursor[4] != '-' ||
+      !ALNPgParseFixedWidthNumber(cursor + 5, 2, &month) || cursor[7] != '-' ||
+      !ALNPgParseFixedWidthNumber(cursor + 8, 2, &day) || cursor[10] != '\0') {
+    return nil;
+  }
+
+  return ALNPgUTCDate(year, month, day, 0, 0, 0, 0.0);
+}
+
+static BOOL ALNPgParseFixedWidthNumber(const char *cursor,
+                                       NSUInteger digitCount,
+                                       NSInteger *valueOut) {
+  if (cursor == NULL || digitCount == 0) {
+    return NO;
+  }
+
+  NSInteger parsed = 0;
+  for (NSUInteger idx = 0; idx < digitCount; idx++) {
+    if (!isdigit((unsigned char)cursor[idx])) {
+      return NO;
+    }
+    parsed = (parsed * 10) + (cursor[idx] - '0');
+  }
+
+  if (valueOut != NULL) {
+    *valueOut = parsed;
+  }
+  return YES;
+}
+
+static NSDate *ALNPgUTCDate(NSInteger year,
+                            NSInteger month,
+                            NSInteger day,
+                            NSInteger hour,
+                            NSInteger minute,
+                            NSInteger second,
+                            double fractionalSeconds) {
+  NSCalendar *calendar = [[NSCalendar alloc] initWithCalendarIdentifier:NSCalendarIdentifierGregorian];
+  calendar.timeZone = [NSTimeZone timeZoneForSecondsFromGMT:0];
+
+  NSDateComponents *components = [[NSDateComponents alloc] init];
+  components.year = year;
+  components.month = month;
+  components.day = day;
+  components.hour = hour;
+  components.minute = minute;
+  components.second = second;
+
+  NSDate *date = [calendar dateFromComponents:components];
+  if (date == nil) {
+    return nil;
+  }
+
+  NSDateComponents *normalized =
+      [calendar components:(NSYearCalendarUnit | NSMonthCalendarUnit | NSDayCalendarUnit |
+                            NSHourCalendarUnit | NSMinuteCalendarUnit | NSSecondCalendarUnit)
+                  fromDate:date];
+  if (normalized.year != year || normalized.month != month || normalized.day != day ||
+      normalized.hour != hour || normalized.minute != minute || normalized.second != second) {
+    return nil;
+  }
+
+  if (fractionalSeconds != 0.0) {
+    return [date dateByAddingTimeInterval:fractionalSeconds];
+  }
+  return date;
+}
+
+static NSDate *ALNPgDateFromTimestampString(NSString *value) {
+  if (![value isKindOfClass:[NSString class]] || [value length] == 0) {
+    return nil;
+  }
+
+  NSString *trimmed =
+      [value stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+  const char *cursor = [trimmed UTF8String];
+  if (cursor == NULL) {
+    return nil;
+  }
+
+  NSInteger year = 0;
+  NSInteger month = 0;
+  NSInteger day = 0;
+  NSInteger hour = 0;
+  NSInteger minute = 0;
+  NSInteger second = 0;
+
+  if (!ALNPgParseFixedWidthNumber(cursor, 4, &year) || cursor[4] != '-' ||
+      !ALNPgParseFixedWidthNumber(cursor + 5, 2, &month) || cursor[7] != '-' ||
+      !ALNPgParseFixedWidthNumber(cursor + 8, 2, &day) ||
+      (cursor[10] != ' ' && cursor[10] != 'T') ||
+      !ALNPgParseFixedWidthNumber(cursor + 11, 2, &hour) || cursor[13] != ':' ||
+      !ALNPgParseFixedWidthNumber(cursor + 14, 2, &minute) || cursor[16] != ':' ||
+      !ALNPgParseFixedWidthNumber(cursor + 17, 2, &second)) {
+    return nil;
+  }
+
+  cursor += 19;
+
+  double fractionalSeconds = 0.0;
+  if (*cursor == '.') {
+    cursor += 1;
+    if (!isdigit((unsigned char)*cursor)) {
+      return nil;
+    }
+    double scale = 0.1;
+    while (isdigit((unsigned char)*cursor)) {
+      fractionalSeconds += ((*cursor - '0') * scale);
+      scale /= 10.0;
+      cursor += 1;
+    }
+  }
+
+  while (*cursor == ' ') {
+    cursor += 1;
+  }
+
+  NSInteger offsetHours = 0;
+  NSInteger offsetMinutes = 0;
+  NSInteger offsetSeconds = 0;
+  NSInteger sign = 1;
+  BOOL hasOffset = NO;
+  if (*cursor == 'Z' || *cursor == 'z') {
+    hasOffset = YES;
+    cursor += 1;
+  } else if (*cursor == '+' || *cursor == '-') {
+    hasOffset = YES;
+    sign = (*cursor == '-') ? -1 : 1;
+    cursor += 1;
+    if (!ALNPgParseFixedWidthNumber(cursor, 2, &offsetHours)) {
+      return nil;
+    }
+    cursor += 2;
+    if (*cursor == ':') {
+      cursor += 1;
+    }
+    if (isdigit((unsigned char)*cursor)) {
+      if (!ALNPgParseFixedWidthNumber(cursor, 2, &offsetMinutes)) {
+        return nil;
+      }
+      cursor += 2;
+      if (*cursor == ':') {
+        cursor += 1;
+        if (!ALNPgParseFixedWidthNumber(cursor, 2, &offsetSeconds)) {
+          return nil;
+        }
+        cursor += 2;
+      }
+    }
+  }
+
+  while (*cursor == ' ') {
+    cursor += 1;
+  }
+  if (*cursor != '\0') {
+    return nil;
+  }
+
+  NSDate *date =
+      ALNPgUTCDate(year, month, day, hour, minute, second, fractionalSeconds);
+  if (date == nil) {
+    return nil;
+  }
+
+  if (hasOffset) {
+    NSInteger offset = ((offsetHours * 60 * 60) + (offsetMinutes * 60) + offsetSeconds) * sign;
+    date = [date dateByAddingTimeInterval:-(NSTimeInterval)offset];
+  }
+  return date;
+}
+
+static NSData *ALNPgDataFromByteaString(NSString *value) {
+  if (![value isKindOfClass:[NSString class]]) {
+    return nil;
+  }
+  NSString *normalized = [value hasPrefix:@"\\x"] ? [value substringFromIndex:2] : value;
+  if (([normalized length] % 2) != 0) {
+    return nil;
+  }
+  NSMutableData *data = [NSMutableData dataWithCapacity:([normalized length] / 2)];
+  for (NSUInteger idx = 0; idx < [normalized length]; idx += 2) {
+    NSString *pair = [normalized substringWithRange:NSMakeRange(idx, 2)];
+    NSScanner *scanner = [NSScanner scannerWithString:pair];
+    unsigned int byte = 0;
+    if (![scanner scanHexInt:&byte] || ![scanner isAtEnd]) {
+      return nil;
+    }
+    unsigned char valueByte = (unsigned char)byte;
+    [data appendBytes:&valueByte length:1];
+  }
+  return data;
+}
+
+static id ALNPgDecodedValueForFieldType(ALNOid fieldType,
+                                        NSString *columnName,
+                                        NSString *stringValue,
+                                        NSError **error) {
+  if (fieldType == 0) {
+    return stringValue ?: @"";
+  }
+
+  id decoded = nil;
+  switch (fieldType) {
+  case ALNPGOIDOID_BOOL:
+    decoded = ALNPgBoolNumberFromString(stringValue);
+    break;
+  case ALNPGOIDOID_INT2:
+  case ALNPGOIDOID_INT4:
+  case ALNPGOIDOID_INT8:
+    decoded = ALNPgIntegerNumberFromString(stringValue);
+    break;
+  case ALNPGOIDOID_NUMERIC:
+    decoded = ALNPgDecimalNumberFromString(stringValue);
+    break;
+  case ALNPGOIDOID_FLOAT4:
+  case ALNPGOIDOID_FLOAT8:
+    decoded = ALNPgDoubleNumberFromString(stringValue);
+    break;
+  case ALNPGOIDOID_DATE:
+    decoded = ALNPgDateFromDateString(stringValue);
+    break;
+  case ALNPGOIDOID_TIMESTAMP:
+  case ALNPGOIDOID_TIMESTAMPTZ:
+    decoded = ALNPgDateFromTimestampString(stringValue);
+    break;
+  case ALNPGOIDOID_BYTEA:
+    decoded = ALNPgDataFromByteaString(stringValue);
+    break;
+  case ALNPGOIDOID_JSON:
+  case ALNPGOIDOID_JSONB: {
+    NSData *jsonData = [stringValue dataUsingEncoding:NSUTF8StringEncoding allowLossyConversion:NO];
+    if (jsonData != nil) {
+      decoded = [ALNJSONSerialization JSONObjectWithData:jsonData options:0 error:error];
+      if (decoded == nil && error != NULL && *error != nil) {
+        NSError *jsonError = *error;
+        NSString *detail = [NSString stringWithFormat:@"column %@ JSON decode failed: %@",
+                                                      columnName ?: @"",
+                                                      [jsonError localizedDescription] ?: @"invalid JSON"];
+        *error = ALNPgMakeError(ALNPgErrorQueryFailed,
+                                @"failed decoding PostgreSQL result value",
+                                detail,
+                                nil);
+      }
+    }
+    break;
+  }
+  case ALNPGOIDOID_NAME:
+  case ALNPGOIDOID_TEXT:
+  case ALNPGOIDOID_BPCHAR:
+  case ALNPGOIDOID_VARCHAR:
+  case ALNPGOIDOID_UUID:
+  case ALNPGOIDOID_TIME:
+    return stringValue ?: @"";
+  default:
+    return stringValue ?: @"";
+  }
+
+  if (decoded != nil) {
+    return decoded;
+  }
+  if (error != NULL && *error == nil) {
+    NSString *detail = [NSString stringWithFormat:@"column %@ could not be decoded for PostgreSQL OID %u",
+                                                  columnName ?: @"",
+                                                  fieldType];
+    *error = ALNPgMakeError(ALNPgErrorQueryFailed,
+                            @"failed decoding PostgreSQL result value",
+                            detail,
+                            nil);
+  }
+  return nil;
 }
 
 static void ALNPgFreeExecParamsBuffer(ALNPgExecParamsBuffer *buffer) {
@@ -712,7 +1139,21 @@ static BOOL ALNPgBuildExecParamsBuffer(NSArray *parameters,
 
   for (NSUInteger idx = 0; idx < count; idx++) {
     id value = parameters[idx];
-    NSString *stringValue = ALNPgStringFromParam(value);
+    NSError *parameterError = nil;
+    NSString *stringValue = ALNPgStringFromParam(value, &parameterError);
+    if (parameterError != nil) {
+      if (error != NULL) {
+        NSString *detail = [NSString stringWithFormat:@"parameter %lu: %@",
+                                                      (unsigned long)(idx + 1),
+                                                      [parameterError localizedDescription] ?: @"invalid value"];
+        *error = ALNPgMakeError(ALNPgErrorInvalidArgument,
+                                @"failed to encode query parameter",
+                                detail,
+                                sql);
+      }
+      ALNPgFreeExecParamsBuffer(buffer);
+      return NO;
+    }
     if (stringValue == nil) {
       buffer->paramValues[idx] = NULL;
       buffer->paramLengths[idx] = 0;
@@ -762,7 +1203,7 @@ static BOOL ALNPgBuildExecParamsBuffer(NSArray *parameters,
   return YES;
 }
 
-static NSDictionary *ALNPgRowDictionary(PGresult *result, int rowIndex) {
+static NSDictionary *ALNPgRowDictionary(PGresult *result, int rowIndex, NSError **error) {
   int fieldCount = ALNPQnfields(result);
   NSMutableDictionary *row = [NSMutableDictionary dictionaryWithCapacity:(NSUInteger)fieldCount];
   for (int field = 0; field < fieldCount; field++) {
@@ -784,7 +1225,16 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result, int rowIndex) {
     }
 
     NSString *stringValue = [NSString stringWithUTF8String:value];
-    row[key] = stringValue ?: @"";
+    ALNOid fieldType = (ALNPQftype != NULL) ? ALNPQftype(result, field) : 0;
+    NSError *decodeError = nil;
+    id decoded = ALNPgDecodedValueForFieldType(fieldType, key, stringValue ?: @"", &decodeError);
+    if (decoded == nil && decodeError != nil) {
+      if (error != NULL) {
+        *error = decodeError;
+      }
+      return nil;
+    }
+    row[key] = decoded ?: @"";
   }
   return row;
 }
@@ -1271,11 +1721,15 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result, int rowIndex) {
   return result;
 }
 
-- (NSArray<NSDictionary *> *)rowsFromResult:(PGresult *)result {
+- (NSArray<NSDictionary *> *)rowsFromResult:(PGresult *)result error:(NSError **)error {
   int rowCount = ALNPQntuples(result);
   NSMutableArray *rows = [NSMutableArray arrayWithCapacity:(NSUInteger)rowCount];
   for (int idx = 0; idx < rowCount; idx++) {
-    [rows addObject:ALNPgRowDictionary(result, idx)];
+    NSDictionary *row = ALNPgRowDictionary(result, idx, error);
+    if (row == nil) {
+      return nil;
+    }
+    [rows addObject:row];
   }
   return rows;
 }
@@ -1304,7 +1758,7 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result, int rowIndex) {
     return nil;
   }
 
-  NSArray *rows = [self rowsFromResult:result];
+  NSArray *rows = [self rowsFromResult:result error:error];
   ALNPQclear(result);
   return rows;
 }
@@ -1379,7 +1833,7 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result, int rowIndex) {
     return nil;
   }
 
-  NSArray *rows = [self rowsFromResult:result];
+  NSArray *rows = [self rowsFromResult:result error:error];
   ALNPQclear(result);
   return rows;
 }

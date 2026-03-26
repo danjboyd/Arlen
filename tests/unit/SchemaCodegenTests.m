@@ -55,6 +55,14 @@
       @"data_type" : @"integer",
       @"is_nullable" : @"YES",
     },
+    @{
+      @"table_schema" : @"public",
+      @"table_name" : @"users",
+      @"column_name" : @"created_at",
+      @"ordinal_position" : @3,
+      @"data_type" : @"timestamp with time zone",
+      @"is_nullable" : @"YES",
+    },
   ];
 }
 
@@ -202,13 +210,17 @@
   XCTAssertTrue([header containsString:@"@interface ALNDBPublicUsersUpdate : NSObject"]);
   XCTAssertTrue([header containsString:@"+ (ALNSQLBuilder *)insertContract:(ALNDBPublicUsersInsert *)contractValues;"]);
   XCTAssertTrue([header containsString:@"+ (nullable ALNDBPublicUsersRow *)decodeTypedRow:(NSDictionary<NSString *, id> *)row"]);
+  XCTAssertTrue([header containsString:@"+ (nullable ALNDBPublicUsersRow *)decodeTypedFirstRowFromRows:(NSArray<NSDictionary<NSString *, id> *> *)rows"]);
+  XCTAssertTrue([header containsString:@"@property(nonatomic, copy, nullable) NSDate * columnCreatedAt;"]);
 
   XCTAssertTrue([implementation containsString:@"Arlen.Data.SchemaCodegen.TypedDecode.ALNDBSchema"]);
   XCTAssertTrue([implementation containsString:@"@synthesize columnId = _columnId;"]);
   XCTAssertTrue([implementation containsString:@"@synthesize columnAge = _columnAge;"]);
+  XCTAssertTrue([implementation containsString:@"@synthesize columnCreatedAt = _columnCreatedAt;"]);
   XCTAssertFalse([implementation containsString:@"@property(nonatomic, copy, readwrite) NSString * columnId;"]);
   XCTAssertTrue([implementation containsString:@"+ (ALNSQLBuilder *)insertContract:(ALNDBPublicUsersInsert *)contractValues {"]);
   XCTAssertTrue([implementation containsString:@"+ (nullable ALNDBPublicUsersRow *)decodeTypedRow:(NSDictionary<NSString *, id> *)row"]);
+  XCTAssertTrue([implementation containsString:@"+ (nullable ALNDBPublicUsersRow *)decodeTypedFirstRowFromRows:(NSArray<NSDictionary<NSString *, id> *> *)rows"]);
   XCTAssertTrue([implementation containsString:@"missing required field"]);
   XCTAssertTrue([implementation containsString:@"field has unexpected runtime type"]);
 

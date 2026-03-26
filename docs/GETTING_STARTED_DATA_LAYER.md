@@ -61,10 +61,53 @@ NSString *sql = compiled[@"sql"];
 NSArray *params = compiled[@"parameters"];
 ```
 
+Nested subqueries now compile through the same active dialect context. That
+means MSSQL rewrites and unsupported-feature checks apply inside nested
+builders too, instead of only at the root statement.
+
 ## 5. Execute Through Adapter
 
 ```objc
-NSArray *rows = [db executeBuilderQuery:builder error:&error];
+NSArray<NSDictionary *> *rows = [db executeBuilderQuery:builder error:&error];
+NSDictionary<NSString *, id> *firstRow = ALNDatabaseFirstRow(rows);
+```
+
+For scalar reads, prefer the explicit helper surface over open-coded
+`rows[0][@"count"]` extraction:
+
+```objc
+NSError *error = nil;
+ALNPgConnection *connection = [db acquireConnection:&error];
+NSNumber *count =
+    ALNDatabaseExecuteScalarQuery(connection,
+                                  @"SELECT COUNT(*) AS count FROM users WHERE status = $1",
+                                  @[ @"active" ],
+                                  @"count",
+                                  &error);
+[db releaseConnection:connection];
+```
+
+PostgreSQL now materializes the supported scalar baseline as Objective-C
+runtime values:
+
+- `BOOL`, integer, float: `NSNumber`
+- `numeric`: `NSDecimalNumber`
+- `date`, `timestamp`, `timestamp with time zone`: `NSDate`
+- `bytea`: `NSData`
+- `json`, `jsonb`: Foundation objects decoded from JSON
+- text-like and unmapped types: `NSString`
+
+If you use schema codegen, decode live rows through the generated contract
+instead of manually casting dictionaries:
+
+```objc
+NSError *error = nil;
+NSArray<NSDictionary *> *rows =
+    [db executeQuery:@"SELECT id, created_at FROM users WHERE id = $1"
+          parameters:@[ @"u-1" ]
+               error:&error];
+ALNDBPublicUsersRow *user =
+    [ALNDBPublicUsersRow decodeTypedFirstRowFromRows:rows error:&error];
 ```
 
 Use transactions for write workflows:
@@ -85,8 +128,9 @@ Use `src/ArlenData/ArlenData.h` when consuming the data layer in non-Arlen runti
 
 1. Read [SQL Builder Conformance Matrix](SQL_BUILDER_CONFORMANCE_MATRIX.md).
 2. Read [ArlenData Reuse Guide](ARLEN_DATA.md).
-3. Read [Phase 17 Roadmap](PHASE17_ROADMAP.md) for the backend-neutral seam and optional MSSQL path.
-4. Read [API Reference](API_REFERENCE.md) pages for `ALNSQLBuilder`, `ALNPg`, `ALNMSSQL`, and `ALNMigrationRunner`.
+3. Read [Phase 20 Roadmap](PHASE20_ROADMAP.md) for the current typed-codec, nested-dialect, and result-helper depth pass.
+4. Read [Phase 17 Roadmap](PHASE17_ROADMAP.md) for the backend-neutral seam and optional MSSQL path.
+5. Read [API Reference](API_REFERENCE.md) pages for `ALNSQLBuilder`, `ALNPg`, `ALNMSSQL`, and `ALNMigrationRunner`.
 
 Schema codegen note:
 

@@ -1,6 +1,35 @@
 # Arlen Status Checkpoint
 
-Last updated: 2026-03-24
+Last updated: 2026-03-26
+
+## Completed Today (2026-03-26)
+
+- Completed the Phase 20A-20C data-layer depth slice:
+  - added typed PostgreSQL bind/result materialization for the supported scalar
+    baseline (`BOOL`, integer, numeric, float, `date`, `timestamp`,
+    `bytea`, `json/jsonb`) so live adapter rows now align with generated typed
+    contracts
+  - extended schema codegen row helpers with
+    `decodeTypedFirstRowFromRows:error:` and added live PostgreSQL coverage so
+    generated decode contracts are exercised against real adapter results
+  - made nested builder compilation dialect-aware so MSSQL validation and
+    rewrite behavior now applies recursively inside subqueries instead of only
+    at the root builder
+  - added lightweight adapter result helpers for first-row and scalar
+    extraction (`ALNDatabaseFirstRow`,
+    `ALNDatabaseScalarValueFromRow`,
+    `ALNDatabaseScalarValueFromRows`,
+    `ALNDatabaseExecuteScalarQuery`)
+  - updated the public data-layer docs and Phase 20 roadmap/status surfaces to
+    reflect the delivered slice
+- Verification for the delivered slice:
+  - `make test-unit-filter TEST=SchemaCodegenTests`
+  - `make test-unit-filter TEST=Phase17BTests`
+  - `ARLEN_PG_TEST_DSN=postgresql:///postgres make test-unit-filter TEST=PgTests`
+  - note: the current `tools-xctest` runner still ignores the focused filter
+    flag and executes a broader unit batch; the 20A-20C coverage passed within
+    those broader runs, while the remaining unrelated failure was the existing
+    auth-table environment assumption in `Phase13ETests`
 
 This document is a running checkpoint log. For authoritative current roadmap
 status, prefer the individual phase roadmap docs and `README.md`. Historical
@@ -177,6 +206,10 @@ entries, not current plan-of-record items.
 - Phase 19: complete (`19A-19F` delivered on 2026-03-14 for incremental
   GNUmake/GNUstep build-graph narrowing, generated-template object reuse, and
   clearer `boomhauer` build scope/progress)
+- Phase 20: active (`20A-20C` complete on 2026-03-26 for typed codecs/live
+  rows, recursive nested dialect compilation, and lightweight result helpers;
+  `20D-20F` pending for reflection, liveness hardening, and
+  `phase20-confidence`)
 
 ## Completed Today (2026-03-21)
 

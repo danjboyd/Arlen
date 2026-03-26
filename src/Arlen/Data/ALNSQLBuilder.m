@@ -2,6 +2,11 @@
 
 NSString *const ALNSQLBuilderErrorDomain = @"Arlen.Data.SQLBuilder.Error";
 
+@protocol ALNSQLDialectNestedCompile <NSObject>
+- (nullable NSDictionary *)aln_compileNestedBuilder:(ALNSQLBuilder *)builder
+                                              error:(NSError *_Nullable *_Nullable)error;
+@end
+
 static NSError *ALNSQLBuilderMakeError(ALNSQLBuilderErrorCode code,
                                        NSString *message,
                                        NSString *identifier) {
@@ -290,6 +295,7 @@ static NSSet *ALNSQLBuilderAllowedJoinOperators(void) {
 @property(nonatomic, copy) NSString *rowLockMode;
 @property(nonatomic, copy) NSArray *rowLockTables;
 @property(nonatomic, assign) BOOL rowLockSkipLocked;
+@property(nonatomic, weak, nullable) id<ALNSQLDialect> activeDialectContext;
 
 @end
 
@@ -1588,7 +1594,17 @@ static NSSet *ALNSQLBuilderAllowedJoinOperators(void) {
   }
 
   NSError *subqueryError = nil;
-  NSDictionary *built = [subquery build:&subqueryError];
+  NSDictionary *built = nil;
+  id<ALNSQLDialect> dialect = self.activeDialectContext;
+  if (dialect != nil && [dialect conformsToProtocol:@protocol(ALNSQLDialectNestedCompile)] &&
+      [dialect respondsToSelector:@selector(aln_compileNestedBuilder:error:)]) {
+    built = [(id<ALNSQLDialectNestedCompile>)dialect aln_compileNestedBuilder:subquery
+                                                                        error:&subqueryError];
+  } else if (dialect != nil) {
+    built = [subquery buildWithDialect:dialect error:&subqueryError];
+  } else {
+    built = [subquery build:&subqueryError];
+  }
   if (built == nil) {
     if (error != NULL) {
       *error = subqueryError ?: ALNSQLBuilderMakeError(ALNSQLBuilderErrorCompileFailed,
@@ -2503,11 +2519,28 @@ static NSSet *ALNSQLBuilderAllowedJoinOperators(void) {
   };
 }
 
+- (NSDictionary *)aln_buildDefaultDialectWithDialectContext:(id<ALNSQLDialect>)dialect
+                                                      error:(NSError **)error {
+  id<ALNSQLDialect> previousDialect = self.activeDialectContext;
+  self.activeDialectContext = dialect;
+  @try {
+    return [self aln_buildDefaultDialect:error];
+  } @finally {
+    self.activeDialectContext = previousDialect;
+  }
+}
+
 - (NSDictionary *)buildWithDialect:(id<ALNSQLDialect>)dialect error:(NSError **)error {
   if (dialect == nil) {
     return [self aln_buildDefaultDialect:error];
   }
-  return [dialect compileBuilder:self error:error];
+  id<ALNSQLDialect> previousDialect = self.activeDialectContext;
+  self.activeDialectContext = dialect;
+  @try {
+    return [dialect compileBuilder:self error:error];
+  } @finally {
+    self.activeDialectContext = previousDialect;
+  }
 }
 
 - (NSDictionary *)build:(NSError **)error {

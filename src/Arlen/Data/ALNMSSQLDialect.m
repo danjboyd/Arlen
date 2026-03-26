@@ -7,6 +7,8 @@
 
 @interface ALNSQLBuilder (ALNDefaultDialectCompile)
 - (nullable NSDictionary *)aln_buildDefaultDialect:(NSError *_Nullable *_Nullable)error;
+- (nullable NSDictionary *)aln_buildDefaultDialectWithDialectContext:(nullable id<ALNSQLDialect>)dialect
+                                                               error:(NSError *_Nullable *_Nullable)error;
 @end
 
 static NSError *ALNMSSQLDialectError(ALNSQLBuilderErrorCode code,
@@ -430,6 +432,61 @@ static NSString *ALNMSSQLApplyPagination(ALNSQLBuilder *builder,
   return [NSString stringWithString:composed];
 }
 
+static NSDictionary *ALNMSSQLCompileBuilder(ALNSQLBuilder *builder,
+                                            BOOL finalizeOutput,
+                                            NSError **error) {
+  if (ALNMSSQLBuilderUsesUnsupportedFeatures(builder, error)) {
+    return nil;
+  }
+
+  NSError *baseError = nil;
+  NSDictionary *base = [builder aln_buildDefaultDialectWithDialectContext:[ALNMSSQLDialect sharedDialect]
+                                                                    error:&baseError];
+  if (base == nil) {
+    if (error != NULL) {
+      *error = baseError;
+    }
+    return nil;
+  }
+
+  NSString *sql = [base[@"sql"] isKindOfClass:[NSString class]] ? base[@"sql"] : @"";
+  NSArray *parameters = [base[@"parameters"] isKindOfClass:[NSArray class]] ? base[@"parameters"] : @[];
+
+  if ([sql hasPrefix:@"WITH RECURSIVE "]) {
+    sql = [@"WITH " stringByAppendingString:[sql substringFromIndex:[@"WITH RECURSIVE " length]]];
+  }
+
+  sql = ALNMSSQLApplyReturningClause(builder, sql, error);
+  if (sql == nil) {
+    return nil;
+  }
+  sql = ALNMSSQLApplyPagination(builder, sql, error);
+  if (sql == nil) {
+    return nil;
+  }
+
+  if (!finalizeOutput) {
+    return @{
+      @"sql" : sql ?: @"",
+      @"parameters" : parameters ?: @[],
+    };
+  }
+
+  NSError *quoteError = nil;
+  NSString *quotedSQL = ALNMSSQLConvertQuotedIdentifiers(sql, &quoteError);
+  if (quotedSQL == nil) {
+    if (error != NULL) {
+      *error = quoteError;
+    }
+    return nil;
+  }
+
+  return @{
+    @"sql" : ALNMSSQLConvertPlaceholders(quotedSQL ?: @""),
+    @"parameters" : parameters ?: @[],
+  };
+}
+
 @implementation ALNMSSQLDialect
 
 + (instancetype)sharedDialect {
@@ -465,48 +522,11 @@ static NSString *ALNMSSQLApplyPagination(ALNSQLBuilder *builder,
 }
 
 - (NSDictionary *)compileBuilder:(ALNSQLBuilder *)builder error:(NSError **)error {
-  if (ALNMSSQLBuilderUsesUnsupportedFeatures(builder, error)) {
-    return nil;
-  }
+  return ALNMSSQLCompileBuilder(builder, YES, error);
+}
 
-  NSError *baseError = nil;
-  NSDictionary *base = [builder aln_buildDefaultDialect:&baseError];
-  if (base == nil) {
-    if (error != NULL) {
-      *error = baseError;
-    }
-    return nil;
-  }
-
-  NSString *sql = [base[@"sql"] isKindOfClass:[NSString class]] ? base[@"sql"] : @"";
-  NSArray *parameters = [base[@"parameters"] isKindOfClass:[NSArray class]] ? base[@"parameters"] : @[];
-
-  if ([sql hasPrefix:@"WITH RECURSIVE "]) {
-    sql = [@"WITH " stringByAppendingString:[sql substringFromIndex:[@"WITH RECURSIVE " length]]];
-  }
-
-  sql = ALNMSSQLApplyReturningClause(builder, sql, error);
-  if (sql == nil) {
-    return nil;
-  }
-  sql = ALNMSSQLApplyPagination(builder, sql, error);
-  if (sql == nil) {
-    return nil;
-  }
-
-  NSError *quoteError = nil;
-  NSString *quotedSQL = ALNMSSQLConvertQuotedIdentifiers(sql, &quoteError);
-  if (quotedSQL == nil) {
-    if (error != NULL) {
-      *error = quoteError;
-    }
-    return nil;
-  }
-
-  return @{
-    @"sql" : ALNMSSQLConvertPlaceholders(quotedSQL ?: @""),
-    @"parameters" : parameters ?: @[],
-  };
+- (NSDictionary *)aln_compileNestedBuilder:(ALNSQLBuilder *)builder error:(NSError **)error {
+  return ALNMSSQLCompileBuilder(builder, NO, error);
 }
 
 - (NSString *)migrationStateTableCreateSQLForTableName:(NSString *)tableName
