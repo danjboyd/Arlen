@@ -118,6 +118,7 @@ typedef void (^ALNPgQueryDiagnosticsListener)(NSDictionary<NSString *, id> *even
 @property(nonatomic, assign) ALNPgPreparedStatementReusePolicy preparedStatementReusePolicy;
 @property(nonatomic, assign) NSUInteger preparedStatementCacheLimit;
 @property(nonatomic, assign) NSUInteger builderCompilationCacheLimit;
+@property(nonatomic, assign) BOOL connectionLivenessChecksEnabled;
 @property(nonatomic, assign) BOOL includeSQLInDiagnosticsEvents;
 @property(nonatomic, assign) BOOL emitDiagnosticsEventsToStderr;
 @property(nonatomic, copy, nullable) ALNPgQueryDiagnosticsListener queryDiagnosticsListener;

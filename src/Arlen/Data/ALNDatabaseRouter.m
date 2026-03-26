@@ -18,6 +18,7 @@ NSString *const ALNDatabaseRouterEventShardKey = @"shard";
 NSString *const ALNDatabaseRouterEventResolverOverrideKey = @"resolver_override";
 NSString *const ALNDatabaseRouterEventErrorDomainKey = @"error_domain";
 NSString *const ALNDatabaseRouterEventErrorCodeKey = @"error_code";
+NSString *const ALNDatabaseRouterEventFallbackPolicyKey = @"fallback_policy";
 
 static NSError *ALNDatabaseRouterMakeError(ALNDatabaseRouterErrorCode code,
                                            NSString *message,
@@ -37,6 +38,18 @@ NSString *ALNDatabaseRouteOperationClassName(ALNDatabaseRouteOperationClass oper
     return @"write";
   case ALNDatabaseRouteOperationClassTransaction:
     return @"transaction";
+  }
+  return @"unknown";
+}
+
+NSString *ALNDatabaseReadFallbackPolicyName(ALNDatabaseReadFallbackPolicy policy) {
+  switch (policy) {
+  case ALNDatabaseReadFallbackPolicyDisabled:
+    return @"disabled";
+  case ALNDatabaseReadFallbackPolicyConnectivityErrors:
+    return @"connectivity_errors";
+  case ALNDatabaseReadFallbackPolicyAllErrors:
+    return @"all_errors";
   }
   return @"unknown";
 }
@@ -116,11 +129,20 @@ NSString *ALNDatabaseRouteOperationClassName(ALNDatabaseRouteOperationClass oper
   _defaultWriteTarget = [defaultWriteTarget copy];
   _readAfterWriteStickinessSeconds = 0;
   _stickinessScopeContextKey = [ALNDatabaseRoutingContextStickinessScopeKey copy];
-  _fallbackReadToWriteOnError = YES;
+  _readFallbackPolicy = ALNDatabaseReadFallbackPolicyConnectivityErrors;
   _lastWriteByScope = [NSMutableDictionary dictionary];
   _routeTargetResolver = nil;
   _routingDiagnosticsListener = nil;
   return self;
+}
+
+- (BOOL)fallbackReadToWriteOnError {
+  return (self.readFallbackPolicy != ALNDatabaseReadFallbackPolicyDisabled);
+}
+
+- (void)setFallbackReadToWriteOnError:(BOOL)fallbackReadToWriteOnError {
+  self.readFallbackPolicy = fallbackReadToWriteOnError ? ALNDatabaseReadFallbackPolicyAllErrors
+                                                       : ALNDatabaseReadFallbackPolicyDisabled;
 }
 
 - (NSString *)adapterName {
@@ -226,8 +248,20 @@ NSString *ALNDatabaseRouteOperationClassName(ALNDatabaseRouteOperationClass oper
 
   NSString *writeTarget = self.defaultWriteTarget ?: @"";
   id<ALNDatabaseAdapter> writeAdapter = self.targets[writeTarget];
+  BOOL policyAllowsFallback = NO;
+  switch (self.readFallbackPolicy) {
+  case ALNDatabaseReadFallbackPolicyDisabled:
+    policyAllowsFallback = NO;
+    break;
+  case ALNDatabaseReadFallbackPolicyConnectivityErrors:
+    policyAllowsFallback = ALNDatabaseErrorIsConnectivityFailure(queryError);
+    break;
+  case ALNDatabaseReadFallbackPolicyAllErrors:
+    policyAllowsFallback = YES;
+    break;
+  }
   BOOL shouldFallback =
-      self.fallbackReadToWriteOnError && [writeTarget length] > 0 &&
+      policyAllowsFallback && [writeTarget length] > 0 &&
       ![target isEqualToString:writeTarget] && writeAdapter != nil;
   if (!shouldFallback) {
     if (error != NULL) {
@@ -348,7 +382,9 @@ NSString *ALNDatabaseRouteOperationClassName(ALNDatabaseRouteOperationClass oper
     @"supports_read_write_routing" : @YES,
     @"supports_read_after_write_stickiness" : @YES,
     @"supports_tenant_shard_routing_hook" : @YES,
-    @"supports_route_fallback_to_write" : @(self.fallbackReadToWriteOnError),
+    @"supports_route_fallback_to_write" :
+        @(self.readFallbackPolicy != ALNDatabaseReadFallbackPolicyDisabled),
+    @"read_fallback_policy" : ALNDatabaseReadFallbackPolicyName(self.readFallbackPolicy),
     @"supports_routing_diagnostics" : @YES,
   };
 }
@@ -404,6 +440,8 @@ NSString *ALNDatabaseRouteOperationClassName(ALNDatabaseRouteOperationClass oper
   descriptor[ALNDatabaseRouterEventUsedStickinessKey] = @(usedStickiness);
   descriptor[ALNDatabaseRouterEventStickinessScopeKey] = scope;
   descriptor[ALNDatabaseRouterEventResolverOverrideKey] = @(resolverOverride);
+  descriptor[ALNDatabaseRouterEventFallbackPolicyKey] =
+      ALNDatabaseReadFallbackPolicyName(self.readFallbackPolicy);
 
   NSString *tenant = [context[ALNDatabaseRoutingContextTenantKey] isKindOfClass:[NSString class]]
                          ? context[ALNDatabaseRoutingContextTenantKey]

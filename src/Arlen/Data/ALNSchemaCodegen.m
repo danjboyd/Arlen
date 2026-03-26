@@ -69,12 +69,47 @@ static NSString *ALNSchemaCodegenPascalSuffix(NSString *identifier) {
 }
 
 static BOOL ALNSchemaCodegenIsNullableFromValue(id value) {
-  NSString *text = [[ALNSchemaCodegenStringValue(value) lowercaseString] stringByTrimmingCharactersInSet:
-                                                                         [NSCharacterSet whitespaceAndNewlineCharacterSet]];
-  if ([text isEqualToString:@"no"] || [text isEqualToString:@"false"] || [text isEqualToString:@"0"]) {
+  NSString *text = [[ALNSchemaCodegenStringValue(value) lowercaseString]
+      stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+  if ([text length] == 0) {
+    return YES;
+  }
+  if ([text isEqualToString:@"no"] || [text isEqualToString:@"false"] || [text isEqualToString:@"0"] ||
+      [text isEqualToString:@"f"] || [text isEqualToString:@"n"]) {
     return NO;
   }
   return YES;
+}
+
+static BOOL ALNSchemaCodegenBoolValue(id value, BOOL fallback) {
+  if ([value respondsToSelector:@selector(boolValue)]) {
+    return [value boolValue];
+  }
+
+  NSString *text = [[ALNSchemaCodegenStringValue(value) lowercaseString]
+      stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+  if ([text length] == 0) {
+    return fallback;
+  }
+  if ([text isEqualToString:@"yes"] || [text isEqualToString:@"true"] || [text isEqualToString:@"1"] ||
+      [text isEqualToString:@"t"] || [text isEqualToString:@"y"]) {
+    return YES;
+  }
+  if ([text isEqualToString:@"no"] || [text isEqualToString:@"false"] || [text isEqualToString:@"0"] ||
+      [text isEqualToString:@"f"] || [text isEqualToString:@"n"]) {
+    return NO;
+  }
+  return fallback;
+}
+
+static NSString *ALNSchemaCodegenDefaultValueShape(id value, BOOL hasDefault) {
+  NSString *shape = [[ALNSchemaCodegenStringValue(value) lowercaseString]
+      stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+  if ([shape isEqualToString:@"literal"] || [shape isEqualToString:@"expression"] ||
+      [shape isEqualToString:@"sequence"] || [shape isEqualToString:@"identity"]) {
+    return shape;
+  }
+  return hasDefault ? @"expression" : @"none";
 }
 
 static NSDictionary<NSString *, NSString *> *ALNSchemaCodegenTypeDescriptor(NSString *dataType) {
@@ -236,12 +271,31 @@ static NSString *ALNSchemaCodegenJSONEscape(NSString *value) {
     }
     NSString *dataType = ALNSchemaCodegenStringValue(row[@"data_type"]);
     if ([dataType length] == 0) {
+      dataType = ALNSchemaCodegenStringValue(row[@"dataType"]);
+    }
+    if ([dataType length] == 0) {
       dataType = ALNSchemaCodegenStringValue(row[@"type"]);
     }
     if ([dataType length] == 0) {
       dataType = @"text";
     }
-    BOOL nullable = ALNSchemaCodegenIsNullableFromValue(row[@"is_nullable"]);
+    id nullableValue = row[@"nullable"];
+    if (nullableValue == nil) {
+      nullableValue = row[@"is_nullable"];
+    }
+    BOOL nullable = ALNSchemaCodegenIsNullableFromValue(nullableValue);
+    BOOL primaryKey = ALNSchemaCodegenBoolValue(row[@"primary_key"], NO);
+    if (!primaryKey) {
+      primaryKey = ALNSchemaCodegenBoolValue(row[@"primaryKey"], NO);
+    }
+    BOOL hasDefault = ALNSchemaCodegenBoolValue(row[@"has_default"], NO);
+    if (!hasDefault) {
+      hasDefault = ALNSchemaCodegenBoolValue(row[@"hasDefault"], NO);
+    }
+    NSString *defaultValueShape = ALNSchemaCodegenDefaultValueShape(row[@"default_value_shape"], hasDefault);
+    if ([defaultValueShape isEqualToString:@"none"]) {
+      defaultValueShape = ALNSchemaCodegenDefaultValueShape(row[@"defaultValueShape"], hasDefault);
+    }
 
     NSInteger ordinal =
         ALNSchemaCodegenOrdinalValue(row[@"ordinal"], ALNSchemaCodegenOrdinalValue(row[@"ordinal_position"], fallbackOrdinal));
@@ -265,6 +319,9 @@ static NSString *ALNSchemaCodegenJSONEscape(NSString *value) {
       @"ordinal" : @(ordinal),
       @"dataType" : dataType,
       @"nullable" : @(nullable),
+      @"primaryKey" : @(primaryKey),
+      @"hasDefault" : @(hasDefault),
+      @"defaultValueShape" : defaultValueShape,
     }];
   }
 
@@ -412,6 +469,11 @@ static NSString *ALNSchemaCodegenJSONEscape(NSString *value) {
       @"dataType" : entry[@"dataType"] ?: @"text",
       @"displayType" : typeDescriptor[@"displayType"] ?: @"any",
       @"nullable" : [entry[@"nullable"] respondsToSelector:@selector(boolValue)] ? entry[@"nullable"] : @(YES),
+      @"primaryKey" : [entry[@"primaryKey"] respondsToSelector:@selector(boolValue)] ? entry[@"primaryKey"] : @(NO),
+      @"hasDefault" : [entry[@"hasDefault"] respondsToSelector:@selector(boolValue)] ? entry[@"hasDefault"] : @(NO),
+      @"defaultValueShape" : [entry[@"defaultValueShape"] isKindOfClass:[NSString class]]
+                                 ? entry[@"defaultValueShape"]
+                                 : @"none",
     }];
     totalColumns += 1;
   }
@@ -815,6 +877,7 @@ static NSString *ALNSchemaCodegenJSONEscape(NSString *value) {
   NSMutableString *manifest = [NSMutableString string];
   [manifest appendString:@"{\n"];
   [manifest appendString:@"  \"version\": 1,\n"];
+  [manifest appendString:@"  \"reflection_contract_version\": 1,\n"];
   [manifest appendFormat:@"  \"class_prefix\": \"%@\",\n", ALNSchemaCodegenJSONEscape(prefix)];
   [manifest appendFormat:@"  \"artifact_base_name\": \"%@\",\n", ALNSchemaCodegenJSONEscape(baseName)];
   [manifest appendFormat:@"  \"typed_contracts\": %@,\n", includeTypedContracts ? @"true" : @"false"];
@@ -851,7 +914,34 @@ static NSString *ALNSchemaCodegenJSONEscape(NSString *value) {
         [manifest appendString:@", "];
       }
     }
-    [manifest appendString:@"]\n"];
+    [manifest appendString:@"],\n"];
+    [manifest appendString:@"      \"column_metadata\": [\n"];
+    for (NSUInteger columnIndex = 0; columnIndex < [columns count]; columnIndex++) {
+      NSDictionary *column = columns[columnIndex];
+      NSString *columnName = [column[@"name"] isKindOfClass:[NSString class]] ? column[@"name"] : @"";
+      NSString *dataType = [column[@"dataType"] isKindOfClass:[NSString class]] ? column[@"dataType"] : @"text";
+      BOOL nullable = [column[@"nullable"] respondsToSelector:@selector(boolValue)] ? [column[@"nullable"] boolValue] : YES;
+      BOOL primaryKey =
+          [column[@"primaryKey"] respondsToSelector:@selector(boolValue)] ? [column[@"primaryKey"] boolValue] : NO;
+      BOOL hasDefault =
+          [column[@"hasDefault"] respondsToSelector:@selector(boolValue)] ? [column[@"hasDefault"] boolValue] : NO;
+      NSString *defaultValueShape =
+          [column[@"defaultValueShape"] isKindOfClass:[NSString class]] ? column[@"defaultValueShape"] : @"none";
+      [manifest appendString:@"        {\n"];
+      [manifest appendFormat:@"          \"name\": \"%@\",\n", ALNSchemaCodegenJSONEscape(columnName)];
+      [manifest appendFormat:@"          \"data_type\": \"%@\",\n", ALNSchemaCodegenJSONEscape(dataType)];
+      [manifest appendFormat:@"          \"nullable\": %@,\n", nullable ? @"true" : @"false"];
+      [manifest appendFormat:@"          \"primary_key\": %@,\n", primaryKey ? @"true" : @"false"];
+      [manifest appendFormat:@"          \"has_default\": %@,\n", hasDefault ? @"true" : @"false"];
+      [manifest appendFormat:@"          \"default_value_shape\": \"%@\"\n",
+                             ALNSchemaCodegenJSONEscape(defaultValueShape)];
+      [manifest appendString:@"        }"];
+      if (columnIndex + 1 < [columns count]) {
+        [manifest appendString:@","];
+      }
+      [manifest appendString:@"\n"];
+    }
+    [manifest appendString:@"      ]\n"];
     [manifest appendString:@"    }"];
     if (index + 1 < [tables count]) {
       [manifest appendString:@","];

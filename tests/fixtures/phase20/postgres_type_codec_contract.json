@@ -1,0 +1,40 @@
+{
+  "cases": [
+    {
+      "expected_class": "NSNumber",
+      "postgres_type": "integer",
+      "sql_fragment": "42::integer"
+    },
+    {
+      "expected_class": "NSNumber",
+      "postgres_type": "boolean",
+      "sql_fragment": "TRUE"
+    },
+    {
+      "expected_class": "NSDecimalNumber",
+      "postgres_type": "numeric",
+      "sql_fragment": "19.75::numeric"
+    },
+    {
+      "expected_class": "NSDate",
+      "postgres_type": "timestamptz",
+      "sql_fragment": "'2026-03-26T12:34:56Z'::timestamptz"
+    },
+    {
+      "expected_class": "NSDate",
+      "postgres_type": "date",
+      "sql_fragment": "'2026-03-26'::date"
+    },
+    {
+      "expected_class": "NSDictionary",
+      "postgres_type": "jsonb",
+      "sql_fragment": "'{\"name\":\"hank\"}'::jsonb"
+    },
+    {
+      "expected_class": "NSData",
+      "postgres_type": "bytea",
+      "sql_fragment": "decode('6869', 'hex')::bytea"
+    }
+  ],
+  "version": "phase20-type-codec-contract-v1"
+}

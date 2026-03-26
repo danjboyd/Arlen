@@ -1,5 +1,8 @@
 #import "ALNDatabaseAdapter.h"
 
+#import "ALNMSSQL.h"
+#import "ALNPg.h"
+
 NSString *const ALNDatabaseAdapterErrorDomain = @"Arlen.Data.Adapter.Error";
 
 NSError *ALNDatabaseAdapterMakeError(ALNDatabaseAdapterErrorCode code,
@@ -10,6 +13,56 @@ NSError *ALNDatabaseAdapterMakeError(ALNDatabaseAdapterErrorCode code,
   return [NSError errorWithDomain:ALNDatabaseAdapterErrorDomain
                              code:code
                          userInfo:details];
+}
+
+BOOL ALNDatabaseErrorIsConnectivityFailure(NSError *error) {
+  if (![error isKindOfClass:[NSError class]]) {
+    return NO;
+  }
+
+  NSError *underlying = [error.userInfo[NSUnderlyingErrorKey] isKindOfClass:[NSError class]]
+                            ? error.userInfo[NSUnderlyingErrorKey]
+                            : nil;
+  if (underlying != nil && ALNDatabaseErrorIsConnectivityFailure(underlying)) {
+    return YES;
+  }
+
+  if ([error.domain isEqualToString:ALNPgErrorDomain]) {
+    return (error.code == ALNPgErrorConnectionFailed || error.code == ALNPgErrorPoolExhausted);
+  }
+  if ([error.domain isEqualToString:ALNMSSQLErrorDomain]) {
+    return (error.code == ALNMSSQLErrorConnectionFailed || error.code == ALNMSSQLErrorPoolExhausted ||
+            error.code == ALNMSSQLErrorTransportUnavailable);
+  }
+
+  NSString *sqlState = [error.userInfo[ALNPgErrorSQLStateKey] isKindOfClass:[NSString class]]
+                           ? error.userInfo[ALNPgErrorSQLStateKey]
+                           : @"";
+  if ([sqlState hasPrefix:@"08"]) {
+    return YES;
+  }
+
+  NSString *text = [[NSString stringWithFormat:@"%@ %@",
+                                                error.localizedDescription ?: @"",
+                                                [error.userInfo[@"detail"] description] ?: @""]
+      lowercaseString];
+  NSArray<NSString *> *hints = @[
+    @"connection refused",
+    @"connection reset",
+    @"connect timeout",
+    @"could not connect",
+    @"network is unreachable",
+    @"server closed the connection",
+    @"transport unavailable",
+    @"pool exhausted",
+    @"broken pipe",
+  ];
+  for (NSString *hint in hints) {
+    if ([text containsString:hint]) {
+      return YES;
+    }
+  }
+  return NO;
 }
 
 NSDictionary<NSString *, id> *ALNDatabaseFirstRow(NSArray<NSDictionary *> *rows) {

@@ -1,6 +1,6 @@
 # Arlen Phase 20 Roadmap
 
-Status: Active (`20A-20C` delivered on 2026-03-26; `20D-20F` pending)
+Status: Complete (`20A-20F` delivered on 2026-03-26)
 Last updated: 2026-03-26
 
 Related docs:
@@ -114,7 +114,27 @@ does not include ORM features.
   - added explicit first-row and scalar extraction helpers in
     `ALNDatabaseAdapter.h`
   - docs/examples now show typed live-row decode and scalar fetch flows
-- `20D-20F`: pending
+- `20D`: complete on 2026-03-26
+  - added `ALNDatabaseInspector` / `ALNPostgresInspector` as the normalized
+    reflection seam for schema tooling
+  - `arlen schema-codegen` now consumes inspector output instead of embedding
+    PostgreSQL-specific introspection SQL in the CLI path
+  - schema manifests now carry `reflection_contract_version` and structured
+    `column_metadata`
+- `20E`: complete on 2026-03-26
+  - `ALNDatabaseRouter` now defaults to connectivity-only read fallback via
+    explicit `readFallbackPolicy`
+  - `ALNPg` now supports checkout liveness checks, stale idle connection
+    recycle behavior, rollback-on-release for leaked transactions, and
+    prepared-statement cache eviction
+  - capability metadata and routing diagnostics now expose the new fallback
+    and liveness semantics explicitly
+- `20F`: complete on 2026-03-26
+  - added Phase 20 fixtures for reflection and type-codec contracts
+  - added `make phase20-confidence` and deterministic artifact generation
+    under `build/release_confidence/phase20`
+  - refreshed docs/reference coverage for inspector usage, fallback policy,
+    liveness controls, and schema-codegen manifest semantics
 
 ## 4. Scope Guardrails
 
@@ -224,6 +244,8 @@ Acceptance (required):
 
 ## 5.4 Phase 20D: Lightweight Reflection + Schema Tooling Alignment
 
+Status: complete on 2026-03-26
+
 Deliverables:
 
 - Add a narrow inspector/reflection contract for table metadata sufficient for
@@ -251,6 +273,8 @@ Acceptance (required):
   authoring layer
 
 ## 5.5 Phase 20E: Connection Liveness + Safer Routing Failure Semantics
+
+Status: complete on 2026-03-26
 
 Deliverables:
 
@@ -283,6 +307,8 @@ Acceptance (required):
   observable
 
 ## 5.6 Phase 20F: Docs, Examples, + `phase20-confidence`
+
+Status: complete on 2026-03-26
 
 Deliverables:
 

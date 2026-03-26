@@ -14,6 +14,7 @@ Read/write routing layer that selects database targets by operation class and ro
 | `defaultWriteTarget` | `NSString *` | `nonatomic, copy, readonly` | Public `defaultWriteTarget` property available on `ALNDatabaseRouter`. |
 | `readAfterWriteStickinessSeconds` | `NSTimeInterval` | `nonatomic, assign` | Public `readAfterWriteStickinessSeconds` property available on `ALNDatabaseRouter`. |
 | `stickinessScopeContextKey` | `NSString *` | `nonatomic, copy` | Public `stickinessScopeContextKey` property available on `ALNDatabaseRouter`. |
+| `readFallbackPolicy` | `ALNDatabaseReadFallbackPolicy` | `nonatomic, assign` | Public `readFallbackPolicy` property available on `ALNDatabaseRouter`. |
 | `fallbackReadToWriteOnError` | `BOOL` | `nonatomic, assign` | Public `fallbackReadToWriteOnError` property available on `ALNDatabaseRouter`. |
 | `routeTargetResolver` | `ALNDatabaseRouteTargetResolver` | `nonatomic, copy, nullable` | Public `routeTargetResolver` property available on `ALNDatabaseRouter`. |
 | `routingDiagnosticsListener` | `ALNDatabaseRoutingDiagnosticsListener` | `nonatomic, copy, nullable` | Public `routingDiagnosticsListener` property available on `ALNDatabaseRouter`. |

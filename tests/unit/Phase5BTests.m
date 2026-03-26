@@ -408,9 +408,64 @@
   XCTAssertEqualObjects(@"fallback", fallbackEvent[ALNDatabaseRouterEventStageKey]);
   XCTAssertEqualObjects(@"reader", fallbackEvent[ALNDatabaseRouterEventSelectedTargetKey]);
   XCTAssertEqualObjects(@"writer", fallbackEvent[ALNDatabaseRouterEventFallbackTargetKey]);
+  XCTAssertEqualObjects(@"connectivity_errors", fallbackEvent[ALNDatabaseRouterEventFallbackPolicyKey]);
   XCTAssertEqualObjects(ALNPgErrorDomain, fallbackEvent[ALNDatabaseRouterEventErrorDomainKey]);
   XCTAssertEqual(ALNPgErrorPoolExhausted,
                  [fallbackEvent[ALNDatabaseRouterEventErrorCodeKey] integerValue]);
+}
+
+- (void)testReadFallbackDoesNotHideNonConnectivityErrorsByDefault {
+  Phase5BFakeAdapter *reader = [[Phase5BFakeAdapter alloc] initWithName:@"reader"];
+  Phase5BFakeAdapter *writer = [[Phase5BFakeAdapter alloc] initWithName:@"writer"];
+  reader.failNextQuery = YES;
+  reader.nextQueryError = [NSError errorWithDomain:@"Phase5BFakeAdapter"
+                                               code:909
+                                           userInfo:@{ NSLocalizedDescriptionKey : @"syntax error near FROM" }];
+
+  ALNDatabaseRouter *router = [self routerWithRead:reader write:writer];
+  XCTAssertNotNil(router);
+  if (router == nil) {
+    return;
+  }
+
+  NSError *error = nil;
+  NSArray<NSDictionary *> *rows = [router executeQuery:@"SELECT nope"
+                                            parameters:@[]
+                                        routingContext:nil
+                                                 error:&error];
+  XCTAssertNil(rows);
+  XCTAssertNotNil(error);
+  XCTAssertEqualObjects(@"Phase5BFakeAdapter", error.domain);
+  XCTAssertEqual((NSInteger)1, reader.queryCount);
+  XCTAssertEqual((NSInteger)0, writer.queryCount);
+}
+
+- (void)testReadFallbackPolicyAllErrorsAllowsBroadRetryOnWriter {
+  Phase5BFakeAdapter *reader = [[Phase5BFakeAdapter alloc] initWithName:@"reader"];
+  Phase5BFakeAdapter *writer = [[Phase5BFakeAdapter alloc] initWithName:@"writer"];
+  writer.rowsToReturn = @[ @{ @"value" : @"writer-retry" } ];
+  reader.failNextQuery = YES;
+  reader.nextQueryError = [NSError errorWithDomain:@"Phase5BFakeAdapter"
+                                               code:909
+                                           userInfo:@{ NSLocalizedDescriptionKey : @"syntax error near FROM" }];
+
+  ALNDatabaseRouter *router = [self routerWithRead:reader write:writer];
+  XCTAssertNotNil(router);
+  if (router == nil) {
+    return;
+  }
+  router.readFallbackPolicy = ALNDatabaseReadFallbackPolicyAllErrors;
+
+  NSError *error = nil;
+  NSArray<NSDictionary *> *rows = [router executeQuery:@"SELECT nope"
+                                            parameters:@[]
+                                        routingContext:nil
+                                                 error:&error];
+  XCTAssertNil(error);
+  XCTAssertEqual((NSUInteger)1, [rows count]);
+  XCTAssertEqualObjects(@"writer-retry", rows[0][@"value"]);
+  XCTAssertEqual((NSInteger)1, reader.queryCount);
+  XCTAssertEqual((NSInteger)1, writer.queryCount);
 }
 
 - (void)testTransactionFailureDoesNotActivateStickinessButSuccessDoes {

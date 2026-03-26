@@ -54,8 +54,12 @@ Hook behavior:
 
 Fallback behavior:
 
-- `fallbackReadToWriteOnError` defaults to `YES`
-- read target execution errors may retry once against write target
+- `readFallbackPolicy` defaults to `ALNDatabaseReadFallbackPolicyConnectivityErrors`
+- `fallbackReadToWriteOnError` remains as a compatibility alias:
+  - `YES` maps to `ALNDatabaseReadFallbackPolicyAllErrors`
+  - `NO` maps to `ALNDatabaseReadFallbackPolicyDisabled`
+- read target execution errors retry against write target only when the
+  explicit policy allows it
 - fallback emits explicit diagnostics event metadata
 
 ## 4. Diagnostics Contract
@@ -68,6 +72,7 @@ Fallback behavior:
 - resolver override indicator
 - optional tenant/shard identifiers
 - optional error domain/code for fallback events
+- explicit fallback policy name
 
 Event keys are constants in `ALNDatabaseRouter.h`.
 

@@ -390,3 +390,50 @@ Soak loop count override:
 Primary reference:
 
 - `docs/PHASE5E_HARDENING_CONFIDENCE.md`
+
+## 16. Phase 20 Data-Layer Depth Pass
+
+Phase 20 deepens the existing data layer without widening it into ORM-style
+metadata or lifecycle behavior.
+
+New internal seams and defaults:
+
+- reflection/codegen now go through `ALNDatabaseInspector`
+  - PostgreSQL-first implementation: `ALNPostgresInspector`
+  - normalized fields: schema/table/column/ordinal/data type/nullability/PK/default-shape
+- generated schema manifests now include:
+  - `reflection_contract_version`
+  - per-table `column_metadata`
+- `ALNDatabaseRouter` now defaults read fallback to connectivity-only errors
+  through `readFallbackPolicy`
+- `ALNPg` now supports:
+  - checkout liveness checks via `connectionLivenessChecksEnabled`
+  - stale idle connection recycle behavior
+  - prepared-statement cache eviction instead of permanent saturation
+
+Focused examples:
+
+```objc
+NSError *error = nil;
+NSArray<NSDictionary<NSString *, id> *> *columns =
+    [ALNDatabaseInspector inspectSchemaColumnsForAdapter:db error:&error];
+NSDictionary *artifacts =
+    [ALNSchemaCodegen renderArtifactsFromColumns:columns
+                                      classPrefix:@"ALNDB"
+                                   databaseTarget:@"default"
+                            includeTypedContracts:YES
+                                            error:&error];
+```
+
+```objc
+router.readFallbackPolicy = ALNDatabaseReadFallbackPolicyConnectivityErrors;
+db.connectionLivenessChecksEnabled = YES;
+```
+
+Confidence pack:
+
+- `make phase20-confidence`
+- output directory: `build/release_confidence/phase20`
+- machine fixtures:
+  - `tests/fixtures/phase20/postgres_reflection_contract.json`
+  - `tests/fixtures/phase20/postgres_type_codec_contract.json`

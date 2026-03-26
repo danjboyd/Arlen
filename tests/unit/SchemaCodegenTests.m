@@ -44,8 +44,11 @@
       @"table_name" : @"users",
       @"column_name" : @"id",
       @"ordinal_position" : @1,
-      @"data_type" : @"text",
+      @"data_type" : @"uuid",
       @"is_nullable" : @"NO",
+      @"primary_key" : @YES,
+      @"has_default" : @YES,
+      @"default_value_shape" : @"expression",
     },
     @{
       @"table_schema" : @"public",
@@ -54,6 +57,8 @@
       @"ordinal_position" : @2,
       @"data_type" : @"integer",
       @"is_nullable" : @"YES",
+      @"has_default" : @YES,
+      @"default_value_shape" : @"literal",
     },
     @{
       @"table_schema" : @"public",
@@ -62,6 +67,8 @@
       @"ordinal_position" : @3,
       @"data_type" : @"timestamp with time zone",
       @"is_nullable" : @"YES",
+      @"has_default" : @YES,
+      @"default_value_shape" : @"expression",
     },
   ];
 }
@@ -218,6 +225,11 @@
   XCTAssertTrue([implementation containsString:@"@synthesize columnAge = _columnAge;"]);
   XCTAssertTrue([implementation containsString:@"@synthesize columnCreatedAt = _columnCreatedAt;"]);
   XCTAssertFalse([implementation containsString:@"@property(nonatomic, copy, readwrite) NSString * columnId;"]);
+  XCTAssertTrue([manifest containsString:@"\"reflection_contract_version\": 1"]);
+  XCTAssertTrue([manifest containsString:@"\"column_metadata\": ["]);
+  XCTAssertTrue([manifest containsString:@"\"primary_key\": true"]);
+  XCTAssertTrue([manifest containsString:@"\"has_default\": true"]);
+  XCTAssertTrue([manifest containsString:@"\"default_value_shape\": \"literal\""]);
   XCTAssertTrue([implementation containsString:@"+ (ALNSQLBuilder *)insertContract:(ALNDBPublicUsersInsert *)contractValues {"]);
   XCTAssertTrue([implementation containsString:@"+ (nullable ALNDBPublicUsersRow *)decodeTypedRow:(NSDictionary<NSString *, id> *)row"]);
   XCTAssertTrue([implementation containsString:@"+ (nullable ALNDBPublicUsersRow *)decodeTypedFirstRowFromRows:(NSArray<NSDictionary<NSString *, id> *> *)rows"]);

@@ -134,4 +134,15 @@ Use `src/ArlenData/ArlenData.h` when consuming the data layer in non-Arlen runti
 
 Schema codegen note:
 
-- `arlen schema-codegen` remains PostgreSQL-only in the current Phase 17 slice.
+- `arlen schema-codegen` remains PostgreSQL-only, but it now goes through the
+  explicit `ALNDatabaseInspector` reflection contract instead of a CLI-local
+  `information_schema` query.
+- generated manifests now include `reflection_contract_version` and
+  per-table `column_metadata` for nullability, primary-key membership, and
+  default-shape tooling.
+
+Routing/liveness note:
+
+- `ALNDatabaseRouter` now defaults read fallback to connectivity-only errors.
+- `ALNPg.connectionLivenessChecksEnabled = YES` enables pre-query checkout
+  liveness checks for recycled pooled connections.

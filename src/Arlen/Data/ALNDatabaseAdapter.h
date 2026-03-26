@@ -58,6 +58,7 @@ typedef NS_ENUM(NSInteger, ALNDatabaseAdapterErrorCode) {
 FOUNDATION_EXPORT NSError *ALNDatabaseAdapterMakeError(ALNDatabaseAdapterErrorCode code,
                                                        NSString *message,
                                                        NSDictionary *_Nullable userInfo);
+FOUNDATION_EXPORT BOOL ALNDatabaseErrorIsConnectivityFailure(NSError *_Nullable error);
 FOUNDATION_EXPORT NSDictionary<NSString *, id> *_Nullable ALNDatabaseFirstRow(
     NSArray<NSDictionary *> *_Nullable rows);
 FOUNDATION_EXPORT id _Nullable ALNDatabaseScalarValueFromRow(

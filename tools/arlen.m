@@ -4,6 +4,7 @@
 
 #import "ALNConfig.h"
 #import "ALNGDL2Adapter.h"
+#import "ALNDatabaseInspector.h"
 #import "ALNJSONSerialization.h"
 #import "ALNMSSQL.h"
 #import "ALNModuleSystem.h"
@@ -3720,18 +3721,9 @@ static int CommandSchemaCodegen(NSArray *args) {
     return 1;
   }
 
-  NSString *introspectionSQL =
-      @"SELECT c.table_schema, c.table_name, c.column_name, c.ordinal_position, c.data_type, c.is_nullable "
-       "FROM information_schema.columns c "
-       "JOIN information_schema.tables t "
-       "  ON t.table_schema = c.table_schema "
-       " AND t.table_name = c.table_name "
-       "WHERE c.table_schema NOT IN ('pg_catalog', 'information_schema') "
-       "  AND t.table_type IN ('BASE TABLE', 'VIEW') "
-       "ORDER BY c.table_schema, c.table_name, c.ordinal_position, c.column_name";
-  NSArray *rows = [database executeQuery:introspectionSQL parameters:@[] error:&error];
+  NSArray *rows = [ALNDatabaseInspector inspectSchemaColumnsForAdapter:database error:&error];
   if (rows == nil) {
-    fprintf(stderr, "arlen schema-codegen: failed schema introspection query: %s\n",
+    fprintf(stderr, "arlen schema-codegen: failed schema inspection: %s\n",
             [[error localizedDescription] UTF8String]);
     return 1;
   }

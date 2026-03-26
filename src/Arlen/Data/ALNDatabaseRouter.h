@@ -21,7 +21,14 @@ typedef NS_ENUM(NSInteger, ALNDatabaseRouteOperationClass) {
   ALNDatabaseRouteOperationClassTransaction = 3,
 };
 
+typedef NS_ENUM(NSInteger, ALNDatabaseReadFallbackPolicy) {
+  ALNDatabaseReadFallbackPolicyDisabled = 0,
+  ALNDatabaseReadFallbackPolicyConnectivityErrors = 1,
+  ALNDatabaseReadFallbackPolicyAllErrors = 2,
+};
+
 FOUNDATION_EXPORT NSString *ALNDatabaseRouteOperationClassName(ALNDatabaseRouteOperationClass operationClass);
+FOUNDATION_EXPORT NSString *ALNDatabaseReadFallbackPolicyName(ALNDatabaseReadFallbackPolicy policy);
 
 extern NSString *const ALNDatabaseRoutingContextTenantKey;
 extern NSString *const ALNDatabaseRoutingContextShardKey;
@@ -39,6 +46,7 @@ extern NSString *const ALNDatabaseRouterEventShardKey;
 extern NSString *const ALNDatabaseRouterEventResolverOverrideKey;
 extern NSString *const ALNDatabaseRouterEventErrorDomainKey;
 extern NSString *const ALNDatabaseRouterEventErrorCodeKey;
+extern NSString *const ALNDatabaseRouterEventFallbackPolicyKey;
 
 typedef NSString *_Nullable (^ALNDatabaseRouteTargetResolver)(
     ALNDatabaseRouteOperationClass operationClass,
@@ -55,6 +63,7 @@ typedef void (^ALNDatabaseRoutingDiagnosticsListener)(NSDictionary<NSString *, i
 
 @property(nonatomic, assign) NSTimeInterval readAfterWriteStickinessSeconds;
 @property(nonatomic, copy) NSString *stickinessScopeContextKey;
+@property(nonatomic, assign) ALNDatabaseReadFallbackPolicy readFallbackPolicy;
 @property(nonatomic, assign) BOOL fallbackReadToWriteOnError;
 
 @property(nonatomic, copy, nullable) ALNDatabaseRouteTargetResolver routeTargetResolver;

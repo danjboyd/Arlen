@@ -3,6 +3,7 @@
 
 #import "Arlen/Data/ALNAdapterConformance.h"
 #import "Arlen/Data/ALNDatabaseAdapter.h"
+#import "Arlen/Data/ALNDatabaseInspector.h"
 #import "Arlen/Data/ALNDatabaseRouter.h"
 #import "Arlen/Data/ALNDisplayGroup.h"
 #import "Arlen/Data/ALNMSSQL.h"

@@ -41,3 +41,16 @@ Compile-time snapshots are paired with PostgreSQL execution regressions in `test
 
 - matrix-aligned advanced builder execution coverage
 - long projection + multi-parameter UTF-8 transport stress coverage (SQLSTATE `22021` regression class)
+
+## Phase 20 Nested Dialect Depth
+
+Phase 20 extends the execution/conformance story beyond the Phase 4 matrix:
+
+- nested builders now compile through the active dialect context instead of
+  relying on root-only adaptation
+- MSSQL unsupported-feature checks now fail closed inside subqueries as well
+  as at the top level
+- regression coverage lives in:
+  - `tests/unit/Phase17BTests.m`
+  - `tests/unit/PgTests.m`
+  - `docs/PHASE20_ROADMAP.md`

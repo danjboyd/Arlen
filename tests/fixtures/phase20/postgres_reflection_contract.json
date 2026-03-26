@@ -1,0 +1,95 @@
+{
+  "normalized_rows": [
+    {
+      "column": "invoice_id",
+      "data_type": "bigint",
+      "default_value_shape": "sequence",
+      "has_default": true,
+      "nullable": false,
+      "ordinal": 1,
+      "primary_key": true,
+      "schema": "billing",
+      "table": "invoices"
+    },
+    {
+      "column": "id",
+      "data_type": "uuid",
+      "default_value_shape": "expression",
+      "has_default": true,
+      "nullable": false,
+      "ordinal": 1,
+      "primary_key": true,
+      "schema": "public",
+      "table": "users"
+    },
+    {
+      "column": "email",
+      "data_type": "text",
+      "default_value_shape": "none",
+      "has_default": false,
+      "nullable": false,
+      "ordinal": 2,
+      "primary_key": false,
+      "schema": "public",
+      "table": "users"
+    },
+    {
+      "column": "created_at",
+      "data_type": "timestamp with time zone",
+      "default_value_shape": "expression",
+      "has_default": true,
+      "nullable": true,
+      "ordinal": 3,
+      "primary_key": false,
+      "schema": "public",
+      "table": "users"
+    }
+  ],
+  "raw_rows": [
+    {
+      "column": "created_at",
+      "data_type": "timestamp with time zone",
+      "default_value_shape": "expression",
+      "has_default": "YES",
+      "nullable": "YES",
+      "ordinal": "3",
+      "primary_key": "0",
+      "schema": "public",
+      "table": "users"
+    },
+    {
+      "column": "email",
+      "data_type": "text",
+      "default_value_shape": "none",
+      "has_default": false,
+      "nullable": "NO",
+      "ordinal": 2,
+      "primary_key": false,
+      "schema": "public",
+      "table": "users"
+    },
+    {
+      "column": "invoice_id",
+      "data_type": "bigint",
+      "default_value_shape": "sequence",
+      "has_default": 1,
+      "nullable": 0,
+      "ordinal": 1,
+      "primary_key": 1,
+      "schema": "billing",
+      "table": "invoices"
+    },
+    {
+      "column": "id",
+      "data_type": "uuid",
+      "default_value_shape": "expression",
+      "has_default": true,
+      "nullable": false,
+      "ordinal": 1,
+      "primary_key": true,
+      "schema": "public",
+      "table": "users"
+    }
+  ],
+  "version": "phase20-reflection-contract-v1"
+}

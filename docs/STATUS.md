@@ -206,10 +206,24 @@ entries, not current plan-of-record items.
 - Phase 19: complete (`19A-19F` delivered on 2026-03-14 for incremental
   GNUmake/GNUstep build-graph narrowing, generated-template object reuse, and
   clearer `boomhauer` build scope/progress)
-- Phase 20: active (`20A-20C` complete on 2026-03-26 for typed codecs/live
-  rows, recursive nested dialect compilation, and lightweight result helpers;
-  `20D-20F` pending for reflection, liveness hardening, and
+- Phase 20: complete (`20A-20F` complete on 2026-03-26 for typed codecs/live
+  rows, recursive nested dialect compilation, lightweight result helpers,
+  reflection/codegen alignment, routing/pool hardening, and
   `phase20-confidence`)
+
+## Completed Today (2026-03-26)
+
+- Completed Phase 20 reflection/tooling, routing/pool hardening, and closeout:
+  - added `ALNDatabaseInspector` / `ALNPostgresInspector` and moved
+    `arlen schema-codegen` onto one normalized reflection contract
+  - extended schema-codegen manifests with
+    `reflection_contract_version` + per-table `column_metadata`
+  - tightened `ALNDatabaseRouter` read fallback defaults to
+    connectivity-only with explicit `readFallbackPolicy`
+  - added PostgreSQL pool checkout liveness checks, idle stale-connection
+    recycling, active-transaction rollback-on-release, and prepared-statement
+    cache eviction instead of saturation starvation
+  - added Phase 20 fixtures, unit coverage, and `make phase20-confidence`
 
 ## Completed Today (2026-03-21)
 

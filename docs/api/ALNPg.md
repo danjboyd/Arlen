@@ -5,22 +5,6 @@
 
 PostgreSQL adapter with pooled connections and adapter-compatible query/command/transaction APIs.
 
-## Result Materialization
-
-`ALNPg` now materializes the supported PostgreSQL scalar baseline as typed
-Objective-C values instead of returning string-only rows for those columns:
-
-- `BOOL`, integer, and float families: `NSNumber`
-- `numeric`: `NSDecimalNumber`
-- `date`, `timestamp`, `timestamp with time zone`: `NSDate`
-- `bytea`: `NSData`
-- `json`, `jsonb`: Foundation objects decoded from JSON
-- text-like and unmapped types: `NSString`
-
-Supported bind inputs include `NSString`, `NSNumber`, `NSDate`, `NSData`,
-`NSArray`, `NSDictionary`, and `NSNull`. For mapped scalar result types,
-runtime decode failures surface an explicit `NSError`.
-
 ## Typical Usage
 
 ```objc
@@ -42,6 +26,7 @@ NSArray *rows = [db executeQuery:@"SELECT now() AS ts"
 | `preparedStatementReusePolicy` | `ALNPgPreparedStatementReusePolicy` | `nonatomic, assign` | Public `preparedStatementReusePolicy` property available on `ALNPg`. |
 | `preparedStatementCacheLimit` | `NSUInteger` | `nonatomic, assign` | Public `preparedStatementCacheLimit` property available on `ALNPg`. |
 | `builderCompilationCacheLimit` | `NSUInteger` | `nonatomic, assign` | Public `builderCompilationCacheLimit` property available on `ALNPg`. |
+| `connectionLivenessChecksEnabled` | `BOOL` | `nonatomic, assign` | Public `connectionLivenessChecksEnabled` property available on `ALNPg`. |
 | `includeSQLInDiagnosticsEvents` | `BOOL` | `nonatomic, assign` | Public `includeSQLInDiagnosticsEvents` property available on `ALNPg`. |
 | `emitDiagnosticsEventsToStderr` | `BOOL` | `nonatomic, assign` | Public `emitDiagnosticsEventsToStderr` property available on `ALNPg`. |
 | `queryDiagnosticsListener` | `ALNPgQueryDiagnosticsListener` | `nonatomic, copy, nullable` | Public `queryDiagnosticsListener` property available on `ALNPg`. |

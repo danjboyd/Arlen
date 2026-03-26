@@ -1252,6 +1252,10 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result, int rowIndex, NSError 
 @property(nonatomic, strong) NSMutableArray<NSString *> *preparedStatementCacheOrder;
 @property(nonatomic, assign) NSUInteger preparedStatementSequence;
 
+- (BOOL)hasActiveTransaction;
+- (BOOL)checkConnectionLiveness:(NSError **)error;
+- (BOOL)deallocatePreparedStatementNamed:(NSString *)name error:(NSError **)error;
+
 @end
 
 @implementation ALNPgConnection
@@ -1338,6 +1342,51 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result, int rowIndex, NSError 
                           nil);
   }
   return nil;
+}
+
+- (BOOL)hasActiveTransaction {
+  return _inTransaction;
+}
+
+- (BOOL)checkConnectionLiveness:(NSError **)error {
+  ALNPgClearError(error);
+  NSError *openError = [self checkOpenError];
+  if (openError != nil) {
+    if (error != NULL) {
+      *error = openError;
+    }
+    return NO;
+  }
+
+  PGresult *result = ALNPQexec(_conn, "SELECT 1");
+  if (result == NULL) {
+    if (error != NULL) {
+      NSString *detail = [NSString stringWithUTF8String:ALNPQerrorMessage(_conn) ?: ""];
+      *error = ALNPgMakeError(ALNPgErrorConnectionFailed,
+                              @"connection liveness check failed",
+                              detail,
+                              @"SELECT 1");
+    }
+    return NO;
+  }
+
+  ALNExecStatusType status = ALNPQresultStatus(result);
+  if (status != ALNPGRES_TUPLES_OK && status != ALNPGRES_COMMAND_OK) {
+    NSString *detail = [NSString stringWithUTF8String:ALNPQresultErrorMessage(result) ?: ""];
+    NSDictionary *diagnostics = ALNPgDiagnosticsFromResult(result);
+    ALNPQclear(result);
+    if (error != NULL) {
+      *error = ALNPgMakeErrorWithDiagnostics(ALNPgErrorConnectionFailed,
+                                             @"connection liveness check failed",
+                                             detail,
+                                             @"SELECT 1",
+                                             diagnostics);
+    }
+    return NO;
+  }
+
+  ALNPQclear(result);
+  return YES;
 }
 
 - (void)resetExecutionCaches {
@@ -1497,6 +1546,8 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result, int rowIndex, NSError 
                                              sql ?: @""];
   NSString *cachedName = self.preparedStatementNamesByKey[key];
   if ([cachedName length] > 0) {
+    [self.preparedStatementCacheOrder removeObject:key];
+    [self.preparedStatementCacheOrder addObject:key];
     if (cacheHit != NULL) {
       *cacheHit = YES;
     }
@@ -1508,7 +1559,19 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result, int rowIndex, NSError 
     if (cacheFull != NULL) {
       *cacheFull = YES;
     }
-    return nil;
+    NSString *oldestKey = [self.preparedStatementCacheOrder firstObject];
+    NSString *oldestName = self.preparedStatementNamesByKey[oldestKey];
+    if ([oldestKey length] > 0) {
+      NSError *evictionError = nil;
+      if (![self deallocatePreparedStatementNamed:oldestName error:&evictionError]) {
+        if (error != NULL) {
+          *error = evictionError;
+        }
+        return nil;
+      }
+      [self.preparedStatementNamesByKey removeObjectForKey:oldestKey];
+      [self.preparedStatementCacheOrder removeObjectAtIndex:0];
+    }
   }
 
   self.preparedStatementSequence += 1;
@@ -1533,6 +1596,51 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result, int rowIndex, NSError 
   [self.preparedStatementCacheOrder removeObject:key];
   [self.preparedStatementCacheOrder addObject:key];
   return statementName;
+}
+
+- (BOOL)deallocatePreparedStatementNamed:(NSString *)name error:(NSError **)error {
+  ALNPgClearError(error);
+  NSError *openError = [self checkOpenError];
+  if (openError != nil) {
+    if (error != NULL) {
+      *error = openError;
+    }
+    return NO;
+  }
+  if (![name isKindOfClass:[NSString class]] || [name length] == 0) {
+    return YES;
+  }
+
+  NSString *sql = [NSString stringWithFormat:@"DEALLOCATE %@", name];
+  PGresult *result = ALNPQexec(_conn, [sql UTF8String]);
+  if (result == NULL) {
+    if (error != NULL) {
+      NSString *detail = [NSString stringWithUTF8String:ALNPQerrorMessage(_conn) ?: ""];
+      *error = ALNPgMakeError(ALNPgErrorQueryFailed,
+                              @"failed to deallocate prepared statement",
+                              detail,
+                              sql);
+    }
+    return NO;
+  }
+
+  ALNExecStatusType status = ALNPQresultStatus(result);
+  if (status != ALNPGRES_COMMAND_OK) {
+    NSString *detail = [NSString stringWithUTF8String:ALNPQresultErrorMessage(result) ?: ""];
+    NSDictionary *diagnostics = ALNPgDiagnosticsFromResult(result);
+    ALNPQclear(result);
+    if (error != NULL) {
+      *error = ALNPgMakeErrorWithDiagnostics(ALNPgErrorQueryFailed,
+                                             @"failed to deallocate prepared statement",
+                                             detail,
+                                             sql,
+                                             diagnostics);
+    }
+    return NO;
+  }
+
+  ALNPQclear(result);
+  return YES;
 }
 
 - (BOOL)prepareStatementNamed:(NSString *)name
@@ -1981,7 +2089,8 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result, int rowIndex, NSError 
   if ([preparedName length] > 0) {
     executeEvent[ALNPgQueryEventPreparedStatementKey] = preparedName;
     executeEvent[ALNPgQueryEventCacheHitKey] = @(preparedCacheHit);
-  } else if (preparedCacheFull) {
+  }
+  if (preparedCacheFull) {
     executeEvent[ALNPgQueryEventCacheFullKey] = @YES;
   }
   [self emitQueryEvent:executeEvent];
@@ -2028,7 +2137,8 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result, int rowIndex, NSError 
     if ([preparedName length] > 0) {
       errorEvent[ALNPgQueryEventPreparedStatementKey] = preparedName;
       errorEvent[ALNPgQueryEventCacheHitKey] = @(preparedCacheHit);
-    } else if (preparedCacheFull) {
+    }
+    if (preparedCacheFull) {
       errorEvent[ALNPgQueryEventCacheFullKey] = @YES;
     }
     if (queryError != nil) {
@@ -2057,7 +2167,8 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result, int rowIndex, NSError 
   if ([preparedName length] > 0) {
     resultEvent[ALNPgQueryEventPreparedStatementKey] = preparedName;
     resultEvent[ALNPgQueryEventCacheHitKey] = @(preparedCacheHit);
-  } else if (preparedCacheFull) {
+  }
+  if (preparedCacheFull) {
     resultEvent[ALNPgQueryEventCacheFullKey] = @YES;
   }
   [self emitQueryEvent:resultEvent];
@@ -2139,7 +2250,8 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result, int rowIndex, NSError 
   if ([preparedName length] > 0) {
     executeEvent[ALNPgQueryEventPreparedStatementKey] = preparedName;
     executeEvent[ALNPgQueryEventCacheHitKey] = @(preparedCacheHit);
-  } else if (preparedCacheFull) {
+  }
+  if (preparedCacheFull) {
     executeEvent[ALNPgQueryEventCacheFullKey] = @YES;
   }
   [self emitQueryEvent:executeEvent];
@@ -2186,7 +2298,8 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result, int rowIndex, NSError 
     if ([preparedName length] > 0) {
       errorEvent[ALNPgQueryEventPreparedStatementKey] = preparedName;
       errorEvent[ALNPgQueryEventCacheHitKey] = @(preparedCacheHit);
-    } else if (preparedCacheFull) {
+    }
+    if (preparedCacheFull) {
       errorEvent[ALNPgQueryEventCacheFullKey] = @YES;
     }
     if (commandError != nil) {
@@ -2215,7 +2328,8 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result, int rowIndex, NSError 
   if ([preparedName length] > 0) {
     resultEvent[ALNPgQueryEventPreparedStatementKey] = preparedName;
     resultEvent[ALNPgQueryEventCacheHitKey] = @(preparedCacheHit);
-  } else if (preparedCacheFull) {
+  }
+  if (preparedCacheFull) {
     resultEvent[ALNPgQueryEventCacheFullKey] = @YES;
   }
   [self emitQueryEvent:resultEvent];
@@ -2308,7 +2422,10 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result, int rowIndex, NSError 
 @implementation ALNPg
 
 - (NSDictionary<NSString *, id> *)capabilityMetadata {
-  return [[self class] capabilityMetadata];
+  NSMutableDictionary<NSString *, id> *metadata =
+      [NSMutableDictionary dictionaryWithDictionary:[[self class] capabilityMetadata]];
+  metadata[@"connection_liveness_checks_enabled"] = @(self.connectionLivenessChecksEnabled);
+  return [NSDictionary dictionaryWithDictionary:metadata];
 }
 
 + (NSDictionary<NSString *, id> *)capabilityMetadata {
@@ -2323,6 +2440,7 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result, int rowIndex, NSError 
     @"json_feature_family" : @"jsonb_ops",
     @"supports_builder_compilation_cache" : @YES,
     @"supports_builder_diagnostics" : @YES,
+    @"supports_connection_liveness_checks" : @YES,
     @"supports_cte" : @YES,
     @"supports_for_update" : @YES,
     @"supports_lateral_join" : @YES,
@@ -2331,6 +2449,7 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result, int rowIndex, NSError 
     @"supports_set_operations" : @YES,
     @"supports_skip_locked" : @YES,
     @"supports_window_clauses" : @YES,
+    @"prepared_statement_cache_eviction" : @"lru",
   };
 }
 
@@ -2369,6 +2488,7 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result, int rowIndex, NSError 
   _preparedStatementReusePolicy = ALNPgPreparedStatementReusePolicyAuto;
   _preparedStatementCacheLimit = 128;
   _builderCompilationCacheLimit = 128;
+  _connectionLivenessChecksEnabled = NO;
   _includeSQLInDiagnosticsEvents = NO;
   _emitDiagnosticsEventsToStderr = NO;
   _queryDiagnosticsListener = nil;
@@ -2387,7 +2507,7 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result, int rowIndex, NSError 
 - (ALNPgConnection *)acquireConnection:(NSError **)error {
   ALNPgClearError(error);
   @synchronized(self) {
-    if ([self.idleConnections count] > 0) {
+    while ([self.idleConnections count] > 0) {
       ALNPgConnection *connection = [self.idleConnections lastObject];
       [self.idleConnections removeLastObject];
       connection.preparedStatementReusePolicy = self.preparedStatementReusePolicy;
@@ -2396,6 +2516,13 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result, int rowIndex, NSError 
       connection.includeSQLInDiagnosticsEvents = self.includeSQLInDiagnosticsEvents;
       connection.emitDiagnosticsEventsToStderr = self.emitDiagnosticsEventsToStderr;
       connection.queryDiagnosticsListener = self.queryDiagnosticsListener;
+      if (self.connectionLivenessChecksEnabled) {
+        NSError *livenessError = nil;
+        if (![connection checkConnectionLiveness:&livenessError]) {
+          [connection close];
+          continue;
+        }
+      }
       self.inUseConnections += 1;
       return connection;
     }
@@ -2438,6 +2565,12 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result, int rowIndex, NSError 
   @synchronized(self) {
     if (self.inUseConnections > 0) {
       self.inUseConnections -= 1;
+    }
+    if (connection.isOpen && [connection hasActiveTransaction]) {
+      NSError *rollbackError = nil;
+      if (![connection rollbackTransaction:&rollbackError]) {
+        [connection close];
+      }
     }
     if (connection.isOpen) {
       [self.idleConnections addObject:connection];
