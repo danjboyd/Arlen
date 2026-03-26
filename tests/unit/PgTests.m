@@ -5,9 +5,11 @@
 #import <string.h>
 #import <unistd.h>
 
+#import "ALNDatabaseInspector.h"
 #import "ALNMigrationRunner.h"
 #import "ALNPg.h"
 #import "ALNPostgresSQLBuilder.h"
+#import "ALNSchemaCodegen.h"
 #import "ALNSQLBuilder.h"
 
 @interface PgTests : XCTestCase
@@ -54,6 +56,37 @@
     return @{};
   }
   return payload;
+}
+
+- (NSDictionary *)phase20TypeCodecFixture {
+  NSString *root = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *path = [root stringByAppendingPathComponent:@"tests/fixtures/phase20/postgres_type_codec_contract.json"];
+  NSData *data = [NSData dataWithContentsOfFile:path];
+  XCTAssertNotNil(data);
+  if (data == nil) {
+    return @{};
+  }
+
+  NSError *error = nil;
+  NSDictionary *payload = [NSJSONSerialization JSONObjectWithData:data options:0 error:&error];
+  XCTAssertNil(error);
+  XCTAssertNotNil(payload);
+  return [payload isKindOfClass:[NSDictionary class]] ? payload : @{};
+}
+
+- (NSDictionary *)schemaTableNamed:(NSString *)table inManifest:(NSDictionary *)manifest {
+  NSArray *tables = [manifest[@"tables"] isKindOfClass:[NSArray class]] ? manifest[@"tables"] : @[];
+  for (NSDictionary *entry in tables) {
+    if (![entry isKindOfClass:[NSDictionary class]]) {
+      continue;
+    }
+    NSString *tableName = [entry[@"table"] isKindOfClass:[NSString class]] ? entry[@"table"] : @"";
+    NSString *schema = [entry[@"schema"] isKindOfClass:[NSString class]] ? entry[@"schema"] : @"";
+    if ([schema isEqualToString:@"public"] && [tableName isEqualToString:table]) {
+      return entry;
+    }
+  }
+  return nil;
 }
 
 - (NSDictionary<NSString *, NSDictionary *> *)phase4EConformanceScenarioLookup {
@@ -290,6 +323,158 @@
   XCTAssertNil(error);
   XCTAssertEqualObjects(@7, ageScalar);
   [database releaseConnection:connection];
+}
+
+- (void)testPostgresTypeCodecFixtureCoversLiveCommonScalarAndArrayRows {
+  NSString *dsn = [self pgTestDSN];
+  if ([dsn length] == 0) {
+    return;
+  }
+
+  NSDictionary *fixture = [self phase20TypeCodecFixture];
+  NSArray<NSDictionary *> *cases = [fixture[@"cases"] isKindOfClass:[NSArray class]] ? fixture[@"cases"] : @[];
+  XCTAssertTrue([cases count] > 0);
+  if ([cases count] == 0) {
+    return;
+  }
+
+  NSMutableArray<NSString *> *selectParts = [NSMutableArray arrayWithCapacity:[cases count]];
+  for (NSUInteger idx = 0; idx < [cases count]; idx++) {
+    NSDictionary *entry = cases[idx];
+    NSString *fragment = [entry[@"sql_fragment"] isKindOfClass:[NSString class]] ? entry[@"sql_fragment"] : @"NULL";
+    [selectParts addObject:[NSString stringWithFormat:@"%@ AS codec_%lu", fragment, (unsigned long)idx]];
+  }
+
+  NSError *error = nil;
+  ALNPg *database = [[ALNPg alloc] initWithConnectionString:dsn maxConnections:2 error:&error];
+  XCTAssertNil(error);
+  XCTAssertNotNil(database);
+  if (database == nil) {
+    return;
+  }
+
+  NSString *sql = [NSString stringWithFormat:@"SELECT %@", [selectParts componentsJoinedByString:@", "]];
+  NSArray<NSDictionary *> *rows = [database executeQuery:sql parameters:@[] error:&error];
+  XCTAssertNil(error);
+  XCTAssertEqual((NSUInteger)1, [rows count]);
+  NSDictionary *row = rows.firstObject;
+
+  for (NSUInteger idx = 0; idx < [cases count]; idx++) {
+    NSDictionary *entry = cases[idx];
+    NSString *expectedClassName =
+        [entry[@"expected_class"] isKindOfClass:[NSString class]] ? entry[@"expected_class"] : @"NSObject";
+    NSString *columnName = [NSString stringWithFormat:@"codec_%lu", (unsigned long)idx];
+    id value = row[columnName];
+    Class expectedClass = NSClassFromString(expectedClassName);
+    XCTAssertNotNil(value);
+    XCTAssertNotNil(expectedClass);
+    XCTAssertTrue([value isKindOfClass:expectedClass], @"column %@ expected %@ but got %@", columnName, expectedClassName, NSStringFromClass([value class]));
+  }
+
+  XCTAssertEqualObjects(@"123e4567-e89b-12d3-a456-426614174000", row[@"codec_7"]);
+  XCTAssertEqualObjects((@[ @"alpha", @"beta" ]), row[@"codec_8"]);
+  XCTAssertEqualObjects((@[ @1, @2, @3 ]), row[@"codec_9"]);
+}
+
+- (void)testPostgresWrapperParametersAndRelationAwareCodegenRoundTripAgainstLiveSchema {
+  NSString *dsn = [self pgTestDSN];
+  if ([dsn length] == 0) {
+    return;
+  }
+
+  NSError *error = nil;
+  ALNPg *database = [[ALNPg alloc] initWithConnectionString:dsn maxConnections:2 error:&error];
+  XCTAssertNil(error);
+  XCTAssertNotNil(database);
+  if (database == nil) {
+    return;
+  }
+
+  NSUUID *actorID = [NSUUID UUID];
+  NSArray<NSDictionary *> *wrapperRows =
+      [database executeQuery:@"SELECT $1::text[] AS tags, $2::jsonb AS profile, $3::uuid AS actor_id, $4::integer[] AS scores"
+                 parameters:@[
+                   ALNDatabaseArrayParameter(@[ @"alpha", @"beta" ]),
+                   ALNDatabaseJSONParameter(@{ @"name" : @"hank" }),
+                   actorID,
+                   ALNDatabaseArrayParameter(@[ @1, @2, @3 ]),
+                 ]
+                      error:&error];
+  XCTAssertNil(error);
+  XCTAssertEqual((NSUInteger)1, [wrapperRows count]);
+  NSDictionary *wrapperRow = wrapperRows.firstObject;
+  XCTAssertEqualObjects((@[ @"alpha", @"beta" ]), wrapperRow[@"tags"]);
+  XCTAssertEqualObjects(@"hank", wrapperRow[@"profile"][@"name"]);
+  XCTAssertEqualObjects([[actorID UUIDString] lowercaseString], [wrapperRow[@"actor_id"] lowercaseString]);
+  XCTAssertEqualObjects((@[ @1, @2, @3 ]), wrapperRow[@"scores"]);
+
+  NSString *table = [self uniqueNameWithPrefix:@"phase20g_users"];
+  NSString *view = [self uniqueNameWithPrefix:@"phase20g_user_emails"];
+  ALNPgConnection *connection = [database acquireConnection:&error];
+  XCTAssertNil(error);
+  XCTAssertNotNil(connection);
+  if (connection == nil) {
+    return;
+  }
+
+  NSString *dropViewSQL = [NSString stringWithFormat:@"DROP VIEW IF EXISTS %@", view];
+  NSString *dropTableSQL = [NSString stringWithFormat:@"DROP TABLE IF EXISTS %@", table];
+  @try {
+    NSString *createTableSQL =
+        [NSString stringWithFormat:@"CREATE TABLE %@(id UUID PRIMARY KEY, email TEXT NOT NULL, tags TEXT[])", table];
+    XCTAssertGreaterThanOrEqual([connection executeCommand:createTableSQL parameters:@[] error:&error], 0);
+    XCTAssertNil(error);
+
+    NSString *createViewSQL =
+        [NSString stringWithFormat:@"CREATE VIEW %@ AS SELECT email FROM %@", view, table];
+    XCTAssertGreaterThanOrEqual([connection executeCommand:createViewSQL parameters:@[] error:&error], 0);
+    XCTAssertNil(error);
+
+    NSArray<NSDictionary *> *reflected = [ALNDatabaseInspector inspectSchemaColumnsForAdapter:database error:&error];
+    XCTAssertNil(error);
+    XCTAssertNotNil(reflected);
+
+    NSMutableArray<NSDictionary *> *filtered = [NSMutableArray array];
+    for (NSDictionary *row in reflected ?: @[]) {
+      NSString *schema = [row[@"schema"] isKindOfClass:[NSString class]] ? row[@"schema"] : @"";
+      NSString *tableName = [row[@"table"] isKindOfClass:[NSString class]] ? row[@"table"] : @"";
+      if ([schema isEqualToString:@"public"] && ([tableName isEqualToString:table] || [tableName isEqualToString:view])) {
+        [filtered addObject:row];
+      }
+    }
+
+    NSDictionary *artifacts = [ALNSchemaCodegen renderArtifactsFromColumns:filtered
+                                                                classPrefix:@"ALNPG"
+                                                             databaseTarget:nil
+                                                      includeTypedContracts:YES
+                                                                      error:&error];
+    XCTAssertNil(error);
+    XCTAssertNotNil(artifacts);
+
+    NSData *manifestData = [[artifacts[@"manifest"] isKindOfClass:[NSString class]] ? artifacts[@"manifest"] : @"{}"
+        dataUsingEncoding:NSUTF8StringEncoding];
+    NSDictionary *manifest =
+        [NSJSONSerialization JSONObjectWithData:manifestData ?: [NSData data] options:0 error:&error];
+    XCTAssertNil(error);
+    XCTAssertEqualObjects(@2, manifest[@"reflection_contract_version"]);
+
+    NSDictionary *tableContract = [self schemaTableNamed:table inManifest:manifest];
+    NSDictionary *viewContract = [self schemaTableNamed:view inManifest:manifest];
+    XCTAssertEqualObjects(@"table", tableContract[@"relation_kind"]);
+    XCTAssertEqualObjects(@NO, tableContract[@"read_only"]);
+    XCTAssertEqualObjects(@YES, tableContract[@"supports_write_contracts"]);
+    XCTAssertNotNil(tableContract[@"insert_class_name"]);
+
+    XCTAssertEqualObjects(@"view", viewContract[@"relation_kind"]);
+    XCTAssertEqualObjects(@YES, viewContract[@"read_only"]);
+    XCTAssertEqualObjects(@NO, viewContract[@"supports_write_contracts"]);
+    XCTAssertNil(viewContract[@"insert_class_name"]);
+    XCTAssertNotNil(viewContract[@"row_class_name"]);
+  } @finally {
+    (void)[connection executeCommand:dropViewSQL parameters:@[] error:NULL];
+    (void)[connection executeCommand:dropTableSQL parameters:@[] error:NULL];
+    [database releaseConnection:connection];
+  }
 }
 
 - (void)testCommandsWithReturningReportAffectedRowsForDirectAndPreparedExecution {

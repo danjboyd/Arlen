@@ -95,7 +95,14 @@ runtime values:
 - `date`, `timestamp`, `timestamp with time zone`: `NSDate`
 - `bytea`: `NSData`
 - `json`, `jsonb`: Foundation objects decoded from JSON
+- supported one-dimensional scalar arrays: `NSArray`
 - text-like and unmapped types: `NSString`
+
+Generated write contracts use explicit collection wrappers so PostgreSQL array
+columns are not mistaken for JSON:
+
+- `ALNDatabaseArrayParameter(...)` for array-typed columns
+- `ALNDatabaseJSONParameter(...)` for `json` / `jsonb`
 
 If you use schema codegen, decode live rows through the generated contract
 instead of manually casting dictionaries:
@@ -138,8 +145,11 @@ Schema codegen note:
   explicit `ALNDatabaseInspector` reflection contract instead of a CLI-local
   `information_schema` query.
 - generated manifests now include `reflection_contract_version` and
-  per-table `column_metadata` for nullability, primary-key membership, and
-  default-shape tooling.
+  per-table `relation_kind`, `read_only`, `supports_write_contracts`, and
+  `column_metadata` for nullability, primary-key membership, and default-shape
+  tooling.
+- reflected views keep typed row helpers, but default write helpers/contracts
+  are emitted only for writable base tables.
 
 Routing/liveness note:
 

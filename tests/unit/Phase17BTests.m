@@ -161,4 +161,46 @@
   XCTAssertEqualObjects(@"mssql", report[@"adapter"]);
 }
 
+- (void)testMSSQLAdapterMaterializesTypedCommonScalarsWhenExplicitTestDSNIsProvided {
+  NSString *dsn = [self mssqlTestDSN];
+  if ([dsn length] == 0) {
+    return;
+  }
+
+  NSError *error = nil;
+  ALNMSSQL *adapter = [[ALNMSSQL alloc] initWithConnectionString:dsn
+                                                   maxConnections:2
+                                                            error:&error];
+  XCTAssertNil(error);
+  XCTAssertNotNil(adapter);
+  if (adapter == nil) {
+    return;
+  }
+
+  NSUUID *actorID = [NSUUID UUID];
+  NSArray<NSDictionary *> *rows =
+      [adapter executeQuery:@"SELECT CAST(42 AS INT) AS age, "
+                             "CAST(1 AS BIT) AS is_active, "
+                             "CAST(19.75 AS DECIMAL(10,2)) AS balance, "
+                             "CAST('2026-03-26 12:34:56.123' AS DATETIME2) AS created_at, "
+                             "CAST(? AS BIGINT) AS total, "
+                             "CAST(? AS BIT) AS enabled, "
+                             "CAST(? AS UNIQUEIDENTIFIER) AS actor_id"
+                 parameters:@[ @7, @YES, actorID ]
+                      error:&error];
+  XCTAssertNil(error);
+  XCTAssertEqual((NSUInteger)1, [rows count]);
+  NSDictionary *row = rows.firstObject;
+  XCTAssertTrue([row[@"age"] isKindOfClass:[NSNumber class]]);
+  XCTAssertEqualObjects(@42, row[@"age"]);
+  XCTAssertTrue([row[@"is_active"] isKindOfClass:[NSNumber class]]);
+  XCTAssertEqualObjects(@YES, row[@"is_active"]);
+  XCTAssertTrue([row[@"balance"] isKindOfClass:[NSNumber class]]);
+  XCTAssertEqualObjects([NSDecimalNumber decimalNumberWithString:@"19.75"], row[@"balance"]);
+  XCTAssertTrue([row[@"created_at"] isKindOfClass:[NSDate class]]);
+  XCTAssertEqualObjects(@7, row[@"total"]);
+  XCTAssertEqualObjects(@YES, row[@"enabled"]);
+  XCTAssertEqualObjects([[actorID UUIDString] uppercaseString], [row[@"actor_id"] uppercaseString]);
+}
+
 @end

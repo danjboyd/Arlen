@@ -34,7 +34,22 @@
       "expected_class": "NSData",
       "postgres_type": "bytea",
       "sql_fragment": "decode('6869', 'hex')::bytea"
+    },
+    {
+      "expected_class": "NSString",
+      "postgres_type": "uuid",
+      "sql_fragment": "'123e4567-e89b-12d3-a456-426614174000'::uuid"
+    },
+    {
+      "expected_class": "NSArray",
+      "postgres_type": "text[]",
+      "sql_fragment": "ARRAY['alpha', 'beta']::text[]"
+    },
+    {
+      "expected_class": "NSArray",
+      "postgres_type": "integer[]",
+      "sql_fragment": "ARRAY[1, 2, 3]::integer[]"
     }
   ],
-  "version": "phase20-type-codec-contract-v1"
+  "version": "phase20-type-codec-contract-v2"
 }

@@ -1,0 +1,388 @@
+{
+  "column_rows": [
+    {
+      "column": "created_at",
+      "data_type": "timestamp with time zone",
+      "default_value_shape": "expression",
+      "has_default": "YES",
+      "nullable": "YES",
+      "ordinal": "3",
+      "primary_key": "0",
+      "read_only": "NO",
+      "relation_kind": "table",
+      "schema": "public",
+      "table": "users"
+    },
+    {
+      "column": "email",
+      "data_type": "text",
+      "default_value_shape": "none",
+      "has_default": false,
+      "nullable": "NO",
+      "ordinal": 2,
+      "primary_key": false,
+      "schema": "public",
+      "table": "users",
+      "table_type": "BASE TABLE"
+    },
+    {
+      "column": "invoice_id",
+      "data_type": "bigint",
+      "default_value_shape": "sequence",
+      "has_default": 1,
+      "nullable": 0,
+      "ordinal": 1,
+      "primary_key": 1,
+      "schema": "billing",
+      "table": "invoices",
+      "table_type": "BASE TABLE"
+    },
+    {
+      "column": "user_id",
+      "data_type": "uuid",
+      "default_value_shape": "none",
+      "has_default": false,
+      "nullable": false,
+      "ordinal": 2,
+      "primary_key": false,
+      "schema": "billing",
+      "table": "invoices",
+      "table_type": "BASE TABLE"
+    },
+    {
+      "column": "amount",
+      "data_type": "numeric",
+      "default_value_shape": "literal",
+      "has_default": true,
+      "nullable": false,
+      "ordinal": 3,
+      "primary_key": false,
+      "schema": "billing",
+      "table": "invoices",
+      "table_type": "BASE TABLE"
+    },
+    {
+      "column": "email",
+      "data_type": "text",
+      "default_value_shape": "none",
+      "has_default": false,
+      "nullable": true,
+      "ordinal": 1,
+      "primary_key": false,
+      "schema": "public",
+      "table": "user_emails",
+      "table_type": "VIEW"
+    },
+    {
+      "column": "id",
+      "data_type": "uuid",
+      "default_value_shape": "expression",
+      "has_default": true,
+      "nullable": false,
+      "ordinal": 1,
+      "primary_key": true,
+      "relation_kind": "table",
+      "read_only": false,
+      "schema": "public",
+      "table": "users"
+    }
+  ],
+  "expected_metadata": {
+    "adapter": "postgresql",
+    "columns": [
+      {
+        "column": "invoice_id",
+        "data_type": "bigint",
+        "default_value_shape": "sequence",
+        "has_default": true,
+        "nullable": false,
+        "ordinal": 1,
+        "primary_key": true,
+        "read_only": false,
+        "relation_kind": "table",
+        "schema": "billing",
+        "table": "invoices"
+      },
+      {
+        "column": "user_id",
+        "data_type": "uuid",
+        "default_value_shape": "none",
+        "has_default": false,
+        "nullable": false,
+        "ordinal": 2,
+        "primary_key": false,
+        "read_only": false,
+        "relation_kind": "table",
+        "schema": "billing",
+        "table": "invoices"
+      },
+      {
+        "column": "amount",
+        "data_type": "numeric",
+        "default_value_shape": "literal",
+        "has_default": true,
+        "nullable": false,
+        "ordinal": 3,
+        "primary_key": false,
+        "read_only": false,
+        "relation_kind": "table",
+        "schema": "billing",
+        "table": "invoices"
+      },
+      {
+        "column": "email",
+        "data_type": "text",
+        "default_value_shape": "none",
+        "has_default": false,
+        "nullable": true,
+        "ordinal": 1,
+        "primary_key": false,
+        "read_only": true,
+        "relation_kind": "view",
+        "schema": "public",
+        "table": "user_emails"
+      },
+      {
+        "column": "id",
+        "data_type": "uuid",
+        "default_value_shape": "expression",
+        "has_default": true,
+        "nullable": false,
+        "ordinal": 1,
+        "primary_key": true,
+        "read_only": false,
+        "relation_kind": "table",
+        "schema": "public",
+        "table": "users"
+      },
+      {
+        "column": "email",
+        "data_type": "text",
+        "default_value_shape": "none",
+        "has_default": false,
+        "nullable": false,
+        "ordinal": 2,
+        "primary_key": false,
+        "read_only": false,
+        "relation_kind": "table",
+        "schema": "public",
+        "table": "users"
+      },
+      {
+        "column": "created_at",
+        "data_type": "timestamp with time zone",
+        "default_value_shape": "expression",
+        "has_default": true,
+        "nullable": true,
+        "ordinal": 3,
+        "primary_key": false,
+        "read_only": false,
+        "relation_kind": "table",
+        "schema": "public",
+        "table": "users"
+      }
+    ],
+    "foreign_keys": [
+      {
+        "columns": [
+          "user_id"
+        ],
+        "constraint_name": "invoices_user_id_fkey",
+        "referenced_columns": [
+          "id"
+        ],
+        "referenced_schema": "public",
+        "referenced_table": "users",
+        "schema": "billing",
+        "table": "invoices"
+      }
+    ],
+    "indexes": [
+      {
+        "columns": [
+          "invoice_id"
+        ],
+        "index_name": "invoices_pkey",
+        "is_primary": true,
+        "is_unique": true,
+        "schema": "billing",
+        "table": "invoices"
+      },
+      {
+        "columns": [
+          "user_id"
+        ],
+        "index_name": "invoices_user_id_idx",
+        "is_primary": false,
+        "is_unique": false,
+        "schema": "billing",
+        "table": "invoices"
+      },
+      {
+        "columns": [
+          "email"
+        ],
+        "index_name": "users_email_key",
+        "is_primary": false,
+        "is_unique": true,
+        "schema": "public",
+        "table": "users"
+      },
+      {
+        "columns": [
+          "id"
+        ],
+        "index_name": "users_pkey",
+        "is_primary": true,
+        "is_unique": true,
+        "schema": "public",
+        "table": "users"
+      }
+    ],
+    "primary_keys": [
+      {
+        "columns": [
+          "invoice_id"
+        ],
+        "constraint_name": "invoices_pkey",
+        "schema": "billing",
+        "table": "invoices"
+      },
+      {
+        "columns": [
+          "id"
+        ],
+        "constraint_name": "users_pkey",
+        "schema": "public",
+        "table": "users"
+      }
+    ],
+    "reflection_contract_version": 2,
+    "relations": [
+      {
+        "read_only": false,
+        "relation_kind": "table",
+        "schema": "billing",
+        "table": "invoices"
+      },
+      {
+        "read_only": true,
+        "relation_kind": "view",
+        "schema": "public",
+        "table": "user_emails"
+      },
+      {
+        "read_only": false,
+        "relation_kind": "table",
+        "schema": "public",
+        "table": "users"
+      }
+    ],
+    "unique_constraints": [
+      {
+        "columns": [
+          "email"
+        ],
+        "constraint_name": "users_email_key",
+        "schema": "public",
+        "table": "users"
+      }
+    ]
+  },
+  "foreign_key_rows": [
+    {
+      "column": "user_id",
+      "constraint_name": "invoices_user_id_fkey",
+      "ordinal": 1,
+      "referenced_column": "id",
+      "referenced_schema": "public",
+      "referenced_table": "users",
+      "schema": "billing",
+      "table": "invoices"
+    }
+  ],
+  "index_rows": [
+    {
+      "column": "invoice_id",
+      "index_name": "invoices_pkey",
+      "is_primary": true,
+      "is_unique": true,
+      "ordinal": 1,
+      "schema": "billing",
+      "table": "invoices"
+    },
+    {
+      "column": "user_id",
+      "index_name": "invoices_user_id_idx",
+      "is_primary": false,
+      "is_unique": false,
+      "ordinal": 1,
+      "schema": "billing",
+      "table": "invoices"
+    },
+    {
+      "column": "id",
+      "index_name": "users_pkey",
+      "is_primary": true,
+      "is_unique": true,
+      "ordinal": 1,
+      "schema": "public",
+      "table": "users"
+    },
+    {
+      "column": "email",
+      "index_name": "users_email_key",
+      "is_primary": false,
+      "is_unique": true,
+      "ordinal": 1,
+      "schema": "public",
+      "table": "users"
+    }
+  ],
+  "primary_key_rows": [
+    {
+      "column": "invoice_id",
+      "constraint_name": "invoices_pkey",
+      "ordinal": 1,
+      "schema": "billing",
+      "table": "invoices"
+    },
+    {
+      "column": "id",
+      "constraint_name": "users_pkey",
+      "ordinal": 1,
+      "schema": "public",
+      "table": "users"
+    }
+  ],
+  "relation_rows": [
+    {
+      "read_only": false,
+      "relation_kind": "table",
+      "schema": "billing",
+      "table": "invoices"
+    },
+    {
+      "read_only": true,
+      "relation_kind": "view",
+      "schema": "public",
+      "table": "user_emails"
+    },
+    {
+      "read_only": false,
+      "relation_kind": "table",
+      "schema": "public",
+      "table": "users"
+    }
+  ],
+  "unique_constraint_rows": [
+    {
+      "column": "email",
+      "constraint_name": "users_email_key",
+      "ordinal": 1,
+      "schema": "public",
+      "table": "users"
+    }
+  ],
+  "version": "phase20-inspector-metadata-contract-v1"
+}

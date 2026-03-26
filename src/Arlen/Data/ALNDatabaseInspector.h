@@ -20,6 +20,8 @@ typedef NS_ENUM(NSInteger, ALNDatabaseInspectorErrorCode) {
 
 + (nullable NSArray<NSDictionary<NSString *, id> *> *)inspectSchemaColumnsForAdapter:(id<ALNDatabaseAdapter>)adapter
                                                                                error:(NSError *_Nullable *_Nullable)error;
++ (nullable NSDictionary<NSString *, id> *)inspectSchemaMetadataForAdapter:(id<ALNDatabaseAdapter>)adapter
+                                                                     error:(NSError *_Nullable *_Nullable)error;
 
 @end
 
@@ -30,6 +32,8 @@ typedef NS_ENUM(NSInteger, ALNDatabaseInspectorErrorCode) {
 
 + (nullable NSArray<NSDictionary<NSString *, id> *> *)normalizedColumnsFromInspectionRows:(NSArray<NSDictionary *> *)rows
                                                                                      error:(NSError *_Nullable *_Nullable)error;
++ (nullable NSDictionary<NSString *, id> *)inspectSchemaMetadataWithAdapter:(id<ALNDatabaseAdapter>)adapter
+                                                                      error:(NSError *_Nullable *_Nullable)error;
 
 @end
 

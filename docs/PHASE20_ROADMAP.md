@@ -1,6 +1,6 @@
 # Arlen Phase 20 Roadmap
 
-Status: Extended (`20A-20F` delivered on 2026-03-26; `20G-20K` planned)
+Status: Extended (`20A-20I` delivered on 2026-03-26; `20J-20K` planned)
 Last updated: 2026-03-26
 
 Related docs:
@@ -148,15 +148,21 @@ does not include ORM features.
     under `build/release_confidence/phase20`
   - refreshed docs/reference coverage for inspector usage, fallback policy,
     liveness controls, and schema-codegen manifest semantics
-- `20G`: planned
-  - preserve relation kind in the reflection contract and make schema codegen
-    view-safe on the write path
-- `20H`: planned
-  - move from hardcoded adapter type handling to a clearer cross-dialect codec
-    contract with a bounded richer supported subset
-- `20I`: planned
-  - widen inspector coverage beyond columns/defaults to the minimum additional
-    metadata that tooling and audits need
+- `20G`: complete on 2026-03-26
+  - preserved `relation_kind` / `read_only` through reflection, manifests, and
+    generated helpers
+  - reflected views now keep typed row helpers but no longer receive default
+    write contracts/builders
+  - added fixture + live PostgreSQL coverage for mixed table/view schemas
+- `20H`: complete on 2026-03-26
+  - added explicit PostgreSQL JSON/array parameter wrappers, bounded
+    one-dimensional array decode, and live codec fixture coverage
+  - brought MSSQL bind/result handling up to a documented typed common-scalar
+    baseline instead of string-only transport for those cases
+- `20I`: complete on 2026-03-26
+  - widened `ALNDatabaseInspector` to inspector-v2 metadata for relations,
+    primary keys, unique constraints, foreign keys, and indexes
+  - added deterministic fixtures/tests for the expanded normalized metadata
 - `20J`: planned
   - add lightweight result/execution ergonomics without widening Arlen into an
     ORM or streaming-heavy API
@@ -369,7 +375,7 @@ Acceptance (required):
 
 ## 5.7 Phase 20G: Relation-Kind-Aware Reflection + View-Safe Codegen
 
-Status: planned
+Status: complete on 2026-03-26
 
 Deliverables:
 
@@ -399,7 +405,7 @@ Acceptance (required):
 
 ## 5.8 Phase 20H: Extended Type Codecs + Dialect-Aware Bind/Result Parity
 
-Status: planned
+Status: complete on 2026-03-26
 
 Deliverables:
 
@@ -429,7 +435,7 @@ Acceptance (required):
 
 ## 5.9 Phase 20I: Inspector V2 for Keys, Indexes, + Relation Metadata
 
-Status: planned
+Status: complete on 2026-03-26
 
 Deliverables:
 

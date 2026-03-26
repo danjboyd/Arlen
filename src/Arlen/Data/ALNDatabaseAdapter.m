@@ -5,6 +5,46 @@
 
 NSString *const ALNDatabaseAdapterErrorDomain = @"Arlen.Data.Adapter.Error";
 
+@implementation ALNDatabaseJSONValue
+
++ (instancetype)valueWithObject:(id)object {
+  return [[self alloc] initWithObject:object];
+}
+
+- (instancetype)init {
+  return [self initWithObject:nil];
+}
+
+- (instancetype)initWithObject:(id)object {
+  self = [super init];
+  if (self != nil) {
+    _object = object;
+  }
+  return self;
+}
+
+@end
+
+@implementation ALNDatabaseArrayValue
+
++ (instancetype)valueWithItems:(NSArray *)items {
+  return [[self alloc] initWithItems:items];
+}
+
+- (instancetype)init {
+  return [self initWithItems:nil];
+}
+
+- (instancetype)initWithItems:(NSArray *)items {
+  self = [super init];
+  if (self != nil) {
+    _items = [items copy] ?: @[];
+  }
+  return self;
+}
+
+@end
+
 NSError *ALNDatabaseAdapterMakeError(ALNDatabaseAdapterErrorCode code,
                                      NSString *message,
                                      NSDictionary *userInfo) {
@@ -63,6 +103,14 @@ BOOL ALNDatabaseErrorIsConnectivityFailure(NSError *error) {
     }
   }
   return NO;
+}
+
+ALNDatabaseJSONValue *ALNDatabaseJSONParameter(id object) {
+  return [ALNDatabaseJSONValue valueWithObject:object];
+}
+
+ALNDatabaseArrayValue *ALNDatabaseArrayParameter(NSArray *items) {
+  return [ALNDatabaseArrayValue valueWithItems:items];
 }
 
 NSDictionary<NSString *, id> *ALNDatabaseFirstRow(NSArray<NSDictionary *> *rows) {

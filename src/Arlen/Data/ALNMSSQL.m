@@ -1,5 +1,6 @@
 #import "ALNMSSQL.h"
 
+#import "ALNJSONSerialization.h"
 #import "ALNMSSQLDialect.h"
 #import "ALNSQLBuilder.h"
 
@@ -442,24 +443,155 @@ static NSError *ALNMSSQLErrorForHandle(ALNMSSQLErrorCode code,
   return ALNMSSQLMakeError(code, message, detail, diagnostics);
 }
 
-static NSString *ALNMSSQLParameterString(id value) {
+static BOOL ALNMSSQLNSNumberLooksBoolean(NSNumber *value) {
+  if (value == nil) {
+    return NO;
+  }
+  const char *type = [value objCType];
+  if (type == NULL) {
+    return NO;
+  }
+  return (strcmp(type, @encode(BOOL)) == 0 || strcmp(type, "B") == 0);
+}
+
+static BOOL ALNMSSQLNSNumberLooksFloatingPoint(NSNumber *value) {
+  if (value == nil) {
+    return NO;
+  }
+  const char *type = [value objCType];
+  if (type == NULL) {
+    return NO;
+  }
+  return (strcmp(type, @encode(float)) == 0 || strcmp(type, @encode(double)) == 0);
+}
+
+static NSString *ALNMSSQLTimestampStringFromDate(NSDate *value) {
+  if (![value isKindOfClass:[NSDate class]]) {
+    return @"";
+  }
+  NSDateFormatter *formatter = [[NSDateFormatter alloc] init];
+  formatter.locale = [[NSLocale alloc] initWithLocaleIdentifier:@"en_US_POSIX"];
+  formatter.timeZone = [NSTimeZone timeZoneForSecondsFromGMT:0];
+  formatter.dateFormat = @"yyyy-MM-dd HH:mm:ss.SSS";
+  return [formatter stringFromDate:value] ?: @"";
+}
+
+static NSString *ALNMSSQLJSONStringFromObject(id value, NSError **error) {
+  NSData *jsonData = [ALNJSONSerialization dataWithJSONObject:value options:0 error:error];
+  if (jsonData == nil) {
+    return nil;
+  }
+  NSString *json = [[NSString alloc] initWithData:jsonData encoding:NSUTF8StringEncoding];
+  if (json == nil && error != NULL) {
+    *error = ALNMSSQLMakeError(ALNMSSQLErrorInvalidArgument,
+                               @"failed to encode MSSQL parameter as JSON",
+                               @"JSON payload was not valid UTF-8",
+                               nil);
+  }
+  return json;
+}
+
+static SQLSMALLINT ALNMSSQLDecimalDigitsFromString(NSString *value) {
+  NSRange decimalPoint = [value rangeOfString:@"."];
+  if (decimalPoint.location == NSNotFound) {
+    return 0;
+  }
+  NSUInteger digits = [value length] - (decimalPoint.location + 1);
+  return (SQLSMALLINT)MIN((NSUInteger)38, digits);
+}
+
+static NSString *ALNMSSQLTextParameterForValue(id value,
+                                               SQLSMALLINT *sqlTypeOut,
+                                               SQLULEN *columnSizeOut,
+                                               SQLSMALLINT *decimalDigitsOut,
+                                               NSError **error) {
+  if (sqlTypeOut != NULL) {
+    *sqlTypeOut = SQL_VARCHAR;
+  }
+  if (columnSizeOut != NULL) {
+    *columnSizeOut = 1;
+  }
+  if (decimalDigitsOut != NULL) {
+    *decimalDigitsOut = 0;
+  }
   if (value == nil || value == [NSNull null]) {
     return nil;
   }
-  if ([value isKindOfClass:[NSString class]]) {
-    return value;
+  if ([value isKindOfClass:[ALNDatabaseArrayValue class]]) {
+    if (error != NULL) {
+      *error = ALNMSSQLMakeError(ALNMSSQLErrorInvalidArgument,
+                                 @"failed binding MSSQL statement parameters",
+                                 @"MSSQL array parameters are not supported",
+                                 nil);
+    }
+    return nil;
   }
-  if ([value respondsToSelector:@selector(stringValue)]) {
-    return [value stringValue];
+
+  NSString *text = nil;
+  SQLSMALLINT sqlType = SQL_VARCHAR;
+  SQLSMALLINT decimalDigits = 0;
+  if ([value isKindOfClass:[ALNDatabaseJSONValue class]]) {
+    text = ALNMSSQLJSONStringFromObject(((ALNDatabaseJSONValue *)value).object, error);
+  } else if ([value isKindOfClass:[NSDictionary class]] || [value isKindOfClass:[NSArray class]]) {
+    text = ALNMSSQLJSONStringFromObject(value, error);
+  } else if ([value isKindOfClass:[NSString class]]) {
+    text = value;
+  } else if ([value isKindOfClass:[NSUUID class]]) {
+    text = [(NSUUID *)value UUIDString];
+    sqlType = SQL_GUID;
+  } else if ([value isKindOfClass:[NSNumber class]]) {
+    if (ALNMSSQLNSNumberLooksBoolean((NSNumber *)value)) {
+      text = [((NSNumber *)value) boolValue] ? @"1" : @"0";
+      sqlType = SQL_BIT;
+    } else if (ALNMSSQLNSNumberLooksFloatingPoint((NSNumber *)value)) {
+      text = [value stringValue];
+      sqlType = SQL_DOUBLE;
+    } else if ([value isKindOfClass:[NSDecimalNumber class]]) {
+      text = [value stringValue];
+      sqlType = SQL_DECIMAL;
+      decimalDigits = ALNMSSQLDecimalDigitsFromString(text);
+    } else {
+      text = [value stringValue];
+      sqlType = SQL_BIGINT;
+    }
+  } else if ([value isKindOfClass:[NSDate class]]) {
+    text = ALNMSSQLTimestampStringFromDate((NSDate *)value);
+    sqlType = SQL_TYPE_TIMESTAMP;
+    decimalDigits = 3;
+  } else if ([value isKindOfClass:[NSData class]]) {
+    if (error != NULL) {
+      *error = ALNMSSQLMakeError(ALNMSSQLErrorInvalidArgument,
+                                 @"failed binding MSSQL statement parameters",
+                                 @"NSData parameters are not yet supported by the MSSQL adapter",
+                                 nil);
+    }
+    return nil;
+  } else if ([value respondsToSelector:@selector(stringValue)]) {
+    text = [value stringValue];
+  } else {
+    text = [value description];
   }
-  return [value description];
+
+  if (text == nil) {
+    return nil;
+  }
+  if (sqlTypeOut != NULL) {
+    *sqlTypeOut = sqlType;
+  }
+  if (columnSizeOut != NULL) {
+    *columnSizeOut = (SQLULEN)MAX((NSUInteger)1, [text length]);
+  }
+  if (decimalDigitsOut != NULL) {
+    *decimalDigitsOut = decimalDigits;
+  }
+  return text;
 }
 
 static BOOL ALNMSSQLPrepareStatement(SQLHDBC connection,
                                      NSString *sql,
                                      NSArray *parameters,
                                      SQLHSTMT *statementOut,
-                                     NSMutableArray<NSData *> *buffers,
+                                     NSMutableArray *buffers,
                                      NSMutableData *indicatorStorage,
                                      NSError **error) {
   if (statementOut != NULL) {
@@ -511,22 +643,40 @@ static BOOL ALNMSSQLPrepareStatement(SQLHDBC connection,
 
   SQLLEN *indicatorValues = (SQLLEN *)[indicatorStorage mutableBytes];
   for (NSUInteger idx = 0; idx < [parameters count]; idx++) {
-    NSString *text = ALNMSSQLParameterString(parameters[idx]);
+    SQLSMALLINT sqlType = SQL_VARCHAR;
+    SQLULEN columnSize = 1;
+    SQLSMALLINT decimalDigits = 0;
+    NSError *parameterError = nil;
+    NSString *text = ALNMSSQLTextParameterForValue(parameters[idx],
+                                                   &sqlType,
+                                                   &columnSize,
+                                                   &decimalDigits,
+                                                   &parameterError);
+    if (parameterError != nil) {
+      if (error != NULL) {
+        NSString *detail = [NSString stringWithFormat:@"parameter %lu: %@",
+                                                      (unsigned long)(idx + 1),
+                                                      [parameterError localizedDescription] ?: @"invalid value"];
+        *error = ALNMSSQLMakeError(ALNMSSQLErrorInvalidArgument,
+                                   @"failed binding MSSQL statement parameters",
+                                   detail,
+                                   nil);
+      }
+      ALNSQLFreeHandle(SQL_HANDLE_STMT, statement);
+      return NO;
+    }
     SQLLEN indicator = SQL_NULL_DATA;
     SQLPOINTER valuePointer = NULL;
     SQLLEN bufferLength = 0;
-    SQLULEN columnSize = 1;
     if ([text length] > 0) {
-      NSData *data = [[text dataUsingEncoding:NSUTF8StringEncoding] mutableCopy];
       NSMutableData *mutableData =
-          [NSMutableData dataWithData:data ?: [NSData data]];
+          [NSMutableData dataWithData:[text dataUsingEncoding:NSUTF8StringEncoding] ?: [NSData data]];
       const char terminator = '\0';
       [mutableData appendBytes:&terminator length:1];
-      [buffers addObject:[NSData dataWithData:mutableData]];
+      [buffers addObject:mutableData];
       indicator = SQL_NTS;
       valuePointer = (SQLPOINTER)[[buffers lastObject] bytes];
       bufferLength = (SQLLEN)[[buffers lastObject] length];
-      columnSize = (SQLULEN)MAX((NSUInteger)1, [text length]);
     }
 
     indicatorValues[idx] = indicator;
@@ -536,9 +686,9 @@ static BOOL ALNMSSQLPrepareStatement(SQLHDBC connection,
                              (SQLUSMALLINT)(idx + 1),
                              SQL_PARAM_INPUT,
                              SQL_C_CHAR,
-                             SQL_VARCHAR,
+                             sqlType,
                              columnSize,
-                             0,
+                             decimalDigits,
                              valuePointer,
                              bufferLength,
                              indicatorPointer);
@@ -572,8 +722,146 @@ static BOOL ALNMSSQLPrepareStatement(SQLHDBC connection,
   return YES;
 }
 
+static NSNumber *ALNMSSQLIntegerNumberFromString(NSString *value) {
+  if (![value isKindOfClass:[NSString class]] || [value length] == 0) {
+    return nil;
+  }
+  NSScanner *scanner = [NSScanner scannerWithString:value];
+  long long parsed = 0;
+  if (![scanner scanLongLong:&parsed] || ![scanner isAtEnd]) {
+    return nil;
+  }
+  return @(parsed);
+}
+
+static NSNumber *ALNMSSQLDoubleNumberFromString(NSString *value) {
+  if (![value isKindOfClass:[NSString class]] || [value length] == 0) {
+    return nil;
+  }
+  NSScanner *scanner = [NSScanner scannerWithString:value];
+  double parsed = 0;
+  if (![scanner scanDouble:&parsed] || ![scanner isAtEnd]) {
+    return nil;
+  }
+  return @(parsed);
+}
+
+static NSDecimalNumber *ALNMSSQLDecimalNumberFromString(NSString *value) {
+  if (![value isKindOfClass:[NSString class]] || [value length] == 0) {
+    return nil;
+  }
+  NSDecimalNumber *number = [NSDecimalNumber decimalNumberWithString:value];
+  return [number isEqualToNumber:[NSDecimalNumber notANumber]] ? nil : number;
+}
+
+static NSDate *ALNMSSQLDateFromString(NSString *value) {
+  if (![value isKindOfClass:[NSString class]] || [value length] == 0) {
+    return nil;
+  }
+  NSString *trimmed =
+      [value stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+  NSArray<NSString *> *formats = @[
+    @"yyyy-MM-dd",
+    @"yyyy-MM-dd HH:mm:ss",
+    @"yyyy-MM-dd HH:mm:ss.SSS",
+    @"yyyy-MM-dd'T'HH:mm:ss",
+    @"yyyy-MM-dd'T'HH:mm:ss.SSS",
+    @"yyyy-MM-dd'T'HH:mm:ssZ",
+    @"yyyy-MM-dd'T'HH:mm:ss.SSSZ",
+  ];
+  NSDateFormatter *formatter = [[NSDateFormatter alloc] init];
+  formatter.locale = [[NSLocale alloc] initWithLocaleIdentifier:@"en_US_POSIX"];
+  formatter.timeZone = [NSTimeZone timeZoneForSecondsFromGMT:0];
+  for (NSString *format in formats) {
+    formatter.dateFormat = format;
+    NSDate *date = [formatter dateFromString:trimmed];
+    if (date != nil) {
+      return date;
+    }
+  }
+  return nil;
+}
+
+static BOOL ALNMSSQLColumnTypeIsInteger(SQLSMALLINT dataType) {
+  return (dataType == SQL_TINYINT || dataType == SQL_SMALLINT || dataType == SQL_INTEGER ||
+          dataType == SQL_BIGINT);
+}
+
+static BOOL ALNMSSQLColumnTypeIsDecimal(SQLSMALLINT dataType) {
+  return (dataType == SQL_DECIMAL || dataType == SQL_NUMERIC);
+}
+
+static BOOL ALNMSSQLColumnTypeIsFloat(SQLSMALLINT dataType) {
+  return (dataType == SQL_REAL || dataType == SQL_FLOAT || dataType == SQL_DOUBLE);
+}
+
+static BOOL ALNMSSQLColumnTypeIsDateLike(SQLSMALLINT dataType) {
+  return (dataType == SQL_TYPE_DATE || dataType == SQL_DATE || dataType == SQL_TYPE_TIMESTAMP ||
+          dataType == SQL_TIMESTAMP);
+}
+
+static id ALNMSSQLDecodedTextColumnValue(SQLSMALLINT dataType,
+                                         NSString *columnName,
+                                         NSString *value,
+                                         NSError **error) {
+  if (dataType == SQL_BIT) {
+    NSString *normalized = [[value lowercaseString] stringByTrimmingCharactersInSet:
+                                                       [NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    if ([normalized isEqualToString:@"1"] || [normalized isEqualToString:@"true"] ||
+        [normalized isEqualToString:@"t"]) {
+      return @YES;
+    }
+    if ([normalized isEqualToString:@"0"] || [normalized isEqualToString:@"false"] ||
+        [normalized isEqualToString:@"f"]) {
+      return @NO;
+    }
+  } else if (ALNMSSQLColumnTypeIsInteger(dataType)) {
+    NSNumber *number = ALNMSSQLIntegerNumberFromString(value);
+    if (number != nil) {
+      return number;
+    }
+  } else if (ALNMSSQLColumnTypeIsDecimal(dataType)) {
+    NSDecimalNumber *number = ALNMSSQLDecimalNumberFromString(value);
+    if (number != nil) {
+      return number;
+    }
+  } else if (ALNMSSQLColumnTypeIsFloat(dataType)) {
+    NSNumber *number = ALNMSSQLDoubleNumberFromString(value);
+    if (number != nil) {
+      return number;
+    }
+  } else if (ALNMSSQLColumnTypeIsDateLike(dataType)) {
+    NSDate *date = ALNMSSQLDateFromString(value);
+    if (date != nil) {
+      return date;
+    }
+  }
+
+  if (dataType == SQL_GUID || dataType == SQL_TYPE_TIME || dataType == SQL_TIME || dataType == SQL_CHAR ||
+      dataType == SQL_VARCHAR || dataType == SQL_LONGVARCHAR || dataType == SQL_WCHAR ||
+      dataType == SQL_WVARCHAR || dataType == SQL_WLONGVARCHAR) {
+    return value ?: @"";
+  }
+
+  if (error != NULL && value != nil &&
+      (dataType == SQL_BIT || ALNMSSQLColumnTypeIsInteger(dataType) || ALNMSSQLColumnTypeIsDecimal(dataType) ||
+       ALNMSSQLColumnTypeIsFloat(dataType) || ALNMSSQLColumnTypeIsDateLike(dataType))) {
+    NSString *detail = [NSString stringWithFormat:@"column %@ could not be decoded for MSSQL type %d",
+                                                  columnName ?: @"",
+                                                  (int)dataType];
+    *error = ALNMSSQLMakeError(ALNMSSQLErrorQueryFailed,
+                               @"failed fetching MSSQL result column",
+                               detail,
+                               nil);
+    return nil;
+  }
+  return value ?: @"";
+}
+
 static id ALNMSSQLFetchColumnValue(SQLHSTMT statement,
                                    SQLUSMALLINT columnIndex,
+                                   SQLSMALLINT dataType,
+                                   NSString *columnName,
                                    NSError **error) {
   NSMutableData *data = [NSMutableData data];
   SQLLEN indicator = 0;
@@ -619,7 +907,18 @@ static id ALNMSSQLFetchColumnValue(SQLHSTMT statement,
     return @"";
   }
   NSString *value = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
-  return value ?: @"";
+  if (value == nil) {
+    if (error != NULL) {
+      NSString *detail = [NSString stringWithFormat:@"column %@ result payload was not valid UTF-8",
+                                                    columnName ?: @""];
+      *error = ALNMSSQLMakeError(ALNMSSQLErrorQueryFailed,
+                                 @"failed fetching MSSQL result column",
+                                 detail,
+                                 nil);
+    }
+    return nil;
+  }
+  return ALNMSSQLDecodedTextColumnValue(dataType, columnName, value, error);
 }
 
 @interface ALNMSSQLConnection ()
@@ -761,7 +1060,7 @@ static id ALNMSSQLFetchColumnValue(SQLHSTMT statement,
     return nil;
   }
 
-  NSMutableArray<NSData *> *buffers = [NSMutableArray array];
+  NSMutableArray *buffers = [NSMutableArray array];
   NSMutableData *indicatorStorage =
       [NSMutableData dataWithLength:MAX((NSUInteger)1, [parameters count]) * sizeof(SQLLEN)];
   SQLHSTMT statement = SQL_NULL_HSTMT;
@@ -794,6 +1093,7 @@ static id ALNMSSQLFetchColumnValue(SQLHSTMT statement,
   }
 
   NSMutableArray<NSString *> *columnNames = [NSMutableArray arrayWithCapacity:(NSUInteger)columnCount];
+  NSMutableArray<NSNumber *> *columnTypes = [NSMutableArray arrayWithCapacity:(NSUInteger)columnCount];
   for (SQLUSMALLINT idx = 1; idx <= (SQLUSMALLINT)columnCount; idx++) {
     SQLCHAR nameBuffer[256] = { 0 };
     SQLSMALLINT nameLength = 0;
@@ -822,6 +1122,7 @@ static id ALNMSSQLFetchColumnValue(SQLHSTMT statement,
     }
     NSString *columnName = [NSString stringWithUTF8String:(const char *)nameBuffer] ?: @"";
     [columnNames addObject:columnName];
+    [columnTypes addObject:@(dataType)];
   }
 
   while ((rc = ALNSQLFetch(statement)) != SQL_NO_DATA) {
@@ -839,7 +1140,11 @@ static id ALNMSSQLFetchColumnValue(SQLHSTMT statement,
     NSMutableDictionary *row = [NSMutableDictionary dictionaryWithCapacity:(NSUInteger)columnCount];
     for (SQLUSMALLINT idx = 1; idx <= (SQLUSMALLINT)columnCount; idx++) {
       NSError *columnError = nil;
-      id value = ALNMSSQLFetchColumnValue(statement, idx, &columnError);
+      id value = ALNMSSQLFetchColumnValue(statement,
+                                          idx,
+                                          [columnTypes[(NSUInteger)(idx - 1)] shortValue],
+                                          columnNames[(NSUInteger)(idx - 1)],
+                                          &columnError);
       if (value == nil && columnError != nil) {
         if (error != NULL) {
           *error = columnError;
@@ -871,7 +1176,7 @@ static id ALNMSSQLFetchColumnValue(SQLHSTMT statement,
     return -1;
   }
 
-  NSMutableArray<NSData *> *buffers = [NSMutableArray array];
+  NSMutableArray *buffers = [NSMutableArray array];
   NSMutableData *indicatorStorage =
       [NSMutableData dataWithLength:MAX((NSUInteger)1, [parameters count]) * sizeof(SQLLEN)];
   SQLHSTMT statement = SQL_NULL_HSTMT;

@@ -16,6 +16,26 @@ typedef NS_ENUM(NSInteger, ALNDatabaseAdapterErrorCode) {
   ALNDatabaseAdapterErrorInvalidResult = 4,
 };
 
+@interface ALNDatabaseJSONValue : NSObject
+
+@property(nonatomic, strong, readonly) id object;
+
++ (instancetype)valueWithObject:(nullable id)object;
+- (instancetype)init NS_UNAVAILABLE;
+- (instancetype)initWithObject:(nullable id)object NS_DESIGNATED_INITIALIZER;
+
+@end
+
+@interface ALNDatabaseArrayValue : NSObject
+
+@property(nonatomic, copy, readonly) NSArray *items;
+
++ (instancetype)valueWithItems:(nullable NSArray *)items;
+- (instancetype)init NS_UNAVAILABLE;
+- (instancetype)initWithItems:(nullable NSArray *)items NS_DESIGNATED_INITIALIZER;
+
+@end
+
 @protocol ALNDatabaseConnection <NSObject>
 
 - (nullable NSArray<NSDictionary *> *)executeQuery:(NSString *)sql
@@ -59,6 +79,8 @@ FOUNDATION_EXPORT NSError *ALNDatabaseAdapterMakeError(ALNDatabaseAdapterErrorCo
                                                        NSString *message,
                                                        NSDictionary *_Nullable userInfo);
 FOUNDATION_EXPORT BOOL ALNDatabaseErrorIsConnectivityFailure(NSError *_Nullable error);
+FOUNDATION_EXPORT ALNDatabaseJSONValue *ALNDatabaseJSONParameter(id _Nullable object);
+FOUNDATION_EXPORT ALNDatabaseArrayValue *ALNDatabaseArrayParameter(NSArray *_Nullable items);
 FOUNDATION_EXPORT NSDictionary<NSString *, id> *_Nullable ALNDatabaseFirstRow(
     NSArray<NSDictionary *> *_Nullable rows);
 FOUNDATION_EXPORT id _Nullable ALNDatabaseScalarValueFromRow(

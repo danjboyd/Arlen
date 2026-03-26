@@ -201,7 +201,12 @@ Introspect PostgreSQL schema metadata and generate typed table/column helper API
 - reflection path now goes through `ALNDatabaseInspector` / `ALNPostgresInspector`
 - generated manifests now include:
   - `reflection_contract_version`
+  - `relation_kind`
+  - `read_only`
+  - `supports_write_contracts`
   - per-table `column_metadata`
+- reflected views retain read-side typed contracts but do not get default write
+  builders/contracts
 - Phase 20 still does not add MSSQL schema introspection/codegen
 
 - `--env <name>`: select runtime environment (default: `development`)

@@ -4,13 +4,15 @@ Last updated: 2026-03-26
 
 ## Completed Today (2026-03-26)
 
-- Extended the Phase 20 roadmap with follow-on subphases `20G-20K` to address
-  the post-closeout data-layer audit:
-  - relation-kind-aware reflection and view-safe schema codegen
-  - richer cross-dialect type codec parity
-  - broader inspector coverage for keys/indexes/relation metadata
-  - lightweight result/savepoint/batch-execution ergonomics
-  - clearer PostgreSQL/MSSQL support-tier and operational parity contracts
+- Completed the Phase 20G-20I follow-on depth slice:
+  - preserved relation kind/read-only metadata end-to-end and made generated
+    schema codegen view-safe on the write path
+  - added explicit PostgreSQL array-vs-JSON parameter wrappers, bounded array
+    decode, fixture-backed codec coverage, and a documented typed MSSQL scalar
+    baseline
+  - widened `ALNDatabaseInspector` to inspector-v2 metadata for relations,
+    primary keys, uniques, foreign keys, and indexes with deterministic
+    fixtures/tests
 - Completed the Phase 20A-20C data-layer depth slice:
   - added typed PostgreSQL bind/result materialization for the supported scalar
     baseline (`BOOL`, integer, numeric, float, `date`, `timestamp`,
@@ -213,12 +215,11 @@ entries, not current plan-of-record items.
 - Phase 19: complete (`19A-19F` delivered on 2026-03-14 for incremental
   GNUmake/GNUstep build-graph narrowing, generated-template object reuse, and
   clearer `boomhauer` build scope/progress)
-- Phase 20: extended (`20A-20F` complete on 2026-03-26 for typed codecs/live
+- Phase 20: extended (`20A-20I` complete on 2026-03-26 for typed codecs/live
   rows, recursive nested dialect compilation, lightweight result helpers,
-  reflection/codegen alignment, routing/pool hardening, and
-  `phase20-confidence`; `20G-20K` planned for relation-kind-safe reflection,
-  richer type parity, broader inspection, result/savepoint ergonomics, and
-  backend support-tier hardening)
+  reflection/codegen alignment, routing/pool hardening, relation-kind-safe
+  reflection, richer type parity, and inspector-v2 metadata; `20J-20K`
+  planned for result/savepoint ergonomics and backend support-tier hardening)
 
 ## Completed Today (2026-03-26)
 
@@ -226,13 +227,25 @@ entries, not current plan-of-record items.
   - added `ALNDatabaseInspector` / `ALNPostgresInspector` and moved
     `arlen schema-codegen` onto one normalized reflection contract
   - extended schema-codegen manifests with
-    `reflection_contract_version` + per-table `column_metadata`
+    `reflection_contract_version`, relation metadata, and per-table
+    `column_metadata`
   - tightened `ALNDatabaseRouter` read fallback defaults to
     connectivity-only with explicit `readFallbackPolicy`
   - added PostgreSQL pool checkout liveness checks, idle stale-connection
     recycling, active-transaction rollback-on-release, and prepared-statement
     cache eviction instead of saturation starvation
   - added Phase 20 fixtures, unit coverage, and `make phase20-confidence`
+- Completed Phase 20 relation-kind reflection, richer type parity, and
+  inspector-v2 metadata:
+  - preserved `relation_kind`, `read_only`, and `supports_write_contracts`
+    through schema manifests and generated helper decisions so reflected views
+    no longer get default write contracts
+  - added `ALNDatabaseJSONParameter(...)` / `ALNDatabaseArrayParameter(...)`,
+    bounded PostgreSQL array decode, fixture-backed live codec coverage, and a
+    documented typed scalar baseline on MSSQL
+  - widened `ALNDatabaseInspector` metadata output to relations, primary keys,
+    unique constraints, foreign keys, and indexes with deterministic fixtures
+    and tests
 
 ## Completed Today (2026-03-21)
 

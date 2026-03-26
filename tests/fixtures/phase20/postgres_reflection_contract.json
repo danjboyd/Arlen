@@ -8,8 +8,23 @@
       "nullable": false,
       "ordinal": 1,
       "primary_key": true,
+      "read_only": false,
+      "relation_kind": "table",
       "schema": "billing",
       "table": "invoices"
+    },
+    {
+      "column": "email",
+      "data_type": "text",
+      "default_value_shape": "none",
+      "has_default": false,
+      "nullable": true,
+      "ordinal": 1,
+      "primary_key": false,
+      "read_only": true,
+      "relation_kind": "view",
+      "schema": "public",
+      "table": "user_emails"
     },
     {
       "column": "id",
@@ -19,6 +34,8 @@
       "nullable": false,
       "ordinal": 1,
       "primary_key": true,
+      "read_only": false,
+      "relation_kind": "table",
       "schema": "public",
       "table": "users"
     },
@@ -30,6 +47,8 @@
       "nullable": false,
       "ordinal": 2,
       "primary_key": false,
+      "read_only": false,
+      "relation_kind": "table",
       "schema": "public",
       "table": "users"
     },
@@ -41,6 +60,8 @@
       "nullable": true,
       "ordinal": 3,
       "primary_key": false,
+      "read_only": false,
+      "relation_kind": "table",
       "schema": "public",
       "table": "users"
     }
@@ -54,6 +75,8 @@
       "nullable": "YES",
       "ordinal": "3",
       "primary_key": "0",
+      "read_only": "NO",
+      "relation_kind": "table",
       "schema": "public",
       "table": "users"
     },
@@ -66,7 +89,8 @@
       "ordinal": 2,
       "primary_key": false,
       "schema": "public",
-      "table": "users"
+      "table": "users",
+      "table_type": "BASE TABLE"
     },
     {
       "column": "invoice_id",
@@ -77,7 +101,20 @@
       "ordinal": 1,
       "primary_key": 1,
       "schema": "billing",
-      "table": "invoices"
+      "table": "invoices",
+      "table_type": "BASE TABLE"
+    },
+    {
+      "column": "email",
+      "data_type": "text",
+      "default_value_shape": "none",
+      "has_default": false,
+      "nullable": true,
+      "ordinal": 1,
+      "primary_key": false,
+      "schema": "public",
+      "table": "user_emails",
+      "table_type": "VIEW"
     },
     {
       "column": "id",
@@ -87,9 +124,11 @@
       "nullable": false,
       "ordinal": 1,
       "primary_key": true,
+      "relation_kind": "table",
+      "read_only": false,
       "schema": "public",
       "table": "users"
     }
   ],
-  "version": "phase20-reflection-contract-v1"
+  "version": "phase20-reflection-contract-v2"
 }

@@ -632,22 +632,39 @@ enum {
   ALNPGOIDOID_NAME = 19,
   ALNPGOIDOID_BOOL = 16,
   ALNPGOIDOID_BYTEA = 17,
+  ALNPGOIDOID_BOOL_ARRAY = 1000,
+  ALNPGOIDOID_BYTEA_ARRAY = 1001,
   ALNPGOIDOID_INT8 = 20,
   ALNPGOIDOID_INT2 = 21,
   ALNPGOIDOID_INT4 = 23,
   ALNPGOIDOID_TEXT = 25,
   ALNPGOIDOID_JSON = 114,
+  ALNPGOIDOID_JSON_ARRAY = 199,
   ALNPGOIDOID_FLOAT4 = 700,
   ALNPGOIDOID_FLOAT8 = 701,
+  ALNPGOIDOID_INT2_ARRAY = 1005,
+  ALNPGOIDOID_INT4_ARRAY = 1007,
+  ALNPGOIDOID_TEXT_ARRAY = 1009,
+  ALNPGOIDOID_BPCHAR_ARRAY = 1014,
+  ALNPGOIDOID_VARCHAR_ARRAY = 1015,
+  ALNPGOIDOID_FLOAT4_ARRAY = 1021,
+  ALNPGOIDOID_FLOAT8_ARRAY = 1022,
   ALNPGOIDOID_BPCHAR = 1042,
   ALNPGOIDOID_VARCHAR = 1043,
   ALNPGOIDOID_DATE = 1082,
   ALNPGOIDOID_TIME = 1083,
   ALNPGOIDOID_TIMESTAMP = 1114,
+  ALNPGOIDOID_TIMESTAMP_ARRAY = 1115,
   ALNPGOIDOID_TIMESTAMPTZ = 1184,
+  ALNPGOIDOID_DATE_ARRAY = 1182,
+  ALNPGOIDOID_TIME_ARRAY = 1183,
+  ALNPGOIDOID_TIMESTAMPTZ_ARRAY = 1185,
+  ALNPGOIDOID_NUMERIC_ARRAY = 1231,
   ALNPGOIDOID_NUMERIC = 1700,
   ALNPGOIDOID_UUID = 2950,
+  ALNPGOIDOID_UUID_ARRAY = 2951,
   ALNPGOIDOID_JSONB = 3802,
+  ALNPGOIDOID_JSONB_ARRAY = 3807,
 };
 
 static BOOL ALNPgNSNumberLooksBoolean(NSNumber *value) {
@@ -701,12 +718,100 @@ static NSString *ALNPgJSONStringFromObject(id value, NSError **error) {
   return json;
 }
 
+static NSString *ALNPgEscapedArrayStringLiteral(NSString *value) {
+  NSString *escaped = [[value stringByReplacingOccurrencesOfString:@"\\" withString:@"\\\\"]
+      stringByReplacingOccurrencesOfString:@"\"" withString:@"\\\""];
+  return [NSString stringWithFormat:@"\"%@\"", escaped ?: @""];
+}
+
+static NSString *ALNPgArrayElementString(id value, NSError **error) {
+  if (value == nil || value == [NSNull null]) {
+    return @"NULL";
+  }
+  if ([value isKindOfClass:[NSString class]]) {
+    return ALNPgEscapedArrayStringLiteral((NSString *)value);
+  }
+  if ([value isKindOfClass:[NSUUID class]]) {
+    return ALNPgEscapedArrayStringLiteral([(NSUUID *)value UUIDString] ?: @"");
+  }
+  if ([value isKindOfClass:[NSNumber class]]) {
+    if (ALNPgNSNumberLooksBoolean((NSNumber *)value)) {
+      return [((NSNumber *)value) boolValue] ? @"true" : @"false";
+    }
+    return [value stringValue];
+  }
+  if ([value isKindOfClass:[NSDate class]]) {
+    return ALNPgEscapedArrayStringLiteral(ALNPgTimestampStringFromDate((NSDate *)value));
+  }
+  if ([value isKindOfClass:[NSData class]]) {
+    return ALNPgEscapedArrayStringLiteral(ALNPgHexStringFromData((NSData *)value));
+  }
+  if ([value isKindOfClass:[NSArray class]]) {
+    if (error != NULL) {
+      *error = ALNPgMakeError(ALNPgErrorInvalidArgument,
+                              @"failed to encode query parameter as PostgreSQL array",
+                              @"nested PostgreSQL array parameters are not supported",
+                              nil);
+    }
+    return nil;
+  }
+  if ([value isKindOfClass:[NSDictionary class]] || [value isKindOfClass:[ALNDatabaseJSONValue class]] ||
+      [value isKindOfClass:[ALNDatabaseArrayValue class]]) {
+    if (error != NULL) {
+      *error = ALNPgMakeError(ALNPgErrorInvalidArgument,
+                              @"failed to encode query parameter as PostgreSQL array",
+                              @"array parameters only support scalar Foundation element values",
+                              nil);
+    }
+    return nil;
+  }
+  return ALNPgEscapedArrayStringLiteral([value description] ?: @"");
+}
+
+static NSString *ALNPgArrayLiteralFromItems(NSArray *items, NSError **error) {
+  if (items == nil) {
+    return nil;
+  }
+  if (![items isKindOfClass:[NSArray class]]) {
+    if (error != NULL) {
+      *error = ALNPgMakeError(ALNPgErrorInvalidArgument,
+                              @"failed to encode query parameter as PostgreSQL array",
+                              @"array parameters must be NSArray instances",
+                              nil);
+    }
+    return nil;
+  }
+
+  NSMutableArray<NSString *> *elements = [NSMutableArray arrayWithCapacity:[items count]];
+  for (id item in items) {
+    NSError *elementError = nil;
+    NSString *element = ALNPgArrayElementString(item, &elementError);
+    if (element == nil) {
+      if (error != NULL) {
+        *error = elementError;
+      }
+      return nil;
+    }
+    [elements addObject:element];
+  }
+  return [NSString stringWithFormat:@"{%@}", [elements componentsJoinedByString:@","]];
+}
+
 static NSString *ALNPgStringFromParam(id value, NSError **error) {
   if (value == nil || value == [NSNull null]) {
     return nil;
   }
+  if ([value isKindOfClass:[ALNDatabaseJSONValue class]]) {
+    return ALNPgJSONStringFromObject(((ALNDatabaseJSONValue *)value).object, error);
+  }
+  if ([value isKindOfClass:[ALNDatabaseArrayValue class]]) {
+    return ALNPgArrayLiteralFromItems(((ALNDatabaseArrayValue *)value).items, error);
+  }
   if ([value isKindOfClass:[NSString class]]) {
     return value;
+  }
+  if ([value isKindOfClass:[NSUUID class]]) {
+    return [(NSUUID *)value UUIDString];
   }
   if ([value isKindOfClass:[NSNumber class]]) {
     if (ALNPgNSNumberLooksBoolean((NSNumber *)value)) {
@@ -782,6 +887,10 @@ static NSDate *ALNPgUTCDate(NSInteger year,
                             NSInteger minute,
                             NSInteger second,
                             double fractionalSeconds);
+static id ALNPgDecodedValueForFieldType(ALNOid fieldType,
+                                        NSString *columnName,
+                                        NSString *stringValue,
+                                        NSError **error);
 
 static NSDate *ALNPgDateFromDateString(NSString *value) {
   if (![value isKindOfClass:[NSString class]] || [value length] == 0) {
@@ -991,6 +1100,249 @@ static NSData *ALNPgDataFromByteaString(NSString *value) {
   return data;
 }
 
+static ALNOid ALNPgElementFieldTypeForArrayFieldType(ALNOid fieldType) {
+  switch (fieldType) {
+  case ALNPGOIDOID_BOOL_ARRAY:
+    return ALNPGOIDOID_BOOL;
+  case ALNPGOIDOID_BYTEA_ARRAY:
+    return ALNPGOIDOID_BYTEA;
+  case ALNPGOIDOID_INT2_ARRAY:
+    return ALNPGOIDOID_INT2;
+  case ALNPGOIDOID_INT4_ARRAY:
+    return ALNPGOIDOID_INT4;
+  case ALNPGOIDOID_TEXT_ARRAY:
+    return ALNPGOIDOID_TEXT;
+  case ALNPGOIDOID_JSON_ARRAY:
+    return ALNPGOIDOID_JSON;
+  case ALNPGOIDOID_FLOAT4_ARRAY:
+    return ALNPGOIDOID_FLOAT4;
+  case ALNPGOIDOID_FLOAT8_ARRAY:
+    return ALNPGOIDOID_FLOAT8;
+  case ALNPGOIDOID_BPCHAR_ARRAY:
+    return ALNPGOIDOID_BPCHAR;
+  case ALNPGOIDOID_VARCHAR_ARRAY:
+    return ALNPGOIDOID_VARCHAR;
+  case ALNPGOIDOID_DATE_ARRAY:
+    return ALNPGOIDOID_DATE;
+  case ALNPGOIDOID_TIME_ARRAY:
+    return ALNPGOIDOID_TIME;
+  case ALNPGOIDOID_TIMESTAMP_ARRAY:
+    return ALNPGOIDOID_TIMESTAMP;
+  case ALNPGOIDOID_TIMESTAMPTZ_ARRAY:
+    return ALNPGOIDOID_TIMESTAMPTZ;
+  case ALNPGOIDOID_NUMERIC_ARRAY:
+    return ALNPGOIDOID_NUMERIC;
+  case ALNPGOIDOID_UUID_ARRAY:
+    return ALNPGOIDOID_UUID;
+  case ALNPGOIDOID_JSONB_ARRAY:
+    return ALNPGOIDOID_JSONB;
+  default:
+    return 0;
+  }
+}
+
+static NSArray *ALNPgArrayTokensFromString(NSString *value, NSError **error) {
+  if (![value isKindOfClass:[NSString class]]) {
+    if (error != NULL) {
+      *error = ALNPgMakeError(ALNPgErrorQueryFailed,
+                              @"failed decoding PostgreSQL array result",
+                              @"array payload was not a string",
+                              nil);
+    }
+    return nil;
+  }
+
+  NSString *trimmed =
+      [value stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+  if ([trimmed length] < 2 || ![trimmed hasPrefix:@"{"] || ![trimmed hasSuffix:@"}"]) {
+    if (error != NULL) {
+      *error = ALNPgMakeError(ALNPgErrorQueryFailed,
+                              @"failed decoding PostgreSQL array result",
+                              @"array payload was not wrapped in braces",
+                              nil);
+    }
+    return nil;
+  }
+  if ([trimmed isEqualToString:@"{}"]) {
+    return @[];
+  }
+
+  NSMutableArray *tokens = [NSMutableArray array];
+  NSMutableString *buffer = [NSMutableString string];
+  BOOL inQuotes = NO;
+  BOOL escaping = NO;
+  BOOL tokenStarted = NO;
+  BOOL tokenQuoted = NO;
+  BOOL afterQuotedToken = NO;
+
+  for (NSUInteger idx = 1; idx + 1 < [trimmed length]; idx++) {
+    unichar ch = [trimmed characterAtIndex:idx];
+    if (inQuotes) {
+      tokenStarted = YES;
+      if (escaping) {
+        [buffer appendFormat:@"%C", ch];
+        escaping = NO;
+        continue;
+      }
+      if (ch == '\\') {
+        escaping = YES;
+        continue;
+      }
+      if (ch == '"') {
+        inQuotes = NO;
+        afterQuotedToken = YES;
+        continue;
+      }
+      [buffer appendFormat:@"%C", ch];
+      continue;
+    }
+
+    if (afterQuotedToken) {
+      if ([[NSCharacterSet whitespaceAndNewlineCharacterSet] characterIsMember:ch]) {
+        continue;
+      }
+      if (ch != ',') {
+        if (error != NULL) {
+          *error = ALNPgMakeError(ALNPgErrorQueryFailed,
+                                  @"failed decoding PostgreSQL array result",
+                                  @"quoted array element was followed by unexpected characters",
+                                  nil);
+        }
+        return nil;
+      }
+    }
+
+    if (ch == '"') {
+      inQuotes = YES;
+      tokenStarted = YES;
+      tokenQuoted = YES;
+      afterQuotedToken = NO;
+      continue;
+    }
+    if (ch == '{' || ch == '}') {
+      if (error != NULL) {
+        *error = ALNPgMakeError(ALNPgErrorQueryFailed,
+                                @"failed decoding PostgreSQL array result",
+                                @"nested PostgreSQL array values are not supported",
+                                nil);
+      }
+      return nil;
+    }
+    if (ch == ',') {
+      NSString *token = tokenQuoted ? [NSString stringWithString:buffer]
+                                    : [[NSString stringWithString:buffer]
+                                          stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+      if (!tokenStarted && !tokenQuoted) {
+        if (error != NULL) {
+          *error = ALNPgMakeError(ALNPgErrorQueryFailed,
+                                  @"failed decoding PostgreSQL array result",
+                                  @"array contained an empty unquoted element",
+                                  nil);
+        }
+        return nil;
+      }
+      if (!tokenQuoted && [token isEqualToString:@"NULL"]) {
+        [tokens addObject:[NSNull null]];
+      } else {
+        [tokens addObject:token ?: @""];
+      }
+      [buffer setString:@""];
+      tokenStarted = NO;
+      tokenQuoted = NO;
+      afterQuotedToken = NO;
+      continue;
+    }
+
+    tokenStarted = YES;
+    [buffer appendFormat:@"%C", ch];
+  }
+
+  if (inQuotes || escaping) {
+    if (error != NULL) {
+      *error = ALNPgMakeError(ALNPgErrorQueryFailed,
+                              @"failed decoding PostgreSQL array result",
+                              @"array payload ended inside a quoted element",
+                              nil);
+    }
+    return nil;
+  }
+
+  NSString *token = tokenQuoted ? [NSString stringWithString:buffer]
+                                : [[NSString stringWithString:buffer]
+                                      stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+  if (!tokenStarted && !tokenQuoted) {
+    if (error != NULL) {
+      *error = ALNPgMakeError(ALNPgErrorQueryFailed,
+                              @"failed decoding PostgreSQL array result",
+                              @"array contained an empty trailing element",
+                              nil);
+    }
+    return nil;
+  }
+  if (!tokenQuoted && [token isEqualToString:@"NULL"]) {
+    [tokens addObject:[NSNull null]];
+  } else {
+    [tokens addObject:token ?: @""];
+  }
+
+  return [NSArray arrayWithArray:tokens];
+}
+
+static NSArray *ALNPgDecodedArrayValueForFieldType(ALNOid fieldType,
+                                                   NSString *columnName,
+                                                   NSString *stringValue,
+                                                   NSError **error) {
+  ALNOid elementType = ALNPgElementFieldTypeForArrayFieldType(fieldType);
+  if (elementType == 0) {
+    if (error != NULL) {
+      NSString *detail = [NSString stringWithFormat:@"column %@ uses unsupported PostgreSQL array OID %u",
+                                                    columnName ?: @"",
+                                                    fieldType];
+      *error = ALNPgMakeError(ALNPgErrorQueryFailed,
+                              @"failed decoding PostgreSQL result value",
+                              detail,
+                              nil);
+    }
+    return nil;
+  }
+
+  NSError *tokenError = nil;
+  NSArray *tokens = ALNPgArrayTokensFromString(stringValue, &tokenError);
+  if (tokens == nil) {
+    if (error != NULL) {
+      *error = tokenError;
+    }
+    return nil;
+  }
+
+  NSMutableArray *decoded = [NSMutableArray arrayWithCapacity:[tokens count]];
+  for (id token in tokens) {
+    if (token == [NSNull null]) {
+      [decoded addObject:[NSNull null]];
+      continue;
+    }
+    NSError *elementError = nil;
+    id element = ALNPgDecodedValueForFieldType(elementType, columnName, token, &elementError);
+    if (element == nil) {
+      if (error != NULL) {
+        if (elementError != nil) {
+          *error = elementError;
+        } else {
+          NSString *detail = [NSString stringWithFormat:@"column %@ array element could not be decoded",
+                                                        columnName ?: @""];
+          *error = ALNPgMakeError(ALNPgErrorQueryFailed,
+                                  @"failed decoding PostgreSQL result value",
+                                  detail,
+                                  nil);
+        }
+      }
+      return nil;
+    }
+    [decoded addObject:element];
+  }
+  return [NSArray arrayWithArray:decoded];
+}
+
 static id ALNPgDecodedValueForFieldType(ALNOid fieldType,
                                         NSString *columnName,
                                         NSString *stringValue,
@@ -1044,6 +1396,25 @@ static id ALNPgDecodedValueForFieldType(ALNOid fieldType,
     }
     break;
   }
+  case ALNPGOIDOID_BOOL_ARRAY:
+  case ALNPGOIDOID_BYTEA_ARRAY:
+  case ALNPGOIDOID_INT2_ARRAY:
+  case ALNPGOIDOID_INT4_ARRAY:
+  case ALNPGOIDOID_TEXT_ARRAY:
+  case ALNPGOIDOID_JSON_ARRAY:
+  case ALNPGOIDOID_FLOAT4_ARRAY:
+  case ALNPGOIDOID_FLOAT8_ARRAY:
+  case ALNPGOIDOID_BPCHAR_ARRAY:
+  case ALNPGOIDOID_VARCHAR_ARRAY:
+  case ALNPGOIDOID_DATE_ARRAY:
+  case ALNPGOIDOID_TIME_ARRAY:
+  case ALNPGOIDOID_TIMESTAMP_ARRAY:
+  case ALNPGOIDOID_TIMESTAMPTZ_ARRAY:
+  case ALNPGOIDOID_NUMERIC_ARRAY:
+  case ALNPGOIDOID_UUID_ARRAY:
+  case ALNPGOIDOID_JSONB_ARRAY:
+    decoded = ALNPgDecodedArrayValueForFieldType(fieldType, columnName, stringValue, error);
+    break;
   case ALNPGOIDOID_NAME:
   case ALNPGOIDOID_TEXT:
   case ALNPGOIDOID_BPCHAR:

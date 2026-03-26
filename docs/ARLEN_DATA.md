@@ -183,8 +183,10 @@ This introspects `information_schema` and writes deterministic artifacts:
 
 Generated table APIs expose:
 
-- typed table-level builder entrypoints (`selectAll`, `selectColumns`, `insertValues`, `updateValues`, `deleteBuilder`)
+- typed table-level builder entrypoints (`selectAll`, `selectColumns`, and
+  write helpers only for writable reflected relations)
 - typed column accessor methods (`columnX`, `qualifiedColumnX`)
+- relation metadata helpers (`relationKind`, `isReadOnlyRelation`)
 - typed decode helpers (`decodeTypedRow`, `decodeTypedFirstRowFromRows`, `decodeTypedRows`)
 
 Consumers can include generated files in non-Arlen builds as long as `ALNSQLBuilder` is linked.
@@ -200,6 +202,9 @@ Bind values accepted by `ALNPg`:
 - `NSNumber` (`BOOL`, integer, float/numeric inputs)
 - `NSDate`
 - `NSData`
+- `NSUUID`
+- `ALNDatabaseJSONParameter(...)`
+- `ALNDatabaseArrayParameter(...)`
 - `NSArray` / `NSDictionary` (JSON-encoded)
 - `NSNull`
 
@@ -211,10 +216,21 @@ Result values returned by `ALNPg` for supported PostgreSQL column types:
 - `date`, `timestamp`, `timestamp with time zone`: `NSDate`
 - `bytea`: `NSData`
 - `json`, `jsonb`: Foundation collection/object decoded from JSON
+- supported one-dimensional scalar arrays (`text[]`, `integer[]`, `numeric[]`,
+  `uuid[]`, date/timestamp families, JSON arrays): `NSArray`
 - text-like and unmapped runtime types: `NSString`
 
 For mapped scalar types, decode failures now surface an explicit `NSError`
 instead of silently returning a mismatched runtime class.
+
+Generated write contracts use explicit wrapper parameters for collection-shaped
+columns:
+
+- array columns emit `ALNDatabaseArrayParameter(...)`
+- `json` / `jsonb` columns emit `ALNDatabaseJSONParameter(...)`
+
+That keeps PostgreSQL array-vs-JSON intent explicit instead of treating every
+Foundation collection as implicit JSON.
 
 Common fetch helpers:
 
@@ -400,9 +416,15 @@ New internal seams and defaults:
 
 - reflection/codegen now go through `ALNDatabaseInspector`
   - PostgreSQL-first implementation: `ALNPostgresInspector`
-  - normalized fields: schema/table/column/ordinal/data type/nullability/PK/default-shape
+  - normalized column fields:
+    schema/table/column/ordinal/data type/nullability/PK/default-shape/relation kind/read-only
+  - metadata surface:
+    relations / columns / primary keys / unique constraints / foreign keys / indexes
 - generated schema manifests now include:
   - `reflection_contract_version`
+  - `relation_kind`
+  - `read_only`
+  - `supports_write_contracts`
   - per-table `column_metadata`
 - `ALNDatabaseRouter` now defaults read fallback to connectivity-only errors
   through `readFallbackPolicy`
@@ -423,6 +445,14 @@ NSDictionary *artifacts =
                                    databaseTarget:@"default"
                             includeTypedContracts:YES
                                             error:&error];
+```
+
+```objc
+NSError *error = nil;
+NSDictionary<NSString *, id> *metadata =
+    [ALNDatabaseInspector inspectSchemaMetadataForAdapter:db error:&error];
+NSArray<NSDictionary<NSString *, id> *> *relations = metadata[@"relations"];
+NSArray<NSDictionary<NSString *, id> *> *indexes = metadata[@"indexes"];
 ```
 
 ```objc
