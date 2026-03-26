@@ -53,7 +53,7 @@ Then open `build/browser-error-audit/index.html`.
 - [Phase 5C Multi-Database Tooling](PHASE5C_MULTI_DATABASE_TOOLING.md): target-aware migrate/schema-codegen flows and deterministic per-target migration state.
 - [Phase 5D Typed Data Contracts](PHASE5D_TYPED_CONTRACTS.md): typed row/insert/update generation, decode helpers, and typed SQL artifacts.
 - [Phase 5E Hardening + Confidence](PHASE5E_HARDENING_CONFIDENCE.md): soak/fault gates and release confidence artifact pack workflow.
-- [Phase 20 Roadmap](PHASE20_ROADMAP.md): completed Phase 20 depth pass for typed codecs, recursive dialect compilation, reflection/codegen contracts, routing/pool hardening, and `phase20-confidence`.
+- [Phase 20 Roadmap](PHASE20_ROADMAP.md): extended data-layer depth pass; `20A-20F` are delivered and `20G-20K` now cover relation-kind-safe reflection, richer codec parity, broader inspection, lighter execution ergonomics, and backend support tiers.
 - [Phase 7A Runtime Hardening](PHASE7A_RUNTIME_HARDENING.md): websocket backpressure safety limit contract and deterministic overload diagnostics.
 - [Phase 7B Security Defaults](PHASE7B_SECURITY_DEFAULTS.md): security profile presets, fail-fast startup validation, and policy contracts.
 - [Phase 7C Observability + Operability](PHASE7C_OBSERVABILITY_OPERABILITY.md): trace/correlation propagation, JSON health/readiness signal contracts, and deploy operability validation script.
@@ -119,7 +119,7 @@ Then open `build/browser-error-audit/index.html`.
 - [Phase 17 Roadmap](PHASE17_ROADMAP.md)
 - [Phase 18 Roadmap](PHASE18_ROADMAP.md)
 - [Phase 19 Roadmap](PHASE19_ROADMAP.md)
-- [Phase 20 Roadmap](PHASE20_ROADMAP.md): current data-layer depth pass; `20A-20C` delivered and `20D-20F` remain pending.
+- [Phase 20 Roadmap](PHASE20_ROADMAP.md): current data-layer depth pass; `20A-20F` are delivered and `20G-20K` remain planned.
 - [Comparative Benchmarking](COMPARATIVE_BENCHMARKING.md)
 - [Competitive Benchmark Roadmap](COMPETITIVE_BENCHMARK_ROADMAP.md)
 - [Phase B Parity Checklist (FastAPI)](PHASEB_PARITY_CHECKLIST_FASTAPI.md)

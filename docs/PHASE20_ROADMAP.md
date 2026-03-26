@@ -1,6 +1,6 @@
 # Arlen Phase 20 Roadmap
 
-Status: Complete (`20A-20F` delivered on 2026-03-26)
+Status: Extended (`20A-20F` delivered on 2026-03-26; `20G-20K` planned)
 Last updated: 2026-03-26
 
 Related docs:
@@ -43,6 +43,13 @@ features:
 - schema tooling still lacks a narrow backend-neutral reflection seam
 - pooled connection liveness and read-fallback behavior need tighter, more
   explicit failure semantics
+- reflected relation metadata still does not distinguish base tables from views
+  when driving write-side codegen
+- type semantics remain deeper on PostgreSQL than on MSSQL and still fall back
+  to string transport outside the supported scalar subset
+- introspection breadth is still narrower than common tooling needs for keys,
+  indexes, and relation kinds
+- result/execution ergonomics remain intentionally minimal for power-user flows
 
 Phase 20 addresses those directly rather than widening Arlen into new
 backends, ORM abstractions, or a second query language.
@@ -95,6 +102,12 @@ does not include ORM features.
    execution-cache hardening.
 6. Phase 20F: docs, examples, conformance expansion, and
    `phase20-confidence`.
+7. Phase 20G: relation-kind-aware reflection and view-safe schema codegen.
+8. Phase 20H: extended type codecs and dialect-aware bind/result parity.
+9. Phase 20I: inspector v2 for keys, indexes, and relation metadata.
+10. Phase 20J: lightweight result-set objects, batch execution, and savepoint
+    ergonomics.
+11. Phase 20K: backend parity contracts and MSSQL operational depth baseline.
 
 ## 3.1 Current Delivery Status
 
@@ -135,6 +148,21 @@ does not include ORM features.
     under `build/release_confidence/phase20`
   - refreshed docs/reference coverage for inspector usage, fallback policy,
     liveness controls, and schema-codegen manifest semantics
+- `20G`: planned
+  - preserve relation kind in the reflection contract and make schema codegen
+    view-safe on the write path
+- `20H`: planned
+  - move from hardcoded adapter type handling to a clearer cross-dialect codec
+    contract with a bounded richer supported subset
+- `20I`: planned
+  - widen inspector coverage beyond columns/defaults to the minimum additional
+    metadata that tooling and audits need
+- `20J`: planned
+  - add lightweight result/execution ergonomics without widening Arlen into an
+    ORM or streaming-heavy API
+- `20K`: planned
+  - make PostgreSQL-vs-MSSQL support tiers and minimum operational guarantees
+    explicit, tested, and less surprising
 
 ## 4. Scope Guardrails
 
@@ -338,3 +366,146 @@ Acceptance (required):
   failover behavior obvious before release
 - examples stay small, deterministic, and aligned with the documented
   PostgreSQL-first developer path
+
+## 5.7 Phase 20G: Relation-Kind-Aware Reflection + View-Safe Codegen
+
+Status: planned
+
+Deliverables:
+
+- Extend the normalized reflection contract to preserve relation kind for each
+  reflected object:
+  - base table
+  - view
+  - materialized view only if the backend can identify it deterministically
+- Thread relation kind through:
+  - `ALNDatabaseInspector`
+  - schema-codegen manifests
+  - generated helper decisions
+- Make write-side schema codegen honest by default:
+  - do not emit misleading insert/update contract helpers for reflected views
+    unless a backend-specific writable-view mode is explicitly supported and
+    documented
+  - preserve read-side typed row generation for views
+- Add fixture and live coverage for mixed table/view schemas so relation-kind
+  regressions are caught before release.
+
+Acceptance (required):
+
+- reflected views no longer receive default write contracts that imply base
+  table semantics
+- relation kind is preserved end-to-end in the reflection contract and manifest
+- ordinary base-table codegen remains backward compatible
+
+## 5.8 Phase 20H: Extended Type Codecs + Dialect-Aware Bind/Result Parity
+
+Status: planned
+
+Deliverables:
+
+- Refactor the current adapter-specific type handling into a small explicit
+  codec registry seam per dialect.
+- Extend the supported typed subset in a bounded way beyond the current scalar
+  baseline:
+  - UUID
+  - bounded array support for supported scalar element types where practical
+  - backend-native date/time and decimal behavior aligned with documented
+    precision/shape semantics
+- Stop treating collection values as implicit JSON when a dialect-specific
+  non-JSON codec applies.
+- Bring MSSQL bind/result behavior up to a documented typed baseline for the
+  same common scalar subset where the transport allows it.
+- Add deterministic fixture coverage for supported-type round trips and explicit
+  unsupported-type diagnostics per dialect.
+
+Acceptance (required):
+
+- supported common types round-trip predictably across PostgreSQL and MSSQL for
+  the documented subset
+- unsupported types stay explicit and diagnostic rather than silently
+  stringifying into surprising contracts
+- codec behavior is documented as a dialect contract instead of being inferred
+  from scattered adapter code paths
+
+## 5.9 Phase 20I: Inspector V2 for Keys, Indexes, + Relation Metadata
+
+Status: planned
+
+Deliverables:
+
+- Widen the reflection seam with a bounded inspector v2 surface for:
+  - primary-key shape
+  - unique constraints
+  - foreign keys
+  - indexes
+  - relation kind / read-only hints
+- Keep the inspector read-oriented and deterministic:
+  - no schema authoring DSL
+  - no mutable metadata graph
+  - no ORM-style table objects
+- Add normalized machine-readable fixtures for the new inspector contracts.
+- Expose enough metadata for audit tooling and codegen/reporting without
+  forcing callers back to raw backend SQL for common questions.
+
+Acceptance (required):
+
+- tooling can answer common structure questions without bespoke reflection SQL
+- fixture ordering and normalized payload shapes remain deterministic
+- the expanded inspector surface remains narrow and clearly non-ORM
+
+## 5.10 Phase 20J: Result Objects + Execution Ergonomics
+
+Status: planned
+
+Deliverables:
+
+- Add a lightweight result wrapper on top of the existing row arrays, with
+  focused helpers for:
+  - `first`
+  - `one`
+  - `oneOrNil`
+  - `scalar`
+  - mapping-backed row access without replacing the underlying dictionary
+    contract
+- Add bounded batch execution helpers for repeated parameter sets where the
+  adapter can support them honestly.
+- Add explicit savepoint helpers to the public transaction surface where the
+  backend supports them.
+- Keep streaming cursors, ORM-style identity tracking, and lazy unit-of-work
+  behavior out of scope for this phase.
+
+Acceptance (required):
+
+- common single-row and scalar flows no longer require manual array/dictionary
+  unpacking in user code
+- supported adapters expose savepoint behavior explicitly rather than forcing
+  nested-transaction users back to raw SQL
+- the existing `NSArray<NSDictionary *>` contract remains supported and
+  documented
+
+## 5.11 Phase 20K: Backend Parity Contracts + MSSQL Operational Baseline
+
+Status: planned
+
+Deliverables:
+
+- Define explicit support tiers per backend in capability metadata and docs:
+  - first-class
+  - supported subset
+  - unavailable at build time
+- Raise MSSQL toward a minimum operational parity bar for the documented subset:
+  - typed scalar bind/result handling
+  - checkout liveness checks where transport support is present
+  - clearer diagnostics and confidence coverage for builder execution paths
+- Add backend-split confidence artifacts so PostgreSQL-first depth and MSSQL
+  subset guarantees are independently visible.
+- Tighten docs and release gates so unsupported or unavailable MSSQL features
+  fail loudly instead of reading like silent omissions.
+
+Acceptance (required):
+
+- users can tell from docs and capability metadata what each backend actually
+  guarantees
+- MSSQL subset behavior is explicit, testable, and operationally less
+  surprising
+- PostgreSQL remains first-class without hiding backend asymmetry
