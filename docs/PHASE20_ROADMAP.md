@@ -1,7 +1,7 @@
 # Arlen Phase 20 Roadmap
 
-Status: Complete (`20A-20K` delivered on 2026-03-26)
-Last updated: 2026-03-26
+Status: Extended (`20A-20K` delivered on 2026-03-26; `20L-20R` planned)
+Last updated: 2026-03-27
 
 Related docs:
 - `docs/ARLEN_DATA.md`
@@ -90,6 +90,10 @@ does not include ORM features.
   fixture-driven regression coverage.
 - Improve common app flows without forcing users into magic object mapping or
   implicit model lifecycle behavior.
+- Borrow SQLAlchemy-style test-infrastructure ideas only at the concept level:
+  explicit requirement gating, shared fixtures/harnesses, reusable assertions,
+  and backend-focused lanes; keep Arlen on GNUmake + XCTest instead of widening
+  Phase 20 into a pytest/nox migration.
 
 ## 3. Scope Summary
 
@@ -111,6 +115,10 @@ does not include ORM features.
 12. Phase 20L: MSSQL native bind/result transport tightening.
 13. Phase 20M: result row ordering and projection semantics.
 14. Phase 20N: optional broader reflection depth for cross-backend tooling.
+15. Phase 20O: explicit test requirements and environment accounting.
+16. Phase 20P: shared test support and disposable backend harnesses.
+17. Phase 20Q: SQL/result assertion helpers and unified backend conformance.
+18. Phase 20R: focused test topology and confidence-lane decomposition.
 
 ## 3.1 Current Delivery Status
 
@@ -190,6 +198,40 @@ does not include ORM features.
 - `20N`: pending if broader cross-backend schema tooling becomes a product goal
   - widen reflection only behind explicit scope, starting from concrete
     tooling/reporting needs instead of chasing SQLAlchemy-style metadata breadth
+- `20O`: pending
+  - replace silent environment-dependent early returns with explicit test
+    requirement accounting for live PostgreSQL, MSSQL, driver, and runner
+    prerequisites
+- `20P`: pending
+  - centralize repeated fixture, temp-dir, shell, and unique-name helpers and
+    add disposable live-backend harness seams
+- `20Q`: pending
+  - add shared SQL/result assertion helpers and push overlapping PostgreSQL /
+    MSSQL claims onto one reusable conformance surface
+- `20R`: pending
+  - break large Phase 20-sensitive verification into focused lanes that do not
+    depend on the stock `xctest` filter behavior staying usable
+
+## 3.2 Recommended Rollout Order For Remaining Work
+
+The best rollout is to treat the new testing subphases as enabling work for the
+remaining implementation slices rather than as post-facto cleanup:
+
+1. `20O`: make backend/toolchain requirements explicit so local and CI runs stop
+   reporting false-green coverage when a DSN, driver, or capability is absent.
+2. `20P`: extract common test support and disposable backend harnesses before
+   adding more live coverage or more follow-on data-layer code.
+3. `20Q`: add reusable SQL/result assertions and unified backend conformance so
+   `20L` and `20M` land on stronger, shared regression surfaces.
+4. `20L`: tighten MSSQL native bind/result transport on top of the improved
+   harness and conformance layers.
+5. `20M`: change row-order/projection semantics only once assertion helpers can
+   verify ordered-column behavior directly.
+6. `20R`: decompose the remaining verification into focused lanes / bundles /
+   confidence paths so follow-on Phase 20 work no longer depends on broad suite
+   blast radius or the current stock `xctest` filtering limitations.
+7. `20N`: keep broader reflection explicitly conditional and out of the critical
+   path unless cross-backend tooling becomes a real product goal.
 
 ## 4. Scope Guardrails
 
@@ -639,3 +681,123 @@ Acceptance (required):
   cross-backend
 - any widened reflection payload remains deterministic and tooling-oriented
 - schema/codegen promises do not outrun the actual supported backend contracts
+
+## 5.15 Phase 20O: Explicit Test Requirements + Environment Accounting
+
+Status: planned
+
+Deliverables:
+
+- Introduce a small Objective-C-native test-requirements layer for live and
+  environment-sensitive coverage:
+  - PostgreSQL DSN availability
+  - MSSQL DSN availability
+  - driver/transport availability
+  - savepoint/liveness capability availability where applicable
+  - optional filter-capable runner availability
+- Replace silent environment-dependent `return` patterns in live tests with
+  explicit requirement accounting and deterministic skip/reporting behavior.
+- Separate coverage expectations more clearly across:
+  - pure unit / fixture-backed tests
+  - live backend tests
+  - runner/toolchain-sensitive tests
+- Keep GNUmake + XCTest as the supported harness; do not widen this slice into a
+  Python test-runner migration.
+
+Acceptance (required):
+
+- DSN-gated and driver-gated tests no longer appear to pass silently when their
+  prerequisites are absent
+- local and CI output make it obvious which backend-sensitive coverage ran vs.
+  skipped and why
+- follow-on verification for `20L` / `20M` can declare concrete prerequisites
+  instead of relying on incidental environment knowledge
+
+## 5.16 Phase 20P: Shared Test Support + Disposable Backend Harnesses
+
+Status: planned
+
+Deliverables:
+
+- Introduce shared test support for repeated helpers such as:
+  - repo-root resolution
+  - fixture JSON loading
+  - temp directory / temp file creation
+  - shell capture
+  - deterministic unique-name generation
+  - common cleanup helpers
+- Add disposable live-backend harness seams where the backend can support them
+  honestly:
+  - predictable temporary schema/table namespace setup
+  - deterministic teardown on PostgreSQL and MSSQL
+- Move obvious repeated helper code out of the large Phase 20-sensitive test
+  files and into shared support seams.
+- Preserve explicit, deterministic fixtures and avoid introducing a large magic
+  meta-test DSL.
+
+Acceptance (required):
+
+- repeated helper logic in Phase 20-sensitive unit/integration tests is
+  materially reduced
+- live backend tests set up and tear down their own namespace predictably
+- adding a new live regression no longer requires re-copying fixture/temp-dir/
+  shell helper code into another test file
+
+## 5.17 Phase 20Q: SQL/Result Assertion Helpers + Unified Backend Conformance
+
+Status: planned
+
+Deliverables:
+
+- Add shared assertion helpers for:
+  - SQL text snapshots / normalization where applicable
+  - placeholder numbering and parameter arity
+  - ordered result-column expectations
+  - typed scalar / row materialization
+  - explicit diagnostics/error-message expectations
+- Lift current ad hoc SQL-builder and adapter checks into reusable conformance
+  helpers/fixtures rather than scattering `containsString:` and one-off
+  equality checks everywhere.
+- Expand backend parity coverage so PostgreSQL and MSSQL run the same in-scope
+  contract cases where Arlen claims overlapping support.
+- Add deterministic seam/mock regressions for failure branches that are hard to
+  hit reliably through live databases alone, such as disconnect classification,
+  rollback-on-release, stale-checkout recycle, and codec fallback behavior.
+
+Acceptance (required):
+
+- SQL/result regressions fail with precise shared assertions instead of only
+  scattered one-off checks
+- overlapping PostgreSQL / MSSQL parity claims are proven by one reusable
+  conformance surface
+- hard-to-reach failure paths have deterministic unit coverage in addition to
+  live backend runs
+
+## 5.18 Phase 20R: Focused Test Topology + Confidence-Lane Decomposition
+
+Status: planned
+
+Deliverables:
+
+- Break large Phase 20-sensitive verification into focused execution targets,
+  bundles, or confidence lanes such as:
+  - SQL builder / dialect compilation
+  - PostgreSQL live data-layer coverage
+  - MSSQL live data-layer coverage
+  - schema codegen / reflection contracts
+  - routing/pool/result-wrapper durability
+- Stop relying solely on the current stock `xctest` filter behavior for focused
+  reruns; add repo-native focused make targets or smaller bundles that remain
+  deterministic on the Debian baseline runner.
+- Extend confidence-path documentation and scripts so the remaining Phase 20
+  follow-ons have narrow verification commands rather than broad suite blast
+  radius.
+- Keep the broad `test-unit` / `test-integration` runs intact as the umbrella
+  regression pass.
+
+Acceptance (required):
+
+- targeted reruns for `20L` / `20M` no longer depend on unrelated unit failures
+- CI can execute backend-focused and pure-unit lanes independently
+- follow-on Phase 20 verification becomes faster and more legible without
+  weakening full-suite regression coverage

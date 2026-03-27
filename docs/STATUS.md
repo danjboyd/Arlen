@@ -1,6 +1,25 @@
 # Arlen Status Checkpoint
 
-Last updated: 2026-03-26
+Last updated: 2026-03-27
+
+## Completed Today (2026-03-27)
+
+- Audited SQLAlchemy Core test-suite ideas against Arlen's current data-layer
+  tests and extended the Phase 20 roadmap with a rollout that keeps Arlen on
+  GNUmake + XCTest instead of chasing Python runner parity:
+  - added `20O` for explicit test requirements and environment accounting so
+    DSN/driver-gated coverage stops passing silently via early returns
+  - added `20P` for shared test support and disposable backend harnesses so
+    repeated repo-root/fixture/temp-dir/shell helpers stop proliferating across
+    large test files
+  - added `20Q` for SQL/result assertion helpers and unified backend
+    conformance so PostgreSQL/MSSQL overlap gets one stronger reusable
+    regression surface
+  - added `20R` for focused test topology and confidence-lane decomposition so
+    remaining Phase 20 work can be verified without depending on the stock
+    `xctest` filter path staying usable
+  - recorded the recommended remaining rollout order as `20O`, `20P`, `20Q`,
+    `20L`, `20M`, `20R`, with `20N` still conditional
 
 ## Completed Today (2026-03-26)
 
@@ -228,9 +247,11 @@ entries, not current plan-of-record items.
   rows, recursive nested dialect compilation, result/savepoint ergonomics,
   reflection/codegen alignment, routing/pool hardening, relation-kind-safe
   reflection, richer type parity, inspector-v2 metadata, backend support
-  tiers, and MSSQL operational baseline hardening; `20L-20N` are planned for
-  MSSQL native transport tightening, result row-order semantics, and optional
-  broader reflection if cross-backend tooling becomes a goal)
+  tiers, and MSSQL operational baseline hardening; `20L-20R` are planned for
+  MSSQL native transport tightening, result row-order semantics, explicit test
+  requirements/support/assertion rollout, focused confidence-lane
+  decomposition, and optional broader reflection if cross-backend tooling
+  becomes a goal)
 
 ## Completed Today (2026-03-26)
 
