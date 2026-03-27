@@ -394,8 +394,7 @@ static BOOL ALNHasAllValues(NSArray *available, NSArray *required) {
   if ([required count] == 0) {
     return YES;
   }
-  id current = context.stash[ALNContextAuthScopesStashKey];
-  NSArray *available = [current isKindOfClass:[NSArray class]] ? current : @[];
+  NSArray *available = [context authScopes] ?: @[];
   return ALNHasAllValues(available, required);
 }
 
@@ -404,8 +403,7 @@ static BOOL ALNHasAllValues(NSArray *available, NSArray *required) {
   if ([required count] == 0) {
     return YES;
   }
-  id current = context.stash[ALNContextAuthRolesStashKey];
-  NSArray *available = [current isKindOfClass:[NSArray class]] ? current : @[];
+  NSArray *available = [context authRoles] ?: @[];
   return ALNHasAllValues(available, required);
 }
 

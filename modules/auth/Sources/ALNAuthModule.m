@@ -4167,7 +4167,7 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
   ctx.session[ALNAuthModuleProviderStateSessionKey] = @{
     @"state" : state ?: @"",
     @"nonce" : nonce ?: @"",
-    @"issuedAt" : [NSDate date],
+    @"issuedAt" : @([[NSDate date] timeIntervalSince1970]),
     @"return_to" : returnTo ?: @"",
   };
   [ctx markSessionDirty];

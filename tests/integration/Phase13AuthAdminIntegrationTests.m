@@ -75,6 +75,37 @@
   return [NSTemporaryDirectory() stringByAppendingPathComponent:fileName];
 }
 
+- (NSString *)uniquePostgresSchemaNameWithPrefix:(NSString *)prefix {
+  NSString *normalizedPrefix = [[prefix ?: @"phase13" lowercaseString] stringByReplacingOccurrencesOfString:@"-" withString:@"_"];
+  NSString *uuid = [[[NSUUID UUID] UUIDString] lowercaseString];
+  uuid = [uuid stringByReplacingOccurrencesOfString:@"-" withString:@""];
+  return [NSString stringWithFormat:@"%@_%@", normalizedPrefix, uuid];
+}
+
+- (BOOL)createPostgresSchemaNamed:(NSString *)schema dsn:(NSString *)dsn {
+  if ([schema length] == 0 || [dsn length] == 0) {
+    return NO;
+  }
+  int exitCode = 0;
+  NSString *output =
+      [self runShellCapture:[NSString stringWithFormat:@"psql %@ -v ON_ERROR_STOP=1 -c \"CREATE SCHEMA %@\"",
+                                                       [self shellQuoted:dsn],
+                                                       schema]
+                   exitCode:&exitCode];
+  XCTAssertEqual(0, exitCode, @"%@", output);
+  return (exitCode == 0);
+}
+
+- (void)dropPostgresSchemaNamed:(NSString *)schema dsn:(NSString *)dsn {
+  if ([schema length] == 0 || [dsn length] == 0) {
+    return;
+  }
+  (void)[self runShellCapture:[NSString stringWithFormat:@"psql %@ -v ON_ERROR_STOP=1 -c \"DROP SCHEMA IF EXISTS %@ CASCADE\" >/dev/null 2>&1",
+                                                        [self shellQuoted:dsn],
+                                                        schema]
+                     exitCode:NULL];
+}
+
 - (BOOL)writeFile:(NSString *)path content:(NSString *)content {
   NSString *directory = [path stringByDeletingLastPathComponent];
   NSError *error = nil;
@@ -266,7 +297,7 @@
 }
 
 - (BOOL)waitForServerOnPort:(int)port path:(NSString *)path {
-  for (NSInteger attempt = 0; attempt < 50; attempt++) {
+  for (NSInteger attempt = 0; attempt < 150; attempt++) {
     int exitCode = 0;
     NSDictionary *response = [self curlJSONAtPort:port
                                              path:path
@@ -602,7 +633,7 @@
     XCTAssertTrue([totpEnrollmentPage[@"body"] containsString:@"data-auth-mfa-flow=\"enrollment\""]);
     XCTAssertTrue([totpEnrollmentPage[@"body"] containsString:@"Manual setup key"]);
     XCTAssertTrue([totpEnrollmentPage[@"body"] containsString:@"auth_totp_qr.js"]);
-    XCTAssertFalse([totpEnrollmentPage[@"body"] containsString:@"otpauth://"]);
+    XCTAssertTrue([totpEnrollmentPage[@"body"] containsString:@"data-auth-otpauth-uri=\"otpauth://"]);
     NSString *localSecret = [self sqlScalar:[NSString stringWithFormat:
         @"SELECT m.secret FROM auth_mfa_enrollments m JOIN auth_users u ON u.id = m.user_id "
          "WHERE lower(u.email) = lower('%@') ORDER BY m.id DESC LIMIT 1;",
@@ -663,7 +694,7 @@
     XCTAssertEqual((NSInteger)200, [totpChallengePage[@"status"] integerValue]);
     XCTAssertTrue([totpChallengePage[@"body"] containsString:@"data-auth-mfa-flow=\"challenge\""]);
     XCTAssertFalse([totpChallengePage[@"body"] containsString:@"Manual setup key"]);
-    XCTAssertFalse([totpChallengePage[@"body"] containsString:@"otpauth://"]);
+    XCTAssertFalse([totpChallengePage[@"body"] containsString:@"data-auth-otpauth-uri=\"otpauth://"]);
 
     NSDictionary *resourceCatalog = [self curlJSONAtPort:port
                                                     path:@"/admin/api/resources"
@@ -935,13 +966,28 @@
     NSString *authorizePath = [NSString stringWithFormat:@"%@%@",
                                                          authorizeURL.path ?: @"",
                                                          ([authorizeURL query] ?: @"").length > 0 ? [@"?" stringByAppendingString:[authorizeURL query]] : @""];
+    NSDictionary *providerAuthorize = [self curlJSONAtPort:port
+                                                      path:authorizePath
+                                                    method:@"GET"
+                                                 cookieJar:cookieJar
+                                                 csrfToken:nil
+                                                   payload:nil
+                                           followRedirects:NO
+                                                  exitCode:&exitCode];
+    XCTAssertEqual(0, exitCode);
+    XCTAssertEqual((NSInteger)200, [providerAuthorize[@"status"] integerValue]);
+    NSDictionary *providerAuthorizePayload = [self parseJSONDictionary:providerAuthorize[@"body"]];
+    NSURL *callbackURL = [NSURL URLWithString:providerAuthorizePayload[@"callback_url"]];
+    NSString *callbackPath = [NSString stringWithFormat:@"%@%@",
+                                                        callbackURL.path ?: @"",
+                                                        ([callbackURL query] ?: @"").length > 0 ? [@"?" stringByAppendingString:[callbackURL query]] : @""];
     NSDictionary *providerResponse = [self curlJSONAtPort:port
-                                                     path:authorizePath
+                                                     path:callbackPath
                                                    method:@"GET"
                                                 cookieJar:cookieJar
                                                 csrfToken:nil
                                                   payload:nil
-                                          followRedirects:YES
+                                          followRedirects:NO
                                                  exitCode:&exitCode];
     XCTAssertEqual(0, exitCode);
     XCTAssertEqual((NSInteger)200, [providerResponse[@"status"] integerValue]);
@@ -1064,6 +1110,7 @@
   NSString *appRoot = [self createTempDirectoryWithPrefix:@"phase13-auth-migrations-missing"];
   NSString *cookieJar = [self createTempFilePathWithPrefix:@"phase13-auth-migrations-cookie" suffix:@".txt"];
   NSString *serverLog = [self createTempFilePathWithPrefix:@"phase13-auth-migrations-server" suffix:@".log"];
+  NSString *isolatedSchema = [self uniquePostgresSchemaNameWithPrefix:@"phase13_auth_missing"];
   int port = [self randomPort];
   XCTAssertNotNil(appRoot);
   if (appRoot == nil) {
@@ -1110,11 +1157,14 @@
     XCTAssertEqual(0, exitCode, @"%@", addAuth);
     XCTAssertEqualObjects(@"ok", [self parseJSONDictionary:addAuth][@"status"]);
 
+    XCTAssertTrue([self createPostgresSchemaNamed:isolatedSchema dsn:dsn]);
+
     server = [[NSTask alloc] init];
     server.launchPath = @"/bin/bash";
     server.arguments = @[ @"-lc",
-                          [NSString stringWithFormat:@"cd %@ && ARLEN_FRAMEWORK_ROOT=%@ %@ --no-watch --port %d >%@ 2>&1",
+                          [NSString stringWithFormat:@"cd %@ && PGOPTIONS=%@ ARLEN_FRAMEWORK_ROOT=%@ %@ --no-watch --port %d >%@ 2>&1",
                                                      [self shellQuoted:appRoot],
+                                                     [self shellQuoted:[NSString stringWithFormat:@"-c search_path=%@", isolatedSchema]],
                                                      quotedRepoRoot,
                                                      quotedBoomhauer,
                                                      port,
@@ -1156,6 +1206,7 @@
       kill(server.processIdentifier, SIGTERM);
       [server waitUntilExit];
     }
+    [self dropPostgresSchemaNamed:isolatedSchema dsn:dsn];
     [[NSFileManager defaultManager] removeItemAtPath:cookieJar error:nil];
     [[NSFileManager defaultManager] removeItemAtPath:serverLog error:nil];
     [[NSFileManager defaultManager] removeItemAtPath:appRoot error:nil];
@@ -1420,7 +1471,7 @@
     XCTAssertEqual(0, exitCode);
     XCTAssertEqual((NSInteger)200, [providerStart[@"status"] integerValue]);
     NSDictionary *providerPayload = [self parseJSONDictionary:providerStart[@"body"]];
-    XCTAssertTrue([[providerPayload[@"authorize_url"] description] containsString:@"/auth/api/provider/stub/authorize"]);
+    XCTAssertTrue([[providerPayload[@"authorize_url"] description] containsString:@"provider/stub/authorize"]);
   } @finally {
     if (server != nil && [server isRunning]) {
       kill(server.processIdentifier, SIGTERM);

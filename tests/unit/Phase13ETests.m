@@ -9,6 +9,8 @@
 #import "ALNController.h"
 #import "ALNAuthModule.h"
 #import "ALNContext.h"
+#import "ALNMigrationRunner.h"
+#import "ALNPg.h"
 #import "ALNRequest.h"
 #import "ALNResponse.h"
 #import "ALNRouter.h"
@@ -158,6 +160,9 @@ static NSUInteger gPhase15UIContextCalls = 0;
 
 - (ALNApplication *)applicationWithConfig:(NSDictionary *)extraConfig {
   NSString *dsn = [self pgTestDSN];
+  if ([dsn length] > 0) {
+    [self ensureAuthModuleMigrationsAppliedForDSN:dsn];
+  }
   NSMutableDictionary *config = [NSMutableDictionary dictionaryWithDictionary:@{
     @"environment" : @"test",
     @"logFormat" : @"json",
@@ -175,6 +180,32 @@ static NSUInteger gPhase15UIContextCalls = 0;
   }];
   [config addEntriesFromDictionary:extraConfig ?: @{}];
   return [[ALNApplication alloc] initWithConfig:config];
+}
+
+- (void)ensureAuthModuleMigrationsAppliedForDSN:(NSString *)dsn {
+  static NSString *gPhase13EPreparedDSN = nil;
+
+  if ([dsn length] == 0) {
+    return;
+  }
+  if ([gPhase13EPreparedDSN isEqualToString:dsn]) {
+    return;
+  }
+
+  NSString *migrationsPath = [[self repoRoot] stringByAppendingPathComponent:@"modules/auth/Migrations"];
+  NSError *error = nil;
+  ALNPg *database = [[ALNPg alloc] initWithConnectionString:dsn maxConnections:1 error:&error];
+  XCTAssertNotNil(database);
+  XCTAssertNil(error);
+
+  NSArray<NSString *> *appliedFiles = nil;
+  XCTAssertTrue([ALNMigrationRunner applyMigrationsAtPath:migrationsPath
+                                                 database:database
+                                                   dryRun:NO
+                                             appliedFiles:&appliedFiles
+                                                    error:&error]);
+  XCTAssertNil(error);
+  gPhase13EPreparedDSN = [dsn copy];
 }
 
 - (NSString *)repoRoot {

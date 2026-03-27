@@ -1,6 +1,7 @@
 <% NSDictionary *form = [ctx objectForKey:@"authFormDescriptor"] ?: @{}; %>
 <% NSString *method = [[form objectForKey:@"method"] ?: @"post" lowercaseString]; %>
 <% NSString *action = [form objectForKey:@"action"] ?: @""; %>
+<% NSString *fieldRowTemplate = [ctx objectForKey:@"authPartialFieldRow"] ?: @"modules/auth/partials/field_row"; %>
 <form method="<%= method %>" action="<%= action %>">
   <% if (![method isEqualToString:@"get"]) { %>
     <input type="hidden" name="csrf_token" value="<%= [ctx objectForKey:@"csrfToken"] ?: @"" %>">
@@ -13,7 +14,7 @@
   <% for (NSDictionary *field in fields) { %>
     <% NSMutableDictionary *fieldCtx = [NSMutableDictionary dictionaryWithDictionary:(NSDictionary *)ctx]; %>
     <% [fieldCtx setObject:(field ?: @{}) forKey:@"authField"]; %>
-    <% if (!ALNEOCInclude(out, fieldCtx, [ctx objectForKey:@"authPartialFieldRow"], error)) { return nil; } %>
+    <% if (!ALNEOCInclude(out, fieldCtx, fieldRowTemplate, error)) { return nil; } %>
   <% } %>
   <div class="auth-actions">
     <button class="auth-button" type="submit"><%= [form objectForKey:@"submitLabel"] ?: @"Continue" %></button>

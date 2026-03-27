@@ -180,6 +180,30 @@
   };
 }
 
+- (id)loginAdmin:(ALNContext *)ctx {
+  NSError *error = nil;
+  BOOL ok = [ALNAuthSession establishAuthenticatedSessionForSubject:@"user-admin"
+                                                           provider:@"local"
+                                                            methods:@[ @"pwd" ]
+                                                             scopes:nil
+                                                              roles:@[ @"user", @"admin" ]
+                                                     assuranceLevel:1
+                                                    authenticatedAt:nil
+                                                            context:ctx
+                                                              error:&error];
+  if (!ok || error != nil) {
+    [self setStatus:500];
+    [self renderText:error.localizedDescription ?: @"admin login failed\n"];
+    return nil;
+  }
+  return @{
+    @"subject" : [self authSubject] ?: @"",
+    @"roles" : [self authRoles] ?: @[],
+    @"aal" : @([self authAssuranceLevel]),
+    @"session_id" : [self authSessionIdentifier] ?: @"",
+  };
+}
+
 - (id)loginStale:(ALNContext *)ctx {
   NSError *error = nil;
   NSDate *staleDate = [NSDate dateWithTimeIntervalSinceNow:-7200.0];
@@ -499,6 +523,11 @@ static NSUInteger AppFastPathControllerSlowInvocationCount = 0;
            controllerClass:[AppAuthAssuranceController class]
                     action:@"login"];
   [app registerRouteMethod:@"GET"
+                      path:@"/login-admin"
+                      name:@"auth_login_admin"
+           controllerClass:[AppAuthAssuranceController class]
+                    action:@"loginAdmin"];
+  [app registerRouteMethod:@"GET"
                       path:@"/login-stale"
                       name:@"auth_login_stale"
            controllerClass:[AppAuthAssuranceController class]
@@ -511,6 +540,11 @@ static NSUInteger AppFastPathControllerSlowInvocationCount = 0;
   [app registerRouteMethod:@"GET"
                       path:@"/secure"
                       name:@"auth_secure"
+           controllerClass:[AppAuthAssuranceController class]
+                    action:@"secure"];
+  [app registerRouteMethod:@"GET"
+                      path:@"/secure-admin"
+                      name:@"auth_secure_admin"
            controllerClass:[AppAuthAssuranceController class]
                     action:@"secure"];
   [app registerRouteMethod:@"GET"
@@ -544,6 +578,16 @@ static NSUInteger AppFastPathControllerSlowInvocationCount = 0;
                          maximumAuthenticationAgeSeconds:60
                                               stepUpPath:@"/mfa/reauth"
                                                    error:NULL]);
+  XCTAssertTrue([app configureRouteNamed:@"auth_secure_admin"
+                           requestSchema:nil
+                          responseSchema:nil
+                                 summary:nil
+                             operationID:nil
+                                    tags:nil
+                           requiredScopes:nil
+                            requiredRoles:@[ @"admin" ]
+                          includeInOpenAPI:NO
+                                    error:NULL]);
   return app;
 }
 
@@ -840,6 +884,23 @@ static NSUInteger AppFastPathControllerSlowInvocationCount = 0;
   NSDictionary *meta = [entry[@"meta"] isKindOfClass:[NSDictionary class]] ? entry[@"meta"] : @{};
   XCTAssertEqualObjects(@2, meta[@"minimum_auth_assurance_level"]);
   XCTAssertEqualObjects(@1, meta[@"current_auth_assurance_level"]);
+}
+
+- (void)testProtectedRoleRouteUsesSessionBackedRolesWithoutBearerAuth {
+  ALNApplication *app = [self buildAppWithAuthAssuranceRoutes];
+  ALNResponse *loginResponse = [app dispatchRequest:[self requestForPath:@"/login-admin"]];
+  NSString *cookiePair = [self cookiePairFromSetCookie:[loginResponse headerForName:@"Set-Cookie"]];
+
+  ALNResponse *secureResponse = [app dispatchRequest:[self requestForPath:@"/secure-admin"
+                                                              queryString:@""
+                                                                  headers:@{
+                                                                    @"cookie" : cookiePair,
+                                                                    @"accept" : @"application/json",
+                                                                  }]];
+  XCTAssertEqual((NSInteger)200, secureResponse.statusCode);
+  NSDictionary *secureJSON = [self JSONObjectFromResponse:secureResponse];
+  XCTAssertEqualObjects(@"user-admin", secureJSON[@"subject"]);
+  XCTAssertEqualObjects(@1, secureJSON[@"aal"]);
 }
 
 - (void)testAuthSessionRotationOccursOnStepUpAndProtectedRouteThenSucceeds {

@@ -154,6 +154,8 @@ static NSArray *ALNAuthProviderBridgeNormalizedMethods(id value) {
   if (![ALNAuthSession establishAuthenticatedSessionForSubject:subject
                                                       provider:provider
                                                        methods:methods
+                                                        scopes:sessionDescriptor[@"scopes"]
+                                                         roles:sessionDescriptor[@"roles"]
                                                 assuranceLevel:assuranceLevel
                                                authenticatedAt:authenticatedAt
                                                        context:context

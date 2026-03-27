@@ -374,7 +374,7 @@
   NSString *compileCommand = [NSString stringWithFormat:
       @"source /usr/GNUstep/System/Library/Makefiles/GNUstep.sh && clang $(gnustep-config --objc-flags) "
        "-fobjc-arc -I%@/src/Arlen -I%@/src/Arlen/Data -I%@/src/Generated %@ %@ %@/src/Arlen/Data/ALNSQLBuilder.m "
-       "-o %@ $(gnustep-config --base-libs) -ldl -lcrypto",
+       "-o %@ $(gnustep-config --base-libs) -ldispatch -ldl -lcrypto",
       repoRoot, repoRoot, appRoot, smokeSourcePath, implPath, repoRoot, smokeBinaryPath];
   NSString *compileOutput = [self runShellCapture:compileCommand exitCode:&code];
   XCTAssertEqual(0, code, @"%@", compileOutput);
@@ -559,12 +559,29 @@
   NSString *compileCommand = [NSString stringWithFormat:
        @"source /usr/GNUstep/System/Library/Makefiles/GNUstep.sh && clang $(gnustep-config --objc-flags) "
        "-fobjc-arc -I%@/src/Arlen -I%@/src/Arlen/Data -I%@/src/Arlen/Support -I%@/src/Generated %@ %@ "
-       "%@/src/Arlen/Data/ALNDatabaseAdapter.m %@/src/Arlen/Data/ALNPg.m %@/src/Arlen/Data/ALNSQLBuilder.m "
-       "%@/src/Arlen/Data/ALNPostgresDialect.m %@/src/Arlen/Support/ALNJSONSerialization.m "
+       "%@/src/Arlen/Data/ALNDatabaseAdapter.m %@/src/Arlen/Data/ALNPg.m %@/src/Arlen/Data/ALNMSSQL.m "
+       "%@/src/Arlen/Data/ALNSQLBuilder.m %@/src/Arlen/Data/ALNSQLDialect.m "
+       "%@/src/Arlen/Data/ALNPostgresDialect.m %@/src/Arlen/Data/ALNPostgresSQLBuilder.m "
+       "%@/src/Arlen/Data/ALNMSSQLDialect.m %@/src/Arlen/Support/ALNJSONSerialization.m "
        "%@/src/Arlen/Support/third_party/yyjson/yyjson.c "
-       "-o %@ $(gnustep-config --base-libs) -ldl -lcrypto",
-      repoRoot, repoRoot, repoRoot, appRoot, smokeSourcePath, implPath, repoRoot, repoRoot, repoRoot, repoRoot, repoRoot,
-      repoRoot, smokeBinaryPath];
+       "-o %@ $(gnustep-config --base-libs) -ldispatch -ldl -lcrypto",
+      repoRoot,
+      repoRoot,
+      repoRoot,
+      appRoot,
+      smokeSourcePath,
+      implPath,
+      repoRoot,
+      repoRoot,
+      repoRoot,
+      repoRoot,
+      repoRoot,
+      repoRoot,
+      repoRoot,
+      repoRoot,
+      repoRoot,
+      repoRoot,
+      smokeBinaryPath];
   NSString *compileOutput = [self runShellCapture:compileCommand exitCode:&code];
   XCTAssertEqual(0, code, @"%@", compileOutput);
 
@@ -594,7 +611,7 @@
   NSString *brokenCompile = [NSString stringWithFormat:
       @"source /usr/GNUstep/System/Library/Makefiles/GNUstep.sh && clang $(gnustep-config --objc-flags) "
        "-fobjc-arc -I%@/src/Arlen -I%@/src/Arlen/Data -I%@/src/Generated %@ %@ "
-       "-o %@.broken $(gnustep-config --base-libs) -ldl -lcrypto",
+       "-o %@.broken $(gnustep-config --base-libs) -ldispatch -ldl -lcrypto",
       repoRoot, repoRoot, appRoot, brokenSourcePath, implPath, smokeBinaryPath];
   NSString *brokenCompileOutput = [self runShellCapture:brokenCompile exitCode:&code];
   XCTAssertNotEqual(0, code);
@@ -700,7 +717,7 @@
 
   NSString *compileCommand = [NSString stringWithFormat:
       @"source /usr/GNUstep/System/Library/Makefiles/GNUstep.sh && clang $(gnustep-config --objc-flags) "
-       "-fobjc-arc -I%@/src/Generated %@ %@ -o %@ $(gnustep-config --base-libs) -ldl -lcrypto",
+       "-fobjc-arc -I%@/src/Generated %@ %@ -o %@ $(gnustep-config --base-libs) -ldispatch -ldl -lcrypto",
       appRoot, smokeSourcePath, implPath, smokeBinaryPath];
   NSString *compileOutput = [self runShellCapture:compileCommand exitCode:&code];
   XCTAssertEqual(0, code, @"%@", compileOutput);
@@ -727,7 +744,7 @@
 
   NSString *brokenCompile = [NSString stringWithFormat:
       @"source /usr/GNUstep/System/Library/Makefiles/GNUstep.sh && clang $(gnustep-config --objc-flags) "
-       "-fobjc-arc -I%@/src/Generated %@ %@ -o %@.broken $(gnustep-config --base-libs) -ldl -lcrypto",
+       "-fobjc-arc -I%@/src/Generated %@ %@ -o %@.broken $(gnustep-config --base-libs) -ldispatch -ldl -lcrypto",
       appRoot, brokenSourcePath, implPath, smokeBinaryPath];
   NSString *brokenOutput = [self runShellCapture:brokenCompile exitCode:&code];
   XCTAssertNotEqual(0, code);
@@ -1264,14 +1281,20 @@
       @"source /usr/GNUstep/System/Library/Makefiles/GNUstep.sh && clang $(gnustep-config --objc-flags) "
        "-fobjc-arc -I%@/src/Arlen -I%@/src/Arlen/Data -I%@/src/Arlen/Support %@ "
        "%@/src/Arlen/Data/ALNDatabaseAdapter.m %@/src/Arlen/Data/ALNDatabaseRouter.m "
-       "%@/src/Arlen/Data/ALNPg.m %@/src/Arlen/Data/ALNSQLBuilder.m "
-       "%@/src/Arlen/Data/ALNPostgresSQLBuilder.m %@/src/Arlen/Support/ALNJSONSerialization.m "
+       "%@/src/Arlen/Data/ALNPg.m %@/src/Arlen/Data/ALNMSSQL.m %@/src/Arlen/Data/ALNSQLBuilder.m "
+       "%@/src/Arlen/Data/ALNSQLDialect.m %@/src/Arlen/Data/ALNPostgresDialect.m "
+       "%@/src/Arlen/Data/ALNPostgresSQLBuilder.m %@/src/Arlen/Data/ALNMSSQLDialect.m "
+       "%@/src/Arlen/Support/ALNJSONSerialization.m "
        "%@/src/Arlen/Support/third_party/yyjson/yyjson.c "
-       "-o %@ $(gnustep-config --base-libs) -ldl -lcrypto",
+       "-o %@ $(gnustep-config --base-libs) -ldispatch -ldl -lcrypto",
       repoRoot,
       repoRoot,
       repoRoot,
       sourcePath,
+      repoRoot,
+      repoRoot,
+      repoRoot,
+      repoRoot,
       repoRoot,
       repoRoot,
       repoRoot,
