@@ -46,6 +46,7 @@ Arlen is designed to solve the same class of problems as frameworks like Mojolic
 - Phase 18: complete (`18A-18H` delivered on 2026-03-14: fragment-first MFA UI reuse, headless MFA contract refinement, optional SMS/Twilio Verify support, and generated-app-ui include-path hardening. See `docs/PHASE18_ROADMAP.md`).
 - Phase 19: complete (`19A-19F` delivered on 2026-03-14: incremental GNUmake/GNUstep build-graph narrowing, generated-template object reuse, clearer `boomhauer` build phases, and `phase19-confidence`. See `docs/PHASE19_ROADMAP.md`).
 - Phase 20: complete (`20A-20K` delivered on 2026-03-26; `20L-20R` delivered on 2026-03-27 for MSSQL native transport tightening, ordered result semantics, bounded PostgreSQL metadata expansion, explicit live-test requirement accounting, shared test support/assertion layers, and repo-native focused confidence lanes. See `docs/PHASE20_ROADMAP.md`).
+- Phase 21: planned (public-release test-suite robustness pass covering in-process request harnesses, request/pipeline assertion helpers, explicit async DB ownership rules, template security/regression decomposition, raw protocol corpora with replayable fuzz inputs, and generated-app/module matrix coverage. See `docs/PHASE21_ROADMAP.md`).
 
 ## Quick Start
 
@@ -283,6 +284,7 @@ Specifications and roadmaps:
 - [Phase 16 Roadmap](docs/PHASE16_ROADMAP.md)
 - [Phase 17 Roadmap](docs/PHASE17_ROADMAP.md)
 - [Phase 20 Roadmap](docs/PHASE20_ROADMAP.md)
+- [Phase 21 Roadmap](docs/PHASE21_ROADMAP.md)
 - [Comparative Benchmarking](docs/COMPARATIVE_BENCHMARKING.md)
 - [Competitive Benchmark Roadmap](docs/COMPETITIVE_BENCHMARK_ROADMAP.md)
 - [Phase B Parity Checklist (FastAPI)](docs/PHASEB_PARITY_CHECKLIST_FASTAPI.md)

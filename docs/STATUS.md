@@ -4,6 +4,19 @@ Last updated: 2026-03-27
 
 ## Completed Today (2026-03-27)
 
+- Planned Phase 21 as the next roadmap phase:
+  - audited Mojolicious `Test::Mojo`, Phoenix `ConnTest` + Ecto SQL sandbox,
+    Jinja's test-suite structure, and llhttp's request/response/fuzzer corpus
+    as the most relevant upstream testing references for Arlen's next
+    robustness pass
+  - added `docs/PHASE21_ROADMAP.md` and scoped `21A-21G` around in-process
+    request harnesses, shared request/pipeline assertions, explicit async DB
+    ownership rules, template security/regression decomposition, raw protocol
+    corpora with replayable fuzz inputs, generated-app/module matrix coverage,
+    and focused contributor rerun lanes
+  - kept the guardrails explicit: stay on GNUmake + XCTest, complement rather
+    than replace spawned-server integration tests, and avoid adopting foreign
+    test frameworks or browser automation as a release gate
 - Completed Phase `20P-20R`:
   - added shared Phase 20 test support under `tests/shared` for fixture loading,
     temp dirs, unique identifiers, DSN/env lookup, MSSQL temp-table naming, and
@@ -289,6 +302,11 @@ entries, not current plan-of-record items.
   tiers, MSSQL native transport tightening, ordered result semantics, bounded
   PostgreSQL metadata expansion, explicit live-test requirement accounting,
   shared test support/assertion helpers, and focused Phase 20 confidence lanes)
+- Phase 21: planned (audit-driven public-release test robustness pass covering
+  in-process request harnesses, shared request/pipeline assertions, explicit
+  async DB ownership rules, template security/regression decomposition, raw
+  protocol corpora with replayable fuzz inputs, generated-app/module matrix
+  coverage, and focused contributor rerun lanes)
 
 ## Completed Today (2026-03-26)
 

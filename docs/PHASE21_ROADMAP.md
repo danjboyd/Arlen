@@ -1,0 +1,315 @@
+# Arlen Phase 21 Roadmap
+
+Status: Planned
+Last updated: 2026-03-27
+
+Related docs:
+- `docs/STATUS.md`
+- `docs/PHASE20_ROADMAP.md`
+- `docs/GETTING_STARTED.md`
+- `docs/TOOLCHAIN_MATRIX.md`
+- `docs/DOCUMENTATION_POLICY.md`
+- `docs/PHASE5_ROADMAP.md`
+- `docs/PHASE7_ROADMAP.md`
+
+External sources reviewed for this roadmap:
+- `https://docs.mojolicious.org/Mojolicious/Guides/Testing`
+- `https://hexdocs.pm/phoenix/testing.html`
+- `https://hexdocs.pm/phoenix/Phoenix.ConnTest.html`
+- `https://hexdocs.pm/ecto_sql/Ecto.Adapters.SQL.Sandbox.html`
+- `https://github.com/pallets/jinja/tree/main/tests`
+- `https://github.com/pallets/jinja/blob/main/tests/test_lexnparse.py`
+- `https://github.com/pallets/jinja/blob/main/tests/test_regression.py`
+- `https://github.com/pallets/jinja/blob/main/tests/test_security.py`
+- `https://github.com/nodejs/llhttp/tree/main/test/request`
+- `https://github.com/nodejs/llhttp/tree/main/test/response`
+- `https://github.com/nodejs/llhttp/tree/main/test/fuzzers`
+
+## 1. Objective
+
+Strengthen Arlen's test suite ahead of public OSS release so first-user flows,
+compiler edges, protocol boundaries, and contributor-found regressions are
+covered with less boilerplate and stronger isolation.
+
+Phase 21 is a test-infrastructure and coverage-depth pass, not a feature
+expansion phase.
+
+## 1.1 Why Phase 21 Exists
+
+The current suite is already meaningful, but it still has a few shape problems
+that matter more once Arlen has outside users:
+
+- downstream bug reports from real apps catch valuable issues, but they still
+  cover only a narrow slice of possible app/module/config combinations
+- many web-facing tests rely on spawned servers plus shell/curl flows, which
+  are good end-to-end acceptance coverage but too heavy for broad
+  request/middleware/session permutations
+- request/redirect/cookie/session assertions are still more ad hoc than they
+  should be for routine route and middleware verification
+- template/compiler coverage is deep, but it is not yet decomposed into the
+  clean parser/security/regression buckets used by mature template engines
+- hostile protocol coverage exists, but the raw HTTP corpus and replay story is
+  not yet as first-class as the parser-focused suites used by projects like
+  llhttp
+- shared test support improved significantly in Phase 20, but that reuse is
+  still concentrated around the data layer rather than the wider web/runtime
+  test surface
+
+Phase 21 addresses those directly.
+
+## 1.2 Upstream Audit Summary
+
+The upstream suites reviewed here are useful because they solve different parts
+of the same problem:
+
+- Mojolicious `Test::Mojo` shows how much leverage comes from one
+  lifecycle-aware in-process app harness:
+  - boot the app automatically
+  - bind a random port
+  - inject configuration directly from the test
+  - introspect helpers/plugins/routes from the same object
+- Phoenix `ConnCase` and `Phoenix.ConnTest` show the value of a thin request
+  harness with reusable assertions:
+  - build a request without forking a server
+  - run endpoint/router pipelines explicitly when testing middleware in
+    isolation
+  - recycle cookies/session state between requests
+  - assert redirects, params, content type, and wrapped errors through shared
+    helpers instead of repeated string parsing
+- Ecto's SQL sandbox shows how async DB-backed tests stay trustworthy only when
+  state ownership is explicit:
+  - explicit allowances for collaborator processes
+  - shared mode when worker processes cannot be individually allowed
+  - deliberate owner/process shutdown rules so tests do not pass while work is
+    still live against borrowed state
+- Jinja's suite structure shows the benefit of splitting a compiler/runtime
+  surface by concern:
+  - parser/lexer tests
+  - runtime tests
+  - security tests
+  - regression tests
+  - resource fixtures
+- llhttp shows how protocol hardening gets stronger when raw inputs become a
+  first-class corpus:
+  - request and response fixture directories
+  - invalid/lenient/pipelining categories
+  - replayable fuzz harnesses tied to raw parser entrypoints
+
+Arlen should borrow those ideas at the concept level while staying on GNUmake +
+XCTest and using Objective-C-native helpers.
+
+## 2. Design Principles
+
+- Keep GNUmake + XCTest as the supported test stack.
+- Prefer harnesses that exercise real Arlen runtime code over broad mocking.
+- Separate fast in-process request coverage from subprocess/live acceptance
+  coverage rather than replacing one with the other.
+- Keep backend requirements and ownership rules explicit.
+- Treat template/security/protocol negatives as first-class fixtures, not
+  incidental one-off assertions.
+- Promote fixed external bug reports into permanent named regression tests.
+- Preserve deterministic fixture output, diagnostics, and GNUstep
+  compatibility.
+- Improve contributor ergonomics, but do not widen this phase into browser
+  automation or a second test framework.
+
+## 3. Scope Summary
+
+1. Phase 21A: in-process request harness and case-template foundation.
+2. Phase 21B: request/pipeline assertion helpers and state recycling.
+3. Phase 21C: disposable DB/app-state sandboxes and async ownership rules.
+4. Phase 21D: template/compiler suite decomposition and regression catalog.
+5. Phase 21E: raw protocol corpus and fuzz/replay hardening.
+6. Phase 21F: generated-app and module/config matrix coverage.
+7. Phase 21G: focused lanes, contributor workflow, docs, and confidence
+   closeout.
+
+## 3.1 Recommended Rollout Order
+
+1. `21A`
+2. `21B`
+3. `21C`
+4. `21D`
+5. `21E`
+6. `21F`
+7. `21G`
+
+That order keeps the shared harness and ownership model in place before Arlen
+widens request, compiler, protocol, and generated-app coverage on top of it.
+
+## 4. Scope Guardrails
+
+- Do not replace XCTest with ExUnit, pytest, Perl test tooling, or another new
+  runner stack.
+- Do not delete or weaken the existing spawned-server integration tests; the
+  new harnesses are additive.
+- Do not make Arlen's public-release story depend on browser automation.
+- Do not promise transactional DB sandbox semantics where the adapter/runtime
+  cannot honestly provide them; explicit schema/namespace isolation remains
+  acceptable when that is the truthful contract.
+- Do not widen this phase into new framework features unrelated to test
+  robustness.
+- Do not compromise deterministic diagnostics or GNUstep compatibility in the
+  name of test convenience.
+
+## 5. Milestones
+
+## 5.1 Phase 21A: In-Process Request Harness + Case Templates
+
+Deliverables:
+
+- Add a shared web-test support layer for in-process route/controller/middleware
+  exercise without shelling out to `curl` for common cases.
+- Introduce case-template or base-test conventions for:
+  - request/response tests
+  - app/module harness tests
+  - DB-backed request tests
+- Allow tests to boot a disposable app/runtime with config overrides supplied
+  directly from the test instead of always writing temp config files first.
+- Expose controlled app/helper/module introspection from the harness.
+
+Acceptance (required):
+
+- At least one current shell/curl-heavy route suite gains focused in-process
+  request coverage for both HTML and JSON responses.
+- Feature/config toggles can be exercised directly from tests without requiring
+  a hand-authored config file for every case.
+
+## 5.2 Phase 21B: Request Assertions + Pipeline Helpers
+
+Deliverables:
+
+- Add shared response/assertion helpers for:
+  - status
+  - content type
+  - headers
+  - HTML body fragments
+  - JSON body decoding
+  - redirects and redirected path params
+  - wrapped error responses
+- Add cookie/session recycling helpers for multi-request flows.
+- Add explicit pipeline-bypass helpers so middleware can be tested in
+  isolation while still running the required endpoint/router setup path.
+- Add reusable request-construction helpers for custom headers, query strings,
+  and body encodings.
+
+Acceptance (required):
+
+- `ApplicationTests`, `MiddlewareTests`, or equivalent web-facing suites use
+  shared redirect/cookie/session/assertion helpers instead of repeated
+  response parsing.
+- At least one pipeline-sensitive auth/session/security test exercises a
+  middleware path through the new isolated helper surface.
+
+## 5.3 Phase 21C: Disposable State Sandboxes + Async Ownership
+
+Deliverables:
+
+- Generalize `tests/shared` so disposable state helpers are reusable beyond the
+  current Phase 20 data-layer focus.
+- Add DB-backed case support for disposable PostgreSQL/MSSQL schemas,
+  namespaces, or transaction-owned state as appropriate to the actual adapter
+  contract.
+- Define explicit worker/process ownership modes for DB-backed tests:
+  - explicit borrowed-state allowance
+  - serialized shared-owner mode
+- Add reusable shutdown/on-exit helpers so test-owned workers terminate before
+  their state owner disappears.
+
+Acceptance (required):
+
+- Large Pg/MSSQL/live suites stop carrying repeated schema/process cleanup
+  helpers inline once equivalent shared support exists.
+- Background-worker tests can deliberately choose explicit ownership or shared
+  mode instead of relying on accidental behavior.
+
+## 5.4 Phase 21D: Template Suite Decomposition + Regression Catalog
+
+Deliverables:
+
+- Split the current broad template/transpiler coverage into focused buckets
+  inspired by Jinja's suite shape:
+  - lexer/parser
+  - compile/codegen
+  - runtime/render
+  - security
+  - regression
+- Add fixture namespaces for invalid syntax, deterministic diagnostics,
+  security-sensitive cases, and externally reported regressions.
+- Establish a simple regression intake convention so fixed downstream bugs land
+  as stable named test cases/fixtures instead of one-off assertions.
+
+Acceptance (required):
+
+- At least one current broad template test file is decomposed into more focused
+  suites with fixture-backed coverage.
+- New template bug fixes can be added to a dedicated regression/security area
+  without editing an increasingly catch-all file.
+
+## 5.5 Phase 21E: Protocol Corpus + Fuzz/Replay Hardening
+
+Deliverables:
+
+- Promote `tests/fixtures/protocol` into a clearer raw-input corpus with
+  request/response categories such as:
+  - valid
+  - invalid
+  - lenient-mode
+  - pipelining
+  - websocket handshake/frame boundaries where applicable
+- Add a replay harness that feeds raw bytes into parser/runtime boundaries and
+  asserts deterministic accept/reject behavior.
+- Add replayable fuzz/adversarial seed handling for parser/framing regressions.
+- Keep strict-vs-lenient behavior explicit when Arlen supports both.
+
+Acceptance (required):
+
+- Existing protocol-adversarial coverage can be rerun from one dedicated corpus
+  target instead of only through broader integration wrappers.
+- A failing raw input or saved seed can be replayed with one documented
+  command.
+
+## 5.6 Phase 21F: Generated-App + Module Matrix Coverage
+
+Deliverables:
+
+- Add a curated generated-app matrix harness for first-user setup paths:
+  - scaffolded app boot/build/test
+  - module add/eject/upgrade flows
+  - mode toggles such as `headless`, `module-ui`, and `generated-app-ui`
+  - representative module feature flags and config variants
+- Reuse the new config-injection support wherever possible so matrix cases stay
+  concise and deterministic.
+- Cover a curated matrix of realistic first-user combinations rather than
+  exploding into all possible permutations.
+
+Acceptance (required):
+
+- A representative set of first-user app/module/config combinations is covered
+  by one focused matrix suite.
+- At least one current downstream bug-report class is converted into generated
+  app/mode/config matrix coverage.
+
+## 5.7 Phase 21G: Focused Lanes + Contributor Workflow + Confidence
+
+Deliverables:
+
+- Add repo-native focused lanes for the new coverage surfaces, for example:
+  - fast request harness tests
+  - template corpus/regression tests
+  - protocol corpus/fuzz replay tests
+  - generated-app matrix tests
+- Document the contributor workflow from bug report to permanent regression:
+  - reproduce
+  - add focused fixture/test
+  - run focused lane
+  - promote through broader suite
+- Add Phase 21 confidence/closeout commands and docs updates once the new test
+  topology is in place.
+
+Acceptance (required):
+
+- Contributors can identify the right focused rerun path from repo docs without
+  test-suite archaeology.
+- Phase 21 closes with documented focused lanes and a reproducible confidence
+  entrypoint.
