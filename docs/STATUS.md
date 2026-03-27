@@ -4,6 +4,18 @@ Last updated: 2026-03-27
 
 ## Completed Today (2026-03-27)
 
+- Planned Phase 22 as the next roadmap phase:
+  - audited the current documentation set for newcomer accessibility,
+    code-accuracy, and missing user-facing guides across `README.md`,
+    `docs/README.md`, the getting-started family, CLI/help output, generated
+    scaffolds, and the current module/service docs
+  - scoped `22A-22G` around entrypoint/navigation reset, onboarding
+    consolidation, docs/code parity hardening, app-author guides,
+    module-lifecycle + lite-mode docs, plugin/frontend guidance, and docs
+    quality closeout
+  - kept the guardrails explicit: prioritize user-facing workflows over deep
+    internal design notes, avoid turning onboarding into contributor checklists,
+    and add lightweight drift prevention where it materially improves trust
 - Completed Phase `21D-21G`:
   - replaced the broad template/transpiler unit surface with focused
     `TemplateParserTests`, `TemplateCodegenTests`, `TemplateSecurityTests`,
@@ -345,10 +357,13 @@ entries, not current plan-of-record items.
   tiers, MSSQL native transport tightening, ordered result semantics, bounded
   PostgreSQL metadata expansion, explicit live-test requirement accounting,
   shared test support/assertion helpers, and focused Phase 20 confidence lanes)
-- Phase 21: in progress (`21A-21C` complete as of 2026-03-27 for in-process
-  request harnesses, shared request/pipeline assertions, and explicit async DB
-  ownership rules; `21D-21G` remain for template/protocol/generated-app depth
-  and focused contributor rerun lanes)
+- Phase 21: complete (`21A-21G` complete as of 2026-03-27 for in-process
+  request harnesses, shared request/pipeline assertions, explicit async DB
+  ownership rules, template-suite decomposition, raw protocol corpus replay,
+  generated-app matrix coverage, and focused contributor rerun lanes)
+- Phase 22: planned (`22A-22G` scoped on 2026-03-27 for newcomer-first
+  onboarding cleanup, docs/code parity hardening, app-author guides,
+  module/lite-mode guidance, plugin/frontend guides, and docs quality closeout)
 
 ## Completed Today (2026-03-26)
 

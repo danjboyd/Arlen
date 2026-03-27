@@ -55,6 +55,7 @@ Then open `build/browser-error-audit/index.html`.
 - [Phase 5E Hardening + Confidence](PHASE5E_HARDENING_CONFIDENCE.md): soak/fault gates and release confidence artifact pack workflow.
 - [Phase 20 Roadmap](PHASE20_ROADMAP.md): delivered `20A-20R` data-layer depth work, including shared test support, SQL/result assertion helpers, and focused confidence-lane decomposition.
 - [Phase 21 Roadmap](PHASE21_ROADMAP.md): completed public-release test robustness pass inspired by Mojolicious, Phoenix/Ecto, Jinja, and llhttp; `21A-21G` are delivered for request harnesses, shared pipeline assertions, explicit async state ownership, template-suite decomposition, raw protocol corpus replay, generated-app matrix coverage, and focused contributor lanes.
+- [Phase 22 Roadmap](PHASE22_ROADMAP.md): planned documentation cleanup pass for newcomer-first onboarding, docs/code parity hardening, app-author guides, module/lite-mode guidance, plugin/frontend guides, and docs quality closeout.
 - [Testing Workflow](TESTING_WORKFLOW.md): focused-lane guide for turning bug reports into permanent template, protocol, and generated-app regressions.
 - [Phase 7A Runtime Hardening](PHASE7A_RUNTIME_HARDENING.md): websocket backpressure safety limit contract and deterministic overload diagnostics.
 - [Phase 7B Security Defaults](PHASE7B_SECURITY_DEFAULTS.md): security profile presets, fail-fast startup validation, and policy contracts.
@@ -123,6 +124,7 @@ Then open `build/browser-error-audit/index.html`.
 - [Phase 19 Roadmap](PHASE19_ROADMAP.md)
 - [Phase 20 Roadmap](PHASE20_ROADMAP.md): completed data-layer depth pass; `20A-20R` are delivered.
 - [Phase 21 Roadmap](PHASE21_ROADMAP.md)
+- [Phase 22 Roadmap](PHASE22_ROADMAP.md)
 - [Comparative Benchmarking](COMPARATIVE_BENCHMARKING.md)
 - [Competitive Benchmark Roadmap](COMPETITIVE_BENCHMARK_ROADMAP.md)
 - [Phase B Parity Checklist (FastAPI)](PHASEB_PARITY_CHECKLIST_FASTAPI.md)
