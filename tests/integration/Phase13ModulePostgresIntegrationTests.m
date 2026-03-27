@@ -1,8 +1,8 @@
 #import <Foundation/Foundation.h>
 #import <XCTest/XCTest.h>
 
-#import <stdlib.h>
-#import <string.h>
+#import "../shared/ALNDatabaseTestSupport.h"
+#import "../shared/ALNTestSupport.h"
 
 @interface Phase13ModulePostgresIntegrationTests : XCTestCase
 @end
@@ -10,36 +10,24 @@
 @implementation Phase13ModulePostgresIntegrationTests
 
 - (NSString *)pgTestDSN {
-  const char *value = getenv("ARLEN_PG_TEST_DSN");
-  if (value == NULL || value[0] == '\0') {
-    return nil;
-  }
-  return [NSString stringWithUTF8String:value];
+  return ALNTestEnvironmentString(@"ARLEN_PG_TEST_DSN");
+}
+
+- (NSString *)requiredPGTestDSNForSelector:(SEL)selector {
+  return ALNTestRequiredEnvironmentString(
+      @"ARLEN_PG_TEST_DSN",
+      NSStringFromClass([self class]),
+      NSStringFromSelector(selector),
+      @"set ARLEN_PG_TEST_DSN to run PostgreSQL module integration coverage");
 }
 
 - (NSString *)createTempDirectoryWithPrefix:(NSString *)prefix {
-  NSString *templatePath =
-      [NSTemporaryDirectory() stringByAppendingPathComponent:[NSString stringWithFormat:@"%@-XXXXXX", prefix]];
-  char *buffer = strdup([templatePath fileSystemRepresentation]);
-  char *created = mkdtemp(buffer);
-  NSString *result = created ? [[NSFileManager defaultManager] stringWithFileSystemRepresentation:created
-                                                                                             length:strlen(created)]
-                             : nil;
-  free(buffer);
-  return result;
+  return ALNTestTemporaryDirectory(prefix);
 }
 
 - (BOOL)writeFile:(NSString *)path content:(NSString *)content {
-  NSString *dir = [path stringByDeletingLastPathComponent];
   NSError *error = nil;
-  if (![[NSFileManager defaultManager] createDirectoryAtPath:dir
-                                 withIntermediateDirectories:YES
-                                                  attributes:nil
-                                                       error:&error]) {
-    XCTFail(@"failed creating %@: %@", dir, error.localizedDescription);
-    return NO;
-  }
-  if (![content writeToFile:path atomically:YES encoding:NSUTF8StringEncoding error:&error]) {
+  if (!ALNTestWriteUTF8File(path, content, &error)) {
     XCTFail(@"failed writing %@: %@", path, error.localizedDescription);
     return NO;
   }
@@ -47,40 +35,19 @@
 }
 
 - (NSString *)runShellCapture:(NSString *)command exitCode:(int *)exitCode {
-  NSTask *task = [[NSTask alloc] init];
-  task.launchPath = @"/bin/bash";
-  task.arguments = @[ @"-lc", command ?: @"" ];
-  NSPipe *stdoutPipe = [NSPipe pipe];
-  NSPipe *stderrPipe = [NSPipe pipe];
-  task.standardOutput = stdoutPipe;
-  task.standardError = stderrPipe;
-  [task launch];
-  [task waitUntilExit];
-  if (exitCode != NULL) {
-    *exitCode = task.terminationStatus;
-  }
-  NSData *stdoutData = [[stdoutPipe fileHandleForReading] readDataToEndOfFile];
-  NSData *stderrData = [[stderrPipe fileHandleForReading] readDataToEndOfFile];
-  NSMutableData *combined = [NSMutableData dataWithData:stdoutData ?: [NSData data]];
-  if ([stderrData length] > 0) {
-    [combined appendData:stderrData];
-  }
-  NSString *output = [[NSString alloc] initWithData:combined encoding:NSUTF8StringEncoding];
-  return output ?: @"";
+  return ALNTestRunShellCapture(command, exitCode);
 }
 
 - (NSDictionary *)parseJSONDictionary:(NSString *)output {
-  NSString *trimmed = [output stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
-  NSData *data = [trimmed dataUsingEncoding:NSUTF8StringEncoding];
   NSError *error = nil;
-  NSDictionary *payload = [NSJSONSerialization JSONObjectWithData:data options:0 error:&error];
+  NSDictionary *payload = ALNTestJSONDictionaryFromString(output, &error);
   XCTAssertNil(error, @"invalid JSON: %@\n%@", error.localizedDescription, output);
   return payload ?: @{};
 }
 
 - (void)testModuleMigrateAppliesAndUpgradesNamespacedMigrations {
-  NSString *dsn = [self pgTestDSN];
-  if ([dsn length] == 0) {
+  NSString *dsn = [self requiredPGTestDSNForSelector:_cmd];
+  if (dsn == nil) {
     return;
   }
 

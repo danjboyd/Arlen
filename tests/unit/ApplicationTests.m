@@ -14,6 +14,7 @@
 #import "ALNRoute.h"
 #import "ALNRouter.h"
 #import "ALNAuthSession.h"
+#import "../shared/ALNWebTestSupport.h"
 
 @interface AppHeaderMiddleware : NSObject <ALNMiddleware>
 @end
@@ -598,29 +599,42 @@ static NSUInteger AppFastPathControllerSlowInvocationCount = 0;
 - (ALNRequest *)requestForPath:(NSString *)path
                    queryString:(NSString *)queryString
                        headers:(NSDictionary *)headers {
-  return [[ALNRequest alloc] initWithMethod:@"GET"
-                                      path:path
-                               queryString:queryString ?: @""
-                                   headers:headers ?: @{}
-                                      body:[NSData data]];
+  return ALNTestRequestWithMethod(@"GET", path, queryString, headers, nil);
 }
 
 - (NSDictionary *)JSONObjectFromResponse:(ALNResponse *)response {
   NSError *error = nil;
-  NSDictionary *json = [NSJSONSerialization JSONObjectWithData:response.bodyData
-                                                       options:0
-                                                         error:&error];
+  NSDictionary *json = ALNTestJSONDictionaryFromResponse(response, &error);
   XCTAssertNil(error);
   XCTAssertTrue([json isKindOfClass:[NSDictionary class]]);
   return [json isKindOfClass:[NSDictionary class]] ? json : @{};
 }
 
 - (NSString *)cookiePairFromSetCookie:(NSString *)setCookie {
-  NSArray *parts = [setCookie componentsSeparatedByString:@";"];
-  if ([parts count] == 0) {
-    return @"";
+  return ALNTestCookiePairFromSetCookie(setCookie);
+}
+
+- (ALNWebTestHarness *)webHarnessForApplication:(ALNApplication *)app {
+  return [ALNWebTestHarness harnessWithApplication:app];
+}
+
+- (void)testWebHarnessExposesApplicationRouteAndMiddlewareIntrospection {
+  ALNApplication *app = [self buildAppWithHaltingMiddleware:NO];
+  ALNWebTestHarness *harness = [self webHarnessForApplication:app];
+
+  XCTAssertEqualObjects(@"test", harness.application.environment);
+  XCTAssertNotNil([harness routeNamed:@"dict"]);
+  XCTAssertTrue([[harness routeTable] count] > 0);
+  XCTAssertTrue([[harness middlewares] count] > 0);
+  BOOL foundCustomMiddleware = NO;
+  for (id middleware in [harness middlewares]) {
+    if ([middleware isKindOfClass:[AppHeaderMiddleware class]]) {
+      foundCustomMiddleware = YES;
+      break;
+    }
   }
-  return [parts[0] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+  XCTAssertTrue(foundCustomMiddleware);
+  XCTAssertEqual((NSUInteger)0, [[harness modules] count]);
 }
 
 - (void)concurrentDispatchWorker:(NSMutableDictionary *)state {
@@ -847,35 +861,34 @@ static NSUInteger AppFastPathControllerSlowInvocationCount = 0;
 
 - (void)testProtectedHTMLRouteRedirectsToStepUpPathWhenMFAIsMissing {
   ALNApplication *app = [self buildAppWithAuthAssuranceRoutes];
-  ALNResponse *loginResponse = [app dispatchRequest:[self requestForPath:@"/login"]];
-  NSString *cookiePair = [self cookiePairFromSetCookie:[loginResponse headerForName:@"Set-Cookie"]];
+  ALNWebTestHarness *harness = [self webHarnessForApplication:app];
+  ALNResponse *loginResponse = [harness dispatchMethod:@"GET" path:@"/login"];
+  [harness recycleCookiesFromResponse:loginResponse];
 
-  ALNResponse *secureResponse = [app dispatchRequest:[self requestForPath:@"/secure"
-                                                              queryString:@""
-                                                                  headers:@{
-                                                                    @"cookie" : cookiePair,
-                                                                    @"accept" : @"text/html",
-                                                                  }]];
-  XCTAssertEqual((NSInteger)302, secureResponse.statusCode);
-  XCTAssertEqualObjects(@"1", [secureResponse headerForName:@"X-Arlen-Step-Up-Required"]);
+  ALNResponse *secureResponse = [harness dispatchMethod:@"GET"
+                                                   path:@"/secure"
+                                            queryString:@""
+                                                headers:@{ @"accept" : @"text/html" }
+                                                   body:nil];
+  ALNAssertResponseRedirect(secureResponse, 302, @"/mfa/challenge?");
+  ALNAssertResponseHeaderEquals(secureResponse, @"X-Arlen-Step-Up-Required", @"1");
   NSString *location = [secureResponse headerForName:@"Location"];
-  XCTAssertTrue([location hasPrefix:@"/mfa/challenge?"]);
   XCTAssertTrue([location containsString:@"reason=step_up_required"]);
   XCTAssertTrue([location containsString:@"return_to=%2Fsecure"]);
 }
 
 - (void)testProtectedAPIRouteReturnsStructuredStepUpRequiredPayload {
   ALNApplication *app = [self buildAppWithAuthAssuranceRoutes];
-  ALNResponse *loginResponse = [app dispatchRequest:[self requestForPath:@"/login"]];
-  NSString *cookiePair = [self cookiePairFromSetCookie:[loginResponse headerForName:@"Set-Cookie"]];
+  ALNWebTestHarness *harness = [self webHarnessForApplication:app];
+  ALNResponse *loginResponse = [harness dispatchMethod:@"GET" path:@"/login"];
+  [harness recycleCookiesFromResponse:loginResponse];
 
-  ALNResponse *secureResponse = [app dispatchRequest:[self requestForPath:@"/secure"
-                                                              queryString:@""
-                                                                  headers:@{
-                                                                    @"cookie" : cookiePair,
-                                                                    @"accept" : @"application/json",
-                                                                  }]];
-  XCTAssertEqual((NSInteger)403, secureResponse.statusCode);
+  ALNResponse *secureResponse = [harness dispatchMethod:@"GET"
+                                                   path:@"/secure"
+                                            queryString:@""
+                                                headers:@{ @"accept" : @"application/json" }
+                                                   body:nil];
+  ALNAssertResponseStatus(secureResponse, 403);
   NSDictionary *json = [self JSONObjectFromResponse:secureResponse];
   XCTAssertEqualObjects(@"step_up_required", json[@"error"][@"code"]);
   NSArray *details = [json[@"details"] isKindOfClass:[NSArray class]] ? json[@"details"] : @[];
@@ -888,16 +901,16 @@ static NSUInteger AppFastPathControllerSlowInvocationCount = 0;
 
 - (void)testProtectedRoleRouteUsesSessionBackedRolesWithoutBearerAuth {
   ALNApplication *app = [self buildAppWithAuthAssuranceRoutes];
-  ALNResponse *loginResponse = [app dispatchRequest:[self requestForPath:@"/login-admin"]];
-  NSString *cookiePair = [self cookiePairFromSetCookie:[loginResponse headerForName:@"Set-Cookie"]];
+  ALNWebTestHarness *harness = [self webHarnessForApplication:app];
+  ALNResponse *loginResponse = [harness dispatchMethod:@"GET" path:@"/login-admin"];
+  [harness recycleCookiesFromResponse:loginResponse];
 
-  ALNResponse *secureResponse = [app dispatchRequest:[self requestForPath:@"/secure-admin"
-                                                              queryString:@""
-                                                                  headers:@{
-                                                                    @"cookie" : cookiePair,
-                                                                    @"accept" : @"application/json",
-                                                                  }]];
-  XCTAssertEqual((NSInteger)200, secureResponse.statusCode);
+  ALNResponse *secureResponse = [harness dispatchMethod:@"GET"
+                                                   path:@"/secure-admin"
+                                            queryString:@""
+                                                headers:@{ @"accept" : @"application/json" }
+                                                   body:nil];
+  ALNAssertResponseStatus(secureResponse, 200);
   NSDictionary *secureJSON = [self JSONObjectFromResponse:secureResponse];
   XCTAssertEqualObjects(@"user-admin", secureJSON[@"subject"]);
   XCTAssertEqualObjects(@1, secureJSON[@"aal"]);
@@ -905,33 +918,31 @@ static NSUInteger AppFastPathControllerSlowInvocationCount = 0;
 
 - (void)testAuthSessionRotationOccursOnStepUpAndProtectedRouteThenSucceeds {
   ALNApplication *app = [self buildAppWithAuthAssuranceRoutes];
-  ALNResponse *loginResponse = [app dispatchRequest:[self requestForPath:@"/login"]];
+  ALNWebTestHarness *harness = [self webHarnessForApplication:app];
+  ALNResponse *loginResponse = [harness dispatchMethod:@"GET" path:@"/login"];
   NSDictionary *loginJSON = [self JSONObjectFromResponse:loginResponse];
   NSString *loginSessionID = loginJSON[@"session_id"];
-  NSString *cookiePair = [self cookiePairFromSetCookie:[loginResponse headerForName:@"Set-Cookie"]];
+  [harness recycleCookiesFromResponse:loginResponse];
 
-  ALNResponse *stepUpResponse = [app dispatchRequest:[self requestForPath:@"/step-up"
-                                                              queryString:@""
-                                                                  headers:@{
-                                                                    @"cookie" : cookiePair,
-                                                                    @"accept" : @"application/json",
-                                                                  }]];
-  XCTAssertEqual((NSInteger)200, stepUpResponse.statusCode);
+  ALNResponse *stepUpResponse = [harness dispatchMethod:@"GET"
+                                                   path:@"/step-up"
+                                            queryString:@""
+                                                headers:@{ @"accept" : @"application/json" }
+                                                   body:nil];
+  ALNAssertResponseStatus(stepUpResponse, 200);
   NSDictionary *stepUpJSON = [self JSONObjectFromResponse:stepUpResponse];
   XCTAssertEqualObjects(@2, stepUpJSON[@"aal"]);
   XCTAssertEqualObjects(@(YES), stepUpJSON[@"mfa"]);
   XCTAssertNotEqualObjects(loginSessionID, stepUpJSON[@"session_id"]);
   XCTAssertTrue([stepUpJSON[@"methods"] containsObject:@"totp"]);
 
-  NSString *elevatedCookie =
-      [self cookiePairFromSetCookie:[stepUpResponse headerForName:@"Set-Cookie"]];
-  ALNResponse *secureResponse = [app dispatchRequest:[self requestForPath:@"/secure"
-                                                              queryString:@""
-                                                                  headers:@{
-                                                                    @"cookie" : elevatedCookie,
-                                                                    @"accept" : @"application/json",
-                                                                  }]];
-  XCTAssertEqual((NSInteger)200, secureResponse.statusCode);
+  [harness recycleCookiesFromResponse:stepUpResponse];
+  ALNResponse *secureResponse = [harness dispatchMethod:@"GET"
+                                                   path:@"/secure"
+                                            queryString:@""
+                                                headers:@{ @"accept" : @"application/json" }
+                                                   body:nil];
+  ALNAssertResponseStatus(secureResponse, 200);
   NSDictionary *secureJSON = [self JSONObjectFromResponse:secureResponse];
   XCTAssertEqualObjects(@2, secureJSON[@"aal"]);
   XCTAssertEqualObjects(@(YES), secureJSON[@"mfa"]);
@@ -940,16 +951,16 @@ static NSUInteger AppFastPathControllerSlowInvocationCount = 0;
 
 - (void)testRecentAuthenticationWindowRejectsStaleSessionDeterministically {
   ALNApplication *app = [self buildAppWithAuthAssuranceRoutes];
-  ALNResponse *loginResponse = [app dispatchRequest:[self requestForPath:@"/login-stale"]];
-  NSString *cookiePair = [self cookiePairFromSetCookie:[loginResponse headerForName:@"Set-Cookie"]];
+  ALNWebTestHarness *harness = [self webHarnessForApplication:app];
+  ALNResponse *loginResponse = [harness dispatchMethod:@"GET" path:@"/login-stale"];
+  [harness recycleCookiesFromResponse:loginResponse];
 
-  ALNResponse *recentResponse = [app dispatchRequest:[self requestForPath:@"/recent"
-                                                              queryString:@""
-                                                                  headers:@{
-                                                                    @"cookie" : cookiePair,
-                                                                    @"accept" : @"application/json",
-                                                                  }]];
-  XCTAssertEqual((NSInteger)403, recentResponse.statusCode);
+  ALNResponse *recentResponse = [harness dispatchMethod:@"GET"
+                                                   path:@"/recent"
+                                            queryString:@""
+                                                headers:@{ @"accept" : @"application/json" }
+                                                   body:nil];
+  ALNAssertResponseStatus(recentResponse, 403);
   NSDictionary *json = [self JSONObjectFromResponse:recentResponse];
   XCTAssertEqualObjects(@"step_up_required", json[@"error"][@"code"]);
   NSArray *details = [json[@"details"] isKindOfClass:[NSArray class]] ? json[@"details"] : @[];
@@ -962,16 +973,16 @@ static NSUInteger AppFastPathControllerSlowInvocationCount = 0;
 
 - (void)testClearAuthenticatedSessionEmitsCookieDeletionWhenSessionBecomesEmpty {
   ALNApplication *app = [self buildAppWithAuthAssuranceRoutes];
-  ALNResponse *loginResponse = [app dispatchRequest:[self requestForPath:@"/login"]];
-  NSString *cookiePair = [self cookiePairFromSetCookie:[loginResponse headerForName:@"Set-Cookie"]];
+  ALNWebTestHarness *harness = [self webHarnessForApplication:app];
+  ALNResponse *loginResponse = [harness dispatchMethod:@"GET" path:@"/login"];
+  [harness recycleCookiesFromResponse:loginResponse];
 
-  ALNResponse *logoutResponse = [app dispatchRequest:[self requestForPath:@"/logout"
-                                                              queryString:@""
-                                                                  headers:@{
-                                                                    @"cookie" : cookiePair,
-                                                                    @"accept" : @"application/json",
-                                                                  }]];
-  XCTAssertEqual((NSInteger)200, logoutResponse.statusCode);
+  ALNResponse *logoutResponse = [harness dispatchMethod:@"GET"
+                                                   path:@"/logout"
+                                            queryString:@""
+                                                headers:@{ @"accept" : @"application/json" }
+                                                   body:nil];
+  ALNAssertResponseStatus(logoutResponse, 200);
   NSDictionary *logoutJSON = [self JSONObjectFromResponse:logoutResponse];
   XCTAssertEqualObjects(@"", logoutJSON[@"subject"]);
   XCTAssertEqualObjects(@0, logoutJSON[@"aal"]);

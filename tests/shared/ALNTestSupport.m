@@ -83,6 +83,31 @@ id ALNTestJSONObjectAtRelativePath(NSString *relativePath, NSError **error) {
   return object;
 }
 
+id ALNTestJSONObjectFromString(NSString *string, NSError **error) {
+  if (error != NULL) {
+    *error = nil;
+  }
+  NSString *payload = [string isKindOfClass:[NSString class]] ? string : @"";
+  NSData *data = [payload dataUsingEncoding:NSUTF8StringEncoding];
+  if (data == nil) {
+    if (error != NULL) {
+      *error = ALNTestSupportMakeError(
+          @"fixture string could not be encoded as UTF-8",
+          @{
+            NSLocalizedDescriptionKey : @"fixture string could not be encoded as UTF-8",
+          });
+    }
+    return nil;
+  }
+
+  NSError *jsonError = nil;
+  id object = [NSJSONSerialization JSONObjectWithData:data options:0 error:&jsonError];
+  if (object == nil && error != NULL) {
+    *error = jsonError;
+  }
+  return object;
+}
+
 NSDictionary *ALNTestJSONDictionaryAtRelativePath(NSString *relativePath, NSError **error) {
   if (error != NULL) {
     *error = nil;
@@ -95,6 +120,24 @@ NSDictionary *ALNTestJSONDictionaryAtRelativePath(NSString *relativePath, NSErro
           @{
             NSLocalizedDescriptionKey : @"fixture JSON payload must be a dictionary",
             @"relative_path" : relativePath ?: @"",
+          });
+    }
+    return nil;
+  }
+  return object;
+}
+
+NSDictionary *ALNTestJSONDictionaryFromString(NSString *string, NSError **error) {
+  if (error != NULL) {
+    *error = nil;
+  }
+  id object = ALNTestJSONObjectFromString(string, error);
+  if (![object isKindOfClass:[NSDictionary class]]) {
+    if (object != nil && error != NULL) {
+      *error = ALNTestSupportMakeError(
+          @"fixture JSON payload must be a dictionary",
+          @{
+            NSLocalizedDescriptionKey : @"fixture JSON payload must be a dictionary",
           });
     }
     return nil;
@@ -135,4 +178,77 @@ NSString *ALNTestTemporaryDirectory(NSString *prefix) {
                          : nil;
   free(buffer);
   return result;
+}
+
+BOOL ALNTestWriteUTF8File(NSString *path, NSString *content, NSError **error) {
+  if (error != NULL) {
+    *error = nil;
+  }
+  NSString *resolvedPath = [path isKindOfClass:[NSString class]] ? path : @"";
+  NSString *directory = [resolvedPath stringByDeletingLastPathComponent];
+  NSError *directoryError = nil;
+  BOOL created = [[NSFileManager defaultManager] createDirectoryAtPath:directory
+                                           withIntermediateDirectories:YES
+                                                            attributes:nil
+                                                                 error:&directoryError];
+  if (!created || directoryError != nil) {
+    if (error != NULL) {
+      *error = directoryError ?: ALNTestSupportMakeError(
+                                     @"failed creating parent directory for test file",
+                                     @{
+                                       NSLocalizedDescriptionKey :
+                                           @"failed creating parent directory for test file",
+                                       @"path" : resolvedPath ?: @"",
+                                     });
+    }
+    return NO;
+  }
+
+  NSError *writeError = nil;
+  BOOL wrote = [[content isKindOfClass:[NSString class]] ? content : @""
+      writeToFile:resolvedPath
+       atomically:YES
+         encoding:NSUTF8StringEncoding
+            error:&writeError];
+  if (!wrote || writeError != nil) {
+    if (error != NULL) {
+      *error = writeError;
+    }
+    return NO;
+  }
+  return YES;
+}
+
+NSString *ALNTestRunShellCapture(NSString *command, int *exitCode) {
+  @try {
+    NSTask *task = [[NSTask alloc] init];
+    task.launchPath = @"/bin/bash";
+    task.arguments = @[ @"-lc", [command isKindOfClass:[NSString class]] ? command : @"" ];
+
+    NSPipe *stdoutPipe = [NSPipe pipe];
+    NSPipe *stderrPipe = [NSPipe pipe];
+    task.standardOutput = stdoutPipe;
+    task.standardError = stderrPipe;
+
+    [task launch];
+    [task waitUntilExit];
+
+    if (exitCode != NULL) {
+      *exitCode = task.terminationStatus;
+    }
+
+    NSData *stdoutData = [[stdoutPipe fileHandleForReading] readDataToEndOfFile];
+    NSData *stderrData = [[stderrPipe fileHandleForReading] readDataToEndOfFile];
+    NSMutableData *combined = [NSMutableData dataWithData:stdoutData ?: [NSData data]];
+    if ([stderrData length] > 0) {
+      [combined appendData:stderrData];
+    }
+    NSString *output = [[NSString alloc] initWithData:combined encoding:NSUTF8StringEncoding];
+    return output ?: @"";
+  } @catch (NSException *exception) {
+    if (exitCode != NULL) {
+      *exitCode = 127;
+    }
+    return exception.reason ?: @"shell command failed";
+  }
 }

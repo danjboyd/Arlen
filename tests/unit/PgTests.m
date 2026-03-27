@@ -106,74 +106,99 @@
   return ALNTestTemporaryDirectory(@"arlen-migrations");
 }
 
-- (void)pgLoaderConcurrencyWorker:(NSDictionary *)context {
-  @autoreleasepool {
-    NSMutableDictionary *state =
-        [context[@"state"] isKindOfClass:[NSMutableDictionary class]] ? context[@"state"] : nil;
-    NSLock *stateLock = [context[@"lock"] isKindOfClass:[NSLock class]] ? context[@"lock"] : nil;
-    NSError *error = nil;
-    ALNPg *database = [[ALNPg alloc]
-        initWithConnectionString:@"host=127.0.0.1 port=1 dbname=arlen_loader_test connect_timeout=1"
-                  maxConnections:1
-                           error:&error];
-    [stateLock lock];
-    @try {
-      NSInteger completed = [state[@"completed"] integerValue];
-      state[@"completed"] = @(completed + 1);
-      if (database == nil && error == nil) {
-        NSInteger nilOutcomes = [state[@"nilOutcomes"] integerValue];
-        state[@"nilOutcomes"] = @(nilOutcomes + 1);
-      }
-    } @finally {
-      [stateLock unlock];
-    }
-  }
+- (void)testLibpqLoaderRemainsDeterministicDuringConcurrentInitialization {
+  NSLock *stateLock = [[NSLock alloc] init];
+  __block NSInteger nilOutcomes = 0;
+  NSError *workerGroupError = nil;
+  BOOL success = ALNTestRunWorkerGroup(NSStringFromClass([self class]),
+                                       NSStringFromSelector(_cmd),
+                                       ALNTestWorkerOwnershipModeExplicitBorrowed,
+                                       10,
+                                       8.0,
+                                       ^BOOL(NSInteger workerIndex,
+                                             NSDictionary<NSString *, id> *ownershipInfo,
+                                             NSError **workerError) {
+                                         (void)workerIndex;
+                                         (void)ownershipInfo;
+                                         NSError *databaseError = nil;
+                                         ALNPg *database = [[ALNPg alloc]
+                                             initWithConnectionString:
+                                                 @"host=127.0.0.1 port=1 dbname=arlen_loader_test "
+                                                 @"connect_timeout=1"
+                                                       maxConnections:1
+                                                                error:&databaseError];
+                                         if (database == nil && databaseError == nil) {
+                                           [stateLock lock];
+                                           @try {
+                                             nilOutcomes += 1;
+                                           } @finally {
+                                             [stateLock unlock];
+                                           }
+                                           if (workerError != NULL) {
+                                             *workerError = [NSError
+                                                 errorWithDomain:@"PgTests"
+                                                            code:1
+                                                        userInfo:@{
+                                                          NSLocalizedDescriptionKey :
+                                                              @"ALNPg initialization returned nil "
+                                                              @"without an error",
+                                                        }];
+                                           }
+                                           return NO;
+                                         }
+                                         return YES;
+                                       },
+                                       &workerGroupError);
+  XCTAssertTrue(success);
+  XCTAssertNil(workerGroupError);
+  XCTAssertEqual((NSInteger)0, nilOutcomes);
 }
 
-- (void)testLibpqLoaderRemainsDeterministicDuringConcurrentInitialization {
-  NSMutableDictionary *state = [@{
-    @"completed" : @(0),
-    @"nilOutcomes" : @(0),
-  } mutableCopy];
+- (void)testDatabaseWorkerGroupSharedOwnerModeSerializesCollaborators {
   NSLock *stateLock = [[NSLock alloc] init];
-  NSDictionary *workerContext = @{
-    @"state" : state,
-    @"lock" : stateLock,
-  };
+  NSMutableArray<NSString *> *ownershipModes = [NSMutableArray array];
+  __block NSInteger activeWorkers = 0;
+  __block NSInteger maxConcurrentWorkers = 0;
 
-  NSInteger workers = 10;
-  for (NSInteger idx = 0; idx < workers; idx++) {
-    [NSThread detachNewThreadSelector:@selector(pgLoaderConcurrencyWorker:)
-                             toTarget:self
-                           withObject:workerContext];
-  }
+  NSError *workerGroupError = nil;
+  BOOL success = ALNTestRunWorkerGroup(NSStringFromClass([self class]),
+                                       NSStringFromSelector(_cmd),
+                                       ALNTestWorkerOwnershipModeSharedOwner,
+                                       4,
+                                       5.0,
+                                       ^BOOL(NSInteger workerIndex,
+                                             NSDictionary<NSString *, id> *ownershipInfo,
+                                             NSError **workerError) {
+                                         (void)workerIndex;
+                                         (void)workerError;
+                                         [stateLock lock];
+                                         @try {
+                                           activeWorkers += 1;
+                                           maxConcurrentWorkers = MAX(maxConcurrentWorkers, activeWorkers);
+                                           [ownershipModes addObject:[ownershipInfo[@"mode_name"]
+                                                                         isKindOfClass:[NSString class]]
+                                                                        ? ownershipInfo[@"mode_name"]
+                                                                        : @""];
+                                         } @finally {
+                                           [stateLock unlock];
+                                         }
+                                         usleep(30000);
+                                         [stateLock lock];
+                                         @try {
+                                           activeWorkers -= 1;
+                                         } @finally {
+                                           [stateLock unlock];
+                                         }
+                                         return YES;
+                                       },
+                                       &workerGroupError);
 
-  NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:8.0];
-  while ([[NSDate date] compare:deadline] == NSOrderedAscending) {
-    NSInteger completed = 0;
-    [stateLock lock];
-    @try {
-      completed = [state[@"completed"] integerValue];
-    } @finally {
-      [stateLock unlock];
-    }
-    if (completed >= workers) {
-      break;
-    }
-    usleep(20000);
-  }
-
-  NSInteger completed = 0;
-  NSInteger nilOutcomes = 0;
-  [stateLock lock];
-  @try {
-    completed = [state[@"completed"] integerValue];
-    nilOutcomes = [state[@"nilOutcomes"] integerValue];
-  } @finally {
-    [stateLock unlock];
-  }
-  XCTAssertEqual(workers, completed);
-  XCTAssertEqual((NSInteger)0, nilOutcomes);
+  XCTAssertTrue(success);
+  XCTAssertNil(workerGroupError);
+  XCTAssertEqual((NSUInteger)4, [ownershipModes count]);
+  XCTAssertEqualObjects([NSSet setWithArray:ownershipModes],
+                        [NSSet setWithArray:@[ @"shared_owner" ]]);
+  XCTAssertEqual((NSInteger)1, maxConcurrentWorkers);
 }
 
 - (void)testConnectionAndPreparedStatements {

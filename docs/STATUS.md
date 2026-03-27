@@ -4,6 +4,24 @@ Last updated: 2026-03-27
 
 ## Completed Today (2026-03-27)
 
+- Completed Phase `21A-21C`:
+  - added `tests/shared/ALNWebTestSupport.{h,m}` as a shared in-process
+    request harness with disposable app construction, config injection, route
+    and middleware introspection, request builders, response decoders, and
+    reusable status/header/content-type/body/redirect assertions
+  - moved multi-request auth/session/CSRF coverage in `ApplicationTests` and
+    `MiddlewareTests` onto shared cookie/session recycling and pipeline helper
+    seams instead of repeated inline response parsing
+  - generalized `tests/shared/ALNTestSupport.{h,m}` and
+    `tests/shared/ALNDatabaseTestSupport.{h,m}` with wider JSON/file/shell
+    helpers plus explicit DB worker ownership modes (`explicit_borrowed` and
+    `shared_owner`) for deterministic concurrency/liveness coverage
+  - moved large PostgreSQL/live suites onto the shared support layer so
+    temp-dir, file-write, shell-capture, DSN, and cleanup logic are less
+    duplicated across integration coverage
+  - verified the slice with `make build-tests`, `make test-unit`, and
+    `make test-integration` using the local PostgreSQL instance plus the local
+    SQL Server 2022 Developer test container
 - Planned Phase 21 as the next roadmap phase:
   - audited Mojolicious `Test::Mojo`, Phoenix `ConnTest` + Ecto SQL sandbox,
     Jinja's test-suite structure, and llhttp's request/response/fuzzer corpus
@@ -302,11 +320,10 @@ entries, not current plan-of-record items.
   tiers, MSSQL native transport tightening, ordered result semantics, bounded
   PostgreSQL metadata expansion, explicit live-test requirement accounting,
   shared test support/assertion helpers, and focused Phase 20 confidence lanes)
-- Phase 21: planned (audit-driven public-release test robustness pass covering
-  in-process request harnesses, shared request/pipeline assertions, explicit
-  async DB ownership rules, template security/regression decomposition, raw
-  protocol corpora with replayable fuzz inputs, generated-app/module matrix
-  coverage, and focused contributor rerun lanes)
+- Phase 21: in progress (`21A-21C` complete as of 2026-03-27 for in-process
+  request harnesses, shared request/pipeline assertions, and explicit async DB
+  ownership rules; `21D-21G` remain for template/protocol/generated-app depth
+  and focused contributor rerun lanes)
 
 ## Completed Today (2026-03-26)
 

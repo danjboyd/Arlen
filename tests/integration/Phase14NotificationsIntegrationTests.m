@@ -1,6 +1,7 @@
 #import <Foundation/Foundation.h>
 #import <XCTest/XCTest.h>
 
+#import "../shared/ALNWebTestSupport.h"
 #import "ALNApplication.h"
 #import "ALNContext.h"
 #import "ALNJobsModule.h"
@@ -164,23 +165,19 @@
                       queryString:(NSString *)queryString
                           headers:(NSDictionary *)headers
                              body:(NSData *)body {
-  return [[ALNRequest alloc] initWithMethod:method ?: @"GET"
-                                      path:path ?: @"/"
-                               queryString:queryString ?: @""
-                                   headers:headers ?: @{}
-                                      body:body ?: [NSData data]];
+  return ALNTestRequestWithMethod(method, path, queryString, headers, body);
 }
 
 - (NSDictionary *)JSONObjectFromResponse:(ALNResponse *)response {
   NSError *error = nil;
-  id json = [NSJSONSerialization JSONObjectWithData:response.bodyData options:0 error:&error];
+  id json = ALNTestJSONDictionaryFromResponse(response, &error);
   XCTAssertNil(error);
   XCTAssertTrue([json isKindOfClass:[NSDictionary class]]);
   return [json isKindOfClass:[NSDictionary class]] ? json : @{};
 }
 
 - (NSString *)stringFromResponse:(ALNResponse *)response {
-  return [[NSString alloc] initWithData:response.bodyData encoding:NSUTF8StringEncoding] ?: @"";
+  return ALNTestStringFromResponse(response);
 }
 
 - (void)testAuthenticatedUserCanInspectInboxOverHTMLAndJSON {
@@ -189,6 +186,7 @@
       [[Phase14NotificationsInjectedAuthMiddleware alloc] init];
   [app addMiddleware:middleware];
   [self registerModulesForApplication:app];
+  ALNWebTestHarness *harness = [ALNWebTestHarness harnessWithApplication:app];
 
   ALNNotificationsModuleRuntime *runtime = [ALNNotificationsModuleRuntime sharedRuntime];
   NSError *error = nil;
@@ -203,49 +201,34 @@
   XCTAssertNotNil(result);
   XCTAssertNil(error);
 
-  ALNResponse *unauthorizedResponse =
-      [app dispatchRequest:[self requestWithMethod:@"GET"
-                                              path:@"/notifications/api/inbox"
-                                       queryString:@""
-                                           headers:@{ @"Accept" : @"application/json" }
-                                              body:nil]];
-  XCTAssertEqual((NSInteger)401, unauthorizedResponse.statusCode);
+  ALNResponse *unauthorizedResponse = [harness dispatchMethod:@"GET"
+                                                         path:@"/notifications/api/inbox"
+                                                  queryString:@""
+                                                      headers:@{ @"Accept" : @"application/json" }
+                                                         body:nil];
+  ALNAssertResponseStatus(unauthorizedResponse, 401);
   NSDictionary *unauthorizedJSON = [self JSONObjectFromResponse:unauthorizedResponse];
   XCTAssertEqualObjects(@"unauthorized", unauthorizedJSON[@"error"][@"code"]);
 
-  ALNResponse *redirectResponse =
-      [app dispatchRequest:[self requestWithMethod:@"GET"
-                                              path:@"/notifications/inbox"
-                                       queryString:@""
-                                           headers:@{}
-                                              body:nil]];
-  XCTAssertEqual((NSInteger)302, redirectResponse.statusCode);
-  NSString *redirectLocation = [redirectResponse headerForName:@"Location"] ?: @"";
-  XCTAssertTrue([redirectLocation containsString:@"/auth/login?return_to="]);
+  ALNResponse *redirectResponse = [harness dispatchMethod:@"GET" path:@"/notifications/inbox"];
+  ALNAssertResponseRedirect(redirectResponse, 302, @"/auth/login?return_to=");
 
   middleware.subject = @"user-phase14";
   middleware.roles = @[];
   middleware.assuranceLevel = 1;
 
-  ALNResponse *htmlResponse =
-      [app dispatchRequest:[self requestWithMethod:@"GET"
-                                              path:@"/notifications/inbox"
-                                       queryString:@""
-                                           headers:@{}
-                                              body:nil]];
-  XCTAssertEqual((NSInteger)200, htmlResponse.statusCode);
-  NSString *html = [self stringFromResponse:htmlResponse];
-  XCTAssertTrue([html containsString:@"Recipient:"]);
-  XCTAssertTrue([html containsString:@"user-phase14"]);
-  XCTAssertTrue([html containsString:@"Phase14 Inbox"]);
+  ALNResponse *htmlResponse = [harness dispatchMethod:@"GET" path:@"/notifications/inbox"];
+  ALNAssertResponseStatus(htmlResponse, 200);
+  ALNAssertResponseBodyContains(htmlResponse, @"Recipient:");
+  ALNAssertResponseBodyContains(htmlResponse, @"user-phase14");
+  ALNAssertResponseBodyContains(htmlResponse, @"Phase14 Inbox");
 
-  ALNResponse *jsonResponse =
-      [app dispatchRequest:[self requestWithMethod:@"GET"
-                                              path:@"/notifications/api/inbox"
-                                       queryString:@""
-                                           headers:@{ @"Accept" : @"application/json" }
-                                              body:nil]];
-  XCTAssertEqual((NSInteger)200, jsonResponse.statusCode);
+  ALNResponse *jsonResponse = [harness dispatchMethod:@"GET"
+                                                 path:@"/notifications/api/inbox"
+                                          queryString:@""
+                                              headers:@{ @"Accept" : @"application/json" }
+                                                 body:nil];
+  ALNAssertResponseStatus(jsonResponse, 200);
   NSDictionary *json = [self JSONObjectFromResponse:jsonResponse];
   NSArray *inbox = [json[@"data"][@"inbox"] isKindOfClass:[NSArray class]] ? json[@"data"][@"inbox"] : @[];
   XCTAssertEqual((NSUInteger)1, [inbox count]);

@@ -50,6 +50,128 @@ NSString *ALNTestMSSQLTemporaryTableName(NSString *prefix) {
   return [@"#" stringByAppendingString:ALNTestUniqueIdentifier(prefix)];
 }
 
+NSString *ALNTestWorkerOwnershipModeName(ALNTestWorkerOwnershipMode mode) {
+  switch (mode) {
+  case ALNTestWorkerOwnershipModeSharedOwner:
+    return @"shared_owner";
+  case ALNTestWorkerOwnershipModeExplicitBorrowed:
+  default:
+    return @"explicit_borrowed";
+  }
+}
+
+NSDictionary<NSString *, id> *ALNTestWorkerOwnershipInfo(ALNTestWorkerOwnershipMode mode,
+                                                         NSInteger workerIndex) {
+  BOOL sharedOwner = (mode == ALNTestWorkerOwnershipModeSharedOwner);
+  return @{
+    @"mode" : @(mode),
+    @"mode_name" : ALNTestWorkerOwnershipModeName(mode),
+    @"worker_index" : @(workerIndex),
+    @"shared_owner" : @(sharedOwner),
+    @"borrowed_state_allowed" : @(sharedOwner ? NO : YES),
+  };
+}
+
+BOOL ALNTestRunWorkerGroup(NSString *suiteName,
+                           NSString *testName,
+                           ALNTestWorkerOwnershipMode mode,
+                           NSInteger workerCount,
+                           NSTimeInterval timeoutSeconds,
+                           ALNTestWorkerGroupBlock block,
+                           NSError **error) {
+  if (error != NULL) {
+    *error = nil;
+  }
+  if (block == nil || workerCount <= 0) {
+    if (error != NULL) {
+      *error = ALNDatabaseTestSupportMakeError(
+          @"worker group requires a positive worker count and block",
+          @{
+            NSLocalizedDescriptionKey : @"worker group requires a positive worker count and block",
+          });
+    }
+    return NO;
+  }
+
+  NSOperationQueue *queue = [[NSOperationQueue alloc] init];
+  queue.maxConcurrentOperationCount =
+      (mode == ALNTestWorkerOwnershipModeSharedOwner) ? 1 : MAX(1, workerCount);
+
+  NSCondition *condition = [[NSCondition alloc] init];
+  __block NSInteger completed = 0;
+  __block NSError *firstWorkerError = nil;
+
+  for (NSInteger idx = 0; idx < workerCount; idx++) {
+    NSInteger workerIndex = idx;
+    [queue addOperationWithBlock:^{
+      @autoreleasepool {
+        NSDictionary<NSString *, id> *ownershipInfo =
+            ALNTestWorkerOwnershipInfo(mode, workerIndex);
+        NSError *workerError = nil;
+        BOOL success = block(workerIndex, ownershipInfo, &workerError);
+        [condition lock];
+        @try {
+          if (!success && firstWorkerError == nil) {
+            firstWorkerError =
+                workerError ?: ALNDatabaseTestSupportMakeError(
+                                   @"worker group operation failed",
+                                   @{
+                                     NSLocalizedDescriptionKey :
+                                         @"worker group operation failed",
+                                     @"suite" : suiteName ?: @"UnknownSuite",
+                                     @"test" : testName ?: @"unknownTest",
+                                     @"mode_name" : ALNTestWorkerOwnershipModeName(mode),
+                                     @"worker_index" : @(workerIndex),
+                                   });
+          }
+          completed += 1;
+          [condition signal];
+        } @finally {
+          [condition unlock];
+        }
+      }
+    }];
+  }
+
+  NSDate *deadline =
+      [NSDate dateWithTimeIntervalSinceNow:(timeoutSeconds > 0.0 ? timeoutSeconds : 10.0)];
+  [condition lock];
+  @try {
+    while (completed < workerCount && [[NSDate date] compare:deadline] == NSOrderedAscending) {
+      [condition waitUntilDate:deadline];
+    }
+  } @finally {
+    [condition unlock];
+  }
+
+  if (completed < workerCount) {
+    [queue cancelAllOperations];
+    if (error != NULL) {
+      *error = ALNDatabaseTestSupportMakeError(
+          @"worker group timed out before all collaborators finished",
+          @{
+            NSLocalizedDescriptionKey :
+                @"worker group timed out before all collaborators finished",
+            @"suite" : suiteName ?: @"UnknownSuite",
+            @"test" : testName ?: @"unknownTest",
+            @"mode_name" : ALNTestWorkerOwnershipModeName(mode),
+            @"completed" : @(completed),
+            @"expected" : @(workerCount),
+          });
+    }
+    return NO;
+  }
+
+  [queue waitUntilAllOperationsAreFinished];
+  if (firstWorkerError != nil) {
+    if (error != NULL) {
+      *error = firstWorkerError;
+    }
+    return NO;
+  }
+  return YES;
+}
+
 BOOL ALNTestWithDisposableSchema(id<ALNDatabaseAdapter> adapter,
                                  NSString *schemaPrefix,
                                  BOOL (^block)(NSString *schemaName, NSError **error),

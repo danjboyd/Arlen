@@ -46,7 +46,7 @@ Arlen is designed to solve the same class of problems as frameworks like Mojolic
 - Phase 18: complete (`18A-18H` delivered on 2026-03-14: fragment-first MFA UI reuse, headless MFA contract refinement, optional SMS/Twilio Verify support, and generated-app-ui include-path hardening. See `docs/PHASE18_ROADMAP.md`).
 - Phase 19: complete (`19A-19F` delivered on 2026-03-14: incremental GNUmake/GNUstep build-graph narrowing, generated-template object reuse, clearer `boomhauer` build phases, and `phase19-confidence`. See `docs/PHASE19_ROADMAP.md`).
 - Phase 20: complete (`20A-20K` delivered on 2026-03-26; `20L-20R` delivered on 2026-03-27 for MSSQL native transport tightening, ordered result semantics, bounded PostgreSQL metadata expansion, explicit live-test requirement accounting, shared test support/assertion layers, and repo-native focused confidence lanes. See `docs/PHASE20_ROADMAP.md`).
-- Phase 21: planned (public-release test-suite robustness pass covering in-process request harnesses, request/pipeline assertion helpers, explicit async DB ownership rules, template security/regression decomposition, raw protocol corpora with replayable fuzz inputs, and generated-app/module matrix coverage. See `docs/PHASE21_ROADMAP.md`).
+- Phase 21: in progress (`21A-21C` delivered on 2026-03-27 for in-process request harnesses, shared request/pipeline assertion helpers, and explicit async DB ownership rules; `21D-21G` remain for compiler/protocol/generated-app depth and focused contributor confidence lanes. See `docs/PHASE21_ROADMAP.md`).
 
 ## Quick Start
 

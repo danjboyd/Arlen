@@ -1,6 +1,6 @@
 # Arlen Phase 21 Roadmap
 
-Status: Planned
+Status: In progress (`21A-21C` delivered on 2026-03-27; `21D-21G` remaining)
 Last updated: 2026-03-27
 
 Related docs:
@@ -156,6 +156,21 @@ widens request, compiler, protocol, and generated-app coverage on top of it.
 
 ## 5.1 Phase 21A: In-Process Request Harness + Case Templates
 
+Status: complete on 2026-03-27
+
+Delivered:
+
+- Added `tests/shared/ALNWebTestSupport.{h,m}` as a shared in-process web-test
+  harness with disposable app construction, config injection, request helpers,
+  and controlled route/module/middleware introspection.
+- Moved web-facing suites onto the shared harness where it reduces boilerplate,
+  including focused in-process coverage in `ApplicationTests`,
+  `MiddlewareTests`, `Phase14NotificationsIntegrationTests`, and
+  `Phase16ModuleIntegrationTests`.
+- Kept spawned-server integration coverage additive rather than replacing it;
+  the new harness exists for fast route/controller/middleware exercise, not as
+  a second runtime path.
+
 Deliverables:
 
 - Add a shared web-test support layer for in-process route/controller/middleware
@@ -176,6 +191,20 @@ Acceptance (required):
   a hand-authored config file for every case.
 
 ## 5.2 Phase 21B: Request Assertions + Pipeline Helpers
+
+Status: complete on 2026-03-27
+
+Delivered:
+
+- Added shared request/response helpers for JSON decoding, request
+  construction, cookie extraction, content-type/status/header/body assertions,
+  and redirect verification in `tests/shared/ALNWebTestSupport.{h,m}`.
+- Reworked multi-request auth/session/CSRF flows in `ApplicationTests` and
+  `MiddlewareTests` to recycle cookies/session state through the shared helper
+  surface instead of re-parsing responses inline.
+- Added explicit isolated-pipeline coverage through the harness helpers so
+  middleware-sensitive tests can run the intended path without shell/curl
+  orchestration.
 
 Deliverables:
 
@@ -202,6 +231,22 @@ Acceptance (required):
   middleware path through the new isolated helper surface.
 
 ## 5.3 Phase 21C: Disposable State Sandboxes + Async Ownership
+
+Status: complete on 2026-03-27
+
+Delivered:
+
+- Generalized `tests/shared/ALNTestSupport.{h,m}` beyond the Phase 20
+  data-layer helpers with shared JSON parsing, file writes, temp-directory
+  setup, and shell-capture support for wider suite reuse.
+- Extended `tests/shared/ALNDatabaseTestSupport.{h,m}` with explicit worker
+  ownership modes (`explicit_borrowed` and `shared_owner`) plus a reusable
+  worker-group runner so DB-backed concurrency tests stop depending on ad hoc
+  thread behavior.
+- Moved large PostgreSQL/live integration suites onto the shared support
+  surface so temp-file, shell, DSN, and cleanup logic are no longer duplicated
+  inline across `PostgresIntegrationTests` and the Phase 13 Postgres module
+  coverage.
 
 Deliverables:
 

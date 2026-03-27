@@ -1,6 +1,7 @@
 #import <Foundation/Foundation.h>
 #import <XCTest/XCTest.h>
 
+#import "../shared/ALNWebTestSupport.h"
 #import "ALNAdminUIModule.h"
 #import "ALNApplication.h"
 #import "ALNContext.h"
@@ -390,11 +391,7 @@ static void Phase16IntegrationResetOrderStore(void) {
                       queryString:(NSString *)queryString
                           headers:(NSDictionary *)headers
                              body:(NSData *)body {
-  return [[ALNRequest alloc] initWithMethod:method ?: @"GET"
-                                      path:path ?: @"/"
-                               queryString:queryString ?: @""
-                                   headers:headers ?: @{}
-                                      body:body ?: [NSData data]];
+  return ALNTestRequestWithMethod(method, path, queryString, headers, body);
 }
 
 - (NSData *)JSONBody:(NSDictionary *)payload {
@@ -403,14 +400,36 @@ static void Phase16IntegrationResetOrderStore(void) {
 
 - (NSDictionary *)JSONObjectFromResponse:(ALNResponse *)response {
   NSError *error = nil;
-  id json = [NSJSONSerialization JSONObjectWithData:response.bodyData options:0 error:&error];
+  id json = ALNTestJSONDictionaryFromResponse(response, &error);
   XCTAssertNil(error);
   XCTAssertTrue([json isKindOfClass:[NSDictionary class]]);
   return [json isKindOfClass:[NSDictionary class]] ? json : @{};
 }
 
 - (NSString *)stringFromResponse:(ALNResponse *)response {
-  return [[NSString alloc] initWithData:response.bodyData encoding:NSUTF8StringEncoding] ?: @"";
+  return ALNTestStringFromResponse(response);
+}
+
+- (void)testWebHarnessExposesRegisteredModulesRoutesAndMiddleware {
+  ALNApplication *app = [self application];
+  [app addMiddleware:[[Phase16IntegrationAuthMiddleware alloc] init]];
+  [self registerModulesForApplication:app];
+
+  ALNWebTestHarness *harness = [ALNWebTestHarness harnessWithApplication:app];
+  XCTAssertTrue([[harness middlewares] count] > 0);
+  BOOL foundAuthMiddleware = NO;
+  for (id middleware in [harness middlewares]) {
+    if ([middleware isKindOfClass:[Phase16IntegrationAuthMiddleware class]]) {
+      foundAuthMiddleware = YES;
+      break;
+    }
+  }
+  XCTAssertTrue(foundAuthMiddleware);
+  XCTAssertNotNil([harness routeNamed:@"jobs_api_run_worker"]);
+  XCTAssertNotNil([harness routeNamed:@"search_api_resource_query"]);
+  XCTAssertNotNil([harness routeNamed:@"ops_dashboard"]);
+  XCTAssertTrue([[harness routeTable] count] > 0);
+  XCTAssertEqualObjects(@"test", harness.application.environment);
 }
 
 - (void)testPhase16AdminSearchAndOpsRoutesExposeMaturedContracts {

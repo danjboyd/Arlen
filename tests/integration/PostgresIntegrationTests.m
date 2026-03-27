@@ -1,8 +1,8 @@
 #import <Foundation/Foundation.h>
 #import <XCTest/XCTest.h>
 
-#import <stdlib.h>
-#import <string.h>
+#import "../shared/ALNDatabaseTestSupport.h"
+#import "../shared/ALNTestSupport.h"
 
 @interface PostgresIntegrationTests : XCTestCase
 @end
@@ -10,47 +10,23 @@
 @implementation PostgresIntegrationTests
 
 - (NSString *)pgTestDSN {
-  const char *value = getenv("ARLEN_PG_TEST_DSN");
-  if (value == NULL || value[0] == '\0') {
-    return nil;
-  }
-  return [NSString stringWithUTF8String:value];
+  return ALNTestEnvironmentString(@"ARLEN_PG_TEST_DSN");
+}
+
+- (NSString *)requiredPGTestDSNForSelector:(SEL)selector {
+  return ALNTestRequiredEnvironmentString(
+      @"ARLEN_PG_TEST_DSN",
+      NSStringFromClass([self class]),
+      NSStringFromSelector(selector),
+      @"set ARLEN_PG_TEST_DSN to run PostgreSQL CLI integration coverage");
 }
 
 - (NSString *)runShellCapture:(NSString *)command exitCode:(int *)exitCode {
-  NSTask *task = [[NSTask alloc] init];
-  task.launchPath = @"/bin/bash";
-  task.arguments = @[ @"-lc", command ];
-  NSPipe *stdoutPipe = [NSPipe pipe];
-  NSPipe *stderrPipe = [NSPipe pipe];
-  task.standardOutput = stdoutPipe;
-  task.standardError = stderrPipe;
-  [task launch];
-  [task waitUntilExit];
-  if (exitCode != NULL) {
-    *exitCode = task.terminationStatus;
-  }
-  NSData *stdoutData = [[stdoutPipe fileHandleForReading] readDataToEndOfFile];
-  NSData *stderrData = [[stderrPipe fileHandleForReading] readDataToEndOfFile];
-  NSMutableData *combined = [NSMutableData dataWithData:stdoutData ?: [NSData data]];
-  if ([stderrData length] > 0) {
-    [combined appendData:stderrData];
-  }
-  NSString *output = [[NSString alloc] initWithData:combined encoding:NSUTF8StringEncoding];
-  return output ?: @"";
+  return ALNTestRunShellCapture(command, exitCode);
 }
 
 - (NSString *)createTempDirectory {
-  NSString *templatePath =
-      [NSTemporaryDirectory() stringByAppendingPathComponent:@"arlen-pg-integration-XXXXXX"];
-  const char *templateCString = [templatePath fileSystemRepresentation];
-  char *buffer = strdup(templateCString);
-  char *created = mkdtemp(buffer);
-  NSString *result = created ? [[NSFileManager defaultManager] stringWithFileSystemRepresentation:created
-                                                                                             length:strlen(created)]
-                             : nil;
-  free(buffer);
-  return result;
+  return ALNTestTemporaryDirectory(@"arlen-pg-integration");
 }
 
 - (NSString *)uniqueMigrationVersionPrefix {
@@ -121,8 +97,8 @@
 }
 
 - (void)testArlenMigrateCommandAppliesPendingMigrations {
-  NSString *dsn = [self pgTestDSN];
-  if ([dsn length] == 0) {
+  NSString *dsn = [self requiredPGTestDSNForSelector:_cmd];
+  if (dsn == nil) {
     return;
   }
 
@@ -161,15 +137,14 @@
                                  "  };\n"
                                  "}\n",
                                  [dsn stringByReplacingOccurrencesOfString:@"\"" withString:@"\\\""]];
-  XCTAssertTrue([config writeToFile:[appRoot stringByAppendingPathComponent:@"config/app.plist"]
-                         atomically:YES
-                           encoding:NSUTF8StringEncoding
-                              error:&error]);
+  XCTAssertTrue(ALNTestWriteUTF8File([appRoot stringByAppendingPathComponent:@"config/app.plist"],
+                                     config,
+                                     &error));
   XCTAssertNil(error);
-  XCTAssertTrue([@"{}\n" writeToFile:[appRoot stringByAppendingPathComponent:@"config/environments/development.plist"]
-                          atomically:YES
-                            encoding:NSUTF8StringEncoding
-                               error:&error]);
+  XCTAssertTrue(ALNTestWriteUTF8File(
+      [appRoot stringByAppendingPathComponent:@"config/environments/development.plist"],
+      @"{}\n",
+      &error));
   XCTAssertNil(error);
 
   NSString *migrationVersion =
@@ -181,10 +156,7 @@
       [NSString stringWithFormat:@"CREATE TABLE %@(id SERIAL PRIMARY KEY, name TEXT);\n"
                                  "INSERT INTO %@ (name) VALUES ('boomhauer');\n",
                                  table, table];
-  XCTAssertTrue([migrationSQL writeToFile:migrationPath
-                               atomically:YES
-                                 encoding:NSUTF8StringEncoding
-                                    error:&error]);
+  XCTAssertTrue(ALNTestWriteUTF8File(migrationPath, migrationSQL, &error));
   XCTAssertNil(error);
 
   int buildCode = 0;
