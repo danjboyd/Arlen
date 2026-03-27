@@ -9,6 +9,8 @@ Define a lightweight application mode ("lite") for rapid prototyping while keepi
 
 Lite mode must not be a separate runtime.
 
+For the practical user-facing workflow, see `docs/LITE_MODE_GUIDE.md`.
+
 ## 2. Core Principle
 
 Lite mode is syntax sugar over the same core components used by full applications:

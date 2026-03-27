@@ -1,6 +1,6 @@
 # Arlen Toolchain Matrix
 
-Last updated: 2026-03-22
+Last updated: 2026-03-27
 
 This document records known-good local toolchain baselines for Arlen onboarding and CI parity.
 
@@ -68,6 +68,8 @@ Optional contributor override:
 - recommended tool commands (`xctest`, `python3`, `curl`)
 - `gnustep-config` execution after sourcing GNUstep
 - `libpq` presence check (when `ldconfig` is available)
+- presence of `docs/TOOLCHAIN_MATRIX.md` itself so the known-good baseline
+  remains discoverable
 
 ## Update Policy
 

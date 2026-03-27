@@ -2,6 +2,9 @@
 
 Phase 3E introduces optional ecosystem service abstractions with plugin-first wiring.
 
+For the practical `arlen generate plugin` workflow, see
+`docs/PLUGIN_SERVICE_GUIDE.md`.
+
 ## 1. Service Contracts
 
 Arlen now includes these adapter protocols:

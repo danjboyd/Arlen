@@ -5,6 +5,9 @@ Phase 7F defines deterministic frontend starter workflows that keep Arlen's core
 This document captures the delivered 7F starter contract set for the current
 first-party scope.
 
+For the user-facing workflow and preset selection guidance, see
+`docs/FRONTEND_STARTERS.md`.
+
 ## 1. Scope (Initial Slice)
 
 - CLI starter generation via `arlen generate frontend`.

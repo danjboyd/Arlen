@@ -583,6 +583,9 @@ def parse_header(path: Path, repo_root: Path) -> List[SymbolDoc]:
 
         symbol_match = SYMBOL_RE.match(line)
         if symbol_match:
+            if line.strip().endswith(";"):
+                i += 1
+                continue
             kind = symbol_match.group(1)
             name = symbol_match.group(2)
             current = SymbolDoc(

@@ -1,6 +1,6 @@
 # First App Guide
 
-This is the quickest path to your first working Arlen app.
+This is the shortest full-app walkthrough for Arlen.
 
 ## 1. Build Arlen CLI (one-time per checkout)
 
@@ -20,6 +20,7 @@ cd MyApp
 ```
 
 Scaffold highlights:
+
 - `src/main.m`: app entrypoint and route registration
 - `src/Controllers/HomeController.m`: controller for `/`
 - `templates/layouts/main.html.eoc`: default app shell
@@ -40,37 +41,30 @@ curl -i http://127.0.0.1:3000/
 ```
 
 Notes:
-- `arlen boomhauer` delegates to `bin/boomhauer`.
-- Watch mode is on by default.
-- If a reload introduces a compile/transpile error, boomhauer stays up and serves diagnostics until you fix it.
+
+- `arlen boomhauer` delegates to `bin/boomhauer`
+- watch mode is on by default
+- if a reload introduces a compile/transpile error, `boomhauer` stays up and
+  serves diagnostics until you fix it
 
 ## 4. Add Your First Extra Endpoint
 
-Generate a controller:
+Use the generator-driven path:
 
 ```bash
-/path/to/Arlen/bin/arlen generate controller Hello
+/path/to/Arlen/bin/arlen generate endpoint Hello \
+  --route /hello \
+  --method GET \
+  --template
 ```
 
-Update `src/main.m`:
+This command creates:
 
-1. Add import:
+- `src/Controllers/HelloController.h`
+- `src/Controllers/HelloController.m`
+- `templates/hello/index.html.eoc`
 
-```objc
-#import "Controllers/HelloController.h"
-```
-
-2. Add route registration near the existing home route:
-
-```objc
-[app registerRouteMethod:@"GET"
-                    path:@"/hello"
-                    name:@"hello"
-         controllerClass:[HelloController class]
-                  action:@"index"];
-```
-
-Save file. In watch mode, Arlen rebuilds automatically.
+It also wires the route into your app bootstrap automatically.
 
 Verify:
 
@@ -87,11 +81,21 @@ curl -i http://127.0.0.1:3000/hello
 /path/to/Arlen/bin/arlen migrate --dry-run
 ```
 
-## 6. Troubleshooting
+## 6. What To Read Next
+
+- `docs/APP_AUTHORING_GUIDE.md`
+- `docs/CONFIGURATION_REFERENCE.md`
+- `docs/GETTING_STARTED_API_FIRST.md`
+- `docs/GETTING_STARTED_HTML_FIRST.md`
+- `docs/MODULES.md`
+
+## 7. Troubleshooting
 
 - `arlen boomhauer` cannot find framework root:
-  - run with `ARLEN_FRAMEWORK_ROOT=/path/to/Arlen` in your environment.
+  - run with `ARLEN_FRAMEWORK_ROOT=/path/to/Arlen` in your environment
 - GNUstep toolchain errors:
-  - re-run `source /usr/GNUstep/System/Library/Makefiles/GNUstep.sh` in the same shell.
-- Build error page shown in browser:
-  - check your recent code edits; boomhauer serves diagnostics and resumes normal responses after the next successful rebuild.
+  - re-run `source /usr/GNUstep/System/Library/Makefiles/GNUstep.sh` in the
+    same shell
+- build error page shown in browser:
+  - check your recent code edits; `boomhauer` serves diagnostics and resumes
+    normal responses after the next successful rebuild

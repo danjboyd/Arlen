@@ -1,10 +1,11 @@
 # Getting Started: Quickstart Track
 
-This track takes you from a clean checkout to a running app and passing checks.
+This track gets you from a clean checkout to a running app as quickly as
+possible.
 
 ## 1. Prerequisites
 
-- GNUstep toolchain
+- clang-built GNUstep toolchain
 - `tools-xctest` package (`xctest` command)
 
 Initialize GNUstep:
@@ -31,16 +32,19 @@ For automation output:
 make all
 ```
 
-Build outputs:
-
-- `build/arlen`
-- `build/boomhauer`
-- `build/eocc`
-
-## 4. Run Development Server
+## 4. Create an App
 
 ```bash
-./bin/boomhauer
+mkdir -p ~/arlen-apps
+cd ~/arlen-apps
+/path/to/Arlen/bin/arlen new MyApp
+cd MyApp
+```
+
+## 5. Run Development Server
+
+```bash
+/path/to/Arlen/bin/arlen boomhauer --port 3000
 ```
 
 Smoke checks:
@@ -48,33 +52,25 @@ Smoke checks:
 ```bash
 curl -i http://127.0.0.1:3000/
 curl -i http://127.0.0.1:3000/healthz
-curl -i http://127.0.0.1:3000/readyz
 ```
 
-## 5. Run Quality Gates
+## 6. Add One Route
 
 ```bash
-./bin/test
-make check
-make ci-quality
+/path/to/Arlen/bin/arlen generate endpoint Hello \
+  --route /hello \
+  --method GET \
+  --template
 ```
-
-## 6. Build and Open Docs
 
 ```bash
-make docs-html
+curl -i http://127.0.0.1:3000/hello
 ```
 
-Open `build/docs/index.html`.
+## 7. Next Guides
 
-## 7. Create Your First App
-
-```bash
-mkdir -p ~/arlen-apps
-cd ~/arlen-apps
-/path/to/Arlen/bin/arlen new MyApp
-cd MyApp
-/path/to/Arlen/bin/arlen boomhauer --port 3000
-```
-
-Next: choose [API-First](GETTING_STARTED_API_FIRST.md) or [HTML-First](GETTING_STARTED_HTML_FIRST.md).
+- [First App Guide](FIRST_APP_GUIDE.md)
+- [App Authoring Guide](APP_AUTHORING_GUIDE.md)
+- [API-First](GETTING_STARTED_API_FIRST.md)
+- [HTML-First](GETTING_STARTED_HTML_FIRST.md)
+- [Lite Mode Guide](LITE_MODE_GUIDE.md)

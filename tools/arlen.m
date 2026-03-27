@@ -23,7 +23,7 @@ static void PrintUsage(void) {
           "  jobs worker [worker args...]\n"
           "  propane [manager args...]\n"
           "  migrate [--env <name>] [--database <target>] [--dsn <connection_string>] [--dry-run]\n"
-          "  module <add|remove|list|doctor|migrate|assets|upgrade> [options]\n"
+          "  module <add|remove|list|doctor|migrate|assets|upgrade|eject> [options]\n"
           "  schema-codegen [--env <name>] [--database <target>] [--dsn <connection_string>] [--output-dir <path>] [--manifest <path>] [--prefix <ClassPrefix>] [--typed-contracts] [--force]\n"
           "  typed-sql-codegen [--input-dir <path>] [--output-dir <path>] [--manifest <path>] [--prefix <ClassPrefix>] [--force]\n"
           "  routes\n"
@@ -1152,6 +1152,42 @@ static BOOL InsertRouteIntoRegisterRoutes(NSString *filePath, NSString *routeLin
                         error:error];
 }
 
+static BOOL InsertControllerImportIfMissing(NSString *filePath,
+                                            NSString *controllerBase,
+                                            NSError **error) {
+  NSString *content = [NSString stringWithContentsOfFile:filePath
+                                                encoding:NSUTF8StringEncoding
+                                                   error:error];
+  if (content == nil) {
+    return NO;
+  }
+
+  NSString *importLine =
+      [NSString stringWithFormat:@"#import \"Controllers/%@Controller.h\"", controllerBase ?: @""];
+  if ([content containsString:importLine]) {
+    return YES;
+  }
+
+  NSMutableArray<NSString *> *lines =
+      [[content componentsSeparatedByString:@"\n"] mutableCopy];
+  NSUInteger insertIndex = 0;
+  for (NSUInteger idx = 0; idx < [lines count]; idx++) {
+    if ([lines[idx] hasPrefix:@"#import "]) {
+      insertIndex = idx + 1;
+    }
+  }
+  [lines insertObject:importLine atIndex:insertIndex];
+
+  NSString *updated = [lines componentsJoinedByString:@"\n"];
+  if (![updated hasSuffix:@"\n"]) {
+    updated = [updated stringByAppendingString:@"\n"];
+  }
+  return [updated writeToFile:filePath
+                   atomically:YES
+                     encoding:NSUTF8StringEncoding
+                        error:error];
+}
+
 static BOOL WireGeneratedRoute(NSString *root,
                                NSString *method,
                                NSString *routePath,
@@ -1175,6 +1211,10 @@ static BOOL WireGeneratedRoute(NSString *root,
                                      @"Could not find src/main.m or app_lite.m for route wiring"
                                }];
     }
+    return NO;
+  }
+
+  if (!InsertControllerImportIfMissing(target, controllerBase, error)) {
     return NO;
   }
 

@@ -562,6 +562,75 @@
   }
 }
 
+- (void)testArlenGenerateEndpointWiresCompilableImportsForFullAndLiteScaffolds {
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *workRoot = [self createTempDirectoryWithPrefix:@"arlen-generate-endpoint-imports"];
+  XCTAssertNotNil(workRoot);
+  if (workRoot == nil) {
+    return;
+  }
+
+  @try {
+    int code = 0;
+    NSString *buildOutput = [self runShellCapture:[NSString stringWithFormat:@"cd %@ && make arlen", repoRoot]
+                                         exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", buildOutput);
+
+    NSArray<NSDictionary *> *cases = @[
+      @{
+        @"name" : @"DocsFull",
+        @"mode" : @"--full",
+        @"bootstrap" : @"src/main.m",
+      },
+      @{
+        @"name" : @"DocsLite",
+        @"mode" : @"--lite",
+        @"bootstrap" : @"app_lite.m",
+      },
+    ];
+
+    for (NSDictionary *caseInfo in cases) {
+      NSString *appName = caseInfo[@"name"];
+      NSString *mode = caseInfo[@"mode"];
+      NSString *bootstrapPath = caseInfo[@"bootstrap"];
+
+      NSString *newOutput =
+          [self runShellCapture:[NSString stringWithFormat:@"cd %@ && ARLEN_FRAMEWORK_ROOT=%@ %@/build/arlen new %@ %@ --json",
+                                                        workRoot, repoRoot, repoRoot, appName, mode]
+                       exitCode:&code];
+      XCTAssertEqual(0, code, @"%@", newOutput);
+
+      NSString *appRoot = [workRoot stringByAppendingPathComponent:appName];
+      NSString *generateOutput =
+          [self runShellCapture:[NSString stringWithFormat:@"cd %@ && ARLEN_FRAMEWORK_ROOT=%@ %@/build/arlen "
+                                                        "generate endpoint Hello --route /hello --template --json",
+                                                        appRoot, repoRoot, repoRoot]
+                       exitCode:&code];
+      XCTAssertEqual(0, code, @"%@", generateOutput);
+
+      NSError *readError = nil;
+      NSString *bootstrapSource =
+          [NSString stringWithContentsOfFile:[appRoot stringByAppendingPathComponent:bootstrapPath]
+                                    encoding:NSUTF8StringEncoding
+                                       error:&readError];
+      XCTAssertNotNil(bootstrapSource);
+      XCTAssertNil(readError);
+      XCTAssertTrue([bootstrapSource containsString:@"#import \"Controllers/HelloController.h\""]);
+      XCTAssertTrue([bootstrapSource containsString:@"controllerClass:[HelloController class]"]);
+
+      NSString *prepareOutput =
+          [self runShellCapture:[NSString stringWithFormat:
+                                              @"source /usr/GNUstep/System/Library/Makefiles/GNUstep.sh && "
+                                               "cd %@ && ARLEN_FRAMEWORK_ROOT=%@ %@/build/arlen boomhauer --prepare-only",
+                                              appRoot, repoRoot, repoRoot]
+                       exitCode:&code];
+      XCTAssertEqual(0, code, @"%@", prepareOutput);
+    }
+  } @finally {
+    [[NSFileManager defaultManager] removeItemAtPath:workRoot error:nil];
+  }
+}
+
 - (void)testArlenGenerateFrontendStartersAreDeterministicAndDeployPackaged {
   NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
   NSString *workRoot = [self createTempDirectoryWithPrefix:@"arlen-frontend-starters"];

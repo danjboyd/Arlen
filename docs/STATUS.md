@@ -2,6 +2,42 @@
 
 Last updated: 2026-03-27
 
+## Leaving Off (2026-03-27 EOD)
+
+- Phase 22 is in progress with `22A-22F` drafted/implemented in the working
+  tree and `22G` partially complete:
+  - newcomer-first navigation landed in `README.md` and `docs/README.md`
+  - onboarding docs were rewritten around one generator-first app path in
+    `docs/GETTING_STARTED.md`, `docs/GETTING_STARTED_QUICKSTART.md`, and
+    `docs/FIRST_APP_GUIDE.md`
+  - new user-facing guides were added for app authoring, configuration,
+    lite mode, plugin/service generation, and frontend starters
+  - `docs/MODULES.md` was expanded into a lifecycle guide, and the relevant
+    historical/spec docs now point at the new practical guides
+  - docs-quality hardening landed via
+    `tools/ci/check_docs_navigation.py`,
+    `tools/ci/run_docs_quality.sh`, and updated review policy in
+    `docs/DOCUMENTATION_POLICY.md`
+- The docs pass also uncovered a real generator regression:
+  - `arlen generate endpoint` was wiring routes into `src/main.m` /
+    `app_lite.m` without adding the required controller import
+  - fixed in `tools/arlen.m`
+  - regression coverage added in
+    `tests/integration/DeploymentIntegrationTests.m`
+- Verification completed at this checkpoint:
+  - `source /usr/GNUstep/System/Library/Makefiles/GNUstep.sh && make arlen build-tests`
+  - `bash tools/ci/run_docs_quality.sh`
+- Verification still pending at handoff:
+  - full integration rerun with the local PostgreSQL instance plus the local
+    SQL Server 2022 Developer test container:
+    `source /usr/GNUstep/System/Library/Makefiles/GNUstep.sh && source /home/danboyd/.config/arlen/mssql-test.env && export ARLEN_PG_TEST_DSN='postgresql:///postgres' && make test-integration`
+- Next-session closeout path:
+  - finish or rerun `make test-integration`
+  - if green, mark Phase 22 complete in `docs/PHASE22_ROADMAP.md`,
+    `README.md`, `docs/README.md`, and `docs/STATUS.md`
+  - regenerate docs if needed, run `git diff --check`, and commit the
+    Phase 22 closeout
+
 ## Completed Today (2026-03-27)
 
 - Planned Phase 22 as the next roadmap phase:

@@ -18,6 +18,7 @@ require_tool git
 
 python3 ./tools/docs/generate_api_reference.py --repo-root "$repo_root"
 python3 ./tools/ci/check_roadmap_consistency.py --repo-root "$repo_root"
+python3 ./tools/ci/check_docs_navigation.py --repo-root "$repo_root"
 python3 ./tools/ci/check_benchmark_contracts.py --repo-root "$repo_root"
 
 if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then

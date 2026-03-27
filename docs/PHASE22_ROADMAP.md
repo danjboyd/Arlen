@@ -1,6 +1,6 @@
 # Arlen Phase 22 Roadmap
 
-Status: Planned (`22A-22G` not started)
+Status: In progress (`22A-22F` drafted/implemented; `22G` closeout and final verification pending)
 Last updated: 2026-03-27
 
 Related docs:
@@ -118,7 +118,17 @@ into the docs quality path.
 
 ## 5.1 Phase 22A: Entrypoint + Navigation Reset
 
-Status: pending
+Status: complete
+
+Checkpoint notes:
+
+- `README.md` now leads with `Start Here` and `Quick Start` before the long
+  phase-history status block.
+- `docs/README.md` now separates newcomer docs, app authoring,
+  modules/integrations, operations, reference, and contributor/history material
+  into distinct sections.
+- The new entry path now points newcomers at dedicated first-app, app-author,
+  lite-mode, and configuration docs instead of phase-history material.
 
 Deliverables:
 
@@ -143,7 +153,16 @@ Acceptance (required):
 
 ## 5.2 Phase 22B: Onboarding + First-App Consolidation
 
-Status: pending
+Status: complete
+
+Checkpoint notes:
+
+- `docs/GETTING_STARTED.md`, `docs/GETTING_STARTED_QUICKSTART.md`, and
+  `docs/FIRST_APP_GUIDE.md` were rewritten around one generator-first app path.
+- The recommended first-app flow now uses `arlen generate endpoint --route`
+  instead of manual bootstrap-file edits.
+- Contributor-only quality-gate and release detail was pushed behind the main
+  scaffold/run/add-route path.
 
 Deliverables:
 
@@ -165,7 +184,20 @@ Acceptance (required):
 
 ## 5.3 Phase 22C: Accuracy Sweep + Parity Hardening
 
-Status: pending
+Status: complete
+
+Checkpoint notes:
+
+- `./build/arlen --help` now advertises `module ... eject`, aligning the
+  top-level CLI help with the module command surface.
+- The API reference generator now ignores forward protocol declarations ending
+  in `;`, removing the duplicate `ALNPlugin` symbol from generated docs.
+- The Phase 22 docs pass uncovered and fixed a real generator regression:
+  `arlen generate endpoint` now inserts the needed controller import into
+  `src/main.m` / `app_lite.m`, and a deployment integration regression test was
+  added for that path.
+- `docs/TOOLCHAIN_MATRIX.md` now documents the extra toolchain-matrix presence
+  check performed by `bin/arlen-doctor`.
 
 Deliverables:
 
@@ -187,7 +219,15 @@ Acceptance (required):
 
 ## 5.4 Phase 22D: App-Author Guides
 
-Status: pending
+Status: complete
+
+Checkpoint notes:
+
+- Added `docs/APP_AUTHORING_GUIDE.md` for routes, controllers, middleware,
+  params, validation, sessions, auth helpers, and route metadata.
+- Added `docs/CONFIGURATION_REFERENCE.md` for the early-runtime keys app
+  authors are most likely to change first.
+- Updated onboarding/index surfaces to point at those guides directly.
 
 Deliverables:
 
@@ -209,7 +249,16 @@ Acceptance (required):
 
 ## 5.5 Phase 22E: Module Lifecycle + Lite-Mode Guidance
 
-Status: pending
+Status: complete
+
+Checkpoint notes:
+
+- `docs/MODULES.md` now covers the module lifecycle as one connected workflow:
+  add, list, doctor, migrate, assets, upgrade, eject, remove, and override
+  boundaries.
+- Added `docs/LITE_MODE_GUIDE.md` so users can choose between full and lite
+  mode without reading the historical spec.
+- Historical/spec docs now cross-link the new user-facing lite-mode guidance.
 
 Deliverables:
 
@@ -240,7 +289,16 @@ Acceptance (required):
 
 ## 5.6 Phase 22F: Plugin/Service + Frontend Guidance
 
-Status: pending
+Status: complete
+
+Checkpoint notes:
+
+- Added `docs/PLUGIN_SERVICE_GUIDE.md` for app-local plugin and service-adapter
+  generation workflow.
+- Added `docs/FRONTEND_STARTERS.md` for choosing and customizing the frontend
+  starter presets.
+- Updated the relevant historical/spec docs to point at the new practical
+  guides.
 
 Deliverables:
 
@@ -263,7 +321,19 @@ Acceptance (required):
 
 ## 5.7 Phase 22G: Docs Quality + Release Closeout
 
-Status: pending
+Status: in progress
+
+Checkpoint notes:
+
+- Added `tools/ci/check_docs_navigation.py` and wired it into
+  `tools/ci/run_docs_quality.sh` so the newcomer-first docs layout is checked in
+  CI.
+- Updated `docs/DOCUMENTATION_POLICY.md` so Phase 22 user-facing docs are part
+  of the docs definition-of-done and review checklist.
+- `make arlen build-tests` and `bash tools/ci/run_docs_quality.sh` passed during
+  this checkpoint.
+- Remaining closeout work: finish the long `make test-integration` verification
+  run, then update summary surfaces from `in progress` to `complete`.
 
 Deliverables:
 

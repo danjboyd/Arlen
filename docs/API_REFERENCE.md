@@ -10,7 +10,7 @@ python3 tools/docs/generate_api_reference.py
 
 - Generated from source headers and metadata (deterministic output)
 - Public headers: `53`
-- Symbols: `92`
+- Symbols: `91`
 - Public methods: `621`
 - Public properties: `199`
 
@@ -34,7 +34,6 @@ python3 tools/docs/generate_api_reference.py
 - [ALNModuleDefinition](api/ALNModuleDefinition.md): Core runtime API surface for application lifecycle, config, and contracts.
 - [ALNModuleMigrationProvider](api/ALNModuleMigrationProvider.md): Protocol contract exported as part of the `ALNModuleMigrationProvider` API surface.
 - [ALNModuleSystem](api/ALNModuleSystem.md): Core runtime API surface for application lifecycle, config, and contracts.
-- [ALNPlugin](api/ALNPlugin.md): Plugin protocol for declarative app extension (registration + optional middleware contribution).
 - [ALNPlugin](api/ALNPlugin.md): Plugin protocol for declarative app extension (registration + optional middleware contribution).
 - [ALNTraceExporter](api/ALNTraceExporter.md): Trace-export protocol used to publish structured request spans to external observability sinks.
 

@@ -27,7 +27,14 @@ When applicable, update:
 - `README.md`
 - `docs/README.md`
 - `docs/GETTING_STARTED.md`
+- `docs/FIRST_APP_GUIDE.md`
+- `docs/APP_AUTHORING_GUIDE.md`
+- `docs/CONFIGURATION_REFERENCE.md`
 - `docs/CLI_REFERENCE.md`
+- `docs/MODULES.md`
+- `docs/LITE_MODE_GUIDE.md`
+- `docs/PLUGIN_SERVICE_GUIDE.md`
+- `docs/FRONTEND_STARTERS.md`
 - `docs/API_REFERENCE.md` and generated pages under `docs/api/` when public API changes
 - relevant spec (`docs/PHASE1_SPEC.md`, `V1_SPEC.md`, etc.)
 - roadmap docs if milestone/scope changed
@@ -39,6 +46,8 @@ When applicable, update:
 - Include exact command lines and expected behavior.
 - Avoid promising features that are not implemented.
 - Use Objective-C/GNUstep terminology consistently.
+- Separate newcomer guidance from contributor/process material when both exist.
+- Treat historical phase docs as supporting context, not the primary entry path for user workflows.
 
 ## 5. Accuracy Rules
 
@@ -87,6 +96,8 @@ Documentation should preserve that ownership split:
 8. Did the docs quality gate pass (`make ci-docs`)?
 9. If comparative benchmark contract fixtures changed, do `tests/fixtures/benchmarking/*` and `docs/COMPARATIVE_BENCHMARKING.md` still describe the same source-of-truth split?
 10. If the change references a downstream-reported issue, does the wording keep upstream and downstream closure ownership distinct?
+11. Does `README.md` still put the newcomer path ahead of phase-history/status detail?
+12. Does `docs/README.md` keep user docs visibly separate from contributor/historical docs?
 
 ## 8. Browser Docs Build Check
 
@@ -103,6 +114,7 @@ Validate that:
 - primary navigation links resolve
 - newly added pages are rendered
 - API reference pages under `build/docs/docs/api/` render and link correctly
+- newcomer-facing pages (`README`, `docs/README`, first-app, app-authoring, configuration, lite mode, plugins/services, frontend starters) remain linked from the docs index
 - generated API reference markdown (`docs/API_REFERENCE.md` + `docs/api/*.md`) is up to date with no uncommitted generator diff
 - imported comparative benchmark contract fixtures remain consistent with `docs/COMPARATIVE_BENCHMARKING.md`
 
@@ -114,7 +126,8 @@ bash ./tools/ci/run_docs_quality.sh
 
 This command is CI-enforced and is the source of truth for docs quality pass/fail.
 It also validates roadmap/status summary consistency across `README.md`,
-`docs/STATUS.md`, and the historical aggregate/index docs.
+`docs/STATUS.md`, the docs index newcomer-navigation contract, and the historical
+aggregate/index docs.
 
 ## 9. Ongoing Maintenance Cadence
 

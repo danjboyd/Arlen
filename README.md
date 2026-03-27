@@ -4,6 +4,33 @@ Arlen is a GNUstep-native Objective-C web framework with an MVC runtime, EOC tem
 
 Arlen is designed to solve the same class of problems as frameworks like Mojolicious while staying idiomatic to Objective-C/GNUstep conventions.
 
+## Start Here
+
+If you are new to Arlen, start with:
+
+- `docs/FIRST_APP_GUIDE.md`
+- `docs/GETTING_STARTED.md`
+- `docs/GETTING_STARTED_TRACKS.md`
+- `docs/APP_AUTHORING_GUIDE.md`
+- `docs/LITE_MODE_GUIDE.md`
+- `docs/README.md`
+
+## Quick Start
+
+```bash
+source /usr/GNUstep/System/Library/Makefiles/GNUstep.sh
+./bin/arlen doctor
+make all
+
+mkdir -p ~/arlen-apps
+cd ~/arlen-apps
+/path/to/Arlen/bin/arlen new MyApp
+cd MyApp
+/path/to/Arlen/bin/arlen boomhauer --port 3000
+```
+
+Then open `http://127.0.0.1:3000/`.
+
 ## Status
 
 - Phase 1: complete and working.
@@ -47,9 +74,9 @@ Arlen is designed to solve the same class of problems as frameworks like Mojolic
 - Phase 19: complete (`19A-19F` delivered on 2026-03-14: incremental GNUmake/GNUstep build-graph narrowing, generated-template object reuse, clearer `boomhauer` build phases, and `phase19-confidence`. See `docs/PHASE19_ROADMAP.md`).
 - Phase 20: complete (`20A-20K` delivered on 2026-03-26; `20L-20R` delivered on 2026-03-27 for MSSQL native transport tightening, ordered result semantics, bounded PostgreSQL metadata expansion, explicit live-test requirement accounting, shared test support/assertion layers, and repo-native focused confidence lanes. See `docs/PHASE20_ROADMAP.md`).
 - Phase 21: complete (`21A-21G` delivered on 2026-03-27 for in-process request harnesses, shared request/pipeline assertion helpers, explicit async DB ownership rules, template-suite decomposition, raw protocol corpus replay, generated-app matrix coverage, and repo-native focused confidence lanes. See `docs/PHASE21_ROADMAP.md`).
-- Phase 22: planned (`22A-22G` documentation cleanup for newcomer-first onboarding, docs/code parity hardening, app-author guides, module/lite-mode guidance, plugin/frontend guides, and docs quality closeout. See `docs/PHASE22_ROADMAP.md`).
+- Phase 22: in progress (`22A-22F` drafted/implemented on 2026-03-27 for newcomer-first onboarding, docs/code parity hardening, app-author guides, module/lite-mode guidance, and plugin/frontend guides; `22G` final closeout remains pending verification. See `docs/PHASE22_ROADMAP.md`).
 
-## Quick Start
+## More Setup Details
 
 Prerequisites:
 - clang-built GNUstep toolchain installed

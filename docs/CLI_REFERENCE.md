@@ -755,10 +755,11 @@ Lifecycle diagnostics:
   - use `--json-performance-manifest <path>` to override JSON performance manifest location
   - use `--allow-missing-certification` only for non-RC smoke/local packaging flows
 - `arlen generate frontend <Name> --preset <vanilla-spa|progressive-mpa>`: scaffold frontend starter templates with built-in API wiring examples
-- `make ci-docs`: run docs quality gate (API docs regen consistency + roadmap summary consistency + imported comparative benchmark-contract consistency + HTML artifact/link checks)
+- `make ci-docs`: run docs quality gate (API docs regen consistency + roadmap summary consistency + newcomer-doc navigation checks + imported comparative benchmark-contract consistency + HTML artifact/link checks)
 - `make ci-benchmark-contracts`: validate the imported lightweight comparative benchmark fixtures under `tests/fixtures/benchmarking/`
 - `tools/ci/run_docs_quality.sh`: docs-quality CI entrypoint used by `make ci-docs` and workflow gate
 - `tools/ci/check_roadmap_consistency.py`: validates that `README.md`, `docs/STATUS.md`, and historical aggregate/index docs stay aligned with the authoritative per-phase roadmap headers
+- `tools/ci/check_docs_navigation.py`: validates newcomer-facing docs sections, key links, and required guide files
 - `tools/ci/check_benchmark_contracts.py`: validates the imported comparative benchmark manifests/config contract pack and the source-of-truth bridge notes in `docs/COMPARATIVE_BENCHMARKING.md`
 - `make docs-api`: regenerate API reference markdown from `Arlen.h` / `ArlenData.h` exports
 - `make docs-html`: generate browser-friendly docs under `build/docs`
