@@ -2,6 +2,8 @@
 #import <XCTest/XCTest.h>
 
 #import "../ALNTestRequirements.h"
+#import "../shared/ALNDatabaseTestSupport.h"
+#import "../shared/ALNTestSupport.h"
 #import "ALNAdapterConformance.h"
 #import "ALNMSSQL.h"
 #import "ALNMSSQLDialect.h"
@@ -13,11 +15,7 @@
 @implementation Phase17BTests
 
 - (NSString *)mssqlTestDSN {
-  const char *value = getenv("ARLEN_MSSQL_TEST_DSN");
-  if (value == NULL || value[0] == '\0') {
-    return nil;
-  }
-  return [NSString stringWithUTF8String:value];
+  return ALNTestEnvironmentString(@"ARLEN_MSSQL_TEST_DSN");
 }
 
 - (BOOL)requireMSSQLTransportForSelector:(SEL)selector {
@@ -30,22 +28,14 @@
 }
 
 - (NSString *)requiredMSSQLTestDSNForSelector:(SEL)selector {
-  NSString *dsn = [self mssqlTestDSN];
-  if ([dsn length] > 0) {
-    return dsn;
-  }
-  ALNTestRequireCondition(NO,
-                          NSStringFromClass([self class]),
-                          NSStringFromSelector(selector),
-                          @"ARLEN_MSSQL_TEST_DSN",
-                          @"set ARLEN_MSSQL_TEST_DSN to run live MSSQL adapter coverage");
-  return nil;
+  return ALNTestRequiredEnvironmentString(@"ARLEN_MSSQL_TEST_DSN",
+                                          NSStringFromClass([self class]),
+                                          NSStringFromSelector(selector),
+                                          @"set ARLEN_MSSQL_TEST_DSN to run live MSSQL adapter coverage");
 }
 
 - (NSString *)uniqueTempTableName {
-  NSString *uuid = [[[NSUUID UUID] UUIDString] lowercaseString];
-  uuid = [uuid stringByReplacingOccurrencesOfString:@"-" withString:@""];
-  return [NSString stringWithFormat:@"#arlen_%@", uuid];
+  return ALNTestMSSQLTemporaryTableName(@"arlen");
 }
 
 - (void)testMSSQLDialectCompilesPaginationAndOutputReturning {

@@ -6,6 +6,8 @@
 #import <unistd.h>
 
 #import "../ALNTestRequirements.h"
+#import "../shared/ALNDatabaseTestSupport.h"
+#import "../shared/ALNTestSupport.h"
 #import "ALNDatabaseInspector.h"
 #import "ALNMigrationRunner.h"
 #import "ALNPg.h"
@@ -19,24 +21,15 @@
 @implementation PgTests
 
 - (NSString *)pgTestDSN {
-  const char *value = getenv("ARLEN_PG_TEST_DSN");
-  if (value == NULL || value[0] == '\0') {
-    return nil;
-  }
-  return [NSString stringWithUTF8String:value];
+  return ALNTestEnvironmentString(@"ARLEN_PG_TEST_DSN");
 }
 
 - (NSString *)requiredPGTestDSNForSelector:(SEL)selector {
-  NSString *dsn = [self pgTestDSN];
-  if ([dsn length] > 0) {
-    return dsn;
-  }
-  ALNTestRequireCondition(NO,
-                          NSStringFromClass([self class]),
-                          NSStringFromSelector(selector),
-                          @"ARLEN_PG_TEST_DSN",
-                          @"set ARLEN_PG_TEST_DSN to run live PostgreSQL data-layer coverage");
-  return nil;
+  return ALNTestRequiredEnvironmentString(
+      @"ARLEN_PG_TEST_DSN",
+      NSStringFromClass([self class]),
+      NSStringFromSelector(selector),
+      @"set ARLEN_PG_TEST_DSN to run live PostgreSQL data-layer coverage");
 }
 
 - (NSInteger)phase5ESoakIterationCount {
@@ -54,35 +47,20 @@
 }
 
 - (NSDictionary *)phase4EConformanceMatrixFixture {
-  NSString *root = [[NSFileManager defaultManager] currentDirectoryPath];
-  NSString *path = [root stringByAppendingPathComponent:@"tests/fixtures/sql_builder/phase4e_conformance_matrix.json"];
-  NSData *data = [NSData dataWithContentsOfFile:path];
-  XCTAssertNotNil(data);
-  if (data == nil) {
-    return @{};
-  }
-
   NSError *error = nil;
-  NSDictionary *payload = [NSJSONSerialization JSONObjectWithData:data options:0 error:&error];
+  NSDictionary *payload =
+      ALNTestJSONDictionaryAtRelativePath(@"tests/fixtures/sql_builder/phase4e_conformance_matrix.json",
+                                          &error);
   XCTAssertNil(error);
   XCTAssertNotNil(payload);
-  if (payload == nil) {
-    return @{};
-  }
-  return payload;
+  return payload ?: @{};
 }
 
 - (NSDictionary *)phase20TypeCodecFixture {
-  NSString *root = [[NSFileManager defaultManager] currentDirectoryPath];
-  NSString *path = [root stringByAppendingPathComponent:@"tests/fixtures/phase20/postgres_type_codec_contract.json"];
-  NSData *data = [NSData dataWithContentsOfFile:path];
-  XCTAssertNotNil(data);
-  if (data == nil) {
-    return @{};
-  }
-
   NSError *error = nil;
-  NSDictionary *payload = [NSJSONSerialization JSONObjectWithData:data options:0 error:&error];
+  NSDictionary *payload =
+      ALNTestJSONDictionaryAtRelativePath(@"tests/fixtures/phase20/postgres_type_codec_contract.json",
+                                          &error);
   XCTAssertNil(error);
   XCTAssertNotNil(payload);
   return [payload isKindOfClass:[NSDictionary class]] ? payload : @{};
@@ -121,22 +99,11 @@
 }
 
 - (NSString *)uniqueNameWithPrefix:(NSString *)prefix {
-  NSString *uuid = [[[NSUUID UUID] UUIDString] lowercaseString];
-  uuid = [uuid stringByReplacingOccurrencesOfString:@"-" withString:@""];
-  return [NSString stringWithFormat:@"%@_%@", prefix, uuid];
+  return ALNTestUniqueIdentifier(prefix);
 }
 
 - (NSString *)createTempDirectory {
-  NSString *templatePath =
-      [NSTemporaryDirectory() stringByAppendingPathComponent:@"arlen-migrations-XXXXXX"];
-  const char *templateCString = [templatePath fileSystemRepresentation];
-  char *buffer = strdup(templateCString);
-  char *created = mkdtemp(buffer);
-  NSString *result = created ? [[NSFileManager defaultManager] stringWithFileSystemRepresentation:created
-                                                                                             length:strlen(created)]
-                             : nil;
-  free(buffer);
-  return result;
+  return ALNTestTemporaryDirectory(@"arlen-migrations");
 }
 
 - (void)pgLoaderConcurrencyWorker:(NSDictionary *)context {

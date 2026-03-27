@@ -640,6 +640,9 @@ Lifecycle diagnostics:
   - require an XCTest runner that supports Apple-style `-only-testing` / `-skip-testing` arguments; stock Debian `tools-xctest` may not provide those flags yet
   - if the patched runner comes from a local `tools-xctest` build tree, also set `ARLEN_XCTEST_LD_LIBRARY_PATH=/path/to/tools-xctest/XCTest/obj`
   - example: `ARLEN_XCTEST=/path/to/patched/xctest ARLEN_XCTEST_LD_LIBRARY_PATH=/path/to/tools-xctest/XCTest/obj make test-unit-filter TEST=RuntimeTests/testRenderAndIncludeNormalizeUnsuffixedTemplateReferences`
+- `make phase20-sql-builder-tests` / `make phase20-schema-tests` / `make phase20-routing-tests`: focused Phase 20 pure-unit lanes that do not depend on `-only-testing`
+- `make phase20-postgres-live-tests` / `make phase20-mssql-live-tests`: focused Phase 20 live-backend lanes with explicit DSN/transport requirement logging
+- `make phase20-focused`: run the full focused Phase 20 lane set without relying on stock `xctest -only-testing`
 - `make browser-error-audit`: run the dedicated browser error audit bundle and generate a review gallery at `build/browser-error-audit/index.html`
   - captures representative build/runtime/browser error scenarios into browsable HTML artifacts
   - preserves raw responses plus wrapped review pages so plain-text/JSON browser fallbacks are easy to inspect
@@ -664,6 +667,7 @@ Lifecycle diagnostics:
 - `make phase16-confidence`: run the Phase 16 module-maturity confidence gate and generate artifacts in `build/release_confidence/phase16`
 - `make phase19-confidence`: run the Phase 19 incremental build-graph confidence gate and generate artifacts in `build/release_confidence/phase19`
 - `make phase20-confidence`: generate Phase 20 reflection/type-codec/backend-tier confidence artifacts in `build/release_confidence/phase20`
+- `tools/ci/run_phase20_focused.sh`: explicit focused Phase 20 lane runner for builder/schema/routing plus PostgreSQL/MSSQL live coverage
 - `tools/ci/run_phase5e_quality.sh`: explicit Phase 5E CI gate entrypoint
 - `tools/ci/run_phase5e_sanitizers.sh`: explicit Phase 5E sanitizer CI gate entrypoint
   - remains the explicit Phase 9H-style blocking lane for ASan/UBSan unit + runtime/data-layer checks plus Phase 9H confidence artifact generation under `build/release_confidence/phase9h`

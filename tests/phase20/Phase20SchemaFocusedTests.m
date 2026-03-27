@@ -1,13 +1,14 @@
 #import <Foundation/Foundation.h>
 #import <XCTest/XCTest.h>
 
+#import "../shared/ALNDataTestAssertions.h"
 #import "../shared/ALNTestSupport.h"
 #import "ALNDatabaseInspector.h"
+#import "ALNSchemaCodegen.h"
 
-@interface Phase20DFakeAdapter : NSObject <ALNDatabaseAdapter>
+@interface Phase20SchemaFocusedFakeAdapter : NSObject <ALNDatabaseAdapter>
 
 @property(nonatomic, copy) NSString *adapter;
-@property(nonatomic, copy) NSArray<NSDictionary<NSString *, id> *> *rowsToReturn;
 @property(nonatomic, strong) NSMutableArray<NSArray<NSDictionary<NSString *, id> *> *> *queuedRowSets;
 @property(nonatomic, assign) NSInteger queryCount;
 
@@ -15,13 +16,12 @@
 
 @end
 
-@implementation Phase20DFakeAdapter
+@implementation Phase20SchemaFocusedFakeAdapter
 
 - (instancetype)initWithAdapterName:(NSString *)adapterName {
   self = [super init];
   if (self != nil) {
     _adapter = [adapterName copy] ?: @"";
-    _rowsToReturn = @[];
     _queuedRowSets = [NSMutableArray array];
     _queryCount = 0;
   }
@@ -50,12 +50,12 @@
     *error = nil;
   }
   self.queryCount += 1;
-  if ([self.queuedRowSets count] > 0) {
-    NSArray<NSDictionary<NSString *, id> *> *next = self.queuedRowSets[0];
-    [self.queuedRowSets removeObjectAtIndex:0];
-    return next;
+  if ([self.queuedRowSets count] == 0) {
+    return @[];
   }
-  return self.rowsToReturn;
+  NSArray<NSDictionary<NSString *, id> *> *next = self.queuedRowSets[0];
+  [self.queuedRowSets removeObjectAtIndex:0];
+  return next;
 }
 
 - (NSInteger)executeCommand:(NSString *)sql
@@ -81,62 +81,59 @@
 
 @end
 
-@interface Phase20DTests : XCTestCase
+@interface Phase20SchemaFocusedTests : XCTestCase
 @end
 
-@implementation Phase20DTests
+@implementation Phase20SchemaFocusedTests
 
-- (NSDictionary *)fixtureNamed:(NSString *)name {
+- (NSDictionary *)fixtureNamed:(NSString *)relativePath {
   NSError *error = nil;
-  NSDictionary *fixture = ALNTestJSONDictionaryAtRelativePath(
-      [@"tests/fixtures/phase20" stringByAppendingPathComponent:name ?: @""],
-      &error);
+  NSDictionary *fixture = ALNTestJSONDictionaryAtRelativePath(relativePath, &error);
   XCTAssertNil(error);
   XCTAssertNotNil(fixture);
-  return [fixture isKindOfClass:[NSDictionary class]] ? fixture : @{};
+  return fixture ?: @{};
 }
 
-- (NSDictionary *)reflectionFixture {
-  return [self fixtureNamed:@"postgres_reflection_contract.json"];
+- (NSArray<NSDictionary *> *)mixedRelationRows {
+  return @[
+    @{
+      @"schema" : @"public",
+      @"table" : @"users",
+      @"column" : @"id",
+      @"ordinal" : @1,
+      @"data_type" : @"uuid",
+      @"nullable" : @NO,
+      @"primary_key" : @YES,
+      @"has_default" : @YES,
+      @"default_value_shape" : @"expression",
+      @"relation_kind" : @"table",
+      @"read_only" : @NO,
+    },
+    @{
+      @"schema" : @"public",
+      @"table" : @"user_emails",
+      @"column" : @"email",
+      @"ordinal" : @1,
+      @"data_type" : @"text",
+      @"nullable" : @YES,
+      @"primary_key" : @NO,
+      @"has_default" : @NO,
+      @"default_value_shape" : @"none",
+      @"relation_kind" : @"view",
+      @"read_only" : @YES,
+    },
+  ];
 }
 
-- (NSDictionary *)metadataFixture {
-  return [self fixtureNamed:@"postgres_inspector_metadata_contract.json"];
-}
-
-- (void)testPostgresInspectorNormalizesFixtureRows {
-  NSDictionary *fixture = [self reflectionFixture];
-  NSArray *rawRows = [fixture[@"raw_rows"] isKindOfClass:[NSArray class]] ? fixture[@"raw_rows"] : @[];
-  NSArray *expected = [fixture[@"normalized_rows"] isKindOfClass:[NSArray class]] ? fixture[@"normalized_rows"] : @[];
-
-  NSError *error = nil;
-  NSArray *normalized = [ALNPostgresInspector normalizedColumnsFromInspectionRows:rawRows error:&error];
-  XCTAssertNil(error);
-  XCTAssertEqualObjects(expected, normalized);
-}
-
-- (void)testDatabaseInspectorRoutesPostgresAdaptersThroughNormalizedContract {
-  NSDictionary *fixture = [self reflectionFixture];
-  NSArray *rawRows = [fixture[@"raw_rows"] isKindOfClass:[NSArray class]] ? fixture[@"raw_rows"] : @[];
-  NSArray *expected = [fixture[@"normalized_rows"] isKindOfClass:[NSArray class]] ? fixture[@"normalized_rows"] : @[];
-
-  Phase20DFakeAdapter *adapter = [[Phase20DFakeAdapter alloc] initWithAdapterName:@"postgresql"];
-  adapter.rowsToReturn = rawRows;
-
-  NSError *error = nil;
-  NSArray *normalized = [ALNDatabaseInspector inspectSchemaColumnsForAdapter:adapter error:&error];
-  XCTAssertNil(error);
-  XCTAssertEqual((NSInteger)1, adapter.queryCount);
-  XCTAssertEqualObjects(expected, normalized);
-}
-
-- (void)testDatabaseInspectorMetadataRoutesPostgresAdaptersThroughNormalizedContract {
-  NSDictionary *fixture = [self metadataFixture];
+- (void)testInspectorMetadataMatchesPhase20FixtureContract {
+  NSDictionary *fixture =
+      [self fixtureNamed:@"tests/fixtures/phase20/postgres_inspector_metadata_contract.json"];
   NSDictionary *expected = [fixture[@"expected_metadata"] isKindOfClass:[NSDictionary class]]
                                ? fixture[@"expected_metadata"]
                                : @{};
 
-  Phase20DFakeAdapter *adapter = [[Phase20DFakeAdapter alloc] initWithAdapterName:@"postgresql"];
+  Phase20SchemaFocusedFakeAdapter *adapter =
+      [[Phase20SchemaFocusedFakeAdapter alloc] initWithAdapterName:@"postgresql"];
   [adapter.queuedRowSets addObject:[fixture[@"relation_rows"] isKindOfClass:[NSArray class]] ? fixture[@"relation_rows"] : @[]];
   [adapter.queuedRowSets addObject:[fixture[@"column_rows"] isKindOfClass:[NSArray class]] ? fixture[@"column_rows"] : @[]];
   [adapter.queuedRowSets addObject:[fixture[@"primary_key_rows"] isKindOfClass:[NSArray class]] ? fixture[@"primary_key_rows"] : @[]];
@@ -165,22 +162,42 @@
   XCTAssertEqualObjects(expected, metadata);
 }
 
-- (void)testDatabaseInspectorRejectsUnsupportedAdapters {
-  Phase20DFakeAdapter *adapter = [[Phase20DFakeAdapter alloc] initWithAdapterName:@"sqlite"];
+- (void)testSchemaCodegenTreatsViewsAsReadOnlyRelations {
+  NSError *error = nil;
+  NSDictionary *artifacts = [ALNSchemaCodegen renderArtifactsFromColumns:[self mixedRelationRows]
+                                                              classPrefix:@"ALNDB"
+                                                           databaseTarget:nil
+                                                    includeTypedContracts:YES
+                                                                    error:&error];
+  XCTAssertNil(error);
+  XCTAssertNotNil(artifacts);
+
+  NSString *header = [artifacts[@"header"] isKindOfClass:[NSString class]] ? artifacts[@"header"] : @"";
+  NSString *implementation =
+      [artifacts[@"implementation"] isKindOfClass:[NSString class]] ? artifacts[@"implementation"] : @"";
+  NSString *manifest = [artifacts[@"manifest"] isKindOfClass:[NSString class]] ? artifacts[@"manifest"] : @"";
+
+  XCTAssertFalse([header containsString:@"@interface ALNDBPublicUserEmailsInsert : NSObject"]);
+  XCTAssertFalse([header containsString:@"@interface ALNDBPublicUserEmailsUpdate : NSObject"]);
+  XCTAssertTrue([header containsString:@"@interface ALNDBPublicUserEmailsRow : NSObject"]);
+  XCTAssertTrue([implementation containsString:@"+ (NSString *)relationKind {\n  return @\"view\";\n}"]);
+  XCTAssertTrue([implementation containsString:@"+ (BOOL)isReadOnlyRelation {\n  return YES;\n}"]);
+  XCTAssertTrue([manifest containsString:@"\"relation_kind\": \"view\""]);
+  XCTAssertTrue([manifest containsString:@"\"read_only\": true"]);
+  XCTAssertTrue([manifest containsString:@"\"supports_write_contracts\": false"]);
+}
+
+- (void)testInspectorRejectsUnsupportedAdaptersWithSharedDiagnosticsAssertions {
+  Phase20SchemaFocusedFakeAdapter *adapter =
+      [[Phase20SchemaFocusedFakeAdapter alloc] initWithAdapterName:@"sqlite"];
 
   NSError *error = nil;
   NSArray *normalized = [ALNDatabaseInspector inspectSchemaColumnsForAdapter:adapter error:&error];
   XCTAssertNil(normalized);
-  XCTAssertNotNil(error);
-  XCTAssertEqualObjects(ALNDatabaseInspectorErrorDomain, error.domain);
-  XCTAssertEqual((NSInteger)ALNDatabaseInspectorErrorUnsupportedAdapter, error.code);
-
-  error = nil;
-  NSDictionary *metadata = [ALNDatabaseInspector inspectSchemaMetadataForAdapter:adapter error:&error];
-  XCTAssertNil(metadata);
-  XCTAssertNotNil(error);
-  XCTAssertEqualObjects(ALNDatabaseInspectorErrorDomain, error.domain);
-  XCTAssertEqual((NSInteger)ALNDatabaseInspectorErrorUnsupportedAdapter, error.code);
+  ALNAssertErrorDetails(error,
+                        ALNDatabaseInspectorErrorDomain,
+                        ALNDatabaseInspectorErrorUnsupportedAdapter,
+                        @"does not support this adapter");
 }
 
 @end

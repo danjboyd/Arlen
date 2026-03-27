@@ -1,0 +1,23 @@
+#ifndef ALN_TEST_SUPPORT_H
+#define ALN_TEST_SUPPORT_H
+
+#import <Foundation/Foundation.h>
+
+NS_ASSUME_NONNULL_BEGIN
+
+FOUNDATION_EXPORT NSString *ALNTestRepoRoot(void);
+FOUNDATION_EXPORT NSString *ALNTestPathFromRepoRoot(NSString *relativePath);
+FOUNDATION_EXPORT NSData *_Nullable ALNTestDataAtRelativePath(NSString *relativePath,
+                                                              NSError *_Nullable *_Nullable error);
+FOUNDATION_EXPORT id _Nullable ALNTestJSONObjectAtRelativePath(NSString *relativePath,
+                                                               NSError *_Nullable *_Nullable error);
+FOUNDATION_EXPORT NSDictionary *_Nullable ALNTestJSONDictionaryAtRelativePath(
+    NSString *relativePath,
+    NSError *_Nullable *_Nullable error);
+FOUNDATION_EXPORT NSString *_Nullable ALNTestEnvironmentString(NSString *name);
+FOUNDATION_EXPORT NSString *ALNTestUniqueIdentifier(NSString *prefix);
+FOUNDATION_EXPORT NSString *_Nullable ALNTestTemporaryDirectory(NSString *prefix);
+
+NS_ASSUME_NONNULL_END
+
+#endif

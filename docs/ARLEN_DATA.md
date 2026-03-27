@@ -498,6 +498,14 @@ BOOL ok = ALNDatabaseWithSavepoint(connection, @"phase20_inner", ^BOOL(NSError *
 Confidence pack:
 
 - `make phase20-confidence`
+- focused verification:
+  - `make phase20-sql-builder-tests`
+  - `make phase20-schema-tests`
+  - `make phase20-routing-tests`
+  - `make phase20-postgres-live-tests`
+  - `make phase20-mssql-live-tests`
+  - `make phase20-focused`
+  - `bash tools/ci/run_phase20_focused.sh`
 - output directory: `build/release_confidence/phase20`
 - machine fixtures:
   - `tests/fixtures/phase20/postgres_reflection_contract.json`

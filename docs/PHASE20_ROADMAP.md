@@ -1,6 +1,6 @@
 # Arlen Phase 20 Roadmap
 
-Status: Extended (`20A-20K` delivered on 2026-03-26; `20L-20O` delivered on 2026-03-27; `20P-20R` planned)
+Status: Complete (`20A-20K` delivered on 2026-03-26; `20L-20R` delivered on 2026-03-27)
 Last updated: 2026-03-27
 
 Related docs:
@@ -205,29 +205,35 @@ does not include ORM features.
   - replaced silent DSN-gated early returns in the Phase 20-sensitive Pg/MSSQL
     live suites with explicit requirement logging for missing backend
     prerequisites
-- `20P`: pending
-  - centralize repeated fixture, temp-dir, shell, and unique-name helpers and
-    add disposable live-backend harness seams
-- `20Q`: pending
-  - add shared SQL/result assertion helpers and push overlapping PostgreSQL /
-    MSSQL claims onto one reusable conformance surface
-- `20R`: pending
-  - break large Phase 20-sensitive verification into focused lanes that do not
-    depend on the stock `xctest` filter behavior staying usable
+- `20P`: complete on 2026-03-27
+  - added shared test support for fixture loading, temp dirs, unique
+    identifiers, DSN/env lookup, and disposable PostgreSQL/MSSQL namespace
+    helpers under `tests/shared`
+  - moved repeated helper logic out of the Phase 20-sensitive Pg/MSSQL/
+    inspector suites and onto the shared support layer
+- `20Q`: complete on 2026-03-27
+  - added shared SQL/result assertion helpers and a reusable focused
+    PostgreSQL/MSSQL conformance surface for overlapping scalar/result claims
+  - added deterministic pool seam regressions for liveness recycle and
+    rollback-on-release behavior without depending on live backend timing
+- `20R`: complete on 2026-03-27
+  - added repo-native focused Phase 20 bundles and make targets for
+    SQL-builder, schema/reflection, PostgreSQL live, MSSQL live, and
+    routing/pool verification
+  - added `tools/ci/run_phase20_focused.sh` so focused Phase 20 reruns no
+    longer depend on stock `xctest -only-testing` support
 
 ## 3.2 Recommended Rollout Order For Remaining Work
 
-With `20L-20O` landed, the remaining work is the test-infrastructure follow-on:
+Phase 20 is now complete. The focused verification entrypoints are:
 
-1. `20P`: extract common test support and disposable backend harnesses so the
-   new explicit requirement layer does not remain duplicated inside large
-   Phase 20-sensitive suites.
-2. `20Q`: add reusable SQL/result assertions and unified backend conformance so
-   overlapping PostgreSQL/MSSQL claims move onto one stronger regression
-   surface.
-3. `20R`: decompose verification into focused lanes / bundles / confidence
-   paths so the remaining Phase 20 work no longer depends on the stock
-   `xctest` filter behavior.
+1. `make phase20-sql-builder-tests`
+2. `make phase20-schema-tests`
+3. `make phase20-routing-tests`
+4. `make phase20-postgres-live-tests`
+5. `make phase20-mssql-live-tests`
+6. `make phase20-focused`
+7. `bash tools/ci/run_phase20_focused.sh`
 
 ## 4. Scope Guardrails
 
@@ -711,7 +717,7 @@ Acceptance (required):
 
 ## 5.16 Phase 20P: Shared Test Support + Disposable Backend Harnesses
 
-Status: planned
+Status: complete on 2026-03-27
 
 Deliverables:
 
@@ -741,7 +747,7 @@ Acceptance (required):
 
 ## 5.17 Phase 20Q: SQL/Result Assertion Helpers + Unified Backend Conformance
 
-Status: planned
+Status: complete on 2026-03-27
 
 Deliverables:
 
@@ -771,7 +777,7 @@ Acceptance (required):
 
 ## 5.18 Phase 20R: Focused Test Topology + Confidence-Lane Decomposition
 
-Status: planned
+Status: complete on 2026-03-27
 
 Deliverables:
 

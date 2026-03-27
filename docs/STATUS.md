@@ -4,6 +4,27 @@ Last updated: 2026-03-27
 
 ## Completed Today (2026-03-27)
 
+- Completed Phase `20P-20R`:
+  - added shared Phase 20 test support under `tests/shared` for fixture loading,
+    temp dirs, unique identifiers, DSN/env lookup, MSSQL temp-table naming, and
+    disposable PostgreSQL/MSSQL schema harnesses
+  - moved Phase 20-sensitive Pg/MSSQL/inspector suites onto the shared support
+    helpers so repeated DSN, fixture, temp-dir, and unique-name boilerplate is
+    no longer duplicated inside the large test files
+  - added shared SQL/result assertion helpers and focused backend conformance
+    suites for builder, schema/reflection, PostgreSQL live coverage, MSSQL live
+    coverage, and routing/pool seam behavior
+  - added deterministic pool seam regressions for liveness recycle and
+    rollback-on-release behavior on PostgreSQL and MSSQL without depending on
+    live backend timing
+  - added repo-native focused Phase 20 lanes:
+    `make phase20-sql-builder-tests`, `make phase20-schema-tests`,
+    `make phase20-routing-tests`, `make phase20-postgres-live-tests`,
+    `make phase20-mssql-live-tests`, `make phase20-focused`, and
+    `tools/ci/run_phase20_focused.sh`
+  - verified the focused runner path end-to-end plus a fresh `make build-tests`
+    rebuild; the focused Phase 20 commands no longer depend on stock
+    `xctest -only-testing` support
 - Completed Phase `20L-20O`:
   - tightened `ALNMSSQL` bind/result transport around native ODBC scalar and
     binary paths, added capability metadata for native transport, and extended
@@ -261,14 +282,13 @@ entries, not current plan-of-record items.
 - Phase 19: complete (`19A-19F` delivered on 2026-03-14 for incremental
   GNUmake/GNUstep build-graph narrowing, generated-template object reuse, and
   clearer `boomhauer` build scope/progress)
-- Phase 20: extended (`20A-20O` complete as of 2026-03-27 for typed codecs/live
+- Phase 20: complete (`20A-20R` complete as of 2026-03-27 for typed codecs/live
   rows, recursive nested dialect compilation, result/savepoint ergonomics,
   reflection/codegen alignment, routing/pool hardening, relation-kind-safe
   reflection, richer type parity, inspector-v2 metadata, backend support
   tiers, MSSQL native transport tightening, ordered result semantics, bounded
-  PostgreSQL metadata expansion, and explicit live-test requirement accounting;
-  `20P-20R` remain planned for shared test support, SQL/result assertion
-  helpers, and focused confidence-lane decomposition)
+  PostgreSQL metadata expansion, explicit live-test requirement accounting,
+  shared test support/assertion helpers, and focused Phase 20 confidence lanes)
 
 ## Completed Today (2026-03-26)
 

@@ -156,6 +156,38 @@
   XCTAssertTrue([makefile containsString:@"$(call xctest_filter_args,$(INTEGRATION_TEST_TARGET_NAME))"]);
 }
 
+- (void)testGNUmakefileDefinesFocusedPhase20ConfidenceLanes {
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *makefilePath = [repoRoot stringByAppendingPathComponent:@"GNUmakefile"];
+  NSString *makefile = [self readFile:makefilePath];
+
+  XCTAssertTrue([makefile containsString:
+                              @"PHASE20_SQL_BUILDER_TEST_BUNDLE := $(BUILD_DIR)/tests/"
+                               "ArlenPhase20SQLBuilderTests.xctest"]);
+  XCTAssertTrue([makefile containsString:
+                              @"PHASE20_SCHEMA_TEST_BUNDLE := $(BUILD_DIR)/tests/"
+                               "ArlenPhase20SchemaTests.xctest"]);
+  XCTAssertTrue([makefile containsString:
+                              @"PHASE20_POSTGRES_LIVE_TEST_BUNDLE := $(BUILD_DIR)/tests/"
+                               "ArlenPhase20PostgresLiveTests.xctest"]);
+  XCTAssertTrue([makefile containsString:
+                              @"PHASE20_MSSQL_LIVE_TEST_BUNDLE := $(BUILD_DIR)/tests/"
+                               "ArlenPhase20MSSQLLiveTests.xctest"]);
+  XCTAssertTrue([makefile containsString:
+                              @"PHASE20_ROUTING_TEST_BUNDLE := $(BUILD_DIR)/tests/"
+                               "ArlenPhase20RoutingTests.xctest"]);
+  XCTAssertTrue([makefile containsString:@"TEST_SHARED_SRCS := $(shell find tests/shared -type f -name '*.m' 2>/dev/null | sort)"]);
+  XCTAssertTrue([makefile containsString:@"phase20-sql-builder-tests: $(PHASE20_SQL_BUILDER_TEST_BIN)"]);
+  XCTAssertTrue([makefile containsString:@"phase20-schema-tests: $(PHASE20_SCHEMA_TEST_BIN)"]);
+  XCTAssertTrue([makefile containsString:@"phase20-postgres-live-tests: $(PHASE20_POSTGRES_LIVE_TEST_BIN)"]);
+  XCTAssertTrue([makefile containsString:@"phase20-mssql-live-tests: $(PHASE20_MSSQL_LIVE_TEST_BIN)"]);
+  XCTAssertTrue([makefile containsString:@"phase20-routing-tests: $(PHASE20_ROUTING_TEST_BIN)"]);
+  XCTAssertTrue([makefile containsString:
+                              @"phase20-focused: phase20-sql-builder-tests phase20-schema-tests "
+                               "phase20-routing-tests phase20-postgres-live-tests "
+                               "phase20-mssql-live-tests"]);
+}
+
 - (void)testGNUmakefileUsesIncrementalObjectsDepfilesAndManifestedTemplates {
   NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
   NSString *makefilePath = [repoRoot stringByAppendingPathComponent:@"GNUmakefile"];
@@ -219,6 +251,19 @@
   XCTAssertTrue([script containsString:
                              @"printf '>source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) "
                               "-MMD -MP -MF %s -c %s -o %s\\n\\n'"]);
+}
+
+- (void)testPhase20FocusedRunnerScriptExecutesRepoNativeLaneTargets {
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *scriptPath =
+      [repoRoot stringByAppendingPathComponent:@"tools/ci/run_phase20_focused.sh"];
+  NSString *script = [self readFile:scriptPath];
+
+  XCTAssertTrue([script containsString:@"make -C \"$repo_root\" phase20-sql-builder-tests"]);
+  XCTAssertTrue([script containsString:@"make -C \"$repo_root\" phase20-schema-tests"]);
+  XCTAssertTrue([script containsString:@"make -C \"$repo_root\" phase20-routing-tests"]);
+  XCTAssertTrue([script containsString:@"make -C \"$repo_root\" phase20-postgres-live-tests"]);
+  XCTAssertTrue([script containsString:@"make -C \"$repo_root\" phase20-mssql-live-tests"]);
 }
 
 - (void)testGNUmakefileIncludesYYJSONCSourceInFrameworkBuilds {

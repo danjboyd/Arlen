@@ -457,6 +457,10 @@ make phase5e-confidence
 `make test-unit-filter` and `make test-integration-filter` accept `TEST=TestClass[/testMethod]` and optional `SKIP_TEST=TestClass[/testMethod]`; they auto-prefix the bundle target name and honor `ARLEN_XCTEST`.
 When the selected runner is a local uninstalled `tools-xctest` build, set `ARLEN_XCTEST_LD_LIBRARY_PATH` to the matching `XCTest/obj` directory so the patched runner loads the patched `libXCTest`.
 Filtered reruns require an XCTest runner that understands Apple-style `-only-testing` / `-skip-testing` arguments. Stock Debian `tools-xctest` remains fine for the normal unfiltered `make test-*` path.
+For the Phase 20 data-layer lanes, prefer the repo-native focused targets instead of filter-dependent reruns:
+`make phase20-sql-builder-tests`, `make phase20-schema-tests`,
+`make phase20-routing-tests`, `make phase20-postgres-live-tests`,
+`make phase20-mssql-live-tests`, or `make phase20-focused`.
 
 Focused rerun examples:
 
@@ -464,6 +468,7 @@ Focused rerun examples:
 ARLEN_XCTEST=/path/to/patched/xctest ARLEN_XCTEST_LD_LIBRARY_PATH=/path/to/tools-xctest/XCTest/obj make test-unit-filter TEST=RuntimeTests/testRenderAndIncludeNormalizeUnsuffixedTemplateReferences
 ARLEN_XCTEST=/path/to/patched/xctest ARLEN_XCTEST_LD_LIBRARY_PATH=/path/to/tools-xctest/XCTest/obj make test-integration-filter TEST=Phase13AuthAdminIntegrationTests/testGeneratedAppUIAuthPagesRenderAfterEjectScaffold
 ARLEN_XCTEST=/path/to/patched/xctest ARLEN_XCTEST_LD_LIBRARY_PATH=/path/to/tools-xctest/XCTest/obj make test-integration-filter TEST=Phase13AuthAdminIntegrationTests SKIP_TEST=Phase13AuthAdminIntegrationTests/testGeneratedAppUIAuthPagesRenderAfterEjectScaffold
+make phase20-focused
 ```
 
 Soak iteration override:
