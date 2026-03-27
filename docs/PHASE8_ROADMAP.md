@@ -60,7 +60,7 @@ Implementation notes (completed):
 - Runtime lookup includes keypath-aware strict diagnostics with additive `key_path` and `segment` metadata.
 - Added centralized transformer registry (`ALNValueTransformers`) and schema hooks (`transformer` / `transformers`).
 - Structured JSON error payloads normalize detail entries to `details[]` with `field`, `code`, `message`, optional `meta`.
-- Coverage added in unit fixtures/tests (`TranspilerTests`, `RuntimeTests`, `SchemaContractTests`).
+- Coverage added in unit fixtures/tests (`TemplateParserTests`, `TemplateCodegenTests`, `RuntimeTests`, `SchemaContractTests`).
 
 ## 3.2 Phase 8B: Startup Route Compilation + Validation
 

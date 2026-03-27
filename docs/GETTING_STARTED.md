@@ -428,6 +428,11 @@ make phase14-confidence
 make phase15-confidence
 make phase16-confidence
 make phase19-confidence
+make phase21-template-tests
+make phase21-protocol-tests
+make phase21-generated-app-tests
+make phase21-focused
+make phase21-confidence
 make ci-fault-injection
 make ci-release-certification
 make phase5e-confidence
@@ -451,6 +456,11 @@ make phase5e-confidence
 `make phase15-confidence` runs the Phase 15 auth UI confidence gate and writes artifacts under `build/release_confidence/phase15`.
 `make phase16-confidence` runs the Phase 16 module-maturity confidence gate and writes artifacts under `build/release_confidence/phase16`.
 `make phase19-confidence` runs the Phase 19 incremental build-graph confidence gate and writes timing + rebuild-scope artifacts under `build/release_confidence/phase19`.
+`make phase21-template-tests` runs the focused template parser/codegen/security/regression bundle.
+`make phase21-protocol-tests` runs the Phase 21 raw protocol corpus replay against the supported parser backends.
+`make phase21-generated-app-tests` runs the curated scaffold/module/config matrix for first-user flows.
+`make phase21-focused` runs all three focused Phase 21 lanes.
+`make phase21-confidence` reruns the focused Phase 21 lanes and regenerates `build/release_confidence/phase21/`.
 `make ci-fault-injection` runs the Phase 9I runtime seam fault matrix and writes artifacts under `build/release_confidence/phase9i`.
 `make ci-release-certification` runs the Phase 9J release checklist and writes certification artifacts under `build/release_confidence/phase9j`.
 `make test-unit` and `make test-integration` run with a repo-local GNUstep test home (`.gnustep-home`) to keep defaults/lock files isolated.
@@ -461,6 +471,10 @@ For the Phase 20 data-layer lanes, prefer the repo-native focused targets instea
 `make phase20-sql-builder-tests`, `make phase20-schema-tests`,
 `make phase20-routing-tests`, `make phase20-postgres-live-tests`,
 `make phase20-mssql-live-tests`, or `make phase20-focused`.
+For public-release hardening and downstream bug intake, prefer the Phase 21 focused lanes:
+`make phase21-template-tests`, `make phase21-protocol-tests`,
+`make phase21-generated-app-tests`, `make phase21-focused`, or
+`make phase21-confidence`.
 
 Focused rerun examples:
 
@@ -469,6 +483,8 @@ ARLEN_XCTEST=/path/to/patched/xctest ARLEN_XCTEST_LD_LIBRARY_PATH=/path/to/tools
 ARLEN_XCTEST=/path/to/patched/xctest ARLEN_XCTEST_LD_LIBRARY_PATH=/path/to/tools-xctest/XCTest/obj make test-integration-filter TEST=Phase13AuthAdminIntegrationTests/testGeneratedAppUIAuthPagesRenderAfterEjectScaffold
 ARLEN_XCTEST=/path/to/patched/xctest ARLEN_XCTEST_LD_LIBRARY_PATH=/path/to/tools-xctest/XCTest/obj make test-integration-filter TEST=Phase13AuthAdminIntegrationTests SKIP_TEST=Phase13AuthAdminIntegrationTests/testGeneratedAppUIAuthPagesRenderAfterEjectScaffold
 make phase20-focused
+make phase21-focused
+python3 tools/ci/phase21_protocol_replay.py --case websocket_invalid_key --backends llhttp --output-dir build/release_confidence/phase21/protocol_replay
 ```
 
 Soak iteration override:

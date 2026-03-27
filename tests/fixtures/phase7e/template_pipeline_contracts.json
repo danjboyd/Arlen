@@ -11,12 +11,12 @@
       "verification": [
         {
           "kind": "unit",
-          "file": "tests/unit/TranspilerTests.m",
+          "file": "tests/unit/TemplateCodegenTests.m",
           "test": "testTranspileFixtureWithMultilineTagsAndExpressions"
         },
         {
           "kind": "unit",
-          "file": "tests/unit/TranspilerTests.m",
+          "file": "tests/unit/TemplateCodegenTests.m",
           "test": "testTranspileFixtureWithNestedControlFlowAndSigils"
         }
       ]
@@ -31,13 +31,13 @@
       "verification": [
         {
           "kind": "unit",
-          "file": "tests/unit/TranspilerTests.m",
-          "test": "testTranspileFixtureRejectsMultilineEmptyExpressionWithDeterministicLocation"
+          "file": "tests/unit/TemplateParserTests.m",
+          "test": "testRejectsMultilineEmptyExpressionWithDeterministicLocation"
         },
         {
           "kind": "unit",
-          "file": "tests/unit/TranspilerTests.m",
-          "test": "testTranspileFixtureRejectsMultilineInvalidSigilWithDeterministicLocation"
+          "file": "tests/unit/TemplateParserTests.m",
+          "test": "testRejectsMultilineInvalidSigilWithDeterministicLocation"
         }
       ]
     },
@@ -51,13 +51,13 @@
       "verification": [
         {
           "kind": "unit",
-          "file": "tests/unit/TranspilerTests.m",
-          "test": "testLintDiagnosticsReportUnguardedIncludeWithDeterministicLocation"
+          "file": "tests/unit/TemplateSecurityTests.m",
+          "test": "testLintDiagnosticsReportUnguardedIncludeFromSecurityFixtureNamespace"
         },
         {
           "kind": "unit",
-          "file": "tests/unit/TranspilerTests.m",
-          "test": "testLintDiagnosticsDoNotReportGuardedInclude"
+          "file": "tests/unit/TemplateSecurityTests.m",
+          "test": "testLintDiagnosticsDoNotReportGuardedIncludeFromSecurityFixtureNamespace"
         },
         {
           "kind": "integration",

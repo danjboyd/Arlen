@@ -87,9 +87,11 @@ Machine-readable contract fixture:
 
 Verification coverage:
 
-- `tests/unit/TranspilerTests.m`
+- `tests/unit/TemplateCodegenTests.m`
   - multiline + nested fixture transpile coverage
+- `tests/unit/TemplateParserTests.m`
   - deterministic malformed-tag location diagnostics
+- `tests/unit/TemplateSecurityTests.m`
   - deterministic lint diagnostics for guarded/unguarded include patterns
 - `tests/integration/HTTPIntegrationTests.m`
   - root endpoint render includes partial output contract

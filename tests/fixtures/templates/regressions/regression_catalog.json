@@ -1,0 +1,20 @@
+{
+  "version": "phase21-template-regressions-v1",
+  "lastUpdated": "2026-03-27",
+  "cases": [
+    {
+      "id": "auth_fragment_requires_contract",
+      "kind": "downstream_report",
+      "suite": "TemplateRegressionTests",
+      "fixture": "tests/fixtures/templates/regressions/requires_fragment_contract.html.eoc",
+      "description": "Required-local guards must survive fragment-heavy auth template composition."
+    },
+    {
+      "id": "render_missing_as_diagnostic",
+      "kind": "regression_diagnostic",
+      "suite": "TemplateRegressionTests",
+      "fixture": "tests/fixtures/templates/regressions/render_missing_as.html.eoc",
+      "description": "Render directives missing an item-local name must keep the deterministic as:\\\"item\\\" diagnostic."
+    }
+  ]
+}

@@ -643,6 +643,19 @@ Lifecycle diagnostics:
 - `make phase20-sql-builder-tests` / `make phase20-schema-tests` / `make phase20-routing-tests`: focused Phase 20 pure-unit lanes that do not depend on `-only-testing`
 - `make phase20-postgres-live-tests` / `make phase20-mssql-live-tests`: focused Phase 20 live-backend lanes with explicit DSN/transport requirement logging
 - `make phase20-focused`: run the full focused Phase 20 lane set without relying on stock `xctest -only-testing`
+- `make phase21-template-tests`: focused template parser/codegen/security/regression bundle
+- `make phase21-protocol-tests`: Phase 21 raw protocol corpus replay across the configured parser backends
+- `make phase21-generated-app-tests`: curated generated-app/module/config matrix for first-user flows
+- `make phase21-focused`: run the full focused Phase 21 lane set
+- `make phase21-confidence`: rerun the focused Phase 21 lanes and regenerate artifacts under `build/release_confidence/phase21`
+- `tools/ci/run_phase21_focused.sh`: explicit focused Phase 21 lane runner for template, protocol, and generated-app coverage
+- `tools/ci/run_phase21_protocol_corpus.sh`: explicit Phase 21 raw protocol corpus gate entrypoint
+  - `ARLEN_PHASE21_PROTOCOL_BACKENDS=llhttp` narrows replay to one parser backend
+  - `ARLEN_PHASE21_PROTOCOL_CASES=case_a,case_b` reruns only selected checked-in protocol cases
+- `tools/ci/phase21_protocol_replay.py`: replay one checked-in protocol case or one saved raw request
+  - example checked-in case: `python3 tools/ci/phase21_protocol_replay.py --case websocket_invalid_key --backends llhttp --output-dir build/release_confidence/phase21/protocol_replay`
+  - example saved seed: `python3 tools/ci/phase21_protocol_replay.py --raw-request tests/fixtures/protocol/fuzz_seeds/websocket_invalid_key_seed.http --expected-status 400 --case-id websocket_invalid_key_seed --backends llhttp`
+- `tools/ci/run_phase21_generated_app_matrix.sh`: explicit Phase 21 generated-app matrix entrypoint
 - `make browser-error-audit`: run the dedicated browser error audit bundle and generate a review gallery at `build/browser-error-audit/index.html`
   - captures representative build/runtime/browser error scenarios into browsable HTML artifacts
   - preserves raw responses plus wrapped review pages so plain-text/JSON browser fallbacks are easy to inspect

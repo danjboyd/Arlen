@@ -1,0 +1,48 @@
+{
+  "version": "phase21-generated-app-matrix-v1",
+  "lastUpdated": "2026-03-27",
+  "cases": [
+    {
+      "id": "scaffold_full_generate_endpoint",
+      "kind": "scaffold_contracts",
+      "appName": "Phase21AgentDX",
+      "scaffoldMode": "full"
+    },
+    {
+      "id": "auth_headless_mode",
+      "kind": "auth_ui_mode",
+      "appName": "Phase21HeadlessAuth",
+      "scaffoldMode": "full",
+      "uiMode": "headless",
+      "expectSessionUIMode": "headless",
+      "expectLoginStatus": 404,
+      "expectRegisterStatus": 404
+    },
+    {
+      "id": "auth_module_ui_mode",
+      "kind": "auth_ui_mode",
+      "appName": "Phase21ModuleUIAuth",
+      "scaffoldMode": "full",
+      "uiMode": "module-ui",
+      "expectSessionUIMode": "module-ui",
+      "expectLoginStatus": 200,
+      "expectRegisterStatus": 200,
+      "expectLoginContains": [
+        "auth-card"
+      ]
+    },
+    {
+      "id": "auth_generated_app_ui_eject_render",
+      "kind": "auth_ui_mode",
+      "appName": "Phase21GeneratedUIAuth",
+      "scaffoldMode": "full",
+      "ejectAuthUI": true,
+      "expectSessionUIMode": "generated-app-ui",
+      "expectLoginStatus": 200,
+      "expectRegisterStatus": 200,
+      "expectLoginContains": [
+        "auth-card"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,94 @@
+{
+  "version": "phase21-protocol-corpus-v1",
+  "lastUpdated": "2026-03-27",
+  "limits": {
+    "maxRequestLineBytes": 256,
+    "maxHeaderBytes": 2048,
+    "maxBodyBytes": 1024
+  },
+  "cases": [
+    {
+      "id": "healthz_small_valid",
+      "category": "valid",
+      "requestPath": "tests/fixtures/protocol/requests/valid/healthz_small.http",
+      "expectedStatus": 200
+    },
+    {
+      "id": "content_length_alpha_invalid",
+      "category": "invalid",
+      "requestPath": "tests/fixtures/protocol/requests/invalid/content_length_alpha.http",
+      "expectedStatus": 400
+    },
+    {
+      "id": "header_over_limit_invalid",
+      "category": "invalid",
+      "requestPath": "tests/fixtures/protocol/requests/invalid/header_over_limit.http",
+      "limits": {
+        "maxHeaderBytes": 80
+      },
+      "expectedStatus": 431
+    },
+    {
+      "id": "request_line_over_limit_invalid",
+      "category": "invalid",
+      "requestPath": "tests/fixtures/protocol/requests/invalid/request_line_over_limit.http",
+      "limits": {
+        "maxRequestLineBytes": 48
+      },
+      "expectedStatusByBackend": {
+        "llhttp": 404,
+        "legacy": 431
+      },
+      "expectedStatus": 431
+    },
+    {
+      "id": "duplicate_content_length_invalid",
+      "category": "invalid",
+      "requestPath": "tests/fixtures/protocol/requests/invalid/duplicate_content_length.http",
+      "expectedStatus": 400
+    },
+    {
+      "id": "content_length_plus_transfer_encoding_invalid",
+      "category": "invalid",
+      "requestPath": "tests/fixtures/protocol/requests/invalid/content_length_plus_transfer_encoding.http",
+      "expectedStatus": 400
+    },
+    {
+      "id": "websocket_invalid_version",
+      "category": "websocket",
+      "requestPath": "tests/fixtures/protocol/requests/websocket/invalid_version.http",
+      "expectedStatus": 400
+    },
+    {
+      "id": "websocket_invalid_key",
+      "category": "websocket",
+      "requestPath": "tests/fixtures/protocol/requests/websocket/invalid_key.http",
+      "expectedStatus": 400
+    },
+    {
+      "id": "websocket_blocked_origin",
+      "category": "websocket",
+      "requestPath": "tests/fixtures/protocol/requests/websocket/blocked_origin.http",
+      "expectedStatus": 403
+    },
+    {
+      "id": "healthz_pipelined_sequence",
+      "category": "pipelining",
+      "requestPath": "tests/fixtures/protocol/requests/pipelining/healthz_double.http",
+      "expectedStatus": 200
+    },
+    {
+      "id": "healthz_lenient_header_spacing",
+      "category": "lenient",
+      "requestPath": "tests/fixtures/protocol/requests/lenient/header_spacing.http",
+      "expectedStatus": 200
+    }
+  ],
+  "fuzzSeeds": [
+    {
+      "id": "websocket_invalid_key_seed",
+      "path": "tests/fixtures/protocol/fuzz_seeds/websocket_invalid_key_seed.http",
+      "expectedStatus": 400
+    }
+  ]
+}

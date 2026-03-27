@@ -1,6 +1,6 @@
 # Arlen Phase 21 Roadmap
 
-Status: In progress (`21A-21C` delivered on 2026-03-27; `21D-21G` remaining)
+Status: Complete (`21A-21G` delivered on 2026-03-27)
 Last updated: 2026-03-27
 
 Related docs:
@@ -270,6 +270,27 @@ Acceptance (required):
 
 ## 5.4 Phase 21D: Template Suite Decomposition + Regression Catalog
 
+Status: complete on 2026-03-27
+
+Delivered:
+
+- Replaced the broad `tests/unit/TranspilerTests.m` bundle with focused
+  Jinja-style suite slices:
+  - `tests/unit/TemplateParserTests.m`
+  - `tests/unit/TemplateCodegenTests.m`
+  - `tests/unit/TemplateSecurityTests.m`
+  - `tests/unit/TemplateRegressionTests.m`
+- Added shared fixture/catalog helpers in
+  `tests/shared/ALNTemplateTestSupport.{h,m}`.
+- Added fixture namespaces for parser negatives, security/lint cases, and
+  named regressions under `tests/fixtures/templates/parser/`,
+  `tests/fixtures/templates/security/`, and
+  `tests/fixtures/templates/regressions/`.
+- Added a checked-in regression catalog at
+  `tests/fixtures/templates/regressions/regression_catalog.json` so
+  downstream template bugs land as stable named cases instead of expanding one
+  catch-all file.
+
 Deliverables:
 
 - Split the current broad template/transpiler coverage into focused buckets
@@ -292,6 +313,22 @@ Acceptance (required):
   without editing an increasingly catch-all file.
 
 ## 5.5 Phase 21E: Protocol Corpus + Fuzz/Replay Hardening
+
+Status: complete on 2026-03-27
+
+Delivered:
+
+- Promoted `tests/fixtures/protocol` into a clearer raw-request corpus with
+  `valid`, `invalid`, `pipelining`, `websocket`, `lenient`, and `fuzz_seeds`
+  coverage plus the checked-in manifest
+  `tests/fixtures/protocol/phase21_protocol_corpus.json`.
+- Added `tools/ci/phase21_protocol_replay.py` to replay either the checked-in
+  corpus or one saved raw request with deterministic expected-status
+  assertions.
+- Added `tools/ci/run_phase21_protocol_corpus.sh` and `make phase21-protocol-tests`
+  so protocol-adversarial coverage is rerunnable from one dedicated lane.
+- Kept strict-vs-lenient/backend differences explicit through per-case limits
+  and backend-specific expected statuses where the parser contracts differ.
 
 Deliverables:
 
@@ -316,6 +353,23 @@ Acceptance (required):
 
 ## 5.6 Phase 21F: Generated-App + Module Matrix Coverage
 
+Status: complete on 2026-03-27
+
+Delivered:
+
+- Added the curated generated-app fixture
+  `tests/fixtures/phase21/generated_app_matrix.json`.
+- Added `tools/ci/phase21_generated_app_matrix.py` and
+  `tools/ci/run_phase21_generated_app_matrix.sh` to exercise scaffold/module
+  add-upgrade/eject flows plus representative auth UI mode/config variants.
+- Covered realistic first-user paths such as scaffold-contract verification,
+  auth module install/upgrade, endpoint generation, dry-run build/check, and
+  HTML/API behavior across `module-ui`, `headless`, and
+  `generated-app-ui`-sensitive setups.
+- Converted downstream-style first-user setup problems into one focused matrix
+  surface instead of waiting for broad integration runs to trip them
+  incidentally.
+
 Deliverables:
 
 - Add a curated generated-app matrix harness for first-user setup paths:
@@ -336,6 +390,26 @@ Acceptance (required):
   app/mode/config matrix coverage.
 
 ## 5.7 Phase 21G: Focused Lanes + Contributor Workflow + Confidence
+
+Status: complete on 2026-03-27
+
+Delivered:
+
+- Added repo-native focused Phase 21 lanes:
+  - `make phase21-template-tests`
+  - `make phase21-protocol-tests`
+  - `make phase21-generated-app-tests`
+  - `make phase21-focused`
+  - `make phase21-confidence`
+- Added explicit runner helpers in `tools/ci/run_phase21_focused.sh`,
+  `tools/ci/run_phase21_protocol_corpus.sh`,
+  `tools/ci/run_phase21_generated_app_matrix.sh`, and
+  `tools/ci/run_phase21_confidence.sh`.
+- Added `docs/TESTING_WORKFLOW.md` so contributors can move from bug report to
+  fixture/test/lane/confidence promotion without test-suite archaeology.
+- Added Phase 21 confidence artifact generation in
+  `tools/ci/generate_phase21_confidence_artifacts.py` and
+  `build/release_confidence/phase21/`.
 
 Deliverables:
 

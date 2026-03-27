@@ -103,8 +103,10 @@ Unified envelope contract:
 
 Unit tests:
 
-- `tests/unit/TranspilerTests.m`
-  - keypath sigil rewrite success/failure matrix.
+- `tests/unit/TemplateCodegenTests.m`
+  - keypath sigil rewrite success matrix.
+- `tests/unit/TemplateParserTests.m`
+  - keypath sigil failure diagnostics.
 - `tests/unit/EOCRuntimeTests.m` (or existing runtime test target)
   - strict/non-strict keypath lookup diagnostics.
 - `tests/unit/SchemaContractTests.m`

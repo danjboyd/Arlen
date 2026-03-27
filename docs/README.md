@@ -54,7 +54,8 @@ Then open `build/browser-error-audit/index.html`.
 - [Phase 5D Typed Data Contracts](PHASE5D_TYPED_CONTRACTS.md): typed row/insert/update generation, decode helpers, and typed SQL artifacts.
 - [Phase 5E Hardening + Confidence](PHASE5E_HARDENING_CONFIDENCE.md): soak/fault gates and release confidence artifact pack workflow.
 - [Phase 20 Roadmap](PHASE20_ROADMAP.md): delivered `20A-20R` data-layer depth work, including shared test support, SQL/result assertion helpers, and focused confidence-lane decomposition.
-- [Phase 21 Roadmap](PHASE21_ROADMAP.md): in-progress public-release test robustness pass inspired by Mojolicious, Phoenix/Ecto, Jinja, and llhttp; `21A-21C` are complete for request harnesses, shared pipeline assertions, and explicit async state ownership, with `21D-21G` remaining for compiler/protocol/generated-app depth and focused contributor lanes.
+- [Phase 21 Roadmap](PHASE21_ROADMAP.md): completed public-release test robustness pass inspired by Mojolicious, Phoenix/Ecto, Jinja, and llhttp; `21A-21G` are delivered for request harnesses, shared pipeline assertions, explicit async state ownership, template-suite decomposition, raw protocol corpus replay, generated-app matrix coverage, and focused contributor lanes.
+- [Testing Workflow](TESTING_WORKFLOW.md): focused-lane guide for turning bug reports into permanent template, protocol, and generated-app regressions.
 - [Phase 7A Runtime Hardening](PHASE7A_RUNTIME_HARDENING.md): websocket backpressure safety limit contract and deterministic overload diagnostics.
 - [Phase 7B Security Defaults](PHASE7B_SECURITY_DEFAULTS.md): security profile presets, fail-fast startup validation, and policy contracts.
 - [Phase 7C Observability + Operability](PHASE7C_OBSERVABILITY_OPERABILITY.md): trace/correlation propagation, JSON health/readiness signal contracts, and deploy operability validation script.

@@ -1,0 +1,3 @@
+<h1>Broken Template</h1>
+<% if (YES) {
+  <p>no close

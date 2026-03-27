@@ -71,7 +71,10 @@ make test-integration
 
 Template-specific regressions are covered in:
 
-- `tests/unit/TranspilerTests.m`
+- `tests/unit/TemplateParserTests.m`
+- `tests/unit/TemplateCodegenTests.m`
+- `tests/unit/TemplateSecurityTests.m`
+- `tests/unit/TemplateRegressionTests.m`
 - `tests/unit/RuntimeTests.m`
 - `tests/integration/HTTPIntegrationTests.m`
 - `tests/integration/DeploymentIntegrationTests.m`

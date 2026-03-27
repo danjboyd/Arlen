@@ -4,6 +4,31 @@ Last updated: 2026-03-27
 
 ## Completed Today (2026-03-27)
 
+- Completed Phase `21D-21G`:
+  - replaced the broad template/transpiler unit surface with focused
+    `TemplateParserTests`, `TemplateCodegenTests`, `TemplateSecurityTests`,
+    and `TemplateRegressionTests`, backed by shared helper support in
+    `tests/shared/ALNTemplateTestSupport.{h,m}`
+  - added parser/security/regression fixture namespaces plus a checked-in
+    regression catalog under `tests/fixtures/templates/`
+  - promoted a clearer raw protocol corpus under `tests/fixtures/protocol/`
+    with dedicated replay tooling in `tools/ci/phase21_protocol_replay.py`
+    and the focused `make phase21-protocol-tests` lane
+  - added a curated generated-app/module/config matrix under
+    `tests/fixtures/phase21/generated_app_matrix.json` with the focused
+    `make phase21-generated-app-tests` lane for scaffold, module, and UI-mode
+    verification
+  - added repo-native Phase 21 focused/confidence entrypoints:
+    `make phase21-template-tests`, `make phase21-protocol-tests`,
+    `make phase21-generated-app-tests`, `make phase21-focused`, and
+    `make phase21-confidence`
+  - added `docs/TESTING_WORKFLOW.md` so contributors can turn bug reports into
+    focused regressions and confidence reruns without depending on
+    `xctest -only-testing`
+  - verified the slice with `make build-tests`, `make test-unit`,
+    `make phase21-focused`, `make phase21-confidence`,
+    `python3 tools/ci/check_roadmap_consistency.py --repo-root .`, and
+    `bash tools/ci/run_docs_quality.sh`
 - Completed Phase `21A-21C`:
   - added `tests/shared/ALNWebTestSupport.{h,m}` as a shared in-process
     request harness with disposable app construction, config injection, route

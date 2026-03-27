@@ -1,0 +1,5 @@
+<%@ requires rows, title %>
+<section class="page">
+  <h1><%= $title %></h1>
+  <%@ render "partials/_row" collection:$rows as:"row" %>
+</section>
