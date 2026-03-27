@@ -126,16 +126,20 @@ Use transactions for write workflows:
 Convenience result helpers:
 
 - `ALNDatabaseExecuteQueryResult(...)`
+- `ALNDatabaseResult.columns`
 - `ALNDatabaseResult.first`
 - `ALNDatabaseResult.one:error:`
 - `ALNDatabaseResult.oneOrNil:error:`
 - `ALNDatabaseResult.scalarValueForColumn:error:`
+- `ALNDatabaseRow.columns`
+- `ALNDatabaseRow.objectAtColumnIndex:`
 - `ALNDatabaseExecuteCommandBatch(...)`
 
 Adapter examples:
 
 - `ALNPg` for PostgreSQL
-- `ALNMSSQL` for SQL Server over ODBC
+- `ALNMSSQL` for SQL Server over ODBC with native common-scalar and binary
+  transport on supported builds
 
 ## 6. Optional Standalone Reuse (`ArlenData`)
 
@@ -160,6 +164,9 @@ Schema codegen note:
   tooling.
 - reflected views keep typed row helpers, but default write helpers/contracts
   are emitted only for writable base tables.
+- broader inspector metadata remains PostgreSQL-only and now includes additive
+  `schemas`, `check_constraints`, `view_definitions`, `relation_comments`, and
+  `column_comments` keys for audit/reporting tooling.
 
 Routing/liveness note:
 
@@ -169,3 +176,6 @@ Routing/liveness note:
 - `ALNMSSQL.connectionLivenessChecksEnabled = YES` enables the same
   checkout-time probe for pooled ODBC connections when transport support is
   present.
+- DSN-gated live Pg/MSSQL data-layer tests now log explicit unsatisfied
+  requirements when `ARLEN_PG_TEST_DSN` / `ARLEN_MSSQL_TEST_DSN` are absent,
+  instead of passing silently via early return.

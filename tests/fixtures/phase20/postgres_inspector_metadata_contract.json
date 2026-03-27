@@ -1,4 +1,26 @@
 {
+  "check_constraint_rows": [
+    {
+      "check_clause": "(amount >= (0)::numeric)",
+      "constraint_name": "invoices_amount_check",
+      "schema": "billing",
+      "table": "invoices"
+    }
+  ],
+  "column_comment_rows": [
+    {
+      "column": "amount",
+      "comment": "Invoice amount in billing currency",
+      "schema": "billing",
+      "table": "invoices"
+    },
+    {
+      "column": "email",
+      "comment": "Primary contact email",
+      "schema": "public",
+      "table": "users"
+    }
+  ],
   "column_rows": [
     {
       "column": "created_at",
@@ -89,6 +111,28 @@
   ],
   "expected_metadata": {
     "adapter": "postgresql",
+    "check_constraints": [
+      {
+        "check_clause": "(amount >= (0)::numeric)",
+        "constraint_name": "invoices_amount_check",
+        "schema": "billing",
+        "table": "invoices"
+      }
+    ],
+    "column_comments": [
+      {
+        "column": "amount",
+        "comment": "Invoice amount in billing currency",
+        "schema": "billing",
+        "table": "invoices"
+      },
+      {
+        "column": "email",
+        "comment": "Primary contact email",
+        "schema": "public",
+        "table": "users"
+      }
+    ],
     "columns": [
       {
         "column": "invoice_id",
@@ -258,6 +302,18 @@
       }
     ],
     "reflection_contract_version": 2,
+    "relation_comments": [
+      {
+        "comment": "Customer invoices",
+        "schema": "billing",
+        "table": "invoices"
+      },
+      {
+        "comment": "Projected public email view",
+        "schema": "public",
+        "table": "user_emails"
+      }
+    ],
     "relations": [
       {
         "read_only": false,
@@ -278,6 +334,22 @@
         "table": "users"
       }
     ],
+    "schemas": [
+      {
+        "materialized_view_count": 0,
+        "relation_count": 1,
+        "schema": "billing",
+        "table_count": 1,
+        "view_count": 0
+      },
+      {
+        "materialized_view_count": 0,
+        "relation_count": 2,
+        "schema": "public",
+        "table_count": 1,
+        "view_count": 1
+      }
+    ],
     "unique_constraints": [
       {
         "columns": [
@@ -286,6 +358,14 @@
         "constraint_name": "users_email_key",
         "schema": "public",
         "table": "users"
+      }
+    ],
+    "view_definitions": [
+      {
+        "definition": "SELECT users.email FROM users;",
+        "relation_kind": "view",
+        "schema": "public",
+        "table": "user_emails"
       }
     ]
   },
@@ -355,6 +435,18 @@
       "table": "users"
     }
   ],
+  "relation_comment_rows": [
+    {
+      "comment": "Customer invoices",
+      "schema": "billing",
+      "table": "invoices"
+    },
+    {
+      "comment": "Projected public email view",
+      "schema": "public",
+      "table": "user_emails"
+    }
+  ],
   "relation_rows": [
     {
       "read_only": false,
@@ -384,5 +476,13 @@
       "table": "users"
     }
   ],
-  "version": "phase20-inspector-metadata-contract-v1"
+  "version": "phase20-inspector-metadata-contract-v2",
+  "view_definition_rows": [
+    {
+      "definition": "SELECT users.email FROM users;",
+      "relation_kind": "view",
+      "schema": "public",
+      "table": "user_emails"
+    }
+  ]
 }

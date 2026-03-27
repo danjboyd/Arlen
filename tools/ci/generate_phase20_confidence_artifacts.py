@@ -147,6 +147,12 @@ def summarize_backend_support_matrix(matrix_fixture: Dict[str, Any]) -> Dict[str
             "supports_connection_liveness_checks": metadata.get(
                 "supports_connection_liveness_checks"
             ),
+            "supports_native_common_scalar_transport": metadata.get(
+                "supports_native_common_scalar_transport"
+            ),
+            "supports_native_binary_transport": metadata.get(
+                "supports_native_binary_transport"
+            ),
             "supports_result_wrappers": metadata.get("supports_result_wrappers"),
             "supports_savepoints": metadata.get("supports_savepoints"),
             "batch_execution_mode": metadata.get("batch_execution_mode", ""),
@@ -264,7 +270,9 @@ def render_markdown(
             f"- `{name}`: tier=`{metadata.get('support_tier', '')}`, "
             f"savepoints=`{metadata.get('supports_savepoints')}`, "
             f"result-wrappers=`{metadata.get('supports_result_wrappers')}`, "
-            f"liveness=`{metadata.get('supports_connection_liveness_checks')}`"
+            f"liveness=`{metadata.get('supports_connection_liveness_checks')}`, "
+            f"native-scalars=`{metadata.get('supports_native_common_scalar_transport')}`, "
+            f"native-binary=`{metadata.get('supports_native_binary_transport')}`"
         )
     lines.append("")
     lines.append("## Live Probe")

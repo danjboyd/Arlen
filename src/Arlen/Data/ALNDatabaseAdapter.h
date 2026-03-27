@@ -45,9 +45,16 @@ typedef NS_ENUM(NSInteger, ALNDatabaseAdapterErrorCode) {
 @property(nonatomic, copy, readonly) NSArray<NSString *> *columns;
 
 + (instancetype)rowWithDictionary:(nullable NSDictionary<NSString *, id> *)dictionary;
++ (instancetype)rowWithDictionary:(nullable NSDictionary<NSString *, id> *)dictionary
+                    orderedColumns:(nullable NSArray<NSString *> *)orderedColumns
+                     orderedValues:(nullable NSArray *)orderedValues;
 - (instancetype)init NS_UNAVAILABLE;
-- (instancetype)initWithDictionary:(nullable NSDictionary<NSString *, id> *)dictionary NS_DESIGNATED_INITIALIZER;
+- (instancetype)initWithDictionary:(nullable NSDictionary<NSString *, id> *)dictionary;
+- (instancetype)initWithDictionary:(nullable NSDictionary<NSString *, id> *)dictionary
+                    orderedColumns:(nullable NSArray<NSString *> *)orderedColumns
+                     orderedValues:(nullable NSArray *)orderedValues NS_DESIGNATED_INITIALIZER;
 - (nullable id)objectForColumn:(NSString *)columnName;
+- (nullable id)objectAtColumnIndex:(NSUInteger)index;
 - (nullable id)objectForKeyedSubscript:(NSString *)columnName;
 
 @end
@@ -56,10 +63,17 @@ typedef NS_ENUM(NSInteger, ALNDatabaseAdapterErrorCode) {
 
 @property(nonatomic, copy, readonly) NSArray<NSDictionary<NSString *, id> *> *rows;
 @property(nonatomic, assign, readonly) NSUInteger count;
+@property(nonatomic, copy, readonly) NSArray<NSString *> *columns;
 
 + (instancetype)resultWithRows:(nullable NSArray<NSDictionary<NSString *, id> *> *)rows;
++ (instancetype)resultWithRows:(nullable NSArray<NSDictionary<NSString *, id> *> *)rows
+                 orderedColumns:(nullable NSArray<NSString *> *)orderedColumns
+                  orderedValues:(nullable NSArray<NSArray *> *)orderedValues;
 - (instancetype)init NS_UNAVAILABLE;
-- (instancetype)initWithRows:(nullable NSArray<NSDictionary<NSString *, id> *> *)rows NS_DESIGNATED_INITIALIZER;
+- (instancetype)initWithRows:(nullable NSArray<NSDictionary<NSString *, id> *> *)rows;
+- (instancetype)initWithRows:(nullable NSArray<NSDictionary<NSString *, id> *> *)rows
+              orderedColumns:(nullable NSArray<NSString *> *)orderedColumns
+               orderedValues:(nullable NSArray<NSArray *> *)orderedValues NS_DESIGNATED_INITIALIZER;
 - (nullable ALNDatabaseRow *)first;
 - (nullable ALNDatabaseRow *)rowAtIndex:(NSUInteger)index;
 - (nullable ALNDatabaseRow *)one:(NSError *_Nullable *_Nullable)error;
@@ -136,6 +150,10 @@ FOUNDATION_EXPORT ALNDatabaseJSONValue *ALNDatabaseJSONParameter(id _Nullable ob
 FOUNDATION_EXPORT ALNDatabaseArrayValue *ALNDatabaseArrayParameter(NSArray *_Nullable items);
 FOUNDATION_EXPORT ALNDatabaseResult *_Nonnull ALNDatabaseResultFromRows(
     NSArray<NSDictionary *> *_Nullable rows);
+FOUNDATION_EXPORT ALNDatabaseResult *_Nonnull ALNDatabaseResultFromRowsWithOrderedColumns(
+    NSArray<NSDictionary *> *_Nullable rows,
+    NSArray<NSString *> *_Nullable orderedColumns,
+    NSArray<NSArray *> *_Nullable orderedValues);
 FOUNDATION_EXPORT NSDictionary<NSString *, id> *_Nullable ALNDatabaseFirstRow(
     NSArray<NSDictionary *> *_Nullable rows);
 FOUNDATION_EXPORT id _Nullable ALNDatabaseScalarValueFromRow(

@@ -1616,38 +1616,66 @@ static BOOL ALNPgBuildExecParamsBuffer(NSArray *parameters,
   return YES;
 }
 
-static NSDictionary *ALNPgRowDictionary(PGresult *result, int rowIndex, NSError **error) {
+static NSArray<NSString *> *ALNPgOrderedColumnNames(PGresult *result) {
   int fieldCount = ALNPQnfields(result);
-  NSMutableDictionary *row = [NSMutableDictionary dictionaryWithCapacity:(NSUInteger)fieldCount];
+  NSMutableArray<NSString *> *columns = [NSMutableArray arrayWithCapacity:(NSUInteger)fieldCount];
   for (int field = 0; field < fieldCount; field++) {
     const char *name = ALNPQfname(result, field);
     NSString *key = (name != NULL) ? [NSString stringWithUTF8String:name] : nil;
     if ([key length] == 0) {
       key = [NSString stringWithFormat:@"col_%d", field];
     }
+    [columns addObject:key];
+  }
+  return [NSArray arrayWithArray:columns];
+}
 
-    if (ALNPQgetisnull(result, rowIndex, field)) {
-      row[key] = [NSNull null];
-      continue;
+static id ALNPgDecodedFieldValue(PGresult *result,
+                                 int rowIndex,
+                                 int field,
+                                 NSString *key,
+                                 NSError **error) {
+  if (ALNPQgetisnull(result, rowIndex, field)) {
+    return [NSNull null];
+  }
+
+  const char *value = ALNPQgetvalue(result, rowIndex, field);
+  if (value == NULL) {
+    return [NSNull null];
+  }
+
+  NSString *stringValue = [NSString stringWithUTF8String:value];
+  ALNOid fieldType = (ALNPQftype != NULL) ? ALNPQftype(result, field) : 0;
+  NSError *decodeError = nil;
+  id decoded = ALNPgDecodedValueForFieldType(fieldType, key, stringValue ?: @"", &decodeError);
+  if (decoded == nil && decodeError != nil) {
+    if (error != NULL) {
+      *error = decodeError;
     }
+    return nil;
+  }
+  return decoded ?: @"";
+}
 
-    const char *value = ALNPQgetvalue(result, rowIndex, field);
-    if (value == NULL) {
-      row[key] = [NSNull null];
-      continue;
-    }
-
-    NSString *stringValue = [NSString stringWithUTF8String:value];
-    ALNOid fieldType = (ALNPQftype != NULL) ? ALNPQftype(result, field) : 0;
-    NSError *decodeError = nil;
-    id decoded = ALNPgDecodedValueForFieldType(fieldType, key, stringValue ?: @"", &decodeError);
-    if (decoded == nil && decodeError != nil) {
-      if (error != NULL) {
-        *error = decodeError;
-      }
+static NSDictionary *ALNPgRowDictionary(PGresult *result,
+                                        NSArray<NSString *> *columnNames,
+                                        int rowIndex,
+                                        NSArray **orderedValuesOut,
+                                        NSError **error) {
+  int fieldCount = ALNPQnfields(result);
+  NSMutableDictionary *row = [NSMutableDictionary dictionaryWithCapacity:(NSUInteger)fieldCount];
+  NSMutableArray *orderedValues = [NSMutableArray arrayWithCapacity:(NSUInteger)fieldCount];
+  for (int field = 0; field < fieldCount; field++) {
+    NSString *key = (field < (int)[columnNames count]) ? columnNames[(NSUInteger)field] : [NSString stringWithFormat:@"col_%d", field];
+    id decoded = ALNPgDecodedFieldValue(result, rowIndex, field, key, error);
+    if (decoded == nil && error != NULL && *error != nil) {
       return nil;
     }
-    row[key] = decoded ?: @"";
+    row[key] = decoded ?: (id)[NSNull null];
+    [orderedValues addObject:decoded ?: (id)[NSNull null]];
+  }
+  if (orderedValuesOut != NULL) {
+    *orderedValuesOut = [NSArray arrayWithArray:orderedValues];
   }
   return row;
 }
@@ -2244,15 +2272,33 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result, int rowIndex, NSError 
 
 - (NSArray<NSDictionary *> *)rowsFromResult:(PGresult *)result error:(NSError **)error {
   int rowCount = ALNPQntuples(result);
+  NSArray<NSString *> *columnNames = ALNPgOrderedColumnNames(result);
   NSMutableArray *rows = [NSMutableArray arrayWithCapacity:(NSUInteger)rowCount];
   for (int idx = 0; idx < rowCount; idx++) {
-    NSDictionary *row = ALNPgRowDictionary(result, idx, error);
+    NSDictionary *row = ALNPgRowDictionary(result, columnNames, idx, NULL, error);
     if (row == nil) {
       return nil;
     }
     [rows addObject:row];
   }
   return rows;
+}
+
+- (ALNDatabaseResult *)databaseResultFromResult:(PGresult *)result error:(NSError **)error {
+  int rowCount = ALNPQntuples(result);
+  NSArray<NSString *> *columnNames = ALNPgOrderedColumnNames(result);
+  NSMutableArray<NSDictionary *> *rows = [NSMutableArray arrayWithCapacity:(NSUInteger)rowCount];
+  NSMutableArray<NSArray *> *orderedValues = [NSMutableArray arrayWithCapacity:(NSUInteger)rowCount];
+  for (int idx = 0; idx < rowCount; idx++) {
+    NSArray *rowValues = nil;
+    NSDictionary *row = ALNPgRowDictionary(result, columnNames, idx, &rowValues, error);
+    if (row == nil) {
+      return nil;
+    }
+    [rows addObject:row];
+    [orderedValues addObject:rowValues ?: @[]];
+  }
+  return ALNDatabaseResultFromRowsWithOrderedColumns(rows, columnNames, orderedValues);
 }
 
 - (NSArray<NSDictionary *> *)executeQuery:(NSString *)sql
@@ -2298,11 +2344,30 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result, int rowIndex, NSError 
 - (ALNDatabaseResult *)executeQueryResult:(NSString *)sql
                                parameters:(NSArray *)parameters
                                     error:(NSError **)error {
-  NSArray<NSDictionary *> *rows = [self executeQuery:sql parameters:parameters error:error];
-  if (rows == nil) {
+  ALNPgClearError(error);
+  PGresult *result = [self runExecParamsSQL:sql parameters:parameters ?: @[] error:error];
+  if (result == NULL) {
     return nil;
   }
-  return ALNDatabaseResultFromRows(rows);
+
+  ALNExecStatusType status = ALNPQresultStatus(result);
+  if (status != ALNPGRES_TUPLES_OK) {
+    NSString *detail = [NSString stringWithUTF8String:ALNPQresultErrorMessage(result) ?: ""];
+    NSDictionary *diagnostics = ALNPgDiagnosticsFromResult(result);
+    ALNPQclear(result);
+    if (error != NULL) {
+      *error = ALNPgMakeErrorWithDiagnostics(ALNPgErrorQueryFailed,
+                                             @"query did not return rows",
+                                             detail,
+                                             sql,
+                                             diagnostics);
+    }
+    return nil;
+  }
+
+  ALNDatabaseResult *rows = [self databaseResultFromResult:result error:error];
+  ALNPQclear(result);
+  return rows;
 }
 
 - (NSInteger)executeCommand:(NSString *)sql
@@ -3174,11 +3239,22 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result, int rowIndex, NSError 
 - (ALNDatabaseResult *)executeQueryResult:(NSString *)sql
                                parameters:(NSArray *)parameters
                                     error:(NSError **)error {
-  NSArray<NSDictionary *> *rows = [self executeQuery:sql parameters:parameters error:error];
-  if (rows == nil) {
+  ALNPgClearError(error);
+  NSError *acquireError = nil;
+  ALNPgConnection *connection = [self acquireConnection:&acquireError];
+  if (connection == nil) {
+    if (error != NULL) {
+      *error = acquireError;
+    }
     return nil;
   }
-  return ALNDatabaseResultFromRows(rows);
+  ALNDatabaseResult *result = nil;
+  @try {
+    result = [connection executeQueryResult:sql parameters:parameters ?: @[] error:error];
+  } @finally {
+    [self releaseConnection:connection];
+  }
+  return result;
 }
 
 - (NSArray<NSDictionary *> *)executeBuilderQuery:(ALNSQLBuilder *)builder

@@ -208,6 +208,9 @@ Introspect PostgreSQL schema metadata and generate typed table/column helper API
 - reflected views retain read-side typed contracts but do not get default write
   builders/contracts
 - Phase 20 still does not add MSSQL schema introspection/codegen
+- `ALNDatabaseInspector inspectSchemaMetadataForAdapter:` remains PostgreSQL-only
+  and now emits additive `schemas`, `check_constraints`, `view_definitions`,
+  `relation_comments`, and `column_comments` metadata for audit/reporting tools
 
 - `--env <name>`: select runtime environment (default: `development`)
 - `--database <target>`: select codegen target (default: `default`)

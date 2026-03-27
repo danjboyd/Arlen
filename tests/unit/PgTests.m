@@ -5,6 +5,7 @@
 #import <string.h>
 #import <unistd.h>
 
+#import "../ALNTestRequirements.h"
 #import "ALNDatabaseInspector.h"
 #import "ALNMigrationRunner.h"
 #import "ALNPg.h"
@@ -23,6 +24,19 @@
     return nil;
   }
   return [NSString stringWithUTF8String:value];
+}
+
+- (NSString *)requiredPGTestDSNForSelector:(SEL)selector {
+  NSString *dsn = [self pgTestDSN];
+  if ([dsn length] > 0) {
+    return dsn;
+  }
+  ALNTestRequireCondition(NO,
+                          NSStringFromClass([self class]),
+                          NSStringFromSelector(selector),
+                          @"ARLEN_PG_TEST_DSN",
+                          @"set ARLEN_PG_TEST_DSN to run live PostgreSQL data-layer coverage");
+  return nil;
 }
 
 - (NSInteger)phase5ESoakIterationCount {
@@ -278,9 +292,11 @@
   NSArray<NSDictionary *> *rows = @[ @{ @"id" : @7, @"name" : @"hank" } ];
   ALNDatabaseResult *result = ALNDatabaseResultFromRows(rows);
   XCTAssertEqual((NSUInteger)1, result.count);
+  XCTAssertEqualObjects((@[ @"id", @"name" ]), result.columns);
 
   ALNDatabaseRow *first = [result first];
   XCTAssertNotNil(first);
+  XCTAssertEqualObjects((@[ @"id", @"name" ]), first.columns);
   XCTAssertEqualObjects(@7, [first objectForColumn:@"id"]);
   XCTAssertEqualObjects(@"hank", first[@"name"]);
   XCTAssertEqualObjects(rows[0], first.dictionaryRepresentation);
@@ -301,6 +317,12 @@
   XCTAssertNil([many one:&error]);
   XCTAssertNotNil(error);
   XCTAssertEqualObjects(ALNDatabaseAdapterErrorDomain, error.domain);
+
+  ALNDatabaseResult *ordered =
+      ALNDatabaseResultFromRowsWithOrderedColumns(rows, @[ @"name", @"id" ], @[ @[ @"hank", @7 ] ]);
+  XCTAssertEqualObjects((@[ @"name", @"id" ]), ordered.columns);
+  XCTAssertEqualObjects(@"hank", [[ordered first] objectAtColumnIndex:0]);
+  XCTAssertEqualObjects(@7, [[ordered first] objectAtColumnIndex:1]);
 }
 
 - (void)testPostgresRowsMaterializeTypedValuesForSupportedScalarColumns {
@@ -566,8 +588,8 @@
 }
 
 - (void)testPostgresResultWrappersBatchExecutionAndSavepointsAgainstLiveConnection {
-  NSString *dsn = [self pgTestDSN];
-  if ([dsn length] == 0) {
+  NSString *dsn = [self requiredPGTestDSNForSelector:_cmd];
+  if (dsn == nil) {
     return;
   }
 
@@ -580,11 +602,19 @@
   }
 
   ALNDatabaseResult *adapterResult =
-      [database executeQueryResult:@"SELECT 7::integer AS total, 'hank'::text AS name"
+      [database executeQueryResult:@"SELECT 'hank'::text AS name, "
+                                   "7::integer AS total, "
+                                   "decode('6869', 'hex')::bytea AS payload"
                        parameters:@[]
                             error:&error];
   XCTAssertNil(error);
   XCTAssertNotNil(adapterResult);
+  XCTAssertEqualObjects((@[ @"name", @"total", @"payload" ]), adapterResult.columns);
+  XCTAssertEqualObjects((@[ @"name", @"total", @"payload" ]), [[adapterResult first] columns]);
+  XCTAssertEqualObjects(@"hank", [[adapterResult first] objectAtColumnIndex:0]);
+  XCTAssertEqualObjects(@7, [[adapterResult first] objectAtColumnIndex:1]);
+  XCTAssertEqualObjects([@"hi" dataUsingEncoding:NSUTF8StringEncoding],
+                        [[adapterResult first] objectAtColumnIndex:2]);
   XCTAssertEqualObjects(@7, [adapterResult scalarValueForColumn:@"total" error:&error]);
   XCTAssertNil(error);
   XCTAssertEqualObjects(@"hank", [[adapterResult first] objectForColumn:@"name"]);

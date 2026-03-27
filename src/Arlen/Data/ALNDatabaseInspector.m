@@ -495,6 +495,309 @@ static NSArray<NSDictionary<NSString *, id> *> *ALNPostgresInspectorNormalizedIn
   return [NSArray arrayWithArray:normalized];
 }
 
+static NSArray<NSDictionary<NSString *, id> *> *ALNPostgresInspectorNormalizedSchemasFromRelations(
+    NSArray<NSDictionary<NSString *, id> *> *relations,
+    NSError **error) {
+  if (error != NULL) {
+    *error = nil;
+  }
+  if (![relations isKindOfClass:[NSArray class]]) {
+    if (error != NULL) {
+      *error = ALNDatabaseInspectorMakeError(ALNDatabaseInspectorErrorInvalidArgument,
+                                             @"relations must be an array",
+                                             nil);
+    }
+    return nil;
+  }
+
+  NSMutableDictionary<NSString *, NSMutableDictionary<NSString *, id> *> *grouped = [NSMutableDictionary dictionary];
+  for (id rawRelation in relations) {
+    if (![rawRelation isKindOfClass:[NSDictionary class]]) {
+      if (error != NULL) {
+        *error = ALNDatabaseInspectorMakeError(ALNDatabaseInspectorErrorInvalidResult,
+                                               @"relation must be a dictionary",
+                                               @{ @"row" : [rawRelation description] ?: @"" });
+      }
+      return nil;
+    }
+
+    NSDictionary *relation = (NSDictionary *)rawRelation;
+    NSString *schema = ALNDatabaseInspectorTrimmedString(relation[@"schema"]);
+    NSString *relationKind = ALNDatabaseInspectorRelationKind(relation[@"relation_kind"], relation[@"table_type"]);
+    if ([schema length] == 0) {
+      if (error != NULL) {
+        *error = ALNDatabaseInspectorMakeError(ALNDatabaseInspectorErrorInvalidResult,
+                                               @"relation metadata is missing schema",
+                                               relation);
+      }
+      return nil;
+    }
+
+    NSMutableDictionary<NSString *, id> *entry = grouped[schema];
+    if (entry == nil) {
+      entry = [@{
+        @"schema" : schema,
+        @"relation_count" : @0,
+        @"table_count" : @0,
+        @"view_count" : @0,
+        @"materialized_view_count" : @0,
+      } mutableCopy];
+      grouped[schema] = entry;
+    }
+
+    entry[@"relation_count"] = @([entry[@"relation_count"] integerValue] + 1);
+    if ([relationKind isEqualToString:@"view"]) {
+      entry[@"view_count"] = @([entry[@"view_count"] integerValue] + 1);
+    } else if ([relationKind isEqualToString:@"materialized_view"]) {
+      entry[@"materialized_view_count"] = @([entry[@"materialized_view_count"] integerValue] + 1);
+    } else {
+      entry[@"table_count"] = @([entry[@"table_count"] integerValue] + 1);
+    }
+  }
+
+  NSArray<NSString *> *schemaNames = [[grouped allKeys] sortedArrayUsingSelector:@selector(compare:)];
+  NSMutableArray<NSDictionary<NSString *, id> *> *normalized = [NSMutableArray arrayWithCapacity:[schemaNames count]];
+  for (NSString *schema in schemaNames) {
+    [normalized addObject:[NSDictionary dictionaryWithDictionary:grouped[schema] ?: @{}]];
+  }
+  return [NSArray arrayWithArray:normalized];
+}
+
+static NSArray<NSDictionary<NSString *, id> *> *ALNPostgresInspectorNormalizedCheckConstraintsFromInspectionRows(
+    NSArray<NSDictionary *> *rows,
+    NSError **error) {
+  if (error != NULL) {
+    *error = nil;
+  }
+  if (![rows isKindOfClass:[NSArray class]]) {
+    if (error != NULL) {
+      *error = ALNDatabaseInspectorMakeError(ALNDatabaseInspectorErrorInvalidArgument,
+                                             @"inspection rows must be an array",
+                                             nil);
+    }
+    return nil;
+  }
+
+  NSMutableArray<NSDictionary<NSString *, id> *> *normalized =
+      [NSMutableArray arrayWithCapacity:[rows count]];
+  for (id rawRow in rows) {
+    if (![rawRow isKindOfClass:[NSDictionary class]]) {
+      if (error != NULL) {
+        *error = ALNDatabaseInspectorMakeError(ALNDatabaseInspectorErrorInvalidResult,
+                                               @"inspection row must be a dictionary",
+                                               @{ @"row" : [rawRow description] ?: @"" });
+      }
+      return nil;
+    }
+
+    NSDictionary *row = (NSDictionary *)rawRow;
+    NSString *schema = ALNDatabaseInspectorTrimmedString(row[@"schema"]);
+    NSString *table = ALNDatabaseInspectorTrimmedString(row[@"table"]);
+    NSString *constraintName =
+        ALNDatabaseInspectorConstraintName(row[@"constraint_name"], @"ck", row);
+    NSString *checkClause = ALNDatabaseInspectorTrimmedString(row[@"check_clause"]);
+    if ([schema length] == 0 || [table length] == 0) {
+      if (error != NULL) {
+        *error = ALNDatabaseInspectorMakeError(ALNDatabaseInspectorErrorInvalidResult,
+                                               @"check-constraint inspection row is missing identifiers",
+                                               row);
+      }
+      return nil;
+    }
+
+    [normalized addObject:@{
+      @"schema" : schema,
+      @"table" : table,
+      @"constraint_name" : constraintName,
+      @"check_clause" : checkClause ?: @"",
+    }];
+  }
+
+  [normalized sortUsingComparator:^NSComparisonResult(NSDictionary *left, NSDictionary *right) {
+    NSComparisonResult tableOrder = ALNDatabaseInspectorSchemaTableCompare(left, right);
+    if (tableOrder != NSOrderedSame) {
+      return tableOrder;
+    }
+    return [left[@"constraint_name"] compare:right[@"constraint_name"]];
+  }];
+  return [NSArray arrayWithArray:normalized];
+}
+
+static NSArray<NSDictionary<NSString *, id> *> *ALNPostgresInspectorNormalizedViewDefinitionsFromInspectionRows(
+    NSArray<NSDictionary *> *rows,
+    NSError **error) {
+  if (error != NULL) {
+    *error = nil;
+  }
+  if (![rows isKindOfClass:[NSArray class]]) {
+    if (error != NULL) {
+      *error = ALNDatabaseInspectorMakeError(ALNDatabaseInspectorErrorInvalidArgument,
+                                             @"inspection rows must be an array",
+                                             nil);
+    }
+    return nil;
+  }
+
+  NSMutableArray<NSDictionary<NSString *, id> *> *normalized =
+      [NSMutableArray arrayWithCapacity:[rows count]];
+  for (id rawRow in rows) {
+    if (![rawRow isKindOfClass:[NSDictionary class]]) {
+      if (error != NULL) {
+        *error = ALNDatabaseInspectorMakeError(ALNDatabaseInspectorErrorInvalidResult,
+                                               @"inspection row must be a dictionary",
+                                               @{ @"row" : [rawRow description] ?: @"" });
+      }
+      return nil;
+    }
+
+    NSDictionary *row = (NSDictionary *)rawRow;
+    NSString *schema = ALNDatabaseInspectorTrimmedString(row[@"schema"]);
+    NSString *table = ALNDatabaseInspectorTrimmedString(row[@"table"]);
+    NSString *relationKind = ALNDatabaseInspectorRelationKind(row[@"relation_kind"], row[@"table_type"]);
+    NSString *definition = ALNDatabaseInspectorTrimmedString(row[@"definition"]);
+    if ([schema length] == 0 || [table length] == 0) {
+      if (error != NULL) {
+        *error = ALNDatabaseInspectorMakeError(ALNDatabaseInspectorErrorInvalidResult,
+                                               @"view-definition inspection row is missing identifiers",
+                                               row);
+      }
+      return nil;
+    }
+
+    [normalized addObject:@{
+      @"schema" : schema,
+      @"table" : table,
+      @"relation_kind" : relationKind,
+      @"definition" : definition ?: @"",
+    }];
+  }
+
+  [normalized sortUsingComparator:^NSComparisonResult(NSDictionary *left, NSDictionary *right) {
+    NSComparisonResult tableOrder = ALNDatabaseInspectorSchemaTableCompare(left, right);
+    if (tableOrder != NSOrderedSame) {
+      return tableOrder;
+    }
+    return [left[@"relation_kind"] compare:right[@"relation_kind"]];
+  }];
+  return [NSArray arrayWithArray:normalized];
+}
+
+static NSArray<NSDictionary<NSString *, id> *> *ALNPostgresInspectorNormalizedRelationCommentsFromInspectionRows(
+    NSArray<NSDictionary *> *rows,
+    NSError **error) {
+  if (error != NULL) {
+    *error = nil;
+  }
+  if (![rows isKindOfClass:[NSArray class]]) {
+    if (error != NULL) {
+      *error = ALNDatabaseInspectorMakeError(ALNDatabaseInspectorErrorInvalidArgument,
+                                             @"inspection rows must be an array",
+                                             nil);
+    }
+    return nil;
+  }
+
+  NSMutableArray<NSDictionary<NSString *, id> *> *normalized = [NSMutableArray array];
+  for (id rawRow in rows) {
+    if (![rawRow isKindOfClass:[NSDictionary class]]) {
+      if (error != NULL) {
+        *error = ALNDatabaseInspectorMakeError(ALNDatabaseInspectorErrorInvalidResult,
+                                               @"inspection row must be a dictionary",
+                                               @{ @"row" : [rawRow description] ?: @"" });
+      }
+      return nil;
+    }
+
+    NSDictionary *row = (NSDictionary *)rawRow;
+    NSString *schema = ALNDatabaseInspectorTrimmedString(row[@"schema"]);
+    NSString *table = ALNDatabaseInspectorTrimmedString(row[@"table"]);
+    NSString *comment = ALNDatabaseInspectorTrimmedString(row[@"comment"]);
+    if ([schema length] == 0 || [table length] == 0) {
+      if (error != NULL) {
+        *error = ALNDatabaseInspectorMakeError(ALNDatabaseInspectorErrorInvalidResult,
+                                               @"relation-comment inspection row is missing identifiers",
+                                               row);
+      }
+      return nil;
+    }
+    if ([comment length] == 0) {
+      continue;
+    }
+
+    [normalized addObject:@{
+      @"schema" : schema,
+      @"table" : table,
+      @"comment" : comment,
+    }];
+  }
+
+  [normalized sortUsingComparator:^NSComparisonResult(NSDictionary *left, NSDictionary *right) {
+    return ALNDatabaseInspectorSchemaTableCompare(left, right);
+  }];
+  return [NSArray arrayWithArray:normalized];
+}
+
+static NSArray<NSDictionary<NSString *, id> *> *ALNPostgresInspectorNormalizedColumnCommentsFromInspectionRows(
+    NSArray<NSDictionary *> *rows,
+    NSError **error) {
+  if (error != NULL) {
+    *error = nil;
+  }
+  if (![rows isKindOfClass:[NSArray class]]) {
+    if (error != NULL) {
+      *error = ALNDatabaseInspectorMakeError(ALNDatabaseInspectorErrorInvalidArgument,
+                                             @"inspection rows must be an array",
+                                             nil);
+    }
+    return nil;
+  }
+
+  NSMutableArray<NSDictionary<NSString *, id> *> *normalized = [NSMutableArray array];
+  for (id rawRow in rows) {
+    if (![rawRow isKindOfClass:[NSDictionary class]]) {
+      if (error != NULL) {
+        *error = ALNDatabaseInspectorMakeError(ALNDatabaseInspectorErrorInvalidResult,
+                                               @"inspection row must be a dictionary",
+                                               @{ @"row" : [rawRow description] ?: @"" });
+      }
+      return nil;
+    }
+
+    NSDictionary *row = (NSDictionary *)rawRow;
+    NSString *schema = ALNDatabaseInspectorTrimmedString(row[@"schema"]);
+    NSString *table = ALNDatabaseInspectorTrimmedString(row[@"table"]);
+    NSString *column = ALNDatabaseInspectorTrimmedString(row[@"column"]);
+    NSString *comment = ALNDatabaseInspectorTrimmedString(row[@"comment"]);
+    if ([schema length] == 0 || [table length] == 0 || [column length] == 0) {
+      if (error != NULL) {
+        *error = ALNDatabaseInspectorMakeError(ALNDatabaseInspectorErrorInvalidResult,
+                                               @"column-comment inspection row is missing identifiers",
+                                               row);
+      }
+      return nil;
+    }
+    if ([comment length] == 0) {
+      continue;
+    }
+
+    [normalized addObject:@{
+      @"schema" : schema,
+      @"table" : table,
+      @"column" : column,
+      @"comment" : comment,
+    }];
+  }
+
+  [normalized sortUsingComparator:^NSComparisonResult(NSDictionary *left, NSDictionary *right) {
+    NSComparisonResult tableOrder = ALNDatabaseInspectorSchemaTableCompare(left, right);
+    if (tableOrder != NSOrderedSame) {
+      return tableOrder;
+    }
+    return [left[@"column"] compare:right[@"column"]];
+  }];
+  return [NSArray arrayWithArray:normalized];
+}
+
 @implementation ALNDatabaseInspector
 
 + (nullable NSArray<NSDictionary<NSString *, id> *> *)inspectSchemaColumnsForAdapter:(id<ALNDatabaseAdapter>)adapter
@@ -869,6 +1172,70 @@ static NSArray<NSDictionary<NSString *, id> *> *ALNPostgresInspectorNormalizedIn
        "  AND tbl.relkind IN ('r', 'm', 'v') "
        "ORDER BY ns.nspname, tbl.relname, idx.relname, cols.ordinality";
 
+  NSString *checkConstraintsSQL =
+      @"SELECT tc.table_schema AS schema, "
+       "       tc.table_name AS table, "
+       "       tc.constraint_name AS constraint_name, "
+       "       cc.check_clause AS check_clause "
+       "FROM information_schema.table_constraints tc "
+       "JOIN information_schema.check_constraints cc "
+       "  ON cc.constraint_schema = tc.constraint_schema "
+       " AND cc.constraint_name = tc.constraint_name "
+       "WHERE tc.constraint_type = 'CHECK' "
+       "  AND tc.table_schema NOT IN ('pg_catalog', 'information_schema') "
+       "ORDER BY tc.table_schema, tc.table_name, tc.constraint_name, cc.check_clause";
+
+  NSString *viewDefinitionsSQL =
+      @"SELECT table_schema AS schema, "
+       "       table_name AS table, "
+       "       'view' AS relation_kind, "
+       "       COALESCE(view_definition, '') AS definition "
+       "FROM information_schema.views "
+       "WHERE table_schema NOT IN ('pg_catalog', 'information_schema') "
+       "UNION ALL "
+       "SELECT schemaname AS schema, "
+       "       matviewname AS table, "
+       "       'materialized_view' AS relation_kind, "
+       "       COALESCE(definition, '') AS definition "
+       "FROM pg_catalog.pg_matviews "
+       "WHERE schemaname NOT IN ('pg_catalog', 'information_schema') "
+       "ORDER BY schema, table, relation_kind";
+
+  NSString *relationCommentsSQL =
+      @"SELECT n.nspname AS schema, "
+       "       c.relname AS table, "
+       "       d.description AS comment "
+       "FROM pg_catalog.pg_class c "
+       "JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace "
+       "JOIN pg_catalog.pg_description d "
+       "  ON d.objoid = c.oid "
+       " AND d.classoid = 'pg_class'::regclass "
+       " AND d.objsubid = 0 "
+       "WHERE c.relkind IN ('r', 'v', 'm') "
+       "  AND n.nspname NOT IN ('pg_catalog', 'information_schema') "
+       "  AND d.description IS NOT NULL "
+       "ORDER BY n.nspname, c.relname";
+
+  NSString *columnCommentsSQL =
+      @"SELECT n.nspname AS schema, "
+       "       c.relname AS table, "
+       "       a.attname AS column, "
+       "       d.description AS comment "
+       "FROM pg_catalog.pg_class c "
+       "JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace "
+       "JOIN pg_catalog.pg_attribute a "
+       "  ON a.attrelid = c.oid "
+       " AND a.attnum > 0 "
+       " AND NOT a.attisdropped "
+       "JOIN pg_catalog.pg_description d "
+       "  ON d.objoid = c.oid "
+       " AND d.classoid = 'pg_class'::regclass "
+       " AND d.objsubid = a.attnum "
+       "WHERE c.relkind IN ('r', 'v', 'm') "
+       "  AND n.nspname NOT IN ('pg_catalog', 'information_schema') "
+       "  AND d.description IS NOT NULL "
+       "ORDER BY n.nspname, c.relname, a.attnum, a.attname";
+
   NSError *queryError = nil;
   NSArray<NSDictionary *> *relationRows = [adapter executeQuery:relationsSQL parameters:@[] error:&queryError];
   if (relationRows == nil) {
@@ -931,6 +1298,50 @@ static NSArray<NSDictionary<NSString *, id> *> *ALNPostgresInspectorNormalizedIn
     return nil;
   }
 
+  NSArray<NSDictionary *> *checkConstraintRows =
+      [adapter executeQuery:checkConstraintsSQL parameters:@[] error:&queryError];
+  if (checkConstraintRows == nil) {
+    if (error != NULL) {
+      *error = queryError ?: ALNDatabaseInspectorMakeError(ALNDatabaseInspectorErrorInspectionFailed,
+                                                           @"check-constraint inspection query failed",
+                                                           nil);
+    }
+    return nil;
+  }
+
+  NSArray<NSDictionary *> *viewDefinitionRows =
+      [adapter executeQuery:viewDefinitionsSQL parameters:@[] error:&queryError];
+  if (viewDefinitionRows == nil) {
+    if (error != NULL) {
+      *error = queryError ?: ALNDatabaseInspectorMakeError(ALNDatabaseInspectorErrorInspectionFailed,
+                                                           @"view-definition inspection query failed",
+                                                           nil);
+    }
+    return nil;
+  }
+
+  NSArray<NSDictionary *> *relationCommentRows =
+      [adapter executeQuery:relationCommentsSQL parameters:@[] error:&queryError];
+  if (relationCommentRows == nil) {
+    if (error != NULL) {
+      *error = queryError ?: ALNDatabaseInspectorMakeError(ALNDatabaseInspectorErrorInspectionFailed,
+                                                           @"relation-comment inspection query failed",
+                                                           nil);
+    }
+    return nil;
+  }
+
+  NSArray<NSDictionary *> *columnCommentRows =
+      [adapter executeQuery:columnCommentsSQL parameters:@[] error:&queryError];
+  if (columnCommentRows == nil) {
+    if (error != NULL) {
+      *error = queryError ?: ALNDatabaseInspectorMakeError(ALNDatabaseInspectorErrorInspectionFailed,
+                                                           @"column-comment inspection query failed",
+                                                           nil);
+    }
+    return nil;
+  }
+
   NSError *normalizeError = nil;
   NSArray<NSDictionary<NSString *, id> *> *relations =
       ALNPostgresInspectorNormalizedRelationsFromInspectionRows(relationRows, &normalizeError);
@@ -968,6 +1379,15 @@ static NSArray<NSDictionary<NSString *, id> *> *ALNPostgresInspectorNormalizedIn
     return nil;
   }
 
+  NSArray<NSDictionary<NSString *, id> *> *schemas =
+      ALNPostgresInspectorNormalizedSchemasFromRelations(relations, &normalizeError);
+  if (schemas == nil) {
+    if (error != NULL) {
+      *error = normalizeError;
+    }
+    return nil;
+  }
+
   NSArray<NSDictionary<NSString *, id> *> *indexes =
       ALNPostgresInspectorNormalizedIndexesFromInspectionRows(indexRows, &normalizeError);
   if (indexes == nil) {
@@ -977,15 +1397,56 @@ static NSArray<NSDictionary<NSString *, id> *> *ALNPostgresInspectorNormalizedIn
     return nil;
   }
 
+  NSArray<NSDictionary<NSString *, id> *> *checkConstraints =
+      ALNPostgresInspectorNormalizedCheckConstraintsFromInspectionRows(checkConstraintRows, &normalizeError);
+  if (checkConstraints == nil) {
+    if (error != NULL) {
+      *error = normalizeError;
+    }
+    return nil;
+  }
+
+  NSArray<NSDictionary<NSString *, id> *> *viewDefinitions =
+      ALNPostgresInspectorNormalizedViewDefinitionsFromInspectionRows(viewDefinitionRows, &normalizeError);
+  if (viewDefinitions == nil) {
+    if (error != NULL) {
+      *error = normalizeError;
+    }
+    return nil;
+  }
+
+  NSArray<NSDictionary<NSString *, id> *> *relationComments =
+      ALNPostgresInspectorNormalizedRelationCommentsFromInspectionRows(relationCommentRows, &normalizeError);
+  if (relationComments == nil) {
+    if (error != NULL) {
+      *error = normalizeError;
+    }
+    return nil;
+  }
+
+  NSArray<NSDictionary<NSString *, id> *> *columnComments =
+      ALNPostgresInspectorNormalizedColumnCommentsFromInspectionRows(columnCommentRows, &normalizeError);
+  if (columnComments == nil) {
+    if (error != NULL) {
+      *error = normalizeError;
+    }
+    return nil;
+  }
+
   return @{
     @"reflection_contract_version" : @2,
     @"adapter" : @"postgresql",
+    @"schemas" : schemas ?: @[],
     @"relations" : relations ?: @[],
     @"columns" : columnRows ?: @[],
     @"primary_keys" : primaryKeys ?: @[],
     @"unique_constraints" : uniqueConstraints ?: @[],
     @"foreign_keys" : foreignKeys ?: @[],
     @"indexes" : indexes ?: @[],
+    @"check_constraints" : checkConstraints ?: @[],
+    @"view_definitions" : viewDefinitions ?: @[],
+    @"relation_comments" : relationComments ?: @[],
+    @"column_comments" : columnComments ?: @[],
   };
 }
 

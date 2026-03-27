@@ -1,6 +1,6 @@
 # Arlen Phase 20 Roadmap
 
-Status: Extended (`20A-20K` delivered on 2026-03-26; `20L-20R` planned)
+Status: Extended (`20A-20K` delivered on 2026-03-26; `20L-20O` delivered on 2026-03-27; `20P-20R` planned)
 Last updated: 2026-03-27
 
 Related docs:
@@ -186,21 +186,24 @@ does not include ORM features.
   - raised MSSQL to a clearer operational subset with checkout liveness checks,
     pooled rollback-on-release behavior, and phase20 confidence artifacts that
     show backend tiers directly
-- `20L`: pending
-  - tighten MSSQL bind/result transport so the documented common subset is less
-    text-only in practice
-  - prioritize explicit binary support and native-path handling where ODBC can
-    support it honestly
-- `20M`: pending
-  - preserve result column order in `ALNDatabaseRow` / `ALNDatabaseResult`
-  - improve projection semantics without replacing the dictionary-backed base
+- `20L`: complete on 2026-03-27
+  - tightened MSSQL bind/result transport around native ODBC scalar and binary
+    paths instead of relying entirely on text conversion
+  - added capability metadata and live-coverage hooks for the supported native
+    subset without inventing array semantics
+- `20M`: complete on 2026-03-27
+  - preserved query projection order in `ALNDatabaseResult` / `ALNDatabaseRow`
+    and added explicit ordered-index access without replacing the dictionary
     contract
-- `20N`: pending if broader cross-backend schema tooling becomes a product goal
-  - widen reflection only behind explicit scope, starting from concrete
-    tooling/reporting needs instead of chasing SQLAlchemy-style metadata breadth
-- `20O`: pending
-  - replace silent environment-dependent early returns with explicit test
-    requirement accounting for live PostgreSQL, MSSQL, driver, and runner
+  - kept backwards-compatible dictionary/scalar helpers intact for existing
+    callers
+- `20N`: complete on 2026-03-27 as bounded PostgreSQL-only metadata expansion
+  - widened inspector metadata additively for schemas, check constraints, view
+    definitions, and relation/column comments without claiming cross-backend
+    parity or widening schema-codegen promises
+- `20O`: complete on 2026-03-27
+  - replaced silent DSN-gated early returns in the Phase 20-sensitive Pg/MSSQL
+    live suites with explicit requirement logging for missing backend
     prerequisites
 - `20P`: pending
   - centralize repeated fixture, temp-dir, shell, and unique-name helpers and
@@ -214,24 +217,17 @@ does not include ORM features.
 
 ## 3.2 Recommended Rollout Order For Remaining Work
 
-The best rollout is to treat the new testing subphases as enabling work for the
-remaining implementation slices rather than as post-facto cleanup:
+With `20L-20O` landed, the remaining work is the test-infrastructure follow-on:
 
-1. `20O`: make backend/toolchain requirements explicit so local and CI runs stop
-   reporting false-green coverage when a DSN, driver, or capability is absent.
-2. `20P`: extract common test support and disposable backend harnesses before
-   adding more live coverage or more follow-on data-layer code.
-3. `20Q`: add reusable SQL/result assertions and unified backend conformance so
-   `20L` and `20M` land on stronger, shared regression surfaces.
-4. `20L`: tighten MSSQL native bind/result transport on top of the improved
-   harness and conformance layers.
-5. `20M`: change row-order/projection semantics only once assertion helpers can
-   verify ordered-column behavior directly.
-6. `20R`: decompose the remaining verification into focused lanes / bundles /
-   confidence paths so follow-on Phase 20 work no longer depends on broad suite
-   blast radius or the current stock `xctest` filtering limitations.
-7. `20N`: keep broader reflection explicitly conditional and out of the critical
-   path unless cross-backend tooling becomes a real product goal.
+1. `20P`: extract common test support and disposable backend harnesses so the
+   new explicit requirement layer does not remain duplicated inside large
+   Phase 20-sensitive suites.
+2. `20Q`: add reusable SQL/result assertions and unified backend conformance so
+   overlapping PostgreSQL/MSSQL claims move onto one stronger regression
+   surface.
+3. `20R`: decompose verification into focused lanes / bundles / confidence
+   paths so the remaining Phase 20 work no longer depends on the stock
+   `xctest` filter behavior.
 
 ## 4. Scope Guardrails
 
@@ -609,7 +605,7 @@ Acceptance (required):
 
 ## 5.12 Phase 20L: MSSQL Native Bind/Result Transport Tightening
 
-Status: planned
+Status: complete on 2026-03-27
 
 Deliverables:
 
@@ -634,7 +630,7 @@ Acceptance (required):
 
 ## 5.13 Phase 20M: Result Row Ordering + Projection Semantics
 
-Status: planned
+Status: complete on 2026-03-27
 
 Deliverables:
 
@@ -657,7 +653,7 @@ Acceptance (required):
 
 ## 5.14 Phase 20N: Optional Broader Reflection Depth for Cross-Backend Tooling
 
-Status: planned only if cross-backend schema tooling becomes a product goal
+Status: complete on 2026-03-27 as bounded PostgreSQL-only additive metadata
 
 Deliverables:
 
@@ -684,7 +680,7 @@ Acceptance (required):
 
 ## 5.15 Phase 20O: Explicit Test Requirements + Environment Accounting
 
-Status: planned
+Status: complete on 2026-03-27
 
 Deliverables:
 

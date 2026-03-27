@@ -4,6 +4,24 @@ Last updated: 2026-03-27
 
 ## Completed Today (2026-03-27)
 
+- Completed Phase `20L-20O`:
+  - tightened `ALNMSSQL` bind/result transport around native ODBC scalar and
+    binary paths, added capability metadata for native transport, and extended
+    the backend support fixture/confidence snapshot to record that subset
+  - preserved select-list order in `ALNDatabaseResult` / `ALNDatabaseRow` via
+    stable `columns` metadata plus `objectAtColumnIndex:` while keeping the
+    dictionary-backed contract intact
+  - widened PostgreSQL inspector metadata additively for `schemas`,
+    `check_constraints`, `view_definitions`, `relation_comments`, and
+    `column_comments` without widening schema-codegen into cross-backend
+    promises
+  - replaced silent DSN-gated early returns in the Phase 20-sensitive Pg/MSSQL
+    live suites with explicit requirement logging for missing backend
+    prerequisites
+  - verified the slice with `make build-tests` plus a broad unit-bundle run
+    that exercised `PgTests`, `Phase20DTests`, and `Phase17BTests`; the stock
+    `xctest` filter still ignored `-only-testing`, but the relevant suites
+    passed within that broader batch
 - Audited SQLAlchemy Core test-suite ideas against Arlen's current data-layer
   tests and extended the Phase 20 roadmap with a rollout that keeps Arlen on
   GNUmake + XCTest instead of chasing Python runner parity:
@@ -243,15 +261,14 @@ entries, not current plan-of-record items.
 - Phase 19: complete (`19A-19F` delivered on 2026-03-14 for incremental
   GNUmake/GNUstep build-graph narrowing, generated-template object reuse, and
   clearer `boomhauer` build scope/progress)
-- Phase 20: extended (`20A-20K` complete on 2026-03-26 for typed codecs/live
+- Phase 20: extended (`20A-20O` complete as of 2026-03-27 for typed codecs/live
   rows, recursive nested dialect compilation, result/savepoint ergonomics,
   reflection/codegen alignment, routing/pool hardening, relation-kind-safe
   reflection, richer type parity, inspector-v2 metadata, backend support
-  tiers, and MSSQL operational baseline hardening; `20L-20R` are planned for
-  MSSQL native transport tightening, result row-order semantics, explicit test
-  requirements/support/assertion rollout, focused confidence-lane
-  decomposition, and optional broader reflection if cross-backend tooling
-  becomes a goal)
+  tiers, MSSQL native transport tightening, ordered result semantics, bounded
+  PostgreSQL metadata expansion, and explicit live-test requirement accounting;
+  `20P-20R` remain planned for shared test support, SQL/result assertion
+  helpers, and focused confidence-lane decomposition)
 
 ## Completed Today (2026-03-26)
 

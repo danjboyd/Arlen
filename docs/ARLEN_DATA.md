@@ -416,6 +416,8 @@ New internal seams and defaults:
 
 - result/execution helpers now include:
   - `ALNDatabaseResult` / `ALNDatabaseRow`
+  - stable select-list column ordering through `ALNDatabaseResult.columns`,
+    `ALNDatabaseRow.columns`, and `ALNDatabaseRow.objectAtColumnIndex:`
   - `ALNDatabaseExecuteQueryResult`
   - `ALNDatabaseExecuteCommandBatch`
   - `ALNDatabaseWithSavepoint`
@@ -424,7 +426,9 @@ New internal seams and defaults:
   - normalized column fields:
     schema/table/column/ordinal/data type/nullability/PK/default-shape/relation kind/read-only
   - metadata surface:
-    relations / columns / primary keys / unique constraints / foreign keys / indexes
+    schemas / relations / columns / primary keys / unique constraints /
+    foreign keys / indexes / check constraints / view definitions /
+    relation comments / column comments
 - generated schema manifests now include:
   - `reflection_contract_version`
   - `relation_kind`
@@ -441,7 +445,10 @@ New internal seams and defaults:
   - bounded batch execution on one acquired connection
   - explicit savepoints with no-op release normalization for SQL Server
   - optional checkout liveness checks when ODBC transport is present
+  - native ODBC bind/fetch handling for the documented common scalar subset
+    plus `NSData` / binary payloads when transport support is present
   - support-tier metadata that makes the subset-vs-unavailable distinction explicit
+  - explicit fail-closed diagnostics for unsupported array-shaped parameters
 
 Focused examples:
 
@@ -461,8 +468,9 @@ NSDictionary *artifacts =
 NSError *error = nil;
 NSDictionary<NSString *, id> *metadata =
     [ALNDatabaseInspector inspectSchemaMetadataForAdapter:db error:&error];
+NSArray<NSDictionary<NSString *, id> *> *schemas = metadata[@"schemas"];
 NSArray<NSDictionary<NSString *, id> *> *relations = metadata[@"relations"];
-NSArray<NSDictionary<NSString *, id> *> *indexes = metadata[@"indexes"];
+NSArray<NSDictionary<NSString *, id> *> *checkConstraints = metadata[@"check_constraints"];
 ```
 
 ```objc
@@ -477,7 +485,9 @@ ALNDatabaseResult *result =
                                   @"SELECT COUNT(*) AS count FROM users WHERE status = $1",
                                   @[ @"active" ],
                                   &error);
+NSArray<NSString *> *projection = result.columns;
 NSNumber *count = [result scalarValueForColumn:@"count" error:&error];
+id firstValue = [[result first] objectAtColumnIndex:0];
 BOOL ok = ALNDatabaseWithSavepoint(connection, @"phase20_inner", ^BOOL(NSError **blockError) {
   return ([connection executeCommand:@"INSERT INTO users (name) VALUES ($1)"
                           parameters:@[ @"hank" ]

@@ -12,6 +12,8 @@
       "savepoint_release_mode": "no_op",
       "support_tier": "supported_subset",
       "supports_connection_liveness_checks": true,
+      "supports_native_binary_transport": true,
+      "supports_native_common_scalar_transport": true,
       "supports_result_wrappers": true,
       "supports_savepoints": true,
       "transport_available": true
@@ -20,6 +22,8 @@
       "adapter": "mssql",
       "support_tier": "unavailable_at_build_time",
       "supports_connection_liveness_checks": false,
+      "supports_native_binary_transport": false,
+      "supports_native_common_scalar_transport": false,
       "supports_result_wrappers": true,
       "supports_savepoints": false,
       "transport_available": false

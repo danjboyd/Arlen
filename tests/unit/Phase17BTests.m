@@ -1,6 +1,7 @@
 #import <Foundation/Foundation.h>
 #import <XCTest/XCTest.h>
 
+#import "../ALNTestRequirements.h"
 #import "ALNAdapterConformance.h"
 #import "ALNMSSQL.h"
 #import "ALNMSSQLDialect.h"
@@ -17,6 +18,28 @@
     return nil;
   }
   return [NSString stringWithUTF8String:value];
+}
+
+- (BOOL)requireMSSQLTransportForSelector:(SEL)selector {
+  NSDictionary *metadata = [ALNMSSQL capabilityMetadata];
+  return ALNTestRequireCondition([metadata[@"transport_available"] boolValue],
+                                 NSStringFromClass([self class]),
+                                 NSStringFromSelector(selector),
+                                 @"mssql_transport_available",
+                                 @"this build lacks ODBC transport support for live MSSQL coverage");
+}
+
+- (NSString *)requiredMSSQLTestDSNForSelector:(SEL)selector {
+  NSString *dsn = [self mssqlTestDSN];
+  if ([dsn length] > 0) {
+    return dsn;
+  }
+  ALNTestRequireCondition(NO,
+                          NSStringFromClass([self class]),
+                          NSStringFromSelector(selector),
+                          @"ARLEN_MSSQL_TEST_DSN",
+                          @"set ARLEN_MSSQL_TEST_DSN to run live MSSQL adapter coverage");
+  return nil;
 }
 
 - (NSString *)uniqueTempTableName {
@@ -127,6 +150,10 @@
   XCTAssertEqualObjects(@(NO), metadata[@"supports_upsert"]);
   XCTAssertEqualObjects(@(YES), metadata[@"supports_result_wrappers"]);
   XCTAssertEqualObjects([metadata[@"transport_available"] boolValue] ? @(YES) : @(NO),
+                        metadata[@"supports_native_common_scalar_transport"]);
+  XCTAssertEqualObjects([metadata[@"transport_available"] boolValue] ? @(YES) : @(NO),
+                        metadata[@"supports_native_binary_transport"]);
+  XCTAssertEqualObjects([metadata[@"transport_available"] boolValue] ? @(YES) : @(NO),
                         metadata[@"supports_connection_liveness_checks"]);
 
   NSError *error = nil;
@@ -152,8 +179,11 @@
 }
 
 - (void)testMSSQLAdapterConformanceSuiteRunsWhenExplicitTestDSNIsProvided {
-  NSString *dsn = [self mssqlTestDSN];
-  if ([dsn length] == 0) {
+  if (![self requireMSSQLTransportForSelector:_cmd]) {
+    return;
+  }
+  NSString *dsn = [self requiredMSSQLTestDSNForSelector:_cmd];
+  if (dsn == nil) {
     return;
   }
 
@@ -174,8 +204,11 @@
 }
 
 - (void)testMSSQLAdapterMaterializesTypedCommonScalarsWhenExplicitTestDSNIsProvided {
-  NSString *dsn = [self mssqlTestDSN];
-  if ([dsn length] == 0) {
+  if (![self requireMSSQLTransportForSelector:_cmd]) {
+    return;
+  }
+  NSString *dsn = [self requiredMSSQLTestDSNForSelector:_cmd];
+  if (dsn == nil) {
     return;
   }
 
@@ -190,6 +223,7 @@
   }
 
   NSUUID *actorID = [NSUUID UUID];
+  NSData *payload = [@"hi" dataUsingEncoding:NSUTF8StringEncoding];
   NSArray<NSDictionary *> *rows =
       [adapter executeQuery:@"SELECT CAST(42 AS INT) AS age, "
                              "CAST(1 AS BIT) AS is_active, "
@@ -197,8 +231,9 @@
                              "CAST('2026-03-26 12:34:56.123' AS DATETIME2) AS created_at, "
                              "CAST(? AS BIGINT) AS total, "
                              "CAST(? AS BIT) AS enabled, "
-                             "CAST(? AS UNIQUEIDENTIFIER) AS actor_id"
-                 parameters:@[ @7, @YES, actorID ]
+                             "CAST(? AS UNIQUEIDENTIFIER) AS actor_id, "
+                             "CAST(? AS VARBINARY(MAX)) AS payload"
+                 parameters:@[ @7, @YES, actorID, payload ]
                       error:&error];
   XCTAssertNil(error);
   XCTAssertEqual((NSUInteger)1, [rows count]);
@@ -213,11 +248,16 @@
   XCTAssertEqualObjects(@7, row[@"total"]);
   XCTAssertEqualObjects(@YES, row[@"enabled"]);
   XCTAssertEqualObjects([[actorID UUIDString] uppercaseString], [row[@"actor_id"] uppercaseString]);
+  XCTAssertTrue([row[@"payload"] isKindOfClass:[NSData class]]);
+  XCTAssertEqualObjects(payload, row[@"payload"]);
 }
 
 - (void)testMSSQLResultWrappersBatchExecutionAndSavepointsWhenExplicitTestDSNIsProvided {
-  NSString *dsn = [self mssqlTestDSN];
-  if ([dsn length] == 0) {
+  if (![self requireMSSQLTransportForSelector:_cmd]) {
+    return;
+  }
+  NSString *dsn = [self requiredMSSQLTestDSNForSelector:_cmd];
+  if (dsn == nil) {
     return;
   }
 
@@ -232,11 +272,18 @@
   }
 
   ALNDatabaseResult *result =
-      [adapter executeQueryResult:@"SELECT CAST(7 AS INT) AS total, CAST('hank' AS NVARCHAR(32)) AS name"
+      [adapter executeQueryResult:@"SELECT CAST(0x6869 AS VARBINARY(16)) AS payload, "
+                                  "CAST('hank' AS NVARCHAR(32)) AS name, "
+                                  "CAST(7 AS INT) AS total"
                        parameters:@[]
                             error:&error];
   XCTAssertNil(error);
   XCTAssertNotNil(result);
+  XCTAssertEqualObjects((@[ @"payload", @"name", @"total" ]), result.columns);
+  XCTAssertEqualObjects((@[ @"payload", @"name", @"total" ]), [[result first] columns]);
+  XCTAssertEqualObjects([@"hi" dataUsingEncoding:NSUTF8StringEncoding],
+                        [[result first] objectAtColumnIndex:0]);
+  XCTAssertEqualObjects(@"hank", [[result first] objectAtColumnIndex:1]);
   XCTAssertEqualObjects(@7, [result scalarValueForColumn:@"total" error:&error]);
   XCTAssertNil(error);
   XCTAssertEqualObjects(@"hank", [[result first] objectForColumn:@"name"]);

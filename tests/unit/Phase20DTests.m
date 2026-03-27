@@ -150,11 +150,23 @@
                                     : @[]];
   [adapter.queuedRowSets addObject:[fixture[@"foreign_key_rows"] isKindOfClass:[NSArray class]] ? fixture[@"foreign_key_rows"] : @[]];
   [adapter.queuedRowSets addObject:[fixture[@"index_rows"] isKindOfClass:[NSArray class]] ? fixture[@"index_rows"] : @[]];
+  [adapter.queuedRowSets addObject:[fixture[@"check_constraint_rows"] isKindOfClass:[NSArray class]]
+                                    ? fixture[@"check_constraint_rows"]
+                                    : @[]];
+  [adapter.queuedRowSets addObject:[fixture[@"view_definition_rows"] isKindOfClass:[NSArray class]]
+                                    ? fixture[@"view_definition_rows"]
+                                    : @[]];
+  [adapter.queuedRowSets addObject:[fixture[@"relation_comment_rows"] isKindOfClass:[NSArray class]]
+                                    ? fixture[@"relation_comment_rows"]
+                                    : @[]];
+  [adapter.queuedRowSets addObject:[fixture[@"column_comment_rows"] isKindOfClass:[NSArray class]]
+                                    ? fixture[@"column_comment_rows"]
+                                    : @[]];
 
   NSError *error = nil;
   NSDictionary *metadata = [ALNDatabaseInspector inspectSchemaMetadataForAdapter:adapter error:&error];
   XCTAssertNil(error);
-  XCTAssertEqual((NSInteger)6, adapter.queryCount);
+  XCTAssertEqual((NSInteger)10, adapter.queryCount);
   XCTAssertEqualObjects(expected, metadata);
 }
 

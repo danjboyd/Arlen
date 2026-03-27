@@ -239,6 +239,8 @@ static NSString *ALNMSSQLValidatedSavepointName(NSString *name, NSError **error)
     @"supports_result_wrappers" : @YES,
     @"supports_savepoints" : @NO,
     @"supports_savepoint_release" : @NO,
+    @"supports_native_common_scalar_transport" : @NO,
+    @"supports_native_binary_transport" : @NO,
     @"transport" : @"odbc",
     @"transport_available" : @NO,
   };
@@ -307,11 +309,11 @@ static NSString *ALNMSSQLValidatedSavepointName(NSString *name, NSError **error)
 - (ALNDatabaseResult *)executeQueryResult:(NSString *)sql
                                parameters:(NSArray *)parameters
                                     error:(NSError **)error {
-  NSArray<NSDictionary *> *rows = [self executeQuery:sql parameters:parameters error:error];
-  if (rows == nil) {
+  ALNMSSQLConnection *connection = [self acquireConnection:error];
+  if (connection == nil) {
     return nil;
   }
-  return ALNDatabaseResultFromRows(rows);
+  return [connection executeQueryResult:sql parameters:parameters error:error];
 }
 
 - (NSInteger)executeCommand:(NSString *)sql parameters:(NSArray *)parameters error:(NSError **)error {
@@ -590,6 +592,89 @@ static NSString *ALNMSSQLTimestampStringFromDate(NSDate *value) {
   return [formatter stringFromDate:value] ?: @"";
 }
 
+static BOOL ALNMSSQLTimestampStructFromDate(NSDate *value, SQL_TIMESTAMP_STRUCT *timestampOut) {
+  if (![value isKindOfClass:[NSDate class]] || timestampOut == NULL) {
+    return NO;
+  }
+  NSCalendar *calendar = [[NSCalendar alloc] initWithCalendarIdentifier:NSCalendarIdentifierGregorian];
+  calendar.timeZone = [NSTimeZone timeZoneForSecondsFromGMT:0];
+  NSDateComponents *components =
+      [calendar components:(NSCalendarUnitYear | NSCalendarUnitMonth | NSCalendarUnitDay |
+                            NSCalendarUnitHour | NSCalendarUnitMinute | NSCalendarUnitSecond)
+                  fromDate:value];
+  if (components == nil) {
+    return NO;
+  }
+
+  double secondsSince1970 = [value timeIntervalSince1970];
+  double integralSeconds = floor(secondsSince1970);
+  double fractionalSeconds = secondsSince1970 - integralSeconds;
+  if (fractionalSeconds < 0.0) {
+    fractionalSeconds += 1.0;
+  }
+
+  memset(timestampOut, 0, sizeof(SQL_TIMESTAMP_STRUCT));
+  timestampOut->year = (SQLSMALLINT)components.year;
+  timestampOut->month = (SQLUSMALLINT)components.month;
+  timestampOut->day = (SQLUSMALLINT)components.day;
+  timestampOut->hour = (SQLUSMALLINT)components.hour;
+  timestampOut->minute = (SQLUSMALLINT)components.minute;
+  timestampOut->second = (SQLUSMALLINT)components.second;
+  timestampOut->fraction = (SQLUINTEGER)llround(fractionalSeconds * 1000000000.0);
+  if (timestampOut->fraction >= 1000000000U) {
+    timestampOut->fraction = 999999999U;
+  }
+  return YES;
+}
+
+static NSDate *ALNMSSQLDateFromDateComponents(NSInteger year,
+                                              NSInteger month,
+                                              NSInteger day,
+                                              NSInteger hour,
+                                              NSInteger minute,
+                                              NSInteger second,
+                                              NSTimeInterval fractionalSeconds) {
+  NSCalendar *calendar = [[NSCalendar alloc] initWithCalendarIdentifier:NSCalendarIdentifierGregorian];
+  calendar.timeZone = [NSTimeZone timeZoneForSecondsFromGMT:0];
+
+  NSDateComponents *components = [[NSDateComponents alloc] init];
+  components.year = year;
+  components.month = month;
+  components.day = day;
+  components.hour = hour;
+  components.minute = minute;
+  components.second = second;
+
+  NSDate *date = [calendar dateFromComponents:components];
+  if (date == nil) {
+    return nil;
+  }
+  if (fractionalSeconds != 0.0) {
+    return [date dateByAddingTimeInterval:fractionalSeconds];
+  }
+  return date;
+}
+
+static NSDate *ALNMSSQLDateFromTimestampStructValue(SQL_TIMESTAMP_STRUCT timestamp) {
+  return ALNMSSQLDateFromDateComponents(timestamp.year,
+                                        timestamp.month,
+                                        timestamp.day,
+                                        timestamp.hour,
+                                        timestamp.minute,
+                                        timestamp.second,
+                                        ((NSTimeInterval)timestamp.fraction / 1000000000.0));
+}
+
+static NSDate *ALNMSSQLDateFromDateStructValue(SQL_DATE_STRUCT dateStruct) {
+  return ALNMSSQLDateFromDateComponents(dateStruct.year,
+                                        dateStruct.month,
+                                        dateStruct.day,
+                                        0,
+                                        0,
+                                        0,
+                                        0.0);
+}
+
 static NSString *ALNMSSQLJSONStringFromObject(id value, NSError **error) {
   NSData *jsonData = [ALNJSONSerialization dataWithJSONObject:value options:0 error:error];
   if (jsonData == nil) {
@@ -701,6 +786,242 @@ static NSString *ALNMSSQLTextParameterForValue(id value,
   return text;
 }
 
+static BOOL ALNMSSQLBindSpecificationForValue(id value,
+                                              NSMutableArray *buffers,
+                                              SQLSMALLINT *cTypeOut,
+                                              SQLSMALLINT *sqlTypeOut,
+                                              SQLULEN *columnSizeOut,
+                                              SQLSMALLINT *decimalDigitsOut,
+                                              SQLPOINTER *valuePointerOut,
+                                              SQLLEN *bufferLengthOut,
+                                              SQLLEN *indicatorOut,
+                                              NSError **error) {
+  if (cTypeOut != NULL) {
+    *cTypeOut = SQL_C_CHAR;
+  }
+  if (sqlTypeOut != NULL) {
+    *sqlTypeOut = SQL_VARCHAR;
+  }
+  if (columnSizeOut != NULL) {
+    *columnSizeOut = 1;
+  }
+  if (decimalDigitsOut != NULL) {
+    *decimalDigitsOut = 0;
+  }
+  if (valuePointerOut != NULL) {
+    *valuePointerOut = NULL;
+  }
+  if (bufferLengthOut != NULL) {
+    *bufferLengthOut = 0;
+  }
+  if (indicatorOut != NULL) {
+    *indicatorOut = SQL_NULL_DATA;
+  }
+  if (error != NULL) {
+    *error = nil;
+  }
+
+  if (value == nil || value == [NSNull null]) {
+    return YES;
+  }
+  if ([value isKindOfClass:[ALNDatabaseArrayValue class]]) {
+    if (error != NULL) {
+      *error = ALNMSSQLMakeError(ALNMSSQLErrorInvalidArgument,
+                                 @"failed binding MSSQL statement parameters",
+                                 @"MSSQL array parameters are not supported",
+                                 nil);
+    }
+    return NO;
+  }
+
+  if ([value isKindOfClass:[NSNumber class]]) {
+    if (ALNMSSQLNSNumberLooksBoolean((NSNumber *)value)) {
+      NSMutableData *buffer = [NSMutableData dataWithLength:sizeof(unsigned char)];
+      unsigned char raw = [((NSNumber *)value) boolValue] ? 1 : 0;
+      memcpy([buffer mutableBytes], &raw, sizeof(unsigned char));
+      [buffers addObject:buffer];
+      if (cTypeOut != NULL) {
+        *cTypeOut = SQL_C_BIT;
+      }
+      if (sqlTypeOut != NULL) {
+        *sqlTypeOut = SQL_BIT;
+      }
+      if (columnSizeOut != NULL) {
+        *columnSizeOut = 1;
+      }
+      if (valuePointerOut != NULL) {
+        *valuePointerOut = (SQLPOINTER)[buffer mutableBytes];
+      }
+      if (bufferLengthOut != NULL) {
+        *bufferLengthOut = (SQLLEN)sizeof(unsigned char);
+      }
+      if (indicatorOut != NULL) {
+        *indicatorOut = 0;
+      }
+      return YES;
+    }
+
+    if (![value isKindOfClass:[NSDecimalNumber class]] && !ALNMSSQLNSNumberLooksFloatingPoint((NSNumber *)value)) {
+      NSMutableData *buffer = [NSMutableData dataWithLength:sizeof(int64_t)];
+      int64_t raw = (int64_t)[(NSNumber *)value longLongValue];
+      memcpy([buffer mutableBytes], &raw, sizeof(int64_t));
+      [buffers addObject:buffer];
+      if (cTypeOut != NULL) {
+        *cTypeOut = SQL_C_SBIGINT;
+      }
+      if (sqlTypeOut != NULL) {
+        *sqlTypeOut = SQL_BIGINT;
+      }
+      if (columnSizeOut != NULL) {
+        *columnSizeOut = 19;
+      }
+      if (valuePointerOut != NULL) {
+        *valuePointerOut = (SQLPOINTER)[buffer mutableBytes];
+      }
+      if (bufferLengthOut != NULL) {
+        *bufferLengthOut = (SQLLEN)sizeof(int64_t);
+      }
+      if (indicatorOut != NULL) {
+        *indicatorOut = 0;
+      }
+      return YES;
+    }
+
+    if (ALNMSSQLNSNumberLooksFloatingPoint((NSNumber *)value)) {
+      NSMutableData *buffer = [NSMutableData dataWithLength:sizeof(double)];
+      double raw = [((NSNumber *)value) doubleValue];
+      memcpy([buffer mutableBytes], &raw, sizeof(double));
+      [buffers addObject:buffer];
+      if (cTypeOut != NULL) {
+        *cTypeOut = SQL_C_DOUBLE;
+      }
+      if (sqlTypeOut != NULL) {
+        *sqlTypeOut = SQL_DOUBLE;
+      }
+      if (columnSizeOut != NULL) {
+        *columnSizeOut = 15;
+      }
+      if (valuePointerOut != NULL) {
+        *valuePointerOut = (SQLPOINTER)[buffer mutableBytes];
+      }
+      if (bufferLengthOut != NULL) {
+        *bufferLengthOut = (SQLLEN)sizeof(double);
+      }
+      if (indicatorOut != NULL) {
+        *indicatorOut = 0;
+      }
+      return YES;
+    }
+  }
+
+  if ([value isKindOfClass:[NSDate class]]) {
+    NSMutableData *buffer = [NSMutableData dataWithLength:sizeof(SQL_TIMESTAMP_STRUCT)];
+    SQL_TIMESTAMP_STRUCT timestamp;
+    if (!ALNMSSQLTimestampStructFromDate((NSDate *)value, &timestamp)) {
+      if (error != NULL) {
+        *error = ALNMSSQLMakeError(ALNMSSQLErrorInvalidArgument,
+                                   @"failed binding MSSQL statement parameters",
+                                   @"NSDate parameter could not be converted to an ODBC timestamp",
+                                   nil);
+      }
+      return NO;
+    }
+    memcpy([buffer mutableBytes], &timestamp, sizeof(SQL_TIMESTAMP_STRUCT));
+    [buffers addObject:buffer];
+    if (cTypeOut != NULL) {
+      *cTypeOut = SQL_C_TYPE_TIMESTAMP;
+    }
+    if (sqlTypeOut != NULL) {
+      *sqlTypeOut = SQL_TYPE_TIMESTAMP;
+    }
+    if (columnSizeOut != NULL) {
+      *columnSizeOut = 23;
+    }
+    if (decimalDigitsOut != NULL) {
+      *decimalDigitsOut = 3;
+    }
+    if (valuePointerOut != NULL) {
+      *valuePointerOut = (SQLPOINTER)[buffer mutableBytes];
+    }
+    if (bufferLengthOut != NULL) {
+      *bufferLengthOut = (SQLLEN)sizeof(SQL_TIMESTAMP_STRUCT);
+    }
+    if (indicatorOut != NULL) {
+      *indicatorOut = (SQLLEN)sizeof(SQL_TIMESTAMP_STRUCT);
+    }
+    return YES;
+  }
+
+  if ([value isKindOfClass:[NSData class]]) {
+    NSData *input = (NSData *)value;
+    NSMutableData *buffer = [NSMutableData dataWithData:input ?: [NSData data]];
+    if ([buffer length] == 0) {
+      [buffer increaseLengthBy:1];
+    }
+    [buffers addObject:buffer];
+    if (cTypeOut != NULL) {
+      *cTypeOut = SQL_C_BINARY;
+    }
+    if (sqlTypeOut != NULL) {
+      *sqlTypeOut = ([input length] > 8000) ? SQL_LONGVARBINARY : SQL_VARBINARY;
+    }
+    if (columnSizeOut != NULL) {
+      *columnSizeOut = (SQLULEN)MAX((NSUInteger)1, [input length]);
+    }
+    if (valuePointerOut != NULL) {
+      *valuePointerOut = (SQLPOINTER)[buffer mutableBytes];
+    }
+    if (bufferLengthOut != NULL) {
+      *bufferLengthOut = (SQLLEN)[input length];
+    }
+    if (indicatorOut != NULL) {
+      *indicatorOut = (SQLLEN)[input length];
+    }
+    return YES;
+  }
+
+  SQLSMALLINT sqlType = SQL_VARCHAR;
+  SQLULEN columnSize = 1;
+  SQLSMALLINT decimalDigits = 0;
+  NSString *text = ALNMSSQLTextParameterForValue(value, &sqlType, &columnSize, &decimalDigits, error);
+  if (text == nil && value != nil && value != [NSNull null]) {
+    return NO;
+  }
+
+  if (cTypeOut != NULL) {
+    *cTypeOut = SQL_C_CHAR;
+  }
+  if (sqlTypeOut != NULL) {
+    *sqlTypeOut = sqlType;
+  }
+  if (columnSizeOut != NULL) {
+    *columnSizeOut = columnSize;
+  }
+  if (decimalDigitsOut != NULL) {
+    *decimalDigitsOut = decimalDigits;
+  }
+
+  if (text == nil) {
+    return YES;
+  }
+
+  NSMutableData *mutableData =
+      [NSMutableData dataWithData:[text dataUsingEncoding:NSUTF8StringEncoding] ?: [NSData data]];
+  const char terminator = '\0';
+  [mutableData appendBytes:&terminator length:1];
+  [buffers addObject:mutableData];
+  if (valuePointerOut != NULL) {
+    *valuePointerOut = (SQLPOINTER)[mutableData mutableBytes];
+  }
+  if (bufferLengthOut != NULL) {
+    *bufferLengthOut = (SQLLEN)[mutableData length];
+  }
+  if (indicatorOut != NULL) {
+    *indicatorOut = SQL_NTS;
+  }
+  return YES;
+}
+
 static BOOL ALNMSSQLPrepareStatement(SQLHDBC connection,
                                      NSString *sql,
                                      NSArray *parameters,
@@ -757,16 +1078,24 @@ static BOOL ALNMSSQLPrepareStatement(SQLHDBC connection,
 
   SQLLEN *indicatorValues = (SQLLEN *)[indicatorStorage mutableBytes];
   for (NSUInteger idx = 0; idx < [parameters count]; idx++) {
+    SQLSMALLINT cType = SQL_C_CHAR;
     SQLSMALLINT sqlType = SQL_VARCHAR;
     SQLULEN columnSize = 1;
     SQLSMALLINT decimalDigits = 0;
+    SQLPOINTER valuePointer = NULL;
+    SQLLEN bufferLength = 0;
+    SQLLEN indicator = SQL_NULL_DATA;
     NSError *parameterError = nil;
-    NSString *text = ALNMSSQLTextParameterForValue(parameters[idx],
-                                                   &sqlType,
-                                                   &columnSize,
-                                                   &decimalDigits,
-                                                   &parameterError);
-    if (parameterError != nil) {
+    if (!ALNMSSQLBindSpecificationForValue(parameters[idx],
+                                           buffers,
+                                           &cType,
+                                           &sqlType,
+                                           &columnSize,
+                                           &decimalDigits,
+                                           &valuePointer,
+                                           &bufferLength,
+                                           &indicator,
+                                           &parameterError)) {
       if (error != NULL) {
         NSString *detail = [NSString stringWithFormat:@"parameter %lu: %@",
                                                       (unsigned long)(idx + 1),
@@ -779,19 +1108,6 @@ static BOOL ALNMSSQLPrepareStatement(SQLHDBC connection,
       ALNSQLFreeHandle(SQL_HANDLE_STMT, statement);
       return NO;
     }
-    SQLLEN indicator = SQL_NULL_DATA;
-    SQLPOINTER valuePointer = NULL;
-    SQLLEN bufferLength = 0;
-    if ([text length] > 0) {
-      NSMutableData *mutableData =
-          [NSMutableData dataWithData:[text dataUsingEncoding:NSUTF8StringEncoding] ?: [NSData data]];
-      const char terminator = '\0';
-      [mutableData appendBytes:&terminator length:1];
-      [buffers addObject:mutableData];
-      indicator = SQL_NTS;
-      valuePointer = (SQLPOINTER)[[buffers lastObject] bytes];
-      bufferLength = (SQLLEN)[[buffers lastObject] length];
-    }
 
     indicatorValues[idx] = indicator;
     SQLLEN *indicatorPointer = &indicatorValues[idx];
@@ -799,7 +1115,7 @@ static BOOL ALNMSSQLPrepareStatement(SQLHDBC connection,
     rc = ALNSQLBindParameter(statement,
                              (SQLUSMALLINT)(idx + 1),
                              SQL_PARAM_INPUT,
-                             SQL_C_CHAR,
+                             cType,
                              sqlType,
                              columnSize,
                              decimalDigits,
@@ -909,9 +1225,20 @@ static BOOL ALNMSSQLColumnTypeIsFloat(SQLSMALLINT dataType) {
   return (dataType == SQL_REAL || dataType == SQL_FLOAT || dataType == SQL_DOUBLE);
 }
 
+static BOOL ALNMSSQLColumnTypeIsBinary(SQLSMALLINT dataType) {
+  return (dataType == SQL_BINARY || dataType == SQL_VARBINARY || dataType == SQL_LONGVARBINARY);
+}
+
+static BOOL ALNMSSQLColumnTypeIsDateOnly(SQLSMALLINT dataType) {
+  return (dataType == SQL_TYPE_DATE || dataType == SQL_DATE);
+}
+
+static BOOL ALNMSSQLColumnTypeIsTimestampLike(SQLSMALLINT dataType) {
+  return (dataType == SQL_TYPE_TIMESTAMP || dataType == SQL_TIMESTAMP);
+}
+
 static BOOL ALNMSSQLColumnTypeIsDateLike(SQLSMALLINT dataType) {
-  return (dataType == SQL_TYPE_DATE || dataType == SQL_DATE || dataType == SQL_TYPE_TIMESTAMP ||
-          dataType == SQL_TIMESTAMP);
+  return (ALNMSSQLColumnTypeIsDateOnly(dataType) || ALNMSSQLColumnTypeIsTimestampLike(dataType));
 }
 
 static id ALNMSSQLDecodedTextColumnValue(SQLSMALLINT dataType,
@@ -972,11 +1299,11 @@ static id ALNMSSQLDecodedTextColumnValue(SQLSMALLINT dataType,
   return value ?: @"";
 }
 
-static id ALNMSSQLFetchColumnValue(SQLHSTMT statement,
-                                   SQLUSMALLINT columnIndex,
-                                   SQLSMALLINT dataType,
-                                   NSString *columnName,
-                                   NSError **error) {
+static id ALNMSSQLFetchTextColumnValue(SQLHSTMT statement,
+                                       SQLUSMALLINT columnIndex,
+                                       SQLSMALLINT dataType,
+                                       NSString *columnName,
+                                       NSError **error) {
   NSMutableData *data = [NSMutableData data];
   SQLLEN indicator = 0;
   char buffer[4096];
@@ -1035,6 +1362,137 @@ static id ALNMSSQLFetchColumnValue(SQLHSTMT statement,
   return ALNMSSQLDecodedTextColumnValue(dataType, columnName, value, error);
 }
 
+static id ALNMSSQLFetchBinaryColumnValue(SQLHSTMT statement,
+                                         SQLUSMALLINT columnIndex,
+                                         NSString *columnName,
+                                         NSError **error) {
+  NSMutableData *data = [NSMutableData data];
+  SQLLEN indicator = 0;
+  unsigned char buffer[4096];
+  memset(buffer, 0, sizeof(buffer));
+  BOOL sawData = NO;
+
+  while (YES) {
+    SQLRETURN rc = ALNSQLGetData(statement,
+                                 columnIndex,
+                                 SQL_C_BINARY,
+                                 buffer,
+                                 (SQLLEN)sizeof(buffer),
+                                 &indicator);
+    if (rc == SQL_NO_DATA) {
+      break;
+    }
+    if (indicator == SQL_NULL_DATA) {
+      return [NSNull null];
+    }
+    if (!SQL_SUCCEEDED(rc) && rc != SQL_SUCCESS_WITH_INFO) {
+      if (error != NULL) {
+        *error = ALNMSSQLErrorForHandle(ALNMSSQLErrorQueryFailed,
+                                        @"failed fetching MSSQL result column",
+                                        SQL_HANDLE_STMT,
+                                        statement);
+      }
+      return nil;
+    }
+
+    sawData = YES;
+    NSUInteger bytesRead = 0;
+    if (rc == SQL_SUCCESS_WITH_INFO || indicator == SQL_NO_TOTAL || indicator > (SQLLEN)sizeof(buffer)) {
+      bytesRead = sizeof(buffer);
+    } else if (indicator >= 0) {
+      bytesRead = (NSUInteger)indicator;
+    }
+    if (bytesRead > 0) {
+      [data appendBytes:buffer length:bytesRead];
+    }
+    if (rc == SQL_SUCCESS) {
+      break;
+    }
+    memset(buffer, 0, sizeof(buffer));
+  }
+
+  if (!sawData) {
+    return [NSData data];
+  }
+  return [NSData dataWithData:data];
+}
+
+static id ALNMSSQLFetchNativeColumnValue(SQLHSTMT statement,
+                                         SQLUSMALLINT columnIndex,
+                                         SQLSMALLINT dataType,
+                                         NSString *columnName,
+                                         NSError **error) {
+  SQLLEN indicator = 0;
+  SQLRETURN rc = SQL_ERROR;
+
+  if (dataType == SQL_BIT) {
+    unsigned char value = 0;
+    rc = ALNSQLGetData(statement, columnIndex, SQL_C_BIT, &value, (SQLLEN)sizeof(value), &indicator);
+    if (indicator == SQL_NULL_DATA) {
+      return [NSNull null];
+    }
+    if (SQL_SUCCEEDED(rc)) {
+      return value ? @YES : @NO;
+    }
+  } else if (ALNMSSQLColumnTypeIsInteger(dataType)) {
+    int64_t value = 0;
+    rc = ALNSQLGetData(statement, columnIndex, SQL_C_SBIGINT, &value, (SQLLEN)sizeof(value), &indicator);
+    if (indicator == SQL_NULL_DATA) {
+      return [NSNull null];
+    }
+    if (SQL_SUCCEEDED(rc)) {
+      return @(value);
+    }
+  } else if (ALNMSSQLColumnTypeIsFloat(dataType)) {
+    double value = 0.0;
+    rc = ALNSQLGetData(statement, columnIndex, SQL_C_DOUBLE, &value, (SQLLEN)sizeof(value), &indicator);
+    if (indicator == SQL_NULL_DATA) {
+      return [NSNull null];
+    }
+    if (SQL_SUCCEEDED(rc)) {
+      return @(value);
+    }
+  } else if (ALNMSSQLColumnTypeIsDateOnly(dataType)) {
+    SQL_DATE_STRUCT value;
+    memset(&value, 0, sizeof(value));
+    rc = ALNSQLGetData(statement, columnIndex, SQL_C_TYPE_DATE, &value, (SQLLEN)sizeof(value), &indicator);
+    if (indicator == SQL_NULL_DATA) {
+      return [NSNull null];
+    }
+    if (SQL_SUCCEEDED(rc)) {
+      NSDate *date = ALNMSSQLDateFromDateStructValue(value);
+      if (date != nil) {
+        return date;
+      }
+    }
+  } else if (ALNMSSQLColumnTypeIsTimestampLike(dataType)) {
+    SQL_TIMESTAMP_STRUCT value;
+    memset(&value, 0, sizeof(value));
+    rc = ALNSQLGetData(statement, columnIndex, SQL_C_TYPE_TIMESTAMP, &value, (SQLLEN)sizeof(value), &indicator);
+    if (indicator == SQL_NULL_DATA) {
+      return [NSNull null];
+    }
+    if (SQL_SUCCEEDED(rc)) {
+      NSDate *date = ALNMSSQLDateFromTimestampStructValue(value);
+      if (date != nil) {
+        return date;
+      }
+    }
+  } else if (ALNMSSQLColumnTypeIsBinary(dataType)) {
+    return ALNMSSQLFetchBinaryColumnValue(statement, columnIndex, columnName, error);
+  }
+
+  return ALNMSSQLFetchTextColumnValue(statement, columnIndex, dataType, columnName, error);
+}
+
+static id ALNMSSQLFetchColumnValue(SQLHSTMT statement,
+                                   SQLUSMALLINT columnIndex,
+                                   SQLSMALLINT dataType,
+                                   NSString *columnName,
+                                   NSError **error) {
+  return ALNMSSQLFetchNativeColumnValue(statement, columnIndex, dataType, columnName, error);
+}
+
 @interface ALNMSSQLConnection ()
 
 @property(nonatomic, copy, readwrite) NSString *connectionString;
@@ -1044,6 +1502,9 @@ static id ALNMSSQLFetchColumnValue(SQLHSTMT statement,
 @property(nonatomic, assign) SQLHDBC connectionHandle;
 
 - (BOOL)checkConnectionLiveness:(NSError **)error;
+- (nullable ALNDatabaseResult *)databaseResultForSQL:(NSString *)sql
+                                          parameters:(NSArray *)parameters
+                                               error:(NSError **)error;
 
 @end
 
@@ -1310,11 +1771,7 @@ static id ALNMSSQLFetchColumnValue(SQLHSTMT statement,
 - (ALNDatabaseResult *)executeQueryResult:(NSString *)sql
                                parameters:(NSArray *)parameters
                                     error:(NSError **)error {
-  NSArray<NSDictionary *> *rows = [self executeQuery:sql parameters:parameters error:error];
-  if (rows == nil) {
-    return nil;
-  }
-  return ALNDatabaseResultFromRows(rows);
+  return [self databaseResultForSQL:sql parameters:parameters error:error];
 }
 
 - (NSInteger)executeCommand:(NSString *)sql parameters:(NSArray *)parameters error:(NSError **)error {
@@ -1357,6 +1814,125 @@ static id ALNMSSQLFetchColumnValue(SQLHSTMT statement,
 
   ALNSQLFreeHandle(SQL_HANDLE_STMT, statement);
   return (NSInteger)MAX((SQLLEN)0, affectedRows);
+}
+
+- (ALNDatabaseResult *)databaseResultForSQL:(NSString *)sql
+                                 parameters:(NSArray *)parameters
+                                      error:(NSError **)error {
+  if (![self isOpen]) {
+    if (error != NULL) {
+      *error = ALNMSSQLMakeError(ALNMSSQLErrorConnectionFailed,
+                                 @"MSSQL connection is not open",
+                                 nil,
+                                 nil);
+    }
+    return nil;
+  }
+
+  NSMutableArray *buffers = [NSMutableArray array];
+  NSMutableData *indicatorStorage =
+      [NSMutableData dataWithLength:MAX((NSUInteger)1, [parameters count]) * sizeof(SQLLEN)];
+  SQLHSTMT statement = SQL_NULL_HSTMT;
+  if (!ALNMSSQLPrepareStatement(_connectionHandle,
+                                sql ?: @"",
+                                parameters ?: @[],
+                                &statement,
+                                buffers,
+                                indicatorStorage,
+                                error)) {
+    return nil;
+  }
+
+  SQLSMALLINT columnCount = 0;
+  SQLRETURN rc = ALNSQLNumResultCols(statement, &columnCount);
+  if (!SQL_SUCCEEDED(rc)) {
+    if (error != NULL) {
+      *error = ALNMSSQLErrorForHandle(ALNMSSQLErrorQueryFailed,
+                                      @"failed reading MSSQL result column metadata",
+                                      SQL_HANDLE_STMT,
+                                      statement);
+    }
+    ALNSQLFreeHandle(SQL_HANDLE_STMT, statement);
+    return nil;
+  }
+  if (columnCount <= 0) {
+    ALNSQLFreeHandle(SQL_HANDLE_STMT, statement);
+    return ALNDatabaseResultFromRowsWithOrderedColumns(@[], @[], @[]);
+  }
+
+  NSMutableArray<NSString *> *columnNames = [NSMutableArray arrayWithCapacity:(NSUInteger)columnCount];
+  NSMutableArray<NSNumber *> *columnTypes = [NSMutableArray arrayWithCapacity:(NSUInteger)columnCount];
+  for (SQLUSMALLINT idx = 1; idx <= (SQLUSMALLINT)columnCount; idx++) {
+    SQLCHAR nameBuffer[256] = { 0 };
+    SQLSMALLINT nameLength = 0;
+    SQLSMALLINT dataType = 0;
+    SQLULEN columnSize = 0;
+    SQLSMALLINT decimalDigits = 0;
+    SQLSMALLINT nullable = 0;
+    rc = ALNSQLDescribeCol(statement,
+                           idx,
+                           nameBuffer,
+                           (SQLSMALLINT)(sizeof(nameBuffer) - 1),
+                           &nameLength,
+                           &dataType,
+                           &columnSize,
+                           &decimalDigits,
+                           &nullable);
+    if (!SQL_SUCCEEDED(rc)) {
+      if (error != NULL) {
+        *error = ALNMSSQLErrorForHandle(ALNMSSQLErrorQueryFailed,
+                                        @"failed describing MSSQL result columns",
+                                        SQL_HANDLE_STMT,
+                                        statement);
+      }
+      ALNSQLFreeHandle(SQL_HANDLE_STMT, statement);
+      return nil;
+    }
+    NSString *columnName = [NSString stringWithUTF8String:(const char *)nameBuffer] ?: @"";
+    [columnNames addObject:columnName];
+    [columnTypes addObject:@(dataType)];
+  }
+
+  NSMutableArray<NSDictionary *> *rows = [NSMutableArray array];
+  NSMutableArray<NSArray *> *orderedValues = [NSMutableArray array];
+  while ((rc = ALNSQLFetch(statement)) != SQL_NO_DATA) {
+    if (!SQL_SUCCEEDED(rc)) {
+      if (error != NULL) {
+        *error = ALNMSSQLErrorForHandle(ALNMSSQLErrorQueryFailed,
+                                        @"failed fetching MSSQL result rows",
+                                        SQL_HANDLE_STMT,
+                                        statement);
+      }
+      ALNSQLFreeHandle(SQL_HANDLE_STMT, statement);
+      return nil;
+    }
+
+    NSMutableDictionary *row = [NSMutableDictionary dictionaryWithCapacity:(NSUInteger)columnCount];
+    NSMutableArray *rowValues = [NSMutableArray arrayWithCapacity:(NSUInteger)columnCount];
+    for (SQLUSMALLINT idx = 1; idx <= (SQLUSMALLINT)columnCount; idx++) {
+      NSError *columnError = nil;
+      id value = ALNMSSQLFetchColumnValue(statement,
+                                          idx,
+                                          [columnTypes[(NSUInteger)(idx - 1)] shortValue],
+                                          columnNames[(NSUInteger)(idx - 1)],
+                                          &columnError);
+      if (value == nil && columnError != nil) {
+        if (error != NULL) {
+          *error = columnError;
+        }
+        ALNSQLFreeHandle(SQL_HANDLE_STMT, statement);
+        return nil;
+      }
+      id storedValue = value ?: (id)[NSNull null];
+      row[columnNames[(NSUInteger)(idx - 1)]] = storedValue;
+      [rowValues addObject:storedValue];
+    }
+    [rows addObject:[NSDictionary dictionaryWithDictionary:row]];
+    [orderedValues addObject:[NSArray arrayWithArray:rowValues]];
+  }
+
+  ALNSQLFreeHandle(SQL_HANDLE_STMT, statement);
+  return ALNDatabaseResultFromRowsWithOrderedColumns(rows, columnNames, orderedValues);
 }
 
 - (NSInteger)executeCommandBatch:(NSString *)sql
@@ -1645,6 +2221,8 @@ static id ALNMSSQLFetchColumnValue(SQLHSTMT statement,
     @"supports_result_wrappers" : @YES,
     @"supports_savepoints" : @YES,
     @"supports_savepoint_release" : @YES,
+    @"supports_native_common_scalar_transport" : @YES,
+    @"supports_native_binary_transport" : @YES,
     @"batch_execution_mode" : @"sequential_same_connection",
     @"savepoint_release_mode" : @"no_op",
     @"transport" : @"odbc",
@@ -1790,11 +2368,17 @@ static id ALNMSSQLFetchColumnValue(SQLHSTMT statement,
 - (ALNDatabaseResult *)executeQueryResult:(NSString *)sql
                                parameters:(NSArray *)parameters
                                     error:(NSError **)error {
-  NSArray<NSDictionary *> *rows = [self executeQuery:sql parameters:parameters error:error];
-  if (rows == nil) {
+  ALNMSSQLConnection *connection = [self acquireConnection:error];
+  if (connection == nil) {
     return nil;
   }
-  return ALNDatabaseResultFromRows(rows);
+  ALNDatabaseResult *result = nil;
+  @try {
+    result = [connection executeQueryResult:sql parameters:parameters ?: @[] error:error];
+  } @finally {
+    [self releaseConnection:connection];
+  }
+  return result;
 }
 
 - (NSInteger)executeCommand:(NSString *)sql parameters:(NSArray *)parameters error:(NSError **)error {
