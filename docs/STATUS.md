@@ -1,6 +1,42 @@
 # Arlen Status Checkpoint
 
-Last updated: 2026-03-27
+Last updated: 2026-03-30
+
+## Leaving Off (2026-03-30)
+
+- Phase 22 is complete:
+  - reran the live-backed integration suite against the local PostgreSQL
+    instance plus the local SQL Server 2022 Developer test container:
+    `source /usr/GNUstep/System/Library/Makefiles/GNUstep.sh && source /home/danboyd/.config/arlen/mssql-test.env && export ARLEN_PG_TEST_DSN='postgresql:///postgres' && make test-integration`
+  - reran `source /usr/GNUstep/System/Library/Makefiles/GNUstep.sh && make arlen build-tests`
+  - reran `bash tools/ci/run_docs_quality.sh`
+  - verified `git diff --check` stays clean
+  - updated `README.md`, `docs/README.md`, `docs/PHASE22_ROADMAP.md`, and
+    `docs/STATUS.md` so the summary surfaces now mark Phase 22 complete
+- No remaining open items from Phase 22. The next roadmap phase is not planned
+  in this checkpoint.
+
+## Completed Today (2026-03-30)
+
+- Completed Phase `22A-22G`:
+  - reworked newcomer entry surfaces in `README.md` and `docs/README.md`
+  - rewrote the main onboarding path around one generator-first flow in
+    `docs/GETTING_STARTED.md`, `docs/GETTING_STARTED_QUICKSTART.md`, and
+    `docs/FIRST_APP_GUIDE.md`
+  - added dedicated user-facing guides for app authoring, configuration, lite
+    mode, plugin/service generation, and frontend starters
+  - expanded `docs/MODULES.md` into a connected lifecycle guide
+  - tightened docs/code parity by exposing `module ... eject` in CLI help,
+    deduplicating generated API reference output, and fixing
+    `arlen generate endpoint` route wiring so it inserts the required
+    controller import
+  - landed docs navigation quality enforcement via
+    `tools/ci/check_docs_navigation.py`,
+    `tools/ci/run_docs_quality.sh`, and updated review policy in
+    `docs/DOCUMENTATION_POLICY.md`
+  - closed the phase with `make arlen build-tests`,
+    `bash tools/ci/run_docs_quality.sh`, and the live-backed
+    `make test-integration` rerun on 2026-03-30
 
 ## Leaving Off (2026-03-27 EOD)
 

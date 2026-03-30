@@ -67,11 +67,11 @@ local hosting.
 ## Contributor and Historical Docs
 
 - [Current Status](STATUS.md): latest checkpoint and verified milestone state.
-- [Session Handoff (2026-03-27)](SESSION_HANDOFF_2026-03-27.md): where the in-progress Phase 22 docs cleanup paused.
+- [Session Handoff (2026-03-27)](SESSION_HANDOFF_2026-03-27.md): historical pause point before the Phase 22 closeout.
 - [Documentation Policy](DOCUMENTATION_POLICY.md): docs standards and review checklist.
 - [Phase 20 Roadmap](PHASE20_ROADMAP.md): completed data-layer depth pass.
 - [Phase 21 Roadmap](PHASE21_ROADMAP.md): completed public-release test robustness pass.
-- [Phase 22 Roadmap](PHASE22_ROADMAP.md): in-progress documentation cleanup pass for newcomer-first onboarding and docs quality closeout.
+- [Phase 22 Roadmap](PHASE22_ROADMAP.md): completed documentation cleanup pass for newcomer-first onboarding and docs quality closeout.
 - [Combined Roadmap Index (Historical Aggregate)](PHASE2_PHASE3_ROADMAP.md)
 - [Phase 1 Spec](PHASE1_SPEC.md)
 - [Arlen CLI Spec](ARLEN_CLI_SPEC.md)

@@ -1,7 +1,7 @@
 # Arlen Phase 22 Roadmap
 
-Status: In progress (`22A-22F` drafted/implemented; `22G` closeout and final verification pending)
-Last updated: 2026-03-27
+Status: complete on 2026-03-30 (`22A-22G`)
+Last updated: 2026-03-30
 
 Related docs:
 - `README.md`
@@ -321,7 +321,7 @@ Acceptance (required):
 
 ## 5.7 Phase 22G: Docs Quality + Release Closeout
 
-Status: in progress
+Status: complete on 2026-03-30
 
 Checkpoint notes:
 
@@ -330,10 +330,13 @@ Checkpoint notes:
   CI.
 - Updated `docs/DOCUMENTATION_POLICY.md` so Phase 22 user-facing docs are part
   of the docs definition-of-done and review checklist.
-- `make arlen build-tests` and `bash tools/ci/run_docs_quality.sh` passed during
-  this checkpoint.
-- Remaining closeout work: finish the long `make test-integration` verification
-  run, then update summary surfaces from `in progress` to `complete`.
+- Final closeout verification completed on 2026-03-30 with:
+  - `source /usr/GNUstep/System/Library/Makefiles/GNUstep.sh && make arlen build-tests`
+  - `bash tools/ci/run_docs_quality.sh`
+  - `source /usr/GNUstep/System/Library/Makefiles/GNUstep.sh && source /home/danboyd/.config/arlen/mssql-test.env && export ARLEN_PG_TEST_DSN='postgresql:///postgres' && make test-integration`
+  - `git diff --check`
+- Updated `README.md`, `docs/README.md`, and `docs/STATUS.md` so the summary
+  surfaces now mark Phase 22 complete.
 
 Deliverables:
 
