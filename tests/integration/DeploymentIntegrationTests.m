@@ -797,6 +797,15 @@
     XCTAssertNil(readError);
     XCTAssertTrue([scaffoldLayout containsString:@"<%@ include \"partials/_nav\" %>"]);
     XCTAssertTrue([scaffoldLayout containsString:@"<%@ yield %>"]);
+
+    NSString *scaffoldNav =
+        [NSString stringWithContentsOfFile:[appRoot stringByAppendingPathComponent:@"templates/partials/_nav.html.eoc"]
+                                  encoding:NSUTF8StringEncoding
+                                     error:&readError];
+    XCTAssertNotNil(scaffoldNav);
+    XCTAssertNil(readError);
+    XCTAssertTrue([scaffoldNav containsString:@"<a href=\"/static/health.txt\">Health</a>"]);
+
     NSString *generateOutput =
         [self runShellCapture:[NSString stringWithFormat:@"cd %@ && ARLEN_FRAMEWORK_ROOT=%@ %@/build/arlen "
                                                       "generate endpoint AgentStatus --route /agent/status "
@@ -813,6 +822,13 @@
                                   : @[];
     XCTAssertTrue([generatedFiles containsObject:@"src/Controllers/AgentStatusController.h"]);
     XCTAssertTrue([generatedFiles containsObject:@"src/Controllers/AgentStatusController.m"]);
+    NSString *generatedController =
+        [NSString stringWithContentsOfFile:[appRoot stringByAppendingPathComponent:@"src/Controllers/AgentStatusController.m"]
+                                  encoding:NSUTF8StringEncoding
+                                     error:&readError];
+    XCTAssertNotNil(generatedController);
+    XCTAssertNil(readError);
+    XCTAssertTrue([generatedController containsString:@"#import \"ALNRequest.h\""]);
     NSArray *modifiedFiles = [generatePayload[@"modified_files"] isKindOfClass:[NSArray class]]
                                  ? generatePayload[@"modified_files"]
                                  : @[];
@@ -841,6 +857,14 @@
     XCTAssertNotNil(generatedTemplate);
     XCTAssertNil(readError);
     XCTAssertTrue([generatedTemplate containsString:@"<%@ layout \"layouts/main\" %>"]);
+
+    NSString *prepareOutput =
+        [self runShellCapture:[NSString stringWithFormat:
+                                            @"source /usr/GNUstep/System/Library/Makefiles/GNUstep.sh && "
+                                             "cd %@ && ARLEN_FRAMEWORK_ROOT=%@ %@/build/arlen boomhauer --prepare-only",
+                                            appRoot, repoRoot, repoRoot]
+                     exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", prepareOutput);
 
     NSString *invalidGenerateOutput =
         [self runShellCapture:[NSString stringWithFormat:@"cd %@ && ARLEN_FRAMEWORK_ROOT=%@ %@/build/arlen "

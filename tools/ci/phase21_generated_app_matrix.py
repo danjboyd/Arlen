@@ -61,7 +61,14 @@ def parse_json_output(output: str, context: str) -> Dict[str, Any]:
     stripped = output.strip()
     if not stripped:
         raise RuntimeError(f"{context} produced empty output")
-    payload = json.loads(stripped)
+    start = stripped.find("{")
+    if start == -1:
+        raise RuntimeError(f"{context} did not produce JSON output\n{output}")
+    decoder = json.JSONDecoder()
+    try:
+        payload, _end = decoder.raw_decode(stripped[start:])
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(f"{context} produced invalid JSON: {exc}\n{output}") from exc
     if not isinstance(payload, dict):
         raise RuntimeError(f"{context} did not produce a JSON object")
     return payload
@@ -174,8 +181,20 @@ def record_failure(record: Dict[str, Any], exc: Exception) -> None:
     record["error"] = str(exc)
 
 
-def scaffold_case(case: Dict[str, Any], repo_root: Path, work_root: Path, env: Dict[str, str]) -> Dict[str, Any]:
-    record: Dict[str, Any] = {"case_id": case["id"], "kind": case["kind"], "status": "pass", "error": ""}
+def scaffold_case(
+    case: Dict[str, Any],
+    repo_root: Path,
+    work_root: Path,
+    env: Dict[str, str],
+    case_output_dir: Path,
+) -> Dict[str, Any]:
+    record: Dict[str, Any] = {
+        "case_id": case["id"],
+        "kind": case["kind"],
+        "status": "pass",
+        "error": "",
+        "artifacts": [],
+    }
     app_name = str(case.get("appName", "Phase21App"))
     scaffold_mode = str(case.get("scaffoldMode", "full"))
     code, output = run_command(
@@ -278,12 +297,39 @@ def scaffold_case(case: Dict[str, Any], repo_root: Path, work_root: Path, env: D
     if check_payload.get("status") != "planned":
         raise RuntimeError("arlen check --dry-run did not produce a planned payload")
 
+    port = allocate_port()
+    write_app_config(app_root, env.get("ARLEN_PG_TEST_DSN", "").strip() or "postgresql:///postgres", port, None)
+    server = None
+    log_path = case_output_dir / "boomhauer.log"
+    root_status = 0
+    health_status = 0
+    try:
+        server = start_server(repo_root, app_root, port, env, log_path)
+        wait_for_server(port)
+
+        root_status, root_body = http_get(port, "/")
+        if root_status != 200:
+            raise RuntimeError(f"/ returned {root_status}")
+        if "/static/health.txt" not in root_body:
+            raise RuntimeError("scaffolded home page did not link to /static/health.txt")
+
+        health_status, health_body = http_get(port, "/static/health.txt")
+        if health_status != 200:
+            raise RuntimeError(f"/static/health.txt returned {health_status}")
+        if health_body.strip() != "ok":
+            raise RuntimeError(f"/static/health.txt returned unexpected body {health_body!r}")
+    finally:
+        stop_server(server)
+
     record["details"] = {
         "created_files": created_files,
         "generated_files": generated_files,
         "build_make_target": build_payload.get("make_target"),
         "check_make_target": check_payload.get("make_target"),
+        "home_status": root_status,
+        "health_status": health_status,
     }
+    record["artifacts"] = ["boomhauer.log"]
     return record
 
 
@@ -458,7 +504,7 @@ def main() -> int:
             try:
                 kind = str(case.get("kind", ""))
                 if kind == "scaffold_contracts":
-                    results.append(scaffold_case(case, repo_root, work_root, env))
+                    results.append(scaffold_case(case, repo_root, work_root, env, case_output_dir))
                 elif kind == "auth_ui_mode":
                     if not pg_dsn:
                         skipped += 1

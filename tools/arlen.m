@@ -644,7 +644,7 @@ static NSString *DefaultFullAppLayoutTemplate(void) {
 static NSString *DefaultFullAppNavPartialTemplate(void) {
   return @"<nav>\n"
           "  <a href=\"/\">Home</a>\n"
-          "  <a href=\"/health.txt\">Health</a>\n"
+          "  <a href=\"/static/health.txt\">Health</a>\n"
           "</nav>\n";
 }
 
@@ -1943,13 +1943,15 @@ static int CommandGenerate(NSArray *args) {
               actionName, controllerBase, actionName];
     }
 
+    NSString *requestImport = apiMode ? @"#import \"ALNRequest.h\"\n" : @"";
     NSString *impl = [NSString stringWithFormat:
                                    @"#import \"%@Controller.h\"\n"
-                                    "#import \"ALNContext.h\"\n\n"
+                                    "#import \"ALNContext.h\"\n"
+                                    "%@\n"
                                     "@implementation %@Controller\n\n"
                                     "%@\n"
                                     "@end\n",
-                                   controllerBase, controllerBase, actionBody];
+                                   controllerBase, requestImport, controllerBase, actionBody];
 
     ok = WriteTextFile(headerPath, header, NO, &error);
     if (ok) {
