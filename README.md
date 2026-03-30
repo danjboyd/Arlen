@@ -2,7 +2,12 @@
 
 Arlen is a GNUstep-native Objective-C web framework with an MVC runtime, EOC templates (`.html.eoc`), and a developer server (`boomhauer`).
 
-Arlen is designed to solve the same class of problems as frameworks like Mojolicious while staying idiomatic to Objective-C/GNUstep conventions.
+Arlen is designed to solve the same class of problems as frameworks like
+Mojolicious while staying idiomatic to Objective-C/GNUstep conventions. The
+project is still young, but the shipped surface is already broad: HTML-first
+and JSON-first app paths, OpenAPI output, first-party auth/admin/jobs/storage
+modules, WebSocket/SSE support, a PostgreSQL-first data layer, optional MSSQL,
+and a managed production runtime (`propane`).
 
 ## Start Here
 
@@ -31,7 +36,74 @@ cd MyApp
 
 Then open `http://127.0.0.1:3000/`.
 
+The default full scaffold gives you:
+
+- `src/main.m`
+- `src/Controllers/HomeController.{h,m}`
+- `templates/layouts/main.html.eoc`
+- `templates/index.html.eoc`
+- `config/app.plist`
+
+## Why Arlen
+
+Arlen is for teams that want a batteries-included web framework in
+Objective-C/GNUstep instead of a thin HTTP layer plus a long list of unrelated
+libraries. The goal is to let you scaffold a real app, serve HTML or JSON, add
+auth and operational surfaces, work against a serious data layer, and ship with
+one coherent toolchain.
+
+## Good Fit If
+
+- you want to stay native to Objective-C and GNUstep for web work
+- you want one framework for server-rendered HTML, JSON APIs, or mixed apps
+- you want built-in modules for auth, admin, jobs, notifications, storage, ops, and search
+- you want first-party tooling for OpenAPI, migrations, schema/SQL codegen, and production runtime management
+- you prefer explicit, deterministic behavior over heavy convention or hidden magic
+
+## Probably Not A Fit If
+
+- you need a large third-party ecosystem today
+- you need untrusted template execution or sandboxed template code; EOC templates are trusted code
+- you want a non-GNUstep stack or a generic GCC-oriented GNUstep setup
+- you want the smallest possible microframework and plan to assemble everything yourself
+
+## What Ships Today
+
+- `HTML-first and JSON-first paths`: EOC templates, layouts, partials, forms, controller rendering helpers, and API endpoints in the same app.
+- `API tooling`: OpenAPI generation, interactive docs, and JSON-first scaffolds.
+- `Auth and security`: sessions, CSRF, rate limiting, MFA, recovery codes, passkeys/WebAuthn, and OIDC/provider login.
+- `First-party modules`: `auth`, `admin-ui`, `jobs`, `notifications`, `storage`, `ops`, and `search`.
+- `Realtime`: WebSocket and SSE support.
+- `Data layer`: PostgreSQL-first migrations, schema codegen, typed SQL helpers, and optional MSSQL support.
+- `Runtime`: `boomhauer` for development and `propane` for production worker supervision, reloads, and cluster controls.
+- `Diagnostics and verification`: `arlen doctor`, build diagnostics, focused regression lanes, and live-backed integration coverage.
+
+## Features People Usually Do Not Expect Here
+
+- interactive OpenAPI explorer and generated API docs
+- passkey/WebAuthn MFA and OIDC login flows
+- built-in admin, ops, storage, notifications, jobs, and search surfaces
+- WebSocket/SSE support plus production runtime management with `propane`
+- typed schema and SQL code generation rather than only raw SQL strings
+
+## Quick Evaluation Path
+
+- `5 minutes`: run the quick start, then hit `/`, `/healthz`, and `/openapi`.
+- `15 minutes`: add a second endpoint with `arlen generate endpoint Hello --route /hello --method GET --template` and see how the controller/template flow feels.
+- `30 minutes`: try a first-party module such as `auth`, or open one of the example apps listed below.
+
+## Example Apps
+
+- [Basic App Smoke Guide](examples/basic_app/README.md): smallest app-owned smoke path.
+- [API-First Reference App](examples/api_reference/README.md): JSON/OpenAPI-heavy reference surface.
+- [Auth + Admin Demo](examples/auth_admin_demo/README.md): modules, auth, and admin composition.
+- [Phase 16 Modules Demo](examples/phase16_modules_demo/README.md): broader multi-module app surface.
+- [Tech Demo](examples/tech_demo/README.md): larger end-to-end example with Arlen UI/runtime features.
+
 ## Status
+
+For readers evaluating maturity: Arlen is young, but not minimal. The list
+below is the detailed milestone ledger for the shipped surface summarized above.
 
 - Phase 1: complete and working.
 - Phase 2A: complete (`propane` + runtime hardening).
@@ -76,7 +148,12 @@ Then open `http://127.0.0.1:3000/`.
 - Phase 21: complete (`21A-21G` delivered on 2026-03-27 for in-process request harnesses, shared request/pipeline assertion helpers, explicit async DB ownership rules, template-suite decomposition, raw protocol corpus replay, generated-app matrix coverage, and repo-native focused confidence lanes. See `docs/PHASE21_ROADMAP.md`).
 - Phase 22: complete (`22A-22G` delivered on 2026-03-30 for newcomer-first onboarding, docs/code parity hardening, app-author guides, module/lite-mode guidance, plugin/frontend guides, and docs quality closeout. See `docs/PHASE22_ROADMAP.md`).
 
-## More Setup Details
+## Requirements and Setup Details
+
+If you are evaluating Arlen rather than contributing to the framework itself,
+the quick start above plus the example apps and docs index are usually enough
+for a first pass. The rest of this section covers the more detailed local
+toolchain and quality-gate workflow.
 
 Prerequisites:
 - clang-built GNUstep toolchain installed
@@ -222,8 +299,19 @@ make deploy-smoke
 
 ## Documentation
 
-Start here:
-- [Docs Index](docs/README.md)
+Start with the [Docs Index](docs/README.md).
+
+Best next reads for evaluation:
+
+- [First App Guide](docs/FIRST_APP_GUIDE.md)
+- [Getting Started](docs/GETTING_STARTED.md)
+- [App Authoring Guide](docs/APP_AUTHORING_GUIDE.md)
+- [Modules](docs/MODULES.md)
+- [Auth Module](docs/AUTH_MODULE.md)
+- [Deployment Guide](docs/DEPLOYMENT.md)
+- [Toolchain Matrix](docs/TOOLCHAIN_MATRIX.md)
+- [Arlen for X Migration Guides](docs/ARLEN_FOR_X_INDEX.md)
+- [API Reference](docs/API_REFERENCE.md)
 
 Generate browser-friendly HTML docs:
 
@@ -235,91 +323,8 @@ make docs-serve
 
 Open `build/docs/index.html` in a browser.
 
-High-value guides:
-- [First App Guide](docs/FIRST_APP_GUIDE.md)
-- [Getting Started](docs/GETTING_STARTED.md)
-- [Getting Started Tracks](docs/GETTING_STARTED_TRACKS.md)
-- [API Reference](docs/API_REFERENCE.md)
-- [Arlen for X Migration Guides](docs/ARLEN_FOR_X_INDEX.md)
-- [Toolchain Matrix](docs/TOOLCHAIN_MATRIX.md)
-- [CLI Reference](docs/CLI_REFERENCE.md)
-- [Core Concepts](docs/CORE_CONCEPTS.md)
-- [Modules](docs/MODULES.md)
-- [Auth Module](docs/AUTH_MODULE.md)
-- [Auth UI Integration Modes](docs/AUTH_UI_INTEGRATION_MODES.md)
-- [Admin UI Module](docs/ADMIN_UI_MODULE.md)
-- [Jobs Module](docs/JOBS_MODULE.md)
-- [Notifications Module](docs/NOTIFICATIONS_MODULE.md)
-- [Storage Module](docs/STORAGE_MODULE.md)
-- [Ops Module](docs/OPS_MODULE.md)
-- [Search Module](docs/SEARCH_MODULE.md)
-- [Deployment Guide](docs/DEPLOYMENT.md)
-- [Systemd Runbook](docs/SYSTEMD_RUNBOOK.md)
-- [Password Hashing](docs/PASSWORD_HASHING.md)
-- [Realtime and Composition](docs/REALTIME_COMPOSITION.md)
-- [Ecosystem Services](docs/ECOSYSTEM_SERVICES.md)
-- [ArlenData Reuse Guide](docs/ARLEN_DATA.md)
-- [SQL Builder Conformance Matrix](docs/SQL_BUILDER_CONFORMANCE_MATRIX.md)
-- [Phase 5E Hardening + Confidence](docs/PHASE5E_HARDENING_CONFIDENCE.md)
-- [Phase 7A Runtime Hardening](docs/PHASE7A_RUNTIME_HARDENING.md)
-- [Phase 7B Security Defaults](docs/PHASE7B_SECURITY_DEFAULTS.md)
-- [Phase 7C Observability + Operability](docs/PHASE7C_OBSERVABILITY_OPERABILITY.md)
-- [Phase 7D Service Durability](docs/PHASE7D_SERVICE_DURABILITY.md)
-- [Phase 7E Template Pipeline Maturity](docs/PHASE7E_TEMPLATE_PIPELINE_MATURITY.md)
-- [Phase 7F Frontend Integration Starters](docs/PHASE7F_FRONTEND_STARTERS.md)
-- [Phase 7G Coding-Agent DX Contracts](docs/PHASE7G_CODING_AGENT_DX_CONTRACTS.md)
-- [Phase 7H Distributed Runtime Depth](docs/PHASE7H_DISTRIBUTED_RUNTIME_DEPTH.md)
-- [Template Troubleshooting](docs/TEMPLATE_TROUBLESHOOTING.md)
-- [SQL Builder Phase 4 Migration Guide](docs/SQL_BUILDER_PHASE4_MIGRATION.md)
-- [Propane Manager](docs/PROPANE.md)
-- [Sanitizer Suppression Policy](docs/SANITIZER_SUPPRESSION_POLICY.md)
-- [Phase 9I Fault Injection](docs/PHASE9I_FAULT_INJECTION.md)
-- [Phase 9J Release Certification](docs/PHASE9J_RELEASE_CERTIFICATION.md)
-- [Known Risk Register](docs/KNOWN_RISK_REGISTER.md)
-- [Release Notes](docs/RELEASE_NOTES.md)
-- [Release Process](docs/RELEASE_PROCESS.md)
-- [Performance Profiles](docs/PERFORMANCE_PROFILES.md)
-- [GSWeb Migration Guide](docs/MIGRATION_GSWEB.md)
-- [Arlen for Rails](docs/ARLEN_FOR_RAILS.md)
-- [Arlen for Django](docs/ARLEN_FOR_DJANGO.md)
-- [Arlen for Laravel](docs/ARLEN_FOR_LARAVEL.md)
-- [Arlen for FastAPI](docs/ARLEN_FOR_FASTAPI.md)
-- [Comparative Benchmarking](docs/COMPARATIVE_BENCHMARKING.md)
-- [Competitive Benchmark Roadmap (Historical In-Repo Track)](docs/COMPETITIVE_BENCHMARK_ROADMAP.md)
-- [Benchmark Handoff (Historical 2026-02-24 EOD)](docs/BENCHMARK_HANDOFF_2026-02-24.md)
-- [Phase B Parity Checklist (FastAPI)](docs/PHASEB_PARITY_CHECKLIST_FASTAPI.md)
-- [Phase C Benchmark Protocol](docs/PHASEC_BENCHMARK_PROTOCOL.md)
-- [Phase D Baseline Campaign](docs/PHASED_BASELINE_CAMPAIGN.md)
-- [Arlen for Express/NestJS](docs/ARLEN_FOR_EXPRESS_NESTJS.md)
-- [Arlen for Mojolicious](docs/ARLEN_FOR_MOJOLICIOUS.md)
-- [Documentation Policy](docs/DOCUMENTATION_POLICY.md)
-
-Specifications and roadmaps:
-- [Phase 1 Spec](docs/PHASE1_SPEC.md)
-- [Phase 2 Roadmap](docs/PHASE2_ROADMAP.md)
-- [Phase 3 Roadmap](docs/PHASE3_ROADMAP.md)
-- [Phase 4 Roadmap](docs/PHASE4_ROADMAP.md)
-- [Phase 5 Roadmap](docs/PHASE5_ROADMAP.md)
-- [Phase 7 Roadmap](docs/PHASE7_ROADMAP.md)
-- [Phase 8 Roadmap](docs/PHASE8_ROADMAP.md)
-- [Phase 9 Roadmap](docs/PHASE9_ROADMAP.md)
-- [Phase 10 Roadmap](docs/PHASE10_ROADMAP.md)
-- [Phase 11 Roadmap](docs/PHASE11_ROADMAP.md)
-- [Phase 12 Roadmap](docs/PHASE12_ROADMAP.md)
-- [Phase 13 Roadmap](docs/PHASE13_ROADMAP.md)
-- [Phase 14 Roadmap](docs/PHASE14_ROADMAP.md)
-- [Phase 15 Roadmap](docs/PHASE15_ROADMAP.md)
-- [Phase 16 Roadmap](docs/PHASE16_ROADMAP.md)
-- [Phase 17 Roadmap](docs/PHASE17_ROADMAP.md)
-- [Phase 20 Roadmap](docs/PHASE20_ROADMAP.md)
-- [Phase 21 Roadmap](docs/PHASE21_ROADMAP.md)
-- [Comparative Benchmarking](docs/COMPARATIVE_BENCHMARKING.md)
-- [Competitive Benchmark Roadmap](docs/COMPETITIVE_BENCHMARK_ROADMAP.md)
-- [Phase B Parity Checklist (FastAPI)](docs/PHASEB_PARITY_CHECKLIST_FASTAPI.md)
-- [Phase C Benchmark Protocol](docs/PHASEC_BENCHMARK_PROTOCOL.md)
-- [Phase D Baseline Campaign](docs/PHASED_BASELINE_CAMPAIGN.md)
-- [EOC v1 Spec](V1_SPEC.md)
-- [RFC: Keypath Locals + Transformers + Route Compile](docs/RFC_KEYPATH_TRANSFORMERS_ROUTE_COMPILE.md)
+For the broader guide set, examples, historical roadmap material, and specs,
+use [docs/README.md](docs/README.md) and [docs/STATUS.md](docs/STATUS.md).
 
 ## Naming
 
