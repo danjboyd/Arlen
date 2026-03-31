@@ -4,12 +4,19 @@ Last updated: 2026-03-31
 
 ## Leaving Off (2026-03-31)
 
-- Phase 23 is complete:
+- Phase 23 follow-on hardening is now the active roadmap work:
   - delivered `23A-23G` for the runtime-inactive Dataverse Web API client,
     OData query composition, CRUD/upsert/batch helpers, metadata
     normalization, typed Dataverse codegen, app/controller Dataverse helpers,
     shared retry/diagnostic contracts, focused confidence lanes, and
     docs/example closeout
+  - extended `docs/PHASE23_ROADMAP.md` with `23H-23I` to bring Arlen's
+    Dataverse test suite to at least the robustness level of
+    `../PerlDatabaseObjectModel` across OData semantics, datasource/write
+    regressions, characterization artifacts, parity accounting, and optional
+    live confidence coverage
+  - Phase 23 is not considered closed again until those new Dataverse
+    parity-hardening subphases are complete
   - added lazy named-target Dataverse helpers on `ALNApplication`,
     `ALNContext`, and `ALNController`
   - added `make phase23-dataverse-tests` and `make phase23-confidence`, with
@@ -510,12 +517,12 @@ entries, not current plan-of-record items.
 - Phase 22: complete (`22A-22G` delivered on 2026-03-30 for newcomer-first
   onboarding cleanup, docs/code parity hardening, app-author guides,
   module/lite-mode guidance, plugin/frontend guides, and docs quality closeout)
-- Phase 23: in progress (`23A-23D` delivered on 2026-03-31 for a
-- Phase 23: complete (`23A-23G` delivered on 2026-03-31 for the
+- Phase 23: active (`23A-23G` delivered on 2026-03-31 for the
   runtime-inactive Dataverse Web API client, OData query composition,
   CRUD/upsert/batch helpers, metadata normalization, typed Dataverse codegen,
   app/controller Dataverse helpers, focused confidence lanes, and docs/example
-  closeout)
+  closeout; `23H-23I` planned for Dataverse test-parity hardening against the
+  Perl reference suite)
 
 ## Completed Today (2026-03-26)
 

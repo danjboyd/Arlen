@@ -1,6 +1,6 @@
 # Arlen Phase 23 Roadmap
 
-Status: complete
+Status: Active (`23A-23G` delivered on 2026-03-31; `23H-23I` planned for Dataverse test-parity hardening)
 Last updated: 2026-03-31
 
 Related docs:
@@ -18,12 +18,16 @@ Related docs:
 Reference inputs reviewed for this roadmap:
 - `../PerlDatabaseObjectModel/Database/DataSource/Dataverse.pm`
 - `../PerlDatabaseObjectModel/OData/Abstract.pm`
+- `../PerlDatabaseObjectModel/OData/t/`
+- `../PerlDatabaseObjectModel/Dataverse/t/`
+- `../PerlDatabaseObjectModel/Database/DataSource/t/`
 - `https://learn.microsoft.com/en-us/power-apps/developer/data-platform/webapi/overview`
 - `https://learn.microsoft.com/en-us/power-apps/developer/data-platform/work-with-data`
 
 ## 0. Progress Checkpoint (2026-03-31)
 
-Phase 23 is complete.
+Phase 23 initial implementation is complete, but Dataverse test-parity
+hardening remains open.
 
 Delivered in-tree:
 
@@ -40,6 +44,12 @@ Delivered in-tree:
   `phase23-confidence`
 - `23G`: docs/example/reference closeout, updated status surfaces, and API-doc
   regeneration
+- Planned follow-on:
+  - `23H`: split and deepen the Dataverse regression matrix until it meets or
+    exceeds the Perl OData/Dataverse behavioral bar for Arlen's supported
+    surface
+  - `23I`: add characterization artifacts, coverage accounting, and richer
+    live confidence gates so that parity is demonstrated instead of implied
 
 ## 1. Objective
 
@@ -108,6 +118,10 @@ Phase 23 exists to introduce that separate but Arlen-native integration seam.
 5. Phase 23E: Arlen runtime/config ergonomics and example integration path.
 6. Phase 23F: reliability, diagnostics, and confidence lanes.
 7. Phase 23G: docs, reference updates, and release closeout.
+8. Phase 23H: Dataverse regression-matrix expansion and test-suite
+   decomposition.
+9. Phase 23I: characterization artifacts, parity accounting, and live
+   confidence expansion.
 
 ## 2.1 Recommended Rollout Order
 
@@ -118,6 +132,8 @@ Phase 23 exists to introduce that separate but Arlen-native integration seam.
 5. `23E`
 6. `23F`
 7. `23G`
+8. `23H`
+9. `23I`
 
 That order keeps the transport/auth baseline in place before Arlen commits to
 query composition, write semantics, codegen, and public docs/examples.
@@ -323,6 +339,84 @@ Acceptance (required):
 - Docs clearly separate shipped guarantees from deferred Dataverse depth.
 - The phase closes with docs, examples, and test coverage aligned.
 
+## 4.8 Phase 23H: Regression-Matrix Expansion + Dataverse Test Topology
+
+Deliverables:
+
+- Split the Dataverse unit surface into focused suites instead of one broad
+  file, expected to include areas such as:
+  - query/OData builder semantics
+  - read-path normalization and paging
+  - write/upsert/lookup/choice behavior
+  - metadata/codegen normalization
+  - runtime target/config wiring
+  - explicit regression cases
+- Add fixture-backed low-level OData coverage for the supported Arlen subset,
+  matching or exceeding the current Perl reference around:
+  - logical filter composition
+  - type-specific literal rendering/coercion
+  - null, `in`, and text-match semantics
+  - `$expand`, `$count`, and query-string serialization
+  - unsupported/error-path behavior
+- Add datasource-behavior regressions for Dataverse-specific transport and
+  payload rules, including:
+  - formatted values
+  - multi-page `@odata.nextLink` traversal
+  - count fallback behavior
+  - `Prefer` / max-page-size handling
+  - lookup-binding edge cases
+  - multi-choice empty-vs-omit semantics
+  - create/update response-shape contracts
+  - alternate-key edge cases
+  - token/transport/error bubbling
+- Add a checked-in gap matrix that maps the current Arlen Dataverse coverage to
+  the relevant Perl test families so new regressions are driven by known
+  coverage holes instead of ad hoc additions.
+
+Acceptance (required):
+
+- Arlen has explicit regression coverage for every shipped Dataverse behavior
+  that the Perl OData/Dataverse/datasource suites currently characterize for
+  the comparable feature surface.
+- The Dataverse test topology is decomposed enough that failures identify the
+  broken contract area without reading one monolithic test file.
+- New fixtures and regression cases are traceable to either a reported bug or
+  a documented parity gap against `../PerlDatabaseObjectModel`.
+
+## 4.9 Phase 23I: Characterization Artifacts + Parity Accounting + Live Confidence
+
+Deliverables:
+
+- Add Dataverse characterization fixtures/artifacts similar in spirit to the
+  Perl datasource characterization harnesses, covering:
+  - canonical request/response shapes
+  - normalized metadata/codegen outputs
+  - retry/throttle and error-surface contracts
+  - supported-environment config/target resolution behavior
+- Add a machine-readable Dataverse parity artifact that records:
+  - covered Perl-equivalent behavior families
+  - intentionally unsupported behaviors
+  - remaining open gaps
+- Extend `phase23-confidence` beyond codegen smoke so optional live validation
+  can exercise the supported slice for:
+  - authentication
+  - read + paging
+  - write/update/upsert
+  - count/formatted-values behavior
+  - metadata/codegen
+- Update Dataverse docs/testing workflow docs so contributors know how to turn
+  a new bug or Perl parity gap into a focused regression and confidence rerun.
+
+Acceptance (required):
+
+- Phase 23 artifacts make it obvious which Dataverse contracts are verified by
+  fixtures only and which are also exercised in live confidence lanes.
+- Any gap between Arlen and the Perl reference for the shipped Dataverse
+  surface is either closed or documented explicitly as an intentional Arlen
+  non-goal.
+- Phase 23 cannot be marked complete again until the Dataverse test suite is at
+  least as robust as the Perl reference for Arlen's supported feature slice.
+
 ## 5. Exit Criteria
 
 Phase 23 is complete when:
@@ -333,9 +427,12 @@ Phase 23 is complete when:
    callers to hand-assemble most Dataverse/OData details.
 3. Metadata inspection and deterministic typed helper generation exist for the
    supported v1 slice.
-4. Reliability, diagnostics, and confidence lanes are strong enough for real
+4. The Dataverse regression matrix, characterization artifacts, and confidence
+   lanes are at least as robust as the Perl Dataverse/OData reference for the
+   supported Arlen feature slice, with any intentional omissions documented.
+5. Reliability, diagnostics, and confidence lanes are strong enough for real
    early-adopter use.
-5. Public docs explain the Dataverse path clearly and truthfully.
+6. Public docs explain the Dataverse path clearly and truthfully.
 
 ## 6. Explicit Non-Goals
 
