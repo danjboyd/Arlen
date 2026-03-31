@@ -1,23 +1,44 @@
 #import "ALNHTTPServer.h"
 
-#import <arpa/inet.h>
 #import <errno.h>
 #import <fcntl.h>
 #import <limits.h>
-#import <netinet/in.h>
 #import <openssl/sha.h>
-#import <signal.h>
 #import <stdlib.h>
 #import <stdio.h>
 #import <string.h>
 #import <strings.h>
 #import <sys/stat.h>
+#include <signal.h>
+#import "ALNPlatform.h"
+
+#if defined(_WIN32)
+#include <io.h>
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#include <windows.h>
+#ifndef ssize_t
+typedef SSIZE_T ssize_t;
+#endif
+#ifndef SHUT_RDWR
+#define SHUT_RDWR SD_BOTH
+#endif
+#else
+#import <arpa/inet.h>
+#import <netinet/in.h>
+#import <signal.h>
 #import <sys/socket.h>
 #import <sys/uio.h>
-#import <sys/time.h>
 #import <unistd.h>
-#ifdef __linux__
+#endif
+#if defined(__linux__)
 #import <sys/sendfile.h>
+#endif
+#ifndef PATH_MAX
+#define PATH_MAX 4096
+#endif
+#if defined(_WIN32) && !defined(SIGTERM)
+#define SIGTERM SIGINT
 #endif
 
 #import "ALNApplication.h"
@@ -78,9 +99,308 @@ typedef struct {
 @implementation ALNStaticFileFDCacheEntry
 @end
 
+typedef intptr_t ALNSocketHandle;
+
+static const ALNSocketHandle ALNInvalidSocketHandle = (ALNSocketHandle)-1;
 static volatile sig_atomic_t gSignalStopRequested = 0;
 
 static void *ALNReallocWithFaults(void *pointer, size_t size);
+
+static NSNumber *ALNBoxSocketHandle(ALNSocketHandle handle) {
+  return @((long long)handle);
+}
+
+static ALNSocketHandle ALNSocketHandleFromNumber(NSNumber *value) {
+  if (![value respondsToSelector:@selector(longLongValue)]) {
+    return ALNInvalidSocketHandle;
+  }
+  return (ALNSocketHandle)[value longLongValue];
+}
+
+#if defined(_WIN32)
+struct iovec {
+  void *iov_base;
+  size_t iov_len;
+};
+
+static int ALNHTTPPlatformErrnoFromSocketError(int socketError) {
+  switch (socketError) {
+  case WSAEINTR:
+    return EINTR;
+  case WSAEWOULDBLOCK:
+    return EWOULDBLOCK;
+  case WSAEINVAL:
+    return EINVAL;
+  case WSAEMFILE:
+    return EMFILE;
+  case WSAENOBUFS:
+    return ENOBUFS;
+  case WSAENOMEM:
+    return ENOMEM;
+  case WSAEADDRINUSE:
+    return EADDRINUSE;
+  case WSAEADDRNOTAVAIL:
+    return EADDRNOTAVAIL;
+  case WSAECONNRESET:
+    return ECONNRESET;
+  case WSAETIMEDOUT:
+    return ETIMEDOUT;
+  case WSAENOTSOCK:
+    return ENOTSOCK;
+  default:
+    return EIO;
+  }
+}
+
+static SOCKET ALNNativeSocketHandle(ALNSocketHandle handle) {
+  return (handle == ALNInvalidSocketHandle) ? INVALID_SOCKET : (SOCKET)handle;
+}
+
+static ALNSocketHandle ALNSocketHandleFromNative(SOCKET handle) {
+  return (handle == INVALID_SOCKET) ? ALNInvalidSocketHandle : (ALNSocketHandle)handle;
+}
+
+static void ALNSyncErrnoFromWSA(void) {
+  errno = ALNHTTPPlatformErrnoFromSocketError(WSAGetLastError());
+}
+
+static BOOL ALNInitializeSocketLayer(void) {
+  static BOOL attempted = NO;
+  static BOOL initialized = NO;
+  @synchronized([ALNHTTPServer class]) {
+    if (!attempted) {
+      WSADATA socketData;
+      attempted = YES;
+      initialized = (WSAStartup(MAKEWORD(2, 2), &socketData) == 0);
+    }
+    return initialized;
+  }
+}
+
+static void ALNReportSocketError(const char *label) {
+  char *messageBuffer = NULL;
+  DWORD flags = FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM |
+                FORMAT_MESSAGE_IGNORE_INSERTS;
+  DWORD errorCode = (DWORD)WSAGetLastError();
+  DWORD length = FormatMessageA(flags,
+                                NULL,
+                                errorCode,
+                                0,
+                                (LPSTR)&messageBuffer,
+                                0,
+                                NULL);
+  if (length > 0 && messageBuffer != NULL) {
+    while (length > 0 &&
+           (messageBuffer[length - 1] == '\r' || messageBuffer[length - 1] == '\n')) {
+      messageBuffer[length - 1] = '\0';
+      length -= 1;
+    }
+    fprintf(stderr, "%s: %s\n", label, messageBuffer);
+    LocalFree(messageBuffer);
+    return;
+  }
+  fprintf(stderr, "%s: Winsock error %lu\n", label, (unsigned long)errorCode);
+}
+
+static BOOL WINAPI ALNConsoleControlHandler(DWORD controlType) {
+  switch (controlType) {
+  case CTRL_C_EVENT:
+  case CTRL_BREAK_EVENT:
+  case CTRL_CLOSE_EVENT:
+  case CTRL_SHUTDOWN_EVENT:
+    gSignalStopRequested = 1;
+    return TRUE;
+  default:
+    return FALSE;
+  }
+}
+
+static ALNSocketHandle ALNSocketOpen(int domain, int type, int protocol) {
+  SOCKET handle = socket(domain, type, protocol);
+  if (handle == INVALID_SOCKET) {
+    ALNSyncErrnoFromWSA();
+  }
+  return ALNSocketHandleFromNative(handle);
+}
+
+static int ALNSocketClose(ALNSocketHandle handle) {
+  if (handle == ALNInvalidSocketHandle) {
+    return 0;
+  }
+  int rc = closesocket(ALNNativeSocketHandle(handle));
+  if (rc != 0) {
+    ALNSyncErrnoFromWSA();
+  }
+  return rc;
+}
+
+static int ALNSocketShutdown(ALNSocketHandle handle) {
+  int rc = shutdown(ALNNativeSocketHandle(handle), SD_BOTH);
+  if (rc != 0) {
+    ALNSyncErrnoFromWSA();
+  }
+  return rc;
+}
+
+static int ALNSocketSetIntOption(ALNSocketHandle handle, int level, int optionName, int value) {
+  int rc = setsockopt(ALNNativeSocketHandle(handle),
+                      level,
+                      optionName,
+                      (const char *)&value,
+                      sizeof(value));
+  if (rc != 0) {
+    ALNSyncErrnoFromWSA();
+  }
+  return rc;
+}
+
+static int ALNSocketBind(ALNSocketHandle handle,
+                         const struct sockaddr *address,
+                         socklen_t addressLength) {
+  int rc = bind(ALNNativeSocketHandle(handle), address, addressLength);
+  if (rc != 0) {
+    ALNSyncErrnoFromWSA();
+  }
+  return rc;
+}
+
+static int ALNSocketListen(ALNSocketHandle handle, int backlog) {
+  int rc = listen(ALNNativeSocketHandle(handle), backlog);
+  if (rc != 0) {
+    ALNSyncErrnoFromWSA();
+  }
+  return rc;
+}
+
+static ALNSocketHandle ALNSocketAccept(ALNSocketHandle handle) {
+  SOCKET accepted = accept(ALNNativeSocketHandle(handle), NULL, NULL);
+  if (accepted == INVALID_SOCKET) {
+    ALNSyncErrnoFromWSA();
+  }
+  return ALNSocketHandleFromNative(accepted);
+}
+
+static ssize_t ALNSocketRecv(ALNSocketHandle handle, void *buffer, size_t length, int flags) {
+  int received = recv(ALNNativeSocketHandle(handle), (char *)buffer, (int)length, flags);
+  if (received == SOCKET_ERROR) {
+    ALNSyncErrnoFromWSA();
+    return -1;
+  }
+  return (ssize_t)received;
+}
+
+static ssize_t ALNSocketSend(ALNSocketHandle handle,
+                             const void *buffer,
+                             size_t length,
+                             int flags) {
+  int sent =
+      send(ALNNativeSocketHandle(handle), (const char *)buffer, (int)length, flags);
+  if (sent == SOCKET_ERROR) {
+    ALNSyncErrnoFromWSA();
+    return -1;
+  }
+  return (ssize_t)sent;
+}
+
+static int ALNSocketGetPeerName(ALNSocketHandle handle,
+                                struct sockaddr *address,
+                                socklen_t *addressLength) {
+  int nativeLength = (addressLength != NULL) ? (int)(*addressLength) : 0;
+  int rc = getpeername(ALNNativeSocketHandle(handle), address, &nativeLength);
+  if (addressLength != NULL) {
+    *addressLength = (socklen_t)nativeLength;
+  }
+  if (rc != 0) {
+    ALNSyncErrnoFromWSA();
+  }
+  return rc;
+}
+
+static int ALNInetPton(int family, const char *text, void *addressBuffer) {
+  int rc = InetPtonA(family, text, addressBuffer);
+  if (rc != 1) {
+    errno = (rc == 0) ? EINVAL : EIO;
+  }
+  return rc;
+}
+
+static const char *ALNInetNtop(int family,
+                               const void *addressBuffer,
+                               char *textBuffer,
+                               size_t textBufferLength) {
+  PCSTR result = InetNtopA(family, (PVOID)addressBuffer, textBuffer, (DWORD)textBufferLength);
+  if (result == NULL) {
+    ALNSyncErrnoFromWSA();
+  }
+  return result;
+}
+#else
+static BOOL ALNInitializeSocketLayer(void) {
+  return YES;
+}
+
+static void ALNReportSocketError(const char *label) {
+  perror(label);
+}
+
+static ALNSocketHandle ALNSocketOpen(int domain, int type, int protocol) {
+  return (ALNSocketHandle)socket(domain, type, protocol);
+}
+
+static int ALNSocketClose(ALNSocketHandle handle) {
+  return close((int)handle);
+}
+
+static int ALNSocketShutdown(ALNSocketHandle handle) {
+  return shutdown((int)handle, SHUT_RDWR);
+}
+
+static int ALNSocketSetIntOption(ALNSocketHandle handle, int level, int optionName, int value) {
+  return setsockopt((int)handle, level, optionName, &value, sizeof(value));
+}
+
+static int ALNSocketBind(ALNSocketHandle handle,
+                         const struct sockaddr *address,
+                         socklen_t addressLength) {
+  return bind((int)handle, address, addressLength);
+}
+
+static int ALNSocketListen(ALNSocketHandle handle, int backlog) {
+  return listen((int)handle, backlog);
+}
+
+static ALNSocketHandle ALNSocketAccept(ALNSocketHandle handle) {
+  return (ALNSocketHandle)accept((int)handle, NULL, NULL);
+}
+
+static ssize_t ALNSocketRecv(ALNSocketHandle handle, void *buffer, size_t length, int flags) {
+  return recv((int)handle, buffer, length, flags);
+}
+
+static ssize_t ALNSocketSend(ALNSocketHandle handle,
+                             const void *buffer,
+                             size_t length,
+                             int flags) {
+  return send((int)handle, buffer, length, flags);
+}
+
+static int ALNSocketGetPeerName(ALNSocketHandle handle,
+                                struct sockaddr *address,
+                                socklen_t *addressLength) {
+  return getpeername((int)handle, address, addressLength);
+}
+
+static int ALNInetPton(int family, const char *text, void *addressBuffer) {
+  return inet_pton(family, text, addressBuffer);
+}
+
+static const char *ALNInetNtop(int family,
+                               const void *addressBuffer,
+                               char *textBuffer,
+                               size_t textBufferLength) {
+  return inet_ntop(family, addressBuffer, textBuffer, textBufferLength);
+}
+#endif
 
 static void ALNHandleSignal(int sig) {
   (void)sig;
@@ -92,12 +412,17 @@ static BOOL ALNSignalStopRequested(void) {
 }
 
 static BOOL ALNInstallSignalHandler(int sig) {
+#if defined(_WIN32)
+  (void)sig;
+  return (SetConsoleCtrlHandler(ALNConsoleControlHandler, TRUE) != 0);
+#else
   struct sigaction action;
   memset(&action, 0, sizeof(action));
   action.sa_handler = ALNHandleSignal;
   sigemptyset(&action.sa_mask);
   action.sa_flags = 0;
   return (sigaction(sig, &action, NULL) == 0);
+#endif
 }
 
 static BOOL ALNConfigBool(NSDictionary *config, NSString *key, BOOL defaultValue) {
@@ -109,11 +434,7 @@ static BOOL ALNConfigBool(NSDictionary *config, NSString *key, BOOL defaultValue
 }
 
 static double ALNNowMilliseconds(void) {
-  struct timeval tv;
-  if (gettimeofday(&tv, NULL) != 0) {
-    return 0.0;
-  }
-  return ((double)tv.tv_sec * 1000.0) + ((double)tv.tv_usec / 1000.0);
+  return ALNPlatformNowMilliseconds();
 }
 
 static NSUInteger ALNConfigUInt(NSDictionary *dict, NSString *key, NSUInteger defaultValue) {
@@ -213,17 +534,31 @@ static NSArray *ALNWebSocketAllowedOriginsFromConfig(NSDictionary *config) {
              : @[];
 }
 
-static void ALNApplyClientSocketTimeout(int clientFd, NSUInteger timeoutSeconds) {
+static void ALNApplyClientSocketTimeout(ALNSocketHandle clientFd, NSUInteger timeoutSeconds) {
   if (timeoutSeconds == 0) {
     return;
   }
 
+#if defined(_WIN32)
+  DWORD timeoutMilliseconds = (DWORD)(timeoutSeconds * 1000U);
+  (void)setsockopt(ALNNativeSocketHandle(clientFd),
+                   SOL_SOCKET,
+                   SO_RCVTIMEO,
+                   (const char *)&timeoutMilliseconds,
+                   sizeof(timeoutMilliseconds));
+  (void)setsockopt(ALNNativeSocketHandle(clientFd),
+                   SOL_SOCKET,
+                   SO_SNDTIMEO,
+                   (const char *)&timeoutMilliseconds,
+                   sizeof(timeoutMilliseconds));
+#else
   struct timeval timeout;
   timeout.tv_sec = (time_t)timeoutSeconds;
   timeout.tv_usec = 0;
 
-  (void)setsockopt(clientFd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
-  (void)setsockopt(clientFd, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout));
+  (void)setsockopt((int)clientFd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
+  (void)setsockopt((int)clientFd, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout));
+#endif
 }
 
 static BOOL ALNIsWhitespaceByte(uint8_t value) {
@@ -794,30 +1129,33 @@ static BOOL ALNConsumeFaultOnce(const char *name) {
 }
 
 static void ALNTransientWriteBackoff(void) {
-  usleep(1000);
+  ALNPlatformSleepMilliseconds(1);
 }
 
-static ssize_t ALNRecvWithFaults(int fd, void *buffer, size_t length, int flags) {
+static ssize_t ALNRecvWithFaults(ALNSocketHandle fd, void *buffer, size_t length, int flags) {
   if (ALNConsumeFaultOnce("ARLEN_FAULT_RECV_EINTR_ONCE")) {
     errno = EINTR;
     return -1;
   }
-  return recv(fd, buffer, length, flags);
+  return ALNSocketRecv(fd, buffer, length, flags);
 }
 
-static ssize_t ALNSendWithFaults(int fd, const void *bytes, size_t length, int flags) {
+static ssize_t ALNSendWithFaults(ALNSocketHandle fd,
+                                 const void *bytes,
+                                 size_t length,
+                                 int flags) {
   if (ALNConsumeFaultOnce("ARLEN_FAULT_SEND_EINTR_ONCE")) {
     errno = EINTR;
     return -1;
   }
   if (ALNConsumeFaultOnce("ARLEN_FAULT_SEND_SHORT_ONCE") && bytes != NULL && length > 0) {
     size_t partial = (length > 1) ? 1 : length;
-    return send(fd, bytes, partial, flags);
+    return ALNSocketSend(fd, bytes, partial, flags);
   }
-  return send(fd, bytes, length, flags);
+  return ALNSocketSend(fd, bytes, length, flags);
 }
 
-static ssize_t ALNWritevWithFaults(int fd, const struct iovec *iov, int iovcnt) {
+static ssize_t ALNWritevWithFaults(ALNSocketHandle fd, const struct iovec *iov, int iovcnt) {
   if (ALNConsumeFaultOnce("ARLEN_FAULT_WRITEV_EINTR_ONCE")) {
     errno = EINTR;
     return -1;
@@ -826,12 +1164,20 @@ static ssize_t ALNWritevWithFaults(int fd, const struct iovec *iov, int iovcnt) 
     errno = EAGAIN;
     return -1;
   }
+#if defined(_WIN32)
+  (void)fd;
+  (void)iov;
+  (void)iovcnt;
+  errno = ENOTSUP;
+  return -1;
+#else
   if (ALNConsumeFaultOnce("ARLEN_FAULT_WRITEV_SHORT_ONCE") && iov != NULL && iovcnt > 0 &&
       iov[0].iov_base != NULL && iov[0].iov_len > 0) {
     size_t partial = (iov[0].iov_len > 1) ? 1 : iov[0].iov_len;
-    return write(fd, iov[0].iov_base, partial);
+    return write((int)fd, iov[0].iov_base, partial);
   }
-  return writev(fd, iov, iovcnt);
+  return writev((int)fd, iov, iovcnt);
+#endif
 }
 
 static void *ALNReallocWithFaults(void *pointer, size_t size) {
@@ -867,7 +1213,10 @@ static int ALNStatWithFaults(const char *path, struct stat *statBuffer) {
 }
 
 #ifdef __linux__
-static ssize_t ALNSendfileWithFaults(int outFd, int inFd, off_t *offset, size_t count) {
+static ssize_t ALNSendfileWithFaults(ALNSocketHandle outFd,
+                                     int inFd,
+                                     off_t *offset,
+                                     size_t count) {
   if (ALNConsumeFaultOnce("ARLEN_FAULT_SENDFILE_EINTR_ONCE")) {
     errno = EINTR;
     return -1;
@@ -880,7 +1229,7 @@ static ssize_t ALNSendfileWithFaults(int outFd, int inFd, off_t *offset, size_t 
     errno = EINVAL;
     return -1;
   }
-  return sendfile(outFd, inFd, offset, count);
+  return sendfile((int)outFd, inFd, offset, count);
 }
 #endif
 
@@ -926,7 +1275,7 @@ static int ALNStatWithRetry(const char *path, struct stat *statBuffer) {
   return -1;
 }
 
-static BOOL ALNSendAll(int fd, const void *bytes, size_t length) {
+static BOOL ALNSendAll(ALNSocketHandle fd, const void *bytes, size_t length) {
   const unsigned char *cursor = (const unsigned char *)bytes;
   size_t remaining = length;
   int transientRetries = 0;
@@ -953,7 +1302,7 @@ static BOOL ALNSendAll(int fd, const void *bytes, size_t length) {
   return YES;
 }
 
-static BOOL ALNWritevAll(int fd, const struct iovec *iov, int iovcnt) {
+static BOOL ALNWritevAll(ALNSocketHandle fd, const struct iovec *iov, int iovcnt) {
   if (iov == NULL || iovcnt <= 0) {
     return YES;
   }
@@ -1198,7 +1547,9 @@ static void ALNStaticFileFDCacheClear(void) {
   [gALNStaticFileFDCacheLock unlock];
 }
 
-static BOOL ALNSendFileReadFallback(int clientFd, int fileFd, unsigned long long remaining) {
+static BOOL ALNSendFileReadFallback(ALNSocketHandle clientFd,
+                                    int fileFd,
+                                    unsigned long long remaining) {
   if (remaining == 0) {
     return YES;
   }
@@ -1226,7 +1577,7 @@ static BOOL ALNSendFileReadFallback(int clientFd, int fileFd, unsigned long long
   return YES;
 }
 
-static BOOL ALNSendFileAtPath(int clientFd,
+static BOOL ALNSendFileAtPath(ALNSocketHandle clientFd,
                               NSString *path,
                               unsigned long long byteLength,
                               unsigned long long device,
@@ -1298,7 +1649,10 @@ cleanup:
   return ok;
 }
 
-static BOOL ALNRecvAll(int fd, void *buffer, size_t length, NSUInteger timeoutMilliseconds) {
+static BOOL ALNRecvAll(ALNSocketHandle fd,
+                       void *buffer,
+                       size_t length,
+                       NSUInteger timeoutMilliseconds) {
   unsigned char *cursor = (unsigned char *)buffer;
   size_t remaining = length;
   NSUInteger effectiveTimeoutMilliseconds = (timeoutMilliseconds > 0) ? timeoutMilliseconds : 5000;
@@ -1360,12 +1714,12 @@ static NSData *ALNWebSocketFrameData(uint8_t opcode, NSData *payload) {
   return frame;
 }
 
-static BOOL ALNWebSocketSendFrame(int fd, uint8_t opcode, NSData *payload) {
+static BOOL ALNWebSocketSendFrame(ALNSocketHandle fd, uint8_t opcode, NSData *payload) {
   NSData *frame = ALNWebSocketFrameData(opcode, payload ?: [NSData data]);
   return ALNSendAll(fd, [frame bytes], [frame length]);
 }
 
-static BOOL ALNWebSocketReadFrame(int fd,
+static BOOL ALNWebSocketReadFrame(ALNSocketHandle fd,
                                   uint8_t *opcode,
                                   BOOL *fin,
                                   NSData **payload,
@@ -1436,7 +1790,7 @@ static BOOL ALNWebSocketReadFrame(int fd,
   return YES;
 }
 
-static NSData *ALNReadHTTPRequestDataLegacy(int clientFd,
+static NSData *ALNReadHTTPRequestDataLegacy(ALNSocketHandle clientFd,
                                             ALNRequestLimits limits,
                                             NSInteger *statusCode,
                                             ALNConnectionReadState *readState) {
@@ -1544,7 +1898,7 @@ static NSData *ALNReadHTTPRequestDataLegacy(int clientFd,
   }
 }
 
-static ALNRequest *ALNReadHTTPRequestLLHTTP(int clientFd,
+static ALNRequest *ALNReadHTTPRequestLLHTTP(ALNSocketHandle clientFd,
                                             ALNRequestLimits limits,
                                             NSInteger *statusCode,
                                             ALNConnectionReadState *readState) {
@@ -1690,7 +2044,7 @@ static ALNRequest *ALNReadHTTPRequestLLHTTP(int clientFd,
   }
 }
 
-static ALNRequest *ALNReadHTTPRequest(int clientFd,
+static ALNRequest *ALNReadHTTPRequest(ALNSocketHandle clientFd,
                                       ALNRequestLimits limits,
                                       ALNHTTPParserBackend backend,
                                       NSInteger *statusCode,
@@ -1724,16 +2078,17 @@ static ALNRequest *ALNReadHTTPRequest(int clientFd,
   return request;
 }
 
-static NSString *ALNRemoteAddressForClient(int clientFd) {
+static NSString *ALNRemoteAddressForClient(ALNSocketHandle clientFd) {
   struct sockaddr_in peer;
   socklen_t peerLen = sizeof(peer);
   memset(&peer, 0, sizeof(peer));
-  if (getpeername(clientFd, (struct sockaddr *)&peer, &peerLen) != 0) {
+  if (ALNSocketGetPeerName(clientFd, (struct sockaddr *)&peer, &peerLen) != 0) {
     return @"";
   }
 
   char addressBuffer[INET_ADDRSTRLEN];
-  const char *ok = inet_ntop(AF_INET, &peer.sin_addr, addressBuffer, sizeof(addressBuffer));
+  const char *ok =
+      ALNInetNtop(AF_INET, &peer.sin_addr, addressBuffer, sizeof(addressBuffer));
   if (ok == NULL) {
     return @"";
   }
@@ -1760,7 +2115,7 @@ static BOOL ALNParseIPv4HostAddress(NSString *value, uint32_t *hostAddressOut) {
     return NO;
   }
   struct in_addr address;
-  if (inet_pton(AF_INET, [value UTF8String], &address) != 1) {
+  if (ALNInetPton(AF_INET, [value UTF8String], &address) != 1) {
     return NO;
   }
   if (hostAddressOut != NULL) {
@@ -1969,7 +2324,7 @@ static NSString *ALNResolvedStaticDirectory(NSString *directory, NSString *publi
     return nil;
   }
 
-  if ([trimmed hasPrefix:@"/"]) {
+  if (ALNPlatformPathIsAbsolute(trimmed)) {
     return [trimmed stringByStandardizingPath];
   }
   NSString *base = [[publicRoot stringByDeletingLastPathComponent] stringByStandardizingPath];
@@ -1980,6 +2335,7 @@ static NSString *ALNCanonicalStaticPath(NSString *path) {
   if (![path isKindOfClass:[NSString class]] || [path length] == 0) {
     return nil;
   }
+#if !defined(_WIN32)
   char resolvedPath[PATH_MAX];
   const char *filesystemPath = [path fileSystemRepresentation];
   if (filesystemPath != NULL && realpath(filesystemPath, resolvedPath) != NULL) {
@@ -1989,6 +2345,7 @@ static NSString *ALNCanonicalStaticPath(NSString *path) {
     canonical = [canonical stringByStandardizingPath];
     return ([canonical length] > 0) ? canonical : nil;
   }
+#endif
   NSString *canonical = [[path stringByResolvingSymlinksInPath] stringByStandardizingPath];
   return ([canonical length] > 0) ? canonical : nil;
 }
@@ -1997,12 +2354,21 @@ static BOOL ALNStaticPathIsSymbolicLink(NSString *path) {
   if (![path isKindOfClass:[NSString class]] || [path length] == 0) {
     return NO;
   }
+#if defined(_WIN32)
+  NSDictionary *attributes =
+      [[NSFileManager defaultManager] attributesOfItemAtPath:path error:NULL];
+  NSString *fileType = [attributes[NSFileType] isKindOfClass:[NSString class]]
+                           ? attributes[NSFileType]
+                           : @"";
+  return [fileType isEqualToString:NSFileTypeSymbolicLink];
+#else
   struct stat info;
   const char *filesystemPath = [path fileSystemRepresentation];
   if (filesystemPath == NULL || lstat(filesystemPath, &info) != 0) {
     return NO;
   }
   return S_ISLNK(info.st_mode);
+#endif
 }
 
 static BOOL ALNStaticCandidateWithinRoot(NSString *candidate, NSString *root) {
@@ -2235,7 +2601,7 @@ static void ALNEnsurePerformanceHeaders(ALNResponse *response,
   }
 }
 
-static void ALNSendFallbackInternalServerError(int clientFd) {
+static void ALNSendFallbackInternalServerError(ALNSocketHandle clientFd) {
   static const char *response =
       "HTTP/1.1 500 Internal Server Error\r\n"
       "Content-Type: text/plain; charset=utf-8\r\n"
@@ -2246,7 +2612,9 @@ static void ALNSendFallbackInternalServerError(int clientFd) {
   (void)ALNSendAll(clientFd, response, strlen(response));
 }
 
-static double ALNSendResponse(int clientFd, ALNResponse *response, BOOL performanceLogging) {
+static double ALNSendResponse(ALNSocketHandle clientFd,
+                              ALNResponse *response,
+                              BOOL performanceLogging) {
   double serializeStart = ALNNowMilliseconds();
   NSData *headerData = [response serializedHeaderData];
   double serializeMs = ALNNowMilliseconds() - serializeStart;
@@ -2331,11 +2699,11 @@ static NSString *ALNRealtimeBackpressureReasonForSubscriptionRejection(NSString 
 
 @interface ALNWebSocketClientSession : NSObject <ALNRealtimeSubscriber>
 
-@property(nonatomic, assign, readonly) int clientFd;
+@property(nonatomic, assign, readonly) ALNSocketHandle clientFd;
 @property(nonatomic, strong, readonly) NSLock *sendLock;
 @property(nonatomic, assign) BOOL closed;
 
-- (instancetype)initWithClientFd:(int)clientFd;
+- (instancetype)initWithClientFd:(ALNSocketHandle)clientFd;
 - (BOOL)sendTextMessage:(NSString *)message;
 - (BOOL)sendBinaryPayload:(NSData *)payload opcode:(uint8_t)opcode;
 - (void)sendCloseFrame;
@@ -2345,7 +2713,7 @@ static NSString *ALNRealtimeBackpressureReasonForSubscriptionRejection(NSString 
 
 @implementation ALNWebSocketClientSession
 
-- (instancetype)initWithClientFd:(int)clientFd {
+- (instancetype)initWithClientFd:(ALNSocketHandle)clientFd {
   self = [super init];
   if (self) {
     _clientFd = clientFd;
@@ -2413,7 +2781,7 @@ static NSString *ALNRealtimeBackpressureReasonForSubscriptionRejection(NSString 
 @property(nonatomic, strong) NSMutableArray *pendingHTTPClientFDs;
 @property(nonatomic, assign) NSUInteger pendingHTTPClientFDHeadIndex;
 @property(nonatomic, assign) BOOL httpWorkerPoolStarted;
-@property(atomic, assign) int serverSocketFD;
+@property(atomic, assign) ALNSocketHandle serverSocketFD;
 @property(nonatomic, strong) NSLock *staticMountCacheLock;
 @property(nonatomic, copy) NSArray *cachedStaticMounts;
 @property(nonatomic, copy) NSArray *webSocketAllowedOrigins;
@@ -2444,7 +2812,7 @@ static NSString *ALNRealtimeBackpressureReasonForSubscriptionRejection(NSString 
     _pendingHTTPClientFDs = [NSMutableArray array];
     _pendingHTTPClientFDHeadIndex = 0;
     _httpWorkerPoolStarted = NO;
-    _serverSocketFD = -1;
+    _serverSocketFD = ALNInvalidSocketHandle;
     _staticMountCacheLock = [[NSLock alloc] init];
     _cachedStaticMounts = nil;
     _webSocketAllowedOrigins = @[];
@@ -2535,9 +2903,9 @@ static NSString *ALNRealtimeBackpressureReasonForSubscriptionRejection(NSString 
 
 - (void)requestStop {
   self.shouldRun = NO;
-  int serverFd = self.serverSocketFD;
-  if (serverFd >= 0) {
-    (void)shutdown(serverFd, SHUT_RDWR);
+  ALNSocketHandle serverFd = self.serverSocketFD;
+  if (serverFd != ALNInvalidSocketHandle) {
+    (void)ALNSocketShutdown(serverFd);
   }
   [self.httpWorkerQueueCondition lock];
   [self.httpWorkerQueueCondition broadcast];
@@ -2563,29 +2931,29 @@ static NSString *ALNRealtimeBackpressureReasonForSubscriptionRejection(NSString 
   return hasQueued;
 }
 
-- (BOOL)enqueueHTTPClientForWorker:(int)clientFd {
+- (BOOL)enqueueHTTPClientForWorker:(ALNSocketHandle)clientFd {
   [self.httpWorkerQueueCondition lock];
   BOOL accepted = ([self queuedHTTPClientCountLocked] < self.maxQueuedHTTPConnections);
   if (accepted) {
-    [self.pendingHTTPClientFDs addObject:@(clientFd)];
+    [self.pendingHTTPClientFDs addObject:ALNBoxSocketHandle(clientFd)];
     [self.httpWorkerQueueCondition signal];
   }
   [self.httpWorkerQueueCondition unlock];
   return accepted;
 }
 
-- (int)dequeueHTTPClientForWorker {
+- (ALNSocketHandle)dequeueHTTPClientForWorker {
   [self.httpWorkerQueueCondition lock];
   while ([self queuedHTTPClientCountLocked] == 0 && [self shouldContinueRunning]) {
     [self.httpWorkerQueueCondition waitUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.25]];
   }
 
-  int clientFd = -1;
+  ALNSocketHandle clientFd = ALNInvalidSocketHandle;
   NSUInteger queuedCount = [self queuedHTTPClientCountLocked];
   if (queuedCount > 0) {
     NSNumber *next = self.pendingHTTPClientFDs[self.pendingHTTPClientFDHeadIndex];
     self.pendingHTTPClientFDHeadIndex += 1;
-    clientFd = [next intValue];
+    clientFd = ALNSocketHandleFromNumber(next);
 
     NSUInteger totalCount = [self.pendingHTTPClientFDs count];
     if (self.pendingHTTPClientFDHeadIndex >= totalCount) {
@@ -2606,8 +2974,8 @@ static NSString *ALNRealtimeBackpressureReasonForSubscriptionRejection(NSString 
   (void)workerIndexObject;
   @autoreleasepool {
     while ([self shouldContinueRunning] || [self hasQueuedHTTPClients]) {
-      int clientFd = [self dequeueHTTPClientForWorker];
-      if (clientFd < 0) {
+      ALNSocketHandle clientFd = [self dequeueHTTPClientForWorker];
+      if (clientFd == ALNInvalidSocketHandle) {
         continue;
       }
 
@@ -2616,7 +2984,7 @@ static NSString *ALNRealtimeBackpressureReasonForSubscriptionRejection(NSString 
           [self handleClient:clientFd];
         } @finally {
           [self releaseHTTPSessionReservation];
-          close(clientFd);
+          ALNSocketClose(clientFd);
         }
       }
     }
@@ -2716,7 +3084,7 @@ static NSString *ALNRealtimeBackpressureReasonForSubscriptionRejection(NSString 
 
 - (BOOL)sendWebSocketHandshakeForRequest:(ALNRequest *)request
                                 response:(ALNResponse *)response
-                                clientFd:(int)clientFd {
+                                clientFd:(ALNSocketHandle)clientFd {
   NSString *clientKey = [request headerValueForName:@"sec-websocket-key"];
   NSString *acceptKey = ALNWebSocketAcceptKey(clientKey);
   if ([acceptKey length] == 0) {
@@ -2759,7 +3127,7 @@ static NSString *ALNRealtimeBackpressureReasonForSubscriptionRejection(NSString 
                             channel:(NSString *)channel
                             session:(ALNWebSocketClientSession *)session
                        subscription:(ALNRealtimeSubscription *)subscription
-                           clientFd:(int)clientFd {
+                           clientFd:(ALNSocketHandle)clientFd {
   if ([mode length] == 0 || session == nil) {
     return;
   }
@@ -2810,7 +3178,7 @@ static NSString *ALNRealtimeBackpressureReasonForSubscriptionRejection(NSString 
   }
 }
 
-- (void)handleClient:(int)clientFd {
+- (void)handleClient:(ALNSocketHandle)clientFd {
   BOOL performanceLogging =
       ALNConfigBool(self.application.config ?: @{}, @"performanceLogging", YES);
   ALNRequestLimits limits = ALNLimitsFromConfig(self.application.config ?: @{});
@@ -3058,17 +3426,25 @@ static NSString *ALNRealtimeBackpressureReasonForSubscriptionRejection(NSString 
         configureLimitsWithMaxTotalSubscribers:runtimeLimits.maxRealtimeTotalSubscribers
                       maxSubscribersPerChannel:runtimeLimits.maxRealtimeChannelSubscribers];
 
+    if (!ALNInitializeSocketLayer()) {
+      fprintf(stderr, "%s: Winsock startup failed\n", [self.serverName UTF8String]);
+      exitCode = 1;
+      @throw [NSException exceptionWithName:@"ALNServerStartFailed"
+                                     reason:@"socket layer initialization failed"
+                                   userInfo:nil];
+    }
+
     if (!ALNInstallSignalHandler(SIGINT) || !ALNInstallSignalHandler(SIGTERM)) {
-      perror("sigaction");
+      fprintf(stderr, "%s: signal handler setup failed\n", [self.serverName UTF8String]);
       exitCode = 1;
       @throw [NSException exceptionWithName:@"ALNServerStartFailed"
                                      reason:@"signal handler setup failed"
                                    userInfo:nil];
     }
 
-    int serverFd = socket(AF_INET, SOCK_STREAM, 0);
-    if (serverFd < 0) {
-      perror("socket");
+    ALNSocketHandle serverFd = ALNSocketOpen(AF_INET, SOCK_STREAM, 0);
+    if (serverFd == ALNInvalidSocketHandle) {
+      ALNReportSocketError("socket");
       exitCode = 1;
       @throw [NSException exceptionWithName:@"ALNServerStartFailed"
                                      reason:@"socket() failed"
@@ -3077,10 +3453,10 @@ static NSString *ALNRealtimeBackpressureReasonForSubscriptionRejection(NSString 
     self.serverSocketFD = serverFd;
 
     int reuse = 1;
-    if (setsockopt(serverFd, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse)) < 0) {
-      perror("setsockopt");
-      close(serverFd);
-      self.serverSocketFD = -1;
+    if (ALNSocketSetIntOption(serverFd, SOL_SOCKET, SO_REUSEADDR, reuse) < 0) {
+      ALNReportSocketError("setsockopt(SO_REUSEADDR)");
+      ALNSocketClose(serverFd);
+      self.serverSocketFD = ALNInvalidSocketHandle;
       exitCode = 1;
       @throw [NSException exceptionWithName:@"ALNServerStartFailed"
                                      reason:@"setsockopt(SO_REUSEADDR) failed"
@@ -3089,10 +3465,10 @@ static NSString *ALNRealtimeBackpressureReasonForSubscriptionRejection(NSString 
 
 #ifdef SO_REUSEPORT
     if (tuning.enableReusePort) {
-      if (setsockopt(serverFd, SOL_SOCKET, SO_REUSEPORT, &reuse, sizeof(reuse)) < 0) {
-        perror("setsockopt(SO_REUSEPORT)");
-        close(serverFd);
-        self.serverSocketFD = -1;
+      if (ALNSocketSetIntOption(serverFd, SOL_SOCKET, SO_REUSEPORT, reuse) < 0) {
+        ALNReportSocketError("setsockopt(SO_REUSEPORT)");
+        ALNSocketClose(serverFd);
+        self.serverSocketFD = ALNInvalidSocketHandle;
         exitCode = 1;
         @throw [NSException exceptionWithName:@"ALNServerStartFailed"
                                        reason:@"setsockopt(SO_REUSEPORT) failed"
@@ -3105,30 +3481,30 @@ static NSString *ALNRealtimeBackpressureReasonForSubscriptionRejection(NSString 
     memset(&addr, 0, sizeof(addr));
     addr.sin_family = AF_INET;
     addr.sin_port = htons((uint16_t)port);
-    if (inet_pton(AF_INET, [bindHost UTF8String], &addr.sin_addr) != 1) {
+    if (ALNInetPton(AF_INET, [bindHost UTF8String], &addr.sin_addr) != 1) {
       fprintf(stderr, "%s: invalid host address: %s\n", [self.serverName UTF8String], [bindHost UTF8String]);
-      close(serverFd);
-      self.serverSocketFD = -1;
+      ALNSocketClose(serverFd);
+      self.serverSocketFD = ALNInvalidSocketHandle;
       exitCode = 1;
       @throw [NSException exceptionWithName:@"ALNServerStartFailed"
                                      reason:@"invalid bind host"
                                    userInfo:nil];
     }
 
-    if (bind(serverFd, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
-      perror("bind");
-      close(serverFd);
-      self.serverSocketFD = -1;
+    if (ALNSocketBind(serverFd, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
+      ALNReportSocketError("bind");
+      ALNSocketClose(serverFd);
+      self.serverSocketFD = ALNInvalidSocketHandle;
       exitCode = 1;
       @throw [NSException exceptionWithName:@"ALNServerStartFailed"
                                      reason:@"bind() failed"
                                    userInfo:nil];
     }
 
-    if (listen(serverFd, (int)tuning.listenBacklog) < 0) {
-      perror("listen");
-      close(serverFd);
-      self.serverSocketFD = -1;
+    if (ALNSocketListen(serverFd, (int)tuning.listenBacklog) < 0) {
+      ALNReportSocketError("listen");
+      ALNSocketClose(serverFd);
+      self.serverSocketFD = ALNInvalidSocketHandle;
       exitCode = 1;
       @throw [NSException exceptionWithName:@"ALNServerStartFailed"
                                      reason:@"listen() failed"
@@ -3152,8 +3528,8 @@ static NSString *ALNRealtimeBackpressureReasonForSubscriptionRejection(NSString 
     }
 
     while ([self shouldContinueRunning]) {
-      int clientFd = accept(serverFd, NULL, NULL);
-      if (clientFd < 0) {
+      ALNSocketHandle clientFd = ALNSocketAccept(serverFd);
+      if (clientFd == ALNInvalidSocketHandle) {
         if (errno == EINTR) {
           if (![self shouldContinueRunning]) {
             break;
@@ -3161,10 +3537,10 @@ static NSString *ALNRealtimeBackpressureReasonForSubscriptionRejection(NSString 
           continue;
         }
         if (errno == EMFILE || errno == ENFILE || errno == ENOBUFS || errno == ENOMEM) {
-          usleep(50000);
+          ALNPlatformSleepMilliseconds(50);
           continue;
         }
-        perror("accept");
+        ALNReportSocketError("accept");
         break;
       }
 
@@ -3177,7 +3553,7 @@ static NSString *ALNRealtimeBackpressureReasonForSubscriptionRejection(NSString 
                           value:@"http_session_limit"];
         [busyResponse setHeader:@"Connection" value:@"close"];
         (void)ALNSendResponse(clientFd, busyResponse, NO);
-        close(clientFd);
+        ALNSocketClose(clientFd);
         continue;
       }
 
@@ -3194,7 +3570,7 @@ static NSString *ALNRealtimeBackpressureReasonForSubscriptionRejection(NSString 
           [busyResponse setHeader:@"Connection" value:@"close"];
           (void)ALNSendResponse(clientFd, busyResponse, NO);
           [self releaseHTTPSessionReservation];
-          close(clientFd);
+          ALNSocketClose(clientFd);
         }
       } else {
         @try {
@@ -3203,7 +3579,7 @@ static NSString *ALNRealtimeBackpressureReasonForSubscriptionRejection(NSString 
           }
         } @finally {
           [self releaseHTTPSessionReservation];
-          close(clientFd);
+          ALNSocketClose(clientFd);
         }
       }
 
@@ -3212,8 +3588,8 @@ static NSString *ALNRealtimeBackpressureReasonForSubscriptionRejection(NSString 
       }
     }
 
-    close(serverFd);
-    self.serverSocketFD = -1;
+    ALNSocketClose(serverFd);
+    self.serverSocketFD = ALNInvalidSocketHandle;
   } @catch (NSException *exception) {
     if (![exception.name isEqualToString:@"ALNServerStartFailed"]) {
       fprintf(stderr, "%s: fatal exception: %s\n", [self.serverName UTF8String],
@@ -3221,7 +3597,10 @@ static NSString *ALNRealtimeBackpressureReasonForSubscriptionRejection(NSString 
       exitCode = 1;
     }
   } @finally {
-    self.serverSocketFD = -1;
+    if (self.serverSocketFD != ALNInvalidSocketHandle) {
+      ALNSocketClose(self.serverSocketFD);
+    }
+    self.serverSocketFD = ALNInvalidSocketHandle;
     [self requestStop];
     [self.application shutdown];
   }

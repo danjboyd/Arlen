@@ -35,7 +35,7 @@ powershell -ExecutionPolicy Bypass -File scripts\run_clang64.ps1 -InnerCommand "
 
 ## Windows Preview Baseline (2026-03-31)
 
-This is the first-pass native Windows contract for Phase 24A-D. It is a
+This is the first-pass native Windows contract for Phase 24A-H. It is a
 preview baseline, not parity with Linux.
 
 | Component | Command | Expected baseline |
@@ -47,7 +47,9 @@ preview baseline, not parity with Linux.
 | Compiler | `clang --version` | available inside `CLANG64` shell |
 | Build tool | `make --version` | available inside `CLANG64` shell |
 | XCTest runner | `command -v xctest` | available inside `CLANG64` shell |
-| Preview build | `make all` | builds `eocc`, preview `libArlenFramework.a`, and `arlen` |
+| Preview build | `make all` | builds `eocc`, preview `libArlenFramework.a`, `arlen`, and `arlen-xctest-runner` |
+| Focused Windows test lane | `make phase24-windows-tests` | runs `ArlenPhase21TemplateTests.xctest` through the repo-local bundle runner |
+| App-root prepare-only smoke | `arlen boomhauer --no-watch --prepare-only` | scaffolded app artifacts build cleanly |
 
 Related guide:
 

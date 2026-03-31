@@ -17,6 +17,9 @@ Use the smallest lane that honestly exercises the bug:
   - run all three Phase 21 focused lanes
 - `make phase21-confidence`
   - run the focused lanes and regenerate `build/release_confidence/phase21/`
+- `make phase24-windows-tests`
+  - focused Windows CLANG64-safe XCTest lane using `build/arlen-xctest-runner`
+  - currently scoped to `ArlenPhase21TemplateTests.xctest`
 
 Phase 20 data-layer-focused lanes remain available:
 
@@ -47,6 +50,9 @@ Phase 20 data-layer-focused lanes remain available:
 4. Run the matching focused lane until it passes.
 5. Promote the change through `make test-unit`, broader integration coverage
    when applicable, and `make phase21-confidence`.
+
+For the native Windows preview branch, promote through `make phase24-windows-tests`
+first before attempting broader Linux-only lanes.
 
 ## 3. Template Regression Intake
 

@@ -4,44 +4,52 @@ Last updated: 2026-03-31
 
 ## Leaving Off (2026-03-31)
 
-- Executed the first implementation pass for Phase `24A-24D` on branch
+- Executed the first implementation pass for Phase `24E-24H` on branch
   `windows/clang64`:
-  - added checked-in CLANG64 launcher wrappers:
-    `scripts/run_clang64.ps1` and `scripts/run_clang64.sh`
-  - updated `GNUmakefile` to auto-discover `GNUSTEP_SH`, resolve PostgreSQL
-    include paths through `pkg-config`/toolchain fallbacks, detect Windows
-    preview mode, and narrow the default Windows build graph to the first-pass
-    `eocc`/preview-library/`arlen` slice
-  - switched `src/Arlen/Core/ALNConfig.m` to Winsock-compatible includes on
-    `_WIN32`
-  - normalized Windows filesystem-path handling in `tools/arlen.m` and
-    `src/Arlen/Core/ALNModuleSystem.m`
-  - replaced the CLI's hardcoded `/bin/bash` launch path with environment/path
-    discovery that can find MSYS2 `bash.exe`
-  - explicitly gated deferred Windows-preview commands in `tools/arlen.m` so
-    unsupported flows now fail with phase-specific messages instead of generic
-    runtime/link errors
-  - updated `bin/arlen-doctor`, `README.md`, `docs/README.md`,
-    `docs/TOOLCHAIN_MATRIX.md`, and new `docs/WINDOWS_CLANG64.md` to document
-    the Phase 24 Windows preview workflow and current support envelope
+  - added a repo-local focused XCTest runner at
+    `tools/arlen_xctest_runner.m`
+  - added the checked-in Windows-focused test lane and wrappers:
+    `make phase24-windows-tests`,
+    `scripts/run_phase24_windows_tests.ps1`, and
+    `scripts/run_phase24_windows_tests.sh`
+  - widened the Windows preview framework slice in `GNUmakefile` so `make all`
+    now builds the basic app/server runtime plus `build/arlen-xctest-runner`
+  - added `src/Arlen/Support/ALNPlatform.{h,m}` and moved timestamp/PID/thread
+    state handling in `ALNApplication`, `ALNLogger`, and `ALNRequest` onto
+    Windows-safe seams
+  - introduced Winsock/socket-layer portability wrappers, console stop
+    handling, and basic request/response runtime seams in
+    `src/Arlen/HTTP/ALNHTTPServer.m`
+  - enabled Windows-preview app-root `boomhauer --no-watch`,
+    `--prepare-only`, `--print-routes`, `--once`, plus `arlen routes` and
+    `arlen test --unit`
+  - updated `README.md`, `docs/README.md`, `docs/GETTING_STARTED.md`,
+    `docs/CLI_REFERENCE.md`, `docs/TESTING_WORKFLOW.md`,
+    `docs/TOOLCHAIN_MATRIX.md`, `docs/WINDOWS_CLANG64.md`, and
+    `docs/PHASE24_ROADMAP.md` to document the widened preview envelope
 - Known limitation at this checkpoint:
   - this shell session could not start MSYS2 bash successfully because
     `env.exe`/`bash.exe` failed with Windows error 5 (`couldn't create signal
-    pipe` / `CreateFileMapping`), so live CLANG64 build verification is still
-    pending outside this sandboxed terminal
-- Next-session closeout path for `24A-24D`:
+    pipe` / `CreateFileMapping`), so live CLANG64 build/test verification is
+    still pending outside this sandboxed terminal
+- Next-session verification/closeout path for the delivered `24A-24H` code:
   - run the checked-in PowerShell launcher on a normal Windows terminal:
     `powershell -ExecutionPolicy Bypass -File scripts\run_clang64.ps1 -InnerCommand "make all"`
-  - verify focused preview CLI smoke commands:
-    `./bin/arlen doctor`, `./bin/arlen new MyApp`, and generator flows
-  - if green, update the Phase 24 roadmap/status docs with concrete command
-    evidence and then move into `24E`
+  - verify the focused preview test lane:
+    `powershell -ExecutionPolicy Bypass -File scripts\run_phase24_windows_tests.ps1`
+  - verify app-root preview smoke commands:
+    `./bin/arlen doctor`, `./bin/arlen new MyApp`,
+    `/path/to/Arlen/bin/arlen boomhauer --no-watch --prepare-only`, and
+    `/path/to/Arlen/bin/arlen routes`
+  - if green, record the concrete command evidence in the status/roadmap docs
+    and continue with `24I-24L`
 
 - Created the dedicated Windows workstream branch:
   - `windows/clang64`
-- Planned Phase 24 as the branch roadmap for native Windows support:
+- Phase 24 is now active as the branch roadmap for native Windows support:
   - added `docs/PHASE24_ROADMAP.md`
-  - scoped `24A-24F` as the first-pass MSYS2 `CLANG64` compatibility track
+  - implemented the preview slices through `24H` in-branch while keeping live
+    CLANG64 verification as an explicit remaining step
   - scoped `24G-24L` as the follow-on full Windows parity track
   - kept the branch contract explicit: GNUmake-first, PowerShell outer / MSYS
     bash inner, wrapper-driven tool discovery, temporary feature gating where
@@ -52,14 +60,10 @@ Last updated: 2026-03-31
   - `docs/README.md`
   - `docs/STATUS.md`
 - Next-session execution order on this branch:
-  - start `24A`/`24B` with the checked-in CLANG64 shell contract and GNUstep
-    path/tool discovery cleanup
-  - then push `24C` to get `eocc`, the core framework library, and `arlen`
-    building under MSYS2 `CLANG64`
-  - defer wider runtime/deployment claims until `24E` establishes a reliable
-    focused Windows XCTest path
-- No Windows compatibility code has landed yet on this branch beyond branch
-  creation and Phase 24 planning.
+  - confirm the delivered `24A-24H` slice in a non-sandboxed CLANG64 shell
+  - then move into `24I` for PostgreSQL/MSSQL loader and transport parity
+  - follow with `24J` filesystem/security semantics, `24K` CI parity, and
+    `24L` production/runtime-manager guidance
 
 ## Leaving Off (2026-03-30)
 

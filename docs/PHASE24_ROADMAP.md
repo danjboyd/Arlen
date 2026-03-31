@@ -1,6 +1,6 @@
 # Arlen Phase 24 Roadmap
 
-Status: planned on 2026-03-31 (`24A-24L`)
+Status: in progress on 2026-03-31 (`24A-24H` landed on branch; live CLANG64 verification still pending outside this sandbox; `24I-24L` planned)
 Last updated: 2026-03-31
 
 Related docs:
@@ -275,7 +275,19 @@ Acceptance (required):
 
 ## 5.5 Phase 24E: Focused Windows XCTest Runner Strategy
 
-Status: planned
+Status: in progress
+
+Checkpoint notes:
+
+- Added a repo-local focused Windows bundle runner source:
+  - `tools/arlen_xctest_runner.m`
+- Added a checked-in focused Windows test target:
+  - `make phase24-windows-tests`
+- Added wrapper entrypoints for the focused lane:
+  - `scripts/run_phase24_windows_tests.ps1`
+  - `scripts/run_phase24_windows_tests.sh`
+- Wired `arlen test --unit` to that focused lane on Windows preview while
+  keeping `--integration` and `--all` explicitly deferred.
 
 Deliverables:
 
@@ -297,7 +309,23 @@ Acceptance (required):
 
 ## 5.6 Phase 24F: First-Pass Closeout + Preview Scope
 
-Status: planned
+Status: in progress
+
+Checkpoint notes:
+
+- Updated the preview documentation set to describe the widened `24A-24H`
+  support envelope in:
+  - `README.md`
+  - `docs/README.md`
+  - `docs/GETTING_STARTED.md`
+  - `docs/CLI_REFERENCE.md`
+  - `docs/TESTING_WORKFLOW.md`
+  - `docs/TOOLCHAIN_MATRIX.md`
+  - `docs/WINDOWS_CLANG64.md`
+- Recorded the focused Windows test lane, the app-root `boomhauer` preview
+  flows, and the remaining deferred surfaces.
+- Closeout evidence is still partially pending because this sandbox cannot run
+  the MSYS2 `CLANG64` shell end-to-end.
 
 Deliverables:
 
@@ -315,7 +343,20 @@ Acceptance (required):
 
 ## 5.7 Phase 24G: HTTP Runtime Portability Seams
 
-Status: planned
+Status: in progress
+
+Checkpoint notes:
+
+- Added `src/Arlen/Support/ALNPlatform.{h,m}` for cross-platform time, sleep,
+  PID, and absolute-path helpers shared by the preview runtime.
+- Replaced the request parser's pthread thread-local path with
+  `dispatch_once` plus `NSThread` storage in `src/Arlen/HTTP/ALNRequest.m`.
+- Introduced Winsock-aware socket wrappers, console stop handling, and
+  portable timeout/send/recv/sendfile-fallback seams in
+  `src/Arlen/HTTP/ALNHTTPServer.m`.
+- Moved ISO8601 timestamp and worker-PID call sites in
+  `src/Arlen/Core/ALNApplication.m` and `src/Arlen/Support/ALNLogger.m` onto
+  the shared platform layer.
 
 Deliverables:
 
@@ -337,7 +378,21 @@ Acceptance (required):
 
 ## 5.8 Phase 24H: `boomhauer` + App-Root DX Parity
 
-Status: planned
+Status: in progress
+
+Checkpoint notes:
+
+- `GNUmakefile` now widens the Windows preview framework slice far enough to
+  build the basic app/server runtime needed for app-root `boomhauer` flows.
+- `bin/boomhauer` now resolves `GNUstep.sh` dynamically, normalizes
+  Windows-owned app-root paths through MSYS, replaces `stat -c` /
+  `sha256sum`-based fingerprinting with Python-backed probes, and emits a
+  Windows-aware generated app makefile.
+- `tools/arlen.m` now enables Windows-preview `boomhauer`, `routes`, and the
+  focused `test --unit` path while keeping watch mode, jobs worker, and
+  `propane` deferred.
+- Repository-root `boomhauer` and watch mode remain intentionally gated on the
+  Windows preview until the later parity phases land.
 
 Deliverables:
 

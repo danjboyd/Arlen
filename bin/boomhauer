@@ -24,12 +24,91 @@ USAGE
 }
 
 script_path="${BASH_SOURCE[0]}"
-if resolved="$(readlink -f "$script_path" 2>/dev/null)"; then
-  script_path="$resolved"
-fi
-script_dir="$(cd "$(dirname "$script_path")" && pwd)"
+script_dir="$(cd "$(dirname "$script_path")" && pwd -P)"
 default_framework_root="$(cd "$script_dir/.." && pwd)"
 framework_root="${ARLEN_FRAMEWORK_ROOT:-$default_framework_root}"
+
+path_looks_like_windows_absolute() {
+  local path="$1"
+  [[ "$path" =~ ^[A-Za-z]:[\\/] ]] || [[ "$path" =~ ^\\\\ ]]
+}
+
+path_is_absolute() {
+  local path="$1"
+  [[ "$path" == /* ]] || path_looks_like_windows_absolute "$path"
+}
+
+normalize_host_path() {
+  local raw="$1"
+  if [[ -z "$raw" ]]; then
+    printf '%s\n' "$PWD"
+    return
+  fi
+  if command -v cygpath >/dev/null 2>&1 && path_looks_like_windows_absolute "$raw"; then
+    cygpath -au "$raw"
+    return
+  fi
+  if path_is_absolute "$raw"; then
+    printf '%s\n' "$raw"
+    return
+  fi
+  printf '%s\n' "$PWD/$raw"
+}
+
+resolve_gnustep_sh() {
+  local candidate=""
+  local gnustep_makefiles=""
+  if [[ -n "${GNUSTEP_SH:-}" && -f "${GNUSTEP_SH:-}" ]]; then
+    printf '%s\n' "$GNUSTEP_SH"
+    return 0
+  fi
+  if [[ -n "${GNUSTEP_MAKEFILES:-}" ]]; then
+    candidate="${GNUSTEP_MAKEFILES}/GNUstep.sh"
+    if [[ -f "$candidate" ]]; then
+      printf '%s\n' "$candidate"
+      return 0
+    fi
+  fi
+  if command -v gnustep-config >/dev/null 2>&1; then
+    gnustep_makefiles="$(gnustep-config --variable=GNUSTEP_MAKEFILES 2>/dev/null || true)"
+    if [[ -n "$gnustep_makefiles" ]]; then
+      candidate="${gnustep_makefiles}/GNUstep.sh"
+      if [[ -f "$candidate" ]]; then
+        printf '%s\n' "$candidate"
+        return 0
+      fi
+    fi
+  fi
+  for candidate in \
+    /clang64/share/GNUstep/Makefiles/GNUstep.sh \
+    /usr/GNUstep/System/Library/Makefiles/GNUstep.sh
+  do
+    if [[ -f "$candidate" ]]; then
+      printf '%s\n' "$candidate"
+      return 0
+    fi
+  done
+  return 1
+}
+
+detect_windows_preview() {
+  local host_os=""
+  if [[ "${MSYSTEM:-}" == "CLANG64" || "${MSYSTEM:-}" == "MINGW64" || "${MSYSTEM:-}" == "UCRT64" ]]; then
+    return 0
+  fi
+  if command -v gnustep-config >/dev/null 2>&1; then
+    host_os="$(gnustep-config --variable=GNUSTEP_HOST_OS 2>/dev/null || true)"
+    if [[ "$host_os" == *mingw* ]]; then
+      return 0
+    fi
+  fi
+  return 1
+}
+
+windows_preview=0
+if detect_windows_preview; then
+  windows_preview=1
+fi
 
 if [[ ! -f "$framework_root/GNUmakefile" || ! -d "$framework_root/src/Arlen" ]]; then
   echo "boomhauer: invalid framework root: $framework_root" >&2
@@ -37,17 +116,13 @@ if [[ ! -f "$framework_root/GNUmakefile" || ! -d "$framework_root/src/Arlen" ]];
   exit 1
 fi
 
-gnustep_sh="/usr/GNUstep/System/Library/Makefiles/GNUstep.sh"
-if [[ ! -f "$gnustep_sh" ]]; then
-  echo "boomhauer: GNUstep.sh not found at $gnustep_sh" >&2
+if ! gnustep_sh="$(resolve_gnustep_sh)"; then
+  echo "boomhauer: GNUstep.sh could not be resolved from the active toolchain" >&2
   exit 1
 fi
 
-app_root="${ARLEN_APP_ROOT:-$PWD}"
-if [[ ! "$app_root" = /* ]]; then
-  app_root="$PWD/$app_root"
-fi
-app_root="$(cd "$app_root" && pwd)"
+app_root="$(normalize_host_path "${ARLEN_APP_ROOT:-$PWD}")"
+app_root="$(cd "$app_root" && pwd -P)"
 
 watch_mode=1
 prepare_only=0
@@ -90,6 +165,11 @@ if [[ -f "$app_root/config/app.plist" ]] && ([[ -f "$app_root/src/main.m" ]] || 
 fi
 
 if [[ $is_app_root -eq 0 ]]; then
+  if [[ $windows_preview -eq 1 ]]; then
+    echo "boomhauer: repository-root boomhauer is not yet supported on Windows CLANG64 preview" >&2
+    echo "boomhauer: run from a generated app root and use --no-watch, --prepare-only, or --print-routes" >&2
+    exit 1
+  fi
   cd "$framework_root"
   if [[ $watch_mode -eq 1 ]]; then
     make arlen >/dev/null
@@ -108,6 +188,12 @@ if [[ $is_app_root -eq 0 ]]; then
   fi
   export ARLEN_APP_ROOT="$app_root"
   exec "$framework_root/build/boomhauer" "${server_args[@]}"
+fi
+
+if [[ $windows_preview -eq 1 && $watch_mode -eq 1 ]]; then
+  echo "boomhauer: watch mode is not yet supported on Windows CLANG64 preview" >&2
+  echo "boomhauer: rerun with --no-watch, --prepare-only, --print-routes, or --once" >&2
+  exit 1
 fi
 
 state_root="$app_root/.boomhauer"
@@ -138,13 +224,19 @@ build_error_recovery_hint="${ARLEN_BOOMHAUER_BUILD_ERROR_RECOVERY_HINT:-Fix the 
 
 file_fingerprint_fields() {
   local path="$1"
-  local size mtime ctime
+  python3 - "$path" <<'PY'
+import os
+import sys
 
-  size="$(stat -c %s "$path" 2>/dev/null || echo 0)"
-  # Keep sub-second precision so same-size edits remain visible to watch mode.
-  mtime="$(stat -c %y "$path" 2>/dev/null || echo 0)"
-  ctime="$(stat -c %z "$path" 2>/dev/null || echo 0)"
-  printf '%s|%s|%s\n' "$size" "$mtime" "$ctime"
+path = sys.argv[1]
+try:
+    stat_result = os.stat(path, follow_symlinks=False)
+except OSError:
+    print("0|0|0")
+    raise SystemExit(0)
+
+print(f"{stat_result.st_size}|{stat_result.st_mtime_ns}|{stat_result.st_ctime_ns}")
+PY
 }
 
 append_fingerprint_entries() {
@@ -178,7 +270,7 @@ append_fingerprint_entries() {
 }
 
 hash_fingerprint_stream() {
-  sort | sha256sum | awk '{print $1}'
+  sort | python3 -c "import hashlib, sys; sys.stdout.write(hashlib.sha256(sys.stdin.buffer.read()).hexdigest() + '\n')"
 }
 
 runtime_fingerprint() {
@@ -342,6 +434,8 @@ emit_app_makefile() {
   local enable_llhttp="${ARLEN_ENABLE_LLHTTP:-1}"
   local gnustep_objc_flags
   local gnustep_base_libs
+  local postgresql_include_flags=""
+  local platform_link_libs="-ldl"
   mapfile -t app_sources < <(find "$app_root/src" -type f -name '*.m' 2>/dev/null | sort)
   mapfile -t framework_module_source_dirs < <(find "$framework_root/modules" -mindepth 2 -maxdepth 2 -type d -name 'Sources' 2>/dev/null | sort)
   mapfile -t app_module_source_dirs < <(
@@ -391,7 +485,6 @@ emit_app_makefile() {
     "-I$framework_root/src/MojoObjc/MVC/View"
     "-I$framework_root/src/MojoObjc/Support"
     "-I$app_root/src"
-    "-I/usr/include/postgresql"
   )
   for module_source_dir in "${framework_module_source_dirs[@]}"; do
     include_args+=("-I$module_source_dir")
@@ -406,22 +499,38 @@ emit_app_makefile() {
   set -u
   gnustep_objc_flags="$(gnustep-config --objc-flags)"
   gnustep_base_libs="$(gnustep-config --base-libs)"
+  postgresql_include_flags="$(pkg-config --cflags-only-I libpq 2>/dev/null || true)"
+  if [[ -z "$postgresql_include_flags" ]]; then
+    if [[ -d /clang64/include/postgresql ]]; then
+      postgresql_include_flags="-I/clang64/include/postgresql"
+    elif [[ -d /usr/include/postgresql ]]; then
+      postgresql_include_flags="-I/usr/include/postgresql"
+    fi
+  fi
+  if [[ $windows_preview -eq 1 ]]; then
+    platform_link_libs="-lws2_32"
+  fi
 
   tmp_makefile="$(mktemp)"
   {
-    printf 'SHELL := /bin/bash\n'
+    printf 'SHELL := bash\n'
     printf '.RECIPEPREFIX = >\n\n'
     printf 'GNUSTEP_SH := %s\n' "$gnustep_sh"
     printf 'APP_BINARY := %s\n' "$app_binary"
     printf 'OBJECTS_READY := %s\n' "$build_root/.objects-ready"
     printf 'FRAMEWORK_LIB := %s\n' "$framework_lib"
     printf 'GNUSTEP_OBJC_FLAGS := %s\n' "$gnustep_objc_flags"
-    printf 'BASE_LINK_LIBS := %s -ldl -lcrypto -ldispatch\n' "$gnustep_base_libs"
-    printf 'OBJC_FLAGS := $(GNUSTEP_OBJC_FLAGS) -fobjc-arc -fPIC -DARLEN_ENABLE_YYJSON=%s -DARLEN_ENABLE_LLHTTP=%s -DARGON2_NO_THREADS=1\n' "$enable_yyjson" "$enable_llhttp"
+    printf 'POSTGRESQL_INCLUDE_FLAGS := %s\n' "$postgresql_include_flags"
+    printf 'ARLEN_PLATFORM_LINK_LIBS := %s\n' "$platform_link_libs"
+    printf 'BASE_LINK_LIBS := %s -lcrypto -ldispatch $(ARLEN_PLATFORM_LINK_LIBS)\n' "$gnustep_base_libs"
+    printf 'OBJC_FLAGS := $(GNUSTEP_OBJC_FLAGS) -fobjc-arc -fPIC -DARLEN_ENABLE_YYJSON=%s -DARLEN_ENABLE_LLHTTP=%s -DARLEN_WINDOWS_PREVIEW=%s -DARGON2_NO_THREADS=1\n' "$enable_yyjson" "$enable_llhttp" "$windows_preview"
     printf 'INCLUDE_FLAGS :='
     for source_path in "${include_args[@]}"; do
       printf ' %s' "$source_path"
     done
+    if [[ -n "$postgresql_include_flags" ]]; then
+      printf ' $(POSTGRESQL_INCLUDE_FLAGS)'
+    fi
     printf '\n'
     printf 'ALL_OBJECTS :='
     for source_path in "${app_sources[@]}" "${generated_sources[@]}"; do

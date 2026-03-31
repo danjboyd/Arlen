@@ -5,8 +5,12 @@ Last updated: 2026-03-31
 This document records the native Windows preview workflow for Arlen on MSYS2
 `CLANG64`.
 
-Phase 24A-D establishes a CLI-first preview. It is intentionally narrower than
-Linux support today.
+Phase 24A-H establishes a basic app/runtime preview. It is still intentionally
+narrower than Linux support today.
+
+This checkpoint reflects the branch implementation for `24A-24H`. Live MSYS2
+`CLANG64` build/test confirmation from this shell is still pending because the
+current sandbox cannot start `bash.exe` / `env.exe` successfully.
 
 ## 1. Host Entry Path
 
@@ -62,10 +66,12 @@ make all
 On Windows preview, `make all` currently means:
 
 - `build/eocc`
-- the reduced CLANG64 preview `libArlenFramework.a`
+- the reduced CLANG64 preview `libArlenFramework.a` with the basic app/server
+  runtime slice
 - `build/arlen`
+- `build/arlen-xctest-runner`
 
-It does not imply `boomhauer`, `propane`, or the full Linux verification
+It does not imply `build/boomhauer`, `propane`, or the full Linux verification
 matrix yet.
 
 You can also build the preview slice explicitly:
@@ -83,45 +89,64 @@ These are the intended first commands to prove the preview is alive:
 ./bin/arlen new MyApp
 cd MyApp
 /path/to/Arlen/bin/arlen generate controller Home --route /
+/path/to/Arlen/bin/arlen boomhauer --no-watch --prepare-only
+/path/to/Arlen/bin/arlen routes
 ```
 
 `arlen doctor` is the bootstrap-first preflight path. `build/arlen doctor`
 should report the same toolchain contract after the CLI is built.
 
+The focused Windows-safe XCTest lane is:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\run_phase24_windows_tests.ps1
+```
+
+Equivalent inner-shell command:
+
+```sh
+make phase24-windows-tests
+```
+
 ## 5. Supported Preview Surface
 
-Phase 24A-D currently targets:
+Phase 24A-H currently targets:
 
 - `arlen doctor`
 - `arlen config`
 - `arlen new`
 - `arlen generate`
 - `arlen build`
+- `arlen boomhauer` for app-root `--no-watch`, `--prepare-only`, `--print-routes`,
+  `--once`, and direct non-watch server launch
+- `arlen routes`
+- `arlen test` as the focused `phase24-windows-tests` lane
 - `arlen typed-sql-codegen`
 - `arlen module add/remove/list/doctor/assets/eject/upgrade`
+- `bin/boomhauer` path normalization and generated app makefile emission for
+  Windows-owned app roots
+- the repo-local `build/arlen-xctest-runner` bundle runner for focused Windows
+  XCTest execution
 
 ## 6. Deferred To Later Phase 24 Work
 
 These remain intentionally deferred on native Windows at this checkpoint:
 
-- `boomhauer`
 - `jobs worker`
 - `propane`
-- `routes`
-- `test`
+- `boomhauer` watch mode and fallback dev error server
 - `perf`
 - `check`
 - `migrate`
 - `schema-codegen`
 - `module migrate`
-- HTTP runtime portability
 - live PostgreSQL/MSSQL validation
+- full verification/CI parity
 - Windows deployment/runtime-manager parity
 
 Roadmap ownership:
 
-- Phase `24E`: Windows XCTest strategy
-- Phase `24H`: `boomhauer` and app-root DX parity
 - Phase `24I`: database transport parity
+- Phase `24J`: filesystem/security parity
 - Phase `24K`: verification/CI parity
 - Phase `24L`: deployment/runtime-manager parity

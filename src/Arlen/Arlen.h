@@ -8,6 +8,7 @@
 #import "Core/ALNOpenAPI.h"
 #import "Core/ALNSchemaContract.h"
 #import "Core/ALNValueTransformers.h"
+#if !ARLEN_WINDOWS_PREVIEW
 #import "Data/ALNAdapterConformance.h"
 #import "Data/ALNDatabaseAdapter.h"
 #import "Data/ALNDisplayGroup.h"
@@ -31,6 +32,7 @@
 #import "Data/ALNSQLDialect.h"
 #endif
 #import "Data/ALNSQLBuilder.h"
+#endif
 #import "HTTP/ALNHTTPServer.h"
 #import "HTTP/ALNRequest.h"
 #import "HTTP/ALNResponse.h"
@@ -47,20 +49,22 @@
 #import "MVC/Template/ALNEOCRuntime.h"
 #import "MVC/Template/ALNEOCTranspiler.h"
 #import "MVC/View/ALNView.h"
+#import "Support/ALNAuth.h"
+#import "Support/ALNAuthSession.h"
 #import "Support/ALNLogger.h"
 #import "Support/ALNMetrics.h"
 #import "Support/ALNPerf.h"
-#import "Support/ALNAuth.h"
+#import "Support/ALNPlatform.h"
+#import "Support/ALNRealtime.h"
+#import "Support/ALNServices.h"
+#if !ARLEN_WINDOWS_PREVIEW
 #import "Support/ALNAuthProviderPresets.h"
 #import "Support/ALNAuthProviderSessionBridge.h"
-#import "Support/ALNAuthSession.h"
 #import "Support/ALNOIDCClient.h"
 #import "Support/ALNPasswordHash.h"
 #import "Support/ALNRecoveryCodes.h"
 #import "Support/ALNTOTP.h"
 #import "Support/ALNWebAuthn.h"
-#import "Support/ALNRealtime.h"
-#import "Support/ALNServices.h"
 #import "ALNAuthModule.h"
 #import "ALNAdminUIModule.h"
 #import "ALNJobsModule.h"
@@ -68,5 +72,6 @@
 #import "ALNOpsModule.h"
 #import "ALNSearchModule.h"
 #import "ALNStorageModule.h"
+#endif
 
 #endif

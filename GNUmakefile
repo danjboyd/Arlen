@@ -45,6 +45,7 @@ DISPATCH_PERF_BENCH_TOOL := $(BUILD_DIR)/dispatch-perf-bench
 HTTP_PARSE_PERF_BENCH_TOOL := $(BUILD_DIR)/http-parse-perf-bench
 ROUTE_MATCH_PERF_BENCH_TOOL := $(BUILD_DIR)/route-match-perf-bench
 BACKEND_CONTRACT_MATRIX_TOOL := $(BUILD_DIR)/backend-contract-matrix
+XCTEST_BUNDLE_RUNNER_TOOL := $(BUILD_DIR)/arlen-xctest-runner
 ARLEN_FRAMEWORK_LIB := $(LIB_DIR)/libArlenFramework.a
 
 TEMPLATE_ROOT := $(ROOT_DIR)/templates
@@ -58,7 +59,40 @@ MODULE_TEMPLATE_FILES := $(shell find modules -type f -path '*/Resources/Templat
 MODULE_TEMPLATE_DIRS := $(shell if [ -d modules ]; then find modules -type d | sort; fi)
 
 FRAMEWORK_ALL_OBJC_SRCS := $(shell find src -type f -name '*.m' | sort)
-WINDOWS_PREVIEW_FRAMEWORK_OBJC_SRCS := src/Arlen/Core/ALNConfig.m src/Arlen/Core/ALNModuleSystem.m src/Arlen/MVC/Template/ALNEOCRuntime.m src/Arlen/MVC/Template/ALNEOCTranspiler.m src/Arlen/Support/ALNJSONSerialization.m
+WINDOWS_PREVIEW_FRAMEWORK_OBJC_SRCS := \
+	src/Arlen/Core/ALNAppRunner.m \
+	src/Arlen/Core/ALNApplication.m \
+	src/Arlen/Core/ALNConfig.m \
+	src/Arlen/Core/ALNModuleSystem.m \
+	src/Arlen/Core/ALNOpenAPI.m \
+	src/Arlen/Core/ALNSchemaContract.m \
+	src/Arlen/Core/ALNValueTransformers.m \
+	src/Arlen/HTTP/ALNHTTPServer.m \
+	src/Arlen/HTTP/ALNRequest.m \
+	src/Arlen/HTTP/ALNResponse.m \
+	src/Arlen/MVC/Controller/ALNContext.m \
+	src/Arlen/MVC/Controller/ALNController.m \
+	src/Arlen/MVC/Controller/ALNPageState.m \
+	src/Arlen/MVC/Middleware/ALNCSRFMiddleware.m \
+	src/Arlen/MVC/Middleware/ALNRateLimitMiddleware.m \
+	src/Arlen/MVC/Middleware/ALNResponseEnvelopeMiddleware.m \
+	src/Arlen/MVC/Middleware/ALNSecurityHeadersMiddleware.m \
+	src/Arlen/MVC/Middleware/ALNSessionMiddleware.m \
+	src/Arlen/MVC/Routing/ALNRoute.m \
+	src/Arlen/MVC/Routing/ALNRouter.m \
+	src/Arlen/MVC/Template/ALNEOCRuntime.m \
+	src/Arlen/MVC/Template/ALNEOCTranspiler.m \
+	src/Arlen/MVC/View/ALNView.m \
+	src/Arlen/Support/ALNAuth.m \
+	src/Arlen/Support/ALNAuthSession.m \
+	src/Arlen/Support/ALNJSONSerialization.m \
+	src/Arlen/Support/ALNLogger.m \
+	src/Arlen/Support/ALNMetrics.m \
+	src/Arlen/Support/ALNPerf.m \
+	src/Arlen/Support/ALNPlatform.m \
+	src/Arlen/Support/ALNRealtime.m \
+	src/Arlen/Support/ALNSecurityPrimitives.m \
+	src/Arlen/Support/ALNServices.m
 ifeq ($(ARLEN_WINDOWS_PREVIEW),1)
 FRAMEWORK_OBJC_SRCS := $(WINDOWS_PREVIEW_FRAMEWORK_OBJC_SRCS)
 else
@@ -69,6 +103,7 @@ ARLEN_ENABLE_YYJSON ?= 1
 ARLEN_ENABLE_LLHTTP ?= 1
 ARLEN_XCTEST ?= xctest
 ARLEN_XCTEST_LD_LIBRARY_PATH ?=
+ARLEN_WINDOWS_FOCUSED_TEST_RUNNER ?= $(XCTEST_BUNDLE_RUNNER_TOOL)
 TEST ?=
 SKIP_TEST ?=
 ifneq ($(filter $(ARLEN_ENABLE_YYJSON),0 1),$(ARLEN_ENABLE_YYJSON))
@@ -89,7 +124,7 @@ LLHTTP_C_SRCS :=
 endif
 ARGON2_C_SRCS := src/Arlen/Support/third_party/argon2/src/argon2.c src/Arlen/Support/third_party/argon2/src/core.c src/Arlen/Support/third_party/argon2/src/encoding.c src/Arlen/Support/third_party/argon2/src/ref.c src/Arlen/Support/third_party/argon2/src/blake2/blake2b.c
 ifeq ($(ARLEN_WINDOWS_PREVIEW),1)
-FRAMEWORK_C_SRCS := $(YYJSON_C_SRCS)
+FRAMEWORK_C_SRCS := $(YYJSON_C_SRCS) $(LLHTTP_C_SRCS)
 else
 FRAMEWORK_C_SRCS := $(YYJSON_C_SRCS) $(LLHTTP_C_SRCS) $(ARGON2_C_SRCS)
 endif
@@ -97,6 +132,7 @@ FRAMEWORK_SRCS := $(FRAMEWORK_OBJC_SRCS) $(FRAMEWORK_C_SRCS)
 ARLEN_DATA_SRCS := $(shell find src/Arlen/Data -type f -name '*.m' | sort)
 JSON_SERIALIZATION_SRCS := src/Arlen/Support/ALNJSONSerialization.m $(YYJSON_C_SRCS)
 EOC_RUNTIME_SRCS := src/Arlen/MVC/Template/ALNEOCRuntime.m src/Arlen/MVC/Template/ALNEOCTranspiler.m
+XCTEST_BUNDLE_RUNNER_SRCS := tools/arlen_xctest_runner.m
 
 UNIT_TEST_BUNDLE := $(BUILD_DIR)/tests/ArlenUnitTests.xctest
 UNIT_TEST_BIN := $(UNIT_TEST_BUNDLE)/ArlenUnitTests
@@ -268,6 +304,7 @@ DISPATCH_PERF_BENCH_ENTRY_OBJS := $(call objs_from,tools/dispatch_perf_bench.m)
 HTTP_PARSE_PERF_BENCH_ENTRY_OBJS := $(call objs_from,tools/http_parse_perf_bench.m)
 ROUTE_MATCH_PERF_BENCH_ENTRY_OBJS := $(call objs_from,tools/route_match_perf_bench.m)
 BACKEND_CONTRACT_MATRIX_ENTRY_OBJS := $(call objs_from,tools/backend_contract_matrix.m)
+XCTEST_BUNDLE_RUNNER_ENTRY_OBJS := $(call objs_from,$(XCTEST_BUNDLE_RUNNER_SRCS))
 UNIT_TEST_OBJS := $(call objs_from,$(UNIT_TEST_SRCS))
 INTEGRATION_TEST_OBJS := $(call objs_from,$(INTEGRATION_TEST_SRCS))
 BROWSER_ERROR_AUDIT_TEST_OBJS := $(call objs_from,$(BROWSER_ERROR_AUDIT_SRCS))
@@ -279,18 +316,18 @@ PHASE20_MSSQL_LIVE_TEST_OBJS := $(call objs_from,$(PHASE20_MSSQL_LIVE_TEST_SRCS)
 PHASE20_ROUTING_TEST_OBJS := $(call objs_from,$(PHASE20_ROUTING_TEST_SRCS))
 PHASE21_TEMPLATE_TEST_OBJS := $(call objs_from,$(PHASE21_TEMPLATE_TEST_SRCS))
 
-ALL_OBJECTS := $(sort $(FRAMEWORK_OBJS) $(MODULE_OBJS) $(ROOT_GENERATED_OBJS) $(TECH_DEMO_GENERATED_OBJS) $(MODULE_GENERATED_OBJS) $(EOCC_ENTRY_OBJS) $(ARLEN_ENTRY_OBJS) $(BOOMHAUER_ENTRY_OBJS) $(SMOKE_RENDER_ENTRY_OBJS) $(TECH_DEMO_SERVER_ENTRY_OBJS) $(API_REFERENCE_SERVER_ENTRY_OBJS) $(AUTH_PRIMITIVES_SERVER_ENTRY_OBJS) $(MIGRATION_SAMPLE_SERVER_ENTRY_OBJS) $(ARLEN_DATA_EXAMPLE_ENTRY_OBJS) $(JSON_PERF_BENCH_ENTRY_OBJS) $(DISPATCH_PERF_BENCH_ENTRY_OBJS) $(HTTP_PARSE_PERF_BENCH_ENTRY_OBJS) $(ROUTE_MATCH_PERF_BENCH_ENTRY_OBJS) $(BACKEND_CONTRACT_MATRIX_ENTRY_OBJS) $(UNIT_TEST_OBJS) $(INTEGRATION_TEST_OBJS) $(BROWSER_ERROR_AUDIT_TEST_OBJS) $(TEST_SHARED_OBJS) $(PHASE20_SQL_BUILDER_TEST_OBJS) $(PHASE20_SCHEMA_TEST_OBJS) $(PHASE20_POSTGRES_LIVE_TEST_OBJS) $(PHASE20_MSSQL_LIVE_TEST_OBJS) $(PHASE20_ROUTING_TEST_OBJS) $(PHASE21_TEMPLATE_TEST_OBJS))
+ALL_OBJECTS := $(sort $(FRAMEWORK_OBJS) $(MODULE_OBJS) $(ROOT_GENERATED_OBJS) $(TECH_DEMO_GENERATED_OBJS) $(MODULE_GENERATED_OBJS) $(EOCC_ENTRY_OBJS) $(ARLEN_ENTRY_OBJS) $(BOOMHAUER_ENTRY_OBJS) $(SMOKE_RENDER_ENTRY_OBJS) $(TECH_DEMO_SERVER_ENTRY_OBJS) $(API_REFERENCE_SERVER_ENTRY_OBJS) $(AUTH_PRIMITIVES_SERVER_ENTRY_OBJS) $(MIGRATION_SAMPLE_SERVER_ENTRY_OBJS) $(ARLEN_DATA_EXAMPLE_ENTRY_OBJS) $(JSON_PERF_BENCH_ENTRY_OBJS) $(DISPATCH_PERF_BENCH_ENTRY_OBJS) $(HTTP_PARSE_PERF_BENCH_ENTRY_OBJS) $(ROUTE_MATCH_PERF_BENCH_ENTRY_OBJS) $(BACKEND_CONTRACT_MATRIX_ENTRY_OBJS) $(XCTEST_BUNDLE_RUNNER_ENTRY_OBJS) $(UNIT_TEST_OBJS) $(INTEGRATION_TEST_OBJS) $(BROWSER_ERROR_AUDIT_TEST_OBJS) $(TEST_SHARED_OBJS) $(PHASE20_SQL_BUILDER_TEST_OBJS) $(PHASE20_SCHEMA_TEST_OBJS) $(PHASE20_POSTGRES_LIVE_TEST_OBJS) $(PHASE20_MSSQL_LIVE_TEST_OBJS) $(PHASE20_ROUTING_TEST_OBJS) $(PHASE21_TEMPLATE_TEST_OBJS))
 ALL_DEPFILES := $(ALL_OBJECTS:.o=.d)
 
-.PHONY: all clang64-preview framework-artifacts eocc transpile module-transpile tech-demo-transpile generated-compile arlen boomhauer tech-demo-server api-reference-server auth-primitives-server migration-sample-server arlen-data-example json-perf-bench dispatch-perf-bench http-parse-perf-bench route-match-perf-bench backend-contract-matrix test-data-layer dev-server tech-demo smoke-render smoke routes build-tests test test-unit test-unit-filter test-integration test-integration-filter browser-error-audit phase20-sql-builder-tests phase20-schema-tests phase20-postgres-live-tests phase20-mssql-live-tests phase20-routing-tests phase20-focused phase21-template-tests phase21-protocol-tests phase21-generated-app-tests phase21-focused phase21-confidence perf perf-fast ci-perf-smoke parity-phaseb perf-phasec perf-phased deploy-smoke phase5e-confidence phase12-confidence phase13-confidence phase14-confidence phase15-confidence phase16-confidence phase19-confidence phase20-confidence ci-quality ci-sanitizers ci-fault-injection ci-release-certification ci-json-abstraction ci-json-perf ci-dispatch-perf ci-http-parse-perf ci-route-match-perf ci-backend-parity-matrix ci-protocol-adversarial ci-syscall-faults ci-allocation-faults ci-soak ci-chaos-restart ci-static-analysis ci-blob-throughput ci-phase11-protocol-adversarial ci-phase11-fuzz ci-phase11-live-adversarial ci-phase11-sanitizers ci-phase11 ci-docs ci-benchmark-contracts check docs-api docs-html docs-serve clean
+.PHONY: all clang64-preview framework-artifacts eocc transpile module-transpile tech-demo-transpile generated-compile arlen boomhauer tech-demo-server api-reference-server auth-primitives-server migration-sample-server arlen-data-example json-perf-bench dispatch-perf-bench http-parse-perf-bench route-match-perf-bench backend-contract-matrix test-data-layer dev-server tech-demo smoke-render smoke routes build-tests test test-unit test-unit-filter test-integration test-integration-filter browser-error-audit phase20-sql-builder-tests phase20-schema-tests phase20-postgres-live-tests phase20-mssql-live-tests phase20-routing-tests phase20-focused phase21-template-tests phase21-protocol-tests phase21-generated-app-tests phase21-focused phase21-confidence phase24-windows-tests perf perf-fast ci-perf-smoke parity-phaseb perf-phasec perf-phased deploy-smoke phase5e-confidence phase12-confidence phase13-confidence phase14-confidence phase15-confidence phase16-confidence phase19-confidence phase20-confidence ci-quality ci-sanitizers ci-fault-injection ci-release-certification ci-json-abstraction ci-json-perf ci-dispatch-perf ci-http-parse-perf ci-route-match-perf ci-backend-parity-matrix ci-protocol-adversarial ci-syscall-faults ci-allocation-faults ci-soak ci-chaos-restart ci-static-analysis ci-blob-throughput ci-phase11-protocol-adversarial ci-phase11-fuzz ci-phase11-live-adversarial ci-phase11-sanitizers ci-phase11 ci-docs ci-benchmark-contracts check docs-api docs-html docs-serve clean
 
 ifeq ($(ARLEN_WINDOWS_PREVIEW),1)
-all: framework-artifacts arlen
+all: framework-artifacts arlen $(XCTEST_BUNDLE_RUNNER_TOOL)
 else
 all: eocc transpile generated-compile arlen boomhauer
 endif
 
-clang64-preview: framework-artifacts arlen
+clang64-preview: framework-artifacts arlen $(XCTEST_BUNDLE_RUNNER_TOOL)
 
 $(BUILD_DIR):
 >mkdir -p $(BUILD_DIR)
@@ -429,6 +466,10 @@ $(ARLEN_TOOL): $(ARLEN_ENTRY_OBJS) $(ARLEN_FRAMEWORK_LIB) | $(BUILD_DIR)
 >@source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) $(ARLEN_ENTRY_OBJS) $(ARLEN_FRAMEWORK_LIB) -o $(ARLEN_TOOL) $(BASE_LINK_LIBS)
 
 arlen: $(ARLEN_TOOL)
+
+$(XCTEST_BUNDLE_RUNNER_TOOL): $(XCTEST_BUNDLE_RUNNER_ENTRY_OBJS) | $(BUILD_DIR)
+>@mkdir -p $(@D)
+>@source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) $(XCTEST_BUNDLE_RUNNER_ENTRY_OBJS) -o $(XCTEST_BUNDLE_RUNNER_TOOL) $(XCTEST_LINK_LIBS)
 
 $(JSON_PERF_BENCH_TOOL): $(JSON_PERF_BENCH_ENTRY_OBJS) $(ARLEN_FRAMEWORK_LIB) | $(BUILD_DIR)
 >@mkdir -p $(@D)
@@ -604,6 +645,10 @@ phase20-focused: phase20-sql-builder-tests phase20-schema-tests phase20-routing-
 phase21-template-tests: $(PHASE21_TEMPLATE_TEST_BIN)
 >mkdir -p $(GNUSTEP_TEST_HOME)/GNUstep/Defaults/.lck
 >source $(GNUSTEP_SH) && export HOME="$(GNUSTEP_TEST_HOME)" GNUSTEP_USER_DIR="$(GNUSTEP_TEST_HOME)/GNUstep" GNUSTEP_USER_ROOT="$(GNUSTEP_TEST_HOME)/GNUstep" GNUSTEP_USER_DEFAULTS_DIR="$(GNUSTEP_TEST_HOME)/GNUstep/Defaults" && $(xctest_runtime_env) "$(ARLEN_XCTEST)" $(PHASE21_TEMPLATE_TEST_BUNDLE)
+
+phase24-windows-tests: $(PHASE21_TEMPLATE_TEST_BIN) $(XCTEST_BUNDLE_RUNNER_TOOL)
+>mkdir -p $(GNUSTEP_TEST_HOME)/GNUstep/Defaults/.lck
+>source $(GNUSTEP_SH) && export HOME="$(GNUSTEP_TEST_HOME)" GNUSTEP_USER_DIR="$(GNUSTEP_TEST_HOME)/GNUstep" GNUSTEP_USER_ROOT="$(GNUSTEP_TEST_HOME)/GNUstep" GNUSTEP_USER_DEFAULTS_DIR="$(GNUSTEP_TEST_HOME)/GNUstep/Defaults" && $(xctest_runtime_env) "$(ARLEN_WINDOWS_FOCUSED_TEST_RUNNER)" $(PHASE21_TEMPLATE_TEST_BUNDLE)
 
 phase21-protocol-tests:
 >bash ./tools/ci/run_phase21_protocol_corpus.sh

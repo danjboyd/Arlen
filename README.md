@@ -40,8 +40,9 @@ Then open `http://127.0.0.1:3000/`.
 ## Windows Preview
 
 Native Windows support is being developed on branch `windows/clang64` as Phase
-24. The current first-pass preview is CLI-first on MSYS2 `CLANG64`, not full
-runtime parity yet.
+24. The current first-pass preview on MSYS2 `CLANG64` now covers the CLI,
+focused template tests, and basic app-root non-watch `boomhauer` flows, but it
+is still not full Linux/runtime parity.
 
 Use the checked-in PowerShell launcher to enter the supported toolchain:
 
@@ -54,6 +55,9 @@ Then build the preview slice:
 ```sh
 make all
 ./bin/arlen doctor
+./bin/arlen new MyApp
+cd MyApp
+/path/to/Arlen/bin/arlen boomhauer --no-watch --prepare-only
 ```
 
 Details, supported commands, and current limitations live in
@@ -170,7 +174,7 @@ below is the detailed milestone ledger for the shipped surface summarized above.
 - Phase 20: complete (`20A-20K` delivered on 2026-03-26; `20L-20R` delivered on 2026-03-27 for MSSQL native transport tightening, ordered result semantics, bounded PostgreSQL metadata expansion, explicit live-test requirement accounting, shared test support/assertion layers, and repo-native focused confidence lanes. See `docs/PHASE20_ROADMAP.md`).
 - Phase 21: complete (`21A-21G` delivered on 2026-03-27 for in-process request harnesses, shared request/pipeline assertion helpers, explicit async DB ownership rules, template-suite decomposition, raw protocol corpus replay, generated-app matrix coverage, and repo-native focused confidence lanes. See `docs/PHASE21_ROADMAP.md`).
 - Phase 22: complete (`22A-22G` delivered on 2026-03-30 for newcomer-first onboarding, docs/code parity hardening, app-author guides, module/lite-mode guidance, plugin/frontend guides, and docs quality closeout. See `docs/PHASE22_ROADMAP.md`).
-- Phase 24: planned on branch `windows/clang64` (`24A-24L` scoped on 2026-03-31 for MSYS2 `CLANG64` Windows compatibility first pass plus the follow-on full parity track. See `docs/PHASE24_ROADMAP.md`).
+- Phase 24: in progress on branch `windows/clang64` (`24A-24H` implementation landed on 2026-03-31 for the MSYS2 `CLANG64` preview slice; `24I-24L` remain for full parity. See `docs/PHASE24_ROADMAP.md`).
 
 ## Requirements and Setup Details
 

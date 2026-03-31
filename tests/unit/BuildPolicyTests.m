@@ -138,7 +138,9 @@
 
   XCTAssertTrue([makefile containsString:@"ARLEN_XCTEST ?= xctest"]);
   XCTAssertTrue([makefile containsString:@"ARLEN_XCTEST_LD_LIBRARY_PATH ?="]);
-  XCTAssertTrue([makefile containsString:@"BASE_LINK_LIBS := $$(gnustep-config --base-libs) -ldl -lcrypto -ldispatch"]);
+  XCTAssertTrue([makefile containsString:@"ARLEN_WINDOWS_FOCUSED_TEST_RUNNER ?= $(XCTEST_BUNDLE_RUNNER_TOOL)"]);
+  XCTAssertTrue([makefile containsString:@"XCTEST_BUNDLE_RUNNER_TOOL := $(BUILD_DIR)/arlen-xctest-runner"]);
+  XCTAssertTrue([makefile containsString:@"BASE_LINK_LIBS := $(ARLEN_PLATFORM_LINK_DIRS) $$(gnustep-config --base-libs) -lcrypto -ldispatch $(ARLEN_PLATFORM_LINK_LIBS)"]);
   XCTAssertTrue([makefile containsString:@"XCTEST_LINK_LIBS := $(BASE_LINK_LIBS) -lXCTest"]);
   XCTAssertTrue([makefile containsString:@"UNIT_TEST_TARGET_NAME := $(notdir $(basename $(UNIT_TEST_BUNDLE)))"]);
   XCTAssertTrue([makefile containsString:@"INTEGRATION_TEST_TARGET_NAME := $(notdir $(basename $(INTEGRATION_TEST_BUNDLE)))"]);
@@ -154,6 +156,8 @@
   XCTAssertTrue([makefile containsString:@"LD_LIBRARY_PATH=\"$(ARLEN_XCTEST_LD_LIBRARY_PATH)$${LD_LIBRARY_PATH:+:$$LD_LIBRARY_PATH}\""]);
   XCTAssertTrue([makefile containsString:@"$(call xctest_filter_args,$(UNIT_TEST_TARGET_NAME))"]);
   XCTAssertTrue([makefile containsString:@"$(call xctest_filter_args,$(INTEGRATION_TEST_TARGET_NAME))"]);
+  XCTAssertTrue([makefile containsString:@"phase24-windows-tests: $(PHASE21_TEMPLATE_TEST_BIN) $(XCTEST_BUNDLE_RUNNER_TOOL)"]);
+  XCTAssertTrue([makefile containsString:@"\"$(ARLEN_WINDOWS_FOCUSED_TEST_RUNNER)\" $(PHASE21_TEMPLATE_TEST_BUNDLE)"]);
 }
 
 - (void)testGNUmakefileDefinesFocusedPhase20ConfidenceLanes {
@@ -243,7 +247,7 @@
   XCTAssertTrue([script containsString:@"printf 'GNUSTEP_OBJC_FLAGS := %s\\n' \"$gnustep_objc_flags\""]);
   XCTAssertTrue([script containsString:
                              @"printf 'OBJC_FLAGS := $(GNUSTEP_OBJC_FLAGS) -fobjc-arc -fPIC "
-                              "-DARLEN_ENABLE_YYJSON=%s -DARLEN_ENABLE_LLHTTP=%s "
+                              "-DARLEN_ENABLE_YYJSON=%s -DARLEN_ENABLE_LLHTTP=%s -DARLEN_WINDOWS_PREVIEW=%s "
                               "-DARGON2_NO_THREADS=1\\n'"]);
   XCTAssertTrue([script containsString:
                              @"printf '>source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) "
@@ -314,7 +318,8 @@
                 @"boomhauer app build must include vendored app module headers");
   XCTAssertTrue([script containsString:@"-DARLEN_ENABLE_YYJSON=%s -DARLEN_ENABLE_LLHTTP=%s"]);
   XCTAssertTrue([script containsString:@"-DARGON2_NO_THREADS=1"]);
-  XCTAssertTrue([script containsString:@"printf 'BASE_LINK_LIBS := %s -ldl -lcrypto -ldispatch\\n' \"$gnustep_base_libs\""]);
+  XCTAssertTrue([script containsString:@"printf 'ARLEN_PLATFORM_LINK_LIBS := %s\\n' \"$platform_link_libs\""]);
+  XCTAssertTrue([script containsString:@"printf 'BASE_LINK_LIBS := %s -lcrypto -ldispatch $(ARLEN_PLATFORM_LINK_LIBS)\\n' \"$gnustep_base_libs\""]);
   XCTAssertTrue([script containsString:@"-ldispatch"]);
 }
 
@@ -400,10 +405,14 @@
   NSString *script = [self readFile:scriptPath];
 
   XCTAssertTrue([script containsString:@"file_fingerprint_fields() {"]);
-  XCTAssertTrue([script containsString:@"stat -c %y \"$path\""],
+  XCTAssertTrue([script containsString:@"python3 - \"$path\" <<'PY'"],
+                @"watch mode should use a portable metadata probe");
+  XCTAssertTrue([script containsString:@"stat_result.st_mtime_ns"],
                 @"watch mode should keep sub-second mtime precision");
-  XCTAssertTrue([script containsString:@"stat -c %z \"$path\""],
+  XCTAssertTrue([script containsString:@"stat_result.st_ctime_ns"],
                 @"watch mode should keep sub-second ctime precision");
+  XCTAssertFalse([script containsString:@"sha256sum"],
+                 @"watch mode should not depend on sha256sum on Windows preview");
   XCTAssertTrue([script containsString:
                               @"append_fingerprint_entries \"$framework_root\" \"framework\" src modules GNUmakefile tools/eocc.m"],
                 @"watch mode should invalidate on framework module header changes");

@@ -16,6 +16,7 @@
 #import "ALNSessionMiddleware.h"
 #import "ALNLogger.h"
 #import "ALNJSONSerialization.h"
+#import "ALNPlatform.h"
 #import "ALNPerf.h"
 #import "ALNMetrics.h"
 #import "ALNAuth.h"
@@ -28,9 +29,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/time.h>
 #include <time.h>
-#include <unistd.h>
 
 NSString *const ALNApplicationErrorDomain = @"Arlen.Application.Error";
 
@@ -1768,35 +1767,7 @@ static NSString *ALNResolvedRequestID(ALNRequestIdentity *requestIdentity) {
 }
 
 static NSString *ALNISO8601Now(void) {
-  struct timeval tv;
-  if (gettimeofday(&tv, NULL) != 0) {
-    return @"1970-01-01T00:00:00.000Z";
-  }
-
-  time_t seconds = tv.tv_sec;
-  struct tm utc;
-  if (gmtime_r(&seconds, &utc) == NULL) {
-    return @"1970-01-01T00:00:00.000Z";
-  }
-
-  int milliseconds = (int)(tv.tv_usec / 1000);
-  char buffer[32];
-  int written = snprintf(buffer,
-                         sizeof(buffer),
-                         "%04d-%02d-%02dT%02d:%02d:%02d.%03dZ",
-                         utc.tm_year + 1900,
-                         utc.tm_mon + 1,
-                         utc.tm_mday,
-                         utc.tm_hour,
-                         utc.tm_min,
-                         utc.tm_sec,
-                         milliseconds);
-  if (written <= 0 || written >= (int)sizeof(buffer)) {
-    return @"1970-01-01T00:00:00.000Z";
-  }
-
-  NSString *formatted = [NSString stringWithUTF8String:buffer];
-  return [formatted length] > 0 ? formatted : @"1970-01-01T00:00:00.000Z";
+  return ALNPlatformISO8601Now();
 }
 
 static BOOL ALNIsASCIIWhitespace(unsigned char byte) {
@@ -2353,7 +2324,7 @@ static NSDictionary *ALNClusterStatusPayload(ALNApplication *application) {
       @"node_id" : application.clusterNodeID ?: @"node",
       @"expected_nodes" : @(application.clusterExpectedNodes),
       @"observed_nodes" : @(application.clusterObservedNodes),
-      @"worker_pid" : @((NSInteger)getpid()),
+      @"worker_pid" : @(ALNPlatformProcessIdentifier()),
       @"mode" : application.clusterEnabled ? @"multi_node" : @"single_node",
       @"quorum" : quorumSummary,
     },
@@ -3160,7 +3131,8 @@ static void ALNFinalizeResponse(ALNApplication *application,
     [response setHeader:@"X-Arlen-Cluster" value:application.clusterName ?: @"default"];
     [response setHeader:@"X-Arlen-Node" value:application.clusterNodeID ?: @"node"];
     [response setHeader:@"X-Arlen-Worker-Pid"
-                  value:[NSString stringWithFormat:@"%d", (int)getpid()]];
+                  value:[NSString stringWithFormat:@"%ld",
+                                               (long)ALNPlatformProcessIdentifier()]];
     [response setHeader:@"X-Arlen-Cluster-Status" value:clusterStatus];
     [response setHeader:@"X-Arlen-Cluster-Observed-Nodes" value:observedNodes];
     [response setHeader:@"X-Arlen-Cluster-Expected-Nodes" value:expectedNodes];

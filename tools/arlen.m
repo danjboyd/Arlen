@@ -39,9 +39,10 @@ static void PrintUsage(void) {
   fprintf(stderr,
           "\n"
           "Windows CLANG64 preview:\n"
-          "  supported: doctor, config, new, generate, build, typed-sql-codegen,\n"
-          "             module add/remove/list/doctor/assets/eject/upgrade\n"
-          "  deferred: boomhauer, jobs worker, propane, routes, test, perf, check,\n"
+          "  supported: doctor, config, new, generate, build, boomhauer, routes,\n"
+          "             focused test, typed-sql-codegen, module add/remove/list/\n"
+          "             doctor/assets/eject/upgrade\n"
+          "  deferred: jobs worker, propane, perf, check,\n"
           "            migrate, schema-codegen, module migrate\n");
 #endif
 }
@@ -2347,11 +2348,6 @@ static int EmitWindowsPreviewUnsupported(NSString *command,
 }
 
 static int CommandBoomhauer(NSArray *args) {
-#if ARLEN_WINDOWS_PREVIEW
-  return EmitWindowsPreviewUnsupported(@"boomhauer", @"boomhauer", args,
-                                       @"Phase 24H will bring up app-root boomhauer workflows on Windows.",
-                                       @"arlen build --dry-run --json");
-#endif
   NSString *appRoot = [[NSFileManager defaultManager] currentDirectoryPath];
   NSString *frameworkRoot = ResolveFrameworkRootForCommand(@"boomhauer");
   if ([frameworkRoot length] == 0) {
@@ -2432,28 +2428,32 @@ static int CommandJobs(NSArray *args) {
 }
 
 static int CommandRoutes(void) {
-#if ARLEN_WINDOWS_PREVIEW
-  return EmitWindowsPreviewUnsupported(@"routes", @"routes", @[],
-                                       @"Phase 24H will enable route inspection once boomhauer is portable on Windows.",
-                                       @"arlen build --dry-run --json");
-#endif
   NSString *appRoot = [[NSFileManager defaultManager] currentDirectoryPath];
   NSString *frameworkRoot = ResolveFrameworkRootForCommand(@"routes");
   if ([frameworkRoot length] == 0) {
     return 1;
   }
-  NSString *command = [NSString stringWithFormat:@"%@ && %@",
-                                                 BoomhauerBuildCommand(frameworkRoot),
-                                                 BoomhauerLaunchCommand(@[ @"--print-routes" ],
-                                                                        frameworkRoot, appRoot)];
+  NSString *command = [NSString stringWithFormat:@"cd %@ && ARLEN_APP_ROOT=%@ ARLEN_FRAMEWORK_ROOT=%@ ./bin/boomhauer --no-watch --print-routes",
+                                                 ShellQuote(frameworkRoot),
+                                                 ShellQuote(appRoot),
+                                                 ShellQuote(frameworkRoot)];
   return RunShellCommand(command);
 }
 
 static int CommandTest(NSArray *args) {
 #if ARLEN_WINDOWS_PREVIEW
-  return EmitWindowsPreviewUnsupported(@"test", @"test", args,
-                                       @"Phase 24E will define the focused Windows XCTest contract.",
-                                       @"arlen doctor --json");
+  if (ArgsContainFlag(args ?: @[], @"--integration") || ArgsContainFlag(args ?: @[], @"--all")) {
+    return EmitWindowsPreviewUnsupported(@"test", @"test", args,
+                                         @"Windows preview currently supports the focused Phase 24 template XCTest lane only.",
+                                         @"powershell -ExecutionPolicy Bypass -File scripts\\run_clang64.ps1 -InnerCommand \"make phase24-windows-tests\"");
+  }
+  NSString *frameworkRoot = ResolveFrameworkRootForCommand(@"test");
+  if ([frameworkRoot length] == 0) {
+    return 1;
+  }
+  NSString *command = [NSString stringWithFormat:@"cd %@ && make phase24-windows-tests",
+                                                 ShellQuote(frameworkRoot)];
+  return RunShellCommand(command);
 #endif
   NSString *frameworkRoot = ResolveFrameworkRootForCommand(@"test");
   if ([frameworkRoot length] == 0) {

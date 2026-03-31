@@ -267,6 +267,10 @@ Build and run `boomhauer` for the current app root.
 - transpile/compile failures in watch mode do not terminate supervisor; diagnostics are served until next successful rebuild
 - while the fallback diagnostic server is active, `boomhauer` retries failed builds on a short backoff and the HTML error page advertises that recovery behavior
 - server args are passed through (`--watch`, `--no-watch`, `--prepare-only`, `--port`, `--host`, `--env`, `--once`, `--print-routes`)
+- Windows CLANG64 preview:
+  - supported for app-root `--no-watch`, `--prepare-only`, `--print-routes`, `--once`, and direct non-watch server launch
+  - watch mode and the fallback dev error server remain deferred
+  - path/bootstrap discovery resolves `GNUstep.sh` dynamically and accepts Windows-owned app-root paths through MSYS normalization
 
 ### `arlen jobs worker [worker args...]`
 
@@ -289,11 +293,17 @@ Run production manager (`propane`) for the current app root.
 
 Build app and print resolved routes (`--print-routes`).
 
+- Windows CLANG64 preview: supported through `bin/boomhauer --no-watch --print-routes`
+
 ### `arlen test [--unit|--integration|--all]`
 
 Run framework tests.
 
 - default: equivalent to `--all`
+- Windows CLANG64 preview:
+  - supported lane: focused template suite only
+  - `arlen test --unit` maps to `make phase24-windows-tests`
+  - `--integration` and `--all` remain deferred until later Phase 24 verification work
 
 ### `arlen perf`
 

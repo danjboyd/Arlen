@@ -73,7 +73,7 @@ local hosting.
 - [Phase 20 Roadmap](PHASE20_ROADMAP.md): completed data-layer depth pass.
 - [Phase 21 Roadmap](PHASE21_ROADMAP.md): completed public-release test robustness pass.
 - [Phase 22 Roadmap](PHASE22_ROADMAP.md): completed documentation cleanup pass for newcomer-first onboarding and docs quality closeout.
-- [Phase 24 Roadmap](PHASE24_ROADMAP.md): planned Windows/MSYS2 `CLANG64` compatibility and parity track on branch `windows/clang64`.
+- [Phase 24 Roadmap](PHASE24_ROADMAP.md): in-progress Windows/MSYS2 `CLANG64` compatibility and parity track on branch `windows/clang64`.
 - [Combined Roadmap Index (Historical Aggregate)](PHASE2_PHASE3_ROADMAP.md)
 - [Phase 1 Spec](PHASE1_SPEC.md)
 - [Arlen CLI Spec](ARLEN_CLI_SPEC.md)

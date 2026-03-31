@@ -2,7 +2,7 @@
 
 #if ARLEN_ENABLE_LLHTTP
 #import "third_party/llhttp/llhttp.h"
-#include <pthread.h>
+#import <dispatch/dispatch.h>
 #endif
 #include <errno.h>
 #include <limits.h>
@@ -383,11 +383,10 @@ NSMutableData *_headerValueData;
 @end
 
 static llhttp_settings_t gALNLLHTTPSettings;
-static pthread_once_t gALNLLHTTPSettingsOnce = PTHREAD_ONCE_INIT;
+static dispatch_once_t gALNLLHTTPSettingsOnce;
 static llhttp_settings_t gALNLLHTTPStreamingSettings;
-static pthread_once_t gALNLLHTTPStreamingSettingsOnce = PTHREAD_ONCE_INIT;
-static pthread_key_t gALNLLHTTPStateKey;
-static pthread_once_t gALNLLHTTPStateKeyOnce = PTHREAD_ONCE_INIT;
+static dispatch_once_t gALNLLHTTPStreamingSettingsOnce;
+static NSString *const ALNLLHTTPThreadStateDictionaryKey = @"aln.http.llhttp.thread_state";
 
 static ALNLLHTTPParseState *ALNLLHTTPState(llhttp_t *parser) {
   if (parser == NULL || parser->data == NULL) {
@@ -839,7 +838,9 @@ static void ALNLLHTTPInitializeSharedSettings(void) {
 }
 
 static const llhttp_settings_t *ALNLLHTTPSharedSettings(void) {
-  pthread_once(&gALNLLHTTPSettingsOnce, ALNLLHTTPInitializeSharedSettings);
+  dispatch_once(&gALNLLHTTPSettingsOnce, ^{
+    ALNLLHTTPInitializeSharedSettings();
+  });
   return &gALNLLHTTPSettings;
 }
 
@@ -855,28 +856,21 @@ static void ALNLLHTTPInitializeStreamingSettings(void) {
 }
 
 static const llhttp_settings_t *ALNLLHTTPStreamingSettings(void) {
-  pthread_once(&gALNLLHTTPStreamingSettingsOnce, ALNLLHTTPInitializeStreamingSettings);
+  dispatch_once(&gALNLLHTTPStreamingSettingsOnce, ^{
+    ALNLLHTTPInitializeStreamingSettings();
+  });
   return &gALNLLHTTPStreamingSettings;
 }
 
-static void ALNLLHTTPThreadStateRelease(void *value) {
-  if (value != NULL) {
-    (void)(__bridge_transfer id)value;
-  }
-}
-
-static void ALNLLHTTPInitializeThreadStateKey(void) {
-  (void)pthread_key_create(&gALNLLHTTPStateKey, ALNLLHTTPThreadStateRelease);
-}
-
 static ALNLLHTTPParseState *ALNLLHTTPThreadState(void) {
-  pthread_once(&gALNLLHTTPStateKeyOnce, ALNLLHTTPInitializeThreadStateKey);
-  void *stored = pthread_getspecific(gALNLLHTTPStateKey);
+  NSMutableDictionary *threadDictionary = [[NSThread currentThread] threadDictionary];
   ALNLLHTTPParseState *state =
-      (stored != NULL) ? (__bridge ALNLLHTTPParseState *)stored : nil;
+      [threadDictionary[ALNLLHTTPThreadStateDictionaryKey] isKindOfClass:[ALNLLHTTPParseState class]]
+          ? threadDictionary[ALNLLHTTPThreadStateDictionaryKey]
+          : nil;
   if (state == nil) {
     state = [[ALNLLHTTPParseState alloc] init];
-    pthread_setspecific(gALNLLHTTPStateKey, (__bridge_retained void *)state);
+    threadDictionary[ALNLLHTTPThreadStateDictionaryKey] = state;
   }
   [state resetForNextParse];
   return state;

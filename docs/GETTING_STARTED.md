@@ -21,6 +21,13 @@ Initialize GNUstep in your shell:
 source /usr/GNUstep/System/Library/Makefiles/GNUstep.sh
 ```
 
+For the native Windows Phase 24 preview on MSYS2 `CLANG64`, enter the checked-in
+toolchain shell instead:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\run_clang64.ps1
+```
+
 Run the bootstrap diagnostic first:
 
 ```bash
@@ -48,6 +55,13 @@ This builds the main tools you will use first:
 - `build/arlen`
 - `build/boomhauer`
 - `build/eocc`
+
+On the Windows preview branch, `make all` currently builds:
+
+- `build/arlen`
+- `build/arlen-xctest-runner`
+- `build/eocc`
+- the preview `libArlenFramework.a`
 
 ## 3. Create Your First App
 
@@ -79,6 +93,12 @@ From app root:
 /path/to/Arlen/bin/arlen boomhauer --port 3000
 ```
 
+On the Windows preview, use non-watch mode for now:
+
+```bash
+/path/to/Arlen/bin/arlen boomhauer --no-watch --port 3000
+```
+
 Then verify:
 
 ```bash
@@ -88,6 +108,8 @@ curl -i http://127.0.0.1:3000/openapi
 ```
 
 `boomhauer` watches app files by default and rebuilds when inputs change.
+Windows preview currently supports app-root non-watch flows plus
+`--prepare-only` / `--print-routes`; watch mode remains deferred.
 
 ## 5. Add One More Route
 
@@ -123,6 +145,9 @@ From app root:
 ```
 
 Use `arlen routes` when you want to inspect registration order and route names.
+On the Windows preview, use `arlen test --unit` or `make phase24-windows-tests`
+for the focused template XCTest lane instead of the full Linux verification
+matrix.
 
 ## 7. Choose the Next Guide
 
