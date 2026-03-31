@@ -5,8 +5,10 @@ Last updated: 2026-03-31
 This document records the native Windows workflow for Arlen on MSYS2
 `CLANG64`.
 
-Phase 24 is complete on branch `windows/clang64`. The branch now documents the
-supported native Windows preview contract rather than a partially open roadmap.
+The Phase 24 preview contract (`24A-24M`) is complete on branch
+`windows/clang64`. The broader roadmap has now been extended with `24N-24S`
+for true Windows-to-Linux parity, but this document still records the current
+checked-in preview contract.
 
 ## 1. Host Entry Path
 

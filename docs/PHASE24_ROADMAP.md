@@ -1,6 +1,6 @@
 # Arlen Phase 24 Roadmap
 
-Status: complete on 2026-03-31 (Phase 24 delivered on branch `windows/clang64`; focused Windows XCTest discovery, DB smoke, app-root confidence, and explicit native non-support boundaries are now part of the checked-in CLANG64 preview contract)
+Status: in progress on 2026-03-31 (`24A-24M` delivered on branch `windows/clang64` for the checked-in CLANG64 preview contract; `24N-24S` now track the remaining work required for true Windows-to-Linux parity)
 Last updated: 2026-03-31
 
 Related docs:
@@ -26,10 +26,11 @@ Make Arlen build and run natively on Windows via MSYS2 `CLANG64` while keeping
 GNUstep-make as the canonical build system and allowing the main branch to
 continue Phase 23 work independently.
 
-Phase 24 is split into two tracks:
+Phase 24 is split into three tracks:
 
 - `24A-24F`: first-pass Windows compatibility
-- `24G-24M`: full Windows parity and closeout
+- `24G-24M`: Windows preview contract completion
+- `24N-24S`: Windows-to-Linux parity closeout
 
 The implementation branch for this work is `windows/clang64`.
 
@@ -62,13 +63,18 @@ First-pass success means:
 
 Full-parity success means:
 
-- `boomhauer` and native app-root workflows run on Windows
-- the HTTP runtime, filesystem security helpers, and database transports all
-  have verified Windows implementations
-- the supported Windows verification matrix is broad enough to make support
-  claims credible
-- the production/deployment story for Windows is explicit rather than inherited
-  from Linux-only docs
+- default app-root `boomhauer` behavior, including watch mode and dev-error
+  recovery, matches Linux on Windows
+- `jobs worker` and `propane` both run natively on Windows with equivalent
+  lifecycle behavior and user-facing contracts
+- the HTTP runtime, filesystem security helpers, database transports, and
+  production/runtime-manager surfaces all have verified Windows
+  implementations
+- the supported Windows verification matrix is broad enough to cover the same
+  unit, integration, live-backend, perf, sanitizer, and fault-injection
+  confidence claims that Linux currently carries
+- the release/deployment story for Windows is implementation-backed rather than
+  inherited from Linux-only docs or limited to preview caveats
 
 ## 2. Design Principles
 
@@ -98,7 +104,7 @@ Full-parity success means:
 5. Phase 24E: focused Windows XCTest runner strategy.
 6. Phase 24F: first-pass closeout and preview-scope documentation.
 
-## 3.2 Full Windows Parity Track
+## 3.2 Windows Preview Contract Track
 
 7. Phase 24G: HTTP/runtime portability seams.
 8. Phase 24H: `boomhauer` and app-root developer-experience parity.
@@ -108,7 +114,16 @@ Full-parity success means:
 12. Phase 24L: production/runtime-manager parity and Windows deployment story.
 13. Phase 24M: Windows XCTest discovery and native warning closeout.
 
-## 3.3 Recommended Rollout Order
+## 3.3 Windows-To-Linux Parity Track
+
+14. Phase 24N: `boomhauer` watch-mode and dev-error parity.
+15. Phase 24O: `jobs worker` and background runtime parity.
+16. Phase 24P: `propane` and native process-manager parity.
+17. Phase 24Q: full test and live-backend matrix parity.
+18. Phase 24R: perf, sanitizer, and fault-injection lane parity.
+19. Phase 24S: release, packaging, and first-class platform closeout.
+
+## 3.4 Recommended Rollout Order
 
 1. `24A`
 2. `24B`
@@ -123,9 +138,16 @@ Full-parity success means:
 11. `24K`
 12. `24L`
 13. `24M`
+14. `24N`
+15. `24O`
+16. `24P`
+17. `24Q`
+18. `24R`
+19. `24S`
 
 That order gets a real Windows development foothold first, then expands
-outward into runtime, security, verification, and deployment parity.
+outward into runtime, security, verification, deployment parity, and finally
+default-platform closeout.
 
 ## 4. Scope Guardrails
 
@@ -609,6 +631,181 @@ Acceptance (required):
 - The remaining Windows-native compile warnings are either fixed or explicitly
   called out as intentional/documented exceptions.
 
+## 5.14 Phase 24N: `boomhauer` Watch-Mode + Dev-Error Parity
+
+Status: planned
+
+Checkpoint notes:
+
+- The current Windows preview only supports non-watch `boomhauer` flows such
+  as `--no-watch`, `--prepare-only`, `--once`, and `--print-routes`.
+- Linux still has meaningfully broader development-server behavior:
+  - default watch mode
+  - rebuild/retry supervision
+  - config/public restart semantics
+  - fallback dev error server loops
+
+Deliverables:
+
+- Implement reliable Windows file watching for app and framework inputs used by
+  `boomhauer`.
+- Restore Linux-equivalent watch-mode lifecycle behavior on Windows:
+  - rebuild/retry loops
+  - config/public restart handling
+  - lazy fallback dev error server launch
+  - recovery after build failures
+- Remove the remaining Windows-specific `boomhauer` watch-mode caveats from the
+  CLI and Windows docs.
+
+Acceptance (required):
+
+- `arlen boomhauer` on Windows defaults to watch mode with the same user-facing
+  semantics and diagnostics as Linux.
+- Build failures and subsequent recoveries in watch mode behave equivalently on
+  Windows and Linux for supported app-root flows.
+
+## 5.15 Phase 24O: `jobs worker` + Background Runtime Parity
+
+Status: planned
+
+Checkpoint notes:
+
+- Native Windows currently blocks `arlen jobs worker` and `bin/jobs-worker`
+  outright.
+- Linux already treats the jobs worker loop as part of the first-party runtime
+  contract for queue-backed module and app workflows.
+
+Deliverables:
+
+- Implement the Windows-safe worker lifecycle and shutdown/restart behavior
+  needed by the jobs loop.
+- Support both CLI and direct script entrypoints:
+  - `arlen jobs worker`
+  - `bin/jobs-worker`
+- Verify that module/system job flows operate correctly on Windows under the
+  same contract Linux uses today.
+
+Acceptance (required):
+
+- The first-party jobs worker loop runs natively on Windows with equivalent
+  lifecycle behavior, diagnostics, and failure handling.
+- Queue-backed jobs workflows pass on Windows without requiring Linux or WSL2.
+
+## 5.16 Phase 24P: `propane` + Native Process-Manager Parity
+
+Status: planned
+
+Checkpoint notes:
+
+- `propane` is currently documented as explicitly unsupported on native
+  Windows.
+- The preview branch documents the runtime boundary honestly, but that is not
+  Linux parity.
+
+Deliverables:
+
+- Implement a Windows-native process-manager model for `propane` that preserves
+  the existing user-facing contract, including propane accessories.
+- Support worker supervision, graceful restart/stop behavior, and the
+  build-before-launch path that Linux currently provides.
+- Define and test the native Windows production-host story:
+  - direct process-manager usage
+  - service integration where required
+  - logging/lifecycle expectations
+
+Acceptance (required):
+
+- `arlen propane` and `bin/propane` run natively on Windows with Linux-equivalent
+  supervision semantics and accessory behavior.
+- The Windows production story is implementation-backed rather than
+  workaround-only documentation.
+
+## 5.17 Phase 24Q: Full Test + Live-Backend Matrix Parity
+
+Status: planned
+
+Checkpoint notes:
+
+- Current Windows confidence work is still preview-scoped:
+  - focused template XCTest lane
+  - focused DB transport smoke
+  - app-root smoke
+- Linux currently carries much broader default verification through the normal
+  `make test-*` and live-backend entrypoints.
+
+Deliverables:
+
+- Make the default Windows developer test entrypoints match Linux:
+  - `make test-unit`
+  - `make test-integration`
+  - filtered reruns where supported
+- Run the PostgreSQL and MSSQL live-backend suites natively on Windows.
+- Standardize the long-term Windows XCTest contract for the broader suite so
+  discovery, filtering, and exit status stay trustworthy.
+
+Acceptance (required):
+
+- The default Linux unit/integration and live-backend test entrypoints produce
+  equivalent automated coverage on Windows.
+- Windows test failures and prerequisites are explicit, automated, and no
+  longer limited to preview-scope smoke coverage.
+
+## 5.18 Phase 24R: Perf, Sanitizer, + Fault-Injection Lane Parity
+
+Status: planned
+
+Checkpoint notes:
+
+- Linux currently carries performance, sanitizer, chaos, and hostile-traffic
+  confidence lanes that the Windows preview contract intentionally excludes.
+- That gap is now narrow and explicit, but it is still a real parity gap.
+
+Deliverables:
+
+- Define and implement the Windows equivalents for the supported Linux
+  robustness lanes:
+  - perf
+  - ASan/UBSan where toolchain-supported
+  - fault injection
+  - hostile-traffic / protocol stress
+  - static analysis
+- Add CI/workflow coverage for those Windows parity lanes.
+- Document any unavoidable Windows-specific substitutions without weakening the
+  confidence claims they are meant to carry.
+
+Acceptance (required):
+
+- Windows CI runs parity-grade performance and robustness lanes instead of only
+  the preview confidence pack.
+- Any remaining Linux-only lanes are explicitly justified and replaced with
+  evidence of equivalent confidence on Windows.
+
+## 5.19 Phase 24S: Release, Packaging, + First-Class Platform Closeout
+
+Status: planned
+
+Checkpoint notes:
+
+- The current Windows docs still describe a preview contract with explicit
+  non-support boundaries.
+- Linux remains the de facto default platform in the release/install story.
+
+Deliverables:
+
+- Remove preview-only framing from top-level Windows docs once parity evidence
+  exists.
+- Define the release/bootstrap/package story for Windows as a first-class
+  platform.
+- Update contributor, user, and deployment docs so Windows is documented
+  alongside Linux rather than as a separate preview exception path.
+
+Acceptance (required):
+
+- Windows is documented and shipped as a first-class supported platform rather
+  than a preview contract.
+- Phase 24 can close with no remaining supported-surface behavior gap between
+  Windows and Linux.
+
 ## 6. Exit Criteria Summary
 
 Phase 24 first-pass closeout requires:
@@ -617,7 +814,7 @@ Phase 24 first-pass closeout requires:
 - documented Windows preview scope
 - explicit unsupported-surface list
 
-Phase 24 full-parity closeout requires:
+Phase 24 preview-contract closeout requires:
 
 - `24G-24M` complete
 - verified Windows-native runtime and app-root workflows
@@ -625,3 +822,12 @@ Phase 24 full-parity closeout requires:
 - explicit deployment/runtime-manager guidance for Windows
 - updated top-level docs/toolchain references to reflect the supported Windows
   contract
+
+Phase 24 full-parity closeout requires:
+
+- `24A-24S` complete
+- default `boomhauer` watch-mode behavior on Windows matches Linux
+- native `jobs worker` and `propane` support on Windows
+- Windows carries the same supported test, live-backend, perf, sanitizer, and
+  robustness confidence claims as Linux
+- top-level docs no longer describe Windows as preview-only

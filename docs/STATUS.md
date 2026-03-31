@@ -4,7 +4,17 @@ Last updated: 2026-03-31
 
 ## Leaving Off (2026-03-31)
 
-- Executed `24M` on branch `windows/clang64` and closed Phase 24:
+- Reopened the Phase 24 roadmap after the preview-contract closeout so the
+  remaining Windows-to-Linux parity work is explicit instead of implied:
+  - added `24N-24S` in `docs/PHASE24_ROADMAP.md`
+  - current parity targets now include:
+    - `boomhauer` watch-mode and dev-error parity
+    - native `jobs worker`
+    - native `propane`
+    - full test/live-backend matrix parity
+    - perf/sanitizer/fault-injection parity
+    - release/package/doc closeout as a first-class platform
+- `24A-24M` remain complete on branch `windows/clang64`:
   - switched the focused Windows lanes to linked test executables driven by
     `tools/arlen_xctest_runner.m` so CLANG64 discovery is real and fail-hard
   - verified `make phase24-windows-tests` discovers and executes the focused
@@ -31,12 +41,13 @@ Last updated: 2026-03-31
   - the only warning still observed on this host is the upstream CLANG64 /
     GNUstep `-fobjc-exceptions` unused-command-line warning rather than an
     Arlen source portability warning
-- Phase 24 is complete on `windows/clang64`.
+- Phase 24 is back to in-progress on `windows/clang64` because the roadmap now
+  includes the new Linux-parity subphases `24N-24S`.
 - Next-session execution order:
-  - decide whether any future Windows work belongs in a new roadmap phase
-    rather than reopening Phase 24
-  - if needed, investigate the upstream CLANG64 / GNUstep
-    `-fobjc-exceptions` warning separately from Arlen source parity work
+  - execute `24N` for `boomhauer` watch-mode and dev-error parity
+  - then `24O` for native `jobs worker`
+  - then `24P` for native `propane`
+  - follow with `24Q-24S` to close the remaining test/CI/release parity work
 
 ## Leaving Off (2026-03-30)
 
