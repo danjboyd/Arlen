@@ -5,8 +5,8 @@ Last updated: 2026-03-31
 This document records the native Windows workflow for Arlen on MSYS2
 `CLANG64`.
 
-The branch implementation now covers `24A-24L`, and `24M` is the explicit
-remaining closeout subphase for Windows XCTest discovery and warning cleanup.
+Phase 24 is complete on branch `windows/clang64`. The branch now documents the
+supported native Windows preview contract rather than a partially open roadmap.
 
 ## 1. Host Entry Path
 
@@ -100,11 +100,18 @@ PowerShell wrappers:
 
 Current verification note:
 
-- As of 2026-03-31, `make phase24-windows-confidence` completed on the
-  checked-in CLANG64 path in this workspace.
-- The remaining Windows test-runner gap is discovery: stock `xctest` currently
-  prints `XCTest: No tests found.` for the focused bundles, so the build,
-  bundle, and app-root smoke are live, but true XCTest parity is not closed yet.
+- As of 2026-03-31, `make phase24-windows-tests`,
+  `make phase24-windows-db-smoke`, and `make phase24-windows-confidence`
+  completed on the checked-in CLANG64 path in this workspace.
+- The focused Windows lanes use repo-local linked test executables so test
+  discovery stays reliable on CLANG64 even though the stock bundle-based
+  `xctest` flow is not.
+- The PostgreSQL transport smoke is prerequisite-aware: when `libpq` is
+  absent, it validates the documented missing-library failure contract instead
+  of pretending loader parity.
+- The only remaining warning observed in this workspace is the upstream
+  CLANG64/GNUstep `-fobjc-exceptions` unused-command-line warning; the
+  previously tracked Arlen source portability warnings are resolved.
 
 ## 5. Supported Native Windows Surface
 

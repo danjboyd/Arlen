@@ -138,8 +138,9 @@
 
   XCTAssertTrue([makefile containsString:@"ARLEN_XCTEST ?= xctest"]);
   XCTAssertTrue([makefile containsString:@"ARLEN_XCTEST_LD_LIBRARY_PATH ?="]);
-  XCTAssertTrue([makefile containsString:@"ARLEN_WINDOWS_FOCUSED_TEST_RUNNER ?= $(ARLEN_XCTEST)"]);
   XCTAssertTrue([makefile containsString:@"XCTEST_BUNDLE_RUNNER_TOOL := $(BUILD_DIR)/arlen-xctest-runner"]);
+  XCTAssertTrue([makefile containsString:@"PHASE24_WINDOWS_TEMPLATE_TEST_TOOL := $(BUILD_DIR)/tests/ArlenPhase21TemplateTestsRunner"]);
+  XCTAssertTrue([makefile containsString:@"PHASE24_WINDOWS_DB_SMOKE_TEST_TOOL := $(BUILD_DIR)/tests/ArlenPhase24WindowsDBSmokeTestsRunner"]);
   XCTAssertTrue([makefile containsString:@"BASE_LINK_LIBS := $(ARLEN_PLATFORM_LINK_DIRS) $$(gnustep-config --base-libs) -lcrypto -ldispatch $(ARLEN_PLATFORM_LINK_LIBS)"]);
   XCTAssertTrue([makefile containsString:@"XCTEST_LINK_LIBS := $(BASE_LINK_LIBS) -lXCTest"]);
   XCTAssertTrue([makefile containsString:@"UNIT_TEST_TARGET_NAME := $(notdir $(basename $(UNIT_TEST_BUNDLE)))"]);
@@ -156,16 +157,14 @@
   XCTAssertTrue([makefile containsString:@"LD_LIBRARY_PATH=\"$(ARLEN_XCTEST_LD_LIBRARY_PATH)$${LD_LIBRARY_PATH:+:$$LD_LIBRARY_PATH}\""]);
   XCTAssertTrue([makefile containsString:@"$(call xctest_filter_args,$(UNIT_TEST_TARGET_NAME))"]);
   XCTAssertTrue([makefile containsString:@"$(call xctest_filter_args,$(INTEGRATION_TEST_TARGET_NAME))"]);
-  XCTAssertTrue([makefile containsString:@"phase24-windows-tests: $(PHASE21_TEMPLATE_TEST_BIN)"]);
-  XCTAssertFalse([makefile containsString:@"phase24-windows-tests: $(PHASE21_TEMPLATE_TEST_BIN) $(XCTEST_BUNDLE_RUNNER_TOOL)"]);
+  XCTAssertTrue([makefile containsString:@"phase24-windows-tests: $(PHASE24_WINDOWS_TEMPLATE_TEST_TOOL)"]);
   XCTAssertTrue([makefile containsString:@"PHASE24_WINDOWS_DB_SMOKE_TEST_BUNDLE := $(BUILD_DIR)/tests/ArlenPhase24WindowsDBSmokeTests.xctest"]);
   XCTAssertTrue([makefile containsString:@"PHASE24_WINDOWS_DB_SMOKE_TEST_SRCS := tests/phase24/Phase24WindowsTransportSmokeTests.m"]);
-  XCTAssertTrue([makefile containsString:@"phase24-windows-db-smoke: $(PHASE24_WINDOWS_DB_SMOKE_TEST_BIN)"]);
-  XCTAssertFalse([makefile containsString:@"phase24-windows-db-smoke: $(PHASE24_WINDOWS_DB_SMOKE_TEST_BIN) $(XCTEST_BUNDLE_RUNNER_TOOL)"]);
+  XCTAssertTrue([makefile containsString:@"phase24-windows-db-smoke: $(PHASE24_WINDOWS_DB_SMOKE_TEST_TOOL)"]);
   XCTAssertTrue([makefile containsString:@"phase24-windows-confidence:"]);
   XCTAssertTrue([makefile containsString:@"bash ./tools/ci/run_phase24_windows_preview.sh"]);
-  XCTAssertTrue([makefile containsString:@"\"$(ARLEN_WINDOWS_FOCUSED_TEST_RUNNER)\" $(PHASE21_TEMPLATE_TEST_BUNDLE)"]);
-  XCTAssertTrue([makefile containsString:@"\"$(ARLEN_WINDOWS_FOCUSED_TEST_RUNNER)\" $(PHASE24_WINDOWS_DB_SMOKE_TEST_BUNDLE)"]);
+  XCTAssertTrue([makefile containsString:@"\"$(PHASE24_WINDOWS_TEMPLATE_TEST_TOOL)\""]);
+  XCTAssertTrue([makefile containsString:@"\"$(PHASE24_WINDOWS_DB_SMOKE_TEST_TOOL)\""]);
 }
 
 - (void)testWindowsPreviewBuildGraphIncludesDataLayerSources {

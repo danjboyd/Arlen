@@ -18,19 +18,23 @@ Use the smallest lane that honestly exercises the bug:
 - `make phase21-confidence`
   - run the focused lanes and regenerate `build/release_confidence/phase21/`
 - `make phase24-windows-tests`
-  - focused Windows CLANG64-safe XCTest lane using the stock `xctest` runner
-  - currently scoped to `ArlenPhase21TemplateTests.xctest`
+  - focused Windows CLANG64-safe XCTest lane using the linked repo-local test
+    runner
+  - currently scoped to the `ArlenPhase21TemplateTestsRunner` executable
 - `make phase24-windows-db-smoke`
-  - focused Windows CLANG64 data-layer transport smoke bundle
-  - asserts libpq/ODBC load before expected connection failure
+  - focused Windows CLANG64 data-layer transport smoke executable
+  - asserts ODBC load and validates the documented PostgreSQL host-library
+    contract before expected connection failure
 - `make phase24-windows-confidence`
   - Windows confidence lane: build, focused tests, DB transport smoke, and
     app-root CLI smoke
 
 Current Windows caveat:
-- the stock CLANG64 `xctest` runner currently prints `XCTest: No tests found.`
-  for the focused Phase 24 bundles, so those lanes are useful build/runtime
-  smoke today but not yet equivalent to Linux XCTest discovery.
+- the focused Phase 24 lanes deliberately use linked test executables because
+  stock bundle-based `xctest` discovery is not reliable on CLANG64
+- the remaining warning seen on this host is the upstream CLANG64/GNUstep
+  `-fobjc-exceptions` unused-command-line warning rather than an Arlen source
+  warning
 
 Phase 20 data-layer-focused lanes remain available:
 

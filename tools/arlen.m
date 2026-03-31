@@ -497,20 +497,6 @@ static NSString *FrameworkRootFromExecutablePath(void) {
   return nil;
 }
 
-static NSString *BoomhauerBuildCommand(NSString *frameworkRoot) {
-  return [NSString stringWithFormat:@"cd %@ && make boomhauer", ShellQuote(frameworkRoot)];
-}
-
-static NSString *BoomhauerLaunchCommand(NSArray *serverArgs, NSString *frameworkRoot, NSString *appRoot) {
-  NSMutableArray *parts = [NSMutableArray array];
-  for (NSString *arg in serverArgs ?: @[]) {
-    [parts addObject:ShellQuote(arg)];
-  }
-  NSString *suffix = ([parts count] > 0) ? [NSString stringWithFormat:@" %@", [parts componentsJoinedByString:@" "]] : @"";
-  return [NSString stringWithFormat:@"cd %@ && ARLEN_APP_ROOT=%@ ./build/boomhauer%@",
-                                    ShellQuote(frameworkRoot), ShellQuote(appRoot), suffix];
-}
-
 static BOOL WriteTextFile(NSString *path, NSString *content, BOOL force, NSError **error) {
   NSFileManager *fm = [NSFileManager defaultManager];
   if ([fm fileExistsAtPath:path] && !force) {

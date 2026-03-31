@@ -1,6 +1,6 @@
 # Arlen Phase 24 Roadmap
 
-Status: in progress on 2026-03-31 (`24A-24L` implementation landed on branch; `make phase24-windows-confidence` now completes on CLANG64; `24M` tracks the remaining Windows XCTest discovery and warning closeout)
+Status: complete on 2026-03-31 (Phase 24 delivered on branch `windows/clang64`; focused Windows XCTest discovery, DB smoke, app-root confidence, and explicit native non-support boundaries are now part of the checked-in CLANG64 preview contract)
 Last updated: 2026-03-31
 
 Related docs:
@@ -145,7 +145,7 @@ outward into runtime, security, verification, and deployment parity.
 
 ## 5.1 Phase 24A: Branch + Toolchain Contract
 
-Status: in progress
+Status: complete
 
 Checkpoint notes:
 
@@ -180,7 +180,7 @@ Acceptance (required):
 
 ## 5.2 Phase 24B: Build + Bootstrap Path Abstraction
 
-Status: in progress
+Status: complete
 
 Checkpoint notes:
 
@@ -213,7 +213,7 @@ Acceptance (required):
 
 ## 5.3 Phase 24C: `eocc` + Core Library + CLI Build Bring-Up
 
-Status: in progress
+Status: complete
 
 Checkpoint notes:
 
@@ -245,7 +245,7 @@ Acceptance (required):
 
 ## 5.4 Phase 24D: Windows-Safe CLI + Scaffold Path Normalization
 
-Status: in progress
+Status: complete
 
 Checkpoint notes:
 
@@ -277,7 +277,7 @@ Acceptance (required):
 
 ## 5.5 Phase 24E: Focused Windows XCTest Runner Strategy
 
-Status: in progress
+Status: complete
 
 Checkpoint notes:
 
@@ -311,7 +311,7 @@ Acceptance (required):
 
 ## 5.6 Phase 24F: First-Pass Closeout + Preview Scope
 
-Status: in progress
+Status: complete
 
 Checkpoint notes:
 
@@ -345,7 +345,7 @@ Acceptance (required):
 
 ## 5.7 Phase 24G: HTTP Runtime Portability Seams
 
-Status: in progress
+Status: complete
 
 Checkpoint notes:
 
@@ -380,7 +380,7 @@ Acceptance (required):
 
 ## 5.8 Phase 24H: `boomhauer` + App-Root DX Parity
 
-Status: in progress
+Status: complete
 
 Checkpoint notes:
 
@@ -413,7 +413,7 @@ Acceptance (required):
 
 ## 5.9 Phase 24I: Database Transport + Dynamic-Loading Parity
 
-Status: in progress
+Status: complete
 
 Checkpoint notes:
 
@@ -447,7 +447,7 @@ Acceptance (required):
 
 ## 5.10 Phase 24J: Filesystem + Security Semantics Parity
 
-Status: in progress
+Status: complete
 
 Checkpoint notes:
 
@@ -485,7 +485,7 @@ Acceptance (required):
 
 ## 5.11 Phase 24K: Full Verification + CI Parity
 
-Status: in progress
+Status: complete
 
 Checkpoint notes:
 
@@ -499,16 +499,20 @@ Checkpoint notes:
   - `make phase24-windows-tests`
   - `make phase24-windows-db-smoke`
   - `make phase24-windows-confidence`
+- The focused Windows lanes now run linked test executables so discovery and
+  exit status stay reliable on CLANG64 instead of depending on stock
+  bundle-based `xctest`.
 - Ran the full confidence lane on CLANG64 on 2026-03-31 and confirmed:
+  - `make phase24-windows-tests`
   - `make all`
   - `make phase24-windows-db-smoke`
+  - `make phase24-windows-confidence`
   - `arlen doctor --json`
   - `arlen new`
   - `arlen boomhauer --no-watch --prepare-only`
   - `arlen routes`
-- Remaining verification gap:
-  - stock Windows `xctest` currently reports `XCTest: No tests found.` for the
-    focused bundles, so true Windows XCTest discovery parity is still pending
+- The PostgreSQL smoke lane is now prerequisite-aware when `libpq` is absent
+  on the host while still failing on unexpected transport regressions.
 
 Deliverables:
 
@@ -530,7 +534,7 @@ Acceptance (required):
 
 ## 5.12 Phase 24L: Production Runtime + Deployment Parity
 
-Status: in progress
+Status: complete
 
 Checkpoint notes:
 
@@ -563,19 +567,23 @@ Acceptance (required):
 
 ## 5.13 Phase 24M: Windows XCTest Discovery + Native Warning Closeout
 
-Status: in progress
+Status: complete
 
 Checkpoint notes:
 
-- `make phase24-windows-confidence` now completes on CLANG64 and exercises the
-  build, DB smoke, doctor, scaffold, and app-root `boomhauer`/`routes` smoke.
-- The remaining Windows verification gap is focused XCTest discovery:
-  stock CLANG64 `xctest` still reports `XCTest: No tests found.` for the
-  Phase 24 focused bundles.
-- The current Windows build also still emits a small set of portability
-  warnings around:
-  - pointer-sized storage in `src/Arlen/Core/ALNApplication.m`
-  - filesystem path/string conversions in `src/Arlen/Support/ALNServices.m`
+- `make phase24-windows-tests` now discovers and executes a non-empty focused
+  XCTest set on CLANG64 through the linked `ArlenPhase21TemplateTestsRunner`.
+- `make phase24-windows-db-smoke` now discovers and executes a non-empty
+  focused XCTest set on CLANG64 through the linked
+  `ArlenPhase24WindowsDBSmokeTestsRunner`.
+- `make phase24-windows-confidence` now fails hard if focused discovery
+  regresses because the linked runners return non-zero on empty discovery.
+- The Phase 24 Windows runner contract is now the repo-local helper plus
+  linked test executables on CLANG64 instead of stock bundle-based `xctest`.
+- The tracked Arlen source portability warnings in
+  `src/Arlen/Core/ALNApplication.m` and `src/Arlen/Support/ALNServices.m`
+  are resolved; the only residual warning observed in this workspace is the
+  upstream CLANG64/GNUstep `-fobjc-exceptions` unused-command-line warning.
 
 Deliverables:
 

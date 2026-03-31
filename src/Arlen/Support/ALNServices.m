@@ -24,6 +24,14 @@ NSString *const ALNServiceErrorDomain = @"Arlen.Services.Error";
 
 static BOOL ALNPathIsSymbolicLink(NSString *path);
 
+static const char *ALNServiceFilesystemPathCString(NSString *path) {
+#if defined(_WIN32)
+  return [path UTF8String];
+#else
+  return [path fileSystemRepresentation];
+#endif
+}
+
 static NSError *ALNServiceError(NSInteger code, NSString *message, NSError *underlying) {
   NSMutableDictionary *userInfo = [NSMutableDictionary dictionary];
   userInfo[NSLocalizedDescriptionKey] = message ?: @"service error";
@@ -255,7 +263,7 @@ static BOOL ALNHardenRegularFilesInDirectory(NSFileManager *fileManager,
 }
 
 static NSData *ALNReadRegularFileNoFollow(NSString *path, NSError **error) {
-  const char *filesystemPath = [path fileSystemRepresentation];
+  const char *filesystemPath = ALNServiceFilesystemPathCString(path);
   if (filesystemPath == NULL) {
     if (error != NULL) {
       *error = [NSError errorWithDomain:ALNServiceErrorDomain
@@ -414,6 +422,7 @@ static NSData *ALNReadRegularFileNoFollow(NSString *path, NSError **error) {
 #endif
 }
 
+#if !defined(_WIN32)
 static BOOL ALNWriteAllToFileDescriptor(int fd, const void *bytes, NSUInteger length) {
   const uint8_t *cursor = (const uint8_t *)bytes;
   NSUInteger remaining = length;
@@ -434,6 +443,7 @@ static BOOL ALNWriteAllToFileDescriptor(int fd, const void *bytes, NSUInteger le
   }
   return YES;
 }
+#endif
 
 static BOOL ALNWriteDataAtomicallyWithMode(NSData *data,
                                            NSString *path,
@@ -454,7 +464,7 @@ static BOOL ALNWriteDataAtomicallyWithMode(NSData *data,
   NSString *tempPath =
       [directory stringByAppendingPathComponent:[NSString stringWithFormat:@".arlen-write-%@.tmp",
                                                                           [[NSUUID UUID] UUIDString] ?: @"tmp"]];
-  const char *tempFSPath = [tempPath fileSystemRepresentation];
+  const char *tempFSPath = ALNServiceFilesystemPathCString(tempPath);
   if (tempFSPath == NULL) {
     if (error != NULL) {
       *error = ALNPOSIXErrorForPath(path, @"temporary file path is invalid");
@@ -518,8 +528,16 @@ static BOOL ALNWriteDataAtomicallyWithMode(NSData *data,
     goto windows_cleanup;
   }
 
+  const char *destinationFSPath = ALNServiceFilesystemPathCString(path);
+  if (destinationFSPath == NULL) {
+    if (error != NULL) {
+      *error = ALNPOSIXErrorForPath(path, @"destination file path is invalid");
+    }
+    goto windows_cleanup;
+  }
+
   if (!MoveFileExA(tempFSPath,
-                   [path fileSystemRepresentation],
+                   destinationFSPath,
                    MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
     if (error != NULL) {
       *error = ALNPOSIXErrorForPath(path, @"temporary file could not be renamed into place");
@@ -651,7 +669,7 @@ static BOOL ALNPathIsSymbolicLink(NSString *path) {
     return NO;
   }
 #if defined(_WIN32)
-  const char *filesystemPath = [path fileSystemRepresentation];
+  const char *filesystemPath = ALNServiceFilesystemPathCString(path);
   if (filesystemPath == NULL) {
     return NO;
   }

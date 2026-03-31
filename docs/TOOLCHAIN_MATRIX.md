@@ -49,8 +49,8 @@ contract.
 | Build tool | `make --version` | available inside `CLANG64` shell |
 | XCTest runner | `command -v xctest` | available inside `CLANG64` shell |
 | Preview build | `make all` | builds `eocc`, preview `libArlenFramework.a` including data-layer sources, `arlen`, and `arlen-xctest-runner` |
-| Focused Windows test lane | `make phase24-windows-tests` | runs `ArlenPhase21TemplateTests.xctest` through the repo-local bundle runner |
-| Focused Windows DB smoke lane | `make phase24-windows-db-smoke` | validates libpq/ODBC transport loading before connection failure |
+| Focused Windows test lane | `make phase24-windows-tests` | runs the linked `ArlenPhase21TemplateTestsRunner` and fails hard if discovery is empty |
+| Focused Windows DB smoke lane | `make phase24-windows-db-smoke` | runs the linked `ArlenPhase24WindowsDBSmokeTestsRunner` and validates the Windows libpq/ODBC transport contract before connection failure |
 | Windows confidence lane | `make phase24-windows-confidence` | runs build, focused tests, DB transport smoke, and app-root CLI smoke |
 | App-root prepare-only smoke | `arlen boomhauer --no-watch --prepare-only` | scaffolded app artifacts build cleanly |
 

@@ -672,6 +672,7 @@ Lifecycle diagnostics:
 - `make phase21-generated-app-tests`: curated generated-app/module/config matrix for first-user flows
 - `make phase21-focused`: run the full focused Phase 21 lane set
 - `make phase21-confidence`: rerun the focused Phase 21 lanes and regenerate artifacts under `build/release_confidence/phase21`
+- `make phase24-windows-tests`: focused Windows XCTest lane using the linked `ArlenPhase21TemplateTestsRunner`
 - `make phase24-windows-db-smoke`: focused Windows transport-loading smoke lane
 - `make phase24-windows-confidence`: Windows build/test/app-root confidence lane
 - `tools/ci/run_phase21_focused.sh`: explicit focused Phase 21 lane runner for template, protocol, and generated-app coverage

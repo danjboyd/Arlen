@@ -415,10 +415,12 @@ static const char *ALNInetNtop(int family,
 }
 #endif
 
+#if !defined(_WIN32)
 static void ALNHandleSignal(int sig) {
   (void)sig;
   gSignalStopRequested = 1;
 }
+#endif
 
 static BOOL ALNSignalStopRequested(void) {
   return (gSignalStopRequested != 0);

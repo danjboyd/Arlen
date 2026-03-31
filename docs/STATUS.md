@@ -4,72 +4,39 @@ Last updated: 2026-03-31
 
 ## Leaving Off (2026-03-31)
 
-- Executed the implementation pass for Phase `24I-24L` on branch
-  `windows/clang64`:
-  - widened the Windows preview framework build to include the first-party
-    data-layer sources and exports in `GNUmakefile` / `src/Arlen/Arlen.h`
-  - added Windows-capable libpq/ODBC dynamic-loader discovery in
-    `src/Arlen/Data/ALNPg.m` and `src/Arlen/Data/ALNMSSQL.m`
-  - enabled native Windows `arlen migrate`, `arlen schema-codegen`, and
-    `arlen module migrate` by restoring the shared data-layer CLI path in
-    `tools/arlen.m`
-  - updated `bin/arlen-doctor` and `build/arlen doctor` so both detect
-    `ARLEN_LIBPQ_LIBRARY`, `ARLEN_ODBC_LIBRARY`, CLANG64 DLL locations, and
-    ODBC manager presence
-  - added explicit Windows filesystem semantics in
-    `src/Arlen/Support/ALNServices.m` and updated the related service
-    regressions in `tests/unit/Phase3ETests.m`
-  - added the focused Windows DB smoke bundle and the broader confidence lane:
-    `make phase24-windows-db-smoke`,
-    `make phase24-windows-confidence`, and
-    `tools/ci/run_phase24_windows_preview.sh`
-  - added the self-hosted Windows workflow
-    `.github/workflows/phase24-windows-preview.yml`
-  - made `propane` and `jobs worker` fail explicitly on native Windows in both
-    the CLI and direct shell entrypoints, and documented the runtime boundary in
-    `docs/WINDOWS_RUNTIME_STORY.md`
-  - updated the Windows/toolchain/testing/deployment docs so the checked-in
-    support boundary reflects the current branch state
+- Executed `24M` on branch `windows/clang64` and closed Phase 24:
+  - switched the focused Windows lanes to linked test executables driven by
+    `tools/arlen_xctest_runner.m` so CLANG64 discovery is real and fail-hard
+  - verified `make phase24-windows-tests` discovers and executes the focused
+    template suite, and `make phase24-windows-db-smoke` discovers and executes
+    the focused Windows transport smoke suite
+  - made the PostgreSQL smoke lane prerequisite-aware when `libpq` is absent on
+    the host while still failing on unexpected transport regressions
+  - resolved the tracked Windows source warnings in
+    `src/Arlen/Core/ALNApplication.m` and `src/Arlen/Support/ALNServices.m`,
+    and guarded Windows-only unused helpers in `src/Arlen/HTTP/ALNHTTPServer.m`
+    and `tools/arlen.m`
+  - updated the Windows/toolchain/testing/roadmap docs so the checked-in
+    CLANG64 preview contract matches the real branch behavior
 - Live CLANG64 verification completed in this workspace on 2026-03-31:
+  - `powershell -ExecutionPolicy Bypass -File scripts\run_clang64.ps1 -InnerCommand "make clean && make phase24-windows-tests"`
+  - `powershell -ExecutionPolicy Bypass -File scripts\run_clang64.ps1 -InnerCommand "make clean && make phase24-windows-db-smoke"`
   - `powershell -ExecutionPolicy Bypass -File scripts\run_clang64.ps1 -InnerCommand "make phase24-windows-confidence"`
   - the lane completed end-to-end, including `make all`,
+    `make phase24-windows-tests`,
     `make phase24-windows-db-smoke`, `arlen doctor --json`,
     `arlen new`, `arlen boomhauer --no-watch --prepare-only`, and
     `arlen routes`
-- Known limitation at this checkpoint:
-  - the stock CLANG64 `xctest` runner still prints `XCTest: No tests found.`
-    for the focused Windows bundles, so build/scaffold confidence is now live
-    but Windows XCTest discovery parity is still incomplete
-- Phase 24 now carries one explicit remaining subphase:
-  - `24M`: Windows XCTest discovery + native warning closeout
-- Next-session closeout path for `24M`:
-  - stabilize a Windows runner that both loads the focused bundles and reports
-    discovered tests reliably
-  - tighten the confidence lane so Windows focused tests fail hard when test
-    discovery regresses instead of silently accepting `No tests found`
-  - decide whether that runner should come from stock `xctest`, a repo-local
-    helper, or an explicit `tools-xctest-msys` source integration
-
-- Created the dedicated Windows workstream branch:
-  - `windows/clang64`
-- Phase 24 is now active as the branch roadmap for native Windows support:
-  - added `docs/PHASE24_ROADMAP.md`
-  - implemented the branch roadmap through `24L` in code and promoted the
-    remaining closeout work into explicit subphase `24M`
-  - kept the branch contract explicit: GNUmake-first, PowerShell outer / MSYS
-    bash inner, wrapper-driven tool discovery, temporary feature gating where
-    needed, and no premature production-support claims
-- Updated the top-level summary docs so the Windows branch now points at the
-  new roadmap:
-  - `README.md`
-  - `docs/README.md`
-  - `docs/STATUS.md`
-- Next-session execution order on this branch:
-  - execute `24M` by closing the Windows XCTest discovery gap
-  - tighten the remaining Windows warnings around pointer-sized storage and
-    filesystem string conversions
-  - decide whether any remaining native Windows runtime work should become a
-    new roadmap phase instead of stretching Phase 24 further
+- Residual note:
+  - the only warning still observed on this host is the upstream CLANG64 /
+    GNUstep `-fobjc-exceptions` unused-command-line warning rather than an
+    Arlen source portability warning
+- Phase 24 is complete on `windows/clang64`.
+- Next-session execution order:
+  - decide whether any future Windows work belongs in a new roadmap phase
+    rather than reopening Phase 24
+  - if needed, investigate the upstream CLANG64 / GNUstep
+    `-fobjc-exceptions` warning separately from Arlen source parity work
 
 ## Leaving Off (2026-03-30)
 

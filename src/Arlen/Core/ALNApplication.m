@@ -27,6 +27,7 @@
 #include <math.h>
 #include <objc/message.h>
 #include <objc/runtime.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -66,6 +67,9 @@ static void ALNSetStructuredErrorResponse(ALNResponse *response,
 static NSString *ALNStringFromTraceBuffer(const char *value);
 static NSString *ALNGenerateRequestID(void);
 static BOOL ALNFillSecureRandomBytes(unsigned char *output, NSUInteger length);
+static void ALNStoreRetainedEnumerationObject(NSFastEnumerationState *state, id object);
+static id ALNGetEnumerationObject(NSFastEnumerationState *state);
+static id ALNTakeEnumerationObject(NSFastEnumerationState *state);
 
 @interface ALNRequestIdentity : NSObject
 
@@ -222,18 +226,15 @@ static BOOL ALNFillSecureRandomBytes(unsigned char *output, NSUInteger length);
   NSArray *keys = nil;
   if (state->state == 0) {
     keys = [self visibleKeys];
-    state->extra[0] = (unsigned long)(__bridge_retained void *)keys;
+    ALNStoreRetainedEnumerationObject(state, keys);
     state->mutationsPtr = (unsigned long *)&_mutationCount;
   } else {
-    keys = (__bridge NSArray *)(void *)state->extra[0];
+    keys = ALNGetEnumerationObject(state);
   }
 
   NSUInteger total = [keys count];
   if (state->state >= total) {
-    if (state->extra[0] != 0) {
-      (void)(__bridge_transfer id)(void *)state->extra[0];
-      state->extra[0] = 0;
-    }
+    (void)ALNTakeEnumerationObject(state);
     return 0;
   }
 
@@ -267,6 +268,51 @@ static BOOL ALNFillSecureRandomBytes(unsigned char *output, NSUInteger length);
 }
 
 @end
+
+static void ALNStoreRetainedEnumerationObject(NSFastEnumerationState *state, id object) {
+  if (state == NULL) {
+    return;
+  }
+
+  uintptr_t pointerValue = (uintptr_t)(__bridge_retained void *)object;
+  NSUInteger bitsPerSlot = sizeof(unsigned long) * 8;
+  NSUInteger slotCount = (sizeof(uintptr_t) + sizeof(unsigned long) - 1) / sizeof(unsigned long);
+  for (NSUInteger idx = 0; idx < 5; idx++) {
+    if (idx < slotCount) {
+      state->extra[idx] = (unsigned long)(pointerValue >> (idx * bitsPerSlot));
+    } else {
+      state->extra[idx] = 0;
+    }
+  }
+}
+
+static uintptr_t ALNEnumerationPointerValue(NSFastEnumerationState *state) {
+  if (state == NULL) {
+    return (uintptr_t)0;
+  }
+
+  NSUInteger bitsPerSlot = sizeof(unsigned long) * 8;
+  NSUInteger slotCount = (sizeof(uintptr_t) + sizeof(unsigned long) - 1) / sizeof(unsigned long);
+  uintptr_t pointerValue = 0;
+  for (NSUInteger idx = 0; idx < slotCount; idx++) {
+    pointerValue |= ((uintptr_t)state->extra[idx]) << (idx * bitsPerSlot);
+  }
+  return pointerValue;
+}
+
+static id ALNGetEnumerationObject(NSFastEnumerationState *state) {
+  return (__bridge id)(void *)ALNEnumerationPointerValue(state);
+}
+
+static id ALNTakeEnumerationObject(NSFastEnumerationState *state) {
+  uintptr_t pointerValue = ALNEnumerationPointerValue(state);
+  if (state != NULL) {
+    for (NSUInteger idx = 0; idx < 5; idx++) {
+      state->extra[idx] = 0;
+    }
+  }
+  return (__bridge_transfer id)(void *)pointerValue;
+}
 
 static const char *ALNObjCTypeWithoutQualifiers(const char *typeEncoding) {
   if (typeEncoding == NULL) {
