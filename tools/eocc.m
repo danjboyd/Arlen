@@ -135,11 +135,25 @@ static BOOL WriteJSONDocument(NSDictionary *document, NSString *path, NSError **
   return [jsonData writeToFile:path options:NSDataWritingAtomic error:error];
 }
 
+static NSData *ReadDataFile(NSString *path, NSError **error) {
+  NSData *data = [NSData dataWithContentsOfFile:path];
+  if (data == nil && error != NULL) {
+    *error = [NSError errorWithDomain:ALNEOCErrorDomain
+                                 code:ALNEOCErrorFileIO
+                             userInfo:@{
+                               NSLocalizedDescriptionKey :
+                                   [NSString stringWithFormat:@"Failed reading file at %@", path ?: @""],
+                               ALNEOCErrorPathKey : path ?: @""
+                             }];
+  }
+  return data;
+}
+
 static NSDictionary *LoadManifestDocument(NSString *path, NSError **error) {
   if ([path length] == 0 || ![[NSFileManager defaultManager] fileExistsAtPath:path]) {
     return nil;
   }
-  NSData *data = [NSData dataWithContentsOfFile:path options:0 error:error];
+  NSData *data = ReadDataFile(path, error);
   if (data == nil) {
     return nil;
   }

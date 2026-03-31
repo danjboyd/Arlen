@@ -1,6 +1,6 @@
 # Arlen Phase 24 Roadmap
 
-Status: in progress on 2026-03-31 (`24A-24H` landed on branch; live CLANG64 verification still pending outside this sandbox; `24I-24L` planned)
+Status: in progress on 2026-03-31 (`24A-24L` implementation landed on branch; `make phase24-windows-confidence` now completes on CLANG64, but stock Windows XCTest discovery still reports `No tests found`)
 Last updated: 2026-03-31
 
 Related docs:
@@ -313,8 +313,8 @@ Status: in progress
 
 Checkpoint notes:
 
-- Updated the preview documentation set to describe the widened `24A-24H`
-  support envelope in:
+- Updated the Windows documentation set to describe the widened `24A-24L`
+  branch contract in:
   - `README.md`
   - `docs/README.md`
   - `docs/GETTING_STARTED.md`
@@ -411,7 +411,23 @@ Acceptance (required):
 
 ## 5.9 Phase 24I: Database Transport + Dynamic-Loading Parity
 
-Status: planned
+Status: in progress
+
+Checkpoint notes:
+
+- Added Windows-capable libpq loading in `src/Arlen/Data/ALNPg.m` via
+  `LoadLibrary` / `GetProcAddress`, `ARLEN_LIBPQ_LIBRARY`, and CLANG64 DLL
+  candidates.
+- Added Windows-capable ODBC loading in `src/Arlen/Data/ALNMSSQL.m` via
+  `LoadLibrary` / `GetProcAddress`, `ARLEN_ODBC_LIBRARY`, and CLANG64/system
+  DLL candidates.
+- Widened the Windows preview framework build to include `src/Arlen/Data/*.m`
+  and exported the data-layer headers from `src/Arlen/Arlen.h`.
+- Restored Windows-preview `arlen migrate`, `arlen schema-codegen`, and
+  `arlen module migrate` now that the shared adapter initialization path is
+  compiled in again.
+- Added `tests/phase24/Phase24WindowsTransportSmokeTests.m` plus
+  `make phase24-windows-db-smoke`.
 
 Deliverables:
 
@@ -429,7 +445,23 @@ Acceptance (required):
 
 ## 5.10 Phase 24J: Filesystem + Security Semantics Parity
 
-Status: planned
+Status: in progress
+
+Checkpoint notes:
+
+- Added explicit Windows filesystem branches in
+  `src/Arlen/Support/ALNServices.m` for:
+  - reparse-point detection
+  - no-follow regular-file reads
+  - atomic write replacement
+  - path containment normalization
+  - non-POSIX private-storage behavior
+- Stopped assuming POSIX mode bits are the only privacy contract on Windows;
+  the Windows path now preserves the explicit Arlen safety rules while relying
+  on the host ACL model instead of fake `0600`/`0700` parity.
+- Updated `tests/unit/Phase3ETests.m` so the Windows service/storage assertions
+  validate the Windows contract directly instead of asserting POSIX permission
+  bits.
 
 Deliverables:
 
@@ -451,7 +483,30 @@ Acceptance (required):
 
 ## 5.11 Phase 24K: Full Verification + CI Parity
 
-Status: planned
+Status: in progress
+
+Checkpoint notes:
+
+- Added the checked-in Windows confidence script:
+  `tools/ci/run_phase24_windows_preview.sh`
+- Added the wider Windows lane:
+  `make phase24-windows-confidence`
+- Added the self-hosted Windows workflow:
+  `.github/workflows/phase24-windows-preview.yml`
+- Updated the testing/toolchain docs so the supported Windows matrix now lists:
+  - `make phase24-windows-tests`
+  - `make phase24-windows-db-smoke`
+  - `make phase24-windows-confidence`
+- Ran the full confidence lane on CLANG64 on 2026-03-31 and confirmed:
+  - `make all`
+  - `make phase24-windows-db-smoke`
+  - `arlen doctor --json`
+  - `arlen new`
+  - `arlen boomhauer --no-watch --prepare-only`
+  - `arlen routes`
+- Remaining verification gap:
+  - stock Windows `xctest` currently reports `XCTest: No tests found.` for the
+    focused bundles, so true Windows XCTest discovery parity is still pending
 
 Deliverables:
 
@@ -473,7 +528,18 @@ Acceptance (required):
 
 ## 5.12 Phase 24L: Production Runtime + Deployment Parity
 
-Status: planned
+Status: in progress
+
+Checkpoint notes:
+
+- Chose the explicit native Windows runtime boundary instead of pretending to
+  support `propane` or the first-party jobs worker loop before the process
+  model is real.
+- Updated `tools/arlen.m`, `bin/propane`, and `bin/jobs-worker` so native
+  Windows fails those paths with a clear message instead of a late shell/runtime
+  failure.
+- Added `docs/WINDOWS_RUNTIME_STORY.md` and linked the Linux-only deployment
+  docs back to that support boundary.
 
 Deliverables:
 

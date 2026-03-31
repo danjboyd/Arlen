@@ -3,12 +3,13 @@
 
 #import <Foundation/Foundation.h>
 #import <XCTest/XCTest.h>
+#import "ALNExports.h"
 
 #import "ALNDatabaseAdapter.h"
 
 NS_ASSUME_NONNULL_BEGIN
 
-FOUNDATION_EXPORT NSString *ALNNormalizedSQLForAssertion(NSString *_Nullable sql);
+ALN_EXPORT NSString *ALNNormalizedSQLForAssertion(NSString *_Nullable sql);
 
 #define ALNAssertBuiltSQLAndParameters(built, expectedSQL, expectedParameters)               \
   do {                                                                                       \

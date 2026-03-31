@@ -2,6 +2,7 @@
 #define ALN_SQL_DIALECT_H
 
 #import <Foundation/Foundation.h>
+#import "../ALNExports.h"
 
 NS_ASSUME_NONNULL_BEGIN
 
@@ -22,9 +23,9 @@ NS_ASSUME_NONNULL_BEGIN
 
 @end
 
-FOUNDATION_EXPORT BOOL ALNSQLDialectIdentifierIsSafe(NSString *value);
-FOUNDATION_EXPORT NSString *ALNSQLDialectDoubleQuoteIdentifier(NSString *value);
-FOUNDATION_EXPORT NSString *ALNSQLDialectBracketQuoteIdentifier(NSString *value);
+ALN_EXPORT BOOL ALNSQLDialectIdentifierIsSafe(NSString *value);
+ALN_EXPORT NSString *ALNSQLDialectDoubleQuoteIdentifier(NSString *value);
+ALN_EXPORT NSString *ALNSQLDialectBracketQuoteIdentifier(NSString *value);
 
 NS_ASSUME_NONNULL_END
 

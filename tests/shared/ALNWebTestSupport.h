@@ -3,6 +3,7 @@
 
 #import <Foundation/Foundation.h>
 #import <XCTest/XCTest.h>
+#import "ALNExports.h"
 
 #import "ALNApplication.h"
 #import "ALNRequest.h"
@@ -11,25 +12,25 @@
 
 NS_ASSUME_NONNULL_BEGIN
 
-FOUNDATION_EXPORT ALNRequest *ALNTestRequestWithMethod(NSString *method,
-                                                       NSString *path,
-                                                       NSString *queryString,
-                                                       NSDictionary *_Nullable headers,
-                                                       NSData *_Nullable body);
-FOUNDATION_EXPORT ALNRequest *ALNTestJSONRequestWithMethod(NSString *method,
-                                                           NSString *path,
-                                                           NSString *queryString,
-                                                           NSDictionary *_Nullable headers,
-                                                           id _Nullable object);
-FOUNDATION_EXPORT NSString *ALNTestStringFromResponse(ALNResponse *_Nullable response);
-FOUNDATION_EXPORT id _Nullable ALNTestJSONObjectFromResponse(ALNResponse *_Nullable response,
-                                                             NSError *_Nullable *_Nullable error);
-FOUNDATION_EXPORT NSDictionary *_Nullable ALNTestJSONDictionaryFromResponse(
+ALN_EXPORT ALNRequest *ALNTestRequestWithMethod(NSString *method,
+                                                NSString *path,
+                                                NSString *queryString,
+                                                NSDictionary *_Nullable headers,
+                                                NSData *_Nullable body);
+ALN_EXPORT ALNRequest *ALNTestJSONRequestWithMethod(NSString *method,
+                                                    NSString *path,
+                                                    NSString *queryString,
+                                                    NSDictionary *_Nullable headers,
+                                                    id _Nullable object);
+ALN_EXPORT NSString *ALNTestStringFromResponse(ALNResponse *_Nullable response);
+ALN_EXPORT id _Nullable ALNTestJSONObjectFromResponse(ALNResponse *_Nullable response,
+                                                      NSError *_Nullable *_Nullable error);
+ALN_EXPORT NSDictionary *_Nullable ALNTestJSONDictionaryFromResponse(
     ALNResponse *_Nullable response,
     NSError *_Nullable *_Nullable error);
-FOUNDATION_EXPORT NSArray *_Nullable ALNTestJSONArrayFromResponse(ALNResponse *_Nullable response,
-                                                                  NSError *_Nullable *_Nullable error);
-FOUNDATION_EXPORT NSString *ALNTestCookiePairFromSetCookie(NSString *_Nullable setCookie);
+ALN_EXPORT NSArray *_Nullable ALNTestJSONArrayFromResponse(ALNResponse *_Nullable response,
+                                                           NSError *_Nullable *_Nullable error);
+ALN_EXPORT NSString *ALNTestCookiePairFromSetCookie(NSString *_Nullable setCookie);
 
 #define ALNAssertResponseStatus(response, expectedStatus)                                    \
   do {                                                                                       \

@@ -166,18 +166,22 @@ NSString *ALNTestUniqueIdentifier(NSString *prefix) {
 
 NSString *ALNTestTemporaryDirectory(NSString *prefix) {
   NSString *sanitizedPrefix = ALNTestSupportSanitizedPrefix(prefix);
-  NSString *templatePath =
-      [NSTemporaryDirectory() stringByAppendingPathComponent:[NSString stringWithFormat:@"%@-XXXXXX",
-                                                                                         sanitizedPrefix]];
-  const char *templateCString = [templatePath fileSystemRepresentation];
-  char *buffer = strdup(templateCString);
-  char *created = (buffer != NULL) ? mkdtemp(buffer) : NULL;
-  NSString *result = created != NULL
-                         ? [[NSFileManager defaultManager] stringWithFileSystemRepresentation:created
-                                                                                         length:strlen(created)]
-                         : nil;
-  free(buffer);
-  return result;
+  NSString *base = NSTemporaryDirectory();
+  if (![base length]) {
+    base = [@"." stringByStandardizingPath];
+  }
+  NSString *directoryName =
+      [NSString stringWithFormat:@"%@-%@", sanitizedPrefix, [[[NSUUID UUID] UUIDString] lowercaseString]];
+  NSString *candidate = [base stringByAppendingPathComponent:directoryName];
+  NSError *createError = nil;
+  BOOL created = [[NSFileManager defaultManager] createDirectoryAtPath:candidate
+                                           withIntermediateDirectories:YES
+                                                            attributes:nil
+                                                                 error:&createError];
+  if (!created || createError != nil) {
+    return nil;
+  }
+  return candidate;
 }
 
 BOOL ALNTestWriteUTF8File(NSString *path, NSString *content, NSError **error) {

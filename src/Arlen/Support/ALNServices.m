@@ -1,11 +1,21 @@
 #import "ALNServices.h"
 #import "ALNJSONSerialization.h"
 
+#if defined(_WIN32)
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#include <windows.h>
+#include <io.h>
+#ifndef ssize_t
+typedef SSIZE_T ssize_t;
+#endif
+#else
+#include <netdb.h>
+#include <sys/socket.h>
+#endif
 #include <fcntl.h>
 #include <errno.h>
-#include <netdb.h>
 #include <string.h>
-#include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>
@@ -36,10 +46,43 @@ static NSString *ALNNonEmptyString(NSString *value, NSString *defaultValue) {
 }
 
 static NSDictionary *ALNPermissionsAttributes(NSUInteger mode) {
+#if defined(_WIN32)
+  (void)mode;
+  return nil;
+#else
   return @{ NSFilePosixPermissions : @(mode) };
+#endif
 }
 
 static NSError *ALNPOSIXErrorForPath(NSString *path, NSString *message) {
+#if defined(_WIN32)
+  DWORD errorCode = GetLastError();
+  NSMutableDictionary *userInfo = [NSMutableDictionary dictionary];
+  userInfo[NSLocalizedDescriptionKey] = message ?: @"filesystem operation failed";
+  if ([path length] > 0) {
+    userInfo[NSFilePathErrorKey] = path;
+  }
+  if (errorCode != 0) {
+    LPSTR messageBuffer = NULL;
+    DWORD flags = FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM |
+                  FORMAT_MESSAGE_IGNORE_INSERTS;
+    DWORD messageLength =
+        FormatMessageA(flags, NULL, errorCode, 0, (LPSTR)&messageBuffer, 0, NULL);
+    if (messageLength > 0 && messageBuffer != NULL) {
+      while (messageLength > 0 &&
+             (messageBuffer[messageLength - 1] == '\r' || messageBuffer[messageLength - 1] == '\n')) {
+        messageBuffer[messageLength - 1] = '\0';
+        messageLength -= 1;
+      }
+      userInfo[NSLocalizedFailureReasonErrorKey] =
+          [NSString stringWithUTF8String:messageBuffer] ?: @"unknown Windows filesystem error";
+      LocalFree(messageBuffer);
+    }
+  }
+  return [NSError errorWithDomain:ALNServiceErrorDomain
+                             code:(NSInteger)errorCode
+                         userInfo:userInfo];
+#else
   int errorCode = errno;
   NSMutableDictionary *userInfo = [NSMutableDictionary dictionary];
   userInfo[NSLocalizedDescriptionKey] = message ?: @"filesystem operation failed";
@@ -47,6 +90,43 @@ static NSError *ALNPOSIXErrorForPath(NSString *path, NSString *message) {
     userInfo[NSFilePathErrorKey] = path;
   }
   return [NSError errorWithDomain:NSPOSIXErrorDomain code:errorCode userInfo:userInfo];
+#endif
+}
+
+static BOOL ALNApplyPrivateMode(NSFileManager *fileManager,
+                                NSString *path,
+                                NSUInteger mode,
+                                NSError **error) {
+#if defined(_WIN32)
+  (void)fileManager;
+  (void)path;
+  (void)mode;
+  (void)error;
+  return YES;
+#else
+  NSError *permissionsError = nil;
+  if (![fileManager setAttributes:ALNPermissionsAttributes(mode)
+                     ofItemAtPath:path
+                            error:&permissionsError]) {
+    if (error != NULL) {
+      *error = permissionsError;
+    }
+    return NO;
+  }
+  return YES;
+#endif
+}
+
+static NSString *ALNContainmentPath(NSString *path) {
+  NSString *normalized = [[ALNNonEmptyString(path, @"") stringByReplacingOccurrencesOfString:@"\\" withString:@"/"]
+      stringByStandardizingPath];
+#if defined(_WIN32)
+  normalized = [normalized lowercaseString];
+#endif
+  if ([normalized length] > 1 && [normalized hasSuffix:@"/"]) {
+    normalized = [normalized substringToIndex:[normalized length] - 1];
+  }
+  return normalized;
 }
 
 static BOOL ALNEnsurePrivateDirectory(NSFileManager *fileManager, NSString *path, NSError **error) {
@@ -72,13 +152,18 @@ static BOOL ALNEnsurePrivateDirectory(NSFileManager *fileManager, NSString *path
     return NO;
   }
 
-  NSError *permissionsError = nil;
-  if (![fileManager setAttributes:ALNPermissionsAttributes(0700)
-                     ofItemAtPath:path
-                            error:&permissionsError]) {
+  if (ALNPathIsSymbolicLink(path)) {
     if (error != NULL) {
-      *error = permissionsError;
+      *error = [NSError errorWithDomain:ALNServiceErrorDomain
+                                   code:3
+                               userInfo:@{
+                                 NSLocalizedDescriptionKey : @"symbolic links and reparse-point directories are not allowed",
+                                 NSFilePathErrorKey : path ?: @"",
+                               }];
     }
+    return NO;
+  }
+  if (!ALNApplyPrivateMode(fileManager, path, 0700, error)) {
     return NO;
   }
   return YES;
@@ -101,13 +186,18 @@ static BOOL ALNEnsurePrivateRegularFile(NSFileManager *fileManager, NSString *pa
     return NO;
   }
 
-  NSError *permissionsError = nil;
-  if (![fileManager setAttributes:ALNPermissionsAttributes(0600)
-                     ofItemAtPath:path
-                            error:&permissionsError]) {
+  if (ALNPathIsSymbolicLink(path)) {
     if (error != NULL) {
-      *error = permissionsError;
+      *error = [NSError errorWithDomain:ALNServiceErrorDomain
+                                   code:3
+                               userInfo:@{
+                                 NSLocalizedDescriptionKey : @"symbolic links and reparse-point files are not allowed",
+                                 NSFilePathErrorKey : path ?: @"",
+                               }];
     }
+    return NO;
+  }
+  if (!ALNApplyPrivateMode(fileManager, path, 0600, error)) {
     return NO;
   }
   return YES;
@@ -178,6 +268,81 @@ static NSData *ALNReadRegularFileNoFollow(NSString *path, NSError **error) {
     return nil;
   }
 
+#if defined(_WIN32)
+  HANDLE fileHandle = CreateFileA(filesystemPath,
+                                  GENERIC_READ,
+                                  FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                                  NULL,
+                                  OPEN_EXISTING,
+                                  FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OPEN_REPARSE_POINT |
+                                      FILE_FLAG_SEQUENTIAL_SCAN,
+                                  NULL);
+  if (fileHandle == INVALID_HANDLE_VALUE) {
+    if (error != NULL) {
+      *error = ALNPOSIXErrorForPath(path, @"file could not be opened");
+    }
+    return nil;
+  }
+
+  BY_HANDLE_FILE_INFORMATION info;
+  if (!GetFileInformationByHandle(fileHandle, &info)) {
+    if (error != NULL) {
+      *error = ALNPOSIXErrorForPath(path, @"file metadata could not be read");
+    }
+    (void)CloseHandle(fileHandle);
+    return nil;
+  }
+  if ((info.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0) {
+    if (error != NULL) {
+      *error = [NSError errorWithDomain:ALNServiceErrorDomain
+                                   code:5
+                               userInfo:@{
+                                 NSLocalizedDescriptionKey : @"symbolic links and reparse-point files are not allowed",
+                                 NSFilePathErrorKey : path ?: @"",
+                               }];
+    }
+    (void)CloseHandle(fileHandle);
+    return nil;
+  }
+  if ((info.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0) {
+    if (error != NULL) {
+      *error = [NSError errorWithDomain:ALNServiceErrorDomain
+                                   code:5
+                               userInfo:@{
+                                 NSLocalizedDescriptionKey : @"expected regular file",
+                                 NSFilePathErrorKey : path ?: @"",
+                               }];
+    }
+    (void)CloseHandle(fileHandle);
+    return nil;
+  }
+
+  NSMutableData *data = [NSMutableData data];
+  unsigned char buffer[16384];
+  while (YES) {
+    DWORD readBytes = 0;
+    if (!ReadFile(fileHandle, buffer, (DWORD)sizeof(buffer), &readBytes, NULL)) {
+      if (error != NULL) {
+        *error = ALNPOSIXErrorForPath(path, @"file payload could not be read");
+      }
+      (void)CloseHandle(fileHandle);
+      return nil;
+    }
+    if (readBytes == 0) {
+      break;
+    }
+    [data appendBytes:buffer length:(NSUInteger)readBytes];
+  }
+
+  if (!CloseHandle(fileHandle)) {
+    if (error != NULL) {
+      *error = ALNPOSIXErrorForPath(path, @"file could not be closed");
+    }
+    return nil;
+  }
+
+  return [NSData dataWithData:data];
+#else
   int openFlags = O_RDONLY;
 #ifdef O_CLOEXEC
   openFlags |= O_CLOEXEC;
@@ -246,6 +411,7 @@ static NSData *ALNReadRegularFileNoFollow(NSString *path, NSError **error) {
   }
 
   return [NSData dataWithData:data];
+#endif
 }
 
 static BOOL ALNWriteAllToFileDescriptor(int fd, const void *bytes, NSUInteger length) {
@@ -283,6 +449,94 @@ static BOOL ALNWriteDataAtomicallyWithMode(NSData *data,
     return NO;
   }
 
+#if defined(_WIN32)
+  (void)mode;
+  NSString *tempPath =
+      [directory stringByAppendingPathComponent:[NSString stringWithFormat:@".arlen-write-%@.tmp",
+                                                                          [[NSUUID UUID] UUIDString] ?: @"tmp"]];
+  const char *tempFSPath = [tempPath fileSystemRepresentation];
+  if (tempFSPath == NULL) {
+    if (error != NULL) {
+      *error = ALNPOSIXErrorForPath(path, @"temporary file path is invalid");
+    }
+    return NO;
+  }
+
+  BOOL ok = NO;
+  HANDLE fileHandle = CreateFileA(tempFSPath,
+                                  GENERIC_WRITE,
+                                  0,
+                                  NULL,
+                                  CREATE_NEW,
+                                  FILE_ATTRIBUTE_NORMAL,
+                                  NULL);
+  if (fileHandle == INVALID_HANDLE_VALUE) {
+    if (error != NULL) {
+      *error = ALNPOSIXErrorForPath(path, @"temporary file could not be created");
+    }
+    return NO;
+  }
+
+  if ([payload length] > 0) {
+    DWORD writtenBytes = 0;
+    if (!WriteFile(fileHandle,
+                   [payload bytes],
+                   (DWORD)[payload length],
+                   &writtenBytes,
+                   NULL) ||
+        writtenBytes != (DWORD)[payload length]) {
+      if (error != NULL) {
+        *error = ALNPOSIXErrorForPath(path, @"file payload could not be written");
+      }
+      goto windows_cleanup;
+    }
+  }
+  if (!FlushFileBuffers(fileHandle)) {
+    if (error != NULL) {
+      *error = ALNPOSIXErrorForPath(path, @"temporary file could not be flushed");
+    }
+    goto windows_cleanup;
+  }
+  if (!CloseHandle(fileHandle)) {
+    fileHandle = INVALID_HANDLE_VALUE;
+    if (error != NULL) {
+      *error = ALNPOSIXErrorForPath(path, @"temporary file could not be closed");
+    }
+    goto windows_cleanup;
+  }
+  fileHandle = INVALID_HANDLE_VALUE;
+
+  if (ALNPathIsSymbolicLink(path)) {
+    if (error != NULL) {
+      *error = [NSError errorWithDomain:ALNServiceErrorDomain
+                                   code:3
+                               userInfo:@{
+                                 NSLocalizedDescriptionKey : @"symbolic links and reparse-point files are not allowed",
+                                 NSFilePathErrorKey : path ?: @"",
+                               }];
+    }
+    goto windows_cleanup;
+  }
+
+  if (!MoveFileExA(tempFSPath,
+                   [path fileSystemRepresentation],
+                   MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
+    if (error != NULL) {
+      *error = ALNPOSIXErrorForPath(path, @"temporary file could not be renamed into place");
+    }
+    goto windows_cleanup;
+  }
+  ok = YES;
+
+windows_cleanup:
+  if (fileHandle != INVALID_HANDLE_VALUE) {
+    (void)CloseHandle(fileHandle);
+  }
+  if (!ok) {
+    (void)DeleteFileA(tempFSPath);
+  }
+  return ok;
+#else
   NSString *templatePath = [directory stringByAppendingPathComponent:@".arlen-write-XXXXXX"];
   char *templateBuffer = strdup([templatePath fileSystemRepresentation]);
   if (templateBuffer == NULL) {
@@ -340,6 +594,7 @@ cleanup:
   }
   free(templateBuffer);
   return ok;
+#endif
 }
 
 static NSArray *ALNNormalizeStringArray(NSArray *values) {
@@ -381,23 +636,37 @@ static BOOL ALNPathIsWithinDirectory(NSString *path, NSString *directoryPath) {
   if (![path isKindOfClass:[NSString class]] || ![directoryPath isKindOfClass:[NSString class]]) {
     return NO;
   }
-  if ([path isEqualToString:directoryPath]) {
+  NSString *normalizedPath = ALNContainmentPath(path);
+  NSString *normalizedDirectory = ALNContainmentPath(directoryPath);
+  if ([normalizedPath isEqualToString:normalizedDirectory]) {
     return YES;
   }
-  NSString *prefix = [directoryPath hasSuffix:@"/"] ? directoryPath
-                                                    : [directoryPath stringByAppendingString:@"/"];
-  return [path hasPrefix:prefix];
+  NSString *prefix = [normalizedDirectory hasSuffix:@"/"] ? normalizedDirectory
+                                                          : [normalizedDirectory stringByAppendingString:@"/"];
+  return [normalizedPath hasPrefix:prefix];
 }
 
 static BOOL ALNPathIsSymbolicLink(NSString *path) {
   if (![path isKindOfClass:[NSString class]] || [path length] == 0) {
     return NO;
   }
+#if defined(_WIN32)
+  const char *filesystemPath = [path fileSystemRepresentation];
+  if (filesystemPath == NULL) {
+    return NO;
+  }
+  DWORD attributes = GetFileAttributesA(filesystemPath);
+  if (attributes == INVALID_FILE_ATTRIBUTES) {
+    return NO;
+  }
+  return (attributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0;
+#else
   struct stat info;
   if (lstat([path fileSystemRepresentation], &info) != 0) {
     return NO;
   }
   return S_ISLNK(info.st_mode);
+#endif
 }
 
 static NSString *ALNNormalizeLocale(NSString *locale) {
@@ -1093,7 +1362,7 @@ static ALNJobEnvelope *ALNJobEnvelopeFromDictionary(id value) {
 }
 
 - (NSDictionary *)readState:(NSError **)error {
-  NSData *payload = [NSData dataWithContentsOfFile:self.storagePath options:0 error:error];
+  NSData *payload = ALNReadRegularFileNoFollow(self.storagePath, error);
   if (payload == nil) {
     if (error != NULL && *error == nil) {
       *error = ALNServiceError(124, @"job adapter state could not be read", nil);
@@ -1777,10 +2046,169 @@ static NSError *ALNRedisClientError(NSInteger code, NSString *message, NSError *
   return ALNServiceError(code, message, underlying);
 }
 
-static BOOL ALNRedisWriteBytes(int socketFD, const uint8_t *bytes, size_t length, NSError **error) {
+#if defined(_WIN32)
+typedef SOCKET ALNRedisSocketHandle;
+static const ALNRedisSocketHandle ALNRedisInvalidSocketHandle = INVALID_SOCKET;
+
+static int ALNRedisErrnoFromWSA(int socketError) {
+  switch (socketError) {
+  case WSAEINTR:
+    return EINTR;
+  case WSAEWOULDBLOCK:
+    return EWOULDBLOCK;
+  case WSAEINVAL:
+    return EINVAL;
+  case WSAEMFILE:
+    return EMFILE;
+  case WSAENOBUFS:
+    return ENOBUFS;
+#ifdef WSA_NOT_ENOUGH_MEMORY
+  case WSA_NOT_ENOUGH_MEMORY:
+    return ENOMEM;
+#endif
+#ifdef WSAENOMEM
+  case WSAENOMEM:
+    return ENOMEM;
+#endif
+  case WSAEADDRINUSE:
+    return EADDRINUSE;
+  case WSAEADDRNOTAVAIL:
+    return EADDRNOTAVAIL;
+  case WSAECONNRESET:
+    return ECONNRESET;
+  case WSAETIMEDOUT:
+    return ETIMEDOUT;
+  case WSAENOTSOCK:
+    return ENOTSOCK;
+  case WSAECONNREFUSED:
+    return ECONNREFUSED;
+  default:
+    return EIO;
+  }
+}
+
+static void ALNRedisSyncErrnoFromWSA(void) {
+  errno = ALNRedisErrnoFromWSA(WSAGetLastError());
+}
+
+static BOOL ALNRedisEnsureSocketLayer(NSError **error) {
+  static BOOL attempted = NO;
+  static BOOL initialized = NO;
+  @synchronized([NSProcessInfo processInfo]) {
+    if (!attempted) {
+      WSADATA socketData;
+      attempted = YES;
+      initialized = (WSAStartup(MAKEWORD(2, 2), &socketData) == 0);
+    }
+  }
+  if (!initialized && error != NULL) {
+    *error = ALNRedisClientError(2215, @"redis socket layer initialization failed", nil);
+  }
+  return initialized;
+}
+
+static NSString *ALNRedisSocketErrorString(void) {
+  DWORD errorCode = (DWORD)WSAGetLastError();
+  char *messageBuffer = NULL;
+  DWORD flags = FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM |
+                FORMAT_MESSAGE_IGNORE_INSERTS;
+  DWORD length =
+      FormatMessageA(flags, NULL, errorCode, 0, (LPSTR)&messageBuffer, 0, NULL);
+  if (length > 0 && messageBuffer != NULL) {
+    while (length > 0 &&
+           (messageBuffer[length - 1] == '\r' || messageBuffer[length - 1] == '\n')) {
+      messageBuffer[length - 1] = '\0';
+      length -= 1;
+    }
+    NSString *message = [NSString stringWithUTF8String:messageBuffer] ?: @"winsock error";
+    LocalFree(messageBuffer);
+    return message;
+  }
+  return [NSString stringWithFormat:@"Winsock error %lu", (unsigned long)errorCode];
+}
+
+static void ALNRedisCloseSocket(ALNRedisSocketHandle socketFD) {
+  if (socketFD != ALNRedisInvalidSocketHandle) {
+    (void)closesocket(socketFD);
+  }
+}
+
+static ssize_t ALNRedisSocketSend(ALNRedisSocketHandle socketFD, const uint8_t *bytes, size_t length) {
+  int chunkLength = (length > (size_t)INT_MAX) ? INT_MAX : (int)length;
+  int result = send(socketFD, (const char *)bytes, chunkLength, 0);
+  if (result == SOCKET_ERROR) {
+    ALNRedisSyncErrnoFromWSA();
+    return -1;
+  }
+  return (ssize_t)result;
+}
+
+static ssize_t ALNRedisSocketRecv(ALNRedisSocketHandle socketFD, uint8_t *buffer, size_t length) {
+  int chunkLength = (length > (size_t)INT_MAX) ? INT_MAX : (int)length;
+  int result = recv(socketFD, (char *)buffer, chunkLength, 0);
+  if (result == SOCKET_ERROR) {
+    ALNRedisSyncErrnoFromWSA();
+    return -1;
+  }
+  return (ssize_t)result;
+}
+
+static void ALNRedisApplySocketTimeouts(ALNRedisSocketHandle socketFD, long timeoutMillis) {
+  DWORD timeoutValue = (timeoutMillis <= 0) ? 2500u : (DWORD)timeoutMillis;
+  (void)setsockopt(socketFD,
+                   SOL_SOCKET,
+                   SO_RCVTIMEO,
+                   (const char *)&timeoutValue,
+                   (int)sizeof(timeoutValue));
+  (void)setsockopt(socketFD,
+                   SOL_SOCKET,
+                   SO_SNDTIMEO,
+                   (const char *)&timeoutValue,
+                   (int)sizeof(timeoutValue));
+}
+#else
+typedef int ALNRedisSocketHandle;
+static const ALNRedisSocketHandle ALNRedisInvalidSocketHandle = -1;
+
+static BOOL ALNRedisEnsureSocketLayer(NSError **error) {
+  (void)error;
+  return YES;
+}
+
+static NSString *ALNRedisSocketErrorString(void) {
+  return [NSString stringWithUTF8String:strerror(errno)] ?: @"socket error";
+}
+
+static void ALNRedisCloseSocket(ALNRedisSocketHandle socketFD) {
+  if (socketFD >= 0) {
+    (void)close(socketFD);
+  }
+}
+
+static ssize_t ALNRedisSocketSend(ALNRedisSocketHandle socketFD, const uint8_t *bytes, size_t length) {
+  return send(socketFD, bytes, length, 0);
+}
+
+static ssize_t ALNRedisSocketRecv(ALNRedisSocketHandle socketFD, uint8_t *buffer, size_t length) {
+  return recv(socketFD, buffer, length, 0);
+}
+
+static void ALNRedisApplySocketTimeouts(ALNRedisSocketHandle socketFD, long timeoutMillis) {
+  struct timeval timeoutValue;
+  timeoutValue.tv_sec = timeoutMillis / 1000;
+  timeoutValue.tv_usec = (timeoutMillis % 1000) * 1000;
+  (void)setsockopt(socketFD, SOL_SOCKET, SO_RCVTIMEO, &timeoutValue, sizeof(timeoutValue));
+  (void)setsockopt(socketFD, SOL_SOCKET, SO_SNDTIMEO, &timeoutValue, sizeof(timeoutValue));
+}
+#endif
+
+static BOOL ALNRedisWriteBytes(ALNRedisSocketHandle socketFD,
+                               const uint8_t *bytes,
+                               size_t length,
+                               NSError **error) {
   size_t written = 0;
   while (written < length) {
-    ssize_t count = send(socketFD, bytes + written, length - written, 0);
+    ssize_t count = ALNRedisSocketSend(socketFD, bytes + written, length - written);
     if (count < 0) {
       if (errno == EINTR) {
         continue;
@@ -1803,14 +2231,17 @@ static BOOL ALNRedisWriteBytes(int socketFD, const uint8_t *bytes, size_t length
   return YES;
 }
 
-static BOOL ALNRedisWriteData(int socketFD, NSData *data, NSError **error) {
+static BOOL ALNRedisWriteData(ALNRedisSocketHandle socketFD, NSData *data, NSError **error) {
   return ALNRedisWriteBytes(socketFD, (const uint8_t *)[data bytes], [data length], error);
 }
 
-static BOOL ALNRedisReadExact(int socketFD, uint8_t *buffer, size_t length, NSError **error) {
+static BOOL ALNRedisReadExact(ALNRedisSocketHandle socketFD,
+                              uint8_t *buffer,
+                              size_t length,
+                              NSError **error) {
   size_t readCount = 0;
   while (readCount < length) {
-    ssize_t count = recv(socketFD, buffer + readCount, length - readCount, 0);
+    ssize_t count = ALNRedisSocketRecv(socketFD, buffer + readCount, length - readCount);
     if (count < 0) {
       if (errno == EINTR) {
         continue;
@@ -1833,7 +2264,7 @@ static BOOL ALNRedisReadExact(int socketFD, uint8_t *buffer, size_t length, NSEr
   return YES;
 }
 
-static NSString *ALNRedisReadLine(int socketFD, NSError **error) {
+static NSString *ALNRedisReadLine(ALNRedisSocketHandle socketFD, NSError **error) {
   NSMutableData *buffer = [NSMutableData data];
   while (YES) {
     uint8_t byte = 0;
@@ -1872,9 +2303,9 @@ static NSString *ALNRedisReadLine(int socketFD, NSError **error) {
   return line;
 }
 
-static id ALNRedisReadReply(int socketFD, NSError **error);
+static id ALNRedisReadReply(ALNRedisSocketHandle socketFD, NSError **error);
 
-static id ALNRedisReadArrayReply(int socketFD, NSString *countText, NSError **error) {
+static id ALNRedisReadArrayReply(ALNRedisSocketHandle socketFD, NSString *countText, NSError **error) {
   long long count = 0;
   if (!ALNParseSignedInteger(countText, &count) || count < -1) {
     if (error != NULL) {
@@ -1900,7 +2331,7 @@ static id ALNRedisReadArrayReply(int socketFD, NSString *countText, NSError **er
   return [NSArray arrayWithArray:out];
 }
 
-static id ALNRedisReadBulkReply(int socketFD, NSString *lengthText, NSError **error) {
+static id ALNRedisReadBulkReply(ALNRedisSocketHandle socketFD, NSString *lengthText, NSError **error) {
   long long length = 0;
   if (!ALNParseSignedInteger(lengthText, &length) || length < -1) {
     if (error != NULL) {
@@ -1929,7 +2360,7 @@ static id ALNRedisReadBulkReply(int socketFD, NSString *lengthText, NSError **er
   return [NSData dataWithData:data];
 }
 
-static id ALNRedisReadReply(int socketFD, NSError **error) {
+static id ALNRedisReadReply(ALNRedisSocketHandle socketFD, NSError **error) {
   uint8_t prefix = 0;
   if (!ALNRedisReadExact(socketFD, &prefix, 1, error)) {
     return nil;
@@ -1972,7 +2403,7 @@ static id ALNRedisReadReply(int socketFD, NSError **error) {
   return nil;
 }
 
-static BOOL ALNRedisWriteCommand(int socketFD, NSArray *parts, NSError **error) {
+static BOOL ALNRedisWriteCommand(ALNRedisSocketHandle socketFD, NSArray *parts, NSError **error) {
   NSMutableData *payload = [NSMutableData data];
   NSString *header = [NSString stringWithFormat:@"*%lu\r\n", (unsigned long)[parts count]];
   [payload appendData:[header dataUsingEncoding:NSUTF8StringEncoding]];
@@ -1996,22 +2427,25 @@ static BOOL ALNRedisWriteCommand(int socketFD, NSArray *parts, NSError **error) 
   return ALNRedisWriteData(socketFD, payload, error);
 }
 
-static int ALNRedisOpenSocketConnection(NSString *host,
-                                        NSUInteger port,
-                                        NSTimeInterval timeoutSeconds,
-                                        NSError **error) {
+static ALNRedisSocketHandle ALNRedisOpenSocketConnection(NSString *host,
+                                                         NSUInteger port,
+                                                         NSTimeInterval timeoutSeconds,
+                                                         NSError **error) {
   NSString *normalizedHost = ALNNonEmptyString(host, @"");
   if ([normalizedHost length] == 0) {
     if (error != NULL) {
       *error = ALNRedisClientError(2213, @"redis host is required", nil);
     }
-    return -1;
+    return ALNRedisInvalidSocketHandle;
   }
   if (port == 0 || port > 65535) {
     if (error != NULL) {
       *error = ALNRedisClientError(2214, @"redis port must be between 1 and 65535", nil);
     }
-    return -1;
+    return ALNRedisInvalidSocketHandle;
+  }
+  if (!ALNRedisEnsureSocketLayer(error)) {
+    return ALNRedisInvalidSocketHandle;
   }
 
   struct addrinfo hints;
@@ -2035,42 +2469,39 @@ static int ALNRedisOpenSocketConnection(NSString *host,
     if (result != NULL) {
       freeaddrinfo(result);
     }
-    return -1;
+    return ALNRedisInvalidSocketHandle;
   }
 
-  int socketFD = -1;
+  ALNRedisSocketHandle socketFD = ALNRedisInvalidSocketHandle;
   long timeoutMillis = (long)(timeoutSeconds * 1000.0);
   if (timeoutMillis <= 0) {
     timeoutMillis = 2500;
   }
-  struct timeval timeoutValue;
-  timeoutValue.tv_sec = timeoutMillis / 1000;
-  timeoutValue.tv_usec = (timeoutMillis % 1000) * 1000;
 
   for (struct addrinfo *candidate = result; candidate != NULL; candidate = candidate->ai_next) {
     socketFD = socket(candidate->ai_family, candidate->ai_socktype, candidate->ai_protocol);
-    if (socketFD < 0) {
+    if (socketFD == ALNRedisInvalidSocketHandle) {
       continue;
     }
 
-    (void)setsockopt(socketFD, SOL_SOCKET, SO_RCVTIMEO, &timeoutValue, sizeof(timeoutValue));
-    (void)setsockopt(socketFD, SOL_SOCKET, SO_SNDTIMEO, &timeoutValue, sizeof(timeoutValue));
+    ALNRedisApplySocketTimeouts(socketFD, timeoutMillis);
 
     if (connect(socketFD, candidate->ai_addr, candidate->ai_addrlen) == 0) {
       break;
     }
-    close(socketFD);
-    socketFD = -1;
+    ALNRedisCloseSocket(socketFD);
+    socketFD = ALNRedisInvalidSocketHandle;
   }
   freeaddrinfo(result);
 
-  if (socketFD < 0) {
+  if (socketFD == ALNRedisInvalidSocketHandle) {
     if (error != NULL) {
       *error = ALNRedisClientError(2216,
-                                   [NSString stringWithFormat:@"redis connect failed: %s", strerror(errno)],
+                                   [NSString stringWithFormat:@"redis connect failed: %@",
+                                                              ALNRedisSocketErrorString()],
                                    nil);
     }
-    return -1;
+    return ALNRedisInvalidSocketHandle;
   }
   return socketFD;
 }
@@ -2149,28 +2580,29 @@ static int ALNRedisOpenSocketConnection(NSString *host,
   return [NSString stringWithFormat:@"%@:%@", self.namespacePrefix ?: @"arlen:cache", key ?: @""];
 }
 
-- (int)openConnectionWithError:(NSError **)error {
-  int fd = ALNRedisOpenSocketConnection(self.host, self.port, self.ioTimeoutSeconds, error);
-  if (fd < 0) {
-    return -1;
+- (ALNRedisSocketHandle)openConnectionWithError:(NSError **)error {
+  ALNRedisSocketHandle fd =
+      ALNRedisOpenSocketConnection(self.host, self.port, self.ioTimeoutSeconds, error);
+  if (fd == ALNRedisInvalidSocketHandle) {
+    return ALNRedisInvalidSocketHandle;
   }
 
   if ([self.password length] > 0) {
     NSError *authError = nil;
     if (!ALNRedisWriteCommand(fd, @[ @"AUTH", self.password ], &authError)) {
-      close(fd);
+      ALNRedisCloseSocket(fd);
       if (error != NULL) {
         *error = authError;
       }
-      return -1;
+      return ALNRedisInvalidSocketHandle;
     }
     id authReply = ALNRedisReadReply(fd, &authError);
     if (authReply == nil || ![[authReply description] isEqualToString:@"OK"]) {
-      close(fd);
+      ALNRedisCloseSocket(fd);
       if (error != NULL) {
         *error = authError ?: ALNRedisClientError(2221, @"redis AUTH failed", nil);
       }
-      return -1;
+      return ALNRedisInvalidSocketHandle;
     }
   }
 
@@ -2178,19 +2610,19 @@ static int ALNRedisOpenSocketConnection(NSString *host,
     NSError *selectError = nil;
     if (!ALNRedisWriteCommand(fd, @[ @"SELECT", [NSString stringWithFormat:@"%ld", (long)self.databaseIndex] ],
                               &selectError)) {
-      close(fd);
+      ALNRedisCloseSocket(fd);
       if (error != NULL) {
         *error = selectError;
       }
-      return -1;
+      return ALNRedisInvalidSocketHandle;
     }
     id selectReply = ALNRedisReadReply(fd, &selectError);
     if (selectReply == nil || ![[selectReply description] isEqualToString:@"OK"]) {
-      close(fd);
+      ALNRedisCloseSocket(fd);
       if (error != NULL) {
         *error = selectError ?: ALNRedisClientError(2222, @"redis SELECT failed", nil);
       }
-      return -1;
+      return ALNRedisInvalidSocketHandle;
     }
   }
 
@@ -2198,8 +2630,8 @@ static int ALNRedisOpenSocketConnection(NSString *host,
 }
 
 - (id)runCommand:(NSArray *)parts error:(NSError **)error {
-  int fd = [self openConnectionWithError:error];
-  if (fd < 0) {
+  ALNRedisSocketHandle fd = [self openConnectionWithError:error];
+  if (fd == ALNRedisInvalidSocketHandle) {
     return nil;
   }
 
@@ -2209,7 +2641,7 @@ static int ALNRedisOpenSocketConnection(NSString *host,
   if (wrote) {
     reply = ALNRedisReadReply(fd, &commandError);
   }
-  close(fd);
+  ALNRedisCloseSocket(fd);
 
   if (!wrote || commandError != nil) {
     if (error != NULL) {
@@ -2883,7 +3315,7 @@ static int ALNRedisOpenSocketConnection(NSString *host,
       continue;
     }
     NSString *path = [self.storageDirectory stringByAppendingPathComponent:item];
-    NSData *payload = [NSData dataWithContentsOfFile:path];
+    NSData *payload = ALNReadRegularFileNoFollow(path, NULL);
     if (payload == nil) {
       continue;
     }

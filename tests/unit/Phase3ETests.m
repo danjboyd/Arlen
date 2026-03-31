@@ -237,6 +237,14 @@ static NSInteger gPhase3EPluginDidStopCount = 0;
   return [attributes[NSFilePosixPermissions] unsignedIntegerValue] & 0777;
 }
 
+- (BOOL)usesWindowsFilesystemSemantics {
+#if defined(_WIN32)
+  return YES;
+#else
+  return NO;
+#endif
+}
+
 - (NSDictionary *)jsonFromResponse:(ALNResponse *)response {
   NSError *error = nil;
   id value = [NSJSONSerialization JSONObjectWithData:response.bodyData options:0 error:&error];
@@ -515,12 +523,22 @@ static NSInteger gPhase3EPluginDidStopCount = 0;
       [rootPath stringByAppendingPathComponent:[NSString stringWithFormat:@"%@.bin", symlinkID]];
   NSString *linkedMetadataPath =
       [rootPath stringByAppendingPathComponent:[NSString stringWithFormat:@"%@.plist", symlinkID]];
-  XCTAssertTrue([[NSFileManager defaultManager] createSymbolicLinkAtPath:linkedDataPath
-                                                     withDestinationPath:outsideDataPath
-                                                                   error:NULL]);
-  XCTAssertTrue([[NSFileManager defaultManager] createSymbolicLinkAtPath:linkedMetadataPath
-                                                     withDestinationPath:outsideMetadataPath
-                                                                   error:NULL]);
+  NSError *linkError = nil;
+  BOOL linkedData =
+      [[NSFileManager defaultManager] createSymbolicLinkAtPath:linkedDataPath
+                                           withDestinationPath:outsideDataPath
+                                                         error:&linkError];
+  BOOL linkedMetadata =
+      [[NSFileManager defaultManager] createSymbolicLinkAtPath:linkedMetadataPath
+                                           withDestinationPath:outsideMetadataPath
+                                                         error:&linkError];
+  if ([self usesWindowsFilesystemSemantics] && (!linkedData || !linkedMetadata)) {
+    (void)[[NSFileManager defaultManager] removeItemAtPath:outsideRoot error:NULL];
+    (void)[[NSFileManager defaultManager] removeItemAtPath:rootPath error:NULL];
+    return;
+  }
+  XCTAssertTrue(linkedData);
+  XCTAssertTrue(linkedMetadata);
 
   NSError *symlinkError = nil;
   XCTAssertNil([adapter attachmentDataForID:symlinkID metadata:NULL error:&symlinkError]);
@@ -590,9 +608,17 @@ static NSInteger gPhase3EPluginDidStopCount = 0;
       [attachmentRoot stringByAppendingPathComponent:[NSString stringWithFormat:@"%@.bin", attachmentID]];
   NSString *attachmentMetadataPath =
       [attachmentRoot stringByAppendingPathComponent:[NSString stringWithFormat:@"%@.plist", attachmentID]];
-  XCTAssertEqual((NSUInteger)0700, [self posixPermissionsAtPath:attachmentRoot]);
-  XCTAssertEqual((NSUInteger)0600, [self posixPermissionsAtPath:attachmentDataPath]);
-  XCTAssertEqual((NSUInteger)0600, [self posixPermissionsAtPath:attachmentMetadataPath]);
+  if ([self usesWindowsFilesystemSemantics]) {
+    BOOL isDirectory = NO;
+    XCTAssertTrue([[NSFileManager defaultManager] fileExistsAtPath:attachmentRoot isDirectory:&isDirectory]);
+    XCTAssertTrue(isDirectory);
+    XCTAssertTrue([[NSFileManager defaultManager] fileExistsAtPath:attachmentDataPath]);
+    XCTAssertTrue([[NSFileManager defaultManager] fileExistsAtPath:attachmentMetadataPath]);
+  } else {
+    XCTAssertEqual((NSUInteger)0700, [self posixPermissionsAtPath:attachmentRoot]);
+    XCTAssertEqual((NSUInteger)0600, [self posixPermissionsAtPath:attachmentDataPath]);
+    XCTAssertEqual((NSUInteger)0600, [self posixPermissionsAtPath:attachmentMetadataPath]);
+  }
 
   NSString *jobsRoot = [self temporaryPathWithPrefix:@"arlen-phase3e-job-perms"];
   NSString *storagePath = [jobsRoot stringByAppendingPathComponent:@"jobs/state.plist"];
@@ -600,8 +626,16 @@ static NSInteger gPhase3EPluginDidStopCount = 0;
                                                                       adapterName:@"file_test_jobs"
                                                                             error:NULL];
   XCTAssertNotNil(jobAdapter);
-  XCTAssertEqual((NSUInteger)0700, [self posixPermissionsAtPath:[storagePath stringByDeletingLastPathComponent]]);
-  XCTAssertEqual((NSUInteger)0600, [self posixPermissionsAtPath:storagePath]);
+  if ([self usesWindowsFilesystemSemantics]) {
+    BOOL isDirectory = NO;
+    XCTAssertTrue([[NSFileManager defaultManager] fileExistsAtPath:[storagePath stringByDeletingLastPathComponent]
+                                                       isDirectory:&isDirectory]);
+    XCTAssertTrue(isDirectory);
+    XCTAssertTrue([[NSFileManager defaultManager] fileExistsAtPath:storagePath]);
+  } else {
+    XCTAssertEqual((NSUInteger)0700, [self posixPermissionsAtPath:[storagePath stringByDeletingLastPathComponent]]);
+    XCTAssertEqual((NSUInteger)0600, [self posixPermissionsAtPath:storagePath]);
+  }
 
   NSString *mailRoot = [self temporaryPathWithPrefix:@"arlen-phase3e-mail-perms"];
   ALNFileMailAdapter *mailAdapter = [[ALNFileMailAdapter alloc] initWithStorageDirectory:mailRoot
@@ -621,8 +655,15 @@ static NSInteger gPhase3EPluginDidStopCount = 0;
   XCTAssertTrue([deliveryID hasPrefix:@"mail-"]);
   NSString *deliveryPath =
       [mailRoot stringByAppendingPathComponent:[NSString stringWithFormat:@"%@.plist", deliveryID]];
-  XCTAssertEqual((NSUInteger)0700, [self posixPermissionsAtPath:mailRoot]);
-  XCTAssertEqual((NSUInteger)0600, [self posixPermissionsAtPath:deliveryPath]);
+  if ([self usesWindowsFilesystemSemantics]) {
+    BOOL isDirectory = NO;
+    XCTAssertTrue([[NSFileManager defaultManager] fileExistsAtPath:mailRoot isDirectory:&isDirectory]);
+    XCTAssertTrue(isDirectory);
+    XCTAssertTrue([[NSFileManager defaultManager] fileExistsAtPath:deliveryPath]);
+  } else {
+    XCTAssertEqual((NSUInteger)0700, [self posixPermissionsAtPath:mailRoot]);
+    XCTAssertEqual((NSUInteger)0600, [self posixPermissionsAtPath:deliveryPath]);
+  }
 
   (void)[[NSFileManager defaultManager] removeItemAtPath:attachmentRoot error:NULL];
   (void)[[NSFileManager defaultManager] removeItemAtPath:jobsRoot error:NULL];

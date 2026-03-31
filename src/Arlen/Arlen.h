@@ -8,7 +8,6 @@
 #import "Core/ALNOpenAPI.h"
 #import "Core/ALNSchemaContract.h"
 #import "Core/ALNValueTransformers.h"
-#if !ARLEN_WINDOWS_PREVIEW
 #import "Data/ALNAdapterConformance.h"
 #import "Data/ALNDatabaseAdapter.h"
 #import "Data/ALNDisplayGroup.h"
@@ -32,7 +31,6 @@
 #import "Data/ALNSQLDialect.h"
 #endif
 #import "Data/ALNSQLBuilder.h"
-#endif
 #import "HTTP/ALNHTTPServer.h"
 #import "HTTP/ALNRequest.h"
 #import "HTTP/ALNResponse.h"

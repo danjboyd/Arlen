@@ -26,12 +26,25 @@ static NSDictionary *ALNMergeDictionaries(NSDictionary *base, NSDictionary *over
   return merged;
 }
 
+static NSData *ALNConfigReadData(NSString *path, NSError **error) {
+  NSData *data = [NSData dataWithContentsOfFile:path];
+  if (data == nil && error != NULL) {
+    *error = [NSError errorWithDomain:ALNConfigErrorDomain
+                                 code:1
+                             userInfo:@{
+                               NSLocalizedDescriptionKey :
+                                   [NSString stringWithFormat:@"Failed reading config file: %@", path ?: @""]
+                             }];
+  }
+  return data;
+}
+
 static NSDictionary *ALNLoadPlist(NSString *path, NSError **error) {
   if (![[NSFileManager defaultManager] fileExistsAtPath:path]) {
     return @{};
   }
 
-  NSData *data = [NSData dataWithContentsOfFile:path options:0 error:error];
+  NSData *data = ALNConfigReadData(path, error);
   if (data == nil) {
     return nil;
   }

@@ -2,6 +2,7 @@
 #define ALN_DATABASE_ADAPTER_H
 
 #import <Foundation/Foundation.h>
+#import "../ALNExports.h"
 
 #import "ALNSQLDialect.h"
 
@@ -142,54 +143,54 @@ typedef NS_ENUM(NSInteger, ALNDatabaseAdapterErrorCode) {
 
 @end
 
-FOUNDATION_EXPORT NSError *ALNDatabaseAdapterMakeError(ALNDatabaseAdapterErrorCode code,
-                                                       NSString *message,
-                                                       NSDictionary *_Nullable userInfo);
-FOUNDATION_EXPORT BOOL ALNDatabaseErrorIsConnectivityFailure(NSError *_Nullable error);
-FOUNDATION_EXPORT ALNDatabaseJSONValue *ALNDatabaseJSONParameter(id _Nullable object);
-FOUNDATION_EXPORT ALNDatabaseArrayValue *ALNDatabaseArrayParameter(NSArray *_Nullable items);
-FOUNDATION_EXPORT ALNDatabaseResult *_Nonnull ALNDatabaseResultFromRows(
+ALN_EXPORT NSError *ALNDatabaseAdapterMakeError(ALNDatabaseAdapterErrorCode code,
+                                                NSString *message,
+                                                NSDictionary *_Nullable userInfo);
+ALN_EXPORT BOOL ALNDatabaseErrorIsConnectivityFailure(NSError *_Nullable error);
+ALN_EXPORT ALNDatabaseJSONValue *ALNDatabaseJSONParameter(id _Nullable object);
+ALN_EXPORT ALNDatabaseArrayValue *ALNDatabaseArrayParameter(NSArray *_Nullable items);
+ALN_EXPORT ALNDatabaseResult *_Nonnull ALNDatabaseResultFromRows(
     NSArray<NSDictionary *> *_Nullable rows);
-FOUNDATION_EXPORT ALNDatabaseResult *_Nonnull ALNDatabaseResultFromRowsWithOrderedColumns(
+ALN_EXPORT ALNDatabaseResult *_Nonnull ALNDatabaseResultFromRowsWithOrderedColumns(
     NSArray<NSDictionary *> *_Nullable rows,
     NSArray<NSString *> *_Nullable orderedColumns,
     NSArray<NSArray *> *_Nullable orderedValues);
-FOUNDATION_EXPORT NSDictionary<NSString *, id> *_Nullable ALNDatabaseFirstRow(
+ALN_EXPORT NSDictionary<NSString *, id> *_Nullable ALNDatabaseFirstRow(
     NSArray<NSDictionary *> *_Nullable rows);
-FOUNDATION_EXPORT id _Nullable ALNDatabaseScalarValueFromRow(
+ALN_EXPORT id _Nullable ALNDatabaseScalarValueFromRow(
     NSDictionary<NSString *, id> *_Nullable row,
     NSString *_Nullable columnName,
     NSError *_Nullable *_Nullable error);
-FOUNDATION_EXPORT id _Nullable ALNDatabaseScalarValueFromRows(
+ALN_EXPORT id _Nullable ALNDatabaseScalarValueFromRows(
     NSArray<NSDictionary *> *_Nullable rows,
     NSString *_Nullable columnName,
     NSError *_Nullable *_Nullable error);
-FOUNDATION_EXPORT id _Nullable ALNDatabaseExecuteScalarQuery(id<ALNDatabaseConnection> connection,
-                                                             NSString *sql,
-                                                             NSArray *_Nullable parameters,
-                                                             NSString *_Nullable columnName,
-                                                             NSError *_Nullable *_Nullable error);
-FOUNDATION_EXPORT ALNDatabaseResult *_Nullable ALNDatabaseExecuteQueryResult(
+ALN_EXPORT id _Nullable ALNDatabaseExecuteScalarQuery(id<ALNDatabaseConnection> connection,
+                                                      NSString *sql,
+                                                      NSArray *_Nullable parameters,
+                                                      NSString *_Nullable columnName,
+                                                      NSError *_Nullable *_Nullable error);
+ALN_EXPORT ALNDatabaseResult *_Nullable ALNDatabaseExecuteQueryResult(
     id<ALNDatabaseConnection> connection,
     NSString *sql,
     NSArray *_Nullable parameters,
     NSError *_Nullable *_Nullable error);
-FOUNDATION_EXPORT NSInteger ALNDatabaseExecuteCommandBatch(id<ALNDatabaseConnection> connection,
-                                                           NSString *sql,
-                                                           NSArray<NSArray *> *_Nullable parameterSets,
-                                                           NSError *_Nullable *_Nullable error);
-FOUNDATION_EXPORT BOOL ALNDatabaseConnectionSupportsSavepoints(
+ALN_EXPORT NSInteger ALNDatabaseExecuteCommandBatch(id<ALNDatabaseConnection> connection,
+                                                    NSString *sql,
+                                                    NSArray<NSArray *> *_Nullable parameterSets,
+                                                    NSError *_Nullable *_Nullable error);
+ALN_EXPORT BOOL ALNDatabaseConnectionSupportsSavepoints(
     id<ALNDatabaseConnection> connection);
-FOUNDATION_EXPORT BOOL ALNDatabaseCreateSavepoint(id<ALNDatabaseConnection> connection,
-                                                  NSString *name,
-                                                  NSError *_Nullable *_Nullable error);
-FOUNDATION_EXPORT BOOL ALNDatabaseRollbackToSavepoint(id<ALNDatabaseConnection> connection,
-                                                      NSString *name,
-                                                      NSError *_Nullable *_Nullable error);
-FOUNDATION_EXPORT BOOL ALNDatabaseReleaseSavepoint(id<ALNDatabaseConnection> connection,
-                                                   NSString *name,
-                                                   NSError *_Nullable *_Nullable error);
-FOUNDATION_EXPORT BOOL ALNDatabaseWithSavepoint(
+ALN_EXPORT BOOL ALNDatabaseCreateSavepoint(id<ALNDatabaseConnection> connection,
+                                           NSString *name,
+                                           NSError *_Nullable *_Nullable error);
+ALN_EXPORT BOOL ALNDatabaseRollbackToSavepoint(id<ALNDatabaseConnection> connection,
+                                               NSString *name,
+                                               NSError *_Nullable *_Nullable error);
+ALN_EXPORT BOOL ALNDatabaseReleaseSavepoint(id<ALNDatabaseConnection> connection,
+                                            NSString *name,
+                                            NSError *_Nullable *_Nullable error);
+ALN_EXPORT BOOL ALNDatabaseWithSavepoint(
     id<ALNDatabaseConnection> connection,
     NSString *name,
     BOOL (^block)(NSError *_Nullable *_Nullable error),

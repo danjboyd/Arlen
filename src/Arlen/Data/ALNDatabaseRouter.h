@@ -2,6 +2,7 @@
 #define ALN_DATABASE_ROUTER_H
 
 #import <Foundation/Foundation.h>
+#import "../ALNExports.h"
 
 #import "ALNDatabaseAdapter.h"
 
@@ -27,8 +28,8 @@ typedef NS_ENUM(NSInteger, ALNDatabaseReadFallbackPolicy) {
   ALNDatabaseReadFallbackPolicyAllErrors = 2,
 };
 
-FOUNDATION_EXPORT NSString *ALNDatabaseRouteOperationClassName(ALNDatabaseRouteOperationClass operationClass);
-FOUNDATION_EXPORT NSString *ALNDatabaseReadFallbackPolicyName(ALNDatabaseReadFallbackPolicy policy);
+ALN_EXPORT NSString *ALNDatabaseRouteOperationClassName(ALNDatabaseRouteOperationClass operationClass);
+ALN_EXPORT NSString *ALNDatabaseReadFallbackPolicyName(ALNDatabaseReadFallbackPolicy policy);
 
 extern NSString *const ALNDatabaseRoutingContextTenantKey;
 extern NSString *const ALNDatabaseRoutingContextShardKey;

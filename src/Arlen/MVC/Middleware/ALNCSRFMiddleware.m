@@ -3,10 +3,23 @@
 #import "ALNContext.h"
 #import "ALNRequest.h"
 #import "ALNResponse.h"
+#import "ALNSecurityPrimitives.h"
+
+#include <string.h>
+
+static uint32_t ALNCSRFRandomUInt32(void) {
+  NSData *random = ALNSecureRandomData(sizeof(uint32_t));
+  if (![random isKindOfClass:[NSData class]] || [random length] != sizeof(uint32_t)) {
+    return 0;
+  }
+  uint32_t value = 0;
+  memcpy(&value, [random bytes], sizeof(uint32_t));
+  return value;
+}
 
 static NSString *ALNCSRFTokenFromRandomBytes(void) {
-  uint32_t partA = arc4random();
-  uint32_t partB = arc4random();
+  uint32_t partA = ALNCSRFRandomUInt32();
+  uint32_t partB = ALNCSRFRandomUInt32();
   NSString *uuid = [[[NSUUID UUID] UUIDString] lowercaseString];
   uuid = [uuid stringByReplacingOccurrencesOfString:@"-" withString:@""];
   return [NSString stringWithFormat:@"%08x%08x%@", partA, partB, uuid];

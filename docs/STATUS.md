@@ -4,53 +4,56 @@ Last updated: 2026-03-31
 
 ## Leaving Off (2026-03-31)
 
-- Executed the first implementation pass for Phase `24E-24H` on branch
+- Executed the implementation pass for Phase `24I-24L` on branch
   `windows/clang64`:
-  - added a repo-local focused XCTest runner at
-    `tools/arlen_xctest_runner.m`
-  - added the checked-in Windows-focused test lane and wrappers:
-    `make phase24-windows-tests`,
-    `scripts/run_phase24_windows_tests.ps1`, and
-    `scripts/run_phase24_windows_tests.sh`
-  - widened the Windows preview framework slice in `GNUmakefile` so `make all`
-    now builds the basic app/server runtime plus `build/arlen-xctest-runner`
-  - added `src/Arlen/Support/ALNPlatform.{h,m}` and moved timestamp/PID/thread
-    state handling in `ALNApplication`, `ALNLogger`, and `ALNRequest` onto
-    Windows-safe seams
-  - introduced Winsock/socket-layer portability wrappers, console stop
-    handling, and basic request/response runtime seams in
-    `src/Arlen/HTTP/ALNHTTPServer.m`
-  - enabled Windows-preview app-root `boomhauer --no-watch`,
-    `--prepare-only`, `--print-routes`, `--once`, plus `arlen routes` and
-    `arlen test --unit`
-  - updated `README.md`, `docs/README.md`, `docs/GETTING_STARTED.md`,
-    `docs/CLI_REFERENCE.md`, `docs/TESTING_WORKFLOW.md`,
-    `docs/TOOLCHAIN_MATRIX.md`, `docs/WINDOWS_CLANG64.md`, and
-    `docs/PHASE24_ROADMAP.md` to document the widened preview envelope
+  - widened the Windows preview framework build to include the first-party
+    data-layer sources and exports in `GNUmakefile` / `src/Arlen/Arlen.h`
+  - added Windows-capable libpq/ODBC dynamic-loader discovery in
+    `src/Arlen/Data/ALNPg.m` and `src/Arlen/Data/ALNMSSQL.m`
+  - enabled native Windows `arlen migrate`, `arlen schema-codegen`, and
+    `arlen module migrate` by restoring the shared data-layer CLI path in
+    `tools/arlen.m`
+  - updated `bin/arlen-doctor` and `build/arlen doctor` so both detect
+    `ARLEN_LIBPQ_LIBRARY`, `ARLEN_ODBC_LIBRARY`, CLANG64 DLL locations, and
+    ODBC manager presence
+  - added explicit Windows filesystem semantics in
+    `src/Arlen/Support/ALNServices.m` and updated the related service
+    regressions in `tests/unit/Phase3ETests.m`
+  - added the focused Windows DB smoke bundle and the broader confidence lane:
+    `make phase24-windows-db-smoke`,
+    `make phase24-windows-confidence`, and
+    `tools/ci/run_phase24_windows_preview.sh`
+  - added the self-hosted Windows workflow
+    `.github/workflows/phase24-windows-preview.yml`
+  - made `propane` and `jobs worker` fail explicitly on native Windows in both
+    the CLI and direct shell entrypoints, and documented the runtime boundary in
+    `docs/WINDOWS_RUNTIME_STORY.md`
+  - updated the Windows/toolchain/testing/deployment docs so the checked-in
+    support boundary reflects the current branch state
+- Live CLANG64 verification completed in this workspace on 2026-03-31:
+  - `powershell -ExecutionPolicy Bypass -File scripts\run_clang64.ps1 -InnerCommand "make phase24-windows-confidence"`
+  - the lane completed end-to-end, including `make all`,
+    `make phase24-windows-db-smoke`, `arlen doctor --json`,
+    `arlen new`, `arlen boomhauer --no-watch --prepare-only`, and
+    `arlen routes`
 - Known limitation at this checkpoint:
-  - this shell session could not start MSYS2 bash successfully because
-    `env.exe`/`bash.exe` failed with Windows error 5 (`couldn't create signal
-    pipe` / `CreateFileMapping`), so live CLANG64 build/test verification is
-    still pending outside this sandboxed terminal
-- Next-session verification/closeout path for the delivered `24A-24H` code:
-  - run the checked-in PowerShell launcher on a normal Windows terminal:
-    `powershell -ExecutionPolicy Bypass -File scripts\run_clang64.ps1 -InnerCommand "make all"`
-  - verify the focused preview test lane:
-    `powershell -ExecutionPolicy Bypass -File scripts\run_phase24_windows_tests.ps1`
-  - verify app-root preview smoke commands:
-    `./bin/arlen doctor`, `./bin/arlen new MyApp`,
-    `/path/to/Arlen/bin/arlen boomhauer --no-watch --prepare-only`, and
-    `/path/to/Arlen/bin/arlen routes`
-  - if green, record the concrete command evidence in the status/roadmap docs
-    and continue with `24I-24L`
+  - the stock CLANG64 `xctest` runner still prints `XCTest: No tests found.`
+    for the focused Windows bundles, so build/scaffold confidence is now live
+    but Windows XCTest discovery parity is still incomplete
+- Next-session closeout path for the delivered `24A-24L` code:
+  - stabilize a Windows runner that both loads the focused bundles and reports
+    discovered tests reliably
+  - tighten the confidence lane so Windows focused tests fail hard when test
+    discovery regresses instead of silently accepting `No tests found`
+  - decide whether that runner should come from stock `xctest`, a repo-local
+    helper, or an explicit `tools-xctest-msys` source integration
 
 - Created the dedicated Windows workstream branch:
   - `windows/clang64`
 - Phase 24 is now active as the branch roadmap for native Windows support:
   - added `docs/PHASE24_ROADMAP.md`
-  - implemented the preview slices through `24H` in-branch while keeping live
+  - implemented the branch roadmap through `24L` in code while keeping live
     CLANG64 verification as an explicit remaining step
-  - scoped `24G-24L` as the follow-on full Windows parity track
   - kept the branch contract explicit: GNUmake-first, PowerShell outer / MSYS
     bash inner, wrapper-driven tool discovery, temporary feature gating where
     needed, and no premature production-support claims
@@ -60,10 +63,11 @@ Last updated: 2026-03-31
   - `docs/README.md`
   - `docs/STATUS.md`
 - Next-session execution order on this branch:
-  - confirm the delivered `24A-24H` slice in a non-sandboxed CLANG64 shell
-  - then move into `24I` for PostgreSQL/MSSQL loader and transport parity
-  - follow with `24J` filesystem/security semantics, `24K` CI parity, and
-    `24L` production/runtime-manager guidance
+  - close the Windows XCTest discovery gap
+  - tighten the remaining Windows warnings around pointer-sized storage and
+    filesystem string conversions
+  - decide whether any remaining native Windows runtime work should become a
+    new roadmap phase instead of stretching Phase 24 further
 
 ## Leaving Off (2026-03-30)
 

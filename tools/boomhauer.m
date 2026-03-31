@@ -1097,7 +1097,7 @@ static NSString *ReadTextFile(NSString *path) {
     return content;
   }
 
-  NSData *data = [NSData dataWithContentsOfFile:path options:0 error:nil];
+  NSData *data = [NSData dataWithContentsOfFile:path];
   if (data == nil) {
     return @"";
   }

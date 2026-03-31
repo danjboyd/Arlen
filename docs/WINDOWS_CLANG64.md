@@ -2,15 +2,12 @@
 
 Last updated: 2026-03-31
 
-This document records the native Windows preview workflow for Arlen on MSYS2
+This document records the native Windows workflow for Arlen on MSYS2
 `CLANG64`.
 
-Phase 24A-H establishes a basic app/runtime preview. It is still intentionally
-narrower than Linux support today.
-
-This checkpoint reflects the branch implementation for `24A-24H`. Live MSYS2
-`CLANG64` build/test confirmation from this shell is still pending because the
-current sandbox cannot start `bash.exe` / `env.exe` successfully.
+The branch implementation now covers the full Phase 24 roadmap in code, but
+live MSYS2 `CLANG64` build/test confirmation from this sandbox is still pending
+because the current terminal cannot start `bash.exe` / `env.exe` successfully.
 
 ## 1. Host Entry Path
 
@@ -27,18 +24,14 @@ Run one command directly:
 powershell -ExecutionPolicy Bypass -File scripts\run_clang64.ps1 -InnerCommand "make all"
 ```
 
-The checked-in wrappers for this workflow are:
+The checked-in wrappers are:
 
 - `scripts/run_clang64.ps1`
 - `scripts/run_clang64.sh`
 
-Both bootstrap `/clang64/share/GNUstep/Makefiles/GNUstep.sh` and prefer the
-MSYS2 `CLANG64` toolchain.
-
 ## 2. Required Tools
 
-The preview expects these commands/libraries inside the active `CLANG64`
-environment:
+Expected inside the active `CLANG64` environment:
 
 - `clang`
 - `make`
@@ -48,105 +41,123 @@ environment:
 - `openapp`
 - `libdispatch`
 
-Optional but recommended:
+Recommended for the wider Windows lanes:
 
 - `python3`
 - `curl`
 - `pkg-config`
 - `pg_config`
+- `libpq`
+- `libodbc` or `odbc32.dll`
 
-## 3. Preview Build Contract
+`arlen doctor` checks both `ARLEN_LIBPQ_LIBRARY` / `ARLEN_ODBC_LIBRARY` and
+the standard `CLANG64` DLL locations when present.
 
-From the documented `CLANG64` shell, the first-pass preview build is:
+## 3. Build Contract
+
+From the documented `CLANG64` shell:
 
 ```sh
 make all
 ```
 
-On Windows preview, `make all` currently means:
+On Windows preview, `make all` builds:
 
 - `build/eocc`
-- the reduced CLANG64 preview `libArlenFramework.a` with the basic app/server
-  runtime slice
 - `build/arlen`
-- `build/arlen-xctest-runner`
+- the Windows preview `libArlenFramework.a`, including the data-layer sources
 
-It does not imply `build/boomhauer`, `propane`, or the full Linux verification
-matrix yet.
-
-You can also build the preview slice explicitly:
+Convenience alias:
 
 ```sh
 make clang64-preview
 ```
 
-## 4. Focused CLI Smoke Commands
+## 4. Verification Lanes
 
-These are the intended first commands to prove the preview is alive:
-
-```sh
-./bin/arlen doctor
-./bin/arlen new MyApp
-cd MyApp
-/path/to/Arlen/bin/arlen generate controller Home --route /
-/path/to/Arlen/bin/arlen boomhauer --no-watch --prepare-only
-/path/to/Arlen/bin/arlen routes
-```
-
-`arlen doctor` is the bootstrap-first preflight path. `build/arlen doctor`
-should report the same toolchain contract after the CLI is built.
-
-The focused Windows-safe XCTest lane is:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File scripts\run_phase24_windows_tests.ps1
-```
-
-Equivalent inner-shell command:
+Focused template lane:
 
 ```sh
 make phase24-windows-tests
 ```
 
-## 5. Supported Preview Surface
+Focused DB transport smoke lane:
 
-Phase 24A-H currently targets:
+```sh
+make phase24-windows-db-smoke
+```
+
+Broader Windows confidence lane:
+
+```sh
+make phase24-windows-confidence
+```
+
+PowerShell wrappers:
+
+- `scripts/run_phase24_windows_tests.ps1`
+- `scripts/run_clang64.ps1 -InnerCommand "make phase24-windows-db-smoke"`
+- `scripts/run_clang64.ps1 -InnerCommand "make phase24-windows-confidence"`
+
+Current verification note:
+
+- As of 2026-03-31, `make phase24-windows-confidence` completed on the
+  checked-in CLANG64 path in this workspace.
+- The remaining Windows test-runner gap is discovery: stock `xctest` currently
+  prints `XCTest: No tests found.` for the focused bundles, so the build,
+  bundle, and app-root smoke are live, but true XCTest parity is not closed yet.
+
+## 5. Supported Native Windows Surface
+
+Supported on the current branch:
 
 - `arlen doctor`
 - `arlen config`
 - `arlen new`
 - `arlen generate`
 - `arlen build`
-- `arlen boomhauer` for app-root `--no-watch`, `--prepare-only`, `--print-routes`,
-  `--once`, and direct non-watch server launch
+- `arlen check`
+- `arlen boomhauer` for app-root `--no-watch`, `--prepare-only`,
+  `--print-routes`, `--once`, and direct non-watch launch
 - `arlen routes`
-- `arlen test` as the focused `phase24-windows-tests` lane
+- `arlen test --unit` as the focused Windows XCTest lane
+- `arlen migrate`
+- `arlen schema-codegen`
 - `arlen typed-sql-codegen`
-- `arlen module add/remove/list/doctor/assets/eject/upgrade`
-- `bin/boomhauer` path normalization and generated app makefile emission for
-  Windows-owned app roots
-- the repo-local `build/arlen-xctest-runner` bundle runner for focused Windows
-  XCTest execution
+- `arlen module add/remove/list/doctor/migrate/assets/eject/upgrade`
+- PostgreSQL/ODBC transport loading through the checked-in Windows DLL
+  discovery contract
 
-## 6. Deferred To Later Phase 24 Work
+## 6. Explicit Native Windows Non-Support
 
-These remain intentionally deferred on native Windows at this checkpoint:
+Still intentionally unsupported:
 
 - `jobs worker`
 - `propane`
-- `boomhauer` watch mode and fallback dev error server
-- `perf`
-- `check`
-- `migrate`
-- `schema-codegen`
-- `module migrate`
-- live PostgreSQL/MSSQL validation
-- full verification/CI parity
-- Windows deployment/runtime-manager parity
+- `boomhauer` watch mode
+- fallback dev error server watch-loop behavior
+- Linux perf/sanitizer confidence lanes
+- native Windows production process-manager support
 
-Roadmap ownership:
+The runtime/deployment boundary is documented in:
 
-- Phase `24I`: database transport parity
-- Phase `24J`: filesystem/security parity
-- Phase `24K`: verification/CI parity
-- Phase `24L`: deployment/runtime-manager parity
+- `docs/WINDOWS_RUNTIME_STORY.md`
+
+## 7. Suggested Smoke Sequence
+
+```sh
+./bin/arlen doctor
+make all
+make phase24-windows-tests
+make phase24-windows-db-smoke
+make phase24-windows-confidence
+```
+
+For app-root smoke:
+
+```sh
+./bin/arlen new MyApp
+cd MyApp
+/path/to/Arlen/bin/arlen boomhauer --no-watch --prepare-only
+/path/to/Arlen/bin/arlen routes
+```

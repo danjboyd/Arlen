@@ -1,6 +1,6 @@
 # Arlen Toolchain Matrix
 
-Last updated: 2026-03-27
+Last updated: 2026-03-31
 
 This document records known-good local toolchain baselines for Arlen onboarding and CI parity.
 
@@ -35,8 +35,9 @@ powershell -ExecutionPolicy Bypass -File scripts\run_clang64.ps1 -InnerCommand "
 
 ## Windows Preview Baseline (2026-03-31)
 
-This is the first-pass native Windows contract for Phase 24A-H. It is a
-preview baseline, not parity with Linux.
+This is the native Windows branch contract on `windows/clang64`. It is a
+supported development/CI baseline, not a native Windows production-manager
+contract.
 
 | Component | Command | Expected baseline |
 | --- | --- | --- |
@@ -47,8 +48,10 @@ preview baseline, not parity with Linux.
 | Compiler | `clang --version` | available inside `CLANG64` shell |
 | Build tool | `make --version` | available inside `CLANG64` shell |
 | XCTest runner | `command -v xctest` | available inside `CLANG64` shell |
-| Preview build | `make all` | builds `eocc`, preview `libArlenFramework.a`, `arlen`, and `arlen-xctest-runner` |
+| Preview build | `make all` | builds `eocc`, preview `libArlenFramework.a` including data-layer sources, `arlen`, and `arlen-xctest-runner` |
 | Focused Windows test lane | `make phase24-windows-tests` | runs `ArlenPhase21TemplateTests.xctest` through the repo-local bundle runner |
+| Focused Windows DB smoke lane | `make phase24-windows-db-smoke` | validates libpq/ODBC transport loading before connection failure |
+| Windows confidence lane | `make phase24-windows-confidence` | runs build, focused tests, DB transport smoke, and app-root CLI smoke |
 | App-root prepare-only smoke | `arlen boomhauer --no-watch --prepare-only` | scaffolded app artifacts build cleanly |
 
 Related guide:
@@ -68,6 +71,7 @@ For the Windows preview branch, the checked-in bootstrap contract is:
 - PowerShell outer launcher: `scripts/run_clang64.ps1`
 - MSYS inner launcher: `scripts/run_clang64.sh`
 - GNUstep bootstrap path: `/clang64/share/GNUstep/Makefiles/GNUstep.sh`
+- Windows CI workflow: `.github/workflows/phase24-windows-preview.yml`
 
 The workflow bootstrap entry point is:
 
@@ -102,7 +106,8 @@ Optional contributor override:
 - required tool commands (`clang`, `make`, `bash`)
 - recommended tool commands (`xctest`, `python3`, `curl`)
 - `gnustep-config` execution after sourcing GNUstep
-- `libpq` presence check (`pkg-config`, `pg_config`, or `ldconfig`, depending on platform)
+- `libpq` presence check (`ARLEN_LIBPQ_LIBRARY`, CLANG64 DLLs, `pkg-config`, `pg_config`, or `ldconfig`, depending on platform)
+- `libodbc` presence check (`ARLEN_ODBC_LIBRARY`, CLANG64/system DLLs, `pkg-config`, or `ldconfig`, depending on platform)
 - presence of `docs/TOOLCHAIN_MATRIX.md` itself so the known-good baseline
   remains discoverable
 

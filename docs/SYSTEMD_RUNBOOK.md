@@ -1,5 +1,8 @@
 # Systemd Runbook
 
+This guide is Linux-only. Native Windows support does not use `systemd`; see
+`docs/WINDOWS_RUNTIME_STORY.md` for the current Windows contract.
+
 This runbook documents the recommended VM/`systemd` shape for Arlen apps using
 `propane`.
 

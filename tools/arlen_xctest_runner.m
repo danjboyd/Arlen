@@ -1,5 +1,5 @@
 #import <Foundation/Foundation.h>
-#import <XCTest/GSXCTestRunner.h>
+#import <objc/message.h>
 #include <stdio.h>
 
 static void PrintUsage(void) {
@@ -29,7 +29,28 @@ int main(int argc, const char *argv[]) {
       return 1;
     }
 
-    BOOL passed = [[GSXCTestRunner sharedRunner] runAll];
+    Class runnerClass = NSClassFromString(@"GSXCTestRunner");
+    if (runnerClass == Nil) {
+      fprintf(stderr, "arlen-xctest-runner: GSXCTestRunner class not available after bundle load\n");
+      return 1;
+    }
+
+    id runner = nil;
+    SEL sharedRunnerSelector = @selector(sharedRunner);
+    if ([runnerClass respondsToSelector:sharedRunnerSelector]) {
+      id (*sharedRunnerImp)(id, SEL) = (id (*)(id, SEL))objc_msgSend;
+      runner = sharedRunnerImp(runnerClass, sharedRunnerSelector);
+    }
+    if (runner == nil) {
+      runner = [[runnerClass alloc] init];
+    }
+    if (runner == nil || ![runner respondsToSelector:@selector(runAll)]) {
+      fprintf(stderr, "arlen-xctest-runner: GSXCTestRunner does not expose runAll\n");
+      return 1;
+    }
+
+    BOOL (*runAllImp)(id, SEL) = (BOOL (*)(id, SEL))objc_msgSend;
+    BOOL passed = runAllImp(runner, @selector(runAll));
     return passed ? 0 : 1;
   }
 }

@@ -99,6 +99,9 @@ selected database target.
 - PostgreSQL-specific commands that are disallowed inside transaction blocks still fail under `arlen migrate`
 - MSSQL requires an installed ODBC manager/runtime client plus a SQL Server
   driver; core Arlen does not link to Microsoft's driver
+- Windows CLANG64 preview:
+  - supported when the checked-in libpq/ODBC transport discovery contract is satisfied
+  - use `arlen doctor` first to confirm DLL/runtime visibility
 
 ### `arlen module <add|remove|list|doctor|migrate|assets|upgrade|eject> [options]`
 
@@ -211,6 +214,9 @@ Introspect PostgreSQL schema metadata and generate typed table/column helper API
 - `ALNDatabaseInspector inspectSchemaMetadataForAdapter:` remains PostgreSQL-only
   and now emits additive `schemas`, `check_constraints`, `view_definitions`,
   `relation_comments`, and `column_comments` metadata for audit/reporting tools
+- Windows CLANG64 preview:
+  - supported for PostgreSQL when `libpq` is available through the documented
+    DLL discovery contract
 
 - `--env <name>`: select runtime environment (default: `development`)
 - `--database <target>`: select codegen target (default: `default`)
@@ -280,6 +286,8 @@ Build and run the first-party jobs worker loop for the current app root.
 - compiles the app through `bin/boomhauer --no-watch --prepare-only` and then runs `.boomhauer/build/boomhauer-app` in jobs-worker mode
 - if that prepare step fails, exits with the same non-zero status and points at `.boomhauer/last_build_error.log`
 - worker args are passed through (`--env`, `--once`, `--limit`, `--poll-interval-seconds`, `--run-scheduler`, `--scheduler-interval-seconds`)
+- Windows CLANG64 preview: explicitly unsupported natively; see
+  `docs/WINDOWS_RUNTIME_STORY.md`
 
 ### `arlen propane [manager args...]`
 
@@ -288,6 +296,8 @@ Run production manager (`propane`) for the current app root.
 - manager args are forwarded to `bin/propane`
 - app-root launches first run `bin/boomhauer --no-watch --prepare-only`; if that fails, `propane` exits non-zero and points at `.boomhauer/last_build_error.log`
 - all production manager settings are called "propane accessories"
+- Windows CLANG64 preview: explicitly unsupported natively; see
+  `docs/WINDOWS_RUNTIME_STORY.md`
 
 ### `arlen routes`
 
@@ -303,7 +313,8 @@ Run framework tests.
 - Windows CLANG64 preview:
   - supported lane: focused template suite only
   - `arlen test --unit` maps to `make phase24-windows-tests`
-  - `--integration` and `--all` remain deferred until later Phase 24 verification work
+  - `--integration` and `--all` remain deferred; use `arlen check` for the
+    broader Windows confidence lane
 
 ### `arlen perf`
 
@@ -319,12 +330,15 @@ Profile selection is environment-driven:
 
 ### `arlen check [--dry-run] [--json]`
 
-Run full quality gate (`make check`):
+Run quality gate:
 
-- unit tests
-- integration tests
-- perf gate
-- `--dry-run`: emit planned `make check` workflow without executing it
+- Windows CLANG64 preview:
+  - maps to `make phase24-windows-confidence`
+  - runs build, focused tests, DB transport smoke, and app-root CLI smoke
+- non-Windows:
+  - maps to `make check`
+  - includes unit tests, integration tests, and perf gate
+- `--dry-run`: emit planned make workflow without executing it
 - `--json`: emit machine-readable workflow payloads/failure diagnostics (`phase7g-agent-dx-contracts-v1`)
 
 ### `arlen build [--dry-run] [--json]`
@@ -658,6 +672,8 @@ Lifecycle diagnostics:
 - `make phase21-generated-app-tests`: curated generated-app/module/config matrix for first-user flows
 - `make phase21-focused`: run the full focused Phase 21 lane set
 - `make phase21-confidence`: rerun the focused Phase 21 lanes and regenerate artifacts under `build/release_confidence/phase21`
+- `make phase24-windows-db-smoke`: focused Windows transport-loading smoke lane
+- `make phase24-windows-confidence`: Windows build/test/app-root confidence lane
 - `tools/ci/run_phase21_focused.sh`: explicit focused Phase 21 lane runner for template, protocol, and generated-app coverage
 - `tools/ci/run_phase21_protocol_corpus.sh`: explicit Phase 21 raw protocol corpus gate entrypoint
   - `ARLEN_PHASE21_PROTOCOL_BACKENDS=llhttp` narrows replay to one parser backend

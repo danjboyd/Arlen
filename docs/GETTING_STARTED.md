@@ -145,9 +145,13 @@ From app root:
 ```
 
 Use `arlen routes` when you want to inspect registration order and route names.
-On the Windows preview, use `arlen test --unit` or `make phase24-windows-tests`
-for the focused template XCTest lane instead of the full Linux verification
-matrix.
+On the Windows preview:
+
+- use `arlen test --unit` or `make phase24-windows-tests` for the focused
+  template XCTest lane
+- use `make phase24-windows-db-smoke` for transport smoke coverage
+- use `arlen check` or `make phase24-windows-confidence` for the broader
+  Windows confidence lane
 
 ## 7. Choose the Next Guide
 

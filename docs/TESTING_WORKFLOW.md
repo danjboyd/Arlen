@@ -18,8 +18,19 @@ Use the smallest lane that honestly exercises the bug:
 - `make phase21-confidence`
   - run the focused lanes and regenerate `build/release_confidence/phase21/`
 - `make phase24-windows-tests`
-  - focused Windows CLANG64-safe XCTest lane using `build/arlen-xctest-runner`
+  - focused Windows CLANG64-safe XCTest lane using the stock `xctest` runner
   - currently scoped to `ArlenPhase21TemplateTests.xctest`
+- `make phase24-windows-db-smoke`
+  - focused Windows CLANG64 data-layer transport smoke bundle
+  - asserts libpq/ODBC load before expected connection failure
+- `make phase24-windows-confidence`
+  - Windows confidence lane: build, focused tests, DB transport smoke, and
+    app-root CLI smoke
+
+Current Windows caveat:
+- the stock CLANG64 `xctest` runner currently prints `XCTest: No tests found.`
+  for the focused Phase 24 bundles, so those lanes are useful build/runtime
+  smoke today but not yet equivalent to Linux XCTest discovery.
 
 Phase 20 data-layer-focused lanes remain available:
 
@@ -51,8 +62,9 @@ Phase 20 data-layer-focused lanes remain available:
 5. Promote the change through `make test-unit`, broader integration coverage
    when applicable, and `make phase21-confidence`.
 
-For the native Windows preview branch, promote through `make phase24-windows-tests`
-first before attempting broader Linux-only lanes.
+For the native Windows preview branch, promote through
+`make phase24-windows-tests`, then `make phase24-windows-db-smoke`, and then
+`make phase24-windows-confidence` before attempting broader Linux-only lanes.
 
 ## 3. Template Regression Intake
 

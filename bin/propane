@@ -57,6 +57,14 @@ fi
 script_dir="$(cd "$(dirname "$script_path")" && pwd)"
 default_framework_root="$(cd "$script_dir/.." && pwd)"
 
+platform_name="$(uname -s 2>/dev/null || echo unknown)"
+case "$platform_name" in
+  MINGW*|MSYS*|CYGWIN*)
+    echo "propane: native Windows does not support propane; see docs/WINDOWS_RUNTIME_STORY.md" >&2
+    exit 1
+    ;;
+esac
+
 framework_root="${ARLEN_FRAMEWORK_ROOT:-$default_framework_root}"
 app_root="${ARLEN_APP_ROOT:-$PWD}"
 environment="production"

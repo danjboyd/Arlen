@@ -2,6 +2,7 @@
 #define ALN_ADAPTER_CONFORMANCE_H
 
 #import <Foundation/Foundation.h>
+#import "../ALNExports.h"
 
 #import "ALNDatabaseAdapter.h"
 
@@ -14,10 +15,10 @@ typedef NS_ENUM(NSInteger, ALNAdapterConformanceErrorCode) {
   ALNAdapterConformanceErrorStepFailed = 2,
 };
 
-FOUNDATION_EXPORT BOOL ALNRunAdapterConformanceSuite(id<ALNDatabaseAdapter> adapter,
-                                                     NSError *_Nullable *_Nullable error);
+ALN_EXPORT BOOL ALNRunAdapterConformanceSuite(id<ALNDatabaseAdapter> adapter,
+                                              NSError *_Nullable *_Nullable error);
 
-FOUNDATION_EXPORT NSDictionary *_Nullable
+ALN_EXPORT NSDictionary *_Nullable
 ALNAdapterConformanceReport(id<ALNDatabaseAdapter> adapter,
                             NSError *_Nullable *_Nullable error);
 

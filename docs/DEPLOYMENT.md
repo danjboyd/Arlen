@@ -1,5 +1,9 @@
 # Deployment Guide
 
+Native Windows development/CI support is documented separately in
+`docs/WINDOWS_RUNTIME_STORY.md`. This guide describes the supported Linux
+production path.
+
 Arlen is designed for deployment behind a reverse proxy.
 
 ## 1. Runtime Boundary

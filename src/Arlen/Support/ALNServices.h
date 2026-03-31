@@ -2,6 +2,7 @@
 #define ALN_SERVICES_H
 
 #import <Foundation/Foundation.h>
+#import "../ALNExports.h"
 
 NS_ASSUME_NONNULL_BEGIN
 
@@ -283,22 +284,22 @@ typedef NS_ENUM(NSUInteger, ALNJobWorkerDisposition) {
 
 @end
 
-FOUNDATION_EXPORT BOOL ALNRunJobAdapterConformanceSuite(id<ALNJobAdapter> adapter,
-                                                        NSError *_Nullable *_Nullable error);
-FOUNDATION_EXPORT BOOL ALNRunCacheAdapterConformanceSuite(id<ALNCacheAdapter> adapter,
+ALN_EXPORT BOOL ALNRunJobAdapterConformanceSuite(id<ALNJobAdapter> adapter,
+                                                 NSError *_Nullable *_Nullable error);
+ALN_EXPORT BOOL ALNRunCacheAdapterConformanceSuite(id<ALNCacheAdapter> adapter,
+                                                   NSError *_Nullable *_Nullable error);
+ALN_EXPORT BOOL ALNRunLocalizationAdapterConformanceSuite(id<ALNLocalizationAdapter> adapter,
                                                           NSError *_Nullable *_Nullable error);
-FOUNDATION_EXPORT BOOL ALNRunLocalizationAdapterConformanceSuite(id<ALNLocalizationAdapter> adapter,
-                                                                 NSError *_Nullable *_Nullable error);
-FOUNDATION_EXPORT BOOL ALNRunMailAdapterConformanceSuite(id<ALNMailAdapter> adapter,
-                                                         NSError *_Nullable *_Nullable error);
-FOUNDATION_EXPORT BOOL ALNRunAttachmentAdapterConformanceSuite(id<ALNAttachmentAdapter> adapter,
-                                                               NSError *_Nullable *_Nullable error);
-FOUNDATION_EXPORT BOOL ALNRunServiceCompatibilitySuite(id<ALNJobAdapter> jobsAdapter,
-                                                       id<ALNCacheAdapter> cacheAdapter,
-                                                       id<ALNLocalizationAdapter> localizationAdapter,
-                                                       id<ALNMailAdapter> mailAdapter,
-                                                       id<ALNAttachmentAdapter> attachmentAdapter,
-                                                       NSError *_Nullable *_Nullable error);
+ALN_EXPORT BOOL ALNRunMailAdapterConformanceSuite(id<ALNMailAdapter> adapter,
+                                                  NSError *_Nullable *_Nullable error);
+ALN_EXPORT BOOL ALNRunAttachmentAdapterConformanceSuite(id<ALNAttachmentAdapter> adapter,
+                                                        NSError *_Nullable *_Nullable error);
+ALN_EXPORT BOOL ALNRunServiceCompatibilitySuite(id<ALNJobAdapter> jobsAdapter,
+                                                id<ALNCacheAdapter> cacheAdapter,
+                                                id<ALNLocalizationAdapter> localizationAdapter,
+                                                id<ALNMailAdapter> mailAdapter,
+                                                id<ALNAttachmentAdapter> attachmentAdapter,
+                                                NSError *_Nullable *_Nullable error);
 
 NS_ASSUME_NONNULL_END
 

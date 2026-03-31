@@ -5,14 +5,12 @@
 #import "ALNConfig.h"
 #import "ALNJSONSerialization.h"
 #import "ALNModuleSystem.h"
-#if !ARLEN_WINDOWS_PREVIEW
 #import "ALNGDL2Adapter.h"
 #import "ALNDatabaseInspector.h"
 #import "ALNMSSQL.h"
 #import "ALNMigrationRunner.h"
 #import "ALNPg.h"
 #import "ALNSchemaCodegen.h"
-#endif
 
 static void PrintUsage(void) {
   fprintf(stderr,
@@ -39,11 +37,11 @@ static void PrintUsage(void) {
   fprintf(stderr,
           "\n"
           "Windows CLANG64 preview:\n"
-          "  supported: doctor, config, new, generate, build, boomhauer, routes,\n"
-          "             focused test, typed-sql-codegen, module add/remove/list/\n"
-          "             doctor/assets/eject/upgrade\n"
-          "  deferred: jobs worker, propane, perf, check,\n"
-          "            migrate, schema-codegen, module migrate\n");
+          "  supported: doctor, config, new, generate, build, check, boomhauer,\n"
+          "             routes, focused test, migrate, schema-codegen,\n"
+          "             typed-sql-codegen, module add/remove/list/doctor/\n"
+          "             migrate/assets/eject/upgrade\n"
+          "  deferred: jobs worker, propane, perf\n");
 #endif
 }
 
@@ -104,7 +102,8 @@ static void PrintModuleUsage(void) {
   fprintf(stdout,
           "\n"
           "Windows CLANG64 preview note:\n"
-          "  `arlen module migrate` is deferred until Phase 24I database parity.\n");
+          "  `arlen module migrate` is supported for database-backed workflows;\n"
+          "  `jobs worker` and `propane` remain explicitly unsupported natively.\n");
 #endif
 }
 
@@ -349,6 +348,19 @@ static NSString *RunShellCaptureCommand(NSString *command, int *exitCode) {
   return [stdoutText stringByAppendingString:stderrText];
 }
 
+static NSData *ReadDataFile(NSString *path, NSError **error) {
+  NSData *data = [NSData dataWithContentsOfFile:path];
+  if (data == nil && error != NULL) {
+    *error = [NSError errorWithDomain:@"Arlen.Error"
+                                 code:1
+                             userInfo:@{
+                               NSLocalizedDescriptionKey :
+                                   [NSString stringWithFormat:@"failed reading file: %@", path ?: @""]
+                             }];
+  }
+  return data;
+}
+
 static int RunShellCommand(NSString *command) {
   NSTask *task = [[NSTask alloc] init];
   task.launchPath = ResolvedBashLaunchPath();
@@ -371,6 +383,28 @@ static NSString *EnvValue(const char *name) {
 
 static BOOL PathExists(NSString *path, BOOL *isDirectory) {
   return [[NSFileManager defaultManager] fileExistsAtPath:path isDirectory:isDirectory];
+}
+
+static NSString *FirstExistingPath(NSArray<NSString *> *candidates) {
+  for (NSString *candidate in candidates ?: @[]) {
+    NSString *trimmed = Trimmed(candidate);
+    if ([trimmed length] == 0) {
+      continue;
+    }
+    if (PathExists(trimmed, NULL)) {
+      return NormalizeFilesystemPath(trimmed);
+    }
+  }
+  return nil;
+}
+
+static NSString *DoctorConfiguredLibraryPath(NSString *environmentVariable,
+                                             NSArray<NSString *> *defaultCandidates) {
+  NSString *override = Trimmed(EnvValue([environmentVariable UTF8String]));
+  if ([override length] > 0) {
+    return override;
+  }
+  return FirstExistingPath(defaultCandidates);
 }
 
 static NSString *ResolveGNUstepScriptPath(void) {
@@ -510,7 +544,7 @@ static BOOL AddPluginClassToAppConfig(NSString *root, NSString *pluginClassName,
   }
 
   NSString *configPath = [root stringByAppendingPathComponent:@"config/app.plist"];
-  NSData *data = [NSData dataWithContentsOfFile:configPath options:0 error:error];
+  NSData *data = ReadDataFile(configPath, error);
   if (data == nil) {
     return NO;
   }
@@ -670,7 +704,7 @@ static NSDictionary *LoadRawConfigForModuleCommand(NSString *appRoot, NSString *
 }
 
 static NSString *ReadUTF8File(NSString *path, NSError **error) {
-  NSData *data = [NSData dataWithContentsOfFile:path options:0 error:error];
+  NSData *data = ReadDataFile(path, error);
   if (data == nil) {
     return nil;
   }
@@ -710,7 +744,7 @@ static BOOL ConfigureGeneratedAuthUIAtAppRoot(NSString *appRoot,
                                               NSString *pagePrefix,
                                               NSError **error) {
   NSString *configPath = [appRoot stringByAppendingPathComponent:@"config/app.plist"];
-  NSData *data = [NSData dataWithContentsOfFile:configPath options:0 error:error];
+  NSData *data = ReadDataFile(configPath, error);
   if (data == nil) {
     return NO;
   }
@@ -1126,8 +1160,7 @@ static int CommandNew(NSArray *args) {
     }
   }
 
-  NSString *root =
-      [[[NSFileManager defaultManager] currentDirectoryPath] stringByAppendingPathComponent:appName];
+  NSString *root = ResolvePathFromRoot([[NSFileManager defaultManager] currentDirectoryPath], appName);
   NSError *error = nil;
   BOOL ok = lite ? ScaffoldLiteApp(root, force, &error) : ScaffoldFullApp(root, force, &error);
   if (!ok) {
@@ -2333,13 +2366,13 @@ static int EmitWindowsPreviewUnsupported(NSString *command,
   if (ArgsContainFlag(args ?: @[], @"--json")) {
     return EmitMachineError(command, workflow ?: command,
                             @"windows_preview_unsupported",
-                            [NSString stringWithFormat:@"arlen %@: not yet supported on Windows CLANG64 preview",
+                            [NSString stringWithFormat:@"arlen %@: not supported on Windows CLANG64 preview",
                                                        command ?: @""],
                             hint,
                             example, 1);
   }
 
-  fprintf(stderr, "arlen %s: not yet supported on Windows CLANG64 preview\n",
+  fprintf(stderr, "arlen %s: not supported on Windows CLANG64 preview\n",
           [command UTF8String]);
   if ([hint length] > 0) {
     fprintf(stderr, "hint: %s\n", [hint UTF8String]);
@@ -2370,8 +2403,8 @@ static int CommandBoomhauer(NSArray *args) {
 static int CommandPropane(NSArray *args) {
 #if ARLEN_WINDOWS_PREVIEW
   return EmitWindowsPreviewUnsupported(@"propane", @"propane", args,
-                                       @"Phase 24L will define the Windows production/runtime-manager story.",
-                                       @"arlen build --dry-run --json");
+                                       @"Native Windows does not support propane; use the documented Windows runtime story or deploy through Linux/WSL2 for production.",
+                                       @"arlen doctor --json");
 #endif
   NSString *appRoot = [[NSFileManager defaultManager] currentDirectoryPath];
   NSString *frameworkRoot = ResolveFrameworkRootForCommand(@"propane");
@@ -2394,8 +2427,8 @@ static int CommandPropane(NSArray *args) {
 static int CommandJobs(NSArray *args) {
 #if ARLEN_WINDOWS_PREVIEW
   return EmitWindowsPreviewUnsupported(@"jobs", @"jobs", args,
-                                       @"Phase 24H will cover worker/runtime parity after the CLI-first bring-up.",
-                                       @"arlen build --dry-run --json");
+                                       @"Native Windows does not support the first-party jobs worker loop; use the documented Windows runtime story or a Linux runtime host.",
+                                       @"arlen doctor --json");
 #endif
   if ([args count] == 0) {
     PrintJobsUsage();
@@ -2444,8 +2477,8 @@ static int CommandTest(NSArray *args) {
 #if ARLEN_WINDOWS_PREVIEW
   if (ArgsContainFlag(args ?: @[], @"--integration") || ArgsContainFlag(args ?: @[], @"--all")) {
     return EmitWindowsPreviewUnsupported(@"test", @"test", args,
-                                         @"Windows preview currently supports the focused Phase 24 template XCTest lane only.",
-                                         @"powershell -ExecutionPolicy Bypass -File scripts\\run_clang64.ps1 -InnerCommand \"make phase24-windows-tests\"");
+                                         @"Windows preview keeps `arlen test` focused on the supported XCTest subset; use `arlen check` for the broader Windows confidence lane.",
+                                         @"powershell -ExecutionPolicy Bypass -File scripts\\run_clang64.ps1 -InnerCommand \"make phase24-windows-confidence\"");
   }
   NSString *frameworkRoot = ResolveFrameworkRootForCommand(@"test");
   if ([frameworkRoot length] == 0) {
@@ -2454,7 +2487,7 @@ static int CommandTest(NSArray *args) {
   NSString *command = [NSString stringWithFormat:@"cd %@ && make phase24-windows-tests",
                                                  ShellQuote(frameworkRoot)];
   return RunShellCommand(command);
-#endif
+#else
   NSString *frameworkRoot = ResolveFrameworkRootForCommand(@"test");
   if ([frameworkRoot length] == 0) {
     return 1;
@@ -2470,6 +2503,7 @@ static int CommandTest(NSArray *args) {
   }
   fprintf(stderr, "arlen test: unsupported options\n");
   return 2;
+#endif
 }
 
 static int CommandPerf(void) {
@@ -2590,9 +2624,7 @@ static int CommandBuild(NSArray *args) {
 
 static int CommandCheck(NSArray *args) {
 #if ARLEN_WINDOWS_PREVIEW
-  return EmitWindowsPreviewUnsupported(@"check", @"check", args,
-                                       @"Use `arlen build`, `arlen doctor`, or the documented CLANG64 smoke commands until Phase 24E/24K lands.",
-                                       @"arlen build --dry-run --json");
+  return RunMakeWorkflowCommand(@"check", @"phase24-windows-confidence", args ?: @[]);
 #else
   return RunMakeWorkflowCommand(@"check", @"check", args ?: @[]);
 #endif
@@ -2773,13 +2805,24 @@ static int CommandDoctor(NSArray *args) {
     }
   }
 
+  NSString *libpqConfiguredPath =
+      DoctorConfiguredLibraryPath(@"ARLEN_LIBPQ_LIBRARY",
+                                  @[ @"C:/msys64/clang64/bin/libpq-5.dll",
+                                     @"C:/msys64/clang64/bin/libpq.dll" ]);
   int libpqCode = 0;
   NSString *libpqLine = Trimmed(RunShellCaptureCommand(
       @"if command -v pkg-config >/dev/null 2>&1 && pkg-config --exists libpq 2>/dev/null; then echo pkg-config; "
       @"elif command -v pg_config >/dev/null 2>&1; then pg_config --includedir 2>/dev/null; "
       @"elif command -v ldconfig >/dev/null 2>&1; then ldconfig -p 2>/dev/null | grep -m1 'libpq\\.so'; fi",
       &libpqCode));
-  if (libpqCode == 0 && [libpqLine length] > 0) {
+  if ([libpqConfiguredPath length] > 0) {
+    NSString *message = [Trimmed(EnvValue("ARLEN_LIBPQ_LIBRARY")) length] > 0
+                            ? [NSString stringWithFormat:@"libpq configured via ARLEN_LIBPQ_LIBRARY (%@)",
+                                                         libpqConfiguredPath]
+                            : [NSString stringWithFormat:@"libpq available: %@", libpqConfiguredPath];
+    AddDoctorCheck(checks, @"libpq", @"pass", message, @"");
+    passCount += 1;
+  } else if (libpqCode == 0 && [libpqLine length] > 0) {
     NSString *message = [libpqLine isEqualToString:@"pkg-config"]
                             ? @"libpq detected via pkg-config"
                             : [NSString stringWithFormat:@"libpq available: %@", libpqLine];
@@ -2794,12 +2837,24 @@ static int CommandDoctor(NSArray *args) {
     warnCount += 1;
   }
 
+  NSString *odbcConfiguredPath =
+      DoctorConfiguredLibraryPath(@"ARLEN_ODBC_LIBRARY",
+                                  @[ @"C:/msys64/clang64/bin/libodbc-2.dll",
+                                     @"C:/msys64/clang64/bin/libodbc.dll",
+                                     @"C:/Windows/System32/odbc32.dll" ]);
   int odbcCode = 0;
   NSString *odbcLine = Trimmed(RunShellCaptureCommand(
       @"if command -v pkg-config >/dev/null 2>&1 && pkg-config --exists odbc 2>/dev/null; then echo pkg-config; "
       @"elif command -v ldconfig >/dev/null 2>&1; then ldconfig -p 2>/dev/null | grep -m1 'libodbc\\.so'; fi",
       &odbcCode));
-  if (odbcCode == 0 && [odbcLine length] > 0) {
+  if ([odbcConfiguredPath length] > 0) {
+    NSString *message = [Trimmed(EnvValue("ARLEN_ODBC_LIBRARY")) length] > 0
+                            ? [NSString stringWithFormat:@"ODBC transport configured via ARLEN_ODBC_LIBRARY (%@)",
+                                                         odbcConfiguredPath]
+                            : [NSString stringWithFormat:@"ODBC manager available: %@", odbcConfiguredPath];
+    AddDoctorCheck(checks, @"libodbc", @"pass", message, @"");
+    passCount += 1;
+  } else if (odbcCode == 0 && [odbcLine length] > 0) {
     NSString *message = [odbcLine isEqualToString:@"pkg-config"]
                             ? @"ODBC manager detected via pkg-config"
                             : [NSString stringWithFormat:@"ODBC manager available: %@", odbcLine];
@@ -3053,7 +3108,6 @@ static NSString *DatabaseAdapterNameFromConfigForTarget(NSDictionary *config, NS
   return @"postgresql";
 }
 
-#if !ARLEN_WINDOWS_PREVIEW
 static id<ALNDatabaseAdapter> DatabaseAdapterForTarget(NSDictionary *config,
                                                        NSString *databaseTarget,
                                                        NSString *dsn,
@@ -3081,7 +3135,6 @@ static id<ALNDatabaseAdapter> DatabaseAdapterForTarget(NSDictionary *config,
   }
   return nil;
 }
-#endif
 
 static NSString *DatabaseTargetPascalSuffix(NSString *databaseTarget) {
   NSArray<NSString *> *parts = [NormalizeDatabaseTarget(databaseTarget) componentsSeparatedByString:@"_"];
@@ -3155,12 +3208,12 @@ static NSString *ALNTypedSQLPascalSuffix(NSString *identifier) {
 }
 
 static NSString *ALNTypedSQLLowerCamel(NSString *identifier) {
-  NSString *pascal = ALNTypedSQLPascalSuffix(identifier);
-  if ([pascal length] == 0) {
+  NSString *pascalSuffix = ALNTypedSQLPascalSuffix(identifier);
+  if ([pascalSuffix length] == 0) {
     return @"value";
   }
-  NSString *first = [[pascal substringToIndex:1] lowercaseString];
-  NSString *rest = ([pascal length] > 1) ? [pascal substringFromIndex:1] : @"";
+  NSString *first = [[pascalSuffix substringToIndex:1] lowercaseString];
+  NSString *rest = ([pascalSuffix length] > 1) ? [pascalSuffix substringFromIndex:1] : @"";
   return [NSString stringWithFormat:@"%@%@", first, rest];
 }
 
@@ -3845,13 +3898,6 @@ static int CommandTypedSQLCodegen(NSArray *args) {
   return 0;
 }
 
-#if ARLEN_WINDOWS_PREVIEW
-static int CommandSchemaCodegen(NSArray *args) {
-  return EmitWindowsPreviewUnsupported(@"schema-codegen", @"schema-codegen", args,
-                                       @"Phase 24I will restore schema-codegen after Windows database transport parity lands.",
-                                       @"arlen typed-sql-codegen --help");
-}
-#else
 static int CommandSchemaCodegen(NSArray *args) {
   NSString *environment = @"development";
   NSString *databaseTarget = @"default";
@@ -4026,15 +4072,7 @@ static int CommandSchemaCodegen(NSArray *args) {
   fprintf(stdout, "  manifest: %s\n", [manifestPath UTF8String]);
   return 0;
 }
-#endif
 
-#if ARLEN_WINDOWS_PREVIEW
-static int CommandMigrate(NSArray *args) {
-  return EmitWindowsPreviewUnsupported(@"migrate", @"migrate", args,
-                                       @"Phase 24I will bring up database-backed migrate workflows on Windows.",
-                                       @"arlen doctor --json");
-}
-#else
 static int CommandMigrate(NSArray *args) {
   NSString *environment = @"development";
   NSString *databaseTarget = @"default";
@@ -4145,7 +4183,6 @@ static int CommandMigrate(NSArray *args) {
   }
   return 0;
 }
-#endif
 
 static int CommandModuleAddOrUpgrade(NSArray *args, BOOL upgradeMode) {
   BOOL asJSON = ArgsContainFlag(args, @"--json");
@@ -4903,13 +4940,6 @@ static int CommandModuleEject(NSArray *args) {
   return 0;
 }
 
-#if ARLEN_WINDOWS_PREVIEW
-static int CommandModuleMigrate(NSArray *args) {
-  return EmitWindowsPreviewUnsupported(@"module", @"migrate", args,
-                                       @"Phase 24I will enable module migration plans after Windows database parity lands.",
-                                       @"arlen module doctor --json");
-}
-#else
 static int CommandModuleMigrate(NSArray *args) {
   BOOL asJSON = ArgsContainFlag(args, @"--json");
   NSString *environment = @"development";
@@ -5061,7 +5091,6 @@ static int CommandModuleMigrate(NSArray *args) {
   }
   return 0;
 }
-#endif
 
 static int CommandModule(NSArray *args) {
   if ([args count] == 0) {

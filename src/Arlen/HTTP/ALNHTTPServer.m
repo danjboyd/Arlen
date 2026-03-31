@@ -117,6 +117,13 @@ static ALNSocketHandle ALNSocketHandleFromNumber(NSNumber *value) {
   return (ALNSocketHandle)[value longLongValue];
 }
 
+static const char *ALNHTTPFilesystemPathCString(NSString *path) {
+  if (![path isKindOfClass:[NSString class]] || [path length] == 0) {
+    return NULL;
+  }
+  return [path UTF8String];
+}
+
 #if defined(_WIN32)
 struct iovec {
   void *iov_base;
@@ -135,8 +142,14 @@ static int ALNHTTPPlatformErrnoFromSocketError(int socketError) {
     return EMFILE;
   case WSAENOBUFS:
     return ENOBUFS;
+#ifdef WSA_NOT_ENOUGH_MEMORY
+  case WSA_NOT_ENOUGH_MEMORY:
+    return ENOMEM;
+#endif
+#ifdef WSAENOMEM
   case WSAENOMEM:
     return ENOMEM;
+#endif
   case WSAEADDRINUSE:
     return EADDRINUSE;
   case WSAEADDRNOTAVAIL:
@@ -1460,7 +1473,7 @@ static int ALNStaticFileFDForPath(NSString *path,
   if (![path isKindOfClass:[NSString class]] || [path length] == 0) {
     return -1;
   }
-  const char *filesystemPath = [path fileSystemRepresentation];
+  const char *filesystemPath = ALNHTTPFilesystemPathCString(path);
   if (filesystemPath == NULL) {
     return -1;
   }
@@ -1644,7 +1657,9 @@ static BOOL ALNSendFileAtPath(ALNSocketHandle clientFd,
   ok = ALNSendFileReadFallback(clientFd, fileFd, remaining);
 #endif
 
+#ifdef __linux__
 cleanup:
+#endif
   close(fileFd);
   return ok;
 }
@@ -2337,7 +2352,7 @@ static NSString *ALNCanonicalStaticPath(NSString *path) {
   }
 #if !defined(_WIN32)
   char resolvedPath[PATH_MAX];
-  const char *filesystemPath = [path fileSystemRepresentation];
+  const char *filesystemPath = ALNHTTPFilesystemPathCString(path);
   if (filesystemPath != NULL && realpath(filesystemPath, resolvedPath) != NULL) {
     NSString *canonical = [[NSFileManager defaultManager]
         stringWithFileSystemRepresentation:resolvedPath
@@ -2363,7 +2378,7 @@ static BOOL ALNStaticPathIsSymbolicLink(NSString *path) {
   return [fileType isEqualToString:NSFileTypeSymbolicLink];
 #else
   struct stat info;
-  const char *filesystemPath = [path fileSystemRepresentation];
+  const char *filesystemPath = ALNHTTPFilesystemPathCString(path);
   if (filesystemPath == NULL || lstat(filesystemPath, &info) != 0) {
     return NO;
   }
@@ -2547,7 +2562,7 @@ static ALNResponse *ALNStaticResponseForMount(ALNRequest *request,
   }
 
   struct stat fileStat;
-  const char *resolvedFilesystemPath = [resolvedFilePath fileSystemRepresentation];
+  const char *resolvedFilesystemPath = ALNHTTPFilesystemPathCString(resolvedFilePath);
   if (resolvedFilesystemPath == NULL ||
       ALNStatWithRetry(resolvedFilesystemPath, &fileStat) != 0 ||
       !S_ISREG(fileStat.st_mode)) {

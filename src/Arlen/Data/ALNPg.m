@@ -5,10 +5,14 @@
 
 #import <dispatch/dispatch.h>
 #import <ctype.h>
-#import <dlfcn.h>
 #import <stdlib.h>
 #import <stdint.h>
 #import <string.h>
+#if defined(_WIN32)
+#include <windows.h>
+#else
+#include <dlfcn.h>
+#endif
 
 NSString *const ALNPgErrorDomain = @"Arlen.Data.Pg.Error";
 NSString *const ALNPgErrorDiagnosticsKey = @"pg_diagnostics";
@@ -130,13 +134,89 @@ static int (*ALNPQgetisnull)(const PGresult *res, int rowNumber, int columnNumbe
 static char *(*ALNPQgetvalue)(const PGresult *res, int rowNumber, int columnNumber) = NULL;
 static char *(*ALNPQcmdTuples)(PGresult *res) = NULL;
 
+#if defined(_WIN32)
+static NSString *ALNLibpqDynamicLoaderLastError(void) {
+  DWORD errorCode = GetLastError();
+  if (errorCode == 0) {
+    return @"unknown Windows loader error";
+  }
+
+  char *messageBuffer = NULL;
+  DWORD flags = FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM |
+                FORMAT_MESSAGE_IGNORE_INSERTS;
+  DWORD length = FormatMessageA(flags,
+                                NULL,
+                                errorCode,
+                                0,
+                                (LPSTR)&messageBuffer,
+                                0,
+                                NULL);
+  if (length == 0 || messageBuffer == NULL) {
+    return [NSString stringWithFormat:@"Windows loader error %lu",
+                                      (unsigned long)errorCode];
+  }
+
+  while (length > 0 &&
+         (messageBuffer[length - 1] == '\r' || messageBuffer[length - 1] == '\n')) {
+    messageBuffer[length - 1] = '\0';
+    length -= 1;
+  }
+  NSString *message =
+      [NSString stringWithUTF8String:messageBuffer] ?: @"unknown Windows loader error";
+  LocalFree(messageBuffer);
+  return message;
+}
+
+static void *ALNOpenLibpqCandidate(const char *candidate) {
+  if (candidate == NULL || candidate[0] == '\0') {
+    return NULL;
+  }
+  return (void *)LoadLibraryA(candidate);
+}
+
+static void *ALNLookupLibpqSymbol(void *handle, const char *symbolName) {
+  return (handle != NULL && symbolName != NULL)
+             ? (void *)GetProcAddress((HMODULE)handle, symbolName)
+             : NULL;
+}
+
+static void ALNCloseLibpqHandle(void *handle) {
+  if (handle != NULL) {
+    FreeLibrary((HMODULE)handle);
+  }
+}
+#else
+static NSString *ALNLibpqDynamicLoaderLastError(void) {
+  const char *dlError = dlerror();
+  return [NSString stringWithUTF8String:(dlError != NULL) ? dlError : "unknown dynamic loader error"] ?:
+         @"unknown dynamic loader error";
+}
+
+static void *ALNOpenLibpqCandidate(const char *candidate) {
+  if (candidate == NULL || candidate[0] == '\0') {
+    return NULL;
+  }
+  return dlopen(candidate, RTLD_LAZY | RTLD_LOCAL);
+}
+
+static void *ALNLookupLibpqSymbol(void *handle, const char *symbolName) {
+  return (handle != NULL && symbolName != NULL) ? dlsym(handle, symbolName) : NULL;
+}
+
+static void ALNCloseLibpqHandle(void *handle) {
+  if (handle != NULL) {
+    dlclose(handle);
+  }
+}
+#endif
+
 static BOOL ALNBindLibpqSymbol(void **target, void *handle, const char *symbolName) {
-  *target = dlsym(handle, symbolName);
+  *target = ALNLookupLibpqSymbol(handle, symbolName);
   return (*target != NULL);
 }
 
 static void ALNBindOptionalLibpqSymbol(void **target, void *handle, const char *symbolName) {
-  *target = dlsym(handle, symbolName);
+  *target = ALNLookupLibpqSymbol(handle, symbolName);
 }
 
 static NSLock *ALNLibpqLoadLock(void) {
@@ -165,23 +245,57 @@ static BOOL ALNLoadLibpq(NSError **error) {
       return NO;
     }
 
+    const char *envCandidate = getenv("ARLEN_LIBPQ_LIBRARY");
+#if defined(_WIN32)
+    const char *candidates[] = {
+      "C:/msys64/clang64/bin/libpq-5.dll",
+      "C:/msys64/clang64/bin/libpq.dll",
+      "libpq-5.dll",
+      "libpq.dll",
+    };
+#else
     const char *candidates[] = {
       "/usr/lib/x86_64-linux-gnu/libpq.so.5",
       "libpq.so.5",
       "libpq.so",
     };
+#endif
 
     void *handle = NULL;
+    NSString *lastLoadError = nil;
+    if (envCandidate != NULL && envCandidate[0] != '\0') {
+      handle = ALNOpenLibpqCandidate(envCandidate);
+      if (handle == NULL) {
+        lastLoadError = [NSString stringWithFormat:@"ARLEN_LIBPQ_LIBRARY=%s failed: %@",
+                                                   envCandidate,
+                                                   ALNLibpqDynamicLoaderLastError()];
+      }
+    }
     size_t candidateCount = sizeof(candidates) / sizeof(candidates[0]);
-    for (size_t idx = 0; idx < candidateCount; idx++) {
-      handle = dlopen(candidates[idx], RTLD_LAZY | RTLD_LOCAL);
+    for (size_t idx = 0; idx < candidateCount && handle == NULL; idx++) {
+      handle = ALNOpenLibpqCandidate(candidates[idx]);
       if (handle != NULL) {
         break;
       }
+      lastLoadError = [NSString stringWithFormat:@"%s failed: %@",
+                                                 candidates[idx],
+                                                 ALNLibpqDynamicLoaderLastError()];
     }
 
     if (handle == NULL) {
-      gLibpqLoadError = @"libpq shared library not found";
+      NSString *candidateSummary =
+#if defined(_WIN32)
+          @"libpq-5.dll, libpq.dll, or ARLEN_LIBPQ_LIBRARY";
+#else
+          @"libpq.so.5, libpq.so, or ARLEN_LIBPQ_LIBRARY";
+#endif
+      gLibpqLoadError = [NSString stringWithFormat:
+                                      @"libpq shared library not found (checked %@)%@",
+                                      candidateSummary,
+                                      [lastLoadError length] > 0
+                                          ? [NSString stringWithFormat:@"; last error: %@",
+                                                                       lastLoadError]
+                                          : @""];
       if (error != NULL) {
         *error = ALNPgMakeError(ALNPgErrorConnectionFailed,
                                 @"failed to load libpq",
@@ -213,10 +327,10 @@ static BOOL ALNLoadLibpq(NSError **error) {
     ALNBindOptionalLibpqSymbol((void **)&ALNPQresultErrorField, handle, "PQresultErrorField");
 
     if (!ok) {
-      const char *dlError = dlerror();
       gLibpqLoadError =
-          [NSString stringWithFormat:@"required libpq symbols missing: %s", dlError ?: "unknown"];
-      dlclose(handle);
+          [NSString stringWithFormat:@"required libpq symbols missing: %@",
+                                     ALNLibpqDynamicLoaderLastError()];
+      ALNCloseLibpqHandle(handle);
       if (error != NULL) {
         *error = ALNPgMakeError(ALNPgErrorConnectionFailed,
                                 @"failed to load libpq",

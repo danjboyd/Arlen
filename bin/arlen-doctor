@@ -147,6 +147,27 @@ add_check() {
   esac
 }
 
+detect_configured_library() {
+  local env_name="$1"
+  shift
+
+  local env_value="${!env_name:-}"
+  if [[ -n "$env_value" ]]; then
+    printf '%s\n' "$env_value"
+    return 0
+  fi
+
+  local candidate=""
+  for candidate in "$@"; do
+    if [[ -n "$candidate" && -f "$candidate" ]]; then
+      printf '%s\n' "$candidate"
+      return 0
+    fi
+  done
+
+  return 1
+}
+
 framework_root=""
 framework_override="${ARLEN_FRAMEWORK_ROOT:-}"
 if [[ -n "$framework_override" ]]; then
@@ -218,7 +239,16 @@ if [[ -n "$gnustep_script" && -f "$gnustep_script" ]]; then
   fi
 fi
 
-if command -v pkg-config >/dev/null 2>&1 && pkg-config --exists libpq 2>/dev/null; then
+libpq_configured_path="$(detect_configured_library ARLEN_LIBPQ_LIBRARY \
+  /clang64/bin/libpq-5.dll \
+  /clang64/bin/libpq.dll || true)"
+if [[ -n "$libpq_configured_path" ]]; then
+  if [[ -n "${ARLEN_LIBPQ_LIBRARY:-}" ]]; then
+    add_check "libpq" "pass" "libpq configured via ARLEN_LIBPQ_LIBRARY ($libpq_configured_path)"
+  else
+    add_check "libpq" "pass" "libpq available: $libpq_configured_path"
+  fi
+elif command -v pkg-config >/dev/null 2>&1 && pkg-config --exists libpq 2>/dev/null; then
   add_check "libpq" "pass" "libpq detected via pkg-config"
 elif command -v pg_config >/dev/null 2>&1; then
   add_check "libpq" "pass" "libpq detected via pg_config ($(pg_config --includedir 2>/dev/null || echo pg_config))"
@@ -233,6 +263,31 @@ elif command -v ldconfig >/dev/null 2>&1; then
 else
   add_check "libpq" "warn" "libpq detection skipped" \
     "Verify libpq availability manually if PostgreSQL support is required."
+fi
+
+odbc_configured_path="$(detect_configured_library ARLEN_ODBC_LIBRARY \
+  /clang64/bin/libodbc-2.dll \
+  /clang64/bin/libodbc.dll \
+  /c/Windows/System32/odbc32.dll || true)"
+if [[ -n "$odbc_configured_path" ]]; then
+  if [[ -n "${ARLEN_ODBC_LIBRARY:-}" ]]; then
+    add_check "libodbc" "pass" "ODBC transport configured via ARLEN_ODBC_LIBRARY ($odbc_configured_path)"
+  else
+    add_check "libodbc" "pass" "ODBC manager available: $odbc_configured_path"
+  fi
+elif command -v pkg-config >/dev/null 2>&1 && pkg-config --exists odbc 2>/dev/null; then
+  add_check "libodbc" "pass" "ODBC manager detected via pkg-config"
+elif command -v ldconfig >/dev/null 2>&1; then
+  odbc_line="$(ldconfig -p 2>/dev/null | grep -m1 'libodbc\\.so' || true)"
+  if [[ -n "$odbc_line" ]]; then
+    add_check "libodbc" "pass" "ODBC manager available: $odbc_line"
+  else
+    add_check "libodbc" "warn" "ODBC manager not detected" \
+      "Install unixODBC or iODBC plus a SQL Server driver to enable the optional MSSQL adapter."
+  fi
+else
+  add_check "libodbc" "warn" "ODBC detection skipped" \
+    "Verify ODBC manager availability manually if MSSQL support is required."
 fi
 
 matrix_path="$repo_root/docs/TOOLCHAIN_MATRIX.md"

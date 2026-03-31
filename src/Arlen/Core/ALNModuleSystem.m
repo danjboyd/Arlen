@@ -55,6 +55,17 @@ static NSError *ALNModuleError(NSInteger code,
   return [NSError errorWithDomain:ALNModuleSystemErrorDomain code:code userInfo:userInfo];
 }
 
+static NSData *ALNModuleReadData(NSString *path, NSError **error) {
+  NSData *data = [NSData dataWithContentsOfFile:path];
+  if (data == nil && error != NULL) {
+    *error = ALNModuleError(1,
+                            [NSString stringWithFormat:@"failed reading file: %@", path ?: @""],
+                            nil,
+                            nil);
+  }
+  return data;
+}
+
 static NSDictionary *ALNModuleLoadPlist(NSString *path, NSError **error) {
   if (![[NSFileManager defaultManager] fileExistsAtPath:path]) {
     if (error != NULL) {
@@ -66,7 +77,7 @@ static NSDictionary *ALNModuleLoadPlist(NSString *path, NSError **error) {
     return nil;
   }
 
-  NSData *data = [NSData dataWithContentsOfFile:path options:0 error:error];
+  NSData *data = ALNModuleReadData(path, error);
   if (data == nil) {
     return nil;
   }

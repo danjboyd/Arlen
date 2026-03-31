@@ -21,6 +21,7 @@
 #import "ALNMetrics.h"
 #import "ALNAuth.h"
 #import "ALNAuthSession.h"
+#import "ALNSecurityPrimitives.h"
 
 #include <ctype.h>
 #include <math.h>
@@ -64,6 +65,7 @@ static void ALNSetStructuredErrorResponse(ALNResponse *response,
                                           NSDictionary *payload);
 static NSString *ALNStringFromTraceBuffer(const char *value);
 static NSString *ALNGenerateRequestID(void);
+static BOOL ALNFillSecureRandomBytes(unsigned char *output, NSUInteger length);
 
 @interface ALNRequestIdentity : NSObject
 
@@ -1702,6 +1704,21 @@ static ALNPerfTrace *ALNDisabledPerfTrace(void) {
   return trace;
 }
 
+static BOOL ALNFillSecureRandomBytes(unsigned char *output, NSUInteger length) {
+  if (output == NULL) {
+    return NO;
+  }
+  if (length == 0) {
+    return YES;
+  }
+  NSData *random = ALNSecureRandomData(length);
+  if (![random isKindOfClass:[NSData class]] || [random length] != length) {
+    return NO;
+  }
+  memcpy(output, [random bytes], length);
+  return YES;
+}
+
 static NSString *ALNFastRandomHexString(NSUInteger length) {
   if (length == 0) {
     return @"";
@@ -1720,7 +1737,12 @@ static NSString *ALNFastRandomHexString(NSUInteger length) {
     }
     randomBytesNeedsFree = YES;
   }
-  arc4random_buf(randomBytes, byteCount);
+  if (!ALNFillSecureRandomBytes(randomBytes, byteCount)) {
+    if (randomBytesNeedsFree) {
+      free(randomBytes);
+    }
+    return @"";
+  }
 
   char stackHexChars[64];
   char *hexChars = stackHexChars;
@@ -1959,7 +1981,10 @@ static void ALNFillRandomLowerHex(char *output, size_t hexLength) {
     output[0] = '\0';
     return;
   }
-  arc4random_buf(randomBytes, byteLength);
+  if (!ALNFillSecureRandomBytes(randomBytes, byteLength)) {
+    output[0] = '\0';
+    return;
+  }
 
   static const char *kHex = "0123456789abcdef";
   for (size_t idx = 0; idx < hexLength; idx++) {
