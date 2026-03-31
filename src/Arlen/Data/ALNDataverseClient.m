@@ -10,10 +10,13 @@ NSString *const ALNDataverseErrorDomain = @"Arlen.Data.Dataverse.Error";
 NSString *const ALNDataverseErrorDiagnosticsKey = @"diagnostics";
 NSString *const ALNDataverseErrorHTTPStatusKey = @"http_status";
 NSString *const ALNDataverseErrorRequestURLKey = @"request_url";
+NSString *const ALNDataverseErrorRequestMethodKey = @"request_method";
+NSString *const ALNDataverseErrorRequestHeadersKey = @"request_headers";
 NSString *const ALNDataverseErrorResponseHeadersKey = @"response_headers";
 NSString *const ALNDataverseErrorResponseBodyKey = @"response_body";
 NSString *const ALNDataverseErrorRetryAfterKey = @"retry_after_seconds";
 NSString *const ALNDataverseErrorCorrelationIDKey = @"correlation_id";
+NSString *const ALNDataverseErrorTargetNameKey = @"target_name";
 
 static NSTimeInterval const ALNDataverseDefaultTimeoutInterval = 60.0;
 static NSUInteger const ALNDataverseDefaultMaxRetries = 2;
@@ -27,23 +30,6 @@ static NSString *ALNDataverseTrimmedString(id value) {
     return [[value stringValue] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
   }
   return @"";
-}
-
-static BOOL ALNDataverseBoolValue(id value, BOOL fallback) {
-  if ([value respondsToSelector:@selector(boolValue)]) {
-    return [value boolValue];
-  }
-  NSString *text = [[ALNDataverseTrimmedString(value) lowercaseString]
-      stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
-  if ([text isEqualToString:@"1"] || [text isEqualToString:@"true"] || [text isEqualToString:@"yes"] ||
-      [text isEqualToString:@"y"] || [text isEqualToString:@"t"]) {
-    return YES;
-  }
-  if ([text isEqualToString:@"0"] || [text isEqualToString:@"false"] || [text isEqualToString:@"no"] ||
-      [text isEqualToString:@"n"] || [text isEqualToString:@"f"]) {
-    return NO;
-  }
-  return fallback;
 }
 
 static NSUInteger ALNDataverseUnsignedIntegerValue(id value, NSUInteger fallback) {
@@ -120,9 +106,14 @@ static NSString *ALNDataverseCorrelationIDFromHeaders(NSDictionary<NSString *, N
     @"x-ms-service-request-id",
   ];
   for (NSString *key in candidateKeys) {
-    NSString *value = headers[[key lowercaseString]];
-    if ([value length] > 0) {
-      return value;
+    for (NSString *headerKey in [headers allKeys]) {
+      if (![[ALNDataverseTrimmedString(headerKey) lowercaseString] isEqualToString:key]) {
+        continue;
+      }
+      NSString *value = ALNDataverseTrimmedString(headers[headerKey]);
+      if ([value length] > 0) {
+        return value;
+      }
     }
   }
   return nil;
@@ -294,9 +285,73 @@ static NSInteger ALNDataverseHTTPStatusFromCurlOutput(NSString *output) {
 }
 
 static NSInteger ALNDataverseRetryAfterSeconds(NSDictionary<NSString *, NSString *> *headers) {
-  NSString *value = headers[@"retry-after"];
+  NSString *value = ALNDataverseTrimmedString(headers[@"retry-after"]);
+  if ([value length] == 0) {
+    value = ALNDataverseTrimmedString(headers[@"Retry-After"]);
+  }
+  if ([value length] == 0) {
+    value = ALNDataverseTrimmedString(headers[@"Retry-after"]);
+  }
   NSInteger seconds = [value integerValue];
-  return seconds > 0 ? seconds : 0;
+  if (seconds > 0) {
+    return seconds;
+  }
+
+  if ([value length] == 0) {
+    return 0;
+  }
+  static NSArray<NSDateFormatter *> *formatters = nil;
+  static dispatch_once_t onceToken;
+  dispatch_once(&onceToken, ^{
+    NSDateFormatter *rfc1123 = [[NSDateFormatter alloc] init];
+    rfc1123.locale = [[NSLocale alloc] initWithLocaleIdentifier:@"en_US_POSIX"];
+    rfc1123.timeZone = [NSTimeZone timeZoneWithAbbreviation:@"GMT"];
+    rfc1123.dateFormat = @"EEE, dd MMM yyyy HH:mm:ss 'GMT'";
+
+    NSDateFormatter *rfc850 = [[NSDateFormatter alloc] init];
+    rfc850.locale = [[NSLocale alloc] initWithLocaleIdentifier:@"en_US_POSIX"];
+    rfc850.timeZone = [NSTimeZone timeZoneWithAbbreviation:@"GMT"];
+    rfc850.dateFormat = @"EEEE, dd-MMM-yy HH:mm:ss 'GMT'";
+
+    NSDateFormatter *asctime = [[NSDateFormatter alloc] init];
+    asctime.locale = [[NSLocale alloc] initWithLocaleIdentifier:@"en_US_POSIX"];
+    asctime.timeZone = [NSTimeZone timeZoneWithAbbreviation:@"GMT"];
+    asctime.dateFormat = @"EEE MMM d HH:mm:ss yyyy";
+
+    formatters = @[ rfc1123, rfc850, asctime ];
+  });
+
+  NSDate *retryDate = nil;
+  for (NSDateFormatter *formatter in formatters) {
+    retryDate = [formatter dateFromString:value];
+    if (retryDate != nil) {
+      break;
+    }
+  }
+  if (retryDate == nil) {
+    return 0;
+  }
+  NSTimeInterval interval = ceil([retryDate timeIntervalSinceNow]);
+  return (interval > 0) ? (NSInteger)interval : 0;
+}
+
+static NSDictionary<NSString *, NSString *> *ALNDataverseRedactedRequestHeaders(
+    NSDictionary<NSString *, NSString *> *headers) {
+  NSMutableDictionary<NSString *, NSString *> *sanitized = [NSMutableDictionary dictionary];
+  NSArray<NSString *> *keys = [[headers allKeys] sortedArrayUsingSelector:@selector(compare:)];
+  for (NSString *key in keys) {
+    NSString *normalizedKey = [ALNDataverseTrimmedString(key) lowercaseString];
+    NSString *value = ALNDataverseTrimmedString(headers[key]);
+    if ([normalizedKey length] == 0 || [value length] == 0) {
+      continue;
+    }
+    if ([normalizedKey isEqualToString:@"authorization"]) {
+      sanitized[key] = @"Bearer [redacted]";
+    } else {
+      sanitized[key] = value;
+    }
+  }
+  return [sanitized copy];
 }
 
 static NSDictionary<NSString *, id> *ALNDataverseResponseSummary(ALNDataverseResponse *response) {
@@ -652,6 +707,11 @@ NSError *ALNDataverseMakeError(ALNDataverseErrorCode code,
 @property(nonatomic, strong, readwrite) ALNDataverseTarget *target;
 @property(nonatomic, strong, readwrite) id<ALNDataverseTransport> transport;
 @property(nonatomic, strong, readwrite) id<ALNDataverseTokenProvider> tokenProvider;
+- (nullable ALNDataverseResponse *)executeAuthorizedRequestWithMethod:(NSString *)method
+                                                            URLString:(NSString *)URLString
+                                                              headers:(NSDictionary<NSString *, NSString *> *)headers
+                                                             bodyData:(nullable NSData *)bodyData
+                                                                error:(NSError **)error;
 @end
 
 @implementation ALNDataverseTarget
@@ -679,6 +739,31 @@ NSError *ALNDataverseMakeError(ALNDataverseErrorCode code,
   return trimmed;
 }
 
++ (NSArray<NSString *> *)configuredTargetNamesFromConfig:(NSDictionary *)config {
+  NSMutableOrderedSet<NSString *> *targets = [NSMutableOrderedSet orderedSet];
+  NSDictionary *root = [config[@"dataverse"] isKindOfClass:[NSDictionary class]] ? config[@"dataverse"] : nil;
+  NSDictionary *topTargets =
+      [config[@"dataverseTargets"] isKindOfClass:[NSDictionary class]] ? config[@"dataverseTargets"] : nil;
+  NSDictionary *nestedTargets =
+      [root[@"targets"] isKindOfClass:[NSDictionary class]] ? root[@"targets"] : nil;
+
+  for (NSString *key in [topTargets allKeys] ?: @[]) {
+    NSString *normalized = [[ALNDataverseTrimmedString(key) lowercaseString]
+        stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    if ([normalized length] > 0) {
+      [targets addObject:normalized];
+    }
+  }
+  for (NSString *key in [nestedTargets allKeys] ?: @[]) {
+    NSString *normalized = [[ALNDataverseTrimmedString(key) lowercaseString]
+        stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    if ([normalized length] > 0) {
+      [targets addObject:normalized];
+    }
+  }
+  return [[targets array] sortedArrayUsingSelector:@selector(compare:)];
+}
+
 + (NSDictionary<NSString *, id> *)configurationNamed:(NSString *)targetName
                                           fromConfig:(NSDictionary *)config {
   NSDictionary *root = [config[@"dataverse"] isKindOfClass:[NSDictionary class]] ? config[@"dataverse"] : nil;
@@ -699,7 +784,7 @@ NSError *ALNDataverseMakeError(ALNDataverseErrorCode code,
       [topTargets[normalizedTarget] isKindOfClass:[NSDictionary class]] ? topTargets[normalizedTarget]
       : ([nestedTargets[normalizedTarget] isKindOfClass:[NSDictionary class]] ? nestedTargets[normalizedTarget] : nil);
   if (targetConfig == nil) {
-    return root;
+    return nil;
   }
 
   NSMutableDictionary *merged = [NSMutableDictionary dictionary];
@@ -1564,19 +1649,6 @@ NSError *ALNDataverseMakeError(ALNDataverseErrorCode code,
     return nil;
   }
 
-  NSError *tokenError = nil;
-  NSString *accessToken = [self.tokenProvider accessTokenForTarget:self.target
-                                                         transport:self.transport
-                                                             error:&tokenError];
-  if ([accessToken length] == 0) {
-    if (error != NULL) {
-      *error = tokenError ?: ALNDataverseMakeError(ALNDataverseErrorAuthenticationFailed,
-                                                   @"Dataverse authentication failed",
-                                                   nil);
-    }
-    return nil;
-  }
-
   NSError *serializationError = nil;
   id serializedObject = ALNDataverseSerializedObject(bodyObject, &serializationError);
   if (bodyObject != nil && serializationError != nil) {
@@ -1595,7 +1667,6 @@ NSError *ALNDataverseMakeError(ALNDataverseErrorCode code,
 
   NSMutableDictionary<NSString *, NSString *> *requestHeaders = [NSMutableDictionary dictionary];
   requestHeaders[@"Accept"] = @"application/json";
-  requestHeaders[@"Authorization"] = [NSString stringWithFormat:@"Bearer %@", accessToken];
   requestHeaders[@"OData-Version"] = @"4.0";
   requestHeaders[@"OData-MaxVersion"] = @"4.0";
   if ([bodyData length] > 0) {
@@ -1619,19 +1690,88 @@ NSError *ALNDataverseMakeError(ALNDataverseErrorCode code,
   }
 
   NSString *URLString = ALNDataverseAbsoluteURLString(self.target.serviceRootURLString, normalizedPath, query);
+  return [self executeAuthorizedRequestWithMethod:normalizedMethod
+                                        URLString:URLString
+                                          headers:requestHeaders
+                                         bodyData:bodyData
+                                            error:error];
+}
+
+- (ALNDataverseResponse *)executeAuthorizedRequestWithMethod:(NSString *)method
+                                                   URLString:(NSString *)URLString
+                                                     headers:(NSDictionary<NSString *, NSString *> *)headers
+                                                    bodyData:(NSData *)bodyData
+                                                       error:(NSError **)error {
+  if (error != NULL) {
+    *error = nil;
+  }
+
+  NSString *normalizedMethod = [[ALNDataverseTrimmedString(method) uppercaseString]
+      stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+  NSString *normalizedURL = ALNDataverseTrimmedString(URLString);
+  if ([normalizedMethod length] == 0 || [normalizedURL length] == 0) {
+    if (error != NULL) {
+      *error = ALNDataverseMakeError(ALNDataverseErrorInvalidArgument,
+                                     @"Dataverse authorized request requires a method and URL",
+                                     nil);
+    }
+    return nil;
+  }
+
+  NSError *tokenError = nil;
+  NSString *accessToken = [self.tokenProvider accessTokenForTarget:self.target
+                                                         transport:self.transport
+                                                             error:&tokenError];
+  if ([accessToken length] == 0) {
+    NSMutableDictionary *details = [NSMutableDictionary dictionary];
+    if ([self.target.targetName length] > 0) {
+      details[ALNDataverseErrorTargetNameKey] = self.target.targetName;
+    }
+    details[ALNDataverseErrorRequestMethodKey] = normalizedMethod;
+    details[ALNDataverseErrorRequestURLKey] = normalizedURL;
+    if (error != NULL) {
+      *error = tokenError ?: ALNDataverseMakeError(ALNDataverseErrorAuthenticationFailed,
+                                                   @"Dataverse authentication failed",
+                                                   details);
+    }
+    return nil;
+  }
+
+  NSMutableDictionary<NSString *, NSString *> *requestHeaders =
+      [NSMutableDictionary dictionaryWithDictionary:headers ?: @{}];
+  requestHeaders[@"Authorization"] = [NSString stringWithFormat:@"Bearer %@", accessToken];
+  NSDictionary<NSString *, NSString *> *redactedHeaders = ALNDataverseRedactedRequestHeaders(requestHeaders);
   NSUInteger maxAttempts = MAX((NSUInteger)1, (self.target.maxRetries + 1));
   NSError *lastError = nil;
+
   for (NSUInteger attempt = 0; attempt < maxAttempts; attempt++) {
     ALNDataverseRequest *request = [[ALNDataverseRequest alloc] initWithMethod:normalizedMethod
-                                                                     URLString:URLString
+                                                                     URLString:normalizedURL
                                                                        headers:requestHeaders
                                                                       bodyData:bodyData];
     NSError *transportError = nil;
     ALNDataverseResponse *response = [self.transport executeRequest:request error:&transportError];
     if (response == nil) {
+      NSMutableDictionary *details = [NSMutableDictionary dictionary];
+      details[ALNDataverseErrorRequestMethodKey] = normalizedMethod;
+      details[ALNDataverseErrorRequestURLKey] = normalizedURL;
+      details[ALNDataverseErrorRequestHeadersKey] = redactedHeaders ?: @{};
+      if ([self.target.targetName length] > 0) {
+        details[ALNDataverseErrorTargetNameKey] = self.target.targetName;
+      }
+      NSMutableDictionary *diagnostics = [NSMutableDictionary dictionary];
+      diagnostics[@"attempt"] = @(attempt + 1);
+      diagnostics[@"max_attempts"] = @(maxAttempts);
+      diagnostics[@"method"] = normalizedMethod;
+      diagnostics[@"target_name"] = self.target.targetName ?: @"";
+      diagnostics[@"body_bytes"] = @([bodyData length]);
+      if ([transportError.localizedDescription length] > 0) {
+        diagnostics[@"transport_error"] = transportError.localizedDescription;
+      }
+      details[ALNDataverseErrorDiagnosticsKey] = diagnostics;
       lastError = transportError ?: ALNDataverseMakeError(ALNDataverseErrorTransportFailed,
                                                           @"Dataverse transport failed",
-                                                          @{ ALNDataverseErrorRequestURLKey : URLString ?: @"" });
+                                                          details);
       if ((attempt + 1) < maxAttempts) {
         [NSThread sleepForTimeInterval:(NSTimeInterval)(attempt + 1)];
         continue;
@@ -1658,21 +1798,31 @@ NSError *ALNDataverseMakeError(ALNDataverseErrorCode code,
     NSString *correlationID = ALNDataverseCorrelationIDFromHeaders(response.headers);
     NSMutableDictionary *details = [NSMutableDictionary dictionary];
     details[ALNDataverseErrorHTTPStatusKey] = @(statusCode);
-    details[ALNDataverseErrorRequestURLKey] = URLString ?: @"";
+    details[ALNDataverseErrorRequestMethodKey] = normalizedMethod;
+    details[ALNDataverseErrorRequestURLKey] = normalizedURL;
+    details[ALNDataverseErrorRequestHeadersKey] = redactedHeaders ?: @{};
     details[ALNDataverseErrorResponseHeadersKey] = response.headers ?: @{};
     details[ALNDataverseErrorResponseBodyKey] = response.bodyText ?: @"";
+    if ([self.target.targetName length] > 0) {
+      details[ALNDataverseErrorTargetNameKey] = self.target.targetName;
+    }
     if (retryAfterSeconds > 0) {
       details[ALNDataverseErrorRetryAfterKey] = @(retryAfterSeconds);
     }
     if ([correlationID length] > 0) {
       details[ALNDataverseErrorCorrelationIDKey] = correlationID;
     }
-    details[ALNDataverseErrorDiagnosticsKey] = @{
-      @"attempt" : @(attempt + 1),
-      @"max_attempts" : @(maxAttempts),
-      @"method" : normalizedMethod ?: @"GET",
-      @"status_code" : @(statusCode),
-    };
+    NSMutableDictionary *diagnostics = [NSMutableDictionary dictionary];
+    diagnostics[@"attempt"] = @(attempt + 1);
+    diagnostics[@"max_attempts"] = @(maxAttempts);
+    diagnostics[@"method"] = normalizedMethod ?: @"GET";
+    diagnostics[@"status_code"] = @(statusCode);
+    diagnostics[@"target_name"] = self.target.targetName ?: @"";
+    diagnostics[@"body_bytes"] = @([bodyData length]);
+    if (retryAfterSeconds > 0) {
+      diagnostics[@"retry_after_seconds"] = @(retryAfterSeconds);
+    }
+    details[ALNDataverseErrorDiagnosticsKey] = diagnostics;
     lastError = ALNDataverseMakeError((statusCode == 429 ? ALNDataverseErrorThrottled : ALNDataverseErrorRequestFailed),
                                       @"Dataverse request returned a non-success status",
                                       details);
@@ -1680,9 +1830,16 @@ NSError *ALNDataverseMakeError(ALNDataverseErrorCode code,
   }
 
   if (error != NULL) {
+    NSMutableDictionary *fallback = [NSMutableDictionary dictionary];
+    fallback[ALNDataverseErrorRequestMethodKey] = normalizedMethod;
+    fallback[ALNDataverseErrorRequestURLKey] = normalizedURL;
+    fallback[ALNDataverseErrorRequestHeadersKey] = redactedHeaders ?: @{};
+    if ([self.target.targetName length] > 0) {
+      fallback[ALNDataverseErrorTargetNameKey] = self.target.targetName;
+    }
     *error = lastError ?: ALNDataverseMakeError(ALNDataverseErrorRequestFailed,
                                                 @"Dataverse request failed",
-                                                @{ ALNDataverseErrorRequestURLKey : URLString ?: @"" });
+                                                fallback);
   }
   return nil;
 }
@@ -2129,40 +2286,16 @@ NSError *ALNDataverseMakeError(ALNDataverseErrorCode code,
   };
   NSData *bodyData = [body dataUsingEncoding:NSUTF8StringEncoding];
   NSString *batchURL = ALNDataverseAbsoluteURLString(self.target.serviceRootURLString, @"$batch", nil);
-  NSError *tokenError = nil;
-  NSString *accessToken = [self.tokenProvider accessTokenForTarget:self.target
-                                                         transport:self.transport
-                                                             error:&tokenError];
-  if ([accessToken length] == 0) {
-    if (error != NULL) {
-      *error = tokenError;
-    }
-    return nil;
-  }
   NSMutableDictionary<NSString *, NSString *> *requestHeaders = [NSMutableDictionary dictionaryWithDictionary:headers];
   requestHeaders[@"Accept"] = @"application/json";
-  requestHeaders[@"Authorization"] = [NSString stringWithFormat:@"Bearer %@", accessToken];
   requestHeaders[@"OData-Version"] = @"4.0";
   requestHeaders[@"OData-MaxVersion"] = @"4.0";
-  ALNDataverseRequest *request = [[ALNDataverseRequest alloc] initWithMethod:@"POST"
-                                                                   URLString:batchURL
-                                                                     headers:requestHeaders
-                                                                    bodyData:bodyData];
-  ALNDataverseResponse *response = [self.transport executeRequest:request error:error];
+  ALNDataverseResponse *response = [self executeAuthorizedRequestWithMethod:@"POST"
+                                                                  URLString:batchURL
+                                                                    headers:requestHeaders
+                                                                   bodyData:bodyData
+                                                                      error:error];
   if (response == nil) {
-    return nil;
-  }
-  if (response.statusCode < 200 || response.statusCode >= 300) {
-    if (error != NULL) {
-      *error = ALNDataverseMakeError(ALNDataverseErrorRequestFailed,
-                                     @"Dataverse batch request returned a non-success status",
-                                     @{
-                                       ALNDataverseErrorHTTPStatusKey : @(response.statusCode),
-                                       ALNDataverseErrorResponseHeadersKey : response.headers ?: @{},
-                                       ALNDataverseErrorResponseBodyKey : response.bodyText ?: @"",
-                                       ALNDataverseErrorRequestURLKey : batchURL ?: @"",
-                                     });
-    }
     return nil;
   }
   return ALNDataverseParseBatchResponses(response, error);

@@ -568,6 +568,18 @@ static NSString *ALNTrimmedLayoutName(id value) {
   [ALNAuthSession clearAuthenticatedSessionForContext:self.context];
 }
 
+- (ALNDataverseClient *)dataverseClient {
+  return [self.context dataverseClient];
+}
+
+- (ALNDataverseClient *)dataverseClientNamed:(NSString *)targetName error:(NSError **)error {
+  return [self.context dataverseClientNamed:targetName error:error];
+}
+
+- (NSArray<NSString *> *)dataverseTargetNames {
+  return [self.context dataverseTargetNames];
+}
+
 - (id<ALNJobAdapter>)jobsAdapter {
   return [self.context jobsAdapter];
 }

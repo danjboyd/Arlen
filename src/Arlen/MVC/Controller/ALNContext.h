@@ -9,6 +9,8 @@
 @class ALNLogger;
 @class ALNPerfTrace;
 @class ALNPageState;
+@class ALNApplication;
+@class ALNDataverseClient;
 
 NS_ASSUME_NONNULL_BEGIN
 
@@ -27,6 +29,7 @@ extern NSString *const ALNContextAuthClaimsStashKey;
 extern NSString *const ALNContextAuthScopesStashKey;
 extern NSString *const ALNContextAuthRolesStashKey;
 extern NSString *const ALNContextAuthSubjectStashKey;
+extern NSString *const ALNContextApplicationStashKey;
 extern NSString *const ALNContextPageStateEnabledStashKey;
 extern NSString *const ALNContextJobsAdapterStashKey;
 extern NSString *const ALNContextCacheAdapterStashKey;
@@ -92,6 +95,11 @@ extern NSString *const ALNContextI18nFallbackLocaleStashKey;
 - (nullable NSDate *)authMFASatisfiedAt;
 - (nullable NSString *)authSessionIdentifier;
 - (BOOL)isMFAAuthenticated;
+- (nullable ALNApplication *)application;
+- (nullable ALNDataverseClient *)dataverseClient;
+- (nullable ALNDataverseClient *)dataverseClientNamed:(nullable NSString *)targetName
+                                                 error:(NSError *_Nullable *_Nullable)error;
+- (NSArray<NSString *> *)dataverseTargetNames;
 - (nullable id<ALNJobAdapter>)jobsAdapter;
 - (nullable id<ALNCacheAdapter>)cacheAdapter;
 - (nullable id<ALNLocalizationAdapter>)localizationAdapter;

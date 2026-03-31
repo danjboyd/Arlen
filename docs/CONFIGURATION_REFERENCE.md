@@ -116,7 +116,7 @@ Named targets can live under either:
 - `dataverse.targets.<name>`
 - `dataverseTargets.<name>`
 
-The Dataverse CLI/codegen path also reads environment overrides:
+The Dataverse runtime helper and CLI/codegen paths also read environment overrides:
 
 - `ARLEN_DATAVERSE_URL` or `ARLEN_DATAVERSE_SERVICE_ROOT`
 - `ARLEN_DATAVERSE_TENANT_ID`

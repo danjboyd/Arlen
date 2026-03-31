@@ -6,6 +6,7 @@
 #import "ALNPerf.h"
 #import "ALNPageState.h"
 #import "ALNAuthSession.h"
+#import "ALNApplication.h"
 
 NSString *const ALNContextSessionStashKey = @"aln.session";
 NSString *const ALNContextSessionDirtyStashKey = @"aln.session.dirty";
@@ -22,6 +23,7 @@ NSString *const ALNContextAuthClaimsStashKey = @"aln.auth.claims";
 NSString *const ALNContextAuthScopesStashKey = @"aln.auth.scopes";
 NSString *const ALNContextAuthRolesStashKey = @"aln.auth.roles";
 NSString *const ALNContextAuthSubjectStashKey = @"aln.auth.subject";
+NSString *const ALNContextApplicationStashKey = @"aln.application";
 NSString *const ALNContextPageStateEnabledStashKey = @"aln.compat.page_state_enabled";
 NSString *const ALNContextJobsAdapterStashKey = @"aln.services.jobs";
 NSString *const ALNContextCacheAdapterStashKey = @"aln.services.cache";
@@ -459,6 +461,35 @@ static BOOL ALNETagListMatches(NSString *ifNoneMatchHeader, NSString *etag) {
 
 - (BOOL)isMFAAuthenticated {
   return [ALNAuthSession isMFAAuthenticatedForContext:self];
+}
+
+- (ALNApplication *)application {
+  id value = self.stash[ALNContextApplicationStashKey];
+  return [value isKindOfClass:[ALNApplication class]] ? value : nil;
+}
+
+- (ALNDataverseClient *)dataverseClient {
+  return [self dataverseClientNamed:nil error:NULL];
+}
+
+- (ALNDataverseClient *)dataverseClientNamed:(NSString *)targetName error:(NSError **)error {
+  ALNApplication *application = [self application];
+  if (application == nil) {
+    if (error != NULL) {
+      *error = [NSError errorWithDomain:@"Arlen.Context.Error"
+                                   code:700
+                               userInfo:@{
+                                 NSLocalizedDescriptionKey : @"Dataverse client is unavailable without an application context"
+                               }];
+    }
+    return nil;
+  }
+  return [application dataverseClientNamed:targetName error:error];
+}
+
+- (NSArray<NSString *> *)dataverseTargetNames {
+  ALNApplication *application = [self application];
+  return (application != nil) ? [application dataverseTargetNames] : @[];
 }
 
 - (id<ALNJobAdapter>)jobsAdapter {

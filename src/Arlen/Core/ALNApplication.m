@@ -20,6 +20,7 @@
 #import "ALNMetrics.h"
 #import "ALNAuth.h"
 #import "ALNAuthSession.h"
+#import "ALNDataverseClient.h"
 
 #include <ctype.h>
 #include <math.h>
@@ -65,6 +66,18 @@ static void ALNSetStructuredErrorResponse(ALNResponse *response,
                                           NSDictionary *payload);
 static NSString *ALNStringFromTraceBuffer(const char *value);
 static NSString *ALNGenerateRequestID(void);
+static NSString *ALNTrimmedStringValue(id value);
+static NSString *ALNNormalizedDataverseTargetName(NSString *rawValue);
+static BOOL ALNDataverseTargetNameIsValid(NSString *targetName);
+static NSArray<NSString *> *ALNDataverseEnvironmentVariableKeys(void);
+static NSString *ALNDataverseEnvironmentValueForTarget(NSString *baseName, NSString *targetName);
+static NSDictionary<NSString *, id> *ALNDataverseMergedConfigForTarget(NSDictionary *config,
+                                                                       NSString *targetName);
+static BOOL ALNDataverseHasConfigurationForTarget(NSDictionary *config, NSString *targetName);
+static ALNDataverseTarget *ALNDataverseTargetFromMergedConfig(NSDictionary *merged,
+                                                              NSString *targetName,
+                                                              NSError **error);
+static NSArray<NSString *> *ALNDataverseTargetNamesFromConfigAndEnvironment(NSDictionary *config);
 
 @interface ALNRequestIdentity : NSObject
 
@@ -533,6 +546,8 @@ static BOOL ALNInvokeRouteAction(id controller,
 @property(nonatomic, strong) NSDate *startedAt;
 @property(nonatomic, assign, readwrite, getter=isStarted) BOOL started;
 @property(nonatomic, strong) NSLock *routeCompilationLock;
+@property(nonatomic, strong) NSMutableDictionary<NSString *, ALNDataverseClient *> *mutableDataverseClients;
+@property(nonatomic, strong) NSLock *dataverseClientLock;
 
 - (void)loadConfiguredPlugins;
 - (void)loadConfiguredModules;
@@ -551,6 +566,212 @@ static BOOL ALNInvokeRouteAction(id controller,
 @end
 
 @implementation ALNApplication
+
+static NSString *ALNTrimmedStringValue(id value) {
+  if ([value isKindOfClass:[NSString class]]) {
+    return [(NSString *)value stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+  }
+  if ([value respondsToSelector:@selector(stringValue)]) {
+    return [[value stringValue] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+  }
+  return @"";
+}
+
+static NSString *ALNNormalizedDataverseTargetName(NSString *rawValue) {
+  NSString *normalized = [[ALNTrimmedStringValue(rawValue) lowercaseString]
+      stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+  return ([normalized length] > 0) ? normalized : @"default";
+}
+
+static BOOL ALNDataverseTargetNameIsValid(NSString *targetName) {
+  NSString *normalized = ALNNormalizedDataverseTargetName(targetName);
+  if ([normalized length] == 0 || [normalized length] > 32) {
+    return NO;
+  }
+  unichar first = [normalized characterAtIndex:0];
+  if (![[NSCharacterSet letterCharacterSet] characterIsMember:first]) {
+    return NO;
+  }
+  NSCharacterSet *allowed =
+      [NSCharacterSet characterSetWithCharactersInString:@"abcdefghijklmnopqrstuvwxyz0123456789_"];
+  return ([[normalized stringByTrimmingCharactersInSet:allowed] length] == 0);
+}
+
+static NSArray<NSString *> *ALNDataverseEnvironmentVariableKeys(void) {
+  NSMutableArray<NSString *> *keys = [NSMutableArray array];
+  extern char **environ;
+  if (environ == NULL) {
+    return @[];
+  }
+
+  for (char **entry = environ; *entry != NULL; entry++) {
+    NSString *line = [NSString stringWithUTF8String:*entry];
+    NSRange separator = [line rangeOfString:@"="];
+    if (separator.location == NSNotFound || separator.location == 0) {
+      continue;
+    }
+    NSString *key = [line substringToIndex:separator.location];
+    if ([key length] > 0) {
+      [keys addObject:key];
+    }
+  }
+  return [keys copy];
+}
+
+static NSString *ALNDataverseEnvironmentValueForTarget(NSString *baseName, NSString *targetName) {
+  NSString *normalizedTarget = ALNNormalizedDataverseTargetName(targetName);
+  if (![normalizedTarget isEqualToString:@"default"]) {
+    NSString *targetedName =
+        [NSString stringWithFormat:@"%@_%@", baseName ?: @"", [normalizedTarget uppercaseString]];
+    const char *targetedValue = getenv([targetedName UTF8String]);
+    if (targetedValue != NULL && targetedValue[0] != '\0') {
+      return [NSString stringWithUTF8String:targetedValue];
+    }
+  }
+  const char *value = getenv([baseName UTF8String]);
+  if (value == NULL || value[0] == '\0') {
+    return nil;
+  }
+  return [NSString stringWithUTF8String:value];
+}
+
+static NSDictionary<NSString *, id> *ALNDataverseMergedConfigForTarget(NSDictionary *config,
+                                                                       NSString *targetName) {
+  NSMutableDictionary<NSString *, id> *merged =
+      [NSMutableDictionary dictionaryWithDictionary:
+          [ALNDataverseTarget configurationNamed:targetName fromConfig:config] ?: @{}];
+
+  NSString *serviceRoot = ALNDataverseEnvironmentValueForTarget(@"ARLEN_DATAVERSE_URL", targetName);
+  if ([serviceRoot length] == 0) {
+    serviceRoot = ALNDataverseEnvironmentValueForTarget(@"ARLEN_DATAVERSE_SERVICE_ROOT", targetName);
+  }
+  NSString *tenantID = ALNDataverseEnvironmentValueForTarget(@"ARLEN_DATAVERSE_TENANT_ID", targetName);
+  NSString *clientID = ALNDataverseEnvironmentValueForTarget(@"ARLEN_DATAVERSE_CLIENT_ID", targetName);
+  NSString *clientSecret =
+      ALNDataverseEnvironmentValueForTarget(@"ARLEN_DATAVERSE_CLIENT_SECRET", targetName);
+  NSString *pageSize = ALNDataverseEnvironmentValueForTarget(@"ARLEN_DATAVERSE_PAGE_SIZE", targetName);
+  NSString *maxRetries =
+      ALNDataverseEnvironmentValueForTarget(@"ARLEN_DATAVERSE_MAX_RETRIES", targetName);
+  NSString *timeout = ALNDataverseEnvironmentValueForTarget(@"ARLEN_DATAVERSE_TIMEOUT", targetName);
+
+  if ([serviceRoot length] > 0) {
+    merged[@"serviceRootURL"] = serviceRoot;
+  }
+  if ([tenantID length] > 0) {
+    merged[@"tenantID"] = tenantID;
+  }
+  if ([clientID length] > 0) {
+    merged[@"clientID"] = clientID;
+  }
+  if ([clientSecret length] > 0) {
+    merged[@"clientSecret"] = clientSecret;
+  }
+  if ([pageSize length] > 0) {
+    merged[@"pageSize"] = @([pageSize integerValue]);
+  }
+  if ([maxRetries length] > 0) {
+    merged[@"maxRetries"] = @([maxRetries integerValue]);
+  }
+  if ([timeout length] > 0) {
+    merged[@"timeout"] = @([timeout doubleValue]);
+  }
+  return [merged copy];
+}
+
+static BOOL ALNDataverseHasConfigurationForTarget(NSDictionary *config, NSString *targetName) {
+  NSString *normalizedTarget = ALNNormalizedDataverseTargetName(targetName);
+  if ([normalizedTarget isEqualToString:@"default"]) {
+    NSDictionary *root = [config[@"dataverse"] isKindOfClass:[NSDictionary class]] ? config[@"dataverse"] : nil;
+    return ([root count] > 0 ||
+            [ALNDataverseEnvironmentValueForTarget(@"ARLEN_DATAVERSE_URL", normalizedTarget) length] > 0 ||
+            [ALNDataverseEnvironmentValueForTarget(@"ARLEN_DATAVERSE_SERVICE_ROOT", normalizedTarget) length] > 0 ||
+            [ALNDataverseEnvironmentValueForTarget(@"ARLEN_DATAVERSE_TENANT_ID", normalizedTarget) length] > 0 ||
+            [ALNDataverseEnvironmentValueForTarget(@"ARLEN_DATAVERSE_CLIENT_ID", normalizedTarget) length] > 0 ||
+            [ALNDataverseEnvironmentValueForTarget(@"ARLEN_DATAVERSE_CLIENT_SECRET", normalizedTarget) length] > 0);
+  }
+
+  if ([[ALNDataverseTarget configuredTargetNamesFromConfig:config] containsObject:normalizedTarget]) {
+    return YES;
+  }
+  return ([ALNDataverseEnvironmentValueForTarget(@"ARLEN_DATAVERSE_URL", normalizedTarget) length] > 0 ||
+          [ALNDataverseEnvironmentValueForTarget(@"ARLEN_DATAVERSE_SERVICE_ROOT", normalizedTarget) length] > 0 ||
+          [ALNDataverseEnvironmentValueForTarget(@"ARLEN_DATAVERSE_TENANT_ID", normalizedTarget) length] > 0 ||
+          [ALNDataverseEnvironmentValueForTarget(@"ARLEN_DATAVERSE_CLIENT_ID", normalizedTarget) length] > 0 ||
+          [ALNDataverseEnvironmentValueForTarget(@"ARLEN_DATAVERSE_CLIENT_SECRET", normalizedTarget) length] > 0);
+}
+
+static ALNDataverseTarget *ALNDataverseTargetFromMergedConfig(NSDictionary *merged,
+                                                              NSString *targetName,
+                                                              NSError **error) {
+  NSString *resolvedServiceRoot =
+      [merged[@"serviceRootURL"] isKindOfClass:[NSString class]] ? merged[@"serviceRootURL"]
+      : ([merged[@"serviceRoot"] isKindOfClass:[NSString class]] ? merged[@"serviceRoot"]
+         : ([merged[@"baseURL"] isKindOfClass:[NSString class]] ? merged[@"baseURL"]
+            : ([merged[@"url"] isKindOfClass:[NSString class]] ? merged[@"url"] : nil)));
+  NSString *resolvedTenantID =
+      [merged[@"tenantID"] isKindOfClass:[NSString class]] ? merged[@"tenantID"]
+      : ([merged[@"tenantId"] isKindOfClass:[NSString class]] ? merged[@"tenantId"] : nil);
+  NSString *resolvedClientID =
+      [merged[@"clientID"] isKindOfClass:[NSString class]] ? merged[@"clientID"]
+      : ([merged[@"clientId"] isKindOfClass:[NSString class]] ? merged[@"clientId"] : nil);
+  NSString *resolvedClientSecret =
+      [merged[@"clientSecret"] isKindOfClass:[NSString class]] ? merged[@"clientSecret"] : nil;
+  NSTimeInterval resolvedTimeout =
+      [merged[@"timeout"] respondsToSelector:@selector(doubleValue)] ? [merged[@"timeout"] doubleValue] : 60.0;
+  NSUInteger resolvedMaxRetries =
+      [merged[@"maxRetries"] respondsToSelector:@selector(unsignedIntegerValue)]
+          ? [merged[@"maxRetries"] unsignedIntegerValue]
+          : 2;
+  NSUInteger resolvedPageSize =
+      [merged[@"pageSize"] respondsToSelector:@selector(unsignedIntegerValue)]
+          ? [merged[@"pageSize"] unsignedIntegerValue]
+          : 500;
+
+  return [[ALNDataverseTarget alloc] initWithServiceRootURLString:resolvedServiceRoot
+                                                         tenantID:resolvedTenantID
+                                                         clientID:resolvedClientID
+                                                     clientSecret:resolvedClientSecret
+                                                        targetName:ALNNormalizedDataverseTargetName(targetName)
+                                                   timeoutInterval:resolvedTimeout
+                                                        maxRetries:resolvedMaxRetries
+                                                          pageSize:resolvedPageSize
+                                                             error:error];
+}
+
+static NSArray<NSString *> *ALNDataverseTargetNamesFromConfigAndEnvironment(NSDictionary *config) {
+  NSMutableOrderedSet<NSString *> *targets = [NSMutableOrderedSet orderedSet];
+  if (ALNDataverseHasConfigurationForTarget(config, @"default")) {
+    [targets addObject:@"default"];
+  }
+  for (NSString *name in [ALNDataverseTarget configuredTargetNamesFromConfig:config]) {
+    if (ALNDataverseTargetNameIsValid(name)) {
+      [targets addObject:ALNNormalizedDataverseTargetName(name)];
+    }
+  }
+
+  NSArray<NSString *> *prefixes = @[
+    @"ARLEN_DATAVERSE_URL_",
+    @"ARLEN_DATAVERSE_SERVICE_ROOT_",
+    @"ARLEN_DATAVERSE_TENANT_ID_",
+    @"ARLEN_DATAVERSE_CLIENT_ID_",
+    @"ARLEN_DATAVERSE_CLIENT_SECRET_",
+    @"ARLEN_DATAVERSE_PAGE_SIZE_",
+    @"ARLEN_DATAVERSE_MAX_RETRIES_",
+    @"ARLEN_DATAVERSE_TIMEOUT_",
+  ];
+  for (NSString *key in ALNDataverseEnvironmentVariableKeys()) {
+    for (NSString *prefix in prefixes) {
+      if (![key hasPrefix:prefix] || [key length] <= [prefix length]) {
+        continue;
+      }
+      NSString *suffix = [[key substringFromIndex:[prefix length]] lowercaseString];
+      if (ALNDataverseTargetNameIsValid(suffix)) {
+        [targets addObject:ALNNormalizedDataverseTargetName(suffix)];
+      }
+    }
+  }
+  return [[targets array] sortedArrayUsingSelector:@selector(compare:)];
+}
 
 - (instancetype)initWithEnvironment:(NSString *)environment
                          configRoot:(NSString *)configRoot
@@ -693,6 +914,8 @@ static BOOL ALNInvokeRouteAction(id controller,
     _startedAt = nil;
     _started = NO;
     _routeCompilationLock = [[NSLock alloc] init];
+    _mutableDataverseClients = [NSMutableDictionary dictionary];
+    _dataverseClientLock = [[NSLock alloc] init];
     ALNLogLevel defaultLogLevel =
         [_environment isEqualToString:@"development"] ? ALNLogLevelDebug : ALNLogLevelInfo;
     _logger.minimumLevel = ALNLogLevelFromConfigValue(_config[@"logLevel"], defaultLogLevel);
@@ -862,6 +1085,95 @@ static BOOL ALNInvokeRouteAction(id controller,
     return;
   }
   _attachmentAdapter = adapter;
+}
+
+- (void)setDataverseClient:(ALNDataverseClient *)client forTargetName:(NSString *)targetName {
+  if (client == nil) {
+    return;
+  }
+  NSString *normalizedTarget = ALNNormalizedDataverseTargetName(targetName);
+  [self.dataverseClientLock lock];
+  self.mutableDataverseClients[normalizedTarget] = client;
+  [self.dataverseClientLock unlock];
+}
+
+- (ALNDataverseClient *)dataverseClient {
+  return [self dataverseClientNamed:nil error:NULL];
+}
+
+- (ALNDataverseClient *)dataverseClientNamed:(NSString *)targetName error:(NSError **)error {
+  if (error != NULL) {
+    *error = nil;
+  }
+  NSString *normalizedTarget = ALNNormalizedDataverseTargetName(targetName);
+  [self.dataverseClientLock lock];
+  ALNDataverseClient *existing = self.mutableDataverseClients[normalizedTarget];
+  [self.dataverseClientLock unlock];
+  if (existing != nil) {
+    return existing;
+  }
+
+  NSError *targetError = nil;
+  ALNDataverseTarget *target = [self dataverseTargetNamed:normalizedTarget error:&targetError];
+  if (target == nil) {
+    if (error != NULL) {
+      *error = targetError;
+    }
+    return nil;
+  }
+  ALNDataverseClient *client = [[ALNDataverseClient alloc] initWithTarget:target error:&targetError];
+  if (client == nil) {
+    if (error != NULL) {
+      *error = targetError;
+    }
+    return nil;
+  }
+
+  [self.dataverseClientLock lock];
+  ALNDataverseClient *cached = self.mutableDataverseClients[normalizedTarget];
+  if (cached == nil) {
+    self.mutableDataverseClients[normalizedTarget] = client;
+    cached = client;
+  }
+  [self.dataverseClientLock unlock];
+  return cached;
+}
+
+- (ALNDataverseTarget *)dataverseTargetNamed:(NSString *)targetName error:(NSError **)error {
+  if (error != NULL) {
+    *error = nil;
+  }
+  NSString *normalizedTarget = ALNNormalizedDataverseTargetName(targetName);
+  if (!ALNDataverseTargetNameIsValid(normalizedTarget)) {
+    if (error != NULL) {
+      *error = [NSError errorWithDomain:ALNApplicationErrorDomain
+                                   code:304
+                               userInfo:@{
+                                 NSLocalizedDescriptionKey :
+                                     @"Dataverse target must match [a-z][a-z0-9_]* and be <= 32 characters"
+                               }];
+    }
+    return nil;
+  }
+  if (!ALNDataverseHasConfigurationForTarget(self.config, normalizedTarget)) {
+    if (error != NULL) {
+      *error = [NSError errorWithDomain:ALNApplicationErrorDomain
+                                   code:305
+                               userInfo:@{
+                                 NSLocalizedDescriptionKey :
+                                     [NSString stringWithFormat:@"Dataverse target is not configured: %@",
+                                                                normalizedTarget]
+                               }];
+    }
+    return nil;
+  }
+
+  NSDictionary<NSString *, id> *merged = ALNDataverseMergedConfigForTarget(self.config, normalizedTarget);
+  return ALNDataverseTargetFromMergedConfig(merged, normalizedTarget, error);
+}
+
+- (NSArray<NSString *> *)dataverseTargetNames {
+  return ALNDataverseTargetNamesFromConfigAndEnvironment(self.config);
 }
 
 - (NSString *)localizedStringForKey:(NSString *)key
@@ -4099,7 +4411,8 @@ static void ALNFinalizeResponse(ALNApplication *application,
     }
   }
 
-  NSMutableDictionary *baseStash = [NSMutableDictionary dictionaryWithCapacity:11];
+  NSMutableDictionary *baseStash = [NSMutableDictionary dictionaryWithCapacity:12];
+  baseStash[ALNContextApplicationStashKey] = self;
   baseStash[ALNContextRequestFormatStashKey] = requestFormat ?: @"";
   if (self.jobsAdapter != nil) {
     baseStash[ALNContextJobsAdapterStashKey] = self.jobsAdapter;

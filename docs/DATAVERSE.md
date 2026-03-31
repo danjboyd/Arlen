@@ -11,13 +11,15 @@ Dataverse support in Arlen is:
 - separate from `ALNDatabaseAdapter` and `ALNSQLBuilder`
 - aimed at the Dataverse Web API, not Microsoft Graph
 
-The current delivered surface covers Phase `23A-23D`:
+Phase `23A-23G` is now complete. The shipped surface includes:
 
 - `ALNDataverseClient`
 - `ALNDataverseQuery`
 - `ALNDataverseMetadata`
 - `ALNDataverseCodegen`
 - `arlen dataverse-codegen`
+- `ALNApplication`, `ALNContext`, and `ALNController` Dataverse helpers
+- repo-native `phase23-dataverse-tests` and `phase23-confidence` lanes
 
 ## 2. Config Shape
 
@@ -61,7 +63,7 @@ Named targets can live in either shape:
 }
 ```
 
-Environment overrides used by the CLI/codegen path:
+Environment overrides are honored by both the runtime helper path and the CLI:
 
 - `ARLEN_DATAVERSE_URL` or `ARLEN_DATAVERSE_SERVICE_ROOT`
 - `ARLEN_DATAVERSE_TENANT_ID`
@@ -74,9 +76,9 @@ Environment overrides used by the CLI/codegen path:
 Target-specific overrides append `_<TARGET>` in uppercase, for example
 `ARLEN_DATAVERSE_URL_SALES`.
 
-## 3. Runtime Usage
+## 3. Runtime Access
 
-Create a target and client directly:
+Create a target and client directly when you only need the ArlenData surface:
 
 ```objc
 NSError *error = nil;
@@ -93,7 +95,50 @@ ALNDataverseTarget *target =
 ALNDataverseClient *client = [[ALNDataverseClient alloc] initWithTarget:target error:&error];
 ```
 
-Query records through the OData builder:
+Inside a full Arlen app, prefer the lazy runtime helpers:
+
+```objc
+NSError *error = nil;
+ALNDataverseClient *defaultClient = [app dataverseClient];
+ALNDataverseClient *salesClient = [app dataverseClientNamed:@"sales" error:&error];
+NSArray<NSString *> *targets = [app dataverseTargetNames];
+```
+
+Controllers and contexts expose the same named-client seam:
+
+```objc
+- (id)syncAccount:(ALNContext *)ctx {
+  NSError *error = nil;
+  ALNDataverseClient *client = [self dataverseClientNamed:@"sales" error:&error];
+  if (client == nil) {
+    [self setStatus:500];
+    [self renderJSON:@{ @"error" : error.localizedDescription ?: @"Dataverse client unavailable" }
+               error:NULL];
+    return self.context.response;
+  }
+
+  ALNDataverseRecord *account =
+      [client retrieveRecordInEntitySet:@"accounts"
+                               recordID:@"00000000-0000-0000-0000-000000000010"
+                           selectFields:@[ @"accountid", @"name" ]
+                                 expand:nil
+                 includeFormattedValues:YES
+                                  error:&error];
+  [self renderJSON:@{
+    @"name" : account.values[@"name"] ?: @"",
+    @"formatted_name" : account.formattedValues[@"name"] ?: @"",
+  }
+             error:NULL];
+  return self.context.response;
+}
+```
+
+If an app never calls these helpers, Dataverse stays dormant and does not add
+startup work.
+
+## 4. Queries and Writes
+
+Use the OData builder for reads:
 
 ```objc
 NSError *error = nil;
@@ -110,7 +155,7 @@ NSArray<ALNDataverseRecord *> *records = page.records;
 NSString *nextLink = page.nextLinkURLString;
 ```
 
-Write helpers keep Dataverse-specific shapes explicit:
+Write helpers keep Dataverse-specific payload rules explicit:
 
 ```objc
 NSError *error = nil;
@@ -126,7 +171,7 @@ NSDictionary *created =
     [client createRecordInEntitySet:@"accounts" values:values returnRepresentation:YES error:&error];
 ```
 
-Available write-path helpers include:
+Shipped helpers include:
 
 - create, update, delete
 - alternate-key upsert
@@ -135,9 +180,9 @@ Available write-path helpers include:
 - generic action/function invocation
 - batch request execution
 
-## 4. Metadata and Codegen
+## 5. Metadata and Codegen
 
-Generate typed helpers from a checked-in or exported metadata payload:
+Generate typed helpers from a saved metadata payload:
 
 ```bash
 /path/to/Arlen/bin/arlen dataverse-codegen \
@@ -152,7 +197,6 @@ Generate from live Dataverse metadata instead:
 
 ```bash
 /path/to/Arlen/bin/arlen dataverse-codegen \
-  --env development \
   --target sales \
   --entity account \
   --entity contact \
@@ -165,9 +209,6 @@ Generated artifacts default to:
 - `src/Generated/ALNDVDataverseSchema.m`
 - `db/schema/dataverse.json`
 
-Non-default targets get target-specific defaults for output dir, manifest, and
-class prefix.
-
 Generated helpers expose:
 
 - logical names and entity-set names
@@ -177,15 +218,48 @@ Generated helpers expose:
 - field constants
 - choice enums and choice metadata
 
-## 5. Current Boundaries
+## 6. Example Path
 
-This surface does not currently try to make Dataverse behave like SQL:
+See [examples/dataverse_reference/README.md](/home/danboyd/git/Arlen/examples/dataverse_reference/README.md)
+for one recommended flow that covers:
+
+- config for default and named targets
+- controller-level client acquisition
+- one read path
+- one write path
+- one metadata/codegen path
+
+## 7. Reliability and Confidence
+
+Dataverse request failures now carry structured error metadata through keys such
+as:
+
+- `ALNDataverseErrorRequestMethodKey`
+- `ALNDataverseErrorRequestURLKey`
+- `ALNDataverseErrorRequestHeadersKey`
+- `ALNDataverseErrorTargetNameKey`
+- `ALNDataverseErrorRetryAfterKey`
+- `ALNDataverseErrorCorrelationIDKey`
+- `ALNDataverseErrorDiagnosticsKey`
+
+Use the focused confidence entrypoints for this surface:
+
+```bash
+source tools/source_gnustep_env.sh
+make phase23-dataverse-tests
+make phase23-confidence
+```
+
+`make phase23-confidence` always runs the fixture-backed Dataverse suite and
+optionally runs a live `dataverse-codegen` smoke when the required
+`ARLEN_DATAVERSE_*` credentials are present.
+
+## 8. Current Boundaries
+
+This surface still does not try to make Dataverse behave like SQL:
 
 - no fake transaction abstraction
 - no `ALNDatabaseAdapter` bridge
 - no Microsoft Graph wrapper
 - no FetchXML-first builder
 - no TDS/SQL endpoint integration
-
-Phase `23E-23G` remain for higher-level runtime ergonomics, deeper diagnostics,
-confidence lanes, and broader doc/example closeout.

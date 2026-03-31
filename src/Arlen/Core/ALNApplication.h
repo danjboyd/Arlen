@@ -13,6 +13,8 @@
 @class ALNMetricsRegistry;
 @class ALNRoute;
 @class ALNApplication;
+@class ALNDataverseClient;
+@class ALNDataverseTarget;
 
 NS_ASSUME_NONNULL_BEGIN
 
@@ -106,6 +108,13 @@ NS_ASSUME_NONNULL_BEGIN
 - (void)setMailAdapter:(id<ALNMailAdapter>)adapter;
 - (void)setWebhookAdapter:(id<ALNWebhookAdapter>)adapter;
 - (void)setAttachmentAdapter:(id<ALNAttachmentAdapter>)adapter;
+- (void)setDataverseClient:(ALNDataverseClient *)client forTargetName:(nullable NSString *)targetName;
+- (nullable ALNDataverseClient *)dataverseClient;
+- (nullable ALNDataverseClient *)dataverseClientNamed:(nullable NSString *)targetName
+                                                 error:(NSError *_Nullable *_Nullable)error;
+- (nullable ALNDataverseTarget *)dataverseTargetNamed:(nullable NSString *)targetName
+                                                 error:(NSError *_Nullable *_Nullable)error;
+- (NSArray<NSString *> *)dataverseTargetNames;
 - (NSString *)localizedStringForKey:(NSString *)key
                               locale:(nullable NSString *)locale
                       fallbackLocale:(nullable NSString *)fallbackLocale

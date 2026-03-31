@@ -67,6 +67,10 @@ if (userID == nil) {
 | `authMFASatisfiedAt` | `- (nullable NSDate *)authMFASatisfiedAt;` | Perform `auth mfa satisfied at` for `ALNContext`. | Read this value when you need current runtime/request state. |
 | `authSessionIdentifier` | `- (nullable NSString *)authSessionIdentifier;` | Perform `auth session identifier` for `ALNContext`. | Read this value when you need current runtime/request state. |
 | `isMFAAuthenticated` | `- (BOOL)isMFAAuthenticated;` | Return whether `ALNContext` currently satisfies this condition. | Check the return value to confirm the operation succeeded. |
+| `application` | `- (nullable ALNApplication *)application;` | Perform `application` for `ALNContext`. | Read this value when you need current runtime/request state. |
+| `dataverseClient` | `- (nullable ALNDataverseClient *)dataverseClient;` | Perform `dataverse client` for `ALNContext`. | Read this value when you need current runtime/request state. |
+| `dataverseClientNamed:error:` | `- (nullable ALNDataverseClient *)dataverseClientNamed:(nullable NSString *)targetName error:(NSError *_Nullable *_Nullable)error;` | Perform `dataverse client named` for `ALNContext`. | Pass `NSError **` and treat a `nil` result as failure. |
+| `dataverseTargetNames` | `- (NSArray<NSString *> *)dataverseTargetNames;` | Perform `dataverse target names` for `ALNContext`. | Read this value when you need current runtime/request state. |
 | `jobsAdapter` | `- (nullable id<ALNJobAdapter>)jobsAdapter;` | Return the configured jobs adapter for the current application/context. | Read this value when you need current runtime/request state. |
 | `cacheAdapter` | `- (nullable id<ALNCacheAdapter>)cacheAdapter;` | Return the configured cache adapter for the current application/context. | Read this value when you need current runtime/request state. |
 | `localizationAdapter` | `- (nullable id<ALNLocalizationAdapter>)localizationAdapter;` | Return the configured localization adapter for the current application/context. | Read this value when you need current runtime/request state. |

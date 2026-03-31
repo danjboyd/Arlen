@@ -102,6 +102,7 @@ one coherent toolchain.
 
 - [Basic App Smoke Guide](examples/basic_app/README.md): smallest app-owned smoke path.
 - [API-First Reference App](examples/api_reference/README.md): JSON/OpenAPI-heavy reference surface.
+- [Dataverse Reference](examples/dataverse_reference/README.md): app-level Dataverse config, controller helpers, and codegen flow.
 - [Auth + Admin Demo](examples/auth_admin_demo/README.md): modules, auth, and admin composition.
 - [Phase 16 Modules Demo](examples/phase16_modules_demo/README.md): broader multi-module app surface.
 - [Tech Demo](examples/tech_demo/README.md): larger end-to-end example with Arlen UI/runtime features.
@@ -153,7 +154,7 @@ below is the detailed milestone ledger for the shipped surface summarized above.
 - Phase 20: complete (`20A-20K` delivered on 2026-03-26; `20L-20R` delivered on 2026-03-27 for MSSQL native transport tightening, ordered result semantics, bounded PostgreSQL metadata expansion, explicit live-test requirement accounting, shared test support/assertion layers, and repo-native focused confidence lanes. See `docs/PHASE20_ROADMAP.md`).
 - Phase 21: complete (`21A-21G` delivered on 2026-03-27 for in-process request harnesses, shared request/pipeline assertion helpers, explicit async DB ownership rules, template-suite decomposition, raw protocol corpus replay, generated-app matrix coverage, and repo-native focused confidence lanes. See `docs/PHASE21_ROADMAP.md`).
 - Phase 22: complete (`22A-22G` delivered on 2026-03-30 for newcomer-first onboarding, docs/code parity hardening, app-author guides, module/lite-mode guidance, plugin/frontend guides, and docs quality closeout. See `docs/PHASE22_ROADMAP.md`).
-- Phase 23: in progress (`23A-23D` delivered on 2026-03-31 for a runtime-inactive Dataverse Web API client, OData query builder, CRUD/batch helpers, metadata normalization, typed Dataverse codegen, and `arlen dataverse-codegen`. See `docs/PHASE23_ROADMAP.md`).
+- Phase 23: complete (`23A-23G` delivered on 2026-03-31 for the runtime-inactive Dataverse Web API client, OData query builder, CRUD/batch helpers, metadata normalization, typed Dataverse codegen, app/controller Dataverse helpers, repo-native confidence lanes, and docs/example closeout. See `docs/PHASE23_ROADMAP.md`).
 
 ## Requirements and Setup Details
 

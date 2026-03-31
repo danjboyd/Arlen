@@ -17,10 +17,13 @@ extern NSString *const ALNDataverseErrorDomain;
 extern NSString *const ALNDataverseErrorDiagnosticsKey;
 extern NSString *const ALNDataverseErrorHTTPStatusKey;
 extern NSString *const ALNDataverseErrorRequestURLKey;
+extern NSString *const ALNDataverseErrorRequestMethodKey;
+extern NSString *const ALNDataverseErrorRequestHeadersKey;
 extern NSString *const ALNDataverseErrorResponseHeadersKey;
 extern NSString *const ALNDataverseErrorResponseBodyKey;
 extern NSString *const ALNDataverseErrorRetryAfterKey;
 extern NSString *const ALNDataverseErrorCorrelationIDKey;
+extern NSString *const ALNDataverseErrorTargetNameKey;
 
 typedef NS_ENUM(NSInteger, ALNDataverseErrorCode) {
   ALNDataverseErrorInvalidArgument = 1,
@@ -47,6 +50,7 @@ typedef NS_ENUM(NSInteger, ALNDataverseErrorCode) {
 
 + (nullable NSString *)normalizedEnvironmentURLStringFromServiceRootURLString:
     (NSString *)serviceRootURLString;
++ (NSArray<NSString *> *)configuredTargetNamesFromConfig:(nullable NSDictionary *)config;
 + (nullable NSDictionary<NSString *, id> *)configurationNamed:(nullable NSString *)targetName
                                                    fromConfig:(nullable NSDictionary *)config;
 + (nullable instancetype)targetNamed:(nullable NSString *)targetName

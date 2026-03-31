@@ -6,6 +6,7 @@
 
 @class ALNContext;
 @class ALNPageState;
+@class ALNDataverseClient;
 
 NS_ASSUME_NONNULL_BEGIN
 
@@ -97,6 +98,10 @@ NS_ASSUME_NONNULL_BEGIN
                   assuranceLevel:(NSUInteger)assuranceLevel
                            error:(NSError *_Nullable *_Nullable)error;
 - (void)clearAuthenticatedSession;
+- (nullable ALNDataverseClient *)dataverseClient;
+- (nullable ALNDataverseClient *)dataverseClientNamed:(nullable NSString *)targetName
+                                                 error:(NSError *_Nullable *_Nullable)error;
+- (NSArray<NSString *> *)dataverseTargetNames;
 - (nullable id<ALNJobAdapter>)jobsAdapter;
 - (nullable id<ALNCacheAdapter>)cacheAdapter;
 - (nullable id<ALNLocalizationAdapter>)localizationAdapter;

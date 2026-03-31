@@ -1,12 +1,16 @@
 #import <Foundation/Foundation.h>
 #import <XCTest/XCTest.h>
 
+#import "ALNApplication.h"
+#import "ALNContext.h"
+#import "ALNController.h"
 #import "ALNDataverseClient.h"
 #import "ALNDataverseCodegen.h"
 #import "ALNDataverseMetadata.h"
 #import "ALNDataverseQuery.h"
 #import "ALNJSONSerialization.h"
 #import "../shared/ALNTestSupport.h"
+#import "../shared/ALNWebTestSupport.h"
 
 @interface ALNFakeDataverseTransport : NSObject <ALNDataverseTransport>
 
@@ -88,21 +92,113 @@
 
 @end
 
+@interface ALNDataverseRuntimeHarnessController : ALNController
+@end
+
+@implementation ALNDataverseRuntimeHarnessController
+
+- (id)status:(ALNContext *)ctx {
+  NSError *defaultError = nil;
+  NSError *salesError = nil;
+  ALNDataverseClient *defaultClient = [ctx dataverseClientNamed:nil error:&defaultError];
+  ALNDataverseClient *salesClient = [self dataverseClientNamed:@"sales" error:&salesError];
+
+  NSMutableDictionary *payload = [NSMutableDictionary dictionary];
+  payload[@"targets"] = [self dataverseTargetNames] ?: @[];
+  if (defaultClient != nil) {
+    payload[@"default_target"] = defaultClient.target.targetName ?: @"";
+  }
+  if (salesClient != nil) {
+    payload[@"sales_target"] = salesClient.target.targetName ?: @"";
+  }
+  if (defaultError != nil) {
+    payload[@"default_error"] = defaultError.localizedDescription ?: @"";
+  }
+  if (salesError != nil) {
+    payload[@"sales_error"] = salesError.localizedDescription ?: @"";
+  }
+  [self renderJSON:payload error:NULL];
+  return self.context.response;
+}
+
+@end
+
 @interface DataverseTests : XCTestCase
 @end
 
 @implementation DataverseTests
 
 - (ALNDataverseTarget *)targetWithError:(NSError **)error {
+  return [self targetNamed:@"crm" maxRetries:0 pageSize:250 error:error];
+}
+
+- (ALNDataverseTarget *)targetNamed:(NSString *)targetName
+                         maxRetries:(NSUInteger)maxRetries
+                           pageSize:(NSUInteger)pageSize
+                              error:(NSError **)error {
   return [[ALNDataverseTarget alloc] initWithServiceRootURLString:@"https://example.crm.dynamics.com/api/data/v9.2"
                                                          tenantID:@"tenant-id"
                                                          clientID:@"client-id"
                                                      clientSecret:@"client-secret"
-                                                        targetName:@"crm"
+                                                        targetName:targetName
                                                    timeoutInterval:5.0
-                                                        maxRetries:0
-                                                          pageSize:250
+                                                        maxRetries:maxRetries
+                                                          pageSize:pageSize
                                                              error:error];
+}
+
+- (NSDictionary *)applicationConfig {
+  return @{
+    @"dataverse" : @{
+      @"serviceRootURL" : @"https://example.crm.dynamics.com/api/data/v9.2",
+      @"tenantID" : @"tenant-id",
+      @"clientID" : @"client-id",
+      @"clientSecret" : @"client-secret",
+      @"pageSize" : @250,
+      @"maxRetries" : @2,
+      @"timeout" : @5,
+      @"targets" : @{
+        @"sales" : @{
+          @"serviceRootURL" : @"https://sales.crm.dynamics.com/api/data/v9.2",
+          @"pageSize" : @100,
+        },
+      },
+    },
+  };
+}
+
+- (nullable NSString *)environmentValueForName:(NSString *)name {
+  const char *value = getenv([name UTF8String]);
+  if (value == NULL) {
+    return nil;
+  }
+  return [NSString stringWithUTF8String:value];
+}
+
+- (void)setEnvironmentValue:(nullable NSString *)value forName:(NSString *)name {
+  if ([value length] > 0) {
+    setenv([name UTF8String], [value UTF8String], 1);
+  } else {
+    unsetenv([name UTF8String]);
+  }
+}
+
+- (NSDictionary<NSString *, NSString *> *)snapshotEnvironmentForNames:(NSArray<NSString *> *)names {
+  NSMutableDictionary<NSString *, NSString *> *snapshot = [NSMutableDictionary dictionary];
+  for (NSString *name in names) {
+    NSString *value = [self environmentValueForName:name];
+    if (value != nil) {
+      snapshot[name] = value;
+    }
+  }
+  return [snapshot copy];
+}
+
+- (void)restoreEnvironmentSnapshot:(NSDictionary<NSString *, NSString *> *)snapshot
+                             names:(NSArray<NSString *> *)names {
+  for (NSString *name in names) {
+    [self setEnvironmentValue:snapshot[name] forName:name];
+  }
 }
 
 - (ALNDataverseResponse *)responseWithStatus:(NSInteger)status
@@ -121,6 +217,94 @@
   }
   id object = [ALNJSONSerialization JSONObjectWithData:request.bodyData options:0 error:NULL];
   return [object isKindOfClass:[NSDictionary class]] ? object : nil;
+}
+
+- (void)testApplicationResolvesDataverseClientsFromConfigAndEnvironment {
+  NSArray<NSString *> *environmentNames = @[
+    @"ARLEN_DATAVERSE_URL_SUPPORT",
+    @"ARLEN_DATAVERSE_TENANT_ID_SUPPORT",
+    @"ARLEN_DATAVERSE_CLIENT_ID_SUPPORT",
+    @"ARLEN_DATAVERSE_CLIENT_SECRET_SUPPORT",
+    @"ARLEN_DATAVERSE_PAGE_SIZE_SUPPORT",
+    @"ARLEN_DATAVERSE_TIMEOUT_SUPPORT",
+  ];
+  NSDictionary<NSString *, NSString *> *snapshot = [self snapshotEnvironmentForNames:environmentNames];
+
+  @try {
+    [self setEnvironmentValue:@"https://support.crm.dynamics.com/api/data/v9.2"
+                      forName:@"ARLEN_DATAVERSE_URL_SUPPORT"];
+    [self setEnvironmentValue:@"support-tenant" forName:@"ARLEN_DATAVERSE_TENANT_ID_SUPPORT"];
+    [self setEnvironmentValue:@"support-client" forName:@"ARLEN_DATAVERSE_CLIENT_ID_SUPPORT"];
+    [self setEnvironmentValue:@"support-secret" forName:@"ARLEN_DATAVERSE_CLIENT_SECRET_SUPPORT"];
+    [self setEnvironmentValue:@"125" forName:@"ARLEN_DATAVERSE_PAGE_SIZE_SUPPORT"];
+    [self setEnvironmentValue:@"30" forName:@"ARLEN_DATAVERSE_TIMEOUT_SUPPORT"];
+
+    ALNApplication *application = [[ALNApplication alloc] initWithConfig:[self applicationConfig]];
+    NSArray<NSString *> *targets = [application dataverseTargetNames];
+    XCTAssertTrue([targets containsObject:@"default"]);
+    XCTAssertTrue([targets containsObject:@"sales"]);
+    XCTAssertTrue([targets containsObject:@"support"]);
+
+    NSError *error = nil;
+    ALNDataverseClient *defaultClient = [application dataverseClient];
+    XCTAssertNotNil(defaultClient);
+    ALNDataverseClient *cachedDefault = [application dataverseClientNamed:@"default" error:&error];
+    XCTAssertNil(error);
+    XCTAssertEqual(defaultClient, cachedDefault);
+    XCTAssertEqualObjects(defaultClient.target.targetName, @"default");
+    XCTAssertEqualObjects(defaultClient.target.serviceRootURLString,
+                          @"https://example.crm.dynamics.com/api/data/v9.2");
+
+    ALNDataverseClient *salesClient = [application dataverseClientNamed:@"sales" error:&error];
+    XCTAssertNil(error);
+    XCTAssertEqualObjects(salesClient.target.targetName, @"sales");
+    XCTAssertEqualObjects(salesClient.target.serviceRootURLString,
+                          @"https://sales.crm.dynamics.com/api/data/v9.2");
+    XCTAssertEqual((NSUInteger)100, salesClient.target.pageSize);
+
+    ALNDataverseClient *supportClient = [application dataverseClientNamed:@"support" error:&error];
+    XCTAssertNil(error);
+    XCTAssertEqualObjects(supportClient.target.targetName, @"support");
+    XCTAssertEqualObjects(supportClient.target.serviceRootURLString,
+                          @"https://support.crm.dynamics.com/api/data/v9.2");
+    XCTAssertEqual((NSUInteger)125, supportClient.target.pageSize);
+    XCTAssertEqualWithAccuracy(30.0, supportClient.target.timeoutInterval, 0.001);
+  } @finally {
+    [self restoreEnvironmentSnapshot:snapshot names:environmentNames];
+  }
+}
+
+- (void)testApplicationRejectsMissingNamedDataverseTarget {
+  ALNApplication *application = [[ALNApplication alloc] initWithConfig:[self applicationConfig]];
+  NSError *error = nil;
+  ALNDataverseClient *client = [application dataverseClientNamed:@"support" error:&error];
+  XCTAssertNil(client);
+  XCTAssertNotNil(error);
+  XCTAssertEqualObjects(error.domain, @"Arlen.Application.Error");
+  XCTAssertEqual((NSInteger)305, error.code);
+}
+
+- (void)testControllerAndContextHelpersResolveDataverseClientsDuringDispatch {
+  ALNWebTestHarness *harness =
+      [ALNWebTestHarness harnessWithConfig:[self applicationConfig]
+                               routeMethod:@"GET"
+                                      path:@"/dataverse"
+                                 routeName:@"dataverse.status"
+                           controllerClass:[ALNDataverseRuntimeHarnessController class]
+                                    action:@"status"
+                               middlewares:nil];
+
+  ALNResponse *response = [harness dispatchMethod:@"GET" path:@"/dataverse"];
+  ALNAssertResponseStatus(response, 200);
+
+  NSError *error = nil;
+  NSDictionary *payload = ALNTestJSONDictionaryFromResponse(response, &error);
+  XCTAssertNil(error);
+  XCTAssertEqualObjects(payload[@"default_target"], @"default");
+  XCTAssertEqualObjects(payload[@"sales_target"], @"sales");
+  NSArray *targets = [payload[@"targets"] isKindOfClass:[NSArray class]] ? payload[@"targets"] : @[];
+  XCTAssertTrue([targets containsObject:@"default"]);
+  XCTAssertTrue([targets containsObject:@"sales"]);
 }
 
 - (void)testQueryBuilderBuildsDeterministicParameters {
@@ -331,6 +515,116 @@
   XCTAssertTrue([transport.capturedRequests[0].URLString hasSuffix:@"/$batch"]);
   XCTAssertEqualObjects(transport.capturedRequests[1].method, @"GET");
   XCTAssertTrue([transport.capturedRequests[1].URLString hasSuffix:@"/WhoAmI()"]);
+}
+
+- (void)testThrottleErrorsIncludeStructuredDiagnostics {
+  ALNFakeDataverseTransport *transport = [[ALNFakeDataverseTransport alloc] init];
+  ALNFakeDataverseTokenProvider *tokenProvider = [[ALNFakeDataverseTokenProvider alloc] init];
+  [transport enqueueResponse:[self responseWithStatus:429
+                                              headers:@{
+                                                @"Content-Type" : @"application/json",
+                                                @"Retry-After" : @"17",
+                                                @"x-ms-request-id" : @"corr-123",
+                                              }
+                                           JSONObject:@{ @"error" : @{ @"message" : @"Slow down" } }]];
+
+  NSError *error = nil;
+  ALNDataverseTarget *target = [self targetNamed:@"sales" maxRetries:0 pageSize:250 error:&error];
+  XCTAssertNil(error);
+  ALNDataverseClient *client = [[ALNDataverseClient alloc] initWithTarget:target
+                                                                transport:transport
+                                                            tokenProvider:tokenProvider
+                                                                    error:&error];
+  XCTAssertNil(error);
+
+  ALNDataverseResponse *response = [client performRequestWithMethod:@"GET"
+                                                               path:@"WhoAmI()"
+                                                              query:nil
+                                                            headers:@{ @"If-Match" : @"W/\"1\"" }
+                                                         bodyObject:nil
+                                             includeFormattedValues:NO
+                                               returnRepresentation:NO
+                                                   consistencyCount:NO
+                                                              error:&error];
+  XCTAssertNil(response);
+  XCTAssertNotNil(error);
+  XCTAssertEqualObjects(error.domain, ALNDataverseErrorDomain);
+  XCTAssertEqual((NSInteger)ALNDataverseErrorThrottled, error.code);
+  XCTAssertEqualObjects(error.userInfo[ALNDataverseErrorRequestMethodKey], @"GET");
+  XCTAssertEqualObjects(error.userInfo[ALNDataverseErrorTargetNameKey], @"sales");
+  XCTAssertEqual(17, [error.userInfo[ALNDataverseErrorRetryAfterKey] integerValue]);
+  XCTAssertEqualObjects(error.userInfo[ALNDataverseErrorCorrelationIDKey], @"corr-123");
+  XCTAssertTrue([error.userInfo[ALNDataverseErrorRequestURLKey] containsString:@"/WhoAmI()"]);
+
+  NSDictionary *requestHeaders = [error.userInfo[ALNDataverseErrorRequestHeadersKey] isKindOfClass:[NSDictionary class]]
+                                     ? error.userInfo[ALNDataverseErrorRequestHeadersKey]
+                                     : @{};
+  XCTAssertEqualObjects(requestHeaders[@"Authorization"], @"Bearer [redacted]");
+  XCTAssertEqualObjects(requestHeaders[@"If-Match"], @"W/\"1\"");
+
+  NSDictionary *diagnostics = [error.userInfo[ALNDataverseErrorDiagnosticsKey] isKindOfClass:[NSDictionary class]]
+                                  ? error.userInfo[ALNDataverseErrorDiagnosticsKey]
+                                  : @{};
+  XCTAssertEqualObjects(diagnostics[@"attempt"], @1);
+  XCTAssertEqualObjects(diagnostics[@"max_attempts"], @1);
+  XCTAssertEqualObjects(diagnostics[@"status_code"], @429);
+  XCTAssertEqualObjects(diagnostics[@"target_name"], @"sales");
+  XCTAssertEqualObjects(diagnostics[@"body_bytes"], @0);
+  XCTAssertEqual((NSUInteger)1, transport.capturedRequests.count);
+  XCTAssertEqualObjects(transport.capturedRequests[0].headers[@"Authorization"], @"Bearer test-token");
+}
+
+- (void)testBatchRequestsUseSharedRetryPolicy {
+  ALNFakeDataverseTransport *transport = [[ALNFakeDataverseTransport alloc] init];
+  ALNFakeDataverseTokenProvider *tokenProvider = [[ALNFakeDataverseTokenProvider alloc] init];
+  [transport enqueueResponse:[[ALNDataverseResponse alloc] initWithStatusCode:503
+                                                                       headers:@{
+                                                                         @"Content-Type" : @"application/json",
+                                                                         @"Retry-After" : @"1",
+                                                                       }
+                                                                      bodyData:nil]];
+
+  NSString *batchBody =
+      @"--batchresponse_123\r\n"
+       "Content-Type: application/http\r\n"
+       "Content-Transfer-Encoding: binary\r\n"
+       "\r\n"
+       "HTTP/1.1 200 OK\r\n"
+       "Content-Type: application/json; charset=utf-8\r\n"
+       "Content-ID: 1\r\n"
+       "\r\n"
+       "{\"name\":\"Acme\"}\r\n"
+       "--batchresponse_123--\r\n";
+  NSData *batchData = [batchBody dataUsingEncoding:NSUTF8StringEncoding];
+  [transport enqueueResponse:[[ALNDataverseResponse alloc] initWithStatusCode:200
+                                                                       headers:@{ @"Content-Type" : @"multipart/mixed; boundary=batchresponse_123" }
+                                                                      bodyData:batchData]];
+
+  NSError *error = nil;
+  ALNDataverseTarget *target = [self targetNamed:@"crm" maxRetries:1 pageSize:250 error:&error];
+  XCTAssertNil(error);
+  ALNDataverseClient *client = [[ALNDataverseClient alloc] initWithTarget:target
+                                                                transport:transport
+                                                            tokenProvider:tokenProvider
+                                                                    error:&error];
+  XCTAssertNil(error);
+
+  NSArray<ALNDataverseBatchResponse *> *responses = [client executeBatchRequests:@[
+    [ALNDataverseBatchRequest requestWithMethod:@"GET"
+                                   relativePath:@"accounts?$top=1"
+                                        headers:nil
+                                     bodyObject:nil
+                                      contentID:@"1"],
+  ]
+                                                                       error:&error];
+  XCTAssertNil(error);
+  XCTAssertEqual((NSUInteger)1, responses.count);
+  XCTAssertTrue([responses[0].bodyText containsString:@"Acme"]);
+  XCTAssertEqual((NSUInteger)2, transport.capturedRequests.count);
+  XCTAssertEqual((NSUInteger)1, tokenProvider.requestCount);
+  XCTAssertTrue([transport.capturedRequests[0].URLString hasSuffix:@"/$batch"]);
+  XCTAssertEqualObjects(transport.capturedRequests[0].headers[@"Authorization"], @"Bearer test-token");
+  XCTAssertEqualObjects(transport.capturedRequests[1].headers[@"Authorization"], @"Bearer test-token");
 }
 
 - (void)testMetadataNormalizationAndCodegenAreDeterministic {

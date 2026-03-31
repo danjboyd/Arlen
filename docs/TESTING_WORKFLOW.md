@@ -27,6 +27,12 @@ Phase 20 data-layer-focused lanes remain available:
 - `make phase20-mssql-live-tests`
 - `make phase20-focused`
 
+Phase 23 Dataverse-focused lanes are also available:
+
+- `make phase23-dataverse-tests`
+- `make phase23-focused`
+- `make phase23-confidence`
+
 ## 2. Bug Report To Regression
 
 1. Reproduce the failure in the narrowest possible form.
@@ -43,10 +49,13 @@ Phase 20 data-layer-focused lanes remain available:
      `tests/fixtures/protocol/phase21_protocol_corpus.json`
    - generated-app setup/config/module issues:
      `tests/fixtures/phase21/generated_app_matrix.json`
+   - Dataverse client/config/runtime/codegen regressions:
+     `tests/unit/DataverseTests.m`
 3. Add or extend a checked-in fixture so the failure is replayable.
 4. Run the matching focused lane until it passes.
 5. Promote the change through `make test-unit`, broader integration coverage
-   when applicable, and `make phase21-confidence`.
+   when applicable, and the matching confidence lane such as
+   `make phase21-confidence` or `make phase23-confidence`.
 
 ## 3. Template Regression Intake
 
@@ -113,3 +122,11 @@ make phase21-confidence
 ```
 
 Artifacts are written to `build/release_confidence/phase21/`.
+
+Phase 23 Dataverse closeout uses:
+
+```bash
+make phase23-confidence
+```
+
+Artifacts are written to `build/release_confidence/phase23/`.

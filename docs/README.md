@@ -78,7 +78,7 @@ toolchain env directly.
 - [Phase 20 Roadmap](PHASE20_ROADMAP.md): completed data-layer depth pass.
 - [Phase 21 Roadmap](PHASE21_ROADMAP.md): completed public-release test robustness pass.
 - [Phase 22 Roadmap](PHASE22_ROADMAP.md): completed documentation cleanup pass for newcomer-first onboarding and docs quality closeout.
-- [Phase 23 Roadmap](PHASE23_ROADMAP.md): current Dataverse integration phase and remaining closeout work.
+- [Phase 23 Roadmap](PHASE23_ROADMAP.md): completed Dataverse integration phase.
 - [Combined Roadmap Index (Historical Aggregate)](PHASE2_PHASE3_ROADMAP.md)
 - [Phase 1 Spec](PHASE1_SPEC.md)
 - [Arlen CLI Spec](ARLEN_CLI_SPEC.md)
@@ -103,3 +103,4 @@ toolchain env directly.
 - [Phase 16 Modules Demo](../examples/phase16_modules_demo/README.md)
 - [GSWeb Migration Sample](../examples/gsweb_migration/README.md)
 - [ArlenData Standalone Example](../examples/arlen_data/README.md)
+- [Dataverse Reference](../examples/dataverse_reference/README.md)

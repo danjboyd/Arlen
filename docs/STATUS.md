@@ -4,25 +4,27 @@ Last updated: 2026-03-31
 
 ## Leaving Off (2026-03-31)
 
-- Phase 23 is in progress with `23A-23D` delivered:
-  - added `ALNDataverseClient`, `ALNDataverseQuery`,
-    `ALNDataverseMetadata`, and `ALNDataverseCodegen`
-  - exported the Dataverse surface through `src/Arlen/Arlen.h` and
-    `src/ArlenData/ArlenData.h`
-  - added `arlen dataverse-codegen` for fixture-backed or live metadata-driven
-    typed helper generation
-  - added fixture-backed regression coverage in `tests/unit/DataverseTests.m`
-    plus `tests/fixtures/phase23/dataverse_entitydefinitions.json`
-  - updated the primary user-facing docs to describe the runtime-inactive
-    Dataverse contract and the new CLI/config surfaces
-- Remaining Phase 23 scope:
-  - `23E`: app/runtime ergonomics and example integration path
-  - `23F`: retries/diagnostics/live confidence hardening beyond the shipped
-    baseline
-  - `23G`: broader docs/reference closeout for full phase completion
+- Phase 23 is complete:
+  - delivered `23A-23G` for the runtime-inactive Dataverse Web API client,
+    OData query composition, CRUD/upsert/batch helpers, metadata
+    normalization, typed Dataverse codegen, app/controller Dataverse helpers,
+    shared retry/diagnostic contracts, focused confidence lanes, and
+    docs/example closeout
+  - added lazy named-target Dataverse helpers on `ALNApplication`,
+    `ALNContext`, and `ALNController`
+  - added `make phase23-dataverse-tests` and `make phase23-confidence`, with
+    optional live Dataverse codegen smoke when `ARLEN_DATAVERSE_*` credentials
+    are present
+  - added `examples/dataverse_reference/README.md` and updated the Dataverse,
+    configuration, testing-workflow, and summary docs to reflect the shipped
+    runtime path
 - Verification completed at this checkpoint:
   - `source tools/source_gnustep_env.sh && make build-tests`
   - `source tools/source_gnustep_env.sh && make test-unit`
+  - `source tools/source_gnustep_env.sh && make phase23-dataverse-tests`
+  - `source tools/source_gnustep_env.sh && make phase23-confidence`
+  - `source tools/source_gnustep_env.sh && make docs-api`
+  - `bash tools/ci/run_docs_quality.sh`
 - Reconciled and fixed the managed-GNUstep bootstrap bug reported from
   `iep-platform`:
   - added `tools/resolve_gnustep.sh` and `tools/source_gnustep_env.sh`
@@ -39,20 +41,24 @@ Last updated: 2026-03-31
 
 ## Completed Today (2026-03-31)
 
-- Completed Phase `23A-23D`:
+- Completed Phase `23A-23G`:
   - added a runtime-inactive Dataverse Web API surface with
     `ALNDataverseClient`, OData query composition, CRUD/upsert helpers,
     lookup/choice serialization, batch execution, metadata normalization, and
     deterministic typed codegen
-  - added `arlen dataverse-codegen` with fixture-input and live Dataverse
-    metadata fetch paths, named targets, config/env resolution, and
-    target-specific output defaults
-  - added fixture-backed Dataverse regression coverage in
-    `tests/unit/DataverseTests.m`
-  - updated `README.md`, `docs/README.md`, `docs/GETTING_STARTED.md`,
-    `docs/GETTING_STARTED_DATA_LAYER.md`, `docs/CLI_REFERENCE.md`,
-    `docs/CONFIGURATION_REFERENCE.md`, `docs/ARLEN_DATA.md`, and
-    `docs/DATAVERSE.md`
+  - added app/runtime Dataverse helpers through `ALNApplication`,
+    `ALNContext`, and `ALNController` with lazy named-target resolution and
+    runtime config/env merging
+  - consolidated Dataverse request execution around one authorized transport
+    path with structured retry/throttle diagnostics, redacted request headers,
+    correlation IDs, and shared batch behavior
+  - added focused Dataverse regression coverage, `phase23-dataverse-tests`,
+    `phase23-confidence`, and optional live codegen smoke artifacts under
+    `build/release_confidence/phase23/`
+  - added the Dataverse reference example plus updated `README.md`,
+    `docs/README.md`, `docs/DATAVERSE.md`, `docs/CONFIGURATION_REFERENCE.md`,
+    `docs/TESTING_WORKFLOW.md`, `docs/PHASE23_ROADMAP.md`, and generated API
+    docs for the new public runtime helpers
 - Planned Phase 23 as the next roadmap phase:
   - added `docs/PHASE23_ROADMAP.md`
   - scoped `23A-23G` around runtime-inactive-by-default Dataverse Web API
@@ -505,10 +511,11 @@ entries, not current plan-of-record items.
   onboarding cleanup, docs/code parity hardening, app-author guides,
   module/lite-mode guidance, plugin/frontend guides, and docs quality closeout)
 - Phase 23: in progress (`23A-23D` delivered on 2026-03-31 for a
+- Phase 23: complete (`23A-23G` delivered on 2026-03-31 for the
   runtime-inactive Dataverse Web API client, OData query composition,
   CRUD/upsert/batch helpers, metadata normalization, typed Dataverse codegen,
-  and `arlen dataverse-codegen`; `23E-23G` remain for higher-level runtime
-  ergonomics, deeper diagnostics/confidence, and phase closeout)
+  app/controller Dataverse helpers, focused confidence lanes, and docs/example
+  closeout)
 
 ## Completed Today (2026-03-26)
 

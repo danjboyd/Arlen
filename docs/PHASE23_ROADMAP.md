@@ -1,6 +1,6 @@
 # Arlen Phase 23 Roadmap
 
-Status: in progress
+Status: complete
 Last updated: 2026-03-31
 
 Related docs:
@@ -23,6 +23,8 @@ Reference inputs reviewed for this roadmap:
 
 ## 0. Progress Checkpoint (2026-03-31)
 
+Phase 23 is complete.
+
 Delivered in-tree:
 
 - `23A`: core Dataverse client/auth/transport plus runtime-inactive defaults
@@ -31,12 +33,13 @@ Delivered in-tree:
   and batch execution
 - `23D`: metadata normalization, deterministic typed codegen, and
   `arlen dataverse-codegen`
-
-Still open for full phase closeout:
-
-- `23E`: higher-level runtime ergonomics and example integration path
-- `23F`: deeper retry/diagnostic/live confidence coverage
-- `23G`: broader docs/reference closeout
+- `23E`: `ALNApplication`, `ALNContext`, and `ALNController` Dataverse helper
+  accessors with lazy named-client resolution plus a documented example path
+- `23F`: shared authorized request execution with retry/throttle diagnostics,
+  structured Dataverse error metadata, `phase23-dataverse-tests`, and
+  `phase23-confidence`
+- `23G`: docs/example/reference closeout, updated status surfaces, and API-doc
+  regeneration
 
 ## 1. Objective
 
@@ -246,7 +249,7 @@ Acceptance (required):
 - Generated artifacts materially reduce stringly-typed logical-name usage.
 - Fixture-backed metadata/codegen tests exist alongside gated live verification.
 
-## 4.5 Phase 23E: Runtime Ergonomics + Example Integration Path
+## 4.5 Phase 23E: Runtime Ergonomics + Example Integration Path (Delivered 2026-03-31)
 
 Deliverables:
 
@@ -269,7 +272,7 @@ Acceptance (required):
 - The example path is deterministic and reflects the recommended production
   shape.
 
-## 4.6 Phase 23F: Reliability + Diagnostics + Confidence
+## 4.6 Phase 23F: Reliability + Diagnostics + Confidence (Delivered 2026-03-31)
 
 Deliverables:
 
@@ -298,7 +301,7 @@ Acceptance (required):
 - Confidence lanes distinguish fixture-only guarantees from live-environment
   guarantees.
 
-## 4.7 Phase 23G: Docs + Release Closeout
+## 4.7 Phase 23G: Docs + Release Closeout (Delivered 2026-03-31)
 
 Deliverables:
 

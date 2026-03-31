@@ -188,6 +188,23 @@
                                "phase20-mssql-live-tests"]);
 }
 
+- (void)testGNUmakefileDefinesPhase23DataverseConfidenceLanes {
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *makefilePath = [repoRoot stringByAppendingPathComponent:@"GNUmakefile"];
+  NSString *makefile = [self readFile:makefilePath];
+
+  XCTAssertTrue([makefile containsString:
+                              @"PHASE23_DATAVERSE_TEST_BUNDLE := $(BUILD_DIR)/tests/"
+                               "ArlenPhase23DataverseTests.xctest"]);
+  XCTAssertTrue([makefile containsString:
+                              @"PHASE23_DATAVERSE_TEST_SRCS := tests/unit/DataverseTests.m"]);
+  XCTAssertTrue([makefile containsString:
+                              @"phase23-dataverse-tests: $(PHASE23_DATAVERSE_TEST_BIN)"]);
+  XCTAssertTrue([makefile containsString:@"phase23-focused: phase23-dataverse-tests"]);
+  XCTAssertTrue([makefile containsString:@"phase23-confidence:"]);
+  XCTAssertTrue([makefile containsString:@"bash ./tools/ci/run_phase23_confidence.sh"]);
+}
+
 - (void)testGNUmakefileUsesIncrementalObjectsDepfilesAndManifestedTemplates {
   NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
   NSString *makefilePath = [repoRoot stringByAppendingPathComponent:@"GNUmakefile"];
@@ -290,6 +307,29 @@
   XCTAssertTrue([script containsString:@"make -C \"$repo_root\" phase20-routing-tests"]);
   XCTAssertTrue([script containsString:@"make -C \"$repo_root\" phase20-postgres-live-tests"]);
   XCTAssertTrue([script containsString:@"make -C \"$repo_root\" phase20-mssql-live-tests"]);
+}
+
+- (void)testPhase23ConfidenceRunnerUsesRepoNativeTargetsAndArtifacts {
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *runnerPath =
+      [repoRoot stringByAppendingPathComponent:@"tools/ci/run_phase23_confidence.sh"];
+  NSString *runner = [self readFile:runnerPath];
+  NSString *generatorPath = [repoRoot
+      stringByAppendingPathComponent:@"tools/ci/generate_phase23_confidence_artifacts.py"];
+  NSString *generator = [self readFile:generatorPath];
+
+  XCTAssertTrue([runner containsString:@"source \"$repo_root/tools/source_gnustep_env.sh\""]);
+  XCTAssertTrue([runner containsString:@"make -C \"$repo_root\" phase23-dataverse-tests"]);
+  XCTAssertTrue([runner containsString:@"build/release_confidence/phase23"]);
+  XCTAssertTrue([runner containsString:@"dataverse-codegen"]);
+  XCTAssertTrue([runner containsString:@"ARLEN_PHASE23_DATAVERSE_ENTITIES"]);
+  XCTAssertTrue([runner containsString:@"live Dataverse codegen skipped"]);
+
+  XCTAssertTrue([generator containsString:@"phase23-confidence-v1"]);
+  XCTAssertTrue([generator containsString:@"make phase23-dataverse-tests"]);
+  XCTAssertTrue([generator containsString:@"make phase23-focused"]);
+  XCTAssertTrue([generator containsString:@"make phase23-confidence"]);
+  XCTAssertTrue([generator containsString:@"ARLEN_DATAVERSE_*"]);
 }
 
 - (void)testGNUmakefileIncludesYYJSONCSourceInFrameworkBuilds {
