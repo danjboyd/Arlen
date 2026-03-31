@@ -4,32 +4,30 @@ Last updated: 2026-03-31
 
 ## Leaving Off (2026-03-31)
 
-- Phase 23 follow-on hardening is now the active roadmap work:
-  - delivered `23A-23G` for the runtime-inactive Dataverse Web API client,
+- Phase 23 is complete again:
+  - delivered `23A-23I` for the runtime-inactive Dataverse Web API client,
     OData query composition, CRUD/upsert/batch helpers, metadata
-    normalization, typed Dataverse codegen, app/controller Dataverse helpers,
-    shared retry/diagnostic contracts, focused confidence lanes, and
-    docs/example closeout
-  - extended `docs/PHASE23_ROADMAP.md` with `23H-23I` to bring Arlen's
-    Dataverse test suite to at least the robustness level of
-    `../PerlDatabaseObjectModel` across OData semantics, datasource/write
-    regressions, characterization artifacts, parity accounting, and optional
-    live confidence coverage
-  - Phase 23 is not considered closed again until those new Dataverse
-    parity-hardening subphases are complete
-  - added lazy named-target Dataverse helpers on `ALNApplication`,
-    `ALNContext`, and `ALNController`
-  - added `make phase23-dataverse-tests` and `make phase23-confidence`, with
-    optional live Dataverse codegen smoke when `ARLEN_DATAVERSE_*` credentials
-    are present
-  - added `examples/dataverse_reference/README.md` and updated the Dataverse,
-    configuration, testing-workflow, and summary docs to reflect the shipped
-    runtime path
+    normalization, typed Dataverse codegen, lazy app/controller target
+    helpers, shared retry/diagnostic contracts, split Dataverse regression
+    suites, characterization snapshots, Perl parity accounting, the optional
+    `phase23-live-smoke` lane, focused confidence artifacts, and docs/example
+    closeout
+  - Dataverse parity hardening now ships through focused suites in
+    `tests/unit/Dataverse*Tests.m`, shared support in
+    `tests/shared/ALNDataverseTestSupport.{h,m}`, and checked-in artifacts
+    under `tests/fixtures/phase23/`
+  - `phase23-confidence` now records parity evaluation and live-smoke status,
+    failing closed if the machine-readable parity matrix regresses
+  - live Dataverse execution remains optional and runtime-inactive by default;
+    the confidence lane compiles the smoke tool and emits explicit skipped
+    manifests when `ARLEN_PHASE23_DATAVERSE_*` or `ARLEN_DATAVERSE_*`
+    credentials are not fully present
 - Verification completed at this checkpoint:
   - `source tools/source_gnustep_env.sh && make build-tests`
   - `source tools/source_gnustep_env.sh && make test-unit`
   - `source tools/source_gnustep_env.sh && make phase23-dataverse-tests`
   - `source tools/source_gnustep_env.sh && make phase23-confidence`
+  - `source tools/source_gnustep_env.sh && make /home/danboyd/git/Arlen/build/phase23-dataverse-live-smoke`
   - `source tools/source_gnustep_env.sh && make docs-api`
   - `bash tools/ci/run_docs_quality.sh`
 - Reconciled and fixed the managed-GNUstep bootstrap bug reported from
@@ -48,6 +46,23 @@ Last updated: 2026-03-31
 
 ## Completed Today (2026-03-31)
 
+- Completed Phase `23H-23I`:
+  - replaced the monolithic Dataverse test file with focused runtime, query,
+    read, write, metadata, regression, and artifact suites backed by shared
+    Dataverse test support helpers
+  - added fixture-backed OData/query characterization,
+    `dataverse_contract_snapshot.json`, and
+    `dataverse_perl_parity_matrix.json` so Arlen's shipped Dataverse surface
+    is explicitly mapped against the Perl OData/Dataverse/datasource test
+    families
+  - tightened Dataverse error wrapping so token and transport failures retain
+    Dataverse diagnostics and preserve underlying errors
+  - added the optional `phase23-live-smoke` build/run lane plus richer
+    `phase23-confidence` artifacts, including explicit skipped manifests when
+    live credentials are absent
+  - updated `docs/DATAVERSE.md`, `docs/TESTING_WORKFLOW.md`,
+    `docs/PHASE23_ROADMAP.md`, and status surfaces to reflect completed
+    Dataverse parity hardening
 - Completed Phase `23A-23G`:
   - added a runtime-inactive Dataverse Web API surface with
     `ALNDataverseClient`, OData query composition, CRUD/upsert helpers,
@@ -517,12 +532,12 @@ entries, not current plan-of-record items.
 - Phase 22: complete (`22A-22G` delivered on 2026-03-30 for newcomer-first
   onboarding cleanup, docs/code parity hardening, app-author guides,
   module/lite-mode guidance, plugin/frontend guides, and docs quality closeout)
-- Phase 23: active (`23A-23G` delivered on 2026-03-31 for the
+- Phase 23: complete (`23A-23I` delivered on 2026-03-31 for the
   runtime-inactive Dataverse Web API client, OData query composition,
   CRUD/upsert/batch helpers, metadata normalization, typed Dataverse codegen,
-  app/controller Dataverse helpers, focused confidence lanes, and docs/example
-  closeout; `23H-23I` planned for Dataverse test-parity hardening against the
-  Perl reference suite)
+  app/controller Dataverse helpers, focused confidence lanes, split
+  regression-matrix coverage, characterization/parity artifacts, optional
+  live Dataverse smoke support, and docs/example closeout)
 
 ## Completed Today (2026-03-26)
 

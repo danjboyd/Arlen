@@ -1,6 +1,6 @@
 # Arlen Phase 23 Roadmap
 
-Status: Active (`23A-23G` delivered on 2026-03-31; `23H-23I` planned for Dataverse test-parity hardening)
+Status: Complete (`23A-23I` delivered on 2026-03-31)
 Last updated: 2026-03-31
 
 Related docs:
@@ -26,8 +26,7 @@ Reference inputs reviewed for this roadmap:
 
 ## 0. Progress Checkpoint (2026-03-31)
 
-Phase 23 initial implementation is complete, but Dataverse test-parity
-hardening remains open.
+Phase 23 is complete, including the Dataverse parity-hardening follow-on work.
 
 Delivered in-tree:
 
@@ -44,12 +43,13 @@ Delivered in-tree:
   `phase23-confidence`
 - `23G`: docs/example/reference closeout, updated status surfaces, and API-doc
   regeneration
-- Planned follow-on:
-  - `23H`: split and deepen the Dataverse regression matrix until it meets or
-    exceeds the Perl OData/Dataverse behavioral bar for Arlen's supported
-    surface
-  - `23I`: add characterization artifacts, coverage accounting, and richer
-    live confidence gates so that parity is demonstrated instead of implied
+- `23H`: split the Dataverse coverage into focused suites, add fixture-backed
+  OData/read/write/runtime regressions, and carry a checked-in parity matrix
+  against the Perl Dataverse/OData reference families
+- `23I`: add Dataverse characterization artifacts, machine-readable parity
+  accounting, a compile-validated `phase23-live-smoke` lane plus optional
+  live execution via `phase23-confidence`, and contributor guidance for
+  turning new bugs or parity gaps into focused regressions
 
 ## 1. Objective
 
@@ -339,7 +339,7 @@ Acceptance (required):
 - Docs clearly separate shipped guarantees from deferred Dataverse depth.
 - The phase closes with docs, examples, and test coverage aligned.
 
-## 4.8 Phase 23H: Regression-Matrix Expansion + Dataverse Test Topology
+## 4.8 Phase 23H: Regression-Matrix Expansion + Dataverse Test Topology (Delivered 2026-03-31)
 
 Deliverables:
 
@@ -383,7 +383,27 @@ Acceptance (required):
 - New fixtures and regression cases are traceable to either a reported bug or
   a documented parity gap against `../PerlDatabaseObjectModel`.
 
-## 4.9 Phase 23I: Characterization Artifacts + Parity Accounting + Live Confidence
+Delivered:
+
+- Replaced the monolithic `tests/unit/DataverseTests.m` suite with focused
+  coverage in `DataverseRuntimeTests`, `DataverseQueryTests`,
+  `DataverseReadTests`, `DataverseWriteTests`, `DataverseMetadataTests`,
+  `DataverseRegressionTests`, and `DataverseArtifactTests`.
+- Added shared Dataverse test harness support in
+  `tests/shared/ALNDataverseTestSupport.{h,m}` so transport, token, target,
+  and payload assertions stay consistent across the decomposed suites.
+- Added fixture-backed OData/query characterization in
+  `tests/fixtures/phase23/dataverse_query_cases.json`.
+- Added explicit regression coverage for create/update/upsert semantics,
+  lookup binding, multi-choice empty-vs-omit behavior, formatted values,
+  paging, alternate-key validation, count/read normalization, throttle
+  diagnostics, and token/transport error wrapping with Dataverse diagnostics.
+- Added a checked-in parity map in
+  `tests/fixtures/phase23/dataverse_perl_parity_matrix.json` so coverage
+  expectations are derived from the Perl OData/Dataverse/datasource families
+  instead of ad hoc test additions.
+
+## 4.9 Phase 23I: Characterization Artifacts + Parity Accounting + Live Confidence (Delivered 2026-03-31)
 
 Deliverables:
 
@@ -416,6 +436,27 @@ Acceptance (required):
   non-goal.
 - Phase 23 cannot be marked complete again until the Dataverse test suite is at
   least as robust as the Perl reference for Arlen's supported feature slice.
+
+Delivered:
+
+- Added Dataverse characterization artifacts in
+  `tests/fixtures/phase23/dataverse_contract_snapshot.json` and matching
+  artifact assertions in `DataverseArtifactTests`.
+- Extended the phase confidence artifact generator to produce
+  `phase23_parity_eval.json` alongside the existing summary JSON/Markdown, and
+  to fail closed if parity accounting regresses.
+- Added `tools/phase23_dataverse_live_smoke.m` and the
+  `phase23-live-smoke`/`PHASE23_LIVE_SMOKE_TOOL` build lane so the optional
+  live Dataverse probe is compile-validated even when live credentials are not
+  available.
+- Extended `tools/ci/run_phase23_confidence.sh` so live Dataverse read/write
+  smoke runs when the full `ARLEN_PHASE23_DATAVERSE_*` environment is present,
+  and otherwise records an explicit skipped manifest instead of silently doing
+  nothing.
+- Updated `docs/DATAVERSE.md` and `docs/TESTING_WORKFLOW.md` so contributors
+  can map new bugs or Perl-reference gaps into the split Dataverse suites,
+  rerun `phase23-dataverse-tests`, and optionally exercise `phase23-live-smoke`
+  plus `phase23-confidence`.
 
 ## 5. Exit Criteria
 

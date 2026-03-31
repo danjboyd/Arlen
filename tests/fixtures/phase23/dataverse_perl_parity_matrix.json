@@ -1,0 +1,194 @@
+{
+  "families": [
+    {
+      "arlen_tests": [
+        "tests/unit/DataverseRuntimeTests.m::testApplicationResolvesDataverseClientsFromConfigAndEnvironment",
+        "tests/unit/DataverseRuntimeTests.m::testApplicationRejectsMissingNamedDataverseTarget",
+        "tests/unit/DataverseRuntimeTests.m::testControllerAndContextHelpersResolveDataverseClientsDuringDispatch"
+      ],
+      "id": "runtime_target_resolution",
+      "perl_tests": [
+        "../PerlDatabaseObjectModel/Database/DataSource/t/03-dataverse-construct.t",
+        "../PerlDatabaseObjectModel/Database/DataSource/t/12-env-overrides.t"
+      ],
+      "status": "covered"
+    },
+    {
+      "arlen_tests": [
+        "tests/unit/DataverseQueryTests.m::testQueryFilterFixtureCases"
+      ],
+      "id": "query_logical_predicates",
+      "perl_tests": [
+        "../PerlDatabaseObjectModel/OData/t/01-where-basic.t",
+        "../PerlDatabaseObjectModel/OData/t/02-where-logical.t",
+        "../PerlDatabaseObjectModel/OData/t/03-where-like-in-null.t",
+        "../PerlDatabaseObjectModel/OData/t/10-flags-case-insensitive-and-in.t"
+      ],
+      "status": "covered"
+    },
+    {
+      "arlen_tests": [
+        "tests/unit/DataverseQueryTests.m::testQueryFilterSupportsNSDateNSUUIDAndBooleanLiterals"
+      ],
+      "id": "query_type_literals",
+      "perl_tests": [
+        "../PerlDatabaseObjectModel/OData/t/04-where-types.t"
+      ],
+      "status": "covered"
+    },
+    {
+      "arlen_tests": [
+        "tests/unit/DataverseQueryTests.m::testQueryParametersFixtureCases",
+        "tests/unit/DataverseReadTests.m::testRetrieveRecordBuildsDeterministicSelectAndExpandQuery"
+      ],
+      "id": "query_expand_order_and_query_string",
+      "perl_tests": [
+        "../PerlDatabaseObjectModel/OData/t/05-order-select.t",
+        "../PerlDatabaseObjectModel/OData/t/06-expand.t",
+        "../PerlDatabaseObjectModel/OData/t/08-build-params.t",
+        "../PerlDatabaseObjectModel/OData/t/09-as-query-string.t"
+      ],
+      "status": "covered"
+    },
+    {
+      "arlen_tests": [
+        "tests/unit/DataverseQueryTests.m::testQueryErrorFixtureCases"
+      ],
+      "id": "query_error_contracts",
+      "perl_tests": [
+        "../PerlDatabaseObjectModel/OData/t/12-errors-and-stubs.t"
+      ],
+      "status": "covered"
+    },
+    {
+      "arlen_tests": [
+        "tests/unit/DataverseReadTests.m::testPingReturnsWhoAmIResponseObject",
+        "tests/unit/DataverseReadTests.m::testFetchPageNormalizesFormattedValuesAndNextLink",
+        "tests/unit/DataverseReadTests.m::testFetchNextPageUsesAbsoluteURLString"
+      ],
+      "id": "read_paging_count_and_formatted_values",
+      "perl_tests": [
+        "../PerlDatabaseObjectModel/Database/DataSource/t/10-ping-flow.t",
+        "../PerlDatabaseObjectModel/Database/DataSource/t/11-count-headers.t",
+        "../PerlDatabaseObjectModel/Database/DataSource/t/20-formatted-values.t",
+        "../PerlDatabaseObjectModel/Database/DataSource/t/23-pagination.t"
+      ],
+      "status": "covered"
+    },
+    {
+      "arlen_tests": [
+        "tests/unit/DataverseWriteTests.m::testCreateUpdateAndUpsertSerializeLookupChoicesAndMultiChoiceSemantics",
+        "tests/unit/DataverseWriteTests.m::testCreateAndUpdateReturnRepresentationUsePreferHeaderAndParseBodies",
+        "tests/unit/DataverseWriteTests.m::testInvokeActionAndDeleteUseExpectedHTTPContracts"
+      ],
+      "id": "write_payloads_headers_and_response_shapes",
+      "perl_tests": [
+        "../PerlDatabaseObjectModel/Database/DataSource/t/21-write-encoding.t",
+        "../PerlDatabaseObjectModel/Database/DataSource/t/25-headers-prefer.t",
+        "../PerlDatabaseObjectModel/Database/DataSource/t/26-update-encoding.t",
+        "../PerlDatabaseObjectModel/Database/DataSource/t/31-save-create-returns-pk.t",
+        "../PerlDatabaseObjectModel/Database/DataSource/t/32-save-multichoice-empty-vs-omit.t",
+        "../PerlDatabaseObjectModel/Database/DataSource/t/33-save-lookup-binding.t",
+        "../PerlDatabaseObjectModel/Database/DataSource/t/60-save-coercions.t"
+      ],
+      "status": "covered"
+    },
+    {
+      "arlen_tests": [
+        "tests/unit/DataverseWriteTests.m::testAlternateKeyPathsAreDeterministicAndValidateInputs"
+      ],
+      "id": "alternate_key_addressing",
+      "perl_tests": [
+        "../PerlDatabaseObjectModel/Dataverse/t/08-tablebuilder-url-regression.t",
+        "../PerlDatabaseObjectModel/Dataverse/t/13-datasource-maxpagesize.t"
+      ],
+      "status": "covered"
+    },
+    {
+      "arlen_tests": [
+        "tests/unit/DataverseRegressionTests.m::testBatchAndFunctionEscapeHatchesWork",
+        "tests/unit/DataverseRegressionTests.m::testBatchRequestsUseSharedRetryPolicy",
+        "tests/unit/DataverseRegressionTests.m::testThrottleErrorsIncludeStructuredDiagnostics",
+        "tests/unit/DataverseRegressionTests.m::testAuthenticationAndTransportErrorsRetainDataverseDiagnostics"
+      ],
+      "id": "batch_retry_and_error_surfaces",
+      "perl_tests": [
+        "../PerlDatabaseObjectModel/Database/DataSource/t/27-error-bubbling.t",
+        "../PerlDatabaseObjectModel/Database/DataSource/t/34-count-filter-retry.t"
+      ],
+      "status": "covered"
+    },
+    {
+      "arlen_tests": [
+        "tests/unit/DataverseMetadataTests.m::testMetadataFetchUsesEntityDefinitionsSummaryDetailsAndPicklists",
+        "tests/unit/DataverseMetadataTests.m::testMetadataNormalizationAndCodegenAreDeterministic"
+      ],
+      "id": "metadata_urls_optionsets_and_normalization",
+      "perl_tests": [
+        "../PerlDatabaseObjectModel/Dataverse/t/01-entity-sets.t",
+        "../PerlDatabaseObjectModel/Dataverse/t/02-attributes.t",
+        "../PerlDatabaseObjectModel/Dataverse/t/06-metadata-urls.t",
+        "../PerlDatabaseObjectModel/Dataverse/t/09-optionsets.t",
+        "../PerlDatabaseObjectModel/Dataverse/t/10-type-normalization.t"
+      ],
+      "status": "covered"
+    },
+    {
+      "arlen_tests": [
+        "tests/unit/DataverseMetadataTests.m::testDataverseCodegenCLIFromFixture",
+        "tests/unit/DataverseArtifactTests.m::testCharacterizationSnapshotMatchesCurrentContracts"
+      ],
+      "id": "codegen_contracts_and_characterization",
+      "perl_tests": [
+        "../PerlDatabaseObjectModel/Dataverse/t/04-generate-class.t",
+        "../PerlDatabaseObjectModel/Dataverse/t/05-helpers.t",
+        "../PerlDatabaseObjectModel/Dataverse/t/07-search-and-generate.t"
+      ],
+      "status": "covered"
+    },
+    {
+      "arlen_tests": [
+        "tests/unit/DataverseArtifactTests.m::testPerlParityMatrixIsGapFreeAndReferencesFocusedCoverage",
+        "tools/ci/run_phase23_confidence.sh",
+        "tools/phase23_dataverse_live_smoke.m"
+      ],
+      "id": "parity_artifacts_and_live_confidence",
+      "perl_tests": [
+        "../PerlDatabaseObjectModel/Database/DataSource/t/71-phase1-characterization-baseline.t",
+        "../PerlDatabaseObjectModel/Database/DataSource/t/72-phase2-differential-harness.t",
+        "../PerlDatabaseObjectModel/Database/DataSource/t/73-phase3-adapter-capability-contracts.t",
+        "../PerlDatabaseObjectModel/Database/DataSource/t/80-phase10-hardening-artifacts.t"
+      ],
+      "status": "covered"
+    }
+  ],
+  "intentional_omissions": [
+    {
+      "id": "fetchxml_builder",
+      "reason": "Arlen's shipped Dataverse slice is OData-first and does not promise FetchXML builder parity."
+    },
+    {
+      "id": "odata_apply_aggregation",
+      "reason": "Arlen's ALNDataverseQuery does not expose Perl's dedicated $apply coverage as part of the supported v1 surface."
+    },
+    {
+      "id": "count_fallback_endpoint_semantics",
+      "reason": "Arlen ships query-page count handling but does not expose a separate count API with top=0 and fallback retry semantics."
+    },
+    {
+      "id": "per_table_overrides_and_query_budget_tracing",
+      "reason": "Per-table datasource overrides and request-budget tracing are not part of Arlen's Dataverse public contract."
+    },
+    {
+      "id": "preview_sanitize_and_existing_selection_workflows",
+      "reason": "Perl's preview sanitization and existing-selection workflows are specific to its table-builder productization and are outside Arlen's shipped Dataverse slice."
+    }
+  ],
+  "reference_suite": {
+    "datasource_tests": "../PerlDatabaseObjectModel/Database/DataSource/t/",
+    "dataverse_tests": "../PerlDatabaseObjectModel/Dataverse/t/",
+    "odata_tests": "../PerlDatabaseObjectModel/OData/t/"
+  },
+  "remaining_gaps": [],
+  "version": "phase23-perl-parity-v1"
+}

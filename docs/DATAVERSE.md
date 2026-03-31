@@ -11,7 +11,7 @@ Dataverse support in Arlen is:
 - separate from `ALNDatabaseAdapter` and `ALNSQLBuilder`
 - aimed at the Dataverse Web API, not Microsoft Graph
 
-Phase `23A-23G` is now complete. The shipped surface includes:
+Phase `23A-23I` is now complete. The shipped surface includes:
 
 - `ALNDataverseClient`
 - `ALNDataverseQuery`
@@ -19,7 +19,10 @@ Phase `23A-23G` is now complete. The shipped surface includes:
 - `ALNDataverseCodegen`
 - `arlen dataverse-codegen`
 - `ALNApplication`, `ALNContext`, and `ALNController` Dataverse helpers
-- repo-native `phase23-dataverse-tests` and `phase23-confidence` lanes
+- repo-native `phase23-dataverse-tests`, `phase23-live-smoke`, and
+  `phase23-confidence` lanes
+- checked-in Dataverse characterization/parity fixtures under
+  `tests/fixtures/phase23/`
 
 ## 2. Config Shape
 
@@ -247,12 +250,32 @@ Use the focused confidence entrypoints for this surface:
 ```bash
 source tools/source_gnustep_env.sh
 make phase23-dataverse-tests
+make phase23-live-smoke
 make phase23-confidence
 ```
 
 `make phase23-confidence` always runs the fixture-backed Dataverse suite and
-optionally runs a live `dataverse-codegen` smoke when the required
-`ARLEN_DATAVERSE_*` credentials are present.
+the checked-in Perl parity accounting. It optionally runs:
+
+- a live Dataverse smoke through `phase23-live-smoke`
+- a live `dataverse-codegen` smoke
+
+The checked-in characterization/parity fixtures are:
+
+- `tests/fixtures/phase23/dataverse_query_cases.json`
+- `tests/fixtures/phase23/dataverse_contract_snapshot.json`
+- `tests/fixtures/phase23/dataverse_perl_parity_matrix.json`
+
+The live smoke lane expects the normal `ARLEN_DATAVERSE_*` credentials plus:
+
+- `ARLEN_PHASE23_DATAVERSE_TARGET`
+- `ARLEN_PHASE23_DATAVERSE_ENTITY_SET`
+- `ARLEN_PHASE23_DATAVERSE_ID_FIELD`
+- `ARLEN_PHASE23_DATAVERSE_NAME_FIELD`
+- `ARLEN_PHASE23_DATAVERSE_ALTKEY_FIELD`
+- `ARLEN_PHASE23_DATAVERSE_FORMATTED_FIELD`
+- `ARLEN_PHASE23_DATAVERSE_EXPECT_PAGING`
+- `ARLEN_PHASE23_DATAVERSE_WRITE_ENABLED=1`
 
 ## 8. Current Boundaries
 

@@ -1,0 +1,134 @@
+{
+  "error_cases": [
+    {
+      "expected_error_code": 2,
+      "id": "empty_in_clause",
+      "predicate": {
+        "accountnumber": {
+          "-in": []
+        }
+      },
+      "select_fields": [
+        "accountid"
+      ]
+    },
+    {
+      "expected_error_code": 1,
+      "id": "unsafe_select_identifier",
+      "predicate": {
+        "name": "Acme"
+      },
+      "select_fields": [
+        "bad-field"
+      ]
+    }
+  ],
+  "filter_cases": [
+    {
+      "expected_filter": "statecode eq 0 and (startswith(tolower(name),'acme') or (accountnumber eq 'A1' or accountnumber eq 'B2')) and not (ownerid eq null)",
+      "id": "logical_groups",
+      "predicate": {
+        "-and": [
+          {
+            "statecode": 0
+          },
+          {
+            "-or": [
+              {
+                "name": {
+                  "-startswith": "Acme"
+                }
+              },
+              {
+                "accountnumber": {
+                  "-in": [
+                    "A1",
+                    "B2"
+                  ]
+                }
+              }
+            ]
+          },
+          {
+            "-not": {
+              "ownerid": null
+            }
+          }
+        ]
+      }
+    },
+    {
+      "expected_filter": "contains(tolower(name),'corp') or not (statuscode eq 1 or statuscode eq 2)",
+      "id": "contains_and_not_in",
+      "predicate": {
+        "-or": [
+          {
+            "name": {
+              "-contains": "Corp"
+            }
+          },
+          {
+            "statuscode": {
+              "-not_in": [
+                1,
+                2
+              ]
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "query_cases": [
+    {
+      "count": true,
+      "expected_parameters": {
+        "$count": "true",
+        "$expand": "primarycontactid($select=fullname;$top=1;$expand=owninguser($select=fullname;$orderby=fullname desc))",
+        "$filter": "statecode ne 1",
+        "$orderby": "name asc,createdon desc",
+        "$select": "accountid,name",
+        "$skip": "10",
+        "$top": "50"
+      },
+      "expand": {
+        "primarycontactid": {
+          "expand": {
+            "owninguser": {
+              "order_by": [
+                {
+                  "-desc": "fullname"
+                }
+              ],
+              "select": [
+                "fullname"
+              ]
+            }
+          },
+          "select": [
+            "fullname"
+          ],
+          "top": 1
+        }
+      },
+      "id": "expand_and_count",
+      "order_by": [
+        "name",
+        {
+          "-desc": "createdon"
+        }
+      ],
+      "predicate": {
+        "statecode": {
+          "!=": 1
+        }
+      },
+      "select_fields": [
+        "accountid",
+        "name"
+      ],
+      "skip": 10,
+      "top": 50
+    }
+  ]
+}

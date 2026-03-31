@@ -1,0 +1,53 @@
+{
+  "create_contract": {
+    "body_fields": {
+      "name": "Acme",
+      "preferredchannels": [],
+      "primarycontactid@odata.bind": "/contacts(00000000-0000-0000-0000-000000000020)",
+      "statuscode": 1
+    }
+  },
+  "metadata_contract": {
+    "header_contains": [
+      "@interface ALNDVAccount : NSObject",
+      "+ (NSString *)fieldAccountid;",
+      "typedef NS_ENUM(NSInteger, ALNDVAccountStatuscodeChoice)",
+      "+ (NSString *)navigationPrimarycontactid;"
+    ],
+    "manifest_target": "crm",
+    "normalized_attribute_count": 7,
+    "normalized_entity_count": 2
+  },
+  "query_page_contract": {
+    "method": "GET",
+    "prefer_contains": [
+      "odata.maxpagesize=250",
+      "odata.include-annotations=\"OData.Community.Display.V1.FormattedValue\""
+    ]
+  },
+  "throttle_error_contract": {
+    "code": 6,
+    "domain": "Arlen.Data.Dataverse.Error",
+    "user_info_keys": [
+      "request_method",
+      "request_url",
+      "request_headers",
+      "response_headers",
+      "response_body",
+      "retry_after_seconds",
+      "correlation_id",
+      "target_name",
+      "diagnostics"
+    ]
+  },
+  "upsert_contract": {
+    "headers": {
+      "If-None-Match": "*"
+    },
+    "method": "PATCH",
+    "url_contains": [
+      "accounts(accountnumber='A-100')"
+    ]
+  },
+  "version": "phase23-characterization-v1"
+}

@@ -4,11 +4,56 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 output_dir="${ARLEN_PHASE23_OUTPUT_DIR:-$repo_root/build/release_confidence/phase23}"
 dataverse_log="$output_dir/phase23_dataverse_tests.log"
+live_smoke_output_dir="$output_dir/live_smoke"
+live_smoke_log="$output_dir/phase23_live_smoke.log"
+live_smoke_manifest="$live_smoke_output_dir/manifest.json"
 live_output_dir="$output_dir/live"
 live_log="$output_dir/phase23_live_codegen.log"
 live_manifest="$live_output_dir/manifest.json"
+parity_matrix="$repo_root/tests/fixtures/phase23/dataverse_perl_parity_matrix.json"
 
-mkdir -p "$output_dir" "$live_output_dir"
+mkdir -p "$output_dir" "$live_smoke_output_dir" "$live_output_dir"
+
+write_live_smoke_manifest() {
+  local status="$1"
+  local reason="${2:-}"
+
+  case "$status" in
+    pass)
+      cat >"$live_smoke_manifest" <<EOF
+{
+  "status": "pass",
+  "reason": "",
+  "artifacts": [
+    "../phase23_live_smoke.log"
+  ]
+}
+EOF
+      ;;
+    fail)
+      cat >"$live_smoke_manifest" <<EOF
+{
+  "status": "fail",
+  "reason": "${reason:-live_smoke_failed}",
+  "artifacts": [
+    "../phase23_live_smoke.log"
+  ]
+}
+EOF
+      ;;
+    *)
+      cat >"$live_smoke_manifest" <<EOF
+{
+  "status": "skipped",
+  "reason": "${reason:-missing_smoke_env}",
+  "artifacts": [
+    "../phase23_live_smoke.log"
+  ]
+}
+EOF
+      ;;
+  esac
+}
 
 write_live_manifest() {
   local status="$1"
@@ -62,11 +107,41 @@ have_live_credentials() {
      -n "${ARLEN_DATAVERSE_CLIENT_SECRET:-}" ]]
 }
 
+have_live_smoke_config() {
+  have_live_credentials &&
+    [[ -n "${ARLEN_PHASE23_DATAVERSE_ENTITY_SET:-}" &&
+       -n "${ARLEN_PHASE23_DATAVERSE_ID_FIELD:-}" &&
+       -n "${ARLEN_PHASE23_DATAVERSE_NAME_FIELD:-}" &&
+       -n "${ARLEN_PHASE23_DATAVERSE_ALTKEY_FIELD:-}" &&
+       -n "${ARLEN_PHASE23_DATAVERSE_FORMATTED_FIELD:-}" &&
+       -n "${ARLEN_PHASE23_DATAVERSE_EXPECT_PAGING:-}" &&
+       "${ARLEN_PHASE23_DATAVERSE_WRITE_ENABLED:-}" == "1" ]]
+}
+
 set +u
 source "$repo_root/tools/source_gnustep_env.sh"
 set -u
 
 make -C "$repo_root" phase23-dataverse-tests 2>&1 | tee "$dataverse_log"
+
+if have_live_smoke_config; then
+  set +e
+  ARLEN_PHASE23_LIVE_SMOKE_OUTPUT="$live_smoke_manifest" \
+    make -C "$repo_root" phase23-live-smoke 2>&1 | tee "$live_smoke_log"
+  live_smoke_status=$?
+  set -e
+
+  if [[ ! -f "$live_smoke_manifest" ]]; then
+    if [[ $live_smoke_status -eq 0 ]]; then
+      write_live_smoke_manifest pass
+    else
+      write_live_smoke_manifest fail live_smoke_failed
+    fi
+  fi
+else
+  printf '%s\n' "phase23-confidence: live Dataverse smoke skipped because ARLEN_PHASE23_DATAVERSE_* live env is not fully set" | tee "$live_smoke_log"
+  write_live_smoke_manifest skipped missing_smoke_env
+fi
 
 if have_live_credentials; then
   live_target="${ARLEN_PHASE23_DATAVERSE_TARGET:-default}"
@@ -111,7 +186,9 @@ fi
 python3 "$repo_root/tools/ci/generate_phase23_confidence_artifacts.py" \
   --output-dir "$output_dir" \
   --dataverse-log "$dataverse_log" \
+  --live-smoke-manifest "$live_smoke_manifest" \
   --live-manifest "$live_manifest" \
-  --live-log "$live_log"
+  --live-log "$live_log" \
+  --parity-matrix "$parity_matrix"
 
 echo "ci: phase23 confidence gate complete"

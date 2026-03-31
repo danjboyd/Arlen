@@ -196,10 +196,17 @@
   XCTAssertTrue([makefile containsString:
                               @"PHASE23_DATAVERSE_TEST_BUNDLE := $(BUILD_DIR)/tests/"
                                "ArlenPhase23DataverseTests.xctest"]);
-  XCTAssertTrue([makefile containsString:
-                              @"PHASE23_DATAVERSE_TEST_SRCS := tests/unit/DataverseTests.m"]);
+  XCTAssertTrue([makefile containsString:@"PHASE23_DATAVERSE_TEST_SRCS := tests/unit/DataverseRuntimeTests.m"]);
+  XCTAssertTrue([makefile containsString:@"tests/unit/DataverseQueryTests.m"]);
+  XCTAssertTrue([makefile containsString:@"tests/unit/DataverseReadTests.m"]);
+  XCTAssertTrue([makefile containsString:@"tests/unit/DataverseWriteTests.m"]);
+  XCTAssertTrue([makefile containsString:@"tests/unit/DataverseMetadataTests.m"]);
+  XCTAssertTrue([makefile containsString:@"tests/unit/DataverseRegressionTests.m"]);
+  XCTAssertTrue([makefile containsString:@"tests/unit/DataverseArtifactTests.m"]);
+  XCTAssertTrue([makefile containsString:@"PHASE23_LIVE_SMOKE_TOOL := $(BUILD_DIR)/phase23-dataverse-live-smoke"]);
   XCTAssertTrue([makefile containsString:
                               @"phase23-dataverse-tests: $(PHASE23_DATAVERSE_TEST_BIN)"]);
+  XCTAssertTrue([makefile containsString:@"phase23-live-smoke: $(PHASE23_LIVE_SMOKE_TOOL)"]);
   XCTAssertTrue([makefile containsString:@"phase23-focused: phase23-dataverse-tests"]);
   XCTAssertTrue([makefile containsString:@"phase23-confidence:"]);
   XCTAssertTrue([makefile containsString:@"bash ./tools/ci/run_phase23_confidence.sh"]);
@@ -320,16 +327,21 @@
 
   XCTAssertTrue([runner containsString:@"source \"$repo_root/tools/source_gnustep_env.sh\""]);
   XCTAssertTrue([runner containsString:@"make -C \"$repo_root\" phase23-dataverse-tests"]);
+  XCTAssertTrue([runner containsString:@"make -C \"$repo_root\" phase23-live-smoke"]);
   XCTAssertTrue([runner containsString:@"build/release_confidence/phase23"]);
   XCTAssertTrue([runner containsString:@"dataverse-codegen"]);
   XCTAssertTrue([runner containsString:@"ARLEN_PHASE23_DATAVERSE_ENTITIES"]);
+  XCTAssertTrue([runner containsString:@"ARLEN_PHASE23_DATAVERSE_ENTITY_SET"]);
+  XCTAssertTrue([runner containsString:@"live Dataverse smoke skipped"]);
   XCTAssertTrue([runner containsString:@"live Dataverse codegen skipped"]);
 
-  XCTAssertTrue([generator containsString:@"phase23-confidence-v1"]);
+  XCTAssertTrue([generator containsString:@"phase23-confidence-v2"]);
   XCTAssertTrue([generator containsString:@"make phase23-dataverse-tests"]);
+  XCTAssertTrue([generator containsString:@"make phase23-live-smoke"]);
   XCTAssertTrue([generator containsString:@"make phase23-focused"]);
   XCTAssertTrue([generator containsString:@"make phase23-confidence"]);
-  XCTAssertTrue([generator containsString:@"ARLEN_DATAVERSE_*"]);
+  XCTAssertTrue([generator containsString:@"ARLEN_PHASE23_DATAVERSE_*"]);
+  XCTAssertTrue([generator containsString:@"phase23_parity_eval.json"]);
 }
 
 - (void)testGNUmakefileIncludesYYJSONCSourceInFrameworkBuilds {

@@ -1729,10 +1729,23 @@ NSError *ALNDataverseMakeError(ALNDataverseErrorCode code,
     }
     details[ALNDataverseErrorRequestMethodKey] = normalizedMethod;
     details[ALNDataverseErrorRequestURLKey] = normalizedURL;
+    NSMutableDictionary *diagnostics = [NSMutableDictionary dictionary];
+    diagnostics[@"attempt"] = @1;
+    diagnostics[@"max_attempts"] = @1;
+    diagnostics[@"method"] = normalizedMethod;
+    diagnostics[@"target_name"] = self.target.targetName ?: @"";
+    diagnostics[@"body_bytes"] = @([bodyData length]);
+    if ([tokenError.localizedDescription length] > 0) {
+      diagnostics[@"authentication_error"] = tokenError.localizedDescription;
+    }
+    details[ALNDataverseErrorDiagnosticsKey] = diagnostics;
+    if (tokenError != nil) {
+      details[NSUnderlyingErrorKey] = tokenError;
+    }
     if (error != NULL) {
-      *error = tokenError ?: ALNDataverseMakeError(ALNDataverseErrorAuthenticationFailed,
-                                                   @"Dataverse authentication failed",
-                                                   details);
+      *error = ALNDataverseMakeError(ALNDataverseErrorAuthenticationFailed,
+                                     @"Dataverse authentication failed",
+                                     details);
     }
     return nil;
   }
@@ -1769,9 +1782,12 @@ NSError *ALNDataverseMakeError(ALNDataverseErrorCode code,
         diagnostics[@"transport_error"] = transportError.localizedDescription;
       }
       details[ALNDataverseErrorDiagnosticsKey] = diagnostics;
-      lastError = transportError ?: ALNDataverseMakeError(ALNDataverseErrorTransportFailed,
-                                                          @"Dataverse transport failed",
-                                                          details);
+      if (transportError != nil) {
+        details[NSUnderlyingErrorKey] = transportError;
+      }
+      lastError = ALNDataverseMakeError(ALNDataverseErrorTransportFailed,
+                                        @"Dataverse transport failed",
+                                        details);
       if ((attempt + 1) < maxAttempts) {
         [NSThread sleepForTimeInterval:(NSTimeInterval)(attempt + 1)];
         continue;

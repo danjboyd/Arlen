@@ -30,6 +30,7 @@ Phase 20 data-layer-focused lanes remain available:
 Phase 23 Dataverse-focused lanes are also available:
 
 - `make phase23-dataverse-tests`
+- `make phase23-live-smoke`
 - `make phase23-focused`
 - `make phase23-confidence`
 
@@ -49,8 +50,23 @@ Phase 23 Dataverse-focused lanes are also available:
      `tests/fixtures/protocol/phase21_protocol_corpus.json`
    - generated-app setup/config/module issues:
      `tests/fixtures/phase21/generated_app_matrix.json`
-   - Dataverse client/config/runtime/codegen regressions:
-     `tests/unit/DataverseTests.m`
+   - Dataverse runtime/config regressions:
+     `tests/unit/DataverseRuntimeTests.m`
+   - Dataverse OData/query-builder regressions:
+     `tests/unit/DataverseQueryTests.m`
+   - Dataverse read-path/paging/response-normalization regressions:
+     `tests/unit/DataverseReadTests.m`
+   - Dataverse write/action/delete regressions:
+     `tests/unit/DataverseWriteTests.m`
+   - Dataverse retry/error/batch regressions:
+     `tests/unit/DataverseRegressionTests.m`
+   - Dataverse metadata/codegen regressions:
+     `tests/unit/DataverseMetadataTests.m`
+   - Dataverse parity/characterization artifacts:
+     `tests/unit/DataverseArtifactTests.m`,
+     `tests/fixtures/phase23/dataverse_query_cases.json`,
+     `tests/fixtures/phase23/dataverse_contract_snapshot.json`,
+     `tests/fixtures/phase23/dataverse_perl_parity_matrix.json`
 3. Add or extend a checked-in fixture so the failure is replayable.
 4. Run the matching focused lane until it passes.
 5. Promote the change through `make test-unit`, broader integration coverage
@@ -126,7 +142,11 @@ Artifacts are written to `build/release_confidence/phase21/`.
 Phase 23 Dataverse closeout uses:
 
 ```bash
+make phase23-dataverse-tests
+make phase23-live-smoke   # optional; requires ARLEN_PHASE23_DATAVERSE_* live env
 make phase23-confidence
 ```
 
 Artifacts are written to `build/release_confidence/phase23/`.
+The Phase 23 confidence pack now includes the checked-in Perl parity accounting
+snapshot, optional live smoke output, and optional live codegen output.
