@@ -16,6 +16,7 @@ Primary contracts:
 - `ALNMSSQLSQLBuilder` (thin MSSQL-named builder surface over the dialect compiler)
 - `ALNPostgresSQLBuilder` (PostgreSQL dialect extension for conflict/upsert, including expression-based `DO UPDATE SET` and optional `DO UPDATE ... WHERE`)
 - `ALNMSSQL` (optional SQL Server adapter with runtime ODBC loading; no hard core dependency on Microsoft's driver)
+- `ALNDataverseClient`, `ALNDataverseQuery`, `ALNDataverseMetadata`, and `ALNDataverseCodegen` (Dataverse Web API/OData client, query builder, metadata normalization, and typed code generation)
 - `ALNSchemaCodegen` (deterministic typed schema helper artifact rendering)
 - `ALNPg` builder execution/caching/diagnostics and typed PostgreSQL bind/result APIs (`executeBuilderQuery`, `executeBuilderCommand`, query stage listener events)
 - `ALNDatabaseAdapter` / `ALNDatabaseConnection`
@@ -23,6 +24,10 @@ Primary contracts:
 - `ALNDisplayGroup`
 - `ALNAdapterConformance` helpers
 - `ALNPg`, `ALNMigrationRunner`, `ALNGDL2Adapter`
+
+Dataverse is intentionally not routed through `ALNDatabaseAdapter` or
+`ALNSQLBuilder`. Use the Dataverse client/query surface directly for Dataverse
+workloads, and keep using the SQL adapter path for PostgreSQL/MSSQL.
 
 ## 2. Non-Arlen Consumption
 
@@ -40,6 +45,9 @@ make test-data-layer
 ```
 
 `make test-data-layer` builds and runs `build/arlen-data-example` using only ArlenData sources.
+
+For Dataverse-specific usage, config shape, and codegen examples, see
+`docs/DATAVERSE.md`.
 
 ## 3. Git Partial Checkout
 

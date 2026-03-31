@@ -10,6 +10,10 @@
 #import "Core/ALNValueTransformers.h"
 #import "Data/ALNAdapterConformance.h"
 #import "Data/ALNDatabaseAdapter.h"
+#import "Data/ALNDataverseClient.h"
+#import "Data/ALNDataverseCodegen.h"
+#import "Data/ALNDataverseMetadata.h"
+#import "Data/ALNDataverseQuery.h"
 #import "Data/ALNDisplayGroup.h"
 #if __has_include("Data/ALNMSSQL.h")
 #import "Data/ALNMSSQL.h"

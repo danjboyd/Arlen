@@ -77,6 +77,58 @@ Common keys:
 If you are just starting, set the connection string first and leave the rest
 alone until you need different pool behavior.
 
+## 4.1 Dataverse (Optional)
+
+Arlen's Dataverse surface is compiled in but runtime-inactive by default. Apps
+only use it when they explicitly configure or instantiate Dataverse helpers.
+
+Common config shape:
+
+```plist
+dataverse = {
+  serviceRootURL = "https://example.crm.dynamics.com/api/data/v9.2";
+  tenantID = "00000000-0000-0000-0000-000000000000";
+  clientID = "11111111-1111-1111-1111-111111111111";
+  clientSecret = "replace-me";
+  pageSize = 500;
+  maxRetries = 2;
+  timeout = 60;
+  targets = {
+    sales = {
+      serviceRootURL = "https://example.crm.dynamics.com/api/data/v9.2";
+    };
+  };
+};
+```
+
+Common keys:
+
+- `dataverse.serviceRootURL` or `dataverse.serviceRoot`
+- `dataverse.tenantID` / `tenantId`
+- `dataverse.clientID` / `clientId`
+- `dataverse.clientSecret`
+- `dataverse.pageSize`
+- `dataverse.maxRetries`
+- `dataverse.timeout`
+
+Named targets can live under either:
+
+- `dataverse.targets.<name>`
+- `dataverseTargets.<name>`
+
+The Dataverse CLI/codegen path also reads environment overrides:
+
+- `ARLEN_DATAVERSE_URL` or `ARLEN_DATAVERSE_SERVICE_ROOT`
+- `ARLEN_DATAVERSE_TENANT_ID`
+- `ARLEN_DATAVERSE_CLIENT_ID`
+- `ARLEN_DATAVERSE_CLIENT_SECRET`
+- `ARLEN_DATAVERSE_PAGE_SIZE`
+- `ARLEN_DATAVERSE_MAX_RETRIES`
+- `ARLEN_DATAVERSE_TIMEOUT`
+
+Target-specific overrides append `_<TARGET>` in uppercase, for example
+`ARLEN_DATAVERSE_URL_SALES`.
+
 ## 5. Session and CSRF
 
 Session config:

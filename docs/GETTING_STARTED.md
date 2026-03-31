@@ -135,8 +135,16 @@ Use `arlen routes` when you want to inspect registration order and route names.
 - starting from the smallest app shape: `docs/LITE_MODE_GUIDE.md`
 - generating plugins or service adapters: `docs/PLUGIN_SERVICE_GUIDE.md`
 - generating frontend starter folders: `docs/FRONTEND_STARTERS.md`
+- using Dataverse through the Web API: `docs/DATAVERSE.md`
 
-## 8. Contributor Notes
+## 8. Optional Dataverse Path
+
+If your app needs Dataverse rather than the SQL migration/schema-codegen path,
+use `docs/DATAVERSE.md`. The Dataverse surface is compiled in but
+runtime-inactive by default, so apps that do not configure it do not pick up
+extra startup work.
+
+## 9. Contributor Notes
 
 If you are working on Arlen itself rather than just building an app with it:
 

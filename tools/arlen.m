@@ -3,6 +3,9 @@
 #import <stdlib.h>
 
 #import "ALNConfig.h"
+#import "ALNDataverseClient.h"
+#import "ALNDataverseCodegen.h"
+#import "ALNDataverseMetadata.h"
 #import "ALNGDL2Adapter.h"
 #import "ALNDatabaseInspector.h"
 #import "ALNJSONSerialization.h"
@@ -25,6 +28,7 @@ static void PrintUsage(void) {
           "  migrate [--env <name>] [--database <target>] [--dsn <connection_string>] [--dry-run]\n"
           "  module <add|remove|list|doctor|migrate|assets|upgrade|eject> [options]\n"
           "  schema-codegen [--env <name>] [--database <target>] [--dsn <connection_string>] [--output-dir <path>] [--manifest <path>] [--prefix <ClassPrefix>] [--typed-contracts] [--force]\n"
+          "  dataverse-codegen [--input <metadata.json>] [--env <name>] [--target <name>] [--service-root <url>] [--tenant-id <id>] [--client-id <id>] [--client-secret <secret>] [--entity <logical_name>] [--output-dir <path>] [--manifest <path>] [--prefix <ClassPrefix>] [--force]\n"
           "  typed-sql-codegen [--input-dir <path>] [--output-dir <path>] [--manifest <path>] [--prefix <ClassPrefix>] [--force]\n"
           "  routes\n"
           "  test [--unit|--integration|--all]\n"
@@ -2974,6 +2978,117 @@ static NSString *DatabaseTargetPascalSuffix(NSString *databaseTarget) {
   return [NSString stringWithString:suffix];
 }
 
+static NSString *NormalizeDataverseTarget(NSString *rawValue) {
+  return NormalizeDatabaseTarget(rawValue);
+}
+
+static BOOL DataverseTargetIsValid(NSString *target) {
+  return DatabaseTargetIsValid(target);
+}
+
+static NSString *DataverseEnvironmentValueForTarget(NSString *baseName, NSString *dataverseTarget) {
+  NSString *target = NormalizeDataverseTarget(dataverseTarget);
+  if (![target isEqualToString:@"default"]) {
+    NSString *targetedName = [NSString stringWithFormat:@"%@_%@", baseName ?: @"", [target uppercaseString]];
+    NSString *targeted = EnvValue([targetedName UTF8String]);
+    if ([targeted length] > 0) {
+      return targeted;
+    }
+  }
+  return EnvValue([baseName UTF8String]);
+}
+
+static NSDictionary *DataverseMergedConfigForTarget(NSDictionary *config, NSString *dataverseTarget) {
+  NSDictionary *resolved = [ALNDataverseTarget configurationNamed:dataverseTarget fromConfig:config];
+  return [resolved isKindOfClass:[NSDictionary class]] ? resolved : @{};
+}
+
+static ALNDataverseTarget *DataverseTargetForCommand(NSDictionary *config,
+                                                     NSString *dataverseTarget,
+                                                     NSDictionary *overrides,
+                                                     NSError **error) {
+  NSMutableDictionary *merged =
+      [NSMutableDictionary dictionaryWithDictionary:DataverseMergedConfigForTarget(config, dataverseTarget) ?: @{}];
+  NSDictionary *overrideValues = [overrides isKindOfClass:[NSDictionary class]] ? overrides : @{};
+  for (NSString *key in overrideValues) {
+    id value = overrideValues[key];
+    if ([value isKindOfClass:[NSString class]] && [Trimmed(value) length] == 0) {
+      continue;
+    }
+    if (value != nil && value != [NSNull null]) {
+      merged[key] = value;
+    }
+  }
+
+  NSString *serviceRoot = DataverseEnvironmentValueForTarget(@"ARLEN_DATAVERSE_URL", dataverseTarget);
+  if ([serviceRoot length] == 0) {
+    serviceRoot = DataverseEnvironmentValueForTarget(@"ARLEN_DATAVERSE_SERVICE_ROOT", dataverseTarget);
+  }
+  NSString *tenantID = DataverseEnvironmentValueForTarget(@"ARLEN_DATAVERSE_TENANT_ID", dataverseTarget);
+  NSString *clientID = DataverseEnvironmentValueForTarget(@"ARLEN_DATAVERSE_CLIENT_ID", dataverseTarget);
+  NSString *clientSecret = DataverseEnvironmentValueForTarget(@"ARLEN_DATAVERSE_CLIENT_SECRET", dataverseTarget);
+  NSString *pageSize = DataverseEnvironmentValueForTarget(@"ARLEN_DATAVERSE_PAGE_SIZE", dataverseTarget);
+  NSString *maxRetries = DataverseEnvironmentValueForTarget(@"ARLEN_DATAVERSE_MAX_RETRIES", dataverseTarget);
+  NSString *timeout = DataverseEnvironmentValueForTarget(@"ARLEN_DATAVERSE_TIMEOUT", dataverseTarget);
+
+  if ([serviceRoot length] > 0) {
+    merged[@"serviceRootURL"] = serviceRoot;
+  }
+  if ([tenantID length] > 0) {
+    merged[@"tenantID"] = tenantID;
+  }
+  if ([clientID length] > 0) {
+    merged[@"clientID"] = clientID;
+  }
+  if ([clientSecret length] > 0) {
+    merged[@"clientSecret"] = clientSecret;
+  }
+  if ([pageSize length] > 0) {
+    merged[@"pageSize"] = @([pageSize integerValue]);
+  }
+  if ([maxRetries length] > 0) {
+    merged[@"maxRetries"] = @([maxRetries integerValue]);
+  }
+  if ([timeout length] > 0) {
+    merged[@"timeout"] = @([timeout doubleValue]);
+  }
+
+  NSString *target = NormalizeDataverseTarget(dataverseTarget);
+  NSString *resolvedServiceRoot =
+      [merged[@"serviceRootURL"] isKindOfClass:[NSString class]] ? merged[@"serviceRootURL"]
+      : ([merged[@"serviceRoot"] isKindOfClass:[NSString class]] ? merged[@"serviceRoot"]
+         : ([merged[@"baseURL"] isKindOfClass:[NSString class]] ? merged[@"baseURL"]
+            : ([merged[@"url"] isKindOfClass:[NSString class]] ? merged[@"url"] : nil)));
+  NSString *resolvedTenantID =
+      [merged[@"tenantID"] isKindOfClass:[NSString class]] ? merged[@"tenantID"]
+      : ([merged[@"tenantId"] isKindOfClass:[NSString class]] ? merged[@"tenantId"] : nil);
+  NSString *resolvedClientID =
+      [merged[@"clientID"] isKindOfClass:[NSString class]] ? merged[@"clientID"]
+      : ([merged[@"clientId"] isKindOfClass:[NSString class]] ? merged[@"clientId"] : nil);
+  NSString *resolvedClientSecret =
+      [merged[@"clientSecret"] isKindOfClass:[NSString class]] ? merged[@"clientSecret"] : nil;
+  NSTimeInterval resolvedTimeout =
+      [merged[@"timeout"] respondsToSelector:@selector(doubleValue)] ? [merged[@"timeout"] doubleValue] : 60.0;
+  NSUInteger resolvedMaxRetries =
+      [merged[@"maxRetries"] respondsToSelector:@selector(unsignedIntegerValue)] ? [merged[@"maxRetries"] unsignedIntegerValue] : 2;
+  NSUInteger resolvedPageSize =
+      [merged[@"pageSize"] respondsToSelector:@selector(unsignedIntegerValue)] ? [merged[@"pageSize"] unsignedIntegerValue] : 500;
+
+  return [[ALNDataverseTarget alloc] initWithServiceRootURLString:resolvedServiceRoot
+                                                         tenantID:resolvedTenantID
+                                                         clientID:resolvedClientID
+                                                     clientSecret:resolvedClientSecret
+                                                        targetName:target
+                                                   timeoutInterval:resolvedTimeout
+                                                        maxRetries:resolvedMaxRetries
+                                                          pageSize:resolvedPageSize
+                                                             error:error];
+}
+
+static NSString *DataverseTargetPascalSuffix(NSString *dataverseTarget) {
+  return DatabaseTargetPascalSuffix(dataverseTarget);
+}
+
 static NSString *ResolvePathFromRoot(NSString *root, NSString *rawPath) {
   NSString *candidate = Trimmed(rawPath);
   if ([candidate length] == 0) {
@@ -3887,6 +4002,237 @@ static int CommandSchemaCodegen(NSArray *args) {
   fprintf(stdout, "  typed contracts: %s\n", includeTypedContracts ? "enabled" : "disabled");
   fprintf(stdout, "  tables: %ld\n", (long)tableCount);
   fprintf(stdout, "  columns: %ld\n", (long)columnCount);
+  fprintf(stdout, "  header: %s\n", [headerPath UTF8String]);
+  fprintf(stdout, "  implementation: %s\n", [implementationPath UTF8String]);
+  fprintf(stdout, "  manifest: %s\n", [manifestPath UTF8String]);
+  return 0;
+}
+
+static int CommandDataverseCodegen(NSArray *args) {
+  NSString *environment = @"development";
+  NSString *dataverseTarget = @"default";
+  NSString *inputArg = nil;
+  NSString *serviceRootOverride = nil;
+  NSString *tenantIDOverride = nil;
+  NSString *clientIDOverride = nil;
+  NSString *clientSecretOverride = nil;
+  NSString *outputDirArg = @"src/Generated";
+  NSString *manifestArg = @"db/schema/dataverse.json";
+  NSString *classPrefix = @"ALNDV";
+  BOOL outputDirExplicit = NO;
+  BOOL manifestExplicit = NO;
+  BOOL classPrefixExplicit = NO;
+  BOOL force = NO;
+  NSMutableArray<NSString *> *logicalNames = [NSMutableArray array];
+
+  for (NSUInteger idx = 0; idx < [args count]; idx++) {
+    NSString *arg = args[idx];
+    if ([arg isEqualToString:@"--env"]) {
+      if (idx + 1 >= [args count]) {
+        fprintf(stderr, "arlen dataverse-codegen: --env requires a value\n");
+        return 2;
+      }
+      environment = args[++idx];
+    } else if ([arg isEqualToString:@"--target"]) {
+      if (idx + 1 >= [args count]) {
+        fprintf(stderr, "arlen dataverse-codegen: --target requires a value\n");
+        return 2;
+      }
+      dataverseTarget = NormalizeDataverseTarget(args[++idx]);
+      if (!DataverseTargetIsValid(dataverseTarget)) {
+        fprintf(stderr,
+                "arlen dataverse-codegen: --target must match [a-z][a-z0-9_]* and be <= 32 characters\n");
+        return 2;
+      }
+    } else if ([arg isEqualToString:@"--input"]) {
+      if (idx + 1 >= [args count]) {
+        fprintf(stderr, "arlen dataverse-codegen: --input requires a value\n");
+        return 2;
+      }
+      inputArg = args[++idx];
+    } else if ([arg isEqualToString:@"--service-root"]) {
+      if (idx + 1 >= [args count]) {
+        fprintf(stderr, "arlen dataverse-codegen: --service-root requires a value\n");
+        return 2;
+      }
+      serviceRootOverride = args[++idx];
+    } else if ([arg isEqualToString:@"--tenant-id"]) {
+      if (idx + 1 >= [args count]) {
+        fprintf(stderr, "arlen dataverse-codegen: --tenant-id requires a value\n");
+        return 2;
+      }
+      tenantIDOverride = args[++idx];
+    } else if ([arg isEqualToString:@"--client-id"]) {
+      if (idx + 1 >= [args count]) {
+        fprintf(stderr, "arlen dataverse-codegen: --client-id requires a value\n");
+        return 2;
+      }
+      clientIDOverride = args[++idx];
+    } else if ([arg isEqualToString:@"--client-secret"]) {
+      if (idx + 1 >= [args count]) {
+        fprintf(stderr, "arlen dataverse-codegen: --client-secret requires a value\n");
+        return 2;
+      }
+      clientSecretOverride = args[++idx];
+    } else if ([arg isEqualToString:@"--entity"]) {
+      if (idx + 1 >= [args count]) {
+        fprintf(stderr, "arlen dataverse-codegen: --entity requires a value\n");
+        return 2;
+      }
+      [logicalNames addObject:[Trimmed([args[++idx] lowercaseString]) copy]];
+    } else if ([arg isEqualToString:@"--output-dir"]) {
+      if (idx + 1 >= [args count]) {
+        fprintf(stderr, "arlen dataverse-codegen: --output-dir requires a value\n");
+        return 2;
+      }
+      outputDirArg = args[++idx];
+      outputDirExplicit = YES;
+    } else if ([arg isEqualToString:@"--manifest"]) {
+      if (idx + 1 >= [args count]) {
+        fprintf(stderr, "arlen dataverse-codegen: --manifest requires a value\n");
+        return 2;
+      }
+      manifestArg = args[++idx];
+      manifestExplicit = YES;
+    } else if ([arg isEqualToString:@"--prefix"]) {
+      if (idx + 1 >= [args count]) {
+        fprintf(stderr, "arlen dataverse-codegen: --prefix requires a value\n");
+        return 2;
+      }
+      classPrefix = args[++idx];
+      classPrefixExplicit = YES;
+    } else if ([arg isEqualToString:@"--force"]) {
+      force = YES;
+    } else if ([arg isEqualToString:@"--help"] || [arg isEqualToString:@"-h"]) {
+      fprintf(stdout,
+              "Usage: arlen dataverse-codegen [--input <metadata.json>] [--env <name>] [--target <name>] "
+              "[--service-root <url>] [--tenant-id <id>] [--client-id <id>] [--client-secret <secret>] "
+              "[--entity <logical_name>] [--output-dir <path>] [--manifest <path>] [--prefix <ClassPrefix>] "
+              "[--force]\n");
+      return 0;
+    } else {
+      fprintf(stderr, "arlen dataverse-codegen: unknown option %s\n", [arg UTF8String]);
+      return 2;
+    }
+  }
+
+  if (![dataverseTarget isEqualToString:@"default"]) {
+    if (!outputDirExplicit) {
+      outputDirArg = [NSString stringWithFormat:@"src/Generated/%@", dataverseTarget];
+    }
+    if (!manifestExplicit) {
+      manifestArg = [NSString stringWithFormat:@"db/schema/dataverse_%@.json", dataverseTarget];
+    }
+    if (!classPrefixExplicit) {
+      classPrefix = [NSString stringWithFormat:@"ALNDV%@", DataverseTargetPascalSuffix(dataverseTarget)];
+    }
+  }
+
+  NSString *appRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *outputDir = ResolvePathFromRoot(appRoot, outputDirArg);
+  NSString *manifestPath = ResolvePathFromRoot(appRoot, manifestArg);
+  NSError *error = nil;
+  NSDictionary<NSString *, id> *normalizedMetadata = nil;
+
+  if ([Trimmed(inputArg) length] > 0) {
+    NSString *inputPath = ResolvePathFromRoot(appRoot, inputArg);
+    NSData *data = [NSData dataWithContentsOfFile:inputPath options:0 error:&error];
+    if (data == nil) {
+      fprintf(stderr, "arlen dataverse-codegen: failed reading %s: %s\n",
+              [inputPath UTF8String], [[error localizedDescription] UTF8String]);
+      return 1;
+    }
+    id payload = [ALNJSONSerialization JSONObjectWithData:data options:0 error:&error];
+    if (payload == nil) {
+      fprintf(stderr, "arlen dataverse-codegen: invalid metadata JSON: %s\n",
+              [[error localizedDescription] UTF8String]);
+      return 1;
+    }
+    normalizedMetadata = [ALNDataverseMetadata normalizedMetadataFromPayload:payload error:&error];
+    if (normalizedMetadata == nil) {
+      fprintf(stderr, "arlen dataverse-codegen: %s\n", [[error localizedDescription] UTF8String]);
+      return 1;
+    }
+  } else {
+    NSDictionary *config = [ALNConfig loadConfigAtRoot:appRoot environment:environment error:&error];
+    if (config == nil) {
+      fprintf(stderr, "arlen dataverse-codegen: failed to load config: %s\n",
+              [[error localizedDescription] UTF8String]);
+      return 1;
+    }
+
+    NSDictionary *overrides = @{
+      @"serviceRootURL" : serviceRootOverride ?: @"",
+      @"tenantID" : tenantIDOverride ?: @"",
+      @"clientID" : clientIDOverride ?: @"",
+      @"clientSecret" : clientSecretOverride ?: @"",
+    };
+    ALNDataverseTarget *target = DataverseTargetForCommand(config, dataverseTarget, overrides, &error);
+    if (target == nil) {
+      fprintf(stderr,
+              "arlen dataverse-codegen: Dataverse credentials are missing (set --service-root/--tenant-id/--client-id/--client-secret or config.dataverse/config.dataverseTargets or ARLEN_DATAVERSE_* env vars): %s\n",
+              [[error localizedDescription] UTF8String]);
+      return 1;
+    }
+
+    ALNDataverseClient *client = [[ALNDataverseClient alloc] initWithTarget:target error:&error];
+    if (client == nil) {
+      fprintf(stderr, "arlen dataverse-codegen: failed to initialize Dataverse client: %s\n",
+              [[error localizedDescription] UTF8String]);
+      return 1;
+    }
+
+    normalizedMetadata = [ALNDataverseMetadata fetchNormalizedMetadataWithClient:client
+                                                                    logicalNames:logicalNames
+                                                                           error:&error];
+    if (normalizedMetadata == nil) {
+      fprintf(stderr, "arlen dataverse-codegen: failed metadata fetch: %s\n",
+              [[error localizedDescription] UTF8String]);
+      return 1;
+    }
+  }
+
+  NSDictionary<NSString *, id> *artifacts =
+      [ALNDataverseCodegen renderArtifactsFromMetadata:normalizedMetadata
+                                           classPrefix:classPrefix
+                                       dataverseTarget:dataverseTarget
+                                                 error:&error];
+  if (artifacts == nil) {
+    fprintf(stderr, "arlen dataverse-codegen: %s\n", [[error localizedDescription] UTF8String]);
+    return 1;
+  }
+
+  NSString *baseName = [artifacts[@"baseName"] isKindOfClass:[NSString class]] ? artifacts[@"baseName"] : @"ALNDVDataverseSchema";
+  NSString *headerPath = [outputDir stringByAppendingPathComponent:[NSString stringWithFormat:@"%@.h", baseName]];
+  NSString *implementationPath =
+      [outputDir stringByAppendingPathComponent:[NSString stringWithFormat:@"%@.m", baseName]];
+
+  if (!WriteTextFile(headerPath, artifacts[@"header"] ?: @"", force, &error)) {
+    fprintf(stderr, "arlen dataverse-codegen: failed writing %s: %s\n",
+            [headerPath UTF8String], [[error localizedDescription] UTF8String]);
+    return 1;
+  }
+  if (!WriteTextFile(implementationPath, artifacts[@"implementation"] ?: @"", force, &error)) {
+    fprintf(stderr, "arlen dataverse-codegen: failed writing %s: %s\n",
+            [implementationPath UTF8String], [[error localizedDescription] UTF8String]);
+    return 1;
+  }
+  if (!WriteTextFile(manifestPath, artifacts[@"manifest"] ?: @"", force, &error)) {
+    fprintf(stderr, "arlen dataverse-codegen: failed writing %s: %s\n",
+            [manifestPath UTF8String], [[error localizedDescription] UTF8String]);
+    return 1;
+  }
+
+  NSInteger entityCount = [artifacts[@"entityCount"] respondsToSelector:@selector(integerValue)]
+                              ? [artifacts[@"entityCount"] integerValue]
+                              : 0;
+  NSInteger attributeCount = [artifacts[@"attributeCount"] respondsToSelector:@selector(integerValue)]
+                                 ? [artifacts[@"attributeCount"] integerValue]
+                                 : 0;
+  fprintf(stdout, "Generated Dataverse artifacts.\n");
+  fprintf(stdout, "  dataverse target: %s\n", [dataverseTarget UTF8String]);
+  fprintf(stdout, "  entities: %ld\n", (long)entityCount);
+  fprintf(stdout, "  attributes: %ld\n", (long)attributeCount);
   fprintf(stdout, "  header: %s\n", [headerPath UTF8String]);
   fprintf(stdout, "  implementation: %s\n", [implementationPath UTF8String]);
   fprintf(stdout, "  manifest: %s\n", [manifestPath UTF8String]);
@@ -4983,6 +5329,9 @@ int main(int argc, const char *argv[]) {
     }
     if ([command isEqualToString:@"schema-codegen"]) {
       return CommandSchemaCodegen(args);
+    }
+    if ([command isEqualToString:@"dataverse-codegen"]) {
+      return CommandDataverseCodegen(args);
     }
     if ([command isEqualToString:@"typed-sql-codegen"]) {
       return CommandTypedSQLCodegen(args);

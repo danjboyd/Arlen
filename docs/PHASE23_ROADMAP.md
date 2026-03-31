@@ -1,10 +1,11 @@
 # Arlen Phase 23 Roadmap
 
-Status: planned
+Status: in progress
 Last updated: 2026-03-31
 
 Related docs:
 - `docs/STATUS.md`
+- `docs/DATAVERSE.md`
 - `docs/ARLEN_DATA.md`
 - `docs/GETTING_STARTED_DATA_LAYER.md`
 - `docs/CONFIGURATION_REFERENCE.md`
@@ -19,6 +20,23 @@ Reference inputs reviewed for this roadmap:
 - `../PerlDatabaseObjectModel/OData/Abstract.pm`
 - `https://learn.microsoft.com/en-us/power-apps/developer/data-platform/webapi/overview`
 - `https://learn.microsoft.com/en-us/power-apps/developer/data-platform/work-with-data`
+
+## 0. Progress Checkpoint (2026-03-31)
+
+Delivered in-tree:
+
+- `23A`: core Dataverse client/auth/transport plus runtime-inactive defaults
+- `23B`: OData query builder and read-path normalization
+- `23C`: CRUD/upsert helpers, lookup bindings, choice values, actions/functions,
+  and batch execution
+- `23D`: metadata normalization, deterministic typed codegen, and
+  `arlen dataverse-codegen`
+
+Still open for full phase closeout:
+
+- `23E`: higher-level runtime ergonomics and example integration path
+- `23F`: deeper retry/diagnostic/live confidence coverage
+- `23G`: broader docs/reference closeout
 
 ## 1. Objective
 
@@ -119,7 +137,7 @@ query composition, write semantics, codegen, and public docs/examples.
 
 ## 4. Milestones
 
-## 4.1 Phase 23A: Core Client + Auth + Runtime-Inactive Defaults
+## 4.1 Phase 23A: Core Client + Auth + Runtime-Inactive Defaults (Delivered 2026-03-31)
 
 Deliverables:
 
@@ -148,7 +166,7 @@ Acceptance (required):
 - The public integration shape does not require a module install or compile-time
   enablement switch.
 
-## 4.2 Phase 23B: OData Query Builder + Read Path
+## 4.2 Phase 23B: OData Query Builder + Read Path (Delivered 2026-03-31)
 
 Deliverables:
 
@@ -178,7 +196,7 @@ Acceptance (required):
 - Unsupported or ambiguous query constructs fail closed with explicit
   diagnostics.
 
-## 4.3 Phase 23C: Write Semantics + Dataverse-Specific Mutations
+## 4.3 Phase 23C: Write Semantics + Dataverse-Specific Mutations (Delivered 2026-03-31)
 
 Deliverables:
 
@@ -203,7 +221,7 @@ Acceptance (required):
 - Batch and custom-operation surfaces exist without pretending they are SQL
   transactions.
 
-## 4.4 Phase 23D: Metadata Inspection + Typed Code Generation
+## 4.4 Phase 23D: Metadata Inspection + Typed Code Generation (Delivered 2026-03-31)
 
 Deliverables:
 

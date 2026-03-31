@@ -238,6 +238,50 @@ Generated artifacts:
 - `<output-dir>/<prefix>Schema.m`
 - `<manifest>`
 
+### `arlen dataverse-codegen [--input <metadata.json>] [--env <name>] [--target <name>] [--service-root <url>] [--tenant-id <id>] [--client-id <id>] [--client-secret <secret>] [--entity <logical_name>] [--output-dir <path>] [--manifest <path>] [--prefix <ClassPrefix>] [--force]`
+
+Fetch Dataverse metadata or normalize a saved metadata fixture and generate typed Dataverse helper APIs.
+
+- runtime-inactive by default; Dataverse is compiled in but unused unless the command or app explicitly configures it
+- `--input <metadata.json>`: normalize a saved/raw metadata payload instead of making live Dataverse requests
+- live mode loads app config for `--env <name>` (default: `development`)
+- config lookup order for live mode:
+  - `config.dataverse`
+  - `config.dataverseTargets.<target>`
+  - `config.dataverse.targets.<target>`
+- environment overrides for live mode:
+  - `ARLEN_DATAVERSE_URL`
+  - `ARLEN_DATAVERSE_SERVICE_ROOT`
+  - `ARLEN_DATAVERSE_TENANT_ID`
+  - `ARLEN_DATAVERSE_CLIENT_ID`
+  - `ARLEN_DATAVERSE_CLIENT_SECRET`
+  - `ARLEN_DATAVERSE_PAGE_SIZE`
+  - `ARLEN_DATAVERSE_MAX_RETRIES`
+  - `ARLEN_DATAVERSE_TIMEOUT`
+- target-specific environment overrides append `_<TARGET>` (for example `ARLEN_DATAVERSE_URL_SALES`)
+- `--target <name>`: select a named Dataverse target (default: `default`)
+- `--service-root`, `--tenant-id`, `--client-id`, `--client-secret`: explicit live credential overrides
+- `--entity <logical_name>`: repeat to limit live metadata fetch/codegen to specific logical table names
+- `--output-dir <path>`: generated Objective-C output directory (default: `src/Generated`)
+- `--manifest <path>`: normalized metadata manifest output (default: `db/schema/dataverse.json`)
+- `--prefix <ClassPrefix>`: generated class prefix (default: `ALNDV`)
+- non-default target defaults when those flags are omitted:
+  - output dir: `src/Generated/<target>`
+  - manifest: `db/schema/dataverse_<target>.json`
+  - class prefix: `ALNDV<PascalTarget>`
+- `--force`: overwrite existing generated files
+
+Generated artifacts:
+
+- `<output-dir>/<prefix>DataverseSchema.h`
+- `<output-dir>/<prefix>DataverseSchema.m`
+- `<manifest>`
+
+Notes:
+
+- This is a Dataverse Web API/OData workflow, not Microsoft Graph and not the SQL migration/schema-codegen path.
+- Generated helpers expose logical names, entity-set names, alternate keys, lookup navigation fields, and choice enums from normalized metadata.
+
 ### `arlen typed-sql-codegen [--input-dir <path>] [--output-dir <path>] [--manifest <path>] [--prefix <ClassPrefix>] [--force]`
 
 Compile SQL files with metadata comments into typed parameter/result helpers.

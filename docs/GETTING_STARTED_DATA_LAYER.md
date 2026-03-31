@@ -1,7 +1,9 @@
 # Getting Started: Data-Layer Track
 
 This track focuses on SQL builder, PostgreSQL default usage, optional MSSQL
-usage, and migration/codegen workflows.
+usage, and migration/codegen workflows. If you need Dataverse, use
+`docs/DATAVERSE.md`; Dataverse ships as a separate Web API/OData surface rather
+than another SQL adapter.
 
 ## 1. Build and Verify Data Path
 
@@ -149,9 +151,10 @@ Use `src/ArlenData/ArlenData.h` when consuming the data layer in non-Arlen runti
 
 1. Read [SQL Builder Conformance Matrix](SQL_BUILDER_CONFORMANCE_MATRIX.md).
 2. Read [ArlenData Reuse Guide](ARLEN_DATA.md).
-3. Read [Phase 20 Roadmap](PHASE20_ROADMAP.md) for the current typed-codec, nested-dialect, and result-helper depth pass.
-4. Read [Phase 17 Roadmap](PHASE17_ROADMAP.md) for the backend-neutral seam and optional MSSQL path.
-5. Read [API Reference](API_REFERENCE.md) pages for `ALNSQLBuilder`, `ALNPg`, `ALNMSSQL`, and `ALNMigrationRunner`.
+3. Read [Dataverse Integration](DATAVERSE.md) if the app needs Microsoft Dataverse instead of the SQL adapter path.
+4. Read [Phase 20 Roadmap](PHASE20_ROADMAP.md) for the current typed-codec, nested-dialect, and result-helper depth pass.
+5. Read [Phase 17 Roadmap](PHASE17_ROADMAP.md) for the backend-neutral seam and optional MSSQL path.
+6. Read [API Reference](API_REFERENCE.md) pages for `ALNSQLBuilder`, `ALNPg`, `ALNMSSQL`, and `ALNMigrationRunner`.
 
 Schema codegen note:
 

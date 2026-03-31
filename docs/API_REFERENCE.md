@@ -9,10 +9,10 @@ python3 tools/docs/generate_api_reference.py
 ```
 
 - Generated from source headers and metadata (deterministic output)
-- Public headers: `53`
-- Symbols: `91`
-- Public methods: `621`
-- Public properties: `199`
+- Public headers: `57`
+- Symbols: `108`
+- Public methods: `692`
+- Public properties: `251`
 
 ## API Surface Boundary
 
@@ -81,6 +81,23 @@ python3 tools/docs/generate_api_reference.py
 - [ALNDatabaseResult](api/ALNDatabaseResult.md): Data-layer APIs for SQL composition, adapters, and migration/runtime operations.
 - [ALNDatabaseRouter](api/ALNDatabaseRouter.md): Read/write routing layer that selects database targets by operation class and routing context.
 - [ALNDatabaseRow](api/ALNDatabaseRow.md): Data-layer APIs for SQL composition, adapters, and migration/runtime operations.
+- [ALNDataverseBatchRequest](api/ALNDataverseBatchRequest.md): Data-layer APIs for SQL composition, adapters, and migration/runtime operations.
+- [ALNDataverseBatchResponse](api/ALNDataverseBatchResponse.md): Data-layer APIs for SQL composition, adapters, and migration/runtime operations.
+- [ALNDataverseChoiceValue](api/ALNDataverseChoiceValue.md): Data-layer APIs for SQL composition, adapters, and migration/runtime operations.
+- [ALNDataverseClient](api/ALNDataverseClient.md): Data-layer APIs for SQL composition, adapters, and migration/runtime operations.
+- [ALNDataverseClientCredentialsTokenProvider](api/ALNDataverseClientCredentialsTokenProvider.md): Data-layer APIs for SQL composition, adapters, and migration/runtime operations.
+- [ALNDataverseCodegen](api/ALNDataverseCodegen.md): Data-layer APIs for SQL composition, adapters, and migration/runtime operations.
+- [ALNDataverseCurlTransport](api/ALNDataverseCurlTransport.md): Data-layer APIs for SQL composition, adapters, and migration/runtime operations.
+- [ALNDataverseEntityPage](api/ALNDataverseEntityPage.md): Data-layer APIs for SQL composition, adapters, and migration/runtime operations.
+- [ALNDataverseLookupBinding](api/ALNDataverseLookupBinding.md): Data-layer APIs for SQL composition, adapters, and migration/runtime operations.
+- [ALNDataverseMetadata](api/ALNDataverseMetadata.md): Data-layer APIs for SQL composition, adapters, and migration/runtime operations.
+- [ALNDataverseQuery](api/ALNDataverseQuery.md): Data-layer APIs for SQL composition, adapters, and migration/runtime operations.
+- [ALNDataverseRecord](api/ALNDataverseRecord.md): Data-layer APIs for SQL composition, adapters, and migration/runtime operations.
+- [ALNDataverseRequest](api/ALNDataverseRequest.md): Data-layer APIs for SQL composition, adapters, and migration/runtime operations.
+- [ALNDataverseResponse](api/ALNDataverseResponse.md): Data-layer APIs for SQL composition, adapters, and migration/runtime operations.
+- [ALNDataverseTarget](api/ALNDataverseTarget.md): Data-layer APIs for SQL composition, adapters, and migration/runtime operations.
+- [ALNDataverseTokenProvider](api/ALNDataverseTokenProvider.md): Protocol contract exported as part of the `ALNDataverseTokenProvider` API surface.
+- [ALNDataverseTransport](api/ALNDataverseTransport.md): Protocol contract exported as part of the `ALNDataverseTransport` API surface.
 - [ALNDisplayGroup](api/ALNDisplayGroup.md): DisplayGroup-style query helper that builds list fetches from filter and sort descriptors.
 - [ALNGDL2Adapter](api/ALNGDL2Adapter.md): Optional GDL2 compatibility adapter with fallback behavior when native GDL2 runtime is unavailable.
 - [ALNMSSQL](api/ALNMSSQL.md): Data-layer APIs for SQL composition, adapters, and migration/runtime operations.
@@ -152,6 +169,10 @@ python3 tools/docs/generate_api_reference.py
 - `src/Arlen/Data/ALNDatabaseAdapter.h`
 - `src/Arlen/Data/ALNDatabaseInspector.h`
 - `src/Arlen/Data/ALNDatabaseRouter.h`
+- `src/Arlen/Data/ALNDataverseClient.h`
+- `src/Arlen/Data/ALNDataverseCodegen.h`
+- `src/Arlen/Data/ALNDataverseMetadata.h`
+- `src/Arlen/Data/ALNDataverseQuery.h`
 - `src/Arlen/Data/ALNDisplayGroup.h`
 - `src/Arlen/Data/ALNGDL2Adapter.h`
 - `src/Arlen/Data/ALNMSSQL.h`

@@ -1,0 +1,215 @@
+{
+  "value": [
+    {
+      "LogicalName": "account",
+      "SchemaName": "Account",
+      "EntitySetName": "accounts",
+      "PrimaryIdAttribute": "accountid",
+      "PrimaryNameAttribute": "name",
+      "DisplayName": {
+        "UserLocalizedLabel": {
+          "Label": "Account"
+        }
+      },
+      "Attributes": [
+        {
+          "LogicalName": "accountid",
+          "SchemaName": "AccountId",
+          "AttributeType": "Uniqueidentifier",
+          "AttributeTypeName": {
+            "Value": "UniqueidentifierType"
+          },
+          "DisplayName": {
+            "UserLocalizedLabel": {
+              "Label": "Account"
+            }
+          },
+          "IsPrimaryId": true,
+          "IsValidForRead": true,
+          "IsValidForCreate": false,
+          "IsValidForUpdate": false,
+          "RequiredLevel": {
+            "Value": "SystemRequired"
+          },
+          "Targets": []
+        },
+        {
+          "LogicalName": "accountnumber",
+          "SchemaName": "AccountNumber",
+          "AttributeType": "String",
+          "AttributeTypeName": {
+            "Value": "StringType"
+          },
+          "DisplayName": {
+            "UserLocalizedLabel": {
+              "Label": "Account Number"
+            }
+          },
+          "IsValidForRead": true,
+          "IsValidForCreate": true,
+          "IsValidForUpdate": true,
+          "RequiredLevel": {
+            "Value": "None"
+          },
+          "Targets": []
+        },
+        {
+          "LogicalName": "name",
+          "SchemaName": "Name",
+          "AttributeType": "String",
+          "AttributeTypeName": {
+            "Value": "StringType"
+          },
+          "DisplayName": {
+            "UserLocalizedLabel": {
+              "Label": "Name"
+            }
+          },
+          "IsValidForRead": true,
+          "IsValidForCreate": true,
+          "IsValidForUpdate": true,
+          "RequiredLevel": {
+            "Value": "ApplicationRequired"
+          },
+          "Targets": []
+        },
+        {
+          "LogicalName": "primarycontactid",
+          "SchemaName": "PrimaryContactId",
+          "AttributeType": "Lookup",
+          "AttributeTypeName": {
+            "Value": "LookupType"
+          },
+          "DisplayName": {
+            "UserLocalizedLabel": {
+              "Label": "Primary Contact"
+            }
+          },
+          "IsValidForRead": true,
+          "IsValidForCreate": true,
+          "IsValidForUpdate": true,
+          "RequiredLevel": {
+            "Value": "None"
+          },
+          "Targets": [
+            "contact"
+          ]
+        },
+        {
+          "LogicalName": "statuscode",
+          "SchemaName": "StatusCode",
+          "AttributeType": "Picklist",
+          "AttributeTypeName": {
+            "Value": "PicklistType"
+          },
+          "DisplayName": {
+            "UserLocalizedLabel": {
+              "Label": "Status"
+            }
+          },
+          "IsValidForRead": true,
+          "IsValidForCreate": true,
+          "IsValidForUpdate": true,
+          "RequiredLevel": {
+            "Value": "None"
+          },
+          "Targets": [],
+          "OptionSet": {
+            "Options": [
+              {
+                "Value": 1,
+                "Label": {
+                  "UserLocalizedLabel": {
+                    "Label": "Active"
+                  }
+                }
+              },
+              {
+                "Value": 2,
+                "Label": {
+                  "UserLocalizedLabel": {
+                    "Label": "Inactive"
+                  }
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "Keys": [
+        {
+          "LogicalName": "ak_accountnumber",
+          "KeyAttributes": [
+            "accountnumber"
+          ]
+        }
+      ],
+      "ManyToOneRelationships": [
+        {
+          "SchemaName": "contact_customer_accounts",
+          "ReferencingAttribute": "primarycontactid",
+          "ReferencedEntity": "contact",
+          "ReferencedAttribute": "contactid",
+          "NavigationPropertyName": "primarycontactid"
+        }
+      ]
+    },
+    {
+      "LogicalName": "contact",
+      "SchemaName": "Contact",
+      "EntitySetName": "contacts",
+      "PrimaryIdAttribute": "contactid",
+      "PrimaryNameAttribute": "fullname",
+      "DisplayName": {
+        "UserLocalizedLabel": {
+          "Label": "Contact"
+        }
+      },
+      "Attributes": [
+        {
+          "LogicalName": "contactid",
+          "SchemaName": "ContactId",
+          "AttributeType": "Uniqueidentifier",
+          "AttributeTypeName": {
+            "Value": "UniqueidentifierType"
+          },
+          "DisplayName": {
+            "UserLocalizedLabel": {
+              "Label": "Contact"
+            }
+          },
+          "IsPrimaryId": true,
+          "IsValidForRead": true,
+          "IsValidForCreate": false,
+          "IsValidForUpdate": false,
+          "RequiredLevel": {
+            "Value": "SystemRequired"
+          },
+          "Targets": []
+        },
+        {
+          "LogicalName": "fullname",
+          "SchemaName": "FullName",
+          "AttributeType": "String",
+          "AttributeTypeName": {
+            "Value": "StringType"
+          },
+          "DisplayName": {
+            "UserLocalizedLabel": {
+              "Label": "Full Name"
+            }
+          },
+          "IsValidForRead": true,
+          "IsValidForCreate": true,
+          "IsValidForUpdate": false,
+          "RequiredLevel": {
+            "Value": "ApplicationRequired"
+          },
+          "Targets": []
+        }
+      ],
+      "Keys": [],
+      "ManyToOneRelationships": []
+    }
+  ]
+}
