@@ -1,6 +1,6 @@
 # Arlen Phase 24 Roadmap
 
-Status: in progress on 2026-03-31 (`24A-24L` implementation landed on branch; `make phase24-windows-confidence` now completes on CLANG64, but stock Windows XCTest discovery still reports `No tests found`)
+Status: in progress on 2026-03-31 (`24A-24L` implementation landed on branch; `make phase24-windows-confidence` now completes on CLANG64; `24M` tracks the remaining Windows XCTest discovery and warning closeout)
 Last updated: 2026-03-31
 
 Related docs:
@@ -29,7 +29,7 @@ continue Phase 23 work independently.
 Phase 24 is split into two tracks:
 
 - `24A-24F`: first-pass Windows compatibility
-- `24G-24L`: full Windows parity
+- `24G-24M`: full Windows parity and closeout
 
 The implementation branch for this work is `windows/clang64`.
 
@@ -106,6 +106,7 @@ Full-parity success means:
 10. Phase 24J: filesystem/security semantics parity.
 11. Phase 24K: full verification, CI, and confidence-lane parity.
 12. Phase 24L: production/runtime-manager parity and Windows deployment story.
+13. Phase 24M: Windows XCTest discovery and native warning closeout.
 
 ## 3.3 Recommended Rollout Order
 
@@ -121,6 +122,7 @@ Full-parity success means:
 10. `24J`
 11. `24K`
 12. `24L`
+13. `24M`
 
 That order gets a real Windows development foothold first, then expands
 outward into runtime, security, verification, and deployment parity.
@@ -559,6 +561,46 @@ Acceptance (required):
 - `propane` support on Windows is either implemented with evidence or clearly
   marked out of scope for the supported Windows surface.
 
+## 5.13 Phase 24M: Windows XCTest Discovery + Native Warning Closeout
+
+Status: in progress
+
+Checkpoint notes:
+
+- `make phase24-windows-confidence` now completes on CLANG64 and exercises the
+  build, DB smoke, doctor, scaffold, and app-root `boomhauer`/`routes` smoke.
+- The remaining Windows verification gap is focused XCTest discovery:
+  stock CLANG64 `xctest` still reports `XCTest: No tests found.` for the
+  Phase 24 focused bundles.
+- The current Windows build also still emits a small set of portability
+  warnings around:
+  - pointer-sized storage in `src/Arlen/Core/ALNApplication.m`
+  - filesystem path/string conversions in `src/Arlen/Support/ALNServices.m`
+
+Deliverables:
+
+- Stabilize a Windows-focused XCTest path that:
+  - loads the focused bundles successfully
+  - discovers real tests
+  - returns reliable pass/fail exit status on CLANG64
+- Tighten the focused Windows lanes so they fail hard when discovery regresses
+  instead of accepting `No tests found`.
+- Resolve or deliberately document the remaining high-signal Windows compiler
+  warnings that still appear during the confidence lane.
+- Decide whether the long-term Windows test-runner contract should use:
+  - stock `xctest`
+  - a repo-local helper
+  - checked-in / adjacent `tools-xctest-msys` source integration
+
+Acceptance (required):
+
+- `make phase24-windows-tests` and `make phase24-windows-db-smoke` execute a
+  non-empty discovered test set on CLANG64 with reliable exit status.
+- `make phase24-windows-confidence` fails when focused test discovery or bundle
+  loading regresses.
+- The remaining Windows-native compile warnings are either fixed or explicitly
+  called out as intentional/documented exceptions.
+
 ## 6. Exit Criteria Summary
 
 Phase 24 first-pass closeout requires:
@@ -569,8 +611,9 @@ Phase 24 first-pass closeout requires:
 
 Phase 24 full-parity closeout requires:
 
-- `24G-24L` complete
+- `24G-24M` complete
 - verified Windows-native runtime and app-root workflows
+- verified Windows XCTest discovery for the focused CLANG64 bundles
 - explicit deployment/runtime-manager guidance for Windows
 - updated top-level docs/toolchain references to reflect the supported Windows
   contract

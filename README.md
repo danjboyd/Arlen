@@ -174,7 +174,7 @@ below is the detailed milestone ledger for the shipped surface summarized above.
 - Phase 20: complete (`20A-20K` delivered on 2026-03-26; `20L-20R` delivered on 2026-03-27 for MSSQL native transport tightening, ordered result semantics, bounded PostgreSQL metadata expansion, explicit live-test requirement accounting, shared test support/assertion layers, and repo-native focused confidence lanes. See `docs/PHASE20_ROADMAP.md`).
 - Phase 21: complete (`21A-21G` delivered on 2026-03-27 for in-process request harnesses, shared request/pipeline assertion helpers, explicit async DB ownership rules, template-suite decomposition, raw protocol corpus replay, generated-app matrix coverage, and repo-native focused confidence lanes. See `docs/PHASE21_ROADMAP.md`).
 - Phase 22: complete (`22A-22G` delivered on 2026-03-30 for newcomer-first onboarding, docs/code parity hardening, app-author guides, module/lite-mode guidance, plugin/frontend guides, and docs quality closeout. See `docs/PHASE22_ROADMAP.md`).
-- Phase 24: in progress on branch `windows/clang64` (`24A-24L` implementation landed on 2026-03-31 for the MSYS2 `CLANG64` branch contract; `make phase24-windows-confidence` now completes on CLANG64, with Windows XCTest discovery still remaining as the main parity gap. See `docs/PHASE24_ROADMAP.md`).
+- Phase 24: in progress on branch `windows/clang64` (`24A-24L` implementation landed on 2026-03-31 for the MSYS2 `CLANG64` branch contract; `24M` now tracks the remaining Windows XCTest discovery and warning closeout work. See `docs/PHASE24_ROADMAP.md`).
 
 ## Requirements and Setup Details
 

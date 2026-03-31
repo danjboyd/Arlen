@@ -5,9 +5,8 @@ Last updated: 2026-03-31
 This document records the native Windows workflow for Arlen on MSYS2
 `CLANG64`.
 
-The branch implementation now covers the full Phase 24 roadmap in code, but
-live MSYS2 `CLANG64` build/test confirmation from this sandbox is still pending
-because the current terminal cannot start `bash.exe` / `env.exe` successfully.
+The branch implementation now covers `24A-24L`, and `24M` is the explicit
+remaining closeout subphase for Windows XCTest discovery and warning cleanup.
 
 ## 1. Host Entry Path
 

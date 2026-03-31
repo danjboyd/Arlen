@@ -40,7 +40,9 @@ Last updated: 2026-03-31
   - the stock CLANG64 `xctest` runner still prints `XCTest: No tests found.`
     for the focused Windows bundles, so build/scaffold confidence is now live
     but Windows XCTest discovery parity is still incomplete
-- Next-session closeout path for the delivered `24A-24L` code:
+- Phase 24 now carries one explicit remaining subphase:
+  - `24M`: Windows XCTest discovery + native warning closeout
+- Next-session closeout path for `24M`:
   - stabilize a Windows runner that both loads the focused bundles and reports
     discovered tests reliably
   - tighten the confidence lane so Windows focused tests fail hard when test
@@ -52,8 +54,8 @@ Last updated: 2026-03-31
   - `windows/clang64`
 - Phase 24 is now active as the branch roadmap for native Windows support:
   - added `docs/PHASE24_ROADMAP.md`
-  - implemented the branch roadmap through `24L` in code while keeping live
-    CLANG64 verification as an explicit remaining step
+  - implemented the branch roadmap through `24L` in code and promoted the
+    remaining closeout work into explicit subphase `24M`
   - kept the branch contract explicit: GNUmake-first, PowerShell outer / MSYS
     bash inner, wrapper-driven tool discovery, temporary feature gating where
     needed, and no premature production-support claims
@@ -63,7 +65,7 @@ Last updated: 2026-03-31
   - `docs/README.md`
   - `docs/STATUS.md`
 - Next-session execution order on this branch:
-  - close the Windows XCTest discovery gap
+  - execute `24M` by closing the Windows XCTest discovery gap
   - tighten the remaining Windows warnings around pointer-sized storage and
     filesystem string conversions
   - decide whether any remaining native Windows runtime work should become a
