@@ -1,0 +1,420 @@
+# Arlen Phase 24 Roadmap
+
+Status: planned on 2026-03-31 (`24A-24L`)
+Last updated: 2026-03-31
+
+Related docs:
+- `README.md`
+- `docs/README.md`
+- `docs/STATUS.md`
+- `docs/TOOLCHAIN_MATRIX.md`
+- `docs/TESTING_WORKFLOW.md`
+- `docs/DEPLOYMENT.md`
+- `docs/PROPANE.md`
+- `docs/SYSTEMD_RUNBOOK.md`
+
+Audit basis:
+- Repository-wide Windows portability audit completed on 2026-03-30 against the
+  checked-in build, runtime, test, and deployment surfaces.
+- Adjacent MSYS2 `CLANG64` GNUstep precedents reviewed on 2026-03-31 across the
+  sibling `libs-OpenSave`, `ScreenshotTool`, `tools-xctest-msys`, and Windows
+  MSYS launcher worktrees under the shared `../` workspace.
+
+## 1. Objective
+
+Make Arlen build and run natively on Windows via MSYS2 `CLANG64` while keeping
+GNUstep-make as the canonical build system and allowing the main branch to
+continue Phase 23 work independently.
+
+Phase 24 is split into two tracks:
+
+- `24A-24F`: first-pass Windows compatibility
+- `24G-24L`: full Windows parity
+
+The implementation branch for this work is `windows/clang64`.
+
+## 1.1 Why Phase 24 Exists
+
+Arlen's current toolchain and runtime contract is Linux-first:
+
+- build/test/bootstrap scripts assume `/usr/GNUstep`, `/bin/bash`, and Debian
+  `tools-xctest`
+- the HTTP runtime is written directly against POSIX sockets, signals, and file
+  descriptor APIs
+- database loading assumes Unix shared-library naming and `dlopen`/`dlsym`
+- deployment guidance is centered on `systemd` and Unix process management
+
+That is compatible with WSL2, but it is not native Windows support. Phase 24
+exists to turn the existing GNUstep-based framework into something that can be
+built and validated on Windows itself using the already-adjacent MSYS2
+`CLANG64` toolchain.
+
+## 1.2 Success Criteria
+
+First-pass success means:
+
+- one documented Windows host workflow can enter the MSYS2 `CLANG64` GNUstep
+  environment from PowerShell
+- `eocc`, the core framework library, and `arlen` build successfully on
+  `CLANG64`
+- a focused Windows-safe XCTest path runs with reliable exit status
+- unsupported surfaces are explicitly documented instead of implied
+
+Full-parity success means:
+
+- `boomhauer` and native app-root workflows run on Windows
+- the HTTP runtime, filesystem security helpers, and database transports all
+  have verified Windows implementations
+- the supported Windows verification matrix is broad enough to make support
+  claims credible
+- the production/deployment story for Windows is explicit rather than inherited
+  from Linux-only docs
+
+## 2. Design Principles
+
+- Stay GNUmake-first. Do not widen the port into a second build-system effort.
+- Use PowerShell as the outer Windows orchestration layer and MSYS bash as the
+  inner GNUstep build shell.
+- Replace hardcoded Linux paths with `gnustep-config` and `CLANG64`-specific
+  discovery where possible.
+- Introduce platform seams for sockets, dynamic library loading, paths, time,
+  and process control instead of scattering unchecked `_WIN32` branches
+  throughout the codebase.
+- Allow temporary feature gating while the port is incomplete; do not promise
+  parity before it is verified.
+- Preserve the clang-based GNUstep requirement; Phase 24 is about Windows
+  support, not broadening Arlen toward generic GNUstep stacks.
+- Keep the main branch free to continue its own roadmap numbering and release
+  work without rebasing the Windows effort into every incremental experiment.
+
+## 3. Scope Summary
+
+## 3.1 First-Pass Compatibility Track
+
+1. Phase 24A: branch + toolchain contract.
+2. Phase 24B: build/bootstrap path abstraction.
+3. Phase 24C: `eocc` + core library + CLI build bring-up.
+4. Phase 24D: Windows-safe CLI/scaffold path normalization.
+5. Phase 24E: focused Windows XCTest runner strategy.
+6. Phase 24F: first-pass closeout and preview-scope documentation.
+
+## 3.2 Full Windows Parity Track
+
+7. Phase 24G: HTTP/runtime portability seams.
+8. Phase 24H: `boomhauer` and app-root developer-experience parity.
+9. Phase 24I: PostgreSQL/MSSQL transport and dynamic-loading parity.
+10. Phase 24J: filesystem/security semantics parity.
+11. Phase 24K: full verification, CI, and confidence-lane parity.
+12. Phase 24L: production/runtime-manager parity and Windows deployment story.
+
+## 3.3 Recommended Rollout Order
+
+1. `24A`
+2. `24B`
+3. `24C`
+4. `24D`
+5. `24E`
+6. `24F`
+7. `24G`
+8. `24H`
+9. `24I`
+10. `24J`
+11. `24K`
+12. `24L`
+
+That order gets a real Windows development foothold first, then expands
+outward into runtime, security, verification, and deployment parity.
+
+## 4. Scope Guardrails
+
+- Do not switch Arlen to CMake, Meson, or another primary build system as part
+  of this phase.
+- Do not treat WSL2 success as native Windows parity.
+- Do not block the main branch's Phase 23 work by rebasing every Windows
+  experiment immediately.
+- Do not claim `propane` or deployment parity until a real Windows production
+  story is implemented and documented.
+- Do not weaken Linux verification or remove existing guardrails just to make
+  the Windows port easier.
+- Do not rely on ad hoc local path edits as the support model; the toolchain
+  contract must be checked in and repeatable.
+
+## 5. Milestones
+
+## 5.1 Phase 24A: Branch + Toolchain Contract
+
+Status: in progress
+
+Checkpoint notes:
+
+- The dedicated implementation branch `windows/clang64` was created on
+  2026-03-31.
+- The adjacent workspace already contains relevant MSYS2/GNUstep precedents,
+  including `tools-xctest-msys` and CLANG64 launcher wrappers used by sibling
+  repos.
+
+Deliverables:
+
+- Establish the canonical Windows host invocation contract:
+  - PowerShell outer launcher
+  - MSYS2 `CLANG64` inner shell
+  - GNUstep bootstrap via `/clang64/share/GNUstep/Makefiles/GNUstep.sh`
+- Document the required `CLANG64` tools and libraries Arlen expects:
+  - `clang`
+  - `gnustep-config`
+  - `make`
+  - `xctest`
+  - `openapp`
+  - `libdispatch`
+- Decide the initial supported repo-local helper scripts/wrappers for entering
+  that environment.
+
+Acceptance (required):
+
+- One documented command path from Windows host shell to a ready GNUstep
+  `CLANG64` build shell succeeds reproducibly.
+- The Phase 24 branch and roadmap are the explicit source of truth for Windows
+  work-in-progress.
+
+## 5.2 Phase 24B: Build + Bootstrap Path Abstraction
+
+Status: planned
+
+Deliverables:
+
+- Remove or centralize hardcoded Linux bootstrap assumptions such as:
+  - `/usr/GNUstep/...`
+  - `/usr/include/postgresql`
+  - Debian-only tool discovery text where Windows `CLANG64` alternatives exist
+- Teach the repo build/bootstrap scripts to resolve GNUstep paths through
+  `gnustep-config` and/or a checked-in Windows wrapper contract.
+- Normalize path handling so Windows absolute paths and MSYS paths can coexist
+  without brittle string-prefix logic.
+
+Acceptance (required):
+
+- The build/bootstrap entry paths no longer require repo-wide manual rewrites to
+  switch from Linux `/usr/GNUstep` to Windows `/clang64`.
+- Windows-specific wrapper entrypoints are checked in and documented rather than
+  remaining local shell history.
+
+## 5.3 Phase 24C: `eocc` + Core Library + CLI Build Bring-Up
+
+Status: planned
+
+Deliverables:
+
+- Make the following build successfully on MSYS2 `CLANG64`:
+  - `build/eocc`
+  - core framework library artifacts
+  - `build/arlen`
+- Resolve immediate compiler and linker issues in Foundation-heavy code before
+  widening into runtime-portability work.
+- Keep ARC and current clang/GNUstep expectations intact.
+
+Acceptance (required):
+
+- A documented `CLANG64` build command produces `eocc`, the core framework
+  library, and `arlen` from a clean checkout.
+- Template compiler and non-server CLI build failures are no longer blocked on
+  Linux-only toolchain assumptions.
+
+## 5.4 Phase 24D: Windows-Safe CLI + Scaffold Path Normalization
+
+Status: planned
+
+Deliverables:
+
+- Make `arlen` subcommands that do not require the full HTTP runtime behave
+  correctly with Windows path forms and PowerShell/MSYS launch patterns.
+- Replace or isolate `/bin/bash` assumptions in CLI-owned helper paths where a
+  Windows wrapper can provide the same behavior.
+- Revalidate scaffold output and generated path handling under CLANG64.
+
+Acceptance (required):
+
+- Focused CLI smoke paths such as `arlen doctor`, `arlen new`, and core
+  generator flows work from the documented Windows workflow.
+- Windows path normalization no longer depends on Unix-only “starts with `/`”
+  checks in the core CLI flow.
+
+## 5.5 Phase 24E: Focused Windows XCTest Runner Strategy
+
+Status: planned
+
+Deliverables:
+
+- Decide the Windows testing contract for the first pass:
+  - stock `xctest.exe`
+  - repo-local `tools-xctest-msys`
+  - temporary focused fallback runner if required
+- Define which suites are Windows-first candidates and which remain
+  intentionally gated.
+- Make the Windows test command return trustworthy pass/fail status even if the
+  broader suite is still incomplete.
+
+Acceptance (required):
+
+- One checked-in command runs a focused Windows-safe XCTest subset and returns a
+  reliable exit code on CLANG64.
+- Unsupported or unstable Windows test lanes are explicitly called out instead
+  of silently skipped.
+
+## 5.6 Phase 24F: First-Pass Closeout + Preview Scope
+
+Status: planned
+
+Deliverables:
+
+- Record the first-pass supported Windows preview surface in the docs.
+- Explicitly list what remains unsupported after the first-pass milestone.
+- Close the first-pass milestone with concrete build/test evidence rather than a
+  purely planning-based completion claim.
+
+Acceptance (required):
+
+- A Windows preview user can tell exactly which Arlen surfaces are supported on
+  CLANG64 and which still require Phase 24 follow-on work.
+- First-pass closeout only happens after `24C-24E` have real build and test
+  evidence attached.
+
+## 5.7 Phase 24G: HTTP Runtime Portability Seams
+
+Status: planned
+
+Deliverables:
+
+- Introduce platform seams for:
+  - sockets
+  - connection shutdown
+  - stop/reload signaling
+  - time APIs
+  - thread-local helpers
+  - `sendfile`-style file response fallbacks
+- Preserve the current Linux implementation while adding Windows-capable
+  alternatives beneath the same runtime contracts.
+
+Acceptance (required):
+
+- The native HTTP server builds on Windows with explicit Winsock-compatible
+  runtime paths.
+- Basic request/response service works on CLANG64 without requiring WSL2.
+
+## 5.8 Phase 24H: `boomhauer` + App-Root DX Parity
+
+Status: planned
+
+Deliverables:
+
+- Replace Linux shell utility assumptions in `bin/boomhauer` with
+  Windows-compatible wrappers or implementation changes.
+- Make app-root `prepare-only`, route printing, and basic dev-server workflows
+  work under the documented PowerShell + MSYS contract.
+- Revisit file-fingerprinting, generated-app makefile emission, and path
+  normalization for Windows-owned app roots.
+
+Acceptance (required):
+
+- `boomhauer --prepare-only` works for a scaffolded app on Windows.
+- Basic app-root developer flow no longer depends on Linux-only `readlink`,
+  `stat`, `sha256sum`, or similar utilities being present natively.
+
+## 5.9 Phase 24I: Database Transport + Dynamic-Loading Parity
+
+Status: planned
+
+Deliverables:
+
+- Add Windows-capable dynamic-library loading seams for PostgreSQL and ODBC
+  transport discovery.
+- Replace Unix-only `.so` and Linux path assumptions with CLANG64-compatible
+  DLL/import-library discovery.
+- Add focused Windows smoke coverage for PostgreSQL and MSSQL adapter bring-up.
+
+Acceptance (required):
+
+- PostgreSQL and MSSQL adapters build and load their transport dependencies on
+  Windows through a checked-in discovery contract.
+- Focused Windows database smoke tests exist for the supported transport level.
+
+## 5.10 Phase 24J: Filesystem + Security Semantics Parity
+
+Status: planned
+
+Deliverables:
+
+- Define Windows behavior for Arlen's security-sensitive filesystem helpers:
+  - private storage expectations
+  - no-follow/symlink containment
+  - atomic write behavior
+  - temp-file handling
+  - path canonicalization and reparse-point safety
+- Update storage/service code and regression tests to use explicit
+  cross-platform semantics instead of assuming POSIX modes map directly.
+
+Acceptance (required):
+
+- Windows implementations of Arlen's filesystem safety rules are explicit and
+  tested.
+- Security-sensitive file helpers no longer rely on unexamined POSIX
+  substitutions for ACL/reparse-point behavior.
+
+## 5.11 Phase 24K: Full Verification + CI Parity
+
+Status: planned
+
+Deliverables:
+
+- Expand from focused Windows-safe suites to the wider supported unit and
+  integration matrix.
+- Add a Windows verification story for:
+  - build
+  - focused tests
+  - broader tests where supported
+  - known unsupported lanes
+- Decide what parity means for perf, sanitizers, and other Linux-heavy
+  confidence lanes on Windows.
+
+Acceptance (required):
+
+- The supported Windows verification matrix is documented and repeatable.
+- Windows support claims are backed by broader automated evidence than the
+  first-pass focused subset.
+
+## 5.12 Phase 24L: Production Runtime + Deployment Parity
+
+Status: planned
+
+Deliverables:
+
+- Decide the Windows production contract for Arlen:
+  - native `propane`
+  - limited/partial `propane`
+  - explicit alternative manager/service story
+  - explicit non-support for some production features
+- Replace or partition Linux-only deployment guidance such as `systemd`
+  runbooks where necessary.
+- Document the supported Windows deployment/runtime-manager story clearly.
+
+Acceptance (required):
+
+- Windows production guidance is explicit, truthful, and tested enough to avoid
+  misleading users.
+- `propane` support on Windows is either implemented with evidence or clearly
+  marked out of scope for the supported Windows surface.
+
+## 6. Exit Criteria Summary
+
+Phase 24 first-pass closeout requires:
+
+- `24A-24E` complete with real build/test evidence
+- documented Windows preview scope
+- explicit unsupported-surface list
+
+Phase 24 full-parity closeout requires:
+
+- `24G-24L` complete
+- verified Windows-native runtime and app-root workflows
+- explicit deployment/runtime-manager guidance for Windows
+- updated top-level docs/toolchain references to reflect the supported Windows
+  contract

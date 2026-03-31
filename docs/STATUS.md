@@ -1,6 +1,32 @@
 # Arlen Status Checkpoint
 
-Last updated: 2026-03-30
+Last updated: 2026-03-31
+
+## Leaving Off (2026-03-31)
+
+- Created the dedicated Windows workstream branch:
+  - `windows/clang64`
+- Planned Phase 24 as the branch roadmap for native Windows support:
+  - added `docs/PHASE24_ROADMAP.md`
+  - scoped `24A-24F` as the first-pass MSYS2 `CLANG64` compatibility track
+  - scoped `24G-24L` as the follow-on full Windows parity track
+  - kept the branch contract explicit: GNUmake-first, PowerShell outer / MSYS
+    bash inner, wrapper-driven tool discovery, temporary feature gating where
+    needed, and no premature production-support claims
+- Updated the top-level summary docs so the Windows branch now points at the
+  new roadmap:
+  - `README.md`
+  - `docs/README.md`
+  - `docs/STATUS.md`
+- Next-session execution order on this branch:
+  - start `24A`/`24B` with the checked-in CLANG64 shell contract and GNUstep
+    path/tool discovery cleanup
+  - then push `24C` to get `eocc`, the core framework library, and `arlen`
+    building under MSYS2 `CLANG64`
+  - defer wider runtime/deployment claims until `24E` establishes a reliable
+    focused Windows XCTest path
+- No Windows compatibility code has landed yet on this branch beyond branch
+  creation and Phase 24 planning.
 
 ## Leaving Off (2026-03-30)
 
