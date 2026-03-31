@@ -37,9 +37,13 @@ if [[ ! -f "$framework_root/GNUmakefile" || ! -d "$framework_root/src/Arlen" ]];
   exit 1
 fi
 
-gnustep_sh="/usr/GNUstep/System/Library/Makefiles/GNUstep.sh"
+gnustep_sh="$(bash "$framework_root/tools/resolve_gnustep.sh" 2>/dev/null || true)"
+if [[ -z "$gnustep_sh" ]]; then
+  gnustep_sh="${GNUSTEP_SH:-/usr/GNUstep/System/Library/Makefiles/GNUstep.sh}"
+fi
 if [[ ! -f "$gnustep_sh" ]]; then
   echo "boomhauer: GNUstep.sh not found at $gnustep_sh" >&2
+  echo "boomhauer: set GNUSTEP_SH, export GNUSTEP_MAKEFILES, or source your toolchain env script first" >&2
   exit 1
 fi
 

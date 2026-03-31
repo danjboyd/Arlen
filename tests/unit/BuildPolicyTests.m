@@ -193,6 +193,8 @@
   NSString *makefilePath = [repoRoot stringByAppendingPathComponent:@"GNUmakefile"];
   NSString *makefile = [self readFile:makefilePath];
 
+  XCTAssertTrue([makefile containsString:@"GNUSTEP_RESOLVER := $(ROOT_DIR)/tools/resolve_gnustep.sh"]);
+  XCTAssertTrue([makefile containsString:@"GNUSTEP_SH ?= $(shell bash \"$(GNUSTEP_RESOLVER)\" 2>/dev/null || true)"]);
   XCTAssertTrue([makefile containsString:@"OBJ_DIR := $(BUILD_DIR)/obj"]);
   XCTAssertTrue([makefile containsString:@"LIB_DIR := $(BUILD_DIR)/lib"]);
   XCTAssertTrue([makefile containsString:@"ARLEN_FRAMEWORK_LIB := $(LIB_DIR)/libArlenFramework.a"]);
@@ -239,6 +241,8 @@
   NSString *scriptPath = [repoRoot stringByAppendingPathComponent:@"bin/boomhauer"];
   NSString *script = [self readFile:scriptPath];
 
+  XCTAssertTrue([script containsString:@"bash \"$framework_root/tools/resolve_gnustep.sh\""]);
+  XCTAssertTrue([script containsString:@"GNUSTEP_MAKEFILES"]);
   XCTAssertTrue([script containsString:@"printf 'FRAMEWORK_LIB := %s\\n' \"$framework_lib\""]);
   XCTAssertTrue([script containsString:@"printf 'GNUSTEP_OBJC_FLAGS := %s\\n' \"$gnustep_objc_flags\""]);
   XCTAssertTrue([script containsString:
@@ -251,6 +255,28 @@
   XCTAssertTrue([script containsString:
                              @"printf '>source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) "
                               "-MMD -MP -MF %s -c %s -o %s\\n\\n'"]);
+}
+
+- (void)testDoctorAndCLIUseResolvedGNUstepContract {
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *doctorScript = [self readFile:[repoRoot stringByAppendingPathComponent:@"bin/arlen-doctor"]];
+  NSString *cliSource = [self readFile:[repoRoot stringByAppendingPathComponent:@"tools/arlen.m"]];
+  NSString *sourceHelper = [self readFile:[repoRoot stringByAppendingPathComponent:@"tools/source_gnustep_env.sh"]];
+
+  XCTAssertTrue([doctorScript containsString:@"bash \"$repo_root/tools/resolve_gnustep.sh\""]);
+  XCTAssertTrue([doctorScript containsString:@"GNUSTEP_MAKEFILES"]);
+  XCTAssertTrue([doctorScript containsString:@"dispatch_headers"]);
+  XCTAssertFalse([doctorScript containsString:@"Install GNUstep development packages."]);
+
+  XCTAssertTrue([cliSource containsString:@"static NSString *ResolveGNUstepScriptPath(void)"]);
+  XCTAssertTrue([cliSource containsString:@"EnvValue(\"GNUSTEP_MAKEFILES\")"]);
+  XCTAssertTrue([cliSource containsString:@"gnustep-config --variable=GNUSTEP_MAKEFILES"]);
+  XCTAssertTrue([cliSource containsString:@"dispatch_headers"]);
+  XCTAssertFalse([cliSource containsString:@"Verify GNUstep installation and shell init: source /usr/GNUstep/System/Library/Makefiles/GNUstep.sh"]);
+
+  XCTAssertTrue([sourceHelper containsString:@"resolve_gnustep.sh"]);
+  XCTAssertTrue([sourceHelper containsString:@"export GNUSTEP_SH=\"$resolved_gnustep_sh\""]);
+  XCTAssertTrue([sourceHelper containsString:@"source \"$resolved_gnustep_sh\""]);
 }
 
 - (void)testPhase20FocusedRunnerScriptExecutesRepoNativeLaneTargets {

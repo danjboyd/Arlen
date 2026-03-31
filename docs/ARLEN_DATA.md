@@ -35,7 +35,7 @@ Compile only data-layer sources and import the umbrella header:
 Reference build/usage validation:
 
 ```bash
-source /usr/GNUstep/System/Library/Makefiles/GNUstep.sh
+source /path/to/Arlen/tools/source_gnustep_env.sh
 make test-data-layer
 ```
 

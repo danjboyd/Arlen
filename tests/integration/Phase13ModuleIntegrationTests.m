@@ -33,6 +33,12 @@
   return payload ?: @{};
 }
 
+- (NSString *)buildToolsCommandForRepoRoot:(NSString *)repoRoot {
+  return [NSString stringWithFormat:@"%@ && cd %@ && make arlen eocc",
+                                    ALNTestGNUstepSourceCommandForRepoRoot(repoRoot),
+                                    ALNTestShellQuote(repoRoot)];
+}
+
 - (void)testModuleCLIAndBuildWorkflow {
   NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
   NSString *appRoot = [self createTempDirectoryWithPrefix:@"phase13-module-app"];
@@ -138,8 +144,7 @@
                           content:@"module-alpha-v2\n"]);
 
     int code = 0;
-    NSString *buildOutput = [self runShellCapture:[NSString stringWithFormat:@"cd %@ && source /usr/GNUstep/System/Library/Makefiles/GNUstep.sh && make arlen eocc",
-                                                                             repoRoot]
+    NSString *buildOutput = [self runShellCapture:[self buildToolsCommandForRepoRoot:repoRoot]
                                          exitCode:&code];
     XCTAssertEqual(0, code, @"%@", buildOutput);
 
@@ -258,9 +263,7 @@
                           content:@"<section>module dashboard</section>\n"]);
 
     int code = 0;
-    NSString *buildOutput = [self runShellCapture:[NSString stringWithFormat:
-        @"cd %@ && source /usr/GNUstep/System/Library/Makefiles/GNUstep.sh && make arlen eocc",
-        repoRoot]
+    NSString *buildOutput = [self runShellCapture:[self buildToolsCommandForRepoRoot:repoRoot]
                                          exitCode:&code];
     XCTAssertEqual(0, code, @"%@", buildOutput);
 

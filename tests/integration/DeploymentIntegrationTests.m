@@ -7,6 +7,8 @@
 #import <string.h>
 #import <sys/socket.h>
 
+#import "../shared/ALNTestSupport.h"
+
 @interface DeploymentIntegrationTests : XCTestCase
 @end
 
@@ -128,12 +130,16 @@
                                                                             withString:@"'\"'\"'"]];
 }
 
+- (NSString *)gnustepSourceCommandForRepoRoot:(NSString *)repoRoot {
+  return ALNTestGNUstepSourceCommandForRepoRoot(repoRoot);
+}
+
 - (NSString *)runMakeAtRepoRoot:(NSString *)repoRoot
                          target:(NSString *)target
                        exitCode:(int *)exitCode {
   NSString *command = [NSString stringWithFormat:
-      @"source /usr/GNUstep/System/Library/Makefiles/GNUstep.sh && cd %@ && make %@",
-      [self shellQuoted:repoRoot], target ?: @""];
+      @"%@ && cd %@ && make %@",
+      [self gnustepSourceCommandForRepoRoot:repoRoot], [self shellQuoted:repoRoot], target ?: @""];
   return [self runShellCapture:command exitCode:exitCode];
 }
 
@@ -286,12 +292,12 @@
 
     int code = 0;
     NSString *compileOutput = [self runShellCapture:[NSString stringWithFormat:
-        @"source /usr/GNUstep/System/Library/Makefiles/GNUstep.sh && clang $(gnustep-config --objc-flags) "
+        @"%@ && clang $(gnustep-config --objc-flags) "
          "-fobjc-arc -DARLEN_ENABLE_YYJSON=0 -DARLEN_ENABLE_LLHTTP=0 "
          "-I%@/src/Arlen -I%@/src/Arlen/HTTP -I%@/src/Arlen/Support "
          "%@ %@/src/Arlen/Support/ALNJSONSerialization.m %@/src/Arlen/HTTP/ALNRequest.m "
          "-o %@ $(gnustep-config --base-libs) -ldl -lcrypto",
-        repoRoot, repoRoot, repoRoot, sourcePath, repoRoot, repoRoot, binaryPath]
+        [self gnustepSourceCommandForRepoRoot:repoRoot], repoRoot, repoRoot, repoRoot, sourcePath, repoRoot, repoRoot, binaryPath]
                                        exitCode:&code];
     XCTAssertEqual(0, code, @"%@", compileOutput);
 
@@ -338,15 +344,13 @@
          "  mkdir -p \"$export_root/$(dirname \"$path\")\"; "
          "  cp \"$path\" \"$export_root/$path\"; "
          "done && "
-         "set +u && "
-         "source /usr/GNUstep/System/Library/Makefiles/GNUstep.sh && "
-         "set -u && "
+         "%@ && "
          "include_flags=\"-I$export_root/src/Arlen\" && "
          "for dir in \"$export_root\"/src/Arlen/* \"$export_root\"/modules/*/Sources; do "
          "  if [ -d \"$dir\" ]; then include_flags=\"$include_flags -I$dir\"; fi; "
          "done && "
          "clang $(gnustep-config --objc-flags) -fobjc-arc -fsyntax-only $include_flags \"$source_path\"",
-        repoRoot, exportRoot, sourcePath]
+        repoRoot, exportRoot, sourcePath, [self gnustepSourceCommandForRepoRoot:repoRoot]]
                                        exitCode:&code];
     XCTAssertEqual(0, code, @"%@", compileOutput);
   } @finally {
@@ -620,9 +624,9 @@
 
       NSString *prepareOutput =
           [self runShellCapture:[NSString stringWithFormat:
-                                              @"source /usr/GNUstep/System/Library/Makefiles/GNUstep.sh && "
+                                              @"%@ && "
                                                "cd %@ && ARLEN_FRAMEWORK_ROOT=%@ %@/build/arlen boomhauer --prepare-only",
-                                              appRoot, repoRoot, repoRoot]
+                                              [self gnustepSourceCommandForRepoRoot:repoRoot], appRoot, repoRoot, repoRoot]
                        exitCode:&code];
       XCTAssertEqual(0, code, @"%@", prepareOutput);
     }
@@ -860,9 +864,9 @@
 
     NSString *prepareOutput =
         [self runShellCapture:[NSString stringWithFormat:
-                                            @"source /usr/GNUstep/System/Library/Makefiles/GNUstep.sh && "
+                                            @"%@ && "
                                              "cd %@ && ARLEN_FRAMEWORK_ROOT=%@ %@/build/arlen boomhauer --prepare-only",
-                                            appRoot, repoRoot, repoRoot]
+                                            [self gnustepSourceCommandForRepoRoot:repoRoot], appRoot, repoRoot, repoRoot]
                      exitCode:&code];
     XCTAssertEqual(0, code, @"%@", prepareOutput);
 
@@ -933,7 +937,8 @@
 
   int code = 0;
   NSString *buildOutput =
-      [self runShellCapture:[NSString stringWithFormat:@"cd %@ && source /usr/GNUstep/System/Library/Makefiles/GNUstep.sh && make smoke-render",
+      [self runShellCapture:[NSString stringWithFormat:@"%@ && cd %@ && make smoke-render",
+                                                      [self gnustepSourceCommandForRepoRoot:repoRoot],
                                                       repoRoot]
                    exitCode:&code];
   XCTAssertEqual(0, code, @"%@", buildOutput);

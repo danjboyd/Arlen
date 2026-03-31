@@ -21,6 +21,9 @@ This repository is in early scaffold stage. Priority is delivering a stable v1 t
 - Prefer deterministic behavior over convenience shortcuts.
 - Preserve compatibility with GNUstep build tooling.
 - Preserve the clang-based GNUstep requirement; do not relax CI or docs toward generic GCC-oriented GNUstep stacks.
+- Repo-local shell bootstrap should prefer `tools/source_gnustep_env.sh`, which
+  resolves `GNUSTEP_SH`, `GNUSTEP_MAKEFILES`, `gnustep-config`, then the
+  `/usr/GNUstep` fallback.
 - If CI provisioning changes, keep the supported toolchain installed at `/usr/GNUstep` or update the repo-wide bootstrap contract deliberately.
 
 ## Git and Release Workflow
@@ -58,7 +61,7 @@ This repository is in early scaffold stage. Priority is delivering a stable v1 t
 - New template syntax support must include fixtures in `tests/fixtures/templates/`.
 - Bug fixes should include regression tests whenever practical.
 - Standardize on XCTest via the Debian `tools-xctest` package (runner command: `xctest`).
-- Before running tests, initialize GNUstep tooling in the shell with `source /usr/GNUstep/System/Library/Makefiles/GNUstep.sh`.
+- Before running tests, initialize GNUstep tooling in the shell with `source /path/to/Arlen/tools/source_gnustep_env.sh` or source the active GNUstep toolchain env directly.
 - Keep test code XCTest-compatible to preserve a future path to Apple XCTest/macOS targets.
 
 ## Documentation Expectations

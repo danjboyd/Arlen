@@ -10,6 +10,7 @@
 #import <unistd.h>
 
 #import "ALNTOTP.h"
+#import "../shared/ALNTestSupport.h"
 
 @interface Phase13AuthAdminIntegrationTests : XCTestCase
 @end
@@ -154,6 +155,12 @@
   XCTAssertNil(error, @"invalid JSON: %@\n%@", error.localizedDescription, output);
   XCTAssertTrue([payload isKindOfClass:[NSDictionary class]]);
   return payload ?: @{};
+}
+
+- (NSString *)buildToolsCommandForRepoRoot:(NSString *)repoRoot quotedRepoRoot:(NSString *)quotedRepoRoot {
+  return [NSString stringWithFormat:@"%@ && cd %@ && make arlen eocc",
+                                    ALNTestGNUstepSourceCommandForRepoRoot(repoRoot),
+                                    quotedRepoRoot ?: [self shellQuoted:repoRoot]];
 }
 
 - (NSDictionary *)curlJSONAtPort:(int)port
@@ -525,10 +532,9 @@
     XCTAssertTrue([self writeLiteAppAtRoot:appRoot]);
 
     int exitCode = 0;
-    NSString *buildOutput =
-        [self runShellCapture:[NSString stringWithFormat:@"cd %@ && source /usr/GNUstep/System/Library/Makefiles/GNUstep.sh && make arlen eocc",
-                                                         quotedRepoRoot]
-                     exitCode:&exitCode];
+    NSString *buildOutput = [self runShellCapture:[self buildToolsCommandForRepoRoot:repoRoot
+                                                                       quotedRepoRoot:quotedRepoRoot]
+                                         exitCode:&exitCode];
     XCTAssertEqual(0, exitCode, @"%@", buildOutput);
 
     NSString *addAuth = [self runShellCapture:[NSString stringWithFormat:
@@ -1144,10 +1150,9 @@
     XCTAssertTrue([self writeBasicAppAtRoot:appRoot extraClasses:nil homeText:@"phase13-auth-migrations-missing"]);
 
     int exitCode = 0;
-    NSString *buildOutput =
-        [self runShellCapture:[NSString stringWithFormat:@"cd %@ && source /usr/GNUstep/System/Library/Makefiles/GNUstep.sh && make arlen eocc",
-                                                         quotedRepoRoot]
-                     exitCode:&exitCode];
+    NSString *buildOutput = [self runShellCapture:[self buildToolsCommandForRepoRoot:repoRoot
+                                                                       quotedRepoRoot:quotedRepoRoot]
+                                         exitCode:&exitCode];
     XCTAssertEqual(0, exitCode, @"%@", buildOutput);
 
     NSString *addAuth = [self runShellCapture:[NSString stringWithFormat:
@@ -1266,10 +1271,9 @@
     XCTAssertTrue([self writeLiteAppAtRoot:appRoot]);
 
     int exitCode = 0;
-    NSString *buildOutput =
-        [self runShellCapture:[NSString stringWithFormat:@"cd %@ && source /usr/GNUstep/System/Library/Makefiles/GNUstep.sh && make arlen eocc",
-                                                         quotedRepoRoot]
-                     exitCode:&exitCode];
+    NSString *buildOutput = [self runShellCapture:[self buildToolsCommandForRepoRoot:repoRoot
+                                                                       quotedRepoRoot:quotedRepoRoot]
+                                         exitCode:&exitCode];
     XCTAssertEqual(0, exitCode, @"%@", buildOutput);
 
     NSString *addAuth = [self runShellCapture:[NSString stringWithFormat:
@@ -1399,10 +1403,9 @@
     XCTAssertTrue([self writeBasicAppAtRoot:appRoot extraClasses:nil homeText:@"phase15-headless"]);
 
     int exitCode = 0;
-    NSString *buildOutput =
-        [self runShellCapture:[NSString stringWithFormat:@"cd %@ && source /usr/GNUstep/System/Library/Makefiles/GNUstep.sh && make arlen eocc",
-                                                         quotedRepoRoot]
-                     exitCode:&exitCode];
+    NSString *buildOutput = [self runShellCapture:[self buildToolsCommandForRepoRoot:repoRoot
+                                                                       quotedRepoRoot:quotedRepoRoot]
+                                         exitCode:&exitCode];
     XCTAssertEqual(0, exitCode, @"%@", buildOutput);
 
     NSString *addAuth = [self runShellCapture:[NSString stringWithFormat:
@@ -1589,10 +1592,9 @@
                                   "</section>\n"]);
 
     int exitCode = 0;
-    NSString *buildOutput =
-        [self runShellCapture:[NSString stringWithFormat:@"cd %@ && source /usr/GNUstep/System/Library/Makefiles/GNUstep.sh && make arlen eocc",
-                                                         quotedRepoRoot]
-                     exitCode:&exitCode];
+    NSString *buildOutput = [self runShellCapture:[self buildToolsCommandForRepoRoot:repoRoot
+                                                                       quotedRepoRoot:quotedRepoRoot]
+                                         exitCode:&exitCode];
     XCTAssertEqual(0, exitCode, @"%@", buildOutput);
 
     NSString *addAuth = [self runShellCapture:[NSString stringWithFormat:
@@ -1770,10 +1772,9 @@
     XCTAssertTrue([self writeBasicAppAtRoot:appRoot extraClasses:nil homeText:@"phase18-sms-disabled"]);
 
     int exitCode = 0;
-    NSString *buildOutput =
-        [self runShellCapture:[NSString stringWithFormat:@"cd %@ && source /usr/GNUstep/System/Library/Makefiles/GNUstep.sh && make arlen eocc",
-                                                         quotedRepoRoot]
-                     exitCode:&exitCode];
+    NSString *buildOutput = [self runShellCapture:[self buildToolsCommandForRepoRoot:repoRoot
+                                                                       quotedRepoRoot:quotedRepoRoot]
+                                         exitCode:&exitCode];
     XCTAssertEqual(0, exitCode, @"%@", buildOutput);
 
     NSString *addAuth = [self runShellCapture:[NSString stringWithFormat:@"cd %@ && ARLEN_FRAMEWORK_ROOT=%@ %@ module add auth --json",
@@ -1932,10 +1933,9 @@
     XCTAssertTrue([self writeBasicAppAtRoot:appRoot extraClasses:nil homeText:@"phase18-sms-enabled"]);
 
     int exitCode = 0;
-    NSString *buildOutput =
-        [self runShellCapture:[NSString stringWithFormat:@"cd %@ && source /usr/GNUstep/System/Library/Makefiles/GNUstep.sh && make arlen eocc",
-                                                         quotedRepoRoot]
-                     exitCode:&exitCode];
+    NSString *buildOutput = [self runShellCapture:[self buildToolsCommandForRepoRoot:repoRoot
+                                                                       quotedRepoRoot:quotedRepoRoot]
+                                         exitCode:&exitCode];
     XCTAssertEqual(0, exitCode, @"%@", buildOutput);
 
     NSString *addAuth = [self runShellCapture:[NSString stringWithFormat:@"cd %@ && ARLEN_FRAMEWORK_ROOT=%@ %@ module add auth --json",
@@ -2307,10 +2307,9 @@
                                   "<a class=\"phase15-provider\" data-phase15-provider=\"<%= [provider objectForKey:@\"identifier\"] ?: @\"\" %>\" href=\"<%= [provider objectForKey:@\"loginPath\"] ?: @\"\" %>\"><%= [provider objectForKey:@\"ctaLabel\"] ?: @\"Continue\" %></a>\n"]);
 
     int exitCode = 0;
-    NSString *buildOutput =
-        [self runShellCapture:[NSString stringWithFormat:@"cd %@ && source /usr/GNUstep/System/Library/Makefiles/GNUstep.sh && make arlen eocc",
-                                                         quotedRepoRoot]
-                     exitCode:&exitCode];
+    NSString *buildOutput = [self runShellCapture:[self buildToolsCommandForRepoRoot:repoRoot
+                                                                       quotedRepoRoot:quotedRepoRoot]
+                                         exitCode:&exitCode];
     XCTAssertEqual(0, exitCode, @"%@", buildOutput);
 
     NSString *addAuth = [self runShellCapture:[NSString stringWithFormat:
@@ -2431,10 +2430,9 @@
     XCTAssertTrue([self writeBasicAppAtRoot:appRoot extraClasses:nil homeText:@"phase18-generated-app-ui"]);
 
     int exitCode = 0;
-    NSString *buildOutput =
-        [self runShellCapture:[NSString stringWithFormat:@"cd %@ && source /usr/GNUstep/System/Library/Makefiles/GNUstep.sh && make arlen eocc",
-                                                         quotedRepoRoot]
-                     exitCode:&exitCode];
+    NSString *buildOutput = [self runShellCapture:[self buildToolsCommandForRepoRoot:repoRoot
+                                                                       quotedRepoRoot:quotedRepoRoot]
+                                         exitCode:&exitCode];
     XCTAssertEqual(0, exitCode, @"%@", buildOutput);
 
     NSString *addAuth = [self runShellCapture:[NSString stringWithFormat:

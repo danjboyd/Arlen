@@ -126,12 +126,15 @@ else
     "Run 'arlen new <AppName>' if you are bootstrapping a new app."
 fi
 
-gnustep_script="/usr/GNUstep/System/Library/Makefiles/GNUstep.sh"
+gnustep_script="$(bash "$repo_root/tools/resolve_gnustep.sh" 2>/dev/null || true)"
+if [[ -z "$gnustep_script" ]]; then
+  gnustep_script="${GNUSTEP_SH:-/usr/GNUstep/System/Library/Makefiles/GNUstep.sh}"
+fi
 if [[ -f "$gnustep_script" ]]; then
   add_check "gnustep_script" "pass" "GNUstep script present: $gnustep_script"
 else
   add_check "gnustep_script" "fail" "missing GNUstep script: $gnustep_script" \
-    "Install GNUstep development packages."
+    "Set GNUSTEP_SH, export GNUSTEP_MAKEFILES, or source your toolchain env script before running Arlen."
 fi
 
 check_command() {
@@ -155,11 +158,18 @@ check_command "python3" "warn" "Install python3 for helper scripts and JSON doct
 check_command "curl" "warn" "Install curl for integration smoke checks."
 
 if [[ -f "$gnustep_script" ]]; then
-  if bash -lc "source '$gnustep_script' >/dev/null 2>&1 && gnustep-config --objc-flags >/dev/null"; then
+  if bash -lc "set +u; source '$gnustep_script' >/dev/null 2>&1; set -u; gnustep-config --objc-flags >/dev/null"; then
     add_check "gnustep_config" "pass" "gnustep-config responded successfully"
   else
     add_check "gnustep_config" "fail" "failed running gnustep-config after sourcing GNUstep.sh" \
-      "Verify GNUstep installation and shell init."
+      "Verify your active GNUstep environment and gnustep-config availability."
+  fi
+
+  if bash -lc "set +u; source '$gnustep_script' >/dev/null 2>&1; set -u; printf '#import <dispatch/dispatch.h>\n' | clang \$(gnustep-config --objc-flags) -x objective-c -fsyntax-only - >/dev/null 2>&1"; then
+    add_check "dispatch_headers" "pass" "dispatch/dispatch.h is available to clang"
+  else
+    add_check "dispatch_headers" "fail" "dispatch/dispatch.h is missing from the active toolchain include paths" \
+      "Install libdispatch development headers/runtime support or use a GNUstep toolchain that exposes dispatch headers."
   fi
 fi
 

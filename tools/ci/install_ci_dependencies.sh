@@ -5,7 +5,10 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$repo_root"
 
 strategy="${ARLEN_CI_GNUSTEP_STRATEGY:-apt}"
-gnustep_sh="${GNUSTEP_SH:-/usr/GNUstep/System/Library/Makefiles/GNUstep.sh}"
+gnustep_sh="$(bash "$repo_root/tools/resolve_gnustep.sh" 2>/dev/null || true)"
+if [[ -z "$gnustep_sh" ]]; then
+  gnustep_sh="${GNUSTEP_SH:-/usr/GNUstep/System/Library/Makefiles/GNUstep.sh}"
+fi
 
 apt_cmd=(apt-get)
 if command -v sudo >/dev/null 2>&1; then
@@ -42,6 +45,7 @@ run_bootstrap_script() {
 validate_clang_gnustep_toolchain() {
   if [[ ! -f "$gnustep_sh" ]]; then
     echo "ci: GNUstep.sh not found at $gnustep_sh" >&2
+    echo "ci: set GNUSTEP_SH, export GNUSTEP_MAKEFILES, or source your toolchain env script before running this helper" >&2
     exit 1
   fi
 

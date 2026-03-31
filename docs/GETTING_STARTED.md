@@ -15,10 +15,11 @@ If you prefer a narrower path, see:
 - a clang-built GNUstep toolchain
 - `tools-xctest` (`xctest` command)
 
-Initialize GNUstep in your shell:
+Initialize GNUstep in your shell. The repo helper also works with managed
+toolchains that expose `GNUSTEP_SH` or `GNUSTEP_MAKEFILES`:
 
 ```bash
-source /usr/GNUstep/System/Library/Makefiles/GNUstep.sh
+source /path/to/Arlen/tools/source_gnustep_env.sh
 ```
 
 Run the bootstrap diagnostic first:

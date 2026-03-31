@@ -6,7 +6,7 @@ usage, and migration/codegen workflows.
 ## 1. Build and Verify Data Path
 
 ```bash
-source /usr/GNUstep/System/Library/Makefiles/GNUstep.sh
+source /path/to/Arlen/tools/source_gnustep_env.sh
 make arlen-data-example
 make test-data-layer
 ```

@@ -5,7 +5,7 @@ This example demonstrates using Arlen's data layer without the HTTP/MVC runtime.
 Build and run from repo root:
 
 ```bash
-source /usr/GNUstep/System/Library/Makefiles/GNUstep.sh
+source /path/to/Arlen/tools/source_gnustep_env.sh
 make test-data-layer
 ```
 

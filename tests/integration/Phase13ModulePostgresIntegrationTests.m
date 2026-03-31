@@ -45,6 +45,12 @@
   return payload ?: @{};
 }
 
+- (NSString *)buildToolsCommandForRepoRoot:(NSString *)repoRoot {
+  return [NSString stringWithFormat:@"%@ && cd %@ && make arlen",
+                                    ALNTestGNUstepSourceCommandForRepoRoot(repoRoot),
+                                    ALNTestShellQuote(repoRoot)];
+}
+
 - (void)testModuleMigrateAppliesAndUpgradesNamespacedMigrations {
   NSString *dsn = [self requiredPGTestDSNForSelector:_cmd];
   if (dsn == nil) {
@@ -134,8 +140,7 @@
                           content:betaMigrationSQL]);
 
     int code = 0;
-    NSString *buildOutput = [self runShellCapture:[NSString stringWithFormat:@"cd %@ && source /usr/GNUstep/System/Library/Makefiles/GNUstep.sh && make arlen",
-                                                                             repoRoot]
+    NSString *buildOutput = [self runShellCapture:[self buildToolsCommandForRepoRoot:repoRoot]
                                          exitCode:&code];
     XCTAssertEqual(0, code, @"%@", buildOutput);
 

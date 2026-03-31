@@ -15,6 +15,7 @@
 #import "ALNResponse.h"
 #import "ALNRouter.h"
 #import "ALNServices.h"
+#import "../shared/ALNTestSupport.h"
 
 static NSUInteger gPhase13EPasswordPolicyCalls = 0;
 static NSUInteger gPhase13EProvisioningCalls = 0;
@@ -725,8 +726,10 @@ static NSUInteger gPhase15UIContextCalls = 0;
   XCTAssertNil(error);
 
   int exitCode = 0;
-  NSString *buildCommand = [NSString stringWithFormat:@"cd %@ && source /usr/GNUstep/System/Library/Makefiles/GNUstep.sh && rm -f build/arlen && LD_PRELOAD='' make arlen >/dev/null && chmod 755 build/arlen",
-                                                     [self shellQuoted:repoRoot]];
+  NSString *buildCommand = [NSString stringWithFormat:
+                                               @"%@ && cd %@ && rm -f build/arlen && LD_PRELOAD='' make arlen >/dev/null && chmod 755 build/arlen",
+                                               ALNTestGNUstepSourceCommandForRepoRoot(repoRoot),
+                                               [self shellQuoted:repoRoot]];
   NSString *buildOutput = [self runShellCapture:buildCommand exitCode:&exitCode];
   XCTAssertEqual(0, exitCode, @"%@", buildOutput);
 

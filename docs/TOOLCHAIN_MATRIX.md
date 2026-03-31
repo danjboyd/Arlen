@@ -1,13 +1,13 @@
 # Arlen Toolchain Matrix
 
-Last updated: 2026-03-27
+Last updated: 2026-03-31
 
 This document records known-good local toolchain baselines for Arlen onboarding and CI parity.
 
 Use `bin/arlen doctor` as the first preflight check. A healthy baseline should also pass:
 
 ```bash
-source /usr/GNUstep/System/Library/Makefiles/GNUstep.sh
+source /path/to/Arlen/tools/source_gnustep_env.sh
 make test-unit
 make test-integration
 ```
@@ -22,9 +22,28 @@ make test-integration
 | Shell | `bash --version` | `GNU bash 5.2.37` |
 | Python | `python3 --version` | `Python 3.13.5` |
 | HTTP client | `curl --version` | `curl 8.14.1` |
-| GNUstep tooling script | `/usr/GNUstep/System/Library/Makefiles/GNUstep.sh` | Present |
-| GNUstep config tool | `source GNUstep.sh && command -v gnustep-config` | `/usr/GNUstep/System/Tools/gnustep-config` |
+| GNUstep bootstrap helper | `source /path/to/Arlen/tools/source_gnustep_env.sh` | Present in repo |
+| GNUstep tooling script | `/usr/GNUstep/System/Library/Makefiles/GNUstep.sh` | Present on current known-good baseline |
+| GNUstep config tool | `source /path/to/Arlen/tools/source_gnustep_env.sh && command -v gnustep-config` | `/usr/GNUstep/System/Tools/gnustep-config` |
 | XCTest runner | `command -v xctest` | `/usr/GNUstep/System/Tools/xctest` |
+
+## GNUstep Resolution Contract
+
+Repo-local shell initialization should prefer:
+
+```bash
+source /path/to/Arlen/tools/source_gnustep_env.sh
+```
+
+That helper resolves the active GNUstep shell init path in this order:
+
+1. `GNUSTEP_SH`
+2. `GNUSTEP_MAKEFILES/GNUstep.sh`
+3. `gnustep-config --variable=GNUSTEP_MAKEFILES`
+4. `/usr/GNUstep/System/Library/Makefiles/GNUstep.sh`
+
+Contributors who already source a managed toolchain env script can keep doing
+that, as long as it exposes a valid `GNUSTEP_SH` or `GNUSTEP_MAKEFILES`.
 
 ## CI Toolchain Contract
 
@@ -32,7 +51,9 @@ Arlen CI requires a clang-built GNUstep stack. In practice that means:
 
 - `gnustep-config --objc-flags` includes `-fobjc-runtime=gnustep-2.2`
 - `clang`, `gnustep-config`, and `xctest` are all available after sourcing `GNUstep.sh`
-- the toolchain is installed at `/usr/GNUstep` unless a workflow explicitly overrides `GNUSTEP_SH`
+- current CI runner baseline installs the toolchain at `/usr/GNUstep`
+- repo-local helpers and `arlen doctor` also support `GNUSTEP_SH` /
+  `GNUSTEP_MAKEFILES`-driven toolchains for local development
 
 The workflow bootstrap entry point is:
 
@@ -67,6 +88,7 @@ Optional contributor override:
 - required tool commands (`clang`, `make`, `bash`)
 - recommended tool commands (`xctest`, `python3`, `curl`)
 - `gnustep-config` execution after sourcing GNUstep
+- `dispatch/dispatch.h` availability after GNUstep init
 - `libpq` presence check (when `ldconfig` is available)
 - presence of `docs/TOOLCHAIN_MATRIX.md` itself so the known-good baseline
   remains discoverable

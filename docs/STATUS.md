@@ -4,18 +4,44 @@ Last updated: 2026-03-31
 
 ## Leaving Off (2026-03-31)
 
-- Phase 23 is now planned:
+- Reconciled and fixed the managed-GNUstep bootstrap bug reported from
+  `iep-platform`:
+  - added `tools/resolve_gnustep.sh` and `tools/source_gnustep_env.sh`
+  - updated `GNUmakefile`, `bin/arlen-doctor`, `bin/boomhauer`,
+    `tools/arlen.m`, and the repo test harness to resolve GNUstep shell init
+    from `GNUSTEP_SH`, `GNUSTEP_MAKEFILES`, `gnustep-config`, then the
+    historical `/usr/GNUstep` fallback
+  - taught `arlen doctor` to fail early on missing `dispatch/dispatch.h`
+    instead of deferring that toolchain problem to a later compile step
+  - recorded upstream status in
+    `docs/PLATFORM_REPORT_RECONCILIATION_2026-03-31.md`
+  - updated active onboarding/toolchain docs plus `AGENTS.md` to prefer
+    `tools/source_gnustep_env.sh`
+- Verification completed at this checkpoint:
+  - `source tools/source_gnustep_env.sh && ./bin/arlen doctor --json`
+  - `source tools/source_gnustep_env.sh && make arlen build-tests`
+  - `source tools/source_gnustep_env.sh && make test-unit`
+- Earlier on `2026-03-31`, Phase 23 Dataverse planning was recorded in
+  `docs/PHASE23_ROADMAP.md`.
+
+## Completed Today (2026-03-31)
+
+- Planned Phase 23 as the next roadmap phase:
   - added `docs/PHASE23_ROADMAP.md`
   - scoped `23A-23G` around runtime-inactive-by-default Dataverse Web API
     integration, OData query composition, write semantics, metadata/codegen,
     app wiring, diagnostics, and docs closeout
-- Phase 23 planning decisions recorded at this checkpoint:
-  - Arlen will target the Dataverse Web API rather than Microsoft Graph as the
-    primary API contract
-  - the Dataverse integration will not ship as an Arlen module
-  - the Dataverse integration will remain compiled in but runtime-inactive
-    unless explicitly configured or instantiated
-- No implementation work has started yet beyond roadmap/status planning docs.
+  - recorded the key planning decisions: Dataverse Web API over Microsoft
+    Graph, no Arlen module packaging, and compiled-in but runtime-inactive
+    behavior by default
+- Closed the managed-GNUstep bootstrap bug reported from `iep-platform`:
+  - replaced the hard-coded `/usr/GNUstep` assumption across build/bootstrap
+    entry points with explicit GNUstep resolution helpers
+  - added repo-local shell bootstrap via `tools/source_gnustep_env.sh`
+  - added `dispatch_headers` doctor coverage for early libdispatch-header
+    diagnostics
+  - updated the active docs/toolchain contract and recorded the upstream
+    closure note in `docs/PLATFORM_REPORT_RECONCILIATION_2026-03-31.md`
 
 ## Leaving Off (2026-03-30)
 

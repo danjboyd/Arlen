@@ -229,6 +229,60 @@ static NSString *Trimmed(NSString *value) {
   return [value stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
 }
 
+static NSString *RunShellCaptureCommand(NSString *command, int *exitCode);
+static NSString *EnvValue(const char *name);
+static BOOL PathExists(NSString *path, BOOL *isDirectory);
+
+static NSString *DefaultGNUstepScriptPath(void) {
+  return @"/usr/GNUstep/System/Library/Makefiles/GNUstep.sh";
+}
+
+static NSString *GNUstepScriptPathFromMakefilesPath(NSString *makefilesPath) {
+  NSString *trimmed = Trimmed(makefilesPath);
+  if ([trimmed length] == 0) {
+    return @"";
+  }
+  return [trimmed stringByAppendingPathComponent:@"GNUstep.sh"];
+}
+
+static NSString *ResolveGNUstepScriptPath(void) {
+  NSString *direct = Trimmed(EnvValue("GNUSTEP_SH"));
+  if ([direct length] > 0 && PathExists(direct, NULL)) {
+    return [direct stringByStandardizingPath];
+  }
+
+  NSString *makefilesFromEnv = Trimmed(EnvValue("GNUSTEP_MAKEFILES"));
+  NSString *fromEnv = GNUstepScriptPathFromMakefilesPath(makefilesFromEnv);
+  if ([fromEnv length] > 0 && PathExists(fromEnv, NULL)) {
+    return [fromEnv stringByStandardizingPath];
+  }
+
+  int configCode = 0;
+  NSString *makefilesFromConfig =
+      Trimmed(RunShellCaptureCommand(@"command -v gnustep-config >/dev/null 2>&1 && gnustep-config --variable=GNUSTEP_MAKEFILES 2>/dev/null",
+                                     &configCode));
+  NSString *fromConfig = GNUstepScriptPathFromMakefilesPath(makefilesFromConfig);
+  if (configCode == 0 && [fromConfig length] > 0 && PathExists(fromConfig, NULL)) {
+    return [fromConfig stringByStandardizingPath];
+  }
+
+  NSString *fallback = DefaultGNUstepScriptPath();
+  if (PathExists(fallback, NULL)) {
+    return fallback;
+  }
+
+  if ([direct length] > 0) {
+    return [direct stringByStandardizingPath];
+  }
+  if ([fromEnv length] > 0) {
+    return [fromEnv stringByStandardizingPath];
+  }
+  if ([fromConfig length] > 0) {
+    return [fromConfig stringByStandardizingPath];
+  }
+  return fallback;
+}
+
 static NSString *RunShellCaptureCommand(NSString *command, int *exitCode) {
   NSTask *task = [[NSTask alloc] init];
   task.launchPath = @"/bin/bash";
@@ -2512,7 +2566,7 @@ static int CommandDoctor(NSArray *args) {
     warnCount += 1;
   }
 
-  NSString *gnustepScript = @"/usr/GNUstep/System/Library/Makefiles/GNUstep.sh";
+  NSString *gnustepScript = ResolveGNUstepScriptPath();
   if (PathExists(gnustepScript, NULL)) {
     AddDoctorCheck(checks, @"gnustep_script", @"pass",
                    [NSString stringWithFormat:@"GNUstep script present: %@", gnustepScript], @"");
@@ -2520,7 +2574,7 @@ static int CommandDoctor(NSArray *args) {
   } else {
     AddDoctorCheck(checks, @"gnustep_script", @"fail",
                    [NSString stringWithFormat:@"missing GNUstep script: %@", gnustepScript],
-                   @"Install GNUstep base development packages.");
+                   @"Set GNUSTEP_SH, export GNUSTEP_MAKEFILES, or source your toolchain env script before running Arlen.");
     failCount += 1;
   }
 
@@ -2572,7 +2626,7 @@ static int CommandDoctor(NSArray *args) {
   if (PathExists(gnustepScript, NULL)) {
     int gnustepCode = 0;
     NSString *flagsOutput =
-        Trimmed(RunShellCaptureCommand([NSString stringWithFormat:@"source %@ >/dev/null 2>&1 && gnustep-config --objc-flags",
+        Trimmed(RunShellCaptureCommand([NSString stringWithFormat:@"set +u; source %@ >/dev/null 2>&1; set -u; gnustep-config --objc-flags",
                                                                 ShellQuote(gnustepScript)],
                                        &gnustepCode));
     if (gnustepCode == 0 && [flagsOutput length] > 0) {
@@ -2583,7 +2637,24 @@ static int CommandDoctor(NSArray *args) {
                      @"gnustep_config",
                      @"fail",
                      @"failed running gnustep-config after sourcing GNUstep.sh",
-                     @"Verify GNUstep installation and shell init: source /usr/GNUstep/System/Library/Makefiles/GNUstep.sh");
+                     @"Verify your active GNUstep environment and gnustep-config availability.");
+      failCount += 1;
+    }
+
+    int dispatchHeaderCode = 0;
+    RunShellCaptureCommand([NSString
+                               stringWithFormat:@"set +u; source %@ >/dev/null 2>&1; set -u; printf '#import <dispatch/dispatch.h>\\n' | clang $(gnustep-config --objc-flags) -x objective-c -fsyntax-only - >/dev/null 2>&1",
+                                                ShellQuote(gnustepScript)],
+                           &dispatchHeaderCode);
+    if (dispatchHeaderCode == 0) {
+      AddDoctorCheck(checks, @"dispatch_headers", @"pass", @"dispatch/dispatch.h is available to clang", @"");
+      passCount += 1;
+    } else {
+      AddDoctorCheck(checks,
+                     @"dispatch_headers",
+                     @"fail",
+                     @"dispatch/dispatch.h is missing from the active toolchain include paths",
+                     @"Install libdispatch development headers/runtime support or use a GNUstep toolchain that exposes dispatch headers.");
       failCount += 1;
     }
   }

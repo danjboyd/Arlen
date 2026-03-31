@@ -5,7 +5,7 @@ This is the shortest full-app walkthrough for Arlen.
 ## 1. Build Arlen CLI (one-time per checkout)
 
 ```bash
-source /usr/GNUstep/System/Library/Makefiles/GNUstep.sh
+source /path/to/Arlen/tools/source_gnustep_env.sh
 cd /path/to/Arlen
 make arlen
 ```
@@ -94,8 +94,10 @@ curl -i http://127.0.0.1:3000/hello
 - `arlen boomhauer` cannot find framework root:
   - run with `ARLEN_FRAMEWORK_ROOT=/path/to/Arlen` in your environment
 - GNUstep toolchain errors:
-  - re-run `source /usr/GNUstep/System/Library/Makefiles/GNUstep.sh` in the
-    same shell
+  - re-run `source /path/to/Arlen/tools/source_gnustep_env.sh` in the same
+    shell, or re-source your managed GNUstep toolchain env
+  - if `arlen doctor` fails `dispatch_headers`, install libdispatch headers for
+    the active toolchain or switch to one that exposes `dispatch/dispatch.h`
 - build error page shown in browser:
   - check your recent code edits; `boomhauer` serves diagnostics and resumes
     normal responses after the next successful rebuild

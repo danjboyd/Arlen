@@ -9,6 +9,8 @@
 #import <string.h>
 #import <sys/socket.h>
 
+#import "../shared/ALNTestSupport.h"
+
 @interface HTTPIntegrationTests : XCTestCase
 @end
 
@@ -144,6 +146,10 @@
   return [NSString stringWithFormat:@"'%@'",
                                     [safeValue stringByReplacingOccurrencesOfString:@"'"
                                                                             withString:@"'\"'\"'"]];
+}
+
+- (NSString *)gnustepSourceCommandForRepoRoot:(NSString *)repoRoot {
+  return ALNTestGNUstepSourceCommandForRepoRoot(repoRoot);
 }
 
 - (NSString *)runShellCapture:(NSString *)command exitCode:(int *)exitCode {
@@ -3300,12 +3306,13 @@
     int poisonCode = 0;
     NSString *poisonCommand = [NSString
         stringWithFormat:@"git -C %@ worktree add --detach %@ HEAD >/dev/null 2>&1 && "
-                         "source /usr/GNUstep/System/Library/Makefiles/GNUstep.sh && cd %@ && "
+                         "%@ && cd %@ && "
                          "make clean >/dev/null && "
                          "EXTRA_OBJC_FLAGS='-fsanitize=address,undefined -fno-omit-frame-pointer' "
                          "make %@/build/eocc %@/build/lib/libArlenFramework.a 2>&1",
                          [self shellQuoted:repoRoot],
                          [self shellQuoted:frameworkRoot],
+                         [self gnustepSourceCommandForRepoRoot:frameworkRoot],
                          [self shellQuoted:frameworkRoot],
                          [self shellQuoted:frameworkRoot],
                          [self shellQuoted:frameworkRoot]];
@@ -3316,9 +3323,10 @@
     int code = 0;
     NSString *output = [self
         runShellCapture:[NSString
-                            stringWithFormat:@"source /usr/GNUstep/System/Library/Makefiles/GNUstep.sh && "
+                            stringWithFormat:@"%@ && "
                                              "cd %@ && ARLEN_FRAMEWORK_ROOT=%@ ARLEN_APP_ROOT=%@ %@ "
                                              "--no-watch --print-routes 2>&1",
+                                             [self gnustepSourceCommandForRepoRoot:repoRoot],
                                              [self shellQuoted:appRoot],
                                              [self shellQuoted:frameworkRoot],
                                              [self shellQuoted:appRoot],

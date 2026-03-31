@@ -2,7 +2,8 @@ SHELL := /bin/bash
 .RECIPEPREFIX = >
 
 ROOT_DIR := $(CURDIR)
-GNUSTEP_SH := /usr/GNUstep/System/Library/Makefiles/GNUstep.sh
+GNUSTEP_RESOLVER := $(ROOT_DIR)/tools/resolve_gnustep.sh
+GNUSTEP_SH ?= $(shell bash "$(GNUSTEP_RESOLVER)" 2>/dev/null || true)
 BUILD_DIR := $(ROOT_DIR)/build
 OBJ_DIR := $(BUILD_DIR)/obj
 LIB_DIR := $(BUILD_DIR)/lib

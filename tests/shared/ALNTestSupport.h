@@ -7,6 +7,8 @@ NS_ASSUME_NONNULL_BEGIN
 
 FOUNDATION_EXPORT NSString *ALNTestRepoRoot(void);
 FOUNDATION_EXPORT NSString *ALNTestPathFromRepoRoot(NSString *relativePath);
+FOUNDATION_EXPORT NSString *ALNTestShellQuote(NSString *value);
+FOUNDATION_EXPORT NSString *ALNTestGNUstepSourceCommandForRepoRoot(NSString *_Nullable repoRoot);
 FOUNDATION_EXPORT NSData *_Nullable ALNTestDataAtRelativePath(NSString *relativePath,
                                                               NSError *_Nullable *_Nullable error);
 FOUNDATION_EXPORT id _Nullable ALNTestJSONObjectAtRelativePath(NSString *relativePath,

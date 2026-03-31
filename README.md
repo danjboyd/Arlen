@@ -23,7 +23,7 @@ If you are new to Arlen, start with:
 ## Quick Start
 
 ```bash
-source /usr/GNUstep/System/Library/Makefiles/GNUstep.sh
+source tools/source_gnustep_env.sh
 ./bin/arlen doctor
 make all
 
@@ -35,6 +35,10 @@ cd MyApp
 ```
 
 Then open `http://127.0.0.1:3000/`.
+
+If you already use a managed GNUstep toolchain, you can source its env script
+first instead. The Arlen helper resolves `GNUSTEP_SH`, `GNUSTEP_MAKEFILES`,
+`gnustep-config`, and finally `/usr/GNUstep`.
 
 The default full scaffold gives you:
 
@@ -166,7 +170,7 @@ Optional contributor fast path:
 Initialize GNUstep in your shell:
 
 ```bash
-source /usr/GNUstep/System/Library/Makefiles/GNUstep.sh
+source tools/source_gnustep_env.sh
 ```
 
 Run bootstrap diagnostics before building:
@@ -179,6 +183,8 @@ CI note:
 - Arlen CI expects a clang-built GNUstep toolchain, not a generic GCC-oriented distro stack.
 - The workflow bootstrap entry point is `tools/ci/install_ci_dependencies.sh`.
 - Current self-hosted runners use `ARLEN_CI_GNUSTEP_STRATEGY=preinstalled` with the clang-built GNUstep toolchain installed at `/usr/GNUstep`.
+- Local contributor shells can use `tools/source_gnustep_env.sh`, which also
+  supports managed toolchains that export `GNUSTEP_SH` or `GNUSTEP_MAKEFILES`.
 - Use `ARLEN_CI_GNUSTEP_STRATEGY=apt` or `bootstrap` only when provisioning a runner that does not already carry that toolchain.
 
 Build framework tools and dev server:

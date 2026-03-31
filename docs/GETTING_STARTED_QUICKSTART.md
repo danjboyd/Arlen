@@ -11,7 +11,7 @@ possible.
 Initialize GNUstep:
 
 ```bash
-source /usr/GNUstep/System/Library/Makefiles/GNUstep.sh
+source /path/to/Arlen/tools/source_gnustep_env.sh
 ```
 
 ## 2. Verify Tooling

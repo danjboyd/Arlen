@@ -14,6 +14,10 @@ make docs-serve
 Open `build/docs/index.html` in your browser, or use `make docs-serve` for
 local hosting.
 
+Before running repo-local build/test/doc commands, source
+`/path/to/Arlen/tools/source_gnustep_env.sh` or source your active GNUstep
+toolchain env directly.
+
 ## New Developers
 
 - [First App Guide](FIRST_APP_GUIDE.md): shortest path to scaffold, run, and extend your first app.
@@ -67,6 +71,7 @@ local hosting.
 ## Contributor and Historical Docs
 
 - [Current Status](STATUS.md): latest checkpoint and verified milestone state.
+- [Platform Report Reconciliation (2026-03-31)](PLATFORM_REPORT_RECONCILIATION_2026-03-31.md): upstream closure note for the managed-GNUstep bootstrap bug reported from `iep-platform`.
 - [Session Handoff (2026-03-27)](SESSION_HANDOFF_2026-03-27.md): historical pause point before the Phase 22 closeout.
 - [Documentation Policy](DOCUMENTATION_POLICY.md): docs standards and review checklist.
 - [Phase 20 Roadmap](PHASE20_ROADMAP.md): completed data-layer depth pass.

@@ -33,6 +33,10 @@ Run bootstrap environment diagnostics without requiring a framework build.
 
 - delegated by `bin/arlen` directly to `bin/arlen-doctor` before any `make arlen`
 - intended for first-run toolchain validation (GNUstep/tooling presence)
+- resolves GNUstep shell init in this order: `GNUSTEP_SH`, `GNUSTEP_MAKEFILES`,
+  `gnustep-config --variable=GNUSTEP_MAKEFILES`, then `/usr/GNUstep`
+- verifies `dispatch/dispatch.h` is available to `clang` after GNUstep init so
+  managed toolchains without libdispatch headers fail early
 - `--env <name>`: include the target environment name in output (default `development`)
 - `--json`: emit structured JSON diagnostics
 
