@@ -142,10 +142,18 @@ static NSDictionary<NSString *, id> *ALNDataverseMetadataNormalizeAttribute(NSDi
 }
 
 static NSDictionary<NSString *, id> *ALNDataverseMetadataNormalizeLookup(NSDictionary *relationship) {
+  NSString *navigationPropertyName =
+      ALNDataverseMetadataTrimmedString(relationship[@"ReferencingEntityNavigationPropertyName"]);
+  if ([navigationPropertyName length] == 0) {
+    navigationPropertyName = ALNDataverseMetadataTrimmedString(relationship[@"NavigationPropertyName"]);
+  }
+  if ([navigationPropertyName length] == 0) {
+    navigationPropertyName = ALNDataverseMetadataTrimmedString(relationship[@"ReferencingAttribute"]);
+  }
   return @{
     @"schema_name" : ALNDataverseMetadataTrimmedString(relationship[@"SchemaName"]) ?: @"",
     @"referencing_attribute" : ALNDataverseMetadataTrimmedString(relationship[@"ReferencingAttribute"]) ?: @"",
-    @"navigation_property_name" : ALNDataverseMetadataTrimmedString(relationship[@"NavigationPropertyName"]) ?: @"",
+    @"navigation_property_name" : navigationPropertyName ?: @"",
     @"referenced_entity" : ALNDataverseMetadataTrimmedString(relationship[@"ReferencedEntity"]) ?: @"",
     @"referenced_attribute" : ALNDataverseMetadataTrimmedString(relationship[@"ReferencedAttribute"]) ?: @"",
   };
@@ -382,7 +390,10 @@ NSError *ALNDataverseMetadataMakeError(ALNDataverseMetadataErrorCode code,
                                                                                             withString:@"''"]];
     NSDictionary<NSString *, NSString *> *detailQuery = @{
       @"$select" : @"LogicalName,SchemaName,EntitySetName,PrimaryIdAttribute,PrimaryNameAttribute,DisplayName",
-      @"$expand" : @"Attributes($select=LogicalName,SchemaName,DisplayName,AttributeType,AttributeTypeName,IsPrimaryId,IsLogical,IsValidForCreate,IsValidForRead,IsValidForUpdate,RequiredLevel,Targets),Keys($select=LogicalName,KeyAttributes),ManyToOneRelationships($select=SchemaName,ReferencingAttribute,ReferencedEntity,ReferencedAttribute,NavigationPropertyName)",
+      // `Targets` is not selectable on the base AttributeMetadata expand against live Dataverse.
+      // Lookup/navigation metadata still comes from ManyToOneRelationships, and picklist enrichment
+      // is fetched separately via a cast query below.
+      @"$expand" : @"Attributes($select=LogicalName,SchemaName,DisplayName,AttributeType,AttributeTypeName,IsPrimaryId,IsLogical,IsValidForCreate,IsValidForRead,IsValidForUpdate,RequiredLevel),Keys($select=LogicalName,KeyAttributes),ManyToOneRelationships($select=SchemaName,ReferencingAttribute,ReferencedEntity,ReferencedAttribute,ReferencingEntityNavigationPropertyName)",
     };
     ALNDataverseResponse *response = [client performRequestWithMethod:@"GET"
                                                                  path:detailPath

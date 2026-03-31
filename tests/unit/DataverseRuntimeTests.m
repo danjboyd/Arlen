@@ -56,7 +56,7 @@
   NSDictionary<NSString *, NSString *> *snapshot = [self snapshotEnvironmentForNames:environmentNames];
 
   @try {
-    [self setEnvironmentValue:@"https://support.crm.dynamics.com/api/data/v9.2"
+    [self setEnvironmentValue:@"https://support.crm.dynamics.com"
                       forName:@"ARLEN_DATAVERSE_URL_SUPPORT"];
     [self setEnvironmentValue:@"support-tenant" forName:@"ARLEN_DATAVERSE_TENANT_ID_SUPPORT"];
     [self setEnvironmentValue:@"support-client" forName:@"ARLEN_DATAVERSE_CLIENT_ID_SUPPORT"];
@@ -92,6 +92,7 @@
     XCTAssertEqualObjects(supportClient.target.targetName, @"support");
     XCTAssertEqualObjects(supportClient.target.serviceRootURLString,
                           @"https://support.crm.dynamics.com/api/data/v9.2");
+    XCTAssertEqualObjects(supportClient.target.environmentURLString, @"https://support.crm.dynamics.com");
     XCTAssertEqual((NSUInteger)125, supportClient.target.pageSize);
     XCTAssertEqualWithAccuracy(30.0, supportClient.target.timeoutInterval, 0.001);
   } @finally {

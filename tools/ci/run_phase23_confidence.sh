@@ -14,6 +14,22 @@ parity_matrix="$repo_root/tests/fixtures/phase23/dataverse_perl_parity_matrix.js
 
 mkdir -p "$output_dir" "$live_smoke_output_dir" "$live_output_dir"
 
+dataverse_env_for_target() {
+  local base_name="$1"
+  local target_name="${2:-default}"
+  local normalized_target
+  normalized_target="$(printf '%s' "$target_name" | tr '[:upper:]' '[:lower:]')"
+  if [[ -n "$normalized_target" && "$normalized_target" != "default" ]]; then
+    local targeted_name="${base_name}_$(printf '%s' "$normalized_target" | tr '[:lower:]' '[:upper:]')"
+    local targeted_value="${!targeted_name:-}"
+    if [[ -n "$targeted_value" ]]; then
+      printf '%s\n' "$targeted_value"
+      return 0
+    fi
+  fi
+  printf '%s\n' "${!base_name:-}"
+}
+
 write_live_smoke_manifest() {
   local status="$1"
   local reason="${2:-}"
@@ -100,11 +116,22 @@ EOF
 }
 
 have_live_credentials() {
-  local service_root="${ARLEN_DATAVERSE_URL:-${ARLEN_DATAVERSE_SERVICE_ROOT:-}}"
+  local live_target="${ARLEN_PHASE23_DATAVERSE_TARGET:-default}"
+  local service_root
+  service_root="$(dataverse_env_for_target ARLEN_DATAVERSE_URL "$live_target")"
+  if [[ -z "$service_root" ]]; then
+    service_root="$(dataverse_env_for_target ARLEN_DATAVERSE_SERVICE_ROOT "$live_target")"
+  fi
+  local tenant_id
+  tenant_id="$(dataverse_env_for_target ARLEN_DATAVERSE_TENANT_ID "$live_target")"
+  local client_id
+  client_id="$(dataverse_env_for_target ARLEN_DATAVERSE_CLIENT_ID "$live_target")"
+  local client_secret
+  client_secret="$(dataverse_env_for_target ARLEN_DATAVERSE_CLIENT_SECRET "$live_target")"
   [[ -n "$service_root" &&
-     -n "${ARLEN_DATAVERSE_TENANT_ID:-}" &&
-     -n "${ARLEN_DATAVERSE_CLIENT_ID:-}" &&
-     -n "${ARLEN_DATAVERSE_CLIENT_SECRET:-}" ]]
+     -n "$tenant_id" &&
+     -n "$client_id" &&
+     -n "$client_secret" ]]
 }
 
 have_live_smoke_config() {

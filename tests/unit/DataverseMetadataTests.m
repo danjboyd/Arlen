@@ -117,6 +117,9 @@
   XCTAssertEqual((NSUInteger)3, transport.capturedRequests.count);
   XCTAssertTrue([transport.capturedRequests[0].URLString containsString:@"EntityDefinitions"]);
   XCTAssertTrue([transport.capturedRequests[1].URLString containsString:@"EntityDefinitions(LogicalName='account')"]);
+  XCTAssertFalse([transport.capturedRequests[1].URLString containsString:@"Targets"]);
+  XCTAssertFalse([transport.capturedRequests[1].URLString containsString:@"ReferencedAttribute,NavigationPropertyName"]);
+  XCTAssertTrue([transport.capturedRequests[1].URLString containsString:@"ReferencingEntityNavigationPropertyName"]);
   XCTAssertTrue([transport.capturedRequests[2].URLString containsString:@"PicklistAttributeMetadata"]);
 }
 

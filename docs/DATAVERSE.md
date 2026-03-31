@@ -79,6 +79,12 @@ Environment overrides are honored by both the runtime helper path and the CLI:
 Target-specific overrides append `_<TARGET>` in uppercase, for example
 `ARLEN_DATAVERSE_URL_SALES`.
 
+`ARLEN_DATAVERSE_URL` may be either the bare Dataverse environment URL
+(`https://example.crm.dynamics.com`) or the explicit Web API service root
+(`https://example.crm.dynamics.com/api/data/v9.2`). Arlen normalizes a bare
+environment URL to `/api/data/v9.2` automatically. `ARLEN_DATAVERSE_SERVICE_ROOT`
+can still be used when you want to be explicit.
+
 ## 3. Runtime Access
 
 Create a target and client directly when you only need the ArlenData surface:

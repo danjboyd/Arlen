@@ -739,6 +739,22 @@ NSError *ALNDataverseMakeError(ALNDataverseErrorCode code,
   return trimmed;
 }
 
++ (NSString *)normalizedServiceRootURLString:(NSString *)serviceRootURLString {
+  NSString *serviceRoot = ALNDataverseTrimmedString(serviceRootURLString);
+  if ([serviceRoot length] == 0) {
+    return nil;
+  }
+  NSString *trimmed = [serviceRoot hasSuffix:@"/"] ? [serviceRoot substringToIndex:([serviceRoot length] - 1)] : serviceRoot;
+  NSString *lowercase = [trimmed lowercaseString];
+  if ([lowercase rangeOfString:@"/api/data/"].location != NSNotFound) {
+    return trimmed;
+  }
+  if ([lowercase hasSuffix:@"/api"]) {
+    return [trimmed stringByAppendingString:@"/data/v9.2"];
+  }
+  return [trimmed stringByAppendingString:@"/api/data/v9.2"];
+}
+
 + (NSArray<NSString *> *)configuredTargetNamesFromConfig:(NSDictionary *)config {
   NSMutableOrderedSet<NSString *> *targets = [NSMutableOrderedSet orderedSet];
   NSDictionary *root = [config[@"dataverse"] isKindOfClass:[NSDictionary class]] ? config[@"dataverse"] : nil;
@@ -858,7 +874,7 @@ NSError *ALNDataverseMakeError(ALNDataverseErrorCode code,
   if (error != NULL) {
     *error = nil;
   }
-  NSString *serviceRoot = ALNDataverseTrimmedString(serviceRootURLString);
+  NSString *serviceRoot = [[self class] normalizedServiceRootURLString:serviceRootURLString];
   NSString *normalizedTenant = ALNDataverseTrimmedString(tenantID);
   NSString *normalizedClientID = ALNDataverseTrimmedString(clientID);
   NSString *normalizedSecret = ALNDataverseTrimmedString(clientSecret);

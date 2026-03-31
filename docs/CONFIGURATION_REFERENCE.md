@@ -129,6 +129,11 @@ The Dataverse runtime helper and CLI/codegen paths also read environment overrid
 Target-specific overrides append `_<TARGET>` in uppercase, for example
 `ARLEN_DATAVERSE_URL_SALES`.
 
+For environment overrides, `ARLEN_DATAVERSE_URL` may be either a bare
+environment URL like `https://example.crm.dynamics.com` or the explicit Web API
+service root. Arlen normalizes a bare environment URL to
+`/api/data/v9.2` automatically.
+
 ## 5. Session and CSRF
 
 Session config:

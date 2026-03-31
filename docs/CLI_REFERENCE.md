@@ -259,6 +259,9 @@ Fetch Dataverse metadata or normalize a saved metadata fixture and generate type
   - `ARLEN_DATAVERSE_MAX_RETRIES`
   - `ARLEN_DATAVERSE_TIMEOUT`
 - target-specific environment overrides append `_<TARGET>` (for example `ARLEN_DATAVERSE_URL_SALES`)
+- `ARLEN_DATAVERSE_URL` may be the bare Dataverse environment URL or the full
+  Web API service root; Arlen normalizes a bare environment URL to
+  `/api/data/v9.2`
 - `--target <name>`: select a named Dataverse target (default: `default`)
 - `--service-root`, `--tenant-id`, `--client-id`, `--client-secret`: explicit live credential overrides
 - `--entity <logical_name>`: repeat to limit live metadata fetch/codegen to specific logical table names
