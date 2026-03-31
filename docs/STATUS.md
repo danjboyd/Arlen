@@ -1,6 +1,21 @@
 # Arlen Status Checkpoint
 
-Last updated: 2026-03-30
+Last updated: 2026-03-31
+
+## Leaving Off (2026-03-31)
+
+- Phase 23 is now planned:
+  - added `docs/PHASE23_ROADMAP.md`
+  - scoped `23A-23G` around runtime-inactive-by-default Dataverse Web API
+    integration, OData query composition, write semantics, metadata/codegen,
+    app wiring, diagnostics, and docs closeout
+- Phase 23 planning decisions recorded at this checkpoint:
+  - Arlen will target the Dataverse Web API rather than Microsoft Graph as the
+    primary API contract
+  - the Dataverse integration will not ship as an Arlen module
+  - the Dataverse integration will remain compiled in but runtime-inactive
+    unless explicitly configured or instantiated
+- No implementation work has started yet beyond roadmap/status planning docs.
 
 ## Leaving Off (2026-03-30)
 
@@ -433,9 +448,12 @@ entries, not current plan-of-record items.
   request harnesses, shared request/pipeline assertions, explicit async DB
   ownership rules, template-suite decomposition, raw protocol corpus replay,
   generated-app matrix coverage, and focused contributor rerun lanes)
-- Phase 22: planned (`22A-22G` scoped on 2026-03-27 for newcomer-first
+- Phase 22: complete (`22A-22G` delivered on 2026-03-30 for newcomer-first
   onboarding cleanup, docs/code parity hardening, app-author guides,
   module/lite-mode guidance, plugin/frontend guides, and docs quality closeout)
+- Phase 23: planned (`23A-23G` scoped on 2026-03-31 for runtime-inactive-by-default
+  Dataverse Web API integration, OData query composition, write semantics,
+  metadata/codegen, app/runtime wiring, diagnostics, and docs closeout)
 
 ## Completed Today (2026-03-26)
 
