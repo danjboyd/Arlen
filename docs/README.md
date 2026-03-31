@@ -23,6 +23,7 @@ local hosting.
 - [Configuration Reference](CONFIGURATION_REFERENCE.md): config keys app authors touch first.
 - [Lite Mode Guide](LITE_MODE_GUIDE.md): when to choose lite mode and how to grow beyond it.
 - [Toolchain Matrix](TOOLCHAIN_MATRIX.md): known-good onboarding/runtime baseline.
+- [Windows CLANG64 Preview](WINDOWS_CLANG64.md): native Windows/MSYS2 `CLANG64` Phase 24 workflow and current support scope.
 - [CLI Reference](CLI_REFERENCE.md): command reference for `arlen`, `boomhauer`, and helper scripts.
 
 ## App Authoring

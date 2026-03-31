@@ -12,6 +12,34 @@ static NSString *ALNModuleTrim(id value) {
   return [(NSString *)value stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
 }
 
+static BOOL ALNModulePathLooksLikeWindowsDriveAbsolute(NSString *path) {
+  if (![path isKindOfClass:[NSString class]] || [path length] < 3) {
+    return NO;
+  }
+  unichar drive = [path characterAtIndex:0];
+  unichar colon = [path characterAtIndex:1];
+  unichar slash = [path characterAtIndex:2];
+  return [[NSCharacterSet letterCharacterSet] characterIsMember:drive] &&
+         colon == ':' &&
+         (slash == '/' || slash == '\\');
+}
+
+static BOOL ALNModulePathIsAbsolute(NSString *path) {
+  if (![path isKindOfClass:[NSString class]] || [path length] == 0) {
+    return NO;
+  }
+  return [path hasPrefix:@"/"] ||
+         [path hasPrefix:@"\\\\"] ||
+         [path hasPrefix:@"//"] ||
+         ALNModulePathLooksLikeWindowsDriveAbsolute(path);
+}
+
+static NSString *ALNModuleNormalizePath(NSString *path) {
+  NSString *value = [path isKindOfClass:[NSString class]] ? path : @"";
+  value = [value stringByReplacingOccurrencesOfString:@"\\" withString:@"/"];
+  return [value stringByStandardizingPath];
+}
+
 static NSError *ALNModuleError(NSInteger code,
                                NSString *message,
                                NSString *detail,
@@ -68,13 +96,13 @@ static NSString *ALNModuleResolvePath(NSString *basePath,
     candidate = defaultRelativePath ?: @"";
   }
   if ([candidate length] == 0) {
-    return [basePath stringByStandardizingPath];
+    return ALNModuleNormalizePath(basePath);
   }
   NSString *expanded = [candidate stringByExpandingTildeInPath];
-  if ([expanded hasPrefix:@"/"]) {
-    return [expanded stringByStandardizingPath];
+  if (ALNModulePathIsAbsolute(expanded)) {
+    return ALNModuleNormalizePath(expanded);
   }
-  return [[basePath stringByAppendingPathComponent:expanded] stringByStandardizingPath];
+  return ALNModuleNormalizePath([basePath stringByAppendingPathComponent:expanded]);
 }
 
 static BOOL ALNModuleIdentifierIsValid(NSString *identifier) {

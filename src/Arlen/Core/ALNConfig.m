@@ -1,7 +1,12 @@
 #import "ALNConfig.h"
 #import "ALNModuleSystem.h"
 
+#if defined(_WIN32)
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#else
 #import <arpa/inet.h>
+#endif
 #import <stdlib.h>
 
 static NSString *const ALNConfigErrorDomain = @"Arlen.Config.Error";

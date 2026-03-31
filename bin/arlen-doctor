@@ -42,12 +42,34 @@ script_dir="$(cd "$(dirname "$script_path")" && pwd)"
 repo_root="$(cd "$script_dir/.." && pwd)"
 app_root="$PWD"
 
+normalize_input_path() {
+  local raw="$1"
+  if [[ -z "$raw" ]]; then
+    return 1
+  fi
+
+  if command -v cygpath >/dev/null 2>&1; then
+    if [[ "$raw" =~ ^[A-Za-z]:[\\/].* ]] || [[ "$raw" =~ ^\\\\ ]]; then
+      cygpath -u "$raw"
+      return 0
+    fi
+  fi
+
+  printf '%s\n' "$raw"
+}
+
+is_absolute_path() {
+  local raw="$1"
+  [[ "$raw" = /* ]] || [[ "$raw" =~ ^[A-Za-z]:[\\/].* ]] || [[ "$raw" =~ ^\\\\ ]]
+}
+
 to_absolute_path() {
   local raw="$1"
   if [[ -z "$raw" ]]; then
     return 1
   fi
-  if [[ "$raw" = /* ]]; then
+  raw="$(normalize_input_path "$raw")"
+  if is_absolute_path "$raw"; then
     printf '%s\n' "$raw"
   else
     printf '%s\n' "$app_root/$raw"
@@ -71,6 +93,39 @@ find_framework_root() {
     [[ "$parent" != "$candidate" ]] || break
     candidate="$parent"
   done
+  return 1
+}
+
+resolve_gnustep_script() {
+  local candidate=""
+  local config_makefiles=""
+
+  if [[ -n "${GNUSTEP_SH:-}" ]] && [[ -f "${GNUSTEP_SH}" ]]; then
+    printf '%s\n' "${GNUSTEP_SH}"
+    return 0
+  fi
+  if [[ -n "${GNUSTEP_MAKEFILES:-}" ]] && [[ -f "${GNUSTEP_MAKEFILES}/GNUstep.sh" ]]; then
+    printf '%s\n' "${GNUSTEP_MAKEFILES}/GNUstep.sh"
+    return 0
+  fi
+  if command -v gnustep-config >/dev/null 2>&1; then
+    config_makefiles="$(gnustep-config --variable=GNUSTEP_MAKEFILES 2>/dev/null || true)"
+    if [[ -n "$config_makefiles" && -f "$config_makefiles/GNUstep.sh" ]]; then
+      printf '%s\n' "$config_makefiles/GNUstep.sh"
+      return 0
+    fi
+  fi
+
+  for candidate in \
+    /clang64/share/GNUstep/Makefiles/GNUstep.sh \
+    /usr/GNUstep/System/Library/Makefiles/GNUstep.sh
+  do
+    if [[ -f "$candidate" ]]; then
+      printf '%s\n' "$candidate"
+      return 0
+    fi
+  done
+
   return 1
 }
 
@@ -126,12 +181,12 @@ else
     "Run 'arlen new <AppName>' if you are bootstrapping a new app."
 fi
 
-gnustep_script="/usr/GNUstep/System/Library/Makefiles/GNUstep.sh"
-if [[ -f "$gnustep_script" ]]; then
+gnustep_script="$(resolve_gnustep_script || true)"
+if [[ -n "$gnustep_script" && -f "$gnustep_script" ]]; then
   add_check "gnustep_script" "pass" "GNUstep script present: $gnustep_script"
 else
-  add_check "gnustep_script" "fail" "missing GNUstep script: $gnustep_script" \
-    "Install GNUstep development packages."
+  add_check "gnustep_script" "fail" "missing GNUstep script" \
+    "Enter the GNUstep toolchain first (for Windows use scripts/run_clang64.ps1)."
 fi
 
 check_command() {
@@ -150,29 +205,33 @@ check_command() {
 check_command "clang" "fail" "Install compiler toolchain and ensure PATH is configured."
 check_command "make" "fail" "Install make and ensure PATH is configured."
 check_command "bash" "fail" "Install bash and ensure PATH is configured."
-check_command "xctest" "warn" "Install Debian package 'tools-xctest' for test execution."
+check_command "xctest" "warn" "Install GNUstep XCTest support in the active toolchain for test execution."
 check_command "python3" "warn" "Install python3 for helper scripts and JSON doctor output."
 check_command "curl" "warn" "Install curl for integration smoke checks."
 
-if [[ -f "$gnustep_script" ]]; then
+if [[ -n "$gnustep_script" && -f "$gnustep_script" ]]; then
   if bash -lc "source '$gnustep_script' >/dev/null 2>&1 && gnustep-config --objc-flags >/dev/null"; then
     add_check "gnustep_config" "pass" "gnustep-config responded successfully"
   else
     add_check "gnustep_config" "fail" "failed running gnustep-config after sourcing GNUstep.sh" \
-      "Verify GNUstep installation and shell init."
+      "Verify GNUstep installation and shell init (Windows preview uses scripts/run_clang64.ps1)."
   fi
 fi
 
-if command -v ldconfig >/dev/null 2>&1; then
+if command -v pkg-config >/dev/null 2>&1 && pkg-config --exists libpq 2>/dev/null; then
+  add_check "libpq" "pass" "libpq detected via pkg-config"
+elif command -v pg_config >/dev/null 2>&1; then
+  add_check "libpq" "pass" "libpq detected via pg_config ($(pg_config --includedir 2>/dev/null || echo pg_config))"
+elif command -v ldconfig >/dev/null 2>&1; then
   libpq_line="$(ldconfig -p 2>/dev/null | grep -m1 'libpq\\.so' || true)"
   if [[ -n "$libpq_line" ]]; then
     add_check "libpq" "pass" "libpq available: $libpq_line"
   else
-    add_check "libpq" "warn" "libpq not detected via ldconfig" \
+    add_check "libpq" "warn" "libpq not detected" \
       "Install PostgreSQL client libraries (libpq) for ALNPg and migrations."
   fi
 else
-  add_check "libpq" "warn" "ldconfig unavailable; skipping libpq detection" \
+  add_check "libpq" "warn" "libpq detection skipped" \
     "Verify libpq availability manually if PostgreSQL support is required."
 fi
 

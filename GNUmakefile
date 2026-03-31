@@ -1,8 +1,28 @@
-SHELL := /bin/bash
+SHELL := bash
 .RECIPEPREFIX = >
 
 ROOT_DIR := $(CURDIR)
-GNUSTEP_SH := /usr/GNUstep/System/Library/Makefiles/GNUstep.sh
+MSYSTEM_NAME := $(strip $(MSYSTEM))
+GNUSTEP_HOST_OS := $(strip $(shell gnustep-config --variable=GNUSTEP_HOST_OS 2>/dev/null))
+ARLEN_WINDOWS_PREVIEW ?= 0
+ifneq ($(filter CLANG64 MINGW64 UCRT64,$(MSYSTEM_NAME)),)
+ARLEN_WINDOWS_PREVIEW := 1
+endif
+ifneq (,$(findstring mingw,$(GNUSTEP_HOST_OS)))
+ARLEN_WINDOWS_PREVIEW := 1
+endif
+
+GNUSTEP_MAKEFILES_FROM_ENV := $(strip $(GNUSTEP_MAKEFILES))
+GNUSTEP_MAKEFILES_FROM_CONFIG := $(strip $(shell gnustep-config --variable=GNUSTEP_MAKEFILES 2>/dev/null))
+GNUSTEP_SH_FROM_ENV := $(strip $(GNUSTEP_SH))
+GNUSTEP_SH_FROM_MAKEFILES_ENV := $(if $(GNUSTEP_MAKEFILES_FROM_ENV),$(GNUSTEP_MAKEFILES_FROM_ENV)/GNUstep.sh)
+GNUSTEP_SH_FROM_CONFIG := $(if $(GNUSTEP_MAKEFILES_FROM_CONFIG),$(GNUSTEP_MAKEFILES_FROM_CONFIG)/GNUstep.sh)
+DEFAULT_GNUSTEP_SH := $(firstword $(wildcard $(GNUSTEP_SH_FROM_ENV) $(GNUSTEP_SH_FROM_MAKEFILES_ENV) $(GNUSTEP_SH_FROM_CONFIG) /clang64/share/GNUstep/Makefiles/GNUstep.sh /usr/GNUstep/System/Library/Makefiles/GNUstep.sh))
+GNUSTEP_SH ?= $(DEFAULT_GNUSTEP_SH)
+ifeq ($(strip $(GNUSTEP_SH)),)
+$(error Could not resolve GNUSTEP_SH. Set GNUSTEP_SH or enter the toolchain with scripts/run_clang64.ps1)
+endif
+
 BUILD_DIR := $(ROOT_DIR)/build
 OBJ_DIR := $(BUILD_DIR)/obj
 LIB_DIR := $(BUILD_DIR)/lib
@@ -37,7 +57,13 @@ TECH_DEMO_TEMPLATE_DIRS := $(shell if [ -d $(TECH_DEMO_TEMPLATE_ROOT) ]; then fi
 MODULE_TEMPLATE_FILES := $(shell find modules -type f -path '*/Resources/Templates/*.html.eoc' 2>/dev/null | sort)
 MODULE_TEMPLATE_DIRS := $(shell if [ -d modules ]; then find modules -type d | sort; fi)
 
-FRAMEWORK_OBJC_SRCS := $(shell find src -type f -name '*.m' | sort)
+FRAMEWORK_ALL_OBJC_SRCS := $(shell find src -type f -name '*.m' | sort)
+WINDOWS_PREVIEW_FRAMEWORK_OBJC_SRCS := src/Arlen/Core/ALNConfig.m src/Arlen/Core/ALNModuleSystem.m src/Arlen/MVC/Template/ALNEOCRuntime.m src/Arlen/MVC/Template/ALNEOCTranspiler.m src/Arlen/Support/ALNJSONSerialization.m
+ifeq ($(ARLEN_WINDOWS_PREVIEW),1)
+FRAMEWORK_OBJC_SRCS := $(WINDOWS_PREVIEW_FRAMEWORK_OBJC_SRCS)
+else
+FRAMEWORK_OBJC_SRCS := $(FRAMEWORK_ALL_OBJC_SRCS)
+endif
 MODULE_SRCS := $(shell find modules -type f -path '*/Sources/*.m' 2>/dev/null | sort)
 ARLEN_ENABLE_YYJSON ?= 1
 ARLEN_ENABLE_LLHTTP ?= 1
@@ -62,7 +88,11 @@ else
 LLHTTP_C_SRCS :=
 endif
 ARGON2_C_SRCS := src/Arlen/Support/third_party/argon2/src/argon2.c src/Arlen/Support/third_party/argon2/src/core.c src/Arlen/Support/third_party/argon2/src/encoding.c src/Arlen/Support/third_party/argon2/src/ref.c src/Arlen/Support/third_party/argon2/src/blake2/blake2b.c
+ifeq ($(ARLEN_WINDOWS_PREVIEW),1)
+FRAMEWORK_C_SRCS := $(YYJSON_C_SRCS)
+else
 FRAMEWORK_C_SRCS := $(YYJSON_C_SRCS) $(LLHTTP_C_SRCS) $(ARGON2_C_SRCS)
+endif
 FRAMEWORK_SRCS := $(FRAMEWORK_OBJC_SRCS) $(FRAMEWORK_C_SRCS)
 ARLEN_DATA_SRCS := $(shell find src/Arlen/Data -type f -name '*.m' | sort)
 JSON_SERIALIZATION_SRCS := src/Arlen/Support/ALNJSONSerialization.m $(YYJSON_C_SRCS)
@@ -102,14 +132,18 @@ PHASE20_ROUTING_TEST_SRCS := tests/phase20/Phase20RoutingPoolFocusedTests.m
 PHASE21_TEMPLATE_TEST_SRCS := tests/unit/TemplateParserTests.m tests/unit/TemplateCodegenTests.m tests/unit/TemplateSecurityTests.m tests/unit/TemplateRegressionTests.m
 
 FRAMEWORK_MODULE_INCLUDE_FLAGS := $(addprefix -I,$(shell find modules -mindepth 2 -maxdepth 2 -type d -name 'Sources' 2>/dev/null | sort))
-INCLUDE_FLAGS := -Isrc -Isrc/Arlen -Isrc/Arlen/Core -Isrc/Arlen/Data -Isrc/Arlen/HTTP -Isrc/Arlen/MVC/Controller -Isrc/Arlen/MVC/Middleware -Isrc/Arlen/MVC/Routing -Isrc/Arlen/MVC/Template -Isrc/Arlen/MVC/View -Isrc/Arlen/Support -Isrc/Arlen/Support/third_party/argon2/include -Isrc/Arlen/Support/third_party/argon2/src -Isrc/MojoObjc -Isrc/MojoObjc/Core -Isrc/MojoObjc/Data -Isrc/MojoObjc/HTTP -Isrc/MojoObjc/MVC/Controller -Isrc/MojoObjc/MVC/Middleware -Isrc/MojoObjc/MVC/Routing -Isrc/MojoObjc/MVC/Template -Isrc/MojoObjc/MVC/View -Isrc/MojoObjc/Support $(FRAMEWORK_MODULE_INCLUDE_FLAGS) -I/usr/include/postgresql
+POSTGRESQL_INCLUDE_FLAGS := $(shell pkg-config --cflags-only-I libpq 2>/dev/null)
+ifeq ($(strip $(POSTGRESQL_INCLUDE_FLAGS)),)
+POSTGRESQL_INCLUDE_FLAGS := $(foreach dir,$(wildcard /clang64/include/postgresql /usr/include/postgresql),-I$(dir))
+endif
+INCLUDE_FLAGS := -Isrc -Isrc/Arlen -Isrc/Arlen/Core -Isrc/Arlen/Data -Isrc/Arlen/HTTP -Isrc/Arlen/MVC/Controller -Isrc/Arlen/MVC/Middleware -Isrc/Arlen/MVC/Routing -Isrc/Arlen/MVC/Template -Isrc/Arlen/MVC/View -Isrc/Arlen/Support -Isrc/Arlen/Support/third_party/argon2/include -Isrc/Arlen/Support/third_party/argon2/src -Isrc/MojoObjc -Isrc/MojoObjc/Core -Isrc/MojoObjc/Data -Isrc/MojoObjc/HTTP -Isrc/MojoObjc/MVC/Controller -Isrc/MojoObjc/MVC/Middleware -Isrc/MojoObjc/MVC/Routing -Isrc/MojoObjc/MVC/Template -Isrc/MojoObjc/MVC/View -Isrc/MojoObjc/Support $(FRAMEWORK_MODULE_INCLUDE_FLAGS) $(POSTGRESQL_INCLUDE_FLAGS)
 EXTRA_OBJC_FLAGS ?=
 ARC_REQUIRED_FLAG := -fobjc-arc
 PIC_FLAG := -fPIC
-FEATURE_FLAGS := -DARLEN_ENABLE_YYJSON=$(ARLEN_ENABLE_YYJSON) -DARLEN_ENABLE_LLHTTP=$(ARLEN_ENABLE_LLHTTP)
+FEATURE_FLAGS := -DARLEN_ENABLE_YYJSON=$(ARLEN_ENABLE_YYJSON) -DARLEN_ENABLE_LLHTTP=$(ARLEN_ENABLE_LLHTTP) -DARLEN_WINDOWS_PREVIEW=$(ARLEN_WINDOWS_PREVIEW)
 THIRD_PARTY_FEATURE_FLAGS := -DARGON2_NO_THREADS=1
 COMMON_COMPILE_FLAGS := $(FEATURE_FLAGS) $(THIRD_PARTY_FEATURE_FLAGS) $(PIC_FLAG) $(EXTRA_OBJC_FLAGS)
-BUILD_FLAGS_SENTINEL_INPUT := GNUSTEP_SH=$(GNUSTEP_SH)|ARC_REQUIRED_FLAG=$(ARC_REQUIRED_FLAG)|PIC_FLAG=$(PIC_FLAG)|FEATURE_FLAGS=$(FEATURE_FLAGS)|THIRD_PARTY_FEATURE_FLAGS=$(THIRD_PARTY_FEATURE_FLAGS)|EXTRA_OBJC_FLAGS=$(EXTRA_OBJC_FLAGS)
+BUILD_FLAGS_SENTINEL_INPUT := GNUSTEP_SH=$(GNUSTEP_SH)|ARLEN_WINDOWS_PREVIEW=$(ARLEN_WINDOWS_PREVIEW)|POSTGRESQL_INCLUDE_FLAGS=$(POSTGRESQL_INCLUDE_FLAGS)|ARC_REQUIRED_FLAG=$(ARC_REQUIRED_FLAG)|PIC_FLAG=$(PIC_FLAG)|FEATURE_FLAGS=$(FEATURE_FLAGS)|THIRD_PARTY_FEATURE_FLAGS=$(THIRD_PARTY_FEATURE_FLAGS)|EXTRA_OBJC_FLAGS=$(EXTRA_OBJC_FLAGS)
 BUILD_FLAGS_SENTINEL_HASH := $(shell printf '%s\n' '$(BUILD_FLAGS_SENTINEL_INPUT)' | sha256sum | awk '{print $$1}')
 BUILD_FLAGS_SENTINEL := $(BUILD_DIR)/.build-flags.$(BUILD_FLAGS_SENTINEL_HASH)
 ifneq ($(findstring -fno-objc-arc,$(EXTRA_OBJC_FLAGS)),)
@@ -123,7 +157,16 @@ endif
 ifneq ($(findstring -fno-objc-arc,$(OBJC_FLAGS)),)
 $(error OBJC_FLAGS cannot disable ARC)
 endif
-BASE_LINK_LIBS := $$(gnustep-config --base-libs) -ldl -lcrypto -ldispatch
+GNUSTEP_SYSTEM_LIBS_DIR := $(strip $(shell gnustep-config --variable=GNUSTEP_SYSTEM_LIBRARIES 2>/dev/null))
+ARLEN_PLATFORM_LINK_DIRS :=
+ifneq ($(GNUSTEP_SYSTEM_LIBS_DIR),)
+ARLEN_PLATFORM_LINK_DIRS += -L$(GNUSTEP_SYSTEM_LIBS_DIR)
+endif
+ARLEN_PLATFORM_LINK_LIBS := -ldl
+ifeq ($(ARLEN_WINDOWS_PREVIEW),1)
+ARLEN_PLATFORM_LINK_LIBS := -lws2_32
+endif
+BASE_LINK_LIBS := $(ARLEN_PLATFORM_LINK_DIRS) $$(gnustep-config --base-libs) -lcrypto -ldispatch $(ARLEN_PLATFORM_LINK_LIBS)
 XCTEST_LINK_LIBS := $(BASE_LINK_LIBS) -lXCTest
 
 ROOT_TEMPLATE_MANIFEST := $(GEN_DIR)/manifest.json
@@ -239,9 +282,15 @@ PHASE21_TEMPLATE_TEST_OBJS := $(call objs_from,$(PHASE21_TEMPLATE_TEST_SRCS))
 ALL_OBJECTS := $(sort $(FRAMEWORK_OBJS) $(MODULE_OBJS) $(ROOT_GENERATED_OBJS) $(TECH_DEMO_GENERATED_OBJS) $(MODULE_GENERATED_OBJS) $(EOCC_ENTRY_OBJS) $(ARLEN_ENTRY_OBJS) $(BOOMHAUER_ENTRY_OBJS) $(SMOKE_RENDER_ENTRY_OBJS) $(TECH_DEMO_SERVER_ENTRY_OBJS) $(API_REFERENCE_SERVER_ENTRY_OBJS) $(AUTH_PRIMITIVES_SERVER_ENTRY_OBJS) $(MIGRATION_SAMPLE_SERVER_ENTRY_OBJS) $(ARLEN_DATA_EXAMPLE_ENTRY_OBJS) $(JSON_PERF_BENCH_ENTRY_OBJS) $(DISPATCH_PERF_BENCH_ENTRY_OBJS) $(HTTP_PARSE_PERF_BENCH_ENTRY_OBJS) $(ROUTE_MATCH_PERF_BENCH_ENTRY_OBJS) $(BACKEND_CONTRACT_MATRIX_ENTRY_OBJS) $(UNIT_TEST_OBJS) $(INTEGRATION_TEST_OBJS) $(BROWSER_ERROR_AUDIT_TEST_OBJS) $(TEST_SHARED_OBJS) $(PHASE20_SQL_BUILDER_TEST_OBJS) $(PHASE20_SCHEMA_TEST_OBJS) $(PHASE20_POSTGRES_LIVE_TEST_OBJS) $(PHASE20_MSSQL_LIVE_TEST_OBJS) $(PHASE20_ROUTING_TEST_OBJS) $(PHASE21_TEMPLATE_TEST_OBJS))
 ALL_DEPFILES := $(ALL_OBJECTS:.o=.d)
 
-.PHONY: all framework-artifacts eocc transpile module-transpile tech-demo-transpile generated-compile arlen boomhauer tech-demo-server api-reference-server auth-primitives-server migration-sample-server arlen-data-example json-perf-bench dispatch-perf-bench http-parse-perf-bench route-match-perf-bench backend-contract-matrix test-data-layer dev-server tech-demo smoke-render smoke routes build-tests test test-unit test-unit-filter test-integration test-integration-filter browser-error-audit phase20-sql-builder-tests phase20-schema-tests phase20-postgres-live-tests phase20-mssql-live-tests phase20-routing-tests phase20-focused phase21-template-tests phase21-protocol-tests phase21-generated-app-tests phase21-focused phase21-confidence perf perf-fast ci-perf-smoke parity-phaseb perf-phasec perf-phased deploy-smoke phase5e-confidence phase12-confidence phase13-confidence phase14-confidence phase15-confidence phase16-confidence phase19-confidence phase20-confidence ci-quality ci-sanitizers ci-fault-injection ci-release-certification ci-json-abstraction ci-json-perf ci-dispatch-perf ci-http-parse-perf ci-route-match-perf ci-backend-parity-matrix ci-protocol-adversarial ci-syscall-faults ci-allocation-faults ci-soak ci-chaos-restart ci-static-analysis ci-blob-throughput ci-phase11-protocol-adversarial ci-phase11-fuzz ci-phase11-live-adversarial ci-phase11-sanitizers ci-phase11 ci-docs ci-benchmark-contracts check docs-api docs-html docs-serve clean
+.PHONY: all clang64-preview framework-artifacts eocc transpile module-transpile tech-demo-transpile generated-compile arlen boomhauer tech-demo-server api-reference-server auth-primitives-server migration-sample-server arlen-data-example json-perf-bench dispatch-perf-bench http-parse-perf-bench route-match-perf-bench backend-contract-matrix test-data-layer dev-server tech-demo smoke-render smoke routes build-tests test test-unit test-unit-filter test-integration test-integration-filter browser-error-audit phase20-sql-builder-tests phase20-schema-tests phase20-postgres-live-tests phase20-mssql-live-tests phase20-routing-tests phase20-focused phase21-template-tests phase21-protocol-tests phase21-generated-app-tests phase21-focused phase21-confidence perf perf-fast ci-perf-smoke parity-phaseb perf-phasec perf-phased deploy-smoke phase5e-confidence phase12-confidence phase13-confidence phase14-confidence phase15-confidence phase16-confidence phase19-confidence phase20-confidence ci-quality ci-sanitizers ci-fault-injection ci-release-certification ci-json-abstraction ci-json-perf ci-dispatch-perf ci-http-parse-perf ci-route-match-perf ci-backend-parity-matrix ci-protocol-adversarial ci-syscall-faults ci-allocation-faults ci-soak ci-chaos-restart ci-static-analysis ci-blob-throughput ci-phase11-protocol-adversarial ci-phase11-fuzz ci-phase11-live-adversarial ci-phase11-sanitizers ci-phase11 ci-docs ci-benchmark-contracts check docs-api docs-html docs-serve clean
 
+ifeq ($(ARLEN_WINDOWS_PREVIEW),1)
+all: framework-artifacts arlen
+else
 all: eocc transpile generated-compile arlen boomhauer
+endif
+
+clang64-preview: framework-artifacts arlen
 
 $(BUILD_DIR):
 >mkdir -p $(BUILD_DIR)

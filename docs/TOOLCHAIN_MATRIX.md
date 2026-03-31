@@ -12,6 +12,13 @@ make test-unit
 make test-integration
 ```
 
+For the native Windows preview on branch `windows/clang64`, use the checked-in
+MSYS2 launcher instead:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\run_clang64.ps1 -InnerCommand "make all"
+```
+
 ## Known-Good Baseline (2026-02-20)
 
 | Component | Command | Observed baseline |
@@ -26,6 +33,26 @@ make test-integration
 | GNUstep config tool | `source GNUstep.sh && command -v gnustep-config` | `/usr/GNUstep/System/Tools/gnustep-config` |
 | XCTest runner | `command -v xctest` | `/usr/GNUstep/System/Tools/xctest` |
 
+## Windows Preview Baseline (2026-03-31)
+
+This is the first-pass native Windows contract for Phase 24A-D. It is a
+preview baseline, not parity with Linux.
+
+| Component | Command | Expected baseline |
+| --- | --- | --- |
+| Host shell | `powershell` | launches `scripts/run_clang64.ps1` |
+| MSYS2 shell | `bash -lc 'echo $MSYSTEM'` | `CLANG64` |
+| GNUstep tooling script | `test -f /clang64/share/GNUstep/Makefiles/GNUstep.sh` | Present |
+| GNUstep config tool | `command -v gnustep-config` | available inside `CLANG64` shell |
+| Compiler | `clang --version` | available inside `CLANG64` shell |
+| Build tool | `make --version` | available inside `CLANG64` shell |
+| XCTest runner | `command -v xctest` | available inside `CLANG64` shell |
+| Preview build | `make all` | builds `eocc`, preview `libArlenFramework.a`, and `arlen` |
+
+Related guide:
+
+- `docs/WINDOWS_CLANG64.md`
+
 ## CI Toolchain Contract
 
 Arlen CI requires a clang-built GNUstep stack. In practice that means:
@@ -33,6 +60,12 @@ Arlen CI requires a clang-built GNUstep stack. In practice that means:
 - `gnustep-config --objc-flags` includes `-fobjc-runtime=gnustep-2.2`
 - `clang`, `gnustep-config`, and `xctest` are all available after sourcing `GNUstep.sh`
 - the toolchain is installed at `/usr/GNUstep` unless a workflow explicitly overrides `GNUSTEP_SH`
+
+For the Windows preview branch, the checked-in bootstrap contract is:
+
+- PowerShell outer launcher: `scripts/run_clang64.ps1`
+- MSYS inner launcher: `scripts/run_clang64.sh`
+- GNUstep bootstrap path: `/clang64/share/GNUstep/Makefiles/GNUstep.sh`
 
 The workflow bootstrap entry point is:
 
@@ -67,7 +100,7 @@ Optional contributor override:
 - required tool commands (`clang`, `make`, `bash`)
 - recommended tool commands (`xctest`, `python3`, `curl`)
 - `gnustep-config` execution after sourcing GNUstep
-- `libpq` presence check (when `ldconfig` is available)
+- `libpq` presence check (`pkg-config`, `pg_config`, or `ldconfig`, depending on platform)
 - presence of `docs/TOOLCHAIN_MATRIX.md` itself so the known-good baseline
   remains discoverable
 

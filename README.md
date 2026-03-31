@@ -18,6 +18,7 @@ If you are new to Arlen, start with:
 - `docs/GETTING_STARTED_TRACKS.md`
 - `docs/APP_AUTHORING_GUIDE.md`
 - `docs/LITE_MODE_GUIDE.md`
+- `docs/WINDOWS_CLANG64.md` for the native Windows Phase 24 preview
 - `docs/README.md`
 
 ## Quick Start
@@ -35,6 +36,28 @@ cd MyApp
 ```
 
 Then open `http://127.0.0.1:3000/`.
+
+## Windows Preview
+
+Native Windows support is being developed on branch `windows/clang64` as Phase
+24. The current first-pass preview is CLI-first on MSYS2 `CLANG64`, not full
+runtime parity yet.
+
+Use the checked-in PowerShell launcher to enter the supported toolchain:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\run_clang64.ps1
+```
+
+Then build the preview slice:
+
+```sh
+make all
+./bin/arlen doctor
+```
+
+Details, supported commands, and current limitations live in
+`docs/WINDOWS_CLANG64.md`.
 
 The default full scaffold gives you:
 

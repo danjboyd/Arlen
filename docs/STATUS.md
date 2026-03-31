@@ -4,6 +4,39 @@ Last updated: 2026-03-31
 
 ## Leaving Off (2026-03-31)
 
+- Executed the first implementation pass for Phase `24A-24D` on branch
+  `windows/clang64`:
+  - added checked-in CLANG64 launcher wrappers:
+    `scripts/run_clang64.ps1` and `scripts/run_clang64.sh`
+  - updated `GNUmakefile` to auto-discover `GNUSTEP_SH`, resolve PostgreSQL
+    include paths through `pkg-config`/toolchain fallbacks, detect Windows
+    preview mode, and narrow the default Windows build graph to the first-pass
+    `eocc`/preview-library/`arlen` slice
+  - switched `src/Arlen/Core/ALNConfig.m` to Winsock-compatible includes on
+    `_WIN32`
+  - normalized Windows filesystem-path handling in `tools/arlen.m` and
+    `src/Arlen/Core/ALNModuleSystem.m`
+  - replaced the CLI's hardcoded `/bin/bash` launch path with environment/path
+    discovery that can find MSYS2 `bash.exe`
+  - explicitly gated deferred Windows-preview commands in `tools/arlen.m` so
+    unsupported flows now fail with phase-specific messages instead of generic
+    runtime/link errors
+  - updated `bin/arlen-doctor`, `README.md`, `docs/README.md`,
+    `docs/TOOLCHAIN_MATRIX.md`, and new `docs/WINDOWS_CLANG64.md` to document
+    the Phase 24 Windows preview workflow and current support envelope
+- Known limitation at this checkpoint:
+  - this shell session could not start MSYS2 bash successfully because
+    `env.exe`/`bash.exe` failed with Windows error 5 (`couldn't create signal
+    pipe` / `CreateFileMapping`), so live CLANG64 build verification is still
+    pending outside this sandboxed terminal
+- Next-session closeout path for `24A-24D`:
+  - run the checked-in PowerShell launcher on a normal Windows terminal:
+    `powershell -ExecutionPolicy Bypass -File scripts\run_clang64.ps1 -InnerCommand "make all"`
+  - verify focused preview CLI smoke commands:
+    `./bin/arlen doctor`, `./bin/arlen new MyApp`, and generator flows
+  - if green, update the Phase 24 roadmap/status docs with concrete command
+    evidence and then move into `24E`
+
 - Created the dedicated Windows workstream branch:
   - `windows/clang64`
 - Planned Phase 24 as the branch roadmap for native Windows support:

@@ -178,7 +178,18 @@ Acceptance (required):
 
 ## 5.2 Phase 24B: Build + Bootstrap Path Abstraction
 
-Status: planned
+Status: in progress
+
+Checkpoint notes:
+
+- Added checked-in Windows/MSYS2 launcher wrappers:
+  - `scripts/run_clang64.ps1`
+  - `scripts/run_clang64.sh`
+- Taught the main GNUmake bootstrap path to resolve `GNUSTEP_SH` through
+  `GNUSTEP_MAKEFILES`, `gnustep-config`, and `/clang64` before falling back to
+  the Linux `/usr/GNUstep` path.
+- Replaced the hardcoded PostgreSQL include path with `pkg-config`/toolchain
+  discovery plus `/clang64` and Linux fallbacks.
 
 Deliverables:
 
@@ -200,7 +211,18 @@ Acceptance (required):
 
 ## 5.3 Phase 24C: `eocc` + Core Library + CLI Build Bring-Up
 
-Status: planned
+Status: in progress
+
+Checkpoint notes:
+
+- Added a Windows preview build mode in `GNUmakefile` that narrows `make all`
+  to the first-pass CLANG64 slice instead of pulling in `boomhauer` and other
+  Unix-only runtime targets by default.
+- Introduced a reduced preview framework library slice for `eocc` and `arlen`
+  while the HTTP/runtime, data transport, and filesystem parity phases remain
+  pending.
+- Added the first Windows-specific source portability change in the preview
+  slice by switching `ALNConfig.m` to Winsock-compatible headers on `_WIN32`.
 
 Deliverables:
 
@@ -221,7 +243,20 @@ Acceptance (required):
 
 ## 5.4 Phase 24D: Windows-Safe CLI + Scaffold Path Normalization
 
-Status: planned
+Status: in progress
+
+Checkpoint notes:
+
+- Replaced core CLI filesystem-path checks that assumed absolute paths always
+  start with `/`.
+- Made the CLI shell-launch path resolve `bash` from the active environment or
+  common MSYS2 locations instead of hardcoding `/bin/bash`.
+- Gated unsupported preview commands with explicit Windows-preview messages so
+  first-pass CLI behavior matches the Phase 24 scope instead of failing
+  indirectly at link/runtime.
+- Updated `bin/arlen-doctor` and `build/arlen doctor` logic toward the CLANG64
+  contract by resolving GNUstep/bootstrap paths dynamically and widening `libpq`
+  detection beyond Linux-only `ldconfig`.
 
 Deliverables:
 
