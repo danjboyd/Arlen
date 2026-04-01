@@ -1,6 +1,60 @@
 # Arlen Status Checkpoint
 
-Last updated: 2026-03-31
+Last updated: 2026-04-01
+
+## Leaving Off (2026-04-01)
+
+- Phase 23 remains complete as documented below.
+- Phase `26A-26E` is now complete:
+  - added the optional `ArlenORM` umbrella under `src/ArlenORM/ArlenORM.h`
+    on top of `ArlenData`
+  - delivered descriptor/reflection/codegen contracts through
+    `ALNORMFieldDescriptor`, `ALNORMRelationDescriptor`,
+    `ALNORMModelDescriptor`, and `ALNORMCodegen`
+  - delivered model/runtime/query/repository contracts through
+    `ALNORMModel`, `ALNORMContext`, `ALNORMQuery`, and
+    `ALNORMRepository`
+  - delivered first-class relation metadata for `belongs_to`, `has_one`,
+    `has_many`, and many-to-many relations with explicit pivot metadata
+  - kept reflected read-only relations read-only by default in generated code
+    and runtime mutation helpers
+- Phase `26F-26O` remains planned next:
+  - explicit load plans and strict loading
+  - changesets, unit-of-work, write graph semantics, and migration-history
+    hardening
+  - backend parity expansion, confidence lanes, docs closeout, and Dataverse
+    ORM tail work
+- Verification completed at this checkpoint:
+  - `source tools/source_gnustep_env.sh && make phase26-orm-tests`
+  - `source tools/source_gnustep_env.sh && make docs-api`
+  - `bash tools/ci/run_docs_quality.sh`
+
+## Completed Today (2026-04-01)
+
+- Completed Phase `26A-26E`:
+  - added the optional `ArlenORM` public surface plus ORM foundation classes
+    under `src/Arlen/ORM/`
+  - added deterministic schema-to-descriptor reflection and model/codegen
+    rendering with manifest/version metadata and override seams
+  - added generated typed model contracts, repository/query composition, and
+    association-aware relation query helpers
+  - added focused ORM regression coverage in `tests/unit/ORMCodegenTests.m`
+    and `tests/unit/ORMRuntimeTests.m`
+  - added `make phase26-orm-tests` as the focused SQL ORM verification lane
+  - updated docs/API generation surfaces for the optional ORM package
+- Planned Phase 26 as the next roadmap phase:
+  - reviewed Arlen's current data-layer seams in `docs/ARLEN_DATA.md`,
+    `docs/PHASE20_ROADMAP.md`, and `src/Arlen/Data/`
+  - reviewed the most relevant PDOM concepts for migration shape and rejected
+    importing the mixed persistence-plus-UI metadata model as a design target
+  - reviewed official ORM guidance across Rails, Django, Laravel, SQLAlchemy,
+    Ecto, EF Core, and Prisma
+  - drafted `docs/PHASE26_ROADMAP.md` around package boundaries, descriptors,
+    associations, strict loading, changesets, unit-of-work semantics,
+    migration-history safety, backend parity, robust confidence lanes, and the
+    Dataverse ORM tail phases
+- Updated roadmap discovery surfaces:
+  - added `docs/PHASE26_ROADMAP.md` to `docs/README.md`
 
 ## Leaving Off (2026-03-31)
 

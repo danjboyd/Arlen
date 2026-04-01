@@ -1,0 +1,53 @@
+{
+  "metadata": {
+    "relations": [
+      { "schema": "public", "table": "users", "relation_kind": "table", "read_only": false },
+      { "schema": "public", "table": "profiles", "relation_kind": "table", "read_only": false },
+      { "schema": "public", "table": "posts", "relation_kind": "table", "read_only": false },
+      { "schema": "public", "table": "tags", "relation_kind": "table", "read_only": false },
+      { "schema": "public", "table": "post_tags", "relation_kind": "table", "read_only": false },
+      { "schema": "public", "table": "user_emails", "relation_kind": "view", "read_only": true }
+    ],
+    "columns": [
+      { "schema": "public", "table": "users", "column": "id", "ordinal": 1, "data_type": "uuid", "nullable": false, "primary_key": true, "has_default": true, "default_value_shape": "expression", "relation_kind": "table", "read_only": false },
+      { "schema": "public", "table": "users", "column": "email", "ordinal": 2, "data_type": "text", "nullable": false, "primary_key": false, "has_default": false, "default_value_shape": "none", "relation_kind": "table", "read_only": false },
+      { "schema": "public", "table": "users", "column": "display_name", "ordinal": 3, "data_type": "text", "nullable": true, "primary_key": false, "has_default": false, "default_value_shape": "none", "relation_kind": "table", "read_only": false },
+
+      { "schema": "public", "table": "profiles", "column": "id", "ordinal": 1, "data_type": "uuid", "nullable": false, "primary_key": true, "has_default": true, "default_value_shape": "expression", "relation_kind": "table", "read_only": false },
+      { "schema": "public", "table": "profiles", "column": "user_id", "ordinal": 2, "data_type": "uuid", "nullable": false, "primary_key": false, "has_default": false, "default_value_shape": "none", "relation_kind": "table", "read_only": false },
+      { "schema": "public", "table": "profiles", "column": "bio", "ordinal": 3, "data_type": "text", "nullable": true, "primary_key": false, "has_default": false, "default_value_shape": "none", "relation_kind": "table", "read_only": false },
+
+      { "schema": "public", "table": "posts", "column": "id", "ordinal": 1, "data_type": "uuid", "nullable": false, "primary_key": true, "has_default": true, "default_value_shape": "expression", "relation_kind": "table", "read_only": false },
+      { "schema": "public", "table": "posts", "column": "user_id", "ordinal": 2, "data_type": "uuid", "nullable": false, "primary_key": false, "has_default": false, "default_value_shape": "none", "relation_kind": "table", "read_only": false },
+      { "schema": "public", "table": "posts", "column": "title", "ordinal": 3, "data_type": "text", "nullable": false, "primary_key": false, "has_default": false, "default_value_shape": "none", "relation_kind": "table", "read_only": false },
+
+      { "schema": "public", "table": "tags", "column": "id", "ordinal": 1, "data_type": "uuid", "nullable": false, "primary_key": true, "has_default": true, "default_value_shape": "expression", "relation_kind": "table", "read_only": false },
+      { "schema": "public", "table": "tags", "column": "label", "ordinal": 2, "data_type": "text", "nullable": false, "primary_key": false, "has_default": false, "default_value_shape": "none", "relation_kind": "table", "read_only": false },
+
+      { "schema": "public", "table": "post_tags", "column": "post_id", "ordinal": 1, "data_type": "uuid", "nullable": false, "primary_key": true, "has_default": false, "default_value_shape": "none", "relation_kind": "table", "read_only": false },
+      { "schema": "public", "table": "post_tags", "column": "tag_id", "ordinal": 2, "data_type": "uuid", "nullable": false, "primary_key": true, "has_default": false, "default_value_shape": "none", "relation_kind": "table", "read_only": false },
+      { "schema": "public", "table": "post_tags", "column": "position", "ordinal": 3, "data_type": "integer", "nullable": true, "primary_key": false, "has_default": false, "default_value_shape": "none", "relation_kind": "table", "read_only": false },
+
+      { "schema": "public", "table": "user_emails", "column": "user_id", "ordinal": 1, "data_type": "uuid", "nullable": true, "primary_key": false, "has_default": false, "default_value_shape": "none", "relation_kind": "view", "read_only": true },
+      { "schema": "public", "table": "user_emails", "column": "email", "ordinal": 2, "data_type": "text", "nullable": true, "primary_key": false, "has_default": false, "default_value_shape": "none", "relation_kind": "view", "read_only": true }
+    ],
+    "primary_keys": [
+      { "schema": "public", "table": "users", "constraint_name": "users_pkey", "columns": ["id"] },
+      { "schema": "public", "table": "profiles", "constraint_name": "profiles_pkey", "columns": ["id"] },
+      { "schema": "public", "table": "posts", "constraint_name": "posts_pkey", "columns": ["id"] },
+      { "schema": "public", "table": "tags", "constraint_name": "tags_pkey", "columns": ["id"] },
+      { "schema": "public", "table": "post_tags", "constraint_name": "post_tags_pkey", "columns": ["post_id", "tag_id"] }
+    ],
+    "unique_constraints": [
+      { "schema": "public", "table": "users", "constraint_name": "users_email_key", "columns": ["email"] },
+      { "schema": "public", "table": "profiles", "constraint_name": "profiles_user_id_key", "columns": ["user_id"] },
+      { "schema": "public", "table": "tags", "constraint_name": "tags_label_key", "columns": ["label"] }
+    ],
+    "foreign_keys": [
+      { "schema": "public", "table": "profiles", "constraint_name": "profiles_user_id_fkey", "columns": ["user_id"], "referenced_schema": "public", "referenced_table": "users", "referenced_columns": ["id"] },
+      { "schema": "public", "table": "posts", "constraint_name": "posts_user_id_fkey", "columns": ["user_id"], "referenced_schema": "public", "referenced_table": "users", "referenced_columns": ["id"] },
+      { "schema": "public", "table": "post_tags", "constraint_name": "post_tags_post_id_fkey", "columns": ["post_id"], "referenced_schema": "public", "referenced_table": "posts", "referenced_columns": ["id"] },
+      { "schema": "public", "table": "post_tags", "constraint_name": "post_tags_tag_id_fkey", "columns": ["tag_id"], "referenced_schema": "public", "referenced_table": "tags", "referenced_columns": ["id"] }
+    ]
+  }
+}

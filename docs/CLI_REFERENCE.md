@@ -695,6 +695,7 @@ Lifecycle diagnostics:
 - `make phase20-postgres-live-tests` / `make phase20-mssql-live-tests`: focused Phase 20 live-backend lanes with explicit DSN/transport requirement logging
 - `make phase20-focused`: run the full focused Phase 20 lane set without relying on stock `xctest -only-testing`
 - `make phase21-template-tests`: focused template parser/codegen/security/regression bundle
+- `make phase26-orm-tests`: focused SQL ORM foundation bundle for descriptors, codegen, repositories, and association/runtime contracts
 - `make phase21-protocol-tests`: Phase 21 raw protocol corpus replay across the configured parser backends
 - `make phase21-generated-app-tests`: curated generated-app/module/config matrix for first-user flows
 - `make phase21-focused`: run the full focused Phase 21 lane set
@@ -812,7 +813,7 @@ Lifecycle diagnostics:
 - `tools/ci/check_roadmap_consistency.py`: validates that `README.md`, `docs/STATUS.md`, and historical aggregate/index docs stay aligned with the authoritative per-phase roadmap headers
 - `tools/ci/check_docs_navigation.py`: validates newcomer-facing docs sections, key links, and required guide files
 - `tools/ci/check_benchmark_contracts.py`: validates the imported comparative benchmark manifests/config contract pack and the source-of-truth bridge notes in `docs/COMPARATIVE_BENCHMARKING.md`
-- `make docs-api`: regenerate API reference markdown from `Arlen.h` / `ArlenData.h` exports
+- `make docs-api`: regenerate API reference markdown from `Arlen.h` / `ArlenData.h` / `ArlenORM.h` exports
 - `make docs-html`: generate browser-friendly docs under `build/docs`
 - `make docs-serve`: serve generated docs locally (default `http://127.0.0.1:4173`, override via `DOCS_PORT`)
 

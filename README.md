@@ -7,8 +7,8 @@ Mojolicious while staying idiomatic to Objective-C/GNUstep conventions. The
 project is still young, but the shipped surface is already broad: HTML-first
 and JSON-first app paths, OpenAPI output, first-party auth/admin/jobs/storage
 modules, WebSocket/SSE support, a PostgreSQL-first data layer, optional MSSQL,
-a runtime-inactive Dataverse Web API integration surface, and a managed
-production runtime (`propane`).
+an optional SQL ORM foundation, a runtime-inactive Dataverse Web API
+integration surface, and a managed production runtime (`propane`).
 
 ## Start Here
 
@@ -79,7 +79,7 @@ one coherent toolchain.
 - `Auth and security`: sessions, CSRF, rate limiting, MFA, recovery codes, passkeys/WebAuthn, and OIDC/provider login.
 - `First-party modules`: `auth`, `admin-ui`, `jobs`, `notifications`, `storage`, `ops`, and `search`.
 - `Realtime`: WebSocket and SSE support.
-- `Data layer`: PostgreSQL-first migrations, schema codegen, typed SQL helpers, optional MSSQL support, and a runtime-inactive Dataverse Web API client/query/codegen surface.
+- `Data layer`: PostgreSQL-first migrations, schema codegen, typed SQL helpers, an optional SQL ORM foundation, optional MSSQL support, and a runtime-inactive Dataverse Web API client/query/codegen surface.
 - `Runtime`: `boomhauer` for development and `propane` for production worker supervision, reloads, and cluster controls.
 - `Diagnostics and verification`: `arlen doctor`, build diagnostics, focused regression lanes, and live-backed integration coverage.
 
@@ -155,6 +155,7 @@ below is the detailed milestone ledger for the shipped surface summarized above.
 - Phase 21: complete (`21A-21G` delivered on 2026-03-27 for in-process request harnesses, shared request/pipeline assertion helpers, explicit async DB ownership rules, template-suite decomposition, raw protocol corpus replay, generated-app matrix coverage, and repo-native focused confidence lanes. See `docs/PHASE21_ROADMAP.md`).
 - Phase 22: complete (`22A-22G` delivered on 2026-03-30 for newcomer-first onboarding, docs/code parity hardening, app-author guides, module/lite-mode guidance, plugin/frontend guides, and docs quality closeout. See `docs/PHASE22_ROADMAP.md`).
 - Phase 23: complete (`23A-23G` delivered on 2026-03-31 for the runtime-inactive Dataverse Web API client, OData query builder, CRUD/batch helpers, metadata normalization, typed Dataverse codegen, app/controller Dataverse helpers, repo-native confidence lanes, and docs/example closeout. See `docs/PHASE23_ROADMAP.md`).
+- Phase 26A-26E: complete (`26A-26E` delivered on 2026-04-01 for the optional `ArlenORM` package, descriptor reflection/codegen foundation, generated SQL-model runtime, repository/query APIs, association metadata, focused ORM tests, and docs/API surface updates. See `docs/PHASE26_ROADMAP.md`).
 
 ## Requirements and Setup Details
 
