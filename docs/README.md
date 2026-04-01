@@ -33,6 +33,7 @@ toolchain env directly.
 
 - [Getting Started: API-First Track](GETTING_STARTED_API_FIRST.md): JSON APIs, schema/auth contracts, and OpenAPI.
 - [Getting Started: HTML-First Track](GETTING_STARTED_HTML_FIRST.md): server-rendered EOC templates, layouts, and forms.
+- [Live UI Guide](LIVE_UI.md): fragment-first live responses, `/arlen/live.js`, live forms/links, and realtime push updates.
 - [Core Concepts](CORE_CONCEPTS.md): runtime architecture and request lifecycle.
 - [Template Troubleshooting](TEMPLATE_TROUBLESHOOTING.md): deterministic transpile/lint diagnostics and repair workflow.
 - [API Reference](API_REFERENCE.md): generated public API docs with per-method purpose and usage guidance.
@@ -65,7 +66,7 @@ toolchain env directly.
 ## Reference
 
 - [Password Hashing](PASSWORD_HASHING.md): Argon2id password hashing defaults and rehash workflow.
-- [Realtime and Composition](REALTIME_COMPOSITION.md): websocket/SSE contracts, pubsub hub, and app mounting.
+- [Realtime and Composition](REALTIME_COMPOSITION.md): websocket/SSE contracts, live fragment transport, pubsub hub, and app mounting.
 - [Arlen for X Migration Guides](ARLEN_FOR_X_INDEX.md): migration playbooks from Rails, Django, Laravel, FastAPI, Express/NestJS, Mojolicious, and GSWeb.
 - [SQL Builder Conformance Matrix](SQL_BUILDER_CONFORMANCE_MATRIX.md): phase-4 SQL snapshot matrix and regression map.
 
@@ -79,6 +80,7 @@ toolchain env directly.
 - [Phase 21 Roadmap](PHASE21_ROADMAP.md): completed public-release test robustness pass.
 - [Phase 22 Roadmap](PHASE22_ROADMAP.md): completed documentation cleanup pass for newcomer-first onboarding and docs quality closeout.
 - [Phase 23 Roadmap](PHASE23_ROADMAP.md): completed Dataverse integration phase.
+- [Phase 25 Roadmap](PHASE25_ROADMAP.md): in-progress live UI phase with `25A-25C` fragment-first baseline delivered.
 - [Combined Roadmap Index (Historical Aggregate)](PHASE2_PHASE3_ROADMAP.md)
 - [Phase 1 Spec](PHASE1_SPEC.md)
 - [Arlen CLI Spec](ARLEN_CLI_SPEC.md)

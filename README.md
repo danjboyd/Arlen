@@ -78,7 +78,7 @@ one coherent toolchain.
 - `API tooling`: OpenAPI generation, interactive docs, and JSON-first scaffolds.
 - `Auth and security`: sessions, CSRF, rate limiting, MFA, recovery codes, passkeys/WebAuthn, and OIDC/provider login.
 - `First-party modules`: `auth`, `admin-ui`, `jobs`, `notifications`, `storage`, `ops`, and `search`.
-- `Realtime`: WebSocket and SSE support.
+- `Realtime and live UI`: WebSocket and SSE support, live fragment responses, built-in `/arlen/live.js`, and controller helpers for live updates/navigation.
 - `Data layer`: PostgreSQL-first migrations, schema codegen, typed SQL helpers, optional MSSQL support, and a runtime-inactive Dataverse Web API client/query/codegen surface.
 - `Runtime`: `boomhauer` for development and `propane` for production worker supervision, reloads, and cluster controls.
 - `Diagnostics and verification`: `arlen doctor`, build diagnostics, focused regression lanes, and live-backed integration coverage.
@@ -155,6 +155,7 @@ below is the detailed milestone ledger for the shipped surface summarized above.
 - Phase 21: complete (`21A-21G` delivered on 2026-03-27 for in-process request harnesses, shared request/pipeline assertion helpers, explicit async DB ownership rules, template-suite decomposition, raw protocol corpus replay, generated-app matrix coverage, and repo-native focused confidence lanes. See `docs/PHASE21_ROADMAP.md`).
 - Phase 22: complete (`22A-22G` delivered on 2026-03-30 for newcomer-first onboarding, docs/code parity hardening, app-author guides, module/lite-mode guidance, plugin/frontend guides, and docs quality closeout. See `docs/PHASE22_ROADMAP.md`).
 - Phase 23: complete (`23A-23G` delivered on 2026-03-31 for the runtime-inactive Dataverse Web API client, OData query builder, CRUD/batch helpers, metadata normalization, typed Dataverse codegen, app/controller Dataverse helpers, repo-native confidence lanes, and docs/example closeout. See `docs/PHASE23_ROADMAP.md`).
+- Phase 25: in progress (`25A-25C` delivered on 2026-04-01 for a fragment-first live UI baseline: `ALNLive`, `/arlen/live.js`, live request metadata, controller live-render/navigation helpers, link/form interception, and the focused `phase25-live-tests` lane. Full diff-engine/live-component depth remains future work. See `docs/PHASE25_ROADMAP.md` and `docs/LIVE_UI.md`).
 
 ## Requirements and Setup Details
 

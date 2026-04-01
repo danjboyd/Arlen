@@ -78,6 +78,8 @@ extern NSString *const ALNContextI18nFallbackLocaleStashKey;
 - (BOOL)applyETagAndReturnNotModifiedIfMatch:(NSString *)etag;
 - (NSString *)requestFormat;
 - (BOOL)wantsJSON;
+- (BOOL)isLiveRequest;
+- (NSDictionary *)liveMetadata;
 - (void)addValidationErrorForField:(NSString *)field
                               code:(NSString *)code
                            message:(NSString *)message;

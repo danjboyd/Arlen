@@ -3,8 +3,10 @@
 #import "ALNAuthSession.h"
 #import "ALNContext.h"
 #import "ALNJSONSerialization.h"
+#import "ALNLive.h"
 #import "ALNPageState.h"
 #import "ALNRequest.h"
+#import "ALNRealtime.h"
 #import "ALNResponse.h"
 #import "ALNView.h"
 #import "ALNPerf.h"
@@ -16,6 +18,10 @@
                 layout:(nullable NSString *)layoutName
   defaultLayoutEnabled:(BOOL)defaultLayoutEnabled
                  error:(NSError *_Nullable *_Nullable)error;
+- (nullable NSString *)renderedTemplateString:(NSString *)templateName
+                                      context:(nullable NSDictionary *)context
+                         defaultLayoutEnabled:(BOOL)defaultLayoutEnabled
+                                        error:(NSError *_Nullable *_Nullable)error;
 
 @end
 
@@ -87,6 +93,33 @@ static NSDictionary *ALNEnvelopePayload(ALNContext *context, id data, NSDictiona
   return [NSDictionary dictionaryWithDictionary:payload];
 }
 
+static NSDictionary *ALNLiveMeta(ALNContext *context) {
+  NSMutableDictionary *meta = [NSMutableDictionary dictionary];
+  NSString *requestID = [context.stash[@"request_id"] isKindOfClass:[NSString class]]
+                            ? context.stash[@"request_id"]
+                            : @"";
+  if ([requestID length] > 0) {
+    meta[@"request_id"] = requestID;
+    meta[@"correlation_id"] = requestID;
+  }
+  NSString *traceID = [context.stash[@"aln.trace_id"] isKindOfClass:[NSString class]]
+                          ? context.stash[@"aln.trace_id"]
+                          : @"";
+  if ([traceID length] > 0) {
+    meta[@"trace_id"] = traceID;
+  }
+  if ([context.routeName length] > 0) {
+    meta[@"route"] = context.routeName;
+  }
+  if ([context.controllerName length] > 0) {
+    meta[@"controller"] = context.controllerName;
+  }
+  if ([context.actionName length] > 0) {
+    meta[@"action"] = context.actionName;
+  }
+  return [NSDictionary dictionaryWithDictionary:meta];
+}
+
 static NSString *ALNSafeRedirectLocation(NSString *location) {
   NSString *candidate = [location isKindOfClass:[NSString class]] ? location : @"";
   if ([candidate length] == 0) {
@@ -113,6 +146,26 @@ static NSString *ALNTrimmedLayoutName(id value) {
 
 + (NSJSONWritingOptions)jsonWritingOptions {
   return 0;
+}
+
+- (NSString *)renderedTemplateString:(NSString *)templateName
+                             context:(NSDictionary *)context
+                defaultLayoutEnabled:(BOOL)defaultLayoutEnabled
+                               error:(NSError **)error {
+  BOOL strictLocals =
+      [self.context.stash[ALNContextEOCStrictLocalsStashKey] boolValue];
+  BOOL strictStringify =
+      [self.context.stash[ALNContextEOCStrictStringifyStashKey] boolValue];
+  [self.context.perfTrace startStage:@"render"];
+  NSString *rendered = [ALNView renderTemplate:templateName
+                                       context:context
+                                        layout:nil
+                          defaultLayoutEnabled:defaultLayoutEnabled
+                                  strictLocals:strictLocals
+                               strictStringify:strictStringify
+                                         error:error];
+  [self.context.perfTrace endStage:@"render"];
+  return rendered;
 }
 
 - (BOOL)renderTemplate:(NSString *)templateName
@@ -283,6 +336,110 @@ static NSString *ALNTrimmedLayoutName(id value) {
 - (void)renderData:(NSData *)data contentType:(NSString *)contentType {
   [self.context.response setDataBody:(data ?: [NSData data]) contentType:contentType];
   self.context.response.committed = YES;
+}
+
+- (BOOL)isLiveRequest {
+  return [self.context isLiveRequest];
+}
+
+- (NSDictionary *)liveMetadata {
+  return [self.context liveMetadata];
+}
+
+- (BOOL)renderLiveOperations:(NSArray *)operations error:(NSError **)error {
+  return [ALNLive renderResponse:self.context.response
+                      operations:operations
+                            meta:ALNLiveMeta(self.context)
+                           error:error];
+}
+
+- (BOOL)renderLiveTemplate:(NSString *)templateName
+                    target:(NSString *)target
+                    action:(NSString *)action
+                   context:(NSDictionary *)context
+                     error:(NSError **)error {
+  NSDictionary *effectiveContext = context ?: [self templateContext];
+  NSString *rendered = [self renderedTemplateString:templateName
+                                            context:effectiveContext
+                               defaultLayoutEnabled:NO
+                                             error:error];
+  if (rendered == nil) {
+    return NO;
+  }
+
+  NSDictionary *liveMetadata = [self liveMetadata];
+  NSString *effectiveTarget = [target length] > 0 ? target : liveMetadata[@"target"];
+  NSString *normalizedAction = [[([action length] > 0 ? action : liveMetadata[@"swap"]) ?: @"" lowercaseString]
+      stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+  NSDictionary *operation = nil;
+  if ([normalizedAction isEqualToString:@"replace"]) {
+    operation = [ALNLive replaceOperationForTarget:effectiveTarget html:rendered];
+  } else if ([normalizedAction isEqualToString:@"update"]) {
+    operation = [ALNLive updateOperationForTarget:effectiveTarget html:rendered];
+  } else if ([normalizedAction isEqualToString:@"append"]) {
+    operation = [ALNLive appendOperationForTarget:effectiveTarget html:rendered];
+  } else if ([normalizedAction isEqualToString:@"prepend"]) {
+    operation = [ALNLive prependOperationForTarget:effectiveTarget html:rendered];
+  } else {
+    if (error != NULL) {
+      *error = [NSError errorWithDomain:@"Arlen.Live.Error"
+                                   code:3
+                               userInfo:@{
+                                 NSLocalizedDescriptionKey :
+                                     @"Live template action must be replace, update, append, or prepend",
+                                 @"action" : normalizedAction ?: @"",
+                               }];
+    }
+    return NO;
+  }
+
+  return [self renderLiveOperations:@[ operation ] error:error];
+}
+
+- (void)renderLiveNavigateTo:(NSString *)location replace:(BOOL)replace {
+  NSError *error = nil;
+  BOOL rendered = [self renderLiveOperations:@[
+    [ALNLive navigateOperationForLocation:location replace:replace]
+  ]
+                                        error:&error];
+  if (!rendered) {
+    [self redirectTo:location status:302];
+  }
+}
+
+- (NSUInteger)publishLiveOperations:(NSArray *)operations
+                          onChannel:(NSString *)channel
+                              error:(NSError **)error {
+  if (error != NULL) {
+    *error = nil;
+  }
+
+  NSDictionary *payload = [ALNLive validatedPayloadWithOperations:operations
+                                                             meta:ALNLiveMeta(self.context)
+                                                            error:error];
+  if (payload == nil) {
+    return 0;
+  }
+
+  NSData *data = [ALNJSONSerialization dataWithJSONObject:payload options:0 error:error];
+  if (data == nil) {
+    return 0;
+  }
+
+  NSString *message = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
+  if ([message length] == 0) {
+    if (error != NULL) {
+      *error = [NSError errorWithDomain:@"Arlen.Live.Error"
+                                   code:4
+                               userInfo:@{
+                                 NSLocalizedDescriptionKey :
+                                     @"Unable to encode live payload as UTF-8 text"
+                               }];
+    }
+    return 0;
+  }
+
+  return [[ALNRealtimeHub sharedHub] publishMessage:message onChannel:channel ?: @""];
 }
 
 - (void)renderSSEEvents:(NSArray *)events {

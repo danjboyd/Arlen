@@ -92,6 +92,8 @@ PHASE21_TEMPLATE_TEST_BUNDLE := $(BUILD_DIR)/tests/ArlenPhase21TemplateTests.xct
 PHASE21_TEMPLATE_TEST_BIN := $(PHASE21_TEMPLATE_TEST_BUNDLE)/ArlenPhase21TemplateTests
 PHASE23_DATAVERSE_TEST_BUNDLE := $(BUILD_DIR)/tests/ArlenPhase23DataverseTests.xctest
 PHASE23_DATAVERSE_TEST_BIN := $(PHASE23_DATAVERSE_TEST_BUNDLE)/ArlenPhase23DataverseTests
+PHASE25_LIVE_TEST_BUNDLE := $(BUILD_DIR)/tests/ArlenPhase25LiveTests.xctest
+PHASE25_LIVE_TEST_BIN := $(PHASE25_LIVE_TEST_BUNDLE)/ArlenPhase25LiveTests
 GNUSTEP_TEST_HOME := $(ROOT_DIR)/.gnustep-home
 
 UNIT_TEST_SRCS := $(shell find tests/unit -type f -name '*.m' | sort)
@@ -105,6 +107,7 @@ PHASE20_MSSQL_LIVE_TEST_SRCS := tests/phase20/Phase20MSSQLLiveFocusedTests.m
 PHASE20_ROUTING_TEST_SRCS := tests/phase20/Phase20RoutingPoolFocusedTests.m
 PHASE21_TEMPLATE_TEST_SRCS := tests/unit/TemplateParserTests.m tests/unit/TemplateCodegenTests.m tests/unit/TemplateSecurityTests.m tests/unit/TemplateRegressionTests.m
 PHASE23_DATAVERSE_TEST_SRCS := tests/unit/DataverseRuntimeTests.m tests/unit/DataverseQueryTests.m tests/unit/DataverseReadTests.m tests/unit/DataverseWriteTests.m tests/unit/DataverseMetadataTests.m tests/unit/DataverseRegressionTests.m tests/unit/DataverseArtifactTests.m
+PHASE25_LIVE_TEST_SRCS := tests/unit/LiveProtocolTests.m tests/unit/LiveControllerTests.m tests/unit/LiveRuntimeTests.m
 
 FRAMEWORK_MODULE_INCLUDE_FLAGS := $(addprefix -I,$(shell find modules -mindepth 2 -maxdepth 2 -type d -name 'Sources' 2>/dev/null | sort))
 INCLUDE_FLAGS := -Isrc -Isrc/Arlen -Isrc/Arlen/Core -Isrc/Arlen/Data -Isrc/Arlen/HTTP -Isrc/Arlen/MVC/Controller -Isrc/Arlen/MVC/Middleware -Isrc/Arlen/MVC/Routing -Isrc/Arlen/MVC/Template -Isrc/Arlen/MVC/View -Isrc/Arlen/Support -Isrc/Arlen/Support/third_party/argon2/include -Isrc/Arlen/Support/third_party/argon2/src -Isrc/MojoObjc -Isrc/MojoObjc/Core -Isrc/MojoObjc/Data -Isrc/MojoObjc/HTTP -Isrc/MojoObjc/MVC/Controller -Isrc/MojoObjc/MVC/Middleware -Isrc/MojoObjc/MVC/Routing -Isrc/MojoObjc/MVC/Template -Isrc/MojoObjc/MVC/View -Isrc/MojoObjc/Support $(FRAMEWORK_MODULE_INCLUDE_FLAGS) -I/usr/include/postgresql
@@ -242,11 +245,12 @@ PHASE20_MSSQL_LIVE_TEST_OBJS := $(call objs_from,$(PHASE20_MSSQL_LIVE_TEST_SRCS)
 PHASE20_ROUTING_TEST_OBJS := $(call objs_from,$(PHASE20_ROUTING_TEST_SRCS))
 PHASE21_TEMPLATE_TEST_OBJS := $(call objs_from,$(PHASE21_TEMPLATE_TEST_SRCS))
 PHASE23_DATAVERSE_TEST_OBJS := $(call objs_from,$(PHASE23_DATAVERSE_TEST_SRCS))
+PHASE25_LIVE_TEST_OBJS := $(call objs_from,$(PHASE25_LIVE_TEST_SRCS))
 
-ALL_OBJECTS := $(sort $(FRAMEWORK_OBJS) $(MODULE_OBJS) $(ROOT_GENERATED_OBJS) $(TECH_DEMO_GENERATED_OBJS) $(MODULE_GENERATED_OBJS) $(EOCC_ENTRY_OBJS) $(ARLEN_ENTRY_OBJS) $(BOOMHAUER_ENTRY_OBJS) $(SMOKE_RENDER_ENTRY_OBJS) $(TECH_DEMO_SERVER_ENTRY_OBJS) $(API_REFERENCE_SERVER_ENTRY_OBJS) $(AUTH_PRIMITIVES_SERVER_ENTRY_OBJS) $(MIGRATION_SAMPLE_SERVER_ENTRY_OBJS) $(ARLEN_DATA_EXAMPLE_ENTRY_OBJS) $(JSON_PERF_BENCH_ENTRY_OBJS) $(DISPATCH_PERF_BENCH_ENTRY_OBJS) $(HTTP_PARSE_PERF_BENCH_ENTRY_OBJS) $(ROUTE_MATCH_PERF_BENCH_ENTRY_OBJS) $(BACKEND_CONTRACT_MATRIX_ENTRY_OBJS) $(PHASE23_LIVE_SMOKE_ENTRY_OBJS) $(UNIT_TEST_OBJS) $(INTEGRATION_TEST_OBJS) $(BROWSER_ERROR_AUDIT_TEST_OBJS) $(TEST_SHARED_OBJS) $(PHASE20_SQL_BUILDER_TEST_OBJS) $(PHASE20_SCHEMA_TEST_OBJS) $(PHASE20_POSTGRES_LIVE_TEST_OBJS) $(PHASE20_MSSQL_LIVE_TEST_OBJS) $(PHASE20_ROUTING_TEST_OBJS) $(PHASE21_TEMPLATE_TEST_OBJS) $(PHASE23_DATAVERSE_TEST_OBJS))
+ALL_OBJECTS := $(sort $(FRAMEWORK_OBJS) $(MODULE_OBJS) $(ROOT_GENERATED_OBJS) $(TECH_DEMO_GENERATED_OBJS) $(MODULE_GENERATED_OBJS) $(EOCC_ENTRY_OBJS) $(ARLEN_ENTRY_OBJS) $(BOOMHAUER_ENTRY_OBJS) $(SMOKE_RENDER_ENTRY_OBJS) $(TECH_DEMO_SERVER_ENTRY_OBJS) $(API_REFERENCE_SERVER_ENTRY_OBJS) $(AUTH_PRIMITIVES_SERVER_ENTRY_OBJS) $(MIGRATION_SAMPLE_SERVER_ENTRY_OBJS) $(ARLEN_DATA_EXAMPLE_ENTRY_OBJS) $(JSON_PERF_BENCH_ENTRY_OBJS) $(DISPATCH_PERF_BENCH_ENTRY_OBJS) $(HTTP_PARSE_PERF_BENCH_ENTRY_OBJS) $(ROUTE_MATCH_PERF_BENCH_ENTRY_OBJS) $(BACKEND_CONTRACT_MATRIX_ENTRY_OBJS) $(PHASE23_LIVE_SMOKE_ENTRY_OBJS) $(UNIT_TEST_OBJS) $(INTEGRATION_TEST_OBJS) $(BROWSER_ERROR_AUDIT_TEST_OBJS) $(TEST_SHARED_OBJS) $(PHASE20_SQL_BUILDER_TEST_OBJS) $(PHASE20_SCHEMA_TEST_OBJS) $(PHASE20_POSTGRES_LIVE_TEST_OBJS) $(PHASE20_MSSQL_LIVE_TEST_OBJS) $(PHASE20_ROUTING_TEST_OBJS) $(PHASE21_TEMPLATE_TEST_OBJS) $(PHASE23_DATAVERSE_TEST_OBJS) $(PHASE25_LIVE_TEST_OBJS))
 ALL_DEPFILES := $(ALL_OBJECTS:.o=.d)
 
-.PHONY: all framework-artifacts eocc transpile module-transpile tech-demo-transpile generated-compile arlen boomhauer tech-demo-server api-reference-server auth-primitives-server migration-sample-server arlen-data-example json-perf-bench dispatch-perf-bench http-parse-perf-bench route-match-perf-bench backend-contract-matrix phase23-live-smoke test-data-layer dev-server tech-demo smoke-render smoke routes build-tests test test-unit test-unit-filter test-integration test-integration-filter browser-error-audit phase20-sql-builder-tests phase20-schema-tests phase20-postgres-live-tests phase20-mssql-live-tests phase20-routing-tests phase20-focused phase21-template-tests phase21-protocol-tests phase21-generated-app-tests phase21-focused phase21-confidence phase23-dataverse-tests phase23-focused phase23-confidence perf perf-fast ci-perf-smoke parity-phaseb perf-phasec perf-phased deploy-smoke phase5e-confidence phase12-confidence phase13-confidence phase14-confidence phase15-confidence phase16-confidence phase19-confidence phase20-confidence ci-quality ci-sanitizers ci-fault-injection ci-release-certification ci-json-abstraction ci-json-perf ci-dispatch-perf ci-http-parse-perf ci-route-match-perf ci-backend-parity-matrix ci-protocol-adversarial ci-syscall-faults ci-allocation-faults ci-soak ci-chaos-restart ci-static-analysis ci-blob-throughput ci-phase11-protocol-adversarial ci-phase11-fuzz ci-phase11-live-adversarial ci-phase11-sanitizers ci-phase11 ci-docs ci-benchmark-contracts check docs-api docs-html docs-serve clean
+.PHONY: all framework-artifacts eocc transpile module-transpile tech-demo-transpile generated-compile arlen boomhauer tech-demo-server api-reference-server auth-primitives-server migration-sample-server arlen-data-example json-perf-bench dispatch-perf-bench http-parse-perf-bench route-match-perf-bench backend-contract-matrix phase23-live-smoke test-data-layer dev-server tech-demo smoke-render smoke routes build-tests test test-unit test-unit-filter test-integration test-integration-filter browser-error-audit phase20-sql-builder-tests phase20-schema-tests phase20-postgres-live-tests phase20-mssql-live-tests phase20-routing-tests phase20-focused phase21-template-tests phase21-protocol-tests phase21-generated-app-tests phase21-focused phase21-confidence phase23-dataverse-tests phase23-focused phase23-confidence phase25-live-tests phase25-focused perf perf-fast ci-perf-smoke parity-phaseb perf-phasec perf-phased deploy-smoke phase5e-confidence phase12-confidence phase13-confidence phase14-confidence phase15-confidence phase16-confidence phase19-confidence phase20-confidence ci-quality ci-sanitizers ci-fault-injection ci-release-certification ci-json-abstraction ci-json-perf ci-dispatch-perf ci-http-parse-perf ci-route-match-perf ci-backend-parity-matrix ci-protocol-adversarial ci-syscall-faults ci-allocation-faults ci-soak ci-chaos-restart ci-static-analysis ci-blob-throughput ci-phase11-protocol-adversarial ci-phase11-fuzz ci-phase11-live-adversarial ci-phase11-sanitizers ci-phase11 ci-docs ci-benchmark-contracts check docs-api docs-html docs-serve clean
 
 all: eocc transpile generated-compile arlen boomhauer
 
@@ -521,6 +525,11 @@ $(PHASE23_DATAVERSE_TEST_BIN): $(PHASE23_DATAVERSE_TEST_OBJS) $(TEST_SHARED_OBJS
 >@source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) $(PHASE23_DATAVERSE_TEST_OBJS) $(TEST_SHARED_OBJS) $(ARLEN_FRAMEWORK_LIB) -shared -fPIC -o $(PHASE23_DATAVERSE_TEST_BIN) $(XCTEST_LINK_LIBS)
 >@sed 's/ArlenUnitTests/ArlenPhase23DataverseTests/g' tests/Info-gnustep-unit.plist > $(PHASE23_DATAVERSE_TEST_BUNDLE)/Resources/Info-gnustep.plist
 
+$(PHASE25_LIVE_TEST_BIN): $(PHASE25_LIVE_TEST_OBJS) $(TEST_SHARED_OBJS) $(ARLEN_FRAMEWORK_LIB)
+>@mkdir -p $(PHASE25_LIVE_TEST_BUNDLE)/Resources
+>@source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) $(PHASE25_LIVE_TEST_OBJS) $(TEST_SHARED_OBJS) $(ARLEN_FRAMEWORK_LIB) -shared -fPIC -o $(PHASE25_LIVE_TEST_BIN) $(XCTEST_LINK_LIBS)
+>@sed 's/ArlenUnitTests/ArlenPhase25LiveTests/g' tests/Info-gnustep-unit.plist > $(PHASE25_LIVE_TEST_BUNDLE)/Resources/Info-gnustep.plist
+
 build-tests: $(UNIT_TEST_BIN) $(INTEGRATION_TEST_BIN)
 
 test-unit: $(UNIT_TEST_BIN)
@@ -595,6 +604,12 @@ phase23-focused: phase23-dataverse-tests
 
 phase23-confidence:
 >bash ./tools/ci/run_phase23_confidence.sh
+
+phase25-live-tests: $(PHASE25_LIVE_TEST_BIN)
+>mkdir -p $(GNUSTEP_TEST_HOME)/GNUstep/Defaults/.lck
+>source $(GNUSTEP_SH) && export HOME="$(GNUSTEP_TEST_HOME)" GNUSTEP_USER_DIR="$(GNUSTEP_TEST_HOME)/GNUstep" GNUSTEP_USER_ROOT="$(GNUSTEP_TEST_HOME)/GNUstep" GNUSTEP_USER_DEFAULTS_DIR="$(GNUSTEP_TEST_HOME)/GNUstep/Defaults" && $(xctest_runtime_env) "$(ARLEN_XCTEST)" $(PHASE25_LIVE_TEST_BUNDLE)
+
+phase25-focused: phase25-live-tests
 
 test: test-unit test-integration
 

@@ -212,6 +212,21 @@
   XCTAssertTrue([makefile containsString:@"bash ./tools/ci/run_phase23_confidence.sh"]);
 }
 
+- (void)testGNUmakefileDefinesPhase25LiveConfidenceLane {
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *makefilePath = [repoRoot stringByAppendingPathComponent:@"GNUmakefile"];
+  NSString *makefile = [self readFile:makefilePath];
+
+  XCTAssertTrue([makefile containsString:
+                              @"PHASE25_LIVE_TEST_BUNDLE := $(BUILD_DIR)/tests/"
+                               "ArlenPhase25LiveTests.xctest"]);
+  XCTAssertTrue([makefile containsString:@"PHASE25_LIVE_TEST_SRCS := tests/unit/LiveProtocolTests.m"]);
+  XCTAssertTrue([makefile containsString:@"tests/unit/LiveControllerTests.m"]);
+  XCTAssertTrue([makefile containsString:@"tests/unit/LiveRuntimeTests.m"]);
+  XCTAssertTrue([makefile containsString:@"phase25-live-tests: $(PHASE25_LIVE_TEST_BIN)"]);
+  XCTAssertTrue([makefile containsString:@"phase25-focused: phase25-live-tests"]);
+}
+
 - (void)testGNUmakefileUsesIncrementalObjectsDepfilesAndManifestedTemplates {
   NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
   NSString *makefilePath = [repoRoot stringByAppendingPathComponent:@"GNUmakefile"];

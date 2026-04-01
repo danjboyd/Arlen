@@ -9,9 +9,9 @@ python3 tools/docs/generate_api_reference.py
 ```
 
 - Generated from source headers and metadata (deterministic output)
-- Public headers: `57`
-- Symbols: `108`
-- Public methods: `705`
+- Public headers: `58`
+- Symbols: `109`
+- Public methods: `728`
 - Public properties: `251`
 
 ## API Surface Boundary
@@ -137,6 +137,7 @@ python3 tools/docs/generate_api_reference.py
 - [ALNJobWorker](api/ALNJobWorker.md): Worker orchestration helper that leases due jobs and executes them through a runtime callback.
 - [ALNJobWorkerRunSummary](api/ALNJobWorkerRunSummary.md): Summary payload for one worker run, including lease/ack/retry/error counters.
 - [ALNJobWorkerRuntime](api/ALNJobWorkerRuntime.md): Worker runtime callback protocol that decides ack/retry/discard disposition for leased jobs.
+- [ALNLive](api/ALNLive.md): Support services for auth, metrics, logging, performance, realtime, and adapters.
 - [ALNLocalizationAdapter](api/ALNLocalizationAdapter.md): Localization adapter protocol for translation registration, lookup, and locale discovery.
 - [ALNLogger](api/ALNLogger.md): Structured logger with configurable output format and level-specific convenience methods.
 - [ALNMailAdapter](api/ALNMailAdapter.md): Mail adapter protocol for outbound delivery and delivery snapshot diagnostics.
@@ -205,6 +206,7 @@ python3 tools/docs/generate_api_reference.py
 - `src/Arlen/Support/ALNAuthProviderPresets.h`
 - `src/Arlen/Support/ALNAuthProviderSessionBridge.h`
 - `src/Arlen/Support/ALNAuthSession.h`
+- `src/Arlen/Support/ALNLive.h`
 - `src/Arlen/Support/ALNLogger.h`
 - `src/Arlen/Support/ALNMetrics.h`
 - `src/Arlen/Support/ALNOIDCClient.h`

@@ -47,6 +47,19 @@ NS_ASSUME_NONNULL_BEGIN
 - (BOOL)renderJSON:(id)object error:(NSError *_Nullable *_Nullable)error;
 - (void)renderText:(NSString *)text;
 - (void)renderData:(NSData *)data contentType:(nullable NSString *)contentType;
+- (BOOL)isLiveRequest;
+- (NSDictionary *)liveMetadata;
+- (BOOL)renderLiveOperations:(NSArray *)operations
+                       error:(NSError *_Nullable *_Nullable)error;
+- (BOOL)renderLiveTemplate:(NSString *)templateName
+                    target:(nullable NSString *)target
+                    action:(nullable NSString *)action
+                   context:(nullable NSDictionary *)context
+                     error:(NSError *_Nullable *_Nullable)error;
+- (void)renderLiveNavigateTo:(NSString *)location replace:(BOOL)replace;
+- (NSUInteger)publishLiveOperations:(NSArray *)operations
+                          onChannel:(NSString *)channel
+                              error:(NSError *_Nullable *_Nullable)error;
 - (void)renderSSEEvents:(NSArray *)events;
 - (void)acceptWebSocketEcho;
 - (void)acceptWebSocketChannel:(NSString *)channel;

@@ -68,7 +68,33 @@ Example event dictionary:
 
 The hub is thread-safe and used by websocket channel mode.
 
-## 5. App Mounting / Embedding
+## 5. Live UI Baseline
+
+Phase 25 adds a fragment-first live UI layer on top of the Phase 3D realtime
+transport baseline.
+
+Current pieces:
+
+- `ALNLive` live-response protocol (`application/vnd.arlen.live+json`)
+- built-in browser runtime at `/arlen/live.js`
+- delegated interception for `a[data-arlen-live]` and `form[data-arlen-live]`
+- optional request metadata via:
+  - `data-arlen-live-target`
+  - `data-arlen-live-swap`
+  - `data-arlen-live-component`
+  - `data-arlen-live-event`
+- controller helpers:
+  - `isLiveRequest`
+  - `liveMetadata`
+  - `renderLiveOperations:error:`
+  - `renderLiveTemplate:target:action:context:error:`
+  - `renderLiveNavigateTo:replace:`
+  - `publishLiveOperations:onChannel:error:`
+
+See [Live UI Guide](LIVE_UI.md) for authoring examples and the current scope
+boundary.
+
+## 6. App Mounting / Embedding
 
 `ALNApplication` now supports:
 
@@ -82,7 +108,7 @@ Behavior:
 
 This enables modular app composition while preserving existing route/controller contracts.
 
-## 6. Built-In Boomhauer Phase 3D Routes
+## 7. Built-In Boomhauer Phase 3D Routes
 
 Current sample routes in `boomhauer`:
 
@@ -93,7 +119,7 @@ Current sample routes in `boomhauer`:
   - `/embedded/status`
   - `/embedded/api/status`
 
-## 7. Verification Coverage
+## 8. Verification Coverage
 
 Phase 3D coverage includes:
 

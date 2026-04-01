@@ -1,7 +1,7 @@
 # Arlen Feature Parity Matrix
 
 Status: Active baseline  
-Last updated: 2026-03-06
+Last updated: 2026-04-01
 
 Related docs:
 - `docs/PHASE2_ROADMAP.md`
@@ -72,7 +72,8 @@ Related docs:
 | Metrics and telemetry primitives | Phoenix | In Scope | Phase 3A | First-class observability posture. |
 | Release packaging with `server`/`migrate` workflow | Phoenix | In Scope | Phase 2D-3C | Core compiled-framework deployment contract. |
 | Realtime channels/pubsub abstraction | Phoenix | In Scope | Phase 3D (complete) | Delivered with `ALNRealtimeHub` channel fanout abstraction over websocket channel mode. |
-| LiveView-like server-driven UI | Phoenix | Maybe Someday | Unscheduled backlog | Strategic but high-scope; reconsider after clustering/runtime maturity. |
+| Server-driven live fragments, forms, and navigation baseline | Phoenix LiveView, Hotwire/Turbo, Symfony UX LiveComponent, Livewire | In Scope | Phase 25 (`25A-25C` initial slice complete) | Fragment-first HTML-over-the-wire baseline ships with `ALNLive`, `/arlen/live.js`, live request metadata, controller live helpers, and websocket-backed push updates. |
+| Full LiveView-style stateful diff engine | Phoenix LiveView | Maybe Someday | Unscheduled backlog | Current design is intentionally fragment-first; whole-page/stateful diffing remains deferred. |
 | Background jobs abstraction | Rails | In Scope | Phase 3E (complete) | Delivered as plugin-first `ALNJobAdapter` contract with in-memory baseline and conformance suite. |
 | File attachment abstraction | Rails | In Scope | Phase 3E (complete) | Delivered via `ALNAttachmentAdapter` with optional adapter replacement through plugins. |
 | Mail delivery abstraction | Rails | In Scope | Phase 3E (complete) | Delivered via `ALNMailAdapter` + `ALNMailMessage` contract with plugin override support. |

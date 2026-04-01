@@ -52,6 +52,7 @@
 #import "MVC/Template/ALNEOCTranspiler.h"
 #import "MVC/View/ALNView.h"
 #import "Support/ALNLogger.h"
+#import "Support/ALNLive.h"
 #import "Support/ALNMetrics.h"
 #import "Support/ALNPerf.h"
 #import "Support/ALNAuth.h"

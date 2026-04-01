@@ -3,6 +3,7 @@
 #import "ALNRequest.h"
 #import "ALNResponse.h"
 #import "ALNLogger.h"
+#import "ALNLive.h"
 #import "ALNPerf.h"
 #import "ALNPageState.h"
 #import "ALNAuthSession.h"
@@ -361,6 +362,14 @@ static BOOL ALNETagListMatches(NSString *ifNoneMatchHeader, NSString *etag) {
 
 - (BOOL)wantsJSON {
   return [[self requestFormat] isEqualToString:@"json"];
+}
+
+- (BOOL)isLiveRequest {
+  return [ALNLive requestIsLive:self.request];
+}
+
+- (NSDictionary *)liveMetadata {
+  return [ALNLive requestMetadataForRequest:self.request];
 }
 
 - (void)addValidationErrorForField:(NSString *)field

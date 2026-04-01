@@ -21,6 +21,7 @@
 #import "ALNAuth.h"
 #import "ALNAuthSession.h"
 #import "ALNDataverseClient.h"
+#import "ALNLive.h"
 
 #include <ctype.h>
 #include <math.h>
@@ -2815,6 +2816,16 @@ static BOOL ALNApplyBuiltInResponse(ALNApplication *application,
       if (!headRequest) {
         [response setTextBody:[application.metrics prometheusText]];
       }
+    }
+    response.committed = YES;
+    return YES;
+  }
+
+  if ([routePath isEqualToString:@"/arlen/live.js"] || [requestPath isEqualToString:@"/arlen/live.js"]) {
+    response.statusCode = 200;
+    [response setHeader:@"Content-Type" value:@"application/javascript; charset=utf-8"];
+    if (!headRequest) {
+      [response setTextBody:[ALNLive runtimeJavaScript]];
     }
     response.committed = YES;
     return YES;

@@ -52,6 +52,8 @@ if (userID == nil) {
 | `applyETagAndReturnNotModifiedIfMatch:` | `- (BOOL)applyETagAndReturnNotModifiedIfMatch:(NSString *)etag;` | Apply this helper to context and update response state. | Call before expensive render/DB work; if it returns `YES`, exit action early. |
 | `requestFormat` | `- (NSString *)requestFormat;` | Resolve request format from explicit route format or Accept negotiation. | Read this value when you need current runtime/request state. |
 | `wantsJSON` | `- (BOOL)wantsJSON;` | Return whether request negotiation prefers JSON. | Check the return value to confirm the operation succeeded. |
+| `isLiveRequest` | `- (BOOL)isLiveRequest;` | Return whether `ALNContext` currently satisfies this condition. | Check the return value to confirm the operation succeeded. |
+| `liveMetadata` | `- (NSDictionary *)liveMetadata;` | Perform `live metadata` for `ALNContext`. | Read this value when you need current runtime/request state. |
 | `addValidationErrorForField:code:message:` | `- (void)addValidationErrorForField:(NSString *)field code:(NSString *)code message:(NSString *)message;` | Append a structured validation error to context state. | Call during bootstrap/setup before this behavior is exercised. |
 | `validationErrors` | `- (NSArray *)validationErrors;` | Return collected validation errors for this request. | Read this value when you need current runtime/request state. |
 | `validatedParams` | `- (NSDictionary *)validatedParams;` | Return schema-validated and transformed parameter values. | Read this value when you need current runtime/request state. |

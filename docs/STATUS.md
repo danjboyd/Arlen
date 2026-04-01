@@ -1,6 +1,28 @@
 # Arlen Status Checkpoint
 
-Last updated: 2026-03-31
+Last updated: 2026-04-01
+
+## Leaving Off (2026-04-01)
+
+- Phase 25 is in progress with `25A-25C` delivered:
+  - added the fragment-first live UI baseline through `ALNLive`, the built-in
+    `/arlen/live.js` runtime, and the `application/vnd.arlen.live+json`
+    response contract
+  - added live request metadata (`target`, `swap`, `component`, `event`,
+    `source`) so templates can describe live rerender targets directly with
+    `data-arlen-live-*` attributes and controllers can inspect the originating
+    live request
+  - added controller/context live helpers, request-driven fragment rerendering,
+    live navigation, websocket-backed live operation publishing, and the
+    focused `phase25-live-tests` lane
+  - documented the new authoring path in `docs/LIVE_UI.md` and recorded the
+    roadmap in `docs/PHASE25_ROADMAP.md`
+- Verification completed at this checkpoint:
+  - `source tools/source_gnustep_env.sh && make build-tests`
+  - `source tools/source_gnustep_env.sh && make phase25-live-tests`
+  - `source tools/source_gnustep_env.sh && make test-unit`
+  - `source tools/source_gnustep_env.sh && make docs-api`
+  - `bash tools/ci/run_docs_quality.sh`
 
 ## Leaving Off (2026-03-31)
 
