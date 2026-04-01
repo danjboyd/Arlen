@@ -33,7 +33,7 @@ toolchain env directly.
 
 - [Getting Started: API-First Track](GETTING_STARTED_API_FIRST.md): JSON APIs, schema/auth contracts, and OpenAPI.
 - [Getting Started: HTML-First Track](GETTING_STARTED_HTML_FIRST.md): server-rendered EOC templates, layouts, and forms.
-- [Live UI Guide](LIVE_UI.md): fragment-first live responses, `/arlen/live.js`, live forms/links, and realtime push updates.
+- [Live UI Guide](LIVE_UI.md): fragment-first live responses, `/arlen/live.js`, keyed collections, live regions, live forms/links, and realtime push updates.
 - [Core Concepts](CORE_CONCEPTS.md): runtime architecture and request lifecycle.
 - [Template Troubleshooting](TEMPLATE_TROUBLESHOOTING.md): deterministic transpile/lint diagnostics and repair workflow.
 - [API Reference](API_REFERENCE.md): generated public API docs with per-method purpose and usage guidance.
@@ -80,7 +80,7 @@ toolchain env directly.
 - [Phase 21 Roadmap](PHASE21_ROADMAP.md): completed public-release test robustness pass.
 - [Phase 22 Roadmap](PHASE22_ROADMAP.md): completed documentation cleanup pass for newcomer-first onboarding and docs quality closeout.
 - [Phase 23 Roadmap](PHASE23_ROADMAP.md): completed Dataverse integration phase.
-- [Phase 25 Roadmap](PHASE25_ROADMAP.md): in-progress live UI phase with `25A-25C` fragment-first baseline delivered.
+- [Phase 25 Roadmap](PHASE25_ROADMAP.md): completed live UI phase with keyed collections, live regions, confidence artifacts, and the shipped tech-demo page.
 - [Combined Roadmap Index (Historical Aggregate)](PHASE2_PHASE3_ROADMAP.md)
 - [Phase 1 Spec](PHASE1_SPEC.md)
 - [Arlen CLI Spec](ARLEN_CLI_SPEC.md)

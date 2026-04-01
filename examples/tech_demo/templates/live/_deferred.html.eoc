@@ -1,0 +1,7 @@
+<p class="eyebrow">Deferred Fragment</p>
+<h3 class="live-fragment-title"><%= $headline %></h3>
+<ul class="live-list">
+<% for (NSString *note in ($notes ?: @[])) { %>
+  <li><%= note %></li>
+<% } %>
+</ul>

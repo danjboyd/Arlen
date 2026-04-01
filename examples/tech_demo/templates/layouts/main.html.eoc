@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title><%= $pageTitle %></title>
     <link rel="stylesheet" href="/static/tech_demo.css">
+    <script src="/arlen/live.js" defer></script>
   </head>
   <body>
     <header class="shell">

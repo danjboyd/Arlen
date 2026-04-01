@@ -48,6 +48,11 @@
                                                      @"X-Arlen-Live-Component" : @" order-list ",
                                                      @"X-Arlen-Live-Event" : @" submit ",
                                                      @"X-Arlen-Live-Source" : @" FORM ",
+                                                     @"X-Arlen-Live-Container" : @" #feed ",
+                                                     @"X-Arlen-Live-Key" : @" row-42 ",
+                                                     @"X-Arlen-Live-Poll" : @" 5s ",
+                                                     @"X-Arlen-Live-Defer" : @" 250ms ",
+                                                     @"X-Arlen-Live-Lazy" : @" true ",
                                                    }
                                                       body:[NSData data]];
 
@@ -57,6 +62,11 @@
   XCTAssertEqualObjects(@"order-list", metadata[@"component"]);
   XCTAssertEqualObjects(@"submit", metadata[@"event"]);
   XCTAssertEqualObjects(@"form", metadata[@"source"]);
+  XCTAssertEqualObjects(@"#feed", metadata[@"container"]);
+  XCTAssertEqualObjects(@"row-42", metadata[@"key"]);
+  XCTAssertEqualObjects(@"5s", metadata[@"poll"]);
+  XCTAssertEqualObjects(@"250ms", metadata[@"defer"]);
+  XCTAssertEqualObjects(@(YES), metadata[@"lazy"]);
 }
 
 - (void)testRenderResponseSerializesPayloadAndHeaders {
@@ -76,6 +86,8 @@
   XCTAssertEqualObjects([ALNLive contentType], [response headerForName:@"Content-Type"]);
   XCTAssertEqualObjects([ALNLive protocolVersion],
                         [response headerForName:@"X-Arlen-Live-Protocol"]);
+  XCTAssertEqualObjects(@"no-store", [response headerForName:@"Cache-Control"]);
+  XCTAssertEqualObjects(@"Accept, X-Arlen-Live", [response headerForName:@"Vary"]);
 
   NSDictionary *payload = ALNTestJSONDictionaryFromResponse(response, &error);
   XCTAssertNil(error);
@@ -106,6 +118,61 @@
   XCTAssertTrue([error.localizedDescription containsString:@"target selector"]);
 }
 
+- (void)testValidatedPayloadSupportsKeyedCollectionOperations {
+  NSError *error = nil;
+  NSDictionary *payload = [ALNLive validatedPayloadWithOperations:@[
+    [ALNLive upsertKeyedOperationForContainer:@"#feed"
+                                          key:@"alpha"
+                                         html:@"<li data-arlen-live-key=\"alpha\">Alpha</li>"
+                                      prepend:NO],
+    [ALNLive removeKeyedOperationForContainer:@"#feed" key:@"alpha"],
+  ]
+                                                              meta:@{ @"channel" : @"live.feed" }
+                                                             error:&error];
+
+  XCTAssertNil(error);
+  XCTAssertEqual((NSUInteger)2, [payload[@"operations"] count]);
+  XCTAssertEqualObjects(@"upsert", payload[@"operations"][0][@"op"]);
+  XCTAssertEqualObjects(@"#feed", payload[@"operations"][0][@"container"]);
+  XCTAssertEqualObjects(@"alpha", payload[@"operations"][0][@"key"]);
+  XCTAssertEqualObjects(@"discard", payload[@"operations"][1][@"op"]);
+  XCTAssertEqualObjects(@"[data-arlen-live-key=\"alpha\"]",
+                        [ALNLive keyedTargetSelectorForContainer:nil key:@"alpha"]);
+}
+
+- (void)testValidatedPayloadRejectsOversizedOperationSet {
+  NSMutableArray *operations = [NSMutableArray array];
+  for (NSUInteger idx = 0; idx < 65; idx++) {
+    [operations addObject:[ALNLive replaceOperationForTarget:@"#items" html:@"<li>Alpha</li>"]];
+  }
+
+  NSError *error = nil;
+  NSDictionary *payload = [ALNLive validatedPayloadWithOperations:operations meta:nil error:&error];
+
+  XCTAssertNil(payload);
+  XCTAssertNotNil(error);
+  XCTAssertTrue([error.localizedDescription containsString:@"operation count"]);
+}
+
+- (void)testValidatedPayloadRejectsOversizedMeta {
+  NSMutableString *large = [NSMutableString string];
+  for (NSUInteger idx = 0; idx < 17000; idx++) {
+    [large appendString:@"x"];
+  }
+
+  NSError *error = nil;
+  NSDictionary *payload =
+      [ALNLive validatedPayloadWithOperations:@[
+        [ALNLive updateOperationForTarget:@"#panel" html:@"<div>ok</div>"]
+      ]
+                                        meta:@{ @"notes" : large }
+                                       error:&error];
+
+  XCTAssertNil(payload);
+  XCTAssertNotNil(error);
+  XCTAssertTrue([error.localizedDescription containsString:@"meta exceeds"]);
+}
+
 - (void)testRuntimeJavaScriptContainsExpectedEntrypoints {
   NSString *script = [ALNLive runtimeJavaScript];
 
@@ -116,6 +183,15 @@
   XCTAssertTrue([script containsString:@"data-arlen-live-component"]);
   XCTAssertTrue([script containsString:@"data-arlen-live-event"]);
   XCTAssertTrue([script containsString:@"data-arlen-live-stream"]);
+  XCTAssertTrue([script containsString:@"data-arlen-live-src"]);
+  XCTAssertTrue([script containsString:@"data-arlen-live-poll"]);
+  XCTAssertTrue([script containsString:@"data-arlen-live-lazy"]);
+  XCTAssertTrue([script containsString:@"data-arlen-live-defer"]);
+  XCTAssertTrue([script containsString:@"data-arlen-live-upload-progress"]);
+  XCTAssertTrue([script containsString:@"data-arlen-live-key"]);
+  XCTAssertTrue([script containsString:@"data-arlen-live-empty"]);
+  XCTAssertTrue([script containsString:@"arlen:live:backpressure"]);
+  XCTAssertTrue([script containsString:@"arlen:live:auth-expired"]);
   XCTAssertTrue([script containsString:@"application/vnd.arlen.live+json"]);
 }
 

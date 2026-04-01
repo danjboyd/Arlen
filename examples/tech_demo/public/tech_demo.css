@@ -83,6 +83,134 @@ main,
   background: #f1fbf8;
 }
 
+.muted {
+  color: #6e5b4b;
+}
+
+.live-stack {
+  display: grid;
+  gap: 1rem;
+}
+
+.live-panel {
+  display: grid;
+  gap: 0.8rem;
+}
+
+.live-form-inline {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: end;
+}
+
+.live-form-inline label {
+  display: grid;
+  gap: 0.3rem;
+  font-size: 0.95rem;
+}
+
+.live-form-inline select,
+.live-form-inline input[type="file"] {
+  min-width: 11rem;
+}
+
+.live-region-grid {
+  display: grid;
+  gap: 1rem;
+}
+
+.live-region-surface[data-arlen-live-loading="true"] {
+  opacity: 0.7;
+}
+
+.live-fragment-title {
+  margin: 0;
+}
+
+.live-list {
+  margin: 0;
+  padding-left: 1.25rem;
+}
+
+.live-inline-note {
+  padding: 0.75rem 0.9rem;
+  border: 1px dashed var(--border);
+  border-radius: 10px;
+  background: #faf6ef;
+}
+
+#upload-progress {
+  width: min(18rem, 100%);
+  height: 1rem;
+}
+
+.live-section-head {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 0.8rem;
+  align-items: center;
+}
+
+.live-stream-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.35rem 0.65rem;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: #f8efe1;
+  font-size: 0.85rem;
+}
+
+.live-stream-pill[data-arlen-live-stream-state="open"] {
+  background: #e2f5ee;
+  border-color: #7cb29d;
+}
+
+.live-stream-pill[data-arlen-live-stream-state="connecting"] {
+  background: #fff6d9;
+}
+
+.live-stream-pill[data-arlen-live-stream-state="closed"],
+.live-stream-pill[data-arlen-live-stream-state="error"] {
+  background: #fae4df;
+  border-color: #c38373;
+}
+
+.live-feed-controls {
+  gap: 0.6rem;
+}
+
+.live-feed {
+  margin: 0;
+  padding-left: 0;
+  list-style: none;
+  display: grid;
+  gap: 0.55rem;
+}
+
+.feed-item {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.7rem 0.8rem;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: #faf8f2;
+}
+
+.feed-item.priority {
+  background: #fef1d6;
+  border-color: #d5a95f;
+}
+
+.feed-item small {
+  color: #7d6450;
+  white-space: nowrap;
+}
+
 .grid {
   width: 100%;
   border-collapse: collapse;
@@ -111,5 +239,9 @@ code {
 @media (min-width: 860px) {
   .layout-grid {
     grid-template-columns: minmax(0, 2.2fr) minmax(240px, 0.9fr);
+  }
+
+  .live-region-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 }

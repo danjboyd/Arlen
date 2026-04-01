@@ -225,6 +225,8 @@
   XCTAssertTrue([makefile containsString:@"tests/unit/LiveRuntimeTests.m"]);
   XCTAssertTrue([makefile containsString:@"phase25-live-tests: $(PHASE25_LIVE_TEST_BIN)"]);
   XCTAssertTrue([makefile containsString:@"phase25-focused: phase25-live-tests"]);
+  XCTAssertTrue([makefile containsString:@"phase25-confidence:"]);
+  XCTAssertTrue([makefile containsString:@"bash ./tools/ci/run_phase25_confidence.sh"]);
 }
 
 - (void)testGNUmakefileUsesIncrementalObjectsDepfilesAndManifestedTemplates {

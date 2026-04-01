@@ -56,10 +56,23 @@ NS_ASSUME_NONNULL_BEGIN
                     action:(nullable NSString *)action
                    context:(nullable NSDictionary *)context
                      error:(NSError *_Nullable *_Nullable)error;
+- (BOOL)renderLiveKeyedTemplate:(NSString *)templateName
+                      container:(nullable NSString *)container
+                            key:(nullable NSString *)key
+                        prepend:(BOOL)prepend
+                        context:(nullable NSDictionary *)context
+                          error:(NSError *_Nullable *_Nullable)error;
 - (void)renderLiveNavigateTo:(NSString *)location replace:(BOOL)replace;
 - (NSUInteger)publishLiveOperations:(NSArray *)operations
                           onChannel:(NSString *)channel
                               error:(NSError *_Nullable *_Nullable)error;
+- (NSUInteger)publishLiveKeyedTemplate:(NSString *)templateName
+                             container:(nullable NSString *)container
+                                   key:(nullable NSString *)key
+                               prepend:(BOOL)prepend
+                               context:(nullable NSDictionary *)context
+                             onChannel:(NSString *)channel
+                                 error:(NSError *_Nullable *_Nullable)error;
 - (void)renderSSEEvents:(NSArray *)events;
 - (void)acceptWebSocketEcho;
 - (void)acceptWebSocketChannel:(NSString *)channel;

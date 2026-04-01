@@ -1,0 +1,20 @@
+<p class="muted">
+  Showing <strong><%= $ordersCount %></strong> orders for
+  <strong><%= $ownerFilterLabel %></strong> and
+  <strong><%= $statusFilterLabel %></strong>.
+</p>
+
+<table class="grid live-grid">
+  <thead>
+    <tr>
+      <th>Order</th>
+      <th>Owner</th>
+      <th>Status</th>
+      <th>Priority</th>
+      <th>Region</th>
+    </tr>
+  </thead>
+  <tbody>
+    <%@ render "live/_order_row" collection:$orders as:"order" empty:"live/_order_empty" %>
+  </tbody>
+</table>

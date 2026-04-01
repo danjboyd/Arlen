@@ -1,0 +1,3 @@
+<p class="eyebrow">Upload Summary</p>
+<p><strong><%= $bodyBytes %></strong> bytes received at <%= $timestamp %>.</p>
+<p class="muted">Request content type: <code><%= $contentType %></code></p>

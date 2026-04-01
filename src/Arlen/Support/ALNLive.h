@@ -23,6 +23,14 @@ NS_ASSUME_NONNULL_BEGIN
 + (NSDictionary *)prependOperationForTarget:(NSString *)target
                                        html:(NSString *)html;
 + (NSDictionary *)removeOperationForTarget:(NSString *)target;
++ (NSString *)keyedTargetSelectorForContainer:(nullable NSString *)container
+                                          key:(nullable NSString *)key;
++ (NSDictionary *)upsertKeyedOperationForContainer:(nullable NSString *)container
+                                               key:(nullable NSString *)key
+                                              html:(NSString *)html
+                                           prepend:(BOOL)prepend;
++ (NSDictionary *)removeKeyedOperationForContainer:(nullable NSString *)container
+                                               key:(nullable NSString *)key;
 + (NSDictionary *)navigateOperationForLocation:(NSString *)location
                                        replace:(BOOL)replace;
 + (NSDictionary *)dispatchOperationForEvent:(NSString *)eventName

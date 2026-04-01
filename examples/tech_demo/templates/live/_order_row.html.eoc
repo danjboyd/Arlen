@@ -1,0 +1,7 @@
+<tr>
+  <td><code><%= $order.id %></code></td>
+  <td><%= $order.owner %></td>
+  <td><%= $order.status %></td>
+  <td><%= $order.priority %></td>
+  <td><%= $order.region %></td>
+</tr>

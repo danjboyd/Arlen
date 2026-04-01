@@ -3371,6 +3371,32 @@
   XCTAssertTrue([body containsString:@"/tech-demo/dashboard"]);
 }
 
+- (void)testTechDemoLivePageIncludesLiveRuntimeRegionsAndFeedSurface {
+  NSString *body = [self requestPath:@"/tech-demo/live"
+                        serverBinary:@"./build/tech-demo-server"
+                           envPrefix:@"ARLEN_APP_ROOT=examples/tech_demo"];
+  XCTAssertTrue([body containsString:@"/arlen/live.js"]);
+  XCTAssertTrue([body containsString:@"data-arlen-live-src=\"/tech-demo/live/pulse\""]);
+  XCTAssertTrue([body containsString:@"data-arlen-live-stream=\"/ws/channel/tech_demo.live\""]);
+  XCTAssertTrue([body containsString:@"data-arlen-live-target=\"#live-orders\""]);
+}
+
+- (void)testTechDemoLiveOrdersEndpointReturnsLivePayload {
+  int curlCode = 0;
+  int serverCode = 0;
+  NSString *body = [self requestWithServerEnv:@"ARLEN_APP_ROOT=examples/tech_demo"
+                                  serverBinary:@"./build/tech-demo-server"
+                                     curlBody:@"curl -fsS -H 'X-Arlen-Live: true' -H 'X-Arlen-Live-Target: #live-orders' -H 'X-Arlen-Live-Swap: update' 'http://127.0.0.1:%d/tech-demo/live/orders?owner=Pat&status=Live'"
+                                     curlCode:&curlCode
+                                    serverCode:&serverCode];
+  XCTAssertEqual(0, curlCode);
+  XCTAssertEqual(0, serverCode);
+  XCTAssertTrue([body containsString:@"\"version\":\"arlen-live-v1\""]);
+  XCTAssertTrue([body containsString:@"\"op\":\"update\""]);
+  XCTAssertTrue([body containsString:@"\"target\":\"#live-orders\""]);
+  XCTAssertTrue([body containsString:@"ORD-410"]);
+}
+
 - (void)testTechDemoUserRouteShowsParams {
   NSString *body = [self requestPath:@"/tech-demo/users/peggy?flag=admin"
                         serverBinary:@"./build/tech-demo-server"

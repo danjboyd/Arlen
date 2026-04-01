@@ -1,0 +1,7 @@
+<p class="eyebrow">Lazy Fragment</p>
+<h3 class="live-fragment-title"><%= $headline %></h3>
+<ul class="live-list">
+<% for (NSString *bullet in ($bullets ?: @[])) { %>
+  <li><%= bullet %></li>
+<% } %>
+</ul>

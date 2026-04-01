@@ -1,0 +1,4 @@
+<p class="eyebrow">Polling Fragment</p>
+<h3 class="live-fragment-title">Server pulse at <%= $timestamp %></h3>
+<p><strong><%= $status %></strong></p>
+<p class="muted">Recent activity: <%= $requestCount %>.</p>

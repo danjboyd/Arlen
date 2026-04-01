@@ -18,6 +18,15 @@ static NSString *RenderLivePanel(id ctx, NSError **error) {
   return @"<section class=\"panel\">Ready</section>";
 }
 
+static NSString *RenderLiveFeedItem(id ctx, NSError **error) {
+  (void)error;
+  NSString *key = [ctx isKindOfClass:[NSDictionary class]] ? ctx[@"key"] : @"";
+  NSString *label = [ctx isKindOfClass:[NSDictionary class]] ? ctx[@"label"] : @"";
+  return [NSString stringWithFormat:@"<li data-arlen-live-key=\"%@\">%@</li>",
+                                    key ?: @"",
+                                    label ?: @""];
+}
+
 @interface LiveControllerHarness : ALNController
 @end
 
@@ -133,6 +142,7 @@ static NSString *RenderLivePanel(id ctx, NSError **error) {
   XCTAssertEqualObjects(@"<section class=\"panel\">Ready</section>",
                         payload[@"operations"][0][@"html"]);
   XCTAssertEqualObjects(@"live_items", payload[@"meta"][@"route"]);
+  XCTAssertEqualObjects(@"POST", payload[@"meta"][@"method"]);
 }
 
 - (void)testRenderLiveTemplateUsesRequestMetadataDefaults {
@@ -157,6 +167,40 @@ static NSString *RenderLivePanel(id ctx, NSError **error) {
   XCTAssertNil(error);
   XCTAssertEqualObjects(@"prepend", payload[@"operations"][0][@"op"]);
   XCTAssertEqualObjects(@"#panel", payload[@"operations"][0][@"target"]);
+}
+
+- (void)testRenderLiveKeyedTemplateUsesKeyedCollectionOperation {
+  ALNEOCRegisterTemplate(@"widgets/feed_item.html.eoc", &RenderLiveFeedItem);
+  LiveControllerHarness *controller = [self freshControllerWithHeaders:@{
+    @"X-Arlen-Live" : @"true",
+    @"X-Arlen-Live-Container" : @"#feed",
+    @"X-Arlen-Live-Key" : @"row-alpha",
+  }];
+
+  NSError *error = nil;
+  BOOL ok = [controller renderLiveKeyedTemplate:@"widgets/feed_item"
+                                      container:nil
+                                            key:nil
+                                        prepend:YES
+                                        context:@{
+                                          @"key" : @"row-alpha",
+                                          @"label" : @"Alpha",
+                                        }
+                                          error:&error];
+
+  XCTAssertTrue(ok);
+  XCTAssertNil(error);
+
+  NSDictionary *payload = ALNTestJSONDictionaryFromResponse(controller.context.response, &error);
+  XCTAssertNil(error);
+  XCTAssertEqualObjects(@"upsert", payload[@"operations"][0][@"op"]);
+  XCTAssertEqualObjects(@"#feed", payload[@"operations"][0][@"container"]);
+  XCTAssertEqualObjects(@"row-alpha", payload[@"operations"][0][@"key"]);
+  XCTAssertEqualObjects(@(YES), payload[@"operations"][0][@"prepend"]);
+  XCTAssertEqualObjects(@"#feed [data-arlen-live-key=\"row-alpha\"]",
+                        payload[@"operations"][0][@"target"]);
+  XCTAssertEqualObjects(@"#feed", payload[@"meta"][@"live"][@"container"]);
+  XCTAssertEqualObjects(@"row-alpha", payload[@"meta"][@"live"][@"key"]);
 }
 
 - (void)testRenderLiveNavigateToBuildsNavigateOperation {
@@ -200,6 +244,44 @@ static NSString *RenderLivePanel(id ctx, NSError **error) {
   XCTAssertEqualObjects([ALNLive protocolVersion], payload[@"version"]);
   XCTAssertEqualObjects(@"append", payload[@"operations"][0][@"op"]);
   XCTAssertEqualObjects(@"#feed", payload[@"operations"][0][@"target"]);
+}
+
+- (void)testPublishLiveKeyedTemplatePublishesPayloadToChannel {
+  ALNEOCRegisterTemplate(@"widgets/feed_item.html.eoc", &RenderLiveFeedItem);
+  LiveControllerHarness *controller = [self freshControllerWithHeaders:@{
+    @"X-Arlen-Live" : @"true",
+    @"X-Arlen-Live-Container" : @"#feed",
+    @"X-Arlen-Live-Key" : @"row-gamma",
+  }];
+  LiveControllerSubscriber *subscriber = [[LiveControllerSubscriber alloc] init];
+  ALNRealtimeSubscription *subscription =
+      [[ALNRealtimeHub sharedHub] subscribeChannel:@"live.feed" subscriber:subscriber];
+  XCTAssertNotNil(subscription);
+
+  NSError *error = nil;
+  NSUInteger delivered = [controller publishLiveKeyedTemplate:@"widgets/feed_item"
+                                                    container:nil
+                                                          key:nil
+                                                      prepend:NO
+                                                      context:@{
+                                                        @"key" : @"row-gamma",
+                                                        @"label" : @"Gamma",
+                                                      }
+                                                    onChannel:@"live.feed"
+                                                        error:&error];
+
+  XCTAssertNil(error);
+  XCTAssertEqual((NSUInteger)1, delivered);
+  XCTAssertEqual((NSUInteger)1, [subscriber.messages count]);
+
+  NSData *messageData = [subscriber.messages[0] dataUsingEncoding:NSUTF8StringEncoding];
+  NSDictionary *payload = [NSJSONSerialization JSONObjectWithData:messageData
+                                                          options:0
+                                                            error:&error];
+  XCTAssertNil(error);
+  XCTAssertEqualObjects(@"upsert", payload[@"operations"][0][@"op"]);
+  XCTAssertEqualObjects(@"#feed", payload[@"operations"][0][@"container"]);
+  XCTAssertEqualObjects(@"row-gamma", payload[@"operations"][0][@"key"]);
 }
 
 - (void)testRenderLiveTemplateRejectsUnsupportedAction {

@@ -1,0 +1,142 @@
+<%@ layout "layouts/main" %>
+<% NSString *ownerFilter = $ownerFilter ?: @""; %>
+<% NSString *statusFilter = $statusFilter ?: @""; %>
+<%@ slot "sidebar" %>
+<div class="callout">
+  <strong>Phase 25 Live UI</strong>
+  <p>This page uses framework-served <code>/arlen/live.js</code> with ordinary HTML links, forms, fragments, and keyed collection updates.</p>
+</div>
+<div class="callout">
+  <strong>Try this</strong>
+  <p>Filter the orders table, wait for the pulse region to refresh, scroll to hydrate the lazy card, and click the feed controls to see keyed updates land locally and over the stream.</p>
+</div>
+<%@ endslot %>
+<section class="live-stack">
+  <div class="callout">
+    <strong>Live runtime</strong>
+    <p>The live layer stays fragment-first: controllers return HTML or explicit live operations, and the browser runtime patches the targeted region.</p>
+  </div>
+
+  <section class="live-panel">
+    <h2>Live Order Filters</h2>
+    <form method="get"
+          action="/tech-demo/live/orders"
+          class="live-form-inline"
+          data-arlen-live
+          data-arlen-live-target="#live-orders"
+          data-arlen-live-swap="update"
+          data-arlen-live-component="orders-board"
+          data-arlen-live-event="filter">
+      <label>
+        Owner
+        <select name="owner">
+          <option value=""<% if ([ownerFilter length] == 0) { %> selected<% } %>>All owners</option>
+          <option value="Pat"<% if ([ownerFilter isEqualToString:@"Pat"]) { %> selected<% } %>>Pat</option>
+          <option value="Peggy"<% if ([ownerFilter isEqualToString:@"Peggy"]) { %> selected<% } %>>Peggy</option>
+          <option value="Hank"<% if ([ownerFilter isEqualToString:@"Hank"]) { %> selected<% } %>>Hank</option>
+        </select>
+      </label>
+      <label>
+        Status
+        <select name="status">
+          <option value=""<% if ([statusFilter length] == 0) { %> selected<% } %>>All statuses</option>
+          <option value="Queued"<% if ([statusFilter isEqualToString:@"Queued"]) { %> selected<% } %>>Queued</option>
+          <option value="Review"<% if ([statusFilter isEqualToString:@"Review"]) { %> selected<% } %>>Review</option>
+          <option value="Live"<% if ([statusFilter isEqualToString:@"Live"]) { %> selected<% } %>>Live</option>
+        </select>
+      </label>
+      <button type="submit">Refresh Orders</button>
+    </form>
+
+    <div id="live-orders" class="live-region">
+      <%@ include "live/_orders" %>
+    </div>
+  </section>
+
+  <div class="live-region-grid">
+    <section id="live-pulse"
+             class="live-panel live-region-surface"
+             data-arlen-live-src="/tech-demo/live/pulse"
+             data-arlen-live-target="#live-pulse"
+             data-arlen-live-swap="update"
+             data-arlen-live-component="pulse-card"
+             data-arlen-live-poll="4s">
+      <p class="muted">Polling live pulse...</p>
+    </section>
+
+    <section id="live-insights"
+             class="live-panel live-region-surface"
+             data-arlen-live-src="/tech-demo/live/insights"
+             data-arlen-live-target="#live-insights"
+             data-arlen-live-swap="update"
+             data-arlen-live-component="insights-card"
+             data-arlen-live-lazy>
+      <p class="muted">This region hydrates when it enters the viewport.</p>
+    </section>
+
+    <section id="live-deferred"
+             class="live-panel live-region-surface"
+             data-arlen-live-src="/tech-demo/live/deferred"
+             data-arlen-live-target="#live-deferred"
+             data-arlen-live-swap="update"
+             data-arlen-live-component="deferred-card"
+             data-arlen-live-defer="650ms">
+      <p class="muted">Deferred region waiting for a short idle window.</p>
+    </section>
+  </div>
+
+  <section class="live-panel">
+    <h2>Upload Progress</h2>
+    <form method="post"
+          action="/tech-demo/live/upload"
+          enctype="multipart/form-data"
+          class="live-form-inline"
+          data-arlen-live
+          data-arlen-live-target="#upload-summary"
+          data-arlen-live-swap="update"
+          data-arlen-live-component="upload-form"
+          data-arlen-live-event="upload"
+          data-arlen-live-progress-target="#upload-progress">
+      <label>
+        Choose a file
+        <input type="file" name="artifact">
+      </label>
+      <button type="submit">Send Upload</button>
+    </form>
+    <progress id="upload-progress" value="0" max="100"></progress>
+    <div id="upload-summary" class="live-inline-note">
+      <p>Submit any file to watch the client-side progress target update while the server returns a live summary fragment.</p>
+    </div>
+  </section>
+
+  <section class="live-panel">
+    <div class="live-section-head">
+      <div>
+        <h2>Keyed Live Feed</h2>
+        <p class="muted">Each control returns a local live response and also publishes the same keyed operation onto the demo websocket channel.</p>
+      </div>
+      <div id="live-feed-stream"
+           class="live-stream-pill"
+           data-arlen-live-stream="/ws/channel/tech_demo.live">
+        WebSocket feed
+      </div>
+    </div>
+
+    <div class="nav live-feed-controls">
+      <a href="/tech-demo/live/feed/publish?key=row-gamma&amp;label=Gamma+deploy+completed"
+         data-arlen-live
+         data-arlen-live-event="append-feed">Append Gamma</a>
+      <a href="/tech-demo/live/feed/publish?key=row-alert&amp;label=Alert+raised&amp;prepend=1"
+         data-arlen-live
+         data-arlen-live-event="prepend-feed">Prepend Alert</a>
+      <a href="/tech-demo/live/feed/remove?key=row-beta"
+         data-arlen-live
+         data-arlen-live-event="remove-feed">Remove Beta</a>
+    </div>
+
+    <ul id="live-feed" class="live-feed">
+      <%@ render "live/_feed_item" collection:$feedItems as:"item" %>
+      <li data-arlen-live-empty hidden>No live feed items yet.</li>
+    </ul>
+  </section>
+</section>

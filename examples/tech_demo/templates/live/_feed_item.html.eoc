@@ -1,0 +1,4 @@
+<li class="feed-item <%= $item.tone %>" data-arlen-live-key="<%= $item.key %>">
+  <span><%= $item.label %></span>
+  <small><%= $item.meta %></small>
+</li>

@@ -117,6 +117,13 @@ static NSDictionary *ALNLiveMeta(ALNContext *context) {
   if ([context.actionName length] > 0) {
     meta[@"action"] = context.actionName;
   }
+  if ([context.request.method length] > 0) {
+    meta[@"method"] = [[context.request.method uppercaseString] copy];
+  }
+  NSDictionary *liveMetadata = [context liveMetadata];
+  if ([liveMetadata count] > 0) {
+    meta[@"live"] = liveMetadata;
+  }
   return [NSDictionary dictionaryWithDictionary:meta];
 }
 
@@ -396,6 +403,46 @@ static NSString *ALNTrimmedLayoutName(id value) {
   return [self renderLiveOperations:@[ operation ] error:error];
 }
 
+- (BOOL)renderLiveKeyedTemplate:(NSString *)templateName
+                      container:(NSString *)container
+                            key:(NSString *)key
+                        prepend:(BOOL)prepend
+                        context:(NSDictionary *)context
+                          error:(NSError **)error {
+  NSDictionary *effectiveContext = context ?: [self templateContext];
+  NSString *rendered = [self renderedTemplateString:templateName
+                                            context:effectiveContext
+                               defaultLayoutEnabled:NO
+                                             error:error];
+  if (rendered == nil) {
+    return NO;
+  }
+
+  NSDictionary *liveMetadata = [self liveMetadata];
+  NSString *effectiveContainer =
+      ([container length] > 0) ? container : liveMetadata[@"container"];
+  NSString *effectiveKey = ([key length] > 0) ? key : liveMetadata[@"key"];
+  if ([effectiveContainer length] == 0 || [effectiveKey length] == 0) {
+    if (error != NULL) {
+      *error = [NSError errorWithDomain:@"Arlen.Live.Error"
+                                   code:5
+                               userInfo:@{
+                                 NSLocalizedDescriptionKey :
+                                     @"Live keyed template rendering requires container and key values",
+                                 @"container" : effectiveContainer ?: @"",
+                                 @"key" : effectiveKey ?: @"",
+                               }];
+    }
+    return NO;
+  }
+
+  NSDictionary *operation = [ALNLive upsertKeyedOperationForContainer:effectiveContainer
+                                                                  key:effectiveKey
+                                                                 html:rendered
+                                                              prepend:prepend];
+  return [self renderLiveOperations:@[ operation ] error:error];
+}
+
 - (void)renderLiveNavigateTo:(NSString *)location replace:(BOOL)replace {
   NSError *error = nil;
   BOOL rendered = [self renderLiveOperations:@[
@@ -440,6 +487,47 @@ static NSString *ALNTrimmedLayoutName(id value) {
   }
 
   return [[ALNRealtimeHub sharedHub] publishMessage:message onChannel:channel ?: @""];
+}
+
+- (NSUInteger)publishLiveKeyedTemplate:(NSString *)templateName
+                             container:(NSString *)container
+                                   key:(NSString *)key
+                               prepend:(BOOL)prepend
+                               context:(NSDictionary *)context
+                             onChannel:(NSString *)channel
+                                 error:(NSError **)error {
+  NSDictionary *effectiveContext = context ?: [self templateContext];
+  NSString *rendered = [self renderedTemplateString:templateName
+                                            context:effectiveContext
+                               defaultLayoutEnabled:NO
+                                             error:error];
+  if (rendered == nil) {
+    return 0;
+  }
+
+  NSDictionary *liveMetadata = [self liveMetadata];
+  NSString *effectiveContainer =
+      ([container length] > 0) ? container : liveMetadata[@"container"];
+  NSString *effectiveKey = ([key length] > 0) ? key : liveMetadata[@"key"];
+  if ([effectiveContainer length] == 0 || [effectiveKey length] == 0) {
+    if (error != NULL) {
+      *error = [NSError errorWithDomain:@"Arlen.Live.Error"
+                                   code:6
+                               userInfo:@{
+                                 NSLocalizedDescriptionKey :
+                                     @"Live keyed publishing requires container and key values",
+                                 @"container" : effectiveContainer ?: @"",
+                                 @"key" : effectiveKey ?: @"",
+                               }];
+    }
+    return 0;
+  }
+
+  NSDictionary *operation = [ALNLive upsertKeyedOperationForContainer:effectiveContainer
+                                                                  key:effectiveKey
+                                                                 html:rendered
+                                                              prepend:prepend];
+  return [self publishLiveOperations:@[ operation ] onChannel:channel error:error];
 }
 
 - (void)renderSSEEvents:(NSArray *)events {
