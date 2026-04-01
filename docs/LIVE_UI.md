@@ -69,6 +69,9 @@ Supported operations:
 - `key`: stable keyed item identifier
 - `target`: derived keyed selector for diagnostics/debugging
 
+`navigate` is intentionally narrow: live payloads accept relative locations or
+`http(s)` URLs, and reject custom/dangerous schemes.
+
 ## 3. Authoring Live Links and Forms
 
 Mark links or forms with `data-arlen-live` so the runtime intercepts them.
@@ -283,10 +286,11 @@ make phase25-confidence
 ```
 
 `phase25-confidence` builds the live suite, boots the tech demo server, and
-records a smoke artifact set under `build/release_confidence/phase25/`.
+records a smoke artifact set under `build/release_confidence/phase25/`,
+including a pushed websocket payload and one negative backpressure capture.
 
 `phase25-live-tests` now includes executable runtime semantics coverage through
 `tests/shared/ALNLiveTestSupport.{h,m}` and
 `tests/shared/live_runtime_harness.js`, which run `/arlen/live.js` against a
-small deterministic DOM/network harness for DOM patching, forms, uploads, and
-region behavior.
+small deterministic DOM/network harness for DOM patching, forms, uploads,
+region behavior, stream/reconnect semantics, and adversarial response cases.

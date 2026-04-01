@@ -28,9 +28,13 @@ function isIdentifierChar(character) {
 function unquote(value) {
   const text = String(value || "").trim();
   if ((text.startsWith("\"") && text.endsWith("\"")) || (text.startsWith("'") && text.endsWith("'"))) {
-    return text.slice(1, -1);
+    return text
+      .slice(1, -1)
+      .replace(/\\\\/g, "\\")
+      .replace(/\\"/g, "\"")
+      .replace(/\\'/g, "'");
   }
-  return text;
+  return text.replace(/\\\\/g, "\\");
 }
 
 function splitOutside(value, separatorMatcher) {
@@ -1065,8 +1069,8 @@ class FakeWebSocket extends SimpleEventTarget {
     this.url = String(url || "");
     this.readyState = FakeWebSocket.CONNECTING;
     this.sent = [];
-    this._registry = registry;
-    registry.set(this.url, this);
+    this.index = registry.length;
+    registry.push(this);
   }
 
   send(payload) {
@@ -1125,7 +1129,7 @@ function createHarness(scenario) {
     },
   };
   const timerManager = new TimerManager();
-  const webSockets = new Map();
+  const webSockets = [];
   const observers = [];
   const pending = new Map();
   const responseQueue = Array.isArray(scenario.responses) ? scenario.responses.slice() : [];
@@ -1147,6 +1151,19 @@ function createHarness(scenario) {
       this.href = value;
     },
   };
+
+  function normalizeWebSocketURL(rawURL) {
+    if (!rawURL) {
+      return "";
+    }
+    const resolved = new URL(String(rawURL), location.href);
+    if (resolved.protocol === "http:") {
+      resolved.protocol = "ws:";
+    } else if (resolved.protocol === "https:") {
+      resolved.protocol = "wss:";
+    }
+    return resolved.toString();
+  }
 
   function normalizeHeaders(headers) {
     const output = {};
@@ -1434,6 +1451,44 @@ function createHarness(scenario) {
     context.IntersectionObserver = window.IntersectionObserver;
   }
 
+  function resolveWebSocket(action) {
+    if (action && action.socketIndex != null) {
+      const socket = webSockets[Number(action.socketIndex)];
+      if (!socket) {
+        throw new Error("websocket not found at index " + action.socketIndex);
+      }
+      return socket;
+    }
+    let rawURL = "";
+    if (action && action.selector) {
+      rawURL = attributeValue(requireElement(action.selector), "data-arlen-live-stream");
+    } else {
+      rawURL = String((action && action.url) || "");
+    }
+    if (!rawURL) {
+      throw new Error("websocket action requires url, selector, or socketIndex");
+    }
+    const normalized = normalizeWebSocketURL(rawURL);
+    for (let index = webSockets.length - 1; index >= 0; index -= 1) {
+      if (webSockets[index] && webSockets[index].url === normalized) {
+        return webSockets[index];
+      }
+    }
+    throw new Error("websocket not found for " + rawURL);
+  }
+
+  function snapshotWebSocket(socket) {
+    if (!socket) {
+      return null;
+    }
+    return {
+      index: socket.index,
+      url: socket.url,
+      readyState: socket.readyState,
+      sent: serializeValue(socket.sent),
+    };
+  }
+
   function requireElement(selector) {
     const element = document.querySelector(String(selector || ""));
     if (!element) {
@@ -1498,6 +1553,37 @@ function createHarness(scenario) {
         );
       case "activate_region":
         return invokeMaybeAsync(action, context.window.ArlenLive.__testing.activateRegion(requireElement(action.selector)));
+      case "scan_streams":
+        return invokeMaybeAsync(action, context.window.ArlenLive.__testing.scanStreams());
+      case "handle_response":
+        {
+          const response = Object.assign({}, action.response || {});
+          response.headers = headerReader(response.headers || {});
+          return invokeMaybeAsync(
+            action,
+            context.window.ArlenLive.__testing.handleLiveTextResponse(
+              response,
+              action.fallbackURL || response.url || location.href,
+              action.options || {}
+            )
+          );
+        }
+      case "websocket_open":
+        resolveWebSocket(action)._emitOpen();
+        return snapshotWebSocket(resolveWebSocket(action));
+      case "websocket_message":
+        resolveWebSocket(action)._emitMessage(
+          typeof action.data === "string" ? action.data : JSON.stringify(action.data == null ? "" : action.data)
+        );
+        return snapshotWebSocket(resolveWebSocket(action));
+      case "websocket_error":
+        resolveWebSocket(action)._emitError();
+        return snapshotWebSocket(resolveWebSocket(action));
+      case "websocket_close":
+        resolveWebSocket(action)._emitClose(action.code || 1000, action.reason || "");
+        return snapshotWebSocket(resolveWebSocket(action));
+      case "websocket_summary":
+        return serializeValue(webSockets.map(snapshotWebSocket));
       case "advance_time":
         timerManager.advance(Number(action.ms || 0));
         await flushMicrotasks();
@@ -1567,6 +1653,7 @@ function createHarness(scenario) {
       errors: log.errors.slice(),
       infos: log.infos.slice(),
       requests: serializeValue(log.requests),
+      webSockets: serializeValue(webSockets.map(snapshotWebSocket)),
       locations: serializeValue(log.locations),
       timers: {
         now: timerManager.now(),

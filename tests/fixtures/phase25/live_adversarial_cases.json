@@ -1,0 +1,33 @@
+{
+  "escapedKeyCases": [
+    {
+      "name": "quote_and_backslash",
+      "container": "#feed",
+      "key": "row-\"beta\\gamma",
+      "label": "Quoted key",
+      "expectedTarget": "#feed [data-arlen-live-key=\"row-\\\"beta\\\\gamma\"]",
+      "runtimeSafe": false
+    },
+    {
+      "name": "backslash_only",
+      "container": "#feed",
+      "key": "row-beta\\gamma",
+      "label": "Backslash key",
+      "expectedTarget": "#feed [data-arlen-live-key=\"row-beta\\\\gamma\"]",
+      "runtimeSafe": true
+    },
+    {
+      "name": "spaces_and_apostrophe",
+      "container": "#feed",
+      "key": "row delta's",
+      "label": "Spaced key",
+      "expectedTarget": "#feed [data-arlen-live-key=\"row delta's\"]",
+      "runtimeSafe": true
+    }
+  ],
+  "invalidNavigateLocations": [
+    "javascript:alert(1)",
+    "data:text/html,boom",
+    "file:///etc/passwd"
+  ]
+}

@@ -100,9 +100,27 @@ static BOOL ALNLivePayloadValueIsJSONSafe(id value) {
   if (value == nil || value == [NSNull null]) {
     return YES;
   }
-  if ([value isKindOfClass:[NSString class]] || [value isKindOfClass:[NSNumber class]] ||
-      [value isKindOfClass:[NSDictionary class]] || [value isKindOfClass:[NSArray class]]) {
-    return [NSJSONSerialization isValidJSONObject:@{ @"value" : value }];
+  if ([value isKindOfClass:[NSString class]] || [value isKindOfClass:[NSNumber class]]) {
+    return YES;
+  }
+  if ([value isKindOfClass:[NSArray class]]) {
+    for (id item in (NSArray *)value) {
+      if (!ALNLivePayloadValueIsJSONSafe(item)) {
+        return NO;
+      }
+    }
+    return YES;
+  }
+  if ([value isKindOfClass:[NSDictionary class]]) {
+    for (id key in (NSDictionary *)value) {
+      if (![key isKindOfClass:[NSString class]]) {
+        return NO;
+      }
+      if (!ALNLivePayloadValueIsJSONSafe(((NSDictionary *)value)[key])) {
+        return NO;
+      }
+    }
+    return YES;
   }
   return NO;
 }
@@ -129,6 +147,47 @@ static BOOL ALNLiveStringFitsLimit(NSString *value,
                           @{
                             @"field" : field ?: @"",
                             @"limit" : @(maxLength),
+                          });
+  }
+  return NO;
+}
+
+static BOOL ALNLiveLocationIsAllowed(NSString *location, NSError **error) {
+  NSString *trimmed = ALNLiveTrimmedString(location);
+  if ([trimmed length] == 0) {
+    return YES;
+  }
+
+  if ([trimmed rangeOfCharacterFromSet:[NSCharacterSet controlCharacterSet]].location != NSNotFound) {
+    if (error != NULL) {
+      *error = ALNLiveError(ALNLiveErrorCodeInvalidOperation,
+                            @"Live navigate locations must not contain control characters",
+                            @{ @"field" : @"location" });
+    }
+    return NO;
+  }
+
+  NSCharacterSet *delimiterSet = [NSCharacterSet characterSetWithCharactersInString:@"/?#"];
+  NSRange colonRange = [trimmed rangeOfString:@":"];
+  NSRange delimiterRange = [trimmed rangeOfCharacterFromSet:delimiterSet];
+  BOOL hasScheme =
+      (colonRange.location != NSNotFound &&
+       (delimiterRange.location == NSNotFound || colonRange.location < delimiterRange.location));
+  if (!hasScheme) {
+    return YES;
+  }
+
+  NSString *scheme = [[trimmed substringToIndex:colonRange.location] lowercaseString];
+  if ([scheme isEqualToString:@"http"] || [scheme isEqualToString:@"https"]) {
+    return YES;
+  }
+
+  if (error != NULL) {
+    *error = ALNLiveError(ALNLiveErrorCodeInvalidOperation,
+                          @"Live navigate locations must be relative paths or http(s) URLs",
+                          @{
+                            @"field" : @"location",
+                            @"scheme" : scheme ?: @"",
                           });
   }
   return NO;
@@ -423,6 +482,9 @@ static NSDictionary *ALNLiveNormalizedOperationFromValue(id value, NSError **err
                                 ALNLiveErrorCodePayloadTooLarge,
                                 @"location",
                                 error)) {
+      return nil;
+    }
+    if (!ALNLiveLocationIsAllowed(location, error)) {
       return nil;
     }
     return ALNLiveOperation(name,
@@ -1092,7 +1154,11 @@ static NSString *ALNLiveRequestHeaderValue(ALNRequest *request, NSString *name) 
       @"    if (headers && headers.get) {",
       @"      retryHeader = headers.get('Retry-After') || headers.get('X-Arlen-Live-Retry-After') || '';",
       @"    }",
-      @"    return parseDuration(retryHeader) || (retryHeader ? Math.max(0, Number(retryHeader) * 1000) : 0);",
+      @"    var trimmed = typeof retryHeader === 'string' ? retryHeader.trim().toLowerCase() : '';",
+      @"    if (trimmed && /^\\d+(?:\\.\\d+)?$/.test(trimmed)) {",
+      @"      return Math.max(0, Number(trimmed) * 1000);",
+      @"    }",
+      @"    return parseDuration(retryHeader);",
       @"  }",
       @"",
       @"  function handleLiveTextResponse(result, fallbackURL, options) {",

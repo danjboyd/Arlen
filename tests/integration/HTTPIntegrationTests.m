@@ -3423,6 +3423,129 @@
   XCTAssertTrue([body containsString:@"multipart/form-data; boundary=demo-boundary"]);
 }
 
+- (void)testTechDemoLiveFeedWebSocketPublishesPayloadAfterHandshake {
+  int port = [self randomPort];
+  NSTask *server = [[NSTask alloc] init];
+  server.launchPath = @"./build/tech-demo-server";
+  server.arguments = @[ @"--port", [NSString stringWithFormat:@"%d", port] ];
+  server.standardOutput = [NSPipe pipe];
+  server.standardError = [NSPipe pipe];
+  NSMutableDictionary *environment = [[[NSProcessInfo processInfo] environment] mutableCopy];
+  if (environment == nil) {
+    environment = [NSMutableDictionary dictionary];
+  }
+  environment[@"ARLEN_APP_ROOT"] = @"examples/tech_demo";
+  server.environment = environment;
+  [server launch];
+
+  @try {
+    BOOL ready = NO;
+    (void)[self requestPathWithRetries:@"/healthz" port:port attempts:60 success:&ready];
+    XCTAssertTrue(ready);
+
+    NSString *script = [NSString stringWithFormat:
+                                         @"import base64, os, socket, struct, time, urllib.request\n"
+                                         @"PORT=%d\n"
+                                         @"def recv_exact(sock, size):\n"
+                                         @"    data=b''\n"
+                                         @"    while len(data)<size:\n"
+                                         @"        chunk=sock.recv(size-len(data))\n"
+                                         @"        if not chunk:\n"
+                                         @"            raise RuntimeError('connection closed')\n"
+                                         @"        data += chunk\n"
+                                         @"    return data\n"
+                                         @"def recv_text(sock):\n"
+                                         @"    b1, b2 = recv_exact(sock, 2)\n"
+                                         @"    opcode = b1 & 0x0F\n"
+                                         @"    length = b2 & 0x7F\n"
+                                         @"    masked = (b2 & 0x80) != 0\n"
+                                         @"    if length == 126:\n"
+                                         @"        length = struct.unpack('!H', recv_exact(sock, 2))[0]\n"
+                                         @"    elif length == 127:\n"
+                                         @"        length = struct.unpack('!Q', recv_exact(sock, 8))[0]\n"
+                                         @"    mask_key = recv_exact(sock, 4) if masked else b''\n"
+                                         @"    payload = recv_exact(sock, length)\n"
+                                         @"    if masked:\n"
+                                         @"        payload = bytes(payload[i] ^ mask_key[i %% 4] for i in range(length))\n"
+                                         @"    if opcode != 0x1:\n"
+                                         @"        raise RuntimeError('unexpected opcode %%d' %% opcode)\n"
+                                         @"    return payload.decode('utf-8')\n"
+                                         @"key = base64.b64encode(os.urandom(16)).decode('ascii')\n"
+                                         @"request = (\n"
+                                         @"    'GET /ws/channel/tech_demo.live HTTP/1.1\\r\\n'\n"
+                                         @"    f'Host: 127.0.0.1:{PORT}\\r\\n'\n"
+                                         @"    'Upgrade: websocket\\r\\n'\n"
+                                         @"    'Connection: Upgrade\\r\\n'\n"
+                                         @"    f'Sec-WebSocket-Key: {key}\\r\\n'\n"
+                                         @"    'Sec-WebSocket-Version: 13\\r\\n\\r\\n'\n"
+                                         @").encode('utf-8')\n"
+                                         @"sock = socket.create_connection(('127.0.0.1', PORT), timeout=5)\n"
+                                         @"sock.sendall(request)\n"
+                                         @"headers = sock.recv(4096).decode('utf-8', 'replace')\n"
+                                         @"if '101 Switching Protocols' not in headers:\n"
+                                         @"    raise RuntimeError(headers)\n"
+                                         @"print('ready')\n"
+                                         @"time.sleep(0.2)\n"
+                                         @"urllib.request.urlopen(f'http://127.0.0.1:{PORT}/tech-demo/live/feed/publish?key=row-delta&label=Delta', timeout=5).read()\n"
+                                         @"message = recv_text(sock)\n"
+                                         @"print(message)\n"
+                                         @"sock.close()\n",
+                                         port];
+    int pyCode = 0;
+    NSString *output = [self runPythonScript:script exitCode:&pyCode];
+    XCTAssertEqual(0, pyCode, @"%@", output);
+    XCTAssertTrue([output containsString:@"ready"], @"%@", output);
+    XCTAssertTrue([output containsString:@"\"op\":\"upsert\""], @"%@", output);
+    XCTAssertTrue([output containsString:@"row-delta"], @"%@", output);
+    XCTAssertTrue([output containsString:@"Delta"], @"%@", output);
+  } @finally {
+    if ([server isRunning]) {
+      (void)kill(server.processIdentifier, SIGTERM);
+      [server waitUntilExit];
+    }
+  }
+}
+
+- (void)testTechDemoLiveOrdersSimulatedUnauthorizedReturns401 {
+  int curlCode = 0;
+  int serverCode = 0;
+  NSString *headers = [self requestWithServerEnv:@"ARLEN_APP_ROOT=examples/tech_demo"
+                                     serverBinary:@"./build/tech-demo-server"
+                                        curlBody:@"curl -sS -D - -o /dev/null -H 'X-Arlen-Live: true' -H 'X-Arlen-Live-Target: #live-orders' 'http://127.0.0.1:%d/tech-demo/live/orders?simulate=unauthorized'"
+                                        curlCode:&curlCode
+                                       serverCode:&serverCode];
+  XCTAssertEqual(0, curlCode);
+  XCTAssertEqual(0, serverCode);
+  XCTAssertTrue([headers containsString:@"401 Unauthorized"]);
+}
+
+- (void)testTechDemoLiveOrdersSimulatedForbiddenReturns403 {
+  int curlCode = 0;
+  int serverCode = 0;
+  NSString *headers = [self requestWithServerEnv:@"ARLEN_APP_ROOT=examples/tech_demo"
+                                     serverBinary:@"./build/tech-demo-server"
+                                        curlBody:@"curl -sS -D - -o /dev/null -H 'X-Arlen-Live: true' -H 'X-Arlen-Live-Target: #live-orders' 'http://127.0.0.1:%d/tech-demo/live/orders?simulate=forbidden'"
+                                        curlCode:&curlCode
+                                       serverCode:&serverCode];
+  XCTAssertEqual(0, curlCode);
+  XCTAssertEqual(0, serverCode);
+  XCTAssertTrue([headers containsString:@"403 Forbidden"]);
+}
+
+- (void)testTechDemoLiveOrdersSimulatedBackpressureReturnsRetryAfter {
+  int curlCode = 0;
+  int serverCode = 0;
+  NSString *headers = [self requestWithServerEnv:@"ARLEN_APP_ROOT=examples/tech_demo"
+                                     serverBinary:@"./build/tech-demo-server"
+                                        curlBody:@"curl -sS -D - -o /dev/null -H 'X-Arlen-Live: true' -H 'X-Arlen-Live-Target: #live-orders' 'http://127.0.0.1:%d/tech-demo/live/orders?simulate=backpressure'"
+                                        curlCode:&curlCode
+                                       serverCode:&serverCode];
+  XCTAssertEqual(0, curlCode);
+  XCTAssertEqual(0, serverCode);
+  XCTAssertTrue([headers containsString:@"429 Too Many Requests"]);
+  XCTAssertTrue([headers containsString:@"Retry-After: 3"]);
+}
+
 - (void)testTechDemoUserRouteShowsParams {
   NSString *body = [self requestPath:@"/tech-demo/users/peggy?flag=admin"
                         serverBinary:@"./build/tech-demo-server"

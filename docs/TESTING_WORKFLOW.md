@@ -84,6 +84,11 @@ Phase 25 live-UI-focused lanes are also available:
      `tests/shared/live_runtime_harness.js`
    - live form/region/upload interactions:
      `tests/unit/LiveRuntimeInteractionTests.m`
+   - live stream/reconnect/auth-expiry/backpressure behavior:
+     `tests/unit/LiveRuntimeStreamTests.m`
+   - adversarial live protocol/runtime regressions:
+     `tests/unit/LiveAdversarialTests.m`,
+     `tests/fixtures/phase25/live_adversarial_cases.json`
    - tech-demo live endpoint integration coverage:
      `tests/integration/HTTPIntegrationTests.m`
 3. Add or extend a checked-in fixture so the failure is replayable.
@@ -179,5 +184,5 @@ make phase25-confidence
 ```
 
 The Phase 25 suite now includes a Node-backed executable runtime harness for
-`/arlen/live.js` semantics in addition to the existing controller/protocol
-coverage and tech-demo smoke artifacts.
+`/arlen/live.js` semantics, focused stream/adversarial suites, and confidence
+artifacts for both push-path and negative-path live behavior.

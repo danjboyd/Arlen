@@ -317,6 +317,37 @@ static NSDictionary *TechDemoFeedItemContext(NSString *key, NSString *label, BOO
   return [self renderTemplateWithoutLayout:templateName context:context error:error];
 }
 
+- (BOOL)renderSimulatedFailureIfRequested:(ALNContext *)ctx {
+  NSString *mode = [[ALNLiveDemoNormalizedValue(ctx.request.queryParams[@"simulate"]) lowercaseString] copy];
+  if ([mode length] == 0) {
+    return NO;
+  }
+
+  if ([mode isEqualToString:@"unauthorized"]) {
+    [self setStatus:401];
+    [self renderText:@"tech demo live unauthorized\n"];
+    return YES;
+  }
+  if ([mode isEqualToString:@"forbidden"]) {
+    [self setStatus:403];
+    [self renderText:@"tech demo live forbidden\n"];
+    return YES;
+  }
+  if ([mode isEqualToString:@"backpressure"]) {
+    [self setStatus:429];
+    [self.context.response setHeader:@"Retry-After" value:@"3"];
+    [self renderText:@"tech demo live backpressure\n"];
+    return YES;
+  }
+  if ([mode isEqualToString:@"busy"]) {
+    [self setStatus:503];
+    [self.context.response setHeader:@"X-Arlen-Live-Retry-After" value:@"1500ms"];
+    [self renderText:@"tech demo live busy\n"];
+    return YES;
+  }
+  return NO;
+}
+
 - (id)index:(ALNContext *)ctx {
   NSDictionary *viewContext = TechDemoLivePageContext(ctx);
   NSError *error = nil;
@@ -327,6 +358,9 @@ static NSDictionary *TechDemoFeedItemContext(NSString *key, NSString *label, BOO
 }
 
 - (id)orders:(ALNContext *)ctx {
+  if ([self renderSimulatedFailureIfRequested:ctx]) {
+    return nil;
+  }
   NSError *error = nil;
   if (![self renderFragmentTemplate:@"live/_orders"
                             context:TechDemoLiveOrdersContext(ctx.request.queryParams ?: @{})

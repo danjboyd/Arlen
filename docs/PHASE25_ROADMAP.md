@@ -1,6 +1,6 @@
 # Arlen Phase 25 Roadmap
 
-Status: Baseline complete (`25A-25G` delivered on 2026-04-01); live testing hardening through `25J` delivered on 2026-04-01; `25K-25L` remain planned
+Status: Complete (`25A-25L` delivered on 2026-04-01)
 Last updated: 2026-04-01
 
 Related docs:
@@ -13,10 +13,10 @@ Related docs:
 
 ## 0. Progress Checkpoint (2026-04-01)
 
-Phase 25's shipped live UI baseline is complete, and the first tranche of
-follow-on testing hardening is now delivered. The remaining work in this
-roadmap is the realtime/recovery/adversarial closeout inspired by the current
-LiveView, Livewire, Symfony UX LiveComponent, and Turbo testing surfaces.
+Phase 25 is complete. The shipped live UI baseline, the first tranche of
+runtime/interaction hardening, and the realtime/recovery/adversarial closeout
+inspired by the current LiveView, Livewire, Symfony UX LiveComponent, and
+Turbo testing surfaces are all delivered in-tree.
 
 Delivered in-tree:
 
@@ -40,11 +40,11 @@ Delivered in-tree:
   behavior, dispatch-event assertions, and negative-path runtime checks
 - `25J`: live form, upload/XHR progress, region defer/poll/lazy interaction
   coverage, plus targeted tech-demo live endpoint integration tests
-
-Planned next:
-
-- `25K`: push stream, reconnect, auth-expiry, and backpressure coverage
-- `25L`: adversarial protocol/runtime regressions and artifact closeout
+- `25K`: websocket stream lifecycle/reconnect coverage, auth-expiry and
+  backpressure runtime assertions, plus tech-demo push/recovery integration
+  checks
+- `25L`: adversarial protocol/runtime fixtures, navigate hardening, widened
+  `phase25-live-tests`, and stronger confidence artifacts
 
 ## 1. Objective
 
@@ -219,45 +219,35 @@ Delivered:
 - targeted integration tests for the tech demo pulse/upload live endpoints
   that previously sat behind `phase25-confidence` smoke coverage only
 
-## 4.11 Phase 25K: Stream Lifecycle, Reconnect, Auth-Expiry, and Backpressure
+## 4.11 Phase 25K: Stream Lifecycle, Reconnect, Auth-Expiry, and Backpressure (Delivered 2026-04-01)
 
-Goal:
+Delivered:
 
-- bring Arlen's realtime/live tests closer to Turbo stream-source and
-  LiveView-connected/disconnected coverage
+- runtime harness actions for websocket open/message/error/close, explicit
+  stream rescans, and direct live-response handling
+- focused stream/recovery coverage in
+  `tests/unit/LiveRuntimeStreamTests.m` for idempotent scans, message
+  application, error/close transitions, reconnect backoff, auth-expiry, and
+  backpressure events
+- tech-demo integration coverage for websocket push readiness plus simulated
+  `401`, `403`, and `429` live responses in
+  `tests/integration/HTTPIntegrationTests.m`
 
-Planned deliverables:
+## 4.12 Phase 25L: Adversarial Regressions + Confidence Closeout (Delivered 2026-04-01)
 
-- runtime tests for websocket stream open, message application, error, close,
-  and reconnect backoff behavior
-- assertions that stream subscriptions do not double-connect and that repeated
-  scans are idempotent
-- runtime tests for `arlen:live:stream-open`,
-  `arlen:live:stream-closed`, `arlen:live:auth-expired`, and
-  `arlen:live:backpressure`
-- HTTP/live tests covering `401`, `403`, and `429` responses plus retry-after
-  handling
-- integration tests that wait for stream readiness before asserting pushed
-  content, similar to Turbo's explicit stream-source synchronization helpers
+Delivered:
 
-## 4.12 Phase 25L: Adversarial Regressions + Confidence Closeout
-
-Goal:
-
-- preserve the fragment-first live surface with competitor-inspired regression
-  discipline, especially around malformed payloads and edge-case runtime input
-
-Planned deliverables:
-
-- protocol tests for invalid `dispatch` details, invalid meta key/value shapes,
-  bad navigate locations, selector/key escaping edges, and header normalization
-- issue-driven regression fixtures under `tests/fixtures/phase25/`
-- a widened `phase25-live-tests` target or sibling focused bundles that fail
-  closed on runtime-semantic regressions
-- stronger `phase25-confidence` artifacts covering one push-path check and one
-  negative-path/live-error check in addition to the current smoke pages
-- docs closeout reflecting the new helper/test architecture once the subphases
-  ship
+- adversarial protocol/runtime coverage in `tests/unit/LiveAdversarialTests.m`
+  for invalid dispatch details, invalid meta shapes, bad navigate locations,
+  selector/key escaping, and lazy-header normalization
+- checked-in issue fixtures under `tests/fixtures/phase25/`
+- widened `phase25-live-tests` to include the new stream and adversarial
+  suites
+- stronger `phase25-confidence` artifacts covering one websocket push-path
+  capture and one negative live backpressure artifact in addition to the
+  existing smoke pages
+- docs closeout reflecting the helper/test architecture and the completed
+  Phase 25 status
 
 ## 5. Verification
 
@@ -273,7 +263,9 @@ bash tools/ci/run_docs_quality.sh
 
 `phase25-live-tests` is the focused XCTest bundle for the live protocol,
 controller helpers, built-in runtime route, executable runtime DOM semantics,
-and live interaction coverage through `tests/shared/ALNLiveTestSupport.{h,m}`
-plus `tests/shared/live_runtime_harness.js`. `phase25-confidence` boots the
-tech demo server and records smoke artifacts for the shipped live page under
+interaction coverage, stream/recovery paths, and adversarial regression cases
+through `tests/shared/ALNLiveTestSupport.{h,m}` plus
+`tests/shared/live_runtime_harness.js`. `phase25-confidence` boots the tech
+demo server and records smoke artifacts for the shipped live page, one pushed
+websocket payload, and one negative-path backpressure response under
 `build/release_confidence/phase25/`.

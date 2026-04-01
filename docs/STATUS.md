@@ -4,8 +4,7 @@ Last updated: 2026-04-01
 
 ## Leaving Off (2026-04-01)
 
-- Phase 25 baseline plus live testing hardening through `25J` is complete,
-  with `25K-25L` still planned:
+- Phase 25 is complete (`25A-25L` delivered on 2026-04-01):
   - shipped the fragment-first live UI surface through `ALNLive`, the built-in
     `/arlen/live.js` runtime, and the `application/vnd.arlen.live+json`
     response contract
@@ -18,11 +17,12 @@ Last updated: 2026-04-01
     the Phase 25 docs closeout in `docs/LIVE_UI.md` and
     `docs/PHASE25_ROADMAP.md`
   - added shared `ALNLiveTestSupport` helpers, a Node-backed executable
-    runtime harness, focused DOM/runtime interaction suites, and targeted
-    tech-demo pulse/upload integration coverage
-  - next planned work is the remaining competitor-inspired live hardening:
-    realtime reconnect/backpressure assertions plus adversarial live
-    regressions and confidence artifacts
+    runtime harness, focused DOM/runtime interaction/stream suites,
+    adversarial fixtures, and targeted tech-demo pulse/upload/push/recovery
+    integration coverage
+  - strengthened `phase25-confidence` with websocket push and negative-path
+    backpressure artifacts, so the live closeout now fails closed on both
+    success and failure-path regressions
 - Verification completed at this checkpoint:
   - `source tools/source_gnustep_env.sh && make build-tests`
   - `source tools/source_gnustep_env.sh && make phase25-live-tests`
