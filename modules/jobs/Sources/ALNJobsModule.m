@@ -395,8 +395,17 @@ static NSDictionary *JMReadPropertyListAtPath(NSString *path, NSError **error) {
   if ([statePath length] == 0 || ![[NSFileManager defaultManager] fileExistsAtPath:statePath]) {
     return nil;
   }
-  NSData *data = [NSData dataWithContentsOfFile:statePath options:0 error:error];
+  NSData *data = [NSData dataWithContentsOfFile:statePath];
   if (data == nil) {
+    if (error != NULL) {
+      *error = [NSError errorWithDomain:@"ALNJobsModule"
+                                   code:1
+                               userInfo:@{
+                                 NSLocalizedDescriptionKey :
+                                     [NSString stringWithFormat:@"failed reading jobs state: %@",
+                                                                statePath ?: @""]
+                               }];
+    }
     return nil;
   }
   NSPropertyListFormat format = NSPropertyListBinaryFormat_v1_0;

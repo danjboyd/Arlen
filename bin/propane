@@ -57,13 +57,32 @@ fi
 script_dir="$(cd "$(dirname "$script_path")" && pwd)"
 default_framework_root="$(cd "$script_dir/.." && pwd)"
 
-platform_name="$(uname -s 2>/dev/null || echo unknown)"
-case "$platform_name" in
-  MINGW*|MSYS*|CYGWIN*)
-    echo "propane: native Windows does not support propane; see docs/WINDOWS_RUNTIME_STORY.md" >&2
-    exit 1
-    ;;
-esac
+path_looks_like_windows_absolute() {
+  local path="$1"
+  [[ "$path" =~ ^[A-Za-z]:[\\/] ]] || [[ "$path" =~ ^\\\\ ]]
+}
+
+path_is_absolute() {
+  local path="$1"
+  [[ "$path" == /* ]] || path_looks_like_windows_absolute "$path"
+}
+
+normalize_host_path() {
+  local raw="$1"
+  if [[ -z "$raw" ]]; then
+    printf '%s\n' "$PWD"
+    return
+  fi
+  if command -v cygpath >/dev/null 2>&1 && path_is_absolute "$raw"; then
+    cygpath -au "$raw"
+    return
+  fi
+  if path_is_absolute "$raw"; then
+    printf '%s\n' "$raw"
+    return
+  fi
+  printf '%s\n' "$PWD/$raw"
+}
 
 framework_root="${ARLEN_FRAMEWORK_ROOT:-$default_framework_root}"
 app_root="${ARLEN_APP_ROOT:-$PWD}"
@@ -223,15 +242,11 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-if [[ ! "$framework_root" = /* ]]; then
-  framework_root="$PWD/$framework_root"
-fi
-framework_root="$(cd "$framework_root" && pwd)"
+framework_root="$(normalize_host_path "$framework_root")"
+framework_root="$(cd "$framework_root" && pwd -P)"
 
-if [[ ! "$app_root" = /* ]]; then
-  app_root="$PWD/$app_root"
-fi
-app_root="$(cd "$app_root" && pwd)"
+app_root="$(normalize_host_path "$app_root")"
+app_root="$(cd "$app_root" && pwd -P)"
 
 if [[ ! -f "$framework_root/GNUmakefile" || ! -d "$framework_root/src/Arlen" ]]; then
   echo "propane: invalid framework root: $framework_root" >&2
@@ -252,6 +267,8 @@ if [[ -z "$config_json" ]]; then
 fi
 
 while IFS='=' read -r key value; do
+  key="${key%$'\r'}"
+  value="${value%$'\r'}"
   case "$key" in
     config_host) config_host="$value" ;;
     config_port) config_port="$value" ;;
@@ -425,9 +442,7 @@ if (( cluster_expected_nodes < 1 )); then
 fi
 
 pid_file="${pid_file_override:-$app_root/tmp/propane.pid}"
-if [[ ! "$pid_file" = /* ]]; then
-  pid_file="$app_root/$pid_file"
-fi
+pid_file="$(normalize_host_path "$pid_file")"
 mkdir -p "$(dirname "$pid_file")"
 
 if [[ -f "$pid_file" ]]; then
@@ -479,9 +494,7 @@ export ARLEN_CLUSTER_EXPECTED_NODES="$cluster_expected_nodes"
 
 lifecycle_log_file="${ARLEN_PROPANE_LIFECYCLE_LOG:-}"
 if [[ -n "$lifecycle_log_file" ]]; then
-  if [[ ! "$lifecycle_log_file" = /* ]]; then
-    lifecycle_log_file="$app_root/$lifecycle_log_file"
-  fi
+  lifecycle_log_file="$(normalize_host_path "$lifecycle_log_file")"
   mkdir -p "$(dirname "$lifecycle_log_file")"
   : > "$lifecycle_log_file"
 fi

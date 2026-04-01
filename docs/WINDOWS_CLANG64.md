@@ -1,14 +1,14 @@
 # Windows CLANG64 Preview
 
-Last updated: 2026-03-31
+Last updated: 2026-04-01
 
 This document records the native Windows workflow for Arlen on MSYS2
 `CLANG64`.
 
-The Phase 24 preview contract (`24A-24M`) is complete on branch
-`windows/clang64`. The broader roadmap has now been extended with `24N-24S`
-for true Windows-to-Linux parity, but this document still records the current
-checked-in preview contract.
+The checked-in Phase 24 preview/runtime contract (`24A-24P`) is complete on
+branch `windows/clang64`. The broader roadmap now continues with `24Q-24S` for
+the remaining Windows-to-Linux parity and platform closeout work, but this
+document still records the current supported preview boundary.
 
 ## 1. Host Entry Path
 
@@ -88,6 +88,12 @@ Focused DB transport smoke lane:
 make phase24-windows-db-smoke
 ```
 
+Focused runtime parity lane:
+
+```sh
+make phase24-windows-runtime-tests
+```
+
 Broader Windows confidence lane:
 
 ```sh
@@ -98,13 +104,15 @@ PowerShell wrappers:
 
 - `scripts/run_phase24_windows_tests.ps1`
 - `scripts/run_clang64.ps1 -InnerCommand "make phase24-windows-db-smoke"`
+- `scripts/run_clang64.ps1 -InnerCommand "make phase24-windows-runtime-tests"`
 - `scripts/run_clang64.ps1 -InnerCommand "make phase24-windows-confidence"`
 
 Current verification note:
 
-- As of 2026-03-31, `make phase24-windows-tests`,
-  `make phase24-windows-db-smoke`, and `make phase24-windows-confidence`
-  completed on the checked-in CLANG64 path in this workspace.
+- As of 2026-04-01, `make phase24-windows-tests`,
+  `make phase24-windows-db-smoke`, `make phase24-windows-runtime-tests`, and
+  `make phase24-windows-confidence` completed on the checked-in CLANG64 path in
+  this workspace.
 - The focused Windows lanes use repo-local linked test executables so test
   discovery stays reliable on CLANG64 even though the stock bundle-based
   `xctest` flow is not.
@@ -125,8 +133,11 @@ Supported on the current branch:
 - `arlen generate`
 - `arlen build`
 - `arlen check`
-- `arlen boomhauer` for app-root `--no-watch`, `--prepare-only`,
-  `--print-routes`, `--once`, and direct non-watch launch
+- `make phase24-windows-runtime-tests`
+- `arlen boomhauer` for app-root watch and non-watch flows, including fallback
+  dev error recovery
+- `arlen jobs worker`
+- `arlen propane`
 - `arlen routes`
 - `arlen test --unit` as the focused Windows XCTest lane
 - `arlen migrate`
@@ -140,12 +151,10 @@ Supported on the current branch:
 
 Still intentionally unsupported:
 
-- `jobs worker`
-- `propane`
-- `boomhauer` watch mode
-- fallback dev error server watch-loop behavior
+- the default `make test-unit` / `make test-integration` / live-backend matrix
 - Linux perf/sanitizer confidence lanes
-- native Windows production process-manager support
+- Windows release/install/package closeout
+- Windows service-integration guidance beyond direct `propane` usage
 
 The runtime/deployment boundary is documented in:
 
@@ -158,6 +167,7 @@ The runtime/deployment boundary is documented in:
 make all
 make phase24-windows-tests
 make phase24-windows-db-smoke
+make phase24-windows-runtime-tests
 make phase24-windows-confidence
 ```
 
@@ -166,6 +176,7 @@ For app-root smoke:
 ```sh
 ./bin/arlen new MyApp
 cd MyApp
-/path/to/Arlen/bin/arlen boomhauer --no-watch --prepare-only
+/path/to/Arlen/bin/arlen boomhauer --port 3000
 /path/to/Arlen/bin/arlen routes
+/path/to/Arlen/bin/arlen jobs worker --env development --once
 ```

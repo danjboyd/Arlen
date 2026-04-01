@@ -13,6 +13,7 @@ mkdir -p "$SMOKE_ROOT"
 make -C "$REPO_ROOT" all
 make -C "$REPO_ROOT" phase24-windows-tests
 make -C "$REPO_ROOT" phase24-windows-db-smoke
+make -C "$REPO_ROOT" phase24-windows-runtime-tests
 
 "$REPO_ROOT/build/arlen" doctor --json >"$SMOKE_ROOT/doctor.json"
 "$REPO_ROOT/build/arlen" new "$APP_ROOT" --force

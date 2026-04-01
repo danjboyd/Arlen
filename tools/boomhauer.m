@@ -11,12 +11,33 @@
 
 static NSData *BenchmarkStaticHTMLData(void);
 
+static const char *FilesystemPathCString(NSString *path) {
+#if defined(_WIN32)
+  return [path UTF8String];
+#else
+  return [path fileSystemRepresentation];
+#endif
+}
+
 static NSString *EnvString(const char *name) {
   const char *raw = getenv(name);
   if (raw == NULL || raw[0] == '\0') {
     return nil;
   }
   return [NSString stringWithUTF8String:raw];
+}
+
+static BOOL SetEnvironmentValue(NSString *name, NSString *value, BOOL overwrite) {
+  const char *nameCString = [[name isKindOfClass:[NSString class]] ? name : @"" UTF8String];
+  const char *valueCString = [[value isKindOfClass:[NSString class]] ? value : @"" UTF8String];
+#if defined(_WIN32)
+  if (!overwrite && getenv(nameCString) != NULL) {
+    return YES;
+  }
+  return (_putenv_s(nameCString, valueCString) == 0);
+#else
+  return (setenv(nameCString, valueCString, overwrite ? 1 : 0) == 0);
+#endif
 }
 
 static BOOL EnvFlagEnabled(const char *name) {
@@ -465,7 +486,7 @@ static NSString *BenchmarkBlobFilePath(NSUInteger size) {
       [cacheDirectory stringByAppendingPathComponent:[NSString stringWithFormat:@"blob-%lu.bin",
                                                                                 (unsigned long)size]];
   struct stat existingStat;
-  if (stat([path fileSystemRepresentation], &existingStat) == 0 && S_ISREG(existingStat.st_mode) &&
+  if (stat(FilesystemPathCString(path), &existingStat) == 0 && S_ISREG(existingStat.st_mode) &&
       (unsigned long long)existingStat.st_size == (unsigned long long)size) {
     return path;
   }
@@ -506,7 +527,7 @@ static BOOL BenchmarkRenderBlobResponse(ALNRequest *request, ALNResponse *respon
     }
 
     struct stat fileStat;
-    if (stat([path fileSystemRepresentation], &fileStat) != 0 || !S_ISREG(fileStat.st_mode)) {
+    if (stat(FilesystemPathCString(path), &fileStat) != 0 || !S_ISREG(fileStat.st_mode)) {
       response.statusCode = 500;
       [response setTextBody:@"blob cache stat failed\n"];
       [response setHeader:@"Content-Type" value:@"text/plain; charset=utf-8"];
@@ -2078,7 +2099,7 @@ int main(int argc, const char *argv[]) {
     }
 
     if (BenchmarkProfileEnabled() && getenv("ARLEN_METRICS_ENABLED") == NULL) {
-      setenv("ARLEN_METRICS_ENABLED", "0", 0);
+      (void)SetEnvironmentValue(@"ARLEN_METRICS_ENABLED", @"0", NO);
     }
 
     BOOL buildErrorMode = ([EnvString("ARLEN_BOOMHAUER_BUILD_ERROR_FILE") length] > 0);

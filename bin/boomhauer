@@ -44,7 +44,7 @@ normalize_host_path() {
     printf '%s\n' "$PWD"
     return
   fi
-  if command -v cygpath >/dev/null 2>&1 && path_looks_like_windows_absolute "$raw"; then
+  if command -v cygpath >/dev/null 2>&1 && path_is_absolute "$raw"; then
     cygpath -au "$raw"
     return
   fi
@@ -190,17 +190,13 @@ if [[ $is_app_root -eq 0 ]]; then
   exec "$framework_root/build/boomhauer" "${server_args[@]}"
 fi
 
-if [[ $windows_preview -eq 1 && $watch_mode -eq 1 ]]; then
-  echo "boomhauer: watch mode is not yet supported on Windows CLANG64 preview" >&2
-  echo "boomhauer: rerun with --no-watch, --prepare-only, --print-routes, or --once" >&2
-  exit 1
-fi
-
 state_root="$app_root/.boomhauer"
 build_root="$state_root/build"
 app_binary="$build_root/boomhauer-app"
 app_makefile="$build_root/AppGNUmakefile"
 framework_lib="$framework_root/build/lib/libArlenFramework.a"
+framework_eocc_make_target="build/eocc"
+framework_lib_make_target="build/lib/libArlenFramework.a"
 gen_root="$build_root/gen/templates"
 module_manifest_root="$gen_root/manifests"
 app_template_root="$gen_root/app"
@@ -562,7 +558,7 @@ emit_app_makefile() {
 }
 
 framework_artifacts_are_current() {
-  make -q -C "$framework_root" "$framework_root/build/eocc" "$framework_lib" >/dev/null 2>&1
+  make -q -C "$framework_root" "$framework_eocc_make_target" "$framework_lib_make_target" >/dev/null 2>&1
 }
 
 framework_archive_contains_sanitizers() {
@@ -603,7 +599,7 @@ ensure_framework_artifacts_ready() {
       echo "boomhauer: [1/4] detected sanitizer-instrumented framework artifacts; rebuilding clean framework artifacts"
       if {
         make -C "$framework_root" clean &&
-          make -C "$framework_root" "$framework_root/build/eocc" "$framework_lib"
+          make -C "$framework_root" "$framework_eocc_make_target" "$framework_lib_make_target"
       } >"$output_file" 2>&1; then
         if [[ -s "$output_file" ]]; then
           cat "$output_file"
@@ -612,7 +608,7 @@ ensure_framework_artifacts_ready() {
         local status=$?
         record_build_failure \
           "tooling" \
-          "make -C $framework_root clean && make -C $framework_root $framework_root/build/eocc $framework_lib" \
+          "make -C $framework_root clean && make -C $framework_root $framework_eocc_make_target $framework_lib_make_target" \
           "$status" \
           "$output_file"
         return "$status"
@@ -622,13 +618,13 @@ ensure_framework_artifacts_ready() {
     fi
   else
     echo "boomhauer: [1/4] checking tool freshness and building framework artifacts"
-    if make -C "$framework_root" "$framework_root/build/eocc" "$framework_lib" >"$output_file" 2>&1; then
+    if make -C "$framework_root" "$framework_eocc_make_target" "$framework_lib_make_target" >"$output_file" 2>&1; then
       if [[ -s "$output_file" ]]; then
         cat "$output_file"
       fi
     else
       local status=$?
-      record_build_failure "tooling" "make -C $framework_root $framework_root/build/eocc $framework_lib" "$status" "$output_file"
+      record_build_failure "tooling" "make -C $framework_root $framework_eocc_make_target $framework_lib_make_target" "$status" "$output_file"
       return "$status"
     fi
   fi

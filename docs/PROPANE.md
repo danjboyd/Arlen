@@ -2,8 +2,9 @@
 
 `propane` is Arlen's production process manager.
 
-Native Windows does not support `propane`; see `docs/WINDOWS_RUNTIME_STORY.md`
-for the current support boundary.
+Native Windows now supports the checked-in `CLANG64` `propane` path for
+app-root workflows. See `docs/WINDOWS_RUNTIME_STORY.md` for the remaining
+Windows preview boundary around release/install/service closeout.
 
 It runs prefork worker processes, restarts failed workers, and supports rolling reloads.
 

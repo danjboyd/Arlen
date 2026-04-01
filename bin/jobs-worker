@@ -27,13 +27,32 @@ fi
 script_dir="$(cd "$(dirname "$script_path")" && pwd)"
 default_framework_root="$(cd "$script_dir/.." && pwd)"
 
-platform_name="$(uname -s 2>/dev/null || echo unknown)"
-case "$platform_name" in
-  MINGW*|MSYS*|CYGWIN*)
-    echo "jobs-worker: native Windows does not support the first-party jobs worker loop; see docs/WINDOWS_RUNTIME_STORY.md" >&2
-    exit 1
-    ;;
-esac
+path_looks_like_windows_absolute() {
+  local path="$1"
+  [[ "$path" =~ ^[A-Za-z]:[\\/] ]] || [[ "$path" =~ ^\\\\ ]]
+}
+
+path_is_absolute() {
+  local path="$1"
+  [[ "$path" == /* ]] || path_looks_like_windows_absolute "$path"
+}
+
+normalize_host_path() {
+  local raw="$1"
+  if [[ -z "$raw" ]]; then
+    printf '%s\n' "$PWD"
+    return
+  fi
+  if command -v cygpath >/dev/null 2>&1 && path_is_absolute "$raw"; then
+    cygpath -au "$raw"
+    return
+  fi
+  if path_is_absolute "$raw"; then
+    printf '%s\n' "$raw"
+    return
+  fi
+  printf '%s\n' "$PWD/$raw"
+}
 
 framework_root="${ARLEN_FRAMEWORK_ROOT:-$default_framework_root}"
 app_root="${ARLEN_APP_ROOT:-$PWD}"
@@ -92,15 +111,11 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-if [[ ! "$framework_root" = /* ]]; then
-  framework_root="$PWD/$framework_root"
-fi
-framework_root="$(cd "$framework_root" && pwd)"
+framework_root="$(normalize_host_path "$framework_root")"
+framework_root="$(cd "$framework_root" && pwd -P)"
 
-if [[ ! "$app_root" = /* ]]; then
-  app_root="$PWD/$app_root"
-fi
-app_root="$(cd "$app_root" && pwd)"
+app_root="$(normalize_host_path "$app_root")"
+app_root="$(cd "$app_root" && pwd -P)"
 
 if [[ ! -f "$framework_root/GNUmakefile" || ! -d "$framework_root/src/Arlen" ]]; then
   echo "jobs-worker: invalid framework root: $framework_root" >&2

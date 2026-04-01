@@ -1,7 +1,7 @@
 # Arlen Phase 24 Roadmap
 
-Status: in progress on 2026-03-31 (`24A-24M` delivered on branch `windows/clang64` for the checked-in CLANG64 preview contract; `24N-24S` now track the remaining work required for true Windows-to-Linux parity)
-Last updated: 2026-03-31
+Status: in progress on 2026-04-01 (`24A-24P` delivered on branch `windows/clang64` for the checked-in CLANG64 preview/runtime contract; `24Q-24S` now track the remaining work required for true Windows-to-Linux parity and platform closeout)
+Last updated: 2026-04-01
 
 Related docs:
 - `README.md`
@@ -30,7 +30,8 @@ Phase 24 is split into three tracks:
 
 - `24A-24F`: first-pass Windows compatibility
 - `24G-24M`: Windows preview contract completion
-- `24N-24S`: Windows-to-Linux parity closeout
+- `24N-24P`: Windows runtime parity closeout
+- `24Q-24S`: Windows-to-Linux parity and platform closeout
 
 The implementation branch for this work is `windows/clang64`.
 
@@ -633,17 +634,16 @@ Acceptance (required):
 
 ## 5.14 Phase 24N: `boomhauer` Watch-Mode + Dev-Error Parity
 
-Status: planned
+Status: complete on 2026-04-01
 
 Checkpoint notes:
 
-- The current Windows preview only supports non-watch `boomhauer` flows such
-  as `--no-watch`, `--prepare-only`, `--once`, and `--print-routes`.
-- Linux still has meaningfully broader development-server behavior:
-  - default watch mode
-  - rebuild/retry supervision
-  - config/public restart semantics
-  - fallback dev error server loops
+- Windows now runs the app-root `boomhauer` watch loop natively on CLANG64.
+- The checked-in runtime parity lane covers:
+  - fallback dev error server readiness
+  - automatic rebuild retry after build failure
+  - recovery back to the real app after source repair
+  - signal-safe teardown and rerun hygiene on Windows
 
 Deliverables:
 
@@ -666,14 +666,14 @@ Acceptance (required):
 
 ## 5.15 Phase 24O: `jobs worker` + Background Runtime Parity
 
-Status: planned
+Status: complete on 2026-04-01
 
 Checkpoint notes:
 
-- Native Windows currently blocks `arlen jobs worker` and `bin/jobs-worker`
-  outright.
-- Linux already treats the jobs worker loop as part of the first-party runtime
-  contract for queue-backed module and app workflows.
+- Native Windows now supports `arlen jobs worker` and `bin/jobs-worker` through
+  the same prepare-then-run contract Linux uses for app-root workflows.
+- The checked-in runtime parity lane verifies a queued-on-boot job path end to
+  end on CLANG64.
 
 Deliverables:
 
@@ -693,14 +693,17 @@ Acceptance (required):
 
 ## 5.16 Phase 24P: `propane` + Native Process-Manager Parity
 
-Status: planned
+Status: complete on 2026-04-01
 
 Checkpoint notes:
 
-- `propane` is currently documented as explicitly unsupported on native
-  Windows.
-- The preview branch documents the runtime boundary honestly, but that is not
-  Linux parity.
+- Native Windows now supports `arlen propane` and `bin/propane` on CLANG64 for
+  the checked-in app-root process-manager path.
+- The focused runtime parity lane verifies:
+  - build-before-launch readiness
+  - `/healthz` availability
+  - reload via `HUP`
+  - clean shutdown via `TERM`
 
 Deliverables:
 
@@ -726,9 +729,11 @@ Status: planned
 
 Checkpoint notes:
 
-- Current Windows confidence work is still preview-scoped:
+- Current Windows confidence work now covers the checked-in runtime parity
+  slice:
   - focused template XCTest lane
   - focused DB transport smoke
+  - focused runtime parity lane
   - app-root smoke
 - Linux currently carries much broader default verification through the normal
   `make test-*` and live-backend entrypoints.
@@ -816,7 +821,7 @@ Phase 24 first-pass closeout requires:
 
 Phase 24 preview-contract closeout requires:
 
-- `24G-24M` complete
+- `24G-24P` complete
 - verified Windows-native runtime and app-root workflows
 - verified Windows XCTest discovery for the focused CLANG64 bundles
 - explicit deployment/runtime-manager guidance for Windows
@@ -826,8 +831,8 @@ Phase 24 preview-contract closeout requires:
 Phase 24 full-parity closeout requires:
 
 - `24A-24S` complete
-- default `boomhauer` watch-mode behavior on Windows matches Linux
-- native `jobs worker` and `propane` support on Windows
 - Windows carries the same supported test, live-backend, perf, sanitizer, and
   robustness confidence claims as Linux
+- Windows has first-class release/install/package/service guidance instead of a
+  preview-scoped runtime boundary
 - top-level docs no longer describe Windows as preview-only

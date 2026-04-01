@@ -415,12 +415,10 @@ static const char *ALNInetNtop(int family,
 }
 #endif
 
-#if !defined(_WIN32)
 static void ALNHandleSignal(int sig) {
   (void)sig;
   gSignalStopRequested = 1;
 }
-#endif
 
 static BOOL ALNSignalStopRequested(void) {
   return (gSignalStopRequested != 0);
@@ -428,8 +426,10 @@ static BOOL ALNSignalStopRequested(void) {
 
 static BOOL ALNInstallSignalHandler(int sig) {
 #if defined(_WIN32)
-  (void)sig;
-  return (SetConsoleCtrlHandler(ALNConsoleControlHandler, TRUE) != 0);
+  BOOL consoleInstalled = (SetConsoleCtrlHandler(ALNConsoleControlHandler, TRUE) != 0);
+  void (*installedHandler)(int) = signal(sig, ALNHandleSignal);
+  BOOL signalInstalled = (installedHandler != SIG_ERR);
+  return (consoleInstalled || signalInstalled);
 #else
   struct sigaction action;
   memset(&action, 0, sizeof(action));

@@ -38,10 +38,11 @@ static void PrintUsage(void) {
           "\n"
           "Windows CLANG64 preview:\n"
           "  supported: doctor, config, new, generate, build, check, boomhauer,\n"
-          "             routes, focused test, migrate, schema-codegen,\n"
+          "             jobs worker, propane, routes, focused test, migrate,\n"
+          "             schema-codegen,\n"
           "             typed-sql-codegen, module add/remove/list/doctor/\n"
           "             migrate/assets/eject/upgrade\n"
-          "  deferred: jobs worker, propane, perf\n");
+          "  deferred: test --integration/--all, perf\n");
 #endif
 }
 
@@ -102,8 +103,7 @@ static void PrintModuleUsage(void) {
   fprintf(stdout,
           "\n"
           "Windows CLANG64 preview note:\n"
-          "  `arlen module migrate` is supported for database-backed workflows;\n"
-          "  `jobs worker` and `propane` remain explicitly unsupported natively.\n");
+          "  `arlen module migrate` is supported for database-backed workflows.\n");
 #endif
 }
 
@@ -2387,11 +2387,6 @@ static int CommandBoomhauer(NSArray *args) {
 }
 
 static int CommandPropane(NSArray *args) {
-#if ARLEN_WINDOWS_PREVIEW
-  return EmitWindowsPreviewUnsupported(@"propane", @"propane", args,
-                                       @"Native Windows does not support propane; use the documented Windows runtime story or deploy through Linux/WSL2 for production.",
-                                       @"arlen doctor --json");
-#endif
   NSString *appRoot = [[NSFileManager defaultManager] currentDirectoryPath];
   NSString *frameworkRoot = ResolveFrameworkRootForCommand(@"propane");
   if ([frameworkRoot length] == 0) {
@@ -2411,11 +2406,6 @@ static int CommandPropane(NSArray *args) {
 }
 
 static int CommandJobs(NSArray *args) {
-#if ARLEN_WINDOWS_PREVIEW
-  return EmitWindowsPreviewUnsupported(@"jobs", @"jobs", args,
-                                       @"Native Windows does not support the first-party jobs worker loop; use the documented Windows runtime story or a Linux runtime host.",
-                                       @"arlen doctor --json");
-#endif
   if ([args count] == 0) {
     PrintJobsUsage();
     return 2;

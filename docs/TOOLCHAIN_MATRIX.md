@@ -1,6 +1,6 @@
 # Arlen Toolchain Matrix
 
-Last updated: 2026-03-31
+Last updated: 2026-04-01
 
 This document records known-good local toolchain baselines for Arlen onboarding and CI parity.
 
@@ -33,11 +33,11 @@ powershell -ExecutionPolicy Bypass -File scripts\run_clang64.ps1 -InnerCommand "
 | GNUstep config tool | `source GNUstep.sh && command -v gnustep-config` | `/usr/GNUstep/System/Tools/gnustep-config` |
 | XCTest runner | `command -v xctest` | `/usr/GNUstep/System/Tools/xctest` |
 
-## Windows Preview Baseline (2026-03-31)
+## Windows Preview Baseline (2026-04-01)
 
 This is the native Windows branch contract on `windows/clang64`. It is a
-supported development/CI baseline, not a native Windows production-manager
-contract.
+supported development/CI/runtime preview baseline; broader live-backend,
+perf/sanitizer, and release/package parity remains open.
 
 | Component | Command | Expected baseline |
 | --- | --- | --- |
@@ -51,8 +51,9 @@ contract.
 | Preview build | `make all` | builds `eocc`, preview `libArlenFramework.a` including data-layer sources, `arlen`, and `arlen-xctest-runner` |
 | Focused Windows test lane | `make phase24-windows-tests` | runs the linked `ArlenPhase21TemplateTestsRunner` and fails hard if discovery is empty |
 | Focused Windows DB smoke lane | `make phase24-windows-db-smoke` | runs the linked `ArlenPhase24WindowsDBSmokeTestsRunner` and validates the Windows libpq/ODBC transport contract before connection failure |
-| Windows confidence lane | `make phase24-windows-confidence` | runs build, focused tests, DB transport smoke, and app-root CLI smoke |
-| App-root prepare-only smoke | `arlen boomhauer --no-watch --prepare-only` | scaffolded app artifacts build cleanly |
+| Focused Windows runtime lane | `make phase24-windows-runtime-tests` | runs the linked `ArlenPhase24WindowsRuntimeParityTestsRunner` and validates watch/dev-error, jobs worker, and propane parity |
+| Windows confidence lane | `make phase24-windows-confidence` | runs build, focused tests, DB transport smoke, runtime parity, and app-root CLI smoke |
+| App-root runtime smoke | `arlen boomhauer --port 3000` / `arlen jobs worker --once` | scaffolded app runtime flows work natively under the checked-in CLANG64 contract |
 
 Related guide:
 

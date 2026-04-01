@@ -141,6 +141,7 @@
   XCTAssertTrue([makefile containsString:@"XCTEST_BUNDLE_RUNNER_TOOL := $(BUILD_DIR)/arlen-xctest-runner"]);
   XCTAssertTrue([makefile containsString:@"PHASE24_WINDOWS_TEMPLATE_TEST_TOOL := $(BUILD_DIR)/tests/ArlenPhase21TemplateTestsRunner"]);
   XCTAssertTrue([makefile containsString:@"PHASE24_WINDOWS_DB_SMOKE_TEST_TOOL := $(BUILD_DIR)/tests/ArlenPhase24WindowsDBSmokeTestsRunner"]);
+  XCTAssertTrue([makefile containsString:@"PHASE24_WINDOWS_RUNTIME_TEST_TOOL := $(BUILD_DIR)/tests/ArlenPhase24WindowsRuntimeParityTestsRunner"]);
   XCTAssertTrue([makefile containsString:@"BASE_LINK_LIBS := $(ARLEN_PLATFORM_LINK_DIRS) $$(gnustep-config --base-libs) -lcrypto -ldispatch $(ARLEN_PLATFORM_LINK_LIBS)"]);
   XCTAssertTrue([makefile containsString:@"XCTEST_LINK_LIBS := $(BASE_LINK_LIBS) -lXCTest"]);
   XCTAssertTrue([makefile containsString:@"UNIT_TEST_TARGET_NAME := $(notdir $(basename $(UNIT_TEST_BUNDLE)))"]);
@@ -161,10 +162,14 @@
   XCTAssertTrue([makefile containsString:@"PHASE24_WINDOWS_DB_SMOKE_TEST_BUNDLE := $(BUILD_DIR)/tests/ArlenPhase24WindowsDBSmokeTests.xctest"]);
   XCTAssertTrue([makefile containsString:@"PHASE24_WINDOWS_DB_SMOKE_TEST_SRCS := tests/phase24/Phase24WindowsTransportSmokeTests.m"]);
   XCTAssertTrue([makefile containsString:@"phase24-windows-db-smoke: $(PHASE24_WINDOWS_DB_SMOKE_TEST_TOOL)"]);
+  XCTAssertTrue([makefile containsString:@"PHASE24_WINDOWS_RUNTIME_TEST_BUNDLE := $(BUILD_DIR)/tests/ArlenPhase24WindowsRuntimeParityTests.xctest"]);
+  XCTAssertTrue([makefile containsString:@"PHASE24_WINDOWS_RUNTIME_TEST_SRCS := tests/phase24/Phase24WindowsRuntimeParityTests.m"]);
+  XCTAssertTrue([makefile containsString:@"phase24-windows-runtime-tests: $(PHASE24_WINDOWS_RUNTIME_TEST_TOOL)"]);
   XCTAssertTrue([makefile containsString:@"phase24-windows-confidence:"]);
   XCTAssertTrue([makefile containsString:@"bash ./tools/ci/run_phase24_windows_preview.sh"]);
   XCTAssertTrue([makefile containsString:@"\"$(PHASE24_WINDOWS_TEMPLATE_TEST_TOOL)\""]);
   XCTAssertTrue([makefile containsString:@"\"$(PHASE24_WINDOWS_DB_SMOKE_TEST_TOOL)\""]);
+  XCTAssertTrue([makefile containsString:@"\"$(PHASE24_WINDOWS_RUNTIME_TEST_TOOL)\""]);
 }
 
 - (void)testWindowsPreviewBuildGraphIncludesDataLayerSources {
@@ -1056,12 +1061,13 @@
   XCTAssertTrue([script containsString:@"make -C \"$REPO_ROOT\" all"]);
   XCTAssertTrue([script containsString:@"make -C \"$REPO_ROOT\" phase24-windows-tests"]);
   XCTAssertTrue([script containsString:@"make -C \"$REPO_ROOT\" phase24-windows-db-smoke"]);
+  XCTAssertTrue([script containsString:@"make -C \"$REPO_ROOT\" phase24-windows-runtime-tests"]);
   XCTAssertTrue([script containsString:@"\"$REPO_ROOT/build/arlen\" doctor --json >\"$SMOKE_ROOT/doctor.json\""]);
   XCTAssertTrue([script containsString:@"ARLEN_FRAMEWORK_ROOT=\"$REPO_ROOT\" \"$REPO_ROOT/build/arlen\" boomhauer --no-watch --prepare-only"]);
   XCTAssertTrue([script containsString:@"ARLEN_FRAMEWORK_ROOT=\"$REPO_ROOT\" \"$REPO_ROOT/build/arlen\" routes >\"$SMOKE_ROOT/routes.txt\""]);
 }
 
-- (void)testWindowsPreviewDoctorAndRuntimeContractsStayExplicit {
+- (void)testWindowsPreviewDoctorAndRuntimeContractsReflectNativeRuntimeSupport {
   NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
   NSString *cli = [self readFile:[repoRoot stringByAppendingPathComponent:@"tools/arlen.m"]];
   NSString *shellDoctor = [self readFile:[repoRoot stringByAppendingPathComponent:@"bin/arlen-doctor"]];
@@ -1069,15 +1075,17 @@
   NSString *jobsWorker = [self readFile:[repoRoot stringByAppendingPathComponent:@"bin/jobs-worker"]];
 
   XCTAssertTrue([cli containsString:@"make phase24-windows-confidence"]);
-  XCTAssertTrue([cli containsString:@"Native Windows does not support propane"]);
-  XCTAssertTrue([cli containsString:@"Native Windows does not support the first-party jobs worker loop"]);
+  XCTAssertTrue([cli containsString:@"./bin/propane"]);
+  XCTAssertTrue([cli containsString:@"./bin/jobs-worker"]);
+  XCTAssertFalse([cli containsString:@"Native Windows does not support propane"]);
+  XCTAssertFalse([cli containsString:@"Native Windows does not support the first-party jobs worker loop"]);
   XCTAssertTrue([cli containsString:@"DoctorConfiguredLibraryPath(@\"ARLEN_LIBPQ_LIBRARY\""]);
   XCTAssertTrue([cli containsString:@"DoctorConfiguredLibraryPath(@\"ARLEN_ODBC_LIBRARY\""]);
   XCTAssertTrue([shellDoctor containsString:@"detect_configured_library ARLEN_LIBPQ_LIBRARY"]);
   XCTAssertTrue([shellDoctor containsString:@"detect_configured_library ARLEN_ODBC_LIBRARY"]);
   XCTAssertTrue([shellDoctor containsString:@"add_check \"libodbc\""]);
-  XCTAssertTrue([propane containsString:@"docs/WINDOWS_RUNTIME_STORY.md"]);
-  XCTAssertTrue([jobsWorker containsString:@"docs/WINDOWS_RUNTIME_STORY.md"]);
+  XCTAssertFalse([propane containsString:@"native Windows does not support propane"]);
+  XCTAssertFalse([jobsWorker containsString:@"native Windows does not support the first-party jobs worker loop"]);
 }
 
 - (void)testPerfHarnessSupportsPinnedBaselineAndPolicyRoots {

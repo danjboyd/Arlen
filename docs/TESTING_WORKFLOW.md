@@ -25,9 +25,12 @@ Use the smallest lane that honestly exercises the bug:
   - focused Windows CLANG64 data-layer transport smoke executable
   - asserts ODBC load and validates the documented PostgreSQL host-library
     contract before expected connection failure
+- `make phase24-windows-runtime-tests`
+  - focused Windows CLANG64 runtime parity executable
+  - covers `boomhauer` watch/dev-error recovery, `jobs worker`, and `propane`
 - `make phase24-windows-confidence`
-  - Windows confidence lane: build, focused tests, DB transport smoke, and
-    app-root CLI smoke
+  - Windows confidence lane: build, focused tests, DB transport smoke, runtime
+    parity, and app-root CLI smoke
 
 Current Windows caveat:
 - the focused Phase 24 lanes deliberately use linked test executables because
@@ -67,7 +70,8 @@ Phase 20 data-layer-focused lanes remain available:
    when applicable, and `make phase21-confidence`.
 
 For the native Windows preview branch, promote through
-`make phase24-windows-tests`, then `make phase24-windows-db-smoke`, and then
+`make phase24-windows-tests`, then `make phase24-windows-db-smoke`, then
+`make phase24-windows-runtime-tests`, and then
 `make phase24-windows-confidence` before attempting broader Linux-only lanes.
 
 ## 3. Template Regression Intake

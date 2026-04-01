@@ -1,53 +1,43 @@
 # Arlen Status Checkpoint
 
-Last updated: 2026-03-31
+Last updated: 2026-04-01
 
-## Leaving Off (2026-03-31)
+## Leaving Off (2026-04-01)
 
-- Reopened the Phase 24 roadmap after the preview-contract closeout so the
-  remaining Windows-to-Linux parity work is explicit instead of implied:
-  - added `24N-24S` in `docs/PHASE24_ROADMAP.md`
-  - current parity targets now include:
-    - `boomhauer` watch-mode and dev-error parity
-    - native `jobs worker`
-    - native `propane`
-    - full test/live-backend matrix parity
-    - perf/sanitizer/fault-injection parity
-    - release/package/doc closeout as a first-class platform
-- `24A-24M` remain complete on branch `windows/clang64`:
-  - switched the focused Windows lanes to linked test executables driven by
-    `tools/arlen_xctest_runner.m` so CLANG64 discovery is real and fail-hard
-  - verified `make phase24-windows-tests` discovers and executes the focused
-    template suite, and `make phase24-windows-db-smoke` discovers and executes
-    the focused Windows transport smoke suite
-  - made the PostgreSQL smoke lane prerequisite-aware when `libpq` is absent on
+- Completed `24N-24P` on branch `windows/clang64`:
+  - `boomhauer` now supports native Windows app-root watch mode, fallback dev
+    error recovery, and signal-safe shutdown on the checked-in CLANG64 path
+  - `arlen jobs worker` / `bin/jobs-worker` now run natively on Windows
+  - `arlen propane` / `bin/propane` now run natively on Windows with reload and
+    shutdown lifecycle coverage
+  - added `tests/phase24/Phase24WindowsRuntimeParityTests.m`,
+    `make phase24-windows-runtime-tests`, and folded that lane into
+    `make phase24-windows-confidence`
+  - hardened the Windows runtime suite cleanup to keep reruns and `make clean`
+    deterministic
+- `24A-24P` are now complete on branch `windows/clang64`:
+  - linked Windows test executables keep CLANG64 discovery explicit and fail-hard
+  - the DB transport smoke remains prerequisite-aware when `libpq` is absent on
     the host while still failing on unexpected transport regressions
-  - resolved the tracked Windows source warnings in
-    `src/Arlen/Core/ALNApplication.m` and `src/Arlen/Support/ALNServices.m`,
-    and guarded Windows-only unused helpers in `src/Arlen/HTTP/ALNHTTPServer.m`
-    and `tools/arlen.m`
-  - updated the Windows/toolchain/testing/roadmap docs so the checked-in
-    CLANG64 preview contract matches the real branch behavior
-- Live CLANG64 verification completed in this workspace on 2026-03-31:
-  - `powershell -ExecutionPolicy Bypass -File scripts\run_clang64.ps1 -InnerCommand "make clean && make phase24-windows-tests"`
-  - `powershell -ExecutionPolicy Bypass -File scripts\run_clang64.ps1 -InnerCommand "make clean && make phase24-windows-db-smoke"`
+  - the runtime parity lane now exercises watch/dev-error recovery, jobs worker,
+    and propane on the checked-in toolchain contract
+- Live CLANG64 verification completed in this workspace on 2026-04-01:
+  - `powershell -ExecutionPolicy Bypass -File scripts\run_clang64.ps1 -InnerCommand "make phase24-windows-runtime-tests"`
   - `powershell -ExecutionPolicy Bypass -File scripts\run_clang64.ps1 -InnerCommand "make phase24-windows-confidence"`
-  - the lane completed end-to-end, including `make all`,
-    `make phase24-windows-tests`,
-    `make phase24-windows-db-smoke`, `arlen doctor --json`,
-    `arlen new`, `arlen boomhauer --no-watch --prepare-only`, and
-    `arlen routes`
+  - the confidence lane completed end-to-end, including `make all`,
+    `make phase24-windows-tests`, `make phase24-windows-db-smoke`,
+    `make phase24-windows-runtime-tests`, `arlen doctor --json`,
+    scaffolded-app `boomhauer` smoke, and `arlen routes`
 - Residual note:
   - the only warning still observed on this host is the upstream CLANG64 /
     GNUstep `-fobjc-exceptions` unused-command-line warning rather than an
     Arlen source portability warning
-- Phase 24 is back to in-progress on `windows/clang64` because the roadmap now
-  includes the new Linux-parity subphases `24N-24S`.
+- Phase 24 remains in progress on `windows/clang64` because the roadmap now
+  carries the remaining parity/platform closeout subphases `24Q-24S`.
 - Next-session execution order:
-  - execute `24N` for `boomhauer` watch-mode and dev-error parity
-  - then `24O` for native `jobs worker`
-  - then `24P` for native `propane`
-  - follow with `24Q-24S` to close the remaining test/CI/release parity work
+  - execute `24Q` for full test/live-backend matrix parity
+  - then `24R` for perf/sanitizer/fault-injection parity
+  - then `24S` for release/package/doc closeout as a first-class platform
 
 ## Leaving Off (2026-03-30)
 

@@ -107,9 +107,8 @@ curl -i http://127.0.0.1:3000/healthz
 curl -i http://127.0.0.1:3000/openapi
 ```
 
-`boomhauer` watches app files by default and rebuilds when inputs change.
-Windows preview currently supports app-root non-watch flows plus
-`--prepare-only` / `--print-routes`; watch mode remains deferred.
+`boomhauer` watches app files by default and rebuilds when inputs change on
+Linux and on the current Windows CLANG64 app-root flow.
 
 ## 5. Add One More Route
 
