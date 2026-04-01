@@ -15,6 +15,21 @@ perf_json="$output_dir/perf/perf_smoke.json"
 
 mkdir -p "$output_dir"
 
+write_live_manifest() {
+  local status="$1"
+  local reason="${2:-}"
+  mkdir -p "$(dirname "$live_manifest")"
+  cat >"$live_manifest" <<EOF
+{
+  "status": "$status",
+  "reason": "$reason",
+  "artifacts": [
+    "live.log"
+  ]
+}
+EOF
+}
+
 set +u
 source "$repo_root/tools/source_gnustep_env.sh"
 set -u
@@ -27,10 +42,21 @@ ARLEN_PHASE26_PERF_OUTPUT="$perf_json" make -C "$repo_root" phase26-orm-perf 2>&
 make -C "$repo_root" arlen-orm-reference 2>&1 | tee "$reference_log"
 make -C "$repo_root" docs-api 2>&1 | tee "$docs_log"
 bash "$repo_root/tools/ci/run_docs_quality.sh" 2>&1 | tee -a "$docs_log"
+set +e
 ARLEN_PHASE26_LIVE_OUTPUT_DIR="$output_dir/live" \
 ARLEN_PHASE26_LIVE_MANIFEST="$live_manifest" \
 ARLEN_PHASE26_LIVE_LOG="$output_dir/live/live.log" \
   make -C "$repo_root" phase26-orm-live
+live_status=$?
+set -e
+
+if [[ ! -f "$live_manifest" ]]; then
+  if [[ $live_status -eq 0 ]]; then
+    write_live_manifest pass ""
+  else
+    write_live_manifest fail live_target_failed
+  fi
+fi
 
 python3 "$repo_root/tools/ci/generate_phase26_confidence_artifacts.py" \
   --output-dir "$output_dir" \

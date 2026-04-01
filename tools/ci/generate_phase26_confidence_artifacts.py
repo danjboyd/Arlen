@@ -18,6 +18,7 @@ PASS_PATTERNS = (
     r"Executed \d+ tests?, with 0 failures",
     r"phase26-orm-perf: wrote",
     r"Arlen ORM reference",
+    r"ci: docs quality gate complete",
 )
 
 
