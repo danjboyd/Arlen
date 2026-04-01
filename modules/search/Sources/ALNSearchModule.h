@@ -6,6 +6,7 @@
 #import "ALNModuleSystem.h"
 
 @class ALNApplication;
+@class ALNContext;
 @class ALNSearchModuleRuntime;
 
 NS_ASSUME_NONNULL_BEGIN
@@ -17,6 +18,8 @@ typedef NS_ENUM(NSInteger, ALNSearchModuleErrorCode) {
   ALNSearchModuleErrorValidationFailed = 2,
   ALNSearchModuleErrorNotFound = 3,
   ALNSearchModuleErrorExecutionFailed = 4,
+  ALNSearchModuleErrorUnauthorized = 5,
+  ALNSearchModuleErrorForbidden = 6,
 };
 
 @protocol ALNSearchEngine <NSObject>
@@ -40,6 +43,22 @@ typedef NS_ENUM(NSInteger, ALNSearchModuleErrorCode) {
                                                 error:(NSError *_Nullable *_Nullable)error;
 - (NSDictionary *)searchModuleCapabilities;
 
+@optional
+
+- (BOOL)searchModuleConfigureWithRuntime:(ALNSearchModuleRuntime *)runtime
+                             application:(ALNApplication *)application
+                              moduleConfig:(NSDictionary *)moduleConfig
+                                   error:(NSError *_Nullable *_Nullable)error;
+- (nullable NSDictionary *)searchModuleExecuteQuery:(nullable NSString *)query
+                                     resourceMetadata:(NSArray<NSDictionary *> *)resourceMetadata
+                                  snapshotsByResource:(NSDictionary<NSString *, NSDictionary *> *)snapshotsByResource
+                                              filters:(nullable NSDictionary *)filters
+                                                 sort:(nullable NSString *)sort
+                                                limit:(NSUInteger)limit
+                                               offset:(NSUInteger)offset
+                                              options:(nullable NSDictionary *)options
+                                                error:(NSError *_Nullable *_Nullable)error;
+
 @end
 
 @protocol ALNSearchResourceDefinition <NSObject>
@@ -48,6 +67,16 @@ typedef NS_ENUM(NSInteger, ALNSearchModuleErrorCode) {
 - (NSDictionary *)searchModuleResourceMetadata;
 - (nullable NSArray<NSDictionary *> *)searchModuleDocumentsForRuntime:(ALNSearchModuleRuntime *)runtime
                                                                 error:(NSError *_Nullable *_Nullable)error;
+
+@optional
+
+- (nullable NSDictionary *)searchModulePublicResultForDocument:(NSDictionary *)document
+                                                       metadata:(NSDictionary *)metadata
+                                                        runtime:(ALNSearchModuleRuntime *)runtime
+                                                          error:(NSError *_Nullable *_Nullable)error;
+- (BOOL)searchModuleAllowsQueryForContext:(ALNContext *)context
+                                  runtime:(ALNSearchModuleRuntime *)runtime
+                                    error:(NSError *_Nullable *_Nullable)error;
 
 @end
 
@@ -89,6 +118,14 @@ typedef NS_ENUM(NSInteger, ALNSearchModuleErrorCode) {
                                   sort:(nullable NSString *)sort
                                 limit:(NSUInteger)limit
                                offset:(NSUInteger)offset
+                                 error:(NSError *_Nullable *_Nullable)error;
+- (nullable NSDictionary *)searchQuery:(nullable NSString *)query
+                    resourceIdentifier:(nullable NSString *)resourceIdentifier
+                               filters:(nullable NSDictionary *)filters
+                                  sort:(nullable NSString *)sort
+                                 limit:(NSUInteger)limit
+                                offset:(NSUInteger)offset
+                          queryOptions:(nullable NSDictionary *)queryOptions
                                  error:(NSError *_Nullable *_Nullable)error;
 - (nullable NSDictionary *)resourceDrilldownForIdentifier:(nullable NSString *)identifier;
 - (NSDictionary *)dashboardSummary;

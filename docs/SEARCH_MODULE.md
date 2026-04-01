@@ -45,6 +45,26 @@ searchModule = {
 };
 ```
 
+Optional first-party PostgreSQL search uses the same resource/provider
+contracts:
+
+```plist
+searchModule = {
+  engineClass = "ALNPostgresSearchEngine";
+  engine = {
+    postgres = {
+      tableName = "search_module_documents";
+      textSearchConfiguration = "simple";
+      maxConnections = 2;
+    };
+  };
+};
+```
+
+`ALNPostgresSearchEngine` reads
+`searchModule.engine.postgres.connectionString` first and falls back to
+`database.connectionString`.
+
 `ALNSearchModuleRuntime` also supports auto-registration from `admin-ui`
 resource metadata when `searchModule.adminUI.autoResources = YES`. Optional
 `includeIdentifiers` and `excludeIdentifiers` lists narrow which admin
@@ -59,9 +79,21 @@ Each search resource definition supplies metadata such as:
 - `summary`
 - `identifierField`
 - `primaryField`
+- `summaryField`
 - `indexedFields`
+- `searchFields`
+- `autocompleteFields`
+- `suggestionFields`
+- `highlightFields`
+- `resultFields`
+- `facetFields`
+- `fieldTypes`
 - `filters`
 - `sorts`
+- `queryModes`
+- `queryPolicy`
+- `queryRoles`
+- `promotions`
 - `pathTemplate`
 - weighted fields and engine-friendly ranking hints where supported
 
@@ -72,9 +104,31 @@ The current first-party filter operators are:
 
 - `eq`
 - `contains`
+- `gt`
+- `gte`
+- `lt`
+- `lte`
+- `in`
 
-The default engine also emits deterministic result snippets/highlights when the
-query can be matched against indexed text.
+Public query routes now return shaped result payloads by default:
+
+- stable top-level result keys such as `resource`, `recordID`, `title`,
+  `summary`, `path`, `score`, `generation`, and `highlights`
+- a shaped `fields` payload based on `resultFields` or the optional
+  `searchModulePublicResultForDocument:metadata:runtime:error:` hook
+- no raw `record` dictionary unless an app explicitly returns it from its own
+  shaping hook
+
+Resource query policies are explicit:
+
+- `public`
+- `authenticated`
+- `role_gated`
+- `predicate`
+
+The module also reports engine capabilities directly in query/config payloads so
+apps can see which engines support highlights, fuzzy matching, autocomplete,
+facets, promoted results, cursor pagination, and related behaviors.
 
 ## Surfaces
 
@@ -96,9 +150,23 @@ JSON routes:
 
 The search JSON routes are included in generated OpenAPI output.
 
+Query responses now include richer sections when supported by the selected
+engine/resource contract:
+
+- `results`
+- `promotedResults`
+- `autocomplete`
+- `suggestions`
+- `facets`
+- `pagination`
+- `resourceMetadata`
+- `engineCapabilities`
+
 ## Protection
 
 - query routes are public by default
+- per-resource `queryPolicy` metadata can require authentication, roles, or an
+  app callback/predicate
 - resource drilldown and reindex routes require the shared operator/admin policy:
   - authenticated session
   - either `operator` or `admin` role
@@ -141,9 +209,11 @@ Manifest defaults:
 
 ## Current Limits
 
-- the shipped in-tree engine is intentionally simple; vendor-specific external
-  engines still need app-owned engine classes
-- the current result payload is optimized for deterministic app/admin/operator
-  flows rather than full-text relevance experimentation
+- the shipped default engine is still snapshot-backed and intentionally simpler
+  than dedicated search services, even though it now supports typed filters,
+  autocomplete, suggestions, facets, promotions, and fuzzy/phrase modes
+- PostgreSQL is the strongest first-party no-extra-service path today; external
+  engines such as Meilisearch and OpenSearch/Elasticsearch are still roadmap
+  work
 - admin auto-resource indexing depends on `admin-ui` being configured before the
   search runtime loads

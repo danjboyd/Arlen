@@ -2,11 +2,22 @@
 <% NSDictionary *activeMetadata = $activeResourceMetadata ?: @{}; %>
 <% NSDictionary *drilldown = $searchDrilldown ?: @{}; %>
 <% NSDictionary *resourceRow = [drilldown objectForKey:@"resource"] ?: @{}; %>
+<% NSDictionary *queryResult = $searchResult ?: @{}; %>
+<% NSArray *availableModes = [queryResult objectForKey:@"availableModes"] ?: ([activeMetadata objectForKey:@"queryModes"] ?: @[]); %>
+<% if ([availableModes count] == 0) { availableModes = @[ @"search" ]; } %>
 
 <section class="search-panel">
   <form method="get" action="<%= [$activeResource length] > 0 ? [NSString stringWithFormat:@"%@/resources/%@", $searchPrefix ?: @"/search", $activeResource] : ($searchPrefix ?: @"/search") %>">
     <label for="q">Query</label>
     <input id="q" type="text" name="q" value="<%= $query ?: @"" %>" placeholder="Search indexed records">
+    <label>
+      <span>Mode</span>
+      <select name="mode">
+        <% for (NSString *mode in availableModes) { %>
+          <option value="<%= mode %>" <%= [[parameters objectForKey:@"mode"] isEqual:mode] ? @"selected" : @"" %>><%= [mode capitalizedString] %></option>
+        <% } %>
+      </select>
+    </label>
     <% if ([activeMetadata count] > 0) { %>
       <% for (NSDictionary *filter in ([activeMetadata objectForKey:@"filters"] ?: @[])) { %>
         <% NSString *filterName = [filter objectForKey:@"name"] ?: @""; %>
@@ -76,17 +87,22 @@
     <div class="search-row">
       <strong><a href="<%= [NSString stringWithFormat:@"%@/resources/%@", $searchPrefix ?: @"/search", resource[@"identifier"] ?: @""] %>"><%= resource[@"label"] ?: resource[@"identifier"] ?: @"resource" %></a></strong>
       <span><code><%= resource[@"identifier"] ?: @"" %></code></span>
-      <span><%= resource[@"indexState"] ?: resource[@"status"] ?: @"idle" %></span>
-      <span><%= [resource[@"documentCount"] stringValue] ?: @"0" %> docs</span>
-      <span>gen <%= [resource[@"activeGeneration"] stringValue] ?: @"0" %></span>
-      <% if ([resource[@"adminIntegrated"] boolValue]) { %>
+      <% if ([resource[@"summary"] length] > 0) { %>
+        <span><%= resource[@"summary"] %></span>
+      <% } %>
+      <% if ([[$searchAdminAllowed description] boolValue]) { %>
+        <span><%= resource[@"indexState"] ?: resource[@"status"] ?: @"idle" %></span>
+        <span><%= [resource[@"documentCount"] stringValue] ?: @"0" %> docs</span>
+        <span>gen <%= [resource[@"activeGeneration"] stringValue] ?: @"0" %></span>
+      <% } %>
+      <% if ([[$searchAdminAllowed description] boolValue] && [resource[@"adminIntegrated"] boolValue]) { %>
         <span>admin-integrated</span>
       <% } %>
     </div>
   <% } %>
 </section>
 
-<% if ([resourceRow count] > 0) { %>
+<% if ([[$searchAdminAllowed description] boolValue] && [resourceRow count] > 0) { %>
   <section class="search-panel">
     <h2>Resource status</h2>
     <dl class="search-meta">
@@ -139,8 +155,57 @@
       <p class="search-error"><%= entry %></p>
     <% } %>
   <% } %>
-  <p><%= [[($searchResult[@"total"] ?: @0) stringValue] ?: @"0" copy] %> indexed matches</p>
-  <% for (NSDictionary *result in ($searchResult[@"results"] ?: @[])) { %>
+  <% if ([(queryResult[@"promotedResults"] ?: @[]) count] > 0) { %>
+    <div class="search-aside">
+      <h3>Promoted</h3>
+      <% for (NSDictionary *result in (queryResult[@"promotedResults"] ?: @[])) { %>
+        <article class="search-result search-result--promoted">
+          <h4>
+            <% if ([result[@"path"] length] > 0) { %>
+              <a href="<%= result[@"path"] %>"><%= result[@"title"] ?: result[@"recordID"] ?: @"result" %></a>
+            <% } else { %>
+              <%= result[@"title"] ?: result[@"recordID"] ?: @"result" %>
+            <% } %>
+          </h4>
+          <p><%= result[@"summary"] ?: @"" %></p>
+          <p class="search-meta"><%= result[@"promotionLabel"] ?: @"Promoted" %></p>
+        </article>
+      <% } %>
+    </div>
+  <% } %>
+  <% if ([(queryResult[@"autocomplete"] ?: @[]) count] > 0 || [(queryResult[@"suggestions"] ?: @[]) count] > 0) { %>
+    <div class="search-aside">
+      <% if ([(queryResult[@"autocomplete"] ?: @[]) count] > 0) { %>
+        <p class="search-meta"><strong>Autocomplete:</strong> <%= [(queryResult[@"autocomplete"] ?: @[]) componentsJoinedByString:@", "] %></p>
+      <% } %>
+      <% if ([(queryResult[@"suggestions"] ?: @[]) count] > 0) { %>
+        <p class="search-meta"><strong>Suggestions:</strong> <%= [(queryResult[@"suggestions"] ?: @[]) componentsJoinedByString:@", "] %></p>
+      <% } %>
+    </div>
+  <% } %>
+  <% if ([(queryResult[@"facets"] ?: @[]) count] > 0) { %>
+    <div class="search-facets">
+      <% for (NSDictionary *facet in (queryResult[@"facets"] ?: @[])) { %>
+        <section class="search-facet">
+          <h3><%= facet[@"label"] ?: facet[@"name"] ?: @"Facet" %></h3>
+          <% if ([facet[@"resourceLabel"] length] > 0 && ![[facet[@"resourceLabel"] lowercaseString] isEqual:[facet[@"label"] lowercaseString]]) { %>
+            <p class="search-meta"><%= facet[@"resourceLabel"] %></p>
+          <% } %>
+          <% for (NSDictionary *value in (facet[@"values"] ?: @[])) { %>
+            <div class="search-row">
+              <span><%= value[@"label"] ?: value[@"value"] ?: @"" %></span>
+              <span><%= [value[@"count"] stringValue] ?: @"0" %></span>
+              <% if ([[value[@"selected"] description] boolValue]) { %>
+                <span>selected</span>
+              <% } %>
+            </div>
+          <% } %>
+        </section>
+      <% } %>
+    </div>
+  <% } %>
+  <p><%= [[(queryResult[@"total"] ?: @0) stringValue] ?: @"0" copy] %> indexed matches</p>
+  <% for (NSDictionary *result in (queryResult[@"results"] ?: @[])) { %>
     <article class="search-result">
       <h3>
         <% if ([result[@"path"] length] > 0) { %>
@@ -152,6 +217,13 @@
       <p><%= result[@"summary"] ?: @"" %></p>
       <% for (NSString *highlight in (result[@"highlights"] ?: @[])) { %>
         <p class="search-meta"><%= highlight %></p>
+      <% } %>
+      <% if ([(result[@"fields"] ?: @{}) count] > 0) { %>
+        <div class="search-result__fields">
+          <% for (NSString *fieldName in [[result[@"fields"] allKeys] sortedArrayUsingSelector:@selector(compare:)]) { %>
+            <span class="search-chip"><strong><%= fieldName %>:</strong> <%= [[result[@"fields"] objectForKey:fieldName] description] ?: @"" %></span>
+          <% } %>
+        </div>
       <% } %>
       <p class="search-meta"><code><%= result[@"resource"] ?: @"" %></code> score <%= [result[@"score"] stringValue] %> generation <%= [result[@"generation"] stringValue] %></p>
     </article>

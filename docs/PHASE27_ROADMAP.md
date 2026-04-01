@@ -1,6 +1,6 @@
 # Arlen Phase 27 Roadmap
 
-Status: Planned
+Status: In progress (`27A-27D` delivered on 2026-04-01)
 Last updated: 2026-04-01
 
 Related docs:
@@ -55,6 +55,26 @@ The current default engine is still intentionally simple:
   external-engine adapters
 
 Phase 27 exists to close that gap.
+
+## 0.1 Delivered So Far (2026-04-01)
+
+`27A-27D` are now shipped:
+
+- `27A`: public query routes return shaped results by default, expose stable
+  `resourceMetadata` / `engineCapabilities` / `pagination` envelopes, and
+  support explicit per-resource public result shaping hooks.
+- `27B`: resource metadata now distinguishes search/autocomplete/highlight/
+  suggestion/result/facet fields, typed field metadata, query policies, query
+  modes, and promotions; engine capability reporting is normalized and the
+  search docs now match the supported operator surface.
+- `27C`: Arlen ships a first-party `ALNPostgresSearchEngine` with PostgreSQL
+  FTS/trigram ranking, configurable `textSearchConfiguration`, module-owned
+  document storage, incremental sync, and degraded rebuild preservation.
+- `27D`: the query contract now includes autocomplete, suggestions, facets, and
+  promoted results in both HTML and JSON surfaces, with fail-closed query-mode
+  validation.
+
+Remaining scope starts at `27E`.
 
 ## 1. Objective
 
