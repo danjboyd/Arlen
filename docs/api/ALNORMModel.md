@@ -14,6 +14,8 @@ Optional ORM APIs for reflected models, repositories, relations, and SQL-first c
 | `fieldValues` | `NSDictionary<NSString *, id> *` | `nonatomic, copy, readonly` | Public `fieldValues` property available on `ALNORMModel`. |
 | `relationValues` | `NSDictionary<NSString *, id> *` | `nonatomic, copy, readonly` | Public `relationValues` property available on `ALNORMModel`. |
 | `dirtyFieldNames` | `NSSet<NSString *> *` | `nonatomic, copy, readonly` | Public `dirtyFieldNames` property available on `ALNORMModel`. |
+| `context` | `ALNORMContext *` | `nonatomic, weak, readonly, nullable` | Public `context` property available on `ALNORMModel`. |
+| `loadedRelationNames` | `NSSet<NSString *> *` | `nonatomic, copy, readonly` | Public `loadedRelationNames` property available on `ALNORMModel`. |
 
 ## Methods
 
@@ -39,6 +41,12 @@ Optional ORM APIs for reflected models, repositories, relations, and SQL-first c
 | `markDetached` | `- (void)markDetached;` | Perform `mark detached` for `ALNORMModel`. | Call for side effects; this method does not return a value. |
 | `setRelationObject:forRelationName:error:` | `- (BOOL)setRelationObject:(nullable id)value forRelationName:(NSString *)relationName error:(NSError *_Nullable *_Nullable)error;` | Set or override the current value for this concern. | Check the returned `BOOL`; on `NO`, inspect the `error` out-parameter. |
 | `relationObjectForName:` | `- (nullable id)relationObjectForName:(NSString *)relationName;` | Perform `relation object for name` for `ALNORMModel`. | Capture the returned value and propagate errors/validation as needed. |
+| `relationObjectForName:error:` | `- (nullable id)relationObjectForName:(NSString *)relationName error:(NSError *_Nullable *_Nullable)error;` | Perform `relation object for name` for `ALNORMModel`. | Pass `NSError **` and treat a `nil` result as failure. |
+| `isRelationLoaded:` | `- (BOOL)isRelationLoaded:(NSString *)relationName;` | Return whether `ALNORMModel` currently satisfies this condition. | Check the return value to confirm the operation succeeded. |
+| `attachToContext:` | `- (void)attachToContext:(nullable ALNORMContext *)context;` | Perform `attach to context` for `ALNORMModel`. | Call for side effects; this method does not return a value. |
+| `markRelationLoaded:value:pivotRows:error:` | `- (BOOL)markRelationLoaded:(NSString *)relationName value:(nullable id)value pivotRows:(nullable NSArray<NSDictionary<NSString *, id> *> *)pivotRows error:(NSError *_Nullable *_Nullable)error;` | Perform `mark relation loaded` for `ALNORMModel`. | Check the returned `BOOL`; on `NO`, inspect the `error` out-parameter. |
+| `markRelationNamed:accessStrategy:` | `- (void)markRelationNamed:(NSString *)relationName accessStrategy:(ALNORMRelationLoadStrategy)accessStrategy;` | Perform `mark relation named` for `ALNORMModel`. | Call for side effects; this method does not return a value. |
+| `pivotValueDictionariesForRelationName:` | `- (NSArray<NSDictionary<NSString *, id> *> *)pivotValueDictionariesForRelationName:(NSString *)relationName;` | Perform `pivot value dictionaries for relation name` for `ALNORMModel`. | Treat returned collection values as snapshots unless the API documents mutability. |
 | `primaryKeyValues` | `- (NSDictionary<NSString *, id> *)primaryKeyValues;` | Perform `primary key values` for `ALNORMModel`. | Read this value when you need current runtime/request state. |
 | `changedFieldValues` | `- (NSDictionary<NSString *, id> *)changedFieldValues;` | Perform `changed field values` for `ALNORMModel`. | Read this value when you need current runtime/request state. |
 | `dictionaryRepresentation` | `- (NSDictionary<NSString *, id> *)dictionaryRepresentation;` | Return this object as a stable dictionary payload. | Read this value when you need current runtime/request state. |

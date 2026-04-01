@@ -5,6 +5,8 @@
 #import "Arlen/Data/ALNDatabaseInspector.h"
 #import "Arlen/Data/ALNSQLBuilder.h"
 #import "Arlen/ORM/ALNORMErrors.h"
+#import "Arlen/ORM/ALNORMValueConverter.h"
+#import "Arlen/ORM/ALNORMWriteOptions.h"
 #import "Arlen/ORM/ALNORMFieldDescriptor.h"
 #import "Arlen/ORM/ALNORMRelationDescriptor.h"
 #import "Arlen/ORM/ALNORMModelDescriptor.h"

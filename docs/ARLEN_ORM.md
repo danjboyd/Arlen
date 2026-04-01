@@ -15,7 +15,7 @@ an ORM do not pay an API-shape cost for it.
 
 ## Scope Today
 
-The current shipped foundation is Phase `26A-26E`:
+The current shipped foundation is Phase `26A-26I`:
 
 - optional package surface via `src/ArlenORM/ArlenORM.h`
 - descriptor contracts for fields, models, relations, uniqueness, and
@@ -25,12 +25,18 @@ The current shipped foundation is Phase `26A-26E`:
 - repository/query APIs on top of `ALNSQLBuilder`
 - first-class `belongs_to`, `has_one`, `has_many`, and many-to-many relation
   metadata with explicit pivot fields
+- explicit joined/select-in/no-load/raise-on-access relation load plans
+- query-level and context-level strict-loading controls plus query-budget
+  diagnostics
+- `ALNORMChangeset`, `ALNORMValueConverter`, and `ALNORMWriteOptions` for
+  converter-backed casting, validation, and writes
+- request-scoped unit-of-work behavior with identity tracking, reload/detach,
+  and transaction/savepoint coordination
+- save/delete/upsert helpers with opt-in optimistic locking, timestamps, and
+  explicit belongs-to graph-save behavior
 
 Not in scope yet:
 
-- load plans / strict-loading diagnostics (`26F`)
-- validation/casting-heavy changesets (`26G`)
-- write graph / unit-of-work semantics (`26H-26I`)
 - migration-history isolation (`26J`)
 - Dataverse ORM support (`26N-26O`)
 
@@ -46,6 +52,8 @@ The main public types are:
 - `ALNORMRelationDescriptor`
 - `ALNORMModelDescriptor`
 - `ALNORMChangeset`
+- `ALNORMValueConverter`
+- `ALNORMWriteOptions`
 - `ALNORMCodegen`
 
 These layer directly onto existing `ArlenData` seams:
@@ -85,6 +93,24 @@ ALNORMRepository *posts = [context repositoryForModelClass:[BlogPostModel class]
 ALNORMQuery *query = [[posts query] whereField:@"authorId" equals:@"user-1"];
 NSDictionary *plan = [posts compiledPlanForQuery:query error:&error];
 NSArray *models = [posts allMatchingQuery:query error:&error];
+```
+
+Strict-loading and eager-loading controls are explicit:
+
+```objc
+ALNORMQuery *query = [[[posts query] withSelectInRelationNamed:@"author"] strictLoading:YES];
+NSArray *models = [posts allMatchingQuery:query error:&error];
+```
+
+For mutation-heavy flows, prefer changesets and write options:
+
+```objc
+ALNORMChangeset *changeset = [ALNORMChangeset changesetWithModel:post];
+[changeset applyInputValues:payload error:&error];
+[repository saveModel:post
+            changeset:changeset
+              options:[ALNORMWriteOptions options]
+                error:&error];
 ```
 
 ## Verification

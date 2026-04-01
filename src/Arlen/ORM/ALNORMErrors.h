@@ -20,6 +20,14 @@ typedef NS_ENUM(NSInteger, ALNORMErrorCode) {
   ALNORMErrorMaterializationFailed = 10,
   ALNORMErrorUnsupportedQueryShape = 11,
   ALNORMErrorReadOnlyMutation = 12,
+  ALNORMErrorStrictLoadingViolation = 13,
+  ALNORMErrorQueryBudgetExceeded = 14,
+  ALNORMErrorValidationFailed = 15,
+  ALNORMErrorOptimisticLockConflict = 16,
+  ALNORMErrorTransactionRequired = 17,
+  ALNORMErrorSaveFailed = 18,
+  ALNORMErrorDeleteFailed = 19,
+  ALNORMErrorUpsertFailed = 20,
 };
 
 FOUNDATION_EXPORT NSError *ALNORMMakeError(ALNORMErrorCode code,

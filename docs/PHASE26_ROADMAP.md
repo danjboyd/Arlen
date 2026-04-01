@@ -1,6 +1,6 @@
 # Arlen Phase 26 Roadmap
 
-Status: in progress on 2026-04-01 (`26A-26E` complete, `26F-26O` planned)
+Status: in progress on 2026-04-01 (`26A-26I` complete, `26J-26O` planned)
 Last updated: 2026-04-01
 
 Related docs:

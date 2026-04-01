@@ -9,10 +9,10 @@ python3 tools/docs/generate_api_reference.py
 ```
 
 - Generated from source headers and metadata (deterministic output)
-- Public headers: `67`
-- Symbols: `118`
-- Public methods: `798`
-- Public properties: `315`
+- Public headers: `69`
+- Symbols: `120`
+- Public methods: `853`
+- Public properties: `335`
 
 ## API Surface Boundary
 
@@ -127,6 +127,8 @@ python3 tools/docs/generate_api_reference.py
 - [ALNORMQuery](api/ALNORMQuery.md): Optional ORM APIs for reflected models, repositories, relations, and SQL-first code generation.
 - [ALNORMRelationDescriptor](api/ALNORMRelationDescriptor.md): Optional ORM APIs for reflected models, repositories, relations, and SQL-first code generation.
 - [ALNORMRepository](api/ALNORMRepository.md): Optional ORM APIs for reflected models, repositories, relations, and SQL-first code generation.
+- [ALNORMValueConverter](api/ALNORMValueConverter.md): Optional ORM APIs for reflected models, repositories, relations, and SQL-first code generation.
+- [ALNORMWriteOptions](api/ALNORMWriteOptions.md): Optional ORM APIs for reflected models, repositories, relations, and SQL-first code generation.
 
 ### Support
 
@@ -225,6 +227,8 @@ python3 tools/docs/generate_api_reference.py
 - `src/Arlen/ORM/ALNORMQuery.h`
 - `src/Arlen/ORM/ALNORMRelationDescriptor.h`
 - `src/Arlen/ORM/ALNORMRepository.h`
+- `src/Arlen/ORM/ALNORMValueConverter.h`
+- `src/Arlen/ORM/ALNORMWriteOptions.h`
 - `src/Arlen/Support/ALNAuth.h`
 - `src/Arlen/Support/ALNAuthProviderPresets.h`
 - `src/Arlen/Support/ALNAuthProviderSessionBridge.h`

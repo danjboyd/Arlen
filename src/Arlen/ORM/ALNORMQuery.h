@@ -10,6 +10,16 @@ NS_ASSUME_NONNULL_BEGIN
 
 typedef void (^ALNORMQueryScope)(id query);
 
+typedef NS_ENUM(NSInteger, ALNORMRelationLoadStrategy) {
+  ALNORMRelationLoadStrategyDefault = 0,
+  ALNORMRelationLoadStrategyJoined = 1,
+  ALNORMRelationLoadStrategySelectIn = 2,
+  ALNORMRelationLoadStrategyNoLoad = 3,
+  ALNORMRelationLoadStrategyRaiseOnAccess = 4,
+};
+
+FOUNDATION_EXPORT NSString *ALNORMRelationLoadStrategyName(ALNORMRelationLoadStrategy strategy);
+
 @interface ALNORMQuery : NSObject
 
 @property(nonatomic, assign, readonly) Class modelClass;
@@ -22,6 +32,8 @@ typedef void (^ALNORMQueryScope)(id query);
 @property(nonatomic, assign, readonly) NSUInteger limitValue;
 @property(nonatomic, assign, readonly) BOOL hasOffset;
 @property(nonatomic, assign, readonly) NSUInteger offsetValue;
+@property(nonatomic, copy, readonly) NSDictionary<NSString *, NSNumber *> *relationLoadStrategies;
+@property(nonatomic, assign, readonly, getter=isStrictLoadingEnabled) BOOL strictLoadingEnabled;
 
 + (nullable instancetype)queryWithModelClass:(Class)modelClass;
 - (instancetype)init NS_UNAVAILABLE;
@@ -49,6 +61,14 @@ typedef void (^ALNORMQueryScope)(id query);
 - (ALNORMQuery *)limit:(NSUInteger)limit;
 - (ALNORMQuery *)offset:(NSUInteger)offset;
 - (ALNORMQuery *)applyScope:(nullable ALNORMQueryScope)scope;
+- (ALNORMQuery *)withRelationNamed:(NSString *)relationName
+                      loadStrategy:(ALNORMRelationLoadStrategy)loadStrategy;
+- (ALNORMQuery *)withJoinedRelationNamed:(NSString *)relationName;
+- (ALNORMQuery *)withSelectInRelationNamed:(NSString *)relationName;
+- (ALNORMQuery *)withNoLoadRelationNamed:(NSString *)relationName;
+- (ALNORMQuery *)withRaiseOnAccessRelationNamed:(NSString *)relationName;
+- (ALNORMQuery *)strictLoading:(BOOL)enabled;
+- (ALNORMRelationLoadStrategy)loadStrategyForRelationNamed:(NSString *)relationName;
 - (nullable ALNSQLBuilder *)selectBuilder:(NSError *_Nullable *_Nullable)error;
 
 @end

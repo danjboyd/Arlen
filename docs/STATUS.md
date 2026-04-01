@@ -5,7 +5,7 @@ Last updated: 2026-04-01
 ## Leaving Off (2026-04-01)
 
 - Phase 23 remains complete as documented below.
-- Phase `26A-26E` is now complete:
+- Phase `26A-26I` is now complete:
   - added the optional `ArlenORM` umbrella under `src/ArlenORM/ArlenORM.h`
     on top of `ArlenData`
   - delivered descriptor/reflection/codegen contracts through
@@ -16,12 +16,20 @@ Last updated: 2026-04-01
     `ALNORMRepository`
   - delivered first-class relation metadata for `belongs_to`, `has_one`,
     `has_many`, and many-to-many relations with explicit pivot metadata
+  - added explicit relation load plans with joined/select-in/no-load/
+    raise-on-access strategies plus strict-loading diagnostics and
+    query-budget tracing
+  - added changesets, value converters, required-field validation, and
+    bounded nested to-one mutation support
+  - added explicit unit-of-work semantics through `ALNORMContext`,
+    request-scoped identity tracking, reload/detach/reset behavior, and
+    transaction/savepoint coordination on top of the adapter seam
+  - added save/delete/upsert helpers with opt-in timestamp automation,
+    optimistic locking, and explicit belongs-to graph-save behavior
   - kept reflected read-only relations read-only by default in generated code
     and runtime mutation helpers
-- Phase `26F-26O` remains planned next:
-  - explicit load plans and strict loading
-  - changesets, unit-of-work, write graph semantics, and migration-history
-    hardening
+- Phase `26J-26O` remains planned next:
+  - migration-history and schema-evolution hardening
   - backend parity expansion, confidence lanes, docs closeout, and Dataverse
     ORM tail work
 - Verification completed at this checkpoint:
@@ -31,6 +39,21 @@ Last updated: 2026-04-01
 
 ## Completed Today (2026-04-01)
 
+- Completed Phase `26F-26I`:
+  - added joined/select-in/no-load/raise-on-access relation strategies and
+    query-level/context-level strict-loading semantics
+  - added query-budget accounting and relation-load tracing inside
+    `ALNORMContext`
+  - added `ALNORMChangeset`, `ALNORMValueConverter`, and
+    `ALNORMWriteOptions` runtime contracts for converter-backed validation and
+    writes
+  - added identity-map tracking, explicit reload/detach/reset semantics, and
+    transaction/savepoint coordination against the existing adapter contracts
+  - added insert/update/delete/upsert helpers with optimistic locking,
+    timestamp automation, partial updates, and explicit belongs-to graph saves
+  - expanded `tests/unit/ORMRuntimeTests.m` into a focused `26F-26I`
+    regression matrix covering strict loading, eager loading strategies,
+    changesets/converters, identity semantics, transactions, and writes
 - Completed Phase `26A-26E`:
   - added the optional `ArlenORM` public surface plus ORM foundation classes
     under `src/Arlen/ORM/`

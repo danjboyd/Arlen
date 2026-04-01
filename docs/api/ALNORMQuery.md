@@ -19,6 +19,8 @@ Optional ORM APIs for reflected models, repositories, relations, and SQL-first c
 | `limitValue` | `NSUInteger` | `nonatomic, assign, readonly` | Public `limitValue` property available on `ALNORMQuery`. |
 | `hasOffset` | `BOOL` | `nonatomic, assign, readonly` | Public `hasOffset` property available on `ALNORMQuery`. |
 | `offsetValue` | `NSUInteger` | `nonatomic, assign, readonly` | Public `offsetValue` property available on `ALNORMQuery`. |
+| `relationLoadStrategies` | `NSDictionary<NSString *, NSNumber *> *` | `nonatomic, copy, readonly` | Public `relationLoadStrategies` property available on `ALNORMQuery`. |
+| `strictLoadingEnabled` | `BOOL` | `nonatomic, assign, readonly, getter=isStrictLoadingEnabled` | Public `strictLoadingEnabled` property available on `ALNORMQuery`. |
 
 ## Methods
 
@@ -41,4 +43,11 @@ Optional ORM APIs for reflected models, repositories, relations, and SQL-first c
 | `limit:` | `- (ALNORMQuery *)limit:(NSUInteger)limit;` | Perform `limit` for `ALNORMQuery`. | Capture the returned value and propagate errors/validation as needed. |
 | `offset:` | `- (ALNORMQuery *)offset:(NSUInteger)offset;` | Perform `offset` for `ALNORMQuery`. | Capture the returned value and propagate errors/validation as needed. |
 | `applyScope:` | `- (ALNORMQuery *)applyScope:(nullable ALNORMQueryScope)scope;` | Apply this helper to context and update response state. | Capture the returned value and propagate errors/validation as needed. |
+| `withRelationNamed:loadStrategy:` | `- (ALNORMQuery *)withRelationNamed:(NSString *)relationName loadStrategy:(ALNORMRelationLoadStrategy)loadStrategy;` | Run a scoped callback with managed lifecycle semantics. | Capture the returned value and propagate errors/validation as needed. |
+| `withJoinedRelationNamed:` | `- (ALNORMQuery *)withJoinedRelationNamed:(NSString *)relationName;` | Run a scoped callback with managed lifecycle semantics. | Capture the returned value and propagate errors/validation as needed. |
+| `withSelectInRelationNamed:` | `- (ALNORMQuery *)withSelectInRelationNamed:(NSString *)relationName;` | Run a scoped callback with managed lifecycle semantics. | Capture the returned value and propagate errors/validation as needed. |
+| `withNoLoadRelationNamed:` | `- (ALNORMQuery *)withNoLoadRelationNamed:(NSString *)relationName;` | Run a scoped callback with managed lifecycle semantics. | Capture the returned value and propagate errors/validation as needed. |
+| `withRaiseOnAccessRelationNamed:` | `- (ALNORMQuery *)withRaiseOnAccessRelationNamed:(NSString *)relationName;` | Run a scoped callback with managed lifecycle semantics. | Capture the returned value and propagate errors/validation as needed. |
+| `strictLoading:` | `- (ALNORMQuery *)strictLoading:(BOOL)enabled;` | Perform `strict loading` for `ALNORMQuery`. | Capture the returned value and propagate errors/validation as needed. |
+| `loadStrategyForRelationNamed:` | `- (ALNORMRelationLoadStrategy)loadStrategyForRelationNamed:(NSString *)relationName;` | Load and normalize configuration data. | Capture the returned value and propagate errors/validation as needed. |
 | `selectBuilder:` | `- (nullable ALNSQLBuilder *)selectBuilder:(NSError *_Nullable *_Nullable)error;` | Perform `select builder` for `ALNORMQuery`. | Capture the returned value and propagate errors/validation as needed. |

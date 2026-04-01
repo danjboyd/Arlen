@@ -34,6 +34,22 @@ static BOOL ALNORMQueryIdentifierIsSafe(NSString *value) {
   return YES;
 }
 
+NSString *ALNORMRelationLoadStrategyName(ALNORMRelationLoadStrategy strategy) {
+  switch (strategy) {
+    case ALNORMRelationLoadStrategyJoined:
+      return @"joined";
+    case ALNORMRelationLoadStrategySelectIn:
+      return @"select_in";
+    case ALNORMRelationLoadStrategyNoLoad:
+      return @"no_load";
+    case ALNORMRelationLoadStrategyRaiseOnAccess:
+      return @"raise_on_access";
+    case ALNORMRelationLoadStrategyDefault:
+    default:
+      return @"default";
+  }
+}
+
 @interface ALNORMQuery ()
 
 @property(nonatomic, assign, readwrite) Class modelClass;
@@ -46,6 +62,8 @@ static BOOL ALNORMQueryIdentifierIsSafe(NSString *value) {
 @property(nonatomic, assign, readwrite) NSUInteger limitValue;
 @property(nonatomic, assign, readwrite) BOOL hasOffset;
 @property(nonatomic, assign, readwrite) NSUInteger offsetValue;
+@property(nonatomic, copy, readwrite) NSDictionary<NSString *, NSNumber *> *relationLoadStrategies;
+@property(nonatomic, assign, readwrite, getter=isStrictLoadingEnabled) BOOL strictLoadingEnabled;
 
 @end
 
@@ -79,6 +97,8 @@ static BOOL ALNORMQueryIdentifierIsSafe(NSString *value) {
     _joins = @[];
     _predicates = @[];
     _orderings = @[];
+    _relationLoadStrategies = @{};
+    _strictLoadingEnabled = NO;
     _hasLimit = NO;
     _limitValue = 0;
     _hasOffset = NO;
@@ -247,6 +267,44 @@ static BOOL ALNORMQueryIdentifierIsSafe(NSString *value) {
     scope(self);
   }
   return self;
+}
+
+- (ALNORMQuery *)withRelationNamed:(NSString *)relationName
+                      loadStrategy:(ALNORMRelationLoadStrategy)loadStrategy {
+  NSString *candidate = ALNORMQueryTrimmedString(relationName);
+  if ([candidate length] == 0) {
+    return self;
+  }
+  NSMutableDictionary *updated = [NSMutableDictionary dictionaryWithDictionary:self.relationLoadStrategies ?: @{}];
+  updated[candidate] = @(loadStrategy);
+  self.relationLoadStrategies = updated;
+  return self;
+}
+
+- (ALNORMQuery *)withJoinedRelationNamed:(NSString *)relationName {
+  return [self withRelationNamed:relationName loadStrategy:ALNORMRelationLoadStrategyJoined];
+}
+
+- (ALNORMQuery *)withSelectInRelationNamed:(NSString *)relationName {
+  return [self withRelationNamed:relationName loadStrategy:ALNORMRelationLoadStrategySelectIn];
+}
+
+- (ALNORMQuery *)withNoLoadRelationNamed:(NSString *)relationName {
+  return [self withRelationNamed:relationName loadStrategy:ALNORMRelationLoadStrategyNoLoad];
+}
+
+- (ALNORMQuery *)withRaiseOnAccessRelationNamed:(NSString *)relationName {
+  return [self withRelationNamed:relationName loadStrategy:ALNORMRelationLoadStrategyRaiseOnAccess];
+}
+
+- (ALNORMQuery *)strictLoading:(BOOL)enabled {
+  self.strictLoadingEnabled = enabled;
+  return self;
+}
+
+- (ALNORMRelationLoadStrategy)loadStrategyForRelationNamed:(NSString *)relationName {
+  NSNumber *value = self.relationLoadStrategies[ALNORMQueryTrimmedString(relationName)];
+  return (value != nil) ? (ALNORMRelationLoadStrategy)[value integerValue] : ALNORMRelationLoadStrategyDefault;
 }
 
 - (ALNSQLBuilder *)selectBuilder:(NSError **)error {

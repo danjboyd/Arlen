@@ -4,7 +4,9 @@
 #import <Foundation/Foundation.h>
 
 #import "../Data/ALNDatabaseAdapter.h"
+#import "ALNORMChangeset.h"
 #import "ALNORMQuery.h"
+#import "ALNORMWriteOptions.h"
 
 NS_ASSUME_NONNULL_BEGIN
 
@@ -38,6 +40,21 @@ NS_ASSUME_NONNULL_BEGIN
                           error:(NSError *_Nullable *_Nullable)error;
 - (nullable id)findByPrimaryKeyValues:(NSDictionary<NSString *, id> *)primaryKeyValues
                                 error:(NSError *_Nullable *_Nullable)error;
+- (BOOL)saveModel:(ALNORMModel *)model error:(NSError *_Nullable *_Nullable)error;
+- (BOOL)saveModel:(ALNORMModel *)model
+          options:(nullable ALNORMWriteOptions *)options
+            error:(NSError *_Nullable *_Nullable)error;
+- (BOOL)saveModel:(ALNORMModel *)model
+        changeset:(nullable ALNORMChangeset *)changeset
+          options:(nullable ALNORMWriteOptions *)options
+            error:(NSError *_Nullable *_Nullable)error;
+- (BOOL)deleteModel:(ALNORMModel *)model error:(NSError *_Nullable *_Nullable)error;
+- (BOOL)deleteModel:(ALNORMModel *)model
+            options:(nullable ALNORMWriteOptions *)options
+              error:(NSError *_Nullable *_Nullable)error;
+- (BOOL)upsertModel:(ALNORMModel *)model
+             options:(nullable ALNORMWriteOptions *)options
+               error:(NSError *_Nullable *_Nullable)error;
 - (nullable NSDictionary<NSString *, id> *)compiledPlanForQuery:(nullable ALNORMQuery *)query
                                                           error:(NSError *_Nullable *_Nullable)error;
 
