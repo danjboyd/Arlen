@@ -23,6 +23,17 @@ Last updated: 2026-04-01
   - strengthened `phase25-confidence` with websocket push and negative-path
     backpressure artifacts, so the live closeout now fails closed on both
     success and failure-path regressions
+- Planned Phase 27 as the next roadmap phase:
+  - added `docs/PHASE27_ROADMAP.md`
+  - scoped `27A-27L` around safe result shaping, metadata contract expansion,
+    a first-party PostgreSQL FTS baseline, first-party Meilisearch and
+    OpenSearch/Elasticsearch engines, richer query semantics, auth/tenant
+    visibility rules, admin/ops explainability, and search-specific
+    confidence lanes
+  - recorded the key boundary for the phase: Arlen should be best-in-class at
+    framework-owned search contracts, runtime integration, and default
+    no-extra-service search, while still relying on dedicated search engines
+    where that produces the strongest retrieval behavior
 - Verification completed at this checkpoint:
   - `source tools/source_gnustep_env.sh && make build-tests`
   - `source tools/source_gnustep_env.sh && make phase25-live-tests`
