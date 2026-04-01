@@ -107,7 +107,7 @@ PHASE20_MSSQL_LIVE_TEST_SRCS := tests/phase20/Phase20MSSQLLiveFocusedTests.m
 PHASE20_ROUTING_TEST_SRCS := tests/phase20/Phase20RoutingPoolFocusedTests.m
 PHASE21_TEMPLATE_TEST_SRCS := tests/unit/TemplateParserTests.m tests/unit/TemplateCodegenTests.m tests/unit/TemplateSecurityTests.m tests/unit/TemplateRegressionTests.m
 PHASE23_DATAVERSE_TEST_SRCS := tests/unit/DataverseRuntimeTests.m tests/unit/DataverseQueryTests.m tests/unit/DataverseReadTests.m tests/unit/DataverseWriteTests.m tests/unit/DataverseMetadataTests.m tests/unit/DataverseRegressionTests.m tests/unit/DataverseArtifactTests.m
-PHASE25_LIVE_TEST_SRCS := tests/unit/LiveProtocolTests.m tests/unit/LiveControllerTests.m tests/unit/LiveRuntimeTests.m
+PHASE25_LIVE_TEST_SRCS := tests/unit/LiveProtocolTests.m tests/unit/LiveControllerTests.m tests/unit/LiveRuntimeTests.m tests/unit/LiveRuntimeDOMTests.m tests/unit/LiveRuntimeInteractionTests.m
 
 FRAMEWORK_MODULE_INCLUDE_FLAGS := $(addprefix -I,$(shell find modules -mindepth 2 -maxdepth 2 -type d -name 'Sources' 2>/dev/null | sort))
 INCLUDE_FLAGS := -Isrc -Isrc/Arlen -Isrc/Arlen/Core -Isrc/Arlen/Data -Isrc/Arlen/HTTP -Isrc/Arlen/MVC/Controller -Isrc/Arlen/MVC/Middleware -Isrc/Arlen/MVC/Routing -Isrc/Arlen/MVC/Template -Isrc/Arlen/MVC/View -Isrc/Arlen/Support -Isrc/Arlen/Support/third_party/argon2/include -Isrc/Arlen/Support/third_party/argon2/src -Isrc/MojoObjc -Isrc/MojoObjc/Core -Isrc/MojoObjc/Data -Isrc/MojoObjc/HTTP -Isrc/MojoObjc/MVC/Controller -Isrc/MojoObjc/MVC/Middleware -Isrc/MojoObjc/MVC/Routing -Isrc/MojoObjc/MVC/Template -Isrc/MojoObjc/MVC/View -Isrc/MojoObjc/Support $(FRAMEWORK_MODULE_INCLUDE_FLAGS) -I/usr/include/postgresql

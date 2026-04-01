@@ -34,6 +34,12 @@ Phase 23 Dataverse-focused lanes are also available:
 - `make phase23-focused`
 - `make phase23-confidence`
 
+Phase 25 live-UI-focused lanes are also available:
+
+- `make phase25-live-tests`
+- `make phase25-focused`
+- `make phase25-confidence`
+
 ## 2. Bug Report To Regression
 
 1. Reproduce the failure in the narrowest possible form.
@@ -67,11 +73,25 @@ Phase 23 Dataverse-focused lanes are also available:
      `tests/fixtures/phase23/dataverse_query_cases.json`,
      `tests/fixtures/phase23/dataverse_contract_snapshot.json`,
      `tests/fixtures/phase23/dataverse_perl_parity_matrix.json`
+   - live protocol/controller regressions:
+     `tests/unit/LiveProtocolTests.m`,
+     `tests/unit/LiveControllerTests.m`
+   - built-in runtime route and override behavior:
+     `tests/unit/LiveRuntimeTests.m`
+   - executable runtime DOM semantics:
+     `tests/unit/LiveRuntimeDOMTests.m`,
+     `tests/shared/ALNLiveTestSupport.{h,m}`,
+     `tests/shared/live_runtime_harness.js`
+   - live form/region/upload interactions:
+     `tests/unit/LiveRuntimeInteractionTests.m`
+   - tech-demo live endpoint integration coverage:
+     `tests/integration/HTTPIntegrationTests.m`
 3. Add or extend a checked-in fixture so the failure is replayable.
 4. Run the matching focused lane until it passes.
 5. Promote the change through `make test-unit`, broader integration coverage
    when applicable, and the matching confidence lane such as
-   `make phase21-confidence` or `make phase23-confidence`.
+   `make phase21-confidence`, `make phase23-confidence`, or
+   `make phase25-confidence`.
 
 ## 3. Template Regression Intake
 
@@ -150,3 +170,14 @@ make phase23-confidence
 Artifacts are written to `build/release_confidence/phase23/`.
 The Phase 23 confidence pack now includes the checked-in Perl parity accounting
 snapshot, optional live smoke output, and optional live codegen output.
+
+Phase 25 live UI closeout uses:
+
+```bash
+make phase25-live-tests
+make phase25-confidence
+```
+
+The Phase 25 suite now includes a Node-backed executable runtime harness for
+`/arlen/live.js` semantics in addition to the existing controller/protocol
+coverage and tech-demo smoke artifacts.

@@ -284,3 +284,9 @@ make phase25-confidence
 
 `phase25-confidence` builds the live suite, boots the tech demo server, and
 records a smoke artifact set under `build/release_confidence/phase25/`.
+
+`phase25-live-tests` now includes executable runtime semantics coverage through
+`tests/shared/ALNLiveTestSupport.{h,m}` and
+`tests/shared/live_runtime_harness.js`, which run `/arlen/live.js` against a
+small deterministic DOM/network harness for DOM patching, forms, uploads, and
+region behavior.

@@ -3397,6 +3397,32 @@
   XCTAssertTrue([body containsString:@"ORD-410"]);
 }
 
+- (void)testTechDemoLivePulseEndpointReturnsHTMLFragment {
+  NSString *body = [self requestPath:@"/tech-demo/live/pulse"
+                        serverBinary:@"./build/tech-demo-server"
+                           envPrefix:@"ARLEN_APP_ROOT=examples/tech_demo"];
+  XCTAssertTrue([body containsString:@"Polling Fragment"]);
+  XCTAssertTrue([body containsString:@"runtime steady"]);
+  XCTAssertTrue([body containsString:@"Server pulse at"]);
+}
+
+- (void)testTechDemoLiveUploadEndpointReturnsLivePayload {
+  int curlCode = 0;
+  int serverCode = 0;
+  NSString *body = [self requestWithServerEnv:@"ARLEN_APP_ROOT=examples/tech_demo"
+                                  serverBinary:@"./build/tech-demo-server"
+                                     curlBody:@"curl -fsS -X POST -H 'Content-Type: multipart/form-data; boundary=demo-boundary' -H 'X-Arlen-Live: true' -H 'X-Arlen-Live-Target: #upload-summary' -H 'X-Arlen-Live-Swap: update' --data-binary $'--demo-boundary\\r\\nContent-Disposition: form-data; name=\"artifact\"; filename=\"report.txt\"\\r\\nContent-Type: text/plain\\r\\n\\r\\nreport-body\\r\\n--demo-boundary--\\r\\n' 'http://127.0.0.1:%d/tech-demo/live/upload'"
+                                     curlCode:&curlCode
+                                    serverCode:&serverCode];
+  XCTAssertEqual(0, curlCode);
+  XCTAssertEqual(0, serverCode);
+  XCTAssertTrue([body containsString:@"\"version\":\"arlen-live-v1\""]);
+  XCTAssertTrue([body containsString:@"\"op\":\"update\""]);
+  XCTAssertTrue([body containsString:@"\"target\":\"#upload-summary\""]);
+  XCTAssertTrue([body containsString:@"Upload Summary"]);
+  XCTAssertTrue([body containsString:@"multipart/form-data; boundary=demo-boundary"]);
+}
+
 - (void)testTechDemoUserRouteShowsParams {
   NSString *body = [self requestPath:@"/tech-demo/users/peggy?flag=admin"
                         serverBinary:@"./build/tech-demo-server"

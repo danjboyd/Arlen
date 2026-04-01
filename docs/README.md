@@ -80,7 +80,7 @@ toolchain env directly.
 - [Phase 21 Roadmap](PHASE21_ROADMAP.md): completed public-release test robustness pass.
 - [Phase 22 Roadmap](PHASE22_ROADMAP.md): completed documentation cleanup pass for newcomer-first onboarding and docs quality closeout.
 - [Phase 23 Roadmap](PHASE23_ROADMAP.md): completed Dataverse integration phase.
-- [Phase 25 Roadmap](PHASE25_ROADMAP.md): shipped live UI baseline plus planned `25H-25L` testing-hardening subphases for runtime semantics, live interactions, and adversarial coverage.
+- [Phase 25 Roadmap](PHASE25_ROADMAP.md): shipped live UI baseline plus delivered `25H-25J` testing hardening for runtime semantics and live interactions, with `25K-25L` still planned.
 - [Combined Roadmap Index (Historical Aggregate)](PHASE2_PHASE3_ROADMAP.md)
 - [Phase 1 Spec](PHASE1_SPEC.md)
 - [Arlen CLI Spec](ARLEN_CLI_SPEC.md)

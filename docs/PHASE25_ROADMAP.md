@@ -1,6 +1,6 @@
 # Arlen Phase 25 Roadmap
 
-Status: Baseline complete (`25A-25G` delivered on 2026-04-01); follow-on testing hardening planned as `25H-25L`
+Status: Baseline complete (`25A-25G` delivered on 2026-04-01); live testing hardening through `25J` delivered on 2026-04-01; `25K-25L` remain planned
 Last updated: 2026-04-01
 
 Related docs:
@@ -13,9 +13,10 @@ Related docs:
 
 ## 0. Progress Checkpoint (2026-04-01)
 
-Phase 25's shipped live UI baseline is complete. The remaining work in this
-roadmap is follow-on testing hardening inspired by the current LiveView,
-Livewire, Symfony UX LiveComponent, and Turbo testing surfaces.
+Phase 25's shipped live UI baseline is complete, and the first tranche of
+follow-on testing hardening is now delivered. The remaining work in this
+roadmap is the realtime/recovery/adversarial closeout inspired by the current
+LiveView, Livewire, Symfony UX LiveComponent, and Turbo testing surfaces.
 
 Delivered in-tree:
 
@@ -33,12 +34,15 @@ Delivered in-tree:
   behavior, and broader negative-path coverage
 - `25G`: `/tech-demo/live`, repo-native `phase25-confidence`, and docs/API
   closeout
+- `25H`: shared `ALNLiveTestSupport`, the executable Node-backed runtime
+  harness, and split runtime-semantic test suites
+- `25I`: DOM operation semantics, keyed collection assertions, navigation
+  behavior, dispatch-event assertions, and negative-path runtime checks
+- `25J`: live form, upload/XHR progress, region defer/poll/lazy interaction
+  coverage, plus targeted tech-demo live endpoint integration tests
 
 Planned next:
 
-- `25H`: shared live test support and runtime execution harness
-- `25I`: DOM operation semantics and navigation/dispatch assertions
-- `25J`: live form, region, poll/lazy/defer, and upload interaction coverage
 - `25K`: push stream, reconnect, auth-expiry, and backpressure coverage
 - `25L`: adversarial protocol/runtime regressions and artifact closeout
 
@@ -147,7 +151,7 @@ Delivered:
 - `phase25-confidence` artifact lane
 - roadmap, status, README, and live guide closeout
 
-## 4.8 Phase 25H: Live Test Support + Runtime Harness
+## 4.8 Phase 25H: Live Test Support + Runtime Harness (Delivered 2026-04-01)
 
 Goal:
 
@@ -156,7 +160,7 @@ Goal:
   `Livewire::test()`, Symfony's `InteractsWithLiveComponents`, and Turbo's
   stream assertion helpers
 
-Planned deliverables:
+Delivered:
 
 - `tests/shared/ALNLiveTestSupport.{h,m}` for payload decoding, DOM assertion
   helpers, and live request fixture builders
@@ -174,7 +178,7 @@ Why this exists:
   asset serving, but most runtime behavior is still covered by string
   presence/smoke checks rather than executable interaction assertions
 
-## 4.9 Phase 25I: DOM Patch Semantics + Navigation/Event Assertions
+## 4.9 Phase 25I: DOM Patch Semantics + Navigation/Event Assertions (Delivered 2026-04-01)
 
 Goal:
 
@@ -182,7 +186,7 @@ Goal:
   Phoenix, Symfony, and Turbo use for live redirects, events, and partial-page
   updates
 
-Planned deliverables:
+Delivered:
 
 - executable assertions for `replace`, `update`, `append`, `prepend`, and
   `remove`
@@ -194,14 +198,14 @@ Planned deliverables:
   propagation
 - negative-path tests for unknown operations and invalid selectors
 
-## 4.10 Phase 25J: Forms, Regions, Poll/Lazy/Defer, and Upload Interaction Coverage
+## 4.10 Phase 25J: Forms, Regions, Poll/Lazy/Defer, and Upload Interaction Coverage (Delivered 2026-04-01)
 
 Goal:
 
 - close the largest current test gap versus LiveView/Livewire/Symfony by
   exercising actual live interaction flows instead of only payload generation
 
-Planned deliverables:
+Delivered:
 
 - GET and POST live form tests covering query/body serialization, submit-button
   preservation, busy-state transitions, and HTML fallback behavior
@@ -212,8 +216,8 @@ Planned deliverables:
   IntersectionObserver fallback
 - upload tests covering XHR path selection, progress attribute updates,
   `arlen:live:upload-progress`, and upload failure behavior
-- targeted integration tests for the tech demo endpoints that currently sit
-  behind `phase25-confidence` smoke coverage only
+- targeted integration tests for the tech demo pulse/upload live endpoints
+  that previously sat behind `phase25-confidence` smoke coverage only
 
 ## 4.11 Phase 25K: Stream Lifecycle, Reconnect, Auth-Expiry, and Backpressure
 
@@ -268,6 +272,8 @@ bash tools/ci/run_docs_quality.sh
 ```
 
 `phase25-live-tests` is the focused XCTest bundle for the live protocol,
-controller helpers, and built-in runtime route. `phase25-confidence` boots the
+controller helpers, built-in runtime route, executable runtime DOM semantics,
+and live interaction coverage through `tests/shared/ALNLiveTestSupport.{h,m}`
+plus `tests/shared/live_runtime_harness.js`. `phase25-confidence` boots the
 tech demo server and records smoke artifacts for the shipped live page under
 `build/release_confidence/phase25/`.

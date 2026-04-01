@@ -193,6 +193,10 @@
   XCTAssertTrue([script containsString:@"arlen:live:backpressure"]);
   XCTAssertTrue([script containsString:@"arlen:live:auth-expired"]);
   XCTAssertTrue([script containsString:@"application/vnd.arlen.live+json"]);
+  XCTAssertTrue([script containsString:@"__testing"]);
+  XCTAssertTrue([script containsString:@"submitLiveForm"]);
+  XCTAssertTrue([script containsString:@"followLiveLink"]);
+  XCTAssertTrue([script containsString:@"fetchLiveRegion"]);
 }
 
 @end
