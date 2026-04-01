@@ -53,7 +53,10 @@ toolchain env directly.
 - [Ecosystem Services](ECOSYSTEM_SERVICES.md): jobs/cache/i18n/mail/attachment adapter contracts.
 - [Dataverse Integration](DATAVERSE.md): Dataverse Web API client, config shape, OData query usage, and typed codegen workflow.
 - [ArlenData Reuse Guide](ARLEN_DATA.md): standalone data-layer packaging and PostgreSQL/MSSQL/Dataverse usage.
-- [ArlenORM Guide](ARLEN_ORM.md): optional SQL ORM foundation layered on ArlenData.
+- [ArlenORM Guide](ARLEN_ORM.md): optional SQL and Dataverse ORM layers on ArlenData.
+- [Arlen ORM Migration Contracts](ARLEN_ORM_MIGRATIONS.md): descriptor snapshots and schema/codegen drift checks.
+- [Arlen ORM Backend Matrix](ARLEN_ORM_BACKEND_MATRIX.md): PostgreSQL, MSSQL, and Dataverse capability boundaries.
+- [Arlen ORM Scorecard](ARLEN_ORM_SCORECARD.md): the narrow best-in-class claim Phase 26 can defend.
 
 ## Operations and Deployment
 
@@ -80,7 +83,7 @@ toolchain env directly.
 - [Phase 21 Roadmap](PHASE21_ROADMAP.md): completed public-release test robustness pass.
 - [Phase 22 Roadmap](PHASE22_ROADMAP.md): completed documentation cleanup pass for newcomer-first onboarding and docs quality closeout.
 - [Phase 23 Roadmap](PHASE23_ROADMAP.md): completed Dataverse integration phase.
-- [Phase 26 Roadmap](PHASE26_ROADMAP.md): planned optional ORM phase plus Dataverse ORM tail work.
+- [Phase 26 Roadmap](PHASE26_ROADMAP.md): completed optional ORM phase plus Dataverse ORM tail work.
 - [Combined Roadmap Index (Historical Aggregate)](PHASE2_PHASE3_ROADMAP.md)
 - [Phase 1 Spec](PHASE1_SPEC.md)
 - [Arlen CLI Spec](ARLEN_CLI_SPEC.md)
@@ -106,3 +109,4 @@ toolchain env directly.
 - [GSWeb Migration Sample](../examples/gsweb_migration/README.md)
 - [ArlenData Standalone Example](../examples/arlen_data/README.md)
 - [Dataverse Reference](../examples/dataverse_reference/README.md)
+- [Arlen ORM Reference](../examples/arlen_orm_reference/README.md)

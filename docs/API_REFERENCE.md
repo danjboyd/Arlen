@@ -9,10 +9,10 @@ python3 tools/docs/generate_api_reference.py
 ```
 
 - Generated from source headers and metadata (deterministic output)
-- Public headers: `69`
-- Symbols: `120`
-- Public methods: `853`
-- Public properties: `335`
+- Public headers: `80`
+- Symbols: `132`
+- Public methods: `928`
+- Public properties: `402`
 
 ## API Surface Boundary
 
@@ -117,9 +117,20 @@ python3 tools/docs/generate_api_reference.py
 
 ### ORM
 
+- [ALNORMAdminResource](api/ALNORMAdminResource.md): Optional ORM APIs for reflected models, repositories, relations, and SQL-first code generation.
 - [ALNORMChangeset](api/ALNORMChangeset.md): Optional ORM APIs for reflected models, repositories, relations, and SQL-first code generation.
 - [ALNORMCodegen](api/ALNORMCodegen.md): Optional ORM APIs for reflected models, repositories, relations, and SQL-first code generation.
 - [ALNORMContext](api/ALNORMContext.md): Optional ORM APIs for reflected models, repositories, relations, and SQL-first code generation.
+- [ALNORMDataverseChangeset](api/ALNORMDataverseChangeset.md): Optional ORM APIs for reflected models, repositories, relations, and SQL-first code generation.
+- [ALNORMDataverseCodegen](api/ALNORMDataverseCodegen.md): Optional ORM APIs for reflected models, repositories, relations, and SQL-first code generation.
+- [ALNORMDataverseContext](api/ALNORMDataverseContext.md): Optional ORM APIs for reflected models, repositories, relations, and SQL-first code generation.
+- [ALNORMDataverseFieldDescriptor](api/ALNORMDataverseFieldDescriptor.md): Optional ORM APIs for reflected models, repositories, relations, and SQL-first code generation.
+- [ALNORMDataverseModel](api/ALNORMDataverseModel.md): Optional ORM APIs for reflected models, repositories, relations, and SQL-first code generation.
+- [ALNORMDataverseModelClass](api/ALNORMDataverseModelClass.md): Protocol contract exported as part of the `ALNORMDataverseModelClass` API surface.
+- [ALNORMDataverseModelDescriptor](api/ALNORMDataverseModelDescriptor.md): Optional ORM APIs for reflected models, repositories, relations, and SQL-first code generation.
+- [ALNORMDataverseRelationDescriptor](api/ALNORMDataverseRelationDescriptor.md): Optional ORM APIs for reflected models, repositories, relations, and SQL-first code generation.
+- [ALNORMDataverseRepository](api/ALNORMDataverseRepository.md): Optional ORM APIs for reflected models, repositories, relations, and SQL-first code generation.
+- [ALNORMDescriptorSnapshot](api/ALNORMDescriptorSnapshot.md): Optional ORM APIs for reflected models, repositories, relations, and SQL-first code generation.
 - [ALNORMFieldDescriptor](api/ALNORMFieldDescriptor.md): Optional ORM APIs for reflected models, repositories, relations, and SQL-first code generation.
 - [ALNORMModel](api/ALNORMModel.md): Optional ORM APIs for reflected models, repositories, relations, and SQL-first code generation.
 - [ALNORMModelClass](api/ALNORMModelClass.md): Protocol contract exported as part of the `ALNORMModelClass` API surface.
@@ -127,6 +138,7 @@ python3 tools/docs/generate_api_reference.py
 - [ALNORMQuery](api/ALNORMQuery.md): Optional ORM APIs for reflected models, repositories, relations, and SQL-first code generation.
 - [ALNORMRelationDescriptor](api/ALNORMRelationDescriptor.md): Optional ORM APIs for reflected models, repositories, relations, and SQL-first code generation.
 - [ALNORMRepository](api/ALNORMRepository.md): Optional ORM APIs for reflected models, repositories, relations, and SQL-first code generation.
+- [ALNORMSchemaDrift](api/ALNORMSchemaDrift.md): Optional ORM APIs for reflected models, repositories, relations, and SQL-first code generation.
 - [ALNORMValueConverter](api/ALNORMValueConverter.md): Optional ORM APIs for reflected models, repositories, relations, and SQL-first code generation.
 - [ALNORMWriteOptions](api/ALNORMWriteOptions.md): Optional ORM APIs for reflected models, repositories, relations, and SQL-first code generation.
 
@@ -217,9 +229,19 @@ python3 tools/docs/generate_api_reference.py
 - `src/Arlen/MVC/Template/ALNEOCRuntime.h`
 - `src/Arlen/MVC/Template/ALNEOCTranspiler.h`
 - `src/Arlen/MVC/View/ALNView.h`
+- `src/Arlen/ORM/ALNORMAdminResource.h`
 - `src/Arlen/ORM/ALNORMChangeset.h`
 - `src/Arlen/ORM/ALNORMCodegen.h`
 - `src/Arlen/ORM/ALNORMContext.h`
+- `src/Arlen/ORM/ALNORMDataverseChangeset.h`
+- `src/Arlen/ORM/ALNORMDataverseCodegen.h`
+- `src/Arlen/ORM/ALNORMDataverseContext.h`
+- `src/Arlen/ORM/ALNORMDataverseFieldDescriptor.h`
+- `src/Arlen/ORM/ALNORMDataverseModel.h`
+- `src/Arlen/ORM/ALNORMDataverseModelDescriptor.h`
+- `src/Arlen/ORM/ALNORMDataverseRelationDescriptor.h`
+- `src/Arlen/ORM/ALNORMDataverseRepository.h`
+- `src/Arlen/ORM/ALNORMDescriptorSnapshot.h`
 - `src/Arlen/ORM/ALNORMErrors.h`
 - `src/Arlen/ORM/ALNORMFieldDescriptor.h`
 - `src/Arlen/ORM/ALNORMModel.h`
@@ -227,6 +249,7 @@ python3 tools/docs/generate_api_reference.py
 - `src/Arlen/ORM/ALNORMQuery.h`
 - `src/Arlen/ORM/ALNORMRelationDescriptor.h`
 - `src/Arlen/ORM/ALNORMRepository.h`
+- `src/Arlen/ORM/ALNORMSchemaDrift.h`
 - `src/Arlen/ORM/ALNORMValueConverter.h`
 - `src/Arlen/ORM/ALNORMWriteOptions.h`
 - `src/Arlen/Support/ALNAuth.h`

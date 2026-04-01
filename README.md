@@ -103,6 +103,7 @@ one coherent toolchain.
 - [Basic App Smoke Guide](examples/basic_app/README.md): smallest app-owned smoke path.
 - [API-First Reference App](examples/api_reference/README.md): JSON/OpenAPI-heavy reference surface.
 - [Dataverse Reference](examples/dataverse_reference/README.md): app-level Dataverse config, controller helpers, and codegen flow.
+- [Arlen ORM Reference](examples/arlen_orm_reference/README.md): optional SQL and Dataverse ORM reference surface.
 - [Auth + Admin Demo](examples/auth_admin_demo/README.md): modules, auth, and admin composition.
 - [Phase 16 Modules Demo](examples/phase16_modules_demo/README.md): broader multi-module app surface.
 - [Tech Demo](examples/tech_demo/README.md): larger end-to-end example with Arlen UI/runtime features.
@@ -155,7 +156,7 @@ below is the detailed milestone ledger for the shipped surface summarized above.
 - Phase 21: complete (`21A-21G` delivered on 2026-03-27 for in-process request harnesses, shared request/pipeline assertion helpers, explicit async DB ownership rules, template-suite decomposition, raw protocol corpus replay, generated-app matrix coverage, and repo-native focused confidence lanes. See `docs/PHASE21_ROADMAP.md`).
 - Phase 22: complete (`22A-22G` delivered on 2026-03-30 for newcomer-first onboarding, docs/code parity hardening, app-author guides, module/lite-mode guidance, plugin/frontend guides, and docs quality closeout. See `docs/PHASE22_ROADMAP.md`).
 - Phase 23: complete (`23A-23G` delivered on 2026-03-31 for the runtime-inactive Dataverse Web API client, OData query builder, CRUD/batch helpers, metadata normalization, typed Dataverse codegen, app/controller Dataverse helpers, repo-native confidence lanes, and docs/example closeout. See `docs/PHASE23_ROADMAP.md`).
-- Phase 26A-26E: complete (`26A-26E` delivered on 2026-04-01 for the optional `ArlenORM` package, descriptor reflection/codegen foundation, generated SQL-model runtime, repository/query APIs, association metadata, focused ORM tests, and docs/API surface updates. See `docs/PHASE26_ROADMAP.md`).
+- Phase 26: complete (`26A-26O` delivered on 2026-04-01 for the optional `ArlenORM` package, SQL descriptor history contracts, split ORM confidence lanes, backend-capability honesty, and the Dataverse ORM bridge. See `docs/PHASE26_ROADMAP.md`).
 
 ## Requirements and Setup Details
 

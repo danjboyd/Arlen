@@ -212,6 +212,37 @@
   XCTAssertTrue([makefile containsString:@"bash ./tools/ci/run_phase23_confidence.sh"]);
 }
 
+- (void)testGNUmakefileDefinesPhase26ORMLanes {
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *makefilePath = [repoRoot stringByAppendingPathComponent:@"GNUmakefile"];
+  NSString *makefile = [self readFile:makefilePath];
+
+  XCTAssertTrue([makefile containsString:
+                              @"PHASE26_ORM_UNIT_TEST_BUNDLE := $(BUILD_DIR)/tests/"
+                               "ArlenPhase26ORMUnitTests.xctest"]);
+  XCTAssertTrue([makefile containsString:
+                              @"PHASE26_ORM_GENERATED_TEST_BUNDLE := $(BUILD_DIR)/tests/"
+                               "ArlenPhase26ORMGeneratedTests.xctest"]);
+  XCTAssertTrue([makefile containsString:
+                              @"PHASE26_ORM_INTEGRATION_TEST_BUNDLE := $(BUILD_DIR)/tests/"
+                               "ArlenPhase26ORMIntegrationTests.xctest"]);
+  XCTAssertTrue([makefile containsString:
+                              @"PHASE26_ORM_BACKEND_PARITY_TEST_BUNDLE := $(BUILD_DIR)/tests/"
+                               "ArlenPhase26ORMBackendParityTests.xctest"]);
+  XCTAssertTrue([makefile containsString:@"tests/unit/ORMMigrationTests.m"]);
+  XCTAssertTrue([makefile containsString:@"tests/unit/ORMBackendParityTests.m"]);
+  XCTAssertTrue([makefile containsString:@"tests/unit/ORMDataverseTests.m"]);
+  XCTAssertTrue([makefile containsString:@"phase26-orm-unit: $(PHASE26_ORM_UNIT_TEST_BIN)"]);
+  XCTAssertTrue([makefile containsString:@"phase26-orm-generated: $(PHASE26_ORM_GENERATED_TEST_BIN)"]);
+  XCTAssertTrue([makefile containsString:@"phase26-orm-integration: $(PHASE26_ORM_INTEGRATION_TEST_BIN)"]);
+  XCTAssertTrue([makefile containsString:@"phase26-orm-backend-parity: $(PHASE26_ORM_BACKEND_PARITY_TEST_BIN)"]);
+  XCTAssertTrue([makefile containsString:@"phase26-orm-perf: $(PHASE26_ORM_PERF_TOOL)"]);
+  XCTAssertTrue([makefile containsString:@"phase26-orm-live:"]);
+  XCTAssertTrue([makefile containsString:@"phase26-confidence:"]);
+  XCTAssertTrue([makefile containsString:@"bash ./tools/ci/run_phase26_live_smoke.sh"]);
+  XCTAssertTrue([makefile containsString:@"bash ./tools/ci/run_phase26_confidence.sh"]);
+}
+
 - (void)testGNUmakefileUsesIncrementalObjectsDepfilesAndManifestedTemplates {
   NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
   NSString *makefilePath = [repoRoot stringByAppendingPathComponent:@"GNUmakefile"];

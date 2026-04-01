@@ -5,7 +5,7 @@ Last updated: 2026-04-01
 ## Leaving Off (2026-04-01)
 
 - Phase 23 remains complete as documented below.
-- Phase `26A-26I` is now complete:
+- Phase `26A-26O` is now complete:
   - added the optional `ArlenORM` umbrella under `src/ArlenORM/ArlenORM.h`
     on top of `ArlenData`
   - delivered descriptor/reflection/codegen contracts through
@@ -28,17 +28,44 @@ Last updated: 2026-04-01
     optimistic locking, and explicit belongs-to graph-save behavior
   - kept reflected read-only relations read-only by default in generated code
     and runtime mutation helpers
-- Phase `26J-26O` remains planned next:
-  - migration-history and schema-evolution hardening
-  - backend parity expansion, confidence lanes, docs closeout, and Dataverse
-    ORM tail work
+  - added descriptor snapshot replay and schema/codegen drift diagnostics
+    through `ALNORMDescriptorSnapshot` and `ALNORMSchemaDrift`
+  - added explicit SQL-vs-Dataverse backend capability matrices plus the
+    optional `ALNORMAdminResource` bridge for admin/resource integration seams
+  - split the ORM release surface into unit, generated, integration,
+    backend-parity, perf, live, and confidence entrypoints
+  - added separate Dataverse ORM descriptors, codegen, context, model,
+    repository, and changeset contracts for lookup relations, reverse
+    collections, writes, and batch flows
+  - added the checked-in Arlen ORM reference example and the ORM migration,
+    backend-matrix, and scorecard docs
 - Verification completed at this checkpoint:
   - `source tools/source_gnustep_env.sh && make phase26-orm-tests`
+  - `source tools/source_gnustep_env.sh && make phase26-orm-unit`
+  - `source tools/source_gnustep_env.sh && make phase26-orm-generated`
+  - `source tools/source_gnustep_env.sh && make phase26-orm-integration`
+  - `source tools/source_gnustep_env.sh && make phase26-orm-backend-parity`
+  - `source tools/source_gnustep_env.sh && make phase26-orm-perf`
+  - `source tools/source_gnustep_env.sh && make phase26-confidence`
   - `source tools/source_gnustep_env.sh && make docs-api`
   - `bash tools/ci/run_docs_quality.sh`
 
 ## Completed Today (2026-04-01)
 
+- Completed Phase `26J-26O`:
+  - added `ALNORMDescriptorSnapshot` and `ALNORMSchemaDrift` for replayable
+    descriptor history and explicit schema/codegen drift diagnostics
+  - added `ALNORMAdminResource` plus public SQL-vs-Dataverse ORM capability
+    metadata to keep backend boundaries explicit
+  - split the Phase 26 confidence surface into real unit/generated/
+    integration/backend-parity test bundles plus perf/live/confidence
+    entrypoints
+  - added the Dataverse ORM bridge through `ALNORMDataverse*` descriptors,
+    codegen, context, model, repository, and changeset contracts
+  - added focused migration, backend-parity, and Dataverse ORM regression
+    suites under `tests/unit/ORM*Tests.m`
+  - added the checked-in `examples/arlen_orm_reference` demo plus new ORM
+    migration/backend-matrix/scorecard docs and release-confidence scripts
 - Completed Phase `26F-26I`:
   - added joined/select-in/no-load/raise-on-access relation strategies and
     query-level/context-level strict-loading semantics
