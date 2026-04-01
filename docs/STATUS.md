@@ -4,7 +4,8 @@ Last updated: 2026-04-01
 
 ## Leaving Off (2026-04-01)
 
-- Phase 25 is complete:
+- Phase 25 baseline is complete, with follow-on testing hardening now planned
+  as `25H-25L`:
   - shipped the fragment-first live UI surface through `ALNLive`, the built-in
     `/arlen/live.js` runtime, and the `application/vnd.arlen.live+json`
     response contract
@@ -16,6 +17,10 @@ Last updated: 2026-04-01
   - shipped `/tech-demo/live`, the repo-native `phase25-confidence` lane, and
     the Phase 25 docs closeout in `docs/LIVE_UI.md` and
     `docs/PHASE25_ROADMAP.md`
+  - next planned work is competitor-inspired live testing hardening:
+    shared live test support, executable runtime semantics coverage,
+    form/region/upload interaction tests, realtime reconnect/backpressure
+    assertions, and adversarial phase artifacts
 - Verification completed at this checkpoint:
   - `source tools/source_gnustep_env.sh && make build-tests`
   - `source tools/source_gnustep_env.sh && make phase25-live-tests`
