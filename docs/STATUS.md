@@ -70,10 +70,25 @@ Last updated: 2026-04-02
   - added fixture-backed unit coverage for descriptor input, ORM manifest
     input, CLI generation, strict OpenAPI requirements, and fail-closed
     operation-ID collisions
+- Reconciled the `OwnerConnect` Dataverse codegen report against the current
+  Arlen workspace:
+  - recorded the upstream-only status note in
+    `docs/OWNERCONNECT_REPORT_RECONCILIATION_2026-04-02.md`
+  - fixed `ALNDataverseCodegen` so polymorphic lookup attributes no longer
+    emit duplicate Objective-C selectors
+  - kept the generated contract explicit: unambiguous lookups still populate
+    `lookupNavigationMap`, while polymorphic lookups now populate the additive
+    `lookupNavigationTargetsMap` and emit navigation-property-specific helper
+    methods such as `navigationCustomeridAccount`
+  - added a focused fixture-backed regression in
+    `tests/unit/DataverseMetadataTests.m`
 - Verification status at this checkpoint:
+  - `source tools/source_gnustep_env.sh && make test-unit-filter TEST=DataverseMetadataTests`
+  - `source tools/source_gnustep_env.sh && make phase23-dataverse-tests`
   - `source tools/source_gnustep_env.sh && make phase26-orm-tests`
   - `source tools/source_gnustep_env.sh && make phase27-search-tests`
   - `source tools/source_gnustep_env.sh && make docs-api`
+  - `source tools/source_gnustep_env.sh && make docs-html`
   - `source tools/source_gnustep_env.sh && bash tools/ci/run_docs_quality.sh`
   - `source tools/source_gnustep_env.sh && make phase26-confidence`
   - `source tools/source_gnustep_env.sh && make phase27-confidence`

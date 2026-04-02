@@ -1,0 +1,115 @@
+{
+  "value": [
+    {
+      "LogicalName": "contact",
+      "SchemaName": "Contact",
+      "EntitySetName": "contacts",
+      "PrimaryIdAttribute": "contactid",
+      "PrimaryNameAttribute": "fullname",
+      "Attributes": [
+        {
+          "LogicalName": "contactid",
+          "SchemaName": "ContactId",
+          "AttributeType": "Uniqueidentifier",
+          "IsPrimaryId": true,
+          "Targets": []
+        },
+        {
+          "LogicalName": "fullname",
+          "SchemaName": "FullName",
+          "AttributeType": "String",
+          "Targets": []
+        },
+        {
+          "LogicalName": "parentcustomerid",
+          "SchemaName": "ParentCustomerId",
+          "AttributeType": "Lookup",
+          "Targets": [
+            "account",
+            "contact"
+          ]
+        }
+      ],
+      "Keys": [],
+      "ManyToOneRelationships": [
+        {
+          "SchemaName": "contact_customer_accounts",
+          "ReferencingAttribute": "parentcustomerid",
+          "ReferencingEntityNavigationPropertyName": "parentcustomerid_account",
+          "ReferencedEntity": "account",
+          "ReferencedAttribute": "accountid"
+        },
+        {
+          "SchemaName": "contact_customer_contacts",
+          "ReferencingAttribute": "parentcustomerid",
+          "ReferencingEntityNavigationPropertyName": "parentcustomerid_contact",
+          "ReferencedEntity": "contact",
+          "ReferencedAttribute": "contactid"
+        }
+      ]
+    },
+    {
+      "LogicalName": "lead",
+      "SchemaName": "Lead",
+      "EntitySetName": "leads",
+      "PrimaryIdAttribute": "leadid",
+      "PrimaryNameAttribute": "fullname",
+      "Attributes": [
+        {
+          "LogicalName": "leadid",
+          "SchemaName": "LeadId",
+          "AttributeType": "Uniqueidentifier",
+          "IsPrimaryId": true,
+          "Targets": []
+        },
+        {
+          "LogicalName": "fullname",
+          "SchemaName": "FullName",
+          "AttributeType": "String",
+          "Targets": []
+        },
+        {
+          "LogicalName": "campaignid",
+          "SchemaName": "CampaignId",
+          "AttributeType": "Lookup",
+          "Targets": [
+            "campaign"
+          ]
+        },
+        {
+          "LogicalName": "customerid",
+          "SchemaName": "CustomerId",
+          "AttributeType": "Lookup",
+          "Targets": [
+            "account",
+            "contact"
+          ]
+        }
+      ],
+      "Keys": [],
+      "ManyToOneRelationships": [
+        {
+          "SchemaName": "lead_campaigns",
+          "ReferencingAttribute": "campaignid",
+          "ReferencingEntityNavigationPropertyName": "campaignid",
+          "ReferencedEntity": "campaign",
+          "ReferencedAttribute": "campaignid"
+        },
+        {
+          "SchemaName": "lead_customer_accounts",
+          "ReferencingAttribute": "customerid",
+          "ReferencingEntityNavigationPropertyName": "customerid_account",
+          "ReferencedEntity": "account",
+          "ReferencedAttribute": "accountid"
+        },
+        {
+          "SchemaName": "lead_customer_contacts",
+          "ReferencingAttribute": "customerid",
+          "ReferencingEntityNavigationPropertyName": "customerid_contact",
+          "ReferencedEntity": "contact",
+          "ReferencedAttribute": "contactid"
+        }
+      ]
+    }
+  ]
+}

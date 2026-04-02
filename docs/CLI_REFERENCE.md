@@ -292,7 +292,10 @@ Generated artifacts:
 Notes:
 
 - This is a Dataverse Web API/OData workflow, not Microsoft Graph and not the SQL migration/schema-codegen path.
-- Generated helpers expose logical names, entity-set names, alternate keys, lookup navigation fields, and choice enums from normalized metadata.
+- Generated helpers expose logical names, entity-set names, alternate keys,
+  singular lookup navigation fields for unambiguous attributes, additive
+  `lookupNavigationTargetsMap` entries for polymorphic attributes, and choice
+  enums from normalized metadata.
 
 ### `arlen typed-sql-codegen [--input-dir <path>] [--output-dir <path>] [--manifest <path>] [--prefix <ClassPrefix>] [--force]`
 

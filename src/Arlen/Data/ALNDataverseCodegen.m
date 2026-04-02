@@ -106,6 +106,11 @@ static NSString *ALNDataverseCodegenPascalSuffix(NSString *identifier) {
   return buffer;
 }
 
+static NSString *ALNDataverseCodegenNavigationMethodName(NSString *identifier) {
+  return [NSString stringWithFormat:@"navigation%@",
+                                    ALNDataverseCodegenPascalSuffix(identifier)];
+}
+
 static NSString *ALNDataverseCodegenEnumCaseName(NSString *label, NSInteger fallbackValue) {
   NSString *suffix = ALNDataverseCodegenPascalSuffix(label);
   if ([suffix isEqualToString:@"Value"]) {
@@ -199,10 +204,17 @@ NSError *ALNDataverseCodegenMakeError(ALNDataverseCodegenErrorCode code,
     [header appendString:@"+ (NSString *)primaryNameAttribute;\n"];
     [header appendString:@"+ (NSArray<NSArray<NSString *> *> *)alternateKeys;\n"];
     [header appendString:@"+ (NSDictionary<NSString *, NSString *> *)lookupNavigationMap;\n"];
+    [header appendString:@"+ (NSDictionary<NSString *, NSArray<NSString *> *> *)lookupNavigationTargetsMap;\n"];
 
     NSMutableArray<NSDictionary<NSString *, id> *> *manifestAttributes = [NSMutableArray array];
     NSMutableArray<NSDictionary<NSString *, id> *> *manifestChoices = [NSMutableArray array];
+    NSMutableArray<NSDictionary<NSString *, id> *> *manifestLookups = [NSMutableArray array];
     NSMutableSet<NSString *> *methodNames = [NSMutableSet set];
+    NSMutableArray<NSDictionary<NSString *, id> *> *normalizedLookups = [NSMutableArray array];
+    NSMutableSet<NSString *> *seenLookupPairs = [NSMutableSet set];
+    NSMutableDictionary<NSString *, NSMutableArray<NSDictionary<NSString *, id> *> *> *lookupGroups =
+        [NSMutableDictionary dictionary];
+    NSMutableArray<NSString *> *lookupAttributeOrder = [NSMutableArray array];
     attributeCount += [attributes count];
     for (NSDictionary<NSString *, id> *attribute in attributes) {
       NSString *attributeName = ALNDataverseCodegenTrimmedString(attribute[@"logical_name"]);
@@ -270,12 +282,76 @@ NSError *ALNDataverseCodegenMakeError(ALNDataverseCodegenErrorCode code,
       if ([attributeName length] == 0 || [navigationName length] == 0) {
         continue;
       }
-      NSString *methodName = [NSString stringWithFormat:@"navigation%@",
-                                                        ALNDataverseCodegenPascalSuffix(attributeName)];
-      if (![methodNames containsObject:methodName]) {
+
+      NSString *pairKey = [NSString stringWithFormat:@"%@\n%@", attributeName, navigationName];
+      if ([seenLookupPairs containsObject:pairKey]) {
+        continue;
+      }
+      [seenLookupPairs addObject:pairKey];
+
+      NSDictionary<NSString *, id> *normalizedLookup = @{
+        @"schema_name" : ALNDataverseCodegenTrimmedString(lookup[@"schema_name"]) ?: @"",
+        @"referencing_attribute" : attributeName,
+        @"navigation_property_name" : navigationName,
+        @"referenced_entity" : ALNDataverseCodegenTrimmedString(lookup[@"referenced_entity"]) ?: @"",
+        @"referenced_attribute" : ALNDataverseCodegenTrimmedString(lookup[@"referenced_attribute"]) ?: @"",
+      };
+      [normalizedLookups addObject:normalizedLookup];
+
+      if (lookupGroups[attributeName] == nil) {
+        lookupGroups[attributeName] = [NSMutableArray array];
+        [lookupAttributeOrder addObject:attributeName];
+      }
+      [lookupGroups[attributeName] addObject:normalizedLookup];
+    }
+
+    for (NSString *attributeName in lookupAttributeOrder) {
+      NSArray<NSDictionary<NSString *, id> *> *lookupEntries = lookupGroups[attributeName] ?: @[];
+      if ([lookupEntries count] == 0) {
+        continue;
+      }
+
+      BOOL polymorphic = ([lookupEntries count] > 1);
+      NSMutableArray<NSString *> *navigationTargets = [NSMutableArray arrayWithCapacity:[lookupEntries count]];
+      NSMutableArray<NSString *> *methodNamesForLookup = [NSMutableArray arrayWithCapacity:[lookupEntries count]];
+      NSMutableArray<NSString *> *referencedEntities = [NSMutableArray array];
+      for (NSDictionary<NSString *, id> *lookup in lookupEntries) {
+        NSString *navigationName = ALNDataverseCodegenTrimmedString(lookup[@"navigation_property_name"]);
+        NSString *referencedEntity = ALNDataverseCodegenTrimmedString(lookup[@"referenced_entity"]);
+        NSString *methodName = polymorphic ? ALNDataverseCodegenNavigationMethodName(navigationName)
+                                           : ALNDataverseCodegenNavigationMethodName(attributeName);
+        if ([methodNames containsObject:methodName]) {
+          if (error != NULL) {
+            *error = ALNDataverseCodegenMakeError(ALNDataverseCodegenErrorIdentifierCollision,
+                                                  @"Dataverse codegen generated duplicate lookup helper method names",
+                                                  @{
+                                                    @"class_name" : className ?: @"",
+                                                    @"method_name" : methodName ?: @"",
+                                                    @"attribute" : attributeName ?: @"",
+                                                    @"navigation_property_name" : navigationName ?: @"",
+                                                  });
+          }
+          return nil;
+        }
         [methodNames addObject:methodName];
+        [methodNamesForLookup addObject:methodName];
+        [navigationTargets addObject:navigationName];
+        if ([referencedEntity length] > 0) {
+          [referencedEntities addObject:referencedEntity];
+        }
         [header appendFormat:@"+ (NSString *)%@;\n", methodName];
       }
+
+      NSMutableDictionary<NSString *, id> *manifestLookup = [NSMutableDictionary dictionary];
+      manifestLookup[@"attribute"] = attributeName ?: @"";
+      manifestLookup[@"polymorphic"] = @(polymorphic);
+      manifestLookup[@"lookup_map_included"] = @(!polymorphic);
+      manifestLookup[@"navigation_targets"] = [NSArray arrayWithArray:navigationTargets];
+      manifestLookup[@"method_names"] = [NSArray arrayWithArray:methodNamesForLookup];
+      if ([referencedEntities count] > 0) {
+        manifestLookup[@"referenced_entities"] = [NSArray arrayWithArray:referencedEntities];
+      }
+      [manifestLookups addObject:manifestLookup];
     }
     [header appendString:@"@end\n\n"];
 
@@ -302,18 +378,34 @@ NSError *ALNDataverseCodegenMakeError(ALNDataverseCodegenErrorCode code,
                                  [alternateKeyExpressions componentsJoinedByString:@", "]];
 
     NSMutableArray<NSString *> *lookupPairs = [NSMutableArray array];
-    for (NSDictionary<NSString *, id> *lookup in lookups) {
-      NSString *attributeName = ALNDataverseCodegenTrimmedString(lookup[@"referencing_attribute"]);
-      NSString *navigationName = ALNDataverseCodegenTrimmedString(lookup[@"navigation_property_name"]);
-      if ([attributeName length] == 0 || [navigationName length] == 0) {
+    NSMutableArray<NSString *> *lookupTargetPairs = [NSMutableArray array];
+    for (NSString *attributeName in lookupAttributeOrder) {
+      NSArray<NSDictionary<NSString *, id> *> *lookupEntries = lookupGroups[attributeName] ?: @[];
+      if ([lookupEntries count] == 0) {
         continue;
       }
-      [lookupPairs addObject:[NSString stringWithFormat:@"@\"%@\": @\"%@\"",
-                                                        ALNDataverseCodegenJSONEscape(attributeName),
-                                                        ALNDataverseCodegenJSONEscape(navigationName)]];
+
+      NSMutableArray<NSString *> *targetExpressions = [NSMutableArray arrayWithCapacity:[lookupEntries count]];
+      for (NSDictionary<NSString *, id> *lookup in lookupEntries) {
+        NSString *navigationName = ALNDataverseCodegenTrimmedString(lookup[@"navigation_property_name"]);
+        [targetExpressions addObject:[NSString stringWithFormat:@"@\"%@\"",
+                                                                ALNDataverseCodegenJSONEscape(navigationName)]];
+      }
+      [lookupTargetPairs addObject:[NSString stringWithFormat:@"@\"%@\": @[ %@ ]",
+                                                              ALNDataverseCodegenJSONEscape(attributeName),
+                                                              [targetExpressions componentsJoinedByString:@", "]]];
+
+      if ([lookupEntries count] == 1) {
+        NSString *navigationName = ALNDataverseCodegenTrimmedString(lookupEntries[0][@"navigation_property_name"]);
+        [lookupPairs addObject:[NSString stringWithFormat:@"@\"%@\": @\"%@\"",
+                                                          ALNDataverseCodegenJSONEscape(attributeName),
+                                                          ALNDataverseCodegenJSONEscape(navigationName)]];
+      }
     }
     [implementation appendFormat:@"+ (NSDictionary<NSString *, NSString *> *)lookupNavigationMap { return @{ %@ }; }\n",
                                  [lookupPairs componentsJoinedByString:@", "]];
+    [implementation appendFormat:@"+ (NSDictionary<NSString *, NSArray<NSString *> *> *)lookupNavigationTargetsMap { return @{ %@ }; }\n",
+                                 [lookupTargetPairs componentsJoinedByString:@", "]];
 
     for (NSDictionary<NSString *, id> *attribute in attributes) {
       NSString *attributeName = ALNDataverseCodegenTrimmedString(attribute[@"logical_name"]);
@@ -344,17 +436,21 @@ NSError *ALNDataverseCodegenMakeError(ALNDataverseCodegenErrorCode code,
       }
     }
 
-    for (NSDictionary<NSString *, id> *lookup in lookups) {
-      NSString *attributeName = ALNDataverseCodegenTrimmedString(lookup[@"referencing_attribute"]);
-      NSString *navigationName = ALNDataverseCodegenTrimmedString(lookup[@"navigation_property_name"]);
-      if ([attributeName length] == 0 || [navigationName length] == 0) {
+    for (NSString *attributeName in lookupAttributeOrder) {
+      NSArray<NSDictionary<NSString *, id> *> *lookupEntries = lookupGroups[attributeName] ?: @[];
+      if ([lookupEntries count] == 0) {
         continue;
       }
-      NSString *methodName = [NSString stringWithFormat:@"navigation%@",
-                                                        ALNDataverseCodegenPascalSuffix(attributeName)];
-      [implementation appendFormat:@"+ (NSString *)%@ { return @\"%@\"; }\n",
-                                   methodName,
-                                   ALNDataverseCodegenJSONEscape(navigationName)];
+
+      BOOL polymorphic = ([lookupEntries count] > 1);
+      for (NSDictionary<NSString *, id> *lookup in lookupEntries) {
+        NSString *navigationName = ALNDataverseCodegenTrimmedString(lookup[@"navigation_property_name"]);
+        NSString *methodName = polymorphic ? ALNDataverseCodegenNavigationMethodName(navigationName)
+                                           : ALNDataverseCodegenNavigationMethodName(attributeName);
+        [implementation appendFormat:@"+ (NSString *)%@ { return @\"%@\"; }\n",
+                                     methodName,
+                                     ALNDataverseCodegenJSONEscape(navigationName)];
+      }
     }
     [implementation appendString:@"@end\n\n"];
 
@@ -366,7 +462,8 @@ NSError *ALNDataverseCodegenMakeError(ALNDataverseCodegenErrorCode code,
       @"primary_name_attribute" : primaryName ?: @"",
       @"attributes" : manifestAttributes,
       @"choices" : manifestChoices,
-      @"lookup_count" : @([lookups count]),
+      @"lookups" : manifestLookups,
+      @"lookup_count" : @([normalizedLookups count]),
       @"alternate_key_count" : @([keys count]),
     }];
   }

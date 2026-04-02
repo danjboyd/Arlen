@@ -120,6 +120,11 @@ Or use a checked-in fixture while developing the app contract:
   --force
 ```
 
+When Dataverse exposes a polymorphic lookup, generated classes keep the
+singular `lookupNavigationMap` limited to unambiguous attributes and expose the
+full target set through `lookupNavigationTargetsMap` plus
+navigation-property-specific helpers such as `navigationCustomeridAccount`.
+
 ## 5. Confidence Commands
 
 ```bash

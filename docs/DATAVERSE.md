@@ -223,9 +223,19 @@ Generated helpers expose:
 - logical names and entity-set names
 - primary id/name attributes
 - alternate keys
-- lookup navigation maps
+- singular lookup navigation maps for unambiguous lookup attributes
+- `lookupNavigationTargetsMap` for all lookup attributes, including
+  polymorphic lookups
+- `navigation<Field>` helpers for unambiguous lookups and
+  navigation-property-specific helpers such as `navigationCustomeridAccount`
+  when Dataverse exposes multiple targets for one logical lookup attribute
 - field constants
 - choice enums and choice metadata
+
+For polymorphic lookups, Arlen intentionally keeps the singular
+`lookupNavigationMap` conservative. Ambiguous lookup attributes are omitted
+from that map rather than collapsing multiple Dataverse navigation targets down
+to one arbitrary value.
 
 ## 6. Example Path
 

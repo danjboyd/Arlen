@@ -10,6 +10,7 @@
   "metadata_contract": {
     "header_contains": [
       "@interface ALNDVAccount : NSObject",
+      "+ (NSDictionary<NSString *, NSArray<NSString *> *> *)lookupNavigationTargetsMap;",
       "+ (NSString *)fieldAccountid;",
       "typedef NS_ENUM(NSInteger, ALNDVAccountStatuscodeChoice)",
       "+ (NSString *)navigationPrimarycontactid;"
