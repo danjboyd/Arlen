@@ -754,6 +754,12 @@ static NSDictionary *STStatusCard(NSString *label, NSString *value, NSString *st
 - (nullable NSDictionary *)additionalQueryFiltersForResourceMetadata:(NSDictionary *)metadata
                                                              context:(ALNContext *)context
                                                                error:(NSError **)error;
+- (nullable NSArray<NSString *> *)visibleFilterValuesForField:(NSString *)field
+                                                     metadata:(NSDictionary *)metadata
+                                                   visibility:(NSDictionary *)visibility
+                                              explicitKeyName:(NSString *)explicitKeyName
+                                                 hiddenValues:(NSArray<NSString *> *)hiddenValues
+                                                        error:(NSError **)error;
 - (BOOL)record:(NSDictionary *)record
   isIndexableForMetadata:(NSDictionary *)metadata
               definition:(id<ALNSearchResourceDefinition>)definition
@@ -782,6 +788,9 @@ static NSDictionary *STStatusCard(NSString *label, NSString *value, NSString *st
 
 @interface ALNDefaultSearchEngine : NSObject <ALNSearchEngine>
 
+- (NSDictionary *)effectiveFilters:(NSDictionary *)filters
+                           metadata:(NSDictionary *)metadata
+                            options:(NSDictionary *)options;
 - (nullable id)searchModuleBeginBuildForMetadata:(NSDictionary *)metadata
                                       generation:(NSUInteger)generation
                                            error:(NSError **)error;
@@ -931,6 +940,18 @@ static NSDictionary *STStatusCard(NSString *label, NSString *value, NSString *st
 - (NSArray<NSString *> *)availableQueryModesForMetadata:(NSDictionary *)metadata {
   NSArray *modes = STNormalizedStringArray(metadata[@"queryModes"]);
   return ([modes count] > 0) ? modes : @[ @"autocomplete", @"fuzzy", @"phrase", @"search" ];
+}
+
+- (NSDictionary *)effectiveFilters:(NSDictionary *)filters
+                           metadata:(NSDictionary *)metadata
+                            options:(NSDictionary *)options {
+  NSMutableDictionary *effective = [NSMutableDictionary dictionaryWithDictionary:filters ?: @{}];
+  NSString *identifier = STLowerTrimmedString(metadata[@"identifier"]);
+  NSDictionary *resourceFilters = STNormalizeDictionary(STNormalizeDictionary(options[@"resourceFilters"])[identifier]);
+  if ([resourceFilters count] > 0) {
+    [effective addEntriesFromDictionary:resourceFilters];
+  }
+  return effective;
 }
 
 - (NSString *)normalizedQueryModeFromOptions:(NSDictionary *)options metadata:(NSDictionary *)metadata {
@@ -1696,8 +1717,9 @@ static NSDictionary *STStatusCard(NSString *label, NSString *value, NSString *st
       return nil;
     }
 
+    NSDictionary *effectiveFilters = [self effectiveFilters:filters metadata:metadata options:options];
     for (NSDictionary *document in documents) {
-      if (![self document:document matchesFilters:filters ?: @{} metadata:metadata error:error]) {
+      if (![self document:document matchesFilters:effectiveFilters metadata:metadata error:error]) {
         if (error != NULL && *error != NULL) {
           return nil;
         }
@@ -2768,12 +2790,13 @@ static NSDictionary *STStatusCard(NSString *label, NSString *value, NSString *st
 
   for (NSDictionary *metadata in STNormalizeArray(resourceMetadata)) {
     NSString *resourceID = STLowerTrimmedString(metadata[@"identifier"]);
+    NSDictionary *effectiveFilters = [self effectiveFilters:filters metadata:metadata options:options];
     NSDictionary *response = [self fixtureResponseForOperation:@"query" resourceID:resourceID query:query options:options ?: @{}];
     if ([response count] == 0 && self.liveRequestsEnabled) {
       NSDictionary *live = [self performLiveSearchForIndexName:[self externalIndexNameForMetadata:metadata]
                                                       metadata:metadata
                                                          query:query
-                                                       filters:filters ?: @{}
+                                                       filters:effectiveFilters
                                                           sort:sort
                                                          limit:fetchLimit
                                                         offset:0U
@@ -2792,7 +2815,7 @@ static NSDictionary *STStatusCard(NSString *label, NSString *value, NSString *st
     if ([resourceFacets count] == 0) {
       resourceFacets = [self facetSummariesFromBuckets:STNormalizeDictionary(normalized[@"facetDistribution"])
                                              metadata:metadata
-                                              filters:filters ?: @{}];
+                                              filters:effectiveFilters];
     }
     if ([resourceFacets count] > 0) {
       [externalFacets addObjectsFromArray:resourceFacets];
@@ -4504,10 +4527,12 @@ static NSDictionary *STStatusCard(NSString *label, NSString *value, NSString *st
   if ([softDeleteHiddenValues count] == 0 && [softDeleteField length] > 0) {
     softDeleteHiddenValues = @[ @"1", @"true", @"yes" ];
   }
+  NSArray *softDeleteVisibleValues = STTrimmedUniqueStringArray(rawMetadata[@"softDeleteVisibleValues"]);
   NSArray *archivedHiddenValues = STTrimmedUniqueStringArray(rawMetadata[@"archivedHiddenValues"]);
   if ([archivedHiddenValues count] == 0 && [archivedField length] > 0) {
     archivedHiddenValues = @[ @"1", @"true", @"yes", @"archived" ];
   }
+  NSArray *archivedVisibleValues = STTrimmedUniqueStringArray(rawMetadata[@"archivedVisibleValues"]);
   NSArray *internalFilterFields = @[ tenantField ?: @"", softDeleteField ?: @"", archivedField ?: @"" ];
   for (NSString *internalField in internalFilterFields) {
     if ([internalField length] == 0) {
@@ -4605,8 +4630,10 @@ static NSDictionary *STStatusCard(NSString *label, NSString *value, NSString *st
       @"tenantClaim" : tenantClaim ?: @"tenant",
       @"softDeleteField" : softDeleteField ?: @"",
       @"softDeleteHiddenValues" : softDeleteHiddenValues ?: @[],
+      @"softDeleteVisibleValues" : softDeleteVisibleValues ?: @[],
       @"archivedField" : archivedField ?: @"",
       @"archivedHiddenValues" : archivedHiddenValues ?: @[],
+      @"archivedVisibleValues" : archivedVisibleValues ?: @[],
     },
     @"syncPolicy" : @{
       @"bulkBatchSize" : @(bulkBatchSize),
@@ -5283,17 +5310,35 @@ static NSDictionary *STStatusCard(NSString *label, NSString *value, NSString *st
   NSString *softDeleteField = STLowerTrimmedString(visibility[@"softDeleteField"]);
   NSArray *softDeleteHiddenValues = STTrimmedUniqueStringArray(visibility[@"softDeleteHiddenValues"]);
   if ([softDeleteField length] > 0 && [softDeleteHiddenValues count] > 0) {
-    NSMutableArray *visibleValues = [NSMutableArray arrayWithArray:@[ @"0", @"false", @"no" ]];
-    if (![softDeleteHiddenValues containsObject:@"deleted"]) {
-      [visibleValues addObject:@"deleted"];
+    NSArray *visibleValues = [self visibleFilterValuesForField:softDeleteField
+                                                      metadata:metadata
+                                                    visibility:visibility
+                                               explicitKeyName:@"softDeleteVisibleValues"
+                                                  hiddenValues:softDeleteHiddenValues
+                                                         error:error];
+    if (visibleValues == nil && error != NULL && *error != nil) {
+      return nil;
     }
-    filters[[NSString stringWithFormat:@"%@__in", softDeleteField]] = visibleValues;
+    if ([visibleValues count] > 0) {
+      filters[[NSString stringWithFormat:@"%@__in", softDeleteField]] = visibleValues;
+    }
   }
 
   NSString *archivedField = STLowerTrimmedString(visibility[@"archivedField"]);
   NSArray *archivedHiddenValues = STTrimmedUniqueStringArray(visibility[@"archivedHiddenValues"]);
   if ([archivedField length] > 0 && [archivedHiddenValues count] > 0) {
-    filters[[NSString stringWithFormat:@"%@__in", archivedField]] = @[ @"0", @"false", @"no", @"active", @"" ];
+    NSArray *visibleValues = [self visibleFilterValuesForField:archivedField
+                                                      metadata:metadata
+                                                    visibility:visibility
+                                               explicitKeyName:@"archivedVisibleValues"
+                                                  hiddenValues:archivedHiddenValues
+                                                         error:error];
+    if (visibleValues == nil && error != NULL && *error != nil) {
+      return nil;
+    }
+    if ([visibleValues count] > 0) {
+      filters[[NSString stringWithFormat:@"%@__in", archivedField]] = visibleValues;
+    }
   }
 
   id<ALNSearchResourceDefinition> definition = [self resourceDefinitionForIdentifier:metadata[@"identifier"]];
@@ -5309,6 +5354,56 @@ static NSDictionary *STStatusCard(NSString *label, NSString *value, NSString *st
     [filters addEntriesFromDictionary:STNormalizeDictionary(custom)];
   }
   return filters;
+}
+
+- (NSArray<NSString *> *)visibleFilterValuesForField:(NSString *)field
+                                            metadata:(NSDictionary *)metadata
+                                          visibility:(NSDictionary *)visibility
+                                     explicitKeyName:(NSString *)explicitKeyName
+                                        hiddenValues:(NSArray<NSString *> *)hiddenValues
+                                               error:(NSError **)error {
+  NSArray<NSString *> *explicitValues = STTrimmedUniqueStringArray(visibility[explicitKeyName]);
+  if ([explicitValues count] > 0) {
+    return explicitValues;
+  }
+
+  NSMutableSet<NSString *> *hiddenSet = [NSMutableSet set];
+  for (NSString *value in hiddenValues ?: @[]) {
+    [hiddenSet addObject:[STLowerTrimmedString(value) lowercaseString]];
+  }
+
+  for (NSDictionary *entry in STNormalizeArray(metadata[@"filters"])) {
+    if (![STLowerTrimmedString(entry[@"name"]) isEqualToString:STLowerTrimmedString(field)]) {
+      continue;
+    }
+    NSMutableArray<NSString *> *derived = [NSMutableArray array];
+    for (NSDictionary *choice in STNormalizeArray(entry[@"choices"])) {
+      NSString *value = STTrimmedString(choice[@"value"]);
+      if ([value length] == 0 || [hiddenSet containsObject:[STLowerTrimmedString(value) lowercaseString]]) {
+        continue;
+      }
+      [derived addObject:value];
+    }
+    if ([derived count] > 0) {
+      return [derived copy];
+    }
+    break;
+  }
+
+  NSString *fieldType = STLowerTrimmedString(STNormalizeDictionary(metadata[@"fieldTypes"])[STLowerTrimmedString(field)]);
+  if (STSearchFieldTypeIsBoolean(fieldType)) {
+    return @[ @"0", @"false", @"no" ];
+  }
+
+  if ([hiddenValues count] > 0 && error != NULL) {
+    *error = STError(ALNSearchModuleErrorInvalidConfiguration,
+                     [NSString stringWithFormat:@"visibility rules for %@ require explicit visible values or filter choices", field ?: @"field"],
+                     @{
+                       @"resource" : metadata[@"identifier"] ?: @"",
+                       @"field" : field ?: @"",
+                     });
+  }
+  return nil;
 }
 
 - (BOOL)record:(NSDictionary *)record
@@ -6747,22 +6842,28 @@ static NSDictionary *STStatusCard(NSString *label, NSString *value, NSString *st
       @"cursor" : @{ @"requested" : @"", @"next" : @"", @"supported" : @NO },
     };
   }
-  NSMutableDictionary *filters = [NSMutableDictionary dictionaryWithDictionary:explicitFilters];
+  NSMutableDictionary *resourceFilters = [NSMutableDictionary dictionary];
   for (NSDictionary *metadata in visibleResources) {
     NSDictionary *extra = [self.runtime additionalQueryFiltersForResourceMetadata:metadata context:ctx error:error];
     if (extra == nil && error != NULL && *error != nil) {
       return nil;
     }
-    [filters addEntriesFromDictionary:extra ?: @{}];
+    if ([extra count] > 0) {
+      resourceFilters[STLowerTrimmedString(metadata[@"identifier"])] = extra;
+    }
+  }
+  NSMutableDictionary *queryOptions = [NSMutableDictionary dictionaryWithDictionary:[self searchQueryOptionsFromParameters:parameters] ?: @{}];
+  if ([resourceFilters count] > 0) {
+    queryOptions[@"resourceFilters"] = resourceFilters;
   }
   return [self.runtime searchQuery:parameters[@"q"]
                 resourceIdentifier:resourceIdentifier
           allowedResourceIdentifiers:[self.runtime resourceIdentifiersFromMetadataArray:visibleResources]
-                           filters:filters
+                           filters:explicitFilters
                               sort:parameters[@"sort"]
                              limit:limit
                             offset:offset
-                      queryOptions:[self searchQueryOptionsFromParameters:parameters]
+                      queryOptions:queryOptions
                              error:error];
 }
 

@@ -1,6 +1,6 @@
 # Arlen Phase 27 Roadmap
 
-Status: Follow-up required (initial `27A-27L` landing shipped on 2026-04-01; post-closeout audit on 2026-04-02 reopened `27E`, `27F`, `27G`, `27H`, and `27L`)
+Status: Complete in repo (`27A-27L` landed on 2026-04-01; the audited `27E`, `27F`, `27G`, `27H`, and `27L` follow-up closed on 2026-04-02; a passing `phase27-confidence` run now requires PostgreSQL plus live Meilisearch/OpenSearch validation)
 Last updated: 2026-04-02
 
 Related docs:
@@ -96,11 +96,10 @@ The initial `27A-27L` landing shipped on 2026-04-01:
   `phase27-confidence`, machine-readable artifact manifests, optional live
   Meilisearch/OpenSearch smoke manifests, and the docs/status closeout.
 
-## 0.2 Post-Closeout Audit (2026-04-02)
+## 0.2 Post-Closeout Audit Resolution (2026-04-02)
 
 The 2026-04-02 audit found that the initial landing materially improved Arlen's
-search posture, but the roadmap should no longer present Phase 27 as fully
-closed.
+search posture, and the follow-up work from that audit is now closed in repo.
 
 Confirmed as substantially shipped:
 
@@ -110,26 +109,21 @@ Confirmed as substantially shipped:
 - `27I`, `27J`, and `27K` landed meaningful admin/ops drilldowns, generator/DX
   coverage, and focused search suites.
 
-Reopened follow-up subphases:
+Audit follow-up closures:
 
-- `27E`: the Meilisearch adapter currently has strong fixture-backed coverage
-  and basic live query probing, but still needs authoritative live indexing,
-  settings synchronization, and live query translation for filters/sorts/facets
-  rather than local fallback ordering.
-- `27F`: the OpenSearch adapter has fixture-backed mappings/alias coverage and
-  a basic live query path, but still needs authoritative live indexing/rebuild
-  flows, engine-driven query translation, and stronger live relevance/query
-  coverage.
-- `27G`: lifecycle summaries, replay state, and cursor envelopes ship today,
-  but rebuild execution still materializes full record arrays in-memory, so the
-  large-index/chunked-import acceptance bar is not yet met.
-- `27H`: tenant/visibility metadata and policy hooks ship today, but cross-
-  resource query execution still needs resource-scoped policy filter handling so
-  tenant/soft-delete/archive rules fail closed without leaking unsupported
-  filters across unrelated resources.
-- `27L`: characterization and confidence artifacts ship today, but final phase
-  closeout still requires non-skipped PostgreSQL verification plus live
-  Meilisearch/OpenSearch query-or-sync validation beyond health-only probes.
+- `27E` and `27F` now execute authoritative live Meilisearch/OpenSearch query
+  and sync flows, translate shared Arlen filters/sorts/facets into engine-
+  native requests, and validate those paths through the confidence gate rather
+  than only fixture or health-probe coverage.
+- `27G` now rebuilds through streamed/chunked engine hooks instead of
+  re-materializing full record arrays before snapshot construction.
+- `27H` now scopes policy-derived tenant/archive/soft-delete filters per
+  resource during mixed-resource search and derives visible values from explicit
+  metadata or filter choices instead of hard-coded archive assumptions.
+- `27L` now requires a non-skipped PostgreSQL path plus live Meilisearch and
+  OpenSearch query/sync validation for a passing `phase27-confidence` run, and
+  the artifact generator fails closed when any required lane is skipped or
+  missing.
 
 Follow-on testing note:
 
@@ -395,21 +389,18 @@ Acceptance (required):
 - Arlen apps can switch from PostgreSQL/default search to Meilisearch through
   module config without redefining resource contracts
 - engine-specific settings remain explicit and documented
-- integration coverage uses a stubbed or optional live Meilisearch lane plus
-  deterministic request/response fixtures
+- integration coverage uses deterministic request/response fixtures plus
+  required live Meilisearch query/sync validation in `phase27-confidence`
 
-Audit follow-up (2026-04-02):
+Audit follow-up resolved (2026-04-02):
 
-- Fixture-backed adapter behavior is shipped.
-- Remaining work:
-  - make live Meilisearch query execution authoritative instead of decorating
-    locally ranked matches
-  - implement live index/settings synchronization for rebuild and incremental
-    sync flows
-  - translate shared Arlen filters/sorts/facets/query modes into Meilisearch
-    requests rather than only probing basic search connectivity
-  - add end-to-end live Meilisearch verification that exercises indexing plus
-    query behavior, not only `/health`
+- Fixture-backed adapter behavior remains shipped.
+- Live Meilisearch indexing and query execution are now authoritative for the
+  adapter path, with shared filter/sort/facet translation instead of local
+  fallback ordering.
+- `phase27-confidence` now provisions a temporary Meilisearch index, waits for
+  task completion, syncs test documents, validates filtered/sorted query
+  results, and records a fail-closed manifest.
 
 ## 4.6 Phase 27F: First-Party OpenSearch / Elasticsearch Engine
 
@@ -434,18 +425,15 @@ Acceptance (required):
 - index rollover/rebuild behavior is documented and visible in jobs/admin/ops
 - engine-specific relevance and mapping configuration are explicit, not hidden
 
-Audit follow-up (2026-04-02):
+Audit follow-up resolved (2026-04-02):
 
-- Fixture-backed adapter behavior is shipped.
-- Remaining work:
-  - make live OpenSearch query execution authoritative instead of decorating
-    locally ranked matches
-  - implement live index creation/settings/mapping synchronization for rebuild
-    and incremental sync flows
-  - translate shared Arlen filters/sorts/facets/query modes into OpenSearch
-    requests rather than only probing basic `_search` connectivity
-  - extend live verification beyond cluster-health probes to cover query and
-    sync semantics
+- Fixture-backed adapter behavior remains shipped.
+- Live OpenSearch indexing and query execution are now authoritative for the
+  adapter path, with shared filter/sort/facet translation instead of local
+  fallback ordering.
+- `phase27-confidence` now provisions a temporary OpenSearch index, bulk syncs
+  documents, validates filtered/sorted query results plus aggregations, and
+  records a fail-closed manifest.
 
 ## 4.7 Phase 27G: Large-Index Lifecycle + Sync Hardening
 
@@ -469,17 +457,14 @@ Acceptance (required):
   contract
 - incremental sync semantics are deterministic across every supported engine
 
-Audit follow-up (2026-04-02):
+Audit follow-up resolved (2026-04-02):
 
 - Bulk-import summaries, replay queues, pause handling, and cursor envelopes are
   shipped.
-- Remaining work:
-  - stop reindex builds from re-materializing the full record set in memory
-    before snapshot construction
-  - add true streamed/chunked rebuild execution so large resources no longer
-    depend on small in-memory snapshots
-  - extend external-engine lifecycle paths so chunked import/recovery semantics
-    are exercised consistently across every engine
+- Reindex builds now stream batches through begin/append/finalize engine hooks
+  instead of depending on a full in-memory record snapshot first.
+- Focused regressions cover the streamed rebuild path so chunked lifecycle
+  behavior stays aligned across engines.
 
 ## 4.8 Phase 27H: Auth, Tenant, and Policy-Aware Search Semantics
 
@@ -504,17 +489,16 @@ Acceptance (required):
 - unit and integration tests cover tenant scoping, role scoping, and
   soft-delete visibility rules
 
-Audit follow-up (2026-04-02):
+Audit follow-up resolved (2026-04-02):
 
 - Tenant, soft-delete, archive, and policy metadata are shipped.
-- Remaining work:
-  - scope policy-derived filters per resource during multi-resource search so
-    tenant/visibility filters do not become unsupported filters for unrelated
-    resources
-  - add explicit regression coverage for `/search/api/query` and HTML search
-    when visible resources mix tenant-scoped and non-tenant-scoped contracts
-  - tighten archived/soft-delete filter semantics so visibility rules remain
-    data-shape-accurate rather than relying on hard-coded visible value sets
+- Multi-resource search now carries policy-derived filters per resource so
+  tenant/visibility filters do not leak into unrelated resource contracts.
+- Archived and soft-delete visibility now derive visible values from explicit
+  metadata or filter choices, falling back only for boolean fields and failing
+  closed otherwise.
+- Focused controller regressions cover `/search/api/query` and HTML search when
+  visible resources mix tenant-scoped and non-tenant-scoped contracts.
 
 ## 4.9 Phase 27I: Admin, Ops, and Explainability Maturity
 
@@ -591,10 +575,10 @@ Acceptance (required):
 
 Audit note (2026-04-02):
 
-- The focused suite split is shipped and is the right base for the remaining
-  work.
-- Additional regressions for reopened `27E`, `27F`, `27G`, `27H`, and `27L`
-  should land in these focused suites instead of creating a separate test phase.
+- The focused suite split is shipped and remains the right base for ongoing
+  search follow-up work.
+- The `27E`, `27F`, `27G`, `27H`, and `27L` regressions landed in these focused
+  suites rather than creating a separate test phase.
 
 ## 4.12 Phase 27L: Confidence Lanes + Benchmarking + Docs Closeout
 
@@ -603,7 +587,7 @@ Deliverables:
 - Add repo-native search confidence lanes, expected to include:
   - focused search unit bundle
   - PostgreSQL-backed integration bundle
-  - optional live external-engine smoke lanes
+  - required live external-engine query/sync validation lanes
   - search artifact pack under `build/release_confidence/phase27/`
 - Add benchmark/characterization artifacts for:
   - ranking quality snapshots
@@ -620,16 +604,17 @@ Acceptance (required):
   engine matrix
 - the phase closes with machine-readable artifacts, not just prose
 
-Audit follow-up (2026-04-02):
+Audit follow-up resolved (2026-04-02):
 
 - `phase27-search-tests`, `phase27-search-characterize`, and
   `phase27-confidence` ship today, along with machine-readable artifacts.
-- Remaining work:
-  - require a non-skipped PostgreSQL-backed verification path for final closeout
-  - extend external-engine confidence from health-only probes to query or sync
-    validation against live Meilisearch/OpenSearch services
-  - update closeout/status language only after the reopened `27E`, `27F`,
-    `27G`, and `27H` items are complete
+- `phase27-confidence` now fails closed unless PostgreSQL characterization
+  passes and both live Meilisearch/OpenSearch validation manifests pass.
+- The artifact generator now records the required-lane evaluation explicitly, so
+  skipped or missing live credentials are surfaced as a failing closeout rather
+  than a soft warning.
+- Roadmap/status/search-module docs now reflect the closed follow-up state and
+  the stricter release-gate contract.
 
 ## 5. Success Criteria
 
@@ -667,8 +652,8 @@ bash tools/ci/run_docs_quality.sh
 git diff --check
 ```
 
-Final closeout should additionally run with real backing services/credentials
-present so the following are not skipped:
+Final closeout must additionally run with real backing services/credentials
+present so `phase27-confidence` can pass:
 
 ```bash
 ARLEN_PG_TEST_DSN=...

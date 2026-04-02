@@ -268,11 +268,13 @@ They also expose:
   FTS/trigram ranking, incremental sync parity, and module-owned document
   storage.
 - `ALNMeilisearchSearchEngine`: first-party adapter with engine descriptors,
-  fixture-backed contract validation, cursor pagination support, and optional
-  live connectivity/query probes.
+  fixture-backed contract validation, authoritative live query/sync
+  translation, cursor pagination support, and required live confidence
+  validation.
 - `ALNOpenSearchSearchEngine`: first-party adapter with mappings/aliases
-  descriptors, fixture-backed contract validation, cursor pagination, and
-  optional live connectivity/query probes.
+  descriptors, fixture-backed contract validation, authoritative live
+  query/sync translation, cursor pagination, and required live confidence
+  validation.
 
 ## Migration Notes
 
@@ -301,8 +303,14 @@ The artifact pack lands under `build/release_confidence/phase27/` and includes:
 
 - focused search test logs
 - runtime-generated query/ranking/facet/suggestion characterization
-- optional live Meilisearch/OpenSearch connectivity smoke manifests
+- required live Meilisearch/OpenSearch query/sync validation manifests
 - a machine-readable confidence manifest and summary
+
+A passing `phase27-confidence` run now also requires:
+
+- `ARLEN_PG_TEST_DSN`
+- `ARLEN_PHASE27_MEILI_URL`
+- `ARLEN_PHASE27_OPENSEARCH_URL`
 
 ## Defaults
 
@@ -322,8 +330,9 @@ Manifest defaults:
   than dedicated search services, even though it now supports typed filters,
   autocomplete, suggestions, facets, promotions, and fuzzy/phrase modes
 - PostgreSQL is still the strongest no-extra-service path for search quality
-- the Meilisearch and OpenSearch adapters ship today, but their deepest
-  cluster-specific lifecycle semantics are intentionally lighter than dedicated
-  engine-specific frameworks or ops tooling
+- the Meilisearch and OpenSearch adapters now execute authoritative live
+  query/sync flows through the shared Arlen contract, but cluster-native
+  analyzer/relevance/ops depth remains lighter than dedicated engine-specific
+  frameworks
 - admin auto-resource indexing depends on `admin-ui` being configured before the
   search runtime loads

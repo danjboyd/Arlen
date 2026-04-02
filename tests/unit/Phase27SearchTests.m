@@ -245,6 +245,120 @@ static NSDictionary *Phase27StreamingDocumentForRecord(NSDictionary *record, NSD
   return [NSString stringWithUTF8String:value];
 }
 
+- (NSString *)repoRoot {
+  return [[NSFileManager defaultManager] currentDirectoryPath];
+}
+
+- (NSString *)createTempDirectoryWithPrefix:(NSString *)prefix {
+  NSString *path = [NSTemporaryDirectory()
+      stringByAppendingPathComponent:[NSString stringWithFormat:@"%@-%@",
+                                                               prefix ?: @"phase27",
+                                                               [[NSUUID UUID] UUIDString]]];
+  NSError *error = nil;
+  BOOL created = [[NSFileManager defaultManager] createDirectoryAtPath:path
+                                           withIntermediateDirectories:YES
+                                                            attributes:nil
+                                                                 error:&error];
+  XCTAssertTrue(created, @"failed creating temp dir %@: %@", path, error.localizedDescription);
+  XCTAssertNil(error);
+  return created ? path : nil;
+}
+
+- (BOOL)writeText:(NSString *)text toPath:(NSString *)path {
+  NSError *error = nil;
+  BOOL created = [[NSFileManager defaultManager] createDirectoryAtPath:[path stringByDeletingLastPathComponent]
+                                           withIntermediateDirectories:YES
+                                                            attributes:nil
+                                                                 error:&error];
+  XCTAssertTrue(created, @"failed creating directory for %@: %@", path, error.localizedDescription);
+  XCTAssertNil(error);
+  if (!created) {
+    return NO;
+  }
+  BOOL wrote = [(text ?: @"") writeToFile:path atomically:YES encoding:NSUTF8StringEncoding error:&error];
+  XCTAssertTrue(wrote, @"failed writing %@: %@", path, error.localizedDescription);
+  XCTAssertNil(error);
+  return wrote;
+}
+
+- (BOOL)writeJSONPayload:(NSDictionary *)payload toPath:(NSString *)path {
+  NSError *error = nil;
+  NSData *data = [NSJSONSerialization dataWithJSONObject:payload ?: @{} options:NSJSONWritingPrettyPrinted error:&error];
+  XCTAssertNotNil(data, @"failed encoding JSON for %@: %@", path, error.localizedDescription);
+  XCTAssertNil(error);
+  if (data == nil) {
+    return NO;
+  }
+  BOOL created = [[NSFileManager defaultManager] createDirectoryAtPath:[path stringByDeletingLastPathComponent]
+                                           withIntermediateDirectories:YES
+                                                            attributes:nil
+                                                                 error:&error];
+  XCTAssertTrue(created, @"failed creating directory for %@: %@", path, error.localizedDescription);
+  XCTAssertNil(error);
+  if (!created) {
+    return NO;
+  }
+  BOOL wrote = [data writeToFile:path options:0 error:&error];
+  XCTAssertTrue(wrote, @"failed writing JSON %@: %@", path, error.localizedDescription);
+  XCTAssertNil(error);
+  return wrote;
+}
+
+- (NSDictionary *)JSONPayloadAtPath:(NSString *)path {
+  NSData *data = [NSData dataWithContentsOfFile:path];
+  XCTAssertNotNil(data, @"missing JSON artifact at %@", path);
+  if (data == nil) {
+    return nil;
+  }
+  NSError *error = nil;
+  id payload = [NSJSONSerialization JSONObjectWithData:data options:0 error:&error];
+  XCTAssertNil(error, @"failed parsing JSON %@: %@", path, error.localizedDescription);
+  XCTAssertTrue([payload isKindOfClass:[NSDictionary class]]);
+  return [payload isKindOfClass:[NSDictionary class]] ? payload : nil;
+}
+
+- (NSDictionary *)runPhase27ConfidenceGeneratorWithOutputDir:(NSString *)outputDir
+                                                   searchLog:(NSString *)searchLog
+                                            characterization:(NSString *)characterization
+                                            meiliManifest:(NSString *)meiliManifest
+                                          opensearchManifest:(NSString *)opensearchManifest {
+  NSString *script = [[self repoRoot] stringByAppendingPathComponent:@"tools/ci/generate_phase27_confidence_artifacts.py"];
+  NSTask *task = [[NSTask alloc] init];
+  task.launchPath = @"/usr/bin/env";
+  task.arguments = @[
+    @"python3",
+    script,
+    @"--output-dir",
+    outputDir ?: @"",
+    @"--search-log",
+    searchLog ?: @"",
+    @"--characterization",
+    characterization ?: @"",
+    @"--meilisearch-manifest",
+    meiliManifest ?: @"",
+    @"--opensearch-manifest",
+    opensearchManifest ?: @"",
+  ];
+  NSPipe *stdoutPipe = [NSPipe pipe];
+  NSPipe *stderrPipe = [NSPipe pipe];
+  task.standardOutput = stdoutPipe;
+  task.standardError = stderrPipe;
+  [task launch];
+  [task waitUntilExit];
+
+  NSString *stdoutText =
+      [[NSString alloc] initWithData:[[stdoutPipe fileHandleForReading] readDataToEndOfFile]
+                            encoding:NSUTF8StringEncoding] ?: @"";
+  NSString *stderrText =
+      [[NSString alloc] initWithData:[[stderrPipe fileHandleForReading] readDataToEndOfFile]
+                            encoding:NSUTF8StringEncoding] ?: @"";
+  return @{
+    @"status" : @(task.terminationStatus),
+    @"stdout" : stdoutText,
+    @"stderr" : stderrText,
+  };
+}
+
 - (void)testDefaultSearchShapesResultsAndExposesRichQuerySections {
   ALNApplication *app = [self applicationWithConfig:nil database:nil];
   [self registerModulesForApplication:app];
@@ -380,6 +494,88 @@ static NSDictionary *Phase27StreamingDocumentForRecord(NSDictionary *record, NSD
   XCTAssertEqualObjects(@3, tenantOrders[@"documentCount"]);
   XCTAssertEqualObjects((@[ @2, @1 ]), Phase27StreamingBuildBatches()[@"tenant_orders"]);
   XCTAssertFalse(*Phase27StreamingLegacySnapshotFlag());
+}
+
+- (void)testConfidenceArtifactsFailClosedWhenPostgresOrLiveValidationIsMissing {
+  NSString *tempDir = [self createTempDirectoryWithPrefix:@"phase27-confidence-fail"];
+  NSString *outputDir = [tempDir stringByAppendingPathComponent:@"out"];
+  NSString *searchLog = [tempDir stringByAppendingPathComponent:@"phase27_search_tests.log"];
+  NSString *characterization = [tempDir stringByAppendingPathComponent:@"search_characterization.json"];
+  NSString *meiliManifest = [tempDir stringByAppendingPathComponent:@"live_meilisearch/manifest.json"];
+  NSString *openManifest = [tempDir stringByAppendingPathComponent:@"live_opensearch/manifest.json"];
+  NSDictionary *characterizationPayload = @{
+    @"default" : @{ @"status" : @"pass", @"topResult" : @"sku-103" },
+    @"postgres" : @{ @"status" : @"skipped", @"reason" : @"missing_ARLEN_PG_TEST_DSN" },
+    @"meilisearch" : @{ @"status" : @"pass", @"topResult" : @"sku-103" },
+    @"opensearch" : @{ @"status" : @"pass", @"topResult" : @"sku-103" },
+  };
+  NSDictionary *meiliPayload = @{ @"status" : @"pass", @"reason" : @"" };
+  NSDictionary *openPayload = @{
+    @"status" : @"fail",
+    @"reason" : @"missing_ARLEN_PHASE27_OPENSEARCH_URL",
+  };
+
+  XCTAssertTrue([self writeText:@"Executed 12 tests, with 0 failures\n" toPath:searchLog]);
+  XCTAssertTrue([self writeJSONPayload:characterizationPayload toPath:characterization]);
+  XCTAssertTrue([self writeJSONPayload:meiliPayload toPath:meiliManifest]);
+  XCTAssertTrue([self writeJSONPayload:openPayload toPath:openManifest]);
+
+  NSDictionary *execution = [self runPhase27ConfidenceGeneratorWithOutputDir:outputDir
+                                                                   searchLog:searchLog
+                                                            characterization:characterization
+                                                                meiliManifest:meiliManifest
+                                                              opensearchManifest:openManifest];
+  XCTAssertEqual(1, [execution[@"status"] intValue]);
+
+  NSDictionary *eval = [self JSONPayloadAtPath:[outputDir stringByAppendingPathComponent:@"phase27_confidence_eval.json"]];
+  XCTAssertEqualObjects(@"phase27-confidence-v2", eval[@"version"]);
+  XCTAssertEqualObjects(@"fail", eval[@"status"]);
+  XCTAssertEqualObjects(@"skipped", eval[@"lanes"][@"postgres_characterization"]);
+  XCTAssertEqualObjects(@"fail", eval[@"lanes"][@"live_external_validation"]);
+  XCTAssertEqualObjects(@"missing_ARLEN_PHASE27_OPENSEARCH_URL", eval[@"live_validation"][@"opensearch_reason"]);
+
+  NSError *error = nil;
+  NSString *markdown = [NSString stringWithContentsOfFile:[outputDir stringByAppendingPathComponent:@"phase27_confidence.md"]
+                                                 encoding:NSUTF8StringEncoding
+                                                    error:&error];
+  XCTAssertNotNil(markdown);
+  XCTAssertNil(error);
+  XCTAssertTrue([markdown containsString:@"Live external query/sync validation: `fail`"]);
+  XCTAssertTrue([markdown containsString:@"ARLEN_PG_TEST_DSN"]);
+}
+
+- (void)testConfidenceArtifactsPassOnlyWhenEveryRequiredLanePasses {
+  NSString *tempDir = [self createTempDirectoryWithPrefix:@"phase27-confidence-pass"];
+  NSString *outputDir = [tempDir stringByAppendingPathComponent:@"out"];
+  NSString *searchLog = [tempDir stringByAppendingPathComponent:@"phase27_search_tests.log"];
+  NSString *characterization = [tempDir stringByAppendingPathComponent:@"search_characterization.json"];
+  NSString *meiliManifest = [tempDir stringByAppendingPathComponent:@"live_meilisearch/manifest.json"];
+  NSString *openManifest = [tempDir stringByAppendingPathComponent:@"live_opensearch/manifest.json"];
+  NSDictionary *characterizationPayload = @{
+    @"default" : @{ @"status" : @"pass", @"topResult" : @"sku-103" },
+    @"postgres" : @{ @"status" : @"pass", @"topResult" : @"sku-102" },
+    @"meilisearch" : @{ @"status" : @"pass", @"topResult" : @"sku-103" },
+    @"opensearch" : @{ @"status" : @"pass", @"topResult" : @"sku-103" },
+  };
+  NSDictionary *livePayload = @{ @"status" : @"pass", @"reason" : @"" };
+
+  XCTAssertTrue([self writeText:@"Test Suite 'All tests' passed\nExecuted 24 tests, with 0 failures\n" toPath:searchLog]);
+  XCTAssertTrue([self writeJSONPayload:characterizationPayload toPath:characterization]);
+  XCTAssertTrue([self writeJSONPayload:livePayload toPath:meiliManifest]);
+  XCTAssertTrue([self writeJSONPayload:livePayload toPath:openManifest]);
+
+  NSDictionary *execution = [self runPhase27ConfidenceGeneratorWithOutputDir:outputDir
+                                                                   searchLog:searchLog
+                                                            characterization:characterization
+                                                                meiliManifest:meiliManifest
+                                                              opensearchManifest:openManifest];
+  XCTAssertEqual(0, [execution[@"status"] intValue]);
+
+  NSDictionary *eval = [self JSONPayloadAtPath:[outputDir stringByAppendingPathComponent:@"phase27_confidence_eval.json"]];
+  XCTAssertEqualObjects(@"pass", eval[@"status"]);
+  XCTAssertEqualObjects(@"pass", eval[@"lanes"][@"postgres_characterization"]);
+  XCTAssertEqualObjects(@"pass", eval[@"lanes"][@"live_external_validation"]);
+  XCTAssertEqualObjects(@"pass", eval[@"live_validation"][@"overall"]);
 }
 
 - (void)testPostgresEngineSupportsFTSIncrementalSyncAndDegradedFallback {

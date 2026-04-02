@@ -1,8 +1,8 @@
 # Arlen Status Checkpoint
 
-Last updated: 2026-04-01
+Last updated: 2026-04-02
 
-## Leaving Off (2026-04-01)
+## Leaving Off (2026-04-02)
 
 - Phase 25 is complete (`25A-25L` delivered on 2026-04-01):
   - shipped the fragment-first live UI surface through `ALNLive`, the built-in
@@ -23,27 +23,37 @@ Last updated: 2026-04-01
   - strengthened `phase25-confidence` with websocket push and negative-path
     backpressure artifacts, so the live closeout now fails closed on both
     success and failure-path regressions
-- Phase 27 is complete (`27A-27L` delivered on 2026-04-01):
+- Phase 27 is complete again (`27A-27L` landed on 2026-04-01; the audited
+  `27E-27L` closeout landed on 2026-04-02):
   - shipped shaped public search results with per-resource field allowlists,
     public/authenticated/role-gated/predicate query policies, richer
     capability-normalized resource metadata, cursor/explain envelopes, and
     fail-closed public query/API behavior
   - added first-party PostgreSQL FTS/trigram, Meilisearch, and OpenSearch
     engines with engine descriptors, fixture-backed adapter validation,
-    optional live connectivity probes, and stable engine capability reporting
+    authoritative live query/sync translation, and stable engine capability
+    reporting
   - expanded the lifecycle/admin/runtime contract with replay queues,
-    bulk-import throughput summaries, tenant/soft-delete/conditional indexing
-    metadata, recent query history, and stronger dashboard/drilldown payloads
+    bulk-import throughput summaries, streamed rebuild execution,
+    tenant/soft-delete/conditional indexing metadata, recent query history,
+    and stronger dashboard/drilldown payloads
   - added `arlen generate search`, the search module playbook example,
     migration/config guidance, focused adapter/lifecycle/admin regression
     suites, `phase27-search-characterize`, and the `phase27-confidence`
     artifact pack
-- Verification completed at this checkpoint:
+  - fixed mixed-resource tenant/visibility queries so policy-derived filters
+    stay scoped to the resource that owns them, with fail-closed archived and
+    soft-delete visibility derivation
+  - tightened `phase27-confidence` so PostgreSQL plus live Meilisearch and
+    OpenSearch query/sync validation are required for a passing release gate
+- Verification status at this checkpoint:
   - `source tools/source_gnustep_env.sh && make build-tests`
   - `source tools/source_gnustep_env.sh && make test-unit`
   - `source tools/source_gnustep_env.sh && make phase27-search-tests`
   - `source tools/source_gnustep_env.sh && make phase27-search-characterize`
   - `source tools/source_gnustep_env.sh && make phase27-confidence`
+    with `ARLEN_PG_TEST_DSN`, `ARLEN_PHASE27_MEILI_URL`, and
+    `ARLEN_PHASE27_OPENSEARCH_URL` configured
   - `source tools/source_gnustep_env.sh && make docs-api`
   - `source tools/source_gnustep_env.sh && bash tools/ci/run_docs_quality.sh`
 

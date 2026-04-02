@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any, Dict
 
 
-VERSION = "phase27-confidence-v1"
+VERSION = "phase27-confidence-v2"
 PASS_PATTERNS = (
     r"\btests PASSED\b",
     r"Test Suite 'All tests' passed",
@@ -70,13 +70,7 @@ def main() -> int:
         "meilisearch": str(meili_manifest.get("status", "fail")),
         "opensearch": str(open_manifest.get("status", "fail")),
     }
-    live_overall = "pass"
-    for value in live_statuses.values():
-        if value == "fail":
-            live_overall = "fail"
-            break
-        if value == "skipped" and live_overall != "fail":
-            live_overall = "skipped"
+    live_overall = "pass" if all(value == "pass" for value in live_statuses.values()) else "fail"
 
     lanes = {
         "phase27_search_tests": search_status,
@@ -84,7 +78,7 @@ def main() -> int:
         "postgres_characterization": postgres_status,
         "meilisearch_characterization": meili_status,
         "opensearch_characterization": open_status,
-        "live_external_smokes": live_overall,
+        "live_external_validation": live_overall,
     }
 
     required = [
@@ -92,8 +86,8 @@ def main() -> int:
         default_status == "pass",
         meili_status == "pass",
         open_status == "pass",
-        postgres_status in ("pass", "skipped"),
-        live_overall in ("pass", "skipped"),
+        postgres_status == "pass",
+        live_overall == "pass",
     ]
     overall_status = "pass" if all(required) else "fail"
     generated_at = datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
@@ -108,6 +102,13 @@ def main() -> int:
             "meilisearch_top_result": characterization.get("meilisearch", {}).get("topResult", ""),
             "opensearch_top_result": characterization.get("opensearch", {}).get("topResult", ""),
             "postgres_status": postgres_status,
+        },
+        "live_validation": {
+            "overall": live_overall,
+            "meilisearch_status": live_statuses["meilisearch"],
+            "meilisearch_reason": str(meili_manifest.get("reason", "")),
+            "opensearch_status": live_statuses["opensearch"],
+            "opensearch_reason": str(open_manifest.get("reason", "")),
         },
         "artifacts": [
             search_log.name,
@@ -129,8 +130,14 @@ def main() -> int:
             f"- PostgreSQL characterization: `{postgres_status}`",
             f"- Meilisearch characterization: `{meili_status}`",
             f"- OpenSearch characterization: `{open_status}`",
-            f"- Live external smokes: `{live_overall}`",
+            f"- Live external query/sync validation: `{live_overall}`",
             f"- Overall status: `{overall_status}`",
+            "",
+            "Required environment:",
+            "",
+            "- `ARLEN_PG_TEST_DSN`",
+            "- `ARLEN_PHASE27_MEILI_URL`",
+            "- `ARLEN_PHASE27_OPENSEARCH_URL`",
             "",
             "Artifacts:",
             "",

@@ -81,7 +81,7 @@ toolchain env directly.
 - [Phase 22 Roadmap](PHASE22_ROADMAP.md): completed documentation cleanup pass for newcomer-first onboarding and docs quality closeout.
 - [Phase 23 Roadmap](PHASE23_ROADMAP.md): completed Dataverse integration phase.
 - [Phase 25 Roadmap](PHASE25_ROADMAP.md): completed live UI baseline plus stream/recovery/adversarial hardening through `25L`.
-- [Phase 27 Roadmap](PHASE27_ROADMAP.md): completed search best-in-class phase; `27A-27L` delivered result shaping, PostgreSQL FTS, first-party Meilisearch/OpenSearch adapters, lifecycle/policy/admin depth, and search confidence artifacts.
+- [Phase 27 Roadmap](PHASE27_ROADMAP.md): completed search best-in-class phase; `27A-27L` landed on 2026-04-01 and the audited `27E-27L` closeout landed on 2026-04-02 for authoritative Meilisearch/OpenSearch behavior, streamed rebuilds, policy-scoped search semantics, and fail-closed confidence artifacts.
 - [Combined Roadmap Index (Historical Aggregate)](PHASE2_PHASE3_ROADMAP.md)
 - [Phase 1 Spec](PHASE1_SPEC.md)
 - [Arlen CLI Spec](ARLEN_CLI_SPEC.md)

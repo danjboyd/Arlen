@@ -344,4 +344,61 @@
   XCTAssertTrue([auditorBody containsString:@"gen "]);
 }
 
+- (void)testMixedResourceQueriesScopePolicyFiltersPerResourceForAPIAndHTML {
+  ALNEOCClearTemplateRegistry();
+  ALNApplication *app = [self application];
+  [app addMiddleware:[[Phase27SearchContextMiddleware alloc] init]];
+  [self registerModulesForApplication:app];
+  [self seedSearchIndexesForApplication:app];
+
+  NSDictionary *headers = @{
+    @"Accept" : @"application/json",
+    @"X-Search-User" : @"tenant-user",
+    @"X-Search-Tenant" : @"tenant-a",
+  };
+
+  ALNResponse *apiResponse =
+      [app dispatchRequest:[self requestWithMethod:@"GET"
+                                              path:@"/search/api/query"
+                                       queryString:@"q=priority&mode=search"
+                                           headers:headers
+                                              body:nil]];
+  XCTAssertEqual((NSInteger)200, apiResponse.statusCode);
+  NSDictionary *apiJSON = [self JSONObjectFromResponse:apiResponse];
+  NSDictionary *payload = [apiJSON[@"data"] isKindOfClass:[NSDictionary class]] ? apiJSON[@"data"] : @{};
+  XCTAssertEqualObjects(@"search", payload[@"mode"]);
+  XCTAssertTrue([(NSArray *)(payload[@"resources"] ?: @[]) containsObject:@"products"]);
+  XCTAssertTrue([(NSArray *)(payload[@"resources"] ?: @[]) containsObject:@"tenant_orders"]);
+  XCTAssertEqualObjects(@"sku-102", [payload[@"promotedResults"] firstObject][@"recordID"]);
+
+  NSMutableArray<NSString *> *resultIDs = [NSMutableArray array];
+  for (NSDictionary *entry in [payload[@"results"] isKindOfClass:[NSArray class]] ? payload[@"results"] : @[]) {
+    if ([entry[@"recordID"] isKindOfClass:[NSString class]]) {
+      [resultIDs addObject:entry[@"recordID"]];
+    }
+  }
+  XCTAssertTrue([resultIDs containsObject:@"sku-103"]);
+  XCTAssertTrue([resultIDs containsObject:@"ord-100"]);
+  XCTAssertFalse([resultIDs containsObject:@"ord-101"]);
+  XCTAssertFalse([resultIDs containsObject:@"ord-102"]);
+  XCTAssertFalse([resultIDs containsObject:@"ord-103"]);
+
+  ALNResponse *htmlResponse =
+      [app dispatchRequest:[self requestWithMethod:@"GET"
+                                              path:@"/search"
+                                       queryString:@"q=priority&mode=search"
+                                           headers:@{
+                                             @"X-Search-User" : @"tenant-user",
+                                             @"X-Search-Tenant" : @"tenant-a",
+                                           }
+                                              body:nil]];
+  XCTAssertEqual((NSInteger)200, htmlResponse.statusCode);
+  NSString *html = ALNTestStringFromResponse(htmlResponse);
+  XCTAssertFalse([html containsString:@"unsupported filter"]);
+  XCTAssertTrue([html containsString:@"Priority"]);
+  XCTAssertTrue([html containsString:@"Tenant A Priority Runbook"]);
+  XCTAssertFalse([html containsString:@"Tenant B Priority Runbook"]);
+  XCTAssertFalse([html containsString:@"Tenant A Archived Note"]);
+}
+
 @end
