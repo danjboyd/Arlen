@@ -1,7 +1,7 @@
 # Arlen Feature Parity Matrix
 
 Status: Active baseline  
-Last updated: 2026-04-01
+Last updated: 2026-04-02
 
 Related docs:
 - `docs/PHASE2_ROADMAP.md`
@@ -65,6 +65,7 @@ Related docs:
 | OpenAPI generation and API docs integration | FastAPI | In Scope | Phase 3A | Improves API discoverability and tooling fit. |
 | Built-in interactive API docs UI | FastAPI | In Scope | Phase 3B-3C | 3B delivered interactive/viewer UX; 3C completed self-hosted Swagger-style option (`/openapi/swagger`). |
 | SDK/export workflow from OpenAPI artifacts | FastAPI ecosystem | In Scope | Phase 3A-3C | Start with artifact export hooks; expand official SDK guidance incrementally. |
+| Descriptor-first TypeScript client/model generation for React and SPA consumers | Prisma, MikroORM, Drizzle ecosystems | In Scope | Phase 28 | Generate TypeScript contracts, clients, validators, and optional React helpers from Arlen descriptors plus route/OpenAPI metadata without making TypeScript the canonical ORM source. |
 | OAuth2 scope/JWT auth ergonomics | FastAPI | In Scope | Phase 3A | First-party auth/scope helper baseline for API teams. |
 | Session-native step-up/MFA ergonomics | Django/FastAPI/modern security toolkits | In Scope | Phase 12 | Route-level assurance policy, session step-up helpers, TOTP/recovery/WebAuthn primitives, and deterministic API/HTML rejection behavior. |
 | OIDC/OAuth2 client and common provider-login presets | Authlib/FastAPI/Django-allauth-style ecosystems | In Scope | Phase 12 | Keep core focused on generic client + provider presets + normalized identity claims; full account-product UX remains out of scope. |
