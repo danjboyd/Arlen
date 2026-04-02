@@ -80,7 +80,11 @@ Last updated: 2026-04-02
     `lookupNavigationMap`, while polymorphic lookups now populate the additive
     `lookupNavigationTargetsMap` and emit navigation-property-specific helper
     methods such as `navigationCustomeridAccount`
-  - added a focused fixture-backed regression in
+  - fixed the Dataverse attribute contract so only Web-API-selectable
+    attributes emit `field...` helpers, while lookup-derived logical helpers
+    now emit under `nonSelectableField...` and are listed separately in
+    `nonSelectableFields`
+  - added focused fixture-backed regressions in
     `tests/unit/DataverseMetadataTests.m`
 - Verification status at this checkpoint:
   - `source tools/source_gnustep_env.sh && make test-unit-filter TEST=DataverseMetadataTests`

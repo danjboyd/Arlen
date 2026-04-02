@@ -52,6 +52,10 @@ static NSString *ALNDataverseMetadataLocalizedLabel(NSDictionary *labelValue) {
 }
 
 static NSString *ALNDataverseMetadataAttributeType(NSDictionary *attribute) {
+  NSString *normalizedType = ALNDataverseMetadataTrimmedString(attribute[@"type"]);
+  if ([normalizedType length] > 0) {
+    return normalizedType;
+  }
   NSDictionary *typeName =
       [attribute[@"AttributeTypeName"] isKindOfClass:[NSDictionary class]] ? attribute[@"AttributeTypeName"] : nil;
   NSString *typeValue = ALNDataverseMetadataTrimmedString(typeName[@"Value"]);
@@ -62,6 +66,9 @@ static NSString *ALNDataverseMetadataAttributeType(NSDictionary *attribute) {
 }
 
 static BOOL ALNDataverseMetadataAttributeNullable(NSDictionary *attribute) {
+  if (attribute[@"nullable"] != nil && attribute[@"nullable"] != [NSNull null]) {
+    return ALNDataverseMetadataBoolValue(attribute[@"nullable"], YES);
+  }
   NSDictionary *requiredLevel =
       [attribute[@"RequiredLevel"] isKindOfClass:[NSDictionary class]] ? attribute[@"RequiredLevel"] : nil;
   NSString *required = [[ALNDataverseMetadataTrimmedString(requiredLevel[@"Value"]) lowercaseString]
@@ -73,6 +80,44 @@ static BOOL ALNDataverseMetadataAttributeNullable(NSDictionary *attribute) {
 }
 
 static NSArray<NSDictionary<NSString *, id> *> *ALNDataverseMetadataNormalizeChoiceOptions(NSDictionary *attribute) {
+  NSArray *normalizedChoices = [attribute[@"choices"] isKindOfClass:[NSArray class]] ? attribute[@"choices"] : nil;
+  if ([normalizedChoices count] > 0) {
+    NSMutableArray<NSDictionary<NSString *, id> *> *normalized = [NSMutableArray arrayWithCapacity:[normalizedChoices count]];
+    for (NSDictionary *option in normalizedChoices) {
+      if (![option isKindOfClass:[NSDictionary class]]) {
+        continue;
+      }
+      NSNumber *value = [option[@"value"] respondsToSelector:@selector(integerValue)] ? option[@"value"] : nil;
+      if (value == nil && [option[@"Value"] respondsToSelector:@selector(integerValue)]) {
+        value = option[@"Value"];
+      }
+      if (value == nil) {
+        continue;
+      }
+      NSString *label = ALNDataverseMetadataTrimmedString(option[@"label"]);
+      if ([label length] == 0) {
+        label = ALNDataverseMetadataLocalizedLabel(
+            [option[@"Label"] isKindOfClass:[NSDictionary class]] ? option[@"Label"] : nil);
+      }
+      [normalized addObject:@{
+        @"value" : value,
+        @"label" : label ?: @"",
+      }];
+    }
+    [normalized sortUsingComparator:^NSComparisonResult(NSDictionary *left, NSDictionary *right) {
+      NSInteger leftValue = [((NSNumber *)left[@"value"]) integerValue];
+      NSInteger rightValue = [((NSNumber *)right[@"value"]) integerValue];
+      if (leftValue < rightValue) {
+        return NSOrderedAscending;
+      }
+      if (leftValue > rightValue) {
+        return NSOrderedDescending;
+      }
+      return [left[@"label"] compare:right[@"label"]];
+    }];
+    return [NSArray arrayWithArray:normalized];
+  }
+
   NSDictionary *optionSet = [attribute[@"OptionSet"] isKindOfClass:[NSDictionary class]] ? attribute[@"OptionSet"] : nil;
   if (optionSet == nil) {
     optionSet = [attribute[@"GlobalOptionSet"] isKindOfClass:[NSDictionary class]] ? attribute[@"GlobalOptionSet"] : nil;
@@ -112,16 +157,59 @@ static NSArray<NSDictionary<NSString *, id> *> *ALNDataverseMetadataNormalizeCho
   return [NSArray arrayWithArray:normalized];
 }
 
+static NSArray<NSString *> *ALNDataverseMetadataSortedTargets(NSDictionary *attribute) {
+  NSArray *targets = nil;
+  if ([attribute[@"Targets"] isKindOfClass:[NSArray class]]) {
+    targets = attribute[@"Targets"];
+  } else if ([attribute[@"targets"] isKindOfClass:[NSArray class]]) {
+    targets = attribute[@"targets"];
+  }
+  return [targets count] > 0 ? [targets sortedArrayUsingSelector:@selector(compare:)] : @[];
+}
+
+static NSString *ALNDataverseMetadataAttributeOf(NSDictionary *attribute) {
+  NSString *attributeOf = ALNDataverseMetadataTrimmedString(attribute[@"AttributeOf"]);
+  if ([attributeOf length] == 0) {
+    attributeOf = ALNDataverseMetadataTrimmedString(attribute[@"attribute_of"]);
+  }
+  return attributeOf;
+}
+
+static BOOL ALNDataverseMetadataAttributeODataSelectable(NSDictionary *attribute) {
+  if (attribute[@"odata_selectable"] != nil && attribute[@"odata_selectable"] != [NSNull null]) {
+    return ALNDataverseMetadataBoolValue(attribute[@"odata_selectable"], YES);
+  }
+  if (attribute[@"IsValidODataAttribute"] != nil && attribute[@"IsValidODataAttribute"] != [NSNull null]) {
+    return ALNDataverseMetadataBoolValue(attribute[@"IsValidODataAttribute"], YES);
+  }
+  return ([ALNDataverseMetadataAttributeOf(attribute) length] == 0);
+}
+
 static NSDictionary<NSString *, id> *ALNDataverseMetadataNormalizeAttribute(NSDictionary *attribute,
                                                                             NSString *primaryIDAttribute,
                                                                             NSString *primaryNameAttribute) {
   NSString *logicalName = ALNDataverseMetadataTrimmedString(attribute[@"LogicalName"]);
+  if ([logicalName length] == 0) {
+    logicalName = ALNDataverseMetadataTrimmedString(attribute[@"logical_name"]);
+  }
   NSString *schemaName = ALNDataverseMetadataTrimmedString(attribute[@"SchemaName"]);
+  if ([schemaName length] == 0) {
+    schemaName = ALNDataverseMetadataTrimmedString(attribute[@"schema_name"]);
+  }
   NSString *displayName = ALNDataverseMetadataLocalizedLabel(
       [attribute[@"DisplayName"] isKindOfClass:[NSDictionary class]] ? attribute[@"DisplayName"] : nil);
+  if ([displayName length] == 0) {
+    displayName = ALNDataverseMetadataTrimmedString(attribute[@"display_name"]);
+  }
   NSString *type = ALNDataverseMetadataAttributeType(attribute);
-  NSArray *targets = [attribute[@"Targets"] isKindOfClass:[NSArray class]] ? attribute[@"Targets"] : @[];
-  NSArray *sortedTargets = [targets sortedArrayUsingSelector:@selector(compare:)];
+  NSArray *sortedTargets = ALNDataverseMetadataSortedTargets(attribute);
+  NSString *attributeOf = ALNDataverseMetadataAttributeOf(attribute);
+  BOOL primaryID = [logicalName isEqualToString:primaryIDAttribute] ||
+                   ALNDataverseMetadataBoolValue((attribute[@"primary_id"] != nil ? attribute[@"primary_id"]
+                                                                                  : attribute[@"IsPrimaryId"]),
+                                                 NO);
+  BOOL primaryName = [logicalName isEqualToString:primaryNameAttribute] ||
+                     ALNDataverseMetadataBoolValue(attribute[@"primary_name"], NO);
 
   return @{
     @"logical_name" : logicalName ?: @"",
@@ -129,13 +217,14 @@ static NSDictionary<NSString *, id> *ALNDataverseMetadataNormalizeAttribute(NSDi
     @"display_name" : displayName ?: @"",
     @"type" : type ?: @"",
     @"nullable" : @(ALNDataverseMetadataAttributeNullable(attribute)),
-    @"primary_id" : @([logicalName isEqualToString:primaryIDAttribute] ||
-                      ALNDataverseMetadataBoolValue(attribute[@"IsPrimaryId"], NO)),
-    @"primary_name" : @([logicalName isEqualToString:primaryNameAttribute]),
-    @"logical" : @(ALNDataverseMetadataBoolValue(attribute[@"IsLogical"], NO)),
-    @"readable" : @(ALNDataverseMetadataBoolValue(attribute[@"IsValidForRead"], YES)),
-    @"creatable" : @(ALNDataverseMetadataBoolValue(attribute[@"IsValidForCreate"], YES)),
-    @"updateable" : @(ALNDataverseMetadataBoolValue(attribute[@"IsValidForUpdate"], YES)),
+    @"primary_id" : @(primaryID),
+    @"primary_name" : @(primaryName),
+    @"logical" : @(ALNDataverseMetadataBoolValue((attribute[@"logical"] != nil ? attribute[@"logical"] : attribute[@"IsLogical"]), NO)),
+    @"readable" : @(ALNDataverseMetadataBoolValue((attribute[@"readable"] != nil ? attribute[@"readable"] : attribute[@"IsValidForRead"]), YES)),
+    @"creatable" : @(ALNDataverseMetadataBoolValue((attribute[@"creatable"] != nil ? attribute[@"creatable"] : attribute[@"IsValidForCreate"]), YES)),
+    @"updateable" : @(ALNDataverseMetadataBoolValue((attribute[@"updateable"] != nil ? attribute[@"updateable"] : attribute[@"IsValidForUpdate"]), YES)),
+    @"attribute_of" : attributeOf ?: @"",
+    @"odata_selectable" : @(ALNDataverseMetadataAttributeODataSelectable(attribute)),
     @"targets" : sortedTargets ?: @[],
     @"choices" : ALNDataverseMetadataNormalizeChoiceOptions(attribute) ?: @[],
   };
@@ -148,36 +237,83 @@ static NSDictionary<NSString *, id> *ALNDataverseMetadataNormalizeLookup(NSDicti
     navigationPropertyName = ALNDataverseMetadataTrimmedString(relationship[@"NavigationPropertyName"]);
   }
   if ([navigationPropertyName length] == 0) {
+    navigationPropertyName = ALNDataverseMetadataTrimmedString(relationship[@"navigation_property_name"]);
+  }
+  if ([navigationPropertyName length] == 0) {
     navigationPropertyName = ALNDataverseMetadataTrimmedString(relationship[@"ReferencingAttribute"]);
   }
+  NSString *schemaName = ALNDataverseMetadataTrimmedString(relationship[@"SchemaName"]);
+  if ([schemaName length] == 0) {
+    schemaName = ALNDataverseMetadataTrimmedString(relationship[@"schema_name"]);
+  }
+  NSString *referencingAttribute = ALNDataverseMetadataTrimmedString(relationship[@"ReferencingAttribute"]);
+  if ([referencingAttribute length] == 0) {
+    referencingAttribute = ALNDataverseMetadataTrimmedString(relationship[@"referencing_attribute"]);
+  }
+  NSString *referencedEntity = ALNDataverseMetadataTrimmedString(relationship[@"ReferencedEntity"]);
+  if ([referencedEntity length] == 0) {
+    referencedEntity = ALNDataverseMetadataTrimmedString(relationship[@"referenced_entity"]);
+  }
+  NSString *referencedAttribute = ALNDataverseMetadataTrimmedString(relationship[@"ReferencedAttribute"]);
+  if ([referencedAttribute length] == 0) {
+    referencedAttribute = ALNDataverseMetadataTrimmedString(relationship[@"referenced_attribute"]);
+  }
   return @{
-    @"schema_name" : ALNDataverseMetadataTrimmedString(relationship[@"SchemaName"]) ?: @"",
-    @"referencing_attribute" : ALNDataverseMetadataTrimmedString(relationship[@"ReferencingAttribute"]) ?: @"",
+    @"schema_name" : schemaName ?: @"",
+    @"referencing_attribute" : referencingAttribute ?: @"",
     @"navigation_property_name" : navigationPropertyName ?: @"",
-    @"referenced_entity" : ALNDataverseMetadataTrimmedString(relationship[@"ReferencedEntity"]) ?: @"",
-    @"referenced_attribute" : ALNDataverseMetadataTrimmedString(relationship[@"ReferencedAttribute"]) ?: @"",
+    @"referenced_entity" : referencedEntity ?: @"",
+    @"referenced_attribute" : referencedAttribute ?: @"",
   };
 }
 
 static NSDictionary<NSString *, id> *ALNDataverseMetadataNormalizeKey(NSDictionary *key) {
-  NSArray *attributes = [key[@"KeyAttributes"] isKindOfClass:[NSArray class]] ? key[@"KeyAttributes"] : @[];
+  NSArray *attributes = [key[@"KeyAttributes"] isKindOfClass:[NSArray class]] ? key[@"KeyAttributes"] : nil;
+  if ([attributes count] == 0) {
+    attributes = [key[@"key_attributes"] isKindOfClass:[NSArray class]] ? key[@"key_attributes"] : @[];
+  }
   NSArray *sorted = [attributes sortedArrayUsingSelector:@selector(compare:)];
+  NSString *logicalName = ALNDataverseMetadataTrimmedString(key[@"LogicalName"]);
+  if ([logicalName length] == 0) {
+    logicalName = ALNDataverseMetadataTrimmedString(key[@"logical_name"]);
+  }
   return @{
-    @"logical_name" : ALNDataverseMetadataTrimmedString(key[@"LogicalName"]) ?: @"",
+    @"logical_name" : logicalName ?: @"",
     @"key_attributes" : sorted ?: @[],
   };
 }
 
 static NSDictionary<NSString *, id> *ALNDataverseMetadataNormalizeEntity(NSDictionary *entity) {
   NSString *logicalName = ALNDataverseMetadataTrimmedString(entity[@"LogicalName"]);
+  if ([logicalName length] == 0) {
+    logicalName = ALNDataverseMetadataTrimmedString(entity[@"logical_name"]);
+  }
   NSString *schemaName = ALNDataverseMetadataTrimmedString(entity[@"SchemaName"]);
+  if ([schemaName length] == 0) {
+    schemaName = ALNDataverseMetadataTrimmedString(entity[@"schema_name"]);
+  }
   NSString *entitySetName = ALNDataverseMetadataTrimmedString(entity[@"EntitySetName"]);
+  if ([entitySetName length] == 0) {
+    entitySetName = ALNDataverseMetadataTrimmedString(entity[@"entity_set_name"]);
+  }
   NSString *primaryIDAttribute = ALNDataverseMetadataTrimmedString(entity[@"PrimaryIdAttribute"]);
+  if ([primaryIDAttribute length] == 0) {
+    primaryIDAttribute = ALNDataverseMetadataTrimmedString(entity[@"primary_id_attribute"]);
+  }
   NSString *primaryNameAttribute = ALNDataverseMetadataTrimmedString(entity[@"PrimaryNameAttribute"]);
+  if ([primaryNameAttribute length] == 0) {
+    primaryNameAttribute = ALNDataverseMetadataTrimmedString(entity[@"primary_name_attribute"]);
+  }
   NSString *displayName = ALNDataverseMetadataLocalizedLabel(
       [entity[@"DisplayName"] isKindOfClass:[NSDictionary class]] ? entity[@"DisplayName"] : nil);
+  if ([displayName length] == 0) {
+    displayName = ALNDataverseMetadataTrimmedString(entity[@"display_name"]);
+  }
 
-  NSArray *attributes = [entity[@"Attributes"] isKindOfClass:[NSArray class]] ? entity[@"Attributes"] : @[];
+  NSArray *attributes = [entity[@"Attributes"] isKindOfClass:[NSArray class]] ? entity[@"Attributes"] : nil;
+  if ([attributes count] == 0) {
+    attributes = [entity[@"attributes"] isKindOfClass:[NSArray class]] ? entity[@"attributes"] : @[];
+  }
   NSMutableArray<NSDictionary<NSString *, id> *> *normalizedAttributes =
       [NSMutableArray arrayWithCapacity:[attributes count]];
   for (NSDictionary *attribute in attributes) {
@@ -194,7 +330,11 @@ static NSDictionary<NSString *, id> *ALNDataverseMetadataNormalizeEntity(NSDicti
     return [left[@"logical_name"] compare:right[@"logical_name"]];
   }];
 
-  NSArray *lookups = [entity[@"ManyToOneRelationships"] isKindOfClass:[NSArray class]] ? entity[@"ManyToOneRelationships"] : @[];
+  NSArray *lookups =
+      [entity[@"ManyToOneRelationships"] isKindOfClass:[NSArray class]] ? entity[@"ManyToOneRelationships"] : nil;
+  if ([lookups count] == 0) {
+    lookups = [entity[@"lookups"] isKindOfClass:[NSArray class]] ? entity[@"lookups"] : @[];
+  }
   NSMutableArray<NSDictionary<NSString *, id> *> *normalizedLookups =
       [NSMutableArray arrayWithCapacity:[lookups count]];
   for (NSDictionary *relationship in lookups) {
@@ -214,7 +354,10 @@ static NSDictionary<NSString *, id> *ALNDataverseMetadataNormalizeEntity(NSDicti
     return [left[@"navigation_property_name"] compare:right[@"navigation_property_name"]];
   }];
 
-  NSArray *keys = [entity[@"Keys"] isKindOfClass:[NSArray class]] ? entity[@"Keys"] : @[];
+  NSArray *keys = [entity[@"Keys"] isKindOfClass:[NSArray class]] ? entity[@"Keys"] : nil;
+  if ([keys count] == 0) {
+    keys = [entity[@"keys"] isKindOfClass:[NSArray class]] ? entity[@"keys"] : @[];
+  }
   NSMutableArray<NSDictionary<NSString *, id> *> *normalizedKeys = [NSMutableArray arrayWithCapacity:[keys count]];
   for (NSDictionary *key in keys) {
     if (![key isKindOfClass:[NSDictionary class]]) {
@@ -288,10 +431,6 @@ NSError *ALNDataverseMetadataMakeError(ALNDataverseMetadataErrorCode code,
   NSMutableArray<NSDictionary<NSString *, id> *> *normalized = [NSMutableArray arrayWithCapacity:[entities count]];
   for (NSDictionary *entity in entities) {
     if (![entity isKindOfClass:[NSDictionary class]]) {
-      continue;
-    }
-    if ([entity[@"logical_name"] isKindOfClass:[NSString class]] && [entity[@"attributes"] isKindOfClass:[NSArray class]]) {
-      [normalized addObject:entity];
       continue;
     }
     NSDictionary<NSString *, id> *normalizedEntity = ALNDataverseMetadataNormalizeEntity(entity);
@@ -393,7 +532,7 @@ NSError *ALNDataverseMetadataMakeError(ALNDataverseMetadataErrorCode code,
       // `Targets` is not selectable on the base AttributeMetadata expand against live Dataverse.
       // Lookup/navigation metadata still comes from ManyToOneRelationships, and picklist enrichment
       // is fetched separately via a cast query below.
-      @"$expand" : @"Attributes($select=LogicalName,SchemaName,DisplayName,AttributeType,AttributeTypeName,IsPrimaryId,IsLogical,IsValidForCreate,IsValidForRead,IsValidForUpdate,RequiredLevel),Keys($select=LogicalName,KeyAttributes),ManyToOneRelationships($select=SchemaName,ReferencingAttribute,ReferencedEntity,ReferencedAttribute,ReferencingEntityNavigationPropertyName)",
+      @"$expand" : @"Attributes($select=LogicalName,SchemaName,DisplayName,AttributeType,AttributeTypeName,AttributeOf,IsPrimaryId,IsLogical,IsValidForCreate,IsValidForRead,IsValidForUpdate,IsValidODataAttribute,RequiredLevel),Keys($select=LogicalName,KeyAttributes),ManyToOneRelationships($select=SchemaName,ReferencingAttribute,ReferencedEntity,ReferencedAttribute,ReferencingEntityNavigationPropertyName)",
     };
     ALNDataverseResponse *response = [client performRequestWithMethod:@"GET"
                                                                  path:detailPath

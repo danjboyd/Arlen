@@ -141,6 +141,8 @@ static NSUInteger DataverseMetadataCountOccurrences(NSString *text, NSString *ne
   XCTAssertTrue([transport.capturedRequests[1].URLString containsString:@"EntityDefinitions(LogicalName='account')"]);
   XCTAssertFalse([transport.capturedRequests[1].URLString containsString:@"Targets"]);
   XCTAssertFalse([transport.capturedRequests[1].URLString containsString:@"ReferencedAttribute,NavigationPropertyName"]);
+  XCTAssertTrue([transport.capturedRequests[1].URLString containsString:@"AttributeOf"]);
+  XCTAssertTrue([transport.capturedRequests[1].URLString containsString:@"IsValidODataAttribute"]);
   XCTAssertTrue([transport.capturedRequests[1].URLString containsString:@"ReferencingEntityNavigationPropertyName"]);
   XCTAssertTrue([transport.capturedRequests[2].URLString containsString:@"PicklistAttributeMetadata"]);
 }
@@ -263,6 +265,87 @@ static NSUInteger DataverseMetadataCountOccurrences(NSString *text, NSString *ne
   XCTAssertEqualObjects(customerLookup[@"lookup_map_included"], @NO);
   XCTAssertEqualObjects(customerLookup[@"method_names"], (@[ @"navigationCustomeridAccount", @"navigationCustomeridContact" ]));
   XCTAssertEqualObjects(customerLookup[@"navigation_targets"], (@[ @"customerid_account", @"customerid_contact" ]));
+}
+
+- (void)testDataverseCodegenSeparatesNonSelectableLookupNameFields {
+  NSError *error = nil;
+  NSDictionary *fixture = ALNTestJSONDictionaryAtRelativePath(
+      @"tests/fixtures/phase23/dataverse_nonselectable_lookup_name_entitydefinitions.json",
+      &error);
+  XCTAssertNil(error);
+  XCTAssertNotNil(fixture);
+
+  NSDictionary<NSString *, id> *normalized = [ALNDataverseMetadata normalizedMetadataFromPayload:fixture error:&error];
+  XCTAssertNil(error);
+  XCTAssertEqualObjects(normalized[@"entity_count"], @1);
+  XCTAssertEqualObjects(normalized[@"attribute_count"], @7);
+
+  NSDictionary *leadEntity = normalized[@"entities"][0];
+  NSArray *attributes = [leadEntity[@"attributes"] isKindOfClass:[NSArray class]] ? leadEntity[@"attributes"] : @[];
+  NSDictionary *offerNameAttribute = nil;
+  NSDictionary *prospectNameAttribute = nil;
+  for (NSDictionary *attribute in attributes) {
+    if ([attribute[@"logical_name"] isEqualToString:@"synact_offername"]) {
+      offerNameAttribute = attribute;
+    } else if ([attribute[@"logical_name"] isEqualToString:@"synact_prospectname"]) {
+      prospectNameAttribute = attribute;
+    }
+  }
+  XCTAssertNotNil(offerNameAttribute);
+  XCTAssertNotNil(prospectNameAttribute);
+  XCTAssertEqualObjects(offerNameAttribute[@"attribute_of"], @"synact_offer");
+  XCTAssertEqualObjects(offerNameAttribute[@"odata_selectable"], @NO);
+  XCTAssertEqualObjects(prospectNameAttribute[@"attribute_of"], @"synact_prospect");
+  XCTAssertEqualObjects(prospectNameAttribute[@"odata_selectable"], @NO);
+
+  NSDictionary<NSString *, id> *artifacts = [ALNDataverseCodegen renderArtifactsFromMetadata:normalized
+                                                                                  classPrefix:@"ALNDV"
+                                                                              dataverseTarget:@"crm"
+                                                                                        error:&error];
+  XCTAssertNil(error);
+  XCTAssertNotNil(artifacts);
+
+  NSString *header = [artifacts[@"header"] isKindOfClass:[NSString class]] ? artifacts[@"header"] : @"";
+  NSString *implementation =
+      [artifacts[@"implementation"] isKindOfClass:[NSString class]] ? artifacts[@"implementation"] : @"";
+
+  XCTAssertTrue([header containsString:@"+ (NSArray<NSString *> *)selectableFields;"]);
+  XCTAssertTrue([header containsString:@"+ (NSArray<NSString *> *)nonSelectableFields;"]);
+  XCTAssertTrue([header containsString:@"+ (NSString *)fieldSynactOffer;"]);
+  XCTAssertTrue([header containsString:@"+ (NSString *)fieldSynactProspect;"]);
+  XCTAssertTrue([header containsString:@"+ (NSString *)fieldSynactReferenceid;"]);
+  XCTAssertTrue([header containsString:@"+ (NSString *)nonSelectableFieldSynactOffername;"]);
+  XCTAssertTrue([header containsString:@"+ (NSString *)nonSelectableFieldSynactProspectname;"]);
+  XCTAssertFalse([header containsString:@"+ (NSString *)fieldSynactOffername;"]);
+  XCTAssertFalse([header containsString:@"+ (NSString *)fieldSynactProspectname;"]);
+
+  XCTAssertTrue([implementation containsString:@"@\"synact_offer\", @\"synact_prospect\", @\"synact_referenceid\""]);
+  XCTAssertTrue([implementation containsString:@"@\"synact_offername\", @\"synact_prospectname\""]);
+  XCTAssertEqual((NSUInteger)1,
+                 DataverseMetadataCountOccurrences(implementation,
+                                                   @"+ (NSString *)nonSelectableFieldSynactOffername { return @\"synact_offername\"; }"));
+  XCTAssertEqual((NSUInteger)1,
+                 DataverseMetadataCountOccurrences(implementation,
+                                                   @"+ (NSString *)nonSelectableFieldSynactProspectname { return @\"synact_prospectname\"; }"));
+
+  NSDictionary *manifest = ALNTestJSONDictionaryFromString(artifacts[@"manifest"], &error);
+  XCTAssertNil(error);
+  NSDictionary *manifestLead = [manifest[@"entities"] isKindOfClass:[NSArray class]] ? [manifest[@"entities"] firstObject] : nil;
+  XCTAssertNotNil(manifestLead);
+  XCTAssertEqualObjects(manifestLead[@"selectable_attribute_count"], @5);
+  XCTAssertEqualObjects(manifestLead[@"non_selectable_attribute_count"], @2);
+  NSArray *manifestAttributes = [manifestLead[@"attributes"] isKindOfClass:[NSArray class]] ? manifestLead[@"attributes"] : @[];
+  NSDictionary *manifestOfferName = nil;
+  for (NSDictionary *attribute in manifestAttributes) {
+    if ([attribute[@"logical_name"] isEqualToString:@"synact_offername"]) {
+      manifestOfferName = attribute;
+      break;
+    }
+  }
+  XCTAssertNotNil(manifestOfferName);
+  XCTAssertEqualObjects(manifestOfferName[@"method_name"], @"nonSelectableFieldSynactOffername");
+  XCTAssertEqualObjects(manifestOfferName[@"selectable"], @NO);
+  XCTAssertEqualObjects(manifestOfferName[@"attribute_of"], @"synact_offer");
 }
 
 - (void)testDataverseCodegenCLIFromFixture {

@@ -2,8 +2,11 @@
 
 Date: `2026-04-02`
 
-This note records the upstream Arlen assessment of the OwnerConnect report in
-`../OwnerConnect/docs/bugs/2026-04-02-arlen-dataverse-codegen-polymorphic-lookup-collision.md`.
+This note records the upstream Arlen assessment of the OwnerConnect Dataverse
+reports filed on `2026-04-02`, including:
+
+- `../OwnerConnect/docs/bugs/2026-04-02-arlen-dataverse-codegen-polymorphic-lookup-collision.md`
+- `../OwnerConnect/docs/bugs/2026-04-02-arlen-dataverse-codegen-nonselectable-lookup-name-fields.md`
 
 Ownership rule:
 
@@ -17,8 +20,11 @@ Ownership rule:
 | OwnerConnect report | Upstream status | Evidence |
 | --- | --- | --- |
 | Dataverse codegen polymorphic lookup collision | fixed in current workspace; awaiting downstream revalidation | `src/Arlen/Data/ALNDataverseCodegen.m`, `tests/unit/DataverseMetadataTests.m`, `tests/fixtures/phase23/dataverse_polymorphic_entitydefinitions.json`, `docs/DATAVERSE.md` |
+| Dataverse codegen emits non-selectable lookup-name fields as normal attributes | fixed in current workspace; awaiting downstream revalidation | `src/Arlen/Data/ALNDataverseMetadata.m`, `src/Arlen/Data/ALNDataverseCodegen.m`, `tests/unit/DataverseMetadataTests.m`, `tests/fixtures/phase23/dataverse_nonselectable_lookup_name_entitydefinitions.json`, `docs/DATAVERSE.md` |
 
 ## Notes
+
+### Polymorphic Lookup Collision
 
 - Upstream reproduced the failure with a focused fixture that includes multiple
   `ManyToOneRelationships` sharing one referencing attribute, such as
@@ -44,3 +50,26 @@ Ownership rule:
 - Downstream revalidation should regenerate the affected OwnerConnect
   Dataverse artifacts and remove the local workaround once the generated output
   compiles without hand edits.
+
+### Non-Selectable Lookup Name Fields
+
+- Upstream reproduced the failure class with a focused fixture that marks
+  lookup-derived `*name` attributes as `AttributeOf=<lookup>` and
+  `IsValidODataAttribute=false`.
+- Root cause:
+  - metadata normalization preserved `IsValidForRead`, but not the stricter
+    Web API selectability signal from `IsValidODataAttribute` / `AttributeOf`
+  - codegen therefore emitted lookup-derived logical name fields as ordinary
+    `field...` helpers, which implied they were safe for a normal `$select`
+- Current upstream behavior:
+  - metadata normalization now records `attribute_of` and `odata_selectable`
+    for attributes
+  - generated `field...` helpers now mean Web-API-selectable attributes
+  - non-selectable logical helpers now move under `nonSelectableField...`
+    and the class exposes explicit `selectableFields` /
+    `nonSelectableFields` lists
+- Regression coverage:
+  - `DataverseMetadataTests::testDataverseCodegenSeparatesNonSelectableLookupNameFields`
+- Downstream revalidation should regenerate the affected OwnerConnect
+  Dataverse artifacts and remove the manual safe-select workaround once the
+  regenerated helpers make the split explicit.

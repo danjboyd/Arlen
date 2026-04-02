@@ -1,0 +1,121 @@
+{
+  "value": [
+    {
+      "LogicalName": "lead",
+      "SchemaName": "Lead",
+      "EntitySetName": "leads",
+      "PrimaryIdAttribute": "leadid",
+      "PrimaryNameAttribute": "fullname",
+      "Attributes": [
+        {
+          "LogicalName": "leadid",
+          "SchemaName": "LeadId",
+          "AttributeType": "Uniqueidentifier",
+          "AttributeTypeName": { "Value": "UniqueidentifierType" },
+          "IsPrimaryId": true,
+          "IsLogical": false,
+          "IsValidForCreate": false,
+          "IsValidForRead": true,
+          "IsValidForUpdate": false,
+          "IsValidODataAttribute": true,
+          "Targets": []
+        },
+        {
+          "LogicalName": "fullname",
+          "SchemaName": "FullName",
+          "AttributeType": "String",
+          "AttributeTypeName": { "Value": "StringType" },
+          "IsLogical": false,
+          "IsValidForCreate": true,
+          "IsValidForRead": true,
+          "IsValidForUpdate": true,
+          "IsValidODataAttribute": true,
+          "Targets": []
+        },
+        {
+          "LogicalName": "synact_referenceid",
+          "SchemaName": "synact_ReferenceId",
+          "AttributeType": "String",
+          "AttributeTypeName": { "Value": "StringType" },
+          "IsLogical": false,
+          "IsValidForCreate": true,
+          "IsValidForRead": true,
+          "IsValidForUpdate": true,
+          "IsValidODataAttribute": true,
+          "Targets": []
+        },
+        {
+          "LogicalName": "synact_offer",
+          "SchemaName": "synact_Offer",
+          "AttributeType": "Lookup",
+          "AttributeTypeName": { "Value": "LookupType" },
+          "IsLogical": false,
+          "IsValidForCreate": true,
+          "IsValidForRead": true,
+          "IsValidForUpdate": true,
+          "IsValidODataAttribute": true,
+          "Targets": [
+            "synact_offer"
+          ]
+        },
+        {
+          "LogicalName": "synact_offername",
+          "SchemaName": "synact_OfferName",
+          "AttributeType": "String",
+          "AttributeTypeName": { "Value": "StringType" },
+          "AttributeOf": "synact_offer",
+          "IsLogical": true,
+          "IsValidForCreate": false,
+          "IsValidForRead": true,
+          "IsValidForUpdate": false,
+          "IsValidODataAttribute": false,
+          "Targets": []
+        },
+        {
+          "LogicalName": "synact_prospect",
+          "SchemaName": "synact_Prospect",
+          "AttributeType": "Lookup",
+          "AttributeTypeName": { "Value": "LookupType" },
+          "IsLogical": false,
+          "IsValidForCreate": true,
+          "IsValidForRead": true,
+          "IsValidForUpdate": true,
+          "IsValidODataAttribute": true,
+          "Targets": [
+            "synact_prospect"
+          ]
+        },
+        {
+          "LogicalName": "synact_prospectname",
+          "SchemaName": "synact_ProspectName",
+          "AttributeType": "String",
+          "AttributeTypeName": { "Value": "StringType" },
+          "AttributeOf": "synact_prospect",
+          "IsLogical": true,
+          "IsValidForCreate": false,
+          "IsValidForRead": true,
+          "IsValidForUpdate": false,
+          "IsValidODataAttribute": false,
+          "Targets": []
+        }
+      ],
+      "Keys": [],
+      "ManyToOneRelationships": [
+        {
+          "SchemaName": "lead_synact_offer",
+          "ReferencingAttribute": "synact_offer",
+          "ReferencingEntityNavigationPropertyName": "synact_Offer",
+          "ReferencedEntity": "synact_offer",
+          "ReferencedAttribute": "synact_offerid"
+        },
+        {
+          "SchemaName": "lead_synact_prospect",
+          "ReferencingAttribute": "synact_prospect",
+          "ReferencingEntityNavigationPropertyName": "synact_Prospect",
+          "ReferencedEntity": "synact_prospect",
+          "ReferencedAttribute": "synact_prospectid"
+        }
+      ]
+    }
+  ]
+}

@@ -223,6 +223,11 @@ Generated helpers expose:
 - logical names and entity-set names
 - primary id/name attributes
 - alternate keys
+- `field...` helpers for Web-API-selectable attributes
+- `nonSelectableField...` helpers for lookup-derived/logical attributes that
+  Dataverse does not allow in a normal `$select`
+- `selectableFields` and `nonSelectableFields` lists so apps can build safe
+  select projections programmatically
 - singular lookup navigation maps for unambiguous lookup attributes
 - `lookupNavigationTargetsMap` for all lookup attributes, including
   polymorphic lookups
@@ -236,6 +241,11 @@ For polymorphic lookups, Arlen intentionally keeps the singular
 `lookupNavigationMap` conservative. Ambiguous lookup attributes are omitted
 from that map rather than collapsing multiple Dataverse navigation targets down
 to one arbitrary value.
+
+For lookup-derived `*name` fields and similar logical attributes, Arlen now
+keeps the generated naming explicit as well. If the live Web API marks an
+attribute as not OData-selectable, Arlen emits it under
+`nonSelectableField...` and excludes it from `selectableFields`.
 
 ## 6. Example Path
 

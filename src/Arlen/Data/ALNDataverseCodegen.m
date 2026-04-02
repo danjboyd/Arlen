@@ -111,6 +111,18 @@ static NSString *ALNDataverseCodegenNavigationMethodName(NSString *identifier) {
                                     ALNDataverseCodegenPascalSuffix(identifier)];
 }
 
+static NSString *ALNDataverseCodegenFieldMethodNameForAttribute(NSDictionary<NSString *, id> *attribute) {
+  NSString *attributeName = ALNDataverseCodegenTrimmedString(attribute[@"logical_name"]);
+  NSString *methodSuffix = ALNDataverseCodegenPascalSuffix(attributeName);
+  BOOL selectable = YES;
+  if (attribute[@"odata_selectable"] != nil && attribute[@"odata_selectable"] != [NSNull null]) {
+    selectable = [attribute[@"odata_selectable"] boolValue];
+  }
+  return [NSString stringWithFormat:@"%@%@",
+                                     selectable ? @"field" : @"nonSelectableField",
+                                     methodSuffix];
+}
+
 static NSString *ALNDataverseCodegenEnumCaseName(NSString *label, NSInteger fallbackValue) {
   NSString *suffix = ALNDataverseCodegenPascalSuffix(label);
   if ([suffix isEqualToString:@"Value"]) {
@@ -205,6 +217,8 @@ NSError *ALNDataverseCodegenMakeError(ALNDataverseCodegenErrorCode code,
     [header appendString:@"+ (NSArray<NSArray<NSString *> *> *)alternateKeys;\n"];
     [header appendString:@"+ (NSDictionary<NSString *, NSString *> *)lookupNavigationMap;\n"];
     [header appendString:@"+ (NSDictionary<NSString *, NSArray<NSString *> *> *)lookupNavigationTargetsMap;\n"];
+    [header appendString:@"+ (NSArray<NSString *> *)selectableFields;\n"];
+    [header appendString:@"+ (NSArray<NSString *> *)nonSelectableFields;\n"];
 
     NSMutableArray<NSDictionary<NSString *, id> *> *manifestAttributes = [NSMutableArray array];
     NSMutableArray<NSDictionary<NSString *, id> *> *manifestChoices = [NSMutableArray array];
@@ -215,14 +229,21 @@ NSError *ALNDataverseCodegenMakeError(ALNDataverseCodegenErrorCode code,
     NSMutableDictionary<NSString *, NSMutableArray<NSDictionary<NSString *, id> *> *> *lookupGroups =
         [NSMutableDictionary dictionary];
     NSMutableArray<NSString *> *lookupAttributeOrder = [NSMutableArray array];
+    NSMutableArray<NSString *> *selectableAttributeExpressions = [NSMutableArray array];
+    NSMutableArray<NSString *> *nonSelectableAttributeExpressions = [NSMutableArray array];
     attributeCount += [attributes count];
     for (NSDictionary<NSString *, id> *attribute in attributes) {
       NSString *attributeName = ALNDataverseCodegenTrimmedString(attribute[@"logical_name"]);
       if ([attributeName length] == 0) {
         continue;
       }
+      BOOL selectable = YES;
+      if (attribute[@"odata_selectable"] != nil && attribute[@"odata_selectable"] != [NSNull null]) {
+        selectable = [attribute[@"odata_selectable"] boolValue];
+      }
+      NSString *attributeOf = ALNDataverseCodegenTrimmedString(attribute[@"attribute_of"]);
       NSString *methodSuffix = ALNDataverseCodegenPascalSuffix(attributeName);
-      NSString *fieldMethod = [NSString stringWithFormat:@"field%@", methodSuffix];
+      NSString *fieldMethod = ALNDataverseCodegenFieldMethodNameForAttribute(attribute);
       if ([methodNames containsObject:fieldMethod]) {
         if (error != NULL) {
           *error = ALNDataverseCodegenMakeError(ALNDataverseCodegenErrorIdentifierCollision,
@@ -236,11 +257,20 @@ NSError *ALNDataverseCodegenMakeError(ALNDataverseCodegenErrorCode code,
       }
       [methodNames addObject:fieldMethod];
       [header appendFormat:@"+ (NSString *)%@;\n", fieldMethod];
-      [manifestAttributes addObject:@{
-        @"logical_name" : attributeName,
-        @"method_name" : fieldMethod,
-        @"type" : ALNDataverseCodegenTrimmedString(attribute[@"type"]) ?: @"",
-      }];
+      NSMutableDictionary<NSString *, id> *manifestAttribute = [NSMutableDictionary dictionary];
+      manifestAttribute[@"logical_name"] = attributeName;
+      manifestAttribute[@"method_name"] = fieldMethod;
+      manifestAttribute[@"type"] = ALNDataverseCodegenTrimmedString(attribute[@"type"]) ?: @"";
+      manifestAttribute[@"selectable"] = @(selectable);
+      manifestAttribute[@"attribute_of"] = attributeOf ?: @"";
+      [manifestAttributes addObject:manifestAttribute];
+      if (selectable) {
+        [selectableAttributeExpressions addObject:[NSString stringWithFormat:@"@\"%@\"",
+                                                                             ALNDataverseCodegenJSONEscape(attributeName)]];
+      } else {
+        [nonSelectableAttributeExpressions addObject:[NSString stringWithFormat:@"@\"%@\"",
+                                                                                ALNDataverseCodegenJSONEscape(attributeName)]];
+      }
 
       NSArray<NSDictionary<NSString *, id> *> *choices =
           [attribute[@"choices"] isKindOfClass:[NSArray class]] ? attribute[@"choices"] : @[];
@@ -376,6 +406,10 @@ NSError *ALNDataverseCodegenMakeError(ALNDataverseCodegenErrorCode code,
     }
     [implementation appendFormat:@"+ (NSArray<NSArray<NSString *> *> *)alternateKeys { return @[ %@ ]; }\n",
                                  [alternateKeyExpressions componentsJoinedByString:@", "]];
+    [implementation appendFormat:@"+ (NSArray<NSString *> *)selectableFields { return @[ %@ ]; }\n",
+                                 [selectableAttributeExpressions componentsJoinedByString:@", "]];
+    [implementation appendFormat:@"+ (NSArray<NSString *> *)nonSelectableFields { return @[ %@ ]; }\n",
+                                 [nonSelectableAttributeExpressions componentsJoinedByString:@", "]];
 
     NSMutableArray<NSString *> *lookupPairs = [NSMutableArray array];
     NSMutableArray<NSString *> *lookupTargetPairs = [NSMutableArray array];
@@ -412,8 +446,7 @@ NSError *ALNDataverseCodegenMakeError(ALNDataverseCodegenErrorCode code,
       if ([attributeName length] == 0) {
         continue;
       }
-      NSString *methodSuffix = ALNDataverseCodegenPascalSuffix(attributeName);
-      NSString *fieldMethod = [NSString stringWithFormat:@"field%@", methodSuffix];
+      NSString *fieldMethod = ALNDataverseCodegenFieldMethodNameForAttribute(attribute);
       [implementation appendFormat:@"+ (NSString *)%@ { return @\"%@\"; }\n",
                                    fieldMethod,
                                    ALNDataverseCodegenJSONEscape(attributeName)];
@@ -463,6 +496,8 @@ NSError *ALNDataverseCodegenMakeError(ALNDataverseCodegenErrorCode code,
       @"attributes" : manifestAttributes,
       @"choices" : manifestChoices,
       @"lookups" : manifestLookups,
+      @"selectable_attribute_count" : @([selectableAttributeExpressions count]),
+      @"non_selectable_attribute_count" : @([nonSelectableAttributeExpressions count]),
       @"lookup_count" : @([normalizedLookups count]),
       @"alternate_key_count" : @([keys count]),
     }];

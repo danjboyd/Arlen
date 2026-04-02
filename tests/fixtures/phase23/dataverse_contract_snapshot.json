@@ -11,6 +11,8 @@
     "header_contains": [
       "@interface ALNDVAccount : NSObject",
       "+ (NSDictionary<NSString *, NSArray<NSString *> *> *)lookupNavigationTargetsMap;",
+      "+ (NSArray<NSString *> *)selectableFields;",
+      "+ (NSArray<NSString *> *)nonSelectableFields;",
       "+ (NSString *)fieldAccountid;",
       "typedef NS_ENUM(NSInteger, ALNDVAccountStatuscodeChoice)",
       "+ (NSString *)navigationPrimarycontactid;"

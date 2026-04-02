@@ -125,6 +125,11 @@ singular `lookupNavigationMap` limited to unambiguous attributes and expose the
 full target set through `lookupNavigationTargetsMap` plus
 navigation-property-specific helpers such as `navigationCustomeridAccount`.
 
+Likewise, keep Dataverse read projections on generated `field...` helpers or
+`selectableFields`. Lookup-derived logical helpers such as `...name` now emit
+under `nonSelectableField...` so the generated API no longer implies they are
+safe in a normal `$select`.
+
 ## 5. Confidence Commands
 
 ```bash
