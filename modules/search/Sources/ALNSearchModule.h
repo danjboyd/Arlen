@@ -52,6 +52,16 @@ typedef BOOL (^ALNSearchResourceBatchConsumer)(NSArray<NSDictionary *> *records,
                              application:(ALNApplication *)application
                               moduleConfig:(NSDictionary *)moduleConfig
                                    error:(NSError *_Nullable *_Nullable)error;
+- (nullable id)searchModuleBeginBuildForMetadata:(NSDictionary *)metadata
+                                      generation:(NSUInteger)generation
+                                           error:(NSError *_Nullable *_Nullable)error;
+- (BOOL)searchModuleAppendBuildRecords:(NSArray<NSDictionary *> *)records
+                              metadata:(NSDictionary *)metadata
+                                 state:(id)state
+                                 error:(NSError *_Nullable *_Nullable)error;
+- (nullable NSDictionary *)searchModuleFinalizeBuildState:(id)state
+                                                 metadata:(NSDictionary *)metadata
+                                                    error:(NSError *_Nullable *_Nullable)error;
 - (nullable NSDictionary *)searchModuleExecuteQuery:(nullable NSString *)query
                                      resourceMetadata:(NSArray<NSDictionary *> *)resourceMetadata
                                   snapshotsByResource:(NSDictionary<NSString *, NSDictionary *> *)snapshotsByResource

@@ -6,6 +6,177 @@
 #import "ALNSearchModule.h"
 #import "../shared/Phase27SearchTestSupport.h"
 
+static NSMutableDictionary<NSString *, NSMutableArray<NSNumber *> *> *Phase27StreamingBuildBatches(void) {
+  static NSMutableDictionary<NSString *, NSMutableArray<NSNumber *> *> *batches = nil;
+  if (batches == nil) {
+    batches = [NSMutableDictionary dictionary];
+  }
+  return batches;
+}
+
+static BOOL *Phase27StreamingLegacySnapshotFlag(void) {
+  static BOOL legacySnapshotCalled = NO;
+  return &legacySnapshotCalled;
+}
+
+static void Phase27ResetStreamingBuildCapture(void) {
+  [Phase27StreamingBuildBatches() removeAllObjects];
+  *Phase27StreamingLegacySnapshotFlag() = NO;
+}
+
+static NSDictionary *Phase27StreamingDocumentForRecord(NSDictionary *record, NSDictionary *metadata) {
+  NSString *identifierField = [metadata[@"identifierField"] isKindOfClass:[NSString class]] ? metadata[@"identifierField"] : @"id";
+  NSString *recordID = [record[identifierField] isKindOfClass:[NSString class]] ? record[identifierField] : @"";
+  if ([recordID length] == 0 && [record[@"recordID"] isKindOfClass:[NSString class]]) {
+    recordID = record[@"recordID"];
+  }
+  if ([recordID length] == 0) {
+    return nil;
+  }
+  NSString *primaryField = [metadata[@"primaryField"] isKindOfClass:[NSString class]] ? metadata[@"primaryField"] : identifierField;
+  NSString *summaryField = [metadata[@"summaryField"] isKindOfClass:[NSString class]] ? metadata[@"summaryField"] : @"";
+  NSString *title = [record[primaryField] isKindOfClass:[NSString class]] ? record[primaryField] : recordID;
+  NSString *summary = ([summaryField length] > 0 && [record[summaryField] isKindOfClass:[NSString class]]) ? record[summaryField] : @"";
+  return @{
+    @"resource" : metadata[@"identifier"] ?: @"",
+    @"recordID" : recordID,
+    @"title" : title ?: recordID,
+    @"summary" : summary ?: @"",
+    @"searchableText" : [NSString stringWithFormat:@"%@ %@", title ?: @"", summary ?: @""],
+    @"autocompleteText" : title ?: recordID,
+    @"fieldText" : @{},
+    @"path" : @"",
+    @"record" : [record isKindOfClass:[NSDictionary class]] ? record : @{},
+  };
+}
+
+@interface Phase27StreamingCaptureSearchEngine : NSObject <ALNSearchEngine>
+@end
+
+@implementation Phase27StreamingCaptureSearchEngine
+
+- (nullable NSDictionary *)searchModuleSnapshotForMetadata:(NSDictionary *)metadata
+                                                   records:(NSArray<NSDictionary *> *)records
+                                                generation:(NSUInteger)generation
+                                                     error:(NSError **)error {
+  *Phase27StreamingLegacySnapshotFlag() = YES;
+  id state = [self searchModuleBeginBuildForMetadata:metadata generation:generation error:error];
+  if (state == nil) {
+    return nil;
+  }
+  if (![self searchModuleAppendBuildRecords:records metadata:metadata state:state error:error]) {
+    return nil;
+  }
+  return [self searchModuleFinalizeBuildState:state metadata:metadata error:error];
+}
+
+- (nullable id)searchModuleBeginBuildForMetadata:(NSDictionary *)metadata
+                                      generation:(NSUInteger)generation
+                                           error:(NSError **)error {
+  (void)metadata;
+  (void)error;
+  return [@{
+    @"generation" : @(MAX((NSUInteger)1U, generation)),
+    @"documents" : [NSMutableArray array],
+  } mutableCopy];
+}
+
+- (BOOL)searchModuleAppendBuildRecords:(NSArray<NSDictionary *> *)records
+                              metadata:(NSDictionary *)metadata
+                                 state:(id)state
+                                 error:(NSError **)error {
+  (void)error;
+  NSMutableDictionary *buildState = [state isKindOfClass:[NSMutableDictionary class]] ? (NSMutableDictionary *)state : nil;
+  NSMutableArray *documents = [buildState[@"documents"] isKindOfClass:[NSMutableArray class]] ? buildState[@"documents"] : nil;
+  if (documents == nil) {
+    return NO;
+  }
+  NSString *identifier = [metadata[@"identifier"] isKindOfClass:[NSString class]] ? metadata[@"identifier"] : @"";
+  NSMutableArray<NSNumber *> *batches = [Phase27StreamingBuildBatches()[identifier] isKindOfClass:[NSMutableArray class]]
+                                            ? Phase27StreamingBuildBatches()[identifier]
+                                            : [NSMutableArray array];
+  [batches addObject:@([records count])];
+  Phase27StreamingBuildBatches()[identifier] = batches;
+  for (NSDictionary *record in [records isKindOfClass:[NSArray class]] ? records : @[]) {
+    NSDictionary *document = Phase27StreamingDocumentForRecord(record, metadata);
+    if (document != nil) {
+      [documents addObject:document];
+    }
+  }
+  return YES;
+}
+
+- (nullable NSDictionary *)searchModuleFinalizeBuildState:(id)state
+                                                 metadata:(NSDictionary *)metadata
+                                                    error:(NSError **)error {
+  (void)metadata;
+  (void)error;
+  NSDictionary *buildState = [state isKindOfClass:[NSDictionary class]] ? (NSDictionary *)state : @{};
+  NSArray *documents = [buildState[@"documents"] isKindOfClass:[NSArray class]] ? buildState[@"documents"] : @[];
+  NSNumber *generation = [buildState[@"generation"] respondsToSelector:@selector(unsignedIntegerValue)] ? buildState[@"generation"] : @1;
+  return @{
+    @"generation" : generation ?: @1,
+    @"builtAt" : @([[NSDate date] timeIntervalSince1970]),
+    @"documentCount" : @([documents count]),
+    @"documents" : documents ?: @[],
+  };
+}
+
+- (nullable NSDictionary *)searchModuleApplyOperation:(NSString *)operation
+                                               record:(NSDictionary *)record
+                                             metadata:(NSDictionary *)metadata
+                                      existingSnapshot:(NSDictionary *)snapshot
+                                                error:(NSError **)error {
+  (void)operation;
+  (void)record;
+  (void)metadata;
+  (void)error;
+  return snapshot ?: @{
+    @"generation" : @1,
+    @"documentCount" : @0,
+    @"documents" : @[],
+  };
+}
+
+- (nullable NSDictionary *)searchModuleExecuteQuery:(NSString *)query
+                                     resourceMetadata:(NSArray<NSDictionary *> *)resourceMetadata
+                                  snapshotsByResource:(NSDictionary<NSString *, NSDictionary *> *)snapshotsByResource
+                                              filters:(NSDictionary *)filters
+                                                 sort:(NSString *)sort
+                                                limit:(NSUInteger)limit
+                                               offset:(NSUInteger)offset
+                                                error:(NSError **)error {
+  (void)query;
+  (void)resourceMetadata;
+  (void)snapshotsByResource;
+  (void)filters;
+  (void)sort;
+  (void)limit;
+  (void)offset;
+  (void)error;
+  return @{
+    @"query" : @"",
+    @"mode" : @"search",
+    @"availableModes" : @[ @"search" ],
+    @"results" : @[],
+    @"matchedDocuments" : @[],
+    @"autocomplete" : @[],
+    @"suggestions" : @[],
+    @"total" : @0,
+    @"limit" : @(limit),
+    @"offset" : @(offset),
+  };
+}
+
+- (NSDictionary *)searchModuleCapabilities {
+  return @{
+    @"engine" : @"streaming-capture",
+    @"supportsIncrementalSync" : @YES,
+  };
+}
+
+@end
+
 @interface Phase27SearchTests : XCTestCase
 @end
 
@@ -14,6 +185,7 @@
 - (void)setUp {
   [super setUp];
   Phase27SearchResetStores();
+  Phase27ResetStreamingBuildCapture();
 }
 
 - (ALNApplication *)applicationWithConfig:(NSDictionary *)extraSearchConfig
@@ -191,6 +363,23 @@
                        queryOptions:@{ @"cursor" : @"not-supported" }
                               error:&error]);
   XCTAssertEqual(ALNSearchModuleErrorValidationFailed, error.code);
+}
+
+- (void)testReindexStreamsBuildBatchesInsteadOfUsingLegacySnapshotContract {
+  ALNApplication *app = [self applicationWithConfig:@{
+    @"engineClass" : @"Phase27StreamingCaptureSearchEngine",
+  }
+                                       database:nil];
+  [self registerModulesForApplication:app];
+
+  ALNSearchModuleRuntime *runtime = [ALNSearchModuleRuntime sharedRuntime];
+  [self seedSearchIndexesForRuntime:runtime];
+
+  NSDictionary *dashboard = [runtime dashboardSummary];
+  NSDictionary *tenantOrders = [self resourceRowNamed:@"tenant_orders" fromDashboard:dashboard];
+  XCTAssertEqualObjects(@3, tenantOrders[@"documentCount"]);
+  XCTAssertEqualObjects((@[ @2, @1 ]), Phase27StreamingBuildBatches()[@"tenant_orders"]);
+  XCTAssertFalse(*Phase27StreamingLegacySnapshotFlag());
 }
 
 - (void)testPostgresEngineSupportsFTSIncrementalSyncAndDegradedFallback {

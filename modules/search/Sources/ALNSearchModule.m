@@ -206,10 +206,35 @@ static NSString *STRecordIDFromCursor(NSString *cursor) {
   return STTrimmedString(value);
 }
 
+static NSDictionary *STHTTPDataRequest(NSString *method,
+                                       NSString *urlString,
+                                       NSDictionary *headers,
+                                       NSData *bodyData,
+                                       NSError **error);
+
 static NSDictionary *STHTTPJSONRequest(NSString *method,
                                        NSString *urlString,
                                        NSDictionary *headers,
                                        id bodyObject,
+                                       NSError **error) {
+  NSData *bodyData = nil;
+  if (bodyObject != nil && bodyObject != [NSNull null]) {
+    bodyData = STJSONDataFromObject(bodyObject, error);
+    if (bodyData == nil) {
+      return nil;
+    }
+  }
+  NSMutableDictionary *requestHeaders = [NSMutableDictionary dictionaryWithDictionary:headers ?: @{}];
+  if (bodyData != nil) {
+    requestHeaders[@"Content-Type"] = @"application/json";
+  }
+  return STHTTPDataRequest(method, urlString, requestHeaders, bodyData, error);
+}
+
+static NSDictionary *STHTTPDataRequest(NSString *method,
+                                       NSString *urlString,
+                                       NSDictionary *headers,
+                                       NSData *bodyData,
                                        NSError **error) {
   if (error != NULL) {
     *error = nil;
@@ -233,17 +258,8 @@ static NSDictionary *STHTTPJSONRequest(NSString *method,
     }
     [request setValue:value forHTTPHeaderField:key];
   }
-  if (bodyObject != nil && bodyObject != [NSNull null]) {
-    NSError *jsonError = nil;
-    NSData *body = STJSONDataFromObject(bodyObject, &jsonError);
-    if (body == nil) {
-      if (error != NULL) {
-        *error = jsonError;
-      }
-      return nil;
-    }
-    [request setValue:@"application/json" forHTTPHeaderField:@"Content-Type"];
-    [request setHTTPBody:body];
+  if ([bodyData isKindOfClass:[NSData class]] && [bodyData length] > 0) {
+    [request setHTTPBody:bodyData];
   }
   NSURLResponse *response = nil;
   NSData *data = [NSURLConnection sendSynchronousRequest:request returningResponse:&response error:error];
@@ -251,12 +267,121 @@ static NSDictionary *STHTTPJSONRequest(NSString *method,
   id object = nil;
   if ([data length] > 0) {
     object = STJSONObjectFromData(data, NULL);
+    if (object == nil) {
+      object = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding] ?: @"";
+    }
   }
   return @{
     @"status" : @([http statusCode]),
     @"headers" : [http allHeaderFields] ?: @{},
     @"body" : object ?: @{},
+    @"rawBody" : data ?: [NSData data],
   };
+}
+
+static BOOL STHTTPStatusIsSuccess(NSInteger statusCode) {
+  return (statusCode >= 200 && statusCode < 300);
+}
+
+static NSDictionary *STFilterComponentsFromRawKey(NSString *rawKey) {
+  NSString *normalizedKey = STLowerTrimmedString(rawKey);
+  NSString *field = normalizedKey;
+  NSString *operatorName = @"eq";
+  NSRange range = [normalizedKey rangeOfString:@"__"];
+  if (range.location != NSNotFound) {
+    field = [normalizedKey substringToIndex:range.location];
+    operatorName = [normalizedKey substringFromIndex:(range.location + range.length)];
+  }
+  return @{
+    @"field" : field ?: @"",
+    @"operator" : operatorName ?: @"eq",
+  };
+}
+
+static BOOL STSearchFieldTypeIsNumeric(NSString *type) {
+  NSString *normalized = STLowerTrimmedString(type);
+  return ([normalized isEqualToString:@"integer"] || [normalized isEqualToString:@"number"] ||
+          [normalized isEqualToString:@"decimal"] || [normalized isEqualToString:@"float"] ||
+          [normalized isEqualToString:@"double"]);
+}
+
+static BOOL STSearchFieldTypeIsBoolean(NSString *type) {
+  NSString *normalized = STLowerTrimmedString(type);
+  return ([normalized isEqualToString:@"boolean"] || [normalized isEqualToString:@"bool"]);
+}
+
+static NSArray *STTrimmedUniqueStringArray(id value);
+static NSString *STStringifyValue(id value);
+
+static NSString *STJSONLiteralString(id value) {
+  id payload = value;
+  if (payload == nil || payload == [NSNull null]) {
+    payload = @"";
+  }
+  if (![payload isKindOfClass:[NSString class]] && ![payload isKindOfClass:[NSNumber class]] &&
+      ![payload isKindOfClass:[NSArray class]] && ![payload isKindOfClass:[NSDictionary class]]) {
+    payload = [payload description] ?: @"";
+  }
+  NSData *data = [NSJSONSerialization dataWithJSONObject:@[ payload ] options:0 error:NULL];
+  NSString *text = [[NSString alloc] initWithData:data ?: [NSData data] encoding:NSUTF8StringEncoding] ?: @"[\"\"]";
+  if ([text length] >= 2U && [text hasPrefix:@"["] && [text hasSuffix:@"]"]) {
+    return [text substringWithRange:NSMakeRange(1U, [text length] - 2U)];
+  }
+  return @"\"\"";
+}
+
+static id STTypedSearchValue(id value, NSString *type) {
+  NSString *normalizedType = STLowerTrimmedString(type);
+  if (STSearchFieldTypeIsNumeric(normalizedType)) {
+    if ([normalizedType isEqualToString:@"integer"]) {
+      return @([STStringifyValue(value) integerValue]);
+    }
+    return @([STStringifyValue(value) doubleValue]);
+  }
+  if (STSearchFieldTypeIsBoolean(normalizedType)) {
+    return @(STBooleanValue(value, NO));
+  }
+  return STTrimmedString(value);
+}
+
+static NSArray *STTypedSearchValues(id value, NSString *type) {
+  NSMutableArray *values = [NSMutableArray array];
+  NSArray *candidates = [value isKindOfClass:[NSArray class]]
+                            ? value
+                            : STTrimmedUniqueStringArray([STTrimmedString(value) componentsSeparatedByString:@","]);
+  for (id entry in candidates) {
+    [values addObject:STTypedSearchValue(entry, type) ?: @""];
+  }
+  return values;
+}
+
+static NSDictionary *STResolvedSearchSortDescriptor(NSDictionary *metadata,
+                                                    NSString *requestedSort,
+                                                    NSString *query) {
+  NSString *resolvedSort = STLowerTrimmedString(requestedSort);
+  if ([resolvedSort length] == 0) {
+    resolvedSort = ([STTrimmedString(query) length] > 0) ? @"relevance" : STLowerTrimmedString(metadata[@"defaultSort"]);
+    if ([resolvedSort length] == 0) {
+      resolvedSort = @"relevance";
+    }
+  }
+  BOOL descending = [resolvedSort hasPrefix:@"-"];
+  NSString *field = descending ? [resolvedSort substringFromIndex:1] : resolvedSort;
+  return @{
+    @"value" : resolvedSort ?: @"",
+    @"field" : field ?: @"",
+    @"direction" : descending ? @"desc" : @"asc",
+  };
+}
+
+static BOOL STAppendNDJSONLine(NSMutableData *data, id object, NSError **error) {
+  NSData *line = STJSONDataFromObject(object, error);
+  if (line == nil) {
+    return NO;
+  }
+  [data appendData:line];
+  [data appendData:[@"\n" dataUsingEncoding:NSUTF8StringEncoding]];
+  return YES;
 }
 
 static NSString *STConfiguredPath(NSDictionary *moduleConfig, NSString *key, NSString *defaultSuffix) {
@@ -405,6 +530,13 @@ static NSString *STPercentEncodedQueryComponent(NSString *value) {
   NSCharacterSet *allowed = [NSCharacterSet URLQueryAllowedCharacterSet];
   NSMutableCharacterSet *blocked = [allowed mutableCopy];
   [blocked removeCharactersInString:@"=&+?"];
+  return [STTrimmedString(value) stringByAddingPercentEncodingWithAllowedCharacters:blocked] ?: @"";
+}
+
+static NSString *STPercentEncodedPathComponent(NSString *value) {
+  NSCharacterSet *allowed = [NSCharacterSet URLPathAllowedCharacterSet];
+  NSMutableCharacterSet *blocked = [allowed mutableCopy];
+  [blocked removeCharactersInString:@"/?#%"];
   return [STTrimmedString(value) stringByAddingPercentEncodingWithAllowedCharacters:blocked] ?: @"";
 }
 
@@ -626,6 +758,11 @@ static NSDictionary *STStatusCard(NSString *label, NSString *value, NSString *st
   isIndexableForMetadata:(NSDictionary *)metadata
               definition:(id<ALNSearchResourceDefinition>)definition
                    error:(NSError **)error;
+- (BOOL)enumerateIndexableRecordsForDefinition:(id<ALNSearchResourceDefinition>)definition
+                                      metadata:(NSDictionary *)metadata
+                                     batchSize:(NSUInteger)batchSize
+                                    usingBlock:(ALNSearchResourceBatchConsumer)consumer
+                                         error:(NSError **)error;
 - (nullable NSArray<NSDictionary *> *)recordsForDefinition:(id<ALNSearchResourceDefinition>)definition
                                                   metadata:(NSDictionary *)metadata
                                                  batchSize:(NSUInteger)batchSize
@@ -644,6 +781,18 @@ static NSDictionary *STStatusCard(NSString *label, NSString *value, NSString *st
 @end
 
 @interface ALNDefaultSearchEngine : NSObject <ALNSearchEngine>
+
+- (nullable id)searchModuleBeginBuildForMetadata:(NSDictionary *)metadata
+                                      generation:(NSUInteger)generation
+                                           error:(NSError **)error;
+- (BOOL)searchModuleAppendBuildRecords:(NSArray<NSDictionary *> *)records
+                              metadata:(NSDictionary *)metadata
+                                 state:(id)state
+                                 error:(NSError **)error;
+- (nullable NSDictionary *)searchModuleFinalizeBuildState:(id)state
+                                                 metadata:(NSDictionary *)metadata
+                                                    error:(NSError **)error;
+
 @end
 
 @interface ALNPostgresSearchEngine : ALNDefaultSearchEngine
@@ -681,8 +830,39 @@ static NSDictionary *STStatusCard(NSString *label, NSString *value, NSString *st
                                             options:(NSDictionary *)options;
 - (NSDictionary *)normalizedExternalResponse:(NSDictionary *)response
                              resourceMetadata:(NSDictionary *)metadata;
+- (NSDictionary<NSString *, NSDictionary *> *)filterMetadataByFieldForMetadata:(NSDictionary *)metadata;
+- (NSString *)fieldTypeForField:(NSString *)field metadata:(NSDictionary *)metadata;
+- (NSArray<NSString *> *)queryFieldsForMetadata:(NSDictionary *)metadata autocomplete:(BOOL)autocomplete;
+- (id)liveDocumentPayloadForDocument:(NSDictionary *)document metadata:(NSDictionary *)metadata;
+- (nullable NSDictionary *)validatedHTTPResponse:(NSDictionary *)response
+                                   allowNotFound:(BOOL)allowNotFound
+                                         message:(NSString *)message
+                                            path:(NSString *)path
+                                           error:(NSError **)error;
+- (nullable NSDictionary *)jsonRequestWithMethod:(NSString *)method
+                                            path:(NSString *)path
+                                         headers:(NSDictionary *)headers
+                                            body:(id)body
+                                   allowNotFound:(BOOL)allowNotFound
+                                         message:(NSString *)message
+                                           error:(NSError **)error;
+- (nullable NSDictionary *)dataRequestWithMethod:(NSString *)method
+                                            path:(NSString *)path
+                                         headers:(NSDictionary *)headers
+                                            body:(NSData *)body
+                                   allowNotFound:(BOOL)allowNotFound
+                                         message:(NSString *)message
+                                           error:(NSError **)error;
+- (NSArray<NSDictionary *> *)facetSummariesFromBuckets:(NSDictionary<NSString *, NSDictionary *> *)buckets
+                                              metadata:(NSDictionary *)metadata
+                                               filters:(NSDictionary *)filters;
 - (nullable NSDictionary *)performLiveSearchForIndexName:(NSString *)indexName
+                                                metadata:(NSDictionary *)metadata
                                                    query:(NSString *)query
+                                                 filters:(NSDictionary *)filters
+                                                    sort:(NSString *)sort
+                                                   limit:(NSUInteger)limit
+                                                  offset:(NSUInteger)offset
                                                  options:(NSDictionary *)options
                                                    error:(NSError **)error;
 
@@ -1298,11 +1478,29 @@ static NSDictionary *STStatusCard(NSString *label, NSString *value, NSString *st
   return candidates;
 }
 
-- (nullable NSDictionary *)searchModuleSnapshotForMetadata:(NSDictionary *)metadata
-                                                   records:(NSArray<NSDictionary *> *)records
-                                                generation:(NSUInteger)generation
-                                                     error:(NSError **)error {
-  NSMutableArray *documents = [NSMutableArray array];
+- (nullable id)searchModuleBeginBuildForMetadata:(NSDictionary *)metadata
+                                      generation:(NSUInteger)generation
+                                           error:(NSError **)error {
+  (void)metadata;
+  (void)error;
+  return [@{
+    @"generation" : @(MAX((NSUInteger)1U, generation)),
+    @"documents" : [NSMutableArray array],
+  } mutableCopy];
+}
+
+- (BOOL)searchModuleAppendBuildRecords:(NSArray<NSDictionary *> *)records
+                              metadata:(NSDictionary *)metadata
+                                 state:(id)state
+                                 error:(NSError **)error {
+  NSMutableDictionary *buildState = [state isKindOfClass:[NSMutableDictionary class]] ? (NSMutableDictionary *)state : nil;
+  NSMutableArray *documents = [buildState[@"documents"] isKindOfClass:[NSMutableArray class]] ? buildState[@"documents"] : nil;
+  if (buildState == nil || documents == nil) {
+    if (error != NULL) {
+      *error = STError(ALNSearchModuleErrorExecutionFailed, @"search engine build state is invalid", nil);
+    }
+    return NO;
+  }
   for (NSDictionary *record in STNormalizeArray(records)) {
     if (![record isKindOfClass:[NSDictionary class]]) {
       continue;
@@ -1312,16 +1510,47 @@ static NSDictionary *STStatusCard(NSString *label, NSString *value, NSString *st
       [documents addObject:document];
     }
   }
+  return YES;
+}
+
+- (nullable NSDictionary *)searchModuleFinalizeBuildState:(id)state
+                                                 metadata:(NSDictionary *)metadata
+                                                    error:(NSError **)error {
+  (void)metadata;
+  NSMutableDictionary *buildState = [state isKindOfClass:[NSMutableDictionary class]] ? (NSMutableDictionary *)state : nil;
+  NSMutableArray *documents = [buildState[@"documents"] isKindOfClass:[NSMutableArray class]] ? buildState[@"documents"] : nil;
+  NSUInteger generation = [buildState[@"generation"] respondsToSelector:@selector(unsignedIntegerValue)]
+                              ? MAX((NSUInteger)1U, [buildState[@"generation"] unsignedIntegerValue])
+                              : 1U;
+  if (buildState == nil || documents == nil) {
+    if (error != NULL) {
+      *error = STError(ALNSearchModuleErrorExecutionFailed, @"search engine build state is invalid", nil);
+    }
+    return nil;
+  }
   [documents sortUsingComparator:^NSComparisonResult(NSDictionary *lhs, NSDictionary *rhs) {
     return [STTrimmedString(lhs[@"recordID"]) compare:STTrimmedString(rhs[@"recordID"])];
   }];
-  (void)error;
   return @{
-    @"generation" : @(MAX((NSUInteger)1U, generation)),
+    @"generation" : @(generation),
     @"builtAt" : @([[NSDate date] timeIntervalSince1970]),
     @"documentCount" : @([documents count]),
     @"documents" : [NSArray arrayWithArray:documents],
   };
+}
+
+- (nullable NSDictionary *)searchModuleSnapshotForMetadata:(NSDictionary *)metadata
+                                                   records:(NSArray<NSDictionary *> *)records
+                                                generation:(NSUInteger)generation
+                                                     error:(NSError **)error {
+  id state = [self searchModuleBeginBuildForMetadata:metadata generation:generation error:error];
+  if (state == nil) {
+    return nil;
+  }
+  if (![self searchModuleAppendBuildRecords:records metadata:metadata state:state error:error]) {
+    return nil;
+  }
+  return [self searchModuleFinalizeBuildState:state metadata:metadata error:error];
 }
 
 - (nullable NSDictionary *)searchModuleApplyOperation:(NSString *)operation
@@ -1750,19 +1979,35 @@ static NSDictionary *STStatusCard(NSString *label, NSString *value, NSString *st
                                                    records:(NSArray<NSDictionary *> *)records
                                                 generation:(NSUInteger)generation
                                                      error:(NSError **)error {
-  NSDictionary *snapshot = [super searchModuleSnapshotForMetadata:metadata records:records generation:generation error:error];
+  id state = [self searchModuleBeginBuildForMetadata:metadata generation:generation error:error];
+  if (state == nil) {
+    return nil;
+  }
+  if (![self searchModuleAppendBuildRecords:records metadata:metadata state:state error:error]) {
+    return nil;
+  }
+  return [self searchModuleFinalizeBuildState:state metadata:metadata error:error];
+}
+
+- (nullable NSDictionary *)searchModuleFinalizeBuildState:(id)state
+                                                 metadata:(NSDictionary *)metadata
+                                                    error:(NSError **)error {
+  NSDictionary *snapshot = [super searchModuleFinalizeBuildState:state metadata:metadata error:error];
   if (snapshot == nil) {
     return nil;
   }
   NSString *resourceIdentifier = STLowerTrimmedString(metadata[@"identifier"]);
   NSArray *documents = STNormalizeArray(snapshot[@"documents"]);
+  NSNumber *resolvedGeneration = [snapshot[@"generation"] respondsToSelector:@selector(unsignedIntegerValue)]
+                                     ? snapshot[@"generation"]
+                                     : @1;
   if (![self ensureSchemaWithError:error]) {
     return nil;
   }
   if (![self.database withTransaction:^BOOL(ALNPgConnection *connection, NSError **txError) {
         NSString *deleteSQL = [NSString stringWithFormat:@"DELETE FROM %@ WHERE resource_identifier = $1 AND generation = $2",
                                                          self.tableName];
-        if ([connection executeCommand:deleteSQL parameters:@[ resourceIdentifier ?: @"", snapshot[@"generation"] ?: @(generation) ] error:txError] < 0) {
+        if ([connection executeCommand:deleteSQL parameters:@[ resourceIdentifier ?: @"", resolvedGeneration ] error:txError] < 0) {
           return NO;
         }
         NSString *insertSQL = [NSString stringWithFormat:
@@ -1774,7 +2019,7 @@ static NSDictionary *STStatusCard(NSString *label, NSString *value, NSString *st
         for (NSDictionary *document in documents) {
           [parameterSets addObject:@[
             resourceIdentifier ?: @"",
-            snapshot[@"generation"] ?: @(generation),
+            resolvedGeneration,
             STTrimmedString(document[@"recordID"]),
             STStringifyValue(document[@"title"]),
             STStringifyValue(document[@"summary"]),
@@ -1790,7 +2035,7 @@ static NSDictionary *STStatusCard(NSString *label, NSString *value, NSString *st
         }
         NSString *pruneSQL = [NSString stringWithFormat:@"DELETE FROM %@ WHERE resource_identifier = $1 AND generation <> $2",
                                                         self.tableName];
-        if ([connection executeCommand:pruneSQL parameters:@[ resourceIdentifier ?: @"", snapshot[@"generation"] ?: @(generation) ] error:txError] < 0) {
+        if ([connection executeCommand:pruneSQL parameters:@[ resourceIdentifier ?: @"", resolvedGeneration ] error:txError] < 0) {
           return NO;
         }
         return YES;
@@ -2125,10 +2370,175 @@ static NSDictionary *STStatusCard(NSString *label, NSString *value, NSString *st
     @"order" : order ?: @[],
     @"autocomplete" : STNormalizeArray(response[@"autocomplete"]),
     @"suggestions" : STNormalizeArray(response[@"suggestions"]),
+    @"facets" : STNormalizeArray(response[@"facets"]),
+    @"facetDistribution" : STNormalizeDictionary(response[@"facetDistribution"]),
     @"total" : [response[@"total"] respondsToSelector:@selector(unsignedIntegerValue)] ? response[@"total"] : @([hits count]),
     @"debug" : STNormalizeDictionary(response[@"debug"]),
     @"source" : ([STTrimmedString(response[@"source"]) length] > 0) ? STTrimmedString(response[@"source"]) : @"fixture",
   };
+}
+
+- (NSDictionary<NSString *, NSDictionary *> *)filterMetadataByFieldForMetadata:(NSDictionary *)metadata {
+  NSMutableDictionary<NSString *, NSDictionary *> *byField = [NSMutableDictionary dictionary];
+  for (NSDictionary *entry in STNormalizeArray(metadata[@"filters"])) {
+    NSString *field = STLowerTrimmedString(entry[@"name"]);
+    if ([field length] == 0) {
+      continue;
+    }
+    byField[field] = entry;
+  }
+  return byField;
+}
+
+- (NSString *)fieldTypeForField:(NSString *)field metadata:(NSDictionary *)metadata {
+  NSDictionary *fieldTypes = STNormalizeDictionary(metadata[@"fieldTypes"]);
+  NSString *resolved = STLowerTrimmedString(fieldTypes[STLowerTrimmedString(field)]);
+  return ([resolved length] > 0) ? resolved : @"string";
+}
+
+- (NSArray<NSString *> *)queryFieldsForMetadata:(NSDictionary *)metadata autocomplete:(BOOL)autocomplete {
+  NSArray *fields = autocomplete ? [self autocompleteFieldsForMetadata:metadata] : [self searchFieldsForMetadata:metadata];
+  return ([fields count] > 0) ? fields : @[ STLowerTrimmedString(metadata[@"primaryField"]) ?: @"id" ];
+}
+
+- (id)liveDocumentPayloadForDocument:(NSDictionary *)document metadata:(NSDictionary *)metadata {
+  NSMutableDictionary *payload = [NSMutableDictionary dictionaryWithDictionary:STNormalizeDictionary(document[@"record"])];
+  NSString *recordID = STTrimmedString(document[@"recordID"]);
+  NSString *identifierField = STLowerTrimmedString(metadata[@"identifierField"]);
+  if ([identifierField length] == 0) {
+    identifierField = @"id";
+  }
+  if ([recordID length] > 0) {
+    payload[@"recordID"] = recordID;
+    if ([STTrimmedString(payload[identifierField]) length] == 0) {
+      payload[identifierField] = recordID;
+    }
+  }
+  payload[@"resource"] = STLowerTrimmedString(metadata[@"identifier"]);
+  payload[@"title"] = STStringifyValue(document[@"title"]);
+  payload[@"summary"] = STStringifyValue(document[@"summary"]);
+  payload[@"searchableText"] = STStringifyValue(document[@"searchableText"]);
+  payload[@"autocompleteText"] = STStringifyValue(document[@"autocompleteText"]);
+  return STPropertyListValue(payload);
+}
+
+- (nullable NSDictionary *)validatedHTTPResponse:(NSDictionary *)response
+                                 allowNotFound:(BOOL)allowNotFound
+                                       message:(NSString *)message
+                                          path:(NSString *)path
+                                         error:(NSError **)error {
+  NSInteger statusCode = [response[@"status"] respondsToSelector:@selector(integerValue)] ? [response[@"status"] integerValue] : 0;
+  if (STHTTPStatusIsSuccess(statusCode) || (allowNotFound && statusCode == 404)) {
+    return response ?: @{};
+  }
+  NSString *bodyMessage = @"";
+  id body = response[@"body"];
+  if ([body isKindOfClass:[NSDictionary class]]) {
+    bodyMessage = STTrimmedString(body[@"message"]);
+    if ([bodyMessage length] == 0) {
+      bodyMessage = STTrimmedString(body[@"error"]);
+    }
+  } else {
+    bodyMessage = STTrimmedString(body);
+  }
+  if (error != NULL) {
+    *error = STError(ALNSearchModuleErrorExecutionFailed,
+                     ([bodyMessage length] > 0) ? bodyMessage : (message ?: @"search engine request failed"),
+                     @{
+                       @"engine" : [self externalEngineName] ?: @"external",
+                       @"path" : STTrimmedString(path),
+                       @"status" : @(statusCode),
+                     });
+  }
+  return nil;
+}
+
+- (nullable NSDictionary *)jsonRequestWithMethod:(NSString *)method
+                                            path:(NSString *)path
+                                         headers:(NSDictionary *)headers
+                                            body:(id)body
+                                   allowNotFound:(BOOL)allowNotFound
+                                         message:(NSString *)message
+                                           error:(NSError **)error {
+  NSDictionary *response = STHTTPJSONRequest(method, path, headers, body, error);
+  if (response == nil) {
+    return nil;
+  }
+  return [self validatedHTTPResponse:response allowNotFound:allowNotFound message:message path:path error:error];
+}
+
+- (nullable NSDictionary *)dataRequestWithMethod:(NSString *)method
+                                            path:(NSString *)path
+                                         headers:(NSDictionary *)headers
+                                            body:(NSData *)body
+                                   allowNotFound:(BOOL)allowNotFound
+                                         message:(NSString *)message
+                                           error:(NSError **)error {
+  NSDictionary *response = STHTTPDataRequest(method, path, headers, body, error);
+  if (response == nil) {
+    return nil;
+  }
+  return [self validatedHTTPResponse:response allowNotFound:allowNotFound message:message path:path error:error];
+}
+
+- (NSArray<NSDictionary *> *)facetSummariesFromBuckets:(NSDictionary<NSString *, NSDictionary *> *)buckets
+                                              metadata:(NSDictionary *)metadata
+                                               filters:(NSDictionary *)filters {
+  NSMutableArray<NSDictionary *> *summaries = [NSMutableArray array];
+  for (NSDictionary *facet in STNormalizeArray(metadata[@"facetFields"])) {
+    NSString *fieldName = STLowerTrimmedString(facet[@"name"]);
+    NSDictionary *bucketCounts = [buckets[fieldName] isKindOfClass:[NSDictionary class]] ? buckets[fieldName] : @{};
+    if ([fieldName length] == 0 || [bucketCounts count] == 0) {
+      continue;
+    }
+    NSMutableDictionary<NSString *, NSString *> *labels = [NSMutableDictionary dictionary];
+    for (NSDictionary *choice in STNormalizeArray(facet[@"choices"])) {
+      NSString *value = STTrimmedString(choice[@"value"]);
+      if ([value length] > 0) {
+        labels[value] = ([STTrimmedString(choice[@"label"]) length] > 0) ? STTrimmedString(choice[@"label"]) : value;
+      }
+    }
+    NSMutableSet<NSString *> *selectedValues = [NSMutableSet set];
+    for (NSString *filterKey in @[ fieldName, [NSString stringWithFormat:@"%@__in", fieldName] ]) {
+      id raw = filters[filterKey];
+      if ([raw isKindOfClass:[NSArray class]]) {
+        for (NSString *value in STTrimmedUniqueStringArray(raw)) {
+          [selectedValues addObject:value];
+        }
+      } else {
+        for (NSString *value in STTrimmedUniqueStringArray([STTrimmedString(raw) componentsSeparatedByString:@","])) {
+          [selectedValues addObject:value];
+        }
+      }
+    }
+    NSArray<NSString *> *values = [[bucketCounts allKeys] sortedArrayUsingComparator:^NSComparisonResult(NSString *lhs, NSString *rhs) {
+      NSInteger left = [bucketCounts[lhs] integerValue];
+      NSInteger right = [bucketCounts[rhs] integerValue];
+      if (left != right) {
+        return (left > right) ? NSOrderedAscending : NSOrderedDescending;
+      }
+      return [lhs compare:rhs];
+    }];
+    NSMutableArray<NSDictionary *> *entries = [NSMutableArray array];
+    for (NSString *value in values) {
+      [entries addObject:@{
+        @"value" : value,
+        @"label" : labels[value] ?: value,
+        @"count" : bucketCounts[value] ?: @0,
+        @"selected" : @([selectedValues containsObject:value]),
+      }];
+    }
+    [summaries addObject:@{
+      @"resource" : STLowerTrimmedString(metadata[@"identifier"]),
+      @"resourceLabel" : metadata[@"label"] ?: STTitleCaseIdentifier(metadata[@"identifier"]),
+      @"name" : fieldName,
+      @"label" : ([STTrimmedString(facet[@"label"]) length] > 0) ? STTrimmedString(facet[@"label"]) : STTitleCaseIdentifier(fieldName),
+      @"type" : ([STLowerTrimmedString(facet[@"type"]) length] > 0) ? STLowerTrimmedString(facet[@"type"]) : @"string",
+      @"values" : entries ?: @[],
+      @"totalValues" : @([bucketCounts count]),
+    }];
+  }
+  return summaries;
 }
 
 - (BOOL)searchModuleConfigureWithRuntime:(ALNSearchModuleRuntime *)runtime
@@ -2191,11 +2601,21 @@ static NSDictionary *STStatusCard(NSString *label, NSString *value, NSString *st
 }
 
 - (nullable NSDictionary *)performLiveSearchForIndexName:(NSString *)indexName
+                                                metadata:(NSDictionary *)metadata
                                                    query:(NSString *)query
+                                                 filters:(NSDictionary *)filters
+                                                    sort:(NSString *)sort
+                                                   limit:(NSUInteger)limit
+                                                  offset:(NSUInteger)offset
                                                  options:(NSDictionary *)options
                                                    error:(NSError **)error {
   (void)indexName;
+  (void)metadata;
   (void)query;
+  (void)filters;
+  (void)sort;
+  (void)limit;
+  (void)offset;
   (void)options;
   (void)error;
   return nil;
@@ -2232,7 +2652,20 @@ static NSDictionary *STStatusCard(NSString *label, NSString *value, NSString *st
                                                    records:(NSArray<NSDictionary *> *)records
                                                 generation:(NSUInteger)generation
                                                      error:(NSError **)error {
-  NSDictionary *snapshot = [super searchModuleSnapshotForMetadata:metadata records:records generation:generation error:error];
+  id state = [self searchModuleBeginBuildForMetadata:metadata generation:generation error:error];
+  if (state == nil) {
+    return nil;
+  }
+  if (![self searchModuleAppendBuildRecords:records metadata:metadata state:state error:error]) {
+    return nil;
+  }
+  return [self searchModuleFinalizeBuildState:state metadata:metadata error:error];
+}
+
+- (nullable NSDictionary *)searchModuleFinalizeBuildState:(id)state
+                                                 metadata:(NSDictionary *)metadata
+                                                    error:(NSError **)error {
+  NSDictionary *snapshot = [super searchModuleFinalizeBuildState:state metadata:metadata error:error];
   if (snapshot == nil) {
     return nil;
   }
@@ -2241,7 +2674,7 @@ static NSDictionary *STStatusCard(NSString *label, NSString *value, NSString *st
   }
   NSUInteger documentCount = [snapshot[@"documentCount"] respondsToSelector:@selector(unsignedIntegerValue)]
                                  ? [snapshot[@"documentCount"] unsignedIntegerValue]
-                                 : [records count];
+                                 : [STNormalizeArray(snapshot[@"documents"]) count];
   NSUInteger chunkCount = (documentCount == 0U) ? 0U : ((documentCount + self.chunkSize - 1U) / self.chunkSize);
   NSMutableDictionary *engineState = [NSMutableDictionary dictionaryWithDictionary:[self externalIndexDescriptorForMetadata:metadata]];
   engineState[@"lastSyncOperation"] = @"full";
@@ -2297,12 +2730,13 @@ static NSDictionary *STStatusCard(NSString *label, NSString *value, NSString *st
                                                offset:(NSUInteger)offset
                                               options:(NSDictionary *)options
                                                 error:(NSError **)error {
+  NSUInteger fetchLimit = MAX(MAX((NSUInteger)25U, limit), (NSUInteger)200U);
   NSDictionary *base = [super searchModuleExecuteQuery:query
                                        resourceMetadata:resourceMetadata
                                     snapshotsByResource:snapshotsByResource
                                                 filters:filters
                                                    sort:sort
-                                                  limit:MAX(limit, (NSUInteger)200U)
+                                                  limit:fetchLimit
                                                  offset:0
                                                 options:options
                                                   error:error];
@@ -2311,27 +2745,38 @@ static NSDictionary *STStatusCard(NSString *label, NSString *value, NSString *st
   }
 
   NSMutableDictionary<NSString *, NSDictionary *> *documentsByKey = [NSMutableDictionary dictionary];
-  for (NSDictionary *document in STNormalizeArray(base[@"matchedDocuments"])) {
-    NSString *resourceID = STLowerTrimmedString(document[@"resource"]);
-    NSString *recordID = STTrimmedString(document[@"recordID"]);
-    if ([resourceID length] == 0 || [recordID length] == 0) {
-      continue;
+  for (NSDictionary *metadata in STNormalizeArray(resourceMetadata)) {
+    NSString *resourceID = STLowerTrimmedString(metadata[@"identifier"]);
+    NSDictionary *snapshot = STNormalizeDictionary(snapshotsByResource[resourceID]);
+    for (NSDictionary *document in STNormalizeArray(snapshot[@"documents"])) {
+      NSString *recordID = STTrimmedString(document[@"recordID"]);
+      if ([resourceID length] == 0 || [recordID length] == 0) {
+        continue;
+      }
+      documentsByKey[[NSString stringWithFormat:@"%@:%@", resourceID, recordID]] = document;
     }
-    documentsByKey[[NSString stringWithFormat:@"%@:%@", resourceID, recordID]] = document;
   }
 
   NSMutableArray *engineOrdered = [NSMutableArray array];
   NSMutableSet *seen = [NSMutableSet set];
+  NSMutableSet *externalizedResources = [NSMutableSet set];
   NSMutableArray *debugEntries = [NSMutableArray array];
-  NSMutableOrderedSet *autocomplete = [NSMutableOrderedSet orderedSetWithArray:STNormalizeArray(base[@"autocomplete"])];
-  NSMutableOrderedSet *suggestions = [NSMutableOrderedSet orderedSetWithArray:STNormalizeArray(base[@"suggestions"])];
+  NSMutableArray *externalFacets = [NSMutableArray array];
+  NSMutableOrderedSet *autocomplete = [NSMutableOrderedSet orderedSet];
+  NSMutableOrderedSet *suggestions = [NSMutableOrderedSet orderedSet];
+  NSUInteger externalTotal = 0U;
 
   for (NSDictionary *metadata in STNormalizeArray(resourceMetadata)) {
     NSString *resourceID = STLowerTrimmedString(metadata[@"identifier"]);
     NSDictionary *response = [self fixtureResponseForOperation:@"query" resourceID:resourceID query:query options:options ?: @{}];
     if ([response count] == 0 && self.liveRequestsEnabled) {
       NSDictionary *live = [self performLiveSearchForIndexName:[self externalIndexNameForMetadata:metadata]
+                                                      metadata:metadata
                                                          query:query
+                                                       filters:filters ?: @{}
+                                                          sort:sort
+                                                         limit:fetchLimit
+                                                        offset:0U
                                                        options:options ?: @{}
                                                          error:NULL];
       response = live ?: @{};
@@ -2340,7 +2785,18 @@ static NSDictionary *STStatusCard(NSString *label, NSString *value, NSString *st
       continue;
     }
 
+    [externalizedResources addObject:resourceID];
     NSDictionary *normalized = [self normalizedExternalResponse:response resourceMetadata:metadata];
+    externalTotal += [normalized[@"total"] respondsToSelector:@selector(unsignedIntegerValue)] ? [normalized[@"total"] unsignedIntegerValue] : 0U;
+    NSArray *resourceFacets = STNormalizeArray(normalized[@"facets"]);
+    if ([resourceFacets count] == 0) {
+      resourceFacets = [self facetSummariesFromBuckets:STNormalizeDictionary(normalized[@"facetDistribution"])
+                                             metadata:metadata
+                                              filters:filters ?: @{}];
+    }
+    if ([resourceFacets count] > 0) {
+      [externalFacets addObjectsFromArray:resourceFacets];
+    }
     NSArray *hits = STNormalizeArray(normalized[@"hits"]);
     if ([hits count] == 0) {
       NSMutableArray *synthesized = [NSMutableArray array];
@@ -2373,11 +2829,36 @@ static NSDictionary *STStatusCard(NSString *label, NSString *value, NSString *st
     }];
   }
 
-  NSArray *orderedMatches = ([engineOrdered count] > 0) ? engineOrdered : STNormalizeArray(base[@"matchedDocuments"]);
-  if ([engineOrdered count] > 0) {
+  if ([externalizedResources count] == 0U) {
+    NSMutableDictionary *fallback = [NSMutableDictionary dictionaryWithDictionary:base];
+    fallback[@"debug"] = @{
+      @"adapter" : [self externalEngineName] ?: @"external",
+      @"source" : @"local_fallback",
+      @"entries" : @[],
+    };
+    return fallback;
+  }
+
+  if ([externalizedResources count] < [resourceMetadata count]) {
+    for (NSString *value in STNormalizeArray(base[@"autocomplete"])) {
+      [autocomplete addObject:value];
+    }
+    for (NSString *value in STNormalizeArray(base[@"suggestions"])) {
+      [suggestions addObject:value];
+    }
+  }
+
+  NSArray *orderedMatches = engineOrdered;
+  NSUInteger fallbackTotal = 0U;
+  if ([externalizedResources count] < [resourceMetadata count]) {
     NSMutableArray *tail = [NSMutableArray array];
     for (NSDictionary *document in STNormalizeArray(base[@"matchedDocuments"])) {
-      NSString *key = [NSString stringWithFormat:@"%@:%@", STLowerTrimmedString(document[@"resource"]), STTrimmedString(document[@"recordID"])];
+      NSString *resourceID = STLowerTrimmedString(document[@"resource"]);
+      if ([externalizedResources containsObject:resourceID]) {
+        continue;
+      }
+      fallbackTotal += 1U;
+      NSString *key = [NSString stringWithFormat:@"%@:%@", resourceID, STTrimmedString(document[@"recordID"])];
       if ([seen containsObject:key]) {
         continue;
       }
@@ -2415,13 +2896,14 @@ static NSDictionary *STStatusCard(NSString *label, NSString *value, NSString *st
     @"matchedDocuments" : orderedMatches ?: @[],
     @"autocomplete" : [autocomplete array] ?: @[],
     @"suggestions" : [suggestions array] ?: @[],
-    @"total" : @([orderedMatches count]),
+    @"facets" : externalFacets ?: @[],
+    @"total" : @((externalTotal > 0U || [externalizedResources count] > 0U) ? (externalTotal + fallbackTotal) : [orderedMatches count]),
     @"limit" : @(resolvedLimit),
     @"offset" : @(requestedCursor.length > 0 ? 0U : offset),
     @"nextCursor" : nextCursor ?: @"",
     @"debug" : @{
       @"adapter" : [self externalEngineName] ?: @"external",
-      @"source" : ([debugEntries count] > 0) ? @"external" : @"local_fallback",
+      @"source" : ([externalizedResources count] == [resourceMetadata count]) ? @"external" : @"mixed",
       @"entries" : debugEntries ?: @[],
     },
   };
@@ -2469,10 +2951,22 @@ static NSDictionary *STStatusCard(NSString *label, NSString *value, NSString *st
 
 - (NSDictionary *)externalIndexDescriptorForMetadata:(NSDictionary *)metadata {
   NSMutableDictionary *descriptor = [NSMutableDictionary dictionaryWithDictionary:[super externalIndexDescriptorForMetadata:metadata]];
-  NSArray *filterable = [[[STNormalizeArray(metadata[@"filters"]) valueForKey:@"name"] ?: @[] copy] sortedArrayUsingSelector:@selector(compare:)];
+  NSMutableOrderedSet<NSString *> *filterable = [NSMutableOrderedSet orderedSet];
+  for (NSDictionary *entry in STNormalizeArray(metadata[@"filters"])) {
+    NSString *name = STLowerTrimmedString(entry[@"name"]);
+    if ([name length] > 0) {
+      [filterable addObject:name];
+    }
+  }
+  for (NSDictionary *entry in STNormalizeArray(metadata[@"facetFields"])) {
+    NSString *name = STLowerTrimmedString(entry[@"name"]);
+    if ([name length] > 0) {
+      [filterable addObject:name];
+    }
+  }
   NSArray *sortable = [[[STNormalizeArray(metadata[@"sorts"]) valueForKey:@"name"] ?: @[] copy] sortedArrayUsingSelector:@selector(compare:)];
   descriptor[@"settings"] = @{
-    @"filterableAttributes" : filterable ?: @[],
+    @"filterableAttributes" : [[filterable array] sortedArrayUsingSelector:@selector(compare:)] ?: @[],
     @"sortableAttributes" : sortable ?: @[],
     @"searchableAttributes" : metadata[@"searchFields"] ?: @[],
     @"displayedAttributes" : metadata[@"resultFields"] ?: @[],
@@ -2483,32 +2977,261 @@ static NSDictionary *STStatusCard(NSString *label, NSString *value, NSString *st
   return descriptor;
 }
 
+- (NSDictionary *)meilisearchHeaders {
+  NSMutableDictionary *headers = [NSMutableDictionary dictionary];
+  if ([self.apiKey length] > 0) {
+    headers[@"Authorization"] = [NSString stringWithFormat:@"Bearer %@", self.apiKey];
+  }
+  return headers;
+}
+
+- (NSArray<NSString *> *)meilisearchFilterExpressionsForMetadata:(NSDictionary *)metadata
+                                                         filters:(NSDictionary *)filters {
+  NSMutableArray<NSString *> *expressions = [NSMutableArray array];
+  NSDictionary<NSString *, NSDictionary *> *filterMetadata = [self filterMetadataByFieldForMetadata:metadata];
+  NSArray<NSString *> *keys = [[filters allKeys] sortedArrayUsingSelector:@selector(compare:)];
+  for (NSString *rawKey in keys) {
+    NSDictionary *components = STFilterComponentsFromRawKey(rawKey);
+    NSString *field = STLowerTrimmedString(components[@"field"]);
+    NSString *operatorName = STLowerTrimmedString(components[@"operator"]);
+    NSDictionary *entry = filterMetadata[field];
+    if ([field length] == 0 || entry == nil) {
+      continue;
+    }
+    NSString *type = ([STLowerTrimmedString(entry[@"type"]) length] > 0) ? STLowerTrimmedString(entry[@"type"]) : [self fieldTypeForField:field metadata:metadata];
+    id rawValue = filters[rawKey];
+    if ([operatorName isEqualToString:@"in"]) {
+      NSArray *values = STTypedSearchValues(rawValue, type);
+      if ([values count] == 0U) {
+        continue;
+      }
+      NSMutableArray<NSString *> *literals = [NSMutableArray array];
+      for (id value in values) {
+        [literals addObject:STJSONLiteralString(value)];
+      }
+      [expressions addObject:[NSString stringWithFormat:@"%@ IN [%@]", field, [literals componentsJoinedByString:@", "]]];
+      continue;
+    }
+    NSString *symbol = @"=";
+    if ([operatorName isEqualToString:@"gt"]) {
+      symbol = @">";
+    } else if ([operatorName isEqualToString:@"gte"]) {
+      symbol = @">=";
+    } else if ([operatorName isEqualToString:@"lt"]) {
+      symbol = @"<";
+    } else if ([operatorName isEqualToString:@"lte"]) {
+      symbol = @"<=";
+    } else if ([operatorName isEqualToString:@"contains"]) {
+      symbol = @"CONTAINS";
+    }
+    [expressions addObject:[NSString stringWithFormat:@"%@ %@ %@",
+                                                      field,
+                                                      symbol,
+                                                      STJSONLiteralString(STTypedSearchValue(rawValue, type))]];
+  }
+  return expressions;
+}
+
+- (NSArray<NSString *> *)meilisearchSortExpressionsForMetadata:(NSDictionary *)metadata
+                                                          sort:(NSString *)sort
+                                                         query:(NSString *)query {
+  NSDictionary *descriptor = STResolvedSearchSortDescriptor(metadata, sort, query);
+  NSString *field = STLowerTrimmedString(descriptor[@"field"]);
+  if ([field length] == 0 || [field isEqualToString:@"relevance"]) {
+    return @[];
+  }
+  return @[ [NSString stringWithFormat:@"%@:%@", field, descriptor[@"direction"] ?: @"asc"] ];
+}
+
+- (BOOL)syncLiveSnapshotForMetadata:(NSDictionary *)metadata
+                           snapshot:(NSDictionary *)snapshot
+                              error:(NSError **)error {
+  NSString *baseURL = [self.serviceURL stringByTrimmingCharactersInSet:[NSCharacterSet characterSetWithCharactersInString:@"/"]];
+  NSString *indexName = [self externalIndexNameForMetadata:metadata];
+  NSString *primaryKey = STLowerTrimmedString(metadata[@"identifierField"]);
+  if ([primaryKey length] == 0) {
+    primaryKey = @"recordID";
+  }
+  NSDictionary *headers = [self meilisearchHeaders];
+  NSString *indexesPath = [NSString stringWithFormat:@"%@/indexes", baseURL];
+  NSString *indexPath = [NSString stringWithFormat:@"%@/%@", indexesPath, STPercentEncodedPathComponent(indexName)];
+  if ([self jsonRequestWithMethod:@"DELETE"
+                             path:indexPath
+                          headers:headers
+                             body:nil
+                    allowNotFound:YES
+                          message:@"Meilisearch index reset failed"
+                            error:error] == nil) {
+    return NO;
+  }
+  if ([self jsonRequestWithMethod:@"POST"
+                             path:indexesPath
+                          headers:headers
+                             body:@{
+                               @"uid" : indexName ?: @"",
+                               @"primaryKey" : primaryKey ?: @"recordID",
+                             }
+                    allowNotFound:NO
+                          message:@"Meilisearch index creation failed"
+                            error:error] == nil) {
+    return NO;
+  }
+  NSDictionary *settings = STNormalizeDictionary([self externalIndexDescriptorForMetadata:metadata][@"settings"]);
+  if ([settings count] > 0 &&
+      [self jsonRequestWithMethod:@"PATCH"
+                             path:[NSString stringWithFormat:@"%@/settings", indexPath]
+                          headers:headers
+                             body:settings
+                    allowNotFound:NO
+                          message:@"Meilisearch settings sync failed"
+                            error:error] == nil) {
+    return NO;
+  }
+  NSArray *documents = STNormalizeArray(snapshot[@"documents"]);
+  for (NSUInteger index = 0U; index < [documents count]; index += self.chunkSize) {
+    NSUInteger length = MIN(self.chunkSize, [documents count] - index);
+    NSArray *chunk = [documents subarrayWithRange:NSMakeRange(index, length)];
+    NSMutableArray *payload = [NSMutableArray arrayWithCapacity:[chunk count]];
+    for (NSDictionary *document in chunk) {
+      [payload addObject:[self liveDocumentPayloadForDocument:document metadata:metadata] ?: @{}];
+    }
+    NSString *path = [NSString stringWithFormat:@"%@/documents?primaryKey=%@",
+                                                indexPath,
+                                                STPercentEncodedQueryComponent(primaryKey)];
+    if ([self jsonRequestWithMethod:@"POST"
+                               path:path
+                            headers:headers
+                               body:payload
+                      allowNotFound:NO
+                            message:@"Meilisearch document sync failed"
+                              error:error] == nil) {
+      return NO;
+    }
+  }
+  return YES;
+}
+
+- (BOOL)syncLiveOperation:(NSString *)operation
+                   record:(NSDictionary *)record
+                 metadata:(NSDictionary *)metadata
+                 snapshot:(NSDictionary *)snapshot
+                    error:(NSError **)error {
+  (void)snapshot;
+  NSString *baseURL = [self.serviceURL stringByTrimmingCharactersInSet:[NSCharacterSet characterSetWithCharactersInString:@"/"]];
+  NSString *indexName = [self externalIndexNameForMetadata:metadata];
+  NSString *indexPath = [NSString stringWithFormat:@"%@/indexes/%@",
+                                                   baseURL,
+                                                   STPercentEncodedPathComponent(indexName)];
+  NSDictionary *headers = [self meilisearchHeaders];
+  NSString *identifierField = STLowerTrimmedString(metadata[@"identifierField"]);
+  if ([identifierField length] == 0) {
+    identifierField = @"recordID";
+  }
+  NSString *recordID = STTrimmedString(record[identifierField]);
+  if ([recordID length] == 0) {
+    recordID = STTrimmedString(record[@"recordID"]);
+  }
+  if ([recordID length] == 0) {
+    if (error != NULL) {
+      *error = STError(ALNSearchModuleErrorValidationFailed,
+                       @"search record is missing an identifier for Meilisearch sync",
+                       @{ @"resource" : metadata[@"identifier"] ?: @"" });
+    }
+    return NO;
+  }
+  if ([[STLowerTrimmedString(operation) lowercaseString] isEqualToString:@"delete"]) {
+    NSString *path = [NSString stringWithFormat:@"%@/documents/%@",
+                                                indexPath,
+                                                STPercentEncodedPathComponent(recordID)];
+    return ([self jsonRequestWithMethod:@"DELETE"
+                                   path:path
+                                headers:headers
+                                   body:nil
+                          allowNotFound:YES
+                                message:@"Meilisearch document delete failed"
+                                  error:error] != nil);
+  }
+  NSDictionary *document = [self normalizedDocumentForRecord:record metadata:metadata];
+  if (document == nil) {
+    if (error != NULL) {
+      *error = STError(ALNSearchModuleErrorValidationFailed,
+                       @"search record could not be normalized for Meilisearch sync",
+                       @{ @"resource" : metadata[@"identifier"] ?: @"" });
+    }
+    return NO;
+  }
+  NSString *path = [NSString stringWithFormat:@"%@/documents?primaryKey=%@",
+                                              indexPath,
+                                              STPercentEncodedQueryComponent(identifierField)];
+  return ([self jsonRequestWithMethod:@"POST"
+                                 path:path
+                              headers:headers
+                                 body:@[ [self liveDocumentPayloadForDocument:document metadata:metadata] ?: @{} ]
+                        allowNotFound:NO
+                              message:@"Meilisearch document upsert failed"
+                                error:error] != nil);
+}
+
 - (nullable NSDictionary *)performLiveSearchForIndexName:(NSString *)indexName
+                                                metadata:(NSDictionary *)metadata
                                                    query:(NSString *)query
+                                                 filters:(NSDictionary *)filters
+                                                    sort:(NSString *)sort
+                                                   limit:(NSUInteger)limit
+                                                  offset:(NSUInteger)offset
                                                  options:(NSDictionary *)options
                                                    error:(NSError **)error {
   if (!self.liveRequestsEnabled) {
     return nil;
   }
+  NSString *baseURL = [self.serviceURL stringByTrimmingCharactersInSet:[NSCharacterSet characterSetWithCharactersInString:@"/"]];
   NSString *path = [NSString stringWithFormat:@"%@/indexes/%@/search",
-                                              [self.serviceURL stringByTrimmingCharactersInSet:[NSCharacterSet characterSetWithCharactersInString:@"/"]],
-                                              indexName ?: @""];
-  NSMutableDictionary *headers = [NSMutableDictionary dictionary];
-  if ([self.apiKey length] > 0) {
-    headers[@"Authorization"] = [NSString stringWithFormat:@"Bearer %@", self.apiKey];
+                                              baseURL,
+                                              STPercentEncodedPathComponent(indexName)];
+  NSMutableDictionary *payload = [NSMutableDictionary dictionary];
+  payload[@"q"] = STTrimmedString(query);
+  payload[@"limit"] = @(MAX((NSUInteger)1U, limit));
+  payload[@"offset"] = @(offset);
+  payload[@"attributesToSearchOn"] = [self queryFieldsForMetadata:metadata
+                                                     autocomplete:[[self normalizedQueryModeFromOptions:options metadata:metadata] isEqualToString:@"autocomplete"]];
+  NSArray *filtersPayload = [self meilisearchFilterExpressionsForMetadata:metadata filters:filters ?: @{}];
+  if ([filtersPayload count] > 0) {
+    payload[@"filter"] = filtersPayload;
   }
-  NSDictionary *response = STHTTPJSONRequest(@"POST",
-                                             path,
-                                             headers,
-                                             @{
-                                               @"q" : STTrimmedString(query),
-                                               @"limit" : @([options[@"limit"] respondsToSelector:@selector(unsignedIntegerValue)] ? [options[@"limit"] unsignedIntegerValue] : 25U),
-                                             },
-                                             error);
+  NSArray *sortPayload = [self meilisearchSortExpressionsForMetadata:metadata sort:sort query:query];
+  if ([sortPayload count] > 0) {
+    payload[@"sort"] = sortPayload;
+  }
+  NSArray *highlightFields = [self highlightFieldsForMetadata:metadata];
+  if ([highlightFields count] > 0) {
+    payload[@"attributesToHighlight"] = highlightFields;
+  }
+  NSArray *facetFields = STNormalizedStringArray([STNormalizeArray(metadata[@"facetFields"]) valueForKey:@"name"]);
+  if ([facetFields count] > 0) {
+    payload[@"facets"] = facetFields;
+  }
+  payload[@"showRankingScore"] = @YES;
+  NSDictionary *response = [self jsonRequestWithMethod:@"POST"
+                                                  path:path
+                                               headers:[self meilisearchHeaders]
+                                                  body:payload
+                                         allowNotFound:NO
+                                               message:@"Meilisearch search failed"
+                                                 error:error];
+  if (response == nil) {
+    return nil;
+  }
   NSDictionary *body = STNormalizeDictionary(response[@"body"]);
+  NSString *identifierField = STLowerTrimmedString(metadata[@"identifierField"]);
+  if ([identifierField length] == 0) {
+    identifierField = @"recordID";
+  }
   NSMutableArray *hits = [NSMutableArray array];
   for (NSDictionary *entry in STNormalizeArray(body[@"hits"])) {
     NSString *recordID = STTrimmedString(entry[@"recordID"]);
+    if ([recordID length] == 0) {
+      recordID = STTrimmedString(entry[identifierField]);
+    }
     if ([recordID length] == 0) {
       continue;
     }
@@ -2518,17 +3241,33 @@ static NSDictionary *STStatusCard(NSString *label, NSString *value, NSString *st
       hit[@"score"] = @([entry[@"_rankingScore"] doubleValue] * 100.0);
     }
     NSDictionary *formatted = STNormalizeDictionary(entry[@"_formatted"]);
-    if ([STTrimmedString(formatted[@"summary"]) length] > 0) {
-      hit[@"highlights"] = @[ STTrimmedString(formatted[@"summary"]) ];
+    NSMutableArray<NSString *> *highlights = [NSMutableArray array];
+    NSMutableArray<NSString *> *matchedFields = [NSMutableArray array];
+    for (NSString *field in [self highlightFieldsForMetadata:metadata]) {
+      NSString *value = STTrimmedString(formatted[field]);
+      if ([value length] == 0) {
+        continue;
+      }
+      [highlights addObject:value];
+      [matchedFields addObject:field];
+    }
+    if ([highlights count] > 0) {
+      hit[@"highlights"] = highlights;
+    }
+    if ([matchedFields count] > 0) {
+      hit[@"matchedFields"] = matchedFields;
     }
     [hits addObject:hit];
   }
   return @{
     @"source" : @"live",
     @"hits" : hits ?: @[],
-    @"total" : body[@"estimatedTotalHits"] ?: @([hits count]),
+    @"total" : body[@"estimatedTotalHits"] ?: body[@"totalHits"] ?: @([hits count]),
+    @"facetDistribution" : STNormalizeDictionary(body[@"facetDistribution"]),
     @"debug" : @{
       @"httpStatus" : response[@"status"] ?: @0,
+      @"path" : path ?: @"",
+      @"payload" : payload ?: @{},
     },
   };
 }
@@ -2572,14 +3311,38 @@ static NSDictionary *STStatusCard(NSString *label, NSString *value, NSString *st
   NSDictionary *fieldTypes = STNormalizeDictionary(metadata[@"fieldTypes"]);
   for (NSString *field in STNormalizeArray(metadata[@"indexedFields"])) {
     NSString *type = STLowerTrimmedString(fieldTypes[field]);
-    if ([type isEqualToString:@"integer"] || [type isEqualToString:@"number"]) {
+    if ([type isEqualToString:@"integer"]) {
       properties[field] = @{ @"type" : @"integer" };
-    } else if ([type isEqualToString:@"boolean"]) {
+    } else if (STSearchFieldTypeIsNumeric(type)) {
+      properties[field] = @{ @"type" : @"double" };
+    } else if (STSearchFieldTypeIsBoolean(type)) {
       properties[field] = @{ @"type" : @"boolean" };
     } else {
-      properties[field] = @{ @"type" : @"text" };
+      properties[field] = @{
+        @"type" : @"text",
+        @"fields" : @{
+          @"keyword" : @{
+            @"type" : @"keyword",
+            @"ignore_above" : @256,
+          },
+        },
+      };
     }
   }
+  properties[@"recordID"] = @{ @"type" : @"keyword" };
+  properties[@"resource"] = @{ @"type" : @"keyword" };
+  properties[@"title"] = @{
+    @"type" : @"text",
+    @"fields" : @{
+      @"keyword" : @{
+        @"type" : @"keyword",
+        @"ignore_above" : @256,
+      },
+    },
+  };
+  properties[@"summary"] = @{ @"type" : @"text" };
+  properties[@"searchableText"] = @{ @"type" : @"text" };
+  properties[@"autocompleteText"] = @{ @"type" : @"text" };
   descriptor[@"mappings"] = @{ @"properties" : properties ?: @{} };
   descriptor[@"analysis"] = STNormalizeDictionary(self.engineConfig[@"analysis"]);
   descriptor[@"aliases"] = STNormalizeArray(self.engineConfig[@"aliases"]);
@@ -2587,36 +3350,367 @@ static NSDictionary *STStatusCard(NSString *label, NSString *value, NSString *st
   return descriptor;
 }
 
+- (NSDictionary *)openSearchHeaders {
+  NSMutableDictionary *headers = [NSMutableDictionary dictionary];
+  if ([self.apiKey length] > 0) {
+    headers[@"Authorization"] = [NSString stringWithFormat:@"ApiKey %@", self.apiKey];
+  }
+  return headers;
+}
+
+- (NSString *)openSearchExactFieldNameForField:(NSString *)field metadata:(NSDictionary *)metadata {
+  NSString *type = [self fieldTypeForField:field metadata:metadata];
+  if (STSearchFieldTypeIsNumeric(type) || STSearchFieldTypeIsBoolean(type) ||
+      [field isEqualToString:@"recordid"] || [field isEqualToString:@"resource"]) {
+    return field;
+  }
+  return [NSString stringWithFormat:@"%@.keyword", field];
+}
+
+- (NSArray<NSString *> *)openSearchQueryFieldsForMetadata:(NSDictionary *)metadata
+                                                    mode:(NSString *)mode {
+  BOOL autocomplete = [mode isEqualToString:@"autocomplete"];
+  NSArray *fields = [self queryFieldsForMetadata:metadata autocomplete:autocomplete];
+  NSDictionary *weights = STNormalizeDictionary(metadata[@"weightedFields"]);
+  NSMutableArray<NSString *> *resolved = [NSMutableArray array];
+  for (NSString *field in fields) {
+    NSUInteger weight = [weights[field] respondsToSelector:@selector(unsignedIntegerValue)]
+                            ? MAX((NSUInteger)1U, [weights[field] unsignedIntegerValue])
+                            : 1U;
+    if (weight > 1U) {
+      [resolved addObject:[NSString stringWithFormat:@"%@^%lu", field, (unsigned long)weight]];
+    } else {
+      [resolved addObject:field];
+    }
+  }
+  return ([resolved count] > 0) ? resolved : @[ @"searchableText" ];
+}
+
+- (NSArray<NSDictionary *> *)openSearchFilterClausesForMetadata:(NSDictionary *)metadata
+                                                        filters:(NSDictionary *)filters {
+  NSMutableArray<NSDictionary *> *clauses = [NSMutableArray array];
+  NSDictionary<NSString *, NSDictionary *> *filterMetadata = [self filterMetadataByFieldForMetadata:metadata];
+  NSArray<NSString *> *keys = [[filters allKeys] sortedArrayUsingSelector:@selector(compare:)];
+  for (NSString *rawKey in keys) {
+    NSDictionary *components = STFilterComponentsFromRawKey(rawKey);
+    NSString *field = STLowerTrimmedString(components[@"field"]);
+    NSString *operatorName = STLowerTrimmedString(components[@"operator"]);
+    NSDictionary *entry = filterMetadata[field];
+    if ([field length] == 0 || entry == nil) {
+      continue;
+    }
+    NSString *type = ([STLowerTrimmedString(entry[@"type"]) length] > 0) ? STLowerTrimmedString(entry[@"type"]) : [self fieldTypeForField:field metadata:metadata];
+    id rawValue = filters[rawKey];
+    if ([operatorName isEqualToString:@"contains"]) {
+      [clauses addObject:@{
+        @"match_phrase" : @{
+          field : STTrimmedString(rawValue),
+        },
+      }];
+      continue;
+    }
+    if ([operatorName isEqualToString:@"in"]) {
+      NSArray *values = STTypedSearchValues(rawValue, type);
+      if ([values count] == 0U) {
+        continue;
+      }
+      [clauses addObject:@{
+        @"terms" : @{
+          [self openSearchExactFieldNameForField:field metadata:metadata] : values,
+        },
+      }];
+      continue;
+    }
+    if ([operatorName isEqualToString:@"gt"] || [operatorName isEqualToString:@"gte"] ||
+        [operatorName isEqualToString:@"lt"] || [operatorName isEqualToString:@"lte"]) {
+      [clauses addObject:@{
+        @"range" : @{
+          field : @{
+            operatorName : STTypedSearchValue(rawValue, type),
+          },
+        },
+      }];
+      continue;
+    }
+    [clauses addObject:@{
+      @"term" : @{
+        [self openSearchExactFieldNameForField:field metadata:metadata] : STTypedSearchValue(rawValue, type),
+      },
+    }];
+  }
+  return clauses;
+}
+
+- (NSArray<NSDictionary *> *)openSearchSortClausesForMetadata:(NSDictionary *)metadata
+                                                         sort:(NSString *)sort
+                                                        query:(NSString *)query {
+  NSDictionary *descriptor = STResolvedSearchSortDescriptor(metadata, sort, query);
+  NSString *field = STLowerTrimmedString(descriptor[@"field"]);
+  if ([field length] == 0 || [field isEqualToString:@"relevance"]) {
+    return @[];
+  }
+  return @[
+    @{
+      [self openSearchExactFieldNameForField:field metadata:metadata] : @{
+        @"order" : descriptor[@"direction"] ?: @"asc",
+      },
+    },
+  ];
+}
+
+- (NSDictionary *)openSearchTextQueryForMetadata:(NSDictionary *)metadata
+                                           query:(NSString *)query
+                                            mode:(NSString *)mode {
+  NSString *normalizedQuery = STTrimmedString(query);
+  if ([normalizedQuery length] == 0) {
+    return @{ @"match_all" : @{} };
+  }
+  NSMutableDictionary *multiMatch = [NSMutableDictionary dictionary];
+  multiMatch[@"query"] = normalizedQuery;
+  multiMatch[@"fields"] = [self openSearchQueryFieldsForMetadata:metadata mode:mode];
+  if ([mode isEqualToString:@"phrase"]) {
+    multiMatch[@"type"] = @"phrase";
+  } else if ([mode isEqualToString:@"autocomplete"]) {
+    multiMatch[@"type"] = @"bool_prefix";
+  } else if ([mode isEqualToString:@"fuzzy"]) {
+    multiMatch[@"fuzziness"] = @"AUTO";
+  }
+  return @{ @"multi_match" : multiMatch };
+}
+
+- (BOOL)syncLiveSnapshotForMetadata:(NSDictionary *)metadata
+                           snapshot:(NSDictionary *)snapshot
+                              error:(NSError **)error {
+  NSString *baseURL = [self.serviceURL stringByTrimmingCharactersInSet:[NSCharacterSet characterSetWithCharactersInString:@"/"]];
+  NSString *indexName = [self externalIndexNameForMetadata:metadata];
+  NSString *indexPath = [NSString stringWithFormat:@"%@/%@", baseURL, STPercentEncodedPathComponent(indexName)];
+  NSDictionary *headers = [self openSearchHeaders];
+  if ([self jsonRequestWithMethod:@"DELETE"
+                             path:indexPath
+                          headers:headers
+                             body:nil
+                    allowNotFound:YES
+                          message:@"OpenSearch index reset failed"
+                            error:error] == nil) {
+    return NO;
+  }
+  NSDictionary *descriptor = [self externalIndexDescriptorForMetadata:metadata];
+  NSMutableDictionary *payload = [NSMutableDictionary dictionary];
+  NSDictionary *analysis = STNormalizeDictionary(descriptor[@"analysis"]);
+  if ([analysis count] > 0) {
+    payload[@"settings"] = @{ @"analysis" : analysis };
+  }
+  NSDictionary *mappings = STNormalizeDictionary(descriptor[@"mappings"]);
+  if ([mappings count] > 0) {
+    payload[@"mappings"] = mappings;
+  }
+  NSMutableDictionary *aliases = [NSMutableDictionary dictionary];
+  for (NSString *alias in STNormalizedStringArray(descriptor[@"aliases"])) {
+    aliases[alias] = @{};
+  }
+  if ([aliases count] > 0) {
+    payload[@"aliases"] = aliases;
+  }
+  if ([self jsonRequestWithMethod:@"PUT"
+                             path:indexPath
+                          headers:headers
+                             body:payload
+                    allowNotFound:NO
+                          message:@"OpenSearch index creation failed"
+                            error:error] == nil) {
+    return NO;
+  }
+
+  NSArray *documents = STNormalizeArray(snapshot[@"documents"]);
+  for (NSUInteger index = 0U; index < [documents count]; index += self.chunkSize) {
+    NSUInteger length = MIN(self.chunkSize, [documents count] - index);
+    NSArray *chunk = [documents subarrayWithRange:NSMakeRange(index, length)];
+    NSMutableData *body = [NSMutableData data];
+    for (NSDictionary *document in chunk) {
+      NSString *recordID = STTrimmedString(document[@"recordID"]);
+      if ([recordID length] == 0) {
+        continue;
+      }
+      if (!STAppendNDJSONLine(body,
+                              @{
+                                @"index" : @{
+                                  @"_index" : indexName ?: @"",
+                                  @"_id" : recordID ?: @"",
+                                },
+                              },
+                              error)) {
+        return NO;
+      }
+      if (!STAppendNDJSONLine(body, [self liveDocumentPayloadForDocument:document metadata:metadata] ?: @{}, error)) {
+        return NO;
+      }
+    }
+    NSMutableDictionary *bulkHeaders = [NSMutableDictionary dictionaryWithDictionary:headers ?: @{}];
+    bulkHeaders[@"Content-Type"] = @"application/x-ndjson";
+    NSDictionary *response = [self dataRequestWithMethod:@"POST"
+                                                    path:[NSString stringWithFormat:@"%@/_bulk?refresh=true", indexPath]
+                                                 headers:bulkHeaders
+                                                    body:body
+                                           allowNotFound:NO
+                                                 message:@"OpenSearch bulk sync failed"
+                                                   error:error];
+    if (response == nil) {
+      return NO;
+    }
+    if ([STNormalizeDictionary(response[@"body"])[@"errors"] boolValue]) {
+      if (error != NULL) {
+        *error = STError(ALNSearchModuleErrorExecutionFailed,
+                         @"OpenSearch bulk sync returned partial failures",
+                         @{
+                           @"engine" : @"opensearch",
+                           @"indexName" : indexName ?: @"",
+                         });
+      }
+      return NO;
+    }
+  }
+  return YES;
+}
+
+- (BOOL)syncLiveOperation:(NSString *)operation
+                   record:(NSDictionary *)record
+                 metadata:(NSDictionary *)metadata
+                 snapshot:(NSDictionary *)snapshot
+                    error:(NSError **)error {
+  (void)snapshot;
+  NSString *baseURL = [self.serviceURL stringByTrimmingCharactersInSet:[NSCharacterSet characterSetWithCharactersInString:@"/"]];
+  NSString *indexName = [self externalIndexNameForMetadata:metadata];
+  NSString *identifierField = STLowerTrimmedString(metadata[@"identifierField"]);
+  if ([identifierField length] == 0) {
+    identifierField = @"recordID";
+  }
+  NSString *recordID = STTrimmedString(record[identifierField]);
+  if ([recordID length] == 0) {
+    recordID = STTrimmedString(record[@"recordID"]);
+  }
+  if ([recordID length] == 0) {
+    if (error != NULL) {
+      *error = STError(ALNSearchModuleErrorValidationFailed,
+                       @"search record is missing an identifier for OpenSearch sync",
+                       @{ @"resource" : metadata[@"identifier"] ?: @"" });
+    }
+    return NO;
+  }
+  NSString *documentPath = [NSString stringWithFormat:@"%@/%@/_doc/%@?refresh=true",
+                                                      baseURL,
+                                                      STPercentEncodedPathComponent(indexName),
+                                                      STPercentEncodedPathComponent(recordID)];
+  if ([[STLowerTrimmedString(operation) lowercaseString] isEqualToString:@"delete"]) {
+    return ([self jsonRequestWithMethod:@"DELETE"
+                                   path:documentPath
+                                headers:[self openSearchHeaders]
+                                   body:nil
+                          allowNotFound:YES
+                                message:@"OpenSearch document delete failed"
+                                  error:error] != nil);
+  }
+  NSDictionary *document = [self normalizedDocumentForRecord:record metadata:metadata];
+  if (document == nil) {
+    if (error != NULL) {
+      *error = STError(ALNSearchModuleErrorValidationFailed,
+                       @"search record could not be normalized for OpenSearch sync",
+                       @{ @"resource" : metadata[@"identifier"] ?: @"" });
+    }
+    return NO;
+  }
+  return ([self jsonRequestWithMethod:@"PUT"
+                                 path:documentPath
+                              headers:[self openSearchHeaders]
+                                 body:[self liveDocumentPayloadForDocument:document metadata:metadata] ?: @{}
+                        allowNotFound:NO
+                              message:@"OpenSearch document upsert failed"
+                                error:error] != nil);
+}
+
 - (nullable NSDictionary *)performLiveSearchForIndexName:(NSString *)indexName
+                                                metadata:(NSDictionary *)metadata
                                                    query:(NSString *)query
+                                                 filters:(NSDictionary *)filters
+                                                    sort:(NSString *)sort
+                                                   limit:(NSUInteger)limit
+                                                  offset:(NSUInteger)offset
                                                  options:(NSDictionary *)options
                                                    error:(NSError **)error {
   if (!self.liveRequestsEnabled) {
     return nil;
   }
+  NSString *baseURL = [self.serviceURL stringByTrimmingCharactersInSet:[NSCharacterSet characterSetWithCharactersInString:@"/"]];
   NSString *path = [NSString stringWithFormat:@"%@/%@/_search",
-                                              [self.serviceURL stringByTrimmingCharactersInSet:[NSCharacterSet characterSetWithCharactersInString:@"/"]],
-                                              indexName ?: @""];
-  NSMutableDictionary *headers = [NSMutableDictionary dictionary];
-  if ([self.apiKey length] > 0) {
-    headers[@"Authorization"] = [NSString stringWithFormat:@"ApiKey %@", self.apiKey];
+                                              baseURL,
+                                              STPercentEncodedPathComponent(indexName)];
+  NSString *mode = [self normalizedQueryModeFromOptions:options metadata:metadata];
+  NSMutableDictionary *payload = [NSMutableDictionary dictionary];
+  payload[@"size"] = @(MAX((NSUInteger)1U, limit));
+  payload[@"from"] = @(offset);
+  payload[@"track_total_hits"] = @YES;
+  NSMutableDictionary *boolQuery = [NSMutableDictionary dictionary];
+  NSArray *filterClauses = [self openSearchFilterClausesForMetadata:metadata filters:filters ?: @{}];
+  if ([filterClauses count] > 0) {
+    boolQuery[@"filter"] = filterClauses;
   }
-  NSDictionary *payload = @{
-    @"size" : @([options[@"limit"] respondsToSelector:@selector(unsignedIntegerValue)] ? [options[@"limit"] unsignedIntegerValue] : 25U),
-    @"query" : @{
-      @"multi_match" : @{
-        @"query" : STTrimmedString(query),
-        @"fields" : @[ @"searchableText", @"title^3", @"summary^2" ],
+  NSDictionary *textQuery = [self openSearchTextQueryForMetadata:metadata query:query mode:mode];
+  if ([textQuery count] > 0) {
+    boolQuery[@"must"] = @[ textQuery ];
+  }
+  payload[@"query"] = @{ @"bool" : boolQuery };
+  NSArray *sortClauses = [self openSearchSortClausesForMetadata:metadata sort:sort query:query];
+  if ([sortClauses count] > 0) {
+    payload[@"sort"] = sortClauses;
+  }
+  NSArray *highlightFields = [self highlightFieldsForMetadata:metadata];
+  if ([STTrimmedString(query) length] > 0 && [highlightFields count] > 0) {
+    NSMutableDictionary *highlightConfig = [NSMutableDictionary dictionary];
+    NSMutableDictionary *highlightFieldsConfig = [NSMutableDictionary dictionary];
+    for (NSString *field in highlightFields) {
+      highlightFieldsConfig[field] = @{};
+    }
+    highlightConfig[@"fields"] = highlightFieldsConfig;
+    payload[@"highlight"] = highlightConfig;
+  }
+  NSMutableDictionary *aggregations = [NSMutableDictionary dictionary];
+  for (NSDictionary *facet in STNormalizeArray(metadata[@"facetFields"])) {
+    NSString *field = STLowerTrimmedString(facet[@"name"]);
+    if ([field length] == 0) {
+      continue;
+    }
+    NSUInteger facetLimit = [facet[@"limit"] respondsToSelector:@selector(unsignedIntegerValue)]
+                                ? MAX((NSUInteger)1U, [facet[@"limit"] unsignedIntegerValue])
+                                : 10U;
+    aggregations[field] = @{
+      @"terms" : @{
+        @"field" : [self openSearchExactFieldNameForField:field metadata:metadata],
+        @"size" : @(facetLimit),
       },
-    },
-  };
-  NSDictionary *response = STHTTPJSONRequest(@"POST", path, headers, payload, error);
+    };
+  }
+  if ([aggregations count] > 0) {
+    payload[@"aggs"] = aggregations;
+  }
+
+  NSDictionary *response = [self jsonRequestWithMethod:@"POST"
+                                                  path:path
+                                               headers:[self openSearchHeaders]
+                                                  body:payload
+                                         allowNotFound:NO
+                                               message:@"OpenSearch search failed"
+                                                 error:error];
+  if (response == nil) {
+    return nil;
+  }
   NSDictionary *body = STNormalizeDictionary(response[@"body"]);
   NSArray *hitsPayload = STNormalizeArray(STNormalizeDictionary(body[@"hits"])[@"hits"]);
   NSMutableArray *hits = [NSMutableArray array];
   for (NSDictionary *entry in hitsPayload) {
     NSDictionary *source = STNormalizeDictionary(entry[@"_source"]);
     NSString *recordID = STTrimmedString(source[@"recordID"]);
+    if ([recordID length] == 0) {
+      recordID = STTrimmedString(source[metadata[@"identifierField"] ?: @"id"]);
+    }
     if ([recordID length] == 0) {
       continue;
     }
@@ -2626,18 +3720,55 @@ static NSDictionary *STStatusCard(NSString *label, NSString *value, NSString *st
       hit[@"score"] = @([entry[@"_score"] doubleValue] * 10.0);
     }
     NSDictionary *highlight = STNormalizeDictionary(entry[@"highlight"]);
-    NSArray *summaryHighlights = STNormalizeArray(highlight[@"summary"]);
-    if ([summaryHighlights count] > 0) {
-      hit[@"highlights"] = summaryHighlights;
+    NSMutableArray<NSString *> *highlightValues = [NSMutableArray array];
+    NSMutableArray<NSString *> *matchedFields = [NSMutableArray array];
+    for (NSString *field in [highlight allKeys]) {
+      NSArray *values = STNormalizeArray(highlight[field]);
+      if ([values count] == 0U) {
+        continue;
+      }
+      [highlightValues addObjectsFromArray:values];
+      [matchedFields addObject:field];
+    }
+    if ([highlightValues count] > 0) {
+      hit[@"highlights"] = highlightValues;
+    }
+    if ([matchedFields count] > 0) {
+      hit[@"matchedFields"] = matchedFields;
     }
     [hits addObject:hit];
+  }
+  NSMutableDictionary *facetDistribution = [NSMutableDictionary dictionary];
+  for (NSString *field in [STNormalizeDictionary(body[@"aggregations"]) allKeys]) {
+    NSDictionary *aggregation = STNormalizeDictionary(body[@"aggregations"])[field];
+    NSMutableDictionary *counts = [NSMutableDictionary dictionary];
+    for (NSDictionary *bucket in STNormalizeArray(aggregation[@"buckets"])) {
+      NSString *value = STTrimmedString(bucket[@"key_as_string"]);
+      if ([value length] == 0) {
+        value = STTrimmedString(bucket[@"key"]);
+      }
+      if ([value length] == 0) {
+        continue;
+      }
+      counts[value] = bucket[@"doc_count"] ?: @0;
+    }
+    if ([counts count] > 0) {
+      facetDistribution[field] = counts;
+    }
+  }
+  id totalValue = STNormalizeDictionary(STNormalizeDictionary(body[@"hits"])[@"total"])[@"value"];
+  if (![totalValue respondsToSelector:@selector(unsignedIntegerValue)]) {
+    totalValue = STNormalizeDictionary(body[@"hits"])[@"total"];
   }
   return @{
     @"source" : @"live",
     @"hits" : hits ?: @[],
-    @"total" : STNormalizeDictionary(body[@"hits"])[@"total"][@"value"] ?: @([hits count]),
+    @"total" : totalValue ?: @([hits count]),
+    @"facetDistribution" : facetDistribution ?: @{},
     @"debug" : @{
       @"httpStatus" : response[@"status"] ?: @0,
+      @"path" : path ?: @"",
+      @"payload" : payload ?: @{},
     },
   };
 }
@@ -3733,21 +4864,53 @@ static NSDictionary *STStatusCard(NSString *label, NSString *value, NSString *st
   [self.lock unlock];
   (void)[self persistStateWithError:NULL];
 
-  NSError *loadError = nil;
-  NSArray *records = [self recordsForDefinition:definition metadata:metadata batchSize:batchSize error:&loadError];
-  if (records == nil) {
-    if (error != NULL) {
-      *error = loadError ?: STError(ALNSearchModuleErrorExecutionFailed,
-                                    @"search resource failed to build documents",
-                                    @{ @"resource" : resourceIdentifier });
+  NSDictionary *snapshot = nil;
+  __block NSUInteger enumeratedDocumentCount = 0U;
+  __block NSUInteger importedBatchCount = 0U;
+  BOOL supportsStreamingBuild = [self.engine respondsToSelector:@selector(searchModuleBeginBuildForMetadata:generation:error:)] &&
+                                [self.engine respondsToSelector:@selector(searchModuleAppendBuildRecords:metadata:state:error:)] &&
+                                [self.engine respondsToSelector:@selector(searchModuleFinalizeBuildState:metadata:error:)];
+  if (supportsStreamingBuild) {
+    id buildState = [(id<ALNSearchEngine>)self.engine searchModuleBeginBuildForMetadata:metadata generation:generation error:error];
+    if (buildState == nil) {
+      return nil;
     }
-    return nil;
+    if (![self enumerateIndexableRecordsForDefinition:definition
+                                             metadata:metadata
+                                            batchSize:batchSize
+                                           usingBlock:^BOOL(NSArray<NSDictionary *> *records, NSError **batchError) {
+                                             if ([records count] == 0U) {
+                                               return YES;
+                                             }
+                                             enumeratedDocumentCount += [records count];
+                                             importedBatchCount += 1U;
+                                             return [(id<ALNSearchEngine>)self.engine searchModuleAppendBuildRecords:records
+                                                                                                          metadata:metadata
+                                                                                                             state:buildState
+                                                                                                             error:batchError];
+                                           }
+                                                error:error]) {
+      return nil;
+    }
+    snapshot = [(id<ALNSearchEngine>)self.engine searchModuleFinalizeBuildState:buildState metadata:metadata error:error];
+  } else {
+    NSError *loadError = nil;
+    NSArray *records = [self recordsForDefinition:definition metadata:metadata batchSize:batchSize error:&loadError];
+    if (records == nil) {
+      if (error != NULL) {
+        *error = loadError ?: STError(ALNSearchModuleErrorExecutionFailed,
+                                      @"search resource failed to build documents",
+                                      @{ @"resource" : resourceIdentifier });
+      }
+      return nil;
+    }
+    enumeratedDocumentCount = [records count];
+    importedBatchCount = (enumeratedDocumentCount == 0U) ? 0U : ((enumeratedDocumentCount + batchSize - 1U) / batchSize);
+    snapshot = [self.engine searchModuleSnapshotForMetadata:metadata
+                                                    records:records
+                                                 generation:generation
+                                                      error:error];
   }
-
-  NSDictionary *snapshot = [self.engine searchModuleSnapshotForMetadata:metadata
-                                                                records:records
-                                                             generation:generation
-                                                                  error:error];
   if (snapshot == nil) {
     return nil;
   }
@@ -3755,8 +4918,10 @@ static NSDictionary *STStatusCard(NSString *label, NSString *value, NSString *st
   NSTimeInterval indexedAt = [[NSDate date] timeIntervalSince1970];
   NSUInteger documentCount = [snapshot[@"documentCount"] respondsToSelector:@selector(unsignedIntegerValue)]
                                  ? [snapshot[@"documentCount"] unsignedIntegerValue]
-                                 : [records count];
-  NSUInteger batchCount = (documentCount == 0U) ? 0U : ((documentCount + batchSize - 1U) / batchSize);
+                                 : enumeratedDocumentCount;
+  NSUInteger batchCount = (importedBatchCount > 0U || documentCount == 0U)
+                              ? importedBatchCount
+                              : ((documentCount + batchSize - 1U) / batchSize);
   double duration = MAX(0.001, indexedAt - startedAt);
   NSDictionary *replay = @{};
   [self.lock lock];
@@ -4187,50 +5352,86 @@ static NSDictionary *STStatusCard(NSString *label, NSString *value, NSString *st
   return YES;
 }
 
-- (NSArray<NSDictionary *> *)recordsForDefinition:(id<ALNSearchResourceDefinition>)definition
-                                         metadata:(NSDictionary *)metadata
-                                        batchSize:(NSUInteger)batchSize
-                                            error:(NSError **)error {
-  NSMutableArray *records = [NSMutableArray array];
+- (BOOL)enumerateIndexableRecordsForDefinition:(id<ALNSearchResourceDefinition>)definition
+                                      metadata:(NSDictionary *)metadata
+                                     batchSize:(NSUInteger)batchSize
+                                    usingBlock:(ALNSearchResourceBatchConsumer)consumer
+                                         error:(NSError **)error {
+  if (consumer == nil) {
+    return YES;
+  }
+  NSUInteger resolvedBatchSize = MAX((NSUInteger)1U, batchSize);
   if (definition != nil &&
       [definition respondsToSelector:@selector(searchModuleEnumerateDocumentBatchesForRuntime:batchSize:usingBlock:error:)]) {
-    BOOL ok = [(id<ALNSearchResourceDefinition>)definition searchModuleEnumerateDocumentBatchesForRuntime:self
-                                                                                                batchSize:MAX((NSUInteger)1U, batchSize)
-                                                                                               usingBlock:^BOOL(NSArray<NSDictionary *> *batch,
-                                                                                                                NSError **batchError) {
-                                                                                                 for (NSDictionary *record in STNormalizeArray(batch)) {
-                                                                                                   if (![record isKindOfClass:[NSDictionary class]]) {
-                                                                                                     continue;
-                                                                                                   }
-                                                                                                   if (![self record:record isIndexableForMetadata:metadata definition:definition error:batchError]) {
-                                                                                                     if (batchError != NULL && *batchError != nil) {
-                                                                                                       return NO;
-                                                                                                     }
-                                                                                                     continue;
-                                                                                                   }
-                                                                                                   [records addObject:[record copy]];
+    return [(id<ALNSearchResourceDefinition>)definition searchModuleEnumerateDocumentBatchesForRuntime:self
+                                                                                              batchSize:resolvedBatchSize
+                                                                                             usingBlock:^BOOL(NSArray<NSDictionary *> *batch,
+                                                                                                              NSError **batchError) {
+                                                                                               NSMutableArray<NSDictionary *> *filtered = [NSMutableArray array];
+                                                                                               for (NSDictionary *record in STNormalizeArray(batch)) {
+                                                                                                 if (![record isKindOfClass:[NSDictionary class]]) {
+                                                                                                   continue;
                                                                                                  }
-                                                                                                 return YES;
+                                                                                                 if (![self record:record
+                                                                                                       isIndexableForMetadata:metadata
+                                                                                                                   definition:definition
+                                                                                                                        error:batchError]) {
+                                                                                                   if (batchError != NULL && *batchError != nil) {
+                                                                                                     return NO;
+                                                                                                   }
+                                                                                                   continue;
+                                                                                                 }
+                                                                                                 [filtered addObject:[record copy]];
                                                                                                }
-                                                                                                    error:error];
-    return ok ? [records copy] : nil;
+                                                                                               return consumer([filtered copy], batchError);
+                                                                                             }
+                                                                                                  error:error];
   }
 
   NSArray *loaded = [definition searchModuleDocumentsForRuntime:self error:error];
   if (loaded == nil) {
-    return nil;
+    return NO;
   }
+  NSMutableArray<NSDictionary *> *filtered = [NSMutableArray arrayWithCapacity:resolvedBatchSize];
   for (NSDictionary *record in STNormalizeArray(loaded)) {
     if (![record isKindOfClass:[NSDictionary class]]) {
       continue;
     }
     if (![self record:record isIndexableForMetadata:metadata definition:definition error:error]) {
       if (error != NULL && *error != nil) {
-        return nil;
+        return NO;
       }
       continue;
     }
-    [records addObject:[record copy]];
+    [filtered addObject:[record copy]];
+    if ([filtered count] >= resolvedBatchSize) {
+      if (!consumer([filtered copy], error)) {
+        return NO;
+      }
+      [filtered removeAllObjects];
+    }
+  }
+  if ([filtered count] > 0U && !consumer([filtered copy], error)) {
+    return NO;
+  }
+  return YES;
+}
+
+- (NSArray<NSDictionary *> *)recordsForDefinition:(id<ALNSearchResourceDefinition>)definition
+                                         metadata:(NSDictionary *)metadata
+                                        batchSize:(NSUInteger)batchSize
+                                            error:(NSError **)error {
+  NSMutableArray *records = [NSMutableArray array];
+  if (![self enumerateIndexableRecordsForDefinition:definition
+                                           metadata:metadata
+                                          batchSize:batchSize
+                                         usingBlock:^BOOL(NSArray<NSDictionary *> *batch, NSError **batchError) {
+                                           (void)batchError;
+                                           [records addObjectsFromArray:STNormalizeArray(batch)];
+                                           return YES;
+                                         }
+                                              error:error]) {
+    return nil;
   }
   return [records copy];
 }
@@ -4745,9 +5946,12 @@ static NSDictionary *STStatusCard(NSString *label, NSString *value, NSString *st
   response[@"promotedResults"] = promotedResults ?: @[];
   response[@"autocomplete"] = STNormalizeArray(result[@"autocomplete"]);
   response[@"suggestions"] = STNormalizeArray(result[@"suggestions"]);
-  response[@"facets"] = [self facetSummariesForMatchedDocuments:matchedDocuments
-                                                resourceMetadata:candidateMetadata
-                                                         filters:filters ?: @{}] ?: @[];
+  NSArray *engineFacets = STNormalizeArray(result[@"facets"]);
+  response[@"facets"] = ([engineFacets count] > 0)
+                            ? engineFacets
+                            : ([self facetSummariesForMatchedDocuments:matchedDocuments
+                                                         resourceMetadata:candidateMetadata
+                                                                  filters:filters ?: @{}] ?: @[]);
   response[@"total"] = [result[@"total"] respondsToSelector:@selector(unsignedIntegerValue)] ? result[@"total"] : @([rawResults count]);
   response[@"matchedCount"] = @([matchedDocuments count]);
   response[@"limit"] = @(resolvedLimit);
