@@ -29,6 +29,9 @@ Dataverse is intentionally not routed through `ALNDatabaseAdapter` or
 `ALNSQLBuilder`. Use the Dataverse client/query surface directly for Dataverse
 workloads, and keep using the SQL adapter path for PostgreSQL/MSSQL.
 
+The optional SQL ORM surface now lives in `src/ArlenORM/ArlenORM.h` on top of
+these contracts. See `docs/ARLEN_ORM.md` for the Phase 26 foundation.
+
 ## 2. Non-Arlen Consumption
 
 Compile only data-layer sources and import the umbrella header:
@@ -45,6 +48,13 @@ make test-data-layer
 ```
 
 `make test-data-layer` builds and runs `build/arlen-data-example` using only ArlenData sources.
+
+For the optional ORM layer on top of ArlenData, run:
+
+```bash
+source /path/to/Arlen/tools/source_gnustep_env.sh
+make phase26-orm-tests
+```
 
 For Dataverse-specific usage, config shape, and codegen examples, see
 `docs/DATAVERSE.md`.

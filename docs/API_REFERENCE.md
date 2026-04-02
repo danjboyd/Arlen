@@ -1,6 +1,6 @@
 # API Reference
 
-This reference is generated from public headers exported by `src/Arlen/Arlen.h` and `src/ArlenData/ArlenData.h`.
+This reference is generated from public headers exported by `src/Arlen/Arlen.h`, `src/ArlenData/ArlenData.h`, and `src/ArlenORM/ArlenORM.h`.
 
 Regenerate after public header changes:
 
@@ -9,15 +9,16 @@ python3 tools/docs/generate_api_reference.py
 ```
 
 - Generated from source headers and metadata (deterministic output)
-- Public headers: `58`
-- Symbols: `109`
-- Public methods: `733`
-- Public properties: `251`
+- Public headers: `81`
+- Symbols: `133`
+- Public methods: `956`
+- Public properties: `402`
 
 ## API Surface Boundary
 
 - `src/Arlen/Arlen.h` is the primary framework umbrella header.
 - `src/ArlenData/ArlenData.h` is the standalone data-layer umbrella header.
+- `src/ArlenORM/ArlenORM.h` is the optional ORM umbrella layered on ArlenData.
 
 ## Symbol Index
 
@@ -114,6 +115,33 @@ python3 tools/docs/generate_api_reference.py
 - [ALNSQLDialect](api/ALNSQLDialect.md): Protocol contract exported as part of the `ALNSQLDialect` API surface.
 - [ALNSchemaCodegen](api/ALNSchemaCodegen.md): Schema artifact generator for typed table/column contracts and optional typed decode helpers.
 
+### ORM
+
+- [ALNORMAdminResource](api/ALNORMAdminResource.md): Optional ORM APIs for reflected models, repositories, relations, and SQL-first code generation.
+- [ALNORMChangeset](api/ALNORMChangeset.md): Optional ORM APIs for reflected models, repositories, relations, and SQL-first code generation.
+- [ALNORMCodegen](api/ALNORMCodegen.md): Optional ORM APIs for reflected models, repositories, relations, and SQL-first code generation.
+- [ALNORMContext](api/ALNORMContext.md): Optional ORM APIs for reflected models, repositories, relations, and SQL-first code generation.
+- [ALNORMDataverseChangeset](api/ALNORMDataverseChangeset.md): Optional ORM APIs for reflected models, repositories, relations, and SQL-first code generation.
+- [ALNORMDataverseCodegen](api/ALNORMDataverseCodegen.md): Optional ORM APIs for reflected models, repositories, relations, and SQL-first code generation.
+- [ALNORMDataverseContext](api/ALNORMDataverseContext.md): Optional ORM APIs for reflected models, repositories, relations, and SQL-first code generation.
+- [ALNORMDataverseFieldDescriptor](api/ALNORMDataverseFieldDescriptor.md): Optional ORM APIs for reflected models, repositories, relations, and SQL-first code generation.
+- [ALNORMDataverseModel](api/ALNORMDataverseModel.md): Optional ORM APIs for reflected models, repositories, relations, and SQL-first code generation.
+- [ALNORMDataverseModelClass](api/ALNORMDataverseModelClass.md): Protocol contract exported as part of the `ALNORMDataverseModelClass` API surface.
+- [ALNORMDataverseModelDescriptor](api/ALNORMDataverseModelDescriptor.md): Optional ORM APIs for reflected models, repositories, relations, and SQL-first code generation.
+- [ALNORMDataverseRelationDescriptor](api/ALNORMDataverseRelationDescriptor.md): Optional ORM APIs for reflected models, repositories, relations, and SQL-first code generation.
+- [ALNORMDataverseRepository](api/ALNORMDataverseRepository.md): Optional ORM APIs for reflected models, repositories, relations, and SQL-first code generation.
+- [ALNORMDescriptorSnapshot](api/ALNORMDescriptorSnapshot.md): Optional ORM APIs for reflected models, repositories, relations, and SQL-first code generation.
+- [ALNORMFieldDescriptor](api/ALNORMFieldDescriptor.md): Optional ORM APIs for reflected models, repositories, relations, and SQL-first code generation.
+- [ALNORMModel](api/ALNORMModel.md): Optional ORM APIs for reflected models, repositories, relations, and SQL-first code generation.
+- [ALNORMModelClass](api/ALNORMModelClass.md): Protocol contract exported as part of the `ALNORMModelClass` API surface.
+- [ALNORMModelDescriptor](api/ALNORMModelDescriptor.md): Optional ORM APIs for reflected models, repositories, relations, and SQL-first code generation.
+- [ALNORMQuery](api/ALNORMQuery.md): Optional ORM APIs for reflected models, repositories, relations, and SQL-first code generation.
+- [ALNORMRelationDescriptor](api/ALNORMRelationDescriptor.md): Optional ORM APIs for reflected models, repositories, relations, and SQL-first code generation.
+- [ALNORMRepository](api/ALNORMRepository.md): Optional ORM APIs for reflected models, repositories, relations, and SQL-first code generation.
+- [ALNORMSchemaDrift](api/ALNORMSchemaDrift.md): Optional ORM APIs for reflected models, repositories, relations, and SQL-first code generation.
+- [ALNORMValueConverter](api/ALNORMValueConverter.md): Optional ORM APIs for reflected models, repositories, relations, and SQL-first code generation.
+- [ALNORMWriteOptions](api/ALNORMWriteOptions.md): Optional ORM APIs for reflected models, repositories, relations, and SQL-first code generation.
+
 ### Support
 
 - [ALNAttachmentAdapter](api/ALNAttachmentAdapter.md): Attachment adapter protocol for save/read/delete/list operations on binary blobs + metadata.
@@ -202,6 +230,29 @@ python3 tools/docs/generate_api_reference.py
 - `src/Arlen/MVC/Template/ALNEOCRuntime.h`
 - `src/Arlen/MVC/Template/ALNEOCTranspiler.h`
 - `src/Arlen/MVC/View/ALNView.h`
+- `src/Arlen/ORM/ALNORMAdminResource.h`
+- `src/Arlen/ORM/ALNORMChangeset.h`
+- `src/Arlen/ORM/ALNORMCodegen.h`
+- `src/Arlen/ORM/ALNORMContext.h`
+- `src/Arlen/ORM/ALNORMDataverseChangeset.h`
+- `src/Arlen/ORM/ALNORMDataverseCodegen.h`
+- `src/Arlen/ORM/ALNORMDataverseContext.h`
+- `src/Arlen/ORM/ALNORMDataverseFieldDescriptor.h`
+- `src/Arlen/ORM/ALNORMDataverseModel.h`
+- `src/Arlen/ORM/ALNORMDataverseModelDescriptor.h`
+- `src/Arlen/ORM/ALNORMDataverseRelationDescriptor.h`
+- `src/Arlen/ORM/ALNORMDataverseRepository.h`
+- `src/Arlen/ORM/ALNORMDescriptorSnapshot.h`
+- `src/Arlen/ORM/ALNORMErrors.h`
+- `src/Arlen/ORM/ALNORMFieldDescriptor.h`
+- `src/Arlen/ORM/ALNORMModel.h`
+- `src/Arlen/ORM/ALNORMModelDescriptor.h`
+- `src/Arlen/ORM/ALNORMQuery.h`
+- `src/Arlen/ORM/ALNORMRelationDescriptor.h`
+- `src/Arlen/ORM/ALNORMRepository.h`
+- `src/Arlen/ORM/ALNORMSchemaDrift.h`
+- `src/Arlen/ORM/ALNORMValueConverter.h`
+- `src/Arlen/ORM/ALNORMWriteOptions.h`
 - `src/Arlen/Support/ALNAuth.h`
 - `src/Arlen/Support/ALNAuthProviderPresets.h`
 - `src/Arlen/Support/ALNAuthProviderSessionBridge.h`

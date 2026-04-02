@@ -4,6 +4,17 @@ Last updated: 2026-04-02
 
 ## Leaving Off (2026-04-02)
 
+- Phase 26 is complete (`26A-26O` delivered on 2026-04-01):
+  - added the optional `ArlenORM` umbrella under `src/ArlenORM/ArlenORM.h`
+    on top of `ArlenData`
+  - shipped descriptor/reflection/codegen, model/runtime/query/repository,
+    relation metadata, changesets, value converters, unit-of-work semantics,
+    descriptor snapshots, schema drift diagnostics, backend capability
+    reporting, and the Dataverse ORM bridge under `src/Arlen/ORM/`
+  - added the checked-in `examples/arlen_orm_reference` demo plus the ORM
+    migration, backend-matrix, scorecard, and Phase 26 roadmap docs
+  - split the ORM release surface into unit, generated, integration,
+    backend-parity, perf, live, and confidence entrypoints
 - Phase 25 is complete (`25A-25L` delivered on 2026-04-01):
   - shipped the fragment-first live UI surface through `ALNLive`, the built-in
     `/arlen/live.js` runtime, and the `application/vnd.arlen.live+json`
@@ -47,15 +58,61 @@ Last updated: 2026-04-02
   - tightened `phase27-confidence` so PostgreSQL plus live Meilisearch and
     OpenSearch query/sync validation are required for a passing release gate
 - Verification status at this checkpoint:
-  - `source tools/source_gnustep_env.sh && make build-tests`
-  - `source tools/source_gnustep_env.sh && make test-unit`
+  - `source tools/source_gnustep_env.sh && make phase26-orm-tests`
   - `source tools/source_gnustep_env.sh && make phase27-search-tests`
-  - `source tools/source_gnustep_env.sh && make phase27-search-characterize`
-  - `source tools/source_gnustep_env.sh && make phase27-confidence`
-    with `ARLEN_PG_TEST_DSN`, `ARLEN_PHASE27_MEILI_URL`, and
-    `ARLEN_PHASE27_OPENSEARCH_URL` configured
   - `source tools/source_gnustep_env.sh && make docs-api`
   - `source tools/source_gnustep_env.sh && bash tools/ci/run_docs_quality.sh`
+  - `source tools/source_gnustep_env.sh && make phase26-confidence`
+  - `source tools/source_gnustep_env.sh && make phase27-confidence`
+    when `ARLEN_PG_TEST_DSN`, `ARLEN_PHASE27_MEILI_URL`, and
+    `ARLEN_PHASE27_OPENSEARCH_URL` are configured
+
+## Leaving Off (2026-04-01)
+
+- Phase 23 remains complete as documented below.
+- Phase `26A-26O` is now complete:
+  - added the optional `ArlenORM` umbrella under `src/ArlenORM/ArlenORM.h`
+    on top of `ArlenData`
+  - delivered descriptor/reflection/codegen contracts through
+    `ALNORMFieldDescriptor`, `ALNORMRelationDescriptor`,
+    `ALNORMModelDescriptor`, and `ALNORMCodegen`
+  - delivered model/runtime/query/repository contracts through
+    `ALNORMModel`, `ALNORMContext`, `ALNORMQuery`, and `ALNORMRepository`
+  - delivered first-class relation metadata for `belongs_to`, `has_one`,
+    `has_many`, and many-to-many relations with explicit pivot metadata
+  - added explicit relation load plans with joined/select-in/no-load/
+    raise-on-access strategies plus strict-loading diagnostics and
+    query-budget tracing
+  - added changesets, value converters, required-field validation, and
+    bounded nested to-one mutation support
+  - added explicit unit-of-work semantics through `ALNORMContext`,
+    request-scoped identity tracking, reload/detach/reset behavior, and
+    transaction/savepoint coordination on top of the adapter seam
+  - added save/delete/upsert helpers with opt-in timestamp automation,
+    optimistic locking, and explicit belongs-to graph-save behavior
+  - kept reflected read-only relations read-only by default in generated code
+    and runtime mutation helpers
+  - added descriptor snapshot replay and schema/codegen drift diagnostics
+    through `ALNORMDescriptorSnapshot` and `ALNORMSchemaDrift`
+  - added explicit SQL-vs-Dataverse backend capability matrices plus the
+    optional `ALNORMAdminResource` bridge for admin/resource integration seams
+  - split the ORM release surface into unit, generated, integration,
+    backend-parity, perf, live, and confidence entrypoints
+  - added separate Dataverse ORM descriptors, codegen, context, model,
+    repository, and changeset contracts for lookup relations, reverse
+    collections, writes, and batch flows
+  - added the checked-in Arlen ORM reference example and the ORM migration,
+    backend-matrix, and scorecard docs
+- Verification completed at this checkpoint:
+  - `source tools/source_gnustep_env.sh && make phase26-orm-tests`
+  - `source tools/source_gnustep_env.sh && make phase26-orm-unit`
+  - `source tools/source_gnustep_env.sh && make phase26-orm-generated`
+  - `source tools/source_gnustep_env.sh && make phase26-orm-integration`
+  - `source tools/source_gnustep_env.sh && make phase26-orm-backend-parity`
+  - `source tools/source_gnustep_env.sh && make phase26-orm-perf`
+  - `source tools/source_gnustep_env.sh && make phase26-confidence`
+  - `source tools/source_gnustep_env.sh && make docs-api`
+  - `bash tools/ci/run_docs_quality.sh`
 
 ## Leaving Off (2026-03-31)
 

@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Generate API reference markdown from Arlen public headers.
 
-The generator reads the public umbrella headers (`Arlen.h` and `ArlenData.h`),
-parses interfaces/protocols/properties/methods, and emits:
+The generator reads the public umbrella headers (`Arlen.h`, `ArlenData.h`,
+and `ArlenORM.h`), parses interfaces/protocols/properties/methods, and emits:
 
 - docs/API_REFERENCE.md (index)
 - docs/api/<Symbol>.md (per-symbol reference pages)
@@ -405,6 +405,8 @@ def fallback_symbol_summary(symbol: SymbolDoc) -> str:
         return "Built-in middleware construction APIs."
     if "/Data/" in header:
         return "Data-layer APIs for SQL composition, adapters, and migration/runtime operations."
+    if "/ORM/" in header:
+        return "Optional ORM APIs for reflected models, repositories, relations, and SQL-first code generation."
     if "/Support/" in header:
         return "Support services for auth, metrics, logging, performance, realtime, and adapters."
     return "Public API surface exported by Arlen."
@@ -538,6 +540,7 @@ def parse_public_header_list(repo_root: Path) -> List[Path]:
     umbrellas = [
         repo_root / "src" / "Arlen" / "Arlen.h",
         repo_root / "src" / "ArlenData" / "ArlenData.h",
+        repo_root / "src" / "ArlenORM" / "ArlenORM.h",
     ]
 
     resolved: List[Path] = []
@@ -551,7 +554,7 @@ def parse_public_header_list(repo_root: Path) -> List[Path]:
             if not match:
                 continue
             inc = match.group(1)
-            if inc.startswith("Arlen/"):
+            if inc.startswith(("Arlen/", "ArlenData/", "ArlenORM/")):
                 candidate = repo_root / "src" / inc
             else:
                 candidate = repo_root / "src" / "Arlen" / inc
@@ -681,6 +684,8 @@ def symbol_section_for_header(header: str) -> str:
         return "Middleware"
     if "/Data/" in header:
         return "Data"
+    if "/ORM/" in header:
+        return "ORM"
     if "/Support/" in header:
         return "Support"
     return "Other"
@@ -761,7 +766,8 @@ def write_index(
     lines.append("")
     lines.append(
         "This reference is generated from public headers exported by "
-        "`src/Arlen/Arlen.h` and `src/ArlenData/ArlenData.h`."
+        "`src/Arlen/Arlen.h`, `src/ArlenData/ArlenData.h`, and "
+        "`src/ArlenORM/ArlenORM.h`."
     )
     lines.append("")
     lines.append("Regenerate after public header changes:")
@@ -780,6 +786,7 @@ def write_index(
     lines.append("")
     lines.append("- `src/Arlen/Arlen.h` is the primary framework umbrella header.")
     lines.append("- `src/ArlenData/ArlenData.h` is the standalone data-layer umbrella header.")
+    lines.append("- `src/ArlenORM/ArlenORM.h` is the optional ORM umbrella layered on ArlenData.")
     lines.append("")
     lines.append("## Symbol Index")
     lines.append("")
@@ -793,6 +800,7 @@ def write_index(
         "Template",
         "View",
         "Data",
+        "ORM",
         "Support",
         "Other",
     ]

@@ -7,8 +7,8 @@ Mojolicious while staying idiomatic to Objective-C/GNUstep conventions. The
 project is still young, but the shipped surface is already broad: HTML-first
 and JSON-first app paths, OpenAPI output, first-party auth/admin/jobs/storage
 modules, WebSocket/SSE support, a PostgreSQL-first data layer, optional MSSQL,
-a runtime-inactive Dataverse Web API integration surface, and a managed
-production runtime (`propane`).
+an optional SQL ORM foundation, a runtime-inactive Dataverse Web API
+integration surface, and a managed production runtime (`propane`).
 
 ## Start Here
 
@@ -79,7 +79,7 @@ one coherent toolchain.
 - `Auth and security`: sessions, CSRF, rate limiting, MFA, recovery codes, passkeys/WebAuthn, and OIDC/provider login.
 - `First-party modules`: `auth`, `admin-ui`, `jobs`, `notifications`, `storage`, `ops`, and `search`.
 - `Realtime and live UI`: WebSocket and SSE support, live fragment responses, built-in `/arlen/live.js`, keyed collection helpers, live regions, and controller helpers for live updates/navigation.
-- `Data layer`: PostgreSQL-first migrations, schema codegen, typed SQL helpers, optional MSSQL support, and a runtime-inactive Dataverse Web API client/query/codegen surface.
+- `Data layer`: PostgreSQL-first migrations, schema codegen, typed SQL helpers, an optional SQL ORM foundation, optional MSSQL support, and a runtime-inactive Dataverse Web API client/query/codegen surface.
 - `Runtime`: `boomhauer` for development and `propane` for production worker supervision, reloads, and cluster controls.
 - `Diagnostics and verification`: `arlen doctor`, build diagnostics, focused regression lanes, and live-backed integration coverage.
 
@@ -103,6 +103,7 @@ one coherent toolchain.
 - [Basic App Smoke Guide](examples/basic_app/README.md): smallest app-owned smoke path.
 - [API-First Reference App](examples/api_reference/README.md): JSON/OpenAPI-heavy reference surface.
 - [Dataverse Reference](examples/dataverse_reference/README.md): app-level Dataverse config, controller helpers, and codegen flow.
+- [Arlen ORM Reference](examples/arlen_orm_reference/README.md): optional SQL and Dataverse ORM reference surface.
 - [Auth + Admin Demo](examples/auth_admin_demo/README.md): modules, auth, and admin composition.
 - [Phase 16 Modules Demo](examples/phase16_modules_demo/README.md): broader multi-module app surface.
 - [Search Module Playbook](examples/search_module_playbook/README.md): scaffold-first path for app-owned search resources and engine swaps.
@@ -157,6 +158,7 @@ below is the detailed milestone ledger for the shipped surface summarized above.
 - Phase 22: complete (`22A-22G` delivered on 2026-03-30 for newcomer-first onboarding, docs/code parity hardening, app-author guides, module/lite-mode guidance, plugin/frontend guides, and docs quality closeout. See `docs/PHASE22_ROADMAP.md`).
 - Phase 23: complete (`23A-23I` delivered on 2026-03-31 for the runtime-inactive Dataverse Web API client, OData query builder, CRUD/batch helpers, metadata normalization, typed Dataverse codegen, app/controller Dataverse helpers, focused regression suites, parity/characterization artifacts, repo-native confidence lanes, and docs/example closeout. See `docs/PHASE23_ROADMAP.md`).
 - Phase 25: complete (`25A-25L` delivered on 2026-04-01). The shipped fragment-first live UI now includes `ALNLive`, `/arlen/live.js`, live request metadata, keyed collection helpers, lazy/poll/deferred regions, upload-progress-aware live forms, websocket-backed push updates, a Node-backed executable runtime harness behind `phase25-live-tests`, adversarial live regression fixtures, and the strengthened `phase25-confidence` artifact pack. Full diff-engine/live-component depth remains future work.
+- Phase 26: complete (`26A-26O` delivered on 2026-04-01 for the optional `ArlenORM` package, SQL descriptor history contracts, split ORM confidence lanes, backend-capability honesty, and the Dataverse ORM bridge. See `docs/PHASE26_ROADMAP.md`).
 - Phase 27: complete (`27A-27L` landed on 2026-04-01; the `27E-27L` audit follow-up closed on 2026-04-02). The search module now ships safe public result shaping, typed/capability-normalized metadata, PostgreSQL FTS/trigram, authoritative first-party Meilisearch/OpenSearch adapters, streamed rebuilds, resource-scoped tenant/visibility semantics, and a fail-closed `phase27-confidence` gate. See `docs/PHASE27_ROADMAP.md`.
 
 ## Requirements and Setup Details
