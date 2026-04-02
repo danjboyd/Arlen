@@ -105,8 +105,11 @@ consumes:
 and emits a generated TypeScript package with:
 
 - `models.ts` read/create/update contracts plus relation metadata
+- `validators.ts` framework-neutral validator schemas plus form-field adapters
+- `query.ts` explicit relation metadata and resource query-shape contracts
 - `client.ts` typed `fetch` transport helpers from OpenAPI operations
 - optional `react.ts` TanStack Query-oriented helpers
+- `meta.ts` module/resource/admin metadata registries plus workspace hints
 - a versioned manifest (`format: arlen-typescript-contract-v1`)
 
 The recommended CLI path is:
@@ -125,8 +128,12 @@ build/arlen typescript-codegen \
 This stays descriptor-first:
 
 - Objective-C models and TypeScript contracts are sibling generated outputs
+- top-level OpenAPI `x-arlen` metadata adds resource/module/workspace contracts
+  without turning TypeScript into the canonical persistence model
 - `react` output is optional and package-scoped
 - missing OpenAPI schemas or unstable operation IDs fail closed
+- generated `query.ts` stays additive; it does not widen `client.ts` request
+  types beyond what the OpenAPI contract actually declares
 
 ## Query Model
 

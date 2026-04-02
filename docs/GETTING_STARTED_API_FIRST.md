@@ -53,8 +53,19 @@ curl -s http://127.0.0.1:3000/openapi.json > build/openapi.json
 This produces:
 
 - `frontend/generated/arlen/src/models.ts`
+- `frontend/generated/arlen/src/validators.ts`
+- `frontend/generated/arlen/src/query.ts`
 - `frontend/generated/arlen/src/client.ts`
 - optional `frontend/generated/arlen/src/react.ts`
+- `frontend/generated/arlen/src/meta.ts`
+
+If your OpenAPI export carries top-level `x-arlen.resources`,
+`x-arlen.modules`, and `x-arlen.workspace` metadata, Arlen also generates
+explicit resource/admin/query/module registries instead of making the frontend
+infer them from route names.
+
+See `examples/phase28_react_reference/README.md` for a checked-in React
+workspace that consumes the generated package shape.
 
 ## 6. Standardize Error Envelope
 

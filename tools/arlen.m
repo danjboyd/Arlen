@@ -31,7 +31,7 @@ static void PrintUsage(void) {
           "  schema-codegen [--env <name>] [--database <target>] [--dsn <connection_string>] [--output-dir <path>] [--manifest <path>] [--prefix <ClassPrefix>] [--typed-contracts] [--force]\n"
           "  dataverse-codegen [--input <metadata.json>] [--env <name>] [--target <name>] [--service-root <url>] [--tenant-id <id>] [--client-id <id>] [--client-secret <secret>] [--entity <logical_name>] [--output-dir <path>] [--manifest <path>] [--prefix <ClassPrefix>] [--force]\n"
           "  typed-sql-codegen [--input-dir <path>] [--output-dir <path>] [--manifest <path>] [--prefix <ClassPrefix>] [--force]\n"
-          "  typescript-codegen [--orm-input <path>] [--openapi-input <path>] [--output-dir <path>] [--manifest <path>] [--prefix <ClassPrefix>] [--database <target>] [--package-name <name>] [--target <models|client|react|all>] [--force]\n"
+          "  typescript-codegen [--orm-input <path>] [--openapi-input <path>] [--output-dir <path>] [--manifest <path>] [--prefix <ClassPrefix>] [--database <target>] [--package-name <name>] [--target <models|validators|query|client|react|meta|all>] [--force]\n"
           "  routes\n"
           "  test [--unit|--integration|--all]\n"
           "  perf\n"
@@ -4170,7 +4170,7 @@ static int CommandTypeScriptCodegen(NSArray *args) {
               "Usage: arlen typescript-codegen [--orm-input <path>] [--openapi-input <path>] "
               "[--output-dir <path>] [--manifest <path>] [--prefix <ClassPrefix>] "
               "[--database <target>] [--package-name <name>] "
-              "[--target <models|client|react|all>] [--force]\n");
+              "[--target <models|validators|query|client|react|meta|all>] [--force]\n");
       return 0;
     } else {
       fprintf(stderr, "arlen typescript-codegen: unknown option %s\n", [arg UTF8String]);

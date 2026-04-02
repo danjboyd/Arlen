@@ -104,6 +104,7 @@ one coherent toolchain.
 - [API-First Reference App](examples/api_reference/README.md): JSON/OpenAPI-heavy reference surface.
 - [Dataverse Reference](examples/dataverse_reference/README.md): app-level Dataverse config, controller helpers, and codegen flow.
 - [Arlen ORM Reference](examples/arlen_orm_reference/README.md): optional SQL and Dataverse ORM reference surface.
+- [Phase 28 React Reference](examples/phase28_react_reference/README.md): descriptor-first React/TypeScript workspace showing generated validators, query contracts, module/resource metadata, and optional React helpers.
 - [Auth + Admin Demo](examples/auth_admin_demo/README.md): modules, auth, and admin composition.
 - [Phase 16 Modules Demo](examples/phase16_modules_demo/README.md): broader multi-module app surface.
 - [Search Module Playbook](examples/search_module_playbook/README.md): scaffold-first path for app-owned search resources and engine swaps.
@@ -160,6 +161,7 @@ below is the detailed milestone ledger for the shipped surface summarized above.
 - Phase 25: complete (`25A-25L` delivered on 2026-04-01). The shipped fragment-first live UI now includes `ALNLive`, `/arlen/live.js`, live request metadata, keyed collection helpers, lazy/poll/deferred regions, upload-progress-aware live forms, websocket-backed push updates, a Node-backed executable runtime harness behind `phase25-live-tests`, adversarial live regression fixtures, and the strengthened `phase25-confidence` artifact pack. Full diff-engine/live-component depth remains future work.
 - Phase 26: complete (`26A-26O` delivered on 2026-04-01 for the optional `ArlenORM` package, SQL descriptor history contracts, split ORM confidence lanes, backend-capability honesty, and the Dataverse ORM bridge. See `docs/PHASE26_ROADMAP.md`).
 - Phase 27: complete (`27A-27L` landed on 2026-04-01; the `27E-27L` audit follow-up closed on 2026-04-02). The search module now ships safe public result shaping, typed/capability-normalized metadata, PostgreSQL FTS/trigram, authoritative first-party Meilisearch/OpenSearch adapters, streamed rebuilds, resource-scoped tenant/visibility semantics, and a fail-closed `phase27-confidence` gate. See `docs/PHASE27_ROADMAP.md`.
+- Phase 28: in progress (`28A-28H` landed on 2026-04-02). Arlen now ships descriptor-first TypeScript models, validator/form adapters, explicit query-shape/resource/module metadata, typed transport and optional React helpers, package scaffolding, and a checked-in React reference workspace, while keeping TypeScript downstream of ORM descriptors and OpenAPI contracts. See `docs/PHASE28_ROADMAP.md`.
 
 ## Requirements and Setup Details
 

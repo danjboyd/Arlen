@@ -10,7 +10,194 @@
       "url": "http://127.0.0.1:3000"
     }
   ],
+  "x-arlen": {
+    "workspace": {
+      "package_manager": "pnpm",
+      "install_command": "pnpm install",
+      "typecheck_command": "pnpm exec tsc --noEmit",
+      "dev_command": "pnpm exec vite"
+    },
+    "resources": [
+      {
+        "name": "users",
+        "entity_name": "public.users",
+        "tag_names": [
+          "users"
+        ],
+        "operation_ids": [
+          "list_users",
+          "get_user",
+          "create_user",
+          "update_user"
+        ],
+        "operations": {
+          "list": "list_users",
+          "detail": "get_user",
+          "create": "create_user",
+          "update": "update_user"
+        },
+        "query": {
+          "allowed_select": [
+            "id",
+            "email",
+            "displayName"
+          ],
+          "allowed_include": [
+            "posts",
+            "profile"
+          ],
+          "sortable_fields": [
+            "email",
+            "displayName",
+            "id"
+          ],
+          "filterable_fields": [
+            "email",
+            "displayName"
+          ],
+          "default_sort": [
+            "email"
+          ],
+          "select_param": "fields",
+          "include_param": "include",
+          "sort_param": "sort",
+          "filter_prefix": "filter.",
+          "cursor_param": "cursor",
+          "limit_param": "limit",
+          "default_page_size": 25,
+          "max_page_size": 100
+        },
+        "admin": {
+          "enabled": true,
+          "title_field": "email",
+          "default_columns": [
+            "email",
+            "displayName"
+          ],
+          "searchable_fields": [
+            "email",
+            "displayName"
+          ],
+          "allowed_actions": [
+            "create",
+            "update"
+          ],
+          "html_path": "/admin/users",
+          "api_path": "/admin/api/resources/users"
+        }
+      }
+    ],
+    "modules": [
+      {
+        "name": "admin-ui",
+        "kind": "admin",
+        "tag_names": [
+          "admin",
+          "users"
+        ],
+        "resources": [
+          "users"
+        ]
+      },
+      {
+        "name": "auth",
+        "kind": "auth",
+        "tag_names": [
+          "auth",
+          "session"
+        ],
+        "operation_ids": [
+          "get_session"
+        ],
+        "bootstrap_operation_id": "get_session"
+      },
+      {
+        "name": "ops",
+        "kind": "ops",
+        "tag_names": [
+          "ops"
+        ],
+        "operation_ids": [
+          "ops_summary"
+        ],
+        "summary_operation_id": "ops_summary"
+      },
+      {
+        "name": "search",
+        "kind": "search",
+        "tag_names": [
+          "search"
+        ],
+        "operation_ids": [
+          "search_capabilities"
+        ],
+        "capability_operation_id": "search_capabilities"
+      }
+    ]
+  },
   "paths": {
+    "/api/session": {
+      "get": {
+        "operationId": "get_session",
+        "summary": "Get session bootstrap",
+        "tags": [
+          "auth",
+          "session"
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "authenticated": {
+                      "type": "boolean"
+                    },
+                    "session": {
+                      "type": "object",
+                      "properties": {
+                        "csrfToken": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "csrfToken"
+                      ]
+                    },
+                    "user": {
+                      "type": [
+                        "object",
+                        "null"
+                      ],
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "email": {
+                          "type": "string",
+                          "format": "email"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "email"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "authenticated",
+                    "session"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/users": {
       "get": {
         "operationId": "list_users",
@@ -58,10 +245,12 @@
                         "type": "object",
                         "properties": {
                           "id": {
-                            "type": "string"
+                            "type": "string",
+                            "format": "uuid"
                           },
                           "email": {
-                            "type": "string"
+                            "type": "string",
+                            "format": "email"
                           },
                           "displayName": {
                             "type": [
@@ -73,7 +262,8 @@
                             "type": "object",
                             "properties": {
                               "lastSeenAt": {
-                                "type": "string"
+                                "type": "string",
+                                "format": "date-time"
                               }
                             }
                           }
@@ -117,12 +307,20 @@
                 "type": "object",
                 "properties": {
                   "email": {
-                    "type": "string"
+                    "type": "string",
+                    "format": "email"
                   },
                   "displayName": {
                     "type": [
                       "string",
                       "null"
+                    ]
+                  },
+                  "role": {
+                    "type": "string",
+                    "enum": [
+                      "author",
+                      "admin"
                     ]
                   }
                 },
@@ -145,10 +343,12 @@
                       "type": "object",
                       "properties": {
                         "id": {
-                          "type": "string"
+                          "type": "string",
+                          "format": "uuid"
                         },
                         "email": {
-                          "type": "string"
+                          "type": "string",
+                          "format": "email"
                         },
                         "displayName": {
                           "type": [
@@ -194,7 +394,8 @@
             "in": "path",
             "required": true,
             "schema": {
-              "type": "string"
+              "type": "string",
+              "format": "uuid"
             }
           },
           {
@@ -218,10 +419,12 @@
                       "type": "object",
                       "properties": {
                         "id": {
-                          "type": "string"
+                          "type": "string",
+                          "format": "uuid"
                         },
                         "email": {
-                          "type": "string"
+                          "type": "string",
+                          "format": "email"
                         },
                         "displayName": {
                           "type": [
@@ -249,7 +452,8 @@
                             "type": "object",
                             "properties": {
                               "id": {
-                                "type": "string"
+                                "type": "string",
+                                "format": "uuid"
                               },
                               "title": {
                                 "type": "string"
@@ -289,7 +493,8 @@
             "in": "path",
             "required": true,
             "schema": {
-              "type": "string"
+              "type": "string",
+              "format": "uuid"
             }
           }
         ],
@@ -326,10 +531,12 @@
                       "type": "object",
                       "properties": {
                         "id": {
-                          "type": "string"
+                          "type": "string",
+                          "format": "uuid"
                         },
                         "email": {
-                          "type": "string"
+                          "type": "string",
+                          "format": "email"
                         },
                         "displayName": {
                           "type": [
@@ -354,6 +561,79 @@
                   },
                   "required": [
                     "data"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/ops/api/summary": {
+      "get": {
+        "operationId": "ops_summary",
+        "summary": "Get ops summary",
+        "tags": [
+          "ops"
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string"
+                    },
+                    "uptimeSeconds": {
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "status",
+                    "uptimeSeconds"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/search/api/capabilities": {
+      "get": {
+        "operationId": "search_capabilities",
+        "summary": "Get search capabilities",
+        "tags": [
+          "search"
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "supportsHighlighting": {
+                      "type": "boolean"
+                    },
+                    "supportedModes": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "enum": [
+                          "fulltext",
+                          "prefix"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "supportsHighlighting",
+                    "supportedModes"
                   ]
                 }
               }

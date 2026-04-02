@@ -1,6 +1,6 @@
 # Arlen Phase 28 Roadmap
 
-Status: Planned
+Status: In Progress (`28A-28H` landed on 2026-04-02)
 Last updated: 2026-04-02
 
 Related docs:
@@ -241,7 +241,7 @@ closeout.
 Likely CLI shape:
 
 ```text
-arlen typescript-codegen [--out-dir <path>] [--manifest <path>] [--target <models|client|react|validators>] [--force]
+arlen typescript-codegen [--out-dir <path>] [--manifest <path>] [--target <models|validators|query|client|react|meta|all>] [--force]
 ```
 
 ## 4.2 Phase 28B: Generated Model + Mutation Surface

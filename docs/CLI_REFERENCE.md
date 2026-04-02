@@ -309,7 +309,7 @@ Compile SQL files with metadata comments into typed parameter/result helpers.
 - `--prefix <ClassPrefix>`: generated class prefix (default: `ALNDB`)
 - `--force`: overwrite existing generated files
 
-### `arlen typescript-codegen [--orm-input <path>] [--openapi-input <path>] [--output-dir <path>] [--manifest <path>] [--prefix <ClassPrefix>] [--database <target>] [--package-name <name>] [--target <models|client|react|all>] [--force]`
+### `arlen typescript-codegen [--orm-input <path>] [--openapi-input <path>] [--output-dir <path>] [--manifest <path>] [--prefix <ClassPrefix>] [--database <target>] [--package-name <name>] [--target <models|validators|query|client|react|meta|all>] [--force]`
 
 Generate a descriptor-first TypeScript package from Arlen ORM descriptors plus
 route/OpenAPI contracts.
@@ -322,11 +322,17 @@ route/OpenAPI contracts.
   - generated TypeScript stays downstream of Arlen descriptors
   - browser-side persistence is out of scope
   - React/TanStack output is optional and layered on top of the plain client
+  - top-level OpenAPI `x-arlen` metadata can add resource/module/workspace
+    contracts without changing route schemas
 - missing or vague inputs fail closed:
   - `client` / `react` targets require `--openapi-input`
   - OpenAPI operations must carry stable `operationId` values
   - request bodies must expose `application/json` schemas
   - descriptor or operation naming collisions abort generation
+  - `x-arlen.resources` and `x-arlen.modules` references must point at known
+    ORM entities and known OpenAPI operation IDs
+  - resource query metadata cannot expose fields or relations the ORM
+    descriptors do not actually define
 
 - `--orm-input <path>`: ORM manifest or schema metadata input (default: `db/schema/arlen_orm_manifest.json`)
 - `--openapi-input <path>`: exported OpenAPI JSON input; required for `client` and `react`
@@ -335,19 +341,31 @@ route/OpenAPI contracts.
 - `--prefix <ClassPrefix>`: descriptor class prefix when `--orm-input` is raw schema metadata (default: `ALNORM`)
 - `--database <target>`: database target hint when `--orm-input` is raw schema metadata
 - `--package-name <name>`: generated package name (default: `arlen-generated-client`)
-- `--target <models|client|react|all>`: repeatable or comma-separated; `react` implies `client`; default is `all`
+- `--target <models|validators|query|client|react|meta|all>`: repeatable or comma-separated; `validators` and `query` imply `models`, `meta` implies `models` plus `query`, `react` implies `client`, and `all` expands to every shipped target
 - `--force`: overwrite existing generated files
 
 Generated artifacts:
 
 - `<output-dir>/src/models.ts`
+- `<output-dir>/src/validators.ts` when `validators` or `all` is selected
+- `<output-dir>/src/query.ts` when `query`, `meta`, or `all` is selected
 - `<output-dir>/src/client.ts` when `client` or `react` is selected
 - `<output-dir>/src/react.ts` when `react` is selected
+- `<output-dir>/src/meta.ts` when `meta` or `all` is selected
 - `<output-dir>/src/index.ts`
 - `<output-dir>/package.json`
 - `<output-dir>/tsconfig.json`
 - `<output-dir>/README.md`
 - `<manifest>`
+
+Notes:
+
+- `query.ts` and `meta.ts` are driven by additive top-level OpenAPI
+  `x-arlen.resources`, `x-arlen.modules`, and `x-arlen.workspace` metadata.
+- `query.ts` does not widen typed client request shapes by itself; if a React
+  app should pass generated select/include/filter/sort params directly into
+  `client.ts`, those params still need to exist in the OpenAPI operation
+  schema.
 
 ### `arlen boomhauer [server args...]`
 

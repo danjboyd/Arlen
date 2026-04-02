@@ -57,19 +57,30 @@ Last updated: 2026-04-02
     soft-delete visibility derivation
   - tightened `phase27-confidence` so PostgreSQL plus live Meilisearch and
     OpenSearch query/sync validation are required for a passing release gate
-- Phase 28 is started (`28A-28D` landed on 2026-04-02):
+- Phase 28 is in progress (`28A-28H` landed on 2026-04-02):
   - added `ALNORMTypeScriptCodegen` plus the first shipped
     descriptor-first TypeScript manifest format
     (`arlen-typescript-contract-v1`)
   - added `arlen typescript-codegen` for ORM manifest/raw-metadata input plus
-    exported OpenAPI input, emitting generated `models.ts`, `client.ts`,
-    optional `react.ts`, and package scaffolding under app-owned output paths
+    exported OpenAPI input, emitting generated `models.ts`,
+    `validators.ts`, `query.ts`, `client.ts`, optional `react.ts`,
+    `meta.ts`, and package scaffolding under app-owned output paths
   - kept the Phase 28 guardrails intact: TypeScript stays generated rather
     than canonical, browser-side persistence remains out of scope, and
     React/TanStack output remains optional on top of the plain transport client
-  - added fixture-backed unit coverage for descriptor input, ORM manifest
-    input, CLI generation, strict OpenAPI requirements, and fail-closed
-    operation-ID collisions
+  - added additive `x-arlen` resource/module/workspace metadata normalization
+    for explicit query-shape contracts, admin/resource registries, auth/session
+    bootstrap metadata, search/ops capability metadata, and workspace hints
+  - tightened package/workspace ergonomics with generated exports, manifest
+    metadata, package README guidance, `types`, and `tsc`-ready package
+    scaffolding for app-local, monorepo, and internal-package adoption shapes
+  - added the checked-in `examples/phase28_react_reference` workspace to show
+    React-side consumption patterns without making React a core runtime
+    dependency for Arlen apps that do not opt in
+  - expanded fixture-backed unit coverage for descriptor input, ORM manifest
+    input, CLI generation, validator/query/meta output, strict OpenAPI
+    requirements, and fail-closed operation-ID plus `x-arlen` metadata
+    validation
 - Reconciled the `OwnerConnect` Dataverse codegen report against the current
   Arlen workspace:
   - recorded the upstream-only status note in

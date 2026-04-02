@@ -42,6 +42,10 @@ static BOOL ALNORMTSBoolValue(id value, BOOL fallback) {
   return fallback;
 }
 
+static NSNumber *ALNORMTSBoolNumber(BOOL value) {
+  return value ? @YES : @NO;
+}
+
 static NSInteger ALNORMTSIntegerValue(id value, NSInteger fallback) {
   return [value respondsToSelector:@selector(integerValue)] ? [value integerValue] : fallback;
 }
@@ -309,6 +313,18 @@ static NSString *ALNORMTSTypeNameForDescriptor(ALNORMModelDescriptor *descriptor
   return ALNORMTSPascalIdentifier(fallback, @"Model");
 }
 
+static NSString *ALNORMTSHumanizedLabel(NSString *value) {
+  NSArray<NSString *> *parts = ALNORMTSIdentifierParts(value);
+  if ([parts count] == 0) {
+    return [ALNORMTSStringValue(value) length] > 0 ? ALNORMTSStringValue(value) : @"Field";
+  }
+  NSMutableArray<NSString *> *words = [NSMutableArray array];
+  for (NSString *part in parts) {
+    [words addObject:ALNORMTSCapitalizedPart(part)];
+  }
+  return [words componentsJoinedByString:@" "];
+}
+
 static NSString *ALNORMTSFieldTypeForDescriptor(ALNORMFieldDescriptor *field) {
   NSString *normalized = [[ALNORMTSStringValue(field.dataType) lowercaseString] copy];
   if ([normalized hasSuffix:@"[]"]) {
@@ -353,6 +369,80 @@ static NSString *ALNORMTSFieldTypeForDescriptor(ALNORMFieldDescriptor *field) {
     return @"string";
   }
   return @"unknown";
+}
+
+static NSString *ALNORMTSValidatorKindForDataType(NSString *dataType) {
+  NSString *normalized = [[ALNORMTSStringValue(dataType) lowercaseString] copy];
+  if ([normalized hasSuffix:@"[]"]) {
+    return @"array";
+  }
+  if ([normalized isEqualToString:@"smallint"] || [normalized isEqualToString:@"integer"] ||
+      [normalized isEqualToString:@"bigint"] || [normalized isEqualToString:@"numeric"] ||
+      [normalized isEqualToString:@"decimal"] || [normalized isEqualToString:@"real"] ||
+      [normalized isEqualToString:@"double precision"]) {
+    return @"number";
+  }
+  if ([normalized isEqualToString:@"boolean"]) {
+    return @"boolean";
+  }
+  if ([normalized isEqualToString:@"json"] || [normalized isEqualToString:@"jsonb"]) {
+    return @"json";
+  }
+  if ([normalized isEqualToString:@"bytea"] || [normalized hasPrefix:@"timestamp"] ||
+      [normalized isEqualToString:@"date"] || [normalized isEqualToString:@"time"] ||
+      [normalized hasSuffix:@"time zone"] || [normalized isEqualToString:@"uuid"] ||
+      [normalized isEqualToString:@"text"] || [normalized hasPrefix:@"character"] ||
+      [normalized isEqualToString:@"inet"] || [normalized isEqualToString:@"cidr"] ||
+      [normalized isEqualToString:@"macaddr"]) {
+    return @"string";
+  }
+  return @"unknown";
+}
+
+static NSString *ALNORMTSFormatHintForDataType(NSString *dataType) {
+  NSString *normalized = [[ALNORMTSStringValue(dataType) lowercaseString] copy];
+  if ([normalized isEqualToString:@"uuid"]) {
+    return @"uuid";
+  }
+  if ([normalized hasPrefix:@"timestamp"]) {
+    return @"date-time";
+  }
+  if ([normalized isEqualToString:@"date"]) {
+    return @"date";
+  }
+  if ([normalized isEqualToString:@"time"] || [normalized hasSuffix:@"time zone"]) {
+    return @"time";
+  }
+  if ([normalized isEqualToString:@"json"] || [normalized isEqualToString:@"jsonb"]) {
+    return @"json";
+  }
+  return @"";
+}
+
+static NSString *ALNORMTSFormInputKindForDataType(NSString *dataType) {
+  NSString *normalized = [[ALNORMTSStringValue(dataType) lowercaseString] copy];
+  if ([normalized hasSuffix:@"[]"] || [normalized isEqualToString:@"json"] || [normalized isEqualToString:@"jsonb"]) {
+    return @"json";
+  }
+  if ([normalized isEqualToString:@"boolean"]) {
+    return @"checkbox";
+  }
+  if ([normalized isEqualToString:@"smallint"] || [normalized isEqualToString:@"integer"] ||
+      [normalized isEqualToString:@"bigint"] || [normalized isEqualToString:@"numeric"] ||
+      [normalized isEqualToString:@"decimal"] || [normalized isEqualToString:@"real"] ||
+      [normalized isEqualToString:@"double precision"]) {
+    return @"number";
+  }
+  if ([normalized hasPrefix:@"timestamp"]) {
+    return @"datetime";
+  }
+  if ([normalized isEqualToString:@"date"]) {
+    return @"date";
+  }
+  if ([normalized isEqualToString:@"time"] || [normalized hasSuffix:@"time zone"]) {
+    return @"time";
+  }
+  return @"text";
 }
 
 static NSString *ALNORMTSNullableType(NSString *typeName, BOOL nullable) {
@@ -570,7 +660,7 @@ static NSString *ALNORMTSRenderSchemaType(id rawSchema,
         [rows addObject:@{
           @"name" : name,
           @"type" : type,
-          @"optional" : @(![requiredFields containsObject:name]),
+          @"optional" : ALNORMTSBoolNumber(![requiredFields containsObject:name]),
         }];
       }
       rendered = ALNORMTSRenderObjectType(rows, depth);
@@ -631,6 +721,232 @@ static id ALNORMTSResolveSchemaReference(id rawSchema,
     }
   }
   return cursor;
+}
+
+static NSDictionary<NSString *, id> *ALNORMTSValidatorSchemaFromOpenAPISchema(id rawSchema,
+                                                                               NSDictionary<NSString *, id> *rootSpec,
+                                                                               NSError **error);
+
+static NSArray<NSDictionary<NSString *, id> *> *ALNORMTSValidatorSchemaMembersFromSchemas(
+    NSArray *schemas,
+    NSDictionary<NSString *, id> *rootSpec,
+    NSError **error) {
+  NSMutableArray<NSDictionary<NSString *, id> *> *members = [NSMutableArray array];
+  for (id rawMember in schemas ?: @[]) {
+    NSDictionary<NSString *, id> *member = ALNORMTSValidatorSchemaFromOpenAPISchema(rawMember, rootSpec, error);
+    if (member == nil) {
+      return nil;
+    }
+    [members addObject:member];
+  }
+  return [NSArray arrayWithArray:members];
+}
+
+static NSDictionary<NSString *, id> *ALNORMTSValidatorSchemaFromOpenAPISchema(id rawSchema,
+                                                                               NSDictionary<NSString *, id> *rootSpec,
+                                                                               NSError **error) {
+  if (error != NULL) {
+    *error = nil;
+  }
+
+  id resolved = ALNORMTSResolveSchemaReference(rawSchema, rootSpec, error);
+  if (resolved == nil) {
+    return nil;
+  }
+
+  NSDictionary<NSString *, id> *schema = ALNORMTSDictionaryValue(resolved);
+  NSMutableDictionary<NSString *, id> *validator = [NSMutableDictionary dictionary];
+
+  BOOL nullable = ALNORMTSBoolValue(schema[@"nullable"], NO);
+  NSMutableArray<NSString *> *types = [NSMutableArray array];
+  id typeValue = schema[@"type"];
+  if ([typeValue isKindOfClass:[NSArray class]]) {
+    for (id rawType in (NSArray *)typeValue) {
+      NSString *normalized = [[ALNORMTSStringValue(rawType) lowercaseString] copy];
+      if ([normalized isEqualToString:@"null"]) {
+        nullable = YES;
+      } else if ([normalized length] > 0) {
+        [types addObject:normalized];
+      }
+    }
+  } else {
+    NSString *normalized = [[ALNORMTSStringValue(typeValue) lowercaseString] copy];
+    if ([normalized isEqualToString:@"null"]) {
+      nullable = YES;
+    } else if ([normalized length] > 0) {
+      [types addObject:normalized];
+    }
+  }
+
+  NSString *formatHint = ALNORMTSStringValue(schema[@"format"]);
+  if ([formatHint length] > 0) {
+    validator[@"formatHint"] = formatHint;
+  }
+  validator[@"nullable"] = @(nullable);
+
+  NSArray *enumValues = [schema[@"enum"] isKindOfClass:[NSArray class]] ? schema[@"enum"] : nil;
+  if ([enumValues count] > 0) {
+    validator[@"kind"] = @"enum";
+    validator[@"literalValues"] = enumValues;
+    return [NSDictionary dictionaryWithDictionary:validator];
+  }
+
+  NSArray *oneOf = [schema[@"oneOf"] isKindOfClass:[NSArray class]] ? schema[@"oneOf"] : nil;
+  if ([oneOf count] > 0) {
+    NSArray<NSDictionary<NSString *, id> *> *members =
+        ALNORMTSValidatorSchemaMembersFromSchemas(oneOf, rootSpec, error);
+    if (members == nil) {
+      return nil;
+    }
+    validator[@"kind"] = @"union";
+    validator[@"members"] = members;
+    return [NSDictionary dictionaryWithDictionary:validator];
+  }
+
+  NSArray *anyOf = [schema[@"anyOf"] isKindOfClass:[NSArray class]] ? schema[@"anyOf"] : nil;
+  if ([anyOf count] > 0) {
+    NSArray<NSDictionary<NSString *, id> *> *members =
+        ALNORMTSValidatorSchemaMembersFromSchemas(anyOf, rootSpec, error);
+    if (members == nil) {
+      return nil;
+    }
+    validator[@"kind"] = @"union";
+    validator[@"members"] = members;
+    return [NSDictionary dictionaryWithDictionary:validator];
+  }
+
+  NSArray *allOf = [schema[@"allOf"] isKindOfClass:[NSArray class]] ? schema[@"allOf"] : nil;
+  if ([allOf count] > 0) {
+    NSArray<NSDictionary<NSString *, id> *> *members =
+        ALNORMTSValidatorSchemaMembersFromSchemas(allOf, rootSpec, error);
+    if (members == nil) {
+      return nil;
+    }
+    validator[@"kind"] = @"intersection";
+    validator[@"members"] = members;
+    return [NSDictionary dictionaryWithDictionary:validator];
+  }
+
+  NSDictionary<NSString *, id> *properties = ALNORMTSDictionaryValue(schema[@"properties"]);
+  NSArray<NSString *> *requiredFields = ALNORMTSNormalizedStringArray(schema[@"required"]);
+  NSString *primaryType = ([types count] > 0) ? types[0] : @"";
+
+  if ([primaryType isEqualToString:@"string"]) {
+    validator[@"kind"] = @"string";
+    return [NSDictionary dictionaryWithDictionary:validator];
+  }
+  if ([primaryType isEqualToString:@"integer"] || [primaryType isEqualToString:@"number"]) {
+    validator[@"kind"] = @"number";
+    return [NSDictionary dictionaryWithDictionary:validator];
+  }
+  if ([primaryType isEqualToString:@"boolean"]) {
+    validator[@"kind"] = @"boolean";
+    return [NSDictionary dictionaryWithDictionary:validator];
+  }
+  if ([primaryType isEqualToString:@"null"]) {
+    validator[@"kind"] = @"null";
+    validator[@"nullable"] = @YES;
+    return [NSDictionary dictionaryWithDictionary:validator];
+  }
+  if ([primaryType isEqualToString:@"array"]) {
+    validator[@"kind"] = @"array";
+    NSDictionary<NSString *, id> *items = ALNORMTSDictionaryValue(schema[@"items"]);
+    if ([items count] > 0) {
+      NSDictionary<NSString *, id> *itemSchema = ALNORMTSValidatorSchemaFromOpenAPISchema(items, rootSpec, error);
+      if (itemSchema == nil) {
+        return nil;
+      }
+      validator[@"items"] = itemSchema;
+    } else {
+      validator[@"items"] = @{ @"kind" : @"unknown", @"nullable" : @NO };
+    }
+    return [NSDictionary dictionaryWithDictionary:validator];
+  }
+  if ([primaryType isEqualToString:@"object"] || [properties count] > 0) {
+    validator[@"kind"] = @"object";
+    NSMutableDictionary<NSString *, id> *validatorProperties = [NSMutableDictionary dictionary];
+    NSArray<NSString *> *sortedPropertyNames = [[properties allKeys] sortedArrayUsingSelector:@selector(compare:)];
+    for (NSString *name in sortedPropertyNames) {
+      NSDictionary<NSString *, id> *propertySchema =
+          ALNORMTSValidatorSchemaFromOpenAPISchema(properties[name], rootSpec, error);
+      if (propertySchema == nil) {
+        return nil;
+      }
+      validatorProperties[name] = propertySchema;
+    }
+    validator[@"properties"] = validatorProperties;
+    validator[@"requiredFields"] = requiredFields ?: @[];
+    id additionalProperties = schema[@"additionalProperties"];
+    if ([additionalProperties isKindOfClass:[NSDictionary class]]) {
+      NSDictionary<NSString *, id> *additionalSchema =
+          ALNORMTSValidatorSchemaFromOpenAPISchema(additionalProperties, rootSpec, error);
+      if (additionalSchema == nil) {
+        return nil;
+      }
+      validator[@"additionalProperties"] = additionalSchema;
+    } else if (additionalProperties != nil) {
+      validator[@"additionalProperties"] = @(ALNORMTSBoolValue(additionalProperties, NO));
+    }
+    return [NSDictionary dictionaryWithDictionary:validator];
+  }
+
+  validator[@"kind"] = @"unknown";
+  return [NSDictionary dictionaryWithDictionary:validator];
+}
+
+static NSDictionary<NSString *, id> *ALNORMTSValidatorSchemaForFieldDescriptor(ALNORMFieldDescriptor *field) {
+  NSString *dataType = ALNORMTSStringValue(field.dataType);
+  NSString *kind = ALNORMTSValidatorKindForDataType(dataType);
+  NSMutableDictionary<NSString *, id> *schema = [NSMutableDictionary dictionary];
+  schema[@"kind"] = kind;
+  schema[@"nullable"] = @(field.isNullable);
+  NSString *formatHint = ALNORMTSFormatHintForDataType(dataType);
+  if ([formatHint length] > 0) {
+    schema[@"formatHint"] = formatHint;
+  }
+  if ([kind isEqualToString:@"array"]) {
+    NSString *baseType = [dataType hasSuffix:@"[]"] ? [dataType substringToIndex:[dataType length] - 2] : @"";
+    schema[@"items"] = @{
+      @"kind" : ALNORMTSValidatorKindForDataType(baseType),
+      @"nullable" : @NO,
+      @"formatHint" : ALNORMTSFormatHintForDataType(baseType),
+    };
+  }
+  return [NSDictionary dictionaryWithDictionary:schema];
+}
+
+static NSDictionary<NSString *, id> *ALNORMTSValidatorObjectSchema(NSArray<NSDictionary<NSString *, id> *> *rows,
+                                                                   BOOL allowAdditionalProperties) {
+  NSMutableDictionary<NSString *, id> *properties = [NSMutableDictionary dictionary];
+  NSMutableArray<NSString *> *requiredFields = [NSMutableArray array];
+  NSMutableArray<NSString *> *readonlyFields = [NSMutableArray array];
+  NSMutableArray<NSString *> *writableFields = [NSMutableArray array];
+  for (NSDictionary<NSString *, id> *row in rows ?: @[]) {
+    NSString *name = ALNORMTSStringValue(row[@"name"]);
+    NSDictionary<NSString *, id> *schema = ALNORMTSDictionaryValue(row[@"schema"]);
+    if ([name length] == 0 || [schema count] == 0) {
+      continue;
+    }
+    properties[name] = schema;
+    if (ALNORMTSBoolValue(row[@"required"], NO)) {
+      [requiredFields addObject:name];
+    }
+    if (ALNORMTSBoolValue(row[@"readOnly"], NO)) {
+      [readonlyFields addObject:name];
+    } else {
+      [writableFields addObject:name];
+    }
+  }
+
+  return @{
+    @"kind" : @"object",
+    @"nullable" : @NO,
+    @"properties" : properties,
+    @"requiredFields" : requiredFields,
+    @"readonlyFields" : readonlyFields,
+    @"writableFields" : writableFields,
+    @"additionalProperties" : @(allowAdditionalProperties),
+  };
 }
 
 static NSArray<NSString *> *ALNORMTSOrderedHTTPMethods(void) {
@@ -793,7 +1109,8 @@ static NSArray<NSDictionary<NSString *, id> *> *ALNORMTSOperationsFromOpenAPISpe
         NSDictionary<NSString *, id> *row = @{
           @"name" : name,
           @"type" : type,
-          @"optional" : @(!required),
+          @"optional" : ALNORMTSBoolNumber(!required),
+          @"schema" : schema,
         };
 
         if ([location isEqualToString:@"path"]) {
@@ -841,8 +1158,9 @@ static NSArray<NSDictionary<NSString *, id> *> *ALNORMTSOperationsFromOpenAPISpe
       NSDictionary<NSString *, id> *jsonRequestBody = ALNORMTSDictionaryValue(requestContent[@"application/json"]);
       NSString *bodyType = nil;
       BOOL bodyRequired = NO;
+      NSDictionary<NSString *, id> *bodySchema = @{};
       if ([requestBody count] > 0) {
-        NSDictionary<NSString *, id> *bodySchema = ALNORMTSDictionaryValue(jsonRequestBody[@"schema"]);
+        bodySchema = ALNORMTSDictionaryValue(jsonRequestBody[@"schema"]);
         if ([bodySchema count] == 0) {
           if (error != NULL) {
             *error = ALNORMMakeError(ALNORMErrorInvalidMetadata,
@@ -912,6 +1230,7 @@ static NSArray<NSDictionary<NSString *, id> *> *ALNORMTSOperationsFromOpenAPISpe
         @"operationId" : operationID,
         @"typeName" : typeName,
         @"methodName" : methodName,
+        @"summary" : ALNORMTSStringValue(operation[@"summary"]) ?: @"",
         @"httpMethod" : [method uppercaseString],
         @"path" : path ?: @"/",
         @"tags" : tags ?: @[],
@@ -922,12 +1241,57 @@ static NSArray<NSDictionary<NSString *, id> *> *ALNORMTSOperationsFromOpenAPISpe
         @"queryProperties" : queryProperties,
         @"headerProperties" : headerProperties,
         @"bodyType" : bodyType ?: @"",
+        @"bodySchema" : bodySchema ?: @{},
         @"bodyRequired" : @(bodyRequired),
         @"responseType" : responseType ?: @"void",
       }];
     }
   }
   return [NSArray arrayWithArray:operations];
+}
+
+static NSDictionary<NSString *, id> *ALNORMTSArlenExtensionRoot(NSDictionary<NSString *, id> *openAPISpecification) {
+  return ALNORMTSDictionaryValue(openAPISpecification[@"x-arlen"]);
+}
+
+static NSArray<NSDictionary<NSString *, id> *> *ALNORMTSNormalizedExtensionEntries(id rawValue,
+                                                                                    NSString *nameKey) {
+  NSMutableArray<NSDictionary<NSString *, id> *> *entries = [NSMutableArray array];
+  if ([rawValue isKindOfClass:[NSArray class]]) {
+    for (id rawEntry in (NSArray *)rawValue) {
+      NSDictionary<NSString *, id> *entry = ALNORMTSDictionaryValue(rawEntry);
+      if ([entry count] > 0) {
+        [entries addObject:entry];
+      }
+    }
+    return [NSArray arrayWithArray:entries];
+  }
+  NSDictionary<NSString *, id> *dictionary = ALNORMTSDictionaryValue(rawValue);
+  NSArray<NSString *> *sortedNames = [[dictionary allKeys] sortedArrayUsingSelector:@selector(compare:)];
+  for (NSString *name in sortedNames) {
+    NSDictionary<NSString *, id> *entry = [dictionary[name] isKindOfClass:[NSDictionary class]] ? dictionary[name] : nil;
+    if ([entry count] == 0) {
+      continue;
+    }
+    NSMutableDictionary<NSString *, id> *normalized = [entry mutableCopy];
+    if ([ALNORMTSStringValue(normalized[nameKey]) length] == 0) {
+      normalized[nameKey] = name;
+    }
+    [entries addObject:normalized];
+  }
+  return [NSArray arrayWithArray:entries];
+}
+
+static NSDictionary<NSString *, NSDictionary<NSString *, id> *> *ALNORMTSOperationsByID(
+    NSArray<NSDictionary<NSString *, id> *> *operations) {
+  NSMutableDictionary<NSString *, NSDictionary<NSString *, id> *> *mapping = [NSMutableDictionary dictionary];
+  for (NSDictionary<NSString *, id> *operation in operations ?: @[]) {
+    NSString *operationID = ALNORMTSStringValue(operation[@"operationId"]);
+    if ([operationID length] > 0) {
+      mapping[operationID] = operation;
+    }
+  }
+  return [NSDictionary dictionaryWithDictionary:mapping];
 }
 
 static ALNORMFieldDescriptor *ALNORMTSFieldDescriptorFromDictionary(NSDictionary<NSString *, id> *dictionary) {
@@ -1060,6 +1424,385 @@ static NSDictionary<NSString *, NSString *> *ALNORMTSTypeNamesByEntity(
     namesByEntity[descriptor.entityName ?: @""] = typeName;
   }
   return [NSDictionary dictionaryWithDictionary:namesByEntity];
+}
+
+static NSDictionary<NSString *, ALNORMModelDescriptor *> *ALNORMTSDescriptorsByEntity(
+    NSArray<ALNORMModelDescriptor *> *descriptors) {
+  NSMutableDictionary<NSString *, ALNORMModelDescriptor *> *mapping = [NSMutableDictionary dictionary];
+  for (ALNORMModelDescriptor *descriptor in descriptors ?: @[]) {
+    NSString *entityName = ALNORMTSStringValue(descriptor.entityName);
+    if ([entityName length] > 0) {
+      mapping[entityName] = descriptor;
+    }
+  }
+  return [NSDictionary dictionaryWithDictionary:mapping];
+}
+
+static BOOL ALNORMTSValidateOperationIDs(NSArray<NSString *> *operationIDs,
+                                         NSDictionary<NSString *, NSDictionary<NSString *, id> *> *operationsByID,
+                                         NSString *errorPrefix,
+                                         NSError **error) {
+  for (NSString *operationID in operationIDs ?: @[]) {
+    if (operationsByID[operationID] == nil) {
+      if (error != NULL) {
+        *error = ALNORMMakeError(ALNORMErrorInvalidMetadata,
+                                 [NSString stringWithFormat:@"%@ references an unknown operationId", errorPrefix ?: @"Arlen metadata"],
+                                 @{
+                                   @"operation_id" : operationID ?: @"",
+                                 });
+      }
+      return NO;
+    }
+  }
+  return YES;
+}
+
+static NSArray<NSString *> *ALNORMTSSortedFieldNamesForDescriptor(ALNORMModelDescriptor *descriptor) {
+  NSMutableArray<NSString *> *fieldNames = [NSMutableArray array];
+  for (ALNORMFieldDescriptor *field in descriptor.fields ?: @[]) {
+    if ([ALNORMTSStringValue(field.name) length] > 0) {
+      [fieldNames addObject:field.name];
+    }
+  }
+  return [fieldNames sortedArrayUsingSelector:@selector(compare:)];
+}
+
+static NSArray<NSString *> *ALNORMTSSortedRelationNamesForDescriptor(ALNORMModelDescriptor *descriptor) {
+  NSMutableArray<NSString *> *relationNames = [NSMutableArray array];
+  for (ALNORMRelationDescriptor *relation in descriptor.relations ?: @[]) {
+    if ([ALNORMTSStringValue(relation.name) length] > 0) {
+      [relationNames addObject:relation.name];
+    }
+  }
+  return [relationNames sortedArrayUsingSelector:@selector(compare:)];
+}
+
+static NSArray<NSDictionary<NSString *, id> *> *ALNORMTSNormalizedResourceMetadata(
+    NSDictionary<NSString *, id> *openAPISpecification,
+    NSArray<NSDictionary<NSString *, id> *> *operations,
+    NSArray<ALNORMModelDescriptor *> *descriptors,
+    NSDictionary<NSString *, NSString *> *typeNamesByEntity,
+    NSError **error) {
+  if (error != NULL) {
+    *error = nil;
+  }
+
+  NSDictionary<NSString *, id> *rootExtension = ALNORMTSArlenExtensionRoot(openAPISpecification ?: @{});
+  NSArray<NSDictionary<NSString *, id> *> *rawResources =
+      ALNORMTSNormalizedExtensionEntries(rootExtension[@"resources"], @"name");
+  NSDictionary<NSString *, ALNORMModelDescriptor *> *descriptorsByEntity = ALNORMTSDescriptorsByEntity(descriptors);
+  NSDictionary<NSString *, NSDictionary<NSString *, id> *> *operationsByID = ALNORMTSOperationsByID(operations);
+  NSMutableArray<NSDictionary<NSString *, id> *> *resources = [NSMutableArray array];
+  NSMutableSet<NSString *> *usedNames = [NSMutableSet set];
+
+  for (NSDictionary<NSString *, id> *rawResource in rawResources) {
+    NSString *name = ALNORMTSStringValue(rawResource[@"name"]);
+    if ([name length] == 0 || [usedNames containsObject:name]) {
+      if (error != NULL) {
+        *error = ALNORMMakeError(ALNORMErrorInvalidMetadata,
+                                 @"OpenAPI x-arlen resource metadata must define unique names",
+                                 @{
+                                   @"resource_name" : name ?: @"",
+                                 });
+      }
+      return nil;
+    }
+    [usedNames addObject:name];
+
+    NSString *entityName = ALNORMTSStringValue(rawResource[@"entity_name"]);
+    ALNORMModelDescriptor *descriptor = ([entityName length] > 0) ? descriptorsByEntity[entityName] : nil;
+    if ([entityName length] > 0 && descriptor == nil) {
+      if (error != NULL) {
+        *error = ALNORMMakeError(ALNORMErrorInvalidMetadata,
+                                 @"OpenAPI x-arlen resource references an unknown ORM entity",
+                                 @{
+                                   @"resource_name" : name ?: @"",
+                                   @"entity_name" : entityName ?: @"",
+                                 });
+      }
+      return nil;
+    }
+
+    NSArray<NSString *> *operationIDs =
+        ALNORMTSNormalizedStringArray(rawResource[@"operation_ids"]);
+    NSDictionary<NSString *, id> *operationMap = ALNORMTSDictionaryValue(rawResource[@"operations"]);
+    for (id rawOperationID in [operationMap allValues]) {
+      NSString *operationID = ALNORMTSStringValue(rawOperationID);
+      if ([operationID length] > 0 && ![operationIDs containsObject:operationID]) {
+        operationIDs = [operationIDs arrayByAddingObject:operationID];
+      }
+    }
+    if (!ALNORMTSValidateOperationIDs(operationIDs,
+                                      operationsByID,
+                                      [NSString stringWithFormat:@"Resource %@", name ?: @""],
+                                      error)) {
+      return nil;
+    }
+
+    NSArray<NSString *> *fieldNames = descriptor != nil ? ALNORMTSSortedFieldNamesForDescriptor(descriptor) : @[];
+    NSArray<NSString *> *relationNames = descriptor != nil ? ALNORMTSSortedRelationNamesForDescriptor(descriptor) : @[];
+
+    NSDictionary<NSString *, id> *query = ALNORMTSDictionaryValue(rawResource[@"query"]);
+    NSArray<NSString *> *allowedSelect = ALNORMTSNormalizedStringArray(query[@"allowed_select"]);
+    NSArray<NSString *> *allowedInclude = ALNORMTSNormalizedStringArray(query[@"allowed_include"]);
+    NSArray<NSString *> *sortableFields = ALNORMTSNormalizedStringArray(query[@"sortable_fields"]);
+    NSArray<NSString *> *filterableFields = ALNORMTSNormalizedStringArray(query[@"filterable_fields"]);
+    NSArray<NSString *> *defaultSort = ALNORMTSNormalizedStringArray(query[@"default_sort"]);
+    for (NSString *fieldName in allowedSelect) {
+      if (descriptor != nil && ![fieldNames containsObject:fieldName]) {
+        if (error != NULL) {
+          *error = ALNORMMakeError(ALNORMErrorInvalidMetadata,
+                                   @"OpenAPI x-arlen resource allowed_select references an unknown field",
+                                   @{
+                                     @"resource_name" : name ?: @"",
+                                     @"field_name" : fieldName ?: @"",
+                                   });
+        }
+        return nil;
+      }
+    }
+    for (NSString *relationName in allowedInclude) {
+      if (descriptor != nil && ![relationNames containsObject:relationName]) {
+        if (error != NULL) {
+          *error = ALNORMMakeError(ALNORMErrorInvalidMetadata,
+                                   @"OpenAPI x-arlen resource allowed_include references an unknown relation",
+                                   @{
+                                     @"resource_name" : name ?: @"",
+                                     @"relation_name" : relationName ?: @"",
+                                   });
+        }
+        return nil;
+      }
+    }
+    for (NSString *fieldName in sortableFields) {
+      if (descriptor != nil && ![fieldNames containsObject:fieldName]) {
+        if (error != NULL) {
+          *error = ALNORMMakeError(ALNORMErrorInvalidMetadata,
+                                   @"OpenAPI x-arlen resource sortable_fields references an unknown field",
+                                   @{
+                                     @"resource_name" : name ?: @"",
+                                     @"field_name" : fieldName ?: @"",
+                                   });
+        }
+        return nil;
+      }
+    }
+    for (NSString *fieldName in filterableFields) {
+      if (descriptor != nil && ![fieldNames containsObject:fieldName]) {
+        if (error != NULL) {
+          *error = ALNORMMakeError(ALNORMErrorInvalidMetadata,
+                                   @"OpenAPI x-arlen resource filterable_fields references an unknown field",
+                                   @{
+                                     @"resource_name" : name ?: @"",
+                                     @"field_name" : fieldName ?: @"",
+                                   });
+        }
+        return nil;
+      }
+    }
+    for (NSString *fieldName in defaultSort) {
+      if ([sortableFields count] > 0 && ![sortableFields containsObject:fieldName]) {
+        if (error != NULL) {
+          *error = ALNORMMakeError(ALNORMErrorInvalidMetadata,
+                                   @"OpenAPI x-arlen resource default_sort must be a subset of sortable_fields",
+                                   @{
+                                     @"resource_name" : name ?: @"",
+                                     @"field_name" : fieldName ?: @"",
+                                   });
+        }
+        return nil;
+      }
+    }
+
+    NSDictionary<NSString *, id> *admin = ALNORMTSDictionaryValue(rawResource[@"admin"]);
+    NSArray<NSString *> *defaultColumns = ALNORMTSNormalizedStringArray(admin[@"default_columns"]);
+    NSArray<NSString *> *searchableFields = ALNORMTSNormalizedStringArray(admin[@"searchable_fields"]);
+    NSString *titleField = ALNORMTSStringValue(admin[@"title_field"]);
+    if (descriptor != nil) {
+      for (NSString *fieldName in defaultColumns) {
+        if (![fieldNames containsObject:fieldName]) {
+          if (error != NULL) {
+            *error = ALNORMMakeError(ALNORMErrorInvalidMetadata,
+                                     @"OpenAPI x-arlen admin default_columns references an unknown field",
+                                     @{
+                                       @"resource_name" : name ?: @"",
+                                       @"field_name" : fieldName ?: @"",
+                                     });
+          }
+          return nil;
+        }
+      }
+      for (NSString *fieldName in searchableFields) {
+        if (![fieldNames containsObject:fieldName]) {
+          if (error != NULL) {
+            *error = ALNORMMakeError(ALNORMErrorInvalidMetadata,
+                                     @"OpenAPI x-arlen admin searchable_fields references an unknown field",
+                                     @{
+                                       @"resource_name" : name ?: @"",
+                                       @"field_name" : fieldName ?: @"",
+                                     });
+          }
+          return nil;
+        }
+      }
+      if ([titleField length] > 0 && ![fieldNames containsObject:titleField]) {
+        if (error != NULL) {
+          *error = ALNORMMakeError(ALNORMErrorInvalidMetadata,
+                                   @"OpenAPI x-arlen admin title_field references an unknown field",
+                                   @{
+                                     @"resource_name" : name ?: @"",
+                                     @"field_name" : titleField ?: @"",
+                                   });
+        }
+        return nil;
+      }
+    }
+
+    NSMutableDictionary<NSString *, id> *normalized = [NSMutableDictionary dictionary];
+    normalized[@"name"] = name;
+    normalized[@"entityName"] = entityName ?: @"";
+    if ([entityName length] > 0) {
+      normalized[@"modelTypeName"] = typeNamesByEntity[entityName] ?: @"";
+    }
+    normalized[@"tagNames"] = ALNORMTSNormalizedStringArray(rawResource[@"tag_names"]);
+    normalized[@"operationIds"] = operationIDs ?: @[];
+    normalized[@"operations"] = @{
+      @"list" : ALNORMTSStringValue(operationMap[@"list"]) ?: @"",
+      @"detail" : ALNORMTSStringValue(operationMap[@"detail"]) ?: @"",
+      @"create" : ALNORMTSStringValue(operationMap[@"create"]) ?: @"",
+      @"update" : ALNORMTSStringValue(operationMap[@"update"]) ?: @"",
+      @"destroy" : ALNORMTSStringValue(operationMap[@"destroy"]) ?: @"",
+    };
+    normalized[@"query"] = @{
+      @"allowedSelect" : allowedSelect ?: @[],
+      @"allowedInclude" : allowedInclude ?: @[],
+      @"sortableFields" : sortableFields ?: @[],
+      @"filterableFields" : filterableFields ?: @[],
+      @"defaultSort" : defaultSort ?: @[],
+      @"selectParam" : [ALNORMTSStringValue(query[@"select_param"]) length] > 0 ? ALNORMTSStringValue(query[@"select_param"]) : @"fields",
+      @"includeParam" : [ALNORMTSStringValue(query[@"include_param"]) length] > 0 ? ALNORMTSStringValue(query[@"include_param"]) : @"include",
+      @"sortParam" : [ALNORMTSStringValue(query[@"sort_param"]) length] > 0 ? ALNORMTSStringValue(query[@"sort_param"]) : @"sort",
+      @"filterPrefix" : [ALNORMTSStringValue(query[@"filter_prefix"]) length] > 0 ? ALNORMTSStringValue(query[@"filter_prefix"]) : @"filter.",
+      @"cursorParam" : [ALNORMTSStringValue(query[@"cursor_param"]) length] > 0 ? ALNORMTSStringValue(query[@"cursor_param"]) : @"cursor",
+      @"limitParam" : [ALNORMTSStringValue(query[@"limit_param"]) length] > 0 ? ALNORMTSStringValue(query[@"limit_param"]) : @"limit",
+      @"defaultPageSize" : @(ALNORMTSIntegerValue(query[@"default_page_size"], 25)),
+      @"maxPageSize" : @(ALNORMTSIntegerValue(query[@"max_page_size"], 100)),
+    };
+    normalized[@"admin"] = @{
+      @"enabled" : @(ALNORMTSBoolValue(admin[@"enabled"], [admin count] > 0)),
+      @"titleField" : titleField ?: @"",
+      @"defaultColumns" : defaultColumns ?: @[],
+      @"searchableFields" : searchableFields ?: @[],
+      @"allowedActions" : ALNORMTSNormalizedStringArray(admin[@"allowed_actions"]),
+      @"htmlPath" : ALNORMTSStringValue(admin[@"html_path"]) ?: @"",
+      @"apiPath" : ALNORMTSStringValue(admin[@"api_path"]) ?: @"",
+    };
+    [resources addObject:normalized];
+  }
+
+  return [NSArray arrayWithArray:resources];
+}
+
+static NSArray<NSDictionary<NSString *, id> *> *ALNORMTSNormalizedModuleMetadata(
+    NSDictionary<NSString *, id> *openAPISpecification,
+    NSArray<NSDictionary<NSString *, id> *> *operations,
+    NSArray<NSDictionary<NSString *, id> *> *resources,
+    NSError **error) {
+  if (error != NULL) {
+    *error = nil;
+  }
+
+  NSDictionary<NSString *, id> *rootExtension = ALNORMTSArlenExtensionRoot(openAPISpecification ?: @{});
+  NSArray<NSDictionary<NSString *, id> *> *rawModules =
+      ALNORMTSNormalizedExtensionEntries(rootExtension[@"modules"], @"name");
+  NSDictionary<NSString *, NSDictionary<NSString *, id> *> *operationsByID = ALNORMTSOperationsByID(operations);
+  NSMutableSet<NSString *> *resourceNames = [NSMutableSet set];
+  for (NSDictionary<NSString *, id> *resource in resources ?: @[]) {
+    NSString *resourceName = ALNORMTSStringValue(resource[@"name"]);
+    if ([resourceName length] > 0) {
+      [resourceNames addObject:resourceName];
+    }
+  }
+
+  NSMutableArray<NSDictionary<NSString *, id> *> *modules = [NSMutableArray array];
+  NSMutableSet<NSString *> *usedNames = [NSMutableSet set];
+  for (NSDictionary<NSString *, id> *rawModule in rawModules) {
+    NSString *name = ALNORMTSStringValue(rawModule[@"name"]);
+    if ([name length] == 0 || [usedNames containsObject:name]) {
+      if (error != NULL) {
+        *error = ALNORMMakeError(ALNORMErrorInvalidMetadata,
+                                 @"OpenAPI x-arlen modules must define unique names",
+                                 @{
+                                   @"module_name" : name ?: @"",
+                                 });
+      }
+      return nil;
+    }
+    [usedNames addObject:name];
+
+    NSMutableArray<NSString *> *operationIDs = [NSMutableArray arrayWithArray:ALNORMTSNormalizedStringArray(rawModule[@"operation_ids"])];
+    for (NSString *specialKey in @[ @"bootstrap_operation_id", @"capability_operation_id", @"summary_operation_id" ]) {
+      NSString *operationID = ALNORMTSStringValue(rawModule[specialKey]);
+      if ([operationID length] > 0 && ![operationIDs containsObject:operationID]) {
+        [operationIDs addObject:operationID];
+      }
+    }
+    if (!ALNORMTSValidateOperationIDs(operationIDs,
+                                      operationsByID,
+                                      [NSString stringWithFormat:@"Module %@", name ?: @""],
+                                      error)) {
+      return nil;
+    }
+
+    NSArray<NSString *> *moduleResources = ALNORMTSNormalizedStringArray(rawModule[@"resources"]);
+    for (NSString *resourceName in moduleResources) {
+      if (![resourceNames containsObject:resourceName]) {
+        if (error != NULL) {
+          *error = ALNORMMakeError(ALNORMErrorInvalidMetadata,
+                                   @"OpenAPI x-arlen module references an unknown resource",
+                                   @{
+                                     @"module_name" : name ?: @"",
+                                     @"resource_name" : resourceName ?: @"",
+                                   });
+        }
+        return nil;
+      }
+    }
+
+    [modules addObject:@{
+      @"name" : name,
+      @"kind" : [ALNORMTSStringValue(rawModule[@"kind"]) length] > 0 ? ALNORMTSStringValue(rawModule[@"kind"]) : @"generic",
+      @"tagNames" : ALNORMTSNormalizedStringArray(rawModule[@"tag_names"]),
+      @"operationIds" : operationIDs,
+      @"resourceNames" : moduleResources ?: @[],
+      @"bootstrapOperationId" : ALNORMTSStringValue(rawModule[@"bootstrap_operation_id"]) ?: @"",
+      @"capabilityOperationId" : ALNORMTSStringValue(rawModule[@"capability_operation_id"]) ?: @"",
+      @"summaryOperationId" : ALNORMTSStringValue(rawModule[@"summary_operation_id"]) ?: @"",
+    }];
+  }
+
+  return [NSArray arrayWithArray:modules];
+}
+
+static NSDictionary<NSString *, id> *ALNORMTSWorkspaceHints(NSDictionary<NSString *, id> *openAPISpecification) {
+  NSDictionary<NSString *, id> *rootExtension = ALNORMTSArlenExtensionRoot(openAPISpecification ?: @{});
+  NSDictionary<NSString *, id> *workspace = ALNORMTSDictionaryValue(rootExtension[@"workspace"]);
+  NSMutableDictionary<NSString *, id> *hints = [NSMutableDictionary dictionary];
+  hints[@"packageManager"] = [ALNORMTSStringValue(workspace[@"package_manager"]) length] > 0
+                                 ? ALNORMTSStringValue(workspace[@"package_manager"])
+                                 : @"npm";
+  hints[@"installCommand"] = [ALNORMTSStringValue(workspace[@"install_command"]) length] > 0
+                                 ? ALNORMTSStringValue(workspace[@"install_command"])
+                                 : @"npm install";
+  hints[@"typecheckCommand"] = [ALNORMTSStringValue(workspace[@"typecheck_command"]) length] > 0
+                                   ? ALNORMTSStringValue(workspace[@"typecheck_command"])
+                                   : @"npm run typecheck";
+  if ([ALNORMTSStringValue(workspace[@"dev_command"]) length] > 0) {
+    hints[@"devCommand"] = ALNORMTSStringValue(workspace[@"dev_command"]);
+  }
+  hints[@"outputDir"] = @"frontend/generated/arlen";
+  hints[@"manifestPath"] = @"db/schema/arlen_typescript.json";
+  return [NSDictionary dictionaryWithDictionary:hints];
 }
 
 static NSString *ALNORMTSRelationTypeName(ALNORMRelationDescriptor *relation,
@@ -1279,6 +2022,500 @@ static NSString *ALNORMTSRenderModelsModule(NSArray<ALNORMModelDescriptor *> *de
   }
   [output appendString:@"};\n"];
 
+  return [NSString stringWithString:output];
+}
+
+static NSString *ALNORMTSRenderValidatorsModule(NSArray<ALNORMModelDescriptor *> *descriptors,
+                                                NSDictionary<NSString *, NSString *> *typeNamesByEntity,
+                                                NSDictionary<NSString *, id> *openAPISpecification,
+                                                NSArray<NSDictionary<NSString *, id> *> *operations,
+                                                NSError **error) {
+  if (error != NULL) {
+    *error = nil;
+  }
+
+  NSMutableArray<NSString *> *modelTypeImports = [NSMutableArray array];
+  NSArray<ALNORMModelDescriptor *> *sortedDescriptors =
+      [descriptors sortedArrayUsingDescriptors:@[ [NSSortDescriptor sortDescriptorWithKey:@"entityName" ascending:YES] ]];
+  for (ALNORMModelDescriptor *descriptor in sortedDescriptors) {
+    NSString *typeName = typeNamesByEntity[descriptor.entityName ?: @""] ?: @"Model";
+    [modelTypeImports addObject:[NSString stringWithFormat:@"type %@CreateInput", typeName]];
+    [modelTypeImports addObject:[NSString stringWithFormat:@"type %@UpdateInput", typeName]];
+  }
+
+  NSMutableString *output = [NSMutableString string];
+  [output appendString:@"// Generated by arlen typescript-codegen. Do not edit by hand.\n\n"];
+  if ([modelTypeImports count] > 0) {
+    [output appendFormat:@"import { %@ } from './models';\n\n", [modelTypeImports componentsJoinedByString:@", "]];
+  }
+  [output appendString:@"export type ArlenValidatorKind = 'string' | 'number' | 'boolean' | 'object' | 'array' | 'enum' | 'union' | 'intersection' | 'json' | 'unknown' | 'null';\n"];
+  [output appendString:@"export interface ArlenValidatorSchema {\n  kind: ArlenValidatorKind;\n  nullable?: boolean;\n  formatHint?: string;\n  literalValues?: Array<string | number | boolean | null>;\n  properties?: Record<string, ArlenValidatorSchema>;\n  requiredFields?: string[];\n  readonlyFields?: string[];\n  writableFields?: string[];\n  items?: ArlenValidatorSchema;\n  members?: ArlenValidatorSchema[];\n  additionalProperties?: boolean | ArlenValidatorSchema;\n}\n\n"];
+  [output appendString:@"export interface ArlenValidationIssue {\n  path: string;\n  code: string;\n  message: string;\n}\n\n"];
+  [output appendString:@"export type ArlenValidationResult<T> =\n  | { success: true; value: T }\n  | { success: false; errors: ArlenValidationIssue[] };\n\n"];
+  [output appendString:@"export interface ArlenFormFieldAdapter {\n  name: string;\n  label: string;\n  inputKind: 'text' | 'number' | 'checkbox' | 'json' | 'date' | 'datetime' | 'time';\n  nullable: boolean;\n  required: boolean;\n  readOnly: boolean;\n  hasDefault: boolean;\n  defaultValueShape: string;\n  formatHint?: string;\n}\n\n"];
+  [output appendString:@"function arlenIsPlainObject(value: unknown): value is Record<string, unknown> {\n  return typeof value === 'object' && value !== null && !Array.isArray(value);\n}\n\n"];
+  [output appendString:@"function arlenIsJSONValue(value: unknown): boolean {\n  if (value === null) {\n    return true;\n  }\n  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {\n    return true;\n  }\n  if (Array.isArray(value)) {\n    return value.every((item) => arlenIsJSONValue(item));\n  }\n  if (arlenIsPlainObject(value)) {\n    return Object.values(value).every((item) => arlenIsJSONValue(item));\n  }\n  return false;\n}\n\n"];
+  [output appendString:@"function arlenJoinPath(base: string, segment: string): string {\n  return base.length > 0 ? `${base}.${segment}` : segment;\n}\n\n"];
+  [output appendString:@"function arlenValidateSchema(schema: ArlenValidatorSchema, value: unknown, path = ''): ArlenValidationIssue[] {\n  if (value === null) {\n    return schema.nullable || schema.kind === 'null'\n      ? []\n      : [{ path, code: 'required', message: 'Expected a non-null value' }];\n  }\n\n  switch (schema.kind) {\n    case 'string':\n      return typeof value === 'string' ? [] : [{ path, code: 'type', message: 'Expected a string' }];\n    case 'number':\n      return typeof value === 'number' && Number.isFinite(value)\n        ? []\n        : [{ path, code: 'type', message: 'Expected a finite number' }];\n    case 'boolean':\n      return typeof value === 'boolean' ? [] : [{ path, code: 'type', message: 'Expected a boolean' }];\n    case 'json':\n      return arlenIsJSONValue(value) ? [] : [{ path, code: 'type', message: 'Expected a JSON-compatible value' }];\n    case 'null':\n      return value === null ? [] : [{ path, code: 'type', message: 'Expected null' }];\n    case 'enum': {\n      const allowed = schema.literalValues ?? [];\n      return allowed.some((candidate) => candidate === value)\n        ? []\n        : [{ path, code: 'enum', message: `Expected one of ${allowed.join(', ')}` }];\n    }\n    case 'array': {\n      if (!Array.isArray(value)) {\n        return [{ path, code: 'type', message: 'Expected an array' }];\n      }\n      const issues: ArlenValidationIssue[] = [];\n      for (let index = 0; index < value.length; index += 1) {\n        issues.push(...arlenValidateSchema(schema.items ?? { kind: 'unknown' }, value[index], `${path}[${index}]`));\n      }\n      return issues;\n    }\n    case 'object': {\n      if (!arlenIsPlainObject(value)) {\n        return [{ path, code: 'type', message: 'Expected an object' }];\n      }\n      const issues: ArlenValidationIssue[] = [];\n      const properties = schema.properties ?? {};\n      const requiredFields = new Set(schema.requiredFields ?? []);\n      for (const fieldName of requiredFields) {\n        if (!(fieldName in value) || value[fieldName] === undefined) {\n          issues.push({ path: arlenJoinPath(path, fieldName), code: 'required', message: 'Field is required' });\n        }\n      }\n      for (const [fieldName, fieldSchema] of Object.entries(properties)) {\n        if (!(fieldName in value) || value[fieldName] === undefined) {\n          continue;\n        }\n        issues.push(...arlenValidateSchema(fieldSchema, value[fieldName], arlenJoinPath(path, fieldName)));\n      }\n      for (const [fieldName, fieldValue] of Object.entries(value)) {\n        if (fieldName in properties) {\n          continue;\n        }\n        if (schema.additionalProperties === false) {\n          issues.push({ path: arlenJoinPath(path, fieldName), code: 'unknown_field', message: 'Field is not allowed' });\n          continue;\n        }\n        if (schema.additionalProperties && typeof schema.additionalProperties === 'object' && !Array.isArray(schema.additionalProperties)) {\n          issues.push(...arlenValidateSchema(schema.additionalProperties, fieldValue, arlenJoinPath(path, fieldName)));\n        }\n      }\n      return issues;\n    }\n    case 'union': {\n      const members = schema.members ?? [];\n      if (members.some((member) => arlenValidateSchema(member, value, path).length === 0)) {\n        return [];\n      }\n      return [{ path, code: 'union', message: 'Value did not match any allowed schema member' }];\n    }\n    case 'intersection': {\n      const issues: ArlenValidationIssue[] = [];\n      for (const member of schema.members ?? []) {\n        issues.push(...arlenValidateSchema(member, value, path));\n      }\n      return issues;\n    }\n    case 'unknown':\n    default:\n      return [];\n  }\n}\n\n"];
+  [output appendString:@"export function validateArlenValue<T>(schema: ArlenValidatorSchema, value: unknown): ArlenValidationResult<T> {\n  const errors = arlenValidateSchema(schema, value);\n  if (errors.length > 0) {\n    return { success: false, errors };\n  }\n  return { success: true, value: value as T };\n}\n\n"];
+
+  NSMutableArray<NSString *> *modelRegistryRows = [NSMutableArray array];
+  for (ALNORMModelDescriptor *descriptor in sortedDescriptors) {
+    NSString *typeName = typeNamesByEntity[descriptor.entityName ?: @""] ?: @"Model";
+    NSString *camelName = ALNORMTSCamelIdentifier(typeName, @"model");
+    NSString *createSchemaConst = [NSString stringWithFormat:@"%@CreateInputSchema", camelName];
+    NSString *updateSchemaConst = [NSString stringWithFormat:@"%@UpdateInputSchema", camelName];
+    NSString *createFormConst = [NSString stringWithFormat:@"%@CreateFormFields", camelName];
+    NSString *updateFormConst = [NSString stringWithFormat:@"%@UpdateFormFields", camelName];
+
+    NSMutableArray<NSDictionary<NSString *, id> *> *createRows = [NSMutableArray array];
+    NSMutableArray<NSDictionary<NSString *, id> *> *updateRows = [NSMutableArray array];
+    NSMutableArray<NSDictionary<NSString *, id> *> *createFormFields = [NSMutableArray array];
+    NSMutableArray<NSDictionary<NSString *, id> *> *updateFormFields = [NSMutableArray array];
+    for (ALNORMFieldDescriptor *field in descriptor.fields ?: @[]) {
+      BOOL readOnly = (field.isReadOnly || descriptor.isReadOnly);
+      NSDictionary<NSString *, id> *fieldSchema = ALNORMTSValidatorSchemaForFieldDescriptor(field);
+      NSString *formatHint = ALNORMTSFormatHintForDataType(field.dataType);
+      NSMutableDictionary<NSString *, id> *formField = [NSMutableDictionary dictionary];
+      formField[@"name"] = field.name ?: @"";
+      formField[@"label"] = ALNORMTSHumanizedLabel(field.name ?: @"");
+      formField[@"inputKind"] = ALNORMTSFormInputKindForDataType(field.dataType);
+      formField[@"nullable"] = @(field.isNullable);
+      formField[@"required"] = ALNORMTSBoolNumber(!field.isNullable && !field.hasDefaultValue && !readOnly);
+      formField[@"readOnly"] = @(readOnly);
+      formField[@"hasDefault"] = @(field.hasDefaultValue);
+      formField[@"defaultValueShape"] = field.defaultValueShape ?: @"none";
+      if ([formatHint length] > 0) {
+        formField[@"formatHint"] = formatHint;
+      }
+
+      if (readOnly) {
+        continue;
+      }
+      [createRows addObject:@{
+        @"name" : field.name ?: @"",
+        @"schema" : fieldSchema,
+        @"required" : ALNORMTSBoolNumber(!field.isNullable && !field.hasDefaultValue),
+      }];
+      [updateRows addObject:@{
+        @"name" : field.name ?: @"",
+        @"schema" : fieldSchema,
+        @"required" : @NO,
+      }];
+      [createFormFields addObject:formField];
+      NSMutableDictionary<NSString *, id> *updateFormField = [formField mutableCopy];
+      updateFormField[@"required"] = @NO;
+      [updateFormFields addObject:updateFormField];
+    }
+
+    NSString *createSchemaLiteral = ALNORMTSJSONStringFromObject(ALNORMTSValidatorObjectSchema(createRows, NO), error);
+    if (createSchemaLiteral == nil) {
+      return nil;
+    }
+    NSString *updateSchemaLiteral = ALNORMTSJSONStringFromObject(ALNORMTSValidatorObjectSchema(updateRows, NO), error);
+    if (updateSchemaLiteral == nil) {
+      return nil;
+    }
+    NSString *createFormLiteral = ALNORMTSJSONStringFromObject(createFormFields, error);
+    if (createFormLiteral == nil) {
+      return nil;
+    }
+    NSString *updateFormLiteral = ALNORMTSJSONStringFromObject(updateFormFields, error);
+    if (updateFormLiteral == nil) {
+      return nil;
+    }
+
+    [output appendFormat:@"export const %@: ArlenValidatorSchema = %@;\n\n", createSchemaConst, createSchemaLiteral];
+    [output appendFormat:@"export const %@: ArlenValidatorSchema = %@;\n\n", updateSchemaConst, updateSchemaLiteral];
+    [output appendFormat:@"export const %@: ArlenFormFieldAdapter[] = %@;\n\n", createFormConst, createFormLiteral];
+    [output appendFormat:@"export const %@: ArlenFormFieldAdapter[] = %@;\n\n", updateFormConst, updateFormLiteral];
+    [output appendFormat:@"export function validate%@CreateInput(value: unknown): ArlenValidationResult<%@CreateInput> {\n  return validateArlenValue<%@CreateInput>(%@, value);\n}\n\n",
+                         typeName, typeName, typeName, createSchemaConst];
+    [output appendFormat:@"export function validate%@UpdateInput(value: unknown): ArlenValidationResult<%@UpdateInput> {\n  return validateArlenValue<%@UpdateInput>(%@, value);\n}\n\n",
+                         typeName, typeName, typeName, updateSchemaConst];
+
+    [modelRegistryRows addObject:[NSString stringWithFormat:@"  %@: {\n    createInput: %@,\n    updateInput: %@,\n    createFormFields: %@,\n    updateFormFields: %@,\n  },",
+                                 ALNORMTSQuotedPropertyName(typeName),
+                                 createSchemaConst,
+                                 updateSchemaConst,
+                                 createFormConst,
+                                 updateFormConst]];
+  }
+
+  NSMutableArray<NSString *> *operationRegistryRows = [NSMutableArray array];
+  for (NSDictionary<NSString *, id> *operation in operations ?: @[]) {
+    NSString *typeName = operation[@"typeName"] ?: @"Operation";
+    NSString *methodName = operation[@"methodName"] ?: @"operation";
+    NSString *schemaConst = [NSString stringWithFormat:@"%@RequestSchema", methodName];
+
+    NSMutableArray<NSDictionary<NSString *, id> *> *requestRows = [NSMutableArray array];
+    NSArray<NSDictionary<NSString *, id> *> *pathProperties =
+        [operation[@"pathProperties"] isKindOfClass:[NSArray class]] ? operation[@"pathProperties"] : @[];
+    NSArray<NSDictionary<NSString *, id> *> *queryProperties =
+        [operation[@"queryProperties"] isKindOfClass:[NSArray class]] ? operation[@"queryProperties"] : @[];
+    NSArray<NSDictionary<NSString *, id> *> *headerProperties =
+        [operation[@"headerProperties"] isKindOfClass:[NSArray class]] ? operation[@"headerProperties"] : @[];
+    NSDictionary<NSString *, id> *bodySchema = ALNORMTSDictionaryValue(operation[@"bodySchema"]);
+
+    if ([pathProperties count] > 0) {
+      NSMutableArray<NSDictionary<NSString *, id> *> *pathRows = [NSMutableArray array];
+      for (NSDictionary<NSString *, id> *property in pathProperties) {
+        NSDictionary<NSString *, id> *schema =
+            ALNORMTSValidatorSchemaFromOpenAPISchema(property[@"schema"], openAPISpecification ?: @{}, error);
+        if (schema == nil) {
+          return nil;
+        }
+        [pathRows addObject:@{
+          @"name" : property[@"name"] ?: @"",
+          @"schema" : schema,
+          @"required" : ALNORMTSBoolNumber(!ALNORMTSBoolValue(property[@"optional"], NO)),
+        }];
+      }
+      [requestRows addObject:@{
+        @"name" : @"path",
+        @"schema" : ALNORMTSValidatorObjectSchema(pathRows, NO),
+        @"required" : @YES,
+      }];
+    }
+    if ([queryProperties count] > 0) {
+      NSMutableArray<NSDictionary<NSString *, id> *> *queryRows = [NSMutableArray array];
+      for (NSDictionary<NSString *, id> *property in queryProperties) {
+        NSDictionary<NSString *, id> *schema =
+            ALNORMTSValidatorSchemaFromOpenAPISchema(property[@"schema"], openAPISpecification ?: @{}, error);
+        if (schema == nil) {
+          return nil;
+        }
+        [queryRows addObject:@{
+          @"name" : property[@"name"] ?: @"",
+          @"schema" : schema,
+          @"required" : ALNORMTSBoolNumber(!ALNORMTSBoolValue(property[@"optional"], NO)),
+        }];
+      }
+      [requestRows addObject:@{
+        @"name" : @"query",
+        @"schema" : ALNORMTSValidatorObjectSchema(queryRows, NO),
+        @"required" : @NO,
+      }];
+    }
+    if ([headerProperties count] > 0) {
+      NSMutableArray<NSDictionary<NSString *, id> *> *headerRows = [NSMutableArray array];
+      for (NSDictionary<NSString *, id> *property in headerProperties) {
+        NSDictionary<NSString *, id> *schema =
+            ALNORMTSValidatorSchemaFromOpenAPISchema(property[@"schema"], openAPISpecification ?: @{}, error);
+        if (schema == nil) {
+          return nil;
+        }
+        [headerRows addObject:@{
+          @"name" : property[@"name"] ?: @"",
+          @"schema" : schema,
+          @"required" : ALNORMTSBoolNumber(!ALNORMTSBoolValue(property[@"optional"], NO)),
+        }];
+      }
+      [requestRows addObject:@{
+        @"name" : @"headers",
+        @"schema" : ALNORMTSValidatorObjectSchema(headerRows, NO),
+        @"required" : @NO,
+      }];
+    }
+    if ([bodySchema count] > 0) {
+      NSDictionary<NSString *, id> *validatorBodySchema =
+          ALNORMTSValidatorSchemaFromOpenAPISchema(bodySchema, openAPISpecification ?: @{}, error);
+      if (validatorBodySchema == nil) {
+        return nil;
+      }
+      [requestRows addObject:@{
+        @"name" : @"body",
+        @"schema" : validatorBodySchema,
+        @"required" : operation[@"bodyRequired"] ?: @NO,
+      }];
+    }
+
+    NSString *requestSchemaLiteral = ALNORMTSJSONStringFromObject(ALNORMTSValidatorObjectSchema(requestRows, NO), error);
+    if (requestSchemaLiteral == nil) {
+      return nil;
+    }
+    [output appendFormat:@"export const %@: ArlenValidatorSchema = %@;\n\n", schemaConst, requestSchemaLiteral];
+    [output appendFormat:@"export function validate%@Request(value: unknown): ArlenValidationResult<Record<string, unknown>> {\n  return validateArlenValue<Record<string, unknown>>(%@, value);\n}\n\n",
+                         typeName,
+                         schemaConst];
+    [operationRegistryRows addObject:[NSString stringWithFormat:@"  %@: %@,", ALNORMTSQuotedPropertyName(methodName), schemaConst]];
+  }
+
+  [output appendString:@"export const arlenModelValidatorSchemas = {\n"];
+  for (NSString *row in modelRegistryRows) {
+    [output appendFormat:@"%@\n", row];
+  }
+  [output appendString:@"} as const;\n\n"];
+
+  [output appendString:@"export const arlenOperationRequestSchemas = {\n"];
+  for (NSString *row in operationRegistryRows) {
+    [output appendFormat:@"%@\n", row];
+  }
+  [output appendString:@"} as const;\n"];
+  return [NSString stringWithString:output];
+}
+
+static NSString *ALNORMTSRenderQueryModule(NSArray<ALNORMModelDescriptor *> *descriptors,
+                                           NSDictionary<NSString *, NSString *> *typeNamesByEntity,
+                                           NSArray<NSDictionary<NSString *, id> *> *resources) {
+  NSMutableString *output = [NSMutableString string];
+  [output appendString:@"// Generated by arlen typescript-codegen. Do not edit by hand.\n\n"];
+  [output appendString:@"export type ArlenSortDirection = 'asc' | 'desc';\n"];
+  [output appendString:@"export type ArlenQueryFilterValue = string | number | boolean | null;\n"];
+  [output appendString:@"export interface ArlenQuerySort<TField extends string = string> {\n  field: TField;\n  direction?: ArlenSortDirection;\n}\n\n"];
+  [output appendString:@"export interface ArlenPaginationContract {\n  cursorParameterName: string;\n  limitParameterName: string;\n  defaultPageSize: number;\n  maxPageSize: number;\n}\n\n"];
+  [output appendString:@"export interface ArlenRelationContract {\n  name: string;\n  kind: 'belongs_to' | 'has_one' | 'has_many' | 'many_to_many';\n  targetEntityName: string;\n  sourceFieldNames: string[];\n  targetFieldNames: string[];\n  throughEntityName?: string;\n  throughSourceFieldNames: string[];\n  throughTargetFieldNames: string[];\n  pivotFieldNames: string[];\n  readOnly: boolean;\n}\n\n"];
+  [output appendString:@"export interface ArlenResourceQueryContract<TSelect extends string = string, TInclude extends string = string, TSort extends string = string, TFilter extends string = string> {\n  resourceName: string;\n  entityName?: string;\n  modelTypeName?: string;\n  operationIds: string[];\n  selectParameterName: string;\n  includeParameterName: string;\n  sortParameterName: string;\n  filterParameterPrefix: string;\n  pagination: ArlenPaginationContract;\n  allowedSelect: TSelect[];\n  allowedInclude: TInclude[];\n  sortableFields: TSort[];\n  filterableFields: TFilter[];\n  defaultSort: TSort[];\n}\n\n"];
+
+  NSArray<ALNORMModelDescriptor *> *sortedDescriptors =
+      [descriptors sortedArrayUsingDescriptors:@[ [NSSortDescriptor sortDescriptorWithKey:@"entityName" ascending:YES] ]];
+  for (ALNORMModelDescriptor *descriptor in sortedDescriptors) {
+    NSString *typeName = typeNamesByEntity[descriptor.entityName ?: @""] ?: @"Model";
+    NSString *camelName = ALNORMTSCamelIdentifier(typeName, @"model");
+    NSArray<NSString *> *fieldNames = ALNORMTSSortedFieldNamesForDescriptor(descriptor);
+    NSArray<NSString *> *relationNames = ALNORMTSSortedRelationNamesForDescriptor(descriptor);
+    [output appendFormat:@"export type %@FieldName = %@;\n", typeName, ALNORMTSStringUnionExpression(fieldNames)];
+    [output appendFormat:@"export const %@FieldNames = %@ as const;\n\n", camelName, ALNORMTSStringArrayExpression(fieldNames)];
+    [output appendFormat:@"export const %@RelationContracts: Record<string, ArlenRelationContract> = {\n", camelName];
+    NSArray<ALNORMRelationDescriptor *> *sortedRelations =
+        [descriptor.relations sortedArrayUsingDescriptors:@[ [NSSortDescriptor sortDescriptorWithKey:@"name" ascending:YES] ]];
+    for (ALNORMRelationDescriptor *relation in sortedRelations) {
+      [output appendFormat:@"  %@: {\n", ALNORMTSQuotedPropertyName(relation.name ?: @"")];
+      [output appendFormat:@"    name: %@,\n", ALNORMTSSingleQuotedString(relation.name ?: @"")];
+      [output appendFormat:@"    kind: %@,\n", ALNORMTSSingleQuotedString([relation kindName])];
+      [output appendFormat:@"    targetEntityName: %@,\n", ALNORMTSSingleQuotedString(relation.targetEntityName ?: @"")];
+      [output appendFormat:@"    sourceFieldNames: %@,\n", ALNORMTSStringArrayExpression(relation.sourceFieldNames)];
+      [output appendFormat:@"    targetFieldNames: %@,\n", ALNORMTSStringArrayExpression(relation.targetFieldNames)];
+      if ([relation.throughEntityName length] > 0) {
+        [output appendFormat:@"    throughEntityName: %@,\n", ALNORMTSSingleQuotedString(relation.throughEntityName)];
+      }
+      [output appendFormat:@"    throughSourceFieldNames: %@,\n", ALNORMTSStringArrayExpression(relation.throughSourceFieldNames)];
+      [output appendFormat:@"    throughTargetFieldNames: %@,\n", ALNORMTSStringArrayExpression(relation.throughTargetFieldNames)];
+      [output appendFormat:@"    pivotFieldNames: %@,\n", ALNORMTSStringArrayExpression(relation.pivotFieldNames)];
+      [output appendFormat:@"    readOnly: %@,\n", relation.isReadOnly ? @"true" : @"false"];
+      [output appendString:@"  },\n"];
+    }
+    [output appendString:@"} as const;\n\n"];
+    [output appendFormat:@"export type %@AvailableInclude = %@;\n\n", typeName, ALNORMTSStringUnionExpression(relationNames)];
+  }
+
+  NSMutableArray<NSString *> *resourceRegistryRows = [NSMutableArray array];
+  NSArray<NSDictionary<NSString *, id> *> *sortedResources =
+      [resources sortedArrayUsingDescriptors:@[ [NSSortDescriptor sortDescriptorWithKey:@"name" ascending:YES] ]];
+  for (NSDictionary<NSString *, id> *resource in sortedResources) {
+    NSString *resourceName = ALNORMTSStringValue(resource[@"name"]);
+    NSString *typeBase = [ALNORMTSStringValue(resource[@"modelTypeName"]) length] > 0
+                             ? ALNORMTSStringValue(resource[@"modelTypeName"])
+                             : ALNORMTSPascalIdentifier(resourceName, @"Resource");
+    NSString *camelName = ALNORMTSCamelIdentifier(resourceName, @"resource");
+    NSString *selectType = [NSString stringWithFormat:@"%@ResourceSelectField", typeBase];
+    NSString *includeType = [NSString stringWithFormat:@"%@ResourceIncludeField", typeBase];
+    NSString *sortType = [NSString stringWithFormat:@"%@ResourceSortField", typeBase];
+    NSString *filterType = [NSString stringWithFormat:@"%@ResourceFilterField", typeBase];
+    NSString *queryShapeType = [NSString stringWithFormat:@"%@ResourceQueryShape", typeBase];
+    NSString *contractConst = [NSString stringWithFormat:@"%@ResourceQueryContract", camelName];
+    NSDictionary<NSString *, id> *query = ALNORMTSDictionaryValue(resource[@"query"]);
+    NSArray<NSString *> *allowedSelect = ALNORMTSNormalizedStringArray(query[@"allowedSelect"]);
+    NSArray<NSString *> *allowedInclude = ALNORMTSNormalizedStringArray(query[@"allowedInclude"]);
+    NSArray<NSString *> *sortableFields = ALNORMTSNormalizedStringArray(query[@"sortableFields"]);
+    NSArray<NSString *> *filterableFields = ALNORMTSNormalizedStringArray(query[@"filterableFields"]);
+    NSArray<NSString *> *defaultSort = ALNORMTSNormalizedStringArray(query[@"defaultSort"]);
+
+    [output appendFormat:@"export type %@ = %@;\n", selectType, ALNORMTSStringUnionExpression(allowedSelect)];
+    [output appendFormat:@"export type %@ = %@;\n", includeType, ALNORMTSStringUnionExpression(allowedInclude)];
+    [output appendFormat:@"export type %@ = %@;\n", sortType, ALNORMTSStringUnionExpression(sortableFields)];
+    [output appendFormat:@"export type %@ = %@;\n\n", filterType, ALNORMTSStringUnionExpression(filterableFields)];
+    [output appendFormat:@"export interface %@ {\n  select?: %@[];\n  include?: %@[];\n  filter?: Partial<Record<%@, ArlenQueryFilterValue | ArlenQueryFilterValue[]>>;\n  sort?: Array<ArlenQuerySort<%@>>;\n  cursor?: string | null;\n  limit?: number;\n}\n\n",
+                         queryShapeType,
+                         selectType,
+                         includeType,
+                         filterType,
+                         sortType];
+    [output appendFormat:@"export const %@: ArlenResourceQueryContract<%@, %@, %@, %@> = {\n",
+                         contractConst,
+                         selectType,
+                         includeType,
+                         sortType,
+                         filterType];
+    [output appendFormat:@"  resourceName: %@,\n", ALNORMTSSingleQuotedString(resourceName)];
+    if ([ALNORMTSStringValue(resource[@"entityName"]) length] > 0) {
+      [output appendFormat:@"  entityName: %@,\n", ALNORMTSSingleQuotedString(resource[@"entityName"])];
+    }
+    if ([ALNORMTSStringValue(resource[@"modelTypeName"]) length] > 0) {
+      [output appendFormat:@"  modelTypeName: %@,\n", ALNORMTSSingleQuotedString(resource[@"modelTypeName"])];
+    }
+    [output appendFormat:@"  operationIds: %@,\n", ALNORMTSStringArrayExpression(resource[@"operationIds"] ?: @[])];
+    [output appendFormat:@"  selectParameterName: %@,\n", ALNORMTSSingleQuotedString(query[@"selectParam"] ?: @"fields")];
+    [output appendFormat:@"  includeParameterName: %@,\n", ALNORMTSSingleQuotedString(query[@"includeParam"] ?: @"include")];
+    [output appendFormat:@"  sortParameterName: %@,\n", ALNORMTSSingleQuotedString(query[@"sortParam"] ?: @"sort")];
+    [output appendFormat:@"  filterParameterPrefix: %@,\n", ALNORMTSSingleQuotedString(query[@"filterPrefix"] ?: @"filter.")];
+    [output appendString:@"  pagination: {\n"];
+    [output appendFormat:@"    cursorParameterName: %@,\n", ALNORMTSSingleQuotedString(query[@"cursorParam"] ?: @"cursor")];
+    [output appendFormat:@"    limitParameterName: %@,\n", ALNORMTSSingleQuotedString(query[@"limitParam"] ?: @"limit")];
+    [output appendFormat:@"    defaultPageSize: %@,\n", [query[@"defaultPageSize"] stringValue] ?: @"25"];
+    [output appendFormat:@"    maxPageSize: %@,\n", [query[@"maxPageSize"] stringValue] ?: @"100"];
+    [output appendString:@"  },\n"];
+    [output appendFormat:@"  allowedSelect: %@,\n", ALNORMTSStringArrayExpression(allowedSelect)];
+    [output appendFormat:@"  allowedInclude: %@,\n", ALNORMTSStringArrayExpression(allowedInclude)];
+    [output appendFormat:@"  sortableFields: %@,\n", ALNORMTSStringArrayExpression(sortableFields)];
+    [output appendFormat:@"  filterableFields: %@,\n", ALNORMTSStringArrayExpression(filterableFields)];
+    [output appendFormat:@"  defaultSort: %@,\n", ALNORMTSStringArrayExpression(defaultSort)];
+    [output appendString:@"};\n\n"];
+    [output appendFormat:@"export function build%@QueryParams(query: %@): Record<string, ArlenQueryFilterValue | ArlenQueryFilterValue[]> {\n",
+                         ALNORMTSPascalIdentifier(resourceName, @"Resource"),
+                         queryShapeType];
+    [output appendString:@"  const params: Record<string, ArlenQueryFilterValue | ArlenQueryFilterValue[]> = {};\n"];
+    [output appendFormat:@"  if (query.select && query.select.length > 0) {\n    params[%@] = query.select;\n  }\n",
+                         ALNORMTSSingleQuotedString(query[@"selectParam"] ?: @"fields")];
+    [output appendFormat:@"  if (query.include && query.include.length > 0) {\n    params[%@] = query.include;\n  }\n",
+                         ALNORMTSSingleQuotedString(query[@"includeParam"] ?: @"include")];
+    [output appendFormat:@"  if (query.sort && query.sort.length > 0) {\n    params[%@] = query.sort.map((item) => `${item.direction ?? 'asc'}:${item.field}`);\n  }\n",
+                         ALNORMTSSingleQuotedString(query[@"sortParam"] ?: @"sort")];
+    [output appendFormat:@"  if (query.cursor !== undefined) {\n    params[%@] = query.cursor;\n  }\n",
+                         ALNORMTSSingleQuotedString(query[@"cursorParam"] ?: @"cursor")];
+    [output appendFormat:@"  if (query.limit !== undefined) {\n    params[%@] = query.limit;\n  }\n",
+                         ALNORMTSSingleQuotedString(query[@"limitParam"] ?: @"limit")];
+    [output appendFormat:@"  for (const [field, rawValue] of Object.entries(query.filter ?? {})) {\n    params[%@ + field] = rawValue as ArlenQueryFilterValue | ArlenQueryFilterValue[];\n  }\n",
+                         ALNORMTSSingleQuotedString(query[@"filterPrefix"] ?: @"filter.")];
+    [output appendString:@"  return params;\n}\n\n"];
+    [resourceRegistryRows addObject:[NSString stringWithFormat:@"  %@: %@,", ALNORMTSQuotedPropertyName(resourceName), contractConst]];
+  }
+
+  [output appendString:@"export const arlenResourceQueryContracts = {\n"];
+  for (NSString *row in resourceRegistryRows) {
+    [output appendFormat:@"%@\n", row];
+  }
+  [output appendString:@"} as const;\n"];
+  return [NSString stringWithString:output];
+}
+
+static NSString *ALNORMTSRenderMetaModule(NSArray<NSDictionary<NSString *, id> *> *resources,
+                                          NSArray<NSDictionary<NSString *, id> *> *modules,
+                                          NSDictionary<NSString *, id> *workspaceHints) {
+  NSMutableString *output = [NSMutableString string];
+  [output appendString:@"// Generated by arlen typescript-codegen. Do not edit by hand.\n\n"];
+  NSMutableArray<NSString *> *queryImports = [NSMutableArray array];
+  NSArray<NSDictionary<NSString *, id> *> *sortedResources =
+      [resources sortedArrayUsingDescriptors:@[ [NSSortDescriptor sortDescriptorWithKey:@"name" ascending:YES] ]];
+  for (NSDictionary<NSString *, id> *resource in sortedResources) {
+    NSString *resourceName = ALNORMTSStringValue(resource[@"name"]);
+    if ([resourceName length] > 0) {
+      [queryImports addObject:[NSString stringWithFormat:@"%@ResourceQueryContract",
+                               ALNORMTSCamelIdentifier(resourceName, @"resource")]];
+    }
+  }
+  if ([queryImports count] > 0) {
+    [output appendFormat:@"import { %@, type ArlenResourceQueryContract } from './query';\n\n",
+                         [queryImports componentsJoinedByString:@", "]];
+  } else {
+    [output appendString:@"import type { ArlenResourceQueryContract } from './query';\n\n"];
+  }
+
+  [output appendString:@"export interface ArlenWorkspaceHints {\n  packageManager: string;\n  installCommand: string;\n  typecheckCommand: string;\n  devCommand?: string;\n  outputDir: string;\n  manifestPath: string;\n}\n\n"];
+  [output appendString:@"export interface ArlenAdminResourceMeta {\n  enabled: boolean;\n  titleField?: string;\n  defaultColumns: string[];\n  searchableFields: string[];\n  allowedActions: string[];\n  htmlPath?: string;\n  apiPath?: string;\n}\n\n"];
+  [output appendString:@"export interface ArlenResourceMeta {\n  name: string;\n  entityName?: string;\n  modelTypeName?: string;\n  tagNames: string[];\n  operationIds: string[];\n  operations: {\n    list?: string;\n    detail?: string;\n    create?: string;\n    update?: string;\n    destroy?: string;\n  };\n  query: ArlenResourceQueryContract | null;\n  admin: ArlenAdminResourceMeta | null;\n}\n\n"];
+  [output appendString:@"export interface ArlenModuleMeta {\n  name: string;\n  kind: string;\n  tagNames: string[];\n  operationIds: string[];\n  resourceNames: string[];\n  bootstrapOperationId?: string;\n  capabilityOperationId?: string;\n  summaryOperationId?: string;\n}\n\n"];
+
+  NSString *workspaceLiteral = ALNORMTSJSONStringFromObject(workspaceHints ?: @{}, NULL);
+  [output appendFormat:@"export const arlenWorkspaceHints: ArlenWorkspaceHints = %@;\n\n", workspaceLiteral ?: @"{}"];
+
+  NSMutableArray<NSString *> *resourceRows = [NSMutableArray array];
+  for (NSDictionary<NSString *, id> *resource in sortedResources) {
+    NSString *resourceName = ALNORMTSStringValue(resource[@"name"]);
+    NSString *queryConst = [NSString stringWithFormat:@"%@ResourceQueryContract",
+                            ALNORMTSCamelIdentifier(resourceName, @"resource")];
+    NSDictionary<NSString *, id> *operations = ALNORMTSDictionaryValue(resource[@"operations"]);
+    NSDictionary<NSString *, id> *admin = ALNORMTSDictionaryValue(resource[@"admin"]);
+    BOOL adminEnabled = ALNORMTSBoolValue(admin[@"enabled"], NO);
+    NSMutableString *row = [NSMutableString string];
+    [row appendFormat:@"  %@: {\n", ALNORMTSQuotedPropertyName(resourceName)];
+    [row appendFormat:@"    name: %@,\n", ALNORMTSSingleQuotedString(resourceName)];
+    if ([ALNORMTSStringValue(resource[@"entityName"]) length] > 0) {
+      [row appendFormat:@"    entityName: %@,\n", ALNORMTSSingleQuotedString(resource[@"entityName"])];
+    }
+    if ([ALNORMTSStringValue(resource[@"modelTypeName"]) length] > 0) {
+      [row appendFormat:@"    modelTypeName: %@,\n", ALNORMTSSingleQuotedString(resource[@"modelTypeName"])];
+    }
+    [row appendFormat:@"    tagNames: %@,\n", ALNORMTSStringArrayExpression(resource[@"tagNames"] ?: @[])];
+    [row appendFormat:@"    operationIds: %@,\n", ALNORMTSStringArrayExpression(resource[@"operationIds"] ?: @[])];
+    [row appendString:@"    operations: {\n"];
+    for (NSString *key in @[ @"list", @"detail", @"create", @"update", @"destroy" ]) {
+      NSString *value = ALNORMTSStringValue(operations[key]);
+      if ([value length] > 0) {
+        [row appendFormat:@"      %@: %@,\n", ALNORMTSQuotedPropertyName(key), ALNORMTSSingleQuotedString(value)];
+      }
+    }
+    [row appendString:@"    },\n"];
+    if ([queryImports count] > 0) {
+      [row appendFormat:@"    query: %@,\n", queryConst];
+    } else {
+      [row appendString:@"    query: null,\n"];
+    }
+    if (adminEnabled) {
+      [row appendString:@"    admin: {\n"];
+      [row appendString:@"      enabled: true,\n"];
+      if ([ALNORMTSStringValue(admin[@"titleField"]) length] > 0) {
+        [row appendFormat:@"      titleField: %@,\n", ALNORMTSSingleQuotedString(admin[@"titleField"])];
+      }
+      [row appendFormat:@"      defaultColumns: %@,\n", ALNORMTSStringArrayExpression(admin[@"defaultColumns"] ?: @[])];
+      [row appendFormat:@"      searchableFields: %@,\n", ALNORMTSStringArrayExpression(admin[@"searchableFields"] ?: @[])];
+      [row appendFormat:@"      allowedActions: %@,\n", ALNORMTSStringArrayExpression(admin[@"allowedActions"] ?: @[])];
+      if ([ALNORMTSStringValue(admin[@"htmlPath"]) length] > 0) {
+        [row appendFormat:@"      htmlPath: %@,\n", ALNORMTSSingleQuotedString(admin[@"htmlPath"])];
+      }
+      if ([ALNORMTSStringValue(admin[@"apiPath"]) length] > 0) {
+        [row appendFormat:@"      apiPath: %@,\n", ALNORMTSSingleQuotedString(admin[@"apiPath"])];
+      }
+      [row appendString:@"    },\n"];
+    } else {
+      [row appendString:@"    admin: null,\n"];
+    }
+    [row appendString:@"  },\n"];
+    [resourceRows addObject:row];
+  }
+
+  [output appendString:@"export const arlenResourceRegistry: Record<string, ArlenResourceMeta> = {\n"];
+  for (NSString *row in resourceRows) {
+    [output appendString:row];
+  }
+  [output appendString:@"};\n\n"];
+
+  [output appendString:@"export const arlenAdminResourceRegistry = {\n"];
+  for (NSDictionary<NSString *, id> *resource in sortedResources) {
+    NSDictionary<NSString *, id> *admin = ALNORMTSDictionaryValue(resource[@"admin"]);
+    if (!ALNORMTSBoolValue(admin[@"enabled"], NO)) {
+      continue;
+    }
+    NSString *resourceName = ALNORMTSStringValue(resource[@"name"]);
+    [output appendFormat:@"  %@: arlenResourceRegistry.%@.admin,\n",
+                         ALNORMTSQuotedPropertyName(resourceName),
+                         ALNORMTSQuotedPropertyName(resourceName)];
+  }
+  [output appendString:@"} as const;\n\n"];
+
+  [output appendString:@"export const arlenModuleRegistry: Record<string, ArlenModuleMeta> = {\n"];
+  NSArray<NSDictionary<NSString *, id> *> *sortedModules =
+      [modules sortedArrayUsingDescriptors:@[ [NSSortDescriptor sortDescriptorWithKey:@"name" ascending:YES] ]];
+  for (NSDictionary<NSString *, id> *module in sortedModules) {
+    NSString *moduleName = ALNORMTSStringValue(module[@"name"]);
+    [output appendFormat:@"  %@: {\n", ALNORMTSQuotedPropertyName(moduleName)];
+    [output appendFormat:@"    name: %@,\n", ALNORMTSSingleQuotedString(moduleName)];
+    [output appendFormat:@"    kind: %@,\n", ALNORMTSSingleQuotedString(module[@"kind"] ?: @"generic")];
+    [output appendFormat:@"    tagNames: %@,\n", ALNORMTSStringArrayExpression(module[@"tagNames"] ?: @[])];
+    [output appendFormat:@"    operationIds: %@,\n", ALNORMTSStringArrayExpression(module[@"operationIds"] ?: @[])];
+    [output appendFormat:@"    resourceNames: %@,\n", ALNORMTSStringArrayExpression(module[@"resourceNames"] ?: @[])];
+    if ([ALNORMTSStringValue(module[@"bootstrapOperationId"]) length] > 0) {
+      [output appendFormat:@"    bootstrapOperationId: %@,\n", ALNORMTSSingleQuotedString(module[@"bootstrapOperationId"])];
+    }
+    if ([ALNORMTSStringValue(module[@"capabilityOperationId"]) length] > 0) {
+      [output appendFormat:@"    capabilityOperationId: %@,\n", ALNORMTSSingleQuotedString(module[@"capabilityOperationId"])];
+    }
+    if ([ALNORMTSStringValue(module[@"summaryOperationId"]) length] > 0) {
+      [output appendFormat:@"    summaryOperationId: %@,\n", ALNORMTSSingleQuotedString(module[@"summaryOperationId"])];
+    }
+    [output appendString:@"  },\n"];
+  }
+  [output appendString:@"};\n"];
   return [NSString stringWithString:output];
 }
 
@@ -1556,11 +2793,20 @@ static NSString *ALNORMTSRenderIndexModule(NSArray<NSString *> *targets) {
   NSMutableString *output = [NSMutableString string];
   [output appendString:@"// Generated by arlen typescript-codegen. Do not edit by hand.\n\n"];
   [output appendString:@"export * from './models';\n"];
+  if ([targets containsObject:@"validators"]) {
+    [output appendString:@"export * from './validators';\n"];
+  }
+  if ([targets containsObject:@"query"]) {
+    [output appendString:@"export * from './query';\n"];
+  }
   if ([targets containsObject:@"client"]) {
     [output appendString:@"export * from './client';\n"];
   }
   if ([targets containsObject:@"react"]) {
     [output appendString:@"export * from './react';\n"];
+  }
+  if ([targets containsObject:@"meta"]) {
+    [output appendString:@"export * from './meta';\n"];
   }
   return [NSString stringWithString:output];
 }
@@ -1568,21 +2814,45 @@ static NSString *ALNORMTSRenderIndexModule(NSArray<NSString *> *targets) {
 static NSString *ALNORMTSRenderReadme(NSString *packageName,
                                       NSArray<NSString *> *targets,
                                       NSInteger modelCount,
-                                      NSInteger operationCount) {
+                                      NSInteger operationCount,
+                                      NSInteger resourceCount,
+                                      NSInteger moduleCount,
+                                      NSDictionary<NSString *, id> *workspaceHints) {
   NSMutableString *output = [NSMutableString string];
   [output appendFormat:@"# %@\n\n", packageName ?: @"arlen-generated-client"];
   [output appendString:@"Generated by `arlen typescript-codegen`.\n\n"];
   [output appendString:@"This package is descriptor-first:\n\n"];
   [output appendString:@"- `src/models.ts`: TypeScript read/create/update contracts and model metadata\n"];
+  if ([targets containsObject:@"validators"]) {
+    [output appendString:@"- `src/validators.ts`: framework-neutral validation schemas and form adapters\n"];
+  }
+  if ([targets containsObject:@"query"]) {
+    [output appendString:@"- `src/query.ts`: explicit relation metadata and resource query-shape contracts\n"];
+  }
   if ([targets containsObject:@"client"]) {
     [output appendString:@"- `src/client.ts`: typed `fetch` transport client derived from OpenAPI metadata\n"];
   }
   if ([targets containsObject:@"react"]) {
     [output appendString:@"- `src/react.ts`: optional TanStack Query-oriented React helpers\n"];
   }
+  if ([targets containsObject:@"meta"]) {
+    [output appendString:@"- `src/meta.ts`: module/resource/admin metadata bridge plus workspace hints\n"];
+  }
   [output appendString:@"\n"];
   [output appendFormat:@"Models: `%ld`\n\n", (long)modelCount];
   [output appendFormat:@"OpenAPI operations: `%ld`\n", (long)operationCount];
+  [output appendFormat:@"Resources: `%ld`\n", (long)resourceCount];
+  [output appendFormat:@"Modules: `%ld`\n\n", (long)moduleCount];
+  [output appendString:@"Common adoption shapes:\n\n"];
+  [output appendString:@"- app-local generated folder under `frontend/generated/arlen`\n"];
+  [output appendString:@"- monorepo package imported via workspace aliases\n"];
+  [output appendString:@"- publishable internal package with app-owned versioning\n\n"];
+  [output appendString:@"Suggested workflow:\n\n"];
+  [output appendFormat:@"- install: `%@`\n", workspaceHints[@"installCommand"] ?: @"npm install"];
+  [output appendFormat:@"- typecheck: `%@`\n", workspaceHints[@"typecheckCommand"] ?: @"npm run typecheck"];
+  if ([ALNORMTSStringValue(workspaceHints[@"devCommand"]) length] > 0) {
+    [output appendFormat:@"- dev: `%@`\n", workspaceHints[@"devCommand"]];
+  }
   return [NSString stringWithString:output];
 }
 
@@ -1611,11 +2881,20 @@ static NSString *ALNORMTSRenderPackageJSON(NSString *packageName,
   NSMutableDictionary<NSString *, id> *exports = [NSMutableDictionary dictionary];
   exports[@"."] = @"./src/index.ts";
   exports[@"./models"] = @"./src/models.ts";
+  if ([targets containsObject:@"validators"]) {
+    exports[@"./validators"] = @"./src/validators.ts";
+  }
+  if ([targets containsObject:@"query"]) {
+    exports[@"./query"] = @"./src/query.ts";
+  }
   if ([targets containsObject:@"client"]) {
     exports[@"./client"] = @"./src/client.ts";
   }
   if ([targets containsObject:@"react"]) {
     exports[@"./react"] = @"./src/react.ts";
+  }
+  if ([targets containsObject:@"meta"]) {
+    exports[@"./meta"] = @"./src/meta.ts";
   }
 
   NSMutableDictionary<NSString *, id> *packageJSON = [NSMutableDictionary dictionary];
@@ -1623,8 +2902,16 @@ static NSString *ALNORMTSRenderPackageJSON(NSString *packageName,
   packageJSON[@"version"] = @"0.1.0";
   packageJSON[@"private"] = @YES;
   packageJSON[@"type"] = @"module";
+  packageJSON[@"types"] = @"./src/index.ts";
   packageJSON[@"sideEffects"] = @NO;
   packageJSON[@"exports"] = exports;
+  packageJSON[@"scripts"] = @{
+    @"typecheck" : @"tsc --noEmit",
+    @"check" : @"tsc --noEmit",
+  };
+  packageJSON[@"devDependencies"] = @{
+    @"typescript" : @"^5.0.0",
+  };
   if ([targets containsObject:@"react"]) {
     packageJSON[@"peerDependencies"] = @{
       @"@tanstack/react-query" : @"^5.0.0",
@@ -1649,7 +2936,7 @@ static NSArray<NSString *> *ALNORMTSNormalizedTargets(NSArray<NSString *> *rawTa
         continue;
       }
       if ([token isEqualToString:@"all"]) {
-        for (NSString *expanded in @[ @"models", @"client", @"react" ]) {
+        for (NSString *expanded in @[ @"models", @"validators", @"query", @"client", @"react", @"meta" ]) {
           if (![targets containsObject:expanded]) {
             [targets addObject:expanded];
           }
@@ -1657,6 +2944,9 @@ static NSArray<NSString *> *ALNORMTSNormalizedTargets(NSArray<NSString *> *rawTa
         continue;
       }
       if ([token isEqualToString:@"react"]) {
+        if (![targets containsObject:@"models"]) {
+          [targets addObject:@"models"];
+        }
         if (![targets containsObject:@"client"]) {
           [targets addObject:@"client"];
         }
@@ -1665,7 +2955,22 @@ static NSArray<NSString *> *ALNORMTSNormalizedTargets(NSArray<NSString *> *rawTa
         }
         continue;
       }
-      if (![token isEqualToString:@"models"] && ![token isEqualToString:@"client"]) {
+      if ([token isEqualToString:@"validators"] || [token isEqualToString:@"query"]) {
+        if (![targets containsObject:@"models"]) {
+          [targets addObject:@"models"];
+        }
+      }
+      if ([token isEqualToString:@"meta"]) {
+        if (![targets containsObject:@"models"]) {
+          [targets addObject:@"models"];
+        }
+        if (![targets containsObject:@"query"]) {
+          [targets addObject:@"query"];
+        }
+      }
+      if (![token isEqualToString:@"models"] && ![token isEqualToString:@"client"] &&
+          ![token isEqualToString:@"validators"] && ![token isEqualToString:@"query"] &&
+          ![token isEqualToString:@"meta"]) {
         if (error != NULL) {
           *error = ALNORMMakeError(ALNORMErrorInvalidArgument,
                                    @"TypeScript codegen target is unsupported",
@@ -1681,7 +2986,7 @@ static NSArray<NSString *> *ALNORMTSNormalizedTargets(NSArray<NSString *> *rawTa
     }
   }
   if ([targets count] == 0) {
-    [targets addObjectsFromArray:@[ @"models", @"client", @"react" ]];
+    [targets addObjectsFromArray:@[ @"models", @"validators", @"query", @"client", @"react", @"meta" ]];
   }
   return [NSArray arrayWithArray:targets];
 }
@@ -1751,34 +3056,51 @@ static NSArray<NSString *> *ALNORMTSNormalizedTargets(NSArray<NSString *> *rawTa
     return nil;
   }
 
-  NSArray<NSDictionary<NSString *, id> *> *operations = @[];
-  if ([normalizedTargets containsObject:@"client"] || [normalizedTargets containsObject:@"react"]) {
-    if (![openAPISpecification isKindOfClass:[NSDictionary class]]) {
-      if (error != NULL) {
-        *error = ALNORMMakeError(ALNORMErrorInvalidArgument,
-                                 @"TypeScript client/react generation requires an OpenAPI specification",
-                                 nil);
-      }
+  NSDictionary<NSString *, NSString *> *typeNamesByEntity = @{};
+  if ([descriptors count] > 0) {
+    typeNamesByEntity = ALNORMTSTypeNamesByEntity(descriptors, error);
+    if (typeNamesByEntity == nil) {
       return nil;
     }
+  }
+
+  NSArray<NSDictionary<NSString *, id> *> *operations = @[];
+  NSArray<NSDictionary<NSString *, id> *> *resources = @[];
+  NSArray<NSDictionary<NSString *, id> *> *modules = @[];
+  NSDictionary<NSString *, id> *workspaceHints = ALNORMTSWorkspaceHints(openAPISpecification ?: @{});
+  BOOL requiresOpenAPI = ([normalizedTargets containsObject:@"client"] || [normalizedTargets containsObject:@"react"]);
+  BOOL hasOpenAPI = [openAPISpecification isKindOfClass:[NSDictionary class]];
+  if (requiresOpenAPI && !hasOpenAPI) {
+    if (error != NULL) {
+      *error = ALNORMMakeError(ALNORMErrorInvalidArgument,
+                               @"TypeScript client/react generation requires an OpenAPI specification",
+                               nil);
+    }
+    return nil;
+  }
+  if (hasOpenAPI) {
     operations = ALNORMTSOperationsFromOpenAPISpecification(openAPISpecification, error);
     if (operations == nil) {
       return nil;
     }
-    if ([operations count] == 0) {
+    resources = ALNORMTSNormalizedResourceMetadata(openAPISpecification,
+                                                   operations,
+                                                   descriptors ?: @[],
+                                                   typeNamesByEntity,
+                                                   error);
+    if (resources == nil) {
+      return nil;
+    }
+    modules = ALNORMTSNormalizedModuleMetadata(openAPISpecification, operations, resources, error);
+    if (modules == nil) {
+      return nil;
+    }
+    if (requiresOpenAPI && [operations count] == 0) {
       if (error != NULL) {
         *error = ALNORMMakeError(ALNORMErrorInvalidMetadata,
                                  @"OpenAPI specification did not contain any operations",
                                  nil);
       }
-      return nil;
-    }
-  }
-
-  NSDictionary<NSString *, NSString *> *typeNamesByEntity = @{};
-  if ([descriptors count] > 0) {
-    typeNamesByEntity = ALNORMTSTypeNamesByEntity(descriptors, error);
-    if (typeNamesByEntity == nil) {
       return nil;
     }
   }
@@ -1794,12 +3116,37 @@ static NSArray<NSString *> *ALNORMTSNormalizedTargets(NSArray<NSString *> *rawTa
     return nil;
   }
   files[@"src/models.ts"] = modelsModule;
+  if ([normalizedTargets containsObject:@"validators"]) {
+    NSString *validatorsModule =
+        ALNORMTSRenderValidatorsModule(descriptors ?: @[],
+                                       typeNamesByEntity,
+                                       openAPISpecification ?: @{},
+                                       operations ?: @[],
+                                       &renderError);
+    if (validatorsModule == nil) {
+      if (error != NULL) {
+        *error = renderError;
+      }
+      return nil;
+    }
+    files[@"src/validators.ts"] = validatorsModule;
+  }
+  if ([normalizedTargets containsObject:@"query"]) {
+    files[@"src/query.ts"] = ALNORMTSRenderQueryModule(descriptors ?: @[],
+                                                       typeNamesByEntity,
+                                                       resources ?: @[]);
+  }
 
   if ([normalizedTargets containsObject:@"client"]) {
     files[@"src/client.ts"] = ALNORMTSRenderClientModule(openAPISpecification ?: @{}, operations ?: @[]);
   }
   if ([normalizedTargets containsObject:@"react"]) {
     files[@"src/react.ts"] = ALNORMTSRenderReactModule(operations ?: @[]);
+  }
+  if ([normalizedTargets containsObject:@"meta"]) {
+    files[@"src/meta.ts"] = ALNORMTSRenderMetaModule(resources ?: @[],
+                                                     modules ?: @[],
+                                                     workspaceHints ?: @{});
   }
   files[@"src/index.ts"] = ALNORMTSRenderIndexModule(normalizedTargets);
 
@@ -1822,7 +3169,13 @@ static NSArray<NSString *> *ALNORMTSNormalizedTargets(NSArray<NSString *> *rawTa
   }
   files[@"tsconfig.json"] = tsconfig;
   files[@"README.md"] =
-      ALNORMTSRenderReadme(resolvedPackageName, normalizedTargets, [descriptors count], [operations count]);
+      ALNORMTSRenderReadme(resolvedPackageName,
+                           normalizedTargets,
+                           [descriptors count],
+                           [operations count],
+                           [resources count],
+                           [modules count],
+                           workspaceHints ?: @{});
 
   NSMutableArray<NSDictionary<NSString *, id> *> *manifestFiles = [NSMutableArray array];
   NSArray<NSString *> *sortedFilePaths = [[files allKeys] sortedArrayUsingSelector:@selector(compare:)];
@@ -1830,10 +3183,16 @@ static NSArray<NSString *> *ALNORMTSNormalizedTargets(NSArray<NSString *> *rawTa
     NSString *kind = @"support";
     if ([path hasSuffix:@"models.ts"]) {
       kind = @"models";
+    } else if ([path hasSuffix:@"validators.ts"]) {
+      kind = @"validators";
+    } else if ([path hasSuffix:@"query.ts"]) {
+      kind = @"query";
     } else if ([path hasSuffix:@"client.ts"]) {
       kind = @"client";
     } else if ([path hasSuffix:@"react.ts"]) {
       kind = @"react";
+    } else if ([path hasSuffix:@"meta.ts"]) {
+      kind = @"meta";
     }
     [manifestFiles addObject:@{
       @"path" : path,
@@ -1853,7 +3212,11 @@ static NSArray<NSString *> *ALNORMTSNormalizedTargets(NSArray<NSString *> *rawTa
       @"type_name" : typeName,
       @"create_input_name" : [NSString stringWithFormat:@"%@CreateInput", typeName],
       @"update_input_name" : [NSString stringWithFormat:@"%@UpdateInput", typeName],
+      @"create_schema_name" : [NSString stringWithFormat:@"%@CreateInputSchema", ALNORMTSCamelIdentifier(typeName, @"model")],
+      @"update_schema_name" : [NSString stringWithFormat:@"%@UpdateInputSchema", ALNORMTSCamelIdentifier(typeName, @"model")],
+      @"field_name_type" : [NSString stringWithFormat:@"%@FieldName", typeName],
       @"relation_name_type" : [NSString stringWithFormat:@"%@RelationName", typeName],
+      @"available_include_type" : [NSString stringWithFormat:@"%@AvailableInclude", typeName],
       @"read_only" : @(descriptor.isReadOnly),
     }];
   }
@@ -1865,10 +3228,35 @@ static NSArray<NSString *> *ALNORMTSNormalizedTargets(NSArray<NSString *> *rawTa
       @"method_name" : operation[@"methodName"] ?: @"",
       @"request_type" : [NSString stringWithFormat:@"%@Request", operation[@"typeName"] ?: @"Operation"],
       @"response_type" : [NSString stringWithFormat:@"%@Response", operation[@"typeName"] ?: @"Operation"],
+      @"request_schema_name" : [NSString stringWithFormat:@"%@RequestSchema", operation[@"methodName"] ?: @"operation"],
       @"http_method" : operation[@"httpMethod"] ?: @"GET",
       @"path" : operation[@"path"] ?: @"/",
       @"kind" : ([operation[@"kind"] integerValue] == ALNORMTSOperationKindQuery) ? @"query" : @"mutation",
       @"tags" : operation[@"tags"] ?: @[],
+    }];
+  }
+
+  NSMutableArray<NSDictionary<NSString *, id> *> *manifestResources = [NSMutableArray array];
+  for (NSDictionary<NSString *, id> *resource in resources ?: @[]) {
+    NSString *resourceName = ALNORMTSStringValue(resource[@"name"]);
+    [manifestResources addObject:@{
+      @"name" : resourceName ?: @"",
+      @"entity_name" : ALNORMTSStringValue(resource[@"entityName"]) ?: @"",
+      @"model_type_name" : ALNORMTSStringValue(resource[@"modelTypeName"]) ?: @"",
+      @"operation_ids" : resource[@"operationIds"] ?: @[],
+      @"query_contract_name" : [NSString stringWithFormat:@"%@ResourceQueryContract",
+                                                       ALNORMTSCamelIdentifier(resourceName, @"resource")],
+      @"admin_enabled" : @(ALNORMTSBoolValue(ALNORMTSDictionaryValue(resource[@"admin"])[@"enabled"], NO)),
+    }];
+  }
+
+  NSMutableArray<NSDictionary<NSString *, id> *> *manifestModules = [NSMutableArray array];
+  for (NSDictionary<NSString *, id> *module in modules ?: @[]) {
+    [manifestModules addObject:@{
+      @"name" : ALNORMTSStringValue(module[@"name"]) ?: @"",
+      @"kind" : ALNORMTSStringValue(module[@"kind"]) ?: @"generic",
+      @"operation_ids" : module[@"operationIds"] ?: @[],
+      @"resource_names" : module[@"resourceNames"] ?: @[],
     }];
   }
 
@@ -1879,9 +3267,14 @@ static NSArray<NSString *> *ALNORMTSNormalizedTargets(NSArray<NSString *> *rawTa
     @"targets" : normalizedTargets,
     @"model_count" : @([descriptors count]),
     @"operation_count" : @([operations count]),
+    @"resource_count" : @([resources count]),
+    @"module_count" : @([modules count]),
     @"files" : manifestFiles,
     @"models" : manifestModels,
     @"operations" : manifestOperations,
+    @"resources" : manifestResources,
+    @"modules" : manifestModules,
+    @"workspace_hints" : workspaceHints ?: @{},
   };
   NSString *manifest = ALNORMTSJSONStringFromObject(manifestRoot, &renderError);
   if (manifest == nil) {
@@ -1898,6 +3291,8 @@ static NSArray<NSString *> *ALNORMTSNormalizedTargets(NSArray<NSString *> *rawTa
     @"packageName" : resolvedPackageName,
     @"modelCount" : @([descriptors count]),
     @"operationCount" : @([operations count]),
+    @"resourceCount" : @([resources count]),
+    @"moduleCount" : @([modules count]),
     @"suggestedOutputDir" : @"frontend/generated/arlen",
     @"suggestedManifestPath" : @"db/schema/arlen_typescript.json",
   };
