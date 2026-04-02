@@ -1397,6 +1397,9 @@ static void ALNEnsureStaticFileFDCache(void) {
     gALNStaticFileFDCacheLock = [[NSLock alloc] init];
     gALNStaticFileFDCacheEntries = [NSMutableDictionary dictionary];
     gALNStaticFileFDCacheLRU = [NSMutableArray array];
+#if defined(_WIN32)
+    gALNStaticFileFDCacheCapacity = 0;
+#endif
 
     const char *rawCapacity = getenv("ARLEN_STATIC_FILE_FD_CACHE_CAPACITY");
     if (rawCapacity != NULL && rawCapacity[0] != '\0') {
@@ -1481,6 +1484,9 @@ static int ALNStaticFileFDForPath(NSString *path,
   }
 
   int openFlags = O_RDONLY;
+#if defined(_WIN32) && defined(O_BINARY)
+  openFlags |= O_BINARY;
+#endif
 #ifdef O_CLOEXEC
   openFlags |= O_CLOEXEC;
 #endif

@@ -25,6 +25,10 @@
   return ALNTestRunShellCapture(command, exitCode);
 }
 
+- (NSString *)platformLinkFlags {
+  return ALNTestPlatformLinkFlags();
+}
+
 - (NSString *)createTempDirectory {
   return ALNTestTemporaryDirectory(@"arlen-pg-integration");
 }
@@ -346,13 +350,14 @@
   NSString *compileCommand = [NSString stringWithFormat:
       @"source /usr/GNUstep/System/Library/Makefiles/GNUstep.sh && clang $(gnustep-config --objc-flags) "
        "-fobjc-arc -I%@/src/Arlen -I%@/src/Arlen/Data -I%@/src/Generated %@ %@ %@/src/Arlen/Data/ALNSQLBuilder.m "
-       "-o %@ $(gnustep-config --base-libs) -ldispatch -ldl -lcrypto",
-      repoRoot, repoRoot, appRoot, smokeSourcePath, implPath, repoRoot, smokeBinaryPath];
+       "-o %@ $(gnustep-config --base-libs) -ldispatch %@ -lcrypto",
+      repoRoot, repoRoot, appRoot, smokeSourcePath, implPath, repoRoot, smokeBinaryPath, [self platformLinkFlags]];
   NSString *compileOutput = [self runShellCapture:compileCommand exitCode:&code];
   XCTAssertEqual(0, code, @"%@", compileOutput);
 
-  NSString *runOutput = [self runShellCapture:[NSString stringWithFormat:@"%@", smokeBinaryPath]
-                                     exitCode:&code];
+  NSString *runOutput =
+      [self runShellCapture:ALNTestShellPath(ALNTestResolvedExecutablePath(smokeBinaryPath))
+                   exitCode:&code];
   XCTAssertEqual(0, code, @"%@", runOutput);
   XCTAssertTrue([runOutput containsString:@"SELECT"]);
   XCTAssertTrue([runOutput containsString:@"WHERE"]);
@@ -536,7 +541,7 @@
        "%@/src/Arlen/Data/ALNPostgresDialect.m %@/src/Arlen/Data/ALNPostgresSQLBuilder.m "
        "%@/src/Arlen/Data/ALNMSSQLDialect.m %@/src/Arlen/Support/ALNJSONSerialization.m "
        "%@/src/Arlen/Support/third_party/yyjson/yyjson.c "
-       "-o %@ $(gnustep-config --base-libs) -ldispatch -ldl -lcrypto",
+       "-o %@ $(gnustep-config --base-libs) -ldispatch %@ -lcrypto",
       repoRoot,
       repoRoot,
       repoRoot,
@@ -553,12 +558,14 @@
       repoRoot,
       repoRoot,
       repoRoot,
-      smokeBinaryPath];
+      smokeBinaryPath,
+      [self platformLinkFlags]];
   NSString *compileOutput = [self runShellCapture:compileCommand exitCode:&code];
   XCTAssertEqual(0, code, @"%@", compileOutput);
 
-  NSString *runOutput = [self runShellCapture:[NSString stringWithFormat:@"%@", smokeBinaryPath]
-                                     exitCode:&code];
+  NSString *runOutput =
+      [self runShellCapture:ALNTestShellPath(ALNTestResolvedExecutablePath(smokeBinaryPath))
+                   exitCode:&code];
   XCTAssertEqual(0, code, @"%@", runOutput);
   XCTAssertTrue([runOutput containsString:@"phase5d-typed-contracts-ok"], @"%@", runOutput);
 
@@ -583,8 +590,8 @@
   NSString *brokenCompile = [NSString stringWithFormat:
       @"source /usr/GNUstep/System/Library/Makefiles/GNUstep.sh && clang $(gnustep-config --objc-flags) "
        "-fobjc-arc -I%@/src/Arlen -I%@/src/Arlen/Data -I%@/src/Generated %@ %@ "
-       "-o %@.broken $(gnustep-config --base-libs) -ldispatch -ldl -lcrypto",
-      repoRoot, repoRoot, appRoot, brokenSourcePath, implPath, smokeBinaryPath];
+       "-o %@.broken $(gnustep-config --base-libs) -ldispatch %@ -lcrypto",
+      repoRoot, repoRoot, appRoot, brokenSourcePath, implPath, smokeBinaryPath, [self platformLinkFlags]];
   NSString *brokenCompileOutput = [self runShellCapture:brokenCompile exitCode:&code];
   XCTAssertNotEqual(0, code);
   XCTAssertTrue([brokenCompileOutput containsString:@"fieldDoesNotExist"], @"%@", brokenCompileOutput);
@@ -689,13 +696,14 @@
 
   NSString *compileCommand = [NSString stringWithFormat:
       @"source /usr/GNUstep/System/Library/Makefiles/GNUstep.sh && clang $(gnustep-config --objc-flags) "
-       "-fobjc-arc -I%@/src/Generated %@ %@ -o %@ $(gnustep-config --base-libs) -ldispatch -ldl -lcrypto",
-      appRoot, smokeSourcePath, implPath, smokeBinaryPath];
+       "-fobjc-arc -I%@/src/Generated %@ %@ -o %@ $(gnustep-config --base-libs) -ldispatch %@ -lcrypto",
+      appRoot, smokeSourcePath, implPath, smokeBinaryPath, [self platformLinkFlags]];
   NSString *compileOutput = [self runShellCapture:compileCommand exitCode:&code];
   XCTAssertEqual(0, code, @"%@", compileOutput);
 
-  NSString *runOutput = [self runShellCapture:[NSString stringWithFormat:@"%@", smokeBinaryPath]
-                                     exitCode:&code];
+  NSString *runOutput =
+      [self runShellCapture:ALNTestShellPath(ALNTestResolvedExecutablePath(smokeBinaryPath))
+                   exitCode:&code];
   XCTAssertEqual(0, code, @"%@", runOutput);
   XCTAssertTrue([runOutput containsString:@"phase5d-typed-sql-ok"], @"%@", runOutput);
 
@@ -716,8 +724,8 @@
 
   NSString *brokenCompile = [NSString stringWithFormat:
       @"source /usr/GNUstep/System/Library/Makefiles/GNUstep.sh && clang $(gnustep-config --objc-flags) "
-       "-fobjc-arc -I%@/src/Generated %@ %@ -o %@.broken $(gnustep-config --base-libs) -ldispatch -ldl -lcrypto",
-      appRoot, brokenSourcePath, implPath, smokeBinaryPath];
+       "-fobjc-arc -I%@/src/Generated %@ %@ -o %@.broken $(gnustep-config --base-libs) -ldispatch %@ -lcrypto",
+      appRoot, brokenSourcePath, implPath, smokeBinaryPath, [self platformLinkFlags]];
   NSString *brokenOutput = [self runShellCapture:brokenCompile exitCode:&code];
   XCTAssertNotEqual(0, code);
   XCTAssertTrue([brokenOutput containsString:@"fieldMissing"], @"%@", brokenOutput);
@@ -1258,7 +1266,7 @@
        "%@/src/Arlen/Data/ALNPostgresSQLBuilder.m %@/src/Arlen/Data/ALNMSSQLDialect.m "
        "%@/src/Arlen/Support/ALNJSONSerialization.m "
        "%@/src/Arlen/Support/third_party/yyjson/yyjson.c "
-       "-o %@ $(gnustep-config --base-libs) -ldispatch -ldl -lcrypto",
+       "-o %@ $(gnustep-config --base-libs) -ldispatch %@ -lcrypto",
       repoRoot,
       repoRoot,
       repoRoot,
@@ -1274,13 +1282,16 @@
       repoRoot,
       repoRoot,
       repoRoot,
-      binaryPath];
+      binaryPath,
+      [self platformLinkFlags]];
   int compileCode = 0;
   NSString *compileOutput = [self runShellCapture:compileCommand exitCode:&compileCode];
   XCTAssertEqual(0, compileCode, @"%@", compileOutput);
 
   int runCode = 0;
-  NSString *runOutput = [self runShellCapture:binaryPath exitCode:&runCode];
+  NSString *runOutput =
+      [self runShellCapture:ALNTestShellPath(ALNTestResolvedExecutablePath(binaryPath))
+                   exitCode:&runCode];
   XCTAssertEqual(0, runCode, @"%@", runOutput);
   XCTAssertTrue([runOutput containsString:@"phase5b-router-ok"], @"%@", runOutput);
 }

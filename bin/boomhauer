@@ -55,6 +55,27 @@ normalize_host_path() {
   printf '%s\n' "$PWD/$raw"
 }
 
+resolve_compiled_binary() {
+  local candidate="$1"
+  if [[ -x "$candidate" ]]; then
+    printf '%s\n' "$candidate"
+    return 0
+  fi
+  if [[ "$candidate" != *.exe ]] && [[ -x "$candidate.exe" ]]; then
+    printf '%s\n' "$candidate.exe"
+    return 0
+  fi
+  return 1
+}
+
+app_root_has_sources() {
+  local root="$1"
+  if [[ -f "$root/app_lite.m" ]]; then
+    return 0
+  fi
+  [[ -n "$(find "$root/src" -type f -name '*.m' -print -quit 2>/dev/null)" ]]
+}
+
 resolve_gnustep_sh() {
   local candidate=""
   local gnustep_makefiles=""
@@ -160,7 +181,7 @@ for arg in "$@"; do
 done
 
 is_app_root=0
-if [[ -f "$app_root/config/app.plist" ]] && ([[ -f "$app_root/src/main.m" ]] || [[ -f "$app_root/app_lite.m" ]]); then
+if [[ -f "$app_root/config/app.plist" ]] && app_root_has_sources "$app_root"; then
   is_app_root=1
 fi
 
@@ -172,8 +193,14 @@ if [[ $is_app_root -eq 0 ]]; then
   fi
   cd "$framework_root"
   if [[ $watch_mode -eq 1 ]]; then
-    make arlen >/dev/null
-    exec "$framework_root/build/arlen" boomhauer --watch "${server_args[@]}"
+    if ! arlen_binary="$(resolve_compiled_binary "$framework_root/build/arlen")"; then
+      make arlen >/dev/null
+      if ! arlen_binary="$(resolve_compiled_binary "$framework_root/build/arlen")"; then
+        echo "boomhauer: expected compiled arlen binary under $framework_root/build" >&2
+        exit 1
+      fi
+    fi
+    exec "$arlen_binary" boomhauer --watch "${server_args[@]}"
   fi
 
   if [[ $prepare_only -eq 1 ]]; then
@@ -182,12 +209,18 @@ if [[ $is_app_root -eq 0 ]]; then
     echo "boomhauer: route inspection mode; ensuring artifacts are current before printing routes"
   fi
 
-  make boomhauer >/dev/null
+  if ! framework_boomhauer_binary="$(resolve_compiled_binary "$framework_root/build/boomhauer")"; then
+    make boomhauer >/dev/null
+    if ! framework_boomhauer_binary="$(resolve_compiled_binary "$framework_root/build/boomhauer")"; then
+      echo "boomhauer: expected compiled boomhauer binary under $framework_root/build" >&2
+      exit 1
+    fi
+  fi
   if [[ $prepare_only -eq 1 ]]; then
     exit 0
   fi
   export ARLEN_APP_ROOT="$app_root"
-  exec "$framework_root/build/boomhauer" "${server_args[@]}"
+  exec "$framework_boomhauer_binary" "${server_args[@]}"
 fi
 
 state_root="$app_root/.boomhauer"
@@ -753,19 +786,35 @@ child_mode=""
 stop_requested=0
 error_server_ready=0
 next_build_retry_at=0
+resolved_app_binary=""
+error_server_binary=""
 
 ensure_error_server_built() {
-  if [[ $error_server_ready -eq 1 && -x "$framework_root/build/boomhauer" ]]; then
+  if [[ $error_server_ready -eq 1 && -n "$error_server_binary" && -x "$error_server_binary" ]]; then
     return 0
   fi
 
-  if ! make -C "$framework_root" boomhauer >/dev/null; then
-    echo "boomhauer: failed to build fallback dev error server" >&2
-    return 1
+  if ! error_server_binary="$(resolve_compiled_binary "$framework_root/build/boomhauer")"; then
+    if ! make -C "$framework_root" boomhauer >/dev/null; then
+      echo "boomhauer: failed to build fallback dev error server" >&2
+      return 1
+    fi
+    if ! error_server_binary="$(resolve_compiled_binary "$framework_root/build/boomhauer")"; then
+      echo "boomhauer: expected compiled fallback dev error server under $framework_root/build" >&2
+      return 1
+    fi
   fi
 
   error_server_ready=1
   return 0
+}
+
+resolve_app_binary() {
+  if resolved_app_binary="$(resolve_compiled_binary "$app_binary")"; then
+    return 0
+  fi
+  echo "boomhauer: expected compiled app binary at $app_binary" >&2
+  return 1
 }
 
 stop_child() {
@@ -787,7 +836,10 @@ trap on_signal INT TERM
 start_app_child() {
   export ARLEN_APP_ROOT="$app_root"
   next_build_retry_at=0
-  "$app_binary" "${server_args[@]}" &
+  if ! resolve_app_binary; then
+    return 1
+  fi
+  "$resolved_app_binary" "${server_args[@]}" &
   child_pid="$!"
   child_mode="app"
 }
@@ -807,7 +859,7 @@ start_error_child() {
   else
     next_build_retry_at=0
   fi
-  "$framework_root/build/boomhauer" "${server_args[@]}" &
+  "$error_server_binary" "${server_args[@]}" &
   child_pid="$!"
   child_mode="build_error"
 }
@@ -829,7 +881,10 @@ run_once() {
     exit 0
   fi
   export ARLEN_APP_ROOT="$app_root"
-  exec "$app_binary" "${server_args[@]}"
+  if ! resolve_app_binary; then
+    exit 1
+  fi
+  exec "$resolved_app_binary" "${server_args[@]}"
 }
 
 if [[ $watch_mode -eq 0 ]]; then

@@ -54,6 +54,27 @@ normalize_host_path() {
   printf '%s\n' "$PWD/$raw"
 }
 
+resolve_compiled_binary() {
+  local candidate="$1"
+  if [[ -x "$candidate" ]]; then
+    printf '%s\n' "$candidate"
+    return 0
+  fi
+  if [[ "$candidate" != *.exe ]] && [[ -x "$candidate.exe" ]]; then
+    printf '%s\n' "$candidate.exe"
+    return 0
+  fi
+  return 1
+}
+
+app_root_has_sources() {
+  local root="$1"
+  if [[ -f "$root/app_lite.m" ]]; then
+    return 0
+  fi
+  [[ -n "$(find "$root/src" -type f -name '*.m' -print -quit 2>/dev/null)" ]]
+}
+
 framework_root="${ARLEN_FRAMEWORK_ROOT:-$default_framework_root}"
 app_root="${ARLEN_APP_ROOT:-$PWD}"
 environment="production"
@@ -122,7 +143,7 @@ if [[ ! -f "$framework_root/GNUmakefile" || ! -d "$framework_root/src/Arlen" ]];
   exit 1
 fi
 
-if [[ ! -f "$app_root/config/app.plist" ]] || [[ ! -f "$app_root/src/main.m" && ! -f "$app_root/app_lite.m" ]]; then
+if [[ ! -f "$app_root/config/app.plist" ]] || ! app_root_has_sources "$app_root"; then
   echo "jobs-worker: invalid app root: $app_root" >&2
   exit 1
 fi
@@ -137,7 +158,8 @@ else
 fi
 
 app_binary="$app_root/.boomhauer/build/boomhauer-app"
-if [[ ! -x "$app_binary" ]]; then
+app_binary_target="$app_binary"
+if ! app_binary="$(resolve_compiled_binary "$app_binary_target")"; then
   echo "jobs-worker: expected compiled app binary at $app_binary" >&2
   exit 1
 fi

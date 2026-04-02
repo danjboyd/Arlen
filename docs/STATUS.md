@@ -1,6 +1,62 @@
 # Arlen Status Checkpoint
 
-Last updated: 2026-04-01
+Last updated: 2026-04-02
+
+## Leaving Off (2026-04-02)
+
+- Continued `24Q` execution on branch `windows/clang64` and landed the current
+  Windows parity fixes:
+  - `src/Arlen/HTTP/ALNHTTPServer.m` now opens static files with `O_BINARY` on
+    Windows so byte-accurate payloads and `Content-Length` stay aligned for
+    CRLF assets
+  - `tests/shared/ALNTestSupport.{h,m}` now carry the shared Windows test
+    helpers needed for CLANG64 parity, including platform link flags and the
+    repo-local shell/executable resolution used by the integration suite
+  - `bin/boomhauer`, `bin/jobs-worker`, and `bin/propane` now resolve `.exe`
+    build outputs explicitly and treat app roots as `config/app.plist` plus
+    either `app_lite.m` or `src/*.m`, which fixes Windows execution for
+    example apps like `examples/tech_demo`
+  - `tests/integration/HTTPIntegrationTests.m` now prepares app-root runtime
+    artifacts before propane launch, reads the MSYS manager PID from the
+    pidfile for reload/TERM flows, and uses the MSYS `kill` path inside the
+    graceful-shutdown probe instead of relying on Windows task PIDs
+  - `tests/integration/DeploymentIntegrationTests.m` and
+    `tests/integration/PostgresIntegrationTests.m` now use platform-aware link
+    flags on Windows instead of hardcoding `-ldl`
+- Live CLANG64 verification completed in this workspace on 2026-04-02:
+  - `powershell -ExecutionPolicy Bypass -File scripts\run_clang64.ps1 -InnerCommand "make test-unit"`
+    passed with 522 discovered XCTest methods
+  - `powershell -ExecutionPolicy Bypass -File scripts\run_clang64.ps1 -InnerCommand "make test-integration-filter TEST=HTTPIntegrationTests/testPropaneServesRequestsAndHandlesReloadSignal"`
+    completed successfully after the Windows propane PID handling fixes
+  - `powershell -ExecutionPolicy Bypass -File scripts\run_clang64.ps1 -InnerCommand "make test-integration-filter TEST=HTTPIntegrationTests/testPropaneGracefulShutdownDrainsInflightQueuedAndKeepAliveConnections"`
+    completed successfully after switching the embedded shutdown probe to MSYS
+    `kill`
+- The broader `make test-integration` Windows rerun is not green yet. The
+  interrupted day-end run surfaced the current remaining `24Q` blockers:
+  - `HTTPIntegrationTests/testBoomhauerPrintRoutesRebuildsSanitizedExternalFrameworkArtifacts`
+    fails in the temporary framework-root worktree because the Windows path
+    form is still reaching `make` as a literal target path (`C:/.../build/eocc`
+    / `build/eocc`) instead of a portable repo-root contract
+  - `HTTPIntegrationTests/testPropaneRespawnsWorkerAfterCrash` and
+    `HTTPIntegrationTests/testPropaneLifecycleDiagnosticsCoverChurnReloadAndMixedSignals`
+    still assume immediate worker PID discovery and currently hit empty child
+    arrays on Windows
+  - `HTTPIntegrationTests/testPropaneSupervisesAsyncWorkersAndRespawnsOnCrash`
+    still does not reliably discover or confirm the supervised async worker
+    respawn on Windows
+  - `HTTPIntegrationTests/testPropaneRestartLoopRemainsStableUnderActiveTraffic`
+    still fails its Python traffic probe on Windows
+- Not rerun yet on this host after the above fixes:
+  - `powershell -ExecutionPolicy Bypass -File scripts\run_clang64.ps1 -InnerCommand "make test-integration"` to a clean passing exit
+  - `powershell -ExecutionPolicy Bypass -File scripts\run_clang64.ps1 -InnerCommand "make phase20-postgres-live-tests"`
+  - `powershell -ExecutionPolicy Bypass -File scripts\run_clang64.ps1 -InnerCommand "make phase20-mssql-live-tests"`
+  - any `24R` perf/sanitizer/fault-injection parity lane or `24S`
+    release/package/doc closeout verification
+- Next-session execution order:
+  - fix the remaining Windows integration failures listed above and rerun
+    `make test-integration`
+  - rerun the PostgreSQL and MSSQL live-backend suites on Windows
+  - then resume `24R` and `24S`
 
 ## Leaving Off (2026-04-01)
 

@@ -84,6 +84,27 @@ normalize_host_path() {
   printf '%s\n' "$PWD/$raw"
 }
 
+resolve_compiled_binary() {
+  local candidate="$1"
+  if [[ -x "$candidate" ]]; then
+    printf '%s\n' "$candidate"
+    return 0
+  fi
+  if [[ "$candidate" != *.exe ]] && [[ -x "$candidate.exe" ]]; then
+    printf '%s\n' "$candidate.exe"
+    return 0
+  fi
+  return 1
+}
+
+app_root_has_sources() {
+  local root="$1"
+  if [[ -f "$root/app_lite.m" ]]; then
+    return 0
+  fi
+  [[ -n "$(find "$root/src" -type f -name '*.m' -print -quit 2>/dev/null)" ]]
+}
+
 framework_root="${ARLEN_FRAMEWORK_ROOT:-$default_framework_root}"
 app_root="${ARLEN_APP_ROOT:-$PWD}"
 environment="production"
@@ -258,9 +279,15 @@ if ! command -v python3 >/dev/null 2>&1; then
   exit 1
 fi
 
-make -C "$framework_root" arlen >/dev/null
+if ! arlen_binary="$(resolve_compiled_binary "$framework_root/build/arlen")"; then
+  make -C "$framework_root" arlen >/dev/null
+  if ! arlen_binary="$(resolve_compiled_binary "$framework_root/build/arlen")"; then
+    echo "propane: expected compiled arlen binary under $framework_root/build" >&2
+    exit 1
+  fi
+fi
 
-config_json="$(cd "$app_root" && "$framework_root/build/arlen" config --env "$environment" --json 2>/dev/null || true)"
+config_json="$(cd "$app_root" && "$arlen_binary" config --env "$environment" --json 2>/dev/null || true)"
 if [[ -z "$config_json" ]]; then
   echo "propane: failed to load app config via arlen config --json" >&2
   exit 1
@@ -455,7 +482,7 @@ if [[ -f "$pid_file" ]]; then
 fi
 
 is_app_root=0
-if [[ -f "$app_root/config/app.plist" ]] && ([[ -f "$app_root/src/main.m" ]] || [[ -f "$app_root/app_lite.m" ]]); then
+if [[ -f "$app_root/config/app.plist" ]] && app_root_has_sources "$app_root"; then
   is_app_root=1
 fi
 
@@ -470,13 +497,18 @@ if (( is_app_root == 1 )); then
   fi
   app_binary="$app_root/.boomhauer/build/boomhauer-app"
 else
-  make -C "$framework_root" boomhauer >/dev/null
   app_binary="$framework_root/build/boomhauer"
 fi
 
-if [[ ! -x "$app_binary" ]]; then
+app_binary_target="$app_binary"
+if ! app_binary="$(resolve_compiled_binary "$app_binary_target")"; then
+  if (( is_app_root == 0 )); then
+    make -C "$framework_root" boomhauer >/dev/null
+  fi
+  if ! app_binary="$(resolve_compiled_binary "$app_binary_target")"; then
   echo "propane: expected compiled server binary at $app_binary" >&2
   exit 1
+  fi
 fi
 
 worker_args=(--env "$environment" --host "$host" --port "$port")

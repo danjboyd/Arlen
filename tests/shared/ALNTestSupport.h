@@ -21,6 +21,11 @@ ALN_EXPORT NSDictionary *_Nullable ALNTestJSONDictionaryFromString(
     NSString *string,
     NSError *_Nullable *_Nullable error);
 ALN_EXPORT NSString *_Nullable ALNTestEnvironmentString(NSString *name);
+ALN_EXPORT NSString *ALNTestResolvedBashLaunchPath(void);
+ALN_EXPORT int ALNTestAvailableTCPPort(void);
+ALN_EXPORT NSString *ALNTestShellPath(NSString *path);
+ALN_EXPORT NSString *ALNTestResolvedExecutablePath(NSString *path);
+ALN_EXPORT NSString *ALNTestPlatformLinkFlags(void);
 ALN_EXPORT NSString *ALNTestUniqueIdentifier(NSString *prefix);
 ALN_EXPORT NSString *_Nullable ALNTestTemporaryDirectory(NSString *prefix);
 ALN_EXPORT BOOL ALNTestWriteUTF8File(NSString *path,

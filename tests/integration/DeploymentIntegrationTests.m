@@ -1,11 +1,10 @@
 #import <Foundation/Foundation.h>
 #import <XCTest/XCTest.h>
 
-#import <arpa/inet.h>
-#import <netinet/in.h>
 #import <stdlib.h>
 #import <string.h>
-#import <sys/socket.h>
+
+#import "../shared/ALNTestSupport.h"
 
 @interface DeploymentIntegrationTests : XCTestCase
 @end
@@ -13,42 +12,11 @@
 @implementation DeploymentIntegrationTests
 
 - (int)randomPort {
-  int fd = socket(AF_INET, SOCK_STREAM, 0);
-  if (fd >= 0) {
-    int port = 0;
-    struct sockaddr_in address;
-    memset(&address, 0, sizeof(address));
-    address.sin_family = AF_INET;
-    address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-    address.sin_port = 0;
-
-    if (bind(fd, (struct sockaddr *)&address, sizeof(address)) == 0) {
-      socklen_t length = sizeof(address);
-      if (getsockname(fd, (struct sockaddr *)&address, &length) == 0) {
-        port = (int)ntohs(address.sin_port);
-      }
-    }
-
-    close(fd);
-    if (port > 0) {
-      return port;
-    }
-  }
-
-  return 34000 + (int)arc4random_uniform(2000);
+  return ALNTestAvailableTCPPort();
 }
 
 - (NSString *)createTempDirectoryWithPrefix:(NSString *)prefix {
-  NSString *templatePath =
-      [NSTemporaryDirectory() stringByAppendingPathComponent:[NSString stringWithFormat:@"%@-XXXXXX", prefix]];
-  const char *templateCString = [templatePath fileSystemRepresentation];
-  char *buffer = strdup(templateCString);
-  char *created = mkdtemp(buffer);
-  NSString *result = created ? [[NSFileManager defaultManager] stringWithFileSystemRepresentation:created
-                                                                                             length:strlen(created)]
-                             : nil;
-  free(buffer);
-  return result;
+  return ALNTestTemporaryDirectory(prefix ?: @"deployment");
 }
 
 - (BOOL)writeFile:(NSString *)path content:(NSString *)content {
@@ -69,24 +37,15 @@
 }
 
 - (NSString *)runShellCapture:(NSString *)command exitCode:(int *)exitCode {
-  NSTask *task = [[NSTask alloc] init];
-  task.launchPath = @"/bin/bash";
-  task.arguments = @[ @"-lc", command ];
-  NSPipe *stdoutPipe = [NSPipe pipe];
-  NSPipe *stderrPipe = [NSPipe pipe];
-  task.standardOutput = stdoutPipe;
-  task.standardError = stderrPipe;
-  [task launch];
-  [task waitUntilExit];
+  return ALNTestRunShellCapture(command, exitCode);
+}
 
-  if (exitCode != NULL) {
-    *exitCode = task.terminationStatus;
-  }
-  NSData *stdoutData = [[stdoutPipe fileHandleForReading] readDataToEndOfFile];
-  NSData *stderrData = [[stderrPipe fileHandleForReading] readDataToEndOfFile];
-  NSString *stdoutText = [[NSString alloc] initWithData:stdoutData encoding:NSUTF8StringEncoding] ?: @"";
-  NSString *stderrText = [[NSString alloc] initWithData:stderrData encoding:NSUTF8StringEncoding] ?: @"";
-  return [stdoutText stringByAppendingString:stderrText];
+- (NSString *)shellPath:(NSString *)path {
+  return ALNTestShellPath(path);
+}
+
+- (NSString *)platformLinkFlags {
+  return ALNTestPlatformLinkFlags();
 }
 
 - (NSString *)runEOCCCaptureAtRepoRoot:(NSString *)repoRoot
@@ -98,7 +57,13 @@
       @"mkdir -p %@/GNUstep/Defaults/.lck && cd %@ && "
        "export HOME=%@ GNUSTEP_USER_DIR=%@/GNUstep GNUSTEP_USER_ROOT=%@/GNUstep "
        "GNUSTEP_USER_DEFAULTS_DIR=%@/GNUstep/Defaults && ./build/eocc %@",
-      gnuHome, repoRoot, gnuHome, gnuHome, gnuHome, gnuHome, arguments];
+      [self shellPath:gnuHome],
+      [self shellPath:repoRoot],
+      [self shellPath:gnuHome],
+      [self shellPath:gnuHome],
+      [self shellPath:gnuHome],
+      [self shellPath:gnuHome],
+      arguments];
   return [self runShellCapture:command exitCode:exitCode];
 }
 
@@ -133,7 +98,7 @@
                        exitCode:(int *)exitCode {
   NSString *command = [NSString stringWithFormat:
       @"source /usr/GNUstep/System/Library/Makefiles/GNUstep.sh && cd %@ && make %@",
-      [self shellQuoted:repoRoot], target ?: @""];
+      [self shellQuoted:[self shellPath:repoRoot]], target ?: @""];
   return [self runShellCapture:command exitCode:exitCode];
 }
 
@@ -147,7 +112,9 @@
        "restore() { touch -d \"@$original_mtime\" \"$path\"; }; "
        "trap restore EXIT && "
        "touch \"$path\" && make -n %@",
-      [self shellQuoted:repoRoot], [self shellQuoted:path], target ?: @""];
+      [self shellQuoted:[self shellPath:repoRoot]],
+      [self shellQuoted:[self shellPath:path]],
+      target ?: @""];
   return [self runShellCapture:command exitCode:exitCode];
 }
 
@@ -163,17 +130,18 @@
                              target:@"build-tests"
                         touchingPath:frameworkSource
                             exitCode:&code];
+  NSString *repoShellRoot = [self shellPath:repoRoot];
   NSString *archiveCommand =
-      [NSString stringWithFormat:@"ar rcs %@/build/lib/libArlenFramework.a", repoRoot];
+      [NSString stringWithFormat:@"ar rcs %@/build/lib/libArlenFramework.a", repoShellRoot];
   NSString *frameworkCompileCommand = [NSString
       stringWithFormat:@"-c src/Arlen/MVC/View/ALNView.m -o %@/build/obj/src/Arlen/MVC/View/ALNView.o",
-                       repoRoot];
+                       repoShellRoot];
   NSString *generatedIndexCompileCommand = [NSString
       stringWithFormat:@"-c build/gen/templates/index.html.eoc.m -o %@/build/obj/build/gen/templates/index.html.eoc.o",
-                       repoRoot];
+                       repoShellRoot];
   NSString *unitCompileCommand = [NSString
       stringWithFormat:@"-c tests/unit/BuildPolicyTests.m -o %@/build/obj/tests/unit/BuildPolicyTests.o",
-                       repoRoot];
+                       repoShellRoot];
   XCTAssertEqual(0, code, @"%@", dryRun);
   XCTAssertTrue([dryRun containsString:frameworkCompileCommand], @"%@", dryRun);
   XCTAssertTrue([dryRun containsString:archiveCommand], @"%@", dryRun);
@@ -196,20 +164,21 @@
                              target:@"build-tests"
                         touchingPath:templatePath
                             exitCode:&code];
+  NSString *repoShellRoot = [self shellPath:repoRoot];
   NSString *transpileCommand = [NSString stringWithFormat:
       @"%@/build/eocc --template-root %@/templates "
        "--output-dir %@/build/gen/templates "
       "--manifest %@/build/gen/templates/manifest.json",
-      repoRoot, repoRoot, repoRoot, repoRoot];
+      repoShellRoot, repoShellRoot, repoShellRoot, repoShellRoot];
   NSString *generatedIndexCompileCommand = [NSString
       stringWithFormat:@"-c build/gen/templates/index.html.eoc.m -o %@/build/obj/build/gen/templates/index.html.eoc.o",
-                       repoRoot];
+                       repoShellRoot];
   NSString *generatedLayoutCompileCommand = [NSString
       stringWithFormat:@"-c build/gen/templates/layouts/main.html.eoc.m -o %@/build/obj/build/gen/templates/layouts/main.html.eoc.o",
-                       repoRoot];
+                       repoShellRoot];
   NSString *frameworkCompileCommand = [NSString
       stringWithFormat:@"-c src/Arlen/MVC/View/ALNView.m -o %@/build/obj/src/Arlen/MVC/View/ALNView.o",
-                       repoRoot];
+                       repoShellRoot];
   XCTAssertEqual(0, code, @"%@", dryRun);
   XCTAssertTrue([dryRun containsString:transpileCommand], @"%@", dryRun);
   XCTAssertTrue([dryRun containsString:generatedIndexCompileCommand], @"%@", dryRun);
@@ -233,11 +202,12 @@
                              target:@"build-tests"
                         touchingPath:unitTestPath
                             exitCode:&code];
+  NSString *repoShellRoot = [self shellPath:repoRoot];
   NSString *frameworkArchiveCommand =
-      [NSString stringWithFormat:@"ar rcs %@/build/lib/libArlenFramework.a", repoRoot];
+      [NSString stringWithFormat:@"ar rcs %@/build/lib/libArlenFramework.a", repoShellRoot];
   NSString *unitCompileCommand = [NSString
       stringWithFormat:@"-c tests/unit/BuildPolicyTests.m -o %@/build/obj/tests/unit/BuildPolicyTests.o",
-                       repoRoot];
+                       repoShellRoot];
   XCTAssertEqual(0, code, @"%@", dryRun);
   XCTAssertTrue([dryRun containsString:unitCompileCommand], @"%@", dryRun);
   XCTAssertTrue([dryRun containsString:@"build/tests/ArlenUnitTests.xctest/ArlenUnitTests"], @"%@", dryRun);
@@ -269,7 +239,11 @@
                                   "  (void)argv;\n"
                                   "  @autoreleasepool {\n"
                                   "    [ALNJSONSerialization resetBackendForTesting];\n"
+                                  "#if defined(_WIN32)\n"
+                                  "    _putenv(\"ARLEN_HTTP_PARSER_BACKEND=\");\n"
+                                  "#else\n"
                                   "    unsetenv(\"ARLEN_HTTP_PARSER_BACKEND\");\n"
+                                  "#endif\n"
                                   "    fprintf(stdout,\n"
                                   "            \"json_available=%d json_backend=%s yyjson_version=%s\\n\",\n"
                                   "            [ALNJSONSerialization isYYJSONAvailable] ? 1 : 0,\n"
@@ -288,14 +262,24 @@
     NSString *compileOutput = [self runShellCapture:[NSString stringWithFormat:
         @"source /usr/GNUstep/System/Library/Makefiles/GNUstep.sh && clang $(gnustep-config --objc-flags) "
          "-fobjc-arc -DARLEN_ENABLE_YYJSON=0 -DARLEN_ENABLE_LLHTTP=0 "
-         "-I%@/src/Arlen -I%@/src/Arlen/HTTP -I%@/src/Arlen/Support "
+         "-I%@/src -I%@/src/Arlen -I%@/src/Arlen/HTTP -I%@/src/Arlen/Support "
          "%@ %@/src/Arlen/Support/ALNJSONSerialization.m %@/src/Arlen/HTTP/ALNRequest.m "
-         "-o %@ $(gnustep-config --base-libs) -ldl -lcrypto",
-        repoRoot, repoRoot, repoRoot, sourcePath, repoRoot, repoRoot, binaryPath]
+         "-o %@ $(gnustep-config --base-libs) %@ -lcrypto",
+        repoRoot,
+        repoRoot,
+        repoRoot,
+        repoRoot,
+        sourcePath,
+        repoRoot,
+        repoRoot,
+        binaryPath,
+        [self platformLinkFlags]]
                                        exitCode:&code];
     XCTAssertEqual(0, code, @"%@", compileOutput);
 
-    NSString *runOutput = [self runShellCapture:binaryPath exitCode:&code];
+    NSString *runOutput =
+        [self runShellCapture:[self shellQuoted:[self shellPath:ALNTestResolvedExecutablePath(binaryPath)]]
+                     exitCode:&code];
     XCTAssertEqual(0, code, @"%@", runOutput);
     XCTAssertTrue([runOutput containsString:@"json_available=0"], @"%@", runOutput);
     XCTAssertTrue([runOutput containsString:@"json_backend=foundation"], @"%@", runOutput);
@@ -385,8 +369,10 @@
                                                   @"%s/tools/deploy/build_release.sh --app-root %s "
                                                    "--framework-root %s --releases-dir %s --release-id rel1 "
                                                    "--allow-missing-certification",
-                                                  [repoRoot UTF8String], [appRoot UTF8String],
-                                                  [repoRoot UTF8String], [releasesDir UTF8String]]
+                                                  [[self shellPath:repoRoot] UTF8String],
+                                                  [[self shellPath:appRoot] UTF8String],
+                                                  [[self shellPath:repoRoot] UTF8String],
+                                                  [[self shellPath:releasesDir] UTF8String]]
                                     exitCode:&code];
     XCTAssertEqual(0, code, @"%@", build1);
 
@@ -394,27 +380,31 @@
                                                   @"%s/tools/deploy/build_release.sh --app-root %s "
                                                    "--framework-root %s --releases-dir %s --release-id rel2 "
                                                    "--allow-missing-certification",
-                                                  [repoRoot UTF8String], [appRoot UTF8String],
-                                                  [repoRoot UTF8String], [releasesDir UTF8String]]
+                                                  [[self shellPath:repoRoot] UTF8String],
+                                                  [[self shellPath:appRoot] UTF8String],
+                                                  [[self shellPath:repoRoot] UTF8String],
+                                                  [[self shellPath:releasesDir] UTF8String]]
                                     exitCode:&code];
     XCTAssertEqual(0, code, @"%@", build2);
 
     NSString *activate2 = [self runShellCapture:[NSString stringWithFormat:
                                                      @"%s/tools/deploy/activate_release.sh "
                                                       "--releases-dir %s --release-id rel2",
-                                                     [repoRoot UTF8String], [releasesDir UTF8String]]
+                                                     [[self shellPath:repoRoot] UTF8String],
+                                                     [[self shellPath:releasesDir] UTF8String]]
                                        exitCode:&code];
     XCTAssertEqual(0, code, @"%@", activate2);
 
     NSString *rollback = [self runShellCapture:[NSString stringWithFormat:
                                                     @"%s/tools/deploy/rollback_release.sh "
                                                      "--releases-dir %s",
-                                                    [repoRoot UTF8String], [releasesDir UTF8String]]
+                                                    [[self shellPath:repoRoot] UTF8String],
+                                                    [[self shellPath:releasesDir] UTF8String]]
                                       exitCode:&code];
     XCTAssertEqual(0, code, @"%@", rollback);
 
     NSString *currentTarget = [self runShellCapture:[NSString stringWithFormat:@"readlink -f %s/current",
-                                                                               [releasesDir UTF8String]]
+                                                                               [[self shellPath:releasesDir] UTF8String]]
                                            exitCode:&code];
     XCTAssertEqual(0, code, @"%@", currentTarget);
     NSString *trimmed =
@@ -465,8 +455,11 @@
                                                         "--port %d "
                                                         "--release-a smoke-1 "
                                                         "--release-b smoke-2",
-                                                       [repoRoot UTF8String], [appRoot UTF8String],
-                                                       [repoRoot UTF8String], [workRoot UTF8String], port]
+                                                       [[self shellPath:repoRoot] UTF8String],
+                                                       [[self shellPath:appRoot] UTF8String],
+                                                       [[self shellPath:repoRoot] UTF8String],
+                                                       [[self shellPath:workRoot] UTF8String],
+                                                       port]
                                          exitCode:&code];
     XCTAssertEqual(0, code, @"%@", smokeOutput);
     XCTAssertTrue([smokeOutput containsString:@"release smoke passed"]);
@@ -729,8 +722,10 @@
                                       @"%s/tools/deploy/build_release.sh --app-root %s "
                                        "--framework-root %s --releases-dir %s --release-id frontend-1 "
                                        "--allow-missing-certification",
-                                      [repoRoot UTF8String], [appA UTF8String], [repoRoot UTF8String],
-                                      [releasesDir UTF8String]]
+                                      [[self shellPath:repoRoot] UTF8String],
+                                      [[self shellPath:appA] UTF8String],
+                                      [[self shellPath:repoRoot] UTF8String],
+                                      [[self shellPath:releasesDir] UTF8String]]
                exitCode:&code];
     XCTAssertEqual(0, code, @"%@", releaseBuild);
 
@@ -888,9 +883,10 @@
                                             @"%s/tools/deploy/build_release.sh --app-root %s "
                                              "--framework-root %s --releases-dir %s --release-id agent-dx-1 "
                                              "--allow-missing-certification --dry-run --json",
-                                            [repoRoot UTF8String], [appRoot UTF8String],
-                                            [repoRoot UTF8String],
-                                            [[workRoot stringByAppendingPathComponent:@"releases"] UTF8String]]
+                                            [[self shellPath:repoRoot] UTF8String],
+                                            [[self shellPath:appRoot] UTF8String],
+                                            [[self shellPath:repoRoot] UTF8String],
+                                            [[self shellPath:[workRoot stringByAppendingPathComponent:@"releases"]] UTF8String]]
                      exitCode:&code];
     XCTAssertEqual(0, code, @"%@", deployPlanOutput);
     NSDictionary *deployPlan =
@@ -1678,10 +1674,12 @@
                                                           "--release-id missing-cert --certification-manifest %s "
                                                           "--json-performance-manifest %s "
                                                           "--dry-run",
-                                                         [repoRoot UTF8String], [appRoot UTF8String],
-                                                         [repoRoot UTF8String], [releasesDir UTF8String],
-                                                         [missingManifest UTF8String],
-                                                         [jsonPerfManifest UTF8String]]
+                                                         [[self shellPath:repoRoot] UTF8String],
+                                                         [[self shellPath:appRoot] UTF8String],
+                                                         [[self shellPath:repoRoot] UTF8String],
+                                                         [[self shellPath:releasesDir] UTF8String],
+                                                         [[self shellPath:missingManifest] UTF8String],
+                                                         [[self shellPath:jsonPerfManifest] UTF8String]]
                                            exitCode:&code];
     XCTAssertNotEqual(0, code, @"%@", missingOutput);
     XCTAssertTrue([missingOutput containsString:@"missing Phase 9J certification manifest"], @"%@", missingOutput);
@@ -1692,10 +1690,12 @@
                                                           "--release-id with-cert --certification-manifest %s "
                                                           "--json-performance-manifest %s "
                                                           "--dry-run --json",
-                                                         [repoRoot UTF8String], [appRoot UTF8String],
-                                                         [repoRoot UTF8String], [releasesDir UTF8String],
-                                                         [certManifest UTF8String],
-                                                         [jsonPerfManifest UTF8String]]
+                                                         [[self shellPath:repoRoot] UTF8String],
+                                                         [[self shellPath:appRoot] UTF8String],
+                                                         [[self shellPath:repoRoot] UTF8String],
+                                                         [[self shellPath:releasesDir] UTF8String],
+                                                         [[self shellPath:certManifest] UTF8String],
+                                                         [[self shellPath:jsonPerfManifest] UTF8String]]
                                            exitCode:&code];
     XCTAssertEqual(0, code, @"%@", passingOutput);
     NSDictionary *payload = [self parseJSONDictionaryFromOutput:passingOutput context:@"build_release dry-run json"];
@@ -2682,10 +2682,12 @@
                                                    "--release-id missing-json-perf --certification-manifest %s "
                                                    "--json-performance-manifest %s "
                                                    "--dry-run",
-                                                  [repoRoot UTF8String], [appRoot UTF8String],
-                                                  [repoRoot UTF8String], [releasesDir UTF8String],
-                                                  [certManifest UTF8String],
-                                                  [missingJSONPerfManifest UTF8String]]
+                                                  [[self shellPath:repoRoot] UTF8String],
+                                                  [[self shellPath:appRoot] UTF8String],
+                                                  [[self shellPath:repoRoot] UTF8String],
+                                                  [[self shellPath:releasesDir] UTF8String],
+                                                  [[self shellPath:certManifest] UTF8String],
+                                                  [[self shellPath:missingJSONPerfManifest] UTF8String]]
                                     exitCode:&code];
     XCTAssertNotEqual(0, code, @"%@", output);
     XCTAssertTrue([output containsString:@"missing Phase 10E JSON performance manifest"], @"%@", output);
