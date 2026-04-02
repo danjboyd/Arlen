@@ -81,6 +81,14 @@ Last updated: 2026-04-02
     input, CLI generation, validator/query/meta output, strict OpenAPI
     requirements, and fail-closed operation-ID plus `x-arlen` metadata
     validation
+  - fixed a late Phase 28 regression discovered by the checked-in React
+    workspace typecheck so generated validator form adapters now emit literal
+    `true`/`false` booleans instead of Objective-C boxed `1`/`0` values
+  - remaining subphases at this checkpoint:
+    - `28I`: dedicated TypeScript unit-test architecture and shared support
+    - `28J`: live integration and React reference coverage
+    - `28K`: drift/perf/compatibility artifacts and confidence hardening
+    - `28L`: docs, API reference, and release closeout
 - Reconciled the `OwnerConnect` Dataverse codegen report against the current
   Arlen workspace:
   - recorded the upstream-only status note in
@@ -98,6 +106,7 @@ Last updated: 2026-04-02
   - added focused fixture-backed regressions in
     `tests/unit/DataverseMetadataTests.m`
 - Verification status at this checkpoint:
+  - `source tools/source_gnustep_env.sh && make test-unit-filter TEST=ORMTypeScriptCodegenTests`
   - `source tools/source_gnustep_env.sh && make test-unit-filter TEST=DataverseMetadataTests`
   - `source tools/source_gnustep_env.sh && make phase23-dataverse-tests`
   - `source tools/source_gnustep_env.sh && make phase26-orm-tests`
@@ -105,6 +114,9 @@ Last updated: 2026-04-02
   - `source tools/source_gnustep_env.sh && make docs-api`
   - `source tools/source_gnustep_env.sh && make docs-html`
   - `source tools/source_gnustep_env.sh && bash tools/ci/run_docs_quality.sh`
+  - `cd examples/phase28_react_reference && npm install --package-lock=false`
+  - `cd examples/phase28_react_reference && npm run generate:arlen`
+  - `cd examples/phase28_react_reference && npm run typecheck`
   - `source tools/source_gnustep_env.sh && make phase26-confidence`
   - `source tools/source_gnustep_env.sh && make phase27-confidence`
     when `ARLEN_PG_TEST_DSN`, `ARLEN_PHASE27_MEILI_URL`, and
