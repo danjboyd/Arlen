@@ -21,7 +21,7 @@ static void PrintUsage(void) {
           "\n"
           "Commands:\n"
           "  new <AppName> [--full|--lite] [--force] [--json]\n"
-          "  generate <controller|endpoint|model|migration|test|plugin|frontend> <Name> [options] [--json]\n"
+          "  generate <controller|endpoint|model|migration|test|plugin|frontend|search> <Name> [options] [--json]\n"
           "  boomhauer [server args...]\n"
           "  jobs worker [worker args...]\n"
           "  propane [manager args...]\n"
@@ -45,7 +45,7 @@ static void PrintNewUsage(void) {
 
 static void PrintGenerateUsage(void) {
   fprintf(stdout,
-          "Usage: arlen generate <controller|endpoint|model|migration|test|plugin|frontend> <Name> [options] [--json]\n"
+          "Usage: arlen generate <controller|endpoint|model|migration|test|plugin|frontend|search> <Name> [options] [--json]\n"
           "\n"
           "Generator options (controller/endpoint):\n"
           "  --route <path>\n"
@@ -59,6 +59,12 @@ static void PrintGenerateUsage(void) {
           "\n"
           "Generator options (frontend):\n"
           "  --preset <vanilla-spa|progressive-mpa>\n"
+          "\n"
+          "Generator behavior (search):\n"
+          "  requires vendored `jobs` and `search` modules\n"
+          "  scaffolds a searchable resource/provider under src/Search/\n"
+          "  registers the provider in config/app.plist\n"
+          "  adds migration and engine-swap notes under docs/search/\n"
           "\n"
           "Machine-readable output:\n"
           "  --json\n");
@@ -402,6 +408,17 @@ static NSString *BoomhauerLaunchCommand(NSArray *serverArgs, NSString *framework
 
 static BOOL WriteTextFile(NSString *path, NSString *content, BOOL force, NSError **error) {
   NSFileManager *fm = [NSFileManager defaultManager];
+  if (content == nil) {
+    if (error != NULL) {
+      *error = [NSError errorWithDomain:@"Arlen.Error"
+                                   code:17
+                               userInfo:@{
+                                 NSLocalizedDescriptionKey :
+                                   [NSString stringWithFormat:@"No content generated for %@", path ?: @""]
+                               }];
+    }
+    return NO;
+  }
   if ([fm fileExistsAtPath:path] && !force) {
     if (error != NULL) {
       *error = [NSError errorWithDomain:@"Arlen.Error"
@@ -480,6 +497,71 @@ static BOOL AddPluginClassToAppConfig(NSString *root, NSString *pluginClassName,
   return [serialized writeToFile:configPath options:NSDataWritingAtomic error:error];
 }
 
+static BOOL AddSearchProviderClassToAppConfig(NSString *root,
+                                              NSString *providerClassName,
+                                              NSError **error) {
+  if ([providerClassName length] == 0) {
+    return YES;
+  }
+
+  NSString *configPath = [root stringByAppendingPathComponent:@"config/app.plist"];
+  NSData *data = [NSData dataWithContentsOfFile:configPath options:0 error:error];
+  if (data == nil) {
+    return NO;
+  }
+
+  NSPropertyListFormat format = NSPropertyListOpenStepFormat;
+  id parsed = [NSPropertyListSerialization propertyListWithData:data
+                                                        options:NSPropertyListMutableContainersAndLeaves
+                                                         format:&format
+                                                          error:error];
+  if (![parsed isKindOfClass:[NSMutableDictionary class]]) {
+    if (error != NULL && *error == nil) {
+      *error = [NSError errorWithDomain:@"Arlen.Error"
+                                   code:13
+                               userInfo:@{
+                                 NSLocalizedDescriptionKey : @"config/app.plist must be a dictionary"
+                               }];
+    }
+    return NO;
+  }
+
+  NSMutableDictionary *config = parsed;
+  NSMutableDictionary *searchModule = [config[@"searchModule"] isKindOfClass:[NSMutableDictionary class]]
+                                          ? config[@"searchModule"]
+                                          : [NSMutableDictionary dictionaryWithDictionary:
+                                                ([config[@"searchModule"] isKindOfClass:[NSDictionary class]]
+                                                     ? config[@"searchModule"]
+                                                     : @{})];
+  NSMutableDictionary *providers = [searchModule[@"providers"] isKindOfClass:[NSMutableDictionary class]]
+                                       ? searchModule[@"providers"]
+                                       : [NSMutableDictionary dictionaryWithDictionary:
+                                             ([searchModule[@"providers"] isKindOfClass:[NSDictionary class]]
+                                                  ? searchModule[@"providers"]
+                                                  : @{})];
+  NSMutableArray *classes = [providers[@"classes"] isKindOfClass:[NSMutableArray class]]
+                                ? providers[@"classes"]
+                                : [NSMutableArray arrayWithArray:
+                                      ([providers[@"classes"] isKindOfClass:[NSArray class]]
+                                           ? providers[@"classes"]
+                                           : @[])];
+  if (![classes containsObject:providerClassName]) {
+    [classes addObject:providerClassName];
+  }
+  providers[@"classes"] = classes;
+  searchModule[@"providers"] = providers;
+  config[@"searchModule"] = searchModule;
+
+  NSData *serialized = [NSPropertyListSerialization dataWithPropertyList:config
+                                                                   format:NSPropertyListOpenStepFormat
+                                                                  options:0
+                                                                    error:error];
+  if (serialized == nil) {
+    return NO;
+  }
+  return [serialized writeToFile:configPath options:NSDataWritingAtomic error:error];
+}
+
 static BOOL RemoveItemIfExists(NSString *path, NSError **error) {
   if (![[NSFileManager defaultManager] fileExistsAtPath:path]) {
     return YES;
@@ -543,6 +625,14 @@ static NSInteger ModuleLockEntryIndex(NSArray<NSDictionary *> *entries, NSString
     }
   }
   return -1;
+}
+
+static BOOL IsModuleInstalledAtAppRoot(NSString *appRoot, NSString *identifier, NSError **error) {
+  NSMutableArray<NSDictionary *> *entries = MutableModuleLockEntriesAtAppRoot(appRoot, error);
+  if (entries == nil) {
+    return NO;
+  }
+  return (ModuleLockEntryIndex(entries, identifier) >= 0);
 }
 
 static NSDictionary *ModuleLockEntryForDefinition(ALNModuleDefinition *definition, NSString *relativePath) {
@@ -1780,6 +1870,244 @@ static NSDictionary<NSString *, NSString *> *FrontendStarterFilesForPreset(NSStr
   };
 }
 
+static NSString *TrimSearchProviderSuffix(NSString *name) {
+  if ([name hasSuffix:@"SearchProvider"] && [name length] > [@"SearchProvider" length]) {
+    return [name substringToIndex:[name length] - [@"SearchProvider" length]];
+  }
+  return name;
+}
+
+static NSString *NormalizedSearchResourceSlug(NSString *name) {
+  NSString *slug = SanitizeRouteName(name ?: @"");
+  while ([slug hasPrefix:@"_"]) {
+    slug = [slug substringFromIndex:1];
+  }
+  while ([slug hasSuffix:@"_"] && [slug length] > 0) {
+    slug = [slug substringToIndex:[slug length] - 1];
+  }
+  if ([slug length] == 0) {
+    return @"search_resource";
+  }
+  return slug;
+}
+
+static NSString *GeneratedSearchProviderHeader(NSString *providerClassName) {
+  return [NSString stringWithFormat:
+                       @"#import <Foundation/Foundation.h>\n"
+                        "#import \"ALNSearchModule.h\"\n\n"
+                        "@interface %@ : NSObject <ALNSearchResourceProvider>\n"
+                        "@end\n",
+                       providerClassName ?: @"GeneratedSearchProvider"];
+}
+
+static NSString *GeneratedSearchProviderImplementation(NSString *providerClassName,
+                                                       NSString *resourceBaseName,
+                                                       NSString *resourceSlug) {
+  NSString *resourceClassName = [NSString stringWithFormat:@"%@SearchResource", resourceBaseName ?: @"Generated"];
+  NSString *label = [resourceBaseName length] > 0 ? resourceBaseName : @"Generated";
+  NSString *summary = [NSString stringWithFormat:@"%@ results for app-owned search.", label];
+  NSString *pathTemplate = [NSString stringWithFormat:@"/%@/:identifier", resourceSlug ?: @"search_resource"];
+  NSString *sampleIdentifier = [NSString stringWithFormat:@"%@-100", resourceSlug ?: @"search_resource"];
+  return [NSString stringWithFormat:
+                       @"#import \"%@.h\"\n\n"
+                        "@interface %@ : NSObject <ALNSearchResourceDefinition>\n"
+                        "@end\n\n"
+                        "@implementation %@\n\n"
+                        "- (NSString *)searchModuleResourceIdentifier {\n"
+                        "  return @\"%@\";\n"
+                        "}\n\n"
+                        "- (NSDictionary *)searchModuleResourceMetadata {\n"
+                        "  return @{\n"
+                        "    @\"label\" : @\"%@\",\n"
+                        "    @\"summary\" : @\"%@\",\n"
+                        "    @\"identifierField\" : @\"id\",\n"
+                        "    @\"primaryField\" : @\"title\",\n"
+                        "    @\"summaryField\" : @\"summary\",\n"
+                        "    @\"indexedFields\" : @[ @\"id\", @\"title\", @\"summary\", @\"status\", @\"updated_at\" ],\n"
+                        "    @\"searchFields\" : @[ @\"title\", @\"summary\" ],\n"
+                        "    @\"autocompleteFields\" : @[ @\"title\" ],\n"
+                        "    @\"suggestionFields\" : @[ @\"title\", @\"summary\" ],\n"
+                        "    @\"highlightFields\" : @[ @\"title\", @\"summary\" ],\n"
+                        "    @\"resultFields\" : @[ @\"id\", @\"title\", @\"status\", @\"updated_at\" ],\n"
+                        "    @\"facetFields\" : @[\n"
+                        "      @{ @\"name\" : @\"status\", @\"label\" : @\"Status\", @\"type\" : @\"string\", @\"choices\" : @[ @\"draft\", @\"published\" ] }\n"
+                        "    ],\n"
+                        "    @\"fieldTypes\" : @{\n"
+                        "      @\"id\" : @\"string\",\n"
+                        "      @\"title\" : @\"string\",\n"
+                        "      @\"summary\" : @\"string\",\n"
+                        "      @\"status\" : @\"string\",\n"
+                        "      @\"updated_at\" : @\"timestamp\",\n"
+                        "    },\n"
+                        "    @\"filters\" : @[\n"
+                        "      @{ @\"name\" : @\"status\", @\"type\" : @\"string\", @\"operators\" : @[ @\"eq\", @\"in\" ], @\"choices\" : @[ @\"draft\", @\"published\" ] }\n"
+                        "    ],\n"
+                        "    @\"sorts\" : @[\n"
+                        "      @{ @\"name\" : @\"updated_at\", @\"type\" : @\"timestamp\", @\"direction\" : @\"desc\", @\"default\" : @YES },\n"
+                        "      @{ @\"name\" : @\"title\", @\"type\" : @\"string\" },\n"
+                        "    ],\n"
+                        "    @\"queryModes\" : @[ @\"search\", @\"phrase\", @\"fuzzy\", @\"autocomplete\" ],\n"
+                        "    @\"queryPolicy\" : @\"public\",\n"
+                        "    @\"pagination\" : @{ @\"defaultLimit\" : @10, @\"maxLimit\" : @50, @\"cursorField\" : @\"id\" },\n"
+                        "    @\"pathTemplate\" : @\"%@\",\n"
+                        "  };\n"
+                        "}\n\n"
+                        "- (NSArray<NSDictionary *> *)searchModuleDocumentsForRuntime:(ALNSearchModuleRuntime *)runtime\n"
+                        "                                                       error:(NSError **)error {\n"
+                        "  (void)runtime;\n"
+                        "  (void)error;\n"
+                        "  return @[\n"
+                        "    @{\n"
+                        "      @\"id\" : @\"%@\",\n"
+                        "      @\"title\" : @\"Replace Me\",\n"
+                        "      @\"summary\" : @\"Swap this placeholder data for real app-owned records.\",\n"
+                        "      @\"status\" : @\"published\",\n"
+                        "      @\"updated_at\" : @\"2026-04-01T00:00:00Z\",\n"
+                        "    },\n"
+                        "  ];\n"
+                        "}\n\n"
+                        "- (NSDictionary *)searchModulePublicResultForDocument:(NSDictionary *)document\n"
+                        "                                              metadata:(NSDictionary *)metadata\n"
+                        "                                               runtime:(ALNSearchModuleRuntime *)runtime\n"
+                        "                                                 error:(NSError **)error {\n"
+                        "  (void)metadata;\n"
+                        "  (void)runtime;\n"
+                        "  (void)error;\n"
+                        "  NSDictionary *record = [document[@\"record\"] isKindOfClass:[NSDictionary class]] ? document[@\"record\"] : @{};\n"
+                        "  return @{\n"
+                        "    @\"fields\" : @{\n"
+                        "      @\"id\" : record[@\"id\"] ?: @\"\",\n"
+                        "      @\"status\" : record[@\"status\"] ?: @\"\",\n"
+                        "      @\"updated_at\" : record[@\"updated_at\"] ?: @\"\",\n"
+                        "    },\n"
+                        "    @\"badge\" : [record[@\"status\"] isEqual:@\"published\"] ? @\"ready\" : @\"draft\",\n"
+                        "  };\n"
+                        "}\n\n"
+                        "@end\n\n"
+                        "@implementation %@\n\n"
+                        "- (NSArray<id<ALNSearchResourceDefinition>> *)searchModuleResourcesForRuntime:(ALNSearchModuleRuntime *)runtime\n"
+                        "                                                                           error:(NSError **)error {\n"
+                        "  (void)runtime;\n"
+                        "  (void)error;\n"
+                        "  return @[ [[%@ alloc] init] ];\n"
+                        "}\n\n"
+                        "@end\n",
+                       providerClassName ?: @"GeneratedSearchProvider",
+                       resourceClassName,
+                       resourceClassName,
+                       resourceSlug ?: @"search_resource",
+                       label,
+                       summary,
+                       pathTemplate,
+                       sampleIdentifier,
+                       providerClassName ?: @"GeneratedSearchProvider",
+                       resourceClassName];
+}
+
+static NSString *GeneratedSearchGuide(NSString *providerClassName,
+                                      NSString *resourceSlug,
+                                      NSString *resourceLabel) {
+  return [NSString stringWithFormat:
+                       @"# %@ Search Scaffold\n\n"
+                        "Generated by `arlen generate search %@`.\n\n"
+                        "## What Was Added\n\n"
+                        "- `src/Search/%@.h`\n"
+                        "- `src/Search/%@.m`\n"
+                        "- `config/app.plist` registration under `searchModule.providers.classes`\n"
+                        "- this guide\n\n"
+                        "## Resource Contract Checklist\n\n"
+                        "Update the generated provider/resource with your real fields:\n\n"
+                        "- `identifierField`, `primaryField`, and `summaryField`\n"
+                        "- `indexedFields`, `searchFields`, and `resultFields`\n"
+                        "- typed `filters`, `facetFields`, and `sorts`\n"
+                        "- `queryPolicy`, `queryModes`, and `pathTemplate`\n"
+                        "- `searchModulePublicResultForDocument:` for public-safe shaping\n\n"
+                        "## Engine Config Examples\n\n"
+                        "Default engine:\n\n"
+                        "```plist\n"
+                        "searchModule = {\n"
+                        "  providers = {\n"
+                        "    classes = ( \"%@\" );\n"
+                        "  };\n"
+                        "};\n"
+                        "```\n\n"
+                        "PostgreSQL FTS/trigram:\n\n"
+                        "```plist\n"
+                        "searchModule = {\n"
+                        "  engineClass = \"ALNPostgresSearchEngine\";\n"
+                        "  providers = {\n"
+                        "    classes = ( \"%@\" );\n"
+                        "  };\n"
+                        "  engine = {\n"
+                        "    postgres = {\n"
+                        "      tableName = \"%@_documents\";\n"
+                        "      textSearchConfiguration = \"simple\";\n"
+                        "      maxConnections = 2;\n"
+                        "    };\n"
+                        "  };\n"
+                        "};\n"
+                        "```\n\n"
+                        "Meilisearch:\n\n"
+                        "```plist\n"
+                        "searchModule = {\n"
+                        "  engineClass = \"ALNMeilisearchSearchEngine\";\n"
+                        "  providers = {\n"
+                        "    classes = ( \"%@\" );\n"
+                        "  };\n"
+                        "  engine = {\n"
+                        "    meilisearch = {\n"
+                        "      serviceURL = \"http://127.0.0.1:7700\";\n"
+                        "      apiKey = \"change-me\";\n"
+                        "      indexPrefix = \"myapp\";\n"
+                        "      liveRequestsEnabled = NO;\n"
+                        "    };\n"
+                        "  };\n"
+                        "};\n"
+                        "```\n\n"
+                        "OpenSearch / Elasticsearch:\n\n"
+                        "```plist\n"
+                        "searchModule = {\n"
+                        "  engineClass = \"ALNOpenSearchSearchEngine\";\n"
+                        "  providers = {\n"
+                        "    classes = ( \"%@\" );\n"
+                        "  };\n"
+                        "  engine = {\n"
+                        "    opensearch = {\n"
+                        "      serviceURL = \"http://127.0.0.1:9200\";\n"
+                        "      apiKey = \"change-me\";\n"
+                        "      indexPrefix = \"myapp\";\n"
+                        "      liveRequestsEnabled = NO;\n"
+                        "    };\n"
+                        "  };\n"
+                        "};\n"
+                        "```\n\n"
+                        "## Migration Path\n\n"
+                        "1. Start with the default engine while you finalize result shaping, filters, and faceting.\n"
+                        "2. Move to `ALNPostgresSearchEngine` when you want better ranking quality without adding new infrastructure.\n"
+                        "3. Move to Meilisearch or OpenSearch when you need external-engine relevance, cursor pagination, or service-owned scaling.\n"
+                        "4. Keep the resource contract stable so routes, result shaping, and public-safe fields do not change during the engine swap.\n"
+                        "5. Reindex after every engine change and verify `/search/api/resources/%@` plus `/search/api/resources/%@/query`.\n\n"
+                        "## Suggested Next Commands\n\n"
+                        "```bash\n"
+                        "./build/arlen module add jobs\n"
+                        "./build/arlen module add search\n"
+                        "./build/arlen module doctor --json\n"
+                        "./build/arlen module migrate --env development\n"
+                        "./build/arlen routes\n"
+                        "```\n",
+                       resourceLabel ?: @"Generated",
+                       resourceLabel ?: @"Generated",
+                       providerClassName ?: @"GeneratedSearchProvider",
+                       providerClassName ?: @"GeneratedSearchProvider",
+                       providerClassName ?: @"GeneratedSearchProvider",
+                       providerClassName ?: @"GeneratedSearchProvider",
+                       resourceSlug ?: @"search_resource",
+                       providerClassName ?: @"GeneratedSearchProvider",
+                       providerClassName ?: @"GeneratedSearchProvider",
+                       resourceSlug ?: @"search_resource",
+                       resourceSlug ?: @"search_resource"];
+}
+
 static int CommandGenerate(NSArray *args) {
   BOOL asJSON = ArgsContainFlag(args, @"--json");
   if ([args count] == 1 &&
@@ -2152,11 +2480,86 @@ static int CommandGenerate(NSArray *args) {
       }
       AppendRelativePath(generatedFiles, root, absolutePath);
     }
+  } else if ([type isEqualToString:@"search"]) {
+    ok = YES;
+    NSError *readinessError = nil;
+    BOOL jobsInstalled = IsModuleInstalledAtAppRoot(root, @"jobs", &readinessError);
+    if (readinessError != nil) {
+      ok = NO;
+      error = readinessError;
+    } else if (!jobsInstalled) {
+      ok = NO;
+      error = [NSError errorWithDomain:@"Arlen.Error"
+                                  code:15
+                              userInfo:@{
+                                NSLocalizedDescriptionKey :
+                                    @"arlen generate search requires the vendored jobs module; run `arlen module add jobs` first"
+                              }];
+    }
+
+    BOOL searchInstalled = NO;
+    if (ok) {
+      readinessError = nil;
+      searchInstalled = IsModuleInstalledAtAppRoot(root, @"search", &readinessError);
+      if (readinessError != nil) {
+        ok = NO;
+        error = readinessError;
+      } else if (!searchInstalled) {
+        ok = NO;
+        error = [NSError errorWithDomain:@"Arlen.Error"
+                                    code:16
+                                userInfo:@{
+                                  NSLocalizedDescriptionKey :
+                                      @"arlen generate search requires the vendored search module; run `arlen module add search` first"
+                                }];
+      }
+    }
+
+    NSString *providerClassName = [name hasSuffix:@"SearchProvider"] ? name : [name stringByAppendingString:@"SearchProvider"];
+    NSString *resourceBaseName = TrimSearchProviderSuffix(providerClassName);
+    NSString *resourceSlug = NormalizedSearchResourceSlug(resourceBaseName);
+    NSString *headerPath =
+        [root stringByAppendingPathComponent:[NSString stringWithFormat:@"src/Search/%@.h", providerClassName]];
+    NSString *implPath =
+        [root stringByAppendingPathComponent:[NSString stringWithFormat:@"src/Search/%@.m", providerClassName]];
+    NSString *guidePath =
+        [root stringByAppendingPathComponent:[NSString stringWithFormat:@"docs/search/%@_search.md", resourceSlug]];
+
+    if (ok) {
+      ok = WriteTextFile(headerPath, GeneratedSearchProviderHeader(providerClassName), NO, &error);
+      if (ok) {
+        AppendRelativePath(generatedFiles, root, headerPath);
+      }
+    }
+    if (ok) {
+      ok = WriteTextFile(implPath,
+                         GeneratedSearchProviderImplementation(providerClassName, resourceBaseName, resourceSlug),
+                         NO,
+                         &error);
+      if (ok) {
+        AppendRelativePath(generatedFiles, root, implPath);
+      }
+    }
+    if (ok) {
+      ok = WriteTextFile(guidePath,
+                         GeneratedSearchGuide(providerClassName, resourceSlug, resourceBaseName),
+                         NO,
+                         &error);
+      if (ok) {
+        AppendRelativePath(generatedFiles, root, guidePath);
+      }
+    }
+    if (ok) {
+      ok = AddSearchProviderClassToAppConfig(root, providerClassName, &error);
+      if (ok) {
+        AppendRelativePath(modifiedFiles, root, [root stringByAppendingPathComponent:@"config/app.plist"]);
+      }
+    }
   } else {
     if (asJSON) {
       return EmitMachineError(@"generate", @"scaffold", @"unknown_generator_type",
                               [NSString stringWithFormat:@"arlen generate: unknown type %@", type ?: @""],
-                              @"Use one of: controller, endpoint, model, migration, test, plugin, frontend.",
+                              @"Use one of: controller, endpoint, model, migration, test, plugin, frontend, search.",
                               @"arlen generate controller Home --json", 2);
     }
     fprintf(stderr, "arlen generate: unknown type %s\n", [type UTF8String]);

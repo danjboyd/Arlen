@@ -178,6 +178,7 @@
   NSArray *authenticatedIdentifiers = [self resourceIdentifiersFromResourcePayload:authenticatedJSON[@"data"][@"resources"]];
   XCTAssertTrue([authenticatedIdentifiers containsObject:@"products"]);
   XCTAssertTrue([authenticatedIdentifiers containsObject:@"members"]);
+  XCTAssertTrue([authenticatedIdentifiers containsObject:@"tenant_orders"]);
   XCTAssertFalse([authenticatedIdentifiers containsObject:@"finance"]);
   XCTAssertFalse([authenticatedIdentifiers containsObject:@"regional_docs"]);
 

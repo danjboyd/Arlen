@@ -1,6 +1,6 @@
 # Arlen Phase 27 Roadmap
 
-Status: In progress (`27A-27D` delivered on 2026-04-01)
+Status: Complete (`27A-27L` delivered on 2026-04-01)
 Last updated: 2026-04-01
 
 Related docs:
@@ -58,7 +58,7 @@ Phase 27 exists to close that gap.
 
 ## 0.1 Delivered So Far (2026-04-01)
 
-`27A-27D` are now shipped:
+`27A-27L` are now shipped:
 
 - `27A`: public query routes return shaped results by default, expose stable
   `resourceMetadata` / `engineCapabilities` / `pagination` envelopes, and
@@ -73,8 +73,28 @@ Phase 27 exists to close that gap.
 - `27D`: the query contract now includes autocomplete, suggestions, facets, and
   promoted results in both HTML and JSON surfaces, with fail-closed query-mode
   validation.
-
-Remaining scope starts at `27E`.
+- `27E`: Arlen ships a first-party `ALNMeilisearchSearchEngine` with engine
+  descriptors, cursor pagination, fixture-backed contract validation, and
+  optional live connectivity probes.
+- `27F`: Arlen ships a first-party `ALNOpenSearchSearchEngine` with mappings,
+  aliases, cursor pagination, fixture-backed contract validation, and optional
+  live connectivity probes.
+- `27G`: resource lifecycle now carries bulk-import summaries, replay queues,
+  paused-resource fail-closed behavior, conditional indexing, and cursor-aware
+  query envelopes.
+- `27H`: visibility and sync policy metadata now cover tenant scoping,
+  soft-delete/archive hiding, and policy-aware indexing/query surfaces.
+- `27I`: admin and ops drilldowns now expose engine descriptors, replay depth,
+  recent queries, and richer runtime summaries.
+- `27J`: `arlen generate search` now scaffolds searchable-resource providers,
+  result shaping, provider registration, and engine migration guidance; the
+  search playbook example documents the app-facing path.
+- `27K`: the search suite is split into focused tests for search contract,
+  controller, lifecycle, adapter, and admin behavior, backed by shared Phase 27
+  search test support plus engine fixture packs.
+- `27L`: Phase 27 now ships `phase27-search-characterize`,
+  `phase27-confidence`, machine-readable artifact manifests, optional live
+  Meilisearch/OpenSearch smoke manifests, and the docs/status closeout.
 
 ## 1. Objective
 
@@ -519,6 +539,7 @@ source tools/source_gnustep_env.sh
 make build-tests
 make test-unit
 make phase27-search-tests
+make phase27-search-characterize
 make phase27-confidence
 make docs-api
 bash tools/ci/run_docs_quality.sh

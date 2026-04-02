@@ -50,7 +50,7 @@ toolchain env directly.
 - [Notifications Module](NOTIFICATIONS_MODULE.md): inbox/preferences plus admin preview/outbox/test-send flows.
 - [Storage Module](STORAGE_MODULE.md): collections, direct uploads, signed downloads, and `/storage/api`.
 - [Ops Module](OPS_MODULE.md): operational dashboard plus `/ops/api`.
-- [Search Module](SEARCH_MODULE.md): shaped public query contracts, reindex/incremental sync, PostgreSQL FTS support, and admin/ops integration.
+- [Search Module](SEARCH_MODULE.md): shaped public query contracts, PostgreSQL/Meilisearch/OpenSearch engines, reindex/incremental sync, and admin/ops integration.
 - [Ecosystem Services](ECOSYSTEM_SERVICES.md): jobs/cache/i18n/mail/attachment adapter contracts.
 - [Dataverse Integration](DATAVERSE.md): Dataverse Web API client, config shape, OData query usage, and typed codegen workflow.
 - [ArlenData Reuse Guide](ARLEN_DATA.md): standalone data-layer packaging and PostgreSQL/MSSQL/Dataverse usage.
@@ -81,7 +81,7 @@ toolchain env directly.
 - [Phase 22 Roadmap](PHASE22_ROADMAP.md): completed documentation cleanup pass for newcomer-first onboarding and docs quality closeout.
 - [Phase 23 Roadmap](PHASE23_ROADMAP.md): completed Dataverse integration phase.
 - [Phase 25 Roadmap](PHASE25_ROADMAP.md): completed live UI baseline plus stream/recovery/adversarial hardening through `25L`.
-- [Phase 27 Roadmap](PHASE27_ROADMAP.md): in-progress search best-in-class phase; `27A-27D` are delivered for safer result shaping, capability normalization, a PostgreSQL FTS baseline, and richer query semantics.
+- [Phase 27 Roadmap](PHASE27_ROADMAP.md): completed search best-in-class phase; `27A-27L` delivered result shaping, PostgreSQL FTS, first-party Meilisearch/OpenSearch adapters, lifecycle/policy/admin depth, and search confidence artifacts.
 - [Combined Roadmap Index (Historical Aggregate)](PHASE2_PHASE3_ROADMAP.md)
 - [Phase 1 Spec](PHASE1_SPEC.md)
 - [Arlen CLI Spec](ARLEN_CLI_SPEC.md)
@@ -104,6 +104,7 @@ toolchain env directly.
 - [Auth UI Modes](../examples/auth_ui_modes/README.md)
 - [Phase 14 Modules Demo](../examples/phase14_modules_demo/README.md)
 - [Phase 16 Modules Demo](../examples/phase16_modules_demo/README.md)
+- [Search Module Playbook](../examples/search_module_playbook/README.md)
 - [GSWeb Migration Sample](../examples/gsweb_migration/README.md)
 - [ArlenData Standalone Example](../examples/arlen_data/README.md)
 - [Dataverse Reference](../examples/dataverse_reference/README.md)

@@ -23,23 +23,27 @@ Last updated: 2026-04-01
   - strengthened `phase25-confidence` with websocket push and negative-path
     backpressure artifacts, so the live closeout now fails closed on both
     success and failure-path regressions
-- Phase 27 is in progress (`27A-27D` delivered on 2026-04-01):
+- Phase 27 is complete (`27A-27L` delivered on 2026-04-01):
   - shipped shaped public search results with per-resource field allowlists,
     public/authenticated/role-gated/predicate query policies, richer
-    capability-normalized resource metadata, and fail-closed public query/API
-    behavior
-  - added a first-party PostgreSQL FTS/trigram engine alongside the default
-    engine, including engine capability reporting, config normalization,
-    snapshot build support, and incremental sync parity
-  - expanded the search query contract with query modes, autocomplete,
-    suggestions, facets, promoted results, typed filters, richer pagination
-    metadata, and safer engine/query envelopes across HTML and JSON surfaces
-  - updated the search dashboard/docs/tests for the new contract, and made the
-    search module explicitly re-register its own EOC templates at startup so
-    HTML rendering remains stable after unit suites clear the global template
-    registry
+    capability-normalized resource metadata, cursor/explain envelopes, and
+    fail-closed public query/API behavior
+  - added first-party PostgreSQL FTS/trigram, Meilisearch, and OpenSearch
+    engines with engine descriptors, fixture-backed adapter validation,
+    optional live connectivity probes, and stable engine capability reporting
+  - expanded the lifecycle/admin/runtime contract with replay queues,
+    bulk-import throughput summaries, tenant/soft-delete/conditional indexing
+    metadata, recent query history, and stronger dashboard/drilldown payloads
+  - added `arlen generate search`, the search module playbook example,
+    migration/config guidance, focused adapter/lifecycle/admin regression
+    suites, `phase27-search-characterize`, and the `phase27-confidence`
+    artifact pack
 - Verification completed at this checkpoint:
+  - `source tools/source_gnustep_env.sh && make build-tests`
   - `source tools/source_gnustep_env.sh && make test-unit`
+  - `source tools/source_gnustep_env.sh && make phase27-search-tests`
+  - `source tools/source_gnustep_env.sh && make phase27-search-characterize`
+  - `source tools/source_gnustep_env.sh && make phase27-confidence`
   - `source tools/source_gnustep_env.sh && make docs-api`
   - `source tools/source_gnustep_env.sh && bash tools/ci/run_docs_quality.sh`
 

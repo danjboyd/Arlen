@@ -154,6 +154,13 @@
   NSDictionary *inventoryFilter = filters[1];
   XCTAssertTrue([(NSArray *)(inventoryFilter[@"operators"] ?: @[]) containsObject:@"gte"]);
   XCTAssertTrue([(NSArray *)(inventoryFilter[@"operators"] ?: @[]) containsObject:@"lte"]);
+  XCTAssertEqualObjects(@"sku", metadata[@"pagination"][@"cursorField"]);
+
+  NSDictionary *tenantMetadata = [runtime resourceMetadataForIdentifier:@"tenant_orders"];
+  XCTAssertEqualObjects(@"tenant_id", tenantMetadata[@"visibility"][@"tenantField"]);
+  XCTAssertEqualObjects(@"deleted", tenantMetadata[@"visibility"][@"softDeleteField"]);
+  XCTAssertEqualObjects(@"delete", tenantMetadata[@"syncPolicy"][@"softDeleteMode"]);
+  XCTAssertEqualObjects(@2, tenantMetadata[@"syncPolicy"][@"bulkBatchSize"]);
 }
 
 - (void)testInvalidQueryModeFailsClosed {
@@ -171,6 +178,17 @@
                               limit:10
                              offset:0
                        queryOptions:@{ @"mode" : @"boolean" }
+                              error:&error]);
+  XCTAssertEqual(ALNSearchModuleErrorValidationFailed, error.code);
+
+  error = nil;
+  XCTAssertNil([runtime searchQuery:@"priority"
+                 resourceIdentifier:@"products"
+                            filters:nil
+                               sort:nil
+                              limit:10
+                             offset:0
+                       queryOptions:@{ @"cursor" : @"not-supported" }
                               error:&error]);
   XCTAssertEqual(ALNSearchModuleErrorValidationFailed, error.code);
 }

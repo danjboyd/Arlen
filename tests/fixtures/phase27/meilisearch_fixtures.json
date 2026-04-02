@@ -1,0 +1,107 @@
+{
+  "snapshot": {
+    "products": {
+      "*": {
+        "settingsVersion": "fixture-v1",
+        "taskUID": 4102
+      }
+    }
+  },
+  "operation": {
+    "products": {
+      "upsert": {
+        "taskUID": 4103
+      },
+      "delete": {
+        "taskUID": 4104
+      }
+    }
+  },
+  "query": {
+    "products": {
+      "priority": {
+        "source": "fixture",
+        "hits": [
+          {
+            "recordID": "sku-102",
+            "score": 940,
+            "matchedFields": [
+              "name",
+              "description"
+            ],
+            "highlights": [
+              "Priority workflow kit for fast-moving queues."
+            ],
+            "explain": {
+              "rankingRule": "words"
+            }
+          },
+          {
+            "recordID": "sku-103",
+            "score": 880,
+            "matchedFields": [
+              "name"
+            ],
+            "highlights": [
+              "Rack accessory for priority stations."
+            ],
+            "explain": {
+              "rankingRule": "attribute"
+            }
+          }
+        ],
+        "autocomplete": [
+          "Priority Kit",
+          "Priority Rack"
+        ],
+        "suggestions": [
+          "priority"
+        ],
+        "debug": {
+          "fixture": "meili-products-priority"
+        }
+      },
+      "kit": {
+        "source": "fixture",
+        "hits": [
+          {
+            "recordID": "sku-102",
+            "score": 910,
+            "matchedFields": [
+              "name"
+            ],
+            "highlights": [
+              "Priority Kit"
+            ],
+            "explain": {
+              "rankingRule": "words"
+            }
+          },
+          {
+            "recordID": "sku-100",
+            "score": 780,
+            "matchedFields": [
+              "name"
+            ],
+            "highlights": [
+              "Starter Kit"
+            ],
+            "explain": {
+              "rankingRule": "attribute"
+            }
+          }
+        ],
+        "autocomplete": [
+          "Priority Kit",
+          "Starter Kit"
+        ],
+        "suggestions": [
+          "kit"
+        ],
+        "debug": {
+          "fixture": "meili-products-kit"
+        }
+      }
+    }
+  }
+}

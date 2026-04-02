@@ -1,0 +1,95 @@
+{
+  "snapshot": {
+    "products": {
+      "*": {
+        "alias": "phase27_products_active",
+        "rolloverIndex": "phase27_products_v2"
+      }
+    }
+  },
+  "query": {
+    "products": {
+      "priority": {
+        "source": "fixture",
+        "hits": [
+          {
+            "recordID": "sku-103",
+            "score": 730,
+            "matchedFields": [
+              "name",
+              "description"
+            ],
+            "highlights": [
+              "Rack accessory for priority stations."
+            ],
+            "explain": {
+              "query": "multi_match"
+            }
+          },
+          {
+            "recordID": "sku-102",
+            "score": 690,
+            "matchedFields": [
+              "name"
+            ],
+            "highlights": [
+              "Priority workflow kit for fast-moving queues."
+            ],
+            "explain": {
+              "query": "bool"
+            }
+          }
+        ],
+        "autocomplete": [
+          "Priority Rack"
+        ],
+        "suggestions": [
+          "priority"
+        ],
+        "debug": {
+          "fixture": "opensearch-products-priority"
+        }
+      },
+      "kit": {
+        "source": "fixture",
+        "hits": [
+          {
+            "recordID": "sku-100",
+            "score": 710,
+            "matchedFields": [
+              "name"
+            ],
+            "highlights": [
+              "Starter Kit"
+            ],
+            "explain": {
+              "query": "multi_match"
+            }
+          },
+          {
+            "recordID": "sku-102",
+            "score": 690,
+            "matchedFields": [
+              "name"
+            ],
+            "highlights": [
+              "Priority Kit"
+            ],
+            "explain": {
+              "query": "bool"
+            }
+          }
+        ],
+        "autocomplete": [
+          "Starter Kit"
+        ],
+        "suggestions": [
+          "kit"
+        ],
+        "debug": {
+          "fixture": "opensearch-products-kit"
+        }
+      }
+    }
+  }
+}

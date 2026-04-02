@@ -749,6 +749,102 @@
   }
 }
 
+- (void)testArlenGenerateSearchScaffoldRegistersProviderAndBuilds {
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *workRoot = [self createTempDirectoryWithPrefix:@"arlen-search-scaffold"];
+  XCTAssertNotNil(workRoot);
+  if (workRoot == nil) {
+    return;
+  }
+
+  @try {
+    int code = 0;
+    NSString *buildOutput = [self runShellCapture:[NSString stringWithFormat:@"cd %@ && make arlen", repoRoot]
+                                         exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", buildOutput);
+
+    NSString *newApp = [self
+        runShellCapture:[NSString stringWithFormat:@"cd %@ && ARLEN_FRAMEWORK_ROOT=%@ %@/build/arlen "
+                                                  "new SearchPlayground --full",
+                                                  workRoot, repoRoot, repoRoot]
+               exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", newApp);
+
+    NSString *appRoot = [workRoot stringByAppendingPathComponent:@"SearchPlayground"];
+    NSString *installJobs = [self
+        runShellCapture:[NSString stringWithFormat:@"cd %@ && ARLEN_FRAMEWORK_ROOT=%@ %@/build/arlen "
+                                                  "module add jobs --json",
+                                                  appRoot, repoRoot, repoRoot]
+               exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", installJobs);
+    NSDictionary *jobsJSON = [self parseJSONDictionaryFromOutput:installJobs context:@"module add jobs --json"];
+    XCTAssertEqualObjects(@"ok", jobsJSON[@"status"]);
+
+    NSString *installSearch = [self
+        runShellCapture:[NSString stringWithFormat:@"cd %@ && ARLEN_FRAMEWORK_ROOT=%@ %@/build/arlen "
+                                                  "module add search --json",
+                                                  appRoot, repoRoot, repoRoot]
+               exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", installSearch);
+    NSDictionary *searchJSON = [self parseJSONDictionaryFromOutput:installSearch context:@"module add search --json"];
+    XCTAssertEqualObjects(@"ok", searchJSON[@"status"]);
+
+    NSString *generateOutput = [self
+        runShellCapture:[NSString stringWithFormat:@"cd %@ && ARLEN_FRAMEWORK_ROOT=%@ %@/build/arlen "
+                                                  "generate search Catalog --json",
+                                                  appRoot, repoRoot, repoRoot]
+               exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", generateOutput);
+    NSDictionary *generateJSON = [self parseJSONDictionaryFromOutput:generateOutput
+                                                             context:@"generate search --json"];
+    XCTAssertEqualObjects(@"ok", generateJSON[@"status"]);
+    XCTAssertEqualObjects(@"search", generateJSON[@"generator"]);
+    XCTAssertTrue([generateJSON[@"generated_files"] containsObject:@"src/Search/CatalogSearchProvider.h"]);
+    XCTAssertTrue([generateJSON[@"generated_files"] containsObject:@"src/Search/CatalogSearchProvider.m"]);
+    XCTAssertTrue([generateJSON[@"generated_files"] containsObject:@"docs/search/catalog_search.md"]);
+    XCTAssertTrue([generateJSON[@"modified_files"] containsObject:@"config/app.plist"]);
+
+    NSString *providerImpl =
+        [NSString stringWithContentsOfFile:[appRoot stringByAppendingPathComponent:@"src/Search/CatalogSearchProvider.m"]
+                                  encoding:NSUTF8StringEncoding
+                                     error:nil];
+    XCTAssertTrue([providerImpl containsString:@"searchModulePublicResultForDocument"]);
+    XCTAssertTrue([providerImpl containsString:@"queryModes"]);
+
+    NSString *guide =
+        [NSString stringWithContentsOfFile:[appRoot stringByAppendingPathComponent:@"docs/search/catalog_search.md"]
+                                  encoding:NSUTF8StringEncoding
+                                     error:nil];
+    XCTAssertTrue([guide containsString:@"ALNPostgresSearchEngine"]);
+    XCTAssertTrue([guide containsString:@"ALNMeilisearchSearchEngine"]);
+    XCTAssertTrue([guide containsString:@"ALNOpenSearchSearchEngine"]);
+
+    NSString *appConfig =
+        [NSString stringWithContentsOfFile:[appRoot stringByAppendingPathComponent:@"config/app.plist"]
+                                  encoding:NSUTF8StringEncoding
+                                     error:nil];
+    XCTAssertTrue([appConfig containsString:@"CatalogSearchProvider"]);
+
+    NSString *doctorOutput =
+        [self runShellCapture:[NSString stringWithFormat:@"cd %@ && ARLEN_FRAMEWORK_ROOT=%@ %@/build/arlen "
+                                                  "module doctor --json",
+                                                  appRoot, repoRoot, repoRoot]
+                     exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", doctorOutput);
+
+    NSString *prepareOutput =
+        [self runShellCapture:[NSString stringWithFormat:
+                                            @"%@ && cd %@ && ARLEN_FRAMEWORK_ROOT=%@ %@/build/arlen "
+                                             "boomhauer --prepare-only",
+                                            [self gnustepSourceCommandForRepoRoot:repoRoot], appRoot, repoRoot,
+                                            repoRoot]
+                     exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", prepareOutput);
+  } @finally {
+    [[NSFileManager defaultManager] removeItemAtPath:workRoot error:nil];
+  }
+}
+
 - (void)testAgentJSONWorkflowContractsCoverScaffoldBuildCheckAndDeploy {
   NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
   NSString *workRoot = [self createTempDirectoryWithPrefix:@"arlen-agent-dx"];

@@ -7,6 +7,8 @@
 NSString *const Phase27SearchPredicateAllowedStashKey = @"phase27_search_predicate_allowed";
 
 static BOOL gPhase27SearchProductsBuildShouldFail = NO;
+static BOOL gPhase27SearchTenantOrdersIndexingShouldFail = NO;
+static BOOL gPhase27SearchTenantOrdersPaused = NO;
 
 NSMutableDictionary<NSString *, NSMutableDictionary *> *Phase27SearchProductStore(void) {
   static NSMutableDictionary<NSString *, NSMutableDictionary *> *store = nil;
@@ -55,10 +57,20 @@ void Phase27SearchResetStores(void) {
     @"internal_cost" : @"31.00",
   } mutableCopy];
   gPhase27SearchProductsBuildShouldFail = NO;
+  gPhase27SearchTenantOrdersIndexingShouldFail = NO;
+  gPhase27SearchTenantOrdersPaused = NO;
 }
 
 void Phase27SearchSetProductsBuildShouldFail(BOOL shouldFail) {
   gPhase27SearchProductsBuildShouldFail = shouldFail;
+}
+
+void Phase27SearchSetTenantOrdersIndexingShouldFail(BOOL shouldFail) {
+  gPhase27SearchTenantOrdersIndexingShouldFail = shouldFail;
+}
+
+void Phase27SearchSetTenantOrdersPaused(BOOL shouldPause) {
+  gPhase27SearchTenantOrdersPaused = shouldPause;
 }
 
 NSString *Phase27SearchUniquePostgresTableName(void) {
@@ -70,6 +82,12 @@ NSString *Phase27SearchUniquePostgresTableName(void) {
     [sanitized appendString:[allowed characterIsMember:ch] ? [NSString stringWithFormat:@"%C", ch] : @"_"];
   }
   return [sanitized copy];
+}
+
+NSString *Phase27SearchFixturesPath(NSString *filename) {
+  NSString *resolved = [filename isKindOfClass:[NSString class]] ? filename : @"";
+  return [[[NSFileManager defaultManager] currentDirectoryPath]
+      stringByAppendingPathComponent:[NSString stringWithFormat:@"tests/fixtures/phase27/%@", resolved]];
 }
 
 @interface Phase27SearchProductsResource : NSObject <ALNSearchResourceDefinition>
@@ -310,6 +328,151 @@ NSString *Phase27SearchUniquePostgresTableName(void) {
 
 @end
 
+@interface Phase27SearchTenantOrdersResource : NSObject <ALNSearchResourceDefinition>
+@end
+
+@implementation Phase27SearchTenantOrdersResource
+
+- (NSString *)searchModuleResourceIdentifier {
+  return @"tenant_orders";
+}
+
+- (NSDictionary *)searchModuleResourceMetadata {
+  return @{
+    @"label" : @"Tenant Orders",
+    @"summary" : @"Tenant-scoped documents with soft delete and replay semantics.",
+    @"identifierField" : @"id",
+    @"primaryField" : @"title",
+    @"summaryField" : @"description",
+    @"indexedFields" : @[ @"id", @"title", @"description", @"tenant_id", @"deleted", @"archived", @"published", @"status" ],
+    @"searchFields" : @[ @"title", @"description", @"status" ],
+    @"resultFields" : @[ @"id", @"title", @"tenant_id", @"status" ],
+    @"fieldTypes" : @{
+      @"deleted" : @"boolean",
+      @"archived" : @"boolean",
+      @"published" : @"boolean",
+    },
+    @"queryPolicy" : @"authenticated",
+    @"tenantField" : @"tenant_id",
+    @"tenantClaim" : @"tenant",
+    @"softDeleteField" : @"deleted",
+    @"archivedField" : @"archived",
+    @"syncPolicy" : @{
+      @"bulkBatchSize" : @2,
+      @"replayLimit" : @3,
+      @"softDeleteMode" : @"delete",
+      @"paused" : @(gPhase27SearchTenantOrdersPaused),
+      @"pauseReason" : gPhase27SearchTenantOrdersPaused ? @"fixture pause" : @"",
+      @"conditionalField" : @"published",
+      @"conditionalValues" : @[ @"yes" ],
+    },
+    @"queryModes" : @[ @"search", @"phrase" ],
+  };
+}
+
+- (BOOL)searchModuleEnumerateDocumentBatchesForRuntime:(ALNSearchModuleRuntime *)runtime
+                                             batchSize:(NSUInteger)batchSize
+                                            usingBlock:(ALNSearchResourceBatchConsumer)consumer
+                                                 error:(NSError **)error {
+  (void)runtime;
+  NSArray *records = @[
+    @{
+      @"id" : @"ord-100",
+      @"title" : @"Tenant A Priority Runbook",
+      @"description" : @"Published queue guide for tenant A.",
+      @"tenant_id" : @"tenant-a",
+      @"deleted" : @"false",
+      @"archived" : @"false",
+      @"published" : @"yes",
+      @"status" : @"active",
+    },
+    @{
+      @"id" : @"ord-101",
+      @"title" : @"Tenant B Priority Runbook",
+      @"description" : @"Published queue guide for tenant B.",
+      @"tenant_id" : @"tenant-b",
+      @"deleted" : @"false",
+      @"archived" : @"false",
+      @"published" : @"yes",
+      @"status" : @"active",
+    },
+    @{
+      @"id" : @"ord-102",
+      @"title" : @"Tenant A Deleted Runbook",
+      @"description" : @"Soft-deleted tenant A document.",
+      @"tenant_id" : @"tenant-a",
+      @"deleted" : @"true",
+      @"archived" : @"false",
+      @"published" : @"yes",
+      @"status" : @"deleted",
+    },
+    @{
+      @"id" : @"ord-103",
+      @"title" : @"Tenant A Archived Note",
+      @"description" : @"Archived tenant A note.",
+      @"tenant_id" : @"tenant-a",
+      @"deleted" : @"false",
+      @"archived" : @"true",
+      @"published" : @"yes",
+      @"status" : @"archived",
+    },
+    @{
+      @"id" : @"ord-104",
+      @"title" : @"Tenant A Draft Note",
+      @"description" : @"Unpublished tenant A draft.",
+      @"tenant_id" : @"tenant-a",
+      @"deleted" : @"false",
+      @"archived" : @"false",
+      @"published" : @"no",
+      @"status" : @"draft",
+    },
+  ];
+  NSUInteger size = MAX((NSUInteger)1U, batchSize);
+  for (NSUInteger index = 0; index < [records count]; index += size) {
+    NSUInteger length = MIN(size, [records count] - index);
+    NSArray *batch = [records subarrayWithRange:NSMakeRange(index, length)];
+    if (!consumer(batch, error)) {
+      return NO;
+    }
+  }
+  return YES;
+}
+
+- (NSArray<NSDictionary *> *)searchModuleDocumentsForRuntime:(ALNSearchModuleRuntime *)runtime
+                                                       error:(NSError **)error {
+  NSMutableArray *records = [NSMutableArray array];
+  if (![self searchModuleEnumerateDocumentBatchesForRuntime:runtime
+                                                  batchSize:100U
+                                                 usingBlock:^BOOL(NSArray<NSDictionary *> *batch, NSError **batchError) {
+                                                   (void)batchError;
+                                                   [records addObjectsFromArray:batch ?: @[]];
+                                                   return YES;
+                                                 }
+                                                      error:error]) {
+    return nil;
+  }
+  return [records copy];
+}
+
+- (BOOL)searchModuleAllowsIndexingRecord:(NSDictionary *)record
+                                 metadata:(NSDictionary *)metadata
+                                  runtime:(ALNSearchModuleRuntime *)runtime
+                                    error:(NSError **)error {
+  (void)metadata;
+  (void)runtime;
+  if (gPhase27SearchTenantOrdersIndexingShouldFail) {
+    if (error != NULL) {
+      *error = [NSError errorWithDomain:@"Phase27Search"
+                                   code:42
+                               userInfo:@{ NSLocalizedDescriptionKey : @"expected tenant orders indexing failure" }];
+    }
+    return NO;
+  }
+  return YES;
+}
+
+@end
+
 @implementation Phase27SearchProvider
 
 - (NSArray<id<ALNSearchResourceDefinition>> *)searchModuleResourcesForRuntime:(ALNSearchModuleRuntime *)runtime
@@ -321,6 +484,7 @@ NSString *Phase27SearchUniquePostgresTableName(void) {
     [[Phase27SearchMembersResource alloc] init],
     [[Phase27SearchFinanceResource alloc] init],
     [[Phase27SearchPredicateResource alloc] init],
+    [[Phase27SearchTenantOrdersResource alloc] init],
   ];
 }
 
@@ -337,6 +501,7 @@ NSString *Phase27SearchUniquePostgresTableName(void) {
   NSString *subject = Phase27SearchHeaderValue(headers, @"x-search-user");
   NSString *rolesHeader = Phase27SearchHeaderValue(headers, @"x-search-roles");
   NSString *predicate = Phase27SearchHeaderValue(headers, @"x-search-predicate");
+  NSString *tenant = Phase27SearchHeaderValue(headers, @"x-search-tenant");
   NSArray *roles = ([rolesHeader length] > 0) ? [[rolesHeader lowercaseString] componentsSeparatedByString:@","] : @[];
   NSMutableArray *normalizedRoles = [NSMutableArray array];
   for (NSString *entry in roles) {
@@ -356,6 +521,7 @@ NSString *Phase27SearchUniquePostgresTableName(void) {
     context.stash[ALNContextAuthClaimsStashKey] = @{
       @"sub" : subject,
       @"roles" : normalizedRoles ?: @[],
+      @"tenant" : tenant ?: @"",
       @"aal" : @2,
       @"amr" : @[ @"pwd" ],
       @"iat" : @((NSInteger)now),

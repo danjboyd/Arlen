@@ -40,7 +40,7 @@ Run bootstrap environment diagnostics without requiring a framework build.
 - `--env <name>`: include the target environment name in output (default `development`)
 - `--json`: emit structured JSON diagnostics
 
-### `arlen generate <controller|endpoint|model|migration|test|plugin|frontend> <Name> [options] [--json]`
+### `arlen generate <controller|endpoint|model|migration|test|plugin|frontend|search> <Name> [options] [--json]`
 
 Generate app artifacts.
 
@@ -61,6 +61,13 @@ Frontend generator options:
 - `--preset <vanilla-spa|progressive-mpa>`: choose frontend starter scaffold (default `vanilla-spa`)
 - `--json`: emit machine-readable scaffold/fix-it payload (`phase7g-agent-dx-contracts-v1`)
 
+Search generator behavior:
+
+- requires vendored `jobs` and `search` modules
+- writes `src/Search/<Name>SearchProvider.{h,m}`
+- appends the provider to `config/app.plist` under `searchModule.providers.classes`
+- writes engine swap and migration notes under `docs/search/<name_slug>_search.md`
+
 Generator behavior:
 
 - `controller`: `src/Controllers/<Name>Controller.{h,m}`
@@ -71,12 +78,14 @@ Generator behavior:
 - `plugin`: `src/Plugins/<Name>Plugin.{h,m}` and class auto-registration in `config/app.plist` (`plugins.classes`), with optional `--preset` service templates
   - `redis-cache` preset uses `ALNRedisCacheAdapter` when `ARLEN_REDIS_URL` is configured
 - `frontend`: deterministic starter assets under `public/frontend/<name_slug>/` with `index.html`, `app.js`, `styles.css`, `starter_manifest.json`, and `README.md`
+- `search`: app-owned searchable resource/provider scaffold plus `config/app.plist` registration and engine migration notes
 
 Notes:
 
 - placeholder routes are supported (for example `/user/admin/:id`)
 - endpoint generator can create route + action + optional template in one command
 - when `templates/layouts/main.html.eoc` exists, generated HTML templates opt into it automatically unless the target logical path is under `layouts/` or `partials/`
+- `generate search` is the fastest way to stand up a search resource without reverse-engineering the `search` module internals
 
 ### `arlen migrate [--env <name>] [--database <target>] [--dsn <connection_string>] [--dry-run]`
 

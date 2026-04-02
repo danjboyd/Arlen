@@ -22,6 +22,9 @@ typedef NS_ENUM(NSInteger, ALNSearchModuleErrorCode) {
   ALNSearchModuleErrorForbidden = 6,
 };
 
+typedef BOOL (^ALNSearchResourceBatchConsumer)(NSArray<NSDictionary *> *records,
+                                               NSError *_Nullable *_Nullable error);
+
 @protocol ALNSearchEngine <NSObject>
 
 - (nullable NSDictionary *)searchModuleSnapshotForMetadata:(NSDictionary *)metadata
@@ -77,6 +80,18 @@ typedef NS_ENUM(NSInteger, ALNSearchModuleErrorCode) {
 - (BOOL)searchModuleAllowsQueryForContext:(ALNContext *)context
                                   runtime:(ALNSearchModuleRuntime *)runtime
                                     error:(NSError *_Nullable *_Nullable)error;
+- (nullable NSDictionary *)searchModuleAdditionalFiltersForContext:(ALNContext *)context
+                                                           metadata:(NSDictionary *)metadata
+                                                            runtime:(ALNSearchModuleRuntime *)runtime
+                                                              error:(NSError *_Nullable *_Nullable)error;
+- (BOOL)searchModuleAllowsIndexingRecord:(NSDictionary *)record
+                                 metadata:(NSDictionary *)metadata
+                                  runtime:(ALNSearchModuleRuntime *)runtime
+                                    error:(NSError *_Nullable *_Nullable)error;
+- (BOOL)searchModuleEnumerateDocumentBatchesForRuntime:(ALNSearchModuleRuntime *)runtime
+                                             batchSize:(NSUInteger)batchSize
+                                            usingBlock:(ALNSearchResourceBatchConsumer)consumer
+                                                 error:(NSError *_Nullable *_Nullable)error;
 
 @end
 

@@ -132,6 +132,8 @@ Use `arlen routes` when you want to inspect registration order and route names.
 - writing routes/controllers/middleware directly: `docs/APP_AUTHORING_GUIDE.md`
 - configuring the app: `docs/CONFIGURATION_REFERENCE.md`
 - adding first-party modules: `docs/MODULES.md`
+- adding app-owned search resources after installing `jobs` + `search`:
+  `arlen generate search Catalog` and `docs/SEARCH_MODULE.md`
 - starting from the smallest app shape: `docs/LITE_MODE_GUIDE.md`
 - generating plugins or service adapters: `docs/PLUGIN_SERVICE_GUIDE.md`
 - generating frontend starter folders: `docs/FRONTEND_STARTERS.md`
