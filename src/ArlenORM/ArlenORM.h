@@ -19,6 +19,7 @@
 #import "Arlen/ORM/ALNORMModel.h"
 #import "Arlen/ORM/ALNORMChangeset.h"
 #import "Arlen/ORM/ALNORMCodegen.h"
+#import "Arlen/ORM/ALNORMTypeScriptCodegen.h"
 #import "Arlen/ORM/ALNORMDataverseFieldDescriptor.h"
 #import "Arlen/ORM/ALNORMDataverseRelationDescriptor.h"
 #import "Arlen/ORM/ALNORMDataverseModelDescriptor.h"

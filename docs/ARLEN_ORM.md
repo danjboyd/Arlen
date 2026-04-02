@@ -58,6 +58,7 @@ The main public types are:
 - `ALNORMValueConverter`
 - `ALNORMWriteOptions`
 - `ALNORMCodegen`
+- `ALNORMTypeScriptCodegen`
 - `ALNORMDescriptorSnapshot`
 - `ALNORMSchemaDrift`
 - `ALNORMAdminResource`
@@ -92,6 +93,40 @@ Current output contracts keep reflected read-only relations read-only by
 default in generated models. Historical SQL descriptor snapshots are serialized
 through `ALNORMDescriptorSnapshot`, and `ALNORMSchemaDrift` fails closed when
 current descriptors diverge from a checked-in history contract.
+
+Phase `28A-28D` adds a first consumer-contract bridge for React / TypeScript
+apps without making TypeScript the canonical ORM source. `ALNORMTypeScriptCodegen`
+consumes:
+
+- checked-in ORM descriptor manifests
+- raw schema metadata (via `ALNORMCodegen`)
+- exported OpenAPI JSON
+
+and emits a generated TypeScript package with:
+
+- `models.ts` read/create/update contracts plus relation metadata
+- `client.ts` typed `fetch` transport helpers from OpenAPI operations
+- optional `react.ts` TanStack Query-oriented helpers
+- a versioned manifest (`format: arlen-typescript-contract-v1`)
+
+The recommended CLI path is:
+
+```bash
+source tools/source_gnustep_env.sh
+build/arlen typescript-codegen \
+  --orm-input db/schema/arlen_orm_manifest.json \
+  --openapi-input build/openapi.json \
+  --output-dir frontend/generated/arlen \
+  --manifest db/schema/arlen_typescript.json \
+  --target all \
+  --force
+```
+
+This stays descriptor-first:
+
+- Objective-C models and TypeScript contracts are sibling generated outputs
+- `react` output is optional and package-scoped
+- missing OpenAPI schemas or unstable operation IDs fail closed
 
 ## Query Model
 

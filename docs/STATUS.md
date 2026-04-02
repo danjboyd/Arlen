@@ -57,16 +57,19 @@ Last updated: 2026-04-02
     soft-delete visibility derivation
   - tightened `phase27-confidence` so PostgreSQL plus live Meilisearch and
     OpenSearch query/sync validation are required for a passing release gate
-- Planned Phase 28 as the next roadmap phase:
-  - added `docs/PHASE28_ROADMAP.md`
-  - scoped `28A-28L` around descriptor-first TypeScript and React interop on
-    top of ArlenORM plus route/OpenAPI contracts, including generated models,
-    transport clients, optional React hooks/query keys, validator adapters,
-    module metadata integration, and TS-specific confidence lanes
-  - recorded the core guardrails: TypeScript stays generated rather than
-    canonical, browser-side persistence remains out of scope, and React /
-    TanStack / validator integrations remain optional outputs rather than core
-    runtime dependencies
+- Phase 28 is started (`28A-28D` landed on 2026-04-02):
+  - added `ALNORMTypeScriptCodegen` plus the first shipped
+    descriptor-first TypeScript manifest format
+    (`arlen-typescript-contract-v1`)
+  - added `arlen typescript-codegen` for ORM manifest/raw-metadata input plus
+    exported OpenAPI input, emitting generated `models.ts`, `client.ts`,
+    optional `react.ts`, and package scaffolding under app-owned output paths
+  - kept the Phase 28 guardrails intact: TypeScript stays generated rather
+    than canonical, browser-side persistence remains out of scope, and
+    React/TanStack output remains optional on top of the plain transport client
+  - added fixture-backed unit coverage for descriptor input, ORM manifest
+    input, CLI generation, strict OpenAPI requirements, and fail-closed
+    operation-ID collisions
 - Verification status at this checkpoint:
   - `source tools/source_gnustep_env.sh && make phase26-orm-tests`
   - `source tools/source_gnustep_env.sh && make phase27-search-tests`

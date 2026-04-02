@@ -304,6 +304,46 @@ Compile SQL files with metadata comments into typed parameter/result helpers.
 - `--prefix <ClassPrefix>`: generated class prefix (default: `ALNDB`)
 - `--force`: overwrite existing generated files
 
+### `arlen typescript-codegen [--orm-input <path>] [--openapi-input <path>] [--output-dir <path>] [--manifest <path>] [--prefix <ClassPrefix>] [--database <target>] [--package-name <name>] [--target <models|client|react|all>] [--force]`
+
+Generate a descriptor-first TypeScript package from Arlen ORM descriptors plus
+route/OpenAPI contracts.
+
+- input modes:
+  - checked-in ORM descriptor manifest (`arlen-orm-descriptor-v1`)
+  - raw schema metadata JSON
+  - raw schema metadata wrapped under `{ "metadata": ... }`
+- current contract is additive and consumer-facing:
+  - generated TypeScript stays downstream of Arlen descriptors
+  - browser-side persistence is out of scope
+  - React/TanStack output is optional and layered on top of the plain client
+- missing or vague inputs fail closed:
+  - `client` / `react` targets require `--openapi-input`
+  - OpenAPI operations must carry stable `operationId` values
+  - request bodies must expose `application/json` schemas
+  - descriptor or operation naming collisions abort generation
+
+- `--orm-input <path>`: ORM manifest or schema metadata input (default: `db/schema/arlen_orm_manifest.json`)
+- `--openapi-input <path>`: exported OpenAPI JSON input; required for `client` and `react`
+- `--output-dir <path>` / `--out-dir <path>`: generated package root (default: `frontend/generated/arlen`)
+- `--manifest <path>`: TypeScript manifest output (default: `db/schema/arlen_typescript.json`)
+- `--prefix <ClassPrefix>`: descriptor class prefix when `--orm-input` is raw schema metadata (default: `ALNORM`)
+- `--database <target>`: database target hint when `--orm-input` is raw schema metadata
+- `--package-name <name>`: generated package name (default: `arlen-generated-client`)
+- `--target <models|client|react|all>`: repeatable or comma-separated; `react` implies `client`; default is `all`
+- `--force`: overwrite existing generated files
+
+Generated artifacts:
+
+- `<output-dir>/src/models.ts`
+- `<output-dir>/src/client.ts` when `client` or `react` is selected
+- `<output-dir>/src/react.ts` when `react` is selected
+- `<output-dir>/src/index.ts`
+- `<output-dir>/package.json`
+- `<output-dir>/tsconfig.json`
+- `<output-dir>/README.md`
+- `<manifest>`
+
 ### `arlen boomhauer [server args...]`
 
 Build and run `boomhauer` for the current app root.

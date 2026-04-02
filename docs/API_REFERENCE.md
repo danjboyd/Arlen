@@ -9,9 +9,9 @@ python3 tools/docs/generate_api_reference.py
 ```
 
 - Generated from source headers and metadata (deterministic output)
-- Public headers: `81`
-- Symbols: `133`
-- Public methods: `956`
+- Public headers: `82`
+- Symbols: `134`
+- Public methods: `959`
 - Public properties: `402`
 
 ## API Surface Boundary
@@ -139,6 +139,7 @@ python3 tools/docs/generate_api_reference.py
 - [ALNORMRelationDescriptor](api/ALNORMRelationDescriptor.md): Optional ORM APIs for reflected models, repositories, relations, and SQL-first code generation.
 - [ALNORMRepository](api/ALNORMRepository.md): Optional ORM APIs for reflected models, repositories, relations, and SQL-first code generation.
 - [ALNORMSchemaDrift](api/ALNORMSchemaDrift.md): Optional ORM APIs for reflected models, repositories, relations, and SQL-first code generation.
+- [ALNORMTypeScriptCodegen](api/ALNORMTypeScriptCodegen.md): Optional ORM APIs for reflected models, repositories, relations, and SQL-first code generation.
 - [ALNORMValueConverter](api/ALNORMValueConverter.md): Optional ORM APIs for reflected models, repositories, relations, and SQL-first code generation.
 - [ALNORMWriteOptions](api/ALNORMWriteOptions.md): Optional ORM APIs for reflected models, repositories, relations, and SQL-first code generation.
 
@@ -251,6 +252,7 @@ python3 tools/docs/generate_api_reference.py
 - `src/Arlen/ORM/ALNORMRelationDescriptor.h`
 - `src/Arlen/ORM/ALNORMRepository.h`
 - `src/Arlen/ORM/ALNORMSchemaDrift.h`
+- `src/Arlen/ORM/ALNORMTypeScriptCodegen.h`
 - `src/Arlen/ORM/ALNORMValueConverter.h`
 - `src/Arlen/ORM/ALNORMWriteOptions.h`
 - `src/Arlen/Support/ALNAuth.h`

@@ -137,6 +137,9 @@ Use `arlen routes` when you want to inspect registration order and route names.
 - starting from the smallest app shape: `docs/LITE_MODE_GUIDE.md`
 - generating plugins or service adapters: `docs/PLUGIN_SERVICE_GUIDE.md`
 - generating frontend starter folders: `docs/FRONTEND_STARTERS.md`
+- generating descriptor-first TypeScript models/clients/React helpers for a
+  frontend app: `docs/GETTING_STARTED_API_FIRST.md` and
+  `arlen typescript-codegen`
 - using Dataverse through the Web API: `docs/DATAVERSE.md`
 
 ## 8. Optional Dataverse Path

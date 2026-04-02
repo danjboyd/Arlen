@@ -13,6 +13,7 @@
 #import "ALNModuleSystem.h"
 #import "ALNMigrationRunner.h"
 #import "ALNPg.h"
+#import "Arlen/ORM/ALNORMTypeScriptCodegen.h"
 #import "ALNSchemaCodegen.h"
 
 static void PrintUsage(void) {
@@ -30,6 +31,7 @@ static void PrintUsage(void) {
           "  schema-codegen [--env <name>] [--database <target>] [--dsn <connection_string>] [--output-dir <path>] [--manifest <path>] [--prefix <ClassPrefix>] [--typed-contracts] [--force]\n"
           "  dataverse-codegen [--input <metadata.json>] [--env <name>] [--target <name>] [--service-root <url>] [--tenant-id <id>] [--client-id <id>] [--client-secret <secret>] [--entity <logical_name>] [--output-dir <path>] [--manifest <path>] [--prefix <ClassPrefix>] [--force]\n"
           "  typed-sql-codegen [--input-dir <path>] [--output-dir <path>] [--manifest <path>] [--prefix <ClassPrefix>] [--force]\n"
+          "  typescript-codegen [--orm-input <path>] [--openapi-input <path>] [--output-dir <path>] [--manifest <path>] [--prefix <ClassPrefix>] [--database <target>] [--package-name <name>] [--target <models|client|react|all>] [--force]\n"
           "  routes\n"
           "  test [--unit|--integration|--all]\n"
           "  perf\n"
@@ -4100,6 +4102,191 @@ static NSDictionary<NSString *, id> *ALNTypedSQLRenderArtifacts(NSArray<NSDictio
   };
 }
 
+static int CommandTypeScriptCodegen(NSArray *args) {
+  NSString *ormInputArg = @"db/schema/arlen_orm_manifest.json";
+  NSString *openAPIInputArg = nil;
+  NSString *outputDirArg = @"frontend/generated/arlen";
+  NSString *manifestArg = @"db/schema/arlen_typescript.json";
+  NSString *classPrefix = @"ALNORM";
+  NSString *databaseTarget = nil;
+  NSString *packageName = @"arlen-generated-client";
+  NSMutableArray<NSString *> *targets = [NSMutableArray array];
+  BOOL force = NO;
+
+  for (NSUInteger idx = 0; idx < [args count]; idx++) {
+    NSString *arg = args[idx];
+    if ([arg isEqualToString:@"--orm-input"]) {
+      if (idx + 1 >= [args count]) {
+        fprintf(stderr, "arlen typescript-codegen: --orm-input requires a value\n");
+        return 2;
+      }
+      ormInputArg = args[++idx];
+    } else if ([arg isEqualToString:@"--openapi-input"]) {
+      if (idx + 1 >= [args count]) {
+        fprintf(stderr, "arlen typescript-codegen: --openapi-input requires a value\n");
+        return 2;
+      }
+      openAPIInputArg = args[++idx];
+    } else if ([arg isEqualToString:@"--output-dir"] || [arg isEqualToString:@"--out-dir"]) {
+      if (idx + 1 >= [args count]) {
+        fprintf(stderr, "arlen typescript-codegen: %s requires a value\n", [arg UTF8String]);
+        return 2;
+      }
+      outputDirArg = args[++idx];
+    } else if ([arg isEqualToString:@"--manifest"]) {
+      if (idx + 1 >= [args count]) {
+        fprintf(stderr, "arlen typescript-codegen: --manifest requires a value\n");
+        return 2;
+      }
+      manifestArg = args[++idx];
+    } else if ([arg isEqualToString:@"--prefix"]) {
+      if (idx + 1 >= [args count]) {
+        fprintf(stderr, "arlen typescript-codegen: --prefix requires a value\n");
+        return 2;
+      }
+      classPrefix = args[++idx];
+    } else if ([arg isEqualToString:@"--database"]) {
+      if (idx + 1 >= [args count]) {
+        fprintf(stderr, "arlen typescript-codegen: --database requires a value\n");
+        return 2;
+      }
+      databaseTarget = args[++idx];
+    } else if ([arg isEqualToString:@"--package-name"]) {
+      if (idx + 1 >= [args count]) {
+        fprintf(stderr, "arlen typescript-codegen: --package-name requires a value\n");
+        return 2;
+      }
+      packageName = args[++idx];
+    } else if ([arg isEqualToString:@"--target"]) {
+      if (idx + 1 >= [args count]) {
+        fprintf(stderr, "arlen typescript-codegen: --target requires a value\n");
+        return 2;
+      }
+      [targets addObject:args[++idx]];
+    } else if ([arg isEqualToString:@"--force"]) {
+      force = YES;
+    } else if ([arg isEqualToString:@"--help"] || [arg isEqualToString:@"-h"]) {
+      fprintf(stdout,
+              "Usage: arlen typescript-codegen [--orm-input <path>] [--openapi-input <path>] "
+              "[--output-dir <path>] [--manifest <path>] [--prefix <ClassPrefix>] "
+              "[--database <target>] [--package-name <name>] "
+              "[--target <models|client|react|all>] [--force]\n");
+      return 0;
+    } else {
+      fprintf(stderr, "arlen typescript-codegen: unknown option %s\n", [arg UTF8String]);
+      return 2;
+    }
+  }
+
+  NSString *appRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *ormInputPath = ResolvePathFromRoot(appRoot, ormInputArg);
+  NSString *openAPIInputPath =
+      ([openAPIInputArg length] > 0) ? ResolvePathFromRoot(appRoot, openAPIInputArg) : nil;
+  NSString *outputDir = ResolvePathFromRoot(appRoot, outputDirArg);
+  NSString *manifestPath = ResolvePathFromRoot(appRoot, manifestArg);
+
+  NSError *error = nil;
+  NSData *ormData = [NSData dataWithContentsOfFile:ormInputPath options:0 error:&error];
+  if (ormData == nil) {
+    fprintf(stderr, "arlen typescript-codegen: failed reading %s: %s\n",
+            [ormInputPath UTF8String], [[error localizedDescription] UTF8String]);
+    return 1;
+  }
+  id ormPayload = [ALNJSONSerialization JSONObjectWithData:ormData options:0 error:&error];
+  if (![ormPayload isKindOfClass:[NSDictionary class]]) {
+    fprintf(stderr, "arlen typescript-codegen: invalid ORM JSON input: %s\n",
+            [[error localizedDescription] UTF8String]);
+    return 1;
+  }
+  NSDictionary<NSString *, id> *ormRoot = ormPayload;
+
+  NSDictionary<NSString *, id> *openAPISpecification = nil;
+  if ([openAPIInputPath length] > 0) {
+    NSData *openAPIData = [NSData dataWithContentsOfFile:openAPIInputPath options:0 error:&error];
+    if (openAPIData == nil) {
+      fprintf(stderr, "arlen typescript-codegen: failed reading %s: %s\n",
+              [openAPIInputPath UTF8String], [[error localizedDescription] UTF8String]);
+      return 1;
+    }
+    id openAPIPayload = [ALNJSONSerialization JSONObjectWithData:openAPIData options:0 error:&error];
+    if (![openAPIPayload isKindOfClass:[NSDictionary class]]) {
+      fprintf(stderr, "arlen typescript-codegen: invalid OpenAPI JSON input: %s\n",
+              [[error localizedDescription] UTF8String]);
+      return 1;
+    }
+    openAPISpecification = openAPIPayload;
+  }
+
+  NSDictionary<NSString *, id> *artifacts = nil;
+  NSDictionary<NSString *, id> *metadata =
+      [ormRoot[@"metadata"] isKindOfClass:[NSDictionary class]] ? ormRoot[@"metadata"] : nil;
+  BOOL looksLikeSchemaMetadata =
+      (metadata != nil) || [ormRoot[@"relations"] isKindOfClass:[NSArray class]] ||
+      [ormRoot[@"columns"] isKindOfClass:[NSArray class]];
+  BOOL looksLikeORMManifest = [ormRoot[@"models"] isKindOfClass:[NSArray class]];
+
+  if (looksLikeSchemaMetadata) {
+    artifacts = [ALNORMTypeScriptCodegen renderArtifactsFromSchemaMetadata:metadata ?: ormRoot
+                                                               classPrefix:classPrefix
+                                                            databaseTarget:databaseTarget
+                                                        descriptorOverrides:nil
+                                                       openAPISpecification:openAPISpecification
+                                                               packageName:packageName
+                                                                   targets:targets
+                                                                     error:&error];
+  } else if (looksLikeORMManifest) {
+    artifacts = [ALNORMTypeScriptCodegen renderArtifactsFromORMManifest:ormRoot
+                                                    openAPISpecification:openAPISpecification
+                                                            packageName:packageName
+                                                                targets:targets
+                                                                  error:&error];
+  } else {
+    fprintf(stderr,
+            "arlen typescript-codegen: ORM input must be raw schema metadata, a `{ \"metadata\": ... }` wrapper, or an `arlen-orm-descriptor-v1` manifest\n");
+    return 1;
+  }
+
+  if (artifacts == nil) {
+    fprintf(stderr, "arlen typescript-codegen: %s\n", [[error localizedDescription] UTF8String]);
+    return 1;
+  }
+
+  NSDictionary<NSString *, NSString *> *files =
+      [artifacts[@"files"] isKindOfClass:[NSDictionary class]] ? artifacts[@"files"] : @{};
+  NSArray<NSString *> *sortedPaths = [[files allKeys] sortedArrayUsingSelector:@selector(compare:)];
+  for (NSString *relativePath in sortedPaths) {
+    NSString *absolutePath = [outputDir stringByAppendingPathComponent:relativePath];
+    if (!WriteTextFile(absolutePath, files[relativePath] ?: @"", force, &error)) {
+      fprintf(stderr, "arlen typescript-codegen: failed writing %s: %s\n",
+              [absolutePath UTF8String], [[error localizedDescription] UTF8String]);
+      return 1;
+    }
+  }
+
+  if (!WriteTextFile(manifestPath, artifacts[@"manifest"] ?: @"", force, &error)) {
+    fprintf(stderr, "arlen typescript-codegen: failed writing %s: %s\n",
+            [manifestPath UTF8String], [[error localizedDescription] UTF8String]);
+    return 1;
+  }
+
+  NSInteger modelCount = [artifacts[@"modelCount"] respondsToSelector:@selector(integerValue)]
+                             ? [artifacts[@"modelCount"] integerValue]
+                             : 0;
+  NSInteger operationCount = [artifacts[@"operationCount"] respondsToSelector:@selector(integerValue)]
+                                 ? [artifacts[@"operationCount"] integerValue]
+                                 : 0;
+  NSString *resolvedPackageName =
+      [artifacts[@"packageName"] isKindOfClass:[NSString class]] ? artifacts[@"packageName"] : packageName;
+
+  fprintf(stdout, "Generated TypeScript artifacts.\n");
+  fprintf(stdout, "  package: %s\n", [resolvedPackageName UTF8String]);
+  fprintf(stdout, "  models: %ld\n", (long)modelCount);
+  fprintf(stdout, "  operations: %ld\n", (long)operationCount);
+  fprintf(stdout, "  output dir: %s\n", [outputDir UTF8String]);
+  fprintf(stdout, "  manifest: %s\n", [manifestPath UTF8String]);
+  return 0;
+}
+
 static int CommandTypedSQLCodegen(NSArray *args) {
   NSString *inputDirArg = @"db/sql/typed";
   NSString *outputDirArg = @"src/Generated";
@@ -5738,6 +5925,9 @@ int main(int argc, const char *argv[]) {
     }
     if ([command isEqualToString:@"typed-sql-codegen"]) {
       return CommandTypedSQLCodegen(args);
+    }
+    if ([command isEqualToString:@"typescript-codegen"]) {
+      return CommandTypeScriptCodegen(args);
     }
     if ([command isEqualToString:@"routes"]) {
       return CommandRoutes();

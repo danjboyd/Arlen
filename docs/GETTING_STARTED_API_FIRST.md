@@ -34,7 +34,29 @@ curl -i http://127.0.0.1:3000/openapi.json
 curl -i http://127.0.0.1:3000/openapi
 ```
 
-## 5. Standardize Error Envelope
+## 5. Generate TypeScript Contracts For React / SPA Consumers
+
+Export the OpenAPI spec to an app-owned artifact path, then generate the
+TypeScript package from ORM descriptors plus that spec:
+
+```bash
+curl -s http://127.0.0.1:3000/openapi.json > build/openapi.json
+/path/to/Arlen/bin/arlen typescript-codegen \
+  --orm-input db/schema/arlen_orm_manifest.json \
+  --openapi-input build/openapi.json \
+  --output-dir frontend/generated/arlen \
+  --manifest db/schema/arlen_typescript.json \
+  --target all \
+  --force
+```
+
+This produces:
+
+- `frontend/generated/arlen/src/models.ts`
+- `frontend/generated/arlen/src/client.ts`
+- optional `frontend/generated/arlen/src/react.ts`
+
+## 6. Standardize Error Envelope
 
 For validation failures, use controller helpers:
 
@@ -45,7 +67,7 @@ For success payloads, prefer:
 
 - `renderJSONEnvelopeWithData:meta:error:`
 
-## 6. Add Auth Guardrails
+## 7. Add Auth Guardrails
 
 Use `ALNAuth` helpers to:
 
@@ -54,9 +76,10 @@ Use `ALNAuth` helpers to:
 - apply claims to context
 - enforce required scopes/roles
 
-## 7. Production-Ready Checklist
+## 8. Production-Ready Checklist
 
 1. Run `make check` and `make ci-quality`.
 2. Confirm `/healthz`, `/readyz`, `/metrics` responses.
 3. Export OpenAPI spec to artifact path.
-4. Document required env/config keys for auth and database.
+4. Regenerate `arlen typescript-codegen` artifacts after contract changes.
+5. Document required env/config keys for auth and database.
