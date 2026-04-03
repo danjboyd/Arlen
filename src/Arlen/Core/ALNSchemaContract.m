@@ -55,6 +55,7 @@ static NSDictionary *ALNSchemaProperties(NSDictionary *schema) {
   NSSet *reserved = [NSSet setWithArray:@[
     @"type", @"required", @"description", @"title", @"items", @"enum", @"source",
     @"default", @"coerce", @"minimum", @"maximum", @"minLength", @"maxLength",
+    @"format",
     @"transformer", @"transformers"
   ]];
   for (id key in schema) {

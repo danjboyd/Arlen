@@ -366,6 +366,10 @@ Notes:
   app should pass generated select/include/filter/sort params directly into
   `client.ts`, those params still need to exist in the OpenAPI operation
   schema.
+- repo-native verification lanes for this generator live at
+  `make phase28-ts-generated`, `make phase28-ts-unit`,
+  `make phase28-ts-integration`, `make phase28-react-reference`, and
+  `make phase28-confidence`
 
 ### `arlen boomhauer [server args...]`
 

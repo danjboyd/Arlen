@@ -27,6 +27,25 @@ const initialDraft: PublicUserCreateInput = {
   displayName: '',
 };
 
+const visibleCreateFields = publicUserCreateFormFields.filter(
+  (field) => !field.hasDefault && !field.readOnly
+);
+
+function resolveModuleOperationHint(
+  moduleMeta: (typeof arlenModuleRegistry)[keyof typeof arlenModuleRegistry]
+): string {
+  if ('bootstrapOperationId' in moduleMeta && moduleMeta.bootstrapOperationId) {
+    return moduleMeta.bootstrapOperationId;
+  }
+  if ('capabilityOperationId' in moduleMeta && moduleMeta.capabilityOperationId) {
+    return moduleMeta.capabilityOperationId;
+  }
+  if ('summaryOperationId' in moduleMeta && moduleMeta.summaryOperationId) {
+    return moduleMeta.summaryOperationId;
+  }
+  return 'no bootstrap op';
+}
+
 function serializeQueryParams(
   query: Record<string, string | number | boolean | null | Array<string | number | boolean | null>>
 ): string {
@@ -90,7 +109,14 @@ export function App() {
     }
 
     setValidationErrors({});
-    await createUserMutation.mutateAsync({ body: validation.value });
+    await createUserMutation.mutateAsync({
+      body: {
+        email: validation.value.email,
+        ...(validation.value.displayName === null || validation.value.displayName === undefined
+          ? {}
+          : { displayName: validation.value.displayName }),
+      },
+    });
   }
 
   return (
@@ -133,12 +159,7 @@ export function App() {
               <li key={moduleMeta.name}>
                 <strong>{moduleMeta.name}</strong>
                 <span>{moduleMeta.kind}</span>
-                <code>
-                  {moduleMeta.bootstrapOperationId ??
-                    moduleMeta.capabilityOperationId ??
-                    moduleMeta.summaryOperationId ??
-                    'no bootstrap op'}
-                </code>
+                <code>{resolveModuleOperationHint(moduleMeta)}</code>
               </li>
             ))}
           </ul>
@@ -170,7 +191,7 @@ export function App() {
             runtime.
           </p>
           <form className="stack" onSubmit={handleSubmit}>
-            {publicUserCreateFormFields.map((field) => {
+            {visibleCreateFields.map((field) => {
               const fieldName = field.name as keyof PublicUserCreateInput;
               const currentValue = draft[fieldName];
               const error = validationErrors[field.name];

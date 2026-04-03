@@ -2077,6 +2077,97 @@ static NSUInteger AppFastPathControllerSlowInvocationCount = 0;
   XCTAssertEqualObjects(@"warning", entry[@"severity"]);
 }
 
+- (void)testRouteSchemasSupportFormatHintsAndExposeThemInOpenAPI {
+  ALNApplication *app = [[ALNApplication alloc] initWithConfig:@{
+    @"environment" : @"test",
+    @"logFormat" : @"json",
+    @"apiOnly" : @(YES),
+    @"openapi" : @{
+      @"enabled" : @(YES),
+    },
+  }];
+  [app registerRouteMethod:@"GET"
+                      path:@"/users/:id"
+                      name:@"format_route"
+           controllerClass:[AppJSONController class]
+                    action:@"dict"];
+
+  NSError *configureError = nil;
+  BOOL configured = [app configureRouteNamed:@"format_route"
+                               requestSchema:@{
+                                 @"type" : @"object",
+                                 @"properties" : @{
+                                   @"id" : @{
+                                     @"type" : @"string",
+                                     @"format" : @"uuid",
+                                     @"source" : @"path",
+                                     @"required" : @(YES),
+                                   },
+                                 },
+                               }
+                              responseSchema:@{
+                                @"type" : @"object",
+                                @"properties" : @{
+                                  @"data" : @{
+                                    @"type" : @"object",
+                                    @"properties" : @{
+                                      @"email" : @{
+                                        @"type" : @"string",
+                                        @"format" : @"email",
+                                      },
+                                      @"lastSeenAt" : @{
+                                        @"type" : @"string",
+                                        @"format" : @"date-time",
+                                      },
+                                    },
+                                  },
+                                },
+                              }
+                                     summary:@"Format test"
+                                 operationID:@"format_test"
+                                        tags:@[ @"users" ]
+                               requiredScopes:nil
+                                requiredRoles:nil
+                              includeInOpenAPI:YES
+                                        error:&configureError];
+  XCTAssertTrue(configured);
+  XCTAssertNil(configureError);
+
+  NSError *startError = nil;
+  BOOL started = [app startWithError:&startError];
+  XCTAssertTrue(started);
+  XCTAssertNil(startError);
+
+  NSDictionary *spec = [app openAPISpecification];
+  NSDictionary *paths = [spec[@"paths"] isKindOfClass:[NSDictionary class]] ? spec[@"paths"] : @{};
+  NSDictionary *pathItem =
+      [paths[@"/users/{id}"] isKindOfClass:[NSDictionary class]] ? paths[@"/users/{id}"] : @{};
+  NSDictionary *operation = [pathItem[@"get"] isKindOfClass:[NSDictionary class]] ? pathItem[@"get"] : @{};
+  NSArray *parameters = [operation[@"parameters"] isKindOfClass:[NSArray class]] ? operation[@"parameters"] : @[];
+  NSDictionary *parameter =
+      ([[parameters firstObject] isKindOfClass:[NSDictionary class]]) ? [parameters firstObject] : @{};
+  XCTAssertEqualObjects(@"uuid", parameter[@"schema"][@"format"]);
+
+  NSDictionary *responses =
+      [operation[@"responses"] isKindOfClass:[NSDictionary class]] ? operation[@"responses"] : @{};
+  NSDictionary *response200 =
+      [responses[@"200"] isKindOfClass:[NSDictionary class]] ? responses[@"200"] : @{};
+  NSDictionary *content =
+      [response200[@"content"] isKindOfClass:[NSDictionary class]] ? response200[@"content"] : @{};
+  NSDictionary *jsonContent =
+      [content[@"application/json"] isKindOfClass:[NSDictionary class]] ? content[@"application/json"] : @{};
+  NSDictionary *schema =
+      [jsonContent[@"schema"] isKindOfClass:[NSDictionary class]] ? jsonContent[@"schema"] : @{};
+  NSDictionary *dataSchema =
+      [schema[@"properties"][@"data"] isKindOfClass:[NSDictionary class]] ? schema[@"properties"][@"data"] : @{};
+  NSDictionary *dataProperties =
+      [dataSchema[@"properties"] isKindOfClass:[NSDictionary class]] ? dataSchema[@"properties"] : @{};
+  XCTAssertEqualObjects(@"email", dataProperties[@"email"][@"format"]);
+  XCTAssertEqualObjects(@"date-time", dataProperties[@"lastSeenAt"][@"format"]);
+
+  [app shutdown];
+}
+
 - (void)testStartFailsFastWhenSessionEnabledWithoutSecret {
   ALNApplication *app = [[ALNApplication alloc] initWithConfig:@{
     @"environment" : @"test",

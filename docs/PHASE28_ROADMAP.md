@@ -1,7 +1,7 @@
 # Arlen Phase 28 Roadmap
 
-Status: In Progress (`28A-28H` landed on 2026-04-02)
-Last updated: 2026-04-02
+Status: Complete (`28A-28L` delivered on 2026-04-03)
+Last updated: 2026-04-03
 
 Related docs:
 - `docs/STATUS.md`
@@ -348,61 +348,70 @@ arlen typescript-codegen [--out-dir <path>] [--manifest <path>] [--target <model
 
 ## 4.9 Phase 28I: TypeScript Unit-Test Architecture + Shared Support
 
-- Add a dedicated TypeScript test harness that complements, rather than
-  replaces, Objective-C/XCTest coverage.
+Delivered on 2026-04-03.
+
+- Added the dedicated `tests/typescript/` harness so TypeScript-side
+  verification complements, rather than replaces, Objective-C/XCTest coverage.
 - Split verification into focused families:
-  - generator snapshot tests
-  - manifest stability tests
-  - TypeScript compile-only tests
+  - generated snapshot and manifest stability tests
+  - strict compile-only package checks
   - transport-client unit tests with mocked `fetch`
   - React hook/query-key tests
-  - validator/schema parity tests
-  - descriptor/OpenAPI parity tests
-- Add shared support helpers for fixture loading, mock transport wiring, and
-  generated-package compilation.
+  - validator/query/meta parity tests
+  - live integration tests that regenerate from merged OpenAPI input
+- Added shared fixture/support helpers plus the checked-in
+  `tests/fixtures/phase28/typescript_snapshot.json` characterization artifact.
 
 ## 4.10 Phase 28J: Integration + React Reference Coverage
 
-- Add live integration coverage where a generated TypeScript package talks to a
-  running Arlen app.
-- Exercise at least two representative frontend scenarios:
+Delivered on 2026-04-03.
+
+- Added the live `examples/phase28_reference` backend used by the Phase 28
+  TypeScript and React lanes.
+- Exercised both representative frontend scenarios from the roadmap:
   - back-office CRUD/resource management
   - customer-facing dashboard/detail/query flows
-- Verify that generated contracts remain usable against real route behavior and
-  not only against fixtures.
-- Keep these lanes explicit about required Node/database/toolchain
-  dependencies, with skipped manifests when the environment is incomplete.
+- Added merged-OpenAPI verification so the live exported contract must match
+  the checked-in Phase 28 fixture before TypeScript regeneration runs.
+- Wired the checked-in React/Vite reference workspace into a live merged-spec
+  lane instead of limiting it to fixture-only generation.
 
 ## 4.11 Phase 28K: Drift, Performance, + Confidence Artifacts
 
-- Add drift detection between:
-  - ORM descriptors
-  - route/OpenAPI contracts
-  - generated TypeScript outputs
-- Fail closed when those layers diverge.
-- Track at least basic performance and size discipline for:
-  - codegen execution time
-  - generated package size
-  - hook/client generation cost in confidence lanes
-- Publish machine-readable artifacts under:
-  - `build/release_confidence/phase28/`
+Delivered on 2026-04-03.
+
+- Added fail-closed drift checks between checked-in Phase 28 OpenAPI contracts,
+  live exported OpenAPI, and regenerated TypeScript outputs.
+- Added the repo-native scripts and make targets for:
+  - `phase28-ts-generated`
+  - `phase28-ts-unit`
+  - `phase28-ts-integration`
+  - `phase28-react-reference`
+  - `phase28-confidence`
+- Published machine-readable manifests plus generation/build metrics under
+  `build/release_confidence/phase28/`.
+- Hardened the core OpenAPI export path so route schema `format` hints now
+  survive readiness validation and live OpenAPI generation.
 
 ## 4.12 Phase 28L: Docs + API Reference + Release Closeout
 
-- Update the user-facing docs set so React/TypeScript adoption has a real
-  first-party path.
-- Update at least:
+Delivered on 2026-04-03.
+
+- Updated the user-facing docs set so React/TypeScript adoption now has a real
+  first-party path across:
+  - `README.md`
+  - `docs/STATUS.md`
+  - `docs/README.md`
   - `docs/ARLEN_ORM.md`
   - `docs/GETTING_STARTED_API_FIRST.md`
   - `docs/FRONTEND_STARTERS.md`
   - `docs/CLI_REFERENCE.md`
-  - `docs/README.md`
-  - generated API reference where new public APIs exist
-- Document both the happy path and the guardrails:
+  - generated API reference via `make docs-api`
+- Documented both the happy path and the guardrails:
   - descriptor-first generation
   - optional React adapters
   - no browser-side ORM persistence
-  - capability differences across SQL and Dataverse targets
+  - fail-closed contract drift and confidence lanes
 
 ## 5. Testing and Verification Strategy
 
@@ -474,6 +483,8 @@ Expected fixture families:
 
 ## 5.3 Phase 28 Exit Standard
 
+Satisfied on 2026-04-03.
+
 Arlen can claim Phase 28 complete only if:
 
 - non-TypeScript apps remain unaffected
@@ -505,7 +516,7 @@ Phase 28 should be considered successful when all of the following are true:
 
 ## 7. Verification Targets
 
-When this phase is implemented, expected verification should include at least:
+Phase 28 closeout verification now includes:
 
 ```bash
 source tools/source_gnustep_env.sh

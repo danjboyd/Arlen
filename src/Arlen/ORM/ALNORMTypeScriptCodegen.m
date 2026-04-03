@@ -2474,11 +2474,11 @@ static NSString *ALNORMTSRenderMetaModule(NSArray<NSDictionary<NSString *, id> *
     [resourceRows addObject:row];
   }
 
-  [output appendString:@"export const arlenResourceRegistry: Record<string, ArlenResourceMeta> = {\n"];
+  [output appendString:@"export const arlenResourceRegistry = {\n"];
   for (NSString *row in resourceRows) {
     [output appendString:row];
   }
-  [output appendString:@"};\n\n"];
+  [output appendString:@"} satisfies Record<string, ArlenResourceMeta>;\n\n"];
 
   [output appendString:@"export const arlenAdminResourceRegistry = {\n"];
   for (NSDictionary<NSString *, id> *resource in sortedResources) {
@@ -2493,7 +2493,7 @@ static NSString *ALNORMTSRenderMetaModule(NSArray<NSDictionary<NSString *, id> *
   }
   [output appendString:@"} as const;\n\n"];
 
-  [output appendString:@"export const arlenModuleRegistry: Record<string, ArlenModuleMeta> = {\n"];
+  [output appendString:@"export const arlenModuleRegistry = {\n"];
   NSArray<NSDictionary<NSString *, id> *> *sortedModules =
       [modules sortedArrayUsingDescriptors:@[ [NSSortDescriptor sortDescriptorWithKey:@"name" ascending:YES] ]];
   for (NSDictionary<NSString *, id> *module in sortedModules) {
@@ -2515,7 +2515,7 @@ static NSString *ALNORMTSRenderMetaModule(NSArray<NSDictionary<NSString *, id> *
     }
     [output appendString:@"  },\n"];
   }
-  [output appendString:@"};\n"];
+  [output appendString:@"} satisfies Record<string, ArlenModuleMeta>;\n"];
   return [NSString stringWithString:output];
 }
 
@@ -2567,7 +2567,7 @@ static NSString *ALNORMTSRenderClientModule(NSDictionary<NSString *, id> *openAP
   [output appendString:@"export type ArlenQueryValue = string | number | boolean | null | undefined | Array<string | number | boolean | null>;\n"];
   [output appendString:@"export type ArlenQueryParams = Record<string, ArlenQueryValue>;\n\n"];
   [output appendString:@"export interface ArlenClientOptions {\n  baseUrl?: string;\n  fetch?: typeof fetch;\n  headers?: ArlenRequestHeaders | (() => ArlenRequestHeaders | Promise<ArlenRequestHeaders>);\n}\n\n"];
-  [output appendString:@"interface ArlenOperationRequest {\n  operationId: string;\n  method: string;\n  path: string;\n  pathParams?: Record<string, string | number | boolean>;\n  query?: ArlenQueryParams;\n  headers?: ArlenRequestHeaders;\n  body?: unknown;\n  signal?: unknown;\n}\n\n"];
+  [output appendString:@"interface ArlenOperationRequest {\n  operationId: string;\n  method: string;\n  path: string;\n  pathParams?: Record<string, string | number | boolean> | undefined;\n  query?: ArlenQueryParams | undefined;\n  headers?: ArlenRequestHeaders | undefined;\n  body?: unknown;\n  signal?: unknown;\n}\n\n"];
   [output appendString:@"function arlenDefaultFetch(): typeof fetch {\n  if (typeof globalThis.fetch !== 'function') {\n    throw new Error('ArlenClient requires a fetch implementation');\n  }\n  return globalThis.fetch.bind(globalThis);\n}\n\n"];
   [output appendString:@"function arlenEncodePath(pathTemplate: string, pathParams: Record<string, string | number | boolean> = {}): string {\n  return pathTemplate.replace(/\\{([^}]+)\\}/g, (_match, rawName: string) => {\n    const value = pathParams[rawName];\n    if (value === undefined || value === null) {\n      throw new Error(`Missing path parameter ${rawName}`);\n    }\n    return encodeURIComponent(String(value));\n  });\n}\n\n"];
   [output appendString:@"function arlenAppendQuery(urlPath: string, query?: ArlenQueryParams): string {\n  if (!query) {\n    return urlPath;\n  }\n  const search = new URLSearchParams();\n  for (const [key, rawValue] of Object.entries(query)) {\n    if (rawValue === undefined) {\n      continue;\n    }\n    const values = Array.isArray(rawValue) ? rawValue : [rawValue];\n    for (const value of values) {\n      if (value === undefined) {\n        continue;\n      }\n      search.append(key, value === null ? 'null' : String(value));\n    }\n  }\n  const queryString = search.toString();\n  return queryString.length > 0 ? `${urlPath}?${queryString}` : urlPath;\n}\n\n"];
@@ -2601,7 +2601,7 @@ static NSString *ALNORMTSRenderClientModule(NSDictionary<NSString *, id> *openAP
   [output appendFormat:@"  constructor(options: ArlenClientOptions = { baseUrl: %@ }) {\n", ALNORMTSSingleQuotedString(defaultBaseURL)];
   [output appendFormat:@"    this.baseUrl = options.baseUrl ?? %@;\n", ALNORMTSSingleQuotedString(defaultBaseURL)];
   [output appendString:@"    this.fetchImplementation = options.fetch ?? arlenDefaultFetch();\n    this.defaultHeaders = options.headers;\n  }\n\n"];
-  [output appendString:@"  private async request<T>(request: ArlenOperationRequest): Promise<T> {\n    const mergedHeaders = {\n      ...(await arlenResolveHeaders(this.defaultHeaders)),\n      ...(await arlenResolveHeaders(request.headers)),\n    };\n    if (request.body !== undefined) {\n      if (!mergedHeaders['content-type']) {\n        mergedHeaders['content-type'] = 'application/json';\n      }\n    }\n    if (!mergedHeaders.accept) {\n      mergedHeaders.accept = 'application/json';\n    }\n\n    const response = await this.fetchImplementation(\n      arlenBuildURL(this.baseUrl, request.path, request.pathParams, request.query),\n      {\n        method: request.method,\n        headers: mergedHeaders,\n        body: request.body === undefined ? undefined : JSON.stringify(request.body),\n        signal: request.signal as AbortSignal | undefined,\n      }\n    );\n    const payload = await arlenParsePayload(response);\n    if (!response.ok) {\n      throw new ArlenClientError(request.operationId, response.status, payload);\n    }\n    return payload as T;\n  }\n\n"];
+  [output appendString:@"  private async request<T>(request: ArlenOperationRequest): Promise<T> {\n    const mergedHeaders = {\n      ...(await arlenResolveHeaders(this.defaultHeaders)),\n      ...(await arlenResolveHeaders(request.headers)),\n    };\n    if (request.body !== undefined) {\n      if (!mergedHeaders['content-type']) {\n        mergedHeaders['content-type'] = 'application/json';\n      }\n    }\n    if (!mergedHeaders.accept) {\n      mergedHeaders.accept = 'application/json';\n    }\n\n    const requestInit: RequestInit = {\n      method: request.method,\n      headers: mergedHeaders,\n    };\n    if (request.body !== undefined) {\n      requestInit.body = JSON.stringify(request.body);\n    }\n    if (request.signal !== undefined) {\n      requestInit.signal = request.signal as AbortSignal;\n    }\n\n    const response = await this.fetchImplementation(\n      arlenBuildURL(this.baseUrl, request.path, request.pathParams, request.query),\n      requestInit\n    );\n    const payload = await arlenParsePayload(response);\n    if (!response.ok) {\n      throw new ArlenClientError(request.operationId, response.status, payload);\n    }\n    return payload as T;\n  }\n\n"];
 
   for (NSDictionary<NSString *, id> *operation in operations ?: @[]) {
     NSString *methodName = operation[@"methodName"] ?: @"operation";

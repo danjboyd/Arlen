@@ -73,6 +73,10 @@ static NSDictionary *ALNOpenAPISchemaFromDescriptor(NSDictionary *descriptor) {
   if ([descriptor[@"description"] isKindOfClass:[NSString class]]) {
     schema[@"description"] = descriptor[@"description"];
   }
+  if ([descriptor[@"format"] isKindOfClass:[NSString class]] &&
+      [descriptor[@"format"] length] > 0) {
+    schema[@"format"] = descriptor[@"format"];
+  }
   if ([descriptor[@"enum"] isKindOfClass:[NSArray class]] &&
       [descriptor[@"enum"] count] > 0) {
     schema[@"enum"] = descriptor[@"enum"];

@@ -77,7 +77,8 @@ toolchain env directly.
 ## Contributor and Historical Docs
 
 - [Current Status](STATUS.md): latest checkpoint and verified milestone state.
-- [Session Handoff (2026-04-02)](SESSION_HANDOFF_2026-04-02.md): current Phase 28 pause point after shipping `28E-28H` and the React reference workspace.
+- [Session Handoff (2026-04-03)](SESSION_HANDOFF_2026-04-03.md): Phase 28 closeout checkpoint covering `28I-28L`, the live reference server, and the final verification set.
+- [Session Handoff (2026-04-02)](SESSION_HANDOFF_2026-04-02.md): historical Phase 28 pause point after shipping `28E-28H` and the React reference workspace.
 - [OwnerConnect Report Reconciliation (2026-04-02)](OWNERCONNECT_REPORT_RECONCILIATION_2026-04-02.md): upstream status note for the Dataverse polymorphic-lookup codegen bug reported from `OwnerConnect`.
 - [Platform Report Reconciliation (2026-03-31)](PLATFORM_REPORT_RECONCILIATION_2026-03-31.md): upstream closure note for the managed-GNUstep bootstrap bug reported from `iep-platform`.
 - [Session Handoff (2026-03-27)](SESSION_HANDOFF_2026-03-27.md): historical pause point before the Phase 22 closeout.
@@ -89,7 +90,7 @@ toolchain env directly.
 - [Phase 25 Roadmap](PHASE25_ROADMAP.md): completed live UI baseline plus stream/recovery/adversarial hardening through `25L`.
 - [Phase 26 Roadmap](PHASE26_ROADMAP.md): completed optional ORM phase plus Dataverse ORM tail work.
 - [Phase 27 Roadmap](PHASE27_ROADMAP.md): completed search best-in-class phase; `27A-27L` landed on 2026-04-01 and the audited `27E-27L` closeout landed on 2026-04-02 for authoritative Meilisearch/OpenSearch behavior, streamed rebuilds, policy-scoped search semantics, and fail-closed confidence artifacts.
-- [Phase 28 Roadmap](PHASE28_ROADMAP.md): in-progress descriptor-first React/TypeScript ORM interop phase; `28A-28H` landed on 2026-04-02 for generated TypeScript models, validators, query/resource/module metadata, typed transport, optional React integrations, and workspace scaffolding on top of ArlenORM plus route/OpenAPI contracts.
+- [Phase 28 Roadmap](PHASE28_ROADMAP.md): completed descriptor-first React/TypeScript ORM interop phase; `28A-28L` closed on 2026-04-03 for generated TypeScript models, validators, query/resource/module metadata, typed transport, optional React integrations, live verification lanes, and confidence/docs closeout on top of ArlenORM plus route/OpenAPI contracts.
 - [Combined Roadmap Index (Historical Aggregate)](PHASE2_PHASE3_ROADMAP.md)
 - [Phase 1 Spec](PHASE1_SPEC.md)
 - [Arlen CLI Spec](ARLEN_CLI_SPEC.md)
@@ -118,3 +119,4 @@ toolchain env directly.
 - [Dataverse Reference](../examples/dataverse_reference/README.md)
 - [Arlen ORM Reference](../examples/arlen_orm_reference/README.md)
 - [Phase 28 React Reference](../examples/phase28_react_reference/README.md)
+- [Phase 28 Reference Server](../examples/phase28_reference/README.md)

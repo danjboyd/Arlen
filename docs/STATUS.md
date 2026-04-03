@@ -1,6 +1,40 @@
 # Arlen Status Checkpoint
 
-Last updated: 2026-04-02
+Last updated: 2026-04-03
+
+## Leaving Off (2026-04-03)
+
+- Phase 28 is complete (`28A-28L` delivered on 2026-04-03):
+  - added the dedicated `tests/typescript/` harness with focused generated,
+    unit, integration, and React helper coverage on top of the earlier
+    Objective-C/XCTest generator tests
+  - added the live `examples/phase28_reference` backend plus merged-OpenAPI
+    parity checks so the emitted `/openapi.json` contract must match the
+    checked-in Phase 28 fixture, including scalar `format` hints
+  - added repo-native `phase28-ts-generated`, `phase28-ts-unit`,
+    `phase28-ts-integration`, `phase28-react-reference`, and
+    `phase28-confidence` lanes with machine-readable artifacts under
+    `build/release_confidence/phase28/`
+  - hardened the generated/client/runtime seam so the TypeScript package now
+    passes strict `exactOptionalPropertyTypes`, resource/module registries keep
+    precise keyed metadata, route schema `format` descriptors survive OpenAPI
+    export, live Node integration keeps session cookies across CSRF-protected
+    mutations, and the checked-in React workspace narrows module metadata plus
+    normalizes model-level create drafts into API request bodies
+  - closed out the docs/API reference set for the shipped TypeScript/React
+    adoption path and recorded the completed checkpoint in
+    `docs/SESSION_HANDOFF_2026-04-03.md`
+- Verification completed at this checkpoint:
+  - `source tools/source_gnustep_env.sh && make phase28-ts-generated`
+  - `source tools/source_gnustep_env.sh && make phase28-ts-unit`
+  - `source tools/source_gnustep_env.sh && make phase28-ts-integration`
+  - `source tools/source_gnustep_env.sh && make phase28-react-reference`
+  - `source tools/source_gnustep_env.sh && make test-unit-filter TEST=ApplicationTests/testRouteSchemasSupportFormatHintsAndExposeThemInOpenAPI`
+    (stock Debian `xctest` still ignored the focused selector and ran the full
+    unit bundle; it passed and the new `ApplicationTests` regression passed in
+    the stream)
+  - `source tools/source_gnustep_env.sh && make phase28-confidence`
+  - `git diff --check`
 
 ## Leaving Off (2026-04-02)
 
@@ -57,7 +91,7 @@ Last updated: 2026-04-02
     soft-delete visibility derivation
   - tightened `phase27-confidence` so PostgreSQL plus live Meilisearch and
     OpenSearch query/sync validation are required for a passing release gate
-- Phase 28 is in progress (`28A-28H` landed on 2026-04-02):
+- Phase 28 was in progress at this checkpoint (`28A-28H` landed on 2026-04-02):
   - added `ALNORMTypeScriptCodegen` plus the first shipped
     descriptor-first TypeScript manifest format
     (`arlen-typescript-contract-v1`)

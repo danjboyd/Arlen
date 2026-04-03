@@ -1,0 +1,35 @@
+{
+  host = "127.0.0.1";
+  port = 3140;
+  apiOnly = YES;
+  serveStatic = NO;
+  logFormat = "json";
+
+  session = {
+    enabled = YES;
+    secret = "phase28-reference-session-secret-0123456789abcdef";
+    cookieName = "phase28_reference_session";
+    maxAgeSeconds = 1800;
+    secure = NO;
+    sameSite = "Lax";
+  };
+
+  csrf = {
+    enabled = YES;
+  };
+
+  openapi = {
+    enabled = YES;
+    docsUIEnabled = NO;
+    title = "Arlen Phase 28 Reference";
+    version = "1.0.0";
+    description = "Live Phase 28 TypeScript integration reference";
+  };
+
+  propaneAccessories = {
+    workerCount = 2;
+    gracefulShutdownSeconds = 10;
+    respawnDelayMs = 250;
+    reloadOverlapSeconds = 1;
+  };
+}

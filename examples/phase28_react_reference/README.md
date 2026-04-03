@@ -8,11 +8,14 @@ TypeScript/React consumption:
   and `meta.ts` from that generated package
 - keep React optional and downstream of Arlen ORM descriptors plus OpenAPI
 
-This example is a checked-in reference workspace, not the Phase 28 live
-integration lane yet. It uses the repo's fixture ORM/OpenAPI inputs so the
-package shape is deterministic, but it is not wired into a backend app in
-repo-wide CI yet. Phase `28J` will cover live integration and React reference
-coverage.
+This example keeps a deterministic checked-in workflow by default: its normal
+`generate:arlen` script points at the repo's fixture ORM/OpenAPI inputs so the
+package shape is reproducible from a clean checkout.
+
+Phase `28J` also wires the same workspace into a live Arlen-backed lane. The
+repo-native CI scripts now fetch `/openapi.json` from the dedicated
+`examples/phase28_reference` server, merge the checked-in Phase 28 `x-arlen`
+metadata, regenerate this workspace, and then run `typecheck` plus `build`.
 
 ## Layout
 
@@ -30,6 +33,13 @@ source tools/source_gnustep_env.sh
 cd examples/phase28_react_reference
 npm install
 npm run generate:arlen
+```
+
+To regenerate from a live Arlen app instead of the fixture contract, point the
+same script at a merged OpenAPI file:
+
+```bash
+ARLEN_PHASE28_OPENAPI_INPUT=/tmp/phase28_live_openapi.json npm run generate:arlen
 ```
 
 That writes:

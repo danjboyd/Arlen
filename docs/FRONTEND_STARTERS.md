@@ -86,6 +86,13 @@ Frontend starters are scaffolds, not managed packages. The intended workflow is:
 
 ## 7. Related Guides
 
+If you need generated TypeScript contracts, typed transport helpers, or the
+checked-in React/Vite reference workflow rather than static starter assets, use
+`arlen typescript-codegen` from `docs/GETTING_STARTED_API_FIRST.md` and the
+Phase 28 examples instead of these starter presets.
+
 - `docs/FIRST_APP_GUIDE.md`
 - `docs/CONFIGURATION_REFERENCE.md`
 - `docs/PHASE7F_FRONTEND_STARTERS.md`
+- `docs/GETTING_STARTED_API_FIRST.md`
+- `../examples/phase28_react_reference/README.md`

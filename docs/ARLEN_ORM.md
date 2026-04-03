@@ -116,7 +116,7 @@ The recommended CLI path is:
 
 ```bash
 source tools/source_gnustep_env.sh
-build/arlen typescript-codegen \
+bin/arlen typescript-codegen \
   --orm-input db/schema/arlen_orm_manifest.json \
   --openapi-input build/openapi.json \
   --output-dir frontend/generated/arlen \
@@ -134,6 +134,14 @@ This stays descriptor-first:
 - missing OpenAPI schemas or unstable operation IDs fail closed
 - generated `query.ts` stays additive; it does not widen `client.ts` request
   types beyond what the OpenAPI contract actually declares
+
+Framework-side verification for this surface now ships as repo-native lanes:
+
+- `make phase28-ts-generated`
+- `make phase28-ts-unit`
+- `make phase28-ts-integration`
+- `make phase28-react-reference`
+- `make phase28-confidence`
 
 ## Query Model
 

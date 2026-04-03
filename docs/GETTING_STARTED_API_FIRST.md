@@ -67,6 +67,15 @@ infer them from route names.
 See `examples/phase28_react_reference/README.md` for a checked-in React
 workspace that consumes the generated package shape.
 
+If you are validating this generated surface inside the Arlen repo itself, the
+focused verification entrypoints are:
+
+- `make phase28-ts-generated`
+- `make phase28-ts-unit`
+- `make phase28-ts-integration`
+- `make phase28-react-reference`
+- `make phase28-confidence`
+
 ## 6. Standardize Error Envelope
 
 For validation failures, use controller helpers:

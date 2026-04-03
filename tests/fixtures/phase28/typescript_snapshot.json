@@ -1,0 +1,335 @@
+{
+  "format": "phase28-typescript-snapshot-v1",
+  "files": {
+    "package.json": {
+      "bytes": 644,
+      "lines": 28,
+      "sha256": "8df7e6ae8250bf3d2d07ce140fc877142faac7070edccb12733e694666045e7c"
+    },
+    "src/client.ts": {
+      "bytes": 10972,
+      "lines": 433,
+      "sha256": "490f4bd53fcd1e3d695e5235905ffb8a0ca1d34fcd04a06caafaf899e6b845fb"
+    },
+    "src/index.ts": {
+      "bytes": 220,
+      "lines": 9,
+      "sha256": "1b2c53ffb96be5f88567bd552ecc237cfc87ec3156a7101a9fb35ac6273866b9"
+    },
+    "src/meta.ts": {
+      "bytes": 3097,
+      "lines": 124,
+      "sha256": "21883c30f4e357b5399739d2879bca1d6b8f3bc25127a7142cb84dc273d0f2ec"
+    },
+    "src/models.ts": {
+      "bytes": 10185,
+      "lines": 409,
+      "sha256": "ae9d4f244d859b3101aaa7d1c3fc09f9ff9c612cb9b18d69c1fd45054b4a35a9"
+    },
+    "src/query.ts": {
+      "bytes": 8504,
+      "lines": 269,
+      "sha256": "4004e2bf316d0fb3a77fbb4a362e31b81525a376d68733ca3cbb654aced98de7"
+    },
+    "src/react.ts": {
+      "bytes": 7360,
+      "lines": 194,
+      "sha256": "5d2de6e56c19c71634b711881e55aa8458baa12ddbd4031d8681227154c99289"
+    },
+    "src/validators.ts": {
+      "bytes": 29100,
+      "lines": 1148,
+      "sha256": "45f020bd1c6bc7a50d3c6b1bc1f056923b087cda19d7162701dbbd1872763871"
+    },
+    "tsconfig.json": {
+      "bytes": 356,
+      "lines": 20,
+      "sha256": "2c23cf7b70792fba949fd74deaed955eeba1dbe8f5b5a5276aa3f0ad5948520d"
+    }
+  },
+  "manifest": {
+    "files": [
+      {
+        "kind": "support",
+        "path": "README.md"
+      },
+      {
+        "kind": "support",
+        "path": "package.json"
+      },
+      {
+        "kind": "client",
+        "path": "src/client.ts"
+      },
+      {
+        "kind": "support",
+        "path": "src/index.ts"
+      },
+      {
+        "kind": "meta",
+        "path": "src/meta.ts"
+      },
+      {
+        "kind": "models",
+        "path": "src/models.ts"
+      },
+      {
+        "kind": "query",
+        "path": "src/query.ts"
+      },
+      {
+        "kind": "react",
+        "path": "src/react.ts"
+      },
+      {
+        "kind": "validators",
+        "path": "src/validators.ts"
+      },
+      {
+        "kind": "support",
+        "path": "tsconfig.json"
+      }
+    ],
+    "module_count": 4,
+    "targets": [
+      "models",
+      "validators",
+      "query",
+      "client",
+      "react",
+      "meta"
+    ],
+    "operations": [
+      {
+        "http_method": "GET",
+        "operation_id": "get_session",
+        "kind": "query",
+        "response_type": "GetSessionResponse",
+        "method_name": "getSession",
+        "tags": [
+          "auth",
+          "session"
+        ],
+        "request_schema_name": "getSessionRequestSchema",
+        "request_type": "GetSessionRequest",
+        "path": "/api/session"
+      },
+      {
+        "http_method": "GET",
+        "operation_id": "list_users",
+        "kind": "query",
+        "response_type": "ListUsersResponse",
+        "method_name": "listUsers",
+        "tags": [
+          "users"
+        ],
+        "request_schema_name": "listUsersRequestSchema",
+        "request_type": "ListUsersRequest",
+        "path": "/api/users"
+      },
+      {
+        "http_method": "POST",
+        "operation_id": "create_user",
+        "kind": "mutation",
+        "response_type": "CreateUserResponse",
+        "method_name": "createUser",
+        "tags": [
+          "users"
+        ],
+        "request_schema_name": "createUserRequestSchema",
+        "request_type": "CreateUserRequest",
+        "path": "/api/users"
+      },
+      {
+        "http_method": "GET",
+        "operation_id": "get_user",
+        "kind": "query",
+        "response_type": "GetUserResponse",
+        "method_name": "getUser",
+        "tags": [
+          "users"
+        ],
+        "request_schema_name": "getUserRequestSchema",
+        "request_type": "GetUserRequest",
+        "path": "/api/users/{id}"
+      },
+      {
+        "http_method": "PATCH",
+        "operation_id": "update_user",
+        "kind": "mutation",
+        "response_type": "UpdateUserResponse",
+        "method_name": "updateUser",
+        "tags": [
+          "users"
+        ],
+        "request_schema_name": "updateUserRequestSchema",
+        "request_type": "UpdateUserRequest",
+        "path": "/api/users/{id}"
+      },
+      {
+        "http_method": "GET",
+        "operation_id": "ops_summary",
+        "kind": "query",
+        "response_type": "OpsSummaryResponse",
+        "method_name": "opsSummary",
+        "tags": [
+          "ops"
+        ],
+        "request_schema_name": "opsSummaryRequestSchema",
+        "request_type": "OpsSummaryRequest",
+        "path": "/ops/api/summary"
+      },
+      {
+        "http_method": "GET",
+        "operation_id": "search_capabilities",
+        "kind": "query",
+        "response_type": "SearchCapabilitiesResponse",
+        "method_name": "searchCapabilities",
+        "tags": [
+          "search"
+        ],
+        "request_schema_name": "searchCapabilitiesRequestSchema",
+        "request_type": "SearchCapabilitiesRequest",
+        "path": "/search/api/capabilities"
+      }
+    ],
+    "resource_count": 1,
+    "format": "arlen-typescript-contract-v1",
+    "models": [
+      {
+        "type_name": "PublicPostTag",
+        "update_schema_name": "publicPostTagUpdateInputSchema",
+        "field_name_type": "PublicPostTagFieldName",
+        "read_only": false,
+        "create_input_name": "PublicPostTagCreateInput",
+        "available_include_type": "PublicPostTagAvailableInclude",
+        "relation_name_type": "PublicPostTagRelationName",
+        "create_schema_name": "publicPostTagCreateInputSchema",
+        "update_input_name": "PublicPostTagUpdateInput",
+        "entity_name": "public.post_tags"
+      },
+      {
+        "type_name": "PublicPost",
+        "update_schema_name": "publicPostUpdateInputSchema",
+        "field_name_type": "PublicPostFieldName",
+        "read_only": false,
+        "create_input_name": "PublicPostCreateInput",
+        "available_include_type": "PublicPostAvailableInclude",
+        "relation_name_type": "PublicPostRelationName",
+        "create_schema_name": "publicPostCreateInputSchema",
+        "update_input_name": "PublicPostUpdateInput",
+        "entity_name": "public.posts"
+      },
+      {
+        "type_name": "PublicProfile",
+        "update_schema_name": "publicProfileUpdateInputSchema",
+        "field_name_type": "PublicProfileFieldName",
+        "read_only": false,
+        "create_input_name": "PublicProfileCreateInput",
+        "available_include_type": "PublicProfileAvailableInclude",
+        "relation_name_type": "PublicProfileRelationName",
+        "create_schema_name": "publicProfileCreateInputSchema",
+        "update_input_name": "PublicProfileUpdateInput",
+        "entity_name": "public.profiles"
+      },
+      {
+        "type_name": "PublicTag",
+        "update_schema_name": "publicTagUpdateInputSchema",
+        "field_name_type": "PublicTagFieldName",
+        "read_only": false,
+        "create_input_name": "PublicTagCreateInput",
+        "available_include_type": "PublicTagAvailableInclude",
+        "relation_name_type": "PublicTagRelationName",
+        "create_schema_name": "publicTagCreateInputSchema",
+        "update_input_name": "PublicTagUpdateInput",
+        "entity_name": "public.tags"
+      },
+      {
+        "type_name": "PublicUserEmail",
+        "update_schema_name": "publicUserEmailUpdateInputSchema",
+        "field_name_type": "PublicUserEmailFieldName",
+        "read_only": true,
+        "create_input_name": "PublicUserEmailCreateInput",
+        "available_include_type": "PublicUserEmailAvailableInclude",
+        "relation_name_type": "PublicUserEmailRelationName",
+        "create_schema_name": "publicUserEmailCreateInputSchema",
+        "update_input_name": "PublicUserEmailUpdateInput",
+        "entity_name": "public.user_emails"
+      },
+      {
+        "type_name": "PublicUser",
+        "update_schema_name": "publicUserUpdateInputSchema",
+        "field_name_type": "PublicUserFieldName",
+        "read_only": false,
+        "create_input_name": "PublicUserCreateInput",
+        "available_include_type": "PublicUserAvailableInclude",
+        "relation_name_type": "PublicUserRelationName",
+        "create_schema_name": "publicUserCreateInputSchema",
+        "update_input_name": "PublicUserUpdateInput",
+        "entity_name": "public.users"
+      }
+    ],
+    "operation_count": 7,
+    "model_count": 6,
+    "workspace_hints": {
+      "devCommand": "pnpm exec vite",
+      "typecheckCommand": "pnpm exec tsc --noEmit",
+      "packageManager": "pnpm",
+      "outputDir": "frontend/generated/arlen",
+      "manifestPath": "db/schema/arlen_typescript.json",
+      "installCommand": "pnpm install"
+    },
+    "modules": [
+      {
+        "resource_names": [
+          "users"
+        ],
+        "kind": "admin",
+        "operation_ids": [],
+        "name": "admin-ui"
+      },
+      {
+        "resource_names": [],
+        "kind": "auth",
+        "operation_ids": [
+          "get_session"
+        ],
+        "name": "auth"
+      },
+      {
+        "resource_names": [],
+        "kind": "ops",
+        "operation_ids": [
+          "ops_summary"
+        ],
+        "name": "ops"
+      },
+      {
+        "resource_names": [],
+        "kind": "search",
+        "operation_ids": [
+          "search_capabilities"
+        ],
+        "name": "search"
+      }
+    ],
+    "package_name": "arlen-phase28-client",
+    "resources": [
+      {
+        "query_contract_name": "usersResourceQueryContract",
+        "entity_name": "public.users",
+        "admin_enabled": true,
+        "operation_ids": [
+          "list_users",
+          "get_user",
+          "create_user",
+          "update_user"
+        ],
+        "model_type_name": "PublicUser",
+        "name": "users"
+      }
+    ],
+    "version": 1
+  },
+  "manifestSha256": "6e292ac0792667c21c2109b0f7be45960c21c71560f69e0f778961321864ac04"
+}
