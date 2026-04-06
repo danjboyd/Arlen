@@ -34,6 +34,10 @@ Phase `26A-26O` is complete:
   and transaction/savepoint coordination
 - save/delete/upsert helpers with opt-in optimistic locking, timestamps, and
   explicit belongs-to graph-save behavior
+- insert/upsert helpers now preserve explicitly assigned primary keys and
+  hydrate database-generated primary keys on adapters that expose
+  `returning_mode` (`RETURNING` / `OUTPUT`) before dependent writes in the same
+  unit of work
 - descriptor snapshots and schema/codegen drift diagnostics for
   migration-history safety
 - explicit backend capability matrices and admin/resource integration helpers
@@ -178,6 +182,12 @@ ALNORMChangeset *changeset = [ALNORMChangeset changesetWithModel:post];
               options:[ALNORMWriteOptions options]
                 error:&error];
 ```
+
+When a new SQL model relies on a database-generated primary key default, Arlen
+now requests the generated key back through the adapter's `returning_mode`
+contract and hydrates it onto the in-memory model before the surrounding
+transaction continues. If your app sets the primary key explicitly on a new
+model, that value remains part of the insert plan instead of being dropped.
 
 Dataverse ORM stays separate from the SQL ORM runtime:
 

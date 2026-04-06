@@ -1,7 +1,9 @@
 #import <Foundation/Foundation.h>
 #import <XCTest/XCTest.h>
 
+#import "../shared/ALNDatabaseTestSupport.h"
 #import "../shared/ALNTestSupport.h"
+#import "ALNPg.h"
 #import "ArlenORM/ArlenORM.h"
 
 static NSDictionary *ALNORMRuntimeFixtureMetadata(void) {
@@ -70,6 +72,136 @@ static ALNORMModelDescriptor *ALNORMRuntimeDescriptorNamed(NSString *entityName)
 @implementation ALNORMRuntimePublicUserEmailsModel
 + (ALNORMModelDescriptor *)modelDescriptor { return ALNORMRuntimeDescriptorNamed(@"public.user_emails"); }
 @end
+
+static ALNORMModelDescriptor *gALNORMRuntimeGeneratedParentDescriptor = nil;
+
+@interface ALNORMRuntimeGeneratedParentModel : ALNORMModel
+@end
+@implementation ALNORMRuntimeGeneratedParentModel
++ (ALNORMModelDescriptor *)modelDescriptor { return gALNORMRuntimeGeneratedParentDescriptor; }
+@end
+
+static ALNORMModelDescriptor *gALNORMRuntimeGeneratedChildDescriptor = nil;
+
+@interface ALNORMRuntimeGeneratedChildModel : ALNORMModel
+@end
+@implementation ALNORMRuntimeGeneratedChildModel
++ (ALNORMModelDescriptor *)modelDescriptor { return gALNORMRuntimeGeneratedChildDescriptor; }
+@end
+
+static ALNORMModelDescriptor *ALNORMRuntimeGeneratedParentDescriptorForTable(NSString *schemaName,
+                                                                             NSString *tableName) {
+  NSArray *fields = @[
+    [[ALNORMFieldDescriptor alloc] initWithName:@"id"
+                                   propertyName:@"id"
+                                     columnName:@"id"
+                                       dataType:@"uuid"
+                                       objcType:@"NSString *"
+                               runtimeClassName:@"NSString"
+                              propertyAttribute:@"copy"
+                                        ordinal:1
+                                       nullable:NO
+                                     primaryKey:YES
+                                         unique:YES
+                                     hasDefault:YES
+                                       readOnly:NO
+                              defaultValueShape:@"expression"],
+    [[ALNORMFieldDescriptor alloc] initWithName:@"name"
+                                   propertyName:@"name"
+                                     columnName:@"name"
+                                       dataType:@"text"
+                                       objcType:@"NSString *"
+                               runtimeClassName:@"NSString"
+                              propertyAttribute:@"copy"
+                                        ordinal:2
+                                       nullable:NO
+                                     primaryKey:NO
+                                         unique:NO
+                                     hasDefault:NO
+                                       readOnly:NO
+                              defaultValueShape:@"none"],
+  ];
+
+  NSString *resolvedSchema = [schemaName length] > 0 ? schemaName : @"public";
+  NSString *resolvedTable = [tableName length] > 0 ? tableName : @"generated_parent";
+  NSString *entityName = [NSString stringWithFormat:@"%@.%@", resolvedSchema, resolvedTable];
+  return [[ALNORMModelDescriptor alloc] initWithClassName:@"ALNORMRuntimeGeneratedParentModel"
+                                               entityName:entityName
+                                               schemaName:resolvedSchema
+                                                tableName:resolvedTable
+                                       qualifiedTableName:entityName
+                                             relationKind:@"table"
+                                           databaseTarget:@"postgresql"
+                                                 readOnly:NO
+                                                   fields:fields
+                                     primaryKeyFieldNames:@[ @"id" ]
+                                 uniqueConstraintFieldSets:@[ @[ @"id" ] ]
+                                                relations:nil];
+}
+
+static ALNORMModelDescriptor *ALNORMRuntimeGeneratedChildDescriptorForTable(NSString *schemaName,
+                                                                            NSString *tableName) {
+  NSArray *fields = @[
+    [[ALNORMFieldDescriptor alloc] initWithName:@"id"
+                                   propertyName:@"id"
+                                     columnName:@"id"
+                                       dataType:@"uuid"
+                                       objcType:@"NSString *"
+                               runtimeClassName:@"NSString"
+                              propertyAttribute:@"copy"
+                                        ordinal:1
+                                       nullable:NO
+                                     primaryKey:YES
+                                         unique:YES
+                                     hasDefault:YES
+                                       readOnly:NO
+                              defaultValueShape:@"expression"],
+    [[ALNORMFieldDescriptor alloc] initWithName:@"parentId"
+                                   propertyName:@"parentId"
+                                     columnName:@"parent_id"
+                                       dataType:@"uuid"
+                                       objcType:@"NSString *"
+                               runtimeClassName:@"NSString"
+                              propertyAttribute:@"copy"
+                                        ordinal:2
+                                       nullable:NO
+                                     primaryKey:NO
+                                         unique:NO
+                                     hasDefault:NO
+                                       readOnly:NO
+                              defaultValueShape:@"none"],
+    [[ALNORMFieldDescriptor alloc] initWithName:@"note"
+                                   propertyName:@"note"
+                                     columnName:@"note"
+                                       dataType:@"text"
+                                       objcType:@"NSString *"
+                               runtimeClassName:@"NSString"
+                              propertyAttribute:@"copy"
+                                        ordinal:3
+                                       nullable:NO
+                                     primaryKey:NO
+                                         unique:NO
+                                     hasDefault:NO
+                                       readOnly:NO
+                              defaultValueShape:@"none"],
+  ];
+
+  NSString *resolvedSchema = [schemaName length] > 0 ? schemaName : @"public";
+  NSString *resolvedTable = [tableName length] > 0 ? tableName : @"generated_child";
+  NSString *entityName = [NSString stringWithFormat:@"%@.%@", resolvedSchema, resolvedTable];
+  return [[ALNORMModelDescriptor alloc] initWithClassName:@"ALNORMRuntimeGeneratedChildModel"
+                                               entityName:entityName
+                                               schemaName:resolvedSchema
+                                                tableName:resolvedTable
+                                       qualifiedTableName:entityName
+                                             relationKind:@"table"
+                                           databaseTarget:@"postgresql"
+                                                 readOnly:NO
+                                                   fields:fields
+                                     primaryKeyFieldNames:@[ @"id" ]
+                                 uniqueConstraintFieldSets:@[ @[ @"id" ] ]
+                                                relations:nil];
+}
 
 static ALNORMModelDescriptor *ALNORMRuntimeAuditEntriesDescriptor(void) {
   static ALNORMModelDescriptor *descriptor = nil;
@@ -416,6 +548,13 @@ static ALNORMContext *ALNORMRuntimeConfiguredAuditContext(ORMRuntimeFakeAdapter 
 @end
 
 @implementation ORMRuntimeTests
+
+- (NSString *)requiredPGTestDSNForSelector:(SEL)selector {
+  return ALNTestRequiredEnvironmentString(@"ARLEN_PG_TEST_DSN",
+                                          NSStringFromClass([self class]),
+                                          NSStringFromSelector(selector),
+                                          @"set ARLEN_PG_TEST_DSN to run live PostgreSQL ORM regression coverage");
+}
 
 - (void)testModelTracksLoadedDirtyAndDetachedState {
   ALNORMRuntimePublicUsersModel *user = [[ALNORMRuntimePublicUsersModel alloc] init];
@@ -893,6 +1032,57 @@ static ALNORMContext *ALNORMRuntimeConfiguredAuditContext(ORMRuntimeFakeAdapter 
   XCTAssertEqualObjects(expectedTransactionLog, adapter.transactionLog);
 }
 
+- (void)testInsertPersistsExplicitPrimaryKeyValuesOnNewModels {
+  ORMRuntimeFakeAdapter *adapter = [[ORMRuntimeFakeAdapter alloc] initWithAdapterName:@"postgresql"];
+  [adapter.queuedCommandResults addObject:@1];
+
+  ALNORMContext *context = ALNORMRuntimeConfiguredAuditContext(adapter);
+  ALNORMRepository *repository =
+      [context repositoryForModelClass:[ALNORMRuntimePublicAuditEntriesModel class]];
+
+  ALNORMRuntimePublicAuditEntriesModel *audit = [[ALNORMRuntimePublicAuditEntriesModel alloc] init];
+  NSError *error = nil;
+  XCTAssertTrue([audit setObject:@"audit-explicit" forFieldName:@"id" error:&error], @"%@", error);
+  XCTAssertTrue([audit setObject:@"user-explicit" forFieldName:@"userId" error:&error], @"%@", error);
+  XCTAssertTrue([audit setObject:@"pending" forFieldName:@"status" error:&error], @"%@", error);
+
+  XCTAssertTrue([repository saveModel:audit error:&error], @"%@", error);
+  XCTAssertTrue([[adapter.executedSQL firstObject] containsString:@"\"id\""], @"%@", [adapter.executedSQL firstObject]);
+  XCTAssertTrue([[adapter.executedParameters firstObject] containsObject:@"audit-explicit"],
+                @"%@",
+                [adapter.executedParameters firstObject]);
+}
+
+- (void)testInsertHydratesGeneratedPrimaryKeysWhenReturningIsSupported {
+  ORMRuntimeFakeAdapter *adapter = [[ORMRuntimeFakeAdapter alloc] initWithAdapterName:@"postgresql"];
+  [adapter.queuedRowSets addObject:@[
+    @{
+      @"id" : @"11111111-2222-3333-4444-555555555555",
+    },
+  ]];
+
+  gALNORMRuntimeGeneratedParentDescriptor =
+      ALNORMRuntimeGeneratedParentDescriptorForTable(@"public", @"generated_parent_models");
+  @try {
+    ALNORMContext *context = [[ALNORMContext alloc] initWithAdapter:adapter];
+    ALNORMRepository *repository =
+        [context repositoryForModelClass:[ALNORMRuntimeGeneratedParentModel class]];
+
+    ALNORMRuntimeGeneratedParentModel *model = [[ALNORMRuntimeGeneratedParentModel alloc] init];
+    NSError *error = nil;
+    XCTAssertTrue([model setObject:@"hydrated parent" forFieldName:@"name" error:&error], @"%@", error);
+
+    XCTAssertTrue([repository saveModel:model error:&error], @"%@", error);
+    XCTAssertEqualObjects(@"11111111-2222-3333-4444-555555555555",
+                          [model objectForFieldName:@"id"]);
+    XCTAssertTrue([[adapter.executedSQL firstObject] containsString:@"RETURNING \"id\""],
+                  @"%@",
+                  [adapter.executedSQL firstObject]);
+  } @finally {
+    gALNORMRuntimeGeneratedParentDescriptor = nil;
+  }
+}
+
 - (void)testSaveDeleteAndUpsertHonorWriteOptionsAndOptimisticLocking {
   ORMRuntimeFakeAdapter *adapter = [[ORMRuntimeFakeAdapter alloc] initWithAdapterName:@"postgresql"];
   [adapter.queuedCommandResults addObjectsFromArray:@[ @1, @1, @0, @1, @1 ]];
@@ -978,18 +1168,162 @@ static ALNORMContext *ALNORMRuntimeConfiguredAuditContext(ORMRuntimeFakeAdapter 
 
 - (void)testCapabilityMetadataHonorsReflectionBoundary {
   ORMRuntimeFakeAdapter *postgres = [[ORMRuntimeFakeAdapter alloc] initWithAdapterName:@"postgresql"];
+  ORMRuntimeFakeAdapter *mssql = [[ORMRuntimeFakeAdapter alloc] initWithAdapterName:@"mssql"];
   ORMRuntimeFakeAdapter *sqlite = [[ORMRuntimeFakeAdapter alloc] initWithAdapterName:@"sqlite"];
 
   NSDictionary *postgresCapabilities = [ALNORMContext capabilityMetadataForAdapter:postgres];
+  NSDictionary *mssqlCapabilities = [ALNORMContext capabilityMetadataForAdapter:mssql];
   NSDictionary *sqliteCapabilities = [ALNORMContext capabilityMetadataForAdapter:sqlite];
 
   XCTAssertEqualObjects(@YES, postgresCapabilities[@"supports_schema_reflection"]);
   XCTAssertEqualObjects(@YES, postgresCapabilities[@"supports_sql_runtime"]);
+  XCTAssertEqualObjects(@"returning", postgresCapabilities[@"returning_mode"]);
+  XCTAssertEqualObjects(@"output", mssqlCapabilities[@"returning_mode"]);
   XCTAssertEqualObjects(@NO, sqliteCapabilities[@"supports_schema_reflection"]);
   XCTAssertEqualObjects(@NO, sqliteCapabilities[@"supports_sql_runtime"]);
   XCTAssertEqualObjects(@YES, postgresCapabilities[@"supports_savepoints"]);
   XCTAssertEqualObjects(@YES, postgresCapabilities[@"supports_upsert"]);
   XCTAssertEqualObjects(@NO, postgresCapabilities[@"supports_dataverse_orm"]);
+}
+
+- (void)testLivePostgresInsertHydratesGeneratedPrimaryKeyBeforeDependentWrites {
+  NSString *dsn = [self requiredPGTestDSNForSelector:_cmd];
+  if (dsn == nil) {
+    return;
+  }
+
+  NSError *error = nil;
+  ALNPg *database = [[ALNPg alloc] initWithConnectionString:dsn maxConnections:2 error:&error];
+  XCTAssertNil(error);
+  XCTAssertNotNil(database);
+  if (database == nil) {
+    return;
+  }
+
+  BOOL success = ALNTestWithDisposableSchema(database,
+                                             @"arlen_orm_hydration",
+                                             ^BOOL(NSString *schemaName, NSError **blockError) {
+                                               NSString *adapterName = [database adapterName];
+                                               NSString *parentTable = @"generated_parent_models";
+                                               NSString *childTable = @"generated_child_models";
+                                               NSString *quotedSchema =
+                                                   ALNTestQuotedIdentifierForAdapterName(adapterName, schemaName);
+                                               NSString *quotedParent =
+                                                   ALNTestQuotedIdentifierForAdapterName(adapterName, parentTable);
+                                               NSString *quotedChild =
+                                                   ALNTestQuotedIdentifierForAdapterName(adapterName, childTable);
+                                               NSString *qualifiedParent =
+                                                   [NSString stringWithFormat:@"%@.%@", quotedSchema, quotedParent];
+                                               NSString *qualifiedChild =
+                                                   [NSString stringWithFormat:@"%@.%@", quotedSchema, quotedChild];
+                                               NSString *generatedUUIDExpression =
+                                                   @"md5(random()::text || clock_timestamp()::text)::uuid";
+
+                                               NSString *createParentSQL =
+                                                   [NSString stringWithFormat:@"CREATE TABLE %@ ("
+                                                                                "id UUID PRIMARY KEY DEFAULT %@, "
+                                                                                "name TEXT NOT NULL"
+                                                                                ")",
+                                                                              qualifiedParent,
+                                                                              generatedUUIDExpression];
+                                               NSInteger createdParent = [database executeCommand:createParentSQL
+                                                                                     parameters:@[]
+                                                                                          error:blockError];
+                                               if (createdParent < 0 ||
+                                                   (blockError != NULL && *blockError != nil)) {
+                                                 return NO;
+                                               }
+
+                                               NSString *createChildSQL =
+                                                   [NSString stringWithFormat:@"CREATE TABLE %@ ("
+                                                                                "id UUID PRIMARY KEY DEFAULT %@, "
+                                                                                "parent_id UUID NOT NULL REFERENCES %@ (id), "
+                                                                                "note TEXT NOT NULL"
+                                                                                ")",
+                                                                              qualifiedChild,
+                                                                              generatedUUIDExpression,
+                                                                              qualifiedParent];
+                                               NSInteger createdChild = [database executeCommand:createChildSQL
+                                                                                    parameters:@[]
+                                                                                         error:blockError];
+                                               if (createdChild < 0 ||
+                                                   (blockError != NULL && *blockError != nil)) {
+                                                 return NO;
+                                               }
+
+                                               gALNORMRuntimeGeneratedParentDescriptor =
+                                                   ALNORMRuntimeGeneratedParentDescriptorForTable(schemaName,
+                                                                                                 parentTable);
+                                               gALNORMRuntimeGeneratedChildDescriptor =
+                                                   ALNORMRuntimeGeneratedChildDescriptorForTable(schemaName,
+                                                                                                childTable);
+
+                                               ALNORMContext *context =
+                                                   [[ALNORMContext alloc] initWithAdapter:database];
+                                               ALNORMRepository *parentRepository =
+                                                   [context repositoryForModelClass:
+                                                                [ALNORMRuntimeGeneratedParentModel class]];
+                                               ALNORMRepository *childRepository =
+                                                   [context repositoryForModelClass:
+                                                                [ALNORMRuntimeGeneratedChildModel class]];
+
+                                               ALNORMRuntimeGeneratedParentModel *parent =
+                                                   [[ALNORMRuntimeGeneratedParentModel alloc] init];
+                                               if (![parent setObject:@"live parent"
+                                                       forFieldName:@"name"
+                                                              error:blockError]) {
+                                                 return NO;
+                                               }
+                                               if (![parentRepository saveModel:parent error:blockError]) {
+                                                 return NO;
+                                               }
+
+                                               NSString *parentID = [parent objectForFieldName:@"id"];
+                                               if ([parentID length] == 0) {
+                                                 if (blockError != NULL) {
+                                                   *blockError = [NSError
+                                                       errorWithDomain:@"ORMRuntimeTests"
+                                                                  code:1
+                                                              userInfo:@{
+                                                                NSLocalizedDescriptionKey :
+                                                                    @"expected generated primary key to be hydrated",
+                                                              }];
+                                                 }
+                                                 return NO;
+                                               }
+
+                                               ALNORMRuntimeGeneratedChildModel *child =
+                                                   [[ALNORMRuntimeGeneratedChildModel alloc] init];
+                                               if (![child setObject:parentID
+                                                      forFieldName:@"parentId"
+                                                             error:blockError] ||
+                                                   ![child setObject:@"dependent write"
+                                                      forFieldName:@"note"
+                                                             error:blockError]) {
+                                                 return NO;
+                                               }
+                                               if (![childRepository saveModel:child error:blockError]) {
+                                                 return NO;
+                                               }
+
+                                               NSDictionary *storedRow = ALNDatabaseFirstRow(
+                                                   [database executeQuery:[NSString stringWithFormat:
+                                                                                          @"SELECT parent_id, note "
+                                                                                           "FROM %@ WHERE parent_id = $1",
+                                                                                          qualifiedChild]
+                                                                parameters:@[ parentID ]
+                                                                     error:blockError]);
+                                               if (storedRow == nil ||
+                                                   (blockError != NULL && *blockError != nil)) {
+                                                 return NO;
+                                               }
+                                               return [[storedRow[@"note"] description]
+                                                   isEqualToString:@"dependent write"];
+                                             },
+                                             &error);
+  gALNORMRuntimeGeneratedParentDescriptor = nil;
+  gALNORMRuntimeGeneratedChildDescriptor = nil;
+  XCTAssertTrue(success, @"%@", error);
 }
 
 @end

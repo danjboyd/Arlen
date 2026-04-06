@@ -40,6 +40,24 @@ Phase 25 live-UI-focused lanes are also available:
 - `make phase25-focused`
 - `make phase25-confidence`
 
+Phase 26 ORM-focused lanes are also available:
+
+- `make phase26-orm-unit`
+  - SQL ORM runtime/repository behavior
+  - when `ARLEN_PG_TEST_DSN` is set, this lane also exercises the live
+    PostgreSQL generated-primary-key hydration regression
+- `make phase26-orm-generated`
+  - descriptor rendering, codegen, and snapshot/history drift behavior
+- `make phase26-orm-integration`
+  - Dataverse ORM runtime behavior
+- `make phase26-orm-backend-parity`
+  - capability metadata and backend boundary checks
+- `make phase26-orm-tests`
+  - full Phase 26 ORM regression bundle
+- `make phase26-confidence`
+  - rerun the full Phase 26 bundle and regenerate
+    `build/release_confidence/phase26/`
+
 ## 2. Bug Report To Regression
 
 1. Reproduce the failure in the narrowest possible form.
@@ -68,6 +86,13 @@ Phase 25 live-UI-focused lanes are also available:
      `tests/unit/DataverseRegressionTests.m`
    - Dataverse metadata/codegen regressions:
      `tests/unit/DataverseMetadataTests.m`
+   - SQL ORM repository/runtime regressions:
+     `tests/unit/ORMRuntimeTests.m`
+   - SQL ORM descriptor/codegen/history regressions:
+     `tests/unit/ORMCodegenTests.m`,
+     `tests/unit/ORMMigrationTests.m`
+   - SQL ORM backend boundary/capability regressions:
+     `tests/unit/ORMBackendParityTests.m`
    - Dataverse parity/characterization artifacts:
      `tests/unit/DataverseArtifactTests.m`,
      `tests/fixtures/phase23/dataverse_query_cases.json`,
@@ -93,10 +118,12 @@ Phase 25 live-UI-focused lanes are also available:
      `tests/integration/HTTPIntegrationTests.m`
 3. Add or extend a checked-in fixture so the failure is replayable.
 4. Run the matching focused lane until it passes.
+   - for SQL ORM runtime bugs that depend on a real PostgreSQL insert/update
+     path, set `ARLEN_PG_TEST_DSN` and rerun `make phase26-orm-unit`
 5. Promote the change through `make test-unit`, broader integration coverage
    when applicable, and the matching confidence lane such as
-   `make phase21-confidence`, `make phase23-confidence`, or
-   `make phase25-confidence`.
+   `make phase21-confidence`, `make phase23-confidence`,
+   `make phase25-confidence`, or `make phase26-confidence`.
 
 ## 3. Template Regression Intake
 

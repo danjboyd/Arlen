@@ -63,6 +63,10 @@ static NSString *ALNORMContextIdentityKey(NSString *classKey,
                     parameters:(NSArray *)parameters
                      modelName:(NSString *)modelName
                          error:(NSError **)error;
+- (nullable NSDictionary<NSString *, id> *)executeCommandReturningOneSQL:(NSString *)sql
+                                                               parameters:(NSArray *)parameters
+                                                                modelName:(NSString *)modelName
+                                                                    error:(NSError **)error;
 - (nullable ALNORMModel *)trackedModelForClass:(Class)modelClass
                               primaryKeyValues:(NSDictionary<NSString *, id> *)primaryKeyValues;
 - (void)trackModel:(ALNORMModel *)model;
@@ -147,6 +151,13 @@ static NSString *ALNORMContextIdentityKey(NSString *classKey,
   metadata[@"supports_savepoints"] = @(savepointsSupported);
   metadata[@"supports_optimistic_locking"] = @(sqlRuntimeSupported);
   metadata[@"supports_upsert"] = @(upsertSupported);
+  if (![[metadata[@"returning_mode"] description] length]) {
+    if ([adapterName isEqualToString:@"postgresql"] || [adapterName isEqualToString:@"postgres"]) {
+      metadata[@"returning_mode"] = @"returning";
+    } else if ([adapterName isEqualToString:@"mssql"]) {
+      metadata[@"returning_mode"] = @"output";
+    }
+  }
   if (metadata[@"boundary_note"] == nil) {
     metadata[@"boundary_note"] =
         reflectionSupported ? @"SQL ORM runtime is enabled; descriptor reflection currently follows PostgreSQL metadata contracts."
@@ -658,6 +669,36 @@ static NSString *ALNORMContextIdentityKey(NSString *classKey,
     return [self.activeConnection executeCommand:sql parameters:parameters ?: @[] error:error];
   }
   return [self.adapter executeCommand:sql parameters:parameters ?: @[] error:error];
+}
+
+- (nullable NSDictionary<NSString *, id> *)executeCommandReturningOneSQL:(NSString *)sql
+                                                               parameters:(NSArray *)parameters
+                                                                modelName:(NSString *)modelName
+                                                                    error:(NSError **)error {
+  if (error != NULL) {
+    *error = nil;
+  }
+
+  [self appendQueryEvent:@{
+    @"event_kind" : @"sql_command",
+    @"sql" : sql ?: @"",
+    @"parameters" : parameters ?: @[],
+    @"entity_name" : modelName ?: @"",
+    @"result_mode" : @"returning_one",
+  }
+             countAsQuery:YES];
+
+  if (self.activeConnection != nil) {
+    if ([self.activeConnection respondsToSelector:@selector(executeQueryOne:parameters:error:)]) {
+      return [self.activeConnection executeQueryOne:sql parameters:parameters ?: @[] error:error];
+    }
+    return ALNDatabaseFirstRow([self.activeConnection executeQuery:sql
+                                                        parameters:parameters ?: @[]
+                                                             error:error]);
+  }
+  return ALNDatabaseFirstRow([self.adapter executeQuery:sql
+                                             parameters:parameters ?: @[]
+                                                  error:error]);
 }
 
 - (nullable ALNORMModel *)trackedModelForClass:(Class)modelClass

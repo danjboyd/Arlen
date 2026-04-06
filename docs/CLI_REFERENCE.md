@@ -773,6 +773,8 @@ Lifecycle diagnostics:
 - `make phase21-template-tests`: focused template parser/codegen/security/regression bundle
 - `make phase26-orm-tests`: full Phase 26 ORM regression bundle
 - `make phase26-orm-unit`: SQL ORM runtime lane
+  - if `ARLEN_PG_TEST_DSN` is set, this lane also runs the live PostgreSQL
+    generated-primary-key hydration regression
 - `make phase26-orm-generated`: descriptor/codegen/history lane
 - `make phase26-orm-integration`: Dataverse ORM lane
 - `make phase26-orm-backend-parity`: backend capability and integration seam lane

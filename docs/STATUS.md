@@ -1,6 +1,25 @@
 # Arlen Status Checkpoint
 
-Last updated: 2026-04-03
+Last updated: 2026-04-06
+
+## Leaving Off (2026-04-06)
+
+- Fixed the SQL ORM insert hydration bug reported downstream by `Invitor`:
+  - `ALNORMRepository` now preserves explicitly assigned primary keys on insert
+    instead of dropping them from the write plan
+  - insert/upsert helpers now request generated primary keys back through the
+    adapter `returning_mode` contract and hydrate those values onto the model
+    before dependent writes continue in the same transaction
+  - `ALNORMContext` now infers `returning_mode` for the canonical PostgreSQL
+    and MSSQL adapters even when a local adapter stub only reports the adapter
+    name
+  - added focused regressions in `tests/unit/ORMRuntimeTests.m` for explicit
+    primary-key inserts, `RETURNING`-backed generated-key hydration, and a live
+    PostgreSQL dependent-write workflow using disposable schemas
+- Verification completed at this checkpoint:
+  - `source tools/source_gnustep_env.sh && make phase26-orm-unit`
+  - `source tools/source_gnustep_env.sh && ARLEN_PG_TEST_DSN='postgresql:///postgres' make phase26-orm-unit`
+  - `source tools/source_gnustep_env.sh && ARLEN_PG_TEST_DSN='postgresql:///postgres' make phase26-orm-tests`
 
 ## Leaving Off (2026-04-03)
 

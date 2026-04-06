@@ -71,6 +71,10 @@ static NSArray *ALNORMRepositoryUniqueValues(NSArray *values) {
                     parameters:(NSArray *)parameters
                      modelName:(NSString *)modelName
                          error:(NSError **)error;
+- (nullable NSDictionary<NSString *, id> *)executeCommandReturningOneSQL:(NSString *)sql
+                                                               parameters:(NSArray *)parameters
+                                                                modelName:(NSString *)modelName
+                                                                    error:(NSError **)error;
 - (nullable ALNORMModel *)trackedModelForClass:(Class)modelClass
                               primaryKeyValues:(NSDictionary<NSString *, id> *)primaryKeyValues;
 - (void)trackModel:(ALNORMModel *)model;
@@ -953,7 +957,13 @@ static NSArray *ALNORMRepositoryUniqueValues(NSArray *values) {
 
   for (NSString *fieldName in candidateFieldNames ?: @[]) {
     ALNORMFieldDescriptor *field = [self.descriptor fieldNamed:fieldName];
-    if (field == nil || field.isReadOnly || field.isPrimaryKey) {
+    if (field == nil || field.isReadOnly) {
+      continue;
+    }
+    if (field.isPrimaryKey && !isInsert) {
+      continue;
+    }
+    if (field.isPrimaryKey && isInsert && [model objectForFieldName:field.name] == nil) {
       continue;
     }
     [fieldNames addObject:field.name ?: @""];
@@ -982,6 +992,74 @@ static NSArray *ALNORMRepositoryUniqueValues(NSArray *values) {
     encodedValues[field.columnName] = encoded ?: [NSNull null];
   }
   return encodedValues;
+}
+
+- (NSArray<ALNORMFieldDescriptor *> *)generatedPrimaryKeyFieldsToHydrateForModel:(ALNORMModel *)model {
+  // Keep explicit primary keys on insert, but ask the database to return any
+  // generated keys before follow-on writes in the same unit of work need them.
+  NSString *returningMode = [self.context.capabilityMetadata[@"returning_mode"] isKindOfClass:[NSString class]]
+                                ? self.context.capabilityMetadata[@"returning_mode"]
+                                : @"";
+  if ([returningMode length] == 0) {
+    return @[];
+  }
+
+  NSMutableArray<ALNORMFieldDescriptor *> *fields = [NSMutableArray array];
+  for (NSString *fieldName in self.descriptor.primaryKeyFieldNames ?: @[]) {
+    ALNORMFieldDescriptor *field = [self.descriptor fieldNamed:fieldName];
+    if (field == nil || field.isReadOnly || !field.hasDefaultValue) {
+      continue;
+    }
+    if ([model objectForFieldName:field.name] != nil) {
+      continue;
+    }
+    [fields addObject:field];
+  }
+  return fields;
+}
+
+- (BOOL)hydrateReturnedFields:(NSArray<ALNORMFieldDescriptor *> *)fields
+                      fromRow:(NSDictionary<NSString *, id> *)row
+                      toModel:(ALNORMModel *)model
+                        error:(NSError **)error {
+  for (ALNORMFieldDescriptor *field in fields ?: @[]) {
+    BOOL found = NO;
+    id rawValue = row[field.columnName];
+    found = (rawValue != nil || [row objectForKey:field.columnName] != nil);
+    if (!found) {
+      rawValue = row[field.propertyName];
+      found = (rawValue != nil || [row objectForKey:field.propertyName] != nil);
+    }
+    if (!found) {
+      rawValue = row[field.name];
+      found = (rawValue != nil || [row objectForKey:field.name] != nil);
+    }
+    if (!found) {
+      if (error != NULL) {
+        *error = ALNORMMakeError(ALNORMErrorSaveFailed,
+                                 @"insert did not return a requested generated primary key field",
+                                 @{
+                                   @"entity_name" : self.descriptor.entityName ?: @"",
+                                   @"field_name" : field.name ?: @"",
+                                   @"column_name" : field.columnName ?: @"",
+                                 });
+      }
+      return NO;
+    }
+
+    id decodedValue = (rawValue == [NSNull null]) ? nil : rawValue;
+    ALNORMValueConverter *converter = [self converterForField:field];
+    if (converter != nil) {
+      decodedValue = [converter decodeValue:decodedValue error:error];
+      if (decodedValue == nil && error != NULL && *error != nil) {
+        return NO;
+      }
+    }
+    if (![model setObject:decodedValue forFieldName:field.name error:error]) {
+      return NO;
+    }
+  }
+  return YES;
 }
 
 - (BOOL)insertModel:(ALNORMModel *)model
@@ -1020,24 +1098,55 @@ static NSArray *ALNORMRepositoryUniqueValues(NSArray *values) {
   }
 
   ALNSQLBuilder *builder = [ALNSQLBuilder insertInto:self.descriptor.qualifiedTableName values:values];
+  NSArray<ALNORMFieldDescriptor *> *generatedPrimaryKeyFields =
+      [self generatedPrimaryKeyFieldsToHydrateForModel:model];
+  if ([generatedPrimaryKeyFields count] > 0) {
+    NSMutableArray<NSString *> *returningColumns =
+        [NSMutableArray arrayWithCapacity:[generatedPrimaryKeyFields count]];
+    for (ALNORMFieldDescriptor *field in generatedPrimaryKeyFields) {
+      [returningColumns addObject:field.columnName ?: @""];
+    }
+    [builder returningFields:returningColumns];
+  }
   NSDictionary<NSString *, id> *plan = ALNORMRepositoryCompileBuilder(self.context.adapter, builder, error);
   if (plan == nil) {
     return NO;
   }
 
-  NSInteger affected = [self.context executeCommandSQL:plan[@"sql"]
-                                            parameters:plan[@"parameters"] ?: @[]
-                                             modelName:self.descriptor.entityName
-                                                 error:error];
-  if (affected < 0) {
-    if (error != NULL && *error == nil) {
-      *error = ALNORMMakeError(ALNORMErrorSaveFailed,
-                               @"insert command failed",
-                               @{
-                                 @"entity_name" : self.descriptor.entityName ?: @"",
-                               });
+  if ([generatedPrimaryKeyFields count] > 0) {
+    NSDictionary<NSString *, id> *returnedRow =
+        [self.context executeCommandReturningOneSQL:plan[@"sql"]
+                                         parameters:plan[@"parameters"] ?: @[]
+                                          modelName:self.descriptor.entityName
+                                              error:error];
+    if (returnedRow == nil) {
+      if (error != NULL && *error == nil) {
+        *error = ALNORMMakeError(ALNORMErrorSaveFailed,
+                                 @"insert command did not return generated primary key values",
+                                 @{
+                                   @"entity_name" : self.descriptor.entityName ?: @"",
+                                 });
+      }
+      return NO;
     }
-    return NO;
+    if (![self hydrateReturnedFields:generatedPrimaryKeyFields fromRow:returnedRow toModel:model error:error]) {
+      return NO;
+    }
+  } else {
+    NSInteger affected = [self.context executeCommandSQL:plan[@"sql"]
+                                              parameters:plan[@"parameters"] ?: @[]
+                                               modelName:self.descriptor.entityName
+                                                   error:error];
+    if (affected < 0) {
+      if (error != NULL && *error == nil) {
+        *error = ALNORMMakeError(ALNORMErrorSaveFailed,
+                                 @"insert command failed",
+                                 @{
+                                   @"entity_name" : self.descriptor.entityName ?: @"",
+                                 });
+      }
+      return NO;
+    }
   }
 
   [model markClean];
@@ -1354,6 +1463,16 @@ static NSArray *ALNORMRepositoryUniqueValues(NSArray *values) {
            } else {
              [builder onConflictDoNothing];
            }
+           NSArray<ALNORMFieldDescriptor *> *generatedPrimaryKeyFields =
+               [strongSelf generatedPrimaryKeyFieldsToHydrateForModel:model];
+           if ([generatedPrimaryKeyFields count] > 0) {
+             NSMutableArray<NSString *> *returningColumns =
+                 [NSMutableArray arrayWithCapacity:[generatedPrimaryKeyFields count]];
+             for (ALNORMFieldDescriptor *field in generatedPrimaryKeyFields) {
+               [returningColumns addObject:field.columnName ?: @""];
+             }
+             [builder returningFields:returningColumns];
+           }
 
            NSDictionary<NSString *, id> *plan =
                ALNORMRepositoryCompileBuilder(strongSelf.context.adapter, builder, blockError);
@@ -1361,19 +1480,43 @@ static NSArray *ALNORMRepositoryUniqueValues(NSArray *values) {
              return NO;
            }
 
-           NSInteger affected = [strongSelf.context executeCommandSQL:plan[@"sql"]
-                                                            parameters:plan[@"parameters"] ?: @[]
-                                                             modelName:strongSelf.descriptor.entityName
-                                                                 error:blockError];
-           if (affected < 0) {
-             if (blockError != NULL && *blockError == nil) {
-               *blockError = ALNORMMakeError(ALNORMErrorUpsertFailed,
-                                             @"upsert command failed",
-                                             @{
-                                               @"entity_name" : strongSelf.descriptor.entityName ?: @"",
-                                             });
+           if ([generatedPrimaryKeyFields count] > 0) {
+             NSDictionary<NSString *, id> *returnedRow =
+                 [strongSelf.context executeCommandReturningOneSQL:plan[@"sql"]
+                                                        parameters:plan[@"parameters"] ?: @[]
+                                                         modelName:strongSelf.descriptor.entityName
+                                                             error:blockError];
+             if (returnedRow == nil) {
+               if (blockError != NULL && *blockError == nil) {
+                 *blockError = ALNORMMakeError(ALNORMErrorUpsertFailed,
+                                               @"upsert command did not return generated primary key values",
+                                               @{
+                                                 @"entity_name" : strongSelf.descriptor.entityName ?: @"",
+                                               });
+               }
+               return NO;
              }
-             return NO;
+             if (![strongSelf hydrateReturnedFields:generatedPrimaryKeyFields
+                                            fromRow:returnedRow
+                                            toModel:model
+                                              error:blockError]) {
+               return NO;
+             }
+           } else {
+             NSInteger affected = [strongSelf.context executeCommandSQL:plan[@"sql"]
+                                                              parameters:plan[@"parameters"] ?: @[]
+                                                               modelName:strongSelf.descriptor.entityName
+                                                                   error:blockError];
+             if (affected < 0) {
+               if (blockError != NULL && *blockError == nil) {
+                 *blockError = ALNORMMakeError(ALNORMErrorUpsertFailed,
+                                               @"upsert command failed",
+                                               @{
+                                                 @"entity_name" : strongSelf.descriptor.entityName ?: @"",
+                                               });
+               }
+               return NO;
+             }
            }
 
            [model markClean];
