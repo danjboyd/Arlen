@@ -94,11 +94,7 @@ WINDOWS_PREVIEW_FRAMEWORK_OBJC_SRCS := \
 	src/Arlen/Support/ALNSecurityPrimitives.m \
 	src/Arlen/Support/ALNServices.m
 ARLEN_DATA_SRCS := $(shell find src/Arlen/Data -type f -name '*.m' | sort)
-ifeq ($(ARLEN_WINDOWS_PREVIEW),1)
-FRAMEWORK_OBJC_SRCS := $(WINDOWS_PREVIEW_FRAMEWORK_OBJC_SRCS) $(ARLEN_DATA_SRCS)
-else
 FRAMEWORK_OBJC_SRCS := $(FRAMEWORK_ALL_OBJC_SRCS)
-endif
 MODULE_SRCS := $(shell find modules -type f -path '*/Sources/*.m' 2>/dev/null | sort)
 ARLEN_ENABLE_YYJSON ?= 1
 ARLEN_ENABLE_LLHTTP ?= 1
@@ -123,11 +119,7 @@ else
 LLHTTP_C_SRCS :=
 endif
 ARGON2_C_SRCS := src/Arlen/Support/third_party/argon2/src/argon2.c src/Arlen/Support/third_party/argon2/src/core.c src/Arlen/Support/third_party/argon2/src/encoding.c src/Arlen/Support/third_party/argon2/src/ref.c src/Arlen/Support/third_party/argon2/src/blake2/blake2b.c
-ifeq ($(ARLEN_WINDOWS_PREVIEW),1)
-FRAMEWORK_C_SRCS := $(YYJSON_C_SRCS) $(LLHTTP_C_SRCS)
-else
 FRAMEWORK_C_SRCS := $(YYJSON_C_SRCS) $(LLHTTP_C_SRCS) $(ARGON2_C_SRCS)
-endif
 FRAMEWORK_SRCS := $(FRAMEWORK_OBJC_SRCS) $(FRAMEWORK_C_SRCS)
 JSON_SERIALIZATION_SRCS := src/Arlen/Support/ALNJSONSerialization.m $(YYJSON_C_SRCS)
 EOC_RUNTIME_SRCS := src/Arlen/MVC/Template/ALNEOCRuntime.m src/Arlen/MVC/Template/ALNEOCTranspiler.m
@@ -136,9 +128,11 @@ XCTEST_BUNDLE_RUNNER_SRCS := tools/arlen_xctest_runner.m
 UNIT_TEST_BUNDLE := $(BUILD_DIR)/tests/ArlenUnitTests.xctest
 UNIT_TEST_BIN := $(UNIT_TEST_BUNDLE)/ArlenUnitTests
 UNIT_TEST_TARGET_NAME := $(notdir $(basename $(UNIT_TEST_BUNDLE)))
+UNIT_TEST_TOOL := $(BUILD_DIR)/tests/ArlenUnitTestsRunner
 INTEGRATION_TEST_BUNDLE := $(BUILD_DIR)/tests/ArlenIntegrationTests.xctest
 INTEGRATION_TEST_BIN := $(INTEGRATION_TEST_BUNDLE)/ArlenIntegrationTests
 INTEGRATION_TEST_TARGET_NAME := $(notdir $(basename $(INTEGRATION_TEST_BUNDLE)))
+INTEGRATION_TEST_TOOL := $(BUILD_DIR)/tests/ArlenIntegrationTestsRunner
 BROWSER_ERROR_AUDIT_TEST_BUNDLE := $(BUILD_DIR)/tests/ArlenBrowserErrorAudit.xctest
 BROWSER_ERROR_AUDIT_TEST_BIN := $(BROWSER_ERROR_AUDIT_TEST_BUNDLE)/ArlenBrowserErrorAudit
 PHASE20_SQL_BUILDER_TEST_BUNDLE := $(BUILD_DIR)/tests/ArlenPhase20SQLBuilderTests.xctest
@@ -147,8 +141,12 @@ PHASE20_SCHEMA_TEST_BUNDLE := $(BUILD_DIR)/tests/ArlenPhase20SchemaTests.xctest
 PHASE20_SCHEMA_TEST_BIN := $(PHASE20_SCHEMA_TEST_BUNDLE)/ArlenPhase20SchemaTests
 PHASE20_POSTGRES_LIVE_TEST_BUNDLE := $(BUILD_DIR)/tests/ArlenPhase20PostgresLiveTests.xctest
 PHASE20_POSTGRES_LIVE_TEST_BIN := $(PHASE20_POSTGRES_LIVE_TEST_BUNDLE)/ArlenPhase20PostgresLiveTests
+PHASE20_POSTGRES_LIVE_TEST_TARGET_NAME := $(notdir $(basename $(PHASE20_POSTGRES_LIVE_TEST_BUNDLE)))
+PHASE20_POSTGRES_LIVE_TEST_TOOL := $(BUILD_DIR)/tests/ArlenPhase20PostgresLiveTestsRunner
 PHASE20_MSSQL_LIVE_TEST_BUNDLE := $(BUILD_DIR)/tests/ArlenPhase20MSSQLLiveTests.xctest
 PHASE20_MSSQL_LIVE_TEST_BIN := $(PHASE20_MSSQL_LIVE_TEST_BUNDLE)/ArlenPhase20MSSQLLiveTests
+PHASE20_MSSQL_LIVE_TEST_TARGET_NAME := $(notdir $(basename $(PHASE20_MSSQL_LIVE_TEST_BUNDLE)))
+PHASE20_MSSQL_LIVE_TEST_TOOL := $(BUILD_DIR)/tests/ArlenPhase20MSSQLLiveTestsRunner
 PHASE20_ROUTING_TEST_BUNDLE := $(BUILD_DIR)/tests/ArlenPhase20RoutingTests.xctest
 PHASE20_ROUTING_TEST_BIN := $(PHASE20_ROUTING_TEST_BUNDLE)/ArlenPhase20RoutingTests
 PHASE21_TEMPLATE_TEST_BUNDLE := $(BUILD_DIR)/tests/ArlenPhase21TemplateTests.xctest
@@ -331,7 +329,7 @@ PHASE24_WINDOWS_RUNTIME_TEST_OBJS := $(call objs_from,$(PHASE24_WINDOWS_RUNTIME_
 ALL_OBJECTS := $(sort $(FRAMEWORK_OBJS) $(MODULE_OBJS) $(ROOT_GENERATED_OBJS) $(TECH_DEMO_GENERATED_OBJS) $(MODULE_GENERATED_OBJS) $(EOCC_ENTRY_OBJS) $(ARLEN_ENTRY_OBJS) $(BOOMHAUER_ENTRY_OBJS) $(SMOKE_RENDER_ENTRY_OBJS) $(TECH_DEMO_SERVER_ENTRY_OBJS) $(API_REFERENCE_SERVER_ENTRY_OBJS) $(AUTH_PRIMITIVES_SERVER_ENTRY_OBJS) $(MIGRATION_SAMPLE_SERVER_ENTRY_OBJS) $(ARLEN_DATA_EXAMPLE_ENTRY_OBJS) $(JSON_PERF_BENCH_ENTRY_OBJS) $(DISPATCH_PERF_BENCH_ENTRY_OBJS) $(HTTP_PARSE_PERF_BENCH_ENTRY_OBJS) $(ROUTE_MATCH_PERF_BENCH_ENTRY_OBJS) $(BACKEND_CONTRACT_MATRIX_ENTRY_OBJS) $(XCTEST_BUNDLE_RUNNER_ENTRY_OBJS) $(UNIT_TEST_OBJS) $(INTEGRATION_TEST_OBJS) $(BROWSER_ERROR_AUDIT_TEST_OBJS) $(TEST_SHARED_OBJS) $(PHASE20_SQL_BUILDER_TEST_OBJS) $(PHASE20_SCHEMA_TEST_OBJS) $(PHASE20_POSTGRES_LIVE_TEST_OBJS) $(PHASE20_MSSQL_LIVE_TEST_OBJS) $(PHASE20_ROUTING_TEST_OBJS) $(PHASE21_TEMPLATE_TEST_OBJS) $(PHASE24_WINDOWS_DB_SMOKE_TEST_OBJS) $(PHASE24_WINDOWS_RUNTIME_TEST_OBJS))
 ALL_DEPFILES := $(ALL_OBJECTS:.o=.d)
 
-.PHONY: all clang64-preview framework-artifacts eocc transpile module-transpile tech-demo-transpile generated-compile arlen boomhauer tech-demo-server api-reference-server auth-primitives-server migration-sample-server arlen-data-example json-perf-bench dispatch-perf-bench http-parse-perf-bench route-match-perf-bench backend-contract-matrix test-data-layer dev-server tech-demo smoke-render smoke routes build-tests test test-unit test-unit-filter test-integration test-integration-filter browser-error-audit phase20-sql-builder-tests phase20-schema-tests phase20-postgres-live-tests phase20-mssql-live-tests phase20-routing-tests phase20-focused phase21-template-tests phase21-protocol-tests phase21-generated-app-tests phase21-focused phase21-confidence phase24-windows-tests phase24-windows-db-smoke phase24-windows-runtime-tests phase24-windows-confidence perf perf-fast ci-perf-smoke parity-phaseb perf-phasec perf-phased deploy-smoke phase5e-confidence phase12-confidence phase13-confidence phase14-confidence phase15-confidence phase16-confidence phase19-confidence phase20-confidence ci-quality ci-sanitizers ci-fault-injection ci-release-certification ci-json-abstraction ci-json-perf ci-dispatch-perf ci-http-parse-perf ci-route-match-perf ci-backend-parity-matrix ci-protocol-adversarial ci-syscall-faults ci-allocation-faults ci-soak ci-chaos-restart ci-static-analysis ci-blob-throughput ci-phase11-protocol-adversarial ci-phase11-fuzz ci-phase11-live-adversarial ci-phase11-sanitizers ci-phase11 ci-docs ci-benchmark-contracts check docs-api docs-html docs-serve clean
+.PHONY: all clang64-preview framework-artifacts eocc transpile module-transpile tech-demo-transpile generated-compile arlen boomhauer tech-demo-server api-reference-server auth-primitives-server migration-sample-server arlen-data-example json-perf-bench dispatch-perf-bench http-parse-perf-bench route-match-perf-bench backend-contract-matrix test-data-layer dev-server tech-demo smoke-render smoke routes build-tests test test-unit test-unit-filter test-integration test-integration-filter browser-error-audit phase20-sql-builder-tests phase20-schema-tests phase20-postgres-live-tests phase20-mssql-live-tests phase20-routing-tests phase20-focused phase21-template-tests phase21-protocol-tests phase21-generated-app-tests phase21-focused phase21-confidence phase24-windows-tests phase24-windows-db-smoke phase24-windows-runtime-tests phase24-windows-confidence phase24-windows-parity perf perf-fast ci-perf-smoke parity-phaseb perf-phasec perf-phased deploy-smoke phase5e-confidence phase12-confidence phase13-confidence phase14-confidence phase15-confidence phase16-confidence phase19-confidence phase20-confidence ci-quality ci-sanitizers ci-fault-injection ci-release-certification ci-json-abstraction ci-json-perf ci-dispatch-perf ci-http-parse-perf ci-route-match-perf ci-backend-parity-matrix ci-protocol-adversarial ci-syscall-faults ci-allocation-faults ci-soak ci-chaos-restart ci-static-analysis ci-blob-throughput ci-phase11-protocol-adversarial ci-phase11-fuzz ci-phase11-live-adversarial ci-phase11-sanitizers ci-phase11 ci-docs ci-benchmark-contracts check docs-api docs-html docs-serve clean
 
 ifeq ($(ARLEN_WINDOWS_PREVIEW),1)
 all: framework-artifacts arlen
@@ -489,6 +487,22 @@ $(XCTEST_BUNDLE_RUNNER_TOOL): $(XCTEST_BUNDLE_RUNNER_ENTRY_OBJS) | $(BUILD_DIR)
 >@mkdir -p $(@D)
 >@source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) $(XCTEST_BUNDLE_RUNNER_ENTRY_OBJS) -o $(XCTEST_BUNDLE_RUNNER_TOOL) $(XCTEST_LINK_LIBS)
 
+$(UNIT_TEST_TOOL): $(XCTEST_BUNDLE_RUNNER_ENTRY_OBJS) $(UNIT_TEST_OBJS) $(TEST_SHARED_OBJS) $(MODULE_OBJS) $(ROOT_GENERATED_OBJS) $(MODULE_GENERATED_OBJS) $(ARLEN_FRAMEWORK_LIB) | $(ROOT_TRANSPILE_STATE) $(MODULE_TRANSPILE_STATE)
+>@mkdir -p $(@D)
+>@source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) $(XCTEST_BUNDLE_RUNNER_ENTRY_OBJS) $(UNIT_TEST_OBJS) $(TEST_SHARED_OBJS) $(MODULE_OBJS) $(ROOT_GENERATED_OBJS) $(MODULE_GENERATED_OBJS) $(ARLEN_FRAMEWORK_LIB) -o $(UNIT_TEST_TOOL) $(XCTEST_LINK_LIBS)
+
+$(INTEGRATION_TEST_TOOL): $(XCTEST_BUNDLE_RUNNER_ENTRY_OBJS) $(INTEGRATION_TEST_OBJS) $(TEST_SHARED_OBJS) $(MODULE_OBJS) $(ROOT_GENERATED_OBJS) $(MODULE_GENERATED_OBJS) $(ARLEN_FRAMEWORK_LIB) $(BOOMHAUER_TOOL) $(TECH_DEMO_SERVER_TOOL) $(API_REFERENCE_SERVER_TOOL) $(AUTH_PRIMITIVES_SERVER_TOOL) $(MIGRATION_SAMPLE_SERVER_TOOL) $(BACKEND_CONTRACT_MATRIX_TOOL) | $(ROOT_TRANSPILE_STATE) $(MODULE_TRANSPILE_STATE)
+>@mkdir -p $(@D)
+>@source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) $(XCTEST_BUNDLE_RUNNER_ENTRY_OBJS) $(INTEGRATION_TEST_OBJS) $(TEST_SHARED_OBJS) $(MODULE_OBJS) $(ROOT_GENERATED_OBJS) $(MODULE_GENERATED_OBJS) $(ARLEN_FRAMEWORK_LIB) -o $(INTEGRATION_TEST_TOOL) $(XCTEST_LINK_LIBS)
+
+$(PHASE20_POSTGRES_LIVE_TEST_TOOL): $(XCTEST_BUNDLE_RUNNER_ENTRY_OBJS) $(PHASE20_POSTGRES_LIVE_TEST_OBJS) $(TEST_SHARED_OBJS) $(ARLEN_FRAMEWORK_LIB) | $(BUILD_DIR)
+>@mkdir -p $(@D)
+>@source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) $(XCTEST_BUNDLE_RUNNER_ENTRY_OBJS) $(PHASE20_POSTGRES_LIVE_TEST_OBJS) $(TEST_SHARED_OBJS) $(ARLEN_FRAMEWORK_LIB) -o $(PHASE20_POSTGRES_LIVE_TEST_TOOL) $(XCTEST_LINK_LIBS)
+
+$(PHASE20_MSSQL_LIVE_TEST_TOOL): $(XCTEST_BUNDLE_RUNNER_ENTRY_OBJS) $(PHASE20_MSSQL_LIVE_TEST_OBJS) $(TEST_SHARED_OBJS) $(ARLEN_FRAMEWORK_LIB) | $(BUILD_DIR)
+>@mkdir -p $(@D)
+>@source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) $(XCTEST_BUNDLE_RUNNER_ENTRY_OBJS) $(PHASE20_MSSQL_LIVE_TEST_OBJS) $(TEST_SHARED_OBJS) $(ARLEN_FRAMEWORK_LIB) -o $(PHASE20_MSSQL_LIVE_TEST_TOOL) $(XCTEST_LINK_LIBS)
+
 $(PHASE24_WINDOWS_TEMPLATE_TEST_TOOL): $(XCTEST_BUNDLE_RUNNER_ENTRY_OBJS) $(PHASE21_TEMPLATE_TEST_OBJS) $(TEST_SHARED_OBJS) $(ARLEN_FRAMEWORK_LIB) | $(BUILD_DIR)
 >@mkdir -p $(@D)
 >@source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) $(XCTEST_BUNDLE_RUNNER_ENTRY_OBJS) $(PHASE21_TEMPLATE_TEST_OBJS) $(TEST_SHARED_OBJS) $(ARLEN_FRAMEWORK_LIB) -o $(PHASE24_WINDOWS_TEMPLATE_TEST_TOOL) $(XCTEST_LINK_LIBS)
@@ -585,7 +599,7 @@ $(UNIT_TEST_BIN): $(UNIT_TEST_OBJS) $(TEST_SHARED_OBJS) $(ARLEN_FRAMEWORK_LIB) $
 >@source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) $(UNIT_TEST_OBJS) $(TEST_SHARED_OBJS) $(MODULE_OBJS) $(ROOT_GENERATED_OBJS) $(MODULE_GENERATED_OBJS) $(ARLEN_FRAMEWORK_LIB) -shared -fPIC -o $(UNIT_TEST_BIN) $(XCTEST_LINK_LIBS)
 >@cp tests/Info-gnustep-unit.plist $(UNIT_TEST_BUNDLE)/Resources/Info-gnustep.plist
 
-$(INTEGRATION_TEST_BIN): $(INTEGRATION_TEST_OBJS) $(TEST_SHARED_OBJS) $(ARLEN_FRAMEWORK_LIB) $(MODULE_OBJS) $(ROOT_GENERATED_OBJS) $(MODULE_GENERATED_OBJS) $(BOOMHAUER_TOOL) $(TECH_DEMO_SERVER_TOOL) $(API_REFERENCE_SERVER_TOOL) $(AUTH_PRIMITIVES_SERVER_TOOL) $(MIGRATION_SAMPLE_SERVER_TOOL) | $(ROOT_TRANSPILE_STATE) $(MODULE_TRANSPILE_STATE)
+$(INTEGRATION_TEST_BIN): $(INTEGRATION_TEST_OBJS) $(TEST_SHARED_OBJS) $(ARLEN_FRAMEWORK_LIB) $(MODULE_OBJS) $(ROOT_GENERATED_OBJS) $(MODULE_GENERATED_OBJS) $(BOOMHAUER_TOOL) $(TECH_DEMO_SERVER_TOOL) $(API_REFERENCE_SERVER_TOOL) $(AUTH_PRIMITIVES_SERVER_TOOL) $(MIGRATION_SAMPLE_SERVER_TOOL) $(BACKEND_CONTRACT_MATRIX_TOOL) | $(ROOT_TRANSPILE_STATE) $(MODULE_TRANSPILE_STATE)
 >@mkdir -p $(INTEGRATION_TEST_BUNDLE)/Resources
 >@source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) $(INTEGRATION_TEST_OBJS) $(TEST_SHARED_OBJS) $(MODULE_OBJS) $(ROOT_GENERATED_OBJS) $(MODULE_GENERATED_OBJS) $(ARLEN_FRAMEWORK_LIB) -shared -fPIC -o $(INTEGRATION_TEST_BIN) $(XCTEST_LINK_LIBS)
 >@cp tests/Info-gnustep-integration.plist $(INTEGRATION_TEST_BUNDLE)/Resources/Info-gnustep.plist
@@ -637,6 +651,33 @@ $(PHASE24_WINDOWS_RUNTIME_TEST_BIN): $(PHASE24_WINDOWS_RUNTIME_TEST_OBJS) $(TEST
 
 build-tests: $(UNIT_TEST_BIN) $(INTEGRATION_TEST_BIN)
 
+ifeq ($(ARLEN_WINDOWS_PREVIEW),1)
+test-unit: $(UNIT_TEST_TOOL)
+>mkdir -p $(GNUSTEP_TEST_HOME)/GNUstep/Defaults/.lck
+>source $(GNUSTEP_SH) && export HOME="$(GNUSTEP_TEST_HOME)" GNUSTEP_USER_DIR="$(GNUSTEP_TEST_HOME)/GNUstep" GNUSTEP_USER_ROOT="$(GNUSTEP_TEST_HOME)/GNUstep" GNUSTEP_USER_DEFAULTS_DIR="$(GNUSTEP_TEST_HOME)/GNUstep/Defaults" && $(xctest_runtime_env) "$(UNIT_TEST_TOOL)"
+
+test-unit-filter: $(UNIT_TEST_TOOL)
+>if [ -z "$(strip $(TEST)$(SKIP_TEST))" ]; then echo "test-unit-filter: set TEST=TestClass[/testMethod] or SKIP_TEST=TestClass[/testMethod]" >&2; exit 2; fi
+>mkdir -p $(GNUSTEP_TEST_HOME)/GNUstep/Defaults/.lck
+>source $(GNUSTEP_SH) && export HOME="$(GNUSTEP_TEST_HOME)" GNUSTEP_USER_DIR="$(GNUSTEP_TEST_HOME)/GNUstep" GNUSTEP_USER_ROOT="$(GNUSTEP_TEST_HOME)/GNUstep" GNUSTEP_USER_DEFAULTS_DIR="$(GNUSTEP_TEST_HOME)/GNUstep/Defaults" && $(xctest_runtime_env) "$(UNIT_TEST_TOOL)" $(call xctest_filter_args,$(UNIT_TEST_TARGET_NAME))
+
+test-integration: $(INTEGRATION_TEST_TOOL)
+>mkdir -p $(GNUSTEP_TEST_HOME)/GNUstep/Defaults/.lck
+>source $(GNUSTEP_SH) && export HOME="$(GNUSTEP_TEST_HOME)" GNUSTEP_USER_DIR="$(GNUSTEP_TEST_HOME)/GNUstep" GNUSTEP_USER_ROOT="$(GNUSTEP_TEST_HOME)/GNUstep" GNUSTEP_USER_DEFAULTS_DIR="$(GNUSTEP_TEST_HOME)/GNUstep/Defaults" && $(xctest_runtime_env) "$(INTEGRATION_TEST_TOOL)"
+
+test-integration-filter: $(INTEGRATION_TEST_TOOL)
+>if [ -z "$(strip $(TEST)$(SKIP_TEST))" ]; then echo "test-integration-filter: set TEST=TestClass[/testMethod] or SKIP_TEST=TestClass[/testMethod]" >&2; exit 2; fi
+>mkdir -p $(GNUSTEP_TEST_HOME)/GNUstep/Defaults/.lck
+>source $(GNUSTEP_SH) && export HOME="$(GNUSTEP_TEST_HOME)" GNUSTEP_USER_DIR="$(GNUSTEP_TEST_HOME)/GNUstep" GNUSTEP_USER_ROOT="$(GNUSTEP_TEST_HOME)/GNUstep" GNUSTEP_USER_DEFAULTS_DIR="$(GNUSTEP_TEST_HOME)/GNUstep/Defaults" && $(xctest_runtime_env) "$(INTEGRATION_TEST_TOOL)" $(call xctest_filter_args,$(INTEGRATION_TEST_TARGET_NAME))
+
+phase20-postgres-live-tests: $(PHASE20_POSTGRES_LIVE_TEST_TOOL)
+>mkdir -p $(GNUSTEP_TEST_HOME)/GNUstep/Defaults/.lck
+>source $(GNUSTEP_SH) && export HOME="$(GNUSTEP_TEST_HOME)" GNUSTEP_USER_DIR="$(GNUSTEP_TEST_HOME)/GNUstep" GNUSTEP_USER_ROOT="$(GNUSTEP_TEST_HOME)/GNUstep" GNUSTEP_USER_DEFAULTS_DIR="$(GNUSTEP_TEST_HOME)/GNUstep/Defaults" && $(xctest_runtime_env) "$(PHASE20_POSTGRES_LIVE_TEST_TOOL)"
+
+phase20-mssql-live-tests: $(PHASE20_MSSQL_LIVE_TEST_TOOL)
+>mkdir -p $(GNUSTEP_TEST_HOME)/GNUstep/Defaults/.lck
+>source $(GNUSTEP_SH) && export HOME="$(GNUSTEP_TEST_HOME)" GNUSTEP_USER_DIR="$(GNUSTEP_TEST_HOME)/GNUstep" GNUSTEP_USER_ROOT="$(GNUSTEP_TEST_HOME)/GNUstep" GNUSTEP_USER_DEFAULTS_DIR="$(GNUSTEP_TEST_HOME)/GNUstep/Defaults" && $(xctest_runtime_env) "$(PHASE20_MSSQL_LIVE_TEST_TOOL)"
+else
 test-unit: $(UNIT_TEST_BIN)
 >mkdir -p $(GNUSTEP_TEST_HOME)/GNUstep/Defaults/.lck
 >source $(GNUSTEP_SH) && export HOME="$(GNUSTEP_TEST_HOME)" GNUSTEP_USER_DIR="$(GNUSTEP_TEST_HOME)/GNUstep" GNUSTEP_USER_ROOT="$(GNUSTEP_TEST_HOME)/GNUstep" GNUSTEP_USER_DEFAULTS_DIR="$(GNUSTEP_TEST_HOME)/GNUstep/Defaults" && $(xctest_runtime_env) "$(ARLEN_XCTEST)" $(UNIT_TEST_BUNDLE)
@@ -675,6 +716,7 @@ phase20-postgres-live-tests: $(PHASE20_POSTGRES_LIVE_TEST_BIN)
 phase20-mssql-live-tests: $(PHASE20_MSSQL_LIVE_TEST_BIN)
 >mkdir -p $(GNUSTEP_TEST_HOME)/GNUstep/Defaults/.lck
 >source $(GNUSTEP_SH) && export HOME="$(GNUSTEP_TEST_HOME)" GNUSTEP_USER_DIR="$(GNUSTEP_TEST_HOME)/GNUstep" GNUSTEP_USER_ROOT="$(GNUSTEP_TEST_HOME)/GNUstep" GNUSTEP_USER_DEFAULTS_DIR="$(GNUSTEP_TEST_HOME)/GNUstep/Defaults" && $(xctest_runtime_env) "$(ARLEN_XCTEST)" $(PHASE20_MSSQL_LIVE_TEST_BUNDLE)
+endif
 
 phase20-routing-tests: $(PHASE20_ROUTING_TEST_BIN)
 >mkdir -p $(GNUSTEP_TEST_HOME)/GNUstep/Defaults/.lck
@@ -714,6 +756,9 @@ endif
 
 phase24-windows-confidence:
 >bash ./tools/ci/run_phase24_windows_preview.sh
+
+phase24-windows-parity:
+>bash ./tools/ci/run_phase24_windows_parity.sh
 
 phase21-protocol-tests:
 >bash ./tools/ci/run_phase21_protocol_corpus.sh

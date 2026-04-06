@@ -1,14 +1,14 @@
 # Windows CLANG64 Preview
 
-Last updated: 2026-04-01
+Last updated: 2026-04-06
 
 This document records the native Windows workflow for Arlen on MSYS2
 `CLANG64`.
 
-The checked-in Phase 24 preview/runtime contract (`24A-24P`) is complete on
-branch `windows/clang64`. The broader roadmap now continues with `24Q-24S` for
-the remaining Windows-to-Linux parity and platform closeout work, but this
-document still records the current supported preview boundary.
+The checked-in Phase 24 preview/runtime contract plus the `24Q-24R` Windows
+parity work are complete on branch `windows/clang64`. Phase `24S` still
+remains for release/package/first-class platform closeout, so this document
+continues to record the current supported preview boundary.
 
 ## 1. Host Entry Path
 
@@ -100,28 +100,62 @@ Broader Windows confidence lane:
 make phase24-windows-confidence
 ```
 
+Default Linux-matching test entrypoints on Windows:
+
+```sh
+make test-unit
+make test-integration
+```
+
+Live-backend suites on Windows:
+
+```sh
+make phase20-postgres-live-tests
+make phase20-mssql-live-tests
+```
+
+Full `24Q-24R` parity lane:
+
+```sh
+make phase24-windows-parity
+```
+
 PowerShell wrappers:
 
 - `scripts/run_phase24_windows_tests.ps1`
 - `scripts/run_clang64.ps1 -InnerCommand "make phase24-windows-db-smoke"`
 - `scripts/run_clang64.ps1 -InnerCommand "make phase24-windows-runtime-tests"`
 - `scripts/run_clang64.ps1 -InnerCommand "make phase24-windows-confidence"`
+- `scripts/run_phase24_windows_parity.ps1`
+
+Backend env contract for the Windows live-backend/parity lanes:
+
+- `ARLEN_PG_TEST_DSN`
+- `ARLEN_LIBPQ_LIBRARY`
+- `ARLEN_PSQL`
+- `ARLEN_ODBC_LIBRARY`
+- `ARLEN_MSSQL_TEST_DSN`
+
+On the checked-in parity hosts, `tools/ci/_phase24_windows_env.sh` can
+populate those defaults automatically and start `MSSQLLocalDB` when the MSSQL
+DSN is unset.
 
 Current verification note:
 
-- As of 2026-04-01, `make phase24-windows-tests`,
-  `make phase24-windows-db-smoke`, `make phase24-windows-runtime-tests`, and
-  `make phase24-windows-confidence` completed on the checked-in CLANG64 path in
+- As of 2026-04-06, `make phase24-windows-tests`,
+  `make phase24-windows-db-smoke`, `make phase24-windows-runtime-tests`,
+  `make phase24-windows-confidence`, `make test-unit`,
+  `make test-integration`, `make phase20-postgres-live-tests`, and
+  `make phase20-mssql-live-tests` completed on the checked-in CLANG64 path in
   this workspace.
-- The focused Windows lanes use repo-local linked test executables so test
-  discovery stays reliable on CLANG64 even though the stock bundle-based
-  `xctest` flow is not.
-- The PostgreSQL transport smoke is prerequisite-aware: when `libpq` is
-  absent, it validates the documented missing-library failure contract instead
-  of pretending loader parity.
+- The broader `24Q-24R` perf/robustness lanes wired through
+  `make phase24-windows-parity` were also rerun successfully on this host on
+  2026-04-06.
+- The focused Windows lanes still use repo-local linked test executables so
+  test discovery stays reliable on CLANG64.
 - The only remaining warning observed in this workspace is the upstream
-  CLANG64/GNUstep `-fobjc-exceptions` unused-command-line warning; the
-  previously tracked Arlen source portability warnings are resolved.
+  CLANG64/GNUstep `-fobjc-exceptions` unused-command-line warning rather than
+  an Arlen portability warning.
 
 ## 5. Supported Native Windows Surface
 
@@ -133,7 +167,16 @@ Supported on the current branch:
 - `arlen generate`
 - `arlen build`
 - `arlen check`
+- `make all`
+- `make phase24-windows-tests`
+- `make phase24-windows-db-smoke`
+- `make phase24-windows-confidence`
+- `make test-unit`
+- `make test-integration`
+- `make phase20-postgres-live-tests`
+- `make phase20-mssql-live-tests`
 - `make phase24-windows-runtime-tests`
+- `make phase24-windows-parity`
 - `arlen boomhauer` for app-root watch and non-watch flows, including fallback
   dev error recovery
 - `arlen jobs worker`
@@ -151,16 +194,18 @@ Supported on the current branch:
 
 Still intentionally unsupported:
 
-- the default `make test-unit` / `make test-integration` / live-backend matrix
-- Linux perf/sanitizer confidence lanes
 - Windows release/install/package closeout
 - Windows service-integration guidance beyond direct `propane` usage
+- first-class Windows deployment/docs packaging outside the checked-in CLANG64
+  path
 
 The runtime/deployment boundary is documented in:
 
 - `docs/WINDOWS_RUNTIME_STORY.md`
 
-## 7. Suggested Smoke Sequence
+## 7. Suggested Windows Sequence
+
+Fast smoke:
 
 ```sh
 ./bin/arlen doctor
@@ -169,6 +214,16 @@ make phase24-windows-tests
 make phase24-windows-db-smoke
 make phase24-windows-runtime-tests
 make phase24-windows-confidence
+```
+
+Full `24Q-24R` parity rerun:
+
+```sh
+make test-unit
+make test-integration
+make phase20-postgres-live-tests
+make phase20-mssql-live-tests
+make phase24-windows-parity
 ```
 
 For app-root smoke:

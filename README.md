@@ -40,11 +40,12 @@ Then open `http://127.0.0.1:3000/`.
 ## Windows Preview
 
 The Phase 24 native Windows implementation is on branch `windows/clang64` and
-defines the current MSYS2 `CLANG64` preview contract. That preview covers the
-CLI, focused Windows XCTest lanes, DB transport smoke, the focused Windows
-runtime parity lane, and app-root `boomhauer`/`jobs worker`/`propane` flows,
-but it still intentionally stops short of the broader Linux parity work in the
-full test/live-backend matrix, perf/sanitizer lanes, and release packaging.
+defines the current MSYS2 `CLANG64` preview contract. That preview now covers
+the CLI, focused Windows XCTest lanes, the default `make test-unit` /
+`make test-integration` entrypoints, PostgreSQL and MSSQL live-backend suites,
+the broader Windows parity workflow, and app-root
+`boomhauer`/`jobs worker`/`propane` flows, but it still intentionally stops
+short of the remaining Phase `24S` release/install/package closeout.
 
 Use the checked-in PowerShell launcher to enter the supported toolchain:
 
@@ -176,7 +177,7 @@ below is the detailed milestone ledger for the shipped surface summarized above.
 - Phase 20: complete (`20A-20K` delivered on 2026-03-26; `20L-20R` delivered on 2026-03-27 for MSSQL native transport tightening, ordered result semantics, bounded PostgreSQL metadata expansion, explicit live-test requirement accounting, shared test support/assertion layers, and repo-native focused confidence lanes. See `docs/PHASE20_ROADMAP.md`).
 - Phase 21: complete (`21A-21G` delivered on 2026-03-27 for in-process request harnesses, shared request/pipeline assertion helpers, explicit async DB ownership rules, template-suite decomposition, raw protocol corpus replay, generated-app matrix coverage, and repo-native focused confidence lanes. See `docs/PHASE21_ROADMAP.md`).
 - Phase 22: complete (`22A-22G` delivered on 2026-03-30 for newcomer-first onboarding, docs/code parity hardening, app-author guides, module/lite-mode guidance, plugin/frontend guides, and docs quality closeout. See `docs/PHASE22_ROADMAP.md`).
-- Phase 24: in progress on branch `windows/clang64` (`24A-24P` delivered on 2026-04-01 for the checked-in MSYS2 `CLANG64` preview/runtime contract; `24Q-24S` now track the remaining work required to bring Windows to Linux parity. See `docs/PHASE24_ROADMAP.md`).
+- Phase 24: in progress on branch `windows/clang64` (`24A-24R` delivered on 2026-04-06 for the checked-in MSYS2 `CLANG64` Windows parity contract; `24S` now tracks release, packaging, and first-class platform closeout. See `docs/PHASE24_ROADMAP.md`).
 
 ## Requirements and Setup Details
 

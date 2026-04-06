@@ -52,6 +52,11 @@ static NSString *ALNTestSupportPortablePath(NSString *path) {
 #endif
 }
 
+static NSString *ALNTestSupportShellSingleQuoted(NSString *value) {
+  NSString *string = [value isKindOfClass:[NSString class]] ? value : @"";
+  return [NSString stringWithFormat:@"'%@'", [string stringByReplacingOccurrencesOfString:@"'" withString:@"'\"'\"'"]];
+}
+
 static NSError *ALNTestSupportMakeError(NSString *message, NSDictionary *userInfo) {
   return [NSError errorWithDomain:ALNTestSupportErrorDomain
                              code:1
@@ -76,6 +81,77 @@ static BOOL ALNTestSupportEnsureWinsockInitialized(void) {
     initialized = (WSAStartup(MAKEWORD(2, 2), &socketData) == 0);
   }
   return initialized;
+}
+
+static void ALNTestSupportAppendWindowsPathEntry(NSMutableArray<NSString *> *entries,
+                                                 NSMutableSet<NSString *> *seenEntries,
+                                                 NSString *path) {
+  NSString *normalized = ALNTestSupportPortablePath(path);
+  if (![normalized isKindOfClass:[NSString class]] || [normalized length] == 0 ||
+      [seenEntries containsObject:normalized]) {
+    return;
+  }
+  [entries addObject:normalized];
+  [seenEntries addObject:normalized];
+}
+
+static void ALNTestSupportAppendExecutableDirectory(NSMutableArray<NSString *> *entries,
+                                                    NSMutableSet<NSString *> *seenEntries,
+                                                    NSString *path) {
+  NSString *normalized = ALNTestSupportPortablePath(path);
+  if (![normalized isKindOfClass:[NSString class]] || [normalized length] == 0) {
+    return;
+  }
+
+  NSFileManager *fileManager = [NSFileManager defaultManager];
+  BOOL isDirectory = NO;
+  if (![fileManager fileExistsAtPath:normalized isDirectory:&isDirectory]) {
+    return;
+  }
+
+  NSString *directory = isDirectory ? normalized : [normalized stringByDeletingLastPathComponent];
+  NSString *psqlPath = [directory stringByAppendingPathComponent:@"psql.exe"];
+  if ([fileManager isExecutableFileAtPath:psqlPath]) {
+    ALNTestSupportAppendWindowsPathEntry(entries, seenEntries, directory);
+  }
+}
+
+static NSArray<NSString *> *ALNTestSupportWindowsShellPathEntries(void) {
+  NSMutableArray<NSString *> *entries = [NSMutableArray array];
+  NSMutableSet<NSString *> *seenEntries = [NSMutableSet set];
+
+  ALNTestSupportAppendExecutableDirectory(entries,
+                                          seenEntries,
+                                          ALNTestEnvironmentString(@"ARLEN_PSQL"));
+  ALNTestSupportAppendExecutableDirectory(entries,
+                                          seenEntries,
+                                          ALNTestEnvironmentString(@"ARLEN_LIBPQ_LIBRARY"));
+
+  NSString *postgresInstallRoot = @"C:/Program Files/PostgreSQL";
+  NSArray<NSString *> *versionDirectories =
+      [[[NSFileManager defaultManager] contentsOfDirectoryAtPath:postgresInstallRoot error:nil]
+          sortedArrayUsingSelector:@selector(localizedStandardCompare:)];
+  for (NSString *version in versionDirectories) {
+    NSString *candidate = [[postgresInstallRoot stringByAppendingPathComponent:version]
+        stringByAppendingPathComponent:@"bin"];
+    ALNTestSupportAppendExecutableDirectory(entries, seenEntries, candidate);
+  }
+
+  return entries;
+}
+
+static NSString *ALNTestSupportWindowsShellPathPrefix(void) {
+  NSMutableArray<NSString *> *shellEntries = [NSMutableArray array];
+  for (NSString *entry in ALNTestSupportWindowsShellPathEntries()) {
+    NSString *shellPath = ALNTestShellPath(entry);
+    if ([shellPath length] > 0) {
+      [shellEntries addObject:shellPath];
+    }
+  }
+  if ([shellEntries count] == 0) {
+    return nil;
+  }
+  return [shellEntries componentsJoinedByString:@":"];
 }
 #endif
 
@@ -397,7 +473,16 @@ NSString *ALNTestRunShellCapture(NSString *command, int *exitCode) {
   @try {
     NSTask *task = [[NSTask alloc] init];
     task.launchPath = ALNTestResolvedBashLaunchPath();
-    task.arguments = @[ @"-lc", [command isKindOfClass:[NSString class]] ? command : @"" ];
+    NSString *shellCommand = [command isKindOfClass:[NSString class]] ? command : @"";
+#if defined(_WIN32)
+    NSString *shellPathPrefix = ALNTestSupportWindowsShellPathPrefix();
+    if ([shellPathPrefix length] > 0) {
+      shellCommand = [NSString stringWithFormat:@"PATH=%@:\"$PATH\"; export PATH; %@",
+                                                  ALNTestSupportShellSingleQuoted(shellPathPrefix),
+                                                  shellCommand];
+    }
+#endif
+    task.arguments = @[ @"-lc", shellCommand ];
 
     NSPipe *stdoutPipe = [NSPipe pipe];
     NSPipe *stderrPipe = [NSPipe pipe];

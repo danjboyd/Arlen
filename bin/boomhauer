@@ -131,6 +131,13 @@ if detect_windows_preview; then
   windows_preview=1
 fi
 
+framework_root="$(normalize_host_path "$framework_root")"
+if ! framework_root="$(cd "$framework_root" 2>/dev/null && pwd -P)"; then
+  echo "boomhauer: invalid framework root: $framework_root" >&2
+  echo "boomhauer: set ARLEN_FRAMEWORK_ROOT to a valid Arlen repository root" >&2
+  exit 1
+fi
+
 if [[ ! -f "$framework_root/GNUmakefile" || ! -d "$framework_root/src/Arlen" ]]; then
   echo "boomhauer: invalid framework root: $framework_root" >&2
   echo "boomhauer: set ARLEN_FRAMEWORK_ROOT to a valid Arlen repository root" >&2
@@ -228,14 +235,28 @@ build_root="$state_root/build"
 app_binary="$build_root/boomhauer-app"
 app_makefile="$build_root/AppGNUmakefile"
 framework_lib="$framework_root/build/lib/libArlenFramework.a"
-framework_eocc_make_target="build/eocc"
-framework_lib_make_target="build/lib/libArlenFramework.a"
+framework_eocc_make_target="$framework_root/build/eocc"
+framework_lib_make_target="$framework_root/build/lib/libArlenFramework.a"
 gen_root="$build_root/gen/templates"
 module_manifest_root="$gen_root/manifests"
 app_template_root="$gen_root/app"
 error_output_file="$state_root/last_build_error.log"
 error_meta_file="$state_root/last_build_error.meta"
+watch_log_file="$state_root/watch.log"
 mkdir -p "$gen_root" "$module_manifest_root"
+: >"$watch_log_file"
+
+log_watch_event() {
+  local event="$1"
+  shift
+  {
+    printf '%s event=%s' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" "$event"
+    for field in "$@"; do
+      printf ' %s' "$field"
+    done
+    printf '\n'
+  } >>"$watch_log_file"
+}
 
 normalized_non_negative_integer() {
   local raw="$1"
@@ -251,51 +272,84 @@ build_error_retry_seconds="$(normalized_non_negative_integer "${ARLEN_BOOMHAUER_
 build_error_auto_refresh_seconds="$(normalized_non_negative_integer "${ARLEN_BOOMHAUER_BUILD_ERROR_AUTO_REFRESH_SECONDS:-3}" 3)"
 build_error_recovery_hint="${ARLEN_BOOMHAUER_BUILD_ERROR_RECOVERY_HINT:-Fix the compile error and save a watched file. Boomhauer retries automatically every ${build_error_retry_seconds} seconds while the diagnostic server is active.}"
 
-file_fingerprint_fields() {
-  local path="$1"
-  python3 - "$path" <<'PY'
-import os
-import sys
-
-path = sys.argv[1]
-try:
-    stat_result = os.stat(path, follow_symlinks=False)
-except OSError:
-    print("0|0|0")
-    raise SystemExit(0)
-
-print(f"{stat_result.st_size}|{stat_result.st_mtime_ns}|{stat_result.st_ctime_ns}")
-PY
-}
-
 append_fingerprint_entries() {
   local base="$1"
   local label="$2"
-  shift 2
+  local fingerprint_mode="${3:-stat}"
+  shift 3
+  python3 - "$base" "$label" "$fingerprint_mode" "$@" <<'PY'
+import hashlib
+import os
+import sys
 
-  local found=0
-  local rel path
+base = sys.argv[1]
+label = sys.argv[2]
+fingerprint_mode = sys.argv[3]
+rels = sys.argv[4:]
+include_content_hash = fingerprint_mode == "content"
 
-  for rel in "$@"; do
-    path="$base/$rel"
-    if [[ -d "$path" ]]; then
-      while IFS= read -r file; do
-        local rel_file
-        rel_file="${file#"$base"/}"
-        printf '%s|%s|' "$label" "$rel_file"
-        file_fingerprint_fields "$file"
-        found=1
-      done < <(find "$path" -type f | sort)
-    elif [[ -f "$path" ]]; then
-      printf '%s|%s|' "$label" "$rel"
-      file_fingerprint_fields "$path"
-      found=1
-    fi
-  done
+found = False
 
-  if [[ $found -eq 0 ]]; then
-    printf '%s|__empty__\n' "$label"
-  fi
+for rel in rels:
+    path = os.path.join(base, rel)
+    if os.path.isdir(path):
+        for root, dirs, files in os.walk(path):
+            dirs.sort()
+            files.sort()
+            for file_name in files:
+                file_path = os.path.join(root, file_name)
+                rel_file = os.path.relpath(file_path, base).replace(os.sep, "/")
+                try:
+                    stat_result = os.stat(file_path, follow_symlinks=False)
+                except OSError:
+                    fields = ["0", "0", "0"]
+                    if include_content_hash:
+                        fields.append("__missing__")
+                else:
+                    fields = [
+                        str(stat_result.st_size),
+                        str(stat_result.st_mtime_ns),
+                        str(stat_result.st_ctime_ns),
+                    ]
+                    if include_content_hash:
+                        digest = hashlib.sha256()
+                        try:
+                            with open(file_path, "rb") as handle:
+                                for chunk in iter(lambda: handle.read(65536), b""):
+                                    digest.update(chunk)
+                            fields.append(digest.hexdigest())
+                        except OSError:
+                            fields.append("__unreadable__")
+                print(f"{label}|{rel_file}|{'|'.join(fields)}")
+                found = True
+    elif os.path.isfile(path):
+        try:
+            stat_result = os.stat(path, follow_symlinks=False)
+        except OSError:
+            fields = ["0", "0", "0"]
+            if include_content_hash:
+                fields.append("__missing__")
+        else:
+            fields = [
+                str(stat_result.st_size),
+                str(stat_result.st_mtime_ns),
+                str(stat_result.st_ctime_ns),
+            ]
+            if include_content_hash:
+                digest = hashlib.sha256()
+                try:
+                    with open(path, "rb") as handle:
+                        for chunk in iter(lambda: handle.read(65536), b""):
+                            digest.update(chunk)
+                    fields.append(digest.hexdigest())
+                except OSError:
+                    fields.append("__unreadable__")
+        print(f"{label}|{rel}|{'|'.join(fields)}")
+        found = True
+
+if not found:
+    print(f"{label}|__empty__")
+PY
 }
 
 hash_fingerprint_stream() {
@@ -308,8 +362,8 @@ runtime_fingerprint() {
     printf 'framework_root|%s\n' "$framework_root"
     printf 'enable_yyjson|%s\n' "${ARLEN_ENABLE_YYJSON:-1}"
     printf 'enable_llhttp|%s\n' "${ARLEN_ENABLE_LLHTTP:-1}"
-    append_fingerprint_entries "$app_root" "app" src templates modules config public app_lite.m config/modules.plist
-    append_fingerprint_entries "$framework_root" "framework" src modules GNUmakefile tools/eocc.m
+    append_fingerprint_entries "$app_root" "app" "content" src templates modules config public app_lite.m config/modules.plist
+    append_fingerprint_entries "$framework_root" "framework" "stat" src modules GNUmakefile tools/eocc.m
   } | hash_fingerprint_stream
 }
 
@@ -591,7 +645,25 @@ emit_app_makefile() {
 }
 
 framework_artifacts_are_current() {
-  make -q -C "$framework_root" "$framework_eocc_make_target" "$framework_lib_make_target" >/dev/null 2>&1
+  local framework_eocc="$framework_root/build/eocc"
+  local framework_source=""
+
+  [[ -x "$framework_eocc" && -f "$framework_lib" ]] || return 1
+
+  for framework_source in "$framework_root/GNUmakefile" "$framework_root/tools/eocc.m"; do
+    if [[ -e "$framework_source" ]] &&
+       { [[ "$framework_source" -nt "$framework_eocc" ]] || [[ "$framework_source" -nt "$framework_lib" ]]; }; then
+      return 1
+    fi
+  done
+
+  while IFS= read -r framework_source; do
+    if [[ "$framework_source" -nt "$framework_eocc" ]] || [[ "$framework_source" -nt "$framework_lib" ]]; then
+      return 1
+    fi
+  done < <(find "$framework_root/src" -type f \( -name '*.h' -o -name '*.m' -o -name '*.c' \) 2>/dev/null)
+
+  return 0
 }
 
 framework_archive_contains_sanitizers() {
@@ -755,22 +827,28 @@ compile_app() {
   fi
   rm -f "$tmp_output"
 
-  if ! run_app_make_target \
+  if run_app_make_target \
       "$build_root/.objects-ready" \
       "boomhauer: [3/4] reusing current app objects" \
       "boomhauer: [3/4] compiling app objects" \
       "compile_objects" \
       "make -C $build_root -f $app_makefile $build_root/.objects-ready"; then
-    return 1
+    :
+  else
+    local status=$?
+    return "$status"
   fi
 
-  if ! run_app_make_target \
+  if run_app_make_target \
       "$app_binary" \
       "boomhauer: [4/4] reusing current app binary" \
       "boomhauer: [4/4] linking app binary" \
       "link" \
       "make -C $build_root -f $app_makefile $app_binary"; then
-    return 1
+    :
+  else
+    local status=$?
+    return "$status"
   fi
 
   clear_build_failure_state
@@ -817,9 +895,41 @@ resolve_app_binary() {
   return 1
 }
 
+resolve_windows_pid_for_child() {
+  local pid="$1"
+  local win_pid=""
+  if [[ $windows_preview -ne 1 ]]; then
+    return 1
+  fi
+  win_pid="$(ps -W | awk -v pid="$pid" '$1 == pid { print $4; exit }')"
+  if [[ "$win_pid" =~ ^[0-9]+$ ]]; then
+    printf '%s\n' "$win_pid"
+    return 0
+  fi
+  return 1
+}
+
 stop_child() {
+  local win_pid=""
   if [[ -n "$child_pid" ]] && kill -0 "$child_pid" 2>/dev/null; then
     kill -TERM "$child_pid" 2>/dev/null || true
+    for _ in $(seq 1 10); do
+      if ! kill -0 "$child_pid" 2>/dev/null; then
+        break
+      fi
+      sleep 0.1
+    done
+    if kill -0 "$child_pid" 2>/dev/null; then
+      if [[ $windows_preview -eq 1 ]] && command -v taskkill.exe >/dev/null 2>&1; then
+        if win_pid="$(resolve_windows_pid_for_child "$child_pid")"; then
+          taskkill.exe //T //F //PID "$win_pid" >/dev/null 2>&1 || true
+        else
+          taskkill.exe //T //F //PID "$child_pid" >/dev/null 2>&1 || true
+        fi
+      else
+        kill -KILL "$child_pid" 2>/dev/null || true
+      fi
+    fi
     wait "$child_pid" 2>/dev/null || true
   fi
   child_pid=""
@@ -842,6 +952,7 @@ start_app_child() {
   "$resolved_app_binary" "${server_args[@]}" &
   child_pid="$!"
   child_mode="app"
+  log_watch_event "child_started" "mode=app" "pid=$child_pid"
 }
 
 start_error_child() {
@@ -862,6 +973,7 @@ start_error_child() {
   "$error_server_binary" "${server_args[@]}" &
   child_pid="$!"
   child_mode="build_error"
+  log_watch_event "child_started" "mode=build_error" "pid=$child_pid"
 }
 
 run_once() {
@@ -892,6 +1004,7 @@ if [[ $watch_mode -eq 0 ]]; then
 fi
 
 last_runtime_fingerprint="$(runtime_fingerprint)"
+log_watch_event "watch_started" "fingerprint=$last_runtime_fingerprint"
 
 echo "boomhauer: watching $app_root"
 
@@ -921,6 +1034,10 @@ while [[ $stop_requested -eq 0 ]]; do
     sleep 1
     current_runtime_fingerprint="$(runtime_fingerprint)"
     if [[ "$current_runtime_fingerprint" != "$last_runtime_fingerprint" ]]; then
+      log_watch_event \
+        "change_detected" \
+        "old=${last_runtime_fingerprint:0:16}" \
+        "new=${current_runtime_fingerprint:0:16}"
       last_runtime_fingerprint="$current_runtime_fingerprint"
       echo "boomhauer: change detected, restarting..."
       restart_reason="change"
@@ -931,6 +1048,7 @@ while [[ $stop_requested -eq 0 ]]; do
       current_epoch="$(date +%s)"
       if [[ "$current_epoch" -ge "$next_build_retry_at" ]]; then
         next_build_retry_at=$(( current_epoch + build_error_retry_seconds ))
+        log_watch_event "build_retry"
         echo "boomhauer: retrying failed build..."
         restart_reason="build_retry"
         stop_child

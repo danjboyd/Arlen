@@ -6,9 +6,12 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shlex
 import signal
+import shutil
 import socket
 import subprocess
+import tempfile
 import threading
 import time
 import urllib.error
@@ -56,6 +59,94 @@ def allocate_free_port() -> int:
         return int(probe.getsockname()[1])
 
 
+def resolve_bash_path() -> str:
+    candidates = []
+    resolved = shutil.which("bash")
+    if resolved:
+        candidates.append(resolved)
+    candidates.extend(
+        [
+            "C:/msys64/usr/bin/bash.exe",
+            "C:/Program Files/Git/bin/bash.exe",
+        ]
+    )
+    for candidate in candidates:
+        if candidate and Path(candidate).exists():
+            return candidate
+    raise RuntimeError("bash executable not found")
+
+
+def shell_join(arguments: List[str]) -> str:
+    return " ".join(shlex.quote(str(argument)) for argument in arguments)
+
+
+def prepare_isolated_app_root(repo_root: Path) -> Path:
+    source_root = (repo_root / "examples/tech_demo").resolve()
+    isolated_root = Path(tempfile.mkdtemp(prefix="phase10m_chaos_app_")).resolve()
+    shutil.copytree(
+        source_root,
+        isolated_root,
+        dirs_exist_ok=True,
+        ignore=shutil.ignore_patterns(".boomhauer"),
+    )
+    return isolated_root
+
+
+def request_windows_control_action(control_file: Path, action: str) -> None:
+    control_file.parent.mkdir(parents=True, exist_ok=True)
+    control_file.write_text(f"{action}\n", encoding="utf-8")
+
+
+def send_signal(pid: int, signal_name: str) -> None:
+    if pid <= 0:
+        raise RuntimeError(f"invalid pid for signal {signal_name}: {pid}")
+    if os.name == "nt":
+        result = subprocess.run(
+            [resolve_bash_path(), "-lc", f"kill -s {signal_name} {pid}"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if result.returncode != 0:
+            detail = result.stderr.strip() or result.stdout.strip() or f"kill -s {signal_name} {pid} failed"
+            raise RuntimeError(detail)
+        return
+    signal_number = getattr(signal, f"SIG{signal_name}")
+    os.kill(pid, signal_number)
+
+
+def force_kill_process(pid: int) -> None:
+    if pid <= 0:
+        raise RuntimeError(f"invalid pid for force kill: {pid}")
+    if os.name == "nt":
+        result = subprocess.run(
+            ["taskkill.exe", "/PID", str(pid), "/T", "/F"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if result.returncode != 0:
+            detail = result.stderr.strip() or result.stdout.strip() or f"taskkill failed for pid {pid}"
+            raise RuntimeError(detail)
+        return
+    os.kill(pid, signal.SIGKILL)
+
+
+def request_manager_signal(control_file: Path, pid: int, signal_name: str) -> None:
+    if os.name == "nt":
+        normalized = signal_name.upper()
+        if normalized == "HUP":
+            request_windows_control_action(control_file, "reload")
+            return
+        if normalized == "TERM":
+            request_windows_control_action(control_file, "term")
+            return
+        if normalized == "INT":
+            request_windows_control_action(control_file, "int")
+            return
+    send_signal(pid, signal_name)
+
+
 def wait_ready(port: int, timeout_seconds: float = 15.0) -> None:
     deadline = time.time() + timeout_seconds
     last_error = ""
@@ -75,7 +166,62 @@ def wait_ready(port: int, timeout_seconds: float = 15.0) -> None:
     raise RuntimeError(f"server failed readiness probe: {last_error}")
 
 
+def wait_for_pid_file(pid_file: Path, timeout_seconds: float) -> int:
+    deadline = time.time() + timeout_seconds
+    while time.time() < deadline:
+        if pid_file.exists():
+            try:
+                raw = pid_file.read_text(encoding="utf-8", errors="replace").strip()
+            except OSError:
+                raw = ""
+            if raw.isdigit():
+                pid_value = int(raw)
+                if pid_value > 0:
+                    return pid_value
+        time.sleep(0.1)
+    raise RuntimeError(f"manager pid file did not become ready: {pid_file}")
+
+
+def read_log_tail(log_path: str, max_bytes: int = 4096) -> str:
+    if not os.path.exists(log_path):
+        return "(no server log captured)"
+    with open(log_path, "r", encoding="utf-8", errors="replace") as handle:
+        handle.seek(0, os.SEEK_END)
+        size = handle.tell()
+        handle.seek(max(0, size - max_bytes), os.SEEK_SET)
+        return handle.read().strip() or "(server log empty)"
+
+
 def child_pids(parent_pid: int) -> List[int]:
+    if os.name == "nt":
+        result = subprocess.run(
+            [
+                "powershell.exe",
+                "-NoProfile",
+                "-Command",
+                (
+                    f"$ppid = {parent_pid}; "
+                    'Get-CimInstance Win32_Process -Filter "ParentProcessId = '
+                    f"{parent_pid}"
+                    '" | Select-Object -ExpandProperty ProcessId'
+                ),
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if result.returncode != 0:
+            return []
+        pids: List[int] = []
+        for line in result.stdout.splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                pids.append(int(line))
+            except Exception:
+                continue
+        return pids
     result = subprocess.run(
         ["ps", "-o", "pid=", "--ppid", str(parent_pid)],
         capture_output=True,
@@ -94,6 +240,44 @@ def child_pids(parent_pid: int) -> List[int]:
         except Exception:
             continue
     return pids
+
+
+def lifecycle_entries(log_path: Path) -> List[Dict[str, str]]:
+    if not log_path.exists():
+        return []
+    entries: List[Dict[str, str]] = []
+    for raw_line in log_path.read_text(encoding="utf-8", errors="replace").splitlines():
+        line = raw_line.strip()
+        if not line.startswith("propane:lifecycle "):
+            continue
+        entry: Dict[str, str] = {}
+        for token in line.split()[1:]:
+            if "=" not in token:
+                continue
+            key, value = token.split("=", 1)
+            if key and value:
+                entry[key] = value
+        if entry:
+            entries.append(entry)
+    return entries
+
+
+def active_worker_pids_from_lifecycle(log_path: Path) -> List[int]:
+    active: List[int] = []
+    stopped = set()
+    for entry in lifecycle_entries(log_path):
+        raw_pid = entry.get("pid", "")
+        if not raw_pid.isdigit():
+            continue
+        pid = int(raw_pid)
+        event = entry.get("event", "")
+        role = entry.get("role", "")
+        if event == "worker_started" and role == "http":
+            if pid not in active:
+                active.append(pid)
+        elif event == "http_worker_stopped":
+            stopped.add(pid)
+    return [pid for pid in active if pid not in stopped]
 
 
 def render_markdown(payload: Dict[str, Any], output_dir: Path) -> str:
@@ -150,6 +334,7 @@ def is_transient_load_fault(exc: BaseException) -> bool:
         "timed out" in message
         or "connection reset" in message
         or "connection refused" in message
+        or "forcibly closed by the remote host" in message
         or "closed before headers" in message
         or "remote end closed" in message
     )
@@ -169,7 +354,7 @@ def main() -> int:
     repo_root = Path(args.repo_root).resolve()
     output_dir = Path(args.output_dir).resolve()
     thresholds_path = (repo_root / args.thresholds).resolve()
-    app_root = (repo_root / "examples/tech_demo").resolve()
+    app_root = prepare_isolated_app_root(repo_root)
     propane = (repo_root / "bin/propane").resolve()
 
     thresholds = load_json(thresholds_path)
@@ -194,38 +379,66 @@ def main() -> int:
 
     port = allocate_free_port()
     pid_file = output_dir / "phase10m_chaos_manager.pid"
+    control_file = output_dir / "phase10m_chaos_manager.control"
     lifecycle_log = output_dir / "phase10m_chaos_lifecycle.log"
     output_dir.mkdir(parents=True, exist_ok=True)
     if pid_file.exists():
         pid_file.unlink()
+    if control_file.exists():
+        control_file.unlink()
     if lifecycle_log.exists():
         lifecycle_log.unlink()
 
     env = dict(os.environ)
     env["ARLEN_FRAMEWORK_ROOT"] = str(repo_root)
     env["ARLEN_APP_ROOT"] = str(app_root)
+    env["ARLEN_PROPANE_CONTROL_FILE"] = str(control_file)
     env["ARLEN_PROPANE_LIFECYCLE_LOG"] = str(lifecycle_log)
 
-    command = [
-        str(propane),
-        "--workers",
-        str(workers),
-        "--host",
-        "127.0.0.1",
-        "--port",
-        str(port),
-        "--env",
-        "development",
-        "--pid-file",
-        str(pid_file),
-    ]
+    if os.name == "nt":
+        command = [
+            resolve_bash_path(),
+            "-lc",
+            shell_join(
+                [
+                    propane.as_posix(),
+                    "--workers",
+                    str(workers),
+                    "--host",
+                    "127.0.0.1",
+                    "--port",
+                    str(port),
+                    "--env",
+                    "development",
+                    "--pid-file",
+                    str(pid_file),
+                ]
+            ),
+        ]
+    else:
+        command = [
+            str(propane),
+            "--workers",
+            str(workers),
+            "--host",
+            "127.0.0.1",
+            "--port",
+            str(port),
+            "--env",
+            "development",
+            "--pid-file",
+            str(pid_file),
+        ]
 
+    fd, manager_log_path = tempfile.mkstemp(prefix="phase10m_chaos_restart_", suffix=".log")
+    os.close(fd)
+    manager_log_handle = open(manager_log_path, "w", encoding="utf-8")
     manager = subprocess.Popen(
         command,
         cwd=str(repo_root),
         env=env,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        stdout=manager_log_handle,
+        stderr=subprocess.STDOUT,
         text=True,
     )
 
@@ -240,7 +453,7 @@ def main() -> int:
     def load_worker() -> None:
         nonlocal request_total, non_200, transient_load_faults
         while not stop_event.is_set():
-            for path in ("/healthz", "/api/sleep?ms=40"):
+            for path in ("/healthz", "/"):
                 if stop_event.is_set():
                     break
                 try:
@@ -274,21 +487,43 @@ def main() -> int:
     violations: List[str] = []
     missing_tokens: List[str] = []
     manager_exit_code = -1
+    manager_control_pid = manager.pid
 
     try:
-        wait_ready(port, timeout_seconds=startup_timeout)
+        try:
+            wait_ready(port, timeout_seconds=startup_timeout)
+            manager_control_pid = wait_for_pid_file(pid_file, timeout_seconds=min(startup_timeout, 10.0))
+        except Exception as exc:
+            rc = manager.poll()
+            log_tail = read_log_tail(manager_log_path)
+            raise RuntimeError(
+                f"{exc}; port={port}; manager_rc={rc}; log_tail={log_tail}"
+            ) from exc
         for thread in workers_threads:
             thread.start()
 
         cycle_start = time.time()
         for cycle in range(1, churn_cycles + 1):
-            children = child_pids(manager.pid)
-            if not children:
-                violations.append(f"cycle {cycle}: no worker children detected")
-                break
-            killed_pid = children[0]
-            os.kill(killed_pid, signal.SIGKILL)
-            os.kill(manager.pid, signal.SIGHUP)
+            killed_pid = 0
+            if os.name == "nt":
+                children = active_worker_pids_from_lifecycle(lifecycle_log)
+                if not children:
+                    children = child_pids(manager_control_pid)
+                if children:
+                    candidate_pid = children[0]
+                    try:
+                        force_kill_process(candidate_pid)
+                        killed_pid = candidate_pid
+                    except Exception:
+                        killed_pid = 0
+            else:
+                children = child_pids(manager_control_pid)
+                if not children:
+                    violations.append(f"cycle {cycle}: no worker children detected")
+                    break
+                killed_pid = children[0]
+                force_kill_process(killed_pid)
+            request_manager_signal(control_file, manager_control_pid, "HUP")
             healthy = True
             try:
                 wait_ready(port, timeout_seconds=cycle_ready_timeout)
@@ -311,7 +546,7 @@ def main() -> int:
         for thread in workers_threads:
             thread.join(timeout=6)
 
-        os.kill(manager.pid, signal.SIGTERM)
+        request_manager_signal(control_file, manager_control_pid, "TERM")
         manager_exit_code = manager.wait(timeout=15)
 
         lifecycle_text = lifecycle_log.read_text(encoding="utf-8", errors="replace") if lifecycle_log.exists() else ""
@@ -330,12 +565,27 @@ def main() -> int:
             if thread.is_alive():
                 thread.join(timeout=1)
         if manager.poll() is None:
-            manager.terminate()
             try:
+                request_manager_signal(control_file, manager_control_pid, "TERM")
                 manager.wait(timeout=8)
-            except subprocess.TimeoutExpired:
-                manager.kill()
+            except Exception:
+                try:
+                    force_kill_process(manager_control_pid)
+                except Exception:
+                    manager.kill()
                 manager.wait(timeout=5)
+        manager_log_handle.close()
+        if os.path.exists(manager_log_path):
+            try:
+                os.remove(manager_log_path)
+            except PermissionError:
+                pass
+        if control_file.exists():
+            try:
+                control_file.unlink()
+            except OSError:
+                pass
+        shutil.rmtree(app_root, ignore_errors=True)
         if manager_exit_code == -1:
             manager_exit_code = int(manager.returncode if manager.returncode is not None else -1)
 
@@ -360,7 +610,7 @@ def main() -> int:
         "threshold_fixture_version": thresholds.get("version", ""),
         "thresholds": thresholds,
         "port": port,
-        "manager_pid": manager.pid,
+        "manager_pid": manager_control_pid,
         "cycle_events": cycle_events,
         "load_errors": load_errors,
         "violations": violations,

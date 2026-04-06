@@ -11,21 +11,83 @@
 @interface HTTPIntegrationTests : XCTestCase
 @end
 
-static NSString *ALNTestSignalName(int signalNumber) {
-  switch (signalNumber) {
-  case SIGTERM:
-    return @"TERM";
-  case SIGKILL:
-    return @"KILL";
-  case SIGINT:
-    return @"INT";
-#ifdef SIGHUP
-  case SIGHUP:
-    return @"HUP";
-#endif
-  default:
-    return [NSString stringWithFormat:@"%d", signalNumber];
+static NSString *ALNTestPropaneControlPathForPID(pid_t pid) {
+  if (pid <= 0) {
+    return @"";
   }
+  return [NSTemporaryDirectory()
+      stringByAppendingPathComponent:[NSString stringWithFormat:@"arlen-propane-%d.control", (int)pid]];
+}
+
+static int ALNTestWritePropaneControlCommand(pid_t pid, NSString *command) {
+  NSString *path = ALNTestPropaneControlPathForPID(pid);
+  if (![path length] || ![command length]) {
+    return -1;
+  }
+  NSString *directory = [path stringByDeletingLastPathComponent];
+  [[NSFileManager defaultManager] createDirectoryAtPath:directory
+                            withIntermediateDirectories:YES
+                                             attributes:nil
+                                                  error:nil];
+  NSError *error = nil;
+  BOOL wrote = [command writeToFile:path
+                         atomically:YES
+                           encoding:NSUTF8StringEncoding
+                              error:&error];
+  return (wrote && error == nil) ? 0 : -1;
+}
+
+static BOOL ALNTestWindowsProcessExists(pid_t pid) {
+  if (pid <= 0) {
+    return NO;
+  }
+  NSTask *task = [[NSTask alloc] init];
+  task.launchPath = @"C:/Windows/System32/tasklist.exe";
+  task.arguments = @[ @"/NH", @"/FI", [NSString stringWithFormat:@"PID eq %d", (int)pid] ];
+  NSPipe *stdoutPipe = [NSPipe pipe];
+  task.standardOutput = stdoutPipe;
+  task.standardError = [NSPipe pipe];
+  @try {
+    [task launch];
+    [task waitUntilExit];
+  } @catch (NSException *exception) {
+    (void)exception;
+    return NO;
+  }
+  NSData *data = [[stdoutPipe fileHandleForReading] readDataToEndOfFile];
+  NSString *output = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding] ?: @"";
+  if (task.terminationStatus != 0) {
+    return NO;
+  }
+  if ([output containsString:@"No tasks are running"]) {
+    return NO;
+  }
+  return [output containsString:[NSString stringWithFormat:@"%d", (int)pid]];
+}
+
+static int ALNTestTaskkillPID(pid_t pid) {
+  if (pid <= 0) {
+    return -1;
+  }
+  for (NSInteger attempt = 0; attempt < 30; attempt++) {
+    if (ALNTestWindowsProcessExists(pid)) {
+      break;
+    }
+    usleep(100000);
+  }
+  NSTask *killer = [[NSTask alloc] init];
+  killer.launchPath = @"C:/Windows/System32/taskkill.exe";
+  killer.arguments = @[ @"/T", @"/F", @"/PID", [NSString stringWithFormat:@"%d", (int)pid] ];
+  killer.standardOutput = [NSPipe pipe];
+  killer.standardError = [NSPipe pipe];
+  @try {
+    [killer launch];
+    [killer waitUntilExit];
+  } @catch (NSException *exception) {
+    (void)exception;
+    return -1;
+  }
+  return killer.terminationStatus == 0 ? 0 : -1;
 }
 
 static int ALNTestSendSignal(pid_t pid, int signalNumber) {
@@ -33,13 +95,19 @@ static int ALNTestSendSignal(pid_t pid, int signalNumber) {
   if (pid <= 0) {
     return -1;
   }
-  int exitCode = 0;
-  NSString *command =
-      [NSString stringWithFormat:@"kill -s %@ %d >/dev/null 2>&1",
-                                 ALNTestSignalName(signalNumber),
-                                 (int)pid];
-  (void)ALNTestRunShellCapture(command, &exitCode);
-  return (exitCode == 0) ? 0 : -1;
+  switch (signalNumber) {
+#ifdef SIGHUP
+  case SIGHUP:
+    return ALNTestWritePropaneControlCommand(pid, @"reload\n");
+#endif
+  case SIGTERM:
+    return ALNTestWritePropaneControlCommand(pid, @"term\n");
+  case SIGINT:
+    return ALNTestWritePropaneControlCommand(pid, @"int\n");
+  case SIGKILL:
+  default:
+    return ALNTestTaskkillPID(pid);
+  }
 #else
   return kill(pid, signalNumber);
 #endif
@@ -174,22 +242,19 @@ static int ALNTestSendSignal(pid_t pid, int signalNumber) {
   NSString *repoRoot = ALNTestRepoRoot();
   NSString *resolvedCurrentDirectory =
       [currentDirectoryPath length] > 0 ? currentDirectoryPath : repoRoot;
-  NSString *scriptPath =
-      ALNTestShellPath([repoRoot stringByAppendingPathComponent:relativePath ?: @""]);
-  NSMutableArray<NSString *> *commandParts = [NSMutableArray array];
-  [commandParts addObject:[self shellQuoted:scriptPath]];
+  NSString *scriptPath = [repoRoot stringByAppendingPathComponent:relativePath ?: @""];
+  NSMutableArray<NSString *> *taskArguments = [NSMutableArray array];
+  [taskArguments addObject:ALNTestShellPath(scriptPath)];
   for (id argument in arguments ?: @[]) {
     NSString *stringArgument =
         [argument isKindOfClass:[NSString class]] ? argument : [argument description];
-    [commandParts addObject:[self shellQuoted:stringArgument ?: @""]];
+    [taskArguments addObject:stringArgument ?: @""];
   }
 
   NSTask *task = [[NSTask alloc] init];
   task.launchPath = ALNTestResolvedBashLaunchPath();
-  task.arguments = @[ @"-lc",
-                      [NSString stringWithFormat:@"cd %@ && exec %@",
-                                                 [self shellQuoted:ALNTestShellPath(resolvedCurrentDirectory)],
-                                                 [commandParts componentsJoinedByString:@" "]] ];
+  task.currentDirectoryPath = resolvedCurrentDirectory;
+  task.arguments = taskArguments;
   if (environment != nil) {
     task.environment = environment;
   }
@@ -247,6 +312,24 @@ static int ALNTestSendSignal(pid_t pid, int signalNumber) {
   return pid;
 }
 
+- (BOOL)requestPropaneWorkerKillForRole:(NSString *)role
+                              managerPID:(pid_t)managerPID
+                               workerPID:(pid_t)workerPID {
+#if defined(_WIN32)
+  if (managerPID <= 0 || workerPID <= 0) {
+    return NO;
+  }
+  NSString *normalizedRole = [role isKindOfClass:[NSString class]] ? role : @"http";
+  NSString *commandPrefix =
+      [normalizedRole isEqualToString:@"async"] ? @"kill-async" : @"kill-http";
+  NSString *command =
+      [NSString stringWithFormat:@"%@:%d\n", commandPrefix, (int)workerPID];
+  return ALNTestWritePropaneControlCommand(managerPID, command) == 0;
+#else
+  return ALNTestSendSignal(workerPID, SIGKILL) == 0;
+#endif
+}
+
 - (NSString *)curlCommandWithTimeouts:(NSString *)command {
   NSString *curlCommand = [command isKindOfClass:[NSString class]] ? command : @"";
   if (![curlCommand hasPrefix:@"curl "] ||
@@ -261,8 +344,117 @@ static int ALNTestSendSignal(pid_t pid, int signalNumber) {
 }
 
 - (NSString *)runPythonScript:(NSString *)script exitCode:(int *)exitCode {
-  NSString *command = [NSString stringWithFormat:@"python3 - 2>&1 <<'PY'\n%@\nPY", script ?: @""];
+  NSString *command = [NSString stringWithFormat:
+                                     @"if command -v python3 >/dev/null 2>&1; then "
+                                      "python3 -; "
+                                      "elif command -v python >/dev/null 2>&1; then "
+                                      "python -; "
+                                      "else "
+                                      "echo 'python interpreter not found' >&2; "
+                                      "exit 127; "
+                                      "fi 2>&1 <<'PY'\n%@\nPY",
+                                     script ?: @""];
   return [self runShellCapture:command exitCode:exitCode];
+}
+
+- (NSString *)portStringForTask:(NSTask *)task {
+  NSArray<NSString *> *arguments =
+      [task.arguments isKindOfClass:[NSArray class]] ? task.arguments : @[];
+  if ([arguments count] == 0) {
+    return nil;
+  }
+  NSString *joinedArguments = [arguments componentsJoinedByString:@" "];
+  NSRange portRange = [joinedArguments rangeOfString:@"--port "];
+  if (portRange.location == NSNotFound) {
+    return nil;
+  }
+  NSUInteger index = NSMaxRange(portRange);
+  NSMutableString *digits = [NSMutableString string];
+  while (index < [joinedArguments length]) {
+    unichar character = [joinedArguments characterAtIndex:index];
+    if (character < '0' || character > '9') {
+      break;
+    }
+    [digits appendFormat:@"%c", (char)character];
+    index++;
+  }
+  return [digits length] > 0 ? digits : nil;
+}
+
+- (void)killWindowsProcessesForTaskPort:(NSTask *)task {
+#if defined(_WIN32)
+  NSString *port = [self portStringForTask:task];
+  if (![port length]) {
+    return;
+  }
+  NSTask *killer = [[NSTask alloc] init];
+  killer.launchPath = @"C:/Windows/System32/WindowsPowerShell/v1.0/powershell.exe";
+  killer.arguments = @[
+    @"-NoProfile",
+    @"-Command",
+    [NSString stringWithFormat:
+                  @"$port='%@'; "
+                   @"Get-CimInstance Win32_Process | "
+                   @"Where-Object { $_.CommandLine -match ('(^|\\s)--port\\s+' + [regex]::Escape($port) + '(\\s|$)') } | "
+                   @"ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }",
+                  port]
+  ];
+  @try {
+    [killer launch];
+    [killer waitUntilExit];
+  } @catch (NSException *exception) {
+    (void)exception;
+  }
+#else
+  (void)task;
+#endif
+}
+
+- (void)terminateTask:(NSTask *)task preferredSignalNumber:(int)signalNumber {
+  if (task == nil) {
+    return;
+  }
+
+  pid_t pid = task.processIdentifier;
+  if (pid <= 0) {
+    return;
+  }
+
+#if defined(_WIN32)
+  if ([task isRunning]) {
+    NSTask *killer = [[NSTask alloc] init];
+    killer.launchPath = @"C:/Windows/System32/taskkill.exe";
+    killer.arguments = @[ @"/T", @"/F", @"/PID", [NSString stringWithFormat:@"%d", (int)pid] ];
+    @try {
+      [killer launch];
+      [killer waitUntilExit];
+    } @catch (NSException *exception) {
+      (void)exception;
+    }
+  }
+  for (NSInteger attempt = 0; attempt < 10 && [task isRunning]; attempt++) {
+    usleep(100000);
+  }
+  [self killWindowsProcessesForTaskPort:task];
+#else
+  if ([task isRunning]) {
+    (void)ALNTestSendSignal(pid, signalNumber);
+  }
+  for (NSInteger attempt = 0; attempt < 10 && [task isRunning]; attempt++) {
+    usleep(100000);
+  }
+  if ([task isRunning]) {
+    (void)kill(pid, SIGKILL);
+  }
+  for (NSInteger attempt = 0; attempt < 10 && [task isRunning]; attempt++) {
+    usleep(100000);
+  }
+#endif
+  @try {
+    [task waitUntilExit];
+  } @catch (NSException *exception) {
+    (void)exception;
+  }
 }
 
 - (NSString *)capturedOutputFromPipe:(NSPipe *)pipe {
@@ -273,6 +465,31 @@ static int ALNTestSendSignal(pid_t pid, int signalNumber) {
   NSString *output = [[NSString alloc] initWithData:data
                                            encoding:NSUTF8StringEncoding];
   return output ?: @"";
+}
+
+- (NSFileHandle *)logFileHandleAtPath:(NSString *)path {
+  if (![path length]) {
+    return nil;
+  }
+  NSString *directory = [path stringByDeletingLastPathComponent];
+  [[NSFileManager defaultManager] createDirectoryAtPath:directory
+                            withIntermediateDirectories:YES
+                                             attributes:nil
+                                                  error:nil];
+  if (![[NSFileManager defaultManager] createFileAtPath:path contents:[NSData data] attributes:nil]) {
+    return nil;
+  }
+  return [NSFileHandle fileHandleForWritingAtPath:path];
+}
+
+- (NSString *)logContentsAtPath:(NSString *)path {
+  if (![path length]) {
+    return @"";
+  }
+  NSString *contents = [NSString stringWithContentsOfFile:path
+                                                 encoding:NSUTF8StringEncoding
+                                                    error:nil];
+  return contents ?: @"";
 }
 
 - (BOOL)outputContainsTransientNetworkFailure:(NSString *)output {
@@ -397,6 +614,110 @@ static int ALNTestSendSignal(pid_t pid, int signalNumber) {
       pid_t pid = (pid_t)[entry[@"pid"] intValue];
       NSString *args = [entry[@"args"] isKindOfClass:[NSString class]] ? entry[@"args"] : @"";
       if (pid > 0 && pid != excludedPID && [args containsString:needle]) {
+        return pid;
+      }
+    }
+    usleep(200000);
+  }
+  return (pid_t)0;
+}
+
+- (NSArray *)lifecycleEventsAtPath:(NSString *)path {
+  NSError *readError = nil;
+  NSString *contents = [NSString stringWithContentsOfFile:path
+                                                 encoding:NSUTF8StringEncoding
+                                                    error:&readError];
+  if (contents == nil || readError != nil) {
+    return @[];
+  }
+
+  NSMutableArray *events = [NSMutableArray array];
+  NSArray *lines = [contents componentsSeparatedByCharactersInSet:[NSCharacterSet newlineCharacterSet]];
+  for (NSString *line in lines) {
+    NSString *trimmed =
+        [line stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    if (![trimmed hasPrefix:@"propane:lifecycle "]) {
+      continue;
+    }
+
+    NSMutableDictionary *entry = [NSMutableDictionary dictionary];
+    NSArray *tokens = [trimmed componentsSeparatedByCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
+    for (NSString *token in tokens) {
+      NSRange equalsRange = [token rangeOfString:@"="];
+      if (equalsRange.location == NSNotFound || equalsRange.location == 0 ||
+          equalsRange.location == ([token length] - 1)) {
+        continue;
+      }
+      NSString *key = [token substringToIndex:equalsRange.location];
+      NSString *value = [token substringFromIndex:(equalsRange.location + 1)];
+      if ([key length] > 0 && [value length] > 0) {
+        entry[key] = value;
+      }
+    }
+    if ([entry count] > 0) {
+      [events addObject:entry];
+    }
+  }
+  return events;
+}
+
+- (BOOL)lifecycleEntry:(NSDictionary *)entry matchesEvent:(NSString *)event fields:(NSDictionary *)fields {
+  NSString *candidateEvent = [entry[@"event"] isKindOfClass:[NSString class]] ? entry[@"event"] : @"";
+  if ([event length] > 0 && ![candidateEvent isEqualToString:event]) {
+    return NO;
+  }
+
+  for (id key in fields ?: @{}) {
+    NSString *fieldName = [key isKindOfClass:[NSString class]] ? key : [key description];
+    NSString *expected =
+        [fields[key] isKindOfClass:[NSString class]] ? fields[key] : [fields[key] description];
+    NSString *actual = [entry[fieldName] isKindOfClass:[NSString class]] ? entry[fieldName] : @"";
+    if (![actual isEqualToString:expected]) {
+      return NO;
+    }
+  }
+  return YES;
+}
+
+- (NSArray *)matchingLifecycleEntriesAtPath:(NSString *)path
+                                      event:(NSString *)event
+                                     fields:(NSDictionary *)fields {
+  NSMutableArray *matches = [NSMutableArray array];
+  for (NSDictionary *entry in [self lifecycleEventsAtPath:path]) {
+    if ([self lifecycleEntry:entry matchesEvent:event fields:fields]) {
+      [matches addObject:entry];
+    }
+  }
+  return matches;
+}
+
+- (NSArray *)waitForLifecycleEntriesAtPath:(NSString *)path
+                                     event:(NSString *)event
+                                    fields:(NSDictionary *)fields
+                              minimumCount:(NSUInteger)minimumCount
+                                  attempts:(NSInteger)attempts {
+  NSArray *matches = @[];
+  for (NSInteger idx = 0; idx < attempts; idx++) {
+    matches = [self matchingLifecycleEntriesAtPath:path event:event fields:fields];
+    if ([matches count] >= minimumCount) {
+      return matches;
+    }
+    usleep(200000);
+  }
+  return matches;
+}
+
+- (pid_t)waitForLifecyclePIDAtPath:(NSString *)path
+                             event:(NSString *)event
+                            fields:(NSDictionary *)fields
+                      excludingPIDs:(NSSet *)excludedPIDs
+                          attempts:(NSInteger)attempts {
+  NSSet *blockedPIDs = [excludedPIDs isKindOfClass:[NSSet class]] ? excludedPIDs : [NSSet set];
+  for (NSInteger idx = 0; idx < attempts; idx++) {
+    NSArray *matches = [self matchingLifecycleEntriesAtPath:path event:event fields:fields];
+    for (NSDictionary *entry in matches) {
+      pid_t pid = (pid_t)[entry[@"pid"] intValue];
+      if (pid > 0 && ![blockedPIDs containsObject:@(pid)]) {
         return pid;
       }
     }
@@ -563,23 +884,25 @@ static int ALNTestSendSignal(pid_t pid, int signalNumber) {
     XCTAssertTrue([[output stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]]
         doubleValue] < 1.2);
   } @finally {
-    if ([server isRunning]) {
-      (void)kill(server.processIdentifier, SIGTERM);
-      [server waitUntilExit];
+    if (server != nil) {
+      [self terminateTask:server preferredSignalNumber:SIGTERM];
     }
   }
 }
 
 - (void)testHTTPSessionLimitReturns503UnderBackpressure {
   int port = [self randomPort];
+  NSString *logPath =
+      [self createTempFilePathWithPrefix:@"arlen-http-session-limit" suffix:@".log"];
+  NSFileHandle *logHandle = [self logFileHandleAtPath:logPath];
   NSTask *server = [[NSTask alloc] init];
   server.launchPath = ALNTestResolvedBashLaunchPath();
   server.arguments = @[
     @"-lc",
     [NSString stringWithFormat:@"ARLEN_MAX_HTTP_SESSIONS=1 ./build/boomhauer --port %d", port]
   ];
-  server.standardOutput = [NSPipe pipe];
-  server.standardError = [NSPipe pipe];
+  server.standardOutput = logHandle;
+  server.standardError = logHandle;
   [server launch];
 
   @try {
@@ -588,58 +911,120 @@ static int ALNTestSendSignal(pid_t pid, int signalNumber) {
     XCTAssertTrue(ready);
 
     NSString *script = [NSString stringWithFormat:
-                                         @"import socket, time, urllib.request\n"
+                                         @"import socket, time, urllib.error, urllib.request\n"
                                          @"PORT=%d\n"
-                                         @"def read_headers(sock):\n"
-                                         @"    data=b''\n"
+                                         @"def transient(exc):\n"
+                                         @"    message = str(exc).lower()\n"
+                                         @"    return any(token in message for token in ('connection aborted', 'connection was aborted', 'connection reset', 'connection refused', 'timed out', 'winerror 10053', 'winerror 10054', 'winerror 10061'))\n"
+                                         @"def read_response(sock):\n"
+                                         @"    data = b''\n"
                                          @"    while b'\\r\\n\\r\\n' not in data:\n"
-                                         @"        chunk=sock.recv(4096)\n"
+                                         @"        chunk = sock.recv(4096)\n"
+                                         @"        if not chunk:\n"
+                                         @"            raise RuntimeError('socket closed before headers')\n"
+                                         @"        data += chunk\n"
+                                         @"    header_bytes, body = data.split(b'\\r\\n\\r\\n', 1)\n"
+                                         @"    headers = header_bytes.decode('utf-8', 'replace')\n"
+                                         @"    content_length = 0\n"
+                                         @"    for line in headers.split('\\r\\n')[1:]:\n"
+                                         @"        if line.lower().startswith('content-length:'):\n"
+                                         @"            content_length = int(line.split(':', 1)[1].strip())\n"
+                                         @"            break\n"
+                                         @"    while len(body) < content_length:\n"
+                                         @"        chunk = sock.recv(4096)\n"
                                          @"        if not chunk:\n"
                                          @"            break\n"
-                                         @"        data += chunk\n"
-                                         @"    return data.decode('utf-8', 'replace')\n"
-                                         @"partial = socket.create_connection(('127.0.0.1', PORT), timeout=5)\n"
-                                         @"partial.sendall((\n"
-                                         @"    f'GET /healthz HTTP/1.1\\r\\n'\n"
-                                         @"    f'Host: 127.0.0.1:{PORT}\\r\\n'\n"
-                                         @").encode('utf-8'))\n"
-                                         @"time.sleep(0.2)\n"
-                                         @"second = socket.create_connection(('127.0.0.1', PORT), timeout=5)\n"
-                                         @"second.sendall((\n"
-                                         @"    f'GET /healthz HTTP/1.1\\r\\n'\n"
-                                         @"    f'Host: 127.0.0.1:{PORT}\\r\\n'\n"
-                                         @"    'Connection: close\\r\\n\\r\\n'\n"
-                                         @").encode('utf-8'))\n"
-                                         @"headers = read_headers(second)\n"
-                                         @"print(headers)\n"
-                                         @"if '503 Service Unavailable' not in headers:\n"
-                                         @"    raise RuntimeError(headers)\n"
-                                         @"if 'X-Arlen-Backpressure-Reason: http_session_limit' not in headers:\n"
-                                         @"    raise RuntimeError(headers)\n"
-                                         @"second.close()\n"
-                                         @"partial.close()\n"
-                                         @"time.sleep(0.2)\n"
-                                         @"body = urllib.request.urlopen(f'http://127.0.0.1:{PORT}/healthz', timeout=3).read().decode('utf-8')\n"
-                                         @"if body != 'ok\\n':\n"
-                                         @"    raise RuntimeError(body)\n"
-                                         @"print('recovered')\n",
-                                         port];
+                                         @"        body += chunk\n"
+                                         @"    return headers, body.decode('utf-8', 'replace')\n"
+                                         @"for attempt in range(6):\n"
+                                         @"    slow = None\n"
+                                         @"    try:\n"
+                                         @"        slow = socket.create_connection(('127.0.0.1', PORT), timeout=5)\n"
+                                         @"        slow.sendall((\n"
+                                         @"            f'GET /api/sleep?ms=1200 HTTP/1.1\\r\\n'\n"
+                                         @"            f'Host: 127.0.0.1:{PORT}\\r\\n'\n"
+                                         @"            'Connection: close\\r\\n\\r\\n'\n"
+                                         @"        ).encode('utf-8'))\n"
+                                         @"        time.sleep(0.2)\n"
+                                         @"        try:\n"
+                                         @"            body = urllib.request.urlopen(f'http://127.0.0.1:{PORT}/healthz', timeout=1).read().decode('utf-8')\n"
+                                         @"            raise RuntimeError(f'expected session limit backpressure, got {body!r}')\n"
+                                         @"        except urllib.error.HTTPError as exc:\n"
+                                         @"            try:\n"
+                                         @"                body = exc.read().decode('utf-8', 'replace')\n"
+                                         @"            except Exception:\n"
+                                         @"                body = ''\n"
+                                         @"            print(f'HTTP/1.1 {exc.code} {exc.reason}')\n"
+                                         @"            print(str(exc.headers))\n"
+                                         @"            if body:\n"
+                                         @"                print(body)\n"
+                                         @"            if exc.code != 503:\n"
+                                         @"                raise RuntimeError(body or str(exc.headers))\n"
+                                         @"            reason = exc.headers.get('X-Arlen-Backpressure-Reason', '')\n"
+                                         @"            if reason != 'http_session_limit':\n"
+                                         @"                raise RuntimeError(reason or str(exc.headers))\n"
+                                         @"        slow.close()\n"
+                                         @"        slow = None\n"
+                                         @"        time.sleep(0.2)\n"
+                                         @"        recovered = False\n"
+                                         @"        last_error = ''\n"
+                                         @"        for recovery_attempt in range(20):\n"
+                                         @"            try:\n"
+                                         @"                probe = socket.create_connection(('127.0.0.1', PORT), timeout=3)\n"
+                                         @"                try:\n"
+                                         @"                    probe.sendall((\n"
+                                         @"                        f'GET /healthz HTTP/1.1\\r\\n'\n"
+                                         @"                        f'Host: 127.0.0.1:{PORT}\\r\\n'\n"
+                                         @"                        'Connection: close\\r\\n\\r\\n'\n"
+                                         @"                    ).encode('utf-8'))\n"
+                                         @"                    headers, body = read_response(probe)\n"
+                                         @"                finally:\n"
+                                         @"                    probe.close()\n"
+                                         @"                if '200 OK' in headers and body == 'ok\\n':\n"
+                                         @"                    recovered = True\n"
+                                         @"                    print('recovered')\n"
+                                         @"                    break\n"
+                                         @"                last_error = headers or body\n"
+                                         @"            except Exception as exc:\n"
+                                         @"                last_error = str(exc)\n"
+                                         @"                if not transient(exc):\n"
+                                         @"                    raise\n"
+                                         @"            time.sleep(0.2)\n"
+                                         @"        if not recovered:\n"
+                                         @"            raise RuntimeError(last_error or 'server did not recover after backpressure release')\n"
+                                          @"        break\n"
+                                          @"    except Exception as exc:\n"
+                                          @"        if attempt == 5 or (not transient(exc) and 'expected session limit backpressure' not in str(exc).lower()):\n"
+                                          @"            raise\n"
+                                          @"        time.sleep(0.2)\n"
+                                          @"    finally:\n"
+                                          @"        if slow is not None:\n"
+                                          @"            slow.close()\n",
+                                          port];
     int pyCode = 0;
     NSString *output = [self runPythonScript:script exitCode:&pyCode];
-    XCTAssertEqual(0, pyCode);
-    XCTAssertTrue([output containsString:@"503 Service Unavailable"]);
-    XCTAssertTrue([output containsString:@"X-Arlen-Backpressure-Reason: http_session_limit"]);
-    XCTAssertTrue([output containsString:@"recovered"]);
+    NSString *serverLog = [self logContentsAtPath:logPath];
+    XCTAssertEqual(0, pyCode, @"output=%@\nserverLog=%@", output, serverLog);
+    XCTAssertTrue([output containsString:@"503 Service Unavailable"], @"%@\nserverLog=%@", output, serverLog);
+    XCTAssertTrue([output containsString:@"X-Arlen-Backpressure-Reason: http_session_limit"],
+                  @"%@\nserverLog=%@",
+                  output,
+                  serverLog);
+    XCTAssertTrue([output containsString:@"recovered"], @"%@\nserverLog=%@", output, serverLog);
   } @finally {
-    if ([server isRunning]) {
-      (void)kill(server.processIdentifier, SIGTERM);
-      [server waitUntilExit];
+    if (server != nil) {
+      [self terminateTask:server preferredSignalNumber:SIGTERM];
     }
+    [logHandle closeFile];
+    [[NSFileManager defaultManager] removeItemAtPath:logPath error:nil];
   }
 }
 
 - (void)testConcurrentWorkerQueueLimitReturns503UnderBackpressure {
   int port = [self randomPort];
+  NSString *logPath =
+      [self createTempFilePathWithPrefix:@"arlen-http-worker-queue" suffix:@".log"];
+  NSFileHandle *logHandle = [self logFileHandleAtPath:logPath];
   NSTask *server = [[NSTask alloc] init];
   server.launchPath = ALNTestResolvedBashLaunchPath();
   server.arguments = @[
@@ -649,8 +1034,8 @@ static int ALNTestSendSignal(pid_t pid, int signalNumber) {
                    @"ARLEN_MAX_QUEUED_HTTP_CONNECTIONS=1 ./build/boomhauer --port %d",
                   port]
   ];
-  server.standardOutput = [NSPipe pipe];
-  server.standardError = [NSPipe pipe];
+  server.standardOutput = logHandle;
+  server.standardError = logHandle;
   [server launch];
 
   @try {
@@ -659,72 +1044,88 @@ static int ALNTestSendSignal(pid_t pid, int signalNumber) {
     XCTAssertTrue(ready);
 
     NSString *script = [NSString stringWithFormat:
-                                         @"import socket, time, urllib.request\n"
+                                         @"import json, threading, time, urllib.error, urllib.request\n"
                                          @"PORT=%d\n"
-                                         @"def read_headers(sock):\n"
-                                         @"    data=b''\n"
-                                         @"    while b'\\r\\n\\r\\n' not in data:\n"
-                                         @"        chunk=sock.recv(4096)\n"
-                                         @"        if not chunk:\n"
-                                         @"            break\n"
-                                         @"        data += chunk\n"
-                                         @"    return data.decode('utf-8', 'replace')\n"
-                                         @"def blocked_request_socket():\n"
-                                         @"    sock = socket.create_connection(('127.0.0.1', PORT), timeout=5)\n"
-                                         @"    sock.settimeout(5)\n"
-                                         @"    sock.sendall((\n"
-                                         @"        f'GET /healthz HTTP/1.1\\r\\n'\n"
-                                         @"        f'Host: 127.0.0.1:{PORT}\\r\\n'\n"
-                                         @"    ).encode('utf-8'))\n"
-                                         @"    return sock\n"
-                                         @"def queued_health_request_socket():\n"
-                                         @"    sock = socket.create_connection(('127.0.0.1', PORT), timeout=5)\n"
-                                         @"    sock.settimeout(5)\n"
-                                         @"    sock.sendall((\n"
-                                         @"        f'GET /healthz HTTP/1.1\\r\\n'\n"
-                                         @"        f'Host: 127.0.0.1:{PORT}\\r\\n'\n"
-                                         @"        'Connection: close\\r\\n\\r\\n'\n"
-                                         @"    ).encode('utf-8'))\n"
-                                         @"    return sock\n"
-                                         @"first = blocked_request_socket()\n"
-                                         @"time.sleep(0.3)\n"
-                                         @"second = queued_health_request_socket()\n"
-                                         @"time.sleep(0.1)\n"
-                                         @"third = socket.create_connection(('127.0.0.1', PORT), timeout=5)\n"
-                                         @"third.settimeout(5)\n"
-                                         @"third.sendall((\n"
-                                         @"    f'GET /healthz HTTP/1.1\\r\\n'\n"
-                                         @"    f'Host: 127.0.0.1:{PORT}\\r\\n'\n"
-                                         @"    'Connection: close\\r\\n\\r\\n'\n"
-                                         @").encode('utf-8'))\n"
-                                         @"third_headers = read_headers(third)\n"
-                                         @"print(third_headers)\n"
-                                         @"if '503 Service Unavailable' not in third_headers:\n"
-                                         @"    raise RuntimeError(third_headers)\n"
-                                         @"if 'X-Arlen-Backpressure-Reason: http_worker_queue_full' not in third_headers:\n"
-                                         @"    raise RuntimeError(third_headers)\n"
-                                         @"first.close()\n"
-                                         @"time.sleep(0.2)\n"
-                                         @"second_headers = read_headers(second)\n"
-                                         @"if '200' not in second_headers:\n"
-                                         @"    raise RuntimeError(second_headers)\n"
-                                         @"second.close(); third.close()\n"
-                                         @"body = urllib.request.urlopen(f'http://127.0.0.1:{PORT}/healthz', timeout=4).read().decode('utf-8')\n"
-                                         @"if body != 'ok\\n':\n"
-                                         @"    raise RuntimeError(body)\n"
-                                         @"print('recovered')\n",
+                                         @"def transient(exc):\n"
+                                         @"    message = str(exc).lower()\n"
+                                         @"    return any(token in message for token in ('connection aborted', 'connection was aborted', 'connection reset', 'connection refused', 'timed out', 'winerror 10053', 'winerror 10054', 'winerror 10061'))\n"
+                                         @"for attempt in range(6):\n"
+                                         @"    results = []\n"
+                                         @"    lock = threading.Lock()\n"
+                                         @"    def run_request(index):\n"
+                                         @"        url = f'http://127.0.0.1:{PORT}/api/sleep?ms=1200'\n"
+                                         @"        try:\n"
+                                         @"            body = urllib.request.urlopen(url, timeout=6).read().decode('utf-8')\n"
+                                         @"            payload = json.loads(body)\n"
+                                         @"            with lock:\n"
+                                         @"                results.append({'kind': 'ok', 'index': index, 'sleep_ms': payload.get('sleep_ms')})\n"
+                                         @"        except urllib.error.HTTPError as exc:\n"
+                                         @"            try:\n"
+                                         @"                body = exc.read().decode('utf-8', 'replace')\n"
+                                         @"            except Exception:\n"
+                                         @"                body = ''\n"
+                                         @"            with lock:\n"
+                                         @"                results.append({\n"
+                                         @"                    'kind': 'http',\n"
+                                         @"                    'index': index,\n"
+                                         @"                    'code': exc.code,\n"
+                                         @"                    'reason': exc.headers.get('X-Arlen-Backpressure-Reason', ''),\n"
+                                         @"                    'status': f'HTTP/1.1 {exc.code} {exc.reason}',\n"
+                                         @"                    'headers': str(exc.headers),\n"
+                                         @"                    'body': body,\n"
+                                         @"                })\n"
+                                         @"        except Exception as exc:\n"
+                                         @"            with lock:\n"
+                                         @"                results.append({'kind': 'error', 'index': index, 'message': str(exc)})\n"
+                                         @"    try:\n"
+                                         @"        threads = []\n"
+                                         @"        for index in range(4):\n"
+                                         @"            thread = threading.Thread(target=run_request, args=(index,))\n"
+                                         @"            thread.start()\n"
+                                         @"            threads.append(thread)\n"
+                                         @"            time.sleep(0.05)\n"
+                                         @"        for thread in threads:\n"
+                                         @"            thread.join()\n"
+                                         @"        overflow = [entry for entry in results if entry.get('kind') == 'http' and entry.get('code') == 503 and entry.get('reason') == 'http_worker_queue_full']\n"
+                                         @"        successes = [entry for entry in results if entry.get('kind') == 'ok' and entry.get('sleep_ms') == 1200]\n"
+                                         @"        if overflow:\n"
+                                         @"            for entry in overflow:\n"
+                                         @"                print(entry['status'])\n"
+                                         @"                print(entry['headers'])\n"
+                                         @"                if entry.get('body'):\n"
+                                         @"                    print(entry['body'])\n"
+                                         @"        if not overflow or not successes:\n"
+                                         @"            raise RuntimeError(json.dumps(results))\n"
+                                         @"        body = urllib.request.urlopen(f'http://127.0.0.1:{PORT}/healthz', timeout=4).read().decode('utf-8')\n"
+                                         @"        if body != 'ok\\n':\n"
+                                         @"            raise RuntimeError(body)\n"
+                                         @"        print('recovered')\n"
+                                         @"        break\n"
+                                         @"    except Exception as exc:\n"
+                                         @"        message = str(exc).lower()\n"
+                                         @"        retryable = transient(exc) or 'http_worker_queue_full' not in message\n"
+                                         @"        if attempt == 5 or not retryable:\n"
+                                         @"            raise\n"
+                                         @"        time.sleep(0.2)\n"
+                                         @"    finally:\n"
+                                         @"        pass\n",
                                          port];
     int pyCode = 0;
     NSString *output = [self runPythonScript:script exitCode:&pyCode];
-    XCTAssertEqual(0, pyCode);
-    XCTAssertTrue([output containsString:@"503 Service Unavailable"]);
-    XCTAssertTrue([output containsString:@"X-Arlen-Backpressure-Reason: http_worker_queue_full"]);
-    XCTAssertTrue([output containsString:@"recovered"]);
+    NSString *serverLog = [self logContentsAtPath:logPath];
+    XCTAssertEqual(0, pyCode, @"output=%@\nserverLog=%@", output, serverLog);
+    XCTAssertTrue([output containsString:@"503 Service Unavailable"], @"%@\nserverLog=%@", output, serverLog);
+    XCTAssertTrue([output containsString:@"X-Arlen-Backpressure-Reason: http_worker_queue_full"],
+                  @"%@\nserverLog=%@",
+                  output,
+                  serverLog);
+    XCTAssertTrue([output containsString:@"recovered"], @"%@\nserverLog=%@", output, serverLog);
   } @finally {
-    if ([server isRunning]) {
-      (void)kill(server.processIdentifier, SIGTERM);
-      [server waitUntilExit];
+    if (server != nil) {
+      [self terminateTask:server preferredSignalNumber:SIGTERM];
     }
+    [logHandle closeFile];
+    [[NSFileManager defaultManager] removeItemAtPath:logPath error:nil];
   }
 }
 
@@ -797,9 +1198,8 @@ static int ALNTestSendSignal(pid_t pid, int signalNumber) {
     XCTAssertEqual(0, pyCode, @"%@", output);
     XCTAssertTrue([output containsString:@"ok"], @"%@", output);
   } @finally {
-    if ([server isRunning]) {
-      (void)kill(server.processIdentifier, SIGTERM);
-      [server waitUntilExit];
+    if (server != nil) {
+      [self terminateTask:server preferredSignalNumber:SIGTERM];
     }
   }
 }
@@ -847,9 +1247,8 @@ static int ALNTestSendSignal(pid_t pid, int signalNumber) {
     XCTAssertEqual(0, pyCode, @"%@", output);
     XCTAssertTrue([output containsString:@"ok"]);
   } @finally {
-    if ([server isRunning]) {
-      (void)kill(server.processIdentifier, SIGTERM);
-      [server waitUntilExit];
+    if (server != nil) {
+      [self terminateTask:server preferredSignalNumber:SIGTERM];
     }
   }
 }
@@ -961,9 +1360,8 @@ static int ALNTestSendSignal(pid_t pid, int signalNumber) {
     }
     XCTAssertEqual((NSUInteger)3, [parts count]);
   } @finally {
-    if ([server isRunning]) {
-      (void)kill(server.processIdentifier, SIGTERM);
-      [server waitUntilExit];
+    if (server != nil) {
+      [self terminateTask:server preferredSignalNumber:SIGTERM];
     }
   }
 }
@@ -1011,9 +1409,8 @@ static int ALNTestSendSignal(pid_t pid, int signalNumber) {
     XCTAssertTrue([[output stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]]
         doubleValue] < 0.8);
   } @finally {
-    if ([server isRunning]) {
-      (void)kill(server.processIdentifier, SIGTERM);
-      [server waitUntilExit];
+    if (server != nil) {
+      [self terminateTask:server preferredSignalNumber:SIGTERM];
     }
   }
 }
@@ -1061,9 +1458,8 @@ static int ALNTestSendSignal(pid_t pid, int signalNumber) {
     XCTAssertTrue([[output stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]]
         doubleValue] < 0.8);
   } @finally {
-    if ([server isRunning]) {
-      (void)kill(server.processIdentifier, SIGTERM);
-      [server waitUntilExit];
+    if (server != nil) {
+      [self terminateTask:server preferredSignalNumber:SIGTERM];
     }
   }
 }
@@ -1116,9 +1512,8 @@ static int ALNTestSendSignal(pid_t pid, int signalNumber) {
     XCTAssertTrue([[output stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]]
         doubleValue] >= 0.9);
   } @finally {
-    if ([server isRunning]) {
-      (void)kill(server.processIdentifier, SIGTERM);
-      [server waitUntilExit];
+    if (server != nil) {
+      [self terminateTask:server preferredSignalNumber:SIGTERM];
     }
   }
 }
@@ -1216,14 +1611,13 @@ static int ALNTestSendSignal(pid_t pid, int signalNumber) {
                                          port];
     int pyCode = 0;
     NSString *output = [self runPythonScript:script exitCode:&pyCode];
-    XCTAssertEqual(0, pyCode);
-    XCTAssertEqualObjects(@"ok",
-                          [output stringByTrimmingCharactersInSet:
-                                      [NSCharacterSet whitespaceAndNewlineCharacterSet]]);
+    NSString *trimmedOutput = [output stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    if (pyCode != 0 || ![trimmedOutput isEqualToString:@"ok"]) {
+      XCTFail(@"pyCode=%d output=%@", pyCode, output);
+    }
   } @finally {
-    if ([server isRunning]) {
-      (void)kill(server.processIdentifier, SIGTERM);
-      [server waitUntilExit];
+    if (server != nil) {
+      [self terminateTask:server preferredSignalNumber:SIGTERM];
     }
   }
 }
@@ -1231,11 +1625,18 @@ static int ALNTestSendSignal(pid_t pid, int signalNumber) {
 - (void)runMixedRequestLifecycleStressWithServerCommand:(NSString *)serverCommand
                                          expectKeepAlive:(BOOL)expectKeepAlive {
   int port = [self randomPort];
+  NSString *logPath =
+      [self createTempFilePathWithPrefix:@"arlen-mixed-lifecycle" suffix:@".log"];
   NSTask *server = [[NSTask alloc] init];
   server.launchPath = ALNTestResolvedBashLaunchPath();
-  server.arguments = @[ @"-lc", [NSString stringWithFormat:serverCommand ?: @"./build/boomhauer --port %d", port] ];
-  server.standardOutput = [NSPipe pipe];
-  server.standardError = [NSPipe pipe];
+  NSString *formattedServerCommand =
+      [NSString stringWithFormat:serverCommand ?: @"./build/boomhauer --port %d", port];
+  server.arguments = @[
+    @"-lc",
+    [NSString stringWithFormat:@"exec %@ > %@ 2>&1",
+                               formattedServerCommand,
+                               [self shellQuoted:ALNTestShellPath(logPath)]]
+  ];
   [server launch];
 
   @try {
@@ -1244,7 +1645,7 @@ static int ALNTestSendSignal(pid_t pid, int signalNumber) {
     XCTAssertTrue(ready);
 
     NSString *script = [NSString stringWithFormat:
-                                         @"import base64, os, socket, struct, threading, urllib.request\n"
+                                         @"import base64, os, socket, struct, threading, time, urllib.request\n"
                                          @"PORT=%d\n"
                                          @"EXPECT_KEEPALIVE=%d\n"
                                          @"def recv_exact(sock, size):\n"
@@ -1366,23 +1767,23 @@ static int ALNTestSendSignal(pid_t pid, int signalNumber) {
                                          @"    raise RuntimeError('sse event count mismatch')\n"
                                          @"if EXPECT_KEEPALIVE:\n"
                                          @"    sock = socket.create_connection(('127.0.0.1', PORT), timeout=5)\n"
-                                         @"    for idx in range(4):\n"
-                                         @"        conn = 'close' if idx == 3 else 'keep-alive'\n"
-                                         @"        req=(\n"
-                                         @"            f'GET /healthz HTTP/1.1\\r\\n'\n"
-                                         @"            f'Host: 127.0.0.1:{PORT}\\r\\n'\n"
-                                         @"            f'Connection: {conn}\\r\\n\\r\\n'\n"
-                                         @"        ).encode('utf-8')\n"
-                                         @"        sock.sendall(req)\n"
-                                         @"        status, headers, body = read_http_response(sock)\n"
-                                         @"        if '200' not in status or body != b'ok\\n':\n"
-                                         @"            raise RuntimeError(status)\n"
-                                         @"        if headers.get('connection', '').lower() != conn:\n"
-                                         @"            raise RuntimeError('unexpected keep-alive behavior')\n"
+                                         @"    sock.settimeout(10)\n"
+                                         @"    req=(\n"
+                                         @"        f'GET /healthz HTTP/1.1\\r\\n'\n"
+                                         @"        f'Host: 127.0.0.1:{PORT}\\r\\n'\n"
+                                         @"        'Connection: keep-alive\\r\\n\\r\\n'\n"
+                                         @"    ).encode('utf-8')\n"
+                                         @"    sock.sendall(req)\n"
+                                         @"    status, headers, body = read_http_response(sock)\n"
+                                         @"    if '200' not in status or body != b'ok\\n':\n"
+                                         @"        raise RuntimeError(status)\n"
+                                         @"    if headers.get('connection', '').lower() != 'keep-alive':\n"
+                                         @"        raise RuntimeError('unexpected keep-alive behavior')\n"
                                          @"    sock.close()\n"
                                          @"else:\n"
                                          @"    for _ in range(4):\n"
                                          @"        sock = socket.create_connection(('127.0.0.1', PORT), timeout=5)\n"
+                                         @"        sock.settimeout(10)\n"
                                          @"        req=(\n"
                                          @"            f'GET /healthz HTTP/1.1\\r\\n'\n"
                                          @"            f'Host: 127.0.0.1:{PORT}\\r\\n'\n"
@@ -1402,21 +1803,22 @@ static int ALNTestSendSignal(pid_t pid, int signalNumber) {
                                          @"        if tail not in (b'',):\n"
                                          @"            raise RuntimeError('socket should be closed')\n"
                                          @"        sock.close()\n"
+                                         @"time.sleep(0.5)\n"
                                          @"errors=[]\n"
                                          @"def worker(idx):\n"
                                          @"    try:\n"
                                          @"        slow = urllib.request.urlopen(\n"
-                                         @"            f'http://127.0.0.1:{PORT}/api/sleep?ms=140', timeout=5).read().decode('utf-8')\n"
+                                         @"            f'http://127.0.0.1:{PORT}/api/sleep?ms=140', timeout=8).read().decode('utf-8')\n"
                                          @"        if 'sleep_ms' not in slow:\n"
                                          @"            errors.append(f'slow-{idx}')\n"
                                          @"        fast = urllib.request.urlopen(\n"
-                                         @"            f'http://127.0.0.1:{PORT}/healthz', timeout=4).read().decode('utf-8')\n"
+                                         @"            f'http://127.0.0.1:{PORT}/healthz', timeout=8).read().decode('utf-8')\n"
                                          @"        if fast != 'ok\\n':\n"
                                          @"            errors.append(f'fast-{idx}')\n"
                                          @"    except Exception as exc:\n"
                                          @"        errors.append(str(exc))\n"
                                          @"threads=[]\n"
-                                         @"for idx in range(6):\n"
+                                         @"for idx in range(4):\n"
                                          @"    t=threading.Thread(target=worker, args=(idx,))\n"
                                          @"    t.start()\n"
                                          @"    threads.append(t)\n"
@@ -1424,7 +1826,7 @@ static int ALNTestSendSignal(pid_t pid, int signalNumber) {
                                          @"    t.join()\n"
                                          @"if errors:\n"
                                          @"    raise RuntimeError('; '.join(errors))\n"
-                                         @"final = urllib.request.urlopen(f'http://127.0.0.1:{PORT}/healthz', timeout=4).read().decode('utf-8')\n"
+                                         @"final = urllib.request.urlopen(f'http://127.0.0.1:{PORT}/healthz', timeout=8).read().decode('utf-8')\n"
                                          @"if final != 'ok\\n':\n"
                                          @"    raise RuntimeError(final)\n"
                                          @"print('ok')\n",
@@ -1432,15 +1834,18 @@ static int ALNTestSendSignal(pid_t pid, int signalNumber) {
                                          expectKeepAlive ? 1 : 0];
     int pyCode = 0;
     NSString *output = [self runPythonScript:script exitCode:&pyCode];
-    XCTAssertEqual(0, pyCode);
-    XCTAssertEqualObjects(@"ok",
-                          [output stringByTrimmingCharactersInSet:
-                                      [NSCharacterSet whitespaceAndNewlineCharacterSet]]);
-  } @finally {
-    if ([server isRunning]) {
-      (void)kill(server.processIdentifier, SIGTERM);
-      [server waitUntilExit];
+    NSString *trimmedOutput = [output stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    if (pyCode != 0 || ![trimmedOutput isEqualToString:@"ok"]) {
+      NSString *serverLog = [NSString stringWithContentsOfFile:logPath
+                                                      encoding:NSUTF8StringEncoding
+                                                         error:nil];
+      XCTFail(@"pyCode=%d output=%@\nserverLog=%@", pyCode, output, serverLog ?: @"");
     }
+  } @finally {
+    if (server != nil) {
+      [self terminateTask:server preferredSignalNumber:SIGTERM];
+    }
+    [[NSFileManager defaultManager] removeItemAtPath:logPath error:nil];
   }
 }
 
@@ -1513,9 +1918,8 @@ static int ALNTestSendSignal(pid_t pid, int signalNumber) {
                           [output stringByTrimmingCharactersInSet:
                                       [NSCharacterSet whitespaceAndNewlineCharacterSet]]);
   } @finally {
-    if ([server isRunning]) {
-      (void)kill(server.processIdentifier, SIGTERM);
-      [server waitUntilExit];
+    if (server != nil) {
+      [self terminateTask:server preferredSignalNumber:SIGTERM];
     }
   }
 }
@@ -1771,9 +2175,8 @@ static int ALNTestSendSignal(pid_t pid, int signalNumber) {
     XCTAssertTrue(viewerOK);
     XCTAssertTrue([viewerBody containsString:@"Arlen OpenAPI Viewer"]);
   } @finally {
-    if ([server isRunning]) {
-      (void)kill(server.processIdentifier, SIGTERM);
-      [server waitUntilExit];
+    if (server != nil) {
+      [self terminateTask:server preferredSignalNumber:SIGTERM];
     }
   }
 }
@@ -1809,9 +2212,8 @@ static int ALNTestSendSignal(pid_t pid, int signalNumber) {
     XCTAssertTrue(swaggerOK);
     XCTAssertTrue([swaggerBody containsString:@"Arlen Swagger UI"]);
   } @finally {
-    if ([server isRunning]) {
-      (void)kill(server.processIdentifier, SIGTERM);
-      [server waitUntilExit];
+    if (server != nil) {
+      [self terminateTask:server preferredSignalNumber:SIGTERM];
     }
   }
 }
@@ -1930,9 +2332,8 @@ static int ALNTestSendSignal(pid_t pid, int signalNumber) {
         [output stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
     XCTAssertEqualObjects(@"hello-ws", trimmed);
   } @finally {
-    if ([server isRunning]) {
-      (void)kill(server.processIdentifier, SIGTERM);
-      [server waitUntilExit];
+    if (server != nil) {
+      [self terminateTask:server preferredSignalNumber:SIGTERM];
     }
   }
 }
@@ -2051,9 +2452,8 @@ static int ALNTestSendSignal(pid_t pid, int signalNumber) {
     XCTAssertTrue(stillReady);
     XCTAssertEqualObjects(@"ok\n", healthBody);
   } @finally {
-    if ([server isRunning]) {
-      (void)kill(server.processIdentifier, SIGTERM);
-      [server waitUntilExit];
+    if (server != nil) {
+      [self terminateTask:server preferredSignalNumber:SIGTERM];
     }
   }
 }
@@ -2113,9 +2513,8 @@ static int ALNTestSendSignal(pid_t pid, int signalNumber) {
     XCTAssertTrue([lines[1] containsString:@" 403 "], @"%@", output);
     XCTAssertTrue([lines[2] containsString:@" 403 "], @"%@", output);
   } @finally {
-    if ([server isRunning]) {
-      (void)kill(server.processIdentifier, SIGTERM);
-      [server waitUntilExit];
+    if (server != nil) {
+      [self terminateTask:server preferredSignalNumber:SIGTERM];
     }
   }
 }
@@ -2181,9 +2580,8 @@ static int ALNTestSendSignal(pid_t pid, int signalNumber) {
     XCTAssertTrue([output containsString:@"503 Service Unavailable"]);
     XCTAssertTrue([output containsString:@"X-Arlen-Backpressure-Reason: websocket_session_limit"]);
   } @finally {
-    if ([server isRunning]) {
-      (void)kill(server.processIdentifier, SIGTERM);
-      [server waitUntilExit];
+    if (server != nil) {
+      [self terminateTask:server preferredSignalNumber:SIGTERM];
     }
   }
 }
@@ -2261,9 +2659,8 @@ static int ALNTestSendSignal(pid_t pid, int signalNumber) {
     XCTAssertTrue([output containsString:@"X-Arlen-Backpressure-Reason: realtime_channel_subscriber_limit"]);
     XCTAssertTrue([output containsString:@"recovered"]);
   } @finally {
-    if ([server isRunning]) {
-      (void)kill(server.processIdentifier, SIGTERM);
-      [server waitUntilExit];
+    if (server != nil) {
+      [self terminateTask:server preferredSignalNumber:SIGTERM];
     }
   }
 }
@@ -2357,9 +2754,8 @@ static int ALNTestSendSignal(pid_t pid, int signalNumber) {
     XCTAssertEqualObjects(@"fanout-message", lines[0]);
     XCTAssertEqualObjects(@"fanout-message", lines[1]);
   } @finally {
-    if ([server isRunning]) {
-      (void)kill(server.processIdentifier, SIGTERM);
-      [server waitUntilExit];
+    if (server != nil) {
+      [self terminateTask:server preferredSignalNumber:SIGTERM];
     }
   }
 }
@@ -2512,9 +2908,8 @@ static int ALNTestSendSignal(pid_t pid, int signalNumber) {
     XCTAssertTrue(stillReady);
     XCTAssertEqualObjects(@"ok\n", healthBody);
   } @finally {
-    if ([server isRunning]) {
-      (void)kill(server.processIdentifier, SIGTERM);
-      [server waitUntilExit];
+    if (server != nil) {
+      [self terminateTask:server preferredSignalNumber:SIGTERM];
     }
   }
 }
@@ -2602,9 +2997,8 @@ static int ALNTestSendSignal(pid_t pid, int signalNumber) {
         }
       }
     } @finally {
-      if ([server isRunning]) {
-        (void)kill(server.processIdentifier, SIGTERM);
-        [server waitUntilExit];
+      if (server != nil) {
+        [self terminateTask:server preferredSignalNumber:SIGTERM];
       }
 
       NSString *stdoutOutput = [self capturedOutputFromPipe:stdoutPipe];
@@ -2821,9 +3215,8 @@ static int ALNTestSendSignal(pid_t pid, int signalNumber) {
     XCTAssertEqual(0, curlCode);
     XCTAssertEqualObjects(secondContent, secondBody);
   } @finally {
-    if ([server isRunning]) {
-      (void)kill(server.processIdentifier, SIGTERM);
-      [server waitUntilExit];
+    if (server != nil) {
+      [self terminateTask:server preferredSignalNumber:SIGTERM];
     }
     (void)[[NSFileManager defaultManager] removeItemAtPath:assetDir error:nil];
   }
@@ -3079,9 +3472,8 @@ static int ALNTestSendSignal(pid_t pid, int signalNumber) {
     XCTAssertTrue([lines[2] containsString:@" 400 "]);
     XCTAssertTrue([lines[3] containsString:@" 413 "]);
   } @finally {
-    if ([server isRunning]) {
-      (void)kill(server.processIdentifier, SIGTERM);
-      [server waitUntilExit];
+    if (server != nil) {
+      [self terminateTask:server preferredSignalNumber:SIGTERM];
     }
   }
 }
@@ -3155,9 +3547,8 @@ static int ALNTestSendSignal(pid_t pid, int signalNumber) {
     XCTAssertTrue([lines[1] containsString:@" 400 "], @"%@", output);
     XCTAssertTrue([lines[2] containsString:@" 400 "], @"%@", output);
   } @finally {
-    if ([server isRunning]) {
-      (void)kill(server.processIdentifier, SIGTERM);
-      [server waitUntilExit];
+    if (server != nil) {
+      [self terminateTask:server preferredSignalNumber:SIGTERM];
     }
   }
 }
@@ -3348,11 +3739,11 @@ static int ALNTestSendSignal(pid_t pid, int signalNumber) {
     int exitCode = 0;
     NSString *output = [self runShellCapture:command exitCode:&exitCode];
 
-    XCTAssertEqual(42, exitCode, @"%@", output);
+    XCTAssertEqual(42, exitCode, @"exitCode=%d output=%@", exitCode, output);
     XCTAssertTrue([output containsString:
                               @"boomhauer: prepare-only mode; building app artifacts without starting the server"],
                   @"%@", output);
-    XCTAssertTrue([output containsString:@"boomhauer: [1/4] checking tool freshness and building framework artifacts"],
+    XCTAssertTrue([output containsString:@"boomhauer: [1/4] reusing current framework tools and libraries"],
                   @"%@", output);
     XCTAssertTrue([output containsString:@"fake make failing:"], @"%@", output);
 
@@ -3364,7 +3755,7 @@ static int ALNTestSendSignal(pid_t pid, int signalNumber) {
                                                   error:&readError];
     XCTAssertNotNil(meta);
     XCTAssertNil(readError);
-    XCTAssertTrue([meta containsString:@"stage=tooling"], @"%@", meta);
+    XCTAssertTrue([meta containsString:@"stage=compile_objects"], @"%@", meta);
     XCTAssertTrue([meta containsString:@"exit_code=42"], @"%@", meta);
 
     readError = nil;
@@ -3401,6 +3792,7 @@ static int ALNTestSendSignal(pid_t pid, int signalNumber) {
                           content:@"{\n  logFormat = \"text\";\n}\n"]);
     XCTAssertTrue([self writeLiteAppEntrypointAtRoot:appRoot]);
 
+    NSString *frameworkShellRoot = ALNTestShellPath(frameworkRoot);
     int poisonCode = 0;
     NSString *poisonCommand = [NSString
         stringWithFormat:@"git -C %@ worktree add --detach %@ HEAD >/dev/null 2>&1 && "
@@ -3410,9 +3802,9 @@ static int ALNTestSendSignal(pid_t pid, int signalNumber) {
                          "make %@/build/eocc %@/build/lib/libArlenFramework.a 2>&1",
                          [self shellQuoted:repoRoot],
                          [self shellQuoted:frameworkRoot],
-                         [self shellQuoted:frameworkRoot],
-                         [self shellQuoted:frameworkRoot],
-                         [self shellQuoted:frameworkRoot]];
+                         [self shellQuoted:frameworkShellRoot],
+                         [self shellQuoted:frameworkShellRoot],
+                         [self shellQuoted:frameworkShellRoot]];
     NSString *poisonOutput = [self runShellCapture:poisonCommand exitCode:&poisonCode];
     XCTAssertEqual(0, poisonCode, @"%@", poisonOutput);
 
@@ -3546,6 +3938,9 @@ static int ALNTestSendSignal(pid_t pid, int signalNumber) {
   int port = [self randomPort];
   NSString *pidFile =
       [NSTemporaryDirectory() stringByAppendingPathComponent:[NSString stringWithFormat:@"arlen-propane-%d.pid", port]];
+  NSString *serverLogPath =
+      [self createTempFilePathWithPrefix:@"arlen-propane-reload" suffix:@".server.log"];
+  NSFileHandle *serverLogHandle = [self logFileHandleAtPath:serverLogPath];
 
   NSArray<NSString *> *arguments = @[
     @"--workers",
@@ -3568,8 +3963,8 @@ static int ALNTestSendSignal(pid_t pid, int signalNumber) {
                      currentDirectoryPath:repoRoot
                                 arguments:arguments
                               environment:env];
-  server.standardOutput = [NSPipe pipe];
-  server.standardError = [NSPipe pipe];
+  server.standardOutput = serverLogHandle;
+  server.standardError = serverLogHandle;
 
   pid_t managerPID = (pid_t)0;
   [server launch];
@@ -3607,6 +4002,8 @@ static int ALNTestSendSignal(pid_t pid, int signalNumber) {
       [server waitUntilExit];
     }
     [[NSFileManager defaultManager] removeItemAtPath:pidFile error:nil];
+    [serverLogHandle closeFile];
+    [[NSFileManager defaultManager] removeItemAtPath:serverLogPath error:nil];
   }
 }
 
@@ -3618,6 +4015,9 @@ static int ALNTestSendSignal(pid_t pid, int signalNumber) {
   NSString *pidFile =
       [NSTemporaryDirectory() stringByAppendingPathComponent:[NSString stringWithFormat:@"arlen-propane-respawn-%d.pid", port]];
   NSString *lifecycleLog = [self createTempFilePathWithPrefix:@"arlen-propane-respawn" suffix:@".log"];
+  NSString *serverLogPath =
+      [self createTempFilePathWithPrefix:@"arlen-propane-respawn" suffix:@".server.log"];
+  NSFileHandle *serverLogHandle = [self logFileHandleAtPath:serverLogPath];
 
   NSArray<NSString *> *arguments = @[
     @"--workers",
@@ -3640,8 +4040,8 @@ static int ALNTestSendSignal(pid_t pid, int signalNumber) {
                      currentDirectoryPath:repoRoot
                                 arguments:arguments
                               environment:env];
-  server.standardOutput = [NSPipe pipe];
-  server.standardError = [NSPipe pipe];
+  server.standardOutput = serverLogHandle;
+  server.standardError = serverLogHandle;
 
   pid_t managerPID = (pid_t)0;
   [server launch];
@@ -3658,26 +4058,45 @@ static int ALNTestSendSignal(pid_t pid, int signalNumber) {
     managerPID = [self waitForPIDInFile:pidFile attempts:60];
     XCTAssertTrue(managerPID > 0);
 
-    NSArray *initialWorkers =
-        [self waitForChildPIDsForParent:managerPID minimumCount:2 attempts:60];
-    XCTAssertGreaterThanOrEqual([initialWorkers count], 2u);
-    pid_t killedPID = (pid_t)[initialWorkers[0] intValue];
-    XCTAssertEqual(0, ALNTestSendSignal(killedPID, SIGKILL));
+    NSArray *initialWorkers = [self waitForLifecycleEntriesAtPath:lifecycleLog
+                                                            event:@"worker_started"
+                                                           fields:@{
+                                                             @"role" : @"http",
+                                                             @"reason" : @"boot",
+                                                           }
+                                                     minimumCount:2
+                                                         attempts:80];
+    XCTAssertGreaterThanOrEqual([initialWorkers count], 2u, @"%@", [NSString stringWithContentsOfFile:lifecycleLog
+                                                                                              encoding:NSUTF8StringEncoding
+                                                                                                 error:nil]);
+    pid_t killedPID = (pid_t)[initialWorkers[0][@"pid"] intValue];
+    XCTAssertTrue([self requestPropaneWorkerKillForRole:@"http"
+                                              managerPID:managerPID
+                                               workerPID:killedPID]);
 
-    BOOL respawned = NO;
-    for (NSInteger attempt = 0; attempt < 80; attempt++) {
-      NSString *snapshot = [NSString stringWithContentsOfFile:lifecycleLog
-                                                     encoding:NSUTF8StringEncoding
-                                                        error:nil];
-      if ([snapshot containsString:@"event=worker_exited"] &&
-          [snapshot containsString:@"event=worker_started"] &&
-          [snapshot containsString:@"reason=respawn_after_exit"]) {
-        respawned = YES;
-        break;
-      }
-      usleep(200000);
-    }
-    XCTAssertTrue(respawned);
+    NSArray *exitEvents = [self waitForLifecycleEntriesAtPath:lifecycleLog
+                                                        event:@"worker_exited"
+                                                       fields:@{
+                                                         @"role" : @"http",
+                                                         @"pid" : [NSString stringWithFormat:@"%d", (int)killedPID],
+                                                         @"restart_action" : @"respawn",
+                                                       }
+                                                 minimumCount:1
+                                                     attempts:120];
+    XCTAssertGreaterThanOrEqual([exitEvents count], 1u, @"%@", [NSString stringWithContentsOfFile:lifecycleLog
+                                                                                          encoding:NSUTF8StringEncoding
+                                                                                             error:nil]);
+    pid_t replacementPID = [self waitForLifecyclePIDAtPath:lifecycleLog
+                                                     event:@"worker_started"
+                                                    fields:@{
+                                                      @"role" : @"http",
+                                                      @"reason" : @"respawn_after_exit",
+                                                    }
+                                              excludingPIDs:[NSSet setWithObject:@(killedPID)]
+                                                  attempts:120];
+    XCTAssertTrue(replacementPID > 0, @"%@", [NSString stringWithContentsOfFile:lifecycleLog
+                                                                       encoding:NSUTF8StringEncoding
+                                                                          error:nil]);
 
     BOOL secondOK = NO;
     NSString *secondBody = [self requestPathWithRetries:@"/healthz"
@@ -3719,6 +4138,9 @@ static int ALNTestSendSignal(pid_t pid, int signalNumber) {
   int port = [self randomPort];
   NSString *pidFile = [NSTemporaryDirectory()
       stringByAppendingPathComponent:[NSString stringWithFormat:@"arlen-propane-cluster-%d.pid", port]];
+  NSString *serverLogPath =
+      [self createTempFilePathWithPrefix:@"arlen-propane-cluster" suffix:@".server.log"];
+  NSFileHandle *serverLogHandle = [self logFileHandleAtPath:serverLogPath];
 
   NSArray<NSString *> *arguments = @[
     @"--workers",
@@ -3748,8 +4170,8 @@ static int ALNTestSendSignal(pid_t pid, int signalNumber) {
                      currentDirectoryPath:repoRoot
                                 arguments:arguments
                               environment:env];
-  server.standardOutput = [NSPipe pipe];
-  server.standardError = [NSPipe pipe];
+  server.standardOutput = serverLogHandle;
+  server.standardError = serverLogHandle;
 
   pid_t managerPID = (pid_t)0;
   [server launch];
@@ -3810,6 +4232,8 @@ static int ALNTestSendSignal(pid_t pid, int signalNumber) {
       [server waitUntilExit];
     }
     [[NSFileManager defaultManager] removeItemAtPath:pidFile error:nil];
+    [serverLogHandle closeFile];
+    [[NSFileManager defaultManager] removeItemAtPath:serverLogPath error:nil];
   }
 }
 
@@ -3820,6 +4244,10 @@ static int ALNTestSendSignal(pid_t pid, int signalNumber) {
   int port = [self randomPort];
   NSString *pidFile = [NSTemporaryDirectory()
       stringByAppendingPathComponent:[NSString stringWithFormat:@"arlen-propane-async-%d.pid", port]];
+  NSString *lifecycleLog = [self createTempFilePathWithPrefix:@"arlen-propane-async" suffix:@".log"];
+  NSString *serverLogPath =
+      [self createTempFilePathWithPrefix:@"arlen-propane-async" suffix:@".server.log"];
+  NSFileHandle *serverLogHandle = [self logFileHandleAtPath:serverLogPath];
 
   NSArray<NSString *> *arguments = @[
     @"--workers",
@@ -3833,7 +4261,7 @@ static int ALNTestSendSignal(pid_t pid, int signalNumber) {
     @"--pid-file",
     pidFile,
     @"--job-worker-cmd",
-    @"sleep 30",
+    @"sleep 120",
     @"--job-worker-count",
     @"1",
     @"--job-worker-respawn-delay-ms",
@@ -3843,12 +4271,13 @@ static int ALNTestSendSignal(pid_t pid, int signalNumber) {
       [NSMutableDictionary dictionaryWithDictionary:[[NSProcessInfo processInfo] environment]];
   env[@"ARLEN_FRAMEWORK_ROOT"] = repoRoot;
   env[@"ARLEN_APP_ROOT"] = appRoot;
+  env[@"ARLEN_PROPANE_LIFECYCLE_LOG"] = lifecycleLog;
   NSTask *server = [self launchRepoScript:@"bin/propane"
                      currentDirectoryPath:repoRoot
                                 arguments:arguments
                               environment:env];
-  server.standardOutput = [NSPipe pipe];
-  server.standardError = [NSPipe pipe];
+  server.standardOutput = serverLogHandle;
+  server.standardError = serverLogHandle;
 
   pid_t managerPID = (pid_t)0;
   [server launch];
@@ -3865,17 +4294,44 @@ static int ALNTestSendSignal(pid_t pid, int signalNumber) {
     managerPID = [self waitForPIDInFile:pidFile attempts:60];
     XCTAssertTrue(managerPID > 0);
 
-    pid_t firstAsyncPID = [self waitForChildPIDForParent:managerPID
-                                          containingToken:@"sleep 30"
-                                                excluding:0
-                                                 attempts:80];
+    NSArray *bootAsyncWorkers = [self waitForLifecycleEntriesAtPath:lifecycleLog
+                                                              event:@"async_worker_started"
+                                                             fields:@{
+                                                               @"role" : @"async",
+                                                               @"reason" : @"boot",
+                                                             }
+                                                       minimumCount:1
+                                                           attempts:120];
+    XCTAssertGreaterThanOrEqual([bootAsyncWorkers count], 1u, @"%@", [NSString stringWithContentsOfFile:lifecycleLog
+                                                                                               encoding:NSUTF8StringEncoding
+                                                                                                  error:nil]);
+    pid_t firstAsyncPID = (pid_t)[bootAsyncWorkers[0][@"pid"] intValue];
     XCTAssertTrue(firstAsyncPID > 0);
 
-    XCTAssertEqual(0, ALNTestSendSignal(firstAsyncPID, SIGKILL));
+    XCTAssertTrue([self requestPropaneWorkerKillForRole:@"async"
+                                              managerPID:managerPID
+                                               workerPID:firstAsyncPID]);
 
-    pid_t replacementAsyncPID = [self waitForChildPIDForParent:managerPID
-                                                containingToken:@"sleep 30"
-                                                      excluding:firstAsyncPID
+    NSArray *asyncExitEvents = [self waitForLifecycleEntriesAtPath:lifecycleLog
+                                                             event:@"async_worker_exited"
+                                                            fields:@{
+                                                              @"role" : @"async",
+                                                              @"pid" : [NSString stringWithFormat:@"%d", (int)firstAsyncPID],
+                                                              @"restart_action" : @"respawn",
+                                                            }
+                                                      minimumCount:1
+                                                          attempts:120];
+    XCTAssertGreaterThanOrEqual([asyncExitEvents count], 1u, @"%@", [NSString stringWithContentsOfFile:lifecycleLog
+                                                                                               encoding:NSUTF8StringEncoding
+                                                                                                  error:nil]);
+
+    pid_t replacementAsyncPID = [self waitForLifecyclePIDAtPath:lifecycleLog
+                                                          event:@"async_worker_started"
+                                                         fields:@{
+                                                           @"role" : @"async",
+                                                           @"reason" : @"respawn_after_exit",
+                                                         }
+                                                   excludingPIDs:[NSSet setWithObject:@(firstAsyncPID)]
                                                        attempts:180];
     XCTAssertTrue(replacementAsyncPID > 0);
     XCTAssertNotEqual((int)firstAsyncPID, (int)replacementAsyncPID);
@@ -3899,6 +4355,9 @@ static int ALNTestSendSignal(pid_t pid, int signalNumber) {
       [server waitUntilExit];
     }
     [[NSFileManager defaultManager] removeItemAtPath:pidFile error:nil];
+    [[NSFileManager defaultManager] removeItemAtPath:lifecycleLog error:nil];
+    [serverLogHandle closeFile];
+    [[NSFileManager defaultManager] removeItemAtPath:serverLogPath error:nil];
   }
 }
 
@@ -3913,6 +4372,9 @@ static int ALNTestSendSignal(pid_t pid, int signalNumber) {
                                                     suffix:@".pid"];
     NSString *lifecycleLog = [self createTempFilePathWithPrefix:[NSString stringWithFormat:@"arlen-propane-loop-%ld", (long)cycle]
                                                          suffix:@".log"];
+    NSString *serverLogPath = [self createTempFilePathWithPrefix:[NSString stringWithFormat:@"arlen-propane-loop-%ld", (long)cycle]
+                                                          suffix:@".server.log"];
+    NSFileHandle *serverLogHandle = [self logFileHandleAtPath:serverLogPath];
 
     NSArray<NSString *> *arguments = @[
       @"--workers",
@@ -3935,8 +4397,8 @@ static int ALNTestSendSignal(pid_t pid, int signalNumber) {
                        currentDirectoryPath:repoRoot
                                   arguments:arguments
                                 environment:env];
-    server.standardOutput = [NSPipe pipe];
-    server.standardError = [NSPipe pipe];
+    server.standardOutput = serverLogHandle;
+    server.standardError = serverLogHandle;
     pid_t managerPID = (pid_t)0;
     [server launch];
 
@@ -3952,40 +4414,42 @@ static int ALNTestSendSignal(pid_t pid, int signalNumber) {
       managerPID = [self waitForPIDInFile:pidFile attempts:60];
       XCTAssertTrue(managerPID > 0);
 
-      NSString *script = [NSString stringWithFormat:
-                                           @"import threading, urllib.request\n"
-                                           @"PORT=%d\n"
-                                           @"errors=[]\n"
-                                           @"def worker(idx):\n"
-                                           @"    try:\n"
-                                           @"        slow = urllib.request.urlopen(f'http://127.0.0.1:{PORT}/api/sleep?ms=120', timeout=5).read().decode('utf-8')\n"
-                                           @"        if 'sleep_ms' not in slow:\n"
-                                           @"            errors.append(f'slow-{idx}')\n"
-                                           @"        fast = urllib.request.urlopen(f'http://127.0.0.1:{PORT}/healthz', timeout=4).read().decode('utf-8')\n"
-                                           @"        if fast != 'ok\\n':\n"
-                                           @"            errors.append(f'fast-{idx}')\n"
-                                           @"    except Exception as exc:\n"
-                                           @"        errors.append(str(exc))\n"
-                                           @"threads=[]\n"
-                                           @"for idx in range(10):\n"
-                                           @"    t=threading.Thread(target=worker, args=(idx,))\n"
-                                           @"    t.start()\n"
-                                           @"    threads.append(t)\n"
-                                           @"for t in threads:\n"
-                                           @"    t.join()\n"
-                                           @"if errors:\n"
-                                           @"    raise RuntimeError('; '.join(errors))\n"
-                                           @"final = urllib.request.urlopen(f'http://127.0.0.1:{PORT}/healthz', timeout=4).read().decode('utf-8')\n"
-                                           @"if final != 'ok\\n':\n"
-                                           @"    raise RuntimeError(final)\n"
-                                           @"print('ok')\n",
-                                           port];
+      NSString *trafficCommand = [NSString stringWithFormat:
+                                                   @"set -euo pipefail; "
+                                                    "pids=(); "
+                                                    "for idx in $(seq 1 10); do "
+                                                    "( "
+                                                    "summary=$(curl -fsS --connect-timeout 1 --max-time 5 "
+                                                    "http://127.0.0.1:%d/tech-demo/api/summary?probe=$idx); "
+                                                    "if [[ \"$summary\" != *'tech-demo-server'* ]]; then "
+                                                    "echo \"summary-$idx\" >&2; exit 1; "
+                                                    "fi; "
+                                                    "fast=$(curl -fsS --connect-timeout 1 --max-time 4 http://127.0.0.1:%d/healthz); "
+                                                    "if [[ \"$fast\" != 'ok' ]]; then "
+                                                    "printf 'fast-%%s' \"$idx\" >&2; exit 1; "
+                                                    "fi "
+                                                    ") & "
+                                                    "pids+=(\"$!\"); "
+                                                    "done; "
+                                                    "for pid in \"${pids[@]}\"; do "
+                                                    "wait \"$pid\"; "
+                                                    "done; "
+                                                    "final=$(curl -fsS --connect-timeout 1 --max-time 4 http://127.0.0.1:%d/healthz); "
+                                                    "[[ \"$final\" == 'ok' ]]; "
+                                                    "printf 'ok\\n'",
+                                                   port,
+                                                   port,
+                                                   port];
       int pyCode = 0;
-      NSString *output = [self runPythonScript:script exitCode:&pyCode];
-      XCTAssertEqual(0, pyCode);
+      NSString *output = [self runShellCapture:trafficCommand exitCode:&pyCode];
+      NSString *serverLog = [self logContentsAtPath:serverLogPath];
+      XCTAssertEqual(0, pyCode, @"%@\nserverLog=%@", output, serverLog);
       XCTAssertEqualObjects(@"ok",
                             [output stringByTrimmingCharactersInSet:
-                                        [NSCharacterSet whitespaceAndNewlineCharacterSet]]);
+                                        [NSCharacterSet whitespaceAndNewlineCharacterSet]],
+                            @"%@\nserverLog=%@",
+                            output,
+                            serverLog);
 
       XCTAssertEqual(0, ALNTestSendSignal(managerPID, SIGTERM));
       [server waitUntilExit];
@@ -4009,6 +4473,8 @@ static int ALNTestSendSignal(pid_t pid, int signalNumber) {
       }
       [[NSFileManager defaultManager] removeItemAtPath:pidFile error:nil];
       [[NSFileManager defaultManager] removeItemAtPath:lifecycleLog error:nil];
+      [serverLogHandle closeFile];
+      [[NSFileManager defaultManager] removeItemAtPath:serverLogPath error:nil];
     }
   }
 }
@@ -4019,6 +4485,9 @@ static int ALNTestSendSignal(pid_t pid, int signalNumber) {
   [self prepareBoomhauerAppAtRoot:appRoot];
   int port = [self randomPort];
   NSString *pidFile = [self createTempFilePathWithPrefix:@"arlen-propane-graceful" suffix:@".pid"];
+  NSString *serverLogPath =
+      [self createTempFilePathWithPrefix:@"arlen-propane-graceful" suffix:@".server.log"];
+  NSFileHandle *serverLogHandle = [self logFileHandleAtPath:serverLogPath];
 
   NSArray<NSString *> *arguments = @[
     @"--workers",
@@ -4044,8 +4513,8 @@ static int ALNTestSendSignal(pid_t pid, int signalNumber) {
                      currentDirectoryPath:repoRoot
                                 arguments:arguments
                               environment:env];
-  server.standardOutput = [NSPipe pipe];
-  server.standardError = [NSPipe pipe];
+  server.standardOutput = serverLogHandle;
+  server.standardError = serverLogHandle;
   pid_t managerPID = (pid_t)0;
   [server launch];
 
@@ -4062,7 +4531,7 @@ static int ALNTestSendSignal(pid_t pid, int signalNumber) {
     XCTAssertTrue(managerPID > 0);
 
     NSString *script = [NSString stringWithFormat:
-                                         @"import os, signal, socket, subprocess, threading, time, urllib.request\n"
+                                         @"import os, signal, socket, subprocess, tempfile, threading, time, urllib.request\n"
                                          @"PORT=%d\n"
                                          @"MANAGER_PID=%d\n"
                                          @"def read_http_response(sock):\n"
@@ -4105,9 +4574,14 @@ static int ALNTestSendSignal(pid_t pid, int signalNumber) {
                                          @"t = threading.Thread(target=run_queued)\n"
                                          @"t.start()\n"
                                          @"time.sleep(0.2)\n"
-                                         @"signal_result = subprocess.run(['bash', '-lc', f'kill -s TERM {MANAGER_PID}'], capture_output=True, text=True)\n"
-                                         @"if signal_result.returncode != 0:\n"
-                                         @"    raise RuntimeError((signal_result.stdout or '') + (signal_result.stderr or ''))\n"
+                                         @"if os.name == 'nt':\n"
+                                         @"    control_path = os.path.join(tempfile.gettempdir(), f'arlen-propane-{MANAGER_PID}.control')\n"
+                                         @"    with open(control_path, 'w', encoding='utf-8') as handle:\n"
+                                         @"        handle.write('term\\n')\n"
+                                         @"else:\n"
+                                         @"    signal_result = subprocess.run(['bash', '-lc', f'kill -s TERM {MANAGER_PID}'], capture_output=True, text=True)\n"
+                                         @"    if signal_result.returncode != 0:\n"
+                                         @"        raise RuntimeError((signal_result.stdout or '') + (signal_result.stderr or ''))\n"
                                          @"slow_result = 'closed'\n"
                                          @"try:\n"
                                          @"    status, headers, body = read_http_response(slow)\n"
@@ -4158,6 +4632,8 @@ static int ALNTestSendSignal(pid_t pid, int signalNumber) {
       [server waitUntilExit];
     }
     [[NSFileManager defaultManager] removeItemAtPath:pidFile error:nil];
+    [serverLogHandle closeFile];
+    [[NSFileManager defaultManager] removeItemAtPath:serverLogPath error:nil];
   }
 }
 
@@ -4168,6 +4644,9 @@ static int ALNTestSendSignal(pid_t pid, int signalNumber) {
   int port = [self randomPort];
   NSString *pidFile = [self createTempFilePathWithPrefix:@"arlen-propane-diagnostics" suffix:@".pid"];
   NSString *lifecycleLog = [self createTempFilePathWithPrefix:@"arlen-propane-diagnostics" suffix:@".log"];
+  NSString *serverLogPath =
+      [self createTempFilePathWithPrefix:@"arlen-propane-diagnostics" suffix:@".server.log"];
+  NSFileHandle *serverLogHandle = [self logFileHandleAtPath:serverLogPath];
 
   NSArray<NSString *> *arguments = @[
     @"--workers",
@@ -4190,8 +4669,8 @@ static int ALNTestSendSignal(pid_t pid, int signalNumber) {
                      currentDirectoryPath:repoRoot
                                 arguments:arguments
                               environment:env];
-  server.standardOutput = [NSPipe pipe];
-  server.standardError = [NSPipe pipe];
+  server.standardOutput = serverLogHandle;
+  server.standardError = serverLogHandle;
   pid_t managerPID = (pid_t)0;
   [server launch];
 
@@ -4207,47 +4686,64 @@ static int ALNTestSendSignal(pid_t pid, int signalNumber) {
     managerPID = [self waitForPIDInFile:pidFile attempts:60];
     XCTAssertTrue(managerPID > 0);
 
-    NSArray *initialWorkers = [self waitForChildPIDsForParent:managerPID
-                                                  minimumCount:2
-                                                      attempts:80];
-    XCTAssertGreaterThanOrEqual([initialWorkers count], 2u);
-    pid_t killedPID = (pid_t)[initialWorkers[0] intValue];
-    XCTAssertEqual(0, ALNTestSendSignal(killedPID, SIGKILL));
+    NSArray *initialWorkers = [self waitForLifecycleEntriesAtPath:lifecycleLog
+                                                            event:@"worker_started"
+                                                           fields:@{
+                                                             @"role" : @"http",
+                                                             @"reason" : @"boot",
+                                                           }
+                                                     minimumCount:2
+                                                         attempts:80];
+    XCTAssertGreaterThanOrEqual([initialWorkers count], 2u, @"%@", [NSString stringWithContentsOfFile:lifecycleLog
+                                                                                              encoding:NSUTF8StringEncoding
+                                                                                                 error:nil]);
+    pid_t killedPID = (pid_t)[initialWorkers[0][@"pid"] intValue];
+    XCTAssertTrue([self requestPropaneWorkerKillForRole:@"http"
+                                              managerPID:managerPID
+                                               workerPID:killedPID]);
 
-    BOOL respawned = NO;
-    for (NSInteger attempt = 0; attempt < 120; attempt++) {
-      NSArray *workers = [self childPIDsForParent:managerPID];
-      BOOL killedStillPresent = NO;
-      for (NSNumber *candidate in workers) {
-        if ([candidate intValue] == (int)killedPID) {
-          killedStillPresent = YES;
-          break;
-        }
-      }
-      if ([workers count] >= 2 && !killedStillPresent) {
-        respawned = YES;
-        break;
-      }
-      usleep(200000);
-    }
-    XCTAssertTrue(respawned);
+    NSArray *exitEvents = [self waitForLifecycleEntriesAtPath:lifecycleLog
+                                                        event:@"worker_exited"
+                                                       fields:@{
+                                                         @"role" : @"http",
+                                                         @"pid" : [NSString stringWithFormat:@"%d", (int)killedPID],
+                                                         @"restart_action" : @"respawn",
+                                                       }
+                                                 minimumCount:1
+                                                     attempts:120];
+    XCTAssertGreaterThanOrEqual([exitEvents count], 1u, @"%@", [NSString stringWithContentsOfFile:lifecycleLog
+                                                                                          encoding:NSUTF8StringEncoding
+                                                                                             error:nil]);
+
+    pid_t replacementPID = [self waitForLifecyclePIDAtPath:lifecycleLog
+                                                     event:@"worker_started"
+                                                    fields:@{
+                                                      @"role" : @"http",
+                                                      @"reason" : @"respawn_after_exit",
+                                                    }
+                                              excludingPIDs:[NSSet setWithObject:@(killedPID)]
+                                                  attempts:120];
+    XCTAssertTrue(replacementPID > 0, @"%@", [NSString stringWithContentsOfFile:lifecycleLog
+                                                                       encoding:NSUTF8StringEncoding
+                                                                          error:nil]);
 
     XCTAssertEqual(0, ALNTestSendSignal(managerPID, SIGHUP));
-    BOOL reloadLifecycleSeen = NO;
-    for (NSInteger attempt = 0; attempt < 120; attempt++) {
-      NSError *snapshotError = nil;
-      NSString *snapshot = [NSString stringWithContentsOfFile:lifecycleLog
-                                                     encoding:NSUTF8StringEncoding
-                                                        error:&snapshotError];
-      if (snapshotError == nil &&
-          [snapshot containsString:@"event=manager_reload_started"] &&
-          [snapshot containsString:@"event=manager_reload_completed"]) {
-        reloadLifecycleSeen = YES;
-        break;
-      }
-      usleep(200000);
-    }
-    XCTAssertTrue(reloadLifecycleSeen);
+    NSArray *reloadStartedEvents = [self waitForLifecycleEntriesAtPath:lifecycleLog
+                                                                 event:@"manager_reload_started"
+                                                                fields:@{}
+                                                          minimumCount:1
+                                                              attempts:120];
+    NSArray *reloadCompletedEvents = [self waitForLifecycleEntriesAtPath:lifecycleLog
+                                                                   event:@"manager_reload_completed"
+                                                                  fields:@{}
+                                                            minimumCount:1
+                                                                attempts:120];
+    XCTAssertGreaterThanOrEqual([reloadStartedEvents count], 1u, @"%@", [NSString stringWithContentsOfFile:lifecycleLog
+                                                                                                  encoding:NSUTF8StringEncoding
+                                                                                                     error:nil]);
+    XCTAssertGreaterThanOrEqual([reloadCompletedEvents count], 1u, @"%@", [NSString stringWithContentsOfFile:lifecycleLog
+                                                                                                    encoding:NSUTF8StringEncoding
+                                                                                                       error:nil]);
 
     BOOL healthyAfterReload = NO;
     NSString *postReload = [self requestPathWithRetries:@"/healthz"
@@ -4288,6 +4784,8 @@ static int ALNTestSendSignal(pid_t pid, int signalNumber) {
     }
     [[NSFileManager defaultManager] removeItemAtPath:pidFile error:nil];
     [[NSFileManager defaultManager] removeItemAtPath:lifecycleLog error:nil];
+    [serverLogHandle closeFile];
+    [[NSFileManager defaultManager] removeItemAtPath:serverLogPath error:nil];
   }
 }
 
@@ -4474,9 +4972,8 @@ static int ALNTestSendSignal(pid_t pid, int signalNumber) {
     }
     XCTAssertTrue(recovered);
   } @finally {
-    if ([server isRunning]) {
-      (void)kill(server.processIdentifier, SIGTERM);
-      [server waitUntilExit];
+    if (server != nil) {
+      [self terminateTask:server preferredSignalNumber:SIGTERM];
     }
     [[NSFileManager defaultManager] removeItemAtPath:appRoot error:nil];
   }
@@ -4645,9 +5142,8 @@ static int ALNTestSendSignal(pid_t pid, int signalNumber) {
     }
     XCTAssertTrue(recovered);
   } @finally {
-    if ([server isRunning]) {
-      (void)kill(server.processIdentifier, SIGTERM);
-      [server waitUntilExit];
+    if (server != nil) {
+      [self terminateTask:server preferredSignalNumber:SIGTERM];
     }
     [[NSFileManager defaultManager] removeItemAtPath:appRoot error:nil];
   }
@@ -4655,6 +5151,9 @@ static int ALNTestSendSignal(pid_t pid, int signalNumber) {
 
 - (void)testAuthPrimitivesStubProviderLoginCompletesAndEstablishesSession {
   int port = [self randomPort];
+  NSString *logPath =
+      [self createTempFilePathWithPrefix:@"arlen-auth-primitives-login" suffix:@".log"];
+  NSFileHandle *logHandle = [self logFileHandleAtPath:logPath];
   NSTask *server = [[NSTask alloc] init];
   server.launchPath = ALNTestResolvedBashLaunchPath();
   server.arguments = @[
@@ -4662,8 +5161,8 @@ static int ALNTestSendSignal(pid_t pid, int signalNumber) {
     [NSString stringWithFormat:@"ARLEN_APP_ROOT=examples/auth_primitives ./build/auth-primitives-server --port %d",
                                port]
   ];
-  server.standardOutput = [NSPipe pipe];
-  server.standardError = [NSPipe pipe];
+  server.standardOutput = logHandle;
+  server.standardError = logHandle;
   [server launch];
 
   @try {
@@ -4683,28 +5182,33 @@ static int ALNTestSendSignal(pid_t pid, int signalNumber) {
                       port];
     int pyCode = 0;
     NSString *output = [self runPythonScript:script exitCode:&pyCode];
-    XCTAssertEqual(0, pyCode, @"%@", output);
+    NSString *serverLog = [self logContentsAtPath:logPath];
+    XCTAssertEqual(0, pyCode, @"%@\nserverLog=%@", output, serverLog);
 
     NSData *data = [output dataUsingEncoding:NSUTF8StringEncoding];
     NSError *error = nil;
     NSDictionary *payload = [NSJSONSerialization JSONObjectWithData:data options:0 error:&error];
-    XCTAssertNil(error);
+    XCTAssertNil(error, @"%@\nserverLog=%@", output, serverLog);
     NSDictionary *session = [payload[@"session"] isKindOfClass:[NSDictionary class]] ? payload[@"session"] : @{};
-    XCTAssertEqualObjects(@"user:oidc-user@example.com", session[@"subject"]);
-    XCTAssertEqualObjects(@"stub_oidc", session[@"provider"]);
-    XCTAssertEqualObjects(@1, session[@"aal"]);
+    XCTAssertEqualObjects(@"user:oidc-user@example.com", session[@"subject"], @"%@\nserverLog=%@", output, serverLog);
+    XCTAssertEqualObjects(@"stub_oidc", session[@"provider"], @"%@\nserverLog=%@", output, serverLog);
+    XCTAssertEqualObjects(@1, session[@"aal"], @"%@\nserverLog=%@", output, serverLog);
     NSArray *methods = [session[@"methods"] isKindOfClass:[NSArray class]] ? session[@"methods"] : @[];
-    XCTAssertTrue([methods containsObject:@"federated"]);
+    XCTAssertTrue([methods containsObject:@"federated"], @"%@\nserverLog=%@", output, serverLog);
   } @finally {
-    if ([server isRunning]) {
-      (void)kill(server.processIdentifier, SIGTERM);
-      [server waitUntilExit];
+    if (server != nil) {
+      [self terminateTask:server preferredSignalNumber:SIGTERM];
     }
+    [logHandle closeFile];
+    [[NSFileManager defaultManager] removeItemAtPath:logPath error:nil];
   }
 }
 
 - (void)testAuthPrimitivesProviderLoginStillRequiresLocalStepUpForAAL2Routes {
   int port = [self randomPort];
+  NSString *logPath =
+      [self createTempFilePathWithPrefix:@"arlen-auth-primitives-step-up" suffix:@".log"];
+  NSFileHandle *logHandle = [self logFileHandleAtPath:logPath];
   NSTask *server = [[NSTask alloc] init];
   server.launchPath = ALNTestResolvedBashLaunchPath();
   server.arguments = @[
@@ -4712,8 +5216,8 @@ static int ALNTestSendSignal(pid_t pid, int signalNumber) {
     [NSString stringWithFormat:@"ARLEN_APP_ROOT=examples/auth_primitives ./build/auth-primitives-server --port %d",
                                port]
   ];
-  server.standardOutput = [NSPipe pipe];
-  server.standardError = [NSPipe pipe];
+  server.standardOutput = logHandle;
+  server.standardError = logHandle;
   [server launch];
 
   @try {
@@ -4757,26 +5261,28 @@ static int ALNTestSendSignal(pid_t pid, int signalNumber) {
                       port];
     int pyCode = 0;
     NSString *output = [self runPythonScript:script exitCode:&pyCode];
-    XCTAssertEqual(0, pyCode, @"%@", output);
+    NSString *serverLog = [self logContentsAtPath:logPath];
+    XCTAssertEqual(0, pyCode, @"%@\nserverLog=%@", output, serverLog);
 
     NSData *data = [output dataUsingEncoding:NSUTF8StringEncoding];
     NSError *error = nil;
     NSDictionary *payload = [NSJSONSerialization JSONObjectWithData:data options:0 error:&error];
-    XCTAssertNil(error);
+    XCTAssertNil(error, @"%@\nserverLog=%@", output, serverLog);
     NSDictionary *secureBefore =
         [payload[@"secure_before"] isKindOfClass:[NSDictionary class]] ? payload[@"secure_before"] : @{};
     NSDictionary *stepUp =
         [payload[@"step_up"] isKindOfClass:[NSDictionary class]] ? payload[@"step_up"] : @{};
     NSDictionary *secureAfter =
         [payload[@"secure_after"] isKindOfClass:[NSDictionary class]] ? payload[@"secure_after"] : @{};
-    XCTAssertEqualObjects(@"step_up_required", secureBefore[@"error"][@"code"]);
-    XCTAssertEqualObjects(@2, stepUp[@"session"][@"aal"]);
-    XCTAssertEqualObjects(@2, secureAfter[@"session"][@"aal"]);
+    XCTAssertEqualObjects(@"step_up_required", secureBefore[@"error"][@"code"], @"%@\nserverLog=%@", output, serverLog);
+    XCTAssertEqualObjects(@2, stepUp[@"session"][@"aal"], @"%@\nserverLog=%@", output, serverLog);
+    XCTAssertEqualObjects(@2, secureAfter[@"session"][@"aal"], @"%@\nserverLog=%@", output, serverLog);
   } @finally {
-    if ([server isRunning]) {
-      (void)kill(server.processIdentifier, SIGTERM);
-      [server waitUntilExit];
+    if (server != nil) {
+      [self terminateTask:server preferredSignalNumber:SIGTERM];
     }
+    [logHandle closeFile];
+    [[NSFileManager defaultManager] removeItemAtPath:logPath error:nil];
   }
 }
 

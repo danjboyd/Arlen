@@ -146,11 +146,12 @@ From app root:
 Use `arlen routes` when you want to inspect registration order and route names.
 On the Windows preview:
 
-- use `arlen test --unit` or `make phase24-windows-tests` for the focused
-  template XCTest lane
-- use `make phase24-windows-db-smoke` for transport smoke coverage
-- use `arlen check` or `make phase24-windows-confidence` for the broader
-  Windows confidence lane
+- use `make phase24-windows-tests`, `make phase24-windows-db-smoke`, and
+  `make phase24-windows-runtime-tests` for the fastest focused CLANG64 reruns
+- promote broader fixes through `make test-unit`, `make test-integration`,
+  `make phase20-postgres-live-tests`, and `make phase20-mssql-live-tests`
+- use `make phase24-windows-confidence` for the focused Windows confidence pack
+  or `make phase24-windows-parity` for the full `24Q-24R` parity workflow
 
 ## 7. Choose the Next Guide
 

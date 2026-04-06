@@ -1,6 +1,38 @@
 # Arlen Status Checkpoint
 
-Last updated: 2026-04-02
+Last updated: 2026-04-06
+
+## Leaving Off (2026-04-06)
+
+- Completed `24Q-24R` on branch `windows/clang64`:
+  - `GNUmakefile` now exposes the default CLANG64 `make test-unit`,
+    `make test-integration`, `make phase20-postgres-live-tests`,
+    `make phase20-mssql-live-tests`, and `make phase24-windows-parity`
+    entrypoints
+  - added `tools/ci/_phase24_windows_env.sh` and updated
+    `tools/ci/run_phase24_windows_parity.sh` plus
+    `.github/workflows/phase24-windows-parity.yml` so the Windows parity lane
+    carries the checked-in PostgreSQL and LocalDB-backed SQL Server defaults
+  - `tools/ci/generate_phase10m_chaos_restart_artifacts.py` now launches
+    `propane` correctly on Windows through `bash -lc` and treats `"forcibly
+    closed by the remote host"` resets as transient restart noise during the
+    chaos lane
+- Live CLANG64 verification completed in this workspace on 2026-04-06:
+  - `powershell -ExecutionPolicy Bypass -File scripts\run_clang64.ps1 -InnerCommand "make test-unit"`
+  - `powershell -ExecutionPolicy Bypass -File scripts\run_clang64.ps1 -InnerCommand "make test-integration"`
+  - `powershell -ExecutionPolicy Bypass -File scripts\run_clang64.ps1 -InnerCommand "make phase20-postgres-live-tests"`
+  - `powershell -ExecutionPolicy Bypass -File scripts\run_clang64.ps1 -InnerCommand "make phase20-mssql-live-tests"`
+  - the full `24R` lane set reran successfully via the individual commands now
+    wired through `tools/ci/run_phase24_windows_parity.sh`
+- `scripts\run_phase24_windows_parity.ps1` now matches `24Q-24R` scope. The
+  end-to-end wrapper was started here as well, but the shell tool timed out
+  before completion, so final verification was finished through the individual
+  commands it sequences.
+- Phase 24 remains in progress on `windows/clang64` because only `24S` remains:
+  - release/install/package closeout
+  - first-class Windows deployment/service/docs closeout
+- Next-session execution order:
+  - execute `24S`
 
 ## Leaving Off (2026-04-02)
 

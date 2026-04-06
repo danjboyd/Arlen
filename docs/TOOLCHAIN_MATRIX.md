@@ -1,6 +1,6 @@
 # Arlen Toolchain Matrix
 
-Last updated: 2026-04-01
+Last updated: 2026-04-06
 
 This document records known-good local toolchain baselines for Arlen onboarding and CI parity.
 
@@ -33,11 +33,11 @@ powershell -ExecutionPolicy Bypass -File scripts\run_clang64.ps1 -InnerCommand "
 | GNUstep config tool | `source GNUstep.sh && command -v gnustep-config` | `/usr/GNUstep/System/Tools/gnustep-config` |
 | XCTest runner | `command -v xctest` | `/usr/GNUstep/System/Tools/xctest` |
 
-## Windows Preview Baseline (2026-04-01)
+## Windows Preview Baseline (2026-04-06)
 
 This is the native Windows branch contract on `windows/clang64`. It is a
-supported development/CI/runtime preview baseline; broader live-backend,
-perf/sanitizer, and release/package parity remains open.
+supported development/CI/runtime parity baseline through `24Q-24R`; only
+release/package/first-class platform closeout remains open in `24S`.
 
 | Component | Command | Expected baseline |
 | --- | --- | --- |
@@ -49,15 +49,31 @@ perf/sanitizer, and release/package parity remains open.
 | Build tool | `make --version` | available inside `CLANG64` shell |
 | XCTest runner | `command -v xctest` | available inside `CLANG64` shell |
 | Preview build | `make all` | builds `eocc`, preview `libArlenFramework.a` including data-layer sources, `arlen`, and `arlen-xctest-runner` |
+| Default unit lane | `make test-unit` | passes on the checked-in CLANG64 contract |
+| Default integration lane | `make test-integration` | passes on the checked-in CLANG64 contract |
+| PostgreSQL live-backend lane | `make phase20-postgres-live-tests` | passes with the checked-in PostgreSQL 17 host/DLL contract |
+| MSSQL live-backend lane | `make phase20-mssql-live-tests` | passes against Windows LocalDB via the ODBC driver contract |
 | Focused Windows test lane | `make phase24-windows-tests` | runs the linked `ArlenPhase21TemplateTestsRunner` and fails hard if discovery is empty |
 | Focused Windows DB smoke lane | `make phase24-windows-db-smoke` | runs the linked `ArlenPhase24WindowsDBSmokeTestsRunner` and validates the Windows libpq/ODBC transport contract before connection failure |
 | Focused Windows runtime lane | `make phase24-windows-runtime-tests` | runs the linked `ArlenPhase24WindowsRuntimeParityTestsRunner` and validates watch/dev-error, jobs worker, and propane parity |
 | Windows confidence lane | `make phase24-windows-confidence` | runs build, focused tests, DB transport smoke, runtime parity, and app-root CLI smoke |
+| Full Windows parity lane | `make phase24-windows-parity` | runs the `24Q-24R` unit/integration/live-backend/perf/robustness parity sequence |
 | App-root runtime smoke | `arlen boomhauer --port 3000` / `arlen jobs worker --once` | scaffolded app runtime flows work natively under the checked-in CLANG64 contract |
 
 Related guide:
 
 - `docs/WINDOWS_CLANG64.md`
+
+Windows parity hosts currently rely on these backend envs:
+
+- `ARLEN_PG_TEST_DSN`
+- `ARLEN_LIBPQ_LIBRARY`
+- `ARLEN_PSQL`
+- `ARLEN_ODBC_LIBRARY`
+- `ARLEN_MSSQL_TEST_DSN`
+
+`tools/ci/_phase24_windows_env.sh` can populate the checked-in PostgreSQL and
+LocalDB-backed MSSQL defaults automatically on the repo parity hosts.
 
 ## CI Toolchain Contract
 
@@ -72,7 +88,8 @@ For the Windows preview branch, the checked-in bootstrap contract is:
 - PowerShell outer launcher: `scripts/run_clang64.ps1`
 - MSYS inner launcher: `scripts/run_clang64.sh`
 - GNUstep bootstrap path: `/clang64/share/GNUstep/Makefiles/GNUstep.sh`
-- Windows CI workflow: `.github/workflows/phase24-windows-preview.yml`
+- Windows preview workflow: `.github/workflows/phase24-windows-preview.yml`
+- Windows parity workflow: `.github/workflows/phase24-windows-parity.yml`
 
 The workflow bootstrap entry point is:
 

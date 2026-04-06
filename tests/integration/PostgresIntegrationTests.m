@@ -21,6 +21,11 @@
       @"set ARLEN_PG_TEST_DSN to run PostgreSQL CLI integration coverage");
 }
 
+- (NSString *)shellQuoted:(NSString *)value {
+  NSString *string = [value isKindOfClass:[NSString class]] ? value : @"";
+  return [NSString stringWithFormat:@"'%@'", [string stringByReplacingOccurrencesOfString:@"'" withString:@"'\"'\"'"]];
+}
+
 - (NSString *)runShellCapture:(NSString *)command exitCode:(int *)exitCode {
   return ALNTestRunShellCapture(command, exitCode);
 }
@@ -189,16 +194,16 @@
 
   int countCode = 0;
   NSString *countOutput =
-      [self runShellCapture:[NSString stringWithFormat:@"psql %s -Atc \"SELECT COUNT(*) FROM %@\"",
-                                                       [dsn UTF8String], table]
+      [self runShellCapture:[NSString stringWithFormat:@"psql %@ -Atc \"SELECT COUNT(*) FROM %@\"",
+                                                       [self shellQuoted:dsn], table]
                    exitCode:&countCode];
   XCTAssertEqual(0, countCode, @"%@", countOutput);
   NSString *trimmed =
       [countOutput stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
   XCTAssertEqualObjects(@"1", trimmed);
 
-  (void)[self runShellCapture:[NSString stringWithFormat:@"psql %s -c \"DROP TABLE IF EXISTS %@\" >/dev/null 2>&1",
-                                                         [dsn UTF8String], table]
+  (void)[self runShellCapture:[NSString stringWithFormat:@"psql %@ -c \"DROP TABLE IF EXISTS %@\" >/dev/null 2>&1",
+                                                         [self shellQuoted:dsn], table]
                      exitCode:NULL];
 }
 
@@ -250,8 +255,8 @@
 
   int code = 0;
   NSString *createOutput =
-      [self runShellCapture:[NSString stringWithFormat:@"psql %s -c \"CREATE TABLE %@(id TEXT NOT NULL, created_at TEXT NOT NULL)\"",
-                                                       [dsn UTF8String], table]
+      [self runShellCapture:[NSString stringWithFormat:@"psql %@ -c \"CREATE TABLE %@(id TEXT NOT NULL, created_at TEXT NOT NULL)\"",
+                                                       [self shellQuoted:dsn], table]
                    exitCode:&code];
   XCTAssertEqual(0, code, @"%@", createOutput);
 
@@ -303,8 +308,8 @@
   XCTAssertNotNil(className);
   XCTAssertNotNil(columnMethod);
   if (className == nil || columnMethod == nil) {
-    (void)[self runShellCapture:[NSString stringWithFormat:@"psql %s -c \"DROP TABLE IF EXISTS %@\" >/dev/null 2>&1",
-                                                           [dsn UTF8String], table]
+    (void)[self runShellCapture:[NSString stringWithFormat:@"psql %@ -c \"DROP TABLE IF EXISTS %@\" >/dev/null 2>&1",
+                                                           [self shellQuoted:dsn], table]
                        exitCode:NULL];
     return;
   }
@@ -371,8 +376,8 @@
                                         exitCode:&code];
   XCTAssertEqual(0, code, @"%@", forcedOutput);
 
-  (void)[self runShellCapture:[NSString stringWithFormat:@"psql %s -c \"DROP TABLE IF EXISTS %@\" >/dev/null 2>&1",
-                                                         [dsn UTF8String], table]
+  (void)[self runShellCapture:[NSString stringWithFormat:@"psql %@ -c \"DROP TABLE IF EXISTS %@\" >/dev/null 2>&1",
+                                                         [self shellQuoted:dsn], table]
                      exitCode:NULL];
 }
 
@@ -424,8 +429,8 @@
 
   int code = 0;
   NSString *createOutput =
-      [self runShellCapture:[NSString stringWithFormat:@"psql %s -c \"CREATE TABLE %@(id TEXT NOT NULL, age INTEGER)\"",
-                                                       [dsn UTF8String], table]
+      [self runShellCapture:[NSString stringWithFormat:@"psql %@ -c \"CREATE TABLE %@(id TEXT NOT NULL, age INTEGER)\"",
+                                                       [self shellQuoted:dsn], table]
                    exitCode:&code];
   XCTAssertEqual(0, code, @"%@", createOutput);
 
@@ -466,8 +471,8 @@
   XCTAssertNotNil(columnMetadata);
   XCTAssertTrue([columnMetadata count] >= 2);
   if (className == nil || rowClassName == nil || insertClassName == nil) {
-    (void)[self runShellCapture:[NSString stringWithFormat:@"psql %s -c \"DROP TABLE IF EXISTS %@\" >/dev/null 2>&1",
-                                                           [dsn UTF8String], table]
+    (void)[self runShellCapture:[NSString stringWithFormat:@"psql %@ -c \"DROP TABLE IF EXISTS %@\" >/dev/null 2>&1",
+                                                           [self shellQuoted:dsn], table]
                        exitCode:NULL];
     return;
   }
@@ -596,8 +601,8 @@
   XCTAssertNotEqual(0, code);
   XCTAssertTrue([brokenCompileOutput containsString:@"fieldDoesNotExist"], @"%@", brokenCompileOutput);
 
-  (void)[self runShellCapture:[NSString stringWithFormat:@"psql %s -c \"DROP TABLE IF EXISTS %@\" >/dev/null 2>&1",
-                                                         [dsn UTF8String], table]
+  (void)[self runShellCapture:[NSString stringWithFormat:@"psql %@ -c \"DROP TABLE IF EXISTS %@\" >/dev/null 2>&1",
+                                                         [self shellQuoted:dsn], table]
                      exitCode:NULL];
 }
 
@@ -751,6 +756,21 @@
       [[NSString stringWithFormat:@"arlen_analytics_%@", [[NSUUID UUID] UUIDString]] lowercaseString];
   analyticsTable = [analyticsTable stringByReplacingOccurrencesOfString:@"-" withString:@""];
 
+  // Named-target migration state lives in fixed tracking tables, so clean any
+  // residue from prior failed reruns before asserting fresh counts.
+  (void)[self runShellCapture:[NSString stringWithFormat:@"psql %@ -c \"DROP TABLE IF EXISTS %@\" >/dev/null 2>&1",
+                                                         [self shellQuoted:dsn], primaryTable]
+                     exitCode:NULL];
+  (void)[self runShellCapture:[NSString stringWithFormat:@"psql %@ -c \"DROP TABLE IF EXISTS %@\" >/dev/null 2>&1",
+                                                         [self shellQuoted:dsn], analyticsTable]
+                     exitCode:NULL];
+  (void)[self runShellCapture:[NSString stringWithFormat:@"psql %@ -c \"DROP TABLE IF EXISTS arlen_schema_migrations__primary\" >/dev/null 2>&1",
+                                                         [self shellQuoted:dsn]]
+                     exitCode:NULL];
+  (void)[self runShellCapture:[NSString stringWithFormat:@"psql %@ -c \"DROP TABLE IF EXISTS arlen_schema_migrations__analytics\" >/dev/null 2>&1",
+                                                         [self shellQuoted:dsn]]
+                     exitCode:NULL];
+
   NSError *error = nil;
   XCTAssertTrue([[NSFileManager defaultManager]
                     createDirectoryAtPath:[appRoot stringByAppendingPathComponent:@"config/environments"]
@@ -886,8 +906,8 @@
   XCTAssertTrue([analyticsFirst containsString:analyticsFailureMessage], @"%@", analyticsFirst);
 
   NSString *primaryCountOutput =
-      [self runShellCapture:[NSString stringWithFormat:@"psql %s -Atc \"SELECT COUNT(*) FROM %@\"",
-                                                       [dsn UTF8String], primaryTable]
+      [self runShellCapture:[NSString stringWithFormat:@"psql %@ -Atc \"SELECT COUNT(*) FROM %@\"",
+                                                       [self shellQuoted:dsn], primaryTable]
                    exitCode:&code];
   XCTAssertEqual(0, code, @"%@", primaryCountOutput);
   NSString *primaryCount =
@@ -895,8 +915,8 @@
   XCTAssertEqualObjects(@"2", primaryCount);
 
   NSString *analyticsCountOutput =
-      [self runShellCapture:[NSString stringWithFormat:@"psql %s -Atc \"SELECT COUNT(*) FROM %@\"",
-                                                       [dsn UTF8String], analyticsTable]
+      [self runShellCapture:[NSString stringWithFormat:@"psql %@ -Atc \"SELECT COUNT(*) FROM %@\"",
+                                                       [self shellQuoted:dsn], analyticsTable]
                    exitCode:&code];
   XCTAssertEqual(0, code, @"%@", analyticsCountOutput);
   NSString *analyticsCount =
@@ -929,8 +949,8 @@
   XCTAssertTrue([dryRunAnalytics containsString:@"Pending migrations: 0"], @"%@", dryRunAnalytics);
 
   NSString *primaryTrackingOutput =
-      [self runShellCapture:[NSString stringWithFormat:@"psql %s -Atc \"SELECT COUNT(*) FROM arlen_schema_migrations__primary\"",
-                                                       [dsn UTF8String]]
+      [self runShellCapture:[NSString stringWithFormat:@"psql %@ -Atc \"SELECT COUNT(*) FROM arlen_schema_migrations__primary\"",
+                                                       [self shellQuoted:dsn]]
                    exitCode:&code];
   XCTAssertEqual(0, code, @"%@", primaryTrackingOutput);
   NSString *primaryTracking =
@@ -938,25 +958,25 @@
   XCTAssertEqualObjects(@"2", primaryTracking);
 
   NSString *analyticsTrackingOutput =
-      [self runShellCapture:[NSString stringWithFormat:@"psql %s -Atc \"SELECT COUNT(*) FROM arlen_schema_migrations__analytics\"",
-                                                       [dsn UTF8String]]
+      [self runShellCapture:[NSString stringWithFormat:@"psql %@ -Atc \"SELECT COUNT(*) FROM arlen_schema_migrations__analytics\"",
+                                                       [self shellQuoted:dsn]]
                    exitCode:&code];
   XCTAssertEqual(0, code, @"%@", analyticsTrackingOutput);
   NSString *analyticsTracking =
       [analyticsTrackingOutput stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
   XCTAssertEqualObjects(@"2", analyticsTracking);
 
-  (void)[self runShellCapture:[NSString stringWithFormat:@"psql %s -c \"DROP TABLE IF EXISTS %@\" >/dev/null 2>&1",
-                                                         [dsn UTF8String], primaryTable]
+  (void)[self runShellCapture:[NSString stringWithFormat:@"psql %@ -c \"DROP TABLE IF EXISTS %@\" >/dev/null 2>&1",
+                                                         [self shellQuoted:dsn], primaryTable]
                      exitCode:NULL];
-  (void)[self runShellCapture:[NSString stringWithFormat:@"psql %s -c \"DROP TABLE IF EXISTS %@\" >/dev/null 2>&1",
-                                                         [dsn UTF8String], analyticsTable]
+  (void)[self runShellCapture:[NSString stringWithFormat:@"psql %@ -c \"DROP TABLE IF EXISTS %@\" >/dev/null 2>&1",
+                                                         [self shellQuoted:dsn], analyticsTable]
                      exitCode:NULL];
-  (void)[self runShellCapture:[NSString stringWithFormat:@"psql %s -c \"DROP TABLE IF EXISTS arlen_schema_migrations__primary\" >/dev/null 2>&1",
-                                                         [dsn UTF8String]]
+  (void)[self runShellCapture:[NSString stringWithFormat:@"psql %@ -c \"DROP TABLE IF EXISTS arlen_schema_migrations__primary\" >/dev/null 2>&1",
+                                                         [self shellQuoted:dsn]]
                      exitCode:NULL];
-  (void)[self runShellCapture:[NSString stringWithFormat:@"psql %s -c \"DROP TABLE IF EXISTS arlen_schema_migrations__analytics\" >/dev/null 2>&1",
-                                                         [dsn UTF8String]]
+  (void)[self runShellCapture:[NSString stringWithFormat:@"psql %@ -c \"DROP TABLE IF EXISTS arlen_schema_migrations__analytics\" >/dev/null 2>&1",
+                                                         [self shellQuoted:dsn]]
                      exitCode:NULL];
 }
 
@@ -1022,13 +1042,13 @@
 
   int code = 0;
   NSString *createPrimary =
-      [self runShellCapture:[NSString stringWithFormat:@"psql %s -c \"CREATE TABLE %@(id TEXT NOT NULL, value TEXT NOT NULL)\"",
-                                                       [dsn UTF8String], primaryTable]
+      [self runShellCapture:[NSString stringWithFormat:@"psql %@ -c \"CREATE TABLE %@(id TEXT NOT NULL, value TEXT NOT NULL)\"",
+                                                       [self shellQuoted:dsn], primaryTable]
                    exitCode:&code];
   XCTAssertEqual(0, code, @"%@", createPrimary);
   NSString *createAnalytics =
-      [self runShellCapture:[NSString stringWithFormat:@"psql %s -c \"CREATE TABLE %@(id TEXT NOT NULL, event_name TEXT NOT NULL)\"",
-                                                       [dsn UTF8String], analyticsTable]
+      [self runShellCapture:[NSString stringWithFormat:@"psql %@ -c \"CREATE TABLE %@(id TEXT NOT NULL, event_name TEXT NOT NULL)\"",
+                                                       [self shellQuoted:dsn], analyticsTable]
                    exitCode:&code];
   XCTAssertEqual(0, code, @"%@", createAnalytics);
 
@@ -1093,11 +1113,11 @@
   XCTAssertNil(error);
   XCTAssertTrue([primaryManifest containsString:@"\"database_target\": \"primary\""]);
 
-  (void)[self runShellCapture:[NSString stringWithFormat:@"psql %s -c \"DROP TABLE IF EXISTS %@\" >/dev/null 2>&1",
-                                                         [dsn UTF8String], primaryTable]
+  (void)[self runShellCapture:[NSString stringWithFormat:@"psql %@ -c \"DROP TABLE IF EXISTS %@\" >/dev/null 2>&1",
+                                                         [self shellQuoted:dsn], primaryTable]
                      exitCode:NULL];
-  (void)[self runShellCapture:[NSString stringWithFormat:@"psql %s -c \"DROP TABLE IF EXISTS %@\" >/dev/null 2>&1",
-                                                         [dsn UTF8String], analyticsTable]
+  (void)[self runShellCapture:[NSString stringWithFormat:@"psql %@ -c \"DROP TABLE IF EXISTS %@\" >/dev/null 2>&1",
+                                                         [self shellQuoted:dsn], analyticsTable]
                      exitCode:NULL];
 }
 

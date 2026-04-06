@@ -31,10 +31,16 @@ Use the smallest lane that honestly exercises the bug:
 - `make phase24-windows-confidence`
   - Windows confidence lane: build, focused tests, DB transport smoke, runtime
     parity, and app-root CLI smoke
+- `make phase24-windows-parity`
+  - full Windows `24Q-24R` parity lane
+  - runs build, default `make test-unit` / `make test-integration`, the
+    PostgreSQL and MSSQL live-backend suites, and the broader perf/robustness
+    confidence scripts wired through `tools/ci/run_phase24_windows_parity.sh`
 
 Current Windows caveat:
 - the focused Phase 24 lanes deliberately use linked test executables because
-  stock bundle-based `xctest` discovery is not reliable on CLANG64
+  CLANG64 test discovery remains more reliable through the checked-in repo-local
+  runner contract than through a stock bundle-only `xctest` path
 - the remaining warning seen on this host is the upstream CLANG64/GNUstep
   `-fobjc-exceptions` unused-command-line warning rather than an Arlen source
   warning
@@ -69,10 +75,12 @@ Phase 20 data-layer-focused lanes remain available:
 5. Promote the change through `make test-unit`, broader integration coverage
    when applicable, and `make phase21-confidence`.
 
-For the native Windows preview branch, promote through
-`make phase24-windows-tests`, then `make phase24-windows-db-smoke`, then
-`make phase24-windows-runtime-tests`, and then
-`make phase24-windows-confidence` before attempting broader Linux-only lanes.
+For the native Windows preview branch, use the focused `phase24-windows-*`
+lanes for fast reproduction, then promote through `make test-unit`,
+`make test-integration`, `make phase20-postgres-live-tests`,
+`make phase20-mssql-live-tests`, and `make phase24-windows-parity`.
+`make phase24-windows-confidence` remains the quicker checked-in smoke path for
+runtime/app-root validation before the full parity sweep.
 
 ## 3. Template Regression Intake
 

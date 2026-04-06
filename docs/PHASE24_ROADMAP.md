@@ -1,7 +1,7 @@
 # Arlen Phase 24 Roadmap
 
-Status: in progress on 2026-04-01 (`24A-24P` delivered on branch `windows/clang64` for the checked-in CLANG64 preview/runtime contract; `24Q-24S` now track the remaining work required for true Windows-to-Linux parity and platform closeout)
-Last updated: 2026-04-01
+Status: in progress on 2026-04-06 (`24A-24R` delivered on branch `windows/clang64` for the checked-in CLANG64 Windows parity contract; `24S` now tracks the remaining release/package/first-class platform closeout work)
+Last updated: 2026-04-06
 
 Related docs:
 - `README.md`
@@ -725,18 +725,21 @@ Acceptance (required):
 
 ## 5.17 Phase 24Q: Full Test + Live-Backend Matrix Parity
 
-Status: planned
+Status: complete on 2026-04-06
 
 Checkpoint notes:
 
-- Current Windows confidence work now covers the checked-in runtime parity
-  slice:
-  - focused template XCTest lane
-  - focused DB transport smoke
-  - focused runtime parity lane
-  - app-root smoke
-- Linux currently carries much broader default verification through the normal
-  `make test-*` and live-backend entrypoints.
+- `GNUmakefile` now exposes Linux-matching Windows entrypoints for
+  `make test-unit`, `make test-integration`,
+  `make phase20-postgres-live-tests`, and
+  `make phase20-mssql-live-tests`.
+- `tools/ci/_phase24_windows_env.sh` standardizes the checked-in Windows
+  PostgreSQL and SQL Server LocalDB defaults for parity hosts.
+- Verified on the checked-in CLANG64 path in this workspace on 2026-04-06:
+  - `make test-unit`
+  - `make test-integration`
+  - `make phase20-postgres-live-tests`
+  - `make phase20-mssql-live-tests`
 
 Deliverables:
 
@@ -757,13 +760,32 @@ Acceptance (required):
 
 ## 5.18 Phase 24R: Perf, Sanitizer, + Fault-Injection Lane Parity
 
-Status: planned
+Status: complete on 2026-04-06
 
 Checkpoint notes:
 
-- Linux currently carries performance, sanitizer, chaos, and hostile-traffic
-  confidence lanes that the Windows preview contract intentionally excludes.
-- That gap is now narrow and explicit, but it is still a real parity gap.
+- `tools/ci/run_phase24_windows_parity.sh` and
+  `scripts/run_phase24_windows_parity.ps1` now sequence the broader Windows
+  perf, sanitizer, hostile-traffic, fault-injection, soak, chaos, and static
+  analysis lanes after the default test/live-backend matrix.
+- `.github/workflows/phase24-windows-parity.yml` captures the checked-in
+  Windows CI contract for those parity lanes, including PostgreSQL DLL pinning
+  and the LocalDB-backed MSSQL DSN.
+- Verified on the checked-in CLANG64 path in this workspace on 2026-04-06:
+  - `tools/ci/run_phase10e_json_performance.sh`
+  - `tools/ci/run_phase10g_dispatch_performance.sh`
+  - `tools/ci/run_phase10h_http_parse_performance.sh`
+  - `tools/ci/run_phase10m_blob_throughput.sh`
+  - `tools/ci/run_phase9i_fault_injection.sh`
+  - `tools/ci/run_phase10m_backend_parity_matrix.sh`
+  - `tools/ci/run_phase10m_protocol_adversarial.sh`
+  - `tools/ci/run_phase10m_syscall_fault_injection.sh`
+  - `tools/ci/run_phase10m_allocation_fault_injection.sh`
+  - `tools/ci/run_phase10m_soak.sh`
+  - `tools/ci/run_phase10m_chaos_restart.sh`
+  - `tools/ci/run_phase10m_static_analysis.sh`
+  - `tools/ci/run_phase10m_sanitizer_matrix.sh`
+  - `tools/ci/run_phase11_confidence.sh`
 
 Deliverables:
 

@@ -677,6 +677,8 @@ Lifecycle diagnostics:
 - `make phase24-windows-db-smoke`: focused Windows transport-loading smoke lane
 - `make phase24-windows-runtime-tests`: focused Windows runtime parity lane using the linked `ArlenPhase24WindowsRuntimeParityTestsRunner`
 - `make phase24-windows-confidence`: Windows build/test/runtime/app-root confidence lane
+- `make phase24-windows-parity`: full Windows `24Q-24R` parity lane
+  - runs build, default unit/integration entrypoints, PostgreSQL/MSSQL live-backend suites, and the broader perf/robustness scripts wired through `tools/ci/run_phase24_windows_parity.sh`
 - `tools/ci/run_phase21_focused.sh`: explicit focused Phase 21 lane runner for template, protocol, and generated-app coverage
 - `tools/ci/run_phase21_protocol_corpus.sh`: explicit Phase 21 raw protocol corpus gate entrypoint
   - `ARLEN_PHASE21_PROTOCOL_BACKENDS=llhttp` narrows replay to one parser backend
@@ -830,8 +832,16 @@ Retry wrappers:
   - controls: `maxAttempts`, `retryDelaySeconds`
   - deterministic exhaustion error: `ALNServiceErrorDomain` code `564`
 
-## PostgreSQL Test Gate
+## Live-Backend Test Gates
 
-DB-backed tests are skipped unless this environment variable is set:
+DB-backed tests are skipped unless the matching environment variables are set:
 
-- `ARLEN_PG_TEST_DSN`: PostgreSQL connection string for migration/adapter tests
+- `ARLEN_PG_TEST_DSN`: PostgreSQL connection string for migration/adapter/live-backend tests
+- `ARLEN_LIBPQ_LIBRARY`: optional explicit `libpq` path when platform autodiscovery is insufficient
+- `ARLEN_PSQL`: optional explicit `psql` path for helper scripts that need the native PostgreSQL client
+- `ARLEN_MSSQL_TEST_DSN`: SQL Server ODBC connection string for the MSSQL live-backend suite
+- `ARLEN_ODBC_LIBRARY`: optional explicit ODBC client library override; on Windows parity hosts use `odbc32.dll`
+
+On Windows CLANG64 parity hosts, `tools/ci/_phase24_windows_env.sh` can fill
+the checked-in PostgreSQL defaults and a LocalDB-backed SQL Server DSN
+automatically when those variables are unset.

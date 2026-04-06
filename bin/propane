@@ -97,6 +97,33 @@ resolve_compiled_binary() {
   return 1
 }
 
+effective_event_pid() {
+  local pid="$1"
+  if [[ -r "/proc/$pid/winpid" ]]; then
+    tr -d '\r\n' < "/proc/$pid/winpid"
+    return 0
+  fi
+  printf '%s\n' "$pid"
+}
+
+process_is_running() {
+  local pid="$1"
+  if [[ -z "$pid" || "$pid" == "0" ]]; then
+    return 1
+  fi
+  if [[ -r /proc/self/winpid ]] && command -v tasklist.exe >/dev/null 2>&1; then
+    tasklist.exe //NH //FI "PID eq $pid" 2>/dev/null | tr -d '\r' | grep -Eq "[[:space:]]$pid([[:space:]]|\$)"
+    return $?
+  fi
+  kill -0 "$pid" 2>/dev/null
+}
+
+default_control_file_for_pid() {
+  local pid="$1"
+  local base="${TEMP:-${TMPDIR:-/tmp}}"
+  printf '%s/arlen-propane-%s.control\n' "${base%/}" "$pid"
+}
+
 app_root_has_sources() {
   local root="$1"
   if [[ -f "$root/app_lite.m" ]]; then
@@ -472,14 +499,20 @@ pid_file="${pid_file_override:-$app_root/tmp/propane.pid}"
 pid_file="$(normalize_host_path "$pid_file")"
 mkdir -p "$(dirname "$pid_file")"
 
+manager_event_pid="$(effective_event_pid "$$")"
+control_file="${ARLEN_PROPANE_CONTROL_FILE:-$(default_control_file_for_pid "$manager_event_pid")}"
+control_file="$(normalize_host_path "$control_file")"
+mkdir -p "$(dirname "$control_file")"
+
 if [[ -f "$pid_file" ]]; then
-  existing_pid="$(cat "$pid_file" 2>/dev/null || true)"
-  if [[ -n "$existing_pid" ]] && kill -0 "$existing_pid" 2>/dev/null; then
+  existing_pid="$(tr -d '\r\n' < "$pid_file" 2>/dev/null || true)"
+  if [[ -n "$existing_pid" ]] && process_is_running "$existing_pid"; then
     echo "propane: already running with pid $existing_pid (pid file: $pid_file)" >&2
     exit 1
   fi
   rm -f "$pid_file"
 fi
+rm -f "$control_file"
 
 is_app_root=0
 if [[ -f "$app_root/config/app.plist" ]] && app_root_has_sources "$app_root"; then
@@ -534,7 +567,10 @@ fi
 emit_lifecycle_event() {
   local event="$1"
   shift
-  local line="propane:lifecycle event=$event manager_pid=$$"
+  local line="propane:lifecycle event=$event manager_pid=$manager_event_pid"
+  if [[ "$manager_event_pid" != "$$" ]]; then
+    line="$line manager_posix_pid=$$"
+  fi
   local kv
   for kv in "$@"; do
     line="$line $kv"
@@ -563,7 +599,7 @@ if (( job_worker_count > 0 )); then
   echo "propane: async workers count=$job_worker_count respawnDelayMs=$job_worker_respawn_delay_ms"
 fi
 
-echo "$$" > "$pid_file"
+echo "$manager_event_pid" > "$pid_file"
 emit_lifecycle_event "manager_started" \
   "worker_count=$worker_count" \
   "async_worker_count=$job_worker_count" \
@@ -587,9 +623,16 @@ spawn_worker() {
   local start_reason="${1:-boot}"
   "$app_binary" "${worker_args[@]}" &
   local pid=$!
+  local event_pid
+  event_pid="$(effective_event_pid "$pid")"
   workers+=("$pid")
-  echo "propane: worker started pid=$pid"
-  emit_lifecycle_event "worker_started" "role=http" "pid=$pid" "reason=$start_reason"
+  worker_event_pids["$pid"]="$event_pid"
+  echo "propane: worker started pid=$event_pid"
+  if [[ "$event_pid" != "$pid" ]]; then
+    emit_lifecycle_event "worker_started" "role=http" "pid=$event_pid" "posix_pid=$pid" "reason=$start_reason"
+  else
+    emit_lifecycle_event "worker_started" "role=http" "pid=$event_pid" "reason=$start_reason"
+  fi
 }
 
 spawn_job_worker() {
@@ -597,11 +640,59 @@ spawn_job_worker() {
   if (( job_worker_count < 1 )) || [[ -z "$job_worker_command" ]]; then
     return
   fi
-  bash -lc "$job_worker_command" &
+  bash -lc "exec $job_worker_command" &
   local pid=$!
+  local event_pid
+  event_pid="$(effective_event_pid "$pid")"
   job_workers+=("$pid")
-  echo "propane: async worker started pid=$pid"
-  emit_lifecycle_event "async_worker_started" "role=async" "pid=$pid" "reason=$start_reason"
+  job_worker_event_pids["$pid"]="$event_pid"
+  echo "propane: async worker started pid=$event_pid"
+  if [[ "$event_pid" != "$pid" ]]; then
+    emit_lifecycle_event "async_worker_started" "role=async" "pid=$event_pid" "posix_pid=$pid" "reason=$start_reason"
+  else
+    emit_lifecycle_event "async_worker_started" "role=async" "pid=$event_pid" "reason=$start_reason"
+  fi
+}
+
+event_pid_for_role() {
+  local role="$1"
+  local pid="$2"
+  case "$role" in
+    http_worker)
+      printf '%s\n' "${worker_event_pids[$pid]:-$pid}"
+      ;;
+    async_worker)
+      printf '%s\n' "${job_worker_event_pids[$pid]:-$pid}"
+      ;;
+    *)
+      printf '%s\n' "$pid"
+      ;;
+  esac
+}
+
+posix_pid_for_role_event_pid() {
+  local role="$1"
+  local event_pid="$2"
+  local posix_pid
+  case "$role" in
+    http_worker)
+      for posix_pid in "${!worker_event_pids[@]}"; do
+        if [[ "${worker_event_pids[$posix_pid]}" == "$event_pid" ]]; then
+          printf '%s\n' "$posix_pid"
+          return 0
+        fi
+      done
+      ;;
+    async_worker)
+      for posix_pid in "${!job_worker_event_pids[@]}"; do
+        if [[ "${job_worker_event_pids[$posix_pid]}" == "$event_pid" ]]; then
+          printf '%s\n' "$posix_pid"
+          return 0
+        fi
+      done
+      ;;
+  esac
+  return 1
 }
 
 terminate_pid_list() {
@@ -617,7 +708,9 @@ terminate_pid_list() {
   local pid
   for pid in "${candidates[@]}"; do
     if kill -0 "$pid" 2>/dev/null; then
-      emit_lifecycle_event "${role}_stop_requested" "role=$role" "pid=$pid" "signal=TERM" "reason=$stop_reason"
+      local event_pid
+      event_pid="$(event_pid_for_role "$role" "$pid")"
+      emit_lifecycle_event "${role}_stop_requested" "role=$role" "pid=$event_pid" "signal=TERM" "reason=$stop_reason"
       kill -TERM "$pid" 2>/dev/null || true
       alive+=("$pid")
     fi
@@ -635,13 +728,15 @@ terminate_pid_list() {
       if kill -0 "$pid" 2>/dev/null; then
         remaining+=("$pid")
       else
+        local event_pid
+        event_pid="$(event_pid_for_role "$role" "$pid")"
         set +e
         wait "$pid" 2>/dev/null
         local status=$?
         set -e
         local exit_reason
         exit_reason="$(describe_wait_status "$status")"
-        emit_lifecycle_event "${role}_stopped" "role=$role" "pid=$pid" "status=$status" "exit_reason=$exit_reason" "reason=$stop_reason"
+        emit_lifecycle_event "${role}_stopped" "role=$role" "pid=$event_pid" "status=$status" "exit_reason=$exit_reason" "reason=$stop_reason"
       fi
     done
     alive=("${remaining[@]}")
@@ -651,22 +746,28 @@ terminate_pid_list() {
   done
 
   for pid in "${alive[@]}"; do
-    emit_lifecycle_event "${role}_stop_requested" "role=$role" "pid=$pid" "signal=KILL" "reason=${stop_reason}_grace_timeout"
+    local event_pid
+    event_pid="$(event_pid_for_role "$role" "$pid")"
+    emit_lifecycle_event "${role}_stop_requested" "role=$role" "pid=$event_pid" "signal=KILL" "reason=${stop_reason}_grace_timeout"
     kill -KILL "$pid" 2>/dev/null || true
   done
   for pid in "${alive[@]}"; do
+    local event_pid
+    event_pid="$(event_pid_for_role "$role" "$pid")"
     set +e
     wait "$pid" 2>/dev/null
     local status=$?
     set -e
     local exit_reason
     exit_reason="$(describe_wait_status "$status")"
-    emit_lifecycle_event "${role}_stopped" "role=$role" "pid=$pid" "status=$status" "exit_reason=$exit_reason" "reason=${stop_reason}_grace_timeout"
+    emit_lifecycle_event "${role}_stopped" "role=$role" "pid=$event_pid" "status=$status" "exit_reason=$exit_reason" "reason=${stop_reason}_grace_timeout"
   done
 }
 
 workers=()
 job_workers=()
+declare -A worker_event_pids=()
+declare -A job_worker_event_pids=()
 shutting_down=0
 reload_requested=0
 manager_exit=0
@@ -698,6 +799,7 @@ cleanup_and_exit() {
   terminate_pid_list "http_worker" "$shutdown_reason" "${workers[@]}"
   terminate_pid_list "async_worker" "$shutdown_reason" "${job_workers[@]}"
   rm -f "$pid_file"
+  rm -f "$control_file"
   emit_lifecycle_event "manager_stopped" "reason=$shutdown_reason" "exit_code=$code"
   exit "$code"
 }
@@ -720,6 +822,36 @@ for ((idx = 0; idx < job_worker_count; idx++)); do
 done
 
 while (( shutting_down == 0 )); do
+  if [[ -f "$control_file" ]]; then
+    control_action="$(tr -d '\r\n' < "$control_file" 2>/dev/null || true)"
+    rm -f "$control_file"
+    case "$control_action" in
+      reload)
+        on_hup
+        ;;
+      kill-http:*)
+        target_event_pid="${control_action#kill-http:}"
+        target_pid="$(posix_pid_for_role_event_pid "http_worker" "$target_event_pid" 2>/dev/null || true)"
+        if [[ -n "$target_pid" ]]; then
+          kill -KILL "$target_pid" 2>/dev/null || true
+        fi
+        ;;
+      kill-async:*)
+        target_event_pid="${control_action#kill-async:}"
+        target_pid="$(posix_pid_for_role_event_pid "async_worker" "$target_event_pid" 2>/dev/null || true)"
+        if [[ -n "$target_pid" ]]; then
+          kill -KILL "$target_pid" 2>/dev/null || true
+        fi
+        ;;
+      int)
+        on_term INT
+        ;;
+      term|stop|shutdown)
+        on_term TERM
+        ;;
+    esac
+  fi
+
   if (( reload_requested == 1 )); then
     reload_generation=$((reload_generation + 1))
     old_workers=("${workers[@]}")
@@ -774,13 +906,15 @@ while (( shutting_down == 0 )); do
     for pair in "${dead[@]}"; do
       dead_pid="${pair%%:*}"
       dead_status="${pair##*:}"
+      event_pid="$(event_pid_for_role "http_worker" "$dead_pid")"
       echo "propane: worker exited pid=$dead_pid status=$dead_status"
       dead_exit_reason="$(describe_wait_status "$dead_status")"
       restart_action="none"
       if (( no_respawn == 0 && once_mode == 0 && shutting_down == 0 )); then
         restart_action="respawn"
       fi
-      emit_lifecycle_event "worker_exited" "role=http" "pid=$dead_pid" "status=$dead_status" "exit_reason=$dead_exit_reason" "restart_action=$restart_action"
+      emit_lifecycle_event "worker_exited" "role=http" "pid=$event_pid" "status=$dead_status" "exit_reason=$dead_exit_reason" "restart_action=$restart_action"
+      unset 'worker_event_pids[$dead_pid]'
     done
 
     if (( once_mode == 1 )); then
@@ -836,13 +970,15 @@ while (( shutting_down == 0 )); do
     for pair in "${job_dead[@]}"; do
       dead_pid="${pair%%:*}"
       dead_status="${pair##*:}"
+      event_pid="$(event_pid_for_role "async_worker" "$dead_pid")"
       echo "propane: async worker exited pid=$dead_pid status=$dead_status"
       dead_exit_reason="$(describe_wait_status "$dead_status")"
       restart_action="none"
       if (( no_respawn == 0 && shutting_down == 0 )); then
         restart_action="respawn"
       fi
-      emit_lifecycle_event "async_worker_exited" "role=async" "pid=$dead_pid" "status=$dead_status" "exit_reason=$dead_exit_reason" "restart_action=$restart_action"
+      emit_lifecycle_event "async_worker_exited" "role=async" "pid=$event_pid" "status=$dead_status" "exit_reason=$dead_exit_reason" "restart_action=$restart_action"
+      unset 'job_worker_event_pids[$dead_pid]'
     done
 
     if (( no_respawn == 0 )); then

@@ -1,0 +1,45 @@
+name: phase24-windows-parity
+
+on:
+  push:
+    branches: ["windows/clang64"]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  windows-parity:
+    runs-on: [self-hosted, Windows, X64, arlen, msys2-clang64]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure local Windows database DSNs
+        shell: powershell
+        run: |
+          $localDb = 'C:\Program Files\Microsoft SQL Server\160\Tools\Binn\SqlLocalDB.exe'
+          & $localDb start MSSQLLocalDB | Out-Null
+          "ARLEN_PG_TEST_DSN=host=127.0.0.1 port=55432 dbname=arlen_phase20 user=postgres password=ArlenP24Q_pg! connect_timeout=5" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "ARLEN_LIBPQ_LIBRARY=C:\Program Files\PostgreSQL\17\bin\libpq.dll" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "ARLEN_PSQL=C:\Program Files\PostgreSQL\17\bin\psql.exe" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "ARLEN_ODBC_LIBRARY=odbc32.dll" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "ARLEN_MSSQL_TEST_DSN=Driver={ODBC Driver 18 for SQL Server};Server=(localdb)\\MSSQLLocalDB;Database=master;Trusted_Connection=Yes;Encrypt=no;TrustServerCertificate=yes;" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Run Phase 24 Windows parity lane
+        shell: powershell
+        run: |
+          powershell -ExecutionPolicy Bypass -File scripts\run_phase24_windows_parity.ps1
+
+      - name: Upload Windows parity artifacts
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase24-windows-parity-${{ github.run_id }}
+          path: |
+            build/phase24/**
+            build/release_confidence/phase10e/**
+            build/release_confidence/phase10g/**
+            build/release_confidence/phase10h/**
+            build/release_confidence/phase10m/**
+            build/release_confidence/phase11/**
+            build/tests/**
+          if-no-files-found: warn

@@ -1,6 +1,7 @@
 #import <Foundation/Foundation.h>
 #import <XCTest/XCTest.h>
 
+#import <objc/runtime.h>
 #import <stdlib.h>
 #import <string.h>
 
@@ -9,7 +10,61 @@
 @interface DeploymentIntegrationTests : XCTestCase
 @end
 
+static BOOL ALNDeploymentShouldNoOpForWindowsPreviewTestName(NSString *testName) {
+  (void)testName;
+  return NO;
+}
+
+static void ALNDeploymentWindowsPreviewNoOpTest(id self, SEL _cmd) {
+  fprintf(stdout,
+          "DeploymentIntegrationTests: windows preview no-op for %s\n",
+          sel_getName(_cmd));
+}
+
 @implementation DeploymentIntegrationTests
+
++ (void)load {
+#if defined(_WIN32)
+  unsigned int methodCount = 0;
+  Method *methods = class_copyMethodList(self, &methodCount);
+  if (methods == NULL) {
+    return;
+  }
+
+  for (unsigned int index = 0; index < methodCount; index++) {
+    Method method = methods[index];
+    SEL selector = method_getName(method);
+    NSString *name = NSStringFromSelector(selector);
+    if (![name hasPrefix:@"test"]) {
+      continue;
+    }
+    if (ALNDeploymentShouldNoOpForWindowsPreviewTestName(name)) {
+      method_setImplementation(method, (IMP)ALNDeploymentWindowsPreviewNoOpTest);
+    }
+  }
+  free(methods);
+#endif
+}
+
+- (BOOL)shouldNoOpForWindowsPreviewTestName:(NSString *)testName {
+  return ALNDeploymentShouldNoOpForWindowsPreviewTestName(testName);
+}
+
+- (void)invokeTest {
+  NSString *testName = [self respondsToSelector:@selector(name)] ? [(id)self name] : @"";
+  if ([self shouldNoOpForWindowsPreviewTestName:testName]) {
+    fprintf(stdout,
+            "DeploymentIntegrationTests: windows preview no-op for %s\n",
+            [testName UTF8String]);
+    return;
+  }
+  struct objc_super superInfo = {
+    .receiver = self,
+    .super_class = class_getSuperclass([DeploymentIntegrationTests class]),
+  };
+  IMP superInvokeTestImp = objc_msg_lookup_super(&superInfo, @selector(invokeTest));
+  ((void (*)(id, SEL))superInvokeTestImp)(self, @selector(invokeTest));
+}
 
 - (int)randomPort {
   return ALNTestAvailableTCPPort();
@@ -107,12 +162,12 @@
                           touchingPath:(NSString *)path
                               exitCode:(int *)exitCode {
   NSString *command = [NSString stringWithFormat:
-      @"set -euo pipefail && cd %@ && "
+      @"set -eo pipefail && source /usr/GNUstep/System/Library/Makefiles/GNUstep.sh && set -u && cd %@ && "
        "path=%@ && original_mtime=$(stat -c %%Y \"$path\") && "
        "restore() { touch -d \"@$original_mtime\" \"$path\"; }; "
        "trap restore EXIT && "
        "touch \"$path\" && make -n %@",
-      [self shellQuoted:[self shellPath:repoRoot]],
+       [self shellQuoted:[self shellPath:repoRoot]],
       [self shellQuoted:[self shellPath:path]],
       target ?: @""];
   return [self runShellCapture:command exitCode:exitCode];
@@ -403,13 +458,13 @@
                                       exitCode:&code];
     XCTAssertEqual(0, code, @"%@", rollback);
 
-    NSString *currentTarget = [self runShellCapture:[NSString stringWithFormat:@"readlink -f %s/current",
-                                                                               [[self shellPath:releasesDir] UTF8String]]
-                                           exitCode:&code];
-    XCTAssertEqual(0, code, @"%@", currentTarget);
+    NSString *currentReleaseID = [self runShellCapture:[NSString stringWithFormat:@"cat %s/current.release-id",
+                                                                                  [[self shellPath:releasesDir] UTF8String]]
+                                              exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", currentReleaseID);
     NSString *trimmed =
-        [currentTarget stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
-    XCTAssertTrue([trimmed hasSuffix:@"/rel1"]);
+        [currentReleaseID stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    XCTAssertEqualObjects(@"rel1", trimmed);
 
     NSString *metadataFile =
         [releasesDir stringByAppendingPathComponent:@"rel1/metadata/release.env"];
@@ -876,7 +931,11 @@
     NSDictionary *checkPlan = [self parseJSONDictionaryFromOutput:checkPlanOutput context:@"arlen check --json"];
     XCTAssertEqualObjects(@"check", checkPlan[@"command"]);
     XCTAssertEqualObjects(@"planned", checkPlan[@"status"]);
+#if ARLEN_WINDOWS_PREVIEW
+    XCTAssertEqualObjects(@"phase24-windows-parity", checkPlan[@"make_target"]);
+#else
     XCTAssertEqualObjects(@"check", checkPlan[@"make_target"]);
+#endif
 
     NSString *deployPlanOutput =
         [self runShellCapture:[NSString stringWithFormat:
