@@ -87,6 +87,48 @@ Notes:
 - when `templates/layouts/main.html.eoc` exists, generated HTML templates opt into it automatically unless the target logical path is under `layouts/` or `partials/`
 - `generate search` is the fastest way to stand up a search resource without reverse-engineering the `search` module internals
 
+### `arlen deploy <plan|push|release> [options]`
+
+First-class release orchestration over the existing `tools/deploy/*` scripts.
+
+`arlen deploy plan`
+
+- validates release packaging inputs using `tools/deploy/build_release.sh --dry-run`
+- emits a normalized machine payload with:
+  - `workflow = deploy.plan`
+  - `manifest_version = phase29-deploy-manifest-v1`
+  - nested `build_release` payload from the packaging script
+
+`arlen deploy push`
+
+- builds a local immutable release under `releases/<release-id>/`
+- writes `metadata/manifest.json` with release/runtime/health contract metadata
+- emits the manifest content in `--json` mode
+
+`arlen deploy release`
+
+- reuses an existing release artifact for the selected `--release-id`, or builds it first if missing
+- runs `migrate --env <name>` only when packaged SQL migrations exist, unless `--skip-migrate` is passed
+- activates `releases/current` via `tools/deploy/activate_release.sh`
+- optionally probes `<base-url>/healthz` when `--base-url` is supplied
+
+Common options:
+
+- `--app-root <path>`: app root to package/activate (default: cwd)
+- `--framework-root <path>`: Arlen checkout root (default: resolved from env/current tree)
+- `--releases-dir <path>`: release output root (default: `<app-root>/releases`)
+- `--release-id <id>`: explicit release identifier (default: UTC timestamp)
+- `--certification-manifest <path>`: override Phase 9J certification manifest path
+- `--json-performance-manifest <path>`: override Phase 10E performance manifest path
+- `--allow-missing-certification`: waive certification/performance manifest enforcement for non-RC flows
+- `--json`: emit normalized machine-readable output
+
+Release-only options:
+
+- `--env <name>`: migration environment (default: `production`)
+- `--base-url <url>`: verify `GET /healthz` after activation
+- `--skip-migrate`: skip the migration step during activation
+
 ### `arlen migrate [--env <name>] [--database <target>] [--dsn <connection_string>] [--dry-run]`
 
 Apply SQL migrations from `db/migrations` using the configured adapter for the

@@ -26,6 +26,7 @@ static void PrintUsage(void) {
           "  boomhauer [server args...]\n"
           "  jobs worker [worker args...]\n"
           "  propane [manager args...]\n"
+          "  deploy <plan|push|release> [options]\n"
           "  migrate [--env <name>] [--database <target>] [--dsn <connection_string>] [--dry-run]\n"
           "  module <add|remove|list|doctor|migrate|assets|upgrade|eject> [options]\n"
           "  schema-codegen [--env <name>] [--database <target>] [--dsn <connection_string>] [--output-dir <path>] [--manifest <path>] [--prefix <ClassPrefix>] [--typed-contracts] [--force]\n"
@@ -74,6 +75,31 @@ static void PrintGenerateUsage(void) {
 
 static void PrintBuildUsage(void) {
   fprintf(stdout, "Usage: arlen build [--dry-run] [--json]\n");
+}
+
+static void PrintDeployUsage(void) {
+  fprintf(stdout,
+          "Usage: arlen deploy <plan|push|release> [options]\n"
+          "\n"
+          "Subcommands:\n"
+          "  plan                  Validate deploy inputs and emit a planned release payload\n"
+          "  push                  Build a local immutable release artifact under releases/\n"
+          "  release               Ensure a release exists, migrate if needed, and activate it\n"
+          "\n"
+          "Shared options:\n"
+          "  --app-root <path>\n"
+          "  --framework-root <path>\n"
+          "  --releases-dir <path>\n"
+          "  --release-id <id>\n"
+          "  --certification-manifest <path>\n"
+          "  --json-performance-manifest <path>\n"
+          "  --allow-missing-certification\n"
+          "  --json\n"
+          "\n"
+          "Release-only options:\n"
+          "  --env <name>          Migration environment (default: production)\n"
+          "  --base-url <url>      Probe <url>/healthz after activation\n"
+          "  --skip-migrate        Skip migration step during activation\n");
 }
 
 static void PrintJobsUsage(void) {
@@ -241,6 +267,32 @@ static NSString *Trimmed(NSString *value) {
   return [value stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
 }
 
+static NSDictionary *JSONDictionaryFromString(NSString *value) {
+  NSData *data = [[Trimmed(value) ?: @"" copy] dataUsingEncoding:NSUTF8StringEncoding];
+  if ([data length] == 0) {
+    return nil;
+  }
+  NSError *error = nil;
+  id parsed = [ALNJSONSerialization JSONObjectWithData:data options:0 error:&error];
+  if (![parsed isKindOfClass:[NSDictionary class]]) {
+    return nil;
+  }
+  return parsed;
+}
+
+static NSDictionary *JSONDictionaryFromFile(NSString *path) {
+  NSData *data = [NSData dataWithContentsOfFile:path ?: @""];
+  if ([data length] == 0) {
+    return nil;
+  }
+  NSError *error = nil;
+  id parsed = [ALNJSONSerialization JSONObjectWithData:data options:0 error:&error];
+  if (![parsed isKindOfClass:[NSDictionary class]]) {
+    return nil;
+  }
+  return parsed;
+}
+
 static NSString *RunShellCaptureCommand(NSString *command, int *exitCode);
 static NSString *EnvValue(const char *name);
 static BOOL PathExists(NSString *path, BOOL *isDirectory);
@@ -338,6 +390,28 @@ static NSString *EnvValue(const char *name) {
 
 static BOOL PathExists(NSString *path, BOOL *isDirectory) {
   return [[NSFileManager defaultManager] fileExistsAtPath:path isDirectory:isDirectory];
+}
+
+static BOOL DirectoryContainsSQLFiles(NSString *path) {
+  BOOL isDirectory = NO;
+  if (!PathExists(path, &isDirectory) || !isDirectory) {
+    return NO;
+  }
+
+  NSDirectoryEnumerator *enumerator = [[NSFileManager defaultManager] enumeratorAtPath:path];
+  for (NSString *relativePath in enumerator) {
+    if ([[[relativePath pathExtension] lowercaseString] isEqualToString:@"sql"]) {
+      return YES;
+    }
+  }
+  return NO;
+}
+
+static void AppendShellOption(NSMutableString *command, NSString *flag, NSString *value) {
+  if ([flag length] == 0 || [value length] == 0) {
+    return;
+  }
+  [command appendFormat:@" %@ %@", flag, ShellQuote(value)];
 }
 
 static BOOL IsFrameworkRoot(NSString *path) {
@@ -2764,6 +2838,505 @@ static int CommandPerf(void) {
     return 1;
   }
   return RunShellCommand([NSString stringWithFormat:@"cd %@ && make perf", ShellQuote(frameworkRoot)]);
+}
+
+static int CommandDeploy(NSArray *args) {
+  if ([args count] == 0) {
+    PrintDeployUsage();
+    return 2;
+  }
+
+  NSString *subcommand = args[0];
+  if ([subcommand isEqualToString:@"--help"] || [subcommand isEqualToString:@"-h"]) {
+    PrintDeployUsage();
+    return 0;
+  }
+  if (![@[ @"plan", @"push", @"release" ] containsObject:subcommand]) {
+    fprintf(stderr, "arlen deploy: unknown subcommand %s\n", [subcommand UTF8String]);
+    PrintDeployUsage();
+    return 2;
+  }
+
+  NSString *appRoot = [[[NSFileManager defaultManager] currentDirectoryPath] stringByStandardizingPath];
+  NSString *frameworkRootOverride = nil;
+  NSString *releasesDir = nil;
+  NSString *releaseID = nil;
+  NSString *certificationManifest = nil;
+  NSString *jsonPerformanceManifest = nil;
+  NSString *environment = @"production";
+  NSString *baseURL = nil;
+  BOOL allowMissingCertification = NO;
+  BOOL asJSON = NO;
+  BOOL skipMigrate = NO;
+
+  NSArray *subArgs = ([args count] > 1) ? [args subarrayWithRange:NSMakeRange(1, [args count] - 1)] : @[];
+  for (NSUInteger idx = 0; idx < [subArgs count]; idx++) {
+    NSString *arg = subArgs[idx];
+    if ([arg isEqualToString:@"--app-root"]) {
+      if (idx + 1 >= [subArgs count]) {
+        if (asJSON) {
+          return EmitMachineError(@"deploy", [NSString stringWithFormat:@"deploy.%@", subcommand],
+                                  @"missing_option_value", @"arlen deploy: --app-root requires a value",
+                                  @"Pass the app root path after --app-root.",
+                                  @"arlen deploy plan --app-root /path/to/app --json", 2);
+        }
+        fprintf(stderr, "arlen deploy: --app-root requires a value\n");
+        return 2;
+      }
+      appRoot = [ResolvePathFromRoot([[NSFileManager defaultManager] currentDirectoryPath], subArgs[++idx])
+                    stringByStandardizingPath];
+    } else if ([arg isEqualToString:@"--framework-root"]) {
+      if (idx + 1 >= [subArgs count]) {
+        if (asJSON) {
+          return EmitMachineError(@"deploy", [NSString stringWithFormat:@"deploy.%@", subcommand],
+                                  @"missing_option_value", @"arlen deploy: --framework-root requires a value",
+                                  @"Pass the framework root path after --framework-root.",
+                                  @"arlen deploy plan --framework-root /path/to/Arlen --json", 2);
+        }
+        fprintf(stderr, "arlen deploy: --framework-root requires a value\n");
+        return 2;
+      }
+      frameworkRootOverride =
+          [ResolvePathFromRoot([[NSFileManager defaultManager] currentDirectoryPath], subArgs[++idx])
+              stringByStandardizingPath];
+    } else if ([arg isEqualToString:@"--releases-dir"]) {
+      if (idx + 1 >= [subArgs count]) {
+        if (asJSON) {
+          return EmitMachineError(@"deploy", [NSString stringWithFormat:@"deploy.%@", subcommand],
+                                  @"missing_option_value", @"arlen deploy: --releases-dir requires a value",
+                                  @"Pass the releases directory after --releases-dir.",
+                                  @"arlen deploy push --releases-dir /srv/app/releases --json", 2);
+        }
+        fprintf(stderr, "arlen deploy: --releases-dir requires a value\n");
+        return 2;
+      }
+      releasesDir = [ResolvePathFromRoot([[NSFileManager defaultManager] currentDirectoryPath], subArgs[++idx])
+                        stringByStandardizingPath];
+    } else if ([arg isEqualToString:@"--release-id"]) {
+      if (idx + 1 >= [subArgs count]) {
+        if (asJSON) {
+          return EmitMachineError(@"deploy", [NSString stringWithFormat:@"deploy.%@", subcommand],
+                                  @"missing_option_value", @"arlen deploy: --release-id requires a value",
+                                  @"Pass a release identifier after --release-id.",
+                                  @"arlen deploy push --release-id rel-20260407 --json", 2);
+        }
+        fprintf(stderr, "arlen deploy: --release-id requires a value\n");
+        return 2;
+      }
+      releaseID = subArgs[++idx];
+    } else if ([arg isEqualToString:@"--certification-manifest"]) {
+      if (idx + 1 >= [subArgs count]) {
+        if (asJSON) {
+          return EmitMachineError(@"deploy", [NSString stringWithFormat:@"deploy.%@", subcommand],
+                                  @"missing_option_value",
+                                  @"arlen deploy: --certification-manifest requires a value",
+                                  @"Pass the certification manifest path after --certification-manifest.",
+                                  @"arlen deploy plan --certification-manifest build/release_confidence/phase9j/manifest.json --json",
+                                  2);
+        }
+        fprintf(stderr, "arlen deploy: --certification-manifest requires a value\n");
+        return 2;
+      }
+      certificationManifest =
+          [ResolvePathFromRoot([[NSFileManager defaultManager] currentDirectoryPath], subArgs[++idx])
+              stringByStandardizingPath];
+    } else if ([arg isEqualToString:@"--json-performance-manifest"]) {
+      if (idx + 1 >= [subArgs count]) {
+        if (asJSON) {
+          return EmitMachineError(@"deploy", [NSString stringWithFormat:@"deploy.%@", subcommand],
+                                  @"missing_option_value",
+                                  @"arlen deploy: --json-performance-manifest requires a value",
+                                  @"Pass the JSON performance manifest path after --json-performance-manifest.",
+                                  @"arlen deploy plan --json-performance-manifest build/release_confidence/phase10e/manifest.json --json",
+                                  2);
+        }
+        fprintf(stderr, "arlen deploy: --json-performance-manifest requires a value\n");
+        return 2;
+      }
+      jsonPerformanceManifest =
+          [ResolvePathFromRoot([[NSFileManager defaultManager] currentDirectoryPath], subArgs[++idx])
+              stringByStandardizingPath];
+    } else if ([arg isEqualToString:@"--env"]) {
+      if (idx + 1 >= [subArgs count]) {
+        if (asJSON) {
+          return EmitMachineError(@"deploy", [NSString stringWithFormat:@"deploy.%@", subcommand],
+                                  @"missing_option_value", @"arlen deploy: --env requires a value",
+                                  @"Pass the runtime environment after --env.",
+                                  @"arlen deploy release --env production --json", 2);
+        }
+        fprintf(stderr, "arlen deploy: --env requires a value\n");
+        return 2;
+      }
+      environment = subArgs[++idx];
+    } else if ([arg isEqualToString:@"--base-url"]) {
+      if (idx + 1 >= [subArgs count]) {
+        if (asJSON) {
+          return EmitMachineError(@"deploy", [NSString stringWithFormat:@"deploy.%@", subcommand],
+                                  @"missing_option_value", @"arlen deploy: --base-url requires a value",
+                                  @"Pass the probe base URL after --base-url.",
+                                  @"arlen deploy release --base-url http://127.0.0.1:3000 --json", 2);
+        }
+        fprintf(stderr, "arlen deploy: --base-url requires a value\n");
+        return 2;
+      }
+      baseURL = subArgs[++idx];
+    } else if ([arg isEqualToString:@"--allow-missing-certification"]) {
+      allowMissingCertification = YES;
+    } else if ([arg isEqualToString:@"--json"]) {
+      asJSON = YES;
+    } else if ([arg isEqualToString:@"--skip-migrate"]) {
+      skipMigrate = YES;
+    } else if ([arg isEqualToString:@"--help"] || [arg isEqualToString:@"-h"]) {
+      PrintDeployUsage();
+      return 0;
+    } else {
+      if (asJSON) {
+        return EmitMachineError(@"deploy", [NSString stringWithFormat:@"deploy.%@", subcommand],
+                                @"unknown_option",
+                                [NSString stringWithFormat:@"arlen deploy: unknown option %@", arg ?: @""],
+                                @"Use `arlen deploy --help` to review supported options.",
+                                @"arlen deploy --help", 2);
+      }
+      fprintf(stderr, "arlen deploy: unknown option %s\n", [arg UTF8String]);
+      PrintDeployUsage();
+      return 2;
+    }
+  }
+
+  NSString *resolveError = nil;
+  NSString *frameworkRoot = nil;
+  if ([frameworkRootOverride length] > 0) {
+    frameworkRoot = frameworkRootOverride;
+  } else {
+    frameworkRoot = ResolveFrameworkRootForCommandDetailed(@"deploy", !asJSON, &resolveError);
+  }
+  if ([frameworkRoot length] == 0) {
+    if (asJSON) {
+      return EmitMachineError(@"deploy", [NSString stringWithFormat:@"deploy.%@", subcommand],
+                              @"framework_root_unresolved",
+                              resolveError ?: @"failed to resolve framework root",
+                              @"Set ARLEN_FRAMEWORK_ROOT or pass --framework-root.",
+                              @"ARLEN_FRAMEWORK_ROOT=/path/to/Arlen arlen deploy plan --json", 1);
+    }
+    return 1;
+  }
+
+  if ([releasesDir length] == 0) {
+    releasesDir = [[appRoot stringByAppendingPathComponent:@"releases"] stringByStandardizingPath];
+  }
+  if ([releaseID length] == 0) {
+    NSDateFormatter *formatter = [[NSDateFormatter alloc] init];
+    formatter.locale = [[NSLocale alloc] initWithLocaleIdentifier:@"en_US_POSIX"];
+    formatter.timeZone = [NSTimeZone timeZoneWithAbbreviation:@"UTC"];
+    formatter.dateFormat = @"yyyyMMdd'T'HHmmss'Z'";
+    releaseID = [formatter stringFromDate:[NSDate date]];
+  }
+
+  NSString *workflow = [NSString stringWithFormat:@"deploy.%@", subcommand];
+  NSString *scriptRoot = [frameworkRoot stringByAppendingPathComponent:@"tools/deploy"];
+  NSString *releaseDir = [releasesDir stringByAppendingPathComponent:releaseID];
+  NSString *manifestPath = [releaseDir stringByAppendingPathComponent:@"metadata/manifest.json"];
+
+  NSMutableString *buildCommand =
+      [NSMutableString stringWithFormat:@"%@/build_release.sh", ShellQuote(scriptRoot)];
+  AppendShellOption(buildCommand, @"--app-root", appRoot);
+  AppendShellOption(buildCommand, @"--framework-root", frameworkRoot);
+  AppendShellOption(buildCommand, @"--releases-dir", releasesDir);
+  AppendShellOption(buildCommand, @"--release-id", releaseID);
+  AppendShellOption(buildCommand, @"--certification-manifest", certificationManifest);
+  AppendShellOption(buildCommand, @"--json-performance-manifest", jsonPerformanceManifest);
+  if (allowMissingCertification) {
+    [buildCommand appendString:@" --allow-missing-certification"];
+  }
+
+  if ([subcommand isEqualToString:@"plan"]) {
+    NSMutableString *planCommand = [buildCommand mutableCopy];
+    [planCommand appendString:@" --dry-run"];
+    if (asJSON) {
+      [planCommand appendString:@" --json"];
+      int exitCode = 0;
+      NSString *capturedOutput = RunShellCaptureCommand(planCommand, &exitCode);
+      NSDictionary *buildPayload = JSONDictionaryFromString(capturedOutput);
+      if (exitCode != 0 || buildPayload == nil) {
+        return EmitMachineError(@"deploy", workflow, @"deploy_plan_failed",
+                                @"arlen deploy plan failed",
+                                @"Inspect the underlying build_release output and fix the first reported issue.",
+                                @"arlen deploy plan --json --allow-missing-certification", exitCode ?: 1);
+      }
+      NSDictionary *payload = @{
+        @"version" : AgentContractVersion(),
+        @"command" : @"deploy",
+        @"workflow" : workflow,
+        @"subcommand" : subcommand,
+        @"status" : @"planned",
+        @"app_root" : appRoot ?: @"",
+        @"framework_root" : frameworkRoot ?: @"",
+        @"releases_dir" : releasesDir ?: @"",
+        @"release_id" : releaseID ?: @"",
+        @"release_dir" : releaseDir ?: @"",
+        @"manifest_path" : manifestPath ?: @"",
+        @"manifest_version" : @"phase29-deploy-manifest-v1",
+        @"build_release" : buildPayload ?: @{},
+      };
+      PrintJSONPayload(stdout, payload);
+      return 0;
+    }
+
+    return RunShellCommand(planCommand);
+  }
+
+  if ([subcommand isEqualToString:@"push"]) {
+    if (asJSON) {
+      NSMutableString *pushCommand = [buildCommand mutableCopy];
+      [pushCommand appendString:@" --json"];
+      int exitCode = 0;
+      NSString *capturedOutput = RunShellCaptureCommand(pushCommand, &exitCode);
+      NSDictionary *buildPayload = JSONDictionaryFromString(capturedOutput);
+      if (exitCode != 0 || buildPayload == nil) {
+        return EmitMachineError(@"deploy", workflow, @"deploy_push_failed",
+                                @"arlen deploy push failed",
+                                @"Inspect the underlying build_release output and fix the first reported issue.",
+                                @"arlen deploy push --json --allow-missing-certification", exitCode ?: 1);
+      }
+      NSDictionary *manifest = JSONDictionaryFromFile(manifestPath) ?: @{};
+      NSDictionary *payload = @{
+        @"version" : AgentContractVersion(),
+        @"command" : @"deploy",
+        @"workflow" : workflow,
+        @"subcommand" : subcommand,
+        @"status" : @"ok",
+        @"app_root" : appRoot ?: @"",
+        @"framework_root" : frameworkRoot ?: @"",
+        @"releases_dir" : releasesDir ?: @"",
+        @"release_id" : releaseID ?: @"",
+        @"release_dir" : releaseDir ?: @"",
+        @"manifest_path" : manifestPath ?: @"",
+        @"manifest_version" : manifest[@"version"] ?: @"phase29-deploy-manifest-v1",
+        @"manifest" : manifest,
+        @"build_release" : buildPayload ?: @{},
+      };
+      PrintJSONPayload(stdout, payload);
+      return 0;
+    }
+
+    return RunShellCommand(buildCommand);
+  }
+
+  BOOL releaseExists = NO;
+  BOOL isDirectory = NO;
+  if (PathExists(releaseDir, &isDirectory) && isDirectory) {
+    releaseExists = YES;
+  }
+
+  NSMutableArray *steps = [NSMutableArray array];
+  NSDictionary *buildPayload = nil;
+  int buildExitCode = 0;
+  if (!releaseExists) {
+    NSMutableString *pushCommand = [buildCommand mutableCopy];
+    [pushCommand appendString:@" --json"];
+    NSString *capturedOutput = RunShellCaptureCommand(pushCommand, &buildExitCode);
+    buildPayload = JSONDictionaryFromString(capturedOutput);
+    if (buildExitCode != 0 || buildPayload == nil) {
+      if (!asJSON && [capturedOutput length] > 0) {
+        fprintf(stderr, "%s", [capturedOutput UTF8String]);
+      }
+      return asJSON ? EmitMachineError(@"deploy", workflow, @"deploy_release_push_failed",
+                                       @"failed to build release artifact during deploy release",
+                                       @"Inspect the build_release failure and rerun after the artifact builds cleanly.",
+                                       @"arlen deploy push --json --allow-missing-certification", buildExitCode ?: 1)
+                    : buildExitCode ?: 1;
+    }
+    [steps addObject:@{
+      @"id" : @"push",
+      @"status" : @"ok",
+      @"release_id" : releaseID ?: @"",
+    }];
+  } else {
+    [steps addObject:@{
+      @"id" : @"push",
+      @"status" : @"reused",
+      @"release_id" : releaseID ?: @"",
+    }];
+  }
+
+  NSString *releaseAppRoot = [releaseDir stringByAppendingPathComponent:@"app"];
+  NSString *releaseFrameworkRoot = [releaseDir stringByAppendingPathComponent:@"framework"];
+  NSString *releaseBinary = [releaseFrameworkRoot stringByAppendingPathComponent:@"build/arlen"];
+  BOOL shouldMigrate = !skipMigrate && DirectoryContainsSQLFiles([releaseAppRoot stringByAppendingPathComponent:@"db/migrations"]);
+  if (shouldMigrate) {
+    NSString *migrateCommand = [NSString
+        stringWithFormat:@"cd %@ && ARLEN_APP_ROOT=%@ ARLEN_FRAMEWORK_ROOT=%@ %@ migrate --env %@",
+                         ShellQuote(releaseAppRoot), ShellQuote(releaseAppRoot),
+                         ShellQuote(releaseFrameworkRoot), ShellQuote(releaseBinary),
+                         ShellQuote(environment ?: @"production")];
+    int migrateExitCode = 0;
+    NSString *migrateOutput = RunShellCaptureCommand(migrateCommand, &migrateExitCode);
+    if (migrateExitCode != 0) {
+      if (!asJSON && [migrateOutput length] > 0) {
+        fprintf(stderr, "%s", [migrateOutput UTF8String]);
+      }
+      if (asJSON) {
+        NSDictionary *payload = @{
+          @"version" : AgentContractVersion(),
+          @"command" : @"deploy",
+          @"workflow" : workflow,
+          @"subcommand" : subcommand,
+          @"status" : @"error",
+          @"release_id" : releaseID ?: @"",
+          @"release_dir" : releaseDir ?: @"",
+          @"steps" : [steps arrayByAddingObject:@{
+            @"id" : @"migrate",
+            @"status" : @"error",
+            @"captured_output" : migrateOutput ?: @"",
+          }],
+          @"error" : @{
+            @"code" : @"deploy_release_migrate_failed",
+            @"message" : @"release activation stopped because migrations failed",
+            @"fixit" : @{
+              @"action" : @"Repair the migration/config failure and rerun the release step.",
+              @"example" : @"arlen deploy release --skip-migrate --json",
+            }
+          },
+          @"exit_code" : @(migrateExitCode),
+        };
+        PrintJSONPayload(stdout, payload);
+      }
+      return migrateExitCode;
+    }
+    [steps addObject:@{
+      @"id" : @"migrate",
+      @"status" : @"ok",
+      @"environment" : environment ?: @"production",
+    }];
+  } else {
+    [steps addObject:@{
+      @"id" : @"migrate",
+      @"status" : skipMigrate ? @"skipped" : @"not_needed",
+      @"environment" : environment ?: @"production",
+    }];
+  }
+
+  NSString *activateCommand =
+      [NSString stringWithFormat:@"%@/activate_release.sh --releases-dir %@ --release-id %@",
+                                 ShellQuote(scriptRoot), ShellQuote(releasesDir), ShellQuote(releaseID)];
+  int activateExitCode = 0;
+  NSString *activateOutput = RunShellCaptureCommand(activateCommand, &activateExitCode);
+  if (activateExitCode != 0) {
+    if (!asJSON && [activateOutput length] > 0) {
+      fprintf(stderr, "%s", [activateOutput UTF8String]);
+    }
+    if (asJSON) {
+      NSDictionary *payload = @{
+        @"version" : AgentContractVersion(),
+        @"command" : @"deploy",
+        @"workflow" : workflow,
+        @"subcommand" : subcommand,
+        @"status" : @"error",
+        @"release_id" : releaseID ?: @"",
+        @"release_dir" : releaseDir ?: @"",
+        @"steps" : [steps arrayByAddingObject:@{
+          @"id" : @"activate",
+          @"status" : @"error",
+          @"captured_output" : activateOutput ?: @"",
+        }],
+        @"error" : @{
+          @"code" : @"deploy_release_activate_failed",
+          @"message" : @"release activation failed",
+          @"fixit" : @{
+            @"action" : @"Inspect the releases directory and activation script output.",
+            @"example" : @"tools/deploy/activate_release.sh --releases-dir /path/to/releases --release-id rel-1",
+          }
+        },
+        @"exit_code" : @(activateExitCode),
+      };
+      PrintJSONPayload(stdout, payload);
+    }
+    return activateExitCode;
+  }
+  [steps addObject:@{
+    @"id" : @"activate",
+    @"status" : @"ok",
+    @"current_path" : [releasesDir stringByAppendingPathComponent:@"current"],
+  }];
+
+  if ([baseURL length] > 0) {
+    NSString *trimmedBaseURL = [baseURL hasSuffix:@"/"] ? [baseURL substringToIndex:[baseURL length] - 1] : baseURL;
+    NSString *healthURL = [trimmedBaseURL stringByAppendingString:@"/healthz"];
+    NSString *healthCommand = [NSString stringWithFormat:@"curl -fsS %@", ShellQuote(healthURL)];
+    int healthExitCode = 0;
+    NSString *healthOutput = RunShellCaptureCommand(healthCommand, &healthExitCode);
+    NSString *trimmedHealthOutput = Trimmed(healthOutput);
+    if (healthExitCode != 0 || ![trimmedHealthOutput isEqualToString:@"ok"]) {
+      if (asJSON) {
+        NSDictionary *payload = @{
+          @"version" : AgentContractVersion(),
+          @"command" : @"deploy",
+          @"workflow" : workflow,
+          @"subcommand" : subcommand,
+          @"status" : @"error",
+          @"release_id" : releaseID ?: @"",
+          @"release_dir" : releaseDir ?: @"",
+          @"steps" : [steps arrayByAddingObject:@{
+            @"id" : @"health",
+            @"status" : @"error",
+            @"base_url" : baseURL ?: @"",
+            @"captured_output" : healthOutput ?: @"",
+          }],
+          @"error" : @{
+            @"code" : @"deploy_release_health_failed",
+            @"message" : @"release activation completed but health verification failed",
+            @"fixit" : @{
+              @"action" : @"Inspect runtime startup logs and verify /healthz is reachable.",
+              @"example" : [NSString stringWithFormat:@"curl -fsS %@/healthz", trimmedBaseURL ?: @""],
+            }
+          },
+          @"exit_code" : @(healthExitCode == 0 ? 1 : healthExitCode),
+        };
+        PrintJSONPayload(stdout, payload);
+      }
+      if (!asJSON && [healthOutput length] > 0) {
+        fprintf(stderr, "%s", [healthOutput UTF8String]);
+      }
+      return (healthExitCode == 0) ? 1 : healthExitCode;
+    }
+    [steps addObject:@{
+      @"id" : @"health",
+      @"status" : @"ok",
+      @"base_url" : baseURL ?: @"",
+      @"health_path" : @"/healthz",
+    }];
+  } else {
+    [steps addObject:@{
+      @"id" : @"health",
+      @"status" : @"skipped",
+      @"reason" : @"base_url_not_provided",
+    }];
+  }
+
+  NSDictionary *manifest = JSONDictionaryFromFile(manifestPath) ?: @{};
+  if (asJSON) {
+    NSDictionary *payload = @{
+      @"version" : AgentContractVersion(),
+      @"command" : @"deploy",
+      @"workflow" : workflow,
+      @"subcommand" : subcommand,
+      @"status" : @"ok",
+      @"environment" : environment ?: @"production",
+      @"release_id" : releaseID ?: @"",
+      @"release_dir" : releaseDir ?: @"",
+      @"releases_dir" : releasesDir ?: @"",
+      @"manifest_path" : manifestPath ?: @"",
+      @"manifest_version" : manifest[@"version"] ?: @"phase29-deploy-manifest-v1",
+      @"manifest" : manifest,
+      @"steps" : steps ?: @[],
+      @"build_release" : buildPayload ?: @{},
+    };
+    PrintJSONPayload(stdout, payload);
+    return 0;
+  }
+
+  fprintf(stdout, "release activated: %s\n", [releaseDir UTF8String]);
+  return 0;
 }
 
 static int RunMakeWorkflowCommand(NSString *commandName, NSString *makeTarget, NSArray *args) {
@@ -5910,6 +6483,9 @@ int main(int argc, const char *argv[]) {
     }
     if ([command isEqualToString:@"propane"]) {
       return CommandPropane(args);
+    }
+    if ([command isEqualToString:@"deploy"]) {
+      return CommandDeploy(args);
     }
     if ([command isEqualToString:@"migrate"]) {
       return CommandMigrate(args);

@@ -1,6 +1,46 @@
 # Arlen Status Checkpoint
 
-Last updated: 2026-04-06
+Last updated: 2026-04-07
+
+## Leaving Off (2026-04-07)
+
+- Started Phase 29 and delivered `29A-29E`:
+  - added first-class `arlen deploy plan|push|release` command handling in
+    `tools/arlen.m`
+  - normalized deploy machine output around `workflow = deploy.<subcommand>`
+    while preserving the lower-level `deploy.build_release` payload under the
+    nested `build_release` key
+  - introduced versioned release metadata at
+    `releases/<id>/metadata/manifest.json` using
+    `phase29-deploy-manifest-v1`
+  - `arlen deploy release` now reuses or creates the selected release,
+    conditionally runs migrations when packaged SQL files exist, activates
+    `releases/current`, and optionally probes `/healthz` via `--base-url`
+  - added focused integration coverage for deploy plan/push/release and
+    updated the deployment docs/CLI spec/reference to point operators at the
+    new command family
+- Planned the remainder of Phase 29:
+  - added `docs/PHASE29_ROADMAP.md`
+  - scoped `29A-29L` around a first-class `arlen deploy` product instead of
+    more ad hoc deployment-script growth
+  - kept the near-term scope centered on release orchestration:
+    `plan`, `push`, `release`, `status`, `rollback`, `doctor`, `logs`, and
+    the supporting release metadata/health-verification contracts
+  - explicitly deferred broader host bootstrap, PostgreSQL provisioning,
+    secrets editing, and distro/package-management depth until after the core
+    rollout product is stable
+- Documentation surfaces updated for the new planned phase:
+  - `README.md`
+  - `docs/README.md`
+  - `docs/STATUS.md`
+- Verification completed at this checkpoint:
+  - `source tools/source_gnustep_env.sh && make arlen`
+  - `source tools/source_gnustep_env.sh && make build-tests`
+  - manual smoke:
+    `arlen deploy plan --json`
+    `arlen deploy push --json`
+    `arlen deploy release --json`
+    verified `releases/current` and `metadata/manifest.json`
 
 ## Leaving Off (2026-04-06)
 

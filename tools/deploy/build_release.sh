@@ -92,6 +92,7 @@ emit_success_json() {
   local status="$1"
   local release_dir="$2"
   local latest_built="$3"
+  local manifest_path="$4"
   printf '{'
   printf '"version":"phase7g-agent-dx-contracts-v1",'
   printf '"workflow":"deploy.build_release",'
@@ -101,6 +102,10 @@ emit_success_json() {
   printf '"releases_dir":"%s",' "$(json_escape "$releases_dir")"
   printf '"release_id":"%s",' "$(json_escape "$release_id")"
   printf '"release_dir":"%s"' "$(json_escape "$release_dir")"
+  if [[ -n "$manifest_path" ]]; then
+    printf ',"manifest_version":"phase29-deploy-manifest-v1"'
+    printf ',"manifest_path":"%s"' "$(json_escape "$manifest_path")"
+  fi
   if [[ -n "$latest_built" ]]; then
     printf ',"latest_built_symlink":"%s"' "$(json_escape "$latest_built")"
   fi
@@ -371,6 +376,7 @@ else
 fi
 
 release_dir="$releases_dir/$release_id"
+manifest_path="$release_dir/metadata/manifest.json"
 if [[ -e "$release_dir" ]]; then
   emit_error \
     "release_exists" \
@@ -382,7 +388,7 @@ fi
 
 if [[ "$dry_run" == "1" ]]; then
   if [[ "$output_json" == "1" ]]; then
-    emit_success_json "planned" "$release_dir" "$releases_dir/latest-built"
+    emit_success_json "planned" "$release_dir" "$releases_dir/latest-built" "$manifest_path"
   else
     echo "build_release.sh dry-run: release_dir=$release_dir"
   fi
@@ -441,14 +447,65 @@ RELEASE_ID=$release_id
 RELEASE_CREATED_UTC=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 ARLEN_APP_ROOT=$release_dir/app
 ARLEN_FRAMEWORK_ROOT=$release_dir/framework
+ARLEN_RELEASE_MANIFEST=$release_dir/metadata/manifest.json
 ARLEN_RELEASE_CERTIFICATION_STATUS=$certification_status
 ARLEN_RELEASE_CERTIFICATION_MANIFEST=$certification_bundle_manifest
 ARLEN_JSON_PERFORMANCE_STATUS=$json_performance_status
 ARLEN_JSON_PERFORMANCE_MANIFEST=$json_performance_bundle_manifest
 EOF
 
+python3 - "$release_dir" "$release_id" "$app_root" "$framework_root" "$certification_status" \
+  "$certification_bundle_manifest" "$json_performance_status" "$json_performance_bundle_manifest" <<'PY'
+import json
+import os
+import sys
+from datetime import datetime, timezone
+
+release_dir, release_id, app_root, framework_root, certification_status, certification_manifest, json_status, json_manifest = sys.argv[1:9]
+
+def rel(*parts):
+    return os.path.join(*parts).replace(os.sep, "/")
+
+manifest = {
+    "version": "phase29-deploy-manifest-v1",
+    "release_id": release_id,
+    "created_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+    "release_dir": release_dir,
+    "app_root_source": app_root,
+    "framework_root_source": framework_root,
+    "paths": {
+        "app_root": rel(release_dir, "app"),
+        "framework_root": rel(release_dir, "framework"),
+        "runtime_binary": rel(release_dir, "app", ".boomhauer", "build", "boomhauer-app"),
+        "migrations_dir": rel(release_dir, "app", "db", "migrations"),
+        "propane": rel(release_dir, "framework", "bin", "propane"),
+        "arlen": rel(release_dir, "framework", "build", "arlen"),
+        "release_env": rel(release_dir, "metadata", "release.env"),
+    },
+    "health_contract": {
+        "health_path": "/healthz",
+        "readiness_path": "/readyz",
+        "expected_ok_body": "ok",
+    },
+    "certification": {
+        "status": certification_status,
+        "manifest_path": certification_manifest,
+    },
+    "json_performance": {
+        "status": json_status,
+        "manifest_path": json_manifest,
+    },
+}
+
+manifest_path = os.path.join(release_dir, "metadata", "manifest.json")
+with open(manifest_path, "w", encoding="utf-8") as handle:
+    json.dump(manifest, handle, indent=2, sort_keys=True)
+    handle.write("\n")
+PY
+
 cat >"$release_dir/metadata/README.txt" <<EOF
 Release: $release_id
+Release manifest: $release_dir/metadata/manifest.json
 
 Release certification status: $certification_status
 Release certification manifest: $certification_bundle_manifest
@@ -465,7 +522,7 @@ EOF
 
 ln -sfn "$release_dir" "$releases_dir/latest-built"
 if [[ "$output_json" == "1" ]]; then
-  emit_success_json "ok" "$release_dir" "$releases_dir/latest-built"
+  emit_success_json "ok" "$release_dir" "$releases_dir/latest-built" "$manifest_path"
 else
   echo "release built: $release_dir"
 fi

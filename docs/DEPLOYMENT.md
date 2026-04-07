@@ -76,6 +76,19 @@ When `cluster.emitHeaders = YES` (default), responses include:
 
 Deployment helper scripts are provided under `tools/deploy/`.
 
+For app-operator workflows, prefer the first-class `arlen deploy` wrapper:
+
+```bash
+./build/arlen deploy plan --app-root /path/to/app --allow-missing-certification --json
+./build/arlen deploy push --app-root /path/to/app --allow-missing-certification --json
+./build/arlen deploy release --app-root /path/to/app --release-id rel-20260407 --allow-missing-certification --json
+```
+
+`arlen deploy push` writes `releases/<id>/metadata/manifest.json` using
+`phase29-deploy-manifest-v1`. `arlen deploy release` reuses that manifest,
+runs packaged migrations when present, activates `releases/current`, and can
+probe `/healthz` when `--base-url` is supplied.
+
 ### 5.1 Build a release artifact
 
 ```bash

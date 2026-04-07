@@ -1,7 +1,7 @@
 # Arlen CLI Specification
 
-Status: Implemented through Phase 5E  
-Last updated: 2026-02-23
+Status: Implemented through Phase 29E  
+Last updated: 2026-04-07
 
 ## 1. Purpose
 
@@ -37,6 +37,7 @@ Implemented command groups:
 - `generate`
 - `boomhauer`
 - `propane`
+- `deploy`
 - `migrate`
 - `schema-codegen`
 - `typed-sql-codegen`
@@ -97,6 +98,24 @@ Behavior:
 - resolves DSN from `--dsn`, `ARLEN_DATABASE_URL_<TARGET>`, `ARLEN_DATABASE_URL`, or config `database/databases`
 - migration state table is target-aware (`arlen_schema_migrations` or `arlen_schema_migrations__<target>`)
 
+### 4.5A `arlen deploy <plan|push|release> [options]`
+
+- `plan` validates release packaging inputs and emits a stable deploy planning payload
+- `push` builds a local immutable release artifact under `releases/<release-id>/`
+- `push` writes `metadata/manifest.json` using contract version `phase29-deploy-manifest-v1`
+- `release` reuses or creates the selected release, runs migrations when packaged `.sql` files exist, and activates `releases/current`
+- `release` can optionally verify `GET /healthz` through `--base-url <url>`
+- shared options:
+  - `--app-root <path>`
+  - `--framework-root <path>`
+  - `--releases-dir <path>`
+  - `--release-id <id>`
+  - `--certification-manifest <path>`
+  - `--json-performance-manifest <path>`
+  - `--allow-missing-certification`
+  - `--json`
+  - `--env <name>` and `--base-url <url>` for `release`
+
 ### 4.6 `arlen routes`
 
 - builds and prints resolved route table (`--print-routes` path)
@@ -154,7 +173,7 @@ Behavior:
 `arlen` operates in two modes:
 
 1. Outside app root: `new`
-2. Inside app root: run/generate/build/test/perf/check/routes/config/migrate/schema-codegen/typed-sql-codegen
+2. Inside app root: run/generate/build/test/perf/check/routes/config/deploy/migrate/schema-codegen/typed-sql-codegen
 
 Framework root resolution order:
 
@@ -175,8 +194,8 @@ Framework root resolution order:
 - `1`: runtime/build/test/perf failure
 - `2`: usage/argument error
 
-## 8. Near-Term Additions (Phase 3)
+## 8. Near-Term Additions
 
-- deployment-oriented CLI helpers layered on existing `tools/deploy/*` scripts
+- `deploy status`, `deploy rollback`, `deploy doctor`, and `deploy logs`
 - richer generator extension hooks
 - plugin/lifecycle scaffolding commands
