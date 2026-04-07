@@ -466,6 +466,16 @@ release_dir, release_id, app_root, framework_root, certification_status, certifi
 def rel(*parts):
     return os.path.join(*parts).replace(os.sep, "/")
 
+migrations_dir = os.path.join(release_dir, "app", "db", "migrations")
+migration_files = []
+if os.path.isdir(migrations_dir):
+    for root, _, files in os.walk(migrations_dir):
+        for name in files:
+            if name.lower().endswith(".sql"):
+                path = os.path.join(root, name)
+                migration_files.append(os.path.relpath(path, release_dir).replace(os.sep, "/"))
+    migration_files.sort()
+
 manifest = {
     "version": "phase29-deploy-manifest-v1",
     "release_id": release_id,
@@ -486,6 +496,10 @@ manifest = {
         "health_path": "/healthz",
         "readiness_path": "/readyz",
         "expected_ok_body": "ok",
+    },
+    "migration_inventory": {
+        "count": len(migration_files),
+        "files": migration_files,
     },
     "certification": {
         "status": certification_status,

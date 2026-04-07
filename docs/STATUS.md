@@ -4,6 +4,20 @@ Last updated: 2026-04-07
 
 ## Leaving Off (2026-04-07)
 
+- Continued Phase 29 and delivered `29F-29I`:
+  - added `arlen deploy status` for active/previous release visibility,
+    manifest-backed health contract reporting, migration inventory, and
+    optional systemd runtime state
+  - added `arlen deploy rollback` for first-class rollback target selection,
+    symlink activation, optional runtime reload/restart, health verification,
+    and honest migration reversibility warnings
+  - added `arlen deploy doctor` for release layout, packaged binary, config,
+    database URL, and optional operability validation
+  - added `arlen deploy logs` for active release metadata pointers plus
+    journald/file log access helpers
+  - extended `phase29-deploy-manifest-v1` with packaged migration inventory so
+    status/doctor/rollback consume structured release metadata instead of
+    scraping text artifacts
 - Started Phase 29 and delivered `29A-29E`:
   - added first-class `arlen deploy plan|push|release` command handling in
     `tools/arlen.m`
@@ -40,6 +54,10 @@ Last updated: 2026-04-07
     `arlen deploy plan --json`
     `arlen deploy push --json`
     `arlen deploy release --json`
+    `arlen deploy status --json`
+    `arlen deploy rollback --runtime-action none --json`
+    `arlen deploy doctor --json`
+    `arlen deploy logs --file <path> --json`
     verified `releases/current` and `metadata/manifest.json`
 
 ## Leaving Off (2026-04-06)

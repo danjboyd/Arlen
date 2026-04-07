@@ -256,6 +256,8 @@ Acceptance:
 
 ### 29F. `arlen deploy status`
 
+Status: Delivered on 2026-04-07
+
 Goal:
 - give operators a single command for current rollout state
 
@@ -273,6 +275,8 @@ Acceptance:
 
 ### 29G. `arlen deploy rollback`
 
+Status: Delivered on 2026-04-07
+
 Goal:
 - make rollback a first-class, verified action instead of a runbook footnote
 
@@ -287,6 +291,8 @@ Acceptance:
 - rollback is scriptable, observable, and health-verified
 
 ### 29H. `arlen deploy doctor`
+
+Status: Delivered on 2026-04-07
 
 Goal:
 - expose server-side deployment diagnostics through a first-party CLI
@@ -304,6 +310,8 @@ Acceptance:
   of generic runtime failure
 
 ### 29I. `arlen deploy logs`
+
+Status: Delivered on 2026-04-07
 
 Goal:
 - shorten the path from “deployment failed” to actionable context

@@ -79,18 +79,24 @@ static void PrintBuildUsage(void) {
 
 static void PrintDeployUsage(void) {
   fprintf(stdout,
-          "Usage: arlen deploy <plan|push|release> [options]\n"
+          "Usage: arlen deploy <plan|push|release|status|rollback|doctor|logs> [options]\n"
           "\n"
           "Subcommands:\n"
           "  plan                  Validate deploy inputs and emit a planned release payload\n"
           "  push                  Build a local immutable release artifact under releases/\n"
           "  release               Ensure a release exists, migrate if needed, and activate it\n"
+          "  status                Show active/previous release state and optional runtime health\n"
+          "  rollback              Activate a previous release and optionally verify health\n"
+          "  doctor                Validate release layout, config, and optional runtime health\n"
+          "  logs                  Show active release log pointers or stream runtime logs\n"
           "\n"
           "Shared options:\n"
           "  --app-root <path>\n"
           "  --framework-root <path>\n"
           "  --releases-dir <path>\n"
           "  --release-id <id>\n"
+          "  --service <name>      systemd unit for runtime state/log actions\n"
+          "  --base-url <url>      Base URL for probe validation\n"
           "  --certification-manifest <path>\n"
           "  --json-performance-manifest <path>\n"
           "  --allow-missing-certification\n"
@@ -98,8 +104,15 @@ static void PrintDeployUsage(void) {
           "\n"
           "Release-only options:\n"
           "  --env <name>          Migration environment (default: production)\n"
-          "  --base-url <url>      Probe <url>/healthz after activation\n"
-          "  --skip-migrate        Skip migration step during activation\n");
+          "  --skip-migrate        Skip migration step during activation\n"
+          "\n"
+          "Rollback options:\n"
+          "  --runtime-action <reload|restart|none>\n"
+          "\n"
+          "Logs options:\n"
+          "  --lines <count>       Number of log lines to show (default: 200)\n"
+          "  --follow              Follow log output\n"
+          "  --file <path>         Tail a log file when journald is not desired\n");
 }
 
 static void PrintJobsUsage(void) {
@@ -296,6 +309,8 @@ static NSDictionary *JSONDictionaryFromFile(NSString *path) {
 static NSString *RunShellCaptureCommand(NSString *command, int *exitCode);
 static NSString *EnvValue(const char *name);
 static BOOL PathExists(NSString *path, BOOL *isDirectory);
+static NSString *DatabaseConnectionStringFromEnvironmentForTarget(NSString *databaseTarget);
+static NSString *DatabaseConnectionStringFromConfigForTarget(NSDictionary *config, NSString *databaseTarget);
 
 static NSString *DefaultGNUstepScriptPath(void) {
   return @"/usr/GNUstep/System/Library/Makefiles/GNUstep.sh";
@@ -412,6 +427,322 @@ static void AppendShellOption(NSMutableString *command, NSString *flag, NSString
     return;
   }
   [command appendFormat:@" %@ %@", flag, ShellQuote(value)];
+}
+
+static NSDictionary *DictionaryFromReleaseEnvFile(NSString *path) {
+  NSString *contents = [NSString stringWithContentsOfFile:path
+                                                 encoding:NSUTF8StringEncoding
+                                                    error:NULL];
+  if ([contents length] == 0) {
+    return @{};
+  }
+
+  NSMutableDictionary *values = [NSMutableDictionary dictionary];
+  NSArray *lines = [contents componentsSeparatedByCharactersInSet:[NSCharacterSet newlineCharacterSet]];
+  for (NSString *line in lines) {
+    NSString *trimmed = Trimmed(line);
+    if ([trimmed length] == 0 || [trimmed hasPrefix:@"#"]) {
+      continue;
+    }
+    NSRange equalsRange = [trimmed rangeOfString:@"="];
+    if (equalsRange.location == NSNotFound) {
+      continue;
+    }
+    NSString *key = Trimmed([trimmed substringToIndex:equalsRange.location]);
+    NSString *value = [trimmed substringFromIndex:(equalsRange.location + 1)];
+    if ([key length] > 0) {
+      values[key] = value ?: @"";
+    }
+  }
+  return values;
+}
+
+static NSString *ResolveSymlinkDestination(NSString *path) {
+  int exitCode = 0;
+  NSString *resolved =
+      Trimmed(RunShellCaptureCommand([NSString stringWithFormat:@"readlink -f %@ 2>/dev/null", ShellQuote(path)],
+                                     &exitCode));
+  return (exitCode == 0 && [resolved length] > 0) ? [resolved stringByStandardizingPath] : nil;
+}
+
+static NSArray<NSString *> *SortedReleaseDirectories(NSString *releasesDir) {
+  NSFileManager *fm = [NSFileManager defaultManager];
+  NSArray<NSString *> *children = [fm contentsOfDirectoryAtPath:releasesDir error:NULL] ?: @[];
+  NSMutableArray<NSString *> *releaseIDs = [NSMutableArray array];
+  for (NSString *entry in children) {
+    if ([entry isEqualToString:@"current"] || [entry isEqualToString:@"latest-built"]) {
+      continue;
+    }
+    NSString *candidate = [releasesDir stringByAppendingPathComponent:entry];
+    BOOL isDirectory = NO;
+    if ([fm fileExistsAtPath:candidate isDirectory:&isDirectory] && isDirectory) {
+      [releaseIDs addObject:entry];
+    }
+  }
+  return [releaseIDs sortedArrayUsingSelector:@selector(compare:)];
+}
+
+static NSString *ReleaseIDForDirectory(NSString *releaseDir) {
+  return [[releaseDir stringByStandardizingPath] lastPathComponent];
+}
+
+static NSString *CurrentReleaseDirectoryAtReleasesDir(NSString *releasesDir) {
+  NSString *currentPath = [releasesDir stringByAppendingPathComponent:@"current"];
+  NSString *resolved = ResolveSymlinkDestination(currentPath);
+  if ([resolved length] > 0) {
+    return resolved;
+  }
+  BOOL isDirectory = NO;
+  if (PathExists(currentPath, &isDirectory) && isDirectory) {
+    return [currentPath stringByStandardizingPath];
+  }
+  return nil;
+}
+
+static NSString *PreviousReleaseIDAtReleasesDir(NSString *releasesDir, NSString *currentReleaseID) {
+  NSArray<NSString *> *sortedReleaseIDs = SortedReleaseDirectories(releasesDir);
+  for (NSInteger idx = (NSInteger)[sortedReleaseIDs count] - 1; idx >= 0; idx--) {
+    NSString *candidate = sortedReleaseIDs[(NSUInteger)idx];
+    if ([candidate isEqualToString:currentReleaseID ?: @""]) {
+      continue;
+    }
+    return candidate;
+  }
+  return nil;
+}
+
+static NSString *ServiceRuntimeState(NSString *serviceName, NSString **capturedOutput) {
+  if ([serviceName length] == 0) {
+    if (capturedOutput != NULL) {
+      *capturedOutput = @"";
+    }
+    return @"not_requested";
+  }
+  int commandCode = 0;
+  NSString *systemctlPath =
+      Trimmed(RunShellCaptureCommand(@"command -v systemctl 2>/dev/null", &commandCode));
+  if (commandCode != 0 || [systemctlPath length] == 0) {
+    if (capturedOutput != NULL) {
+      *capturedOutput = @"systemctl not available";
+    }
+    return @"unavailable";
+  }
+
+  int exitCode = 0;
+  NSString *output = Trimmed(RunShellCaptureCommand([NSString stringWithFormat:@"systemctl is-active %@ 2>&1",
+                                                                              ShellQuote(serviceName)],
+                                                   &exitCode));
+  if (capturedOutput != NULL) {
+    *capturedOutput = output ?: @"";
+  }
+  if ([output length] == 0) {
+    return (exitCode == 0) ? @"active" : @"unknown";
+  }
+  return output;
+}
+
+static NSDictionary *HealthContractFromManifest(NSDictionary *manifest) {
+  NSDictionary *contract = [manifest[@"health_contract"] isKindOfClass:[NSDictionary class]]
+                               ? manifest[@"health_contract"]
+                               : nil;
+  return contract ?: @{
+    @"health_path" : @"/healthz",
+    @"readiness_path" : @"/readyz",
+    @"expected_ok_body" : @"ok",
+  };
+}
+
+static NSDictionary *MigrationInventoryFromManifest(NSDictionary *manifest) {
+  NSDictionary *inventory = [manifest[@"migration_inventory"] isKindOfClass:[NSDictionary class]]
+                                ? manifest[@"migration_inventory"]
+                                : nil;
+  if (inventory != nil) {
+    return inventory;
+  }
+  return @{
+    @"count" : @0,
+    @"files" : @[],
+  };
+}
+
+static NSDictionary *RunDeployHealthProbe(NSString *frameworkRoot, NSString *baseURL) {
+  if ([baseURL length] == 0) {
+    return @{
+      @"status" : @"skipped",
+      @"reason" : @"base_url_not_provided",
+    };
+  }
+
+  NSString *scriptPath = [[frameworkRoot stringByAppendingPathComponent:@"tools/deploy/validate_operability.sh"]
+      stringByStandardizingPath];
+  int exitCode = 0;
+  NSString *command = [NSString stringWithFormat:@"%@ --base-url %@", ShellQuote(scriptPath), ShellQuote(baseURL)];
+  NSString *output = RunShellCaptureCommand(command, &exitCode);
+  return @{
+    @"status" : (exitCode == 0) ? @"ok" : @"error",
+    @"base_url" : baseURL ?: @"",
+    @"captured_output" : output ?: @"",
+    @"exit_code" : @(exitCode),
+  };
+}
+
+static NSDictionary *LoadReleaseMetadataAtDirectory(NSString *releaseDir) {
+  NSString *manifestPath = [releaseDir stringByAppendingPathComponent:@"metadata/manifest.json"];
+  NSString *releaseEnvPath = [releaseDir stringByAppendingPathComponent:@"metadata/release.env"];
+  NSDictionary *manifest = JSONDictionaryFromFile(manifestPath) ?: @{};
+  NSDictionary *releaseEnv = DictionaryFromReleaseEnvFile(releaseEnvPath);
+  return @{
+    @"manifest_path" : manifestPath ?: @"",
+    @"release_env_path" : releaseEnvPath ?: @"",
+    @"manifest" : manifest,
+    @"release_env" : releaseEnv ?: @{},
+  };
+}
+
+static NSArray<NSDictionary *> *DeployDoctorChecksForRelease(NSString *releaseDir,
+                                                             NSString *environment,
+                                                             NSString *serviceName,
+                                                             NSString *baseURL,
+                                                             NSInteger *passCount,
+                                                             NSInteger *warnCount,
+                                                             NSInteger *failCount) {
+  NSMutableArray<NSDictionary *> *checks = [NSMutableArray array];
+  __block NSInteger localPass = 0;
+  __block NSInteger localWarn = 0;
+  __block NSInteger localFail = 0;
+  NSFileManager *fm = [NSFileManager defaultManager];
+
+  void (^addCheck)(NSString *, NSString *, NSString *, NSString *) =
+      ^(NSString *checkID, NSString *status, NSString *message, NSString *hint) {
+        [checks addObject:@{
+          @"id" : checkID ?: @"",
+          @"status" : status ?: @"warn",
+          @"message" : message ?: @"",
+          @"hint" : hint ?: @"",
+        }];
+        if ([status isEqualToString:@"pass"]) {
+          localPass += 1;
+        } else if ([status isEqualToString:@"fail"]) {
+          localFail += 1;
+        } else {
+          localWarn += 1;
+        }
+      };
+
+  BOOL isDirectory = NO;
+  if ([releaseDir length] > 0 && [fm fileExistsAtPath:releaseDir isDirectory:&isDirectory] && isDirectory) {
+    addCheck(@"release_dir", @"pass", [NSString stringWithFormat:@"active release: %@", releaseDir], @"");
+  } else {
+    addCheck(@"release_dir", @"fail", @"active release directory is missing",
+             @"Build or activate a release before running deploy doctor.");
+    if (passCount != NULL) {
+      *passCount = localPass;
+    }
+    if (warnCount != NULL) {
+      *warnCount = localWarn;
+    }
+    if (failCount != NULL) {
+      *failCount = localFail;
+    }
+    return checks;
+  }
+
+  NSDictionary *metadata = LoadReleaseMetadataAtDirectory(releaseDir);
+  NSString *manifestPath = metadata[@"manifest_path"];
+  NSDictionary *manifest = [metadata[@"manifest"] isKindOfClass:[NSDictionary class]] ? metadata[@"manifest"] : @{};
+  if ([manifest count] > 0) {
+    addCheck(@"manifest", @"pass", [NSString stringWithFormat:@"release manifest present: %@", manifestPath], @"");
+  } else {
+    addCheck(@"manifest", @"fail", [NSString stringWithFormat:@"release manifest missing or invalid: %@", manifestPath],
+             @"Rebuild the release artifact with `arlen deploy push`.");
+  }
+
+  NSString *releaseEnvPath = metadata[@"release_env_path"];
+  if ([fm fileExistsAtPath:releaseEnvPath]) {
+    addCheck(@"release_env", @"pass", [NSString stringWithFormat:@"release env present: %@", releaseEnvPath], @"");
+  } else {
+    addCheck(@"release_env", @"warn", [NSString stringWithFormat:@"release env missing: %@", releaseEnvPath],
+             @"Rebuild the release artifact if metadata files are incomplete.");
+  }
+
+  NSDictionary *paths = [manifest[@"paths"] isKindOfClass:[NSDictionary class]] ? manifest[@"paths"] : @{};
+  NSArray<NSDictionary *> *requiredPaths = @[
+    @{ @"id" : @"app_root", @"path" : paths[@"app_root"] ?: [releaseDir stringByAppendingPathComponent:@"app"] },
+    @{ @"id" : @"framework_root", @"path" : paths[@"framework_root"] ?: [releaseDir stringByAppendingPathComponent:@"framework"] },
+    @{ @"id" : @"runtime_binary", @"path" : paths[@"runtime_binary"] ?: @"" },
+    @{ @"id" : @"propane", @"path" : paths[@"propane"] ?: @"" },
+    @{ @"id" : @"arlen", @"path" : paths[@"arlen"] ?: @"" },
+  ];
+  for (NSDictionary *entry in requiredPaths) {
+    NSString *checkID = entry[@"id"];
+    NSString *path = entry[@"path"];
+    if ([path length] > 0 && [fm fileExistsAtPath:path]) {
+      addCheck(checkID, @"pass", [NSString stringWithFormat:@"%@ present: %@", checkID, path], @"");
+    } else {
+      addCheck(checkID, @"fail", [NSString stringWithFormat:@"%@ missing: %@", checkID, path ?: @""],
+               @"Rebuild the release artifact so runtime files are packaged again.");
+    }
+  }
+
+  NSString *appRoot = [paths[@"app_root"] isKindOfClass:[NSString class]] ? paths[@"app_root"] : nil;
+  if ([appRoot length] > 0) {
+    NSError *configError = nil;
+    NSDictionary *config = [ALNConfig loadConfigAtRoot:appRoot environment:environment ?: @"production" error:&configError];
+    if (config != nil) {
+      addCheck(@"config", @"pass",
+               [NSString stringWithFormat:@"app config loads for %@ environment", environment ?: @"production"], @"");
+      NSString *connectionString = DatabaseConnectionStringFromEnvironmentForTarget(@"default");
+      if ([connectionString length] == 0) {
+        connectionString = DatabaseConnectionStringFromConfigForTarget(config, @"default");
+      }
+      if ([connectionString length] > 0) {
+        addCheck(@"database_url", @"pass", @"database connection string resolved", @"");
+      } else {
+        addCheck(@"database_url", @"warn", @"database connection string is empty",
+                 @"Set ARLEN_DATABASE_URL or configure database.connectionString before release.");
+      }
+    } else {
+      addCheck(@"config", @"fail", configError.localizedDescription ?: @"failed to load app config",
+               @"Run `arlen config --env production` from the active release app root.");
+    }
+  }
+
+  if ([serviceName length] > 0) {
+    NSString *serviceOutput = nil;
+    NSString *serviceState = ServiceRuntimeState(serviceName, &serviceOutput);
+    NSString *status = [serviceState isEqualToString:@"active"] ? @"pass"
+                       : [serviceState isEqualToString:@"unavailable"] ? @"warn"
+                       : @"warn";
+      addCheck(@"service", status,
+             [NSString stringWithFormat:@"service %@ state: %@", serviceName, serviceState],
+             [serviceOutput length] > 0 ? serviceOutput : @"");
+  }
+
+  if ([baseURL length] > 0) {
+    NSString *probeFrameworkRoot =
+        [[([paths[@"framework_root"] isKindOfClass:[NSString class]] ? paths[@"framework_root"]
+                                                                    : [releaseDir stringByAppendingPathComponent:@"framework"])
+            stringByStandardizingPath] copy];
+    NSDictionary *probe = RunDeployHealthProbe(probeFrameworkRoot, baseURL);
+    NSString *probeStatus = [probe[@"status"] isEqualToString:@"ok"] ? @"pass" : @"fail";
+    addCheck(@"operability", probeStatus,
+             [NSString stringWithFormat:@"operability probe %@ for %@", probe[@"status"] ?: @"", baseURL],
+             probe[@"captured_output"] ?: @"");
+  } else {
+    addCheck(@"operability", @"warn", @"base URL not provided; live operability probe skipped",
+             @"Pass --base-url http://127.0.0.1:3000 to validate health/readiness/metrics contracts.");
+  }
+
+  if (passCount != NULL) {
+    *passCount = localPass;
+  }
+  if (warnCount != NULL) {
+    *warnCount = localWarn;
+  }
+  if (failCount != NULL) {
+    *failCount = localFail;
+  }
+  return checks;
 }
 
 static BOOL IsFrameworkRoot(NSString *path) {
@@ -2851,7 +3182,7 @@ static int CommandDeploy(NSArray *args) {
     PrintDeployUsage();
     return 0;
   }
-  if (![@[ @"plan", @"push", @"release" ] containsObject:subcommand]) {
+  if (![@[ @"plan", @"push", @"release", @"status", @"rollback", @"doctor", @"logs" ] containsObject:subcommand]) {
     fprintf(stderr, "arlen deploy: unknown subcommand %s\n", [subcommand UTF8String]);
     PrintDeployUsage();
     return 2;
@@ -2865,9 +3196,14 @@ static int CommandDeploy(NSArray *args) {
   NSString *jsonPerformanceManifest = nil;
   NSString *environment = @"production";
   NSString *baseURL = nil;
+  NSString *serviceName = nil;
+  NSString *runtimeAction = @"reload";
+  NSString *logFilePath = nil;
   BOOL allowMissingCertification = NO;
   BOOL asJSON = NO;
   BOOL skipMigrate = NO;
+  BOOL followLogs = NO;
+  NSInteger logLines = 200;
 
   NSArray *subArgs = ([args count] > 1) ? [args subarrayWithRange:NSMakeRange(1, [args count] - 1)] : @[];
   for (NSUInteger idx = 0; idx < [subArgs count]; idx++) {
@@ -2980,6 +3316,60 @@ static int CommandDeploy(NSArray *args) {
         return 2;
       }
       baseURL = subArgs[++idx];
+    } else if ([arg isEqualToString:@"--service"]) {
+      if (idx + 1 >= [subArgs count]) {
+        if (asJSON) {
+          return EmitMachineError(@"deploy", [NSString stringWithFormat:@"deploy.%@", subcommand],
+                                  @"missing_option_value", @"arlen deploy: --service requires a value",
+                                  @"Pass the systemd unit name after --service.",
+                                  @"arlen deploy status --service arlen@myapp --json", 2);
+        }
+        fprintf(stderr, "arlen deploy: --service requires a value\n");
+        return 2;
+      }
+      serviceName = subArgs[++idx];
+    } else if ([arg isEqualToString:@"--runtime-action"]) {
+      if (idx + 1 >= [subArgs count]) {
+        if (asJSON) {
+          return EmitMachineError(@"deploy", [NSString stringWithFormat:@"deploy.%@", subcommand],
+                                  @"missing_option_value", @"arlen deploy: --runtime-action requires a value",
+                                  @"Use reload, restart, or none.",
+                                  @"arlen deploy rollback --runtime-action restart --json", 2);
+        }
+        fprintf(stderr, "arlen deploy: --runtime-action requires a value\n");
+        return 2;
+      }
+      runtimeAction = [subArgs[++idx] lowercaseString];
+    } else if ([arg isEqualToString:@"--lines"]) {
+      if (idx + 1 >= [subArgs count]) {
+        if (asJSON) {
+          return EmitMachineError(@"deploy", [NSString stringWithFormat:@"deploy.%@", subcommand],
+                                  @"missing_option_value", @"arlen deploy: --lines requires a value",
+                                  @"Pass the number of lines to show after --lines.",
+                                  @"arlen deploy logs --lines 200 --json", 2);
+        }
+        fprintf(stderr, "arlen deploy: --lines requires a value\n");
+        return 2;
+      }
+      logLines = [[subArgs[++idx] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]] integerValue];
+      if (logLines <= 0) {
+        logLines = 200;
+      }
+    } else if ([arg isEqualToString:@"--follow"]) {
+      followLogs = YES;
+    } else if ([arg isEqualToString:@"--file"]) {
+      if (idx + 1 >= [subArgs count]) {
+        if (asJSON) {
+          return EmitMachineError(@"deploy", [NSString stringWithFormat:@"deploy.%@", subcommand],
+                                  @"missing_option_value", @"arlen deploy: --file requires a value",
+                                  @"Pass the log file path after --file.",
+                                  @"arlen deploy logs --file /var/log/arlen/app.log --json", 2);
+        }
+        fprintf(stderr, "arlen deploy: --file requires a value\n");
+        return 2;
+      }
+      logFilePath = [ResolvePathFromRoot([[NSFileManager defaultManager] currentDirectoryPath], subArgs[++idx])
+                        stringByStandardizingPath];
     } else if ([arg isEqualToString:@"--allow-missing-certification"]) {
       allowMissingCertification = YES;
     } else if ([arg isEqualToString:@"--json"]) {
@@ -3024,7 +3414,8 @@ static int CommandDeploy(NSArray *args) {
   if ([releasesDir length] == 0) {
     releasesDir = [[appRoot stringByAppendingPathComponent:@"releases"] stringByStandardizingPath];
   }
-  if ([releaseID length] == 0) {
+  if ([releaseID length] == 0 &&
+      [@[ @"plan", @"push", @"release" ] containsObject:subcommand]) {
     NSDateFormatter *formatter = [[NSDateFormatter alloc] init];
     formatter.locale = [[NSLocale alloc] initWithLocaleIdentifier:@"en_US_POSIX"];
     formatter.timeZone = [NSTimeZone timeZoneWithAbbreviation:@"UTC"];
@@ -3032,17 +3423,37 @@ static int CommandDeploy(NSArray *args) {
     releaseID = [formatter stringFromDate:[NSDate date]];
   }
 
+  if ([runtimeAction length] > 0 &&
+      ![@[ @"reload", @"restart", @"none" ] containsObject:runtimeAction]) {
+    return asJSON ? EmitMachineError(@"deploy", [NSString stringWithFormat:@"deploy.%@", subcommand], @"invalid_runtime_action",
+                                     @"invalid --runtime-action; expected reload, restart, or none",
+                                     @"Use reload, restart, or none.",
+                                     @"arlen deploy rollback --runtime-action restart --json", 2)
+                  : 2;
+  }
+
   NSString *workflow = [NSString stringWithFormat:@"deploy.%@", subcommand];
   NSString *scriptRoot = [frameworkRoot stringByAppendingPathComponent:@"tools/deploy"];
-  NSString *releaseDir = [releasesDir stringByAppendingPathComponent:releaseID];
-  NSString *manifestPath = [releaseDir stringByAppendingPathComponent:@"metadata/manifest.json"];
+  NSString *releaseDir = [releaseID length] > 0 ? [releasesDir stringByAppendingPathComponent:releaseID] : @"";
+  NSString *manifestPath =
+      [releaseID length] > 0 ? [releaseDir stringByAppendingPathComponent:@"metadata/manifest.json"] : @"";
+  NSString *currentReleaseDir = CurrentReleaseDirectoryAtReleasesDir(releasesDir);
+  NSString *currentReleaseID = [currentReleaseDir length] > 0 ? ReleaseIDForDirectory(currentReleaseDir) : nil;
+  NSString *currentManifestPath =
+      [currentReleaseDir length] > 0 ? [currentReleaseDir stringByAppendingPathComponent:@"metadata/manifest.json"] : nil;
+  NSDictionary *currentManifest = [currentManifestPath length] > 0 ? (JSONDictionaryFromFile(currentManifestPath) ?: @{}) : @{};
+  NSDictionary *currentHealthContract = HealthContractFromManifest(currentManifest);
+  NSDictionary *currentMigrationInventory = MigrationInventoryFromManifest(currentManifest);
+  NSString *previousReleaseID = PreviousReleaseIDAtReleasesDir(releasesDir, currentReleaseID);
 
   NSMutableString *buildCommand =
       [NSMutableString stringWithFormat:@"%@/build_release.sh", ShellQuote(scriptRoot)];
   AppendShellOption(buildCommand, @"--app-root", appRoot);
   AppendShellOption(buildCommand, @"--framework-root", frameworkRoot);
   AppendShellOption(buildCommand, @"--releases-dir", releasesDir);
-  AppendShellOption(buildCommand, @"--release-id", releaseID);
+  if ([releaseID length] > 0) {
+    AppendShellOption(buildCommand, @"--release-id", releaseID);
+  }
   AppendShellOption(buildCommand, @"--certification-manifest", certificationManifest);
   AppendShellOption(buildCommand, @"--json-performance-manifest", jsonPerformanceManifest);
   if (allowMissingCertification) {
@@ -3120,6 +3531,335 @@ static int CommandDeploy(NSArray *args) {
     }
 
     return RunShellCommand(buildCommand);
+  }
+
+  if ([subcommand isEqualToString:@"status"]) {
+    NSString *serviceOutput = nil;
+    NSString *serviceState = ServiceRuntimeState(serviceName, &serviceOutput);
+    NSDictionary *healthProbe = [baseURL length] > 0 ? RunDeployHealthProbe(frameworkRoot, baseURL)
+                                                     : @{ @"status" : @"skipped", @"reason" : @"base_url_not_provided" };
+    if (asJSON) {
+      NSDictionary *payload = @{
+        @"version" : AgentContractVersion(),
+        @"command" : @"deploy",
+        @"workflow" : workflow,
+        @"subcommand" : subcommand,
+        @"status" : ([currentReleaseDir length] > 0) ? @"ok" : @"warn",
+        @"releases_dir" : releasesDir ?: @"",
+        @"active_release_id" : currentReleaseID ?: @"",
+        @"active_release_dir" : currentReleaseDir ?: @"",
+        @"previous_release_id" : previousReleaseID ?: @"",
+        @"manifest_path" : currentManifestPath ?: @"",
+        @"manifest" : currentManifest ?: @{},
+        @"health_contract" : currentHealthContract ?: @{},
+        @"migration_inventory" : currentMigrationInventory ?: @{},
+        @"service" : @{
+          @"name" : serviceName ?: @"",
+          @"state" : serviceState ?: @"not_requested",
+          @"detail" : serviceOutput ?: @"",
+        },
+        @"health_probe" : healthProbe ?: @{},
+      };
+      PrintJSONPayload(stdout, payload);
+      return ([currentReleaseDir length] > 0) ? 0 : 1;
+    }
+
+    fprintf(stdout, "Active release: %s\n", [(currentReleaseID ?: @"(none)") UTF8String]);
+    fprintf(stdout, "Previous release: %s\n", [(previousReleaseID ?: @"(none)") UTF8String]);
+    fprintf(stdout, "Release dir: %s\n", [(currentReleaseDir ?: @"(none)") UTF8String]);
+    fprintf(stdout, "Service state: %s\n", [(serviceState ?: @"not_requested") UTF8String]);
+    fprintf(stdout, "Migration count: %s\n",
+            [(([[currentMigrationInventory[@"count"] description] length] > 0)
+                   ? [currentMigrationInventory[@"count"] description]
+                   : @"0") UTF8String]);
+    if ([baseURL length] > 0) {
+      fprintf(stdout, "Health probe: %s\n", [([healthProbe[@"status"] description] ?: @"error") UTF8String]);
+    }
+    return ([currentReleaseDir length] > 0) ? 0 : 1;
+  }
+
+  if ([subcommand isEqualToString:@"rollback"]) {
+    NSString *rollbackTargetID = [releaseID length] > 0 ? releaseID : previousReleaseID;
+    if ([rollbackTargetID length] == 0) {
+      return asJSON ? EmitMachineError(@"deploy", workflow, @"rollback_target_missing",
+                                       @"no rollback target is available",
+                                       @"Build at least two releases or pass --release-id explicitly.",
+                                       @"arlen deploy rollback --release-id rel-previous --json", 1)
+                    : 1;
+    }
+
+    NSMutableArray *warnings = [NSMutableArray array];
+    if ([currentMigrationInventory[@"count"] respondsToSelector:@selector(integerValue)] &&
+        [currentMigrationInventory[@"count"] integerValue] > 0) {
+      [warnings addObject:@"active release packages migrations; Arlen cannot determine whether they are reversible"];
+    }
+
+    NSString *rollbackCommand =
+        [NSString stringWithFormat:@"%@/rollback_release.sh --releases-dir %@ --release-id %@",
+                                   ShellQuote(scriptRoot), ShellQuote(releasesDir), ShellQuote(rollbackTargetID)];
+    int rollbackExitCode = 0;
+    NSString *rollbackOutput = RunShellCaptureCommand(rollbackCommand, &rollbackExitCode);
+    if (rollbackExitCode != 0) {
+      if (!asJSON && [rollbackOutput length] > 0) {
+        fprintf(stderr, "%s", [rollbackOutput UTF8String]);
+      }
+      return asJSON ? EmitMachineError(@"deploy", workflow, @"deploy_rollback_failed",
+                                       @"rollback activation failed",
+                                       @"Inspect the rollback_release output and verify the target release exists.",
+                                       @"arlen deploy rollback --release-id rel-previous --json", rollbackExitCode)
+                    : rollbackExitCode;
+    }
+
+    NSMutableArray *steps = [NSMutableArray array];
+    [steps addObject:@{ @"id" : @"rollback", @"status" : @"ok", @"target_release_id" : rollbackTargetID ?: @"" }];
+
+    NSString *runtimeState = @"not_requested";
+    NSString *runtimeDetail = @"";
+    NSString *runtimeActionUsed = @"none";
+    if ([serviceName length] > 0 && ![runtimeAction isEqualToString:@"none"]) {
+      NSString *systemctlVerb = [runtimeAction isEqualToString:@"restart"] ? @"restart" : @"reload";
+      NSString *runtimeCommand = [NSString stringWithFormat:@"systemctl %@ %@", systemctlVerb, ShellQuote(serviceName)];
+      int runtimeExitCode = 0;
+      NSString *runtimeOutput = RunShellCaptureCommand(runtimeCommand, &runtimeExitCode);
+      if (runtimeExitCode != 0 && [runtimeAction isEqualToString:@"reload"]) {
+        runtimeCommand = [NSString stringWithFormat:@"systemctl restart %@", ShellQuote(serviceName)];
+        runtimeOutput = RunShellCaptureCommand(runtimeCommand, &runtimeExitCode);
+        if (runtimeExitCode == 0) {
+          systemctlVerb = @"restart";
+        }
+      }
+      runtimeActionUsed = systemctlVerb;
+      runtimeDetail = runtimeOutput ?: @"";
+      runtimeState = (runtimeExitCode == 0) ? @"ok" : @"error";
+      [steps addObject:@{
+        @"id" : @"runtime",
+        @"status" : runtimeState,
+        @"action" : runtimeActionUsed ?: @"",
+        @"service" : serviceName ?: @"",
+        @"captured_output" : runtimeDetail ?: @"",
+      }];
+      if (runtimeExitCode != 0) {
+        if (!asJSON && [runtimeDetail length] > 0) {
+          fprintf(stderr, "%s", [runtimeDetail UTF8String]);
+        }
+        if (asJSON) {
+          NSDictionary *payload = @{
+            @"version" : AgentContractVersion(),
+            @"command" : @"deploy",
+            @"workflow" : workflow,
+            @"subcommand" : subcommand,
+            @"status" : @"error",
+            @"target_release_id" : rollbackTargetID ?: @"",
+            @"steps" : steps ?: @[],
+            @"warnings" : warnings ?: @[],
+            @"error" : @{
+              @"code" : @"deploy_rollback_runtime_failed",
+              @"message" : @"rollback switched releases but runtime reload/restart failed",
+              @"fixit" : @{
+                @"action" : @"Inspect service logs and rerun with --runtime-action restart if needed.",
+                @"example" : @"arlen deploy rollback --service arlen@myapp --runtime-action restart --json",
+              }
+            },
+            @"exit_code" : @(runtimeExitCode),
+          };
+          PrintJSONPayload(stdout, payload);
+        }
+        return runtimeExitCode;
+      }
+    } else {
+      [steps addObject:@{
+        @"id" : @"runtime",
+        @"status" : @"skipped",
+        @"action" : @"none",
+      }];
+    }
+
+    NSDictionary *healthProbe = [baseURL length] > 0 ? RunDeployHealthProbe(frameworkRoot, baseURL)
+                                                     : @{ @"status" : @"skipped", @"reason" : @"base_url_not_provided" };
+    [steps addObject:@{
+      @"id" : @"health",
+      @"status" : healthProbe[@"status"] ?: @"skipped",
+      @"base_url" : baseURL ?: @"",
+      @"captured_output" : healthProbe[@"captured_output"] ?: @"",
+    }];
+    if ([[healthProbe[@"status"] description] isEqualToString:@"error"]) {
+      if (asJSON) {
+        NSDictionary *payload = @{
+          @"version" : AgentContractVersion(),
+          @"command" : @"deploy",
+          @"workflow" : workflow,
+          @"subcommand" : subcommand,
+          @"status" : @"error",
+          @"target_release_id" : rollbackTargetID ?: @"",
+          @"steps" : steps ?: @[],
+          @"warnings" : warnings ?: @[],
+          @"error" : @{
+            @"code" : @"deploy_rollback_health_failed",
+            @"message" : @"rollback completed but health validation failed",
+            @"fixit" : @{
+              @"action" : @"Inspect runtime logs and verify the rollback target responds on the expected base URL.",
+              @"example" : @"arlen deploy logs --service arlen@myapp",
+            }
+          },
+          @"exit_code" : @([healthProbe[@"exit_code"] integerValue] == 0 ? 1 : [healthProbe[@"exit_code"] integerValue]),
+        };
+        PrintJSONPayload(stdout, payload);
+      }
+      return ([healthProbe[@"exit_code"] integerValue] == 0) ? 1 : [healthProbe[@"exit_code"] integerValue];
+    }
+
+    NSString *activeDirAfterRollback = CurrentReleaseDirectoryAtReleasesDir(releasesDir);
+    NSDictionary *activeManifestAfterRollback =
+        [activeDirAfterRollback length] > 0
+            ? (JSONDictionaryFromFile([activeDirAfterRollback stringByAppendingPathComponent:@"metadata/manifest.json"]) ?: @{})
+            : @{};
+    if (asJSON) {
+      NSDictionary *payload = @{
+        @"version" : AgentContractVersion(),
+        @"command" : @"deploy",
+        @"workflow" : workflow,
+        @"subcommand" : subcommand,
+        @"status" : @"ok",
+        @"target_release_id" : rollbackTargetID ?: @"",
+        @"active_release_id" : [activeDirAfterRollback length] > 0 ? ReleaseIDForDirectory(activeDirAfterRollback) : @"",
+        @"active_release_dir" : activeDirAfterRollback ?: @"",
+        @"manifest" : activeManifestAfterRollback ?: @{},
+        @"warnings" : warnings ?: @[],
+        @"steps" : steps ?: @[],
+      };
+      PrintJSONPayload(stdout, payload);
+      return 0;
+    }
+
+    fprintf(stdout, "Rollback activated: %s\n", [rollbackTargetID UTF8String]);
+    return 0;
+  }
+
+  if ([subcommand isEqualToString:@"doctor"]) {
+    NSInteger passCount = 0;
+    NSInteger warnCount = 0;
+    NSInteger failCount = 0;
+    NSArray *checks = DeployDoctorChecksForRelease(currentReleaseDir, environment, serviceName, baseURL,
+                                                   &passCount, &warnCount, &failCount);
+    NSString *status = (failCount > 0) ? @"fail" : (warnCount > 0 ? @"warn" : @"ok");
+    if (asJSON) {
+      NSDictionary *payload = @{
+        @"version" : AgentContractVersion(),
+        @"command" : @"deploy",
+        @"workflow" : workflow,
+        @"subcommand" : subcommand,
+        @"status" : status,
+        @"active_release_id" : currentReleaseID ?: @"",
+        @"active_release_dir" : currentReleaseDir ?: @"",
+        @"environment" : environment ?: @"production",
+        @"checks" : checks ?: @[],
+        @"summary" : @{
+          @"pass" : @(passCount),
+          @"warn" : @(warnCount),
+          @"fail" : @(failCount),
+        },
+      };
+      PrintJSONPayload(stdout, payload);
+      return (failCount > 0) ? 1 : 0;
+    }
+
+    fprintf(stdout, "Deploy doctor status: %s\n", [status UTF8String]);
+    for (NSDictionary *check in checks) {
+      fprintf(stdout, "[%s] %s\n", [[check[@"status"] description] UTF8String],
+              [[check[@"message"] description] UTF8String]);
+    }
+    return (failCount > 0) ? 1 : 0;
+  }
+
+  if ([subcommand isEqualToString:@"logs"]) {
+    NSDictionary *releaseEnv = [currentReleaseDir length] > 0
+                                   ? DictionaryFromReleaseEnvFile([currentReleaseDir stringByAppendingPathComponent:@"metadata/release.env"])
+                                   : @{};
+    NSString *lifecycleLog = [releaseEnv[@"ARLEN_PROPANE_LIFECYCLE_LOG"] isKindOfClass:[NSString class]]
+                                 ? releaseEnv[@"ARLEN_PROPANE_LIFECYCLE_LOG"]
+                                 : @"";
+    if ([serviceName length] > 0) {
+      NSString *journalCommand = [NSString stringWithFormat:@"journalctl -u %@ -n %ld --no-pager%@",
+                                                          ShellQuote(serviceName), (long)logLines,
+                                                          followLogs ? @" --follow" : @""];
+      if (asJSON) {
+        int exitCode = 0;
+        NSString *capturedOutput = RunShellCaptureCommand(journalCommand, &exitCode);
+        NSDictionary *payload = @{
+          @"version" : AgentContractVersion(),
+          @"command" : @"deploy",
+          @"workflow" : workflow,
+          @"subcommand" : subcommand,
+          @"status" : (exitCode == 0) ? @"ok" : @"error",
+          @"active_release_id" : currentReleaseID ?: @"",
+          @"active_release_dir" : currentReleaseDir ?: @"",
+          @"service" : serviceName ?: @"",
+          @"log_source" : @"journald",
+          @"manifest_path" : currentManifestPath ?: @"",
+          @"lifecycle_log_path" : lifecycleLog ?: @"",
+          @"captured_output" : capturedOutput ?: @"",
+          @"exit_code" : @(exitCode),
+        };
+        PrintJSONPayload(stdout, payload);
+        return exitCode;
+      }
+      return RunShellCommand(journalCommand);
+    }
+
+    if ([logFilePath length] > 0) {
+      NSString *tailCommand = [NSString stringWithFormat:@"tail -n %ld %@%@",
+                                                       (long)logLines, followLogs ? @"-f " : @"",
+                                                       ShellQuote(logFilePath)];
+      if (asJSON) {
+        int exitCode = 0;
+        NSString *capturedOutput = RunShellCaptureCommand(tailCommand, &exitCode);
+        NSDictionary *payload = @{
+          @"version" : AgentContractVersion(),
+          @"command" : @"deploy",
+          @"workflow" : workflow,
+          @"subcommand" : subcommand,
+          @"status" : (exitCode == 0) ? @"ok" : @"error",
+          @"active_release_id" : currentReleaseID ?: @"",
+          @"active_release_dir" : currentReleaseDir ?: @"",
+          @"log_source" : @"file",
+          @"log_file" : logFilePath ?: @"",
+          @"manifest_path" : currentManifestPath ?: @"",
+          @"lifecycle_log_path" : lifecycleLog ?: @"",
+          @"captured_output" : capturedOutput ?: @"",
+          @"exit_code" : @(exitCode),
+        };
+        PrintJSONPayload(stdout, payload);
+        return exitCode;
+      }
+      return RunShellCommand(tailCommand);
+    }
+
+    NSDictionary *payload = @{
+      @"version" : AgentContractVersion(),
+      @"command" : @"deploy",
+      @"workflow" : workflow,
+      @"subcommand" : subcommand,
+      @"status" : ([currentReleaseDir length] > 0) ? @"ok" : @"warn",
+      @"active_release_id" : currentReleaseID ?: @"",
+      @"active_release_dir" : currentReleaseDir ?: @"",
+      @"manifest_path" : currentManifestPath ?: @"",
+      @"release_readme_path" : [currentReleaseDir length] > 0 ? [currentReleaseDir stringByAppendingPathComponent:@"metadata/README.txt"] : @"",
+      @"release_env_path" : [currentReleaseDir length] > 0 ? [currentReleaseDir stringByAppendingPathComponent:@"metadata/release.env"] : @"",
+      @"lifecycle_log_path" : lifecycleLog ?: @"",
+      @"service" : serviceName ?: @"",
+    };
+    if (asJSON) {
+      PrintJSONPayload(stdout, payload);
+      return ([currentReleaseDir length] > 0) ? 0 : 1;
+    }
+    fprintf(stdout, "Active release: %s\n", [(currentReleaseID ?: @"(none)") UTF8String]);
+    fprintf(stdout, "Manifest: %s\n", [[payload[@"manifest_path"] description] UTF8String]);
+    fprintf(stdout, "Release README: %s\n", [[payload[@"release_readme_path"] description] UTF8String]);
+    fprintf(stdout, "Release env: %s\n", [[payload[@"release_env_path"] description] UTF8String]);
+    if ([lifecycleLog length] > 0) {
+      fprintf(stdout, "Lifecycle log: %s\n", [lifecycleLog UTF8String]);
+    }
+    return ([currentReleaseDir length] > 0) ? 0 : 1;
   }
 
   BOOL releaseExists = NO;

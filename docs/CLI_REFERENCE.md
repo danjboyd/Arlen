@@ -112,6 +112,32 @@ First-class release orchestration over the existing `tools/deploy/*` scripts.
 - activates `releases/current` via `tools/deploy/activate_release.sh`
 - optionally probes `<base-url>/healthz` when `--base-url` is supplied
 
+`arlen deploy status`
+
+- reports the active release id, previous release id, manifest path, migration inventory, and health contract from `releases/current`
+- reports service state when `--service <unit>` is supplied
+- can run a live operability probe when `--base-url <url>` is supplied
+
+`arlen deploy rollback`
+
+- selects the most recent non-active release by default, or uses `--release-id <id>`
+- switches `releases/current` via `tools/deploy/rollback_release.sh`
+- can reload or restart a systemd unit through `--service <unit>` and `--runtime-action <reload|restart|none>`
+- can verify operability after rollback with `--base-url <url>`
+- surfaces an explicit warning that packaged migrations do not imply reversibility
+
+`arlen deploy doctor`
+
+- validates release layout, manifest presence, packaged binaries, config loading, and database URL completeness
+- reports service state when `--service <unit>` is supplied
+- runs full `tools/deploy/validate_operability.sh` when `--base-url <url>` is supplied
+
+`arlen deploy logs`
+
+- streams `journalctl -u <unit>` when `--service <unit>` is supplied
+- can tail an explicit file with `--file <path>`
+- otherwise reports active release metadata pointers (`manifest.json`, `README.txt`, `release.env`, optional lifecycle log path)
+
 Common options:
 
 - `--app-root <path>`: app root to package/activate (default: cwd)
@@ -128,6 +154,11 @@ Release-only options:
 - `--env <name>`: migration environment (default: `production`)
 - `--base-url <url>`: verify `GET /healthz` after activation
 - `--skip-migrate`: skip the migration step during activation
+- `--service <name>`: systemd unit for status/rollback/log operations
+- `--runtime-action <reload|restart|none>`: runtime action used by rollback when `--service` is set
+- `--lines <count>`: number of log lines to show for `deploy logs` (default `200`)
+- `--follow`: follow `deploy logs` output
+- `--file <path>`: tail an explicit log file instead of journald
 
 ### `arlen migrate [--env <name>] [--database <target>] [--dsn <connection_string>] [--dry-run]`
 

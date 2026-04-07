@@ -117,6 +117,8 @@ deleting it.
 ```bash
 systemctl status arlen@myapp
 journalctl -u arlen@myapp -n 200 --no-pager
+./build/arlen deploy status --service arlen@myapp --releases-dir /srv/arlen/myapp/releases --json
+./build/arlen deploy logs --service arlen@myapp --lines 200
 ```
 
 2. Check the built-in probes:
@@ -125,6 +127,8 @@ journalctl -u arlen@myapp -n 200 --no-pager
 curl -fsS http://127.0.0.1:3000/healthz
 curl -fsS -H 'Accept: application/json' http://127.0.0.1:3000/readyz
 curl -fsS http://127.0.0.1:3000/metrics
+./build/arlen deploy doctor --service arlen@myapp --base-url http://127.0.0.1:3000 \
+  --releases-dir /srv/arlen/myapp/releases --json
 ```
 
 3. If you installed the `ops` module, inspect `/ops` or `/ops/api/{summary,signals,metrics}`.

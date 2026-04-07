@@ -89,6 +89,13 @@ For app-operator workflows, prefer the first-class `arlen deploy` wrapper:
 runs packaged migrations when present, activates `releases/current`, and can
 probe `/healthz` when `--base-url` is supplied.
 
+Additional deploy CLI helpers:
+
+- `arlen deploy status --releases-dir /path/to/app/releases --json`
+- `arlen deploy rollback --releases-dir /path/to/app/releases --service arlen@myapp --runtime-action reload --json`
+- `arlen deploy doctor --releases-dir /path/to/app/releases --base-url http://127.0.0.1:3000 --json`
+- `arlen deploy logs --service arlen@myapp --lines 200`
+
 ### 5.1 Build a release artifact
 
 ```bash

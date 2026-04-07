@@ -1082,6 +1082,10 @@
     XCTAssertTrue([[NSFileManager defaultManager] fileExistsAtPath:manifestPath]);
     NSDictionary *manifest = [pushPayload[@"manifest"] isKindOfClass:[NSDictionary class]] ? pushPayload[@"manifest"] : @{};
     XCTAssertEqualObjects(@"phase29-deploy-manifest-v1", manifest[@"version"]);
+    NSDictionary *migrationInventory = [manifest[@"migration_inventory"] isKindOfClass:[NSDictionary class]]
+                                           ? manifest[@"migration_inventory"]
+                                           : @{};
+    XCTAssertEqualObjects(@0, migrationInventory[@"count"]);
 
     NSString *releaseOutput = [self runShellCapture:[NSString stringWithFormat:
                                                         @"cd %@ && ARLEN_FRAMEWORK_ROOT=%@ %@/build/arlen "
@@ -1112,6 +1116,142 @@
     NSString *trimmed =
         [currentTarget stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
     XCTAssertTrue([trimmed hasSuffix:@"/cli-rel-1"]);
+  } @finally {
+    [[NSFileManager defaultManager] removeItemAtPath:appRoot error:nil];
+    [[NSFileManager defaultManager] removeItemAtPath:workRoot error:nil];
+  }
+}
+
+- (void)testArlenDeployStatusRollbackDoctorAndLogsCommandsReportActiveReleaseState {
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *appRoot = [self createTempDirectoryWithPrefix:@"arlen-deploy-ops-app"];
+  NSString *workRoot = [self createTempDirectoryWithPrefix:@"arlen-deploy-ops-work"];
+  XCTAssertNotNil(appRoot);
+  XCTAssertNotNil(workRoot);
+  if (appRoot == nil || workRoot == nil) {
+    return;
+  }
+
+  @try {
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"config/app.plist"]
+                          content:@"{\n"
+                                  "  host = \"127.0.0.1\";\n"
+                                  "  port = 3000;\n"
+                                  "  database = {\n"
+                                  "    connectionString = \"postgresql:///deploy_ops\";\n"
+                                  "    adapter = \"postgresql\";\n"
+                                  "  };\n"
+                                  "}\n"]);
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"config/environments/production.plist"]
+                          content:@"{\n  logFormat = \"json\";\n}\n"]);
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"app_lite.m"]
+                          content:@"#import <Foundation/Foundation.h>\n"
+                                  "int main(int argc, const char *argv[]) { (void)argc; (void)argv; return 0; }\n"]);
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"db/migrations/202604071200_create_ops.sql"]
+                          content:@"CREATE TABLE deploy_ops (id INTEGER);\n"]);
+
+    int code = 0;
+    NSString *buildOutput = [self runShellCapture:[NSString stringWithFormat:@"cd %@ && make arlen", repoRoot]
+                                         exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", buildOutput);
+
+    NSString *releasesDir = [workRoot stringByAppendingPathComponent:@"releases"];
+    NSString *pushOne = [self runShellCapture:[NSString stringWithFormat:
+                                                  @"cd %@ && ARLEN_FRAMEWORK_ROOT=%@ %@/build/arlen "
+                                                   "deploy push --app-root %@ --releases-dir %@ --release-id cli-rel-a "
+                                                   "--allow-missing-certification --json",
+                                                  appRoot, repoRoot, repoRoot, appRoot, releasesDir]
+                                    exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", pushOne);
+
+    NSString *pushTwo = [self runShellCapture:[NSString stringWithFormat:
+                                                  @"cd %@ && ARLEN_FRAMEWORK_ROOT=%@ %@/build/arlen "
+                                                   "deploy push --app-root %@ --releases-dir %@ --release-id cli-rel-b "
+                                                   "--allow-missing-certification --json",
+                                                  appRoot, repoRoot, repoRoot, appRoot, releasesDir]
+                                    exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", pushTwo);
+
+    NSString *releaseTwo = [self runShellCapture:[NSString stringWithFormat:
+                                                      @"cd %@ && ARLEN_FRAMEWORK_ROOT=%@ %@/build/arlen "
+                                                       "deploy release --app-root %@ --releases-dir %@ --release-id cli-rel-b "
+                                                       "--allow-missing-certification --skip-migrate --json",
+                                                      appRoot, repoRoot, repoRoot, appRoot, releasesDir]
+                                        exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", releaseTwo);
+
+    NSString *statusOutput = [self runShellCapture:[NSString stringWithFormat:
+                                                        @"cd %@ && ARLEN_FRAMEWORK_ROOT=%@ %@/build/arlen "
+                                                         "deploy status --app-root %@ --releases-dir %@ --json",
+                                                        appRoot, repoRoot, repoRoot, appRoot, releasesDir]
+                                          exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", statusOutput);
+    NSDictionary *statusPayload =
+        [self parseJSONDictionaryFromOutput:statusOutput context:@"arlen deploy status --json"];
+    XCTAssertEqualObjects(@"deploy.status", statusPayload[@"workflow"]);
+    XCTAssertEqualObjects(@"cli-rel-b", statusPayload[@"active_release_id"]);
+    XCTAssertEqualObjects(@"cli-rel-a", statusPayload[@"previous_release_id"]);
+    NSDictionary *statusManifest = [statusPayload[@"manifest"] isKindOfClass:[NSDictionary class]]
+                                       ? statusPayload[@"manifest"]
+                                       : @{};
+    NSDictionary *statusInventory = [statusManifest[@"migration_inventory"] isKindOfClass:[NSDictionary class]]
+                                        ? statusManifest[@"migration_inventory"]
+                                        : @{};
+    XCTAssertEqualObjects(@1, statusInventory[@"count"]);
+
+    NSString *doctorOutput = [self runShellCapture:[NSString stringWithFormat:
+                                                        @"cd %@ && ARLEN_FRAMEWORK_ROOT=%@ %@/build/arlen "
+                                                         "deploy doctor --app-root %@ --releases-dir %@ --json",
+                                                        appRoot, repoRoot, repoRoot, appRoot, releasesDir]
+                                          exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", doctorOutput);
+    NSDictionary *doctorPayload =
+        [self parseJSONDictionaryFromOutput:doctorOutput context:@"arlen deploy doctor --json"];
+    XCTAssertEqualObjects(@"deploy.doctor", doctorPayload[@"workflow"]);
+    NSArray *checks = [doctorPayload[@"checks"] isKindOfClass:[NSArray class]] ? doctorPayload[@"checks"] : @[];
+    XCTAssertTrue([checks count] >= 5);
+
+    NSString *rollbackOutput = [self runShellCapture:[NSString stringWithFormat:
+                                                          @"cd %@ && ARLEN_FRAMEWORK_ROOT=%@ %@/build/arlen "
+                                                           "deploy rollback --app-root %@ --releases-dir %@ --runtime-action none --json",
+                                                          appRoot, repoRoot, repoRoot, appRoot, releasesDir]
+                                            exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", rollbackOutput);
+    NSDictionary *rollbackPayload =
+        [self parseJSONDictionaryFromOutput:rollbackOutput context:@"arlen deploy rollback --json"];
+    XCTAssertEqualObjects(@"deploy.rollback", rollbackPayload[@"workflow"]);
+    XCTAssertEqualObjects(@"cli-rel-a", rollbackPayload[@"target_release_id"]);
+    XCTAssertEqualObjects(@"cli-rel-a", rollbackPayload[@"active_release_id"]);
+    NSArray *rollbackWarnings = [rollbackPayload[@"warnings"] isKindOfClass:[NSArray class]]
+                                    ? rollbackPayload[@"warnings"]
+                                    : @[];
+    XCTAssertTrue([rollbackWarnings count] >= 1);
+
+    NSString *currentTarget = [self runShellCapture:[NSString stringWithFormat:@"readlink -f %s/current",
+                                                                               [releasesDir UTF8String]]
+                                           exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", currentTarget);
+    NSString *trimmed =
+        [currentTarget stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    XCTAssertTrue([trimmed hasSuffix:@"/cli-rel-a"]);
+
+    NSString *logPath = [workRoot stringByAppendingPathComponent:@"runtime.log"];
+    XCTAssertTrue([self writeFile:logPath content:@"line-1\nline-2\nline-3\n"]);
+    NSString *logsOutput = [self runShellCapture:[NSString stringWithFormat:
+                                                      @"cd %@ && ARLEN_FRAMEWORK_ROOT=%@ %@/build/arlen "
+                                                       "deploy logs --app-root %@ --releases-dir %@ --file %@ --lines 2 --json",
+                                                      appRoot, repoRoot, repoRoot, appRoot, releasesDir, logPath]
+                                        exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", logsOutput);
+    NSDictionary *logsPayload =
+        [self parseJSONDictionaryFromOutput:logsOutput context:@"arlen deploy logs --json"];
+    XCTAssertEqualObjects(@"deploy.logs", logsPayload[@"workflow"]);
+    XCTAssertEqualObjects(@"file", logsPayload[@"log_source"]);
+    NSString *capturedOutput = [logsPayload[@"captured_output"] isKindOfClass:[NSString class]]
+                                   ? logsPayload[@"captured_output"]
+                                   : @"";
+    XCTAssertTrue([capturedOutput containsString:@"line-2"], @"%@", capturedOutput);
+    XCTAssertTrue([capturedOutput containsString:@"line-3"], @"%@", capturedOutput);
   } @finally {
     [[NSFileManager defaultManager] removeItemAtPath:appRoot error:nil];
     [[NSFileManager defaultManager] removeItemAtPath:workRoot error:nil];

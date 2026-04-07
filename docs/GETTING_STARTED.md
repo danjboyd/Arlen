@@ -159,7 +159,8 @@ If you are working on Arlen itself rather than just building an app with it:
 - `docs/DEPLOYMENT.md` covers the immutable release artifact workflow; current
   release payloads package migrations plus a prepared app binary so
   `framework/bin/propane` can run directly from the built artifact, and
-  `arlen deploy plan|push|release` is the preferred operator-facing wrapper
+  `arlen deploy plan|push|release|status|rollback|doctor|logs` is the
+  preferred operator-facing wrapper
 - `docs/DOCUMENTATION_POLICY.md` covers docs definition-of-done and quality
   expectations
 - `docs/TESTING_WORKFLOW.md` covers the focused regression and confidence lanes

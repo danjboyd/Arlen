@@ -98,23 +98,30 @@ Behavior:
 - resolves DSN from `--dsn`, `ARLEN_DATABASE_URL_<TARGET>`, `ARLEN_DATABASE_URL`, or config `database/databases`
 - migration state table is target-aware (`arlen_schema_migrations` or `arlen_schema_migrations__<target>`)
 
-### 4.5A `arlen deploy <plan|push|release> [options]`
+### 4.5A `arlen deploy <plan|push|release|status|rollback|doctor|logs> [options]`
 
 - `plan` validates release packaging inputs and emits a stable deploy planning payload
 - `push` builds a local immutable release artifact under `releases/<release-id>/`
 - `push` writes `metadata/manifest.json` using contract version `phase29-deploy-manifest-v1`
 - `release` reuses or creates the selected release, runs migrations when packaged `.sql` files exist, and activates `releases/current`
 - `release` can optionally verify `GET /healthz` through `--base-url <url>`
+- `status` reports the active release, previous release, manifest-backed health contract, and optional service state
+- `rollback` promotes a previous release through `rollback_release.sh`, can reload/restart a service, and can re-run deploy health verification
+- `doctor` validates active release layout, packaged binaries, config loading, and optional live operability
+- `logs` exposes release metadata pointers plus journald/file log access helpers
 - shared options:
   - `--app-root <path>`
   - `--framework-root <path>`
   - `--releases-dir <path>`
   - `--release-id <id>`
+  - `--service <name>`
   - `--certification-manifest <path>`
   - `--json-performance-manifest <path>`
   - `--allow-missing-certification`
   - `--json`
-  - `--env <name>` and `--base-url <url>` for `release`
+  - `--env <name>` and `--base-url <url>` for runtime-aware subcommands
+  - `--runtime-action <reload|restart|none>` for `rollback`
+  - `--lines <count>`, `--follow`, and `--file <path>` for `logs`
 
 ### 4.6 `arlen routes`
 
