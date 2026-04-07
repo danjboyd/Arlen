@@ -298,6 +298,7 @@ arlen service install --mode dev --dry-run --json
 
 - run from an app root for `boomhauer` service autodiscovery
 - run from a packaged release layout for `arlen service install --mode runtime`
-- live install/uninstall require an elevated PowerShell session
+- live install/uninstall request UAC elevation from a non-elevated PowerShell
+  session when the current user can elevate
 - install `NSSM` first with `winget install NSSM.NSSM` if it is not already
   available

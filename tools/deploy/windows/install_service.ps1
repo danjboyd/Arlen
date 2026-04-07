@@ -6,6 +6,7 @@ param(
   [string]$ReleasesDir = "",
   [string]$LogDir = "",
   [string]$NSSMPath = "",
+  [string]$ResultFile = "",
   [switch]$DryRun,
   [switch]$Json
 )
@@ -43,7 +44,7 @@ function Emit-ArlenServiceError {
   )
 
   if ($Json) {
-    @{
+    $payload = @{
       version = "phase7g-agent-dx-contracts-v1"
       command = "service"
       workflow = "service.install"
@@ -53,11 +54,34 @@ function Emit-ArlenServiceError {
         code = $Code
         message = $Message
       }
-    } | ConvertTo-Json -Depth 6
+    }
+    $json = $payload | ConvertTo-Json -Depth 6
+    if ($ResultFile) {
+      Set-Content -LiteralPath $ResultFile -Value $json -Encoding UTF8
+    }
+    $json
   } else {
     Write-Error $Message
   }
   exit $ExitCode
+}
+
+function Write-ArlenServicePayload {
+  param(
+    [Parameter(Mandatory = $true)]
+    [hashtable]$Payload
+  )
+
+  if ($Json) {
+    $json = $Payload | ConvertTo-Json -Depth 8
+    if ($ResultFile) {
+      Set-Content -LiteralPath $ResultFile -Value $json -Encoding UTF8
+    }
+    $json
+  } else {
+    return $false
+  }
+  return $true
 }
 
 function Convert-ToStablePath {
@@ -198,6 +222,68 @@ function Resolve-PowerShellPath {
     }
   }
   Emit-ArlenServiceError "powershell_not_found" "arlen service install: unable to locate powershell.exe"
+}
+
+function Invoke-ArlenServiceElevation {
+  param(
+    [string]$SelectedMode,
+    [string]$SelectedName,
+    [string]$SelectedAppRoot,
+    [string]$SelectedReleasesDir,
+    [string]$SelectedLogDir,
+    [string]$SelectedNSSMPath
+  )
+
+  $powerShellPath = Resolve-PowerShellPath
+  $scriptPath = (Resolve-Path -LiteralPath $PSCommandPath).Path
+  $workingDirectory = (Get-Location).Path
+  $resultFilePath = ""
+  if ($Json) {
+    $resultFilePath = Join-Path ([System.IO.Path]::GetTempPath()) ([System.Guid]::NewGuid().ToString() + ".json")
+  }
+
+  $elevatedArgs = @(
+    "-NoProfile",
+    "-ExecutionPolicy",
+    "Bypass",
+    "-File",
+    $scriptPath,
+    "-Mode",
+    $SelectedMode
+  )
+  if ($SelectedName) { $elevatedArgs += @("-Name", $SelectedName) }
+  if ($SelectedAppRoot) { $elevatedArgs += @("-AppRoot", $SelectedAppRoot) }
+  if ($SelectedReleasesDir) { $elevatedArgs += @("-ReleasesDir", $SelectedReleasesDir) }
+  if ($SelectedLogDir) { $elevatedArgs += @("-LogDir", $SelectedLogDir) }
+  if ($SelectedNSSMPath) { $elevatedArgs += @("-NSSMPath", $SelectedNSSMPath) }
+  if ($Json) {
+    $elevatedArgs += "-Json"
+    $elevatedArgs += @("-ResultFile", $resultFilePath)
+  }
+
+  try {
+    $process = Start-Process -FilePath $powerShellPath `
+                             -ArgumentList $elevatedArgs `
+                             -Verb RunAs `
+                             -WorkingDirectory $workingDirectory `
+                             -Wait `
+                             -PassThru
+  } catch {
+    Emit-ArlenServiceError "uac_cancelled" "arlen service install: elevation was cancelled or denied."
+  }
+
+  if ($Json -and $resultFilePath -and (Test-Path -LiteralPath $resultFilePath -PathType Leaf)) {
+    try {
+      $json = Get-Content -LiteralPath $resultFilePath -Raw
+      if ($json) {
+        Write-Output $json.Trim()
+      }
+    } finally {
+      Remove-Item -LiteralPath $resultFilePath -Force -ErrorAction SilentlyContinue
+    }
+  }
+
+  exit $process.ExitCode
 }
 
 function Resolve-ActiveReleaseRoot {
@@ -370,9 +456,7 @@ $plan = @{
 }
 
 if ($DryRun) {
-  if ($Json) {
-    $plan | ConvertTo-Json -Depth 8
-  } else {
+  if (-not (Write-ArlenServicePayload -Payload $plan)) {
     Write-Host "arlen service install dry-run"
     Write-Host "  mode: $Mode"
     Write-Host "  name: $serviceName"
@@ -384,13 +468,18 @@ if ($DryRun) {
 }
 
 if (-not (Test-IsElevated)) {
-  Emit-ArlenServiceError "elevation_required" "arlen service install: administrator access is required to register a Windows service. Re-run from an elevated PowerShell session."
+  Invoke-ArlenServiceElevation -SelectedMode $Mode `
+                               -SelectedName $serviceName `
+                               -SelectedAppRoot $resolvedAppRoot `
+                               -SelectedReleasesDir $resolvedReleasesDir `
+                               -SelectedLogDir $resolvedLogDir `
+                               -SelectedNSSMPath $NSSMPath
 }
 
 $nssmPath = Resolve-ArlenNSSMPath $NSSMPath
 New-Item -ItemType Directory -Force -Path $resolvedLogDir | Out-Null
 
-Invoke-NSSM -ExecutablePath $nssmPath -Arguments @("install", $serviceName, $powerShellPath) + $appParameters -ErrorCode "service_install_failed" -ActionDescription "installing service $serviceName"
+Invoke-NSSM -ExecutablePath $nssmPath -Arguments (@("install", $serviceName, $powerShellPath) + $appParameters) -ErrorCode "service_install_failed" -ActionDescription "installing service $serviceName"
 Invoke-NSSM -ExecutablePath $nssmPath -Arguments @("set", $serviceName, "AppDirectory", $appDirectory) -ErrorCode "service_config_failed" -ActionDescription "setting AppDirectory for $serviceName"
 Invoke-NSSM -ExecutablePath $nssmPath -Arguments @("set", $serviceName, "AppStdout", $stdoutLog) -ErrorCode "service_config_failed" -ActionDescription "setting AppStdout for $serviceName"
 Invoke-NSSM -ExecutablePath $nssmPath -Arguments @("set", $serviceName, "AppStderr", $stderrLog) -ErrorCode "service_config_failed" -ActionDescription "setting AppStderr for $serviceName"
@@ -402,11 +491,10 @@ if ($environmentLines.Count -gt 0) {
   Invoke-NSSM -ExecutablePath $nssmPath -Arguments (@("set", $serviceName, "AppEnvironmentExtra") + $environmentLines) -ErrorCode "service_config_failed" -ActionDescription "setting AppEnvironmentExtra for $serviceName"
 }
 
-if ($Json) {
-  $plan | ConvertTo-Json -Depth 8
-} else {
+if (-not (Write-ArlenServicePayload -Payload $plan)) {
   Write-Host "Installed Arlen service $serviceName"
   Write-Host "  mode: $Mode"
   Write-Host "  stdout log: $stdoutLog"
   Write-Host "  stderr log: $stderrLog"
 }
+exit 0

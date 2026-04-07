@@ -119,8 +119,8 @@ arlen service install --mode dev --dry-run --json
 
 - run that from the app root to inspect the autodiscovered `boomhauer` service
   plan and default logs under `tmp\service\`
-- re-run without `--dry-run` from an elevated PowerShell session to register
-  the actual Windows service
+- re-run without `--dry-run` from plain PowerShell and Arlen will request UAC
+  elevation when Windows service registration is needed
 - use `arlen service uninstall --mode dev` from the same app root to remove the
   registered developer service later
 

@@ -5,6 +5,7 @@ param(
   [string]$AppRoot = "",
   [string]$ReleasesDir = "",
   [string]$NSSMPath = "",
+  [string]$ResultFile = "",
   [switch]$DryRun,
   [switch]$Json
 )
@@ -40,7 +41,7 @@ function Emit-ArlenServiceError {
   )
 
   if ($Json) {
-    @{
+    $payload = @{
       version = "phase7g-agent-dx-contracts-v1"
       command = "service"
       workflow = "service.uninstall"
@@ -50,11 +51,34 @@ function Emit-ArlenServiceError {
         code = $Code
         message = $Message
       }
-    } | ConvertTo-Json -Depth 6
+    }
+    $json = $payload | ConvertTo-Json -Depth 6
+    if ($ResultFile) {
+      Set-Content -LiteralPath $ResultFile -Value $json -Encoding UTF8
+    }
+    $json
   } else {
     Write-Error $Message
   }
   exit $ExitCode
+}
+
+function Write-ArlenServicePayload {
+  param(
+    [Parameter(Mandatory = $true)]
+    [hashtable]$Payload
+  )
+
+  if ($Json) {
+    $json = $Payload | ConvertTo-Json -Depth 6
+    if ($ResultFile) {
+      Set-Content -LiteralPath $ResultFile -Value $json -Encoding UTF8
+    }
+    $json
+  } else {
+    return $false
+  }
+  return $true
 }
 
 function Test-ArlenAppRoot {
@@ -148,6 +172,79 @@ function Test-IsElevated {
   return $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 }
 
+function Resolve-PowerShellPath {
+  $candidates = @(
+    "C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe",
+    "C:\Program Files\PowerShell\7\pwsh.exe"
+  )
+  foreach ($candidate in $candidates) {
+    if (Test-Path -LiteralPath $candidate -PathType Leaf) {
+      return (Resolve-Path -LiteralPath $candidate).Path
+    }
+  }
+  Emit-ArlenServiceError "powershell_not_found" "arlen service uninstall: unable to locate powershell.exe"
+}
+
+function Invoke-ArlenServiceElevation {
+  param(
+    [string]$SelectedMode,
+    [string]$SelectedName,
+    [string]$SelectedAppRoot,
+    [string]$SelectedReleasesDir,
+    [string]$SelectedNSSMPath
+  )
+
+  $powerShellPath = Resolve-PowerShellPath
+  $scriptPath = (Resolve-Path -LiteralPath $PSCommandPath).Path
+  $workingDirectory = (Get-Location).Path
+  $resultFilePath = ""
+  if ($Json) {
+    $resultFilePath = Join-Path ([System.IO.Path]::GetTempPath()) ([System.Guid]::NewGuid().ToString() + ".json")
+  }
+
+  $elevatedArgs = @(
+    "-NoProfile",
+    "-ExecutionPolicy",
+    "Bypass",
+    "-File",
+    $scriptPath,
+    "-Mode",
+    $SelectedMode
+  )
+  if ($SelectedName) { $elevatedArgs += @("-Name", $SelectedName) }
+  if ($SelectedAppRoot) { $elevatedArgs += @("-AppRoot", $SelectedAppRoot) }
+  if ($SelectedReleasesDir) { $elevatedArgs += @("-ReleasesDir", $SelectedReleasesDir) }
+  if ($SelectedNSSMPath) { $elevatedArgs += @("-NSSMPath", $SelectedNSSMPath) }
+  if ($Json) {
+    $elevatedArgs += "-Json"
+    $elevatedArgs += @("-ResultFile", $resultFilePath)
+  }
+
+  try {
+    $process = Start-Process -FilePath $powerShellPath `
+                             -ArgumentList $elevatedArgs `
+                             -Verb RunAs `
+                             -WorkingDirectory $workingDirectory `
+                             -Wait `
+                             -PassThru
+  } catch {
+    Emit-ArlenServiceError "uac_cancelled" "arlen service uninstall: elevation was cancelled or denied."
+  }
+
+  if ($Json -and $resultFilePath -and (Test-Path -LiteralPath $resultFilePath -PathType Leaf)) {
+    try {
+      $json = Get-Content -LiteralPath $resultFilePath -Raw
+      if ($json) {
+        Write-Output $json.Trim()
+      }
+    } finally {
+      Remove-Item -LiteralPath $resultFilePath -Force -ErrorAction SilentlyContinue
+    }
+  }
+
+  exit $process.ExitCode
+}
+
 function Invoke-NSSM {
   param(
     [string]$ExecutablePath,
@@ -218,9 +315,7 @@ $plan = @{
 }
 
 if ($DryRun) {
-  if ($Json) {
-    $plan | ConvertTo-Json -Depth 6
-  } else {
+  if (-not (Write-ArlenServicePayload -Payload $plan)) {
     Write-Host "arlen service uninstall dry-run"
     Write-Host "  mode: $Mode"
     Write-Host "  name: $serviceName"
@@ -229,15 +324,17 @@ if ($DryRun) {
 }
 
 if (-not (Test-IsElevated)) {
-  Emit-ArlenServiceError "elevation_required" "arlen service uninstall: administrator access is required to remove a Windows service. Re-run from an elevated PowerShell session."
+  Invoke-ArlenServiceElevation -SelectedMode $Mode `
+                               -SelectedName $serviceName `
+                               -SelectedAppRoot $resolvedAppRoot `
+                               -SelectedReleasesDir $resolvedReleasesDir `
+                               -SelectedNSSMPath $NSSMPath
 }
 
 $nssmPath = Resolve-ArlenNSSMPath $NSSMPath
 Invoke-NSSM -ExecutablePath $nssmPath -Arguments @("stop", $serviceName) -ErrorCode "service_stop_failed" -ActionDescription "stopping service $serviceName"
 Invoke-NSSM -ExecutablePath $nssmPath -Arguments @("remove", $serviceName, "confirm") -ErrorCode "service_remove_failed" -ActionDescription "removing service $serviceName"
 
-if ($Json) {
-  $plan | ConvertTo-Json -Depth 6
-} else {
+if (-not (Write-ArlenServicePayload -Payload $plan)) {
   Write-Host "Uninstalled Arlen service $serviceName"
 }

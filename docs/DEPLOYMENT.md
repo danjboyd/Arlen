@@ -262,7 +262,8 @@ Current backend note:
 - install it with `winget install NSSM.NSSM` when not already present
 - Arlen also probes the Winget package cache when the `nssm` alias link is not
   present
-- live install/uninstall require an elevated PowerShell session
+- live install/uninstall relaunch through UAC from a non-elevated PowerShell
+  session when the current user can elevate
 
 ## 9. Rollback Workflow
 

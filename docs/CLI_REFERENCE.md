@@ -88,8 +88,9 @@ Install or remove the supported Windows service wrapper for Arlen entrypoints.
     `<releases-dir>/service/propane.stderr.log`
 - elevation:
   - `--dry-run` works without elevation
-  - live `install`/`uninstall` require an elevated PowerShell session and
-    return `elevation_required` when the shell is not elevated
+  - live `install`/`uninstall` relaunch through UAC from a non-elevated
+    PowerShell session when the current user can elevate
+  - if elevation is cancelled or denied, the command returns `uac_cancelled`
 
 ### `arlen generate <controller|endpoint|model|migration|test|plugin|frontend> <Name> [options] [--json]`
 
