@@ -40,6 +40,8 @@ Then open `http://127.0.0.1:3000/`.
 If you already use a managed GNUstep toolchain, you can source its env script
 first instead. The Arlen helper resolves `GNUSTEP_SH`, `GNUSTEP_MAKEFILES`,
 `gnustep-config`, and finally `/usr/GNUstep`.
+For the current native Windows preview entry path, see
+`docs/WINDOWS_CLANG64.md`.
 
 The default full scaffold gives you:
 

@@ -58,6 +58,12 @@ Phase 26 ORM-focused lanes are also available:
   - rerun the full Phase 26 bundle and regenerate
     `build/release_confidence/phase26/`
 
+Windows-focused preview lane:
+
+- `make phase24-windows-db-smoke`
+  - focused PostgreSQL / ODBC loader smoke for MSYS2 `CLANG64`
+  - uses `arlen-xctest-runner` to load the XCTest bundle directly
+
 ## 2. Bug Report To Regression
 
 1. Reproduce the failure in the narrowest possible form.

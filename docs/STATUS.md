@@ -4,6 +4,17 @@ Last updated: 2026-04-07
 
 ## Leaving Off (2026-04-07)
 
+- Started a `main`-based Phase 24 reintegration pass from the historical
+  `origin/windows/clang64` branch:
+  - added CLANG64 entry wrappers
+    `scripts/run_clang64.ps1` and `scripts/run_clang64.sh`
+  - extended GNUstep resolution to recognize `/clang64`
+  - added `ALNPlatform` as a narrow Windows portability seam for
+    time/process/path helpers
+  - added `arlen-xctest-runner` plus the focused
+    `phase24-windows-db-smoke` transport loader lane
+  - recorded the reintegration boundary in
+    `docs/PHASE24_ROADMAP.md` and `docs/WINDOWS_CLANG64.md`
 - Fixed the packaged `deploy doctor --base-url` regression reported from
   `OwnerConnect`:
   - release packaging now includes

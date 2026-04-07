@@ -313,6 +313,9 @@ static NSString *DatabaseConnectionStringFromEnvironmentForTarget(NSString *data
 static NSString *DatabaseConnectionStringFromConfigForTarget(NSDictionary *config, NSString *databaseTarget);
 
 static NSString *DefaultGNUstepScriptPath(void) {
+  if (PathExists(@"/clang64/share/GNUstep/Makefiles/GNUstep.sh", NULL)) {
+    return @"/clang64/share/GNUstep/Makefiles/GNUstep.sh";
+  }
   return @"/usr/GNUstep/System/Library/Makefiles/GNUstep.sh";
 }
 
