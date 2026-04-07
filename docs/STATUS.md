@@ -11,8 +11,18 @@ Last updated: 2026-04-07
   - extended GNUstep resolution to recognize `/clang64`
   - added `ALNPlatform` as a narrow Windows portability seam for
     time/process/path helpers
-  - added `arlen-xctest-runner` plus the focused
-    `phase24-windows-db-smoke` transport loader lane
+  - forward-ported Windows-aware shell/runtime behavior into
+    `bin/boomhauer`, `bin/jobs-worker`, and `bin/propane`
+  - forward-ported Windows transport loader support into `ALNPg` and
+    `ALNMSSQL`
+  - transplanted the Windows socket/runtime portability layer into
+    `ALNHTTPServer`
+  - added `arlen-xctest-runner`, the focused
+    `phase24-windows-db-smoke` transport loader lane, the
+    `phase24-windows-runtime-tests` parity suite, and the aggregated
+    `phase24-windows-confidence` lane
+  - added the main-based Windows preview workflow
+    `.github/workflows/phase24-windows-preview.yml`
   - recorded the reintegration boundary in
     `docs/PHASE24_ROADMAP.md` and `docs/WINDOWS_CLANG64.md`
 - Fixed the packaged `deploy doctor --base-url` regression reported from

@@ -27,6 +27,54 @@ fi
 script_dir="$(cd "$(dirname "$script_path")" && pwd)"
 default_framework_root="$(cd "$script_dir/.." && pwd)"
 
+path_looks_like_windows_absolute() {
+  local path="$1"
+  [[ "$path" =~ ^[A-Za-z]:[\\/] ]] || [[ "$path" =~ ^\\\\ ]]
+}
+
+path_is_absolute() {
+  local path="$1"
+  [[ "$path" == /* ]] || path_looks_like_windows_absolute "$path"
+}
+
+normalize_host_path() {
+  local raw="$1"
+  if [[ -z "$raw" ]]; then
+    printf '%s\n' "$PWD"
+    return
+  fi
+  if command -v cygpath >/dev/null 2>&1 && path_is_absolute "$raw"; then
+    cygpath -au "$raw"
+    return
+  fi
+  if path_is_absolute "$raw"; then
+    printf '%s\n' "$raw"
+    return
+  fi
+  printf '%s\n' "$PWD/$raw"
+}
+
+resolve_compiled_binary() {
+  local candidate="$1"
+  if [[ -x "$candidate" ]]; then
+    printf '%s\n' "$candidate"
+    return 0
+  fi
+  if [[ "$candidate" != *.exe ]] && [[ -x "$candidate.exe" ]]; then
+    printf '%s\n' "$candidate.exe"
+    return 0
+  fi
+  return 1
+}
+
+app_root_has_sources() {
+  local root="$1"
+  if [[ -f "$root/app_lite.m" ]]; then
+    return 0
+  fi
+  [[ -n "$(find "$root/src" -type f -name '*.m' -print -quit 2>/dev/null)" ]]
+}
+
 framework_root="${ARLEN_FRAMEWORK_ROOT:-$default_framework_root}"
 app_root="${ARLEN_APP_ROOT:-$PWD}"
 environment="production"
@@ -84,15 +132,11 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-if [[ ! "$framework_root" = /* ]]; then
-  framework_root="$PWD/$framework_root"
-fi
-framework_root="$(cd "$framework_root" && pwd)"
+framework_root="$(normalize_host_path "$framework_root")"
+framework_root="$(cd "$framework_root" && pwd -P)"
 
-if [[ ! "$app_root" = /* ]]; then
-  app_root="$PWD/$app_root"
-fi
-app_root="$(cd "$app_root" && pwd)"
+app_root="$(normalize_host_path "$app_root")"
+app_root="$(cd "$app_root" && pwd -P)"
 
 is_checkout_framework_root=0
 if [[ -f "$framework_root/GNUmakefile" && -d "$framework_root/src/Arlen" ]]; then
@@ -100,7 +144,7 @@ if [[ -f "$framework_root/GNUmakefile" && -d "$framework_root/src/Arlen" ]]; the
 fi
 
 is_release_framework_root=0
-if [[ -x "$framework_root/build/arlen" && -x "$framework_root/bin/jobs-worker" ]]; then
+if resolve_compiled_binary "$framework_root/build/arlen" >/dev/null && [[ -x "$framework_root/bin/jobs-worker" ]]; then
   is_release_framework_root=1
 fi
 
@@ -109,13 +153,13 @@ if (( is_checkout_framework_root == 0 && is_release_framework_root == 0 )); then
   exit 1
 fi
 
-if [[ ! -f "$app_root/config/app.plist" ]] || [[ ! -f "$app_root/src/main.m" && ! -f "$app_root/app_lite.m" ]]; then
+if [[ ! -f "$app_root/config/app.plist" ]] || ! app_root_has_sources "$app_root"; then
   echo "jobs-worker: invalid app root: $app_root" >&2
   exit 1
 fi
 
-if (( is_release_framework_root == 1 )) && [[ -x "$app_root/.boomhauer/build/boomhauer-app" ]]; then
-  app_binary="$app_root/.boomhauer/build/boomhauer-app"
+if (( is_release_framework_root == 1 )) && app_binary="$(resolve_compiled_binary "$app_root/.boomhauer/build/boomhauer-app")"; then
+  :
 else
   if ARLEN_APP_ROOT="$app_root" ARLEN_FRAMEWORK_ROOT="$framework_root" \
       "$framework_root/bin/boomhauer" --env "$environment" --no-watch --prepare-only >/dev/null; then
@@ -125,7 +169,10 @@ else
     echo "jobs-worker: app prepare step failed; see $app_root/.boomhauer/last_build_error.log" >&2
     exit "$status"
   fi
-  app_binary="$app_root/.boomhauer/build/boomhauer-app"
+  if ! app_binary="$(resolve_compiled_binary "$app_root/.boomhauer/build/boomhauer-app")"; then
+    echo "jobs-worker: expected compiled app binary at $app_root/.boomhauer/build/boomhauer-app" >&2
+    exit 1
+  fi
 fi
 
 if [[ ! -x "$app_binary" ]]; then

@@ -31,6 +31,76 @@ script_dir="$(cd "$(dirname "$script_path")" && pwd)"
 default_framework_root="$(cd "$script_dir/.." && pwd)"
 framework_root="${ARLEN_FRAMEWORK_ROOT:-$default_framework_root}"
 
+path_looks_like_windows_absolute() {
+  local path="$1"
+  [[ "$path" =~ ^[A-Za-z]:[\\/] ]] || [[ "$path" =~ ^\\\\ ]]
+}
+
+path_is_absolute() {
+  local path="$1"
+  [[ "$path" == /* ]] || path_looks_like_windows_absolute "$path"
+}
+
+normalize_host_path() {
+  local raw="$1"
+  if [[ -z "$raw" ]]; then
+    printf '%s\n' "$PWD"
+    return
+  fi
+  if command -v cygpath >/dev/null 2>&1 && path_is_absolute "$raw"; then
+    cygpath -au "$raw"
+    return
+  fi
+  if path_is_absolute "$raw"; then
+    printf '%s\n' "$raw"
+    return
+  fi
+  printf '%s\n' "$PWD/$raw"
+}
+
+resolve_compiled_binary() {
+  local candidate="$1"
+  if [[ -x "$candidate" ]]; then
+    printf '%s\n' "$candidate"
+    return 0
+  fi
+  if [[ "$candidate" != *.exe ]] && [[ -x "$candidate.exe" ]]; then
+    printf '%s\n' "$candidate.exe"
+    return 0
+  fi
+  return 1
+}
+
+app_root_has_sources() {
+  local root="$1"
+  if [[ -f "$root/app_lite.m" ]]; then
+    return 0
+  fi
+  [[ -n "$(find "$root/src" -type f -name '*.m' -print -quit 2>/dev/null)" ]]
+}
+
+detect_windows_preview() {
+  local host_os=""
+  if [[ "${MSYSTEM:-}" == "CLANG64" || "${MSYSTEM:-}" == "MINGW64" || "${MSYSTEM:-}" == "UCRT64" ]]; then
+    return 0
+  fi
+  if command -v gnustep-config >/dev/null 2>&1; then
+    host_os="$(gnustep-config --variable=GNUSTEP_HOST_OS 2>/dev/null || true)"
+    if [[ "$host_os" == *mingw* ]]; then
+      return 0
+    fi
+  fi
+  return 1
+}
+
+windows_preview=0
+if detect_windows_preview; then
+  windows_preview=1
+fi
+
+framework_root="$(normalize_host_path "$framework_root")"
+framework_root="$(cd "$framework_root" && pwd -P)"
+
 if [[ ! -f "$framework_root/GNUmakefile" || ! -d "$framework_root/src/Arlen" ]]; then
   echo "boomhauer: invalid framework root: $framework_root" >&2
   echo "boomhauer: set ARLEN_FRAMEWORK_ROOT to a valid Arlen repository root" >&2
@@ -47,11 +117,8 @@ if [[ ! -f "$gnustep_sh" ]]; then
   exit 1
 fi
 
-app_root="${ARLEN_APP_ROOT:-$PWD}"
-if [[ ! "$app_root" = /* ]]; then
-  app_root="$PWD/$app_root"
-fi
-app_root="$(cd "$app_root" && pwd)"
+app_root="$(normalize_host_path "${ARLEN_APP_ROOT:-$PWD}")"
+app_root="$(cd "$app_root" && pwd -P)"
 
 watch_mode=1
 prepare_only=0
@@ -89,15 +156,26 @@ for arg in "$@"; do
 done
 
 is_app_root=0
-if [[ -f "$app_root/config/app.plist" ]] && ([[ -f "$app_root/src/main.m" ]] || [[ -f "$app_root/app_lite.m" ]]); then
+if [[ -f "$app_root/config/app.plist" ]] && app_root_has_sources "$app_root"; then
   is_app_root=1
 fi
 
 if [[ $is_app_root -eq 0 ]]; then
+  if [[ $windows_preview -eq 1 ]]; then
+    echo "boomhauer: repository-root boomhauer is not yet supported on Windows CLANG64 preview" >&2
+    echo "boomhauer: run from a generated app root and use --no-watch, --prepare-only, or --print-routes" >&2
+    exit 1
+  fi
   cd "$framework_root"
   if [[ $watch_mode -eq 1 ]]; then
-    make arlen >/dev/null
-    exec "$framework_root/build/arlen" boomhauer --watch "${server_args[@]}"
+    if ! arlen_binary="$(resolve_compiled_binary "$framework_root/build/arlen")"; then
+      make arlen >/dev/null
+      if ! arlen_binary="$(resolve_compiled_binary "$framework_root/build/arlen")"; then
+        echo "boomhauer: expected compiled arlen binary under $framework_root/build" >&2
+        exit 1
+      fi
+    fi
+    exec "$arlen_binary" boomhauer --watch "${server_args[@]}"
   fi
 
   if [[ $prepare_only -eq 1 ]]; then
@@ -106,12 +184,18 @@ if [[ $is_app_root -eq 0 ]]; then
     echo "boomhauer: route inspection mode; ensuring artifacts are current before printing routes"
   fi
 
-  make boomhauer >/dev/null
+  if ! framework_boomhauer_binary="$(resolve_compiled_binary "$framework_root/build/boomhauer")"; then
+    make boomhauer >/dev/null
+    if ! framework_boomhauer_binary="$(resolve_compiled_binary "$framework_root/build/boomhauer")"; then
+      echo "boomhauer: expected compiled boomhauer binary under $framework_root/build" >&2
+      exit 1
+    fi
+  fi
   if [[ $prepare_only -eq 1 ]]; then
     exit 0
   fi
   export ARLEN_APP_ROOT="$app_root"
-  exec "$framework_root/build/boomhauer" "${server_args[@]}"
+  exec "$framework_boomhauer_binary" "${server_args[@]}"
 fi
 
 state_root="$app_root/.boomhauer"

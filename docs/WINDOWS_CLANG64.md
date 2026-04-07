@@ -2,7 +2,7 @@
 
 Last updated: 2026-04-07
 
-This document records the first `main`-branch reintegration slice of Arlen's
+This document records the current `main`-branch reintegration slice of Arlen's
 native Windows work for MSYS2 `CLANG64`.
 
 Current scope on `main`:
@@ -10,12 +10,15 @@ Current scope on `main`:
 - checked-in CLANG64 entry wrappers
 - GNUstep path resolution that recognizes `/clang64`
 - a platform seam for time/process/path helpers
-- a focused Windows DB transport smoke lane
+- Windows-aware `boomhauer`, `jobs-worker`, and `propane` shell entrypoints
+- Windows transport loader support for PostgreSQL and ODBC
+- a Windows socket/runtime portability layer in `ALNHTTPServer`
+- focused Windows DB smoke and runtime parity lanes
+- a main-based Windows preview workflow
 
-This is not yet a full claim that current `main` has complete Windows runtime
-parity. The heavier `boomhauer`, `jobs-worker`, `propane`, and deployment
-forward-ports still need to be transplanted from the historical
-`origin/windows/clang64` branch onto current `main`.
+This is still not a full claim that current `main` has complete Windows
+support. Runtime parity is now partially forward-ported, but release/install
+closeout and broader confidence parity remain open.
 
 ## 1. Host Entry Path
 
@@ -48,7 +51,7 @@ Expected inside the active `CLANG64` environment:
 - `xctest`
 - `libdispatch`
 
-Recommended for the current focused Windows lane:
+Recommended for the current Windows preview lanes:
 
 - `python3`
 - `curl`
@@ -56,12 +59,24 @@ Recommended for the current focused Windows lane:
 - `libpq`
 - `libodbc` or `odbc32.dll`
 
-## 3. Current Mainline Windows Lane
+## 3. Current Mainline Windows Lanes
 
 Focused transport loader smoke:
 
 ```sh
 make phase24-windows-db-smoke
+```
+
+Runtime/server parity checks:
+
+```sh
+make phase24-windows-runtime-tests
+```
+
+Aggregated preview confidence lane:
+
+```sh
+make phase24-windows-confidence
 ```
 
 Convenience preview runner:
@@ -70,23 +85,24 @@ Convenience preview runner:
 bash ./tools/ci/run_phase24_windows_preview.sh
 ```
 
-That lane is intended to verify the Windows DLL loading contract for:
+Those lanes are intended to verify:
 
 - PostgreSQL (`libpq`)
 - MSSQL / ODBC
+- `boomhauer` watch-mode recovery
+- `jobs-worker` queued-job execution
+- `propane` request serving and reload handling
 
-The focused lane uses `arlen-xctest-runner` so a Windows host can load and run
+The preview lanes use `arlen-xctest-runner` so a Windows host can load and run
 the XCTest bundle without depending on the stock bundle discovery path.
 
 ## 4. Current Non-Claims
 
 Not yet claimed on current `main`:
 
-- full Windows `boomhauer` parity
-- full Windows `jobs-worker` parity
-- full Windows `propane` parity
 - full unit/integration/live/perf confidence parity
 - Windows release/install/package closeout
+- packaged-release deployment parity on Windows
 
 Those still belong to the remaining Phase 24 reintegration work from the
 historical `origin/windows/clang64` branch.

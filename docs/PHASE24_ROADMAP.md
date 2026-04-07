@@ -1,6 +1,6 @@
 # Arlen Phase 24 Roadmap
 
-Status: imported from branch work on 2026-04-07; first `main` reintegration pass in progress
+Status: imported from branch work on 2026-04-07; second `main` reintegration pass in progress
 Last updated: 2026-04-07
 
 This roadmap tracks the selective reintegration of the Windows `CLANG64` work
@@ -38,12 +38,14 @@ Current mainline-delivered slice:
 - `ALNPlatform` seam for time/process/path helpers
 - `arlen-xctest-runner` helper for focused Windows-safe XCTest bundle loading
 - `phase24-windows-db-smoke` focused transport loader lane
+- Windows-aware shell/runtime path handling in `bin/boomhauer`,
+  `bin/jobs-worker`, and `bin/propane`
+- Windows loader support in `ALNPg` and `ALNMSSQL`
+- Windows socket/runtime portability in `ALNHTTPServer`
+- `phase24-windows-runtime-tests` plus the aggregated
+  `phase24-windows-confidence` lane
+- main-based Windows preview workflow and artifact upload path
 
 Not yet forward-ported from the historical branch:
 
-- full Windows `boomhauer` parity
-- full Windows `jobs-worker` parity
-- full Windows `propane` parity
-- Windows runtime parity suites from the historical branch
-- Windows CI workflow and artifact publishing
 - Windows release/deployment closeout

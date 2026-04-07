@@ -147,6 +147,7 @@
   XCTAssertTrue([makefile containsString:@"INTEGRATION_TEST_TARGET_NAME := $(notdir $(basename $(INTEGRATION_TEST_BUNDLE)))"]);
   XCTAssertTrue([makefile containsString:@"XCTEST_BUNDLE_RUNNER_TOOL := $(BUILD_DIR)/arlen-xctest-runner"]);
   XCTAssertTrue([makefile containsString:@"PHASE24_WINDOWS_DB_SMOKE_TEST_BUNDLE := $(BUILD_DIR)/tests/ArlenPhase24WindowsDBSmokeTests.xctest"]);
+  XCTAssertTrue([makefile containsString:@"PHASE24_WINDOWS_RUNTIME_TEST_BUNDLE := $(BUILD_DIR)/tests/ArlenPhase24WindowsRuntimeParityTests.xctest"]);
   XCTAssertTrue([makefile containsString:@"define xctest_filter_args"]);
   XCTAssertTrue([makefile containsString:@"define xctest_runtime_env"]);
   XCTAssertTrue([makefile containsString:@"test-unit-filter: $(UNIT_TEST_BIN)"]);
@@ -159,6 +160,8 @@
   XCTAssertTrue([makefile containsString:@"LD_LIBRARY_PATH=\"$(ARLEN_XCTEST_LD_LIBRARY_PATH)$${LD_LIBRARY_PATH:+:$$LD_LIBRARY_PATH}\""]);
   XCTAssertTrue([makefile containsString:@"$(call xctest_filter_args,$(UNIT_TEST_TARGET_NAME))"]);
   XCTAssertTrue([makefile containsString:@"$(call xctest_filter_args,$(INTEGRATION_TEST_TARGET_NAME))"]);
+  XCTAssertTrue([makefile containsString:@"phase24-windows-runtime-tests: $(PHASE24_WINDOWS_RUNTIME_TEST_BIN) $(XCTEST_BUNDLE_RUNNER_TOOL)"]);
+  XCTAssertTrue([makefile containsString:@"phase24-windows-confidence: phase24-windows-db-smoke phase24-windows-runtime-tests"]);
 }
 
 - (void)testGNUmakefileDefinesFocusedPhase20ConfidenceLanes {
