@@ -1,7 +1,7 @@
 # Arlen Phase 24 Roadmap
 
-Status: complete on 2026-04-06 (`24A-24S` delivered on branch `windows/clang64` for the checked-in CLANG64 Windows parity, release, and platform contract)
-Last updated: 2026-04-06
+Status: in progress (`24A-24S` delivered on branch `windows/clang64`; `24T` planned for PowerShell-first Windows launcher wrappers)
+Last updated: 2026-04-07
 
 Related docs:
 - `README.md`
@@ -31,7 +31,7 @@ Phase 24 is split into three tracks:
 - `24A-24F`: first-pass Windows compatibility
 - `24G-24M`: Windows preview contract completion
 - `24N-24P`: Windows runtime parity closeout
-- `24Q-24S`: Windows-to-Linux parity and platform closeout
+- `24Q-24T`: Windows-to-Linux parity and platform closeout
 
 The implementation branch for this work is `windows/clang64`.
 
@@ -123,6 +123,7 @@ Full-parity success means:
 17. Phase 24Q: full test and live-backend matrix parity.
 18. Phase 24R: perf, sanitizer, and fault-injection lane parity.
 19. Phase 24S: release, packaging, and first-class platform closeout.
+20. Phase 24T: PowerShell-first launcher wrappers for `arlen` and `boomhauer`.
 
 ## 3.4 Recommended Rollout Order
 
@@ -145,10 +146,12 @@ Full-parity success means:
 17. `24Q`
 18. `24R`
 19. `24S`
+20. `24T`
 
 That order gets a real Windows development foothold first, then expands
-outward into runtime, security, verification, deployment parity, and finally
-default-platform closeout.
+outward into runtime, security, verification, deployment parity, default-platform
+closeout, and finally a PowerShell-native launcher surface over the checked-in
+CLANG64 contract.
 
 ## 4. Scope Guardrails
 
@@ -851,6 +854,46 @@ Acceptance (required):
 - Phase 24 can close with no remaining supported-surface behavior gap between
   Windows and Linux.
 
+## 5.20 Phase 24T: PowerShell-First Launcher Wrappers
+
+Status: planned
+
+Rationale:
+
+- The checked-in Windows CLANG64 support currently requires users to enter the
+  MSYS2/GNUstep environment explicitly through `scripts/run_clang64.ps1` before
+  invoking `arlen` or `boomhauer`.
+- That remains a valid platform contract, but it still feels like an explicit
+  toolchain step rather than a first-class Windows command surface.
+- A thin wrapper layer can preserve the current CLANG64/GNUstep runtime while
+  exposing PowerShell-friendly entrypoints that keep working directory,
+  argument pass-through, stdout/stderr, long-running console behavior, and exit
+  status intact.
+
+Deliverables:
+
+- Add Windows-facing launcher shims for `arlen` and `boomhauer` that can be
+  invoked directly from PowerShell and `cmd.exe`.
+- Keep those wrappers thin and deterministic:
+  - resolve the checked-in CLANG64 bootstrap path
+  - translate the current working directory and relevant path arguments
+  - delegate to the existing `bin/arlen` and `bin/boomhauer` launchers
+  - propagate stdout/stderr, console lifecycle behavior, and exit status
+    without creating a second command implementation
+- Document the supported invocation contract in the Windows getting-started and
+  CLI docs, including any execution-policy or PATH expectations for `.ps1` and
+  `.cmd` entrypoints.
+
+Acceptance (required):
+
+- From plain PowerShell on a supported Windows host, `arlen doctor` works
+  without the user manually entering `scripts/run_clang64.ps1`.
+- From plain PowerShell on a supported Windows host, a scaffolded app can be
+  started with `arlen boomhauer --port 3000` or an equivalent first-class
+  launcher path without manually entering the CLANG64 shell first.
+- Wrapper-based invocation preserves current working directory, argument
+  semantics, visible process output, and non-zero exit propagation.
+
 ## 6. Exit Criteria Summary
 
 Phase 24 first-pass closeout requires:
@@ -870,9 +913,11 @@ Phase 24 preview-contract closeout requires:
 
 Phase 24 full-parity closeout requires:
 
-- `24A-24S` complete
+- `24A-24T` complete
 - Windows carries the same supported test, live-backend, perf, sanitizer, and
   robustness confidence claims as Linux
 - Windows has first-class release/install/package/service guidance instead of a
   preview-scoped runtime boundary
+- Windows CLI/dev-server entrypoints can be launched from plain PowerShell
+  without a manual CLANG64-shell handoff
 - top-level docs no longer describe Windows as preview-only

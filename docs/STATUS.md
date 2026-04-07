@@ -1,6 +1,18 @@
 # Arlen Status Checkpoint
 
-Last updated: 2026-04-06
+Last updated: 2026-04-07
+
+## Leaving Off (2026-04-07)
+
+- Reopened Phase 24 on branch `windows/clang64` to add planned subphase `24T`:
+  - scope: PowerShell-first launcher wrappers for `arlen` and `boomhauer`
+    over the existing checked-in MSYS2 `CLANG64` contract
+  - intent: let supported Windows users invoke the CLI/dev-server surface from
+    plain PowerShell or `cmd.exe` without manually entering the CLANG64 shell
+  - guardrail: keep the wrappers thin; do not fork command behavior away from
+    the existing `bin/arlen` / `bin/boomhauer` implementations
+- Phase 24 is no longer treated as fully complete in the roadmap ledger because
+  `24T` is now planned after the previously delivered `24A-24S` slice.
 
 ## Leaving Off (2026-04-06)
 
@@ -29,7 +41,8 @@ Last updated: 2026-04-06
   - `powershell -ExecutionPolicy Bypass -File scripts\run_clang64.ps1 -InnerCommand "make test-integration-filter TEST=DeploymentIntegrationTests/testReleaseBuildActivateAndRollbackScripts"`
   - `powershell -ExecutionPolicy Bypass -File scripts\run_clang64.ps1 -InnerCommand "make test-integration-filter TEST=DeploymentIntegrationTests/testReleaseSmokeScriptValidatesDeployRunbook"`
   - `powershell -ExecutionPolicy Bypass -File scripts\run_clang64.ps1 -InnerCommand "make deploy-smoke"`
-- Phase 24 is now complete on `windows/clang64`.
+- Phase 24 was complete on `windows/clang64` at this checkpoint before the
+  later `24T` launcher-wrapper follow-up was added to the roadmap.
 
 ## Leaving Off (2026-04-02)
 
