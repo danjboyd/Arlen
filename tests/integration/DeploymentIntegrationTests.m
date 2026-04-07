@@ -91,6 +91,17 @@ static void ALNDeploymentWindowsPreviewNoOpTest(id self, SEL _cmd) {
   return YES;
 }
 
+- (BOOL)writeRunnableLiteAppAtRoot:(NSString *)appRoot {
+  return [self writeFile:[appRoot stringByAppendingPathComponent:@"app_lite.m"]
+                 content:@"#import <Foundation/Foundation.h>\n"
+                         "#import \"ArlenServer.h\"\n"
+                         "int main(int argc, const char *argv[]) {\n"
+                         "  @autoreleasepool {\n"
+                         "    return ALNRunAppMain(argc, argv, NULL);\n"
+                         "  }\n"
+                         "}\n"];
+}
+
 - (NSString *)runShellCapture:(NSString *)command exitCode:(int *)exitCode {
   return ALNTestRunShellCapture(command, exitCode);
 }
@@ -411,9 +422,7 @@ static void ALNDeploymentWindowsPreviewNoOpTest(id self, SEL _cmd) {
                                   "}\n"]);
     XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"config/environments/production.plist"]
                           content:@"{\n  logFormat = \"json\";\n}\n"]);
-    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"app_lite.m"]
-                          content:@"#import <Foundation/Foundation.h>\n"
-                                  "int main(int argc, const char *argv[]) { (void)argc; (void)argv; return 0; }\n"]);
+    XCTAssertTrue([self writeRunnableLiteAppAtRoot:appRoot]);
     XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"public/health.txt"]
                           content:@"ok\n"]);
 
@@ -441,6 +450,33 @@ static void ALNDeploymentWindowsPreviewNoOpTest(id self, SEL _cmd) {
                                                   [[self shellPath:releasesDir] UTF8String]]
                                     exitCode:&code];
     XCTAssertEqual(0, code, @"%@", build2);
+
+    NSString *releaseTwoRoot = [releasesDir stringByAppendingPathComponent:@"rel2"];
+    NSArray<NSString *> *expectedPackagedArtifacts = @[
+      ALNTestResolvedExecutablePath([releaseTwoRoot stringByAppendingPathComponent:@"framework/build/arlen"]),
+      ALNTestResolvedExecutablePath([releaseTwoRoot stringByAppendingPathComponent:@"framework/build/boomhauer"]),
+      ALNTestResolvedExecutablePath([releaseTwoRoot stringByAppendingPathComponent:@"framework/build/eocc"]),
+      [releaseTwoRoot stringByAppendingPathComponent:@"framework/build/lib/libArlenFramework.a"],
+      [releaseTwoRoot stringByAppendingPathComponent:@"framework/tools/deploy/_release_pointer.sh"],
+      [releaseTwoRoot stringByAppendingPathComponent:@"framework/tools/deploy/windows/start_release.ps1"],
+      [releaseTwoRoot stringByAppendingPathComponent:@"framework/tools/deploy/windows/invoke_release_migrate.ps1"],
+      [releaseTwoRoot stringByAppendingPathComponent:@"framework/tools/deploy/windows/send_release_control.ps1"],
+    ];
+    for (NSString *artifactPath in expectedPackagedArtifacts) {
+      XCTAssertTrue([[NSFileManager defaultManager] fileExistsAtPath:artifactPath],
+                    @"missing packaged artifact %@", artifactPath);
+    }
+
+    NSArray<NSString *> *expectedPackagedDirectories = @[
+      [releaseTwoRoot stringByAppendingPathComponent:@"framework/src/Arlen"],
+      [releaseTwoRoot stringByAppendingPathComponent:@"framework/src/MojoObjc"],
+      [releaseTwoRoot stringByAppendingPathComponent:@"framework/modules"],
+    ];
+    for (NSString *directoryPath in expectedPackagedDirectories) {
+      BOOL isDirectory = NO;
+      XCTAssertTrue([[NSFileManager defaultManager] fileExistsAtPath:directoryPath isDirectory:&isDirectory] && isDirectory,
+                    @"missing packaged directory %@", directoryPath);
+    }
 
     NSString *activate2 = [self runShellCapture:[NSString stringWithFormat:
                                                      @"%s/tools/deploy/activate_release.sh "
@@ -494,9 +530,7 @@ static void ALNDeploymentWindowsPreviewNoOpTest(id self, SEL _cmd) {
                                   "}\n"]);
     XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"config/environments/production.plist"]
                           content:@"{\n  logFormat = \"json\";\n}\n"]);
-    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"app_lite.m"]
-                          content:@"#import <Foundation/Foundation.h>\n"
-                                  "int main(int argc, const char *argv[]) { (void)argc; (void)argv; return 0; }\n"]);
+    XCTAssertTrue([self writeRunnableLiteAppAtRoot:appRoot]);
     XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"public/health.txt"]
                           content:@"ok\n"]);
 

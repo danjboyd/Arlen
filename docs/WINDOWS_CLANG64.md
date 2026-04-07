@@ -1,14 +1,13 @@
-# Windows CLANG64 Preview
+# Windows CLANG64
 
 Last updated: 2026-04-06
 
 This document records the native Windows workflow for Arlen on MSYS2
 `CLANG64`.
 
-The checked-in Phase 24 preview/runtime contract plus the `24Q-24R` Windows
-parity work are complete on branch `windows/clang64`. Phase `24S` still
-remains for release/package/first-class platform closeout, so this document
-continues to record the current supported preview boundary.
+Phase `24A-24S` is complete on branch `windows/clang64`, so this is now the
+checked-in first-class Windows contract for Arlen development, runtime,
+testing, and release packaging.
 
 ## 1. Host Entry Path
 
@@ -42,7 +41,7 @@ Expected inside the active `CLANG64` environment:
 - `openapp`
 - `libdispatch`
 
-Recommended for the wider Windows lanes:
+Recommended for the broader Windows lanes:
 
 - `python3`
 - `curl`
@@ -62,13 +61,13 @@ From the documented `CLANG64` shell:
 make all
 ```
 
-On Windows preview, `make all` builds:
+On Windows CLANG64, `make all` builds:
 
 - `build/eocc`
 - `build/arlen`
-- the Windows preview `libArlenFramework.a`, including the data-layer sources
+- `build/lib/libArlenFramework.a`
 
-Convenience alias:
+Compatibility alias:
 
 ```sh
 make clang64-preview
@@ -114,10 +113,16 @@ make phase20-postgres-live-tests
 make phase20-mssql-live-tests
 ```
 
-Full `24Q-24R` parity lane:
+Full Windows parity lane:
 
 ```sh
 make phase24-windows-parity
+```
+
+Release runbook smoke:
+
+```sh
+make deploy-smoke
 ```
 
 PowerShell wrappers:
@@ -151,6 +156,9 @@ Current verification note:
 - The broader `24Q-24R` perf/robustness lanes wired through
   `make phase24-windows-parity` were also rerun successfully on this host on
   2026-04-06.
+- `make deploy-smoke` also completed successfully on this host on 2026-04-06,
+  exercising the packaged Windows release helpers against the checked-in
+  `examples/tech_demo` app.
 - The focused Windows lanes still use repo-local linked test executables so
   test discovery stays reliable on CLANG64.
 - The only remaining warning observed in this workspace is the upstream
@@ -167,6 +175,7 @@ Supported on the current branch:
 - `arlen generate`
 - `arlen build`
 - `arlen check`
+- `arlen test`
 - `make all`
 - `make phase24-windows-tests`
 - `make phase24-windows-db-smoke`
@@ -177,31 +186,45 @@ Supported on the current branch:
 - `make phase20-mssql-live-tests`
 - `make phase24-windows-runtime-tests`
 - `make phase24-windows-parity`
+- `make deploy-smoke`
 - `arlen boomhauer` for app-root watch and non-watch flows, including fallback
   dev error recovery
 - `arlen jobs worker`
 - `arlen propane`
 - `arlen routes`
-- `arlen test --unit` as the focused Windows XCTest lane
 - `arlen migrate`
 - `arlen schema-codegen`
 - `arlen typed-sql-codegen`
 - `arlen module add/remove/list/doctor/migrate/assets/eject/upgrade`
+- `tools/deploy/build_release.sh`
+- `tools/deploy/activate_release.sh`
+- `tools/deploy/rollback_release.sh`
+- `tools/deploy/smoke_release.sh`
+- `tools/deploy/windows/invoke_release_migrate.ps1`
+- `tools/deploy/windows/start_release.ps1`
+- `tools/deploy/windows/send_release_control.ps1`
 - PostgreSQL/ODBC transport loading through the checked-in Windows DLL
   discovery contract
 
-## 6. Explicit Native Windows Non-Support
+## 6. Release Helpers
 
-Still intentionally unsupported:
+Build a release artifact from CLANG64:
 
-- Windows release/install/package closeout
-- Windows service-integration guidance beyond direct `propane` usage
-- first-class Windows deployment/docs packaging outside the checked-in CLANG64
-  path
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\run_clang64.ps1 -InnerCommand "tools/deploy/build_release.sh --app-root C:/srv/MyApp --framework-root C:/Users/Support/git/Arlen --releases-dir C:/srv/MyApp/releases"
+```
 
-The runtime/deployment boundary is documented in:
+From the packaged release, use the checked-in PowerShell helpers:
 
-- `docs/WINDOWS_RUNTIME_STORY.md`
+```powershell
+powershell -ExecutionPolicy Bypass -File C:\srv\MyApp\releases\current\framework\tools\deploy\windows\invoke_release_migrate.ps1 -ReleasesDir C:\srv\MyApp\releases
+powershell -ExecutionPolicy Bypass -File C:\srv\MyApp\releases\current\framework\tools\deploy\windows\start_release.ps1 -ReleasesDir C:\srv\MyApp\releases
+powershell -ExecutionPolicy Bypass -File C:\srv\MyApp\releases\current\framework\tools\deploy\windows\send_release_control.ps1 -ReleasesDir C:\srv\MyApp\releases -Action reload
+powershell -ExecutionPolicy Bypass -File C:\srv\MyApp\releases\current\framework\tools\deploy\windows\send_release_control.ps1 -ReleasesDir C:\srv\MyApp\releases -Action term
+```
+
+If `bash.exe` is not under the default MSYS2 or Git-for-Windows locations, set
+`ARLEN_BASH_PATH` or pass `-BashPath`.
 
 ## 7. Suggested Windows Sequence
 
@@ -216,7 +239,7 @@ make phase24-windows-runtime-tests
 make phase24-windows-confidence
 ```
 
-Full `24Q-24R` parity rerun:
+Full parity and release rerun:
 
 ```sh
 make test-unit
@@ -224,6 +247,7 @@ make test-integration
 make phase20-postgres-live-tests
 make phase20-mssql-live-tests
 make phase24-windows-parity
+make deploy-smoke
 ```
 
 For app-root smoke:

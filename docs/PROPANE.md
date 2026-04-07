@@ -2,9 +2,9 @@
 
 `propane` is Arlen's production process manager.
 
-Native Windows now supports the checked-in `CLANG64` `propane` path for
-app-root workflows. See `docs/WINDOWS_RUNTIME_STORY.md` for the remaining
-Windows preview boundary around release/install/service closeout.
+Native Windows supports the checked-in `CLANG64` `propane` path for app-root
+and packaged-release workflows. See `docs/WINDOWS_RUNTIME_STORY.md` for the
+Windows release and service-wrapper guidance.
 
 It runs prefork worker processes, restarts failed workers, and supports rolling reloads.
 
@@ -106,6 +106,7 @@ Environment fallbacks:
 - `ARLEN_PROPANE_JOB_WORKER_COUNT`
 - `ARLEN_PROPANE_JOB_WORKER_RESPAWN_DELAY_MS`
 - `ARLEN_PROPANE_LIFECYCLE_LOG` (optional path for structured lifecycle diagnostics copy)
+- `ARLEN_PROPANE_CONTROL_FILE` (optional explicit control-file path for reload/term actions)
 - `ARLEN_CLUSTER_ENABLED`
 - `ARLEN_CLUSTER_NAME`
 - `ARLEN_CLUSTER_NODE_ID`
@@ -115,6 +116,21 @@ Environment fallbacks:
 - `ARLEN_REQUEST_DISPATCH_MODE` (`concurrent` by default; set `serialized` to force deterministic serialized dispatch)
 
 `propane` exports resolved cluster values to worker processes, so CLI overrides are consistently applied at runtime.
+
+## Packaged Release Helpers
+
+For immutable release payloads, use the packaged PowerShell wrappers on
+Windows:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File C:\path\to\app\releases\current\framework\tools\deploy\windows\start_release.ps1 -ReleasesDir C:\path\to\app\releases
+powershell -ExecutionPolicy Bypass -File C:\path\to\app\releases\current\framework\tools\deploy\windows\send_release_control.ps1 -ReleasesDir C:\path\to\app\releases -Action reload
+powershell -ExecutionPolicy Bypass -File C:\path\to\app\releases\current\framework\tools\deploy\windows\send_release_control.ps1 -ReleasesDir C:\path\to\app\releases -Action term
+```
+
+Those wrappers resolve the active release via `current.release-id`, set the
+release-local app/framework roots, and keep `propane` in the foreground for the
+outer service wrapper or orchestrator.
 
 ## Lifecycle Diagnostics Contract
 

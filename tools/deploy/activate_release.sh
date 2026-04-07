@@ -1,11 +1,15 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=/dev/null
+source "$script_dir/_release_pointer.sh"
+
 usage() {
   cat <<'USAGE'
 Usage: activate_release.sh --release-id <id> [--releases-dir <path>]
 
-Switch releases/current symlink to the selected immutable release.
+Switch releases/current to the selected immutable release.
 USAGE
 }
 
@@ -49,5 +53,5 @@ if [[ ! -d "$release_dir" ]]; then
   exit 1
 fi
 
-ln -sfn "$release_dir" "$releases_dir/current"
+arlen_deploy_set_pointer "$releases_dir/current" "$release_dir" "$release_id"
 echo "release activated: $release_dir"

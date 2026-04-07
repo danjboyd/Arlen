@@ -169,19 +169,6 @@ static NSString *ALNResolveAppRoot(void) {
 
 @end
 
-@interface HealthController : ALNController
-@end
-
-@implementation HealthController
-
-- (id)check:(ALNContext *)ctx {
-  (void)ctx;
-  [self renderText:@"ok\n"];
-  return nil;
-}
-
-@end
-
 static ALNApplication *BuildApplication(NSString *environment, NSString *appRoot) {
   NSError *error = nil;
   ALNApplication *app = [[ALNApplication alloc] initWithEnvironment:environment
@@ -223,11 +210,6 @@ static ALNApplication *BuildApplication(NSString *environment, NSString *appRoot
                       name:@"tech_demo_api_summary"
            controllerClass:[TechDemoAPIController class]
                     action:@"summary"];
-  [app registerRouteMethod:@"GET"
-                      path:@"/healthz"
-                      name:@"healthz"
-           controllerClass:[HealthController class]
-                    action:@"check"];
   return app;
 }
 

@@ -12,7 +12,7 @@ make test-unit
 make test-integration
 ```
 
-For the native Windows preview on branch `windows/clang64`, use the checked-in
+For native Windows on branch `windows/clang64`, use the checked-in
 MSYS2 launcher instead:
 
 ```powershell
@@ -33,11 +33,10 @@ powershell -ExecutionPolicy Bypass -File scripts\run_clang64.ps1 -InnerCommand "
 | GNUstep config tool | `source GNUstep.sh && command -v gnustep-config` | `/usr/GNUstep/System/Tools/gnustep-config` |
 | XCTest runner | `command -v xctest` | `/usr/GNUstep/System/Tools/xctest` |
 
-## Windows Preview Baseline (2026-04-06)
+## Windows CLANG64 Baseline (2026-04-06)
 
-This is the native Windows branch contract on `windows/clang64`. It is a
-supported development/CI/runtime parity baseline through `24Q-24R`; only
-release/package/first-class platform closeout remains open in `24S`.
+This is the checked-in native Windows contract on `windows/clang64`. It is a
+supported development, CI, runtime, and release-packaging baseline.
 
 | Component | Command | Expected baseline |
 | --- | --- | --- |
@@ -48,7 +47,7 @@ release/package/first-class platform closeout remains open in `24S`.
 | Compiler | `clang --version` | available inside `CLANG64` shell |
 | Build tool | `make --version` | available inside `CLANG64` shell |
 | XCTest runner | `command -v xctest` | available inside `CLANG64` shell |
-| Preview build | `make all` | builds `eocc`, preview `libArlenFramework.a` including data-layer sources, `arlen`, and `arlen-xctest-runner` |
+| CLANG64 build | `make all` | builds `eocc`, `libArlenFramework.a` including data-layer sources, and `arlen` |
 | Default unit lane | `make test-unit` | passes on the checked-in CLANG64 contract |
 | Default integration lane | `make test-integration` | passes on the checked-in CLANG64 contract |
 | PostgreSQL live-backend lane | `make phase20-postgres-live-tests` | passes with the checked-in PostgreSQL 17 host/DLL contract |
@@ -58,6 +57,7 @@ release/package/first-class platform closeout remains open in `24S`.
 | Focused Windows runtime lane | `make phase24-windows-runtime-tests` | runs the linked `ArlenPhase24WindowsRuntimeParityTestsRunner` and validates watch/dev-error, jobs worker, and propane parity |
 | Windows confidence lane | `make phase24-windows-confidence` | runs build, focused tests, DB transport smoke, runtime parity, and app-root CLI smoke |
 | Full Windows parity lane | `make phase24-windows-parity` | runs the `24Q-24R` unit/integration/live-backend/perf/robustness parity sequence |
+| Release runbook smoke | `make deploy-smoke` | validates packaged release build, activation, runtime, reload, rollback, and operability probes |
 | App-root runtime smoke | `arlen boomhauer --port 3000` / `arlen jobs worker --once` | scaffolded app runtime flows work natively under the checked-in CLANG64 contract |
 
 Related guide:
@@ -83,12 +83,11 @@ Arlen CI requires a clang-built GNUstep stack. In practice that means:
 - `clang`, `gnustep-config`, and `xctest` are all available after sourcing `GNUstep.sh`
 - the toolchain is installed at `/usr/GNUstep` unless a workflow explicitly overrides `GNUSTEP_SH`
 
-For the Windows preview branch, the checked-in bootstrap contract is:
+For the Windows CLANG64 branch, the checked-in bootstrap contract is:
 
 - PowerShell outer launcher: `scripts/run_clang64.ps1`
 - MSYS inner launcher: `scripts/run_clang64.sh`
 - GNUstep bootstrap path: `/clang64/share/GNUstep/Makefiles/GNUstep.sh`
-- Windows preview workflow: `.github/workflows/phase24-windows-preview.yml`
 - Windows parity workflow: `.github/workflows/phase24-windows-parity.yml`
 
 The workflow bootstrap entry point is:

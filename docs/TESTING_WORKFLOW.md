@@ -75,7 +75,7 @@ Phase 20 data-layer-focused lanes remain available:
 5. Promote the change through `make test-unit`, broader integration coverage
    when applicable, and `make phase21-confidence`.
 
-For the native Windows preview branch, use the focused `phase24-windows-*`
+For native Windows CLANG64 hosts, use the focused `phase24-windows-*`
 lanes for fast reproduction, then promote through `make test-unit`,
 `make test-integration`, `make phase20-postgres-live-tests`,
 `make phase20-mssql-live-tests`, and `make phase24-windows-parity`.

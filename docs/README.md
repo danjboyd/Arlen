@@ -23,8 +23,8 @@ local hosting.
 - [Configuration Reference](CONFIGURATION_REFERENCE.md): config keys app authors touch first.
 - [Lite Mode Guide](LITE_MODE_GUIDE.md): when to choose lite mode and how to grow beyond it.
 - [Toolchain Matrix](TOOLCHAIN_MATRIX.md): known-good onboarding/runtime baseline.
-- [Windows CLANG64 Preview](WINDOWS_CLANG64.md): native Windows/MSYS2 `CLANG64` Phase 24 workflow and current support scope.
-- [Windows Runtime Story](WINDOWS_RUNTIME_STORY.md): explicit native Windows runtime/deployment support boundary.
+- [Windows CLANG64](WINDOWS_CLANG64.md): native Windows/MSYS2 `CLANG64` workflow, parity lanes, and release helpers.
+- [Windows Runtime Story](WINDOWS_RUNTIME_STORY.md): native Windows runtime, release, and service-wrapper guidance.
 - [CLI Reference](CLI_REFERENCE.md): command reference for `arlen`, `boomhauer`, and helper scripts.
 
 ## App Authoring
@@ -56,7 +56,7 @@ local hosting.
 - [Deployment Guide](DEPLOYMENT.md): deployment model and production guidance.
 - [Systemd Runbook](SYSTEMD_RUNBOOK.md): systemd unit template and incident collection steps.
 - [Propane Manager](PROPANE.md): production process manager and propane accessories.
-- [Windows Runtime Story](WINDOWS_RUNTIME_STORY.md): native Windows support boundary for runtime/deployment surfaces.
+- [Windows Runtime Story](WINDOWS_RUNTIME_STORY.md): native Windows runtime, release, and service-wrapper guidance.
 - [Release Process](RELEASE_PROCESS.md): semantic versioning, deprecations, and release checklist.
 - [Testing Workflow](TESTING_WORKFLOW.md): focused contributor lanes for turning bug reports into regressions.
 

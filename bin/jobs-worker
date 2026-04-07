@@ -25,6 +25,8 @@ if resolved="$(readlink -f "$script_path" 2>/dev/null)"; then
   script_path="$resolved"
 fi
 script_dir="$(cd "$(dirname "$script_path")" && pwd)"
+# shellcheck source=/dev/null
+source "$script_dir/_framework_root.sh"
 default_framework_root="$(cd "$script_dir/.." && pwd)"
 
 path_looks_like_windows_absolute() {
@@ -138,8 +140,7 @@ framework_root="$(cd "$framework_root" && pwd -P)"
 app_root="$(normalize_host_path "$app_root")"
 app_root="$(cd "$app_root" && pwd -P)"
 
-if [[ ! -f "$framework_root/GNUmakefile" || ! -d "$framework_root/src/Arlen" ]]; then
-  echo "jobs-worker: invalid framework root: $framework_root" >&2
+if ! framework_root_mode="$(arlen_validate_framework_root "jobs-worker" "$framework_root")"; then
   exit 1
 fi
 

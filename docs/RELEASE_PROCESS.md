@@ -70,6 +70,14 @@ tools/deploy/build_release.sh \
   --certification-manifest /path/to/Arlen/build/release_confidence/phase9j/manifest.json
 ```
 
+Windows packaged-release helpers:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File C:\path\to\app\releases\current\framework\tools\deploy\windows\invoke_release_migrate.ps1 -ReleasesDir C:\path\to\app\releases
+powershell -ExecutionPolicy Bypass -File C:\path\to\app\releases\current\framework\tools\deploy\windows\start_release.ps1 -ReleasesDir C:\path\to\app\releases
+powershell -ExecutionPolicy Bypass -File C:\path\to\app\releases\current\framework\tools\deploy\windows\send_release_control.ps1 -ReleasesDir C:\path\to\app\releases -Action reload
+```
+
 Validate activation + rollback:
 
 ```bash

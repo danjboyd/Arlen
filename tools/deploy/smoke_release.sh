@@ -5,7 +5,7 @@ usage() {
   cat <<'USAGE'
 Usage: smoke_release.sh [options]
 
-Validate release build/activate/health-readiness operability/rollback runbook end-to-end.
+Validate release build/activate/propane-operability/reload/rollback runbook end-to-end.
 
 Options:
   --app-root <path>        App root to package (default: cwd)
@@ -20,6 +20,8 @@ USAGE
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 framework_root="$(cd "$script_dir/../.." && pwd)"
+# shellcheck source=/dev/null
+source "$script_dir/_release_pointer.sh"
 app_root="$PWD"
 work_dir=""
 port=3901
@@ -88,27 +90,86 @@ cleanup() {
 }
 trap cleanup EXIT
 
+terminate_server_pid() {
+  local server_pid="$1"
+  local control_file="${2:-}"
+  local probe_port="${3:-}"
+  if [[ -z "$server_pid" ]]; then
+    return 0
+  fi
+
+  if [[ -n "$control_file" ]]; then
+    mkdir -p "$(dirname "$control_file")"
+    printf 'term\n' >"$control_file" 2>/dev/null || true
+    for _ in $(seq 1 40); do
+      if ! kill -0 "$server_pid" >/dev/null 2>&1; then
+        return 0
+      fi
+      sleep 0.1
+    done
+  fi
+
+  if arlen_deploy_is_windows_host; then
+    if [[ -n "$probe_port" ]]; then
+      ARLEN_DEPLOY_PROBE_PORT="$probe_port" \
+        powershell -NoProfile -Command \
+          '$port = [int]$env:ARLEN_DEPLOY_PROBE_PORT; Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -Unique | ForEach-Object { Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue }' \
+        >/dev/null 2>&1 || true
+    fi
+    cmd.exe /d /c "taskkill /PID $server_pid /T /F >NUL 2>NUL" >/dev/null 2>&1 || true
+    return 0
+  fi
+
+  kill -TERM "$server_pid" >/dev/null 2>&1 || true
+}
+
+request_release_control() {
+  local control_file="$1"
+  local action="$2"
+  mkdir -p "$(dirname "$control_file")"
+  printf '%s\n' "$action" >"$control_file"
+}
+
+wait_for_release_health() {
+  local probe_port="$1"
+  for _ in $(seq 1 120); do
+    if curl -fsS "http://127.0.0.1:${probe_port}/healthz" >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep 0.1
+  done
+  return 1
+}
+
+wait_for_release_control_consumption() {
+  local control_file="$1"
+  for _ in $(seq 1 50); do
+    if [[ ! -e "$control_file" ]]; then
+      return 0
+    fi
+    sleep 0.1
+  done
+  return 1
+}
+
 run_release_health_check() {
   local release_dir="$1"
   local probe_port="$2"
   local server_log="$3"
+  local pid_file="$release_dir/app/tmp/propane.pid"
+  local control_file="$release_dir/app/tmp/propane.control"
+
+  mkdir -p "$release_dir/app/tmp"
+  rm -f "$pid_file" "$control_file"
 
   ARLEN_APP_ROOT="$release_dir/app" \
     ARLEN_FRAMEWORK_ROOT="$release_dir/framework" \
-    "$release_dir/framework/build/boomhauer" --port "$probe_port" >"$server_log" 2>&1 &
+    ARLEN_PROPANE_CONTROL_FILE="$control_file" \
+    "$release_dir/framework/bin/propane" --env production --port "$probe_port" --pid-file "$pid_file" >"$server_log" 2>&1 &
   local server_pid=$!
 
-  local success=0
-  for _ in $(seq 1 60); do
-    if curl -fsS "http://127.0.0.1:${probe_port}/healthz" >/dev/null 2>&1; then
-      success=1
-      break
-    fi
-    sleep 0.05
-  done
-
-  if [[ "$success" != "1" ]]; then
-    kill -TERM "$server_pid" >/dev/null 2>&1 || true
+  if ! wait_for_release_health "$probe_port"; then
+    terminate_server_pid "$server_pid" "$control_file" "$probe_port"
     wait "$server_pid" || true
     echo "smoke_release.sh: health probe failed for $release_dir"
     echo "smoke_release.sh: server log follows"
@@ -118,7 +179,7 @@ run_release_health_check() {
 
   if ! "$framework_root/tools/deploy/validate_operability.sh" \
       --base-url "http://127.0.0.1:${probe_port}" >/dev/null; then
-    kill -TERM "$server_pid" >/dev/null 2>&1 || true
+    terminate_server_pid "$server_pid" "$control_file" "$probe_port"
     wait "$server_pid" || true
     echo "smoke_release.sh: operability validation failed for $release_dir"
     echo "smoke_release.sh: server log follows"
@@ -126,7 +187,18 @@ run_release_health_check() {
     return 1
   fi
 
-  kill -TERM "$server_pid" >/dev/null 2>&1 || true
+  request_release_control "$control_file" "reload"
+  wait_for_release_control_consumption "$control_file" || true
+  if ! wait_for_release_health "$probe_port"; then
+    terminate_server_pid "$server_pid" "$control_file" "$probe_port"
+    wait "$server_pid" || true
+    echo "smoke_release.sh: reload probe failed for $release_dir"
+    echo "smoke_release.sh: server log follows"
+    cat "$server_log"
+    return 1
+  fi
+
+  terminate_server_pid "$server_pid" "$control_file" "$probe_port"
   wait "$server_pid" || true
   return 0
 }
@@ -149,7 +221,7 @@ run_release_health_check() {
   --releases-dir "$releases_dir" \
   --release-id "$release_b" >/dev/null
 
-current_release="$(readlink -f "$releases_dir/current")"
+current_release="$(arlen_deploy_resolved_release_path "$releases_dir" "$releases_dir/current")"
 if [[ ! -f "$current_release/metadata/release.env" ]]; then
   echo "smoke_release.sh: missing release metadata in active release"
   exit 1
@@ -160,7 +232,7 @@ run_release_health_check "$current_release" "$port" "$work_dir/server_${release_
   --releases-dir "$releases_dir" \
   --release-id "$release_a" >/dev/null
 
-current_release="$(readlink -f "$releases_dir/current")"
+current_release="$(arlen_deploy_resolved_release_path "$releases_dir" "$releases_dir/current")"
 if [[ "$current_release" != "$releases_dir/$release_a" ]]; then
   echo "smoke_release.sh: rollback failed to activate $release_a"
   exit 1

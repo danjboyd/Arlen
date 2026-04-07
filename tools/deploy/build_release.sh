@@ -42,6 +42,8 @@ json_escape() {
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 default_framework_root="$(cd "$script_dir/../.." && pwd)"
+# shellcheck source=/dev/null
+source "$script_dir/_release_pointer.sh"
 
 app_root="$PWD"
 framework_root="$default_framework_root"
@@ -389,7 +391,7 @@ if [[ "$dry_run" == "1" ]]; then
   exit 0
 fi
 
-make -C "$framework_root" arlen boomhauer >/dev/null
+make -C "$framework_root" eocc arlen boomhauer build/lib/libArlenFramework.a >/dev/null
 
 mkdir -p "$release_dir/app" "$release_dir/framework" "$release_dir/metadata"
 
@@ -402,6 +404,12 @@ copy_if_exists() {
   fi
 }
 
+copy_artifact_if_exists() {
+  local src_base="$1"
+  local destination_dir="$2"
+  arlen_deploy_copy_artifact_to_dir "$src_base" "$destination_dir" || true
+}
+
 # Package app payload.
 copy_if_exists "$app_root/config" "$release_dir/app/config"
 copy_if_exists "$app_root/public" "$release_dir/app/public"
@@ -412,8 +420,13 @@ copy_if_exists "$app_root/app_lite.m" "$release_dir/app/app_lite.m"
 
 # Package runtime/tooling payload used by deploy scripts.
 copy_if_exists "$framework_root/bin" "$release_dir/framework/bin"
-copy_if_exists "$framework_root/build/boomhauer" "$release_dir/framework/build/boomhauer"
-copy_if_exists "$framework_root/build/arlen" "$release_dir/framework/build/arlen"
+copy_if_exists "$framework_root/src" "$release_dir/framework/src"
+copy_if_exists "$framework_root/modules" "$release_dir/framework/modules"
+copy_if_exists "$framework_root/tools/deploy" "$release_dir/framework/tools/deploy"
+copy_artifact_if_exists "$framework_root/build/eocc" "$release_dir/framework/build"
+copy_artifact_if_exists "$framework_root/build/boomhauer" "$release_dir/framework/build"
+copy_artifact_if_exists "$framework_root/build/arlen" "$release_dir/framework/build"
+copy_artifact_if_exists "$framework_root/build/lib/libArlenFramework.a" "$release_dir/framework/build/lib"
 
 if [[ "$allow_missing_certification" != "1" ]]; then
   certification_source_dir="$(cd "$(dirname "$certification_manifest")" && pwd)"
@@ -434,6 +447,8 @@ RELEASE_ID=$release_id
 RELEASE_CREATED_UTC=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 ARLEN_APP_ROOT=$release_dir/app
 ARLEN_FRAMEWORK_ROOT=$release_dir/framework
+ARLEN_PROPANE_PID_FILE=$release_dir/app/tmp/propane.pid
+ARLEN_PROPANE_CONTROL_FILE=$release_dir/app/tmp/propane.control
 ARLEN_RELEASE_CERTIFICATION_STATUS=$certification_status
 ARLEN_RELEASE_CERTIFICATION_MANIFEST=$certification_bundle_manifest
 ARLEN_JSON_PERFORMANCE_STATUS=$json_performance_status
@@ -449,14 +464,25 @@ JSON performance status: $json_performance_status
 JSON performance manifest: $json_performance_bundle_manifest
 
 Run migrate step before switching traffic:
-  cd "$release_dir/app" && "$release_dir/framework/build/arlen" migrate --env production
+  cd "$release_dir/app" && "$release_dir/framework/bin/arlen" migrate --env production
 
 Run propane from this release:
   ARLEN_APP_ROOT="$release_dir/app" ARLEN_FRAMEWORK_ROOT="$release_dir/framework" \
-    "$release_dir/framework/bin/propane" --env production
+  ARLEN_PROPANE_CONTROL_FILE="$release_dir/app/tmp/propane.control" \
+    "$release_dir/framework/bin/propane" --env production --pid-file "$release_dir/app/tmp/propane.pid"
+
+Windows PowerShell migrate helper:
+  powershell -ExecutionPolicy Bypass -File "$release_dir/framework/tools/deploy/windows/invoke_release_migrate.ps1" -ReleaseRoot "$release_dir"
+
+Windows PowerShell runtime helper:
+  powershell -ExecutionPolicy Bypass -File "$release_dir/framework/tools/deploy/windows/start_release.ps1" -ReleaseRoot "$release_dir"
+
+Windows PowerShell runtime control:
+  powershell -ExecutionPolicy Bypass -File "$release_dir/framework/tools/deploy/windows/send_release_control.ps1" -ReleaseRoot "$release_dir" -Action reload
+  powershell -ExecutionPolicy Bypass -File "$release_dir/framework/tools/deploy/windows/send_release_control.ps1" -ReleaseRoot "$release_dir" -Action term
 EOF
 
-ln -sfn "$release_dir" "$releases_dir/latest-built"
+arlen_deploy_set_pointer "$releases_dir/latest-built" "$release_dir" "$release_id"
 if [[ "$output_json" == "1" ]]; then
   emit_success_json "ok" "$release_dir" "$releases_dir/latest-built"
 else

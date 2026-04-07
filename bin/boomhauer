@@ -25,6 +25,8 @@ USAGE
 
 script_path="${BASH_SOURCE[0]}"
 script_dir="$(cd "$(dirname "$script_path")" && pwd -P)"
+# shellcheck source=/dev/null
+source "$script_dir/_framework_root.sh"
 default_framework_root="$(cd "$script_dir/.." && pwd)"
 framework_root="${ARLEN_FRAMEWORK_ROOT:-$default_framework_root}"
 
@@ -134,13 +136,11 @@ fi
 framework_root="$(normalize_host_path "$framework_root")"
 if ! framework_root="$(cd "$framework_root" 2>/dev/null && pwd -P)"; then
   echo "boomhauer: invalid framework root: $framework_root" >&2
-  echo "boomhauer: set ARLEN_FRAMEWORK_ROOT to a valid Arlen repository root" >&2
+  echo "boomhauer: set ARLEN_FRAMEWORK_ROOT to an Arlen checkout or packaged release framework payload" >&2
   exit 1
 fi
 
-if [[ ! -f "$framework_root/GNUmakefile" || ! -d "$framework_root/src/Arlen" ]]; then
-  echo "boomhauer: invalid framework root: $framework_root" >&2
-  echo "boomhauer: set ARLEN_FRAMEWORK_ROOT to a valid Arlen repository root" >&2
+if ! framework_root_mode="$(arlen_validate_framework_root "boomhauer" "$framework_root")"; then
   exit 1
 fi
 
@@ -696,8 +696,50 @@ boomhauer: rebuild $framework_root cleanly without sanitizer flags before using 
 EOF
 }
 
+emit_packaged_framework_link_mode_diagnostic() {
+  local output_file="$1"
+
+  cat >"$output_file" <<EOF
+boomhauer: packaged framework root contains sanitizer-instrumented framework artifacts:
+  $framework_lib
+boomhauer: packaged release payloads must carry a clean libArlenFramework.a because boomhauer cannot rebuild framework artifacts from an immutable release.
+boomhauer: rebuild and repackage the framework from a clean checkout before activating this release.
+EOF
+}
+
 ensure_framework_artifacts_ready() {
   local output_file="$1"
+
+  if [[ "$framework_root_mode" == "packaged" ]]; then
+    if ! resolve_compiled_binary "$framework_root/build/eocc" >/dev/null || [[ ! -f "$framework_lib" ]]; then
+      cat >"$output_file" <<EOF
+boomhauer: packaged framework root is missing prebuilt runtime artifacts:
+  expected eocc under $framework_root/build
+  expected libArlenFramework.a under $framework_root/build/lib
+boomhauer: run tools/deploy/build_release.sh from a prepared checkout so the release payload includes immutable framework build artifacts.
+EOF
+      record_build_failure \
+        "tooling" \
+        "verify packaged framework artifacts under $framework_root/build" \
+        1 \
+        "$output_file"
+      return 1
+    fi
+
+    echo "boomhauer: [1/4] using packaged framework artifacts"
+    if framework_archive_contains_sanitizers; then
+      emit_packaged_framework_link_mode_diagnostic "$output_file"
+      record_build_failure \
+        "framework_link_mode" \
+        "verify packaged $framework_lib is free of sanitizer instrumentation" \
+        2 \
+        "$output_file"
+      return 2
+    fi
+
+    : >"$output_file"
+    return 0
+  fi
 
   if framework_artifacts_are_current; then
     if framework_archive_contains_sanitizers; then

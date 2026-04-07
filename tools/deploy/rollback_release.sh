@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=/dev/null
+source "$script_dir/_release_pointer.sh"
+
 usage() {
   cat <<'USAGE'
 Usage: rollback_release.sh [--release-id <id>] [--releases-dir <path>]
@@ -43,16 +47,12 @@ if [[ ! -d "$releases_dir" ]]; then
 fi
 releases_dir="$(cd "$releases_dir" && pwd)"
 
-current_target=""
-if [[ -L "$releases_dir/current" ]]; then
-  current_target="$(readlink -f "$releases_dir/current" || true)"
-fi
+current_release_id="$(arlen_deploy_resolved_release_id "$releases_dir/current" || true)"
 
 if [[ -z "$target_release_id" ]]; then
   mapfile -t candidates < <(find "$releases_dir" -mindepth 1 -maxdepth 1 -type d -printf "%f\n" | sort -r)
   for candidate in "${candidates[@]}"; do
-    candidate_path="$releases_dir/$candidate"
-    if [[ "$candidate_path" == "$current_target" ]]; then
+    if [[ "$candidate" == "$current_release_id" ]]; then
       continue
     fi
     target_release_id="$candidate"
@@ -71,5 +71,5 @@ if [[ ! -d "$target_path" ]]; then
   exit 1
 fi
 
-ln -sfn "$target_path" "$releases_dir/current"
+arlen_deploy_set_pointer "$releases_dir/current" "$target_path" "$target_release_id"
 echo "rollback activated: $target_path"

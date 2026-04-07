@@ -99,7 +99,7 @@ selected database target.
 - PostgreSQL-specific commands that are disallowed inside transaction blocks still fail under `arlen migrate`
 - MSSQL requires an installed ODBC manager/runtime client plus a SQL Server
   driver; core Arlen does not link to Microsoft's driver
-- Windows CLANG64 preview:
+- Windows CLANG64 support:
   - supported when the checked-in libpq/ODBC transport discovery contract is satisfied
   - use `arlen doctor` first to confirm DLL/runtime visibility
 
@@ -214,7 +214,7 @@ Introspect PostgreSQL schema metadata and generate typed table/column helper API
 - `ALNDatabaseInspector inspectSchemaMetadataForAdapter:` remains PostgreSQL-only
   and now emits additive `schemas`, `check_constraints`, `view_definitions`,
   `relation_comments`, and `column_comments` metadata for audit/reporting tools
-- Windows CLANG64 preview:
+- Windows CLANG64 support:
   - supported for PostgreSQL when `libpq` is available through the documented
     DLL discovery contract
 
@@ -273,7 +273,7 @@ Build and run `boomhauer` for the current app root.
 - transpile/compile failures in watch mode do not terminate supervisor; diagnostics are served until next successful rebuild
 - while the fallback diagnostic server is active, `boomhauer` retries failed builds on a short backoff and the HTML error page advertises that recovery behavior
 - server args are passed through (`--watch`, `--no-watch`, `--prepare-only`, `--port`, `--host`, `--env`, `--once`, `--print-routes`)
-- Windows CLANG64 preview:
+- Windows CLANG64 support:
   - supported for app-root watch and non-watch flows, including the fallback dev error server retry loop
   - path/bootstrap discovery resolves `GNUstep.sh` dynamically and accepts Windows-owned app-root paths through MSYS normalization
 
@@ -285,9 +285,9 @@ Build and run the first-party jobs worker loop for the current app root.
 - compiles the app through `bin/boomhauer --no-watch --prepare-only` and then runs `.boomhauer/build/boomhauer-app` in jobs-worker mode
 - if that prepare step fails, exits with the same non-zero status and points at `.boomhauer/last_build_error.log`
 - worker args are passed through (`--env`, `--once`, `--limit`, `--poll-interval-seconds`, `--run-scheduler`, `--scheduler-interval-seconds`)
-- Windows CLANG64 preview:
+- Windows CLANG64 support:
   - supported natively for app-root workflows through the same prepare-then-run contract as Linux
-  - see `docs/WINDOWS_RUNTIME_STORY.md` for the remaining Windows preview boundary
+  - packaged release payloads can also reuse the same framework/app-root contract
 
 ### `arlen propane [manager args...]`
 
@@ -296,26 +296,25 @@ Run production manager (`propane`) for the current app root.
 - manager args are forwarded to `bin/propane`
 - app-root launches first run `bin/boomhauer --no-watch --prepare-only`; if that fails, `propane` exits non-zero and points at `.boomhauer/last_build_error.log`
 - all production manager settings are called "propane accessories"
-- Windows CLANG64 preview:
+- Windows CLANG64 support:
   - supported natively for app-root workflows, including build-before-launch, reload/shutdown handling, and propane accessories
-  - see `docs/WINDOWS_RUNTIME_STORY.md` for the remaining Windows preview boundary
+  - packaged release payloads can also reuse the same framework/app-root contract
 
 ### `arlen routes`
 
 Build app and print resolved routes (`--print-routes`).
 
-- Windows CLANG64 preview: supported through `bin/boomhauer --no-watch --print-routes`
+- Windows CLANG64 support: supported through `bin/boomhauer --no-watch --print-routes`
 
 ### `arlen test [--unit|--integration|--all]`
 
 Run framework tests.
 
 - default: equivalent to `--all`
-- Windows CLANG64 preview:
-  - supported lane: focused template suite only
-  - `arlen test --unit` maps to `make phase24-windows-tests`
-  - `--integration` and `--all` remain deferred; use `arlen check` for the
-    broader Windows confidence lane
+- Windows CLANG64 support:
+  - `arlen test --unit` maps to `make test-unit`
+  - `arlen test --integration` maps to `make test-integration`
+  - `arlen test --all` maps to `make test`
 
 ### `arlen perf`
 
@@ -333,9 +332,10 @@ Profile selection is environment-driven:
 
 Run quality gate:
 
-- Windows CLANG64 preview:
-  - maps to `make phase24-windows-confidence`
-  - runs build, focused tests, DB transport smoke, and app-root CLI smoke
+- Windows CLANG64 support:
+  - maps to `make phase24-windows-parity`
+  - runs the checked-in Windows parity sweep, including default unit/integration,
+    live-backend, and perf/robustness lanes
 - non-Windows:
   - maps to `make check`
   - includes unit tests, integration tests, and perf gate

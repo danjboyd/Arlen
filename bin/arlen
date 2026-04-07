@@ -2,6 +2,19 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+resolve_compiled_binary() {
+  local candidate="$1"
+  if [[ -x "$candidate" ]]; then
+    printf '%s\n' "$candidate"
+    return 0
+  fi
+  if [[ "$candidate" != *.exe ]] && [[ -x "$candidate.exe" ]]; then
+    printf '%s\n' "$candidate.exe"
+    return 0
+  fi
+  return 1
+}
+
 if [[ "${1:-}" == "doctor" ]]; then
   shift
   if [[ ! -x "$repo_root/bin/arlen-doctor" ]]; then
@@ -12,4 +25,8 @@ if [[ "${1:-}" == "doctor" ]]; then
 fi
 
 make -C "$repo_root" arlen >/dev/null
-exec "$repo_root/build/arlen" "$@"
+if ! arlen_binary="$(resolve_compiled_binary "$repo_root/build/arlen")"; then
+  echo "arlen: compiled binary missing under $repo_root/build" >&2
+  exit 1
+fi
+exec "$arlen_binary" "$@"

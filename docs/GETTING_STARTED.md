@@ -21,8 +21,8 @@ Initialize GNUstep in your shell:
 source /usr/GNUstep/System/Library/Makefiles/GNUstep.sh
 ```
 
-For the native Windows Phase 24 preview on MSYS2 `CLANG64`, enter the checked-in
-toolchain shell instead:
+For native Windows on MSYS2 `CLANG64`, enter the checked-in toolchain shell
+instead:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts\run_clang64.ps1
@@ -56,12 +56,11 @@ This builds the main tools you will use first:
 - `build/boomhauer`
 - `build/eocc`
 
-On the Windows preview branch, `make all` currently builds:
+On Windows CLANG64, `make all` currently builds:
 
 - `build/arlen`
-- `build/arlen-xctest-runner`
 - `build/eocc`
-- the preview `libArlenFramework.a`
+- `build/lib/libArlenFramework.a`
 
 ## 3. Create Your First App
 
@@ -93,12 +92,6 @@ From app root:
 /path/to/Arlen/bin/arlen boomhauer --port 3000
 ```
 
-On the Windows preview, use non-watch mode for now:
-
-```bash
-/path/to/Arlen/bin/arlen boomhauer --no-watch --port 3000
-```
-
 Then verify:
 
 ```bash
@@ -108,7 +101,7 @@ curl -i http://127.0.0.1:3000/openapi
 ```
 
 `boomhauer` watches app files by default and rebuilds when inputs change on
-Linux and on the current Windows CLANG64 app-root flow.
+both Linux and the checked-in Windows CLANG64 app-root flow.
 
 ## 5. Add One More Route
 
@@ -144,14 +137,14 @@ From app root:
 ```
 
 Use `arlen routes` when you want to inspect registration order and route names.
-On the Windows preview:
+On Windows CLANG64:
 
 - use `make phase24-windows-tests`, `make phase24-windows-db-smoke`, and
   `make phase24-windows-runtime-tests` for the fastest focused CLANG64 reruns
 - promote broader fixes through `make test-unit`, `make test-integration`,
   `make phase20-postgres-live-tests`, and `make phase20-mssql-live-tests`
 - use `make phase24-windows-confidence` for the focused Windows confidence pack
-  or `make phase24-windows-parity` for the full `24Q-24R` parity workflow
+  or `make phase24-windows-parity` for the full parity workflow
 
 ## 7. Choose the Next Guide
 

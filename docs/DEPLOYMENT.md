@@ -1,8 +1,8 @@
 # Deployment Guide
 
-Native Windows development/CI support is documented separately in
-`docs/WINDOWS_RUNTIME_STORY.md`. This guide describes the supported Linux
-production path.
+This guide describes the shared Arlen deployment model plus the supported Linux
+and Windows production paths. Native Windows runtime and service-wrapper
+details also live in `docs/WINDOWS_RUNTIME_STORY.md`.
 
 Arlen is designed for deployment behind a reverse proxy.
 
@@ -129,15 +129,21 @@ tools/deploy/activate_release.sh \
   --release-id <release-id>
 ```
 
-This switches `releases/current` symlink.
+This switches `releases/current` and updates `releases/current.release-id`.
 
 ### 5.3 Run migration step (explicit)
 
-From activated release payload:
+From activated release payload on Linux/MSYS:
 
 ```bash
 cd /path/to/app/releases/current/app
-/path/to/app/releases/current/framework/build/arlen migrate --env production
+/path/to/app/releases/current/framework/bin/arlen migrate --env production
+```
+
+From PowerShell on Windows:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File C:\path\to\app\releases\current\framework\tools\deploy\windows\invoke_release_migrate.ps1 -ReleasesDir C:\path\to\app\releases
 ```
 
 ### 5.4 Start runtime from activated release
@@ -145,7 +151,21 @@ cd /path/to/app/releases/current/app
 ```bash
 ARLEN_APP_ROOT=/path/to/app/releases/current/app \
 ARLEN_FRAMEWORK_ROOT=/path/to/app/releases/current/framework \
-/path/to/app/releases/current/framework/bin/propane --env production
+ARLEN_PROPANE_CONTROL_FILE=/path/to/app/releases/current/app/tmp/propane.control \
+/path/to/app/releases/current/framework/bin/propane --env production --pid-file /path/to/app/releases/current/app/tmp/propane.pid
+```
+
+From PowerShell on Windows:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File C:\path\to\app\releases\current\framework\tools\deploy\windows\start_release.ps1 -ReleasesDir C:\path\to\app\releases
+```
+
+Runtime control on Windows:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File C:\path\to\app\releases\current\framework\tools\deploy\windows\send_release_control.ps1 -ReleasesDir C:\path\to\app\releases -Action reload
+powershell -ExecutionPolicy Bypass -File C:\path\to\app\releases\current\framework\tools\deploy\windows\send_release_control.ps1 -ReleasesDir C:\path\to\app\releases -Action term
 ```
 
 ## 6. Container-First Runbook (Baseline)
@@ -158,7 +178,7 @@ Minimum container deployment path:
 4. Start `propane --env production` as container entrypoint.
 5. Probe `/readyz` and `/livez` for rollout/health checks.
 
-## 7. VM/systemd Runbook (Baseline)
+## 7. VM/systemd Runbook (Linux Baseline)
 
 Use release symlink plus explicit environment wiring in service unit.
 
@@ -189,11 +209,26 @@ Recommended pattern:
 - enable incident-only debug mode with a drop-in plus a second env file
 - avoid maintaining separate long-lived "normal" and "debug" service units
 
-Detailed steps:
+Detailed Linux steps:
 
 - `docs/SYSTEMD_RUNBOOK.md`
 
-## 8. Rollback Workflow
+## 8. Windows Service Wrapper Baseline
+
+Windows uses the same immutable release artifact layout, but the supported
+orchestration entrypoints are the packaged PowerShell helpers instead of
+`systemd`.
+
+Recommended baseline:
+
+- keep a stable `releases` directory per app
+- run `invoke_release_migrate.ps1` before traffic switch
+- have your Windows service wrapper execute `start_release.ps1 -ReleasesDir <path>`
+- use `send_release_control.ps1 -Action reload` for rolling refreshes
+- use `send_release_control.ps1 -Action term` for graceful shutdown
+- keep `ARLEN_BASH_PATH` set when MSYS `bash.exe` lives outside the default paths
+
+## 9. Rollback Workflow
 
 Rollback to specific release:
 
@@ -211,7 +246,7 @@ tools/deploy/rollback_release.sh --releases-dir /path/to/app/releases
 
 After rollback symlink switch, restart/reload `propane` from `releases/current`.
 
-## 9. Automated Runbook Validation
+## 10. Automated Runbook Validation
 
 Phase 3C adds automated smoke validation for the documented release runbook:
 
@@ -241,7 +276,7 @@ This validates:
 - rollback
 - text + JSON health/readiness probe contracts after rollback
 
-## 10. Current Capability Snapshot
+## 11. Current Capability Snapshot
 
 | Capability | Current state | Verification |
 | --- | --- | --- |
@@ -251,5 +286,6 @@ This validates:
 | Explicit migration step in runbook | Available | Scripted release metadata + docs |
 | Readiness/liveness endpoint contract | Available | Unit + integration tests |
 | Rollback workflow | Available | Deployment integration test |
-| Container + systemd baseline guidance | Available | Documented runbook baseline |
+| Container + Linux systemd baseline guidance | Available | Documented runbook baseline |
+| Windows release helper / service-wrapper guidance | Available | `docs/WINDOWS_RUNTIME_STORY.md` + packaged PowerShell helpers |
 | Deployment runbook smoke validation | Available | `tools/deploy/smoke_release.sh` + integration test |

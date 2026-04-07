@@ -1,6 +1,6 @@
 # Arlen Phase 24 Roadmap
 
-Status: in progress on 2026-04-06 (`24A-24R` delivered on branch `windows/clang64` for the checked-in CLANG64 Windows parity contract; `24S` now tracks the remaining release/package/first-class platform closeout work)
+Status: complete on 2026-04-06 (`24A-24S` delivered on branch `windows/clang64` for the checked-in CLANG64 Windows parity, release, and platform contract)
 Last updated: 2026-04-06
 
 Related docs:
@@ -809,13 +809,15 @@ Acceptance (required):
 
 ## 5.19 Phase 24S: Release, Packaging, + First-Class Platform Closeout
 
-Status: planned
+Status: complete
 
 Checkpoint notes:
 
-- The current Windows docs still describe a preview contract with explicit
-  non-support boundaries.
-- Linux remains the de facto default platform in the release/install story.
+- Windows docs, CLI entrypoints, and release helpers now reflect the supported
+  CLANG64 parity contract rather than a preview boundary.
+- The immutable release workflow now ships Windows PowerShell wrappers for
+  migrate, start, reload, and stop operations alongside the Linux shell
+  helpers.
 
 Deliverables:
 
@@ -825,6 +827,22 @@ Deliverables:
   platform.
 - Update contributor, user, and deployment docs so Windows is documented
   alongside Linux rather than as a separate preview exception path.
+
+Completed implementation:
+
+- `tools/deploy/build_release.sh` now packages the framework runtime binaries,
+  static library, source/module headers, deploy tooling, and Windows release
+  helpers needed by immutable Windows releases.
+- `bin/boomhauer`, `bin/jobs-worker`, and `bin/propane` now accept packaged
+  framework roots in addition to source checkouts.
+- `tools/deploy/windows/{invoke_release_migrate,start_release,send_release_control}.ps1`
+  define the checked-in Windows packaged-release contract.
+- `docs/WINDOWS_CLANG64.md`, `docs/WINDOWS_RUNTIME_STORY.md`,
+  `docs/DEPLOYMENT.md`, `docs/RELEASE_PROCESS.md`, `docs/PROPANE.md`,
+  `docs/TOOLCHAIN_MATRIX.md`, `docs/GETTING_STARTED.md`, `README.md`, and
+  `docs/README.md` now document Windows as a first-class supported platform.
+- `make deploy-smoke` and the targeted deployment integration tests now pass on
+  the checked-in Windows CLANG64 host.
 
 Acceptance (required):
 

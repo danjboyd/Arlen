@@ -2,14 +2,14 @@
 
 Last updated: 2026-04-06
 
-This document defines the truthful native Windows runtime/deployment contract
-for Arlen on the `windows/clang64` branch.
+This document defines the native Windows runtime, release, and service-wrapper
+contract for Arlen on the `windows/clang64` branch.
 
 ## Supported Native Windows Scope
 
-Native Windows support is currently aimed at development, CI validation, the
-default unit/integration/live-backend entrypoints, and the checked-in parity
-lanes on MSYS2 `CLANG64`.
+Native Windows support covers development, CI validation, the default
+unit/integration/live-backend entrypoints, the checked-in parity lanes, and
+the immutable release workflow on MSYS2 `CLANG64`.
 
 Supported entrypoints:
 
@@ -23,9 +23,11 @@ Supported entrypoints:
 - `make phase24-windows-runtime-tests`
 - `make phase24-windows-confidence`
 - `make phase24-windows-parity`
+- `make deploy-smoke`
 - `arlen doctor`
 - `arlen build`
 - `arlen check`
+- `arlen test`
 - `arlen boomhauer`
 - `arlen jobs worker`
 - `arlen propane`
@@ -33,30 +35,87 @@ Supported entrypoints:
 - `arlen migrate`
 - `arlen schema-codegen`
 - `arlen module migrate`
+- `tools/deploy/build_release.sh`
+- `tools/deploy/activate_release.sh`
+- `tools/deploy/rollback_release.sh`
+- `tools/deploy/smoke_release.sh`
+- `tools/deploy/windows/invoke_release_migrate.ps1`
+- `tools/deploy/windows/start_release.ps1`
+- `tools/deploy/windows/send_release_control.ps1`
 
-## Explicit Native Windows Non-Support
+## Release Artifact Contract
 
-These remain intentionally incomplete or unsupported as first-class Windows
-platform claims:
+Windows release artifacts use the same immutable layout as Linux:
 
-- Windows release/install/package closeout
-- Windows service-integration guidance beyond direct `propane` usage
-- the Linux/systemd deployment story
+```text
+releases/<release-id>/
+  app/
+  framework/
+  metadata/
+```
 
-Arlen now supports the checked-in native Windows runtime entrypoints through
-`boomhauer`, `jobs worker`, and `propane`, plus the broader test/live-backend
-and perf/robustness parity lanes, but it does not yet claim that Windows is a
-fully closed-out first-class platform. That broader platform claim remains
-gated on Phase `24S`.
+The packaged framework payload includes:
 
-## Recommended Production Path
+- `bin/`
+- `src/`
+- `modules/`
+- `build/eocc`
+- `build/arlen`
+- `build/boomhauer`
+- `build/lib/libArlenFramework.a`
+- `tools/deploy/`
 
-If you need the most mature packaged production path today:
+`metadata/release.env` and `metadata/README.txt` capture the resolved app,
+framework, PID, and control-file paths for the release.
 
-- Linux remains the default documented deployment target
-- follow `docs/DEPLOYMENT.md`, `docs/PROPANE.md`, and
-  `docs/SYSTEMD_RUNBOOK.md` there
+## Windows Rollout Sequence
 
-Windows hosts can now run Arlen natively through the checked-in `CLANG64`
-`propane` path and parity lanes, but the surrounding release/install/service
-story is still part of the remaining Phase `24S` closeout work.
+1. Build the release artifact from a CLANG64 shell with
+   `tools/deploy/build_release.sh`.
+2. Activate it with `tools/deploy/activate_release.sh`.
+3. Run the packaged migration helper:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File C:\srv\MyApp\releases\current\framework\tools\deploy\windows\invoke_release_migrate.ps1 -ReleasesDir C:\srv\MyApp\releases
+```
+
+4. Start the packaged runtime:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File C:\srv\MyApp\releases\current\framework\tools\deploy\windows\start_release.ps1 -ReleasesDir C:\srv\MyApp\releases
+```
+
+5. Reload or stop the running release through the packaged control helper:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File C:\srv\MyApp\releases\current\framework\tools\deploy\windows\send_release_control.ps1 -ReleasesDir C:\srv\MyApp\releases -Action reload
+powershell -ExecutionPolicy Bypass -File C:\srv\MyApp\releases\current\framework\tools\deploy\windows\send_release_control.ps1 -ReleasesDir C:\srv\MyApp\releases -Action term
+```
+
+The PowerShell helpers resolve the active release through
+`releases/current.release-id`, so Windows orchestration does not depend on MSYS
+symlink or junction traversal.
+
+## Service Wrapper Guidance
+
+Windows does not use `systemd`, but the supported runtime contract is the same
+immutable-release model used on Linux:
+
+- keep one stable `releases` directory per app
+- point your Windows service wrapper or orchestrator at
+  `start_release.ps1 -ReleasesDir <path>`
+- run `invoke_release_migrate.ps1` before switching traffic
+- use `send_release_control.ps1 -Action reload` for rolling refreshes
+- use `send_release_control.ps1 -Action term` for graceful shutdown
+- restart on unexpected `propane` exit the same way the Linux `systemd` unit
+  does
+
+If `bash.exe` is not installed at `C:\msys64\usr\bin\bash.exe` or
+`C:\Program Files\Git\bin\bash.exe`, set `ARLEN_BASH_PATH` or pass `-BashPath`
+to the PowerShell helpers.
+
+## Cross-Platform Notes
+
+- Linux `systemd` guidance remains in `docs/SYSTEMD_RUNBOOK.md`.
+- The shared deployment model, rollback contract, and `deploy-smoke`
+  verification flow remain documented in `docs/DEPLOYMENT.md`.

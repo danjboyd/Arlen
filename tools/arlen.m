@@ -36,13 +36,13 @@ static void PrintUsage(void) {
 #if ARLEN_WINDOWS_PREVIEW
   fprintf(stderr,
           "\n"
-          "Windows CLANG64 preview:\n"
+          "Windows CLANG64 support:\n"
           "  supported: doctor, config, new, generate, build, check, boomhauer,\n"
-          "             jobs worker, propane, routes, focused test, migrate,\n"
+          "             jobs worker, propane, routes, test, migrate,\n"
           "             schema-codegen,\n"
           "             typed-sql-codegen, module add/remove/list/doctor/\n"
           "             migrate/assets/eject/upgrade\n"
-          "  deferred: test --integration/--all, perf\n");
+          "  deferred: perf\n");
 #endif
 }
 
@@ -102,7 +102,7 @@ static void PrintModuleUsage(void) {
 #if ARLEN_WINDOWS_PREVIEW
   fprintf(stdout,
           "\n"
-          "Windows CLANG64 preview note:\n"
+          "Windows CLANG64 note:\n"
           "  `arlen module migrate` is supported for database-backed workflows.\n");
 #endif
 }
@@ -2344,21 +2344,21 @@ static NSString *ResolveFrameworkRootForCommand(NSString *commandName) {
   return ResolveFrameworkRootForCommandDetailed(commandName, YES, NULL);
 }
 
-static int EmitWindowsPreviewUnsupported(NSString *command,
+static int EmitWindowsCLANG64Unsupported(NSString *command,
                                          NSString *workflow,
                                          NSArray *args,
                                          NSString *hint,
                                          NSString *example) {
   if (ArgsContainFlag(args ?: @[], @"--json")) {
     return EmitMachineError(command, workflow ?: command,
-                            @"windows_preview_unsupported",
-                            [NSString stringWithFormat:@"arlen %@: not supported on Windows CLANG64 preview",
+                            @"windows_clang64_unsupported",
+                            [NSString stringWithFormat:@"arlen %@: not supported on Windows CLANG64",
                                                        command ?: @""],
                             hint,
                             example, 1);
   }
 
-  fprintf(stderr, "arlen %s: not supported on Windows CLANG64 preview\n",
+  fprintf(stderr, "arlen %s: not supported on Windows CLANG64\n",
           [command UTF8String]);
   if ([hint length] > 0) {
     fprintf(stderr, "hint: %s\n", [hint UTF8String]);
@@ -2451,18 +2451,21 @@ static int CommandRoutes(void) {
 
 static int CommandTest(NSArray *args) {
 #if ARLEN_WINDOWS_PREVIEW
-  if (ArgsContainFlag(args ?: @[], @"--integration") || ArgsContainFlag(args ?: @[], @"--all")) {
-    return EmitWindowsPreviewUnsupported(@"test", @"test", args,
-                                         @"Windows preview keeps `arlen test` focused on the supported XCTest subset; use `arlen check` for the broader Windows confidence lane.",
-                                         @"powershell -ExecutionPolicy Bypass -File scripts\\run_clang64.ps1 -InnerCommand \"make phase24-windows-confidence\"");
-  }
   NSString *frameworkRoot = ResolveFrameworkRootForCommand(@"test");
   if ([frameworkRoot length] == 0) {
     return 1;
   }
-  NSString *command = [NSString stringWithFormat:@"cd %@ && make phase24-windows-tests",
-                                                 ShellQuote(frameworkRoot)];
-  return RunShellCommand(command);
+  if ([args count] == 0 || [args containsObject:@"--all"]) {
+    return RunShellCommand([NSString stringWithFormat:@"cd %@ && make test", ShellQuote(frameworkRoot)]);
+  }
+  if ([args containsObject:@"--unit"]) {
+    return RunShellCommand([NSString stringWithFormat:@"cd %@ && make test-unit", ShellQuote(frameworkRoot)]);
+  }
+  if ([args containsObject:@"--integration"]) {
+    return RunShellCommand([NSString stringWithFormat:@"cd %@ && make test-integration", ShellQuote(frameworkRoot)]);
+  }
+  fprintf(stderr, "arlen test: unsupported options\n");
+  return 2;
 #else
   NSString *frameworkRoot = ResolveFrameworkRootForCommand(@"test");
   if ([frameworkRoot length] == 0) {
@@ -2484,8 +2487,8 @@ static int CommandTest(NSArray *args) {
 
 static int CommandPerf(void) {
 #if ARLEN_WINDOWS_PREVIEW
-  return EmitWindowsPreviewUnsupported(@"perf", @"perf", @[],
-                                       @"Performance lanes stay deferred until the Windows runtime and verification tracks land.",
+  return EmitWindowsCLANG64Unsupported(@"perf", @"perf", @[],
+                                       @"Use `make phase24-windows-parity` for the checked-in Windows performance and robustness sweep.",
                                        @"arlen build --dry-run --json");
 #endif
   NSString *frameworkRoot = ResolveFrameworkRootForCommand(@"perf");
@@ -2600,7 +2603,7 @@ static int CommandBuild(NSArray *args) {
 
 static int CommandCheck(NSArray *args) {
 #if ARLEN_WINDOWS_PREVIEW
-  return RunMakeWorkflowCommand(@"check", @"phase24-windows-confidence", args ?: @[]);
+  return RunMakeWorkflowCommand(@"check", @"phase24-windows-parity", args ?: @[]);
 #else
   return RunMakeWorkflowCommand(@"check", @"check", args ?: @[]);
 #endif
@@ -2713,7 +2716,7 @@ static int CommandDoctor(NSArray *args) {
   } else {
     AddDoctorCheck(checks, @"gnustep_script", @"fail",
                    @"missing GNUstep script",
-                   @"Enter the GNUstep toolchain first (Windows preview uses scripts/run_clang64.ps1).");
+                   @"Enter the GNUstep toolchain first (Windows CLANG64 uses scripts/run_clang64.ps1).");
     failCount += 1;
   }
 
@@ -2776,7 +2779,7 @@ static int CommandDoctor(NSArray *args) {
                      @"gnustep_config",
                      @"fail",
                      @"failed running gnustep-config after sourcing GNUstep.sh",
-                     @"Verify GNUstep installation and shell init (Windows preview uses scripts/run_clang64.ps1).");
+                     @"Verify GNUstep installation and shell init (Windows CLANG64 uses scripts/run_clang64.ps1).");
       failCount += 1;
     }
   }
