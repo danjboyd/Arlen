@@ -1,11 +1,11 @@
 # Windows CLANG64
 
-Last updated: 2026-04-06
+Last updated: 2026-04-07
 
 This document records the native Windows workflow for Arlen on MSYS2
 `CLANG64`.
 
-Phase `24A-24S` is complete on branch `windows/clang64`, so this is now the
+Phase `24A-24T` is complete on branch `windows/clang64`, so this is now the
 checked-in first-class Windows contract for Arlen development, runtime,
 testing, and release packaging.
 
@@ -28,6 +28,24 @@ The checked-in wrappers are:
 
 - `scripts/run_clang64.ps1`
 - `scripts/run_clang64.sh`
+- `bin/arlen.ps1`
+- `bin/arlen.cmd`
+- `bin/boomhauer.ps1`
+- `bin/boomhauer.cmd`
+
+For direct PowerShell use, put the framework `bin` directory on `PATH`:
+
+```powershell
+$env:PATH = "C:\path\to\Arlen\bin;$env:PATH"
+arlen doctor
+```
+
+When `bin` is on `PATH`, PowerShell resolves `arlen` and `boomhauer` through
+the checked-in `.cmd` shims, which in turn launch the `.ps1` wrappers with
+`ExecutionPolicy Bypass`. Those wrappers bootstrap the same MSYS2 `CLANG64`
+environment as `scripts/run_clang64.ps1`, preserve the current working
+directory, and delegate directly to the existing `bin/arlen` / `bin/boomhauer`
+bash launchers.
 
 ## 2. Required Tools
 
@@ -205,6 +223,7 @@ Supported on the current branch:
 - `tools/deploy/windows/send_release_control.ps1`
 - PostgreSQL/ODBC transport loading through the checked-in Windows DLL
   discovery contract
+- direct PowerShell/`cmd.exe` wrapper invocation for `arlen` and `boomhauer`
 
 ## 6. Release Helpers
 
@@ -258,4 +277,13 @@ cd MyApp
 /path/to/Arlen/bin/arlen boomhauer --port 3000
 /path/to/Arlen/bin/arlen routes
 /path/to/Arlen/bin/arlen jobs worker --env development --once
+```
+
+Equivalent plain-PowerShell app-root smoke:
+
+```powershell
+$env:PATH = "C:\path\to\Arlen\bin;$env:PATH"
+arlen new MyApp --lite
+Set-Location .\MyApp
+boomhauer --port 3000
 ```

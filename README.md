@@ -53,6 +53,13 @@ Use the checked-in PowerShell launcher to enter the supported toolchain:
 powershell -ExecutionPolicy Bypass -File scripts\run_clang64.ps1
 ```
 
+Or expose the thin Windows launchers for the current session:
+
+```powershell
+$env:PATH = "C:\path\to\Arlen\bin;$env:PATH"
+arlen doctor
+```
+
 Then build the supported CLANG64 slice:
 
 ```sh
@@ -177,7 +184,7 @@ below is the detailed milestone ledger for the shipped surface summarized above.
 - Phase 20: complete (`20A-20K` delivered on 2026-03-26; `20L-20R` delivered on 2026-03-27 for MSSQL native transport tightening, ordered result semantics, bounded PostgreSQL metadata expansion, explicit live-test requirement accounting, shared test support/assertion layers, and repo-native focused confidence lanes. See `docs/PHASE20_ROADMAP.md`).
 - Phase 21: complete (`21A-21G` delivered on 2026-03-27 for in-process request harnesses, shared request/pipeline assertion helpers, explicit async DB ownership rules, template-suite decomposition, raw protocol corpus replay, generated-app matrix coverage, and repo-native focused confidence lanes. See `docs/PHASE21_ROADMAP.md`).
 - Phase 22: complete (`22A-22G` delivered on 2026-03-30 for newcomer-first onboarding, docs/code parity hardening, app-author guides, module/lite-mode guidance, plugin/frontend guides, and docs quality closeout. See `docs/PHASE22_ROADMAP.md`).
-- Phase 24: in progress on branch `windows/clang64` (`24A-24S` delivered on 2026-04-06 for the checked-in MSYS2 `CLANG64` Windows parity and release contract; `24T` is planned for PowerShell-first `arlen` / `boomhauer` launcher wrappers. See `docs/PHASE24_ROADMAP.md`).
+- Phase 24: complete on branch `windows/clang64` (`24A-24T` delivered on 2026-04-07 for the checked-in MSYS2 `CLANG64` Windows parity, release contract, and PowerShell-first launcher wrappers. See `docs/PHASE24_ROADMAP.md`).
 
 ## Requirements and Setup Details
 

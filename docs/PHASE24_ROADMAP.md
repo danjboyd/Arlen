@@ -1,6 +1,6 @@
 # Arlen Phase 24 Roadmap
 
-Status: in progress (`24A-24S` delivered on branch `windows/clang64`; `24T` planned for PowerShell-first Windows launcher wrappers)
+Status: complete on 2026-04-07 (`24A-24T` delivered on branch `windows/clang64` for the checked-in CLANG64 Windows parity, release, and PowerShell-first launcher contract)
 Last updated: 2026-04-07
 
 Related docs:
@@ -856,7 +856,7 @@ Acceptance (required):
 
 ## 5.20 Phase 24T: PowerShell-First Launcher Wrappers
 
-Status: planned
+Status: complete on 2026-04-07
 
 Rationale:
 
@@ -883,6 +883,21 @@ Deliverables:
 - Document the supported invocation contract in the Windows getting-started and
   CLI docs, including any execution-policy or PATH expectations for `.ps1` and
   `.cmd` entrypoints.
+
+Completed implementation:
+
+- Added shared CLANG64 bootstrap helper `bin/_windows_clang64_launcher.ps1`.
+- Added repo-local PowerShell and `cmd.exe` launchers:
+  - `bin/arlen.ps1`
+  - `bin/arlen.cmd`
+  - `bin/boomhauer.ps1`
+  - `bin/boomhauer.cmd`
+- The wrappers preserve current working directory, bootstrap the checked-in
+  CLANG64/GNUstep environment, and delegate directly to the existing
+  `bin/arlen` and `bin/boomhauer` bash launchers without duplicating command
+  behavior.
+- Updated `README.md`, `docs/GETTING_STARTED.md`, `docs/CLI_REFERENCE.md`, and
+  `docs/WINDOWS_CLANG64.md` to document the PATH-based wrapper contract.
 
 Acceptance (required):
 

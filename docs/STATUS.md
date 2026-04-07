@@ -4,15 +4,17 @@ Last updated: 2026-04-07
 
 ## Leaving Off (2026-04-07)
 
-- Reopened Phase 24 on branch `windows/clang64` to add planned subphase `24T`:
-  - scope: PowerShell-first launcher wrappers for `arlen` and `boomhauer`
-    over the existing checked-in MSYS2 `CLANG64` contract
-  - intent: let supported Windows users invoke the CLI/dev-server surface from
-    plain PowerShell or `cmd.exe` without manually entering the CLANG64 shell
-  - guardrail: keep the wrappers thin; do not fork command behavior away from
-    the existing `bin/arlen` / `bin/boomhauer` implementations
-- Phase 24 is no longer treated as fully complete in the roadmap ledger because
-  `24T` is now planned after the previously delivered `24A-24S` slice.
+- Completed `24T` on branch `windows/clang64`:
+  - added `bin/_windows_clang64_launcher.ps1` plus thin `bin/arlen.{ps1,cmd}`
+    and `bin/boomhauer.{ps1,cmd}` wrappers for plain PowerShell / `cmd.exe`
+    invocation
+  - the wrappers preserve current working directory, bootstrap the checked-in
+    CLANG64/GNUstep environment, and delegate directly to the existing bash
+    launchers instead of reimplementing CLI/runtime behavior
+  - updated the Windows docs and getting-started path so users can put `bin`
+    on `PATH` and run `arlen` / `boomhauer` without a manual
+    `scripts/run_clang64.ps1` handoff
+- Phase 24 is complete again on `windows/clang64` with `24A-24T` delivered.
 
 ## Leaving Off (2026-04-06)
 

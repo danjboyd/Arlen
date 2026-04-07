@@ -10,6 +10,13 @@ Usage:
 arlen <command> [options]
 ```
 
+Windows launcher note:
+
+- on the checked-in CLANG64 path, `bin/arlen.ps1` + `bin/arlen.cmd` expose a
+  thin PowerShell/`cmd.exe` wrapper over the existing MSYS2/GNUstep launcher
+- when the framework `bin` directory is on `PATH`, plain PowerShell can invoke
+  `arlen ...` without manually entering `scripts/run_clang64.ps1`
+
 Commands:
 
 ### `arlen new <AppName> [--full|--lite] [--force] [--json]`
@@ -35,6 +42,9 @@ Run bootstrap environment diagnostics without requiring a framework build.
 - intended for first-run toolchain validation (GNUstep/tooling presence)
 - `--env <name>`: include the target environment name in output (default `development`)
 - `--json`: emit structured JSON diagnostics
+- Windows CLANG64 support:
+  - available through the checked-in `.ps1` / `.cmd` wrappers when `bin` is on
+    `PATH`
 
 ### `arlen generate <controller|endpoint|model|migration|test|plugin|frontend> <Name> [options] [--json]`
 
@@ -276,6 +286,8 @@ Build and run `boomhauer` for the current app root.
 - Windows CLANG64 support:
   - supported for app-root watch and non-watch flows, including the fallback dev error server retry loop
   - path/bootstrap discovery resolves `GNUstep.sh` dynamically and accepts Windows-owned app-root paths through MSYS normalization
+  - plain PowerShell invocation is supported through `bin/boomhauer.ps1` +
+    `bin/boomhauer.cmd` when the framework `bin` directory is on `PATH`
 
 ### `arlen jobs worker [worker args...]`
 

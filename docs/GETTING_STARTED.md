@@ -28,10 +28,23 @@ instead:
 powershell -ExecutionPolicy Bypass -File scripts\run_clang64.ps1
 ```
 
+Or add the checked-in Windows wrappers to your `PATH` for the current
+PowerShell session:
+
+```powershell
+$env:PATH = "C:\path\to\Arlen\bin;$env:PATH"
+```
+
 Run the bootstrap diagnostic first:
 
 ```bash
 /path/to/Arlen/bin/arlen doctor
+```
+
+From plain PowerShell on Windows, the same command can be:
+
+```powershell
+arlen doctor
 ```
 
 If you want structured output for automation:
@@ -90,6 +103,12 @@ From app root:
 
 ```bash
 /path/to/Arlen/bin/arlen boomhauer --port 3000
+```
+
+From plain PowerShell on Windows with `bin` on `PATH`:
+
+```powershell
+boomhauer --port 3000
 ```
 
 Then verify:
