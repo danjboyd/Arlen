@@ -80,6 +80,7 @@ toolchain env directly.
 - [Session Handoff (2026-04-03)](SESSION_HANDOFF_2026-04-03.md): Phase 28 closeout checkpoint covering `28I-28L`, the live reference server, and the final verification set.
 - [Session Handoff (2026-04-02)](SESSION_HANDOFF_2026-04-02.md): historical Phase 28 pause point after shipping `28E-28H` and the React reference workspace.
 - [OwnerConnect Report Reconciliation (2026-04-02)](OWNERCONNECT_REPORT_RECONCILIATION_2026-04-02.md): upstream status note for the Dataverse polymorphic-lookup codegen bug reported from `OwnerConnect`.
+- [OwnerConnect Report Reconciliation (2026-04-07)](OWNERCONNECT_REPORT_RECONCILIATION_2026-04-07.md): upstream closure note for the packaged `deploy doctor --base-url` release-helper bug and current deploy-gap assessment reported from `OwnerConnect`.
 - [Platform Report Reconciliation (2026-03-31)](PLATFORM_REPORT_RECONCILIATION_2026-03-31.md): upstream closure note for the managed-GNUstep bootstrap bug reported from `iep-platform`.
 - [Session Handoff (2026-03-27)](SESSION_HANDOFF_2026-03-27.md): historical pause point before the Phase 22 closeout.
 - [Documentation Policy](DOCUMENTATION_POLICY.md): docs standards and review checklist.

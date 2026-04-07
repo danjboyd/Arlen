@@ -427,6 +427,8 @@ copy_if_exists "$app_root/.boomhauer/build/boomhauer-app" "$release_dir/app/.boo
 copy_if_exists "$framework_root/bin" "$release_dir/framework/bin"
 copy_if_exists "$framework_root/build/boomhauer" "$release_dir/framework/build/boomhauer"
 copy_if_exists "$framework_root/build/arlen" "$release_dir/framework/build/arlen"
+copy_if_exists "$framework_root/tools/deploy/validate_operability.sh" \
+  "$release_dir/framework/tools/deploy/validate_operability.sh"
 
 if [[ "$allow_missing_certification" != "1" ]]; then
   certification_source_dir="$(cd "$(dirname "$certification_manifest")" && pwd)"
@@ -490,6 +492,7 @@ manifest = {
         "migrations_dir": rel(release_dir, "app", "db", "migrations"),
         "propane": rel(release_dir, "framework", "bin", "propane"),
         "arlen": rel(release_dir, "framework", "build", "arlen"),
+        "operability_probe_helper": rel(release_dir, "framework", "tools", "deploy", "validate_operability.sh"),
         "release_env": rel(release_dir, "metadata", "release.env"),
     },
     "health_contract": {

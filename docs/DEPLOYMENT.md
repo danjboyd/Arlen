@@ -88,7 +88,10 @@ For app-operator workflows, prefer the first-class `arlen deploy` wrapper:
 `arlen deploy push` writes `releases/<id>/metadata/manifest.json` using
 `phase29-deploy-manifest-v1`. `arlen deploy release` reuses that manifest,
 runs packaged migrations when present, activates `releases/current`, and can
-probe `/healthz` when `--base-url` is supplied.
+probe `/healthz` when `--base-url` is supplied. Packaged framework payloads now
+also include `framework/tools/deploy/validate_operability.sh`, so
+`arlen deploy doctor --base-url ...` works from an activated packaged release
+without needing a source checkout beside it.
 
 Additional deploy CLI helpers:
 

@@ -1082,6 +1082,13 @@
     XCTAssertTrue([[NSFileManager defaultManager] fileExistsAtPath:manifestPath]);
     NSDictionary *manifest = [pushPayload[@"manifest"] isKindOfClass:[NSDictionary class]] ? pushPayload[@"manifest"] : @{};
     XCTAssertEqualObjects(@"phase29-deploy-manifest-v1", manifest[@"version"]);
+    NSDictionary *pushPaths = [manifest[@"paths"] isKindOfClass:[NSDictionary class]] ? manifest[@"paths"] : @{};
+    NSString *operabilityHelper =
+        [pushPaths[@"operability_probe_helper"] isKindOfClass:[NSString class]]
+            ? pushPaths[@"operability_probe_helper"]
+            : @"";
+    XCTAssertTrue([[NSFileManager defaultManager] isExecutableFileAtPath:operabilityHelper],
+                  @"missing packaged helper: %@", operabilityHelper);
     NSDictionary *migrationInventory = [manifest[@"migration_inventory"] isKindOfClass:[NSDictionary class]]
                                            ? manifest[@"migration_inventory"]
                                            : @{};
@@ -1210,6 +1217,15 @@
     XCTAssertEqualObjects(@"deploy.doctor", doctorPayload[@"workflow"]);
     NSArray *checks = [doctorPayload[@"checks"] isKindOfClass:[NSArray class]] ? doctorPayload[@"checks"] : @[];
     XCTAssertTrue([checks count] >= 5);
+    BOOL sawOperabilityHelper = NO;
+    for (NSDictionary *check in checks) {
+      if (![[check objectForKey:@"id"] isEqual:@"operability_probe_helper"]) {
+        continue;
+      }
+      sawOperabilityHelper = YES;
+      XCTAssertEqualObjects(@"pass", check[@"status"]);
+    }
+    XCTAssertTrue(sawOperabilityHelper);
 
     NSString *rollbackOutput = [self runShellCapture:[NSString stringWithFormat:
                                                           @"cd %@ && ARLEN_FRAMEWORK_ROOT=%@ %@/build/arlen "
@@ -1252,6 +1268,177 @@
                                    : @"";
     XCTAssertTrue([capturedOutput containsString:@"line-2"], @"%@", capturedOutput);
     XCTAssertTrue([capturedOutput containsString:@"line-3"], @"%@", capturedOutput);
+  } @finally {
+    [[NSFileManager defaultManager] removeItemAtPath:appRoot error:nil];
+    [[NSFileManager defaultManager] removeItemAtPath:workRoot error:nil];
+  }
+}
+
+- (void)testArlenDeployDoctorBaseURLWorksAgainstPackagedRelease {
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *appRoot = [self createTempDirectoryWithPrefix:@"arlen-deploy-doctor-baseurl-app"];
+  NSString *workRoot = [self createTempDirectoryWithPrefix:@"arlen-deploy-doctor-baseurl-work"];
+  XCTAssertNotNil(appRoot);
+  XCTAssertNotNil(workRoot);
+  if (appRoot == nil || workRoot == nil) {
+    return;
+  }
+
+  @try {
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"config/app.plist"]
+                          content:@"{\n"
+                                  "  host = \"127.0.0.1\";\n"
+                                  "  port = 3000;\n"
+                                  "  database = {\n"
+                                  "    connectionString = \"postgresql:///deploy_doctor_baseurl\";\n"
+                                  "    adapter = \"postgresql\";\n"
+                                  "  };\n"
+                                  "  logFormat = \"text\";\n"
+                                  "}\n"]);
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"config/environments/production.plist"]
+                          content:@"{\n  logFormat = \"text\";\n}\n"]);
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"app_lite.m"]
+                          content:@"#import <Foundation/Foundation.h>\n"
+                                  "#import <stdio.h>\n"
+                                  "#import <stdlib.h>\n"
+                                  "#import \"ArlenServer.h\"\n"
+                                  "\n"
+                                  "static ALNApplication *CreateApp(NSString *environment, NSString *appRootCurrent) {\n"
+                                  "  NSError *error = nil;\n"
+                                  "  ALNApplication *app = [[ALNApplication alloc] initWithEnvironment:environment configRoot:appRootCurrent error:&error];\n"
+                                  "  if (app == nil) {\n"
+                                  "    fprintf(stderr, \"failed loading config: %s\\n\", [[error localizedDescription] UTF8String]);\n"
+                                  "    return nil;\n"
+                                  "  }\n"
+                                  "  return app;\n"
+                                  "}\n"
+                                  "\n"
+                                  "static void PrintUsage(void) {\n"
+                                  "  fprintf(stdout, \"Usage: boomhauer [--port <port>] [--host <addr>] [--env <env>] [--once] [--print-routes]\\n\");\n"
+                                  "}\n"
+                                  "\n"
+                                  "int main(int argc, const char *argv[]) {\n"
+                                  "  @autoreleasepool {\n"
+                                  "    int portOverride = 0;\n"
+                                  "    NSString *host = nil;\n"
+                                  "    NSString *environment = @\"development\";\n"
+                                  "    BOOL once = NO;\n"
+                                  "    BOOL printRoutes = NO;\n"
+                                  "    for (int idx = 1; idx < argc; idx++) {\n"
+                                  "      NSString *arg = [NSString stringWithUTF8String:argv[idx]];\n"
+                                  "      if ([arg isEqualToString:@\"--port\"]) {\n"
+                                  "        if ((idx + 1) >= argc) { PrintUsage(); return 2; }\n"
+                                  "        portOverride = atoi(argv[++idx]);\n"
+                                  "      } else if ([arg isEqualToString:@\"--host\"]) {\n"
+                                  "        if ((idx + 1) >= argc) { PrintUsage(); return 2; }\n"
+                                  "        host = [NSString stringWithUTF8String:argv[++idx]];\n"
+                                  "      } else if ([arg isEqualToString:@\"--env\"]) {\n"
+                                  "        if ((idx + 1) >= argc) { PrintUsage(); return 2; }\n"
+                                  "        environment = [NSString stringWithUTF8String:argv[++idx]];\n"
+                                  "      } else if ([arg isEqualToString:@\"--once\"]) {\n"
+                                  "        once = YES;\n"
+                                  "      } else if ([arg isEqualToString:@\"--print-routes\"]) {\n"
+                                  "        printRoutes = YES;\n"
+                                  "      } else if ([arg isEqualToString:@\"--help\"] || [arg isEqualToString:@\"-h\"]) {\n"
+                                  "        PrintUsage();\n"
+                                  "        return 0;\n"
+                                  "      } else {\n"
+                                  "        fprintf(stderr, \"Unknown argument: %s\\n\", argv[idx]);\n"
+                                  "        return 2;\n"
+                                  "      }\n"
+                                  "    }\n"
+                                  "    NSString *appRootCurrent = [[[NSProcessInfo processInfo] environment] objectForKey:@\"ARLEN_APP_ROOT\"];\n"
+                                  "    if ([appRootCurrent length] == 0) {\n"
+                                  "      appRootCurrent = [[NSFileManager defaultManager] currentDirectoryPath];\n"
+                                  "    }\n"
+                                  "    ALNApplication *app = CreateApp(environment, appRootCurrent);\n"
+                                  "    if (app == nil) {\n"
+                                  "      return 1;\n"
+                                  "    }\n"
+                                  "    ALNHTTPServer *server = [[ALNHTTPServer alloc] initWithApplication:app publicRoot:[appRootCurrent stringByAppendingPathComponent:@\"public\"]];\n"
+                                  "    server.serverName = @\"boomhauer\";\n"
+                                  "    if (printRoutes) {\n"
+                                  "      [server printRoutesToFile:stdout];\n"
+                                  "      return 0;\n"
+                                  "    }\n"
+                                  "    return [server runWithHost:host portOverride:portOverride once:once];\n"
+                                  "  }\n"
+                                  "}\n"]);
+
+    int code = 0;
+    NSString *buildOutput = [self runMakeAtRepoRoot:repoRoot target:@"arlen" exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", buildOutput);
+
+    NSString *releasesDir = [workRoot stringByAppendingPathComponent:@"releases"];
+    NSString *pushOutput = [self runShellCapture:[NSString stringWithFormat:
+                                                     @"cd %@ && ARLEN_FRAMEWORK_ROOT=%@ %@/build/arlen "
+                                                      "deploy push --app-root %@ --releases-dir %@ --release-id doctor-rel-1 "
+                                                      "--allow-missing-certification --json",
+                                                     appRoot, repoRoot, repoRoot, appRoot, releasesDir]
+                                       exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", pushOutput);
+
+    NSString *releaseOutput = [self runShellCapture:[NSString stringWithFormat:
+                                                        @"cd %@ && ARLEN_FRAMEWORK_ROOT=%@ %@/build/arlen "
+                                                         "deploy release --app-root %@ --releases-dir %@ --release-id doctor-rel-1 "
+                                                         "--allow-missing-certification --skip-migrate --json",
+                                                        appRoot, repoRoot, repoRoot, appRoot, releasesDir]
+                                          exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", releaseOutput);
+
+    NSString *releaseDir = [releasesDir stringByAppendingPathComponent:@"doctor-rel-1"];
+    NSString *runtimeBinary =
+        [releaseDir stringByAppendingPathComponent:@"app/.boomhauer/build/boomhauer-app"];
+    XCTAssertTrue([[NSFileManager defaultManager] isExecutableFileAtPath:runtimeBinary]);
+
+    int port = [self randomPort];
+    NSString *doctorOutput = [self runShellCapture:[NSString stringWithFormat:
+                                                        @"set -euo pipefail && "
+                                                         "release_dir=%@ && runtime=%@ && repo_root=%@ && app_root=%@ && releases_dir=%@ && port=%d && "
+                                                         "ARLEN_APP_ROOT=\"$release_dir/app\" ARLEN_FRAMEWORK_ROOT=\"$release_dir/framework\" "
+                                                         "\"$runtime\" --port \"$port\" >\"$release_dir/server.log\" 2>&1 & "
+                                                         "server_pid=$! && "
+                                                         "trap 'kill \"$server_pid\" >/dev/null 2>&1 || true' EXIT && "
+                                                         "python3 - \"$port\" <<'PY'\n"
+                                                         "import sys\n"
+                                                         "import time\n"
+                                                         "import urllib.request\n"
+                                                         "port = int(sys.argv[1])\n"
+                                                         "url = f'http://127.0.0.1:{port}/healthz'\n"
+                                                         "for _ in range(40):\n"
+                                                         "    try:\n"
+                                                         "        urllib.request.urlopen(url, timeout=1).read()\n"
+                                                         "        break\n"
+                                                         "    except Exception:\n"
+                                                         "        time.sleep(0.1)\n"
+                                                         "else:\n"
+                                                         "    raise SystemExit('packaged release server failed to become ready')\n"
+                                                         "PY\n"
+                                                         "ARLEN_FRAMEWORK_ROOT=\"$repo_root\" \"$repo_root/build/arlen\" deploy doctor "
+                                                         "--app-root \"$app_root\" --releases-dir \"$releases_dir\" "
+                                                         "--base-url \"http://127.0.0.1:$port\" --json",
+                                                        [self shellQuoted:releaseDir],
+                                                        [self shellQuoted:runtimeBinary],
+                                                        [self shellQuoted:repoRoot],
+                                                        [self shellQuoted:appRoot],
+                                                        [self shellQuoted:releasesDir],
+                                                        port]
+                                          exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", doctorOutput);
+    NSDictionary *doctorPayload =
+        [self parseJSONDictionaryFromOutput:doctorOutput context:@"arlen deploy doctor --base-url --json"];
+    XCTAssertEqualObjects(@"deploy.doctor", doctorPayload[@"workflow"]);
+    XCTAssertEqualObjects(@"ok", doctorPayload[@"status"]);
+    NSArray *checks = [doctorPayload[@"checks"] isKindOfClass:[NSArray class]] ? doctorPayload[@"checks"] : @[];
+    BOOL sawOperability = NO;
+    for (NSDictionary *check in checks) {
+      if (![[check objectForKey:@"id"] isEqual:@"operability"]) {
+        continue;
+      }
+      sawOperability = YES;
+      XCTAssertEqualObjects(@"pass", check[@"status"]);
+    }
+    XCTAssertTrue(sawOperability);
   } @finally {
     [[NSFileManager defaultManager] removeItemAtPath:appRoot error:nil];
     [[NSFileManager defaultManager] removeItemAtPath:workRoot error:nil];

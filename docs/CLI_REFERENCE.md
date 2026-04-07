@@ -132,6 +132,7 @@ First-class release orchestration over the existing `tools/deploy/*` scripts.
 - validates release layout, manifest presence, packaged binaries, config loading, and database URL completeness
 - reports service state when `--service <unit>` is supplied
 - runs full `tools/deploy/validate_operability.sh` when `--base-url <url>` is supplied
+- packaged releases include that helper under `framework/tools/deploy/`, so `deploy doctor --base-url` works against activated release payloads
 
 `arlen deploy logs`
 

@@ -575,6 +575,15 @@ static NSDictionary *RunDeployHealthProbe(NSString *frameworkRoot, NSString *bas
 
   NSString *scriptPath = [[frameworkRoot stringByAppendingPathComponent:@"tools/deploy/validate_operability.sh"]
       stringByStandardizingPath];
+  if (![[NSFileManager defaultManager] isExecutableFileAtPath:scriptPath]) {
+    return @{
+      @"status" : @"error",
+      @"base_url" : baseURL ?: @"",
+      @"captured_output" :
+          [NSString stringWithFormat:@"operability helper missing or not executable: %@", scriptPath],
+      @"exit_code" : @127,
+    };
+  }
   int exitCode = 0;
   NSString *command = [NSString stringWithFormat:@"%@ --base-url %@", ShellQuote(scriptPath), ShellQuote(baseURL)];
   NSString *output = RunShellCaptureCommand(command, &exitCode);
@@ -672,6 +681,7 @@ static NSArray<NSDictionary *> *DeployDoctorChecksForRelease(NSString *releaseDi
     @{ @"id" : @"runtime_binary", @"path" : paths[@"runtime_binary"] ?: @"" },
     @{ @"id" : @"propane", @"path" : paths[@"propane"] ?: @"" },
     @{ @"id" : @"arlen", @"path" : paths[@"arlen"] ?: @"" },
+    @{ @"id" : @"operability_probe_helper", @"path" : paths[@"operability_probe_helper"] ?: @"" },
   ];
   for (NSDictionary *entry in requiredPaths) {
     NSString *checkID = entry[@"id"];

@@ -4,6 +4,17 @@ Last updated: 2026-04-07
 
 ## Leaving Off (2026-04-07)
 
+- Fixed the packaged `deploy doctor --base-url` regression reported from
+  `OwnerConnect`:
+  - release packaging now includes
+    `framework/tools/deploy/validate_operability.sh`
+  - release manifests now record `paths.operability_probe_helper`
+  - `deploy doctor` now emits a deterministic missing-helper error instead of a
+    shell-level “No such file or directory” failure when the helper is absent
+  - added a focused deployment integration regression that runs
+    `deploy doctor --base-url` against a packaged release server
+  - recorded the upstream reconciliation in
+    `docs/OWNERCONNECT_REPORT_RECONCILIATION_2026-04-07.md`
 - Completed Phase 29 and delivered `29J-29L`:
   - reserved `/healthz`, `/readyz`, `/livez`, `/metrics`, and `/clusterz`
     ahead of app routing so catch-all routes cannot shadow deploy/operability
