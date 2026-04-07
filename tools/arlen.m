@@ -22,7 +22,7 @@ static void PrintUsage(void) {
           "  boomhauer [server args...]\n"
           "  jobs worker [worker args...]\n"
           "  propane [manager args...]\n"
-          "  service <install|uninstall> --mode <dev|runtime> [--name <ServiceName>] [--app-root <path>] [--releases-dir <path>] [--dry-run] [--json]\n"
+          "  service <install|uninstall|start|stop|status|enable> --mode <dev|runtime> [--name <ServiceName>] [--app-root <path>] [--releases-dir <path>] [--dry-run] [--json]\n"
           "  migrate [--env <name>] [--database <target>] [--dsn <connection_string>] [--dry-run]\n"
           "  module <add|remove|list|doctor|migrate|assets|upgrade|eject> [options]\n"
           "  schema-codegen [--env <name>] [--database <target>] [--dsn <connection_string>] [--output-dir <path>] [--manifest <path>] [--prefix <ClassPrefix>] [--typed-contracts] [--force]\n"
@@ -85,9 +85,10 @@ static void PrintJobsUsage(void) {
 
 static void PrintServiceUsage(void) {
   fprintf(stdout,
-          "Usage: arlen service <install|uninstall> --mode <dev|runtime> [options]\n"
+          "Usage: arlen service <install|uninstall|start|stop|status|enable> --mode <dev|runtime> [options]\n"
           "\n"
           "Options:\n"
+          "  <install|uninstall|start|stop|status|enable>\n"
           "  --mode <dev|runtime>\n"
           "  --name <ServiceName>\n"
           "  --app-root <path>\n"
@@ -100,8 +101,8 @@ static void PrintServiceUsage(void) {
   fprintf(stdout,
           "\n"
           "Windows CLANG64 note:\n"
-          "  dev mode installs a boomhauer-backed developer service.\n"
-          "  runtime mode installs a packaged propane-backed service.\n");
+          "  dev mode targets a boomhauer-backed developer service.\n"
+          "  runtime mode targets a packaged propane-backed service.\n");
 #else
   fprintf(stdout,
           "\n"
@@ -2514,11 +2515,11 @@ static int CommandService(NSArray *args) {
 #if !ARLEN_WINDOWS_PREVIEW
   if (ArgsContainFlag(args ?: @[], @"--json")) {
     return EmitMachineError(@"service", @"service", @"platform_not_supported",
-                            @"arlen service: Windows service install/uninstall is currently implemented only on Windows CLANG64; Linux systemd wiring is planned behind the same CLI surface.",
+                            @"arlen service: Windows service workflows are currently implemented only on Windows CLANG64; Linux systemd wiring is planned behind the same CLI surface.",
                             @"Use the native Windows CLANG64 path for now. Linux systemd support will follow behind `arlen service`.",
                             @"arlen service install --mode runtime --dry-run --json", 1);
   }
-  fprintf(stderr, "arlen service: Windows service install/uninstall is currently implemented only on Windows CLANG64\n");
+  fprintf(stderr, "arlen service: Windows service workflows are currently implemented only on Windows CLANG64\n");
   fprintf(stderr, "hint: Linux systemd wiring is planned behind the same `arlen service` surface.\n");
   return 1;
 #else
@@ -2528,7 +2529,12 @@ static int CommandService(NSArray *args) {
   }
 
   NSString *subcommand = args[0];
-  if (![subcommand isEqualToString:@"install"] && ![subcommand isEqualToString:@"uninstall"]) {
+  if (![subcommand isEqualToString:@"install"] &&
+      ![subcommand isEqualToString:@"uninstall"] &&
+      ![subcommand isEqualToString:@"start"] &&
+      ![subcommand isEqualToString:@"stop"] &&
+      ![subcommand isEqualToString:@"status"] &&
+      ![subcommand isEqualToString:@"enable"]) {
     PrintServiceUsage();
     return 2;
   }
@@ -2538,9 +2544,14 @@ static int CommandService(NSArray *args) {
     return 1;
   }
 
-  NSString *scriptRelativePath = [subcommand isEqualToString:@"install"]
-      ? @"tools/deploy/windows/install_service.ps1"
-      : @"tools/deploy/windows/uninstall_service.ps1";
+  NSString *scriptRelativePath = nil;
+  if ([subcommand isEqualToString:@"install"]) {
+    scriptRelativePath = @"tools/deploy/windows/install_service.ps1";
+  } else if ([subcommand isEqualToString:@"uninstall"]) {
+    scriptRelativePath = @"tools/deploy/windows/uninstall_service.ps1";
+  } else {
+    scriptRelativePath = @"tools/deploy/windows/service_control.ps1";
+  }
   NSString *scriptPath = [frameworkRoot stringByAppendingPathComponent:scriptRelativePath];
   if (!PathExists(scriptPath, NULL)) {
     fprintf(stderr, "arlen service: helper script missing at %s\n", [scriptPath UTF8String]);
@@ -2550,6 +2561,7 @@ static int CommandService(NSArray *args) {
   NSArray<NSString *> *rawServiceArgs =
       ([args count] > 1) ? [args subarrayWithRange:NSMakeRange(1, [args count] - 1)] : @[];
   NSDictionary<NSString *, NSString *> *serviceFlagMap = @{
+    @"--action": @"-Action",
     @"--mode": @"-Mode",
     @"--name": @"-Name",
     @"--app-root": @"-AppRoot",
@@ -2560,6 +2572,13 @@ static int CommandService(NSArray *args) {
     @"--json": @"-Json",
   };
   NSMutableArray<NSString *> *serviceArgs = [NSMutableArray arrayWithCapacity:[rawServiceArgs count]];
+  if ([subcommand isEqualToString:@"start"] ||
+      [subcommand isEqualToString:@"stop"] ||
+      [subcommand isEqualToString:@"status"] ||
+      [subcommand isEqualToString:@"enable"]) {
+    [serviceArgs addObject:@"-Action"];
+    [serviceArgs addObject:subcommand];
+  }
   for (NSUInteger idx = 0; idx < [rawServiceArgs count]; idx++) {
     NSString *arg = rawServiceArgs[idx];
     if ([arg isEqualToString:@"--help"] || [arg isEqualToString:@"-h"]) {

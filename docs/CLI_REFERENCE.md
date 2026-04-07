@@ -46,7 +46,7 @@ Run bootstrap environment diagnostics without requiring a framework build.
   - available through the checked-in `.ps1` / `.cmd` wrappers when `bin` is on
     `PATH`
 
-### `arlen service <install|uninstall> --mode <dev|runtime> [options]`
+### `arlen service <install|uninstall|start|stop|status|enable> --mode <dev|runtime> [options]`
 
 Install or remove the supported Windows service wrapper for Arlen entrypoints.
 
@@ -57,6 +57,10 @@ Install or remove the supported Windows service wrapper for Arlen entrypoints.
 - subcommands:
   - `install`
   - `uninstall`
+  - `start`
+  - `stop`
+  - `status`
+  - `enable`
 - required:
   - `--mode <dev|runtime>`
 - optional:
@@ -78,6 +82,12 @@ Install or remove the supported Windows service wrapper for Arlen entrypoints.
   - `dev` installs a `boomhauer` service for a developer workstation
   - `runtime` installs a packaged `propane` service through
     `tools/deploy/windows/start_release.ps1`
+- lifecycle behavior:
+  - `install`: registers the Windows service wrapper
+  - `start`: starts the resolved service
+  - `stop`: stops the resolved service
+  - `status`: reports the resolved service state and startup type
+  - `enable`: sets the resolved service startup type to `Automatic`
 - default service names:
   - `dev`: `arlen-dev-<app>`
   - `runtime`: `arlen-<app>`
@@ -90,6 +100,8 @@ Install or remove the supported Windows service wrapper for Arlen entrypoints.
   - `--dry-run` works without elevation
   - live `install`/`uninstall` relaunch through UAC from a non-elevated
     PowerShell session when the current user can elevate
+  - live `start`/`stop`/`enable` use the same UAC relaunch behavior
+  - `status` does not require elevation
   - if elevation is cancelled or denied, the command returns `uac_cancelled`
 
 ### `arlen generate <controller|endpoint|model|migration|test|plugin|frontend> <Name> [options] [--json]`

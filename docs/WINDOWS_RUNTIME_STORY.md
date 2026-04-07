@@ -117,6 +117,10 @@ contract:
 - `arlen service uninstall --mode dev`
 - `arlen service install --mode runtime`
 - `arlen service uninstall --mode runtime`
+- `arlen service start --mode dev|runtime`
+- `arlen service stop --mode dev|runtime`
+- `arlen service status --mode dev|runtime`
+- `arlen service enable --mode dev|runtime`
 
 Mode semantics:
 
@@ -146,6 +150,8 @@ Backend note:
   present
 - live install/uninstall relaunch through UAC from a non-elevated PowerShell
   session when the current user can elevate
+- `start`, `stop`, and `enable` use the same UAC relaunch path
+- `status` remains readable without elevation
 - cancellation or denial returns `uac_cancelled`
 - Linux `systemd` wiring should later reuse the same `arlen service` contract
   rather than introducing a separate service-management CLI

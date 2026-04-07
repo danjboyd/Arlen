@@ -233,6 +233,10 @@ Arlen now also exposes a Windows service-install CLI on top of that contract:
 ```powershell
 arlen service install --mode runtime
 arlen service uninstall --mode runtime
+arlen service start --mode runtime
+arlen service stop --mode runtime
+arlen service status --mode runtime
+arlen service enable --mode runtime
 ```
 
 Developer-box `boomhauer` services are also supported explicitly:
@@ -240,6 +244,10 @@ Developer-box `boomhauer` services are also supported explicitly:
 ```powershell
 arlen service install --mode dev
 arlen service uninstall --mode dev
+arlen service start --mode dev
+arlen service stop --mode dev
+arlen service status --mode dev
+arlen service enable --mode dev
 ```
 
 Autodiscovery defaults:

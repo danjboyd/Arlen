@@ -123,6 +123,9 @@ arlen service install --mode dev --dry-run --json
   elevation when Windows service registration is needed
 - use `arlen service uninstall --mode dev` from the same app root to remove the
   registered developer service later
+- use `arlen service start --mode dev`, `arlen service stop --mode dev`,
+  `arlen service status --mode dev`, and `arlen service enable --mode dev` for
+  the common Windows service lifecycle operations
 
 Then verify:
 

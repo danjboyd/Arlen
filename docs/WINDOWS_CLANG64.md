@@ -224,7 +224,7 @@ Supported on the current branch:
 - PostgreSQL/ODBC transport loading through the checked-in Windows DLL
   discovery contract
 - direct PowerShell/`cmd.exe` wrapper invocation for `arlen` and `boomhauer`
-- Windows service install/uninstall through `arlen service --mode dev|runtime`
+- Windows service install/control through `arlen service --mode dev|runtime`
   over the checked-in NSSM-backed contract
 
 ## 6. Release Helpers
@@ -298,6 +298,8 @@ arlen service install --mode dev --dry-run --json
 
 - run from an app root for `boomhauer` service autodiscovery
 - run from a packaged release layout for `arlen service install --mode runtime`
+- use `arlen service start|stop|status|enable --mode dev|runtime` for the
+  common Windows service lifecycle controls after install
 - live install/uninstall request UAC elevation from a non-elevated PowerShell
   session when the current user can elevate
 - install `NSSM` first with `winget install NSSM.NSSM` if it is not already
