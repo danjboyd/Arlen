@@ -2,6 +2,38 @@
 
 Last updated: 2026-04-07
 
+## Leaving Off For macOS Upgrade (2026-04-07)
+
+- Branch state:
+  - current branch is `mac`
+  - latest Apple-port checkpoint commit is `17de90f`
+    (`Phase 30F-I apple runtime validation`)
+- Phase 30 status:
+  - `30A-30I` are now delivered on `mac`
+  - Apple build/bootstrap path works through `./bin/build-apple`
+  - Apple smoke path works through `./bin/test --smoke-only`
+  - repo-root and app-root `boomhauer` execution both work on the current
+    Apple runtime path
+- Verified immediately before leaving off:
+  - `./bin/test --smoke-only`
+  - `./bin/boomhauer --prepare-only`
+- Current blocker:
+  - full Apple XCTest execution is still unavailable because the active
+    developer directory is Command Line Tools rather than full Xcode
+  - before resuming XCTest work, install full Xcode and switch the active
+    developer directory with:
+    `sudo xcode-select -s /Applications/Xcode.app/Contents/Developer`
+    then run:
+    `sudo xcodebuild -runFirstLaunch`
+- First commands to run after the macOS upgrade:
+  - `xcodebuild -version`
+  - `xcode-select -p`
+  - `./bin/arlen doctor`
+  - `./bin/test --smoke-only`
+- Next implementation target after the upgrade:
+  - continue Phase 30 with full Xcode-backed XCTest integration and the
+    remaining `30J-30M` work
+
 ## Leaving Off (2026-04-07)
 
 - Continued Phase 30 and delivered `30F-30I` on the `mac` branch:
