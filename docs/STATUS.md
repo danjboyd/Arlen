@@ -1599,3 +1599,14 @@ the individual roadmap documents.
   - Django-style admin/backoffice product
   - full account-management product surfaces
   - package-volume ecosystem targets as a core roadmap deliverable
+- Phase 24 is complete again on branch `windows/clang64`:
+  - `24U` is now delivered for Windows-native `arlen service install|uninstall`
+    workflows over the checked-in CLANG64 contract
+  - `dev` mode auto-discovers app roots and wires `boomhauer` logs to
+    `<app-root>\tmp\service\`
+  - `runtime` mode auto-discovers packaged release layouts and wires `propane`
+    logs to `<releases-dir>\service\`
+  - live service registration/removal now return `elevation_required` when the
+    shell is not elevated
+  - Linux `systemd` wiring remains a later follow-up behind the same
+    `arlen service` CLI surface

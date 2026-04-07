@@ -1,6 +1,6 @@
 # Windows Runtime Story
 
-Last updated: 2026-04-06
+Last updated: 2026-04-07
 
 This document defines the native Windows runtime, release, and service-wrapper
 contract for Arlen on the `windows/clang64` branch.
@@ -109,6 +109,44 @@ immutable-release model used on Linux:
 - use `send_release_control.ps1 -Action term` for graceful shutdown
 - restart on unexpected `propane` exit the same way the Linux `systemd` unit
   does
+
+Phase 24U adds a higher-level Windows service CLI on top of that runtime
+contract:
+
+- `arlen service install --mode dev`
+- `arlen service uninstall --mode dev`
+- `arlen service install --mode runtime`
+- `arlen service uninstall --mode runtime`
+
+Mode semantics:
+
+- `--mode dev`: installs a developer-box `boomhauer` service for an app root
+- `--mode runtime`: installs a packaged-release `propane` service through
+  `start_release.ps1 -ReleasesDir <path>`
+
+Autodiscovery defaults:
+
+- `dev`: `--app-root` and `--name` are optional when invoked from inside the
+  app root
+- `runtime`: `--releases-dir` and `--name` are optional when invoked from
+  inside the immutable release layout
+
+Default Windows log locations:
+
+- `dev`: `<app-root>\tmp\service\boomhauer.stdout.log` and
+  `<app-root>\tmp\service\boomhauer.stderr.log`
+- `runtime`: `<releases-dir>\service\propane.stdout.log` and
+  `<releases-dir>\service\propane.stderr.log`
+
+Backend note:
+
+- the current Windows implementation uses `NSSM`
+- install it with `winget install NSSM.NSSM` when not already present
+- Arlen also probes the Winget package cache when the `nssm` alias link is not
+  present
+- live install/uninstall require an elevated PowerShell session
+- Linux `systemd` wiring should later reuse the same `arlen service` contract
+  rather than introducing a separate service-management CLI
 
 If `bash.exe` is not installed at `C:\msys64\usr\bin\bash.exe` or
 `C:\Program Files\Git\bin\bash.exe`, set `ARLEN_BASH_PATH` or pass `-BashPath`

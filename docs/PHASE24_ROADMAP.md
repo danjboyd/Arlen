@@ -1,6 +1,6 @@
 # Arlen Phase 24 Roadmap
 
-Status: in progress (`24A-24T` delivered on branch `windows/clang64`; `24U` planned for Windows-native `arlen service` install/uninstall support)
+Status: complete (`24A-24U` delivered on branch `windows/clang64`; Linux `systemd` wiring remains a later follow-up behind the same `arlen service` CLI surface)
 Last updated: 2026-04-07
 
 Related docs:
@@ -914,7 +914,7 @@ Acceptance (required):
 
 ## 5.21 Phase 24U: Windows-Native `arlen service` Install/Uninstall Workflows
 
-Status: planned
+Status: complete on 2026-04-07
 
 Rationale:
 
@@ -943,6 +943,25 @@ Deliverables:
   modes, including how names are derived and when explicit overrides are
   required.
 
+Completed implementation:
+
+- `tools/arlen.m` now exposes `arlen service install|uninstall --mode dev|runtime`
+  on Windows and forwards the documented CLI flags into the checked-in
+  PowerShell helpers.
+- `tools/deploy/windows/install_service.ps1` and
+  `tools/deploy/windows/uninstall_service.ps1` now auto-discover app roots and
+  packaged release layouts, derive deterministic default service names, and
+  emit machine-readable dry-run/install/uninstall payloads.
+- `--mode dev` installs the `boomhauer` service contract with logs under
+  `<app-root>\tmp\service\`.
+- `--mode runtime` installs the packaged `propane` service contract with logs
+  under `<releases-dir>\service\`.
+- The Windows backend auto-discovers `NSSM` from common install paths and the
+  Winget package cache after `winget install NSSM.NSSM`.
+- Live install/uninstall now fail with an explicit `elevation_required` error
+  when the shell is not elevated instead of silently pretending service
+  registration succeeded.
+
 Acceptance (required):
 
 - From plain PowerShell on Windows, `arlen service install --mode dev` can
@@ -953,6 +972,8 @@ Acceptance (required):
   the user to hand-write service-wrapper metadata.
 - `arlen service uninstall --mode dev|runtime` removes only the registered
   Windows service wrapper state and does not delete app or release files.
+- Live install/uninstall require an elevated Windows PowerShell session; dry-run
+  planning works without elevation.
 
 Forward-compatibility note:
 

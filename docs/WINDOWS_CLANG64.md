@@ -224,6 +224,8 @@ Supported on the current branch:
 - PostgreSQL/ODBC transport loading through the checked-in Windows DLL
   discovery contract
 - direct PowerShell/`cmd.exe` wrapper invocation for `arlen` and `boomhauer`
+- Windows service install/uninstall through `arlen service --mode dev|runtime`
+  over the checked-in NSSM-backed contract
 
 ## 6. Release Helpers
 
@@ -287,3 +289,15 @@ arlen new MyApp --lite
 Set-Location .\MyApp
 boomhauer --port 3000
 ```
+
+Windows service flows use the same wrappers:
+
+```powershell
+arlen service install --mode dev --dry-run --json
+```
+
+- run from an app root for `boomhauer` service autodiscovery
+- run from a packaged release layout for `arlen service install --mode runtime`
+- live install/uninstall require an elevated PowerShell session
+- install `NSSM` first with `winget install NSSM.NSSM` if it is not already
+  available

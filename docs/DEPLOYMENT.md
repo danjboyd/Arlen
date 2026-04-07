@@ -228,6 +228,42 @@ Recommended baseline:
 - use `send_release_control.ps1 -Action term` for graceful shutdown
 - keep `ARLEN_BASH_PATH` set when MSYS `bash.exe` lives outside the default paths
 
+Arlen now also exposes a Windows service-install CLI on top of that contract:
+
+```powershell
+arlen service install --mode runtime
+arlen service uninstall --mode runtime
+```
+
+Developer-box `boomhauer` services are also supported explicitly:
+
+```powershell
+arlen service install --mode dev
+arlen service uninstall --mode dev
+```
+
+Autodiscovery defaults:
+
+- `runtime`: when invoked from inside a supported immutable release layout,
+  `--releases-dir` and `--name` can be omitted
+- `dev`: when invoked from inside a supported app root, `--app-root` and
+  `--name` can be omitted
+
+Default Windows log locations:
+
+- runtime: `<releases-dir>\service\propane.stdout.log` and
+  `<releases-dir>\service\propane.stderr.log`
+- dev: `<app-root>\tmp\service\boomhauer.stdout.log` and
+  `<app-root>\tmp\service\boomhauer.stderr.log`
+
+Current backend note:
+
+- Windows service installation currently uses `NSSM`
+- install it with `winget install NSSM.NSSM` when not already present
+- Arlen also probes the Winget package cache when the `nssm` alias link is not
+  present
+- live install/uninstall require an elevated PowerShell session
+
 ## 9. Rollback Workflow
 
 Rollback to specific release:

@@ -22,6 +22,7 @@ static void PrintUsage(void) {
           "  boomhauer [server args...]\n"
           "  jobs worker [worker args...]\n"
           "  propane [manager args...]\n"
+          "  service <install|uninstall> --mode <dev|runtime> [--name <ServiceName>] [--app-root <path>] [--releases-dir <path>] [--dry-run] [--json]\n"
           "  migrate [--env <name>] [--database <target>] [--dsn <connection_string>] [--dry-run]\n"
           "  module <add|remove|list|doctor|migrate|assets|upgrade|eject> [options]\n"
           "  schema-codegen [--env <name>] [--database <target>] [--dsn <connection_string>] [--output-dir <path>] [--manifest <path>] [--prefix <ClassPrefix>] [--typed-contracts] [--force]\n"
@@ -80,6 +81,33 @@ static void PrintJobsUsage(void) {
           "Usage: arlen jobs worker [worker args...]\n"
           "\n"
           "Delegates to framework bin/jobs-worker with ARLEN_APP_ROOT and ARLEN_FRAMEWORK_ROOT resolved.\n");
+}
+
+static void PrintServiceUsage(void) {
+  fprintf(stdout,
+          "Usage: arlen service <install|uninstall> --mode <dev|runtime> [options]\n"
+          "\n"
+          "Options:\n"
+          "  --mode <dev|runtime>\n"
+          "  --name <ServiceName>\n"
+          "  --app-root <path>\n"
+          "  --releases-dir <path>\n"
+          "  --log-dir <path>        (install only)\n"
+          "  --nssm-path <path>\n"
+          "  --dry-run\n"
+          "  --json\n");
+#if ARLEN_WINDOWS_PREVIEW
+  fprintf(stdout,
+          "\n"
+          "Windows CLANG64 note:\n"
+          "  dev mode installs a boomhauer-backed developer service.\n"
+          "  runtime mode installs a packaged propane-backed service.\n");
+#else
+  fprintf(stdout,
+          "\n"
+          "Platform note:\n"
+          "  Linux/systemd wiring is planned behind the same `arlen service` surface, but this backend is currently Windows-only.\n");
+#endif
 }
 
 static void PrintCheckUsage(void) {
@@ -365,6 +393,39 @@ static int RunShellCommand(NSString *command) {
   NSTask *task = [[NSTask alloc] init];
   task.launchPath = ResolvedBashLaunchPath();
   task.arguments = @[ @"-lc", command ];
+  task.standardInput = [NSFileHandle fileHandleWithStandardInput];
+  task.standardOutput = [NSFileHandle fileHandleWithStandardOutput];
+  task.standardError = [NSFileHandle fileHandleWithStandardError];
+  [task launch];
+  [task waitUntilExit];
+  return task.terminationStatus;
+}
+
+static NSString *ResolvedPowerShellLaunchPath(void) {
+  NSArray<NSString *> *candidates = @[
+    @"C:/Windows/System32/WindowsPowerShell/v1.0/powershell.exe",
+    @"C:/Program Files/PowerShell/7/pwsh.exe",
+  ];
+  for (NSString *candidate in candidates) {
+    if ([[NSFileManager defaultManager] isExecutableFileAtPath:candidate]) {
+      return NormalizeFilesystemPath(candidate);
+    }
+  }
+  return @"C:/Windows/System32/WindowsPowerShell/v1.0/powershell.exe";
+}
+
+static int RunPowerShellScript(NSString *scriptPath, NSArray<NSString *> *args) {
+  NSTask *task = [[NSTask alloc] init];
+  task.launchPath = ResolvedPowerShellLaunchPath();
+  NSMutableArray<NSString *> *taskArgs = [NSMutableArray arrayWithObjects:@"-NoProfile",
+                                                                           @"-ExecutionPolicy",
+                                                                           @"Bypass",
+                                                                           @"-File",
+                                                                           scriptPath ?: @"", nil];
+  if ([args count] > 0) {
+    [taskArgs addObjectsFromArray:args];
+  }
+  task.arguments = taskArgs;
   task.standardInput = [NSFileHandle fileHandleWithStandardInput];
   task.standardOutput = [NSFileHandle fileHandleWithStandardOutput];
   task.standardError = [NSFileHandle fileHandleWithStandardError];
@@ -2447,6 +2508,74 @@ static int CommandRoutes(void) {
                                                  ShellQuote(appRoot),
                                                  ShellQuote(frameworkRoot)];
   return RunShellCommand(command);
+}
+
+static int CommandService(NSArray *args) {
+#if !ARLEN_WINDOWS_PREVIEW
+  if (ArgsContainFlag(args ?: @[], @"--json")) {
+    return EmitMachineError(@"service", @"service", @"platform_not_supported",
+                            @"arlen service: Windows service install/uninstall is currently implemented only on Windows CLANG64; Linux systemd wiring is planned behind the same CLI surface.",
+                            @"Use the native Windows CLANG64 path for now. Linux systemd support will follow behind `arlen service`.",
+                            @"arlen service install --mode runtime --dry-run --json", 1);
+  }
+  fprintf(stderr, "arlen service: Windows service install/uninstall is currently implemented only on Windows CLANG64\n");
+  fprintf(stderr, "hint: Linux systemd wiring is planned behind the same `arlen service` surface.\n");
+  return 1;
+#else
+  if ([args count] == 0) {
+    PrintServiceUsage();
+    return 2;
+  }
+
+  NSString *subcommand = args[0];
+  if (![subcommand isEqualToString:@"install"] && ![subcommand isEqualToString:@"uninstall"]) {
+    PrintServiceUsage();
+    return 2;
+  }
+
+  NSString *frameworkRoot = ResolveFrameworkRootForCommand(@"service");
+  if ([frameworkRoot length] == 0) {
+    return 1;
+  }
+
+  NSString *scriptRelativePath = [subcommand isEqualToString:@"install"]
+      ? @"tools/deploy/windows/install_service.ps1"
+      : @"tools/deploy/windows/uninstall_service.ps1";
+  NSString *scriptPath = [frameworkRoot stringByAppendingPathComponent:scriptRelativePath];
+  if (!PathExists(scriptPath, NULL)) {
+    fprintf(stderr, "arlen service: helper script missing at %s\n", [scriptPath UTF8String]);
+    return 1;
+  }
+
+  NSArray<NSString *> *rawServiceArgs =
+      ([args count] > 1) ? [args subarrayWithRange:NSMakeRange(1, [args count] - 1)] : @[];
+  NSDictionary<NSString *, NSString *> *serviceFlagMap = @{
+    @"--mode": @"-Mode",
+    @"--name": @"-Name",
+    @"--app-root": @"-AppRoot",
+    @"--releases-dir": @"-ReleasesDir",
+    @"--log-dir": @"-LogDir",
+    @"--nssm-path": @"-NSSMPath",
+    @"--dry-run": @"-DryRun",
+    @"--json": @"-Json",
+  };
+  NSMutableArray<NSString *> *serviceArgs = [NSMutableArray arrayWithCapacity:[rawServiceArgs count]];
+  for (NSUInteger idx = 0; idx < [rawServiceArgs count]; idx++) {
+    NSString *arg = rawServiceArgs[idx];
+    if ([arg isEqualToString:@"--help"] || [arg isEqualToString:@"-h"]) {
+      PrintServiceUsage();
+      return 0;
+    }
+    NSString *mappedFlag = serviceFlagMap[arg];
+    if ([mappedFlag length] > 0) {
+      [serviceArgs addObject:mappedFlag];
+    } else {
+      [serviceArgs addObject:arg ?: @""];
+    }
+  }
+
+  return RunPowerShellScript(scriptPath, serviceArgs);
+#endif
 }
 
 static int CommandTest(NSArray *args) {
@@ -5133,6 +5262,9 @@ int main(int argc, const char *argv[]) {
     }
     if ([command isEqualToString:@"propane"]) {
       return CommandPropane(args);
+    }
+    if ([command isEqualToString:@"service"]) {
+      return CommandService(args);
     }
     if ([command isEqualToString:@"migrate"]) {
       return CommandMigrate(args);

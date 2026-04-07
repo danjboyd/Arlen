@@ -46,6 +46,51 @@ Run bootstrap environment diagnostics without requiring a framework build.
   - available through the checked-in `.ps1` / `.cmd` wrappers when `bin` is on
     `PATH`
 
+### `arlen service <install|uninstall> --mode <dev|runtime> [options]`
+
+Install or remove the supported Windows service wrapper for Arlen entrypoints.
+
+- current implementation scope:
+  - Windows CLANG64 only
+  - Linux `systemd` wiring is planned later behind the same `arlen service`
+    surface
+- subcommands:
+  - `install`
+  - `uninstall`
+- required:
+  - `--mode <dev|runtime>`
+- optional:
+  - `--name <ServiceName>`
+  - `--app-root <path>` (`dev` mode)
+  - `--releases-dir <path>` (`runtime` mode)
+  - `--log-dir <path>` (`install` only)
+  - `--nssm-path <path>`
+  - `--dry-run`
+  - `--json`
+- autodiscovery:
+  - `dev` mode discovers the app root from the current directory when omitted
+  - `runtime` mode discovers the immutable `releases` directory from the
+    current directory when omitted
+- backend:
+  - uses `NSSM` on Windows (`winget install NSSM.NSSM` when not already present)
+  - also probes the Winget package cache when the `nssm` alias link is absent
+- mode behavior:
+  - `dev` installs a `boomhauer` service for a developer workstation
+  - `runtime` installs a packaged `propane` service through
+    `tools/deploy/windows/start_release.ps1`
+- default service names:
+  - `dev`: `arlen-dev-<app>`
+  - `runtime`: `arlen-<app>`
+- default log locations:
+  - `dev`: `<app-root>/tmp/service/boomhauer.stdout.log` and
+    `<app-root>/tmp/service/boomhauer.stderr.log`
+  - `runtime`: `<releases-dir>/service/propane.stdout.log` and
+    `<releases-dir>/service/propane.stderr.log`
+- elevation:
+  - `--dry-run` works without elevation
+  - live `install`/`uninstall` require an elevated PowerShell session and
+    return `elevation_required` when the shell is not elevated
+
 ### `arlen generate <controller|endpoint|model|migration|test|plugin|frontend> <Name> [options] [--json]`
 
 Generate app artifacts.

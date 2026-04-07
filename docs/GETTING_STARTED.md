@@ -111,6 +111,19 @@ From plain PowerShell on Windows with `bin` on `PATH`:
 boomhauer --port 3000
 ```
 
+For a long-running Windows service instead of an interactive console server:
+
+```powershell
+arlen service install --mode dev --dry-run --json
+```
+
+- run that from the app root to inspect the autodiscovered `boomhauer` service
+  plan and default logs under `tmp\service\`
+- re-run without `--dry-run` from an elevated PowerShell session to register
+  the actual Windows service
+- use `arlen service uninstall --mode dev` from the same app root to remove the
+  registered developer service later
+
 Then verify:
 
 ```bash
