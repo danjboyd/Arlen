@@ -4,7 +4,19 @@ Last updated: 2026-04-07
 
 ## Leaving Off (2026-04-07)
 
-- Completed `24T` on branch `windows/clang64`:
+- Reopened Phase 24 on branch `windows/clang64` to add planned subphase `24U`:
+  - scope: Windows-native `arlen service install|uninstall --mode dev|runtime`
+    workflows over the checked-in CLANG64 contract
+  - intent: support `boomhauer` as a developer-box Windows service and
+    packaged `propane` as a runtime/test/prod Windows service through one
+    higher-level CLI surface
+  - autodiscovery target: make `--name`, `--app-root`, and `--releases-dir`
+    optional when invocation from app-root or immutable-release layout is
+    unambiguous
+  - forward-compatibility note: Linux `systemd` wiring should follow later
+    behind the same `arlen service` command instead of introducing a separate
+    OS-specific CLI
+- `24T` remains delivered on branch `windows/clang64`:
   - added `bin/_windows_clang64_launcher.ps1` plus thin `bin/arlen.{ps1,cmd}`
     and `bin/boomhauer.{ps1,cmd}` wrappers for plain PowerShell / `cmd.exe`
     invocation
@@ -14,7 +26,8 @@ Last updated: 2026-04-07
   - updated the Windows docs and getting-started path so users can put `bin`
     on `PATH` and run `arlen` / `boomhauer` without a manual
     `scripts/run_clang64.ps1` handoff
-- Phase 24 is complete again on `windows/clang64` with `24A-24T` delivered.
+- Phase 24 is no longer treated as fully complete in the roadmap ledger because
+  `24U` is now planned after the previously delivered `24A-24T` slice.
 
 ## Leaving Off (2026-04-06)
 

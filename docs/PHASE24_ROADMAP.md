@@ -1,6 +1,6 @@
 # Arlen Phase 24 Roadmap
 
-Status: complete on 2026-04-07 (`24A-24T` delivered on branch `windows/clang64` for the checked-in CLANG64 Windows parity, release, and PowerShell-first launcher contract)
+Status: in progress (`24A-24T` delivered on branch `windows/clang64`; `24U` planned for Windows-native `arlen service` install/uninstall support)
 Last updated: 2026-04-07
 
 Related docs:
@@ -31,7 +31,7 @@ Phase 24 is split into three tracks:
 - `24A-24F`: first-pass Windows compatibility
 - `24G-24M`: Windows preview contract completion
 - `24N-24P`: Windows runtime parity closeout
-- `24Q-24T`: Windows-to-Linux parity and platform closeout
+- `24Q-24U`: Windows-to-Linux parity and platform closeout
 
 The implementation branch for this work is `windows/clang64`.
 
@@ -124,6 +124,7 @@ Full-parity success means:
 18. Phase 24R: perf, sanitizer, and fault-injection lane parity.
 19. Phase 24S: release, packaging, and first-class platform closeout.
 20. Phase 24T: PowerShell-first launcher wrappers for `arlen` and `boomhauer`.
+21. Phase 24U: Windows-native `arlen service` install/uninstall workflows.
 
 ## 3.4 Recommended Rollout Order
 
@@ -147,11 +148,13 @@ Full-parity success means:
 18. `24R`
 19. `24S`
 20. `24T`
+21. `24U`
 
 That order gets a real Windows development foothold first, then expands
 outward into runtime, security, verification, deployment parity, default-platform
-closeout, and finally a PowerShell-native launcher surface over the checked-in
-CLANG64 contract.
+closeout, then a PowerShell-native launcher surface over the checked-in
+CLANG64 contract, and finally first-class Windows service-installation
+orchestration for developer and runtime flows.
 
 ## 4. Scope Guardrails
 
@@ -909,6 +912,56 @@ Acceptance (required):
 - Wrapper-based invocation preserves current working directory, argument
   semantics, visible process output, and non-zero exit propagation.
 
+## 5.21 Phase 24U: Windows-Native `arlen service` Install/Uninstall Workflows
+
+Status: planned
+
+Rationale:
+
+- The checked-in Windows runtime story already supports packaged release
+  orchestration through PowerShell helpers plus direct CLI/dev-server wrappers.
+- The next operational gap is native Windows service registration and removal
+  for those supported entrypoints.
+- Developer boxes and Windows test/prod hosts need different service targets:
+  - dev mode should wrap `boomhauer`
+  - runtime mode should wrap the packaged `propane` start helper
+
+Deliverables:
+
+- Add a higher-level service-management CLI surface on Windows:
+  - `arlen service install --mode dev|runtime`
+  - `arlen service uninstall --mode dev|runtime`
+- Make `--name`, `--app-root`, and `--releases-dir` optional when the current
+  working directory makes the target deterministic:
+  - dev mode auto-discovers app root and derives a default service name
+  - runtime mode auto-discovers `releases-dir` from the active immutable
+    release layout and derives a default service name
+- Keep the service backends mode-specific:
+  - `--mode dev` => `boomhauer` on a developer workstation
+  - `--mode runtime` => packaged `start_release.ps1` / `propane`
+- Document the supported Windows service wrapper/install contract and failure
+  modes, including how names are derived and when explicit overrides are
+  required.
+
+Acceptance (required):
+
+- From plain PowerShell on Windows, `arlen service install --mode dev` can
+  install a development service for a supported app root without requiring the
+  user to hand-write service-wrapper metadata.
+- From plain PowerShell on Windows, `arlen service install --mode runtime` can
+  install a runtime service for a supported release layout without requiring
+  the user to hand-write service-wrapper metadata.
+- `arlen service uninstall --mode dev|runtime` removes only the registered
+  Windows service wrapper state and does not delete app or release files.
+
+Forward-compatibility note:
+
+- This service CLI should be designed as the long-term cross-platform
+  orchestration surface.
+- Phase 24U only covers the Windows backend.
+- Linux `systemd` wiring should be added later behind the same `arlen service`
+  contract rather than introducing a second unrelated CLI surface.
+
 ## 6. Exit Criteria Summary
 
 Phase 24 first-pass closeout requires:
@@ -928,11 +981,13 @@ Phase 24 preview-contract closeout requires:
 
 Phase 24 full-parity closeout requires:
 
-- `24A-24T` complete
+- `24A-24U` complete
 - Windows carries the same supported test, live-backend, perf, sanitizer, and
   robustness confidence claims as Linux
 - Windows has first-class release/install/package/service guidance instead of a
   preview-scoped runtime boundary
 - Windows CLI/dev-server entrypoints can be launched from plain PowerShell
   without a manual CLANG64-shell handoff
+- Windows service installation/removal is implementation-backed for the
+  supported dev/runtime flows
 - top-level docs no longer describe Windows as preview-only
