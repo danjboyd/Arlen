@@ -391,6 +391,11 @@ fi
 
 make -C "$framework_root" arlen boomhauer >/dev/null
 
+if [[ -f "$app_root/config/app.plist" ]] && ([[ -f "$app_root/src/main.m" ]] || [[ -f "$app_root/app_lite.m" ]]); then
+  ARLEN_APP_ROOT="$app_root" ARLEN_FRAMEWORK_ROOT="$framework_root" \
+    "$framework_root/bin/boomhauer" --no-watch --prepare-only >/dev/null
+fi
+
 mkdir -p "$release_dir/app" "$release_dir/framework" "$release_dir/metadata"
 
 copy_if_exists() {
@@ -409,6 +414,8 @@ copy_if_exists "$app_root/templates" "$release_dir/app/templates"
 copy_if_exists "$app_root/modules" "$release_dir/app/modules"
 copy_if_exists "$app_root/src" "$release_dir/app/src"
 copy_if_exists "$app_root/app_lite.m" "$release_dir/app/app_lite.m"
+copy_if_exists "$app_root/db/migrations" "$release_dir/app/db/migrations"
+copy_if_exists "$app_root/.boomhauer/build/boomhauer-app" "$release_dir/app/.boomhauer/build/boomhauer-app"
 
 # Package runtime/tooling payload used by deploy scripts.
 copy_if_exists "$framework_root/bin" "$release_dir/framework/bin"

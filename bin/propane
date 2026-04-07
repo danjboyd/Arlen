@@ -225,7 +225,17 @@ if [[ ! "$app_root" = /* ]]; then
 fi
 app_root="$(cd "$app_root" && pwd)"
 
-if [[ ! -f "$framework_root/GNUmakefile" || ! -d "$framework_root/src/Arlen" ]]; then
+is_checkout_framework_root=0
+if [[ -f "$framework_root/GNUmakefile" && -d "$framework_root/src/Arlen" ]]; then
+  is_checkout_framework_root=1
+fi
+
+is_release_framework_root=0
+if [[ -x "$framework_root/build/arlen" && -x "$framework_root/bin/propane" ]]; then
+  is_release_framework_root=1
+fi
+
+if (( is_checkout_framework_root == 0 && is_release_framework_root == 0 )); then
   echo "propane: invalid framework root: $framework_root" >&2
   exit 1
 fi
@@ -235,7 +245,9 @@ if ! command -v python3 >/dev/null 2>&1; then
   exit 1
 fi
 
-make -C "$framework_root" arlen >/dev/null
+if (( is_checkout_framework_root == 1 )); then
+  make -C "$framework_root" arlen >/dev/null
+fi
 
 config_json="$(cd "$app_root" && "$framework_root/build/arlen" config --env "$environment" --json 2>/dev/null || true)"
 if [[ -z "$config_json" ]]; then
@@ -437,17 +449,23 @@ if [[ -f "$app_root/config/app.plist" ]] && ([[ -f "$app_root/src/main.m" ]] || 
 fi
 
 if (( is_app_root == 1 )); then
-  if ARLEN_APP_ROOT="$app_root" ARLEN_FRAMEWORK_ROOT="$framework_root" \
-      "$framework_root/bin/boomhauer" --no-watch --prepare-only >/dev/null; then
-    :
+  if (( is_release_framework_root == 1 )) && [[ -x "$app_root/.boomhauer/build/boomhauer-app" ]]; then
+    app_binary="$app_root/.boomhauer/build/boomhauer-app"
   else
-    status=$?
-    echo "propane: app prepare step failed; see $app_root/.boomhauer/last_build_error.log" >&2
-    exit "$status"
+    if ARLEN_APP_ROOT="$app_root" ARLEN_FRAMEWORK_ROOT="$framework_root" \
+        "$framework_root/bin/boomhauer" --no-watch --prepare-only >/dev/null; then
+      :
+    else
+      status=$?
+      echo "propane: app prepare step failed; see $app_root/.boomhauer/last_build_error.log" >&2
+      exit "$status"
+    fi
+    app_binary="$app_root/.boomhauer/build/boomhauer-app"
   fi
-  app_binary="$app_root/.boomhauer/build/boomhauer-app"
 else
-  make -C "$framework_root" boomhauer >/dev/null
+  if (( is_checkout_framework_root == 1 )); then
+    make -C "$framework_root" boomhauer >/dev/null
+  fi
   app_binary="$framework_root/build/boomhauer"
 fi
 

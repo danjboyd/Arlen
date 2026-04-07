@@ -95,7 +95,8 @@ run_release_health_check() {
 
   ARLEN_APP_ROOT="$release_dir/app" \
     ARLEN_FRAMEWORK_ROOT="$release_dir/framework" \
-    "$release_dir/framework/build/boomhauer" --port "$probe_port" >"$server_log" 2>&1 &
+    "$release_dir/framework/bin/propane" --port "$probe_port" --pid-file "$release_dir/app/tmp/propane-smoke.pid" \
+    >"$server_log" 2>&1 &
   local server_pid=$!
 
   local success=0

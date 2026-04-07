@@ -381,6 +381,8 @@
                                   "int main(int argc, const char *argv[]) { (void)argc; (void)argv; return 0; }\n"]);
     XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"public/health.txt"]
                           content:@"ok\n"]);
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"db/migrations/202604070101_create_demo.sql"]
+                          content:@"CREATE TABLE demo_release (id INTEGER);\n"]);
 
     NSString *releasesDir = [workRoot stringByAppendingPathComponent:@"releases"];
 
@@ -429,6 +431,10 @@
         [releasesDir stringByAppendingPathComponent:@"rel1/metadata/release.env"];
     BOOL metadataExists = [[NSFileManager defaultManager] fileExistsAtPath:metadataFile];
     XCTAssertTrue(metadataExists);
+    XCTAssertTrue([[NSFileManager defaultManager]
+        fileExistsAtPath:[releasesDir stringByAppendingPathComponent:@"rel1/app/db/migrations/202604070101_create_demo.sql"]]);
+    XCTAssertTrue([[NSFileManager defaultManager]
+        fileExistsAtPath:[releasesDir stringByAppendingPathComponent:@"rel1/app/.boomhauer/build/boomhauer-app"]]);
   } @finally {
     [[NSFileManager defaultManager] removeItemAtPath:appRoot error:nil];
     [[NSFileManager defaultManager] removeItemAtPath:workRoot error:nil];
@@ -437,29 +443,27 @@
 
 - (void)testReleaseSmokeScriptValidatesDeployRunbook {
   NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
-  NSString *appRoot = [self createTempDirectoryWithPrefix:@"arlen-smoke-app"];
+  NSString *appParent = [self createTempDirectoryWithPrefix:@"arlen-smoke-app"];
   NSString *workRoot = [self createTempDirectoryWithPrefix:@"arlen-smoke-work"];
-  XCTAssertNotNil(appRoot);
+  XCTAssertNotNil(appParent);
   XCTAssertNotNil(workRoot);
-  if (appRoot == nil || workRoot == nil) {
+  if (appParent == nil || workRoot == nil) {
     return;
   }
 
   @try {
-    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"config/app.plist"]
-                          content:@"{\n"
-                                  "  host = \"127.0.0.1\";\n"
-                                  "  port = 3000;\n"
-                                  "}\n"]);
-    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"config/environments/production.plist"]
-                          content:@"{\n  logFormat = \"json\";\n}\n"]);
-    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"app_lite.m"]
-                          content:@"#import <Foundation/Foundation.h>\n"
-                                  "int main(int argc, const char *argv[]) { (void)argc; (void)argv; return 0; }\n"]);
-    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"public/health.txt"]
-                          content:@"ok\n"]);
-
     int code = 0;
+    NSString *buildOutput = [self runShellCapture:[NSString stringWithFormat:@"cd %@ && make arlen", repoRoot]
+                                         exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", buildOutput);
+
+    NSString *newOutput = [self
+        runShellCapture:[NSString stringWithFormat:@"cd %@ && ARLEN_FRAMEWORK_ROOT=%@ %@/build/arlen new SmokeApp --full",
+                                                  appParent, repoRoot, repoRoot]
+               exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", newOutput);
+
+    NSString *appRoot = [appParent stringByAppendingPathComponent:@"SmokeApp"];
     int port = [self randomPort];
     NSString *smokeOutput = [self runShellCapture:[NSString stringWithFormat:
                                                        @"%s/tools/deploy/smoke_release.sh "
@@ -475,7 +479,7 @@
     XCTAssertEqual(0, code, @"%@", smokeOutput);
     XCTAssertTrue([smokeOutput containsString:@"release smoke passed"]);
   } @finally {
-    [[NSFileManager defaultManager] removeItemAtPath:appRoot error:nil];
+    [[NSFileManager defaultManager] removeItemAtPath:appParent error:nil];
     [[NSFileManager defaultManager] removeItemAtPath:workRoot error:nil];
   }
 }

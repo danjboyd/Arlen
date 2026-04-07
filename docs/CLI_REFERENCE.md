@@ -401,6 +401,7 @@ Build and run the first-party jobs worker loop for the current app root.
 
 - delegates to framework `bin/jobs-worker` with `ARLEN_APP_ROOT` + `ARLEN_FRAMEWORK_ROOT`
 - compiles the app through `bin/boomhauer --no-watch --prepare-only` and then runs `.boomhauer/build/boomhauer-app` in jobs-worker mode
+- when `ARLEN_FRAMEWORK_ROOT` points at a packaged release payload and `app/.boomhauer/build/boomhauer-app` is already present, reuses that packaged binary instead of recompiling from source
 - if that prepare step fails, exits with the same non-zero status and points at `.boomhauer/last_build_error.log`
 - worker args are passed through (`--env`, `--once`, `--limit`, `--poll-interval-seconds`, `--run-scheduler`, `--scheduler-interval-seconds`)
 
@@ -410,6 +411,7 @@ Run production manager (`propane`) for the current app root.
 
 - manager args are forwarded to `bin/propane`
 - app-root launches first run `bin/boomhauer --no-watch --prepare-only`; if that fails, `propane` exits non-zero and points at `.boomhauer/last_build_error.log`
+- when `ARLEN_FRAMEWORK_ROOT` points at a packaged release payload, `propane` runs directly from that payload and reuses `app/.boomhauer/build/boomhauer-app` without requiring a full Arlen checkout
 - all production manager settings are called "propane accessories"
 
 ### `arlen routes`
@@ -891,6 +893,7 @@ Lifecycle diagnostics:
   - use `--certification-manifest <path>` to override manifest location
   - use `--json-performance-manifest <path>` to override JSON performance manifest location
   - use `--allow-missing-certification` only for non-RC smoke/local packaging flows
+  - packages `app/db/migrations` and the prepared app binary at `app/.boomhauer/build/boomhauer-app` so the documented release migrate and `framework/bin/propane` workflows run from the artifact itself
 - `arlen generate frontend <Name> --preset <vanilla-spa|progressive-mpa>`: scaffold frontend starter templates with built-in API wiring examples
 - `make ci-docs`: run docs quality gate (API docs regen consistency + roadmap summary consistency + newcomer-doc navigation checks + imported comparative benchmark-contract consistency + HTML artifact/link checks)
 - `make ci-benchmark-contracts`: validate the imported lightweight comparative benchmark fixtures under `tests/fixtures/benchmarking/`

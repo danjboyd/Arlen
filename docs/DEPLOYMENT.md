@@ -112,6 +112,13 @@ releases/<release-id>/
   metadata/
 ```
 
+Packaged release payloads now include:
+
+- app config/templates/public/modules/source files needed for runtime inspection
+- `app/db/migrations` for the documented `arlen migrate` step
+- prebuilt app server binary at `app/.boomhauer/build/boomhauer-app`
+- runtime wrapper scripts plus `framework/build/arlen` and `framework/build/boomhauer`
+
 Release metadata includes:
 
 - `metadata/release.env`
@@ -136,6 +143,9 @@ cd /path/to/app/releases/current/app
 /path/to/app/releases/current/framework/build/arlen migrate --env production
 ```
 
+The packaged release includes `app/db/migrations`, so this command no longer
+depends on copying migration files into the artifact after build time.
+
 ### 5.4 Start runtime from activated release
 
 ```bash
@@ -143,6 +153,10 @@ ARLEN_APP_ROOT=/path/to/app/releases/current/app \
 ARLEN_FRAMEWORK_ROOT=/path/to/app/releases/current/framework \
 /path/to/app/releases/current/framework/bin/propane --env production
 ```
+
+`propane` now runs directly from the packaged release payload. It does not
+require a full Arlen checkout when `ARLEN_FRAMEWORK_ROOT` points at
+`releases/current/framework`.
 
 ## 6. Container-First Runbook (Baseline)
 
@@ -233,6 +247,7 @@ This validates:
 
 - release build
 - activation
+- startup through packaged `framework/bin/propane`
 - text + JSON health/readiness probe contracts from activated payload
 - rollback
 - text + JSON health/readiness probe contracts after rollback

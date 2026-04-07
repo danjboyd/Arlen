@@ -156,6 +156,9 @@ If you are working on Arlen itself rather than just building an app with it:
 
 - `make test`, `make ci-quality`, and the broader confidence lanes remain the
   deeper project-level verification path
+- `docs/DEPLOYMENT.md` covers the immutable release artifact workflow; current
+  release payloads package migrations plus a prepared app binary so
+  `framework/bin/propane` can run directly from the built artifact
 - `docs/DOCUMENTATION_POLICY.md` covers docs definition-of-done and quality
   expectations
 - `docs/TESTING_WORKFLOW.md` covers the focused regression and confidence lanes

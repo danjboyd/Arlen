@@ -94,7 +94,17 @@ if [[ ! "$app_root" = /* ]]; then
 fi
 app_root="$(cd "$app_root" && pwd)"
 
-if [[ ! -f "$framework_root/GNUmakefile" || ! -d "$framework_root/src/Arlen" ]]; then
+is_checkout_framework_root=0
+if [[ -f "$framework_root/GNUmakefile" && -d "$framework_root/src/Arlen" ]]; then
+  is_checkout_framework_root=1
+fi
+
+is_release_framework_root=0
+if [[ -x "$framework_root/build/arlen" && -x "$framework_root/bin/jobs-worker" ]]; then
+  is_release_framework_root=1
+fi
+
+if (( is_checkout_framework_root == 0 && is_release_framework_root == 0 )); then
   echo "jobs-worker: invalid framework root: $framework_root" >&2
   exit 1
 fi
@@ -104,16 +114,20 @@ if [[ ! -f "$app_root/config/app.plist" ]] || [[ ! -f "$app_root/src/main.m" && 
   exit 1
 fi
 
-if ARLEN_APP_ROOT="$app_root" ARLEN_FRAMEWORK_ROOT="$framework_root" \
-    "$framework_root/bin/boomhauer" --env "$environment" --no-watch --prepare-only >/dev/null; then
-  :
+if (( is_release_framework_root == 1 )) && [[ -x "$app_root/.boomhauer/build/boomhauer-app" ]]; then
+  app_binary="$app_root/.boomhauer/build/boomhauer-app"
 else
-  status=$?
-  echo "jobs-worker: app prepare step failed; see $app_root/.boomhauer/last_build_error.log" >&2
-  exit "$status"
+  if ARLEN_APP_ROOT="$app_root" ARLEN_FRAMEWORK_ROOT="$framework_root" \
+      "$framework_root/bin/boomhauer" --env "$environment" --no-watch --prepare-only >/dev/null; then
+    :
+  else
+    status=$?
+    echo "jobs-worker: app prepare step failed; see $app_root/.boomhauer/last_build_error.log" >&2
+    exit "$status"
+  fi
+  app_binary="$app_root/.boomhauer/build/boomhauer-app"
 fi
 
-app_binary="$app_root/.boomhauer/build/boomhauer-app"
 if [[ ! -x "$app_binary" ]]; then
   echo "jobs-worker: expected compiled app binary at $app_binary" >&2
   exit 1
