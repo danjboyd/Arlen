@@ -72,11 +72,8 @@ function Write-ArlenServicePayload {
     if ($ResultFile) {
       Set-Content -LiteralPath $ResultFile -Value $json -Encoding UTF8
     }
-    $json
-  } else {
-    return $false
+    Write-Output $json
   }
-  return $true
 }
 
 function Test-ArlenAppRoot {
@@ -278,7 +275,9 @@ $plan = @{
 }
 
 if ($Action -eq "status") {
-  if (-not (Write-ArlenServicePayload -Payload $plan)) {
+  if ($Json) {
+    Write-ArlenServicePayload -Payload $plan
+  } else {
     Write-Host "arlen service status"
     Write-Host "  mode: $Mode"
     Write-Host "  name: $serviceName"
@@ -289,7 +288,9 @@ if ($Action -eq "status") {
 }
 
 if ($DryRun) {
-  if (-not (Write-ArlenServicePayload -Payload $plan)) {
+  if ($Json) {
+    Write-ArlenServicePayload -Payload $plan
+  } else {
     Write-Host "arlen service $Action dry-run"
     Write-Host "  mode: $Mode"
     Write-Host "  name: $serviceName"
@@ -323,7 +324,9 @@ $plan.status = "ok"
 $plan.service_status = if ($wmiService) { $wmiService.State } else { $service.Status.ToString() }
 $plan.startup_type = if ($wmiService) { $wmiService.StartMode } else { $startupType }
 
-if (-not (Write-ArlenServicePayload -Payload $plan)) {
+if ($Json) {
+  Write-ArlenServicePayload -Payload $plan
+} else {
   Write-Host "Arlen service $Action complete"
   Write-Host "  name: $serviceName"
   Write-Host "  status: $($plan.service_status)"

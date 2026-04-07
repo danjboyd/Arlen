@@ -74,11 +74,8 @@ function Write-ArlenServicePayload {
     if ($ResultFile) {
       Set-Content -LiteralPath $ResultFile -Value $json -Encoding UTF8
     }
-    $json
-  } else {
-    return $false
+    Write-Output $json
   }
-  return $true
 }
 
 function Test-ArlenAppRoot {
@@ -315,7 +312,9 @@ $plan = @{
 }
 
 if ($DryRun) {
-  if (-not (Write-ArlenServicePayload -Payload $plan)) {
+  if ($Json) {
+    Write-ArlenServicePayload -Payload $plan
+  } else {
     Write-Host "arlen service uninstall dry-run"
     Write-Host "  mode: $Mode"
     Write-Host "  name: $serviceName"
@@ -335,6 +334,8 @@ $nssmPath = Resolve-ArlenNSSMPath $NSSMPath
 Invoke-NSSM -ExecutablePath $nssmPath -Arguments @("stop", $serviceName) -ErrorCode "service_stop_failed" -ActionDescription "stopping service $serviceName"
 Invoke-NSSM -ExecutablePath $nssmPath -Arguments @("remove", $serviceName, "confirm") -ErrorCode "service_remove_failed" -ActionDescription "removing service $serviceName"
 
-if (-not (Write-ArlenServicePayload -Payload $plan)) {
+if ($Json) {
+  Write-ArlenServicePayload -Payload $plan
+} else {
   Write-Host "Uninstalled Arlen service $serviceName"
 }

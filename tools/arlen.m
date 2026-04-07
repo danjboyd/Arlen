@@ -427,11 +427,23 @@ static int RunPowerShellScript(NSString *scriptPath, NSArray<NSString *> *args) 
     [taskArgs addObjectsFromArray:args];
   }
   task.arguments = taskArgs;
+  NSPipe *stdoutPipe = [NSPipe pipe];
+  NSPipe *stderrPipe = [NSPipe pipe];
   task.standardInput = [NSFileHandle fileHandleWithStandardInput];
-  task.standardOutput = [NSFileHandle fileHandleWithStandardOutput];
-  task.standardError = [NSFileHandle fileHandleWithStandardError];
+  task.standardOutput = stdoutPipe;
+  task.standardError = stderrPipe;
   [task launch];
   [task waitUntilExit];
+  NSData *stdoutData = [[stdoutPipe fileHandleForReading] readDataToEndOfFile];
+  NSData *stderrData = [[stderrPipe fileHandleForReading] readDataToEndOfFile];
+  if ([stdoutData length] > 0) {
+    fwrite([stdoutData bytes], 1, [stdoutData length], stdout);
+    fflush(stdout);
+  }
+  if ([stderrData length] > 0) {
+    fwrite([stderrData bytes], 1, [stderrData length], stderr);
+    fflush(stderr);
+  }
   return task.terminationStatus;
 }
 

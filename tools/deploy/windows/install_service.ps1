@@ -77,11 +77,8 @@ function Write-ArlenServicePayload {
     if ($ResultFile) {
       Set-Content -LiteralPath $ResultFile -Value $json -Encoding UTF8
     }
-    $json
-  } else {
-    return $false
+    Write-Output $json
   }
-  return $true
 }
 
 function Convert-ToStablePath {
@@ -456,7 +453,9 @@ $plan = @{
 }
 
 if ($DryRun) {
-  if (-not (Write-ArlenServicePayload -Payload $plan)) {
+  if ($Json) {
+    Write-ArlenServicePayload -Payload $plan
+  } else {
     Write-Host "arlen service install dry-run"
     Write-Host "  mode: $Mode"
     Write-Host "  name: $serviceName"
@@ -491,7 +490,9 @@ if ($environmentLines.Count -gt 0) {
   Invoke-NSSM -ExecutablePath $nssmPath -Arguments (@("set", $serviceName, "AppEnvironmentExtra") + $environmentLines) -ErrorCode "service_config_failed" -ActionDescription "setting AppEnvironmentExtra for $serviceName"
 }
 
-if (-not (Write-ArlenServicePayload -Payload $plan)) {
+if ($Json) {
+  Write-ArlenServicePayload -Payload $plan
+} else {
   Write-Host "Installed Arlen service $serviceName"
   Write-Host "  mode: $Mode"
   Write-Host "  stdout log: $stdoutLog"

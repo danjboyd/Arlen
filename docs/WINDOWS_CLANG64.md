@@ -47,6 +47,10 @@ environment as `scripts/run_clang64.ps1`, preserve the current working
 directory, and delegate directly to the existing `bin/arlen` / `bin/boomhauer`
 bash launchers.
 
+Windows `arlen service ...` commands are handled directly by the checked-in
+PowerShell backend so that service status/control output remains visible in
+plain PowerShell without depending on the GNUstep CLI binary path.
+
 ## 2. Required Tools
 
 Expected inside the active `CLANG64` environment:
