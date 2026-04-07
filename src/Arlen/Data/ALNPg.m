@@ -1,5 +1,6 @@
 #import "ALNPg.h"
 #import "ALNJSONSerialization.h"
+#import "ALNPlatform.h"
 #import "ALNPostgresDialect.h"
 #import "ALNSQLBuilder.h"
 
@@ -165,16 +166,10 @@ static BOOL ALNLoadLibpq(NSError **error) {
       return NO;
     }
 
-    const char *candidates[] = {
-      "/usr/lib/x86_64-linux-gnu/libpq.so.5",
-      "libpq.so.5",
-      "libpq.so",
-    };
-
     void *handle = NULL;
-    size_t candidateCount = sizeof(candidates) / sizeof(candidates[0]);
-    for (size_t idx = 0; idx < candidateCount; idx++) {
-      handle = dlopen(candidates[idx], RTLD_LAZY | RTLD_LOCAL);
+    NSArray<NSString *> *candidates = ALNDefaultLibpqCandidatePaths();
+    for (NSString *candidate in candidates) {
+      handle = dlopen([candidate UTF8String], RTLD_LAZY | RTLD_LOCAL);
       if (handle != NULL) {
         break;
       }

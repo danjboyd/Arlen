@@ -1,6 +1,6 @@
 # Arlen Toolchain Matrix
 
-Last updated: 2026-03-31
+Last updated: 2026-04-07
 
 This document records known-good local toolchain baselines for Arlen onboarding and CI parity.
 
@@ -26,6 +26,28 @@ make test-integration
 | GNUstep tooling script | `/usr/GNUstep/System/Library/Makefiles/GNUstep.sh` | Present on current known-good baseline |
 | GNUstep config tool | `source /path/to/Arlen/tools/source_gnustep_env.sh && command -v gnustep-config` | `/usr/GNUstep/System/Tools/gnustep-config` |
 | XCTest runner | `command -v xctest` | `/usr/GNUstep/System/Tools/xctest` |
+
+## Apple Bring-Up Baseline (2026-04-07)
+
+This is the current Apple-runtime characterization baseline for the `mac`
+branch. It is a bring-up checkpoint, not yet a full parity claim.
+
+| Component | Command | Observed baseline |
+| --- | --- | --- |
+| OS family | `uname -s` | `Darwin` |
+| Architecture | `uname -m` | `arm64` |
+| OS version | `sw_vers -productVersion` | `15.5` |
+| Apple SDK | `xcrun --show-sdk-path` | `/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk` |
+| C/ObjC compiler | `xcrun --find clang` | `/Library/Developer/CommandLineTools/usr/bin/clang` |
+| Homebrew | `brew --prefix` | `/opt/homebrew` |
+| OpenSSL package | `brew list --versions openssl@3` | `openssl@3 3.6.0` |
+
+Apple path notes:
+
+- use `./bin/arlen doctor`
+- use `./bin/build-apple`
+- do not source GNUstep bootstrap scripts on the Apple path
+- Apple XCTest integration is not yet closed out
 
 ## GNUstep Resolution Contract
 

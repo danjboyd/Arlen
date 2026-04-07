@@ -16,11 +16,13 @@ local hosting.
 
 Before running repo-local build/test/doc commands, source
 `/path/to/Arlen/tools/source_gnustep_env.sh` or source your active GNUstep
-toolchain env directly.
+toolchain env directly for the Linux/GNUstep path. On macOS, use
+`GETTING_STARTED_MACOS.md`.
 
 ## New Developers
 
 - [First App Guide](FIRST_APP_GUIDE.md): shortest path to scaffold, run, and extend your first app.
+- [Getting Started on macOS](GETTING_STARTED_MACOS.md): Apple-runtime bootstrap path for macOS without GNUstep.
 - [Getting Started](GETTING_STARTED.md): build Arlen, create an app, add a route, and choose the next guide.
 - [Getting Started Tracks](GETTING_STARTED_TRACKS.md): quickstart, API-first, HTML-first, and data-layer entry paths.
 - [App Authoring Guide](APP_AUTHORING_GUIDE.md): routes, controllers, middleware, and route metadata.
@@ -77,6 +79,8 @@ toolchain env directly.
 ## Contributor and Historical Docs
 
 - [Current Status](STATUS.md): latest checkpoint and verified milestone state.
+- [Apple Platform Contract](APPLE_PLATFORM.md): current Apple-runtime support boundary on macOS.
+- [Phase 30 Roadmap](PHASE30_ROADMAP.md): Apple-runtime port roadmap and current bring-up status.
 - [Session Handoff (2026-04-03)](SESSION_HANDOFF_2026-04-03.md): Phase 28 closeout checkpoint covering `28I-28L`, the live reference server, and the final verification set.
 - [Session Handoff (2026-04-02)](SESSION_HANDOFF_2026-04-02.md): historical Phase 28 pause point after shipping `28E-28H` and the React reference workspace.
 - [OwnerConnect Report Reconciliation (2026-04-02)](OWNERCONNECT_REPORT_RECONCILIATION_2026-04-02.md): upstream status note for the Dataverse polymorphic-lookup codegen bug reported from `OwnerConnect`.

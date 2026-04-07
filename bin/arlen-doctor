@@ -34,13 +34,12 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-script_path="${BASH_SOURCE[0]}"
-if resolved="$(readlink -f "$script_path" 2>/dev/null)"; then
-  script_path="$resolved"
-fi
-script_dir="$(cd "$(dirname "$script_path")" && pwd)"
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd "$script_dir/.." && pwd)"
 app_root="$PWD"
+
+# shellcheck source=tools/platform.sh
+source "$repo_root/tools/platform.sh"
 
 to_absolute_path() {
   local raw="$1"
@@ -92,6 +91,17 @@ add_check() {
   esac
 }
 
+check_command() {
+  local command_name="$1"
+  local level="$2"
+  local missing_hint="$3"
+  if command -v "$command_name" >/dev/null 2>&1; then
+    add_check "tool_$command_name" "pass" "$command_name found at $(command -v "$command_name")"
+  else
+    add_check "tool_$command_name" "$level" "$command_name not found on PATH" "$missing_hint"
+  fi
+}
+
 framework_root=""
 framework_override="${ARLEN_FRAMEWORK_ROOT:-}"
 if [[ -n "$framework_override" ]]; then
@@ -126,72 +136,134 @@ else
     "Run 'arlen new <AppName>' if you are bootstrapping a new app."
 fi
 
-gnustep_script="$(bash "$repo_root/tools/resolve_gnustep.sh" 2>/dev/null || true)"
-if [[ -z "$gnustep_script" ]]; then
-  gnustep_script="${GNUSTEP_SH:-/usr/GNUstep/System/Library/Makefiles/GNUstep.sh}"
-fi
-if [[ -f "$gnustep_script" ]]; then
-  add_check "gnustep_script" "pass" "GNUstep script present: $gnustep_script"
-else
-  add_check "gnustep_script" "fail" "missing GNUstep script: $gnustep_script" \
-    "Set GNUSTEP_SH, export GNUSTEP_MAKEFILES, or source your toolchain env script before running Arlen."
-fi
-
-check_command() {
-  local command_name="$1"
-  local level="$2"
-  local missing_hint="$3"
-  if command -v "$command_name" >/dev/null 2>&1; then
-    local resolved
-    resolved="$(command -v "$command_name")"
-    add_check "tool_$command_name" "pass" "$command_name found at $resolved"
-  else
-    add_check "tool_$command_name" "$level" "$command_name not found on PATH" "$missing_hint"
-  fi
-}
-
-check_command "clang" "fail" "Install compiler toolchain and ensure PATH is configured."
-check_command "make" "fail" "Install make and ensure PATH is configured."
-check_command "bash" "fail" "Install bash and ensure PATH is configured."
-check_command "xctest" "warn" "Install Debian package 'tools-xctest' for test execution."
-check_command "python3" "warn" "Install python3 for helper scripts and JSON doctor output."
-check_command "curl" "warn" "Install curl for integration smoke checks."
-
-if [[ -f "$gnustep_script" ]]; then
-  if bash -lc "set +u; source '$gnustep_script' >/dev/null 2>&1; set -u; gnustep-config --objc-flags >/dev/null"; then
-    add_check "gnustep_config" "pass" "gnustep-config responded successfully"
-  else
-    add_check "gnustep_config" "fail" "failed running gnustep-config after sourcing GNUstep.sh" \
-      "Verify your active GNUstep environment and gnustep-config availability."
-  fi
-
-  if bash -lc "set +u; source '$gnustep_script' >/dev/null 2>&1; set -u; printf '#import <dispatch/dispatch.h>\n' | clang \$(gnustep-config --objc-flags) -x objective-c -fsyntax-only - >/dev/null 2>&1"; then
-    add_check "dispatch_headers" "pass" "dispatch/dispatch.h is available to clang"
-  else
-    add_check "dispatch_headers" "fail" "dispatch/dispatch.h is missing from the active toolchain include paths" \
-      "Install libdispatch development headers/runtime support or use a GNUstep toolchain that exposes dispatch headers."
-  fi
-fi
-
-if command -v ldconfig >/dev/null 2>&1; then
-  libpq_line="$(ldconfig -p 2>/dev/null | grep -m1 'libpq\\.so' || true)"
-  if [[ -n "$libpq_line" ]]; then
-    add_check "libpq" "pass" "libpq available: $libpq_line"
-  else
-    add_check "libpq" "warn" "libpq not detected via ldconfig" \
-      "Install PostgreSQL client libraries (libpq) for ALNPg and migrations."
-  fi
-else
-  add_check "libpq" "warn" "ldconfig unavailable; skipping libpq detection" \
-    "Verify libpq availability manually if PostgreSQL support is required."
-fi
-
 matrix_path="$repo_root/docs/TOOLCHAIN_MATRIX.md"
 if [[ -f "$matrix_path" ]]; then
   add_check "toolchain_matrix" "pass" "known-good matrix available: docs/TOOLCHAIN_MATRIX.md"
 else
   add_check "toolchain_matrix" "warn" "known-good matrix missing: docs/TOOLCHAIN_MATRIX.md" \
     "Add and maintain docs/TOOLCHAIN_MATRIX.md for onboarding guidance."
+fi
+
+if aln_platform_is_macos; then
+  add_check "platform" "pass" "platform: macOS Apple runtime path"
+  check_command "xcrun" "fail" "Install Xcode Command Line Tools."
+  check_command "clang" "fail" "Install Xcode Command Line Tools."
+  check_command "make" "fail" "Install developer command line tools and ensure PATH is configured."
+  check_command "bash" "fail" "Install bash and ensure PATH is configured."
+  check_command "python3" "warn" "Install python3 for helper scripts and JSON doctor output."
+  check_command "curl" "warn" "Install curl for integration smoke checks."
+  check_command "brew" "warn" "Install Homebrew for OpenSSL and optional libpq provisioning."
+  check_command "xctest" "warn" "Apple XCTest CLI wiring is planned in Phase 30F."
+
+  sdk_path="$(xcrun --show-sdk-path 2>/dev/null || true)"
+  if [[ -n "$sdk_path" && -d "$sdk_path" ]]; then
+    add_check "apple_sdk" "pass" "macOS SDK available: $sdk_path"
+  else
+    add_check "apple_sdk" "fail" "unable to resolve macOS SDK path via xcrun" \
+      "Install Xcode Command Line Tools or full Xcode."
+  fi
+
+  if [[ -n "$sdk_path" ]] && xcrun clang -isysroot "$sdk_path" -fobjc-arc -x objective-c -fsyntax-only - >/dev/null 2>&1 <<'EOF'
+#import <Foundation/Foundation.h>
+EOF
+  then
+    add_check "foundation_headers" "pass" "Apple Foundation headers are available to clang"
+  else
+    add_check "foundation_headers" "fail" "Apple Foundation headers are not available to clang" \
+      "Verify Command Line Tools installation and xcrun SDK resolution."
+  fi
+
+  if [[ -n "$sdk_path" ]] && xcrun clang -isysroot "$sdk_path" -fobjc-arc -x objective-c -fsyntax-only - >/dev/null 2>&1 <<'EOF'
+#import <dispatch/dispatch.h>
+EOF
+  then
+    add_check "dispatch_headers" "pass" "dispatch/dispatch.h is available via the macOS SDK"
+  else
+    add_check "dispatch_headers" "fail" "dispatch/dispatch.h is missing from the active Apple SDK" \
+      "Verify the active macOS SDK and Apple clang toolchain."
+  fi
+
+  apple_build_script="$repo_root/tools/build_apple.sh"
+  if [[ -x "$apple_build_script" ]]; then
+    add_check "apple_build_script" "pass" "Apple build script present: $apple_build_script"
+  else
+    add_check "apple_build_script" "fail" "Apple build script missing or not executable: $apple_build_script" \
+      "Restore tools/build_apple.sh and mark it executable."
+  fi
+
+  openssl_prefix="${ARLEN_OPENSSL_PREFIX:-}"
+  if [[ -z "$openssl_prefix" ]]; then
+    openssl_prefix="$(aln_platform_brew_prefix openssl@3 || true)"
+  fi
+  if [[ -n "$openssl_prefix" && -d "$openssl_prefix/include/openssl" ]]; then
+    add_check "openssl_headers" "pass" "OpenSSL headers available: $openssl_prefix"
+  else
+    add_check "openssl_headers" "fail" "OpenSSL headers not found for the Apple build path" \
+      "Run 'brew install openssl@3' or set ARLEN_OPENSSL_PREFIX."
+  fi
+
+  libpq_prefix="${ARLEN_LIBPQ_PREFIX:-}"
+  if [[ -z "$libpq_prefix" ]]; then
+    libpq_prefix="$(aln_platform_brew_prefix libpq || true)"
+  fi
+  if [[ -z "$libpq_prefix" ]]; then
+    libpq_prefix="$(aln_platform_brew_prefix postgresql || true)"
+  fi
+  if [[ -n "$libpq_prefix" && -d "$libpq_prefix/lib" ]]; then
+    add_check "libpq" "pass" "libpq candidate available: $libpq_prefix"
+  else
+    add_check "libpq" "warn" "libpq not detected for the Apple path" \
+      "Install Homebrew 'libpq' or 'postgresql' if PostgreSQL support is required."
+  fi
+else
+  add_check "platform" "pass" "platform: GNUstep/Linux bootstrap path"
+
+  gnustep_script="$(bash "$repo_root/tools/resolve_gnustep.sh" 2>/dev/null || true)"
+  if [[ -z "$gnustep_script" ]]; then
+    gnustep_script="${GNUSTEP_SH:-/usr/GNUstep/System/Library/Makefiles/GNUstep.sh}"
+  fi
+  if [[ -f "$gnustep_script" ]]; then
+    add_check "gnustep_script" "pass" "GNUstep script present: $gnustep_script"
+  else
+    add_check "gnustep_script" "fail" "missing GNUstep script: $gnustep_script" \
+      "Set GNUSTEP_SH, export GNUSTEP_MAKEFILES, or source your toolchain env script before running Arlen."
+  fi
+
+  check_command "clang" "fail" "Install compiler toolchain and ensure PATH is configured."
+  check_command "make" "fail" "Install make and ensure PATH is configured."
+  check_command "bash" "fail" "Install bash and ensure PATH is configured."
+  check_command "xctest" "warn" "Install Debian package 'tools-xctest' for test execution."
+  check_command "python3" "warn" "Install python3 for helper scripts and JSON doctor output."
+  check_command "curl" "warn" "Install curl for integration smoke checks."
+
+  if [[ -f "${gnustep_script:-}" ]]; then
+    if bash -lc "set +u; source '$gnustep_script' >/dev/null 2>&1; set -u; gnustep-config --objc-flags >/dev/null"; then
+      add_check "gnustep_config" "pass" "gnustep-config responded successfully"
+    else
+      add_check "gnustep_config" "fail" "failed running gnustep-config after sourcing GNUstep.sh" \
+        "Verify your active GNUstep environment and gnustep-config availability."
+    fi
+
+    if bash -lc "set +u; source '$gnustep_script' >/dev/null 2>&1; set -u; printf '#import <dispatch/dispatch.h>\n' | clang \$(gnustep-config --objc-flags) -x objective-c -fsyntax-only - >/dev/null 2>&1"; then
+      add_check "dispatch_headers" "pass" "dispatch/dispatch.h is available to clang"
+    else
+      add_check "dispatch_headers" "fail" "dispatch/dispatch.h is missing from the active toolchain include paths" \
+        "Install libdispatch development headers/runtime support or use a GNUstep toolchain that exposes dispatch headers."
+    fi
+  fi
+
+  if command -v ldconfig >/dev/null 2>&1; then
+    libpq_line="$(ldconfig -p 2>/dev/null | grep -m1 'libpq\\.so' || true)"
+    if [[ -n "$libpq_line" ]]; then
+      add_check "libpq" "pass" "libpq available: $libpq_line"
+    else
+      add_check "libpq" "warn" "libpq not detected via ldconfig" \
+        "Install PostgreSQL client libraries (libpq) for ALNPg and migrations."
+    fi
+  else
+    add_check "libpq" "warn" "ldconfig unavailable; skipping libpq detection" \
+      "Verify libpq availability manually if PostgreSQL support is required."
+  fi
 fi
 
 if (( as_json == 1 )); then
@@ -254,7 +326,7 @@ else
   echo "  environment: $environment"
   for entry in "${checks[@]}"; do
     IFS=$'\t' read -r check_id status message hint <<<"$entry"
-    status_upper="${status^^}"
+    status_upper="$(printf '%s' "$status" | tr '[:lower:]' '[:upper:]')"
     printf '[%s] %s\n' "$status_upper" "$message"
     if [[ -n "$hint" ]]; then
       printf '       hint: %s\n' "$hint"

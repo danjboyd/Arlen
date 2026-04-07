@@ -4,6 +4,24 @@ Last updated: 2026-04-07
 
 ## Leaving Off (2026-04-07)
 
+- Started Phase 30 and delivered `30A-30E` on the `mac` branch:
+  - added `docs/PHASE30_ROADMAP.md` to scope the Apple-runtime port with
+    `30A-30O`
+  - added `docs/APPLE_PLATFORM.md` and `docs/GETTING_STARTED_MACOS.md` to
+    define the current macOS contract and bootstrap path
+  - introduced centralized portability helpers in `tools/platform.sh` and
+    `src/Arlen/Support/ALNPlatform.{h,m}`
+  - updated `bin/arlen` so Darwin now prefers the Apple-native builder by
+    default while retaining the GNUstep path behind `ARLEN_BUILD_PLATFORM`
+  - replaced the GNUstep-only `bin/arlen-doctor` assumptions with a
+    platform-aware doctor flow that validates Apple SDK, Apple clang, and
+    OpenSSL on macOS and no longer fails on Bash 3 syntax
+  - added `tools/build_apple.sh` and `bin/build-apple` as the first
+    Apple-native build/bootstrap path for `eocc`, `libArlenFramework.a`, and
+    `arlen`, with optional repo-root `boomhauer` build support
+  - extended `ALNPg` with centralized `libpq` candidate discovery so the data
+    layer can probe Homebrew/macOS dynamic library locations instead of only
+    Linux `.so` paths
 - Completed Phase 29 and delivered `29J-29L`:
   - reserved `/healthz`, `/readyz`, `/livez`, `/metrics`, and `/clusterz`
     ahead of app routing so catch-all routes cannot shadow deploy/operability

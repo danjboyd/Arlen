@@ -14,6 +14,7 @@ integration surface, and a managed production runtime (`propane`).
 
 If you are new to Arlen, start with:
 
+- `docs/GETTING_STARTED_MACOS.md` if you are targeting macOS with Apple APIs
 - `docs/FIRST_APP_GUIDE.md`
 - `docs/GETTING_STARTED.md`
 - `docs/GETTING_STARTED_TRACKS.md`
@@ -23,11 +24,24 @@ If you are new to Arlen, start with:
 
 ## Quick Start
 
+Linux/GNUstep path:
+
 ```bash
 source tools/source_gnustep_env.sh
 ./bin/arlen doctor
 make all
+```
 
+macOS Apple-runtime path:
+
+```bash
+./bin/arlen doctor
+./bin/build-apple
+```
+
+Create and run your first app:
+
+```bash
 mkdir -p ~/arlen-apps
 cd ~/arlen-apps
 /path/to/Arlen/bin/arlen new MyApp
@@ -37,9 +51,10 @@ cd MyApp
 
 Then open `http://127.0.0.1:3000/`.
 
-If you already use a managed GNUstep toolchain, you can source its env script
-first instead. The Arlen helper resolves `GNUSTEP_SH`, `GNUSTEP_MAKEFILES`,
-`gnustep-config`, and finally `/usr/GNUstep`.
+If you already use a managed GNUstep toolchain on Linux, you can source its
+env script first instead. The Arlen helper resolves `GNUSTEP_SH`,
+`GNUSTEP_MAKEFILES`, `gnustep-config`, and finally `/usr/GNUstep`. On macOS,
+use the Apple builder documented in `docs/GETTING_STARTED_MACOS.md`.
 
 The default full scaffold gives you:
 

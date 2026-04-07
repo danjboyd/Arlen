@@ -11,5 +11,15 @@ if [[ "${1:-}" == "doctor" ]]; then
   exec "$repo_root/bin/arlen-doctor" "$@"
 fi
 
+build_platform="${ARLEN_BUILD_PLATFORM:-auto}"
+if [[ "$build_platform" == "auto" && "$(uname -s)" == "Darwin" ]]; then
+  build_platform="apple"
+fi
+
+if [[ "$build_platform" == "apple" ]]; then
+  "$repo_root/bin/build-apple" >/dev/null
+  exec "$repo_root/build/apple/arlen" "$@"
+fi
+
 make -C "$repo_root" arlen >/dev/null
 exec "$repo_root/build/arlen" "$@"

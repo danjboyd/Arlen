@@ -4861,12 +4861,12 @@ static NSString *ALNTypedSQLPascalSuffix(NSString *identifier) {
 }
 
 static NSString *ALNTypedSQLLowerCamel(NSString *identifier) {
-  NSString *pascal = ALNTypedSQLPascalSuffix(identifier);
-  if ([pascal length] == 0) {
+  NSString *pascalSuffix = ALNTypedSQLPascalSuffix(identifier);
+  if ([pascalSuffix length] == 0) {
     return @"value";
   }
-  NSString *first = [[pascal substringToIndex:1] lowercaseString];
-  NSString *rest = ([pascal length] > 1) ? [pascal substringFromIndex:1] : @"";
+  NSString *first = [[pascalSuffix substringToIndex:1] lowercaseString];
+  NSString *rest = ([pascalSuffix length] > 1) ? [pascalSuffix substringFromIndex:1] : @"";
   return [NSString stringWithFormat:@"%@%@", first, rest];
 }
 
