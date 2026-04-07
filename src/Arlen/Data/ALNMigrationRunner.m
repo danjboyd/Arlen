@@ -368,14 +368,38 @@ static NSString *ALNMigrationNormalizeSQLForDialect(NSString *sql, id<ALNSQLDial
   NSMutableArray<NSString *> *lines = [NSMutableArray array];
   NSArray<NSString *> *rawLines =
       [(sql ?: @"") componentsSeparatedByCharactersInSet:[NSCharacterSet newlineCharacterSet]];
-  NSRegularExpression *goRegex =
-      [NSRegularExpression regularExpressionWithPattern:@"^\\s*GO(?:\\s+[0-9]+)?\\s*(?:--.*)?$"
-                                                options:NSRegularExpressionCaseInsensitive
-                                                  error:nil];
   for (NSString *line in rawLines) {
     NSString *normalizedLine = line ?: @"";
-    NSRange fullRange = NSMakeRange(0, [normalizedLine length]);
-    if ([goRegex numberOfMatchesInString:normalizedLine options:0 range:fullRange] > 0) {
+    NSString *candidate = [normalizedLine stringByTrimmingCharactersInSet:
+                                              [NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    NSRange commentRange = [candidate rangeOfString:@"--"];
+    if (commentRange.location != NSNotFound) {
+      candidate = [[candidate substringToIndex:commentRange.location]
+          stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    }
+
+    NSArray<NSString *> *rawTokens =
+        [candidate componentsSeparatedByCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    NSMutableArray<NSString *> *tokens = [NSMutableArray arrayWithCapacity:[rawTokens count]];
+    for (NSString *token in rawTokens) {
+      if ([token length] > 0) {
+        [tokens addObject:token];
+      }
+    }
+
+    BOOL isGoBatchSeparator = NO;
+    if ([tokens count] == 1) {
+      isGoBatchSeparator = [[tokens[0] uppercaseString] isEqualToString:@"GO"];
+    } else if ([tokens count] == 2) {
+      NSString *command = [tokens[0] uppercaseString];
+      NSString *repeatCount = tokens[1];
+      NSCharacterSet *digits = [NSCharacterSet decimalDigitCharacterSet];
+      isGoBatchSeparator = [command isEqualToString:@"GO"] &&
+                           [repeatCount length] > 0 &&
+                           [[repeatCount stringByTrimmingCharactersInSet:digits] length] == 0;
+    }
+
+    if (isGoBatchSeparator) {
       [lines addObject:@";"];
     } else {
       [lines addObject:normalizedLine];
