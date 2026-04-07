@@ -4,6 +4,23 @@ Last updated: 2026-04-07
 
 ## Leaving Off (2026-04-07)
 
+- Windows integration branch checkpoint after `857d706`
+  (`Continue Phase 24 windows runtime reintegration`):
+  - branch: `windows-clang64-integration`
+  - completed the main-based Windows runtime/server reintegration slice:
+    bootstrap wrappers, GNUstep `/clang64` resolution, `ALNPlatform`,
+    Windows-aware `boomhauer` / `jobs-worker` / `propane`, Windows transport
+    loaders, transplanted `ALNHTTPServer` portability, runtime parity tests,
+    and `.github/workflows/phase24-windows-preview.yml`
+  - verified locally with:
+    `source ./tools/source_gnustep_env.sh && make arlen build-tests phase24-windows-db-smoke phase24-windows-runtime-tests`
+    `source ./tools/source_gnustep_env.sh && make phase24-windows-confidence`
+    `source ./tools/source_gnustep_env.sh && make test-unit-filter TEST=BuildPolicyTests/testGNUmakefileDeclaresTestingAndConfidenceEntryPoints`
+  - remaining Windows work is deferred into Phase 31:
+    packaged runtime binary resolution, Windows release artifact packaging,
+    deploy doctor/release parity, packaged-release confidence lanes, preview CI
+    expansion, and deployment-doc closeout
+  - next restart document: `docs/PHASE31_ROADMAP.md`
 - Started a `main`-based Phase 24 reintegration pass from the historical
   `origin/windows/clang64` branch:
   - added CLANG64 entry wrappers
@@ -90,6 +107,7 @@ Last updated: 2026-04-07
   - `README.md`
   - `docs/README.md`
   - `docs/STATUS.md`
+  - `docs/PHASE31_ROADMAP.md`
 - Verification completed at this checkpoint:
   - `source tools/source_gnustep_env.sh && make arlen`
   - `source tools/source_gnustep_env.sh && make build-tests`
