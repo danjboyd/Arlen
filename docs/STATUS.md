@@ -4,6 +4,25 @@ Last updated: 2026-04-07
 
 ## Leaving Off (2026-04-07)
 
+- Continued Phase 30 and delivered `30F-30I` on the `mac` branch:
+  - updated `bin/test` so Darwin now runs the Apple-native verification lane
+    through `tools/test_apple.sh` instead of falling through to GNUstep
+    `make test`
+  - added `tools/test_apple.sh` to run `arlen doctor`, build the Apple
+    artifacts, scaffold a fresh app, boot it on a random local port, and
+    probe `/`, `/healthz`, and `/openapi`
+  - added `tools/build_apple_app.sh` so app-root projects can build an Apple
+    `.boomhauer/apple/boomhauer-app` binary against
+    `build/apple/lib/libArlenFramework.a`
+  - updated `bin/boomhauer` with an Apple runtime path for both repo-root and
+    app-root execution, with watch mode explicitly disabled on the current
+    Apple path instead of silently assuming GNUstep behavior
+  - fixed the Apple app-builder `--print-path` contract so template
+    transpilation logs no longer corrupt captured binary paths for shell
+    callers
+  - documented the current Apple-runtime checkpoint in the Phase 30 roadmap
+    and macOS platform/getting-started docs, including the present XCTest
+    limitation with Command Line Tools-only environments
 - Started Phase 30 and delivered `30A-30E` on the `mac` branch:
   - added `docs/PHASE30_ROADMAP.md` to scope the Apple-runtime port with
     `30A-30O`
@@ -77,6 +96,12 @@ Last updated: 2026-04-07
   - `docs/README.md`
   - `docs/STATUS.md`
 - Verification completed at this checkpoint:
+  - `./bin/test --smoke-only`
+  - manual Apple runtime smoke:
+    `./bin/build-apple --with-boomhauer`
+    `build/apple/arlen new AppleCap`
+    `tools/build_apple_app.sh --prepare-only --print-path`
+    verified `GET /`, `GET /healthz`, and `GET /openapi`
   - `source tools/source_gnustep_env.sh && make arlen`
   - `source tools/source_gnustep_env.sh && make build-tests`
   - `source tools/source_gnustep_env.sh && make phase29-confidence`

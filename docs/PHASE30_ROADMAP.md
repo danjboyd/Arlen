@@ -11,8 +11,8 @@ requiring GNUstep for that platform.
 
 Phase 30 keeps the existing Linux/GNUstep path intact for now. The work in
 this phase is additive: establish the Apple contract, stand up an Apple-native
-build/bootstrap path, and create the portability seams needed for the rest of
-the port.
+build/bootstrap path, create the portability seams needed for the rest of the
+port, and validate that the Apple runtime can boot a scaffolded app.
 
 ## 30A. Apple Platform Contract
 
@@ -128,36 +128,113 @@ Shipped in this subphase:
 - optional `boomhauer` build support is included behind `--with-boomhauer`
   after template transpilation succeeds
 
-Current scope boundary:
-
-- Apple XCTest integration is deferred to `30F`
-- full dependency normalization for `libpq`/ODBC remains broader `30H` work
-- broad runtime validation remains `30I`
-
 Acceptance checkpoint:
 
 - macOS can attempt a native Arlen build without GNUstep setup
 - the build path fails with Apple-specific remediation instead of GNUstep-only
   guidance
 
-## Remaining Subphases
-
 ## 30F. Apple XCTest Migration
 
-Move the test path from GNUstep `xctest` assumptions to Apple XCTest tooling.
+Goal:
+
+- move the macOS test path off GNUstep `xctest` assumptions and onto an
+  Apple-native entrypoint
+
+Shipped in this subphase:
+
+- `bin/test` now dispatches to `tools/test_apple.sh` on Darwin
+- the Apple test lane runs `arlen doctor`, builds the Apple artifacts, and
+  performs scaffold-app smoke verification instead of incorrectly attempting
+  GNUstep test commands on macOS
+- the Apple lane now reports the current environment limitation honestly when
+  full Xcode-backed XCTest execution is unavailable
+
+Current boundary:
+
+- full XCTest bundle/executable integration remains blocked on activating a
+  full Xcode developer directory in the macOS environment used for bring-up
+
+Acceptance checkpoint:
+
+- macOS no longer falls through to GNUstep `make test`
+- the Apple test entrypoint is deterministic about what it verifies today
 
 ## 30G. Shell and Tooling Portability Hardening
 
-Complete the remaining script portability pass across CI helpers, deploy tools,
-and ancillary scripts.
+Goal:
+
+- remove Apple-hostile shell assumptions from the core dev entrypoints
+
+Shipped in this subphase:
+
+- `bin/boomhauer` now uses `tools/platform.sh` helpers and has an explicit
+  Apple runtime path
+- Apple app-root and repo-root boomhauer flows avoid GNUstep bootstrap
+  assumptions
+- `tools/build_apple_app.sh` provides a Bash 3 compatible scaffold-app build
+  helper for the Apple runtime
+- Apple path builders now keep `--print-path` stdout clean so script callers
+  can reliably capture binary paths
+
+Current boundary:
+
+- wider CI/deploy helper cleanup remains future work outside the core Apple
+  developer loop
+
+Acceptance checkpoint:
+
+- the primary macOS build/test/run scripts execute without GNU/Linux-only shell
+  features
 
 ## 30H. Dependency Discovery for PostgreSQL and Optional Backends
 
-Normalize `libpq`, ODBC, and other optional dependency discovery on macOS.
+Goal:
+
+- make the Apple runtime fail with actionable dependency guidance instead of
+  Linux-centric assumptions
+
+Shipped in this subphase:
+
+- the Apple build and app-root builder both detect Homebrew `openssl@3`
+  through `ARLEN_OPENSSL_PREFIX` or Homebrew probing
+- `ALNPg` now has broader Apple-aware dynamic-library candidate paths from the
+  earlier portability seam work, and that discovery remains the current `libpq`
+  baseline on macOS
+
+Current boundary:
+
+- `libpq`, ODBC, and other optional backend headers/libs are not yet fully
+  normalized into the Apple builder with the same completeness as OpenSSL
+
+Acceptance checkpoint:
+
+- Apple build/test flows now emit macOS-specific remediation for the required
+  crypto dependency and no longer assume Linux-only library layouts
 
 ## 30I. Runtime Validation on macOS
 
-Run `boomhauer` and a scaffolded app end to end on Apple APIs.
+Goal:
+
+- prove that the Apple runtime can actually serve requests through `boomhauer`
+  and a generated app
+
+Shipped in this subphase:
+
+- `bin/boomhauer` can now run on macOS in both repo-root and app-root modes
+- app-root execution on Apple now builds a dedicated
+  `.boomhauer/apple/boomhauer-app` binary via `tools/build_apple_app.sh`
+- watch mode is explicitly disabled with a clear warning on the current Apple
+  runtime path instead of silently assuming Linux/GNUstep behavior
+- `tools/test_apple.sh --smoke-only` scaffolds a fresh app, builds it, launches
+  it on a random local port, and verifies `/`, `/healthz`, and `/openapi`
+
+Acceptance checkpoint:
+
+- a scaffolded macOS app can boot and answer smoke requests on Apple APIs
+- repo-root and app-root boomhauer launches no longer depend on GNUstep
+
+## Remaining Subphases
 
 ## 30J. Security/Auth Surface Audit
 

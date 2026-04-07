@@ -2,6 +2,11 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+if [[ "$(uname -s)" == "Darwin" ]]; then
+  exec "$repo_root/tools/test_apple.sh" "$@"
+fi
+
 export GNUSTEP_USER_ROOT="${GNUSTEP_USER_ROOT:-$repo_root/.gnustep}"
 mkdir -p "$GNUSTEP_USER_ROOT"
 

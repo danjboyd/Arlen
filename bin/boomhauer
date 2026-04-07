@@ -23,8 +23,11 @@ Environment:
 USAGE
 }
 
+# shellcheck source=tools/platform.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/tools/platform.sh"
+
 script_path="${BASH_SOURCE[0]}"
-if resolved="$(readlink -f "$script_path" 2>/dev/null)"; then
+if resolved="$(aln_platform_realpath "$script_path" 2>/dev/null)"; then
   script_path="$resolved"
 fi
 script_dir="$(cd "$(dirname "$script_path")" && pwd)"
@@ -34,16 +37,6 @@ framework_root="${ARLEN_FRAMEWORK_ROOT:-$default_framework_root}"
 if [[ ! -f "$framework_root/GNUmakefile" || ! -d "$framework_root/src/Arlen" ]]; then
   echo "boomhauer: invalid framework root: $framework_root" >&2
   echo "boomhauer: set ARLEN_FRAMEWORK_ROOT to a valid Arlen repository root" >&2
-  exit 1
-fi
-
-gnustep_sh="$(bash "$framework_root/tools/resolve_gnustep.sh" 2>/dev/null || true)"
-if [[ -z "$gnustep_sh" ]]; then
-  gnustep_sh="${GNUSTEP_SH:-/usr/GNUstep/System/Library/Makefiles/GNUstep.sh}"
-fi
-if [[ ! -f "$gnustep_sh" ]]; then
-  echo "boomhauer: GNUstep.sh not found at $gnustep_sh" >&2
-  echo "boomhauer: set GNUSTEP_SH, export GNUSTEP_MAKEFILES, or source your toolchain env script first" >&2
   exit 1
 fi
 
@@ -91,6 +84,52 @@ done
 is_app_root=0
 if [[ -f "$app_root/config/app.plist" ]] && ([[ -f "$app_root/src/main.m" ]] || [[ -f "$app_root/app_lite.m" ]]); then
   is_app_root=1
+fi
+
+if aln_platform_is_macos; then
+  if [[ $watch_mode -eq 1 ]]; then
+    echo "boomhauer: watch mode is not yet implemented on the Apple runtime path; continuing without watch"
+    watch_mode=0
+  fi
+
+  if [[ $is_app_root -eq 0 ]]; then
+    if [[ $prepare_only -eq 1 ]]; then
+      echo "boomhauer: prepare-only mode; building Apple boomhauer artifacts"
+    fi
+    bash "$framework_root/bin/build-apple" --with-boomhauer >/dev/null
+    if [[ $prepare_only -eq 1 ]]; then
+      exit 0
+    fi
+    export ARLEN_APP_ROOT="$app_root"
+    exec "$framework_root/build/apple/boomhauer" "${server_args[@]}"
+  fi
+
+  if [[ $prepare_only -eq 1 ]]; then
+    echo "boomhauer: prepare-only mode; building Apple app artifacts"
+    bash "$framework_root/tools/build_apple_app.sh" \
+      --app-root "$app_root" \
+      --framework-root "$framework_root" \
+      --prepare-only >/dev/null
+    exit 0
+  fi
+
+  app_binary="$(
+    bash "$framework_root/tools/build_apple_app.sh" \
+      --app-root "$app_root" \
+      --framework-root "$framework_root" \
+      --print-path
+  )"
+  exec "$app_binary" "${server_args[@]}"
+fi
+
+gnustep_sh="$(bash "$framework_root/tools/resolve_gnustep.sh" 2>/dev/null || true)"
+if [[ -z "$gnustep_sh" ]]; then
+  gnustep_sh="${GNUSTEP_SH:-/usr/GNUstep/System/Library/Makefiles/GNUstep.sh}"
+fi
+if [[ ! -f "$gnustep_sh" ]]; then
+  echo "boomhauer: GNUstep.sh not found at $gnustep_sh" >&2
+  echo "boomhauer: set GNUSTEP_SH, export GNUSTEP_MAKEFILES, or source your toolchain env script first" >&2
+  exit 1
 fi
 
 if [[ $is_app_root -eq 0 ]]; then
