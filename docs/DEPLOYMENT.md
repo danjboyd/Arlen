@@ -33,11 +33,12 @@ API-only mode (`apiOnly = YES`, or `ARLEN_API_ONLY=1`) defaults to:
 
 ## 4. Built-In Health Contract
 
-Arlen provides built-in fallback health endpoints:
+Arlen reserves its built-in operability endpoints ahead of app route dispatch:
 
 - `GET /healthz` -> `200 ok\n`
 - `GET /readyz` -> `200 ready\n`
 - `GET /livez` -> `200 live\n`
+- `GET /metrics` -> `200` Prometheus text exposition payload
 - `GET /clusterz` -> `200` JSON cluster/runtime contract payload
 
 Use these for LB probes and deployment readiness checks.
@@ -95,6 +96,16 @@ Additional deploy CLI helpers:
 - `arlen deploy rollback --releases-dir /path/to/app/releases --service arlen@myapp --runtime-action reload --json`
 - `arlen deploy doctor --releases-dir /path/to/app/releases --base-url http://127.0.0.1:3000 --json`
 - `arlen deploy logs --service arlen@myapp --lines 200`
+
+Focused deploy confidence lane:
+
+```bash
+make phase29-confidence
+```
+
+That lane exercises deploy manifest generation, push/release/status/rollback/
+doctor/logs flows, and a reserved-endpoint smoke app where `/:token` must not
+shadow `/healthz`, `/readyz`, or `/metrics`.
 
 ### 5.1 Build a release artifact
 

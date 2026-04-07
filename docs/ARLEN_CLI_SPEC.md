@@ -1,6 +1,6 @@
 # Arlen CLI Specification
 
-Status: Implemented through Phase 29E  
+Status: Implemented through Phase 29L  
 Last updated: 2026-04-07
 
 ## 1. Purpose
@@ -105,6 +105,7 @@ Behavior:
 - `push` writes `metadata/manifest.json` using contract version `phase29-deploy-manifest-v1`
 - `release` reuses or creates the selected release, runs migrations when packaged `.sql` files exist, and activates `releases/current`
 - `release` can optionally verify `GET /healthz` through `--base-url <url>`
+- operability endpoints used by deploy verification are reserved ahead of app routes
 - `status` reports the active release, previous release, manifest-backed health contract, and optional service state
 - `rollback` promotes a previous release through `rollback_release.sh`, can reload/restart a service, and can re-run deploy health verification
 - `doctor` validates active release layout, packaged binaries, config loading, and optional live operability
@@ -203,6 +204,6 @@ Framework root resolution order:
 
 ## 8. Near-Term Additions
 
-- `deploy status`, `deploy rollback`, `deploy doctor`, and `deploy logs`
+- `deploy init` as a narrow, optional host bootstrap helper after the core deploy product stabilizes
 - richer generator extension hooks
 - plugin/lifecycle scaffolding commands

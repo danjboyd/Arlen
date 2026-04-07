@@ -89,6 +89,8 @@ curl -i http://127.0.0.1:3000/openapi
 ```
 
 `boomhauer` watches app files by default and rebuilds when inputs change.
+Arlen reserves `/healthz`, `/readyz`, `/livez`, `/metrics`, and `/clusterz`
+for built-in operability, so app routes should not reuse those paths.
 
 ## 5. Add One More Route
 

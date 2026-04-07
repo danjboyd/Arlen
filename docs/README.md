@@ -91,7 +91,7 @@ toolchain env directly.
 - [Phase 26 Roadmap](PHASE26_ROADMAP.md): completed optional ORM phase plus Dataverse ORM tail work.
 - [Phase 27 Roadmap](PHASE27_ROADMAP.md): completed search best-in-class phase; `27A-27L` landed on 2026-04-01 and the audited `27E-27L` closeout landed on 2026-04-02 for authoritative Meilisearch/OpenSearch behavior, streamed rebuilds, policy-scoped search semantics, and fail-closed confidence artifacts.
 - [Phase 28 Roadmap](PHASE28_ROADMAP.md): completed descriptor-first React/TypeScript ORM interop phase; `28A-28L` closed on 2026-04-03 for generated TypeScript models, validators, query/resource/module metadata, typed transport, optional React integrations, live verification lanes, and confidence/docs closeout on top of ArlenORM plus route/OpenAPI contracts.
-- [Phase 29 Roadmap](PHASE29_ROADMAP.md): planned first-class deploy product phase covering `arlen deploy`, release metadata normalization, rollout/rollback/status orchestration, health verification, and deploy-focused diagnostics.
+- [Phase 29 Roadmap](PHASE29_ROADMAP.md): completed deploy product phase delivering first-class `arlen deploy` orchestration, release metadata normalization, reserved operability probes, deploy-focused diagnostics, and `phase29-confidence`.
 - [Combined Roadmap Index (Historical Aggregate)](PHASE2_PHASE3_ROADMAP.md)
 - [Phase 1 Spec](PHASE1_SPEC.md)
 - [Arlen CLI Spec](ARLEN_CLI_SPEC.md)

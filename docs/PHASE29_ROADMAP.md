@@ -1,6 +1,6 @@
 # Arlen Phase 29 Roadmap
 
-Status: In Progress
+Status: Complete on 2026-04-07
 Last updated: 2026-04-07
 
 Related docs:
@@ -327,6 +327,8 @@ Acceptance:
 
 ### 29J. Health and Operability Reservation Hardening
 
+Status: Delivered on 2026-04-07
+
 Goal:
 - make deploy verification targets trustworthy in production
 
@@ -342,6 +344,8 @@ Acceptance:
 
 ### 29K. Focused Verification and Confidence Artifacts
 
+Status: Delivered on 2026-04-07
+
 Goal:
 - keep the deploy product regression-resistant
 
@@ -356,6 +360,8 @@ Acceptance:
   contract regressions
 
 ### 29L. Docs and Release Closeout
+
+Status: Delivered on 2026-04-07
 
 Goal:
 - close the gap between deploy behavior, CLI docs, runbooks, and examples

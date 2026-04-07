@@ -60,6 +60,10 @@ That gives you:
 - `propane:lifecycle ...` manager/worker diagnostics in journald
 - crash dump availability through your host `coredumpctl` pipeline
 
+Arlen reserves `/healthz`, `/readyz`, `/livez`, `/metrics`, and `/clusterz`
+ahead of app route dispatch, so the deploy/runbook probe paths in this guide
+remain valid even when apps register broad catch-all routes.
+
 ## 3. Base Environment File
 
 Copy `tools/deploy/systemd/site.env.example` to `/etc/arlen/<site>.env` and

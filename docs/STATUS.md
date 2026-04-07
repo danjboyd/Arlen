@@ -4,6 +4,17 @@ Last updated: 2026-04-07
 
 ## Leaving Off (2026-04-07)
 
+- Completed Phase 29 and delivered `29J-29L`:
+  - reserved `/healthz`, `/readyz`, `/livez`, `/metrics`, and `/clusterz`
+    ahead of app routing so catch-all routes cannot shadow deploy/operability
+    probes
+  - added an HTTP integration regression proving reserved operability endpoints
+    still win against `/:token` app routes while normal app routes continue to
+    resolve normally
+  - added the repo-native `phase29-confidence` lane plus generated evaluation
+    artifacts under `build/release_confidence/phase29/`
+  - updated roadmap/spec/reference/runbook docs to mark Phase 29 complete and
+    document the reserved probe contract and confidence workflow
 - Continued Phase 29 and delivered `29F-29I`:
   - added `arlen deploy status` for active/previous release visibility,
     manifest-backed health contract reporting, migration inventory, and
@@ -50,6 +61,7 @@ Last updated: 2026-04-07
 - Verification completed at this checkpoint:
   - `source tools/source_gnustep_env.sh && make arlen`
   - `source tools/source_gnustep_env.sh && make build-tests`
+  - `source tools/source_gnustep_env.sh && make phase29-confidence`
   - manual smoke:
     `arlen deploy plan --json`
     `arlen deploy push --json`

@@ -111,6 +111,7 @@ First-class release orchestration over the existing `tools/deploy/*` scripts.
 - runs `migrate --env <name>` only when packaged SQL migrations exist, unless `--skip-migrate` is passed
 - activates `releases/current` via `tools/deploy/activate_release.sh`
 - optionally probes `<base-url>/healthz` when `--base-url` is supplied
+- relies on the reserved operability contract, so app routes cannot shadow `/healthz`
 
 `arlen deploy status`
 
@@ -673,6 +674,7 @@ Behavior:
 - built-in health/readiness probes support JSON signal payloads when requested:
   - `GET /healthz` with `Accept: application/json` (or `?format=json`)
   - `GET /readyz` with `Accept: application/json` (or `?format=json`)
+  - reserved operability endpoints (`/healthz`, `/readyz`, `/livez`, `/metrics`, `/clusterz`) are resolved ahead of app routes
   - strict readiness (`503 not_ready` before startup) can be enabled with `ARLEN_READINESS_REQUIRES_STARTUP=1`
   - quorum-gated readiness in cluster mode can be enabled with `ARLEN_READINESS_REQUIRES_CLUSTER_QUORUM=1`
 - distributed runtime diagnostics include:
@@ -960,6 +962,7 @@ Lifecycle diagnostics:
 - `make perf-phased`: run Phase D baseline campaign (parity + Arlen/FastAPI matrix) and write `build/perf/phased/latest_campaign_report.json`
 - `make deploy-smoke`: validate deployment runbook with automated release smoke
 - `tools/deploy/validate_operability.sh`: validate text/JSON health/readiness/metrics operability contracts against a running server
+- `make phase29-confidence`: fail-closed deploy confidence lane covering manifest-backed deploy flows plus reserved operability endpoint regression smoke
 - `tools/deploy/build_release.sh --dry-run --json`: emit deploy release planning payload for coding-agent automation
   - enforces Phase 9J certification manifest by default (`build/release_confidence/phase9j/manifest.json`)
   - enforces Phase 10E JSON performance manifest by default (`build/release_confidence/phase10e/manifest.json`)

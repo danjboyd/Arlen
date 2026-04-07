@@ -8,7 +8,7 @@ This guide explains Arlen's runtime model at a high level.
 2. Request is parsed into `ALNRequest`.
 3. `ALNRouter` matches method/path to a route.
 4. Route invocation metadata is resolved from startup compile output (or lazily compiled when startup compile is disabled).
-5. `ALNApplication` handles built-ins (`/healthz`, `/readyz`, `/livez`, `/metrics`, `/clusterz`, OpenAPI/docs paths) when no app route matches.
+5. `ALNApplication` reserves operability built-ins (`/healthz`, `/readyz`, `/livez`, `/metrics`, `/clusterz`) ahead of app route dispatch and still serves docs/OpenAPI built-ins on unmatched paths.
 6. Request contract coercion/validation runs (if configured on the matched route).
 7. Middleware and auth scope/role checks run.
 8. Controller action executes.

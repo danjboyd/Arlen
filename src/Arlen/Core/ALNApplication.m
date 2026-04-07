@@ -2714,6 +2714,15 @@ static BOOL ALNBuiltInEndpointPrefersJSON(ALNRequest *request) {
   return [format isEqualToString:@"json"];
 }
 
+static BOOL ALNPathIsReservedOperabilityEndpoint(NSString *path) {
+  NSString *candidate = path ?: @"";
+  return [candidate isEqualToString:@"/healthz"] ||
+         [candidate isEqualToString:@"/readyz"] ||
+         [candidate isEqualToString:@"/livez"] ||
+         [candidate isEqualToString:@"/metrics"] ||
+         [candidate isEqualToString:@"/clusterz"];
+}
+
 static BOOL ALNApplyBuiltInResponse(ALNApplication *application,
                                     ALNRequest *request,
                                     ALNResponse *response,
@@ -4168,6 +4177,78 @@ static void ALNFinalizeResponse(ALNApplication *application,
     if ([routePath length] == 0) {
       routePath = request.path ?: @"/";
     }
+  }
+
+  NSString *reservedBuiltInPath = nil;
+  NSString *reservedRetryPath = nil;
+  NSString *reservedRetryFormat = nil;
+  if (ALNPathIsReservedOperabilityEndpoint(routePath)) {
+    reservedBuiltInPath = routePath;
+  } else if (ALNPathIsReservedOperabilityEndpoint(request.path ?: @"/")) {
+    reservedBuiltInPath = request.path ?: @"/";
+  } else {
+    reservedRetryFormat = ALNExtractPathFormat(routePath, &reservedRetryPath);
+    if ([reservedRetryPath length] > 0 &&
+        ALNPathIsReservedOperabilityEndpoint(reservedRetryPath)) {
+      reservedBuiltInPath = reservedRetryPath;
+      if ([requestFormat length] == 0 && [reservedRetryFormat length] > 0) {
+        requestFormat = reservedRetryFormat;
+      }
+    }
+  }
+
+  if ([reservedBuiltInPath length] > 0) {
+    if ([requestFormat length] == 0) {
+      requestFormat =
+          ALNRequestPreferredFormatWithoutPathExtension(request, apiOnly, reservedBuiltInPath);
+    }
+    (void)ALNApplyBuiltInResponse(self, request, response, reservedBuiltInPath);
+    ALNFinalizeResponse(self,
+                        response,
+                        trace,
+                        request,
+                        requestIdentity,
+                        &traceContext,
+                        performanceLogging);
+    ALNRecordRequestMetrics(self, response, trace);
+    if (metricsEnabled) {
+      [self.metrics addGauge:@"http_requests_active" delta:-1.0];
+    }
+
+    if (self.traceExporter != nil) {
+      @try {
+        [self.traceExporter exportTrace:ALNTraceExportPayload(trace,
+                                                              ALNResolvedRequestID(requestIdentity),
+                                                              &traceContext,
+                                                              request,
+                                                              response,
+                                                              @"",
+                                                              @"",
+                                                              @"")
+                                request:request
+                               response:response
+                              routeName:@""
+                         controllerName:@""
+                             actionName:@""];
+      } @catch (NSException *exception) {
+        [self.logger warn:@"trace exporter failed"
+                   fields:@{
+                     @"request_id" : ALNResolvedRequestID(requestIdentity),
+                     @"exception" : exception.reason ?: @"",
+                   }];
+      }
+    }
+
+    if (infoLoggingEnabled) {
+      NSMutableDictionary *fields = [NSMutableDictionary dictionary];
+      fields[@"request_id"] = ALNResolvedRequestID(requestIdentity);
+      fields[@"method"] = request.method ?: @"GET";
+      fields[@"path"] = request.path ?: reservedBuiltInPath;
+      fields[@"status"] = @(response.statusCode);
+      fields[@"route"] = reservedBuiltInPath;
+      [self.logger info:@"request complete" fields:fields];
+    }
+    return response;
   }
 
   if (performanceLogging) {

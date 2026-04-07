@@ -428,6 +428,161 @@
   XCTAssertEqualObjects(@"live\n", live);
 }
 
+- (void)testReservedOperabilityEndpointsCannotBeShadowedByCatchAllRoute {
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *appRoot = [self createTempDirectoryWithPrefix:@"arlen-health-reserved"];
+  XCTAssertNotNil(appRoot);
+  if (appRoot == nil) {
+    return;
+  }
+
+  @try {
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"config/app.plist"]
+                          content:@"{\n"
+                                  "  host = \"127.0.0.1\";\n"
+                                  "  port = 3000;\n"
+                                  "  logFormat = \"text\";\n"
+                                  "}\n"]);
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"config/environments/development.plist"]
+                          content:@"{\n  logFormat = \"text\";\n}\n"]);
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"app_lite.m"]
+                          content:@"#import <Foundation/Foundation.h>\n"
+                                  "#import <stdio.h>\n"
+                                  "#import <stdlib.h>\n"
+                                  "#import \"ALNContext.h\"\n"
+                                  "#import \"ALNController.h\"\n"
+                                  "#import \"ArlenServer.h\"\n"
+                                  "\n"
+                                  "@interface ReservedRouteController : ALNController\n"
+                                  "@end\n"
+                                  "\n"
+                                  "@implementation ReservedRouteController\n"
+                                  "- (id)token:(ALNContext *)ctx {\n"
+                                  "  NSString *token = [ctx.params[@\"token\"] isKindOfClass:[NSString class]] ? ctx.params[@\"token\"] : @\"\";\n"
+                                  "  [self renderText:[NSString stringWithFormat:@\"token:%@\\n\", token]];\n"
+                                  "  return nil;\n"
+                                  "}\n"
+                                  "@end\n"
+                                  "\n"
+                                  "static ALNApplication *CreateApp(NSString *environment, NSString *appRootCurrent) {\n"
+                                  "  NSError *error = nil;\n"
+                                  "  ALNApplication *app = [[ALNApplication alloc] initWithEnvironment:environment configRoot:appRootCurrent error:&error];\n"
+                                  "  if (app == nil) {\n"
+                                  "    fprintf(stderr, \"failed loading config: %s\\n\", [[error localizedDescription] UTF8String]);\n"
+                                  "    return nil;\n"
+                                  "  }\n"
+                                  "  [app registerRouteMethod:@\"GET\" path:@\"/:token\" name:@\"token\" controllerClass:[ReservedRouteController class] action:@\"token\"];\n"
+                                  "  return app;\n"
+                                  "}\n"
+                                  "\n"
+                                  "static void PrintUsage(void) {\n"
+                                  "  fprintf(stdout, \"Usage: boomhauer [--port <port>] [--host <addr>] [--env <env>] [--once] [--print-routes]\\n\");\n"
+                                  "}\n"
+                                  "\n"
+                                  "int main(int argc, const char *argv[]) {\n"
+                                  "  @autoreleasepool {\n"
+                                  "    int portOverride = 0;\n"
+                                  "    NSString *host = nil;\n"
+                                  "    NSString *environment = @\"development\";\n"
+                                  "    BOOL once = NO;\n"
+                                  "    BOOL printRoutes = NO;\n"
+                                  "    for (int idx = 1; idx < argc; idx++) {\n"
+                                  "      NSString *arg = [NSString stringWithUTF8String:argv[idx]];\n"
+                                  "      if ([arg isEqualToString:@\"--port\"]) {\n"
+                                  "        if ((idx + 1) >= argc) { PrintUsage(); return 2; }\n"
+                                  "        portOverride = atoi(argv[++idx]);\n"
+                                  "      } else if ([arg isEqualToString:@\"--host\"]) {\n"
+                                  "        if ((idx + 1) >= argc) { PrintUsage(); return 2; }\n"
+                                  "        host = [NSString stringWithUTF8String:argv[++idx]];\n"
+                                  "      } else if ([arg isEqualToString:@\"--env\"]) {\n"
+                                  "        if ((idx + 1) >= argc) { PrintUsage(); return 2; }\n"
+                                  "        environment = [NSString stringWithUTF8String:argv[++idx]];\n"
+                                  "      } else if ([arg isEqualToString:@\"--once\"]) {\n"
+                                  "        once = YES;\n"
+                                  "      } else if ([arg isEqualToString:@\"--print-routes\"]) {\n"
+                                  "        printRoutes = YES;\n"
+                                  "      } else if ([arg isEqualToString:@\"--help\"] || [arg isEqualToString:@\"-h\"]) {\n"
+                                  "        PrintUsage();\n"
+                                  "        return 0;\n"
+                                  "      } else {\n"
+                                  "        fprintf(stderr, \"Unknown argument: %s\\n\", argv[idx]);\n"
+                                  "        return 2;\n"
+                                  "      }\n"
+                                  "    }\n"
+                                  "    NSString *appRootCurrent = [[[NSProcessInfo processInfo] environment] objectForKey:@\"ARLEN_APP_ROOT\"];\n"
+                                  "    if ([appRootCurrent length] == 0) {\n"
+                                  "      appRootCurrent = [[NSFileManager defaultManager] currentDirectoryPath];\n"
+                                  "    }\n"
+                                  "    ALNApplication *app = CreateApp(environment, appRootCurrent);\n"
+                                  "    if (app == nil) {\n"
+                                  "      return 1;\n"
+                                  "    }\n"
+                                  "    ALNHTTPServer *server = [[ALNHTTPServer alloc] initWithApplication:app publicRoot:[appRootCurrent stringByAppendingPathComponent:@\"public\"]];\n"
+                                  "    server.serverName = @\"boomhauer\";\n"
+                                  "    if (printRoutes) { [server printRoutesToFile:stdout]; return 0; }\n"
+                                  "    return [server runWithHost:host portOverride:portOverride once:once];\n"
+                                  "  }\n"
+                                  "}\n"]);
+
+    NSString *envPrefix =
+        [NSString stringWithFormat:@"ARLEN_FRAMEWORK_ROOT='%@' ARLEN_APP_ROOT='%@'", repoRoot, appRoot];
+    int prepareCode = 0;
+    NSString *prepareOutput =
+        [self runShellCapture:[NSString stringWithFormat:@"%@ ./bin/boomhauer --prepare-only 2>&1",
+                                                         envPrefix]
+                     exitCode:&prepareCode];
+    XCTAssertEqual(0, prepareCode, @"%@", prepareOutput);
+
+    NSString *preparedBinary =
+        [appRoot stringByAppendingPathComponent:@".boomhauer/build/boomhauer-app"];
+    XCTAssertTrue([[NSFileManager defaultManager] isExecutableFileAtPath:preparedBinary]);
+
+    int curlCode = 0;
+    int serverCode = 0;
+    NSString *healthBody =
+        [self requestWithServerEnv:envPrefix
+                       serverBinary:preparedBinary
+                          curlBody:@"curl -fsS http://127.0.0.1:%d/healthz"
+                          curlCode:&curlCode
+                         serverCode:&serverCode];
+    XCTAssertEqual(0, curlCode);
+    XCTAssertEqual(0, serverCode);
+    XCTAssertEqualObjects(@"ok\n", healthBody);
+
+    NSString *readyBody =
+        [self requestWithServerEnv:envPrefix
+                       serverBinary:preparedBinary
+                          curlBody:@"curl -fsS http://127.0.0.1:%d/readyz"
+                          curlCode:&curlCode
+                         serverCode:&serverCode];
+    XCTAssertEqual(0, curlCode);
+    XCTAssertEqual(0, serverCode);
+    XCTAssertEqualObjects(@"ready\n", readyBody);
+
+    NSString *metricsBody =
+        [self requestWithServerEnv:envPrefix
+                       serverBinary:preparedBinary
+                          curlBody:@"curl -fsS http://127.0.0.1:%d/metrics"
+                          curlCode:&curlCode
+                         serverCode:&serverCode];
+    XCTAssertEqual(0, curlCode);
+    XCTAssertEqual(0, serverCode);
+    XCTAssertTrue([metricsBody containsString:@"aln_http_requests_total"], @"%@", metricsBody);
+
+    NSString *shadowBody =
+        [self requestWithServerEnv:envPrefix
+                       serverBinary:preparedBinary
+                          curlBody:@"curl -fsS http://127.0.0.1:%d/shadowed"
+                          curlCode:&curlCode
+                         serverCode:&serverCode];
+    XCTAssertEqual(0, curlCode);
+    XCTAssertEqual(0, serverCode);
+    XCTAssertEqualObjects(@"token:shadowed\n", shadowBody);
+  } @finally {
+    [[NSFileManager defaultManager] removeItemAtPath:appRoot error:nil];
+  }
+}
+
 - (void)testPartialRequestDoesNotBlockSecondClient {
   int port = [self randomPort];
   NSTask *server = [[NSTask alloc] init];
