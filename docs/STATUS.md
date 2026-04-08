@@ -1,6 +1,42 @@
 # Arlen Status Checkpoint
 
-Last updated: 2026-04-07
+Last updated: 2026-04-08
+
+## Leaving Off (2026-04-08)
+
+- Phase 31 is now complete (`31A-31H`) on `windows-clang64-integration`:
+  - added the repo-native `phase31-confidence` lane with packaged release
+    smoke, packaged `deploy doctor --base-url`, packaged `jobs-worker --once`,
+    and synthetic `.exe` fallback verification artifacts under
+    `build/release_confidence/phase31/`
+  - expanded `.github/workflows/phase24-windows-preview.yml` so the Windows
+    self-hosted preview runner now validates both `phase24-windows-confidence`
+    and `phase31-confidence`
+  - updated `tools/deploy/smoke_release.sh` to emit machine-readable results
+    and to validate operability through packaged helper paths from the active
+    release
+  - closed the Windows docs/support statement with an explicit preview claim:
+    MSYS2 `CLANG64` is the supported Windows preview workflow for runtime and
+    packaged deploy verification, while Linux remains the authoritative
+    production baseline
+  - next work resumes after the Windows closeout rather than inside Phase 31
+- Phase 31 `31A-31D` completed on `windows-clang64-integration`:
+  - audited the minimum Windows packaged-release contract and documented it in
+    `docs/WINDOWS_CLANG64.md`
+  - updated `tools/deploy/build_release.sh` so packaged releases copy the
+    actual compiled binaries in use, preserve `.exe` suffixes, and record
+    manifest/release-env paths for `arlen`, `boomhauer`, `propane`,
+    `jobs-worker`, the app runtime binary, and the operability helper
+  - updated `arlen deploy release` and `arlen deploy doctor` so packaged
+    Windows release roots resolve manifest-backed executables/helpers instead
+    of assuming Unix-only `build/*` filenames
+  - added integration coverage for packaged manifest path assertions and for
+    `deploy doctor` succeeding when a release only has `.exe` binaries behind
+    Unix-style manifest base names
+  - remaining Phase 31 work is now `31E-31H`:
+    packaged Windows smoke/confidence lane, preview CI expansion, deployment
+    docs closeout, and final support statement
+  - suggested next restart document: `docs/PHASE31_ROADMAP.md`
 
 ## Leaving Off (2026-04-07)
 

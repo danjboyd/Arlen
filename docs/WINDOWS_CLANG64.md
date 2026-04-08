@@ -1,6 +1,6 @@
 # Windows CLANG64 Preview
 
-Last updated: 2026-04-07
+Last updated: 2026-04-08
 
 This document records the current `main`-branch reintegration slice of Arlen's
 native Windows work for MSYS2 `CLANG64`.
@@ -17,8 +17,9 @@ Current scope on `main`:
 - a main-based Windows preview workflow
 
 This is still not a full claim that current `main` has complete Windows
-support. Runtime parity is now partially forward-ported, but release/install
-closeout and broader confidence parity remain open.
+support. Runtime parity, packaged-release parity, deploy/doctor parity, and
+preview CI coverage are now forward ported, but Windows remains a preview
+target rather than a general production support claim.
 
 ## 1. Host Entry Path
 
@@ -79,6 +80,12 @@ Aggregated preview confidence lane:
 make phase24-windows-confidence
 ```
 
+Packaged release confidence lane:
+
+```sh
+make phase31-confidence
+```
+
 Convenience preview runner:
 
 ```sh
@@ -96,13 +103,47 @@ Those lanes are intended to verify:
 The preview lanes use `arlen-xctest-runner` so a Windows host can load and run
 the XCTest bundle without depending on the stock bundle discovery path.
 
-## 4. Current Non-Claims
+## 4. Packaged Release Contract
+
+The current Windows packaged-release contract is now explicit:
+
+- build releases from an MSYS2 `CLANG64` shell with the GNUstep environment
+  initialized
+- packaged release manifests record the actual runtime/helper paths for
+  `arlen`, `boomhauer`, `propane`, `jobs-worker`, the app runtime binary, and
+  the operability probe helper
+- deploy/runtime entrypoints resolve compiled binaries through `.exe` siblings
+  instead of assuming Unix-only filenames
+- `arlen deploy doctor` reads those manifest-backed helper paths when checking
+  a packaged release root
+- `make phase31-confidence` exercises packaged release smoke, packaged
+  `deploy doctor --base-url`, packaged `jobs-worker --once`, and a synthetic
+  `.exe` fallback check suitable for CI/manual runner validation
+
+Minimum assumptions that still remain external on Windows:
+
+- MSYS2 `CLANG64` remains the supported host shell for the preview workflow
+- the packaged app still expects the GNUstep/MSYS2 runtime and required DLLs
+  to be available on the host
+- the preview path is validated through a self-hosted Windows workflow rather
+  than a generic GitHub-hosted runner image
+
+## 5. Current Non-Claims
 
 Not yet claimed on current `main`:
 
 - full unit/integration/live/perf confidence parity
-- Windows release/install/package closeout
-- packaged-release deployment parity on Windows
+- generic supported production hosting on Windows
+- a Windows operator path that does not depend on MSYS2 `CLANG64` and the
+  GNUstep/MSYS2 runtime stack
 
-Those still belong to the remaining Phase 24 reintegration work from the
-historical `origin/windows/clang64` branch.
+## 6. Support Statement
+
+Current Windows support statement:
+
+- Windows on MSYS2 `CLANG64` is a supported preview workflow for framework
+  development, runtime parity checks, and packaged release/deploy validation
+- the authoritative preview verification entrypoints are
+  `make phase24-windows-confidence` and `make phase31-confidence`
+- Arlen does not yet claim broad production support for Windows deployments;
+  Linux remains the authoritative production baseline

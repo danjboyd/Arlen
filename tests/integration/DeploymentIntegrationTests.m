@@ -70,6 +70,16 @@
   return YES;
 }
 
+- (BOOL)makeExecutableAtPath:(NSString *)path {
+  NSError *error = nil;
+  BOOL updated = [[NSFileManager defaultManager] setAttributes:@{ NSFilePosixPermissions : @0755 }
+                                                  ofItemAtPath:path
+                                                         error:&error];
+  XCTAssertTrue(updated, @"failed marking %@ executable: %@", path, error.localizedDescription);
+  XCTAssertNil(error);
+  return updated;
+}
+
 - (NSString *)runShellCapture:(NSString *)command exitCode:(int *)exitCode {
   NSTask *task = [[NSTask alloc] init];
   task.launchPath = @"/bin/bash";
@@ -1083,12 +1093,18 @@
     NSDictionary *manifest = [pushPayload[@"manifest"] isKindOfClass:[NSDictionary class]] ? pushPayload[@"manifest"] : @{};
     XCTAssertEqualObjects(@"phase29-deploy-manifest-v1", manifest[@"version"]);
     NSDictionary *pushPaths = [manifest[@"paths"] isKindOfClass:[NSDictionary class]] ? manifest[@"paths"] : @{};
+    NSString *releaseBoomhauer = [pushPaths[@"boomhauer"] isKindOfClass:[NSString class]] ? pushPaths[@"boomhauer"] : @"";
+    XCTAssertTrue([[NSFileManager defaultManager] isExecutableFileAtPath:releaseBoomhauer],
+                  @"missing packaged boomhauer binary: %@", releaseBoomhauer);
     NSString *operabilityHelper =
         [pushPaths[@"operability_probe_helper"] isKindOfClass:[NSString class]]
             ? pushPaths[@"operability_probe_helper"]
             : @"";
     XCTAssertTrue([[NSFileManager defaultManager] isExecutableFileAtPath:operabilityHelper],
                   @"missing packaged helper: %@", operabilityHelper);
+    NSString *jobsWorker = [pushPaths[@"jobs_worker"] isKindOfClass:[NSString class]] ? pushPaths[@"jobs_worker"] : @"";
+    XCTAssertTrue([[NSFileManager defaultManager] isExecutableFileAtPath:jobsWorker],
+                  @"missing packaged jobs-worker wrapper: %@", jobsWorker);
     NSDictionary *migrationInventory = [manifest[@"migration_inventory"] isKindOfClass:[NSDictionary class]]
                                            ? manifest[@"migration_inventory"]
                                            : @{};
@@ -1268,6 +1284,138 @@
                                    : @"";
     XCTAssertTrue([capturedOutput containsString:@"line-2"], @"%@", capturedOutput);
     XCTAssertTrue([capturedOutput containsString:@"line-3"], @"%@", capturedOutput);
+  } @finally {
+    [[NSFileManager defaultManager] removeItemAtPath:appRoot error:nil];
+    [[NSFileManager defaultManager] removeItemAtPath:workRoot error:nil];
+  }
+}
+
+- (void)testArlenDeployDoctorResolvesExecutableManifestPathsWithExeSuffix {
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *appRoot = [self createTempDirectoryWithPrefix:@"arlen-deploy-doctor-exe-app"];
+  NSString *workRoot = [self createTempDirectoryWithPrefix:@"arlen-deploy-doctor-exe-work"];
+  XCTAssertNotNil(appRoot);
+  XCTAssertNotNil(workRoot);
+  if (appRoot == nil || workRoot == nil) {
+    return;
+  }
+
+  @try {
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"config/app.plist"]
+                          content:@"{\n"
+                                  "  host = \"127.0.0.1\";\n"
+                                  "  port = 3000;\n"
+                                  "  database = {\n"
+                                  "    connectionString = \"postgresql:///deploy_doctor_exe\";\n"
+                                  "    adapter = \"postgresql\";\n"
+                                  "  };\n"
+                                  "}\n"]);
+
+    NSString *releasesDir = [workRoot stringByAppendingPathComponent:@"releases"];
+    NSString *releaseDir = [releasesDir stringByAppendingPathComponent:@"exe-rel-1"];
+    NSString *runtimeBinary = [releaseDir stringByAppendingPathComponent:@"app/.boomhauer/build/boomhauer-app.exe"];
+    NSString *frameworkBoomhauer = [releaseDir stringByAppendingPathComponent:@"framework/build/boomhauer.exe"];
+    NSString *frameworkArlen = [releaseDir stringByAppendingPathComponent:@"framework/build/arlen.exe"];
+    NSString *propanePath = [releaseDir stringByAppendingPathComponent:@"framework/bin/propane"];
+    NSString *jobsWorkerPath = [releaseDir stringByAppendingPathComponent:@"framework/bin/jobs-worker"];
+    NSString *helperPath =
+        [releaseDir stringByAppendingPathComponent:@"framework/tools/deploy/validate_operability.sh"];
+    NSString *manifestPath = [releaseDir stringByAppendingPathComponent:@"metadata/manifest.json"];
+    NSString *releaseEnvPath = [releaseDir stringByAppendingPathComponent:@"metadata/release.env"];
+    NSString *currentLink = [releasesDir stringByAppendingPathComponent:@"current"];
+
+    XCTAssertTrue([self writeFile:runtimeBinary content:@"#!/usr/bin/env bash\nexit 0\n"]);
+    XCTAssertTrue([self makeExecutableAtPath:runtimeBinary]);
+    XCTAssertTrue([self writeFile:frameworkBoomhauer content:@"#!/usr/bin/env bash\nexit 0\n"]);
+    XCTAssertTrue([self makeExecutableAtPath:frameworkBoomhauer]);
+    XCTAssertTrue([self writeFile:frameworkArlen content:@"#!/usr/bin/env bash\nexit 0\n"]);
+    XCTAssertTrue([self makeExecutableAtPath:frameworkArlen]);
+    XCTAssertTrue([self writeFile:propanePath content:@"#!/usr/bin/env bash\nexit 0\n"]);
+    XCTAssertTrue([self makeExecutableAtPath:propanePath]);
+    XCTAssertTrue([self writeFile:jobsWorkerPath content:@"#!/usr/bin/env bash\nexit 0\n"]);
+    XCTAssertTrue([self makeExecutableAtPath:jobsWorkerPath]);
+    XCTAssertTrue([self writeFile:helperPath content:@"#!/usr/bin/env bash\necho ok\n"]);
+    XCTAssertTrue([self makeExecutableAtPath:helperPath]);
+    XCTAssertTrue([self writeFile:[releaseDir stringByAppendingPathComponent:@"app/config/app.plist"]
+                          content:@"{\n"
+                                  "  host = \"127.0.0.1\";\n"
+                                  "  port = 3000;\n"
+                                  "  database = {\n"
+                                  "    connectionString = \"postgresql:///deploy_doctor_exe\";\n"
+                                  "    adapter = \"postgresql\";\n"
+                                  "  };\n"
+                                  "}\n"]);
+    NSString *releaseEnvContents =
+        [NSString stringWithFormat:@"ARLEN_APP_ROOT=%@\nARLEN_FRAMEWORK_ROOT=%@\n",
+                                   [releaseDir stringByAppendingPathComponent:@"app"],
+                                   [releaseDir stringByAppendingPathComponent:@"framework"]];
+    XCTAssertTrue([self writeFile:releaseEnvPath content:releaseEnvContents]);
+
+    NSDictionary *manifest = @{
+      @"version" : @"phase29-deploy-manifest-v1",
+      @"release_id" : @"exe-rel-1",
+      @"paths" : @{
+        @"app_root" : [releaseDir stringByAppendingPathComponent:@"app"],
+        @"framework_root" : [releaseDir stringByAppendingPathComponent:@"framework"],
+        @"runtime_binary" : [[runtimeBinary stringByDeletingPathExtension] copy],
+        @"boomhauer" : [[frameworkBoomhauer stringByDeletingPathExtension] copy],
+        @"propane" : propanePath,
+        @"jobs_worker" : jobsWorkerPath,
+        @"arlen" : [[frameworkArlen stringByDeletingPathExtension] copy],
+        @"operability_probe_helper" : helperPath,
+        @"release_env" : releaseEnvPath,
+      },
+      @"health_contract" : @{
+        @"health_path" : @"/healthz",
+        @"readiness_path" : @"/readyz",
+        @"expected_ok_body" : @"ok",
+      },
+      @"migration_inventory" : @{
+        @"count" : @0,
+        @"files" : @[],
+      },
+    };
+    NSError *manifestError = nil;
+    NSData *manifestData =
+        [NSJSONSerialization dataWithJSONObject:manifest options:NSJSONWritingPrettyPrinted error:&manifestError];
+    XCTAssertNotNil(manifestData);
+    XCTAssertNil(manifestError);
+    NSString *manifestContents = [[NSString alloc] initWithData:manifestData encoding:NSUTF8StringEncoding];
+    XCTAssertTrue([self writeFile:manifestPath content:manifestContents]);
+
+    NSError *symlinkError = nil;
+    XCTAssertTrue([[NSFileManager defaultManager] createSymbolicLinkAtPath:currentLink
+                                               withDestinationPath:releaseDir
+                                                             error:&symlinkError],
+                  @"failed creating current symlink: %@", symlinkError.localizedDescription);
+
+    int code = 0;
+    NSString *buildOutput = [self runMakeAtRepoRoot:repoRoot target:@"arlen" exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", buildOutput);
+
+    NSString *doctorOutput = [self runShellCapture:[NSString stringWithFormat:
+                                                        @"cd %@ && ARLEN_FRAMEWORK_ROOT=%@ %@/build/arlen "
+                                                         "deploy doctor --app-root %@ --releases-dir %@ --json",
+                                                        appRoot, repoRoot, repoRoot, appRoot, releasesDir]
+                                          exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", doctorOutput);
+    NSDictionary *doctorPayload =
+        [self parseJSONDictionaryFromOutput:doctorOutput context:@"arlen deploy doctor exe manifest --json"];
+    XCTAssertEqualObjects(@"deploy.doctor", doctorPayload[@"workflow"]);
+    XCTAssertEqualObjects(@"warn", doctorPayload[@"status"]);
+
+    NSArray *checks = [doctorPayload[@"checks"] isKindOfClass:[NSArray class]] ? doctorPayload[@"checks"] : @[];
+    NSMutableDictionary *statuses = [NSMutableDictionary dictionary];
+    for (NSDictionary *check in checks) {
+      if ([check[@"id"] isKindOfClass:[NSString class]] && [check[@"status"] isKindOfClass:[NSString class]]) {
+        statuses[check[@"id"]] = check[@"status"];
+      }
+    }
+    XCTAssertEqualObjects(@"pass", statuses[@"runtime_binary"]);
+    XCTAssertEqualObjects(@"pass", statuses[@"boomhauer"]);
+    XCTAssertEqualObjects(@"pass", statuses[@"arlen"]);
+    XCTAssertEqualObjects(@"pass", statuses[@"jobs_worker"]);
+    XCTAssertEqualObjects(@"pass", statuses[@"operability_probe_helper"]);
   } @finally {
     [[NSFileManager defaultManager] removeItemAtPath:appRoot error:nil];
     [[NSFileManager defaultManager] removeItemAtPath:workRoot error:nil];

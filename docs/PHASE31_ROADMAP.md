@@ -1,7 +1,7 @@
 # Arlen Phase 31 Roadmap
 
-Status: planned on 2026-04-07
-Last updated: 2026-04-07
+Status: complete on 2026-04-08
+Last updated: 2026-04-08
 
 Phase 31 intentionally skips Phase 30 and reserves that number unused.
 
@@ -18,6 +18,28 @@ Guardrails:
   support
 - keep Windows support explicit about preview vs supported production status
 - prefer additive detection and packaging seams over platform-specific forks
+
+Completed on 2026-04-08:
+
+- `31A` audited the packaged Windows release contract and documented the
+  minimum assumptions in `docs/WINDOWS_CLANG64.md`
+- `31B` taught packaged-release metadata and deploy flows to resolve compiled
+  binaries through `.exe` siblings instead of assuming Unix-only filenames
+- `31C` extended `tools/deploy/build_release.sh` so the release manifest and
+  `release.env` record the actual packaged runtime/helper paths used by
+  `propane`, `jobs-worker`, and deploy commands
+- `31D` updated `arlen deploy doctor` and packaged operability checks to use
+  manifest-backed helper paths and to keep missing-helper failures
+  deterministic
+- `31E` added the repo-native `phase31-confidence` packaged release lane plus
+  fail-closed artifacts under `build/release_confidence/phase31/`
+- `31F` expanded the self-hosted Windows preview workflow to run both runtime
+  parity and packaged release confidence validation
+- `31G` updated Windows/deploy/testing/toolchain docs to describe the actual
+  packaged preview workflow and prerequisites
+- `31H` closed Phase 31 with an explicit support statement: Windows `CLANG64`
+  remains a supported preview path, while Linux remains the authoritative
+  production baseline
 
 ## 31A. Windows Release Contract Audit
 

@@ -40,8 +40,8 @@ Then open `http://127.0.0.1:3000/`.
 If you already use a managed GNUstep toolchain, you can source its env script
 first instead. The Arlen helper resolves `GNUSTEP_SH`, `GNUSTEP_MAKEFILES`,
 `gnustep-config`, and finally `/usr/GNUstep`.
-For the current native Windows preview entry path, see
-`docs/WINDOWS_CLANG64.md`.
+For the current native Windows preview entry path and packaged-release
+contract, see `docs/WINDOWS_CLANG64.md`.
 
 The default full scaffold gives you:
 
@@ -166,7 +166,7 @@ below is the detailed milestone ledger for the shipped surface summarized above.
 - Phase 27: complete (`27A-27L` landed on 2026-04-01; the `27E-27L` audit follow-up closed on 2026-04-02). The search module now ships safe public result shaping, typed/capability-normalized metadata, PostgreSQL FTS/trigram, authoritative first-party Meilisearch/OpenSearch adapters, streamed rebuilds, resource-scoped tenant/visibility semantics, and a fail-closed `phase27-confidence` gate. See `docs/PHASE27_ROADMAP.md`.
 - Phase 28: complete (`28A-28L` delivered on 2026-04-03). Arlen now ships descriptor-first TypeScript models, validator/form adapters, explicit query-shape/resource/module metadata, typed transport and optional React helpers, a checked-in React/Vite consumer workspace, a live reference server, dedicated generated/unit/integration/react verification lanes, and the fail-closed `phase28-confidence` artifact pack while keeping TypeScript downstream of ORM descriptors and OpenAPI contracts. See `docs/PHASE28_ROADMAP.md`.
 - Phase 29: complete (`29A-29L` delivered on 2026-04-07). Arlen now ships a first-class `arlen deploy` workflow (`plan`, `push`, `release`, `status`, `rollback`, `doctor`, `logs`), versioned deploy manifests, reserved operability endpoints for trustworthy `/healthz` and `/readyz` rollout probes, and the fail-closed `phase29-confidence` verification lane. See `docs/PHASE29_ROADMAP.md`.
-- Phase 31: planned. This phase intentionally skips Phase 30 and captures the remaining Windows integration work after the Phase 24 runtime reintegration: packaged release parity, Windows deploy/doctor closeout, packaged confidence lanes, preview CI expansion, and final support-statement docs. See `docs/PHASE31_ROADMAP.md`.
+- Phase 31: complete (`31A-31H` delivered on 2026-04-08). Arlen now ships a preview-complete Windows `CLANG64` path for packaged release/deploy verification: manifest-backed packaged runtime/helper resolution, `deploy doctor` parity, the `phase31-confidence` packaged release lane, expanded Windows preview CI, and an explicit support statement that keeps Windows in preview while Linux remains the production baseline. See `docs/PHASE31_ROADMAP.md`.
 
 ## Requirements and Setup Details
 

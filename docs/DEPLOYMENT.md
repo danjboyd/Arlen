@@ -104,11 +104,28 @@ Focused deploy confidence lane:
 
 ```bash
 make phase29-confidence
+make phase31-confidence
 ```
 
 That lane exercises deploy manifest generation, push/release/status/rollback/
 doctor/logs flows, and a reserved-endpoint smoke app where `/:token` must not
 shadow `/healthz`, `/readyz`, or `/metrics`.
+
+`phase31-confidence` adds the packaged-release closeout checks that were still
+missing from Phase 29:
+
+- packaged release smoke through `tools/deploy/smoke_release.sh --json`
+- packaged `propane` startup plus `deploy doctor --base-url`
+- packaged `jobs-worker --once`
+- synthetic manifest-base-name to `.exe` fallback validation
+
+Windows support statement for deployment:
+
+- packaged release and deploy workflows are now available on MSYS2 `CLANG64`
+  as a preview path
+- the preview path is verified by the Windows self-hosted workflow and the
+  repo-native `phase31-confidence` lane
+- this is still not a general production support claim for Windows hosts
 
 ### 5.1 Build a release artifact
 
@@ -150,13 +167,17 @@ Packaged release payloads now include:
 
 - app config/templates/public/modules/source files needed for runtime inspection
 - `app/db/migrations` for the documented `arlen migrate` step
-- prebuilt app server binary at `app/.boomhauer/build/boomhauer-app`
-- runtime wrapper scripts plus `framework/build/arlen` and `framework/build/boomhauer`
+- prebuilt app server binary at `app/.boomhauer/build/boomhauer-app` (or
+  `.exe` on Windows preview builds)
+- runtime wrapper scripts plus `framework/build/arlen` and
+  `framework/build/boomhauer` (with `.exe` suffixes preserved when present)
 
 Release metadata includes:
 
 - `metadata/release.env`
 - `metadata/README.txt` with migrate/run commands
+- manifest-backed runtime/helper paths for `arlen`, `boomhauer`, `propane`,
+  `jobs-worker`, and the operability helper
 
 ### 5.2 Activate a release
 
@@ -190,7 +211,8 @@ ARLEN_FRAMEWORK_ROOT=/path/to/app/releases/current/framework \
 
 `propane` now runs directly from the packaged release payload. It does not
 require a full Arlen checkout when `ARLEN_FRAMEWORK_ROOT` points at
-`releases/current/framework`.
+`releases/current/framework`, and the packaged manifest is authoritative for
+runtime/helper path resolution across Unix and Windows preview builds.
 
 ## 6. Container-First Runbook (Baseline)
 

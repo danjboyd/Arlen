@@ -468,6 +468,25 @@ static NSString *ResolveSymlinkDestination(NSString *path) {
   return (exitCode == 0 && [resolved length] > 0) ? [resolved stringByStandardizingPath] : nil;
 }
 
+static NSString *ResolveExecutablePath(NSString *path) {
+  if ([path length] == 0) {
+    return nil;
+  }
+
+  NSFileManager *fm = [NSFileManager defaultManager];
+  NSString *standardPath = [path stringByStandardizingPath];
+  if ([fm isExecutableFileAtPath:standardPath]) {
+    return standardPath;
+  }
+  if (![[standardPath lowercaseString] hasSuffix:@".exe"]) {
+    NSString *windowsCandidate = [standardPath stringByAppendingString:@".exe"];
+    if ([fm isExecutableFileAtPath:windowsCandidate]) {
+      return windowsCandidate;
+    }
+  }
+  return nil;
+}
+
 static NSArray<NSString *> *SortedReleaseDirectories(NSString *releasesDir) {
   NSFileManager *fm = [NSFileManager defaultManager];
   NSArray<NSString *> *children = [fm contentsOfDirectoryAtPath:releasesDir error:NULL] ?: @[];
@@ -568,7 +587,7 @@ static NSDictionary *MigrationInventoryFromManifest(NSDictionary *manifest) {
   };
 }
 
-static NSDictionary *RunDeployHealthProbe(NSString *frameworkRoot, NSString *baseURL) {
+static NSDictionary *RunDeployHealthProbe(NSString *frameworkRoot, NSString *helperPath, NSString *baseURL) {
   if ([baseURL length] == 0) {
     return @{
       @"status" : @"skipped",
@@ -576,8 +595,11 @@ static NSDictionary *RunDeployHealthProbe(NSString *frameworkRoot, NSString *bas
     };
   }
 
-  NSString *scriptPath = [[frameworkRoot stringByAppendingPathComponent:@"tools/deploy/validate_operability.sh"]
-      stringByStandardizingPath];
+  NSString *scriptPath = [helperPath length] > 0 ? [helperPath stringByStandardizingPath] : nil;
+  if ([scriptPath length] == 0) {
+    scriptPath = [[frameworkRoot stringByAppendingPathComponent:@"tools/deploy/validate_operability.sh"]
+        stringByStandardizingPath];
+  }
   if (![[NSFileManager defaultManager] isExecutableFileAtPath:scriptPath]) {
     return @{
       @"status" : @"error",
@@ -682,15 +704,25 @@ static NSArray<NSDictionary *> *DeployDoctorChecksForRelease(NSString *releaseDi
     @{ @"id" : @"app_root", @"path" : paths[@"app_root"] ?: [releaseDir stringByAppendingPathComponent:@"app"] },
     @{ @"id" : @"framework_root", @"path" : paths[@"framework_root"] ?: [releaseDir stringByAppendingPathComponent:@"framework"] },
     @{ @"id" : @"runtime_binary", @"path" : paths[@"runtime_binary"] ?: @"" },
+    @{ @"id" : @"boomhauer", @"path" : paths[@"boomhauer"] ?: @"" },
     @{ @"id" : @"propane", @"path" : paths[@"propane"] ?: @"" },
+    @{ @"id" : @"jobs_worker", @"path" : paths[@"jobs_worker"] ?: @"" },
     @{ @"id" : @"arlen", @"path" : paths[@"arlen"] ?: @"" },
     @{ @"id" : @"operability_probe_helper", @"path" : paths[@"operability_probe_helper"] ?: @"" },
   ];
   for (NSDictionary *entry in requiredPaths) {
     NSString *checkID = entry[@"id"];
     NSString *path = entry[@"path"];
-    if ([path length] > 0 && [fm fileExistsAtPath:path]) {
-      addCheck(checkID, @"pass", [NSString stringWithFormat:@"%@ present: %@", checkID, path], @"");
+    NSString *resolvedPath = nil;
+    if ([checkID isEqualToString:@"runtime_binary"] || [checkID isEqualToString:@"boomhauer"] ||
+        [checkID isEqualToString:@"arlen"]) {
+      resolvedPath = ResolveExecutablePath(path);
+    } else if ([path length] > 0 && [fm fileExistsAtPath:path]) {
+      resolvedPath = [path stringByStandardizingPath];
+    }
+
+    if ([resolvedPath length] > 0) {
+      addCheck(checkID, @"pass", [NSString stringWithFormat:@"%@ present: %@", checkID, resolvedPath], @"");
     } else {
       addCheck(checkID, @"fail", [NSString stringWithFormat:@"%@ missing: %@", checkID, path ?: @""],
                @"Rebuild the release artifact so runtime files are packaged again.");
@@ -736,7 +768,9 @@ static NSArray<NSDictionary *> *DeployDoctorChecksForRelease(NSString *releaseDi
         [[([paths[@"framework_root"] isKindOfClass:[NSString class]] ? paths[@"framework_root"]
                                                                     : [releaseDir stringByAppendingPathComponent:@"framework"])
             stringByStandardizingPath] copy];
-    NSDictionary *probe = RunDeployHealthProbe(probeFrameworkRoot, baseURL);
+    NSString *probeHelper =
+        [paths[@"operability_probe_helper"] isKindOfClass:[NSString class]] ? paths[@"operability_probe_helper"] : nil;
+    NSDictionary *probe = RunDeployHealthProbe(probeFrameworkRoot, probeHelper, baseURL);
     NSString *probeStatus = [probe[@"status"] isEqualToString:@"ok"] ? @"pass" : @"fail";
     addCheck(@"operability", probeStatus,
              [NSString stringWithFormat:@"operability probe %@ for %@", probe[@"status"] ?: @"", baseURL],
@@ -3549,7 +3583,13 @@ static int CommandDeploy(NSArray *args) {
   if ([subcommand isEqualToString:@"status"]) {
     NSString *serviceOutput = nil;
     NSString *serviceState = ServiceRuntimeState(serviceName, &serviceOutput);
-    NSDictionary *healthProbe = [baseURL length] > 0 ? RunDeployHealthProbe(frameworkRoot, baseURL)
+    NSDictionary *currentPaths =
+        [currentManifest[@"paths"] isKindOfClass:[NSDictionary class]] ? currentManifest[@"paths"] : @{};
+    NSString *currentProbeHelper =
+        [currentPaths[@"operability_probe_helper"] isKindOfClass:[NSString class]] ? currentPaths[@"operability_probe_helper"] : nil;
+    NSString *probeFrameworkRoot = [currentReleaseDir length] > 0 ? [[currentReleaseDir stringByAppendingPathComponent:@"framework"] stringByStandardizingPath]
+                                                                  : frameworkRoot;
+    NSDictionary *healthProbe = [baseURL length] > 0 ? RunDeployHealthProbe(probeFrameworkRoot, currentProbeHelper, baseURL)
                                                      : @{ @"status" : @"skipped", @"reason" : @"base_url_not_provided" };
     if (asJSON) {
       NSDictionary *payload = @{
@@ -3687,8 +3727,23 @@ static int CommandDeploy(NSArray *args) {
       }];
     }
 
-    NSDictionary *healthProbe = [baseURL length] > 0 ? RunDeployHealthProbe(frameworkRoot, baseURL)
-                                                     : @{ @"status" : @"skipped", @"reason" : @"base_url_not_provided" };
+    NSString *activeDirAfterRollback = CurrentReleaseDirectoryAtReleasesDir(releasesDir);
+    NSDictionary *activeManifestAfterRollback =
+        [activeDirAfterRollback length] > 0
+            ? (JSONDictionaryFromFile([activeDirAfterRollback stringByAppendingPathComponent:@"metadata/manifest.json"]) ?: @{})
+            : @{};
+    NSDictionary *activePathsAfterRollback =
+        [activeManifestAfterRollback[@"paths"] isKindOfClass:[NSDictionary class]] ? activeManifestAfterRollback[@"paths"] : @{};
+    NSString *probeHelperAfterRollback =
+        [activePathsAfterRollback[@"operability_probe_helper"] isKindOfClass:[NSString class]]
+            ? activePathsAfterRollback[@"operability_probe_helper"]
+            : nil;
+    NSString *probeFrameworkRootAfterRollback =
+        [activeDirAfterRollback length] > 0 ? [[activeDirAfterRollback stringByAppendingPathComponent:@"framework"] stringByStandardizingPath]
+                                            : frameworkRoot;
+    NSDictionary *healthProbe = [baseURL length] > 0
+                                    ? RunDeployHealthProbe(probeFrameworkRootAfterRollback, probeHelperAfterRollback, baseURL)
+                                    : @{ @"status" : @"skipped", @"reason" : @"base_url_not_provided" };
     [steps addObject:@{
       @"id" : @"health",
       @"status" : healthProbe[@"status"] ?: @"skipped",
@@ -3720,12 +3775,6 @@ static int CommandDeploy(NSArray *args) {
       }
       return ([healthProbe[@"exit_code"] integerValue] == 0) ? 1 : [healthProbe[@"exit_code"] integerValue];
     }
-
-    NSString *activeDirAfterRollback = CurrentReleaseDirectoryAtReleasesDir(releasesDir);
-    NSDictionary *activeManifestAfterRollback =
-        [activeDirAfterRollback length] > 0
-            ? (JSONDictionaryFromFile([activeDirAfterRollback stringByAppendingPathComponent:@"metadata/manifest.json"]) ?: @{})
-            : @{};
     if (asJSON) {
       NSDictionary *payload = @{
         @"version" : AgentContractVersion(),
@@ -3914,7 +3963,19 @@ static int CommandDeploy(NSArray *args) {
 
   NSString *releaseAppRoot = [releaseDir stringByAppendingPathComponent:@"app"];
   NSString *releaseFrameworkRoot = [releaseDir stringByAppendingPathComponent:@"framework"];
-  NSString *releaseBinary = [releaseFrameworkRoot stringByAppendingPathComponent:@"build/arlen"];
+  NSDictionary *releaseMetadata = LoadReleaseMetadataAtDirectory(releaseDir);
+  NSDictionary *releaseManifest =
+      [releaseMetadata[@"manifest"] isKindOfClass:[NSDictionary class]] ? releaseMetadata[@"manifest"] : @{};
+  NSDictionary *releasePaths =
+      [releaseManifest[@"paths"] isKindOfClass:[NSDictionary class]] ? releaseManifest[@"paths"] : @{};
+  NSString *releaseBinary =
+      ([releasePaths[@"arlen"] isKindOfClass:[NSString class]] ? ResolveExecutablePath(releasePaths[@"arlen"]) : nil);
+  if ([releaseBinary length] == 0) {
+    releaseBinary = ResolveExecutablePath([releaseFrameworkRoot stringByAppendingPathComponent:@"build/arlen"]);
+  }
+  if ([releaseBinary length] == 0) {
+    releaseBinary = [releaseFrameworkRoot stringByAppendingPathComponent:@"build/arlen"];
+  }
   BOOL shouldMigrate = !skipMigrate && DirectoryContainsSQLFiles([releaseAppRoot stringByAppendingPathComponent:@"db/migrations"]);
   if (shouldMigrate) {
     NSString *migrateCommand = [NSString

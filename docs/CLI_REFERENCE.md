@@ -111,6 +111,8 @@ First-class release orchestration over the existing `tools/deploy/*` scripts.
 - runs `migrate --env <name>` only when packaged SQL migrations exist, unless `--skip-migrate` is passed
 - activates `releases/current` via `tools/deploy/activate_release.sh`
 - optionally probes `<base-url>/healthz` when `--base-url` is supplied
+- resolves the packaged `arlen` binary from manifest-backed paths, including
+  `.exe` siblings on Windows preview builds
 - relies on the reserved operability contract, so app routes cannot shadow `/healthz`
 
 `arlen deploy status`
@@ -133,6 +135,8 @@ First-class release orchestration over the existing `tools/deploy/*` scripts.
 - reports service state when `--service <unit>` is supplied
 - runs full `tools/deploy/validate_operability.sh` when `--base-url <url>` is supplied
 - packaged releases include that helper under `framework/tools/deploy/`, so `deploy doctor --base-url` works against activated release payloads
+- packaged binary checks resolve `.exe` siblings when the manifest records
+  Windows-style compiled output base names
 
 `arlen deploy logs`
 

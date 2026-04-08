@@ -1,6 +1,6 @@
 # Arlen Toolchain Matrix
 
-Last updated: 2026-04-07
+Last updated: 2026-04-08
 
 This document records known-good local toolchain baselines for Arlen onboarding and CI parity.
 
@@ -71,6 +71,7 @@ Windows preview helpers:
 - `scripts/run_clang64.ps1`
 - `scripts/run_clang64.sh`
 - `tools/ci/run_phase24_windows_preview.sh`
+- `tools/ci/run_phase31_confidence.sh`
 
 Supported CI bootstrap strategies:
 
@@ -90,6 +91,11 @@ Optional contributor override:
 - set `ARLEN_XCTEST=/path/to/patched/xctest` to use a filter-capable runner for `make test-unit-filter` / `make test-integration-filter`
 - if that runner comes from a local uninstalled `tools-xctest` build, also set `ARLEN_XCTEST_LD_LIBRARY_PATH=/path/to/tools-xctest/XCTest/obj`
 - stock Debian `xctest` remains the baseline for the normal unfiltered test and confidence commands
+
+Windows preview CI currently validates two layers:
+
+- runtime parity via `make phase24-windows-confidence`
+- packaged release/deploy parity via `make phase31-confidence`
 
 ## Doctor Check Mapping
 
