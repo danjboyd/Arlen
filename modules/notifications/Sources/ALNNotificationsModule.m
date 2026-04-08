@@ -3,6 +3,7 @@
 #import "../../admin-ui/Sources/ALNAdminUIModule.h"
 #import "../../auth/Sources/ALNAuthModule.h"
 
+#import "ALNDataCompat.h"
 #import "ALNApplication.h"
 #import "ALNController.h"
 #import "ALNContext.h"
@@ -93,7 +94,7 @@ static NSDictionary *NMReadPropertyListAtPath(NSString *path, NSError **error) {
   if ([statePath length] == 0 || ![[NSFileManager defaultManager] fileExistsAtPath:statePath]) {
     return nil;
   }
-  NSData *data = [NSData dataWithContentsOfFile:statePath options:0 error:error];
+  NSData *data = ALNDataReadFromFile(statePath, 0, error);
   if (data == nil) {
     return nil;
   }

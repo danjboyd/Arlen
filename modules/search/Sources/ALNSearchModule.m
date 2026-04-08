@@ -1,5 +1,6 @@
 #import "ALNSearchModule.h"
 
+#import "ALNDataCompat.h"
 #import "ALNAdminUIModule.h"
 #import "ALNApplication.h"
 #import "ALNAuthModule.h"
@@ -77,7 +78,7 @@ static NSDictionary *STJSONDictionaryFromPath(NSString *path, NSError **error) {
   if ([resolvedPath length] == 0) {
     return @{};
   }
-  NSData *data = [NSData dataWithContentsOfFile:resolvedPath options:0 error:error];
+  NSData *data = ALNDataReadFromFile(resolvedPath, 0, error);
   if (data == nil) {
     return nil;
   }
@@ -491,7 +492,7 @@ static NSDictionary *STReadPropertyListAtPath(NSString *path, NSError **error) {
   if ([statePath length] == 0 || ![[NSFileManager defaultManager] fileExistsAtPath:statePath]) {
     return nil;
   }
-  NSData *data = [NSData dataWithContentsOfFile:statePath options:0 error:error];
+  NSData *data = ALNDataReadFromFile(statePath, 0, error);
   if (data == nil) {
     return nil;
   }

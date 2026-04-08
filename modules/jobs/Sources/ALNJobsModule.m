@@ -1,5 +1,6 @@
 #import "ALNJobsModule.h"
 
+#import "ALNDataCompat.h"
 #import "ALNApplication.h"
 #import "ALNContext.h"
 #import "ALNController.h"
@@ -395,7 +396,7 @@ static NSDictionary *JMReadPropertyListAtPath(NSString *path, NSError **error) {
   if ([statePath length] == 0 || ![[NSFileManager defaultManager] fileExistsAtPath:statePath]) {
     return nil;
   }
-  NSData *data = [NSData dataWithContentsOfFile:statePath options:0 error:error];
+  NSData *data = ALNDataReadFromFile(statePath, 0, error);
   if (data == nil) {
     return nil;
   }

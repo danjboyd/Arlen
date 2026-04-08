@@ -1,6 +1,7 @@
 #import <Foundation/Foundation.h>
 #import <openssl/sha.h>
 
+#import "ALNDataCompat.h"
 #import "ALNEOCRuntime.h"
 #import "ALNEOCTranspiler.h"
 
@@ -139,7 +140,7 @@ static NSDictionary *LoadManifestDocument(NSString *path, NSError **error) {
   if ([path length] == 0 || ![[NSFileManager defaultManager] fileExistsAtPath:path]) {
     return nil;
   }
-  NSData *data = [NSData dataWithContentsOfFile:path options:0 error:error];
+  NSData *data = ALNDataReadFromFile(path, 0, error);
   if (data == nil) {
     return nil;
   }

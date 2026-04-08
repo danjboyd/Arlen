@@ -2,6 +2,7 @@
 #import <stdio.h>
 #import <stdlib.h>
 
+#import "ALNDataCompat.h"
 #import "ALNConfig.h"
 #import "ALNDataverseClient.h"
 #import "ALNDataverseCodegen.h"
@@ -904,7 +905,7 @@ static BOOL AddPluginClassToAppConfig(NSString *root, NSString *pluginClassName,
   }
 
   NSString *configPath = [root stringByAppendingPathComponent:@"config/app.plist"];
-  NSData *data = [NSData dataWithContentsOfFile:configPath options:0 error:error];
+  NSData *data = ALNDataReadFromFile(configPath, 0, error);
   if (data == nil) {
     return NO;
   }
@@ -959,7 +960,7 @@ static BOOL AddSearchProviderClassToAppConfig(NSString *root,
   }
 
   NSString *configPath = [root stringByAppendingPathComponent:@"config/app.plist"];
-  NSData *data = [NSData dataWithContentsOfFile:configPath options:0 error:error];
+  NSData *data = ALNDataReadFromFile(configPath, 0, error);
   if (data == nil) {
     return NO;
   }
@@ -1137,7 +1138,7 @@ static NSDictionary *LoadRawConfigForModuleCommand(NSString *appRoot, NSString *
 }
 
 static NSString *ReadUTF8File(NSString *path, NSError **error) {
-  NSData *data = [NSData dataWithContentsOfFile:path options:0 error:error];
+  NSData *data = ALNDataReadFromFile(path, 0, error);
   if (data == nil) {
     return nil;
   }
@@ -1177,7 +1178,7 @@ static BOOL ConfigureGeneratedAuthUIAtAppRoot(NSString *appRoot,
                                               NSString *pagePrefix,
                                               NSError **error) {
   NSString *configPath = [appRoot stringByAppendingPathComponent:@"config/app.plist"];
-  NSData *data = [NSData dataWithContentsOfFile:configPath options:0 error:error];
+  NSData *data = ALNDataReadFromFile(configPath, 0, error);
   if (data == nil) {
     return NO;
   }
@@ -4935,12 +4936,12 @@ static NSString *ALNTypedSQLPascalSuffix(NSString *identifier) {
 }
 
 static NSString *ALNTypedSQLLowerCamel(NSString *identifier) {
-  NSString *pascal = ALNTypedSQLPascalSuffix(identifier);
-  if ([pascal length] == 0) {
+  NSString *pascalSuffix = ALNTypedSQLPascalSuffix(identifier);
+  if ([pascalSuffix length] == 0) {
     return @"value";
   }
-  NSString *first = [[pascal substringToIndex:1] lowercaseString];
-  NSString *rest = ([pascal length] > 1) ? [pascal substringFromIndex:1] : @"";
+  NSString *first = [[pascalSuffix substringToIndex:1] lowercaseString];
+  NSString *rest = ([pascalSuffix length] > 1) ? [pascalSuffix substringFromIndex:1] : @"";
   return [NSString stringWithFormat:@"%@%@", first, rest];
 }
 
@@ -5573,7 +5574,7 @@ static int CommandTypeScriptCodegen(NSArray *args) {
   NSString *manifestPath = ResolvePathFromRoot(appRoot, manifestArg);
 
   NSError *error = nil;
-  NSData *ormData = [NSData dataWithContentsOfFile:ormInputPath options:0 error:&error];
+  NSData *ormData = ALNDataReadFromFile(ormInputPath, 0, &error);
   if (ormData == nil) {
     fprintf(stderr, "arlen typescript-codegen: failed reading %s: %s\n",
             [ormInputPath UTF8String], [[error localizedDescription] UTF8String]);
@@ -5589,7 +5590,7 @@ static int CommandTypeScriptCodegen(NSArray *args) {
 
   NSDictionary<NSString *, id> *openAPISpecification = nil;
   if ([openAPIInputPath length] > 0) {
-    NSData *openAPIData = [NSData dataWithContentsOfFile:openAPIInputPath options:0 error:&error];
+    NSData *openAPIData = ALNDataReadFromFile(openAPIInputPath, 0, &error);
     if (openAPIData == nil) {
       fprintf(stderr, "arlen typescript-codegen: failed reading %s: %s\n",
               [openAPIInputPath UTF8String], [[error localizedDescription] UTF8String]);
@@ -6113,7 +6114,7 @@ static int CommandDataverseCodegen(NSArray *args) {
 
   if ([Trimmed(inputArg) length] > 0) {
     NSString *inputPath = ResolvePathFromRoot(appRoot, inputArg);
-    NSData *data = [NSData dataWithContentsOfFile:inputPath options:0 error:&error];
+    NSData *data = ALNDataReadFromFile(inputPath, 0, &error);
     if (data == nil) {
       fprintf(stderr, "arlen dataverse-codegen: failed reading %s: %s\n",
               [inputPath UTF8String], [[error localizedDescription] UTF8String]);

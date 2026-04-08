@@ -22,6 +22,7 @@
 #import "ALNAuthSession.h"
 #import "ALNDataverseClient.h"
 #import "ALNLive.h"
+#import "ALNPlatform.h"
 
 #include <ctype.h>
 #include <math.h>
@@ -2034,7 +2035,12 @@ static NSString *ALNFastRandomHexString(NSUInteger length) {
     }
     randomBytesNeedsFree = YES;
   }
-  arc4random_buf(randomBytes, byteCount);
+  if (!ALNPlatformFillRandomBytes(randomBytes, byteCount)) {
+    if (randomBytesNeedsFree) {
+      free(randomBytes);
+    }
+    return @"";
+  }
 
   char stackHexChars[64];
   char *hexChars = stackHexChars;
@@ -2081,35 +2087,7 @@ static NSString *ALNResolvedRequestID(ALNRequestIdentity *requestIdentity) {
 }
 
 static NSString *ALNISO8601Now(void) {
-  struct timeval tv;
-  if (gettimeofday(&tv, NULL) != 0) {
-    return @"1970-01-01T00:00:00.000Z";
-  }
-
-  time_t seconds = tv.tv_sec;
-  struct tm utc;
-  if (gmtime_r(&seconds, &utc) == NULL) {
-    return @"1970-01-01T00:00:00.000Z";
-  }
-
-  int milliseconds = (int)(tv.tv_usec / 1000);
-  char buffer[32];
-  int written = snprintf(buffer,
-                         sizeof(buffer),
-                         "%04d-%02d-%02dT%02d:%02d:%02d.%03dZ",
-                         utc.tm_year + 1900,
-                         utc.tm_mon + 1,
-                         utc.tm_mday,
-                         utc.tm_hour,
-                         utc.tm_min,
-                         utc.tm_sec,
-                         milliseconds);
-  if (written <= 0 || written >= (int)sizeof(buffer)) {
-    return @"1970-01-01T00:00:00.000Z";
-  }
-
-  NSString *formatted = [NSString stringWithUTF8String:buffer];
-  return [formatted length] > 0 ? formatted : @"1970-01-01T00:00:00.000Z";
+  return ALNPlatformISO8601Now();
 }
 
 static BOOL ALNIsASCIIWhitespace(unsigned char byte) {
@@ -2301,7 +2279,10 @@ static void ALNFillRandomLowerHex(char *output, size_t hexLength) {
     output[0] = '\0';
     return;
   }
-  arc4random_buf(randomBytes, byteLength);
+  if (!ALNPlatformFillRandomBytes(randomBytes, byteLength)) {
+    output[0] = '\0';
+    return;
+  }
 
   static const char *kHex = "0123456789abcdef";
   for (size_t idx = 0; idx < hexLength; idx++) {

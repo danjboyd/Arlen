@@ -1,5 +1,6 @@
 #import "ALNModuleSystem.h"
 
+#import "ALNDataCompat.h"
 #import "ALNApplication.h"
 
 NSString *const ALNModuleSystemErrorDomain = @"Arlen.ModuleSystem.Error";
@@ -38,7 +39,7 @@ static NSDictionary *ALNModuleLoadPlist(NSString *path, NSError **error) {
     return nil;
   }
 
-  NSData *data = [NSData dataWithContentsOfFile:path options:0 error:error];
+  NSData *data = ALNDataReadFromFile(path, 0, error);
   if (data == nil) {
     return nil;
   }

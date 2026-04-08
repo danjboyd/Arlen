@@ -1,15 +1,19 @@
 #import "ALNCSRFMiddleware.h"
 
 #import "ALNContext.h"
+#import "ALNPlatform.h"
 #import "ALNRequest.h"
 #import "ALNResponse.h"
 
 static NSString *ALNCSRFTokenFromRandomBytes(void) {
-  uint32_t partA = arc4random();
-  uint32_t partB = arc4random();
+  uint32_t parts[2] = {0, 0};
+  if (!ALNPlatformFillRandomBytes(parts, sizeof(parts))) {
+    parts[0] = (uint32_t)[[NSProcessInfo processInfo] processIdentifier];
+    parts[1] = (uint32_t)([[NSDate date] timeIntervalSince1970] * 1000.0);
+  }
   NSString *uuid = [[[NSUUID UUID] UUIDString] lowercaseString];
   uuid = [uuid stringByReplacingOccurrencesOfString:@"-" withString:@""];
-  return [NSString stringWithFormat:@"%08x%08x%@", partA, partB, uuid];
+  return [NSString stringWithFormat:@"%08x%08x%@", parts[0], parts[1], uuid];
 }
 
 static BOOL ALNIsSafeMethod(NSString *method) {

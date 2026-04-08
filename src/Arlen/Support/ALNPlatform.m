@@ -6,10 +6,34 @@
 #if defined(_WIN32)
 #include <process.h>
 #include <windows.h>
+#include <bcrypt.h>
 #else
 #include <sys/time.h>
 #include <unistd.h>
 #endif
+
+BOOL ALNPlatformFillRandomBytes(void *buffer, size_t count) {
+  if (buffer == NULL) {
+    return NO;
+  }
+#if defined(_WIN32)
+  return BCryptGenRandom(NULL, (PUCHAR)buffer, (ULONG)count, BCRYPT_USE_SYSTEM_PREFERRED_RNG) == 0;
+#else
+  arc4random_buf(buffer, count);
+  return YES;
+#endif
+}
+
+BOOL ALNPlatformGMTimeUTC(const time_t *seconds, struct tm *utc) {
+  if (seconds == NULL || utc == NULL) {
+    return NO;
+  }
+#if defined(_WIN32)
+  return gmtime_s(utc, seconds) == 0;
+#else
+  return gmtime_r(seconds, utc) != NULL;
+#endif
+}
 
 double ALNPlatformNowMilliseconds(void) {
 #if defined(_WIN32)
@@ -55,7 +79,7 @@ NSString *ALNPlatformISO8601Now(void) {
 
   time_t seconds = tv.tv_sec;
   struct tm utc;
-  if (gmtime_r(&seconds, &utc) == NULL) {
+  if (!ALNPlatformGMTimeUTC(&seconds, &utc)) {
     return @"1970-01-01T00:00:00.000Z";
   }
 
