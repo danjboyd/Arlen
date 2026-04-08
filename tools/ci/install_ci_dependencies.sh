@@ -4,6 +4,72 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$repo_root"
 
+platform="$(uname -s)"
+if [[ "$platform" == "Darwin" ]]; then
+  strategy="${ARLEN_CI_APPLE_STRATEGY:-brew}"
+
+  install_brew_dependencies() {
+    if ! command -v brew >/dev/null 2>&1; then
+      echo "ci: Homebrew is required for the Apple CI bootstrap path" >&2
+      exit 1
+    fi
+    brew install openssl@3
+  }
+
+  validate_apple_toolchain() {
+    local openssl_prefix
+    if ! command -v xcrun >/dev/null 2>&1; then
+      echo "ci: xcrun is required for the Apple CI path" >&2
+      exit 1
+    fi
+    if ! command -v clang >/dev/null 2>&1; then
+      echo "ci: clang is required for the Apple CI path" >&2
+      exit 1
+    fi
+    if ! command -v swift >/dev/null 2>&1; then
+      echo "ci: swift is required for the Apple XCTest smoke path" >&2
+      exit 1
+    fi
+    if ! xcrun --find xctest >/dev/null 2>&1; then
+      echo "ci: xctest is required via xcrun for the Apple CI path" >&2
+      exit 1
+    fi
+
+    openssl_prefix="${ARLEN_OPENSSL_PREFIX:-}"
+    if [[ -z "$openssl_prefix" ]] && command -v brew >/dev/null 2>&1; then
+      openssl_prefix="$(brew --prefix openssl@3 2>/dev/null || true)"
+    fi
+    if [[ -z "$openssl_prefix" || ! -d "$openssl_prefix/include/openssl" ]]; then
+      echo "ci: OpenSSL headers are required for the Apple CI path" >&2
+      echo "ci: install Homebrew openssl@3 or set ARLEN_OPENSSL_PREFIX" >&2
+      exit 1
+    fi
+
+    echo "ci: Apple strategy: $strategy"
+    echo "ci: xcode-select: $(xcode-select -p)"
+    echo "ci: xctest: $(xcrun --find xctest)"
+    echo "ci: sdk: $(xcrun --show-sdk-path)"
+    echo "ci: openssl: $openssl_prefix"
+  }
+
+  case "$strategy" in
+    brew)
+      install_brew_dependencies
+      ;;
+    preinstalled)
+      echo "ci: using preinstalled Apple toolchain dependencies"
+      ;;
+    *)
+      echo "ci: unsupported ARLEN_CI_APPLE_STRATEGY: $strategy" >&2
+      echo "ci: supported strategies: brew, preinstalled" >&2
+      exit 1
+      ;;
+  esac
+
+  validate_apple_toolchain
+  exit 0
+fi
+
 strategy="${ARLEN_CI_GNUSTEP_STRATEGY:-apt}"
 gnustep_sh="$(bash "$repo_root/tools/resolve_gnustep.sh" 2>/dev/null || true)"
 if [[ -z "$gnustep_sh" ]]; then

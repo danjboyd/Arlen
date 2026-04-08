@@ -153,7 +153,18 @@ if aln_platform_is_macos; then
   check_command "python3" "warn" "Install python3 for helper scripts and JSON doctor output."
   check_command "curl" "warn" "Install curl for integration smoke checks."
   check_command "brew" "warn" "Install Homebrew for OpenSSL and optional libpq provisioning."
-  check_command "xctest" "warn" "Apple XCTest CLI wiring is planned in Phase 30F."
+  xctest_path=""
+  if command -v xctest >/dev/null 2>&1; then
+    xctest_path="$(command -v xctest)"
+  elif command -v xcrun >/dev/null 2>&1; then
+    xctest_path="$(xcrun --find xctest 2>/dev/null || true)"
+  fi
+  if [[ -n "$xctest_path" ]]; then
+    add_check "tool_xctest" "pass" "xctest found at $xctest_path"
+  else
+    add_check "tool_xctest" "warn" "xctest not found via PATH or xcrun" \
+      "Activate full Xcode with 'sudo xcode-select -s /Applications/Xcode.app/Contents/Developer' and run 'sudo xcodebuild -runFirstLaunch'."
+  fi
 
   sdk_path="$(xcrun --show-sdk-path 2>/dev/null || true)"
   if [[ -n "$sdk_path" && -d "$sdk_path" ]]; then

@@ -38,6 +38,7 @@ macOS Apple-runtime path:
 ./bin/arlen doctor
 ./bin/build-apple
 ./bin/test --smoke-only
+bash ./tools/ci/run_phase30_confidence.sh
 ```
 
 Create and run your first app:
@@ -182,6 +183,7 @@ below is the detailed milestone ledger for the shipped surface summarized above.
 - Phase 27: complete (`27A-27L` landed on 2026-04-01; the `27E-27L` audit follow-up closed on 2026-04-02). The search module now ships safe public result shaping, typed/capability-normalized metadata, PostgreSQL FTS/trigram, authoritative first-party Meilisearch/OpenSearch adapters, streamed rebuilds, resource-scoped tenant/visibility semantics, and a fail-closed `phase27-confidence` gate. See `docs/PHASE27_ROADMAP.md`.
 - Phase 28: complete (`28A-28L` delivered on 2026-04-03). Arlen now ships descriptor-first TypeScript models, validator/form adapters, explicit query-shape/resource/module metadata, typed transport and optional React helpers, a checked-in React/Vite consumer workspace, a live reference server, dedicated generated/unit/integration/react verification lanes, and the fail-closed `phase28-confidence` artifact pack while keeping TypeScript downstream of ORM descriptors and OpenAPI contracts. See `docs/PHASE28_ROADMAP.md`.
 - Phase 29: complete (`29A-29L` delivered on 2026-04-07). Arlen now ships a first-class `arlen deploy` workflow (`plan`, `push`, `release`, `status`, `rollback`, `doctor`, `logs`), versioned deploy manifests, reserved operability endpoints for trustworthy `/healthz` and `/readyz` rollout probes, and the fail-closed `phase29-confidence` verification lane. See `docs/PHASE29_ROADMAP.md`.
+- Phase 30: complete (`30A-30O` delivered on 2026-04-08). Arlen now ships a closed Apple-runtime baseline on macOS with full-Xcode detection in `arlen doctor`, Apple XCTest smoke verification, `./bin/test --smoke-only` coverage for build/runtime/security/scaffold/example flows, the repo-native `phase30-confidence` artifact pack, and a `macos-15` CI lane enforcing the same contract. See `docs/PHASE30_ROADMAP.md`.
 - Phase 31: complete (`31A-31H` delivered on 2026-04-08). Arlen now ships a preview-complete Windows `CLANG64` path for packaged release/deploy verification: manifest-backed packaged runtime/helper resolution, `deploy doctor` parity, the `phase31-confidence` packaged release lane, expanded Windows preview CI, and an explicit support statement that keeps Windows in preview while Linux remains the production baseline. See `docs/PHASE31_ROADMAP.md`.
 
 ## Requirements and Setup Details

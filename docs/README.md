@@ -81,7 +81,7 @@ toolchain env directly for the Linux/GNUstep path. On macOS, use
 ## Contributor and Historical Docs
 
 - [Current Status](STATUS.md): latest checkpoint and verified milestone state.
-- [Phase 30 Roadmap](PHASE30_ROADMAP.md): Apple-runtime port roadmap and current bring-up status.
+- [Phase 30 Roadmap](PHASE30_ROADMAP.md): completed Apple-runtime baseline on macOS, including CI coverage and `phase30-confidence`.
 - [Session Handoff (2026-04-03)](SESSION_HANDOFF_2026-04-03.md): Phase 28 closeout checkpoint covering `28I-28L`, the live reference server, and the final verification set.
 - [Session Handoff (2026-04-02)](SESSION_HANDOFF_2026-04-02.md): historical Phase 28 pause point after shipping `28E-28H` and the React reference workspace.
 - [OwnerConnect Report Reconciliation (2026-04-02)](OWNERCONNECT_REPORT_RECONCILIATION_2026-04-02.md): upstream status note for the Dataverse polymorphic-lookup codegen bug reported from `OwnerConnect`.

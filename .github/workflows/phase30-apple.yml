@@ -1,0 +1,37 @@
+name: phase30-apple
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  apple-baseline:
+    runs-on: macos-15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Select full Xcode
+        run: |
+          sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
+
+      - name: Install Apple build dependencies
+        env:
+          ARLEN_CI_APPLE_STRATEGY: brew
+        run: |
+          bash ./tools/ci/install_ci_dependencies.sh
+
+      - name: Run Phase 30 Apple confidence gate
+        run: |
+          bash ./tools/ci/run_phase30_confidence.sh
+
+      - name: Upload Apple confidence artifacts
+        if: github.event_name == 'workflow_dispatch' || failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase30-apple-confidence-${{ github.run_id }}
+          path: |
+            build/release_confidence/phase30/**
+          if-no-files-found: warn

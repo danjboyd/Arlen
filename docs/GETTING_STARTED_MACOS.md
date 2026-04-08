@@ -1,18 +1,21 @@
 # Getting Started on macOS
 
-This guide is the Apple-runtime path for Arlen on macOS.
+This guide is the closed Apple-runtime baseline for Arlen on macOS.
 
 ## 1. Prerequisites
 
-- macOS with Xcode Command Line Tools installed
+- macOS with full Xcode installed and selected as the active developer
+  directory
 - `python3`
 - `curl`
 - Homebrew
 - Homebrew `openssl@3`
 
-Install the package dependency:
+Install the package dependency and activate full Xcode:
 
 ```bash
+sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
+sudo xcodebuild -runFirstLaunch
 brew install openssl@3
 ```
 
@@ -49,20 +52,23 @@ To also attempt the repo-root smoke server build:
 
 ## 4. Current Scope
 
-The Apple path is still in bring-up.
-
-What exists now:
+What the closed Apple baseline covers now:
 
 - Apple-native bootstrap/build entrypoint
 - Apple doctor checks
 - centralized portability helpers
-- Apple `bin/test --smoke-only` verification lane for runtime, security, and
-  example-app coverage
+- Apple XCTest smoke verification through `tools/apple_xctest_smoke.sh`
+- Apple `bin/test --smoke-only` verification lane for runtime, security,
+  scaffolded-app, and example-app coverage
+- repo-native `tools/ci/run_phase30_confidence.sh` artifact lane under
+  `build/release_confidence/phase30/`
 - Apple `bin/boomhauer` support for repo-root and app-root execution
+- macOS CI coverage for the same Phase 30 baseline
 
-What is still being completed:
+What is still deferred after Phase 30:
 
-- full Xcode-backed Apple XCTest integration
+- full repo-native Objective-C Apple XCTest bundle integration for the Arlen
+  test suite
 - Apple watch-mode support in `boomhauer`
 - broader optional dependency normalization
 
@@ -79,14 +85,22 @@ starting it on a local port, and probing the default routes.
 
 It also:
 
+- runs the Apple XCTest smoke when full Xcode is active
 - runs the Apple-native `apple-auth-audit` binary for password hashing, OIDC,
   and WebAuthn verification
 - builds and runs `examples/auth_primitives`
 - verifies local login, TOTP MFA elevation, and the stub OIDC provider flow on
   the Apple runtime path
 
+For the repeatable artifact pack, run:
+
+```bash
+bash ./tools/ci/run_phase30_confidence.sh
+```
+
 ## 6. Read Next
 
 - `docs/APPLE_PLATFORM.md`
 - `docs/PHASE30_ROADMAP.md`
+- `build/release_confidence/phase30/`
 - `docs/GETTING_STARTED.md`

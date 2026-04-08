@@ -267,15 +267,20 @@ run_auth_primitives_validation() {
 echo "test-apple: running doctor"
 "$repo_root/bin/arlen" doctor >/dev/null
 
-if command -v xcodebuild >/dev/null 2>&1; then
-  if xcodebuild -version >/dev/null 2>&1; then
-    echo "test-apple: full Xcode detected, but Apple XCTest bundle integration is still deferred" >&2
-    echo "test-apple: continuing with Apple-native runtime and security verification" >&2
+xctest_smoke_available=0
+if command -v xcodebuild >/dev/null 2>&1 && xcodebuild -version >/dev/null 2>&1; then
+  if command -v xcrun >/dev/null 2>&1 && xcrun --find xctest >/dev/null 2>&1; then
+    xctest_smoke_available=1
   else
-    echo "test-apple: full Xcode is not active; Apple XCTest execution is unavailable in this environment" >&2
+    echo "test-apple: full Xcode is active, but xctest is unavailable via xcrun" >&2
   fi
 else
   echo "test-apple: xcodebuild not found; Apple XCTest execution is unavailable in this environment" >&2
+fi
+
+if [[ $xctest_smoke_available -eq 1 ]]; then
+  echo "test-apple: running Apple XCTest smoke"
+  "$repo_root/tools/apple_xctest_smoke.sh" >/dev/null
 fi
 
 echo "test-apple: building framework and Apple verification artifacts"
@@ -287,8 +292,8 @@ echo "test-apple: running Apple auth/security audit"
 run_scaffold_smoke
 run_auth_primitives_validation
 
-if [[ $smoke_only -eq 0 ]]; then
-  echo "test-apple: Apple XCTest remains deferred until full Xcode-backed integration lands"
+if [[ $smoke_only -eq 0 && $xctest_smoke_available -ne 1 ]]; then
+  echo "test-apple: Apple XCTest smoke was skipped because full Xcode is not active" >&2
 fi
 
 echo "test-apple: Apple runtime verification passed"

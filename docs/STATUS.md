@@ -4,6 +4,29 @@ Last updated: 2026-04-08
 
 ## Leaving Off (2026-04-08)
 
+- Completed Phase 30 and delivered `30M-30O` on the `mac` branch:
+  - added `.github/workflows/phase30-apple.yml` so the Apple baseline now runs
+    continuously on `macos-15`
+  - added `tools/apple_xctest_smoke.sh` plus the repo-native
+    `phase30-confidence` lane under `tools/ci/run_phase30_confidence.sh`,
+    `tools/ci/generate_phase30_confidence_artifacts.py`, and
+    `build/release_confidence/phase30/`
+  - updated `tools/test_apple.sh` so the Apple smoke lane now exercises Apple
+    XCTest availability when full Xcode is active before running the build,
+    auth audit, scaffold-app, and example-app verification
+  - fixed the macOS doctor path to resolve `xctest` through `xcrun` and
+    removed the macOS-hostile `sha256sum` assumption from GNUmakefile parse
+    time while keeping `tools/ci/run_phase30_confidence.sh` as the canonical
+    Apple artifact lane
+  - updated the Apple platform contract, toolchain matrix, macOS getting
+    started guide, roadmap, README surfaces, and CLI reference to describe the
+    closed Phase 30 baseline and its remaining post-phase follow-up scope
+- Phase 30 status:
+  - `30A-30O` are now delivered on `mac`
+  - `tools/ci/run_phase30_confidence.sh` is the canonical Apple artifact pack
+  - `.github/workflows/phase30-apple.yml` is the continuous macOS CI lane
+  - full repo-native Objective-C Apple XCTest bundle migration remains future
+    follow-up beyond the Phase 30 baseline
 - Continued Phase 30 and delivered `30J-30L` on the `mac` branch:
   - added `tools/apple_auth_audit.m` plus the built
     `build/apple/apple-auth-audit` binary so the Apple path now executes
@@ -20,15 +43,11 @@ Last updated: 2026-04-08
     README, docs index, and Phase 30 roadmap to describe the new `30A-30L`
     checkpoint and the still-deferred Xcode-backed XCTest work
 - Phase 30 status:
-  - `30A-30L` are now delivered on `mac`
+  - `30A-30L` were delivered before the Phase 30 closeout
   - `./bin/test --smoke-only` is the current Apple-native verification lane
     for runtime, security, scaffolded-app, and example-app coverage
-  - full Apple XCTest bundle integration remains deferred pending the Phase 30F
-    Xcode-backed path
-- Remaining Phase 30 subphases:
-  - `30M` CI expansion
-  - `30N` compatibility cleanup
-  - `30O` phase closeout
+  - at that checkpoint, full Apple XCTest bundle integration remained deferred
+    pending the Xcode-backed path
 
 ## Leaving Off For macOS Upgrade (2026-04-07)
 

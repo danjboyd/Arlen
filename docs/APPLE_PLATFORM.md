@@ -23,7 +23,7 @@ Foundation APIs instead of reusing the GNUstep bootstrap path.
 - OS baseline: macOS 15.x
 - Architecture baseline: `arm64`
 - Toolchain baseline:
-  - Xcode Command Line Tools or full Xcode
+  - full Xcode selected through `xcode-select`
   - Apple clang available through `xcrun`
   - `python3`
   - `curl`
@@ -71,6 +71,8 @@ GNUstep bootstrap scripts.
 - `./bin/build-apple --with-boomhauer` builds the repo-root Apple boomhauer
   target.
 - `./bin/test --smoke-only` now uses the Apple runtime path on macOS:
+  - runs an Apple XCTest smoke through `tools/apple_xctest_smoke.sh` when full
+    Xcode is active
   - runs `arlen doctor`
   - builds the Apple artifacts
   - runs the Apple-native auth/security audit binary
@@ -84,16 +86,17 @@ GNUstep bootstrap scripts.
 
 ## Known Characterized Gaps
 
-- Full Apple XCTest execution is not wired up yet in this environment because
-  the active developer directory is Xcode Command Line Tools rather than full
-  Xcode.
+- Full repo-native Objective-C Apple XCTest bundle migration is still future
+  work; the current closed baseline verifies Apple XCTest availability through
+  the dedicated `tools/apple_xctest_smoke.sh` helper and the Phase 30
+  confidence lane.
 - Some shell tooling and CI helpers outside the core build/test/run loop still
-  assume GNU/Linux utilities.
+  remain GNUstep/Linux-specific because the Linux path is still supported.
 - PostgreSQL and ODBC discovery still need broader macOS normalization.
 - Apple watch-mode support for `boomhauer` is not implemented yet; the runtime
   falls back to non-watch execution with an explicit warning.
 
-## Non-Goals of Phase 30A-L
+## Non-Goals of Phase 30
 
 - deprecating Linux/GNUstep support
 - shipping an Xcode project as the primary build path
@@ -102,9 +105,8 @@ GNUstep bootstrap scripts.
 
 ## Short-Term Direction
 
-The next implementation slice after `30L` is:
+The next implementation slice after Phase 30 is:
 
-1. full Xcode-backed XCTest build/run integration
-2. CI coverage for the Apple runtime path
-3. broader dependency normalization for PostgreSQL and optional backends
-4. compatibility cleanup and phase closeout
+1. repo-native Objective-C Apple XCTest build/run integration for the full test suite
+2. broader dependency normalization for PostgreSQL and optional backends
+3. Apple runtime ergonomics beyond the current validated non-watch baseline

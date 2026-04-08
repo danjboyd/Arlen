@@ -1,6 +1,6 @@
 # Phase 30 Roadmap
 
-Status: in progress  
+Status: complete  
 Last updated: 2026-04-08
 
 ## Goal
@@ -315,11 +315,81 @@ Acceptance checkpoint:
 
 Add a macOS CI lane so the Apple path is continuously verified.
 
+Shipped in this subphase:
+
+- `.github/workflows/phase30-apple.yml` now runs the Apple baseline on
+  `macos-15`
+- the Apple CI lane explicitly selects full Xcode, bootstraps Homebrew
+  `openssl@3`, and runs the repo-native `phase30-confidence` gate
+- `tools/ci/install_ci_dependencies.sh` now has a macOS/Apple CI path instead
+  of assuming GNUstep/Linux-only provisioning
+
+Acceptance checkpoint:
+
+- the Apple runtime path is continuously verified on macOS CI
+- CI bootstrap no longer treats Apple verification as an out-of-band manual
+  setup
+
 ## 30N. Compatibility Cleanup
 
 Decide which seams remain dual-platform and which can be simplified.
+
+Shipped in this subphase:
+
+- `bin/arlen doctor` now resolves Apple XCTest through `xcrun` instead of
+  warning incorrectly when `xctest` is not on `PATH`
+- `tools/apple_xctest_smoke.sh` now provides a deterministic Apple XCTest smoke
+  helper that exercises the active full-Xcode toolchain
+- `tools/test_apple.sh` now runs the Apple XCTest smoke whenever the Xcode
+  developer directory is active, while still preserving the runtime/auth smoke
+  lane when it is not
+- `GNUmakefile` now uses a portable SHA-256 helper at parse time so
+  `make phase30-confidence` is callable on macOS without `sha256sum`
+
+Acceptance checkpoint:
+
+- the remaining Apple-versus-GNUstep seams in the core phase-closeout path are
+  explicit rather than accidental
+- the Apple developer loop can use the repo-native confidence entrypoint
 
 ## 30O. Phase Closeout
 
 Publish a confidence pack and mark the Apple baseline complete only after build,
 runtime, docs, and verification are all repeatable.
+
+Shipped in this subphase:
+
+- `tools/ci/run_phase30_confidence.sh` now produces a Phase 30 confidence pack
+  under `build/release_confidence/phase30/`
+- `tools/ci/generate_phase30_confidence_artifacts.py` now emits the eval,
+  markdown summary, and manifest for the Apple baseline
+- `GNUmakefile` now exposes a `phase30-confidence` helper target for GNU Make
+  environments, while the direct script remains the Apple baseline entrypoint
+- onboarding/status/toolchain docs now describe the completed Apple baseline,
+  the new confidence lane, and the remaining post-Phase-30 follow-up scope
+
+Acceptance checkpoint:
+
+- `bash ./tools/ci/run_phase30_confidence.sh` and the macOS CI lane both
+  verify the same Apple baseline
+- build, XCTest availability, runtime smoke, auth/example smoke, and docs all
+  agree on the closed Phase 30 contract
+
+## Phase Result
+
+Phase 30 is complete. The Apple baseline now means:
+
+- macOS contributors can build Arlen through `./bin/build-apple`
+- `./bin/test --smoke-only` verifies Apple XCTest availability when full Xcode
+  is active, then runs the Apple build, auth/security audit, scaffold-app
+  smoke, and `examples/auth_primitives` coverage
+- `bash ./tools/ci/run_phase30_confidence.sh` publishes the repeatable artifact
+  pack for that same baseline
+- macOS CI continuously enforces that contract on `macos-15`
+
+Deferred follow-up after Phase 30:
+
+- repo-native Objective-C Apple XCTest bundle migration for the full Arlen test
+  suite
+- broader Apple normalization for optional PostgreSQL/ODBC backend build paths
+- non-watch Apple runtime ergonomics beyond the validated baseline
