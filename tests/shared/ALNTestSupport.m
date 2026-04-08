@@ -56,10 +56,15 @@ NSString *ALNTestShellQuote(NSString *value) {
 }
 
 NSString *ALNTestGNUstepSourceCommandForRepoRoot(NSString *repoRoot) {
+#if defined(__APPLE__)
+  (void)repoRoot;
+  return @":";
+#else
   NSString *resolvedRepoRoot =
       ([repoRoot isKindOfClass:[NSString class]] && [repoRoot length] > 0) ? repoRoot : ALNTestRepoRoot();
   NSString *helperPath = [resolvedRepoRoot stringByAppendingPathComponent:@"tools/source_gnustep_env.sh"];
   return [NSString stringWithFormat:@"source %@", ALNTestShellQuote(helperPath)];
+#endif
 }
 
 NSData *ALNTestDataAtRelativePath(NSString *relativePath, NSError **error) {

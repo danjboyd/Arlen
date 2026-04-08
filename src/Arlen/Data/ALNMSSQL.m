@@ -2,6 +2,7 @@
 
 #import "ALNJSONSerialization.h"
 #import "ALNMSSQLDialect.h"
+#import "ALNPlatform.h"
 #import "ALNSQLBuilder.h"
 
 #import <dispatch/dispatch.h>
@@ -531,28 +532,10 @@ static BOOL ALNMSSQLLoadODBC(NSError **error) {
       return NO;
     }
 
-    const char *envCandidate = getenv("ARLEN_ODBC_LIBRARY");
-#if defined(_WIN32)
-    const char *candidates[] = {
-      envCandidate,
-      "C:/msys64/clang64/bin/libodbc-2.dll",
-      "C:/msys64/clang64/bin/libodbc.dll",
-      "odbc32.dll",
-      "libodbc-2.dll",
-      "libodbc.dll",
-    };
-#else
-    const char *candidates[] = {
-      envCandidate,
-      "/usr/lib/x86_64-linux-gnu/libodbc.so.2",
-      "libodbc.so.2",
-      "libodbc.so",
-    };
-#endif
-    size_t candidateCount = sizeof(candidates) / sizeof(candidates[0]);
     void *handle = NULL;
-    for (size_t idx = 0; idx < candidateCount; idx++) {
-      handle = ALNOpenODBCCandidate(candidates[idx]);
+    NSArray<NSString *> *candidates = ALNDefaultODBCCandidatePaths();
+    for (NSString *candidate in candidates) {
+      handle = ALNOpenODBCCandidate([candidate UTF8String]);
       if (handle != NULL) {
         break;
       }

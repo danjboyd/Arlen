@@ -76,7 +76,7 @@ clang_path="$(xcrun --find clang)"
 
 openssl_prefix="${ARLEN_OPENSSL_PREFIX:-}"
 if [[ -z "$openssl_prefix" ]]; then
-  openssl_prefix="$(aln_platform_brew_prefix openssl@3 || true)"
+  openssl_prefix="$(aln_platform_first_brew_prefix openssl@3 || true)"
 fi
 if [[ -z "$openssl_prefix" || ! -d "$openssl_prefix/include/openssl" ]]; then
   echo "build-apple-app: unable to locate OpenSSL headers" >&2

@@ -255,9 +255,51 @@ static NSUInteger gPhase15UIContextCalls = 0;
 
 - (NSDictionary *)parseJSONDictionary:(NSString *)output {
   NSString *trimmed = [output stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
-  NSData *data = [trimmed dataUsingEncoding:NSUTF8StringEncoding];
   NSError *error = nil;
+  NSData *data = [trimmed dataUsingEncoding:NSUTF8StringEncoding];
   NSDictionary *payload = [NSJSONSerialization JSONObjectWithData:data options:0 error:&error];
+  if (payload == nil) {
+    NSUInteger startIndex = NSNotFound;
+    NSUInteger depth = 0;
+    BOOL inString = NO;
+    BOOL escaping = NO;
+    for (NSUInteger idx = 0; idx < [trimmed length]; idx++) {
+      unichar ch = [trimmed characterAtIndex:idx];
+      if (escaping) {
+        escaping = NO;
+        continue;
+      }
+      if (ch == '\\') {
+        escaping = YES;
+        continue;
+      }
+      if (ch == '"') {
+        inString = !inString;
+        continue;
+      }
+      if (inString) {
+        continue;
+      }
+      if (ch == '{') {
+        if (depth == 0) {
+          startIndex = idx;
+        }
+        depth += 1;
+        continue;
+      }
+      if (ch == '}' && depth > 0) {
+        depth -= 1;
+        if (depth == 0 && startIndex != NSNotFound) {
+          NSString *candidate =
+              [trimmed substringWithRange:NSMakeRange(startIndex, idx - startIndex + 1)];
+          data = [candidate dataUsingEncoding:NSUTF8StringEncoding];
+          error = nil;
+          payload = [NSJSONSerialization JSONObjectWithData:data options:0 error:&error];
+          break;
+        }
+      }
+    }
+  }
   XCTAssertNil(error, @"invalid JSON: %@\n%@", error.localizedDescription, output);
   XCTAssertTrue([payload isKindOfClass:[NSDictionary class]]);
   return payload ?: @{};
@@ -709,7 +751,12 @@ static NSUInteger gPhase15UIContextCalls = 0;
     return;
   }
   NSString *repoRoot = [self repoRoot];
-  NSString *arlenPath = [repoRoot stringByAppendingPathComponent:@"build/arlen"];
+  NSString *arlenPath =
+#if defined(__APPLE__)
+      [repoRoot stringByAppendingPathComponent:@"bin/arlen"];
+#else
+      [repoRoot stringByAppendingPathComponent:@"build/arlen"];
+#endif
   NSString *tempApp = [self createTempDirectoryWithPrefix:@"phase15-auth-eject"];
   XCTAssertNotNil(tempApp);
 
@@ -726,10 +773,15 @@ static NSUInteger gPhase15UIContextCalls = 0;
   XCTAssertNil(error);
 
   int exitCode = 0;
+#if defined(__APPLE__)
+  NSString *buildCommand = [NSString stringWithFormat:@"cd %@ && ./bin/build-apple >/dev/null",
+                                                      [self shellQuoted:repoRoot]];
+#else
   NSString *buildCommand = [NSString stringWithFormat:
                                                @"%@ && cd %@ && rm -f build/arlen && LD_PRELOAD='' make arlen >/dev/null && chmod 755 build/arlen",
                                                ALNTestGNUstepSourceCommandForRepoRoot(repoRoot),
                                                [self shellQuoted:repoRoot]];
+#endif
   NSString *buildOutput = [self runShellCapture:buildCommand exitCode:&exitCode];
   XCTAssertEqual(0, exitCode, @"%@", buildOutput);
 
@@ -756,13 +808,22 @@ static NSUInteger gPhase15UIContextCalls = 0;
   XCTAssertTrue([payload[@"created_files"] containsObject:@"public/auth/auth_totp_qr.js"]);
   XCTAssertTrue([payload[@"updated_files"] containsObject:@"config/app.plist"]);
 
-  NSString *configText = [NSString stringWithContentsOfFile:[tempApp stringByAppendingPathComponent:@"config/app.plist"]
-                                                   encoding:NSUTF8StringEncoding
-                                                      error:&error];
+  NSString *configPath = [tempApp stringByAppendingPathComponent:@"config/app.plist"];
+  NSData *configData = [NSData dataWithContentsOfFile:configPath options:0 error:&error];
   XCTAssertNil(error);
-  XCTAssertTrue([configText containsString:@"generated-app-ui"]);
-  XCTAssertTrue([configText containsString:@"layouts/auth_generated"]);
-  XCTAssertTrue([configText containsString:@"generatedPagePrefix = auth"]);
+  XCTAssertNotNil(configData);
+  NSPropertyListFormat format = NSPropertyListOpenStepFormat;
+  NSDictionary *config = [NSPropertyListSerialization propertyListWithData:configData
+                                                                   options:NSPropertyListMutableContainersAndLeaves
+                                                                    format:&format
+                                                                     error:&error];
+  XCTAssertNil(error);
+  XCTAssertTrue([config isKindOfClass:[NSDictionary class]]);
+  NSDictionary *authModule = [config[@"authModule"] isKindOfClass:[NSDictionary class]] ? config[@"authModule"] : @{};
+  NSDictionary *ui = [authModule[@"ui"] isKindOfClass:[NSDictionary class]] ? authModule[@"ui"] : @{};
+  XCTAssertEqualObjects(@"generated-app-ui", ui[@"mode"]);
+  XCTAssertEqualObjects(@"layouts/auth_generated", ui[@"layout"]);
+  XCTAssertEqualObjects(@"auth", ui[@"generatedPagePrefix"]);
   XCTAssertTrue([[NSFileManager defaultManager] fileExistsAtPath:[tempApp stringByAppendingPathComponent:@"templates/auth/partials/page_wrapper.html.eoc"]]);
   XCTAssertTrue([[NSFileManager defaultManager] fileExistsAtPath:[tempApp stringByAppendingPathComponent:@"templates/auth/fragments/mfa_challenge_form.html.eoc"]]);
   XCTAssertTrue([[NSFileManager defaultManager] fileExistsAtPath:[tempApp stringByAppendingPathComponent:@"templates/auth/partials/bodies/mfa_manage_body.html.eoc"]]);

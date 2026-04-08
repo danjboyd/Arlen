@@ -60,9 +60,11 @@ PY
 export GNUSTEP_USER_ROOT="${GNUSTEP_USER_ROOT:-$repo_root/.gnustep}"
 mkdir -p "$GNUSTEP_USER_ROOT"
 mkdir -p "$bootstrap_dir"
-set +u
-source /usr/GNUstep/System/Library/Makefiles/GNUstep.sh
-set -u
+if [[ -f "$repo_root/tools/source_gnustep_env.sh" ]]; then
+  set +u
+  source "$repo_root/tools/source_gnustep_env.sh"
+  set -u
+fi
 
 tsan_so="$(clang -print-file-name=libtsan.so)"
 if [[ -z "$tsan_so" || ! -f "$tsan_so" ]]; then

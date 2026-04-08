@@ -204,7 +204,7 @@ EOF
 
   openssl_prefix="${ARLEN_OPENSSL_PREFIX:-}"
   if [[ -z "$openssl_prefix" ]]; then
-    openssl_prefix="$(aln_platform_brew_prefix openssl@3 || true)"
+    openssl_prefix="$(aln_platform_first_brew_prefix openssl@3 || true)"
   fi
   if [[ -n "$openssl_prefix" && -d "$openssl_prefix/include/openssl" ]]; then
     add_check "openssl_headers" "pass" "OpenSSL headers available: $openssl_prefix"
@@ -215,16 +215,24 @@ EOF
 
   libpq_prefix="${ARLEN_LIBPQ_PREFIX:-}"
   if [[ -z "$libpq_prefix" ]]; then
-    libpq_prefix="$(aln_platform_brew_prefix libpq || true)"
-  fi
-  if [[ -z "$libpq_prefix" ]]; then
-    libpq_prefix="$(aln_platform_brew_prefix postgresql || true)"
+    libpq_prefix="$(aln_platform_first_brew_prefix libpq postgresql || true)"
   fi
   if [[ -n "$libpq_prefix" && -d "$libpq_prefix/lib" ]]; then
     add_check "libpq" "pass" "libpq candidate available: $libpq_prefix"
   else
     add_check "libpq" "warn" "libpq not detected for the Apple path" \
       "Install Homebrew 'libpq' or 'postgresql' if PostgreSQL support is required."
+  fi
+
+  odbc_prefix="${ARLEN_ODBC_PREFIX:-}"
+  if [[ -z "$odbc_prefix" ]]; then
+    odbc_prefix="$(aln_platform_first_brew_prefix unixodbc libiodbc || true)"
+  fi
+  if [[ -n "$odbc_prefix" && -d "$odbc_prefix/lib" ]]; then
+    add_check "odbc" "pass" "ODBC candidate available: $odbc_prefix"
+  else
+    add_check "odbc" "warn" "ODBC manager not detected for the Apple path" \
+      "Install Homebrew 'unixodbc' or 'libiodbc' if MSSQL transport is required."
   fi
 else
   add_check "platform" "pass" "platform: GNUstep/Linux bootstrap path"

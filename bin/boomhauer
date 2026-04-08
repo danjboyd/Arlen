@@ -154,39 +154,136 @@ if [[ -f "$app_root/config/app.plist" ]] && app_root_has_sources "$app_root"; th
 fi
 
 if aln_platform_is_macos; then
-  if [[ $watch_mode -eq 1 ]]; then
-    echo "boomhauer: watch mode is not yet implemented on the Apple runtime path; continuing without watch"
-    watch_mode=0
-  fi
+  apple_compiled_binary=""
+  apple_child_pid=""
 
-  if [[ $is_app_root -eq 0 ]]; then
-    if [[ $prepare_only -eq 1 ]]; then
-      echo "boomhauer: prepare-only mode; building Apple boomhauer artifacts"
+  apple_fingerprint_fields() {
+    local path="$1"
+    local size mtime
+    size="$(stat -f %z "$path" 2>/dev/null || echo 0)"
+    mtime="$(stat -f %m "$path" 2>/dev/null || echo 0)"
+    printf '%s|%s\n' "$size" "$mtime"
+  }
+
+  apple_append_entries() {
+    local base="$1"
+    local label="$2"
+    shift 2
+
+    local found=0
+    local rel path
+    for rel in "$@"; do
+      path="$base/$rel"
+      if [[ -d "$path" ]]; then
+        while IFS= read -r file; do
+          printf '%s|%s|' "$label" "${file#"$base"/}"
+          apple_fingerprint_fields "$file"
+          found=1
+        done < <(find "$path" -type f | sort)
+      elif [[ -f "$path" ]]; then
+        printf '%s|%s|' "$label" "$rel"
+        apple_fingerprint_fields "$path"
+        found=1
+      fi
+    done
+
+    if [[ $found -eq 0 ]]; then
+      printf '%s|__empty__\n' "$label"
     fi
-    bash "$framework_root/bin/build-apple" --with-boomhauer >/dev/null
-    if [[ $prepare_only -eq 1 ]]; then
-      exit 0
+  }
+
+  apple_runtime_fingerprint() {
+    {
+      printf 'app_root|%s\n' "$app_root"
+      printf 'framework_root|%s\n' "$framework_root"
+      printf 'is_app_root|%s\n' "$is_app_root"
+      apple_append_entries "$app_root" "app" src templates modules config public app_lite.m config/modules.plist
+      apple_append_entries "$framework_root" "framework" src modules templates GNUmakefile bin/boomhauer tools/build_apple.sh tools/build_apple_app.sh
+    } | sort | shasum -a 256 | awk '{print $1}'
+  }
+
+  apple_stop_child() {
+    if [[ -n "$apple_child_pid" ]] && kill -0 "$apple_child_pid" >/dev/null 2>&1; then
+      kill "$apple_child_pid" >/dev/null 2>&1 || true
+      wait "$apple_child_pid" >/dev/null 2>&1 || true
     fi
-    export ARLEN_APP_ROOT="$app_root"
-    exec "$framework_root/build/apple/boomhauer" "${server_args[@]}"
-  fi
+    apple_child_pid=""
+  }
 
-  if [[ $prepare_only -eq 1 ]]; then
-    echo "boomhauer: prepare-only mode; building Apple app artifacts"
-    bash "$framework_root/tools/build_apple_app.sh" \
-      --app-root "$app_root" \
-      --framework-root "$framework_root" \
-      --prepare-only >/dev/null
-    exit 0
-  fi
+  apple_prepare_binary() {
+    if [[ $is_app_root -eq 0 ]]; then
+      bash "$framework_root/bin/build-apple" --with-boomhauer >/dev/null
+      printf '%s\n' "$framework_root/build/apple/boomhauer"
+      return 0
+    fi
 
-  app_binary="$(
     bash "$framework_root/tools/build_apple_app.sh" \
       --app-root "$app_root" \
       --framework-root "$framework_root" \
       --print-path
-  )"
-  exec "$app_binary" "${server_args[@]}"
+  }
+
+  apple_start_child() {
+    export ARLEN_APP_ROOT="$app_root"
+    "$apple_compiled_binary" "${server_args[@]}" &
+    apple_child_pid="$!"
+  }
+
+  apple_run_once() {
+    if [[ $prepare_only -eq 1 ]]; then
+      if [[ $is_app_root -eq 0 ]]; then
+        echo "boomhauer: prepare-only mode; building Apple boomhauer artifacts"
+      else
+        echo "boomhauer: prepare-only mode; building Apple app artifacts"
+      fi
+    fi
+
+    apple_compiled_binary="$(apple_prepare_binary)"
+    if [[ $prepare_only -eq 1 ]]; then
+      exit 0
+    fi
+    export ARLEN_APP_ROOT="$app_root"
+    exec "$apple_compiled_binary" "${server_args[@]}"
+  }
+
+  if [[ $watch_mode -eq 0 ]]; then
+    apple_run_once
+  fi
+
+  trap apple_stop_child INT TERM EXIT
+
+  apple_compiled_binary="$(apple_prepare_binary)"
+  echo "boomhauer: watching $app_root"
+  apple_last_fingerprint="$(apple_runtime_fingerprint)"
+  apple_start_child
+
+  while true; do
+    sleep 1
+
+    if [[ -n "$apple_child_pid" ]] && ! kill -0 "$apple_child_pid" >/dev/null 2>&1; then
+      set +e
+      wait "$apple_child_pid"
+      child_status=$?
+      set -e
+      apple_child_pid=""
+      exit "$child_status"
+    fi
+
+    apple_current_fingerprint="$(apple_runtime_fingerprint)"
+    if [[ "$apple_current_fingerprint" == "$apple_last_fingerprint" ]]; then
+      continue
+    fi
+    apple_last_fingerprint="$apple_current_fingerprint"
+    echo "boomhauer: change detected, rebuilding..."
+
+    if next_binary="$(apple_prepare_binary)"; then
+      apple_compiled_binary="$next_binary"
+      apple_stop_child
+      apple_start_child
+    else
+      echo "boomhauer: Apple rebuild failed; keeping the previous server process running if available" >&2
+    fi
+  done
 fi
 
 gnustep_sh="$(bash "$framework_root/tools/resolve_gnustep.sh" 2>/dev/null || true)"

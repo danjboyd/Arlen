@@ -279,8 +279,13 @@ else
 fi
 
 if [[ $xctest_smoke_available -eq 1 ]]; then
-  echo "test-apple: running Apple XCTest smoke"
-  "$repo_root/tools/apple_xctest_smoke.sh" >/dev/null
+  if [[ $smoke_only -eq 1 ]]; then
+    echo "test-apple: running Apple XCTest smoke"
+    "$repo_root/tools/apple_xctest_smoke.sh" >/dev/null
+  else
+    echo "test-apple: running Apple XCTest unit suite"
+    "$repo_root/tools/test_apple_xctest.sh" --suite unit >/dev/null
+  fi
 fi
 
 echo "test-apple: building framework and Apple verification artifacts"
@@ -293,7 +298,7 @@ run_scaffold_smoke
 run_auth_primitives_validation
 
 if [[ $smoke_only -eq 0 && $xctest_smoke_available -ne 1 ]]; then
-  echo "test-apple: Apple XCTest smoke was skipped because full Xcode is not active" >&2
+  echo "test-apple: Apple XCTest unit suite was skipped because full Xcode is not active" >&2
 fi
 
 echo "test-apple: Apple runtime verification passed"

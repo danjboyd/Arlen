@@ -41,6 +41,31 @@ BOOL ALNPlatformUsesGNUstepFoundation(void) {
 #endif
 }
 
+static void ALNAppendPrefixLibraryCandidates(NSMutableArray<NSString *> *candidates,
+                                             const char *envName,
+                                             NSArray<NSString *> *relativePaths) {
+  if (candidates == nil || relativePaths == nil) {
+    return;
+  }
+
+  const char *prefixValue = (envName != NULL) ? getenv(envName) : NULL;
+  if (prefixValue == NULL || prefixValue[0] == '\0') {
+    return;
+  }
+
+  NSString *prefix = [NSString stringWithUTF8String:prefixValue];
+  if ([prefix length] == 0) {
+    return;
+  }
+
+  for (NSString *relativePath in relativePaths) {
+    if (![relativePath isKindOfClass:[NSString class]] || [relativePath length] == 0) {
+      continue;
+    }
+    [candidates addObject:[prefix stringByAppendingPathComponent:relativePath]];
+  }
+}
+
 NSArray<NSString *> *ALNDefaultLibpqCandidatePaths(void) {
   NSMutableArray<NSString *> *candidates = [NSMutableArray array];
   const char *envCandidate = getenv("ARLEN_LIBPQ_LIBRARY");
@@ -50,6 +75,10 @@ NSArray<NSString *> *ALNDefaultLibpqCandidatePaths(void) {
       [candidates addObject:envPath];
     }
   }
+  ALNAppendPrefixLibraryCandidates(candidates,
+                                   "ARLEN_LIBPQ_PREFIX",
+                                   @[ @"lib/libpq.5.dylib", @"lib/libpq.dylib", @"lib/libpq.5.so",
+                                      @"lib/libpq.so", @"bin/libpq-5.dll", @"bin/libpq.dll" ]);
 
 #if defined(__APPLE__)
   [candidates addObject:@"/opt/homebrew/opt/libpq/lib/libpq.5.dylib"];
@@ -71,6 +100,49 @@ NSArray<NSString *> *ALNDefaultLibpqCandidatePaths(void) {
   [candidates addObject:@"/usr/lib/x86_64-linux-gnu/libpq.so.5"];
   [candidates addObject:@"libpq.so.5"];
   [candidates addObject:@"libpq.so"];
+#endif
+
+  return candidates;
+}
+
+NSArray<NSString *> *ALNDefaultODBCCandidatePaths(void) {
+  NSMutableArray<NSString *> *candidates = [NSMutableArray array];
+  const char *envCandidate = getenv("ARLEN_ODBC_LIBRARY");
+  if (envCandidate != NULL && envCandidate[0] != '\0') {
+    NSString *envPath = [NSString stringWithUTF8String:envCandidate];
+    if ([envPath length] > 0) {
+      [candidates addObject:envPath];
+    }
+  }
+  ALNAppendPrefixLibraryCandidates(candidates,
+                                   "ARLEN_ODBC_PREFIX",
+                                   @[ @"lib/libodbc.2.dylib", @"lib/libodbc.dylib",
+                                      @"lib/libodbc.so.2", @"lib/libodbc.so",
+                                      @"bin/libodbc-2.dll", @"bin/libodbc.dll" ]);
+
+#if defined(__APPLE__)
+  [candidates addObject:@"/opt/homebrew/opt/unixodbc/lib/libodbc.2.dylib"];
+  [candidates addObject:@"/opt/homebrew/opt/unixodbc/lib/libodbc.dylib"];
+  [candidates addObject:@"/opt/homebrew/opt/libiodbc/lib/libiodbc.2.dylib"];
+  [candidates addObject:@"/opt/homebrew/opt/libiodbc/lib/libiodbc.dylib"];
+  [candidates addObject:@"/usr/local/opt/unixodbc/lib/libodbc.2.dylib"];
+  [candidates addObject:@"/usr/local/opt/unixodbc/lib/libodbc.dylib"];
+  [candidates addObject:@"/usr/local/opt/libiodbc/lib/libiodbc.2.dylib"];
+  [candidates addObject:@"/usr/local/opt/libiodbc/lib/libiodbc.dylib"];
+  [candidates addObject:@"libodbc.2.dylib"];
+  [candidates addObject:@"libodbc.dylib"];
+  [candidates addObject:@"libiodbc.2.dylib"];
+  [candidates addObject:@"libiodbc.dylib"];
+#elif defined(_WIN32)
+  [candidates addObject:@"C:/msys64/clang64/bin/libodbc-2.dll"];
+  [candidates addObject:@"C:/msys64/clang64/bin/libodbc.dll"];
+  [candidates addObject:@"odbc32.dll"];
+  [candidates addObject:@"libodbc-2.dll"];
+  [candidates addObject:@"libodbc.dll"];
+#else
+  [candidates addObject:@"/usr/lib/x86_64-linux-gnu/libodbc.so.2"];
+  [candidates addObject:@"libodbc.so.2"];
+  [candidates addObject:@"libodbc.so"];
 #endif
 
   return candidates;

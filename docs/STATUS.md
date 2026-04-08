@@ -4,6 +4,26 @@ Last updated: 2026-04-08
 
 ## Leaving Off (2026-04-08)
 
+- Completed Phase 30 and delivered `30P-30R` on the `mac` branch:
+  - added repo-native Apple XCTest bundle build/run entrypoints under
+    `tools/build_apple_xctest.sh`, `tools/test_apple_xctest.sh`, and
+    `tests/Info-apple-unit.plist`, then wired `tools/test_apple.sh` to run the
+    full Apple XCTest unit suite under full Xcode
+  - normalized Apple optional-backend discovery for `libpq` and ODBC-style
+    transports across `build_apple`, `build_apple_app`, `arlen doctor`, and
+    runtime loader candidate paths
+  - implemented Apple watch-mode rebuild/restart handling in `bin/boomhauer`
+    and closed the remaining Apple/Foundation parity gaps uncovered by the
+    full XCTest run
+  - verified `./tools/test_apple.sh` end-to-end on macOS after the above
+    changes, with the Apple XCTest unit suite and runtime verification both
+    passing on 2026-04-08
+- Phase 30 status:
+  - `30A-30R` are now delivered on `mac`
+  - `tools/test_apple.sh` is the canonical Apple verification lane for the
+    full XCTest unit suite plus runtime/security/scaffold/example coverage
+  - `tools/ci/run_phase30_confidence.sh` remains the canonical Apple artifact
+    pack
 - Completed Phase 30 and delivered `30M-30O` on the `mac` branch:
   - added `.github/workflows/phase30-apple.yml` so the Apple baseline now runs
     continuously on `macos-15`
@@ -22,13 +42,11 @@ Last updated: 2026-04-08
     started guide, roadmap, README surfaces, and CLI reference to describe the
     closed Phase 30 baseline and its remaining post-phase follow-up scope
 - Phase 30 status:
-  - `30A-30O` are now delivered on `mac`
+  - `30A-30R` are now delivered on `mac`
   - `tools/ci/run_phase30_confidence.sh` is the canonical Apple artifact pack
   - `.github/workflows/phase30-apple.yml` is the continuous macOS CI lane
-  - the remaining Phase 30 subphases are now:
-    `30P` Apple XCTest suite migration,
-    `30Q` optional backend normalization,
-    `30R` Apple runtime ergonomics
+  - `tools/test_apple.sh` is now the canonical Apple verification lane for the
+    full XCTest unit suite plus runtime/security/scaffold/example coverage
 - Continued Phase 30 and delivered `30J-30L` on the `mac` branch:
   - added `tools/apple_auth_audit.m` plus the built
     `build/apple/apple-auth-audit` binary so the Apple path now executes

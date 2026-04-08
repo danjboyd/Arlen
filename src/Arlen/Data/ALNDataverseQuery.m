@@ -52,6 +52,11 @@ static BOOL ALNDataverseQueryNumberLooksBoolean(NSNumber *number) {
   if (number == nil) {
     return NO;
   }
+#if defined(__APPLE__)
+  if (CFGetTypeID((__bridge CFTypeRef)number) == CFBooleanGetTypeID()) {
+    return YES;
+  }
+#endif
   const char *type = [number objCType];
   if (type == NULL) {
     return NO;

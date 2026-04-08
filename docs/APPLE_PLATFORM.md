@@ -103,10 +103,10 @@ GNUstep bootstrap scripts.
 - claiming full Apple parity for every module before runtime validation closes
 - removing OpenSSL-backed crypto code in favor of Apple Security APIs
 
-## Short-Term Direction
+## Current Phase 30 State
 
-The next implementation slice in Phase 30 is:
+Phase 30 now includes:
 
 1. `30P` repo-native Objective-C Apple XCTest build/run integration for the full test suite
-2. `30Q` broader dependency normalization for PostgreSQL and optional backends
-3. `30R` Apple runtime ergonomics beyond the current validated non-watch baseline
+2. `30Q` Apple-aware optional dependency normalization for PostgreSQL and ODBC-style backends
+3. `30R` Apple runtime ergonomics, including watch-mode rebuild/restart handling in `boomhauer`

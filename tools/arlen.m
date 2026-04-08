@@ -899,6 +899,14 @@ static BOOL WriteTextFile(NSString *path, NSString *content, BOOL force, NSError
   return [content writeToFile:path atomically:YES encoding:NSUTF8StringEncoding error:error];
 }
 
+static NSPropertyListFormat WritablePlistFormat(void) {
+#if defined(__APPLE__)
+  return NSPropertyListXMLFormat_v1_0;
+#else
+  return NSPropertyListOpenStepFormat;
+#endif
+}
+
 static BOOL AddPluginClassToAppConfig(NSString *root, NSString *pluginClassName, NSError **error) {
   if ([pluginClassName length] == 0) {
     return YES;
@@ -943,7 +951,7 @@ static BOOL AddPluginClassToAppConfig(NSString *root, NSString *pluginClassName,
   config[@"plugins"] = plugins;
 
   NSData *serialized = [NSPropertyListSerialization dataWithPropertyList:config
-                                                                   format:NSPropertyListOpenStepFormat
+                                                                   format:WritablePlistFormat()
                                                                   options:0
                                                                     error:error];
   if (serialized == nil) {
@@ -1008,7 +1016,7 @@ static BOOL AddSearchProviderClassToAppConfig(NSString *root,
   config[@"searchModule"] = searchModule;
 
   NSData *serialized = [NSPropertyListSerialization dataWithPropertyList:config
-                                                                   format:NSPropertyListOpenStepFormat
+                                                                   format:WritablePlistFormat()
                                                                   options:0
                                                                     error:error];
   if (serialized == nil) {
@@ -1215,7 +1223,7 @@ static BOOL ConfigureGeneratedAuthUIAtAppRoot(NSString *appRoot,
   config[@"authModule"] = authModule;
 
   NSData *serialized = [NSPropertyListSerialization dataWithPropertyList:config
-                                                                   format:NSPropertyListOpenStepFormat
+                                                                   format:WritablePlistFormat()
                                                                   options:0
                                                                     error:error];
   if (serialized == nil) {

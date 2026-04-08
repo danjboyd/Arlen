@@ -43,3 +43,17 @@ aln_platform_brew_prefix() {
   fi
   brew --prefix "$formula" 2>/dev/null
 }
+
+aln_platform_first_brew_prefix() {
+  local formula
+  for formula in "$@"; do
+    if [[ -z "$formula" ]]; then
+      continue
+    fi
+    if prefix="$(aln_platform_brew_prefix "$formula")" && [[ -n "$prefix" ]]; then
+      printf '%s\n' "$prefix"
+      return 0
+    fi
+  done
+  return 1
+}

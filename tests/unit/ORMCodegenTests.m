@@ -40,6 +40,17 @@
   for (NSString *includePath in includePaths) {
     [flags addObject:[NSString stringWithFormat:@"-I%@", ALNTestShellQuote(includePath)]];
   }
+  NSString *modulesRoot = [repoRoot stringByAppendingPathComponent:@"modules"];
+  NSArray<NSString *> *moduleNames =
+      [[[NSFileManager defaultManager] contentsOfDirectoryAtPath:modulesRoot error:NULL]
+          sortedArrayUsingSelector:@selector(compare:)];
+  for (NSString *moduleName in moduleNames) {
+    NSString *sourcesPath = [modulesRoot stringByAppendingPathComponent:[moduleName stringByAppendingPathComponent:@"Sources"]];
+    BOOL isDirectory = NO;
+    if ([[NSFileManager defaultManager] fileExistsAtPath:sourcesPath isDirectory:&isDirectory] && isDirectory) {
+      [flags addObject:[NSString stringWithFormat:@"-I%@", ALNTestShellQuote(sourcesPath)]];
+    }
+  }
   [flags addObject:@"-I/usr/include/postgresql"];
   return [flags componentsJoinedByString:@" "];
 }
@@ -228,6 +239,16 @@
 
   NSString *repoRoot = ALNTestRepoRoot();
   NSString *includeFlags = [self syntaxOnlyIncludeFlagsWithRepoRoot:repoRoot temporaryDir:tmpDir];
+#if defined(__APPLE__)
+  NSString *command = [NSString stringWithFormat:
+      @"set -euo pipefail && "
+       "cd %@ && "
+       "xcrun clang -isysroot \"$(xcrun --show-sdk-path)\" -arch arm64 -fobjc-arc -fsyntax-only "
+       "%@ %@",
+      ALNTestShellQuote(repoRoot),
+      includeFlags,
+      ALNTestShellQuote(implementationPath)];
+#else
   NSString *command = [NSString stringWithFormat:
       @"set -euo pipefail && "
        "cd %@ && "
@@ -238,6 +259,7 @@
       ALNTestGNUstepSourceCommandForRepoRoot(repoRoot),
       includeFlags,
       ALNTestShellQuote(implementationPath)];
+#endif
   int exitCode = 0;
   NSString *output = ALNTestRunShellCapture(command, &exitCode);
   XCTAssertEqual(0, exitCode, @"%@", output);
@@ -281,6 +303,16 @@
   NSArray<NSString *> *sourcePaths = @[ ormSourcePath, frameworkSourcePath ];
   NSString *includeFlags = [self syntaxOnlyIncludeFlagsWithRepoRoot:repoRoot temporaryDir:tmpDir];
   for (NSString *sourcePath in sourcePaths) {
+#if defined(__APPLE__)
+    NSString *command = [NSString stringWithFormat:
+        @"set -euo pipefail && "
+         "cd %@ && "
+         "xcrun clang -isysroot \"$(xcrun --show-sdk-path)\" -arch arm64 -fobjc-arc -fsyntax-only "
+         "%@ %@",
+        ALNTestShellQuote(repoRoot),
+        includeFlags,
+        ALNTestShellQuote(sourcePath)];
+#else
     NSString *command = [NSString stringWithFormat:
         @"set -euo pipefail && "
          "cd %@ && "
@@ -291,6 +323,7 @@
         ALNTestGNUstepSourceCommandForRepoRoot(repoRoot),
         includeFlags,
         ALNTestShellQuote(sourcePath)];
+#endif
     int exitCode = 0;
     NSString *output = ALNTestRunShellCapture(command, &exitCode);
     XCTAssertEqual(0, exitCode, @"%@", output);

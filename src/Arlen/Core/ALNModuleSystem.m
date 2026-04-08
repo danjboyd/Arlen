@@ -590,7 +590,12 @@ static NSDictionary *ALNModuleNormalizedDependency(id rawDependency,
     return NO;
   }
   NSData *data = [NSPropertyListSerialization dataWithPropertyList:finalDocument
-                                                            format:NSPropertyListOpenStepFormat
+                                                            format:
+#if defined(__APPLE__)
+                                                                NSPropertyListXMLFormat_v1_0
+#else
+                                                                NSPropertyListOpenStepFormat
+#endif
                                                            options:0
                                                              error:error];
   if (data == nil) {

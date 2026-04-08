@@ -58,9 +58,11 @@ with open(summary_path, "w", encoding="utf-8") as handle:
 PY
 }
 
-set +u
-source /usr/GNUstep/System/Library/Makefiles/GNUstep.sh
-set -u
+if [[ -f "$repo_root/tools/source_gnustep_env.sh" ]]; then
+  set +u
+  source "$repo_root/tools/source_gnustep_env.sh"
+  set -u
+fi
 make boomhauer
 
 tsan_so="$(clang -print-file-name=libtsan.so)"

@@ -42,6 +42,19 @@ static BOOL ALNORMTSBoolValue(id value, BOOL fallback) {
   return fallback;
 }
 
+static BOOL ALNORMTSNSNumberLooksBoolean(NSNumber *value) {
+  if (value == nil) {
+    return NO;
+  }
+#if defined(__APPLE__)
+  if (CFGetTypeID((__bridge CFTypeRef)value) == CFBooleanGetTypeID()) {
+    return YES;
+  }
+#endif
+  const char *type = [value objCType];
+  return (type != NULL && (strcmp(type, @encode(BOOL)) == 0 || strcmp(type, "B") == 0));
+}
+
 static NSNumber *ALNORMTSBoolNumber(BOOL value) {
   return value ? @YES : @NO;
 }
@@ -510,7 +523,7 @@ static NSString *ALNORMTSLiteralTypeForValue(id value) {
     return ALNORMTSSingleQuotedString(value);
   }
   if ([value isKindOfClass:[NSNumber class]]) {
-    if (strcmp([(NSNumber *)value objCType], @encode(BOOL)) == 0) {
+    if (ALNORMTSNSNumberLooksBoolean((NSNumber *)value)) {
       return [value boolValue] ? @"true" : @"false";
     }
     return [value stringValue];

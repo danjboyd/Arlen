@@ -43,6 +43,11 @@ static BOOL ALNNSNumberLooksBoolean(NSNumber *number) {
   if (number == nil) {
     return NO;
   }
+#if defined(__APPLE__)
+  if (CFGetTypeID((__bridge CFTypeRef)number) == CFBooleanGetTypeID()) {
+    return YES;
+  }
+#endif
   const char *type = [number objCType];
   if (type == NULL) {
     return NO;
@@ -51,6 +56,27 @@ static BOOL ALNNSNumberLooksBoolean(NSNumber *number) {
 }
 
 static BOOL ALNValidateJSONObjectRecursive(id obj, NSUInteger depth);
+
+static id ALNMutableFoundationLeavesObject(id obj) {
+  if ([obj isKindOfClass:[NSDictionary class]]) {
+    NSMutableDictionary *dict = [NSMutableDictionary dictionaryWithCapacity:[(NSDictionary *)obj count]];
+    for (id key in (NSDictionary *)obj) {
+      dict[key] = ALNMutableFoundationLeavesObject([(NSDictionary *)obj objectForKey:key]) ?: [NSNull null];
+    }
+    return dict;
+  }
+  if ([obj isKindOfClass:[NSArray class]]) {
+    NSMutableArray *array = [NSMutableArray arrayWithCapacity:[(NSArray *)obj count]];
+    for (id value in (NSArray *)obj) {
+      [array addObject:ALNMutableFoundationLeavesObject(value) ?: [NSNull null]];
+    }
+    return array;
+  }
+  if ([obj isKindOfClass:[NSString class]]) {
+    return [obj mutableCopy];
+  }
+  return obj;
+}
 
 #if ARLEN_ENABLE_YYJSON
 static id ALNFoundationFromYYValue(yyjson_val *value,
@@ -453,6 +479,9 @@ static BOOL ALNValidateJSONObjectRecursive(id obj, NSUInteger depth) {
                   ALNJSONSerializationErrorParseFailed,
                   @"Top-level JSON value must be array or object unless fragments are allowed");
       return nil;
+    }
+    if ((options & NSJSONReadingMutableLeaves) != 0) {
+      return ALNMutableFoundationLeavesObject(parsed);
     }
     return parsed;
   }

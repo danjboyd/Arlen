@@ -58,31 +58,28 @@ What the closed Apple baseline covers now:
 - Apple doctor checks
 - centralized portability helpers
 - Apple XCTest smoke verification through `tools/apple_xctest_smoke.sh`
-- Apple `bin/test --smoke-only` verification lane for runtime, security,
-  scaffolded-app, and example-app coverage
+- repo-native Apple XCTest bundle build/run entrypoints through
+  `tools/build_apple_xctest.sh` and `tools/test_apple_xctest.sh`
+- Apple `tools/test_apple.sh` verification lane for the full Apple XCTest unit
+  suite plus runtime, security, scaffolded-app, and example-app coverage
 - repo-native `tools/ci/run_phase30_confidence.sh` artifact lane under
   `build/release_confidence/phase30/`
-- Apple `bin/boomhauer` support for repo-root and app-root execution
+- Apple `bin/boomhauer` support for repo-root and app-root execution,
+  including watch-mode rebuild/restart handling
+- optional backend discovery for `libpq` and ODBC-style transports through
+  Apple-aware environment and Homebrew prefix detection
 - macOS CI coverage for the same Phase 30 baseline
 
-What is still planned in the remaining Phase 30 subphases:
-
-- `30P`: full repo-native Objective-C Apple XCTest bundle integration for the
-  Arlen test suite
-- `30Q`: broader optional dependency normalization
-- `30R`: Apple runtime ergonomics, including the final watch-mode decision for
-  `boomhauer`
-
-## 5. Smoke Test the Apple Runtime
+## 5. Verify the Apple Runtime
 
 Run:
 
 ```bash
-./bin/test --smoke-only
+./tools/test_apple.sh
 ```
 
-On macOS this verifies the Apple path by scaffolding a fresh app, building it,
-starting it on a local port, and probing the default routes.
+On macOS this verifies the Apple path by running the Apple XCTest unit suite,
+then building, auditing, scaffolding, and probing the Apple runtime path.
 
 It also:
 

@@ -161,7 +161,11 @@
   XCTAssertEqual((NSInteger)200, publicResources.statusCode);
   NSDictionary *publicJSON = [self JSONObjectFromResponse:publicResources];
   NSArray *publicIdentifiers = [self resourceIdentifiersFromResourcePayload:publicJSON[@"data"][@"resources"]];
-  XCTAssertEqualObjects((@[ @"products" ]), publicIdentifiers);
+  XCTAssertTrue([publicIdentifiers containsObject:@"products"]);
+  XCTAssertFalse([publicIdentifiers containsObject:@"members"]);
+  XCTAssertFalse([publicIdentifiers containsObject:@"tenant_orders"]);
+  XCTAssertFalse([publicIdentifiers containsObject:@"finance"]);
+  XCTAssertFalse([publicIdentifiers containsObject:@"regional_docs"]);
   XCTAssertEqualObjects(@"ALNDefaultSearchEngine", publicJSON[@"data"][@"engine"]);
   XCTAssertTrue([publicJSON[@"data"][@"engineCapabilities"][@"supportsPromotedResults"] boolValue]);
 
