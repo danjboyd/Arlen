@@ -1,7 +1,7 @@
 # Phase 30 Roadmap
 
 Status: in progress  
-Last updated: 2026-04-07
+Last updated: 2026-04-08
 
 ## Goal
 
@@ -234,20 +234,82 @@ Acceptance checkpoint:
 - a scaffolded macOS app can boot and answer smoke requests on Apple APIs
 - repo-root and app-root boomhauer launches no longer depend on GNUstep
 
-## Remaining Subphases
-
 ## 30J. Security/Auth Surface Audit
 
-Validate OpenSSL, password hashing, OIDC, MFA, and WebAuthn contracts on the
-Apple path.
+Goal:
+
+Validate the security-sensitive contracts that still rely on OpenSSL or
+security-adjacent runtime seams on the Apple path.
+
+Shipped in this subphase:
+
+- `tools/build_apple.sh` now builds `build/apple/apple-auth-audit` as an
+  Apple-native verification binary against the same framework archive used by
+  the runtime path
+- `tools/test_apple.sh` now executes that audit binary as part of the default
+  macOS verification lane
+- the Apple audit covers:
+  - Argon2id password hashing defaults and verification through
+    `ALNPasswordHash`
+  - OIDC authorization/callback/token verification contracts through
+    `ALNOIDCClient`
+  - WebAuthn registration/assertion verification plus session AAL elevation
+    through `ALNWebAuthn` and `ALNAuthSession`
+
+Current boundary:
+
+- this is still a native runtime audit, not a full Apple XCTest bundle lane
+- broader module-specific auth product coverage remains outside the core Phase
+  30 Apple bring-up scope
+
+Acceptance checkpoint:
+
+- the macOS Apple lane exercises OpenSSL-backed password/OIDC/WebAuthn paths
+  without falling back to GNUstep tooling
 
 ## 30K. Scaffold and Example App Validation
 
+Goal:
+
 Prove the generated app path works on macOS, not just framework binaries.
+
+Shipped in this subphase:
+
+- `tools/test_apple.sh` now validates two Apple app-root paths:
+  - a freshly scaffolded app created with `build/apple/arlen new`
+  - the checked-in `examples/auth_primitives` example app
+- the scaffold lane now verifies `/`, `/healthz`, and `/openapi`
+- the example-app lane now verifies:
+  - local login plus TOTP MFA elevation
+  - persisted session state at AAL2 after step-up
+  - stub OIDC provider login completing successfully at AAL1
+
+Acceptance checkpoint:
+
+- the Apple path proves both generated apps and a checked-in example app can
+  build and run through `tools/build_apple_app.sh`
 
 ## 30L. Documentation Closeout
 
+Goal:
+
 Finish onboarding/reference docs for the Apple-native path.
+
+Shipped in this subphase:
+
+- `docs/APPLE_PLATFORM.md` now defines the verified Apple security/runtime
+  boundary through the current audit lane
+- `docs/GETTING_STARTED_MACOS.md` now points contributors at the full
+  Apple-runtime verification flow, including the auth/example coverage
+- `README.md`, `docs/README.md`, and `docs/STATUS.md` now describe the current
+  Phase 30 checkpoint as `30A-30L`
+
+Acceptance checkpoint:
+
+- onboarding and status docs agree on what the Apple path verifies today and
+  what is still deferred
+
+## Remaining Subphases
 
 ## 30M. CI Expansion
 

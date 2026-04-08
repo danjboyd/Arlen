@@ -1,6 +1,34 @@
 # Arlen Status Checkpoint
 
-Last updated: 2026-04-07
+Last updated: 2026-04-08
+
+## Leaving Off (2026-04-08)
+
+- Continued Phase 30 and delivered `30J-30L` on the `mac` branch:
+  - added `tools/apple_auth_audit.m` plus the built
+    `build/apple/apple-auth-audit` binary so the Apple path now executes
+    native password hashing, OIDC, and WebAuthn verification against the
+    Apple-built framework archive
+  - extended `tools/test_apple.sh` so the macOS lane now runs `arlen doctor`,
+    builds the Apple artifacts, executes the auth/security audit, scaffolds a
+    fresh app, and probes `/`, `/healthz`, and `/openapi`
+  - extended the same Apple lane to build and run
+    `examples/auth_primitives`, validating local login, TOTP MFA elevation,
+    preserved AAL2 session state, and the stub OIDC provider login flow on the
+    Apple runtime
+  - updated the Apple platform contract, macOS getting-started guide, top-level
+    README, docs index, and Phase 30 roadmap to describe the new `30A-30L`
+    checkpoint and the still-deferred Xcode-backed XCTest work
+- Phase 30 status:
+  - `30A-30L` are now delivered on `mac`
+  - `./bin/test --smoke-only` is the current Apple-native verification lane
+    for runtime, security, scaffolded-app, and example-app coverage
+  - full Apple XCTest bundle integration remains deferred pending the Phase 30F
+    Xcode-backed path
+- Remaining Phase 30 subphases:
+  - `30M` CI expansion
+  - `30N` compatibility cleanup
+  - `30O` phase closeout
 
 ## Leaving Off For macOS Upgrade (2026-04-07)
 

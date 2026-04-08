@@ -37,6 +37,7 @@ macOS Apple-runtime path:
 ```bash
 ./bin/arlen doctor
 ./bin/build-apple
+./bin/test --smoke-only
 ```
 
 Create and run your first app:

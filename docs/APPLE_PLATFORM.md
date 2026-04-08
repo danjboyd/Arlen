@@ -65,14 +65,20 @@ GNUstep bootstrap scripts.
 ## Current Verified Scope
 
 - `./bin/build-apple` builds `eocc`, `libArlenFramework.a`, and `arlen`.
+- `./bin/build-apple` also builds `build/apple/apple-auth-audit`, which
+  exercises the Apple-native password hashing, OIDC, and WebAuthn seams
+  against the built framework archive.
 - `./bin/build-apple --with-boomhauer` builds the repo-root Apple boomhauer
   target.
 - `./bin/test --smoke-only` now uses the Apple runtime path on macOS:
   - runs `arlen doctor`
   - builds the Apple artifacts
+  - runs the Apple-native auth/security audit binary
   - scaffolds a fresh app
   - starts it through the Apple runtime
   - verifies `/`, `/healthz`, and `/openapi`
+  - builds and runs `examples/auth_primitives`
+  - verifies local login + TOTP MFA elevation and stub OIDC provider login
 - `./bin/boomhauer` now has an Apple app-root path as well as a repo-root
   runtime path.
 
@@ -87,7 +93,7 @@ GNUstep bootstrap scripts.
 - Apple watch-mode support for `boomhauer` is not implemented yet; the runtime
   falls back to non-watch execution with an explicit warning.
 
-## Non-Goals of Phase 30A-I
+## Non-Goals of Phase 30A-L
 
 - deprecating Linux/GNUstep support
 - shipping an Xcode project as the primary build path
@@ -96,9 +102,9 @@ GNUstep bootstrap scripts.
 
 ## Short-Term Direction
 
-The next implementation slice after `30I` is:
+The next implementation slice after `30L` is:
 
 1. full Xcode-backed XCTest build/run integration
-2. broader dependency normalization for PostgreSQL and optional backends
-3. security/auth surface audit on Apple APIs
-4. CI coverage for the Apple runtime path
+2. CI coverage for the Apple runtime path
+3. broader dependency normalization for PostgreSQL and optional backends
+4. compatibility cleanup and phase closeout

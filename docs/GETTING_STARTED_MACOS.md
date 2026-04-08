@@ -56,7 +56,8 @@ What exists now:
 - Apple-native bootstrap/build entrypoint
 - Apple doctor checks
 - centralized portability helpers
-- Apple `bin/test --smoke-only` scaffold smoke lane
+- Apple `bin/test --smoke-only` verification lane for runtime, security, and
+  example-app coverage
 - Apple `bin/boomhauer` support for repo-root and app-root execution
 
 What is still being completed:
@@ -75,6 +76,14 @@ Run:
 
 On macOS this verifies the Apple path by scaffolding a fresh app, building it,
 starting it on a local port, and probing the default routes.
+
+It also:
+
+- runs the Apple-native `apple-auth-audit` binary for password hashing, OIDC,
+  and WebAuthn verification
+- builds and runs `examples/auth_primitives`
+- verifies local login, TOTP MFA elevation, and the stub OIDC provider flow on
+  the Apple runtime path
 
 ## 6. Read Next
 

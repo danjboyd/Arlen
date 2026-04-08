@@ -63,8 +63,9 @@ if [[ ! -f "$app_root/config/app.plist" ]]; then
   exit 1
 fi
 
-if [[ ! -f "$app_root/src/main.m" && ! -f "$app_root/app_lite.m" ]]; then
-  echo "build-apple-app: expected $app_root/src/main.m or $app_root/app_lite.m" >&2
+if [[ ! -f "$app_root/app_lite.m" ]] &&
+   ! find "$app_root/src" -type f -name '*.m' -print -quit 2>/dev/null | grep -q .; then
+  echo "build-apple-app: expected Objective-C app sources under $app_root/src or app_lite.m" >&2
   exit 1
 fi
 
@@ -234,11 +235,19 @@ if [[ ${#app_sources[@]} -eq 0 ]]; then
 fi
 
 app_objects=()
-for src in "${app_sources[@]}" "${generated_sources[@]}"; do
+for src in "${app_sources[@]}"; do
   obj="$(obj_path_for "$src")"
   compile_objc "$src" "$obj"
   app_objects+=("$obj")
 done
+
+if (( ${#generated_sources[@]} > 0 )); then
+  for src in "${generated_sources[@]}"; do
+    obj="$(obj_path_for "$src")"
+    compile_objc "$src" "$obj"
+    app_objects+=("$obj")
+  done
+fi
 
 "$clang_path" "${objc_flags[@]}" "${app_objects[@]}" "$framework_lib" -o "$app_binary" "${link_flags[@]}"
 

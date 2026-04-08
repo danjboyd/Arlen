@@ -184,6 +184,11 @@ compile_objc "$repo_root/tools/arlen.m" "$arlen_entry_obj"
 arlen_bin="$build_root/arlen"
 "$clang_path" "${objc_flags[@]}" "$arlen_entry_obj" "$framework_lib" -o "$arlen_bin" "${link_flags[@]}"
 
+apple_auth_audit_obj="$(obj_path_for "$repo_root/tools/apple_auth_audit.m")"
+compile_objc "$repo_root/tools/apple_auth_audit.m" "$apple_auth_audit_obj"
+apple_auth_audit_bin="$build_root/apple-auth-audit"
+"$clang_path" "${objc_flags[@]}" "$apple_auth_audit_obj" "$framework_lib" -o "$apple_auth_audit_bin" "${link_flags[@]}"
+
 if [[ $with_boomhauer -eq 1 ]]; then
   template_files=()
   while IFS= read -r template; do
@@ -216,6 +221,7 @@ build-apple: built artifacts:
   $eocc_bin
   $framework_lib
   $arlen_bin
+  $apple_auth_audit_bin
 EOF
 
 if [[ $with_boomhauer -eq 1 && -x "$build_root/boomhauer" ]]; then
