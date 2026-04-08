@@ -105,8 +105,8 @@ GNUstep bootstrap scripts.
 
 ## Short-Term Direction
 
-The next implementation slice after Phase 30 is:
+The next implementation slice in Phase 30 is:
 
-1. repo-native Objective-C Apple XCTest build/run integration for the full test suite
-2. broader dependency normalization for PostgreSQL and optional backends
-3. Apple runtime ergonomics beyond the current validated non-watch baseline
+1. `30P` repo-native Objective-C Apple XCTest build/run integration for the full test suite
+2. `30Q` broader dependency normalization for PostgreSQL and optional backends
+3. `30R` Apple runtime ergonomics beyond the current validated non-watch baseline

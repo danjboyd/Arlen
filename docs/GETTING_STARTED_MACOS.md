@@ -65,12 +65,13 @@ What the closed Apple baseline covers now:
 - Apple `bin/boomhauer` support for repo-root and app-root execution
 - macOS CI coverage for the same Phase 30 baseline
 
-What is still deferred after Phase 30:
+What is still planned in the remaining Phase 30 subphases:
 
-- full repo-native Objective-C Apple XCTest bundle integration for the Arlen
-  test suite
-- Apple watch-mode support in `boomhauer`
-- broader optional dependency normalization
+- `30P`: full repo-native Objective-C Apple XCTest bundle integration for the
+  Arlen test suite
+- `30Q`: broader optional dependency normalization
+- `30R`: Apple runtime ergonomics, including the final watch-mode decision for
+  `boomhauer`
 
 ## 5. Smoke Test the Apple Runtime
 

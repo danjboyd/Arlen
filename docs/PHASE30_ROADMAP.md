@@ -1,6 +1,6 @@
 # Phase 30 Roadmap
 
-Status: complete  
+Status: in progress
 Last updated: 2026-04-08
 
 ## Goal
@@ -375,9 +375,9 @@ Acceptance checkpoint:
 - build, XCTest availability, runtime smoke, auth/example smoke, and docs all
   agree on the closed Phase 30 contract
 
-## Phase Result
+## Current Delivered Baseline
 
-Phase 30 is complete. The Apple baseline now means:
+Phase 30 has delivered `30A-30O`. The current Apple baseline means:
 
 - macOS contributors can build Arlen through `./bin/build-apple`
 - `./bin/test --smoke-only` verifies Apple XCTest availability when full Xcode
@@ -387,9 +387,65 @@ Phase 30 is complete. The Apple baseline now means:
   pack for that same baseline
 - macOS CI continuously enforces that contract on `macos-15`
 
-Deferred follow-up after Phase 30:
+## Remaining Subphases
 
-- repo-native Objective-C Apple XCTest bundle migration for the full Arlen test
-  suite
-- broader Apple normalization for optional PostgreSQL/ODBC backend build paths
-- non-watch Apple runtime ergonomics beyond the validated baseline
+## 30P. Apple XCTest Suite Migration
+
+Move the repo-native Objective-C Arlen test suites onto an Apple XCTest path
+instead of relying on the current smoke-only Apple XCTest proof point.
+
+Planned scope:
+
+- define the supported Apple test bundle/executable contract for the existing
+  Objective-C unit and integration suites
+- add Apple-native build/run entrypoints for those suites
+- prove focused and full-suite execution on macOS without falling back to the
+  GNUstep `xctest` lane
+
+Acceptance checkpoint:
+
+- the main Arlen Objective-C test suites have a documented Apple XCTest build
+  and execution path
+- the Apple path validates more than the current dedicated XCTest smoke helper
+
+## 30Q. Optional Backend Normalization
+
+Broaden the Apple dependency/build contract for optional database backends
+beyond the current OpenSSL-first baseline.
+
+Planned scope:
+
+- normalize Apple header/library discovery for PostgreSQL `libpq`
+- characterize and document the Apple ODBC/MSSQL build path
+- upgrade Apple build/test diagnostics so missing optional backend
+  dependencies fail with explicit macOS remediation
+
+Acceptance checkpoint:
+
+- Apple contributors can intentionally enable PostgreSQL and optional backend
+  features with documented dependency paths
+- Apple diagnostics no longer rely on Linux-centric assumptions for those
+  optional backends
+
+## 30R. Apple Runtime Ergonomics
+
+Improve the Apple runtime developer experience beyond the currently validated
+non-watch baseline.
+
+Planned scope:
+
+- decide whether watch-mode support lands or remains an explicit non-goal
+- tighten the Apple app-root/runtime ergonomics around the current boomhauer
+  contract
+- document the resulting steady-state Apple runtime expectations
+
+Acceptance checkpoint:
+
+- the Apple runtime ergonomics story is explicit and defensible
+- watch-mode and related runtime behavior are either implemented or clearly
+  ruled out with matching docs and diagnostics
+
+## Follow-On Scope
+
+The next work now continues inside Phase 30 through `30P-30R` rather than
+living as undocumented follow-up.

@@ -25,8 +25,10 @@ Last updated: 2026-04-08
   - `30A-30O` are now delivered on `mac`
   - `tools/ci/run_phase30_confidence.sh` is the canonical Apple artifact pack
   - `.github/workflows/phase30-apple.yml` is the continuous macOS CI lane
-  - full repo-native Objective-C Apple XCTest bundle migration remains future
-    follow-up beyond the Phase 30 baseline
+  - the remaining Phase 30 subphases are now:
+    `30P` Apple XCTest suite migration,
+    `30Q` optional backend normalization,
+    `30R` Apple runtime ergonomics
 - Continued Phase 30 and delivered `30J-30L` on the `mac` branch:
   - added `tools/apple_auth_audit.m` plus the built
     `build/apple/apple-auth-audit` binary so the Apple path now executes
