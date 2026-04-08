@@ -109,6 +109,7 @@ Behavior:
 - `status` reports the active release, previous release, manifest-backed health contract, and optional service state
 - `rollback` promotes a previous release through `rollback_release.sh`, can reload/restart a service, and can re-run deploy health verification
 - `doctor` validates active release layout, packaged binaries, config loading, and optional live operability
+- packaged releases include the operability helper `framework/tools/deploy/validate_operability.sh` used by `doctor --base-url`
 - `logs` exposes release metadata pointers plus journald/file log access helpers
 - shared options:
   - `--app-root <path>`

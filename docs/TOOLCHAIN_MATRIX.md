@@ -1,6 +1,6 @@
 # Arlen Toolchain Matrix
 
-Last updated: 2026-04-07
+Last updated: 2026-04-08
 
 This document records known-good local toolchain baselines for Arlen onboarding and CI parity.
 
@@ -10,6 +10,12 @@ Use `bin/arlen doctor` as the first preflight check. A healthy baseline should a
 source /path/to/Arlen/tools/source_gnustep_env.sh
 make test-unit
 make test-integration
+```
+
+Windows preview entry path:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\run_clang64.ps1 -InnerCommand "make arlen"
 ```
 
 ## Known-Good Baseline (2026-02-20)
@@ -62,7 +68,8 @@ That helper resolves the active GNUstep shell init path in this order:
 1. `GNUSTEP_SH`
 2. `GNUSTEP_MAKEFILES/GNUstep.sh`
 3. `gnustep-config --variable=GNUSTEP_MAKEFILES`
-4. `/usr/GNUstep/System/Library/Makefiles/GNUstep.sh`
+4. `/clang64/share/GNUstep/Makefiles/GNUstep.sh`
+5. `/usr/GNUstep/System/Library/Makefiles/GNUstep.sh`
 
 Contributors who already source a managed toolchain env script can keep doing
 that, as long as it exposes a valid `GNUSTEP_SH` or `GNUSTEP_MAKEFILES`.
@@ -80,6 +87,13 @@ Arlen CI requires a clang-built GNUstep stack. In practice that means:
 The workflow bootstrap entry point is:
 
 - `tools/ci/install_ci_dependencies.sh`
+
+Windows preview helpers:
+
+- `scripts/run_clang64.ps1`
+- `scripts/run_clang64.sh`
+- `tools/ci/run_phase24_windows_preview.sh`
+- `tools/ci/run_phase31_confidence.sh`
 
 Supported CI bootstrap strategies:
 
@@ -99,6 +113,11 @@ Optional contributor override:
 - set `ARLEN_XCTEST=/path/to/patched/xctest` to use a filter-capable runner for `make test-unit-filter` / `make test-integration-filter`
 - if that runner comes from a local uninstalled `tools-xctest` build, also set `ARLEN_XCTEST_LD_LIBRARY_PATH=/path/to/tools-xctest/XCTest/obj`
 - stock Debian `xctest` remains the baseline for the normal unfiltered test and confidence commands
+
+Windows preview CI currently validates two layers:
+
+- runtime parity via `make phase24-windows-confidence`
+- packaged release/deploy parity via `make phase31-confidence`
 
 ## Doctor Check Mapping
 

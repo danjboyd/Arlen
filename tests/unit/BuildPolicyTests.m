@@ -138,10 +138,16 @@
 
   XCTAssertTrue([makefile containsString:@"ARLEN_XCTEST ?= xctest"]);
   XCTAssertTrue([makefile containsString:@"ARLEN_XCTEST_LD_LIBRARY_PATH ?="]);
-  XCTAssertTrue([makefile containsString:@"BASE_LINK_LIBS := $$(gnustep-config --base-libs) -ldl -lcrypto -ldispatch"]);
+  XCTAssertTrue([makefile containsString:@"GNUSTEP_SYSTEM_LIBS_DIR := $(strip $(shell gnustep-config --variable=GNUSTEP_SYSTEM_LIBRARIES 2>/dev/null))"]);
+  XCTAssertTrue([makefile containsString:@"ARLEN_PLATFORM_LINK_LIBS := -ldl"]);
+  XCTAssertTrue([makefile containsString:@"ARLEN_PLATFORM_LINK_LIBS := -lws2_32"]);
+  XCTAssertTrue([makefile containsString:@"BASE_LINK_LIBS := $(ARLEN_PLATFORM_LINK_DIRS) $$(gnustep-config --base-libs) -lcrypto -ldispatch $(ARLEN_PLATFORM_LINK_LIBS)"]);
   XCTAssertTrue([makefile containsString:@"XCTEST_LINK_LIBS := $(BASE_LINK_LIBS) -lXCTest"]);
   XCTAssertTrue([makefile containsString:@"UNIT_TEST_TARGET_NAME := $(notdir $(basename $(UNIT_TEST_BUNDLE)))"]);
   XCTAssertTrue([makefile containsString:@"INTEGRATION_TEST_TARGET_NAME := $(notdir $(basename $(INTEGRATION_TEST_BUNDLE)))"]);
+  XCTAssertTrue([makefile containsString:@"XCTEST_BUNDLE_RUNNER_TOOL := $(BUILD_DIR)/arlen-xctest-runner"]);
+  XCTAssertTrue([makefile containsString:@"PHASE24_WINDOWS_DB_SMOKE_TEST_BUNDLE := $(BUILD_DIR)/tests/ArlenPhase24WindowsDBSmokeTests.xctest"]);
+  XCTAssertTrue([makefile containsString:@"PHASE24_WINDOWS_RUNTIME_TEST_BUNDLE := $(BUILD_DIR)/tests/ArlenPhase24WindowsRuntimeParityTests.xctest"]);
   XCTAssertTrue([makefile containsString:@"define xctest_filter_args"]);
   XCTAssertTrue([makefile containsString:@"define xctest_runtime_env"]);
   XCTAssertTrue([makefile containsString:@"test-unit-filter: $(UNIT_TEST_BIN)"]);
@@ -154,6 +160,10 @@
   XCTAssertTrue([makefile containsString:@"LD_LIBRARY_PATH=\"$(ARLEN_XCTEST_LD_LIBRARY_PATH)$${LD_LIBRARY_PATH:+:$$LD_LIBRARY_PATH}\""]);
   XCTAssertTrue([makefile containsString:@"$(call xctest_filter_args,$(UNIT_TEST_TARGET_NAME))"]);
   XCTAssertTrue([makefile containsString:@"$(call xctest_filter_args,$(INTEGRATION_TEST_TARGET_NAME))"]);
+  XCTAssertTrue([makefile containsString:@"phase24-windows-runtime-tests: $(PHASE24_WINDOWS_RUNTIME_TEST_BIN) $(XCTEST_BUNDLE_RUNNER_TOOL)"]);
+  XCTAssertTrue([makefile containsString:@"phase24-windows-confidence: phase24-windows-db-smoke phase24-windows-runtime-tests"]);
+  XCTAssertTrue([makefile containsString:@"phase31-confidence:"]);
+  XCTAssertTrue([makefile containsString:@"bash ./tools/ci/run_phase31_confidence.sh"]);
 }
 
 - (void)testGNUmakefileDefinesFocusedPhase20ConfidenceLanes {
@@ -272,6 +282,8 @@
 
   XCTAssertTrue([makefile containsString:@"GNUSTEP_RESOLVER := $(ROOT_DIR)/tools/resolve_gnustep.sh"]);
   XCTAssertTrue([makefile containsString:@"GNUSTEP_SH ?= $(shell bash \"$(GNUSTEP_RESOLVER)\" 2>/dev/null || true)"]);
+  XCTAssertTrue([makefile containsString:@"ARLEN_WINDOWS_PREVIEW ?= 0"]);
+  XCTAssertTrue([makefile containsString:@"POSTGRESQL_INCLUDE_FLAGS := $(shell pkg-config --cflags-only-I libpq 2>/dev/null)"]);
   XCTAssertTrue([makefile containsString:@"OBJ_DIR := $(BUILD_DIR)/obj"]);
   XCTAssertTrue([makefile containsString:@"LIB_DIR := $(BUILD_DIR)/lib"]);
   XCTAssertTrue([makefile containsString:@"ARLEN_FRAMEWORK_LIB := $(LIB_DIR)/libArlenFramework.a"]);
@@ -298,6 +310,8 @@
 
   XCTAssertTrue([makefile containsString:
                               @"BUILD_FLAGS_SENTINEL_INPUT := GNUSTEP_SH=$(GNUSTEP_SH)|"
+                               "ARLEN_WINDOWS_PREVIEW=$(ARLEN_WINDOWS_PREVIEW)|"
+                               "POSTGRESQL_INCLUDE_FLAGS=$(POSTGRESQL_INCLUDE_FLAGS)|"
                                "ARC_REQUIRED_FLAG=$(ARC_REQUIRED_FLAG)|PIC_FLAG=$(PIC_FLAG)|"
                                "FEATURE_FLAGS=$(FEATURE_FLAGS)|THIRD_PARTY_FEATURE_FLAGS="
                                "$(THIRD_PARTY_FEATURE_FLAGS)|EXTRA_OBJC_FLAGS=$(EXTRA_OBJC_FLAGS)"]);
@@ -347,6 +361,7 @@
 
   XCTAssertTrue([cliSource containsString:@"static NSString *ResolveGNUstepScriptPath(void)"]);
   XCTAssertTrue([cliSource containsString:@"EnvValue(\"GNUSTEP_MAKEFILES\")"]);
+  XCTAssertTrue([cliSource containsString:@"@\"/clang64/share/GNUstep/Makefiles/GNUstep.sh\""]);
   XCTAssertTrue([cliSource containsString:@"gnustep-config --variable=GNUSTEP_MAKEFILES"]);
   XCTAssertTrue([cliSource containsString:@"dispatch_headers"]);
   XCTAssertFalse([cliSource containsString:@"Verify GNUstep installation and shell init: source /usr/GNUstep/System/Library/Makefiles/GNUstep.sh"]);
@@ -354,6 +369,10 @@
   XCTAssertTrue([sourceHelper containsString:@"resolve_gnustep.sh"]);
   XCTAssertTrue([sourceHelper containsString:@"export GNUSTEP_SH=\"$resolved_gnustep_sh\""]);
   XCTAssertTrue([sourceHelper containsString:@"source \"$resolved_gnustep_sh\""]);
+
+  NSString *resolverScript = [self readFile:[repoRoot stringByAppendingPathComponent:@"tools/resolve_gnustep.sh"]];
+  XCTAssertTrue([resolverScript containsString:@"clang64_gnustep_sh"]);
+  XCTAssertTrue([resolverScript containsString:@"/clang64/share/GNUstep/Makefiles/GNUstep.sh"]);
 }
 
 - (void)testPhase20FocusedRunnerScriptExecutesRepoNativeLaneTargets {

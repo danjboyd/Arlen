@@ -43,6 +43,55 @@ json_escape() {
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 default_framework_root="$(cd "$script_dir/../.." && pwd)"
 
+path_looks_like_windows_absolute() {
+  local path="$1"
+  [[ "$path" =~ ^[A-Za-z]:[\\/] ]] || [[ "$path" =~ ^\\\\ ]]
+}
+
+path_is_absolute() {
+  local path="$1"
+  [[ "$path" == /* ]] || path_looks_like_windows_absolute "$path"
+}
+
+resolve_compiled_binary() {
+  local candidate="$1"
+  if [[ -x "$candidate" ]]; then
+    printf '%s\n' "$candidate"
+    return 0
+  fi
+  if [[ "$candidate" != *.exe ]] && [[ -x "$candidate.exe" ]]; then
+    printf '%s\n' "$candidate.exe"
+    return 0
+  fi
+  return 1
+}
+
+copy_path_if_exists() {
+  local src="$1"
+  local dest="$2"
+  if [[ -e "$src" ]]; then
+    mkdir -p "$(dirname "$dest")"
+    cp -a "$src" "$dest"
+  fi
+}
+
+copy_compiled_binary_if_exists() {
+  local src_base="$1"
+  local dest_base="$2"
+  local resolved_src=""
+  if ! resolved_src="$(resolve_compiled_binary "$src_base" 2>/dev/null)"; then
+    return 1
+  fi
+
+  local resolved_dest="$dest_base"
+  if [[ "$resolved_src" == *.exe ]] && [[ "$resolved_dest" != *.exe ]]; then
+    resolved_dest="${resolved_dest}.exe"
+  fi
+  copy_path_if_exists "$resolved_src" "$resolved_dest"
+  printf '%s\n' "$resolved_dest"
+  return 0
+}
+
 app_root="$PWD"
 framework_root="$default_framework_root"
 releases_dir=""
@@ -404,29 +453,44 @@ fi
 
 mkdir -p "$release_dir/app" "$release_dir/framework" "$release_dir/metadata"
 
-copy_if_exists() {
-  local src="$1"
-  local dest="$2"
-  if [[ -e "$src" ]]; then
-    mkdir -p "$(dirname "$dest")"
-    cp -a "$src" "$dest"
-  fi
-}
-
 # Package app payload.
-copy_if_exists "$app_root/config" "$release_dir/app/config"
-copy_if_exists "$app_root/public" "$release_dir/app/public"
-copy_if_exists "$app_root/templates" "$release_dir/app/templates"
-copy_if_exists "$app_root/modules" "$release_dir/app/modules"
-copy_if_exists "$app_root/src" "$release_dir/app/src"
-copy_if_exists "$app_root/app_lite.m" "$release_dir/app/app_lite.m"
-copy_if_exists "$app_root/db/migrations" "$release_dir/app/db/migrations"
-copy_if_exists "$app_root/.boomhauer/build/boomhauer-app" "$release_dir/app/.boomhauer/build/boomhauer-app"
+copy_path_if_exists "$app_root/config" "$release_dir/app/config"
+copy_path_if_exists "$app_root/public" "$release_dir/app/public"
+copy_path_if_exists "$app_root/templates" "$release_dir/app/templates"
+copy_path_if_exists "$app_root/modules" "$release_dir/app/modules"
+copy_path_if_exists "$app_root/src" "$release_dir/app/src"
+copy_path_if_exists "$app_root/app_lite.m" "$release_dir/app/app_lite.m"
+copy_path_if_exists "$app_root/db/migrations" "$release_dir/app/db/migrations"
+
+packaged_runtime_binary="$release_dir/app/.boomhauer/build/boomhauer-app"
+if packaged_runtime_binary="$(copy_compiled_binary_if_exists "$app_root/.boomhauer/build/boomhauer-app" \
+  "$release_dir/app/.boomhauer/build/boomhauer-app" 2>/dev/null)"; then
+  :
+else
+  packaged_runtime_binary="$release_dir/app/.boomhauer/build/boomhauer-app"
+fi
 
 # Package runtime/tooling payload used by deploy scripts.
-copy_if_exists "$framework_root/bin" "$release_dir/framework/bin"
-copy_if_exists "$framework_root/build/boomhauer" "$release_dir/framework/build/boomhauer"
-copy_if_exists "$framework_root/build/arlen" "$release_dir/framework/build/arlen"
+copy_path_if_exists "$framework_root/bin" "$release_dir/framework/bin"
+packaged_framework_boomhauer="$release_dir/framework/build/boomhauer"
+if packaged_framework_boomhauer="$(copy_compiled_binary_if_exists "$framework_root/build/boomhauer" \
+  "$release_dir/framework/build/boomhauer" 2>/dev/null)"; then
+  :
+else
+  packaged_framework_boomhauer="$release_dir/framework/build/boomhauer"
+fi
+packaged_arlen_binary="$release_dir/framework/build/arlen"
+if packaged_arlen_binary="$(copy_compiled_binary_if_exists "$framework_root/build/arlen" \
+  "$release_dir/framework/build/arlen" 2>/dev/null)"; then
+  :
+else
+  packaged_arlen_binary="$release_dir/framework/build/arlen"
+fi
+copy_path_if_exists "$framework_root/tools/deploy/validate_operability.sh" \
+  "$release_dir/framework/tools/deploy/validate_operability.sh"
+packaged_propane="$release_dir/framework/bin/propane"
+packaged_jobs_worker="$release_dir/framework/bin/jobs-worker"
+packaged_operability_helper="$release_dir/framework/tools/deploy/validate_operability.sh"
 
 if [[ "$allow_missing_certification" != "1" ]]; then
   certification_source_dir="$(cd "$(dirname "$certification_manifest")" && pwd)"
@@ -448,6 +512,12 @@ RELEASE_CREATED_UTC=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 ARLEN_APP_ROOT=$release_dir/app
 ARLEN_FRAMEWORK_ROOT=$release_dir/framework
 ARLEN_RELEASE_MANIFEST=$release_dir/metadata/manifest.json
+ARLEN_RELEASE_RUNTIME_BINARY=$packaged_runtime_binary
+ARLEN_RELEASE_FRAMEWORK_BOOMHAUER=$packaged_framework_boomhauer
+ARLEN_RELEASE_ARLEN_BINARY=$packaged_arlen_binary
+ARLEN_RELEASE_PROPANE=$packaged_propane
+ARLEN_RELEASE_JOBS_WORKER=$packaged_jobs_worker
+ARLEN_RELEASE_OPERABILITY_PROBE_HELPER=$packaged_operability_helper
 ARLEN_RELEASE_CERTIFICATION_STATUS=$certification_status
 ARLEN_RELEASE_CERTIFICATION_MANIFEST=$certification_bundle_manifest
 ARLEN_JSON_PERFORMANCE_STATUS=$json_performance_status
@@ -455,13 +525,30 @@ ARLEN_JSON_PERFORMANCE_MANIFEST=$json_performance_bundle_manifest
 EOF
 
 python3 - "$release_dir" "$release_id" "$app_root" "$framework_root" "$certification_status" \
-  "$certification_bundle_manifest" "$json_performance_status" "$json_performance_bundle_manifest" <<'PY'
+  "$certification_bundle_manifest" "$json_performance_status" "$json_performance_bundle_manifest" \
+  "$packaged_runtime_binary" "$packaged_framework_boomhauer" "$packaged_arlen_binary" \
+  "$packaged_propane" "$packaged_jobs_worker" "$packaged_operability_helper" <<'PY'
 import json
 import os
 import sys
 from datetime import datetime, timezone
 
-release_dir, release_id, app_root, framework_root, certification_status, certification_manifest, json_status, json_manifest = sys.argv[1:9]
+(
+    release_dir,
+    release_id,
+    app_root,
+    framework_root,
+    certification_status,
+    certification_manifest,
+    json_status,
+    json_manifest,
+    runtime_binary,
+    framework_boomhauer,
+    arlen_binary,
+    propane_binary,
+    jobs_worker_binary,
+    operability_probe_helper,
+) = sys.argv[1:15]
 
 def rel(*parts):
     return os.path.join(*parts).replace(os.sep, "/")
@@ -486,10 +573,13 @@ manifest = {
     "paths": {
         "app_root": rel(release_dir, "app"),
         "framework_root": rel(release_dir, "framework"),
-        "runtime_binary": rel(release_dir, "app", ".boomhauer", "build", "boomhauer-app"),
+        "runtime_binary": runtime_binary,
         "migrations_dir": rel(release_dir, "app", "db", "migrations"),
-        "propane": rel(release_dir, "framework", "bin", "propane"),
-        "arlen": rel(release_dir, "framework", "build", "arlen"),
+        "boomhauer": framework_boomhauer,
+        "propane": propane_binary,
+        "jobs_worker": jobs_worker_binary,
+        "arlen": arlen_binary,
+        "operability_probe_helper": operability_probe_helper,
         "release_env": rel(release_dir, "metadata", "release.env"),
     },
     "health_contract": {
@@ -527,11 +617,11 @@ JSON performance status: $json_performance_status
 JSON performance manifest: $json_performance_bundle_manifest
 
 Run migrate step before switching traffic:
-  cd "$release_dir/app" && "$release_dir/framework/build/arlen" migrate --env production
+  cd "$release_dir/app" && "$packaged_arlen_binary" migrate --env production
 
 Run propane from this release:
   ARLEN_APP_ROOT="$release_dir/app" ARLEN_FRAMEWORK_ROOT="$release_dir/framework" \
-    "$release_dir/framework/bin/propane" --env production
+    "$packaged_propane" --env production
 EOF
 
 ln -sfn "$release_dir" "$releases_dir/latest-built"

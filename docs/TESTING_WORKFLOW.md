@@ -58,6 +58,22 @@ Phase 26 ORM-focused lanes are also available:
   - rerun the full Phase 26 bundle and regenerate
     `build/release_confidence/phase26/`
 
+Windows-focused preview lanes:
+
+- `make phase24-windows-db-smoke`
+  - focused PostgreSQL / ODBC loader smoke for MSYS2 `CLANG64`
+  - uses `arlen-xctest-runner` to load the XCTest bundle directly
+- `make phase24-windows-runtime-tests`
+  - Windows runtime/server parity coverage for `boomhauer`, `jobs-worker`, and
+    `propane`
+- `make phase24-windows-confidence`
+  - runs both Windows preview lanes and matches the CI preview entrypoint
+- `make phase31-confidence`
+  - runs packaged release smoke, packaged `deploy doctor --base-url`,
+    packaged `jobs-worker --once`, and the synthetic `.exe` manifest fallback
+    check
+  - writes artifacts under `build/release_confidence/phase31/`
+
 ## 2. Bug Report To Regression
 
 1. Reproduce the failure in the narrowest possible form.

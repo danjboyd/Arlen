@@ -1,0 +1,36 @@
+name: phase31-windows-preview
+
+on:
+  push:
+    branches:
+      - windows-clang64-integration
+      - main
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  windows-preview:
+    runs-on: [self-hosted, Windows, X64, arlen, msys2-clang64]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run Windows preview runtime parity lane
+        shell: powershell
+        run: |
+          powershell -ExecutionPolicy Bypass -File scripts\run_clang64.ps1 -InnerCommand "bash ./tools/ci/run_phase24_windows_preview.sh"
+
+      - name: Run Windows packaged release confidence lane
+        shell: powershell
+        run: |
+          powershell -ExecutionPolicy Bypass -File scripts\run_clang64.ps1 -InnerCommand "make phase31-confidence"
+
+      - name: Upload Windows preview artifacts
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase31-windows-preview-${{ github.run_id }}
+          path: |
+            build/phase24
+            build/release_confidence/phase31
+            build/tests

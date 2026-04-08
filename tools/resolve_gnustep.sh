@@ -2,6 +2,7 @@
 set -euo pipefail
 
 default_gnustep_sh="/usr/GNUstep/System/Library/Makefiles/GNUstep.sh"
+clang64_gnustep_sh="/clang64/share/GNUstep/Makefiles/GNUstep.sh"
 
 print_path() {
   printf '%s\n' "$1"
@@ -43,6 +44,11 @@ if command -v gnustep-config >/dev/null 2>&1; then
       exit 0
     fi
   fi
+fi
+
+if [[ -f "$clang64_gnustep_sh" ]]; then
+  print_path "$clang64_gnustep_sh"
+  exit 0
 fi
 
 print_path "$default_gnustep_sh"

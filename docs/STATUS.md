@@ -101,6 +101,91 @@ Last updated: 2026-04-08
   - extended `ALNPg` with centralized `libpq` candidate discovery so the data
     layer can probe Homebrew/macOS dynamic library locations instead of only
     Linux `.so` paths
+- Phase 31 is now complete (`31A-31H`) on `windows-clang64-integration`:
+  - added the repo-native `phase31-confidence` lane with packaged release
+    smoke, packaged `deploy doctor --base-url`, packaged `jobs-worker --once`,
+    and synthetic `.exe` fallback verification artifacts under
+    `build/release_confidence/phase31/`
+  - expanded `.github/workflows/phase24-windows-preview.yml` so the Windows
+    self-hosted preview runner now validates both `phase24-windows-confidence`
+    and `phase31-confidence`
+  - updated `tools/deploy/smoke_release.sh` to emit machine-readable results
+    and to validate operability through packaged helper paths from the active
+    release
+  - closed the Windows docs/support statement with an explicit preview claim:
+    MSYS2 `CLANG64` is the supported Windows preview workflow for runtime and
+    packaged deploy verification, while Linux remains the authoritative
+    production baseline
+  - next work resumes after the Windows closeout rather than inside Phase 31
+- Phase 31 `31A-31D` completed on `windows-clang64-integration`:
+  - audited the minimum Windows packaged-release contract and documented it in
+    `docs/WINDOWS_CLANG64.md`
+  - updated `tools/deploy/build_release.sh` so packaged releases copy the
+    actual compiled binaries in use, preserve `.exe` suffixes, and record
+    manifest/release-env paths for `arlen`, `boomhauer`, `propane`,
+    `jobs-worker`, the app runtime binary, and the operability helper
+  - updated `arlen deploy release` and `arlen deploy doctor` so packaged
+    Windows release roots resolve manifest-backed executables/helpers instead
+    of assuming Unix-only `build/*` filenames
+  - added integration coverage for packaged manifest path assertions and for
+    `deploy doctor` succeeding when a release only has `.exe` binaries behind
+    Unix-style manifest base names
+  - remaining Phase 31 work is now `31E-31H`:
+    packaged Windows smoke/confidence lane, preview CI expansion, deployment
+    docs closeout, and final support statement
+  - suggested next restart document: `docs/PHASE31_ROADMAP.md`
+
+## Leaving Off (2026-04-07)
+
+- Windows integration branch checkpoint after `857d706`
+  (`Continue Phase 24 windows runtime reintegration`):
+  - branch: `windows-clang64-integration`
+  - completed the main-based Windows runtime/server reintegration slice:
+    bootstrap wrappers, GNUstep `/clang64` resolution, `ALNPlatform`,
+    Windows-aware `boomhauer` / `jobs-worker` / `propane`, Windows transport
+    loaders, transplanted `ALNHTTPServer` portability, runtime parity tests,
+    and `.github/workflows/phase24-windows-preview.yml`
+  - verified locally with:
+    `source ./tools/source_gnustep_env.sh && make arlen build-tests phase24-windows-db-smoke phase24-windows-runtime-tests`
+    `source ./tools/source_gnustep_env.sh && make phase24-windows-confidence`
+    `source ./tools/source_gnustep_env.sh && make test-unit-filter TEST=BuildPolicyTests/testGNUmakefileDeclaresTestingAndConfidenceEntryPoints`
+  - remaining Windows work is deferred into Phase 31:
+    packaged runtime binary resolution, Windows release artifact packaging,
+    deploy doctor/release parity, packaged-release confidence lanes, preview CI
+    expansion, and deployment-doc closeout
+  - next restart document: `docs/PHASE31_ROADMAP.md`
+- Started a `main`-based Phase 24 reintegration pass from the historical
+  `origin/windows/clang64` branch:
+  - added CLANG64 entry wrappers
+    `scripts/run_clang64.ps1` and `scripts/run_clang64.sh`
+  - extended GNUstep resolution to recognize `/clang64`
+  - added `ALNPlatform` as a narrow Windows portability seam for
+    time/process/path helpers
+  - forward-ported Windows-aware shell/runtime behavior into
+    `bin/boomhauer`, `bin/jobs-worker`, and `bin/propane`
+  - forward-ported Windows transport loader support into `ALNPg` and
+    `ALNMSSQL`
+  - transplanted the Windows socket/runtime portability layer into
+    `ALNHTTPServer`
+  - added `arlen-xctest-runner`, the focused
+    `phase24-windows-db-smoke` transport loader lane, the
+    `phase24-windows-runtime-tests` parity suite, and the aggregated
+    `phase24-windows-confidence` lane
+  - added the main-based Windows preview workflow
+    `.github/workflows/phase24-windows-preview.yml`
+  - recorded the reintegration boundary in
+    `docs/PHASE24_ROADMAP.md` and `docs/WINDOWS_CLANG64.md`
+- Fixed the packaged `deploy doctor --base-url` regression reported from
+  `OwnerConnect`:
+  - release packaging now includes
+    `framework/tools/deploy/validate_operability.sh`
+  - release manifests now record `paths.operability_probe_helper`
+  - `deploy doctor` now emits a deterministic missing-helper error instead of a
+    shell-level “No such file or directory” failure when the helper is absent
+  - added a focused deployment integration regression that runs
+    `deploy doctor --base-url` against a packaged release server
+  - recorded the upstream reconciliation in
+    `docs/OWNERCONNECT_REPORT_RECONCILIATION_2026-04-07.md`
 - Completed Phase 29 and delivered `29J-29L`:
   - reserved `/healthz`, `/readyz`, `/livez`, `/metrics`, and `/clusterz`
     ahead of app routing so catch-all routes cannot shadow deploy/operability
@@ -155,6 +240,7 @@ Last updated: 2026-04-08
   - `README.md`
   - `docs/README.md`
   - `docs/STATUS.md`
+  - `docs/PHASE31_ROADMAP.md`
 - Verification completed at this checkpoint:
   - `./bin/test --smoke-only`
   - manual Apple runtime smoke:

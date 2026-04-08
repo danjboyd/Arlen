@@ -1,13 +1,19 @@
 #import "ALNServices.h"
+#import "ALNDataCompat.h"
 #import "ALNJSONSerialization.h"
 
 #include <fcntl.h>
 #include <errno.h>
-#include <netdb.h>
 #include <string.h>
-#include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+#if defined(_WIN32)
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#else
+#include <netdb.h>
+#include <sys/socket.h>
+#endif
 #include <unistd.h>
 
 NSString *const ALNServiceErrorDomain = @"Arlen.Services.Error";
@@ -165,6 +171,25 @@ static BOOL ALNHardenRegularFilesInDirectory(NSFileManager *fileManager,
 }
 
 static NSData *ALNReadRegularFileNoFollow(NSString *path, NSError **error) {
+#if defined(_WIN32)
+  NSDictionary *attributes = [[NSFileManager defaultManager] attributesOfItemAtPath:path error:error];
+  NSString *fileType = [attributes objectForKey:NSFileType];
+  if (attributes == nil) {
+    return nil;
+  }
+  if (![fileType isEqualToString:NSFileTypeRegular]) {
+    if (error != NULL) {
+      *error = [NSError errorWithDomain:ALNServiceErrorDomain
+                                   code:5
+                               userInfo:@{
+                                 NSLocalizedDescriptionKey : @"expected regular file",
+                                 NSFilePathErrorKey : path ?: @"",
+                               }];
+    }
+    return nil;
+  }
+  return ALNDataReadFromFile(path, 0, error);
+#else
   const char *filesystemPath = [path fileSystemRepresentation];
   if (filesystemPath == NULL) {
     if (error != NULL) {
@@ -246,6 +271,7 @@ static NSData *ALNReadRegularFileNoFollow(NSString *path, NSError **error) {
   }
 
   return [NSData dataWithData:data];
+#endif
 }
 
 static BOOL ALNWriteAllToFileDescriptor(int fd, const void *bytes, NSUInteger length) {
@@ -283,6 +309,29 @@ static BOOL ALNWriteDataAtomicallyWithMode(NSData *data,
     return NO;
   }
 
+#if defined(_WIN32)
+  if (![payload writeToFile:path atomically:YES]) {
+    if (error != NULL) {
+      *error = [NSError errorWithDomain:ALNServiceErrorDomain
+                                   code:6
+                               userInfo:@{
+                                 NSLocalizedDescriptionKey : @"file payload could not be written",
+                                 NSFilePathErrorKey : path ?: @"",
+                               }];
+    }
+    return NO;
+  }
+  NSError *permissionsError = nil;
+  if (![[NSFileManager defaultManager] setAttributes:ALNPermissionsAttributes(mode)
+                                        ofItemAtPath:path
+                                               error:&permissionsError]) {
+    if (error != NULL) {
+      *error = permissionsError;
+    }
+    return NO;
+  }
+  return YES;
+#else
   NSString *templatePath = [directory stringByAppendingPathComponent:@".arlen-write-XXXXXX"];
   char *templateBuffer = strdup([templatePath fileSystemRepresentation]);
   if (templateBuffer == NULL) {
@@ -340,6 +389,7 @@ cleanup:
   }
   free(templateBuffer);
   return ok;
+#endif
 }
 
 static NSArray *ALNNormalizeStringArray(NSArray *values) {
@@ -393,11 +443,17 @@ static BOOL ALNPathIsSymbolicLink(NSString *path) {
   if (![path isKindOfClass:[NSString class]] || [path length] == 0) {
     return NO;
   }
+#if defined(_WIN32)
+  NSDictionary *attributes = [[NSFileManager defaultManager] attributesOfItemAtPath:path error:NULL];
+  NSString *fileType = [attributes objectForKey:NSFileType];
+  return [fileType isEqualToString:NSFileTypeSymbolicLink];
+#else
   struct stat info;
   if (lstat([path fileSystemRepresentation], &info) != 0) {
     return NO;
   }
   return S_ISLNK(info.st_mode);
+#endif
 }
 
 static NSString *ALNNormalizeLocale(NSString *locale) {
@@ -1093,7 +1149,7 @@ static ALNJobEnvelope *ALNJobEnvelopeFromDictionary(id value) {
 }
 
 - (NSDictionary *)readState:(NSError **)error {
-  NSData *payload = [NSData dataWithContentsOfFile:self.storagePath options:0 error:error];
+  NSData *payload = ALNDataReadFromFile(self.storagePath, 0, error);
   if (payload == nil) {
     if (error != NULL && *error == nil) {
       *error = ALNServiceError(124, @"job adapter state could not be read", nil);

@@ -6,6 +6,7 @@
 #import <string.h>
 #import <strings.h>
 
+#import "ALNDataCompat.h"
 #import "ArlenServer.h"
 #import "ALNJSONSerialization.h"
 
@@ -17,6 +18,17 @@ static NSString *EnvString(const char *name) {
     return nil;
   }
   return [NSString stringWithUTF8String:raw];
+}
+
+static BOOL SetEnvIfMissing(const char *name, const char *value) {
+  if (name == NULL || value == NULL || getenv(name) != NULL) {
+    return YES;
+  }
+#if defined(_WIN32)
+  return (_putenv_s(name, value) == 0);
+#else
+  return (setenv(name, value, 0) == 0);
+#endif
 }
 
 static BOOL EnvFlagEnabled(const char *name) {
@@ -464,9 +476,11 @@ static NSString *BenchmarkBlobFilePath(NSUInteger size) {
   NSString *path =
       [cacheDirectory stringByAppendingPathComponent:[NSString stringWithFormat:@"blob-%lu.bin",
                                                                                 (unsigned long)size]];
-  struct stat existingStat;
-  if (stat([path fileSystemRepresentation], &existingStat) == 0 && S_ISREG(existingStat.st_mode) &&
-      (unsigned long long)existingStat.st_size == (unsigned long long)size) {
+  NSDictionary *existingAttributes = [[NSFileManager defaultManager] attributesOfItemAtPath:path error:NULL];
+  NSString *existingType = [existingAttributes objectForKey:NSFileType];
+  NSNumber *existingSize = [existingAttributes objectForKey:NSFileSize];
+  if ([existingType isEqualToString:NSFileTypeRegular] &&
+      [existingSize unsignedLongLongValue] == (unsigned long long)size) {
     return path;
   }
 
@@ -505,8 +519,11 @@ static BOOL BenchmarkRenderBlobResponse(ALNRequest *request, ALNResponse *respon
       return YES;
     }
 
-    struct stat fileStat;
-    if (stat([path fileSystemRepresentation], &fileStat) != 0 || !S_ISREG(fileStat.st_mode)) {
+    NSDictionary *fileAttributes = [[NSFileManager defaultManager] attributesOfItemAtPath:path error:NULL];
+    NSString *fileType = [fileAttributes objectForKey:NSFileType];
+    NSNumber *fileSize = [fileAttributes objectForKey:NSFileSize];
+    NSDate *modificationDate = [fileAttributes objectForKey:NSFileModificationDate];
+    if (![fileType isEqualToString:NSFileTypeRegular] || fileSize == nil) {
       response.statusCode = 500;
       [response setTextBody:@"blob cache stat failed\n"];
       [response setHeader:@"Content-Type" value:@"text/plain; charset=utf-8"];
@@ -518,17 +535,11 @@ static BOOL BenchmarkRenderBlobResponse(ALNRequest *request, ALNResponse *respon
     [response setHeader:@"Content-Type" value:@"application/octet-stream"];
     [response setHeader:@"Cache-Control" value:@"no-store"];
     response.fileBodyPath = path;
-    response.fileBodyLength = (unsigned long long)fileStat.st_size;
-    response.fileBodyDevice = (unsigned long long)fileStat.st_dev;
-    response.fileBodyInode = (unsigned long long)fileStat.st_ino;
-    response.fileBodyMTimeSeconds = (long long)fileStat.st_mtime;
-#if defined(__APPLE__) || defined(__MACH__)
-    response.fileBodyMTimeNanoseconds = fileStat.st_mtimespec.tv_nsec;
-#elif defined(__linux__)
-    response.fileBodyMTimeNanoseconds = fileStat.st_mtim.tv_nsec;
-#else
+    response.fileBodyLength = [fileSize unsignedLongLongValue];
+    response.fileBodyDevice = 0;
+    response.fileBodyInode = 0;
+    response.fileBodyMTimeSeconds = (long long)[modificationDate timeIntervalSince1970];
     response.fileBodyMTimeNanoseconds = 0;
-#endif
     response.committed = YES;
     return YES;
   }
@@ -1097,7 +1108,7 @@ static NSString *ReadTextFile(NSString *path) {
     return content;
   }
 
-  NSData *data = [NSData dataWithContentsOfFile:path options:0 error:nil];
+  NSData *data = ALNDataReadFromFile(path, 0, nil);
   if (data == nil) {
     return @"";
   }
@@ -2077,8 +2088,8 @@ int main(int argc, const char *argv[]) {
       }
     }
 
-    if (BenchmarkProfileEnabled() && getenv("ARLEN_METRICS_ENABLED") == NULL) {
-      setenv("ARLEN_METRICS_ENABLED", "0", 0);
+    if (BenchmarkProfileEnabled()) {
+      (void)SetEnvIfMissing("ARLEN_METRICS_ENABLED", "0");
     }
 
     BOOL buildErrorMode = ([EnvString("ARLEN_BOOMHAUER_BUILD_ERROR_FILE") length] > 0);

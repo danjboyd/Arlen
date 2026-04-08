@@ -55,6 +55,7 @@
 #import "Support/ALNLive.h"
 #import "Support/ALNMetrics.h"
 #import "Support/ALNPerf.h"
+#import "Support/ALNPlatform.h"
 #import "Support/ALNAuth.h"
 #import "Support/ALNAuthProviderPresets.h"
 #import "Support/ALNAuthProviderSessionBridge.h"

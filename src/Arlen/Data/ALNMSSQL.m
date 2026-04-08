@@ -4,10 +4,15 @@
 #import "ALNMSSQLDialect.h"
 #import "ALNSQLBuilder.h"
 
-#import <dlfcn.h>
+#import <dispatch/dispatch.h>
 #import <stdint.h>
 #import <stdlib.h>
 #import <string.h>
+#if defined(_WIN32)
+#include <windows.h>
+#else
+#include <dlfcn.h>
+#endif
 
 #if __has_include(<sql.h>) && __has_include(<sqlext.h>)
 #import <sql.h>
@@ -420,8 +425,84 @@ static SQLRETURN (*ALNSQLGetDiagRec)(SQLSMALLINT,
 static SQLRETURN (*ALNSQLSetConnectAttr)(SQLHDBC, SQLINTEGER, SQLPOINTER, SQLINTEGER) = NULL;
 static SQLRETURN (*ALNSQLEndTran)(SQLSMALLINT, SQLHANDLE, SQLSMALLINT) = NULL;
 
+#if defined(_WIN32)
+static NSString *ALNMSSQLODBCLoaderLastError(void) {
+  DWORD errorCode = GetLastError();
+  if (errorCode == 0) {
+    return @"unknown Windows loader error";
+  }
+
+  char *messageBuffer = NULL;
+  DWORD flags = FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM |
+                FORMAT_MESSAGE_IGNORE_INSERTS;
+  DWORD length = FormatMessageA(flags,
+                                NULL,
+                                errorCode,
+                                0,
+                                (LPSTR)&messageBuffer,
+                                0,
+                                NULL);
+  if (length == 0 || messageBuffer == NULL) {
+    return [NSString stringWithFormat:@"Windows loader error %lu",
+                                      (unsigned long)errorCode];
+  }
+
+  while (length > 0 &&
+         (messageBuffer[length - 1] == '\r' || messageBuffer[length - 1] == '\n')) {
+    messageBuffer[length - 1] = '\0';
+    length -= 1;
+  }
+  NSString *message =
+      [NSString stringWithUTF8String:messageBuffer] ?: @"unknown Windows loader error";
+  LocalFree(messageBuffer);
+  return message;
+}
+
+static void *ALNOpenODBCCandidate(const char *candidate) {
+  if (candidate == NULL || candidate[0] == '\0') {
+    return NULL;
+  }
+  return (void *)LoadLibraryA(candidate);
+}
+
+static void *ALNLookupODBCSymbol(void *handle, const char *symbolName) {
+  return (handle != NULL && symbolName != NULL)
+             ? (void *)GetProcAddress((HMODULE)handle, symbolName)
+             : NULL;
+}
+
+static void ALNCloseODBCHandle(void *handle) {
+  if (handle != NULL) {
+    FreeLibrary((HMODULE)handle);
+  }
+}
+#else
+static NSString *ALNMSSQLODBCLoaderLastError(void) {
+  const char *dlError = dlerror();
+  return [NSString stringWithUTF8String:(dlError != NULL) ? dlError : "unknown dynamic loader error"] ?:
+         @"unknown dynamic loader error";
+}
+
+static void *ALNOpenODBCCandidate(const char *candidate) {
+  if (candidate == NULL || candidate[0] == '\0') {
+    return NULL;
+  }
+  return dlopen(candidate, RTLD_LAZY | RTLD_LOCAL);
+}
+
+static void *ALNLookupODBCSymbol(void *handle, const char *symbolName) {
+  return (handle != NULL && symbolName != NULL) ? dlsym(handle, symbolName) : NULL;
+}
+
+static void ALNCloseODBCHandle(void *handle) {
+  if (handle != NULL) {
+    dlclose(handle);
+  }
+}
+#endif
+
 static BOOL ALNMSSQLBindODBCSymbol(void **target, void *handle, const char *symbolName) {
-  *target = dlsym(handle, symbolName);
+  *target = ALNLookupODBCSymbol(handle, symbolName);
   return (*target != NULL);
 }
 
@@ -450,15 +531,28 @@ static BOOL ALNMSSQLLoadODBC(NSError **error) {
       return NO;
     }
 
+    const char *envCandidate = getenv("ARLEN_ODBC_LIBRARY");
+#if defined(_WIN32)
     const char *candidates[] = {
+      envCandidate,
+      "C:/msys64/clang64/bin/libodbc-2.dll",
+      "C:/msys64/clang64/bin/libodbc.dll",
+      "odbc32.dll",
+      "libodbc-2.dll",
+      "libodbc.dll",
+    };
+#else
+    const char *candidates[] = {
+      envCandidate,
       "/usr/lib/x86_64-linux-gnu/libodbc.so.2",
       "libodbc.so.2",
       "libodbc.so",
     };
+#endif
     size_t candidateCount = sizeof(candidates) / sizeof(candidates[0]);
     void *handle = NULL;
     for (size_t idx = 0; idx < candidateCount; idx++) {
-      handle = dlopen(candidates[idx], RTLD_LAZY | RTLD_LOCAL);
+      handle = ALNOpenODBCCandidate(candidates[idx]);
       if (handle != NULL) {
         break;
       }
@@ -493,10 +587,10 @@ static BOOL ALNMSSQLLoadODBC(NSError **error) {
     ok = ok && ALNMSSQLBindODBCSymbol((void **)&ALNSQLSetConnectAttr, handle, "SQLSetConnectAttr");
     ok = ok && ALNMSSQLBindODBCSymbol((void **)&ALNSQLEndTran, handle, "SQLEndTran");
     if (!ok) {
-      const char *dlError = dlerror();
       gODBCLoadError =
-          [NSString stringWithFormat:@"required ODBC symbols missing: %s", dlError ?: "unknown"];
-      dlclose(handle);
+          [NSString stringWithFormat:@"required ODBC symbols missing: %@",
+                                     ALNMSSQLODBCLoaderLastError()];
+      ALNCloseODBCHandle(handle);
       if (error != NULL) {
         *error = ALNMSSQLMakeError(ALNMSSQLErrorTransportUnavailable,
                                    @"failed to load ODBC transport",

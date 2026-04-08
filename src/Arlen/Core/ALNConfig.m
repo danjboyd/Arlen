@@ -1,7 +1,13 @@
 #import "ALNConfig.h"
+#import "ALNDataCompat.h"
 #import "ALNModuleSystem.h"
 
+#if defined(_WIN32)
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#else
 #import <arpa/inet.h>
+#endif
 #import <stdlib.h>
 
 static NSString *const ALNConfigErrorDomain = @"Arlen.Config.Error";
@@ -26,7 +32,7 @@ static NSDictionary *ALNLoadPlist(NSString *path, NSError **error) {
     return @{};
   }
 
-  NSData *data = [NSData dataWithContentsOfFile:path options:0 error:error];
+  NSData *data = ALNDataReadFromFile(path, 0, error);
   if (data == nil) {
     return nil;
   }

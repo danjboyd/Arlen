@@ -69,6 +69,7 @@ toolchain env directly for the Linux/GNUstep path. On macOS, use
 - [Propane Manager](PROPANE.md): production process manager and propane accessories.
 - [Release Process](RELEASE_PROCESS.md): semantic versioning, deprecations, and release checklist.
 - [Testing Workflow](TESTING_WORKFLOW.md): focused contributor lanes for turning bug reports into regressions.
+- [Windows CLANG64 Preview](WINDOWS_CLANG64.md): current `main`-branch Windows bootstrap, packaged-release preview contract, and support statement.
 
 ## Reference
 
@@ -84,6 +85,7 @@ toolchain env directly for the Linux/GNUstep path. On macOS, use
 - [Session Handoff (2026-04-03)](SESSION_HANDOFF_2026-04-03.md): Phase 28 closeout checkpoint covering `28I-28L`, the live reference server, and the final verification set.
 - [Session Handoff (2026-04-02)](SESSION_HANDOFF_2026-04-02.md): historical Phase 28 pause point after shipping `28E-28H` and the React reference workspace.
 - [OwnerConnect Report Reconciliation (2026-04-02)](OWNERCONNECT_REPORT_RECONCILIATION_2026-04-02.md): upstream status note for the Dataverse polymorphic-lookup codegen bug reported from `OwnerConnect`.
+- [OwnerConnect Report Reconciliation (2026-04-07)](OWNERCONNECT_REPORT_RECONCILIATION_2026-04-07.md): upstream closure note for the packaged `deploy doctor --base-url` release-helper bug and current deploy-gap assessment reported from `OwnerConnect`.
 - [Platform Report Reconciliation (2026-03-31)](PLATFORM_REPORT_RECONCILIATION_2026-03-31.md): upstream closure note for the managed-GNUstep bootstrap bug reported from `iep-platform`.
 - [Session Handoff (2026-03-27)](SESSION_HANDOFF_2026-03-27.md): historical pause point before the Phase 22 closeout.
 - [Documentation Policy](DOCUMENTATION_POLICY.md): docs standards and review checklist.
@@ -91,11 +93,13 @@ toolchain env directly for the Linux/GNUstep path. On macOS, use
 - [Phase 21 Roadmap](PHASE21_ROADMAP.md): completed public-release test robustness pass.
 - [Phase 22 Roadmap](PHASE22_ROADMAP.md): completed documentation cleanup pass for newcomer-first onboarding and docs quality closeout.
 - [Phase 23 Roadmap](PHASE23_ROADMAP.md): completed Dataverse integration phase.
+- [Phase 24 Roadmap](PHASE24_ROADMAP.md): imported Windows CLANG64 roadmap and current `main` reintegration order.
 - [Phase 25 Roadmap](PHASE25_ROADMAP.md): completed live UI baseline plus stream/recovery/adversarial hardening through `25L`.
 - [Phase 26 Roadmap](PHASE26_ROADMAP.md): completed optional ORM phase plus Dataverse ORM tail work.
 - [Phase 27 Roadmap](PHASE27_ROADMAP.md): completed search best-in-class phase; `27A-27L` landed on 2026-04-01 and the audited `27E-27L` closeout landed on 2026-04-02 for authoritative Meilisearch/OpenSearch behavior, streamed rebuilds, policy-scoped search semantics, and fail-closed confidence artifacts.
 - [Phase 28 Roadmap](PHASE28_ROADMAP.md): completed descriptor-first React/TypeScript ORM interop phase; `28A-28L` closed on 2026-04-03 for generated TypeScript models, validators, query/resource/module metadata, typed transport, optional React integrations, live verification lanes, and confidence/docs closeout on top of ArlenORM plus route/OpenAPI contracts.
 - [Phase 29 Roadmap](PHASE29_ROADMAP.md): completed deploy product phase delivering first-class `arlen deploy` orchestration, release metadata normalization, reserved operability probes, deploy-focused diagnostics, and `phase29-confidence`.
+- [Phase 31 Roadmap](PHASE31_ROADMAP.md): completed Windows release/deployment closeout after the main-based Phase 24 runtime reintegration; Phase 30 is intentionally unused.
 - [Combined Roadmap Index (Historical Aggregate)](PHASE2_PHASE3_ROADMAP.md)
 - [Phase 1 Spec](PHASE1_SPEC.md)
 - [Arlen CLI Spec](ARLEN_CLI_SPEC.md)
