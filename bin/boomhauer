@@ -11,15 +11,21 @@ restarting the server when files change and rebuilding only when build inputs
 change.
 
 Options:
+  --host <addr>  Bind the server to a specific host/interface
+  --port <port>  Override the configured listen port
+  --env <env>    Run with the given app environment
   --watch        Enable watch mode (default)
   --no-watch     Disable watch mode
   --once         Serve one request and exit (disables watch)
   --prepare-only Compile app/server and exit without starting it
+  --print-routes Build artifacts if needed, then print the route table
   --help, -h     Show this help
 
 Environment:
   ARLEN_APP_ROOT         App root to run (default: current directory)
   ARLEN_FRAMEWORK_ROOT   Arlen framework root (auto-detected from script path)
+  ARLEN_HOST             Default bind host when --host is not passed
+  ARLEN_PORT             Default listen port when --port is not passed
 USAGE
 }
 
@@ -229,6 +235,13 @@ if aln_platform_is_macos; then
     apple_child_pid=""
   }
 
+  apple_stop_requested=0
+
+  apple_on_signal() {
+    apple_stop_requested=1
+    apple_stop_child
+  }
+
   apple_prepare_binary() {
     if [[ $is_app_root -eq 0 ]]; then
       bash "$framework_root/bin/build-apple" --with-boomhauer >/dev/null
@@ -269,15 +282,20 @@ if aln_platform_is_macos; then
     apple_run_once
   fi
 
-  trap apple_stop_child INT TERM EXIT
+  trap apple_on_signal INT TERM
+  trap apple_stop_child EXIT
 
   apple_compiled_binary="$(apple_prepare_binary)"
   echo "boomhauer: watching $app_root"
   apple_last_fingerprint="$(apple_runtime_fingerprint)"
   apple_start_child
 
-  while true; do
+  while [[ $apple_stop_requested -eq 0 ]]; do
     sleep 1
+
+    if [[ $apple_stop_requested -eq 1 ]]; then
+      break
+    fi
 
     if [[ -n "$apple_child_pid" ]] && ! kill -0 "$apple_child_pid" >/dev/null 2>&1; then
       set +e
@@ -295,14 +313,23 @@ if aln_platform_is_macos; then
     apple_last_fingerprint="$apple_current_fingerprint"
     echo "boomhauer: change detected, rebuilding..."
 
+    if [[ $apple_stop_requested -eq 1 ]]; then
+      break
+    fi
     if next_binary="$(apple_prepare_binary)"; then
+      if [[ $apple_stop_requested -eq 1 ]]; then
+        break
+      fi
       apple_compiled_binary="$next_binary"
       apple_stop_child
       apple_start_child
     else
-      echo "boomhauer: Apple rebuild failed; keeping the previous server process running if available" >&2
+      if [[ $apple_stop_requested -eq 0 ]]; then
+        echo "boomhauer: Apple rebuild failed; keeping the previous server process running if available" >&2
+      fi
     fi
   done
+  exit 0
 fi
 
 gnustep_sh="$(bash "$framework_root/tools/resolve_gnustep.sh" 2>/dev/null || true)"
