@@ -1078,9 +1078,7 @@ static NSDate *ALNPgUTCDate(NSInteger year,
   }
 
   NSDateComponents *normalized =
-      [calendar components:(NSYearCalendarUnit | NSMonthCalendarUnit | NSDayCalendarUnit |
-                            NSHourCalendarUnit | NSMinuteCalendarUnit | NSSecondCalendarUnit)
-                  fromDate:date];
+      [calendar components:ALNPlatformCalendarDateTimeUnitMask() fromDate:date];
   if (normalized.year != year || normalized.month != month || normalized.day != day ||
       normalized.hour != hour || normalized.minute != minute || normalized.second != second) {
     return nil;

@@ -1,10 +1,9 @@
 #import "ALNOIDCClient.h"
 
-#import <openssl/bn.h>
 #import <openssl/evp.h>
-#import <openssl/rsa.h>
 
 #import "ALNAuth.h"
+#import "ALNCryptoCompat.h"
 #import "ALNJSONSerialization.h"
 #import "ALNSecurityPrimitives.h"
 
@@ -264,30 +263,11 @@ static EVP_PKEY *ALNOIDCNewRSAPublicKeyFromJWK(NSDictionary *jwk, NSError **erro
     return NULL;
   }
 
-  BIGNUM *modulus = BN_bin2bn([modulusData bytes], (int)[modulusData length], NULL);
-  BIGNUM *exponent = BN_bin2bn([exponentData bytes], (int)[exponentData length], NULL);
-  RSA *rsa = RSA_new();
-  EVP_PKEY *pkey = NULL;
-
-  if (modulus == NULL || exponent == NULL || rsa == NULL ||
-      RSA_set0_key(rsa, modulus, exponent, NULL) != 1) {
-    BN_free(modulus);
-    BN_free(exponent);
-    RSA_free(rsa);
+  EVP_PKEY *pkey = ALNCryptoCreateRSAPublicKeyFromModulusExponent(modulusData, exponentData);
+  if (pkey == NULL) {
     if (error != NULL) {
       *error = ALNOIDCClientError(ALNOIDCClientErrorJWKMalformed,
                                   @"Failed constructing RSA verification key from JWK");
-    }
-    return NULL;
-  }
-
-  pkey = EVP_PKEY_new();
-  if (pkey == NULL || EVP_PKEY_assign_RSA(pkey, rsa) != 1) {
-    EVP_PKEY_free(pkey);
-    RSA_free(rsa);
-    if (error != NULL) {
-      *error = ALNOIDCClientError(ALNOIDCClientErrorJWKMalformed,
-                                  @"Failed assigning RSA key material for verification");
     }
     return NULL;
   }

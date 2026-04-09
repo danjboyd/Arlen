@@ -147,7 +147,6 @@ link_flags=(
   -L"$openssl_prefix/lib"
   -framework Foundation
   -framework CoreFoundation
-  -lobjc
   -lcrypto
 )
 

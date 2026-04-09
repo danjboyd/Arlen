@@ -362,7 +362,12 @@ static NSString *ALNMSSQLValidatedSavepointName(NSString *name, NSError **error)
                                             NSError **error))block
                             error:(NSError **)error {
   (void)block;
-  return [self withTransaction:nil error:error];
+  return [self withTransaction:^BOOL(ALNMSSQLConnection *connection, NSError **transactionError) {
+    (void)connection;
+    (void)transactionError;
+    return NO;
+  }
+                           error:error];
 }
 
 @end

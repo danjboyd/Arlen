@@ -1,90 +1,32 @@
 #import <Foundation/Foundation.h>
 #import <XCTest/XCTest.h>
 
-#import <openssl/bn.h>
 #import <openssl/evp.h>
 #import <openssl/pem.h>
-#import <openssl/rsa.h>
 
 #import "ALNAuthProviderPresets.h"
+#import "ALNCryptoCompat.h"
 #import "ALNOIDCClient.h"
 #import "ALNSecurityPrimitives.h"
 
 static NSDictionary *OIDCTestRSAKeyMaterial(NSString *kid) {
   NSMutableDictionary *material = [NSMutableDictionary dictionary];
-  BIGNUM *exponent = BN_new();
-  RSA *rsa = RSA_new();
-  EVP_PKEY *privateKey = NULL;
-  BIO *privateBIO = NULL;
-  const BIGNUM *nValue = NULL;
-  const BIGNUM *eValue = NULL;
-  char *privateBuffer = NULL;
-
-  if (exponent == NULL || rsa == NULL || BN_set_word(exponent, RSA_F4) != 1 ||
-      RSA_generate_key_ex(rsa, 2048, exponent, NULL) != 1) {
-    BN_free(exponent);
-    RSA_free(rsa);
-    return material;
-  }
-
-  RSA_get0_key(rsa, &nValue, &eValue, NULL);
-  if (nValue == NULL || eValue == NULL) {
-    BN_free(exponent);
-    RSA_free(rsa);
-    return material;
-  }
-
-  NSData *modulus = [NSMutableData dataWithLength:(NSUInteger)BN_num_bytes(nValue)];
-  NSData *exponentData = [NSMutableData dataWithLength:(NSUInteger)BN_num_bytes(eValue)];
-  BN_bn2bin(nValue, (unsigned char *)[(NSMutableData *)modulus mutableBytes]);
-  BN_bn2bin(eValue, (unsigned char *)[(NSMutableData *)exponentData mutableBytes]);
-
-  privateKey = EVP_PKEY_new();
-  if (privateKey == NULL || EVP_PKEY_assign_RSA(privateKey, rsa) != 1) {
-    EVP_PKEY_free(privateKey);
-    BN_free(exponent);
-    RSA_free(rsa);
-    return material;
-  }
-  rsa = NULL;
-
-  privateBIO = BIO_new(BIO_s_mem());
-  if (privateBIO == NULL ||
-      PEM_write_bio_PrivateKey(privateBIO, privateKey, NULL, NULL, 0, NULL, NULL) != 1) {
-    BIO_free(privateBIO);
-    EVP_PKEY_free(privateKey);
-    BN_free(exponent);
-    return material;
-  }
-
-  long privateLength = BIO_get_mem_data(privateBIO, &privateBuffer);
-  NSString *privateKeyPEM =
-      (privateBuffer != NULL && privateLength > 0)
-          ? [[NSString alloc] initWithBytes:privateBuffer
-                                     length:(NSUInteger)privateLength
-                                   encoding:NSUTF8StringEncoding]
-          : nil;
+  EVP_PKEY *privateKey = ALNCryptoGenerateRSAKey(2048);
+  NSString *privateKeyPEM = ALNCryptoCopyPEMStringForPrivateKey(privateKey);
+  NSDictionary *jwk = ALNCryptoCopyRSAJWK(privateKey, kid);
   if ([privateKeyPEM length] == 0) {
-    BIO_free(privateBIO);
     EVP_PKEY_free(privateKey);
-    BN_free(exponent);
+    return material;
+  }
+  if (![jwk isKindOfClass:[NSDictionary class]]) {
+    EVP_PKEY_free(privateKey);
     return material;
   }
 
   material[@"kid"] = kid ?: @"test-key";
   material[@"privateKeyPEM"] = privateKeyPEM;
-  material[@"jwk"] = @{
-    @"kty" : @"RSA",
-    @"alg" : @"RS256",
-    @"use" : @"sig",
-    @"kid" : kid ?: @"test-key",
-    @"n" : ALNBase64URLStringFromData(modulus) ?: @"",
-    @"e" : ALNBase64URLStringFromData(exponentData) ?: @"",
-  };
-
-  BIO_free(privateBIO);
+  material[@"jwk"] = jwk;
   EVP_PKEY_free(privateKey);
-  BN_free(exponent);
   return material;
 }
 

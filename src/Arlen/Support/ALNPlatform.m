@@ -148,6 +148,16 @@ NSArray<NSString *> *ALNDefaultODBCCandidatePaths(void) {
   return candidates;
 }
 
+NSCalendarUnit ALNPlatformCalendarDateTimeUnitMask(void) {
+#if defined(GNUSTEP)
+  return (NSYearCalendarUnit | NSMonthCalendarUnit | NSDayCalendarUnit |
+          NSHourCalendarUnit | NSMinuteCalendarUnit | NSSecondCalendarUnit);
+#else
+  return (NSCalendarUnitYear | NSCalendarUnitMonth | NSCalendarUnitDay |
+          NSCalendarUnitHour | NSCalendarUnitMinute | NSCalendarUnitSecond);
+#endif
+}
+
 BOOL ALNPlatformFillRandomBytes(void *buffer, size_t count) {
   if (buffer == NULL) {
     return NO;

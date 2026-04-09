@@ -1,5 +1,6 @@
 #import "ALNAuthModule.h"
 
+#import "ALNHTTPCompat.h"
 #import "ALNApplication.h"
 #import "ALNAuthSession.h"
 #import "ALNContext.h"
@@ -793,7 +794,7 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
 
   NSHTTPURLResponse *response = nil;
   NSError *requestError = nil;
-  NSData *bodyData = [NSURLConnection sendSynchronousRequest:request returningResponse:&response error:&requestError];
+  NSData *bodyData = ALNSynchronousURLRequest(request, (NSURLResponse **)&response, &requestError);
   if (bodyData == nil) {
     if (error != NULL) {
       *error = requestError ?: AMError(ALNAuthModuleErrorPolicyRejected, @"Twilio Verify request failed", nil);

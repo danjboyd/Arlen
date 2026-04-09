@@ -151,7 +151,6 @@ link_flags=(
   -framework Foundation
   -framework CoreFoundation
   -framework XCTest
-  -lobjc
   -lcrypto
 )
 

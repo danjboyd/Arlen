@@ -7,6 +7,7 @@
 #import "ALNContext.h"
 #import "ALNController.h"
 #import "ALNEOCRuntime.h"
+#import "ALNHTTPCompat.h"
 #import "ALNPg.h"
 #import "ALNJobsModule.h"
 #import "ALNRequest.h"
@@ -263,7 +264,7 @@ static NSDictionary *STHTTPDataRequest(NSString *method,
     [request setHTTPBody:bodyData];
   }
   NSURLResponse *response = nil;
-  NSData *data = [NSURLConnection sendSynchronousRequest:request returningResponse:&response error:error];
+  NSData *data = ALNSynchronousURLRequest(request, &response, error);
   NSHTTPURLResponse *http = [response isKindOfClass:[NSHTTPURLResponse class]] ? (NSHTTPURLResponse *)response : nil;
   id object = nil;
   if ([data length] > 0) {

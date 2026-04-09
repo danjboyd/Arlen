@@ -1,10 +1,10 @@
 #import "ALNWebAuthn.h"
 
+#import "ALNCryptoCompat.h"
 #import "ALNJSONSerialization.h"
 #import "ALNSecurityPrimitives.h"
 
 #import <openssl/bio.h>
-#import <openssl/ec.h>
 #import <openssl/ecdsa.h>
 #import <openssl/evp.h>
 #import <openssl/pem.h>
@@ -346,38 +346,9 @@ static NSString *ALNWebAuthnPublicKeyPEMFromCOSEKey(id keyObject, NSError **erro
     return nil;
   }
 
-  EC_KEY *ecKey = EC_KEY_new_by_curve_name(NID_X9_62_prime256v1);
-  BIGNUM *xBN = BN_bin2bn([x bytes], (int)[x length], NULL);
-  BIGNUM *yBN = BN_bin2bn([y bytes], (int)[y length], NULL);
-  const EC_GROUP *group = (ecKey != NULL) ? EC_KEY_get0_group(ecKey) : NULL;
-  EC_POINT *point = (group != NULL) ? EC_POINT_new(group) : NULL;
-  NSString *pem = nil;
-
-  if (ecKey != NULL && group != NULL && xBN != NULL && yBN != NULL && point != NULL &&
-      EC_POINT_set_affine_coordinates_GFp(group, point, xBN, yBN, NULL) == 1 &&
-      EC_KEY_set_public_key(ecKey, point) == 1) {
-    EVP_PKEY *pkey = EVP_PKEY_new();
-    if (pkey != NULL && EVP_PKEY_assign_EC_KEY(pkey, ecKey) == 1) {
-      BIO *bio = BIO_new(BIO_s_mem());
-      if (bio != NULL && PEM_write_bio_PUBKEY(bio, pkey) == 1) {
-        char *buffer = NULL;
-        long length = BIO_get_mem_data(bio, &buffer);
-        if (buffer != NULL && length > 0) {
-          pem = [[NSString alloc] initWithBytes:buffer length:(NSUInteger)length encoding:NSUTF8StringEncoding];
-        }
-      }
-      BIO_free(bio);
-      EVP_PKEY_free(pkey);
-      ecKey = NULL;
-    }
-  }
-
-  if (ecKey != NULL) {
-    EC_KEY_free(ecKey);
-  }
-  EC_POINT_free(point);
-  BN_free(xBN);
-  BN_free(yBN);
+  EVP_PKEY *pkey = ALNCryptoCreateES256PublicKeyFromCoordinates(x, y);
+  NSString *pem = ALNCryptoCopyPublicPEMString(pkey);
+  EVP_PKEY_free(pkey);
 
   if ([pem length] == 0 && error != NULL) {
     *error = ALNWebAuthnError(ALNWebAuthnErrorUnsupportedCredentialKey,

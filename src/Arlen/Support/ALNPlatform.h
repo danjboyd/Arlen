@@ -9,6 +9,7 @@ FOUNDATION_EXPORT BOOL ALNPlatformUsesAppleFoundation(void);
 FOUNDATION_EXPORT BOOL ALNPlatformUsesGNUstepFoundation(void);
 FOUNDATION_EXPORT NSArray<NSString *> *ALNDefaultLibpqCandidatePaths(void);
 FOUNDATION_EXPORT NSArray<NSString *> *ALNDefaultODBCCandidatePaths(void);
+NSCalendarUnit ALNPlatformCalendarDateTimeUnitMask(void);
 double ALNPlatformNowMilliseconds(void);
 NSString *ALNPlatformISO8601Now(void);
 NSInteger ALNPlatformProcessIdentifier(void);

@@ -4,6 +4,16 @@ Last updated: 2026-04-09
 
 ## Leaving Off (2026-04-09)
 
+- Completed Phase 30 and delivered `30S` on the `mac` branch:
+  - added shared compatibility seams in `ALNPlatform`, `ALNHTTPCompat`, and
+    `ALNCryptoCompat` so Apple-versus-GNUstep/Foundation/OpenSSL differences
+    stay centralized instead of spreading through app-facing code
+  - removed the current Apple warning buckets from `./bin/build-apple`,
+    `./bin/arlen new`, app-root `boomhauer --prepare-only`, and
+    `./tools/build_apple_xctest.sh`, including the duplicate `-lobjc` linker
+    noise and the deprecated Apple-only crypto/network call sites
+  - verified on 2026-04-09 that the Apple framework build, generated-app
+    prepare flow, and Apple XCTest bundle build all complete without warnings
 - Reopened Phase 30 on the `mac` branch with new subphase `30S`:
   - documented a cross-platform compatibility-shim cleanup to centralize the
     remaining Apple-versus-GNUstep API differences behind shared seams instead
@@ -14,8 +24,7 @@ Last updated: 2026-04-09
   - updated the roadmap, top-level README, and docs index so Phase 30 is no
     longer presented as fully closed at `30A-30R`
 - Phase 30 status:
-  - `30A-30R` are delivered on `mac`
-  - `30S` remains for warning-free Apple/GNUstep compatibility shims
+  - `30A-30S` are delivered on `mac`
   - `tools/test_apple.sh` remains the canonical Apple verification lane and
     `tools/ci/run_phase30_confidence.sh` remains the canonical Apple artifact
     pack

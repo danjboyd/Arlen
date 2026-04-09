@@ -1,15 +1,13 @@
 #import <Foundation/Foundation.h>
 #import <Foundation/NSByteOrder.h>
 
-#import <openssl/bn.h>
 #import <openssl/bio.h>
-#import <openssl/ec.h>
 #import <openssl/evp.h>
 #import <openssl/pem.h>
-#import <openssl/rsa.h>
 
 #import "ALNAuthSession.h"
 #import "ALNContext.h"
+#import "ALNCryptoCompat.h"
 #import "ALNLogger.h"
 #import "ALNOIDCClient.h"
 #import "ALNPasswordHash.h"
@@ -59,79 +57,22 @@ static NSDictionary *AuditValidClaims(NSString *nonce) {
 
 static NSDictionary *AuditRSAKeyMaterial(NSString *kid) {
   NSMutableDictionary *material = [NSMutableDictionary dictionary];
-  BIGNUM *exponent = BN_new();
-  RSA *rsa = RSA_new();
-  EVP_PKEY *privateKey = NULL;
-  BIO *privateBIO = NULL;
-  const BIGNUM *nValue = NULL;
-  const BIGNUM *eValue = NULL;
-  char *privateBuffer = NULL;
-
-  if (exponent == NULL || rsa == NULL || BN_set_word(exponent, RSA_F4) != 1 ||
-      RSA_generate_key_ex(rsa, 2048, exponent, NULL) != 1) {
-    BN_free(exponent);
-    RSA_free(rsa);
-    return material;
-  }
-
-  RSA_get0_key(rsa, &nValue, &eValue, NULL);
-  if (nValue == NULL || eValue == NULL) {
-    BN_free(exponent);
-    RSA_free(rsa);
-    return material;
-  }
-
-  NSMutableData *modulus = [NSMutableData dataWithLength:(NSUInteger)BN_num_bytes(nValue)];
-  NSMutableData *exponentData = [NSMutableData dataWithLength:(NSUInteger)BN_num_bytes(eValue)];
-  BN_bn2bin(nValue, (unsigned char *)[modulus mutableBytes]);
-  BN_bn2bin(eValue, (unsigned char *)[exponentData mutableBytes]);
-
-  privateKey = EVP_PKEY_new();
-  if (privateKey == NULL || EVP_PKEY_assign_RSA(privateKey, rsa) != 1) {
-    EVP_PKEY_free(privateKey);
-    BN_free(exponent);
-    RSA_free(rsa);
-    return material;
-  }
-  rsa = NULL;
-
-  privateBIO = BIO_new(BIO_s_mem());
-  if (privateBIO == NULL ||
-      PEM_write_bio_PrivateKey(privateBIO, privateKey, NULL, NULL, 0, NULL, NULL) != 1) {
-    BIO_free(privateBIO);
-    EVP_PKEY_free(privateKey);
-    BN_free(exponent);
-    return material;
-  }
-
-  long privateLength = BIO_get_mem_data(privateBIO, &privateBuffer);
-  NSString *privateKeyPEM =
-      (privateBuffer != NULL && privateLength > 0)
-          ? [[NSString alloc] initWithBytes:privateBuffer
-                                     length:(NSUInteger)privateLength
-                                   encoding:NSUTF8StringEncoding]
-          : nil;
+  EVP_PKEY *privateKey = ALNCryptoGenerateRSAKey(2048);
+  NSString *privateKeyPEM = ALNCryptoCopyPEMStringForPrivateKey(privateKey);
+  NSDictionary *jwk = ALNCryptoCopyRSAJWK(privateKey, kid);
   if ([privateKeyPEM length] == 0) {
-    BIO_free(privateBIO);
     EVP_PKEY_free(privateKey);
-    BN_free(exponent);
+    return material;
+  }
+  if (![jwk isKindOfClass:[NSDictionary class]]) {
+    EVP_PKEY_free(privateKey);
     return material;
   }
 
   material[@"kid"] = kid ?: @"test-key";
   material[@"privateKeyPEM"] = privateKeyPEM;
-  material[@"jwk"] = @{
-    @"kty" : @"RSA",
-    @"alg" : @"RS256",
-    @"use" : @"sig",
-    @"kid" : kid ?: @"test-key",
-    @"n" : ALNBase64URLStringFromData(modulus) ?: @"",
-    @"e" : ALNBase64URLStringFromData(exponentData) ?: @"",
-  };
-
-  BIO_free(privateBIO);
+  material[@"jwk"] = jwk;
   EVP_PKEY_free(privateKey);
-  BN_free(exponent);
   return material;
 }
 
@@ -245,60 +186,27 @@ static NSData *AuditSHA256String(NSString *value) {
 }
 
 static NSDictionary *AuditGeneratedKeyMaterial(void) {
-  EC_KEY *ecKey = EC_KEY_new_by_curve_name(NID_X9_62_prime256v1);
   NSMutableDictionary *material = [NSMutableDictionary dictionary];
-  if (ecKey == NULL || EC_KEY_generate_key(ecKey) != 1) {
-    EC_KEY_free(ecKey);
+  EVP_PKEY *privateKey = ALNCryptoGenerateES256Key();
+  if (privateKey == NULL) {
     return material;
   }
 
-  const EC_GROUP *group = EC_KEY_get0_group(ecKey);
-  const EC_POINT *point = EC_KEY_get0_public_key(ecKey);
-  BIGNUM *xBN = BN_new();
-  BIGNUM *yBN = BN_new();
-  if (group != NULL && point != NULL && xBN != NULL && yBN != NULL &&
-      EC_POINT_get_affine_coordinates_GFp(group, point, xBN, yBN, NULL) == 1) {
-    unsigned char xBytes[32];
-    unsigned char yBytes[32];
-    BN_bn2binpad(xBN, xBytes, sizeof(xBytes));
-    BN_bn2binpad(yBN, yBytes, sizeof(yBytes));
-    material[@"x"] = [NSData dataWithBytes:xBytes length:sizeof(xBytes)];
-    material[@"y"] = [NSData dataWithBytes:yBytes length:sizeof(yBytes)];
+  NSDictionary<NSString *, NSData *> *coordinates = ALNCryptoCopyES256PublicKeyCoordinates(privateKey);
+  if ([coordinates[@"x"] length] == 32 && [coordinates[@"y"] length] == 32) {
+    material[@"x"] = coordinates[@"x"];
+    material[@"y"] = coordinates[@"y"];
   }
 
-  EVP_PKEY *privateKey = EVP_PKEY_new();
-  if (privateKey != NULL && EVP_PKEY_assign_EC_KEY(privateKey, ecKey) == 1) {
-    BIO *privateBIO = BIO_new(BIO_s_mem());
-    BIO *publicBIO = BIO_new(BIO_s_mem());
-    if (privateBIO != NULL && publicBIO != NULL &&
-        PEM_write_bio_PrivateKey(privateBIO, privateKey, NULL, NULL, 0, NULL, NULL) == 1 &&
-        PEM_write_bio_PUBKEY(publicBIO, privateKey) == 1) {
-      char *privateBuffer = NULL;
-      char *publicBuffer = NULL;
-      long privateLength = BIO_get_mem_data(privateBIO, &privateBuffer);
-      long publicLength = BIO_get_mem_data(publicBIO, &publicBuffer);
-      if (privateBuffer != NULL && privateLength > 0) {
-        material[@"privateKeyPEM"] =
-            [[NSString alloc] initWithBytes:privateBuffer
-                                     length:(NSUInteger)privateLength
-                                   encoding:NSUTF8StringEncoding];
-      }
-      if (publicBuffer != NULL && publicLength > 0) {
-        material[@"publicKeyPEM"] =
-            [[NSString alloc] initWithBytes:publicBuffer
-                                     length:(NSUInteger)publicLength
-                                   encoding:NSUTF8StringEncoding];
-      }
-    }
-    BIO_free(privateBIO);
-    BIO_free(publicBIO);
-    EVP_PKEY_free(privateKey);
-    ecKey = NULL;
+  NSString *privateKeyPEM = ALNCryptoCopyPEMStringForPrivateKey(privateKey);
+  NSString *publicKeyPEM = ALNCryptoCopyPublicPEMString(privateKey);
+  if ([privateKeyPEM length] > 0) {
+    material[@"privateKeyPEM"] = privateKeyPEM;
   }
-
-  EC_KEY_free(ecKey);
-  BN_free(xBN);
-  BN_free(yBN);
+  if ([publicKeyPEM length] > 0) {
+    material[@"publicKeyPEM"] = publicKeyPEM;
+  }
+  EVP_PKEY_free(privateKey);
   return material;
 }
 
