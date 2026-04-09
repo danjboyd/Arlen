@@ -1,6 +1,24 @@
 # Arlen Status Checkpoint
 
-Last updated: 2026-04-08
+Last updated: 2026-04-09
+
+## Leaving Off (2026-04-09)
+
+- Reopened Phase 30 on the `mac` branch with new subphase `30S`:
+  - documented a cross-platform compatibility-shim cleanup to centralize the
+    remaining Apple-versus-GNUstep API differences behind shared seams instead
+    of scattered source-local conditionals
+  - set the explicit acceptance target that `./bin/build-apple` should compile
+    warning-free on the supported macOS/Xcode baseline while preserving
+    compatibility with GNUstep libs-base 1.30
+  - updated the roadmap, top-level README, and docs index so Phase 30 is no
+    longer presented as fully closed at `30A-30R`
+- Phase 30 status:
+  - `30A-30R` are delivered on `mac`
+  - `30S` remains for warning-free Apple/GNUstep compatibility shims
+  - `tools/test_apple.sh` remains the canonical Apple verification lane and
+    `tools/ci/run_phase30_confidence.sh` remains the canonical Apple artifact
+    pack
 
 ## Leaving Off (2026-04-08)
 

@@ -1,7 +1,7 @@
 # Phase 30 Roadmap
 
 Status: in progress
-Last updated: 2026-04-08
+Last updated: 2026-04-09
 
 ## Goal
 
@@ -377,7 +377,8 @@ Acceptance checkpoint:
 
 ## Current Delivered Baseline
 
-Phase 30 has delivered `30A-30R`. The current Apple baseline means:
+Phase 30 has delivered `30A-30R`, with `30S` remaining. The current Apple
+baseline means:
 
 - macOS contributors can build Arlen through `./bin/build-apple`
 - `./bin/test --smoke-only` verifies Apple XCTest availability when full Xcode
@@ -424,7 +425,37 @@ Delivered:
 - documented the steady-state Apple runtime expectations around the now-green
   Apple verification lane
 
+## 30S. Cross-Platform Compatibility Shim Cleanup
+
+Goal:
+
+Build the remaining Apple-versus-GNUstep compatibility shims so the shared
+Arlen source compiles warning-free against both GNUstep libs-base 1.30 and the
+current macOS SDK without scattering ad hoc platform conditionals throughout
+the codebase.
+
+Planned scope:
+
+- centralize Foundation availability and enum-name differences behind shared
+  compatibility helpers instead of repeated source-local `#if` blocks
+- replace deprecated Apple-only API usage where a cross-platform wrapper can
+  preserve the GNUstep libs-base 1.30 contract
+- migrate Apple-hostile networking and crypto seams onto compatibility
+  abstractions that remain valid on both supported platforms
+- remove the current Apple compile/link warning buckets from the framework and
+  tooling entrypoints used by `arlen new`, `build-apple`, and app-root
+  `boomhauer`
+
+Acceptance checkpoint:
+
+- `./bin/build-apple` completes without compiler/linker warnings on the current
+  supported macOS/Xcode baseline
+- the GNUstep/libs-base 1.30 build and test path remains clean and functionally
+  unchanged
+- platform-specific compiler conditionals are centralized behind documented
+  compatibility seams rather than spread across app-facing code
+
 ## Follow-On Scope
 
-Phase 30 is closed at `30A-30R`. Any further Apple work now belongs to a later
-phase rather than undocumented follow-up inside Phase 30.
+Phase 30 is no longer closed at `30A-30R`; it now remains open through `30S`
+for the warning-free Apple/GNUstep compatibility cleanup.
