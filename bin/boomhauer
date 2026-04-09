@@ -74,6 +74,25 @@ resolve_compiled_binary() {
   return 1
 }
 
+run_with_server_args() {
+  local binary="$1"
+  shift || true
+  if [[ ${#server_args[@]} -gt 0 ]]; then
+    "$binary" "$@" "${server_args[@]}"
+  else
+    "$binary" "$@"
+  fi
+}
+
+exec_with_server_args() {
+  local binary="$1"
+  shift || true
+  if [[ ${#server_args[@]} -gt 0 ]]; then
+    exec "$binary" "$@" "${server_args[@]}"
+  fi
+  exec "$binary" "$@"
+}
+
 app_root_has_sources() {
   local root="$1"
   if [[ -f "$root/app_lite.m" ]]; then
@@ -225,7 +244,7 @@ if aln_platform_is_macos; then
 
   apple_start_child() {
     export ARLEN_APP_ROOT="$app_root"
-    "$apple_compiled_binary" "${server_args[@]}" &
+    run_with_server_args "$apple_compiled_binary" &
     apple_child_pid="$!"
   }
 
@@ -243,7 +262,7 @@ if aln_platform_is_macos; then
       exit 0
     fi
     export ARLEN_APP_ROOT="$app_root"
-    exec "$apple_compiled_binary" "${server_args[@]}"
+    exec_with_server_args "$apple_compiled_binary"
   }
 
   if [[ $watch_mode -eq 0 ]]; then
@@ -311,7 +330,7 @@ if [[ $is_app_root -eq 0 ]]; then
         exit 1
       fi
     fi
-    exec "$arlen_binary" boomhauer --watch "${server_args[@]}"
+    exec_with_server_args "$arlen_binary" boomhauer --watch
   fi
 
   if [[ $prepare_only -eq 1 ]]; then
@@ -331,7 +350,7 @@ if [[ $is_app_root -eq 0 ]]; then
     exit 0
   fi
   export ARLEN_APP_ROOT="$app_root"
-  exec "$framework_boomhauer_binary" "${server_args[@]}"
+  exec_with_server_args "$framework_boomhauer_binary"
 fi
 
 state_root="$app_root/.boomhauer"
@@ -906,7 +925,7 @@ trap on_signal INT TERM
 start_app_child() {
   export ARLEN_APP_ROOT="$app_root"
   next_build_retry_at=0
-  "$app_binary" "${server_args[@]}" &
+  run_with_server_args "$app_binary" &
   child_pid="$!"
   child_mode="app"
 }
@@ -926,7 +945,7 @@ start_error_child() {
   else
     next_build_retry_at=0
   fi
-  "$framework_root/build/boomhauer" "${server_args[@]}" &
+  run_with_server_args "$framework_root/build/boomhauer" &
   child_pid="$!"
   child_mode="build_error"
 }
@@ -948,7 +967,7 @@ run_once() {
     exit 0
   fi
   export ARLEN_APP_ROOT="$app_root"
-  exec "$app_binary" "${server_args[@]}"
+  exec_with_server_args "$app_binary"
 }
 
 if [[ $watch_mode -eq 0 ]]; then
