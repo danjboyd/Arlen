@@ -1494,6 +1494,13 @@ static int ALNStaticFileFDForPath(NSString *path,
   openFlags |= O_NOFOLLOW;
 #endif
 
+  // Some dynamic file responses only set a path + length and do not populate
+  // cache-validation metadata. In that case, bypass the shared fd cache and
+  // stream directly from a fresh descriptor.
+  if (device == 0 || inode == 0) {
+    return ALNOpenWithRetry(filesystemPath, openFlags);
+  }
+
   ALNEnsureStaticFileFDCache();
   if (gALNStaticFileFDCacheCapacity == 0) {
     return ALNOpenWithRetry(filesystemPath, openFlags);

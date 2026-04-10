@@ -293,6 +293,25 @@ static NSData *BenchmarkEchoJSONData(NSString *name, NSString *path) {
   return data;
 }
 
+static NSData *BenchmarkParseOnlyJSONData(NSString *name) {
+  char lengthBuffer[32];
+  int lengthLength = snprintf(lengthBuffer, sizeof(lengthBuffer), "%lu",
+                              (unsigned long)[name length]);
+  if (lengthLength < 0) {
+    lengthLength = 0;
+  }
+
+  NSMutableData *data = [NSMutableData dataWithCapacity:48];
+  BenchmarkAppendASCIIBytes(data, "{\"ok\":true,\"name_length\":");
+  if (lengthLength > 0) {
+    [data appendBytes:lengthBuffer length:(NSUInteger)lengthLength];
+  } else {
+    BenchmarkAppendASCIIBytes(data, "0");
+  }
+  BenchmarkAppendASCIIBytes(data, "}");
+  return data;
+}
+
 static NSData *BenchmarkRequestMetaJSONData(ALNRequest *request) {
   NSMutableData *data = [NSMutableData dataWithCapacity:128];
   BenchmarkAppendASCIIBytes(data, "{\"remoteAddress\":");
@@ -360,8 +379,30 @@ static BOOL BenchmarkRenderEchoResponse(ALNRequest *request,
   if (request == nil || response == nil) {
     return NO;
   }
+  NSTimeInterval start = BenchmarkUnixTimestamp();
   NSString *name = [params[@"name"] isKindOfClass:[NSString class]] ? params[@"name"] : @"unknown";
-  BenchmarkRenderJSONResponseData(response, BenchmarkEchoJSONData(name, request.path ?: @""));
+  NSTimeInterval afterName = BenchmarkUnixTimestamp();
+  NSString *path = [request.path isKindOfClass:[NSString class]] ? request.path : @"";
+  NSData *payload = BenchmarkEchoJSONData(name, path);
+  NSTimeInterval afterJSON = BenchmarkUnixTimestamp();
+  if (BenchmarkProfileEnabled()) {
+    [response setHeader:@"X-Benchmark-Echo-Name-Ms"
+                  value:[NSString stringWithFormat:@"%.3f", (afterName - start) * 1000.0]];
+    [response setHeader:@"X-Benchmark-Echo-JSON-Ms"
+                  value:[NSString stringWithFormat:@"%.3f", (afterJSON - afterName) * 1000.0]];
+    [response setHeader:@"X-Benchmark-Echo-Bytes"
+                  value:[NSString stringWithFormat:@"%lu", (unsigned long)[payload length]]];
+  }
+  BenchmarkRenderJSONResponseData(response, payload);
+  return YES;
+}
+
+static BOOL BenchmarkRenderParseOnlyResponse(NSDictionary *params, ALNResponse *response) {
+  if (response == nil) {
+    return NO;
+  }
+  NSString *name = [params[@"name"] isKindOfClass:[NSString class]] ? params[@"name"] : @"";
+  BenchmarkRenderJSONResponseData(response, BenchmarkParseOnlyJSONData(name));
   return YES;
 }
 
@@ -669,6 +710,13 @@ static NSDictionary *BenchmarkDBParseRequestObject(ALNContext *ctx, NSError **er
   return BenchmarkRenderEchoResponse(request, params, response);
 }
 
++ (BOOL)aln_fastRoute_parseOnlyRequest:(ALNRequest *)request
+                             response:(ALNResponse *)response
+                               params:(NSDictionary *)params {
+  (void)request;
+  return BenchmarkRenderParseOnlyResponse(params, response);
+}
+
 + (BOOL)aln_fastRoute_requestMetaRequest:(ALNRequest *)request
                                 response:(ALNResponse *)response
                                   params:(NSDictionary *)params {
@@ -700,6 +748,13 @@ static NSDictionary *BenchmarkDBParseRequestObject(ALNContext *ctx, NSError **er
   (void)[[self class] aln_fastRoute_echoRequest:ctx.request
                                        response:self.context.response
                                          params:ctx.params];
+  return nil;
+}
+
+- (id)parseOnly:(ALNContext *)ctx {
+  (void)[[self class] aln_fastRoute_parseOnlyRequest:ctx.request
+                                            response:self.context.response
+                                              params:ctx.params];
   return nil;
 }
 
@@ -1924,6 +1979,11 @@ static ALNApplication *BuildApplication(NSString *environment) {
                       name:@"api_echo"
            controllerClass:[ApiController class]
                     action:@"echo"];
+  [app registerRouteMethod:@"GET"
+                      path:@"/api/parse-only/:name"
+                      name:@"api_parse_only"
+           controllerClass:[ApiController class]
+                    action:@"parseOnly"];
   [app registerRouteMethod:@"GET"
                       path:@"/api/request-meta"
                       name:@"api_request_meta"

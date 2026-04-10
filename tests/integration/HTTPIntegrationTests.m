@@ -2738,6 +2738,44 @@
   XCTAssertEqualObjects(binaryBody, sendfileBody);
 }
 
+- (void)testBenchmarkProfileLargeBlobRouteStreamsCompleteBody {
+  int curlCode = 0;
+  int serverCode = 0;
+  NSString *output =
+      [self requestWithServerEnv:@"ARLEN_BENCHMARK_PROFILE=1"
+                     serverBinary:@"./build/boomhauer"
+                        curlBody:@"tmp=$(mktemp) && curl -fsS --max-time 5 -o \"$tmp\" http://127.0.0.1:%d/api/blob?size=262144 && wc -c < \"$tmp\" && rm -f \"$tmp\""
+                        curlCode:&curlCode
+                       serverCode:&serverCode];
+  XCTAssertEqual(0, curlCode);
+  XCTAssertEqual(0, serverCode);
+  XCTAssertEqualObjects(@"262144",
+                        [output stringByTrimmingCharactersInSet:
+                                    [NSCharacterSet whitespaceAndNewlineCharacterSet]]);
+}
+
+- (void)testBenchmarkProfileParseOnlyRouteReturnsFixedPayloadForLargePath {
+  int curlCode = 0;
+  int serverCode = 0;
+  NSMutableString *segment = [NSMutableString stringWithString:@"pathparse_"];
+  for (NSUInteger idx = 0; idx < 128; idx++) {
+    [segment appendString:@"aaaaaaaa"];
+  }
+  NSString *curlBody =
+      [NSString stringWithFormat:@"curl -fsS http://127.0.0.1:%%d/api/parse-only/%@",
+                                 segment];
+  NSString *output =
+      [self requestWithServerEnv:@"ARLEN_BENCHMARK_PROFILE=1"
+                     serverBinary:@"./build/boomhauer"
+                        curlBody:curlBody
+                        curlCode:&curlCode
+                       serverCode:&serverCode];
+  XCTAssertEqual(0, curlCode);
+  XCTAssertEqual(0, serverCode);
+  XCTAssertTrue([output containsString:@"\"ok\":true"], @"%@", output);
+  XCTAssertTrue([output containsString:@"\"name_length\":1034"], @"%@", output);
+}
+
 - (void)testStaticAssetEndpointInDevelopment {
   NSString *body = [self simpleRequestPath:@"/static/sample.txt"];
   XCTAssertEqualObjects(@"static ok\n", body);

@@ -231,6 +231,66 @@
   }
 }
 
+- (void)testQueryValueForNameCachesRepeatedLookupsAcrossBackends {
+  NSString *raw = @"GET /items/list?name=Peggy+Hill&empty&encoded%20key=value+two&name=Bobby HTTP/1.1\r\n"
+                  "Host: localhost\r\n\r\n";
+  NSData *data = [raw dataUsingEncoding:NSUTF8StringEncoding];
+
+  for (NSNumber *backendValue in [self allBackends]) {
+    ALNHTTPParserBackend backend = (ALNHTTPParserBackend)[backendValue unsignedIntegerValue];
+    NSError *error = nil;
+    ALNRequest *request = [ALNRequest requestFromRawData:data backend:backend error:&error];
+    XCTAssertNil(error, @"backend=%@", [self backendName:backend]);
+    XCTAssertNotNil(request, @"backend=%@", [self backendName:backend]);
+    if (request == nil) {
+      continue;
+    }
+
+    for (NSUInteger idx = 0; idx < 5; idx++) {
+      XCTAssertEqualObjects(@"Bobby", [request queryValueForName:@"name"], @"backend=%@", [self backendName:backend]);
+      XCTAssertEqualObjects(@"value two", [request queryValueForName:@"encoded key"], @"backend=%@", [self backendName:backend]);
+      XCTAssertEqualObjects(@"", [request queryValueForName:@"empty"], @"backend=%@", [self backendName:backend]);
+      XCTAssertNil([request queryValueForName:@"missing"], @"backend=%@", [self backendName:backend]);
+    }
+
+    NSDictionary *queryParams = [request queryParams];
+    XCTAssertEqualObjects(@"Bobby", queryParams[@"name"], @"backend=%@", [self backendName:backend]);
+    XCTAssertEqualObjects(@"value two", queryParams[@"encoded key"], @"backend=%@", [self backendName:backend]);
+    XCTAssertEqualObjects(@"", queryParams[@"empty"], @"backend=%@", [self backendName:backend]);
+  }
+}
+
+- (void)testLLHTTPDeferredHeaderValueLookupRemainsStableAcrossRepeatedAccess {
+  if (![ALNRequest isLLHTTPAvailable]) {
+    return;
+  }
+
+  NSString *raw = @"GET /items/list HTTP/1.1\r\n"
+                  "Host: localhost\r\n"
+                  "X-Custom-Trace: trace-value\r\n"
+                  "X-Another-Header: another-value\r\n\r\n";
+  NSData *data = [raw dataUsingEncoding:NSUTF8StringEncoding];
+  NSError *error = nil;
+  ALNRequest *request = [ALNRequest requestFromRawData:data
+                                               backend:ALNHTTPParserBackendLLHTTP
+                                                 error:&error];
+  XCTAssertNil(error);
+  XCTAssertNotNil(request);
+  if (request == nil) {
+    return;
+  }
+
+  for (NSUInteger idx = 0; idx < 5; idx++) {
+    XCTAssertEqualObjects(@"trace-value", [request headerValueForName:@"X-Custom-Trace"]);
+    XCTAssertEqualObjects(@"another-value", [request headerValueForName:@"X-Another-Header"]);
+  }
+
+  NSDictionary *headers = [request headers];
+  XCTAssertEqualObjects(@"trace-value", headers[@"x-custom-trace"]);
+  XCTAssertEqualObjects(@"another-value", headers[@"x-another-header"]);
+  XCTAssertEqualObjects(@"trace-value", [request headerValueForName:@"X-Custom-Trace"]);
+}
+
 - (void)testLegacyParserRejectsDuplicateContentLengthHeader {
   NSString *raw = @"POST /upload HTTP/1.1\r\n"
                   "Host: localhost\r\n"

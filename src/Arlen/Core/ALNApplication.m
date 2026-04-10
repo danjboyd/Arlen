@@ -81,6 +81,37 @@ static ALNDataverseTarget *ALNDataverseTargetFromMergedConfig(NSDictionary *merg
                                                               NSError **error);
 static NSArray<NSString *> *ALNDataverseTargetNamesFromConfigAndEnvironment(NSDictionary *config);
 
+static BOOL ALNEnvFlagEnabled(const char *name) {
+  if (name == NULL || name[0] == '\0') {
+    return NO;
+  }
+  const char *raw = getenv(name);
+  if (raw == NULL || raw[0] == '\0') {
+    return NO;
+  }
+  if (strcmp(raw, "0") == 0) {
+    return NO;
+  }
+  if (strcasecmp(raw, "false") == 0 || strcasecmp(raw, "off") == 0 ||
+      strcasecmp(raw, "no") == 0) {
+    return NO;
+  }
+  return YES;
+}
+
+static BOOL ALNBenchmarkDispatchHeadersEnabledForRoute(ALNRoute *route) {
+  if (!ALNEnvFlagEnabled("ARLEN_BENCHMARK_PROFILE")) {
+    return NO;
+  }
+  NSString *routeName = [route.name isKindOfClass:[NSString class]] ? route.name : @"";
+  return [routeName isEqualToString:@"api_echo"] ||
+         [routeName isEqualToString:@"api_parse_only"];
+}
+
+static double ALNWallClockMilliseconds(void) {
+  return [[NSDate date] timeIntervalSinceReferenceDate] * 1000.0;
+}
+
 @interface ALNRequestIdentity : NSObject
 
 - (NSString *)value;
@@ -4235,6 +4266,7 @@ static void ALNFinalizeResponse(ALNApplication *application,
   if (performanceLogging) {
     [trace startStage:@"route"];
   }
+  double benchmarkRouteStageStartMs = ALNWallClockMilliseconds();
   NSString *retryStrippedPath = nil;
   NSString *retryPathFormat = nil;
   NSDictionary *matchedParams = nil;
@@ -4259,6 +4291,7 @@ static void ALNFinalizeResponse(ALNApplication *application,
   if (performanceLogging) {
     [trace endStage:@"route"];
   }
+  double benchmarkRouteStageDurationMs = ALNWallClockMilliseconds() - benchmarkRouteStageStartMs;
 
   if (matchedRoute == nil) {
     NSString *builtInPath = routePath;
@@ -4384,9 +4417,20 @@ static void ALNFinalizeResponse(ALNApplication *application,
   }
   if (routeReady && ALNRouteCanUseCompiledFastAction(self, matchedRoute) && !response.committed) {
     BOOL fastHandled = NO;
+    double benchmarkControllerStageStartMs = ALNWallClockMilliseconds();
+    double benchmarkControllerStageDurationMs = 0.0;
+    BOOL benchmarkDispatchHeadersEnabled = ALNBenchmarkDispatchHeadersEnabledForRoute(matchedRoute);
     [trace startStage:@"controller"];
     @try {
       fastHandled = ALNInvokeCompiledFastRouteAction(matchedRoute, request, response, request.routeParams);
+      benchmarkControllerStageDurationMs =
+          ALNWallClockMilliseconds() - benchmarkControllerStageStartMs;
+      if (benchmarkDispatchHeadersEnabled) {
+        [response setHeader:@"X-Benchmark-Dispatch-Route-Ms"
+                      value:[NSString stringWithFormat:@"%.3f", benchmarkRouteStageDurationMs]];
+        [response setHeader:@"X-Benchmark-Dispatch-Controller-Ms"
+                      value:[NSString stringWithFormat:@"%.3f", benchmarkControllerStageDurationMs]];
+      }
       if (fastHandled && !response.committed) {
         if (ALNResponseHasBody(response)) {
           if (response.statusCode == 0) {
@@ -4398,6 +4442,8 @@ static void ALNFinalizeResponse(ALNApplication *application,
         response.committed = YES;
       }
     } @catch (NSException *exception) {
+      benchmarkControllerStageDurationMs =
+          ALNWallClockMilliseconds() - benchmarkControllerStageStartMs;
       NSDictionary *details = ALNErrorDetailsFromException(exception);
       ALNApplyInternalErrorResponse(self,
                                     request,

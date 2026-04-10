@@ -115,6 +115,114 @@ static NSString *ALNURLDecode(NSString *value) {
 
 static NSDictionary *ALNParseQueryString(NSString *query);
 
+static BOOL ALNUTF8BytesAreValid(const unsigned char *bytes, size_t length) {
+  if (bytes == NULL) {
+    return (length == 0);
+  }
+  size_t idx = 0;
+  while (idx < length) {
+    unsigned char byte = bytes[idx];
+    if ((byte & 0x80) == 0) {
+      idx += 1;
+      continue;
+    }
+    if (byte >= 0xC2 && byte <= 0xDF) {
+      if ((idx + 1) >= length) {
+        return NO;
+      }
+      unsigned char b1 = bytes[idx + 1];
+      if ((b1 & 0xC0) != 0x80) {
+        return NO;
+      }
+      idx += 2;
+      continue;
+    }
+    if (byte == 0xE0) {
+      if ((idx + 2) >= length) {
+        return NO;
+      }
+      unsigned char b1 = bytes[idx + 1];
+      unsigned char b2 = bytes[idx + 2];
+      if (b1 < 0xA0 || b1 > 0xBF || (b2 & 0xC0) != 0x80) {
+        return NO;
+      }
+      idx += 3;
+      continue;
+    }
+    if ((byte >= 0xE1 && byte <= 0xEC) || (byte >= 0xEE && byte <= 0xEF)) {
+      if ((idx + 2) >= length) {
+        return NO;
+      }
+      unsigned char b1 = bytes[idx + 1];
+      unsigned char b2 = bytes[idx + 2];
+      if ((b1 & 0xC0) != 0x80 || (b2 & 0xC0) != 0x80) {
+        return NO;
+      }
+      idx += 3;
+      continue;
+    }
+    if (byte == 0xED) {
+      if ((idx + 2) >= length) {
+        return NO;
+      }
+      unsigned char b1 = bytes[idx + 1];
+      unsigned char b2 = bytes[idx + 2];
+      if (b1 < 0x80 || b1 > 0x9F || (b2 & 0xC0) != 0x80) {
+        return NO;
+      }
+      idx += 3;
+      continue;
+    }
+    if (byte == 0xF0) {
+      if ((idx + 3) >= length) {
+        return NO;
+      }
+      unsigned char b1 = bytes[idx + 1];
+      unsigned char b2 = bytes[idx + 2];
+      unsigned char b3 = bytes[idx + 3];
+      if (b1 < 0x90 || b1 > 0xBF ||
+          (b2 & 0xC0) != 0x80 ||
+          (b3 & 0xC0) != 0x80) {
+        return NO;
+      }
+      idx += 4;
+      continue;
+    }
+    if (byte >= 0xF1 && byte <= 0xF3) {
+      if ((idx + 3) >= length) {
+        return NO;
+      }
+      unsigned char b1 = bytes[idx + 1];
+      unsigned char b2 = bytes[idx + 2];
+      unsigned char b3 = bytes[idx + 3];
+      if ((b1 & 0xC0) != 0x80 ||
+          (b2 & 0xC0) != 0x80 ||
+          (b3 & 0xC0) != 0x80) {
+        return NO;
+      }
+      idx += 4;
+      continue;
+    }
+    if (byte == 0xF4) {
+      if ((idx + 3) >= length) {
+        return NO;
+      }
+      unsigned char b1 = bytes[idx + 1];
+      unsigned char b2 = bytes[idx + 2];
+      unsigned char b3 = bytes[idx + 3];
+      if (b1 < 0x80 || b1 > 0x8F ||
+          (b2 & 0xC0) != 0x80 ||
+          (b3 & 0xC0) != 0x80) {
+        return NO;
+      }
+      idx += 4;
+      continue;
+    }
+    return NO;
+  }
+  return YES;
+}
+
 static BOOL ALNContentTypeIsFormURLEncoded(NSString *contentType) {
   if (![contentType isKindOfClass:[NSString class]] || [contentType length] == 0) {
     return NO;
@@ -723,12 +831,15 @@ static int ALNLLHTTPFinalizeHeader(llhttp_t *parser) {
                            &valueBytes,
                            &valueByteLength);
   ALNLLHTTPTrimOWS(&valueBytes, &valueByteLength);
-  NSString *value = ALNLLHTTPHeaderValueString(valueBytes, valueByteLength);
-  if (value == nil) {
+  if (!ALNUTF8BytesAreValid(valueBytes, valueByteLength)) {
     return ALNLLHTTPSetError(parser, @"Request header is not valid UTF-8");
   }
 
   if (hotKey != nil) {
+    NSString *value = ALNLLHTTPHeaderValueString(valueBytes, valueByteLength);
+    if (value == nil) {
+      return ALNLLHTTPSetError(parser, @"Request header is not valid UTF-8");
+    }
     state->_headers[hotKey] = value ?: @"";
   } else {
     id deferredName = ALNLLHTTPDeferredHeaderStorageFromBytes(fieldBytes,
@@ -1381,6 +1492,7 @@ static ALNRequest *ALNRequestFromRawDataLLHTTP(NSData *data, NSError **error) {
 @property(nonatomic, copy) NSDictionary *cachedQueryParams;
 @property(nonatomic, copy) NSDictionary *cachedFormParams;
 @property(nonatomic, copy) NSDictionary *cachedCookies;
+@property(nonatomic, strong) NSMutableDictionary *cachedQueryValueLookups;
 @property(nonatomic, copy) NSArray *deferredHeaderNames;
 @property(nonatomic, copy) NSArray *deferredHeaderValues;
 @property(nonatomic, strong) NSData *deferredHeaderSourceData;
@@ -1452,6 +1564,9 @@ static NSString *ALNDeferredHeaderValue(id storedValue, NSData *sourceData) {
     return @"";
   }
 #if ARLEN_ENABLE_LLHTTP
+  if (!ALNUTF8BytesAreValid(bytes, length)) {
+    return nil;
+  }
   return ALNLLHTTPHeaderValueString(bytes, length);
 #else
   return [[NSString alloc] initWithBytes:bytes length:length encoding:NSUTF8StringEncoding];
@@ -1504,6 +1619,7 @@ static BOOL ALNASCIIBytesEqualLowercaseCString(const unsigned char *bytes,
     _scheme = @"http";
     _parseDurationMilliseconds = 0.0;
     _responseWriteDurationMilliseconds = 0.0;
+    _cachedQueryValueLookups = [[NSMutableDictionary alloc] init];
     _headersMaterialized = YES;
     _deferredHeaderNames = nil;
     _deferredHeaderValues = nil;
@@ -1651,7 +1767,14 @@ static BOOL ALNASCIIBytesEqualLowercaseCString(const unsigned char *bytes,
     return [value isKindOfClass:[NSString class]] ? value : nil;
   }
 
-  return ALNQueryValueForNameInString(_queryString, name);
+  id memoized = self.cachedQueryValueLookups[name];
+  if (memoized != nil) {
+    return [memoized isKindOfClass:[NSString class]] ? memoized : nil;
+  }
+
+  NSString *value = ALNQueryValueForNameInString(_queryString, name);
+  self.cachedQueryValueLookups[name] = value ?: [NSNull null];
+  return value;
 }
 
 - (NSDictionary *)queryParams {
@@ -1664,6 +1787,7 @@ static BOOL ALNASCIIBytesEqualLowercaseCString(const unsigned char *bytes,
     parsed = @{};
   }
   self.cachedQueryParams = parsed;
+  [self.cachedQueryValueLookups removeAllObjects];
   return self.cachedQueryParams ?: parsed;
 }
 

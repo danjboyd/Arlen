@@ -115,30 +115,30 @@ static ALNRoute *ALNBestRouteInCandidates(NSArray *candidates,
 
     BOOL useFastPath = [route usesParameterizedFastPath];
     NSArray *candidateSegments = nil;
-    if (!useFastPath) {
-      if (lazyPathSegments == nil) {
-        lazyPathSegments = [ALNRoute pathSegmentsForPath:path];
-      }
-      candidateSegments = lazyPathSegments;
-    }
-    NSDictionary *candidateParams = [route matchPath:path pathSegments:candidateSegments];
-    if (candidateParams == nil) {
-      continue;
-    }
+	    if (!useFastPath) {
+	      if (lazyPathSegments == nil) {
+	        lazyPathSegments = [ALNRoute pathSegmentsForPath:path];
+	      }
+	      candidateSegments = lazyPathSegments;
+	    }
+	    NSDictionary *candidateParams = [route matchPath:path pathSegments:candidateSegments];
+	    if (candidateParams == nil) {
+	      continue;
+	    }
 
-    if (ALNRouteShouldReplace(route, bestRoute)) {
-      bestRoute = route;
-      bestParams = candidateParams;
-    }
+	    if (ALNRouteShouldReplace(route, bestRoute)) {
+	      bestRoute = route;
+	      bestParams = candidateParams;
+	    }
   }
 
-  if (bestRoute == nil || bestParams == nil) {
-    return nil;
-  }
-  if (paramsOut != NULL) {
-    *paramsOut = bestParams;
-  }
-  return bestRoute;
+	  if (bestRoute == nil || bestParams == nil) {
+	    return nil;
+	  }
+	  if (paramsOut != NULL) {
+	    *paramsOut = bestParams;
+	  }
+	  return bestRoute;
 }
 
 static void ALNIndexStaticRoute(NSMutableDictionary *index, ALNRoute *route) {
