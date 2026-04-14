@@ -2,6 +2,12 @@
 
 Arlen is designed for deployment behind a reverse proxy.
 
+This guide now has two layers:
+
+- the currently implemented Phase 29 release workflow
+- the Phase 32 deployment-target contract that future remote deploy work will
+  enforce
+
 ## 1. Runtime Boundary
 
 - Arlen handles HTTP application runtime.
@@ -31,7 +37,168 @@ API-only mode (`apiOnly = YES`, or `ARLEN_API_ONLY=1`) defaults to:
 - `serveStatic = NO`
 - `logFormat = "json"`
 
-## 4. Built-In Health Contract
+## 4. Phase 32 Deployment Target Contract
+
+Phase 29 gave Arlen a first-class release workflow. Phase 32 defines the
+target-compatibility contract that future remote deploy work must enforce.
+
+### 4.1 Platform Profiles
+
+Deployment support is defined by a platform profile, not by CPU architecture
+alone.
+
+A profile should encode:
+
+- OS family
+- CPU architecture
+- runtime family
+- toolchain/runtime variant where relevant
+
+Examples:
+
+- `macos-arm64-apple-foundation`
+- `macos-x86_64-apple-foundation`
+- `linux-x86_64-gnustep-clang`
+- `windows-x86_64-gnustep-clang64`
+- `windows-x86_64-gnustep-msvc`
+
+Why this matters:
+
+- Apple Foundation and GNUstep are different runtime families
+- the same Objective-C source may still diverge in behavior across those
+  families
+- deployment safety depends on the full runtime boundary, not only on whether
+  the CPU is `arm64` or `x86_64`
+
+### 4.2 Deployment Support Levels
+
+Arlen should classify deployment plans into these levels:
+
+- `supported`
+  - local build profile matches the remote target profile exactly
+- `experimental`
+  - remote rebuild is explicitly enabled and the target falls within a
+    narrowly allowed best-effort class
+- `unsupported`
+  - profile or runtime-family mismatch is outside the supported contract
+
+Current intended v1 policy:
+
+- same-profile deployment: supported
+- GNUstep-to-GNUstep remote rebuild across profile differences: experimental
+- Apple Foundation to GNUstep deployment: unsupported
+
+### 4.3 Project Deployment Configuration
+
+Future app-owned deployment config should stay declarative.
+
+Recommended target fields:
+
+- target identifier
+- host/address metadata
+- platform profile
+- runtime strategy
+- release path
+- healthcheck target
+- build/deploy hooks
+- reserved `propane accessories` fields for future production manager handoff
+
+Illustrative shape:
+
+```yaml
+deployment:
+  targets:
+    production:
+      host: app1.example.com
+      profile: linux-x86_64-gnustep-clang
+      runtime_strategy: managed
+      release_path: /opt/arlen/apps/myapp
+      healthcheck: /healthz
+      hooks:
+        pre_activate: []
+        post_activate: []
+      propane_accessories:
+        workerCount: 4
+```
+
+This is a contract model, not yet a claim that every field above is already
+implemented in the current CLI.
+
+### 4.4 Runtime Strategies
+
+For GNUstep-backed deployment targets, Arlen should treat runtime strategy as
+explicit configuration rather than implicit host state.
+
+Recommended strategies:
+
+- `system`
+  - the target already carries a compatible runtime/toolchain
+- `managed`
+  - Arlen deploys and manages the expected runtime on the host
+- `bundled`
+  - the release artifact carries the runtime beside the app
+
+The default production bias should stay toward deterministic runtime control,
+not toward guessing that arbitrary host packages are compatible.
+
+### 4.5 Deploy Doctor Architecture
+
+`arlen deploy doctor` should evolve into a probe-based system.
+
+Probe result classes:
+
+- `error`: deployment cannot proceed
+- `warn`: deployment may work, but does not match the preferred contract
+- `info`: characterization detail
+- `action`: concrete remediation guidance
+
+Probe categories should include:
+
+- local profile resolution
+- target profile resolution
+- runtime presence and version
+- release-root and filesystem readiness
+- service-manager readiness
+- environment/secrets completeness
+- operability endpoint expectations
+- remote rebuild capability when enabled
+
+### 4.6 Remote Host Readiness
+
+For target-aware remote deployment, doctor should verify at least:
+
+- target OS family and architecture
+- target runtime family and platform profile
+- writable release/shared/temp paths
+- required service-manager or lifecycle support
+- runtime availability or install requirements
+- environment/secrets completeness
+- network/healthcheck assumptions
+- current operability contract (`/healthz`, `/readyz`, `/livez`, `/metrics`)
+
+For Linux and Windows production targets, doctor should also be able to answer:
+
+- whether the host already satisfies the chosen runtime strategy
+- whether the deploy user can activate and restart the release
+- whether the release layout and health probes are meaningful on that host
+
+### 4.7 Remote Rebuild Contract
+
+Remote rebuild should never be a silent fallback.
+
+If Arlen later supports `--allow-remote-rebuild`, doctor should require:
+
+- explicit operator opt-in
+- a functional remote build chain, not just tool presence
+- compile and link validation for a minimal Objective-C/Foundation program
+- stronger warnings when the local and remote profiles differ
+
+The intended near-term support boundary is:
+
+- GNUstep-to-GNUstep remote rebuild: possible best-effort path
+- Apple Foundation to GNUstep remote rebuild: not a supported v1 path
+
+## 5. Built-In Health Contract
 
 Arlen reserves its built-in operability endpoints ahead of app route dispatch:
 
@@ -73,7 +240,7 @@ When `cluster.emitHeaders = YES` (default), responses include:
 - `X-Arlen-Cluster-Observed-Nodes`
 - `X-Arlen-Cluster-Expected-Nodes`
 
-## 5. Immutable Release Artifact Workflow
+## 6. Immutable Release Artifact Workflow
 
 Deployment helper scripts are provided under `tools/deploy/`.
 
@@ -86,12 +253,24 @@ For app-operator workflows, prefer the first-class `arlen deploy` wrapper:
 ```
 
 `arlen deploy push` writes `releases/<id>/metadata/manifest.json` using
-`phase29-deploy-manifest-v1`. `arlen deploy release` reuses that manifest,
+`phase32-deploy-manifest-v1`. The manifest now records deployment metadata for
+the local profile, target profile, runtime strategy, compatibility status, and
+remote rebuild requirements. `arlen deploy release` reuses that manifest,
 runs packaged migrations when present, activates `releases/current`, and can
 probe `/healthz` when `--base-url` is supplied. Packaged framework payloads now
 also include `framework/tools/deploy/validate_operability.sh`, so
 `arlen deploy doctor --base-url ...` works from an activated packaged release
 without needing a source checkout beside it.
+
+Target-aware deploy options:
+
+- `--target-profile <profile>` records the intended deployment target profile
+- `--runtime-strategy <system|managed|bundled>` records how the runtime should
+  be satisfied on the target
+- `--allow-remote-rebuild` opts into best-effort GNUstep cross-profile rebuild
+  planning
+- `--remote-build-check-command <shell>` is required by `deploy release` when
+  the manifest represents an experimental remote rebuild target
 
 Additional deploy CLI helpers:
 
@@ -127,7 +306,7 @@ Windows support statement for deployment:
   repo-native `phase31-confidence` lane
 - this is still not a general production support claim for Windows hosts
 
-### 5.1 Build a release artifact
+### 6.1 Build a release artifact
 
 ```bash
 tools/deploy/build_release.sh \
@@ -179,7 +358,7 @@ Release metadata includes:
 - manifest-backed runtime/helper paths for `arlen`, `boomhauer`, `propane`,
   `jobs-worker`, and the operability helper
 
-### 5.2 Activate a release
+### 6.2 Activate a release
 
 ```bash
 tools/deploy/activate_release.sh \
@@ -189,7 +368,7 @@ tools/deploy/activate_release.sh \
 
 This switches `releases/current` symlink.
 
-### 5.3 Run migration step (explicit)
+### 6.3 Run migration step (explicit)
 
 From activated release payload:
 
@@ -201,7 +380,7 @@ cd /path/to/app/releases/current/app
 The packaged release includes `app/db/migrations`, so this command no longer
 depends on copying migration files into the artifact after build time.
 
-### 5.4 Start runtime from activated release
+### 6.4 Start runtime from activated release
 
 ```bash
 ARLEN_APP_ROOT=/path/to/app/releases/current/app \
@@ -214,7 +393,7 @@ require a full Arlen checkout when `ARLEN_FRAMEWORK_ROOT` points at
 `releases/current/framework`, and the packaged manifest is authoritative for
 runtime/helper path resolution across Unix and Windows preview builds.
 
-## 6. Container-First Runbook (Baseline)
+## 7. Container-First Runbook (Baseline)
 
 Minimum container deployment path:
 
@@ -224,7 +403,7 @@ Minimum container deployment path:
 4. Start `propane --env production` as container entrypoint.
 5. Probe `/readyz` and `/livez` for rollout/health checks.
 
-## 7. VM/systemd Runbook (Baseline)
+## 8. VM/systemd Runbook (Baseline)
 
 Use release symlink plus explicit environment wiring in service unit.
 

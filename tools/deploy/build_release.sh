@@ -24,6 +24,12 @@ Options:
                           (default: <framework-root>/build/release_confidence/phase10e/manifest.json)
   --allow-missing-certification
                           Skip certification manifest enforcement (non-RC use only)
+  --target-profile <profile>
+                          Deployment target profile
+                          (default: current local platform profile)
+  --runtime-strategy <system|managed|bundled>
+                          Runtime install strategy (default: system)
+  --allow-remote-rebuild  Allow best-effort cross-profile source rebuild planning
   --dry-run                Validate inputs and emit planned release metadata only
   --json                   Emit machine-readable workflow payloads
   --help                   Show this help
@@ -92,6 +98,89 @@ copy_compiled_binary_if_exists() {
   return 0
 }
 
+detect_local_platform_profile() {
+  local os_name
+  local arch_name
+  os_name="$(uname -s 2>/dev/null || echo unknown)"
+  arch_name="$(uname -m 2>/dev/null || echo unknown)"
+
+  case "$arch_name" in
+    amd64)
+      arch_name="x86_64"
+      ;;
+    aarch64)
+      arch_name="arm64"
+      ;;
+  esac
+
+  case "$os_name" in
+    Darwin)
+      printf 'macos-%s-apple-foundation\n' "$arch_name"
+      ;;
+    Linux)
+      printf 'linux-%s-gnustep-clang\n' "$arch_name"
+      ;;
+    MINGW*|MSYS*|CYGWIN*)
+      if [[ "${MSYSTEM:-}" == "CLANG64" ]]; then
+        printf 'windows-%s-gnustep-clang64\n' "$arch_name"
+      else
+        printf 'windows-%s-gnustep-msvc\n' "$arch_name"
+      fi
+      ;;
+    *)
+      printf 'unknown-%s-unknown\n' "$arch_name"
+      ;;
+  esac
+}
+
+runtime_family_for_profile() {
+  local profile="${1:-}"
+  if [[ "$profile" == *"apple-foundation"* ]]; then
+    printf 'apple-foundation\n'
+  elif [[ "$profile" == *"gnustep"* ]]; then
+    printf 'gnustep\n'
+  else
+    printf 'unknown\n'
+  fi
+}
+
+compute_deployment_compatibility() {
+  local local_profile="$1"
+  local target_profile="$2"
+  local allow_remote_rebuild="$3"
+  local local_family
+  local target_family
+  local_family="$(runtime_family_for_profile "$local_profile")"
+  target_family="$(runtime_family_for_profile "$target_profile")"
+
+  if [[ "$local_profile" == "$target_profile" ]]; then
+    printf 'supported|same_profile\n'
+    return 0
+  fi
+
+  if [[ "$allow_remote_rebuild" != "1" ]]; then
+    printf 'unsupported|profile_mismatch_requires_remote_rebuild_opt_in\n'
+    return 0
+  fi
+
+  if [[ "$local_family" != "$target_family" ]]; then
+    printf 'unsupported|cross_runtime_family_remote_rebuild_not_supported\n'
+    return 0
+  fi
+
+  if [[ "$local_family" == "apple-foundation" ]]; then
+    printf 'unsupported|apple_cross_profile_remote_rebuild_not_supported\n'
+    return 0
+  fi
+
+  if [[ "$local_family" == "gnustep" ]]; then
+    printf 'experimental|gnustep_cross_profile_remote_rebuild\n'
+    return 0
+  fi
+
+  printf 'unsupported|profile_mismatch_not_supported\n'
+}
+
 app_root="$PWD"
 framework_root="$default_framework_root"
 releases_dir=""
@@ -105,6 +194,10 @@ json_performance_status=""
 json_performance_bundle_manifest=""
 dry_run=0
 output_json=0
+local_profile=""
+target_profile=""
+runtime_strategy="system"
+allow_remote_rebuild=0
 
 emit_error() {
   local code="$1"
@@ -152,12 +245,20 @@ emit_success_json() {
   printf '"release_id":"%s",' "$(json_escape "$release_id")"
   printf '"release_dir":"%s"' "$(json_escape "$release_dir")"
   if [[ -n "$manifest_path" ]]; then
-    printf ',"manifest_version":"phase29-deploy-manifest-v1"'
+    printf ',"manifest_version":"phase32-deploy-manifest-v1"'
     printf ',"manifest_path":"%s"' "$(json_escape "$manifest_path")"
   fi
   if [[ -n "$latest_built" ]]; then
     printf ',"latest_built_symlink":"%s"' "$(json_escape "$latest_built")"
   fi
+  printf ',"deployment":{"schema":"phase32-deploy-target-v1","local_profile":"%s","target_profile":"%s","runtime_strategy":"%s","support_level":"%s","compatibility_reason":"%s","allow_remote_rebuild":%s,"remote_rebuild_required":%s}' \
+    "$(json_escape "$local_profile")" \
+    "$(json_escape "$target_profile")" \
+    "$(json_escape "$runtime_strategy")" \
+    "$(json_escape "$deployment_support_level")" \
+    "$(json_escape "$deployment_reason")" \
+    "$([[ "$allow_remote_rebuild" == "1" ]] && printf 'true' || printf 'false')" \
+    "$([[ "$remote_rebuild_required" == "1" ]] && printf 'true' || printf 'false')"
   if [[ -n "$certification_manifest" ]]; then
     printf ',"certification_manifest":"%s"' "$(json_escape "$certification_manifest")"
   fi
@@ -239,6 +340,30 @@ while [[ $# -gt 0 ]]; do
       allow_missing_certification=1
       shift
       ;;
+    --target-profile)
+      [[ $# -ge 2 ]] || emit_error \
+        "missing_option_value" \
+        "--target-profile requires a value" \
+        "Pass the deployment target profile after --target-profile." \
+        "tools/deploy/build_release.sh --target-profile linux-x86_64-gnustep-clang --app-root /path/to/app" \
+        2
+      target_profile="$2"
+      shift 2
+      ;;
+    --runtime-strategy)
+      [[ $# -ge 2 ]] || emit_error \
+        "missing_option_value" \
+        "--runtime-strategy requires a value" \
+        "Pass system, managed, or bundled after --runtime-strategy." \
+        "tools/deploy/build_release.sh --runtime-strategy managed --app-root /path/to/app" \
+        2
+      runtime_strategy="$2"
+      shift 2
+      ;;
+    --allow-remote-rebuild)
+      allow_remote_rebuild=1
+      shift
+      ;;
     --dry-run)
       dry_run=1
       shift
@@ -281,6 +406,27 @@ fi
 
 app_root="$(cd "$app_root" && pwd)"
 framework_root="$(cd "$framework_root" && pwd)"
+local_profile="$(detect_local_platform_profile)"
+if [[ -z "$target_profile" ]]; then
+  target_profile="$local_profile"
+fi
+
+if [[ "$runtime_strategy" != "system" && "$runtime_strategy" != "managed" && "$runtime_strategy" != "bundled" ]]; then
+  emit_error \
+    "invalid_runtime_strategy" \
+    "invalid runtime strategy: $runtime_strategy" \
+    "Use system, managed, or bundled." \
+    "tools/deploy/build_release.sh --runtime-strategy managed --app-root /path/to/app" \
+    2
+fi
+
+deployment_compatibility="$(compute_deployment_compatibility "$local_profile" "$target_profile" "$allow_remote_rebuild")"
+deployment_support_level="${deployment_compatibility%%|*}"
+deployment_reason="${deployment_compatibility#*|}"
+remote_rebuild_required=0
+if [[ "$local_profile" != "$target_profile" ]]; then
+  remote_rebuild_required=1
+fi
 
 if [[ -z "$certification_manifest" ]]; then
   certification_manifest="$framework_root/build/release_confidence/phase9j/manifest.json"
@@ -522,12 +668,21 @@ ARLEN_RELEASE_CERTIFICATION_STATUS=$certification_status
 ARLEN_RELEASE_CERTIFICATION_MANIFEST=$certification_bundle_manifest
 ARLEN_JSON_PERFORMANCE_STATUS=$json_performance_status
 ARLEN_JSON_PERFORMANCE_MANIFEST=$json_performance_bundle_manifest
+ARLEN_DEPLOY_LOCAL_PROFILE=$local_profile
+ARLEN_DEPLOY_TARGET_PROFILE=$target_profile
+ARLEN_DEPLOY_RUNTIME_STRATEGY=$runtime_strategy
+ARLEN_DEPLOY_SUPPORT_LEVEL=$deployment_support_level
+ARLEN_DEPLOY_COMPATIBILITY_REASON=$deployment_reason
+ARLEN_DEPLOY_ALLOW_REMOTE_REBUILD=$allow_remote_rebuild
+ARLEN_DEPLOY_REMOTE_REBUILD_REQUIRED=$remote_rebuild_required
 EOF
 
 python3 - "$release_dir" "$release_id" "$app_root" "$framework_root" "$certification_status" \
   "$certification_bundle_manifest" "$json_performance_status" "$json_performance_bundle_manifest" \
   "$packaged_runtime_binary" "$packaged_framework_boomhauer" "$packaged_arlen_binary" \
-  "$packaged_propane" "$packaged_jobs_worker" "$packaged_operability_helper" <<'PY'
+  "$packaged_propane" "$packaged_jobs_worker" "$packaged_operability_helper" \
+  "$local_profile" "$target_profile" "$runtime_strategy" "$deployment_support_level" "$deployment_reason" \
+  "$allow_remote_rebuild" "$remote_rebuild_required" <<'PY'
 import json
 import os
 import sys
@@ -548,7 +703,14 @@ from datetime import datetime, timezone
     propane_binary,
     jobs_worker_binary,
     operability_probe_helper,
-) = sys.argv[1:15]
+    local_profile,
+    target_profile,
+    runtime_strategy,
+    deployment_support_level,
+    deployment_reason,
+    allow_remote_rebuild,
+    remote_rebuild_required,
+) = sys.argv[1:22]
 
 def rel(*parts):
     return os.path.join(*parts).replace(os.sep, "/")
@@ -564,7 +726,7 @@ if os.path.isdir(migrations_dir):
     migration_files.sort()
 
 manifest = {
-    "version": "phase29-deploy-manifest-v1",
+    "version": "phase32-deploy-manifest-v1",
     "release_id": release_id,
     "created_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
     "release_dir": release_dir,
@@ -598,6 +760,16 @@ manifest = {
     "json_performance": {
         "status": json_status,
         "manifest_path": json_manifest,
+    },
+    "deployment": {
+        "schema": "phase32-deploy-target-v1",
+        "local_profile": local_profile,
+        "target_profile": target_profile,
+        "runtime_strategy": runtime_strategy,
+        "support_level": deployment_support_level,
+        "compatibility_reason": deployment_reason,
+        "allow_remote_rebuild": allow_remote_rebuild == "1",
+        "remote_rebuild_required": remote_rebuild_required == "1",
     },
 }
 

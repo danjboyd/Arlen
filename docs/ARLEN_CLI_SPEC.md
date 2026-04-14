@@ -102,13 +102,26 @@ Behavior:
 
 - `plan` validates release packaging inputs and emits a stable deploy planning payload
 - `push` builds a local immutable release artifact under `releases/<release-id>/`
-- `push` writes `metadata/manifest.json` using contract version `phase29-deploy-manifest-v1`
+- `push` writes `metadata/manifest.json` using contract version `phase32-deploy-manifest-v1`
+- deploy manifests now carry target-aware deployment metadata (`local_profile`,
+  `target_profile`, `runtime_strategy`, `support_level`,
+  `compatibility_reason`, and remote rebuild requirements)
 - `release` reuses or creates the selected release, runs migrations when packaged `.sql` files exist, and activates `releases/current`
 - `release` can optionally verify `GET /healthz` through `--base-url <url>`
+- `release` fails closed when the packaged manifest records an unsupported
+  target profile
+- `release` requires `--remote-build-check-command <shell>` to succeed when
+  the packaged manifest records an experimental remote rebuild target
 - operability endpoints used by deploy verification are reserved ahead of app routes
 - `status` reports the active release, previous release, manifest-backed health contract, and optional service state
+- `status` now also reports deployment metadata for the active release and
+  rollback candidate
 - `rollback` promotes a previous release through `rollback_release.sh`, can reload/restart a service, and can re-run deploy health verification
+- `rollback` now reports deployment metadata for the rollback source and
+  activated target
 - `doctor` validates active release layout, packaged binaries, config loading, and optional live operability
+- `doctor` also validates deployment compatibility metadata and requires a
+  remote build-check command for experimental remote rebuild targets
 - packaged releases include the operability helper `framework/tools/deploy/validate_operability.sh` used by `doctor --base-url`
 - `logs` exposes release metadata pointers plus journald/file log access helpers
 - shared options:
@@ -116,6 +129,10 @@ Behavior:
   - `--framework-root <path>`
   - `--releases-dir <path>`
   - `--release-id <id>`
+  - `--target-profile <profile>`
+  - `--runtime-strategy <system|managed|bundled>`
+  - `--allow-remote-rebuild`
+  - `--remote-build-check-command <shell>`
   - `--service <name>`
   - `--certification-manifest <path>`
   - `--json-performance-manifest <path>`
@@ -206,5 +223,9 @@ Framework root resolution order:
 ## 8. Near-Term Additions
 
 - `deploy init` as a narrow, optional host bootstrap helper after the core deploy product stabilizes
+- target-aware deploy configuration and platform-profile validation for
+  production targets
+- richer `deploy doctor` target probes for runtime strategy, host readiness,
+  and explicit remote rebuild gating
 - richer generator extension hooks
 - plugin/lifecycle scaffolding commands

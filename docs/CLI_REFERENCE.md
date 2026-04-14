@@ -96,7 +96,7 @@ First-class release orchestration over the existing `tools/deploy/*` scripts.
 - validates release packaging inputs using `tools/deploy/build_release.sh --dry-run`
 - emits a normalized machine payload with:
   - `workflow = deploy.plan`
-  - `manifest_version = phase29-deploy-manifest-v1`
+  - `manifest_version = phase32-deploy-manifest-v1`
   - nested `build_release` payload from the packaging script
 
 `arlen deploy push`
@@ -111,6 +111,8 @@ First-class release orchestration over the existing `tools/deploy/*` scripts.
 - runs `migrate --env <name>` only when packaged SQL migrations exist, unless `--skip-migrate` is passed
 - activates `releases/current` via `tools/deploy/activate_release.sh`
 - optionally probes `<base-url>/healthz` when `--base-url` is supplied
+- fails closed when the packaged manifest records an unsupported target profile
+- requires `--remote-build-check-command` to succeed when the packaged manifest records an experimental remote rebuild target
 - resolves the packaged `arlen` binary from manifest-backed paths, including
   `.exe` siblings on Windows preview builds
 - relies on the reserved operability contract, so app routes cannot shadow `/healthz`
@@ -118,6 +120,7 @@ First-class release orchestration over the existing `tools/deploy/*` scripts.
 `arlen deploy status`
 
 - reports the active release id, previous release id, manifest path, migration inventory, and health contract from `releases/current`
+- reports deployment metadata for the active release and rollback candidate
 - reports service state when `--service <unit>` is supplied
 - can run a live operability probe when `--base-url <url>` is supplied
 
@@ -132,6 +135,7 @@ First-class release orchestration over the existing `tools/deploy/*` scripts.
 `arlen deploy doctor`
 
 - validates release layout, manifest presence, packaged binaries, config loading, and database URL completeness
+- validates deployment compatibility metadata and requires a remote build-check command when the active release targets an experimental remote rebuild path
 - reports service state when `--service <unit>` is supplied
 - runs full `tools/deploy/validate_operability.sh` when `--base-url <url>` is supplied
 - packaged releases include that helper under `framework/tools/deploy/`, so `deploy doctor --base-url` works against activated release payloads
@@ -150,6 +154,10 @@ Common options:
 - `--framework-root <path>`: Arlen checkout root (default: resolved from env/current tree)
 - `--releases-dir <path>`: release output root (default: `<app-root>/releases`)
 - `--release-id <id>`: explicit release identifier (default: UTC timestamp)
+- `--target-profile <profile>`: deployment target profile (`linux-x86_64-gnustep-clang`, `windows-x86_64-gnustep-clang64`, `macos-arm64-apple-foundation`, etc.)
+- `--runtime-strategy <system|managed|bundled>`: target runtime fulfillment contract (default `system`)
+- `--allow-remote-rebuild`: allow the best-effort GNUstep cross-profile rebuild path
+- `--remote-build-check-command <shell>`: shell command used to validate the target build chain for experimental remote rebuild targets
 - `--certification-manifest <path>`: override Phase 9J certification manifest path
 - `--json-performance-manifest <path>`: override Phase 10E performance manifest path
 - `--allow-missing-certification`: waive certification/performance manifest enforcement for non-RC flows

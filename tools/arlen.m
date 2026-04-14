@@ -98,6 +98,10 @@ static void PrintDeployUsage(void) {
           "  --release-id <id>\n"
           "  --service <name>      systemd unit for runtime state/log actions\n"
           "  --base-url <url>      Base URL for probe validation\n"
+          "  --target-profile <profile>\n"
+          "  --runtime-strategy <system|managed|bundled>\n"
+          "  --allow-remote-rebuild\n"
+          "  --remote-build-check-command <shell>\n"
           "  --certification-manifest <path>\n"
           "  --json-performance-manifest <path>\n"
           "  --allow-missing-certification\n"
@@ -588,6 +592,123 @@ static NSDictionary *MigrationInventoryFromManifest(NSDictionary *manifest) {
   };
 }
 
+static NSString *CurrentDeployArchitecture(void) {
+#if defined(__aarch64__) || defined(__arm64__)
+  return @"arm64";
+#elif defined(__x86_64__) || defined(_M_X64) || defined(__amd64__)
+  return @"x86_64";
+#else
+  return @"unknown";
+#endif
+}
+
+static NSString *CurrentDeployPlatformProfile(void) {
+  NSString *arch = CurrentDeployArchitecture();
+#if defined(__APPLE__)
+  return [NSString stringWithFormat:@"macos-%@-apple-foundation", arch ?: @"unknown"];
+#elif defined(_WIN32)
+  NSString *msystem = [[Trimmed(EnvValue("MSYSTEM")) uppercaseString] copy];
+  NSString *variant = [msystem isEqualToString:@"CLANG64"] ? @"clang64" : @"msvc";
+  return [NSString stringWithFormat:@"windows-%@-gnustep-%@", arch ?: @"unknown", variant];
+#elif defined(__linux__)
+  return [NSString stringWithFormat:@"linux-%@-gnustep-clang", arch ?: @"unknown"];
+#else
+  return [NSString stringWithFormat:@"unknown-%@-unknown", arch ?: @"unknown"];
+#endif
+}
+
+static NSString *RuntimeFamilyForDeployProfile(NSString *profile) {
+  NSString *value = Trimmed(profile);
+  if ([value rangeOfString:@"apple-foundation"].location != NSNotFound) {
+    return @"apple-foundation";
+  }
+  if ([value rangeOfString:@"gnustep"].location != NSNotFound) {
+    return @"gnustep";
+  }
+  return @"unknown";
+}
+
+static NSDictionary *AssessDeployCompatibility(NSString *localProfile,
+                                               NSString *targetProfile,
+                                               BOOL allowRemoteRebuild) {
+  NSString *resolvedLocal = [Trimmed(localProfile) length] > 0 ? Trimmed(localProfile) : CurrentDeployPlatformProfile();
+  NSString *resolvedTarget = [Trimmed(targetProfile) length] > 0 ? Trimmed(targetProfile) : resolvedLocal;
+  NSString *localFamily = RuntimeFamilyForDeployProfile(resolvedLocal);
+  NSString *targetFamily = RuntimeFamilyForDeployProfile(resolvedTarget);
+  BOOL remoteRebuildRequired = ![resolvedLocal isEqualToString:resolvedTarget];
+  NSString *supportLevel = @"supported";
+  NSString *reason = @"same_profile";
+
+  if (remoteRebuildRequired) {
+    if (!allowRemoteRebuild) {
+      supportLevel = @"unsupported";
+      reason = @"profile_mismatch_requires_remote_rebuild_opt_in";
+    } else if (![localFamily isEqualToString:targetFamily]) {
+      supportLevel = @"unsupported";
+      reason = @"cross_runtime_family_remote_rebuild_not_supported";
+    } else if ([localFamily isEqualToString:@"apple-foundation"]) {
+      supportLevel = @"unsupported";
+      reason = @"apple_cross_profile_remote_rebuild_not_supported";
+    } else if ([localFamily isEqualToString:@"gnustep"]) {
+      supportLevel = @"experimental";
+      reason = @"gnustep_cross_profile_remote_rebuild";
+    } else {
+      supportLevel = @"unsupported";
+      reason = @"profile_mismatch_not_supported";
+    }
+  }
+
+  return @{
+    @"schema" : @"phase32-deploy-target-v1",
+    @"local_profile" : resolvedLocal ?: @"",
+    @"target_profile" : resolvedTarget ?: @"",
+    @"support_level" : supportLevel,
+    @"compatibility_reason" : reason,
+    @"allow_remote_rebuild" : @(allowRemoteRebuild),
+    @"remote_rebuild_required" : @(remoteRebuildRequired),
+    @"local_runtime_family" : localFamily ?: @"unknown",
+    @"target_runtime_family" : targetFamily ?: @"unknown",
+  };
+}
+
+static NSDictionary *DeploymentMetadataFromManifest(NSDictionary *manifest, BOOL allowRemoteRebuildFallback) {
+  NSDictionary *deployment = [manifest[@"deployment"] isKindOfClass:[NSDictionary class]] ? manifest[@"deployment"] : nil;
+  NSString *localProfile = [deployment[@"local_profile"] isKindOfClass:[NSString class]] ? deployment[@"local_profile"] : CurrentDeployPlatformProfile();
+  NSString *targetProfile = [deployment[@"target_profile"] isKindOfClass:[NSString class]] ? deployment[@"target_profile"] : localProfile;
+  BOOL allowRemoteRebuild = [deployment[@"allow_remote_rebuild"] respondsToSelector:@selector(boolValue)]
+                                ? [deployment[@"allow_remote_rebuild"] boolValue]
+                                : allowRemoteRebuildFallback;
+  NSMutableDictionary *resolved = [AssessDeployCompatibility(localProfile, targetProfile, allowRemoteRebuild) mutableCopy];
+  NSString *runtimeStrategy =
+      [deployment[@"runtime_strategy"] isKindOfClass:[NSString class]] ? deployment[@"runtime_strategy"] : @"system";
+  resolved[@"runtime_strategy"] = runtimeStrategy ?: @"system";
+  resolved[@"manifest_version"] = [manifest[@"version"] isKindOfClass:[NSString class]] ? manifest[@"version"] : @"";
+  if ([deployment[@"schema"] isKindOfClass:[NSString class]]) {
+    resolved[@"schema"] = deployment[@"schema"];
+  }
+  return resolved;
+}
+
+static NSDictionary *RunRemoteBuildCheck(NSString *command) {
+  NSString *trimmedCommand = Trimmed(command);
+  if ([trimmedCommand length] == 0) {
+    return @{
+      @"status" : @"missing",
+      @"captured_output" : @"",
+      @"exit_code" : @1,
+    };
+  }
+
+  int exitCode = 0;
+  NSString *output = RunShellCaptureCommand(trimmedCommand, &exitCode);
+  return @{
+    @"status" : (exitCode == 0) ? @"ok" : @"error",
+    @"command" : trimmedCommand ?: @"",
+    @"captured_output" : output ?: @"",
+    @"exit_code" : @(exitCode),
+  };
+}
+
 static NSDictionary *RunDeployHealthProbe(NSString *frameworkRoot, NSString *helperPath, NSString *baseURL) {
   if ([baseURL length] == 0) {
     return @{
@@ -638,6 +759,7 @@ static NSArray<NSDictionary *> *DeployDoctorChecksForRelease(NSString *releaseDi
                                                              NSString *environment,
                                                              NSString *serviceName,
                                                              NSString *baseURL,
+                                                             NSString *remoteBuildCheckCommand,
                                                              NSInteger *passCount,
                                                              NSInteger *warnCount,
                                                              NSInteger *failCount) {
@@ -698,6 +820,50 @@ static NSArray<NSDictionary *> *DeployDoctorChecksForRelease(NSString *releaseDi
   } else {
     addCheck(@"release_env", @"warn", [NSString stringWithFormat:@"release env missing: %@", releaseEnvPath],
              @"Rebuild the release artifact if metadata files are incomplete.");
+  }
+
+  NSDictionary *deployment = DeploymentMetadataFromManifest(manifest, NO);
+  NSString *supportLevel = [deployment[@"support_level"] isKindOfClass:[NSString class]] ? deployment[@"support_level"] : @"supported";
+  NSString *runtimeStrategy = [deployment[@"runtime_strategy"] isKindOfClass:[NSString class]] ? deployment[@"runtime_strategy"] : @"system";
+  NSString *localProfile = [deployment[@"local_profile"] isKindOfClass:[NSString class]] ? deployment[@"local_profile"] : @"";
+  NSString *targetProfile = [deployment[@"target_profile"] isKindOfClass:[NSString class]] ? deployment[@"target_profile"] : @"";
+  NSString *compatibilityReason =
+      [deployment[@"compatibility_reason"] isKindOfClass:[NSString class]] ? deployment[@"compatibility_reason"] : @"same_profile";
+  NSString *compatibilityStatus = [supportLevel isEqualToString:@"supported"] ? @"pass"
+                                 : [supportLevel isEqualToString:@"experimental"] ? @"warn"
+                                 : @"fail";
+  addCheck(@"deployment_profile",
+           @"pass",
+           [NSString stringWithFormat:@"deployment local=%@ target=%@", localProfile ?: @"", targetProfile ?: @""],
+           @"");
+  addCheck(@"runtime_strategy",
+           [@[ @"system", @"managed", @"bundled" ] containsObject:runtimeStrategy] ? @"pass" : @"fail",
+           [NSString stringWithFormat:@"runtime strategy: %@", runtimeStrategy ?: @"system"],
+           @"Use system, managed, or bundled in the deploy target configuration.");
+  addCheck(@"compatibility",
+           compatibilityStatus,
+           [NSString stringWithFormat:@"deployment compatibility %@ (%@)", supportLevel ?: @"supported",
+                                      compatibilityReason ?: @"same_profile"],
+           [supportLevel isEqualToString:@"unsupported"]
+               ? @"Deploy to the same platform profile, or opt into a supported remote rebuild path."
+               : [supportLevel isEqualToString:@"experimental"]
+                     ? @"Remote rebuild is best-effort; validate the target build chain before activation."
+                     : @"");
+  if ([deployment[@"remote_rebuild_required"] boolValue]) {
+    NSDictionary *remoteBuildCheck = RunRemoteBuildCheck(remoteBuildCheckCommand);
+    NSString *remoteStatus = [remoteBuildCheck[@"status"] isEqualToString:@"ok"] ? @"pass"
+                           : [remoteBuildCheck[@"status"] isEqualToString:@"missing"] ? @"fail"
+                                                                                       : @"fail";
+    addCheck(@"remote_build_check",
+             remoteStatus,
+             [remoteBuildCheck[@"status"] isEqualToString:@"ok"]
+                 ? @"remote rebuild validation command completed successfully"
+                 : [remoteBuildCheck[@"status"] isEqualToString:@"missing"]
+                       ? @"remote rebuild validation command not provided"
+                       : @"remote rebuild validation command failed",
+             [remoteBuildCheck[@"status"] isEqualToString:@"missing"]
+                 ? @"Pass --remote-build-check-command to validate the target build chain."
+                 : (remoteBuildCheck[@"captured_output"] ?: @""));
   }
 
   NSDictionary *paths = [manifest[@"paths"] isKindOfClass:[NSDictionary class]] ? manifest[@"paths"] : @{};
@@ -3252,10 +3418,14 @@ static int CommandDeploy(NSArray *args) {
   NSString *jsonPerformanceManifest = nil;
   NSString *environment = @"production";
   NSString *baseURL = nil;
+  NSString *targetProfile = nil;
+  NSString *runtimeStrategy = @"system";
+  NSString *remoteBuildCheckCommand = nil;
   NSString *serviceName = nil;
   NSString *runtimeAction = @"reload";
   NSString *logFilePath = nil;
   BOOL allowMissingCertification = NO;
+  BOOL allowRemoteRebuild = NO;
   BOOL asJSON = NO;
   BOOL skipMigrate = NO;
   BOOL followLogs = NO;
@@ -3372,6 +3542,42 @@ static int CommandDeploy(NSArray *args) {
         return 2;
       }
       baseURL = subArgs[++idx];
+    } else if ([arg isEqualToString:@"--target-profile"]) {
+      if (idx + 1 >= [subArgs count]) {
+        if (asJSON) {
+          return EmitMachineError(@"deploy", [NSString stringWithFormat:@"deploy.%@", subcommand],
+                                  @"missing_option_value", @"arlen deploy: --target-profile requires a value",
+                                  @"Pass the deployment target profile after --target-profile.",
+                                  @"arlen deploy plan --target-profile linux-x86_64-gnustep-clang --json", 2);
+        }
+        fprintf(stderr, "arlen deploy: --target-profile requires a value\n");
+        return 2;
+      }
+      targetProfile = Trimmed(subArgs[++idx]);
+    } else if ([arg isEqualToString:@"--runtime-strategy"]) {
+      if (idx + 1 >= [subArgs count]) {
+        if (asJSON) {
+          return EmitMachineError(@"deploy", [NSString stringWithFormat:@"deploy.%@", subcommand],
+                                  @"missing_option_value", @"arlen deploy: --runtime-strategy requires a value",
+                                  @"Use system, managed, or bundled.",
+                                  @"arlen deploy plan --runtime-strategy managed --json", 2);
+        }
+        fprintf(stderr, "arlen deploy: --runtime-strategy requires a value\n");
+        return 2;
+      }
+      runtimeStrategy = [Trimmed(subArgs[++idx]) lowercaseString];
+    } else if ([arg isEqualToString:@"--remote-build-check-command"]) {
+      if (idx + 1 >= [subArgs count]) {
+        if (asJSON) {
+          return EmitMachineError(@"deploy", [NSString stringWithFormat:@"deploy.%@", subcommand],
+                                  @"missing_option_value", @"arlen deploy: --remote-build-check-command requires a value",
+                                  @"Pass a shell command that validates the target build chain.",
+                                  @"arlen deploy doctor --remote-build-check-command 'ssh app1 true' --json", 2);
+        }
+        fprintf(stderr, "arlen deploy: --remote-build-check-command requires a value\n");
+        return 2;
+      }
+      remoteBuildCheckCommand = subArgs[++idx];
     } else if ([arg isEqualToString:@"--service"]) {
       if (idx + 1 >= [subArgs count]) {
         if (asJSON) {
@@ -3428,6 +3634,8 @@ static int CommandDeploy(NSArray *args) {
                         stringByStandardizingPath];
     } else if ([arg isEqualToString:@"--allow-missing-certification"]) {
       allowMissingCertification = YES;
+    } else if ([arg isEqualToString:@"--allow-remote-rebuild"]) {
+      allowRemoteRebuild = YES;
     } else if ([arg isEqualToString:@"--json"]) {
       asJSON = YES;
     } else if ([arg isEqualToString:@"--skip-migrate"]) {
@@ -3487,6 +3695,14 @@ static int CommandDeploy(NSArray *args) {
                                      @"arlen deploy rollback --runtime-action restart --json", 2)
                   : 2;
   }
+  if ([runtimeStrategy length] > 0 &&
+      ![@[ @"system", @"managed", @"bundled" ] containsObject:runtimeStrategy]) {
+    return asJSON ? EmitMachineError(@"deploy", [NSString stringWithFormat:@"deploy.%@", subcommand], @"invalid_runtime_strategy",
+                                     @"invalid --runtime-strategy; expected system, managed, or bundled",
+                                     @"Use system, managed, or bundled.",
+                                     @"arlen deploy plan --runtime-strategy managed --json", 2)
+                  : 2;
+  }
 
   NSString *workflow = [NSString stringWithFormat:@"deploy.%@", subcommand];
   NSString *scriptRoot = [frameworkRoot stringByAppendingPathComponent:@"tools/deploy"];
@@ -3500,7 +3716,9 @@ static int CommandDeploy(NSArray *args) {
   NSDictionary *currentManifest = [currentManifestPath length] > 0 ? (JSONDictionaryFromFile(currentManifestPath) ?: @{}) : @{};
   NSDictionary *currentHealthContract = HealthContractFromManifest(currentManifest);
   NSDictionary *currentMigrationInventory = MigrationInventoryFromManifest(currentManifest);
+  NSDictionary *currentDeployment = DeploymentMetadataFromManifest(currentManifest, allowRemoteRebuild);
   NSString *previousReleaseID = PreviousReleaseIDAtReleasesDir(releasesDir, currentReleaseID);
+  NSDictionary *requestedDeployment = AssessDeployCompatibility(CurrentDeployPlatformProfile(), targetProfile, allowRemoteRebuild);
 
   NSMutableString *buildCommand =
       [NSMutableString stringWithFormat:@"%@/build_release.sh", ShellQuote(scriptRoot)];
@@ -3512,8 +3730,13 @@ static int CommandDeploy(NSArray *args) {
   }
   AppendShellOption(buildCommand, @"--certification-manifest", certificationManifest);
   AppendShellOption(buildCommand, @"--json-performance-manifest", jsonPerformanceManifest);
+  AppendShellOption(buildCommand, @"--target-profile", [requestedDeployment[@"target_profile"] isKindOfClass:[NSString class]] ? requestedDeployment[@"target_profile"] : targetProfile);
+  AppendShellOption(buildCommand, @"--runtime-strategy", runtimeStrategy);
   if (allowMissingCertification) {
     [buildCommand appendString:@" --allow-missing-certification"];
+  }
+  if (allowRemoteRebuild) {
+    [buildCommand appendString:@" --allow-remote-rebuild"];
   }
 
   if ([subcommand isEqualToString:@"plan"]) {
@@ -3542,7 +3765,8 @@ static int CommandDeploy(NSArray *args) {
         @"release_id" : releaseID ?: @"",
         @"release_dir" : releaseDir ?: @"",
         @"manifest_path" : manifestPath ?: @"",
-        @"manifest_version" : @"phase29-deploy-manifest-v1",
+        @"manifest_version" : @"phase32-deploy-manifest-v1",
+        @"deployment" : requestedDeployment ?: @{},
         @"build_release" : buildPayload ?: @{},
       };
       PrintJSONPayload(stdout, payload);
@@ -3578,7 +3802,8 @@ static int CommandDeploy(NSArray *args) {
         @"release_id" : releaseID ?: @"",
         @"release_dir" : releaseDir ?: @"",
         @"manifest_path" : manifestPath ?: @"",
-        @"manifest_version" : manifest[@"version"] ?: @"phase29-deploy-manifest-v1",
+        @"manifest_version" : manifest[@"version"] ?: @"phase32-deploy-manifest-v1",
+        @"deployment" : DeploymentMetadataFromManifest(manifest, allowRemoteRebuild),
         @"manifest" : manifest,
         @"build_release" : buildPayload ?: @{},
       };
@@ -3594,6 +3819,10 @@ static int CommandDeploy(NSArray *args) {
     NSString *serviceState = ServiceRuntimeState(serviceName, &serviceOutput);
     NSDictionary *currentPaths =
         [currentManifest[@"paths"] isKindOfClass:[NSDictionary class]] ? currentManifest[@"paths"] : @{};
+    NSString *previousReleaseDir = [previousReleaseID length] > 0 ? [releasesDir stringByAppendingPathComponent:previousReleaseID] : nil;
+    NSString *previousManifestPath =
+        [previousReleaseDir length] > 0 ? [previousReleaseDir stringByAppendingPathComponent:@"metadata/manifest.json"] : nil;
+    NSDictionary *previousManifest = [previousManifestPath length] > 0 ? (JSONDictionaryFromFile(previousManifestPath) ?: @{}) : @{};
     NSString *currentProbeHelper =
         [currentPaths[@"operability_probe_helper"] isKindOfClass:[NSString class]] ? currentPaths[@"operability_probe_helper"] : nil;
     NSString *probeFrameworkRoot = [currentReleaseDir length] > 0 ? [[currentReleaseDir stringByAppendingPathComponent:@"framework"] stringByStandardizingPath]
@@ -3611,10 +3840,18 @@ static int CommandDeploy(NSArray *args) {
         @"active_release_id" : currentReleaseID ?: @"",
         @"active_release_dir" : currentReleaseDir ?: @"",
         @"previous_release_id" : previousReleaseID ?: @"",
+        @"previous_release_dir" : previousReleaseDir ?: @"",
         @"manifest_path" : currentManifestPath ?: @"",
         @"manifest" : currentManifest ?: @{},
+        @"deployment" : currentDeployment ?: @{},
         @"health_contract" : currentHealthContract ?: @{},
         @"migration_inventory" : currentMigrationInventory ?: @{},
+        @"rollback_candidate" : @{
+          @"release_id" : previousReleaseID ?: @"",
+          @"release_dir" : previousReleaseDir ?: @"",
+          @"manifest_path" : previousManifestPath ?: @"",
+          @"deployment" : DeploymentMetadataFromManifest(previousManifest, NO),
+        },
         @"service" : @{
           @"name" : serviceName ?: @"",
           @"state" : serviceState ?: @"not_requested",
@@ -3629,6 +3866,9 @@ static int CommandDeploy(NSArray *args) {
     fprintf(stdout, "Active release: %s\n", [(currentReleaseID ?: @"(none)") UTF8String]);
     fprintf(stdout, "Previous release: %s\n", [(previousReleaseID ?: @"(none)") UTF8String]);
     fprintf(stdout, "Release dir: %s\n", [(currentReleaseDir ?: @"(none)") UTF8String]);
+    fprintf(stdout, "Profile: %s -> %s\n",
+            [([currentDeployment[@"local_profile"] description] ?: @"(unknown)") UTF8String],
+            [([currentDeployment[@"target_profile"] description] ?: @"(unknown)") UTF8String]);
     fprintf(stdout, "Service state: %s\n", [(serviceState ?: @"not_requested") UTF8String]);
     fprintf(stdout, "Migration count: %s\n",
             [(([[currentMigrationInventory[@"count"] description] length] > 0)
@@ -3741,6 +3981,7 @@ static int CommandDeploy(NSArray *args) {
         [activeDirAfterRollback length] > 0
             ? (JSONDictionaryFromFile([activeDirAfterRollback stringByAppendingPathComponent:@"metadata/manifest.json"]) ?: @{})
             : @{};
+    NSDictionary *activeDeploymentAfterRollback = DeploymentMetadataFromManifest(activeManifestAfterRollback, NO);
     NSDictionary *activePathsAfterRollback =
         [activeManifestAfterRollback[@"paths"] isKindOfClass:[NSDictionary class]] ? activeManifestAfterRollback[@"paths"] : @{};
     NSString *probeHelperAfterRollback =
@@ -3794,6 +4035,12 @@ static int CommandDeploy(NSArray *args) {
         @"target_release_id" : rollbackTargetID ?: @"",
         @"active_release_id" : [activeDirAfterRollback length] > 0 ? ReleaseIDForDirectory(activeDirAfterRollback) : @"",
         @"active_release_dir" : activeDirAfterRollback ?: @"",
+        @"deployment" : activeDeploymentAfterRollback ?: @{},
+        @"rollback_source" : @{
+          @"release_id" : currentReleaseID ?: @"",
+          @"release_dir" : currentReleaseDir ?: @"",
+          @"deployment" : currentDeployment ?: @{},
+        },
         @"manifest" : activeManifestAfterRollback ?: @{},
         @"warnings" : warnings ?: @[],
         @"steps" : steps ?: @[],
@@ -3811,6 +4058,7 @@ static int CommandDeploy(NSArray *args) {
     NSInteger warnCount = 0;
     NSInteger failCount = 0;
     NSArray *checks = DeployDoctorChecksForRelease(currentReleaseDir, environment, serviceName, baseURL,
+                                                   remoteBuildCheckCommand,
                                                    &passCount, &warnCount, &failCount);
     NSString *status = (failCount > 0) ? @"fail" : (warnCount > 0 ? @"warn" : @"ok");
     if (asJSON) {
@@ -3823,6 +4071,7 @@ static int CommandDeploy(NSArray *args) {
         @"active_release_id" : currentReleaseID ?: @"",
         @"active_release_dir" : currentReleaseDir ?: @"",
         @"environment" : environment ?: @"production",
+        @"deployment" : currentDeployment ?: @{},
         @"checks" : checks ?: @[],
         @"summary" : @{
           @"pass" : @(passCount),
@@ -3975,8 +4224,88 @@ static int CommandDeploy(NSArray *args) {
   NSDictionary *releaseMetadata = LoadReleaseMetadataAtDirectory(releaseDir);
   NSDictionary *releaseManifest =
       [releaseMetadata[@"manifest"] isKindOfClass:[NSDictionary class]] ? releaseMetadata[@"manifest"] : @{};
+  NSDictionary *releaseDeployment = DeploymentMetadataFromManifest(releaseManifest, allowRemoteRebuild);
   NSDictionary *releasePaths =
       [releaseManifest[@"paths"] isKindOfClass:[NSDictionary class]] ? releaseManifest[@"paths"] : @{};
+  NSString *releaseSupportLevel =
+      [releaseDeployment[@"support_level"] isKindOfClass:[NSString class]] ? releaseDeployment[@"support_level"] : @"supported";
+  NSString *releaseCompatibilityReason =
+      [releaseDeployment[@"compatibility_reason"] isKindOfClass:[NSString class]] ? releaseDeployment[@"compatibility_reason"] : @"same_profile";
+  if ([releaseSupportLevel isEqualToString:@"unsupported"]) {
+    if (asJSON) {
+      NSDictionary *payload = @{
+        @"version" : AgentContractVersion(),
+        @"command" : @"deploy",
+        @"workflow" : workflow,
+        @"subcommand" : subcommand,
+        @"status" : @"error",
+        @"release_id" : releaseID ?: @"",
+        @"release_dir" : releaseDir ?: @"",
+        @"deployment" : releaseDeployment ?: @{},
+        @"steps" : [steps arrayByAddingObject:@{
+          @"id" : @"compatibility",
+          @"status" : @"error",
+          @"support_level" : releaseSupportLevel ?: @"unsupported",
+          @"reason" : releaseCompatibilityReason ?: @"",
+        }],
+        @"error" : @{
+          @"code" : @"deploy_release_unsupported_target",
+          @"message" : @"deployment target is outside the supported compatibility contract",
+          @"fixit" : @{
+            @"action" : @"Deploy to the same platform profile, or opt into a supported GNUstep remote rebuild path.",
+            @"example" : @"arlen deploy release --target-profile linux-x86_64-gnustep-clang --json",
+          }
+        },
+        @"exit_code" : @1,
+      };
+      PrintJSONPayload(stdout, payload);
+    }
+    return 1;
+  }
+  if ([releaseSupportLevel isEqualToString:@"experimental"]) {
+    NSDictionary *remoteBuildCheck = RunRemoteBuildCheck(remoteBuildCheckCommand);
+    if (![[remoteBuildCheck[@"status"] description] isEqualToString:@"ok"]) {
+      if (asJSON) {
+        NSDictionary *payload = @{
+          @"version" : AgentContractVersion(),
+          @"command" : @"deploy",
+          @"workflow" : workflow,
+          @"subcommand" : subcommand,
+          @"status" : @"error",
+          @"release_id" : releaseID ?: @"",
+          @"release_dir" : releaseDir ?: @"",
+          @"deployment" : releaseDeployment ?: @{},
+          @"steps" : [steps arrayByAddingObject:@{
+            @"id" : @"remote_build_check",
+            @"status" : @"error",
+            @"captured_output" : remoteBuildCheck[@"captured_output"] ?: @"",
+          }],
+          @"error" : @{
+            @"code" : @"deploy_release_remote_build_check_failed",
+            @"message" : @"experimental remote rebuild target requires a successful build-chain validation command",
+            @"fixit" : @{
+              @"action" : @"Pass --remote-build-check-command and verify it can compile/link on the target host.",
+              @"example" : @"arlen deploy release --allow-remote-rebuild --remote-build-check-command 'ssh host true' --json",
+            }
+          },
+          @"exit_code" : @([remoteBuildCheck[@"exit_code"] integerValue] > 0 ? [remoteBuildCheck[@"exit_code"] integerValue] : 1),
+        };
+        PrintJSONPayload(stdout, payload);
+      }
+      return ([remoteBuildCheck[@"exit_code"] integerValue] > 0) ? [remoteBuildCheck[@"exit_code"] integerValue] : 1;
+    }
+    [steps addObject:@{
+      @"id" : @"remote_build_check",
+      @"status" : @"ok",
+      @"support_level" : releaseSupportLevel ?: @"experimental",
+    }];
+  } else {
+    [steps addObject:@{
+      @"id" : @"compatibility",
+      @"status" : @"ok",
+      @"support_level" : releaseSupportLevel ?: @"supported",
+    }];
+  }
   NSString *releaseBinary =
       ([releasePaths[@"arlen"] isKindOfClass:[NSString class]] ? ResolveExecutablePath(releasePaths[@"arlen"]) : nil);
   if ([releaseBinary length] == 0) {
@@ -4149,7 +4478,8 @@ static int CommandDeploy(NSArray *args) {
       @"release_dir" : releaseDir ?: @"",
       @"releases_dir" : releasesDir ?: @"",
       @"manifest_path" : manifestPath ?: @"",
-      @"manifest_version" : manifest[@"version"] ?: @"phase29-deploy-manifest-v1",
+      @"manifest_version" : manifest[@"version"] ?: @"phase32-deploy-manifest-v1",
+      @"deployment" : releaseDeployment ?: @{},
       @"manifest" : manifest,
       @"steps" : steps ?: @[],
       @"build_release" : buildPayload ?: @{},

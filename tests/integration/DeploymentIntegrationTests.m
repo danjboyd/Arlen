@@ -1037,11 +1037,16 @@
     XCTAssertEqualObjects(@"deploy.plan", deployPlan[@"workflow"]);
     XCTAssertEqualObjects(@"planned", deployPlan[@"status"]);
     XCTAssertEqualObjects(@"agent-dx-1", deployPlan[@"release_id"]);
-    XCTAssertEqualObjects(@"phase29-deploy-manifest-v1", deployPlan[@"manifest_version"]);
+    XCTAssertEqualObjects(@"phase32-deploy-manifest-v1", deployPlan[@"manifest_version"]);
+    NSDictionary *deployment = [deployPlan[@"deployment"] isKindOfClass:[NSDictionary class]] ? deployPlan[@"deployment"] : @{};
+    XCTAssertEqualObjects(@"supported", deployment[@"support_level"]);
     NSDictionary *buildRelease = [deployPlan[@"build_release"] isKindOfClass:[NSDictionary class]]
                                      ? deployPlan[@"build_release"]
                                      : @{};
     XCTAssertEqualObjects(@"deploy.build_release", buildRelease[@"workflow"]);
+    NSDictionary *buildDeployment =
+        [buildRelease[@"deployment"] isKindOfClass:[NSDictionary class]] ? buildRelease[@"deployment"] : @{};
+    XCTAssertEqualObjects(@"supported", buildDeployment[@"support_level"]);
   } @finally {
     [[NSFileManager defaultManager] removeItemAtPath:workRoot error:nil];
   }
@@ -1085,13 +1090,16 @@
     NSDictionary *pushPayload = [self parseJSONDictionaryFromOutput:pushOutput context:@"arlen deploy push --json"];
     XCTAssertEqualObjects(@"deploy.push", pushPayload[@"workflow"]);
     XCTAssertEqualObjects(@"ok", pushPayload[@"status"]);
-    XCTAssertEqualObjects(@"phase29-deploy-manifest-v1", pushPayload[@"manifest_version"]);
+    XCTAssertEqualObjects(@"phase32-deploy-manifest-v1", pushPayload[@"manifest_version"]);
     NSString *manifestPath = [pushPayload[@"manifest_path"] isKindOfClass:[NSString class]]
                                  ? pushPayload[@"manifest_path"]
                                  : @"";
     XCTAssertTrue([[NSFileManager defaultManager] fileExistsAtPath:manifestPath]);
     NSDictionary *manifest = [pushPayload[@"manifest"] isKindOfClass:[NSDictionary class]] ? pushPayload[@"manifest"] : @{};
-    XCTAssertEqualObjects(@"phase29-deploy-manifest-v1", manifest[@"version"]);
+    XCTAssertEqualObjects(@"phase32-deploy-manifest-v1", manifest[@"version"]);
+    NSDictionary *deployment = [manifest[@"deployment"] isKindOfClass:[NSDictionary class]] ? manifest[@"deployment"] : @{};
+    XCTAssertEqualObjects(@"supported", deployment[@"support_level"]);
+    XCTAssertEqualObjects(@"system", deployment[@"runtime_strategy"]);
     NSDictionary *pushPaths = [manifest[@"paths"] isKindOfClass:[NSDictionary class]] ? manifest[@"paths"] : @{};
     NSString *releaseBoomhauer = [pushPaths[@"boomhauer"] isKindOfClass:[NSString class]] ? pushPaths[@"boomhauer"] : @"";
     XCTAssertTrue([[NSFileManager defaultManager] isExecutableFileAtPath:releaseBoomhauer],
@@ -1122,12 +1130,14 @@
     XCTAssertEqualObjects(@"deploy.release", releasePayload[@"workflow"]);
     XCTAssertEqualObjects(@"ok", releasePayload[@"status"]);
     NSArray *steps = [releasePayload[@"steps"] isKindOfClass:[NSArray class]] ? releasePayload[@"steps"] : @[];
-    XCTAssertEqual((NSUInteger)4, [steps count]);
+    XCTAssertEqual((NSUInteger)5, [steps count]);
     NSDictionary *pushStep = [steps[0] isKindOfClass:[NSDictionary class]] ? steps[0] : @{};
-    NSDictionary *migrateStep = [steps[1] isKindOfClass:[NSDictionary class]] ? steps[1] : @{};
-    NSDictionary *activateStep = [steps[2] isKindOfClass:[NSDictionary class]] ? steps[2] : @{};
-    NSDictionary *healthStep = [steps[3] isKindOfClass:[NSDictionary class]] ? steps[3] : @{};
+    NSDictionary *compatibilityStep = [steps[1] isKindOfClass:[NSDictionary class]] ? steps[1] : @{};
+    NSDictionary *migrateStep = [steps[2] isKindOfClass:[NSDictionary class]] ? steps[2] : @{};
+    NSDictionary *activateStep = [steps[3] isKindOfClass:[NSDictionary class]] ? steps[3] : @{};
+    NSDictionary *healthStep = [steps[4] isKindOfClass:[NSDictionary class]] ? steps[4] : @{};
     XCTAssertEqualObjects(@"reused", pushStep[@"status"]);
+    XCTAssertEqualObjects(@"ok", compatibilityStep[@"status"]);
     XCTAssertEqualObjects(@"not_needed", migrateStep[@"status"]);
     XCTAssertEqualObjects(@"ok", activateStep[@"status"]);
     XCTAssertEqualObjects(@"skipped", healthStep[@"status"]);
@@ -1214,6 +1224,10 @@
     XCTAssertEqualObjects(@"deploy.status", statusPayload[@"workflow"]);
     XCTAssertEqualObjects(@"cli-rel-b", statusPayload[@"active_release_id"]);
     XCTAssertEqualObjects(@"cli-rel-a", statusPayload[@"previous_release_id"]);
+    NSDictionary *statusDeployment = [statusPayload[@"deployment"] isKindOfClass:[NSDictionary class]]
+                                         ? statusPayload[@"deployment"]
+                                         : @{};
+    XCTAssertEqualObjects(@"supported", statusDeployment[@"support_level"]);
     NSDictionary *statusManifest = [statusPayload[@"manifest"] isKindOfClass:[NSDictionary class]]
                                        ? statusPayload[@"manifest"]
                                        : @{};
@@ -1234,7 +1248,12 @@
     NSArray *checks = [doctorPayload[@"checks"] isKindOfClass:[NSArray class]] ? doctorPayload[@"checks"] : @[];
     XCTAssertTrue([checks count] >= 5);
     BOOL sawOperabilityHelper = NO;
+    BOOL sawCompatibility = NO;
     for (NSDictionary *check in checks) {
+      if ([[check objectForKey:@"id"] isEqual:@"compatibility"]) {
+        sawCompatibility = YES;
+        XCTAssertEqualObjects(@"pass", check[@"status"]);
+      }
       if (![[check objectForKey:@"id"] isEqual:@"operability_probe_helper"]) {
         continue;
       }
@@ -1242,6 +1261,7 @@
       XCTAssertEqualObjects(@"pass", check[@"status"]);
     }
     XCTAssertTrue(sawOperabilityHelper);
+    XCTAssertTrue(sawCompatibility);
 
     NSString *rollbackOutput = [self runShellCapture:[NSString stringWithFormat:
                                                           @"cd %@ && ARLEN_FRAMEWORK_ROOT=%@ %@/build/arlen "
@@ -1416,6 +1436,135 @@
     XCTAssertEqualObjects(@"pass", statuses[@"arlen"]);
     XCTAssertEqualObjects(@"pass", statuses[@"jobs_worker"]);
     XCTAssertEqualObjects(@"pass", statuses[@"operability_probe_helper"]);
+  } @finally {
+    [[NSFileManager defaultManager] removeItemAtPath:appRoot error:nil];
+    [[NSFileManager defaultManager] removeItemAtPath:workRoot error:nil];
+  }
+}
+
+- (void)testArlenDeployExperimentalRemoteRebuildRequiresAndUsesBuildCheckCommand {
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *appRoot = [self createTempDirectoryWithPrefix:@"arlen-deploy-remote-rebuild-app"];
+  NSString *workRoot = [self createTempDirectoryWithPrefix:@"arlen-deploy-remote-rebuild-work"];
+  XCTAssertNotNil(appRoot);
+  XCTAssertNotNil(workRoot);
+  if (appRoot == nil || workRoot == nil) {
+    return;
+  }
+
+  @try {
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"config/app.plist"]
+                          content:@"{\n"
+                                  "  host = \"127.0.0.1\";\n"
+                                  "  port = 3000;\n"
+                                  "}\n"]);
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"config/environments/production.plist"]
+                          content:@"{\n  logFormat = \"json\";\n}\n"]);
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"app_lite.m"]
+                          content:@"#import <Foundation/Foundation.h>\n"
+                                  "int main(int argc, const char *argv[]) { (void)argc; (void)argv; return 0; }\n"]);
+
+    int code = 0;
+    NSString *buildOutput = [self runShellCapture:[NSString stringWithFormat:@"cd %@ && make arlen", repoRoot]
+                                         exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", buildOutput);
+
+    NSString *releasesDir = [workRoot stringByAppendingPathComponent:@"releases"];
+    NSString *pushOutput = [self runShellCapture:[NSString stringWithFormat:
+                                                     @"cd %@ && ARLEN_FRAMEWORK_ROOT=%@ %@/build/arlen "
+                                                      "deploy push --app-root %@ --releases-dir %@ --release-id remote-rel-1 "
+                                                      "--target-profile windows-x86_64-gnustep-clang64 --runtime-strategy managed "
+                                                      "--allow-remote-rebuild --allow-missing-certification --json",
+                                                     appRoot, repoRoot, repoRoot, appRoot, releasesDir]
+                                       exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", pushOutput);
+    NSDictionary *pushPayload = [self parseJSONDictionaryFromOutput:pushOutput context:@"arlen deploy push remote rebuild --json"];
+    NSDictionary *pushDeployment = [pushPayload[@"deployment"] isKindOfClass:[NSDictionary class]] ? pushPayload[@"deployment"] : @{};
+    XCTAssertEqualObjects(@"experimental", pushDeployment[@"support_level"]);
+    XCTAssertEqualObjects(@"managed", pushDeployment[@"runtime_strategy"]);
+
+    NSString *releaseOutput = [self runShellCapture:[NSString stringWithFormat:
+                                                        @"cd %@ && ARLEN_FRAMEWORK_ROOT=%@ %@/build/arlen "
+                                                         "deploy release --app-root %@ --releases-dir %@ --release-id remote-rel-1 "
+                                                         "--allow-missing-certification --skip-migrate --allow-remote-rebuild "
+                                                         "--remote-build-check-command /bin/true --json",
+                                                        appRoot, repoRoot, repoRoot, appRoot, releasesDir]
+                                          exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", releaseOutput);
+    NSDictionary *releasePayload =
+        [self parseJSONDictionaryFromOutput:releaseOutput context:@"arlen deploy release remote rebuild --json"];
+    XCTAssertEqualObjects(@"experimental", releasePayload[@"deployment"][@"support_level"]);
+    NSArray *steps = [releasePayload[@"steps"] isKindOfClass:[NSArray class]] ? releasePayload[@"steps"] : @[];
+    NSDictionary *remoteBuildStep = [steps[1] isKindOfClass:[NSDictionary class]] ? steps[1] : @{};
+    XCTAssertEqualObjects(@"remote_build_check", remoteBuildStep[@"id"]);
+    XCTAssertEqualObjects(@"ok", remoteBuildStep[@"status"]);
+
+    NSString *doctorOutput = [self runShellCapture:[NSString stringWithFormat:
+                                                        @"cd %@ && ARLEN_FRAMEWORK_ROOT=%@ %@/build/arlen "
+                                                         "deploy doctor --app-root %@ --releases-dir %@ --json",
+                                                        appRoot, repoRoot, repoRoot, appRoot, releasesDir]
+                                          exitCode:&code];
+    XCTAssertEqual(1, code, @"%@", doctorOutput);
+    NSDictionary *doctorPayload =
+        [self parseJSONDictionaryFromOutput:doctorOutput context:@"arlen deploy doctor remote rebuild --json"];
+    XCTAssertEqualObjects(@"fail", doctorPayload[@"status"]);
+    NSArray *checks = [doctorPayload[@"checks"] isKindOfClass:[NSArray class]] ? doctorPayload[@"checks"] : @[];
+    NSMutableDictionary *statuses = [NSMutableDictionary dictionary];
+    for (NSDictionary *check in checks) {
+      if ([check[@"id"] isKindOfClass:[NSString class]] && [check[@"status"] isKindOfClass:[NSString class]]) {
+        statuses[check[@"id"]] = check[@"status"];
+      }
+    }
+    XCTAssertEqualObjects(@"warn", statuses[@"compatibility"]);
+    XCTAssertEqualObjects(@"fail", statuses[@"remote_build_check"]);
+  } @finally {
+    [[NSFileManager defaultManager] removeItemAtPath:appRoot error:nil];
+    [[NSFileManager defaultManager] removeItemAtPath:workRoot error:nil];
+  }
+}
+
+- (void)testArlenDeployReleaseRejectsUnsupportedCrossRuntimeFamilyTarget {
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *appRoot = [self createTempDirectoryWithPrefix:@"arlen-deploy-unsupported-target-app"];
+  NSString *workRoot = [self createTempDirectoryWithPrefix:@"arlen-deploy-unsupported-target-work"];
+  XCTAssertNotNil(appRoot);
+  XCTAssertNotNil(workRoot);
+  if (appRoot == nil || workRoot == nil) {
+    return;
+  }
+
+  @try {
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"config/app.plist"]
+                          content:@"{\n"
+                                  "  host = \"127.0.0.1\";\n"
+                                  "  port = 3000;\n"
+                                  "}\n"]);
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"config/environments/production.plist"]
+                          content:@"{\n  logFormat = \"json\";\n}\n"]);
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"app_lite.m"]
+                          content:@"#import <Foundation/Foundation.h>\n"
+                                  "int main(int argc, const char *argv[]) { (void)argc; (void)argv; return 0; }\n"]);
+
+    int code = 0;
+    NSString *buildOutput = [self runShellCapture:[NSString stringWithFormat:@"cd %@ && make arlen", repoRoot]
+                                         exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", buildOutput);
+
+    NSString *releasesDir = [workRoot stringByAppendingPathComponent:@"releases"];
+    NSString *releaseOutput = [self runShellCapture:[NSString stringWithFormat:
+                                                        @"cd %@ && ARLEN_FRAMEWORK_ROOT=%@ %@/build/arlen "
+                                                         "deploy release --app-root %@ --releases-dir %@ --release-id unsupported-rel-1 "
+                                                         "--target-profile macos-arm64-apple-foundation --allow-remote-rebuild "
+                                                         "--allow-missing-certification --skip-migrate --json",
+                                                        appRoot, repoRoot, repoRoot, appRoot, releasesDir]
+                                          exitCode:&code];
+    XCTAssertEqual(1, code, @"%@", releaseOutput);
+    NSDictionary *releasePayload =
+        [self parseJSONDictionaryFromOutput:releaseOutput context:@"arlen deploy release unsupported target --json"];
+    XCTAssertEqualObjects(@"error", releasePayload[@"status"]);
+    XCTAssertEqualObjects(@"unsupported", releasePayload[@"deployment"][@"support_level"]);
+    NSDictionary *error = [releasePayload[@"error"] isKindOfClass:[NSDictionary class]] ? releasePayload[@"error"] : @{};
+    XCTAssertEqualObjects(@"deploy_release_unsupported_target", error[@"code"]);
   } @finally {
     [[NSFileManager defaultManager] removeItemAtPath:appRoot error:nil];
     [[NSFileManager defaultManager] removeItemAtPath:workRoot error:nil];

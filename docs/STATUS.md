@@ -1,6 +1,29 @@
 # Arlen Status Checkpoint
 
-Last updated: 2026-04-09
+Last updated: 2026-04-14
+
+## Leaving Off (2026-04-14)
+
+- Continued Phase 32 and delivered `32F-32I`:
+  - added target-aware deploy flags to the CLI and release builder:
+    `--target-profile`, `--runtime-strategy`, `--allow-remote-rebuild`, and
+    `--remote-build-check-command`
+  - expanded packaged release manifests to `phase32-deploy-manifest-v1` with
+    deployment metadata for local/target profiles, runtime strategy,
+    compatibility status, and remote rebuild requirements
+  - taught `arlen deploy release` to fail closed on unsupported target
+    profiles and to require a successful remote build-check command for
+    experimental GNUstep cross-profile rebuilds
+  - extended `arlen deploy doctor`, `status`, and `rollback` JSON payloads
+    with deployment metadata and rollback-candidate depth
+  - added deployment integration coverage for experimental remote rebuild
+    gating and unsupported cross-runtime target rejection
+- Phase 32 status:
+  - `32A-32I` are now delivered
+  - remaining work is `32J-32L`: `propane` handoff boundary, confidence lanes,
+    and deployment docs closeout
+  - deploy remains a Phase 29 local release product operationally, but it now
+    enforces the Phase 32 compatibility contract at release time
 
 ## Leaving Off (2026-04-09)
 
