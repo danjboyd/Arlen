@@ -10,6 +10,11 @@ The repository ships reference files under `tools/deploy/systemd/`:
 - `site.env.example`: per-site production environment file
 - `site.debug.env.example`: per-site incident/debug environment file
 
+When a deploy target requires GNUstep env sourcing, `arlen deploy init <target>`
+also generates concrete wrapper scripts under
+`build/deploy/targets/<target>/bin/` that source the declared GNUstep script
+before execing packaged `propane` / `jobs-worker`.
+
 The recommended pattern is one base unit plus a temporary debug override. Do
 not keep separate long-lived "normal" and "debug" service units in sync.
 
@@ -29,6 +34,10 @@ If your deployment root differs, copy `tools/deploy/systemd/arlen@.service`
 and adjust the paths before installing it into `/etc/systemd/system/`.
 The reference template also assumes the service account is `arlen:arlen`; edit
 `User=` and `Group=` if your host uses a different runtime user.
+
+For GNUstep-backed targets, prefer the generated unit from
+`arlen deploy init <target>` over hand-copying the raw template. The generated
+unit bakes in the target release root, env file, and wrapper choice.
 
 ## 2. Install the Base Unit
 

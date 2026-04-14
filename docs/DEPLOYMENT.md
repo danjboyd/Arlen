@@ -90,39 +90,67 @@ Current intended v1 policy:
 
 ### 4.3 Project Deployment Configuration
 
-Future app-owned deployment config should stay declarative.
+App-owned deployment config now lives in `config/deploy.plist`.
 
-Recommended target fields:
+Current target fields:
 
 - target identifier
 - host/address metadata
 - platform profile
 - runtime strategy
+- runtime action default
 - release path
-- healthcheck target
-- build/deploy hooks
-- reserved `propane accessories` fields for future production manager handoff
+- healthcheck base URL
+- database contract
+- required env-key contract
+- SSH transport metadata
+- init/runtime user metadata
 
-Illustrative shape:
+Current shape:
 
-```yaml
-deployment:
-  targets:
-    production:
-      host: app1.example.com
-      profile: linux-x86_64-gnustep-clang
-      runtime_strategy: managed
-      release_path: /opt/arlen/apps/myapp
-      healthcheck: /healthz
-      hooks:
-        pre_activate: []
-        post_activate: []
-      propane_accessories:
-        workerCount: 4
+```plist
+{
+  deployment = {
+    schema = "phase32-deploy-targets-v1";
+    targets = {
+      production = {
+        host = "app1.example.com";
+        releasePath = "/srv/arlen/myapp";
+        profile = "linux-x86_64-gnustep-clang";
+        runtimeStrategy = "system";
+        runtimeAction = "restart";
+        environment = "production";
+        service = "arlen@myapp";
+        baseURL = "http://127.0.0.1:3000";
+        database = { mode = "host_local"; adapter = "postgresql"; target = "default"; };
+        configuration = {
+          envFile = "/etc/arlen/myapp.env";
+          requiredEnvironmentKeys = ("ARLEN_DATABASE_URL", "ARLEN_SESSION_SECRET");
+        };
+        runtime = {
+          gnustepScript = "/usr/GNUstep/System/Library/Makefiles/GNUstep.sh";
+          requiresEnvWrapper = YES;
+        };
+        init = { runtimeUser = "arlen"; runtimeGroup = "arlen"; };
+        transport = {
+          sshHost = "deploy@app1.example.com";
+          sshCommand = "ssh";
+          sshOptions = ("-oBatchMode=yes");
+        };
+      };
+    };
+  };
+}
 ```
 
-This is a contract model, not yet a claim that every field above is already
-implemented in the current CLI.
+Arlen now resolves:
+
+- `arlen deploy plan production`
+- `arlen deploy push production`
+- `arlen deploy release production`
+- `arlen deploy doctor production`
+
+Explicit CLI flags still override the checked-in target fields.
 
 ### 4.4 Runtime Strategies
 
@@ -181,6 +209,15 @@ For Linux and Windows production targets, doctor should also be able to answer:
 - whether the host already satisfies the chosen runtime strategy
 - whether the deploy user can activate and restart the release
 - whether the release layout and health probes are meaningful on that host
+
+Named targets with SSH transport now let Arlen delegate:
+
+- `status`
+- `doctor`
+- `rollback`
+- `logs`
+
+to the active packaged release on the remote host.
 
 ### 4.7 Remote Rebuild Contract
 
@@ -475,6 +512,62 @@ When the release app root already carries `app/.boomhauer/build/boomhauer-app`,
 both `propane` and `jobs-worker` now prefer that shipped binary even if the
 release app root is no longer a mutable source checkout (`ARLEN-BUG-018`).
 
+### 4.9 Host Bootstrap Scaffold
+
+`arlen deploy init <target>` now provides a narrow host bootstrap scaffold for
+Linux/Debian-style targets.
+
+It currently creates:
+
+- release/shared/log/tmp directories under the declared `releasePath`
+- generated concrete systemd unit under `build/deploy/targets/<target>/systemd/`
+- generated env example under `build/deploy/targets/<target>/env/`
+- generated GNUstep runtime wrappers under `build/deploy/targets/<target>/bin/`
+- generated README with operator follow-up steps
+
+On GNUstep-backed targets, `config/deploy.plist` can declare:
+
+- `runtime.gnustepScript`
+  - the host GNUstep bootstrap script Arlen should source for runtime wrappers
+- `runtime.requiresEnvWrapper`
+  - whether packaged `propane` / `jobs-worker` should run through generated
+    wrappers that source GNUstep first
+
+It does not:
+
+- create or rotate secret values
+- provision PostgreSQL
+- install ingress/reverse-proxy/TLS/DNS infrastructure
+- become a general-purpose machine provisioner
+
+The intended flow is:
+
+1. check in `config/deploy.plist`
+2. run `arlen deploy init <target>` on the host or against the host filesystem
+3. install the generated unit/env artifacts where the host expects them
+4. populate secret values outside the release tree
+5. use `arlen deploy push|release <target>` for release shipping and activation
+
+### 4.10 Arlen-Ready Debian GNUstep Host
+
+An Arlen-ready Debian GNUstep host currently means:
+
+- release/shared/log/tmp layout exists for the target
+- `systemd` is available for the Debian-first service contract
+- the supported clang-built GNUstep stack is already installed on the host
+- the declared `runtime.gnustepScript` exists
+- `gnustep-config` works after sourcing that GNUstep script
+- generated runtime wrappers are installed when the target requires env sourcing
+
+`arlen deploy doctor <target>` now validates that contract directly on the host
+even before an active release exists.
+
+Important boundary:
+
+- Arlen validates this host/runtime contract
+- Arlen does not yet install the GNUstep runtime itself
+- `runtimeStrategy=managed` is still only declarative at this stage
+
 ### 6.5 Deployment ownership boundaries
 
 Arlen deploy should own:
@@ -503,15 +596,18 @@ Operational split:
 Do not make deploy doctor guess production database topology only from the DSN.
 The deploy target contract should declare what the deployment expects.
 
-Recommended target shape:
+Recommended checked-in target shape:
 
-```yaml
-deployment:
-  targets:
-    production:
-      database:
-        adapter: postgresql
-        mode: external
+```plist
+{
+  deployment = {
+    targets = {
+      production = {
+        database = { adapter = "postgresql"; mode = "external"; target = "default"; };
+      };
+    };
+  };
+}
 ```
 
 Supported database dependency modes:

@@ -87,9 +87,61 @@ Notes:
 - when `templates/layouts/main.html.eoc` exists, generated HTML templates opt into it automatically unless the target logical path is under `layouts/` or `partials/`
 - `generate search` is the fastest way to stand up a search resource without reverse-engineering the `search` module internals
 
-### `arlen deploy <plan|push|release> [options]`
+### `arlen deploy <init|plan|push|release|status|rollback|doctor|logs> [target] [options]`
 
 First-class release orchestration over the existing `tools/deploy/*` scripts.
+
+Named targets:
+
+- when `[target]` is supplied, Arlen resolves defaults from `config/deploy.plist`
+- explicit CLI flags still win over target defaults
+- current target schema is OpenStep/XML plist-backed and uses:
+
+```plist
+{
+  deployment = {
+    schema = "phase32-deploy-targets-v1";
+    targets = {
+      production = {
+        host = "myapp.example.com";
+        releasePath = "/srv/arlen/myapp";
+        profile = "linux-x86_64-gnustep-clang";
+        runtimeStrategy = "system";
+        runtimeAction = "restart";
+        environment = "production";
+        service = "arlen@myapp";
+        baseURL = "http://127.0.0.1:3000";
+        database = { mode = "host_local"; adapter = "postgresql"; target = "default"; };
+        configuration = {
+          envFile = "/etc/arlen/myapp.env";
+          requiredEnvironmentKeys = ("ARLEN_DATABASE_URL", "ARLEN_SESSION_SECRET");
+        };
+        init = { runtimeUser = "arlen"; runtimeGroup = "arlen"; };
+        transport = {
+          sshHost = "deploy@myapp.example.com";
+          sshCommand = "ssh";
+          sshOptions = ("-oBatchMode=yes");
+        };
+      };
+    };
+  };
+}
+```
+
+`arlen deploy init`
+
+- requires a named target from `config/deploy.plist`
+- creates deterministic Linux/Debian-style host scaffolding for that target
+- creates:
+  - release/shared/log/tmp directories under the target release root
+  - generated systemd unit under `build/deploy/targets/<target>/systemd/`
+  - generated env example under `build/deploy/targets/<target>/env/`
+  - generated GNUstep runtime wrappers under `build/deploy/targets/<target>/bin/`
+  - generated README with operator follow-up steps
+- honors target runtime metadata:
+  - `runtime.gnustepScript`
+  - `runtime.requiresEnvWrapper`
+- does not provision secrets, PostgreSQL, reverse proxies, TLS, or DNS
 
 `arlen deploy plan`
 
@@ -102,6 +154,9 @@ First-class release orchestration over the existing `tools/deploy/*` scripts.
 `arlen deploy push`
 
 - builds a local immutable release under `releases/<release-id>/`
+- when `[target]` has SSH transport metadata, stages the local release under
+  `build/deploy/targets/<target>/local-releases/` and uploads it to the remote
+  target release path over SSH/tar streaming
 - writes `metadata/manifest.json` with release/runtime/health contract metadata
 - writes manifest paths release-relative so the packaged release stays valid
   after ship/move (`ARLEN-BUG-017`)
@@ -118,6 +173,10 @@ First-class release orchestration over the existing `tools/deploy/*` scripts.
 `arlen deploy release`
 
 - reuses an existing release artifact for the selected `--release-id`, or builds it first if missing
+- when `[target]` has SSH transport metadata:
+  - builds or reuses the local staged release
+  - uploads it to the remote target
+  - invokes the packaged remote `arlen deploy release` inside that uploaded release
 - runs `migrate --env <name>` only when packaged SQL migrations exist, unless `--skip-migrate` is passed
 - activates `releases/current` via `tools/deploy/activate_release.sh`
 - can reload or restart a systemd unit through `--service <unit>` and
@@ -135,6 +194,8 @@ First-class release orchestration over the existing `tools/deploy/*` scripts.
 `arlen deploy status`
 
 - reports the active release id, previous release id, manifest path, migration inventory, and health contract from `releases/current`
+- when `[target]` has SSH transport metadata, delegates to the active packaged
+  release on the remote host
 - reports deployment metadata for the active release and rollback candidate
 - reports packaged `propane_handoff` metadata for the active release and rollback candidate
 - resolves manifest-backed runtime/helper paths relative to the active release,
@@ -149,12 +210,21 @@ First-class release orchestration over the existing `tools/deploy/*` scripts.
 - can reload or restart a systemd unit through `--service <unit>` and `--runtime-action <reload|restart|none>`
 - can verify operability after rollback with `--base-url <url>`
 - surfaces an explicit warning that packaged migrations do not imply reversibility
+- when `[target]` has SSH transport metadata, delegates the rollback to the
+  active packaged release on the remote host
 
 `arlen deploy doctor`
 
 - validates release layout, manifest presence, packaged binaries, config loading, and database URL completeness
 - validates explicit database deployment contracts from the packaged manifest
   (`external`, `host_local`, `embedded`)
+- when run against a local named target without an active release, validates
+  target-host readiness instead of failing immediately:
+  - release/shared/log/tmp layout
+  - generated host artifacts
+  - GNUstep script presence
+  - `gnustep-config` after sourcing GNUstep
+  - wrapper generation/readiness for GNUstep targets
 - validates required environment keys without printing their values
 - validates deployment compatibility metadata and requires a remote build-check command when the active release targets an experimental remote rebuild path
 - reports packaged `propane_handoff` metadata in JSON mode
@@ -170,15 +240,19 @@ First-class release orchestration over the existing `tools/deploy/*` scripts.
   Windows-style compiled output base names
 - `tools/deploy/smoke_release.sh` also resolves the packaged operability helper
   against the selected release root instead of the caller's cwd (`ARLEN-BUG-019`)
+- when `[target]` has SSH transport metadata, delegates doctor to the active
+  packaged release on the remote host
 
 `arlen deploy logs`
 
 - streams `journalctl -u <unit>` when `--service <unit>` is supplied
 - can tail an explicit file with `--file <path>`
 - otherwise reports active release metadata pointers (`manifest.json`, `README.txt`, `release.env`, optional lifecycle log path)
+- when `[target]` has SSH transport metadata, delegates logs to the remote host
 
 Common options:
 
+- `[target]`: named deploy target from `config/deploy.plist`
 - `--app-root <path>`: app root to package/activate (default: cwd)
 - `--framework-root <path>`: Arlen checkout root (default: resolved from env/current tree)
 - `--releases-dir <path>`: release output root (default: `<app-root>/releases`)

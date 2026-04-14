@@ -27,7 +27,7 @@ static void PrintUsage(void) {
           "  boomhauer [server args...]\n"
           "  jobs worker [worker args...]\n"
           "  propane [manager args...]\n"
-          "  deploy <plan|push|release> [options]\n"
+          "  deploy <init|plan|push|release|status|rollback|doctor|logs> [target] [options]\n"
           "  migrate [--env <name>] [--database <target>] [--dsn <connection_string>] [--dry-run]\n"
           "  module <add|remove|list|doctor|migrate|assets|upgrade|eject> [options]\n"
           "  schema-codegen [--env <name>] [--database <target>] [--dsn <connection_string>] [--output-dir <path>] [--manifest <path>] [--prefix <ClassPrefix>] [--typed-contracts] [--force]\n"
@@ -80,9 +80,10 @@ static void PrintBuildUsage(void) {
 
 static void PrintDeployUsage(void) {
   fprintf(stdout,
-          "Usage: arlen deploy <plan|push|release|status|rollback|doctor|logs> [options]\n"
+          "Usage: arlen deploy <init|plan|push|release|status|rollback|doctor|logs> [target] [options]\n"
           "\n"
           "Subcommands:\n"
+          "  init                  Generate deterministic host bootstrap artifacts for a named target\n"
           "  plan                  Validate deploy inputs and emit a planned release payload\n"
           "  push                  Build a local immutable release artifact under releases/\n"
           "  release               Ensure a release exists, migrate if needed, and activate it\n"
@@ -92,6 +93,7 @@ static void PrintDeployUsage(void) {
           "  logs                  Show active release log pointers or stream runtime logs\n"
           "\n"
           "Shared options:\n"
+          "  [target]              Named deploy target from config/deploy.plist\n"
           "  --app-root <path>\n"
           "  --framework-root <path>\n"
           "  --releases-dir <path>\n"
@@ -1081,6 +1083,552 @@ static NSDictionary *LoadReleaseMetadataAtDirectory(NSString *releaseDir) {
     @"manifest" : manifest,
     @"release_env" : releaseEnv ?: @{},
   };
+}
+
+static NSDictionary *PlistDictionaryFromFile(NSString *path, NSError **error) {
+  NSData *data = ALNDataReadFromFile(path, 0, error);
+  if (data == nil) {
+    return nil;
+  }
+
+  NSPropertyListFormat format = NSPropertyListOpenStepFormat;
+  id parsed = [NSPropertyListSerialization propertyListWithData:data
+                                                        options:NSPropertyListImmutable
+                                                         format:&format
+                                                          error:error];
+  if (![parsed isKindOfClass:[NSDictionary class]]) {
+    if (error != NULL && *error == nil) {
+      *error = [NSError errorWithDomain:@"Arlen.Error"
+                                   code:41
+                               userInfo:@{
+                                 NSLocalizedDescriptionKey :
+                                     [NSString stringWithFormat:@"deploy config must be a dictionary: %@", path ?: @""]
+                               }];
+    }
+    return nil;
+  }
+  return parsed;
+}
+
+static NSArray<NSString *> *StringArrayFromValue(id value) {
+  if (![value isKindOfClass:[NSArray class]]) {
+    return @[];
+  }
+
+  NSMutableArray<NSString *> *strings = [NSMutableArray array];
+  for (id entry in (NSArray *)value) {
+    if (![entry isKindOfClass:[NSString class]]) {
+      continue;
+    }
+    NSString *trimmed = Trimmed(entry);
+    if ([trimmed length] == 0) {
+      continue;
+    }
+    [strings addObject:trimmed];
+  }
+  return SortedUniqueStrings(strings);
+}
+
+static NSString *StringValueForDeployKey(NSDictionary *dictionary, NSString *key) {
+  id value = dictionary[key];
+  return [value isKindOfClass:[NSString class]] ? Trimmed(value) : @"";
+}
+
+static NSString *SystemdUnitFilenameForServiceName(NSString *serviceName) {
+  NSString *trimmed = Trimmed(serviceName);
+  if ([trimmed length] == 0) {
+    return @"arlen.service";
+  }
+  return [trimmed hasSuffix:@".service"] ? trimmed : [trimmed stringByAppendingString:@".service"];
+}
+
+static NSString *DeployConfigPathAtAppRoot(NSString *appRoot) {
+  return [[appRoot stringByAppendingPathComponent:@"config/deploy.plist"] stringByStandardizingPath];
+}
+
+static BOOL BoolValueForDeployKey(id value, BOOL defaultValue) {
+  if ([value respondsToSelector:@selector(boolValue)]) {
+    return [value boolValue];
+  }
+  if ([value isKindOfClass:[NSString class]]) {
+    NSString *normalized = [[Trimmed(value) lowercaseString] copy];
+    if ([normalized isEqualToString:@"yes"] || [normalized isEqualToString:@"true"] ||
+        [normalized isEqualToString:@"1"] || [normalized isEqualToString:@"on"]) {
+      return YES;
+    }
+    if ([normalized isEqualToString:@"no"] || [normalized isEqualToString:@"false"] ||
+        [normalized isEqualToString:@"0"] || [normalized isEqualToString:@"off"]) {
+      return NO;
+    }
+  }
+  return defaultValue;
+}
+
+static BOOL SetExecutablePermissions(NSString *path, NSError **error) {
+  return [[NSFileManager defaultManager] setAttributes:@{ NSFilePosixPermissions : @0755 }
+                                          ofItemAtPath:path
+                                                 error:error];
+}
+
+static NSDictionary *DeployTargetPayload(NSDictionary *target) {
+  if (![target isKindOfClass:[NSDictionary class]]) {
+    return @{};
+  }
+  return @{
+    @"schema" : @"phase32-deploy-targets-v1",
+    @"name" : StringValueForDeployKey(target, @"name"),
+    @"config_path" : StringValueForDeployKey(target, @"config_path"),
+    @"release_path" : StringValueForDeployKey(target, @"release_path"),
+    @"releases_dir" : StringValueForDeployKey(target, @"releases_dir"),
+    @"profile" : StringValueForDeployKey(target, @"profile"),
+    @"runtime_strategy" : StringValueForDeployKey(target, @"runtime_strategy"),
+    @"runtime_action" : StringValueForDeployKey(target, @"runtime_action"),
+    @"environment" : StringValueForDeployKey(target, @"environment"),
+    @"service" : StringValueForDeployKey(target, @"service"),
+    @"base_url" : StringValueForDeployKey(target, @"base_url"),
+    @"env_file" : StringValueForDeployKey(target, @"env_file"),
+    @"remote_enabled" : @([target[@"remote_enabled"] boolValue]),
+    @"ssh_host" : StringValueForDeployKey(target, @"ssh_host"),
+    @"runtime" : @{
+      @"family" : RuntimeFamilyForDeployProfile(StringValueForDeployKey(target, @"profile")),
+      @"gnustep_script" : StringValueForDeployKey(target, @"gnustep_script"),
+      @"requires_env_wrapper" : @([target[@"requires_env_wrapper"] boolValue]),
+      @"propane_wrapper" : StringValueForDeployKey(target, @"propane_wrapper"),
+      @"jobs_worker_wrapper" : StringValueForDeployKey(target, @"jobs_worker_wrapper"),
+    },
+    @"database" : @{
+      @"mode" : StringValueForDeployKey(target, @"database_mode"),
+      @"adapter" : StringValueForDeployKey(target, @"database_adapter"),
+      @"target" : StringValueForDeployKey(target, @"database_target"),
+    },
+    @"configuration" : @{
+      @"required_environment_keys" :
+          [target[@"required_environment_keys"] isKindOfClass:[NSArray class]] ? target[@"required_environment_keys"] : @[],
+    },
+  };
+}
+
+static NSDictionary *LoadDeployTargetNamed(NSString *appRoot, NSString *targetName, NSError **error) {
+  NSString *configPath = DeployConfigPathAtAppRoot(appRoot);
+  if (!PathExists(configPath, NULL)) {
+    if (error != NULL) {
+      *error = [NSError errorWithDomain:@"Arlen.Error"
+                                   code:42
+                               userInfo:@{
+                                 NSLocalizedDescriptionKey :
+                                     [NSString stringWithFormat:@"missing deploy target config: %@", configPath ?: @""]
+                               }];
+    }
+    return nil;
+  }
+
+  NSDictionary *root = PlistDictionaryFromFile(configPath, error);
+  if (root == nil) {
+    return nil;
+  }
+
+  NSDictionary *deployment = [root[@"deployment"] isKindOfClass:[NSDictionary class]] ? root[@"deployment"] : root;
+  NSDictionary *targets = [deployment[@"targets"] isKindOfClass:[NSDictionary class]] ? deployment[@"targets"] : nil;
+  NSDictionary *rawTarget = [targets[targetName] isKindOfClass:[NSDictionary class]] ? targets[targetName] : nil;
+  if (targets == nil || rawTarget == nil) {
+    if (error != NULL) {
+      *error = [NSError errorWithDomain:@"Arlen.Error"
+                                   code:43
+                               userInfo:@{
+                                 NSLocalizedDescriptionKey :
+                                     [NSString stringWithFormat:@"unknown deploy target '%@' in %@", targetName ?: @"",
+                                                                configPath ?: @""]
+                               }];
+    }
+    return nil;
+  }
+
+  NSDictionary *transport = [rawTarget[@"transport"] isKindOfClass:[NSDictionary class]] ? rawTarget[@"transport"] : @{};
+  NSDictionary *database = [rawTarget[@"database"] isKindOfClass:[NSDictionary class]] ? rawTarget[@"database"] : @{};
+  NSDictionary *configuration =
+      [rawTarget[@"configuration"] isKindOfClass:[NSDictionary class]] ? rawTarget[@"configuration"] : @{};
+  NSDictionary *init = [rawTarget[@"init"] isKindOfClass:[NSDictionary class]] ? rawTarget[@"init"] : @{};
+  NSDictionary *runtime = [rawTarget[@"runtime"] isKindOfClass:[NSDictionary class]] ? rawTarget[@"runtime"] : @{};
+
+  NSString *releasePath = StringValueForDeployKey(rawTarget, @"releasePath");
+  if ([releasePath length] == 0) {
+    if (error != NULL) {
+      *error = [NSError errorWithDomain:@"Arlen.Error"
+                                   code:44
+                               userInfo:@{
+                                 NSLocalizedDescriptionKey :
+                                     [NSString stringWithFormat:@"deploy target '%@' is missing releasePath", targetName ?: @""]
+                               }];
+    }
+    return nil;
+  }
+
+  NSString *serviceName = StringValueForDeployKey(rawTarget, @"service");
+  if ([serviceName length] == 0) {
+    serviceName = [NSString stringWithFormat:@"arlen@%@", targetName ?: @"app"];
+  }
+
+  NSString *envFile = StringValueForDeployKey(configuration, @"envFile");
+  if ([envFile length] == 0) {
+    envFile = [NSString stringWithFormat:@"/etc/arlen/%@.env", targetName ?: @"app"];
+  }
+
+  NSString *generatedDir =
+      [[appRoot stringByAppendingPathComponent:[NSString stringWithFormat:@"build/deploy/targets/%@", targetName ?: @"default"]]
+          stringByStandardizingPath];
+  NSString *releasesDir = [StringValueForDeployKey(rawTarget, @"releasesDir") length] > 0
+                              ? StringValueForDeployKey(rawTarget, @"releasesDir")
+                              : [releasePath stringByAppendingPathComponent:@"releases"];
+  NSString *profile = StringValueForDeployKey(rawTarget, @"profile");
+  NSString *runtimeFamily = RuntimeFamilyForDeployProfile(profile);
+  BOOL targetUsesGNUstep = [runtimeFamily isEqualToString:@"gnustep"];
+  NSString *gnustepScript = StringValueForDeployKey(runtime, @"gnustepScript");
+  if ([gnustepScript length] == 0 && targetUsesGNUstep) {
+    gnustepScript = DefaultGNUstepScriptPath();
+  }
+  BOOL requiresEnvWrapper =
+      BoolValueForDeployKey(runtime[@"requiresEnvWrapper"], targetUsesGNUstep);
+  NSString *binDir = [[generatedDir stringByAppendingPathComponent:@"bin"] stringByStandardizingPath];
+
+  return @{
+    @"schema" : @"phase32-deploy-targets-v1",
+    @"name" : targetName ?: @"",
+    @"config_path" : configPath ?: @"",
+    @"host" : StringValueForDeployKey(rawTarget, @"host"),
+    @"release_path" : releasePath ?: @"",
+    @"releases_dir" : [releasesDir stringByStandardizingPath],
+    @"shared_dir" : [[releasePath stringByAppendingPathComponent:@"shared"] stringByStandardizingPath],
+    @"logs_dir" : [[releasePath stringByAppendingPathComponent:@"logs"] stringByStandardizingPath],
+    @"tmp_dir" : [[releasePath stringByAppendingPathComponent:@"tmp"] stringByStandardizingPath],
+    @"local_staging_releases_dir" : [[generatedDir stringByAppendingPathComponent:@"local-releases"] stringByStandardizingPath],
+    @"generated_dir" : generatedDir ?: @"",
+    @"profile" : profile ?: @"",
+    @"runtime_family" : runtimeFamily ?: @"unknown",
+    @"runtime_strategy" : StringValueForDeployKey(rawTarget, @"runtimeStrategy"),
+    @"runtime_action" : StringValueForDeployKey(rawTarget, @"runtimeAction"),
+    @"environment" : StringValueForDeployKey(rawTarget, @"environment"),
+    @"service" : serviceName ?: @"",
+    @"base_url" : StringValueForDeployKey(rawTarget, @"baseURL"),
+    @"database_mode" : StringValueForDeployKey(database, @"mode"),
+    @"database_adapter" : StringValueForDeployKey(database, @"adapter"),
+    @"database_target" : [StringValueForDeployKey(database, @"target") length] > 0 ? StringValueForDeployKey(database, @"target") : @"default",
+    @"required_environment_keys" : StringArrayFromValue(configuration[@"requiredEnvironmentKeys"]),
+    @"env_file" : envFile ?: @"",
+    @"runtime_user" : [StringValueForDeployKey(init, @"runtimeUser") length] > 0 ? StringValueForDeployKey(init, @"runtimeUser") : @"arlen",
+    @"runtime_group" : [StringValueForDeployKey(init, @"runtimeGroup") length] > 0 ? StringValueForDeployKey(init, @"runtimeGroup") : @"arlen",
+    @"gnustep_script" : gnustepScript ?: @"",
+    @"requires_env_wrapper" : @(requiresEnvWrapper),
+    @"propane_wrapper" : [binDir stringByAppendingPathComponent:@"propane-wrapper"],
+    @"jobs_worker_wrapper" : [binDir stringByAppendingPathComponent:@"jobs-worker-wrapper"],
+    @"ssh_host" : StringValueForDeployKey(transport, @"sshHost"),
+    @"ssh_command" : [StringValueForDeployKey(transport, @"sshCommand") length] > 0 ? StringValueForDeployKey(transport, @"sshCommand") : @"ssh",
+    @"ssh_options" : StringArrayFromValue(transport[@"sshOptions"]),
+    @"remote_tmp_dir" : [StringValueForDeployKey(transport, @"remoteTmpDir") length] > 0 ? StringValueForDeployKey(transport, @"remoteTmpDir") : @"/tmp",
+    @"remote_enabled" : @([StringValueForDeployKey(transport, @"sshHost") length] > 0),
+    @"systemd_unit_filename" : SystemdUnitFilenameForServiceName(serviceName),
+  };
+}
+
+static NSString *RenderedSystemdUnitForTarget(NSDictionary *target, NSString *frameworkRoot) {
+  NSString *templatePath = [frameworkRoot stringByAppendingPathComponent:@"tools/deploy/systemd/arlen@.service"];
+  NSString *template = [NSString stringWithContentsOfFile:templatePath encoding:NSUTF8StringEncoding error:NULL];
+  if ([template length] == 0) {
+    template = @"[Unit]\nDescription=Arlen site %i\n\n[Service]\nType=simple\nUser=arlen\nGroup=arlen\nWorkingDirectory=/srv/arlen/%i/releases/current/app\nEnvironment=ARLEN_APP_ROOT=/srv/arlen/%i/releases/current/app\nEnvironment=ARLEN_FRAMEWORK_ROOT=/srv/arlen/%i/releases/current/framework\nEnvironmentFile=-/etc/arlen/%i.env\nExecStart=/srv/arlen/%i/releases/current/framework/bin/propane --env production\nExecReload=/bin/kill -HUP $MAINPID\nRestart=always\n\n[Install]\nWantedBy=multi-user.target\n";
+  }
+
+  NSString *targetName = StringValueForDeployKey(target, @"name");
+  NSString *releasePath = StringValueForDeployKey(target, @"release_path");
+  NSString *envFile = StringValueForDeployKey(target, @"env_file");
+  NSString *runtimeUser = StringValueForDeployKey(target, @"runtime_user");
+  NSString *runtimeGroup = StringValueForDeployKey(target, @"runtime_group");
+  NSString *environment = [StringValueForDeployKey(target, @"environment") length] > 0 ? StringValueForDeployKey(target, @"environment") : @"production";
+  NSString *serviceName = StringValueForDeployKey(target, @"service");
+  NSString *execStart =
+      [target[@"requires_env_wrapper"] boolValue]
+          ? (StringValueForDeployKey(target, @"propane_wrapper") ?: @"")
+          : [[[releasePath stringByAppendingPathComponent:@"releases/current/framework/bin/propane"] stringByStandardizingPath]
+                stringByAppendingFormat:@" --env %@", environment ?: @"production"];
+
+  NSString *content = [template copy];
+  content = [content stringByReplacingOccurrencesOfString:@"Description=Arlen site %i"
+                                               withString:[NSString stringWithFormat:@"Description=Arlen site %@", targetName ?: @"app"]];
+  content = [content stringByReplacingOccurrencesOfString:@"/srv/arlen/%i" withString:releasePath ?: @"/srv/arlen/app"];
+  content = [content stringByReplacingOccurrencesOfString:@"/etc/arlen/%i.env" withString:envFile ?: @"/etc/arlen/app.env"];
+  content = [content stringByReplacingOccurrencesOfString:@"User=arlen" withString:[NSString stringWithFormat:@"User=%@", runtimeUser ?: @"arlen"]];
+  content = [content stringByReplacingOccurrencesOfString:@"Group=arlen" withString:[NSString stringWithFormat:@"Group=%@", runtimeGroup ?: @"arlen"]];
+  content = [content stringByReplacingOccurrencesOfString:@"ExecStart=/srv/arlen/%i/releases/current/framework/bin/propane --env production"
+                                               withString:[NSString stringWithFormat:@"ExecStart=%@", execStart ?: @""]];
+  content = [content stringByReplacingOccurrencesOfString:@"SyslogIdentifier=arlen-%i"
+                                               withString:[NSString stringWithFormat:@"SyslogIdentifier=%@",
+                                                                             [serviceName stringByReplacingOccurrencesOfString:@".service" withString:@""]]];
+  return content;
+}
+
+static NSString *RenderedGNUstepWrapperForTarget(NSDictionary *target, NSString *toolName) {
+  NSString *gnustepScript = StringValueForDeployKey(target, @"gnustep_script");
+  NSString *releasePath = StringValueForDeployKey(target, @"release_path");
+  NSString *environment = [StringValueForDeployKey(target, @"environment") length] > 0 ? StringValueForDeployKey(target, @"environment") : @"production";
+  BOOL requiresWrapper = [target[@"requires_env_wrapper"] boolValue];
+  NSString *binaryPath = nil;
+  if ([toolName isEqualToString:@"propane"]) {
+    binaryPath = [[releasePath stringByAppendingPathComponent:@"releases/current/framework/bin/propane"] stringByStandardizingPath];
+  } else {
+    binaryPath = [[releasePath stringByAppendingPathComponent:@"releases/current/framework/bin/jobs-worker"] stringByStandardizingPath];
+  }
+  NSString *argumentSuffix = [toolName isEqualToString:@"propane"] ? [NSString stringWithFormat:@" --env %@", environment ?: @"production"] : @"";
+  if (!requiresWrapper || [gnustepScript length] == 0) {
+    return [NSString stringWithFormat:
+        @"#!/usr/bin/env bash\n"
+         "set -euo pipefail\n"
+         "exec %@%@ \"$@\"\n",
+        ShellQuote(binaryPath ?: @""), argumentSuffix ?: @""];
+  }
+  return [NSString stringWithFormat:
+      @"#!/usr/bin/env bash\n"
+       "set -euo pipefail\n"
+       "GNUSTEP_SCRIPT=%@\n"
+       "if [ ! -f \"$GNUSTEP_SCRIPT\" ]; then\n"
+       "  echo \"missing GNUstep.sh: $GNUSTEP_SCRIPT\" >&2\n"
+       "  exit 1\n"
+       "fi\n"
+       "set +u\n"
+       "source \"$GNUSTEP_SCRIPT\"\n"
+       "set -u\n"
+       "exec %@%@ \"$@\"\n",
+      ShellQuote(gnustepScript ?: @""), ShellQuote(binaryPath ?: @""), argumentSuffix ?: @""];
+}
+
+static NSString *RenderedEnvExampleForTarget(NSDictionary *target, NSString *frameworkRoot) {
+  NSString *templatePath = [frameworkRoot stringByAppendingPathComponent:@"tools/deploy/systemd/site.env.example"];
+  NSString *template = [NSString stringWithContentsOfFile:templatePath encoding:NSUTF8StringEncoding error:NULL];
+  if ([template length] == 0) {
+    template = @"ARLEN_HOST=127.0.0.1\nARLEN_PORT=3000\nARLEN_DATABASE_URL=postgres://app:CHANGE_ME@127.0.0.1/app_production\nARLEN_SESSION_SECRET=replace-with-32-plus-character-secret\n";
+  }
+
+  NSString *targetName = StringValueForDeployKey(target, @"name");
+  NSString *releasePath = StringValueForDeployKey(target, @"release_path");
+  NSMutableString *content =
+      [[template stringByReplacingOccurrencesOfString:@"/srv/arlen/<site>" withString:releasePath ?: @"/srv/arlen/app"] mutableCopy];
+  [content appendString:
+               @"\n# Do not pin ARLEN_APP_ROOT or ARLEN_FRAMEWORK_ROOT here.\n"
+                "# Release activation owns those paths.\n"];
+  for (NSString *requiredKey in [target[@"required_environment_keys"] isKindOfClass:[NSArray class]]
+                                   ? target[@"required_environment_keys"]
+                                   : @[]) {
+    if ([content rangeOfString:[NSString stringWithFormat:@"%@=", requiredKey]].location == NSNotFound) {
+      [content appendFormat:@"%@=CHANGE_ME_%@\n", requiredKey, [targetName uppercaseString]];
+    }
+  }
+  return content;
+}
+
+static NSString *RenderedInitReadmeForTarget(NSDictionary *target) {
+  NSString *serviceFile = StringValueForDeployKey(target, @"systemd_unit_filename");
+  NSString *generatedDir = StringValueForDeployKey(target, @"generated_dir");
+  NSString *envFile = StringValueForDeployKey(target, @"env_file");
+  NSString *runtimeFamily = StringValueForDeployKey(target, @"runtime_family");
+  NSString *gnustepScript = StringValueForDeployKey(target, @"gnustep_script");
+  BOOL requiresWrapper = [target[@"requires_env_wrapper"] boolValue];
+  return [NSString stringWithFormat:
+      @"Arlen deploy init generated deterministic host artifacts for target %@.\n\n"
+       "Created host layout:\n"
+       "- %@\n"
+       "- %@\n"
+       "- %@\n"
+       "- %@\n\n"
+       "Generated artifacts:\n"
+       "- %@/systemd/%@\n"
+       "- %@/env/%@.env.example\n"
+       "- %@/bin/propane-wrapper\n"
+       "- %@/bin/jobs-worker-wrapper\n\n"
+       "Runtime contract:\n"
+       "- runtime family: %@\n"
+       "- GNUstep script: %@\n"
+       "- requires env wrapper: %@\n\n"
+       "Operator follow-up still required:\n"
+       "- create the runtime user/group if your host does not already provide them\n"
+       "- install the systemd unit under /etc/systemd/system/\n"
+       "- install the generated wrappers on GNUstep-backed hosts when runtime env sourcing is required\n"
+       "- copy the env example to %@ and populate secret values\n"
+       "- reload systemd and enable/start the service\n",
+      StringValueForDeployKey(target, @"name"),
+      StringValueForDeployKey(target, @"release_path"),
+      StringValueForDeployKey(target, @"releases_dir"),
+      StringValueForDeployKey(target, @"shared_dir"),
+      StringValueForDeployKey(target, @"logs_dir"),
+      generatedDir, serviceFile, generatedDir, StringValueForDeployKey(target, @"name"),
+      generatedDir, generatedDir, runtimeFamily ?: @"unknown", gnustepScript ?: @"",
+      requiresWrapper ? @"yes" : @"no", envFile];
+}
+
+static NSString *SSHCommandPrefixForTarget(NSDictionary *target) {
+  NSMutableArray<NSString *> *parts = [NSMutableArray array];
+  [parts addObject:ShellQuote(StringValueForDeployKey(target, @"ssh_command"))];
+  for (NSString *option in [target[@"ssh_options"] isKindOfClass:[NSArray class]] ? target[@"ssh_options"] : @[]) {
+    [parts addObject:ShellQuote(option)];
+  }
+  [parts addObject:ShellQuote(StringValueForDeployKey(target, @"ssh_host"))];
+  return [parts componentsJoinedByString:@" "];
+}
+
+static NSDictionary *RunSSHCommandForTarget(NSDictionary *target, NSString *remoteScript) {
+  NSString *prefix = SSHCommandPrefixForTarget(target);
+  NSString *command = [NSString stringWithFormat:@"%@ bash -lc %@", prefix, ShellQuote(remoteScript ?: @"true")];
+  int exitCode = 0;
+  NSString *capturedOutput = RunShellCaptureCommand(command, &exitCode);
+  return @{
+    @"status" : (exitCode == 0) ? @"ok" : @"error",
+    @"command" : command ?: @"",
+    @"captured_output" : capturedOutput ?: @"",
+    @"exit_code" : @(exitCode),
+  };
+}
+
+static NSDictionary *UploadReleaseToRemoteTarget(NSDictionary *target, NSString *localReleasesDir, NSString *releaseID) {
+  NSString *remoteReleasesDir = StringValueForDeployKey(target, @"releases_dir");
+  NSString *remoteReleaseDir = [remoteReleasesDir stringByAppendingPathComponent:releaseID ?: @""];
+  NSString *remoteScript = [NSString stringWithFormat:@"mkdir -p %@ && rm -rf %@ && tar -C %@ -xf -",
+                                                      ShellQuote(remoteReleasesDir),
+                                                      ShellQuote(remoteReleaseDir),
+                                                      ShellQuote(remoteReleasesDir)];
+  NSString *command = [NSString stringWithFormat:@"tar -C %@ -cf - %@ | %@ bash -lc %@",
+                                                     ShellQuote(localReleasesDir),
+                                                     ShellQuote(releaseID ?: @""),
+                                                     SSHCommandPrefixForTarget(target),
+                                                     ShellQuote(remoteScript)];
+  int exitCode = 0;
+  NSString *capturedOutput = RunShellCaptureCommand(command, &exitCode);
+  return @{
+    @"status" : (exitCode == 0) ? @"ok" : @"error",
+    @"command" : command ?: @"",
+    @"remote_release_dir" : remoteReleaseDir ?: @"",
+    @"captured_output" : capturedOutput ?: @"",
+    @"exit_code" : @(exitCode),
+  };
+}
+
+static NSArray<NSDictionary *> *DeployDoctorChecksForTargetHost(NSDictionary *target,
+                                                                NSInteger *passCount,
+                                                                NSInteger *warnCount,
+                                                                NSInteger *failCount) {
+  NSMutableArray<NSDictionary *> *checks = [NSMutableArray array];
+  __block NSInteger localPass = 0;
+  __block NSInteger localWarn = 0;
+  __block NSInteger localFail = 0;
+  NSFileManager *fm = [NSFileManager defaultManager];
+
+  void (^addCheck)(NSString *, NSString *, NSString *, NSString *) =
+      ^(NSString *checkID, NSString *status, NSString *message, NSString *hint) {
+        [checks addObject:@{
+          @"id" : checkID ?: @"",
+          @"status" : status ?: @"warn",
+          @"message" : message ?: @"",
+          @"hint" : hint ?: @"",
+        }];
+        if ([status isEqualToString:@"pass"]) {
+          localPass += 1;
+        } else if ([status isEqualToString:@"fail"]) {
+          localFail += 1;
+        } else {
+          localWarn += 1;
+        }
+      };
+
+  NSArray<NSDictionary *> *directories = @[
+    @{ @"id" : @"target_release_path", @"path" : StringValueForDeployKey(target, @"release_path") ?: @"" },
+    @{ @"id" : @"target_releases_dir", @"path" : StringValueForDeployKey(target, @"releases_dir") ?: @"" },
+    @{ @"id" : @"target_shared_dir", @"path" : StringValueForDeployKey(target, @"shared_dir") ?: @"" },
+    @{ @"id" : @"target_logs_dir", @"path" : StringValueForDeployKey(target, @"logs_dir") ?: @"" },
+    @{ @"id" : @"target_tmp_dir", @"path" : StringValueForDeployKey(target, @"tmp_dir") ?: @"" },
+  ];
+  for (NSDictionary *entry in directories) {
+    BOOL isDirectory = NO;
+    NSString *path = entry[@"path"];
+    NSString *status = ([path length] > 0 && [fm fileExistsAtPath:path isDirectory:&isDirectory] && isDirectory) ? @"pass" : @"fail";
+    addCheck(entry[@"id"], status,
+             [NSString stringWithFormat:@"%@ %@", [status isEqualToString:@"pass"] ? @"directory present:" : @"directory missing:",
+                                        path ?: @""],
+             @"Run `arlen deploy init <target>` on the target host to create the expected layout.");
+  }
+
+  NSString *generatedDir = StringValueForDeployKey(target, @"generated_dir");
+  NSString *systemdUnit = [generatedDir stringByAppendingPathComponent:[NSString stringWithFormat:@"systemd/%@",
+                                                                 StringValueForDeployKey(target, @"systemd_unit_filename")]];
+  NSString *envExample =
+      [generatedDir stringByAppendingPathComponent:[NSString stringWithFormat:@"env/%@.env.example",
+                                                                 StringValueForDeployKey(target, @"name")]];
+  addCheck(@"target_systemd_unit",
+           [fm fileExistsAtPath:systemdUnit] ? @"pass" : @"fail",
+           [NSString stringWithFormat:@"%@ %@", [fm fileExistsAtPath:systemdUnit] ? @"generated systemd unit:" : @"generated systemd unit missing:",
+                                      systemdUnit],
+           @"Run `arlen deploy init <target>` to generate the host artifacts.");
+  addCheck(@"target_env_example",
+           [fm fileExistsAtPath:envExample] ? @"pass" : @"fail",
+           [NSString stringWithFormat:@"%@ %@", [fm fileExistsAtPath:envExample] ? @"generated env example:" : @"generated env example missing:",
+                                      envExample],
+           @"Run `arlen deploy init <target>` to generate the env template.");
+
+  NSString *runtimeFamily = StringValueForDeployKey(target, @"runtime_family");
+  if ([runtimeFamily isEqualToString:@"gnustep"]) {
+    NSString *gnustepScript = StringValueForDeployKey(target, @"gnustep_script");
+    addCheck(@"target_gnustep_script",
+             ([gnustepScript length] > 0 && [fm fileExistsAtPath:gnustepScript]) ? @"pass" : @"fail",
+             [NSString stringWithFormat:@"%@ %@", ([gnustepScript length] > 0 && [fm fileExistsAtPath:gnustepScript]) ? @"GNUstep script present:" : @"GNUstep script missing:",
+                                        gnustepScript ?: @""],
+             @"Install the supported clang-built GNUstep stack or point runtime.gnustepScript at the active GNUstep.sh.");
+    if ([gnustepScript length] > 0 && [fm fileExistsAtPath:gnustepScript]) {
+      int exitCode = 0;
+      NSString *captured = RunShellCaptureCommand([NSString stringWithFormat:@"set +u; source %@ >/dev/null 2>&1; set -u; gnustep-config --objc-flags",
+                                                                              ShellQuote(gnustepScript)], &exitCode);
+      addCheck(@"target_gnustep_config",
+               (exitCode == 0) ? @"pass" : @"fail",
+               (exitCode == 0) ? @"gnustep-config works after sourcing GNUstep.sh"
+                               : @"gnustep-config failed after sourcing GNUstep.sh",
+               (exitCode == 0) ? @""
+                               : (Trimmed(captured) ?: @"Verify the target GNUstep environment and gnustep-config installation."));
+    }
+    BOOL requiresWrapper = [target[@"requires_env_wrapper"] boolValue];
+    NSString *propaneWrapper = StringValueForDeployKey(target, @"propane_wrapper");
+    NSString *jobsWrapper = StringValueForDeployKey(target, @"jobs_worker_wrapper");
+    if (requiresWrapper) {
+      addCheck(@"target_runtime_wrapper",
+               ([fm isExecutableFileAtPath:propaneWrapper] && [fm isExecutableFileAtPath:jobsWrapper]) ? @"pass" : @"fail",
+               ([fm isExecutableFileAtPath:propaneWrapper] && [fm isExecutableFileAtPath:jobsWrapper])
+                   ? @"GNUstep runtime wrappers generated"
+                   : @"GNUstep runtime wrappers missing",
+               @"Run `arlen deploy init <target>` and install the generated wrappers on the target host.");
+    } else {
+      addCheck(@"target_runtime_wrapper", @"warn",
+               @"runtime wrapper disabled for this target",
+               @"Only disable wrappers when packaged binaries run correctly without sourcing GNUstep.sh.");
+    }
+    NSString *runtimeStrategy = StringValueForDeployKey(target, @"runtime_strategy");
+    addCheck(@"target_runtime_strategy_readiness",
+             [runtimeStrategy isEqualToString:@"managed"] ? @"warn" : @"pass",
+             [runtimeStrategy isEqualToString:@"managed"]
+                 ? @"runtimeStrategy=managed declared, but Arlen does not yet provision the GNUstep runtime automatically"
+                 : [NSString stringWithFormat:@"runtimeStrategy=%@ expects the host runtime to be ready before deploy", runtimeStrategy ?: @"system"],
+             @"`arlen deploy` validates the host/runtime contract but does not install the GNUstep runtime yet.");
+  }
+
+  int systemctlCode = 0;
+  NSString *systemctlPath = Trimmed(RunShellCaptureCommand(@"command -v systemctl 2>/dev/null", &systemctlCode));
+  addCheck(@"target_systemd",
+           (systemctlCode == 0 && [systemctlPath length] > 0) ? @"pass" : @"warn",
+           (systemctlCode == 0 && [systemctlPath length] > 0) ? [NSString stringWithFormat:@"systemd available: %@", systemctlPath]
+                                                               : @"systemd not detected on this host",
+           @"The Debian-first host contract assumes systemd for production service management.");
+
+  if (passCount != NULL) {
+    *passCount = localPass;
+  }
+  if (warnCount != NULL) {
+    *warnCount = localWarn;
+  }
+  if (failCount != NULL) {
+    *failCount = localFail;
+  }
+  return checks;
 }
 
 static NSArray<NSDictionary *> *DeployDoctorChecksForRelease(NSString *releaseDir,
@@ -3856,7 +4404,7 @@ static int CommandDeploy(NSArray *args) {
     PrintDeployUsage();
     return 0;
   }
-  if (![@[ @"plan", @"push", @"release", @"status", @"rollback", @"doctor", @"logs" ] containsObject:subcommand]) {
+  if (![@[ @"init", @"plan", @"push", @"release", @"status", @"rollback", @"doctor", @"logs" ] containsObject:subcommand]) {
     fprintf(stderr, "arlen deploy: unknown subcommand %s\n", [subcommand UTF8String]);
     PrintDeployUsage();
     return 2;
@@ -3885,7 +4433,18 @@ static int CommandDeploy(NSArray *args) {
   BOOL asJSON = NO;
   BOOL skipMigrate = NO;
   BOOL followLogs = NO;
+  BOOL releasesDirExplicit = NO;
+  BOOL environmentExplicit = NO;
+  BOOL baseURLExplicit = NO;
+  BOOL targetProfileExplicit = NO;
+  BOOL runtimeStrategyExplicit = NO;
+  BOOL databaseModeExplicit = NO;
+  BOOL databaseAdapterExplicit = NO;
+  BOOL databaseTargetExplicit = NO;
+  BOOL serviceNameExplicit = NO;
+  BOOL runtimeActionExplicit = NO;
   NSInteger logLines = 200;
+  NSString *targetName = nil;
 
   NSArray *subArgs = ([args count] > 1) ? [args subarrayWithRange:NSMakeRange(1, [args count] - 1)] : @[];
   for (NSUInteger idx = 0; idx < [subArgs count]; idx++) {
@@ -3930,6 +4489,7 @@ static int CommandDeploy(NSArray *args) {
       }
       releasesDir = [ResolvePathFromRoot([[NSFileManager defaultManager] currentDirectoryPath], subArgs[++idx])
                         stringByStandardizingPath];
+      releasesDirExplicit = YES;
     } else if ([arg isEqualToString:@"--release-id"]) {
       if (idx + 1 >= [subArgs count]) {
         if (asJSON) {
@@ -3986,6 +4546,7 @@ static int CommandDeploy(NSArray *args) {
         return 2;
       }
       environment = subArgs[++idx];
+      environmentExplicit = YES;
     } else if ([arg isEqualToString:@"--base-url"]) {
       if (idx + 1 >= [subArgs count]) {
         if (asJSON) {
@@ -3998,6 +4559,7 @@ static int CommandDeploy(NSArray *args) {
         return 2;
       }
       baseURL = subArgs[++idx];
+      baseURLExplicit = YES;
     } else if ([arg isEqualToString:@"--target-profile"]) {
       if (idx + 1 >= [subArgs count]) {
         if (asJSON) {
@@ -4010,6 +4572,7 @@ static int CommandDeploy(NSArray *args) {
         return 2;
       }
       targetProfile = Trimmed(subArgs[++idx]);
+      targetProfileExplicit = YES;
     } else if ([arg isEqualToString:@"--runtime-strategy"]) {
       if (idx + 1 >= [subArgs count]) {
         if (asJSON) {
@@ -4022,6 +4585,7 @@ static int CommandDeploy(NSArray *args) {
         return 2;
       }
       runtimeStrategy = [Trimmed(subArgs[++idx]) lowercaseString];
+      runtimeStrategyExplicit = YES;
     } else if ([arg isEqualToString:@"--database-mode"]) {
       if (idx + 1 >= [subArgs count]) {
         if (asJSON) {
@@ -4034,6 +4598,7 @@ static int CommandDeploy(NSArray *args) {
         return 2;
       }
       databaseMode = [Trimmed(subArgs[++idx]) lowercaseString];
+      databaseModeExplicit = YES;
     } else if ([arg isEqualToString:@"--database-adapter"]) {
       if (idx + 1 >= [subArgs count]) {
         if (asJSON) {
@@ -4046,6 +4611,7 @@ static int CommandDeploy(NSArray *args) {
         return 2;
       }
       databaseAdapter = [Trimmed(subArgs[++idx]) lowercaseString];
+      databaseAdapterExplicit = YES;
     } else if ([arg isEqualToString:@"--database-target"]) {
       if (idx + 1 >= [subArgs count]) {
         if (asJSON) {
@@ -4058,6 +4624,7 @@ static int CommandDeploy(NSArray *args) {
         return 2;
       }
       databaseTarget = NormalizeDatabaseTarget(subArgs[++idx]);
+      databaseTargetExplicit = YES;
       if (!DatabaseTargetIsValid(databaseTarget)) {
         return asJSON ? EmitMachineError(@"deploy", [NSString stringWithFormat:@"deploy.%@", subcommand],
                                          @"invalid_database_target",
@@ -4113,6 +4680,7 @@ static int CommandDeploy(NSArray *args) {
         return 2;
       }
       serviceName = subArgs[++idx];
+      serviceNameExplicit = YES;
     } else if ([arg isEqualToString:@"--runtime-action"]) {
       if (idx + 1 >= [subArgs count]) {
         if (asJSON) {
@@ -4125,6 +4693,7 @@ static int CommandDeploy(NSArray *args) {
         return 2;
       }
       runtimeAction = [subArgs[++idx] lowercaseString];
+      runtimeActionExplicit = YES;
     } else if ([arg isEqualToString:@"--lines"]) {
       if (idx + 1 >= [subArgs count]) {
         if (asJSON) {
@@ -4166,6 +4735,8 @@ static int CommandDeploy(NSArray *args) {
     } else if ([arg isEqualToString:@"--help"] || [arg isEqualToString:@"-h"]) {
       PrintDeployUsage();
       return 0;
+    } else if (![arg hasPrefix:@"--"] && [targetName length] == 0) {
+      targetName = Trimmed(arg);
     } else {
       if (asJSON) {
         return EmitMachineError(@"deploy", [NSString stringWithFormat:@"deploy.%@", subcommand],
@@ -4196,6 +4767,65 @@ static int CommandDeploy(NSArray *args) {
                               @"ARLEN_FRAMEWORK_ROOT=/path/to/Arlen arlen deploy plan --json", 1);
     }
     return 1;
+  }
+
+  NSDictionary *resolvedTarget = nil;
+  BOOL remoteTargetEnabled = NO;
+  NSString *remoteReleasesDir = nil;
+  if ([targetName length] > 0) {
+    NSError *targetError = nil;
+    resolvedTarget = LoadDeployTargetNamed(appRoot, targetName, &targetError);
+    if (resolvedTarget == nil) {
+      return asJSON ? EmitMachineError(@"deploy", [NSString stringWithFormat:@"deploy.%@", subcommand],
+                                       @"deploy_target_unresolved",
+                                       targetError.localizedDescription ?: @"failed to load deploy target",
+                                       @"Add config/deploy.plist with the named target, or pass raw deploy flags instead.",
+                                       @"arlen deploy plan --target-profile linux-x86_64-gnustep-clang --json", 1)
+                    : 1;
+    }
+
+    if (!targetProfileExplicit && [StringValueForDeployKey(resolvedTarget, @"profile") length] > 0) {
+      targetProfile = StringValueForDeployKey(resolvedTarget, @"profile");
+    }
+    if (!runtimeStrategyExplicit && [StringValueForDeployKey(resolvedTarget, @"runtime_strategy") length] > 0) {
+      runtimeStrategy = StringValueForDeployKey(resolvedTarget, @"runtime_strategy");
+    }
+    if (!databaseModeExplicit && [StringValueForDeployKey(resolvedTarget, @"database_mode") length] > 0) {
+      databaseMode = StringValueForDeployKey(resolvedTarget, @"database_mode");
+    }
+    if (!databaseAdapterExplicit && [StringValueForDeployKey(resolvedTarget, @"database_adapter") length] > 0) {
+      databaseAdapter = StringValueForDeployKey(resolvedTarget, @"database_adapter");
+    }
+    if (!databaseTargetExplicit && [StringValueForDeployKey(resolvedTarget, @"database_target") length] > 0) {
+      databaseTarget = NormalizeDatabaseTarget(StringValueForDeployKey(resolvedTarget, @"database_target"));
+    }
+    if (!environmentExplicit && [StringValueForDeployKey(resolvedTarget, @"environment") length] > 0) {
+      environment = StringValueForDeployKey(resolvedTarget, @"environment");
+    }
+    if (!baseURLExplicit && [StringValueForDeployKey(resolvedTarget, @"base_url") length] > 0) {
+      baseURL = StringValueForDeployKey(resolvedTarget, @"base_url");
+    }
+    if (!serviceNameExplicit && [StringValueForDeployKey(resolvedTarget, @"service") length] > 0) {
+      serviceName = StringValueForDeployKey(resolvedTarget, @"service");
+    }
+    if (!runtimeActionExplicit && [StringValueForDeployKey(resolvedTarget, @"runtime_action") length] > 0) {
+      runtimeAction = StringValueForDeployKey(resolvedTarget, @"runtime_action");
+    }
+
+    for (NSString *requiredKey in [resolvedTarget[@"required_environment_keys"] isKindOfClass:[NSArray class]]
+                                     ? resolvedTarget[@"required_environment_keys"]
+                                     : @[]) {
+      if (![requiredEnvironmentKeys containsObject:requiredKey]) {
+        [requiredEnvironmentKeys addObject:requiredKey];
+      }
+    }
+
+    remoteTargetEnabled = [resolvedTarget[@"remote_enabled"] boolValue];
+    remoteReleasesDir = StringValueForDeployKey(resolvedTarget, @"releases_dir");
+    if (!releasesDirExplicit) {
+      releasesDir = remoteTargetEnabled ? StringValueForDeployKey(resolvedTarget, @"local_staging_releases_dir")
+                                        : remoteReleasesDir;
+    }
   }
 
   if ([releasesDir length] == 0) {
@@ -4233,6 +4863,114 @@ static int CommandDeploy(NSArray *args) {
                                      @"Use external, host_local, or embedded.",
                                      @"arlen deploy plan --database-mode external --json", 2)
                   : 2;
+  }
+
+  if ([subcommand isEqualToString:@"init"]) {
+    if ([targetName length] == 0 || resolvedTarget == nil) {
+      return asJSON ? EmitMachineError(@"deploy", @"deploy.init", @"deploy_init_target_required",
+                                       @"arlen deploy init requires a named target from config/deploy.plist",
+                                       @"Run `arlen deploy init <target>` for a checked-in deployment target.",
+                                       @"arlen deploy init production --json", 2)
+                    : 2;
+    }
+
+    NSFileManager *fm = [NSFileManager defaultManager];
+    NSMutableArray<NSString *> *createdDirectories = [NSMutableArray array];
+    NSMutableArray<NSString *> *writtenFiles = [NSMutableArray array];
+    NSArray<NSString *> *directories = @[
+      StringValueForDeployKey(resolvedTarget, @"release_path"),
+      StringValueForDeployKey(resolvedTarget, @"releases_dir"),
+      StringValueForDeployKey(resolvedTarget, @"shared_dir"),
+      StringValueForDeployKey(resolvedTarget, @"logs_dir"),
+      StringValueForDeployKey(resolvedTarget, @"tmp_dir"),
+      [StringValueForDeployKey(resolvedTarget, @"generated_dir") stringByAppendingPathComponent:@"bin"],
+      [StringValueForDeployKey(resolvedTarget, @"generated_dir") stringByAppendingPathComponent:@"systemd"],
+      [StringValueForDeployKey(resolvedTarget, @"generated_dir") stringByAppendingPathComponent:@"env"],
+    ];
+    for (NSString *directory in directories) {
+      if ([directory length] == 0) {
+        continue;
+      }
+      if ([fm createDirectoryAtPath:directory withIntermediateDirectories:YES attributes:nil error:NULL]) {
+        [createdDirectories addObject:directory];
+      }
+    }
+
+    NSString *generatedDir = StringValueForDeployKey(resolvedTarget, @"generated_dir");
+    NSString *systemdPath =
+        [[generatedDir stringByAppendingPathComponent:@"systemd"] stringByAppendingPathComponent:StringValueForDeployKey(resolvedTarget, @"systemd_unit_filename")];
+    NSString *envExamplePath =
+        [[[generatedDir stringByAppendingPathComponent:@"env"] stringByAppendingPathComponent:StringValueForDeployKey(resolvedTarget, @"name")] stringByAppendingString:@".env.example"];
+    NSString *propaneWrapperPath = StringValueForDeployKey(resolvedTarget, @"propane_wrapper");
+    NSString *jobsWorkerWrapperPath = StringValueForDeployKey(resolvedTarget, @"jobs_worker_wrapper");
+    NSString *readmePath = [generatedDir stringByAppendingPathComponent:@"README.txt"];
+
+    NSError *writeError = nil;
+    if (!WriteTextFile(systemdPath, RenderedSystemdUnitForTarget(resolvedTarget, frameworkRoot), YES, &writeError)) {
+      return asJSON ? EmitMachineError(@"deploy", @"deploy.init", @"deploy_init_write_failed",
+                                       writeError.localizedDescription ?: @"failed writing generated systemd unit",
+                                       @"Verify the target output directory is writable and rerun deploy init.",
+                                       @"arlen deploy init production --json", 1)
+                    : 1;
+    }
+    [writtenFiles addObject:systemdPath];
+    writeError = nil;
+    if (!WriteTextFile(envExamplePath, RenderedEnvExampleForTarget(resolvedTarget, frameworkRoot), YES, &writeError)) {
+      return asJSON ? EmitMachineError(@"deploy", @"deploy.init", @"deploy_init_write_failed",
+                                       writeError.localizedDescription ?: @"failed writing generated env example",
+                                       @"Verify the target output directory is writable and rerun deploy init.",
+                                       @"arlen deploy init production --json", 1)
+                    : 1;
+    }
+    [writtenFiles addObject:envExamplePath];
+    writeError = nil;
+    if (!WriteTextFile(propaneWrapperPath, RenderedGNUstepWrapperForTarget(resolvedTarget, @"propane"), YES, &writeError)) {
+      return asJSON ? EmitMachineError(@"deploy", @"deploy.init", @"deploy_init_write_failed",
+                                       writeError.localizedDescription ?: @"failed writing propane wrapper",
+                                       @"Verify the target output directory is writable and rerun deploy init.",
+                                       @"arlen deploy init production --json", 1)
+                    : 1;
+    }
+    SetExecutablePermissions(propaneWrapperPath, NULL);
+    [writtenFiles addObject:propaneWrapperPath];
+    writeError = nil;
+    if (!WriteTextFile(jobsWorkerWrapperPath, RenderedGNUstepWrapperForTarget(resolvedTarget, @"jobs-worker"), YES, &writeError)) {
+      return asJSON ? EmitMachineError(@"deploy", @"deploy.init", @"deploy_init_write_failed",
+                                       writeError.localizedDescription ?: @"failed writing jobs-worker wrapper",
+                                       @"Verify the target output directory is writable and rerun deploy init.",
+                                       @"arlen deploy init production --json", 1)
+                    : 1;
+    }
+    SetExecutablePermissions(jobsWorkerWrapperPath, NULL);
+    [writtenFiles addObject:jobsWorkerWrapperPath];
+    writeError = nil;
+    if (!WriteTextFile(readmePath, RenderedInitReadmeForTarget(resolvedTarget), YES, &writeError)) {
+      return asJSON ? EmitMachineError(@"deploy", @"deploy.init", @"deploy_init_write_failed",
+                                       writeError.localizedDescription ?: @"failed writing deploy init README",
+                                       @"Verify the target output directory is writable and rerun deploy init.",
+                                       @"arlen deploy init production --json", 1)
+                    : 1;
+    }
+    [writtenFiles addObject:readmePath];
+
+    if (asJSON) {
+      NSDictionary *payload = @{
+        @"version" : AgentContractVersion(),
+        @"command" : @"deploy",
+        @"workflow" : @"deploy.init",
+        @"subcommand" : @"init",
+        @"status" : @"ok",
+        @"target" : DeployTargetPayload(resolvedTarget),
+        @"created_directories" : createdDirectories ?: @[],
+        @"written_files" : writtenFiles ?: @[],
+      };
+      PrintJSONPayload(stdout, payload);
+      return 0;
+    }
+
+    fprintf(stdout, "Initialized deploy target %s\n", [targetName UTF8String]);
+    fprintf(stdout, "Generated artifacts under %s\n", [generatedDir UTF8String]);
+    return 0;
   }
 
   NSString *workflow = [NSString stringWithFormat:@"deploy.%@", subcommand];
@@ -4276,6 +5014,188 @@ static int CommandDeploy(NSArray *args) {
     [buildCommand appendString:@" --allow-remote-rebuild"];
   }
 
+  if (remoteTargetEnabled && ![subcommand isEqualToString:@"plan"]) {
+    NSDictionary *localBuildPayload = nil;
+    if ([subcommand isEqualToString:@"push"] || [subcommand isEqualToString:@"release"]) {
+      NSMutableString *pushCommand = [buildCommand mutableCopy];
+      [pushCommand appendString:asJSON ? @" --json" : @""];
+      int pushExitCode = 0;
+      NSString *pushOutput = RunShellCaptureCommand(pushCommand, &pushExitCode);
+      if (pushExitCode != 0) {
+        if (asJSON) {
+          NSDictionary *payload = JSONDictionaryFromString(pushOutput);
+          if (payload != nil) {
+            NSMutableDictionary *wrapped = [payload mutableCopy];
+            wrapped[@"target"] = DeployTargetPayload(resolvedTarget);
+            PrintJSONPayload(stdout, wrapped);
+            return pushExitCode;
+          }
+          return EmitMachineError(@"deploy", workflow, @"deploy_target_push_failed",
+                                  @"failed to build the local release artifact for the named target",
+                                  @"Inspect the underlying deploy push failure and rerun after the local artifact builds cleanly.",
+                                  @"arlen deploy push production --json", pushExitCode ?: 1);
+        }
+        if ([pushOutput length] > 0) {
+          fprintf(stderr, "%s", [pushOutput UTF8String]);
+        }
+        return pushExitCode ?: 1;
+      }
+      if (asJSON) {
+        localBuildPayload = JSONDictionaryFromString(pushOutput) ?: @{};
+      }
+    }
+
+    NSDictionary *transportStep = nil;
+    if ([subcommand isEqualToString:@"push"] || [subcommand isEqualToString:@"release"]) {
+      transportStep = UploadReleaseToRemoteTarget(resolvedTarget, releasesDir, releaseID);
+      if (![[transportStep[@"status"] description] isEqualToString:@"ok"]) {
+        if (asJSON) {
+          NSDictionary *payload = @{
+            @"version" : AgentContractVersion(),
+            @"command" : @"deploy",
+            @"workflow" : workflow,
+            @"subcommand" : subcommand,
+            @"status" : @"error",
+            @"target" : DeployTargetPayload(resolvedTarget),
+            @"release_id" : releaseID ?: @"",
+            @"local_releases_dir" : releasesDir ?: @"",
+            @"remote_releases_dir" : remoteReleasesDir ?: @"",
+            @"transport" : transportStep ?: @{},
+            @"build_release" : localBuildPayload ?: @{},
+            @"error" : @{
+              @"code" : @"deploy_target_transport_failed",
+              @"message" : @"failed to upload the prepared release artifact to the remote target",
+              @"fixit" : @{
+                @"action" : @"Verify SSH access, remote path permissions, and retry the target deploy.",
+                @"example" : @"arlen deploy push production --json",
+              }
+            },
+            @"exit_code" : @([transportStep[@"exit_code"] integerValue] > 0 ? [transportStep[@"exit_code"] integerValue] : 1),
+          };
+          PrintJSONPayload(stdout, payload);
+        }
+        return ([transportStep[@"exit_code"] integerValue] > 0) ? [transportStep[@"exit_code"] integerValue] : 1;
+      }
+
+      if ([subcommand isEqualToString:@"push"]) {
+        NSDictionary *manifest = JSONDictionaryFromFile(manifestPath) ?: @{};
+        if (asJSON) {
+          NSDictionary *payload = @{
+            @"version" : AgentContractVersion(),
+            @"command" : @"deploy",
+            @"workflow" : workflow,
+            @"subcommand" : subcommand,
+            @"status" : @"ok",
+            @"target" : DeployTargetPayload(resolvedTarget),
+            @"release_id" : releaseID ?: @"",
+            @"local_releases_dir" : releasesDir ?: @"",
+            @"remote_releases_dir" : remoteReleasesDir ?: @"",
+            @"remote_release_dir" : transportStep[@"remote_release_dir"] ?: @"",
+            @"manifest_path" : manifestPath ?: @"",
+            @"manifest_version" : manifest[@"version"] ?: @"phase32-deploy-manifest-v1",
+            @"deployment" : DeploymentMetadataFromManifest(manifest, allowRemoteRebuild),
+            @"propane_handoff" : PropaneHandoffFromManifest(manifest, releaseDir),
+            @"transport" : transportStep ?: @{},
+            @"manifest" : manifest ?: @{},
+            @"build_release" : localBuildPayload ?: @{},
+          };
+          PrintJSONPayload(stdout, payload);
+          return 0;
+        }
+        fprintf(stdout, "Uploaded release %s to %s\n", [releaseID UTF8String], [remoteReleasesDir UTF8String]);
+        return 0;
+      }
+    }
+
+    NSString *remoteBaseDir =
+        ([subcommand isEqualToString:@"release"] && [releaseID length] > 0)
+            ? [remoteReleasesDir stringByAppendingPathComponent:releaseID]
+            : [remoteReleasesDir stringByAppendingPathComponent:@"current"];
+    NSString *remoteAppRoot = [remoteBaseDir stringByAppendingPathComponent:@"app"];
+    NSString *remoteFrameworkRoot = [remoteBaseDir stringByAppendingPathComponent:@"framework"];
+    NSString *remoteBinary = [remoteFrameworkRoot stringByAppendingPathComponent:@"build/arlen"];
+
+    NSMutableString *remoteDelegate =
+        [NSMutableString stringWithFormat:@"set -euo pipefail && if [ ! -x %@ ]; then echo 'remote packaged arlen missing at %@' >&2; exit 1; fi && cd %@ && ARLEN_FRAMEWORK_ROOT=%@ %@ deploy %@",
+                                           ShellQuote(remoteBinary), remoteBinary, ShellQuote(remoteAppRoot),
+                                           ShellQuote(remoteFrameworkRoot), ShellQuote(remoteBinary),
+                                           subcommand];
+    AppendShellOption(remoteDelegate, @"--app-root", remoteAppRoot);
+    AppendShellOption(remoteDelegate, @"--releases-dir", remoteReleasesDir);
+    if ([subcommand isEqualToString:@"release"] && [releaseID length] > 0) {
+      AppendShellOption(remoteDelegate, @"--release-id", releaseID);
+      AppendShellOption(remoteDelegate, @"--env", environment);
+      if (skipMigrate) {
+        [remoteDelegate appendString:@" --skip-migrate"];
+      }
+    }
+    if ([serviceName length] > 0) {
+      AppendShellOption(remoteDelegate, @"--service", serviceName);
+    }
+    if ([runtimeAction length] > 0 &&
+        [@[ @"release", @"rollback" ] containsObject:subcommand]) {
+      AppendShellOption(remoteDelegate, @"--runtime-action", runtimeAction);
+    }
+    if ([baseURL length] > 0 &&
+        [@[ @"release", @"status", @"doctor", @"rollback" ] containsObject:subcommand]) {
+      AppendShellOption(remoteDelegate, @"--base-url", baseURL);
+    }
+    if ([remoteBuildCheckCommand length] > 0 &&
+        [@[ @"release", @"doctor" ] containsObject:subcommand]) {
+      AppendShellOption(remoteDelegate, @"--remote-build-check-command", remoteBuildCheckCommand);
+    }
+    if ([subcommand isEqualToString:@"logs"]) {
+      if (logLines > 0) {
+        AppendShellOption(remoteDelegate, @"--lines", [NSString stringWithFormat:@"%ld", (long)logLines]);
+      }
+      if (followLogs) {
+        [remoteDelegate appendString:@" --follow"];
+      }
+      if ([logFilePath length] > 0) {
+        AppendShellOption(remoteDelegate, @"--file", logFilePath);
+      }
+    }
+    if (asJSON) {
+      [remoteDelegate appendString:@" --json"];
+    }
+
+    NSDictionary *remoteResult = RunSSHCommandForTarget(resolvedTarget, remoteDelegate);
+    if (asJSON) {
+      NSDictionary *remotePayload = JSONDictionaryFromString(remoteResult[@"captured_output"]);
+      if ([remotePayload isKindOfClass:[NSDictionary class]]) {
+        NSMutableDictionary *wrapped = [remotePayload mutableCopy];
+        wrapped[@"target"] = DeployTargetPayload(resolvedTarget);
+        if (transportStep != nil) {
+          wrapped[@"transport"] = transportStep;
+        }
+        PrintJSONPayload(stdout, wrapped);
+        return [remoteResult[@"exit_code"] integerValue];
+      }
+
+      NSDictionary *payload = @{
+        @"version" : AgentContractVersion(),
+        @"command" : @"deploy",
+        @"workflow" : workflow,
+        @"subcommand" : subcommand,
+        @"status" : ([remoteResult[@"exit_code"] integerValue] == 0) ? @"ok" : @"error",
+        @"target" : DeployTargetPayload(resolvedTarget),
+        @"release_id" : releaseID ?: @"",
+        @"remote_releases_dir" : remoteReleasesDir ?: @"",
+        @"transport" : transportStep ?: @{},
+        @"remote_execution" : remoteResult ?: @{},
+        @"exit_code" : @([remoteResult[@"exit_code"] integerValue]),
+      };
+      PrintJSONPayload(stdout, payload);
+      return [remoteResult[@"exit_code"] integerValue];
+    }
+
+    if ([remoteResult[@"captured_output"] length] > 0) {
+      fprintf(([remoteResult[@"exit_code"] integerValue] == 0) ? stdout : stderr, "%s",
+              [remoteResult[@"captured_output"] UTF8String]);
+    }
+    return [remoteResult[@"exit_code"] integerValue];
+  }
+
   if ([subcommand isEqualToString:@"plan"]) {
     NSMutableString *planCommand = [buildCommand mutableCopy];
     [planCommand appendString:@" --dry-run"];
@@ -4296,6 +5216,7 @@ static int CommandDeploy(NSArray *args) {
         @"workflow" : workflow,
         @"subcommand" : subcommand,
         @"status" : @"planned",
+        @"target" : DeployTargetPayload(resolvedTarget),
         @"app_root" : appRoot ?: @"",
         @"framework_root" : frameworkRoot ?: @"",
         @"releases_dir" : releasesDir ?: @"",
@@ -4333,6 +5254,7 @@ static int CommandDeploy(NSArray *args) {
         @"workflow" : workflow,
         @"subcommand" : subcommand,
         @"status" : @"ok",
+        @"target" : DeployTargetPayload(resolvedTarget),
         @"app_root" : appRoot ?: @"",
         @"framework_root" : frameworkRoot ?: @"",
         @"releases_dir" : releasesDir ?: @"",
@@ -4598,9 +5520,43 @@ static int CommandDeploy(NSArray *args) {
     NSInteger passCount = 0;
     NSInteger warnCount = 0;
     NSInteger failCount = 0;
-    NSArray *checks = DeployDoctorChecksForRelease(currentReleaseDir, environment, serviceName, baseURL,
-                                                   remoteBuildCheckCommand,
-                                                   &passCount, &warnCount, &failCount);
+    NSMutableArray *checks = [NSMutableArray array];
+    BOOL currentReleaseIsDirectory = NO;
+    BOOL currentReleaseLooksUsable =
+        ([currentReleaseDir length] > 0 && PathExists(currentReleaseDir, &currentReleaseIsDirectory) &&
+         currentReleaseIsDirectory &&
+         PathExists([currentReleaseDir stringByAppendingPathComponent:@"metadata/manifest.json"], NULL));
+    if (currentReleaseLooksUsable) {
+      NSInteger releasePass = 0;
+      NSInteger releaseWarn = 0;
+      NSInteger releaseFail = 0;
+      NSArray *releaseChecks = DeployDoctorChecksForRelease(currentReleaseDir, environment, serviceName, baseURL,
+                                                            remoteBuildCheckCommand,
+                                                            &releasePass, &releaseWarn, &releaseFail);
+      [checks addObjectsFromArray:releaseChecks ?: @[]];
+      passCount += releasePass;
+      warnCount += releaseWarn;
+      failCount += releaseFail;
+    }
+    if (resolvedTarget != nil && !remoteTargetEnabled) {
+      NSInteger targetPass = 0;
+      NSInteger targetWarn = 0;
+      NSInteger targetFail = 0;
+      NSArray *targetChecks = DeployDoctorChecksForTargetHost(resolvedTarget, &targetPass, &targetWarn, &targetFail);
+      [checks addObjectsFromArray:targetChecks ?: @[]];
+      passCount += targetPass;
+      warnCount += targetWarn;
+      failCount += targetFail;
+    }
+    if ([checks count] == 0) {
+      [checks addObject:@{
+        @"id" : @"release_dir",
+        @"status" : @"fail",
+        @"message" : @"active release directory is missing",
+        @"hint" : @"Build or activate a release before running deploy doctor, or pass a named target for host-readiness checks.",
+      }];
+      failCount += 1;
+    }
     NSString *status = (failCount > 0) ? @"fail" : (warnCount > 0 ? @"warn" : @"ok");
     if (asJSON) {
       NSDictionary *payload = @{
@@ -4614,6 +5570,7 @@ static int CommandDeploy(NSArray *args) {
         @"environment" : environment ?: @"production",
         @"deployment" : currentDeployment ?: @{},
         @"propane_handoff" : PropaneHandoffFromManifest(currentManifest, currentReleaseDir),
+        @"target" : DeployTargetPayload(resolvedTarget),
         @"checks" : checks ?: @[],
         @"summary" : @{
           @"pass" : @(passCount),

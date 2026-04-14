@@ -4,6 +4,48 @@ Last updated: 2026-04-14
 
 ## Leaving Off (2026-04-14)
 
+- Completed Phase 32 and delivered `32U-32V`:
+  - added target-level GNUstep runtime metadata via `runtime.gnustepScript`
+    and `runtime.requiresEnvWrapper`
+  - extended `arlen deploy init <target>` to generate GNUstep runtime wrappers
+    for packaged `propane` and `jobs-worker`
+  - extended `arlen deploy doctor <target>` so a fresh local host can be
+    checked before any release is active, including layout, generated
+    artifacts, GNUstep script presence, `gnustep-config` after source, wrapper
+    readiness, and an explicit warning that `runtimeStrategy=managed` is not
+    yet automatic
+  - updated deployment/operator docs so there is now one authoritative answer
+    for what an Arlen-ready Debian GNUstep host means
+- Phase 32 status:
+  - `32A-32V` are now delivered
+  - `make phase32-confidence` remains the canonical deploy confidence lane
+- Continued Phase 32 and delivered `32R-32T`:
+  - added checked-in named deploy targets through `config/deploy.plist`, so
+    `arlen deploy plan|push|release|status|rollback|doctor|logs <target>` can
+    resolve target defaults without requiring operators to remember the full
+    flag set
+  - added `arlen deploy init <target>` for deterministic Linux/Debian host
+    scaffolding, including release/shared/log/tmp directory creation plus
+    generated systemd/env artifacts under `build/deploy/targets/<target>/`
+  - added SSH/tar-based remote release transport and activation, so named
+    targets with `transport.sshHost` can ship prepared releases and delegate
+    release/status/doctor/rollback/logs to the remote packaged `arlen`
+  - added focused deployment regressions in
+    `tests/integration/DeploymentIntegrationTests.m` for named-target
+    resolution, deploy-init artifact generation, and mocked SSH
+    push/release/status flows
+- Phase 32 status:
+  - `32A-32T` are now delivered
+  - `32U-32V` remain pending
+  - `make phase32-confidence` remains the canonical deploy confidence lane
+- Reopened Phase 32 for blank-host deployment follow-up work:
+  - added `32R-32V` for checked-in named deploy targets, narrow `deploy init`
+    host scaffolding, SSH artifact transport/activation, fresh GNUstep host
+    readiness, and generated Debian-first host artifacts/docs
+  - kept the boundary explicit:
+    - this follow-up is about making Arlen a real target-driven deploy product
+    - it is not about secret management, PostgreSQL provisioning, or
+      reverse-proxy/TLS/DNS setup
 - Fixed two new deployment regressions reported downstream from `OwnerConnect`:
   - `ARLEN-BUG-019`: `tools/deploy/smoke_release.sh` now resolves the packaged
     `operability_probe_helper` path relative to the selected release root
@@ -32,6 +74,7 @@ Last updated: 2026-04-14
     host/platform owns secret values and database provisioning
 - Phase 32 status:
   - `32A-32Q` are delivered
+  - `32R-32V` are pending follow-up scope
   - `make phase32-confidence` remains the canonical deploy closeout lane for
     the shipped Phase 32 target-aware deployment baseline
 - Closed the remaining packaged-deploy gaps reported after `613cf7b`:

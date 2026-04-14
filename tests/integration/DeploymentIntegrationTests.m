@@ -1374,6 +1374,226 @@
   }
 }
 
+- (void)testArlenDeployNamedTargetPlanAndInitUseCheckedInDeployConfig {
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *appRoot = [self createTempDirectoryWithPrefix:@"arlen-deploy-target-app"];
+  NSString *workRoot = [self createTempDirectoryWithPrefix:@"arlen-deploy-target-work"];
+  XCTAssertNotNil(appRoot);
+  XCTAssertNotNil(workRoot);
+  if (appRoot == nil || workRoot == nil) {
+    return;
+  }
+
+  @try {
+    NSString *releasePath = [workRoot stringByAppendingPathComponent:@"host/myapp"];
+    NSString *gnustepScript = @"/usr/GNUstep/System/Library/Makefiles/GNUstep.sh";
+    NSString *deployConfig = [NSString stringWithFormat:
+                                  @"{\n"
+                                   "  deployment = {\n"
+                                   "    schema = \"phase32-deploy-targets-v1\";\n"
+                                   "    targets = {\n"
+                                   "      production = {\n"
+                                   "        host = \"myapp.example.test\";\n"
+                                   "        releasePath = \"%@\";\n"
+                                   "        profile = \"linux-x86_64-gnustep-clang\";\n"
+                                   "        runtimeStrategy = \"managed\";\n"
+                                   "        runtimeAction = \"restart\";\n"
+                                   "        environment = \"production\";\n"
+                                   "        service = \"arlen@myapp\";\n"
+                                   "        baseURL = \"http://127.0.0.1:3000\";\n"
+                                   "        database = { mode = \"host_local\"; adapter = \"postgresql\"; target = \"default\"; };\n"
+                                   "        configuration = {\n"
+                                   "          envFile = \"%@\";\n"
+                                   "          requiredEnvironmentKeys = (\"ARLEN_DATABASE_URL\", \"ARLEN_SESSION_SECRET\");\n"
+                                   "        };\n"
+                                   "        runtime = { gnustepScript = \"%@\"; requiresEnvWrapper = YES; };\n"
+                                   "        init = { runtimeUser = \"arlen\"; runtimeGroup = \"arlen\"; };\n"
+                                   "      };\n"
+                                   "    };\n"
+                                   "  };\n"
+                                   "}\n",
+                                  releasePath,
+                                  [workRoot stringByAppendingPathComponent:@"etc/arlen/myapp.env"],
+                                  gnustepScript];
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"config/app.plist"]
+                          content:@"{\n  host = \"127.0.0.1\";\n  port = 3000;\n}\n"]);
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"config/environments/production.plist"]
+                          content:@"{\n  logFormat = \"json\";\n}\n"]);
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"config/deploy.plist"]
+                          content:deployConfig]);
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"app_lite.m"]
+                          content:@"#import <Foundation/Foundation.h>\n"
+                                  "int main(int argc, const char *argv[]) { (void)argc; (void)argv; return 0; }\n"]);
+
+    int code = 0;
+    NSString *buildOutput = [self runMakeAtRepoRoot:repoRoot target:@"arlen" exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", buildOutput);
+
+    NSString *planOutput = [self runShellCapture:[NSString stringWithFormat:
+                                                      @"cd %@ && ARLEN_FRAMEWORK_ROOT=%@ %@/build/arlen "
+                                                       "deploy plan production --app-root %@ --release-id named-target-rel "
+                                                       "--allow-missing-certification --json",
+                                                      appRoot, repoRoot, repoRoot, appRoot]
+                                        exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", planOutput);
+    NSDictionary *planPayload =
+        [self parseJSONDictionaryFromOutput:planOutput context:@"arlen deploy plan production --json"];
+    XCTAssertEqualObjects(@"planned", planPayload[@"status"]);
+    NSDictionary *target = [planPayload[@"target"] isKindOfClass:[NSDictionary class]] ? planPayload[@"target"] : @{};
+    XCTAssertEqualObjects(@"production", target[@"name"]);
+    XCTAssertEqualObjects(@"linux-x86_64-gnustep-clang", target[@"profile"]);
+    XCTAssertEqualObjects(@"managed", target[@"runtime_strategy"]);
+    XCTAssertEqualObjects(@"build/deploy/targets/production/local-releases",
+                          [planPayload[@"releases_dir"] hasSuffix:@"build/deploy/targets/production/local-releases"] ? @"build/deploy/targets/production/local-releases" : planPayload[@"releases_dir"]);
+
+    NSString *initOutput = [self runShellCapture:[NSString stringWithFormat:
+                                                      @"cd %@ && ARLEN_FRAMEWORK_ROOT=%@ %@/build/arlen "
+                                                       "deploy init production --app-root %@ --json",
+                                                      appRoot, repoRoot, repoRoot, appRoot]
+                                        exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", initOutput);
+    NSDictionary *initPayload =
+        [self parseJSONDictionaryFromOutput:initOutput context:@"arlen deploy init production --json"];
+    XCTAssertEqualObjects(@"ok", initPayload[@"status"]);
+    NSArray *writtenFiles =
+        [initPayload[@"written_files"] isKindOfClass:[NSArray class]] ? initPayload[@"written_files"] : @[];
+    XCTAssertEqual((NSUInteger)5, [writtenFiles count]);
+    NSString *generatedRoot = [appRoot stringByAppendingPathComponent:@"build/deploy/targets/production"];
+    XCTAssertTrue([[NSFileManager defaultManager]
+                      fileExistsAtPath:[generatedRoot stringByAppendingPathComponent:@"systemd/arlen@myapp.service"]]);
+    XCTAssertTrue([[NSFileManager defaultManager]
+                      fileExistsAtPath:[generatedRoot stringByAppendingPathComponent:@"env/production.env.example"]]);
+    NSString *propaneWrapper = [generatedRoot stringByAppendingPathComponent:@"bin/propane-wrapper"];
+    NSString *jobsWrapper = [generatedRoot stringByAppendingPathComponent:@"bin/jobs-worker-wrapper"];
+    XCTAssertTrue([[NSFileManager defaultManager] isExecutableFileAtPath:propaneWrapper], @"%@", propaneWrapper);
+    XCTAssertTrue([[NSFileManager defaultManager] isExecutableFileAtPath:jobsWrapper], @"%@", jobsWrapper);
+    NSString *unitContents = [NSString stringWithContentsOfFile:[generatedRoot stringByAppendingPathComponent:@"systemd/arlen@myapp.service"]
+                                                       encoding:NSUTF8StringEncoding
+                                                          error:nil];
+    XCTAssertTrue([unitContents containsString:propaneWrapper], @"%@", unitContents);
+    XCTAssertTrue([[NSFileManager defaultManager] fileExistsAtPath:releasePath]);
+    XCTAssertTrue([[NSFileManager defaultManager]
+                      fileExistsAtPath:[releasePath stringByAppendingPathComponent:@"releases"]]);
+
+    NSString *doctorOutput = [self runShellCapture:[NSString stringWithFormat:
+                                                       @"cd %@ && ARLEN_FRAMEWORK_ROOT=%@ %@/build/arlen "
+                                                        "deploy doctor production --app-root %@ --json",
+                                                       appRoot, repoRoot, repoRoot, appRoot]
+                                         exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", doctorOutput);
+    NSDictionary *doctorPayload =
+        [self parseJSONDictionaryFromOutput:doctorOutput context:@"arlen deploy doctor production --json"];
+    NSArray *checks = [doctorPayload[@"checks"] isKindOfClass:[NSArray class]] ? doctorPayload[@"checks"] : @[];
+    NSMutableDictionary *statuses = [NSMutableDictionary dictionary];
+    for (NSDictionary *check in checks) {
+      if ([check[@"id"] isKindOfClass:[NSString class]] && [check[@"status"] isKindOfClass:[NSString class]]) {
+        statuses[check[@"id"]] = check[@"status"];
+      }
+    }
+    XCTAssertEqualObjects(@"pass", statuses[@"target_gnustep_script"]);
+    XCTAssertEqualObjects(@"pass", statuses[@"target_gnustep_config"]);
+    XCTAssertEqualObjects(@"pass", statuses[@"target_runtime_wrapper"]);
+  } @finally {
+    [[NSFileManager defaultManager] removeItemAtPath:appRoot error:nil];
+    [[NSFileManager defaultManager] removeItemAtPath:workRoot error:nil];
+  }
+}
+
+- (void)testArlenDeployReleaseAndStatusOperateAgainstRemoteNamedTargetOverSSH {
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *appRoot = [self createTempDirectoryWithPrefix:@"arlen-deploy-ssh-app"];
+  NSString *workRoot = [self createTempDirectoryWithPrefix:@"arlen-deploy-ssh-work"];
+  XCTAssertNotNil(appRoot);
+  XCTAssertNotNil(workRoot);
+  if (appRoot == nil || workRoot == nil) {
+    return;
+  }
+
+  @try {
+    NSString *releasePath = [workRoot stringByAppendingPathComponent:@"remote-host/myapp"];
+    NSString *mockSSH = [workRoot stringByAppendingPathComponent:@"mock-ssh.sh"];
+    NSString *deployConfig = [NSString stringWithFormat:
+                                  @"{\n"
+                                   "  deployment = {\n"
+                                   "    schema = \"phase32-deploy-targets-v1\";\n"
+                                   "    targets = {\n"
+                                   "      production = {\n"
+                                   "        host = \"myapp.example.test\";\n"
+                                   "        releasePath = \"%@\";\n"
+                                   "        profile = \"linux-x86_64-gnustep-clang\";\n"
+                                   "        runtimeStrategy = \"system\";\n"
+                                   "        runtimeAction = \"none\";\n"
+                                   "        environment = \"production\";\n"
+                                   "        transport = {\n"
+                                   "          sshHost = \"mock-target\";\n"
+                                   "          sshCommand = \"%@\";\n"
+                                   "        };\n"
+                                   "      };\n"
+                                   "    };\n"
+                                   "  };\n"
+                                   "}\n",
+                                  releasePath, mockSSH];
+    XCTAssertTrue([self writeFile:mockSSH
+                          content:@"#!/usr/bin/env bash\n"
+                                  "set -euo pipefail\n"
+                                  "host=\"$1\"\n"
+                                  "shift\n"
+                                  "exec \"$@\"\n"]);
+    XCTAssertTrue([self makeExecutableAtPath:mockSSH]);
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"config/app.plist"]
+                          content:@"{\n  host = \"127.0.0.1\";\n  port = 3000;\n}\n"]);
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"config/environments/production.plist"]
+                          content:@"{\n  logFormat = \"json\";\n}\n"]);
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"config/deploy.plist"]
+                          content:deployConfig]);
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"app_lite.m"]
+                          content:@"#import <Foundation/Foundation.h>\n"
+                                  "int main(int argc, const char *argv[]) { (void)argc; (void)argv; return 0; }\n"]);
+
+    int code = 0;
+    NSString *buildOutput = [self runMakeAtRepoRoot:repoRoot target:@"arlen" exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", buildOutput);
+
+    NSString *releaseOutput = [self runShellCapture:[NSString stringWithFormat:
+                                                         @"cd %@ && ARLEN_FRAMEWORK_ROOT=%@ %@/build/arlen "
+                                                          "deploy release production --app-root %@ --release-id ssh-rel-1 "
+                                                          "--allow-missing-certification --skip-migrate --runtime-action none --json",
+                                                         appRoot, repoRoot, repoRoot, appRoot]
+                                           exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", releaseOutput);
+    NSDictionary *releasePayload =
+        [self parseJSONDictionaryFromOutput:releaseOutput context:@"arlen deploy release production remote --json"];
+    XCTAssertEqualObjects(@"ok", releasePayload[@"status"]);
+    NSDictionary *target = [releasePayload[@"target"] isKindOfClass:[NSDictionary class]] ? releasePayload[@"target"] : @{};
+    XCTAssertEqualObjects(@"production", target[@"name"]);
+    NSDictionary *transport = [releasePayload[@"transport"] isKindOfClass:[NSDictionary class]] ? releasePayload[@"transport"] : @{};
+    XCTAssertEqualObjects(@"ok", transport[@"status"]);
+
+    NSString *remoteCurrent = [self runShellCapture:[NSString stringWithFormat:@"readlink -f %s/releases/current",
+                                                                               [releasePath UTF8String]]
+                                           exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", remoteCurrent);
+    NSString *trimmedCurrent =
+        [remoteCurrent stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    XCTAssertTrue([trimmedCurrent hasSuffix:@"/ssh-rel-1"], @"%@", trimmedCurrent);
+
+    NSString *statusOutput = [self runShellCapture:[NSString stringWithFormat:
+                                                        @"cd %@ && ARLEN_FRAMEWORK_ROOT=%@ %@/build/arlen "
+                                                         "deploy status production --app-root %@ --json",
+                                                        appRoot, repoRoot, repoRoot, appRoot]
+                                          exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", statusOutput);
+    NSDictionary *statusPayload =
+        [self parseJSONDictionaryFromOutput:statusOutput context:@"arlen deploy status production remote --json"];
+    XCTAssertEqualObjects(@"ok", statusPayload[@"status"]);
+    XCTAssertEqualObjects(@"ssh-rel-1", statusPayload[@"active_release_id"]);
+    XCTAssertEqualObjects(@"production", statusPayload[@"target"][@"name"]);
+  } @finally {
+    [[NSFileManager defaultManager] removeItemAtPath:appRoot error:nil];
+    [[NSFileManager defaultManager] removeItemAtPath:workRoot error:nil];
+  }
+}
+
 - (void)testPackagedReleaseShipsDeployHelpersAndPackagedCLIActivates_ARLEN_BUG_016 {
   NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
   NSString *appRoot = [self createTempDirectoryWithPrefix:@"arlen-bug-016-app"];

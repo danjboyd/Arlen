@@ -1,6 +1,6 @@
 # Arlen Phase 32 Roadmap
 
-Status: complete on 2026-04-14
+Status: reopened for host-bootstrap follow-up scope on 2026-04-14
 Last updated: 2026-04-14
 
 Related docs:
@@ -71,6 +71,12 @@ Follow-up scope added after the initial closeout:
   and host-local settings
 - developer/operator docs should call out the stale shared-env override
   failure mode that showed up during the `parker-app` migration
+- a blank Debian VM still lacks first-class target bootstrap:
+  - no checked-in named deploy target object
+  - no narrow `deploy init` host-shape scaffolding
+  - no built-in remote artifact transport/activation
+  - no generated host wrapper/unit/env installation flow
+  - no first-class runtime/toolchain readiness contract for a fresh host
 
 ## 0.1 Phase 32 North Star
 
@@ -140,6 +146,11 @@ or `propane` integration expansion.
 15. `32O`: activation-owned runtime roots and host env conflict detection.
 16. `32P`: deploy release runtime action parity and operator workflow closeout.
 17. `32Q`: deployment documentation addendum for secrets, database modes, and migrations.
+18. `32R`: named deploy targets and checked-in target resolution.
+19. `32S`: host bootstrap scaffold (`deploy init`) for Arlen-shaped Linux hosts.
+20. `32T`: remote artifact transport and activation over SSH.
+21. `32U`: runtime/toolchain readiness for fresh GNUstep hosts.
+22. `32V`: generated host artifacts and Debian-first operator docs.
 
 ## 2.1 Current Phase State
 
@@ -157,6 +168,11 @@ Delivered in this checkpoint:
 - `32J`
 - `32K`
 - `32L`
+- `32R`
+- `32S`
+- `32T`
+- `32U`
+- `32V`
 
 Remaining after this checkpoint:
 
@@ -178,6 +194,10 @@ Remaining after this checkpoint:
 - Do not let shared host env silently override activation-owned runtime roots.
 - Do not expand deploy into secret provisioning; host/platform remains the
   owner of secret values.
+- Do not turn Arlen deploy into a general machine-provisioning platform.
+- Do not make PostgreSQL installation, role creation, backup policy, TLS, DNS,
+  or reverse-proxy provisioning part of Phase 32.
+- Do not make `deploy init` depend on secret value entry/edit flows.
 
 ## 4. Detailed Subphases
 
@@ -577,3 +597,213 @@ Delivered scope:
   - activation-owned runtime-root behavior
 - updated CLI docs to describe the new deploy flags and doctor/runtime-action
   behavior
+
+### 32R. Named Deploy Targets and Checked-In Target Resolution
+
+Status: completed 2026-04-14
+
+Goal:
+- make deployment targets first-class app objects instead of operationally
+  remembered flag bundles
+
+Required follow-up:
+
+- define the checked-in target config surface for named targets such as
+  `production`
+- teach deploy commands to resolve:
+  - `arlen deploy plan production`
+  - `arlen deploy push production`
+  - `arlen deploy release production`
+  - `arlen deploy doctor production`
+- keep target objects declarative and machine-readable
+- support app-owned metadata for:
+  - host/address
+  - release path
+  - platform profile
+  - runtime strategy
+  - database mode
+  - runtime action defaults
+
+Acceptance:
+
+- roadmap and deploy docs define the named-target resolution contract
+- target config examples are checked into the docs
+- deploy CLI no longer depends on operators remembering the full target flag set
+
+Implemented:
+
+- checked-in `config/deploy.plist` targets are now first-class deploy objects
+- `arlen deploy plan|push|release|status|rollback|doctor|logs <target>` resolve
+  target defaults from that config while letting explicit CLI flags win
+- target metadata currently covers:
+  - host
+  - release path
+  - platform profile
+  - runtime strategy and runtime action
+  - database contract
+  - required env keys
+  - SSH transport metadata
+
+### 32S. Host Bootstrap Scaffold (`deploy init`) for Arlen-Shaped Linux Hosts
+
+Status: completed 2026-04-14
+
+Goal:
+- close the biggest blank-host gap without turning Arlen into a full machine
+  provisioner
+
+Required follow-up:
+
+- add a narrow `arlen deploy init <target>` contract for Debian/Linux hosts
+- allow it to scaffold:
+  - release/shared directory layout
+  - runtime user/group creation expectations
+  - `/etc/arlen/<app>.env` examples
+  - systemd unit/drop-in installation
+  - host wrapper installation when required
+- keep it explicit that this is host-shape scaffolding, not full provisioning
+
+Out of scope for this subphase:
+
+- secret editing/rotation/storage
+- PostgreSQL provisioning
+- nginx/Caddy/TLS/DNS setup
+
+Acceptance:
+
+- docs define what `deploy init` creates vs what the operator must still do
+- generated artifacts are deterministic and app-target aware
+- Debian-first operator runbook matches the generated layout
+
+Implemented:
+
+- `arlen deploy init <target>` now creates deterministic host-shape artifacts
+  and directories for Linux/Debian-style targets
+- it scaffolds:
+  - release/shared/log/tmp directories under the declared release root
+  - generated concrete systemd unit under `build/deploy/targets/<target>/systemd/`
+  - generated env example under `build/deploy/targets/<target>/env/`
+  - generated README with operator follow-up steps
+- it intentionally does not provision secrets, PostgreSQL, or ingress
+
+### 32T. Remote Artifact Transport and Activation Over SSH
+
+Status: completed 2026-04-14
+
+Goal:
+- make `arlen deploy` able to ship and activate a prepared release on a target
+  host without requiring a separate custom rsync/scp wrapper
+
+Required follow-up:
+
+- define the remote transport contract for named targets
+- support:
+  - artifact copy/upload
+  - remote unpack/install into the target release path
+  - remote activation
+  - optional remote doctor/health verification
+- keep transport scoped to prepared release artifacts rather than remote source builds
+
+Acceptance:
+
+- roadmap and docs define the SSH deploy flow and its support boundary
+- target-aware deploy commands can operate against a remote host using the
+  checked-in target object
+
+Implemented:
+
+- targets can declare `transport.sshHost` plus optional `sshCommand` /
+  `sshOptions`
+- `arlen deploy push <target>` now:
+  - builds a local prepared release in target-specific staging
+  - uploads it to the remote target release path over SSH/tar streaming
+- `arlen deploy release <target>` now:
+  - uploads the prepared release
+  - activates it remotely by invoking the packaged `arlen deploy release`
+    inside the shipped release
+- `status`, `doctor`, `rollback`, and `logs` can now delegate to the active
+  packaged release on the remote target over the same SSH contract
+
+### 32U. Runtime/Toolchain Readiness for Fresh GNUstep Hosts
+
+Status: completed 2026-04-14
+
+Goal:
+- make the blank-host contract honest for Linux GNUstep targets without hiding
+  runtime requirements behind app-specific wrappers
+
+Required follow-up:
+
+- define what a fresh Debian GNUstep/Arlen host must provide before packaged
+  `propane` and `arlen` are considered runnable
+- extend doctor/init docs around:
+  - GNUstep env/runtime expectations
+  - wrapper requirements when needed
+  - runtime/toolchain readiness checks for fresh hosts
+- prepare the seam for future GNUstep/runtime bootstrap tooling without
+  coupling that tooling into app deploy logic yet
+
+Out of scope for this subphase:
+
+- full package-manager-driven runtime installation inside `arlen deploy`
+
+Acceptance:
+
+- docs give one authoritative answer for what “Arlen-ready Debian host” means
+- doctor/init expectations account for runtime wrapper or env sourcing needs
+
+Implemented:
+
+- named targets can now declare GNUstep runtime expectations with:
+  - `runtime.gnustepScript`
+  - `runtime.requiresEnvWrapper`
+- `arlen deploy init <target>` now generates GNUstep runtime wrappers for
+  packaged `propane` and `jobs-worker`
+- `arlen deploy doctor <target>` now validates fresh-host GNUstep readiness
+  even before a release is active, including:
+  - release/shared/log/tmp layout
+  - generated systemd/env artifacts
+  - GNUstep script presence
+  - `gnustep-config` after sourcing GNUstep
+  - wrapper generation/readiness
+  - explicit warning that `runtimeStrategy=managed` is not yet automatic
+
+### 32V. Generated Host Artifacts and Debian-First Operator Docs
+
+Status: completed 2026-04-14
+
+Goal:
+- turn the host bootstrap contract into concrete generated files and clear
+  operator documentation
+
+Required follow-up:
+
+- generate target-aware host artifacts such as:
+  - systemd units
+  - env examples
+  - wrapper scripts
+  - directory layout manifests
+- update operator docs to show:
+  - blank Debian VM to Arlen-shaped host bootstrap
+  - named-target deploy flow
+  - remote deploy activation flow
+  - explicit remaining manual steps:
+    - secrets
+    - PostgreSQL
+    - reverse proxy / TLS / DNS
+
+Acceptance:
+
+- generated artifacts and docs tell the same story
+- Debian-first runbook is complete enough for a fresh host bootstrap without
+  framework-internals archaeology
+
+Implemented:
+
+- generated host artifacts now include:
+  - concrete systemd unit
+  - env template
+  - GNUstep runtime wrappers
+  - generated README with install/follow-up steps
+- deployment, CLI, getting-started, docs index, and systemd runbook now point
+  at the generated artifact flow and the authoritative Debian host contract
