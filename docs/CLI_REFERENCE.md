@@ -106,6 +106,9 @@ First-class release orchestration over the existing `tools/deploy/*` scripts.
 - writes manifest paths release-relative so the packaged release stays valid
   after ship/move (`ARLEN-BUG-017`)
 - writes `deployment` and `propane_handoff` metadata into the packaged manifest
+- writes explicit `database` and `configuration` contracts into the packaged
+  manifest when `--database-mode`, `--database-adapter`, `--database-target`,
+  and `--require-env-key` are supplied
 - ships the packaged deploy helper set under `framework/tools/deploy/`,
   including activate/rollback/env-materialization helpers (`ARLEN-BUG-016`)
 - copies packaged runtime binaries as real files inside the release instead of
@@ -117,6 +120,8 @@ First-class release orchestration over the existing `tools/deploy/*` scripts.
 - reuses an existing release artifact for the selected `--release-id`, or builds it first if missing
 - runs `migrate --env <name>` only when packaged SQL migrations exist, unless `--skip-migrate` is passed
 - activates `releases/current` via `tools/deploy/activate_release.sh`
+- can reload or restart a systemd unit through `--service <unit>` and
+  `--runtime-action <reload|restart|none>` after activation
 - rewrites `metadata/release.env` against the activated release root so
   packaged `propane` handoff metadata is target-absolute after ship/move
 - optionally probes `<base-url>/healthz` when `--base-url` is supplied
@@ -147,9 +152,15 @@ First-class release orchestration over the existing `tools/deploy/*` scripts.
 `arlen deploy doctor`
 
 - validates release layout, manifest presence, packaged binaries, config loading, and database URL completeness
+- validates explicit database deployment contracts from the packaged manifest
+  (`external`, `host_local`, `embedded`)
+- validates required environment keys without printing their values
 - validates deployment compatibility metadata and requires a remote build-check command when the active release targets an experimental remote rebuild path
 - reports packaged `propane_handoff` metadata in JSON mode
 - reports service state when `--service <unit>` is supplied
+- flags effective runtime-root conflicts when a live service is using
+  `ARLEN_APP_ROOT` / `ARLEN_FRAMEWORK_ROOT` values that disagree with the
+  activated release
 - runs full `tools/deploy/validate_operability.sh` when `--base-url <url>` is supplied
 - packaged releases include that helper under `framework/tools/deploy/`, so `deploy doctor --base-url` works against activated release payloads
 - resolves manifest-backed helper/runtime paths from the active release root
@@ -171,6 +182,10 @@ Common options:
 - `--release-id <id>`: explicit release identifier (default: UTC timestamp)
 - `--target-profile <profile>`: deployment target profile (`linux-x86_64-gnustep-clang`, `windows-x86_64-gnustep-clang64`, `macos-arm64-apple-foundation`, etc.)
 - `--runtime-strategy <system|managed|bundled>`: target runtime fulfillment contract (default `system`)
+- `--database-mode <external|host_local|embedded>`: declared database dependency contract for this target
+- `--database-adapter <name>`: declared database adapter contract for this target
+- `--database-target <name>`: declared database target name (default `default`)
+- `--require-env-key <NAME>`: record a required environment key without storing its value in the release
 - `--allow-remote-rebuild`: allow the best-effort GNUstep cross-profile rebuild path
 - `--remote-build-check-command <shell>`: shell command used to validate the target build chain for experimental remote rebuild targets
 - `--certification-manifest <path>`: override Phase 9J certification manifest path
@@ -184,7 +199,7 @@ Release-only options:
 - `--base-url <url>`: verify `GET /healthz` after activation
 - `--skip-migrate`: skip the migration step during activation
 - `--service <name>`: systemd unit for status/rollback/log operations
-- `--runtime-action <reload|restart|none>`: runtime action used by rollback when `--service` is set
+- `--runtime-action <reload|restart|none>`: runtime action used by `deploy release` and `deploy rollback` when `--service` is set
 - `--lines <count>`: number of log lines to show for `deploy logs` (default `200`)
 - `--follow`: follow `deploy logs` output
 - `--file <path>`: tail an explicit log file instead of journald

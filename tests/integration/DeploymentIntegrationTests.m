@@ -1100,6 +1100,12 @@
     NSDictionary *deployment = [manifest[@"deployment"] isKindOfClass:[NSDictionary class]] ? manifest[@"deployment"] : @{};
     XCTAssertEqualObjects(@"supported", deployment[@"support_level"]);
     XCTAssertEqualObjects(@"system", deployment[@"runtime_strategy"]);
+    NSDictionary *databaseContract = [manifest[@"database"] isKindOfClass:[NSDictionary class]] ? manifest[@"database"] : @{};
+    XCTAssertEqualObjects(@"phase32-database-contract-v1", databaseContract[@"schema"]);
+    XCTAssertEqualObjects(@"", databaseContract[@"mode"]);
+    NSDictionary *configurationContract =
+        [manifest[@"configuration"] isKindOfClass:[NSDictionary class]] ? manifest[@"configuration"] : @{};
+    XCTAssertEqualObjects(@"phase32-config-contract-v1", configurationContract[@"schema"]);
     NSDictionary *propaneHandoff =
         [manifest[@"propane_handoff"] isKindOfClass:[NSDictionary class]] ? manifest[@"propane_handoff"] : @{};
     XCTAssertEqualObjects(@"phase32-propane-handoff-v1", propaneHandoff[@"schema"]);
@@ -1141,16 +1147,18 @@
     XCTAssertEqualObjects(@"deploy.release", releasePayload[@"workflow"]);
     XCTAssertEqualObjects(@"ok", releasePayload[@"status"]);
     NSArray *steps = [releasePayload[@"steps"] isKindOfClass:[NSArray class]] ? releasePayload[@"steps"] : @[];
-    XCTAssertEqual((NSUInteger)5, [steps count]);
+    XCTAssertEqual((NSUInteger)6, [steps count]);
     NSDictionary *pushStep = [steps[0] isKindOfClass:[NSDictionary class]] ? steps[0] : @{};
     NSDictionary *compatibilityStep = [steps[1] isKindOfClass:[NSDictionary class]] ? steps[1] : @{};
     NSDictionary *migrateStep = [steps[2] isKindOfClass:[NSDictionary class]] ? steps[2] : @{};
     NSDictionary *activateStep = [steps[3] isKindOfClass:[NSDictionary class]] ? steps[3] : @{};
-    NSDictionary *healthStep = [steps[4] isKindOfClass:[NSDictionary class]] ? steps[4] : @{};
+    NSDictionary *runtimeStep = [steps[4] isKindOfClass:[NSDictionary class]] ? steps[4] : @{};
+    NSDictionary *healthStep = [steps[5] isKindOfClass:[NSDictionary class]] ? steps[5] : @{};
     XCTAssertEqualObjects(@"reused", pushStep[@"status"]);
     XCTAssertEqualObjects(@"ok", compatibilityStep[@"status"]);
     XCTAssertEqualObjects(@"not_needed", migrateStep[@"status"]);
     XCTAssertEqualObjects(@"ok", activateStep[@"status"]);
+    XCTAssertEqualObjects(@"skipped", runtimeStep[@"status"]);
     XCTAssertEqualObjects(@"skipped", healthStep[@"status"]);
 
     NSString *currentTarget = [self runShellCapture:[NSString stringWithFormat:@"readlink -f %s/current",
@@ -1160,6 +1168,115 @@
     NSString *trimmed =
         [currentTarget stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
     XCTAssertTrue([trimmed hasSuffix:@"/cli-rel-1"]);
+  } @finally {
+    [[NSFileManager defaultManager] removeItemAtPath:appRoot error:nil];
+    [[NSFileManager defaultManager] removeItemAtPath:workRoot error:nil];
+  }
+}
+
+- (void)testArlenDeployDoctorValidatesExplicitDatabaseModeAndRequiredEnvironmentKeys {
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *appRoot = [self createTempDirectoryWithPrefix:@"arlen-deploy-contract-app"];
+  NSString *workRoot = [self createTempDirectoryWithPrefix:@"arlen-deploy-contract-work"];
+  XCTAssertNotNil(appRoot);
+  XCTAssertNotNil(workRoot);
+  if (appRoot == nil || workRoot == nil) {
+    return;
+  }
+
+  @try {
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"config/app.plist"]
+                          content:@"{\n"
+                                  "  host = \"127.0.0.1\";\n"
+                                  "  port = 3000;\n"
+                                  "  database = {\n"
+                                  "    connectionString = \"postgresql://db.example.test/deploy_contract\";\n"
+                                  "    adapter = \"postgresql\";\n"
+                                  "  };\n"
+                                  "}\n"]);
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"config/environments/production.plist"]
+                          content:@"{\n  logFormat = \"json\";\n}\n"]);
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"app_lite.m"]
+                          content:@"#import <Foundation/Foundation.h>\n"
+                                  "int main(int argc, const char *argv[]) { (void)argc; (void)argv; return 0; }\n"]);
+
+    int code = 0;
+    NSString *buildOutput = [self runShellCapture:[NSString stringWithFormat:@"cd %@ && make arlen", repoRoot]
+                                         exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", buildOutput);
+
+    NSString *releasesDir = [workRoot stringByAppendingPathComponent:@"releases"];
+    NSString *pushOutput = [self runShellCapture:[NSString stringWithFormat:
+                                                     @"cd %@ && ARLEN_FRAMEWORK_ROOT=%@ %@/build/arlen "
+                                                      "deploy push --app-root %@ --releases-dir %@ --release-id contract-rel-1 "
+                                                      "--database-mode external --database-adapter postgresql --database-target default "
+                                                      "--require-env-key ARLEN_DATABASE_URL --require-env-key APP_SECRET "
+                                                      "--allow-missing-certification --json",
+                                                     appRoot, repoRoot, repoRoot, appRoot, releasesDir]
+                                       exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", pushOutput);
+    NSDictionary *pushPayload = [self parseJSONDictionaryFromOutput:pushOutput context:@"arlen deploy push contract --json"];
+    NSDictionary *manifest = [pushPayload[@"manifest"] isKindOfClass:[NSDictionary class]] ? pushPayload[@"manifest"] : @{};
+    NSDictionary *databaseContract = [manifest[@"database"] isKindOfClass:[NSDictionary class]] ? manifest[@"database"] : @{};
+    XCTAssertEqualObjects(@"external", databaseContract[@"mode"]);
+    XCTAssertEqualObjects(@"postgresql", databaseContract[@"adapter"]);
+    NSDictionary *configurationContract =
+        [manifest[@"configuration"] isKindOfClass:[NSDictionary class]] ? manifest[@"configuration"] : @{};
+    NSArray *requiredKeys =
+        [configurationContract[@"required_environment_keys"] isKindOfClass:[NSArray class]]
+            ? configurationContract[@"required_environment_keys"]
+            : @[];
+    XCTAssertTrue([requiredKeys containsObject:@"ARLEN_DATABASE_URL"]);
+    XCTAssertTrue([requiredKeys containsObject:@"APP_SECRET"]);
+
+    NSString *releaseOutput = [self runShellCapture:[NSString stringWithFormat:
+                                                        @"cd %@ && ARLEN_FRAMEWORK_ROOT=%@ %@/build/arlen "
+                                                         "deploy release --app-root %@ --releases-dir %@ --release-id contract-rel-1 "
+                                                         "--database-mode external --database-adapter postgresql --database-target default "
+                                                         "--require-env-key ARLEN_DATABASE_URL --require-env-key APP_SECRET "
+                                                         "--allow-missing-certification --skip-migrate --json",
+                                                        appRoot, repoRoot, repoRoot, appRoot, releasesDir]
+                                          exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", releaseOutput);
+
+    NSString *doctorMissingOutput = [self runShellCapture:[NSString stringWithFormat:
+                                                               @"cd %@ && ARLEN_FRAMEWORK_ROOT=%@ %@/build/arlen "
+                                                                "deploy doctor --app-root %@ --releases-dir %@ --json",
+                                                               appRoot, repoRoot, repoRoot, appRoot, releasesDir]
+                                             exitCode:&code];
+    XCTAssertEqual(1, code, @"%@", doctorMissingOutput);
+    NSDictionary *doctorMissingPayload =
+        [self parseJSONDictionaryFromOutput:doctorMissingOutput context:@"arlen deploy doctor missing env --json"];
+    NSArray *missingChecks =
+        [doctorMissingPayload[@"checks"] isKindOfClass:[NSArray class]] ? doctorMissingPayload[@"checks"] : @[];
+    NSMutableDictionary *missingStatuses = [NSMutableDictionary dictionary];
+    for (NSDictionary *check in missingChecks) {
+      if ([check[@"id"] isKindOfClass:[NSString class]] && [check[@"status"] isKindOfClass:[NSString class]]) {
+        missingStatuses[check[@"id"]] = check[@"status"];
+      }
+    }
+    XCTAssertEqualObjects(@"fail", missingStatuses[@"required_env_keys"]);
+    XCTAssertEqualObjects(@"pass", missingStatuses[@"database_mode_validation"]);
+
+    NSString *doctorOutput = [self runShellCapture:[NSString stringWithFormat:
+                                                       @"cd %@ && ARLEN_DATABASE_URL=postgresql://db.example.test/deploy_contract "
+                                                        "APP_SECRET=secret-value ARLEN_FRAMEWORK_ROOT=%@ %@/build/arlen "
+                                                        "deploy doctor --app-root %@ --releases-dir %@ --json",
+                                                       appRoot, repoRoot, repoRoot, appRoot, releasesDir]
+                                         exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", doctorOutput);
+    NSDictionary *doctorPayload =
+        [self parseJSONDictionaryFromOutput:doctorOutput context:@"arlen deploy doctor contract --json"];
+    NSArray *checks = [doctorPayload[@"checks"] isKindOfClass:[NSArray class]] ? doctorPayload[@"checks"] : @[];
+    NSMutableDictionary *statuses = [NSMutableDictionary dictionary];
+    for (NSDictionary *check in checks) {
+      if ([check[@"id"] isKindOfClass:[NSString class]] && [check[@"status"] isKindOfClass:[NSString class]]) {
+        statuses[check[@"id"]] = check[@"status"];
+      }
+    }
+    XCTAssertEqualObjects(@"pass", statuses[@"required_env_keys"]);
+    XCTAssertEqualObjects(@"pass", statuses[@"database_contract"]);
+    XCTAssertEqualObjects(@"pass", statuses[@"database_mode_validation"]);
   } @finally {
     [[NSFileManager defaultManager] removeItemAtPath:appRoot error:nil];
     [[NSFileManager defaultManager] removeItemAtPath:workRoot error:nil];

@@ -81,7 +81,7 @@ toolchain env directly for the Linux/GNUstep path. On macOS, use
 ## Contributor and Historical Docs
 
 - [Current Status](STATUS.md): latest checkpoint and verified milestone state.
-- [Phase 32 Roadmap](PHASE32_ROADMAP.md): completed target-aware deployment phase; `32A-32L` cover the platform-profile support matrix, deploy-target config contract, remote rebuild gating, expanded release manifests, explicit `propane_handoff` metadata, the `phase32-confidence` lane, and deployment docs closeout.
+- [Phase 32 Roadmap](PHASE32_ROADMAP.md): completed target-aware deployment phase; `32A-32Q` now cover the platform-profile support matrix, deploy-target config contract, remote rebuild gating, expanded release manifests, explicit database/configuration contracts, runtime-root conflict detection, `deploy release` runtime-action parity, the `phase32-confidence` lane, and deployment docs closeout.
 - [Phase 30 Roadmap](PHASE30_ROADMAP.md): Apple-runtime roadmap on macOS; `30A-30S` are now delivered, including the compatibility-shim cleanup for warning-free Apple/GNUstep builds.
 - [Session Handoff (2026-04-03)](SESSION_HANDOFF_2026-04-03.md): Phase 28 closeout checkpoint covering `28I-28L`, the live reference server, and the final verification set.
 - [Session Handoff (2026-04-02)](SESSION_HANDOFF_2026-04-02.md): historical Phase 28 pause point after shipping `28E-28H` and the React reference workspace.

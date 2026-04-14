@@ -58,6 +58,20 @@ yet give app teams one authoritative answer to these questions:
 
 Phase 32 exists to define that contract before more deploy automation lands.
 
+Follow-up scope added after the initial closeout:
+
+- deploy should keep owning release packaging, migration, activation,
+  rollback, and verification, but not secret management
+- deploy target config should explicitly declare database dependency mode
+  instead of making doctor infer host-local requirements from DSN shape alone
+- `arlen deploy doctor` should validate the declared database mode and fail
+  clearly when a required host-local database service is unavailable
+- release activation should own `ARLEN_APP_ROOT` and
+  `ARLEN_FRAMEWORK_ROOT`, while shared host env should stay focused on secrets
+  and host-local settings
+- developer/operator docs should call out the stale shared-env override
+  failure mode that showed up during the `parker-app` migration
+
 ## 0.1 Phase 32 North Star
 
 Make Arlen production deployment target-aware and honest.
@@ -121,6 +135,11 @@ or `propane` integration expansion.
 10. `32J`: `propane` integration boundary and production manager handoff.
 11. `32K`: confidence lanes and fixture coverage.
 12. `32L`: deployment documentation suite closeout.
+13. `32M`: explicit database deployment dependency contract.
+14. `32N`: doctor validation for declared database mode and secret-safe config checks.
+15. `32O`: activation-owned runtime roots and host env conflict detection.
+16. `32P`: deploy release runtime action parity and operator workflow closeout.
+17. `32Q`: deployment documentation addendum for secrets, database modes, and migrations.
 
 ## 2.1 Current Phase State
 
@@ -154,6 +173,11 @@ Remaining after this checkpoint:
   service manager.
 - Do not make source checkout assumptions part of the future activated-release
   contract.
+- Do not infer database deployment topology purely from DSN shape when the
+  deploy target can declare that contract explicitly.
+- Do not let shared host env silently override activation-owned runtime roots.
+- Do not expand deploy into secret provisioning; host/platform remains the
+  owner of secret values.
 
 ## 4. Detailed Subphases
 
@@ -408,3 +432,148 @@ Delivered scope:
 - updated deployment, CLI, `propane`, testing, and toolchain docs
 - updated roadmap, status, README surfaces, and docs index
 - documented `phase32-confidence` as the deploy closeout artifact lane
+
+### 32M. Explicit Database Deployment Dependency Contract
+
+Status: Delivered on 2026-04-14
+
+Goal:
+- stop guessing whether production expects an external database, a host-local
+  database service, or an embedded/file-backed database
+
+Required follow-up:
+
+- extend the recommended deploy-target schema with an explicit database block
+- document supported database dependency modes:
+  - `external`
+  - `host_local`
+  - `embedded`
+- make it explicit that Arlen validates the declared mode but does not install
+  or provision the database service
+
+Delivered scope:
+
+- deploy packaging now accepts explicit database contract flags:
+  - `--database-mode`
+  - `--database-adapter`
+  - `--database-target`
+- packaged manifests now record a `database` contract block
+- deploy docs now state explicitly that Arlen validates this declared mode and
+  does not provision the database server itself
+
+### 32N. Doctor Validation for Declared Database Mode and Secret-Safe Config Checks
+
+Status: Delivered on 2026-04-14
+
+Goal:
+- make `arlen deploy doctor` validate the declared deployment contract instead
+  of relying on implicit heuristics
+
+Required follow-up:
+
+- for `database.mode=external`:
+  - validate config presence and optional connectivity
+  - do not require a local database package/service on the app host
+- for `database.mode=host_local`:
+  - validate that the required database service is reachable on the host
+  - fail clearly when the declared host-local dependency is unavailable
+- for `database.mode=embedded`:
+  - validate file/runtime prerequisites instead of service presence
+- add secret-safe config inspection guidance:
+  - show required keys
+  - avoid printing secret values
+
+Delivered scope:
+
+- `arlen deploy doctor` now validates declared database mode from the packaged
+  manifest
+- `database.mode=external` validates config presence without requiring a local
+  database install
+- `database.mode=host_local` now uses PostgreSQL-oriented host readiness
+  probes when that adapter is declared
+- required env keys recorded with `--require-env-key` are now checked without
+  printing secret values
+
+### 32O. Activation-Owned Runtime Roots and Host Env Conflict Detection
+
+Status: Delivered on 2026-04-14
+
+Goal:
+- prevent legacy host env from silently overriding activated release roots
+
+Required follow-up:
+
+- document that release activation owns:
+  - `ARLEN_APP_ROOT`
+  - `ARLEN_FRAMEWORK_ROOT`
+- document that shared env files should contain true secrets/host settings, not
+  release-root runtime overrides
+- teach `arlen deploy doctor` to flag conflicting persistent host env/runtime
+  root overrides when they disagree with the active release
+
+Delivered scope:
+
+- deploy docs now state explicitly that release activation owns
+  `ARLEN_APP_ROOT` and `ARLEN_FRAMEWORK_ROOT`
+- `arlen deploy doctor --service <unit>` now inspects the live service
+  environment and fails when effective runtime roots disagree with the active
+  release
+- docs now call out the `parker-app` migration failure mode and remediation
+
+### 32P. Deploy Release Runtime Action Parity and Operator Workflow Closeout
+
+Status: Delivered on 2026-04-14
+
+Goal:
+- close the remaining gap between release activation and runtime reload/restart
+  orchestration
+
+Required follow-up:
+
+- define whether `arlen deploy release` should support first-class
+  `--service` + `--runtime-action`
+- keep migration, activation, runtime action, and health verification as
+  separately visible workflow steps
+- document the boundary:
+  - deploy handles packaging, migration, activation, runtime action, and verification
+  - `propane` handles worker supervision
+
+Delivered scope:
+
+- `arlen deploy release` now supports `--service` plus
+  `--runtime-action <reload|restart|none>`
+- release JSON payloads now keep `migrate`, `activate`, `runtime`, and
+  `health` as separate visible workflow steps
+- CLI/deploy docs now describe that runtime action contract explicitly
+
+### 32Q. Deployment Documentation Addendum for Secrets, Database Modes, and Migrations
+
+Status: Delivered on 2026-04-14
+
+Goal:
+- make the deploy contract understandable without requiring developers to infer
+  policy from old bugs or implementation details
+
+Required follow-up:
+
+- expand developer/operator docs with explicit guidance for:
+  - secret ownership and host injection
+  - target-level database mode declaration
+  - migration expectations and `--skip-migrate`
+  - forward-compatible rollout guidance for schema changes
+  - the rule that app workers must not race to migrate at boot
+- add concrete examples for:
+  - systemd env layout focused on secrets
+  - release-based runtime root ownership
+  - host-local vs external database targets
+
+Delivered scope:
+
+- updated deploy docs with explicit sections for:
+  - deploy ownership boundaries
+  - database dependency modes
+  - secret-safe required env key recording
+  - migration expectations and forward-compatible rollout guidance
+  - activation-owned runtime-root behavior
+- updated CLI docs to describe the new deploy flags and doctor/runtime-action
+  behavior

@@ -29,6 +29,14 @@ Options:
                           (default: current local platform profile)
   --runtime-strategy <system|managed|bundled>
                           Runtime install strategy (default: system)
+  --database-mode <external|host_local|embedded>
+                          Declared database dependency mode for this target
+  --database-adapter <name>
+                          Declared database adapter contract for this target
+  --database-target <name>
+                          Declared database target name (default: default)
+  --require-env-key <NAME>
+                          Record a required environment key without storing its value
   --allow-remote-rebuild  Allow best-effort cross-profile source rebuild planning
   --dry-run                Validate inputs and emit planned release metadata only
   --json                   Emit machine-readable workflow payloads
@@ -209,6 +217,10 @@ local_profile=""
 target_profile=""
 runtime_strategy="system"
 allow_remote_rebuild=0
+database_mode=""
+database_adapter=""
+database_target="default"
+required_env_keys=()
 
 emit_error() {
   local code="$1"
@@ -371,6 +383,46 @@ while [[ $# -gt 0 ]]; do
       runtime_strategy="$2"
       shift 2
       ;;
+    --database-mode)
+      [[ $# -ge 2 ]] || emit_error \
+        "missing_option_value" \
+        "--database-mode requires a value" \
+        "Pass external, host_local, or embedded after --database-mode." \
+        "tools/deploy/build_release.sh --database-mode external --app-root /path/to/app" \
+        2
+      database_mode="$2"
+      shift 2
+      ;;
+    --database-adapter)
+      [[ $# -ge 2 ]] || emit_error \
+        "missing_option_value" \
+        "--database-adapter requires a value" \
+        "Pass the declared adapter name after --database-adapter." \
+        "tools/deploy/build_release.sh --database-adapter postgresql --app-root /path/to/app" \
+        2
+      database_adapter="$2"
+      shift 2
+      ;;
+    --database-target)
+      [[ $# -ge 2 ]] || emit_error \
+        "missing_option_value" \
+        "--database-target requires a value" \
+        "Pass the declared database target name after --database-target." \
+        "tools/deploy/build_release.sh --database-target default --app-root /path/to/app" \
+        2
+      database_target="$2"
+      shift 2
+      ;;
+    --require-env-key)
+      [[ $# -ge 2 ]] || emit_error \
+        "missing_option_value" \
+        "--require-env-key requires a value" \
+        "Pass the required environment key name after --require-env-key." \
+        "tools/deploy/build_release.sh --require-env-key ARLEN_DATABASE_URL --app-root /path/to/app" \
+        2
+      required_env_keys+=("$2")
+      shift 2
+      ;;
     --allow-remote-rebuild)
       allow_remote_rebuild=1
       shift
@@ -428,6 +480,15 @@ if [[ "$runtime_strategy" != "system" && "$runtime_strategy" != "managed" && "$r
     "invalid runtime strategy: $runtime_strategy" \
     "Use system, managed, or bundled." \
     "tools/deploy/build_release.sh --runtime-strategy managed --app-root /path/to/app" \
+    2
+fi
+
+if [[ -n "$database_mode" ]] && [[ "$database_mode" != "external" && "$database_mode" != "host_local" && "$database_mode" != "embedded" ]]; then
+  emit_error \
+    "invalid_database_mode" \
+    "invalid database mode: $database_mode" \
+    "Use external, host_local, or embedded." \
+    "tools/deploy/build_release.sh --database-mode external --app-root /path/to/app" \
     2
 fi
 
@@ -694,18 +755,27 @@ ARLEN_DEPLOY_SUPPORT_LEVEL=$deployment_support_level
 ARLEN_DEPLOY_COMPATIBILITY_REASON=$deployment_reason
 ARLEN_DEPLOY_ALLOW_REMOTE_REBUILD=$allow_remote_rebuild
 ARLEN_DEPLOY_REMOTE_REBUILD_REQUIRED=$remote_rebuild_required
+ARLEN_DEPLOY_DATABASE_MODE=$database_mode
+ARLEN_DEPLOY_DATABASE_ADAPTER=$database_adapter
+ARLEN_DEPLOY_DATABASE_TARGET=$database_target
 ARLEN_DEPLOY_PROPANE_MANAGER_BINARY=framework/bin/propane
 ARLEN_DEPLOY_PROPANE_ACCESSORIES_CONFIG_KEY=propaneAccessories
 ARLEN_DEPLOY_PROPANE_RUNTIME_ACTION_DEFAULT=reload
 ARLEN_DEPLOY_PROPANE_JOB_WORKER_BINARY=framework/bin/jobs-worker
 EOF
 
+required_env_keys_blob=""
+if [[ ${#required_env_keys[@]} -gt 0 ]]; then
+  printf -v required_env_keys_blob '%s\n' "${required_env_keys[@]}"
+fi
+
 python3 - "$release_dir" "$release_id" "$app_root" "$framework_root" "$certification_status" \
   "$certification_bundle_manifest" "$json_performance_status" "$json_performance_bundle_manifest" \
   "$packaged_runtime_binary" "$packaged_framework_boomhauer" "$packaged_arlen_binary" \
   "$packaged_propane" "$packaged_jobs_worker" "$packaged_operability_helper" \
   "$local_profile" "$target_profile" "$runtime_strategy" "$deployment_support_level" "$deployment_reason" \
-  "$allow_remote_rebuild" "$remote_rebuild_required" <<'PY'
+  "$allow_remote_rebuild" "$remote_rebuild_required" "$database_mode" "$database_adapter" \
+  "$database_target" "$required_env_keys_blob" <<'PY'
 import json
 import os
 import sys
@@ -733,7 +803,11 @@ from datetime import datetime, timezone
     deployment_reason,
     allow_remote_rebuild,
     remote_rebuild_required,
-) = sys.argv[1:22]
+    database_mode,
+    database_adapter,
+    database_target,
+    required_env_keys_blob,
+) = sys.argv[1:26]
 
 def rel(*parts):
     return os.path.join(*parts).replace(os.sep, "/")
@@ -803,6 +877,18 @@ manifest = {
         "compatibility_reason": deployment_reason,
         "allow_remote_rebuild": allow_remote_rebuild == "1",
         "remote_rebuild_required": remote_rebuild_required == "1",
+    },
+    "database": {
+        "schema": "phase32-database-contract-v1",
+        "mode": database_mode,
+        "adapter": database_adapter,
+        "target": database_target or "default",
+    },
+    "configuration": {
+        "schema": "phase32-config-contract-v1",
+        "required_environment_keys": [
+            entry for entry in (required_env_keys_blob or "").splitlines() if entry.strip()
+        ],
     },
     "propane_handoff": {
         "schema": "phase32-propane-handoff-v1",

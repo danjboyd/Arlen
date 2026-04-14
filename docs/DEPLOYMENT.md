@@ -282,12 +282,16 @@ For app-operator workflows, prefer the first-class `arlen deploy` wrapper:
 `arlen deploy push` writes `releases/<id>/metadata/manifest.json` using
 `phase32-deploy-manifest-v1`. The manifest now records deployment metadata for
 the local profile, target profile, runtime strategy, compatibility status, and
-remote rebuild requirements. Manifest runtime/helper paths are now stored
+remote rebuild requirements. It also records explicit database/configuration
+contracts when the deploy command is given `--database-mode`,
+`--database-adapter`, `--database-target`, and `--require-env-key`.
+Manifest runtime/helper paths are now stored
 release-relative so the package stays portable after ship/move
 (`ARLEN-BUG-017`). `arlen deploy release` reuses that manifest, runs packaged
 migrations when present, activates `releases/current`, rewrites
-`metadata/release.env` against the activated release root, and can probe
-`/healthz` when `--base-url` is supplied. Packaged framework payloads now also
+`metadata/release.env` against the activated release root, can optionally
+reload/restart a systemd unit after activation, and can probe `/healthz` when
+`--base-url` is supplied. Packaged framework payloads now also
 include the packaged deploy helper set under `framework/tools/deploy/`, so
 `arlen deploy doctor --base-url ...` works from an activated packaged release
 without needing a source checkout beside it.
@@ -297,6 +301,11 @@ Target-aware deploy options:
 - `--target-profile <profile>` records the intended deployment target profile
 - `--runtime-strategy <system|managed|bundled>` records how the runtime should
   be satisfied on the target
+- `--database-mode <external|host_local|embedded>` records the declared
+  database dependency contract
+- `--database-adapter <name>` records the declared database adapter contract
+- `--database-target <name>` records the declared database target name
+- `--require-env-key <NAME>` records required env keys without storing values
 - `--allow-remote-rebuild` opts into best-effort GNUstep cross-profile rebuild
   planning
 - `--remote-build-check-command <shell>` is required by `deploy release` when
@@ -338,6 +347,9 @@ missing from Phase 29:
 - rollback-candidate deployment metadata in `deploy status`
 - rollback-source deployment metadata in `deploy rollback`
 - packaged `propane_handoff` manifest and `release.env` contract
+- explicit database/configuration manifest contracts
+- doctor validation for declared required env keys with secret-redacted output
+- runtime-root conflict detection for live services
 - explicit rejection of unsupported cross-runtime deployment targets
 
 Windows support statement for deployment:
@@ -456,15 +468,115 @@ When the release app root already carries `app/.boomhauer/build/boomhauer-app`,
 both `propane` and `jobs-worker` now prefer that shipped binary even if the
 release app root is no longer a mutable source checkout (`ARLEN-BUG-018`).
 
+### 6.5 Deployment ownership boundaries
+
+Arlen deploy should own:
+
+- immutable release packaging
+- explicit migration execution
+- release activation
+- runtime verification
+- rollback by release switch
+
+Arlen deploy should not own:
+
+- secret value storage
+- secret manager integration policy
+- database server installation/provisioning
+- long-running worker supervision
+
+Operational split:
+
+- deploy handles packaging, migration, activation, and verification
+- `propane` handles worker supervision and runtime process management
+- the host/platform handles secret values and site-local service provisioning
+
+### 6.6 Database dependency contract
+
+Do not make deploy doctor guess production database topology only from the DSN.
+The deploy target contract should declare what the deployment expects.
+
+Recommended target shape:
+
+```yaml
+deployment:
+  targets:
+    production:
+      database:
+        adapter: postgresql
+        mode: external
+```
+
+Supported database dependency modes:
+
+- `external`
+  - the database is outside the app host
+  - doctor should validate config presence and optionally connectivity
+  - doctor should not require PostgreSQL to be installed on the app host
+- `host_local`
+  - the database is expected to be reachable on the deploy host
+  - doctor should fail if the declared local database service is unavailable
+- `embedded`
+  - the database is file/runtime-backed rather than a host service
+  - doctor should validate file and runtime prerequisites instead of service presence
+
+Arlen should validate the declared mode. Arlen should not become a database
+installer or provisioner.
+
+Current doctor behavior for those modes:
+
+- `external`
+  - requires database config presence
+  - does not require a local PostgreSQL install on the app host
+- `host_local`
+  - requires a usable host-local database probe for the declared adapter
+  - currently ships PostgreSQL-oriented host readiness checks
+- `embedded`
+  - records the contract and leaves file/runtime prerequisite checks to the
+    target-specific validation path
+
+Required environment keys:
+
+- record them with `--require-env-key <NAME>`
+- Arlen stores only the key names, never the values
+- `deploy doctor` validates presence without printing secret values
+
+### 6.7 Migration guidance
+
+Treat schema migration as an explicit deploy step, not as a hidden boot-time
+side effect.
+
+Current Arlen behavior:
+
+- `arlen deploy release` runs `migrate --env <name>` before activation when
+  packaged SQL migrations exist
+- `--skip-migrate` is available for controlled rollouts
+- `--service <unit> --runtime-action <reload|restart|none>` can make runtime
+  restart/reload an explicit post-activation deploy step
+
+Expected app/operator behavior:
+
+- make migrations safe to retry
+- prefer forward-compatible schema rollout patterns
+- do not rely on app workers racing each other to migrate at boot
+- fail deployment clearly when required database config or connectivity is missing
+
+Forward-compatible rollout examples:
+
+- add columns before new code depends on them
+- backfill separately when needed
+- drop old columns only after old code is gone
+
 ## 7. Container-First Runbook (Baseline)
 
 Minimum container deployment path:
 
 1. Build release artifact during image build or CI packaging.
 2. Set `ARLEN_APP_ROOT` and `ARLEN_FRAMEWORK_ROOT` to active release paths.
-3. Run migration command before switching traffic.
-4. Start `propane --env production` as container entrypoint.
-5. Probe `/readyz` and `/livez` for rollout/health checks.
+3. Inject secrets from the host/platform rather than baking them into the release.
+4. Run migration command before switching traffic.
+5. Start `propane --env production` as container entrypoint.
+6. Probe `/readyz` and `/livez` for rollout/health checks.
 
 ## 8. VM/systemd Runbook (Baseline)
 
@@ -483,6 +595,7 @@ Recommended systemd behavior:
 - `Restart=always`
 - `TimeoutStopSec` aligned with propane graceful shutdown accessories
 - pre-start migrate step via separate unit or deployment orchestration
+- prefer host-managed secret env here, not release-root overrides
 
 Reference files now ship under `tools/deploy/systemd/`:
 
@@ -496,6 +609,17 @@ Recommended pattern:
 - keep one base production unit template
 - enable incident-only debug mode with a drop-in plus a second env file
 - avoid maintaining separate long-lived "normal" and "debug" service units
+- keep shared env focused on secrets and host settings, not release-root path overrides
+
+Important:
+
+- release activation should own `ARLEN_APP_ROOT` and `ARLEN_FRAMEWORK_ROOT`
+- shared env files should not persist legacy values for those runtime roots
+- if shared env overrides those values, live services can bypass the activated
+  immutable release even when the unit `ExecStart` points at `releases/current`
+
+This was the exact failure mode observed during the `parker-app` migration from
+pre-release deploy wiring to Arlen-managed release activation.
 
 Detailed steps:
 

@@ -4,6 +4,24 @@ Last updated: 2026-04-14
 
 ## Leaving Off (2026-04-14)
 
+- Completed the Phase 32 follow-up deployment-contract work (`32M-32Q`):
+  - packaged release manifests now record explicit `database` and
+    `configuration` contracts via `--database-mode`, `--database-adapter`,
+    `--database-target`, and `--require-env-key`
+  - `arlen deploy doctor` now validates declared database mode, checks
+    required env keys without printing secret values, and flags effective
+    runtime-root conflicts for live services when `ARLEN_APP_ROOT` /
+    `ARLEN_FRAMEWORK_ROOT` disagree with the activated release
+  - `arlen deploy release` now supports `--service` plus
+    `--runtime-action <reload|restart|none>` so activation, runtime action,
+    and health verification are separate visible workflow steps
+  - updated deploy and CLI docs to state clearly that deploy owns packaging,
+    migration, activation, runtime action, and verification, while the
+    host/platform owns secret values and database provisioning
+- Phase 32 status:
+  - `32A-32Q` are delivered
+  - `make phase32-confidence` remains the canonical deploy closeout lane for
+    the shipped Phase 32 target-aware deployment baseline
 - Closed the remaining packaged-deploy gaps reported after `613cf7b`:
   - fixed `ARLEN-BUG-016` by shipping the packaged deploy helper set under
     `framework/tools/deploy/`, so packaged `arlen deploy release` can

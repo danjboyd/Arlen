@@ -147,7 +147,7 @@ Behavior:
   - `--allow-missing-certification`
   - `--json`
   - `--env <name>` and `--base-url <url>` for runtime-aware subcommands
-  - `--runtime-action <reload|restart|none>` for `rollback`
+  - `--runtime-action <reload|restart|none>` for `release` and `rollback`
   - `--lines <count>`, `--follow`, and `--file <path>` for `logs`
 
 ### 4.6 `arlen routes`
@@ -234,6 +234,7 @@ Framework root resolution order:
 - target-aware deploy configuration and platform-profile validation for
   production targets
 - richer `deploy doctor` target probes for runtime strategy, host readiness,
+  declared database mode, required env key presence, runtime-root conflicts,
   and explicit remote rebuild gating
 - richer generator extension hooks
 - plugin/lifecycle scaffolding commands

@@ -100,6 +100,10 @@ static void PrintDeployUsage(void) {
           "  --base-url <url>      Base URL for probe validation\n"
           "  --target-profile <profile>\n"
           "  --runtime-strategy <system|managed|bundled>\n"
+          "  --database-mode <external|host_local|embedded>\n"
+          "  --database-adapter <name>\n"
+          "  --database-target <name>\n"
+          "  --require-env-key <NAME>\n"
           "  --allow-remote-rebuild\n"
           "  --remote-build-check-command <shell>\n"
           "  --certification-manifest <path>\n"
@@ -110,6 +114,7 @@ static void PrintDeployUsage(void) {
           "Release-only options:\n"
           "  --env <name>          Migration environment (default: production)\n"
           "  --skip-migrate        Skip migration step during activation\n"
+          "  --runtime-action <reload|restart|none>\n"
           "\n"
           "Rollback options:\n"
           "  --runtime-action <reload|restart|none>\n"
@@ -314,8 +319,11 @@ static NSDictionary *JSONDictionaryFromFile(NSString *path) {
 static NSString *RunShellCaptureCommand(NSString *command, int *exitCode);
 static NSString *EnvValue(const char *name);
 static BOOL PathExists(NSString *path, BOOL *isDirectory);
+static NSString *NormalizeDatabaseTarget(NSString *rawValue);
+static BOOL DatabaseTargetIsValid(NSString *target);
 static NSString *DatabaseConnectionStringFromEnvironmentForTarget(NSString *databaseTarget);
 static NSString *DatabaseConnectionStringFromConfigForTarget(NSDictionary *config, NSString *databaseTarget);
+static NSString *DatabaseAdapterNameFromConfigForTarget(NSDictionary *config, NSString *databaseTarget);
 
 static NSString *DefaultGNUstepScriptPath(void) {
   if (PathExists(@"/clang64/share/GNUstep/Makefiles/GNUstep.sh", NULL)) {
@@ -617,6 +625,188 @@ static NSString *ServiceRuntimeState(NSString *serviceName, NSString **capturedO
   return output;
 }
 
+static NSString *ServiceMainPID(NSString *serviceName, NSString **capturedOutput) {
+  if ([serviceName length] == 0) {
+    if (capturedOutput != NULL) {
+      *capturedOutput = @"";
+    }
+    return nil;
+  }
+  int exitCode = 0;
+  NSString *output = Trimmed(RunShellCaptureCommand([NSString stringWithFormat:@"systemctl show %@ -p MainPID --value 2>&1",
+                                                                              ShellQuote(serviceName)],
+                                                   &exitCode));
+  if (capturedOutput != NULL) {
+    *capturedOutput = output ?: @"";
+  }
+  if (exitCode != 0 || [output length] == 0 || [output isEqualToString:@"0"]) {
+    return nil;
+  }
+  return output;
+}
+
+static NSDictionary *EnvironmentDictionaryFromEnvironData(NSData *data) {
+  if ([data length] == 0) {
+    return @{};
+  }
+
+  NSMutableDictionary *environment = [NSMutableDictionary dictionary];
+  const char *bytes = data.bytes;
+  NSUInteger length = data.length;
+  NSUInteger start = 0;
+  for (NSUInteger idx = 0; idx <= length; idx++) {
+    BOOL atEnd = (idx == length);
+    if (!atEnd && bytes[idx] != '\0') {
+      continue;
+    }
+    if (idx > start) {
+      NSData *entryData = [NSData dataWithBytes:bytes + start length:(idx - start)];
+      NSString *entry = [[NSString alloc] initWithData:entryData encoding:NSUTF8StringEncoding];
+      NSRange separator = [entry rangeOfString:@"="];
+      if ([entry length] > 0 && separator.location != NSNotFound && separator.location > 0) {
+        NSString *key = [entry substringToIndex:separator.location];
+        NSString *value = [entry substringFromIndex:(separator.location + 1)];
+        environment[key] = value ?: @"";
+      }
+    }
+    start = idx + 1;
+  }
+  return environment;
+}
+
+static NSDictionary *EnvironmentDictionaryForPID(NSString *pid, NSString **capturedOutput) {
+  NSString *trimmedPID = Trimmed(pid);
+  if ([trimmedPID length] == 0) {
+    if (capturedOutput != NULL) {
+      *capturedOutput = @"service has no main pid";
+    }
+    return @{};
+  }
+
+  NSString *environPath = [NSString stringWithFormat:@"/proc/%@/environ", trimmedPID];
+  NSData *data = [NSData dataWithContentsOfFile:environPath];
+  if ([data length] == 0) {
+    if (capturedOutput != NULL) {
+      *capturedOutput = [NSString stringWithFormat:@"unable to read %@" , environPath];
+    }
+    return @{};
+  }
+  if (capturedOutput != NULL) {
+    *capturedOutput = [NSString stringWithFormat:@"loaded environment from pid %@", trimmedPID];
+  }
+  return EnvironmentDictionaryFromEnvironData(data);
+}
+
+static NSDictionary *ServiceEnvironmentForService(NSString *serviceName, NSString **capturedOutput) {
+  NSString *mainPIDOutput = nil;
+  NSString *mainPID = ServiceMainPID(serviceName, &mainPIDOutput);
+  if ([mainPID length] == 0) {
+    if (capturedOutput != NULL) {
+      *capturedOutput = mainPIDOutput ?: @"service has no main pid";
+    }
+    return @{};
+  }
+  return EnvironmentDictionaryForPID(mainPID, capturedOutput);
+}
+
+static NSArray<NSString *> *NormalizedRequiredEnvironmentKeys(NSArray *keys) {
+  NSMutableArray<NSString *> *normalized = [NSMutableArray array];
+  NSMutableSet<NSString *> *seen = [NSMutableSet set];
+  for (id entry in keys ?: @[]) {
+    if (![entry isKindOfClass:[NSString class]]) {
+      continue;
+    }
+    NSString *key = Trimmed(entry);
+    if ([key length] == 0 || [seen containsObject:key]) {
+      continue;
+    }
+    [seen addObject:key];
+    [normalized addObject:key];
+  }
+  return normalized;
+}
+
+static BOOL EnvironmentDictionaryContainsNonEmptyValueForKey(NSDictionary *environment, NSString *key) {
+  if (![key isKindOfClass:[NSString class]] || [key length] == 0) {
+    return NO;
+  }
+  NSString *value = [environment[key] isKindOfClass:[NSString class]] ? environment[key] : nil;
+  return [Trimmed(value) length] > 0;
+}
+
+static NSDictionary *DatabaseContractFromManifest(NSDictionary *manifest, NSDictionary *config) {
+  NSDictionary *database = [manifest[@"database"] isKindOfClass:[NSDictionary class]] ? manifest[@"database"] : @{};
+  NSDictionary *configuration = [manifest[@"configuration"] isKindOfClass:[NSDictionary class]] ? manifest[@"configuration"] : @{};
+  NSString *target = [database[@"target"] isKindOfClass:[NSString class]] ? Trimmed(database[@"target"]) : @"";
+  if ([target length] == 0) {
+    target = @"default";
+  }
+  NSString *adapter = [database[@"adapter"] isKindOfClass:[NSString class]] ? Trimmed(database[@"adapter"]) : @"";
+  if ([adapter length] == 0 && [config isKindOfClass:[NSDictionary class]]) {
+    adapter = DatabaseAdapterNameFromConfigForTarget(config, target);
+  }
+  return @{
+    @"schema" : [database[@"schema"] isKindOfClass:[NSString class]] ? database[@"schema"] : @"phase32-database-contract-v1",
+    @"mode" : [database[@"mode"] isKindOfClass:[NSString class]] ? Trimmed(database[@"mode"]) : @"",
+    @"adapter" : adapter ?: @"",
+    @"target" : target ?: @"default",
+    @"required_environment_keys" : NormalizedRequiredEnvironmentKeys(configuration[@"required_environment_keys"]),
+  };
+}
+
+static NSDictionary *RunHostLocalDatabaseProbe(NSString *adapter, NSString *connectionString) {
+  NSString *normalizedAdapter = [[Trimmed(adapter) lowercaseString] copy];
+  NSString *dsn = Trimmed(connectionString);
+  if ([normalizedAdapter length] == 0) {
+    return @{
+      @"status" : @"warn",
+      @"message" : @"host-local database contract declared without an adapter",
+      @"hint" : @"Declare --database-adapter or configure database.adapter in app config.",
+    };
+  }
+
+  if ([normalizedAdapter isEqualToString:@"postgresql"] || [normalizedAdapter isEqualToString:@"gdl2"]) {
+    int commandCode = 0;
+    NSString *pgIsReady = Trimmed(RunShellCaptureCommand(@"command -v pg_isready 2>/dev/null", &commandCode));
+    if (commandCode == 0 && [pgIsReady length] > 0) {
+      NSString *command = [dsn length] > 0
+                              ? [NSString stringWithFormat:@"pg_isready -q -d %@", ShellQuote(dsn)]
+                              : @"pg_isready -q";
+      int exitCode = 0;
+      NSString *output = RunShellCaptureCommand(command, &exitCode);
+      return @{
+        @"status" : (exitCode == 0) ? @"pass" : @"fail",
+        @"message" : (exitCode == 0) ? @"host-local PostgreSQL probe succeeded"
+                                     : @"host-local PostgreSQL probe failed",
+        @"hint" : (exitCode == 0)
+                      ? @""
+                      : ([output length] > 0 ? output : @"Install/start PostgreSQL on the target host or change database.mode."),
+      };
+    }
+
+    NSString *serviceOutput = nil;
+    NSString *serviceState = ServiceRuntimeState(@"postgresql", &serviceOutput);
+    if ([serviceState isEqualToString:@"active"]) {
+      return @{
+        @"status" : @"pass",
+        @"message" : @"host-local PostgreSQL service is active",
+        @"hint" : @"",
+      };
+    }
+    return @{
+      @"status" : @"fail",
+      @"message" : @"host-local PostgreSQL contract is declared but no usable local service was detected",
+      @"hint" : [serviceOutput length] > 0 ? serviceOutput : @"Install/start PostgreSQL or declare database.mode=external.",
+    };
+  }
+
+  return @{
+    @"status" : @"warn",
+    @"message" : [NSString stringWithFormat:@"no host-local probe is implemented for adapter %@", normalizedAdapter ?: @""],
+    @"hint" : @"Add adapter-specific host readiness validation before relying on host_local deployment for this database.",
+  };
+}
+
 static NSDictionary *HealthContractFromManifest(NSDictionary *manifest) {
   NSDictionary *contract = [manifest[@"health_contract"] isKindOfClass:[NSDictionary class]]
                                ? manifest[@"health_contract"]
@@ -779,6 +969,7 @@ static NSDictionary *ResolvedReleaseEnvForMetadata(NSDictionary *manifest, NSDic
   }
   NSDictionary *paths = ResolvedManifestPathsForRelease(manifest, releaseDir);
   NSDictionary *deployment = DeploymentMetadataFromManifest(manifest, NO);
+  NSDictionary *databaseContract = DatabaseContractFromManifest(manifest, nil);
   NSDictionary *handoff = PropaneHandoffFromManifest(manifest, releaseDir);
   NSDictionary *certification =
       [manifest[@"certification"] isKindOfClass:[NSDictionary class]] ? manifest[@"certification"] : @{};
@@ -816,6 +1007,9 @@ static NSDictionary *ResolvedReleaseEnvForMetadata(NSDictionary *manifest, NSDic
       [deployment[@"allow_remote_rebuild"] boolValue] ? @"1" : @"0";
   resolved[@"ARLEN_DEPLOY_REMOTE_REBUILD_REQUIRED"] =
       [deployment[@"remote_rebuild_required"] boolValue] ? @"1" : @"0";
+  resolved[@"ARLEN_DEPLOY_DATABASE_MODE"] = databaseContract[@"mode"] ?: @"";
+  resolved[@"ARLEN_DEPLOY_DATABASE_ADAPTER"] = databaseContract[@"adapter"] ?: @"";
+  resolved[@"ARLEN_DEPLOY_DATABASE_TARGET"] = databaseContract[@"target"] ?: @"default";
   resolved[@"ARLEN_DEPLOY_PROPANE_MANAGER_BINARY"] = handoff[@"manager_binary"] ?: @"";
   resolved[@"ARLEN_DEPLOY_PROPANE_ACCESSORIES_CONFIG_KEY"] = handoff[@"accessories_config_key"] ?: @"propaneAccessories";
   resolved[@"ARLEN_DEPLOY_PROPANE_RUNTIME_ACTION_DEFAULT"] = handoff[@"runtime_action_default"] ?: @"reload";
@@ -941,6 +1135,7 @@ static NSArray<NSDictionary *> *DeployDoctorChecksForRelease(NSString *releaseDi
   NSDictionary *metadata = LoadReleaseMetadataAtDirectory(releaseDir);
   NSString *manifestPath = metadata[@"manifest_path"];
   NSDictionary *manifest = [metadata[@"manifest"] isKindOfClass:[NSDictionary class]] ? metadata[@"manifest"] : @{};
+  NSDictionary *releaseEnv = [metadata[@"release_env"] isKindOfClass:[NSDictionary class]] ? metadata[@"release_env"] : @{};
   if ([manifest count] > 0) {
     addCheck(@"manifest", @"pass", [NSString stringWithFormat:@"release manifest present: %@", manifestPath], @"");
   } else {
@@ -1012,6 +1207,10 @@ static NSArray<NSDictionary *> *DeployDoctorChecksForRelease(NSString *releaseDi
   }
 
   NSDictionary *paths = ResolvedManifestPathsForRelease(manifest, releaseDir);
+  NSDictionary *currentProcessEnvironment = [[NSProcessInfo processInfo] environment] ?: @{};
+  NSString *serviceEnvironmentDetail = nil;
+  NSDictionary *serviceEnvironment =
+      [serviceName length] > 0 ? ServiceEnvironmentForService(serviceName, &serviceEnvironmentDetail) : @{};
   NSArray<NSDictionary *> *requiredPaths = @[
     @{ @"id" : @"app_root", @"path" : paths[@"app_root"] ?: [releaseDir stringByAppendingPathComponent:@"app"] },
     @{ @"id" : @"framework_root", @"path" : paths[@"framework_root"] ?: [releaseDir stringByAppendingPathComponent:@"framework"] },
@@ -1048,15 +1247,82 @@ static NSArray<NSDictionary *> *DeployDoctorChecksForRelease(NSString *releaseDi
     if (config != nil) {
       addCheck(@"config", @"pass",
                [NSString stringWithFormat:@"app config loads for %@ environment", environment ?: @"production"], @"");
-      NSString *connectionString = DatabaseConnectionStringFromEnvironmentForTarget(@"default");
+      NSDictionary *databaseContract = DatabaseContractFromManifest(manifest, config);
+      NSArray<NSString *> *requiredEnvironmentKeys =
+          [databaseContract[@"required_environment_keys"] isKindOfClass:[NSArray class]]
+              ? databaseContract[@"required_environment_keys"]
+              : @[];
+      if ([requiredEnvironmentKeys count] > 0) {
+        NSMutableArray<NSString *> *missingKeys = [NSMutableArray array];
+        for (NSString *key in requiredEnvironmentKeys) {
+          BOOL presentInProcess = EnvironmentDictionaryContainsNonEmptyValueForKey(currentProcessEnvironment, key);
+          BOOL presentInService = EnvironmentDictionaryContainsNonEmptyValueForKey(serviceEnvironment, key);
+          if (!presentInProcess && !presentInService) {
+            [missingKeys addObject:key];
+          }
+        }
+        if ([missingKeys count] == 0) {
+          addCheck(@"required_env_keys", @"pass",
+                   [NSString stringWithFormat:@"required environment keys present: %@",
+                                              [requiredEnvironmentKeys componentsJoinedByString:@", "]],
+                   @"Values remain redacted by design.");
+        } else {
+          addCheck(@"required_env_keys", @"fail",
+                   [NSString stringWithFormat:@"required environment keys missing: %@",
+                                              [missingKeys componentsJoinedByString:@", "]],
+                   @"Provide the missing keys through host/service environment injection without baking secret values into the release.");
+        }
+      } else {
+        addCheck(@"required_env_keys", @"warn", @"no required environment keys declared in deploy metadata",
+                 @"Use --require-env-key to record secret/config expectations without storing values.");
+      }
+
+      NSString *databaseTarget =
+          [databaseContract[@"target"] isKindOfClass:[NSString class]] ? databaseContract[@"target"] : @"default";
+      NSString *connectionString = DatabaseConnectionStringFromEnvironmentForTarget(databaseTarget);
       if ([connectionString length] == 0) {
-        connectionString = DatabaseConnectionStringFromConfigForTarget(config, @"default");
+        connectionString = DatabaseConnectionStringFromConfigForTarget(config, databaseTarget);
       }
       if ([connectionString length] > 0) {
         addCheck(@"database_url", @"pass", @"database connection string resolved", @"");
       } else {
         addCheck(@"database_url", @"warn", @"database connection string is empty",
                  @"Set ARLEN_DATABASE_URL or configure database.connectionString before release.");
+      }
+      NSString *databaseMode =
+          [databaseContract[@"mode"] isKindOfClass:[NSString class]] ? databaseContract[@"mode"] : @"";
+      NSString *databaseAdapter =
+          [databaseContract[@"adapter"] isKindOfClass:[NSString class]] ? databaseContract[@"adapter"] : @"";
+      if ([databaseMode length] == 0) {
+        addCheck(@"database_contract", @"warn", @"no explicit database deployment contract declared",
+                 @"Declare --database-mode so deploy doctor does not have to guess production database topology.");
+      } else {
+        addCheck(@"database_contract", @"pass",
+                 [NSString stringWithFormat:@"database contract mode=%@ adapter=%@ target=%@",
+                                            databaseMode ?: @"", databaseAdapter ?: @"",
+                                            databaseTarget ?: @"default"],
+                 @"");
+        if ([databaseMode isEqualToString:@"host_local"]) {
+          NSDictionary *probe = RunHostLocalDatabaseProbe(databaseAdapter, connectionString);
+          addCheck(@"database_host_local",
+                   [probe[@"status"] description] ?: @"warn",
+                   [probe[@"message"] description] ?: @"host-local database probe unavailable",
+                   [probe[@"hint"] description] ?: @"");
+        } else if ([databaseMode isEqualToString:@"external"]) {
+          addCheck(@"database_mode_validation",
+                   [connectionString length] > 0 ? @"pass" : @"fail",
+                   [connectionString length] > 0 ? @"external database contract declared; config is present"
+                                                : @"external database contract declared but no connection string resolved",
+                   [connectionString length] > 0
+                       ? @"Doctor does not require a local database install for database.mode=external."
+                       : @"Provide the external database DSN through config or host-managed environment.");
+        } else if ([databaseMode isEqualToString:@"embedded"]) {
+          addCheck(@"database_mode_validation",
+                   [connectionString length] > 0 ? @"pass" : @"warn",
+                   [connectionString length] > 0 ? @"embedded database contract declared"
+                                                : @"embedded database contract declared without an explicit connection string",
+                   @"Validate file/runtime prerequisites for the embedded database path on the target host.");
+        }
       }
     } else {
       addCheck(@"config", @"fail", configError.localizedDescription ?: @"failed to load app config",
@@ -1073,6 +1339,35 @@ static NSArray<NSDictionary *> *DeployDoctorChecksForRelease(NSString *releaseDi
       addCheck(@"service", status,
              [NSString stringWithFormat:@"service %@ state: %@", serviceName, serviceState],
              [serviceOutput length] > 0 ? serviceOutput : @"");
+    NSString *expectedAppRoot = [releaseEnv[@"ARLEN_APP_ROOT"] isKindOfClass:[NSString class]] ? releaseEnv[@"ARLEN_APP_ROOT"] : @"";
+    NSString *expectedFrameworkRoot =
+        [releaseEnv[@"ARLEN_FRAMEWORK_ROOT"] isKindOfClass:[NSString class]] ? releaseEnv[@"ARLEN_FRAMEWORK_ROOT"] : @"";
+    if ([serviceState isEqualToString:@"active"]) {
+      NSString *liveAppRoot =
+          [serviceEnvironment[@"ARLEN_APP_ROOT"] isKindOfClass:[NSString class]] ? serviceEnvironment[@"ARLEN_APP_ROOT"] : @"";
+      NSString *liveFrameworkRoot =
+          [serviceEnvironment[@"ARLEN_FRAMEWORK_ROOT"] isKindOfClass:[NSString class]] ? serviceEnvironment[@"ARLEN_FRAMEWORK_ROOT"] : @"";
+      if ([liveAppRoot length] == 0 || [liveFrameworkRoot length] == 0) {
+        addCheck(@"runtime_root_conflict", @"warn",
+                 @"service is active but effective runtime-root environment could not be fully verified",
+                 [serviceEnvironmentDetail length] > 0 ? serviceEnvironmentDetail
+                                                       : @"Ensure the service inherits activation-owned runtime roots.");
+      } else if (![liveAppRoot isEqualToString:expectedAppRoot] ||
+                 ![liveFrameworkRoot isEqualToString:expectedFrameworkRoot]) {
+        addCheck(@"runtime_root_conflict", @"fail",
+                 [NSString stringWithFormat:@"service runtime roots differ from the activated release (app=%@ framework=%@)",
+                                            liveAppRoot ?: @"", liveFrameworkRoot ?: @""],
+                 @"Remove stale ARLEN_APP_ROOT / ARLEN_FRAMEWORK_ROOT overrides from shared host env so release activation owns runtime roots.");
+      } else {
+        addCheck(@"runtime_root_conflict", @"pass",
+                 @"service runtime roots match the activated release",
+                 @"");
+      }
+    } else {
+      addCheck(@"runtime_root_conflict", @"warn",
+               @"runtime-root conflict check skipped because the service is not active",
+               @"Start the service and rerun deploy doctor to verify effective ARLEN_APP_ROOT / ARLEN_FRAMEWORK_ROOT values.");
+    }
   }
 
   if ([baseURL length] > 0) {
@@ -3577,6 +3872,10 @@ static int CommandDeploy(NSArray *args) {
   NSString *baseURL = nil;
   NSString *targetProfile = nil;
   NSString *runtimeStrategy = @"system";
+  NSString *databaseMode = nil;
+  NSString *databaseAdapter = nil;
+  NSString *databaseTarget = @"default";
+  NSMutableArray<NSString *> *requiredEnvironmentKeys = [NSMutableArray array];
   NSString *remoteBuildCheckCommand = nil;
   NSString *serviceName = nil;
   NSString *runtimeAction = @"reload";
@@ -3723,6 +4022,73 @@ static int CommandDeploy(NSArray *args) {
         return 2;
       }
       runtimeStrategy = [Trimmed(subArgs[++idx]) lowercaseString];
+    } else if ([arg isEqualToString:@"--database-mode"]) {
+      if (idx + 1 >= [subArgs count]) {
+        if (asJSON) {
+          return EmitMachineError(@"deploy", [NSString stringWithFormat:@"deploy.%@", subcommand],
+                                  @"missing_option_value", @"arlen deploy: --database-mode requires a value",
+                                  @"Use external, host_local, or embedded.",
+                                  @"arlen deploy plan --database-mode external --json", 2);
+        }
+        fprintf(stderr, "arlen deploy: --database-mode requires a value\n");
+        return 2;
+      }
+      databaseMode = [Trimmed(subArgs[++idx]) lowercaseString];
+    } else if ([arg isEqualToString:@"--database-adapter"]) {
+      if (idx + 1 >= [subArgs count]) {
+        if (asJSON) {
+          return EmitMachineError(@"deploy", [NSString stringWithFormat:@"deploy.%@", subcommand],
+                                  @"missing_option_value", @"arlen deploy: --database-adapter requires a value",
+                                  @"Pass the declared database adapter name.",
+                                  @"arlen deploy plan --database-adapter postgresql --json", 2);
+        }
+        fprintf(stderr, "arlen deploy: --database-adapter requires a value\n");
+        return 2;
+      }
+      databaseAdapter = [Trimmed(subArgs[++idx]) lowercaseString];
+    } else if ([arg isEqualToString:@"--database-target"]) {
+      if (idx + 1 >= [subArgs count]) {
+        if (asJSON) {
+          return EmitMachineError(@"deploy", [NSString stringWithFormat:@"deploy.%@", subcommand],
+                                  @"missing_option_value", @"arlen deploy: --database-target requires a value",
+                                  @"Pass the declared database target name.",
+                                  @"arlen deploy plan --database-target default --json", 2);
+        }
+        fprintf(stderr, "arlen deploy: --database-target requires a value\n");
+        return 2;
+      }
+      databaseTarget = NormalizeDatabaseTarget(subArgs[++idx]);
+      if (!DatabaseTargetIsValid(databaseTarget)) {
+        return asJSON ? EmitMachineError(@"deploy", [NSString stringWithFormat:@"deploy.%@", subcommand],
+                                         @"invalid_database_target",
+                                         @"invalid --database-target; expected [a-z][a-z0-9_]* up to 32 characters",
+                                         @"Use a safe database target identifier.",
+                                         @"arlen deploy plan --database-target default --json", 2)
+                      : 2;
+      }
+    } else if ([arg isEqualToString:@"--require-env-key"]) {
+      if (idx + 1 >= [subArgs count]) {
+        if (asJSON) {
+          return EmitMachineError(@"deploy", [NSString stringWithFormat:@"deploy.%@", subcommand],
+                                  @"missing_option_value", @"arlen deploy: --require-env-key requires a value",
+                                  @"Pass the required environment key name after --require-env-key.",
+                                  @"arlen deploy plan --require-env-key ARLEN_DATABASE_URL --json", 2);
+        }
+        fprintf(stderr, "arlen deploy: --require-env-key requires a value\n");
+        return 2;
+      }
+      NSString *requiredKey = Trimmed(subArgs[++idx]);
+      if ([requiredKey length] == 0) {
+        return asJSON ? EmitMachineError(@"deploy", [NSString stringWithFormat:@"deploy.%@", subcommand],
+                                         @"invalid_required_env_key",
+                                         @"invalid --require-env-key; expected a non-empty environment key",
+                                         @"Pass the exact environment variable name to record.",
+                                         @"arlen deploy plan --require-env-key ARLEN_DATABASE_URL --json", 2)
+                      : 2;
+      }
+      if (![requiredEnvironmentKeys containsObject:requiredKey]) {
+        [requiredEnvironmentKeys addObject:requiredKey];
+      }
     } else if ([arg isEqualToString:@"--remote-build-check-command"]) {
       if (idx + 1 >= [subArgs count]) {
         if (asJSON) {
@@ -3860,6 +4226,14 @@ static int CommandDeploy(NSArray *args) {
                                      @"arlen deploy plan --runtime-strategy managed --json", 2)
                   : 2;
   }
+  if ([databaseMode length] > 0 &&
+      ![@[ @"external", @"host_local", @"embedded" ] containsObject:databaseMode]) {
+    return asJSON ? EmitMachineError(@"deploy", [NSString stringWithFormat:@"deploy.%@", subcommand], @"invalid_database_mode",
+                                     @"invalid --database-mode; expected external, host_local, or embedded",
+                                     @"Use external, host_local, or embedded.",
+                                     @"arlen deploy plan --database-mode external --json", 2)
+                  : 2;
+  }
 
   NSString *workflow = [NSString stringWithFormat:@"deploy.%@", subcommand];
   NSString *scriptRoot = [frameworkRoot stringByAppendingPathComponent:@"tools/deploy"];
@@ -3889,6 +4263,12 @@ static int CommandDeploy(NSArray *args) {
   AppendShellOption(buildCommand, @"--json-performance-manifest", jsonPerformanceManifest);
   AppendShellOption(buildCommand, @"--target-profile", [requestedDeployment[@"target_profile"] isKindOfClass:[NSString class]] ? requestedDeployment[@"target_profile"] : targetProfile);
   AppendShellOption(buildCommand, @"--runtime-strategy", runtimeStrategy);
+  AppendShellOption(buildCommand, @"--database-mode", databaseMode);
+  AppendShellOption(buildCommand, @"--database-adapter", databaseAdapter);
+  AppendShellOption(buildCommand, @"--database-target", databaseTarget);
+  for (NSString *requiredKey in requiredEnvironmentKeys) {
+    AppendShellOption(buildCommand, @"--require-env-key", requiredKey);
+  }
   if (allowMissingCertification) {
     [buildCommand appendString:@" --allow-missing-certification"];
   }
@@ -4571,6 +4951,62 @@ static int CommandDeploy(NSArray *args) {
     @"status" : @"ok",
     @"current_path" : [releasesDir stringByAppendingPathComponent:@"current"],
   }];
+
+  if ([serviceName length] > 0 && ![runtimeAction isEqualToString:@"none"]) {
+    NSString *systemctlVerb = [runtimeAction isEqualToString:@"restart"] ? @"restart" : @"reload";
+    NSString *runtimeCommand = [NSString stringWithFormat:@"systemctl %@ %@", systemctlVerb, ShellQuote(serviceName)];
+    int runtimeExitCode = 0;
+    NSString *runtimeOutput = RunShellCaptureCommand(runtimeCommand, &runtimeExitCode);
+    if (runtimeExitCode != 0 && [runtimeAction isEqualToString:@"reload"]) {
+      runtimeCommand = [NSString stringWithFormat:@"systemctl restart %@", ShellQuote(serviceName)];
+      runtimeOutput = RunShellCaptureCommand(runtimeCommand, &runtimeExitCode);
+      if (runtimeExitCode == 0) {
+        systemctlVerb = @"restart";
+      }
+    }
+    [steps addObject:@{
+      @"id" : @"runtime",
+      @"status" : (runtimeExitCode == 0) ? @"ok" : @"error",
+      @"action" : systemctlVerb ?: @"",
+      @"service" : serviceName ?: @"",
+      @"captured_output" : runtimeOutput ?: @"",
+    }];
+    if (runtimeExitCode != 0) {
+      if (!asJSON && [runtimeOutput length] > 0) {
+        fprintf(stderr, "%s", [runtimeOutput UTF8String]);
+      }
+      if (asJSON) {
+        NSDictionary *payload = @{
+          @"version" : AgentContractVersion(),
+          @"command" : @"deploy",
+          @"workflow" : workflow,
+          @"subcommand" : subcommand,
+          @"status" : @"error",
+          @"release_id" : releaseID ?: @"",
+          @"release_dir" : releaseDir ?: @"",
+          @"deployment" : releaseDeployment ?: @{},
+          @"steps" : steps ?: @[],
+          @"error" : @{
+            @"code" : @"deploy_release_runtime_failed",
+            @"message" : @"release activation completed but runtime reload/restart failed",
+            @"fixit" : @{
+              @"action" : @"Inspect service logs and rerun with --runtime-action restart if needed.",
+              @"example" : @"arlen deploy release --service arlen@myapp --runtime-action restart --json",
+            }
+          },
+          @"exit_code" : @(runtimeExitCode),
+        };
+        PrintJSONPayload(stdout, payload);
+      }
+      return runtimeExitCode;
+    }
+  } else {
+    [steps addObject:@{
+      @"id" : @"runtime",
+      @"status" : @"skipped",
+      @"action" : @"none",
+    }];
+  }
 
   if ([baseURL length] > 0) {
     NSString *trimmedBaseURL = [baseURL hasSuffix:@"/"] ? [baseURL substringToIndex:[baseURL length] - 1] : baseURL;
