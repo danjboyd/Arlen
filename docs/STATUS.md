@@ -4,6 +4,17 @@ Last updated: 2026-04-14
 
 ## Leaving Off (2026-04-14)
 
+- Closed the remaining packaged-deploy gaps reported after `613cf7b`:
+  - fixed `ARLEN-BUG-016` by shipping the packaged deploy helper set under
+    `framework/tools/deploy/`, so packaged `arlen deploy release` can
+    self-activate without a neighboring source checkout
+  - finished `ARLEN-BUG-018` by copying compiled runtime binaries into the
+    release as standalone files instead of preserved symlinks back to the
+    source/build host, which keeps packaged `propane` / `jobs-worker` on the
+    immutable release binary in production
+  - added deployment regressions for packaged CLI self-activation and
+    symlink-dereferenced runtime packaging in
+    `tests/integration/DeploymentIntegrationTests.m`
 - Fixed two new deployment regressions reported downstream from `MusicianApp`:
   - `ARLEN-BUG-017`: packaged Phase 32 manifests now store release-relative
     runtime/helper paths, `deploy status` / `deploy doctor` resolve those paths

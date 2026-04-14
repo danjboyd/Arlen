@@ -106,6 +106,10 @@ First-class release orchestration over the existing `tools/deploy/*` scripts.
 - writes manifest paths release-relative so the packaged release stays valid
   after ship/move (`ARLEN-BUG-017`)
 - writes `deployment` and `propane_handoff` metadata into the packaged manifest
+- ships the packaged deploy helper set under `framework/tools/deploy/`,
+  including activate/rollback/env-materialization helpers (`ARLEN-BUG-016`)
+- copies packaged runtime binaries as real files inside the release instead of
+  preserving build-host symlinks (`ARLEN-BUG-018`)
 - emits the manifest content in `--json` mode
 
 `arlen deploy release`

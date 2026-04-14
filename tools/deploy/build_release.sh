@@ -81,6 +81,17 @@ copy_path_if_exists() {
   fi
 }
 
+copy_regular_file_if_exists() {
+  local src="$1"
+  local dest="$2"
+  if [[ -e "$src" ]]; then
+    mkdir -p "$(dirname "$dest")"
+    # ARLEN-BUG-018: packaged binaries must be standalone files inside the
+    # release, not preserved symlinks back to the build/source host.
+    cp -Lf "$src" "$dest"
+  fi
+}
+
 copy_compiled_binary_if_exists() {
   local src_base="$1"
   local dest_base="$2"
@@ -93,7 +104,7 @@ copy_compiled_binary_if_exists() {
   if [[ "$resolved_src" == *.exe ]] && [[ "$resolved_dest" != *.exe ]]; then
     resolved_dest="${resolved_dest}.exe"
   fi
-  copy_path_if_exists "$resolved_src" "$resolved_dest"
+  copy_regular_file_if_exists "$resolved_src" "$resolved_dest"
   printf '%s\n' "$resolved_dest"
   return 0
 }
@@ -634,6 +645,12 @@ else
 fi
 copy_path_if_exists "$framework_root/tools/deploy/validate_operability.sh" \
   "$release_dir/framework/tools/deploy/validate_operability.sh"
+copy_path_if_exists "$framework_root/tools/deploy/activate_release.sh" \
+  "$release_dir/framework/tools/deploy/activate_release.sh"
+copy_path_if_exists "$framework_root/tools/deploy/rollback_release.sh" \
+  "$release_dir/framework/tools/deploy/rollback_release.sh"
+copy_path_if_exists "$framework_root/tools/deploy/write_release_env.py" \
+  "$release_dir/framework/tools/deploy/write_release_env.py"
 packaged_propane="$release_dir/framework/bin/propane"
 packaged_jobs_worker="$release_dir/framework/bin/jobs-worker"
 packaged_operability_helper="$release_dir/framework/tools/deploy/validate_operability.sh"

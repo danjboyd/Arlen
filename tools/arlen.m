@@ -1113,7 +1113,19 @@ static BOOL IsFrameworkRoot(NSString *path) {
   NSString *makefile = [path stringByAppendingPathComponent:@"GNUmakefile"];
   NSString *tool = [path stringByAppendingPathComponent:@"tools/boomhauer.m"];
   NSString *runtime = [path stringByAppendingPathComponent:@"src/Arlen/ArlenServer.h"];
-  return PathExists(makefile, NULL) && PathExists(tool, NULL) && PathExists(runtime, NULL);
+  if (PathExists(makefile, NULL) && PathExists(tool, NULL) && PathExists(runtime, NULL)) {
+    return YES;
+  }
+
+  // ARLEN-BUG-016: packaged `arlen` must recognize `releases/<id>/framework`
+  // as a valid framework root, not just a source checkout.
+  NSString *packagedArlen = ResolveExecutablePath([path stringByAppendingPathComponent:@"build/arlen"]);
+  NSString *packagedPropane = [path stringByAppendingPathComponent:@"bin/propane"];
+  NSString *packagedActivate = [path stringByAppendingPathComponent:@"tools/deploy/activate_release.sh"];
+  NSString *packagedRollback = [path stringByAppendingPathComponent:@"tools/deploy/rollback_release.sh"];
+  NSString *packagedWriteEnv = [path stringByAppendingPathComponent:@"tools/deploy/write_release_env.py"];
+  return ([packagedArlen length] > 0) && PathExists(packagedPropane, NULL) && PathExists(packagedActivate, NULL) &&
+         PathExists(packagedRollback, NULL) && PathExists(packagedWriteEnv, NULL);
 }
 
 static NSString *FindFrameworkRoot(NSString *startPath) {
@@ -4816,7 +4828,7 @@ static int CommandDoctor(NSArray *args) {
                    @"fail",
                    [NSString stringWithFormat:@"ARLEN_FRAMEWORK_ROOT is not a valid framework root: %@",
                                               frameworkOverride ?: @""],
-                   @"Unset ARLEN_FRAMEWORK_ROOT or point it at a checkout containing GNUmakefile + src/Arlen.");
+                   @"Unset ARLEN_FRAMEWORK_ROOT or point it at an Arlen checkout or packaged release framework root.");
     failCount += 1;
   } else if ([frameworkRoot length] > 0) {
     AddDoctorCheck(checks,
@@ -4830,7 +4842,7 @@ static int CommandDoctor(NSArray *args) {
                    @"framework_root",
                    @"fail",
                    @"could not resolve framework root",
-                   @"Set ARLEN_FRAMEWORK_ROOT or run from inside an Arlen checkout/app.");
+                   @"Set ARLEN_FRAMEWORK_ROOT or run from inside an Arlen checkout/app/release.");
     failCount += 1;
   }
 

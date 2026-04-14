@@ -1166,6 +1166,77 @@
   }
 }
 
+- (void)testPackagedReleaseShipsDeployHelpersAndPackagedCLIActivates_ARLEN_BUG_016 {
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *appRoot = [self createTempDirectoryWithPrefix:@"arlen-bug-016-app"];
+  NSString *workRoot = [self createTempDirectoryWithPrefix:@"arlen-bug-016-work"];
+  XCTAssertNotNil(appRoot);
+  XCTAssertNotNil(workRoot);
+  if (appRoot == nil || workRoot == nil) {
+    return;
+  }
+
+  @try {
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"config/app.plist"]
+                          content:@"{\n"
+                                  "  host = \"127.0.0.1\";\n"
+                                  "  port = 3000;\n"
+                                  "}\n"]);
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"config/environments/production.plist"]
+                          content:@"{\n  logFormat = \"json\";\n}\n"]);
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"app_lite.m"]
+                          content:@"#import <Foundation/Foundation.h>\n"
+                                  "int main(int argc, const char *argv[]) { (void)argc; (void)argv; return 0; }\n"]);
+
+    int code = 0;
+    NSString *buildOutput = [self runMakeAtRepoRoot:repoRoot target:@"arlen" exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", buildOutput);
+
+    NSString *releasesDir = [workRoot stringByAppendingPathComponent:@"releases"];
+    NSString *pushOutput = [self runShellCapture:[NSString stringWithFormat:
+                                                     @"cd %@ && ARLEN_FRAMEWORK_ROOT=%@ %@/build/arlen "
+                                                      "deploy push --app-root %@ --releases-dir %@ --release-id packaged-cli-rel "
+                                                      "--allow-missing-certification --json",
+                                                     appRoot, repoRoot, repoRoot, appRoot, releasesDir]
+                                       exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", pushOutput);
+
+    NSString *releaseDir = [releasesDir stringByAppendingPathComponent:@"packaged-cli-rel"];
+    NSString *packagedActivate = [releaseDir stringByAppendingPathComponent:@"framework/tools/deploy/activate_release.sh"];
+    NSString *packagedRollback = [releaseDir stringByAppendingPathComponent:@"framework/tools/deploy/rollback_release.sh"];
+    NSString *packagedWriteEnv = [releaseDir stringByAppendingPathComponent:@"framework/tools/deploy/write_release_env.py"];
+    XCTAssertTrue([[NSFileManager defaultManager] isExecutableFileAtPath:packagedActivate], @"%@", packagedActivate);
+    XCTAssertTrue([[NSFileManager defaultManager] isExecutableFileAtPath:packagedRollback], @"%@", packagedRollback);
+    XCTAssertTrue([[NSFileManager defaultManager] isExecutableFileAtPath:packagedWriteEnv], @"%@", packagedWriteEnv);
+
+    NSString *releaseOutput = [self runShellCapture:[NSString stringWithFormat:
+                                                        @"cd %@ && ARLEN_FRAMEWORK_ROOT=%@ %@ "
+                                                         "deploy release --app-root %@ --releases-dir %@ --release-id packaged-cli-rel "
+                                                         "--allow-missing-certification --skip-migrate --json",
+                                                        releaseDir,
+                                                        [releaseDir stringByAppendingPathComponent:@"framework"],
+                                                        [releaseDir stringByAppendingPathComponent:@"framework/build/arlen"],
+                                                        [releaseDir stringByAppendingPathComponent:@"app"],
+                                                        releasesDir]
+                                          exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", releaseOutput);
+    NSDictionary *releasePayload =
+        [self parseJSONDictionaryFromOutput:releaseOutput context:@"packaged arlen deploy release --json"];
+    XCTAssertEqualObjects(@"ok", releasePayload[@"status"]);
+
+    NSString *currentTarget = [self runShellCapture:[NSString stringWithFormat:@"readlink -f %s/current",
+                                                                               [releasesDir UTF8String]]
+                                           exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", currentTarget);
+    NSString *trimmed =
+        [currentTarget stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    XCTAssertEqualObjects(releaseDir, trimmed);
+  } @finally {
+    [[NSFileManager defaultManager] removeItemAtPath:appRoot error:nil];
+    [[NSFileManager defaultManager] removeItemAtPath:workRoot error:nil];
+  }
+}
+
 - (void)testArlenDeployStatusRollbackDoctorAndLogsCommandsReportActiveReleaseState {
   NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
   NSString *appRoot = [self createTempDirectoryWithPrefix:@"arlen-deploy-ops-app"];
@@ -1682,6 +1753,73 @@
     XCTAssertEqual((NSUInteger)2, [trimmed count], @"%@", runtimeLogText);
     XCTAssertEqualObjects(runtimeBinary, trimmed[0]);
     XCTAssertEqualObjects(runtimeBinary, trimmed[1]);
+  } @finally {
+    [[NSFileManager defaultManager] removeItemAtPath:appRoot error:nil];
+    [[NSFileManager defaultManager] removeItemAtPath:workRoot error:nil];
+  }
+}
+
+- (void)testReleasePackagingDereferencesCompiledRuntimeSymlink_ARLEN_BUG_018 {
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *appRoot = [self createTempDirectoryWithPrefix:@"arlen-bug-018-symlink-app"];
+  NSString *workRoot = [self createTempDirectoryWithPrefix:@"arlen-bug-018-symlink-work"];
+  XCTAssertNotNil(appRoot);
+  XCTAssertNotNil(workRoot);
+  if (appRoot == nil || workRoot == nil) {
+    return;
+  }
+
+  @try {
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"config/app.plist"]
+                          content:@"{\n"
+                                  "  host = \"127.0.0.1\";\n"
+                                  "  port = 3000;\n"
+                                  "}\n"]);
+    NSString *sourceRuntime =
+        [workRoot stringByAppendingPathComponent:@"external-runtime/boomhauer-app"];
+    XCTAssertTrue([self writeFile:sourceRuntime content:@"#!/usr/bin/env bash\nexit 0\n"]);
+    XCTAssertTrue([self makeExecutableAtPath:sourceRuntime]);
+
+    NSString *symlinkedRuntime =
+        [appRoot stringByAppendingPathComponent:@".boomhauer/build/boomhauer-app"];
+    NSError *symlinkError = nil;
+    XCTAssertTrue([[NSFileManager defaultManager] createDirectoryAtPath:[symlinkedRuntime stringByDeletingLastPathComponent]
+                                            withIntermediateDirectories:YES
+                                                             attributes:nil
+                                                                  error:&symlinkError],
+                  @"%@", symlinkError.localizedDescription);
+    symlinkError = nil;
+    XCTAssertTrue([[NSFileManager defaultManager] createSymbolicLinkAtPath:symlinkedRuntime
+                                               withDestinationPath:sourceRuntime
+                                                             error:&symlinkError],
+                  @"%@", symlinkError.localizedDescription);
+
+    NSString *releasesDir = [workRoot stringByAppendingPathComponent:@"releases"];
+    int code = 0;
+    NSString *buildOutput = [self runShellCapture:[NSString stringWithFormat:
+                                                       @"%s/tools/deploy/build_release.sh --app-root %s "
+                                                        "--framework-root %s --releases-dir %s --release-id rel-symlink "
+                                                        "--allow-missing-certification",
+                                                       [repoRoot UTF8String], [appRoot UTF8String],
+                                                       [repoRoot UTF8String], [releasesDir UTF8String]]
+                                         exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", buildOutput);
+
+    NSString *packagedRuntime =
+        [releasesDir stringByAppendingPathComponent:@"rel-symlink/app/.boomhauer/build/boomhauer-app"];
+    BOOL isSymlink = NO;
+    NSDictionary *attributes = [[NSFileManager defaultManager] attributesOfItemAtPath:packagedRuntime error:nil];
+    isSymlink = [[attributes fileType] isEqualToString:NSFileTypeSymbolicLink];
+    XCTAssertFalse(isSymlink, @"packaged runtime should be a real file, not a symlink: %@", packagedRuntime);
+
+    NSString *resolvedPackaged = [self runShellCapture:[NSString stringWithFormat:@"readlink -f %s",
+                                                                                   [packagedRuntime UTF8String]]
+                                               exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", resolvedPackaged);
+    NSString *trimmed =
+        [resolvedPackaged stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    XCTAssertTrue([trimmed hasPrefix:[releasesDir stringByAppendingPathComponent:@"rel-symlink/app/.boomhauer/build"]],
+                  @"packaged runtime resolved outside release: %@", trimmed);
   } @finally {
     [[NSFileManager defaultManager] removeItemAtPath:appRoot error:nil];
     [[NSFileManager defaultManager] removeItemAtPath:workRoot error:nil];

@@ -288,7 +288,7 @@ release-relative so the package stays portable after ship/move
 migrations when present, activates `releases/current`, rewrites
 `metadata/release.env` against the activated release root, and can probe
 `/healthz` when `--base-url` is supplied. Packaged framework payloads now also
-include `framework/tools/deploy/validate_operability.sh`, so
+include the packaged deploy helper set under `framework/tools/deploy/`, so
 `arlen deploy doctor --base-url ...` works from an activated packaged release
 without needing a source checkout beside it.
 
@@ -392,6 +392,13 @@ Packaged release payloads now include:
   `.exe` on Windows preview builds)
 - runtime wrapper scripts plus `framework/build/arlen` and
   `framework/build/boomhauer` (with `.exe` suffixes preserved when present)
+- deploy helpers under `framework/tools/deploy/`, including
+  `activate_release.sh`, `rollback_release.sh`, `write_release_env.py`, and
+  `validate_operability.sh`
+
+Compiled runtime binaries are copied into the release by value, not as
+preserved symlinks, so the activated release does not continue to point back at
+the build host's `.boomhauer` cache (`ARLEN-BUG-018`).
 
 Release metadata includes:
 
