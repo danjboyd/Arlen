@@ -154,11 +154,16 @@ if (( is_checkout_framework_root == 0 && is_release_framework_root == 0 )); then
 fi
 
 if [[ ! -f "$app_root/config/app.plist" ]] || ! app_root_has_sources "$app_root"; then
-  echo "jobs-worker: invalid app root: $app_root" >&2
-  exit 1
-fi
-
-if (( is_release_framework_root == 1 )) && app_binary="$(resolve_compiled_binary "$app_root/.boomhauer/build/boomhauer-app")"; then
+  packaged_app_binary=""
+  if (( is_release_framework_root == 1 )) && packaged_app_binary="$(resolve_compiled_binary "$app_root/.boomhauer/build/boomhauer-app")"; then
+    app_binary="$packaged_app_binary"
+  else
+    echo "jobs-worker: invalid app root: $app_root" >&2
+    exit 1
+  fi
+elif (( is_release_framework_root == 1 )) && app_binary="$(resolve_compiled_binary "$app_root/.boomhauer/build/boomhauer-app")"; then
+  # ARLEN-BUG-018: packaged release workers should execute the shipped binary
+  # instead of forcing a mutable source-style rebuild.
   :
 else
   if ARLEN_APP_ROOT="$app_root" ARLEN_FRAMEWORK_ROOT="$framework_root" \

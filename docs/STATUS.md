@@ -4,6 +4,19 @@ Last updated: 2026-04-14
 
 ## Leaving Off (2026-04-14)
 
+- Fixed two new deployment regressions reported downstream from `MusicianApp`:
+  - `ARLEN-BUG-017`: packaged Phase 32 manifests now store release-relative
+    runtime/helper paths, `deploy status` / `deploy doctor` resolve those paths
+    from the active release root, and release activation rewrites
+    `metadata/release.env` against the target host path instead of preserving
+    build-host absolute paths
+  - `ARLEN-BUG-018`: packaged `propane` and `jobs-worker` now prefer the
+    shipped `app/.boomhauer/build/boomhauer-app` runtime binary even when the
+    release app root no longer carries source files, instead of forcing a
+    mutable source-style rebuild path
+  - added focused deployment regressions in
+    `tests/integration/DeploymentIntegrationTests.m` for relocated release
+    metadata resolution and packaged runtime-launcher preference
 - Completed Phase 32 and delivered `32J-32L`:
   - added explicit `propane_handoff` metadata to packaged release manifests
     and `release.env` so the seam between deploy orchestration and `propane`

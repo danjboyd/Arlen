@@ -124,6 +124,14 @@ Packaged release manifests now carry a `propane_handoff` object describing:
 - the config key that owns `propane accessories`
 - the default deploy runtime action used for release lifecycle changes
 
+The handoff contract now has two explicit stages:
+
+- the shipped manifest stays release-relative so the payload can move cleanly
+  between hosts (`ARLEN-BUG-017`)
+- release activation rewrites `release.env` against the target host path, and
+  `propane` prefers the packaged app runtime binary whenever it already exists
+  in the release app root (`ARLEN-BUG-018`)
+
 That split of ownership is deliberate:
 
 - `arlen deploy` packages releases, activates them, and records the handoff

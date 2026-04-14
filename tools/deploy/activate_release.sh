@@ -43,11 +43,13 @@ fi
 mkdir -p "$releases_dir"
 releases_dir="$(cd "$releases_dir" && pwd)"
 release_dir="$releases_dir/$release_id"
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 if [[ ! -d "$release_dir" ]]; then
   echo "activate_release.sh: release not found: $release_dir" >&2
   exit 1
 fi
 
+"$script_dir/write_release_env.py" "$release_dir"
 ln -sfn "$release_dir" "$releases_dir/current"
 echo "release activated: $release_dir"

@@ -282,10 +282,13 @@ For app-operator workflows, prefer the first-class `arlen deploy` wrapper:
 `arlen deploy push` writes `releases/<id>/metadata/manifest.json` using
 `phase32-deploy-manifest-v1`. The manifest now records deployment metadata for
 the local profile, target profile, runtime strategy, compatibility status, and
-remote rebuild requirements. `arlen deploy release` reuses that manifest,
-runs packaged migrations when present, activates `releases/current`, and can
-probe `/healthz` when `--base-url` is supplied. Packaged framework payloads now
-also include `framework/tools/deploy/validate_operability.sh`, so
+remote rebuild requirements. Manifest runtime/helper paths are now stored
+release-relative so the package stays portable after ship/move
+(`ARLEN-BUG-017`). `arlen deploy release` reuses that manifest, runs packaged
+migrations when present, activates `releases/current`, rewrites
+`metadata/release.env` against the activated release root, and can probe
+`/healthz` when `--base-url` is supplied. Packaged framework payloads now also
+include `framework/tools/deploy/validate_operability.sh`, so
 `arlen deploy doctor --base-url ...` works from an activated packaged release
 without needing a source checkout beside it.
 
@@ -396,6 +399,8 @@ Release metadata includes:
 - `metadata/README.txt` with migrate/run commands
 - manifest-backed runtime/helper paths for `arlen`, `boomhauer`, `propane`,
   `jobs-worker`, and the operability helper
+- release-relative manifest paths for all packaged runtime/helper entries
+  (`ARLEN-BUG-017`)
 
 ### 6.2 Activate a release
 
@@ -406,6 +411,14 @@ tools/deploy/activate_release.sh \
 ```
 
 This switches `releases/current` symlink.
+
+Activation also rewrites `metadata/release.env` so:
+
+- the shipped manifest can stay portable in transit
+- the activated environment file points at the target host's actual release
+  root
+- `deploy status`, `deploy doctor`, and `propane` handoff metadata stay honest
+  after the release moves to a different machine/path
 
 ### 6.3 Run migration step (explicit)
 
@@ -431,6 +444,10 @@ ARLEN_FRAMEWORK_ROOT=/path/to/app/releases/current/framework \
 require a full Arlen checkout when `ARLEN_FRAMEWORK_ROOT` points at
 `releases/current/framework`, and the packaged manifest is authoritative for
 runtime/helper path resolution across Unix and Windows preview builds.
+
+When the release app root already carries `app/.boomhauer/build/boomhauer-app`,
+both `propane` and `jobs-worker` now prefer that shipped binary even if the
+release app root is no longer a mutable source checkout (`ARLEN-BUG-018`).
 
 ## 7. Container-First Runbook (Baseline)
 

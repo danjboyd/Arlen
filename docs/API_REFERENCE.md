@@ -9,7 +9,7 @@ python3 tools/docs/generate_api_reference.py
 ```
 
 - Generated from source headers and metadata (deterministic output)
-- Public headers: `82`
+- Public headers: `83`
 - Symbols: `134`
 - Public methods: `959`
 - Public properties: `402`
@@ -265,6 +265,7 @@ python3 tools/docs/generate_api_reference.py
 - `src/Arlen/Support/ALNOIDCClient.h`
 - `src/Arlen/Support/ALNPasswordHash.h`
 - `src/Arlen/Support/ALNPerf.h`
+- `src/Arlen/Support/ALNPlatform.h`
 - `src/Arlen/Support/ALNRealtime.h`
 - `src/Arlen/Support/ALNRecoveryCodes.h`
 - `src/Arlen/Support/ALNServices.h`

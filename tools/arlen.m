@@ -492,6 +492,55 @@ static NSString *ResolveExecutablePath(NSString *path) {
   return nil;
 }
 
+static BOOL IsAbsoluteDeployPath(NSString *path) {
+  NSString *value = path ?: @"";
+  if ([value hasPrefix:@"/"] || [value hasPrefix:@"\\\\"]) {
+    return YES;
+  }
+  if ([value length] >= 3) {
+    unichar drive = [value characterAtIndex:0];
+    unichar colon = [value characterAtIndex:1];
+    unichar slash = [value characterAtIndex:2];
+    if (((drive >= 'A' && drive <= 'Z') || (drive >= 'a' && drive <= 'z')) && colon == ':' &&
+        (slash == '/' || slash == '\\')) {
+      return YES;
+    }
+  }
+  return NO;
+}
+
+static NSString *ResolveReleaseManifestPath(NSString *releaseDir, NSString *path, NSString *fallbackRelativePath) {
+  NSString *candidate = [Trimmed(path) length] > 0 ? Trimmed(path) : Trimmed(fallbackRelativePath);
+  if ([candidate length] == 0) {
+    return nil;
+  }
+  if (IsAbsoluteDeployPath(candidate) || [releaseDir length] == 0) {
+    return [candidate stringByStandardizingPath];
+  }
+  return [[releaseDir stringByAppendingPathComponent:candidate] stringByStandardizingPath];
+}
+
+static NSDictionary *ResolvedManifestPathsForRelease(NSDictionary *manifest, NSString *releaseDir) {
+  NSDictionary *paths = [manifest[@"paths"] isKindOfClass:[NSDictionary class]] ? manifest[@"paths"] : @{};
+  return @{
+    @"app_root" : ResolveReleaseManifestPath(releaseDir, paths[@"app_root"], @"app") ?: @"",
+    @"framework_root" : ResolveReleaseManifestPath(releaseDir, paths[@"framework_root"], @"framework") ?: @"",
+    @"runtime_binary" :
+        ResolveReleaseManifestPath(releaseDir, paths[@"runtime_binary"], @"app/.boomhauer/build/boomhauer-app") ?: @"",
+    @"migrations_dir" :
+        ResolveReleaseManifestPath(releaseDir, paths[@"migrations_dir"], @"app/db/migrations") ?: @"",
+    @"boomhauer" : ResolveReleaseManifestPath(releaseDir, paths[@"boomhauer"], @"framework/build/boomhauer") ?: @"",
+    @"propane" : ResolveReleaseManifestPath(releaseDir, paths[@"propane"], @"framework/bin/propane") ?: @"",
+    @"jobs_worker" :
+        ResolveReleaseManifestPath(releaseDir, paths[@"jobs_worker"], @"framework/bin/jobs-worker") ?: @"",
+    @"arlen" : ResolveReleaseManifestPath(releaseDir, paths[@"arlen"], @"framework/build/arlen") ?: @"",
+    @"operability_probe_helper" : ResolveReleaseManifestPath(releaseDir,
+                                                              paths[@"operability_probe_helper"],
+                                                              @"framework/tools/deploy/validate_operability.sh") ?: @"",
+    @"release_env" : ResolveReleaseManifestPath(releaseDir, paths[@"release_env"], @"metadata/release.env") ?: @"",
+  };
+}
+
 static NSArray<NSString *> *SortedReleaseDirectories(NSString *releasesDir) {
   NSFileManager *fm = [NSFileManager defaultManager];
   NSArray<NSString *> *children = [fm contentsOfDirectoryAtPath:releasesDir error:NULL] ?: @[];
@@ -689,20 +738,20 @@ static NSDictionary *DeploymentMetadataFromManifest(NSDictionary *manifest, BOOL
   return resolved;
 }
 
-static NSDictionary *PropaneHandoffFromManifest(NSDictionary *manifest) {
+static NSDictionary *PropaneHandoffFromManifest(NSDictionary *manifest, NSString *releaseDir) {
   NSDictionary *handoff = [manifest[@"propane_handoff"] isKindOfClass:[NSDictionary class]] ? manifest[@"propane_handoff"] : nil;
-  NSDictionary *paths = [manifest[@"paths"] isKindOfClass:[NSDictionary class]] ? manifest[@"paths"] : @{};
+  NSDictionary *paths = ResolvedManifestPathsForRelease(manifest, releaseDir);
   NSString *managerBinary =
       [handoff[@"manager_binary"] isKindOfClass:[NSString class]]
-          ? handoff[@"manager_binary"]
+          ? ResolveReleaseManifestPath(releaseDir, handoff[@"manager_binary"], paths[@"propane"])
           : ([paths[@"propane"] isKindOfClass:[NSString class]] ? paths[@"propane"] : @"");
   NSString *jobsWorkerBinary =
       [handoff[@"jobs_worker_binary"] isKindOfClass:[NSString class]]
-          ? handoff[@"jobs_worker_binary"]
+          ? ResolveReleaseManifestPath(releaseDir, handoff[@"jobs_worker_binary"], paths[@"jobs_worker"])
           : ([paths[@"jobs_worker"] isKindOfClass:[NSString class]] ? paths[@"jobs_worker"] : @"");
   NSString *releaseEnvPath =
       [handoff[@"release_env_path"] isKindOfClass:[NSString class]]
-          ? handoff[@"release_env_path"]
+          ? ResolveReleaseManifestPath(releaseDir, handoff[@"release_env_path"], paths[@"release_env"])
           : ([paths[@"release_env"] isKindOfClass:[NSString class]] ? paths[@"release_env"] : @"");
   return @{
     @"schema" : [handoff[@"schema"] isKindOfClass:[NSString class]] ? handoff[@"schema"] : @"phase32-propane-handoff-v1",
@@ -721,6 +770,57 @@ static NSDictionary *PropaneHandoffFromManifest(NSDictionary *manifest) {
       @"propane" : @"process supervision and propane accessories",
     },
   };
+}
+
+static NSDictionary *ResolvedReleaseEnvForMetadata(NSDictionary *manifest, NSDictionary *releaseEnv, NSString *releaseDir) {
+  NSMutableDictionary *resolved = [NSMutableDictionary dictionary];
+  if ([releaseEnv isKindOfClass:[NSDictionary class]]) {
+    [resolved addEntriesFromDictionary:releaseEnv];
+  }
+  NSDictionary *paths = ResolvedManifestPathsForRelease(manifest, releaseDir);
+  NSDictionary *deployment = DeploymentMetadataFromManifest(manifest, NO);
+  NSDictionary *handoff = PropaneHandoffFromManifest(manifest, releaseDir);
+  NSDictionary *certification =
+      [manifest[@"certification"] isKindOfClass:[NSDictionary class]] ? manifest[@"certification"] : @{};
+  NSDictionary *jsonPerformance =
+      [manifest[@"json_performance"] isKindOfClass:[NSDictionary class]] ? manifest[@"json_performance"] : @{};
+
+  resolved[@"RELEASE_ID"] = [manifest[@"release_id"] isKindOfClass:[NSString class]] ? manifest[@"release_id"] : ReleaseIDForDirectory(releaseDir);
+  resolved[@"RELEASE_CREATED_UTC"] =
+      [manifest[@"created_utc"] isKindOfClass:[NSString class]] ? manifest[@"created_utc"] : @"";
+  resolved[@"ARLEN_RELEASE_ENV_LAYOUT"] = @"target-absolute";
+  resolved[@"ARLEN_RELEASE_ROOT"] = releaseDir ?: @"";
+  resolved[@"ARLEN_APP_ROOT"] = paths[@"app_root"] ?: @"";
+  resolved[@"ARLEN_FRAMEWORK_ROOT"] = paths[@"framework_root"] ?: @"";
+  resolved[@"ARLEN_RELEASE_MANIFEST"] = [releaseDir stringByAppendingPathComponent:@"metadata/manifest.json"] ?: @"";
+  resolved[@"ARLEN_RELEASE_RUNTIME_BINARY"] = paths[@"runtime_binary"] ?: @"";
+  resolved[@"ARLEN_RELEASE_FRAMEWORK_BOOMHAUER"] = paths[@"boomhauer"] ?: @"";
+  resolved[@"ARLEN_RELEASE_ARLEN_BINARY"] = paths[@"arlen"] ?: @"";
+  resolved[@"ARLEN_RELEASE_PROPANE"] = paths[@"propane"] ?: @"";
+  resolved[@"ARLEN_RELEASE_JOBS_WORKER"] = paths[@"jobs_worker"] ?: @"";
+  resolved[@"ARLEN_RELEASE_OPERABILITY_PROBE_HELPER"] = paths[@"operability_probe_helper"] ?: @"";
+  resolved[@"ARLEN_RELEASE_CERTIFICATION_STATUS"] =
+      [certification[@"status"] isKindOfClass:[NSString class]] ? certification[@"status"] : @"unknown";
+  resolved[@"ARLEN_RELEASE_CERTIFICATION_MANIFEST"] =
+      ResolveReleaseManifestPath(releaseDir, certification[@"manifest_path"], @"metadata/certification/manifest.json") ?: @"";
+  resolved[@"ARLEN_JSON_PERFORMANCE_STATUS"] =
+      [jsonPerformance[@"status"] isKindOfClass:[NSString class]] ? jsonPerformance[@"status"] : @"unknown";
+  resolved[@"ARLEN_JSON_PERFORMANCE_MANIFEST"] =
+      ResolveReleaseManifestPath(releaseDir, jsonPerformance[@"manifest_path"], @"metadata/json_performance/manifest.json") ?: @"";
+  resolved[@"ARLEN_DEPLOY_LOCAL_PROFILE"] = deployment[@"local_profile"] ?: @"";
+  resolved[@"ARLEN_DEPLOY_TARGET_PROFILE"] = deployment[@"target_profile"] ?: @"";
+  resolved[@"ARLEN_DEPLOY_RUNTIME_STRATEGY"] = deployment[@"runtime_strategy"] ?: @"system";
+  resolved[@"ARLEN_DEPLOY_SUPPORT_LEVEL"] = deployment[@"support_level"] ?: @"supported";
+  resolved[@"ARLEN_DEPLOY_COMPATIBILITY_REASON"] = deployment[@"compatibility_reason"] ?: @"same_profile";
+  resolved[@"ARLEN_DEPLOY_ALLOW_REMOTE_REBUILD"] =
+      [deployment[@"allow_remote_rebuild"] boolValue] ? @"1" : @"0";
+  resolved[@"ARLEN_DEPLOY_REMOTE_REBUILD_REQUIRED"] =
+      [deployment[@"remote_rebuild_required"] boolValue] ? @"1" : @"0";
+  resolved[@"ARLEN_DEPLOY_PROPANE_MANAGER_BINARY"] = handoff[@"manager_binary"] ?: @"";
+  resolved[@"ARLEN_DEPLOY_PROPANE_ACCESSORIES_CONFIG_KEY"] = handoff[@"accessories_config_key"] ?: @"propaneAccessories";
+  resolved[@"ARLEN_DEPLOY_PROPANE_RUNTIME_ACTION_DEFAULT"] = handoff[@"runtime_action_default"] ?: @"reload";
+  resolved[@"ARLEN_DEPLOY_PROPANE_JOB_WORKER_BINARY"] = handoff[@"jobs_worker_binary"] ?: @"";
+  return resolved;
 }
 
 static NSDictionary *RunRemoteBuildCheck(NSString *command) {
@@ -780,7 +880,7 @@ static NSDictionary *LoadReleaseMetadataAtDirectory(NSString *releaseDir) {
   NSString *manifestPath = [releaseDir stringByAppendingPathComponent:@"metadata/manifest.json"];
   NSString *releaseEnvPath = [releaseDir stringByAppendingPathComponent:@"metadata/release.env"];
   NSDictionary *manifest = JSONDictionaryFromFile(manifestPath) ?: @{};
-  NSDictionary *releaseEnv = DictionaryFromReleaseEnvFile(releaseEnvPath);
+  NSDictionary *releaseEnv = ResolvedReleaseEnvForMetadata(manifest, DictionaryFromReleaseEnvFile(releaseEnvPath), releaseDir);
   return @{
     @"manifest_path" : manifestPath ?: @"",
     @"release_env_path" : releaseEnvPath ?: @"",
@@ -857,7 +957,7 @@ static NSArray<NSDictionary *> *DeployDoctorChecksForRelease(NSString *releaseDi
   }
 
   NSDictionary *deployment = DeploymentMetadataFromManifest(manifest, NO);
-  NSDictionary *propaneHandoff = PropaneHandoffFromManifest(manifest);
+  NSDictionary *propaneHandoff = PropaneHandoffFromManifest(manifest, releaseDir);
   NSString *supportLevel = [deployment[@"support_level"] isKindOfClass:[NSString class]] ? deployment[@"support_level"] : @"supported";
   NSString *runtimeStrategy = [deployment[@"runtime_strategy"] isKindOfClass:[NSString class]] ? deployment[@"runtime_strategy"] : @"system";
   NSString *localProfile = [deployment[@"local_profile"] isKindOfClass:[NSString class]] ? deployment[@"local_profile"] : @"";
@@ -911,7 +1011,7 @@ static NSArray<NSDictionary *> *DeployDoctorChecksForRelease(NSString *releaseDi
                  : (remoteBuildCheck[@"captured_output"] ?: @""));
   }
 
-  NSDictionary *paths = [manifest[@"paths"] isKindOfClass:[NSDictionary class]] ? manifest[@"paths"] : @{};
+  NSDictionary *paths = ResolvedManifestPathsForRelease(manifest, releaseDir);
   NSArray<NSDictionary *> *requiredPaths = @[
     @{ @"id" : @"app_root", @"path" : paths[@"app_root"] ?: [releaseDir stringByAppendingPathComponent:@"app"] },
     @{ @"id" : @"framework_root", @"path" : paths[@"framework_root"] ?: [releaseDir stringByAppendingPathComponent:@"framework"] },
@@ -3849,7 +3949,7 @@ static int CommandDeploy(NSArray *args) {
         @"manifest_path" : manifestPath ?: @"",
         @"manifest_version" : manifest[@"version"] ?: @"phase32-deploy-manifest-v1",
         @"deployment" : DeploymentMetadataFromManifest(manifest, allowRemoteRebuild),
-        @"propane_handoff" : PropaneHandoffFromManifest(manifest),
+        @"propane_handoff" : PropaneHandoffFromManifest(manifest, releaseDir),
         @"manifest" : manifest,
         @"build_release" : buildPayload ?: @{},
       };
@@ -3863,8 +3963,7 @@ static int CommandDeploy(NSArray *args) {
   if ([subcommand isEqualToString:@"status"]) {
     NSString *serviceOutput = nil;
     NSString *serviceState = ServiceRuntimeState(serviceName, &serviceOutput);
-    NSDictionary *currentPaths =
-        [currentManifest[@"paths"] isKindOfClass:[NSDictionary class]] ? currentManifest[@"paths"] : @{};
+    NSDictionary *currentPaths = ResolvedManifestPathsForRelease(currentManifest, currentReleaseDir);
     NSString *previousReleaseDir = [previousReleaseID length] > 0 ? [releasesDir stringByAppendingPathComponent:previousReleaseID] : nil;
     NSString *previousManifestPath =
         [previousReleaseDir length] > 0 ? [previousReleaseDir stringByAppendingPathComponent:@"metadata/manifest.json"] : nil;
@@ -3890,7 +3989,7 @@ static int CommandDeploy(NSArray *args) {
         @"manifest_path" : currentManifestPath ?: @"",
         @"manifest" : currentManifest ?: @{},
         @"deployment" : currentDeployment ?: @{},
-        @"propane_handoff" : PropaneHandoffFromManifest(currentManifest),
+        @"propane_handoff" : PropaneHandoffFromManifest(currentManifest, currentReleaseDir),
         @"health_contract" : currentHealthContract ?: @{},
         @"migration_inventory" : currentMigrationInventory ?: @{},
         @"rollback_candidate" : @{
@@ -3898,7 +3997,7 @@ static int CommandDeploy(NSArray *args) {
           @"release_dir" : previousReleaseDir ?: @"",
           @"manifest_path" : previousManifestPath ?: @"",
           @"deployment" : DeploymentMetadataFromManifest(previousManifest, NO),
-          @"propane_handoff" : PropaneHandoffFromManifest(previousManifest),
+          @"propane_handoff" : PropaneHandoffFromManifest(previousManifest, previousReleaseDir),
         },
         @"service" : @{
           @"name" : serviceName ?: @"",
@@ -4031,7 +4130,7 @@ static int CommandDeploy(NSArray *args) {
             : @{};
     NSDictionary *activeDeploymentAfterRollback = DeploymentMetadataFromManifest(activeManifestAfterRollback, NO);
     NSDictionary *activePathsAfterRollback =
-        [activeManifestAfterRollback[@"paths"] isKindOfClass:[NSDictionary class]] ? activeManifestAfterRollback[@"paths"] : @{};
+        ResolvedManifestPathsForRelease(activeManifestAfterRollback, activeDirAfterRollback);
     NSString *probeHelperAfterRollback =
         [activePathsAfterRollback[@"operability_probe_helper"] isKindOfClass:[NSString class]]
             ? activePathsAfterRollback[@"operability_probe_helper"]
@@ -4084,12 +4183,12 @@ static int CommandDeploy(NSArray *args) {
         @"active_release_id" : [activeDirAfterRollback length] > 0 ? ReleaseIDForDirectory(activeDirAfterRollback) : @"",
         @"active_release_dir" : activeDirAfterRollback ?: @"",
         @"deployment" : activeDeploymentAfterRollback ?: @{},
-        @"propane_handoff" : PropaneHandoffFromManifest(activeManifestAfterRollback),
+        @"propane_handoff" : PropaneHandoffFromManifest(activeManifestAfterRollback, activeDirAfterRollback),
         @"rollback_source" : @{
           @"release_id" : currentReleaseID ?: @"",
           @"release_dir" : currentReleaseDir ?: @"",
           @"deployment" : currentDeployment ?: @{},
-          @"propane_handoff" : PropaneHandoffFromManifest(currentManifest),
+          @"propane_handoff" : PropaneHandoffFromManifest(currentManifest, currentReleaseDir),
         },
         @"manifest" : activeManifestAfterRollback ?: @{},
         @"warnings" : warnings ?: @[],
@@ -4122,7 +4221,7 @@ static int CommandDeploy(NSArray *args) {
         @"active_release_dir" : currentReleaseDir ?: @"",
         @"environment" : environment ?: @"production",
         @"deployment" : currentDeployment ?: @{},
-        @"propane_handoff" : PropaneHandoffFromManifest(currentManifest),
+        @"propane_handoff" : PropaneHandoffFromManifest(currentManifest, currentReleaseDir),
         @"checks" : checks ?: @[],
         @"summary" : @{
           @"pass" : @(passCount),
@@ -4276,8 +4375,7 @@ static int CommandDeploy(NSArray *args) {
   NSDictionary *releaseManifest =
       [releaseMetadata[@"manifest"] isKindOfClass:[NSDictionary class]] ? releaseMetadata[@"manifest"] : @{};
   NSDictionary *releaseDeployment = DeploymentMetadataFromManifest(releaseManifest, allowRemoteRebuild);
-  NSDictionary *releasePaths =
-      [releaseManifest[@"paths"] isKindOfClass:[NSDictionary class]] ? releaseManifest[@"paths"] : @{};
+  NSDictionary *releasePaths = ResolvedManifestPathsForRelease(releaseManifest, releaseDir);
   NSString *releaseSupportLevel =
       [releaseDeployment[@"support_level"] isKindOfClass:[NSString class]] ? releaseDeployment[@"support_level"] : @"supported";
   NSString *releaseCompatibilityReason =
@@ -4531,7 +4629,7 @@ static int CommandDeploy(NSArray *args) {
       @"manifest_path" : manifestPath ?: @"",
       @"manifest_version" : manifest[@"version"] ?: @"phase32-deploy-manifest-v1",
       @"deployment" : releaseDeployment ?: @{},
-      @"propane_handoff" : PropaneHandoffFromManifest(manifest),
+      @"propane_handoff" : PropaneHandoffFromManifest(manifest, releaseDir),
       @"manifest" : manifest,
       @"steps" : steps ?: @[],
       @"build_release" : buildPayload ?: @{},

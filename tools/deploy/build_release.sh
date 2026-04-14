@@ -655,19 +655,21 @@ fi
 cat >"$release_dir/metadata/release.env" <<EOF
 RELEASE_ID=$release_id
 RELEASE_CREATED_UTC=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-ARLEN_APP_ROOT=$release_dir/app
-ARLEN_FRAMEWORK_ROOT=$release_dir/framework
-ARLEN_RELEASE_MANIFEST=$release_dir/metadata/manifest.json
-ARLEN_RELEASE_RUNTIME_BINARY=$packaged_runtime_binary
-ARLEN_RELEASE_FRAMEWORK_BOOMHAUER=$packaged_framework_boomhauer
-ARLEN_RELEASE_ARLEN_BINARY=$packaged_arlen_binary
-ARLEN_RELEASE_PROPANE=$packaged_propane
-ARLEN_RELEASE_JOBS_WORKER=$packaged_jobs_worker
-ARLEN_RELEASE_OPERABILITY_PROBE_HELPER=$packaged_operability_helper
+ARLEN_RELEASE_ENV_LAYOUT=release-relative
+ARLEN_RELEASE_ROOT=.
+ARLEN_APP_ROOT=app
+ARLEN_FRAMEWORK_ROOT=framework
+ARLEN_RELEASE_MANIFEST=metadata/manifest.json
+ARLEN_RELEASE_RUNTIME_BINARY=app/.boomhauer/build/boomhauer-app
+ARLEN_RELEASE_FRAMEWORK_BOOMHAUER=framework/build/boomhauer
+ARLEN_RELEASE_ARLEN_BINARY=framework/build/arlen
+ARLEN_RELEASE_PROPANE=framework/bin/propane
+ARLEN_RELEASE_JOBS_WORKER=framework/bin/jobs-worker
+ARLEN_RELEASE_OPERABILITY_PROBE_HELPER=framework/tools/deploy/validate_operability.sh
 ARLEN_RELEASE_CERTIFICATION_STATUS=$certification_status
-ARLEN_RELEASE_CERTIFICATION_MANIFEST=$certification_bundle_manifest
+ARLEN_RELEASE_CERTIFICATION_MANIFEST=metadata/certification/manifest.json
 ARLEN_JSON_PERFORMANCE_STATUS=$json_performance_status
-ARLEN_JSON_PERFORMANCE_MANIFEST=$json_performance_bundle_manifest
+ARLEN_JSON_PERFORMANCE_MANIFEST=metadata/json_performance/manifest.json
 ARLEN_DEPLOY_LOCAL_PROFILE=$local_profile
 ARLEN_DEPLOY_TARGET_PROFILE=$target_profile
 ARLEN_DEPLOY_RUNTIME_STRATEGY=$runtime_strategy
@@ -675,10 +677,10 @@ ARLEN_DEPLOY_SUPPORT_LEVEL=$deployment_support_level
 ARLEN_DEPLOY_COMPATIBILITY_REASON=$deployment_reason
 ARLEN_DEPLOY_ALLOW_REMOTE_REBUILD=$allow_remote_rebuild
 ARLEN_DEPLOY_REMOTE_REBUILD_REQUIRED=$remote_rebuild_required
-ARLEN_DEPLOY_PROPANE_MANAGER_BINARY=$packaged_propane
+ARLEN_DEPLOY_PROPANE_MANAGER_BINARY=framework/bin/propane
 ARLEN_DEPLOY_PROPANE_ACCESSORIES_CONFIG_KEY=propaneAccessories
 ARLEN_DEPLOY_PROPANE_RUNTIME_ACTION_DEFAULT=reload
-ARLEN_DEPLOY_PROPANE_JOB_WORKER_BINARY=$packaged_jobs_worker
+ARLEN_DEPLOY_PROPANE_JOB_WORKER_BINARY=framework/bin/jobs-worker
 EOF
 
 python3 - "$release_dir" "$release_id" "$app_root" "$framework_root" "$certification_status" \
@@ -719,6 +721,14 @@ from datetime import datetime, timezone
 def rel(*parts):
     return os.path.join(*parts).replace(os.sep, "/")
 
+def release_rel(path):
+    candidate = (path or "").strip()
+    if not candidate:
+        return ""
+    if os.path.isabs(candidate):
+        return os.path.relpath(candidate, release_dir).replace(os.sep, "/")
+    return candidate.replace(os.sep, "/")
+
 migrations_dir = os.path.join(release_dir, "app", "db", "migrations")
 migration_files = []
 if os.path.isdir(migrations_dir):
@@ -733,20 +743,22 @@ manifest = {
     "version": "phase32-deploy-manifest-v1",
     "release_id": release_id,
     "created_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-    "release_dir": release_dir,
+    # ARLEN-BUG-017: shipped manifests must stay valid after moving the release
+    # to a different host/path, so portable metadata stays release-relative.
+    "release_dir": ".",
     "app_root_source": app_root,
     "framework_root_source": framework_root,
     "paths": {
-        "app_root": rel(release_dir, "app"),
-        "framework_root": rel(release_dir, "framework"),
-        "runtime_binary": runtime_binary,
-        "migrations_dir": rel(release_dir, "app", "db", "migrations"),
-        "boomhauer": framework_boomhauer,
-        "propane": propane_binary,
-        "jobs_worker": jobs_worker_binary,
-        "arlen": arlen_binary,
-        "operability_probe_helper": operability_probe_helper,
-        "release_env": rel(release_dir, "metadata", "release.env"),
+        "app_root": "app",
+        "framework_root": "framework",
+        "runtime_binary": release_rel(runtime_binary),
+        "migrations_dir": rel("app", "db", "migrations"),
+        "boomhauer": release_rel(framework_boomhauer),
+        "propane": release_rel(propane_binary),
+        "jobs_worker": release_rel(jobs_worker_binary),
+        "arlen": release_rel(arlen_binary),
+        "operability_probe_helper": release_rel(operability_probe_helper),
+        "release_env": rel("metadata", "release.env"),
     },
     "health_contract": {
         "health_path": "/healthz",
@@ -759,11 +771,11 @@ manifest = {
     },
     "certification": {
         "status": certification_status,
-        "manifest_path": certification_manifest,
+        "manifest_path": release_rel(certification_manifest),
     },
     "json_performance": {
         "status": json_status,
-        "manifest_path": json_manifest,
+        "manifest_path": release_rel(json_manifest),
     },
     "deployment": {
         "schema": "phase32-deploy-target-v1",
@@ -778,9 +790,9 @@ manifest = {
     "propane_handoff": {
         "schema": "phase32-propane-handoff-v1",
         "manager": "propane",
-        "manager_binary": propane_binary,
-        "jobs_worker_binary": jobs_worker_binary,
-        "release_env_path": rel(release_dir, "metadata", "release.env"),
+        "manager_binary": release_rel(propane_binary),
+        "jobs_worker_binary": release_rel(jobs_worker_binary),
+        "release_env_path": rel("metadata", "release.env"),
         "accessories_config_key": "propaneAccessories",
         "runtime_action_default": "reload",
         "activation_environment_keys": [

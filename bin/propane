@@ -503,22 +503,29 @@ if [[ -f "$app_root/config/app.plist" ]] && app_root_has_sources "$app_root"; th
   is_app_root=1
 fi
 
-if (( is_app_root == 1 )); then
-  if (( is_release_framework_root == 1 )) && app_binary="$(resolve_compiled_binary "$app_root/.boomhauer/build/boomhauer-app")"; then
+packaged_app_binary=""
+if (( is_release_framework_root == 1 )) && packaged_app_binary="$(resolve_compiled_binary "$app_root/.boomhauer/build/boomhauer-app")"; then
+  :
+else
+  packaged_app_binary=""
+fi
+
+if [[ -n "$packaged_app_binary" ]]; then
+  # ARLEN-BUG-018: packaged releases must prefer the shipped runtime binary,
+  # even when the app root no longer looks like a mutable source checkout.
+  app_binary="$packaged_app_binary"
+elif (( is_app_root == 1 )); then
+  if ARLEN_APP_ROOT="$app_root" ARLEN_FRAMEWORK_ROOT="$framework_root" \
+      "$framework_root/bin/boomhauer" --no-watch --prepare-only >/dev/null; then
     :
   else
-    if ARLEN_APP_ROOT="$app_root" ARLEN_FRAMEWORK_ROOT="$framework_root" \
-        "$framework_root/bin/boomhauer" --no-watch --prepare-only >/dev/null; then
-      :
-    else
-      status=$?
-      echo "propane: app prepare step failed; see $app_root/.boomhauer/last_build_error.log" >&2
-      exit "$status"
-    fi
-    if ! app_binary="$(resolve_compiled_binary "$app_root/.boomhauer/build/boomhauer-app")"; then
-      echo "propane: expected compiled server binary at $app_root/.boomhauer/build/boomhauer-app" >&2
-      exit 1
-    fi
+    status=$?
+    echo "propane: app prepare step failed; see $app_root/.boomhauer/last_build_error.log" >&2
+    exit "$status"
+  fi
+  if ! app_binary="$(resolve_compiled_binary "$app_root/.boomhauer/build/boomhauer-app")"; then
+    echo "propane: expected compiled server binary at $app_root/.boomhauer/build/boomhauer-app" >&2
+    exit 1
   fi
 else
   if (( is_checkout_framework_root == 1 )); then

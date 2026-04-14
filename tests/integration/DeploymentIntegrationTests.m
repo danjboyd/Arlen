@@ -1105,17 +1105,24 @@
     XCTAssertEqualObjects(@"phase32-propane-handoff-v1", propaneHandoff[@"schema"]);
     XCTAssertEqualObjects(@"propaneAccessories", propaneHandoff[@"accessories_config_key"]);
     NSDictionary *pushPaths = [manifest[@"paths"] isKindOfClass:[NSDictionary class]] ? manifest[@"paths"] : @{};
+    NSString *manifestReleaseDir = [[manifestPath stringByDeletingLastPathComponent] stringByDeletingLastPathComponent];
     NSString *releaseBoomhauer = [pushPaths[@"boomhauer"] isKindOfClass:[NSString class]] ? pushPaths[@"boomhauer"] : @"";
-    XCTAssertTrue([[NSFileManager defaultManager] isExecutableFileAtPath:releaseBoomhauer],
+    XCTAssertEqualObjects(@"framework/build/boomhauer", releaseBoomhauer);
+    XCTAssertTrue([[NSFileManager defaultManager]
+                      isExecutableFileAtPath:[manifestReleaseDir stringByAppendingPathComponent:releaseBoomhauer]],
                   @"missing packaged boomhauer binary: %@", releaseBoomhauer);
     NSString *operabilityHelper =
         [pushPaths[@"operability_probe_helper"] isKindOfClass:[NSString class]]
             ? pushPaths[@"operability_probe_helper"]
             : @"";
-    XCTAssertTrue([[NSFileManager defaultManager] isExecutableFileAtPath:operabilityHelper],
+    XCTAssertEqualObjects(@"framework/tools/deploy/validate_operability.sh", operabilityHelper);
+    XCTAssertTrue([[NSFileManager defaultManager]
+                      isExecutableFileAtPath:[manifestReleaseDir stringByAppendingPathComponent:operabilityHelper]],
                   @"missing packaged helper: %@", operabilityHelper);
     NSString *jobsWorker = [pushPaths[@"jobs_worker"] isKindOfClass:[NSString class]] ? pushPaths[@"jobs_worker"] : @"";
-    XCTAssertTrue([[NSFileManager defaultManager] isExecutableFileAtPath:jobsWorker],
+    XCTAssertEqualObjects(@"framework/bin/jobs-worker", jobsWorker);
+    XCTAssertTrue([[NSFileManager defaultManager]
+                      isExecutableFileAtPath:[manifestReleaseDir stringByAppendingPathComponent:jobsWorker]],
                   @"missing packaged jobs-worker wrapper: %@", jobsWorker);
     NSDictionary *migrationInventory = [manifest[@"migration_inventory"] isKindOfClass:[NSDictionary class]]
                                            ? manifest[@"migration_inventory"]
@@ -1458,6 +1465,223 @@
     XCTAssertEqualObjects(@"pass", statuses[@"arlen"]);
     XCTAssertEqualObjects(@"pass", statuses[@"jobs_worker"]);
     XCTAssertEqualObjects(@"pass", statuses[@"operability_probe_helper"]);
+  } @finally {
+    [[NSFileManager defaultManager] removeItemAtPath:appRoot error:nil];
+    [[NSFileManager defaultManager] removeItemAtPath:workRoot error:nil];
+  }
+}
+
+- (void)testArlenDeployStatusAndDoctorResolveRelocatedReleaseMetadata_ARLEN_BUG_017 {
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *appRoot = [self createTempDirectoryWithPrefix:@"arlen-bug-017-app"];
+  NSString *sourceWorkRoot = [self createTempDirectoryWithPrefix:@"arlen-bug-017-source"];
+  NSString *shipWorkRoot = [self createTempDirectoryWithPrefix:@"arlen-bug-017-shipped"];
+  XCTAssertNotNil(appRoot);
+  XCTAssertNotNil(sourceWorkRoot);
+  XCTAssertNotNil(shipWorkRoot);
+  if (appRoot == nil || sourceWorkRoot == nil || shipWorkRoot == nil) {
+    return;
+  }
+
+  @try {
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"config/app.plist"]
+                          content:@"{\n"
+                                  "  host = \"127.0.0.1\";\n"
+                                  "  port = 3000;\n"
+                                  "}\n"]);
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"config/environments/production.plist"]
+                          content:@"{\n  logFormat = \"json\";\n}\n"]);
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"app_lite.m"]
+                          content:@"#import <Foundation/Foundation.h>\n"
+                                  "int main(int argc, const char *argv[]) { (void)argc; (void)argv; return 0; }\n"]);
+
+    int code = 0;
+    NSString *buildOutput = [self runMakeAtRepoRoot:repoRoot target:@"arlen" exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", buildOutput);
+
+    NSString *sourceReleasesDir = [sourceWorkRoot stringByAppendingPathComponent:@"releases"];
+    NSString *pushOutput = [self runShellCapture:[NSString stringWithFormat:
+                                                     @"cd %@ && ARLEN_FRAMEWORK_ROOT=%@ %@/build/arlen "
+                                                      "deploy push --app-root %@ --releases-dir %@ --release-id shipped-rel-1 "
+                                                      "--allow-missing-certification --json",
+                                                     appRoot, repoRoot, repoRoot, appRoot, sourceReleasesDir]
+                                       exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", pushOutput);
+
+    NSString *shippedReleasesDir = [shipWorkRoot stringByAppendingPathComponent:@"releases"];
+    NSString *sourceReleaseDir = [sourceReleasesDir stringByAppendingPathComponent:@"shipped-rel-1"];
+    NSString *shippedReleaseDir = [shippedReleasesDir stringByAppendingPathComponent:@"shipped-rel-1"];
+    NSError *moveError = nil;
+    XCTAssertTrue([[NSFileManager defaultManager] createDirectoryAtPath:shippedReleasesDir
+                                            withIntermediateDirectories:YES
+                                                             attributes:nil
+                                                                  error:&moveError],
+                  @"%@", moveError.localizedDescription);
+    moveError = nil;
+    XCTAssertTrue([[NSFileManager defaultManager] moveItemAtPath:sourceReleaseDir toPath:shippedReleaseDir error:&moveError],
+                  @"%@", moveError.localizedDescription);
+
+    NSString *activateOutput = [self runShellCapture:[NSString stringWithFormat:
+                                                         @"cd %@ && %@/tools/deploy/activate_release.sh "
+                                                          "--releases-dir %@ --release-id shipped-rel-1",
+                                                         [self shellQuoted:repoRoot],
+                                                         [self shellQuoted:repoRoot],
+                                                         [self shellQuoted:shippedReleasesDir]]
+                                           exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", activateOutput);
+
+    NSString *manifestPath = [shippedReleaseDir stringByAppendingPathComponent:@"metadata/manifest.json"];
+    NSData *manifestData = [NSData dataWithContentsOfFile:manifestPath];
+    NSError *manifestError = nil;
+    NSDictionary *manifest =
+        manifestData != nil ? [NSJSONSerialization JSONObjectWithData:manifestData options:0 error:&manifestError] : nil;
+    XCTAssertNotNil(manifestData);
+    XCTAssertNil(manifestError);
+    XCTAssertTrue([manifest isKindOfClass:[NSDictionary class]]);
+    if (![manifest isKindOfClass:[NSDictionary class]]) {
+      manifest = @{};
+    }
+    NSDictionary *paths = [manifest[@"paths"] isKindOfClass:[NSDictionary class]] ? manifest[@"paths"] : @{};
+    XCTAssertEqualObjects(@"framework/bin/propane", paths[@"propane"]);
+    XCTAssertEqualObjects(@"framework/tools/deploy/validate_operability.sh", paths[@"operability_probe_helper"]);
+    XCTAssertFalse([[paths[@"propane"] description] hasPrefix:@"/"]);
+    XCTAssertFalse([[paths[@"operability_probe_helper"] description] hasPrefix:@"/"]);
+
+    NSString *releaseEnvPath = [shippedReleaseDir stringByAppendingPathComponent:@"metadata/release.env"];
+    NSString *releaseEnvText =
+        [NSString stringWithContentsOfFile:releaseEnvPath encoding:NSUTF8StringEncoding error:nil] ?: @"";
+    NSString *expectedAppRootLine =
+        [NSString stringWithFormat:@"ARLEN_APP_ROOT=%@", [shippedReleaseDir stringByAppendingPathComponent:@"app"]];
+    NSString *expectedPropaneLine = [NSString
+        stringWithFormat:@"ARLEN_RELEASE_PROPANE=%@",
+                         [shippedReleaseDir stringByAppendingPathComponent:@"framework/bin/propane"]];
+    XCTAssertTrue([releaseEnvText containsString:expectedAppRootLine], @"%@", releaseEnvText);
+    XCTAssertTrue([releaseEnvText containsString:expectedPropaneLine], @"%@", releaseEnvText);
+
+    NSString *statusOutput = [self runShellCapture:[NSString stringWithFormat:
+                                                        @"cd %@ && ARLEN_FRAMEWORK_ROOT=%@ %@/build/arlen "
+                                                         "deploy status --app-root %@ --releases-dir %@ --json",
+                                                        appRoot, repoRoot, repoRoot, appRoot, shippedReleasesDir]
+                                          exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", statusOutput);
+    NSDictionary *statusPayload =
+        [self parseJSONDictionaryFromOutput:statusOutput context:@"arlen deploy status relocated release --json"];
+    XCTAssertEqualObjects(@"shipped-rel-1", statusPayload[@"active_release_id"]);
+    XCTAssertEqualObjects(shippedReleaseDir, statusPayload[@"active_release_dir"]);
+    XCTAssertEqualObjects([shippedReleaseDir stringByAppendingPathComponent:@"framework/bin/propane"],
+                          statusPayload[@"propane_handoff"][@"manager_binary"]);
+    XCTAssertEqualObjects([shippedReleaseDir stringByAppendingPathComponent:@"metadata/release.env"],
+                          statusPayload[@"propane_handoff"][@"release_env_path"]);
+
+    NSString *doctorOutput = [self runShellCapture:[NSString stringWithFormat:
+                                                        @"cd %@ && ARLEN_FRAMEWORK_ROOT=%@ %@/build/arlen "
+                                                         "deploy doctor --app-root %@ --releases-dir %@ --json",
+                                                        appRoot, repoRoot, repoRoot, appRoot, shippedReleasesDir]
+                                          exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", doctorOutput);
+    NSDictionary *doctorPayload =
+        [self parseJSONDictionaryFromOutput:doctorOutput context:@"arlen deploy doctor relocated release --json"];
+    NSArray *checks = [doctorPayload[@"checks"] isKindOfClass:[NSArray class]] ? doctorPayload[@"checks"] : @[];
+    NSMutableDictionary *statuses = [NSMutableDictionary dictionary];
+    for (NSDictionary *check in checks) {
+      if ([check[@"id"] isKindOfClass:[NSString class]] && [check[@"status"] isKindOfClass:[NSString class]]) {
+        statuses[check[@"id"]] = check[@"status"];
+      }
+    }
+    XCTAssertEqualObjects(@"pass", statuses[@"propane"]);
+    XCTAssertEqualObjects(@"pass", statuses[@"operability_probe_helper"]);
+  } @finally {
+    [[NSFileManager defaultManager] removeItemAtPath:appRoot error:nil];
+    [[NSFileManager defaultManager] removeItemAtPath:sourceWorkRoot error:nil];
+    [[NSFileManager defaultManager] removeItemAtPath:shipWorkRoot error:nil];
+  }
+}
+
+- (void)testPackagedReleaseRuntimeLaunchersPreferPackagedBinary_ARLEN_BUG_018 {
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *appRoot = [self createTempDirectoryWithPrefix:@"arlen-bug-018-app"];
+  NSString *workRoot = [self createTempDirectoryWithPrefix:@"arlen-bug-018-work"];
+  XCTAssertNotNil(appRoot);
+  XCTAssertNotNil(workRoot);
+  if (appRoot == nil || workRoot == nil) {
+    return;
+  }
+
+  @try {
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"config/app.plist"]
+                          content:@"{\n"
+                                  "  host = \"127.0.0.1\";\n"
+                                  "  port = 3000;\n"
+                                  "  propaneAccessories = {\n"
+                                  "    workerCount = 1;\n"
+                                  "    jobWorkerCount = 0;\n"
+                                  "  };\n"
+                                  "}\n"]);
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"config/environments/production.plist"]
+                          content:@"{\n  logFormat = \"json\";\n}\n"]);
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"app_lite.m"]
+                          content:@"#import <Foundation/Foundation.h>\n"
+                                  "int main(int argc, const char *argv[]) { (void)argc; (void)argv; return 0; }\n"]);
+
+    int code = 0;
+    NSString *buildOutput = [self runMakeAtRepoRoot:repoRoot target:@"arlen" exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", buildOutput);
+
+    NSString *releasesDir = [workRoot stringByAppendingPathComponent:@"releases"];
+    NSString *pushOutput = [self runShellCapture:[NSString stringWithFormat:
+                                                     @"cd %@ && ARLEN_FRAMEWORK_ROOT=%@ %@/build/arlen "
+                                                      "deploy push --app-root %@ --releases-dir %@ --release-id packaged-rel-1 "
+                                                      "--allow-missing-certification --json",
+                                                     appRoot, repoRoot, repoRoot, appRoot, releasesDir]
+                                       exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", pushOutput);
+
+    NSString *releaseDir = [releasesDir stringByAppendingPathComponent:@"packaged-rel-1"];
+    NSString *releaseAppRoot = [releaseDir stringByAppendingPathComponent:@"app"];
+    NSString *runtimeBinary = [releaseAppRoot stringByAppendingPathComponent:@".boomhauer/build/boomhauer-app"];
+    NSString *runtimeLog = [workRoot stringByAppendingPathComponent:@"packaged-runtime.log"];
+    NSString *runtimeScript = [NSString stringWithFormat:@"#!/usr/bin/env bash\nprintf '%%s\\n' \"$0\" >> %@\nexit 0\n",
+                                                         [self shellQuoted:runtimeLog]];
+    XCTAssertTrue([self writeFile:runtimeBinary content:runtimeScript]);
+    XCTAssertTrue([self makeExecutableAtPath:runtimeBinary]);
+    [[NSFileManager defaultManager] removeItemAtPath:[releaseAppRoot stringByAppendingPathComponent:@"app_lite.m"] error:nil];
+    [[NSFileManager defaultManager] removeItemAtPath:[releaseAppRoot stringByAppendingPathComponent:@"src"] error:nil];
+
+    NSString *propanePath = [releaseDir stringByAppendingPathComponent:@"framework/bin/propane"];
+    NSString *propaneOutput = [self runShellCapture:[NSString stringWithFormat:
+                                                        @"cd %@ && ARLEN_APP_ROOT=%@ ARLEN_FRAMEWORK_ROOT=%@ %@ "
+                                                         "--env production --once --workers 1 --job-worker-count 0 "
+                                                         "--pid-file %@",
+                                                        releaseDir, releaseAppRoot,
+                                                        [releaseDir stringByAppendingPathComponent:@"framework"],
+                                                        propanePath,
+                                                        [workRoot stringByAppendingPathComponent:@"propane.pid"]]
+                                          exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", propaneOutput);
+
+    NSString *jobsWorkerPath = [releaseDir stringByAppendingPathComponent:@"framework/bin/jobs-worker"];
+    NSString *jobsWorkerOutput = [self runShellCapture:[NSString stringWithFormat:
+                                                           @"cd %@ && ARLEN_APP_ROOT=%@ ARLEN_FRAMEWORK_ROOT=%@ %@ "
+                                                            "--env production --once",
+                                                           releaseDir, releaseAppRoot,
+                                                           [releaseDir stringByAppendingPathComponent:@"framework"],
+                                                           jobsWorkerPath]
+                                             exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", jobsWorkerOutput);
+
+    NSString *runtimeLogText =
+        [NSString stringWithContentsOfFile:runtimeLog encoding:NSUTF8StringEncoding error:nil] ?: @"";
+    NSArray<NSString *> *lines =
+        [runtimeLogText componentsSeparatedByCharactersInSet:[NSCharacterSet newlineCharacterSet]];
+    NSMutableArray<NSString *> *trimmed = [NSMutableArray array];
+    for (NSString *line in lines) {
+      if ([[line stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]] length] > 0) {
+        [trimmed addObject:[line stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]]];
+      }
+    }
+    XCTAssertEqual((NSUInteger)2, [trimmed count], @"%@", runtimeLogText);
+    XCTAssertEqualObjects(runtimeBinary, trimmed[0]);
+    XCTAssertEqualObjects(runtimeBinary, trimmed[1]);
   } @finally {
     [[NSFileManager defaultManager] removeItemAtPath:appRoot error:nil];
     [[NSFileManager defaultManager] removeItemAtPath:workRoot error:nil];

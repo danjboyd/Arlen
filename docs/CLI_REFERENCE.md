@@ -103,6 +103,8 @@ First-class release orchestration over the existing `tools/deploy/*` scripts.
 
 - builds a local immutable release under `releases/<release-id>/`
 - writes `metadata/manifest.json` with release/runtime/health contract metadata
+- writes manifest paths release-relative so the packaged release stays valid
+  after ship/move (`ARLEN-BUG-017`)
 - writes `deployment` and `propane_handoff` metadata into the packaged manifest
 - emits the manifest content in `--json` mode
 
@@ -111,6 +113,8 @@ First-class release orchestration over the existing `tools/deploy/*` scripts.
 - reuses an existing release artifact for the selected `--release-id`, or builds it first if missing
 - runs `migrate --env <name>` only when packaged SQL migrations exist, unless `--skip-migrate` is passed
 - activates `releases/current` via `tools/deploy/activate_release.sh`
+- rewrites `metadata/release.env` against the activated release root so
+  packaged `propane` handoff metadata is target-absolute after ship/move
 - optionally probes `<base-url>/healthz` when `--base-url` is supplied
 - fails closed when the packaged manifest records an unsupported target profile
 - requires `--remote-build-check-command` to succeed when the packaged manifest records an experimental remote rebuild target
@@ -123,6 +127,8 @@ First-class release orchestration over the existing `tools/deploy/*` scripts.
 - reports the active release id, previous release id, manifest path, migration inventory, and health contract from `releases/current`
 - reports deployment metadata for the active release and rollback candidate
 - reports packaged `propane_handoff` metadata for the active release and rollback candidate
+- resolves manifest-backed runtime/helper paths relative to the active release,
+  so relocated packaged releases still report usable metadata (`ARLEN-BUG-017`)
 - reports service state when `--service <unit>` is supplied
 - can run a live operability probe when `--base-url <url>` is supplied
 
@@ -142,6 +148,8 @@ First-class release orchestration over the existing `tools/deploy/*` scripts.
 - reports service state when `--service <unit>` is supplied
 - runs full `tools/deploy/validate_operability.sh` when `--base-url <url>` is supplied
 - packaged releases include that helper under `framework/tools/deploy/`, so `deploy doctor --base-url` works against activated release payloads
+- resolves manifest-backed helper/runtime paths from the active release root
+  instead of trusting source-host absolute paths (`ARLEN-BUG-017`)
 - packaged binary checks resolve `.exe` siblings when the manifest records
   Windows-style compiled output base names
 
@@ -492,6 +500,9 @@ Build and run the first-party jobs worker loop for the current app root.
 - delegates to framework `bin/jobs-worker` with `ARLEN_APP_ROOT` + `ARLEN_FRAMEWORK_ROOT`
 - compiles the app through `bin/boomhauer --no-watch --prepare-only` and then runs `.boomhauer/build/boomhauer-app` in jobs-worker mode
 - when `ARLEN_FRAMEWORK_ROOT` points at a packaged release payload and `app/.boomhauer/build/boomhauer-app` is already present, reuses that packaged binary instead of recompiling from source
+- packaged release reuse now wins even when the release app root no longer
+  carries source files; `boomhauer` is not required for immutable runtime
+  startup (`ARLEN-BUG-018`)
 - if that prepare step fails, exits with the same non-zero status and points at `.boomhauer/last_build_error.log`
 - worker args are passed through (`--env`, `--once`, `--limit`, `--poll-interval-seconds`, `--run-scheduler`, `--scheduler-interval-seconds`)
 
@@ -502,6 +513,9 @@ Run production manager (`propane`) for the current app root.
 - manager args are forwarded to `bin/propane`
 - app-root launches first run `bin/boomhauer --no-watch --prepare-only`; if that fails, `propane` exits non-zero and points at `.boomhauer/last_build_error.log`
 - when `ARLEN_FRAMEWORK_ROOT` points at a packaged release payload, `propane` runs directly from that payload and reuses `app/.boomhauer/build/boomhauer-app` without requiring a full Arlen checkout
+- when a packaged release app root already carries `.boomhauer/build/boomhauer-app`,
+  both `propane` and `jobs-worker` now prefer that shipped binary even if the
+  release app root is no longer a mutable source checkout (`ARLEN-BUG-018`)
 - all production manager settings are called "propane accessories"
 
 ### `arlen routes`

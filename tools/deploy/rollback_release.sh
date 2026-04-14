@@ -13,6 +13,7 @@ USAGE
 
 releases_dir="$PWD/releases"
 target_release_id=""
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -71,5 +72,6 @@ if [[ ! -d "$target_path" ]]; then
   exit 1
 fi
 
+"$script_dir/write_release_env.py" "$target_path"
 ln -sfn "$target_path" "$releases_dir/current"
 echo "rollback activated: $target_path"

@@ -137,6 +137,8 @@ Windows-focused preview lanes:
      `tests/fixtures/phase25/live_adversarial_cases.json`
    - tech-demo live endpoint integration coverage:
      `tests/integration/HTTPIntegrationTests.m`
+   - deployment/release packaging regressions:
+     `tests/integration/DeploymentIntegrationTests.m`
 3. Add or extend a checked-in fixture so the failure is replayable.
 4. Run the matching focused lane until it passes.
    - for SQL ORM runtime bugs that depend on a real PostgreSQL insert/update
