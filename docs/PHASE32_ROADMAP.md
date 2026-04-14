@@ -1,6 +1,6 @@
 # Arlen Phase 32 Roadmap
 
-Status: in progress
+Status: complete on 2026-04-14
 Last updated: 2026-04-14
 
 Related docs:
@@ -135,10 +135,13 @@ Delivered in this checkpoint:
 - `32G`
 - `32H`
 - `32I`
+- `32J`
+- `32K`
+- `32L`
 
 Remaining after this checkpoint:
 
-- `32J-32L`
+- none
 
 ## 3. Scope Guardrails
 
@@ -354,17 +357,54 @@ Delivered scope:
 
 ### 32J. `propane` Integration Boundary and Production Manager Handoff
 
+Status: Delivered on 2026-04-14
+
 Goal:
 - define the seam between deploy orchestration and future `propane`
   accessories ownership
 
+Delivered scope:
+
+- packaged release manifests now carry `propane_handoff` metadata
+- release env exports explicit `propane` handoff variables
+- deploy JSON output now reports the packaged `propane_handoff` contract in
+  `push`, `release`, `status`, `rollback`, and `doctor`
+- the deploy/docs contract now states clearly that `arlen deploy` owns release
+  packaging/activation while `propane` owns supervision and `propane
+  accessories`
+
 ### 32K. Confidence Lanes and Fixture Coverage
+
+Status: Delivered on 2026-04-14
 
 Goal:
 - add deploy-target fixture matrices and doctor/activation regression lanes
 
+Delivered scope:
+
+- added `tools/ci/run_phase32_confidence.sh`
+- added `tools/ci/generate_phase32_confidence_artifacts.py`
+- added `make phase32-confidence`
+- extended deployment integration tests with `propane_handoff` assertions
+- the Phase 32 confidence lane now verifies:
+  - supported same-profile release metadata
+  - experimental remote rebuild metadata and gating
+  - doctor failure without remote build validation
+  - doctor degradation to warning with explicit validation
+  - rollback/status deployment metadata depth
+  - unsupported target rejection
+  - packaged `propane_handoff` manifest/release-env contract
+
 ### 32L. Deployment Documentation Suite Closeout
+
+Status: Delivered on 2026-04-14
 
 Goal:
 - finish the developer and operator documentation package for the target-aware
   deploy product
+
+Delivered scope:
+
+- updated deployment, CLI, `propane`, testing, and toolchain docs
+- updated roadmap, status, README surfaces, and docs index
+- documented `phase32-confidence` as the deploy closeout artifact lane

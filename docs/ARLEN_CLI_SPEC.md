@@ -106,6 +106,9 @@ Behavior:
 - deploy manifests now carry target-aware deployment metadata (`local_profile`,
   `target_profile`, `runtime_strategy`, `support_level`,
   `compatibility_reason`, and remote rebuild requirements)
+- deploy manifests now also carry a `propane_handoff` contract describing the
+  packaged `propane` / `jobs-worker` paths, `release.env`, the
+  `propaneAccessories` config key, and the default deploy runtime action
 - `release` reuses or creates the selected release, runs migrations when packaged `.sql` files exist, and activates `releases/current`
 - `release` can optionally verify `GET /healthz` through `--base-url <url>`
 - `release` fails closed when the packaged manifest records an unsupported
@@ -116,12 +119,17 @@ Behavior:
 - `status` reports the active release, previous release, manifest-backed health contract, and optional service state
 - `status` now also reports deployment metadata for the active release and
   rollback candidate
+- `status` now reports the packaged `propane_handoff` contract for the active
+  release and rollback candidate
 - `rollback` promotes a previous release through `rollback_release.sh`, can reload/restart a service, and can re-run deploy health verification
 - `rollback` now reports deployment metadata for the rollback source and
   activated target
+- `rollback` now reports the packaged `propane_handoff` contract for the
+  rollback source and activated target
 - `doctor` validates active release layout, packaged binaries, config loading, and optional live operability
 - `doctor` also validates deployment compatibility metadata and requires a
   remote build-check command for experimental remote rebuild targets
+- `doctor` reports the packaged `propane_handoff` contract in JSON mode
 - packaged releases include the operability helper `framework/tools/deploy/validate_operability.sh` used by `doctor --base-url`
 - `logs` exposes release metadata pointers plus journald/file log access helpers
 - shared options:

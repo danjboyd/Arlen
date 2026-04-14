@@ -139,6 +139,13 @@ Windows preview CI currently validates two layers:
 - runtime parity via `make phase24-windows-confidence`
 - packaged release/deploy parity via `make phase31-confidence`
 
+Linux/GNUstep deploy confidence now validates three layers:
+
+- local deploy orchestration via `make phase29-confidence`
+- packaged release/deploy parity via `make phase31-confidence`
+- target-aware deploy compatibility and `propane` handoff coverage via
+  `make phase32-confidence`
+
 ## Doctor Check Mapping
 
 `bin/arlen-doctor` currently validates:

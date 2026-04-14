@@ -103,6 +103,7 @@ First-class release orchestration over the existing `tools/deploy/*` scripts.
 
 - builds a local immutable release under `releases/<release-id>/`
 - writes `metadata/manifest.json` with release/runtime/health contract metadata
+- writes `deployment` and `propane_handoff` metadata into the packaged manifest
 - emits the manifest content in `--json` mode
 
 `arlen deploy release`
@@ -121,6 +122,7 @@ First-class release orchestration over the existing `tools/deploy/*` scripts.
 
 - reports the active release id, previous release id, manifest path, migration inventory, and health contract from `releases/current`
 - reports deployment metadata for the active release and rollback candidate
+- reports packaged `propane_handoff` metadata for the active release and rollback candidate
 - reports service state when `--service <unit>` is supplied
 - can run a live operability probe when `--base-url <url>` is supplied
 
@@ -136,6 +138,7 @@ First-class release orchestration over the existing `tools/deploy/*` scripts.
 
 - validates release layout, manifest presence, packaged binaries, config loading, and database URL completeness
 - validates deployment compatibility metadata and requires a remote build-check command when the active release targets an experimental remote rebuild path
+- reports packaged `propane_handoff` metadata in JSON mode
 - reports service state when `--service <unit>` is supplied
 - runs full `tools/deploy/validate_operability.sh` when `--base-url <url>` is supplied
 - packaged releases include that helper under `framework/tools/deploy/`, so `deploy doctor --base-url` works against activated release payloads
@@ -977,6 +980,8 @@ Lifecycle diagnostics:
 - `make deploy-smoke`: validate deployment runbook with automated release smoke
 - `tools/deploy/validate_operability.sh`: validate text/JSON health/readiness/metrics operability contracts against a running server
 - `make phase29-confidence`: fail-closed deploy confidence lane covering manifest-backed deploy flows plus reserved operability endpoint regression smoke
+- `make phase31-confidence`: packaged release/deploy parity lane covering `deploy doctor --base-url`, packaged `jobs-worker --once`, and `.exe` helper fallback checks
+- `make phase32-confidence`: target-aware deploy lane covering remote rebuild gating, rollback/status deployment metadata, unsupported-target rejection, and the packaged `propane_handoff` contract
 - `tools/deploy/build_release.sh --dry-run --json`: emit deploy release planning payload for coding-agent automation
   - enforces Phase 9J certification manifest by default (`build/release_confidence/phase9j/manifest.json`)
   - enforces Phase 10E JSON performance manifest by default (`build/release_confidence/phase10e/manifest.json`)

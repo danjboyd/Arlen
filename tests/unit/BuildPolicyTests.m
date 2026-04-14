@@ -164,6 +164,8 @@
   XCTAssertTrue([makefile containsString:@"phase24-windows-confidence: phase24-windows-db-smoke phase24-windows-runtime-tests"]);
   XCTAssertTrue([makefile containsString:@"phase31-confidence:"]);
   XCTAssertTrue([makefile containsString:@"bash ./tools/ci/run_phase31_confidence.sh"]);
+  XCTAssertTrue([makefile containsString:@"phase32-confidence:"]);
+  XCTAssertTrue([makefile containsString:@"bash ./tools/ci/run_phase32_confidence.sh"]);
 }
 
 - (void)testGNUmakefileDefinesFocusedPhase20ConfidenceLanes {

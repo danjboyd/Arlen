@@ -198,6 +198,33 @@ The intended near-term support boundary is:
 - GNUstep-to-GNUstep remote rebuild: possible best-effort path
 - Apple Foundation to GNUstep remote rebuild: not a supported v1 path
 
+### 4.8 `propane` Handoff Boundary
+
+Activated releases now carry an explicit `propane` handoff contract.
+
+Release manifests expose `propane_handoff` metadata with:
+
+- `manager = propane`
+- packaged `propane` binary path
+- packaged `jobs-worker` binary path
+- `release.env` path
+- `accessories_config_key = propaneAccessories`
+- default runtime action for deploy-driven lifecycle changes
+
+This is the boundary between responsibilities:
+
+- `arlen deploy`
+  - packages the release
+  - records deployment and `propane` handoff metadata
+  - activates releases and triggers lifecycle actions
+- `propane`
+  - owns process supervision
+  - owns worker lifecycle
+  - owns `propane accessories`
+
+The deploy product should not become a second process manager. It hands off to
+`propane` through the packaged metadata and environment contract.
+
 ## 5. Built-In Health Contract
 
 Arlen reserves its built-in operability endpoints ahead of app route dispatch:
@@ -284,6 +311,7 @@ Focused deploy confidence lane:
 ```bash
 make phase29-confidence
 make phase31-confidence
+make phase32-confidence
 ```
 
 That lane exercises deploy manifest generation, push/release/status/rollback/
@@ -297,6 +325,17 @@ missing from Phase 29:
 - packaged `propane` startup plus `deploy doctor --base-url`
 - packaged `jobs-worker --once`
 - synthetic manifest-base-name to `.exe` fallback validation
+
+`phase32-confidence` adds the target-aware deploy closeout checks:
+
+- supported same-profile release metadata
+- experimental GNUstep cross-profile remote rebuild metadata
+- fail-closed remote build-check gating in `deploy doctor`
+- successful release activation after an explicit remote build-check command
+- rollback-candidate deployment metadata in `deploy status`
+- rollback-source deployment metadata in `deploy rollback`
+- packaged `propane_handoff` manifest and `release.env` contract
+- explicit rejection of unsupported cross-runtime deployment targets
 
 Windows support statement for deployment:
 

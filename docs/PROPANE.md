@@ -112,6 +112,26 @@ Environment fallbacks:
 
 `propane` exports resolved cluster values to worker processes, so CLI overrides are consistently applied at runtime.
 
+## Deploy Handoff
+
+Phase 32 makes the deploy-to-`propane` seam explicit.
+
+Packaged release manifests now carry a `propane_handoff` object describing:
+
+- the packaged `propane` manager binary
+- the packaged `jobs-worker` binary
+- the `release.env` file that supplies activation/runtime paths
+- the config key that owns `propane accessories`
+- the default deploy runtime action used for release lifecycle changes
+
+That split of ownership is deliberate:
+
+- `arlen deploy` packages releases, activates them, and records the handoff
+- `propane` owns process supervision and all `propane accessories`
+
+This keeps deployment orchestration and production process management separate
+while still giving operators one deterministic packaged contract.
+
 ## Lifecycle Diagnostics Contract
 
 `propane` emits machine-readable lifecycle lines to stdout:

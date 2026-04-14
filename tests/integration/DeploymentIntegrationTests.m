@@ -1100,6 +1100,10 @@
     NSDictionary *deployment = [manifest[@"deployment"] isKindOfClass:[NSDictionary class]] ? manifest[@"deployment"] : @{};
     XCTAssertEqualObjects(@"supported", deployment[@"support_level"]);
     XCTAssertEqualObjects(@"system", deployment[@"runtime_strategy"]);
+    NSDictionary *propaneHandoff =
+        [manifest[@"propane_handoff"] isKindOfClass:[NSDictionary class]] ? manifest[@"propane_handoff"] : @{};
+    XCTAssertEqualObjects(@"phase32-propane-handoff-v1", propaneHandoff[@"schema"]);
+    XCTAssertEqualObjects(@"propaneAccessories", propaneHandoff[@"accessories_config_key"]);
     NSDictionary *pushPaths = [manifest[@"paths"] isKindOfClass:[NSDictionary class]] ? manifest[@"paths"] : @{};
     NSString *releaseBoomhauer = [pushPaths[@"boomhauer"] isKindOfClass:[NSString class]] ? pushPaths[@"boomhauer"] : @"";
     XCTAssertTrue([[NSFileManager defaultManager] isExecutableFileAtPath:releaseBoomhauer],
@@ -1228,6 +1232,15 @@
                                          ? statusPayload[@"deployment"]
                                          : @{};
     XCTAssertEqualObjects(@"supported", statusDeployment[@"support_level"]);
+    NSDictionary *statusPropaneHandoff =
+        [statusPayload[@"propane_handoff"] isKindOfClass:[NSDictionary class]] ? statusPayload[@"propane_handoff"] : @{};
+    XCTAssertEqualObjects(@"phase32-propane-handoff-v1", statusPropaneHandoff[@"schema"]);
+    NSDictionary *rollbackCandidate = [statusPayload[@"rollback_candidate"] isKindOfClass:[NSDictionary class]]
+                                          ? statusPayload[@"rollback_candidate"]
+                                          : @{};
+    NSDictionary *rollbackCandidatePropane =
+        [rollbackCandidate[@"propane_handoff"] isKindOfClass:[NSDictionary class]] ? rollbackCandidate[@"propane_handoff"] : @{};
+    XCTAssertEqualObjects(@"phase32-propane-handoff-v1", rollbackCandidatePropane[@"schema"]);
     NSDictionary *statusManifest = [statusPayload[@"manifest"] isKindOfClass:[NSDictionary class]]
                                        ? statusPayload[@"manifest"]
                                        : @{};
@@ -1274,6 +1287,15 @@
     XCTAssertEqualObjects(@"deploy.rollback", rollbackPayload[@"workflow"]);
     XCTAssertEqualObjects(@"cli-rel-a", rollbackPayload[@"target_release_id"]);
     XCTAssertEqualObjects(@"cli-rel-a", rollbackPayload[@"active_release_id"]);
+    NSDictionary *rollbackPropane =
+        [rollbackPayload[@"propane_handoff"] isKindOfClass:[NSDictionary class]] ? rollbackPayload[@"propane_handoff"] : @{};
+    XCTAssertEqualObjects(@"phase32-propane-handoff-v1", rollbackPropane[@"schema"]);
+    NSDictionary *rollbackSource = [rollbackPayload[@"rollback_source"] isKindOfClass:[NSDictionary class]]
+                                       ? rollbackPayload[@"rollback_source"]
+                                       : @{};
+    NSDictionary *rollbackSourcePropane =
+        [rollbackSource[@"propane_handoff"] isKindOfClass:[NSDictionary class]] ? rollbackSource[@"propane_handoff"] : @{};
+    XCTAssertEqualObjects(@"phase32-propane-handoff-v1", rollbackSourcePropane[@"schema"]);
     NSArray *rollbackWarnings = [rollbackPayload[@"warnings"] isKindOfClass:[NSArray class]]
                                     ? rollbackPayload[@"warnings"]
                                     : @[];
@@ -1482,6 +1504,9 @@
     NSDictionary *pushDeployment = [pushPayload[@"deployment"] isKindOfClass:[NSDictionary class]] ? pushPayload[@"deployment"] : @{};
     XCTAssertEqualObjects(@"experimental", pushDeployment[@"support_level"]);
     XCTAssertEqualObjects(@"managed", pushDeployment[@"runtime_strategy"]);
+    NSDictionary *pushPropaneHandoff =
+        [pushPayload[@"propane_handoff"] isKindOfClass:[NSDictionary class]] ? pushPayload[@"propane_handoff"] : @{};
+    XCTAssertEqualObjects(@"phase32-propane-handoff-v1", pushPropaneHandoff[@"schema"]);
 
     NSString *releaseOutput = [self runShellCapture:[NSString stringWithFormat:
                                                         @"cd %@ && ARLEN_FRAMEWORK_ROOT=%@ %@/build/arlen "

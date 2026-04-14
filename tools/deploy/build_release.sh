@@ -675,6 +675,10 @@ ARLEN_DEPLOY_SUPPORT_LEVEL=$deployment_support_level
 ARLEN_DEPLOY_COMPATIBILITY_REASON=$deployment_reason
 ARLEN_DEPLOY_ALLOW_REMOTE_REBUILD=$allow_remote_rebuild
 ARLEN_DEPLOY_REMOTE_REBUILD_REQUIRED=$remote_rebuild_required
+ARLEN_DEPLOY_PROPANE_MANAGER_BINARY=$packaged_propane
+ARLEN_DEPLOY_PROPANE_ACCESSORIES_CONFIG_KEY=propaneAccessories
+ARLEN_DEPLOY_PROPANE_RUNTIME_ACTION_DEFAULT=reload
+ARLEN_DEPLOY_PROPANE_JOB_WORKER_BINARY=$packaged_jobs_worker
 EOF
 
 python3 - "$release_dir" "$release_id" "$app_root" "$framework_root" "$certification_status" \
@@ -770,6 +774,25 @@ manifest = {
         "compatibility_reason": deployment_reason,
         "allow_remote_rebuild": allow_remote_rebuild == "1",
         "remote_rebuild_required": remote_rebuild_required == "1",
+    },
+    "propane_handoff": {
+        "schema": "phase32-propane-handoff-v1",
+        "manager": "propane",
+        "manager_binary": propane_binary,
+        "jobs_worker_binary": jobs_worker_binary,
+        "release_env_path": rel(release_dir, "metadata", "release.env"),
+        "accessories_config_key": "propaneAccessories",
+        "runtime_action_default": "reload",
+        "activation_environment_keys": [
+            "ARLEN_APP_ROOT",
+            "ARLEN_FRAMEWORK_ROOT",
+            "ARLEN_RELEASE_MANIFEST",
+            "ARLEN_DEPLOY_PROPANE_MANAGER_BINARY",
+        ],
+        "ownership": {
+            "deploy": "release packaging and activation",
+            "propane": "process supervision and propane accessories",
+        },
     },
 }
 

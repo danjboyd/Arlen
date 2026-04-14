@@ -689,6 +689,40 @@ static NSDictionary *DeploymentMetadataFromManifest(NSDictionary *manifest, BOOL
   return resolved;
 }
 
+static NSDictionary *PropaneHandoffFromManifest(NSDictionary *manifest) {
+  NSDictionary *handoff = [manifest[@"propane_handoff"] isKindOfClass:[NSDictionary class]] ? manifest[@"propane_handoff"] : nil;
+  NSDictionary *paths = [manifest[@"paths"] isKindOfClass:[NSDictionary class]] ? manifest[@"paths"] : @{};
+  NSString *managerBinary =
+      [handoff[@"manager_binary"] isKindOfClass:[NSString class]]
+          ? handoff[@"manager_binary"]
+          : ([paths[@"propane"] isKindOfClass:[NSString class]] ? paths[@"propane"] : @"");
+  NSString *jobsWorkerBinary =
+      [handoff[@"jobs_worker_binary"] isKindOfClass:[NSString class]]
+          ? handoff[@"jobs_worker_binary"]
+          : ([paths[@"jobs_worker"] isKindOfClass:[NSString class]] ? paths[@"jobs_worker"] : @"");
+  NSString *releaseEnvPath =
+      [handoff[@"release_env_path"] isKindOfClass:[NSString class]]
+          ? handoff[@"release_env_path"]
+          : ([paths[@"release_env"] isKindOfClass:[NSString class]] ? paths[@"release_env"] : @"");
+  return @{
+    @"schema" : [handoff[@"schema"] isKindOfClass:[NSString class]] ? handoff[@"schema"] : @"phase32-propane-handoff-v1",
+    @"manager" : @"propane",
+    @"manager_binary" : managerBinary ?: @"",
+    @"jobs_worker_binary" : jobsWorkerBinary ?: @"",
+    @"release_env_path" : releaseEnvPath ?: @"",
+    @"accessories_config_key" :
+        [handoff[@"accessories_config_key"] isKindOfClass:[NSString class]] ? handoff[@"accessories_config_key"] : @"propaneAccessories",
+    @"runtime_action_default" :
+        [handoff[@"runtime_action_default"] isKindOfClass:[NSString class]] ? handoff[@"runtime_action_default"] : @"reload",
+    @"activation_environment_keys" :
+        [handoff[@"activation_environment_keys"] isKindOfClass:[NSArray class]] ? handoff[@"activation_environment_keys"] : @[ @"ARLEN_APP_ROOT", @"ARLEN_FRAMEWORK_ROOT", @"ARLEN_RELEASE_MANIFEST" ],
+    @"ownership" : [handoff[@"ownership"] isKindOfClass:[NSDictionary class]] ? handoff[@"ownership"] : @{
+      @"deploy" : @"release packaging and activation",
+      @"propane" : @"process supervision and propane accessories",
+    },
+  };
+}
+
 static NSDictionary *RunRemoteBuildCheck(NSString *command) {
   NSString *trimmedCommand = Trimmed(command);
   if ([trimmedCommand length] == 0) {
@@ -823,6 +857,7 @@ static NSArray<NSDictionary *> *DeployDoctorChecksForRelease(NSString *releaseDi
   }
 
   NSDictionary *deployment = DeploymentMetadataFromManifest(manifest, NO);
+  NSDictionary *propaneHandoff = PropaneHandoffFromManifest(manifest);
   NSString *supportLevel = [deployment[@"support_level"] isKindOfClass:[NSString class]] ? deployment[@"support_level"] : @"supported";
   NSString *runtimeStrategy = [deployment[@"runtime_strategy"] isKindOfClass:[NSString class]] ? deployment[@"runtime_strategy"] : @"system";
   NSString *localProfile = [deployment[@"local_profile"] isKindOfClass:[NSString class]] ? deployment[@"local_profile"] : @"";
@@ -840,6 +875,16 @@ static NSArray<NSDictionary *> *DeployDoctorChecksForRelease(NSString *releaseDi
            [@[ @"system", @"managed", @"bundled" ] containsObject:runtimeStrategy] ? @"pass" : @"fail",
            [NSString stringWithFormat:@"runtime strategy: %@", runtimeStrategy ?: @"system"],
            @"Use system, managed, or bundled in the deploy target configuration.");
+  NSString *propaneManagerBinary =
+      [propaneHandoff[@"manager_binary"] isKindOfClass:[NSString class]] ? propaneHandoff[@"manager_binary"] : @"";
+  NSString *propaneJobsWorkerBinary =
+      [propaneHandoff[@"jobs_worker_binary"] isKindOfClass:[NSString class]] ? propaneHandoff[@"jobs_worker_binary"] : @"";
+  addCheck(@"propane_handoff",
+           ([propaneManagerBinary length] > 0 && [propaneJobsWorkerBinary length] > 0) ? @"pass" : @"warn",
+           [NSString stringWithFormat:@"propane handoff manager=%@ accessories=%@",
+                                      [propaneHandoff[@"manager"] description] ?: @"propane",
+                                      [propaneHandoff[@"accessories_config_key"] description] ?: @"propaneAccessories"],
+           @"Packaged release metadata should identify the `propane` manager binary, jobs worker binary, and propane accessories key.");
   addCheck(@"compatibility",
            compatibilityStatus,
            [NSString stringWithFormat:@"deployment compatibility %@ (%@)", supportLevel ?: @"supported",
@@ -3804,6 +3849,7 @@ static int CommandDeploy(NSArray *args) {
         @"manifest_path" : manifestPath ?: @"",
         @"manifest_version" : manifest[@"version"] ?: @"phase32-deploy-manifest-v1",
         @"deployment" : DeploymentMetadataFromManifest(manifest, allowRemoteRebuild),
+        @"propane_handoff" : PropaneHandoffFromManifest(manifest),
         @"manifest" : manifest,
         @"build_release" : buildPayload ?: @{},
       };
@@ -3844,6 +3890,7 @@ static int CommandDeploy(NSArray *args) {
         @"manifest_path" : currentManifestPath ?: @"",
         @"manifest" : currentManifest ?: @{},
         @"deployment" : currentDeployment ?: @{},
+        @"propane_handoff" : PropaneHandoffFromManifest(currentManifest),
         @"health_contract" : currentHealthContract ?: @{},
         @"migration_inventory" : currentMigrationInventory ?: @{},
         @"rollback_candidate" : @{
@@ -3851,6 +3898,7 @@ static int CommandDeploy(NSArray *args) {
           @"release_dir" : previousReleaseDir ?: @"",
           @"manifest_path" : previousManifestPath ?: @"",
           @"deployment" : DeploymentMetadataFromManifest(previousManifest, NO),
+          @"propane_handoff" : PropaneHandoffFromManifest(previousManifest),
         },
         @"service" : @{
           @"name" : serviceName ?: @"",
@@ -4036,10 +4084,12 @@ static int CommandDeploy(NSArray *args) {
         @"active_release_id" : [activeDirAfterRollback length] > 0 ? ReleaseIDForDirectory(activeDirAfterRollback) : @"",
         @"active_release_dir" : activeDirAfterRollback ?: @"",
         @"deployment" : activeDeploymentAfterRollback ?: @{},
+        @"propane_handoff" : PropaneHandoffFromManifest(activeManifestAfterRollback),
         @"rollback_source" : @{
           @"release_id" : currentReleaseID ?: @"",
           @"release_dir" : currentReleaseDir ?: @"",
           @"deployment" : currentDeployment ?: @{},
+          @"propane_handoff" : PropaneHandoffFromManifest(currentManifest),
         },
         @"manifest" : activeManifestAfterRollback ?: @{},
         @"warnings" : warnings ?: @[],
@@ -4072,6 +4122,7 @@ static int CommandDeploy(NSArray *args) {
         @"active_release_dir" : currentReleaseDir ?: @"",
         @"environment" : environment ?: @"production",
         @"deployment" : currentDeployment ?: @{},
+        @"propane_handoff" : PropaneHandoffFromManifest(currentManifest),
         @"checks" : checks ?: @[],
         @"summary" : @{
           @"pass" : @(passCount),
@@ -4480,6 +4531,7 @@ static int CommandDeploy(NSArray *args) {
       @"manifest_path" : manifestPath ?: @"",
       @"manifest_version" : manifest[@"version"] ?: @"phase32-deploy-manifest-v1",
       @"deployment" : releaseDeployment ?: @{},
+      @"propane_handoff" : PropaneHandoffFromManifest(manifest),
       @"manifest" : manifest,
       @"steps" : steps ?: @[],
       @"build_release" : buildPayload ?: @{},

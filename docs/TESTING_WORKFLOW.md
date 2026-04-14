@@ -73,6 +73,11 @@ Windows-focused preview lanes:
     packaged `jobs-worker --once`, and the synthetic `.exe` manifest fallback
     check
   - writes artifacts under `build/release_confidence/phase31/`
+- `make phase32-confidence`
+  - runs target-aware deploy compatibility coverage: experimental remote
+    rebuild gating, unsupported-target rejection, rollback/status deployment
+    metadata, and packaged `propane_handoff` contract checks
+  - writes artifacts under `build/release_confidence/phase32/`
 
 ## 2. Bug Report To Regression
 

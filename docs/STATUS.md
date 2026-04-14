@@ -4,26 +4,29 @@ Last updated: 2026-04-14
 
 ## Leaving Off (2026-04-14)
 
-- Continued Phase 32 and delivered `32F-32I`:
-  - added target-aware deploy flags to the CLI and release builder:
-    `--target-profile`, `--runtime-strategy`, `--allow-remote-rebuild`, and
-    `--remote-build-check-command`
-  - expanded packaged release manifests to `phase32-deploy-manifest-v1` with
-    deployment metadata for local/target profiles, runtime strategy,
-    compatibility status, and remote rebuild requirements
-  - taught `arlen deploy release` to fail closed on unsupported target
-    profiles and to require a successful remote build-check command for
-    experimental GNUstep cross-profile rebuilds
-  - extended `arlen deploy doctor`, `status`, and `rollback` JSON payloads
-    with deployment metadata and rollback-candidate depth
-  - added deployment integration coverage for experimental remote rebuild
-    gating and unsupported cross-runtime target rejection
+- Completed Phase 32 and delivered `32J-32L`:
+  - added explicit `propane_handoff` metadata to packaged release manifests
+    and `release.env` so the seam between deploy orchestration and `propane`
+    process ownership is now machine-readable
+  - extended deploy JSON outputs to report the packaged `propane_handoff`
+    contract alongside the Phase 32 deployment metadata
+  - added the repo-native `phase32-confidence` lane under
+    `tools/ci/run_phase32_confidence.sh`,
+    `tools/ci/generate_phase32_confidence_artifacts.py`, and
+    `build/release_confidence/phase32/`
+  - verified the new lane end-to-end on 2026-04-14, covering experimental
+    remote rebuild gating, unsupported target rejection, rollback/status
+    deployment metadata depth, and the packaged `propane_handoff` contract
+  - closed the deployment docs suite with updates to `docs/DEPLOYMENT.md`,
+    `docs/PROPANE.md`, `docs/CLI_REFERENCE.md`,
+    `docs/ARLEN_CLI_SPEC.md`, `docs/TESTING_WORKFLOW.md`,
+    `docs/TOOLCHAIN_MATRIX.md`, the docs index, and the top-level README
 - Phase 32 status:
-  - `32A-32I` are now delivered
-  - remaining work is `32J-32L`: `propane` handoff boundary, confidence lanes,
-    and deployment docs closeout
-  - deploy remains a Phase 29 local release product operationally, but it now
-    enforces the Phase 32 compatibility contract at release time
+  - `32A-32L` are now delivered
+  - `make phase32-confidence` is the canonical deploy closeout lane for
+    target-aware compatibility gating and `propane` handoff artifacts
+  - deploy remains a local release product operationally, but it now closes
+    the Phase 32 target-aware compatibility and `propane` handoff contract
 
 ## Leaving Off (2026-04-09)
 
