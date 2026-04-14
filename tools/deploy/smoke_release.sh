@@ -74,8 +74,9 @@ resolve_directory_path() {
 resolve_operability_helper() {
   local release_dir="$1"
   local manifest_path="$release_dir/metadata/manifest.json"
+  local helper_path=""
   if [[ -f "$manifest_path" ]] && command -v python3 >/dev/null 2>&1; then
-    python3 - "$manifest_path" <<'PY'
+    helper_path="$(python3 - "$manifest_path" <<'PY'
 import json
 import sys
 
@@ -91,7 +92,15 @@ if isinstance(payload, dict):
             helper = value
 print(helper)
 PY
-    return 0
+)"
+    if [[ -n "$helper_path" ]]; then
+      if [[ "$helper_path" = /* ]] || [[ "$helper_path" =~ ^[A-Za-z]:[\\/] ]] || [[ "$helper_path" =~ ^\\\\ ]]; then
+        printf '%s\n' "$helper_path"
+      else
+        printf '%s\n' "$release_dir/$helper_path"
+      fi
+      return 0
+    fi
   fi
   printf '%s\n' "$release_dir/framework/tools/deploy/validate_operability.sh"
 }

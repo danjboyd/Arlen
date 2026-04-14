@@ -451,7 +451,7 @@
   }
 }
 
-- (void)testReleaseSmokeScriptValidatesDeployRunbook {
+- (void)testReleaseSmokeScriptValidatesDeployRunbook_ARLEN_BUG_019 {
   NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
   NSString *appParent = [self createTempDirectoryWithPrefix:@"arlen-smoke-app"];
   NSString *workRoot = [self createTempDirectoryWithPrefix:@"arlen-smoke-work"];
@@ -475,21 +475,112 @@
 
     NSString *appRoot = [appParent stringByAppendingPathComponent:@"SmokeApp"];
     int port = [self randomPort];
+    // ARLEN-BUG-019: packaged smoke validation must resolve the manifest's
+    // release-relative operability helper against the selected release root,
+    // not against the caller's current working directory.
     NSString *smokeOutput = [self runShellCapture:[NSString stringWithFormat:
-                                                       @"%s/tools/deploy/smoke_release.sh "
+                                                       @"cd %s && %s/tools/deploy/smoke_release.sh "
                                                         "--app-root %s "
                                                         "--framework-root %s "
                                                         "--work-dir %s "
                                                         "--port %d "
                                                         "--release-a smoke-1 "
                                                         "--release-b smoke-2",
-                                                       [repoRoot UTF8String], [appRoot UTF8String],
+                                                       [appParent UTF8String], [repoRoot UTF8String], [appRoot UTF8String],
                                                        [repoRoot UTF8String], [workRoot UTF8String], port]
                                          exitCode:&code];
     XCTAssertEqual(0, code, @"%@", smokeOutput);
     XCTAssertTrue([smokeOutput containsString:@"release smoke passed"]);
   } @finally {
     [[NSFileManager defaultManager] removeItemAtPath:appParent error:nil];
+    [[NSFileManager defaultManager] removeItemAtPath:workRoot error:nil];
+  }
+}
+
+- (void)testWriteReleaseEnvPreservesPhase32DatabaseContractThroughActivateAndRollback_ARLEN_BUG_020 {
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *appRoot = [self createTempDirectoryWithPrefix:@"arlen-bug-020-app"];
+  NSString *workRoot = [self createTempDirectoryWithPrefix:@"arlen-bug-020-work"];
+  XCTAssertNotNil(appRoot);
+  XCTAssertNotNil(workRoot);
+  if (appRoot == nil || workRoot == nil) {
+    return;
+  }
+
+  @try {
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"config/app.plist"]
+                          content:@"{\n"
+                                  "  host = \"127.0.0.1\";\n"
+                                  "  port = 3000;\n"
+                                  "  database = {\n"
+                                  "    connectionString = \"postgresql://db.example.test/bug020\";\n"
+                                  "    adapter = \"postgresql\";\n"
+                                  "  };\n"
+                                  "}\n"]);
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"config/environments/production.plist"]
+                          content:@"{\n  logFormat = \"json\";\n}\n"]);
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"app_lite.m"]
+                          content:@"#import <Foundation/Foundation.h>\n"
+                                  "int main(int argc, const char *argv[]) { (void)argc; (void)argv; return 0; }\n"]);
+
+    int code = 0;
+    NSString *buildOutput = [self runMakeAtRepoRoot:repoRoot target:@"arlen" exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", buildOutput);
+
+    NSString *releasesDir = [workRoot stringByAppendingPathComponent:@"releases"];
+    NSString *pushOne = [self runShellCapture:[NSString stringWithFormat:
+                                                  @"cd %@ && ARLEN_FRAMEWORK_ROOT=%@ %@/build/arlen "
+                                                   "deploy push --app-root %@ --releases-dir %@ --release-id db-rel-a "
+                                                   "--database-mode external --database-adapter postgresql --database-target primary "
+                                                   "--require-env-key ARLEN_DATABASE_URL --allow-missing-certification --json",
+                                                  appRoot, repoRoot, repoRoot, appRoot, releasesDir]
+                                    exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", pushOne);
+    NSString *pushTwo = [self runShellCapture:[NSString stringWithFormat:
+                                                  @"cd %@ && ARLEN_FRAMEWORK_ROOT=%@ %@/build/arlen "
+                                                   "deploy push --app-root %@ --releases-dir %@ --release-id db-rel-b "
+                                                   "--database-mode external --database-adapter postgresql --database-target primary "
+                                                   "--require-env-key ARLEN_DATABASE_URL --allow-missing-certification --json",
+                                                  appRoot, repoRoot, repoRoot, appRoot, releasesDir]
+                                    exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", pushTwo);
+
+    NSString *releaseOne = [self runShellCapture:[NSString stringWithFormat:
+                                                      @"cd %@ && ARLEN_FRAMEWORK_ROOT=%@ %@/build/arlen "
+                                                       "deploy release --app-root %@ --releases-dir %@ --release-id db-rel-a "
+                                                       "--allow-missing-certification --skip-migrate --json",
+                                                      appRoot, repoRoot, repoRoot, appRoot, releasesDir]
+                                        exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", releaseOne);
+
+    NSString *releaseEnvA = [releasesDir stringByAppendingPathComponent:@"db-rel-a/metadata/release.env"];
+    NSString *envA = [NSString stringWithContentsOfFile:releaseEnvA encoding:NSUTF8StringEncoding error:nil] ?: @"";
+    XCTAssertTrue([envA containsString:@"ARLEN_DEPLOY_DATABASE_MODE=external"], @"%@", envA);
+    XCTAssertTrue([envA containsString:@"ARLEN_DEPLOY_DATABASE_ADAPTER=postgresql"], @"%@", envA);
+    XCTAssertTrue([envA containsString:@"ARLEN_DEPLOY_DATABASE_TARGET=primary"], @"%@", envA);
+
+    NSString *releaseTwo = [self runShellCapture:[NSString stringWithFormat:
+                                                      @"cd %@ && ARLEN_FRAMEWORK_ROOT=%@ %@/build/arlen "
+                                                       "deploy release --app-root %@ --releases-dir %@ --release-id db-rel-b "
+                                                       "--allow-missing-certification --skip-migrate --json",
+                                                      appRoot, repoRoot, repoRoot, appRoot, releasesDir]
+                                        exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", releaseTwo);
+
+    NSString *rollbackOutput = [self runShellCapture:[NSString stringWithFormat:
+                                                          @"cd %@ && ARLEN_FRAMEWORK_ROOT=%@ %@/build/arlen "
+                                                           "deploy rollback --app-root %@ --releases-dir %@ --runtime-action none --json",
+                                                          appRoot, repoRoot, repoRoot, appRoot, releasesDir]
+                                            exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", rollbackOutput);
+
+    NSString *envAAfterRollback =
+        [NSString stringWithContentsOfFile:releaseEnvA encoding:NSUTF8StringEncoding error:nil] ?: @"";
+    XCTAssertTrue([envAAfterRollback containsString:@"ARLEN_DEPLOY_DATABASE_MODE=external"], @"%@", envAAfterRollback);
+    XCTAssertTrue([envAAfterRollback containsString:@"ARLEN_DEPLOY_DATABASE_ADAPTER=postgresql"], @"%@", envAAfterRollback);
+    XCTAssertTrue([envAAfterRollback containsString:@"ARLEN_DEPLOY_DATABASE_TARGET=primary"], @"%@", envAAfterRollback);
+  } @finally {
+    [[NSFileManager defaultManager] removeItemAtPath:appRoot error:nil];
     [[NSFileManager defaultManager] removeItemAtPath:workRoot error:nil];
   }
 }

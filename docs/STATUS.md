@@ -4,6 +4,18 @@ Last updated: 2026-04-14
 
 ## Leaving Off (2026-04-14)
 
+- Fixed two new deployment regressions reported downstream from `OwnerConnect`:
+  - `ARLEN-BUG-019`: `tools/deploy/smoke_release.sh` now resolves the packaged
+    `operability_probe_helper` path relative to the selected release root
+    instead of executing a release-relative manifest string against the
+    caller's cwd
+  - `ARLEN-BUG-020`: `tools/deploy/write_release_env.py` now preserves the
+    Phase 32 database contract fields during activation/rollback so
+    `metadata/release.env` remains a complete activation-time summary of the
+    packaged deploy contract
+  - added focused deployment regressions in
+    `tests/integration/DeploymentIntegrationTests.m` for non-release-cwd smoke
+    validation and database-contract preservation through activation/rollback
 - Completed the Phase 32 follow-up deployment-contract work (`32M-32Q`):
   - packaged release manifests now record explicit `database` and
     `configuration` contracts via `--database-mode`, `--database-adapter`,

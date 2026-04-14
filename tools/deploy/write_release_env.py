@@ -36,6 +36,7 @@ def main() -> int:
 
     paths = manifest.get("paths") or {}
     deployment = manifest.get("deployment") or {}
+    database = manifest.get("database") or {}
     handoff = manifest.get("propane_handoff") or {}
     certification = manifest.get("certification") or {}
     json_performance = manifest.get("json_performance") or {}
@@ -75,6 +76,9 @@ def main() -> int:
         "ARLEN_DEPLOY_COMPATIBILITY_REASON": deployment.get("compatibility_reason") or "same_profile",
         "ARLEN_DEPLOY_ALLOW_REMOTE_REBUILD": "1" if deployment.get("allow_remote_rebuild") else "0",
         "ARLEN_DEPLOY_REMOTE_REBUILD_REQUIRED": "1" if deployment.get("remote_rebuild_required") else "0",
+        "ARLEN_DEPLOY_DATABASE_MODE": database.get("mode") or "",
+        "ARLEN_DEPLOY_DATABASE_ADAPTER": database.get("adapter") or "",
+        "ARLEN_DEPLOY_DATABASE_TARGET": database.get("target") or "default",
         "ARLEN_DEPLOY_PROPANE_MANAGER_BINARY": resolve_release_path(
             release_dir, handoff.get("manager_binary") or paths.get("propane"), "framework/bin/propane"
         ),

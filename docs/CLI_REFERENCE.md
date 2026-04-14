@@ -123,7 +123,8 @@ First-class release orchestration over the existing `tools/deploy/*` scripts.
 - can reload or restart a systemd unit through `--service <unit>` and
   `--runtime-action <reload|restart|none>` after activation
 - rewrites `metadata/release.env` against the activated release root so
-  packaged `propane` handoff metadata is target-absolute after ship/move
+  packaged `propane` handoff metadata is target-absolute after ship/move while
+  preserving the Phase 32 database contract fields
 - optionally probes `<base-url>/healthz` when `--base-url` is supplied
 - fails closed when the packaged manifest records an unsupported target profile
 - requires `--remote-build-check-command` to succeed when the packaged manifest records an experimental remote rebuild target
@@ -167,6 +168,8 @@ First-class release orchestration over the existing `tools/deploy/*` scripts.
   instead of trusting source-host absolute paths (`ARLEN-BUG-017`)
 - packaged binary checks resolve `.exe` siblings when the manifest records
   Windows-style compiled output base names
+- `tools/deploy/smoke_release.sh` also resolves the packaged operability helper
+  against the selected release root instead of the caller's cwd (`ARLEN-BUG-019`)
 
 `arlen deploy logs`
 

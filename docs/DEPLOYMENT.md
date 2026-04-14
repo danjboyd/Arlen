@@ -294,7 +294,10 @@ reload/restart a systemd unit after activation, and can probe `/healthz` when
 `--base-url` is supplied. Packaged framework payloads now also
 include the packaged deploy helper set under `framework/tools/deploy/`, so
 `arlen deploy doctor --base-url ...` works from an activated packaged release
-without needing a source checkout beside it.
+without needing a source checkout beside it. `tools/deploy/smoke_release.sh`
+also resolves that packaged operability helper against the selected release
+root now, so the smoke runbook stays valid even when invoked from some other
+working directory (`ARLEN-BUG-019`).
 
 Target-aware deploy options:
 
@@ -347,6 +350,8 @@ missing from Phase 29:
 - rollback-candidate deployment metadata in `deploy status`
 - rollback-source deployment metadata in `deploy rollback`
 - packaged `propane_handoff` manifest and `release.env` contract
+- activation/rollback preservation of the Phase 32 database contract in
+  `release.env` (`ARLEN-BUG-020`)
 - explicit database/configuration manifest contracts
 - doctor validation for declared required env keys with secret-redacted output
 - runtime-root conflict detection for live services
@@ -438,6 +443,8 @@ Activation also rewrites `metadata/release.env` so:
   root
 - `deploy status`, `deploy doctor`, and `propane` handoff metadata stay honest
   after the release moves to a different machine/path
+- the packaged Phase 32 deploy contract, including database metadata, remains
+  present after activation/rollback (`ARLEN-BUG-020`)
 
 ### 6.3 Run migration step (explicit)
 
