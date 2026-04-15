@@ -349,12 +349,7 @@
   NSString *outputDir = [tempDir stringByAppendingPathComponent:@"frontend/generated/arlen"];
   NSString *manifestPath = [tempDir stringByAppendingPathComponent:@"db/schema/arlen_typescript.json"];
 
-  NSString *arlenCLIPath =
-#if defined(__APPLE__)
-      ALNTestPathFromRepoRoot(@"bin/arlen");
-#else
-      ALNTestPathFromRepoRoot(@"build/arlen");
-#endif
+  NSString *arlenCLIPath = ALNTestPathFromRepoRoot(@"bin/arlen");
 
   NSString *command =
       [NSString stringWithFormat:@"%@ && %@ typescript-codegen --orm-input %@ --openapi-input %@ --output-dir %@ --manifest %@ --package-name %@ --prefix ALNORMX --target all --force",

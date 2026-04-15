@@ -62,7 +62,7 @@
         {
           "kind": "integration",
           "file": "tests/integration/DeploymentIntegrationTests.m",
-          "test": "testReleaseSmokeScriptValidatesDeployRunbook"
+          "test": "testReleaseSmokeScriptValidatesDeployRunbook_ARLEN_BUG_019"
         }
       ]
     }
