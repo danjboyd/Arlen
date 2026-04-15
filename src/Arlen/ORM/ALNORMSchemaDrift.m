@@ -1,6 +1,7 @@
 #import "ALNORMSchemaDrift.h"
 
 #import "ALNORMErrors.h"
+#import "../Support/ALNJSONSerialization.h"
 
 static NSDictionary<NSString *, NSDictionary<NSString *, id> *> *ALNORMSchemaDriftIndexDescriptors(
     NSArray<ALNORMModelDescriptor *> *descriptors) {
@@ -17,7 +18,7 @@ static NSString *ALNORMSchemaDriftJSONString(id value) {
 #ifdef NSJSONWritingSortedKeys
   options |= NSJSONWritingSortedKeys;
 #endif
-  NSData *data = [NSJSONSerialization dataWithJSONObject:value ?: @{} options:options error:&error];
+  NSData *data = [ALNJSONSerialization dataWithJSONObject:value ?: @{} options:options error:&error];
   if (data == nil || error != nil) {
     return @"";
   }

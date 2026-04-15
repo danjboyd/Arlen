@@ -1,5 +1,6 @@
 #import "ALNLive.h"
 
+#import "ALNJSONSerialization.h"
 #import "ALNRequest.h"
 #import "ALNResponse.h"
 
@@ -126,10 +127,10 @@ static BOOL ALNLivePayloadValueIsJSONSafe(id value) {
 }
 
 static NSUInteger ALNLiveJSONSizeForValue(id value) {
-  if (value == nil || ![NSJSONSerialization isValidJSONObject:value]) {
+  if (value == nil || ![ALNJSONSerialization isValidJSONObject:value]) {
     return 0;
   }
-  NSData *data = [NSJSONSerialization dataWithJSONObject:value options:0 error:nil];
+  NSData *data = [ALNJSONSerialization dataWithJSONObject:value options:0 error:nil];
   return [data length];
 }
 

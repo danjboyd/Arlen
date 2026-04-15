@@ -46,6 +46,7 @@ typedef SSIZE_T ssize_t;
 #import "ALNRequest.h"
 #import "ALNResponse.h"
 #import "ALNRealtime.h"
+#import "Support/ALNJSONSerialization.h"
 
 typedef struct {
   NSUInteger maxRequestLineBytes;
@@ -2772,9 +2773,9 @@ static NSDictionary *ALNEventStreamResyncRequiredPayload(NSString *streamID,
 }
 
 static NSString *ALNJSONStringForEventEnvelope(ALNEventEnvelope *event) {
-  NSData *data = [NSJSONSerialization dataWithJSONObject:[event dictionaryRepresentation]
-                                                 options:0
-                                                   error:NULL];
+  NSData *data = [ALNJSONSerialization dataWithJSONObject:[event dictionaryRepresentation]
+                                                  options:0
+                                                    error:NULL];
   return [[NSString alloc] initWithData:(data ?: [NSData data]) encoding:NSUTF8StringEncoding] ?: @"{}";
 }
 
@@ -3329,14 +3330,14 @@ static BOOL ALNSendSSEHeaders(ALNSocketHandle clientFd, ALNResponse *response) {
   ALNResponse *resyncResponse = [[ALNResponse alloc] init];
   resyncResponse.statusCode = 409;
   NSData *bodyData =
-      [NSJSONSerialization dataWithJSONObject:ALNEventStreamResyncRequiredPayload(
-                                             result.streamID,
-                                             result.requestedAfterSequence,
-                                             result.latestCursor.sequence,
-                                             result.replayLimit,
-                                             result.replayWindow)
-                                      options:0
-                                        error:NULL];
+      [ALNJSONSerialization dataWithJSONObject:ALNEventStreamResyncRequiredPayload(
+                                              result.streamID,
+                                              result.requestedAfterSequence,
+                                              result.latestCursor.sequence,
+                                              result.replayLimit,
+                                              result.replayWindow)
+                                       options:0
+                                         error:NULL];
   [resyncResponse setDataBody:(bodyData ?: [NSData data])
                   contentType:@"application/json; charset=utf-8"];
   NSString *requestID = [response headerForName:@"X-Request-Id"];

@@ -3,6 +3,7 @@
 #import <dispatch/dispatch.h>
 
 #import "../Data/ALNDatabaseAdapter.h"
+#import "../Support/ALNJSONSerialization.h"
 #import "ALNORMErrors.h"
 
 static NSDateFormatter *ALNORMISO8601DateFormatter(void) {
@@ -154,7 +155,7 @@ static id ALNORMValueConverterFail(NSString *message,
                return ALNORMValueConverterFail(@"JSON string could not be encoded as UTF-8", value, error);
              }
              NSError *jsonError = nil;
-             id object = [NSJSONSerialization JSONObjectWithData:data options:0 error:&jsonError];
+             id object = [ALNJSONSerialization JSONObjectWithData:data options:0 error:&jsonError];
              if (object != nil) {
                return object;
              }
