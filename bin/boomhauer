@@ -935,6 +935,9 @@ ensure_error_server_built() {
 
 stop_child() {
   if [[ -n "$child_pid" ]] && kill -0 "$child_pid" 2>/dev/null; then
+    if kill -0 "-$child_pid" 2>/dev/null; then
+      kill -TERM "-$child_pid" 2>/dev/null || true
+    fi
     kill -TERM "$child_pid" 2>/dev/null || true
     wait "$child_pid" 2>/dev/null || true
   fi
@@ -952,7 +955,11 @@ trap on_signal INT TERM
 start_app_child() {
   export ARLEN_APP_ROOT="$app_root"
   next_build_retry_at=0
-  run_with_server_args "$app_binary" &
+  if command -v setsid >/dev/null 2>&1; then
+    setsid bash -lc 'exec "$@"' _ "$app_binary" "${server_args[@]}" &
+  else
+    run_with_server_args "$app_binary" &
+  fi
   child_pid="$!"
   child_mode="app"
 }
@@ -972,7 +979,11 @@ start_error_child() {
   else
     next_build_retry_at=0
   fi
-  run_with_server_args "$framework_root/build/boomhauer" &
+  if command -v setsid >/dev/null 2>&1; then
+    setsid bash -lc 'exec "$@"' _ "$framework_root/build/boomhauer" "${server_args[@]}" &
+  else
+    run_with_server_args "$framework_root/build/boomhauer" &
+  fi
   child_pid="$!"
   child_mode="build_error"
 }

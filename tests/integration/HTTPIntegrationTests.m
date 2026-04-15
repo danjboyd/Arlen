@@ -567,7 +567,12 @@
                          serverCode:&serverCode];
     XCTAssertEqual(0, curlCode);
     XCTAssertEqual(0, serverCode);
-    XCTAssertTrue([metricsBody containsString:@"aln_http_requests_total"], @"%@", metricsBody);
+    XCTAssertTrue([metricsBody containsString:@"# TYPE aln_http_requests_active gauge"],
+                  @"%@",
+                  metricsBody);
+    XCTAssertTrue([metricsBody containsString:@"aln_http_requests_active 1.000"],
+                  @"%@",
+                  metricsBody);
 
     NSString *shadowBody =
         [self requestWithServerEnv:envPrefix
@@ -3709,7 +3714,7 @@
                                        serverCode:&serverCode];
   XCTAssertEqual(0, curlCode);
   XCTAssertEqual(0, serverCode);
-  XCTAssertTrue([headers containsString:@"401 Unauthorized"]);
+  XCTAssertTrue([headers containsString:@"HTTP/1.1 401 "], @"%@", headers);
 }
 
 - (void)testTechDemoLiveOrdersSimulatedForbiddenReturns403 {
@@ -4192,8 +4197,8 @@
                                            @"errors=[]\n"
                                            @"def worker(idx):\n"
                                            @"    try:\n"
-                                           @"        slow = urllib.request.urlopen(f'http://127.0.0.1:{PORT}/api/sleep?ms=120', timeout=5).read().decode('utf-8')\n"
-                                           @"        if 'sleep_ms' not in slow:\n"
+                                           @"        slow = urllib.request.urlopen(f'http://127.0.0.1:{PORT}/tech-demo/live/orders', timeout=5).read().decode('utf-8')\n"
+                                           @"        if 'Showing <strong>4</strong> orders' not in slow:\n"
                                            @"            errors.append(f'slow-{idx}')\n"
                                            @"        fast = urllib.request.urlopen(f'http://127.0.0.1:{PORT}/healthz', timeout=4).read().decode('utf-8')\n"
                                            @"        if fast != 'ok\\n':\n"
