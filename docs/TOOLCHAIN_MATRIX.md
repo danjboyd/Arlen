@@ -1,6 +1,6 @@
 # Arlen Toolchain Matrix
 
-Last updated: 2026-04-08
+Last updated: 2026-04-15
 
 This document records known-good local toolchain baselines for Arlen onboarding and CI parity.
 
@@ -103,6 +103,33 @@ Arlen CI now has two platform contracts:
 The workflow bootstrap entry point is:
 
 - `tools/ci/install_ci_dependencies.sh`
+
+Current GitHub Actions workflow surface:
+
+- `linux-quality`
+  - authoritative Linux/GNUstep merge gate
+- `linux-sanitizers`
+  - authoritative Linux/GNUstep sanitizer merge gate
+- `docs-quality`
+  - required docs/API-reference/browser-doc merge gate
+- `apple-baseline`
+  - non-required Apple baseline-confidence lane
+- `windows-preview`
+  - non-required Windows preview-confidence lane
+- `release-certification`
+  - release-only Phase 9J certification lane
+
+Current documented required checks for `main`:
+
+- `linux-quality / quality-gate`
+- `linux-sanitizers / sanitizer-gate`
+- `docs-quality / docs-gate`
+
+Current documented non-required checks:
+
+- `apple-baseline / apple-baseline`
+- `windows-preview / windows-preview`
+- `release-certification / release-certification`
 
 Windows preview helpers:
 

@@ -1,4 +1,4 @@
-name: phase31-windows-preview
+name: windows-preview
 
 on:
   push:
@@ -8,9 +8,14 @@ on:
   pull_request:
   workflow_dispatch:
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   windows-preview:
     runs-on: [self-hosted, Windows, X64, arlen, msys2-clang64]
+    timeout-minutes: 90
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -26,11 +31,12 @@ jobs:
           powershell -ExecutionPolicy Bypass -File scripts\run_clang64.ps1 -InnerCommand "make phase31-confidence"
 
       - name: Upload Windows preview artifacts
-        if: github.event_name == 'workflow_dispatch'
+        if: github.event_name == 'workflow_dispatch' || failure()
         uses: actions/upload-artifact@v4
         with:
-          name: phase31-windows-preview-${{ github.run_id }}
+          name: windows-preview-artifacts-${{ github.run_id }}
           path: |
             build/phase24
             build/release_confidence/phase31
             build/tests
+          if-no-files-found: warn

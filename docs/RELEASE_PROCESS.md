@@ -99,5 +99,24 @@ CI uploads `build/perf/` and profile baselines as release-quality artifacts.
 GitHub branch protection is configured in repository settings, not in-tree.
 For `main`, require these status checks before merge:
 
-- `phase5e-quality / quality-gate`
-- `phase5e-sanitizers / sanitizer-gate`
+- `linux-quality / quality-gate`
+- `linux-sanitizers / sanitizer-gate`
+- `docs-quality / docs-gate`
+
+Keep these visible but non-required unless the support statement changes:
+
+- `apple-baseline / apple-baseline`
+- `windows-preview / windows-preview`
+- `release-certification / release-certification`
+
+## 6. Release Workflow
+
+Release certification is intentionally isolated from the merge gate.
+
+GitHub Actions release entrypoint:
+
+- `release-certification / release-certification`
+
+That workflow is triggered on published releases and can also be run manually
+with `workflow_dispatch` when release evidence needs to be regenerated without
+changing the merge-gate workflow contract.

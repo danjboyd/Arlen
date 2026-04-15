@@ -6,9 +6,14 @@ on:
   pull_request:
   workflow_dispatch:
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   docs-gate:
     runs-on: [self-hosted, Linux, X64, arlen, iep-apt]
+    timeout-minutes: 45
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -26,9 +31,10 @@ jobs:
           bash ./tools/ci/run_docs_quality.sh
 
       - name: Upload docs artifacts
-        if: github.event_name == 'workflow_dispatch'
+        if: github.event_name == 'workflow_dispatch' || failure()
         uses: actions/upload-artifact@v4
         with:
           name: docs-artifacts-${{ github.run_id }}
           path: |
             build/docs
+          if-no-files-found: warn

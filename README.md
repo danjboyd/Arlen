@@ -218,6 +218,14 @@ Run bootstrap diagnostics before building:
 CI note:
 - Arlen CI expects a clang-built GNUstep toolchain, not a generic GCC-oriented distro stack.
 - The workflow bootstrap entry point is `tools/ci/install_ci_dependencies.sh`.
+- The current documented required checks for `main` are:
+  - `linux-quality / quality-gate`
+  - `linux-sanitizers / sanitizer-gate`
+  - `docs-quality / docs-gate`
+- Apple and Windows CI lanes are intentionally visible but non-required while
+  Linux/GNUstep remains the authoritative production baseline.
+- Release certification is intentionally isolated in
+  `release-certification / release-certification` instead of the merge gate.
 - Current self-hosted runners use `ARLEN_CI_GNUSTEP_STRATEGY=preinstalled` with the clang-built GNUstep toolchain installed at `/usr/GNUstep`.
 - Local contributor shells can use `tools/source_gnustep_env.sh`, which also
   supports managed toolchains that export `GNUSTEP_SH` or `GNUSTEP_MAKEFILES`.

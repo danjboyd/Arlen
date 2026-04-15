@@ -2,12 +2,17 @@
 - Describe the change and the user-visible behavior.
 
 ## Validation
+- [ ] `make ci-quality`
+- [ ] `make ci-sanitizers`
 - [ ] `make test-unit`
 - [ ] `make test-integration`
 - [ ] `make test-data-layer` (or not applicable)
 - [ ] `make ci-docs` (for docs/public header/API reference changes)
 - [ ] `bash ./tools/ci/run_runtime_concurrency_gate.sh` (for HTTP/runtime/realtime changes)
-- [ ] `make ci-sanitizers` (ASAN/UBSAN required for runtime changes)
+
+## CI Contract
+- [ ] This change updates workflow files/docs together if the CI contract moved.
+- [ ] No stale workflow name, required-check, or branch-protection reference was left behind.
 
 ## Concurrency Impact
 - [ ] This change touches request/session lifecycle, shared mutable state, or worker/realtime paths.

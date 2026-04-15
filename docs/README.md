@@ -82,6 +82,8 @@ toolchain env directly for the Linux/GNUstep path. On macOS, use
 ## Contributor and Historical Docs
 
 - [Current Status](STATUS.md): latest checkpoint and verified milestone state.
+- [CI Alignment](CI_ALIGNMENT.md): required CI shape, merge-gate guidance, and the rule that CI must stay current and green.
+- [Phase 34 Roadmap](PHASE34_ROADMAP.md): CI-robustness phase covering workflow honesty, merge-gate cleanup, docs-gate promotion, and remaining branch-protection/release-lane cleanup.
 - [Phase 33 Roadmap](PHASE33_ROADMAP.md): completed durable event-stream seam phase; `33A-33L` delivered the store/broker/auth seam, replay-window and `resync_required` contract, websocket/SSE/HTTP integration, plain generated TypeScript consumer surface, confidence lane, and docs/module-boundary closeout.
 - [Phase 32 Roadmap](PHASE32_ROADMAP.md): completed target-aware deployment phase plus host-bootstrap closeout; `32A-32V` now cover the shipped deploy contract, named targets, `deploy init`, SSH transport/activation, fresh GNUstep host readiness, and Debian-first generated host artifacts/docs.
 - [Phase 30 Roadmap](PHASE30_ROADMAP.md): Apple-runtime roadmap on macOS; `30A-30S` are now delivered, including the compatibility-shim cleanup for warning-free Apple/GNUstep builds.

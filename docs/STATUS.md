@@ -4,6 +4,34 @@ Last updated: 2026-04-15
 
 ## Leaving Off (2026-04-15)
 
+- Continued Phase 34 and delivered `34A-34G`:
+  - audited the active CI contract and documented it in
+    `docs/CI_ALIGNMENT.md`
+  - removed the redundant legacy `phase3c-quality` workflow
+  - renamed the active GitHub Actions workflows to purpose-based names:
+    - `linux-quality`
+    - `linux-sanitizers`
+    - `apple-baseline`
+    - `windows-preview`
+  - promoted `docs-quality` into the documented required merge-check set
+  - added workflow-level concurrency cancellation, explicit timeouts, and
+    failure-artifact uploads to the active workflows
+  - isolated release certification into the dedicated
+    `.github/workflows/release-certification.yml` workflow instead of running
+    it from the Linux merge gate
+  - updated `AGENTS.md`, `README.md`, `docs/README.md`,
+    `docs/TOOLCHAIN_MATRIX.md`, `docs/RELEASE_PROCESS.md`, and
+    `.github/PULL_REQUEST_TEMPLATE.md` so contributor guidance matches the new
+    CI contract
+- Phase 34 status:
+  - `34A-34G` are delivered
+  - `34H-34J` remain open for branch-protection/repo-settings closeout,
+    contributor-workflow polish, and end-to-end verification on GitHub
+  - documented required checks are now:
+    - `linux-quality / quality-gate`
+    - `linux-sanitizers / sanitizer-gate`
+    - `docs-quality / docs-gate`
+
 - Completed Phase 33 and delivered `33A-33L`:
   - added the new support surface under `src/Arlen/Support/ALNEventStream.{h,m}`
     for:

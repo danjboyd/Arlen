@@ -1,0 +1,43 @@
+name: release-certification
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.release.tag_name || github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release-certification:
+    runs-on: [self-hosted, Linux, X64, arlen, iep-apt]
+    timeout-minutes: 150
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        env:
+          ARLEN_CI_GNUSTEP_STRATEGY: preinstalled
+        run: |
+          bash ./tools/ci/install_ci_dependencies.sh
+
+      - name: Run Phase 9J release certification pack
+        env:
+          GNUSTEP_USER_ROOT: ${{ github.workspace }}/.gnustep
+          ARLEN_PHASE9J_RELEASE_ID: ${{ github.event.release.tag_name || github.run_id }}
+        run: |
+          bash ./tools/ci/run_phase9j_release_certification.sh
+
+      - name: Upload release certification artifacts
+        if: github.event_name == 'workflow_dispatch' || failure() || success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-certification-artifacts-${{ github.run_id }}
+          path: |
+            build/perf
+            build/release_confidence
+            tests/performance/baselines
+            tests/performance/policies
+          if-no-files-found: warn

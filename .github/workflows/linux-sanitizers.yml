@@ -1,4 +1,4 @@
-name: phase5e-sanitizers
+name: linux-sanitizers
 
 on:
   push:
@@ -8,9 +8,14 @@ on:
     - cron: "15 4 * * *"
   workflow_dispatch:
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   sanitizer-gate:
     runs-on: [self-hosted, Linux, X64, arlen, iep-apt]
+    timeout-minutes: 120
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -30,10 +35,10 @@ jobs:
           bash ./tools/ci/run_phase10m_sanitizer_matrix.sh
 
       - name: Upload sanitizer confidence artifacts
-        if: github.event_name == 'workflow_dispatch'
+        if: github.event_name == 'workflow_dispatch' || failure()
         uses: actions/upload-artifact@v4
         with:
-          name: phase10m-sanitizer-confidence
+          name: linux-sanitizers-artifacts-${{ github.run_id }}
           path: |
             build/release_confidence/phase10m/sanitizers/**
             build/release_confidence/phase10m/backend_parity/**
@@ -49,6 +54,7 @@ jobs:
   thread-race-nightly:
     runs-on: [self-hosted, Linux, X64, arlen, iep-apt]
     continue-on-error: true
+    timeout-minutes: 120
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     steps:
       - name: Checkout
@@ -67,9 +73,9 @@ jobs:
           bash ./tools/ci/run_phase10m_thread_race_nightly.sh
 
       - name: Upload thread-race nightly artifacts
-        if: github.event_name == 'workflow_dispatch'
+        if: github.event_name == 'workflow_dispatch' || failure()
         uses: actions/upload-artifact@v4
         with:
-          name: phase10m-thread-race-nightly
+          name: linux-thread-race-nightly-${{ github.run_id }}
           path: build/sanitizers/phase10m_thread_race/**
           if-no-files-found: warn

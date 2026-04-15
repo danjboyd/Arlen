@@ -19,6 +19,11 @@ This repository is in early scaffold stage. Priority is delivering a stable v1 t
 - Read `V1_SPEC.md` before changing template syntax or compiler behavior.
 - Keep changes incremental and verifiable.
 - Prefer deterministic behavior over convenience shortcuts.
+- Treat keeping GitHub CI current, representative of shipped behavior, and green
+  as a core project goal.
+- When build/test/docs/release workflows change, update the in-repo CI
+  definitions and contributor docs in the same change so required checks do not
+  drift from the current project contract.
 - Preserve compatibility with GNUstep build tooling.
 - Preserve the clang-based GNUstep requirement; do not relax CI or docs toward generic GCC-oriented GNUstep stacks.
 - Repo-local shell bootstrap should prefer `tools/source_gnustep_env.sh`, which
@@ -60,6 +65,9 @@ This repository is in early scaffold stage. Priority is delivering a stable v1 t
 - New parser behaviors must include unit tests.
 - New template syntax support must include fixtures in `tests/fixtures/templates/`.
 - Bug fixes should include regression tests whenever practical.
+- Changes that add, remove, rename, or materially repurpose CI lanes must also
+  update the workflow files, branch-protection guidance, and the CI alignment
+  notes in `docs/CI_ALIGNMENT.md`.
 - Standardize on XCTest via the Debian `tools-xctest` package (runner command: `xctest`).
 - Before running tests, initialize GNUstep tooling in the shell with `source /path/to/Arlen/tools/source_gnustep_env.sh` or source the active GNUstep toolchain env directly.
 - Keep test code XCTest-compatible to preserve a future path to Apple XCTest/macOS targets.
