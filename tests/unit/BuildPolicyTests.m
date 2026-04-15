@@ -1154,9 +1154,8 @@
 - (void)testGitHubWorkflowsUseCentralCIToolchainInstaller {
   NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
   NSArray<NSString *> *workflowPaths = @[
-    @".github/workflows/phase3c-quality.yml",
-    @".github/workflows/phase4-quality.yml",
-    @".github/workflows/phase4-sanitizers.yml",
+    @".github/workflows/linux-quality.yml",
+    @".github/workflows/linux-sanitizers.yml",
     @".github/workflows/docs-quality.yml",
   ];
 
@@ -1194,8 +1193,7 @@
 - (void)testPerfGitHubWorkflowsPinSelfHostedBaselineRoot {
   NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
   NSArray<NSString *> *workflowPaths = @[
-    @".github/workflows/phase3c-quality.yml",
-    @".github/workflows/phase4-quality.yml",
+    @".github/workflows/linux-quality.yml",
   ];
 
   for (NSString *relativePath in workflowPaths) {
@@ -1208,7 +1206,7 @@
 - (void)testSanitizerWorkflowRaisesSelfHostedSoakRetryBudget {
   NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
   NSString *workflow = [self
-      readFile:[repoRoot stringByAppendingPathComponent:@".github/workflows/phase4-sanitizers.yml"]];
+      readFile:[repoRoot stringByAppendingPathComponent:@".github/workflows/linux-sanitizers.yml"]];
 
   XCTAssertTrue([workflow containsString:@"Run Phase 10M sanitizer matrix gate"]);
   XCTAssertTrue([workflow containsString:@"ARLEN_PERF_RETRY_COUNT: \"3\""]);
