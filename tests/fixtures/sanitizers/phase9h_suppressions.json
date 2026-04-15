@@ -1,6 +1,6 @@
 {
   "version": "phase9h-suppression-registry-v1",
-  "lastUpdated": "2026-03-24",
+  "lastUpdated": "2026-04-15",
   "suppressions": [
     {
       "id": "phase9h-tsan-gnustep-libobjc-deadlock",
@@ -9,7 +9,7 @@
       "owner": "runtime-core",
       "reason": "Suppress GNUstep libobjc startup lock-order-inversion reports under TSAN while runtime/toolchain behavior is investigated.",
       "introducedOn": "2026-03-24",
-      "expiresOn": "2026-03-31"
+      "expiresOn": "2026-06-30"
     },
     {
       "id": "phase9h-tsan-gnustep-base-deadlock",
@@ -18,7 +18,7 @@
       "owner": "runtime-core",
       "reason": "Suppress GNUstep base/XCTest lock-order-inversion reports under TSAN while runtime/toolchain behavior is investigated.",
       "introducedOn": "2026-03-24",
-      "expiresOn": "2026-03-31"
+      "expiresOn": "2026-06-30"
     },
     {
       "id": "phase9h-tsan-gnustep-libobjc-monitor-race",
@@ -27,7 +27,7 @@
       "owner": "runtime-core",
       "reason": "Suppress GNUstep libobjc monitor bookkeeping race reports under TSAN while runtime/toolchain behavior is investigated.",
       "introducedOn": "2026-03-24",
-      "expiresOn": "2026-03-31"
+      "expiresOn": "2026-06-30"
     },
     {
       "id": "phase9h-tsan-gnustep-base-monitor-race",
@@ -36,7 +36,7 @@
       "owner": "runtime-core",
       "reason": "Suppress GNUstep base/XCTest monitor teardown race reports under TSAN while runtime/toolchain behavior is investigated.",
       "introducedOn": "2026-03-24",
-      "expiresOn": "2026-03-31"
+      "expiresOn": "2026-06-30"
     }
   ]
 }

@@ -1,6 +1,6 @@
 {
   "version": "phase9j-known-risk-register-v1",
-  "lastUpdated": "2026-03-24",
+  "lastUpdated": "2026-04-15",
   "risks": [
     {
       "id": "phase9j-risk-tsan-nonblocking",
@@ -8,8 +8,8 @@
       "status": "active",
       "severity": "medium",
       "owner": "runtime-core",
-      "targetDate": "2026-03-31",
-      "notes": "A fresh local tsan_experimental run now passes after unsanitized eocc bootstrap, GNUstep suppression wiring, and TSAN-only quarantine of nested CLI/script assertion tests, but the 2026-03-23 and 2026-03-24 nightlies still reproduced the GNUstep libobjc lock-order-inversion signature and standalone instrumented arlen still emits the same runtime/toolchain noise; keep tsan_experimental non-blocking until that stack is resolved and two consecutive deterministic pass cycles are observed."
+      "targetDate": "2026-06-30",
+      "notes": "A fresh local tsan_experimental run now passes after unsanitized eocc bootstrap, GNUstep suppression wiring, and TSAN-only quarantine of nested CLI/script assertion tests, but the GNUstep libobjc/base lock-order-inversion and monitor-race signatures remain unresolved in CI governance as of 2026-04-15; keep tsan_experimental non-blocking until that stack is resolved and two consecutive deterministic pass cycles are observed."
     },
     {
       "id": "phase9j-risk-benchmark-ladder",
