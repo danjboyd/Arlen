@@ -2,6 +2,7 @@
 #define ALN_CONTROLLER_H
 
 #import <Foundation/Foundation.h>
+#import "ALNEventStream.h"
 #import "ALNServices.h"
 
 @class ALNContext;
@@ -133,6 +134,31 @@ NS_ASSUME_NONNULL_BEGIN
 - (nullable id<ALNLocalizationAdapter>)localizationAdapter;
 - (nullable id<ALNMailAdapter>)mailAdapter;
 - (nullable id<ALNAttachmentAdapter>)attachmentAdapter;
+- (nullable id<ALNEventStreamStore>)eventStreamStore;
+- (nullable id<ALNEventStreamBroker>)eventStreamBroker;
+- (nullable ALNEventStreamAppendResult *)appendEventStreamEvent:(NSDictionary *)event
+                                                       toStream:(NSString *)streamID
+                                                          error:(NSError *_Nullable *_Nullable)error;
+- (nullable ALNEventStreamReplayResult *)replayEventStream:(NSString *)streamID
+                                             afterSequence:(nullable NSNumber *)sequence
+                                                     limit:(NSUInteger)limit
+                                              replayWindow:(NSUInteger)replayWindow
+                                                     error:(NSError *_Nullable *_Nullable)error;
+- (BOOL)renderEventStreamReplay:(NSString *)streamID
+                  afterSequence:(nullable NSNumber *)sequence
+                          limit:(NSUInteger)limit
+                   replayWindow:(NSUInteger)replayWindow
+                          error:(NSError *_Nullable *_Nullable)error;
+- (BOOL)renderSSEStream:(NSString *)streamID
+          afterSequence:(nullable NSNumber *)sequence
+                  limit:(NSUInteger)limit
+           replayWindow:(NSUInteger)replayWindow
+                  error:(NSError *_Nullable *_Nullable)error;
+- (BOOL)acceptWebSocketStream:(NSString *)streamID
+                afterSequence:(nullable NSNumber *)sequence
+                        limit:(NSUInteger)limit
+                 replayWindow:(NSUInteger)replayWindow
+                        error:(NSError *_Nullable *_Nullable)error;
 - (NSString *)localizedStringForKey:(NSString *)key
                               locale:(nullable NSString *)locale
                       fallbackLocale:(nullable NSString *)fallbackLocale

@@ -42,6 +42,7 @@ typedef SSIZE_T ssize_t;
 #endif
 
 #import "ALNApplication.h"
+#import "ALNEventStream.h"
 #import "ALNRequest.h"
 #import "ALNResponse.h"
 #import "ALNRealtime.h"
@@ -2727,7 +2728,103 @@ static NSString *ALNRealtimeBackpressureReasonForSubscriptionRejection(NSString 
   return @"realtime_subscriber_limit";
 }
 
-@interface ALNWebSocketClientSession : NSObject <ALNRealtimeSubscriber>
+static NSString *ALNEventStreamStringHeader(ALNResponse *response, NSString *name) {
+  NSString *value = [response headerForName:name];
+  if (![value isKindOfClass:[NSString class]]) {
+    return @"";
+  }
+  NSString *trimmed =
+      [value stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+  return trimmed ?: @"";
+}
+
+static NSNumber *ALNEventStreamUnsignedHeader(ALNResponse *response, NSString *name) {
+  NSString *value = ALNEventStreamStringHeader(response, name);
+  if ([value length] == 0) {
+    return nil;
+  }
+  NSScanner *scanner = [NSScanner scannerWithString:value];
+  long long parsed = 0;
+  if (![scanner scanLongLong:&parsed] || ![scanner isAtEnd] || parsed < 0) {
+    return nil;
+  }
+  return @((unsigned long long)parsed);
+}
+
+static NSDictionary *ALNEventStreamResyncRequiredPayload(NSString *streamID,
+                                                         NSNumber *requestedAfterSequence,
+                                                         NSUInteger latestSequence,
+                                                         NSUInteger replayLimit,
+                                                         NSUInteger replayWindow) {
+  NSMutableDictionary *payload = [NSMutableDictionary dictionary];
+  payload[@"status"] = @"resync_required";
+  payload[@"stream_id"] = streamID ?: @"";
+  payload[@"latest_cursor"] = @{
+    @"stream_id" : streamID ?: @"",
+    @"sequence" : @(latestSequence),
+  };
+  payload[@"replay_limit"] = @(replayLimit);
+  payload[@"replay_window"] = @(replayWindow);
+  if (requestedAfterSequence != nil) {
+    payload[@"requested_after_sequence"] = requestedAfterSequence;
+  }
+  return [payload copy];
+}
+
+static NSString *ALNJSONStringForEventEnvelope(ALNEventEnvelope *event) {
+  NSData *data = [NSJSONSerialization dataWithJSONObject:[event dictionaryRepresentation]
+                                                 options:0
+                                                   error:NULL];
+  return [[NSString alloc] initWithData:(data ?: [NSData data]) encoding:NSUTF8StringEncoding] ?: @"{}";
+}
+
+static NSString *ALNSSEFrameForEventEnvelope(ALNEventEnvelope *event) {
+  NSMutableString *frame = [NSMutableString string];
+  [frame appendFormat:@"id: %@\n", event.eventID ?: @""];
+  [frame appendFormat:@"event: %@\n", event.eventType ?: @"event"];
+  NSString *data = ALNJSONStringForEventEnvelope(event);
+  NSArray *lines = [data componentsSeparatedByCharactersInSet:[NSCharacterSet newlineCharacterSet]];
+  if ([lines count] == 0) {
+    [frame appendString:@"data:\n"];
+  } else {
+    for (NSString *line in lines) {
+      [frame appendFormat:@"data: %@\n", line ?: @""];
+    }
+  }
+  [frame appendString:@"\n"];
+  return frame;
+}
+
+static BOOL ALNSendSSEHeaders(ALNSocketHandle clientFd, ALNResponse *response) {
+  NSMutableString *head = [NSMutableString string];
+  [head appendString:@"HTTP/1.1 200 OK\r\n"];
+  [head appendString:@"Content-Type: text/event-stream; charset=utf-8\r\n"];
+  [head appendString:@"Cache-Control: no-cache\r\n"];
+  [head appendString:@"Connection: keep-alive\r\n"];
+  [head appendString:@"X-Accel-Buffering: no\r\n"];
+
+  NSString *requestID = [response headerForName:@"X-Request-Id"];
+  if ([requestID length] > 0) {
+    [head appendFormat:@"X-Request-Id: %@\r\n", requestID];
+  }
+  NSString *correlationID = [response headerForName:@"X-Correlation-Id"];
+  if ([correlationID length] > 0) {
+    [head appendFormat:@"X-Correlation-Id: %@\r\n", correlationID];
+  }
+  NSString *traceID = [response headerForName:@"X-Trace-Id"];
+  if ([traceID length] > 0) {
+    [head appendFormat:@"X-Trace-Id: %@\r\n", traceID];
+  }
+  NSString *traceparent = [response headerForName:@"traceparent"];
+  if ([traceparent length] > 0) {
+    [head appendFormat:@"traceparent: %@\r\n", traceparent];
+  }
+  [head appendString:@"\r\n"];
+  NSData *data = [head dataUsingEncoding:NSUTF8StringEncoding] ?: [NSData data];
+  return ALNSendAll(clientFd, [data bytes], [data length]);
+}
+
+@interface ALNWebSocketClientSession : NSObject <ALNRealtimeSubscriber, ALNEventStreamLiveSubscriber>
 
 @property(nonatomic, assign, readonly) ALNSocketHandle clientFd;
 @property(nonatomic, strong, readonly) NSLock *sendLock;
@@ -2788,6 +2885,66 @@ static NSString *ALNRealtimeBackpressureReasonForSubscriptionRejection(NSString 
 - (void)receiveRealtimeMessage:(NSString *)message onChannel:(NSString *)channel {
   (void)channel;
   (void)[self sendTextMessage:message ?: @""];
+}
+
+- (void)receiveCommittedEvent:(ALNEventEnvelope *)event onStream:(NSString *)streamID {
+  (void)streamID;
+  (void)[self sendTextMessage:ALNJSONStringForEventEnvelope(event)];
+}
+
+@end
+
+@interface ALNSSEClientSession : NSObject <ALNEventStreamLiveSubscriber>
+
+@property(nonatomic, assign, readonly) ALNSocketHandle clientFd;
+@property(nonatomic, strong, readonly) NSLock *sendLock;
+@property(nonatomic, assign) BOOL closed;
+
+- (instancetype)initWithClientFd:(ALNSocketHandle)clientFd;
+- (BOOL)sendFrame:(NSString *)frame;
+- (BOOL)sendKeepalive;
+- (BOOL)isClosedSnapshot;
+
+@end
+
+@implementation ALNSSEClientSession
+
+- (instancetype)initWithClientFd:(ALNSocketHandle)clientFd {
+  self = [super init];
+  if (self) {
+    _clientFd = clientFd;
+    _sendLock = [[NSLock alloc] init];
+    _closed = NO;
+  }
+  return self;
+}
+
+- (BOOL)sendFrame:(NSString *)frame {
+  NSData *payload = [frame dataUsingEncoding:NSUTF8StringEncoding] ?: [NSData data];
+  [self.sendLock lock];
+  BOOL canSend = !self.closed;
+  BOOL ok = canSend ? ALNSendAll(self.clientFd, [payload bytes], [payload length]) : NO;
+  if (!ok) {
+    self.closed = YES;
+  }
+  [self.sendLock unlock];
+  return ok;
+}
+
+- (BOOL)sendKeepalive {
+  return [self sendFrame:@": keepalive\n\n"];
+}
+
+- (BOOL)isClosedSnapshot {
+  [self.sendLock lock];
+  BOOL closed = self.closed;
+  [self.sendLock unlock];
+  return closed;
+}
+
+- (void)receiveCommittedEvent:(ALNEventEnvelope *)event onStream:(NSString *)streamID {
+  (void)streamID;
+  (void)[self sendFrame:ALNSSEFrameForEventEnvelope(event)];
 }
 
 @end
@@ -3095,7 +3252,16 @@ static NSString *ALNRealtimeBackpressureReasonForSubscriptionRejection(NSString 
 
 - (NSString *)webSocketModeFromResponse:(ALNResponse *)response {
   NSString *mode = [[response headerForName:@"X-Arlen-WebSocket-Mode"] lowercaseString];
-  if ([mode isEqualToString:@"echo"] || [mode isEqualToString:@"channel"]) {
+  if ([mode isEqualToString:@"echo"] || [mode isEqualToString:@"channel"] ||
+      [mode isEqualToString:@"stream"]) {
+    return mode;
+  }
+  return @"";
+}
+
+- (NSString *)sseModeFromResponse:(ALNResponse *)response {
+  NSString *mode = [[response headerForName:@"X-Arlen-SSE-Mode"] lowercaseString];
+  if ([mode isEqualToString:@"stream"]) {
     return mode;
   }
   return @"";
@@ -3110,6 +3276,82 @@ static NSString *ALNRealtimeBackpressureReasonForSubscriptionRejection(NSString 
       [[channel stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]]
           lowercaseString];
   return ([normalized length] > 0) ? normalized : @"default";
+}
+
+- (NSString *)eventStreamIdentifierFromResponse:(ALNResponse *)response {
+  return ALNEventStreamStringHeader(response, @"X-Arlen-Event-Stream-Id");
+}
+
+- (NSNumber *)eventStreamAfterSequenceFromResponse:(ALNResponse *)response {
+  return ALNEventStreamUnsignedHeader(response, @"X-Arlen-Event-Stream-After-Sequence");
+}
+
+- (NSUInteger)eventStreamReplayLimitFromResponse:(ALNResponse *)response {
+  NSNumber *value = ALNEventStreamUnsignedHeader(response, @"X-Arlen-Event-Stream-Replay-Limit");
+  NSUInteger limit = [value respondsToSelector:@selector(unsignedIntegerValue)]
+                         ? [value unsignedIntegerValue]
+                         : 100;
+  return (limit > 0) ? limit : 100;
+}
+
+- (NSUInteger)eventStreamReplayWindowFromResponse:(ALNResponse *)response {
+  NSNumber *value = ALNEventStreamUnsignedHeader(response, @"X-Arlen-Event-Stream-Replay-Window");
+  NSUInteger window = [value respondsToSelector:@selector(unsignedIntegerValue)]
+                          ? [value unsignedIntegerValue]
+                          : 0;
+  return (window > 0) ? window : [self eventStreamReplayLimitFromResponse:response];
+}
+
+- (ALNEventStreamReplayResult *)eventStreamReplayResultFromResponse:(ALNResponse *)response
+                                                              error:(NSError **)error {
+  id<ALNEventStreamStore> store = self.application.eventStreamStore;
+  if (store == nil) {
+    if (error != NULL) {
+      *error = [NSError errorWithDomain:ALNEventStreamErrorDomain
+                                   code:ALNEventStreamErrorInvalidArgument
+                               userInfo:@{
+                                 NSLocalizedDescriptionKey : @"Event stream transport requires a configured store",
+                               }];
+    }
+    return nil;
+  }
+  ALNEventStreamService *service =
+      [[ALNEventStreamService alloc] initWithStore:store broker:self.application.eventStreamBroker];
+  return [service replayStream:[self eventStreamIdentifierFromResponse:response]
+                 afterSequence:[self eventStreamAfterSequenceFromResponse:response]
+                         limit:[self eventStreamReplayLimitFromResponse:response]
+                  replayWindow:[self eventStreamReplayWindowFromResponse:response]
+                         error:error];
+}
+
+- (ALNResponse *)eventStreamResyncResponseForResponse:(ALNResponse *)response
+                                         replayResult:(ALNEventStreamReplayResult *)result {
+  ALNResponse *resyncResponse = [[ALNResponse alloc] init];
+  resyncResponse.statusCode = 409;
+  NSData *bodyData =
+      [NSJSONSerialization dataWithJSONObject:ALNEventStreamResyncRequiredPayload(
+                                             result.streamID,
+                                             result.requestedAfterSequence,
+                                             result.latestCursor.sequence,
+                                             result.replayLimit,
+                                             result.replayWindow)
+                                      options:0
+                                        error:NULL];
+  [resyncResponse setDataBody:(bodyData ?: [NSData data])
+                  contentType:@"application/json; charset=utf-8"];
+  NSString *requestID = [response headerForName:@"X-Request-Id"];
+  if ([requestID length] > 0) {
+    [resyncResponse setHeader:@"X-Request-Id" value:requestID];
+  }
+  NSString *correlationID = [response headerForName:@"X-Correlation-Id"];
+  if ([correlationID length] > 0) {
+    [resyncResponse setHeader:@"X-Correlation-Id" value:correlationID];
+  }
+  NSString *traceID = [response headerForName:@"X-Trace-Id"];
+  if ([traceID length] > 0) {
+    [resyncResponse setHeader:@"X-Trace-Id" value:traceID];
+  }
+  return resyncResponse;
 }
 
 - (BOOL)sendWebSocketHandshakeForRequest:(ALNRequest *)request
@@ -3157,6 +3399,7 @@ static NSString *ALNRealtimeBackpressureReasonForSubscriptionRejection(NSString 
                             channel:(NSString *)channel
                             session:(ALNWebSocketClientSession *)session
                        subscription:(ALNRealtimeSubscription *)subscription
+               streamSubscription:(ALNEventStreamBrokerSubscription *)streamSubscription
                            clientFd:(ALNSocketHandle)clientFd {
   if ([mode length] == 0 || session == nil) {
     return;
@@ -3197,6 +3440,8 @@ static NSString *ALNRealtimeBackpressureReasonForSubscriptionRejection(NSString 
 
       if ([mode isEqualToString:@"channel"]) {
         (void)[[ALNRealtimeHub sharedHub] publishMessage:message onChannel:channel];
+      } else if ([mode isEqualToString:@"stream"]) {
+        continue;
       } else {
         (void)[session sendTextMessage:message];
       }
@@ -3204,6 +3449,33 @@ static NSString *ALNRealtimeBackpressureReasonForSubscriptionRejection(NSString 
   } @finally {
     if (subscription != nil) {
       [[ALNRealtimeHub sharedHub] unsubscribe:subscription];
+    }
+    if (streamSubscription != nil && self.application.eventStreamBroker != nil) {
+      [self.application.eventStreamBroker unsubscribe:streamSubscription];
+    }
+  }
+}
+
+- (void)runSSEStreamSession:(ALNSSEClientSession *)session
+               subscription:(ALNEventStreamBrokerSubscription *)subscription {
+  if (session == nil) {
+    return;
+  }
+  NSUInteger keepaliveCounter = 0;
+  @try {
+    while ([self shouldContinueRunning] && ![session isClosedSnapshot]) {
+      [NSThread sleepForTimeInterval:1.0];
+      keepaliveCounter += 1;
+      if (keepaliveCounter >= 15) {
+        if (![session sendKeepalive]) {
+          break;
+        }
+        keepaliveCounter = 0;
+      }
+    }
+  } @finally {
+    if (subscription != nil && self.application.eventStreamBroker != nil) {
+      [self.application.eventStreamBroker unsubscribe:subscription];
     }
   }
 }
@@ -3309,6 +3581,7 @@ static NSString *ALNRealtimeBackpressureReasonForSubscriptionRejection(NSString 
         }
 
         NSString *webSocketMode = [self webSocketModeFromResponse:response];
+        NSString *sseMode = [self sseModeFromResponse:response];
         BOOL responseWantsWebSocket = (response.statusCode == 101) && ([webSocketMode length] > 0);
         BOOL webSocketRequestValid = ALNRequestIsWebSocketUpgrade(request);
         if (responseWantsWebSocket && !webSocketRequestValid) {
@@ -3335,7 +3608,9 @@ static NSString *ALNRealtimeBackpressureReasonForSubscriptionRejection(NSString 
           }
           ALNWebSocketClientSession *webSocketSession = nil;
           ALNRealtimeSubscription *channelSubscription = nil;
+          ALNEventStreamBrokerSubscription *streamSubscription = nil;
           NSString *webSocketChannel = @"";
+          ALNEventStreamReplayResult *streamReplayResult = nil;
 
           BOOL reserved =
               [self reserveWebSocketSessionWithLimit:self.maxConcurrentWebSocketSessions];
@@ -3376,6 +3651,53 @@ static NSString *ALNRealtimeBackpressureReasonForSubscriptionRejection(NSString 
               [self releaseWebSocketSessionReservation];
               return;
             }
+          } else if ([webSocketMode isEqualToString:@"stream"]) {
+            NSError *streamError = nil;
+            streamReplayResult = [self eventStreamReplayResultFromResponse:response error:&streamError];
+            if (streamReplayResult == nil) {
+              ALNResponse *failure =
+                  ALNErrorResponse((streamError.code == ALNEventStreamErrorUnauthorized) ? 403 : 500,
+                                   @"event stream unavailable\n");
+              [failure setHeader:@"Connection" value:@"close"];
+              ALNEnsurePerformanceHeaders(failure,
+                                          performanceLogging,
+                                          parseMs,
+                                          ALNNowMilliseconds() - requestStartMs);
+              (void)ALNSendResponse(clientFd, failure, performanceLogging);
+              [self releaseWebSocketSessionReservation];
+              return;
+            }
+            if (streamReplayResult.resyncRequired) {
+              ALNResponse *resyncResponse = [self eventStreamResyncResponseForResponse:response
+                                                                           replayResult:streamReplayResult];
+              [resyncResponse setHeader:@"Connection" value:@"close"];
+              ALNEnsurePerformanceHeaders(resyncResponse,
+                                          performanceLogging,
+                                          parseMs,
+                                          ALNNowMilliseconds() - requestStartMs);
+              (void)ALNSendResponse(clientFd, resyncResponse, performanceLogging);
+              [self releaseWebSocketSessionReservation];
+              return;
+            }
+            webSocketSession = [[ALNWebSocketClientSession alloc] initWithClientFd:clientFd];
+            if (self.application.eventStreamBroker != nil) {
+              streamSubscription = [self.application.eventStreamBroker
+                  subscribeToStream:streamReplayResult.streamID
+                         subscriber:webSocketSession
+                              error:&streamError];
+              if (streamSubscription == nil) {
+                ALNResponse *busyResponse = ALNErrorResponse(503, @"event stream live broker unavailable\n");
+                [busyResponse setHeader:@"Retry-After" value:@"1"];
+                [busyResponse setHeader:@"Connection" value:@"close"];
+                ALNEnsurePerformanceHeaders(busyResponse,
+                                            performanceLogging,
+                                            parseMs,
+                                            ALNNowMilliseconds() - requestStartMs);
+                (void)ALNSendResponse(clientFd, busyResponse, performanceLogging);
+                [self releaseWebSocketSessionReservation];
+                return;
+              }
+            }
           }
 
           @try {
@@ -3383,16 +3705,98 @@ static NSString *ALNRealtimeBackpressureReasonForSubscriptionRejection(NSString 
               if (webSocketSession == nil) {
                 webSocketSession = [[ALNWebSocketClientSession alloc] initWithClientFd:clientFd];
               }
+              if ([webSocketMode isEqualToString:@"stream"]) {
+                for (ALNEventEnvelope *event in streamReplayResult.events ?: @[]) {
+                  if (![webSocketSession sendTextMessage:ALNJSONStringForEventEnvelope(event)]) {
+                    break;
+                  }
+                }
+              }
               [self runWebSocketSessionWithMode:webSocketMode
                                         channel:webSocketChannel
                                         session:webSocketSession
                                    subscription:channelSubscription
+                              streamSubscription:streamSubscription
                                        clientFd:clientFd];
-            } else if (channelSubscription != nil) {
-              [[ALNRealtimeHub sharedHub] unsubscribe:channelSubscription];
+            } else {
+              if (channelSubscription != nil) {
+                [[ALNRealtimeHub sharedHub] unsubscribe:channelSubscription];
+              }
+              if (streamSubscription != nil && self.application.eventStreamBroker != nil) {
+                [self.application.eventStreamBroker unsubscribe:streamSubscription];
+              }
             }
           } @finally {
             [self releaseWebSocketSessionReservation];
+          }
+          return;
+        }
+
+        if ([sseMode isEqualToString:@"stream"]) {
+          NSError *streamError = nil;
+          ALNEventStreamReplayResult *streamReplayResult =
+              [self eventStreamReplayResultFromResponse:response error:&streamError];
+          if (streamReplayResult == nil) {
+            ALNResponse *failure =
+                ALNErrorResponse((streamError.code == ALNEventStreamErrorUnauthorized) ? 403 : 500,
+                                 @"event stream unavailable\n");
+            [failure setHeader:@"Connection" value:@"close"];
+            ALNEnsurePerformanceHeaders(failure,
+                                        performanceLogging,
+                                        parseMs,
+                                        ALNNowMilliseconds() - requestStartMs);
+            (void)ALNSendResponse(clientFd, failure, performanceLogging);
+            return;
+          }
+          if (streamReplayResult.resyncRequired) {
+            ALNResponse *resyncResponse = [self eventStreamResyncResponseForResponse:response
+                                                                         replayResult:streamReplayResult];
+            [resyncResponse setHeader:@"Connection" value:@"close"];
+            ALNEnsurePerformanceHeaders(resyncResponse,
+                                        performanceLogging,
+                                        parseMs,
+                                        ALNNowMilliseconds() - requestStartMs);
+            (void)ALNSendResponse(clientFd, resyncResponse, performanceLogging);
+            return;
+          }
+
+          BOOL reserved = [self reserveHTTPSessionWithLimit:self.maxConcurrentHTTPSessions];
+          if (!reserved) {
+            ALNResponse *busyResponse = ALNErrorResponse(503, @"server busy\n");
+            [busyResponse setHeader:@"Retry-After" value:@"1"];
+            [busyResponse setHeader:@"X-Arlen-Backpressure-Reason" value:@"http_session_limit"];
+            [busyResponse setHeader:@"Connection" value:@"close"];
+            ALNEnsurePerformanceHeaders(busyResponse,
+                                        performanceLogging,
+                                        parseMs,
+                                        ALNNowMilliseconds() - requestStartMs);
+            (void)ALNSendResponse(clientFd, busyResponse, performanceLogging);
+            return;
+          }
+
+          ALNSSEClientSession *sseSession = [[ALNSSEClientSession alloc] initWithClientFd:clientFd];
+          ALNEventStreamBrokerSubscription *streamSubscription = nil;
+          @try {
+            if (!ALNSendSSEHeaders(clientFd, response)) {
+              return;
+            }
+            for (ALNEventEnvelope *event in streamReplayResult.events ?: @[]) {
+              if (![sseSession sendFrame:ALNSSEFrameForEventEnvelope(event)]) {
+                return;
+              }
+            }
+            if (self.application.eventStreamBroker != nil) {
+              streamSubscription = [self.application.eventStreamBroker
+                  subscribeToStream:streamReplayResult.streamID
+                         subscriber:sseSession
+                              error:&streamError];
+              if (streamSubscription == nil) {
+                return;
+              }
+            }
+            [self runSSEStreamSession:sseSession subscription:streamSubscription];
+          } @finally {
+            [self releaseHTTPSessionReservation];
           }
           return;
         }

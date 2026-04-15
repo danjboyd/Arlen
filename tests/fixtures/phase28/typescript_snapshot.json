@@ -1,10 +1,15 @@
 {
   "format": "phase28-typescript-snapshot-v1",
   "files": {
+    "README.md": {
+      "bytes": 1021,
+      "lines": 32,
+      "sha256": "735e683a715a80de4cec50ae4b0171455f9a972e6eb1d9f45a338741cbc91f7c"
+    },
     "package.json": {
-      "bytes": 644,
-      "lines": 28,
-      "sha256": "8df7e6ae8250bf3d2d07ce140fc877142faac7070edccb12733e694666045e7c"
+      "bytes": 683,
+      "lines": 29,
+      "sha256": "5929c788456bd15d736e18be8fc44e8a1fe5327e5dfdeaa9deca69b601786173"
     },
     "src/client.ts": {
       "bytes": 10972,
@@ -12,9 +17,9 @@
       "sha256": "490f4bd53fcd1e3d695e5235905ffb8a0ca1d34fcd04a06caafaf899e6b845fb"
     },
     "src/index.ts": {
-      "bytes": 220,
-      "lines": 9,
-      "sha256": "1b2c53ffb96be5f88567bd552ecc237cfc87ec3156a7101a9fb35ac6273866b9"
+      "bytes": 248,
+      "lines": 10,
+      "sha256": "bd9769c8d13180bbf7557f7a35f17611d265b5f040c5df2ca123b8dad5f7cd27"
     },
     "src/meta.ts": {
       "bytes": 3097,
@@ -35,6 +40,11 @@
       "bytes": 7360,
       "lines": 194,
       "sha256": "5d2de6e56c19c71634b711881e55aa8458baa12ddbd4031d8681227154c99289"
+    },
+    "src/realtime.ts": {
+      "bytes": 9225,
+      "lines": 243,
+      "sha256": "ef24b83fe085754c1dbfc11ecb80b8a23a032ef06a828a9012989d560fbf5a94"
     },
     "src/validators.ts": {
       "bytes": 29100,
@@ -82,6 +92,10 @@
         "path": "src/react.ts"
       },
       {
+        "kind": "realtime",
+        "path": "src/realtime.ts"
+      },
+      {
         "kind": "validators",
         "path": "src/validators.ts"
       },
@@ -97,7 +111,8 @@
       "query",
       "client",
       "react",
-      "meta"
+      "meta",
+      "realtime"
     ],
     "operations": [
       {
@@ -331,5 +346,5 @@
     ],
     "version": 1
   },
-  "manifestSha256": "6e292ac0792667c21c2109b0f7be45960c21c71560f69e0f778961321864ac04"
+  "manifestSha256": "2862226773f5db451afd5791a81c14928b943f89128432bafd431273fb9642b5"
 }

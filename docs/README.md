@@ -37,6 +37,7 @@ toolchain env directly for the Linux/GNUstep path. On macOS, use
 - [Getting Started: API-First Track](GETTING_STARTED_API_FIRST.md): JSON APIs, schema/auth contracts, and OpenAPI.
 - [Getting Started: HTML-First Track](GETTING_STARTED_HTML_FIRST.md): server-rendered EOC templates, layouts, and forms.
 - [Live UI Guide](LIVE_UI.md): fragment-first live responses, `/arlen/live.js`, keyed collections, live regions, live forms/links, and realtime push updates.
+- [Durable Event Streams](EVENT_STREAMS.md): durable append/replay, websocket/SSE/poll consumption, auth hooks, and the plain generated TypeScript stream client.
 - [Core Concepts](CORE_CONCEPTS.md): runtime architecture and request lifecycle.
 - [Template Troubleshooting](TEMPLATE_TROUBLESHOOTING.md): deterministic transpile/lint diagnostics and repair workflow.
 - [API Reference](API_REFERENCE.md): generated public API docs with per-method purpose and usage guidance.
@@ -81,6 +82,7 @@ toolchain env directly for the Linux/GNUstep path. On macOS, use
 ## Contributor and Historical Docs
 
 - [Current Status](STATUS.md): latest checkpoint and verified milestone state.
+- [Phase 33 Roadmap](PHASE33_ROADMAP.md): completed durable event-stream seam phase; `33A-33L` delivered the store/broker/auth seam, replay-window and `resync_required` contract, websocket/SSE/HTTP integration, plain generated TypeScript consumer surface, confidence lane, and docs/module-boundary closeout.
 - [Phase 32 Roadmap](PHASE32_ROADMAP.md): completed target-aware deployment phase plus host-bootstrap closeout; `32A-32V` now cover the shipped deploy contract, named targets, `deploy init`, SSH transport/activation, fresh GNUstep host readiness, and Debian-first generated host artifacts/docs.
 - [Phase 30 Roadmap](PHASE30_ROADMAP.md): Apple-runtime roadmap on macOS; `30A-30S` are now delivered, including the compatibility-shim cleanup for warning-free Apple/GNUstep builds.
 - [Session Handoff (2026-04-03)](SESSION_HANDOFF_2026-04-03.md): Phase 28 closeout checkpoint covering `28I-28L`, the live reference server, and the final verification set.

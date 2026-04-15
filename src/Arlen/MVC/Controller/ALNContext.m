@@ -31,6 +31,8 @@ NSString *const ALNContextCacheAdapterStashKey = @"aln.services.cache";
 NSString *const ALNContextLocalizationAdapterStashKey = @"aln.services.i18n";
 NSString *const ALNContextMailAdapterStashKey = @"aln.services.mail";
 NSString *const ALNContextAttachmentAdapterStashKey = @"aln.services.attachment";
+NSString *const ALNContextEventStreamStoreStashKey = @"aln.services.event_stream";
+NSString *const ALNContextEventStreamBrokerStashKey = @"aln.services.event_stream_broker";
 NSString *const ALNContextI18nDefaultLocaleStashKey = @"aln.services.i18n.default_locale";
 NSString *const ALNContextI18nFallbackLocaleStashKey = @"aln.services.i18n.fallback_locale";
 
@@ -541,8 +543,24 @@ static BOOL ALNETagListMatches(NSString *ifNoneMatchHeader, NSString *etag) {
   return nil;
 }
 
+- (id<ALNEventStreamStore>)eventStreamStore {
+  id value = self.stash[ALNContextEventStreamStoreStashKey];
+  if ([value conformsToProtocol:@protocol(ALNEventStreamStore)]) {
+    return value;
+  }
+  return nil;
+}
+
+- (id<ALNEventStreamBroker>)eventStreamBroker {
+  id value = self.stash[ALNContextEventStreamBrokerStashKey];
+  if ([value conformsToProtocol:@protocol(ALNEventStreamBroker)]) {
+    return value;
+  }
+  return nil;
+}
+
 - (NSString *)localizedStringForKey:(NSString *)key
-                             locale:(NSString *)locale
+                              locale:(NSString *)locale
                      fallbackLocale:(NSString *)fallbackLocale
                        defaultValue:(NSString *)defaultValue
                           arguments:(NSDictionary *)arguments {

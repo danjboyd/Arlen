@@ -5,6 +5,7 @@ Arlen app: registering routes, writing controllers, using middleware, and
 adding route metadata.
 
 If you have not scaffolded an app yet, start with `docs/FIRST_APP_GUIDE.md`.
+For durable replayable realtime, pair this guide with `docs/EVENT_STREAMS.md`.
 
 ## 1. Generated App Shape
 

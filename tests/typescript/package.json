@@ -5,7 +5,7 @@
   "scripts": {
     "generate:arlen": "../../bin/arlen typescript-codegen --orm-input ../../tests/fixtures/phase26/orm_schema_metadata_contract.json --openapi-input \"${ARLEN_PHASE28_OPENAPI_INPUT:-../../tests/fixtures/phase28/openapi_contract.json}\" --output-dir ./generated/arlen --manifest ./generated/arlen.manifest.json --package-name arlen-phase28-client --target all --force",
     "test:generated": "node --import tsx --test ./unit/generated_snapshot.test.ts && tsc --noEmit -p ./tsconfig.json",
-    "test:unit": "node --import tsx --test ./unit/client_runtime.test.ts ./unit/contract_parity.test.ts ./react/react_contracts.test.ts",
+    "test:unit": "node --import tsx --test ./unit/client_runtime.test.ts ./unit/contract_parity.test.ts ./unit/realtime_client.test.ts ./react/react_contracts.test.ts",
     "test:integration": "node --import tsx --test ./integration/live_contract.test.ts"
   },
   "dependencies": {

@@ -1,5 +1,6 @@
 #import "ALNController.h"
 
+#import "ALNApplication.h"
 #import "ALNAuthSession.h"
 #import "ALNContext.h"
 #import "ALNJSONSerialization.h"
@@ -149,6 +150,44 @@ static NSString *ALNTrimmedLayoutName(id value) {
   NSString *trimmed =
       [(NSString *)value stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
   return ([trimmed length] > 0) ? trimmed : nil;
+}
+
+static NSNumber *ALNEventStreamSequenceNumber(id value) {
+  if ([value respondsToSelector:@selector(unsignedIntegerValue)]) {
+    return @([value unsignedIntegerValue]);
+  }
+  return nil;
+}
+
+static void ALNConfigureEventStreamHeaders(ALNResponse *response,
+                                           NSString *streamID,
+                                           NSNumber *sequence,
+                                           NSUInteger limit,
+                                           NSUInteger replayWindow) {
+  [response setHeader:@"X-Arlen-Event-Stream-Id" value:streamID ?: @""];
+  if (sequence != nil) {
+    [response setHeader:@"X-Arlen-Event-Stream-After-Sequence"
+                  value:[NSString stringWithFormat:@"%llu",
+                                                 (unsigned long long)[sequence unsignedIntegerValue]]];
+  }
+  [response setHeader:@"X-Arlen-Event-Stream-Replay-Limit"
+                value:[NSString stringWithFormat:@"%llu", (unsigned long long)((limit > 0) ? limit : 100)]];
+  [response setHeader:@"X-Arlen-Event-Stream-Replay-Window"
+                value:[NSString stringWithFormat:@"%llu",
+                                               (unsigned long long)((replayWindow > 0) ? replayWindow : ((limit > 0) ? limit : 100))]];
+}
+
+static NSDictionary *ALNEventStreamResyncPayload(ALNEventStreamReplayResult *result) {
+  NSMutableDictionary *payload = [NSMutableDictionary dictionary];
+  payload[@"status"] = @"resync_required";
+  payload[@"stream_id"] = result.streamID ?: @"";
+  payload[@"latest_cursor"] = [result.latestCursor dictionaryRepresentation] ?: @{};
+  payload[@"replay_limit"] = @(result.replayLimit);
+  payload[@"replay_window"] = @(result.replayWindow);
+  if (result.requestedAfterSequence != nil) {
+    payload[@"requested_after_sequence"] = result.requestedAfterSequence;
+  }
+  return [payload copy];
 }
 
 + (NSJSONWritingOptions)jsonWritingOptions {
@@ -843,6 +882,199 @@ static NSString *ALNTrimmedLayoutName(id value) {
 
 - (id<ALNAttachmentAdapter>)attachmentAdapter {
   return [self.context attachmentAdapter];
+}
+
+- (id<ALNEventStreamStore>)eventStreamStore {
+  return [self.context eventStreamStore];
+}
+
+- (id<ALNEventStreamBroker>)eventStreamBroker {
+  return [self.context eventStreamBroker];
+}
+
+- (ALNEventStreamAppendResult *)appendEventStreamEvent:(NSDictionary *)event
+                                              toStream:(NSString *)streamID
+                                                 error:(NSError **)error {
+  if (error != NULL) {
+    *error = nil;
+  }
+  ALNApplication *application = [self.context application];
+  if (application == nil) {
+    if (error != NULL) {
+      *error = [NSError errorWithDomain:ALNEventStreamErrorDomain
+                                   code:ALNEventStreamErrorInvalidArgument
+                               userInfo:@{
+                                 NSLocalizedDescriptionKey :
+                                     @"Event stream append requires an application context",
+                               }];
+    }
+    return nil;
+  }
+  if (![application authorizeEventStreamAppendToStream:streamID
+                                                 event:event ?: @{}
+                                               context:self.context
+                                                 error:error]) {
+    return nil;
+  }
+
+  ALNEventStreamService *service =
+      [[ALNEventStreamService alloc] initWithStore:[self eventStreamStore]
+                                            broker:[self eventStreamBroker]];
+  return [service appendEvent:event ?: @{} toStream:streamID error:error];
+}
+
+- (ALNEventStreamReplayResult *)replayEventStream:(NSString *)streamID
+                                    afterSequence:(NSNumber *)sequence
+                                            limit:(NSUInteger)limit
+                                     replayWindow:(NSUInteger)replayWindow
+                                            error:(NSError **)error {
+  if (error != NULL) {
+    *error = nil;
+  }
+  ALNApplication *application = [self.context application];
+  if (application == nil) {
+    if (error != NULL) {
+      *error = [NSError errorWithDomain:ALNEventStreamErrorDomain
+                                   code:ALNEventStreamErrorInvalidArgument
+                               userInfo:@{
+                                 NSLocalizedDescriptionKey :
+                                     @"Event stream replay requires an application context",
+                               }];
+    }
+    return nil;
+  }
+  if (![application authorizeEventStreamReplayOfStream:streamID
+                                         afterSequence:sequence
+                                               context:self.context
+                                                 error:error]) {
+    return nil;
+  }
+
+  ALNEventStreamService *service =
+      [[ALNEventStreamService alloc] initWithStore:[self eventStreamStore]
+                                            broker:[self eventStreamBroker]];
+  return [service replayStream:streamID
+                 afterSequence:sequence
+                         limit:limit
+                  replayWindow:replayWindow
+                         error:error];
+}
+
+- (BOOL)renderEventStreamReplay:(NSString *)streamID
+                  afterSequence:(NSNumber *)sequence
+                          limit:(NSUInteger)limit
+                   replayWindow:(NSUInteger)replayWindow
+                          error:(NSError **)error {
+  ALNEventStreamReplayResult *result = [self replayEventStream:streamID
+                                                 afterSequence:sequence
+                                                         limit:limit
+                                                  replayWindow:replayWindow
+                                                         error:error];
+  if (result == nil) {
+    return NO;
+  }
+  if (result.resyncRequired) {
+    [self setStatus:409];
+    return [self renderJSON:ALNEventStreamResyncPayload(result) error:error];
+  }
+
+  NSMutableDictionary *payload = [NSMutableDictionary dictionary];
+  payload[@"stream_id"] = result.streamID ?: @"";
+  payload[@"events"] = [result.events valueForKey:@"dictionaryRepresentation"] ?: @[];
+  payload[@"latest_cursor"] = [result.latestCursor dictionaryRepresentation] ?: @{};
+  payload[@"replay_limit"] = @(result.replayLimit);
+  payload[@"replay_window"] = @(result.replayWindow);
+  if (result.requestedAfterSequence != nil) {
+    payload[@"requested_after_sequence"] = result.requestedAfterSequence;
+  }
+  return [self renderJSON:[payload copy] error:error];
+}
+
+- (BOOL)renderSSEStream:(NSString *)streamID
+          afterSequence:(NSNumber *)sequence
+                  limit:(NSUInteger)limit
+           replayWindow:(NSUInteger)replayWindow
+                  error:(NSError **)error {
+  if (error != NULL) {
+    *error = nil;
+  }
+  ALNApplication *application = [self.context application];
+  if (application == nil) {
+    if (error != NULL) {
+      *error = [NSError errorWithDomain:ALNEventStreamErrorDomain
+                                   code:ALNEventStreamErrorInvalidArgument
+                               userInfo:@{
+                                 NSLocalizedDescriptionKey :
+                                     @"SSE event stream requires an application context",
+                               }];
+    }
+    return NO;
+  }
+  if (![application authorizeEventStreamSubscribeToStream:streamID context:self.context error:error] ||
+      ![application authorizeEventStreamReplayOfStream:streamID
+                                         afterSequence:sequence
+                                               context:self.context
+                                                 error:error]) {
+    return NO;
+  }
+
+  [self.context.response setStatusCode:200];
+  [self.context.response setHeader:@"X-Arlen-SSE-Mode" value:@"stream"];
+  [self.context.response setHeader:@"Content-Type" value:@"text/event-stream; charset=utf-8"];
+  [self.context.response setHeader:@"Cache-Control" value:@"no-cache"];
+  [self.context.response setHeader:@"Connection" value:@"keep-alive"];
+  [self.context.response setHeader:@"X-Accel-Buffering" value:@"no"];
+  ALNConfigureEventStreamHeaders(self.context.response,
+                                 streamID,
+                                 ALNEventStreamSequenceNumber(sequence),
+                                 limit,
+                                 replayWindow);
+  [self.context.response clearBody];
+  self.context.response.committed = YES;
+  return YES;
+}
+
+- (BOOL)acceptWebSocketStream:(NSString *)streamID
+                afterSequence:(NSNumber *)sequence
+                        limit:(NSUInteger)limit
+                 replayWindow:(NSUInteger)replayWindow
+                        error:(NSError **)error {
+  if (error != NULL) {
+    *error = nil;
+  }
+  ALNApplication *application = [self.context application];
+  if (application == nil) {
+    if (error != NULL) {
+      *error = [NSError errorWithDomain:ALNEventStreamErrorDomain
+                                   code:ALNEventStreamErrorInvalidArgument
+                               userInfo:@{
+                                 NSLocalizedDescriptionKey :
+                                     @"WebSocket event stream requires an application context",
+                               }];
+    }
+    return NO;
+  }
+  if (![application authorizeEventStreamSubscribeToStream:streamID context:self.context error:error] ||
+      ![application authorizeEventStreamReplayOfStream:streamID
+                                         afterSequence:sequence
+                                               context:self.context
+                                                 error:error]) {
+    return NO;
+  }
+
+  [self.context.response setStatusCode:101];
+  [self.context.response setHeader:@"Connection" value:@"Upgrade"];
+  [self.context.response setHeader:@"Upgrade" value:@"websocket"];
+  [self.context.response setHeader:@"X-Arlen-WebSocket-Mode" value:@"stream"];
+  ALNConfigureEventStreamHeaders(self.context.response,
+                                 streamID,
+                                 ALNEventStreamSequenceNumber(sequence),
+                                 limit,
+                                 replayWindow);
+  [self.context.response setHeader:@"Content-Type" value:@""];
+  [self.context.response clearBody];
+  self.context.response.committed = YES;
+  return YES;
 }
 
 - (NSString *)localizedStringForKey:(NSString *)key

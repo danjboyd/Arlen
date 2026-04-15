@@ -1,4 +1,5 @@
 import type { ListUsersRequest, PublicUserCreateInput } from '../generated/arlen/src/index.ts';
+import type { ArlenRealtimeClientOptions, ArlenRealtimeEventEnvelope } from '../generated/arlen/src/index.ts';
 import {
   buildUsersQueryParams,
   usersResourceQueryContract,
@@ -37,6 +38,25 @@ const validParams = buildUsersQueryParams({
 void validRequest;
 void validParams;
 void arlenModuleRegistry.auth.bootstrapOperationId;
+
+const realtimeOptions: ArlenRealtimeClientOptions = {
+  streamId: 'conversation:33',
+  transports: ['websocket', 'sse', 'poll'],
+};
+
+const realtimeEnvelope: ArlenRealtimeEventEnvelope<{ body: string }> = {
+  stream_id: 'conversation:33',
+  sequence: 1,
+  event_id: 'evt_1',
+  event_type: 'message_created',
+  occurred_at: '2026-04-15T21:00:00Z',
+  payload: {
+    body: 'compile only',
+  },
+};
+
+void realtimeOptions;
+void realtimeEnvelope;
 
 // @ts-expect-error invalid include values must fail closed.
 buildUsersQueryParams({ include: ['notARelation'] });

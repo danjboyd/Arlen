@@ -20,6 +20,7 @@
 #import "ALNMetrics.h"
 #import "ALNAuth.h"
 #import "ALNAuthSession.h"
+#import "ALNEventStream.h"
 #import "ALNDataverseClient.h"
 #import "ALNLive.h"
 #import "ALNPlatform.h"
@@ -80,6 +81,7 @@ static ALNDataverseTarget *ALNDataverseTargetFromMergedConfig(NSDictionary *merg
                                                               NSString *targetName,
                                                               NSError **error);
 static NSArray<NSString *> *ALNDataverseTargetNamesFromConfigAndEnvironment(NSDictionary *config);
+static ALNEventStreamRequestContext *ALNEventStreamRequestContextFromOptionalContext(ALNContext *context);
 
 static BOOL ALNEnvFlagEnabled(const char *name) {
   if (name == NULL || name[0] == '\0') {
@@ -557,6 +559,9 @@ static BOOL ALNInvokeRouteAction(id controller,
 @property(nonatomic, strong, readwrite) id<ALNMailAdapter> mailAdapter;
 @property(nonatomic, strong, readwrite) id<ALNWebhookAdapter> webhookAdapter;
 @property(nonatomic, strong, readwrite) id<ALNAttachmentAdapter> attachmentAdapter;
+@property(nonatomic, strong, readwrite, nullable) id<ALNEventStreamStore> eventStreamStore;
+@property(nonatomic, strong, readwrite, nullable) id<ALNEventStreamBroker> eventStreamBroker;
+@property(nonatomic, strong, readwrite, nullable) id<ALNEventStreamAuthorizationHook> eventStreamAuthorizationHook;
 @property(nonatomic, assign, readwrite) BOOL clusterEnabled;
 @property(nonatomic, copy, readwrite) NSString *clusterName;
 @property(nonatomic, copy, readwrite) NSString *clusterNodeID;
@@ -842,6 +847,7 @@ static NSArray<NSString *> *ALNDataverseTargetNamesFromConfigAndEnvironment(NSDi
     _mailAdapter = [[ALNInMemoryMailAdapter alloc] init];
     _webhookAdapter = [[ALNInMemoryWebhookAdapter alloc] init];
     _attachmentAdapter = [[ALNInMemoryAttachmentAdapter alloc] init];
+    _eventStreamBroker = [[ALNInMemoryEventStreamBroker alloc] initWithAdapterName:nil];
     NSDictionary *services = [_config[@"services"] isKindOfClass:[NSDictionary class]] ? _config[@"services"] : @{};
     NSDictionary *i18nConfig =
         [services[@"i18n"] isKindOfClass:[NSDictionary class]] ? services[@"i18n"] : @{};
@@ -1118,6 +1124,27 @@ static NSArray<NSString *> *ALNDataverseTargetNamesFromConfigAndEnvironment(NSDi
     return;
   }
   _attachmentAdapter = adapter;
+}
+
+- (void)setEventStreamStore:(id<ALNEventStreamStore>)adapter {
+  if (adapter == nil) {
+    return;
+  }
+  _eventStreamStore = adapter;
+}
+
+- (void)setEventStreamBroker:(id<ALNEventStreamBroker>)adapter {
+  if (adapter == nil) {
+    return;
+  }
+  _eventStreamBroker = adapter;
+}
+
+- (void)setEventStreamAuthorizationHook:(id<ALNEventStreamAuthorizationHook>)hook {
+  if (hook == nil) {
+    return;
+  }
+  _eventStreamAuthorizationHook = hook;
 }
 
 - (void)setDataverseClient:(ALNDataverseClient *)client forTargetName:(NSString *)targetName {
@@ -3698,6 +3725,127 @@ static void ALNFinalizeResponse(ALNApplication *application,
   return YES;
 }
 
+- (BOOL)authorizeEventStreamAppendToStream:(NSString *)streamID
+                                     event:(NSDictionary *)event
+                                   context:(ALNContext *)context
+                                     error:(NSError **)error {
+  if (error != NULL) {
+    *error = nil;
+  }
+  NSString *normalizedStreamID =
+      [streamID isKindOfClass:[NSString class]]
+          ? [streamID stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]]
+          : @"";
+  if ([normalizedStreamID length] == 0) {
+    if (error != NULL) {
+      *error = [NSError errorWithDomain:ALNEventStreamErrorDomain
+                                   code:ALNEventStreamErrorInvalidArgument
+                               userInfo:@{
+                                 NSLocalizedDescriptionKey : @"Stream identifier is required",
+                                 @"field" : @"stream_id",
+                               }];
+    }
+    return NO;
+  }
+  if (self.eventStreamAuthorizationHook == nil) {
+    if (error != NULL) {
+      *error = [NSError errorWithDomain:ALNEventStreamErrorDomain
+                                   code:ALNEventStreamErrorUnauthorized
+                               userInfo:@{
+                                 NSLocalizedDescriptionKey :
+                                     @"No event stream authorization hook is configured",
+                                 @"operation" : @"append",
+                                 @"stream_id" : normalizedStreamID,
+                               }];
+    }
+    return NO;
+  }
+  return [self.eventStreamAuthorizationHook authorizeEventStreamAppendToStream:normalizedStreamID
+                                                                         event:event ?: @{}
+                                                                requestContext:ALNEventStreamRequestContextFromOptionalContext(context)
+                                                                         error:error];
+}
+
+- (BOOL)authorizeEventStreamReplayOfStream:(NSString *)streamID
+                             afterSequence:(NSNumber *)sequence
+                                   context:(ALNContext *)context
+                                     error:(NSError **)error {
+  if (error != NULL) {
+    *error = nil;
+  }
+  NSString *normalizedStreamID =
+      [streamID isKindOfClass:[NSString class]]
+          ? [streamID stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]]
+          : @"";
+  if ([normalizedStreamID length] == 0) {
+    if (error != NULL) {
+      *error = [NSError errorWithDomain:ALNEventStreamErrorDomain
+                                   code:ALNEventStreamErrorInvalidArgument
+                               userInfo:@{
+                                 NSLocalizedDescriptionKey : @"Stream identifier is required",
+                                 @"field" : @"stream_id",
+                               }];
+    }
+    return NO;
+  }
+  if (self.eventStreamAuthorizationHook == nil) {
+    if (error != NULL) {
+      *error = [NSError errorWithDomain:ALNEventStreamErrorDomain
+                                   code:ALNEventStreamErrorUnauthorized
+                               userInfo:@{
+                                 NSLocalizedDescriptionKey :
+                                     @"No event stream authorization hook is configured",
+                                 @"operation" : @"replay",
+                                 @"stream_id" : normalizedStreamID,
+                               }];
+    }
+    return NO;
+  }
+  return [self.eventStreamAuthorizationHook authorizeEventStreamReplayOfStream:normalizedStreamID
+                                                                 afterSequence:sequence
+                                                                requestContext:ALNEventStreamRequestContextFromOptionalContext(context)
+                                                                         error:error];
+}
+
+- (BOOL)authorizeEventStreamSubscribeToStream:(NSString *)streamID
+                                      context:(ALNContext *)context
+                                        error:(NSError **)error {
+  if (error != NULL) {
+    *error = nil;
+  }
+  NSString *normalizedStreamID =
+      [streamID isKindOfClass:[NSString class]]
+          ? [streamID stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]]
+          : @"";
+  if ([normalizedStreamID length] == 0) {
+    if (error != NULL) {
+      *error = [NSError errorWithDomain:ALNEventStreamErrorDomain
+                                   code:ALNEventStreamErrorInvalidArgument
+                               userInfo:@{
+                                 NSLocalizedDescriptionKey : @"Stream identifier is required",
+                                 @"field" : @"stream_id",
+                               }];
+    }
+    return NO;
+  }
+  if (self.eventStreamAuthorizationHook == nil) {
+    if (error != NULL) {
+      *error = [NSError errorWithDomain:ALNEventStreamErrorDomain
+                                   code:ALNEventStreamErrorUnauthorized
+                               userInfo:@{
+                                 NSLocalizedDescriptionKey :
+                                     @"No event stream authorization hook is configured",
+                                 @"operation" : @"subscribe",
+                                 @"stream_id" : normalizedStreamID,
+                               }];
+    }
+    return NO;
+  }
+  return [self.eventStreamAuthorizationHook authorizeEventStreamSubscribeToStream:normalizedStreamID
+                                                                   requestContext:ALNEventStreamRequestContextFromOptionalContext(context)
+                                                                            error:error];
+}
+
 - (BOOL)routingCompileOnStartEnabled {
   NSDictionary *routing = ALNRoutingConfig(self.config);
   return ALNBoolConfigValue(routing[@"compileOnStart"], YES);
@@ -4548,6 +4696,12 @@ static void ALNFinalizeResponse(ALNApplication *application,
   if (self.attachmentAdapter != nil) {
     baseStash[ALNContextAttachmentAdapterStashKey] = self.attachmentAdapter;
   }
+  if (self.eventStreamStore != nil) {
+    baseStash[ALNContextEventStreamStoreStashKey] = self.eventStreamStore;
+  }
+  if (self.eventStreamBroker != nil) {
+    baseStash[ALNContextEventStreamBrokerStashKey] = self.eventStreamBroker;
+  }
   baseStash[ALNContextI18nDefaultLocaleStashKey] = self.i18nDefaultLocale ?: @"en";
   baseStash[ALNContextI18nFallbackLocaleStashKey] =
       self.i18nFallbackLocale ?: self.i18nDefaultLocale ?: @"en";
@@ -4880,6 +5034,24 @@ static void ALNFinalizeResponse(ALNApplication *application,
   }
 
   return response;
+}
+
+static ALNEventStreamRequestContext *ALNEventStreamRequestContextFromOptionalContext(ALNContext *context) {
+  if (context != nil) {
+    return [ALNEventStreamRequestContext requestContextWithContext:context];
+  }
+  return [[ALNEventStreamRequestContext alloc] initWithRequestMethod:@""
+                                                         requestPath:@""
+                                                  requestQueryString:@""
+                                                           routeName:@""
+                                                      controllerName:@""
+                                                          actionName:@""
+                                                         authSubject:nil
+                                                          authScopes:@[]
+                                                           authRoles:@[]
+                                                          authClaims:nil
+                                               authSessionIdentifier:nil
+                                                         liveRequest:NO];
 }
 
 @end

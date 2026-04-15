@@ -2,6 +2,7 @@
 #define ALN_APPLICATION_H
 
 #import <Foundation/Foundation.h>
+#import "ALNEventStream.h"
 #import "ALNModuleSystem.h"
 #import "ALNServices.h"
 
@@ -66,6 +67,9 @@ NS_ASSUME_NONNULL_BEGIN
 @property(nonatomic, strong, readonly) id<ALNMailAdapter> mailAdapter;
 @property(nonatomic, strong, readonly) id<ALNWebhookAdapter> webhookAdapter;
 @property(nonatomic, strong, readonly) id<ALNAttachmentAdapter> attachmentAdapter;
+@property(nonatomic, strong, readonly, nullable) id<ALNEventStreamStore> eventStreamStore;
+@property(nonatomic, strong, readonly, nullable) id<ALNEventStreamBroker> eventStreamBroker;
+@property(nonatomic, strong, readonly, nullable) id<ALNEventStreamAuthorizationHook> eventStreamAuthorizationHook;
 @property(nonatomic, assign, readonly) BOOL clusterEnabled;
 @property(nonatomic, copy, readonly) NSString *clusterName;
 @property(nonatomic, copy, readonly) NSString *clusterNodeID;
@@ -108,6 +112,9 @@ NS_ASSUME_NONNULL_BEGIN
 - (void)setMailAdapter:(id<ALNMailAdapter>)adapter;
 - (void)setWebhookAdapter:(id<ALNWebhookAdapter>)adapter;
 - (void)setAttachmentAdapter:(id<ALNAttachmentAdapter>)adapter;
+- (void)setEventStreamStore:(id<ALNEventStreamStore>)adapter;
+- (void)setEventStreamBroker:(id<ALNEventStreamBroker>)adapter;
+- (void)setEventStreamAuthorizationHook:(id<ALNEventStreamAuthorizationHook>)hook;
 - (void)setDataverseClient:(ALNDataverseClient *)client forTargetName:(nullable NSString *)targetName;
 - (nullable ALNDataverseClient *)dataverseClient;
 - (nullable ALNDataverseClient *)dataverseClientNamed:(nullable NSString *)targetName
@@ -140,6 +147,18 @@ NS_ASSUME_NONNULL_BEGIN
             maximumAuthenticationAgeSeconds:(NSUInteger)maximumAuthenticationAgeSeconds
                                  stepUpPath:(nullable NSString *)stepUpPath
                                       error:(NSError *_Nullable *_Nullable)error;
+
+- (BOOL)authorizeEventStreamAppendToStream:(NSString *)streamID
+                                     event:(NSDictionary *)event
+                                   context:(nullable ALNContext *)context
+                                     error:(NSError *_Nullable *_Nullable)error;
+- (BOOL)authorizeEventStreamReplayOfStream:(NSString *)streamID
+                             afterSequence:(nullable NSNumber *)sequence
+                                   context:(nullable ALNContext *)context
+                                     error:(NSError *_Nullable *_Nullable)error;
+- (BOOL)authorizeEventStreamSubscribeToStream:(NSString *)streamID
+                                      context:(nullable ALNContext *)context
+                                        error:(NSError *_Nullable *_Nullable)error;
 
 - (ALNResponse *)dispatchRequest:(ALNRequest *)request;
 - (NSArray *)routeTable;

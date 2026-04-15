@@ -2,6 +2,7 @@
 #define ALN_CONTEXT_H
 
 #import <Foundation/Foundation.h>
+#import "ALNEventStream.h"
 #import "ALNServices.h"
 
 @class ALNRequest;
@@ -36,6 +37,8 @@ extern NSString *const ALNContextCacheAdapterStashKey;
 extern NSString *const ALNContextLocalizationAdapterStashKey;
 extern NSString *const ALNContextMailAdapterStashKey;
 extern NSString *const ALNContextAttachmentAdapterStashKey;
+extern NSString *const ALNContextEventStreamStoreStashKey;
+extern NSString *const ALNContextEventStreamBrokerStashKey;
 extern NSString *const ALNContextI18nDefaultLocaleStashKey;
 extern NSString *const ALNContextI18nFallbackLocaleStashKey;
 
@@ -107,6 +110,8 @@ extern NSString *const ALNContextI18nFallbackLocaleStashKey;
 - (nullable id<ALNLocalizationAdapter>)localizationAdapter;
 - (nullable id<ALNMailAdapter>)mailAdapter;
 - (nullable id<ALNAttachmentAdapter>)attachmentAdapter;
+- (nullable id<ALNEventStreamStore>)eventStreamStore;
+- (nullable id<ALNEventStreamBroker>)eventStreamBroker;
 - (NSString *)localizedStringForKey:(NSString *)key
                               locale:(nullable NSString *)locale
                       fallbackLocale:(nullable NSString *)fallbackLocale

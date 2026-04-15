@@ -60,6 +60,7 @@
 #import "Support/ALNAuthProviderPresets.h"
 #import "Support/ALNAuthProviderSessionBridge.h"
 #import "Support/ALNAuthSession.h"
+#import "Support/ALNEventStream.h"
 #import "Support/ALNOIDCClient.h"
 #import "Support/ALNPasswordHash.h"
 #import "Support/ALNRecoveryCodes.h"

@@ -68,6 +68,46 @@ Example event dictionary:
 
 The hub is thread-safe and used by websocket channel mode.
 
+## 4.1 Durable Event-Stream Seam (Phase 33)
+
+Arlen now also ships a durable core/service event-stream seam under
+`ALNEventStream`:
+
+- `ALNEventEnvelope`
+- `ALNEventStreamCursor`
+- `ALNEventStreamRequestContext`
+- `ALNEventStreamStore`
+- `ALNEventStreamAuthorizationHook`
+- `ALNInMemoryEventStreamStore`
+- `ALNEventStreamBroker`
+- `ALNInMemoryEventStreamBroker`
+- `ALNEventStreamService`
+
+Current shipped scope for that seam:
+
+- canonical event envelope shape for named append-only streams
+- authoritative sequence assignment in the configured store adapter
+- replay after sequence through the same store seam
+- request-derived authorization context for append/replay/subscribe decisions
+- deny-by-default authorization entrypoints on `ALNApplication`
+- idempotent append retries scoped by `(stream_id, idempotency_key)`
+- replay-window enforcement with deterministic `resync_required` results
+- publish-after-commit live fanout through the broker seam
+- websocket stream subscribe helpers layered on the same replay/auth contract
+- SSE stream subscribe helpers layered on the same replay/auth contract
+- HTTP replay/poll helpers layered on the same replay/auth contract
+- a plain generated TypeScript consumer surface in the Phase 28 package under
+  `src/realtime.ts`
+
+Current non-goals still remain:
+
+- conversation/presence/read-cursor semantics
+- broker-backed multi-node fanout without an explicit adapter
+- React-specific helpers as part of the first shipping slice
+
+See [Durable Event Streams](EVENT_STREAMS.md) for app-author usage and the
+module boundary.
+
 ## 5. Live UI Baseline
 
 Phase 25 adds a fragment-first live UI layer on top of the Phase 3D realtime

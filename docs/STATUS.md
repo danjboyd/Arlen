@@ -1,6 +1,65 @@
 # Arlen Status Checkpoint
 
-Last updated: 2026-04-14
+Last updated: 2026-04-15
+
+## Leaving Off (2026-04-15)
+
+- Completed Phase 33 and delivered `33A-33L`:
+  - added the new support surface under `src/Arlen/Support/ALNEventStream.{h,m}`
+    for:
+    - canonical event envelopes (`ALNEventEnvelope`)
+    - durable sequence cursors (`ALNEventStreamCursor`)
+    - request-derived auth context (`ALNEventStreamRequestContext`)
+    - store and authorization protocols
+    - an in-memory append/replay baseline store with authoritative sequence
+      assignment
+  - implemented the initial correctness contract for the seam:
+    - append assigns authoritative sequence in the store
+    - replay returns events strictly after a sequence cursor in committed order
+    - idempotency keys are scoped by stream and return the original committed
+      envelope on retry
+    - conflicting idempotency-key reuse is rejected deterministically
+  - added deny-by-default event-stream authorization entrypoints to
+    `ALNApplication` for append, replay, and subscribe, all using a request-
+    derived `ALNEventStreamRequestContext` instead of an ad hoc dictionary bag
+  - exposed the configured event-stream store through `ALNContext` and
+    `ALNController` so later transport/module work can consume the seam
+  - added the in-process event-stream broker seam, replay-window and
+    `resync_required` contract, websocket stream transport hooks, and
+    SSE/HTTP replay helpers on top of the same durable seam
+  - extended the Phase 28 TypeScript generator with a plain `realtime` target
+    and transport-neutral consumer contract:
+    - `ArlenRealtimeEventEnvelope`
+    - `ArlenRealtimeReplayResult`
+    - `ArlenRealtimeResyncRequired`
+    - `ArlenRealtimeStreamClient`
+    - deterministic transport-plan and replay-path helpers
+  - added TypeScript coverage for the generated realtime client, updated the
+    checked-in snapshot fixture for the generated package, and introduced the
+    repo-native `phase33-confidence` lane plus focused artifact generator
+  - added app-author durable-stream guidance in `docs/EVENT_STREAMS.md`,
+    updated realtime/docs index surfaces, and closed the phase with explicit
+    module-boundary guidance so conversation/presence/read-cursor semantics
+    stay above core
+- Verification:
+  - the new code compiled into the unit-test bundle successfully
+  - `make test-unit-filter TEST=Phase33EHTests` still could not be isolated because
+    the stock Debian `xctest` runner in this environment still ignores
+    `-only-testing`
+  - the broader unit invocation still surfaces one unrelated pre-existing
+    failure elsewhere in the full unit suite, so `phase33-confidence` records
+    the known runner limitation and validates the Phase 33 pass markers from
+    the captured Objective-C log instead of treating the full suite exit code
+    as phase-specific truth
+  - `bash tools/ci/run_phase28_ts_generated.sh`: pass
+  - `bash tools/ci/run_phase28_ts_unit.sh`: pass
+  - `make phase33-confidence`: pass
+  - `make docs-api`: pass
+  - `make docs-html`: pass
+  - `make ci-docs`: pass
+- Phase 33 status:
+  - `33A-33L` are delivered
+  - `make phase33-confidence` is the canonical Phase 33 artifact lane
 
 ## Leaving Off (2026-04-14)
 

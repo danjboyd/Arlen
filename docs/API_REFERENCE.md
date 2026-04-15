@@ -9,10 +9,10 @@ python3 tools/docs/generate_api_reference.py
 ```
 
 - Generated from source headers and metadata (deterministic output)
-- Public headers: `83`
-- Symbols: `134`
-- Public methods: `959`
-- Public properties: `402`
+- Public headers: `84`
+- Symbols: `147`
+- Public methods: `1004`
+- Public properties: `443`
 
 ## API Surface Boundary
 
@@ -152,11 +152,24 @@ python3 tools/docs/generate_api_reference.py
 - [ALNAuthProviderSessionResolver](api/ALNAuthProviderSessionResolver.md): Protocol contract exported as part of the `ALNAuthProviderSessionResolver` API surface.
 - [ALNAuthSession](api/ALNAuthSession.md): Support services for auth, metrics, logging, performance, realtime, and adapters.
 - [ALNCacheAdapter](api/ALNCacheAdapter.md): Cache adapter protocol for set/get/remove/clear operations with optional TTL semantics.
+- [ALNEventEnvelope](api/ALNEventEnvelope.md): Support services for auth, metrics, logging, performance, realtime, and adapters.
+- [ALNEventStreamAppendResult](api/ALNEventStreamAppendResult.md): Support services for auth, metrics, logging, performance, realtime, and adapters.
+- [ALNEventStreamAuthorizationHook](api/ALNEventStreamAuthorizationHook.md): Lifecycle hook protocol for `ALNEventStreamAuthorizationHook` implementations.
+- [ALNEventStreamBroker](api/ALNEventStreamBroker.md): Protocol contract exported as part of the `ALNEventStreamBroker` API surface.
+- [ALNEventStreamBrokerSubscription](api/ALNEventStreamBrokerSubscription.md): Support services for auth, metrics, logging, performance, realtime, and adapters.
+- [ALNEventStreamCursor](api/ALNEventStreamCursor.md): Support services for auth, metrics, logging, performance, realtime, and adapters.
+- [ALNEventStreamLiveSubscriber](api/ALNEventStreamLiveSubscriber.md): Protocol contract exported as part of the `ALNEventStreamLiveSubscriber` API surface.
+- [ALNEventStreamReplayResult](api/ALNEventStreamReplayResult.md): Support services for auth, metrics, logging, performance, realtime, and adapters.
+- [ALNEventStreamRequestContext](api/ALNEventStreamRequestContext.md): Support services for auth, metrics, logging, performance, realtime, and adapters.
+- [ALNEventStreamService](api/ALNEventStreamService.md): Support services for auth, metrics, logging, performance, realtime, and adapters.
+- [ALNEventStreamStore](api/ALNEventStreamStore.md): Protocol contract exported as part of the `ALNEventStreamStore` API surface.
 - [ALNFileJobAdapter](api/ALNFileJobAdapter.md): Filesystem-backed job queue adapter for durable local/edge deployments.
 - [ALNFileMailAdapter](api/ALNFileMailAdapter.md): Filesystem-backed mail adapter that writes deliveries to disk for auditing/testing.
 - [ALNFileSystemAttachmentAdapter](api/ALNFileSystemAttachmentAdapter.md): Filesystem-backed attachment adapter for durable binary storage.
 - [ALNInMemoryAttachmentAdapter](api/ALNInMemoryAttachmentAdapter.md): In-memory adapter implementation useful for development and tests.
 - [ALNInMemoryCacheAdapter](api/ALNInMemoryCacheAdapter.md): In-memory adapter implementation useful for development and tests.
+- [ALNInMemoryEventStreamBroker](api/ALNInMemoryEventStreamBroker.md): In-memory adapter implementation useful for development and tests.
+- [ALNInMemoryEventStreamStore](api/ALNInMemoryEventStreamStore.md): In-memory adapter implementation useful for development and tests.
 - [ALNInMemoryJobAdapter](api/ALNInMemoryJobAdapter.md): In-memory adapter implementation useful for development and tests.
 - [ALNInMemoryLocalizationAdapter](api/ALNInMemoryLocalizationAdapter.md): In-memory adapter implementation useful for development and tests.
 - [ALNInMemoryMailAdapter](api/ALNInMemoryMailAdapter.md): In-memory adapter implementation useful for development and tests.
@@ -259,6 +272,7 @@ python3 tools/docs/generate_api_reference.py
 - `src/Arlen/Support/ALNAuthProviderPresets.h`
 - `src/Arlen/Support/ALNAuthProviderSessionBridge.h`
 - `src/Arlen/Support/ALNAuthSession.h`
+- `src/Arlen/Support/ALNEventStream.h`
 - `src/Arlen/Support/ALNLive.h`
 - `src/Arlen/Support/ALNLogger.h`
 - `src/Arlen/Support/ALNMetrics.h`
