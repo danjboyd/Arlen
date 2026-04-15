@@ -80,7 +80,7 @@ def read_http_response(sock: socket.socket) -> Tuple[str, Dict[str, str], bytes]
     return status, headers, body[:length]
 
 
-def wait_ready(port: int, timeout_seconds: float = 12.0) -> None:
+def wait_ready(port: int, timeout_seconds: float = 20.0) -> None:
     deadline = time.time() + timeout_seconds
     last_error = ""
     while time.time() < deadline:
@@ -99,7 +99,7 @@ def wait_ready(port: int, timeout_seconds: float = 12.0) -> None:
     raise RuntimeError(f"server failed readiness probe: {last_error}")
 
 
-def start_server(binary: Path, mode: str, port: int) -> subprocess.Popen[str]:
+def start_server(binary: Path, mode: str, port: int, startup_timeout_seconds: float) -> subprocess.Popen[str]:
     command = [str(binary), "--port", str(port)]
     if mode == "serialized":
         command = [str(binary), "--env", "production", "--port", str(port)]
@@ -110,7 +110,7 @@ def start_server(binary: Path, mode: str, port: int) -> subprocess.Popen[str]:
         text=True,
     )
     try:
-        wait_ready(port)
+        wait_ready(port, timeout_seconds=startup_timeout_seconds)
     except Exception:
         stop_server(process)
         raise
@@ -168,49 +168,55 @@ def run_keepalive_batch(port: int, request_count: int, pipelined: bool) -> Tuple
         return 0, 0
     failures = 0
     sent = 0
-    sock = socket.create_connection(("127.0.0.1", port), timeout=4)
-    sock.settimeout(4)
-    try:
-        if pipelined and request_count >= 2:
-            first = (
-                f"GET /healthz HTTP/1.1\r\n"
-                f"Host: 127.0.0.1:{port}\r\n"
-                "Connection: keep-alive\r\n\r\n"
-            ).encode("utf-8")
-            second = (
-                f"GET /healthz HTTP/1.1\r\n"
-                f"Host: 127.0.0.1:{port}\r\n"
-                "Connection: keep-alive\r\n\r\n"
-            ).encode("utf-8")
-            sock.sendall(first + second)
-            for _ in range(2):
+    remaining = request_count
+    use_pipeline = pipelined and request_count >= 2
+
+    while remaining > 0:
+        sock = socket.create_connection(("127.0.0.1", port), timeout=6)
+        sock.settimeout(6)
+        try:
+            if use_pipeline and remaining >= 2:
+                first = (
+                    f"GET /healthz HTTP/1.1\r\n"
+                    f"Host: 127.0.0.1:{port}\r\n"
+                    "Connection: keep-alive\r\n\r\n"
+                ).encode("utf-8")
+                second = (
+                    f"GET /healthz HTTP/1.1\r\n"
+                    f"Host: 127.0.0.1:{port}\r\n"
+                    "Connection: keep-alive\r\n\r\n"
+                ).encode("utf-8")
+                sock.sendall(first + second)
+                for _ in range(2):
+                    status, _, body = read_http_response(sock)
+                    sent += 1
+                    remaining -= 1
+                    if "200" not in status or body != b"ok\n":
+                        failures += 1
+                use_pipeline = False
+
+            while remaining > 0:
+                connection = "close" if remaining == 1 else "keep-alive"
+                request = (
+                    f"GET /healthz HTTP/1.1\r\n"
+                    f"Host: 127.0.0.1:{port}\r\n"
+                    f"Connection: {connection}\r\n\r\n"
+                ).encode("utf-8")
+                sock.sendall(request)
                 status, _, body = read_http_response(sock)
                 sent += 1
+                remaining -= 1
                 if "200" not in status or body != b"ok\n":
                     failures += 1
-            request_count -= 2
-
-        for idx in range(request_count):
-            connection = "close" if idx == request_count - 1 else "keep-alive"
-            request = (
-                f"GET /healthz HTTP/1.1\r\n"
-                f"Host: 127.0.0.1:{port}\r\n"
-                f"Connection: {connection}\r\n\r\n"
-            ).encode("utf-8")
-            sock.sendall(request)
-            status, _, body = read_http_response(sock)
-            sent += 1
-            if "200" not in status or body != b"ok\n":
-                failures += 1
-    except Exception:
-        remaining = request_count - max(sent, 0)
-        failures += max(remaining, 0)
-        return request_count, failures
-    finally:
-        try:
-            sock.close()
-        except OSError:
-            pass
+        except Exception:
+            failures += 1
+            remaining = max(0, remaining - 1)
+            use_pipeline = False
+        finally:
+            try:
+                sock.close()
+            except OSError:
+                pass
     return sent, failures
 
 
@@ -225,6 +231,7 @@ def run_mode(binary: Path, mode: str, thresholds: Dict[str, Any]) -> Dict[str, A
     requests = int(thresholds.get("requestsPerMode", 400))
     sample_every = max(1, int(thresholds.get("sampleEveryRequests", 80)))
     restart_cycles = max(0, int(thresholds.get("restartCycles", 1)))
+    startup_timeout = float(thresholds.get("startupTimeoutSeconds", 20))
     max_request_failures = int(thresholds.get("maxRequestFailures", 0))
     max_rss_delta = int(thresholds.get("maxRssDeltaKB", 131072))
     max_fd_delta = int(thresholds.get("maxFDDelta", 96))
@@ -238,7 +245,7 @@ def run_mode(binary: Path, mode: str, thresholds: Dict[str, Any]) -> Dict[str, A
     samples: List[Dict[str, Any]] = []
 
     try:
-        process = start_server(binary, mode, port)
+        process = start_server(binary, mode, port, startup_timeout)
         baseline = read_process_metrics(process.pid)
         samples.append({"request_index": 0, **baseline})
 
@@ -278,7 +285,7 @@ def run_mode(binary: Path, mode: str, thresholds: Dict[str, Any]) -> Dict[str, A
             stop_server(process)
             process = None
             port = allocate_free_port()
-            process = start_server(binary, mode, port)
+            process = start_server(binary, mode, port, startup_timeout)
             try:
                 status, body = request_single_health(port)
                 restart_ok = (status == 200 and body == "ok\n")

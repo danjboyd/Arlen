@@ -67,6 +67,11 @@
   return [flags componentsJoinedByString:@" "];
 }
 
+- (NSString *)gnuStepSyntaxOnlyContractFlags {
+  return @"-fobjc-runtime=gnustep-2.2 -fblocks -D_NATIVE_OBJC_EXCEPTIONS "
+         "-fconstant-string-class=NSConstantString";
+}
+
 - (NSDictionary *)fixture {
   NSError *error = nil;
   NSDictionary *fixture =
@@ -266,10 +271,11 @@
        "cd %@ && "
        "%@ && "
        "LD_PRELOAD='' XCTEST_LD_PRELOAD='' ASAN_OPTIONS='' UBSAN_OPTIONS='' EXTRA_OBJC_FLAGS='' "
-       "clang $(gnustep-config --objc-flags) -fsyntax-only "
+       "clang $(gnustep-config --objc-flags) %@ -fsyntax-only "
        "%@ $(find modules -mindepth 2 -maxdepth 2 -type d -name Sources -printf ' -I%%p') %@",
       ALNTestShellQuote(repoRoot),
       ALNTestGNUstepSourceCommandForRepoRoot(repoRoot),
+      [self gnuStepSyntaxOnlyContractFlags],
       includeFlags,
       ALNTestShellQuote(implementationPath)];
 #endif
@@ -331,10 +337,11 @@
          "cd %@ && "
          "%@ && "
          "LD_PRELOAD='' XCTEST_LD_PRELOAD='' ASAN_OPTIONS='' UBSAN_OPTIONS='' EXTRA_OBJC_FLAGS='' "
-         "clang $(gnustep-config --objc-flags) -fsyntax-only "
+         "clang $(gnustep-config --objc-flags) %@ -fsyntax-only "
          "%@ $(find modules -mindepth 2 -maxdepth 2 -type d -name Sources -printf ' -I%%p') %@",
         ALNTestShellQuote(repoRoot),
         ALNTestGNUstepSourceCommandForRepoRoot(repoRoot),
+        [self gnuStepSyntaxOnlyContractFlags],
         includeFlags,
         ALNTestShellQuote(sourcePath)];
 #endif

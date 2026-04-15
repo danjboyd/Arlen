@@ -75,6 +75,17 @@ def wait_ready(port: int, timeout_seconds: float = 15.0) -> None:
     raise RuntimeError(f"server failed readiness probe: {last_error}")
 
 
+def wait_for_lifecycle_token(path: Path, token: str, timeout_seconds: float) -> None:
+    deadline = time.time() + timeout_seconds
+    while time.time() < deadline:
+        if path.exists():
+            text = path.read_text(encoding="utf-8", errors="replace")
+            if token in text:
+                return
+        time.sleep(0.2)
+    raise RuntimeError(f"timed out waiting for lifecycle token: {token}")
+
+
 def child_pids(parent_pid: int) -> List[int]:
     result = subprocess.run(
         ["ps", "-o", "pid=", "--ppid", str(parent_pid)],
@@ -293,6 +304,11 @@ def main() -> int:
             healthy = True
             try:
                 wait_ready(port, timeout_seconds=cycle_ready_timeout)
+                wait_for_lifecycle_token(
+                    lifecycle_log,
+                    f"event=manager_reload_completed manager_pid={manager.pid} generation={cycle}",
+                    cycle_ready_timeout,
+                )
             except Exception as exc:  # noqa: BLE001
                 healthy = False
                 violations.append(f"cycle {cycle}: health check failed after churn ({exc})")
