@@ -11,6 +11,18 @@
 
 - (NSString *)syntaxOnlyIncludeFlagsWithRepoRoot:(NSString *)repoRoot temporaryDir:(NSString *)tmpDir {
   NSMutableArray<NSString *> *flags = [NSMutableArray array];
+  NSArray<NSString *> *gnustepHeaderRoots = @[
+    [NSHomeDirectory() stringByAppendingPathComponent:@"GNUstep/Library/Headers"],
+    @"/usr/GNUstep/Local/Library/Headers",
+    @"/usr/GNUstep/System/Library/Headers",
+  ];
+  for (NSString *headerRoot in gnustepHeaderRoots) {
+    BOOL isDirectory = NO;
+    if ([[NSFileManager defaultManager] fileExistsAtPath:headerRoot isDirectory:&isDirectory] &&
+        isDirectory) {
+      [flags addObject:[NSString stringWithFormat:@"-I%@", ALNTestShellQuote(headerRoot)]];
+    }
+  }
   NSArray<NSString *> *includePaths = @[
     tmpDir ?: @"",
     [repoRoot stringByAppendingPathComponent:@"src"],
@@ -253,6 +265,7 @@
       @"set -euo pipefail && "
        "cd %@ && "
        "%@ && "
+       "LD_PRELOAD='' XCTEST_LD_PRELOAD='' ASAN_OPTIONS='' UBSAN_OPTIONS='' EXTRA_OBJC_FLAGS='' "
        "clang $(gnustep-config --objc-flags) -fsyntax-only "
        "%@ $(find modules -mindepth 2 -maxdepth 2 -type d -name Sources -printf ' -I%%p') %@",
       ALNTestShellQuote(repoRoot),
@@ -317,6 +330,7 @@
         @"set -euo pipefail && "
          "cd %@ && "
          "%@ && "
+         "LD_PRELOAD='' XCTEST_LD_PRELOAD='' ASAN_OPTIONS='' UBSAN_OPTIONS='' EXTRA_OBJC_FLAGS='' "
          "clang $(gnustep-config --objc-flags) -fsyntax-only "
          "%@ $(find modules -mindepth 2 -maxdepth 2 -type d -name Sources -printf ' -I%%p') %@",
         ALNTestShellQuote(repoRoot),

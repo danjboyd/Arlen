@@ -357,7 +357,7 @@ static NSUInteger DataverseMetadataCountOccurrences(NSString *text, NSString *ne
   NSString *manifestPath = [tempDir stringByAppendingPathComponent:@"dataverse.json"];
   NSString *arlenCLIPath = ALNTestPathFromRepoRoot(@"bin/arlen");
 
-  NSString *command = [NSString stringWithFormat:@"%@ && %@ dataverse-codegen --input %@ --output-dir %@ --manifest %@ --prefix ALNDV --force",
+  NSString *command = [NSString stringWithFormat:@"%@ && LD_PRELOAD='' XCTEST_LD_PRELOAD='' ASAN_OPTIONS='' UBSAN_OPTIONS='' EXTRA_OBJC_FLAGS='' %@ dataverse-codegen --input %@ --output-dir %@ --manifest %@ --prefix ALNDV --force",
                                                  ALNTestGNUstepSourceCommandForRepoRoot(ALNTestRepoRoot()),
                                                  ALNTestShellQuote([arlenCLIPath stringByStandardizingPath]),
                                                  ALNTestShellQuote(fixturePath),

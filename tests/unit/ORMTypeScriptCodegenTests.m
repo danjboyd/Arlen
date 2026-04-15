@@ -352,7 +352,7 @@
   NSString *arlenCLIPath = ALNTestPathFromRepoRoot(@"bin/arlen");
 
   NSString *command =
-      [NSString stringWithFormat:@"%@ && %@ typescript-codegen --orm-input %@ --openapi-input %@ --output-dir %@ --manifest %@ --package-name %@ --prefix ALNORMX --target all --force",
+      [NSString stringWithFormat:@"%@ && LD_PRELOAD='' XCTEST_LD_PRELOAD='' ASAN_OPTIONS='' UBSAN_OPTIONS='' EXTRA_OBJC_FLAGS='' %@ typescript-codegen --orm-input %@ --openapi-input %@ --output-dir %@ --manifest %@ --package-name %@ --prefix ALNORMX --target all --force",
                                  ALNTestGNUstepSourceCommandForRepoRoot(ALNTestRepoRoot()),
                                  ALNTestShellQuote([arlenCLIPath stringByStandardizingPath]),
                                  ALNTestShellQuote(ormFixturePath),

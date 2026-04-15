@@ -7,6 +7,7 @@
   "loadDurationSeconds": 5,
   "startupTimeoutSeconds": 60,
   "cycleReadinessTimeoutSeconds": 25,
+  "managerShutdownTimeoutSeconds": 25,
   "maxNon200Responses": 8,
   "maxLoadErrors": 8,
   "allowedManagerExitCodes": [0, -15],

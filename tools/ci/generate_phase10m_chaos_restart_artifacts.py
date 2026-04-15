@@ -182,6 +182,7 @@ def main() -> int:
     load_duration = float(thresholds.get("loadDurationSeconds", 5))
     startup_timeout = float(thresholds.get("startupTimeoutSeconds", 60))
     cycle_ready_timeout = float(thresholds.get("cycleReadinessTimeoutSeconds", 25))
+    manager_shutdown_timeout = float(thresholds.get("managerShutdownTimeoutSeconds", 25))
     max_non_200 = int(thresholds.get("maxNon200Responses", 8))
     max_load_errors = int(thresholds.get("maxLoadErrors", 8))
     allowed_exit_codes = thresholds.get("allowedManagerExitCodes", [0, -15])
@@ -240,7 +241,7 @@ def main() -> int:
     def load_worker() -> None:
         nonlocal request_total, non_200, transient_load_faults
         while not stop_event.is_set():
-            for path in ("/healthz", "/api/sleep?ms=40"):
+            for path in ("/healthz", "/tech-demo/api/summary"):
                 if stop_event.is_set():
                     break
                 try:
@@ -312,7 +313,7 @@ def main() -> int:
             thread.join(timeout=6)
 
         os.kill(manager.pid, signal.SIGTERM)
-        manager_exit_code = manager.wait(timeout=15)
+        manager_exit_code = manager.wait(timeout=manager_shutdown_timeout)
 
         lifecycle_text = lifecycle_log.read_text(encoding="utf-8", errors="replace") if lifecycle_log.exists() else ""
         for token in required_tokens:
