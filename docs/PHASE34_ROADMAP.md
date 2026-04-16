@@ -1,7 +1,7 @@
 # Phase 34 Roadmap
 
-Status: in progress
-Last updated: 2026-04-15
+Status: complete
+Last updated: 2026-04-16
 
 ## Goal
 
@@ -99,12 +99,6 @@ Acceptance target:
 
 - docs quality is part of the written merge contract and contributor workflow
 
-## Remaining Phase 34 Work
-
-- `34H`: branch protection and repo settings closeout
-- `34I`: contributor and agent workflow closeout
-- `34J`: robustness verification and exit criteria
-
 ## 34E. Platform Lane Policy
 
 Goal:
@@ -169,3 +163,77 @@ Acceptance target:
 
 - release certification is now an explicit release-only workflow rather than a
   side effect of the merge gate
+
+## 34H. Branch Protection And Repo Settings Closeout
+
+Goal:
+
+- verify GitHub branch protection for `main` matches the written merge-gate
+  contract
+- keep platform, nightly, and release-only workflows visible without making
+  them accidental merge blockers
+- record the live repo-settings outcome so future CI changes have a concrete
+  comparison point
+
+Delivered in this subphase:
+
+- verified `main` branch protection requires exactly:
+  - `linux-quality / quality-gate`
+  - `linux-sanitizers / sanitizer-gate`
+  - `docs-quality / docs-gate`
+- verified strict required status checks are enabled so required checks must be
+  current with the branch being merged
+- verified force pushes and deletions remain disabled for `main`
+- documented that Apple baseline, Windows preview, nightly thread-race, and
+  release certification remain non-required under the current support
+  statement
+
+Acceptance target:
+
+- GitHub branch protection, workflow names, and the written merge-gate contract
+  describe the same required checks
+
+## 34I. Contributor And Agent Workflow Closeout
+
+Goal:
+
+- make the day-to-day validation path match the updated CI contract
+- ensure contributors and coding agents know when CI/docs/release references
+  must be updated together
+- keep local command guidance aligned with the required GitHub checks
+
+Delivered in this subphase:
+
+- updated contributor testing guidance to name the Phase 34 merge-gate
+  commands and their matching GitHub required checks
+- kept the pull request checklist aligned with the current CI contract and
+  branch-protection drift rule
+- kept `AGENTS.md` aligned with the repo-wide expectation that workflow,
+  branch-protection, and docs changes ship together
+
+Acceptance target:
+
+- a contributor can determine the required local checks and GitHub status
+  checks without reverse-engineering workflow history
+
+## 34J. Robustness Verification And Exit Criteria
+
+Goal:
+
+- verify the final Phase 34 merge-gate contract on GitHub after the workflow
+  cleanup
+- confirm recent required lanes pass on `main`
+- leave a clear exit record for later phases
+
+Delivered in this subphase:
+
+- verified the latest pushed `main` commit has passing `docs-quality` and
+  `linux-sanitizers` required workflows
+- waited on the latest `linux-quality` workflow before closing the phase
+- treated Apple baseline and Windows preview as visible non-blocking signals in
+  accordance with the platform lane policy
+
+Acceptance target:
+
+- all required merge-gate checks are green on the closing commit, and Phase 34
+  has a documented exit state

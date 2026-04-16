@@ -1,6 +1,29 @@
 # Arlen Status Checkpoint
 
-Last updated: 2026-04-15
+Last updated: 2026-04-16
+
+## Leaving Off (2026-04-16)
+
+- Completed Phase 34 and delivered `34H-34J`:
+  - verified live GitHub branch protection for `main` requires exactly:
+    - `linux-quality / quality-gate`
+    - `linux-sanitizers / sanitizer-gate`
+    - `docs-quality / docs-gate`
+  - verified strict required status checks are enabled and force pushes /
+    branch deletions are disabled for `main`
+  - kept Apple baseline, Windows preview, nightly thread-race, and release
+    certification documented as visible but non-blocking lanes under the
+    current support statement
+  - updated contributor testing guidance so local merge-gate commands map
+    directly to the required GitHub checks
+  - closed `docs/PHASE34_ROADMAP.md` and `docs/CI_ALIGNMENT.md` with the final
+    branch-protection and CI contract state
+- Phase 34 status:
+  - `34A-34J` are delivered
+  - required merge-gate checks remain:
+    - `linux-quality / quality-gate`
+    - `linux-sanitizers / sanitizer-gate`
+    - `docs-quality / docs-gate`
 
 ## Leaving Off (2026-04-15)
 

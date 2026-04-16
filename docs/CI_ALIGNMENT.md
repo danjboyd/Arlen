@@ -1,6 +1,6 @@
 # CI Alignment
 
-Last updated: 2026-04-15
+Last updated: 2026-04-16
 
 This document defines the intended shape of Arlen CI so workflow names,
 required checks, and actual project contracts stay aligned.
@@ -50,10 +50,9 @@ Completed:
 - `34E`: platform lane policy
 - `34F`: failure triage and fast feedback
 - `34G`: release lane isolation
-
-Remaining:
-
-- `34H` through `34J`
+- `34H`: branch protection and repo settings closeout
+- `34I`: contributor and agent workflow closeout
+- `34J`: robustness verification and exit criteria
 
 ## Current Merge-Gate Contract
 
@@ -128,6 +127,14 @@ Do not require by default:
 - Windows preview
 - nightly thread-race / experimental lanes
 - release certification
+
+Verified repo state on 2026-04-16:
+
+- `main` branch protection requires exactly the three checks above
+- strict required status checks are enabled
+- force pushes and branch deletions are disabled
+- Apple baseline, Windows preview, nightly thread-race, and release
+  certification are not required checks
 
 Raise a lane to required only when:
 

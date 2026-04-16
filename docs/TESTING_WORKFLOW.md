@@ -3,6 +3,24 @@
 This guide describes the fastest path from a bug report to a permanent Arlen
 regression test.
 
+## Merge-Gate Validation
+
+The Phase 34 merge gate for `main` is:
+
+- `linux-quality / quality-gate`
+  - local entrypoint: `make ci-quality`
+- `linux-sanitizers / sanitizer-gate`
+  - local entrypoint: `make ci-sanitizers`
+- `docs-quality / docs-gate`
+  - local entrypoint: `make ci-docs`
+
+Before merging changes that affect runtime behavior, sanitizer behavior, docs,
+or workflow policy, make the matching local lane pass and confirm the matching
+GitHub required check is green. If workflow names, required checks, release
+lanes, or platform support policy move, update `.github/workflows/`,
+`docs/CI_ALIGNMENT.md`, branch-protection guidance, and contributor docs in the
+same change.
+
 ## 1. Focused Lanes
 
 Use the smallest lane that honestly exercises the bug:
