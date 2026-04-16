@@ -4115,6 +4115,8 @@
     XCTAssertTrue([artifacts containsObject:@"chaos_restart_results.json"]);
     XCTAssertTrue([artifacts containsObject:@"phase10m_chaos_restart.md"]);
     XCTAssertTrue([artifacts containsObject:@"phase10m_chaos_lifecycle.log"]);
+    XCTAssertTrue([artifacts containsObject:@"phase10m_chaos_manager_stdout.log"]);
+    XCTAssertTrue([artifacts containsObject:@"phase10m_chaos_manager_stderr.log"]);
   } @finally {
     [[NSFileManager defaultManager] removeItemAtPath:outputRoot error:nil];
   }

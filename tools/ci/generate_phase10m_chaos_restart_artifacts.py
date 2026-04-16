@@ -15,7 +15,7 @@ import urllib.error
 import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 VERSION = "phase10m-chaos-restart-v1"
 THRESHOLD_VERSION = "phase10m-chaos-restart-thresholds-v1"
@@ -56,10 +56,16 @@ def allocate_free_port() -> int:
         return int(probe.getsockname()[1])
 
 
-def wait_ready(port: int, timeout_seconds: float = 15.0) -> None:
+def wait_ready(port: int,
+               timeout_seconds: float = 15.0,
+               manager: Optional[subprocess.Popen] = None) -> None:
     deadline = time.time() + timeout_seconds
     last_error = ""
     while time.time() < deadline:
+        if manager is not None:
+            exit_code = manager.poll()
+            if exit_code is not None:
+                raise RuntimeError(f"server manager exited before readiness probe: exit_code={exit_code}")
         try:
             body = (
                 urllib.request.urlopen(f"http://127.0.0.1:{port}/healthz", timeout=1.5)
@@ -207,11 +213,16 @@ def main() -> int:
     port = allocate_free_port()
     pid_file = output_dir / "phase10m_chaos_manager.pid"
     lifecycle_log = output_dir / "phase10m_chaos_lifecycle.log"
+    manager_stdout_path = output_dir / "phase10m_chaos_manager_stdout.log"
+    manager_stderr_path = output_dir / "phase10m_chaos_manager_stderr.log"
     output_dir.mkdir(parents=True, exist_ok=True)
     if pid_file.exists():
         pid_file.unlink()
     if lifecycle_log.exists():
         lifecycle_log.unlink()
+    for log_path in (manager_stdout_path, manager_stderr_path):
+        if log_path.exists():
+            log_path.unlink()
 
     env = dict(os.environ)
     env["ARLEN_FRAMEWORK_ROOT"] = str(repo_root)
@@ -232,12 +243,14 @@ def main() -> int:
         str(pid_file),
     ]
 
+    manager_stdout = manager_stdout_path.open("w", encoding="utf-8")
+    manager_stderr = manager_stderr_path.open("w", encoding="utf-8")
     manager = subprocess.Popen(
         command,
         cwd=str(repo_root),
         env=env,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        stdout=manager_stdout,
+        stderr=manager_stderr,
         text=True,
     )
 
@@ -288,7 +301,7 @@ def main() -> int:
     manager_exit_code = -1
 
     try:
-        wait_ready(port, timeout_seconds=startup_timeout)
+        wait_ready(port, timeout_seconds=startup_timeout, manager=manager)
         for thread in workers_threads:
             thread.start()
 
@@ -303,7 +316,7 @@ def main() -> int:
             os.kill(manager.pid, signal.SIGHUP)
             healthy = True
             try:
-                wait_ready(port, timeout_seconds=cycle_ready_timeout)
+                wait_ready(port, timeout_seconds=cycle_ready_timeout, manager=manager)
                 wait_for_lifecycle_token(
                     lifecycle_log,
                     f"event=manager_reload_completed manager_pid={manager.pid} generation={cycle}",
@@ -355,6 +368,8 @@ def main() -> int:
                 manager.wait(timeout=5)
         if manager_exit_code == -1:
             manager_exit_code = int(manager.returncode if manager.returncode is not None else -1)
+        manager_stdout.close()
+        manager_stderr.close()
 
     if non_200 > max_non_200:
         violations.append(f"non-200 responses {non_200} exceed maxNon200Responses {max_non_200}")
@@ -407,6 +422,8 @@ def main() -> int:
             "chaos_restart_results.json",
             "phase10m_chaos_restart.md",
             "phase10m_chaos_lifecycle.log",
+            "phase10m_chaos_manager_stdout.log",
+            "phase10m_chaos_manager_stderr.log",
         ],
     }
     write_json(output_dir / "manifest.json", manifest)

@@ -12,6 +12,9 @@ set +u
 source /usr/GNUstep/System/Library/Makefiles/GNUstep.sh
 set -u
 make boomhauer
+ARLEN_APP_ROOT="$repo_root/examples/tech_demo" \
+ARLEN_FRAMEWORK_ROOT="$repo_root" \
+  "$repo_root/bin/boomhauer" --no-watch --prepare-only >/dev/null
 
 generator_args=(
   --repo-root "$repo_root"

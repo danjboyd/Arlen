@@ -1003,6 +1003,7 @@ Lifecycle diagnostics:
   - intended for local/manual perf triage; `make ci-quality` already covers the broader multi-profile macro perf matrix in CI
 - `make ci-quality`: run unit + integration + multi-profile perf quality gate plus runtime concurrency, JSON abstraction/performance gates, and Phase 9I fault-injection checks
 - `make ci-sanitizers`: run the Phase 10M ASan/UBSan sanitizer matrix (unit, runtime probe, backend parity, fault injection, soak, chaos restart, static analysis) and generate artifacts under `build/release_confidence/phase10m/sanitizers`
+- `make ci-chaos-restart`: run the Phase 10M `propane` chaos/restart lane against the tech demo, warming the app build before manager startup and retaining manager stdout/stderr plus lifecycle artifacts under `build/release_confidence/phase10m/chaos_restart`
 - `make ci-fault-injection`: run Phase 9I runtime seam fault-injection matrix and generate artifacts under `build/release_confidence/phase9i`
 - `make ci-release-certification`: run Phase 9J enterprise release checklist and generate certification artifacts under `build/release_confidence/phase9j`
 - `make ci-json-abstraction`: fail when runtime sources bypass `ALNJSONSerialization`
