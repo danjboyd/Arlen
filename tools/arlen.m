@@ -1352,12 +1352,12 @@ static NSString *RenderedSystemdUnitForTarget(NSDictionary *target, NSString *fr
   NSString *content = [template copy];
   content = [content stringByReplacingOccurrencesOfString:@"Description=Arlen site %i"
                                                withString:[NSString stringWithFormat:@"Description=Arlen site %@", targetName ?: @"app"]];
+  content = [content stringByReplacingOccurrencesOfString:@"ExecStart=/srv/arlen/%i/releases/current/framework/bin/propane --env production"
+                                               withString:[NSString stringWithFormat:@"ExecStart=%@", execStart ?: @""]];
   content = [content stringByReplacingOccurrencesOfString:@"/srv/arlen/%i" withString:releasePath ?: @"/srv/arlen/app"];
   content = [content stringByReplacingOccurrencesOfString:@"/etc/arlen/%i.env" withString:envFile ?: @"/etc/arlen/app.env"];
   content = [content stringByReplacingOccurrencesOfString:@"User=arlen" withString:[NSString stringWithFormat:@"User=%@", runtimeUser ?: @"arlen"]];
   content = [content stringByReplacingOccurrencesOfString:@"Group=arlen" withString:[NSString stringWithFormat:@"Group=%@", runtimeGroup ?: @"arlen"]];
-  content = [content stringByReplacingOccurrencesOfString:@"ExecStart=/srv/arlen/%i/releases/current/framework/bin/propane --env production"
-                                               withString:[NSString stringWithFormat:@"ExecStart=%@", execStart ?: @""]];
   content = [content stringByReplacingOccurrencesOfString:@"SyslogIdentifier=arlen-%i"
                                                withString:[NSString stringWithFormat:@"SyslogIdentifier=%@",
                                                                              [serviceName stringByReplacingOccurrencesOfString:@".service" withString:@""]]];

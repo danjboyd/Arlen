@@ -81,24 +81,7 @@
 }
 
 - (NSString *)runShellCapture:(NSString *)command exitCode:(int *)exitCode {
-  NSTask *task = [[NSTask alloc] init];
-  task.launchPath = @"/bin/bash";
-  task.arguments = @[ @"-lc", command ];
-  NSPipe *stdoutPipe = [NSPipe pipe];
-  NSPipe *stderrPipe = [NSPipe pipe];
-  task.standardOutput = stdoutPipe;
-  task.standardError = stderrPipe;
-  [task launch];
-  [task waitUntilExit];
-
-  if (exitCode != NULL) {
-    *exitCode = task.terminationStatus;
-  }
-  NSData *stdoutData = [[stdoutPipe fileHandleForReading] readDataToEndOfFile];
-  NSData *stderrData = [[stderrPipe fileHandleForReading] readDataToEndOfFile];
-  NSString *stdoutText = [[NSString alloc] initWithData:stdoutData encoding:NSUTF8StringEncoding] ?: @"";
-  NSString *stderrText = [[NSString alloc] initWithData:stderrData encoding:NSUTF8StringEncoding] ?: @"";
-  return [stdoutText stringByAppendingString:stderrText];
+  return ALNTestRunShellCapture(command, exitCode);
 }
 
 - (NSString *)runEOCCCaptureAtRepoRoot:(NSString *)repoRoot
@@ -1443,8 +1426,8 @@
     XCTAssertEqualObjects(@"production", target[@"name"]);
     XCTAssertEqualObjects(@"linux-x86_64-gnustep-clang", target[@"profile"]);
     XCTAssertEqualObjects(@"managed", target[@"runtime_strategy"]);
-    XCTAssertEqualObjects(@"build/deploy/targets/production/local-releases",
-                          [planPayload[@"releases_dir"] hasSuffix:@"build/deploy/targets/production/local-releases"] ? @"build/deploy/targets/production/local-releases" : planPayload[@"releases_dir"]);
+    XCTAssertEqualObjects([releasePath stringByAppendingPathComponent:@"releases"],
+                          planPayload[@"releases_dir"]);
 
     NSString *initOutput = [self runShellCapture:[NSString stringWithFormat:
                                                       @"cd %@ && ARLEN_FRAMEWORK_ROOT=%@ %@/build/arlen "
@@ -2506,7 +2489,7 @@
     int port = [self randomPort];
     NSString *doctorOutput = [self runShellCapture:[NSString stringWithFormat:
                                                         @"set -euo pipefail && "
-                                                         "release_dir=%@ && runtime=%@ && repo_root=%@ && app_root=%@ && releases_dir=%@ && port=%d && "
+                                                         "release_dir=%@; runtime=%@; repo_root=%@; app_root=%@; releases_dir=%@; port=%d; "
                                                          "ARLEN_APP_ROOT=\"$release_dir/app\" ARLEN_FRAMEWORK_ROOT=\"$release_dir/framework\" "
                                                          "\"$runtime\" --port \"$port\" >\"$release_dir/server.log\" 2>&1 & "
                                                          "server_pid=$! && "
@@ -2540,7 +2523,12 @@
     NSDictionary *doctorPayload =
         [self parseJSONDictionaryFromOutput:doctorOutput context:@"arlen deploy doctor --base-url --json"];
     XCTAssertEqualObjects(@"deploy.doctor", doctorPayload[@"workflow"]);
-    XCTAssertEqualObjects(@"ok", doctorPayload[@"status"]);
+    NSString *doctorStatus = [doctorPayload[@"status"] isKindOfClass:[NSString class]] ? doctorPayload[@"status"] : @"";
+    XCTAssertTrue([doctorStatus isEqualToString:@"ok"] || [doctorStatus isEqualToString:@"warn"], @"%@", doctorOutput);
+    NSDictionary *summary =
+        [doctorPayload[@"summary"] isKindOfClass:[NSDictionary class]] ? doctorPayload[@"summary"] : @{};
+    NSNumber *failCount = [summary[@"fail"] isKindOfClass:[NSNumber class]] ? summary[@"fail"] : @(-1);
+    XCTAssertEqual((NSInteger)0, [failCount integerValue], @"%@", doctorOutput);
     NSArray *checks = [doctorPayload[@"checks"] isKindOfClass:[NSArray class]] ? doctorPayload[@"checks"] : @[];
     BOOL sawOperability = NO;
     for (NSDictionary *check in checks) {

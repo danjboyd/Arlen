@@ -102,7 +102,15 @@ PY
 validate_json_signal "healthz" "health" "ok" "true"
 validate_json_signal "readyz" "ready" "ready" "true"
 
-metrics_text="$(curl -fsS "${trimmed_base}/metrics")"
+metrics_text=""
+for _ in $(seq 1 10); do
+  metrics_text="$(curl -fsS "${trimmed_base}/metrics")"
+  if printf '%s' "$metrics_text" | grep -q "aln_http_requests_total"; then
+    break
+  fi
+  curl -fsS "${trimmed_base}/healthz" >/dev/null || true
+  sleep 0.05
+done
 if ! printf '%s' "$metrics_text" | grep -q "aln_http_requests_total"; then
   echo "validate_operability.sh: /metrics missing aln_http_requests_total" >&2
   exit 1

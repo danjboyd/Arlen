@@ -239,32 +239,43 @@ BOOL ALNTestWriteUTF8File(NSString *path, NSString *content, NSError **error) {
 }
 
 NSString *ALNTestRunShellCapture(NSString *command, int *exitCode) {
+  NSString *capturePath = nil;
   @try {
+    capturePath = [NSTemporaryDirectory()
+        stringByAppendingPathComponent:[NSString stringWithFormat:@"arlen-shell-capture-%@.log",
+                                                                  [[NSUUID UUID] UUIDString]]];
+    [[NSFileManager defaultManager] createFileAtPath:capturePath contents:nil attributes:nil];
+    NSFileHandle *captureHandle = [NSFileHandle fileHandleForWritingAtPath:capturePath];
+    if (captureHandle == nil) {
+      if (exitCode != NULL) {
+        *exitCode = 127;
+      }
+      return @"failed to create shell capture file";
+    }
+
     NSTask *task = [[NSTask alloc] init];
     task.launchPath = @"/bin/bash";
     task.arguments = @[ @"-lc", [command isKindOfClass:[NSString class]] ? command : @"" ];
 
-    NSPipe *stdoutPipe = [NSPipe pipe];
-    NSPipe *stderrPipe = [NSPipe pipe];
-    task.standardOutput = stdoutPipe;
-    task.standardError = stderrPipe;
+    task.standardOutput = captureHandle;
+    task.standardError = captureHandle;
 
     [task launch];
     [task waitUntilExit];
+    [captureHandle closeFile];
 
     if (exitCode != NULL) {
       *exitCode = task.terminationStatus;
     }
 
-    NSData *stdoutData = [[stdoutPipe fileHandleForReading] readDataToEndOfFile];
-    NSData *stderrData = [[stderrPipe fileHandleForReading] readDataToEndOfFile];
-    NSMutableData *combined = [NSMutableData dataWithData:stdoutData ?: [NSData data]];
-    if ([stderrData length] > 0) {
-      [combined appendData:stderrData];
-    }
-    NSString *output = [[NSString alloc] initWithData:combined encoding:NSUTF8StringEncoding];
+    NSData *capturedData = [NSData dataWithContentsOfFile:capturePath] ?: [NSData data];
+    [[NSFileManager defaultManager] removeItemAtPath:capturePath error:NULL];
+    NSString *output = [[NSString alloc] initWithData:capturedData encoding:NSUTF8StringEncoding];
     return output ?: @"";
   } @catch (NSException *exception) {
+    if (capturePath != nil) {
+      [[NSFileManager defaultManager] removeItemAtPath:capturePath error:NULL];
+    }
     if (exitCode != NULL) {
       *exitCode = 127;
     }
