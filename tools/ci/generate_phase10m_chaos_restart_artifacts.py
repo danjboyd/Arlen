@@ -228,6 +228,10 @@ def main() -> int:
     env["ARLEN_FRAMEWORK_ROOT"] = str(repo_root)
     env["ARLEN_APP_ROOT"] = str(app_root)
     env["ARLEN_PROPANE_LIFECYCLE_LOG"] = str(lifecycle_log)
+    if "ARLEN_PHASE10M_CHAOS_EXTRA_OBJC_FLAGS" in os.environ:
+        env["EXTRA_OBJC_FLAGS"] = os.environ["ARLEN_PHASE10M_CHAOS_EXTRA_OBJC_FLAGS"]
+    elif "sanitize" in env.get("EXTRA_OBJC_FLAGS", ""):
+        env["EXTRA_OBJC_FLAGS"] = ""
 
     command = [
         str(propane),

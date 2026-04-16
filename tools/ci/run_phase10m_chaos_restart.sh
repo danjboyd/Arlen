@@ -12,9 +12,16 @@ set +u
 source /usr/GNUstep/System/Library/Makefiles/GNUstep.sh
 set -u
 make boomhauer
-ARLEN_APP_ROOT="$repo_root/examples/tech_demo" \
-ARLEN_FRAMEWORK_ROOT="$repo_root" \
-  "$repo_root/bin/boomhauer" --no-watch --prepare-only >/dev/null
+prebuild_env=(
+  "ARLEN_APP_ROOT=$repo_root/examples/tech_demo"
+  "ARLEN_FRAMEWORK_ROOT=$repo_root"
+)
+if [[ -v ARLEN_PHASE10M_CHAOS_EXTRA_OBJC_FLAGS ]]; then
+  prebuild_env+=("EXTRA_OBJC_FLAGS=$ARLEN_PHASE10M_CHAOS_EXTRA_OBJC_FLAGS")
+elif [[ "${EXTRA_OBJC_FLAGS:-}" == *sanitize* ]]; then
+  prebuild_env+=("EXTRA_OBJC_FLAGS=")
+fi
+env "${prebuild_env[@]}" "$repo_root/bin/boomhauer" --no-watch --prepare-only >/dev/null
 
 generator_args=(
   --repo-root "$repo_root"
