@@ -54,6 +54,16 @@ Completed:
 - `34I`: contributor and agent workflow closeout
 - `34J`: robustness verification and exit criteria
 
+Planned/open:
+
+- `34K`: OracleTestVMs-backed platform runner standardization for Apple and
+  Windows confidence lanes. This keeps both lanes non-required under the
+  current support statement while defining a repeatable LAN/self-hosted runner
+  lifecycle. Closing this subphase is blocked on `gnustep-cli-new` being ready
+  for Arlen's Windows MSYS2 `CLANG64` GNUstep provisioning path and on
+  OracleTestVMs macOS VM provisioning being available for the macOS runner
+  side.
+
 ## Current Merge-Gate Contract
 
 - `linux-quality`
@@ -85,6 +95,23 @@ visible but non-required:
 
 Platform lanes should upload artifacts on failure so they remain useful for
 diagnosis even while non-blocking.
+
+## Platform Runner Provisioning Direction
+
+Phase 34K standardizes the intended platform-runner path:
+
+- Windows preview should run on an OracleTestVMs-provisioned LAN Windows VM
+  with the MSYS2 `CLANG64` GNUstep toolchain installed through
+  `gnustep-cli-new`, then registered as a GitHub Actions self-hosted runner
+  with labels `arlen` and `msys2-clang64`.
+- Apple baseline should move toward an OracleTestVMs-provisioned macOS VM path
+  once that provider is available, while preserving the existing full-Xcode and
+  XCTest requirements of `apple-baseline`.
+- The first operational target can be a dedicated long-lived platform runner;
+  ephemeral lease-backed registration/teardown may be documented as a follow-up
+  if that is the lower-risk path to a stable signal.
+
+This provisioning work does not change branch protection by itself.
 
 ## Failure Triage And Fast Feedback
 

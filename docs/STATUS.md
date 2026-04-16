@@ -4,7 +4,29 @@ Last updated: 2026-04-16
 
 ## Leaving Off (2026-04-16)
 
-- Completed Phase 34 and delivered `34H-34J`:
+- Reopened Phase 34 with planned subphase `34K` for OracleTestVMs-backed
+  platform runner standardization:
+  - goal is to align Apple and Windows platform confidence lanes on a repeatable
+    LAN/self-hosted runner lifecycle rather than one-off machine state
+  - Windows path should use OracleTestVMs to provision a local Windows VM and
+    `gnustep-cli-new` to install the MSYS2 `CLANG64` GNUstep toolchain before
+    registering/running the Arlen GitHub Actions runner
+  - macOS path should use OracleTestVMs macOS VM provisioning once available,
+    preserving the Phase 30 full-Xcode/XCTest `apple-baseline` contract
+  - `gnustep-cli-new` completion for Arlen's Windows use case is an explicit
+    blocker for closing `34K`
+  - OracleTestVMs macOS VM provisioning availability is an explicit blocker for
+    completing the macOS side of `34K`
+- Phase 34 status:
+  - `34A-34J` are delivered
+  - `34K` is planned/open
+  - required merge-gate checks remain unchanged:
+    - `linux-quality / quality-gate`
+    - `linux-sanitizers / sanitizer-gate`
+    - `docs-quality / docs-gate`
+
+- Previously closed the required merge-gate portion of Phase 34 and delivered
+  `34H-34J`:
   - verified live GitHub branch protection for `main` requires exactly:
     - `linux-quality / quality-gate`
     - `linux-sanitizers / sanitizer-gate`

@@ -1,6 +1,6 @@
 # Phase 34 Roadmap
 
-Status: complete
+Status: active (`34A-34J` delivered; `34K` planned)
 Last updated: 2026-04-16
 
 ## Goal
@@ -11,6 +11,12 @@ shipped behavior.
 
 Phase 34 is a CI-robustness phase. It focuses on workflow honesty, merge-gate
 clarity, and drift prevention rather than a new end-user feature surface.
+
+After the required Linux/docs merge gate was stabilized, Phase 34 was reopened
+for one platform-runner standardization subphase. That work keeps Apple and
+Windows non-required under the current support statement, but makes their
+runner provisioning path explicit and repeatable before either lane is
+considered for promotion.
 
 ## 34A. CI Contract Audit
 
@@ -237,3 +243,57 @@ Acceptance target:
 
 - all required merge-gate checks are green on the closing commit, and Phase 34
   has a documented exit state
+
+## 34K. OracleTestVMs Platform Runner Standardization
+
+Goal:
+
+- align Apple and Windows platform confidence lanes on an OracleTestVMs-backed
+  self-hosted runner process
+- make LAN-provisioned platform runners reproducible enough that
+  `apple-baseline` and `windows-preview` can be operated without manual
+  one-off machine state
+- use `gnustep-cli-new` as the Windows MSYS2/GNUstep toolchain provisioning
+  path before relying on the Windows preview runner for routine CI signal
+
+Planned scope:
+
+- define the standard runner lifecycle for disposable or dedicated LAN VMs:
+  provision through OracleTestVMs, install the platform toolchain, register the
+  GitHub Actions runner with the expected labels, run Arlen validation, and
+  clean up or reset runner state
+- document the Windows runner contract around:
+  - OracleTestVMs `windows-2022` readiness
+  - `gnustep-cli-new` MSYS2 `CLANG64` / GNUstep installation
+  - Arlen `scripts/run_clang64.ps1`
+  - GitHub runner labels `arlen` and `msys2-clang64`
+- document the macOS runner contract once OracleTestVMs macOS VM provisioning
+  is available, including full-Xcode/XCTest expectations for
+  `apple-baseline`
+- decide whether Phase 34 standardizes on dedicated long-lived platform
+  runners first, then records ephemeral runner automation as follow-up, or
+  requires the ephemeral flow before closing `34K`
+- keep `apple-baseline` and `windows-preview` visible but non-required unless a
+  later support statement deliberately promotes either lane
+
+Blockers:
+
+- `gnustep-cli-new` must be complete enough for Arlen's Windows use case:
+  first-time MSYS2/GNUstep provisioning on a fresh OracleTestVMs Windows lease,
+  a working `GNUstep.sh` / `gnustep-config` / `clang` / `xctest` environment,
+  and enough dependency coverage to run Arlen's Windows preview and packaged
+  release confidence lanes
+- OracleTestVMs macOS VM provisioning must be available before the macOS side
+  of the standardized runner lifecycle can be completed
+- GitHub runner registration and secret/token handling for LAN VMs must be
+  documented before the process is treated as operationally repeatable
+
+Acceptance target:
+
+- a documented OracleTestVMs-backed platform runner process exists for Windows
+  and macOS, with blockers resolved or explicitly deferred
+- `windows-preview` can start on an online LAN runner and run the Arlen Windows
+  preview commands through the documented GNUstep provisioning path
+- `apple-baseline` has a documented OracleTestVMs-backed runner path that
+  matches the Phase 30 full-Xcode/XCTest contract without changing the current
+  required merge-gate checks
