@@ -1,6 +1,6 @@
 # Phase 35 Roadmap
 
-Status: delivered
+Status: delivered through 35H; 35I-35M planned
 Last updated: 2026-04-17
 
 ## Goal
@@ -51,6 +51,13 @@ And route-side attachment like:
     action:@"index"
   policies:@[ @"admin" ]];
 ```
+
+Follow-up subphases add plist-backed route definitions as another registration
+surface for the same router. They must not create a second route system:
+plist loading validates declarative route records and calls the existing
+`ALNApplication`/`ALNRouter` registration APIs so route matching, route
+metadata, policy evaluation, reverse lookup, logging, and diagnostics stay on
+one authoritative route table.
 
 ## Security Boundary
 
@@ -298,3 +305,156 @@ Closeout notes:
   replace auth, CSRF, audit logging, or rollback controls.
 - `make phase35-confidence` writes focused artifacts to
   `build/release_confidence/phase35/`.
+
+## 35I. Plist Route Schema and Validation
+
+Status: planned
+
+Goal:
+
+- define a deterministic plist schema for static route registration
+- make the schema author-friendly without expanding routing semantics beyond
+  the existing Objective-C route API
+- reject malformed route records before the app starts serving traffic
+
+Non-goal:
+
+- do not introduce a second route matcher or a parallel route metadata model
+
+Proposed shape:
+
+```plist
+routes = (
+  {
+    method = "GET";
+    path = "/";
+    name = "home";
+    controller = "HomeController";
+    action = "index";
+  },
+  {
+    method = "POST";
+    path = "/admin/pages/:id";
+    name = "admin.pages.update";
+    controller = "AdminPagesController";
+    action = "update";
+    policies = ("admin");
+  }
+);
+```
+
+Deliverables:
+
+- documented `routes` array schema
+- required fields for `method`, `path`, `controller`, and `action`
+- route-name validation, with names strongly encouraged and required anywhere
+  policy, reverse-route, or diagnostics behavior needs stable identity
+- optional `formats`, `guardAction`, and `policies` fields that map directly to
+  existing router metadata
+- startup diagnostics for unknown keys, unsupported methods, invalid paths,
+  invalid controller/action strings, duplicate names, and malformed policy
+  arrays
+
+Acceptance target:
+
+- invalid plist route definitions fail deterministically with actionable
+  diagnostics and no partial route table mutation
+
+## 35J. Plist Loader Into Existing Router APIs
+
+Status: planned
+
+Goal:
+
+- implement plist route loading as a thin adapter over existing route
+  registration APIs
+- preserve one authoritative `ALNRoute`/`ALNRouter` model
+
+Deliverables:
+
+- app configuration hook that loads declarative routes at startup
+- route registration through `ALNApplication`/`ALNRouter` methods rather than
+  direct mutation of router internals
+- controller-class resolution and action validation consistent with
+  code-defined routes
+- deterministic ordering between code-defined and plist-defined routes
+- rollback behavior when any configured route is invalid
+
+Acceptance target:
+
+- a plist route produces the same `ALNRoute` object shape, matching behavior,
+  route name, formats, guard action, controller/action dispatch, and policy
+  metadata as the equivalent Objective-C route registration call
+
+## 35K. Policy and Admin Integration for Plist Routes
+
+Status: planned
+
+Goal:
+
+- make plist-defined routes first-class consumers of the Phase 35 policy layer
+- keep `/admin` policy wiring compatible with code-defined and declarative
+  routes
+
+Deliverables:
+
+- `policies` field support in plist route records
+- validation that plist-referenced policy names exist under
+  `security.routePolicies`
+- tests covering path-prefix policies on plist-defined routes
+- tests covering explicit plist route policy attachment
+- documentation showing `/admin` and non-admin examples
+
+Acceptance target:
+
+- route policies behave identically whether the route was registered from
+  Objective-C code or from plist configuration
+
+## 35L. Route Inspection and Documentation
+
+Status: planned
+
+Goal:
+
+- make declarative routes inspectable and easy to compare with code-defined
+  routes
+- document when plist routes are appropriate and when Objective-C route code is
+  the better tool
+
+Deliverables:
+
+- route inspection output that includes whether a route was configured from
+  plist or code, without changing runtime semantics
+- app-author docs for static route plist registration
+- configuration reference updates
+- troubleshooting notes for duplicate names, missing controllers/actions,
+  unsupported methods, and unknown policy names
+- examples that combine `routes` with `security.routePolicies`
+
+Acceptance target:
+
+- an operator or coding agent can inspect the effective route table and see the
+  same policy/name/controller/action data regardless of registration source
+
+## 35M. Confidence Lane and Closeout for Plist Routes
+
+Status: planned
+
+Goal:
+
+- add focused regression coverage proving plist route registration stays a
+  wrapper around the existing route system
+
+Deliverables:
+
+- tests proving parity between plist-defined and code-defined routes
+- tests proving startup fails without partial mutation for invalid route plist
+  records
+- tests proving duplicate route names and unknown policies are rejected
+- confidence-lane update that includes plist route coverage
+- roadmap/status closeout notes when delivered
+
+Acceptance target:
+
+- Phase 35 plist route support can be verified with one focused local command,
+  and that command proves there is still only one authoritative route table

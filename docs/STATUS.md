@@ -4,7 +4,13 @@ Last updated: 2026-04-17
 
 ## Leaving Off (2026-04-17)
 
-- Completed Phase 35E-35H and closed Phase 35:
+- Reopened Phase 35 with planned follow-up subphases `35I-35M` for plist route
+  definitions:
+  - plist routes are explicitly a declarative registration surface over the
+    existing `ALNApplication`/`ALNRouter` APIs, not a second route system
+  - planned work covers schema validation, loader behavior, policy/admin
+    integration, route inspection/docs, and a focused parity confidence lane
+- Completed Phase 35E-35H and closed the original access-policy scope:
   - `security.routePolicies.admin` now protects mounted admin UI routes when
     configured, while apps without that policy keep existing behavior
   - added spoofing/proxy regressions for trusted and untrusted forwarded
