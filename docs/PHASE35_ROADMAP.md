@@ -1,6 +1,6 @@
 # Phase 35 Roadmap
 
-Status: delivered through 35H; 35I-35M planned
+Status: delivered through 35K; 35L-35M planned
 Last updated: 2026-04-17
 
 ## Goal
@@ -308,7 +308,7 @@ Closeout notes:
 
 ## 35I. Plist Route Schema and Validation
 
-Status: planned
+Status: delivered 2026-04-17
 
 Goal:
 
@@ -360,9 +360,21 @@ Acceptance target:
 - invalid plist route definitions fail deterministically with actionable
   diagnostics and no partial route table mutation
 
+Delivered notes:
+
+- Added top-level `routes` config validation for static route records.
+- Required fields are `method`, `path`, `controller`, and `action`.
+- Optional `name`, `formats`, `guardAction`, and `policies` map directly to
+  existing route metadata.
+- Startup rejects unknown keys, unsupported methods, invalid paths, unresolved
+  controller classes, invalid action/guard names, duplicate configured names,
+  malformed string arrays, and unknown plist-referenced policy names.
+- Invalid configured routes fail with `invalid_configured_routes` and do not
+  register any configured route.
+
 ## 35J. Plist Loader Into Existing Router APIs
 
-Status: planned
+Status: delivered 2026-04-17
 
 Goal:
 
@@ -386,9 +398,21 @@ Acceptance target:
   route name, formats, guard action, controller/action dispatch, and policy
   metadata as the equivalent Objective-C route registration call
 
+Delivered notes:
+
+- `ALNApplication` loads configured routes during `startWithError:` after app,
+  module, and code-defined route registration.
+- The loader validates the full array first, then calls
+  `registerRouteMethod:path:name:formats:controllerClass:guardAction:action:policies:`.
+- Configured routes therefore share the existing `ALNRoute` objects,
+  `ALNRouter` route table, matching behavior, route compile path, and dispatch
+  behavior with code-defined routes.
+- Duplicate-name validation checks names already present in the router before
+  configured routes are registered.
+
 ## 35K. Policy and Admin Integration for Plist Routes
 
-Status: planned
+Status: delivered 2026-04-17
 
 Goal:
 
@@ -409,6 +433,17 @@ Acceptance target:
 
 - route policies behave identically whether the route was registered from
   Objective-C code or from plist configuration
+
+Delivered notes:
+
+- Plist route records support `policies = (...)`.
+- Policy names referenced by plist routes must exist under
+  `security.routePolicies` before any configured route is registered.
+- `ApplicationTests` covers explicit policy attachment on a plist-defined
+  route, source IP denial, and allowed dispatch through the same route policy
+  middleware used by code-defined routes.
+- `docs/CONFIGURATION_REFERENCE.md` documents the route schema, validation
+  behavior, startup failure contract, and the one-router design constraint.
 
 ## 35L. Route Inspection and Documentation
 

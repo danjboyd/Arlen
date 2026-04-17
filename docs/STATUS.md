@@ -4,12 +4,22 @@ Last updated: 2026-04-17
 
 ## Leaving Off (2026-04-17)
 
-- Reopened Phase 35 with planned follow-up subphases `35I-35M` for plist route
+- Delivered Phase 35I-35K for plist route definitions:
+  - added top-level `routes` config validation for static route records
+  - configured routes are validated as a full array and then registered through
+    existing `ALNApplication`/`ALNRouter` APIs during startup
+  - invalid route config fails startup without partial configured-route
+    registration
+  - plist route `policies` references are validated against
+    `security.routePolicies` before registration
+  - added `ApplicationTests` coverage for router parity, invalid-config
+    rollback, unknown policies, and source IP policy enforcement
+- Reopened Phase 35 with follow-up subphases `35I-35M` for plist route
   definitions:
   - plist routes are explicitly a declarative registration surface over the
     existing `ALNApplication`/`ALNRouter` APIs, not a second route system
-  - planned work covers schema validation, loader behavior, policy/admin
-    integration, route inspection/docs, and a focused parity confidence lane
+  - `35I-35K` are delivered; `35L-35M` remain planned for route
+    inspection/docs and a focused parity confidence lane
 - Completed Phase 35E-35H and closed the original access-policy scope:
   - `security.routePolicies.admin` now protects mounted admin UI routes when
     configured, while apps without that policy keep existing behavior

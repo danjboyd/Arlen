@@ -2290,4 +2290,155 @@ static NSUInteger AppFastPathControllerSlowInvocationCount = 0;
   [app shutdown];
 }
 
+- (void)testConfiguredRoutesRegisterThroughExistingRouter {
+  ALNApplication *app = [[ALNApplication alloc] initWithConfig:@{
+    @"environment" : @"test",
+    @"logFormat" : @"json",
+    @"routes" : @[
+      @{
+        @"method" : @"GET",
+        @"path" : @"/plist/:id",
+        @"name" : @"plist.show",
+        @"controller" : @"AppJSONController",
+        @"action" : @"dict",
+        @"formats" : @[ @"json", @"json" ],
+      }
+    ],
+  }];
+
+  NSError *startError = nil;
+  XCTAssertTrue([app startWithError:&startError]);
+  XCTAssertNil(startError);
+
+  ALNRoute *route = [app.router routeNamed:@"plist.show"];
+  XCTAssertNotNil(route);
+  XCTAssertEqualObjects(@"GET", route.method);
+  XCTAssertEqualObjects(@"/plist/:id", route.pathPattern);
+  XCTAssertEqual(route.controllerClass, [AppJSONController class]);
+  XCTAssertEqualObjects(@"dict", route.actionName);
+  XCTAssertEqualObjects((@[ @"json" ]), route.formats);
+
+  ALNRouteMatch *match = [app.router matchMethod:@"GET"
+                                            path:@"/plist/42"
+                                          format:@"json"];
+  XCTAssertNotNil(match);
+  XCTAssertEqualObjects(@"42", match.params[@"id"]);
+
+  NSArray *table = [app routeTable];
+  XCTAssertEqual((NSUInteger)1, [table count]);
+  NSDictionary *entry = table[0];
+  XCTAssertEqualObjects(@"plist.show", entry[@"name"]);
+  XCTAssertEqualObjects(@"AppJSONController", entry[@"controller"]);
+  [app shutdown];
+}
+
+- (void)testConfiguredRoutesRejectInvalidSchemaWithoutPartialMutation {
+  ALNApplication *app = [[ALNApplication alloc] initWithConfig:@{
+    @"environment" : @"test",
+    @"logFormat" : @"json",
+    @"routes" : @[
+      @{
+        @"method" : @"GET",
+        @"path" : @"/valid",
+        @"name" : @"valid.configured",
+        @"controller" : @"AppJSONController",
+        @"action" : @"dict",
+      },
+      @{
+        @"method" : @"GET",
+        @"path" : @"invalid",
+        @"name" : @"invalid.configured",
+        @"controller" : @"AppJSONController",
+        @"action" : @"dict",
+      },
+    ],
+  }];
+
+  NSError *startError = nil;
+  XCTAssertFalse([app startWithError:&startError]);
+  XCTAssertNotNil(startError);
+  XCTAssertEqualObjects(@"Arlen.Application.Error", startError.domain);
+  XCTAssertEqual((NSInteger)352, startError.code);
+  XCTAssertEqualObjects(@"invalid_configured_routes", startError.userInfo[@"reason"]);
+  NSArray *details = startError.userInfo[@"details"];
+  XCTAssertTrue([details isKindOfClass:[NSArray class]]);
+  XCTAssertNil([app.router routeNamed:@"valid.configured"]);
+  XCTAssertEqual((NSUInteger)0, [[app.router allRoutes] count]);
+}
+
+- (void)testConfiguredRoutesRejectUnknownPolicyBeforeRegistration {
+  ALNApplication *app = [[ALNApplication alloc] initWithConfig:@{
+    @"environment" : @"test",
+    @"logFormat" : @"json",
+    @"routes" : @[
+      @{
+        @"method" : @"GET",
+        @"path" : @"/admin/configured",
+        @"name" : @"admin.configured",
+        @"controller" : @"AppJSONController",
+        @"action" : @"dict",
+        @"policies" : @[ @"admin" ],
+      }
+    ],
+  }];
+
+  NSError *startError = nil;
+  XCTAssertFalse([app startWithError:&startError]);
+  XCTAssertNotNil(startError);
+  XCTAssertEqual((NSInteger)352, startError.code);
+  NSArray *details = startError.userInfo[@"details"];
+  XCTAssertTrue([details isKindOfClass:[NSArray class]]);
+  XCTAssertTrue([details count] > 0);
+  NSDictionary *detail = [details firstObject];
+  XCTAssertEqualObjects(@"unknown_route_policy", detail[@"code"]);
+  XCTAssertNil([app.router routeNamed:@"admin.configured"]);
+}
+
+- (void)testConfiguredRoutePoliciesApplyToPlistDefinedRoutes {
+  ALNApplication *app = [[ALNApplication alloc] initWithConfig:@{
+    @"environment" : @"test",
+    @"logFormat" : @"json",
+    @"security" : @{
+      @"routePolicies" : @{
+        @"admin" : @{
+          @"sourceIPAllowlist" : @[ @"127.0.0.1/32" ],
+        },
+      },
+    },
+    @"routes" : @[
+      @{
+        @"method" : @"GET",
+        @"path" : @"/admin/configured",
+        @"name" : @"admin.configured",
+        @"controller" : @"AppJSONController",
+        @"action" : @"dict",
+        @"policies" : @[ @"admin" ],
+      }
+    ],
+  }];
+
+  NSError *startError = nil;
+  XCTAssertTrue([app startWithError:&startError]);
+  XCTAssertNil(startError);
+
+  ALNRoute *route = [app.router routeNamed:@"admin.configured"];
+  XCTAssertNotNil(route);
+  XCTAssertEqualObjects((@[ @"admin" ]), route.policyNames);
+
+  ALNRequest *deniedRequest = [self requestForPath:@"/admin/configured"];
+  deniedRequest.remoteAddress = @"198.51.100.10";
+  ALNResponse *denied = [app dispatchRequest:deniedRequest];
+  XCTAssertEqual((NSInteger)403, denied.statusCode);
+  XCTAssertEqualObjects(@"source_ip_denied",
+                        [denied headerForName:@"X-Arlen-Policy-Denial-Reason"]);
+
+  ALNRequest *allowedRequest = [self requestForPath:@"/admin/configured"];
+  allowedRequest.remoteAddress = @"127.0.0.1";
+  ALNResponse *allowed = [app dispatchRequest:allowedRequest];
+  XCTAssertEqual((NSInteger)200, allowed.statusCode);
+  NSDictionary *json = [self JSONObjectFromResponse:allowed];
+  XCTAssertEqualObjects(@(YES), json[@"ok"]);
+  [app shutdown];
+}
+
 @end

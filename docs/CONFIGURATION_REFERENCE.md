@@ -255,6 +255,63 @@ See [Route Policies](ROUTE_POLICIES.md) for `/admin` examples, denial log
 fields, troubleshooting guidance, and the `make phase35-confidence`
 verification lane.
 
+## 6.2 Plist Route Definitions
+
+Static routes can be declared in plist configuration with the top-level
+`routes` array. This is only a declarative registration surface over the
+existing route system: Arlen validates every configured route, then registers
+valid entries through the same `ALNApplication`/`ALNRouter` APIs used by
+Objective-C route code.
+
+Example:
+
+```plist
+routes = (
+  {
+    method = "GET";
+    path = "/";
+    name = "home";
+    controller = "HomeController";
+    action = "index";
+  },
+  {
+    method = "POST";
+    path = "/admin/pages/:id";
+    name = "admin.pages.update";
+    controller = "AdminPagesController";
+    action = "update";
+    policies = ("admin");
+  }
+);
+```
+
+Required route fields:
+
+- `method`: one of `GET`, `POST`, `PUT`, `PATCH`, `DELETE`, `HEAD`,
+  `OPTIONS`, or `ANY`
+- `path`: absolute route path beginning with `/`
+- `controller`: Objective-C controller class name
+- `action`: action name without a trailing colon
+
+Optional route fields:
+
+- `name`: stable route name; strongly recommended for diagnostics and reverse
+  routing
+- `formats`: accepted route formats
+- `guardAction`: guard action name without a trailing colon
+- `policies`: named route policies from `security.routePolicies`
+
+Configured routes are loaded during application startup after normal app and
+module route registration. Invalid configured routes fail startup with
+`invalid_configured_routes`, include per-field diagnostics under `details`, and
+do not partially mutate the route table. Duplicate configured route names,
+unknown keys, unsupported methods, missing controller classes, invalid paths,
+malformed string arrays, and unknown policy names are rejected before any
+configured route is registered.
+
+Use plist routes for static, data-shaped route tables. Keep dynamic or
+conditional route registration in Objective-C code.
+
 ## 7. Auth and API Helpers
 
 Auth:

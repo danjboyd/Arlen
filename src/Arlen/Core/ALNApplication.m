@@ -84,6 +84,10 @@ static ALNDataverseTarget *ALNDataverseTargetFromMergedConfig(NSDictionary *merg
 static NSArray<NSString *> *ALNDataverseTargetNamesFromConfigAndEnvironment(NSDictionary *config);
 static ALNEventStreamRequestContext *ALNEventStreamRequestContextFromOptionalContext(ALNContext *context);
 static NSError *ALNValidateRoutePolicyReferences(ALNApplication *application);
+static NSDictionary *ALNErrorDetailEntry(NSString *field,
+                                         NSString *code,
+                                         NSString *message,
+                                         NSDictionary *meta);
 
 static BOOL ALNEnvFlagEnabled(const char *name) {
   if (name == NULL || name[0] == '\0') {
@@ -652,7 +656,9 @@ static BOOL ALNInvokeRouteAction(id controller,
 @property(nonatomic, strong) NSLock *routeCompilationLock;
 @property(nonatomic, strong) NSMutableDictionary<NSString *, ALNDataverseClient *> *mutableDataverseClients;
 @property(nonatomic, strong) NSLock *dataverseClientLock;
+@property(nonatomic, assign) BOOL configuredRoutesLoaded;
 
+- (BOOL)loadConfiguredRoutesWithError:(NSError *_Nullable *_Nullable)error;
 - (void)loadConfiguredPlugins;
 - (void)loadConfiguredModules;
 - (void)loadConfiguredStaticMounts;
@@ -1018,6 +1024,7 @@ static NSArray<NSString *> *ALNDataverseTargetNamesFromConfigAndEnvironment(NSDi
     _bootedAt = [NSDate date];
     _startedAt = nil;
     _started = NO;
+    _configuredRoutesLoaded = NO;
     _routeCompilationLock = [[NSLock alloc] init];
     _mutableDataverseClients = [NSMutableDictionary dictionary];
     _dataverseClientLock = [[NSLock alloc] init];
@@ -1840,6 +1847,248 @@ static NSArray *ALNNormalizedUniqueStrings(NSArray *values) {
     [normalized addObject:trimmed];
   }
   return [NSArray arrayWithArray:normalized];
+}
+
+static NSString *ALNTrimmedRouteConfigString(id value) {
+  if (![value isKindOfClass:[NSString class]]) {
+    return nil;
+  }
+  NSString *trimmed = [(NSString *)value stringByTrimmingCharactersInSet:
+                                      [NSCharacterSet whitespaceAndNewlineCharacterSet]];
+  return ([trimmed length] > 0) ? trimmed : nil;
+}
+
+static NSArray *ALNAllowedRouteConfigKeys(void) {
+  return @[
+    @"method",
+    @"path",
+    @"name",
+    @"controller",
+    @"action",
+    @"formats",
+    @"guardAction",
+    @"policies",
+  ];
+}
+
+static NSSet *ALNSupportedConfiguredRouteMethods(void) {
+  static NSSet *methods = nil;
+  if (methods == nil) {
+    methods = [[NSSet alloc] initWithArray:@[
+      @"ANY",
+      @"DELETE",
+      @"GET",
+      @"HEAD",
+      @"OPTIONS",
+      @"PATCH",
+      @"POST",
+      @"PUT",
+    ]];
+  }
+  return methods;
+}
+
+static BOOL ALNConfiguredRouteStringArrayIsValid(id value,
+                                                 NSString *field,
+                                                 NSMutableArray *details) {
+  if (value == nil) {
+    return YES;
+  }
+  if (![value isKindOfClass:[NSArray class]]) {
+    [details addObject:ALNErrorDetailEntry(field,
+                                           @"invalid_type",
+                                           @"field must be an array of strings",
+                                           nil)];
+    return NO;
+  }
+  BOOL ok = YES;
+  NSUInteger idx = 0;
+  for (id entry in (NSArray *)value) {
+    if (ALNTrimmedRouteConfigString(entry) == nil) {
+      [details addObject:ALNErrorDetailEntry(
+                             [NSString stringWithFormat:@"%@.%lu",
+                                                        field,
+                                                        (unsigned long)idx],
+                             @"invalid_string",
+                             @"array values must be non-empty strings",
+                             nil)];
+      ok = NO;
+    }
+    idx++;
+  }
+  return ok;
+}
+
+static NSDictionary *ALNValidatedConfiguredRouteRecord(NSDictionary *entry,
+                                                       NSUInteger index,
+                                                       ALNApplication *application,
+                                                       NSMutableSet *seenNames,
+                                                       NSMutableArray *details) {
+  NSUInteger detailStart = [details count];
+  NSString *prefix = [NSString stringWithFormat:@"routes.%lu", (unsigned long)index];
+  if (![entry isKindOfClass:[NSDictionary class]]) {
+    [details addObject:ALNErrorDetailEntry(prefix,
+                                           @"invalid_type",
+                                           @"route entry must be a dictionary",
+                                           nil)];
+    return nil;
+  }
+
+  NSSet *allowedKeys = [NSSet setWithArray:ALNAllowedRouteConfigKeys()];
+  for (id key in [entry allKeys]) {
+    if (![key isKindOfClass:[NSString class]] || ![allowedKeys containsObject:key]) {
+      [details addObject:ALNErrorDetailEntry(
+                             [NSString stringWithFormat:@"%@.%@", prefix, key ?: @""],
+                             @"unknown_key",
+                             @"route entry contains an unsupported key",
+                             nil)];
+    }
+  }
+
+  NSString *method = ALNTrimmedRouteConfigString(entry[@"method"]);
+  NSString *path = ALNTrimmedRouteConfigString(entry[@"path"]);
+  NSString *controllerName = ALNTrimmedRouteConfigString(entry[@"controller"]);
+  NSString *action = ALNTrimmedRouteConfigString(entry[@"action"]);
+  NSString *name = ALNTrimmedRouteConfigString(entry[@"name"]);
+  NSString *guardAction = ALNTrimmedRouteConfigString(entry[@"guardAction"]);
+  NSArray *formats = nil;
+  NSArray *policies = nil;
+
+  if (method == nil) {
+    [details addObject:ALNErrorDetailEntry([prefix stringByAppendingString:@".method"],
+                                           @"required",
+                                           @"method is required",
+                                           nil)];
+  } else {
+    method = [method uppercaseString];
+    if (![ALNSupportedConfiguredRouteMethods() containsObject:method]) {
+      [details addObject:ALNErrorDetailEntry([prefix stringByAppendingString:@".method"],
+                                             @"unsupported_method",
+                                             @"method is not supported for plist routes",
+                                             @{ @"method" : method ?: @"" })];
+    }
+  }
+
+  if (path == nil) {
+    [details addObject:ALNErrorDetailEntry([prefix stringByAppendingString:@".path"],
+                                           @"required",
+                                           @"path is required",
+                                           nil)];
+  } else if (![path hasPrefix:@"/"]) {
+    [details addObject:ALNErrorDetailEntry([prefix stringByAppendingString:@".path"],
+                                           @"invalid_path",
+                                           @"path must start with /",
+                                           @{ @"path" : path ?: @"" })];
+  }
+
+  if (controllerName == nil) {
+    [details addObject:ALNErrorDetailEntry([prefix stringByAppendingString:@".controller"],
+                                           @"required",
+                                           @"controller is required",
+                                           nil)];
+  }
+
+  if (action == nil) {
+    [details addObject:ALNErrorDetailEntry([prefix stringByAppendingString:@".action"],
+                                           @"required",
+                                           @"action is required",
+                                           nil)];
+  } else if ([action rangeOfString:@":"].location != NSNotFound) {
+    [details addObject:ALNErrorDetailEntry([prefix stringByAppendingString:@".action"],
+                                           @"invalid_action",
+                                           @"action must be an action name without a colon",
+                                           @{ @"action" : action ?: @"" })];
+  }
+
+  if (guardAction != nil && [guardAction rangeOfString:@":"].location != NSNotFound) {
+    [details addObject:ALNErrorDetailEntry([prefix stringByAppendingString:@".guardAction"],
+                                           @"invalid_guard_action",
+                                           @"guardAction must be an action name without a colon",
+                                           @{ @"guardAction" : guardAction ?: @"" })];
+  }
+
+  if (name != nil) {
+    if ([seenNames containsObject:name] || [application.router routeNamed:name] != nil) {
+      [details addObject:ALNErrorDetailEntry([prefix stringByAppendingString:@".name"],
+                                             @"duplicate_route_name",
+                                             @"route name is already registered",
+                                             @{ @"name" : name ?: @"" })];
+    } else {
+      [seenNames addObject:name];
+    }
+  }
+
+  if (!ALNConfiguredRouteStringArrayIsValid(entry[@"formats"],
+                                            [prefix stringByAppendingString:@".formats"],
+                                            details)) {
+    /* Details populated above. */
+  } else if ([entry[@"formats"] isKindOfClass:[NSArray class]]) {
+    formats = ALNNormalizedUniqueStrings(entry[@"formats"]);
+  }
+
+  if (!ALNConfiguredRouteStringArrayIsValid(entry[@"policies"],
+                                            [prefix stringByAppendingString:@".policies"],
+                                            details)) {
+    /* Details populated above. */
+  } else if ([entry[@"policies"] isKindOfClass:[NSArray class]]) {
+    policies = ALNNormalizedUniqueStrings(entry[@"policies"]);
+    NSDictionary *security = ALNDictionaryConfigValue(application.config ?: @{}, @"security");
+    NSDictionary *configuredPolicies = ALNDictionaryConfigValue(security, @"routePolicies");
+    for (NSString *policyName in policies ?: @[]) {
+      if (![configuredPolicies[policyName] isKindOfClass:[NSDictionary class]]) {
+        [details addObject:ALNErrorDetailEntry(
+                               [prefix stringByAppendingString:@".policies"],
+                               @"unknown_route_policy",
+                               @"policy is not configured under security.routePolicies",
+                               @{ @"policy" : policyName ?: @"" })];
+      }
+    }
+  }
+
+  Class controllerClass = nil;
+  if (controllerName != nil) {
+    controllerClass = NSClassFromString(controllerName);
+    if (controllerClass == Nil) {
+      [details addObject:ALNErrorDetailEntry([prefix stringByAppendingString:@".controller"],
+                                             @"unknown_controller",
+                                             @"controller class could not be resolved",
+                                             @{ @"controller" : controllerName ?: @"" })];
+    }
+  }
+
+  if ([details count] > detailStart) {
+    return nil;
+  }
+
+  NSMutableDictionary *record = [NSMutableDictionary dictionary];
+  record[@"method"] = method ?: @"";
+  record[@"path"] = path ?: @"";
+  record[@"controllerClass"] = controllerClass;
+  record[@"action"] = action ?: @"";
+  if (name != nil) {
+    record[@"name"] = name;
+  }
+  if ([guardAction length] > 0) {
+    record[@"guardAction"] = guardAction;
+  }
+  if ([formats count] > 0) {
+    record[@"formats"] = formats;
+  }
+  if ([policies count] > 0) {
+    record[@"policies"] = policies;
+  }
+  return [record copy];
+}
+
+static NSError *ALNConfiguredRoutesError(NSArray *details) {
+  return [NSError errorWithDomain:ALNApplicationErrorDomain
+                             code:352
+                         userInfo:@{
+                           NSLocalizedDescriptionKey : @"Invalid route definitions",
+                           @"reason" : @"invalid_configured_routes",
+                           @"config_key" : @"routes",
+                           @"details" : details ?: @[],
+                         }];
 }
 
 static NSError *ALNValidateRoutePolicyReferences(ALNApplication *application) {
@@ -3686,6 +3935,67 @@ static void ALNFinalizeResponse(ALNApplication *application,
   }
 }
 
+- (BOOL)loadConfiguredRoutesWithError:(NSError **)error {
+  if (self.configuredRoutesLoaded) {
+    return YES;
+  }
+
+  id rawRoutes = self.config[@"routes"];
+  if (rawRoutes == nil) {
+    self.configuredRoutesLoaded = YES;
+    return YES;
+  }
+  if (![rawRoutes isKindOfClass:[NSArray class]]) {
+    if (error != NULL) {
+      *error = ALNConfiguredRoutesError(@[
+        ALNErrorDetailEntry(@"routes",
+                            @"invalid_type",
+                            @"routes must be an array of dictionaries",
+                            nil)
+      ]);
+    }
+    return NO;
+  }
+
+  NSArray *routes = (NSArray *)rawRoutes;
+  NSMutableArray *details = [NSMutableArray array];
+  NSMutableArray *records = [NSMutableArray array];
+  NSMutableSet *seenNames = [NSMutableSet set];
+  NSUInteger idx = 0;
+  for (id value in routes) {
+    NSDictionary *record = ALNValidatedConfiguredRouteRecord(value,
+                                                             idx,
+                                                             self,
+                                                             seenNames,
+                                                             details);
+    if (record != nil) {
+      [records addObject:record];
+    }
+    idx++;
+  }
+
+  if ([details count] > 0) {
+    if (error != NULL) {
+      *error = ALNConfiguredRoutesError(details);
+    }
+    return NO;
+  }
+
+  for (NSDictionary *record in records) {
+    [self registerRouteMethod:record[@"method"]
+                         path:record[@"path"]
+                         name:record[@"name"]
+                      formats:record[@"formats"]
+              controllerClass:record[@"controllerClass"]
+                  guardAction:record[@"guardAction"]
+                       action:record[@"action"]
+                     policies:record[@"policies"]];
+  }
+
+  self.configuredRoutesLoaded = YES;
+  return YES;
+}
+
 - (void)loadConfiguredModules {
   NSError *error = nil;
   NSArray<id<ALNModule>> *modules = [ALNModuleSystem loadModulesForApplication:self error:&error];
@@ -4256,6 +4566,13 @@ static void ALNFinalizeResponse(ALNApplication *application,
   if (routePolicyConfigError != nil) {
     if (error != NULL) {
       *error = routePolicyConfigError;
+    }
+    return NO;
+  }
+  NSError *configuredRoutesError = nil;
+  if (![self loadConfiguredRoutesWithError:&configuredRoutesError]) {
+    if (error != NULL) {
+      *error = configuredRoutesError;
     }
     return NO;
   }
