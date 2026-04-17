@@ -44,6 +44,7 @@
 #import "MVC/Middleware/ALNCSRFMiddleware.h"
 #import "MVC/Middleware/ALNRateLimitMiddleware.h"
 #import "MVC/Middleware/ALNResponseEnvelopeMiddleware.h"
+#import "MVC/Middleware/ALNRoutePolicyMiddleware.h"
 #import "MVC/Middleware/ALNSecurityHeadersMiddleware.h"
 #import "MVC/Middleware/ALNSessionMiddleware.h"
 #import "MVC/Routing/ALNRoute.h"

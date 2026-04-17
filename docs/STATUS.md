@@ -4,6 +4,14 @@ Last updated: 2026-04-17
 
 ## Leaving Off (2026-04-17)
 
+- Delivered Phase 35A-35D for the route/middleware policy layer:
+  - added named route-policy configuration under `security.routePolicies`
+    plus `security.trustedProxies`
+  - added IPv4/IPv6 CIDR matching and proxy-aware client IP resolution for
+    `Forwarded` and `X-Forwarded-For`
+  - added path-prefix policy matching and route-side `policies:` attachment
+  - added `ALNRoutePolicyMiddleware` denial behavior, structured denial logs,
+    startup diagnostics, and focused middleware regression coverage
 - Added planned Phase 35 for the route/middleware policy layer requested by
   the downstream OwnerConnect feature report:
   - named route policies rather than admin-only IP whitelist switches

@@ -23,6 +23,14 @@ NS_ASSUME_NONNULL_BEGIN
             controllerClass:(Class)controllerClass
                 guardAction:(nullable NSString *)guardAction
                      action:(NSString *)action;
+- (ALNRoute *)addRouteMethod:(NSString *)method
+                       path:(NSString *)path
+                       name:(nullable NSString *)name
+                    formats:(nullable NSArray *)formats
+            controllerClass:(Class)controllerClass
+                guardAction:(nullable NSString *)guardAction
+                     action:(NSString *)action
+                   policies:(nullable NSArray *)policies;
 - (nullable ALNRouteMatch *)matchMethod:(NSString *)method path:(NSString *)path;
 - (nullable ALNRouteMatch *)matchMethod:(NSString *)method
                                    path:(NSString *)path

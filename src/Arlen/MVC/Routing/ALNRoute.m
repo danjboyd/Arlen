@@ -131,6 +131,7 @@ static NSString *ALNNormalizedPathForFastMatch(NSString *path) {
     _tags = @[];
     _requiredScopes = @[];
     _requiredRoles = @[];
+    _policyNames = @[];
     _minimumAuthAssuranceLevel = 0;
     _maximumAuthenticationAgeSeconds = 0;
     _stepUpPath = @"";
@@ -393,6 +394,9 @@ static NSString *ALNNormalizedPathForFastMatch(NSString *path) {
   }
   if ([self.requiredRoles count] > 0) {
     representation[@"requiredRoles"] = self.requiredRoles;
+  }
+  if ([self.policyNames count] > 0) {
+    representation[@"policies"] = self.policyNames;
   }
   if (self.minimumAuthAssuranceLevel > 0) {
     representation[@"minimumAuthAssuranceLevel"] = @(self.minimumAuthAssuranceLevel);

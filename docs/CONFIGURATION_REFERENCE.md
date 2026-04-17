@@ -171,6 +171,80 @@ Security headers:
 Many apps can keep the generated security-header defaults and only tighten the
 CSP later as the frontend becomes more specific.
 
+## 6.1 Route Policies
+
+Route policies are named access-control checks evaluated by middleware before a
+protected controller/action runs. The first policy capabilities are path-prefix
+matching, route-side attachment, source IP allowlisting, and an auth-required
+gate.
+
+Example:
+
+```plist
+security = {
+  trustedProxies = (
+    "127.0.0.1/32",
+    "10.0.0.0/8",
+    "::1/128"
+  );
+
+  routePolicies = {
+    admin = {
+      pathPrefixes = ("/admin");
+      requireAuth = YES;
+      trustForwardedClientIP = YES;
+      sourceIPAllowlist = (
+        "127.0.0.1/32",
+        "10.0.0.0/8",
+        "203.0.113.10/32"
+      );
+    };
+  };
+};
+```
+
+Policy names must start with a letter or underscore and may then contain
+letters, digits, or underscores. Invalid names, invalid CIDR ranges, unsupported
+policy fields, and route-side references to unknown policies fail application
+startup with deterministic diagnostics.
+
+Policy keys:
+
+- `pathPrefixes`: URL path prefixes protected by the policy
+- `sourceIPAllowlist`: IPv4 or IPv6 CIDR ranges allowed through the outer gate
+- `requireAuth`: deny when the request has no authenticated subject
+- `trustForwardedClientIP`: allow the policy to use proxy-provided client IP
+  headers, but only when the direct peer matches `security.trustedProxies`
+
+Proxy behavior is fail-closed for protected routes. Without trusted proxies,
+Arlen uses the direct socket peer IP. With trusted proxies configured, Arlen only
+uses `Forwarded` or `X-Forwarded-For` when the immediate peer is trusted; public
+clients cannot opt into those headers themselves. If Arlen cannot resolve a
+client IP for a protected allowlist check, the request is denied.
+
+Denied route-policy requests return `403`, set
+`X-Arlen-Policy-Denial-Reason`, and log `route_policy.denied` with distinct
+reasons such as `source_ip_denied`, `direct_peer_unresolved`,
+`forwarded_client_unresolved`, and `authentication_required`.
+
+Route-side attachment is also available for routes that should opt into a named
+policy independent of path prefix:
+
+```objc
+[app registerRouteMethod:@"GET"
+                    path:@"/admin"
+                    name:@"admin_index"
+                 formats:nil
+         controllerClass:[AdminController class]
+             guardAction:nil
+                  action:@"index"
+                policies:@[ @"admin" ]];
+```
+
+IP allowlisting is an outer gate only. Real administrative surfaces should still
+use authentication, CSRF protection for browser flows, audit logging, and
+revision history or rollback for operational changes.
+
 ## 7. Auth and API Helpers
 
 Auth:

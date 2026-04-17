@@ -10,6 +10,7 @@
 #import "ALNCSRFMiddleware.h"
 #import "ALNRateLimitMiddleware.h"
 #import "ALNResponseEnvelopeMiddleware.h"
+#import "ALNRoutePolicyMiddleware.h"
 #import "ALNRouter.h"
 #import "ALNRoute.h"
 #import "ALNSecurityHeadersMiddleware.h"
@@ -82,6 +83,7 @@ static ALNDataverseTarget *ALNDataverseTargetFromMergedConfig(NSDictionary *merg
                                                               NSError **error);
 static NSArray<NSString *> *ALNDataverseTargetNamesFromConfigAndEnvironment(NSDictionary *config);
 static ALNEventStreamRequestContext *ALNEventStreamRequestContextFromOptionalContext(ALNContext *context);
+static NSError *ALNValidateRoutePolicyReferences(ALNApplication *application);
 
 static BOOL ALNEnvFlagEnabled(const char *name) {
   if (name == NULL || name[0] == '\0') {
@@ -407,6 +409,63 @@ static BOOL ALNFastRouteSignatureIsValid(NSMethodSignature *signature) {
   return (ALNReturnKindForSignature(signature) == ALNRouteInvocationReturnKindBool);
 }
 
+static NSString *ALNNormalizedRoutePolicyPrefixValue(id value) {
+  NSString *trimmed = ALNTrimmedStringValue(value);
+  if ([trimmed length] == 0) {
+    return @"";
+  }
+  while ([trimmed containsString:@"//"]) {
+    trimmed = [trimmed stringByReplacingOccurrencesOfString:@"//" withString:@"/"];
+  }
+  if (![trimmed hasPrefix:@"/"]) {
+    trimmed = [@"/" stringByAppendingString:trimmed];
+  }
+  while ([trimmed length] > 1 && [trimmed hasSuffix:@"/"]) {
+    trimmed = [trimmed substringToIndex:[trimmed length] - 1];
+  }
+  return trimmed;
+}
+
+static BOOL ALNRoutePolicyPrefixCouldMatchFastRoute(ALNRoute *route, NSString *prefix) {
+  NSString *normalizedPrefix = ALNNormalizedRoutePolicyPrefixValue(prefix);
+  if ([normalizedPrefix length] == 0) {
+    return NO;
+  }
+  if ([normalizedPrefix isEqualToString:@"/"]) {
+    return YES;
+  }
+  if (route.kind != ALNRouteKindStatic) {
+    return YES;
+  }
+  NSString *normalizedRoute = ALNNormalizedRoutePolicyPrefixValue(route.pathPattern);
+  if ([normalizedRoute isEqualToString:normalizedPrefix]) {
+    return YES;
+  }
+  NSString *prefixWithSlash = [normalizedPrefix stringByAppendingString:@"/"];
+  return [normalizedRoute hasPrefix:prefixWithSlash];
+}
+
+static BOOL ALNRoutePolicyMiddlewareIsTransparentForFastRoute(ALNApplication *application, ALNRoute *route) {
+  if ([route.policyNames count] > 0) {
+    return NO;
+  }
+  NSDictionary *config = [application.config isKindOfClass:[NSDictionary class]] ? application.config : @{};
+  NSDictionary *security = [config[@"security"] isKindOfClass:[NSDictionary class]] ? config[@"security"] : @{};
+  NSDictionary *policies = [security[@"routePolicies"] isKindOfClass:[NSDictionary class]]
+                                ? security[@"routePolicies"]
+                                : @{};
+  for (NSString *name in [policies allKeys]) {
+    NSDictionary *policy = [policies[name] isKindOfClass:[NSDictionary class]] ? policies[name] : nil;
+    NSArray *prefixes = [policy[@"pathPrefixes"] isKindOfClass:[NSArray class]] ? policy[@"pathPrefixes"] : @[];
+    for (id prefix in prefixes) {
+      if (ALNRoutePolicyPrefixCouldMatchFastRoute(route, [prefix isKindOfClass:[NSString class]] ? prefix : @"")) {
+        return NO;
+      }
+    }
+  }
+  return YES;
+}
+
 static BOOL ALNRouteCanUseCompiledFastAction(ALNApplication *application, ALNRoute *route) {
   if (application == nil || route == nil) {
     return NO;
@@ -414,8 +473,15 @@ static BOOL ALNRouteCanUseCompiledFastAction(ALNApplication *application, ALNRou
   if (route.compiledFastActionSelector == NULL || route.compiledFastActionIMP == NULL) {
     return NO;
   }
-  if ([[application middlewares] count] > 0) {
-    return NO;
+  NSArray *middlewares = [application middlewares];
+  if ([middlewares count] > 0) {
+    BOOL onlyTransparentRoutePolicyMiddleware =
+        ([middlewares count] == 1 &&
+         [middlewares[0] isKindOfClass:[ALNRoutePolicyMiddleware class]] &&
+         ALNRoutePolicyMiddlewareIsTransparentForFastRoute(application, route));
+    if (!onlyTransparentRoutePolicyMiddleware) {
+      return NO;
+    }
   }
   if (route.guardSelector != NULL) {
     return NO;
@@ -987,13 +1053,32 @@ static NSArray<NSString *> *ALNDataverseTargetNamesFromConfigAndEnvironment(NSDi
                   controllerClass:(Class)controllerClass
                       guardAction:(NSString *)guardAction
                            action:(NSString *)actionName {
+  return [self registerRouteMethod:method
+                              path:path
+                              name:name
+                           formats:formats
+                   controllerClass:controllerClass
+                       guardAction:guardAction
+                            action:actionName
+                          policies:nil];
+}
+
+- (ALNRoute *)registerRouteMethod:(NSString *)method
+                             path:(NSString *)path
+                             name:(NSString *)name
+                          formats:(NSArray *)formats
+                  controllerClass:(Class)controllerClass
+                      guardAction:(NSString *)guardAction
+                           action:(NSString *)actionName
+                         policies:(NSArray *)policies {
   return [self.router addRouteMethod:method
                                 path:path
                                 name:name
                              formats:formats
                      controllerClass:controllerClass
                          guardAction:guardAction
-                              action:actionName];
+                              action:actionName
+                            policies:policies];
 }
 
 - (void)beginRouteGroupWithPrefix:(NSString *)prefix
@@ -1755,6 +1840,48 @@ static NSArray *ALNNormalizedUniqueStrings(NSArray *values) {
     [normalized addObject:trimmed];
   }
   return [NSArray arrayWithArray:normalized];
+}
+
+static NSError *ALNValidateRoutePolicyReferences(ALNApplication *application) {
+  if (application == nil) {
+    return nil;
+  }
+  NSDictionary *security = ALNDictionaryConfigValue(application.config ?: @{}, @"security");
+  NSDictionary *policies = ALNDictionaryConfigValue(security, @"routePolicies");
+  NSMutableArray *details = [NSMutableArray array];
+
+  for (id value in [application.router allRoutes]) {
+    if (![value isKindOfClass:[ALNRoute class]]) {
+      continue;
+    }
+    ALNRoute *route = (ALNRoute *)value;
+    for (NSString *policyName in route.policyNames ?: @[]) {
+      if (![policyName isKindOfClass:[NSString class]] || [policyName length] == 0) {
+        continue;
+      }
+      if (![policies[policyName] isKindOfClass:[NSDictionary class]]) {
+        [details addObject:@{
+          @"field" : @"route.policyNames",
+          @"code" : @"unknown_route_policy",
+          @"policy" : policyName,
+          @"route" : route.name ?: @"",
+          @"path" : route.pathPattern ?: @"",
+        }];
+      }
+    }
+  }
+
+  if ([details count] == 0) {
+    return nil;
+  }
+  return [NSError errorWithDomain:ALNApplicationErrorDomain
+                             code:351
+                         userInfo:@{
+                           NSLocalizedDescriptionKey : @"Invalid route policy references",
+                           @"reason" : @"invalid_route_policy_references",
+                           @"config_key" : @"security.routePolicies",
+                           @"details" : details,
+                         }];
 }
 
 static NSDictionary *ALNErrorDetailEntry(NSString *field,
@@ -3725,6 +3852,25 @@ static void ALNFinalizeResponse(ALNApplication *application,
   return YES;
 }
 
+- (BOOL)configureRoutePoliciesForRouteNamed:(NSString *)routeName
+                                   policies:(NSArray *)policies
+                                      error:(NSError **)error {
+  ALNRoute *route = [self.router routeNamed:routeName];
+  if (route == nil) {
+    if (error != NULL) {
+      *error = [NSError errorWithDomain:ALNApplicationErrorDomain
+                                   code:305
+                               userInfo:@{
+                                 NSLocalizedDescriptionKey :
+                                     [NSString stringWithFormat:@"route not found: %@", routeName ?: @""]
+                               }];
+    }
+    return NO;
+  }
+  route.policyNames = ALNNormalizedUniqueStrings(policies);
+  return YES;
+}
+
 - (BOOL)authorizeEventStreamAppendToStream:(NSString *)streamID
                                      event:(NSDictionary *)event
                                    context:(ALNContext *)context
@@ -4106,6 +4252,20 @@ static void ALNFinalizeResponse(ALNApplication *application,
     }
     return NO;
   }
+  NSError *routePolicyConfigError = [ALNRoutePolicyMiddleware validateSecurityConfiguration:self.config];
+  if (routePolicyConfigError != nil) {
+    if (error != NULL) {
+      *error = routePolicyConfigError;
+    }
+    return NO;
+  }
+  NSError *routePolicyReferenceError = ALNValidateRoutePolicyReferences(self);
+  if (routePolicyReferenceError != nil) {
+    if (error != NULL) {
+      *error = routePolicyReferenceError;
+    }
+    return NO;
+  }
 
   if ([self routingCompileOnStartEnabled]) {
     NSError *routeCompileError = nil;
@@ -4212,6 +4372,8 @@ static void ALNFinalizeResponse(ALNApplication *application,
         ALNStringConfigValue(securityHeaders[@"contentSecurityPolicy"], @"default-src 'self'");
     [self addMiddleware:[[ALNSecurityHeadersMiddleware alloc] initWithContentSecurityPolicy:csp]];
   }
+
+  [self addMiddleware:[[ALNRoutePolicyMiddleware alloc] init]];
 
   NSDictionary *rateLimit = ALNDictionaryConfigValue(self.config, @"rateLimit");
   BOOL rateLimitEnabled = ALNBoolConfigValue(rateLimit[@"enabled"], NO);
@@ -4708,6 +4870,7 @@ static void ALNFinalizeResponse(ALNApplication *application,
   baseStash[ALNContextEOCStrictLocalsStashKey] = @(self.eocStrictLocalsEnabled);
   baseStash[ALNContextEOCStrictStringifyStashKey] = @(self.eocStrictStringifyEnabled);
   baseStash[ALNContextPageStateEnabledStashKey] = @(self.pageStateEnabled);
+  baseStash[ALNContextRoutePolicyNamesStashKey] = matchedRoute.policyNames ?: @[];
   NSMutableDictionary *stash =
       (NSMutableDictionary *)[[ALNRequestLazyStash alloc] initWithBaseValues:baseStash
                                                              requestIdentity:requestIdentity

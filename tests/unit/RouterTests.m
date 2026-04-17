@@ -133,6 +133,24 @@
   XCTAssertNil(htmlMatch);
 }
 
+- (void)testRoutePoliciesAttachAndAppearInRouteTable {
+  ALNRouter *router = [[ALNRouter alloc] init];
+  ALNRoute *route = [router addRouteMethod:@"GET"
+                                      path:@"/admin"
+                                      name:@"admin_index"
+                                   formats:nil
+                           controllerClass:[RouterDummyController class]
+                               guardAction:nil
+                                    action:@"index"
+                                  policies:@[ @"admin", @" admin ", @"audit" ]];
+
+  XCTAssertEqualObjects((@[ @"admin", @"audit" ]), route.policyNames);
+  NSArray *table = [router routeTable];
+  XCTAssertEqual((NSUInteger)1, [table count]);
+  NSDictionary *entry = table[0];
+  XCTAssertEqualObjects((@[ @"admin", @"audit" ]), entry[@"policies"]);
+}
+
 - (void)testFormatConditionSelectsMatchingRouteVariant {
   ALNRouter *router = [[ALNRouter alloc] init];
   [router addRouteMethod:@"GET"

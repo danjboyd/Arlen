@@ -113,6 +113,17 @@
                          headers:headers];
 }
 
+- (ALNResponse *)dispatchPolicyRequestForApp:(ALNApplication *)app
+                                        path:(NSString *)path
+                               remoteAddress:(NSString *)remoteAddress
+                                     headers:(NSDictionary *)headers {
+  ALNRequest *request = [self requestWithMethod:@"GET"
+                                           path:path ?: @"/admin"
+                                        headers:headers ?: @{}];
+  request.remoteAddress = remoteAddress ?: @"";
+  return [app dispatchRequest:request];
+}
+
 - (ALNRequest *)requestWithMethod:(NSString *)method
                              path:(NSString *)path
                       queryString:(NSString *)queryString
@@ -176,6 +187,199 @@
       [self hmacSHA256:[prefix dataUsingEncoding:NSUTF8StringEncoding]
                    key:[secret dataUsingEncoding:NSUTF8StringEncoding]];
   return [NSString stringWithFormat:@"%@.%@", prefix, [self base64URLFromData:signature]];
+}
+
+- (ALNApplication *)routePolicyApplicationWithSecurity:(NSDictionary *)security
+                                                 route:(NSString *)routePath
+                                              policies:(NSArray *)policies {
+  ALNApplication *app = [[ALNApplication alloc] initWithConfig:@{
+    @"environment" : @"test",
+    @"logFormat" : @"json",
+    @"security" : security ?: @{},
+  }];
+  [app registerRouteMethod:@"GET"
+                      path:routePath ?: @"/admin"
+                      name:@"admin_ping"
+                   formats:nil
+           controllerClass:[MiddlewareFormController class]
+               guardAction:nil
+                    action:@"ping"
+                  policies:policies];
+  return app;
+}
+
+- (void)testRoutePolicySourceIPAllowlistAllowsDirectPeer {
+  NSDictionary *security = @{
+    @"routePolicies" : @{
+      @"admin" : @{
+        @"pathPrefixes" : @[ @"/admin" ],
+        @"sourceIPAllowlist" : @[ @"127.0.0.1/32", @"2001:db8::/32" ],
+      }
+    }
+  };
+  ALNApplication *app = [self routePolicyApplicationWithSecurity:security route:@"/admin" policies:nil];
+  XCTAssertTrue([app startWithError:NULL]);
+
+  ALNResponse *response = [self dispatchPolicyRequestForApp:app
+                                                       path:@"/admin"
+                                              remoteAddress:@"127.0.0.1"
+                                                    headers:@{}];
+  ALNAssertResponseStatus(response, 200);
+  XCTAssertEqualObjects(@"pong\n", ALNTestStringFromResponse(response));
+}
+
+- (void)testRoutePolicySourceIPAllowlistDeniesDirectPeerOutsideCIDR {
+  NSDictionary *security = @{
+    @"routePolicies" : @{
+      @"admin" : @{
+        @"pathPrefixes" : @[ @"/admin" ],
+        @"sourceIPAllowlist" : @[ @"10.0.0.0/8" ],
+      }
+    }
+  };
+  ALNApplication *app = [self routePolicyApplicationWithSecurity:security route:@"/admin" policies:nil];
+  XCTAssertTrue([app startWithError:NULL]);
+
+  ALNResponse *response = [self dispatchPolicyRequestForApp:app
+                                                       path:@"/admin"
+                                              remoteAddress:@"203.0.113.10"
+                                                    headers:@{}];
+  ALNAssertResponseStatus(response, 403);
+  XCTAssertEqualObjects(@"source_ip_denied", [response headerForName:@"X-Arlen-Policy-Denial-Reason"]);
+}
+
+- (void)testRoutePolicyTrustedProxyUsesForwardedClientIP {
+  NSDictionary *security = @{
+    @"trustedProxies" : @[ @"127.0.0.1/32" ],
+    @"routePolicies" : @{
+      @"admin" : @{
+        @"pathPrefixes" : @[ @"/admin" ],
+        @"trustForwardedClientIP" : @(YES),
+        @"sourceIPAllowlist" : @[ @"203.0.113.10/32" ],
+      }
+    }
+  };
+  ALNApplication *app = [self routePolicyApplicationWithSecurity:security route:@"/admin" policies:nil];
+  XCTAssertTrue([app startWithError:NULL]);
+
+  ALNResponse *response = [self dispatchPolicyRequestForApp:app
+                                                       path:@"/admin"
+                                              remoteAddress:@"127.0.0.1"
+                                                    headers:@{
+                                                      @"Forwarded" : @"for=203.0.113.10;proto=https",
+                                                    }];
+  ALNAssertResponseStatus(response, 200);
+}
+
+- (void)testRoutePolicyIgnoresSpoofedXForwardedForFromUntrustedPeer {
+  NSDictionary *security = @{
+    @"trustedProxies" : @[ @"127.0.0.1/32" ],
+    @"routePolicies" : @{
+      @"admin" : @{
+        @"pathPrefixes" : @[ @"/admin" ],
+        @"trustForwardedClientIP" : @(YES),
+        @"sourceIPAllowlist" : @[ @"203.0.113.10/32" ],
+      }
+    }
+  };
+  ALNApplication *app = [self routePolicyApplicationWithSecurity:security route:@"/admin" policies:nil];
+  XCTAssertTrue([app startWithError:NULL]);
+
+  ALNResponse *response = [self dispatchPolicyRequestForApp:app
+                                                       path:@"/admin"
+                                              remoteAddress:@"198.51.100.20"
+                                                    headers:@{
+                                                      @"X-Forwarded-For" : @"203.0.113.10",
+                                                    }];
+  ALNAssertResponseStatus(response, 403);
+  XCTAssertEqualObjects(@"source_ip_denied", [response headerForName:@"X-Arlen-Policy-Denial-Reason"]);
+}
+
+- (void)testRouteSidePolicyAttachmentProtectsNamedRoute {
+  NSDictionary *security = @{
+    @"routePolicies" : @{
+      @"admin" : @{
+        @"sourceIPAllowlist" : @[ @"192.0.2.10/32" ],
+      }
+    }
+  };
+  ALNApplication *app = [self routePolicyApplicationWithSecurity:security
+                                                          route:@"/private"
+                                                       policies:@[ @"admin" ]];
+  XCTAssertTrue([app startWithError:NULL]);
+
+  ALNResponse *allowed = [self dispatchPolicyRequestForApp:app
+                                                      path:@"/private"
+                                             remoteAddress:@"192.0.2.10"
+                                                   headers:@{}];
+  ALNAssertResponseStatus(allowed, 200);
+  ALNResponse *denied = [self dispatchPolicyRequestForApp:app
+                                                     path:@"/private"
+                                            remoteAddress:@"192.0.2.11"
+                                                  headers:@{}];
+  ALNAssertResponseStatus(denied, 403);
+}
+
+- (void)testRoutePolicyRequireAuthDeniesUnauthenticatedRequest {
+  NSDictionary *security = @{
+    @"routePolicies" : @{
+      @"admin" : @{
+        @"pathPrefixes" : @[ @"/admin" ],
+        @"requireAuth" : @(YES),
+      }
+    }
+  };
+  ALNApplication *app = [self routePolicyApplicationWithSecurity:security route:@"/admin" policies:nil];
+  XCTAssertTrue([app startWithError:NULL]);
+
+  ALNResponse *response = [self dispatchPolicyRequestForApp:app
+                                                       path:@"/admin"
+                                              remoteAddress:@"127.0.0.1"
+                                                    headers:@{}];
+  ALNAssertResponseStatus(response, 403);
+  XCTAssertEqualObjects(@"authentication_required", [response headerForName:@"X-Arlen-Policy-Denial-Reason"]);
+}
+
+- (void)testRoutePolicyConfigRejectsInvalidCIDRAndUnsupportedFields {
+  ALNApplication *app = [[ALNApplication alloc] initWithConfig:@{
+    @"environment" : @"test",
+    @"security" : @{
+      @"trustedProxies" : @[ @"not-a-cidr" ],
+      @"routePolicies" : @{
+        @"admin" : @{
+          @"pathPrefixes" : @[ @"/admin" ],
+          @"sourceIPAllowlist" : @[ @"10.0.0.0/99" ],
+          @"trustedProxyHeaders" : @(YES),
+        }
+      }
+    }
+  }];
+  NSError *error = nil;
+  XCTAssertFalse([app startWithError:&error]);
+  XCTAssertNotNil(error);
+  XCTAssertEqualObjects(@"invalid_route_policy_config", error.userInfo[@"reason"]);
+  NSArray *details = [error.userInfo[@"details"] isKindOfClass:[NSArray class]] ? error.userInfo[@"details"] : @[];
+  XCTAssertTrue([details count] >= 3);
+}
+
+- (void)testRoutePolicyStartRejectsUnknownRouteSidePolicy {
+  NSDictionary *security = @{
+    @"routePolicies" : @{
+      @"admin" : @{},
+    }
+  };
+  ALNApplication *app = [self routePolicyApplicationWithSecurity:security
+                                                          route:@"/private"
+                                                       policies:@[ @"missing_admin_policy" ]];
+
+  NSError *error = nil;
+  XCTAssertFalse([app startWithError:&error]);
+  XCTAssertNotNil(error);
+  XCTAssertEqualObjects(@"invalid_route_policy_references", error.userInfo[@"reason"]);
+  NSArray *details = [error.userInfo[@"details"] isKindOfClass:[NSArray class]] ? error.userInfo[@"details"] : @[];
+  XCTAssertEqual((NSUInteger)1, [details count]);
+  XCTAssertEqualObjects(@"unknown_route_policy", details[0][@"code"]);
+  XCTAssertEqualObjects(@"missing_admin_policy", details[0][@"policy"]);
 }
 
 - (void)testSessionAndCSRFMiddlewareAllowValidUnsafeRequest {

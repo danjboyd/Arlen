@@ -63,6 +63,22 @@ static NSArray *ALNNormalizeFormats(NSArray *formats) {
   return [NSArray arrayWithArray:normalized];
 }
 
+static NSArray *ALNNormalizePolicyNames(NSArray *policies) {
+  NSMutableArray *normalized = [NSMutableArray array];
+  for (id value in policies ?: @[]) {
+    if (![value isKindOfClass:[NSString class]]) {
+      continue;
+    }
+    NSString *trimmed =
+        [(NSString *)value stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    if ([trimmed length] == 0 || [normalized containsObject:trimmed]) {
+      continue;
+    }
+    [normalized addObject:trimmed];
+  }
+  return [NSArray arrayWithArray:normalized];
+}
+
 static NSString *ALNNormalizedMethodName(NSString *method) {
   if (![method isKindOfClass:[NSString class]] || [method length] == 0) {
     return @"GET";
@@ -215,6 +231,24 @@ static NSArray *ALNStaticCandidatesForPath(NSDictionary *index,
             controllerClass:(Class)controllerClass
                 guardAction:(NSString *)guardAction
                      action:(NSString *)action {
+  return [self addRouteMethod:method
+                         path:path
+                         name:name
+                      formats:formats
+              controllerClass:controllerClass
+                  guardAction:guardAction
+                       action:action
+                     policies:nil];
+}
+
+- (ALNRoute *)addRouteMethod:(NSString *)method
+                       path:(NSString *)path
+                       name:(NSString *)name
+                    formats:(NSArray *)formats
+            controllerClass:(Class)controllerClass
+                guardAction:(NSString *)guardAction
+                     action:(NSString *)action
+                   policies:(NSArray *)policies {
   NSString *groupPrefix = @"/";
   NSString *inheritedGuard = nil;
   NSArray *inheritedFormats = nil;
@@ -248,6 +282,7 @@ static NSArray *ALNStaticCandidatesForPath(NSDictionary *index,
                                    guardActionName:resolvedGuard
                                         actionName:action
                                  registrationIndex:self.routeCounter++];
+  route.policyNames = ALNNormalizePolicyNames(policies);
   [self.routes addObject:route];
 
   NSString *bucketKey = ALNNormalizedMethodName(route.method);

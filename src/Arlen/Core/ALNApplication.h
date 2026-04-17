@@ -97,6 +97,14 @@ NS_ASSUME_NONNULL_BEGIN
                    controllerClass:(Class)controllerClass
                        guardAction:(nullable NSString *)guardAction
                             action:(NSString *)actionName;
+- (ALNRoute *)registerRouteMethod:(NSString *)method
+                              path:(NSString *)path
+                              name:(nullable NSString *)name
+                           formats:(nullable NSArray *)formats
+                   controllerClass:(Class)controllerClass
+                       guardAction:(nullable NSString *)guardAction
+                            action:(NSString *)actionName
+                          policies:(nullable NSArray *)policies;
 - (void)beginRouteGroupWithPrefix:(NSString *)prefix
                       guardAction:(nullable NSString *)guardAction
                           formats:(nullable NSArray *)formats;
@@ -146,6 +154,9 @@ NS_ASSUME_NONNULL_BEGIN
                   minimumAuthAssuranceLevel:(NSUInteger)minimumAuthAssuranceLevel
             maximumAuthenticationAgeSeconds:(NSUInteger)maximumAuthenticationAgeSeconds
                                  stepUpPath:(nullable NSString *)stepUpPath
+                                      error:(NSError *_Nullable *_Nullable)error;
+- (BOOL)configureRoutePoliciesForRouteNamed:(NSString *)routeName
+                                   policies:(nullable NSArray *)policies
                                       error:(NSError *_Nullable *_Nullable)error;
 
 - (BOOL)authorizeEventStreamAppendToStream:(NSString *)streamID

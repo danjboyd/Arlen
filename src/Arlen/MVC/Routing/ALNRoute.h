@@ -50,6 +50,7 @@ typedef NS_ENUM(NSUInteger, ALNRouteInvocationReturnKind) {
 @property(nonatomic, copy) NSArray *tags;
 @property(nonatomic, copy) NSArray *requiredScopes;
 @property(nonatomic, copy) NSArray *requiredRoles;
+@property(nonatomic, copy) NSArray *policyNames;
 @property(nonatomic, assign) NSUInteger minimumAuthAssuranceLevel;
 @property(nonatomic, assign) NSUInteger maximumAuthenticationAgeSeconds;
 @property(nonatomic, copy) NSString *stepUpPath;

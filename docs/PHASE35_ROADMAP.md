@@ -1,6 +1,6 @@
 # Phase 35 Roadmap
 
-Status: planned
+Status: in progress; 35A-35D delivered, 35E-35H planned
 Last updated: 2026-04-17
 
 ## Goal
@@ -77,6 +77,8 @@ Default behavior:
 
 ## 35A. Policy Model and Configuration Contract
 
+Status: delivered 2026-04-17
+
 Goal:
 
 - define the configuration schema for route policies and trusted proxies
@@ -102,6 +104,8 @@ Acceptance target:
 
 ## 35B. CIDR and Client IP Resolution Runtime
 
+Status: delivered 2026-04-17
+
 Goal:
 
 - implement reusable IPv4/IPv6 CIDR matching
@@ -125,6 +129,8 @@ Acceptance target:
 
 ## 35C. Route Attachment and Path-Prefix Matching
 
+Status: delivered 2026-04-17
+
 Goal:
 
 - let policies apply by config path prefix and by explicit route metadata
@@ -144,6 +150,8 @@ Acceptance target:
 - when multiple policies apply, the result is deterministic and fail-closed
 
 ## 35D. Policy Middleware Evaluation
+
+Status: delivered 2026-04-17
 
 Goal:
 
@@ -167,6 +175,22 @@ Acceptance target:
 
 - policy denial prevents controller/action execution
 - logs distinguish source-IP denial from auth failure
+
+Delivered notes:
+
+- `ALNRoutePolicyMiddleware` validates `security.trustedProxies` and
+  `security.routePolicies` during application startup.
+- `sourceIPAllowlist` supports IPv4 and IPv6 CIDR ranges. Bare IP addresses are
+  treated as exact-host matches.
+- `trustForwardedClientIP` is policy-specific and only trusts `Forwarded` or
+  `X-Forwarded-For` when the immediate peer matches `security.trustedProxies`.
+- Path-prefix policies are evaluated by sorted policy name, then route-side
+  policies are appended in route registration order with duplicates removed.
+- Route-side policy references fail startup when the named policy is not
+  configured.
+- Denied requests return `403`, set `X-Arlen-Policy-Denial-Reason`, commit the
+  response before controller dispatch, and log `route_policy.denied` with the
+  policy, reason, route, path, client IP, and client-IP source fields.
 
 ## 35E. `/admin` First Consumer
 
