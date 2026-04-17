@@ -132,6 +132,7 @@ static NSString *ALNNormalizedPathForFastMatch(NSString *path) {
     _requiredScopes = @[];
     _requiredRoles = @[];
     _policyNames = @[];
+    _source = @"code";
     _minimumAuthAssuranceLevel = 0;
     _maximumAuthenticationAgeSeconds = 0;
     _stepUpPath = @"";
@@ -373,6 +374,7 @@ static NSString *ALNNormalizedPathForFastMatch(NSString *path) {
     @"name" : self.name ?: @"",
     @"controller" : NSStringFromClass(self.controllerClass ?: [NSObject class]),
     @"action" : self.actionName ?: @"",
+    @"source" : self.source ?: @"code",
   }];
   if ([self.guardActionName length] > 0) {
     representation[@"guard"] = self.guardActionName;

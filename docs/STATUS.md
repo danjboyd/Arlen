@@ -4,6 +4,15 @@ Last updated: 2026-04-17
 
 ## Leaving Off (2026-04-17)
 
+- Closed Phase 35 with `35L-35M` delivered:
+  - route inspection now marks each effective route with `source = code` or
+    `source = plist`
+  - `boomhauer --print-routes` / `arlen routes` print the source marker while
+    still reading from the single authoritative route table
+  - added plist/code route-table parity, duplicate-name rejection, and source
+    metadata regression coverage
+  - expanded `make phase35-confidence` to include `ApplicationTests` and plist
+    route coverage in the confidence manifest
 - Delivered Phase 35I-35K for plist route definitions:
   - added top-level `routes` config validation for static route records
   - configured routes are validated as a full array and then registered through
@@ -18,8 +27,7 @@ Last updated: 2026-04-17
   definitions:
   - plist routes are explicitly a declarative registration surface over the
     existing `ALNApplication`/`ALNRouter` APIs, not a second route system
-  - `35I-35K` are delivered; `35L-35M` remain planned for route
-    inspection/docs and a focused parity confidence lane
+  - `35I-35M` are delivered; Phase 35 is closed
 - Completed Phase 35E-35H and closed the original access-policy scope:
   - `security.routePolicies.admin` now protects mounted admin UI routes when
     configured, while apps without that policy keep existing behavior

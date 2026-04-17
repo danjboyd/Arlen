@@ -2329,6 +2329,67 @@ static NSUInteger AppFastPathControllerSlowInvocationCount = 0;
   NSDictionary *entry = table[0];
   XCTAssertEqualObjects(@"plist.show", entry[@"name"]);
   XCTAssertEqualObjects(@"AppJSONController", entry[@"controller"]);
+  XCTAssertEqualObjects(@"plist", entry[@"source"]);
+  [app shutdown];
+}
+
+- (void)testConfiguredRoutesShareRouteTableInspectionWithCodeRoutes {
+  ALNApplication *app = [[ALNApplication alloc] initWithConfig:@{
+    @"environment" : @"test",
+    @"logFormat" : @"json",
+    @"routes" : @[
+      @{
+        @"method" : @"GET",
+        @"path" : @"/configured/:id",
+        @"name" : @"configured.show",
+        @"controller" : @"AppJSONController",
+        @"action" : @"dict",
+        @"formats" : @[ @"json" ],
+      }
+    ],
+  }];
+
+  [app registerRouteMethod:@"GET"
+                      path:@"/coded/:id"
+                      name:@"coded.show"
+           controllerClass:[AppJSONController class]
+                    action:@"dict"];
+
+  NSError *startError = nil;
+  XCTAssertTrue([app startWithError:&startError]);
+  XCTAssertNil(startError);
+
+  ALNRoute *codeRoute = [app.router routeNamed:@"coded.show"];
+  ALNRoute *plistRoute = [app.router routeNamed:@"configured.show"];
+  XCTAssertNotNil(codeRoute);
+  XCTAssertNotNil(plistRoute);
+  XCTAssertEqualObjects(@"code", codeRoute.source);
+  XCTAssertEqualObjects(@"plist", plistRoute.source);
+
+  NSArray *table = [app routeTable];
+  XCTAssertEqual((NSUInteger)2, [table count]);
+  NSDictionary *codeEntry = table[0];
+  NSDictionary *plistEntry = table[1];
+  XCTAssertEqualObjects(@"coded.show", codeEntry[@"name"]);
+  XCTAssertEqualObjects(@"code", codeEntry[@"source"]);
+  XCTAssertEqualObjects(@"AppJSONController", codeEntry[@"controller"]);
+  XCTAssertEqualObjects(@"dict", codeEntry[@"action"]);
+  XCTAssertEqualObjects(@"configured.show", plistEntry[@"name"]);
+  XCTAssertEqualObjects(@"plist", plistEntry[@"source"]);
+  XCTAssertEqualObjects(@"AppJSONController", plistEntry[@"controller"]);
+  XCTAssertEqualObjects(@"dict", plistEntry[@"action"]);
+  XCTAssertEqualObjects((@[ @"json" ]), plistEntry[@"formats"]);
+
+  ALNRouteMatch *codeMatch = [app.router matchMethod:@"GET"
+                                                path:@"/coded/7"
+                                              format:nil];
+  ALNRouteMatch *plistMatch = [app.router matchMethod:@"GET"
+                                                 path:@"/configured/7"
+                                               format:@"json"];
+  XCTAssertNotNil(codeMatch);
+  XCTAssertNotNil(plistMatch);
+  XCTAssertEqualObjects(@"7", codeMatch.params[@"id"]);
+  XCTAssertEqualObjects(@"7", plistMatch.params[@"id"]);
   [app shutdown];
 }
 
@@ -2363,6 +2424,41 @@ static NSUInteger AppFastPathControllerSlowInvocationCount = 0;
   NSArray *details = startError.userInfo[@"details"];
   XCTAssertTrue([details isKindOfClass:[NSArray class]]);
   XCTAssertNil([app.router routeNamed:@"valid.configured"]);
+  XCTAssertEqual((NSUInteger)0, [[app.router allRoutes] count]);
+}
+
+- (void)testConfiguredRoutesRejectDuplicateNamesBeforeRegistration {
+  ALNApplication *app = [[ALNApplication alloc] initWithConfig:@{
+    @"environment" : @"test",
+    @"logFormat" : @"json",
+    @"routes" : @[
+      @{
+        @"method" : @"GET",
+        @"path" : @"/first",
+        @"name" : @"duplicate.configured",
+        @"controller" : @"AppJSONController",
+        @"action" : @"dict",
+      },
+      @{
+        @"method" : @"POST",
+        @"path" : @"/second",
+        @"name" : @"duplicate.configured",
+        @"controller" : @"AppJSONController",
+        @"action" : @"dict",
+      },
+    ],
+  }];
+
+  NSError *startError = nil;
+  XCTAssertFalse([app startWithError:&startError]);
+  XCTAssertNotNil(startError);
+  XCTAssertEqual((NSInteger)352, startError.code);
+  NSArray *details = startError.userInfo[@"details"];
+  XCTAssertTrue([details isKindOfClass:[NSArray class]]);
+  XCTAssertTrue([details count] > 0);
+  NSDictionary *detail = [details firstObject];
+  XCTAssertEqualObjects(@"duplicate_route_name", detail[@"code"]);
+  XCTAssertNil([app.router routeNamed:@"duplicate.configured"]);
   XCTAssertEqual((NSUInteger)0, [[app.router allRoutes] count]);
 }
 

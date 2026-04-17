@@ -11,16 +11,18 @@ source "$repo_root/tools/source_gnustep_env.sh"
 make -C "$repo_root" build-tests >"$output_dir/build-tests.log" 2>&1
 make -C "$repo_root" test-unit-filter TEST=MiddlewareTests >"$output_dir/middleware-tests.log" 2>&1
 make -C "$repo_root" test-unit-filter TEST=RouterTests >"$output_dir/router-tests.log" 2>&1
+make -C "$repo_root" test-unit-filter TEST=ApplicationTests >"$output_dir/application-tests.log" 2>&1
 make -C "$repo_root" test-unit-filter TEST=Phase16FTests >"$output_dir/admin-ui-policy-tests.log" 2>&1
 
 cat >"$output_dir/manifest.json" <<EOF
 {
-  "version": "phase35-confidence-v1",
+  "version": "phase35-confidence-v2",
   "status": "pass",
   "artifacts": [
     "build-tests.log",
     "middleware-tests.log",
     "router-tests.log",
+    "application-tests.log",
     "admin-ui-policy-tests.log"
   ],
   "coverage": [
@@ -29,7 +31,10 @@ cat >"$output_dir/manifest.json" <<EOF
     "trusted proxy Forwarded and X-Forwarded-For handling",
     "spoofed and malformed forwarded-header regressions",
     "route-side policy metadata",
-    "admin-ui policy attachment"
+    "admin-ui policy attachment",
+    "plist route validation and no-partial-mutation startup failures",
+    "plist route registration through the authoritative route table",
+    "plist/code route inspection source metadata"
   ]
 }
 EOF

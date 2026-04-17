@@ -622,6 +622,17 @@ Run production manager (`propane`) for the current app root.
 
 Build app and print resolved routes (`--print-routes`).
 
+Each route line includes the registration source in brackets:
+
+```text
+GET /admin [plist] -> AdminController#index (admin.index)
+GET /health [code] -> HealthController#show (health.show)
+```
+
+`[plist]` means the route came from top-level `routes` configuration.
+`[code]` means the route was registered by Objective-C app/module code. Both
+forms are inspected from the same effective route table.
+
 ### `arlen test [--unit|--integration|--all]`
 
 Run framework tests.

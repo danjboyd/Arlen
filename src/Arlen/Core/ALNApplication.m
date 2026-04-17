@@ -3982,14 +3982,15 @@ static void ALNFinalizeResponse(ALNApplication *application,
   }
 
   for (NSDictionary *record in records) {
-    [self registerRouteMethod:record[@"method"]
-                         path:record[@"path"]
-                         name:record[@"name"]
-                      formats:record[@"formats"]
-              controllerClass:record[@"controllerClass"]
-                  guardAction:record[@"guardAction"]
-                       action:record[@"action"]
-                     policies:record[@"policies"]];
+    ALNRoute *route = [self registerRouteMethod:record[@"method"]
+                                           path:record[@"path"]
+                                           name:record[@"name"]
+                                        formats:record[@"formats"]
+                                controllerClass:record[@"controllerClass"]
+                                    guardAction:record[@"guardAction"]
+                                         action:record[@"action"]
+                                       policies:record[@"policies"]];
+    route.source = @"plist";
   }
 
   self.configuredRoutesLoaded = YES;

@@ -149,6 +149,7 @@
   XCTAssertEqual((NSUInteger)1, [table count]);
   NSDictionary *entry = table[0];
   XCTAssertEqualObjects((@[ @"admin", @"audit" ]), entry[@"policies"]);
+  XCTAssertEqualObjects(@"code", entry[@"source"]);
 }
 
 - (void)testFormatConditionSelectsMatchingRouteVariant {

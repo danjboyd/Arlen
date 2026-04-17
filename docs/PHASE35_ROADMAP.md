@@ -1,6 +1,6 @@
 # Phase 35 Roadmap
 
-Status: delivered through 35K; 35L-35M planned
+Status: delivered
 Last updated: 2026-04-17
 
 ## Goal
@@ -447,7 +447,7 @@ Delivered notes:
 
 ## 35L. Route Inspection and Documentation
 
-Status: planned
+Status: delivered 2026-04-17
 
 Goal:
 
@@ -471,9 +471,22 @@ Acceptance target:
 - an operator or coding agent can inspect the effective route table and see the
   same policy/name/controller/action data regardless of registration source
 
+Delivered notes:
+
+- `ALNRoute` now carries source metadata. Code-defined routes default to
+  `code`; top-level plist `routes` records are marked `plist` after
+  registration through the existing application/router APIs.
+- `[app routeTable]` exposes `source` alongside existing method, path, name,
+  controller, action, format, guard, policy, auth, schema, and OpenAPI fields.
+- `boomhauer --print-routes` and `arlen routes` include `[code]` or `[plist]`
+  in the printed route table.
+- `docs/CONFIGURATION_REFERENCE.md`, `docs/CLI_REFERENCE.md`, and
+  `docs/GETTING_STARTED.md` document static plist routes, policy examples,
+  route inspection, and common startup diagnostics.
+
 ## 35M. Confidence Lane and Closeout for Plist Routes
 
-Status: planned
+Status: delivered 2026-04-17
 
 Goal:
 
@@ -493,3 +506,15 @@ Acceptance target:
 
 - Phase 35 plist route support can be verified with one focused local command,
   and that command proves there is still only one authoritative route table
+
+Delivered notes:
+
+- `ApplicationTests` cover plist/code route-table parity, no-partial-mutation
+  startup failures, duplicate route names, unknown policy names, and policy
+  enforcement on plist-defined routes.
+- `RouterTests` cover route-table `source = code` for normal route
+  registration.
+- `make phase35-confidence` now includes `ApplicationTests` and records plist
+  route coverage in the Phase 35 manifest.
+- Phase 35 is closed with both the route/middleware policy layer and the plist
+  route registration follow-up delivered.

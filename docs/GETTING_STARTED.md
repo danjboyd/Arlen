@@ -118,6 +118,11 @@ Then verify:
 curl -i http://127.0.0.1:3000/hello
 ```
 
+For static route tables, you can also declare routes in `config/app.plist`
+with the top-level `routes` array. Those entries call the same router APIs as
+Objective-C route code, so matching, policies, reverse lookup, and route
+inspection stay on one effective route table.
+
 ## 6. Common Next Commands
 
 From app root:
@@ -128,7 +133,8 @@ From app root:
 /path/to/Arlen/bin/arlen check
 ```
 
-Use `arlen routes` when you want to inspect registration order and route names.
+Use `arlen routes` when you want to inspect registration order, route names,
+and whether each route came from plist configuration or Objective-C code.
 
 ## 7. Choose the Next Guide
 

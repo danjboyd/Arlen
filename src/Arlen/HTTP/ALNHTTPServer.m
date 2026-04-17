@@ -3083,7 +3083,8 @@ static BOOL ALNSendSSEHeaders(ALNSocketHandle clientFd, ALNResponse *response) {
   FILE *out = (stream != NULL) ? stream : stdout;
   NSArray *routes = [self.application routeTable];
   for (NSDictionary *route in routes) {
-    fprintf(out, "%s %s -> %s#%s (%s)\n", [route[@"method"] UTF8String], [route[@"path"] UTF8String],
+    fprintf(out, "%s %s [%s] -> %s#%s (%s)\n", [route[@"method"] UTF8String], [route[@"path"] UTF8String],
+            [route[@"source"] UTF8String],
             [route[@"controller"] UTF8String], [route[@"action"] UTF8String],
             [route[@"name"] UTF8String]);
   }

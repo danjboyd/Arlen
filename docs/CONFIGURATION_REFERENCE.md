@@ -269,6 +269,14 @@ Example:
 routes = (
   {
     method = "GET";
+    path = "/admin";
+    name = "admin.index";
+    controller = "AdminController";
+    action = "index";
+    policies = ("admin");
+  },
+  {
+    method = "GET";
     path = "/";
     name = "home";
     controller = "HomeController";
@@ -283,6 +291,20 @@ routes = (
     policies = ("admin");
   }
 );
+```
+
+Routes can be combined with the same named policy configuration used by
+code-defined routes:
+
+```plist
+security = {
+  routePolicies = {
+    admin = {
+      pathPrefixes = ("/admin");
+      sourceIPAllowlist = ("127.0.0.1/32", "10.0.0.0/8");
+    };
+  };
+};
 ```
 
 Required route fields:
@@ -311,6 +333,26 @@ configured route is registered.
 
 Use plist routes for static, data-shaped route tables. Keep dynamic or
 conditional route registration in Objective-C code.
+
+Route inspection uses the same route table for Objective-C and plist routes.
+`[app routeTable]` includes the same method, path, name, controller, action,
+formats, guard, and policy fields for both sources, plus `source = "code"` or
+`source = "plist"`. `arlen routes` / `boomhauer --print-routes` prints that
+source in brackets so operators can compare configured and code-defined routes
+without inferring provenance from file layout.
+
+Troubleshooting:
+
+- `duplicate_route_name`: route names must be unique across code-defined routes
+  and all configured routes.
+- `unknown_controller`: the `controller` string must resolve to an Objective-C
+  class linked into the app binary.
+- `unsupported_method`: `method` must be one of the documented HTTP method
+  names above.
+- `unknown_route_policy`: each plist route `policies` entry must exist under
+  `security.routePolicies`.
+- `invalid_action` / `invalid_guard_action`: use the action name without the
+  Objective-C trailing colon.
 
 ## 7. Auth and API Helpers
 
