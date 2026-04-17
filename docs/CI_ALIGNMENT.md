@@ -1,9 +1,15 @@
 # CI Alignment
 
-Last updated: 2026-04-16
+Last updated: 2026-04-17
 
 This document defines the intended shape of Arlen CI so workflow names,
 required checks, and actual project contracts stay aligned.
+
+CI checkouts must include submodules while Arlen carries the temporary
+`vendor/tools-xctest` runner. That submodule pins GNUstep/tools-xctest PR 5 for
+Apple-style `-only-testing` / `-skip-testing` support. Periodically check
+upstream `tools-xctest`; once that behavior is available upstream, remove the
+submodule and switch the default runner back to upstream `xctest`.
 
 ## Goal
 

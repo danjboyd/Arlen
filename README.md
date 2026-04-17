@@ -198,10 +198,18 @@ toolchain and quality-gate workflow.
 Prerequisites:
 - clang-built GNUstep toolchain installed
 - `tools-xctest` installed (provides `xctest`)
+- initialized submodules (`git submodule update --init --recursive`) so the
+  repo-local patched `vendor/tools-xctest` runner is available
 
-Optional contributor fast path:
-- set `ARLEN_XCTEST=/path/to/patched/xctest` to use a filter-capable XCTest runner for focused reruns such as `make test-unit-filter TEST=RuntimeTests/testRenderAndIncludeNormalizeUnsuffixedTemplateReferences`
-- if that runner comes from a local uninstalled `tools-xctest` checkout, also set `ARLEN_XCTEST_LD_LIBRARY_PATH=/path/to/tools-xctest/XCTest/obj`
+Contributor test-runner default:
+- Arlen builds and uses `vendor/tools-xctest/obj/xctest` by default while
+  GNUstep/tools-xctest PR 5 is pending upstream, so focused reruns such as
+  `make test-unit-filter TEST=RuntimeTests/testRenderAndIncludeNormalizeUnsuffixedTemplateReferences`
+  honor Apple-style `-only-testing` filters
+- set `ARLEN_USE_VENDORED_XCTEST=0` to fall back to the system `xctest`
+- set `ARLEN_XCTEST=/path/to/xctest` and, when needed,
+  `ARLEN_XCTEST_LD_LIBRARY_PATH=/path/to/tools-xctest/XCTest/obj` to test a
+  different runner
 
 Initialize GNUstep in your shell:
 

@@ -1,0 +1,3 @@
+[submodule "vendor/tools-xctest"]
+	path = vendor/tools-xctest
+	url = https://github.com/gnustep/tools-xctest.git

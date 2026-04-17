@@ -64,8 +64,19 @@ ARLEN_ENABLE_LLHTTP := 0
 endif
 endif
 endif
+VENDORED_TOOLS_XCTEST_DIR := $(ROOT_DIR)/vendor/tools-xctest
+VENDORED_XCTEST := $(VENDORED_TOOLS_XCTEST_DIR)/obj/xctest
+VENDORED_XCTEST_LIB_DIR := $(VENDORED_TOOLS_XCTEST_DIR)/XCTest/obj
+ARLEN_USE_VENDORED_XCTEST ?= 1
+ifeq ($(ARLEN_USE_VENDORED_XCTEST),1)
+ARLEN_XCTEST ?= $(VENDORED_XCTEST)
+ARLEN_XCTEST_LD_LIBRARY_PATH ?= $(VENDORED_XCTEST_LIB_DIR)
+XCTEST_RUNNER_PREREQ := $(VENDORED_XCTEST)
+else
 ARLEN_XCTEST ?= xctest
 ARLEN_XCTEST_LD_LIBRARY_PATH ?=
+XCTEST_RUNNER_PREREQ :=
+endif
 TEST ?=
 SKIP_TEST ?=
 ifneq ($(filter $(ARLEN_ENABLE_YYJSON),0 1),$(ARLEN_ENABLE_YYJSON))
@@ -317,7 +328,7 @@ PHASE24_WINDOWS_RUNTIME_TEST_OBJS := $(call objs_from,$(PHASE24_WINDOWS_RUNTIME_
 ALL_OBJECTS := $(sort $(FRAMEWORK_OBJS) $(MODULE_OBJS) $(ROOT_GENERATED_OBJS) $(TECH_DEMO_GENERATED_OBJS) $(MODULE_GENERATED_OBJS) $(EOCC_ENTRY_OBJS) $(ARLEN_ENTRY_OBJS) $(BOOMHAUER_ENTRY_OBJS) $(SMOKE_RENDER_ENTRY_OBJS) $(TECH_DEMO_SERVER_ENTRY_OBJS) $(API_REFERENCE_SERVER_ENTRY_OBJS) $(PHASE28_REFERENCE_SERVER_ENTRY_OBJS) $(AUTH_PRIMITIVES_SERVER_ENTRY_OBJS) $(MIGRATION_SAMPLE_SERVER_ENTRY_OBJS) $(ARLEN_DATA_EXAMPLE_ENTRY_OBJS) $(JSON_PERF_BENCH_ENTRY_OBJS) $(DISPATCH_PERF_BENCH_ENTRY_OBJS) $(HTTP_PARSE_PERF_BENCH_ENTRY_OBJS) $(ROUTE_MATCH_PERF_BENCH_ENTRY_OBJS) $(BACKEND_CONTRACT_MATRIX_ENTRY_OBJS) $(PHASE23_LIVE_SMOKE_ENTRY_OBJS) $(PHASE26_ORM_PERF_ENTRY_OBJS) $(ARLEN_ORM_REFERENCE_ENTRY_OBJS) $(PHASE27_SEARCH_CHARACTERIZE_ENTRY_OBJS) $(XCTEST_BUNDLE_RUNNER_ENTRY_OBJS) $(UNIT_TEST_OBJS) $(INTEGRATION_TEST_OBJS) $(BROWSER_ERROR_AUDIT_TEST_OBJS) $(TEST_SHARED_OBJS) $(PHASE20_SQL_BUILDER_TEST_OBJS) $(PHASE20_SCHEMA_TEST_OBJS) $(PHASE20_POSTGRES_LIVE_TEST_OBJS) $(PHASE20_MSSQL_LIVE_TEST_OBJS) $(PHASE20_ROUTING_TEST_OBJS) $(PHASE21_TEMPLATE_TEST_OBJS) $(PHASE23_DATAVERSE_TEST_OBJS) $(PHASE25_LIVE_TEST_OBJS) $(PHASE26_ORM_TEST_OBJS) $(PHASE26_ORM_UNIT_TEST_OBJS) $(PHASE26_ORM_GENERATED_TEST_OBJS) $(PHASE26_ORM_INTEGRATION_TEST_OBJS) $(PHASE26_ORM_BACKEND_PARITY_TEST_OBJS) $(PHASE27_SEARCH_TEST_OBJS) $(PHASE24_WINDOWS_DB_SMOKE_TEST_OBJS) $(PHASE24_WINDOWS_RUNTIME_TEST_OBJS))
 ALL_DEPFILES := $(ALL_OBJECTS:.o=.d)
 
-.PHONY: all framework-artifacts eocc transpile module-transpile tech-demo-transpile generated-compile arlen boomhauer tech-demo-server api-reference-server phase28-reference-server auth-primitives-server migration-sample-server arlen-data-example arlen-orm-reference json-perf-bench dispatch-perf-bench http-parse-perf-bench route-match-perf-bench backend-contract-matrix phase23-live-smoke phase24-windows-db-smoke phase24-windows-runtime-tests phase24-windows-confidence phase26-orm-perf phase27-search-characterize phase28-ts-unit phase28-ts-generated phase28-ts-integration phase28-react-reference phase28-confidence phase29-confidence phase30-confidence phase31-confidence phase32-confidence phase33-confidence test-data-layer dev-server tech-demo smoke-render smoke routes build-tests test test-unit test-unit-filter test-integration test-integration-filter browser-error-audit phase20-sql-builder-tests phase20-schema-tests phase20-postgres-live-tests phase20-mssql-live-tests phase20-routing-tests phase20-focused phase21-template-tests phase21-protocol-tests phase21-generated-app-tests phase21-focused phase21-confidence phase23-dataverse-tests phase23-focused phase23-confidence phase25-live-tests phase25-focused phase25-confidence phase26-orm-tests phase26-orm-unit phase26-orm-generated phase26-orm-integration phase26-orm-backend-parity phase26-orm-live phase26-confidence phase27-search-tests phase27-focused phase27-confidence perf perf-fast ci-perf-smoke parity-phaseb perf-phasec perf-phased deploy-smoke phase5e-confidence phase12-confidence phase13-confidence phase14-confidence phase15-confidence phase16-confidence phase19-confidence phase20-confidence ci-quality ci-sanitizers ci-fault-injection ci-release-certification ci-json-abstraction ci-json-perf ci-dispatch-perf ci-http-parse-perf ci-route-match-perf ci-backend-parity-matrix ci-protocol-adversarial ci-syscall-faults ci-allocation-faults ci-soak ci-chaos-restart ci-static-analysis ci-blob-throughput ci-phase11-protocol-adversarial ci-phase11-fuzz ci-phase11-live-adversarial ci-phase11-sanitizers ci-phase11 ci-docs ci-benchmark-contracts check docs-api docs-html docs-serve clean
+.PHONY: all framework-artifacts eocc transpile module-transpile tech-demo-transpile generated-compile arlen boomhauer tech-demo-server api-reference-server phase28-reference-server auth-primitives-server migration-sample-server arlen-data-example arlen-orm-reference json-perf-bench dispatch-perf-bench http-parse-perf-bench route-match-perf-bench backend-contract-matrix phase23-live-smoke phase24-windows-db-smoke phase24-windows-runtime-tests phase24-windows-confidence phase26-orm-perf phase27-search-characterize phase28-ts-unit phase28-ts-generated phase28-ts-integration phase28-react-reference phase28-confidence phase29-confidence phase30-confidence phase31-confidence phase32-confidence phase33-confidence test-data-layer dev-server tech-demo smoke-render smoke routes build-tests vendored-xctest test test-unit test-unit-filter test-integration test-integration-filter browser-error-audit phase20-sql-builder-tests phase20-schema-tests phase20-postgres-live-tests phase20-mssql-live-tests phase20-routing-tests phase20-focused phase21-template-tests phase21-protocol-tests phase21-generated-app-tests phase21-focused phase21-confidence phase23-dataverse-tests phase23-focused phase23-confidence phase25-live-tests phase25-focused phase25-confidence phase26-orm-tests phase26-orm-unit phase26-orm-generated phase26-orm-integration phase26-orm-backend-parity phase26-orm-live phase26-confidence phase27-search-tests phase27-focused phase27-confidence perf perf-fast ci-perf-smoke parity-phaseb perf-phasec perf-phased deploy-smoke phase5e-confidence phase12-confidence phase13-confidence phase14-confidence phase15-confidence phase16-confidence phase19-confidence phase20-confidence ci-quality ci-sanitizers ci-fault-injection ci-release-certification ci-json-abstraction ci-json-perf ci-dispatch-perf ci-http-parse-perf ci-route-match-perf ci-backend-parity-matrix ci-protocol-adversarial ci-syscall-faults ci-allocation-faults ci-soak ci-chaos-restart ci-static-analysis ci-blob-throughput ci-phase11-protocol-adversarial ci-phase11-fuzz ci-phase11-live-adversarial ci-phase11-sanitizers ci-phase11 ci-docs ci-benchmark-contracts check docs-api docs-html docs-serve clean
 
 all: eocc transpile generated-compile arlen boomhauer
 
@@ -663,52 +674,57 @@ $(PHASE24_WINDOWS_RUNTIME_TEST_BIN): $(PHASE24_WINDOWS_RUNTIME_TEST_OBJS) $(TEST
 
 build-tests: $(UNIT_TEST_BIN) $(INTEGRATION_TEST_BIN)
 
-test-unit: $(UNIT_TEST_BIN)
+vendored-xctest: $(VENDORED_XCTEST)
+
+$(VENDORED_XCTEST):
+>source $(GNUSTEP_SH) && $(MAKE) -C $(VENDORED_TOOLS_XCTEST_DIR)
+
+test-unit: $(UNIT_TEST_BIN) $(XCTEST_RUNNER_PREREQ)
 >mkdir -p $(GNUSTEP_TEST_HOME)/GNUstep/Defaults/.lck
 >source $(GNUSTEP_SH) && export HOME="$(GNUSTEP_TEST_HOME)" GNUSTEP_USER_DIR="$(GNUSTEP_TEST_HOME)/GNUstep" GNUSTEP_USER_ROOT="$(GNUSTEP_TEST_HOME)/GNUstep" GNUSTEP_USER_DEFAULTS_DIR="$(GNUSTEP_TEST_HOME)/GNUstep/Defaults" && $(xctest_runtime_env) "$(ARLEN_XCTEST)" $(UNIT_TEST_BUNDLE)
 
-test-unit-filter: $(UNIT_TEST_BIN)
+test-unit-filter: $(UNIT_TEST_BIN) $(XCTEST_RUNNER_PREREQ)
 >if [ -z "$(strip $(TEST)$(SKIP_TEST))" ]; then echo "test-unit-filter: set TEST=TestClass[/testMethod] or SKIP_TEST=TestClass[/testMethod]" >&2; exit 2; fi
 >mkdir -p $(GNUSTEP_TEST_HOME)/GNUstep/Defaults/.lck
 >source $(GNUSTEP_SH) && export HOME="$(GNUSTEP_TEST_HOME)" GNUSTEP_USER_DIR="$(GNUSTEP_TEST_HOME)/GNUstep" GNUSTEP_USER_ROOT="$(GNUSTEP_TEST_HOME)/GNUstep" GNUSTEP_USER_DEFAULTS_DIR="$(GNUSTEP_TEST_HOME)/GNUstep/Defaults" && $(xctest_runtime_env) "$(ARLEN_XCTEST)" $(UNIT_TEST_BUNDLE) $(call xctest_filter_args,$(UNIT_TEST_TARGET_NAME))
 
-test-integration: $(INTEGRATION_TEST_BIN)
+test-integration: $(INTEGRATION_TEST_BIN) $(XCTEST_RUNNER_PREREQ)
 >mkdir -p $(GNUSTEP_TEST_HOME)/GNUstep/Defaults/.lck
 >source $(GNUSTEP_SH) && export HOME="$(GNUSTEP_TEST_HOME)" GNUSTEP_USER_DIR="$(GNUSTEP_TEST_HOME)/GNUstep" GNUSTEP_USER_ROOT="$(GNUSTEP_TEST_HOME)/GNUstep" GNUSTEP_USER_DEFAULTS_DIR="$(GNUSTEP_TEST_HOME)/GNUstep/Defaults" && $(xctest_runtime_env) "$(ARLEN_XCTEST)" $(INTEGRATION_TEST_BUNDLE)
 
-test-integration-filter: $(INTEGRATION_TEST_BIN)
+test-integration-filter: $(INTEGRATION_TEST_BIN) $(XCTEST_RUNNER_PREREQ)
 >if [ -z "$(strip $(TEST)$(SKIP_TEST))" ]; then echo "test-integration-filter: set TEST=TestClass[/testMethod] or SKIP_TEST=TestClass[/testMethod]" >&2; exit 2; fi
 >mkdir -p $(GNUSTEP_TEST_HOME)/GNUstep/Defaults/.lck
 >source $(GNUSTEP_SH) && export HOME="$(GNUSTEP_TEST_HOME)" GNUSTEP_USER_DIR="$(GNUSTEP_TEST_HOME)/GNUstep" GNUSTEP_USER_ROOT="$(GNUSTEP_TEST_HOME)/GNUstep" GNUSTEP_USER_DEFAULTS_DIR="$(GNUSTEP_TEST_HOME)/GNUstep/Defaults" && $(xctest_runtime_env) "$(ARLEN_XCTEST)" $(INTEGRATION_TEST_BUNDLE) $(call xctest_filter_args,$(INTEGRATION_TEST_TARGET_NAME))
 
-browser-error-audit: $(BROWSER_ERROR_AUDIT_TEST_BIN) boomhauer
+browser-error-audit: $(BROWSER_ERROR_AUDIT_TEST_BIN) boomhauer $(XCTEST_RUNNER_PREREQ)
 >mkdir -p $(GNUSTEP_TEST_HOME)/GNUstep/Defaults/.lck
 >source $(GNUSTEP_SH) && export HOME="$(GNUSTEP_TEST_HOME)" GNUSTEP_USER_DIR="$(GNUSTEP_TEST_HOME)/GNUstep" GNUSTEP_USER_ROOT="$(GNUSTEP_TEST_HOME)/GNUstep" GNUSTEP_USER_DEFAULTS_DIR="$(GNUSTEP_TEST_HOME)/GNUstep/Defaults" ARLEN_BROWSER_ERROR_AUDIT_OUTPUT_DIR="$(ROOT_DIR)/build/browser-error-audit" && $(xctest_runtime_env) "$(ARLEN_XCTEST)" $(BROWSER_ERROR_AUDIT_TEST_BUNDLE)
 >@echo "browser-error-audit: open $(ROOT_DIR)/build/browser-error-audit/index.html"
 
-phase20-sql-builder-tests: $(PHASE20_SQL_BUILDER_TEST_BIN)
+phase20-sql-builder-tests: $(PHASE20_SQL_BUILDER_TEST_BIN) $(XCTEST_RUNNER_PREREQ)
 >mkdir -p $(GNUSTEP_TEST_HOME)/GNUstep/Defaults/.lck
 >source $(GNUSTEP_SH) && export HOME="$(GNUSTEP_TEST_HOME)" GNUSTEP_USER_DIR="$(GNUSTEP_TEST_HOME)/GNUstep" GNUSTEP_USER_ROOT="$(GNUSTEP_TEST_HOME)/GNUstep" GNUSTEP_USER_DEFAULTS_DIR="$(GNUSTEP_TEST_HOME)/GNUstep/Defaults" && $(xctest_runtime_env) "$(ARLEN_XCTEST)" $(PHASE20_SQL_BUILDER_TEST_BUNDLE)
 
-phase20-schema-tests: $(PHASE20_SCHEMA_TEST_BIN)
+phase20-schema-tests: $(PHASE20_SCHEMA_TEST_BIN) $(XCTEST_RUNNER_PREREQ)
 >mkdir -p $(GNUSTEP_TEST_HOME)/GNUstep/Defaults/.lck
 >source $(GNUSTEP_SH) && export HOME="$(GNUSTEP_TEST_HOME)" GNUSTEP_USER_DIR="$(GNUSTEP_TEST_HOME)/GNUstep" GNUSTEP_USER_ROOT="$(GNUSTEP_TEST_HOME)/GNUstep" GNUSTEP_USER_DEFAULTS_DIR="$(GNUSTEP_TEST_HOME)/GNUstep/Defaults" && $(xctest_runtime_env) "$(ARLEN_XCTEST)" $(PHASE20_SCHEMA_TEST_BUNDLE)
 
-phase20-postgres-live-tests: $(PHASE20_POSTGRES_LIVE_TEST_BIN)
+phase20-postgres-live-tests: $(PHASE20_POSTGRES_LIVE_TEST_BIN) $(XCTEST_RUNNER_PREREQ)
 >mkdir -p $(GNUSTEP_TEST_HOME)/GNUstep/Defaults/.lck
 >source $(GNUSTEP_SH) && export HOME="$(GNUSTEP_TEST_HOME)" GNUSTEP_USER_DIR="$(GNUSTEP_TEST_HOME)/GNUstep" GNUSTEP_USER_ROOT="$(GNUSTEP_TEST_HOME)/GNUstep" GNUSTEP_USER_DEFAULTS_DIR="$(GNUSTEP_TEST_HOME)/GNUstep/Defaults" && $(xctest_runtime_env) "$(ARLEN_XCTEST)" $(PHASE20_POSTGRES_LIVE_TEST_BUNDLE)
 
-phase20-mssql-live-tests: $(PHASE20_MSSQL_LIVE_TEST_BIN)
+phase20-mssql-live-tests: $(PHASE20_MSSQL_LIVE_TEST_BIN) $(XCTEST_RUNNER_PREREQ)
 >mkdir -p $(GNUSTEP_TEST_HOME)/GNUstep/Defaults/.lck
 >source $(GNUSTEP_SH) && export HOME="$(GNUSTEP_TEST_HOME)" GNUSTEP_USER_DIR="$(GNUSTEP_TEST_HOME)/GNUstep" GNUSTEP_USER_ROOT="$(GNUSTEP_TEST_HOME)/GNUstep" GNUSTEP_USER_DEFAULTS_DIR="$(GNUSTEP_TEST_HOME)/GNUstep/Defaults" && $(xctest_runtime_env) "$(ARLEN_XCTEST)" $(PHASE20_MSSQL_LIVE_TEST_BUNDLE)
 
-phase20-routing-tests: $(PHASE20_ROUTING_TEST_BIN)
+phase20-routing-tests: $(PHASE20_ROUTING_TEST_BIN) $(XCTEST_RUNNER_PREREQ)
 >mkdir -p $(GNUSTEP_TEST_HOME)/GNUstep/Defaults/.lck
 >source $(GNUSTEP_SH) && export HOME="$(GNUSTEP_TEST_HOME)" GNUSTEP_USER_DIR="$(GNUSTEP_TEST_HOME)/GNUstep" GNUSTEP_USER_ROOT="$(GNUSTEP_TEST_HOME)/GNUstep" GNUSTEP_USER_DEFAULTS_DIR="$(GNUSTEP_TEST_HOME)/GNUstep/Defaults" && $(xctest_runtime_env) "$(ARLEN_XCTEST)" $(PHASE20_ROUTING_TEST_BUNDLE)
 
 phase20-focused: phase20-sql-builder-tests phase20-schema-tests phase20-routing-tests phase20-postgres-live-tests phase20-mssql-live-tests
 
-phase21-template-tests: $(PHASE21_TEMPLATE_TEST_BIN)
+phase21-template-tests: $(PHASE21_TEMPLATE_TEST_BIN) $(XCTEST_RUNNER_PREREQ)
 >mkdir -p $(GNUSTEP_TEST_HOME)/GNUstep/Defaults/.lck
 >source $(GNUSTEP_SH) && export HOME="$(GNUSTEP_TEST_HOME)" GNUSTEP_USER_DIR="$(GNUSTEP_TEST_HOME)/GNUstep" GNUSTEP_USER_ROOT="$(GNUSTEP_TEST_HOME)/GNUstep" GNUSTEP_USER_DEFAULTS_DIR="$(GNUSTEP_TEST_HOME)/GNUstep/Defaults" && $(xctest_runtime_env) "$(ARLEN_XCTEST)" $(PHASE21_TEMPLATE_TEST_BUNDLE)
 
@@ -723,7 +739,7 @@ phase21-focused: phase21-template-tests phase21-protocol-tests phase21-generated
 phase21-confidence:
 >bash ./tools/ci/run_phase21_confidence.sh
 
-phase23-dataverse-tests: $(PHASE23_DATAVERSE_TEST_BIN)
+phase23-dataverse-tests: $(PHASE23_DATAVERSE_TEST_BIN) $(XCTEST_RUNNER_PREREQ)
 >mkdir -p $(GNUSTEP_TEST_HOME)/GNUstep/Defaults/.lck
 >source $(GNUSTEP_SH) && export HOME="$(GNUSTEP_TEST_HOME)" GNUSTEP_USER_DIR="$(GNUSTEP_TEST_HOME)/GNUstep" GNUSTEP_USER_ROOT="$(GNUSTEP_TEST_HOME)/GNUstep" GNUSTEP_USER_DEFAULTS_DIR="$(GNUSTEP_TEST_HOME)/GNUstep/Defaults" && $(xctest_runtime_env) "$(ARLEN_XCTEST)" $(PHASE23_DATAVERSE_TEST_BUNDLE)
 
@@ -738,7 +754,7 @@ phase23-focused: phase23-dataverse-tests
 phase23-confidence:
 >bash ./tools/ci/run_phase23_confidence.sh
 
-phase25-live-tests: $(PHASE25_LIVE_TEST_BIN)
+phase25-live-tests: $(PHASE25_LIVE_TEST_BIN) $(XCTEST_RUNNER_PREREQ)
 >mkdir -p $(GNUSTEP_TEST_HOME)/GNUstep/Defaults/.lck
 >source $(GNUSTEP_SH) && export HOME="$(GNUSTEP_TEST_HOME)" GNUSTEP_USER_DIR="$(GNUSTEP_TEST_HOME)/GNUstep" GNUSTEP_USER_ROOT="$(GNUSTEP_TEST_HOME)/GNUstep" GNUSTEP_USER_DEFAULTS_DIR="$(GNUSTEP_TEST_HOME)/GNUstep/Defaults" && $(xctest_runtime_env) "$(ARLEN_XCTEST)" $(PHASE25_LIVE_TEST_BUNDLE)
 
@@ -747,23 +763,23 @@ phase25-focused: phase25-live-tests
 phase25-confidence:
 >bash ./tools/ci/run_phase25_confidence.sh
 
-phase26-orm-tests: $(PHASE26_ORM_TEST_BIN)
+phase26-orm-tests: $(PHASE26_ORM_TEST_BIN) $(XCTEST_RUNNER_PREREQ)
 >mkdir -p $(GNUSTEP_TEST_HOME)/GNUstep/Defaults/.lck
 >source $(GNUSTEP_SH) && export HOME="$(GNUSTEP_TEST_HOME)" GNUSTEP_USER_DIR="$(GNUSTEP_TEST_HOME)/GNUstep" GNUSTEP_USER_ROOT="$(GNUSTEP_TEST_HOME)/GNUstep" GNUSTEP_USER_DEFAULTS_DIR="$(GNUSTEP_TEST_HOME)/GNUstep/Defaults" && $(xctest_runtime_env) "$(ARLEN_XCTEST)" $(PHASE26_ORM_TEST_BUNDLE)
 
-phase26-orm-unit: $(PHASE26_ORM_UNIT_TEST_BIN)
+phase26-orm-unit: $(PHASE26_ORM_UNIT_TEST_BIN) $(XCTEST_RUNNER_PREREQ)
 >mkdir -p $(GNUSTEP_TEST_HOME)/GNUstep/Defaults/.lck
 >source $(GNUSTEP_SH) && export HOME="$(GNUSTEP_TEST_HOME)" GNUSTEP_USER_DIR="$(GNUSTEP_TEST_HOME)/GNUstep" GNUSTEP_USER_ROOT="$(GNUSTEP_TEST_HOME)/GNUstep" GNUSTEP_USER_DEFAULTS_DIR="$(GNUSTEP_TEST_HOME)/GNUstep/Defaults" && $(xctest_runtime_env) "$(ARLEN_XCTEST)" $(PHASE26_ORM_UNIT_TEST_BUNDLE)
 
-phase26-orm-generated: $(PHASE26_ORM_GENERATED_TEST_BIN)
+phase26-orm-generated: $(PHASE26_ORM_GENERATED_TEST_BIN) $(XCTEST_RUNNER_PREREQ)
 >mkdir -p $(GNUSTEP_TEST_HOME)/GNUstep/Defaults/.lck
 >source $(GNUSTEP_SH) && export HOME="$(GNUSTEP_TEST_HOME)" GNUSTEP_USER_DIR="$(GNUSTEP_TEST_HOME)/GNUstep" GNUSTEP_USER_ROOT="$(GNUSTEP_TEST_HOME)/GNUstep" GNUSTEP_USER_DEFAULTS_DIR="$(GNUSTEP_TEST_HOME)/GNUstep/Defaults" && $(xctest_runtime_env) "$(ARLEN_XCTEST)" $(PHASE26_ORM_GENERATED_TEST_BUNDLE)
 
-phase26-orm-integration: $(PHASE26_ORM_INTEGRATION_TEST_BIN)
+phase26-orm-integration: $(PHASE26_ORM_INTEGRATION_TEST_BIN) $(XCTEST_RUNNER_PREREQ)
 >mkdir -p $(GNUSTEP_TEST_HOME)/GNUstep/Defaults/.lck
 >source $(GNUSTEP_SH) && export HOME="$(GNUSTEP_TEST_HOME)" GNUSTEP_USER_DIR="$(GNUSTEP_TEST_HOME)/GNUstep" GNUSTEP_USER_ROOT="$(GNUSTEP_TEST_HOME)/GNUstep" GNUSTEP_USER_DEFAULTS_DIR="$(GNUSTEP_TEST_HOME)/GNUstep/Defaults" && $(xctest_runtime_env) "$(ARLEN_XCTEST)" $(PHASE26_ORM_INTEGRATION_TEST_BUNDLE)
 
-phase26-orm-backend-parity: $(PHASE26_ORM_BACKEND_PARITY_TEST_BIN)
+phase26-orm-backend-parity: $(PHASE26_ORM_BACKEND_PARITY_TEST_BIN) $(XCTEST_RUNNER_PREREQ)
 >mkdir -p $(GNUSTEP_TEST_HOME)/GNUstep/Defaults/.lck
 >source $(GNUSTEP_SH) && export HOME="$(GNUSTEP_TEST_HOME)" GNUSTEP_USER_DIR="$(GNUSTEP_TEST_HOME)/GNUstep" GNUSTEP_USER_ROOT="$(GNUSTEP_TEST_HOME)/GNUstep" GNUSTEP_USER_DEFAULTS_DIR="$(GNUSTEP_TEST_HOME)/GNUstep/Defaults" && $(xctest_runtime_env) "$(ARLEN_XCTEST)" $(PHASE26_ORM_BACKEND_PARITY_TEST_BUNDLE)
 
@@ -776,7 +792,7 @@ phase26-orm-live:
 phase26-confidence:
 >bash ./tools/ci/run_phase26_confidence.sh
 
-phase27-search-tests: $(PHASE27_SEARCH_TEST_BIN)
+phase27-search-tests: $(PHASE27_SEARCH_TEST_BIN) $(XCTEST_RUNNER_PREREQ)
 >mkdir -p $(GNUSTEP_TEST_HOME)/GNUstep/Defaults/.lck
 >source $(GNUSTEP_SH) && export HOME="$(GNUSTEP_TEST_HOME)" GNUSTEP_USER_DIR="$(GNUSTEP_TEST_HOME)/GNUstep" GNUSTEP_USER_ROOT="$(GNUSTEP_TEST_HOME)/GNUstep" GNUSTEP_USER_DEFAULTS_DIR="$(GNUSTEP_TEST_HOME)/GNUstep/Defaults" && $(xctest_runtime_env) "$(ARLEN_XCTEST)" $(PHASE27_SEARCH_TEST_BUNDLE)
 

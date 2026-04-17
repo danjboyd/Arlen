@@ -68,7 +68,16 @@ This repository is in early scaffold stage. Priority is delivering a stable v1 t
 - Changes that add, remove, rename, or materially repurpose CI lanes must also
   update the workflow files, branch-protection guidance, and the CI alignment
   notes in `docs/CI_ALIGNMENT.md`.
-- Standardize on XCTest via the Debian `tools-xctest` package (runner command: `xctest`).
+- Standardize on XCTest-compatible tests. On GNUstep, use Arlen's repo-local
+  `vendor/tools-xctest` runner through the make targets by default; do not use
+  upstream/system `xctest` for focused testing unless explicitly validating the
+  fallback path.
+- While GNUstep/tools-xctest PR 5 is pending upstream, Arlen vendors a patched
+  `tools-xctest` submodule for Apple-style `-only-testing` /
+  `-skip-testing` filter support. Periodically check upstream `tools-xctest`;
+  once the PR or equivalent behavior is incorporated in released upstream,
+  decommission the submodule and return the default runner path to upstream
+  `xctest` as-is.
 - Before running tests, initialize GNUstep tooling in the shell with `source /path/to/Arlen/tools/source_gnustep_env.sh` or source the active GNUstep toolchain env directly.
 - Keep test code XCTest-compatible to preserve a future path to Apple XCTest/macOS targets.
 

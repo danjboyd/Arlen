@@ -157,9 +157,14 @@ If CI migrates to a first-party source-built GNUstep toolchain, install it into 
 
 Optional contributor override:
 
-- set `ARLEN_XCTEST=/path/to/patched/xctest` to use a filter-capable runner for `make test-unit-filter` / `make test-integration-filter`
-- if that runner comes from a local uninstalled `tools-xctest` build, also set `ARLEN_XCTEST_LD_LIBRARY_PATH=/path/to/tools-xctest/XCTest/obj`
-- stock Debian `xctest` remains the baseline for the normal unfiltered test and confidence commands
+- Arlen vendors GNUstep/tools-xctest at `vendor/tools-xctest` and pins the
+  Apple-style filter patch from PR 5 until that support is available upstream
+- `make test-unit`, `make test-integration`, and focused filter targets build
+  and use `vendor/tools-xctest/obj/xctest` by default
+- set `ARLEN_USE_VENDORED_XCTEST=0` to use the system `xctest`
+- set `ARLEN_XCTEST=/path/to/xctest` and, when needed,
+  `ARLEN_XCTEST_LD_LIBRARY_PATH=/path/to/tools-xctest/XCTest/obj` to test a
+  different local runner
 
 Windows preview CI currently validates two layers:
 

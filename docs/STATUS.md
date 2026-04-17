@@ -1,6 +1,26 @@
 # Arlen Status Checkpoint
 
-Last updated: 2026-04-16
+Last updated: 2026-04-17
+
+## Leaving Off (2026-04-17)
+
+- Fixed `ARLEN-BUG-021`, reported downstream from `OwnerConnect`:
+  - `arlen deploy` SSH transport no longer builds remote execution through a
+    local shell command string
+  - remote command execution now uses `NSTask` argv construction and sends one
+    `bash -lc '<script>'` command string after the SSH host
+  - tar-stream upload now connects a local `tar` task to the SSH task with an
+    `NSPipe`
+  - updated the mocked SSH deployment regression so post-host arguments are
+    reparsed like real SSH, covering the original `mkdir: missing operand`
+    failure class
+- Added a temporary `vendor/tools-xctest` submodule pinned to
+  GNUstep/tools-xctest PR 5 while Apple-style CLI filters are pending upstream:
+  - `make test-unit`, `make test-integration`, and their `*-filter` variants
+    now default to the repo-local patched `xctest`
+  - CI checkout steps now fetch submodules recursively
+  - `AGENTS.md`, CI alignment, README, CLI, and toolchain docs record the
+    periodic upstream-check/decommission condition
 
 ## Leaving Off (2026-04-16)
 

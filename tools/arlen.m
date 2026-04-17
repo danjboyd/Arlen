@@ -413,6 +413,54 @@ static int RunShellCommand(NSString *command) {
   return task.terminationStatus;
 }
 
+static NSString *TaskCommandDescription(NSString *launchPath, NSArray<NSString *> *arguments) {
+  NSMutableArray<NSString *> *parts = [NSMutableArray array];
+  [parts addObject:ShellQuote(launchPath ?: @"")];
+  for (NSString *argument in arguments ?: @[]) {
+    [parts addObject:ShellQuote(argument ?: @"")];
+  }
+  return [parts componentsJoinedByString:@" "];
+}
+
+static NSString *TaskCapturePath(NSString *prefix) {
+  NSString *name = [NSString stringWithFormat:@"%@-%@.log",
+                                              prefix ?: @"arlen-task",
+                                              [[NSProcessInfo processInfo] globallyUniqueString]];
+  return [NSTemporaryDirectory() stringByAppendingPathComponent:name];
+}
+
+static NSString *RunTaskCapture(NSString *launchPath, NSArray<NSString *> *arguments, int *exitCode) {
+  NSTask *task = [[NSTask alloc] init];
+  task.launchPath = launchPath ?: @"/usr/bin/env";
+  task.arguments = arguments ?: @[];
+  NSString *capturePath = TaskCapturePath(@"arlen-task-capture");
+  [[NSFileManager defaultManager] createFileAtPath:capturePath contents:nil attributes:nil];
+  NSFileHandle *captureWrite = [NSFileHandle fileHandleForWritingAtPath:capturePath];
+  task.standardOutput = captureWrite;
+  task.standardError = captureWrite;
+  @try {
+    [task launch];
+    [task waitUntilExit];
+  } @catch (NSException *exception) {
+    [captureWrite closeFile];
+    [[NSFileManager defaultManager] removeItemAtPath:capturePath error:nil];
+    if (exitCode != NULL) {
+      *exitCode = 127;
+    }
+    return [NSString stringWithFormat:@"failed launching %@: %@",
+                                      TaskCommandDescription(launchPath, arguments),
+                                      [exception reason] ?: [exception name] ?: @"unknown error"];
+  }
+
+  if (exitCode != NULL) {
+    *exitCode = task.terminationStatus;
+  }
+  [captureWrite closeFile];
+  NSData *capturedData = [NSData dataWithContentsOfFile:capturePath] ?: [NSData data];
+  [[NSFileManager defaultManager] removeItemAtPath:capturePath error:nil];
+  return [[NSString alloc] initWithData:capturedData encoding:NSUTF8StringEncoding] ?: @"";
+}
+
 static NSString *EnvValue(const char *name) {
   const char *value = getenv(name);
   if (value == NULL || value[0] == '\0') {
@@ -1461,24 +1509,26 @@ static NSString *RenderedInitReadmeForTarget(NSDictionary *target) {
       requiresWrapper ? @"yes" : @"no", envFile];
 }
 
-static NSString *SSHCommandPrefixForTarget(NSDictionary *target) {
-  NSMutableArray<NSString *> *parts = [NSMutableArray array];
-  [parts addObject:ShellQuote(StringValueForDeployKey(target, @"ssh_command"))];
+static NSArray<NSString *> *SSHArgumentsForTarget(NSDictionary *target, NSString *remoteScript) {
+  NSMutableArray<NSString *> *arguments = [NSMutableArray array];
+  [arguments addObject:StringValueForDeployKey(target, @"ssh_command") ?: @"ssh"];
   for (NSString *option in [target[@"ssh_options"] isKindOfClass:[NSArray class]] ? target[@"ssh_options"] : @[]) {
-    [parts addObject:ShellQuote(option)];
+    [arguments addObject:option ?: @""];
   }
-  [parts addObject:ShellQuote(StringValueForDeployKey(target, @"ssh_host"))];
-  return [parts componentsJoinedByString:@" "];
+  [arguments addObject:StringValueForDeployKey(target, @"ssh_host") ?: @""];
+  NSString *remoteCommand = [NSString stringWithFormat:@"bash -lc %@",
+                                                       ShellQuote(remoteScript ?: @"true")];
+  [arguments addObject:remoteCommand];
+  return arguments;
 }
 
 static NSDictionary *RunSSHCommandForTarget(NSDictionary *target, NSString *remoteScript) {
-  NSString *prefix = SSHCommandPrefixForTarget(target);
-  NSString *command = [NSString stringWithFormat:@"%@ bash -lc %@", prefix, ShellQuote(remoteScript ?: @"true")];
+  NSArray<NSString *> *arguments = SSHArgumentsForTarget(target, remoteScript);
   int exitCode = 0;
-  NSString *capturedOutput = RunShellCaptureCommand(command, &exitCode);
+  NSString *capturedOutput = RunTaskCapture(@"/usr/bin/env", arguments, &exitCode);
   return @{
     @"status" : (exitCode == 0) ? @"ok" : @"error",
-    @"command" : command ?: @"",
+    @"command" : TaskCommandDescription(@"/usr/bin/env", arguments),
     @"captured_output" : capturedOutput ?: @"",
     @"exit_code" : @(exitCode),
   };
@@ -1491,13 +1541,57 @@ static NSDictionary *UploadReleaseToRemoteTarget(NSDictionary *target, NSString 
                                                       ShellQuote(remoteReleasesDir),
                                                       ShellQuote(remoteReleaseDir),
                                                       ShellQuote(remoteReleasesDir)];
-  NSString *command = [NSString stringWithFormat:@"tar -C %@ -cf - %@ | %@ bash -lc %@",
-                                                     ShellQuote(localReleasesDir),
-                                                     ShellQuote(releaseID ?: @""),
-                                                     SSHCommandPrefixForTarget(target),
-                                                     ShellQuote(remoteScript)];
+  NSArray<NSString *> *tarArguments = @[ @"tar", @"-C", localReleasesDir ?: @"", @"-cf", @"-", releaseID ?: @"" ];
+  NSArray<NSString *> *sshArguments = SSHArgumentsForTarget(target, remoteScript);
+  NSString *command = [NSString stringWithFormat:@"%@ | %@",
+                                                 TaskCommandDescription(@"/usr/bin/env", tarArguments),
+                                                 TaskCommandDescription(@"/usr/bin/env", sshArguments)];
   int exitCode = 0;
-  NSString *capturedOutput = RunShellCaptureCommand(command, &exitCode);
+  NSMutableString *capturedOutput = [NSMutableString string];
+  NSString *capturePath = TaskCapturePath(@"arlen-deploy-upload");
+  [[NSFileManager defaultManager] createFileAtPath:capturePath contents:nil attributes:nil];
+  NSTask *tarTask = [[NSTask alloc] init];
+  NSTask *sshTask = [[NSTask alloc] init];
+  tarTask.launchPath = @"/usr/bin/env";
+  tarTask.arguments = tarArguments;
+  sshTask.launchPath = @"/usr/bin/env";
+  sshTask.arguments = sshArguments;
+  NSPipe *streamPipe = [NSPipe pipe];
+  NSFileHandle *streamRead = [streamPipe fileHandleForReading];
+  NSFileHandle *streamWrite = [streamPipe fileHandleForWriting];
+  NSFileHandle *captureWrite = [NSFileHandle fileHandleForWritingAtPath:capturePath];
+  tarTask.standardOutput = streamWrite;
+  tarTask.standardError = captureWrite;
+  sshTask.standardInput = streamRead;
+  sshTask.standardOutput = captureWrite;
+  sshTask.standardError = captureWrite;
+  @try {
+    [sshTask launch];
+    [tarTask launch];
+    [tarTask waitUntilExit];
+    [streamWrite closeFile];
+    [sshTask waitUntilExit];
+    [streamRead closeFile];
+    int tarExitCode = tarTask.terminationStatus;
+    int sshExitCode = sshTask.terminationStatus;
+    exitCode = (tarExitCode == 0) ? sshExitCode : tarExitCode;
+  } @catch (NSException *exception) {
+    if ([tarTask isRunning]) {
+      [tarTask terminate];
+    }
+    if ([sshTask isRunning]) {
+      [sshTask terminate];
+    }
+    exitCode = 127;
+    [capturedOutput appendFormat:@"failed launching %@: %@",
+                                 command ?: @"deploy upload transport",
+                                 [exception reason] ?: [exception name] ?: @"unknown error"];
+  }
+  [captureWrite closeFile];
+  NSData *capturedData = [NSData dataWithContentsOfFile:capturePath] ?: [NSData data];
+  [[NSFileManager defaultManager] removeItemAtPath:capturePath error:nil];
+  NSString *capturedText = [[NSString alloc] initWithData:capturedData encoding:NSUTF8StringEncoding] ?: @"";
+  [capturedOutput appendString:capturedText];
   return @{
     @"status" : (exitCode == 0) ? @"ok" : @"error",
     @"command" : command ?: @"",

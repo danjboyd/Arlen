@@ -1495,6 +1495,7 @@
   @try {
     NSString *releasePath = [workRoot stringByAppendingPathComponent:@"remote-host/myapp"];
     NSString *mockSSH = [workRoot stringByAppendingPathComponent:@"mock-ssh.sh"];
+    NSString *mockSSHLog = [workRoot stringByAppendingPathComponent:@"mock-ssh.log"];
     NSString *deployConfig = [NSString stringWithFormat:
                                   @"{\n"
                                    "  deployment = {\n"
@@ -1510,6 +1511,7 @@
                                    "        transport = {\n"
                                    "          sshHost = \"mock-target\";\n"
                                    "          sshCommand = \"%@\";\n"
+                                   "          sshOptions = (\"-oBatchMode=yes\");\n"
                                    "        };\n"
                                    "      };\n"
                                    "    };\n"
@@ -1519,9 +1521,18 @@
     XCTAssertTrue([self writeFile:mockSSH
                           content:@"#!/usr/bin/env bash\n"
                                   "set -euo pipefail\n"
+                                  "while [[ \"$#\" -gt 0 && \"$1\" == -* ]]; do\n"
+                                  "  option=\"$1\"\n"
+                                  "  shift\n"
+                                  "  if [[ \"$option\" == \"-o\" || \"$option\" == \"-p\" ]]; then\n"
+                                  "    shift\n"
+                                  "  fi\n"
+                                  "done\n"
                                   "host=\"$1\"\n"
                                   "shift\n"
-                                  "exec \"$@\"\n"]);
+                                  "printf 'host=%s argc=%s command=%s\\n' \"$host\" \"$#\" \"$*\" >> \"$ARLEN_MOCK_SSH_LOG\"\n"
+                                  "remote_command=\"$*\"\n"
+                                  "exec bash -lc \"$remote_command\"\n"]);
     XCTAssertTrue([self makeExecutableAtPath:mockSSH]);
     XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"config/app.plist"]
                           content:@"{\n  host = \"127.0.0.1\";\n  port = 3000;\n}\n"]);
@@ -1538,10 +1549,10 @@
     XCTAssertEqual(0, code, @"%@", buildOutput);
 
     NSString *releaseOutput = [self runShellCapture:[NSString stringWithFormat:
-                                                         @"cd %@ && ARLEN_FRAMEWORK_ROOT=%@ %@/build/arlen "
+                                                         @"cd %@ && ARLEN_FRAMEWORK_ROOT=%@ ARLEN_MOCK_SSH_LOG=%@ %@/build/arlen "
                                                           "deploy release production --app-root %@ --release-id ssh-rel-1 "
                                                           "--allow-missing-certification --skip-migrate --runtime-action none --json",
-                                                         appRoot, repoRoot, repoRoot, appRoot]
+                                                         appRoot, repoRoot, mockSSHLog, repoRoot, appRoot]
                                            exitCode:&code];
     XCTAssertEqual(0, code, @"%@", releaseOutput);
     NSDictionary *releasePayload =
@@ -1551,6 +1562,10 @@
     XCTAssertEqualObjects(@"production", target[@"name"]);
     NSDictionary *transport = [releasePayload[@"transport"] isKindOfClass:[NSDictionary class]] ? releasePayload[@"transport"] : @{};
     XCTAssertEqualObjects(@"ok", transport[@"status"]);
+    NSString *transportCommand = [transport[@"command"] isKindOfClass:[NSString class]] ? transport[@"command"] : @"";
+    XCTAssertTrue([transportCommand containsString:@"'-oBatchMode=yes'"], @"%@", transportCommand);
+    XCTAssertTrue([transportCommand containsString:@"'mock-target' 'bash -lc "], @"%@", transportCommand);
+    XCTAssertFalse([transportCommand containsString:@"'bash' '-lc'"], @"%@", transportCommand);
 
     NSString *remoteCurrent = [self runShellCapture:[NSString stringWithFormat:@"readlink -f %s/releases/current",
                                                                                [releasePath UTF8String]]
@@ -1561,9 +1576,9 @@
     XCTAssertTrue([trimmedCurrent hasSuffix:@"/ssh-rel-1"], @"%@", trimmedCurrent);
 
     NSString *statusOutput = [self runShellCapture:[NSString stringWithFormat:
-                                                        @"cd %@ && ARLEN_FRAMEWORK_ROOT=%@ %@/build/arlen "
+                                                        @"cd %@ && ARLEN_FRAMEWORK_ROOT=%@ ARLEN_MOCK_SSH_LOG=%@ %@/build/arlen "
                                                          "deploy status production --app-root %@ --json",
-                                                        appRoot, repoRoot, repoRoot, appRoot]
+                                                        appRoot, repoRoot, mockSSHLog, repoRoot, appRoot]
                                           exitCode:&code];
     XCTAssertEqual(0, code, @"%@", statusOutput);
     NSDictionary *statusPayload =
@@ -1571,6 +1586,8 @@
     XCTAssertEqualObjects(@"ok", statusPayload[@"status"]);
     XCTAssertEqualObjects(@"ssh-rel-1", statusPayload[@"active_release_id"]);
     XCTAssertEqualObjects(@"production", statusPayload[@"target"][@"name"]);
+    NSString *mockLog = [NSString stringWithContentsOfFile:mockSSHLog encoding:NSUTF8StringEncoding error:nil] ?: @"";
+    XCTAssertTrue([mockLog containsString:@"host=mock-target argc=1 command=bash -lc "], @"%@", mockLog);
   } @finally {
     [[NSFileManager defaultManager] removeItemAtPath:appRoot error:nil];
     [[NSFileManager defaultManager] removeItemAtPath:workRoot error:nil];

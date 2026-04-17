@@ -219,6 +219,12 @@ Named targets with SSH transport now let Arlen delegate:
 
 to the active packaged release on the remote host.
 
+The SSH transport contract deliberately avoids local shell command assembly for
+remote execution. Arlen builds the local SSH and tar processes as argv arrays,
+streams tar output through a pipe for uploads, and sends the remote shell as a
+single command string. This preserves the intended `bash -lc '<script>'`
+boundary across SSH remote-command reparsing (`ARLEN-BUG-021`).
+
 ### 4.7 Remote Rebuild Contract
 
 Remote rebuild should never be a silent fallback.
@@ -322,6 +328,10 @@ the local profile, target profile, runtime strategy, compatibility status, and
 remote rebuild requirements. It also records explicit database/configuration
 contracts when the deploy command is given `--database-mode`,
 `--database-adapter`, `--database-target`, and `--require-env-key`.
+For named targets with SSH transport, Arlen runs the local upload path as
+argv-level tasks: a local `tar` process streams into the SSH process through an
+`NSPipe`, and the remote side receives one `bash -lc '<script>'` command string
+instead of split `bash`, `-lc`, and script arguments (`ARLEN-BUG-021`).
 Manifest runtime/helper paths are now stored
 release-relative so the package stays portable after ship/move
 (`ARLEN-BUG-017`). `arlen deploy release` reuses that manifest, runs packaged

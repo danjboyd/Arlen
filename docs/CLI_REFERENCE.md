@@ -157,6 +157,10 @@ Named targets:
 - when `[target]` has SSH transport metadata, stages the local release under
   `build/deploy/targets/<target>/local-releases/` and uploads it to the remote
   target release path over SSH/tar streaming
+- SSH transport uses argv-level local process execution and sends the remote
+  shell as one `bash -lc '<script>'` command string so SSH remote-command
+  reparsing cannot split the script into `bash -lc` positional arguments
+  (`ARLEN-BUG-021`)
 - writes `metadata/manifest.json` with release/runtime/health contract metadata
 - writes manifest paths release-relative so the packaged release stays valid
   after ship/move (`ARLEN-BUG-017`)
@@ -963,13 +967,17 @@ Lifecycle diagnostics:
 - `make build-tests`: build unit + integration bundles through the incremental
   object/archive/template graph without running XCTest
 - `make test-unit` / `make test-integration`: run XCTest bundles with repo-local GNUstep defaults home (`.gnustep-home`)
-  - honor `ARLEN_XCTEST` as the runner override (default `xctest`)
+  - default to the repo-local patched runner at
+    `vendor/tools-xctest/obj/xctest` while GNUstep/tools-xctest PR 5 is pending
+    upstream
+  - honor `ARLEN_USE_VENDORED_XCTEST=0` to fall back to the system `xctest`
+  - honor `ARLEN_XCTEST` as the runner override
   - honor `ARLEN_XCTEST_LD_LIBRARY_PATH` when the selected runner needs a non-system `libXCTest`
 - `make test-unit-filter` / `make test-integration-filter`: focused XCTest reruns using `TEST=TestClass[/testMethod]` and optional `SKIP_TEST=TestClass[/testMethod]`
   - Arlen prepends the bundle target name automatically, so you do not include `ArlenUnitTests/` or `ArlenIntegrationTests/` in `TEST`
-  - require an XCTest runner that supports Apple-style `-only-testing` / `-skip-testing` arguments; stock Debian `tools-xctest` may not provide those flags yet
-  - if the patched runner comes from a local `tools-xctest` build tree, also set `ARLEN_XCTEST_LD_LIBRARY_PATH=/path/to/tools-xctest/XCTest/obj`
-  - example: `ARLEN_XCTEST=/path/to/patched/xctest ARLEN_XCTEST_LD_LIBRARY_PATH=/path/to/tools-xctest/XCTest/obj make test-unit-filter TEST=RuntimeTests/testRenderAndIncludeNormalizeUnsuffixedTemplateReferences`
+  - use the vendored patched runner by default so Apple-style `-only-testing`
+    / `-skip-testing` arguments work before the system package catches up
+  - example: `make test-unit-filter TEST=RuntimeTests/testRenderAndIncludeNormalizeUnsuffixedTemplateReferences`
 - `make phase20-sql-builder-tests` / `make phase20-schema-tests` / `make phase20-routing-tests`: focused Phase 20 pure-unit lanes that do not depend on `-only-testing`
 - `make phase20-postgres-live-tests` / `make phase20-mssql-live-tests`: focused Phase 20 live-backend lanes with explicit DSN/transport requirement logging
 - `make phase20-focused`: run the full focused Phase 20 lane set without relying on stock `xctest -only-testing`
