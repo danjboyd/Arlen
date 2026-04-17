@@ -5,6 +5,7 @@ Date: `2026-04-17`
 This note records the upstream Arlen assessment of the OwnerConnect report:
 
 - `Arlen deploy SSH transport invokes bash -lc incorrectly for remote targets`
+- `Named-target deploy release rebuilds existing release ID instead of reusing it`
 
 Ownership rule:
 
@@ -18,8 +19,40 @@ Ownership rule:
 | OwnerConnect report | Upstream status | Evidence |
 | --- | --- | --- |
 | SSH deploy push fails with `mkdir: missing operand` because remote `bash -lc` arguments are not preserved over SSH | fixed in current workspace; awaiting downstream revalidation | `tools/arlen.m`, `tests/integration/DeploymentIntegrationTests.m`, `docs/DEPLOYMENT.md`, `docs/CLI_REFERENCE.md` |
+| `arlen deploy release <target> --release-id <existing-id>` rebuilds an existing local release and fails with `release_exists` | accepted upstream bug; open for next deployment bugfix pass | `docs/OPEN_ISSUES.md` (`ARLEN-BUG-022`) |
 
 ## Notes
+
+### `ARLEN-BUG-022`: Named-Target Release Reuse Regression
+
+- Upstream accepted the failure class from the downstream report.
+- Reproduction context:
+  - `OwnerConnect` vendored Arlen in `vendor/Arlen` as of the `2026-04-17`
+    deployment.
+  - CLI reported deploy contract version `phase7g-agent-dx-contracts-v1`.
+  - Deploy manifests reported `phase32-deploy-manifest-v1`.
+- Reported flow:
+  - `vendor/Arlen/build/arlen deploy push iep-ownerconnect --allow-missing-certification --json`
+  - returned release ID `20260417T213058Z`
+  - `vendor/Arlen/build/arlen deploy release iep-ownerconnect --release-id 20260417T213058Z --allow-missing-certification --json`
+- Actual result:
+  - named-target release attempted to run `build_release.sh` for the same local
+    release ID before remote activation
+  - `build_release.sh` failed with `release_exists` because
+    `build/deploy/targets/iep-ownerconnect/local-releases/20260417T213058Z`
+    already existed
+- Expected result:
+  - named-target `deploy release --release-id` should reuse the existing
+    artifact when present, upload or reuse the remote artifact as needed, and
+    activate the selected release on the remote host
+- Downstream workaround used:
+  - ran `vendor/Arlen/build/arlen deploy release iep-ownerconnect --allow-missing-certification --json`
+    without `--release-id`
+  - Arlen created, uploaded, and activated fresh release `20260417T213200Z`
+- Proposed upstream regression:
+  - `deploy push <target> --release-id X`
+  - `deploy release <target> --release-id X`
+  - assert release `X` is activated without a `release_exists` failure
 
 ### `ARLEN-BUG-021`: SSH Remote Command Argument Reparse
 
