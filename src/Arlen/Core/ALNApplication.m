@@ -4373,8 +4373,6 @@ static void ALNFinalizeResponse(ALNApplication *application,
     [self addMiddleware:[[ALNSecurityHeadersMiddleware alloc] initWithContentSecurityPolicy:csp]];
   }
 
-  [self addMiddleware:[[ALNRoutePolicyMiddleware alloc] init]];
-
   NSDictionary *rateLimit = ALNDictionaryConfigValue(self.config, @"rateLimit");
   BOOL rateLimitEnabled = ALNBoolConfigValue(rateLimit[@"enabled"], NO);
   if (rateLimitEnabled) {
@@ -4413,6 +4411,8 @@ static void ALNFinalizeResponse(ALNApplication *application,
       sessionMiddlewareActive = YES;
     }
   }
+
+  [self addMiddleware:[[ALNRoutePolicyMiddleware alloc] init]];
 
   NSDictionary *csrf = ALNDictionaryConfigValue(self.config, @"csrf");
   BOOL csrfEnabled = ALNBoolConfigValue(csrf[@"enabled"], sessionEnabled);

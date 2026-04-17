@@ -3,6 +3,8 @@
 
 #import "ALNAdminUIModule.h"
 #import "ALNApplication.h"
+#import "ALNRequest.h"
+#import "ALNResponse.h"
 
 static NSMutableDictionary<NSString *, NSMutableDictionary *> *Phase16FWidgetStore(void) {
   static NSMutableDictionary<NSString *, NSMutableDictionary *> *store = nil;
@@ -274,10 +276,34 @@ static void Phase16FResetWidgetStore(void) {
   }];
 }
 
+- (ALNApplication *)applicationWithSecurity:(NSDictionary *)security {
+  return [[ALNApplication alloc] initWithConfig:@{
+    @"environment" : @"test",
+    @"logFormat" : @"json",
+    @"csrf" : @{ @"enabled" : @NO },
+    @"security" : security ?: @{},
+    @"adminUI" : @{
+      @"resourceProviders" : @{ @"classes" : @[ @"Phase16FResourceProvider" ] },
+    },
+  }];
+}
+
 - (void)registerModuleForApplication:(ALNApplication *)app {
   NSError *error = nil;
   XCTAssertTrue([[[ALNAdminUIModule alloc] init] registerWithApplication:app error:&error]);
   XCTAssertNil(error);
+}
+
+- (ALNResponse *)dispatchGETPath:(NSString *)path
+                      remoteAddress:(NSString *)remoteAddress
+                       application:(ALNApplication *)app {
+  ALNRequest *request = [[ALNRequest alloc] initWithMethod:@"GET"
+                                                      path:path ?: @"/"
+                                               queryString:@""
+                                                   headers:@{}
+                                                      body:[NSData data]];
+  request.remoteAddress = remoteAddress ?: @"";
+  return [app dispatchRequest:request];
 }
 
 - (void)testListMetadataBulkExportAndAutocompleteContracts {
@@ -344,6 +370,41 @@ static void Phase16FResetWidgetStore(void) {
   XCTAssertNil(error);
   XCTAssertEqual((NSUInteger)1, [suggestions count]);
   XCTAssertEqualObjects(@"ready", suggestions[0][@"value"]);
+}
+
+- (void)testAdminRoutesAttachConfiguredAdminPolicyAndDenyDisallowedSourceIP {
+  NSDictionary *security = @{
+    @"routePolicies" : @{
+      @"admin" : @{
+        @"sourceIPAllowlist" : @[ @"127.0.0.1/32" ],
+      }
+    }
+  };
+  ALNApplication *app = [self applicationWithSecurity:security];
+  [self registerModuleForApplication:app];
+
+  ALNAdminUIModuleRuntime *runtime = [ALNAdminUIModuleRuntime sharedRuntime];
+  NSArray *routeTable = [runtime.mountedApplication routeTable];
+  XCTAssertTrue([routeTable count] > 0);
+  for (NSDictionary *route in routeTable) {
+    XCTAssertEqualObjects((@[ @"admin" ]), route[@"policies"]);
+  }
+
+  NSError *error = nil;
+  XCTAssertTrue([app startWithError:&error]);
+  XCTAssertNil(error);
+
+  ALNResponse *denied = [self dispatchGETPath:@"/admin"
+                                remoteAddress:@"198.51.100.10"
+                                  application:app];
+  XCTAssertEqual((NSInteger)403, denied.statusCode);
+  XCTAssertEqualObjects(@"source_ip_denied", [denied headerForName:@"X-Arlen-Policy-Denial-Reason"]);
+
+  ALNResponse *allowedToReachAdminAuth = [self dispatchGETPath:@"/admin"
+                                                 remoteAddress:@"127.0.0.1"
+                                                   application:app];
+  XCTAssertEqual((NSInteger)302, allowedToReachAdminAuth.statusCode);
+  XCTAssertNil([allowedToReachAdminAuth headerForName:@"X-Arlen-Policy-Denial-Reason"]);
 }
 
 @end

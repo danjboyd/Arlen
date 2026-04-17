@@ -96,6 +96,10 @@ Windows-focused preview lanes:
     rebuild gating, unsupported-target rejection, rollback/status deployment
     metadata, and packaged `propane_handoff` contract checks
   - writes artifacts under `build/release_confidence/phase32/`
+- `make phase35-confidence`
+  - runs the route-policy confidence set for CIDR/proxy decisions,
+    route-side policy metadata, and `/admin` policy attachment
+  - writes artifacts under `build/release_confidence/phase35/`
 
 ## 2. Bug Report To Regression
 

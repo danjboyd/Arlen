@@ -11,6 +11,8 @@
 #import "ALNSessionMiddleware.h"
 #import "../shared/ALNWebTestSupport.h"
 
+static NSUInteger MiddlewarePingInvocationCount = 0;
+
 @interface MiddlewareFormController : ALNController
 @end
 
@@ -39,6 +41,7 @@
 
 - (id)ping:(ALNContext *)ctx {
   (void)ctx;
+  MiddlewarePingInvocationCount += 1;
   [self renderText:@"pong\n"];
   return nil;
 }
@@ -271,6 +274,101 @@
   ALNAssertResponseStatus(response, 200);
 }
 
+- (void)testRoutePolicyTrustedProxyUsesXForwardedForClientIP {
+  NSDictionary *security = @{
+    @"trustedProxies" : @[ @"127.0.0.1/32" ],
+    @"routePolicies" : @{
+      @"admin" : @{
+        @"pathPrefixes" : @[ @"/admin" ],
+        @"trustForwardedClientIP" : @(YES),
+        @"sourceIPAllowlist" : @[ @"203.0.113.10/32" ],
+      }
+    }
+  };
+  ALNApplication *app = [self routePolicyApplicationWithSecurity:security route:@"/admin" policies:nil];
+  XCTAssertTrue([app startWithError:NULL]);
+
+  ALNResponse *response = [self dispatchPolicyRequestForApp:app
+                                                       path:@"/admin"
+                                              remoteAddress:@"127.0.0.1"
+                                                    headers:@{
+                                                      @"X-Forwarded-For" : @"203.0.113.10, 198.51.100.2",
+                                                    }];
+  ALNAssertResponseStatus(response, 200);
+}
+
+- (void)testRoutePolicyIPv6CIDRAllowsAndDeniesDeterministically {
+  NSDictionary *security = @{
+    @"routePolicies" : @{
+      @"admin" : @{
+        @"pathPrefixes" : @[ @"/admin" ],
+        @"sourceIPAllowlist" : @[ @"2001:db8::/32" ],
+      }
+    }
+  };
+  ALNApplication *app = [self routePolicyApplicationWithSecurity:security route:@"/admin" policies:nil];
+  XCTAssertTrue([app startWithError:NULL]);
+
+  ALNResponse *allowed = [self dispatchPolicyRequestForApp:app
+                                                      path:@"/admin"
+                                             remoteAddress:@"2001:db8::42"
+                                                   headers:@{}];
+  ALNAssertResponseStatus(allowed, 200);
+
+  ALNResponse *denied = [self dispatchPolicyRequestForApp:app
+                                                     path:@"/admin"
+                                            remoteAddress:@"2001:db9::42"
+                                                  headers:@{}];
+  ALNAssertResponseStatus(denied, 403);
+  XCTAssertEqualObjects(@"source_ip_denied", [denied headerForName:@"X-Arlen-Policy-Denial-Reason"]);
+}
+
+- (void)testRoutePolicyDeniesMalformedForwardedClientFromTrustedProxy {
+  NSDictionary *security = @{
+    @"trustedProxies" : @[ @"127.0.0.1/32" ],
+    @"routePolicies" : @{
+      @"admin" : @{
+        @"pathPrefixes" : @[ @"/admin" ],
+        @"trustForwardedClientIP" : @(YES),
+        @"sourceIPAllowlist" : @[ @"203.0.113.10/32" ],
+      }
+    }
+  };
+  ALNApplication *app = [self routePolicyApplicationWithSecurity:security route:@"/admin" policies:nil];
+  XCTAssertTrue([app startWithError:NULL]);
+
+  ALNResponse *response = [self dispatchPolicyRequestForApp:app
+                                                       path:@"/admin"
+                                              remoteAddress:@"127.0.0.1"
+                                                    headers:@{
+                                                      @"Forwarded" : @"for=not-an-ip;proto=https",
+                                                    }];
+  ALNAssertResponseStatus(response, 403);
+  XCTAssertEqualObjects(@"forwarded_client_unresolved",
+                        [response headerForName:@"X-Arlen-Policy-Denial-Reason"]);
+}
+
+- (void)testRoutePolicyDeniesWhenDirectPeerCannotBeResolved {
+  NSDictionary *security = @{
+    @"routePolicies" : @{
+      @"admin" : @{
+        @"pathPrefixes" : @[ @"/admin" ],
+        @"sourceIPAllowlist" : @[ @"127.0.0.1/32" ],
+      }
+    }
+  };
+  ALNApplication *app = [self routePolicyApplicationWithSecurity:security route:@"/admin" policies:nil];
+  XCTAssertTrue([app startWithError:NULL]);
+
+  ALNResponse *response = [self dispatchPolicyRequestForApp:app
+                                                       path:@"/admin"
+                                              remoteAddress:@"not-an-ip"
+                                                    headers:@{}];
+  ALNAssertResponseStatus(response, 403);
+  XCTAssertEqualObjects(@"direct_peer_unresolved",
+                        [response headerForName:@"X-Arlen-Policy-Denial-Reason"]);
+}
+
 - (void)testRoutePolicyIgnoresSpoofedXForwardedForFromUntrustedPeer {
   NSDictionary *security = @{
     @"trustedProxies" : @[ @"127.0.0.1/32" ],
@@ -293,6 +391,34 @@
                                                     }];
   ALNAssertResponseStatus(response, 403);
   XCTAssertEqualObjects(@"source_ip_denied", [response headerForName:@"X-Arlen-Policy-Denial-Reason"]);
+}
+
+- (void)testRoutePolicyDenialPreventsControllerExecution {
+  NSDictionary *security = @{
+    @"routePolicies" : @{
+      @"admin" : @{
+        @"pathPrefixes" : @[ @"/admin" ],
+        @"sourceIPAllowlist" : @[ @"127.0.0.1/32" ],
+      }
+    }
+  };
+  ALNApplication *app = [self routePolicyApplicationWithSecurity:security route:@"/admin" policies:nil];
+  XCTAssertTrue([app startWithError:NULL]);
+  MiddlewarePingInvocationCount = 0;
+
+  ALNResponse *denied = [self dispatchPolicyRequestForApp:app
+                                                     path:@"/admin"
+                                            remoteAddress:@"198.51.100.10"
+                                                  headers:@{}];
+  ALNAssertResponseStatus(denied, 403);
+  XCTAssertEqual((NSUInteger)0, MiddlewarePingInvocationCount);
+
+  ALNResponse *allowed = [self dispatchPolicyRequestForApp:app
+                                                      path:@"/admin"
+                                             remoteAddress:@"127.0.0.1"
+                                                   headers:@{}];
+  ALNAssertResponseStatus(allowed, 200);
+  XCTAssertEqual((NSUInteger)1, MiddlewarePingInvocationCount);
 }
 
 - (void)testRouteSidePolicyAttachmentProtectsNamedRoute {

@@ -8,6 +8,8 @@
 #import "ALNPg.h"
 #import "ALNRequest.h"
 #import "ALNResponse.h"
+#import "ALNRoute.h"
+#import "ALNRouter.h"
 
 NSString *const ALNAdminUIModuleErrorDomain = @"Arlen.Modules.AdminUI.Error";
 
@@ -1394,7 +1396,7 @@ static void AUNotifySearchIncrementalSync(NSString *resourceIdentifier, NSDictio
   if ([application.config[@"runtimeInvocationMode"] isKindOfClass:[NSString class]]) {
     childConfig[@"runtimeInvocationMode"] = application.config[@"runtimeInvocationMode"];
   }
-  for (NSString *key in @[ @"session", @"csrf", @"database", @"securityHeaders", @"observability", @"services" ]) {
+  for (NSString *key in @[ @"session", @"csrf", @"database", @"security", @"securityHeaders", @"observability", @"services" ]) {
     if ([application.config[key] isKindOfClass:[NSDictionary class]]) {
       childConfig[key] = application.config[key];
     }
@@ -3111,6 +3113,30 @@ static void AUNotifySearchIncrementalSync(NSString *resourceIdentifier, NSDictio
              controllerClass:[ALNAdminUIController class]
                       action:@"apiResourceItemsIndex"];
   [child endRouteGroup];
+
+  NSDictionary *security = [application.config[@"security"] isKindOfClass:[NSDictionary class]]
+                                ? application.config[@"security"]
+                                : @{};
+  NSDictionary *routePolicies = [security[@"routePolicies"] isKindOfClass:[NSDictionary class]]
+                                     ? security[@"routePolicies"]
+                                     : @{};
+  BOOL attachAdminPolicy = [routePolicies[@"admin"] isKindOfClass:[NSDictionary class]];
+  if (attachAdminPolicy) {
+    NSError *policyError = nil;
+    for (ALNRoute *route in [child.router allRoutes]) {
+      if ([route.name length] == 0) {
+        continue;
+      }
+      if (![child configureRoutePoliciesForRouteNamed:route.name
+                                             policies:@[ @"admin" ]
+                                                error:&policyError]) {
+        if (error != NULL) {
+          *error = policyError;
+        }
+        return NO;
+      }
+    }
+  }
 
   NSError *routeError = nil;
   NSMutableDictionary *routeSchemas = [NSMutableDictionary dictionaryWithDictionary:@{

@@ -4,6 +4,16 @@ Last updated: 2026-04-17
 
 ## Leaving Off (2026-04-17)
 
+- Completed Phase 35E-35H and closed Phase 35:
+  - `security.routePolicies.admin` now protects mounted admin UI routes when
+    configured, while apps without that policy keep existing behavior
+  - added spoofing/proxy regressions for trusted and untrusted forwarded
+    headers, IPv6 CIDR decisions, unresolved clients, and controller
+    non-execution on denial
+  - added `docs/ROUTE_POLICIES.md` for `/admin`, reverse-proxy setup, denial
+    reasons, log fields, and operator warnings
+  - added `make phase35-confidence`, which writes artifacts under
+    `build/release_confidence/phase35/`
 - Delivered Phase 35A-35D for the route/middleware policy layer:
   - added named route-policy configuration under `security.routePolicies`
     plus `security.trustedProxies`

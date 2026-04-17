@@ -1,6 +1,6 @@
 # Phase 35 Roadmap
 
-Status: in progress; 35A-35D delivered, 35E-35H planned
+Status: delivered
 Last updated: 2026-04-17
 
 ## Goal
@@ -194,6 +194,8 @@ Delivered notes:
 
 ## 35E. `/admin` First Consumer
 
+Status: delivered 2026-04-17
+
 Goal:
 
 - make `/admin` the first framework-owned consumer of named route policies
@@ -212,6 +214,8 @@ Acceptance target:
 - existing apps without admin policy config retain documented behavior
 
 ## 35F. Spoofing and Proxy Regression Suite
+
+Status: delivered 2026-04-17
 
 Goal:
 
@@ -236,6 +240,8 @@ Acceptance target:
 
 ## 35G. Audit, Diagnostics, and Operator Docs
 
+Status: delivered 2026-04-17
+
 Goal:
 
 - make policy behavior inspectable enough for operators and coding agents to
@@ -257,6 +263,8 @@ Acceptance target:
 
 ## 35H. Confidence Lane and Closeout
 
+Status: delivered 2026-04-17
+
 Goal:
 
 - add a focused confidence lane that proves the route policy layer remains
@@ -272,3 +280,21 @@ Acceptance target:
 
 - Phase 35 has a repeatable local verification command and documented CI
   expectation before being marked delivered
+
+Closeout notes:
+
+- `modules/admin-ui` now copies `security` config into its mounted child app
+  and attaches the configured `admin` policy to all admin routes when
+  `security.routePolicies.admin` exists.
+- Existing apps with no `admin` route policy keep the prior admin behavior.
+- `MiddlewareTests` covers IPv4/IPv6 CIDR decisions, trusted `Forwarded`,
+  trusted `X-Forwarded-For`, untrusted forwarded-header spoofing, malformed
+  forwarded clients, unresolved direct peers, and controller non-execution on
+  policy denial.
+- `Phase16FTests` covers admin UI policy attachment and source IP denial before
+  admin auth handling.
+- `docs/ROUTE_POLICIES.md` documents the operator contract, reverse-proxy
+  troubleshooting, denial reasons, and the warning that IP allowlists do not
+  replace auth, CSRF, audit logging, or rollback controls.
+- `make phase35-confidence` writes focused artifacts to
+  `build/release_confidence/phase35/`.

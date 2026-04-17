@@ -166,6 +166,8 @@
   XCTAssertTrue([makefile containsString:@"bash ./tools/ci/run_phase31_confidence.sh"]);
   XCTAssertTrue([makefile containsString:@"phase32-confidence:"]);
   XCTAssertTrue([makefile containsString:@"bash ./tools/ci/run_phase32_confidence.sh"]);
+  XCTAssertTrue([makefile containsString:@"phase35-confidence:"]);
+  XCTAssertTrue([makefile containsString:@"bash ./tools/ci/run_phase35_confidence.sh"]);
 }
 
 - (void)testGNUmakefileDefinesFocusedPhase20ConfidenceLanes {

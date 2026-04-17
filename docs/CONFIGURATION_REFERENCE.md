@@ -245,6 +245,16 @@ IP allowlisting is an outer gate only. Real administrative surfaces should still
 use authentication, CSRF protection for browser flows, audit logging, and
 revision history or rollback for operational changes.
 
+The framework admin UI is wired as the first built-in consumer. If
+`security.routePolicies.admin` exists, all mounted `/admin` routes attach that
+policy. Apps without an `admin` route policy keep the existing admin behavior.
+For reverse-proxy deployments, configure `security.trustedProxies` with only the
+private proxy peers that connect directly to Arlen.
+
+See [Route Policies](ROUTE_POLICIES.md) for `/admin` examples, denial log
+fields, troubleshooting guidance, and the `make phase35-confidence`
+verification lane.
+
 ## 7. Auth and API Helpers
 
 Auth:
