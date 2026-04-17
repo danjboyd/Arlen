@@ -4,6 +4,13 @@ Last updated: 2026-04-17
 
 ## Leaving Off (2026-04-17)
 
+- Added planned Phase 35 for the route/middleware policy layer requested by
+  the downstream OwnerConnect feature report:
+  - named route policies rather than admin-only IP whitelist switches
+  - proxy-aware IPv4/IPv6 source IP allowlisting
+  - deterministic path-prefix and route-side policy attachment
+  - `/admin` as the first framework consumer
+  - spoofed forwarded-header regression coverage and operator docs
 - Fixed `ARLEN-BUG-021`, reported downstream from `OwnerConnect`:
   - `arlen deploy` SSH transport no longer builds remote execution through a
     local shell command string
