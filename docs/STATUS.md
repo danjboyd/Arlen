@@ -4,6 +4,10 @@ Last updated: 2026-04-17
 
 ## Leaving Off (2026-04-17)
 
+- Next-session first priority: fix `ARLEN-BUG-022` / `ISSUE-002`, the
+  named-target `arlen deploy release <target> --release-id <existing-id>`
+  regression where the remote release path rebuilds an existing local release
+  ID and fails with `release_exists` instead of reusing the prepared artifact.
 - Closed Phase 35 with `35L-35M` delivered:
   - route inspection now marks each effective route with `source = code` or
     `source = plist`
