@@ -22,6 +22,14 @@ jobs:
         with:
           submodules: recursive
 
+      - name: Record GNUstep CLI provisioning pin
+        shell: powershell
+        run: |
+          git -C vendor\gnustep-cli-new rev-parse HEAD
+          if (!(Test-Path vendor\gnustep-cli-new\docs\windows-integration.md)) {
+            throw "missing vendored gnustep-cli-new Windows integration docs"
+          }
+
       - name: Run Windows preview runtime parity lane
         shell: powershell
         run: |

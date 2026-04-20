@@ -72,6 +72,7 @@ toolchain env directly for the Linux/GNUstep path. On macOS, use
 - [Testing Workflow](TESTING_WORKFLOW.md): focused contributor lanes for turning bug reports into regressions.
 - [Route Policies](ROUTE_POLICIES.md): named access policies, proxy-aware source IP allowlisting, `/admin` policy wiring, diagnostics, and confidence checks.
 - [Windows CLANG64 Preview](WINDOWS_CLANG64.md): current `main`-branch Windows bootstrap, packaged-release preview contract, and support statement.
+- [Platform Runner Runbook](PLATFORM_RUNNERS.md): Phase 34K Apple/Windows runner provisioning, labels, validation commands, and deferred package-manager boundary.
 
 ## Reference
 
@@ -85,7 +86,7 @@ toolchain env directly for the Linux/GNUstep path. On macOS, use
 - [Current Status](STATUS.md): latest checkpoint and verified milestone state.
 - [CI Alignment](CI_ALIGNMENT.md): required CI shape, merge-gate guidance, and the rule that CI must stay current and green.
 - [Phase 35 Roadmap](PHASE35_ROADMAP.md): completed route/middleware policy layer for named access policies, proxy-aware source IP allowlisting, `/admin` as the first consumer, and `phase35-confidence`; `35I-35M` add and close plist route definitions as a declarative registration surface over the existing router with route inspection source metadata.
-- [Phase 34 Roadmap](PHASE34_ROADMAP.md): CI-robustness phase covering workflow honesty, merge-gate cleanup, docs-gate promotion, branch-protection/release-lane cleanup, and the planned OracleTestVMs-backed platform-runner standardization follow-up.
+- [Phase 34 Roadmap](PHASE34_ROADMAP.md): completed CI-robustness phase covering workflow honesty, merge-gate cleanup, docs-gate promotion, branch-protection/release-lane cleanup, and platform-runner standardization.
 - [Phase 33 Roadmap](PHASE33_ROADMAP.md): completed durable event-stream seam phase; `33A-33L` delivered the store/broker/auth seam, replay-window and `resync_required` contract, websocket/SSE/HTTP integration, plain generated TypeScript consumer surface, confidence lane, and docs/module-boundary closeout.
 - [Phase 32 Roadmap](PHASE32_ROADMAP.md): completed target-aware deployment phase plus host-bootstrap closeout; `32A-32V` now cover the shipped deploy contract, named targets, `deploy init`, SSH transport/activation, fresh GNUstep host readiness, and Debian-first generated host artifacts/docs.
 - [Phase 30 Roadmap](PHASE30_ROADMAP.md): Apple-runtime roadmap on macOS; `30A-30S` are now delivered, including the compatibility-shim cleanup for warning-free Apple/GNUstep builds.

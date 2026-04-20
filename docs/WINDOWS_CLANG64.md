@@ -44,7 +44,8 @@ Checked-in wrappers:
 For Phase 34K runner provisioning, Arlen pins `gnustep-cli-new` as a submodule
 at `vendor/gnustep-cli-new`. Use that checkout as the source of truth for the
 MSYS2 `CLANG64` GNUstep managed-toolchain manifests and Windows bootstrap
-validation helpers when preparing a self-hosted `windows-preview` runner.
+validation helpers when preparing a self-hosted `windows-preview` runner. See
+`docs/PLATFORM_RUNNERS.md` for the runner labels and validation commands.
 
 ## 2. Required Tools
 

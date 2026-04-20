@@ -4,6 +4,20 @@ Last updated: 2026-04-20
 
 ## Leaving Off (2026-04-20)
 
+- Closed Phase 34 with `34K` delivered:
+  - added `docs/PLATFORM_RUNNERS.md` to document Windows and Apple platform
+    runner contracts, GitHub runner labels, validation commands, token
+    handling, and the package-manager boundary
+  - Windows `windows-preview` now has a pinned provisioning contract through
+    `vendor/gnustep-cli-new`
+  - Apple baseline remains GitHub-hosted `macos-15`; OracleTestVMs macOS
+    execution is explicitly deferred until that provider path is available
+  - future `gnustep install arlen` support is recorded as a distribution
+    follow-up, not a Phase 34 closeout dependency
+  - required merge-gate checks remain unchanged:
+    - `linux-quality / quality-gate`
+    - `linux-sanitizers / sanitizer-gate`
+    - `docs-quality / docs-gate`
 - Resumed Phase 34K platform-runner standardization:
   - added `vendor/gnustep-cli-new` as a submodule pinned to
     `5b83862fc81968d3614ebc2d92301a56354d7c15`
@@ -12,9 +26,8 @@ Last updated: 2026-04-20
     `windows-preview` runner path
   - this does not change branch protection or promote Windows preview to a
     required merge gate
-  - remaining Phase 34K work is proving the pinned provisioning flow on an
-    online OracleTestVMs Windows runner and documenting the macOS runner path
-    once OracleTestVMs macOS provisioning is available
+  - the Phase 34 closeout documents the online-runner validation commands and
+    defers OracleTestVMs macOS execution until the provider path is available
 
 ## Leaving Off (2026-04-17)
 

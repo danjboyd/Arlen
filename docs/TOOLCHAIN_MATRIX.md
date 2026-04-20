@@ -175,6 +175,8 @@ Platform runner provisioning:
 - use the pinned checkout's Windows integration docs, managed-toolchain
   manifests, and bootstrap validation helpers when preparing the MSYS2
   `CLANG64` GNUstep environment for `windows-preview`
+- the runner labels, validation commands, and package-manager boundary are
+  documented in `docs/PLATFORM_RUNNERS.md`
 - this pin supports the non-required Windows preview lane; it does not change
   the authoritative Linux/GNUstep merge gate
 

@@ -64,17 +64,13 @@ Completed:
 - `34H`: branch protection and repo settings closeout
 - `34I`: contributor and agent workflow closeout
 - `34J`: robustness verification and exit criteria
-
-Planned/open:
-
 - `34K`: OracleTestVMs-backed platform runner standardization for Apple and
   Windows confidence lanes. This keeps both lanes non-required under the
   current support statement while defining a repeatable LAN/self-hosted runner
-  lifecycle. Arlen now pins `gnustep-cli-new` at `vendor/gnustep-cli-new` as
-  the Windows MSYS2 `CLANG64` GNUstep provisioning source. Closing this
-  subphase remains blocked on proving the pinned path on a fresh Windows
-  runner and on OracleTestVMs macOS VM provisioning being available for the
-  macOS runner side.
+  lifecycle. Arlen pins `gnustep-cli-new` at `vendor/gnustep-cli-new` as the
+  Windows MSYS2 `CLANG64` GNUstep provisioning source. The current Apple
+  baseline remains GitHub-hosted `macos-15`; OracleTestVMs macOS execution is
+  deferred until that provider path is available.
 
 ## Current Merge-Gate Contract
 
@@ -116,12 +112,16 @@ Phase 34K standardizes the intended platform-runner path:
   with the MSYS2 `CLANG64` GNUstep toolchain installed through
   the pinned `vendor/gnustep-cli-new` revision, then registered as a GitHub
   Actions self-hosted runner with labels `arlen` and `msys2-clang64`.
-- Apple baseline should move toward an OracleTestVMs-provisioned macOS VM path
-  once that provider is available, while preserving the existing full-Xcode and
-  XCTest requirements of `apple-baseline`.
+- Apple baseline remains on GitHub-hosted `macos-15` and should move toward an
+  OracleTestVMs-provisioned macOS VM path once that provider is available,
+  while preserving the existing full-Xcode and XCTest requirements of
+  `apple-baseline`.
 - The first operational target can be a dedicated long-lived platform runner;
   ephemeral lease-backed registration/teardown may be documented as a follow-up
   if that is the lower-risk path to a stable signal.
+- Future `gnustep install arlen` package-manager support belongs to a later
+  distribution phase and is not part of the Phase 34 merge-gate or
+  platform-runner contract.
 
 This provisioning work does not change branch protection by itself.
 
