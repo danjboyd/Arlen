@@ -4,6 +4,15 @@ Last updated: 2026-04-20
 
 ## Leaving Off (2026-04-20)
 
+- Added planned Phase 36 for deploy operator UX:
+  - next unused phase number is `36`
+  - scoped `36A-36L` around `deploy list`, `deploy dryrun`, release
+    inventories, named-target release reuse, initialized-target guards,
+    deploy config samples, bash/PowerShell completion, docs, and
+    `phase36-confidence`
+  - roadmap file: `docs/PHASE36_ROADMAP.md`
+  - the phase keeps future `gnustep install arlen` package-manager support out
+    of the current deploy command contract
 - Closed Phase 34 with `34K` delivered:
   - added `docs/PLATFORM_RUNNERS.md` to document Windows and Apple platform
     runner contracts, GitHub runner labels, validation commands, token

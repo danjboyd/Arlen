@@ -85,6 +85,7 @@ toolchain env directly for the Linux/GNUstep path. On macOS, use
 
 - [Current Status](STATUS.md): latest checkpoint and verified milestone state.
 - [CI Alignment](CI_ALIGNMENT.md): required CI shape, merge-gate guidance, and the rule that CI must stay current and green.
+- [Phase 36 Roadmap](PHASE36_ROADMAP.md): planned deploy operator-UX phase covering `deploy list`, `deploy dryrun`, release inventories, deploy config samples, initialized-target guards, and bash/PowerShell completions.
 - [Phase 35 Roadmap](PHASE35_ROADMAP.md): completed route/middleware policy layer for named access policies, proxy-aware source IP allowlisting, `/admin` as the first consumer, and `phase35-confidence`; `35I-35M` add and close plist route definitions as a declarative registration surface over the existing router with route inspection source metadata.
 - [Phase 34 Roadmap](PHASE34_ROADMAP.md): completed CI-robustness phase covering workflow honesty, merge-gate cleanup, docs-gate promotion, branch-protection/release-lane cleanup, and platform-runner standardization.
 - [Phase 33 Roadmap](PHASE33_ROADMAP.md): completed durable event-stream seam phase; `33A-33L` delivered the store/broker/auth seam, replay-window and `resync_required` contract, websocket/SSE/HTTP integration, plain generated TypeScript consumer surface, confidence lane, and docs/module-boundary closeout.
