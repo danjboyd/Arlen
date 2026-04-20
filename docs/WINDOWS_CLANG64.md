@@ -1,6 +1,6 @@
 # Windows CLANG64 Preview
 
-Last updated: 2026-04-08
+Last updated: 2026-04-20
 
 This document records the current `main`-branch reintegration slice of Arlen's
 native Windows work for MSYS2 `CLANG64`.
@@ -40,6 +40,11 @@ Checked-in wrappers:
 
 - `scripts/run_clang64.ps1`
 - `scripts/run_clang64.sh`
+
+For Phase 34K runner provisioning, Arlen pins `gnustep-cli-new` as a submodule
+at `vendor/gnustep-cli-new`. Use that checkout as the source of truth for the
+MSYS2 `CLANG64` GNUstep managed-toolchain manifests and Windows bootstrap
+validation helpers when preparing a self-hosted `windows-preview` runner.
 
 ## 2. Required Tools
 
@@ -122,7 +127,8 @@ The current Windows packaged-release contract is now explicit:
 
 Minimum assumptions that still remain external on Windows:
 
-- MSYS2 `CLANG64` remains the supported host shell for the preview workflow
+- MSYS2 `CLANG64` remains the supported host shell for the preview workflow,
+  provisioned for CI through the pinned `vendor/gnustep-cli-new` contract
 - the packaged app still expects the GNUstep/MSYS2 runtime and required DLLs
   to be available on the host
 - the preview path is validated through a self-hosted Windows workflow rather

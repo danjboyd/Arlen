@@ -1,6 +1,20 @@
 # Arlen Status Checkpoint
 
-Last updated: 2026-04-17
+Last updated: 2026-04-20
+
+## Leaving Off (2026-04-20)
+
+- Resumed Phase 34K platform-runner standardization:
+  - added `vendor/gnustep-cli-new` as a submodule pinned to
+    `5b83862fc81968d3614ebc2d92301a56354d7c15`
+  - the pinned checkout is now documented as Arlen's source of truth for
+    Windows MSYS2 `CLANG64` GNUstep provisioning in the self-hosted
+    `windows-preview` runner path
+  - this does not change branch protection or promote Windows preview to a
+    required merge gate
+  - remaining Phase 34K work is proving the pinned provisioning flow on an
+    online OracleTestVMs Windows runner and documenting the macOS runner path
+    once OracleTestVMs macOS provisioning is available
 
 ## Leaving Off (2026-04-17)
 

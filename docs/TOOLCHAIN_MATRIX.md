@@ -137,6 +137,8 @@ Windows preview helpers:
 - `scripts/run_clang64.sh`
 - `tools/ci/run_phase24_windows_preview.sh`
 - `tools/ci/run_phase31_confidence.sh`
+- `vendor/gnustep-cli-new` pins the Phase 34K Windows MSYS2/GNUstep
+  provisioning source for self-hosted `windows-preview` runners
 
 Supported CI bootstrap strategies:
 
@@ -165,6 +167,16 @@ Optional contributor override:
 - set `ARLEN_XCTEST=/path/to/xctest` and, when needed,
   `ARLEN_XCTEST_LD_LIBRARY_PATH=/path/to/tools-xctest/XCTest/obj` to test a
   different local runner
+
+Platform runner provisioning:
+
+- Arlen vendors `gnustep-cli-new` at `vendor/gnustep-cli-new` for the Phase 34K
+  Windows runner path
+- use the pinned checkout's Windows integration docs, managed-toolchain
+  manifests, and bootstrap validation helpers when preparing the MSYS2
+  `CLANG64` GNUstep environment for `windows-preview`
+- this pin supports the non-required Windows preview lane; it does not change
+  the authoritative Linux/GNUstep merge gate
 
 Windows preview CI currently validates two layers:
 

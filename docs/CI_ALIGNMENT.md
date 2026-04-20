@@ -1,6 +1,6 @@
 # CI Alignment
 
-Last updated: 2026-04-17
+Last updated: 2026-04-20
 
 This document defines the intended shape of Arlen CI so workflow names,
 required checks, and actual project contracts stay aligned.
@@ -10,6 +10,11 @@ CI checkouts must include submodules while Arlen carries the temporary
 Apple-style `-only-testing` / `-skip-testing` support. Periodically check
 upstream `tools-xctest`; once that behavior is available upstream, remove the
 submodule and switch the default runner back to upstream `xctest`.
+
+Arlen also vendors `gnustep-cli-new` at `vendor/gnustep-cli-new` for Phase 34K
+platform-runner standardization. This pin records the exact Windows
+MSYS2/GNUstep provisioning source that Arlen expects for `windows-preview`
+runners; it is not a new required merge-gate lane by itself.
 
 ## Goal
 
@@ -65,10 +70,11 @@ Planned/open:
 - `34K`: OracleTestVMs-backed platform runner standardization for Apple and
   Windows confidence lanes. This keeps both lanes non-required under the
   current support statement while defining a repeatable LAN/self-hosted runner
-  lifecycle. Closing this subphase is blocked on `gnustep-cli-new` being ready
-  for Arlen's Windows MSYS2 `CLANG64` GNUstep provisioning path and on
-  OracleTestVMs macOS VM provisioning being available for the macOS runner
-  side.
+  lifecycle. Arlen now pins `gnustep-cli-new` at `vendor/gnustep-cli-new` as
+  the Windows MSYS2 `CLANG64` GNUstep provisioning source. Closing this
+  subphase remains blocked on proving the pinned path on a fresh Windows
+  runner and on OracleTestVMs macOS VM provisioning being available for the
+  macOS runner side.
 
 ## Current Merge-Gate Contract
 
@@ -108,8 +114,8 @@ Phase 34K standardizes the intended platform-runner path:
 
 - Windows preview should run on an OracleTestVMs-provisioned LAN Windows VM
   with the MSYS2 `CLANG64` GNUstep toolchain installed through
-  `gnustep-cli-new`, then registered as a GitHub Actions self-hosted runner
-  with labels `arlen` and `msys2-clang64`.
+  the pinned `vendor/gnustep-cli-new` revision, then registered as a GitHub
+  Actions self-hosted runner with labels `arlen` and `msys2-clang64`.
 - Apple baseline should move toward an OracleTestVMs-provisioned macOS VM path
   once that provider is available, while preserving the existing full-Xcode and
   XCTest requirements of `apple-baseline`.

@@ -1,7 +1,7 @@
 # Phase 34 Roadmap
 
-Status: active (`34A-34J` delivered; `34K` planned)
-Last updated: 2026-04-16
+Status: active (`34A-34J` delivered; `34K` in progress)
+Last updated: 2026-04-20
 
 ## Goal
 
@@ -255,6 +255,8 @@ Goal:
   one-off machine state
 - use `gnustep-cli-new` as the Windows MSYS2/GNUstep toolchain provisioning
   path before relying on the Windows preview runner for routine CI signal
+- keep Arlen pinned to the exact `gnustep-cli-new` revision used for runner
+  provisioning through the `vendor/gnustep-cli-new` submodule
 
 Planned scope:
 
@@ -264,9 +266,12 @@ Planned scope:
   clean up or reset runner state
 - document the Windows runner contract around:
   - OracleTestVMs `windows-2022` readiness
-  - `gnustep-cli-new` MSYS2 `CLANG64` / GNUstep installation
+  - pinned `vendor/gnustep-cli-new` MSYS2 `CLANG64` / GNUstep installation
   - Arlen `scripts/run_clang64.ps1`
   - GitHub runner labels `arlen` and `msys2-clang64`
+- use the vendored `gnustep-cli-new` checkout as the source of truth for
+  Windows bootstrap, managed-toolchain manifests, and validation helper
+  contracts referenced by Arlen runner docs
 - document the macOS runner contract once OracleTestVMs macOS VM provisioning
   is available, including full-Xcode/XCTest expectations for
   `apple-baseline`
@@ -278,7 +283,8 @@ Planned scope:
 
 Blockers:
 
-- `gnustep-cli-new` must be complete enough for Arlen's Windows use case:
+- the pinned `gnustep-cli-new` submodule must be complete enough for Arlen's
+  Windows use case:
   first-time MSYS2/GNUstep provisioning on a fresh OracleTestVMs Windows lease,
   a working `GNUstep.sh` / `gnustep-config` / `clang` / `xctest` environment,
   and enough dependency coverage to run Arlen's Windows preview and packaged
@@ -292,6 +298,8 @@ Acceptance target:
 
 - a documented OracleTestVMs-backed platform runner process exists for Windows
   and macOS, with blockers resolved or explicitly deferred
+- Arlen records the exact `gnustep-cli-new` revision used for Windows runner
+  provisioning through `vendor/gnustep-cli-new`
 - `windows-preview` can start on an online LAN runner and run the Arlen Windows
   preview commands through the documented GNUstep provisioning path
 - `apple-baseline` has a documented OracleTestVMs-backed runner path that

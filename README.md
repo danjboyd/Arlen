@@ -199,7 +199,8 @@ Prerequisites:
 - clang-built GNUstep toolchain installed
 - `tools-xctest` installed (provides `xctest`)
 - initialized submodules (`git submodule update --init --recursive`) so the
-  repo-local patched `vendor/tools-xctest` runner is available
+  repo-local patched `vendor/tools-xctest` runner and the pinned
+  `vendor/gnustep-cli-new` Phase 34K Windows provisioning source are available
 
 Contributor test-runner default:
 - Arlen builds and uses `vendor/tools-xctest/obj/xctest` by default while

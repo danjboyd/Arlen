@@ -28,8 +28,8 @@ Single route descriptor containing method/path pattern/controller/action and mat
 | `tags` | `NSArray *` | `nonatomic, copy` | Public `tags` property available on `ALNRoute`. |
 | `requiredScopes` | `NSArray *` | `nonatomic, copy` | Public `requiredScopes` property available on `ALNRoute`. |
 | `requiredRoles` | `NSArray *` | `nonatomic, copy` | Public `requiredRoles` property available on `ALNRoute`. |
-| `policyNames` | `NSArray *` | `nonatomic, copy` | Named route policies applied to this route by `ALNRoutePolicyMiddleware`. |
-| `source` | `NSString *` | `nonatomic, copy` | Registration source for route inspection, typically `code` or `plist`. |
+| `policyNames` | `NSArray *` | `nonatomic, copy` | Public `policyNames` property available on `ALNRoute`. |
+| `source` | `NSString *` | `nonatomic, copy` | Public `source` property available on `ALNRoute`. |
 | `minimumAuthAssuranceLevel` | `NSUInteger` | `nonatomic, assign` | Public `minimumAuthAssuranceLevel` property available on `ALNRoute`. |
 | `maximumAuthenticationAgeSeconds` | `NSUInteger` | `nonatomic, assign` | Public `maximumAuthenticationAgeSeconds` property available on `ALNRoute`. |
 | `stepUpPath` | `NSString *` | `nonatomic, copy` | Public `stepUpPath` property available on `ALNRoute`. |

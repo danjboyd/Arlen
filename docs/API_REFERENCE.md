@@ -9,10 +9,10 @@ python3 tools/docs/generate_api_reference.py
 ```
 
 - Generated from source headers and metadata (deterministic output)
-- Public headers: `84`
-- Symbols: `147`
-- Public methods: `1004`
-- Public properties: `443`
+- Public headers: `85`
+- Symbols: `148`
+- Public methods: `1008`
+- Public properties: `445`
 
 ## API Surface Boundary
 
@@ -61,6 +61,7 @@ python3 tools/docs/generate_api_reference.py
 - [ALNCSRFMiddleware](api/ALNCSRFMiddleware.md): CSRF validation middleware for state-changing requests using token headers/query params.
 - [ALNRateLimitMiddleware](api/ALNRateLimitMiddleware.md): In-memory rate limiting middleware for per-window request throttling.
 - [ALNResponseEnvelopeMiddleware](api/ALNResponseEnvelopeMiddleware.md): Middleware that normalizes JSON API responses into a consistent envelope shape.
+- [ALNRoutePolicyMiddleware](api/ALNRoutePolicyMiddleware.md): Built-in middleware implementation ready to register on an application.
 - [ALNSecurityHeadersMiddleware](api/ALNSecurityHeadersMiddleware.md): Middleware that injects security-related response headers (including optional CSP).
 - [ALNSessionMiddleware](api/ALNSessionMiddleware.md): Session middleware that signs/verifies cookie-backed session state for request context access.
 
@@ -237,6 +238,7 @@ python3 tools/docs/generate_api_reference.py
 - `src/Arlen/MVC/Middleware/ALNCSRFMiddleware.h`
 - `src/Arlen/MVC/Middleware/ALNRateLimitMiddleware.h`
 - `src/Arlen/MVC/Middleware/ALNResponseEnvelopeMiddleware.h`
+- `src/Arlen/MVC/Middleware/ALNRoutePolicyMiddleware.h`
 - `src/Arlen/MVC/Middleware/ALNSecurityHeadersMiddleware.h`
 - `src/Arlen/MVC/Middleware/ALNSessionMiddleware.h`
 - `src/Arlen/MVC/Routing/ALNRoute.h`
