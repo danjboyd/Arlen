@@ -4,6 +4,17 @@ Last updated: 2026-04-20
 
 ## Leaving Off (2026-04-20)
 
+- Delivered Phase 36E-36H for deploy operator UX:
+  - named remote `deploy push <target>` and `deploy release <target>` now fail
+    before mutation with `deploy_target_not_initialized` until
+    `arlen deploy init <target>` has generated the target host artifacts
+  - `arlen new` writes a commented `config/deploy.plist.example`, and
+    generated READMEs include the copy/edit/list/dryrun/init/doctor/push flow
+  - existing apps can run `arlen deploy target sample` or
+    `arlen deploy target sample --write` to generate the same deploy sample
+  - `arlen completion bash` and `arlen completion powershell` generate
+    first-class shell completion scripts backed by read-only local candidate
+    commands
 - Delivered Phase 36A-36D for deploy operator UX:
   - bare `arlen deploy` is now an onboarding entrypoint with `deploy.help`
     JSON, and `arlen deploy list` reports configured targets or an empty

@@ -21,6 +21,8 @@ Create a new app scaffold.
 - `--force`: overwrite existing files where allowed
 - `--json`: emit machine-readable scaffold payload (`phase7g-agent-dx-contracts-v1`)
 - `--help` / `-h`: show command usage
+- scaffold defaults:
+  - `config/deploy.plist.example` with a commented deploy target sample
 - full-mode scaffold defaults:
   - `templates/layouts/main.html.eoc`
   - `templates/index.html.eoc` with `<%@ layout "layouts/main" %>`
@@ -87,7 +89,7 @@ Notes:
 - when `templates/layouts/main.html.eoc` exists, generated HTML templates opt into it automatically unless the target logical path is under `layouts/` or `partials/`
 - `generate search` is the fastest way to stand up a search resource without reverse-engineering the `search` module internals
 
-### `arlen deploy <list|dryrun|init|push|releases|release|status|rollback|doctor|logs> [target] [options]`
+### `arlen deploy <list|dryrun|init|push|releases|release|status|rollback|doctor|logs|target sample> [target] [options]`
 
 First-class release orchestration over the existing `tools/deploy/*` scripts.
 
@@ -157,6 +159,16 @@ Named targets:
   - `runtime.requiresEnvWrapper`
 - does not provision secrets, PostgreSQL, reverse proxies, TLS, or DNS
 
+`arlen deploy target sample`
+
+- prints the canonical commented `config/deploy.plist.example` content to stdout
+- `--write` writes `config/deploy.plist.example` by default
+- `--output <path>` chooses a different output path
+- `--force` is required to overwrite an existing file
+- `--target <name>` customizes the sample target name
+- `--ssh-host <host>` fills the sample SSH host
+- emits `workflow = deploy.target.sample` in `--json` mode
+
 `arlen deploy dryrun`
 
 - validates release packaging inputs using `tools/deploy/build_release.sh --dry-run`
@@ -170,6 +182,9 @@ Named targets:
 `arlen deploy push`
 
 - builds a local immutable release under `releases/<release-id>/`
+- when `[target]` has SSH transport metadata, fails before build/upload with
+  `deploy_target_not_initialized` until `arlen deploy init <target>` has
+  generated the target host artifacts
 - when `[target]` has SSH transport metadata, stages the local release under
   `build/deploy/targets/<target>/local-releases/` and uploads it to the remote
   target release path over SSH/tar streaming
@@ -205,6 +220,9 @@ Named targets:
 `arlen deploy release`
 
 - reuses an existing release artifact for the selected `--release-id`, or builds it first if missing
+- when `[target]` has SSH transport metadata, fails before build/upload or
+  activation with `deploy_target_not_initialized` until
+  `arlen deploy init <target>` has generated the target host artifacts
 - when `[target]` has SSH transport metadata:
   - builds or reuses the local staged release
   - uploads it to the remote target
@@ -312,6 +330,20 @@ Release-only options:
 - `--lines <count>`: number of log lines to show for `deploy logs` (default `200`)
 - `--follow`: follow `deploy logs` output
 - `--file <path>`: tail an explicit log file instead of journald
+
+### `arlen completion <bash|powershell>`
+
+Generate shell completion scripts for the Arlen CLI.
+
+- `arlen completion bash` prints a bash completer that registers `arlen` with
+  `complete -F _arlen_complete arlen`
+- `arlen completion powershell` prints a PowerShell completer that registers
+  `arlen` with `Register-ArgumentCompleter`
+- generated scripts call `arlen completion candidates ...` for dynamic local
+  candidates such as deploy subcommands, deploy target names, release IDs, and
+  command options
+- candidate generation is read-only and local-only; it does not perform SSH,
+  build releases, or write files
 
 ### `arlen migrate [--env <name>] [--database <target>] [--dsn <connection_string>] [--dry-run]`
 

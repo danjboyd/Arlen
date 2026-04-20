@@ -90,7 +90,17 @@ Current intended v1 policy:
 
 ### 4.3 Project Deployment Configuration
 
-App-owned deployment config now lives in `config/deploy.plist`.
+App-owned deployment config now lives in `config/deploy.plist`. New
+`arlen new` apps include a commented `config/deploy.plist.example`; existing
+apps can generate the same sample with:
+
+```sh
+arlen deploy target sample --write
+```
+
+Copy or write the sample to `config/deploy.plist`, edit the target fields, and
+then use `arlen deploy list` / `arlen deploy dryrun <target>` to verify the
+operator-facing config before initialization.
 
 Current target fields:
 
@@ -324,6 +334,11 @@ For app-operator workflows, prefer the first-class `arlen deploy` wrapper:
 ./build/arlen deploy release --app-root /path/to/app --release-id rel-20260407 --allow-missing-certification --json
 ```
 
+For named remote targets, `deploy push <target>` and `deploy release <target>`
+now require the target to be initialized first. If the target host artifacts are
+missing, Arlen fails before build/upload/activation with
+`deploy_target_not_initialized` and points to `arlen deploy init <target>`.
+
 `arlen deploy push` writes `releases/<id>/metadata/manifest.json` using
 `phase32-deploy-manifest-v1`. The manifest now records deployment metadata for
 the local profile, target profile, runtime strategy, compatibility status, and
@@ -554,11 +569,14 @@ It does not:
 
 The intended flow is:
 
-1. check in `config/deploy.plist`
-2. run `arlen deploy init <target>` on the host or against the host filesystem
-3. install the generated unit/env artifacts where the host expects them
-4. populate secret values outside the release tree
-5. use `arlen deploy push|release <target>` for release shipping and activation
+1. copy `config/deploy.plist.example` to `config/deploy.plist`
+2. edit and check in the non-secret target contract
+3. run `arlen deploy list`
+4. run `arlen deploy dryrun <target>`
+5. run `arlen deploy init <target>` on the host or against the host filesystem
+6. install the generated unit/env artifacts where the host expects them
+7. populate secret values outside the release tree
+8. use `arlen deploy push|release <target>` for release shipping and activation
 
 ### 4.10 Arlen-Ready Debian GNUstep Host
 

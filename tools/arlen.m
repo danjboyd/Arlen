@@ -27,7 +27,8 @@ static void PrintUsage(void) {
           "  boomhauer [server args...]\n"
           "  jobs worker [worker args...]\n"
           "  propane [manager args...]\n"
-          "  deploy <list|dryrun|init|push|releases|release|status|rollback|doctor|logs> [target] [options]\n"
+          "  deploy <list|dryrun|init|push|releases|release|status|rollback|doctor|logs|target sample> [target] [options]\n"
+          "  completion <bash|powershell>\n"
           "  migrate [--env <name>] [--database <target>] [--dsn <connection_string>] [--dry-run]\n"
           "  module <add|remove|list|doctor|migrate|assets|upgrade|eject> [options]\n"
           "  schema-codegen [--env <name>] [--database <target>] [--dsn <connection_string>] [--output-dir <path>] [--manifest <path>] [--prefix <ClassPrefix>] [--typed-contracts] [--force]\n"
@@ -80,7 +81,7 @@ static void PrintBuildUsage(void) {
 
 static void PrintDeployUsage(void) {
   fprintf(stdout,
-          "Usage: arlen deploy <list|dryrun|init|push|releases|release|status|rollback|doctor|logs> [target] [options]\n"
+          "Usage: arlen deploy <list|dryrun|init|push|releases|release|status|rollback|doctor|logs|target sample> [target] [options]\n"
           "\n"
           "Subcommands:\n"
           "  list                  List configured targets from config/deploy.plist\n"
@@ -93,6 +94,7 @@ static void PrintDeployUsage(void) {
           "  rollback              Activate a previous release and optionally verify health\n"
           "  doctor                Validate release layout, config, and optional runtime health\n"
           "  logs                  Show active release log pointers or stream runtime logs\n"
+          "  target sample         Print or write a commented config/deploy.plist.example\n"
           "  plan                  Deprecated alias for dryrun\n"
           "\n"
           "Shared options:\n"
@@ -128,6 +130,16 @@ static void PrintDeployUsage(void) {
           "  --lines <count>       Number of log lines to show (default: 200)\n"
           "  --follow              Follow log output\n"
           "  --file <path>         Tail a log file when journald is not desired\n");
+}
+
+static void PrintCompletionUsage(void) {
+  fprintf(stdout,
+          "Usage: arlen completion <bash|powershell|candidates> [options]\n"
+          "\n"
+          "Subcommands:\n"
+          "  bash                  Generate bash completion script to stdout\n"
+          "  powershell            Generate PowerShell completion script to stdout\n"
+          "  candidates <kind>     Internal read-only completion candidates\n");
 }
 
 static void PrintJobsUsage(void) {
@@ -1259,6 +1271,90 @@ static NSDictionary *DeployTargetPayload(NSDictionary *target) {
   };
 }
 
+static NSString *DeployTargetSamplePlist(NSString *targetName, NSString *sshHost) {
+  NSString *name = [Trimmed(targetName) length] > 0 ? Trimmed(targetName) : @"production";
+  NSString *host = [Trimmed(sshHost) length] > 0 ? Trimmed(sshHost) : @"deploy@app.example.com";
+  return [NSString stringWithFormat:
+      @"/*\n"
+       "  Arlen deploy target sample.\n"
+       "\n"
+       "  Copy this file to config/deploy.plist, edit the placeholders, then run:\n"
+       "    arlen deploy list\n"
+       "    arlen deploy dryrun %@\n"
+       "    arlen deploy init %@\n"
+       "    arlen deploy doctor %@\n"
+       "    arlen deploy push %@\n"
+       "\n"
+       "  OpenStep plist comments are supported by GNUstep property-list parsing.\n"
+       "*/\n"
+       "{\n"
+       "  deployment = {\n"
+       "    /* Schema marker for Arlen's named deploy target contract. */\n"
+       "    schema = \"phase32-deploy-targets-v1\";\n"
+       "\n"
+       "    targets = {\n"
+       "      %@ = {\n"
+       "        /* Human-readable host label shown in deploy list output. */\n"
+       "        host = \"app.example.com\";\n"
+       "\n"
+       "        /* Target release root. Arlen creates releases/, shared/, logs/, and tmp/ under this path. */\n"
+       "        releasePath = \"/srv/arlen/app\";\n"
+       "\n"
+       "        /* Keep this aligned with the host GNUstep/clang runtime family. */\n"
+       "        profile = \"linux-x86_64-gnustep-clang\";\n"
+       "\n"
+       "        /* system = host already has runtime; managed/bundled are reserved for stricter runtime control. */\n"
+       "        runtimeStrategy = \"system\";\n"
+       "\n"
+       "        /* Use none until the service unit exists; restart is common after systemd setup. */\n"
+       "        runtimeAction = \"none\";\n"
+       "\n"
+       "        /* App config environment used for release activation and migrations. */\n"
+       "        environment = \"production\";\n"
+       "\n"
+       "        /* Optional systemd unit name for status/log/reload integration. */\n"
+       "        service = \"arlen@app\";\n"
+       "\n"
+       "        /* Optional health probe base URL for release/status/doctor. */\n"
+       "        baseURL = \"http://127.0.0.1:3000\";\n"
+       "\n"
+       "        database = {\n"
+       "          /* external, host_local, or embedded. */\n"
+       "          mode = \"host_local\";\n"
+       "          adapter = \"postgresql\";\n"
+       "          target = \"default\";\n"
+       "        };\n"
+       "\n"
+       "        configuration = {\n"
+       "          /* Target env file materialized by deploy init samples and runtime wrappers. */\n"
+       "          envFile = \"/etc/arlen/app.env\";\n"
+       "          requiredEnvironmentKeys = (\"ARLEN_DATABASE_URL\", \"ARLEN_SESSION_SECRET\");\n"
+       "        };\n"
+       "\n"
+       "        runtime = {\n"
+       "          /* GNUstep environment script on the target host. */\n"
+       "          gnustepScript = \"/usr/GNUstep/System/Library/Makefiles/GNUstep.sh\";\n"
+       "          requiresEnvWrapper = YES;\n"
+       "        };\n"
+       "\n"
+       "        init = {\n"
+       "          runtimeUser = \"arlen\";\n"
+       "          runtimeGroup = \"arlen\";\n"
+       "        };\n"
+       "\n"
+       "        transport = {\n"
+       "          /* Remove transport for local-only targets. With transport present, push/release use SSH. */\n"
+       "          sshHost = \"%@\";\n"
+       "          sshCommand = \"ssh\";\n"
+       "          sshOptions = (\"-oBatchMode=yes\");\n"
+       "        };\n"
+       "      };\n"
+       "    };\n"
+       "  };\n"
+       "}\n",
+      name, name, name, name, name, host];
+}
+
 static NSDictionary *LoadDeployTargetNamed(NSString *appRoot, NSString *targetName, NSError **error) {
   NSString *configPath = DeployConfigPathAtAppRoot(appRoot);
   if (!PathExists(configPath, NULL)) {
@@ -1429,6 +1525,36 @@ static NSArray<NSDictionary *> *DeployTargetPayloads(NSArray<NSDictionary *> *ta
     [payloads addObject:DeployTargetPayload(target)];
   }
   return payloads;
+}
+
+static NSArray<NSString *> *MissingInitializedDeployTargetPaths(NSDictionary *target) {
+  NSMutableArray<NSString *> *missing = [NSMutableArray array];
+  NSArray<NSString *> *requiredPaths = @[
+    StringValueForDeployKey(target, @"release_path"),
+    StringValueForDeployKey(target, @"releases_dir"),
+    StringValueForDeployKey(target, @"shared_dir"),
+    StringValueForDeployKey(target, @"logs_dir"),
+    StringValueForDeployKey(target, @"tmp_dir"),
+    StringValueForDeployKey(target, @"generated_dir"),
+    StringValueForDeployKey(target, @"propane_wrapper"),
+    StringValueForDeployKey(target, @"jobs_worker_wrapper"),
+    [[StringValueForDeployKey(target, @"generated_dir") stringByAppendingPathComponent:@"systemd"]
+        stringByAppendingPathComponent:StringValueForDeployKey(target, @"systemd_unit_filename")],
+  ];
+  for (NSString *path in requiredPaths) {
+    if ([path length] > 0 && !PathExists(path, NULL)) {
+      [missing addObject:path];
+    }
+  }
+  return missing;
+}
+
+static BOOL DeployTargetIsInitialized(NSDictionary *target, NSArray<NSString *> **missingPathsOut) {
+  NSArray<NSString *> *missing = MissingInitializedDeployTargetPaths(target);
+  if (missingPathsOut != NULL) {
+    *missingPathsOut = missing;
+  }
+  return [missing count] == 0;
 }
 
 static NSString *RenderedSystemdUnitForTarget(NSDictionary *target, NSString *frameworkRoot) {
@@ -2820,6 +2946,8 @@ static BOOL ScaffoldFullApp(NSString *root, BOOL force, NSError **error) {
                            @"{\n  logFormat = \"json\";\n}\n", force, error);
   ok = ok && WriteTextFile([root stringByAppendingPathComponent:@"config/environments/production.plist"],
                            @"{\n  logFormat = \"json\";\n}\n", force, error);
+  ok = ok && WriteTextFile([root stringByAppendingPathComponent:@"config/deploy.plist.example"],
+                           DeployTargetSamplePlist(@"production", nil), force, error);
   ok = ok && WriteTextFile([root stringByAppendingPathComponent:@"templates/layouts/main.html.eoc"],
                            DefaultFullAppLayoutTemplate(), force, error);
   ok = ok && WriteTextFile([root stringByAppendingPathComponent:@"templates/partials/_nav.html.eoc"],
@@ -2885,7 +3013,18 @@ static BOOL ScaffoldFullApp(NSString *root, BOOL force, NSError **error) {
                             "- `src/Controllers/HomeController.m` handles `/`.\n"
                             "- `templates/layouts/main.html.eoc` owns the default app shell.\n"
                             "- `templates/partials/_nav.html.eoc` and `templates/partials/_feature.html.eoc` show composition-first partials.\n"
-                            "- `templates/index.html.eoc` renders the home page through `<%@ layout \"layouts/main\" %>`.\n",
+                            "- `templates/index.html.eoc` renders the home page through `<%@ layout \"layouts/main\" %>`.\n\n"
+                            "## Deploy\n\n"
+                            "Start from the commented sample target:\n\n"
+                            "```sh\n"
+                            "cp config/deploy.plist.example config/deploy.plist\n"
+                            "$EDITOR config/deploy.plist\n"
+                            "arlen deploy list\n"
+                            "arlen deploy dryrun production\n"
+                            "arlen deploy init production\n"
+                            "arlen deploy doctor production\n"
+                            "arlen deploy push production\n"
+                            "```\n",
                            force, error);
   ok = ok && WriteTextFile([root stringByAppendingPathComponent:@"public/health.txt"],
                            @"ok\n", force, error);
@@ -2914,6 +3053,8 @@ static BOOL ScaffoldLiteApp(NSString *root, BOOL force, NSError **error) {
   ok = ok && WriteTextFile([root stringByAppendingPathComponent:@"config/app.plist"],
                            @"{\n  host = \"127.0.0.1\";\n  port = 3000;\n  serveStatic = YES;\n  staticAllowExtensions = (\"css\", \"js\", \"json\", \"txt\", \"html\", \"htm\", \"svg\", \"png\", \"jpg\", \"jpeg\", \"gif\", \"ico\", \"webp\", \"woff\", \"woff2\", \"map\", \"xml\");\n  listenBacklog = 128;\n  connectionTimeoutSeconds = 30;\n  database = {\n    connectionString = \"\";\n    adapter = \"postgresql\";\n    poolSize = 8;\n  };\n  session = {\n    enabled = NO;\n    secret = \"\";\n    cookieName = \"arlen_session\";\n    maxAgeSeconds = 1209600;\n    secure = NO;\n    sameSite = \"Lax\";\n  };\n  csrf = {\n    enabled = NO;\n    headerName = \"x-csrf-token\";\n    queryParamName = \"csrf_token\";\n  };\n  rateLimit = {\n    enabled = NO;\n    requests = 120;\n    windowSeconds = 60;\n  };\n  securityHeaders = {\n    enabled = YES;\n    contentSecurityPolicy = \"default-src 'self'\";\n  };\n  auth = {\n    enabled = NO;\n    bearerSecret = \"\";\n    issuer = \"\";\n    audience = \"\";\n  };\n  openapi = {\n    enabled = YES;\n    docsUIEnabled = YES;\n    docsUIStyle = \"interactive\";\n    title = \"Arlen API\";\n    version = \"0.1.0\";\n    description = \"Generated by Arlen\";\n  };\n  compatibility = {\n    pageStateEnabled = NO;\n  };\n  apiHelpers = {\n    responseEnvelopeEnabled = NO;\n  };\n  plugins = {\n    classes = ();\n  };\n  propaneAccessories = {\n    workerCount = 4;\n    gracefulShutdownSeconds = 10;\n    respawnDelayMs = 250;\n    reloadOverlapSeconds = 1;\n  };\n}\n",
                            force, error);
+  ok = ok && WriteTextFile([root stringByAppendingPathComponent:@"config/deploy.plist.example"],
+                           DeployTargetSamplePlist(@"production", nil), force, error);
   ok = ok && WriteTextFile([root stringByAppendingPathComponent:@"app_lite.m"],
                            @"#import <Foundation/Foundation.h>\n"
                             "#import \"ArlenServer.h\"\n\n"
@@ -2949,7 +3090,18 @@ static BOOL ScaffoldLiteApp(NSString *root, BOOL force, NSError **error) {
                             "- `arlen boomhauer --port 3000` (if `arlen` is on PATH)\n"
                             "- or `/path/to/Arlen/bin/arlen boomhauer --port 3000`\n\n"
                             "- `app_lite.m` includes a single-file controller + server setup.\n"
-                            "- You can split this into full mode structure later.\n",
+                            "- You can split this into full mode structure later.\n\n"
+                            "## Deploy\n\n"
+                            "Start from the commented sample target:\n\n"
+                            "```sh\n"
+                            "cp config/deploy.plist.example config/deploy.plist\n"
+                            "$EDITOR config/deploy.plist\n"
+                            "arlen deploy list\n"
+                            "arlen deploy dryrun production\n"
+                            "arlen deploy init production\n"
+                            "arlen deploy doctor production\n"
+                            "arlen deploy push production\n"
+                            "```\n",
                            force, error);
   ok = ok && WriteTextFile([root stringByAppendingPathComponent:@"public/health.txt"],
                            @"ok\n", force, error);
@@ -4640,6 +4792,114 @@ static int CommandPerf(void) {
   return RunShellCommand([NSString stringWithFormat:@"cd %@ && make perf", ShellQuote(frameworkRoot)]);
 }
 
+static int CommandDeployTargetSample(NSArray *args) {
+  BOOL asJSON = ArgsContainFlag(args, @"--json");
+  BOOL writeFile = NO;
+  BOOL force = NO;
+  NSString *targetName = @"production";
+  NSString *sshHost = nil;
+  NSString *outputPath = nil;
+  NSString *appRoot = [[[NSFileManager defaultManager] currentDirectoryPath] stringByStandardizingPath];
+
+  for (NSUInteger idx = 0; idx < [args count]; idx++) {
+    NSString *arg = args[idx];
+    if ([arg isEqualToString:@"--write"]) {
+      writeFile = YES;
+    } else if ([arg isEqualToString:@"--force"]) {
+      force = YES;
+    } else if ([arg isEqualToString:@"--json"]) {
+      asJSON = YES;
+    } else if ([arg isEqualToString:@"--target"]) {
+      if (idx + 1 >= [args count]) {
+        return EmitMachineError(@"deploy", @"deploy.target.sample", @"missing_option_value",
+                                @"arlen deploy target sample: --target requires a value",
+                                @"Pass a target name after --target.",
+                                @"arlen deploy target sample --target production", 2);
+      }
+      targetName = Trimmed(args[++idx]);
+    } else if ([arg isEqualToString:@"--ssh-host"]) {
+      if (idx + 1 >= [args count]) {
+        return EmitMachineError(@"deploy", @"deploy.target.sample", @"missing_option_value",
+                                @"arlen deploy target sample: --ssh-host requires a value",
+                                @"Pass an SSH host after --ssh-host.",
+                                @"arlen deploy target sample --ssh-host deploy@app.example.com", 2);
+      }
+      sshHost = args[++idx];
+    } else if ([arg isEqualToString:@"--output"]) {
+      if (idx + 1 >= [args count]) {
+        return EmitMachineError(@"deploy", @"deploy.target.sample", @"missing_option_value",
+                                @"arlen deploy target sample: --output requires a value",
+                                @"Pass an output path after --output.",
+                                @"arlen deploy target sample --write --output config/deploy.plist.example", 2);
+      }
+      outputPath = args[++idx];
+    } else if ([arg isEqualToString:@"--help"] || [arg isEqualToString:@"-h"]) {
+      fprintf(stdout,
+              "Usage: arlen deploy target sample [--write] [--force] [--target <name>] [--ssh-host <host>] [--json]\n");
+      return 0;
+    } else {
+      return asJSON ? EmitMachineError(@"deploy", @"deploy.target.sample", @"unknown_option",
+                                       [NSString stringWithFormat:@"unknown option %@", arg ?: @""],
+                                       @"Use supported options for `arlen deploy target sample`.",
+                                       @"arlen deploy target sample --write --json", 2)
+                    : 2;
+    }
+  }
+
+  if ([targetName length] == 0) {
+    targetName = @"production";
+  }
+  NSString *sample = DeployTargetSamplePlist(targetName, sshHost);
+  NSString *resolvedOutput = [outputPath length] > 0
+      ? [ResolvePathFromRoot(appRoot, outputPath) stringByStandardizingPath]
+      : [[appRoot stringByAppendingPathComponent:@"config/deploy.plist.example"] stringByStandardizingPath];
+
+  if (writeFile) {
+    NSError *error = nil;
+    if (!WriteTextFile(resolvedOutput, sample, force, &error)) {
+      return asJSON ? EmitMachineError(@"deploy", @"deploy.target.sample", @"deploy_sample_write_failed",
+                                       error.localizedDescription ?: @"failed writing deploy target sample",
+                                       @"Use --force to overwrite an existing sample or choose another output path.",
+                                       @"arlen deploy target sample --write --force --json", 1)
+                    : 1;
+    }
+    if (asJSON) {
+      NSDictionary *payload = @{
+        @"version" : AgentContractVersion(),
+        @"command" : @"deploy",
+        @"workflow" : @"deploy.target.sample",
+        @"subcommand" : @"target sample",
+        @"status" : @"ok",
+        @"target_name" : targetName ?: @"production",
+        @"path" : resolvedOutput ?: @"",
+        @"written" : @YES,
+      };
+      PrintJSONPayload(stdout, payload);
+      return 0;
+    }
+    fprintf(stdout, "Wrote deploy target sample to %s\n", [resolvedOutput UTF8String]);
+    return 0;
+  }
+
+  if (asJSON) {
+    NSDictionary *payload = @{
+      @"version" : AgentContractVersion(),
+      @"command" : @"deploy",
+      @"workflow" : @"deploy.target.sample",
+      @"subcommand" : @"target sample",
+      @"status" : @"ok",
+      @"target_name" : targetName ?: @"production",
+      @"path" : resolvedOutput ?: @"",
+      @"written" : @NO,
+      @"sample" : sample ?: @"",
+    };
+    PrintJSONPayload(stdout, payload);
+    return 0;
+  }
+  fprintf(stdout, "%s", [sample UTF8String]);
+  return 0;
+}
+
 static int CommandDeploy(NSArray *args) {
   BOOL rootJSON = [args containsObject:@"--json"];
   if ([args count] == 0 || [[args[0] description] hasPrefix:@"--"]) {
@@ -4659,7 +4919,7 @@ static int CommandDeploy(NSArray *args) {
         @"targets" : DeployTargetPayloads(targets ?: @[]),
         @"next_actions" : ([targets count] > 0)
             ? @[ @"arlen deploy list", @"arlen deploy dryrun <target>", @"arlen deploy push <target>" ]
-            : @[ @"Add config/deploy.plist or start from a project template deploy sample." ],
+            : @[ @"Copy config/deploy.plist.example to config/deploy.plist, or run arlen deploy target sample --write." ],
         @"error" : (targets == nil)
             ? @{
                 @"code" : @"deploy_targets_invalid",
@@ -4684,9 +4944,19 @@ static int CommandDeploy(NSArray *args) {
       fprintf(stdout, "\nConfigured targets: %lu. Run `arlen deploy list` to inspect them.\n",
               (unsigned long)[targets count]);
     } else {
-      fprintf(stdout, "\nNo deploy targets configured. Add config/deploy.plist, then run `arlen deploy list`.\n");
+      fprintf(stdout, "\nNo deploy targets configured. Copy config/deploy.plist.example to config/deploy.plist, or run `arlen deploy target sample --write`.\n");
     }
     return 0;
+  }
+
+  if ([args[0] isEqualToString:@"target"]) {
+    if ([args count] >= 2 && [args[1] isEqualToString:@"sample"]) {
+      NSArray *sampleArgs = ([args count] > 2) ? [args subarrayWithRange:NSMakeRange(2, [args count] - 2)] : @[];
+      return CommandDeployTargetSample(sampleArgs);
+    }
+    fprintf(stderr, "arlen deploy target: expected sample\n");
+    PrintDeployUsage();
+    return 2;
   }
 
   NSString *subcommand = args[0];
@@ -5200,6 +5470,37 @@ static int CommandDeploy(NSArray *args) {
                                      @"Use external, host_local, or embedded.",
                                      @"arlen deploy dryrun --database-mode external --json", 2)
                   : 2;
+  }
+
+  if (remoteTargetEnabled && [@[ @"push", @"release" ] containsObject:subcommand]) {
+    NSArray<NSString *> *missingInitPaths = nil;
+    if (!DeployTargetIsInitialized(resolvedTarget, &missingInitPaths)) {
+      if (asJSON) {
+        NSDictionary *payload = @{
+          @"version" : AgentContractVersion(),
+          @"command" : @"deploy",
+          @"workflow" : [NSString stringWithFormat:@"deploy.%@", subcommand],
+          @"subcommand" : subcommand ?: @"",
+          @"status" : @"error",
+          @"target" : DeployTargetPayload(resolvedTarget),
+          @"missing_paths" : missingInitPaths ?: @[],
+          @"error" : @{
+            @"code" : @"deploy_target_not_initialized",
+            @"message" : @"remote deploy target has not been initialized",
+            @"fixit" : @{
+              @"action" : @"Run deploy init for the target before remote push or release.",
+              @"example" : [NSString stringWithFormat:@"arlen deploy init %@ --json", targetName ?: @"production"],
+            }
+          },
+          @"exit_code" : @1,
+        };
+        PrintJSONPayload(stdout, payload);
+        return 1;
+      }
+      fprintf(stderr, "arlen deploy: target %s is not initialized; run `arlen deploy init %s` first\n",
+              [(targetName ?: @"") UTF8String], [(targetName ?: @"") UTF8String]);
+      return 1;
+    }
   }
 
   if ([subcommand isEqualToString:@"init"]) {
@@ -9598,6 +9899,206 @@ static int CommandModule(NSArray *args) {
   return 2;
 }
 
+static NSArray<NSString *> *TopLevelCompletionCandidates(void) {
+  return @[ @"new", @"generate", @"boomhauer", @"jobs", @"propane", @"deploy", @"completion",
+            @"migrate", @"module", @"schema-codegen", @"dataverse-codegen", @"typed-sql-codegen",
+            @"typescript-codegen", @"routes", @"test", @"perf", @"check", @"build", @"config", @"doctor" ];
+}
+
+static NSArray<NSString *> *DeploySubcommandCompletionCandidates(void) {
+  return @[ @"list", @"dryrun", @"init", @"push", @"releases", @"release", @"status",
+            @"rollback", @"doctor", @"logs", @"target", @"plan" ];
+}
+
+static NSArray<NSString *> *DeployTargetSubcommandCompletionCandidates(void) {
+  return @[ @"sample" ];
+}
+
+static NSArray<NSString *> *DeployOptionCompletionCandidates(void) {
+  return @[ @"--app-root", @"--framework-root", @"--releases-dir", @"--release-id", @"--service",
+            @"--base-url", @"--target-profile", @"--runtime-strategy", @"--database-mode",
+            @"--database-adapter", @"--database-target", @"--require-env-key",
+            @"--allow-remote-rebuild", @"--remote-build-check-command", @"--certification-manifest",
+            @"--json-performance-manifest", @"--allow-missing-certification", @"--json",
+            @"--env", @"--skip-migrate", @"--runtime-action", @"--lines", @"--follow", @"--file",
+            @"--write", @"--force", @"--target", @"--ssh-host", @"--output" ];
+}
+
+static NSString *CompletionScriptBash(void) {
+  return @"# bash completion for arlen\n"
+         "_arlen_complete() {\n"
+         "  local cur prev first second\n"
+         "  COMPREPLY=()\n"
+         "  cur=\"${COMP_WORDS[COMP_CWORD]}\"\n"
+         "  prev=\"${COMP_WORDS[COMP_CWORD-1]}\"\n"
+         "  first=\"${COMP_WORDS[1]}\"\n"
+         "  second=\"${COMP_WORDS[2]}\"\n"
+         "  if [[ $COMP_CWORD -eq 1 ]]; then\n"
+         "    COMPREPLY=( $(compgen -W \"$(arlen completion candidates top-level-commands 2>/dev/null)\" -- \"$cur\") )\n"
+         "    return 0\n"
+         "  fi\n"
+         "  if [[ \"$first\" == \"deploy\" ]]; then\n"
+         "    if [[ $COMP_CWORD -eq 2 ]]; then\n"
+         "      COMPREPLY=( $(compgen -W \"$(arlen completion candidates deploy-subcommands 2>/dev/null)\" -- \"$cur\") )\n"
+         "      return 0\n"
+         "    fi\n"
+         "    if [[ \"$second\" == \"target\" && $COMP_CWORD -eq 3 ]]; then\n"
+         "      COMPREPLY=( $(compgen -W \"$(arlen completion candidates deploy-target-subcommands 2>/dev/null)\" -- \"$cur\") )\n"
+         "      return 0\n"
+         "    fi\n"
+         "    if [[ \"$cur\" == --* ]]; then\n"
+         "      COMPREPLY=( $(compgen -W \"$(arlen completion candidates deploy-options 2>/dev/null)\" -- \"$cur\") )\n"
+         "      return 0\n"
+         "    fi\n"
+         "    if [[ \"$prev\" == \"--release-id\" ]]; then\n"
+         "      local target_name=\"\"\n"
+         "      local i word previous\n"
+         "      for (( i=3; i<COMP_CWORD; i++ )); do\n"
+         "        word=\"${COMP_WORDS[i]}\"\n"
+         "        previous=\"${COMP_WORDS[i-1]}\"\n"
+         "        if [[ \"$word\" != --* && \"$previous\" != --* ]]; then target_name=\"$word\"; break; fi\n"
+         "      done\n"
+         "      COMPREPLY=( $(compgen -W \"$(arlen completion candidates deploy-release-ids --target \"$target_name\" 2>/dev/null)\" -- \"$cur\") )\n"
+         "      return 0\n"
+         "    fi\n"
+         "    COMPREPLY=( $(compgen -W \"$(arlen completion candidates deploy-targets 2>/dev/null)\" -- \"$cur\") )\n"
+         "    return 0\n"
+         "  fi\n"
+         "}\n"
+         "complete -F _arlen_complete arlen\n";
+}
+
+static NSString *CompletionScriptPowerShell(void) {
+  return @"# PowerShell completion for arlen\n"
+         "Register-ArgumentCompleter -CommandName arlen -ScriptBlock {\n"
+         "  param($commandName, $parameterName, $wordToComplete, $commandAst, $fakeBoundParameters)\n"
+         "  $line = $commandAst.ToString()\n"
+         "  $words = @($commandAst.CommandElements | ForEach-Object { $_.Extent.Text })\n"
+         "  $candidates = @()\n"
+         "  if ($words.Count -le 1) {\n"
+         "    $candidates = arlen completion candidates top-level-commands 2>$null\n"
+         "  } elseif ($words[1] -eq 'deploy') {\n"
+         "    if ($words.Count -le 2) {\n"
+         "      $candidates = arlen completion candidates deploy-subcommands 2>$null\n"
+         "    } elseif ($words[2] -eq 'target' -and $words.Count -le 3) {\n"
+         "      $candidates = arlen completion candidates deploy-target-subcommands 2>$null\n"
+         "    } elseif ($wordToComplete -like '--*') {\n"
+         "      $candidates = arlen completion candidates deploy-options 2>$null\n"
+         "    } else {\n"
+         "      $candidates = arlen completion candidates deploy-targets 2>$null\n"
+         "      if (-not $candidates) { $candidates = arlen completion candidates deploy-subcommands 2>$null }\n"
+         "    }\n"
+         "  } elseif ($line -match '^arlen\\s+deploy\\s+') {\n"
+         "    if ($wordToComplete -like '--*') {\n"
+         "      $candidates = arlen completion candidates deploy-options 2>$null\n"
+         "    } else {\n"
+         "      $candidates = arlen completion candidates deploy-targets 2>$null\n"
+         "      if (-not $candidates) { $candidates = arlen completion candidates deploy-subcommands 2>$null }\n"
+         "    }\n"
+         "  } elseif ($line -match '^arlen\\s+deploy$') {\n"
+         "    $candidates = arlen completion candidates deploy-subcommands 2>$null\n"
+         "  } else {\n"
+         "    $candidates = arlen completion candidates top-level-commands 2>$null\n"
+         "  }\n"
+         "  $candidates | Where-Object { $_ -like \"$wordToComplete*\" } | ForEach-Object {\n"
+         "    [System.Management.Automation.CompletionResult]::new($_, $_, 'ParameterValue', $_)\n"
+         "  }\n"
+         "}\n";
+}
+
+static int CommandCompletionCandidates(NSArray *args) {
+  if ([args count] == 0) {
+    return 0;
+  }
+  NSString *kind = args[0];
+  NSString *appRoot = [[[NSFileManager defaultManager] currentDirectoryPath] stringByStandardizingPath];
+  NSString *targetName = nil;
+  NSString *releasesDir = nil;
+  for (NSUInteger idx = 1; idx < [args count]; idx++) {
+    NSString *arg = args[idx];
+    if ([arg isEqualToString:@"--app-root"] && idx + 1 < [args count]) {
+      appRoot = [ResolvePathFromRoot([[NSFileManager defaultManager] currentDirectoryPath], args[++idx])
+                    stringByStandardizingPath];
+    } else if ([arg isEqualToString:@"--target"] && idx + 1 < [args count]) {
+      targetName = args[++idx];
+    } else if ([arg isEqualToString:@"--releases-dir"] && idx + 1 < [args count]) {
+      releasesDir = [ResolvePathFromRoot(appRoot, args[++idx]) stringByStandardizingPath];
+    }
+  }
+
+  NSArray<NSString *> *candidates = @[];
+  if ([kind isEqualToString:@"top-level-commands"]) {
+    candidates = TopLevelCompletionCandidates();
+  } else if ([kind isEqualToString:@"deploy-subcommands"]) {
+    candidates = DeploySubcommandCompletionCandidates();
+  } else if ([kind isEqualToString:@"deploy-target-subcommands"]) {
+    candidates = DeployTargetSubcommandCompletionCandidates();
+  } else if ([kind isEqualToString:@"deploy-options"]) {
+    candidates = DeployOptionCompletionCandidates();
+  } else if ([kind isEqualToString:@"deploy-targets"]) {
+    NSString *configPath = nil;
+    NSError *error = nil;
+    NSArray *targets = LoadDeployTargets(appRoot, &configPath, &error);
+    NSMutableArray<NSString *> *names = [NSMutableArray array];
+    if (targets != nil) {
+      for (NSDictionary *target in targets) {
+        NSString *name = StringValueForDeployKey(target, @"name");
+        if ([name length] > 0) {
+          [names addObject:name];
+        }
+      }
+    }
+    candidates = names;
+  } else if ([kind isEqualToString:@"deploy-release-ids"]) {
+    NSString *candidateReleasesDir = releasesDir;
+    if ([candidateReleasesDir length] == 0 && [targetName length] > 0 &&
+        ![@[ @"list", @"dryrun", @"init", @"push", @"releases", @"release", @"status", @"rollback", @"doctor", @"logs", @"target", @"plan" ] containsObject:targetName]) {
+      NSError *error = nil;
+      NSDictionary *target = LoadDeployTargetNamed(appRoot, targetName, &error);
+      if (target != nil) {
+        candidateReleasesDir = [target[@"remote_enabled"] boolValue]
+            ? StringValueForDeployKey(target, @"local_staging_releases_dir")
+            : StringValueForDeployKey(target, @"releases_dir");
+      }
+    }
+    if ([candidateReleasesDir length] == 0) {
+      candidateReleasesDir = [[appRoot stringByAppendingPathComponent:@"releases"] stringByStandardizingPath];
+    }
+    candidates = SortedReleaseDirectories(candidateReleasesDir);
+  }
+
+  for (NSString *candidate in candidates ?: @[]) {
+    fprintf(stdout, "%s\n", [candidate UTF8String]);
+  }
+  return 0;
+}
+
+static int CommandCompletion(NSArray *args) {
+  if ([args count] == 0) {
+    PrintCompletionUsage();
+    return 2;
+  }
+  NSString *subcommand = args[0];
+  NSArray *subArgs = ([args count] > 1) ? [args subarrayWithRange:NSMakeRange(1, [args count] - 1)] : @[];
+  if ([subcommand isEqualToString:@"bash"]) {
+    fprintf(stdout, "%s", [CompletionScriptBash() UTF8String]);
+    return 0;
+  }
+  if ([subcommand isEqualToString:@"powershell"]) {
+    fprintf(stdout, "%s", [CompletionScriptPowerShell() UTF8String]);
+    return 0;
+  }
+  if ([subcommand isEqualToString:@"candidates"]) {
+    return CommandCompletionCandidates(subArgs);
+  }
+  if ([subcommand isEqualToString:@"--help"] || [subcommand isEqualToString:@"-h"]) {
+    PrintCompletionUsage();
+    return 0;
+  }
+  PrintCompletionUsage();
+  return 2;
+}
+
 int main(int argc, const char *argv[]) {
   @autoreleasepool {
     if (argc < 2) {
@@ -9628,6 +10129,9 @@ int main(int argc, const char *argv[]) {
     }
     if ([command isEqualToString:@"deploy"]) {
       return CommandDeploy(args);
+    }
+    if ([command isEqualToString:@"completion"]) {
+      return CommandCompletion(args);
     }
     if ([command isEqualToString:@"migrate"]) {
       return CommandMigrate(args);

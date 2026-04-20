@@ -1,6 +1,6 @@
 # Phase 36 Roadmap
 
-Status: planned
+Status: in progress; 36A-36H delivered
 Last updated: 2026-04-20
 
 ## Goal
@@ -155,6 +155,8 @@ Acceptance:
 
 ## 36E. Initialized-Target Guards
 
+Status: delivered 2026-04-20.
+
 Goal:
 
 - prevent remote mutation commands from running before target initialization
@@ -176,6 +178,8 @@ Acceptance:
 
 ## 36F. Deploy Config Sample
 
+Status: delivered 2026-04-20.
+
 Goal:
 
 - provide a commented deploy target sample for generated apps and existing apps
@@ -195,6 +199,8 @@ Acceptance:
   fake target configuration by default
 
 ## 36G. Deploy Target Sample Command
+
+Status: delivered 2026-04-20.
 
 Goal:
 
@@ -216,6 +222,8 @@ Acceptance:
   from docs
 
 ## 36H. CLI Completion Foundation
+
+Status: delivered 2026-04-20.
 
 Goal:
 

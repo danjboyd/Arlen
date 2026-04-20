@@ -1536,6 +1536,119 @@
   }
 }
 
+- (void)testArlenNewDeploySampleAndCompletionFoundation {
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *workRoot = [self createTempDirectoryWithPrefix:@"arlen-phase36-sample-completion"];
+  XCTAssertNotNil(workRoot);
+  if (workRoot == nil) {
+    return;
+  }
+
+  @try {
+    int code = 0;
+    NSString *buildOutput = [self runMakeAtRepoRoot:repoRoot target:@"arlen" exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", buildOutput);
+
+    NSString *newOutput = [self runShellCapture:[NSString stringWithFormat:
+                                                     @"cd %@ && ARLEN_FRAMEWORK_ROOT=%@ %@/build/arlen "
+                                                      "new DeploySampleApp --lite --json",
+                                                     workRoot, repoRoot, repoRoot]
+                                       exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", newOutput);
+    NSDictionary *newPayload =
+        [self parseJSONDictionaryFromOutput:newOutput context:@"arlen new deploy sample --json"];
+    NSArray *createdFiles =
+        [newPayload[@"created_files"] isKindOfClass:[NSArray class]] ? newPayload[@"created_files"] : @[];
+    XCTAssertTrue([createdFiles containsObject:@"config/deploy.plist.example"]);
+
+    NSString *appRoot = [workRoot stringByAppendingPathComponent:@"DeploySampleApp"];
+    NSString *samplePath = [appRoot stringByAppendingPathComponent:@"config/deploy.plist.example"];
+    NSString *sample = [NSString stringWithContentsOfFile:samplePath encoding:NSUTF8StringEncoding error:nil] ?: @"";
+    XCTAssertTrue([sample containsString:@"/*"], @"%@", sample);
+    XCTAssertTrue([sample containsString:@"runtimeStrategy"], @"%@", sample);
+    NSString *readme = [NSString stringWithContentsOfFile:[appRoot stringByAppendingPathComponent:@"README.md"]
+                                                  encoding:NSUTF8StringEncoding
+                                                     error:nil] ?: @"";
+    XCTAssertTrue([readme containsString:@"arlen deploy dryrun production"], @"%@", readme);
+
+    NSString *deployConfigPath = [appRoot stringByAppendingPathComponent:@"config/deploy.plist"];
+    NSError *copyError = nil;
+    XCTAssertTrue([[NSFileManager defaultManager] copyItemAtPath:samplePath toPath:deployConfigPath error:&copyError],
+                  @"%@", copyError.localizedDescription);
+    NSString *listOutput = [self runShellCapture:[NSString stringWithFormat:
+                                                      @"cd %@ && %@/build/arlen deploy list --app-root %@ --json",
+                                                      appRoot, repoRoot, appRoot]
+                                        exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", listOutput);
+    NSDictionary *listPayload =
+        [self parseJSONDictionaryFromOutput:listOutput context:@"arlen deploy list sample --json"];
+    XCTAssertEqualObjects(@1, listPayload[@"target_count"]);
+
+    [[NSFileManager defaultManager] removeItemAtPath:deployConfigPath error:nil];
+    NSString *sampleCommandOutput = [self runShellCapture:[NSString stringWithFormat:
+                                                              @"cd %@ && %@/build/arlen deploy target sample "
+                                                               "--target staging --ssh-host deploy@stage.example.test "
+                                                               "--write --output config/deploy.plist --json",
+                                                              appRoot, repoRoot]
+                                                exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", sampleCommandOutput);
+    NSDictionary *sampleCommandPayload =
+        [self parseJSONDictionaryFromOutput:sampleCommandOutput context:@"arlen deploy target sample --json"];
+    XCTAssertEqualObjects(@"deploy.target.sample", sampleCommandPayload[@"workflow"]);
+    NSString *stagingListOutput = [self runShellCapture:[NSString stringWithFormat:
+                                                            @"cd %@ && %@/build/arlen deploy list --app-root %@ --json",
+                                                            appRoot, repoRoot, appRoot]
+                                              exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", stagingListOutput);
+    NSDictionary *stagingListPayload =
+        [self parseJSONDictionaryFromOutput:stagingListOutput context:@"arlen deploy list staging sample --json"];
+    NSArray *targets = [stagingListPayload[@"targets"] isKindOfClass:[NSArray class]] ? stagingListPayload[@"targets"] : @[];
+    NSDictionary *target = ([targets count] > 0 && [targets[0] isKindOfClass:[NSDictionary class]]) ? targets[0] : @{};
+    XCTAssertEqualObjects(@"staging", target[@"name"]);
+    XCTAssertEqualObjects(@"deploy@stage.example.test", target[@"ssh_host"]);
+
+    NSString *bashCompletion = [self runShellCapture:[NSString stringWithFormat:@"%@/build/arlen completion bash", repoRoot]
+                                            exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", bashCompletion);
+    XCTAssertTrue([bashCompletion containsString:@"complete -F _arlen_complete arlen"], @"%@", bashCompletion);
+    XCTAssertTrue([bashCompletion containsString:@"arlen completion candidates deploy-targets"], @"%@", bashCompletion);
+
+    NSString *powerShellCompletion = [self runShellCapture:[NSString stringWithFormat:@"%@/build/arlen completion powershell", repoRoot]
+                                                  exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", powerShellCompletion);
+    XCTAssertTrue([powerShellCompletion containsString:@"Register-ArgumentCompleter"], @"%@", powerShellCompletion);
+
+    NSString *candidateOutput = [self runShellCapture:[NSString stringWithFormat:
+                                                          @"cd %@ && %@/build/arlen completion candidates deploy-targets",
+                                                          appRoot, repoRoot]
+                                            exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", candidateOutput);
+    XCTAssertTrue([candidateOutput containsString:@"staging"], @"%@", candidateOutput);
+    NSString *targetSubcommandOutput =
+        [self runShellCapture:[NSString stringWithFormat:@"%@/build/arlen completion candidates deploy-target-subcommands",
+                                                         repoRoot]
+                     exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", targetSubcommandOutput);
+    XCTAssertTrue([targetSubcommandOutput containsString:@"sample"], @"%@", targetSubcommandOutput);
+    NSString *deployOptionsOutput =
+        [self runShellCapture:[NSString stringWithFormat:@"%@/build/arlen completion candidates deploy-options",
+                                                         repoRoot]
+                     exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", deployOptionsOutput);
+    XCTAssertTrue([deployOptionsOutput containsString:@"--write"], @"%@", deployOptionsOutput);
+
+    XCTAssertTrue([self writeFile:deployConfigPath content:@"{ deployment = { targets = ; }; }\n"]);
+    NSString *malformedCandidateOutput = [self runShellCapture:[NSString stringWithFormat:
+                                                                   @"cd %@ && %@/build/arlen completion candidates deploy-targets",
+                                                                   appRoot, repoRoot]
+                                                     exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", malformedCandidateOutput);
+    XCTAssertEqualObjects(@"", [malformedCandidateOutput stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]]);
+  } @finally {
+    [[NSFileManager defaultManager] removeItemAtPath:workRoot error:nil];
+  }
+}
+
 - (void)testArlenDeployReleaseAndStatusOperateAgainstRemoteNamedTargetOverSSH {
   NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
   NSString *appRoot = [self createTempDirectoryWithPrefix:@"arlen-deploy-ssh-app"];
@@ -1601,6 +1714,29 @@
     int code = 0;
     NSString *buildOutput = [self runMakeAtRepoRoot:repoRoot target:@"arlen" exitCode:&code];
     XCTAssertEqual(0, code, @"%@", buildOutput);
+
+    NSString *uninitializedPushOutput = [self runShellCapture:[NSString stringWithFormat:
+                                                                  @"cd %@ && ARLEN_FRAMEWORK_ROOT=%@ ARLEN_MOCK_SSH_LOG=%@ %@/build/arlen "
+                                                                   "deploy push production --app-root %@ --release-id ssh-rel-guard "
+                                                                   "--allow-missing-certification --json",
+                                                                  appRoot, repoRoot, mockSSHLog, repoRoot, appRoot]
+                                                    exitCode:&code];
+    XCTAssertEqual(1, code, @"%@", uninitializedPushOutput);
+    NSDictionary *uninitializedPushPayload =
+        [self parseJSONDictionaryFromOutput:uninitializedPushOutput context:@"arlen deploy push production uninitialized --json"];
+    NSDictionary *uninitializedError =
+        [uninitializedPushPayload[@"error"] isKindOfClass:[NSDictionary class]] ? uninitializedPushPayload[@"error"] : @{};
+    XCTAssertEqualObjects(@"deploy_target_not_initialized", uninitializedError[@"code"]);
+
+    NSString *initOutput = [self runShellCapture:[NSString stringWithFormat:
+                                                      @"cd %@ && ARLEN_FRAMEWORK_ROOT=%@ ARLEN_MOCK_SSH_LOG=%@ %@/build/arlen "
+                                                       "deploy init production --app-root %@ --json",
+                                                      appRoot, repoRoot, mockSSHLog, repoRoot, appRoot]
+                                        exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", initOutput);
+    NSDictionary *initPayload =
+        [self parseJSONDictionaryFromOutput:initOutput context:@"arlen deploy init production remote --json"];
+    XCTAssertEqualObjects(@"ok", initPayload[@"status"]);
 
     NSString *pushOutput = [self runShellCapture:[NSString stringWithFormat:
                                                        @"cd %@ && ARLEN_FRAMEWORK_ROOT=%@ ARLEN_MOCK_SSH_LOG=%@ %@/build/arlen "
