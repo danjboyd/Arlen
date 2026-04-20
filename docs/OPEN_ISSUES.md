@@ -12,6 +12,8 @@
   existing local staged release for named remote targets before upload and
   packaged remote activation, avoiding the prior `release_exists` rebuild
   failure.
+- Verification: Phase 36D added the focused named remote regression, and
+  Phase 36K now includes it in `make phase36-confidence`.
 
 ### Summary
 
@@ -58,7 +60,7 @@ should reuse the existing local release artifact when present, upload or reuse
 the corresponding remote artifact as needed, and activate that release on the
 remote host through the packaged remote `arlen deploy release`.
 
-### Actual behavior
+### Actual behavior before Phase 36D
 
 The named-target command attempts to rebuild the same local release ID before
 remote activation. Because the local release directory already exists, the build

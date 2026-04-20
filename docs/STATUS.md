@@ -4,6 +4,18 @@ Last updated: 2026-04-20
 
 ## Leaving Off (2026-04-20)
 
+- Closed Phase 36 with `36I-36L` delivered:
+  - completion candidate commands are covered for local-only, read-only safety,
+    including malformed deploy config and remote-target release ID candidates
+    that do not invoke SSH
+  - deploy docs and generated app README templates now consistently use
+    `deploy list`, `deploy dryrun`, `deploy releases`,
+    `config/deploy.plist.example`, and `deploy target sample`
+  - added `make phase36-confidence`, backed by
+    `tools/ci/run_phase36_confidence.sh` and
+    `tools/ci/generate_phase36_confidence_artifacts.py`, with passing
+    artifacts under `build/release_confidence/phase36/`
+  - Phase 36 is now complete (`36A-36L`)
 - Delivered Phase 36E-36H for deploy operator UX:
   - named remote `deploy push <target>` and `deploy release <target>` now fail
     before mutation with `deploy_target_not_initialized` until

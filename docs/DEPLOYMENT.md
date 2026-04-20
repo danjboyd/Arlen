@@ -102,6 +102,20 @@ Copy or write the sample to `config/deploy.plist`, edit the target fields, and
 then use `arlen deploy list` / `arlen deploy dryrun <target>` to verify the
 operator-facing config before initialization.
 
+Shell completion is first-class for deploy operations:
+
+```sh
+arlen completion bash
+arlen completion powershell
+```
+
+The generated completion scripts call back into local read-only candidate
+commands for deploy subcommands, target names, release IDs, and options. They
+do not perform SSH, build releases, or write files while completing.
+
+Future `gnustep install arlen` package-manager support remains a distribution
+path, not a prerequisite for the current deploy command flow.
+
 Current target fields:
 
 - target identifier

@@ -1,6 +1,6 @@
 # Phase 36 Roadmap
 
-Status: in progress; 36A-36H delivered
+Status: complete; 36A-36L delivered 2026-04-20
 Last updated: 2026-04-20
 
 ## Goal
@@ -251,6 +251,8 @@ Acceptance:
 
 ## 36I. Completion Safety And Tests
 
+Status: delivered 2026-04-20.
+
 Goal:
 
 - keep completion reliable enough to enable by default in operator docs
@@ -270,6 +272,8 @@ Acceptance:
   side effects
 
 ## 36J. Deploy Docs Refresh
+
+Status: delivered 2026-04-20.
 
 Goal:
 
@@ -293,6 +297,8 @@ Acceptance:
 
 ## 36K. Confidence Lane
 
+Status: delivered 2026-04-20.
+
 Goal:
 
 - add a focused regression lane for the Phase 36 deploy UX contract
@@ -315,7 +321,16 @@ Acceptance:
 
 - Phase 36 has one repeatable local verification command
 
+Evidence:
+
+- `make phase36-confidence`
+- `build/release_confidence/phase36/manifest.json`
+- `build/release_confidence/phase36/phase36_confidence_eval.json`
+- `build/release_confidence/phase36/phase36_confidence.md`
+
 ## 36L. Closeout
+
+Status: delivered 2026-04-20.
 
 Goal:
 

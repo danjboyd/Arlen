@@ -100,6 +100,12 @@ Windows-focused preview lanes:
   - runs the route-policy confidence set for CIDR/proxy decisions,
     route-side policy metadata, and `/admin` policy attachment
   - writes artifacts under `build/release_confidence/phase35/`
+- `make phase36-confidence`
+  - runs the deploy operator-UX confidence set for target discovery, dryrun
+    aliasing, sample config parsing, uninitialized target guards, release
+    inventory listing, named remote release reuse, and bash/PowerShell
+    completion safety
+  - writes artifacts under `build/release_confidence/phase36/`
 
 ## 2. Bug Report To Regression
 
