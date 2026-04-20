@@ -145,9 +145,10 @@ Current shape:
 
 Arlen now resolves:
 
-- `arlen deploy plan production`
+- `arlen deploy dryrun production`
 - `arlen deploy push production`
 - `arlen deploy release production`
+- `arlen deploy releases production`
 - `arlen deploy doctor production`
 
 Explicit CLI flags still override the checked-in target fields.
@@ -317,8 +318,9 @@ Deployment helper scripts are provided under `tools/deploy/`.
 For app-operator workflows, prefer the first-class `arlen deploy` wrapper:
 
 ```bash
-./build/arlen deploy plan --app-root /path/to/app --allow-missing-certification --json
+./build/arlen deploy dryrun --app-root /path/to/app --allow-missing-certification --json
 ./build/arlen deploy push --app-root /path/to/app --allow-missing-certification --json
+./build/arlen deploy releases --app-root /path/to/app --json
 ./build/arlen deploy release --app-root /path/to/app --release-id rel-20260407 --allow-missing-certification --json
 ```
 

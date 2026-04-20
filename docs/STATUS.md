@@ -4,6 +4,17 @@ Last updated: 2026-04-20
 
 ## Leaving Off (2026-04-20)
 
+- Delivered Phase 36A-36D for deploy operator UX:
+  - bare `arlen deploy` is now an onboarding entrypoint with `deploy.help`
+    JSON, and `arlen deploy list` reports configured targets or an empty
+    target set without requiring framework resolution
+  - `arlen deploy dryrun` is the canonical dry-run command; `plan` remains a
+    deprecated alias and emits `deprecated_alias = plan` in JSON mode
+  - `arlen deploy releases [target]` lists local or remote release artifacts
+    with `deploy.releases` JSON and manifest metadata when available
+  - fixed `ARLEN-BUG-022` / `ISSUE-002` for named remote targets by reusing an
+    existing local staged release during `deploy release <target> --release-id`
+    instead of rebuilding into `release_exists`
 - Added planned Phase 36 for deploy operator UX:
   - next unused phase number is `36`
   - scoped `36A-36L` around `deploy list`, `deploy dryrun`, release
@@ -40,7 +51,7 @@ Last updated: 2026-04-20
 
 ## Leaving Off (2026-04-17)
 
-- Next-session first priority: fix `ARLEN-BUG-022` / `ISSUE-002`, the
+- Resolved on 2026-04-20: `ARLEN-BUG-022` / `ISSUE-002`, the
   named-target `arlen deploy release <target> --release-id <existing-id>`
   regression where the remote release path rebuilds an existing local release
   ID and fails with `release_exists` instead of reusing the prepared artifact.

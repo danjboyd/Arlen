@@ -57,6 +57,8 @@ initialization, pushed release artifacts, or shell-completion setup is missing.
 
 ## 36A. Deploy Command Discovery
 
+Status: delivered 2026-04-20.
+
 Goal:
 
 - make bare `arlen deploy` a useful onboarding entrypoint
@@ -82,6 +84,8 @@ Acceptance:
 
 ## 36B. Deploy Dryrun Rename
 
+Status: delivered 2026-04-20.
+
 Goal:
 
 - rename `arlen deploy plan` to `arlen deploy dryrun`
@@ -102,6 +106,8 @@ Acceptance:
 - new docs and generated next actions use `dryrun`
 
 ## 36C. Deploy Release Inventory
+
+Status: delivered 2026-04-20.
 
 Goal:
 
@@ -124,6 +130,8 @@ Acceptance:
   IDs are available before choosing one to activate
 
 ## 36D. Named-Target Release Reuse
+
+Status: delivered 2026-04-20.
 
 Goal:
 

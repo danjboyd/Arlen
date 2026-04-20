@@ -87,7 +87,7 @@ Notes:
 - when `templates/layouts/main.html.eoc` exists, generated HTML templates opt into it automatically unless the target logical path is under `layouts/` or `partials/`
 - `generate search` is the fastest way to stand up a search resource without reverse-engineering the `search` module internals
 
-### `arlen deploy <init|plan|push|release|status|rollback|doctor|logs> [target] [options]`
+### `arlen deploy <list|dryrun|init|push|releases|release|status|rollback|doctor|logs> [target] [options]`
 
 First-class release orchestration over the existing `tools/deploy/*` scripts.
 
@@ -128,6 +128,20 @@ Named targets:
 }
 ```
 
+`arlen deploy`
+
+- with no subcommand, exits `0` and prints deploy command help plus target
+  discovery next steps
+- with `--json`, emits `workflow = deploy.help`
+- missing `config/deploy.plist` is treated as onboarding state, not an error
+
+`arlen deploy list`
+
+- lists named deploy targets from `config/deploy.plist`
+- exits `0` with an empty target list when no deploy config exists yet
+- emits `workflow = deploy.list` in `--json` mode
+- sorts target names deterministically
+
 `arlen deploy init`
 
 - requires a named target from `config/deploy.plist`
@@ -143,13 +157,15 @@ Named targets:
   - `runtime.requiresEnvWrapper`
 - does not provision secrets, PostgreSQL, reverse proxies, TLS, or DNS
 
-`arlen deploy plan`
+`arlen deploy dryrun`
 
 - validates release packaging inputs using `tools/deploy/build_release.sh --dry-run`
 - emits a normalized machine payload with:
-  - `workflow = deploy.plan`
+  - `workflow = deploy.dryrun`
   - `manifest_version = phase32-deploy-manifest-v1`
   - nested `build_release` payload from the packaging script
+- `arlen deploy plan` remains a deprecated compatibility alias; JSON output
+  records `deprecated_alias = plan`
 
 `arlen deploy push`
 
@@ -173,6 +189,18 @@ Named targets:
 - copies packaged runtime binaries as real files inside the release instead of
   preserving build-host symlinks (`ARLEN-BUG-018`)
 - emits the manifest content in `--json` mode
+
+`arlen deploy releases`
+
+- lists release artifacts available to activate
+- local mode lists directories under `--releases-dir`
+- named local targets list the target release directory
+- named remote targets list remote release directories over SSH without
+  requiring an active `releases/current` symlink
+- excludes the `current` symlink and labels release state as `active`,
+  `previous`, or `available` when that state is known
+- emits `workflow = deploy.releases` in `--json` mode and includes manifest
+  metadata when `metadata/manifest.json` is present
 
 `arlen deploy release`
 

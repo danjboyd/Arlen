@@ -2,12 +2,16 @@
 
 ## ISSUE-002: Named-target deploy release rebuilds existing release ID instead of reusing it
 
-- Status: `open`
+- Status: `resolved`
 - Priority: `high`
 - Tracking ID: `ARLEN-BUG-022`
 - Discovered: `2026-04-17`
-- Target follow-up: next deployment bugfix pass
-- Last updated: `2026-04-17`
+- Target follow-up: Phase 36D
+- Last updated: `2026-04-20`
+- Resolution: `arlen deploy release <target> --release-id <id>` now reuses an
+  existing local staged release for named remote targets before upload and
+  packaged remote activation, avoiding the prior `release_exists` rebuild
+  failure.
 
 ### Summary
 

@@ -98,11 +98,14 @@ Behavior:
 - resolves DSN from `--dsn`, `ARLEN_DATABASE_URL_<TARGET>`, `ARLEN_DATABASE_URL`, or config `database/databases`
 - migration state table is target-aware (`arlen_schema_migrations` or `arlen_schema_migrations__<target>`)
 
-### 4.5A `arlen deploy <plan|push|release|status|rollback|doctor|logs> [options]`
+### 4.5A `arlen deploy <list|dryrun|init|push|releases|release|status|rollback|doctor|logs> [options]`
 
-- `plan` validates release packaging inputs and emits a stable deploy planning payload
+- `list` reports configured deploy targets from `config/deploy.plist`
+- `dryrun` validates release packaging inputs and emits a stable deploy planning payload
+- `plan` remains a deprecated compatibility alias for `dryrun`
 - `push` builds a local immutable release artifact under `releases/<release-id>/`
 - `push` writes `metadata/manifest.json` using contract version `phase32-deploy-manifest-v1`
+- `releases` reports release artifacts available to activate
 - deploy manifests now carry target-aware deployment metadata (`local_profile`,
   `target_profile`, `runtime_strategy`, `support_level`,
   `compatibility_reason`, and remote rebuild requirements)
