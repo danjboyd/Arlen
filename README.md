@@ -3,12 +3,14 @@
 Arlen is a GNUstep-native Objective-C web framework with an MVC runtime, EOC templates (`.html.eoc`), and a developer server (`boomhauer`).
 
 Arlen is designed to solve the same class of problems as frameworks like
-Mojolicious while staying idiomatic to Objective-C/GNUstep conventions. The
-project is still young, but the shipped surface is already broad: HTML-first
-and JSON-first app paths, OpenAPI output, first-party auth/admin/jobs/storage
-modules, WebSocket/SSE support, a PostgreSQL-first data layer, optional MSSQL,
-an optional SQL ORM foundation, a runtime-inactive Dataverse Web API
-integration surface, and a managed production runtime (`propane`).
+Mojolicious while staying idiomatic to Objective-C/GNUstep conventions.
+
+The project is still young, but the core shipped surface is already real:
+server-rendered HTML and JSON app paths, OpenAPI output, first-party auth/admin
+/jobs/storage modules, a PostgreSQL-first data layer, realtime support, and a
+managed production runtime (`propane`). Linux with a clang-built GNUstep
+toolchain is the primary production target. macOS has a verified Apple-runtime
+path, and Windows `CLANG64` is currently a preview target.
 
 ## Start Here
 
@@ -24,12 +26,19 @@ If you are new to Arlen, start with:
 
 ## Quick Start
 
-Linux/GNUstep path:
+If you are evaluating Arlen on Linux/GNUstep, make sure you have:
+
+- a clang-built GNUstep toolchain
+- initialized submodules via `git submodule update --init --recursive`
+- `tools-xctest` available if you plan to run the full test suite
+
+Linux/GNUstep evaluation path:
 
 ```bash
 source tools/source_gnustep_env.sh
 ./bin/arlen doctor
 make all
+./bin/test --smoke-only
 ```
 
 macOS Apple-runtime path:
@@ -59,6 +68,9 @@ env script first instead. The Arlen helper resolves `GNUSTEP_SH`,
 use the Apple builder documented in `docs/GETTING_STARTED_MACOS.md`.
 For the current native Windows preview entry path and packaged-release
 contract, see `docs/WINDOWS_CLANG64.md`.
+
+If `./bin/arlen doctor` fails, stop there and fix the reported GNUstep
+toolchain issue before expecting `make all` or app scaffolds to work.
 
 The default full scaffold gives you:
 
@@ -102,7 +114,7 @@ one coherent toolchain.
 - `Runtime`: `boomhauer` for development and `propane` for production worker supervision, reloads, and cluster controls.
 - `Diagnostics and verification`: `arlen doctor`, build diagnostics, focused regression lanes, and live-backed integration coverage.
 
-## Features People Usually Do Not Expect Here
+## Notable Built-In Capabilities
 
 - interactive OpenAPI explorer and generated API docs
 - passkey/WebAuthn MFA and OIDC login flows
@@ -132,71 +144,21 @@ one coherent toolchain.
 
 ## Status
 
-For readers evaluating maturity: Arlen is young, but not minimal. The list
-below is the detailed milestone ledger for the shipped surface summarized above.
+For readers evaluating maturity: Arlen is young, but it is no longer a minimal
+scaffold.
 
-- Phase 1: complete and working.
-- Phase 2A: complete (`propane` + runtime hardening).
-- Phase 2B: complete (PostgreSQL adapter, migrations, sessions/CSRF/rate-limit/security headers).
-- Phase 2C: complete (developer error UX + validation + timing controls).
-- Phase 2D: complete (parity baseline + deployment contract + perf gate hardening).
-- Phase 3A: complete (metrics, schema/auth contracts, OpenAPI baseline, plugins/lifecycle).
-- Phase 3B: complete (data-layer maturation, interactive OpenAPI explorer, GSWeb compatibility helpers).
-- Phase 3C: complete (release/doc maturity, perf trend profiles, swagger docs style, migration readiness package).
-- Phase 3D: complete (websocket/SSE baseline, mount composition, realtime pubsub abstraction).
-- Phase 3E: complete (plugin-first ecosystem services: jobs/cache/i18n/mail/attachments).
-- Phase 3F: complete (doctor + toolchain matrix, ALNPg diagnostics hardening, API helpers, static mount ergonomics, concrete jobs/mail adapters, async worker supervision baseline).
-- Phase 3G: complete (SQL builder v2 expansion, PostgreSQL dialect builder, and standalone `ArlenData` reuse packaging).
-- Phase 3H: complete (cluster runtime primitives: `/clusterz`, cluster response headers, and propane cluster controls).
-- Phase 4A: complete (query IR foundation for expression compilation, safety contracts, and deterministic malformed-shape diagnostics).
-- Phase 4B: complete (SQL surface completion for set/window/predicate/locking/join/CTE composition).
-- Phase 4C: complete (typed schema codegen with generated table/column helper APIs and CLI workflow).
-- Phase 4D: complete (builder execution caching, prepared-statement reuse policy, and structured/redacted query diagnostics).
-- Phase 4E: complete (conformance matrix, property/long-run regression suite, migration/deprecation hardening, and Phase 4 quality gate wiring).
-- Phase 5A: complete (reliability contract mapping, external regression intake, and adapter capability metadata baselines).
-- Phase 5B: complete (runtime read/write routing, scoped read-after-write stickiness, and deterministic fallback diagnostics).
-- Phase 5C: complete (target-aware multi-database migration/schema-codegen tooling and deterministic per-target state).
-- Phase 5D: complete (typed row/insert/update schema contracts, typed decode helpers, and typed SQL codegen workflow).
-- Phase 5E: complete (data-layer soak/fault hardening gates and release confidence artifact pack generation).
-- Phase 7: complete for current first-party scope (runtime hardening, security defaults, observability/operability, ecosystem durability, template pipeline maturity, frontend starters, coding-agent DX, and distributed-runtime contracts; closeout verified 2026-03-13).
-- Phase 9: complete (documentation platform, generated API reference, onboarding tracks/migration guides, and enterprise release certification hardening track).
-- Phase 11A: complete (session/bearer/CSRF hardening).
-- Phase 11B: complete (HTTP header and parser-boundary hardening).
-- Phase 11C: complete (websocket handshake/origin/stall hardening).
-- Phase 11D: complete (static/attachment filesystem containment and private on-disk adapter permissions).
-- Phase 11E: complete (trusted proxy CIDR boundaries and text-log control-character escaping).
-- Phase 11F: complete (hostile protocol corpus, deterministic fuzz/live probes, and Phase 11 sanitizer confidence lanes).
-- Phase 12: complete (12A-12F delivered: auth-assurance/step-up primitives, TOTP/recovery helpers, WebAuthn/passkey MFA baseline, OIDC/provider-login primitives, and Phase 12 confidence artifacts).
-- Phase 13: complete (13A-13I delivered: first-class module substrate, first-party `auth` and `admin-ui` modules, Django-inspired admin resources, `/auth/api` + `/admin/api` surfaces, sample app, and Phase 13 confidence gate).
-- Phase 14: complete (14A-14I delivered: first-party `jobs`, `notifications`, `storage`, `ops`, and `search` modules, Phase 14 sample app, and `phase14-confidence` gate).
-- Phase 15: complete (15A-15E delivered on 2026-03-10: `headless`, `module-ui`, `generated-app-ui`, auth UI examples, and `phase15-confidence`).
-- Phase 16: complete (`16A-16G` delivered on 2026-03-11: `jobs`, `notifications`, `storage`, `search`, `ops`, and `admin-ui` maturity; `examples/phase16_modules_demo` and `phase16-confidence` included. See `docs/PHASE16_ROADMAP.md`).
-- Phase 17: complete (`17A-17D` delivered on 2026-03-12: backend-neutral SQL dialect/migration seams, optional MSSQL adapter + dialect, configured `migrate` / `module migrate` backend selection, and updated data-layer docs. See `docs/PHASE17_ROADMAP.md`).
-- Phase 18: complete (`18A-18H` delivered on 2026-03-14: fragment-first MFA UI reuse, headless MFA contract refinement, optional SMS/Twilio Verify support, and generated-app-ui include-path hardening. See `docs/PHASE18_ROADMAP.md`).
-- Phase 19: complete (`19A-19F` delivered on 2026-03-14: incremental GNUmake/GNUstep build-graph narrowing, generated-template object reuse, clearer `boomhauer` build phases, and `phase19-confidence`. See `docs/PHASE19_ROADMAP.md`).
-- Phase 20: complete (`20A-20K` delivered on 2026-03-26; `20L-20R` delivered on 2026-03-27 for MSSQL native transport tightening, ordered result semantics, bounded PostgreSQL metadata expansion, explicit live-test requirement accounting, shared test support/assertion layers, and repo-native focused confidence lanes. See `docs/PHASE20_ROADMAP.md`).
-- Phase 21: complete (`21A-21G` delivered on 2026-03-27 for in-process request harnesses, shared request/pipeline assertion helpers, explicit async DB ownership rules, template-suite decomposition, raw protocol corpus replay, generated-app matrix coverage, and repo-native focused confidence lanes. See `docs/PHASE21_ROADMAP.md`).
-- Phase 22: complete (`22A-22G` delivered on 2026-03-30 for newcomer-first onboarding, docs/code parity hardening, app-author guides, module/lite-mode guidance, plugin/frontend guides, and docs quality closeout. See `docs/PHASE22_ROADMAP.md`).
-- Phase 23: complete (`23A-23I` delivered on 2026-03-31 for the runtime-inactive Dataverse Web API client, OData query builder, CRUD/batch helpers, metadata normalization, typed Dataverse codegen, app/controller Dataverse helpers, focused regression suites, parity/characterization artifacts, repo-native confidence lanes, and docs/example closeout. See `docs/PHASE23_ROADMAP.md`).
-- Phase 25: complete (`25A-25L` delivered on 2026-04-01). The shipped fragment-first live UI now includes `ALNLive`, `/arlen/live.js`, live request metadata, keyed collection helpers, lazy/poll/deferred regions, upload-progress-aware live forms, websocket-backed push updates, a Node-backed executable runtime harness behind `phase25-live-tests`, adversarial live regression fixtures, and the strengthened `phase25-confidence` artifact pack. Full diff-engine/live-component depth remains future work.
-- Phase 26: complete (`26A-26O` delivered on 2026-04-01 for the optional `ArlenORM` package, SQL descriptor history contracts, split ORM confidence lanes, backend-capability honesty, and the Dataverse ORM bridge. See `docs/PHASE26_ROADMAP.md`).
-- Phase 27: complete (`27A-27L` landed on 2026-04-01; the `27E-27L` audit follow-up closed on 2026-04-02). The search module now ships safe public result shaping, typed/capability-normalized metadata, PostgreSQL FTS/trigram, authoritative first-party Meilisearch/OpenSearch adapters, streamed rebuilds, resource-scoped tenant/visibility semantics, and a fail-closed `phase27-confidence` gate. See `docs/PHASE27_ROADMAP.md`.
-- Phase 28: complete (`28A-28L` delivered on 2026-04-03). Arlen now ships descriptor-first TypeScript models, validator/form adapters, explicit query-shape/resource/module metadata, typed transport and optional React helpers, a checked-in React/Vite consumer workspace, a live reference server, dedicated generated/unit/integration/react verification lanes, and the fail-closed `phase28-confidence` artifact pack while keeping TypeScript downstream of ORM descriptors and OpenAPI contracts. See `docs/PHASE28_ROADMAP.md`.
-- Phase 29: complete (`29A-29L` delivered on 2026-04-07). Arlen now ships a first-class `arlen deploy` workflow (`plan`, `push`, `release`, `status`, `rollback`, `doctor`, `logs`), versioned deploy manifests, reserved operability endpoints for trustworthy `/healthz` and `/readyz` rollout probes, and the fail-closed `phase29-confidence` verification lane. See `docs/PHASE29_ROADMAP.md`.
-- Phase 30: complete (`30A-30S` delivered on 2026-04-09). Arlen now ships a verified Apple-runtime baseline on macOS with full-Xcode detection in `arlen doctor`, repo-native Apple XCTest bundle build/run entrypoints, a green Apple XCTest unit suite in `./tools/test_apple.sh`, normalized optional PostgreSQL/ODBC backend discovery, Apple watch-mode rebuild/restart ergonomics in `boomhauer`, the repo-native `phase30-confidence` artifact pack, a `macos-15` CI lane enforcing the same contract, and centralized compatibility shims that keep the shared source warning-free on current macOS while preserving the GNUstep libs-base 1.30 path. See `docs/PHASE30_ROADMAP.md`.
-- Phase 31: complete (`31A-31H` delivered on 2026-04-08). Arlen now ships a preview-complete Windows `CLANG64` path for packaged release/deploy verification: manifest-backed packaged runtime/helper resolution, `deploy doctor` parity, the `phase31-confidence` packaged release lane, expanded Windows preview CI, and an explicit support statement that keeps Windows in preview while Linux remains the production baseline. See `docs/PHASE31_ROADMAP.md`.
-- Phase 32: complete (`32A-32V` delivered on 2026-04-14). Arlen now ships the full target-aware deployment closeout: platform profiles, support-level classification, checked-in named deploy targets, `deploy init` Linux host scaffolding, SSH-based remote artifact transport/activation, explicit database/configuration deploy contracts, GNUstep host-readiness validation, generated runtime wrappers, and the `phase32-confidence` artifact lane. See `docs/PHASE32_ROADMAP.md` and `docs/DEPLOYMENT.md`.
-- Phase 33: complete (`33A-33L` delivered on 2026-04-15). Arlen now ships the full durable event-stream seam: authoritative append/replay with idempotent retry semantics, deny-by-default auth hooks, an in-process broker seam, deterministic replay-window and `resync_required` behavior, websocket/SSE/HTTP integration on the same contract, a plain generated TypeScript consumer surface, the `phase33-confidence` lane, and app-author/module-boundary docs. See `docs/PHASE33_ROADMAP.md` and `docs/EVENT_STREAMS.md`.
-- Phase 34: complete (`34A-34K` delivered on 2026-04-20). Arlen now has a current CI contract with required Linux/docs merge gates, non-required Apple/Windows platform confidence lanes, release-lane isolation, branch-protection guidance, and a pinned `vendor/gnustep-cli-new` Windows runner provisioning contract for Phase 34K. See `docs/PHASE34_ROADMAP.md`, `docs/CI_ALIGNMENT.md`, and `docs/PLATFORM_RUNNERS.md`.
-- Phase 35: complete (`35A-35M` delivered on 2026-04-17). Arlen now has named route policies, proxy-aware source IP allowlisting, `/admin` policy integration, plist route definitions with source metadata, and the `phase35-confidence` lane. See `docs/PHASE35_ROADMAP.md` and `docs/ROUTE_POLICIES.md`.
-- Phase 36: complete (`36A-36L` delivered on 2026-04-20). Arlen now ships the full deploy operator-UX pass: `deploy list`, canonical `deploy dryrun` with `plan` alias compatibility, `deploy releases`, named-target release reuse for pushed remote artifacts, initialized-target guards, generated deploy config samples, `deploy target sample`, bash/PowerShell completion generation, completion safety coverage, deploy docs refresh, and the `phase36-confidence` lane. See `docs/PHASE36_ROADMAP.md`.
+- Core framework/runtime work is complete through the current first-party scope, including HTML/JSON request handling, EOC templates, data-layer fundamentals, auth/security hardening, realtime/event-stream support, and deployment/runtime management.
+- Linux with clang-built GNUstep remains the authoritative production baseline.
+- macOS has a verified Apple-runtime path.
+- Windows `CLANG64` is available as a preview path, not the primary production target.
+- Current status, roadmap history, and milestone detail live in [docs/STATUS.md](docs/STATUS.md) and the `docs/PHASE*_ROADMAP.md` files.
 
 ## Requirements and Setup Details
 
 If you are evaluating Arlen rather than contributing to the framework itself,
 the quick start above plus the example apps and docs index are usually enough
 for a first pass. The rest of this section covers the more detailed local
-toolchain and quality-gate workflow.
+toolchain and contributor workflow.
 
 Prerequisites:
 - clang-built GNUstep toolchain installed
@@ -227,13 +189,10 @@ Run bootstrap diagnostics before building:
 ./bin/arlen doctor
 ```
 
-CI note:
+Contributor and CI notes:
 - Arlen CI expects a clang-built GNUstep toolchain, not a generic GCC-oriented distro stack.
 - The workflow bootstrap entry point is `tools/ci/install_ci_dependencies.sh`.
-- The current documented required checks for `main` are:
-  - `linux-quality / quality-gate`
-  - `linux-sanitizers / sanitizer-gate`
-  - `docs-quality / docs-gate`
+- The current documented required checks for `main` are `linux-quality / quality-gate`, `linux-sanitizers / sanitizer-gate`, and `docs-quality / docs-gate`.
 - Apple and Windows CI lanes are intentionally visible but non-required while
   Linux/GNUstep remains the authoritative production baseline.
 - Release certification is intentionally isolated in
