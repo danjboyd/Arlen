@@ -139,6 +139,11 @@ Supported directives are covered in [Section 7](#7-directive-reference).
 EOC uses sigil locals so controller-provided values read naturally in
 templates.
 
+The `$` prefix is deliberate. In Objective-C, `user.profile.email` already looks
+like normal in-scope code. EOC uses the sigil to mark render-context lookup
+explicitly so templates can distinguish controller-provided locals from ordinary
+Objective-C variables, ivars, methods, and temporaries.
+
 ### 4.1 Syntax
 
 - `$identifier`
@@ -175,7 +180,42 @@ At render time, EOC resolves sigil locals deterministically:
 This means the same sigil form works against common Foundation containers and
 Objective-C objects.
 
-### 4.3 Where Sigil Locals Work
+### 4.3 Why EOC Uses A Sigil
+
+The sigil is a disambiguation marker, not a new control-flow language.
+
+- `$user` means "look up `user` from the current render context"
+- `user` means "use the normal Objective-C variable named `user` if one exists"
+
+Without the sigil, EOC would have to guess whether `user.profile.email` was:
+
+- a render-context lookup
+- an Objective-C local variable or ivar
+- a method result
+- invalid code that should fail at compile time
+
+The sigil keeps that boundary explicit and gives the transpiler a deterministic
+rewrite target such as `ALNEOCLocal(...)` or `ALNEOCLocalPath(...)`. It also
+improves diagnostics because missing locals can be reported as template-context
+errors instead of generic Objective-C failures.
+
+Example:
+
+```html
+<%
+id user = @{ @"name" : @"Debug Override" };
+%>
+
+<p>Context user: <%= $user.name %></p>
+<p>Local variable user: <%= [user objectForKey:@"name"] %></p>
+```
+
+In that template:
+
+- `$user` comes from the controller or caller render context
+- `user` comes from the Objective-C local declared in the `<% ... %>` block
+
+### 4.4 Where Sigil Locals Work
 
 Sigil locals can be used anywhere an Objective-C expression is valid inside EOC
 code or output tags.
@@ -190,7 +230,7 @@ Examples:
 <% } %>
 ```
 
-### 4.4 What Sigil Locals Are Not
+### 4.5 What Sigil Locals Are Not
 
 Sigil locals are not a second language inside EOC. They are shorthand for
 render-context lookup inside otherwise normal Objective-C expressions.

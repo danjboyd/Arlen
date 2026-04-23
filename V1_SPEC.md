@@ -46,6 +46,12 @@ Supported tags:
 
 EOC supports sigil locals so controller-provided values feel in-scope in templates.
 
+The sigil is required so render-context lookup is visually and semantically
+distinct from ordinary Objective-C identifiers. For example, `$user.profile.email`
+unambiguously means "resolve this keypath from template context," while
+`user.profile.email` remains normal Objective-C syntax and may refer to a local
+variable, ivar, method result, or invalid code.
+
 - `$identifier` resolves to a local value from render context.
 - `$identifier(.identifier)*` resolves a dotted keypath from render context.
 - Identifier segment format: `[A-Za-z_][A-Za-z0-9_]*`.
