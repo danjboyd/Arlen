@@ -36,6 +36,7 @@ toolchain env directly for the Linux/GNUstep path. On macOS, use
 
 - [Getting Started: API-First Track](GETTING_STARTED_API_FIRST.md): JSON APIs, schema/auth contracts, and OpenAPI.
 - [Getting Started: HTML-First Track](GETTING_STARTED_HTML_FIRST.md): server-rendered EOC templates, layouts, and forms.
+- [EOC Guide](EOC_GUIDE.md): comprehensive syntax and authoring guide for `.html.eoc` templates.
 - [Live UI Guide](LIVE_UI.md): fragment-first live responses, `/arlen/live.js`, keyed collections, live regions, live forms/links, and realtime push updates.
 - [Durable Event Streams](EVENT_STREAMS.md): durable append/replay, websocket/SSE/poll consumption, auth hooks, and the plain generated TypeScript stream client.
 - [Core Concepts](CORE_CONCEPTS.md): runtime architecture and request lifecycle.

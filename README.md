@@ -20,6 +20,7 @@ If you are new to Arlen, start with:
 - `docs/FIRST_APP_GUIDE.md`
 - `docs/GETTING_STARTED.md`
 - `docs/GETTING_STARTED_TRACKS.md`
+- `docs/EOC_GUIDE.md` if you are building server-rendered pages with EOC
 - `docs/APP_AUTHORING_GUIDE.md`
 - `docs/LITE_MODE_GUIDE.md`
 - `docs/README.md`

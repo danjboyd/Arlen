@@ -72,6 +72,9 @@ make transpile
 
 The direct `eocc` workflow supports manifest-backed incremental reuse/removal accounting and optional custom logical-path prefixes/registry output when you are debugging app or module template trees.
 
+For the full template language reference, composition syntax, escaping rules,
+strict modes, and authoring patterns, start with `docs/EOC_GUIDE.md`.
+
 For API-level details see:
 
 - [ALNEOCTranspiler](api/ALNEOCTranspiler.md)
