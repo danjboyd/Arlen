@@ -28,7 +28,9 @@
           "id": "index_html",
           "path": "/index.html",
           "expectedStatus": 200,
-          "contains": "Phase 37 acceptance harness"
+          "contains": "Phase 37 acceptance harness",
+          "notContains": "unexpected failure marker",
+          "bodyRegex": "<h1>Phase 37 acceptance harness</h1>"
         },
         {
           "id": "status_json",
@@ -166,6 +168,12 @@
           "headers": {
             "location": "/items/1",
             "set-cookie": "phase37_session=ok; Path=/; HttpOnly"
+          },
+          "cookieAttributes": {
+            "phase37_session": [
+              "Path=/",
+              "HttpOnly"
+            ]
           }
         },
         {
@@ -338,7 +346,15 @@
             "\"order\": \"id\"",
             "\"name\": \"alpha\"",
             "\"name\": \"beta\""
-          ]
+          ],
+          "orderedContains": [
+            "\"name\": \"alpha\"",
+            "\"name\": \"beta\""
+          ],
+          "jsonPathEquals": {
+            "records.0.name": "alpha",
+            "records.1.name": "beta"
+          }
         },
         {
           "id": "primary_key_hydration",
@@ -453,7 +469,8 @@
           ],
           "headers": {
             "content-type": "text/event-stream"
-          }
+          },
+          "headerPresent": "content-type"
         },
         {
           "id": "auth_expiry",
@@ -521,6 +538,10 @@
             "\"server\": \"boomhauer\"",
             "\"propaneAccessories\""
           ],
+          "jsonPathEquals": {
+            "propaneAccessories.environment": "test",
+            "checks.3": "jobs-worker"
+          },
           "jsonEquals": {
             "releaseId": "phase37-packaged-fixture",
             "runtime": "packaged"
@@ -581,6 +602,66 @@
           "contains": "deploy_runtime"
         }
       ]
+    },
+    {
+      "id": "eoc_kitchen_sink_runtime",
+      "mode": "runtime",
+      "serviceBacked": true,
+      "runtimeVariantOf": "eoc_kitchen_sink",
+      "description": "Opt-in real Arlen runtime variant for the EOC kitchen sink site. Planned by 37M.",
+      "requiredEnvironment": [
+        "ARLEN_PHASE37_RUNTIME_EOC_APP"
+      ],
+      "port": 37381,
+      "probes": []
+    },
+    {
+      "id": "mvc_crud_runtime",
+      "mode": "runtime",
+      "serviceBacked": true,
+      "runtimeVariantOf": "mvc_crud",
+      "description": "Opt-in real Arlen runtime variant for the MVC CRUD site. Planned by 37M.",
+      "requiredEnvironment": [
+        "ARLEN_PHASE37_RUNTIME_MVC_APP"
+      ],
+      "port": 37382,
+      "probes": []
+    },
+    {
+      "id": "module_portal_runtime",
+      "mode": "runtime",
+      "serviceBacked": true,
+      "runtimeVariantOf": "module_portal",
+      "description": "Opt-in real Arlen runtime variant for the module portal site. Planned by 37M.",
+      "requiredEnvironment": [
+        "ARLEN_PHASE37_RUNTIME_MODULE_APP"
+      ],
+      "port": 37383,
+      "probes": []
+    },
+    {
+      "id": "live_ui_reference_runtime",
+      "mode": "runtime",
+      "serviceBacked": true,
+      "runtimeVariantOf": "live_ui_reference",
+      "description": "Opt-in real Arlen runtime variant for the live UI reference site. Planned by 37M.",
+      "requiredEnvironment": [
+        "ARLEN_PHASE37_RUNTIME_LIVE_APP"
+      ],
+      "port": 37384,
+      "probes": []
+    },
+    {
+      "id": "packaged_deploy_runtime",
+      "mode": "runtime",
+      "serviceBacked": true,
+      "runtimeVariantOf": "packaged_deploy",
+      "description": "Opt-in actual generated packaged release proof. Planned by 37R.",
+      "requiredEnvironment": [
+        "ARLEN_PHASE37_RUNTIME_PACKAGED_APP"
+      ],
+      "port": 37385,
+      "probes": []
     }
   ]
 }

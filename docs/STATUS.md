@@ -4,6 +4,15 @@ Last updated: 2026-04-24
 
 ## Leaving Off (2026-04-24)
 
+- Delivered Phase 37M-37P validation-depth follow-up:
+  - added fast/runtime acceptance modes with `make phase37-acceptance-fast`
+    and `make phase37-acceptance-runtime`
+  - added runtime-variant manifest slots for EOC, MVC, module portal, live UI,
+    and packaged deploy surfaces
+  - added executable EOC golden assertions through
+    `tools/ci/check_phase37_eoc_golden.py` and `make phase37-eoc-golden`
+  - deepened acceptance harness assertions with negative self-tests and wired
+    them into `make phase37-confidence`
 - Added planned Phase 37 validation-depth follow-up subphases:
   - `37M-37S` cover real-runtime acceptance variants, dual-mode acceptance
     manifests, executable EOC golden render assertions, deeper harness

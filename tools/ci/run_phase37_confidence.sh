@@ -7,11 +7,16 @@ output_dir="${ARLEN_PHASE37_OUTPUT_DIR:-$repo_root/build/release_confidence/phas
 mkdir -p "$output_dir"
 
 ARLEN_PHASE37_OUTPUT_DIR="$output_dir" bash "$repo_root/tools/ci/run_phase37_contract.sh"
-ARLEN_PHASE37_ACCEPTANCE_OUTPUT_DIR="$output_dir/acceptance" bash "$repo_root/tools/ci/run_phase37_acceptance.sh"
+python3 "$repo_root/tools/ci/test_phase37_acceptance_assertions.py" \
+  >"$output_dir/acceptance_assertion_selftest.log"
+ARLEN_PHASE37_ACCEPTANCE_MODE="${ARLEN_PHASE37_ACCEPTANCE_MODE:-fast}" \
+  ARLEN_PHASE37_ACCEPTANCE_OUTPUT_DIR="$output_dir/acceptance" \
+  bash "$repo_root/tools/ci/run_phase37_acceptance.sh"
 
 python3 "$repo_root/tools/ci/generate_phase37_confidence_artifacts.py" \
   --output-dir "$output_dir" \
   --contract-summary "$output_dir/contract_summary.json" \
+  --eoc-golden-summary "$output_dir/eoc_golden_summary.json" \
   --acceptance-manifest "$output_dir/acceptance/manifest.json"
 
 echo "ci: phase37 confidence gate complete"

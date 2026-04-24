@@ -182,6 +182,28 @@ def validate_parser_protocol_corpus(repo_root: Path, errors: list[str]) -> dict[
     return payload
 
 
+def validate_acceptance_manifest(repo_root: Path, errors: list[str]) -> dict[str, Any]:
+    path = repo_root / "tests/fixtures/phase37/acceptance_sites.json"
+    payload = load_json(path)
+    sites = payload.get("sites")
+    require(isinstance(sites, list), errors, "acceptance manifest sites must be a list")
+    runtime_variants = {
+        site.get("runtimeVariantOf")
+        for site in sites if isinstance(site, dict) and site.get("mode") == "runtime"
+    } if isinstance(sites, list) else set()
+    for required in {
+        "eoc_kitchen_sink",
+        "mvc_crud",
+        "module_portal",
+        "live_ui_reference",
+        "packaged_deploy",
+    }:
+        require(required in runtime_variants,
+                errors,
+                f"acceptance manifest missing runtime variant for {required}")
+    return payload
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Validate Phase 37 contract fixtures")
     parser.add_argument("--repo-root", required=True)
@@ -193,6 +215,7 @@ def main() -> int:
     contract = validate_public_surface_contract(repo_root, errors)
     golden = validate_eoc_golden_cases(repo_root, errors)
     corpus = validate_parser_protocol_corpus(repo_root, errors)
+    acceptance = validate_acceptance_manifest(repo_root, errors)
 
     summary = {
         "version": "phase37-contract-check-v1",
@@ -201,6 +224,7 @@ def main() -> int:
         "golden_case_count": len(golden.get("cases", [])),
         "template_parser_case_count": len(corpus.get("templateParserCases", [])),
         "http_protocol_case_count": len(corpus.get("httpProtocolCases", [])),
+        "acceptance_site_count": len(acceptance.get("sites", [])),
         "errors": errors,
     }
     if args.output:

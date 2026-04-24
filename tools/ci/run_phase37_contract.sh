@@ -9,4 +9,8 @@ python3 "$repo_root/tools/ci/check_phase37_contract.py" \
   --repo-root "$repo_root" \
   --output "$output_dir/contract_summary.json"
 
+python3 "$repo_root/tools/ci/check_phase37_eoc_golden.py" \
+  --repo-root "$repo_root" \
+  --output "$output_dir/eoc_golden_summary.json"
+
 echo "ci: phase37 contract gate complete"

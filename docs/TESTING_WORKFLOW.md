@@ -45,6 +45,15 @@ Phase 37 public-release confidence lanes are available:
   - runs the acceptance-site harness against the checked-in Phase 37 manifest
     using deterministic ports, isolated logs, HTTP probes, JSON assertions, and
     static checks
+- `make phase37-acceptance-fast`
+  - runs only the default service-free fixture-backed acceptance sites
+- `make phase37-acceptance-runtime`
+  - runs runtime-mode acceptance entries; these are service-backed/opt-in until
+    their real Arlen app variants are implemented
+- `make phase37-eoc-golden`
+  - executes the Phase 37 EOC golden render/diagnostic fixture assertions
+- `make phase37-harness-selftest`
+  - runs negative and positive self-tests for acceptance harness assertions
 - `make phase37-confidence`
   - runs the Phase 37 contract and acceptance lanes and writes artifacts under
     `build/release_confidence/phase37/`
@@ -308,3 +317,8 @@ To add or update a Phase 37 acceptance probe:
    `serviceBacked`.
 4. Run `make phase37-acceptance`.
 5. Run `make phase37-confidence` before closeout or release-candidate review.
+
+Use runtime-mode entries for real Arlen app variants and keep fixture-backed
+entries in fast mode. Do not move runtime-mode entries into the default lane
+without updating CI alignment and branch-protection guidance in the same
+change.

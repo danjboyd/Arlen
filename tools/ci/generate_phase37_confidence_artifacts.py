@@ -27,19 +27,26 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Generate Phase 37 confidence artifacts")
     parser.add_argument("--output-dir", default="build/release_confidence/phase37")
     parser.add_argument("--contract-summary", default="build/release_confidence/phase37/contract_summary.json")
+    parser.add_argument("--eoc-golden-summary", default="build/release_confidence/phase37/eoc_golden_summary.json")
     parser.add_argument("--acceptance-manifest", default="build/release_confidence/phase37/acceptance/manifest.json")
     args = parser.parse_args()
 
     output_dir = Path(args.output_dir).resolve()
     contract = load_json(Path(args.contract_summary).resolve())
+    eoc_golden = load_json(Path(args.eoc_golden_summary).resolve())
     acceptance = load_json(Path(args.acceptance_manifest).resolve())
+    assertion_log = output_dir / "acceptance_assertion_selftest.log"
     generated_at = datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
     checks = {
         "public_surface_contract": contract.get("status") == "pass",
         "eoc_golden_catalog": contract.get("golden_case_count", 0) >= 4,
+        "eoc_golden_execution": eoc_golden.get("status") == "pass"
+        and eoc_golden.get("case_count", 0) >= 4,
         "parser_protocol_corpus": contract.get("template_parser_case_count", 0) >= 4
         and contract.get("http_protocol_case_count", 0) >= 4,
         "acceptance_harness": acceptance.get("status") == "pass",
+        "acceptance_assertion_selftest": assertion_log.exists()
+        and "assertion self-tests passed" in assertion_log.read_text(encoding="utf-8"),
         "acceptance_sites_37e_37j": {
             "eoc_kitchen_sink",
             "mvc_crud",
@@ -60,6 +67,7 @@ def main() -> int:
         "status": status,
         "checks": checks,
         "contract_summary": str(Path(args.contract_summary)),
+        "eoc_golden_summary": str(Path(args.eoc_golden_summary)),
         "acceptance_manifest": str(Path(args.acceptance_manifest)),
     }
     write_json(output_dir / "phase37_confidence_eval.json", eval_payload)
@@ -72,8 +80,10 @@ def main() -> int:
         "Checks:",
         f"- public surface contract: `{checks['public_surface_contract']}`",
         f"- EOC golden catalog: `{checks['eoc_golden_catalog']}`",
+        f"- EOC golden execution: `{checks['eoc_golden_execution']}`",
         f"- parser/protocol corpus: `{checks['parser_protocol_corpus']}`",
         f"- acceptance harness: `{checks['acceptance_harness']}`",
+        f"- acceptance assertion self-test: `{checks['acceptance_assertion_selftest']}`",
         f"- acceptance sites 37E-37J: `{checks['acceptance_sites_37e_37j']}`",
         "",
         "Focused entrypoints:",
@@ -90,7 +100,9 @@ def main() -> int:
         "status": status,
         "artifacts": [
             "contract_summary.json",
+            "eoc_golden_summary.json",
             "acceptance/manifest.json",
+            "acceptance_assertion_selftest.log",
             "phase37_confidence_eval.json",
             "phase37_confidence.md",
         ],

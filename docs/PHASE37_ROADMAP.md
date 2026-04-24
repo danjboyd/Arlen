@@ -1,6 +1,6 @@
 # Phase 37 Roadmap
 
-Status: complete for original scope; 37A-37L delivered 2026-04-24; 37M-37S planned validation-depth follow-up
+Status: validation-depth follow-up in progress; 37A-37P delivered 2026-04-24; 37Q-37S planned
 Last updated: 2026-04-24
 
 ## Goal
@@ -462,7 +462,7 @@ Arlen runtime instead of fixture servers alone.
 
 ## 37M. Real Runtime Acceptance Site Variants
 
-Status: planned.
+Status: delivered 2026-04-24.
 
 Goal:
 
@@ -486,9 +486,16 @@ Acceptance:
 - Phase 37 can distinguish fixture contract coverage from real Arlen runtime
   acceptance coverage
 
+Delivered artifacts:
+
+- runtime-mode acceptance entries in `tests/fixtures/phase37/acceptance_sites.json`
+- `runtimeVariantOf` metadata for EOC, MVC, module portal, live UI, and
+  packaged deploy surfaces
+- `make phase37-contract` validates runtime variant coverage
+
 ## 37N. Dual-Mode Acceptance Manifest
 
-Status: planned.
+Status: delivered 2026-04-24.
 
 Goal:
 
@@ -512,9 +519,17 @@ Acceptance:
 - developers can run a quick local contract check and release reviewers can run
   deeper runtime evidence without changing the fixture manifest by hand
 
+Delivered artifacts:
+
+- `make phase37-acceptance-fast`
+- `make phase37-acceptance-runtime`
+- `make phase37-acceptance` remains mapped to the fast service-free lane
+- acceptance manifests record execution mode and skipped runtime/service-backed
+  sites
+
 ## 37O. Executable EOC Golden Render Assertions
 
-Status: planned.
+Status: delivered 2026-04-24.
 
 Goal:
 
@@ -536,9 +551,16 @@ Acceptance:
 - EOC golden cases prove actual parser, codegen, runtime, escaping, strict mode,
   and diagnostic behavior
 
+Delivered artifacts:
+
+- `tools/ci/check_phase37_eoc_golden.py`
+- `make phase37-eoc-golden`
+- `make phase37-contract` runs executable golden assertions and writes
+  `build/release_confidence/phase37/eoc_golden_summary.json`
+
 ## 37P. Acceptance Harness Assertion Depth
 
-Status: planned.
+Status: delivered 2026-04-24.
 
 Goal:
 
@@ -560,6 +582,18 @@ Acceptance:
 
 - acceptance probes can express real browser/API expectations without fragile
   ad hoc string checks
+
+Delivered artifacts:
+
+- `notContains`
+- `jsonPathEquals`
+- `bodyRegex`
+- `headerPresent`
+- `headerRegex`
+- `orderedContains`
+- `cookieAttributes`
+- `tools/ci/test_phase37_acceptance_assertions.py`
+- `make phase37-harness-selftest`
 
 ## 37Q. Regression Intake Enforcement
 

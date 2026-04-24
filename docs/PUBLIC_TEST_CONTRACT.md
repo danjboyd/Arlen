@@ -50,6 +50,13 @@ Run the acceptance harness:
 make phase37-acceptance
 ```
 
+Run the explicit fast or runtime acceptance modes:
+
+```sh
+make phase37-acceptance-fast
+make phase37-acceptance-runtime
+```
+
 Generate the current Phase 37 evidence pack:
 
 ```sh
@@ -78,6 +85,11 @@ These sites prove integration contracts and user workflows. They do not replace
 focused unit/regression tests, live adapter tests, or the Phase 31/32/36 deploy
 confidence lanes that exercise packaged deployment behavior more deeply.
 
+Runtime-mode entries in `tests/fixtures/phase37/acceptance_sites.json` reserve
+the real Arlen app variants. They are service-backed and opt-in until the
+corresponding generated/runtime apps are stable enough for release
+certification.
+
 ## Regression Intake
 
 When fixing a public bug:
@@ -93,3 +105,7 @@ For acceptance probes, edit `tests/fixtures/phase37/acceptance_sites.json`.
 Prefer service-free fixture behavior by default; mark a site `serviceBacked`
 only when it requires an explicit external dependency and document the required
 environment variables next to the site.
+
+The harness supports `contains`, `notContains`, `orderedContains`, `bodyRegex`,
+`headers`, `headerPresent`, `headerRegex`, `jsonEquals`, `jsonPathEquals`, and
+`cookieAttributes`.
