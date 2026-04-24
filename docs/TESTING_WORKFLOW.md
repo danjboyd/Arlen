@@ -36,6 +36,19 @@ Use the smallest lane that honestly exercises the bug:
 - `make phase21-confidence`
   - run the focused lanes and regenerate `build/release_confidence/phase21/`
 
+Phase 37 public-release confidence lanes are available:
+
+- `make phase37-contract`
+  - validates the public surface matrix, EOC golden-render catalog, and
+    deterministic parser/protocol corpus
+- `make phase37-acceptance`
+  - runs the acceptance-site harness against the checked-in Phase 37 manifest
+    using deterministic ports, isolated logs, HTTP probes, JSON assertions, and
+    static checks
+- `make phase37-confidence`
+  - runs the Phase 37 contract and acceptance lanes and writes artifacts under
+    `build/release_confidence/phase37/`
+
 Phase 20 data-layer-focused lanes remain available:
 
 - `make phase20-sql-builder-tests`
@@ -119,8 +132,14 @@ Windows-focused preview lanes:
      `tests/unit/TemplateSecurityTests.m`
    - fixed downstream template bugs:
      `tests/unit/TemplateRegressionTests.m`
+   - Phase 37 EOC golden-render coverage:
+     `tests/fixtures/phase37/eoc_golden_render_cases.json`
+   - Phase 37 public-surface coverage:
+     `tests/fixtures/phase37/public_surface_contract.json`
    - raw protocol framing / parser behavior:
      `tests/fixtures/protocol/phase21_protocol_corpus.json`
+   - Phase 37 deterministic parser/protocol corpus expansion:
+     `tests/fixtures/phase37/parser_protocol_corpus.json`
    - generated-app setup/config/module issues:
      `tests/fixtures/phase21/generated_app_matrix.json`
    - Dataverse runtime/config regressions:
@@ -167,6 +186,8 @@ Windows-focused preview lanes:
      `tests/integration/HTTPIntegrationTests.m`
    - deployment/release packaging regressions:
      `tests/integration/DeploymentIntegrationTests.m`
+   - cross-surface acceptance behavior:
+     `tests/fixtures/phase37/acceptance_sites.json`
 3. Add or extend a checked-in fixture so the failure is replayable.
 4. Run the matching focused lane until it passes.
    - for SQL ORM runtime bugs that depend on a real PostgreSQL insert/update
@@ -264,3 +285,16 @@ make phase25-confidence
 The Phase 25 suite now includes a Node-backed executable runtime harness for
 `/arlen/live.js` semantics, focused stream/adversarial suites, and confidence
 artifacts for both push-path and negative-path live behavior.
+
+Phase 37 public-release confidence uses:
+
+```bash
+make phase37-contract
+make phase37-acceptance
+make phase37-confidence
+```
+
+Artifacts are written to `build/release_confidence/phase37/`. The default
+acceptance manifest is service-free; set `ARLEN_PHASE37_INCLUDE_SERVICE_BACKED=1`
+only when a later acceptance site explicitly documents required external
+services.

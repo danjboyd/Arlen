@@ -1,0 +1,2 @@
+<p>Literal text may mention &lt;%= not_a_tag %&gt; without opening a parser tag.</p>
+<p><%= $title %></p>

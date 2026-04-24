@@ -1,0 +1,327 @@
+{
+  "version": "phase37-public-surface-contract-v1",
+  "lastUpdated": "2026-04-24",
+  "defaultReleaseGate": [
+    "make test-unit",
+    "make test-integration",
+    "make phase21-focused",
+    "make phase25-focused",
+    "make phase26-orm-tests",
+    "make phase37-contract",
+    "make phase37-acceptance",
+    "make ci-quality",
+    "make ci-sanitizers",
+    "make ci-docs"
+  ],
+  "surfaces": [
+    {
+      "id": "eoc_transpiler_runtime",
+      "name": "EOC transpiler/runtime",
+      "ownerArea": "template-core",
+      "releaseLevel": "required",
+      "focusedEvidence": [
+        "tests/unit/TemplateParserTests.m",
+        "tests/unit/TemplateCodegenTests.m",
+        "tests/unit/TemplateRegressionTests.m",
+        "tests/unit/RuntimeTests.m"
+      ],
+      "integrationEvidence": [
+        "tests/integration/DeploymentIntegrationTests.m:testSmokeRenderOutputsComposedLayoutPartialsAndEscapedItems",
+        "tests/fixtures/phase37/eoc_golden_render_cases.json"
+      ],
+      "optionalLiveEvidence": [],
+      "requiredLanes": [
+        "make phase21-template-tests",
+        "make phase37-contract"
+      ],
+      "acceptanceCoverage": [
+        "37E:eoc_kitchen_sink"
+      ]
+    },
+    {
+      "id": "mvc_controller_routing",
+      "name": "View/controller/routing",
+      "ownerArea": "mvc-core",
+      "releaseLevel": "required",
+      "focusedEvidence": [
+        "tests/unit/ControllerTests.m",
+        "tests/unit/ViewTests.m",
+        "tests/unit/RouterTests.m",
+        "tests/unit/ApplicationTests.m"
+      ],
+      "integrationEvidence": [
+        "tests/integration/HTTPIntegrationTests.m"
+      ],
+      "optionalLiveEvidence": [],
+      "requiredLanes": [
+        "make test-unit",
+        "make test-integration"
+      ],
+      "acceptanceCoverage": [
+        "37F:mvc_crud"
+      ]
+    },
+    {
+      "id": "http_protocol",
+      "name": "HTTP server and protocol parsing",
+      "ownerArea": "runtime-core",
+      "releaseLevel": "required",
+      "focusedEvidence": [
+        "tests/unit/RequestTests.m",
+        "tests/unit/ResponseTests.m",
+        "tests/fixtures/protocol/phase21_protocol_corpus.json",
+        "tests/fixtures/phase37/parser_protocol_corpus.json"
+      ],
+      "integrationEvidence": [
+        "tests/integration/HTTPIntegrationTests.m"
+      ],
+      "optionalLiveEvidence": [
+        "tools/ci/run_phase10m_protocol_adversarial.sh",
+        "tools/ci/run_phase11_protocol_fuzz.sh"
+      ],
+      "requiredLanes": [
+        "make phase21-protocol-tests",
+        "make phase37-contract"
+      ],
+      "acceptanceCoverage": [
+        "37D:acceptance_harness",
+        "37F:mvc_crud"
+      ]
+    },
+    {
+      "id": "middleware_security",
+      "name": "Middleware, security headers, sessions, CSRF, rate limits, and route policy",
+      "ownerArea": "security-runtime",
+      "releaseLevel": "required",
+      "focusedEvidence": [
+        "tests/unit/MiddlewareTests.m",
+        "tests/unit/Phase14GTests.m",
+        "tests/unit/ConfigTests.m"
+      ],
+      "integrationEvidence": [
+        "tests/integration/HTTPIntegrationTests.m",
+        "tests/integration/Phase13AuthAdminIntegrationTests.m"
+      ],
+      "optionalLiveEvidence": [],
+      "requiredLanes": [
+        "make test-unit",
+        "make test-integration",
+        "make phase35-confidence"
+      ],
+      "acceptanceCoverage": [
+        "37F:mvc_crud",
+        "37G:module_portal"
+      ]
+    },
+    {
+      "id": "cli_generated_apps",
+      "name": "CLI and generated app scaffolds",
+      "ownerArea": "developer-experience",
+      "releaseLevel": "required",
+      "focusedEvidence": [
+        "tests/unit/BuildPolicyTests.m",
+        "tests/fixtures/phase21/generated_app_matrix.json"
+      ],
+      "integrationEvidence": [
+        "tests/integration/DeploymentIntegrationTests.m"
+      ],
+      "optionalLiveEvidence": [],
+      "requiredLanes": [
+        "make phase21-generated-app-tests",
+        "make test-integration"
+      ],
+      "acceptanceCoverage": [
+        "37J:packaged_deploy"
+      ]
+    },
+    {
+      "id": "first_party_modules",
+      "name": "First-party modules",
+      "ownerArea": "modules",
+      "releaseLevel": "required",
+      "focusedEvidence": [
+        "tests/unit/Phase13ATests.m",
+        "tests/unit/Phase14ATests.m",
+        "tests/unit/Phase16ATests.m",
+        "tests/unit/Phase27SearchTests.m"
+      ],
+      "integrationEvidence": [
+        "tests/integration/Phase13ModuleIntegrationTests.m",
+        "tests/integration/Phase13AuthAdminIntegrationTests.m",
+        "tests/integration/Phase14JobsNotificationsIntegrationTests.m",
+        "tests/integration/Phase14SearchIntegrationTests.m",
+        "tests/integration/Phase14StorageIntegrationTests.m",
+        "tests/integration/Phase14OpsIntegrationTests.m",
+        "tests/integration/Phase16ModuleIntegrationTests.m"
+      ],
+      "optionalLiveEvidence": [],
+      "requiredLanes": [
+        "make test-unit",
+        "make test-integration"
+      ],
+      "acceptanceCoverage": [
+        "37G:module_portal"
+      ]
+    },
+    {
+      "id": "data_orm_dataverse",
+      "name": "Data adapters, SQL builder, migrations, ORM, and Dataverse",
+      "ownerArea": "data-core",
+      "releaseLevel": "required",
+      "focusedEvidence": [
+        "tests/unit/DataverseRuntimeTests.m",
+        "tests/unit/DataverseQueryTests.m",
+        "tests/unit/DataverseReadTests.m",
+        "tests/unit/DataverseWriteTests.m",
+        "tests/unit/ORMRuntimeTests.m",
+        "tests/unit/ORMCodegenTests.m",
+        "tests/unit/ORMMigrationTests.m",
+        "tests/unit/ORMBackendParityTests.m",
+        "tests/phase20/Phase20SQLBuilderFocusedTests.m",
+        "tests/phase20/Phase20SchemaFocusedTests.m"
+      ],
+      "integrationEvidence": [
+        "tests/integration/PostgresIntegrationTests.m"
+      ],
+      "optionalLiveEvidence": [
+        "ARLEN_PG_TEST_DSN",
+        "ARLEN_MSSQL_TEST_DSN",
+        "ARLEN_PHASE23_DATAVERSE_*"
+      ],
+      "requiredLanes": [
+        "make phase20-focused",
+        "make phase23-dataverse-tests",
+        "make phase26-orm-tests"
+      ],
+      "acceptanceCoverage": [
+        "37H:data_orm_reference"
+      ]
+    },
+    {
+      "id": "live_realtime",
+      "name": "Live UI and realtime",
+      "ownerArea": "live-runtime",
+      "releaseLevel": "required",
+      "focusedEvidence": [
+        "tests/unit/LiveProtocolTests.m",
+        "tests/unit/LiveControllerTests.m",
+        "tests/unit/LiveRuntimeTests.m",
+        "tests/unit/LiveRuntimeDOMTests.m",
+        "tests/unit/LiveRuntimeInteractionTests.m",
+        "tests/unit/LiveRuntimeStreamTests.m",
+        "tests/unit/LiveAdversarialTests.m",
+        "tests/fixtures/phase25/live_adversarial_cases.json"
+      ],
+      "integrationEvidence": [
+        "tests/integration/HTTPIntegrationTests.m"
+      ],
+      "optionalLiveEvidence": [
+        "tools/ci/run_phase11_live_adversarial.sh"
+      ],
+      "requiredLanes": [
+        "make phase25-live-tests"
+      ],
+      "acceptanceCoverage": [
+        "37I:live_ui_reference"
+      ]
+    },
+    {
+      "id": "typescript_client_generation",
+      "name": "TypeScript/client generation",
+      "ownerArea": "client-generation",
+      "releaseLevel": "required",
+      "focusedEvidence": [
+        "tests/unit/ORMTypeScriptCodegenTests.m",
+        "tests/typescript/unit/client_runtime.test.ts",
+        "tests/typescript/unit/contract_parity.test.ts",
+        "tests/typescript/unit/generated_snapshot.test.ts",
+        "tests/typescript/unit/realtime_client.test.ts"
+      ],
+      "integrationEvidence": [
+        "tests/typescript/integration/live_contract.test.ts",
+        "examples/phase28_reference"
+      ],
+      "optionalLiveEvidence": [],
+      "requiredLanes": [
+        "make phase28-ts-unit",
+        "make phase28-ts-generated",
+        "make phase28-ts-integration"
+      ],
+      "acceptanceCoverage": [
+        "37I:live_ui_reference"
+      ]
+    },
+    {
+      "id": "deploy_runtime",
+      "name": "Deploy, packaged release, boomhauer, jobs worker, and propane accessories",
+      "ownerArea": "deployment-runtime",
+      "releaseLevel": "required",
+      "focusedEvidence": [
+        "tests/unit/BuildPolicyTests.m",
+        "tests/integration/DeploymentIntegrationTests.m",
+        "tests/phase24/Phase24WindowsRuntimeParityTests.m"
+      ],
+      "integrationEvidence": [
+        "tools/ci/run_phase31_confidence.sh",
+        "tools/ci/run_phase32_confidence.sh",
+        "tools/ci/run_phase36_confidence.sh"
+      ],
+      "optionalLiveEvidence": [
+        "named remote SSH deploy target"
+      ],
+      "requiredLanes": [
+        "make phase31-confidence",
+        "make phase32-confidence",
+        "make phase36-confidence"
+      ],
+      "acceptanceCoverage": [
+        "37J:packaged_deploy"
+      ]
+    },
+    {
+      "id": "windows_preview",
+      "name": "Windows CLANG64 preview",
+      "ownerArea": "platform-preview",
+      "releaseLevel": "conditional",
+      "focusedEvidence": [
+        "tests/phase24/Phase24WindowsTransportSmokeTests.m",
+        "tests/phase24/Phase24WindowsRuntimeParityTests.m"
+      ],
+      "integrationEvidence": [
+        ".github/workflows/windows-preview.yml",
+        "docs/WINDOWS_CLANG64.md"
+      ],
+      "optionalLiveEvidence": [
+        "self-hosted Windows CLANG64 runner"
+      ],
+      "requiredLanes": [
+        "make phase24-windows-confidence"
+      ],
+      "acceptanceCoverage": [
+        "37J:packaged_deploy"
+      ]
+    },
+    {
+      "id": "apple_baseline",
+      "name": "Apple baseline",
+      "ownerArea": "platform-preview",
+      "releaseLevel": "conditional",
+      "focusedEvidence": [
+        "tools/test_apple.sh",
+        "tools/test_apple_xctest.sh",
+        "tools/build_apple.sh"
+      ],
+      "integrationEvidence": [
+        ".github/workflows/apple-baseline.yml",
+        "docs/APPLE_PLATFORM.md"
+      ],
+      "optionalLiveEvidence": [
+        "GitHub-hosted macos-15 runner"
+      ],
+      "requiredLanes": [
+        "apple-baseline workflow"
+      ],
+      "acceptanceCoverage": []
+    }
+  ]
+}

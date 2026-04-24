@@ -1,6 +1,6 @@
 # Phase 37 Roadmap
 
-Status: planned
+Status: in progress; 37A-37D delivered 2026-04-24
 Last updated: 2026-04-24
 
 ## Goal
@@ -55,7 +55,7 @@ make phase37-confidence
 
 ## 37A. Public Surface Test Contract Matrix
 
-Status: planned.
+Status: delivered 2026-04-24.
 
 Goal:
 
@@ -91,9 +91,15 @@ Acceptance:
   behavior
 - release reviewers can see whether a surface is uncovered, optional, or gated
 
+Delivered artifacts:
+
+- `docs/PUBLIC_TEST_CONTRACT.md`
+- `tests/fixtures/phase37/public_surface_contract.json`
+- `make phase37-contract`
+
 ## 37B. EOC Golden Render Regression Expansion
 
-Status: planned.
+Status: delivered 2026-04-24.
 
 Goal:
 
@@ -122,9 +128,15 @@ Acceptance:
   source drift
 - downstream template bugs can be reduced to a catalog entry plus golden output
 
+Delivered artifacts:
+
+- `tests/fixtures/phase37/eoc_golden_render_cases.json`
+- `tests/fixtures/templates/golden/`
+- Phase 37 contract validation for golden-render coverage
+
 ## 37C. Parser And Protocol Corpus Growth
 
-Status: planned.
+Status: delivered 2026-04-24.
 
 Goal:
 
@@ -149,9 +161,16 @@ Acceptance:
 - required CI replays a stable corpus
 - new parser failures can be captured as raw input plus expected diagnostic
 
+Delivered artifacts:
+
+- `tests/fixtures/phase37/parser_protocol_corpus.json`
+- new parser fixtures under `tests/fixtures/templates/parser/`
+- new protocol request seeds under `tests/fixtures/protocol/requests/`
+- Phase 37 contract validation for deterministic corpus shape
+
 ## 37D. Acceptance Site Harness
 
-Status: planned.
+Status: delivered 2026-04-24.
 
 Goal:
 
@@ -171,6 +190,14 @@ Acceptance:
 
 - every Phase 37 acceptance site can be exercised from one local command
 - failed probes identify the route, expected result, actual result, and log path
+
+Delivered artifacts:
+
+- `tools/ci/phase37_acceptance_harness.py`
+- `tests/fixtures/phase37/acceptance_sites.json`
+- `tests/acceptance/phase37_harness_site/`
+- `make phase37-acceptance`
+- `make phase37-confidence`
 
 ## 37E. EOC Kitchen Sink Site
 

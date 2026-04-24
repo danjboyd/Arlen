@@ -1,0 +1,5 @@
+<%@ requires title %>
+<%# comment with <% nested-looking marker %>
+<h1><%=
+  $title
+%></h1>

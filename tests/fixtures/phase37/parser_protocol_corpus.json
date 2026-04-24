@@ -1,0 +1,71 @@
+{
+  "version": "phase37-parser-protocol-corpus-v1",
+  "lastUpdated": "2026-04-24",
+  "templateParserCases": [
+    {
+      "id": "nested_looking_tag_literal",
+      "category": "valid",
+      "template": "tests/fixtures/templates/parser/valid/nested_looking_tag_literal.html.eoc",
+      "expectedDiagnostic": null
+    },
+    {
+      "id": "directive_comment_and_multiline_expression",
+      "category": "valid",
+      "template": "tests/fixtures/templates/parser/valid/directive_comment_multiline.html.eoc",
+      "expectedDiagnostic": null
+    },
+    {
+      "id": "invalid_sigil_keypath_middle_segment",
+      "category": "invalid",
+      "template": "tests/fixtures/templates/parser/invalid/phase37_invalid_sigil_keypath_middle.html.eoc",
+      "expectedDiagnostic": {
+        "code": "ALNEOCErrorTranspilerSyntax",
+        "line": 1,
+        "column": 4
+      }
+    },
+    {
+      "id": "unclosed_directive_at_eof",
+      "category": "invalid",
+      "template": "tests/fixtures/templates/parser/invalid/phase37_unclosed_directive_eof.html.eoc",
+      "expectedDiagnostic": {
+        "code": "ALNEOCErrorTranspilerSyntax"
+      }
+    }
+  ],
+  "httpProtocolCases": [
+    {
+      "id": "phase37_header_injection_attempt",
+      "category": "invalid",
+      "requestPath": "tests/fixtures/protocol/requests/invalid/header_injection_attempt.http",
+      "expectedStatus": 400,
+      "backend": "llhttp,legacy"
+    },
+    {
+      "id": "phase37_body_shorter_than_content_length",
+      "category": "invalid",
+      "requestPath": "tests/fixtures/protocol/requests/invalid/body_shorter_than_content_length.http",
+      "expectedStatus": 400,
+      "backend": "llhttp,legacy"
+    },
+    {
+      "id": "phase37_keep_alive_boundary",
+      "category": "pipelining",
+      "requestPath": "tests/fixtures/protocol/requests/pipelining/keep_alive_boundary.http",
+      "expectedStatus": 200,
+      "backend": "llhttp,legacy"
+    },
+    {
+      "id": "phase37_websocket_missing_upgrade",
+      "category": "websocket",
+      "requestPath": "tests/fixtures/protocol/requests/websocket/missing_upgrade.http",
+      "expectedStatus": 400,
+      "backend": "llhttp,legacy"
+    }
+  ],
+  "generator": {
+    "tool": "tools/ci/check_phase37_contract.py",
+    "mode": "validate-corpus",
+    "deterministic": true
+  }
+}

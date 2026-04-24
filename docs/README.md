@@ -71,6 +71,7 @@ toolchain env directly for the Linux/GNUstep path. On macOS, use
 - [Propane Manager](PROPANE.md): production process manager and propane accessories.
 - [Release Process](RELEASE_PROCESS.md): semantic versioning, deprecations, and release checklist.
 - [Testing Workflow](TESTING_WORKFLOW.md): focused contributor lanes for turning bug reports into regressions.
+- [Public Test Contract](PUBLIC_TEST_CONTRACT.md): Phase 37 public-surface release-confidence matrix and default evidence contract.
 - [Route Policies](ROUTE_POLICIES.md): named access policies, proxy-aware source IP allowlisting, `/admin` policy wiring, diagnostics, and confidence checks.
 - [Windows CLANG64 Preview](WINDOWS_CLANG64.md): current `main`-branch Windows bootstrap, packaged-release preview contract, and support statement.
 - [Platform Runner Runbook](PLATFORM_RUNNERS.md): Phase 34K Apple/Windows runner provisioning, labels, validation commands, and deferred package-manager boundary.
@@ -86,7 +87,7 @@ toolchain env directly for the Linux/GNUstep path. On macOS, use
 
 - [Current Status](STATUS.md): latest checkpoint and verified milestone state.
 - [CI Alignment](CI_ALIGNMENT.md): required CI shape, merge-gate guidance, and the rule that CI must stay current and green.
-- [Phase 37 Roadmap](PHASE37_ROADMAP.md): planned public-release test confidence phase covering a public-surface test contract matrix, expanded EOC golden-render regressions, deterministic parser/protocol corpora, acceptance-site harnesses, battle-test sites for EOC/MVC/modules/data/live/deploy surfaces, and `phase37-confidence`.
+- [Phase 37 Roadmap](PHASE37_ROADMAP.md): in-progress public-release test confidence phase; `37A-37D` delivered the public-surface test contract matrix, EOC golden-render catalog, deterministic parser/protocol corpus, acceptance-site harness, and `phase37-confidence` scaffolding.
 - [Phase 36 Roadmap](PHASE36_ROADMAP.md): completed deploy operator-UX phase; `36A-36L` delivered `deploy list`, `deploy dryrun`, release inventories, named-target release reuse, initialized-target guards, deploy config samples, `deploy target sample`, bash/PowerShell completion generation, completion safety coverage, docs refresh, and `phase36-confidence`.
 - [Phase 35 Roadmap](PHASE35_ROADMAP.md): completed route/middleware policy layer for named access policies, proxy-aware source IP allowlisting, `/admin` as the first consumer, and `phase35-confidence`; `35I-35M` add and close plist route definitions as a declarative registration surface over the existing router with route inspection source metadata.
 - [Phase 34 Roadmap](PHASE34_ROADMAP.md): completed CI-robustness phase covering workflow honesty, merge-gate cleanup, docs-gate promotion, branch-protection/release-lane cleanup, and platform-runner standardization.

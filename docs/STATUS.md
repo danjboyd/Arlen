@@ -4,6 +4,19 @@ Last updated: 2026-04-24
 
 ## Leaving Off (2026-04-24)
 
+- Delivered Phase 37A-37D for public-release test confidence:
+  - added `docs/PUBLIC_TEST_CONTRACT.md` and
+    `tests/fixtures/phase37/public_surface_contract.json` as the checked-in
+    public-surface release-confidence matrix
+  - added Phase 37 EOC golden-render fixtures and catalog coverage under
+    `tests/fixtures/phase37/eoc_golden_render_cases.json` and
+    `tests/fixtures/templates/golden/`
+  - added deterministic parser/protocol corpus expansion through
+    `tests/fixtures/phase37/parser_protocol_corpus.json`, parser fixtures, and
+    protocol request seeds
+  - added the Phase 37 acceptance harness, service-free self-check site, and
+    `make phase37-contract`, `make phase37-acceptance`, and
+    `make phase37-confidence`
 - Added planned Phase 37 for public-release test confidence:
   - next unused phase number is `37`
   - scoped `37A-37L` around a public-surface test contract matrix, expanded

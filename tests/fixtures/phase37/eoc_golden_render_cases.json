@@ -1,0 +1,95 @@
+{
+  "version": "phase37-eoc-golden-render-cases-v1",
+  "lastUpdated": "2026-04-24",
+  "cases": [
+    {
+      "id": "escaped_raw_nil_and_description_output",
+      "template": "tests/fixtures/templates/golden/escaped_raw_nil_and_description.html.eoc",
+      "context": {
+        "title": "A&B <C>",
+        "trusted": "<strong>ok</strong>",
+        "missing": null,
+        "count": 7
+      },
+      "expectedOutput": "tests/fixtures/templates/golden/expected/escaped_raw_nil_and_description.html",
+      "requiredCoverage": [
+        "escaped output",
+        "raw output",
+        "nil output",
+        "default stringify"
+      ]
+    },
+    {
+      "id": "keypath_layout_include_collection",
+      "template": "tests/fixtures/templates/golden/pages/profile.html.eoc",
+      "supportingTemplates": [
+        "tests/fixtures/templates/golden/layouts/application.html.eoc",
+        "tests/fixtures/templates/golden/partials/_badge.html.eoc",
+        "tests/fixtures/templates/golden/partials/_empty_badge.html.eoc"
+      ],
+      "context": {
+        "title": "Profile",
+        "user": {
+          "profile": {
+            "email": "dev@example.test"
+          }
+        },
+        "badges": [
+          "admin",
+          "billing"
+        ]
+      },
+      "expectedOutput": "tests/fixtures/templates/golden/expected/profile.html",
+      "requiredCoverage": [
+        "dotted keypath locals",
+        "layout",
+        "slot",
+        "include",
+        "collection render",
+        "overlay locals"
+      ]
+    },
+    {
+      "id": "strict_required_local_diagnostic",
+      "template": "tests/fixtures/templates/golden/requires_title.html.eoc",
+      "context": {},
+      "expectError": {
+        "domain": "ALNEOCErrorDomain",
+        "code": "ALNEOCErrorTemplateExecutionFailed",
+        "path": "golden/requires_title.html.eoc",
+        "line": 1,
+        "column": 1,
+        "local": "title"
+      },
+      "requiredCoverage": [
+        "required locals",
+        "filename diagnostics",
+        "line diagnostics",
+        "column diagnostics"
+      ]
+    },
+    {
+      "id": "strict_stringify_rejects_generic_description",
+      "template": "tests/fixtures/templates/golden/strict_stringify.html.eoc",
+      "context": {
+        "value": {
+          "fixtureType": "non_string_convertible"
+        }
+      },
+      "renderOptions": {
+        "strictStringify": true
+      },
+      "expectError": {
+        "domain": "ALNEOCErrorDomain",
+        "code": "ALNEOCErrorTemplateExecutionFailed",
+        "path": "golden/strict_stringify.html.eoc",
+        "line": 1,
+        "column": 4
+      },
+      "requiredCoverage": [
+        "strict stringify",
+        "non-string output rejection"
+      ]
+    }
+  ]
+}

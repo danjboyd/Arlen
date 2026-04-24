@@ -1,0 +1,4 @@
+<h1><%= $title %></h1>
+<div class="trusted"><%== $trusted %></div>
+<p class="missing"><%= $missing %></p>
+<p class="count"><%= $count %></p>

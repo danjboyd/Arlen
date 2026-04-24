@@ -1,0 +1,10 @@
+<%@ layout "golden/layouts/application" %>
+<%@ requires title, user, badges %>
+<%@ slot "sidebar" %>
+  <%@ include "golden/partials/_badge" with @{ @"badge" : @"profile" } %>
+<%@ endslot %>
+<h1><%= $title %></h1>
+<p><%= $user.profile.email %></p>
+<ul>
+<%@ render "golden/partials/_badge" collection:$badges as:"badge" empty:"golden/partials/_empty_badge" %>
+</ul>

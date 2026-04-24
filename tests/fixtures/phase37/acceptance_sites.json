@@ -1,0 +1,60 @@
+{
+  "version": "phase37-acceptance-sites-v1",
+  "lastUpdated": "2026-04-24",
+  "defaultTimeoutSeconds": 10,
+  "sites": [
+    {
+      "id": "phase37_harness_self_check",
+      "description": "Service-free acceptance harness self-check used until 37E-J add Arlen battle-test sites.",
+      "port": 37370,
+      "serviceBacked": false,
+      "startCommand": [
+        "python3",
+        "-m",
+        "http.server",
+        "{port}",
+        "--bind",
+        "127.0.0.1",
+        "--directory",
+        "{repo_root}/tests/acceptance/phase37_harness_site/public"
+      ],
+      "readyProbe": {
+        "path": "/status.json",
+        "expectedStatus": 200,
+        "contains": "\"status\": \"ok\""
+      },
+      "probes": [
+        {
+          "id": "index_html",
+          "path": "/index.html",
+          "expectedStatus": 200,
+          "contains": "Phase 37 acceptance harness"
+        },
+        {
+          "id": "status_json",
+          "path": "/status.json",
+          "expectedStatus": 200,
+          "jsonEquals": {
+            "status": "ok",
+            "site": "phase37_harness_self_check"
+          }
+        },
+        {
+          "id": "missing_route",
+          "path": "/missing",
+          "expectedStatus": 404
+        }
+      ],
+      "staticChecks": [
+        {
+          "path": "tests/acceptance/phase37_harness_site/public/index.html",
+          "contains": "Phase 37 acceptance harness"
+        },
+        {
+          "path": "tests/fixtures/phase37/public_surface_contract.json",
+          "contains": "eoc_transpiler_runtime"
+        }
+      ]
+    }
+  ]
+}
