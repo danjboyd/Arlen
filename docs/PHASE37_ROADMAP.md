@@ -1,6 +1,6 @@
 # Phase 37 Roadmap
 
-Status: complete; 37A-37L delivered 2026-04-24
+Status: complete for original scope; 37A-37L delivered 2026-04-24; 37M-37S planned validation-depth follow-up
 Last updated: 2026-04-24
 
 ## Goal
@@ -452,3 +452,189 @@ Delivered artifacts:
 - `docs/README.md`
 - `docs/STATUS.md`
 - this roadmap marked complete
+
+## Validation-Depth Follow-Up
+
+The original Phase 37 scope established the public-surface contract, fast
+service-free acceptance sites, and confidence lane. The follow-up subphases
+below make that evidence stronger by proving more behavior through the real
+Arlen runtime instead of fixture servers alone.
+
+## 37M. Real Runtime Acceptance Site Variants
+
+Status: planned.
+
+Goal:
+
+- convert the fixture-backed acceptance sites into real Arlen app variants
+  incrementally while preserving the current fast lane
+
+Required behavior:
+
+- keep the existing service-free fixture sites as fast contract checks
+- add real-runtime variants for:
+  - EOC kitchen sink using actual `.html.eoc` templates
+  - MVC CRUD using real `ALNApplication`, routes, controllers, and middleware
+  - module portal booting actual first-party modules
+  - live UI serving the real runtime asset and live payloads
+  - packaged deploy using an actual generated app release bundle
+- make real-runtime variants opt-in until they are stable enough for release
+  certification
+
+Acceptance:
+
+- Phase 37 can distinguish fixture contract coverage from real Arlen runtime
+  acceptance coverage
+
+## 37N. Dual-Mode Acceptance Manifest
+
+Status: planned.
+
+Goal:
+
+- split acceptance execution into fast fixture-backed checks and deeper
+  real-runtime checks
+
+Required behavior:
+
+- add explicit entrypoints for:
+  - `make phase37-acceptance-fast`
+  - `make phase37-acceptance-runtime`
+- keep `make phase37-acceptance` mapped to the default service-free lane unless
+  the CI contract is deliberately changed
+- allow `make phase37-confidence` or release certification to include the
+  runtime lane through an explicit environment variable or target
+- record mode, skipped service-backed sites, and runtime-site results in the
+  generated confidence manifest
+
+Acceptance:
+
+- developers can run a quick local contract check and release reviewers can run
+  deeper runtime evidence without changing the fixture manifest by hand
+
+## 37O. Executable EOC Golden Render Assertions
+
+Status: planned.
+
+Goal:
+
+- close the gap between cataloged golden fixtures and actual template render
+  behavior
+
+Required behavior:
+
+- compile/render every case in `tests/fixtures/phase37/eoc_golden_render_cases.json`
+- compare exact expected HTML output where an expected-output fixture exists
+- assert exact error domain, code, path, line, column, and local metadata for
+  diagnostic cases
+- run under `make phase21-template-tests` or a focused Phase 37 template lane
+- make the EOC kitchen sink real-runtime site reuse the same fixtures where
+  practical
+
+Acceptance:
+
+- EOC golden cases prove actual parser, codegen, runtime, escaping, strict mode,
+  and diagnostic behavior
+
+## 37P. Acceptance Harness Assertion Depth
+
+Status: planned.
+
+Goal:
+
+- improve probe precision so acceptance failures catch subtle regressions
+
+Required behavior:
+
+- add support for:
+  - `notContains`
+  - JSON path or nested deep equality
+  - regular expression body/header assertions
+  - header presence independent of exact value
+  - ordered body assertions
+  - cookie attribute checks
+- include negative self-tests for each assertion type
+- preserve deterministic artifact output for failures
+
+Acceptance:
+
+- acceptance probes can express real browser/API expectations without fragile
+  ad hoc string checks
+
+## 37Q. Regression Intake Enforcement
+
+Status: planned.
+
+Goal:
+
+- make the Phase 37 testing model a durable bug-fix discipline
+
+Required behavior:
+
+- add contributor-facing checklist coverage for public bug fixes:
+  - focused unit regression
+  - checked-in fixture or corpus case
+  - Phase 37 acceptance probe when behavior crosses a public workflow boundary
+  - docs update for user-visible behavior
+- add a lightweight script or docs-quality check that validates new Phase 37
+  acceptance entries have stable IDs, descriptions, and artifact paths
+- document when acceptance coverage is not appropriate
+
+Acceptance:
+
+- future public bug fixes leave permanent evidence in the correct layer instead
+  of only adding broad end-to-end checks
+
+## 37R. Real Packaged Deploy Release Proof
+
+Status: planned.
+
+Goal:
+
+- prove packaged release behavior through an actual generated app and local
+  target, not only the fixture deploy site
+
+Required behavior:
+
+- build an actual packaged release for a small acceptance app
+- start the packaged server and probe health, static assets, template rendering,
+  and runtime metadata
+- run packaged `jobs-worker --once`
+- run local deploy `dryrun`, `list`, `releases`, `status`, and `rollback`
+  probes against an isolated temporary target
+- verify propane accessories are read from the expected settings surface
+- keep remote SSH mutation optional behind explicit configuration
+
+Acceptance:
+
+- release candidates include evidence that the packaging and deploy path users
+  run is operational, not just contract-shaped
+
+## 37S. Contract Coverage Status Tracking
+
+Status: planned.
+
+Goal:
+
+- make the public surface matrix show the depth of evidence for each surface
+
+Required behavior:
+
+- extend `tests/fixtures/phase37/public_surface_contract.json` with coverage
+  status fields such as:
+  - `fixture_contract`
+  - `unit_regression`
+  - `integration`
+  - `acceptance_fixture`
+  - `real_runtime_acceptance`
+  - `optional_live`
+- have `make phase37-contract` validate the required status fields
+- have `make phase37-confidence` summarize coverage depth in generated
+  artifacts
+- document which gaps are acceptable for default release gating and which
+  require follow-up before public launch
+
+Acceptance:
+
+- reviewers can see not just that a surface is listed, but how strongly it is
+  proven by current evidence

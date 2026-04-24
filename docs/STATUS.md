@@ -4,6 +4,12 @@ Last updated: 2026-04-24
 
 ## Leaving Off (2026-04-24)
 
+- Added planned Phase 37 validation-depth follow-up subphases:
+  - `37M-37S` cover real-runtime acceptance variants, dual-mode acceptance
+    manifests, executable EOC golden render assertions, deeper harness
+    assertions, regression intake enforcement, real packaged deploy proof, and
+    contract coverage status tracking
+  - original Phase 37 scope remains complete through `37A-37L`
 - Closed Phase 37 with `37I-37L` delivered:
   - added live UI and packaged deploy acceptance sites to the Phase 37
     service-free manifest

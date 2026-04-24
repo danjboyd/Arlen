@@ -152,7 +152,7 @@ scaffold.
 - Phase 7: complete for current first-party scope.
 - Phase 18: complete (`18A-18H` delivered on 2026-03-14) for the tracked
   module/runtime milestone.
-- Phase 37 is planned as the next public-release test confidence phase; see
+- Phase 37 completed the public-release test confidence scaffold; see
   [docs/PHASE37_ROADMAP.md](docs/PHASE37_ROADMAP.md).
 - Linux with clang-built GNUstep remains the authoritative production baseline.
 - macOS has a verified Apple-runtime path.
