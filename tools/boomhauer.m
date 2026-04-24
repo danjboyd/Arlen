@@ -546,7 +546,12 @@ static BOOL BenchmarkRenderBlobResponse(ALNRequest *request, ALNResponse *respon
                                               (NSInteger)BenchmarkBlobMaximumSize());
 
   NSString *mode = [[request queryValueForName:@"mode"] lowercaseString];
-  BOOL useSendfileMode = [mode isEqualToString:@"sendfile"] || [mode isEqualToString:@"file"];
+  BOOL useValidatedFileMetadataMode = [mode isEqualToString:@"validated-file"];
+  BOOL useBadFileMetadataMode = [mode isEqualToString:@"bad-file-metadata"];
+  BOOL useSendfileMode = [mode isEqualToString:@"sendfile"] ||
+                         [mode isEqualToString:@"file"] ||
+                         useValidatedFileMetadataMode ||
+                         useBadFileMetadataMode;
   if (!useSendfileMode && BenchmarkProfileEnabled() && [mode length] == 0 && size >= 65536) {
     useSendfileMode = YES;
   }
@@ -581,6 +586,24 @@ static BOOL BenchmarkRenderBlobResponse(ALNRequest *request, ALNResponse *respon
     response.fileBodyInode = 0;
     response.fileBodyMTimeSeconds = (long long)[modificationDate timeIntervalSince1970];
     response.fileBodyMTimeNanoseconds = 0;
+    if (useValidatedFileMetadataMode || useBadFileMetadataMode) {
+      struct stat fileStat;
+      if (stat([path fileSystemRepresentation], &fileStat) == 0) {
+        response.fileBodyDevice = (unsigned long long)fileStat.st_dev;
+        response.fileBodyInode = (unsigned long long)fileStat.st_ino;
+        response.fileBodyMTimeSeconds = (long long)fileStat.st_mtime;
+#if defined(__linux__)
+        response.fileBodyMTimeNanoseconds = fileStat.st_mtim.tv_nsec;
+#elif defined(__APPLE__)
+        response.fileBodyMTimeNanoseconds = fileStat.st_mtimespec.tv_nsec;
+#else
+        response.fileBodyMTimeNanoseconds = 0;
+#endif
+        if (useBadFileMetadataMode) {
+          response.fileBodyInode += 1;
+        }
+      }
+    }
     response.committed = YES;
     return YES;
   }
@@ -1997,6 +2020,11 @@ static ALNApplication *BuildApplication(NSString *environment) {
   [app registerRouteMethod:@"GET"
                       path:@"/api/blob"
                       name:@"api_blob"
+           controllerClass:[ApiController class]
+                    action:@"blob"];
+  [app registerRouteMethod:@"HEAD"
+                      path:@"/api/blob"
+                      name:@"api_blob_head"
            controllerClass:[ApiController class]
                     action:@"blob"];
   if (!minimalBenchmarkRoutes) {

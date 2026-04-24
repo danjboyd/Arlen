@@ -3,7 +3,7 @@
 - Kind: `interface`
 - Header: `src/Arlen/HTTP/ALNResponse.h`
 
-Mutable HTTP response model for status, headers, and body serialization into wire-format bytes.
+Mutable HTTP response model for status, headers, buffered bodies, and preflighted file streaming into wire-format bytes.
 
 ## Properties
 
@@ -13,12 +13,12 @@ Mutable HTTP response model for status, headers, and body serialization into wir
 | `headers` | `NSMutableDictionary *` | `nonatomic, strong, readonly` | Public `headers` property available on `ALNResponse`. |
 | `bodyData` | `NSMutableData *` | `nonatomic, strong, readonly` | Public `bodyData` property available on `ALNResponse`. |
 | `committed` | `BOOL` | `nonatomic, assign` | Public `committed` property available on `ALNResponse`. |
-| `fileBodyPath` | `NSString *` | `nonatomic, copy, nullable` | Public `fileBodyPath` property available on `ALNResponse`. |
-| `fileBodyLength` | `unsigned long long` | `nonatomic, assign` | Public `fileBodyLength` property available on `ALNResponse`. |
-| `fileBodyDevice` | `unsigned long long` | `nonatomic, assign` | Public `fileBodyDevice` property available on `ALNResponse`. |
-| `fileBodyInode` | `unsigned long long` | `nonatomic, assign` | Public `fileBodyInode` property available on `ALNResponse`. |
-| `fileBodyMTimeSeconds` | `long long` | `nonatomic, assign` | Public `fileBodyMTimeSeconds` property available on `ALNResponse`. |
-| `fileBodyMTimeNanoseconds` | `long` | `nonatomic, assign` | Public `fileBodyMTimeNanoseconds` property available on `ALNResponse`. |
+| `fileBodyPath` | `NSString *` | `nonatomic, copy, nullable` | Existing regular file path to stream after Arlen preflights the descriptor before successful headers are sent. |
+| `fileBodyLength` | `unsigned long long` | `nonatomic, assign` | Expected byte count for a file streaming response; also drives `Content-Length` for GET and HEAD. |
+| `fileBodyDevice` | `unsigned long long` | `nonatomic, assign` | Optional device identity used to reject stale or replaced file streaming targets before headers are sent. |
+| `fileBodyInode` | `unsigned long long` | `nonatomic, assign` | Optional inode identity used to reject stale or replaced file streaming targets before headers are sent. |
+| `fileBodyMTimeSeconds` | `long long` | `nonatomic, assign` | Optional file modification timestamp seconds used to reject changed streaming targets before headers are sent. |
+| `fileBodyMTimeNanoseconds` | `long` | `nonatomic, assign` | Optional file modification timestamp nanoseconds used to reject changed streaming targets before headers are sent. |
 
 ## Methods
 

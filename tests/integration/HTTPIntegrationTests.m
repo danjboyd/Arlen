@@ -2743,6 +2743,53 @@
   XCTAssertEqualObjects(binaryBody, sendfileBody);
 }
 
+- (void)testCommittedFileBodyPathStreamsCompleteBody_ARLEN_BUG_023 {
+  int curlCode = 0;
+  int serverCode = 0;
+  NSString *output =
+      [self requestWithServerEnv:nil
+                     serverBinary:@"./build/boomhauer"
+                        curlBody:@"tmp=$(mktemp) && code=$(curl -sS -w '%%{http_code}' -o \"$tmp\" http://127.0.0.1:%d/api/blob?size=8192\\&mode=validated-file) && bytes=$(wc -c < \"$tmp\") && prefix=$(dd if=\"$tmp\" bs=1 count=8 2>/dev/null | tr -d '\\n') && rm -f \"$tmp\" && printf 'code=%%s\\nbytes=%%s\\nprefix=%%s\\n' \"$code\" \"$bytes\" \"$prefix\""
+                        curlCode:&curlCode
+                       serverCode:&serverCode];
+  XCTAssertEqual(0, curlCode);
+  XCTAssertEqual(0, serverCode);
+  XCTAssertTrue([output containsString:@"code=200\n"], @"%@", output);
+  XCTAssertTrue([output containsString:@"bytes=8192\n"], @"%@", output);
+  XCTAssertTrue([output containsString:@"prefix=xxxxxxxx\n"], @"%@", output);
+}
+
+- (void)testCommittedFileBodyPathHeadOmitsBody_ARLEN_BUG_023 {
+  int curlCode = 0;
+  int serverCode = 0;
+  NSString *headers =
+      [self requestWithServerEnv:nil
+                     serverBinary:@"./build/boomhauer"
+                        curlBody:@"curl -sS -I http://127.0.0.1:%d/api/blob?size=8192\\&mode=validated-file"
+                        curlCode:&curlCode
+                       serverCode:&serverCode];
+  XCTAssertEqual(0, curlCode);
+  XCTAssertEqual(0, serverCode);
+  XCTAssertTrue([headers containsString:@"HTTP/1.1 200 OK\r\n"], @"%@", headers);
+  XCTAssertTrue([headers containsString:@"Content-Length: 8192\r\n"], @"%@", headers);
+}
+
+- (void)testCommittedFileBodyPathPreflightFailureReturns500BeforeHeaders_ARLEN_BUG_023 {
+  int curlCode = 0;
+  int serverCode = 0;
+  NSString *output =
+      [self requestWithServerEnv:nil
+                     serverBinary:@"./build/boomhauer"
+                        curlBody:@"tmp=$(mktemp) && code=$(curl -sS -w '%%{http_code}' -o \"$tmp\" http://127.0.0.1:%d/api/blob?size=8192\\&mode=bad-file-metadata) && bytes=$(wc -c < \"$tmp\") && body=$(cat \"$tmp\") && rm -f \"$tmp\" && printf 'code=%%s\\nbytes=%%s\\nbody=%%s' \"$code\" \"$bytes\" \"$body\""
+                        curlCode:&curlCode
+                       serverCode:&serverCode];
+  XCTAssertEqual(0, curlCode);
+  XCTAssertEqual(0, serverCode);
+  XCTAssertTrue([output containsString:@"code=500\n"], @"%@", output);
+  XCTAssertTrue([output containsString:@"bytes=22\n"], @"%@", output);
+  XCTAssertTrue([output containsString:@"body=internal server error"], @"%@", output);
+}
+
 - (void)testBenchmarkProfileLargeBlobRouteStreamsCompleteBody {
   int curlCode = 0;
   int serverCode = 0;

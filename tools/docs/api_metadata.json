@@ -27,7 +27,7 @@
       "summary": "Immutable HTTP request model containing method/path/query/headers/body and parsed parameter helpers."
     },
     "ALNResponse": {
-      "summary": "Mutable HTTP response model for status, headers, and body serialization into wire-format bytes."
+      "summary": "Mutable HTTP response model for status, headers, buffered bodies, and preflighted file streaming into wire-format bytes."
     },
     "ALNContext": {
       "summary": "Per-request execution context shared across middleware and controllers, including params/auth/session/services.",
@@ -208,6 +208,24 @@
     },
     "ALNApplication|clusterNodeID": {
       "purpose": "Node identifier used for distributed-runtime diagnostics and headers."
+    },
+    "ALNResponse|fileBodyPath": {
+      "purpose": "Existing regular file path to stream after Arlen preflights the descriptor before successful headers are sent."
+    },
+    "ALNResponse|fileBodyLength": {
+      "purpose": "Expected byte count for a file streaming response; also drives `Content-Length` for GET and HEAD."
+    },
+    "ALNResponse|fileBodyDevice": {
+      "purpose": "Optional device identity used to reject stale or replaced file streaming targets before headers are sent."
+    },
+    "ALNResponse|fileBodyInode": {
+      "purpose": "Optional inode identity used to reject stale or replaced file streaming targets before headers are sent."
+    },
+    "ALNResponse|fileBodyMTimeSeconds": {
+      "purpose": "Optional file modification timestamp seconds used to reject changed streaming targets before headers are sent."
+    },
+    "ALNResponse|fileBodyMTimeNanoseconds": {
+      "purpose": "Optional file modification timestamp nanoseconds used to reject changed streaming targets before headers are sent."
     }
   },
   "methods": {

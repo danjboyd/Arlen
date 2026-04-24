@@ -1607,25 +1607,12 @@ static BOOL ALNSendFileReadFallback(ALNSocketHandle clientFd,
   return YES;
 }
 
-static BOOL ALNSendFileAtPath(ALNSocketHandle clientFd,
-                              NSString *path,
-                              unsigned long long byteLength,
-                              unsigned long long device,
-                              unsigned long long inode,
-                              long long mtimeSeconds,
-                              long mtimeNanoseconds) {
-  if (![path isKindOfClass:[NSString class]] || [path length] == 0) {
-    return NO;
-  }
-  if (byteLength == 0) {
-    return YES;
-  }
-
-  int fileFd = ALNStaticFileFDForPath(path, device, inode, byteLength, mtimeSeconds, mtimeNanoseconds);
+static BOOL ALNSendFileDescriptor(ALNSocketHandle clientFd,
+                                  int fileFd,
+                                  unsigned long long byteLength) {
   if (fileFd < 0) {
     return NO;
   }
-
   BOOL ok = NO;
   unsigned long long remaining = byteLength;
 #ifdef __linux__
@@ -1677,7 +1664,6 @@ static BOOL ALNSendFileAtPath(ALNSocketHandle clientFd,
 #ifdef __linux__
 cleanup:
 #endif
-  close(fileFd);
   return ok;
 }
 
@@ -2646,13 +2632,42 @@ static void ALNSendFallbackInternalServerError(ALNSocketHandle clientFd) {
 
 static double ALNSendResponse(ALNSocketHandle clientFd,
                               ALNResponse *response,
-                              BOOL performanceLogging) {
+                              BOOL performanceLogging,
+                              BOOL sendBody) {
   double serializeStart = ALNNowMilliseconds();
+  NSString *fileBodyPath = response.fileBodyPath;
+  unsigned long long fileBodyLength = response.fileBodyLength;
+  unsigned long long fileBodyDevice = response.fileBodyDevice;
+  unsigned long long fileBodyInode = response.fileBodyInode;
+  long long fileBodyMTimeSeconds = response.fileBodyMTimeSeconds;
+  long fileBodyMTimeNanoseconds = response.fileBodyMTimeNanoseconds;
+  int fileBodyFd = -1;
+  if ([fileBodyPath length] > 0 && fileBodyLength > 0) {
+    fileBodyFd = ALNStaticFileFDForPath(fileBodyPath,
+                                        fileBodyDevice,
+                                        fileBodyInode,
+                                        fileBodyLength,
+                                        fileBodyMTimeSeconds,
+                                        fileBodyMTimeNanoseconds);
+    if (fileBodyFd < 0) {
+      double writeStart = ALNNowMilliseconds();
+      ALNSendFallbackInternalServerError(clientFd);
+      return ALNNowMilliseconds() - writeStart;
+    }
+    if (!sendBody) {
+      close(fileBodyFd);
+      fileBodyFd = -1;
+    }
+  }
+
   NSData *headerData = [response serializedHeaderData];
   double serializeMs = ALNNowMilliseconds() - serializeStart;
 
   if (headerData == nil || [headerData length] == 0) {
     double writeStart = ALNNowMilliseconds();
+    if (fileBodyFd >= 0) {
+      close(fileBodyFd);
+    }
     ALNSendFallbackInternalServerError(clientFd);
     return (ALNNowMilliseconds() - writeStart) + serializeMs;
   }
@@ -2671,24 +2686,19 @@ static double ALNSendResponse(ALNSocketHandle clientFd,
   NSUInteger headerLength = [headerData length];
   NSData *bodyData = [response bodyDataForTransmission];
   NSUInteger bodyLength = [response bodyLength];
-  NSString *fileBodyPath = response.fileBodyPath;
-  unsigned long long fileBodyLength = response.fileBodyLength;
-  unsigned long long fileBodyDevice = response.fileBodyDevice;
-  unsigned long long fileBodyInode = response.fileBodyInode;
-  long long fileBodyMTimeSeconds = response.fileBodyMTimeSeconds;
-  long fileBodyMTimeNanoseconds = response.fileBodyMTimeNanoseconds;
-
-  if ([fileBodyPath length] > 0 && fileBodyLength > 0) {
+  if (!sendBody) {
     if (headerLength > 0) {
       (void)ALNSendAll(clientFd, [headerData bytes], headerLength);
     }
-    (void)ALNSendFileAtPath(clientFd,
-                            fileBodyPath,
-                            fileBodyLength,
-                            fileBodyDevice,
-                            fileBodyInode,
-                            fileBodyMTimeSeconds,
-                            fileBodyMTimeNanoseconds);
+  } else if ([fileBodyPath length] > 0 && fileBodyLength > 0) {
+    if (headerLength > 0) {
+      (void)ALNSendAll(clientFd, [headerData bytes], headerLength);
+    }
+    if (fileBodyFd >= 0) {
+      (void)ALNSendFileDescriptor(clientFd, fileBodyFd, fileBodyLength);
+      close(fileBodyFd);
+      fileBodyFd = -1;
+    }
   } else if (headerLength > 0 && bodyLength > 0) {
     struct iovec iov[2];
     iov[0].iov_base = (void *)[headerData bytes];
@@ -2706,6 +2716,9 @@ static double ALNSendResponse(ALNSocketHandle clientFd,
     if (bodyLength > 0) {
       (void)ALNSendAll(clientFd, [bodyData bytes], bodyLength);
     }
+  }
+  if (fileBodyFd >= 0) {
+    close(fileBodyFd);
   }
   return (ALNNowMilliseconds() - writeStart) + serializeMs;
 }
@@ -3529,7 +3542,7 @@ static BOOL ALNSendSSEHeaders(ALNSocketHandle clientFd, ALNResponse *response) {
                                       performanceLogging,
                                       parseMs,
                                       ALNNowMilliseconds() - requestStartMs);
-          (void)ALNSendResponse(clientFd, errorResponse, performanceLogging);
+          (void)ALNSendResponse(clientFd, errorResponse, performanceLogging, YES);
           return;
         }
         request.parseDurationMilliseconds = parseMs;
@@ -3557,7 +3570,10 @@ static BOOL ALNSendSSEHeaders(ALNSocketHandle clientFd, ALNResponse *response) {
                                         parseMs,
                                         ALNNowMilliseconds() - requestStartMs);
             request.responseWriteDurationMilliseconds =
-                ALNSendResponse(clientFd, staticResponse, performanceLogging);
+                ALNSendResponse(clientFd,
+                                staticResponse,
+                                performanceLogging,
+                                ![request.method isEqualToString:@"HEAD"]);
             requestsHandled += 1;
             if (!keepAlive) {
               return;
@@ -3593,7 +3609,7 @@ static BOOL ALNSendSSEHeaders(ALNSocketHandle clientFd, ALNResponse *response) {
                                       performanceLogging,
                                       parseMs,
                                       ALNNowMilliseconds() - requestStartMs);
-          (void)ALNSendResponse(clientFd, invalidUpgrade, performanceLogging);
+          (void)ALNSendResponse(clientFd, invalidUpgrade, performanceLogging, YES);
           return;
         }
         BOOL webSocketUpgrade = webSocketRequestValid && responseWantsWebSocket;
@@ -3605,7 +3621,7 @@ static BOOL ALNSendSSEHeaders(ALNSocketHandle clientFd, ALNResponse *response) {
                                         performanceLogging,
                                         parseMs,
                                         ALNNowMilliseconds() - requestStartMs);
-            (void)ALNSendResponse(clientFd, originDenied, performanceLogging);
+            (void)ALNSendResponse(clientFd, originDenied, performanceLogging, YES);
             return;
           }
           ALNWebSocketClientSession *webSocketSession = nil;
@@ -3626,7 +3642,7 @@ static BOOL ALNSendSSEHeaders(ALNSocketHandle clientFd, ALNResponse *response) {
                                         performanceLogging,
                                         parseMs,
                                         ALNNowMilliseconds() - requestStartMs);
-            (void)ALNSendResponse(clientFd, busyResponse, performanceLogging);
+            (void)ALNSendResponse(clientFd, busyResponse, performanceLogging, YES);
             return;
           }
 
@@ -3649,7 +3665,7 @@ static BOOL ALNSendSSEHeaders(ALNSocketHandle clientFd, ALNResponse *response) {
                                           performanceLogging,
                                           parseMs,
                                           ALNNowMilliseconds() - requestStartMs);
-              (void)ALNSendResponse(clientFd, busyResponse, performanceLogging);
+              (void)ALNSendResponse(clientFd, busyResponse, performanceLogging, YES);
               [self releaseWebSocketSessionReservation];
               return;
             }
@@ -3665,7 +3681,7 @@ static BOOL ALNSendSSEHeaders(ALNSocketHandle clientFd, ALNResponse *response) {
                                           performanceLogging,
                                           parseMs,
                                           ALNNowMilliseconds() - requestStartMs);
-              (void)ALNSendResponse(clientFd, failure, performanceLogging);
+              (void)ALNSendResponse(clientFd, failure, performanceLogging, YES);
               [self releaseWebSocketSessionReservation];
               return;
             }
@@ -3677,7 +3693,7 @@ static BOOL ALNSendSSEHeaders(ALNSocketHandle clientFd, ALNResponse *response) {
                                           performanceLogging,
                                           parseMs,
                                           ALNNowMilliseconds() - requestStartMs);
-              (void)ALNSendResponse(clientFd, resyncResponse, performanceLogging);
+              (void)ALNSendResponse(clientFd, resyncResponse, performanceLogging, YES);
               [self releaseWebSocketSessionReservation];
               return;
             }
@@ -3695,7 +3711,7 @@ static BOOL ALNSendSSEHeaders(ALNSocketHandle clientFd, ALNResponse *response) {
                                             performanceLogging,
                                             parseMs,
                                             ALNNowMilliseconds() - requestStartMs);
-                (void)ALNSendResponse(clientFd, busyResponse, performanceLogging);
+                (void)ALNSendResponse(clientFd, busyResponse, performanceLogging, YES);
                 [self releaseWebSocketSessionReservation];
                 return;
               }
@@ -3747,7 +3763,7 @@ static BOOL ALNSendSSEHeaders(ALNSocketHandle clientFd, ALNResponse *response) {
                                         performanceLogging,
                                         parseMs,
                                         ALNNowMilliseconds() - requestStartMs);
-            (void)ALNSendResponse(clientFd, failure, performanceLogging);
+            (void)ALNSendResponse(clientFd, failure, performanceLogging, YES);
             return;
           }
           if (streamReplayResult.resyncRequired) {
@@ -3758,7 +3774,7 @@ static BOOL ALNSendSSEHeaders(ALNSocketHandle clientFd, ALNResponse *response) {
                                         performanceLogging,
                                         parseMs,
                                         ALNNowMilliseconds() - requestStartMs);
-            (void)ALNSendResponse(clientFd, resyncResponse, performanceLogging);
+            (void)ALNSendResponse(clientFd, resyncResponse, performanceLogging, YES);
             return;
           }
 
@@ -3772,7 +3788,7 @@ static BOOL ALNSendSSEHeaders(ALNSocketHandle clientFd, ALNResponse *response) {
                                         performanceLogging,
                                         parseMs,
                                         ALNNowMilliseconds() - requestStartMs);
-            (void)ALNSendResponse(clientFd, busyResponse, performanceLogging);
+            (void)ALNSendResponse(clientFd, busyResponse, performanceLogging, YES);
             return;
           }
 
@@ -3811,7 +3827,10 @@ static BOOL ALNSendSSEHeaders(ALNSocketHandle clientFd, ALNResponse *response) {
                                     parseMs,
                                     ALNNowMilliseconds() - requestStartMs);
         request.responseWriteDurationMilliseconds =
-            ALNSendResponse(clientFd, response, performanceLogging);
+            ALNSendResponse(clientFd,
+                            response,
+                            performanceLogging,
+                            ![request.method isEqualToString:@"HEAD"]);
         requestsHandled += 1;
         if (!keepAlive) {
           return;
@@ -3988,7 +4007,7 @@ static BOOL ALNSendSSEHeaders(ALNSocketHandle clientFd, ALNResponse *response) {
         [busyResponse setHeader:@"X-Arlen-Backpressure-Reason"
                           value:@"http_session_limit"];
         [busyResponse setHeader:@"Connection" value:@"close"];
-        (void)ALNSendResponse(clientFd, busyResponse, NO);
+        (void)ALNSendResponse(clientFd, busyResponse, NO, YES);
         ALNSocketClose(clientFd);
         continue;
       }
@@ -4004,7 +4023,7 @@ static BOOL ALNSendSSEHeaders(ALNSocketHandle clientFd, ALNResponse *response) {
           [busyResponse setHeader:@"X-Arlen-Backpressure-Reason"
                             value:@"http_worker_queue_full"];
           [busyResponse setHeader:@"Connection" value:@"close"];
-          (void)ALNSendResponse(clientFd, busyResponse, NO);
+          (void)ALNSendResponse(clientFd, busyResponse, NO, YES);
           [self releaseHTTPSessionReservation];
           ALNSocketClose(clientFd);
         }

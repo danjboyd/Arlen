@@ -1460,7 +1460,8 @@ static NSArray<NSString *> *ALNDataverseTargetNamesFromConfigAndEnvironment(NSDi
 }
 
 static BOOL ALNResponseHasBody(ALNResponse *response) {
-  return [response bodyLength] > 0;
+  return [response bodyLength] > 0 ||
+         ([response.fileBodyPath length] > 0 && response.fileBodyLength > 0);
 }
 
 static NSDictionary *ALNDictionaryConfigValue(NSDictionary *config, NSString *key) {

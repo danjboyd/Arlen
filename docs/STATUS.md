@@ -4,6 +4,15 @@ Last updated: 2026-04-24
 
 ## Leaving Off (2026-04-24)
 
+- Fixed the file streaming response bug reported from
+  `StateCompulsoryPoolingAPI`:
+  - `ALNResponse.fileBodyPath` responses now preflight the file before sending
+    successful headers
+  - invalid file-body metadata returns a fallback `500` instead of advertising
+    `200 OK` with an undeliverable `Content-Length`
+  - `HEAD` preserves file response headers without sending the body
+  - regression coverage lives in `HTTPIntegrationTests` under
+    `ARLEN_BUG_023`
 - Completed Phase 37 through `37Q-37S`:
   - added regression intake enforcement with `make phase37-intake`
   - added packaged deploy proof recording with

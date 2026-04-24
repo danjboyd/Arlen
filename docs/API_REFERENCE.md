@@ -42,7 +42,7 @@ python3 tools/docs/generate_api_reference.py
 
 - [ALNHTTPServer](api/ALNHTTPServer.md): HTTP server host that binds an `ALNApplication` to socket runtime and request loop execution.
 - [ALNRequest](api/ALNRequest.md): Immutable HTTP request model containing method/path/query/headers/body and parsed parameter helpers.
-- [ALNResponse](api/ALNResponse.md): Mutable HTTP response model for status, headers, and body serialization into wire-format bytes.
+- [ALNResponse](api/ALNResponse.md): Mutable HTTP response model for status, headers, buffered bodies, and preflighted file streaming into wire-format bytes.
 
 ### MVC Controllers
 
