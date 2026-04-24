@@ -113,6 +113,11 @@ Prefer service-free fixture behavior by default; mark a site `serviceBacked`
 only when it requires an explicit external dependency and document the required
 environment variables next to the site.
 
+The first post-Phase-37 public bug closed under this workflow is
+`ARLEN-BUG-023`, the `ALNResponse.fileBodyPath` streaming truncation reported
+by `StateCompulsoryPoolingAPI`. Its focused HTTP integration regressions are
+listed under the `http_protocol` surface in the contract matrix.
+
 The harness supports `contains`, `notContains`, `orderedContains`, `bodyRegex`,
 `headers`, `headerPresent`, `headerRegex`, `jsonEquals`, `jsonPathEquals`, and
 `cookieAttributes`.

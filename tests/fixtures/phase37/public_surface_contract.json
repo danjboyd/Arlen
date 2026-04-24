@@ -60,7 +60,10 @@
         "tests/unit/ApplicationTests.m"
       ],
       "integrationEvidence": [
-        "tests/integration/HTTPIntegrationTests.m"
+        "tests/integration/HTTPIntegrationTests.m",
+        "tests/integration/HTTPIntegrationTests.m:testCommittedFileBodyPathStreamsCompleteBody_ARLEN_BUG_023",
+        "tests/integration/HTTPIntegrationTests.m:testCommittedFileBodyPathHeadOmitsBody_ARLEN_BUG_023",
+        "tests/integration/HTTPIntegrationTests.m:testCommittedFileBodyPathPreflightFailureReturns500BeforeHeaders_ARLEN_BUG_023"
       ],
       "optionalLiveEvidence": [],
       "requiredLanes": [

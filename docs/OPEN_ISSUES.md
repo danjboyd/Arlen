@@ -1,5 +1,44 @@
 # Open Issues
 
+## ISSUE-003: File streaming responses sent successful headers with no body
+
+- Status: `resolved`
+- Priority: `critical`
+- Tracking ID: `ARLEN-BUG-023`
+- Discovered: `2026-04-24`
+- Reported by: `StateCompulsoryPoolingAPI`
+- Last updated: `2026-04-24`
+- Resolution: `ALNResponse.fileBodyPath` responses now preflight the target
+  file descriptor before successful headers are sent. Invalid or stale
+  file-body metadata returns Arlen's fallback `500 Internal Server Error`
+  instead of advertising a successful response with an undeliverable
+  `Content-Length`.
+- Verification:
+  - `HTTPIntegrationTests::testCommittedFileBodyPathStreamsCompleteBody_ARLEN_BUG_023`
+  - `HTTPIntegrationTests::testCommittedFileBodyPathHeadOmitsBody_ARLEN_BUG_023`
+  - `HTTPIntegrationTests::testCommittedFileBodyPathPreflightFailureReturns500BeforeHeaders_ARLEN_BUG_023`
+- Reconciliation note:
+  `docs/STATECOMPULSORYPOOLINGAPI_REPORT_RECONCILIATION_2026-04-24.md`
+
+### Summary
+
+When an application committed a response with `fileBodyPath` and
+`fileBodyLength`, Arlen could send `200 OK` headers, including the expected
+`Content-Length`, but send zero body bytes if file streaming failed. Browser
+PDF viewers and proxy clients then saw a truncated successful transfer instead
+of an application-level error.
+
+### Impact
+
+This broke public document download/viewing paths and any downstream client that
+trusted Arlen's file streaming response contract.
+
+### Current contract
+
+1. GET file-body responses must stream the advertised byte count.
+2. HEAD file-body responses must preserve headers and omit the body.
+3. Failed file preflight must fail before successful headers are sent.
+
 ## ISSUE-002: Named-target deploy release rebuilds existing release ID instead of reusing it
 
 - Status: `resolved`

@@ -4,6 +4,12 @@ Last updated: 2026-04-24
 
 ## Leaving Off (2026-04-24)
 
+- Continued post-Phase-37 regression-intake hardening:
+  - recorded `ARLEN-BUG-023` / `ISSUE-003` in `docs/OPEN_ISSUES.md`
+  - linked the file streaming regressions into the Phase 37 `http_protocol`
+    public-surface evidence matrix
+  - documented `ARLEN-BUG-023` as the first public bug closed under the
+    Phase 37 regression workflow
 - Fixed the file streaming response bug reported from
   `StateCompulsoryPoolingAPI`:
   - `ALNResponse.fileBodyPath` responses now preflight the file before sending
