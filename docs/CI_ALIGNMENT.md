@@ -1,6 +1,6 @@
 # CI Alignment
 
-Last updated: 2026-04-20
+Last updated: 2026-04-24
 
 This document defines the intended shape of Arlen CI so workflow names,
 required checks, and actual project contracts stay aligned.
@@ -46,6 +46,7 @@ The required merge gate should reflect the current authoritative baseline:
 Additional lanes should stay visible but non-blocking unless the support
 statement is raised:
 
+- Phase 37 public-release confidence
 - Apple baseline confidence
 - Windows preview confidence
 - scheduled thread-race / experimental sanitizer follow-up lanes
@@ -81,6 +82,7 @@ Completed:
 Additional lanes remain visible but non-blocking while their support level
 stays below the authoritative Linux production baseline:
 
+- `phase37-confidence`
 - `apple-baseline`
 - `windows-preview`
 - nightly thread-race / experimental follow-up lanes
@@ -125,6 +127,21 @@ Phase 34K standardizes the intended platform-runner path:
 
 This provisioning work does not change branch protection by itself.
 
+## Phase 37 Public-Release Confidence
+
+Phase 37 adds a public-surface contract and service-free acceptance suite:
+
+- `make phase37-contract`
+- `make phase37-acceptance`
+- `make phase37-confidence`
+
+These commands generate evidence under `build/release_confidence/phase37/`.
+They are recommended for release-candidate review and broad public-surface
+changes, but they do not change required merge-gate checks by themselves. Raise
+Phase 37 to a required workflow only after it is deliberately added to
+`.github/workflows/`, branch-protection guidance, and the public support
+contract in the same change.
+
 ## Failure Triage And Fast Feedback
 
 The current workflow policy is:
@@ -162,6 +179,7 @@ For `main`, require:
 
 Do not require by default:
 
+- Phase 37 confidence
 - Apple baseline
 - Windows preview
 - nightly thread-race / experimental lanes

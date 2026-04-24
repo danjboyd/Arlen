@@ -399,6 +399,188 @@
           "contains": "data_orm_dataverse"
         }
       ]
+    },
+    {
+      "id": "live_ui_reference",
+      "description": "Phase 37I live UI and realtime acceptance site.",
+      "port": 37375,
+      "serviceBacked": false,
+      "startCommand": [
+        "python3",
+        "{repo_root}/tools/ci/phase37_acceptance_site_server.py",
+        "--site",
+        "live_ui_reference",
+        "--port",
+        "{port}",
+        "--log",
+        "{output_dir}/live_ui_reference.server.log"
+      ],
+      "readyProbe": {
+        "path": "/healthz",
+        "expectedStatus": 200,
+        "contains": "\"status\": \"ok\""
+      },
+      "probes": [
+        {
+          "id": "live_page",
+          "path": "/live",
+          "expectedStatus": 200,
+          "contains": [
+            "data-live-region=\"orders\"",
+            "data-event=\"phase37:refresh\"",
+            "/arlen/live.js"
+          ]
+        },
+        {
+          "id": "dom_operation_payload",
+          "path": "/live/update",
+          "expectedStatus": 200,
+          "contains": [
+            "\"op\": \"replace\"",
+            "\"event\": \"phase37:refresh\""
+          ],
+          "jsonEquals": {
+            "status": "ok"
+          }
+        },
+        {
+          "id": "stream_shape",
+          "path": "/live/stream",
+          "expectedStatus": 200,
+          "contains": [
+            "event: message",
+            "\"op\":\"append\""
+          ],
+          "headers": {
+            "content-type": "text/event-stream"
+          }
+        },
+        {
+          "id": "auth_expiry",
+          "path": "/live/auth-expired",
+          "expectedStatus": 401,
+          "jsonEquals": {
+            "error": "auth_expired",
+            "event": "arlen:auth-expired"
+          }
+        },
+        {
+          "id": "backpressure",
+          "path": "/live/backpressure",
+          "expectedStatus": 429,
+          "jsonEquals": {
+            "error": "backpressure",
+            "retryAfter": 2
+          }
+        },
+        {
+          "id": "runtime_asset",
+          "path": "/arlen/live.js",
+          "expectedStatus": 200,
+          "contains": "window.ArlenLive"
+        }
+      ],
+      "staticChecks": [
+        {
+          "path": "tests/acceptance/live_ui_reference/README.md",
+          "contains": "Phase 37I"
+        },
+        {
+          "path": "tests/fixtures/phase37/public_surface_contract.json",
+          "contains": "live_realtime"
+        }
+      ]
+    },
+    {
+      "id": "packaged_deploy",
+      "description": "Phase 37J packaged deploy acceptance site.",
+      "port": 37376,
+      "serviceBacked": false,
+      "startCommand": [
+        "python3",
+        "{repo_root}/tools/ci/phase37_acceptance_site_server.py",
+        "--site",
+        "packaged_deploy",
+        "--port",
+        "{port}",
+        "--log",
+        "{output_dir}/packaged_deploy.server.log"
+      ],
+      "readyProbe": {
+        "path": "/healthz",
+        "expectedStatus": 200,
+        "contains": "\"status\": \"ok\""
+      },
+      "probes": [
+        {
+          "id": "release_manifest",
+          "path": "/package/manifest",
+          "expectedStatus": 200,
+          "contains": [
+            "\"runtime\": \"packaged\"",
+            "\"server\": \"boomhauer\"",
+            "\"propaneAccessories\""
+          ],
+          "jsonEquals": {
+            "releaseId": "phase37-packaged-fixture",
+            "runtime": "packaged"
+          }
+        },
+        {
+          "id": "health_check",
+          "path": "/package/healthz",
+          "expectedStatus": 200,
+          "jsonEquals": {
+            "status": "ok",
+            "packaged": true
+          }
+        },
+        {
+          "id": "static_asset",
+          "path": "/package/static/app.css",
+          "expectedStatus": 200,
+          "contains": ".packaged"
+        },
+        {
+          "id": "template_rendering",
+          "path": "/package/template",
+          "expectedStatus": 200,
+          "contains": [
+            "Packaged Template",
+            "rendered"
+          ]
+        },
+        {
+          "id": "jobs_worker_once",
+          "path": "/package/jobs-worker",
+          "expectedStatus": 200,
+          "jsonEquals": {
+            "mode": "once",
+            "processed": 1,
+            "status": "ok"
+          }
+        },
+        {
+          "id": "deploy_local_workflow",
+          "path": "/package/deploy",
+          "expectedStatus": 200,
+          "contains": [
+            "\"dryrun\": \"ok\"",
+            "\"rollback\": \"available\"",
+            "\"status\": \"ok\""
+          ]
+        }
+      ],
+      "staticChecks": [
+        {
+          "path": "tests/acceptance/packaged_deploy/README.md",
+          "contains": "Phase 37J"
+        },
+        {
+          "path": "tests/fixtures/phase37/public_surface_contract.json",
+          "contains": "deploy_runtime"
+        }
+      ]
     }
   ]
 }

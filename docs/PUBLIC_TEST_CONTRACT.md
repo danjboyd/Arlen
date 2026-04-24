@@ -1,6 +1,6 @@
 # Public Test Contract
 
-Status: Phase 37A baseline
+Status: Phase 37 complete
 Last updated: 2026-04-24
 
 This document defines the release-confidence contract for Arlen's public
@@ -59,6 +59,25 @@ make phase37-confidence
 The confidence artifacts are written under
 `build/release_confidence/phase37/`.
 
+Phase 37 is a release-confidence lane, not a branch-protection change by
+itself. The current required merge-gate checks remain defined in
+`docs/CI_ALIGNMENT.md`.
+
+## Acceptance Sites
+
+The default `phase37-acceptance` manifest is service-free and currently covers:
+
+- `eoc_kitchen_sink`
+- `mvc_crud`
+- `module_portal`
+- `data_orm_reference`
+- `live_ui_reference`
+- `packaged_deploy`
+
+These sites prove integration contracts and user workflows. They do not replace
+focused unit/regression tests, live adapter tests, or the Phase 31/32/36 deploy
+confidence lanes that exercise packaged deployment behavior more deeply.
+
 ## Regression Intake
 
 When fixing a public bug:
@@ -69,3 +88,8 @@ When fixing a public bug:
    process, packaging, or client/runtime boundaries.
 4. Update the public contract matrix when a new surface or gate exists.
 5. Update user-facing docs when behavior changed.
+
+For acceptance probes, edit `tests/fixtures/phase37/acceptance_sites.json`.
+Prefer service-free fixture behavior by default; mark a site `serviceBacked`
+only when it requires an explicit external dependency and document the required
+environment variables next to the site.

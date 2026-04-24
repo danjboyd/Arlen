@@ -59,6 +59,10 @@ class Phase37Handler(BaseHTTPRequestHandler):
             self.handle_module_get(path)
         elif self.site == "data_orm_reference":
             self.handle_data_get(path)
+        elif self.site == "live_ui_reference":
+            self.handle_live_get(path)
+        elif self.site == "packaged_deploy":
+            self.handle_packaged_get(path)
         else:
             self.write_json(404, {"error": "unknown_site"})
 
@@ -176,6 +180,77 @@ class Phase37Handler(BaseHTTPRequestHandler):
             self.write_json(422, {"error": "validation_failed", "field": "name"})
             return
         self.write_json(201, {"id": 3, "name": name, "transaction": "committed"})
+
+    def handle_live_get(self, path: str) -> None:
+        if path == "/live":
+            body = "\n".join([
+                "<section id=\"orders\" data-live-region=\"orders\">",
+                "<button data-live-action=\"dispatch\" data-event=\"phase37:refresh\">Refresh</button>",
+                "<div id=\"stream-status\">connected</div>",
+                "<script src=\"/arlen/live.js\"></script>",
+                "</section>",
+            ]).encode("utf-8")
+            self.write(200, body)
+            return
+        if path == "/live/update":
+            self.write_json(200, {
+                "operations": [
+                    {"op": "replace", "target": "#orders", "html": "<section id=\"orders\">updated</section>"},
+                    {"op": "dispatch", "target": "document", "event": "phase37:refresh"},
+                ],
+                "status": "ok",
+            })
+            return
+        if path == "/live/stream":
+            self.write(200,
+                       b"event: message\ndata: {\"op\":\"append\",\"target\":\"#orders\"}\n\n",
+                       "text/event-stream")
+            return
+        if path == "/live/auth-expired":
+            self.write_json(401, {"error": "auth_expired", "event": "arlen:auth-expired"})
+            return
+        if path == "/live/backpressure":
+            self.write_json(429, {"error": "backpressure", "retryAfter": 2})
+            return
+        if path == "/arlen/live.js":
+            self.write(200,
+                       b"window.ArlenLive={version:'phase37-fixture',connect:function(){return true;}};\n",
+                       "application/javascript")
+            return
+        self.write_json(404, {"error": "not_found"})
+
+    def handle_packaged_get(self, path: str) -> None:
+        if path == "/package/manifest":
+            self.write_json(200, {
+                "releaseId": "phase37-packaged-fixture",
+                "runtime": "packaged",
+                "server": "boomhauer",
+                "propaneAccessories": {"environment": "test", "workers": 1},
+                "checks": ["health", "static", "template", "jobs-worker", "deploy-local"],
+            })
+            return
+        if path == "/package/healthz":
+            self.write_json(200, {"status": "ok", "packaged": True})
+            return
+        if path == "/package/static/app.css":
+            self.write(200, b".packaged { color: #111; }\n", "text/css")
+            return
+        if path == "/package/template":
+            self.write(200, b"<main><h1>Packaged Template</h1><p>rendered</p></main>")
+            return
+        if path == "/package/jobs-worker":
+            self.write_json(200, {"mode": "once", "processed": 1, "status": "ok"})
+            return
+        if path == "/package/deploy":
+            self.write_json(200, {
+                "dryrun": "ok",
+                "list": ["local"],
+                "releases": ["phase37-packaged-fixture"],
+                "rollback": "available",
+                "status": "ok",
+            })
+            return
+        self.write_json(404, {"error": "not_found"})
 
 
 def main() -> int:

@@ -4,6 +4,15 @@ Last updated: 2026-04-24
 
 ## Leaving Off (2026-04-24)
 
+- Closed Phase 37 with `37I-37L` delivered:
+  - added live UI and packaged deploy acceptance sites to the Phase 37
+    service-free manifest
+  - Phase 37 confidence now requires EOC, MVC, module portal, data/ORM, live
+    UI, and packaged deploy acceptance sites to pass
+  - updated `docs/CI_ALIGNMENT.md`, `docs/TESTING_WORKFLOW.md`,
+    `docs/PUBLIC_TEST_CONTRACT.md`, the docs index, and the Phase 37 roadmap
+  - Phase 37 is now complete (`37A-37L`) and does not change required
+    branch-protection checks
 - Delivered Phase 37E-37H acceptance sites:
   - added service-free EOC kitchen sink, MVC CRUD, module portal, and data/ORM
     acceptance site entries to `tests/fixtures/phase37/acceptance_sites.json`

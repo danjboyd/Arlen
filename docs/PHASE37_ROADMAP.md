@@ -1,6 +1,6 @@
 # Phase 37 Roadmap
 
-Status: in progress; 37A-37H delivered 2026-04-24
+Status: complete; 37A-37L delivered 2026-04-24
 Last updated: 2026-04-24
 
 ## Goal
@@ -324,7 +324,7 @@ Delivered artifacts:
 
 ## 37I. Live UI Reference Site
 
-Status: planned.
+Status: delivered 2026-04-24.
 
 Goal:
 
@@ -345,9 +345,16 @@ Acceptance:
 - live UI regressions can be reproduced from a site route and a deterministic
   client-runtime script
 
+Delivered artifacts:
+
+- `tests/acceptance/live_ui_reference/`
+- `live_ui_reference` entry in `tests/fixtures/phase37/acceptance_sites.json`
+- live page, DOM operation payload, SSE stream shape, auth expiry,
+  backpressure, and runtime asset probes
+
 ## 37J. Packaged Deploy Site
 
-Status: planned.
+Status: delivered 2026-04-24.
 
 Goal:
 
@@ -368,9 +375,18 @@ Acceptance:
 
 - the public release bundle can be smoke-tested as users will actually run it
 
+Delivered artifacts:
+
+- `tests/acceptance/packaged_deploy/`
+- `packaged_deploy` entry in `tests/fixtures/phase37/acceptance_sites.json`
+- packaged manifest, health, static asset, template rendering, jobs-worker,
+  deploy local workflow, and propane accessories probes
+- real package/deploy behavior remains covered by Phase 31, Phase 32, and
+  Phase 36 confidence lanes referenced in the public surface contract
+
 ## 37K. Confidence Lane And CI Alignment
 
-Status: planned.
+Status: delivered 2026-04-24.
 
 Goal:
 
@@ -392,9 +408,19 @@ Acceptance:
 - release candidates include a Phase 37 evidence pack
 - CI naming and documentation stay aligned with the actual required checks
 
+Delivered artifacts:
+
+- `make phase37-contract`
+- `make phase37-acceptance`
+- `make phase37-confidence`
+- `tools/ci/run_phase37_*.sh`
+- `tools/ci/generate_phase37_confidence_artifacts.py`
+- `docs/CI_ALIGNMENT.md` documents that Phase 37 is a release-confidence lane
+  and does not change required merge-gate checks
+
 ## 37L. Regression Intake And Closeout Docs
 
-Status: planned.
+Status: delivered 2026-04-24.
 
 Goal:
 
@@ -418,3 +444,11 @@ Acceptance:
 - future bugs have a clear path from report to permanent regression evidence
 - Phase 37 closes with the same roadmap, docs, and confidence-lane alignment
   expected of shipped behavior
+
+Delivered artifacts:
+
+- `docs/PUBLIC_TEST_CONTRACT.md`
+- `docs/TESTING_WORKFLOW.md`
+- `docs/README.md`
+- `docs/STATUS.md`
+- this roadmap marked complete

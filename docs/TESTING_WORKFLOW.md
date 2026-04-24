@@ -195,7 +195,8 @@ Windows-focused preview lanes:
 5. Promote the change through `make test-unit`, broader integration coverage
    when applicable, and the matching confidence lane such as
    `make phase21-confidence`, `make phase23-confidence`,
-   `make phase25-confidence`, or `make phase26-confidence`.
+   `make phase25-confidence`, `make phase26-confidence`, or
+   `make phase37-confidence`.
 
 ## 3. Template Regression Intake
 
@@ -298,3 +299,12 @@ Artifacts are written to `build/release_confidence/phase37/`. The default
 acceptance manifest is service-free; set `ARLEN_PHASE37_INCLUDE_SERVICE_BACKED=1`
 only when a later acceptance site explicitly documents required external
 services.
+
+To add or update a Phase 37 acceptance probe:
+
+1. Add the route behavior to the relevant acceptance site fixture or helper.
+2. Add a probe entry to `tests/fixtures/phase37/acceptance_sites.json`.
+3. Keep the default probe service-free unless the site is explicitly marked
+   `serviceBacked`.
+4. Run `make phase37-acceptance`.
+5. Run `make phase37-confidence` before closeout or release-candidate review.
