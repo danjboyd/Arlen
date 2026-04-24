@@ -40,6 +40,16 @@ def main() -> int:
         "parser_protocol_corpus": contract.get("template_parser_case_count", 0) >= 4
         and contract.get("http_protocol_case_count", 0) >= 4,
         "acceptance_harness": acceptance.get("status") == "pass",
+        "acceptance_sites_37e_37h": {
+            "eoc_kitchen_sink",
+            "mvc_crud",
+            "module_portal",
+            "data_orm_reference",
+        }.issubset({
+            str(site.get("id"))
+            for site in acceptance.get("sites", [])
+            if isinstance(site, dict) and site.get("status") == "pass"
+        }),
     }
     status = "pass" if all(checks.values()) else "fail"
     eval_payload = {
@@ -62,6 +72,7 @@ def main() -> int:
         f"- EOC golden catalog: `{checks['eoc_golden_catalog']}`",
         f"- parser/protocol corpus: `{checks['parser_protocol_corpus']}`",
         f"- acceptance harness: `{checks['acceptance_harness']}`",
+        f"- acceptance sites 37E-37H: `{checks['acceptance_sites_37e_37h']}`",
         "",
         "Focused entrypoints:",
         "",

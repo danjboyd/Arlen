@@ -1,6 +1,6 @@
 # Phase 37 Roadmap
 
-Status: in progress; 37A-37D delivered 2026-04-24
+Status: in progress; 37A-37H delivered 2026-04-24
 Last updated: 2026-04-24
 
 ## Goal
@@ -201,7 +201,7 @@ Delivered artifacts:
 
 ## 37E. EOC Kitchen Sink Site
 
-Status: planned.
+Status: delivered 2026-04-24.
 
 Goal:
 
@@ -222,9 +222,15 @@ Acceptance:
 - template runtime regressions are observable through HTTP, not only direct
   render helper calls
 
+Delivered artifacts:
+
+- `tests/acceptance/eoc_kitchen_sink/`
+- `eoc_kitchen_sink` entry in `tests/fixtures/phase37/acceptance_sites.json`
+- dynamic fixture responses in `tools/ci/phase37_acceptance_site_server.py`
+
 ## 37F. MVC CRUD Site
 
-Status: planned.
+Status: delivered 2026-04-24.
 
 Goal:
 
@@ -250,9 +256,16 @@ Acceptance:
 - the default app workflow works end to end without relying on module-specific
   integration tests
 
+Delivered artifacts:
+
+- `tests/acceptance/mvc_crud/`
+- `mvc_crud` entry in `tests/fixtures/phase37/acceptance_sites.json`
+- harness support for POST bodies, request headers, redirect assertions, and
+  static asset probes
+
 ## 37G. Module Portal Site
 
-Status: planned.
+Status: delivered 2026-04-24.
 
 Goal:
 
@@ -273,9 +286,16 @@ Acceptance:
 
 - first-party modules prove shared runtime compatibility before public release
 
+Delivered artifacts:
+
+- `tests/acceptance/module_portal/`
+- `module_portal` entry in `tests/fixtures/phase37/acceptance_sites.json`
+- auth, admin, jobs, notifications, search, storage, ops, asset, and protected
+  route probes
+
 ## 37H. Data And ORM Reference Site
 
-Status: planned.
+Status: delivered 2026-04-24.
 
 Goal:
 
@@ -294,6 +314,13 @@ Acceptance:
 
 - data-layer regressions have a site-level reproduction path in addition to
   focused unit and live-adapter tests
+
+Delivered artifacts:
+
+- `tests/acceptance/data_orm_reference/`
+- `data_orm_reference` entry in `tests/fixtures/phase37/acceptance_sites.json`
+- migration, deterministic record ordering, create, validation, descriptor, and
+  primary-key hydration probes
 
 ## 37I. Live UI Reference Site
 

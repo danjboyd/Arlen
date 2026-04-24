@@ -46,10 +46,26 @@ def format_args(args: list[str], repo_root: Path, port: int, output_dir: Path) -
     return formatted
 
 
-def fetch(url: str, timeout: float) -> tuple[int, str, dict[str, str]]:
-    request = urllib.request.Request(url, headers={"Connection": "close"})
+class NoRedirectHandler(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):  # type: ignore[override]
+        return None
+
+
+def fetch(url: str, probe: dict[str, Any], timeout: float) -> tuple[int, str, dict[str, str]]:
+    method = str(probe.get("method", "GET")).upper()
+    body_value = probe.get("body")
+    data = None
+    if isinstance(body_value, str):
+        data = body_value.encode("utf-8")
+    headers = {"Connection": "close"}
+    probe_headers = probe.get("requestHeaders")
+    if isinstance(probe_headers, dict):
+        for key, value in probe_headers.items():
+            headers[str(key)] = str(value)
+    request = urllib.request.Request(url, data=data, headers=headers, method=method)
+    opener = urllib.request.build_opener(NoRedirectHandler)
     try:
-        with urllib.request.urlopen(request, timeout=timeout) as response:
+        with opener.open(request, timeout=timeout) as response:
             body = response.read().decode("utf-8", errors="replace")
             headers = {key.lower(): value for key, value in response.headers.items()}
             return response.status, body, headers
@@ -64,14 +80,21 @@ def run_probe(site_id: str, base_url: str, probe: dict[str, Any], timeout: float
     expected_status = int(probe.get("expectedStatus", 200))
     url = base_url + str(probe.get("path", "/"))
     try:
-        status, body, headers = fetch(url, timeout)
+        status, body, headers = fetch(url, probe, timeout)
     except Exception as exc:  # noqa: BLE001 - preserve exact probe failure
         return ProbeResult(site_id, probe_id, "fail", f"{url}: request failed: {exc}")
     if status != expected_status:
         return ProbeResult(site_id, probe_id, "fail", f"{url}: expected {expected_status}, got {status}")
     contains = probe.get("contains")
-    if isinstance(contains, str) and contains not in body:
-        return ProbeResult(site_id, probe_id, "fail", f"{url}: missing body text {contains!r}")
+    if isinstance(contains, str):
+        contains_values = [contains]
+    elif isinstance(contains, list):
+        contains_values = [str(item) for item in contains]
+    else:
+        contains_values = []
+    for expected_text in contains_values:
+        if expected_text not in body:
+            return ProbeResult(site_id, probe_id, "fail", f"{url}: missing body text {expected_text!r}")
     expected_headers = probe.get("headers")
     if isinstance(expected_headers, dict):
         for key, value in expected_headers.items():

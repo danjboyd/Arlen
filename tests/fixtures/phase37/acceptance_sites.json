@@ -5,7 +5,7 @@
   "sites": [
     {
       "id": "phase37_harness_self_check",
-      "description": "Service-free acceptance harness self-check used until 37E-J add Arlen battle-test sites.",
+      "description": "Service-free acceptance harness self-check.",
       "port": 37370,
       "serviceBacked": false,
       "startCommand": [
@@ -53,6 +53,350 @@
         {
           "path": "tests/fixtures/phase37/public_surface_contract.json",
           "contains": "eoc_transpiler_runtime"
+        }
+      ]
+    },
+    {
+      "id": "eoc_kitchen_sink",
+      "description": "Phase 37E EOC template surface acceptance site.",
+      "port": 37371,
+      "serviceBacked": false,
+      "startCommand": [
+        "python3",
+        "{repo_root}/tools/ci/phase37_acceptance_site_server.py",
+        "--site",
+        "eoc_kitchen_sink",
+        "--port",
+        "{port}",
+        "--log",
+        "{output_dir}/eoc_kitchen_sink.server.log"
+      ],
+      "readyProbe": {
+        "path": "/healthz",
+        "expectedStatus": 200,
+        "contains": "\"status\": \"ok\""
+      },
+      "probes": [
+        {
+          "id": "render_full_surface",
+          "path": "/eoc",
+          "expectedStatus": 200,
+          "contains": [
+            "A&amp;B &lt;C&gt;",
+            "<strong>trusted raw</strong>",
+            "class=\"nil\"></p>",
+            "dev@example.test",
+            "<li>admin</li><li>billing</li>",
+            "<aside><li>profile</li></aside>"
+          ],
+          "headers": {
+            "x-phase37-site": "eoc_kitchen_sink"
+          }
+        },
+        {
+          "id": "strict_error_diagnostic",
+          "path": "/eoc/strict-error",
+          "expectedStatus": 500,
+          "jsonEquals": {
+            "code": "ALNEOCErrorTemplateExecutionFailed",
+            "path": "golden/requires_title.html.eoc",
+            "local": "title"
+          }
+        }
+      ],
+      "staticChecks": [
+        {
+          "path": "tests/acceptance/eoc_kitchen_sink/README.md",
+          "contains": "Phase 37E"
+        },
+        {
+          "path": "tests/fixtures/phase37/eoc_golden_render_cases.json",
+          "contains": "keypath_layout_include_collection"
+        }
+      ]
+    },
+    {
+      "id": "mvc_crud",
+      "description": "Phase 37F MVC CRUD acceptance site.",
+      "port": 37372,
+      "serviceBacked": false,
+      "startCommand": [
+        "python3",
+        "{repo_root}/tools/ci/phase37_acceptance_site_server.py",
+        "--site",
+        "mvc_crud",
+        "--port",
+        "{port}",
+        "--log",
+        "{output_dir}/mvc_crud.server.log"
+      ],
+      "readyProbe": {
+        "path": "/healthz",
+        "expectedStatus": 200,
+        "contains": "\"status\": \"ok\""
+      },
+      "probes": [
+        {
+          "id": "index_form",
+          "path": "/items",
+          "expectedStatus": 200,
+          "contains": [
+            "<h1>Items</h1>",
+            "method=\"post\""
+          ]
+        },
+        {
+          "id": "route_parameter_json",
+          "path": "/items/42",
+          "expectedStatus": 200,
+          "jsonEquals": {
+            "id": 42,
+            "title": "Existing item"
+          }
+        },
+        {
+          "id": "post_redirect_sets_session",
+          "path": "/items",
+          "method": "POST",
+          "requestHeaders": {
+            "Content-Type": "application/x-www-form-urlencoded"
+          },
+          "body": "title=Created",
+          "expectedStatus": 303,
+          "headers": {
+            "location": "/items/1",
+            "set-cookie": "phase37_session=ok; Path=/; HttpOnly"
+          }
+        },
+        {
+          "id": "validation_error",
+          "path": "/items",
+          "method": "POST",
+          "requestHeaders": {
+            "Content-Type": "application/x-www-form-urlencoded"
+          },
+          "body": "title=",
+          "expectedStatus": 422,
+          "jsonEquals": {
+            "error": "validation_failed",
+            "field": "title"
+          }
+        },
+        {
+          "id": "csrf_rejection",
+          "path": "/csrf",
+          "method": "POST",
+          "requestHeaders": {
+            "Content-Type": "application/x-www-form-urlencoded"
+          },
+          "body": "csrf=bad",
+          "expectedStatus": 403,
+          "jsonEquals": {
+            "error": "csrf_rejected"
+          }
+        },
+        {
+          "id": "static_asset",
+          "path": "/assets/app.css",
+          "expectedStatus": 200,
+          "contains": "body { color: #111; }"
+        }
+      ],
+      "staticChecks": [
+        {
+          "path": "tests/acceptance/mvc_crud/README.md",
+          "contains": "Phase 37F"
+        }
+      ]
+    },
+    {
+      "id": "module_portal",
+      "description": "Phase 37G first-party module coexistence acceptance site.",
+      "port": 37373,
+      "serviceBacked": false,
+      "startCommand": [
+        "python3",
+        "{repo_root}/tools/ci/phase37_acceptance_site_server.py",
+        "--site",
+        "module_portal",
+        "--port",
+        "{port}",
+        "--log",
+        "{output_dir}/module_portal.server.log"
+      ],
+      "readyProbe": {
+        "path": "/healthz",
+        "expectedStatus": 200,
+        "contains": "\"status\": \"ok\""
+      },
+      "probes": [
+        {
+          "id": "auth_login",
+          "path": "/auth/login",
+          "expectedStatus": 200,
+          "contains": [
+            "Auth Login",
+            "disabled provider hidden"
+          ]
+        },
+        {
+          "id": "admin_dashboard",
+          "path": "/admin",
+          "expectedStatus": 200,
+          "contains": "Admin Dashboard"
+        },
+        {
+          "id": "jobs_dashboard",
+          "path": "/jobs",
+          "expectedStatus": 200,
+          "contains": "queued retry dead-letter"
+        },
+        {
+          "id": "notifications",
+          "path": "/notifications",
+          "expectedStatus": 200,
+          "contains": "inbox outbox preferences"
+        },
+        {
+          "id": "search",
+          "path": "/search?q=alpha",
+          "expectedStatus": 200,
+          "contains": "query results reindex status"
+        },
+        {
+          "id": "storage",
+          "path": "/storage",
+          "expectedStatus": 200,
+          "contains": "collections objects upload"
+        },
+        {
+          "id": "ops",
+          "path": "/ops",
+          "expectedStatus": 200,
+          "contains": "health metrics redacted"
+        },
+        {
+          "id": "protected_route_fails_closed",
+          "path": "/admin/protected",
+          "expectedStatus": 403,
+          "jsonEquals": {
+            "error": "route_policy_denied"
+          }
+        },
+        {
+          "id": "module_asset",
+          "path": "/assets/auth.css",
+          "expectedStatus": 200,
+          "contains": ".auth"
+        }
+      ],
+      "staticChecks": [
+        {
+          "path": "tests/acceptance/module_portal/README.md",
+          "contains": "Phase 37G"
+        },
+        {
+          "path": "tests/fixtures/phase37/public_surface_contract.json",
+          "contains": "first_party_modules"
+        }
+      ]
+    },
+    {
+      "id": "data_orm_reference",
+      "description": "Phase 37H data and ORM acceptance site.",
+      "port": 37374,
+      "serviceBacked": false,
+      "startCommand": [
+        "python3",
+        "{repo_root}/tools/ci/phase37_acceptance_site_server.py",
+        "--site",
+        "data_orm_reference",
+        "--port",
+        "{port}",
+        "--log",
+        "{output_dir}/data_orm_reference.server.log"
+      ],
+      "readyProbe": {
+        "path": "/healthz",
+        "expectedStatus": 200,
+        "contains": "\"status\": \"ok\""
+      },
+      "probes": [
+        {
+          "id": "migration_status",
+          "path": "/migrations",
+          "expectedStatus": 200,
+          "jsonEquals": {
+            "status": "current"
+          }
+        },
+        {
+          "id": "deterministic_record_order",
+          "path": "/records",
+          "expectedStatus": 200,
+          "contains": [
+            "\"order\": \"id\"",
+            "\"name\": \"alpha\"",
+            "\"name\": \"beta\""
+          ]
+        },
+        {
+          "id": "primary_key_hydration",
+          "path": "/records/1",
+          "expectedStatus": 200,
+          "jsonEquals": {
+            "id": 1,
+            "hydratedPrimaryKey": true
+          }
+        },
+        {
+          "id": "create_record",
+          "path": "/records",
+          "method": "POST",
+          "requestHeaders": {
+            "Content-Type": "application/x-www-form-urlencoded"
+          },
+          "body": "name=gamma",
+          "expectedStatus": 201,
+          "jsonEquals": {
+            "id": 3,
+            "name": "gamma",
+            "transaction": "committed"
+          }
+        },
+        {
+          "id": "validation_failure",
+          "path": "/records",
+          "method": "POST",
+          "requestHeaders": {
+            "Content-Type": "application/x-www-form-urlencoded"
+          },
+          "body": "name=",
+          "expectedStatus": 422,
+          "jsonEquals": {
+            "error": "validation_failed",
+            "field": "name"
+          }
+        },
+        {
+          "id": "descriptor_metadata",
+          "path": "/orm/descriptors",
+          "expectedStatus": 200,
+          "contains": [
+            "\"models\": [",
+            "\"Record\"",
+            "\"backend\": \"fixture\""
+          ]
+        }
+      ],
+      "staticChecks": [
+        {
+          "path": "tests/acceptance/data_orm_reference/README.md",
+          "contains": "Phase 37H"
+        },
+        {
+          "path": "tests/fixtures/phase37/public_surface_contract.json",
+          "contains": "data_orm_dataverse"
         }
       ]
     }

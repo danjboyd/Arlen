@@ -4,6 +4,15 @@ Last updated: 2026-04-24
 
 ## Leaving Off (2026-04-24)
 
+- Delivered Phase 37E-37H acceptance sites:
+  - added service-free EOC kitchen sink, MVC CRUD, module portal, and data/ORM
+    acceptance site entries to `tests/fixtures/phase37/acceptance_sites.json`
+  - added `tools/ci/phase37_acceptance_site_server.py` for deterministic
+    dynamic HTTP fixture behavior
+  - extended the acceptance harness with POST, request headers, no-redirect
+    assertions, and multi-string body assertions
+  - updated Phase 37 confidence generation to require the 37E-37H acceptance
+    sites to pass
 - Delivered Phase 37A-37D for public-release test confidence:
   - added `docs/PUBLIC_TEST_CONTRACT.md` and
     `tests/fixtures/phase37/public_surface_contract.json` as the checked-in
