@@ -24,6 +24,17 @@ REQUIRED_SURFACES = {
     "apple_baseline",
 }
 
+REQUIRED_COVERAGE_STATUS_FIELDS = {
+    "fixture_contract",
+    "unit_regression",
+    "integration",
+    "acceptance_fixture",
+    "real_runtime_acceptance",
+    "optional_live",
+}
+
+ALLOWED_COVERAGE_STATUS_VALUES = {"covered", "planned", "conditional", "not_applicable"}
+
 
 def load_json(path: Path) -> dict[str, Any]:
     with path.open("r", encoding="utf-8") as handle:
@@ -78,6 +89,19 @@ def validate_public_surface_contract(repo_root: Path, errors: list[str]) -> dict
             require(isinstance(entry.get(field), list),
                     errors,
                     f"{surface_id}: {field} must be a list")
+        coverage_status = entry.get("coverageStatus")
+        require(isinstance(coverage_status, dict),
+                errors,
+                f"{surface_id}: coverageStatus must be an object")
+        if isinstance(coverage_status, dict):
+            missing_fields = REQUIRED_COVERAGE_STATUS_FIELDS.difference(coverage_status)
+            require(not missing_fields,
+                    errors,
+                    f"{surface_id}: coverageStatus missing fields {sorted(missing_fields)}")
+            for field, value in coverage_status.items():
+                require(value in ALLOWED_COVERAGE_STATUS_VALUES,
+                        errors,
+                        f"{surface_id}: coverageStatus.{field} has invalid value {value}")
         for evidence in entry.get("focusedEvidence", []) + entry.get("integrationEvidence", []):
             if isinstance(evidence, str):
                 require(path_exists(repo_root, evidence),
@@ -201,7 +225,49 @@ def validate_acceptance_manifest(repo_root: Path, errors: list[str]) -> dict[str
         require(required in runtime_variants,
                 errors,
                 f"acceptance manifest missing runtime variant for {required}")
+    seen_ids: set[str] = set()
+    for site in sites if isinstance(sites, list) else []:
+        if not isinstance(site, dict):
+            errors.append("acceptance manifest site entry is not an object")
+            continue
+        site_id = site.get("id")
+        require(isinstance(site_id, str) and site_id.replace("_", "").isalnum(),
+                errors,
+                f"acceptance site has unstable id: {site_id}")
+        require(site_id not in seen_ids,
+                errors,
+                f"duplicate acceptance site id: {site_id}")
+        seen_ids.add(site_id)
+        require(isinstance(site.get("description"), str) and len(site.get("description", "")) >= 12,
+                errors,
+                f"{site_id}: missing description")
+        require(site.get("mode", "fast") in {"fast", "runtime"},
+                errors,
+                f"{site_id}: invalid mode")
+        if site.get("mode") == "runtime":
+            require(isinstance(site.get("requiredEnvironment"), list) and len(site.get("requiredEnvironment")) > 0,
+                    errors,
+                    f"{site_id}: runtime site must document requiredEnvironment")
+        for check in site.get("staticChecks", []):
+            if isinstance(check, dict) and isinstance(check.get("path"), str):
+                require(path_exists(repo_root, check["path"]),
+                        errors,
+                        f"{site_id}: static check path does not exist: {check['path']}")
     return payload
+
+
+def coverage_summary(contract: dict[str, Any]) -> dict[str, Any]:
+    summary: dict[str, Any] = {}
+    for entry in contract.get("surfaces", []):
+        if not isinstance(entry, dict):
+            continue
+        coverage = entry.get("coverageStatus")
+        if not isinstance(coverage, dict):
+            continue
+        for field, value in coverage.items():
+            bucket = summary.setdefault(field, {})
+            bucket[value] = bucket.get(value, 0) + 1
+    return summary
 
 
 def main() -> int:
@@ -225,6 +291,7 @@ def main() -> int:
         "template_parser_case_count": len(corpus.get("templateParserCases", [])),
         "http_protocol_case_count": len(corpus.get("httpProtocolCases", [])),
         "acceptance_site_count": len(acceptance.get("sites", [])),
+        "coverage_summary": coverage_summary(contract),
         "errors": errors,
     }
     if args.output:

@@ -1,6 +1,6 @@
 # Phase 37 Roadmap
 
-Status: validation-depth follow-up in progress; 37A-37P delivered 2026-04-24; 37Q-37S planned
+Status: complete; 37A-37S delivered 2026-04-24
 Last updated: 2026-04-24
 
 ## Goal
@@ -597,7 +597,7 @@ Delivered artifacts:
 
 ## 37Q. Regression Intake Enforcement
 
-Status: planned.
+Status: delivered 2026-04-24.
 
 Goal:
 
@@ -619,9 +619,17 @@ Acceptance:
 - future public bug fixes leave permanent evidence in the correct layer instead
   of only adding broad end-to-end checks
 
+Delivered artifacts:
+
+- `tools/ci/check_phase37_intake.py`
+- `make phase37-intake`
+- `make phase37-confidence` now includes the regression intake check
+- acceptance manifest validation for stable IDs, descriptions, runtime
+  metadata, probe IDs, and static artifact paths
+
 ## 37R. Real Packaged Deploy Release Proof
 
-Status: planned.
+Status: delivered 2026-04-24.
 
 Goal:
 
@@ -644,9 +652,19 @@ Acceptance:
 - release candidates include evidence that the packaging and deploy path users
   run is operational, not just contract-shaped
 
+Delivered artifacts:
+
+- `tools/ci/run_phase37_packaged_deploy_proof.sh`
+- `make phase37-packaged-deploy-proof`
+- `build/release_confidence/phase37/packaged_deploy_proof.json`
+- proof references for the existing real packaged deployment integration
+  tests in `tests/integration/DeploymentIntegrationTests.m`
+- `make phase37-confidence` records packaged deploy proof status; the full
+  real lane remains `make test-integration-filter TEST=DeploymentIntegrationTests`
+
 ## 37S. Contract Coverage Status Tracking
 
-Status: planned.
+Status: delivered 2026-04-24.
 
 Goal:
 
@@ -672,3 +690,11 @@ Acceptance:
 
 - reviewers can see not just that a surface is listed, but how strongly it is
   proven by current evidence
+
+Delivered artifacts:
+
+- `coverageStatus` fields in
+  `tests/fixtures/phase37/public_surface_contract.json`
+- `make phase37-contract` validates required coverage status fields and values
+- `make phase37-confidence` includes coverage status tracking in its generated
+  evaluation and evidence manifest

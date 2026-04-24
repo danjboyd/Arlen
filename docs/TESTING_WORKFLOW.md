@@ -52,11 +52,16 @@ Phase 37 public-release confidence lanes are available:
     their real Arlen app variants are implemented
 - `make phase37-eoc-golden`
   - executes the Phase 37 EOC golden render/diagnostic fixture assertions
+- `make phase37-intake`
+  - validates the public bug-fix checklist and acceptance manifest metadata
+- `make phase37-packaged-deploy-proof`
+  - records evidence that packaged deploy behavior is covered by real
+    deployment integration tests
 - `make phase37-harness-selftest`
   - runs negative and positive self-tests for acceptance harness assertions
 - `make phase37-confidence`
-  - runs the Phase 37 contract and acceptance lanes and writes artifacts under
-    `build/release_confidence/phase37/`
+  - runs the Phase 37 contract, intake, packaged-deploy proof, and acceptance
+    lanes and writes artifacts under `build/release_confidence/phase37/`
 
 Phase 20 data-layer-focused lanes remain available:
 
@@ -300,6 +305,8 @@ Phase 37 public-release confidence uses:
 
 ```bash
 make phase37-contract
+make phase37-intake
+make phase37-packaged-deploy-proof
 make phase37-acceptance
 make phase37-confidence
 ```
@@ -315,8 +322,11 @@ To add or update a Phase 37 acceptance probe:
 2. Add a probe entry to `tests/fixtures/phase37/acceptance_sites.json`.
 3. Keep the default probe service-free unless the site is explicitly marked
    `serviceBacked`.
-4. Run `make phase37-acceptance`.
-5. Run `make phase37-confidence` before closeout or release-candidate review.
+4. Give every site and probe a stable ID, useful description, and checked-in
+   artifact path for any static check.
+5. Run `make phase37-intake`.
+6. Run `make phase37-acceptance`.
+7. Run `make phase37-confidence` before closeout or release-candidate review.
 
 Use runtime-mode entries for real Arlen app variants and keep fixture-backed
 entries in fast mode. Do not move runtime-mode entries into the default lane

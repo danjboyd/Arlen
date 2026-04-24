@@ -29,12 +29,16 @@ def main() -> int:
     parser.add_argument("--contract-summary", default="build/release_confidence/phase37/contract_summary.json")
     parser.add_argument("--eoc-golden-summary", default="build/release_confidence/phase37/eoc_golden_summary.json")
     parser.add_argument("--acceptance-manifest", default="build/release_confidence/phase37/acceptance/manifest.json")
+    parser.add_argument("--intake-summary", default="build/release_confidence/phase37/intake_summary.json")
+    parser.add_argument("--packaged-deploy-proof", default="build/release_confidence/phase37/packaged_deploy_proof.json")
     args = parser.parse_args()
 
     output_dir = Path(args.output_dir).resolve()
     contract = load_json(Path(args.contract_summary).resolve())
     eoc_golden = load_json(Path(args.eoc_golden_summary).resolve())
     acceptance = load_json(Path(args.acceptance_manifest).resolve())
+    intake = load_json(Path(args.intake_summary).resolve())
+    packaged_deploy = load_json(Path(args.packaged_deploy_proof).resolve())
     assertion_log = output_dir / "acceptance_assertion_selftest.log"
     generated_at = datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
     checks = {
@@ -59,6 +63,10 @@ def main() -> int:
             for site in acceptance.get("sites", [])
             if isinstance(site, dict) and site.get("status") == "pass"
         }),
+        "regression_intake_enforcement": intake.get("status") == "pass",
+        "packaged_deploy_release_proof": packaged_deploy.get("status") == "pass",
+        "contract_coverage_status_tracking": isinstance(contract.get("coverage_summary"), dict)
+        and bool(contract.get("coverage_summary", {}).get("fixture_contract")),
     }
     status = "pass" if all(checks.values()) else "fail"
     eval_payload = {
@@ -69,6 +77,8 @@ def main() -> int:
         "contract_summary": str(Path(args.contract_summary)),
         "eoc_golden_summary": str(Path(args.eoc_golden_summary)),
         "acceptance_manifest": str(Path(args.acceptance_manifest)),
+        "intake_summary": str(Path(args.intake_summary)),
+        "packaged_deploy_proof": str(Path(args.packaged_deploy_proof)),
     }
     write_json(output_dir / "phase37_confidence_eval.json", eval_payload)
     markdown = "\n".join([
@@ -85,10 +95,15 @@ def main() -> int:
         f"- acceptance harness: `{checks['acceptance_harness']}`",
         f"- acceptance assertion self-test: `{checks['acceptance_assertion_selftest']}`",
         f"- acceptance sites 37E-37J: `{checks['acceptance_sites_37e_37j']}`",
+        f"- regression intake enforcement: `{checks['regression_intake_enforcement']}`",
+        f"- packaged deploy release proof: `{checks['packaged_deploy_release_proof']}`",
+        f"- contract coverage status tracking: `{checks['contract_coverage_status_tracking']}`",
         "",
         "Focused entrypoints:",
         "",
         "- `make phase37-contract`",
+        "- `make phase37-intake`",
+        "- `make phase37-packaged-deploy-proof`",
         "- `make phase37-acceptance`",
         "- `make phase37-confidence`",
         "",
@@ -101,6 +116,8 @@ def main() -> int:
         "artifacts": [
             "contract_summary.json",
             "eoc_golden_summary.json",
+            "intake_summary.json",
+            "packaged_deploy_proof.json",
             "acceptance/manifest.json",
             "acceptance_assertion_selftest.log",
             "phase37_confidence_eval.json",

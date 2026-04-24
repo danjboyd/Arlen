@@ -132,6 +132,8 @@ This provisioning work does not change branch protection by itself.
 Phase 37 adds a public-surface contract and service-free acceptance suite:
 
 - `make phase37-contract`
+- `make phase37-intake`
+- `make phase37-packaged-deploy-proof`
 - `make phase37-acceptance`
 - `make phase37-confidence`
 

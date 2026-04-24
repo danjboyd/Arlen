@@ -4,6 +4,13 @@ Last updated: 2026-04-24
 
 ## Leaving Off (2026-04-24)
 
+- Completed Phase 37 through `37Q-37S`:
+  - added regression intake enforcement with `make phase37-intake`
+  - added packaged deploy proof recording with
+    `make phase37-packaged-deploy-proof`
+  - added coverage status tracking to the public surface contract and Phase 37
+    confidence artifacts
+  - Phase 37 validation-depth follow-up is now complete through `37S`
 - Delivered Phase 37M-37P validation-depth follow-up:
   - added fast/runtime acceptance modes with `make phase37-acceptance-fast`
     and `make phase37-acceptance-runtime`

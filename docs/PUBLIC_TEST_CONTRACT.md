@@ -57,6 +57,13 @@ make phase37-acceptance-fast
 make phase37-acceptance-runtime
 ```
 
+Run the regression-intake and packaged-deploy proof checks:
+
+```sh
+make phase37-intake
+make phase37-packaged-deploy-proof
+```
+
 Generate the current Phase 37 evidence pack:
 
 ```sh
@@ -109,3 +116,15 @@ environment variables next to the site.
 The harness supports `contains`, `notContains`, `orderedContains`, `bodyRegex`,
 `headers`, `headerPresent`, `headerRegex`, `jsonEquals`, `jsonPathEquals`, and
 `cookieAttributes`.
+
+## Coverage Status
+
+Every public-surface entry carries a `coverageStatus` object so reviewers can
+separate listed contract coverage from executable proof depth. Required fields
+are `fixture_contract`, `unit_regression`, `integration`,
+`acceptance_fixture`, `real_runtime_acceptance`, and `optional_live`.
+
+Allowed values are `covered`, `planned`, `conditional`, and `not_applicable`.
+`planned` and `conditional` values are acceptable for the default Phase 37 lane
+only when the surface is outside the current service-free release gate or is
+reserved for opt-in live/runtime proof.

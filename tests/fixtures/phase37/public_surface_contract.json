@@ -8,6 +8,8 @@
     "make phase25-focused",
     "make phase26-orm-tests",
     "make phase37-contract",
+    "make phase37-intake",
+    "make phase37-packaged-deploy-proof",
     "make phase37-acceptance",
     "make ci-quality",
     "make ci-sanitizers",
@@ -36,7 +38,15 @@
       ],
       "acceptanceCoverage": [
         "37E:eoc_kitchen_sink"
-      ]
+      ],
+      "coverageStatus": {
+        "fixture_contract": "covered",
+        "unit_regression": "covered",
+        "integration": "covered",
+        "acceptance_fixture": "covered",
+        "real_runtime_acceptance": "planned",
+        "optional_live": "not_applicable"
+      }
     },
     {
       "id": "mvc_controller_routing",
@@ -59,7 +69,15 @@
       ],
       "acceptanceCoverage": [
         "37F:mvc_crud"
-      ]
+      ],
+      "coverageStatus": {
+        "fixture_contract": "covered",
+        "unit_regression": "covered",
+        "integration": "covered",
+        "acceptance_fixture": "covered",
+        "real_runtime_acceptance": "planned",
+        "optional_live": "not_applicable"
+      }
     },
     {
       "id": "http_protocol",
@@ -86,7 +104,15 @@
       "acceptanceCoverage": [
         "37D:acceptance_harness",
         "37F:mvc_crud"
-      ]
+      ],
+      "coverageStatus": {
+        "fixture_contract": "covered",
+        "unit_regression": "covered",
+        "integration": "covered",
+        "acceptance_fixture": "covered",
+        "real_runtime_acceptance": "planned",
+        "optional_live": "conditional"
+      }
     },
     {
       "id": "middleware_security",
@@ -111,7 +137,15 @@
       "acceptanceCoverage": [
         "37F:mvc_crud",
         "37G:module_portal"
-      ]
+      ],
+      "coverageStatus": {
+        "fixture_contract": "covered",
+        "unit_regression": "covered",
+        "integration": "covered",
+        "acceptance_fixture": "covered",
+        "real_runtime_acceptance": "planned",
+        "optional_live": "not_applicable"
+      }
     },
     {
       "id": "cli_generated_apps",
@@ -132,7 +166,15 @@
       ],
       "acceptanceCoverage": [
         "37J:packaged_deploy"
-      ]
+      ],
+      "coverageStatus": {
+        "fixture_contract": "covered",
+        "unit_regression": "covered",
+        "integration": "covered",
+        "acceptance_fixture": "covered",
+        "real_runtime_acceptance": "planned",
+        "optional_live": "not_applicable"
+      }
     },
     {
       "id": "first_party_modules",
@@ -161,7 +203,15 @@
       ],
       "acceptanceCoverage": [
         "37G:module_portal"
-      ]
+      ],
+      "coverageStatus": {
+        "fixture_contract": "covered",
+        "unit_regression": "covered",
+        "integration": "covered",
+        "acceptance_fixture": "covered",
+        "real_runtime_acceptance": "planned",
+        "optional_live": "not_applicable"
+      }
     },
     {
       "id": "data_orm_dataverse",
@@ -195,7 +245,15 @@
       ],
       "acceptanceCoverage": [
         "37H:data_orm_reference"
-      ]
+      ],
+      "coverageStatus": {
+        "fixture_contract": "covered",
+        "unit_regression": "covered",
+        "integration": "covered",
+        "acceptance_fixture": "covered",
+        "real_runtime_acceptance": "planned",
+        "optional_live": "conditional"
+      }
     },
     {
       "id": "live_realtime",
@@ -223,7 +281,15 @@
       ],
       "acceptanceCoverage": [
         "37I:live_ui_reference"
-      ]
+      ],
+      "coverageStatus": {
+        "fixture_contract": "covered",
+        "unit_regression": "covered",
+        "integration": "covered",
+        "acceptance_fixture": "covered",
+        "real_runtime_acceptance": "planned",
+        "optional_live": "conditional"
+      }
     },
     {
       "id": "typescript_client_generation",
@@ -249,7 +315,15 @@
       ],
       "acceptanceCoverage": [
         "37I:live_ui_reference"
-      ]
+      ],
+      "coverageStatus": {
+        "fixture_contract": "covered",
+        "unit_regression": "covered",
+        "integration": "covered",
+        "acceptance_fixture": "covered",
+        "real_runtime_acceptance": "planned",
+        "optional_live": "not_applicable"
+      }
     },
     {
       "id": "deploy_runtime",
@@ -276,7 +350,15 @@
       ],
       "acceptanceCoverage": [
         "37J:packaged_deploy"
-      ]
+      ],
+      "coverageStatus": {
+        "fixture_contract": "covered",
+        "unit_regression": "covered",
+        "integration": "covered",
+        "acceptance_fixture": "covered",
+        "real_runtime_acceptance": "planned",
+        "optional_live": "conditional"
+      }
     },
     {
       "id": "windows_preview",
@@ -299,7 +381,15 @@
       ],
       "acceptanceCoverage": [
         "37J:packaged_deploy"
-      ]
+      ],
+      "coverageStatus": {
+        "fixture_contract": "covered",
+        "unit_regression": "covered",
+        "integration": "covered",
+        "acceptance_fixture": "covered",
+        "real_runtime_acceptance": "conditional",
+        "optional_live": "conditional"
+      }
     },
     {
       "id": "apple_baseline",
@@ -321,7 +411,15 @@
       "requiredLanes": [
         "apple-baseline workflow"
       ],
-      "acceptanceCoverage": []
+      "acceptanceCoverage": [],
+      "coverageStatus": {
+        "fixture_contract": "covered",
+        "unit_regression": "covered",
+        "integration": "covered",
+        "acceptance_fixture": "not_applicable",
+        "real_runtime_acceptance": "conditional",
+        "optional_live": "conditional"
+      }
     }
   ]
 }
