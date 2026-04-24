@@ -1,8 +1,19 @@
 # Arlen Status Checkpoint
 
-Last updated: 2026-04-20
+Last updated: 2026-04-24
 
-## Leaving Off (2026-04-20)
+## Leaving Off (2026-04-24)
+
+- Added planned Phase 37 for public-release test confidence:
+  - next unused phase number is `37`
+  - scoped `37A-37L` around a public-surface test contract matrix, expanded
+    EOC golden-render regressions, deterministic parser/protocol corpus
+    growth, acceptance-site harnesses, battle-test sites for EOC, MVC,
+    modules, data/ORM, live UI, packaged deploy/runtime behavior, CI
+    confidence artifacts, and regression-intake docs
+  - roadmap file: `docs/PHASE37_ROADMAP.md`
+  - the phase keeps live external services optional by default and preserves
+    focused unit/regression tests as the primary bug-fix evidence
 
 - Closed Phase 36 with `36I-36L` delivered:
   - completion candidate commands are covered for local-only, read-only safety,

@@ -149,6 +149,11 @@ For readers evaluating maturity: Arlen is young, but it is no longer a minimal
 scaffold.
 
 - Core framework/runtime work is complete through the current first-party scope, including HTML/JSON request handling, EOC templates, data-layer fundamentals, auth/security hardening, realtime/event-stream support, and deployment/runtime management.
+- Phase 7: complete for current first-party scope.
+- Phase 18: complete (`18A-18H` delivered on 2026-03-14) for the tracked
+  module/runtime milestone.
+- Phase 37 is planned as the next public-release test confidence phase; see
+  [docs/PHASE37_ROADMAP.md](docs/PHASE37_ROADMAP.md).
 - Linux with clang-built GNUstep remains the authoritative production baseline.
 - macOS has a verified Apple-runtime path.
 - Windows `CLANG64` is available as a preview path, not the primary production target.
