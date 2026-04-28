@@ -965,6 +965,9 @@ ci-allocation-faults:
 ci-soak:
 >bash ./tools/ci/run_phase10m_soak.sh
 
+ci-phase38-fd-regression:
+>bash ./tools/ci/run_phase38_fd_regression.sh
+
 ci-chaos-restart:
 >bash ./tools/ci/run_phase10m_chaos_restart.sh
 

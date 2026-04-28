@@ -1,0 +1,20 @@
+{
+  "fileBodyRequestEvery": 40,
+  "fileBodySize": 8192,
+  "lastUpdated": "2026-04-28",
+  "maxDevNullFDDelta": 4,
+  "maxFDDelta": 96,
+  "maxRegularFileFDDelta": 96,
+  "maxRequestFailures": 64,
+  "maxRssDeltaKB": 131072,
+  "maxSocketFDDelta": 96,
+  "modes": [
+    "concurrent",
+    "serialized"
+  ],
+  "requestsPerMode": 480,
+  "restartCycles": 2,
+  "sampleEveryRequests": 80,
+  "startupTimeoutSeconds": 20,
+  "version": "phase10m-soak-thresholds-v1"
+}

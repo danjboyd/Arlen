@@ -1083,6 +1083,7 @@ Lifecycle diagnostics:
 - `make ci-quality`: run unit + integration + multi-profile perf quality gate plus runtime concurrency, JSON abstraction/performance gates, and Phase 9I fault-injection checks
 - `make ci-sanitizers`: run the Phase 10M ASan/UBSan sanitizer matrix (unit, runtime probe, backend parity, fault injection, soak, chaos restart, static analysis) and generate artifacts under `build/release_confidence/phase10m/sanitizers`
 - `make ci-soak`: run the Phase 10M long-run soak lane with health traffic, validated `fileBodyPath` responses, restart checks, and `/proc` FD target sampling including `/dev/null` drift
+- `make ci-phase38-fd-regression`: run the opt-in Phase 38 FD regression evidence lane, preserving Phase 10M soak artifacts plus a Phase 38 summary under `build/release_confidence/phase38/fd_regression`
 - `make ci-chaos-restart`: run the Phase 10M `propane` chaos/restart lane against the tech demo, warming the app build before manager startup with app-root-compatible framework flags and retaining manager stdout/stderr plus lifecycle artifacts under `build/release_confidence/phase10m/chaos_restart`
 - `make ci-fault-injection`: run Phase 9I runtime seam fault-injection matrix and generate artifacts under `build/release_confidence/phase9i`
 - `make ci-release-certification`: run Phase 9J enterprise release checklist and generate certification artifacts under `build/release_confidence/phase9j`

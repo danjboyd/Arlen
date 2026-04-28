@@ -1,6 +1,6 @@
 # Arlen Phase 38 Roadmap
 
-Status: Planned  
+Status: In progress
 Last updated: 2026-04-28
 
 Related docs:
@@ -26,7 +26,8 @@ can prove that long-lived file-serving workloads remain stable.
 ## 2. Current Assessment
 
 The report is accepted as a real Arlen-facing production bug, but root cause is
-not yet proven.
+not yet proven. Phase 38 staging has ruled out a simple per-file-response
+`/dev/null` leak in the synthetic `fileBodyPath` path.
 
 Known facts:
 
@@ -46,10 +47,28 @@ Known facts:
 
 Working hypothesis:
 
-The leak is in the worker-process runtime path rather than the application file
-lookup path. Possible sources include GNUstep Base internals, Arlen's use of
-GNUstep APIs, `propane` worker launch or stdio handling, downstream controller
-code invoked under Arlen, or an interaction between those layers.
+The leak is in a worker-process runtime path that synthetic PDF traffic did not
+exercise rather than in the visible app file lookup or simple Arlen
+`fileBodyPath` happy path. Possible sources include GNUstep Base internals,
+Arlen's use of GNUstep APIs, `propane` worker launch or stdio handling,
+downstream app code invoked under uptime/background paths, production runtime
+differences, or an interaction between those layers.
+
+Phase 38 staging evidence from 2026-04-28:
+
+- VM: Debian/libvirt via `../OracleTestVMs`, `100G` root disk.
+- App: `StateCompulsoryPoolingAPI`, local fixture PostgreSQL DB, synthetic PDFs.
+- Runtime shape: `propane`, two workers, `ARLEN_REQUEST_DISPATCH_MODE=serialized`,
+  soft open-file limit `1024`.
+- Arlen refs tested:
+  - API-pinned `9ae509e8542d`
+  - incident ref `734ac332693a`
+- Incident-ref traffic:
+  - `4,000` full PDF `GET` responses, `0` failures
+  - `20,000` additional client-discarded PDF `GET` responses, `0` failures
+  - final real worker FD state: `25` descriptors per worker, `1` `/dev/null`
+    descriptor per worker
+  - bounded `strace` windows during PDF traffic: `0` `/dev/null` opens
 
 ## 3. Scope Summary
 
@@ -66,7 +85,7 @@ code invoked under Arlen, or an interaction between those layers.
 
 ## 4.1 Phase 38A: Staging Infrastructure Parity
 
-Status: Planned
+Status: Complete
 
 Deliverables:
 
@@ -103,7 +122,7 @@ Acceptance:
 
 ## 4.2 Phase 38B: Staging App and Fixture Corpus
 
-Status: Planned
+Status: Complete
 
 Deliverables:
 
@@ -130,7 +149,7 @@ Acceptance:
 
 ## 4.3 Phase 38C: Synthetic Traffic and FD Sampling Harness
 
-Status: Planned
+Status: Complete
 
 Deliverables:
 
@@ -167,7 +186,7 @@ Acceptance:
 
 ## 4.4 Phase 38D: Syscall Tracing and Root-Cause Isolation
 
-Status: Planned
+Status: Complete for synthetic staging; production root cause remains open
 
 Deliverables:
 
@@ -207,11 +226,13 @@ Acceptance:
 
 ## 4.5 Phase 38E: Focused Runtime Fix
 
-Status: Planned
+Status: Blocked pending a reproduced leaking path
 
 Deliverables:
 
-- Implement the smallest fix in the responsible layer.
+- Implement the smallest fix in the responsible layer once the leaking path is
+  captured. Do not patch by guesswork based only on descriptor exhaustion
+  symptoms.
 - If the leak is in Arlen:
   - close descriptors deterministically at the ownership boundary
   - add failure-path cleanup
@@ -236,9 +257,17 @@ Acceptance:
 - Existing `fileBodyPath`, serialized-dispatch, and `propane` integration
   coverage remains passing.
 
+Current 38E disposition:
+
+- No focused runtime fix was applied because Phase 38A-D did not reproduce the
+  leak and `strace` saw no `/dev/null` opens during synthetic file traffic.
+- The next valid 38E input is a trace or FD snapshot series that identifies the
+  descriptor opener. Until then, a code fix would be speculative.
+
 ## 4.6 Phase 38F: Regression Gates and CI Artifacts
 
-Status: Planned
+Status: Complete for Arlen-only tripwire; downstream reproduction gate remains
+open
 
 Deliverables:
 
@@ -252,6 +281,10 @@ Deliverables:
   full downstream app.
 - Keep Phase 10M soak as the fast runtime tripwire and link it to Phase 38
   evidence.
+- Add an explicit Phase 38 opt-in gate:
+  - `make ci-phase38-fd-regression`
+  - artifacts under `build/release_confidence/phase38/fd_regression`
+  - summary file `phase38_fd_regression_summary.json`
 
 Acceptance:
 
@@ -260,9 +293,14 @@ Acceptance:
 - The fixed implementation passes the same lane.
 - The artifact pack is reviewable without access to production.
 
+Current 38F disposition:
+
+- Complete for the Arlen-only tripwire. The downstream-app staging harness
+  remains the authoritative reproduction route for `ARLEN-BUG-024`.
+
 ## 4.7 Phase 38G: Operational Diagnostics and Runbook
 
-Status: Planned
+Status: Complete
 
 Deliverables:
 
@@ -278,6 +316,12 @@ Deliverables:
   - why raising `LimitNOFILE` is mitigation only
   - staging reproduction instructions
 
+Current 38G disposition:
+
+- Added `tools/ops/sample_fd_targets.py` for Linux `/proc` FD target sampling.
+- Updated `docs/PROPANE.md` and `docs/DEPLOYMENT.md` with descriptor exhaustion
+  triage and safe restart guidance.
+
 Acceptance:
 
 - Operators can detect descriptor exhaustion before PDF responses fail.
@@ -286,7 +330,7 @@ Acceptance:
 
 ## 4.8 Phase 38H: Downstream Validation and Closeout
 
-Status: Planned
+Status: Partial; closeout remains blocked on representative uptime validation
 
 Deliverables:
 
@@ -308,6 +352,13 @@ Acceptance:
 - Arlen docs record the root cause, fix commit, and permanent regression
   evidence.
 
+Current 38H disposition:
+
+- Partial. Downstream staging synthetic traffic passed on the incident Arlen ref,
+  but production closeout is intentionally blocked until representative uptime
+  validation or production-safe diagnostics confirm the `/dev/null` descriptor
+  growth no longer recurs.
+
 ## 5. Work Queue
 
 The phases/subphases to work on, in order:
@@ -319,12 +370,14 @@ The phases/subphases to work on, in order:
    staging deployment.
 4. `38D`: run bounded syscall tracing and identify the genuine descriptor
    opener.
-5. `38E`: implement the focused fix in Arlen, `propane`, GNUstep containment,
-   or downstream code depending on evidence.
-6. `38F`: convert the reproduction into permanent regression coverage and
-   artifacts.
-7. `38G`: add operator diagnostics and runbook updates.
-8. `38H`: complete downstream validation and closeout documentation.
+5. `38E`: blocked pending a captured leaking path; do not apply speculative
+   fixes.
+6. `38F`: maintain `make ci-phase38-fd-regression` as the Arlen-only tripwire
+   and add a focused reproducer once the real leaking path is known.
+7. `38G`: complete; keep operator diagnostics current as production evidence
+   improves.
+8. `38H`: partial; complete only after downstream confirms stable uptime or a
+   root-cause fix ships and validates.
 
 ## 6. Non-Goals
 

@@ -163,3 +163,39 @@ Stable churn/stop fields include:
 - `reason` (for example `respawn_after_exit`, `reload_retire_generation_1`, `signal_term`)
 - `status` and `exit_reason` (`exit_0`, `exit_1`, `signal_9`, etc.)
 - `restart_action` (`none` or `respawn`)
+
+## Descriptor Exhaustion Triage
+
+For Linux/GNUstep deployments, operators can sample live worker file descriptor
+targets without sending traffic:
+
+```bash
+python3 /path/to/Arlen/tools/ops/sample_fd_targets.py \
+  --pgrep boomhauer-app \
+  --json
+```
+
+For app-specific release names, use a narrower process pattern, for example:
+
+```bash
+python3 /path/to/Arlen/tools/ops/sample_fd_targets.py \
+  --pgrep state-compulsory-pooling-api
+```
+
+The sampler reports total descriptors, `/dev/null` descriptors, socket
+descriptors, regular-file descriptors, the open-file soft limit, and the top
+`readlink` targets under `/proc/$pid/fd`. Treat either of these as warning
+signals:
+
+- worker descriptors above `85%` of the soft open-file limit
+- hundreds of `/dev/null` descriptors in one worker
+
+For file-response incidents, compare the application log with the sampler:
+
+- missing or stale application paths usually show low worker FD pressure
+- descriptor exhaustion shows high total descriptors and often transport errors
+  such as GNUstep pipe-creation failures
+
+Raising `LimitNOFILE` delays exhaustion but does not fix a descriptor leak.
+The safe short-term mitigation is a controlled worker/service restart while
+retaining FD snapshots and logs for root-cause analysis.

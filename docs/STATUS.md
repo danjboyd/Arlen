@@ -4,6 +4,37 @@ Last updated: 2026-04-28
 
 ## Leaving Off (2026-04-28)
 
+- Executed Phase 38A-D and the implementable parts of 38E-H:
+  - provisioned a disposable Debian/libvirt VM through `../OracleTestVMs`
+  - expanded root disk to `100G`, installed diagnostics, authenticated `gh`,
+    and provisioned GNUstep through `gnustep-cli-new`
+  - cloned and built `StateCompulsoryPoolingAPI` plus its pinned Arlen
+    dependency
+  - cloned `StateCompulsoryPooling`, created a local PostgreSQL fixture DB, and
+    seeded synthetic PDF documents without production data or production DB
+    credentials
+  - reran the staging app against incident Arlen ref `734ac332693a`, through
+    `propane`, with two workers, serialized dispatch, and `ulimit -n 1024`
+  - validated `HEAD` and full `GET` PDF responses before soak
+  - ran `4,000` full PDF `GET` responses and `20,000` additional client-discarded
+    PDF `GET` responses with `0` failures
+  - bounded `strace` windows saw `0` `/dev/null` opens during file traffic
+  - final real worker FD state stayed at `25` descriptors per worker with one
+    `/dev/null` descriptor per worker
+- Phase 38 conclusion so far:
+  - synthetic staging disproves a simple per-file-response `/dev/null` leak in
+    Arlen's visible `fileBodyPath` path
+  - `ARLEN-BUG-024` remains open because production showed real descriptor
+    exhaustion over uptime and the descriptor opener is still unidentified
+  - the focused runtime fix (`38E`) is blocked until production-safe diagnostics
+    capture a leaking path or a broader staging profile reproduces it
+- Added Phase 38 hardening that does not depend on guessing the root cause:
+  - `tools/ops/sample_fd_targets.py` for Linux `/proc` FD target triage
+  - `make ci-phase38-fd-regression`, preserving Arlen-only FD drift evidence
+    under `build/release_confidence/phase38/fd_regression`
+  - deployment/propane runbook updates for descriptor exhaustion detection and
+    safe restart mitigation
+
 - Accepted `ARLEN-BUG-024` / `ISSUE-004` as an open critical
   Arlen-facing production reliability bug:
   - long-lived `StateCompulsoryPoolingAPI` workers accumulate hundreds of

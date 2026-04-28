@@ -84,6 +84,29 @@ tracks `/dev/null` descriptor drift, and sends validated `fileBodyPath`
 responses. This is a tripwire, not a full reproduction of the reported
 `propane` production shape.
 
+Phase 38 staging on 2026-04-28 built `StateCompulsoryPoolingAPI` against the
+reported production Arlen ref `734ac332693a`, launched it through `propane`
+with two workers, `ARLEN_REQUEST_DISPATCH_MODE=serialized`, and a soft
+open-file limit of `1024`, then ran synthetic PDF traffic:
+
+- `4,000` full PDF `GET` responses: `0` failures
+- `20,000` additional PDF `GET` responses discarded client-side: `0` failures
+- final worker FD state: `25` FDs per worker, `1` `/dev/null` descriptor per
+  worker
+- bounded `strace` windows during file traffic observed `0` `/dev/null`
+  opens
+
+This disproves a simple per-file-response `/dev/null` leak in the staged
+`fileBodyPath` path, but does not close the issue because production still
+showed real descriptor exhaustion over uptime. Phase 38 therefore added:
+
+- `tools/ops/sample_fd_targets.py` for production-safe FD target triage
+- `make ci-phase38-fd-regression` for an opt-in Arlen-only FD drift evidence
+  lane under `build/release_confidence/phase38/fd_regression`
+
+The focused fix remains blocked until a leaking path is reproduced or captured
+from production-safe diagnostics.
+
 ## ISSUE-003: File streaming responses sent successful headers with no body
 
 - Status: `resolved`

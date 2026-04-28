@@ -37,6 +37,11 @@ API-only mode (`apiOnly = YES`, or `ARLEN_API_ONLY=1`) defaults to:
 - `serveStatic = NO`
 - `logFormat = "json"`
 
+Descriptor pressure should be monitored on long-lived GNUstep deployments that
+serve files. Arlen ships `tools/ops/sample_fd_targets.py` for Linux `/proc`
+sampling; see `docs/PROPANE.md` for the operator triage workflow and the
+`/dev/null` descriptor exhaustion warning signs from `ARLEN-BUG-024`.
+
 ## 4. Phase 32 Deployment Target Contract
 
 Phase 29 gave Arlen a first-class release workflow. Phase 32 defines the

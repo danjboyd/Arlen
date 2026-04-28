@@ -60,7 +60,24 @@ Ownership rule:
   current investigation target is broader than a missing close in the
   `fileBodyPath` happy path.
 - Upstream added a Phase 10M soak tripwire that tracks `/dev/null` descriptor
-  drift during validated `fileBodyPath` traffic. That tripwire passed locally
-  at short scale and does not yet reproduce the production failure.
-- Phase 38 tracks the planned staging reproduction, tracing, root-cause fix,
-  regression hardening, and operational diagnostics.
+  drift during validated `fileBodyPath` traffic.
+- Phase 38 staging on 2026-04-28 reproduced the deployment shape on a
+  disposable Debian/libvirt VM and tested both the API-pinned Arlen ref and the
+  production incident ref `734ac332693a`.
+  - `StateCompulsoryPoolingAPI` ran through `propane` with two workers,
+    `ARLEN_REQUEST_DISPATCH_MODE=serialized`, and `ulimit -n 1024`.
+  - Synthetic PDF fixtures exercised the same `/v1/states/.../documents/.../pdf`
+    route shape and `response.fileBodyPath` transport.
+  - The incident ref passed `4,000` full PDF `GET` responses and `20,000`
+    additional PDF `GET` responses discarded client-side with `0` failures.
+  - Worker FD counts stayed at `25` each, with `1` `/dev/null` descriptor per
+    worker; bounded `strace` windows saw `0` `/dev/null` opens during file
+    traffic.
+- Current conclusion: the staged evidence does not support a simple
+  per-file-response Arlen leak. The production issue remains open pending a
+  captured leaking path, likely involving uptime, non-PDF/background activity,
+  production runtime differences, or a cross-layer GNUstep interaction not
+  exercised by synthetic file traffic.
+- Phase 38 added production-safe FD triage (`tools/ops/sample_fd_targets.py`)
+  and an opt-in evidence lane (`make ci-phase38-fd-regression`). The focused
+  runtime fix remains blocked until the descriptor opener is identified.
