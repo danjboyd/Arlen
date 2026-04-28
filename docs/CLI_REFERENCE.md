@@ -1003,6 +1003,11 @@ Core options:
 - `--job-worker-cmd <command>`
 - `--job-worker-count <n>`
 - `--job-worker-respawn-delay-ms <n>`
+- `--worker-fd-warn-percent <n>`
+- `--worker-fd-critical-percent <n>`
+- `--worker-fd-retire-percent <n>`
+- `--worker-fd-retire-count <n>`
+- `--worker-fd-check-seconds <n>`
 - `--no-respawn`
 
 Async worker environment fallbacks:
@@ -1010,6 +1015,11 @@ Async worker environment fallbacks:
 - `ARLEN_PROPANE_JOB_WORKER_COMMAND`
 - `ARLEN_PROPANE_JOB_WORKER_COUNT`
 - `ARLEN_PROPANE_JOB_WORKER_RESPAWN_DELAY_MS`
+- `ARLEN_PROPANE_WORKER_FD_WARN_PERCENT`
+- `ARLEN_PROPANE_WORKER_FD_CRITICAL_PERCENT`
+- `ARLEN_PROPANE_WORKER_FD_RETIRE_PERCENT`
+- `ARLEN_PROPANE_WORKER_FD_RETIRE_COUNT`
+- `ARLEN_PROPANE_WORKER_FD_CHECK_SECONDS`
 - `ARLEN_PROPANE_LIFECYCLE_LOG` (optional file path for structured lifecycle diagnostics)
 - `ARLEN_CLUSTER_ENABLED`
 - `ARLEN_CLUSTER_NAME`
@@ -1028,6 +1038,10 @@ Lifecycle diagnostics:
 - stdout emits deterministic lines prefixed with `propane:lifecycle`
 - line contract: `event=<name> manager_pid=<pid> key=value ...`
 - worker churn fields include stable `status`, `exit_reason`, `restart_action`, and `reason`
+- Linux worker FD-pressure events include `worker_fd_pressure_warning`,
+  `worker_fd_pressure_critical`, and `worker_fd_pressure_retire_requested`
+- request FD-delta debugging is available with `ARLEN_FD_DELTA_DEBUG=1` and
+  `ARLEN_FD_DELTA_WARN=<n>`; keep it disabled except during diagnostics
 
 ## Other Helper Scripts and Build Targets
 

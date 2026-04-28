@@ -26,6 +26,11 @@ Options:
   --job-worker-cmd <command>        Spawn supervised async worker command
   --job-worker-count <n>            Number of supervised async worker processes
   --job-worker-respawn-delay-ms <n> Override async worker respawn delay
+  --worker-fd-warn-percent <n>      Warn when worker FD usage reaches percent
+  --worker-fd-critical-percent <n>  Critical log when worker FD usage reaches percent
+  --worker-fd-retire-percent <n>    Gracefully recycle worker above percent (0 disables)
+  --worker-fd-retire-count <n>      Gracefully recycle worker above FD count (0 disables)
+  --worker-fd-check-seconds <n>     Worker FD pressure check interval
   --app-root <path>                 App root (default: ARLEN_APP_ROOT or cwd)
   --framework-root <path>           Framework root (default: ARLEN_FRAMEWORK_ROOT or script root)
   --no-respawn                      Disable worker respawn on crash/exit
@@ -42,6 +47,11 @@ Environment:
   ARLEN_FRAMEWORK_ROOT
   ARLEN_PROPANE_JOB_WORKER_COMMAND
   ARLEN_PROPANE_JOB_WORKER_COUNT
+  ARLEN_PROPANE_WORKER_FD_WARN_PERCENT
+  ARLEN_PROPANE_WORKER_FD_CRITICAL_PERCENT
+  ARLEN_PROPANE_WORKER_FD_RETIRE_PERCENT
+  ARLEN_PROPANE_WORKER_FD_RETIRE_COUNT
+  ARLEN_PROPANE_WORKER_FD_CHECK_SECONDS
   ARLEN_PROPANE_LIFECYCLE_LOG
   ARLEN_CLUSTER_ENABLED
   ARLEN_CLUSTER_NAME
@@ -125,6 +135,11 @@ cluster_expected_nodes_override=""
 job_worker_cmd_override=""
 job_worker_count_override=""
 job_worker_respawn_delay_override=""
+worker_fd_warn_percent_override=""
+worker_fd_critical_percent_override=""
+worker_fd_retire_percent_override=""
+worker_fd_retire_count_override=""
+worker_fd_check_seconds_override=""
 
 no_respawn=0
 once_mode=0
@@ -215,6 +230,31 @@ while [[ $# -gt 0 ]]; do
     --job-worker-respawn-delay-ms)
       [[ $# -ge 2 ]] || { echo "propane: --job-worker-respawn-delay-ms requires a value" >&2; exit 2; }
       job_worker_respawn_delay_override="$2"
+      shift 2
+      ;;
+    --worker-fd-warn-percent)
+      [[ $# -ge 2 ]] || { echo "propane: --worker-fd-warn-percent requires a value" >&2; exit 2; }
+      worker_fd_warn_percent_override="$2"
+      shift 2
+      ;;
+    --worker-fd-critical-percent)
+      [[ $# -ge 2 ]] || { echo "propane: --worker-fd-critical-percent requires a value" >&2; exit 2; }
+      worker_fd_critical_percent_override="$2"
+      shift 2
+      ;;
+    --worker-fd-retire-percent)
+      [[ $# -ge 2 ]] || { echo "propane: --worker-fd-retire-percent requires a value" >&2; exit 2; }
+      worker_fd_retire_percent_override="$2"
+      shift 2
+      ;;
+    --worker-fd-retire-count)
+      [[ $# -ge 2 ]] || { echo "propane: --worker-fd-retire-count requires a value" >&2; exit 2; }
+      worker_fd_retire_count_override="$2"
+      shift 2
+      ;;
+    --worker-fd-check-seconds)
+      [[ $# -ge 2 ]] || { echo "propane: --worker-fd-check-seconds requires a value" >&2; exit 2; }
+      worker_fd_check_seconds_override="$2"
       shift 2
       ;;
     --app-root)
@@ -328,6 +368,11 @@ while IFS='=' read -r key value; do
     config_cluster_name) config_cluster_name="$value" ;;
     config_cluster_node_id) config_cluster_node_id="$value" ;;
     config_cluster_expected_nodes) config_cluster_expected_nodes="$value" ;;
+    config_worker_fd_warn_percent) config_worker_fd_warn_percent="$value" ;;
+    config_worker_fd_critical_percent) config_worker_fd_critical_percent="$value" ;;
+    config_worker_fd_retire_percent) config_worker_fd_retire_percent="$value" ;;
+    config_worker_fd_retire_count) config_worker_fd_retire_count="$value" ;;
+    config_worker_fd_check_seconds) config_worker_fd_check_seconds="$value" ;;
   esac
 done < <(python3 - "$config_json" <<'PY'
 import json
@@ -378,6 +423,11 @@ print(f"config_cluster_enabled={1 if as_bool(cluster.get('enabled', False), Fals
 print(f"config_cluster_name={as_str(cluster.get('name', 'default'), 'default')}")
 print(f"config_cluster_node_id={as_str(cluster.get('nodeID', 'node'), 'node')}")
 print(f"config_cluster_expected_nodes={as_int(cluster.get('expectedNodes', 1), 1, 1)}")
+print(f"config_worker_fd_warn_percent={as_int(accessories.get('workerFDWarnPercent', 80), 80, 0)}")
+print(f"config_worker_fd_critical_percent={as_int(accessories.get('workerFDCriticalPercent', 90), 90, 0)}")
+print(f"config_worker_fd_retire_percent={as_int(accessories.get('workerFDRetirePercent', 0), 0, 0)}")
+print(f"config_worker_fd_retire_count={as_int(accessories.get('workerFDRetireCount', 0), 0, 0)}")
+print(f"config_worker_fd_check_seconds={as_int(accessories.get('workerFDCheckSeconds', 15), 15, 1)}")
 PY
 )
 
@@ -393,6 +443,11 @@ enable_reuse_port="${config_enable_reuse_port:-0}"
 job_worker_count="${job_worker_count_override:-${config_job_worker_count:-${ARLEN_PROPANE_JOB_WORKER_COUNT:-0}}}"
 job_worker_command="${job_worker_cmd_override:-${config_job_worker_command:-${ARLEN_PROPANE_JOB_WORKER_COMMAND:-}}}"
 job_worker_respawn_delay_ms="${job_worker_respawn_delay_override:-${config_job_worker_respawn_delay_ms:-${ARLEN_PROPANE_JOB_WORKER_RESPAWN_DELAY_MS:-250}}}"
+worker_fd_warn_percent="${worker_fd_warn_percent_override:-${ARLEN_PROPANE_WORKER_FD_WARN_PERCENT:-${config_worker_fd_warn_percent:-80}}}"
+worker_fd_critical_percent="${worker_fd_critical_percent_override:-${ARLEN_PROPANE_WORKER_FD_CRITICAL_PERCENT:-${config_worker_fd_critical_percent:-90}}}"
+worker_fd_retire_percent="${worker_fd_retire_percent_override:-${ARLEN_PROPANE_WORKER_FD_RETIRE_PERCENT:-${config_worker_fd_retire_percent:-0}}}"
+worker_fd_retire_count="${worker_fd_retire_count_override:-${ARLEN_PROPANE_WORKER_FD_RETIRE_COUNT:-${config_worker_fd_retire_count:-0}}}"
+worker_fd_check_seconds="${worker_fd_check_seconds_override:-${ARLEN_PROPANE_WORKER_FD_CHECK_SECONDS:-${config_worker_fd_check_seconds:-15}}}"
 
 is_uint() {
   [[ "$1" =~ ^[0-9]+$ ]]
@@ -435,7 +490,7 @@ if [[ -z "$cluster_node_id" ]]; then
   cluster_node_id="node"
 fi
 
-for numeric in "$worker_count" "$port" "$graceful_shutdown_seconds" "$respawn_delay_ms" "$reload_overlap_seconds" "$listen_backlog" "$connection_timeout_seconds" "$enable_reuse_port" "$job_worker_count" "$job_worker_respawn_delay_ms" "$cluster_expected_nodes"; do
+for numeric in "$worker_count" "$port" "$graceful_shutdown_seconds" "$respawn_delay_ms" "$reload_overlap_seconds" "$listen_backlog" "$connection_timeout_seconds" "$enable_reuse_port" "$job_worker_count" "$job_worker_respawn_delay_ms" "$cluster_expected_nodes" "$worker_fd_warn_percent" "$worker_fd_critical_percent" "$worker_fd_retire_percent" "$worker_fd_retire_count" "$worker_fd_check_seconds"; do
   if ! is_uint "$numeric"; then
     echo "propane: expected integer propane accessory/runtime value but got: $numeric" >&2
     exit 2
@@ -480,6 +535,14 @@ if (( job_worker_count > 0 )) && [[ -z "$job_worker_command" ]]; then
 fi
 if (( cluster_expected_nodes < 1 )); then
   echo "propane: cluster expected nodes must be >= 1" >&2
+  exit 2
+fi
+if (( worker_fd_warn_percent > 100 || worker_fd_critical_percent > 100 || worker_fd_retire_percent > 100 )); then
+  echo "propane: worker FD percent propane accessories must be <= 100" >&2
+  exit 2
+fi
+if (( worker_fd_check_seconds < 1 )); then
+  echo "propane: worker FD check seconds must be >= 1" >&2
   exit 2
 fi
 
@@ -595,6 +658,7 @@ echo "propane: cluster enabled=$cluster_enabled name=$cluster_name nodeID=$clust
 if (( job_worker_count > 0 )); then
   echo "propane: async workers count=$job_worker_count respawnDelayMs=$job_worker_respawn_delay_ms"
 fi
+echo "propane: fd pressure warnPercent=$worker_fd_warn_percent criticalPercent=$worker_fd_critical_percent retirePercent=$worker_fd_retire_percent retireCount=$worker_fd_retire_count checkSeconds=$worker_fd_check_seconds"
 
 echo "$$" > "$pid_file"
 emit_lifecycle_event "manager_started" \
@@ -614,6 +678,133 @@ sleep_ms() {
   local duration
   printf -v duration '%d.%03d' "$whole" "$frac"
   sleep "$duration"
+}
+
+worker_fd_count() {
+  local pid="$1"
+  if [[ ! -d "/proc/$pid/fd" ]]; then
+    echo "-1"
+    return
+  fi
+  find "/proc/$pid/fd" -maxdepth 1 -type l 2>/dev/null | wc -l | tr -d ' '
+}
+
+worker_fd_soft_limit() {
+  local pid="$1"
+  if [[ ! -r "/proc/$pid/limits" ]]; then
+    echo "0"
+    return
+  fi
+  awk '$1 == "Max" && $2 == "open" && $3 == "files" {print $4; found=1} END {if (!found) print 0}' "/proc/$pid/limits" 2>/dev/null
+}
+
+worker_fd_top_targets() {
+  local pid="$1"
+  if [[ ! -d "/proc/$pid/fd" ]]; then
+    echo ""
+    return
+  fi
+  local line
+  local out=""
+  while IFS= read -r line; do
+    line="${line#"${line%%[![:space:]]*}"}"
+    line="${line// /_}"
+    if [[ -n "$line" ]]; then
+      if [[ -n "$out" ]]; then
+        out="$out,$line"
+      else
+        out="$line"
+      fi
+    fi
+  done < <(for fd in "/proc/$pid/fd"/*; do readlink "$fd" 2>/dev/null || true; done | sort | uniq -c | sort -nr | head -5)
+  echo "$out"
+}
+
+remove_worker_pid() {
+  local retired_pid="$1"
+  local survivors=()
+  local pid
+  for pid in "${workers[@]}"; do
+    if [[ "$pid" != "$retired_pid" ]]; then
+      survivors+=("$pid")
+    fi
+  done
+  workers=("${survivors[@]}")
+}
+
+check_worker_fd_pressure() {
+  if [[ ! -d /proc ]]; then
+    return
+  fi
+
+  local retire_pids=()
+  local pid
+  for pid in "${workers[@]}"; do
+    if ! kill -0 "$pid" 2>/dev/null; then
+      continue
+    fi
+    local fd_count soft_limit usage_percent remaining top_targets severity should_retire reason
+    fd_count="$(worker_fd_count "$pid")"
+    soft_limit="$(worker_fd_soft_limit "$pid")"
+    if ! is_uint "$fd_count" || (( fd_count < 0 )); then
+      continue
+    fi
+    if ! is_uint "$soft_limit" || (( soft_limit <= 0 )); then
+      usage_percent=0
+      remaining=-1
+    else
+      usage_percent="$((fd_count * 100 / soft_limit))"
+      remaining="$((soft_limit - fd_count))"
+    fi
+    top_targets="$(worker_fd_top_targets "$pid")"
+    severity=""
+    if (( worker_fd_critical_percent > 0 && usage_percent >= worker_fd_critical_percent )); then
+      severity="critical"
+    elif (( worker_fd_warn_percent > 0 && usage_percent >= worker_fd_warn_percent )); then
+      severity="warning"
+    fi
+    if [[ -n "$severity" ]]; then
+      emit_lifecycle_event "worker_fd_pressure_${severity}" \
+        "role=http" \
+        "pid=$pid" \
+        "fd_count=$fd_count" \
+        "fd_soft_limit=$soft_limit" \
+        "fd_usage_percent=$usage_percent" \
+        "fd_remaining=$remaining" \
+        "top_fd_targets=$top_targets"
+    fi
+
+    should_retire=0
+    reason=""
+    if (( worker_fd_retire_count > 0 && fd_count >= worker_fd_retire_count )); then
+      should_retire=1
+      reason="fd_count_threshold"
+    elif (( worker_fd_retire_percent > 0 && usage_percent >= worker_fd_retire_percent )); then
+      should_retire=1
+      reason="fd_percent_threshold"
+    fi
+    if (( should_retire == 1 )); then
+      emit_lifecycle_event "worker_fd_pressure_retire_requested" \
+        "role=http" \
+        "pid=$pid" \
+        "reason=$reason" \
+        "fd_count=$fd_count" \
+        "fd_soft_limit=$soft_limit" \
+        "fd_usage_percent=$usage_percent" \
+        "fd_remaining=$remaining" \
+        "top_fd_targets=$top_targets"
+      retire_pids+=("$pid")
+    fi
+  done
+
+  for pid in "${retire_pids[@]}"; do
+    remove_worker_pid "$pid"
+    terminate_pid_list "http_worker" "fd_pressure_retire" "$pid"
+    if (( no_respawn == 0 && once_mode == 0 && shutting_down == 0 )); then
+      sleep_ms "$respawn_delay_ms"
+      spawn_worker "respawn_after_fd_pressure"
+    fi
+  done
 }
 
 spawn_worker() {
@@ -705,6 +896,7 @@ reload_requested=0
 manager_exit=0
 shutdown_reason="manager_exit"
 reload_generation=0
+last_fd_pressure_check=0
 
 on_term() {
   local signal_name="${1:-TERM}"
@@ -753,6 +945,12 @@ for ((idx = 0; idx < job_worker_count; idx++)); do
 done
 
 while (( shutting_down == 0 )); do
+  now_seconds="$(date +%s)"
+  if (( now_seconds - last_fd_pressure_check >= worker_fd_check_seconds )); then
+    check_worker_fd_pressure
+    last_fd_pressure_check="$now_seconds"
+  fi
+
   if (( reload_requested == 1 )); then
     reload_generation=$((reload_generation + 1))
     old_workers=("${workers[@]}")

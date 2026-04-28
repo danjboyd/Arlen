@@ -164,6 +164,58 @@ Stable churn/stop fields include:
 - `status` and `exit_reason` (`exit_0`, `exit_1`, `signal_9`, etc.)
 - `restart_action` (`none` or `respawn`)
 
+Stable FD-pressure events include:
+
+- `worker_fd_pressure_warning`
+- `worker_fd_pressure_critical`
+- `worker_fd_pressure_retire_requested`
+
+Stable FD-pressure fields include:
+
+- `pid`
+- `fd_count`
+- `fd_soft_limit`
+- `fd_usage_percent`
+- `fd_remaining`
+- `top_fd_targets`
+
+## FD-Pressure Propane Accessories
+
+On Linux, `propane` can sample worker descriptor pressure through `/proc` and
+emit lifecycle diagnostics before descriptor exhaustion breaks request handling.
+The checks are disabled only by setting thresholds to `0`; warning diagnostics
+default on.
+
+Supported propane accessories:
+
+- `workerFDWarnPercent` default `80`
+- `workerFDCriticalPercent` default `90`
+- `workerFDRetirePercent` default `0`, disabled
+- `workerFDRetireCount` default `0`, disabled
+- `workerFDCheckSeconds` default `15`
+
+Equivalent CLI/env overrides:
+
+```bash
+propane --worker-fd-warn-percent 80 \
+  --worker-fd-critical-percent 90 \
+  --worker-fd-retire-percent 95 \
+  --worker-fd-retire-count 950 \
+  --worker-fd-check-seconds 15
+```
+
+```bash
+ARLEN_PROPANE_WORKER_FD_WARN_PERCENT=80
+ARLEN_PROPANE_WORKER_FD_CRITICAL_PERCENT=90
+ARLEN_PROPANE_WORKER_FD_RETIRE_PERCENT=95
+ARLEN_PROPANE_WORKER_FD_RETIRE_COUNT=950
+ARLEN_PROPANE_WORKER_FD_CHECK_SECONDS=15
+```
+
+FD-pressure retirement is an availability mitigation. It recycles a worker that
+is already under descriptor pressure; it does not fix the application or runtime
+path that opened the descriptors.
+
 ## Descriptor Exhaustion Triage
 
 For Linux/GNUstep deployments, operators can sample live worker file descriptor
@@ -199,3 +251,24 @@ For file-response incidents, compare the application log with the sampler:
 Raising `LimitNOFILE` delays exhaustion but does not fix a descriptor leak.
 The safe short-term mitigation is a controlled worker/service restart while
 retaining FD snapshots and logs for root-cause analysis.
+
+## Request FD-Delta Debugging
+
+For staging or short production-safe diagnostic windows, workers can log a
+request when the process FD count rises during that request:
+
+```bash
+ARLEN_FD_DELTA_DEBUG=1
+ARLEN_FD_DELTA_WARN=3
+```
+
+The log event is `http.request.fd_delta` and includes method, path, worker PID,
+status, route/controller/action when known, `fd_before`, `fd_after`, and
+`fd_delta`. Keep this disabled by default; it samples `/proc/self/fd` around
+each request and is intended to identify leaking request paths.
+
+Apps that launch subprocesses with `NSTask`, `NSPipe`,
+`NSFileHandle fileHandleWithNullDevice`, or raw `open` own descriptor lifetime.
+Long-lived Arlen workers make small per-request leaks production-significant,
+so subprocess helpers should use explicit close/release ownership and should be
+validated with FD-count regression checks.

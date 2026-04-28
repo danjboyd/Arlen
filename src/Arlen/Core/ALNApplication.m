@@ -27,12 +27,15 @@
 #import "ALNPlatform.h"
 
 #include <ctype.h>
+#include <dirent.h>
 #include <math.h>
 #include <objc/message.h>
 #include <objc/runtime.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
+#include <sys/resource.h>
 #include <sys/time.h>
 #include <time.h>
 #include <unistd.h>
@@ -78,6 +81,19 @@ static NSString *ALNDataverseEnvironmentValueForTarget(NSString *baseName, NSStr
 static NSDictionary<NSString *, id> *ALNDataverseMergedConfigForTarget(NSDictionary *config,
                                                                        NSString *targetName);
 static BOOL ALNDataverseHasConfigurationForTarget(NSDictionary *config, NSString *targetName);
+static BOOL ALNProcessFDDeltaDebugEnabled(void);
+static NSInteger ALNProcessFDDeltaWarnThreshold(void);
+static NSInteger ALNCurrentProcessFDCount(void);
+static NSInteger ALNCurrentProcessFDSoftLimit(void);
+static NSDictionary *ALNDescriptorDiagnosticsForException(NSException *exception);
+static void ALNLogRequestFDDeltaIfNeeded(ALNApplication *application,
+                                         ALNRequest *request,
+                                         ALNResponse *response,
+                                         NSString *routeName,
+                                         NSString *controllerName,
+                                         NSString *actionName,
+                                         NSInteger beforeCount,
+                                         NSInteger threshold);
 static ALNDataverseTarget *ALNDataverseTargetFromMergedConfig(NSDictionary *merged,
                                                               NSString *targetName,
                                                               NSError **error);
@@ -808,6 +824,129 @@ static BOOL ALNDataverseHasConfigurationForTarget(NSDictionary *config, NSString
           [ALNDataverseEnvironmentValueForTarget(@"ARLEN_DATAVERSE_TENANT_ID", normalizedTarget) length] > 0 ||
           [ALNDataverseEnvironmentValueForTarget(@"ARLEN_DATAVERSE_CLIENT_ID", normalizedTarget) length] > 0 ||
           [ALNDataverseEnvironmentValueForTarget(@"ARLEN_DATAVERSE_CLIENT_SECRET", normalizedTarget) length] > 0);
+}
+
+static BOOL ALNProcessFDDeltaDebugEnabled(void) {
+  const char *raw = getenv("ARLEN_FD_DELTA_DEBUG");
+  if (raw == NULL || raw[0] == '\0') {
+    return NO;
+  }
+  if (strcmp(raw, "0") == 0 ||
+      strcasecmp(raw, "false") == 0 ||
+      strcasecmp(raw, "no") == 0 ||
+      strcasecmp(raw, "off") == 0) {
+    return NO;
+  }
+  return YES;
+}
+
+static NSInteger ALNProcessFDDeltaWarnThreshold(void) {
+  const char *raw = getenv("ARLEN_FD_DELTA_WARN");
+  if (raw == NULL || raw[0] == '\0') {
+    return 1;
+  }
+  char *end = NULL;
+  long parsed = strtol(raw, &end, 10);
+  if (end == raw || parsed < 1) {
+    return 1;
+  }
+  return (NSInteger)parsed;
+}
+
+static NSInteger ALNCurrentProcessFDCount(void) {
+#if defined(__linux__)
+  DIR *dir = opendir("/proc/self/fd");
+  if (dir == NULL) {
+    return -1;
+  }
+  NSInteger count = 0;
+  struct dirent *entry = NULL;
+  while ((entry = readdir(dir)) != NULL) {
+    if (entry->d_name[0] == '.') {
+      continue;
+    }
+    count += 1;
+  }
+  closedir(dir);
+  return count;
+#else
+  return -1;
+#endif
+}
+
+static NSInteger ALNCurrentProcessFDSoftLimit(void) {
+  struct rlimit limit;
+  if (getrlimit(RLIMIT_NOFILE, &limit) != 0) {
+    return -1;
+  }
+  if (limit.rlim_cur == RLIM_INFINITY) {
+    return -1;
+  }
+  return (NSInteger)limit.rlim_cur;
+}
+
+static NSDictionary *ALNDescriptorDiagnosticsForException(NSException *exception) {
+  NSString *reason = exception.reason ?: exception.description ?: @"";
+  NSString *lowerReason = [reason lowercaseString];
+  BOOL descriptorLikely = ([lowerReason rangeOfString:@"pipe"].location != NSNotFound ||
+                           [lowerReason rangeOfString:@"descriptor"].location != NSNotFound ||
+                           [lowerReason rangeOfString:@"file"].location != NSNotFound);
+  if (!descriptorLikely) {
+    return @{};
+  }
+  NSInteger fdCount = ALNCurrentProcessFDCount();
+  NSInteger fdSoftLimit = ALNCurrentProcessFDSoftLimit();
+  NSMutableDictionary *diagnostics = [NSMutableDictionary dictionary];
+  diagnostics[@"pid"] = @((int)getpid());
+  if (fdCount >= 0) {
+    diagnostics[@"fd_count"] = @(fdCount);
+  }
+  if (fdSoftLimit >= 0) {
+    diagnostics[@"fd_soft_limit"] = @(fdSoftLimit);
+    if (fdCount >= 0) {
+      diagnostics[@"fd_remaining"] = @(fdSoftLimit - fdCount);
+      diagnostics[@"fd_usage_percent"] = @((fdSoftLimit > 0) ? (fdCount * 100 / fdSoftLimit) : 0);
+    }
+  }
+  diagnostics[@"guidance"] =
+      @"pipe/helper failures may indicate process-wide file descriptor exhaustion";
+  return diagnostics;
+}
+
+static void ALNLogRequestFDDeltaIfNeeded(ALNApplication *application,
+                                         ALNRequest *request,
+                                         ALNResponse *response,
+                                         NSString *routeName,
+                                         NSString *controllerName,
+                                         NSString *actionName,
+                                         NSInteger beforeCount,
+                                         NSInteger threshold) {
+  if (application == nil || beforeCount < 0 || threshold < 1) {
+    return;
+  }
+  NSInteger afterCount = ALNCurrentProcessFDCount();
+  if (afterCount < 0) {
+    return;
+  }
+  NSInteger delta = afterCount - beforeCount;
+  if (delta < threshold) {
+    return;
+  }
+  [application.logger warn:@"request fd delta"
+                   fields:@{
+                     @"event" : @"http.request.fd_delta",
+                     @"pid" : @((int)getpid()),
+                     @"method" : request.method ?: @"",
+                     @"path" : request.path ?: @"",
+                     @"status" : @(response.statusCode),
+                     @"route" : routeName ?: @"",
+                     @"controller" : controllerName ?: @"",
+                     @"action" : actionName ?: @"",
+                     @"fd_before" : @(beforeCount),
+                     @"fd_after" : @(afterCount),
+                     @"fd_delta" : @(delta),
+                     @"threshold" : @(threshold),
+                   }];
 }
 
 static ALNDataverseTarget *ALNDataverseTargetFromMergedConfig(NSDictionary *merged,
@@ -4760,6 +4899,12 @@ static void ALNFinalizeResponse(ALNApplication *application,
 }
 
 - (ALNResponse *)dispatchRequest:(ALNRequest *)request {
+  BOOL fdDeltaDebugEnabled = ALNProcessFDDeltaDebugEnabled();
+  NSInteger fdDeltaWarnThreshold =
+      fdDeltaDebugEnabled ? ALNProcessFDDeltaWarnThreshold() : 0;
+  NSInteger fdCountBefore =
+      fdDeltaDebugEnabled ? ALNCurrentProcessFDCount() : -1;
+
   NSString *rewrittenPath = nil;
   NSDictionary *mountedEntry = [self mountedEntryForPath:request.path rewrittenPath:&rewrittenPath];
   if (mountedEntry != nil) {
@@ -4788,6 +4933,14 @@ static void ALNFinalizeResponse(ALNApplication *application,
       if ([prefix length] > 0 && [forwardedResponse headerForName:@"X-Arlen-Mount-Prefix"] == nil) {
         [forwardedResponse setHeader:@"X-Arlen-Mount-Prefix" value:prefix];
       }
+      ALNLogRequestFDDeltaIfNeeded(self,
+                                   request,
+                                   forwardedResponse,
+                                   prefix,
+                                   @"",
+                                   @"mounted_application",
+                                   fdCountBefore,
+                                   fdDeltaWarnThreshold);
       return forwardedResponse;
     }
   }
@@ -4889,6 +5042,14 @@ static void ALNFinalizeResponse(ALNApplication *application,
       fields[@"route"] = reservedBuiltInPath;
       [self.logger info:@"request complete" fields:fields];
     }
+    ALNLogRequestFDDeltaIfNeeded(self,
+                                 request,
+                                 response,
+                                 reservedBuiltInPath,
+                                 @"",
+                                 @"built_in",
+                                 fdCountBefore,
+                                 fdDeltaWarnThreshold);
     return response;
   }
 
@@ -5006,6 +5167,14 @@ static void ALNFinalizeResponse(ALNApplication *application,
       }
       [self.logger info:@"request" fields:fields];
     }
+    ALNLogRequestFDDeltaIfNeeded(self,
+                                 request,
+                                 response,
+                                 builtInPath,
+                                 @"",
+                                 handledBuiltIn ? @"built_in" : @"not_found",
+                                 fdCountBefore,
+                                 fdDeltaWarnThreshold);
     return response;
   }
 
@@ -5073,7 +5242,12 @@ static void ALNFinalizeResponse(ALNApplication *application,
     } @catch (NSException *exception) {
       benchmarkControllerStageDurationMs =
           ALNWallClockMilliseconds() - benchmarkControllerStageStartMs;
-      NSDictionary *details = ALNErrorDetailsFromException(exception);
+      NSMutableDictionary *details =
+          [NSMutableDictionary dictionaryWithDictionary:ALNErrorDetailsFromException(exception)];
+      NSDictionary *descriptorDiagnostics = ALNDescriptorDiagnosticsForException(exception);
+      if ([descriptorDiagnostics count] > 0) {
+        details[@"descriptor_diagnostics"] = descriptorDiagnostics;
+      }
       ALNApplyInternalErrorResponse(self,
                                     request,
                                     response,
@@ -5083,13 +5257,16 @@ static void ALNFinalizeResponse(ALNApplication *application,
                                     @"Internal Server Error",
                                     exception.reason ?: @"controller exception",
                                     details);
-      [self.logger error:@"controller exception"
-                  fields:@{
-                    @"request_id" : ALNResolvedRequestID(requestIdentity),
-                    @"controller" : resolvedControllerName,
-                    @"action" : resolvedActionName,
-                    @"exception" : exception.description ?: @""
-                  }];
+      NSMutableDictionary *logFields = [NSMutableDictionary dictionaryWithDictionary:@{
+        @"request_id" : ALNResolvedRequestID(requestIdentity),
+        @"controller" : resolvedControllerName,
+        @"action" : resolvedActionName,
+        @"exception" : exception.description ?: @""
+      }];
+      if ([descriptorDiagnostics count] > 0) {
+        logFields[@"descriptor_diagnostics"] = descriptorDiagnostics;
+      }
+      [self.logger error:@"controller exception" fields:logFields];
       fastHandled = YES;
     }
     [trace endStage:@"controller"];
@@ -5155,6 +5332,14 @@ static void ALNFinalizeResponse(ALNApplication *application,
         }
         [self.logger info:@"request" fields:logFields];
       }
+      ALNLogRequestFDDeltaIfNeeded(self,
+                                   request,
+                                   response,
+                                   resolvedRouteName,
+                                   resolvedControllerName,
+                                   resolvedActionName,
+                                   fdCountBefore,
+                                   fdDeltaWarnThreshold);
       return response;
     }
   }
@@ -5338,7 +5523,12 @@ static void ALNFinalizeResponse(ALNApplication *application,
         }
       }
     } @catch (NSException *exception) {
-      NSDictionary *details = ALNErrorDetailsFromException(exception);
+      NSMutableDictionary *details =
+          [NSMutableDictionary dictionaryWithDictionary:ALNErrorDetailsFromException(exception)];
+      NSDictionary *descriptorDiagnostics = ALNDescriptorDiagnosticsForException(exception);
+      if ([descriptorDiagnostics count] > 0) {
+        details[@"descriptor_diagnostics"] = descriptorDiagnostics;
+      }
       ALNApplyInternalErrorResponse(self,
                                     request,
                                     response,
@@ -5348,13 +5538,16 @@ static void ALNFinalizeResponse(ALNApplication *application,
                                     @"Internal Server Error",
                                     exception.reason ?: @"controller exception",
                                     details);
-      [self.logger error:@"controller exception"
-                  fields:@{
-                    @"request_id" : ALNResolvedRequestID(requestIdentity),
-                    @"controller" : context.controllerName ?: @"",
-                    @"action" : context.actionName ?: @"",
-                    @"exception" : exception.description ?: @""
-                  }];
+      NSMutableDictionary *logFields = [NSMutableDictionary dictionaryWithDictionary:@{
+        @"request_id" : ALNResolvedRequestID(requestIdentity),
+        @"controller" : context.controllerName ?: @"",
+        @"action" : context.actionName ?: @"",
+        @"exception" : exception.description ?: @""
+      }];
+      if ([descriptorDiagnostics count] > 0) {
+        logFields[@"descriptor_diagnostics"] = descriptorDiagnostics;
+      }
+      [self.logger error:@"controller exception" fields:logFields];
     }
     [trace endStage:@"controller"];
   }
@@ -5514,6 +5707,15 @@ static void ALNFinalizeResponse(ALNApplication *application,
     }
     [self.logger info:@"request" fields:logFields];
   }
+
+  ALNLogRequestFDDeltaIfNeeded(self,
+                               request,
+                               response,
+                               resolvedRouteName,
+                               resolvedControllerName,
+                               resolvedActionName,
+                               fdCountBefore,
+                               fdDeltaWarnThreshold);
 
   return response;
 }

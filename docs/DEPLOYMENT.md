@@ -41,6 +41,10 @@ Descriptor pressure should be monitored on long-lived GNUstep deployments that
 serve files. Arlen ships `tools/ops/sample_fd_targets.py` for Linux `/proc`
 sampling; see `docs/PROPANE.md` for the operator triage workflow and the
 `/dev/null` descriptor exhaustion warning signs from `ARLEN-BUG-024`.
+`propane` also emits Linux worker FD-pressure lifecycle diagnostics and can
+optionally retire workers above configured FD pressure thresholds. Request-level
+FD-delta logging is available through `ARLEN_FD_DELTA_DEBUG=1` for short
+diagnostic windows.
 
 ## 4. Phase 32 Deployment Target Contract
 

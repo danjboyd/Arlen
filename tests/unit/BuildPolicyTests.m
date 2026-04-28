@@ -630,6 +630,9 @@
   NSString *script = [self readFile:scriptPath];
   NSString *samplerPath = [repoRoot stringByAppendingPathComponent:@"tools/ops/sample_fd_targets.py"];
   NSString *sampler = [self readFile:samplerPath];
+  NSString *propaneScript = [self readFile:[repoRoot stringByAppendingPathComponent:@"bin/propane"]];
+  NSString *applicationSource =
+      [self readFile:[repoRoot stringByAppendingPathComponent:@"src/Arlen/Core/ALNApplication.m"]];
   NSString *propaneDocs = [self readFile:[repoRoot stringByAppendingPathComponent:@"docs/PROPANE.md"]];
 
   XCTAssertTrue([makefile containsString:@"ci-phase38-fd-regression:"]);
@@ -637,7 +640,16 @@
   XCTAssertTrue([script containsString:@"phase38_fd_regression_summary.json"]);
   XCTAssertTrue([sampler containsString:@"arlen-fd-target-sample-v1"]);
   XCTAssertTrue([sampler containsString:@"dev_null_fds"]);
+  XCTAssertTrue([propaneScript containsString:@"worker_fd_pressure_${severity}"]);
+  XCTAssertTrue([propaneScript containsString:@"worker_fd_pressure_retire_requested"]);
+  XCTAssertTrue([propaneScript containsString:@"ARLEN_PROPANE_WORKER_FD_RETIRE_PERCENT"]);
+  XCTAssertTrue([applicationSource containsString:@"ARLEN_FD_DELTA_DEBUG"]);
+  XCTAssertTrue([applicationSource containsString:@"http.request.fd_delta"]);
+  XCTAssertTrue([applicationSource containsString:@"descriptor_diagnostics"]);
+  XCTAssertTrue([applicationSource containsString:@"process-wide file descriptor exhaustion"]);
   XCTAssertTrue([propaneDocs containsString:@"sample_fd_targets.py"]);
+  XCTAssertTrue([propaneDocs containsString:@"workerFDRetirePercent"]);
+  XCTAssertTrue([propaneDocs containsString:@"ARLEN_FD_DELTA_WARN"]);
 }
 
 - (void)testGNUmakefileIncludesPerfSmokeTarget {

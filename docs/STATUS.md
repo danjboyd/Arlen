@@ -2,6 +2,19 @@
 
 Last updated: 2026-04-28
 
+## Leaving Off (2026-04-28, Phase 38I)
+
+- Executed Phase 38I Arlen FD-pressure hardening:
+  - `propane` now samples Linux worker FD pressure and emits lifecycle warning
+    and critical events with worker PID, FD count, soft limit, usage percent,
+    remaining descriptors, and top FD targets
+  - added optional FD-pressure worker retirement propane accessories:
+    `workerFDRetirePercent` and `workerFDRetireCount`
+  - added CLI/env overrides for FD pressure thresholds and check cadence
+  - added disabled-by-default request FD-delta diagnostics with
+    `ARLEN_FD_DELTA_DEBUG=1` and `ARLEN_FD_DELTA_WARN=<n>`
+  - documented subprocess descriptor ownership best practices for Arlen apps
+
 ## Leaving Off (2026-04-28)
 
 - Executed Phase 38A-D and the implementable parts of 38E-H:

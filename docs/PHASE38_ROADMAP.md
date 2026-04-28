@@ -387,7 +387,7 @@ Current 38H disposition:
 
 ## 4.9 Phase 38I: Arlen FD-Pressure Hardening
 
-Status: Planned
+Status: Complete
 
 Deliverables:
 
@@ -426,6 +426,17 @@ Acceptance:
   requiring production stress traffic.
 - Docs clearly distinguish Arlen hardening from downstream descriptor ownership.
 
+Current 38I disposition:
+
+- `propane` samples Linux worker FD pressure and emits structured lifecycle
+  warning/critical events.
+- `propane` supports optional FD-pressure worker retirement through propane
+  accessories.
+- Workers support disabled-by-default request FD-delta logs through
+  `ARLEN_FD_DELTA_DEBUG` and `ARLEN_FD_DELTA_WARN`.
+- `docs/PROPANE.md`, `docs/DEPLOYMENT.md`, and `docs/CLI_REFERENCE.md` document
+  the diagnostics and subprocess descriptor ownership guidance.
+
 ## 5. Work Queue
 
 The phases/subphases to work on, in order:
@@ -445,9 +456,8 @@ The phases/subphases to work on, in order:
    improves.
 8. `38H`: partial; complete only after downstream confirms stable uptime or a
    root-cause fix ships and validates.
-9. `38I`: implement Arlen FD-pressure hardening: warnings, optional worker
-   recycling, better failure diagnostics, request FD-delta debug mode, and
-   subprocess best-practice docs.
+9. `38I`: complete; monitor the new FD-pressure lifecycle events and use
+   request FD-delta debugging only for focused diagnostic windows.
 
 ## 6. Non-Goals
 
