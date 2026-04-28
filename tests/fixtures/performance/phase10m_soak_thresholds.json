@@ -5,9 +5,13 @@
   "startupTimeoutSeconds": 20,
   "requestsPerMode": 480,
   "sampleEveryRequests": 80,
+  "fileBodyRequestEvery": 40,
+  "fileBodySize": 8192,
   "restartCycles": 2,
   "maxRequestFailures": 4,
   "maxRssDeltaKB": 131072,
   "maxFDDelta": 96,
-  "maxSocketFDDelta": 96
+  "maxSocketFDDelta": 96,
+  "maxDevNullFDDelta": 4,
+  "maxRegularFileFDDelta": 96
 }

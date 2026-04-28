@@ -130,7 +130,7 @@ def stop_server(process: subprocess.Popen[str] | None) -> None:
         process.wait(timeout=5)
 
 
-def read_process_metrics(pid: int) -> Dict[str, int]:
+def read_process_metrics(pid: int) -> Dict[str, Any]:
     status_path = Path(f"/proc/{pid}/status")
     fd_path = Path(f"/proc/{pid}/fd")
     rss_kb = -1
@@ -142,18 +142,33 @@ def read_process_metrics(pid: int) -> Dict[str, int]:
             break
     fd_count = 0
     socket_fd_count = 0
+    dev_null_fd_count = 0
+    regular_file_fd_count = 0
+    fd_targets: Dict[str, int] = {}
     for entry in fd_path.iterdir():
         fd_count += 1
         try:
             target = os.readlink(entry)
         except OSError:
             continue
+        fd_targets[target] = fd_targets.get(target, 0) + 1
+        if target == "/dev/null":
+            dev_null_fd_count += 1
         if target.startswith("socket:"):
             socket_fd_count += 1
+        elif not target.startswith(("anon_inode:", "pipe:")):
+            regular_file_fd_count += 1
+    top_fd_targets = [
+        {"target": target, "count": count}
+        for target, count in sorted(fd_targets.items(), key=lambda item: (-item[1], item[0]))[:12]
+    ]
     return {
         "rss_kb": rss_kb,
         "fd_count": fd_count,
         "socket_fd_count": socket_fd_count,
+        "dev_null_fd_count": dev_null_fd_count,
+        "regular_file_fd_count": regular_file_fd_count,
+        "top_fd_targets": top_fd_targets,
     }
 
 
@@ -161,6 +176,15 @@ def request_single_health(port: int) -> Tuple[int, str]:
     with urllib.request.urlopen(f"http://127.0.0.1:{port}/healthz", timeout=3.0) as response:
         body = response.read().decode("utf-8")
         return response.status, body
+
+
+def request_file_body(port: int, size: int) -> Tuple[int, int, bytes]:
+    with urllib.request.urlopen(
+        f"http://127.0.0.1:{port}/api/blob?size={size}&mode=validated-file",
+        timeout=6.0,
+    ) as response:
+        body = response.read()
+        return response.status, len(body), body[:8]
 
 
 def run_keepalive_batch(port: int, request_count: int, pipelined: bool) -> Tuple[int, int]:
@@ -227,6 +251,10 @@ def max_metric(samples: List[Dict[str, Any]], key: str) -> int:
     return max(values)
 
 
+def sample_delta(samples: List[Dict[str, Any]], baseline: Dict[str, Any], key: str) -> int:
+    return max_metric(samples, key) - int(baseline.get(key, 0))
+
+
 def run_mode(binary: Path, mode: str, thresholds: Dict[str, Any]) -> Dict[str, Any]:
     requests = int(thresholds.get("requestsPerMode", 400))
     sample_every = max(1, int(thresholds.get("sampleEveryRequests", 80)))
@@ -236,11 +264,18 @@ def run_mode(binary: Path, mode: str, thresholds: Dict[str, Any]) -> Dict[str, A
     max_rss_delta = int(thresholds.get("maxRssDeltaKB", 131072))
     max_fd_delta = int(thresholds.get("maxFDDelta", 96))
     max_socket_fd_delta = int(thresholds.get("maxSocketFDDelta", 96))
+    max_dev_null_fd_delta = int(thresholds.get("maxDevNullFDDelta", 4))
+    max_regular_file_fd_delta = int(thresholds.get("maxRegularFileFDDelta", 96))
+    file_body_request_every = int(thresholds.get("fileBodyRequestEvery", 0))
+    file_body_size = int(thresholds.get("fileBodySize", 8192))
 
     process: subprocess.Popen[str] | None = None
     port = allocate_free_port()
     failures = 0
+    file_body_requests = 0
+    file_body_failures = 0
     completed = 0
+    next_file_body_at = file_body_request_every if file_body_request_every > 0 else 0
     restart_errors: List[str] = []
     samples: List[Dict[str, Any]] = []
 
@@ -250,7 +285,19 @@ def run_mode(binary: Path, mode: str, thresholds: Dict[str, Any]) -> Dict[str, A
         samples.append({"request_index": 0, **baseline})
 
         while completed < requests:
-            if mode == "serialized":
+            if next_file_body_at > 0 and completed >= next_file_body_at:
+                try:
+                    status, byte_count, prefix = request_file_body(port, file_body_size)
+                    file_body_requests += 1
+                    if status != 200 or byte_count != file_body_size or prefix != b"xxxxxxxx":
+                        failures += 1
+                        file_body_failures += 1
+                except Exception:
+                    failures += 1
+                    file_body_failures += 1
+                completed += 1
+                next_file_body_at += file_body_request_every
+            elif mode == "serialized":
                 try:
                     status, body = request_single_health(port)
                     if status != 200 or body != "ok\n":
@@ -276,9 +323,13 @@ def run_mode(binary: Path, mode: str, thresholds: Dict[str, Any]) -> Dict[str, A
         max_rss = max_metric(samples, "rss_kb")
         max_fd = max_metric(samples, "fd_count")
         max_socket_fd = max_metric(samples, "socket_fd_count")
-        rss_delta = max_rss - baseline["rss_kb"]
-        fd_delta = max_fd - baseline["fd_count"]
-        socket_fd_delta = max_socket_fd - baseline["socket_fd_count"]
+        max_dev_null_fd = max_metric(samples, "dev_null_fd_count")
+        max_regular_file_fd = max_metric(samples, "regular_file_fd_count")
+        rss_delta = sample_delta(samples, baseline, "rss_kb")
+        fd_delta = sample_delta(samples, baseline, "fd_count")
+        socket_fd_delta = sample_delta(samples, baseline, "socket_fd_count")
+        dev_null_fd_delta = sample_delta(samples, baseline, "dev_null_fd_count")
+        regular_file_fd_delta = sample_delta(samples, baseline, "regular_file_fd_count")
 
         restarts = []
         for cycle in range(1, restart_cycles + 1):
@@ -309,6 +360,14 @@ def run_mode(binary: Path, mode: str, thresholds: Dict[str, Any]) -> Dict[str, A
             violations.append(
                 f"socket fd delta {socket_fd_delta} > maxSocketFDDelta {max_socket_fd_delta}"
             )
+        if dev_null_fd_delta > max_dev_null_fd_delta:
+            violations.append(
+                f"/dev/null fd delta {dev_null_fd_delta} > maxDevNullFDDelta {max_dev_null_fd_delta}"
+            )
+        if regular_file_fd_delta > max_regular_file_fd_delta:
+            violations.append(
+                f"regular file fd delta {regular_file_fd_delta} > maxRegularFileFDDelta {max_regular_file_fd_delta}"
+            )
         violations.extend(restart_errors)
 
         return {
@@ -317,16 +376,22 @@ def run_mode(binary: Path, mode: str, thresholds: Dict[str, Any]) -> Dict[str, A
             "requests_target": requests,
             "requests_completed": completed,
             "request_failures": failures,
+            "file_body_requests": file_body_requests,
+            "file_body_failures": file_body_failures,
             "baseline": baseline,
             "max_observed": {
                 "rss_kb": max_rss,
                 "fd_count": max_fd,
                 "socket_fd_count": max_socket_fd,
+                "dev_null_fd_count": max_dev_null_fd,
+                "regular_file_fd_count": max_regular_file_fd,
             },
             "deltas": {
                 "rss_kb": rss_delta,
                 "fd_count": fd_delta,
                 "socket_fd_count": socket_fd_delta,
+                "dev_null_fd_count": dev_null_fd_delta,
+                "regular_file_fd_count": regular_file_fd_delta,
             },
             "restart_cycles": restart_cycles,
             "restart_results": restarts,
@@ -345,18 +410,21 @@ def render_markdown(payload: Dict[str, Any], output_dir: Path) -> str:
     lines.append(f"Git commit: `{payload['commit']}`")
     lines.append(f"Threshold fixture: `{payload.get('threshold_fixture_version', '')}`")
     lines.append("")
-    lines.append("| Mode | Status | Requests | Failures | RSS delta (KB) | FD delta | Socket FD delta |")
-    lines.append("| --- | --- | --- | --- | --- | --- | --- |")
+    lines.append("| Mode | Status | Requests | File bodies | Failures | RSS delta (KB) | FD delta | /dev/null FD delta | Socket FD delta |")
+    lines.append("| --- | --- | --- | --- | --- | --- | --- | --- | --- |")
     for result in payload.get("results", []):
         lines.append(
-            "| {mode} | {status} | {completed}/{target} | {failures} | {rss} | {fd} | {socket_fd} |".format(
+            "| {mode} | {status} | {completed}/{target} | {file_completed}/{file_failed} | {failures} | {rss} | {fd} | {dev_null_fd} | {socket_fd} |".format(
                 mode=result.get("mode", ""),
                 status=result.get("status", ""),
                 completed=result.get("requests_completed", 0),
                 target=result.get("requests_target", 0),
+                file_completed=result.get("file_body_requests", 0),
+                file_failed=result.get("file_body_failures", 0),
                 failures=result.get("request_failures", 0),
                 rss=result.get("deltas", {}).get("rss_kb", 0),
                 fd=result.get("deltas", {}).get("fd_count", 0),
+                dev_null_fd=result.get("deltas", {}).get("dev_null_fd_count", 0),
                 socket_fd=result.get("deltas", {}).get("socket_fd_count", 0),
             )
         )

@@ -449,7 +449,9 @@ Deliverables:
     - `tests/fixtures/performance/phase10m_soak_thresholds.json`
     - `tools/ci/generate_phase10m_soak_artifacts.py`
     - `tools/ci/run_phase10m_soak.sh`
-  - gate emits bounded-RSS/fd/socket deltas with restart-cycle assertions and manifest pack.
+  - gate emits bounded-RSS/fd/socket deltas, `/dev/null` FD target drift,
+    validated `fileBodyPath` response churn, restart-cycle assertions, and
+    manifest pack.
   - wired make/CI target: `make ci-soak`.
 - 10M.7 chaos/restart under live traffic (complete):
   - added churn threshold fixture + chaos artifact generator + CI gate:
