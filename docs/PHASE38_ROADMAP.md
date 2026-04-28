@@ -25,9 +25,12 @@ can prove that long-lived file-serving workloads remain stable.
 
 ## 2. Current Assessment
 
-The report is accepted as a real Arlen-facing production bug, but root cause is
-not yet proven. Phase 38 staging has ruled out a simple per-file-response
-`/dev/null` leak in the synthetic `fileBodyPath` path.
+The report is accepted as a real Arlen-facing production failure, but current
+evidence points to a downstream app descriptor leak rather than an Arlen
+file-response leak. Phase 38 staging ruled out a simple per-file-response
+`/dev/null` leak in the synthetic `fileBodyPath` path. Follow-up production
+inspection identified `StateCompulsoryPoolingAPI` respondent autostart
+subprocess launches as the likely descriptor opener.
 
 Known facts:
 
@@ -47,12 +50,13 @@ Known facts:
 
 Working hypothesis:
 
-The leak is in a worker-process runtime path that synthetic PDF traffic did not
-exercise rather than in the visible app file lookup or simple Arlen
-`fileBodyPath` happy path. Possible sources include GNUstep Base internals,
-Arlen's use of GNUstep APIs, `propane` worker launch or stdio handling,
-downstream app code invoked under uptime/background paths, production runtime
-differences, or an interaction between those layers.
+The leak is in downstream app code invoked by respondent workflow endpoints,
+not in the visible app file lookup or simple Arlen `fileBodyPath` happy path.
+`StateCompulsoryPoolingAPI` creates an `NSTask`, assigns three fresh
+`[NSFileHandle fileHandleWithNullDevice]` handles for stdin/stdout/stderr, and
+does not release the task object. On GNUstep, an isolated reproduction showed
+that this retains three `/dev/null` descriptors in the parent process for each
+launch.
 
 Phase 38 staging evidence from 2026-04-28:
 
@@ -70,6 +74,19 @@ Phase 38 staging evidence from 2026-04-28:
     descriptor per worker
   - bounded `strace` windows during PDF traffic: `0` `/dev/null` opens
 
+Production follow-up evidence from 2026-04-28:
+
+- Restarted production workers accumulated `/dev/null` descriptors again while
+  still far below the soft limit.
+- Worker `1561594` moved from `85` to `100` `/dev/null` descriptors during
+  investigation.
+- Worker `1561595` moved from `79` to `91` `/dev/null` descriptors during
+  investigation.
+- Growth occurred in multiples of `3`, matching one app `NSTask` launch with
+  three null-device standard streams.
+- A disposable GNUstep VM reproducer using the same `NSTask` pattern showed
+  `/dev/null` counts `0`, `3`, `6`, `9`, `12`, `15` after five launches.
+
 ## 3. Scope Summary
 
 1. Phase 38A: staging infrastructure and environment parity.
@@ -80,6 +97,7 @@ Phase 38 staging evidence from 2026-04-28:
 6. Phase 38F: regression gates and CI artifact hardening.
 7. Phase 38G: operational diagnostics and runbook updates.
 8. Phase 38H: downstream validation and closeout.
+9. Phase 38I: Arlen FD-pressure hardening and best-practice diagnostics.
 
 ## 4. Milestones
 
@@ -186,7 +204,7 @@ Acceptance:
 
 ## 4.4 Phase 38D: Syscall Tracing and Root-Cause Isolation
 
-Status: Complete for synthetic staging; production root cause remains open
+Status: Complete; production root cause appears downstream
 
 Deliverables:
 
@@ -224,9 +242,17 @@ Acceptance:
   - cross-layer interaction requiring Arlen mitigation
 - Capture enough evidence to implement the fix without guessing.
 
+Current 38D disposition:
+
+- Production-safe inspection identified the downstream respondent autostart
+  `NSTask` path as the likely descriptor opener.
+- The path explains both the `/dev/null` target and the observed production
+  growth increments.
+- No Arlen file-response or `propane` worker-launch leak has been identified.
+
 ## 4.5 Phase 38E: Focused Runtime Fix
 
-Status: Blocked pending a reproduced leaking path
+Status: Deferred to downstream app fix
 
 Deliverables:
 
@@ -259,10 +285,10 @@ Acceptance:
 
 Current 38E disposition:
 
-- No focused runtime fix was applied because Phase 38A-D did not reproduce the
-  leak and `strace` saw no `/dev/null` opens during synthetic file traffic.
-- The next valid 38E input is a trace or FD snapshot series that identifies the
-  descriptor opener. Until then, a code fix would be speculative.
+- No focused Arlen runtime fix was applied because the reproduced leak mechanism
+  is in downstream `StateCompulsoryPoolingAPI` `NSTask` ownership.
+- The downstream fix should release or otherwise close the three null-device
+  handles associated with each subprocess launch.
 
 ## 4.6 Phase 38F: Regression Gates and CI Artifacts
 
@@ -359,6 +385,47 @@ Current 38H disposition:
   validation or production-safe diagnostics confirm the `/dev/null` descriptor
   growth no longer recurs.
 
+## 4.9 Phase 38I: Arlen FD-Pressure Hardening
+
+Status: Planned
+
+Deliverables:
+
+- Add `propane` worker FD pressure warnings on Linux:
+  - worker PID
+  - current FD count
+  - soft open-file limit
+  - percent used
+  - top FD targets when available
+  - warning and critical threshold values
+- Add optional FD-pressure worker recycling as propane accessories:
+  - retire workers gracefully above a configured FD usage percent
+  - retire workers gracefully above a configured absolute FD count
+  - log that recycling is mitigation for a process leak, not a root-cause fix
+- Improve descriptor-exhaustion diagnostics around pipe/helper creation
+  failures:
+  - include worker PID, FD count, soft limit, and likely descriptor exhaustion
+    guidance when available
+  - preserve existing GNUstep exception details
+- Add a staging/debug request FD-delta mode:
+  - sample FD count before and after each request
+  - log request method/path, worker PID, and FD delta above a threshold
+  - keep disabled by default
+- Document subprocess best practices for Arlen apps:
+  - apps that use `NSTask`, `NSPipe`, `NSFileHandle fileHandleWithNullDevice`,
+    or raw `open` own descriptor lifetime
+  - long-lived workers make small per-request leaks production-significant
+  - prefer explicit release/close ownership in subprocess helpers
+
+Acceptance:
+
+- Operators get structured warnings before FD exhaustion breaks file responses.
+- FD-pressure recycling can protect availability while the leaking app path is
+  being fixed.
+- Debug FD-delta logs can identify request paths that leak descriptors without
+  requiring production stress traffic.
+- Docs clearly distinguish Arlen hardening from downstream descriptor ownership.
+
 ## 5. Work Queue
 
 The phases/subphases to work on, in order:
@@ -370,14 +437,17 @@ The phases/subphases to work on, in order:
    staging deployment.
 4. `38D`: run bounded syscall tracing and identify the genuine descriptor
    opener.
-5. `38E`: blocked pending a captured leaking path; do not apply speculative
-   fixes.
+5. `38E`: deferred to the downstream app fix for `NSTask` null-device handle
+   ownership.
 6. `38F`: maintain `make ci-phase38-fd-regression` as the Arlen-only tripwire
    and add a focused reproducer once the real leaking path is known.
 7. `38G`: complete; keep operator diagnostics current as production evidence
    improves.
 8. `38H`: partial; complete only after downstream confirms stable uptime or a
    root-cause fix ships and validates.
+9. `38I`: implement Arlen FD-pressure hardening: warnings, optional worker
+   recycling, better failure diagnostics, request FD-delta debug mode, and
+   subprocess best-practice docs.
 
 ## 6. Non-Goals
 
