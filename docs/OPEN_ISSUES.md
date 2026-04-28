@@ -1,5 +1,89 @@
 # Open Issues
 
+## ISSUE-004: Production workers leak `/dev/null` file descriptors until file responses fail
+
+- Status: `open`
+- Priority: `critical`
+- Tracking ID: `ARLEN-BUG-024`
+- Discovered: `2026-04-27`
+- Reported by: `StateCompulsoryPoolingAPI`
+- Last updated: `2026-04-28`
+- Target follow-up: Phase 38
+- Reconciliation note:
+  `docs/STATECOMPULSORYPOOLINGAPI_REPORT_RECONCILIATION_2026-04-24.md`
+- Roadmap:
+  `docs/PHASE38_ROADMAP.md`
+
+### Summary
+
+Long-lived `StateCompulsoryPoolingAPI` workers served by Arlen through
+`propane` accumulated hundreds of open `/dev/null` descriptors. At failure time
+both workers were near the process soft open-file limit:
+
+- worker `1096874`: `1023` open descriptors, about `970` targeting `/dev/null`
+- worker `1096875`: `1023` open descriptors, about `967` targeting `/dev/null`
+- process limit: soft `1024`, hard `524288`
+
+Once descriptor exhaustion approached, document metadata endpoints continued to
+respond, `HEAD` on PDF endpoints could still return `200`, but full
+`GET` file responses failed. Arlen logged controller exceptions with the
+GNUstep Base reason `Failed to create pipe to handle perform in thread`.
+
+### Repro context (reported)
+
+- Host: `iep-softwaredev`
+- Observed: `2026-04-27` through `2026-04-28`
+- App: `StateCompulsoryPoolingAPI`
+- Arlen runtime path:
+  `/opt/StateCompulsoryPoolingAPI/current/.third_party/Arlen`
+- Running release:
+  `/opt/StateCompulsoryPoolingAPI/releases/0049b4a5c85a70132ca43f7529650d2b8825c8d5-arlen734ac33`
+- Process manager: `propane`
+- Service: `scp-api-arlen.service`
+- Request dispatch mode: `ARLEN_REQUEST_DISPATCH_MODE=serialized`
+- Worker count: `2`
+- Worker soft open-file limit: `1024`
+- Representative endpoint:
+  `/v1/states/OK/dockets/CD_2025-002412/documents/0ee415d6f4ae4ea355d421699aae0990f6070fb14c14e745c22c780d8b02b6c3/pdf`
+
+### Current assessment
+
+This is accepted as a real Arlen-facing production reliability bug. The visible
+`ALNResponse.fileBodyPath` send path preflights and closes its per-request
+descriptor, and the static file descriptor cache is capped and evicts by
+closing entries, so this does not currently look like a simple missing close in
+the happy-path file-send code.
+
+The exception text comes from GNUstep Base, which means the observed crash point
+is GNUstep failing to allocate an internal pipe after the process is already at
+or near descriptor exhaustion. The source of the `/dev/null` leak is not yet
+proven. It may be in GNUstep Base internals, Arlen's use of GNUstep APIs,
+`propane` worker launch or stdio handling, downstream app code invoked under
+Arlen, or an interaction between those components.
+
+### Expected behavior
+
+1. Arlen workers should not leak `/dev/null` descriptors over normal request
+   handling.
+2. Long-lived workers should continue serving dynamic `fileBodyPath` responses
+   under normal uptime.
+3. Arlen should surface actionable diagnostics when descriptor exhaustion is
+   approaching.
+4. If a helper/thread/pipe allocation fails, the failure path should be bounded
+   and explicit rather than cascading into unrelated file-response failures.
+
+### Workaround
+
+Restarting the service clears the descriptors and temporarily restores PDF
+downloads. Raising `LimitNOFILE` only delays recurrence and is not a fix.
+
+### Current regression coverage
+
+Phase 10M soak coverage now samples `/proc/$pid/fd`, records top FD targets,
+tracks `/dev/null` descriptor drift, and sends validated `fileBodyPath`
+responses. This is a tripwire, not a full reproduction of the reported
+`propane` production shape.
+
 ## ISSUE-003: File streaming responses sent successful headers with no body
 
 - Status: `resolved`

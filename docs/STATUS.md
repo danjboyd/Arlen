@@ -1,6 +1,26 @@
 # Arlen Status Checkpoint
 
-Last updated: 2026-04-24
+Last updated: 2026-04-28
+
+## Leaving Off (2026-04-28)
+
+- Accepted `ARLEN-BUG-024` / `ISSUE-004` as an open critical
+  Arlen-facing production reliability bug:
+  - long-lived `StateCompulsoryPoolingAPI` workers accumulate hundreds of
+    `/dev/null` descriptors until workers approach `1024` open descriptors
+  - PDF/file `GET` responses then fail while metadata endpoints remain healthy
+  - the observed exception reason, `Failed to create pipe to handle perform in
+    thread`, is surfaced from GNUstep Base after descriptor exhaustion
+- Added Phase 38 planning for the fix:
+  - `38A-38H` cover a Debian/libvirt staging reproduction, GNUstep provisioning
+    through `gnustep-cli-new`, downstream app fixture deployment, traffic/FD
+    sampling, syscall tracing, focused fix, regression gates, operator
+    diagnostics, and downstream closeout
+  - authoritative roadmap: `docs/PHASE38_ROADMAP.md`
+- Hardened the Phase 10M soak tripwire:
+  - tracks `/proc/$pid/fd` target grouping and `/dev/null` descriptor drift
+  - sends validated `fileBodyPath` responses during the soak
+  - local verification passed with `/dev/null` FD delta `0`
 
 ## Leaving Off (2026-04-24)
 
