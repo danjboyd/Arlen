@@ -259,6 +259,20 @@ streams tar output through a pipe for uploads, and sends the remote shell as a
 single command string. This preserves the intended `bash -lc '<script>'`
 boundary across SSH remote-command reparsing (`ARLEN-BUG-021`).
 
+`transport.sshOptions` is an argv fragment, not a set. Arlen preserves the
+manifest order exactly after dropping empty values, so positional options such
+as `("-F", "/dev/null")` remain adjacent when SSH is invoked
+(`ARLEN-BUG-025`). If the SSH task exits before the upload stream finishes,
+Arlen now stops the local tar producer and returns a structured
+`deploy_target_transport_failed` result instead of waiting indefinitely
+(`ARLEN-BUG-026`).
+
+`arlen deploy init <target>` is local host scaffolding. It creates the target
+release layout and generated wrappers on the filesystem where the command runs;
+it does not SSH to `transport.sshHost`. For remote targets, run it on the target
+host or against an intentionally mounted/staged host layout before relying on
+remote `push` or `release`.
+
 ### 4.7 Remote Rebuild Contract
 
 Remote rebuild should never be a silent fallback.

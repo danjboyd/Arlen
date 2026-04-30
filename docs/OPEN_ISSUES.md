@@ -1,5 +1,69 @@
 # Open Issues
 
+## ISSUE-006: Remote deploy push could hang when SSH exited before tar completed
+
+- Status: `resolved`
+- Priority: `high`
+- Tracking ID: `ARLEN-BUG-026`
+- Discovered: `2026-04-30`
+- Reported by: `TaxCalculator`
+- Last updated: `2026-04-30`
+- Resolution: remote upload now closes the parent pipe handles after launching
+  the local `tar` and SSH tasks, monitors both child processes, and terminates
+  `tar` when SSH exits first so `deploy push --json` can emit a structured
+  transport error instead of waiting indefinitely.
+- Verification:
+  - `DeploymentIntegrationTests::testArlenDeployPushReportsRemoteUploadFailureWhenSSHExitsEarly_ARLEN_BUG_026`
+- Reconciliation note:
+  `docs/TAXCALCULATOR_REPORT_RECONCILIATION_2026-04-30.md`
+
+### Summary
+
+When the SSH side of a remote upload exited early, for example because host-key
+verification failed, `arlen deploy push <target> --json` could hang before
+printing a JSON error. The local `tar` child could remain blocked writing the
+release archive into the upload pipe while no SSH process was available to read
+the stream.
+
+### Current Contract
+
+1. Remote upload must not wait indefinitely after SSH exits.
+2. `--json` mode must return a structured `deploy_target_transport_failed`
+   payload with captured transport output.
+3. SSH stderr must remain visible through the transport diagnostics.
+
+## ISSUE-005: Remote deploy SSH options were reordered before invocation
+
+- Status: `resolved`
+- Priority: `high`
+- Tracking ID: `ARLEN-BUG-025`
+- Discovered: `2026-04-30`
+- Reported by: `TaxCalculator`
+- Last updated: `2026-04-30`
+- Resolution: `transport.sshOptions` now uses order-preserving manifest
+  normalization instead of the sorted/deduplicated set helper used for
+  order-insensitive fields.
+- Verification:
+  - `DeploymentIntegrationTests::testArlenDeployReleaseAndStatusOperateAgainstRemoteNamedTargetOverSSH`
+- Reconciliation note:
+  `docs/TAXCALCULATOR_REPORT_RECONCILIATION_2026-04-30.md`
+
+### Summary
+
+`transport.sshOptions` was parsed through the generic string-array helper used
+for set-like configuration values. That helper sorted and deduplicated entries,
+which corrupted positional SSH argument pairs such as `("-F", "/dev/null")`.
+The resulting invocation could become `ssh -F -oBatchMode=yes /dev/null ...`,
+causing SSH to treat `-oBatchMode=yes` as the config-file path.
+
+### Current Contract
+
+1. `transport.sshOptions` preserves manifest order exactly after trimming empty
+   string entries.
+2. Positional SSH option pairs remain adjacent in the generated argv.
+3. Order-insensitive manifest lists may still use sorted/deduplicated
+   normalization where that behavior is intentional.
+
 ## ISSUE-004: Production workers leak `/dev/null` file descriptors until file responses fail
 
 - Status: `open`

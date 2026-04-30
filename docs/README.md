@@ -100,6 +100,7 @@ toolchain env directly for the Linux/GNUstep path. On macOS, use
 - [OwnerConnect Report Reconciliation (2026-04-02)](OWNERCONNECT_REPORT_RECONCILIATION_2026-04-02.md): upstream status note for the Dataverse polymorphic-lookup codegen bug reported from `OwnerConnect`.
 - [OwnerConnect Report Reconciliation (2026-04-07)](OWNERCONNECT_REPORT_RECONCILIATION_2026-04-07.md): upstream closure note for the packaged `deploy doctor --base-url` release-helper bug and current deploy-gap assessment reported from `OwnerConnect`.
 - [OwnerConnect Report Reconciliation (2026-04-17)](OWNERCONNECT_REPORT_RECONCILIATION_2026-04-17.md): upstream closure note for the SSH remote `bash -lc` transport bug reported from `OwnerConnect`.
+- [TaxCalculator Report Reconciliation (2026-04-30)](TAXCALCULATOR_REPORT_RECONCILIATION_2026-04-30.md): upstream closure note for remote deploy `sshOptions` ordering and early SSH-exit upload failures reported from `TaxCalculator`.
 - [StateCompulsoryPoolingAPI Report Reconciliation (2026-04-24)](STATECOMPULSORYPOOLINGAPI_REPORT_RECONCILIATION_2026-04-24.md): upstream notes for the `ALNResponse.fileBodyPath` streaming truncation fix and the open `/dev/null` descriptor leak reported from `StateCompulsoryPoolingAPI`.
 - [Platform Report Reconciliation (2026-03-31)](PLATFORM_REPORT_RECONCILIATION_2026-03-31.md): upstream closure note for the managed-GNUstep bootstrap bug reported from `iep-platform`.
 - [Session Handoff (2026-03-27)](SESSION_HANDOFF_2026-03-27.md): historical pause point before the Phase 22 closeout.

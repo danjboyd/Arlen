@@ -105,7 +105,16 @@
     return @{};
   }
 
-  NSData *data = [trimmed dataUsingEncoding:NSUTF8StringEncoding];
+  NSRange firstBrace = [trimmed rangeOfString:@"{"];
+  NSRange lastBrace = [trimmed rangeOfString:@"}" options:NSBackwardsSearch];
+  NSString *jsonText = trimmed;
+  if (firstBrace.location != NSNotFound && lastBrace.location != NSNotFound &&
+      lastBrace.location >= firstBrace.location) {
+    jsonText = [trimmed substringWithRange:NSMakeRange(firstBrace.location,
+                                                       (lastBrace.location - firstBrace.location) + 1)];
+  }
+
+  NSData *data = [jsonText dataUsingEncoding:NSUTF8StringEncoding];
   NSError *error = nil;
   id parsed = [NSJSONSerialization JSONObjectWithData:data options:0 error:&error];
   XCTAssertNil(error, @"%@ produced invalid JSON: %@\n%@", context, error.localizedDescription, output);
@@ -1663,6 +1672,17 @@
     NSString *releasePath = [workRoot stringByAppendingPathComponent:@"remote-host/myapp"];
     NSString *mockSSH = [workRoot stringByAppendingPathComponent:@"mock-ssh.sh"];
     NSString *mockSSHLog = [workRoot stringByAppendingPathComponent:@"mock-ssh.log"];
+    NSString *gnuHome = [workRoot stringByAppendingPathComponent:@"gnu-home"];
+    NSString *gnuDefaultsLock = [gnuHome stringByAppendingPathComponent:@"GNUstep/Defaults/.lck"];
+    XCTAssertTrue([[NSFileManager defaultManager] createDirectoryAtPath:gnuDefaultsLock
+                                            withIntermediateDirectories:YES
+                                                             attributes:nil
+                                                                  error:NULL]);
+    NSString *arlenEnv = [NSString stringWithFormat:@"HOME=%@ GNUSTEP_USER_DIR=%@ GNUSTEP_USER_ROOT=%@ GNUSTEP_USER_DEFAULTS_DIR=%@",
+                                                    [self shellQuoted:gnuHome],
+                                                    [self shellQuoted:[gnuHome stringByAppendingPathComponent:@"GNUstep"]],
+                                                    [self shellQuoted:[gnuHome stringByAppendingPathComponent:@"GNUstep"]],
+                                                    [self shellQuoted:[gnuHome stringByAppendingPathComponent:@"GNUstep/Defaults"]]];
     NSString *deployConfig = [NSString stringWithFormat:
                                   @"{\n"
                                    "  deployment = {\n"
@@ -1678,7 +1698,7 @@
                                    "        transport = {\n"
                                    "          sshHost = \"mock-target\";\n"
                                    "          sshCommand = \"%@\";\n"
-                                   "          sshOptions = (\"-oBatchMode=yes\");\n"
+                                   "          sshOptions = (\"-F\", \"/dev/null\", \"-oBatchMode=yes\");\n"
                                    "        };\n"
                                    "      };\n"
                                    "    };\n"
@@ -1691,7 +1711,12 @@
                                   "while [[ \"$#\" -gt 0 && \"$1\" == -* ]]; do\n"
                                   "  option=\"$1\"\n"
                                   "  shift\n"
-                                  "  if [[ \"$option\" == \"-o\" || \"$option\" == \"-p\" ]]; then\n"
+                                  "  if [[ \"$option\" == \"-o\" || \"$option\" == \"-p\" || \"$option\" == \"-F\" ]]; then\n"
+                                  "    if [[ \"$#\" -eq 0 || \"$1\" == -* ]]; then\n"
+                                  "      echo \"missing value for $option\" >&2\n"
+                                  "      exit 64\n"
+                                  "    fi\n"
+                                  "    printf 'option=%s value=%s\\n' \"$option\" \"$1\" >> \"$ARLEN_MOCK_SSH_LOG\"\n"
                                   "    shift\n"
                                   "  fi\n"
                                   "done\n"
@@ -1716,10 +1741,10 @@
     XCTAssertEqual(0, code, @"%@", buildOutput);
 
     NSString *uninitializedPushOutput = [self runShellCapture:[NSString stringWithFormat:
-                                                                  @"cd %@ && ARLEN_FRAMEWORK_ROOT=%@ ARLEN_MOCK_SSH_LOG=%@ %@/build/arlen "
+                                                                  @"cd %@ && %@ ARLEN_FRAMEWORK_ROOT=%@ ARLEN_MOCK_SSH_LOG=%@ %@/build/arlen "
                                                                    "deploy push production --app-root %@ --release-id ssh-rel-guard "
                                                                    "--allow-missing-certification --json",
-                                                                  appRoot, repoRoot, mockSSHLog, repoRoot, appRoot]
+                                                                  appRoot, arlenEnv, repoRoot, mockSSHLog, repoRoot, appRoot]
                                                     exitCode:&code];
     XCTAssertEqual(1, code, @"%@", uninitializedPushOutput);
     NSDictionary *uninitializedPushPayload =
@@ -1729,9 +1754,9 @@
     XCTAssertEqualObjects(@"deploy_target_not_initialized", uninitializedError[@"code"]);
 
     NSString *initOutput = [self runShellCapture:[NSString stringWithFormat:
-                                                      @"cd %@ && ARLEN_FRAMEWORK_ROOT=%@ ARLEN_MOCK_SSH_LOG=%@ %@/build/arlen "
+                                                      @"cd %@ && %@ ARLEN_FRAMEWORK_ROOT=%@ ARLEN_MOCK_SSH_LOG=%@ %@/build/arlen "
                                                        "deploy init production --app-root %@ --json",
-                                                      appRoot, repoRoot, mockSSHLog, repoRoot, appRoot]
+                                                      appRoot, arlenEnv, repoRoot, mockSSHLog, repoRoot, appRoot]
                                         exitCode:&code];
     XCTAssertEqual(0, code, @"%@", initOutput);
     NSDictionary *initPayload =
@@ -1739,10 +1764,10 @@
     XCTAssertEqualObjects(@"ok", initPayload[@"status"]);
 
     NSString *pushOutput = [self runShellCapture:[NSString stringWithFormat:
-                                                       @"cd %@ && ARLEN_FRAMEWORK_ROOT=%@ ARLEN_MOCK_SSH_LOG=%@ %@/build/arlen "
+                                                       @"cd %@ && %@ ARLEN_FRAMEWORK_ROOT=%@ ARLEN_MOCK_SSH_LOG=%@ %@/build/arlen "
                                                         "deploy push production --app-root %@ --release-id ssh-rel-1 "
                                                         "--allow-missing-certification --json",
-                                                       appRoot, repoRoot, mockSSHLog, repoRoot, appRoot]
+                                                       appRoot, arlenEnv, repoRoot, mockSSHLog, repoRoot, appRoot]
                                          exitCode:&code];
     XCTAssertEqual(0, code, @"%@", pushOutput);
     NSDictionary *pushPayload =
@@ -1752,9 +1777,9 @@
     XCTAssertEqualObjects(@"ok", pushTransport[@"status"]);
 
     NSString *remoteReleasesOutput = [self runShellCapture:[NSString stringWithFormat:
-                                                               @"cd %@ && ARLEN_FRAMEWORK_ROOT=%@ ARLEN_MOCK_SSH_LOG=%@ %@/build/arlen "
+                                                               @"cd %@ && %@ ARLEN_FRAMEWORK_ROOT=%@ ARLEN_MOCK_SSH_LOG=%@ %@/build/arlen "
                                                                 "deploy releases production --app-root %@ --json",
-                                                               appRoot, repoRoot, mockSSHLog, repoRoot, appRoot]
+                                                               appRoot, arlenEnv, repoRoot, mockSSHLog, repoRoot, appRoot]
                                                  exitCode:&code];
     XCTAssertEqual(0, code, @"%@", remoteReleasesOutput);
     NSDictionary *remoteReleasesPayload =
@@ -1769,10 +1794,10 @@
     XCTAssertEqualObjects(@"available", remoteReleaseItem[@"state"]);
 
     NSString *releaseOutput = [self runShellCapture:[NSString stringWithFormat:
-                                                         @"cd %@ && ARLEN_FRAMEWORK_ROOT=%@ ARLEN_MOCK_SSH_LOG=%@ %@/build/arlen "
+                                                         @"cd %@ && %@ ARLEN_FRAMEWORK_ROOT=%@ ARLEN_MOCK_SSH_LOG=%@ %@/build/arlen "
                                                           "deploy release production --app-root %@ --release-id ssh-rel-1 "
                                                           "--allow-missing-certification --skip-migrate --runtime-action none --json",
-                                                         appRoot, repoRoot, mockSSHLog, repoRoot, appRoot]
+                                                         appRoot, arlenEnv, repoRoot, mockSSHLog, repoRoot, appRoot]
                                            exitCode:&code];
     XCTAssertEqual(0, code, @"%@", releaseOutput);
     NSDictionary *releasePayload =
@@ -1783,7 +1808,7 @@
     NSDictionary *transport = [releasePayload[@"transport"] isKindOfClass:[NSDictionary class]] ? releasePayload[@"transport"] : @{};
     XCTAssertEqualObjects(@"ok", transport[@"status"]);
     NSString *transportCommand = [transport[@"command"] isKindOfClass:[NSString class]] ? transport[@"command"] : @"";
-    XCTAssertTrue([transportCommand containsString:@"'-oBatchMode=yes'"], @"%@", transportCommand);
+    XCTAssertTrue([transportCommand containsString:@"'-F' '/dev/null' '-oBatchMode=yes' 'mock-target'"], @"%@", transportCommand);
     XCTAssertTrue([transportCommand containsString:@"'mock-target' 'bash -lc "], @"%@", transportCommand);
     XCTAssertFalse([transportCommand containsString:@"'bash' '-lc'"], @"%@", transportCommand);
 
@@ -1796,18 +1821,133 @@
     XCTAssertTrue([trimmedCurrent hasSuffix:@"/ssh-rel-1"], @"%@", trimmedCurrent);
 
     NSString *statusOutput = [self runShellCapture:[NSString stringWithFormat:
-                                                        @"cd %@ && ARLEN_FRAMEWORK_ROOT=%@ ARLEN_MOCK_SSH_LOG=%@ %@/build/arlen "
+                                                        @"cd %@ && %@ ARLEN_FRAMEWORK_ROOT=%@ ARLEN_MOCK_SSH_LOG=%@ %@/build/arlen "
                                                          "deploy status production --app-root %@ --json",
-                                                        appRoot, repoRoot, mockSSHLog, repoRoot, appRoot]
+                                                        appRoot, arlenEnv, repoRoot, mockSSHLog, repoRoot, appRoot]
                                           exitCode:&code];
     XCTAssertEqual(0, code, @"%@", statusOutput);
     NSDictionary *statusPayload =
         [self parseJSONDictionaryFromOutput:statusOutput context:@"arlen deploy status production remote --json"];
     XCTAssertEqualObjects(@"ok", statusPayload[@"status"]);
-    XCTAssertEqualObjects(@"ssh-rel-1", statusPayload[@"active_release_id"]);
+    NSString *activeReleaseID =
+        [statusPayload[@"active_release_id"] isKindOfClass:[NSString class]] ? statusPayload[@"active_release_id"] : @"";
+    if ([activeReleaseID length] == 0) {
+      NSDictionary *remoteExecution =
+          [statusPayload[@"remote_execution"] isKindOfClass:[NSDictionary class]] ? statusPayload[@"remote_execution"] : @{};
+      NSString *remoteCapturedOutput =
+          [remoteExecution[@"captured_output"] isKindOfClass:[NSString class]] ? remoteExecution[@"captured_output"] : @"";
+      NSDictionary *remoteStatus =
+          [self parseJSONDictionaryFromOutput:remoteCapturedOutput context:@"remote packaged arlen deploy status --json"];
+      activeReleaseID =
+          [remoteStatus[@"active_release_id"] isKindOfClass:[NSString class]] ? remoteStatus[@"active_release_id"] : @"";
+    }
+    XCTAssertEqualObjects(@"ssh-rel-1", activeReleaseID, @"%@", statusOutput);
     XCTAssertEqualObjects(@"production", statusPayload[@"target"][@"name"]);
     NSString *mockLog = [NSString stringWithContentsOfFile:mockSSHLog encoding:NSUTF8StringEncoding error:nil] ?: @"";
+    XCTAssertTrue([mockLog containsString:@"option=-F value=/dev/null"], @"%@", mockLog);
     XCTAssertTrue([mockLog containsString:@"host=mock-target argc=1 command=bash -lc "], @"%@", mockLog);
+  } @finally {
+    [[NSFileManager defaultManager] removeItemAtPath:appRoot error:nil];
+    [[NSFileManager defaultManager] removeItemAtPath:workRoot error:nil];
+  }
+}
+
+- (void)testArlenDeployPushReportsRemoteUploadFailureWhenSSHExitsEarly_ARLEN_BUG_026 {
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *appRoot = [self createTempDirectoryWithPrefix:@"arlen-deploy-ssh-early-exit-app"];
+  NSString *workRoot = [self createTempDirectoryWithPrefix:@"arlen-deploy-ssh-early-exit-work"];
+  XCTAssertNotNil(appRoot);
+  XCTAssertNotNil(workRoot);
+  if (appRoot == nil || workRoot == nil) {
+    return;
+  }
+
+  @try {
+    NSString *releasePath = [workRoot stringByAppendingPathComponent:@"remote-host/myapp"];
+    NSString *mockSSH = [workRoot stringByAppendingPathComponent:@"mock-ssh-exits-early.sh"];
+    NSString *gnuHome = [workRoot stringByAppendingPathComponent:@"gnu-home"];
+    NSString *gnuDefaultsLock = [gnuHome stringByAppendingPathComponent:@"GNUstep/Defaults/.lck"];
+    XCTAssertTrue([[NSFileManager defaultManager] createDirectoryAtPath:gnuDefaultsLock
+                                            withIntermediateDirectories:YES
+                                                             attributes:nil
+                                                                  error:NULL]);
+    NSString *arlenEnv = [NSString stringWithFormat:@"HOME=%@ GNUSTEP_USER_DIR=%@ GNUSTEP_USER_ROOT=%@ GNUSTEP_USER_DEFAULTS_DIR=%@",
+                                                    [self shellQuoted:gnuHome],
+                                                    [self shellQuoted:[gnuHome stringByAppendingPathComponent:@"GNUstep"]],
+                                                    [self shellQuoted:[gnuHome stringByAppendingPathComponent:@"GNUstep"]],
+                                                    [self shellQuoted:[gnuHome stringByAppendingPathComponent:@"GNUstep/Defaults"]]];
+    NSString *deployConfig = [NSString stringWithFormat:
+                                  @"{\n"
+                                   "  deployment = {\n"
+                                   "    schema = \"phase32-deploy-targets-v1\";\n"
+                                   "    targets = {\n"
+                                   "      production = {\n"
+                                   "        host = \"myapp.example.test\";\n"
+                                   "        releasePath = \"%@\";\n"
+                                   "        profile = \"linux-x86_64-gnustep-clang\";\n"
+                                   "        runtimeStrategy = \"system\";\n"
+                                   "        runtimeAction = \"none\";\n"
+                                   "        environment = \"production\";\n"
+                                   "        transport = {\n"
+                                   "          sshHost = \"mock-target\";\n"
+                                   "          sshCommand = \"%@\";\n"
+                                   "          sshOptions = (\"-oBatchMode=yes\");\n"
+                                   "        };\n"
+                                   "      };\n"
+                                   "    };\n"
+                                   "  };\n"
+                                   "}\n",
+                                  releasePath, mockSSH];
+    XCTAssertTrue([self writeFile:mockSSH
+                          content:@"#!/usr/bin/env bash\n"
+                                  "echo 'mock ssh exits before reading upload stream' >&2\n"
+                                  "exit 255\n"]);
+    XCTAssertTrue([self makeExecutableAtPath:mockSSH]);
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"config/app.plist"]
+                          content:@"{\n  host = \"127.0.0.1\";\n  port = 3000;\n}\n"]);
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"config/environments/production.plist"]
+                          content:@"{\n  logFormat = \"json\";\n}\n"]);
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"config/deploy.plist"]
+                          content:deployConfig]);
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"app_lite.m"]
+                          content:@"#import <Foundation/Foundation.h>\n"
+                                  "int main(int argc, const char *argv[]) { (void)argc; (void)argv; return 0; }\n"]);
+
+    NSMutableString *largeFixture = [NSMutableString stringWithCapacity:2 * 1024 * 1024];
+    for (NSUInteger i = 0; i < 32768; i++) {
+      [largeFixture appendString:@"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\n"];
+    }
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"Resources/large-upload-fixture.txt"]
+                          content:largeFixture]);
+
+    int code = 0;
+    NSString *buildOutput = [self runMakeAtRepoRoot:repoRoot target:@"arlen" exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", buildOutput);
+
+    NSString *initOutput = [self runShellCapture:[NSString stringWithFormat:
+                                                      @"cd %@ && %@ ARLEN_FRAMEWORK_ROOT=%@ %@/build/arlen "
+                                                       "deploy init production --app-root %@ --json",
+                                                      appRoot, arlenEnv, repoRoot, repoRoot, appRoot]
+                                        exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", initOutput);
+
+    NSString *pushOutput = [self runShellCapture:[NSString stringWithFormat:
+                                                      @"cd %@ && %@ ARLEN_FRAMEWORK_ROOT=%@ timeout 20s %@/build/arlen "
+                                                       "deploy push production --app-root %@ --release-id ssh-early-exit-rel "
+                                                       "--allow-missing-certification --json",
+                                                      appRoot, arlenEnv, repoRoot, repoRoot, appRoot]
+                                        exitCode:&code];
+    XCTAssertNotEqual(124, code, @"deploy push timed out instead of reporting transport failure:\n%@", pushOutput);
+    XCTAssertNotEqual(0, code, @"%@", pushOutput);
+    NSDictionary *pushPayload =
+        [self parseJSONDictionaryFromOutput:pushOutput context:@"arlen deploy push early SSH exit --json"];
+    XCTAssertEqualObjects(@"error", pushPayload[@"status"]);
+    NSDictionary *error = [pushPayload[@"error"] isKindOfClass:[NSDictionary class]] ? pushPayload[@"error"] : @{};
+    XCTAssertEqualObjects(@"deploy_target_transport_failed", error[@"code"]);
+    NSDictionary *transport = [pushPayload[@"transport"] isKindOfClass:[NSDictionary class]] ? pushPayload[@"transport"] : @{};
+    XCTAssertEqualObjects(@"error", transport[@"status"]);
+    NSString *capturedOutput = [transport[@"captured_output"] isKindOfClass:[NSString class]] ? transport[@"captured_output"] : @"";
+    XCTAssertTrue([capturedOutput containsString:@"mock ssh exits before reading upload stream"], @"%@", capturedOutput);
   } @finally {
     [[NSFileManager defaultManager] removeItemAtPath:appRoot error:nil];
     [[NSFileManager defaultManager] removeItemAtPath:workRoot error:nil];

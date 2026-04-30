@@ -1,6 +1,27 @@
 # Arlen Status Checkpoint
 
-Last updated: 2026-04-28
+Last updated: 2026-04-30
+
+## Leaving Off (2026-04-30)
+
+- Fixed the remote deploy bugs reported from `TaxCalculator`:
+  - `ARLEN-BUG-025` / `ISSUE-005`: `transport.sshOptions` now preserves
+    manifest order, so positional SSH option pairs such as `-F /dev/null` stay
+    adjacent in the generated argv
+  - `ARLEN-BUG-026` / `ISSUE-006`: remote upload now exits promptly with
+    structured `deploy_target_transport_failed` JSON when SSH exits before the
+    local tar stream completes
+- Added downstream reconciliation and bug-ledger entries:
+  - `docs/TAXCALCULATOR_REPORT_RECONCILIATION_2026-04-30.md`
+  - `docs/OPEN_ISSUES.md`
+- Updated deploy docs to clarify:
+  - `transport.sshOptions` is argv-ordered
+  - early SSH transport failures remain visible in JSON diagnostics
+  - `arlen deploy init <target>` is local host scaffolding and does not SSH to
+    `transport.sshHost`
+- Regression coverage:
+  - `DeploymentIntegrationTests::testArlenDeployReleaseAndStatusOperateAgainstRemoteNamedTargetOverSSH`
+  - `DeploymentIntegrationTests::testArlenDeployPushReportsRemoteUploadFailureWhenSSHExitsEarly_ARLEN_BUG_026`
 
 ## Leaving Off (2026-04-28, Phase 38I)
 

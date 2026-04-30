@@ -148,6 +148,9 @@ Named targets:
 
 - requires a named target from `config/deploy.plist`
 - creates deterministic Linux/Debian-style host scaffolding for that target
+- runs against the local filesystem; it does not SSH to `transport.sshHost`
+- for remote targets, run it on the target host or against an intentionally
+  mounted/staged representation of that host layout before remote push/release
 - creates:
   - release/shared/log/tmp directories under the target release root
   - generated systemd unit under `build/deploy/targets/<target>/systemd/`
@@ -188,10 +191,15 @@ Named targets:
 - when `[target]` has SSH transport metadata, stages the local release under
   `build/deploy/targets/<target>/local-releases/` and uploads it to the remote
   target release path over SSH/tar streaming
+- preserves `transport.sshOptions` in manifest order so positional SSH option
+  pairs such as `("-F", "/dev/null")` remain adjacent (`ARLEN-BUG-025`)
 - SSH transport uses argv-level local process execution and sends the remote
   shell as one `bash -lc '<script>'` command string so SSH remote-command
   reparsing cannot split the script into `bash -lc` positional arguments
   (`ARLEN-BUG-021`)
+- if SSH exits before upload completes, terminates the local tar producer and
+  emits `deploy_target_transport_failed` in `--json` mode with captured
+  transport output (`ARLEN-BUG-026`)
 - writes `metadata/manifest.json` with release/runtime/health contract metadata
 - writes manifest paths release-relative so the packaged release stays valid
   after ship/move (`ARLEN-BUG-017`)

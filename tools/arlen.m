@@ -1192,6 +1192,25 @@ static NSArray<NSString *> *StringArrayFromValue(id value) {
   return SortedUniqueStrings(strings);
 }
 
+static NSArray<NSString *> *OrderedStringArrayFromValue(id value) {
+  if (![value isKindOfClass:[NSArray class]]) {
+    return @[];
+  }
+
+  NSMutableArray<NSString *> *strings = [NSMutableArray array];
+  for (id entry in (NSArray *)value) {
+    if (![entry isKindOfClass:[NSString class]]) {
+      continue;
+    }
+    NSString *trimmed = Trimmed(entry);
+    if ([trimmed length] == 0) {
+      continue;
+    }
+    [strings addObject:trimmed];
+  }
+  return strings;
+}
+
 static NSString *StringValueForDeployKey(NSDictionary *dictionary, NSString *key) {
   id value = dictionary[key];
   return [value isKindOfClass:[NSString class]] ? Trimmed(value) : @"";
@@ -1469,7 +1488,7 @@ static NSDictionary *LoadDeployTargetNamed(NSString *appRoot, NSString *targetNa
     @"jobs_worker_wrapper" : [binDir stringByAppendingPathComponent:@"jobs-worker-wrapper"],
     @"ssh_host" : StringValueForDeployKey(transport, @"sshHost"),
     @"ssh_command" : [StringValueForDeployKey(transport, @"sshCommand") length] > 0 ? StringValueForDeployKey(transport, @"sshCommand") : @"ssh",
-    @"ssh_options" : StringArrayFromValue(transport[@"sshOptions"]),
+    @"ssh_options" : OrderedStringArrayFromValue(transport[@"sshOptions"]),
     @"remote_tmp_dir" : [StringValueForDeployKey(transport, @"remoteTmpDir") length] > 0 ? StringValueForDeployKey(transport, @"remoteTmpDir") : @"/tmp",
     @"remote_enabled" : @([StringValueForDeployKey(transport, @"sshHost") length] > 0),
     @"systemd_unit_filename" : SystemdUnitFilenameForServiceName(serviceName),
@@ -1702,6 +1721,17 @@ static NSArray<NSString *> *SSHArgumentsForTarget(NSDictionary *target, NSString
   return arguments;
 }
 
+static void CloseFileHandleQuietly(NSFileHandle *handle) {
+  if (handle == nil) {
+    return;
+  }
+  @try {
+    [handle closeFile];
+  } @catch (NSException *exception) {
+    (void)exception;
+  }
+}
+
 static NSDictionary *RunSSHCommandForTarget(NSDictionary *target, NSString *remoteScript) {
   NSArray<NSString *> *arguments = SSHArgumentsForTarget(target, remoteScript);
   int exitCode = 0;
@@ -1847,10 +1877,14 @@ static NSDictionary *UploadReleaseToRemoteTarget(NSDictionary *target, NSString 
   @try {
     [sshTask launch];
     [tarTask launch];
-    [tarTask waitUntilExit];
-    [streamWrite closeFile];
-    [sshTask waitUntilExit];
-    [streamRead closeFile];
+    CloseFileHandleQuietly(streamWrite);
+    CloseFileHandleQuietly(streamRead);
+    while ([tarTask isRunning] || [sshTask isRunning]) {
+      if (![sshTask isRunning] && [tarTask isRunning]) {
+        [tarTask terminate];
+      }
+      [NSThread sleepForTimeInterval:0.05];
+    }
     int tarExitCode = tarTask.terminationStatus;
     int sshExitCode = sshTask.terminationStatus;
     exitCode = (tarExitCode == 0) ? sshExitCode : tarExitCode;
@@ -1866,7 +1900,9 @@ static NSDictionary *UploadReleaseToRemoteTarget(NSDictionary *target, NSString 
                                  command ?: @"deploy upload transport",
                                  [exception reason] ?: [exception name] ?: @"unknown error"];
   }
-  [captureWrite closeFile];
+  CloseFileHandleQuietly(streamWrite);
+  CloseFileHandleQuietly(streamRead);
+  CloseFileHandleQuietly(captureWrite);
   NSData *capturedData = [NSData dataWithContentsOfFile:capturePath] ?: [NSData data];
   [[NSFileManager defaultManager] removeItemAtPath:capturePath error:nil];
   NSString *capturedText = [[NSString alloc] initWithData:capturedData encoding:NSUTF8StringEncoding] ?: @"";
