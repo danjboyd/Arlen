@@ -4,6 +4,14 @@ Last updated: 2026-04-30
 
 ## Leaving Off (2026-04-30)
 
+- Added Phase 39 planning for the `TaxCalculator` multi-worker state-safety
+  feature request:
+  - `docs/PHASE39_ROADMAP.md` now tracks the planned implementation through
+    subphases `39A-39H`
+  - the initiative covers the multi-worker process-local state contract,
+    durable state configuration signals, doctor/deploy warnings, demo-only
+    in-memory store labeling, durable store examples, optional worker identity
+    diagnostics, and confidence coverage
 - Fixed the shell-command capture deadlock reported from `TaxCalculator`:
   - `ARLEN-BUG-027` / `ISSUE-007`: `RunShellCaptureCommand()` now captures
     stdout/stderr through temporary files instead of waiting on a child process
