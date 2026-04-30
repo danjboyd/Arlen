@@ -1,5 +1,39 @@
 # Open Issues
 
+## ISSUE-007: Shell-command capture could deadlock on large child output
+
+- Status: `resolved`
+- Priority: `high`
+- Tracking ID: `ARLEN-BUG-027`
+- Discovered: `2026-04-30`
+- Reported by: `TaxCalculator`
+- Last updated: `2026-04-30`
+- Resolution: `RunShellCaptureCommand()` now captures shell stdout and stderr
+  into temporary files instead of `NSPipe`s, so long-running child commands can
+  continue writing while Arlen waits for process exit. Captured output is read
+  back after the process exits and temporary files are removed.
+- Verification:
+  - `BuildPolicyTests::testArlenBuildJSONCapturesLargeChildOutputWithoutPipeDeadlock_ARLEN_BUG_027`
+- Reconciliation note:
+  `docs/TAXCALCULATOR_REPORT_RECONCILIATION_2026-04-30.md`
+
+### Summary
+
+`RunShellCaptureCommand()` launched a shell command with separate stdout and
+stderr `NSPipe`s, waited for the child to exit, and only then drained the pipes.
+If a child command wrote enough output to fill either pipe buffer, the child
+blocked in `pipe_w` while Arlen waited in `waitUntilExit`. This could hang
+`arlen deploy push --json` during the local release build before remote upload
+started, especially when rebuilding Arlen emitted many compiler warnings.
+
+### Current Contract
+
+1. Shell-command capture must not depend on bounded pipe buffers for captured
+   stdout/stderr.
+2. Captured build output remains available to JSON callers after command exit.
+3. Deploy build failures can reach the existing structured JSON error path
+   instead of hanging before any payload is emitted.
+
 ## ISSUE-006: Remote deploy push could hang when SSH exited before tar completed
 
 - Status: `resolved`

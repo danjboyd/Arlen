@@ -7,6 +7,8 @@ This note records the upstream Arlen assessment of the TaxCalculator report:
 - `transport.sshOptions` ordering is not preserved for remote deploy
 - `arlen deploy push` can hang when SSH exits before the upload stream is fully
   written
+- `arlen deploy push --json` can hang during local release build when captured
+  child output fills an `NSPipe`
 - `arlen deploy init <remote-target>` creates target release directories on the
   local filesystem
 
@@ -23,6 +25,7 @@ Ownership rule:
 | --- | --- | --- |
 | `sshOptions = ("-F", "/dev/null", "-oBatchMode=yes")` was reordered into an invalid SSH argv | fixed in current workspace; awaiting downstream revalidation | `docs/OPEN_ISSUES.md` (`ARLEN-BUG-025`), `tools/arlen.m`, `tests/integration/DeploymentIntegrationTests.m`, `docs/CLI_REFERENCE.md`, `docs/DEPLOYMENT.md` |
 | `deploy push --json` could hang when SSH exited early during tar-stream upload | fixed in current workspace; awaiting downstream revalidation | `docs/OPEN_ISSUES.md` (`ARLEN-BUG-026`), `tools/arlen.m`, `tests/integration/DeploymentIntegrationTests.m`, `docs/CLI_REFERENCE.md`, `docs/DEPLOYMENT.md` |
+| `deploy push --json` could hang before upload when a captured build child filled stdout/stderr pipes | fixed in current workspace; awaiting downstream revalidation | `docs/OPEN_ISSUES.md` (`ARLEN-BUG-027`), `tools/arlen.m`, `tests/unit/BuildPolicyTests.m`, `docs/CLI_REFERENCE.md`, `docs/DEPLOYMENT.md` |
 | `deploy init <remote-target> --json` created `/srv/arlen/...` directories locally | documented current behavior; not reclassified as a transport bug in this patch | `docs/CLI_REFERENCE.md`, `docs/DEPLOYMENT.md` |
 
 ## Notes
@@ -58,6 +61,23 @@ Ownership rule:
     transport output.
 - Regression coverage:
   - `DeploymentIntegrationTests::testArlenDeployPushReportsRemoteUploadFailureWhenSSHExitsEarly_ARLEN_BUG_026`
+
+### `ARLEN-BUG-027`: Shell Capture Pipe Deadlock
+
+- Upstream accepted the failure class from the downstream report.
+- Root cause:
+  - `RunShellCaptureCommand()` captured stdout and stderr through `NSPipe`.
+  - The parent waited for the child to exit before reading either pipe.
+  - A noisy child build process could fill a pipe buffer and block in
+    `pipe_w`, while Arlen waited indefinitely for process exit.
+- Current upstream behavior:
+  - `RunShellCaptureCommand()` writes stdout and stderr to temporary files.
+  - The parent waits for process exit without depending on pipe buffer
+    capacity, then reads and removes the capture files.
+  - `deploy push --json` can now either complete the local build or reach the
+    existing structured build-failure JSON path.
+- Regression coverage:
+  - `BuildPolicyTests::testArlenBuildJSONCapturesLargeChildOutputWithoutPipeDeadlock_ARLEN_BUG_027`
 
 ### Remote `deploy init`
 

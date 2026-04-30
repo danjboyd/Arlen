@@ -395,22 +395,60 @@ static NSString *ResolveGNUstepScriptPath(void) {
   return fallback;
 }
 
+static NSString *TaskCapturePath(NSString *prefix) {
+  NSString *name = [NSString stringWithFormat:@"%@-%@.log",
+                                              prefix ?: @"arlen-task",
+                                              [[NSProcessInfo processInfo] globallyUniqueString]];
+  return [NSTemporaryDirectory() stringByAppendingPathComponent:name];
+}
+
+static void CloseFileHandleQuietly(NSFileHandle *handle) {
+  if (handle == nil) {
+    return;
+  }
+  @try {
+    [handle closeFile];
+  } @catch (NSException *exception) {
+    (void)exception;
+  }
+}
+
 static NSString *RunShellCaptureCommand(NSString *command, int *exitCode) {
   NSTask *task = [[NSTask alloc] init];
   task.launchPath = @"/bin/bash";
   task.arguments = @[ @"-lc", command ?: @"" ];
-  NSPipe *stdoutPipe = [NSPipe pipe];
-  NSPipe *stderrPipe = [NSPipe pipe];
-  task.standardOutput = stdoutPipe;
-  task.standardError = stderrPipe;
-  [task launch];
-  [task waitUntilExit];
+  NSString *stdoutPath = TaskCapturePath(@"arlen-shell-stdout");
+  NSString *stderrPath = TaskCapturePath(@"arlen-shell-stderr");
+  [[NSFileManager defaultManager] createFileAtPath:stdoutPath contents:nil attributes:nil];
+  [[NSFileManager defaultManager] createFileAtPath:stderrPath contents:nil attributes:nil];
+  NSFileHandle *stdoutWrite = [NSFileHandle fileHandleForWritingAtPath:stdoutPath];
+  NSFileHandle *stderrWrite = [NSFileHandle fileHandleForWritingAtPath:stderrPath];
+  task.standardOutput = stdoutWrite;
+  task.standardError = stderrWrite;
+  @try {
+    [task launch];
+    [task waitUntilExit];
+  } @catch (NSException *exception) {
+    CloseFileHandleQuietly(stdoutWrite);
+    CloseFileHandleQuietly(stderrWrite);
+    [[NSFileManager defaultManager] removeItemAtPath:stdoutPath error:nil];
+    [[NSFileManager defaultManager] removeItemAtPath:stderrPath error:nil];
+    if (exitCode != NULL) {
+      *exitCode = 127;
+    }
+    return [NSString stringWithFormat:@"failed launching shell command: %@",
+                                      [exception reason] ?: [exception name] ?: @"unknown error"];
+  }
 
   if (exitCode != NULL) {
     *exitCode = task.terminationStatus;
   }
-  NSData *stdoutData = [[stdoutPipe fileHandleForReading] readDataToEndOfFile];
-  NSData *stderrData = [[stderrPipe fileHandleForReading] readDataToEndOfFile];
+  CloseFileHandleQuietly(stdoutWrite);
+  CloseFileHandleQuietly(stderrWrite);
+  NSData *stdoutData = [NSData dataWithContentsOfFile:stdoutPath] ?: [NSData data];
+  NSData *stderrData = [NSData dataWithContentsOfFile:stderrPath] ?: [NSData data];
+  [[NSFileManager defaultManager] removeItemAtPath:stdoutPath error:nil];
+  [[NSFileManager defaultManager] removeItemAtPath:stderrPath error:nil];
   NSString *stdoutText = [[NSString alloc] initWithData:stdoutData encoding:NSUTF8StringEncoding] ?: @"";
   NSString *stderrText = [[NSString alloc] initWithData:stderrData encoding:NSUTF8StringEncoding] ?: @"";
   return [stdoutText stringByAppendingString:stderrText];
@@ -435,13 +473,6 @@ static NSString *TaskCommandDescription(NSString *launchPath, NSArray<NSString *
     [parts addObject:ShellQuote(argument ?: @"")];
   }
   return [parts componentsJoinedByString:@" "];
-}
-
-static NSString *TaskCapturePath(NSString *prefix) {
-  NSString *name = [NSString stringWithFormat:@"%@-%@.log",
-                                              prefix ?: @"arlen-task",
-                                              [[NSProcessInfo processInfo] globallyUniqueString]];
-  return [NSTemporaryDirectory() stringByAppendingPathComponent:name];
 }
 
 static NSString *RunTaskCapture(NSString *launchPath, NSArray<NSString *> *arguments, int *exitCode) {
@@ -1719,17 +1750,6 @@ static NSArray<NSString *> *SSHArgumentsForTarget(NSDictionary *target, NSString
                                                        ShellQuote(remoteScript ?: @"true")];
   [arguments addObject:remoteCommand];
   return arguments;
-}
-
-static void CloseFileHandleQuietly(NSFileHandle *handle) {
-  if (handle == nil) {
-    return;
-  }
-  @try {
-    [handle closeFile];
-  } @catch (NSException *exception) {
-    (void)exception;
-  }
 }
 
 static NSDictionary *RunSSHCommandForTarget(NSDictionary *target, NSString *remoteScript) {

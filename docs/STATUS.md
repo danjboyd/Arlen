@@ -4,6 +4,14 @@ Last updated: 2026-04-30
 
 ## Leaving Off (2026-04-30)
 
+- Fixed the shell-command capture deadlock reported from `TaxCalculator`:
+  - `ARLEN-BUG-027` / `ISSUE-007`: `RunShellCaptureCommand()` now captures
+    stdout/stderr through temporary files instead of waiting on a child process
+    before draining `NSPipe`s
+  - this unblocks noisy local release builds under `arlen deploy push --json`
+    so they can complete or reach structured JSON failure output
+  - regression coverage:
+    `BuildPolicyTests::testArlenBuildJSONCapturesLargeChildOutputWithoutPipeDeadlock_ARLEN_BUG_027`
 - Fixed the remote deploy bugs reported from `TaxCalculator`:
   - `ARLEN-BUG-025` / `ISSUE-005`: `transport.sshOptions` now preserves
     manifest order, so positional SSH option pairs such as `-F /dev/null` stay

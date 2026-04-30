@@ -267,6 +267,11 @@ Arlen now stops the local tar producer and returns a structured
 `deploy_target_transport_failed` result instead of waiting indefinitely
 (`ARLEN-BUG-026`).
 
+Captured local shell commands, including release builds run before remote
+upload, use file-backed stdout/stderr capture. Large compiler warning output
+therefore cannot fill an `NSPipe` and deadlock Arlen before JSON diagnostics
+are emitted (`ARLEN-BUG-027`).
+
 `arlen deploy init <target>` is local host scaffolding. It creates the target
 release layout and generated wrappers on the filesystem where the command runs;
 it does not SSH to `transport.sshHost`. For remote targets, run it on the target

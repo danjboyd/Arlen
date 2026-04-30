@@ -200,6 +200,9 @@ Named targets:
 - if SSH exits before upload completes, terminates the local tar producer and
   emits `deploy_target_transport_failed` in `--json` mode with captured
   transport output (`ARLEN-BUG-026`)
+- local release build capture uses file-backed stdout/stderr capture, so noisy
+  compiler output cannot fill an `NSPipe` and hang before JSON error emission
+  (`ARLEN-BUG-027`)
 - writes `metadata/manifest.json` with release/runtime/health contract metadata
 - writes manifest paths release-relative so the packaged release stays valid
   after ship/move (`ARLEN-BUG-017`)

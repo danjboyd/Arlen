@@ -69,6 +69,34 @@
                                                                             withString:@"'\"'\"'"]];
 }
 
+- (NSDictionary *)parseJSONDictionaryFromOutput:(NSString *)output context:(NSString *)context {
+  NSString *trimmed =
+      [output stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+  XCTAssertTrue([trimmed length] > 0, @"%@ output was empty", context);
+  if ([trimmed length] == 0) {
+    return @{};
+  }
+
+  NSRange firstBrace = [trimmed rangeOfString:@"{"];
+  NSRange lastBrace = [trimmed rangeOfString:@"}" options:NSBackwardsSearch];
+  NSString *jsonText = trimmed;
+  if (firstBrace.location != NSNotFound && lastBrace.location != NSNotFound &&
+      lastBrace.location >= firstBrace.location) {
+    jsonText = [trimmed substringWithRange:NSMakeRange(firstBrace.location,
+                                                       (lastBrace.location - firstBrace.location) + 1)];
+  }
+
+  NSData *data = [jsonText dataUsingEncoding:NSUTF8StringEncoding];
+  NSError *error = nil;
+  id parsed = [NSJSONSerialization JSONObjectWithData:data options:0 error:&error];
+  XCTAssertNil(error, @"%@ produced invalid JSON: %@\n%@", context, error.localizedDescription, output);
+  XCTAssertTrue([parsed isKindOfClass:[NSDictionary class]], @"%@ expected JSON object output\n%@", context, output);
+  if (![parsed isKindOfClass:[NSDictionary class]]) {
+    return @{};
+  }
+  return parsed;
+}
+
 - (NSString *)runShellCapture:(NSString *)command exitCode:(int *)exitCode {
   NSTask *task = [[NSTask alloc] init];
   task.launchPath = @"/bin/bash";
@@ -86,6 +114,54 @@
   NSData *stdoutData = [[stdoutPipe fileHandleForReading] readDataToEndOfFile];
   NSString *output = [[NSString alloc] initWithData:stdoutData encoding:NSUTF8StringEncoding];
   return output ?: @"";
+}
+
+- (void)testArlenBuildJSONCapturesLargeChildOutputWithoutPipeDeadlock_ARLEN_BUG_027 {
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *fixtureRoot = [self createTempDirectoryWithPrefix:@"arlen-shell-capture-large-output"];
+  XCTAssertNotNil(fixtureRoot);
+  if (fixtureRoot == nil) {
+    return;
+  }
+
+  @try {
+    NSString *makefilePath = [fixtureRoot stringByAppendingPathComponent:@"GNUmakefile"];
+    XCTAssertTrue([self writeFile:makefilePath
+                          content:@"all:\n"
+                                  "\t@echo ARLEN_BUG_027_STDOUT_BEGIN\n"
+                                  "\t@i=0; while [ $$i -lt 9000 ]; do echo ARLEN_BUG_027_STDOUT; i=$$((i + 1)); done\n"
+                                  "\t@echo ARLEN_BUG_027_STDERR_BEGIN >&2\n"
+                                  "\t@i=0; while [ $$i -lt 9000 ]; do echo ARLEN_BUG_027_STDERR >&2; i=$$((i + 1)); done\n"
+                                  "\t@echo ARLEN_BUG_027_DONE\n"]);
+    XCTAssertTrue([self writeFile:[fixtureRoot stringByAppendingPathComponent:@"tools/boomhauer.m"]
+                          content:@"int main(void) { return 0; }\n"]);
+    XCTAssertTrue([self writeFile:[fixtureRoot stringByAppendingPathComponent:@"src/Arlen/ArlenServer.h"]
+                          content:@"#import <Foundation/Foundation.h>\n"]);
+
+    NSString *outputPath = [fixtureRoot stringByAppendingPathComponent:@"arlen-build-output.json"];
+    NSString *command = [NSString stringWithFormat:
+        @"cd %@ && ARLEN_FRAMEWORK_ROOT=%@ timeout 20s %@/build/arlen build --json > %@",
+        [self shellQuoted:repoRoot],
+        [self shellQuoted:fixtureRoot],
+        [self shellQuoted:repoRoot],
+        [self shellQuoted:outputPath]];
+    int exitCode = 0;
+    NSString *commandOutput = [self runShellCapture:command exitCode:&exitCode];
+    NSString *output = [self readFile:outputPath];
+
+    XCTAssertNotEqual(124, exitCode, @"arlen build --json timed out, likely blocked on captured child output:\n%@", commandOutput);
+    XCTAssertEqual(0, exitCode, @"%@\n%@", commandOutput, output);
+    NSDictionary *payload = [self parseJSONDictionaryFromOutput:output
+                                                        context:@"arlen build large child output --json"];
+    XCTAssertEqualObjects(@"ok", payload[@"status"]);
+    NSString *capturedOutput =
+        [payload[@"captured_output"] isKindOfClass:[NSString class]] ? payload[@"captured_output"] : @"";
+    XCTAssertTrue([capturedOutput containsString:@"ARLEN_BUG_027_STDOUT_BEGIN"], @"%@", capturedOutput);
+    XCTAssertTrue([capturedOutput containsString:@"ARLEN_BUG_027_STDERR_BEGIN"], @"%@", capturedOutput);
+    XCTAssertTrue([capturedOutput containsString:@"ARLEN_BUG_027_DONE"], @"%@", capturedOutput);
+  } @finally {
+    [[NSFileManager defaultManager] removeItemAtPath:fixtureRoot error:nil];
+  }
 }
 
 - (void)testGNUmakefileEnforcesARCFlagsAndRejectsOptOut {
