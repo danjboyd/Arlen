@@ -24,6 +24,11 @@ By default this workflow runs:
 - `tools/build_docs_html.sh`
 - `tools/ci/generate_phase9j_release_certification_pack.py`
 
+The workflow starts from `make clean`. Unit-test regressions that execute Arlen
+tools therefore must declare those tools in the build graph; `make test-unit`
+builds `build/arlen` before running the unit bundle so CLI JSON regressions do
+not depend on stale artifacts from a previous lane.
+
 ## 2. Artifact Pack
 
 Certification artifacts are generated under:
@@ -77,3 +82,15 @@ tools/deploy/build_release.sh --certification-manifest /path/to/manifest.json ..
 ```
 
 A release candidate without a certified Phase 9J manifest is considered incomplete.
+
+## 5. Downstream Blocker Triage
+
+When a downstream app reports a Phase 9J blocker, Arlen records upstream status
+separately from app closure. The expected upstream response is:
+
+- add or update the bug-ledger entry in `docs/OPEN_ISSUES.md`
+- preserve the downstream ownership split in a reconciliation note
+- fix the Arlen build/test/release contract rather than bypassing the Phase 9J
+  manifest requirement
+- verify the clean path with `make clean`, focused regression coverage, and
+  `make ci-release-certification`

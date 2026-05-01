@@ -72,6 +72,7 @@ toolchain env directly for the Linux/GNUstep path. On macOS, use
 - [Release Process](RELEASE_PROCESS.md): semantic versioning, deprecations, and release checklist.
 - [Testing Workflow](TESTING_WORKFLOW.md): focused contributor lanes for turning bug reports into regressions.
 - [Public Test Contract](PUBLIC_TEST_CONTRACT.md): Phase 37 public-surface release-confidence matrix and default evidence contract.
+- [TaxCalculator Phase 9J Reconciliation](TAXCALCULATOR_PHASE9J_RECONCILIATION_2026-05-01.md): upstream status for the May 1, 2026 downstream release-certification blocker.
 - [Route Policies](ROUTE_POLICIES.md): named access policies, proxy-aware source IP allowlisting, `/admin` policy wiring, diagnostics, and confidence checks.
 - [Windows CLANG64 Preview](WINDOWS_CLANG64.md): current `main`-branch Windows bootstrap, packaged-release preview contract, and support statement.
 - [Platform Runner Runbook](PLATFORM_RUNNERS.md): Phase 34K Apple/Windows runner provisioning, labels, validation commands, and deferred package-manager boundary.

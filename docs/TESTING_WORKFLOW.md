@@ -21,6 +21,11 @@ lanes, or platform support policy move, update `.github/workflows/`,
 `docs/CI_ALIGNMENT.md`, branch-protection guidance, and contributor docs in the
 same change.
 
+`make test-unit` and `make test-unit-filter` build the Arlen CLI before loading
+the unit-test bundle. Unit regressions may execute `build/arlen` directly, and
+focused reruns after `make clean` must not depend on a stale CLI from an earlier
+lane.
+
 ## 1. Focused Lanes
 
 Use the smallest lane that honestly exercises the bug:

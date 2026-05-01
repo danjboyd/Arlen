@@ -1,6 +1,22 @@
 # Arlen Status Checkpoint
 
-Last updated: 2026-04-30
+Last updated: 2026-05-01
+
+## Leaving Off (2026-05-01)
+
+- Fixed the Phase 9J release-certification flake reported from
+  `TaxCalculator`:
+  - `ARLEN-BUG-028` / `ISSUE-008`: `make test-unit` now builds `build/arlen`
+    as part of the unit-test bundle prerequisites, matching
+    `BuildPolicyTests` regressions that execute the CLI after a clean rebuild
+  - hardened the ARLEN-BUG-027 regression diagnostics so early CLI exits report
+    combined shell output, redirected JSON byte count, and the command line
+  - downstream app closure remains pending `TaxCalculator` revalidation against
+    the updated vendored Arlen
+- Added upstream reconciliation notes for the May 1, 2026 TaxCalculator Phase
+  9J blocker:
+  - `docs/TAXCALCULATOR_PHASE9J_RECONCILIATION_2026-05-01.md`
+  - `docs/OPEN_ISSUES.md`
 
 ## Leaving Off (2026-04-30)
 

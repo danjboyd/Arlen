@@ -1,5 +1,51 @@
 # Open Issues
 
+## ISSUE-008: Phase 9J clean certification could run unit tests without `build/arlen`
+
+- Status: `fixed upstream; awaiting downstream revalidation`
+- Priority: `high`
+- Tracking ID: `ARLEN-BUG-028`
+- Discovered: `2026-05-01`
+- Reported by: `TaxCalculator`
+- Last updated: `2026-05-01`
+- Resolution: the unit-test bundle now declares `$(ARLEN_TOOL)` as an explicit
+  build prerequisite, so `make test-unit` and `make test-unit-filter` rebuild
+  `build/arlen` after `make clean` before any unit regression shells out to the
+  CLI. The ARLEN-BUG-027 regression also captures combined shell stdout/stderr
+  and reports redirected JSON output size when the CLI exits before emitting a
+  payload.
+- Verification performed:
+  - `make clean`
+  - `make test-unit-filter TEST=BuildPolicyTests/testArlenBuildJSONCapturesLargeChildOutputWithoutPipeDeadlock_ARLEN_BUG_027`
+  - `make test-unit`
+  - `make ci-docs`
+- Release-gate note:
+  `make ci-release-certification` progressed past the original BuildPolicy unit
+  blocker in this workspace, then failed and hung later in
+  `HTTPIntegrationTests` endpoint probes under the sandboxed verification
+  command. That later integration failure is not attributed to ARLEN-BUG-028.
+- Reconciliation note:
+  `docs/TAXCALCULATOR_PHASE9J_RECONCILIATION_2026-05-01.md`
+
+### Summary
+
+`make ci-release-certification` starts from a clean build tree before running
+the Phase 5E quality gate. That gate begins with `make test-unit`. The unit-test
+bundle did not depend on `build/arlen`, even though
+`BuildPolicyTests::testArlenBuildJSONCapturesLargeChildOutputWithoutPipeDeadlock_ARLEN_BUG_027`
+executes `build/arlen build --json` directly. If no earlier target had rebuilt
+the CLI after `make clean`, the test could fail before any JSON payload was
+written and report only an empty redirected output file.
+
+### Current Contract
+
+1. Unit-test regressions that execute the Arlen CLI must have `build/arlen`
+   available from the `make test-unit` dependency graph.
+2. Focused unit-test reruns after `make clean` must not depend on stale or
+   previously built CLI artifacts.
+3. CLI JSON-output regressions must preserve enough shell diagnostics to
+   distinguish missing binaries, early process exits, timeouts, and invalid JSON.
+
 ## ISSUE-007: Shell-command capture could deadlock on large child output
 
 - Status: `resolved`

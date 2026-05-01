@@ -101,18 +101,23 @@
   NSTask *task = [[NSTask alloc] init];
   task.launchPath = @"/bin/bash";
   task.arguments = @[ @"-lc", command ?: @"" ];
-  NSPipe *stdoutPipe = [NSPipe pipe];
-  NSPipe *stderrPipe = [NSPipe pipe];
-  task.standardOutput = stdoutPipe;
-  task.standardError = stderrPipe;
+  NSString *capturePath = [NSTemporaryDirectory()
+      stringByAppendingPathComponent:[NSString stringWithFormat:@"arlen-test-shell-%@.log",
+                                                               [[NSUUID UUID] UUIDString]]];
+  [[NSFileManager defaultManager] createFileAtPath:capturePath contents:nil attributes:nil];
+  NSFileHandle *captureWrite = [NSFileHandle fileHandleForWritingAtPath:capturePath];
+  task.standardOutput = captureWrite;
+  task.standardError = captureWrite;
   [task launch];
   [task waitUntilExit];
 
   if (exitCode != NULL) {
     *exitCode = task.terminationStatus;
   }
-  NSData *stdoutData = [[stdoutPipe fileHandleForReading] readDataToEndOfFile];
-  NSString *output = [[NSString alloc] initWithData:stdoutData encoding:NSUTF8StringEncoding];
+  [captureWrite closeFile];
+  NSData *capturedData = [NSData dataWithContentsOfFile:capturePath] ?: [NSData data];
+  [[NSFileManager defaultManager] removeItemAtPath:capturePath error:nil];
+  NSString *output = [[NSString alloc] initWithData:capturedData encoding:NSUTF8StringEncoding];
   return output ?: @"";
 }
 
@@ -139,6 +144,9 @@
                           content:@"#import <Foundation/Foundation.h>\n"]);
 
     NSString *outputPath = [fixtureRoot stringByAppendingPathComponent:@"arlen-build-output.json"];
+    NSString *arlenPath = [repoRoot stringByAppendingPathComponent:@"build/arlen"];
+    XCTAssertTrue([[NSFileManager defaultManager] isExecutableFileAtPath:arlenPath],
+                  @"expected test-unit prerequisite to build executable %@", arlenPath);
     NSString *command = [NSString stringWithFormat:
         @"cd %@ && ARLEN_FRAMEWORK_ROOT=%@ timeout 20s %@/build/arlen build --json > %@",
         [self shellQuoted:repoRoot],
@@ -148,9 +156,14 @@
     int exitCode = 0;
     NSString *commandOutput = [self runShellCapture:command exitCode:&exitCode];
     NSString *output = [self readFile:outputPath];
+    NSDictionary *attributes = [[NSFileManager defaultManager] attributesOfItemAtPath:outputPath
+                                                                                error:nil];
+    NSNumber *outputSize = attributes[NSFileSize] ?: @0;
 
-    XCTAssertNotEqual(124, exitCode, @"arlen build --json timed out, likely blocked on captured child output:\n%@", commandOutput);
-    XCTAssertEqual(0, exitCode, @"%@\n%@", commandOutput, output);
+    XCTAssertNotEqual(124, exitCode, @"arlen build --json timed out, likely blocked on captured child output:\ncommand: %@\nshell output:\n%@\njson output bytes: %@\njson output:\n%@",
+                      command, commandOutput, outputSize, output);
+    XCTAssertEqual(0, exitCode, @"command: %@\nshell output:\n%@\njson output bytes: %@\njson output:\n%@",
+                   command, commandOutput, outputSize, output);
     NSDictionary *payload = [self parseJSONDictionaryFromOutput:output
                                                         context:@"arlen build large child output --json"];
     XCTAssertEqualObjects(@"ok", payload[@"status"]);

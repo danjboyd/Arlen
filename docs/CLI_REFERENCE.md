@@ -1146,6 +1146,8 @@ Lifecycle diagnostics:
   - `ARLEN_PHASE9J_OUTPUT_DIR` overrides artifact output directory
   - `ARLEN_PHASE9J_SKIP_GATES=1` skips gate execution and regenerates certification from existing artifacts
   - `ARLEN_PHASE9J_ALLOW_INCOMPLETE=1` emits an incomplete pack without failing the command
+  - the default gate starts from `make clean`; unit-test prerequisites include
+    `build/arlen` so CLI regressions run against a freshly built tool
 - `tools/ci/run_perf_smoke.sh`: explicit macro perf-smoke entrypoint used by `make ci-perf-smoke`
   - kept standalone because the self-hosted Phase 5E quality workflow already runs the fuller macro perf matrix
   - `ARLEN_PERF_SMOKE_PROFILES` selects the checked-in macro perf profiles to gate (default `default,template_heavy`)
