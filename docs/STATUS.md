@@ -4,6 +4,19 @@ Last updated: 2026-05-02
 
 ## Leaving Off (2026-05-02)
 
+- Fixed the post-restart health race reported from `TaxCalculator`:
+  - `ARLEN-BUG-032` / `ISSUE-012`: `arlen deploy release` now polls
+    `/healthz` after a successful runtime restart/reload instead of failing on
+    the first transient connection refusal
+  - default health startup window is 30 seconds with a 1-second interval,
+    configurable through target keys `healthStartupTimeoutSeconds` /
+    `healthStartupIntervalSeconds` and CLI flags
+    `--health-startup-timeout` / `--health-startup-interval`
+  - timed-out health validation reports `deployment_state =
+    activated_health_unverified`
+- Added upstream reconciliation note:
+  - `docs/TAXCALCULATOR_HEALTH_STARTUP_RECONCILIATION_2026-05-02.md`
+
 - Fixed the runtime activation report from `TaxCalculator`:
   - `ARLEN-BUG-031` / `ISSUE-011`: `arlen deploy release` now restores
     `releases/current` to the previous active release when the configured

@@ -1366,6 +1366,109 @@
   }
 }
 
+- (void)testArlenDeployReleaseRetriesHealthAfterRuntimeRestart_ARLEN_BUG_032 {
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *appRoot = [self createTempDirectoryWithPrefix:@"arlen-deploy-health-retry-app"];
+  NSString *workRoot = [self createTempDirectoryWithPrefix:@"arlen-deploy-health-retry-work"];
+  XCTAssertNotNil(appRoot);
+  XCTAssertNotNil(workRoot);
+  if (appRoot == nil || workRoot == nil) {
+    return;
+  }
+
+  @try {
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"config/app.plist"]
+                          content:@"{\n"
+                                  "  host = \"127.0.0.1\";\n"
+                                  "  port = 3000;\n"
+                                  "}\n"]);
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"config/environments/production.plist"]
+                          content:@"{\n  logFormat = \"json\";\n}\n"]);
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"app_lite.m"]
+                          content:@"#import <Foundation/Foundation.h>\n"
+                                  "int main(int argc, const char *argv[]) { (void)argc; (void)argv; return 0; }\n"]);
+
+    int code = 0;
+    NSString *buildOutput = [self runShellCapture:[NSString stringWithFormat:@"cd %@ && make arlen", repoRoot]
+                                         exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", buildOutput);
+
+    NSString *releasesDir = [workRoot stringByAppendingPathComponent:@"releases"];
+    NSString *pushOutput = [self runShellCapture:[NSString stringWithFormat:
+                                                     @"cd %@ && ARLEN_FRAMEWORK_ROOT=%@ %@/build/arlen "
+                                                      "deploy push --app-root %@ --releases-dir %@ --release-id health-retry-rel "
+                                                      "--skip-release-certification --json",
+                                                     appRoot, repoRoot, repoRoot, appRoot, releasesDir]
+                                       exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", pushOutput);
+
+    int port = [self randomPort];
+    NSString *serverScript =
+        [NSString stringWithFormat:
+                      @"import http.server, socketserver, threading, time\n"
+                       @"PORT=%d\n"
+                       @"ready={'value': False}\n"
+                       @"def flip():\n"
+                       @"    time.sleep(1.0)\n"
+                       @"    ready['value'] = True\n"
+                       @"class Handler(http.server.BaseHTTPRequestHandler):\n"
+                       @"    def do_GET(self):\n"
+                       @"        if self.path == '/healthz' and ready['value']:\n"
+                       @"            self.send_response(200)\n"
+                       @"            self.end_headers()\n"
+                       @"            self.wfile.write(b'ok\\n')\n"
+                       @"        else:\n"
+                       @"            self.send_response(503)\n"
+                       @"            self.end_headers()\n"
+                       @"            self.wfile.write(b'not ready\\n')\n"
+                       @"    def log_message(self, fmt, *args):\n"
+                       @"        pass\n"
+                       @"threading.Thread(target=flip, daemon=True).start()\n"
+                       @"with socketserver.TCPServer(('127.0.0.1', PORT), Handler) as httpd:\n"
+                       @"    httpd.serve_forever()\n",
+                      port];
+    NSString *serverCommand = [NSString stringWithFormat:@"python3 - <<'PY'\n%@\nPY", serverScript];
+    NSTask *server = [[NSTask alloc] init];
+    server.launchPath = @"/bin/bash";
+    server.arguments = @[ @"-lc", serverCommand ];
+    server.standardOutput = [NSPipe pipe];
+    server.standardError = [NSPipe pipe];
+    [server launch];
+
+    @try {
+      usleep(200000);
+      NSString *runtimeCommand = @"printf 'runtime restarted\\n'";
+      NSString *releaseOutput = [self runShellCapture:[NSString stringWithFormat:
+                                                          @"cd %@ && ARLEN_FRAMEWORK_ROOT=%@ %@/build/arlen "
+                                                           "deploy release --app-root %@ --releases-dir %@ --release-id health-retry-rel "
+                                                           "--skip-release-certification --service arlen@test "
+                                                           "--runtime-action restart --runtime-restart-command %@ "
+                                                           "--base-url http://127.0.0.1:%d "
+                                                           "--health-startup-timeout 5 --health-startup-interval 0.25 --json",
+                                                          appRoot, repoRoot, repoRoot, appRoot, releasesDir,
+                                                          [self shellQuoted:runtimeCommand], port]
+                                            exitCode:&code];
+      XCTAssertEqual(0, code, @"%@", releaseOutput);
+      NSDictionary *payload =
+          [self parseJSONDictionaryFromOutput:releaseOutput context:@"arlen deploy release health retry --json"];
+      XCTAssertEqualObjects(@"ok", payload[@"status"]);
+      NSArray *steps = [payload[@"steps"] isKindOfClass:[NSArray class]] ? payload[@"steps"] : @[];
+      NSDictionary *healthStep = [[steps lastObject] isKindOfClass:[NSDictionary class]] ? [steps lastObject] : @{};
+      XCTAssertEqualObjects(@"health", healthStep[@"id"]);
+      XCTAssertEqualObjects(@"ok", healthStep[@"status"]);
+      XCTAssertTrue([healthStep[@"attempts"] integerValue] > 1, @"%@", healthStep);
+    } @finally {
+      if ([server isRunning]) {
+        [server terminate];
+        [server waitUntilExit];
+      }
+    }
+  } @finally {
+    [[NSFileManager defaultManager] removeItemAtPath:appRoot error:nil];
+    [[NSFileManager defaultManager] removeItemAtPath:workRoot error:nil];
+  }
+}
+
 - (void)testArlenDeployDoctorValidatesExplicitDatabaseModeAndRequiredEnvironmentKeys {
   NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
   NSString *appRoot = [self createTempDirectoryWithPrefix:@"arlen-deploy-contract-app"];

@@ -1,5 +1,42 @@
 # Open Issues
 
+## ISSUE-012: Post-restart health probe could race service startup
+
+- Status: `fixed upstream; awaiting downstream revalidation`
+- Priority: `medium-high`
+- Tracking ID: `ARLEN-BUG-032`
+- Discovered: `2026-05-02`
+- Reported by: `TaxCalculator`
+- Last updated: `2026-05-02`
+- Resolution: `arlen deploy release` now polls `/healthz` for a bounded
+  startup window after runtime restart/reload instead of treating the first
+  connection failure as final. The default window is 30 seconds with a
+  1-second interval, configurable through `healthStartupTimeoutSeconds`,
+  `healthStartupIntervalSeconds`, `--health-startup-timeout`, and
+  `--health-startup-interval`.
+- Verification:
+  - `DeploymentIntegrationTests::testArlenDeployReleaseRetriesHealthAfterRuntimeRestart_ARLEN_BUG_032`
+- Reconciliation note:
+  `docs/TAXCALCULATOR_HEALTH_STARTUP_RECONCILIATION_2026-05-02.md`
+
+### Summary
+
+After the runtime action succeeded, `deploy release` immediately probed
+`/healthz` once. During a normal systemd restart, the service can be active and
+the new workers can be starting while the socket is not accepting requests yet.
+That produced a nonzero deploy result even though follow-up `deploy status`,
+`deploy doctor`, and public health probes passed.
+
+### Current Contract
+
+1. Runtime restart/reload success is still required before health validation.
+2. Post-runtime health validation polls for a bounded startup window.
+3. Transient connection failures during the window are pending, not immediate
+   deploy failure.
+4. If the window expires, JSON reports `deployment_state =
+   activated_health_unverified` with retry attempts, timeout, service state,
+   and last health output.
+
 ## ISSUE-011: Runtime restart failure could leave `current` advanced
 
 - Status: `fixed upstream; awaiting downstream revalidation`

@@ -109,6 +109,8 @@ static void PrintDeployUsage(void) {
           "  --runtime-strategy <system|managed|bundled>\n"
           "  --runtime-restart-command <shell>\n"
           "  --runtime-reload-command <shell>\n"
+          "  --health-startup-timeout <seconds>\n"
+          "  --health-startup-interval <seconds>\n"
           "  --database-mode <external|host_local|embedded>\n"
           "  --database-adapter <name>\n"
           "  --database-target <name>\n"
@@ -1195,6 +1197,66 @@ static NSDictionary *RunDeployHealthProbe(NSString *frameworkRoot, NSString *hel
   };
 }
 
+static NSDictionary *RunReleaseHealthProbeWithRetry(NSString *baseURL,
+                                                    NSTimeInterval timeoutSeconds,
+                                                    NSTimeInterval intervalSeconds) {
+  NSString *trimmedBaseURL = [baseURL hasSuffix:@"/"] ? [baseURL substringToIndex:[baseURL length] - 1] : baseURL;
+  NSString *healthURL = [trimmedBaseURL stringByAppendingString:@"/healthz"];
+  NSTimeInterval timeout = timeoutSeconds > 0 ? timeoutSeconds : 30.0;
+  NSTimeInterval interval = intervalSeconds > 0 ? intervalSeconds : 1.0;
+  if (interval > timeout) {
+    interval = timeout;
+  }
+  NSTimeInterval attemptTimeout = interval;
+  if (attemptTimeout < 1.0) {
+    attemptTimeout = 1.0;
+  }
+  if (attemptTimeout > 5.0) {
+    attemptTimeout = 5.0;
+  }
+  NSString *healthCommand =
+      [NSString stringWithFormat:@"curl --max-time %.3f -fsS %@", attemptTimeout, ShellQuote(healthURL)];
+  NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:timeout];
+  int exitCode = 1;
+  NSString *output = @"";
+  NSInteger attempts = 0;
+
+  while (YES) {
+    attempts += 1;
+    output = RunShellCaptureCommand(healthCommand, &exitCode);
+    NSString *trimmedOutput = Trimmed(output);
+    if (exitCode == 0 && [trimmedOutput isEqualToString:@"ok"]) {
+      return @{
+        @"status" : @"ok",
+        @"base_url" : baseURL ?: @"",
+        @"health_path" : @"/healthz",
+        @"command" : healthCommand ?: @"",
+        @"captured_output" : output ?: @"",
+        @"exit_code" : @(exitCode),
+        @"attempts" : @(attempts),
+        @"timeout_seconds" : @(timeout),
+        @"interval_seconds" : @(interval),
+      };
+    }
+    if ([[NSDate date] compare:deadline] != NSOrderedAscending) {
+      break;
+    }
+    usleep((useconds_t)(interval * 1000000.0));
+  }
+
+  return @{
+    @"status" : @"error",
+    @"base_url" : baseURL ?: @"",
+    @"health_path" : @"/healthz",
+    @"command" : healthCommand ?: @"",
+    @"captured_output" : output ?: @"",
+    @"exit_code" : @(exitCode == 0 ? 1 : exitCode),
+    @"attempts" : @(attempts),
+    @"timeout_seconds" : @(timeout),
+    @"interval_seconds" : @(interval),
+  };
+}
+
 static NSDictionary *LoadReleaseMetadataAtDirectory(NSString *releaseDir) {
   NSString *manifestPath = [releaseDir stringByAppendingPathComponent:@"metadata/manifest.json"];
   NSString *releaseEnvPath = [releaseDir stringByAppendingPathComponent:@"metadata/release.env"];
@@ -1302,6 +1364,18 @@ static BOOL BoolValueForDeployKey(id value, BOOL defaultValue) {
         [normalized isEqualToString:@"0"] || [normalized isEqualToString:@"off"]) {
       return NO;
     }
+  }
+  return defaultValue;
+}
+
+static NSTimeInterval TimeIntervalValueForDeployKey(id value, NSTimeInterval defaultValue) {
+  if ([value respondsToSelector:@selector(doubleValue)]) {
+    NSTimeInterval parsed = [value doubleValue];
+    return parsed > 0 ? parsed : defaultValue;
+  }
+  if ([value isKindOfClass:[NSString class]]) {
+    NSTimeInterval parsed = [Trimmed(value) doubleValue];
+    return parsed > 0 ? parsed : defaultValue;
   }
   return defaultValue;
 }
@@ -1534,6 +1608,8 @@ static NSDictionary *LoadDeployTargetNamed(NSString *appRoot, NSString *targetNa
     @"runtime_action" : StringValueForDeployKey(rawTarget, @"runtimeAction"),
     @"runtime_restart_command" : StringValueForDeployKey(rawTarget, @"runtimeRestartCommand"),
     @"runtime_reload_command" : StringValueForDeployKey(rawTarget, @"runtimeReloadCommand"),
+    @"health_startup_timeout_seconds" : @(TimeIntervalValueForDeployKey(rawTarget[@"healthStartupTimeoutSeconds"], 30.0)),
+    @"health_startup_interval_seconds" : @(TimeIntervalValueForDeployKey(rawTarget[@"healthStartupIntervalSeconds"], 1.0)),
     @"environment" : StringValueForDeployKey(rawTarget, @"environment"),
     @"service" : serviceName ?: @"",
     @"base_url" : StringValueForDeployKey(rawTarget, @"baseURL"),
@@ -5096,6 +5172,8 @@ static int CommandDeploy(NSArray *args) {
   NSString *runtimeAction = @"reload";
   NSString *runtimeRestartCommand = nil;
   NSString *runtimeReloadCommand = nil;
+  NSTimeInterval healthStartupTimeoutSeconds = 30.0;
+  NSTimeInterval healthStartupIntervalSeconds = 1.0;
   NSString *logFilePath = nil;
   BOOL allowMissingCertification = NO;
   BOOL allowRemoteRebuild = NO;
@@ -5114,6 +5192,8 @@ static int CommandDeploy(NSArray *args) {
   BOOL runtimeActionExplicit = NO;
   BOOL runtimeRestartCommandExplicit = NO;
   BOOL runtimeReloadCommandExplicit = NO;
+  BOOL healthStartupTimeoutExplicit = NO;
+  BOOL healthStartupIntervalExplicit = NO;
   NSInteger logLines = 200;
   NSString *targetName = nil;
 
@@ -5391,6 +5471,32 @@ static int CommandDeploy(NSArray *args) {
       }
       runtimeReloadCommand = subArgs[++idx];
       runtimeReloadCommandExplicit = YES;
+    } else if ([arg isEqualToString:@"--health-startup-timeout"]) {
+      if (idx + 1 >= [subArgs count]) {
+        if (asJSON) {
+          return EmitMachineError(@"deploy", [NSString stringWithFormat:@"deploy.%@", subcommand],
+                                  @"missing_option_value", @"arlen deploy: --health-startup-timeout requires a value",
+                                  @"Pass the maximum health startup wait in seconds.",
+                                  @"arlen deploy release --health-startup-timeout 30 --json", 2);
+        }
+        fprintf(stderr, "arlen deploy: --health-startup-timeout requires a value\n");
+        return 2;
+      }
+      healthStartupTimeoutSeconds = TimeIntervalValueForDeployKey(subArgs[++idx], 30.0);
+      healthStartupTimeoutExplicit = YES;
+    } else if ([arg isEqualToString:@"--health-startup-interval"]) {
+      if (idx + 1 >= [subArgs count]) {
+        if (asJSON) {
+          return EmitMachineError(@"deploy", [NSString stringWithFormat:@"deploy.%@", subcommand],
+                                  @"missing_option_value", @"arlen deploy: --health-startup-interval requires a value",
+                                  @"Pass the health startup polling interval in seconds.",
+                                  @"arlen deploy release --health-startup-interval 1 --json", 2);
+        }
+        fprintf(stderr, "arlen deploy: --health-startup-interval requires a value\n");
+        return 2;
+      }
+      healthStartupIntervalSeconds = TimeIntervalValueForDeployKey(subArgs[++idx], 1.0);
+      healthStartupIntervalExplicit = YES;
     } else if ([arg isEqualToString:@"--lines"]) {
       if (idx + 1 >= [subArgs count]) {
         if (asJSON) {
@@ -5560,6 +5666,16 @@ static int CommandDeploy(NSArray *args) {
     if (!runtimeReloadCommandExplicit &&
         [StringValueForDeployKey(resolvedTarget, @"runtime_reload_command") length] > 0) {
       runtimeReloadCommand = StringValueForDeployKey(resolvedTarget, @"runtime_reload_command");
+    }
+    if (!healthStartupTimeoutExplicit &&
+        [resolvedTarget[@"health_startup_timeout_seconds"] respondsToSelector:@selector(doubleValue)]) {
+      healthStartupTimeoutSeconds =
+          TimeIntervalValueForDeployKey(resolvedTarget[@"health_startup_timeout_seconds"], healthStartupTimeoutSeconds);
+    }
+    if (!healthStartupIntervalExplicit &&
+        [resolvedTarget[@"health_startup_interval_seconds"] respondsToSelector:@selector(doubleValue)]) {
+      healthStartupIntervalSeconds =
+          TimeIntervalValueForDeployKey(resolvedTarget[@"health_startup_interval_seconds"], healthStartupIntervalSeconds);
     }
 
     for (NSString *requiredKey in [resolvedTarget[@"required_environment_keys"] isKindOfClass:[NSArray class]]
@@ -5937,6 +6053,12 @@ static int CommandDeploy(NSArray *args) {
     if ([runtimeReloadCommand length] > 0 &&
         [@[ @"release", @"rollback" ] containsObject:subcommand]) {
       AppendShellOption(remoteDelegate, @"--runtime-reload-command", runtimeReloadCommand);
+    }
+    if ([subcommand isEqualToString:@"release"]) {
+      AppendShellOption(remoteDelegate, @"--health-startup-timeout",
+                        [NSString stringWithFormat:@"%.3f", healthStartupTimeoutSeconds]);
+      AppendShellOption(remoteDelegate, @"--health-startup-interval",
+                        [NSString stringWithFormat:@"%.3f", healthStartupIntervalSeconds]);
     }
     if ([baseURL length] > 0 &&
         [@[ @"release", @"status", @"doctor", @"rollback" ] containsObject:subcommand]) {
@@ -6890,13 +7012,12 @@ static int CommandDeploy(NSArray *args) {
   }
 
   if ([baseURL length] > 0) {
-    NSString *trimmedBaseURL = [baseURL hasSuffix:@"/"] ? [baseURL substringToIndex:[baseURL length] - 1] : baseURL;
-    NSString *healthURL = [trimmedBaseURL stringByAppendingString:@"/healthz"];
-    NSString *healthCommand = [NSString stringWithFormat:@"curl -fsS %@", ShellQuote(healthURL)];
-    int healthExitCode = 0;
-    NSString *healthOutput = RunShellCaptureCommand(healthCommand, &healthExitCode);
-    NSString *trimmedHealthOutput = Trimmed(healthOutput);
-    if (healthExitCode != 0 || ![trimmedHealthOutput isEqualToString:@"ok"]) {
+    NSDictionary *healthProbe =
+        RunReleaseHealthProbeWithRetry(baseURL, healthStartupTimeoutSeconds, healthStartupIntervalSeconds);
+    NSString *healthStatus = [healthProbe[@"status"] isKindOfClass:[NSString class]] ? healthProbe[@"status"] : @"error";
+    if (![healthStatus isEqualToString:@"ok"]) {
+      NSString *serviceOutput = nil;
+      NSString *serviceState = [serviceName length] > 0 ? ServiceRuntimeState(serviceName, &serviceOutput) : @"not_requested";
       if (asJSON) {
         NSDictionary *payload = @{
           @"version" : AgentContractVersion(),
@@ -6904,36 +7025,47 @@ static int CommandDeploy(NSArray *args) {
           @"workflow" : workflow,
           @"subcommand" : subcommand,
           @"status" : @"error",
+          @"deployment_state" : @"activated_health_unverified",
           @"release_id" : releaseID ?: @"",
           @"release_dir" : releaseDir ?: @"",
+          @"service" : serviceName ?: @"",
+          @"service_state" : serviceState ?: @"",
+          @"service_state_output" : serviceOutput ?: @"",
           @"steps" : [steps arrayByAddingObject:@{
             @"id" : @"health",
             @"status" : @"error",
             @"base_url" : baseURL ?: @"",
-            @"captured_output" : healthOutput ?: @"",
+            @"captured_output" : healthProbe[@"captured_output"] ?: @"",
+            @"attempts" : healthProbe[@"attempts"] ?: @0,
+            @"timeout_seconds" : healthProbe[@"timeout_seconds"] ?: @(healthStartupTimeoutSeconds),
+            @"interval_seconds" : healthProbe[@"interval_seconds"] ?: @(healthStartupIntervalSeconds),
           }],
           @"error" : @{
             @"code" : @"deploy_release_health_failed",
-            @"message" : @"release activation completed but health verification failed",
+            @"message" : @"release activation and runtime action completed but health verification timed out",
             @"fixit" : @{
-              @"action" : @"Inspect runtime startup logs and verify /healthz is reachable.",
-              @"example" : [NSString stringWithFormat:@"curl -fsS %@/healthz", trimmedBaseURL ?: @""],
+              @"action" : @"Run deploy status/doctor/logs; increase --health-startup-timeout if the service needs a longer normal startup window.",
+              @"example" : @"arlen deploy status --json && arlen deploy doctor --json",
             }
           },
-          @"exit_code" : @(healthExitCode == 0 ? 1 : healthExitCode),
+          @"exit_code" : @([healthProbe[@"exit_code"] integerValue] == 0 ? 1 : [healthProbe[@"exit_code"] integerValue]),
         };
         PrintJSONPayload(stdout, payload);
       }
-      if (!asJSON && [healthOutput length] > 0) {
-        fprintf(stderr, "%s", [healthOutput UTF8String]);
+      if (!asJSON && [healthProbe[@"captured_output"] isKindOfClass:[NSString class]] &&
+          [healthProbe[@"captured_output"] length] > 0) {
+        fprintf(stderr, "%s", [healthProbe[@"captured_output"] UTF8String]);
       }
-      return (healthExitCode == 0) ? 1 : healthExitCode;
+      return ([healthProbe[@"exit_code"] integerValue] == 0) ? 1 : [healthProbe[@"exit_code"] intValue];
     }
     [steps addObject:@{
       @"id" : @"health",
       @"status" : @"ok",
       @"base_url" : baseURL ?: @"",
       @"health_path" : @"/healthz",
+      @"attempts" : healthProbe[@"attempts"] ?: @0,
+      @"timeout_seconds" : healthProbe[@"timeout_seconds"] ?: @(healthStartupTimeoutSeconds),
+      @"interval_seconds" : healthProbe[@"interval_seconds"] ?: @(healthStartupIntervalSeconds),
     }];
   } else {
     [steps addObject:@{
@@ -10108,7 +10240,8 @@ static NSArray<NSString *> *DeployOptionCompletionCandidates(void) {
             @"--base-url", @"--target-profile", @"--runtime-strategy", @"--database-mode",
             @"--database-adapter", @"--database-target", @"--require-env-key",
             @"--allow-remote-rebuild", @"--remote-build-check-command", @"--runtime-restart-command",
-            @"--runtime-reload-command", @"--certification-manifest",
+            @"--runtime-reload-command", @"--health-startup-timeout", @"--health-startup-interval",
+            @"--certification-manifest",
             @"--json-performance-manifest", @"--allow-missing-certification",
             @"--skip-release-certification", @"--dev", @"--json",
             @"--env", @"--skip-migrate", @"--runtime-action", @"--lines", @"--follow", @"--file",

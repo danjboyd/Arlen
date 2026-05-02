@@ -112,6 +112,8 @@ Named targets:
         runtimeAction = "restart";
         runtimeRestartCommand = "sudo -n /bin/systemctl restart arlen@myapp.service";
         runtimeReloadCommand = "sudo -n /bin/systemctl reload arlen@myapp.service";
+        healthStartupTimeoutSeconds = 30;
+        healthStartupIntervalSeconds = 1;
         environment = "production";
         service = "arlen@myapp";
         baseURL = "http://127.0.0.1:3000";
@@ -344,6 +346,8 @@ Release-only options:
 - `--runtime-action <reload|restart|none>`: runtime action used by `deploy release` and `deploy rollback` when `--service` is set
 - `--runtime-restart-command <shell>`: non-interactive restart command override, for example `sudo -n systemctl restart arlen@myapp`
 - `--runtime-reload-command <shell>`: non-interactive reload command override
+- `--health-startup-timeout <seconds>`: bounded post-runtime health wait for `deploy release` (default `30`)
+- `--health-startup-interval <seconds>`: post-runtime health polling interval for `deploy release` (default `1`)
 - `--lines <count>`: number of log lines to show for `deploy logs` (default `200`)
 - `--follow`: follow `deploy logs` output
 - `--file <path>`: tail an explicit log file instead of journald
@@ -1216,6 +1220,7 @@ Lifecycle diagnostics:
   - `--allow-missing-certification` remains available as the compatibility spelling
   - if a configured runtime reload/restart fails after activation, Arlen restores `releases/current` to the previous release when possible and reports `deployment_state=activation_failed`; if restoration is not possible, JSON reports `deployment_state=stale_runtime`
   - use `--runtime-restart-command` / `--runtime-reload-command` or target config keys `runtimeRestartCommand` / `runtimeReloadCommand` for non-interactive systemd wrappers such as `sudo -n systemctl restart ...`
+  - after a successful runtime action, health validation polls `/healthz` until `--health-startup-timeout` expires; timeout errors report `deployment_state=activated_health_unverified`
   - packages `app/db/migrations` and the prepared app binary at `app/.boomhauer/build/boomhauer-app` so the documented release migrate and `framework/bin/propane` workflows run from the artifact itself
 - `arlen generate frontend <Name> --preset <vanilla-spa|progressive-mpa>`: scaffold frontend starter templates with built-in API wiring examples
 - `make ci-docs`: run docs quality gate (API docs regen consistency + roadmap summary consistency + newcomer-doc navigation checks + imported comparative benchmark-contract consistency + HTML artifact/link checks)

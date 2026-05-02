@@ -154,6 +154,8 @@ Current shape:
         runtimeAction = "restart";
         runtimeRestartCommand = "sudo -n /bin/systemctl restart arlen@myapp.service";
         runtimeReloadCommand = "sudo -n /bin/systemctl reload arlen@myapp.service";
+        healthStartupTimeoutSeconds = 30;
+        healthStartupIntervalSeconds = 1;
         environment = "production";
         service = "arlen@myapp";
         baseURL = "http://127.0.0.1:3000";
@@ -410,8 +412,10 @@ reload/restart a systemd unit after activation, and can probe `/healthz` when
 switch, Arlen restores `releases/current` to the previously active release when
 one exists and reports `deployment_state = activation_failed`; if restoration
 fails, JSON output reports `deployment_state = stale_runtime` so operators know
-the running process may not match the active release pointer. Packaged framework
-payloads now also
+the running process may not match the active release pointer. After a successful
+runtime action, release health validation polls `/healthz` for a bounded startup
+window before failing; if that window expires, JSON reports `deployment_state =
+activated_health_unverified`. Packaged framework payloads now also
 include the packaged deploy helper set under `framework/tools/deploy/`, so
 `arlen deploy doctor --base-url ...` works from an activated packaged release
 without needing a source checkout beside it. `tools/deploy/smoke_release.sh`
@@ -438,6 +442,9 @@ Target-aware deploy options:
   `sudo -n systemctl restart arlen@myapp`
 - `--runtime-reload-command <shell>` overrides the default
   `systemctl reload <service>` command
+- `--health-startup-timeout <seconds>` sets the post-runtime health polling
+  window for `deploy release` (default `30`)
+- `--health-startup-interval <seconds>` sets the polling interval (default `1`)
 - `--skip-release-certification` waives Phase 9J / Phase 10E evidence for
   explicit non-RC app iteration
 - `--dev` is a shorter alias for `--skip-release-certification`
@@ -468,6 +475,8 @@ Then configure:
 ```plist
 runtimeRestartCommand = "sudo -n /bin/systemctl restart arlen@iep-ownerconnect.service";
 runtimeReloadCommand = "sudo -n /bin/systemctl reload arlen@iep-ownerconnect.service";
+healthStartupTimeoutSeconds = 30;
+healthStartupIntervalSeconds = 1;
 ```
 
 Focused deploy confidence lane:

@@ -154,6 +154,8 @@ Behavior:
   - `--service <name>`
   - `--runtime-restart-command <shell>`
   - `--runtime-reload-command <shell>`
+  - `--health-startup-timeout <seconds>`
+  - `--health-startup-interval <seconds>`
   - `--certification-manifest <path>`
   - `--json-performance-manifest <path>`
   - `--skip-release-certification`
