@@ -1,5 +1,74 @@
 # Open Issues
 
+## ISSUE-010: Non-RC downstream deploy path was not first-class
+
+- Status: `fixed upstream; awaiting downstream revalidation`
+- Priority: `medium`
+- Tracking ID: `ARLEN-BUG-030`
+- Discovered: `2026-05-02`
+- Reported by: `TaxCalculator`
+- Last updated: `2026-05-02`
+- Resolution: deploy packaging now accepts first-class non-RC aliases
+  `--skip-release-certification` and `--dev` in addition to the existing
+  `--allow-missing-certification` compatibility spelling. The release artifact
+  still records waived Phase 9J / Phase 10E status, and text-mode packaging
+  emits an explicit warning when certification checks are waived.
+- Verification:
+  - `DeploymentIntegrationTests::testBuildReleaseRequiresPhase9JCertificationByDefault`
+- Reconciliation note:
+  `docs/TAXCALCULATOR_PHASE9J_DEPLOY_RECONCILIATION_2026-05-02.md`
+
+### Summary
+
+`arlen deploy push` intentionally enforced Phase 9J certification by default,
+but the documented downstream app-iteration path depended on the older
+`--allow-missing-certification` spelling. That made the supported non-RC path
+look like an emergency bypass instead of a deliberate app-iteration workflow.
+
+### Current Contract
+
+1. Phase 9J certification remains the default for release-candidate packaging.
+2. Non-RC app iteration may explicitly waive certification with
+   `--skip-release-certification`, `--dev`, or the compatibility spelling
+   `--allow-missing-certification`.
+3. Waived releases must record `certification_status = waived` and
+   `json_performance_status = waived` in release metadata.
+4. Text-mode packaging must warn when certification checks are waived.
+
+## ISSUE-009: HTTP integration reserved-endpoint regression could hang
+
+- Status: `fixed upstream; awaiting downstream revalidation`
+- Priority: `high`
+- Tracking ID: `ARLEN-BUG-029`
+- Discovered: `2026-05-02`
+- Reported by: `TaxCalculator`
+- Last updated: `2026-05-02`
+- Resolution: the HTTP integration request helper no longer waits
+  indefinitely for spawned servers. Shell command capture now uses temporary
+  files, server shutdown is bounded, stalled children are terminated/killed, and
+  timeout diagnostics include the command, port, stdout, and stderr.
+- Verification:
+  - `make test-integration-filter TEST=HTTPIntegrationTests/testReservedOperabilityEndpointsCannotBeShadowedByCatchAllRoute`
+- Reconciliation note:
+  `docs/TAXCALCULATOR_PHASE9J_DEPLOY_RECONCILIATION_2026-05-02.md`
+
+### Summary
+
+The reserved operability endpoint regression starts a prepared app and probes
+`/healthz`, `/readyz`, `/metrics`, and a catch-all route. The shared helper
+launched each server with `--once`, sent one `curl` request, and then waited
+unconditionally for the server process to exit. If an operability endpoint did
+not drive `--once` shutdown, the request could complete but the test process
+would block forever in `waitUntilExit`.
+
+### Current Contract
+
+1. Integration tests that spawn servers must use bounded startup/request/shutdown
+   waits.
+2. Test failures must include enough process diagnostics to distinguish request
+   failures, server startup failures, and shutdown stalls.
+3. Spawned server processes must be cleaned up even when the request path fails.
+
 ## ISSUE-008: Phase 9J clean certification could run unit tests without `build/arlen`
 
 - Status: `fixed upstream; awaiting downstream revalidation`

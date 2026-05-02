@@ -154,6 +154,8 @@ Behavior:
   - `--service <name>`
   - `--certification-manifest <path>`
   - `--json-performance-manifest <path>`
+  - `--skip-release-certification`
+  - `--dev`
   - `--allow-missing-certification`
   - `--json`
   - `--env <name>` and `--base-url <url>` for runtime-aware subcommands

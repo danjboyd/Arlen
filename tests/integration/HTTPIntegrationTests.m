@@ -156,18 +156,21 @@
   NSTask *task = [[NSTask alloc] init];
   task.launchPath = @"/bin/bash";
   task.arguments = @[ @"-lc", command ];
-  NSPipe *stdoutPipe = [NSPipe pipe];
-  NSPipe *stderrPipe = [NSPipe pipe];
-  task.standardOutput = stdoutPipe;
-  task.standardError = stderrPipe;
+  NSString *capturePath = [self createTempFilePathWithPrefix:@"arlen-http-shell" suffix:@".log"];
+  [[NSFileManager defaultManager] createFileAtPath:capturePath contents:nil attributes:nil];
+  NSFileHandle *captureWrite = [NSFileHandle fileHandleForWritingAtPath:capturePath];
+  task.standardOutput = captureWrite;
+  task.standardError = captureWrite;
   [task launch];
   [task waitUntilExit];
 
   if (exitCode != NULL) {
     *exitCode = task.terminationStatus;
   }
-  NSData *stdoutData = [[stdoutPipe fileHandleForReading] readDataToEndOfFile];
-  NSString *output = [[NSString alloc] initWithData:stdoutData
+  [captureWrite closeFile];
+  NSData *capturedData = [NSData dataWithContentsOfFile:capturePath] ?: [NSData data];
+  [[NSFileManager defaultManager] removeItemAtPath:capturePath error:nil];
+  NSString *output = [[NSString alloc] initWithData:capturedData
                                            encoding:NSUTF8StringEncoding];
   return output ?: @"";
 }
@@ -185,6 +188,31 @@
   NSString *output = [[NSString alloc] initWithData:data
                                            encoding:NSUTF8StringEncoding];
   return output ?: @"";
+}
+
+- (BOOL)waitForTaskExit:(NSTask *)task timeoutSeconds:(NSTimeInterval)timeoutSeconds {
+  NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:timeoutSeconds];
+  while ([task isRunning]) {
+    if ([[NSDate date] compare:deadline] != NSOrderedAscending) {
+      return NO;
+    }
+    usleep(100000);
+  }
+  [task waitUntilExit];
+  return YES;
+}
+
+- (BOOL)terminateTask:(NSTask *)task timeoutSeconds:(NSTimeInterval)timeoutSeconds {
+  if (![task isRunning]) {
+    [task waitUntilExit];
+    return YES;
+  }
+  [task terminate];
+  if ([self waitForTaskExit:task timeoutSeconds:timeoutSeconds]) {
+    return YES;
+  }
+  (void)kill(task.processIdentifier, SIGKILL);
+  return [self waitForTaskExit:task timeoutSeconds:2.0];
 }
 
 - (BOOL)outputContainsTransientNetworkFailure:(NSString *)output {
@@ -335,8 +363,10 @@
     NSTask *server = [[NSTask alloc] init];
     server.launchPath = @"/bin/bash";
     server.arguments = @[ @"-lc", serverCmd ];
-    server.standardOutput = [NSPipe pipe];
-    server.standardError = [NSPipe pipe];
+    NSPipe *stdoutPipe = [NSPipe pipe];
+    NSPipe *stderrPipe = [NSPipe pipe];
+    server.standardOutput = stdoutPipe;
+    server.standardError = stderrPipe;
     [server launch];
 
     usleep(250000);
@@ -353,11 +383,25 @@
       usleep(200000);
     }
 
-    if (localCurlCode != 0 && [server isRunning]) {
-      [server terminate];
+    if ([server isRunning]) {
+      if (localCurlCode == 0) {
+        if (![self terminateTask:server timeoutSeconds:5.0]) {
+          NSString *stdoutText = [self capturedOutputFromPipe:stdoutPipe];
+          NSString *stderrText = [self capturedOutputFromPipe:stderrPipe];
+          XCTFail(@"server did not stop after successful request; command=%@ port=%d stdout=%@ stderr=%@",
+                  serverCmd, port, stdoutText, stderrText);
+          localServerCode = 124;
+          break;
+        }
+      } else {
+        (void)[self terminateTask:server timeoutSeconds:5.0];
+      }
     }
-    [server waitUntilExit];
-    localServerCode = server.terminationStatus;
+    if ([server isRunning]) {
+      localServerCode = 124;
+    } else {
+      localServerCode = (localCurlCode == 0) ? 0 : server.terminationStatus;
+    }
 
     if (localCurlCode == 0) {
       break;
@@ -537,52 +581,83 @@
         [appRoot stringByAppendingPathComponent:@".boomhauer/build/boomhauer-app"];
     XCTAssertTrue([[NSFileManager defaultManager] isExecutableFileAtPath:preparedBinary]);
 
-    int curlCode = 0;
-    int serverCode = 0;
-    NSString *healthBody =
-        [self requestWithServerEnv:envPrefix
-                       serverBinary:preparedBinary
-                          curlBody:@"curl -fsS http://127.0.0.1:%d/healthz"
-                          curlCode:&curlCode
-                         serverCode:&serverCode];
-    XCTAssertEqual(0, curlCode);
-    XCTAssertEqual(0, serverCode);
-    XCTAssertEqualObjects(@"ok\n", healthBody);
+    int port = [self randomPort];
+    NSString *serverCmd =
+        [NSString stringWithFormat:@"%@ %@ --port %d",
+                                   envPrefix,
+                                   [self shellQuoted:preparedBinary],
+                                   port];
+    NSTask *server = [[NSTask alloc] init];
+    server.launchPath = @"/bin/bash";
+    server.arguments = @[ @"-lc", serverCmd ];
+    NSPipe *stdoutPipe = [NSPipe pipe];
+    NSPipe *stderrPipe = [NSPipe pipe];
+    server.standardOutput = stdoutPipe;
+    server.standardError = stderrPipe;
+    [server launch];
 
-    NSString *readyBody =
-        [self requestWithServerEnv:envPrefix
-                       serverBinary:preparedBinary
-                          curlBody:@"curl -fsS http://127.0.0.1:%d/readyz"
-                          curlCode:&curlCode
-                         serverCode:&serverCode];
-    XCTAssertEqual(0, curlCode);
-    XCTAssertEqual(0, serverCode);
-    XCTAssertEqualObjects(@"ready\n", readyBody);
+    @try {
+      BOOL ready = NO;
+      NSString *healthBody = @"";
+      int curlCode = 1;
+      NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:20.0];
+      while ([[NSDate date] compare:deadline] == NSOrderedAscending) {
+        NSString *command =
+            [NSString stringWithFormat:@"curl --max-time 2 -fsS http://127.0.0.1:%d/healthz",
+                                       port];
+        healthBody = [self runShellCapture:command exitCode:&curlCode];
+        if (curlCode == 0) {
+          ready = YES;
+          break;
+        }
+        if (![server isRunning]) {
+          break;
+        }
+        usleep(200000);
+      }
+      if (!ready) {
+        (void)[self terminateTask:server timeoutSeconds:5.0];
+        NSString *stdoutText = [self capturedOutputFromPipe:stdoutPipe];
+        NSString *stderrText = [self capturedOutputFromPipe:stderrPipe];
+        XCTFail(@"reserved endpoint server did not become ready; command=%@ port=%d curlCode=%d curlOutput=%@ stdout=%@ stderr=%@",
+                serverCmd, port, curlCode, healthBody, stdoutText, stderrText);
+        return;
+      }
+      XCTAssertEqualObjects(@"ok\n", healthBody);
 
-    NSString *metricsBody =
-        [self requestWithServerEnv:envPrefix
-                       serverBinary:preparedBinary
-                          curlBody:@"curl -fsS http://127.0.0.1:%d/metrics"
-                          curlCode:&curlCode
-                         serverCode:&serverCode];
-    XCTAssertEqual(0, curlCode);
-    XCTAssertEqual(0, serverCode);
-    XCTAssertTrue([metricsBody containsString:@"# TYPE aln_http_requests_active gauge"],
-                  @"%@",
-                  metricsBody);
-    XCTAssertTrue([metricsBody containsString:@"aln_http_requests_active 1.000"],
-                  @"%@",
-                  metricsBody);
+      NSString *readyCommand =
+          [NSString stringWithFormat:@"curl --max-time 5 -fsS http://127.0.0.1:%d/readyz",
+                                     port];
+      NSString *readyBody = [self runShellCapture:readyCommand exitCode:&curlCode];
+      XCTAssertEqual(0, curlCode, @"command=%@ output=%@", readyCommand, readyBody);
+      XCTAssertEqualObjects(@"ready\n", readyBody);
 
-    NSString *shadowBody =
-        [self requestWithServerEnv:envPrefix
-                       serverBinary:preparedBinary
-                          curlBody:@"curl -fsS http://127.0.0.1:%d/shadowed"
-                          curlCode:&curlCode
-                         serverCode:&serverCode];
-    XCTAssertEqual(0, curlCode);
-    XCTAssertEqual(0, serverCode);
-    XCTAssertEqualObjects(@"token:shadowed\n", shadowBody);
+      NSString *metricsCommand =
+          [NSString stringWithFormat:@"curl --max-time 5 -fsS http://127.0.0.1:%d/metrics",
+                                     port];
+      NSString *metricsBody = [self runShellCapture:metricsCommand exitCode:&curlCode];
+      XCTAssertEqual(0, curlCode, @"command=%@ output=%@", metricsCommand, metricsBody);
+      XCTAssertTrue([metricsBody containsString:@"# TYPE aln_http_requests_active gauge"],
+                    @"%@",
+                    metricsBody);
+      XCTAssertTrue([metricsBody containsString:@"aln_http_requests_active 1.000"],
+                    @"%@",
+                    metricsBody);
+
+      NSString *shadowCommand =
+          [NSString stringWithFormat:@"curl --max-time 5 -fsS http://127.0.0.1:%d/shadowed",
+                                     port];
+      NSString *shadowBody = [self runShellCapture:shadowCommand exitCode:&curlCode];
+      XCTAssertEqual(0, curlCode, @"command=%@ output=%@", shadowCommand, shadowBody);
+      XCTAssertEqualObjects(@"token:shadowed\n", shadowBody);
+    } @finally {
+      if (![self terminateTask:server timeoutSeconds:5.0]) {
+        NSString *stdoutText = [self capturedOutputFromPipe:stdoutPipe];
+        NSString *stderrText = [self capturedOutputFromPipe:stderrPipe];
+        XCTFail(@"reserved endpoint server did not shut down; command=%@ port=%d stdout=%@ stderr=%@",
+                serverCmd, port, stdoutText, stderrText);
+      }
+    }
   } @finally {
     [[NSFileManager defaultManager] removeItemAtPath:appRoot error:nil];
   }

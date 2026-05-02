@@ -1,6 +1,19 @@
 # Arlen Status Checkpoint
 
-Last updated: 2026-05-01
+Last updated: 2026-05-02
+
+## Leaving Off (2026-05-02)
+
+- Fixed two follow-up `TaxCalculator` reports after the Phase 9J BuildPolicy
+  blocker was resolved:
+  - `ARLEN-BUG-029` / `ISSUE-009`: HTTP integration server helpers now use
+    bounded shutdown and process diagnostics so reserved operability endpoint
+    regressions fail instead of hanging indefinitely
+  - `ARLEN-BUG-030` / `ISSUE-010`: non-RC downstream app deploys now have
+    first-class `--skip-release-certification` and `--dev` aliases while
+    retaining strict Phase 9J enforcement by default
+- Added upstream reconciliation notes:
+  - `docs/TAXCALCULATOR_PHASE9J_DEPLOY_RECONCILIATION_2026-05-02.md`
 
 ## Leaving Off (2026-05-01)
 

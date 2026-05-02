@@ -328,7 +328,9 @@ Common options:
 - `--remote-build-check-command <shell>`: shell command used to validate the target build chain for experimental remote rebuild targets
 - `--certification-manifest <path>`: override Phase 9J certification manifest path
 - `--json-performance-manifest <path>`: override Phase 10E performance manifest path
-- `--allow-missing-certification`: waive certification/performance manifest enforcement for non-RC flows
+- `--skip-release-certification`: waive certification/performance manifest enforcement for explicit non-RC app iteration
+- `--dev`: alias for `--skip-release-certification`
+- `--allow-missing-certification`: compatibility spelling for the same non-RC waiver
 - `--json`: emit normalized machine-readable output
 
 Release-only options:
@@ -1206,7 +1208,8 @@ Lifecycle diagnostics:
   - enforces Phase 10E JSON performance manifest by default (`build/release_confidence/phase10e/manifest.json`)
   - use `--certification-manifest <path>` to override manifest location
   - use `--json-performance-manifest <path>` to override JSON performance manifest location
-  - use `--allow-missing-certification` only for non-RC smoke/local packaging flows
+  - use `--skip-release-certification` or `--dev` only for explicit non-RC app iteration
+  - `--allow-missing-certification` remains available as the compatibility spelling
   - packages `app/db/migrations` and the prepared app binary at `app/.boomhauer/build/boomhauer-app` so the documented release migrate and `framework/bin/propane` workflows run from the artifact itself
 - `arlen generate frontend <Name> --preset <vanilla-spa|progressive-mpa>`: scaffold frontend starter templates with built-in API wiring examples
 - `make ci-docs`: run docs quality gate (API docs regen consistency + roadmap summary consistency + newcomer-doc navigation checks + imported comparative benchmark-contract consistency + HTML artifact/link checks)

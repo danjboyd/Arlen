@@ -370,11 +370,18 @@ Deployment helper scripts are provided under `tools/deploy/`.
 For app-operator workflows, prefer the first-class `arlen deploy` wrapper:
 
 ```bash
-./build/arlen deploy dryrun --app-root /path/to/app --allow-missing-certification --json
-./build/arlen deploy push --app-root /path/to/app --allow-missing-certification --json
+./build/arlen deploy dryrun --app-root /path/to/app --skip-release-certification --json
+./build/arlen deploy push --app-root /path/to/app --skip-release-certification --json
 ./build/arlen deploy releases --app-root /path/to/app --json
-./build/arlen deploy release --app-root /path/to/app --release-id rel-20260407 --allow-missing-certification --json
+./build/arlen deploy release --app-root /path/to/app --release-id rel-20260407 --skip-release-certification --json
 ```
+
+Phase 9J certification is enforced by default for release-candidate packaging.
+For explicit non-RC app iteration, use `--skip-release-certification` or
+`--dev`. These options waive Phase 9J and Phase 10E evidence checks, record
+`certification_status = waived` and `json_performance_status = waived` in the
+release metadata, and print a text-mode warning. The older
+`--allow-missing-certification` spelling remains supported for compatibility.
 
 For named remote targets, `deploy push <target>` and `deploy release <target>`
 now require the target to be initialized first. If the target host artifacts are
@@ -419,6 +426,11 @@ Target-aware deploy options:
   planning
 - `--remote-build-check-command <shell>` is required by `deploy release` when
   the manifest represents an experimental remote rebuild target
+- `--skip-release-certification` waives Phase 9J / Phase 10E evidence for
+  explicit non-RC app iteration
+- `--dev` is a shorter alias for `--skip-release-certification`
+- `--allow-missing-certification` remains as the compatibility spelling for the
+  same non-RC waiver
 
 Additional deploy CLI helpers:
 

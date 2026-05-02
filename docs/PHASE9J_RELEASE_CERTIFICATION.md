@@ -69,11 +69,14 @@ Default manifest path:
 
 - `build/release_confidence/phase9j/manifest.json`
 
-Non-RC opt-out (for local smoke workflows only):
+Non-RC opt-out (for explicit app iteration or local smoke workflows only):
 
 ```bash
-tools/deploy/build_release.sh --allow-missing-certification ...
+tools/deploy/build_release.sh --skip-release-certification ...
+tools/deploy/build_release.sh --dev ...
 ```
+
+`--allow-missing-certification` remains supported as the compatibility spelling.
 
 Override manifest path:
 
@@ -82,6 +85,11 @@ tools/deploy/build_release.sh --certification-manifest /path/to/manifest.json ..
 ```
 
 A release candidate without a certified Phase 9J manifest is considered incomplete.
+
+Non-release-candidate app iteration can explicitly waive certification with
+`arlen deploy push --skip-release-certification` or `arlen deploy push --dev`.
+That path records waived certification metadata and is not a certified Phase 9J
+release candidate.
 
 ## 5. Downstream Blocker Triage
 

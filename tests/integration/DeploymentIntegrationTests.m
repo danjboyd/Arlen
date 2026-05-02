@@ -3721,6 +3721,38 @@
     XCTAssertEqualObjects(@"planned", payload[@"status"]);
     XCTAssertEqualObjects(@"certified", payload[@"certification_status"]);
     XCTAssertEqualObjects(@"pass", payload[@"json_performance_status"]);
+
+    NSString *skipOutput = [self runShellCapture:[NSString stringWithFormat:
+                                                       @"%s/tools/deploy/build_release.sh "
+                                                        "--app-root %s --framework-root %s --releases-dir %s "
+                                                        "--release-id skip-cert --certification-manifest %s "
+                                                        "--json-performance-manifest %s "
+                                                        "--skip-release-certification --dry-run --json",
+                                                       [repoRoot UTF8String], [appRoot UTF8String],
+                                                       [repoRoot UTF8String], [releasesDir UTF8String],
+                                                       [missingManifest UTF8String],
+                                                       [jsonPerfManifest UTF8String]]
+                                         exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", skipOutput);
+    NSDictionary *skipPayload = [self parseJSONDictionaryFromOutput:skipOutput
+                                                            context:@"build_release skip certification dry-run json"];
+    XCTAssertEqualObjects(@"planned", skipPayload[@"status"]);
+    XCTAssertEqualObjects(@"waived", skipPayload[@"certification_status"]);
+    XCTAssertEqualObjects(@"waived", skipPayload[@"json_performance_status"]);
+
+    NSString *devOutput = [self runShellCapture:[NSString stringWithFormat:
+                                                      @"%s/tools/deploy/build_release.sh "
+                                                       "--app-root %s --framework-root %s --releases-dir %s "
+                                                       "--release-id dev-cert --certification-manifest %s "
+                                                       "--json-performance-manifest %s "
+                                                       "--dev --dry-run 2>&1",
+                                                      [repoRoot UTF8String], [appRoot UTF8String],
+                                                      [repoRoot UTF8String], [releasesDir UTF8String],
+                                                      [missingManifest UTF8String],
+                                                      [jsonPerfManifest UTF8String]]
+                                        exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", devOutput);
+    XCTAssertTrue([devOutput containsString:@"release certification checks waived"], @"%@", devOutput);
   } @finally {
     [[NSFileManager defaultManager] removeItemAtPath:appRoot error:nil];
     [[NSFileManager defaultManager] removeItemAtPath:workRoot error:nil];

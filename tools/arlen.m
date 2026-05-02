@@ -116,6 +116,8 @@ static void PrintDeployUsage(void) {
           "  --certification-manifest <path>\n"
           "  --json-performance-manifest <path>\n"
           "  --allow-missing-certification\n"
+          "  --skip-release-certification\n"
+          "  --dev                  Non-RC app iteration deploy; waive release certification\n"
           "  --json\n"
           "\n"
           "Release-only options:\n"
@@ -5344,7 +5346,9 @@ static int CommandDeploy(NSArray *args) {
       }
       logFilePath = [ResolvePathFromRoot([[NSFileManager defaultManager] currentDirectoryPath], subArgs[++idx])
                         stringByStandardizingPath];
-    } else if ([arg isEqualToString:@"--allow-missing-certification"]) {
+    } else if ([arg isEqualToString:@"--allow-missing-certification"] ||
+               [arg isEqualToString:@"--skip-release-certification"] ||
+               [arg isEqualToString:@"--dev"]) {
       allowMissingCertification = YES;
     } else if ([arg isEqualToString:@"--allow-remote-rebuild"]) {
       allowRemoteRebuild = YES;
@@ -5915,7 +5919,7 @@ static int CommandDeploy(NSArray *args) {
         return EmitMachineError(@"deploy", workflow, @"deploy_dryrun_failed",
                                 @"arlen deploy dryrun failed",
                                 @"Inspect the underlying build_release output and fix the first reported issue.",
-                                @"arlen deploy dryrun --json --allow-missing-certification", exitCode ?: 1);
+                                @"arlen deploy dryrun --json --skip-release-certification", exitCode ?: 1);
       }
       NSMutableDictionary *payload = [@{
         @"version" : AgentContractVersion(),
@@ -6036,7 +6040,7 @@ static int CommandDeploy(NSArray *args) {
         return EmitMachineError(@"deploy", workflow, @"deploy_push_failed",
                                 @"arlen deploy push failed",
                                 @"Inspect the underlying build_release output and fix the first reported issue.",
-                                @"arlen deploy push --json --allow-missing-certification", exitCode ?: 1);
+                                @"arlen deploy push --json --skip-release-certification", exitCode ?: 1);
       }
       NSDictionary *manifest = JSONDictionaryFromFile(manifestPath) ?: @{};
       NSDictionary *payload = @{
@@ -6493,7 +6497,7 @@ static int CommandDeploy(NSArray *args) {
       return asJSON ? EmitMachineError(@"deploy", workflow, @"deploy_release_push_failed",
                                        @"failed to build release artifact during deploy release",
                                        @"Inspect the build_release failure and rerun after the artifact builds cleanly.",
-                                       @"arlen deploy push --json --allow-missing-certification", buildExitCode ?: 1)
+                                       @"arlen deploy push --json --skip-release-certification", buildExitCode ?: 1)
                     : buildExitCode ?: 1;
     }
     [steps addObject:@{
@@ -9975,7 +9979,8 @@ static NSArray<NSString *> *DeployOptionCompletionCandidates(void) {
             @"--base-url", @"--target-profile", @"--runtime-strategy", @"--database-mode",
             @"--database-adapter", @"--database-target", @"--require-env-key",
             @"--allow-remote-rebuild", @"--remote-build-check-command", @"--certification-manifest",
-            @"--json-performance-manifest", @"--allow-missing-certification", @"--json",
+            @"--json-performance-manifest", @"--allow-missing-certification",
+            @"--skip-release-certification", @"--dev", @"--json",
             @"--env", @"--skip-migrate", @"--runtime-action", @"--lines", @"--follow", @"--file",
             @"--write", @"--force", @"--target", @"--ssh-host", @"--output" ];
 }

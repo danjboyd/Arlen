@@ -26,6 +26,11 @@ the unit-test bundle. Unit regressions may execute `build/arlen` directly, and
 focused reruns after `make clean` must not depend on a stale CLI from an earlier
 lane.
 
+Integration tests that spawn HTTP servers must bound startup, request, and
+shutdown waits. A focused integration regression should fail with command, port,
+stdout/stderr, and process-status diagnostics rather than requiring an outer
+`timeout` wrapper to kill a hung test.
+
 ## 1. Focused Lanes
 
 Use the smallest lane that honestly exercises the bug:

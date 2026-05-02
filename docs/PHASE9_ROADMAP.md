@@ -320,7 +320,8 @@ Completed scope:
 - Enforced certification requirements in release packaging script:
   - `tools/deploy/build_release.sh`
   - default requirement: valid `phase9j` manifest with `status=certified`
-  - explicit non-RC override: `--allow-missing-certification`
+  - explicit non-RC override: `--skip-release-certification` / `--dev`
+    (`--allow-missing-certification` remains as a compatibility spelling)
 - Added documentation and release-notes linkage for known-risk register:
   - `docs/PHASE9J_RELEASE_CERTIFICATION.md`
   - `docs/KNOWN_RISK_REGISTER.md`

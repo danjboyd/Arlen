@@ -24,6 +24,9 @@ Options:
                           (default: <framework-root>/build/release_confidence/phase10e/manifest.json)
   --allow-missing-certification
                           Skip certification manifest enforcement (non-RC use only)
+  --skip-release-certification
+                          Alias for --allow-missing-certification
+  --dev                   Alias for --allow-missing-certification for app iteration
   --target-profile <profile>
                           Deployment target profile
                           (default: current local platform profile)
@@ -359,7 +362,7 @@ while [[ $# -gt 0 ]]; do
       json_performance_manifest="$2"
       shift 2
       ;;
-    --allow-missing-certification)
+    --allow-missing-certification|--skip-release-certification|--dev)
       allow_missing_certification=1
       shift
       ;;
@@ -640,6 +643,9 @@ PY
 else
   certification_status="waived"
   json_performance_status="waived"
+  if [[ "$output_json" != "1" ]]; then
+    echo "build_release.sh: warning: Phase 9J and Phase 10E release certification checks waived for non-RC deployment packaging" >&2
+  fi
 fi
 
 release_dir="$releases_dir/$release_id"
