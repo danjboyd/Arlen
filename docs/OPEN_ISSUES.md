@@ -1,5 +1,46 @@
 # Open Issues
 
+## ISSUE-011: Runtime restart failure could leave `current` advanced
+
+- Status: `fixed upstream; awaiting downstream revalidation`
+- Priority: `high`
+- Tracking ID: `ARLEN-BUG-031`
+- Discovered: `2026-05-02`
+- Reported by: `TaxCalculator`
+- Last updated: `2026-05-02`
+- Resolution: `arlen deploy release` now treats runtime restart/reload failure
+  as an activation failure. If a previous active release exists, Arlen restores
+  `releases/current` to that release and reports
+  `deployment_state = activation_failed`; if rollback cannot be performed, the
+  JSON error reports `deployment_state = stale_runtime`. Deploy targets and CLI
+  invocations can also supply non-interactive runtime commands with
+  `runtimeRestartCommand`, `runtimeReloadCommand`,
+  `--runtime-restart-command`, and `--runtime-reload-command`.
+- Verification:
+  - `DeploymentIntegrationTests::testArlenDeployReleaseRestoresCurrentWhenRuntimeRestartFails_ARLEN_BUG_031`
+- Reconciliation note:
+  `docs/TAXCALCULATOR_RUNTIME_ACTIVATION_RECONCILIATION_2026-05-02.md`
+
+### Summary
+
+For systemd-backed targets, `arlen deploy release` switched
+`releases/current` before running the configured runtime action. If `systemctl
+restart` failed because the deploy user lacked non-interactive authorization,
+the command exited with an error but left `current` pointing at the new release.
+The already-running service could continue serving the previous process image,
+while status and health probes still looked healthy.
+
+### Current Contract
+
+1. Runtime action failure after activation must not silently leave the target in
+   an apparently successful state.
+2. If a previous active release exists, Arlen restores `current` to it and
+   reports `deployment_state = activation_failed`.
+3. If Arlen cannot restore `current`, it reports `deployment_state =
+   stale_runtime` so operators know the symlink and running process may differ.
+4. `deploy doctor` compares resolved runtime roots so benign
+   `/releases/current` paths are distinguished from a true stale runtime.
+
 ## ISSUE-010: Non-RC downstream deploy path was not first-class
 
 - Status: `fixed upstream; awaiting downstream revalidation`

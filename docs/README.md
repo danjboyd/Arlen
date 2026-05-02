@@ -74,6 +74,7 @@ toolchain env directly for the Linux/GNUstep path. On macOS, use
 - [Public Test Contract](PUBLIC_TEST_CONTRACT.md): Phase 37 public-surface release-confidence matrix and default evidence contract.
 - [TaxCalculator Phase 9J Reconciliation](TAXCALCULATOR_PHASE9J_RECONCILIATION_2026-05-01.md): upstream status for the May 1, 2026 downstream release-certification blocker.
 - [TaxCalculator Phase 9J Deploy Reconciliation](TAXCALCULATOR_PHASE9J_DEPLOY_RECONCILIATION_2026-05-02.md): upstream status for the May 2, 2026 HTTP integration hang and non-RC deploy workflow reports.
+- [TaxCalculator Runtime Activation Reconciliation](TAXCALCULATOR_RUNTIME_ACTIVATION_RECONCILIATION_2026-05-02.md): upstream status for the May 2, 2026 stale-runtime activation report.
 - [Route Policies](ROUTE_POLICIES.md): named access policies, proxy-aware source IP allowlisting, `/admin` policy wiring, diagnostics, and confidence checks.
 - [Windows CLANG64 Preview](WINDOWS_CLANG64.md): current `main`-branch Windows bootstrap, packaged-release preview contract, and support statement.
 - [Platform Runner Runbook](PLATFORM_RUNNERS.md): Phase 34K Apple/Windows runner provisioning, labels, validation commands, and deferred package-manager boundary.

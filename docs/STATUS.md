@@ -4,6 +4,20 @@ Last updated: 2026-05-02
 
 ## Leaving Off (2026-05-02)
 
+- Fixed the runtime activation report from `TaxCalculator`:
+  - `ARLEN-BUG-031` / `ISSUE-011`: `arlen deploy release` now restores
+    `releases/current` to the previous active release when the configured
+    runtime restart/reload fails after activation, reports
+    `deployment_state = activation_failed`, and uses `stale_runtime` when the
+    rollback cannot be completed
+  - added `runtimeRestartCommand` / `runtimeReloadCommand` target config keys
+    and matching CLI options for non-interactive systemd wrappers such as
+    `sudo -n systemctl restart ...`
+  - `deploy doctor` now resolves `/releases/current` runtime-root paths before
+    flagging true stale-runtime conflicts
+- Added upstream reconciliation note:
+  - `docs/TAXCALCULATOR_RUNTIME_ACTIVATION_RECONCILIATION_2026-05-02.md`
+
 - Fixed two follow-up `TaxCalculator` reports after the Phase 9J BuildPolicy
   blocker was resolved:
   - `ARLEN-BUG-029` / `ISSUE-009`: HTTP integration server helpers now use

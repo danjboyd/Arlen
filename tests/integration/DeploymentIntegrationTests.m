@@ -1284,6 +1284,88 @@
   }
 }
 
+- (void)testArlenDeployReleaseRestoresCurrentWhenRuntimeRestartFails_ARLEN_BUG_031 {
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *appRoot = [self createTempDirectoryWithPrefix:@"arlen-deploy-runtime-fail-app"];
+  NSString *workRoot = [self createTempDirectoryWithPrefix:@"arlen-deploy-runtime-fail-work"];
+  XCTAssertNotNil(appRoot);
+  XCTAssertNotNil(workRoot);
+  if (appRoot == nil || workRoot == nil) {
+    return;
+  }
+
+  @try {
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"config/app.plist"]
+                          content:@"{\n"
+                                  "  host = \"127.0.0.1\";\n"
+                                  "  port = 3000;\n"
+                                  "}\n"]);
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"config/environments/production.plist"]
+                          content:@"{\n  logFormat = \"json\";\n}\n"]);
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"app_lite.m"]
+                          content:@"#import <Foundation/Foundation.h>\n"
+                                  "int main(int argc, const char *argv[]) { (void)argc; (void)argv; return 0; }\n"]);
+
+    int code = 0;
+    NSString *buildOutput = [self runShellCapture:[NSString stringWithFormat:@"cd %@ && make arlen", repoRoot]
+                                         exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", buildOutput);
+
+    NSString *releasesDir = [workRoot stringByAppendingPathComponent:@"releases"];
+    for (NSString *release in @[ @"runtime-rel-a", @"runtime-rel-b" ]) {
+      NSString *pushOutput = [self runShellCapture:[NSString stringWithFormat:
+                                                       @"cd %@ && ARLEN_FRAMEWORK_ROOT=%@ %@/build/arlen "
+                                                        "deploy push --app-root %@ --releases-dir %@ --release-id %@ "
+                                                        "--skip-release-certification --json",
+                                                       appRoot, repoRoot, repoRoot, appRoot, releasesDir, release]
+                                         exitCode:&code];
+      XCTAssertEqual(0, code, @"%@", pushOutput);
+    }
+
+    NSString *firstReleaseOutput = [self runShellCapture:[NSString stringWithFormat:
+                                                             @"cd %@ && ARLEN_FRAMEWORK_ROOT=%@ %@/build/arlen "
+                                                              "deploy release --app-root %@ --releases-dir %@ --release-id runtime-rel-a "
+                                                              "--skip-release-certification --runtime-action none --json",
+                                                             appRoot, repoRoot, repoRoot, appRoot, releasesDir]
+                                               exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", firstReleaseOutput);
+
+    NSString *runtimeFailureCommand = @"printf 'Interactive authentication required.\\n' >&2; exit 77";
+    NSString *secondReleaseOutput = [self runShellCapture:[NSString stringWithFormat:
+                                                              @"cd %@ && ARLEN_FRAMEWORK_ROOT=%@ %@/build/arlen "
+                                                               "deploy release --app-root %@ --releases-dir %@ --release-id runtime-rel-b "
+                                                               "--skip-release-certification --service arlen@test "
+                                                               "--runtime-action restart --runtime-restart-command %@ --json",
+                                                              appRoot, repoRoot, repoRoot, appRoot, releasesDir,
+                                                              [self shellQuoted:runtimeFailureCommand]]
+                                                exitCode:&code];
+    XCTAssertEqual(77, code, @"%@", secondReleaseOutput);
+    NSDictionary *payload =
+        [self parseJSONDictionaryFromOutput:secondReleaseOutput context:@"arlen deploy release runtime failure --json"];
+    XCTAssertEqualObjects(@"error", payload[@"status"]);
+    XCTAssertEqualObjects(@"activation_failed", payload[@"deployment_state"]);
+    XCTAssertEqualObjects(@"runtime-rel-b", payload[@"target_release_id"]);
+    XCTAssertEqualObjects(@"runtime-rel-a", payload[@"active_release_id"]);
+    NSDictionary *error = [payload[@"error"] isKindOfClass:[NSDictionary class]] ? payload[@"error"] : @{};
+    XCTAssertEqualObjects(@"deploy_release_runtime_failed", error[@"code"]);
+    NSArray *steps = [payload[@"steps"] isKindOfClass:[NSArray class]] ? payload[@"steps"] : @[];
+    NSDictionary *lastStep = [[steps lastObject] isKindOfClass:[NSDictionary class]] ? [steps lastObject] : @{};
+    XCTAssertEqualObjects(@"rollback_current", lastStep[@"id"]);
+    XCTAssertEqualObjects(@"ok", lastStep[@"status"]);
+
+    NSString *currentTarget = [self runShellCapture:[NSString stringWithFormat:@"readlink -f %s/current",
+                                                                               [releasesDir UTF8String]]
+                                           exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", currentTarget);
+    NSString *trimmed =
+        [currentTarget stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    XCTAssertTrue([trimmed hasSuffix:@"/runtime-rel-a"], @"%@", trimmed);
+  } @finally {
+    [[NSFileManager defaultManager] removeItemAtPath:appRoot error:nil];
+    [[NSFileManager defaultManager] removeItemAtPath:workRoot error:nil];
+  }
+}
+
 - (void)testArlenDeployDoctorValidatesExplicitDatabaseModeAndRequiredEnvironmentKeys {
   NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
   NSString *appRoot = [self createTempDirectoryWithPrefix:@"arlen-deploy-contract-app"];

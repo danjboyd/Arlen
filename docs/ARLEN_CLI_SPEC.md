@@ -152,6 +152,8 @@ Behavior:
   - `--allow-remote-rebuild`
   - `--remote-build-check-command <shell>`
   - `--service <name>`
+  - `--runtime-restart-command <shell>`
+  - `--runtime-reload-command <shell>`
   - `--certification-manifest <path>`
   - `--json-performance-manifest <path>`
   - `--skip-release-certification`

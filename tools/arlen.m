@@ -107,6 +107,8 @@ static void PrintDeployUsage(void) {
           "  --base-url <url>      Base URL for probe validation\n"
           "  --target-profile <profile>\n"
           "  --runtime-strategy <system|managed|bundled>\n"
+          "  --runtime-restart-command <shell>\n"
+          "  --runtime-reload-command <shell>\n"
           "  --database-mode <external|host_local|embedded>\n"
           "  --database-adapter <name>\n"
           "  --database-target <name>\n"
@@ -807,6 +809,31 @@ static NSDictionary *ServiceEnvironmentForService(NSString *serviceName, NSStrin
   return EnvironmentDictionaryForPID(mainPID, capturedOutput);
 }
 
+static NSString *ExpandedRuntimeCommandTemplate(NSString *commandTemplate,
+                                                NSString *action,
+                                                NSString *serviceName) {
+  NSString *command = Trimmed(commandTemplate);
+  if ([command length] == 0) {
+    return @"";
+  }
+  command = [command stringByReplacingOccurrencesOfString:@"{action}" withString:action ?: @""];
+  command = [command stringByReplacingOccurrencesOfString:@"{service}" withString:ShellQuote(serviceName ?: @"")];
+  return command;
+}
+
+static NSString *RuntimeCommandForAction(NSString *action,
+                                         NSString *serviceName,
+                                         NSString *restartCommand,
+                                         NSString *reloadCommand) {
+  NSString *normalizedAction = [Trimmed(action) lowercaseString];
+  if ([normalizedAction isEqualToString:@"restart"]) {
+    NSString *custom = ExpandedRuntimeCommandTemplate(restartCommand, @"restart", serviceName);
+    return [custom length] > 0 ? custom : [NSString stringWithFormat:@"systemctl restart %@", ShellQuote(serviceName)];
+  }
+  NSString *custom = ExpandedRuntimeCommandTemplate(reloadCommand, @"reload", serviceName);
+  return [custom length] > 0 ? custom : [NSString stringWithFormat:@"systemctl reload %@", ShellQuote(serviceName)];
+}
+
 static NSArray<NSString *> *NormalizedRequiredEnvironmentKeys(NSArray *keys) {
   NSMutableArray<NSString *> *normalized = [NSMutableArray array];
   NSMutableSet<NSString *> *seen = [NSMutableSet set];
@@ -1505,6 +1532,8 @@ static NSDictionary *LoadDeployTargetNamed(NSString *appRoot, NSString *targetNa
     @"runtime_family" : runtimeFamily ?: @"unknown",
     @"runtime_strategy" : StringValueForDeployKey(rawTarget, @"runtimeStrategy"),
     @"runtime_action" : StringValueForDeployKey(rawTarget, @"runtimeAction"),
+    @"runtime_restart_command" : StringValueForDeployKey(rawTarget, @"runtimeRestartCommand"),
+    @"runtime_reload_command" : StringValueForDeployKey(rawTarget, @"runtimeReloadCommand"),
     @"environment" : StringValueForDeployKey(rawTarget, @"environment"),
     @"service" : serviceName ?: @"",
     @"base_url" : StringValueForDeployKey(rawTarget, @"baseURL"),
@@ -2331,16 +2360,32 @@ static NSArray<NSDictionary *> *DeployDoctorChecksForRelease(NSString *releaseDi
                  @"service is active but effective runtime-root environment could not be fully verified",
                  [serviceEnvironmentDetail length] > 0 ? serviceEnvironmentDetail
                                                        : @"Ensure the service inherits activation-owned runtime roots.");
-      } else if (![liveAppRoot isEqualToString:expectedAppRoot] ||
-                 ![liveFrameworkRoot isEqualToString:expectedFrameworkRoot]) {
-        addCheck(@"runtime_root_conflict", @"fail",
-                 [NSString stringWithFormat:@"service runtime roots differ from the activated release (app=%@ framework=%@)",
-                                            liveAppRoot ?: @"", liveFrameworkRoot ?: @""],
-                 @"Remove stale ARLEN_APP_ROOT / ARLEN_FRAMEWORK_ROOT overrides from shared host env so release activation owns runtime roots.");
       } else {
-        addCheck(@"runtime_root_conflict", @"pass",
-                 @"service runtime roots match the activated release",
-                 @"");
+        NSString *resolvedLiveAppRoot = ResolveSymlinkDestination(liveAppRoot) ?: [liveAppRoot stringByStandardizingPath];
+        NSString *resolvedLiveFrameworkRoot =
+            ResolveSymlinkDestination(liveFrameworkRoot) ?: [liveFrameworkRoot stringByStandardizingPath];
+        NSString *resolvedExpectedAppRoot =
+            ResolveSymlinkDestination(expectedAppRoot) ?: [expectedAppRoot stringByStandardizingPath];
+        NSString *resolvedExpectedFrameworkRoot =
+            ResolveSymlinkDestination(expectedFrameworkRoot) ?: [expectedFrameworkRoot stringByStandardizingPath];
+        BOOL literalRootsMatch = [liveAppRoot isEqualToString:expectedAppRoot] &&
+                                 [liveFrameworkRoot isEqualToString:expectedFrameworkRoot];
+        BOOL resolvedRootsMatch = [resolvedLiveAppRoot isEqualToString:resolvedExpectedAppRoot] &&
+                                  [resolvedLiveFrameworkRoot isEqualToString:resolvedExpectedFrameworkRoot];
+        if (!resolvedRootsMatch) {
+          addCheck(@"runtime_root_conflict", @"fail",
+                   [NSString stringWithFormat:@"service runtime roots differ from the activated release (app=%@ framework=%@)",
+                                              liveAppRoot ?: @"", liveFrameworkRoot ?: @""],
+                   @"The service may still be serving an older release. Restart the configured runtime non-interactively or roll back current.");
+        } else if (!literalRootsMatch) {
+          addCheck(@"runtime_root_conflict", @"pass",
+                   @"service runtime roots resolve to the activated release through releases/current",
+                   @"Literal paths differ, but their resolved targets match the active release.");
+        } else {
+          addCheck(@"runtime_root_conflict", @"pass",
+                   @"service runtime roots match the activated release",
+                   @"");
+        }
       }
     } else {
       addCheck(@"runtime_root_conflict", @"warn",
@@ -5049,6 +5094,8 @@ static int CommandDeploy(NSArray *args) {
   NSString *remoteBuildCheckCommand = nil;
   NSString *serviceName = nil;
   NSString *runtimeAction = @"reload";
+  NSString *runtimeRestartCommand = nil;
+  NSString *runtimeReloadCommand = nil;
   NSString *logFilePath = nil;
   BOOL allowMissingCertification = NO;
   BOOL allowRemoteRebuild = NO;
@@ -5065,6 +5112,8 @@ static int CommandDeploy(NSArray *args) {
   BOOL databaseTargetExplicit = NO;
   BOOL serviceNameExplicit = NO;
   BOOL runtimeActionExplicit = NO;
+  BOOL runtimeRestartCommandExplicit = NO;
+  BOOL runtimeReloadCommandExplicit = NO;
   NSInteger logLines = 200;
   NSString *targetName = nil;
 
@@ -5316,6 +5365,32 @@ static int CommandDeploy(NSArray *args) {
       }
       runtimeAction = [subArgs[++idx] lowercaseString];
       runtimeActionExplicit = YES;
+    } else if ([arg isEqualToString:@"--runtime-restart-command"]) {
+      if (idx + 1 >= [subArgs count]) {
+        if (asJSON) {
+          return EmitMachineError(@"deploy", [NSString stringWithFormat:@"deploy.%@", subcommand],
+                                  @"missing_option_value", @"arlen deploy: --runtime-restart-command requires a value",
+                                  @"Pass the non-interactive restart command.",
+                                  @"arlen deploy release --runtime-restart-command 'sudo -n systemctl restart arlen@myapp' --json", 2);
+        }
+        fprintf(stderr, "arlen deploy: --runtime-restart-command requires a value\n");
+        return 2;
+      }
+      runtimeRestartCommand = subArgs[++idx];
+      runtimeRestartCommandExplicit = YES;
+    } else if ([arg isEqualToString:@"--runtime-reload-command"]) {
+      if (idx + 1 >= [subArgs count]) {
+        if (asJSON) {
+          return EmitMachineError(@"deploy", [NSString stringWithFormat:@"deploy.%@", subcommand],
+                                  @"missing_option_value", @"arlen deploy: --runtime-reload-command requires a value",
+                                  @"Pass the non-interactive reload command.",
+                                  @"arlen deploy release --runtime-reload-command 'sudo -n systemctl reload arlen@myapp' --json", 2);
+        }
+        fprintf(stderr, "arlen deploy: --runtime-reload-command requires a value\n");
+        return 2;
+      }
+      runtimeReloadCommand = subArgs[++idx];
+      runtimeReloadCommandExplicit = YES;
     } else if ([arg isEqualToString:@"--lines"]) {
       if (idx + 1 >= [subArgs count]) {
         if (asJSON) {
@@ -5477,6 +5552,14 @@ static int CommandDeploy(NSArray *args) {
     }
     if (!runtimeActionExplicit && [StringValueForDeployKey(resolvedTarget, @"runtime_action") length] > 0) {
       runtimeAction = StringValueForDeployKey(resolvedTarget, @"runtime_action");
+    }
+    if (!runtimeRestartCommandExplicit &&
+        [StringValueForDeployKey(resolvedTarget, @"runtime_restart_command") length] > 0) {
+      runtimeRestartCommand = StringValueForDeployKey(resolvedTarget, @"runtime_restart_command");
+    }
+    if (!runtimeReloadCommandExplicit &&
+        [StringValueForDeployKey(resolvedTarget, @"runtime_reload_command") length] > 0) {
+      runtimeReloadCommand = StringValueForDeployKey(resolvedTarget, @"runtime_reload_command");
     }
 
     for (NSString *requiredKey in [resolvedTarget[@"required_environment_keys"] isKindOfClass:[NSArray class]]
@@ -5847,6 +5930,14 @@ static int CommandDeploy(NSArray *args) {
         [@[ @"release", @"rollback" ] containsObject:subcommand]) {
       AppendShellOption(remoteDelegate, @"--runtime-action", runtimeAction);
     }
+    if ([runtimeRestartCommand length] > 0 &&
+        [@[ @"release", @"rollback" ] containsObject:subcommand]) {
+      AppendShellOption(remoteDelegate, @"--runtime-restart-command", runtimeRestartCommand);
+    }
+    if ([runtimeReloadCommand length] > 0 &&
+        [@[ @"release", @"rollback" ] containsObject:subcommand]) {
+      AppendShellOption(remoteDelegate, @"--runtime-reload-command", runtimeReloadCommand);
+    }
     if ([baseURL length] > 0 &&
         [@[ @"release", @"status", @"doctor", @"rollback" ] containsObject:subcommand]) {
       AppendShellOption(remoteDelegate, @"--base-url", baseURL);
@@ -6176,11 +6267,11 @@ static int CommandDeploy(NSArray *args) {
     NSString *runtimeActionUsed = @"none";
     if ([serviceName length] > 0 && ![runtimeAction isEqualToString:@"none"]) {
       NSString *systemctlVerb = [runtimeAction isEqualToString:@"restart"] ? @"restart" : @"reload";
-      NSString *runtimeCommand = [NSString stringWithFormat:@"systemctl %@ %@", systemctlVerb, ShellQuote(serviceName)];
+      NSString *runtimeCommand = RuntimeCommandForAction(systemctlVerb, serviceName, runtimeRestartCommand, runtimeReloadCommand);
       int runtimeExitCode = 0;
       NSString *runtimeOutput = RunShellCaptureCommand(runtimeCommand, &runtimeExitCode);
       if (runtimeExitCode != 0 && [runtimeAction isEqualToString:@"reload"]) {
-        runtimeCommand = [NSString stringWithFormat:@"systemctl restart %@", ShellQuote(serviceName)];
+        runtimeCommand = RuntimeCommandForAction(@"restart", serviceName, runtimeRestartCommand, runtimeReloadCommand);
         runtimeOutput = RunShellCaptureCommand(runtimeCommand, &runtimeExitCode);
         if (runtimeExitCode == 0) {
           systemctlVerb = @"restart";
@@ -6706,11 +6797,11 @@ static int CommandDeploy(NSArray *args) {
 
   if ([serviceName length] > 0 && ![runtimeAction isEqualToString:@"none"]) {
     NSString *systemctlVerb = [runtimeAction isEqualToString:@"restart"] ? @"restart" : @"reload";
-    NSString *runtimeCommand = [NSString stringWithFormat:@"systemctl %@ %@", systemctlVerb, ShellQuote(serviceName)];
+    NSString *runtimeCommand = RuntimeCommandForAction(systemctlVerb, serviceName, runtimeRestartCommand, runtimeReloadCommand);
     int runtimeExitCode = 0;
     NSString *runtimeOutput = RunShellCaptureCommand(runtimeCommand, &runtimeExitCode);
     if (runtimeExitCode != 0 && [runtimeAction isEqualToString:@"reload"]) {
-      runtimeCommand = [NSString stringWithFormat:@"systemctl restart %@", ShellQuote(serviceName)];
+      runtimeCommand = RuntimeCommandForAction(@"restart", serviceName, runtimeRestartCommand, runtimeReloadCommand);
       runtimeOutput = RunShellCaptureCommand(runtimeCommand, &runtimeExitCode);
       if (runtimeExitCode == 0) {
         systemctlVerb = @"restart";
@@ -6724,8 +6815,41 @@ static int CommandDeploy(NSArray *args) {
       @"captured_output" : runtimeOutput ?: @"",
     }];
     if (runtimeExitCode != 0) {
+      NSString *rollbackActivationID = [currentReleaseID length] > 0 ? currentReleaseID : nil;
+      int rollbackActivationExitCode = 0;
+      NSString *rollbackActivationOutput = @"";
+      NSString *deploymentState = @"stale_runtime";
+      NSString *activeReleaseIDAfterFailure = releaseID ?: @"";
+      if ([rollbackActivationID length] > 0) {
+        NSString *rollbackActivationCommand =
+            [NSString stringWithFormat:@"%@/activate_release.sh --releases-dir %@ --release-id %@",
+                                       ShellQuote(scriptRoot), ShellQuote(releasesDir), ShellQuote(rollbackActivationID)];
+        rollbackActivationOutput = RunShellCaptureCommand(rollbackActivationCommand, &rollbackActivationExitCode);
+        deploymentState = (rollbackActivationExitCode == 0) ? @"activation_failed" : @"stale_runtime";
+        activeReleaseIDAfterFailure = (rollbackActivationExitCode == 0) ? rollbackActivationID : (releaseID ?: @"");
+        [steps addObject:@{
+          @"id" : @"rollback_current",
+          @"status" : (rollbackActivationExitCode == 0) ? @"ok" : @"error",
+          @"target_release_id" : rollbackActivationID ?: @"",
+          @"captured_output" : rollbackActivationOutput ?: @"",
+        }];
+      } else {
+        [steps addObject:@{
+          @"id" : @"rollback_current",
+          @"status" : @"skipped",
+          @"reason" : @"no_previous_active_release",
+        }];
+      }
       if (!asJSON && [runtimeOutput length] > 0) {
         fprintf(stderr, "%s", [runtimeOutput UTF8String]);
+      }
+      if (!asJSON) {
+        if ([deploymentState isEqualToString:@"activation_failed"]) {
+          fprintf(stderr, "arlen deploy release: runtime action failed; restored current to %s\n",
+                  [activeReleaseIDAfterFailure UTF8String]);
+        } else {
+          fprintf(stderr, "arlen deploy release: runtime action failed after current changed; deployment_state=stale_runtime\n");
+        }
       }
       if (asJSON) {
         NSDictionary *payload = @{
@@ -6734,16 +6858,21 @@ static int CommandDeploy(NSArray *args) {
           @"workflow" : workflow,
           @"subcommand" : subcommand,
           @"status" : @"error",
+          @"deployment_state" : deploymentState ?: @"stale_runtime",
           @"release_id" : releaseID ?: @"",
           @"release_dir" : releaseDir ?: @"",
+          @"target_release_id" : releaseID ?: @"",
+          @"active_release_id" : activeReleaseIDAfterFailure ?: @"",
           @"deployment" : releaseDeployment ?: @{},
           @"steps" : steps ?: @[],
           @"error" : @{
             @"code" : @"deploy_release_runtime_failed",
-            @"message" : @"release activation completed but runtime reload/restart failed",
+            @"message" : [deploymentState isEqualToString:@"activation_failed"]
+                ? @"runtime reload/restart failed; current was restored to the previous release"
+                : @"runtime reload/restart failed after current changed; runtime may be stale",
             @"fixit" : @{
-              @"action" : @"Inspect service logs and rerun with --runtime-action restart if needed.",
-              @"example" : @"arlen deploy release --service arlen@myapp --runtime-action restart --json",
+              @"action" : @"Configure non-interactive runtime permissions or pass --runtime-restart-command with sudo -n.",
+              @"example" : @"arlen deploy release --service arlen@myapp --runtime-action restart --runtime-restart-command 'sudo -n systemctl restart arlen@myapp' --json",
             }
           },
           @"exit_code" : @(runtimeExitCode),
@@ -9978,7 +10107,8 @@ static NSArray<NSString *> *DeployOptionCompletionCandidates(void) {
   return @[ @"--app-root", @"--framework-root", @"--releases-dir", @"--release-id", @"--service",
             @"--base-url", @"--target-profile", @"--runtime-strategy", @"--database-mode",
             @"--database-adapter", @"--database-target", @"--require-env-key",
-            @"--allow-remote-rebuild", @"--remote-build-check-command", @"--certification-manifest",
+            @"--allow-remote-rebuild", @"--remote-build-check-command", @"--runtime-restart-command",
+            @"--runtime-reload-command", @"--certification-manifest",
             @"--json-performance-manifest", @"--allow-missing-certification",
             @"--skip-release-certification", @"--dev", @"--json",
             @"--env", @"--skip-migrate", @"--runtime-action", @"--lines", @"--follow", @"--file",

@@ -152,6 +152,8 @@ Current shape:
         profile = "linux-x86_64-gnustep-clang";
         runtimeStrategy = "system";
         runtimeAction = "restart";
+        runtimeRestartCommand = "sudo -n /bin/systemctl restart arlen@myapp.service";
+        runtimeReloadCommand = "sudo -n /bin/systemctl reload arlen@myapp.service";
         environment = "production";
         service = "arlen@myapp";
         baseURL = "http://127.0.0.1:3000";
@@ -404,7 +406,12 @@ release-relative so the package stays portable after ship/move
 migrations when present, activates `releases/current`, rewrites
 `metadata/release.env` against the activated release root, can optionally
 reload/restart a systemd unit after activation, and can probe `/healthz` when
-`--base-url` is supplied. Packaged framework payloads now also
+`--base-url` is supplied. If the runtime reload/restart fails after the symlink
+switch, Arlen restores `releases/current` to the previously active release when
+one exists and reports `deployment_state = activation_failed`; if restoration
+fails, JSON output reports `deployment_state = stale_runtime` so operators know
+the running process may not match the active release pointer. Packaged framework
+payloads now also
 include the packaged deploy helper set under `framework/tools/deploy/`, so
 `arlen deploy doctor --base-url ...` works from an activated packaged release
 without needing a source checkout beside it. `tools/deploy/smoke_release.sh`
@@ -426,6 +433,11 @@ Target-aware deploy options:
   planning
 - `--remote-build-check-command <shell>` is required by `deploy release` when
   the manifest represents an experimental remote rebuild target
+- `--runtime-restart-command <shell>` overrides the default
+  `systemctl restart <service>` command; use a non-interactive command such as
+  `sudo -n systemctl restart arlen@myapp`
+- `--runtime-reload-command <shell>` overrides the default
+  `systemctl reload <service>` command
 - `--skip-release-certification` waives Phase 9J / Phase 10E evidence for
   explicit non-RC app iteration
 - `--dev` is a shorter alias for `--skip-release-certification`
@@ -438,6 +450,25 @@ Additional deploy CLI helpers:
 - `arlen deploy rollback --releases-dir /path/to/app/releases --service arlen@myapp --runtime-action reload --json`
 - `arlen deploy doctor --releases-dir /path/to/app/releases --base-url http://127.0.0.1:3000 --json`
 - `arlen deploy logs --service arlen@myapp --lines 200`
+
+For deploy targets, the matching `config/deploy.plist` keys are
+`runtimeRestartCommand` and `runtimeReloadCommand`. Command templates may use
+`{service}` and `{action}` placeholders; `{service}` is shell-quoted before
+expansion. Systemd-backed production targets must grant the deploy user
+non-interactive permission for the configured command. A typical sudoers rule is
+scoped to the one unit, for example:
+
+```sudoers
+deploy ALL=(root) NOPASSWD: /bin/systemctl restart arlen@iep-ownerconnect.service
+deploy ALL=(root) NOPASSWD: /bin/systemctl reload arlen@iep-ownerconnect.service
+```
+
+Then configure:
+
+```plist
+runtimeRestartCommand = "sudo -n /bin/systemctl restart arlen@iep-ownerconnect.service";
+runtimeReloadCommand = "sudo -n /bin/systemctl reload arlen@iep-ownerconnect.service";
+```
 
 Focused deploy confidence lane:
 
