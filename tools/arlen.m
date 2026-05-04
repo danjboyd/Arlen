@@ -314,7 +314,15 @@ static NSString *Trimmed(NSString *value) {
 }
 
 static NSDictionary *JSONDictionaryFromString(NSString *value) {
-  NSData *data = [[Trimmed(value) ?: @"" copy] dataUsingEncoding:NSUTF8StringEncoding];
+  NSString *trimmed = Trimmed(value);
+  if ([trimmed length] > 0 && ![trimmed hasPrefix:@"{"]) {
+    NSRange start = [trimmed rangeOfString:@"{"];
+    NSRange end = [trimmed rangeOfString:@"}" options:NSBackwardsSearch];
+    if (start.location != NSNotFound && end.location != NSNotFound && end.location >= start.location) {
+      trimmed = [trimmed substringWithRange:NSMakeRange(start.location, end.location - start.location + 1)];
+    }
+  }
+  NSData *data = [[trimmed ?: @"" copy] dataUsingEncoding:NSUTF8StringEncoding];
   if ([data length] == 0) {
     return nil;
   }
@@ -347,6 +355,12 @@ static BOOL DatabaseTargetIsValid(NSString *target);
 static NSString *DatabaseConnectionStringFromEnvironmentForTarget(NSString *databaseTarget);
 static NSString *DatabaseConnectionStringFromConfigForTarget(NSDictionary *config, NSString *databaseTarget);
 static NSString *DatabaseAdapterNameFromConfigForTarget(NSDictionary *config, NSString *databaseTarget);
+static NSDictionary *Phase39StateContractFromConfig(NSDictionary *config);
+static NSArray<NSDictionary *> *Phase39MultiWorkerStateWarnings(NSDictionary *config,
+                                                                NSString *environment,
+                                                                NSString *databaseMode,
+                                                                NSString *databaseTarget);
+static void PrintDeployWarnings(NSArray<NSDictionary *> *warnings);
 
 static NSString *DefaultGNUstepScriptPath(void) {
   if (PathExists(@"/clang64/share/GNUstep/Makefiles/GNUstep.sh", NULL)) {
@@ -879,6 +893,91 @@ static NSDictionary *DatabaseContractFromManifest(NSDictionary *manifest, NSDict
     @"target" : target ?: @"default",
     @"required_environment_keys" : NormalizedRequiredEnvironmentKeys(configuration[@"required_environment_keys"]),
   };
+}
+
+static NSDictionary *Phase39StateContractFromConfig(NSDictionary *config) {
+  NSDictionary *state = [config[@"state"] isKindOfClass:[NSDictionary class]] ? config[@"state"] : @{};
+  NSString *mode = [state[@"mode"] isKindOfClass:[NSString class]] ? Trimmed([state[@"mode"] lowercaseString]) : @"";
+  NSString *target = [state[@"target"] isKindOfClass:[NSString class]] ? Trimmed(state[@"target"]) : @"";
+  if ([target length] == 0) {
+    target = @"default";
+  }
+  return @{
+    @"schema" : @"phase39-state-contract-v1",
+    @"durable" : @([state[@"durable"] respondsToSelector:@selector(boolValue)] && [state[@"durable"] boolValue]),
+    @"mode" : mode ?: @"",
+    @"target" : target ?: @"default",
+  };
+}
+
+static BOOL Phase39ConfigDeclaresDurableState(NSDictionary *config,
+                                              NSString *databaseMode,
+                                              NSString *databaseTarget) {
+  if (![config isKindOfClass:[NSDictionary class]]) {
+    return NO;
+  }
+
+  NSDictionary *state = Phase39StateContractFromConfig(config);
+  if ([state[@"durable"] boolValue]) {
+    return YES;
+  }
+
+  if ([Trimmed(databaseMode) length] > 0) {
+    return YES;
+  }
+
+  NSString *target = [Trimmed(databaseTarget) length] > 0 ? Trimmed(databaseTarget) : @"default";
+  if ([DatabaseConnectionStringFromEnvironmentForTarget(target) length] > 0 ||
+      [DatabaseConnectionStringFromConfigForTarget(config, target) length] > 0) {
+    return YES;
+  }
+
+  return NO;
+}
+
+static NSArray<NSDictionary *> *Phase39MultiWorkerStateWarnings(NSDictionary *config,
+                                                                NSString *environment,
+                                                                NSString *databaseMode,
+                                                                NSString *databaseTarget) {
+  if (![[Trimmed(environment) lowercaseString] isEqualToString:@"production"] ||
+      ![config isKindOfClass:[NSDictionary class]]) {
+    return @[];
+  }
+
+  NSDictionary *propaneAccessories =
+      [config[@"propaneAccessories"] isKindOfClass:[NSDictionary class]] ? config[@"propaneAccessories"] : @{};
+  NSInteger workerCount = [propaneAccessories[@"workerCount"] respondsToSelector:@selector(integerValue)]
+                               ? [propaneAccessories[@"workerCount"] integerValue]
+                               : 4;
+  if (workerCount <= 1 ||
+      Phase39ConfigDeclaresDurableState(config, databaseMode, databaseTarget)) {
+    return @[];
+  }
+
+  return @[
+    @{
+      @"id" : @"multi_worker_state",
+      @"status" : @"warn",
+      @"message" : [NSString stringWithFormat:@"production uses %ld propane workers without a declared durable state signal",
+                                               (long)workerCount],
+      @"hint" : @"Each propane worker has isolated process-local memory. Declare state.durable=YES with a durable mode/target, or declare a database deploy contract for app-owned request-spanning state.",
+      @"worker_count" : @(workerCount),
+    }
+  ];
+}
+
+static void PrintDeployWarnings(NSArray<NSDictionary *> *warnings) {
+  for (NSDictionary *warning in warnings ?: @[]) {
+    NSString *message = [warning[@"message"] isKindOfClass:[NSString class]] ? warning[@"message"] : @"";
+    NSString *hint = [warning[@"hint"] isKindOfClass:[NSString class]] ? warning[@"hint"] : @"";
+    if ([message length] > 0) {
+      fprintf(stderr, "arlen deploy: warning [%s] %s\n",
+              [[warning[@"id"] description] UTF8String], [message UTF8String]);
+    }
+    if ([hint length] > 0) {
+      fprintf(stderr, "arlen deploy: hint: %s\n", [hint UTF8String]);
+    }
+  }
 }
 
 static NSDictionary *RunHostLocalDatabaseProbe(NSString *adapter, NSString *connectionString) {
@@ -2332,6 +2431,30 @@ static NSArray<NSDictionary *> *DeployDoctorChecksForRelease(NSString *releaseDi
       addCheck(@"config", @"pass",
                [NSString stringWithFormat:@"app config loads for %@ environment", environment ?: @"production"], @"");
       NSDictionary *databaseContract = DatabaseContractFromManifest(manifest, config);
+      NSArray<NSDictionary *> *stateWarnings =
+          Phase39MultiWorkerStateWarnings(config,
+                                          environment ?: @"production",
+                                          [databaseContract[@"mode"] isKindOfClass:[NSString class]]
+                                              ? databaseContract[@"mode"]
+                                              : @"",
+                                          [databaseContract[@"target"] isKindOfClass:[NSString class]]
+                                              ? databaseContract[@"target"]
+                                              : @"default");
+      if ([stateWarnings count] == 0) {
+        NSDictionary *stateContract = Phase39StateContractFromConfig(config);
+        addCheck(@"multi_worker_state", @"pass",
+                 [NSString stringWithFormat:@"state contract durable=%@ mode=%@ target=%@",
+                                            [stateContract[@"durable"] boolValue] ? @"YES" : @"NO",
+                                            stateContract[@"mode"] ?: @"",
+                                            stateContract[@"target"] ?: @"default"],
+                 @"Production multi-worker state warnings are quiet when state is explicitly durable, a database contract is declared, a database URL is configured, or workerCount <= 1.");
+      } else {
+        NSDictionary *warning = stateWarnings[0];
+        addCheck(@"multi_worker_state",
+                 @"warn",
+                 [warning[@"message"] description] ?: @"production multi-worker state contract is missing",
+                 [warning[@"hint"] description] ?: @"Declare durable state before production multi-worker deployment.");
+      }
       NSArray<NSString *> *requiredEnvironmentKeys =
           [databaseContract[@"required_environment_keys"] isKindOfClass:[NSArray class]]
               ? databaseContract[@"required_environment_keys"]
@@ -3065,6 +3188,11 @@ static BOOL ScaffoldFullApp(NSString *root, BOOL force, NSError **error) {
                             "    connectionString = \"\";\n"
                             "    adapter = \"postgresql\";\n"
                             "    poolSize = 8;\n"
+                            "  };\n"
+                            "  state = {\n"
+                            "    durable = NO;\n"
+                            "    mode = \"\";\n"
+                            "    target = \"default\";\n"
                             "  };\n"
                             "  session = {\n"
                             "    enabled = NO;\n"
@@ -5885,6 +6013,13 @@ static int CommandDeploy(NSArray *args) {
   NSDictionary *currentDeployment = DeploymentMetadataFromManifest(currentManifest, allowRemoteRebuild);
   NSString *previousReleaseID = PreviousReleaseIDAtReleasesDir(releasesDir, currentReleaseID);
   NSDictionary *requestedDeployment = AssessDeployCompatibility(CurrentDeployPlatformProfile(), targetProfile, allowRemoteRebuild);
+  NSError *loadedConfigError = nil;
+  NSDictionary *loadedConfig = [ALNConfig loadConfigAtRoot:appRoot
+                                               environment:environment ?: @"production"
+                                                     error:&loadedConfigError];
+  NSArray<NSDictionary *> *multiWorkerStateWarnings =
+      Phase39MultiWorkerStateWarnings(loadedConfig, environment, databaseMode, databaseTarget);
+  NSDictionary *stateContract = Phase39StateContractFromConfig(loadedConfig ?: @{});
 
   NSMutableString *buildCommand =
       [NSMutableString stringWithFormat:@"%@/build_release.sh", ShellQuote(scriptRoot)];
@@ -6005,6 +6140,8 @@ static int CommandDeploy(NSArray *args) {
             @"manifest_version" : manifest[@"version"] ?: @"phase32-deploy-manifest-v1",
             @"deployment" : DeploymentMetadataFromManifest(manifest, allowRemoteRebuild),
             @"propane_handoff" : PropaneHandoffFromManifest(manifest, releaseDir),
+            @"state" : Phase39StateContractFromConfig(loadedConfig ?: @{}),
+            @"warnings" : multiWorkerStateWarnings ?: @[],
             @"transport" : transportStep ?: @{},
             @"manifest" : manifest ?: @{},
             @"build_release" : localBuildPayload ?: @{},
@@ -6149,6 +6286,8 @@ static int CommandDeploy(NSArray *args) {
         @"manifest_path" : manifestPath ?: @"",
         @"manifest_version" : @"phase32-deploy-manifest-v1",
         @"deployment" : requestedDeployment ?: @{},
+        @"state" : stateContract ?: @{},
+        @"warnings" : multiWorkerStateWarnings ?: @[],
         @"build_release" : buildPayload ?: @{},
       } mutableCopy];
       if (usedPlanAlias) {
@@ -6161,6 +6300,7 @@ static int CommandDeploy(NSArray *args) {
     if (usedPlanAlias) {
       fprintf(stderr, "arlen deploy plan is deprecated; use arlen deploy dryrun instead.\n");
     }
+    PrintDeployWarnings(multiWorkerStateWarnings);
     return RunShellCommand(dryrunCommand);
   }
 
@@ -6243,6 +6383,9 @@ static int CommandDeploy(NSArray *args) {
   }
 
   if ([subcommand isEqualToString:@"push"]) {
+    if (!asJSON) {
+      PrintDeployWarnings(multiWorkerStateWarnings);
+    }
     if (asJSON) {
       NSMutableString *pushCommand = [buildCommand mutableCopy];
       [pushCommand appendString:@" --json"];
@@ -6272,6 +6415,8 @@ static int CommandDeploy(NSArray *args) {
         @"manifest_version" : manifest[@"version"] ?: @"phase32-deploy-manifest-v1",
         @"deployment" : DeploymentMetadataFromManifest(manifest, allowRemoteRebuild),
         @"propane_handoff" : PropaneHandoffFromManifest(manifest, releaseDir),
+        @"state" : stateContract ?: @{},
+        @"warnings" : multiWorkerStateWarnings ?: @[],
         @"manifest" : manifest,
         @"build_release" : buildPayload ?: @{},
       };
@@ -6695,6 +6840,10 @@ static int CommandDeploy(NSArray *args) {
     releaseExists = YES;
   }
 
+  if (!asJSON) {
+    PrintDeployWarnings(multiWorkerStateWarnings);
+  }
+
   NSMutableArray *steps = [NSMutableArray array];
   NSDictionary *buildPayload = nil;
   int buildExitCode = 0;
@@ -7091,6 +7240,8 @@ static int CommandDeploy(NSArray *args) {
       @"manifest_version" : manifest[@"version"] ?: @"phase32-deploy-manifest-v1",
       @"deployment" : releaseDeployment ?: @{},
       @"propane_handoff" : PropaneHandoffFromManifest(manifest, releaseDir),
+      @"state" : Phase39StateContractFromConfig(loadedConfig ?: @{}),
+      @"warnings" : multiWorkerStateWarnings ?: @[],
       @"manifest" : manifest,
       @"steps" : steps ?: @[],
       @"build_release" : buildPayload ?: @{},

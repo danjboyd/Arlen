@@ -1,6 +1,22 @@
 # Arlen Status Checkpoint
 
-Last updated: 2026-05-02
+Last updated: 2026-05-04
+
+## Leaving Off (2026-05-04)
+
+- Executed Phase 39A-D for the multi-worker state-safety initiative:
+  - documented the `propane` multi-worker process-local state contract in
+    propane, deployment, app-authoring, configuration, and CLI docs
+  - added the app-level durable state intent contract:
+    `state.durable`, `state.mode`, and `state.target`, with
+    `ARLEN_STATE_DURABLE`, `ARLEN_STATE_MODE`, and `ARLEN_STATE_TARGET`
+    overrides
+  - added `multi_worker_state` warnings to `arlen doctor --env production`,
+    `arlen deploy doctor`, and deploy dry-run/push/release JSON payloads
+  - warning policy is non-blocking: successful deploy dry-run/push/release
+    flows keep their existing successful exit codes
+  - updated `docs/PHASE39_ROADMAP.md` to mark `39A-39D` complete while
+    `39E-39H` remain planned
 
 ## Leaving Off (2026-05-02)
 

@@ -77,7 +77,36 @@ Common keys:
 If you are just starting, set the connection string first and leave the rest
 alone until you need different pool behavior.
 
-## 4.1 Dataverse (Optional)
+## 4.1 Durable State Intent
+
+Production apps with more than one `propane` worker should declare how
+request-spanning app-owned state is made durable:
+
+```plist
+state = {
+  durable = YES;
+  mode = "database";
+  target = "default";
+};
+```
+
+Common keys:
+
+- `durable`: `YES` when mutable app-owned state lives outside worker memory
+- `mode`: `database`, `sqlite`, `file`, or another documented durable strategy
+- `target`: the database/storage target name, usually `default`
+
+Environment overrides:
+
+- `ARLEN_STATE_DURABLE`
+- `ARLEN_STATE_MODE`
+- `ARLEN_STATE_TARGET`
+
+This is an operator/developer intent signal. Arlen does not claim it can
+statically prove every app-owned store is durable. The signal drives production
+doctor/deploy warnings for multi-worker apps.
+
+## 4.2 Dataverse (Optional)
 
 Arlen's Dataverse surface is compiled in but runtime-inactive by default. Apps
 only use it when they explicitly configure or instantiate Dataverse helpers.

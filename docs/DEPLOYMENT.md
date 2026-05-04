@@ -30,6 +30,8 @@ Recommended app/runtime defaults for production:
 - explicit `requestLimits`
 - explicit observability policy (`observability.tracePropagationEnabled`, `observability.healthDetailsEnabled`, `observability.readinessRequiresStartup`, `observability.readinessRequiresClusterQuorum`)
 - explicit propane accessories (`workerCount`, shutdown/reload timings)
+- explicit durable state intent (`state.durable`, `state.mode`, `state.target`)
+  or an explicit deploy database contract for request-spanning app state
 - explicit cluster settings when running multi-node (`cluster.enabled`, `cluster.name`, `cluster.expectedNodes`, `cluster.observedNodes`)
 
 API-only mode (`apiOnly = YES`, or `ARLEN_API_ONLY=1`) defaults to:
@@ -45,6 +47,35 @@ sampling; see `docs/PROPANE.md` for the operator triage workflow and the
 optionally retire workers above configured FD pressure thresholds. Request-level
 FD-delta logging is available through `ARLEN_FD_DELTA_DEBUG=1` for short
 diagnostic windows.
+
+### 3.1 Durable State And Multiple Workers
+
+`propaneAccessories.workerCount` defaults to multiple production workers. Each
+worker is a separate process, so process-local mutable state is not a durable
+production data model. Avoid production user stores such as
+`NSMutableDictionary *usersByEmail`, app-owned singleton user stores,
+in-memory scenario/workflow stores, and runtime-mutated in-memory role maps.
+
+Declare durable intent in `config/app.plist`:
+
+```plist
+state = {
+  durable = YES;
+  mode = "database";
+  target = "default";
+};
+```
+
+For the initial guardrail, an explicit deploy database contract also counts as
+a durable state signal:
+
+```plist
+database = { mode = "host_local"; adapter = "postgresql"; target = "default"; };
+```
+
+`arlen doctor --env production`, `arlen deploy doctor`, `arlen deploy dryrun`,
+`arlen deploy push`, and `arlen deploy release` warn, but do not fail, when a
+production multi-worker app has no durable state signal.
 
 ## 4. Phase 32 Deployment Target Contract
 

@@ -106,6 +106,11 @@
   XCTAssertEqual((NSInteger)8, [database[@"poolSize"] integerValue]);
   XCTAssertEqualObjects(@"postgresql", database[@"adapter"]);
 
+  NSDictionary *state = config[@"state"];
+  XCTAssertEqualObjects(@(NO), state[@"durable"]);
+  XCTAssertEqualObjects(@"", state[@"mode"]);
+  XCTAssertEqualObjects(@"default", state[@"target"]);
+
   NSDictionary *session = config[@"session"];
   XCTAssertEqualObjects(@(NO), session[@"enabled"]);
   XCTAssertEqualObjects(@"arlen_session", session[@"cookieName"]);
@@ -190,6 +195,51 @@
   XCTAssertEqual((NSInteger)256, [runtimeLimits[@"maxQueuedHTTPConnections"] integerValue]);
   XCTAssertEqual((NSInteger)0, [runtimeLimits[@"maxRealtimeTotalSubscribers"] integerValue]);
   XCTAssertEqual((NSInteger)0, [runtimeLimits[@"maxRealtimeChannelSubscribers"] integerValue]);
+}
+
+- (void)testStateContractCanBeConfiguredAndOverriddenFromEnvironment {
+  NSString *root = [self createTempAppRoot];
+  XCTAssertNotNil(root);
+  if (root == nil) {
+    return;
+  }
+
+  NSString *appPlist = [root stringByAppendingPathComponent:@"config/app.plist"];
+  BOOL ok = [self writeFile:appPlist
+                    content:@"{\n"
+                            "  state = {\n"
+                            "    durable = YES;\n"
+                            "    mode = \"database\";\n"
+                            "    target = \"default\";\n"
+                            "  };\n"
+                            "}\n"];
+  XCTAssertTrue(ok);
+
+  NSError *error = nil;
+  NSDictionary *config = [ALNConfig loadConfigAtRoot:root
+                                         environment:@"production"
+                                               error:&error];
+  XCTAssertNil(error);
+  NSDictionary *state = config[@"state"];
+  XCTAssertEqualObjects(@(YES), state[@"durable"]);
+  XCTAssertEqualObjects(@"database", state[@"mode"]);
+  XCTAssertEqualObjects(@"default", state[@"target"]);
+
+  setenv("ARLEN_STATE_DURABLE", "0", 1);
+  setenv("ARLEN_STATE_MODE", "file", 1);
+  setenv("ARLEN_STATE_TARGET", "pilot", 1);
+  error = nil;
+  NSDictionary *overridden = [ALNConfig loadConfigAtRoot:root
+                                             environment:@"production"
+                                                   error:&error];
+  unsetenv("ARLEN_STATE_DURABLE");
+  unsetenv("ARLEN_STATE_MODE");
+  unsetenv("ARLEN_STATE_TARGET");
+  XCTAssertNil(error);
+  NSDictionary *overriddenState = overridden[@"state"];
+  XCTAssertEqualObjects(@(NO), overriddenState[@"durable"]);
+  XCTAssertEqualObjects(@"file", overriddenState[@"mode"]);
+  XCTAssertEqualObjects(@"pilot", overriddenState[@"target"]);
 }
 
 - (void)testProductionDefaultsToConcurrentRequestDispatchMode {

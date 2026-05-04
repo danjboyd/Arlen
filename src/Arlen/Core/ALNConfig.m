@@ -93,6 +93,9 @@ static void ALNApplyLimitOverride(NSMutableDictionary *limits, NSString *value, 
 }
 
 static NSString *ALNEnvValue(const char *name) {
+  if (name == NULL) {
+    return nil;
+  }
   const char *value = getenv(name);
   if (value == NULL || value[0] == '\0') {
     return nil;
@@ -482,6 +485,9 @@ static NSDictionary *ALNSecurityProfileDefaults(NSString *profileName) {
       ALNEnvValueCompat("ARLEN_DB_POOL_SIZE", "MOJOOBJC_DB_POOL_SIZE");
   NSString *databaseAdapter =
       ALNEnvValueCompat("ARLEN_DB_ADAPTER", "MOJOOBJC_DB_ADAPTER");
+  NSString *stateDurable = ALNEnvValueCompat("ARLEN_STATE_DURABLE", NULL);
+  NSString *stateMode = ALNEnvValueCompat("ARLEN_STATE_MODE", NULL);
+  NSString *stateTarget = ALNEnvValueCompat("ARLEN_STATE_TARGET", NULL);
 
   NSString *sessionEnabled =
       ALNEnvValueCompat("ARLEN_SESSION_ENABLED", "MOJOOBJC_SESSION_ENABLED");
@@ -676,6 +682,20 @@ static NSDictionary *ALNSecurityProfileDefaults(NSString *profileName) {
   }
   ALNApplyIntegerOverride(database, databasePoolSize, @"poolSize", 1);
   config[@"database"] = database;
+
+  NSMutableDictionary *state =
+      [NSMutableDictionary dictionaryWithDictionary:config[@"state"] ?: @{}];
+  NSNumber *stateDurableValue = ALNParseBooleanString(stateDurable);
+  if (stateDurableValue != nil) {
+    state[@"durable"] = stateDurableValue;
+  }
+  if ([stateMode length] > 0) {
+    state[@"mode"] = [stateMode lowercaseString];
+  }
+  if ([stateTarget length] > 0) {
+    state[@"target"] = stateTarget;
+  }
+  config[@"state"] = state;
 
   NSMutableDictionary *session =
       [NSMutableDictionary dictionaryWithDictionary:config[@"session"] ?: @{}];
@@ -1036,6 +1056,30 @@ static NSDictionary *ALNSecurityProfileDefaults(NSString *profileName) {
     finalDatabase[@"adapter"] = @"postgresql";
   }
   config[@"database"] = finalDatabase;
+
+  NSMutableDictionary *finalState =
+      [NSMutableDictionary dictionaryWithDictionary:config[@"state"] ?: @{}];
+  NSNumber *finalStateDurableValue =
+      [finalState[@"durable"] isKindOfClass:[NSString class]]
+          ? ALNParseBooleanString(finalState[@"durable"])
+          : nil;
+  if (finalStateDurableValue != nil) {
+    finalState[@"durable"] = finalStateDurableValue;
+  } else if (finalState[@"durable"] == nil) {
+    finalState[@"durable"] = @(NO);
+  } else {
+    finalState[@"durable"] = @([finalState[@"durable"] boolValue]);
+  }
+  if (![finalState[@"mode"] isKindOfClass:[NSString class]]) {
+    finalState[@"mode"] = @"";
+  } else {
+    finalState[@"mode"] = [finalState[@"mode"] lowercaseString];
+  }
+  if (![finalState[@"target"] isKindOfClass:[NSString class]] ||
+      [finalState[@"target"] length] == 0) {
+    finalState[@"target"] = @"default";
+  }
+  config[@"state"] = finalState;
 
   NSMutableDictionary *finalSession =
       [NSMutableDictionary dictionaryWithDictionary:config[@"session"] ?: @{}];

@@ -4,6 +4,39 @@
 
 It runs prefork worker processes, restarts failed workers, and supports rolling reloads.
 
+## Multi-Worker State Contract
+
+`propane` runs multiple worker processes for production workloads. Those
+workers do not share Objective-C heap memory. Process-local dictionaries,
+arrays, singleton service instances, and in-memory adapter instances can diverge
+from worker to worker.
+
+Request-spanning application state that must survive worker changes, worker
+restarts, rolling reloads, deploys, or multiple hosts must live in shared
+durable storage. Safe production patterns include signed cookie session state
+plus a database-backed user lookup, SQLite or file-backed state for a
+single-host pilot, PostgreSQL for multi-worker and multi-host production, and
+durable first-party adapters where available.
+
+Do not rely on sticky sessions as the default correctness model for normal HTTP
+apps. Sticky routing can be useful operationally, but Arlen's production state
+contract is that user, role, scenario, workflow, and other mutable domain data
+is durable outside a worker process.
+
+The explicit app-level declaration is:
+
+```plist
+state = {
+  durable = YES;
+  mode = "database";
+  target = "default";
+};
+```
+
+Existing deploy database contracts can also satisfy the first warning version.
+Without either signal, `arlen doctor --env production`, `arlen deploy doctor`,
+and production deploy planning warn when `propaneAccessories.workerCount > 1`.
+
 ## Usage
 
 ```bash
