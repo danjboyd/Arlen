@@ -17,6 +17,10 @@ Last updated: 2026-05-04
     flows keep their existing successful exit codes
   - updated `docs/PHASE39_ROADMAP.md` to mark `39A-39D` complete while
     `39E-39H` remain planned
+- Added `docs/SESSION_HANDOFF_2026-05-04.md` with the morning pickup point:
+  start with `39E` demo-only in-memory labeling, then `39F` durable examples,
+  then `39G` worker identity diagnostics, and finish with `39H` confidence
+  closeout.
 
 ## Leaving Off (2026-05-02)
 

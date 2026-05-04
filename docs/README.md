@@ -90,6 +90,7 @@ toolchain env directly for the Linux/GNUstep path. On macOS, use
 ## Contributor and Historical Docs
 
 - [Current Status](STATUS.md): latest checkpoint and verified milestone state.
+- [Session Handoff 2026-05-04](SESSION_HANDOFF_2026-05-04.md): Phase 39A-D completion notes, verification, remaining 39E-H pickup order, and dirty-worktree cautions.
 - [CI Alignment](CI_ALIGNMENT.md): required CI shape, merge-gate guidance, and the rule that CI must stay current and green.
 - [Phase 39 Roadmap](PHASE39_ROADMAP.md): in-progress multi-worker state-safety phase; `39A-39D` delivered process-local state documentation, durable state contracts, and doctor/deploy warnings, with demo-only in-memory labeling, durable store examples, optional worker identity diagnostics, and confidence coverage still planned.
 - [Phase 38 Roadmap](PHASE38_ROADMAP.md): planned production-runtime reliability phase for `ARLEN-BUG-024`, covering staging reproduction of `/dev/null` descriptor growth, syscall tracing, root-cause fix, regression gates, operator diagnostics, and downstream closeout.
