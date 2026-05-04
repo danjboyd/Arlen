@@ -178,6 +178,32 @@ For auth-aware flows:
 
 Use those helpers instead of digging through raw session data directly.
 
+## 5.1 Request-Spanning State In Production
+
+Sessions are signed cookie-backed by default, but app-owned domain lookups still
+need durable storage when they can change. In production with multiple
+`propane` workers, do not store users, roles, scenarios, workflows, or other
+business records only in process-local objects such as `NSMutableDictionary`,
+singleton stores, or in-memory adapters.
+
+Use a durable lookup behind the request flow:
+
+- signed cookie session stores a stable user identifier
+- controller/middleware loads the user, roles, and mutable business state from
+  a database or another durable adapter
+- caches may be in-memory only when a cache miss can be rebuilt from durable
+  state
+
+Declare the intent in config so doctor/deploy guardrails can reason about it:
+
+```plist
+state = {
+  durable = YES;
+  mode = "database";
+  target = "default";
+};
+```
+
 ## 6. Middleware
 
 Arlen middleware implements the `ALNMiddleware` protocol:

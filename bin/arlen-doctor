@@ -136,6 +136,59 @@ else
     "Run 'arlen new <AppName>' if you are bootstrapping a new app."
 fi
 
+phase39_config_blob() {
+  if [[ -f "$app_config_path" ]]; then
+    sed 's,//.*,,' "$app_config_path"
+  fi
+  local env_config="$app_root/config/environments/$environment.plist"
+  if [[ -f "$env_config" ]]; then
+    sed 's,//.*,,' "$env_config"
+  fi
+}
+
+phase39_last_numeric_assignment() {
+  local key="$1"
+  phase39_config_blob | sed -nE "s/.*${key}[[:space:]]*=[[:space:]]*([0-9]+)[[:space:]]*;.*/\\1/p" | tail -n 1
+}
+
+phase39_has_nonempty_assignment() {
+  local key="$1"
+  phase39_config_blob | sed -nE "s/.*${key}[[:space:]]*=[[:space:]]*\"([^\"]+)\"[[:space:]]*;.*/\\1/p" | grep -q '.'
+}
+
+if [[ "$environment" == "production" && -f "$app_config_path" ]]; then
+  phase39_worker_count="${ARLEN_PROPANE_WORKERS:-}"
+  if [[ ! "$phase39_worker_count" =~ ^[0-9]+$ ]]; then
+    phase39_worker_count="$(phase39_last_numeric_assignment "workerCount")"
+  fi
+  if [[ ! "$phase39_worker_count" =~ ^[0-9]+$ ]]; then
+    phase39_worker_count=4
+  fi
+
+  phase39_has_durable_state=0
+  if phase39_config_blob | grep -Eq 'durable[[:space:]]*=[[:space:]]*(YES|1|true)[[:space:]]*;'; then
+    phase39_has_durable_state=1
+  fi
+  if [[ -n "${ARLEN_STATE_DURABLE:-}" && "${ARLEN_STATE_DURABLE,,}" =~ ^(1|yes|true)$ ]]; then
+    phase39_has_durable_state=1
+  fi
+
+  phase39_has_database_signal=0
+  if [[ -n "${ARLEN_DATABASE_URL:-}" ]] || phase39_has_nonempty_assignment "connectionString"; then
+    phase39_has_database_signal=1
+  fi
+
+  if (( phase39_worker_count > 1 && phase39_has_durable_state == 0 && phase39_has_database_signal == 0 )); then
+    add_check "multi_worker_state" "warn" \
+      "production uses $phase39_worker_count propane workers without a declared durable state signal" \
+      "Each propane worker has isolated process-local memory. Declare state.durable=YES with a durable mode/target, or configure a database-backed state signal for request-spanning app data."
+  else
+    add_check "multi_worker_state" "pass" \
+      "multi-worker state contract is quiet for $environment workerCount=$phase39_worker_count" \
+      "Warnings are quiet when workerCount <= 1, state.durable=YES, or a database connection string is configured."
+  fi
+fi
+
 matrix_path="$repo_root/docs/TOOLCHAIN_MATRIX.md"
 if [[ -f "$matrix_path" ]]; then
   add_check "toolchain_matrix" "pass" "known-good matrix available: docs/TOOLCHAIN_MATRIX.md"

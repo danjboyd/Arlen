@@ -1,7 +1,7 @@
 # Arlen Phase 39 Roadmap
 
-Status: Planned
-Last updated: 2026-04-30
+Status: In progress
+Last updated: 2026-05-04
 
 Related docs:
 
@@ -65,7 +65,7 @@ Current facts:
 
 ## 4.1 Phase 39A: Multi-Worker State Contract Documentation
 
-Status: Planned
+Status: Completed
 
 Deliverables:
 
@@ -95,7 +95,7 @@ Acceptance:
 
 ## 4.2 Phase 39B: Durable State Configuration Contract
 
-Status: Planned
+Status: Completed
 
 Deliverables:
 
@@ -128,7 +128,7 @@ Acceptance:
 
 ## 4.3 Phase 39C: Doctor Warning Checks
 
-Status: Planned
+Status: Completed
 
 Deliverables:
 
@@ -156,7 +156,7 @@ Acceptance:
 
 ## 4.4 Phase 39D: Deploy Dry-Run, Push, and Release Warnings
 
-Status: Planned
+Status: Completed
 
 Deliverables:
 

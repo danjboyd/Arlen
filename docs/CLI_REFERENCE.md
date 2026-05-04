@@ -182,6 +182,8 @@ Named targets:
 - emits a normalized machine payload with:
   - `workflow = deploy.dryrun`
   - `manifest_version = phase32-deploy-manifest-v1`
+  - `warnings`, including `multi_worker_state` when production multi-worker
+    config has no durable state signal
   - nested `build_release` payload from the packaging script
 - `arlen deploy plan` remains a deprecated compatibility alias; JSON output
   records `deprecated_alias = plan`
@@ -219,6 +221,8 @@ Named targets:
 - copies packaged runtime binaries as real files inside the release instead of
   preserving build-host symlinks (`ARLEN-BUG-018`)
 - emits the manifest content in `--json` mode
+- emits warning data without changing a successful exit code when production
+  multi-worker state has no durable signal
 
 `arlen deploy releases`
 
@@ -255,6 +259,8 @@ Named targets:
 - resolves the packaged `arlen` binary from manifest-backed paths, including
   `.exe` siblings on Windows preview builds
 - relies on the reserved operability contract, so app routes cannot shadow `/healthz`
+- emits warning data without changing a successful exit code when production
+  multi-worker state has no durable signal
 
 `arlen deploy status`
 
@@ -283,6 +289,9 @@ Named targets:
 - validates release layout, manifest presence, packaged binaries, config loading, and database URL completeness
 - validates explicit database deployment contracts from the packaged manifest
   (`external`, `host_local`, `embedded`)
+- includes a `multi_worker_state` check; production apps with
+  `propaneAccessories.workerCount > 1` warn when neither `state.durable = YES`
+  nor an acceptable database-backed state signal is configured
 - when run against a local named target without an active release, validates
   target-host readiness instead of failing immediately:
   - release/shared/log/tmp layout
