@@ -68,7 +68,7 @@ What the closed Apple baseline covers now:
   including watch-mode rebuild/restart handling
 - optional backend discovery for `libpq` and ODBC-style transports through
   Apple-aware environment and Homebrew prefix detection
-- macOS CI coverage for the same Phase 30 baseline
+- macOS CI coverage for the Apple-runtime baseline
 
 ## 5. Verify the Apple Runtime
 
@@ -99,6 +99,5 @@ bash ./tools/ci/run_phase30_confidence.sh
 ## 6. Read Next
 
 - `docs/APPLE_PLATFORM.md`
-- `docs/PHASE30_ROADMAP.md`
 - `build/release_confidence/phase30/`
 - `docs/GETTING_STARTED.md`

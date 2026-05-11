@@ -36,8 +36,8 @@ When applicable, update:
 - `docs/PLUGIN_SERVICE_GUIDE.md`
 - `docs/FRONTEND_STARTERS.md`
 - `docs/API_REFERENCE.md` and generated pages under `docs/api/` when public API changes
-- relevant spec (`docs/PHASE1_SPEC.md`, `V1_SPEC.md`, etc.)
-- roadmap docs if milestone/scope changed
+- relevant spec (`V1_SPEC.md`, etc.)
+- internal roadmap docs under `docs/internal/` if milestone/scope changed (see Section 10)
 
 ## 4. Writing Standards
 
@@ -134,3 +134,35 @@ aggregate/index docs.
 - Update docs in the same change set as feature code whenever possible.
 - Run periodic docs audits at phase boundaries.
 - Track major doc gaps as roadmap work items, not informal notes.
+
+## 10. Internal vs. User-Facing Docs
+
+Arlen separates documentation by audience using directory layout:
+
+- `docs/` root contains **user-facing** material: guides, references, module
+  docs, and the curated index. Anything an evaluator, app author, or operator
+  is expected to read lives here.
+- `docs/internal/` contains **engineering/historical** material: phase
+  roadmaps, session handoffs, dated reconciliation notes, audits, and
+  benchmark/operational handoffs. This material remains under version control
+  and is fully discoverable, but is not linked from the user-facing index.
+
+Rules:
+
+- Nothing dated (`*_YYYY-MM-DD*`), phase-numbered (`PHASE*`), or
+  app-specific (`*_RECONCILIATION_*`, app-name-prefixed handoffs) belongs at
+  the `docs/` root. New files matching those patterns must be created under
+  `docs/internal/`.
+- User-facing prose (including `README.md`, `docs/README.md`, getting-started
+  guides, module docs, and references) must describe capabilities, not phase
+  numbers. Internal phase IDs may appear inside `docs/internal/` and in
+  engineering channels (commit messages, AGENTS.md), but should not leak into
+  user-facing copy.
+- Promotion from `docs/internal/` to `docs/` requires rewriting the doc as
+  evergreen, audience-appropriate material — moving a phase roadmap verbatim
+  is not promotion.
+- `docs/internal/README.md` (when present) indexes engineering material for
+  contributors; it is intentionally separate from `docs/README.md`.
+- A user-facing roadmap (`docs/ROADMAP.md`, when present) describes
+  capabilities as shipped/preview/planned without phase IDs, updated at
+  capability boundaries rather than per-subphase.

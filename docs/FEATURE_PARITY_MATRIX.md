@@ -4,10 +4,10 @@ Status: Active baseline
 Last updated: 2026-04-02
 
 Related docs:
-- `docs/PHASE2_ROADMAP.md`
-- `docs/PHASE3_ROADMAP.md`
+- `docs/internal/PHASE2_ROADMAP.md`
+- `docs/internal/PHASE3_ROADMAP.md`
 - `docs/DEPLOYMENT.md`
-- `docs/PHASE1_SPEC.md`
+- `docs/internal/PHASE1_SPEC.md`
 
 ## 1. Baseline and Parity Model
 

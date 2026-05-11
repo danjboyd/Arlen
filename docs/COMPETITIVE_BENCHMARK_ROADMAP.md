@@ -6,10 +6,10 @@ Last updated: 2026-03-21
 Related docs:
 - `docs/COMPARATIVE_BENCHMARKING.md`
 - `docs/PERFORMANCE_PROFILES.md`
-- `docs/PHASE7A_RUNTIME_HARDENING.md`
+- `docs/internal/PHASE7A_RUNTIME_HARDENING.md`
 - `docs/RELEASE_PROCESS.md`
 - `docs/ARLEN_FOR_FASTAPI.md`
-- `docs/PHASED_BASELINE_CAMPAIGN.md`
+- `docs/internal/PHASED_BASELINE_CAMPAIGN.md`
 - `docs/STATUS.md`
 
 ## 1. Objective
@@ -108,7 +108,7 @@ Implementation notes (completed):
   - `tests/performance/run_phaseb_parity.sh`
   - `make parity-phaseb`
 - Added checklist and execution contract doc:
-  - `docs/PHASEB_PARITY_CHECKLIST_FASTAPI.md`
+  - `docs/internal/PHASEB_PARITY_CHECKLIST_FASTAPI.md`
 - Latest verification:
   - command: `make parity-phaseb`
   - result: pass
@@ -151,7 +151,7 @@ Implementation notes (completed):
 - Added Make target:
   - `make perf-phasec`
 - Added protocol documentation:
-  - `docs/PHASEC_BENCHMARK_PROTOCOL.md`
+  - `docs/internal/PHASEC_BENCHMARK_PROTOCOL.md`
 - Latest verification:
   - command: `make perf-phasec`
   - result: pass
@@ -190,7 +190,7 @@ Implementation notes (completed):
 - Added Make target:
   - `make perf-phased`
 - Added campaign execution guide:
-  - `docs/PHASED_BASELINE_CAMPAIGN.md`
+  - `docs/internal/PHASED_BASELINE_CAMPAIGN.md`
 - Latest verification:
   - command: `make perf-phased`
   - result: pass

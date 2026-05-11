@@ -1,6 +1,6 @@
-# SQL Builder Conformance Matrix (Phase 4E)
+# SQL Builder Conformance Matrix
 
-This matrix defines stable SQL/parameter conformance targets for Arlen's Phase 4 SQL builder surface.
+This matrix defines stable SQL/parameter conformance targets for Arlen's SQL builder surface.
 
 Machine-readable source:
 
@@ -42,9 +42,9 @@ Compile-time snapshots are paired with PostgreSQL execution regressions in `test
 - matrix-aligned advanced builder execution coverage
 - long projection + multi-parameter UTF-8 transport stress coverage (SQLSTATE `22021` regression class)
 
-## Phase 20 Nested Dialect Depth
+## Nested Dialect Depth
 
-Phase 20 extends the execution/conformance story beyond the Phase 4 matrix:
+The nested-dialect pass extends the execution/conformance story:
 
 - nested builders now compile through the active dialect context instead of
   relying on root-only adaptation
@@ -53,4 +53,3 @@ Phase 20 extends the execution/conformance story beyond the Phase 4 matrix:
 - regression coverage lives in:
   - `tests/unit/Phase17BTests.m`
   - `tests/unit/PgTests.m`
-  - `docs/PHASE20_ROADMAP.md`

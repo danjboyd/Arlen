@@ -10,16 +10,14 @@ ownership modes:
 All three modes keep the same session, provider-login, MFA, verification, and
 password-reset behavior. The UI mode only changes who owns the HTML surface.
 
-Phase 18A-18D in [docs/PHASE18_ROADMAP.md](PHASE18_ROADMAP.md) are delivered
-around three explicit reuse paths:
+The module ships three explicit reuse paths:
 
 - stock full-page auth UI
 - reusable server-rendered auth fragments for EOC apps
 - strengthened headless `/auth/api/...` contracts for React/native clients
 
-Phase 18E-18G are also delivered. Optional SMS MFA through Twilio Verify is
-available as a disabled-by-default secondary factor without changing the core
-TOTP-first auth/session contract.
+Optional SMS MFA through Twilio Verify is available as a disabled-by-default
+secondary factor without changing the core TOTP-first auth/session contract.
 
 ## Route Contract
 

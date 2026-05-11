@@ -48,7 +48,6 @@ macOS Apple-runtime path:
 ./bin/arlen doctor
 ./bin/build-apple
 ./bin/test --smoke-only
-bash ./tools/ci/run_phase30_confidence.sh
 ```
 
 Create and run your first app:
@@ -136,10 +135,10 @@ one coherent toolchain.
 - [API-First Reference App](examples/api_reference/README.md): JSON/OpenAPI-heavy reference surface.
 - [Dataverse Reference](examples/dataverse_reference/README.md): app-level Dataverse config, controller helpers, and codegen flow.
 - [Arlen ORM Reference](examples/arlen_orm_reference/README.md): optional SQL and Dataverse ORM reference surface.
-- [Phase 28 React Reference](examples/phase28_react_reference/README.md): descriptor-first React/TypeScript workspace showing generated validators, query contracts, module/resource metadata, and optional React helpers.
-- [Phase 28 Reference Server](examples/phase28_reference/README.md): live backend used by the generated TypeScript integration and React reference lanes.
+- [React/TypeScript Reference](examples/phase28_react_reference/README.md): descriptor-first React/TypeScript workspace showing generated validators, query contracts, module/resource metadata, and optional React helpers.
+- [Reference Server (TypeScript Integration)](examples/phase28_reference/README.md): live backend used by the generated TypeScript integration and React reference lanes.
 - [Auth + Admin Demo](examples/auth_admin_demo/README.md): modules, auth, and admin composition.
-- [Phase 16 Modules Demo](examples/phase16_modules_demo/README.md): broader multi-module app surface.
+- [Multi-Module Demo](examples/phase16_modules_demo/README.md): broader multi-module app surface (`admin-ui` + `search` + `ops`).
 - [Search Module Playbook](examples/search_module_playbook/README.md): scaffold-first path for app-owned search resources and engine swaps.
 - [Tech Demo](examples/tech_demo/README.md): larger end-to-end example with Arlen UI/runtime features, including `/tech-demo/live`.
 
@@ -148,16 +147,13 @@ one coherent toolchain.
 For readers evaluating maturity: Arlen is young, but it is no longer a minimal
 scaffold.
 
-- Core framework/runtime work is complete through the current first-party scope, including HTML/JSON request handling, EOC templates, data-layer fundamentals, auth/security hardening, realtime/event-stream support, and deployment/runtime management.
-- Phase 7: complete for current first-party scope.
-- Phase 18: complete (`18A-18H` delivered on 2026-03-14) for the tracked
-  module/runtime milestone.
-- Phase 37 completed the public-release test confidence scaffold; see
-  [docs/PHASE37_ROADMAP.md](docs/PHASE37_ROADMAP.md).
-- Linux with clang-built GNUstep remains the authoritative production baseline.
+- Core framework and runtime are complete through the current first-party scope: HTML/JSON request handling, EOC templates, data-layer fundamentals, auth/security hardening, realtime/event-stream support, and deployment/runtime management.
+- First-party modules (`auth`, `admin-ui`, `jobs`, `notifications`, `storage`, `ops`, `search`) are shipping.
+- A public-release test confidence scaffold (acceptance harness, golden-render catalog, regression-intake enforcement) is in place.
+- Linux with clang-built GNUstep is the authoritative production baseline.
 - macOS has a verified Apple-runtime path.
 - Windows `CLANG64` is available as a preview path, not the primary production target.
-- Current status, roadmap history, and milestone detail live in [docs/STATUS.md](docs/STATUS.md) and the `docs/PHASE*_ROADMAP.md` files.
+- A capability-level maturity snapshot lives in [docs/STATUS.md](docs/STATUS.md). Engineering history and milestone detail live under [docs/internal/](docs/internal/).
 
 ## Requirements and Setup Details
 
@@ -171,7 +167,7 @@ Prerequisites:
 - `tools-xctest` installed (provides `xctest`)
 - initialized submodules (`git submodule update --init --recursive`) so the
   repo-local patched `vendor/tools-xctest` runner and the pinned
-  `vendor/gnustep-cli-new` Phase 34K Windows provisioning source are available
+  `vendor/gnustep-cli-new` Windows provisioning source are available
 
 Contributor test-runner default:
 - Arlen builds and uses `vendor/tools-xctest/obj/xctest` by default while
@@ -243,7 +239,7 @@ Full-mode scaffolds now default to composition-first EOC:
 - `templates/index.html.eoc` opts into that shell with `<%@ layout "layouts/main" %>`
 - `templates/partials/_nav.html.eoc` and `templates/partials/_feature.html.eoc` demonstrate partial includes and collection rendering
 
-Phase 13/14/15/16 modules quick path:
+Module quick path:
 
 ```bash
 /path/to/Arlen/build/arlen module add auth
@@ -263,7 +259,7 @@ login attempt. Missing auth tables now surface an actionable module-migrate
 message instead of a generic database error.
 
 See `examples/phase16_modules_demo/README.md` for the canonical app-owned
-`admin-ui` + `search` + `ops` composition path on top of the matured Phase 16
+`admin-ui` + `search` + `ops` composition path on top of the first-party
 module stack.
 
 First-party module surfaces:
@@ -286,21 +282,19 @@ Run tests and quality gate:
 ```bash
 ./bin/test
 make check
-make parity-phaseb
-make perf-phasec
-make perf-phased
 make ci-perf-smoke
 make ci-benchmark-contracts
 make ci-quality
 make ci-fault-injection
 make ci-release-certification
-make ci-phase11
-make phase14-confidence
-make phase15-confidence
-make phase16-confidence
 make test-data-layer
 make browser-error-audit
 ```
+
+The `GNUmakefile` exposes additional confidence lanes tied to historical
+milestone work (search the `Makefile` for `*-confidence` targets). Those lanes
+are intended for contributors validating specific subsystems and are not part
+of the standard quality gate above.
 
 `make ci-perf-smoke` is the lighter local/manual macro perf subset. The
 self-hosted quality workflow already runs the broader multi-profile macro perf

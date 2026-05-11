@@ -17,7 +17,7 @@
 - Verification:
   - `DeploymentIntegrationTests::testArlenDeployReleaseRetriesHealthAfterRuntimeRestart_ARLEN_BUG_032`
 - Reconciliation note:
-  `docs/TAXCALCULATOR_HEALTH_STARTUP_RECONCILIATION_2026-05-02.md`
+  `docs/internal/TAXCALCULATOR_HEALTH_STARTUP_RECONCILIATION_2026-05-02.md`
 
 ### Summary
 
@@ -56,7 +56,7 @@ That produced a nonzero deploy result even though follow-up `deploy status`,
 - Verification:
   - `DeploymentIntegrationTests::testArlenDeployReleaseRestoresCurrentWhenRuntimeRestartFails_ARLEN_BUG_031`
 - Reconciliation note:
-  `docs/TAXCALCULATOR_RUNTIME_ACTIVATION_RECONCILIATION_2026-05-02.md`
+  `docs/internal/TAXCALCULATOR_RUNTIME_ACTIVATION_RECONCILIATION_2026-05-02.md`
 
 ### Summary
 
@@ -94,7 +94,7 @@ while status and health probes still looked healthy.
 - Verification:
   - `DeploymentIntegrationTests::testBuildReleaseRequiresPhase9JCertificationByDefault`
 - Reconciliation note:
-  `docs/TAXCALCULATOR_PHASE9J_DEPLOY_RECONCILIATION_2026-05-02.md`
+  `docs/internal/TAXCALCULATOR_PHASE9J_DEPLOY_RECONCILIATION_2026-05-02.md`
 
 ### Summary
 
@@ -128,7 +128,7 @@ look like an emergency bypass instead of a deliberate app-iteration workflow.
 - Verification:
   - `make test-integration-filter TEST=HTTPIntegrationTests/testReservedOperabilityEndpointsCannotBeShadowedByCatchAllRoute`
 - Reconciliation note:
-  `docs/TAXCALCULATOR_PHASE9J_DEPLOY_RECONCILIATION_2026-05-02.md`
+  `docs/internal/TAXCALCULATOR_PHASE9J_DEPLOY_RECONCILIATION_2026-05-02.md`
 
 ### Summary
 
@@ -172,7 +172,7 @@ would block forever in `waitUntilExit`.
   `HTTPIntegrationTests` endpoint probes under the sandboxed verification
   command. That later integration failure is not attributed to ARLEN-BUG-028.
 - Reconciliation note:
-  `docs/TAXCALCULATOR_PHASE9J_RECONCILIATION_2026-05-01.md`
+  `docs/internal/TAXCALCULATOR_PHASE9J_RECONCILIATION_2026-05-01.md`
 
 ### Summary
 
@@ -208,7 +208,7 @@ written and report only an empty redirected output file.
 - Verification:
   - `BuildPolicyTests::testArlenBuildJSONCapturesLargeChildOutputWithoutPipeDeadlock_ARLEN_BUG_027`
 - Reconciliation note:
-  `docs/TAXCALCULATOR_REPORT_RECONCILIATION_2026-04-30.md`
+  `docs/internal/TAXCALCULATOR_REPORT_RECONCILIATION_2026-04-30.md`
 
 ### Summary
 
@@ -242,7 +242,7 @@ started, especially when rebuilding Arlen emitted many compiler warnings.
 - Verification:
   - `DeploymentIntegrationTests::testArlenDeployPushReportsRemoteUploadFailureWhenSSHExitsEarly_ARLEN_BUG_026`
 - Reconciliation note:
-  `docs/TAXCALCULATOR_REPORT_RECONCILIATION_2026-04-30.md`
+  `docs/internal/TAXCALCULATOR_REPORT_RECONCILIATION_2026-04-30.md`
 
 ### Summary
 
@@ -273,7 +273,7 @@ the stream.
 - Verification:
   - `DeploymentIntegrationTests::testArlenDeployReleaseAndStatusOperateAgainstRemoteNamedTargetOverSSH`
 - Reconciliation note:
-  `docs/TAXCALCULATOR_REPORT_RECONCILIATION_2026-04-30.md`
+  `docs/internal/TAXCALCULATOR_REPORT_RECONCILIATION_2026-04-30.md`
 
 ### Summary
 
@@ -301,9 +301,9 @@ causing SSH to treat `-oBatchMode=yes` as the config-file path.
 - Last updated: `2026-04-28`
 - Target follow-up: Phase 38
 - Reconciliation note:
-  `docs/STATECOMPULSORYPOOLINGAPI_REPORT_RECONCILIATION_2026-04-24.md`
+  `docs/internal/STATECOMPULSORYPOOLINGAPI_REPORT_RECONCILIATION_2026-04-24.md`
 - Roadmap:
-  `docs/PHASE38_ROADMAP.md`
+  `docs/internal/PHASE38_ROADMAP.md`
 
 ### Summary
 
@@ -416,7 +416,7 @@ from production-safe diagnostics.
   - `HTTPIntegrationTests::testCommittedFileBodyPathHeadOmitsBody_ARLEN_BUG_023`
   - `HTTPIntegrationTests::testCommittedFileBodyPathPreflightFailureReturns500BeforeHeaders_ARLEN_BUG_023`
 - Reconciliation note:
-  `docs/STATECOMPULSORYPOOLINGAPI_REPORT_RECONCILIATION_2026-04-24.md`
+  `docs/internal/STATECOMPULSORYPOOLINGAPI_REPORT_RECONCILIATION_2026-04-24.md`
 
 ### Summary
 
@@ -599,4 +599,4 @@ Externally this presents as intermittent or sustained `502 Bad Gateway` from ngi
 2. Require integration coverage for any future changes to HTTP connection persistence + worker dispatch interaction.
 3. Re-run ASAN/UBSAN + endpoint traffic smoke during future runtime concurrency refactors.
 4. Keep `tools/ci/run_runtime_concurrency_gate.sh` in pre-merge validation for HTTP/runtime lifecycle changes.
-5. Track/update concurrency hardening baselines in `docs/CONCURRENCY_AUDIT_2026-02-25.md`.
+5. Track/update concurrency hardening baselines in `docs/internal/CONCURRENCY_AUDIT_2026-02-25.md`.
