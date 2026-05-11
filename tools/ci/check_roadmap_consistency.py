@@ -1,4 +1,17 @@
 #!/usr/bin/env python3
+"""
+Validate that the user-facing status/roadmap surface stays well-formed.
+
+This script enforces the contract from docs/DOCUMENTATION_POLICY.md section 10:
+user-facing docs describe capabilities, not phase numbers. Engineering history
+lives under docs/internal/ and is intentionally not policed here.
+
+What this gate guards:
+- docs/STATUS.md is a one-page capability snapshot with the expected sections.
+- README.md's status summary references docs/STATUS.md and docs/internal/.
+- docs/README.md's contributing section points at docs/internal/.
+- User-facing copy does NOT smuggle phase IDs back in.
+"""
 import argparse
 import re
 import sys
@@ -24,8 +37,13 @@ def require_regex(errors, haystack: str, pattern: str, label: str):
         errors.append(f"{label}: missing expected pattern: {pattern}")
 
 
+def require_no_regex(errors, haystack: str, pattern: str, label: str):
+    if re.search(pattern, haystack, re.MULTILINE):
+        errors.append(f"{label}: found forbidden pattern: {pattern}")
+
+
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Validate roadmap/status summaries stay aligned")
+    parser = argparse.ArgumentParser(description="Validate user-facing status/roadmap surface")
     parser.add_argument("--repo-root", required=True)
     args = parser.parse_args()
 
@@ -35,99 +53,75 @@ def main() -> int:
     readme = read_text(repo_root, "README.md")
     docs_readme = read_text(repo_root, "docs/README.md")
     docs_status = read_text(repo_root, "docs/STATUS.md")
-    phase7 = read_text(repo_root, "docs/PHASE7_ROADMAP.md")
-    phase18 = read_text(repo_root, "docs/PHASE18_ROADMAP.md")
-    phase2_phase3 = read_text(repo_root, "docs/PHASE2_PHASE3_ROADMAP.md")
-    eoc_v1 = read_text(repo_root, "docs/EOC_V1_ROADMAP.md")
 
-    require_regex(
-        errors,
-        phase7,
-        r"^Status: Complete for current first-party scope",
-        "docs/PHASE7_ROADMAP.md",
-    )
-    require_contains(
+    # docs/STATUS.md must be a capability-level snapshot, not the engineering
+    # journal. See docs/internal/STATUS_HISTORY.md for the journal.
+    for marker in [
+        "## Platform Support",
+        "## Capability Maturity",
+        "### Shipped",
+        "### Preview",
+        "### In Flight",
+    ]:
+        require_contains(errors, docs_status, marker, "docs/STATUS.md")
+
+    require_contains(errors, docs_status, "Linux", "docs/STATUS.md")
+    require_contains(errors, docs_status, "macOS", "docs/STATUS.md")
+    require_contains(errors, docs_status, "Windows", "docs/STATUS.md")
+    require_contains(errors, docs_status, "docs/internal/", "docs/STATUS.md")
+
+    # The capability table should mention each first-party module by name.
+    for module in ["auth", "admin-ui", "jobs", "notifications", "storage", "ops", "search"]:
+        require_contains(errors, docs_status, module, "docs/STATUS.md")
+
+    # Phase IDs must not appear in the user-facing status snapshot or the
+    # README status summary. Engineering history references must be qualified
+    # by the docs/internal/ path.
+    forbidden_phase_id = r"\bPhase\s*\d"
+    require_no_regex(errors, docs_status, forbidden_phase_id, "docs/STATUS.md")
+
+    # The README status summary should point at docs/STATUS.md and
+    # docs/internal/ rather than naming specific phase roadmaps.
+    require_contains(errors, readme, "docs/STATUS.md", "README.md")
+    require_contains(errors, readme, "docs/internal/", "README.md")
+    require_no_regex(
         errors,
         readme,
-        "Phase 7: complete for current first-party scope",
+        r"docs/PHASE\d+_ROADMAP\.md",
         "README.md",
     )
-    require_contains(
-        errors,
-        docs_status,
-        "Phase 7: complete for current first-party scope",
-        "docs/STATUS.md",
-    )
-    require_not_contains(
-        errors,
-        readme,
-        "Phase 7A: initial slice implemented",
-        "README.md",
-    )
-    require_not_contains(
-        errors,
-        docs_status,
-        "Phase 7A: initial slice implemented",
-        "docs/STATUS.md",
-    )
 
-    require_regex(
-        errors,
-        phase18,
-        r"^Status: complete on 2026-03-14 \(`18A-18H`\)",
-        "docs/PHASE18_ROADMAP.md",
-    )
-    require_contains(
-        errors,
-        readme,
-        "Phase 18: complete (`18A-18H` delivered on 2026-03-14",
-        "README.md",
-    )
-    require_contains(
-        errors,
-        docs_status,
-        "Phase 18: complete (`18A-18H` delivered on 2026-03-14",
-        "docs/STATUS.md",
-    )
-
-    require_regex(
-        errors,
-        eoc_v1,
-        r"^Status: Complete with follow-on backlog$",
-        "docs/EOC_V1_ROADMAP.md",
-    )
-    require_not_contains(
-        errors,
-        eoc_v1,
-        "## Suggested Immediate Next Steps",
-        "docs/EOC_V1_ROADMAP.md",
-    )
-    require_contains(
-        errors,
-        eoc_v1,
-        "## Post-v1 Follow-On Backlog",
-        "docs/EOC_V1_ROADMAP.md",
-    )
-
-    require_contains(
-        errors,
-        phase2_phase3,
-        "Status: Historical aggregate index",
-        "docs/PHASE2_PHASE3_ROADMAP.md",
-    )
-    require_contains(
+    # The curated docs index points at docs/internal/ for historical material.
+    require_contains(errors, docs_readme, "internal/", "docs/README.md")
+    require_no_regex(
         errors,
         docs_readme,
-        "[Combined Roadmap Index (Historical Aggregate)](PHASE2_PHASE3_ROADMAP.md)",
+        r"\]\(PHASE\d+",
         "docs/README.md",
     )
+    require_no_regex(
+        errors,
+        docs_readme,
+        r"\]\(SESSION_HANDOFF_",
+        "docs/README.md",
+    )
+
+    # docs/internal/ must exist as the home of engineering history.
+    internal_dir = repo_root / "docs" / "internal"
+    if not internal_dir.is_dir():
+        errors.append("docs/internal/: expected engineering-history directory is missing")
+    else:
+        # Sanity: at least one PHASE roadmap should live under docs/internal/.
+        any_phase = any(p.name.startswith("PHASE") for p in internal_dir.iterdir())
+        if not any_phase:
+            errors.append("docs/internal/: expected at least one PHASE*_ROADMAP.md under engineering-history")
 
     if errors:
         for error in errors:
             print(f"roadmap-consistency: {error}", file=sys.stderr)
         return 1
 
-    print("roadmap-consistency: summary docs aligned")
+    print("roadmap-consistency: user-facing status surface aligned")
     return 0
 
 

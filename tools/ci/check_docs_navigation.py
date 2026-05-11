@@ -13,6 +13,11 @@ def require_contains(errors, haystack: str, needle: str, label: str) -> None:
         errors.append(f"{label}: missing expected text: {needle}")
 
 
+def require_not_contains(errors, haystack: str, needle: str, label: str) -> None:
+    if needle in haystack:
+        errors.append(f"{label}: found stale text: {needle}")
+
+
 def require_order(errors, haystack: str, first: str, second: str, label: str) -> None:
     first_index = haystack.find(first)
     second_index = haystack.find(second)
@@ -49,14 +54,19 @@ def main() -> int:
     require_contains(errors, readme, "docs/APP_AUTHORING_GUIDE.md", "README.md")
     require_contains(errors, readme, "docs/README.md", "README.md")
 
+    # docs/README.md is the curated user-facing index. It must group user docs
+    # by reader intent and must not surface engineering/historical material at
+    # the top level. See docs/DOCUMENTATION_POLICY.md section 10.
     for marker in [
-        "## New Developers",
-        "## App Authoring",
-        "## Modules and Integrations",
+        "## Start Here",
+        "## Building Apps",
+        "## Modules",
+        "## Data Layer",
         "## Operations and Deployment",
         "## Reference",
-        "## Contributor and Historical Docs",
+        "## Migration Guides",
         "## Examples",
+        "## Contributing and Internal Material",
     ]:
         require_contains(errors, docs_readme, marker, "docs/README.md")
 
@@ -65,6 +75,25 @@ def main() -> int:
     require_contains(errors, docs_readme, "[Lite Mode Guide](LITE_MODE_GUIDE.md)", "docs/README.md")
     require_contains(errors, docs_readme, "[Plugin + Service Guide](PLUGIN_SERVICE_GUIDE.md)", "docs/README.md")
     require_contains(errors, docs_readme, "[Frontend Starters Guide](FRONTEND_STARTERS.md)", "docs/README.md")
+    require_contains(errors, docs_readme, "[Documentation Policy](DOCUMENTATION_POLICY.md)", "docs/README.md")
+    require_contains(errors, docs_readme, "internal/", "docs/README.md")
+
+    # The curated index must not surface phase-numbered, dated, or
+    # app-specific reconciliation documents at the user-facing layer.
+    for stale_pattern in [
+        "PHASE",
+        "SESSION_HANDOFF_",
+        "_RECONCILIATION_",
+        "CONCURRENCY_AUDIT_",
+        "BENCHMARK_HANDOFF_",
+    ]:
+        # Allow references to docs/internal/<stale_pattern>… but reject
+        # references to <stale_pattern> at the docs/ root layer.
+        for line in docs_readme.splitlines():
+            if stale_pattern in line and "internal/" not in line and "](" in line:
+                errors.append(
+                    f"docs/README.md: stale user-facing link to {stale_pattern} material: {line.strip()}"
+                )
 
     for rel_path in [
         "docs/APP_AUTHORING_GUIDE.md",
@@ -72,7 +101,9 @@ def main() -> int:
         "docs/LITE_MODE_GUIDE.md",
         "docs/PLUGIN_SERVICE_GUIDE.md",
         "docs/FRONTEND_STARTERS.md",
-        "docs/PHASE22_ROADMAP.md",
+        "docs/DOCUMENTATION_POLICY.md",
+        "docs/STATUS.md",
+        "docs/internal",
     ]:
         require_file(errors, repo_root / rel_path, repo_root)
 
