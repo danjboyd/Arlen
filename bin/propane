@@ -946,7 +946,7 @@ done
 
 while (( shutting_down == 0 )); do
   now_seconds="$(date +%s)"
-  if (( now_seconds - last_fd_pressure_check >= worker_fd_check_seconds )); then
+  if (( once_mode == 0 )) && (( now_seconds - last_fd_pressure_check >= worker_fd_check_seconds )); then
     check_worker_fd_pressure
     last_fd_pressure_check="$now_seconds"
   fi
