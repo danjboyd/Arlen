@@ -1,6 +1,6 @@
-# Phase 16 Modules Demo
+# Multi-Module Demo
 
-This sample app demonstrates the matured Phase 16 module stack working
+This sample app demonstrates the matured multi-module stack working
 together:
 
 - `auth`
@@ -11,7 +11,7 @@ together:
 - `ops`
 - `search`
 
-Compared with the Phase 14 demo, this app emphasizes the new Phase 16 seams:
+Compared with the initial multi-module demo, this app emphasizes the matured seams:
 
 - richer admin resource metadata with filters, sorts, bulk actions, exports,
   and autocomplete

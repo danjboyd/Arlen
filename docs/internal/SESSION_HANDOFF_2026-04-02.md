@@ -39,7 +39,7 @@ resume from a concrete repo state rather than chat history.
     guidance, and generated package/manifest metadata suitable for app-local,
     monorepo, and internal-package workflows
 - Added the checked-in React/Vite reference workspace:
-  - `examples/phase28_react_reference`
+  - `examples/react_typescript_reference`
   - demonstrates consumption of generated models, validators, query/resource
     metadata, client helpers, and optional React/TanStack helpers
 - Tightened docs and status surfaces:
@@ -75,7 +75,7 @@ source tools/source_gnustep_env.sh
 make test-unit-filter TEST=ORMTypeScriptCodegenTests
 bash tools/ci/run_docs_quality.sh
 
-cd examples/phase28_react_reference
+cd examples/react_typescript_reference
 npm install --package-lock=false
 npm run generate:arlen
 npm run typecheck

@@ -1,6 +1,6 @@
-# Phase 14 Modules Demo
+# Multi-Module Demo (initial)
 
-This sample app demonstrates the full Phase 14 module stack working together:
+This sample app demonstrates the initial multi-module stack working together:
 
 - `auth`
 - `admin-ui`

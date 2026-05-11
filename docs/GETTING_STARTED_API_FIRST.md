@@ -64,7 +64,7 @@ If your OpenAPI export carries top-level `x-arlen.resources`,
 explicit resource/admin/query/module registries instead of making the frontend
 infer them from route names.
 
-See `examples/phase28_react_reference/README.md` for a checked-in React
+See `examples/react_typescript_reference/README.md` for a checked-in React
 workspace that consumes the generated package shape.
 
 If you are validating this generated surface inside the Arlen repo itself, the

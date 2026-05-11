@@ -135,10 +135,10 @@ one coherent toolchain.
 - [API-First Reference App](examples/api_reference/README.md): JSON/OpenAPI-heavy reference surface.
 - [Dataverse Reference](examples/dataverse_reference/README.md): app-level Dataverse config, controller helpers, and codegen flow.
 - [Arlen ORM Reference](examples/arlen_orm_reference/README.md): optional SQL and Dataverse ORM reference surface.
-- [React/TypeScript Reference](examples/phase28_react_reference/README.md): descriptor-first React/TypeScript workspace showing generated validators, query contracts, module/resource metadata, and optional React helpers.
-- [Reference Server (TypeScript Integration)](examples/phase28_reference/README.md): live backend used by the generated TypeScript integration and React reference lanes.
+- [React/TypeScript Reference](examples/react_typescript_reference/README.md): descriptor-first React/TypeScript workspace showing generated validators, query contracts, module/resource metadata, and optional React helpers.
+- [Reference Server (TypeScript Integration)](examples/typescript_reference_server/README.md): live backend used by the generated TypeScript integration and React reference lanes.
 - [Auth + Admin Demo](examples/auth_admin_demo/README.md): modules, auth, and admin composition.
-- [Multi-Module Demo](examples/phase16_modules_demo/README.md): broader multi-module app surface (`admin-ui` + `search` + `ops`).
+- [Multi-Module Demo](examples/multi_module_demo/README.md): broader multi-module app surface (`admin-ui` + `search` + `ops`).
 - [Search Module Playbook](examples/search_module_playbook/README.md): scaffold-first path for app-owned search resources and engine swaps.
 - [Tech Demo](examples/tech_demo/README.md): larger end-to-end example with Arlen UI/runtime features, including `/tech-demo/live`.
 
@@ -258,7 +258,7 @@ Run `module migrate --env <env>` before the first local `auth` registration or
 login attempt. Missing auth tables now surface an actionable module-migrate
 message instead of a generic database error.
 
-See `examples/phase16_modules_demo/README.md` for the canonical app-owned
+See `examples/multi_module_demo/README.md` for the canonical app-owned
 `admin-ui` + `search` + `ops` composition path on top of the first-party
 module stack.
 

@@ -151,7 +151,7 @@ and whether each route came from plist configuration or Objective-C code.
 - generating descriptor-first TypeScript models, validators, query/resource
   metadata, clients, and optional React helpers for a frontend app:
   `docs/GETTING_STARTED_API_FIRST.md`, `arlen typescript-codegen`, and
-  `examples/phase28_react_reference/README.md`
+  `examples/react_typescript_reference/README.md`
 - using Dataverse through the Web API: `docs/DATAVERSE.md`
 
 ## 8. Optional Dataverse Path

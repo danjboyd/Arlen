@@ -17,7 +17,7 @@ ARLEN_PHASE28_TS_GENERATED_OUTPUT_DIR="$output_dir/generated" \
 ARLEN_PHASE28_TS_INTEGRATION_OUTPUT_DIR="$output_dir/integration" \
   bash "$repo_root/tools/ci/run_phase28_ts_integration.sh"
 ARLEN_PHASE28_REACT_REFERENCE_OUTPUT_DIR="$output_dir/react_reference" \
-  bash "$repo_root/tools/ci/run_phase28_react_reference.sh"
+  bash "$repo_root/tools/ci/run_react_typescript_reference.sh"
 
 make -C "$repo_root" docs-api 2>&1 | tee "$docs_log"
 bash "$repo_root/tools/ci/run_docs_quality.sh" 2>&1 | tee -a "$docs_log"

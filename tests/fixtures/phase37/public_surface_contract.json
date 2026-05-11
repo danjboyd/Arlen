@@ -308,7 +308,7 @@
       ],
       "integrationEvidence": [
         "tests/typescript/integration/live_contract.test.ts",
-        "examples/phase28_reference"
+        "examples/typescript_reference_server"
       ],
       "optionalLiveEvidence": [],
       "requiredLanes": [

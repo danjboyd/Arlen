@@ -1006,7 +1006,7 @@ Last updated: 2026-05-04
   - added the dedicated `tests/typescript/` harness with focused generated,
     unit, integration, and React helper coverage on top of the earlier
     Objective-C/XCTest generator tests
-  - added the live `examples/phase28_reference` backend plus merged-OpenAPI
+  - added the live `examples/typescript_reference_server` backend plus merged-OpenAPI
     parity checks so the emitted `/openapi.json` contract must match the
     checked-in Phase 28 fixture, including scalar `format` hints
   - added repo-native `phase28-ts-generated`, `phase28-ts-unit`,
@@ -1106,7 +1106,7 @@ Last updated: 2026-05-04
   - tightened package/workspace ergonomics with generated exports, manifest
     metadata, package README guidance, `types`, and `tsc`-ready package
     scaffolding for app-local, monorepo, and internal-package adoption shapes
-  - added the checked-in `examples/phase28_react_reference` workspace to show
+  - added the checked-in `examples/react_typescript_reference` workspace to show
     React-side consumption patterns without making React a core runtime
     dependency for Arlen apps that do not opt in
   - expanded fixture-backed unit coverage for descriptor input, ORM manifest
@@ -1146,9 +1146,9 @@ Last updated: 2026-05-04
   - `source tools/source_gnustep_env.sh && make docs-api`
   - `source tools/source_gnustep_env.sh && make docs-html`
   - `source tools/source_gnustep_env.sh && bash tools/ci/run_docs_quality.sh`
-  - `cd examples/phase28_react_reference && npm install --package-lock=false`
-  - `cd examples/phase28_react_reference && npm run generate:arlen`
-  - `cd examples/phase28_react_reference && npm run typecheck`
+  - `cd examples/react_typescript_reference && npm install --package-lock=false`
+  - `cd examples/react_typescript_reference && npm run generate:arlen`
+  - `cd examples/react_typescript_reference && npm run typecheck`
   - `source tools/source_gnustep_env.sh && make phase26-confidence`
   - `source tools/source_gnustep_env.sh && make phase27-confidence`
     when `ARLEN_PG_TEST_DSN`, `ARLEN_PHASE27_MEILI_URL`, and
@@ -1915,7 +1915,7 @@ entries, not current plan-of-record items.
   - made the built-in `users` resource conditional on a configured database while keeping provider-only app resources valid without a database connection
   - added `Phase16FTests.m` and focused integration coverage for bulk actions, exports, typed filters, autocomplete, and resource metadata parity
 - Completed Phase 16G docs, example app, and confidence closeout:
-  - added `examples/phase16_modules_demo/` as the canonical matured-module reference app spanning `auth`, `admin-ui`, `jobs`, `notifications`, `storage`, `ops`, and `search`
+  - added `examples/multi_module_demo/` as the canonical matured-module reference app spanning `auth`, `admin-ui`, `jobs`, `notifications`, `storage`, `ops`, and `search`
   - added `make phase16-confidence` plus deterministic artifact generation under `build/release_confidence/phase16/`
   - finished the Phase 16 docs/status pass across the top-level onboarding path and the `search`, `ops`, and `admin-ui` module guides
 - Tightened mounted admin runtime behavior and stale expectations uncovered by the new confidence path:
@@ -1954,7 +1954,7 @@ entries, not current plan-of-record items.
   - added job-backed `search.reindex` execution, `admin-ui` auto-resource indexing, shared `search_indexes` admin resource, and ops summary integration
   - added `Phase14HTests.m` and `Phase14SearchIntegrationTests.m` coverage for metadata normalization, fail-closed query parsing, and reindex/admin/ops visibility
 - Completed Phase 14I docs, sample app, and confidence artifacts:
-  - added `examples/phase14_modules_demo/` showing `auth`, `admin-ui`, `jobs`, `notifications`, `storage`, `ops`, and `search` installed together
+  - added `examples/multi_module_demo_initial/` showing `auth`, `admin-ui`, `jobs`, `notifications`, `storage`, `ops`, and `search` installed together
   - added `docs/OPS_MODULE.md` and `docs/SEARCH_MODULE.md` and updated the module/bootstrap documentation path
   - added `make phase14-confidence` with artifact generation under `build/release_confidence/phase14/`
 - Completed Phase 14D notifications channels, previews, preferences, and admin integration:

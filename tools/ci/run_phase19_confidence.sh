@@ -5,7 +5,7 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 final_output_dir="${ARLEN_PHASE19_OUTPUT_DIR:-$repo_root/build/release_confidence/phase19}"
 work_dir="${ARLEN_PHASE19_WORK_DIR:-$repo_root/.phase19-confidence-work}"
 output_dir="$work_dir"
-app_root="${ARLEN_PHASE19_APP_ROOT:-$repo_root/examples/phase14_modules_demo}"
+app_root="${ARLEN_PHASE19_APP_ROOT:-$repo_root/examples/multi_module_demo_initial}"
 gnustep_sh="/usr/GNUstep/System/Library/Makefiles/GNUstep.sh"
 overall_status=0
 

@@ -366,7 +366,7 @@ Delivered on 2026-04-03.
 
 Delivered on 2026-04-03.
 
-- Added the live `examples/phase28_reference` backend used by the Phase 28
+- Added the live `examples/typescript_reference_server` backend used by the Phase 28
   TypeScript and React lanes.
 - Exercised both representative frontend scenarios from the roadmap:
   - back-office CRUD/resource management

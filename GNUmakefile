@@ -290,7 +290,7 @@ BOOMHAUER_ENTRY_OBJS := $(call objs_from,tools/boomhauer.m)
 SMOKE_RENDER_ENTRY_OBJS := $(call objs_from,tools/eoc_smoke_render.m)
 TECH_DEMO_SERVER_ENTRY_OBJS := $(call objs_from,examples/tech_demo/src/tech_demo_server.m)
 API_REFERENCE_SERVER_ENTRY_OBJS := $(call objs_from,examples/api_reference/src/api_reference_server.m)
-PHASE28_REFERENCE_SERVER_ENTRY_OBJS := $(call objs_from,examples/phase28_reference/src/phase28_reference_server.m)
+PHASE28_REFERENCE_SERVER_ENTRY_OBJS := $(call objs_from,examples/typescript_reference_server/src/typescript_reference_server_server.m)
 AUTH_PRIMITIVES_SERVER_ENTRY_OBJS := $(call objs_from,examples/auth_primitives/src/auth_primitives_server.m)
 MIGRATION_SAMPLE_SERVER_ENTRY_OBJS := $(call objs_from,examples/gsweb_migration/src/migration_sample_server.m)
 ARLEN_DATA_EXAMPLE_ENTRY_OBJS := $(call objs_from,examples/arlen_data/src/arlen_data_example.m)
@@ -821,7 +821,7 @@ phase28-ts-integration:
 >bash ./tools/ci/run_phase28_ts_integration.sh
 
 phase28-react-reference:
->bash ./tools/ci/run_phase28_react_reference.sh
+>bash ./tools/ci/run_react_typescript_reference.sh
 
 phase28-confidence:
 >bash ./tools/ci/run_phase28_confidence.sh
