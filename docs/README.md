@@ -109,13 +109,13 @@ toolchain env directly for the Linux/GNUstep path. On macOS, use
 - [Auth Primitives Example](../examples/auth_primitives/README.md): low-level auth primitive composition.
 - [Auth + Admin Demo](../examples/auth_admin_demo/README.md): modules, auth, and admin composition.
 - [Auth UI Modes](../examples/auth_ui_modes/README.md): `headless`, `module-ui`, and `generated-app-ui` side by side.
-- [Multi-Module Demo](../examples/phase16_modules_demo/README.md): broader multi-module app surface (`admin-ui` + `search` + `ops`).
+- [Multi-Module Demo](../examples/multi_module_demo/README.md): broader multi-module app surface (`admin-ui` + `search` + `ops`).
 - [Search Module Playbook](../examples/search_module_playbook/README.md): scaffold-first path for app-owned search resources and engine swaps.
 - [ArlenData Standalone Example](../examples/arlen_data/README.md): consuming the data layer outside Arlen.
 - [Dataverse Reference](../examples/dataverse_reference/README.md): app-level Dataverse config, controller helpers, and codegen flow.
 - [Arlen ORM Reference](../examples/arlen_orm_reference/README.md): optional SQL and Dataverse ORM reference surface.
-- [React/TypeScript Reference](../examples/phase28_react_reference/README.md): descriptor-first React/TypeScript workspace showing generated validators, query contracts, module/resource metadata, and optional React helpers.
-- [Reference Server (TypeScript Integration)](../examples/phase28_reference/README.md): live backend used by the generated TypeScript integration and React reference lanes.
+- [React/TypeScript Reference](../examples/react_typescript_reference/README.md): descriptor-first React/TypeScript workspace showing generated validators, query contracts, module/resource metadata, and optional React helpers.
+- [Reference Server (TypeScript Integration)](../examples/typescript_reference_server/README.md): live backend used by the generated TypeScript integration and React reference lanes.
 - [GSWeb Migration Sample](../examples/gsweb_migration/README.md): migration-path example from GSWeb.
 
 ## Contributing and Internal Material

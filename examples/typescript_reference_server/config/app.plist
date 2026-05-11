@@ -8,7 +8,7 @@
   session = {
     enabled = YES;
     secret = "phase28-reference-session-secret-0123456789abcdef";
-    cookieName = "phase28_reference_session";
+    cookieName = "typescript_reference_server_session";
     maxAgeSeconds = 1800;
     secure = NO;
     sameSite = "Lax";

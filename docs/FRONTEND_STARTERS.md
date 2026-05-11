@@ -94,4 +94,4 @@ React/TypeScript reference examples instead of these starter presets.
 - `docs/FIRST_APP_GUIDE.md`
 - `docs/CONFIGURATION_REFERENCE.md`
 - `docs/GETTING_STARTED_API_FIRST.md`
-- `../examples/phase28_react_reference/README.md`
+- `../examples/react_typescript_reference/README.md`

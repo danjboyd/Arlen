@@ -8,7 +8,7 @@ output_dir="${ARLEN_PHASE14_OUTPUT_DIR:-$repo_root/build/release_confidence/phas
 xctest_runner="${ARLEN_XCTEST:-xctest}"
 xctest_ld_library_path="${ARLEN_XCTEST_LD_LIBRARY_PATH:-}"
 unit_bundle="${ARLEN_PHASE14_UNIT_BUNDLE:-$repo_root/build/tests/ArlenUnitTests.xctest}"
-example_root="${ARLEN_PHASE14_EXAMPLE_ROOT:-$repo_root/examples/phase14_modules_demo}"
+example_root="${ARLEN_PHASE14_EXAMPLE_ROOT:-$repo_root/examples/multi_module_demo_initial}"
 unit_log="$output_dir/phase14_unit.log"
 module_list_json="$output_dir/phase14_module_list.json"
 doctor_json="$output_dir/phase14_module_doctor.json"
@@ -16,7 +16,7 @@ migrate_json="$output_dir/phase14_module_migrate.json"
 assets_json="$output_dir/phase14_module_assets.json"
 assets_dir="$output_dir/module_assets"
 flow_json="$output_dir/phase14_sample_flow.json"
-server_log="$output_dir/phase14_modules_demo_server.log"
+server_log="$output_dir/multi_module_demo_initial_server.log"
 
 mkdir -p "$output_dir" "${HOME}/GNUstep/Defaults/.lck"
 

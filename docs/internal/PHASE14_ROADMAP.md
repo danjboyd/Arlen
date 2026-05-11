@@ -460,7 +460,7 @@ Deliverables:
 
 Delivered:
 
-- `examples/phase14_modules_demo/` sample app installing `auth`, `admin-ui`, `jobs`, `notifications`, `storage`, `ops`, and `search`
+- `examples/multi_module_demo_initial/` sample app installing `auth`, `admin-ui`, `jobs`, `notifications`, `storage`, `ops`, and `search`
 - `docs/OPS_MODULE.md` and `docs/SEARCH_MODULE.md` plus updated bootstrap/reference docs
 - `make phase14-confidence` and artifact generation under `build/release_confidence/phase14/`
 

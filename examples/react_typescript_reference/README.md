@@ -1,6 +1,6 @@
-# Phase 28 React Reference
+# React/TypeScript Reference
 
-This example shows the intended app-owned workflow for Phase 28
+This example shows the intended app-owned workflow for the descriptor-first
 TypeScript/React consumption:
 
 - generate descriptor-first contracts into a local folder
@@ -14,7 +14,7 @@ package shape is reproducible from a clean checkout.
 
 Phase `28J` also wires the same workspace into a live Arlen-backed lane. The
 repo-native CI scripts now fetch `/openapi.json` from the dedicated
-`examples/phase28_reference` server, merge the checked-in Phase 28 `x-arlen`
+`examples/typescript_reference_server` server, merge the checked-in `x-arlen`
 metadata, regenerate this workspace, and then run `typecheck` plus `build`.
 
 ## Layout
@@ -30,7 +30,7 @@ Build `arlen` first, then generate the local package:
 
 ```bash
 source tools/source_gnustep_env.sh
-cd examples/phase28_react_reference
+cd examples/react_typescript_reference
 npm install
 npm run generate:arlen
 ```
@@ -44,19 +44,19 @@ ARLEN_PHASE28_OPENAPI_INPUT=/tmp/phase28_live_openapi.json npm run generate:arle
 
 That writes:
 
-- `examples/phase28_react_reference/generated/arlen/src/models.ts`
-- `examples/phase28_react_reference/generated/arlen/src/validators.ts`
-- `examples/phase28_react_reference/generated/arlen/src/query.ts`
-- `examples/phase28_react_reference/generated/arlen/src/client.ts`
-- `examples/phase28_react_reference/generated/arlen/src/react.ts`
-- `examples/phase28_react_reference/generated/arlen/src/meta.ts`
+- `examples/react_typescript_reference/generated/arlen/src/models.ts`
+- `examples/react_typescript_reference/generated/arlen/src/validators.ts`
+- `examples/react_typescript_reference/generated/arlen/src/query.ts`
+- `examples/react_typescript_reference/generated/arlen/src/client.ts`
+- `examples/react_typescript_reference/generated/arlen/src/react.ts`
+- `examples/react_typescript_reference/generated/arlen/src/meta.ts`
 
 ## Run The Workspace
 
 After generation, you can open the reference app locally:
 
 ```bash
-cd examples/phase28_react_reference
+cd examples/react_typescript_reference
 VITE_ARLEN_BASE_URL=http://127.0.0.1:3000 npm run dev
 ```
 

@@ -91,7 +91,7 @@ Delivered on 2026-03-14:
 - regression coverage now verifies framework-touch, template-touch, and
   unit-test-only rebuild scope, and `make phase19-confidence` writes timing +
   scope artifacts under `build/release_confidence/phase19`
-- current Phase 19 confidence baseline (`examples/phase14_modules_demo` app
+- current Phase 19 confidence baseline (`examples/multi_module_demo_initial` app
   root):
   - `make build-tests` cold after `make clean`: `70.99s`
   - `make build-tests` warm/no-op: `0.37s`

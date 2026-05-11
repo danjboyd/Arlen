@@ -17,7 +17,7 @@ This note records the Phase 28 closeout checkpoint after executing `28I-28L`.
 
 - Added the dedicated `tests/typescript/` harness plus the checked-in
   `tests/fixtures/phase28/typescript_snapshot.json` characterization artifact.
-- Added the live `examples/phase28_reference` backend used by the TypeScript
+- Added the live `examples/typescript_reference_server` backend used by the TypeScript
   integration and React reference lanes.
 - Added the Phase 28 CI/common tooling under `tools/ci/` plus GNUmake targets
   for generated, unit, integration, React reference, and aggregate confidence

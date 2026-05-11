@@ -3,8 +3,8 @@ set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 output_dir="${ARLEN_PHASE28_REACT_REFERENCE_OUTPUT_DIR:-$repo_root/build/release_confidence/phase28/react_reference}"
-log_path="$output_dir/phase28_react_reference.log"
-server_log="$output_dir/phase28_reference_server.log"
+log_path="$output_dir/react_typescript_reference.log"
+server_log="$output_dir/typescript_reference_server_server.log"
 live_openapi="$output_dir/live_openapi.json"
 merged_openapi="$output_dir/merged_openapi.json"
 comparison_path="$output_dir/openapi_comparison.json"
@@ -20,7 +20,7 @@ phase28_require_command node
 phase28_source_gnustep "$repo_root"
 
 make -C "$repo_root" arlen phase28-reference-server >/dev/null
-phase28_ensure_npm_deps "$repo_root/examples/phase28_react_reference" "vite"
+phase28_ensure_npm_deps "$repo_root/examples/react_typescript_reference" "vite"
 
 port="$(phase28_pick_port)"
 server_pid=""
@@ -34,7 +34,7 @@ cleanup() {
 
 trap cleanup EXIT
 
-ARLEN_APP_ROOT=examples/phase28_reference "$repo_root/build/phase28-reference-server" \
+ARLEN_APP_ROOT=examples/typescript_reference_server "$repo_root/build/phase28-reference-server" \
   --host 127.0.0.1 \
   --port "$port" \
   >"$server_log" 2>&1 &
@@ -50,7 +50,7 @@ python3 "$repo_root/tools/ci/merge_phase28_openapi.py" \
 
 set +e
 {
-  cd "$repo_root/examples/phase28_react_reference"
+  cd "$repo_root/examples/react_typescript_reference"
   ARLEN_PHASE28_OPENAPI_INPUT="$merged_openapi" npm run generate:arlen
   ARLEN_PHASE28_BASE_URL="http://127.0.0.1:${port}" npm run typecheck
   ARLEN_PHASE28_BASE_URL="http://127.0.0.1:${port}" npm run build
@@ -58,14 +58,14 @@ set +e
 status=$?
 set -e
 
-find "$repo_root/examples/phase28_react_reference/dist" -type f 2>/dev/null | sort >"$dist_listing" || true
+find "$repo_root/examples/react_typescript_reference/dist" -type f 2>/dev/null | sort >"$dist_listing" || true
 
 cat >"$manifest_path" <<EOF
 {
   "status": "$([[ $status -eq 0 ]] && echo pass || echo fail)",
   "artifacts": [
-    "phase28_react_reference.log",
-    "phase28_reference_server.log",
+    "react_typescript_reference.log",
+    "typescript_reference_server_server.log",
     "live_openapi.json",
     "merged_openapi.json",
     "openapi_comparison.json",
