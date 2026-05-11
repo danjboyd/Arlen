@@ -5,7 +5,7 @@ Last updated: 2026-03-21
 
 Related docs:
 - `docs/COMPARATIVE_BENCHMARKING.md`
-- `docs/COMPETITIVE_BENCHMARK_ROADMAP.md`
+- `docs/internal/COMPETITIVE_BENCHMARK_ROADMAP.md`
 - `docs/PHASEB_PARITY_CHECKLIST_FASTAPI.md`
 - `docs/PHASEC_BENCHMARK_PROTOCOL.md`
 - `tests/performance/protocols/phased_baseline_campaign.json`

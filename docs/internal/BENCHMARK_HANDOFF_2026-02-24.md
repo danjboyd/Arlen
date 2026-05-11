@@ -5,13 +5,13 @@ Historical handoff note:
 This document preserves the original Phase D checkpoint. The current benchmark
 roadmap state is archived as complete via the external comparative benchmark
 program described in `docs/COMPARATIVE_BENCHMARKING.md` and
-`docs/COMPETITIVE_BENCHMARK_ROADMAP.md`.
+`docs/internal/COMPETITIVE_BENCHMARK_ROADMAP.md`.
 
 Status snapshot:
 
 - Competitive benchmark phases complete: `A`, `B`, `C`, `D`
 - Remaining phases at handoff time: `E`, `F`
-- Current roadmap state: `docs/COMPETITIVE_BENCHMARK_ROADMAP.md` is archived; the sibling `../ArlenBenchmarking` program now carries the comparative optimization/reporting/publication track
+- Current roadmap state: `docs/internal/COMPETITIVE_BENCHMARK_ROADMAP.md` is archived; the sibling `../ArlenBenchmarking` program now carries the comparative optimization/reporting/publication track
 
 Current resolution:
 

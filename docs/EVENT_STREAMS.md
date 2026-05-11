@@ -1,6 +1,6 @@
 # Durable Event Streams
 
-Arlen Phase 33 adds a narrow durable event-stream seam between the existing
+Arlen adds a narrow durable event-stream seam between the existing
 realtime transport helpers and higher-level module semantics.
 
 Use this seam when your app needs:
@@ -191,7 +191,7 @@ not imply data loss if the client still has a valid durable cursor.
 
 ## TypeScript Consumer Surface
 
-Phase 33 extends the existing generated TypeScript package with
+The seam extends the existing generated TypeScript package with
 `src/realtime.ts`.
 
 The plain consumer surface includes:
@@ -238,7 +238,7 @@ Use the durable event-stream seam when:
 
 ## Module Boundary
 
-Phase 33 closes with a narrow core boundary.
+The seam closes with a narrow core boundary.
 
 Reasonable follow-on work above this seam includes:
 

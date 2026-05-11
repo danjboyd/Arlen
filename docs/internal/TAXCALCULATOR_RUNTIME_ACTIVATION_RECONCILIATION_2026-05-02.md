@@ -17,7 +17,7 @@ Ownership rule:
 
 | TaxCalculator report | Upstream status | Evidence |
 | --- | --- | --- |
-| `arlen deploy release` can activate a release without successfully restarting the configured runtime service | fixed upstream; awaiting downstream revalidation | `docs/OPEN_ISSUES.md` (`ARLEN-BUG-031`), `tools/arlen.m`, `tests/integration/DeploymentIntegrationTests.m`, `docs/DEPLOYMENT.md`, `docs/CLI_REFERENCE.md` |
+| `arlen deploy release` can activate a release without successfully restarting the configured runtime service | fixed upstream; awaiting downstream revalidation | `docs/internal/OPEN_ISSUES.md` (`ARLEN-BUG-031`), `tools/arlen.m`, `tests/integration/DeploymentIntegrationTests.m`, `docs/DEPLOYMENT.md`, `docs/CLI_REFERENCE.md` |
 
 ## Notes
 

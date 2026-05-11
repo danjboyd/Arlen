@@ -1,6 +1,6 @@
 # Jobs Module
 
-The first-party `jobs` module productizes queue and scheduler workflows on top of the Phase 3 `ALNJobAdapter` and `ALNJobWorker` contracts, with durable operator metadata, multi-queue controls, and deterministic retry/idempotency semantics.
+The first-party `jobs` module productizes queue and scheduler workflows on top of the `ALNJobAdapter` and `ALNJobWorker` contracts, with durable operator metadata, multi-queue controls, and deterministic retry/idempotency semantics.
 
 ## Install
 
@@ -113,7 +113,7 @@ The operator surfaces are protected by the shared auth/admin contracts:
 - `admin` role required
 - AAL2 step-up required
 
-That keeps the jobs dashboard aligned with the Phase 13 auth and admin model without requiring the `admin-ui` module to render it.
+That keeps the jobs dashboard aligned with the first-party auth and admin model without requiring the `admin-ui` module to render it.
 
 ## Defaults
 

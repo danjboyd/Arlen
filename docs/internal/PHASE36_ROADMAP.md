@@ -286,7 +286,7 @@ Required docs:
 - `docs/GETTING_STARTED.md`
 - `docs/GETTING_STARTED_QUICKSTART.md`
 - generated app README template
-- `docs/OPEN_ISSUES.md` for closing `ARLEN-BUG-022`
+- `docs/internal/OPEN_ISSUES.md` for closing `ARLEN-BUG-022`
 
 Acceptance:
 

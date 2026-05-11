@@ -76,7 +76,7 @@ Last updated: 2026-05-04
 - Added upstream reconciliation notes for the May 1, 2026 TaxCalculator Phase
   9J blocker:
   - `docs/TAXCALCULATOR_PHASE9J_RECONCILIATION_2026-05-01.md`
-  - `docs/OPEN_ISSUES.md`
+  - `docs/internal/OPEN_ISSUES.md`
 
 ## Leaving Off (2026-04-30)
 
@@ -105,7 +105,7 @@ Last updated: 2026-05-04
     local tar stream completes
 - Added downstream reconciliation and bug-ledger entries:
   - `docs/TAXCALCULATOR_REPORT_RECONCILIATION_2026-04-30.md`
-  - `docs/OPEN_ISSUES.md`
+  - `docs/internal/OPEN_ISSUES.md`
 - Updated deploy docs to clarify:
   - `transport.sshOptions` is argv-ordered
   - early SSH transport failures remain visible in JSON diagnostics
@@ -182,7 +182,7 @@ Last updated: 2026-05-04
 ## Leaving Off (2026-04-24)
 
 - Continued post-Phase-37 regression-intake hardening:
-  - recorded `ARLEN-BUG-023` / `ISSUE-003` in `docs/OPEN_ISSUES.md`
+  - recorded `ARLEN-BUG-023` / `ISSUE-003` in `docs/internal/OPEN_ISSUES.md`
   - linked the file streaming regressions into the Phase 37 `http_protocol`
     public-surface evidence matrix
   - documented `ARLEN-BUG-023` as the first public bug closed under the
@@ -2410,7 +2410,7 @@ entries, not current plan-of-record items.
   - `docs/PHASE2_PHASE3_ROADMAP.md`
   - `docs/PHASE9_ROADMAP.md`
 - Added competitive benchmarking execution roadmap:
-  - `docs/COMPETITIVE_BENCHMARK_ROADMAP.md`
+  - `docs/internal/COMPETITIVE_BENCHMARK_ROADMAP.md`
   - completed Phase A claim-matrix freeze for v1 Arlen-vs-FastAPI benchmark scenarios
 - Completed Phase B parity implementation for frozen benchmark scenarios:
   - FastAPI reference service + dependency contract (`tests/performance/fastapi_reference/`)

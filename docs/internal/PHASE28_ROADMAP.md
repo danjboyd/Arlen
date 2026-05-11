@@ -10,7 +10,7 @@ Related docs:
 - `docs/ARLEN_ORM_MIGRATIONS.md`
 - `docs/GETTING_STARTED_API_FIRST.md`
 - `docs/FRONTEND_STARTERS.md`
-- `docs/FEATURE_PARITY_MATRIX.md`
+- `docs/internal/FEATURE_PARITY_MATRIX.md`
 - `docs/PHASE26_ROADMAP.md`
 - `docs/DOCUMENTATION_POLICY.md`
 
@@ -19,7 +19,7 @@ Reference inputs reviewed for this roadmap:
 - `docs/ARLEN_ORM_MIGRATIONS.md`
 - `docs/GETTING_STARTED_API_FIRST.md`
 - `docs/FRONTEND_STARTERS.md`
-- `docs/FEATURE_PARITY_MATRIX.md`
+- `docs/internal/FEATURE_PARITY_MATRIX.md`
 - `docs/PHASE26_ROADMAP.md`
 - `examples/arlen_orm_reference/README.md`
 - `src/Arlen/ORM/ALNORMCodegen.m`

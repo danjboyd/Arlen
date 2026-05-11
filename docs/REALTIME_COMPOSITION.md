@@ -1,6 +1,6 @@
 # Realtime and Composition
 
-Phase 3D adds baseline realtime and app-composition contracts to Arlen.
+Arlen adds baseline realtime and app-composition contracts to Arlen.
 
 ## 1. Controller Realtime APIs
 
@@ -68,7 +68,7 @@ Example event dictionary:
 
 The hub is thread-safe and used by websocket channel mode.
 
-## 4.1 Durable Event-Stream Seam (Phase 33)
+## 4.1 Durable Event-Stream Seam
 
 Arlen now also ships a durable core/service event-stream seam under
 `ALNEventStream`:
@@ -96,7 +96,7 @@ Current shipped scope for that seam:
 - websocket stream subscribe helpers layered on the same replay/auth contract
 - SSE stream subscribe helpers layered on the same replay/auth contract
 - HTTP replay/poll helpers layered on the same replay/auth contract
-- a plain generated TypeScript consumer surface in the Phase 28 package under
+- a plain generated TypeScript consumer surface in the generated TypeScript package under
   `src/realtime.ts`
 
 Current non-goals still remain:
@@ -110,7 +110,7 @@ module boundary.
 
 ## 5. Live UI Baseline
 
-Phase 25 adds a fragment-first live UI layer on top of the Phase 3D realtime
+Arlen adds a fragment-first live UI layer on top of the realtime
 transport baseline.
 
 Current pieces:
@@ -148,7 +148,7 @@ Behavior:
 
 This enables modular app composition while preserving existing route/controller contracts.
 
-## 7. Built-In Boomhauer Phase 3D Routes
+## 7. Built-In Boomhauer Realtime Routes
 
 Current sample routes in `boomhauer`:
 
@@ -161,7 +161,7 @@ Current sample routes in `boomhauer`:
 
 ## 8. Verification Coverage
 
-Phase 3D coverage includes:
+Coverage includes:
 
 - unit tests for `ALNRealtimeHub`, mount rewriting, controller realtime helpers
 - integration tests for websocket echo, channel fanout, concurrent SSE requests, and mounted route composition

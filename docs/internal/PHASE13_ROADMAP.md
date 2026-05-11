@@ -8,7 +8,7 @@ Related docs:
 - `docs/PHASE3_ROADMAP.md`
 - `docs/PHASE7_ROADMAP.md`
 - `docs/PHASE2_PHASE3_ROADMAP.md`
-- `docs/FEATURE_PARITY_MATRIX.md`
+- `docs/internal/FEATURE_PARITY_MATRIX.md`
 - `docs/ARLEN_CLI_SPEC.md`
 - `docs/GETTING_STARTED.md`
 

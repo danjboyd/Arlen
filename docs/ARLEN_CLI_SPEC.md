@@ -1,6 +1,6 @@
 # Arlen CLI Specification
 
-Status: Implemented through Phase 29L  
+Status: Implemented  
 Last updated: 2026-04-07
 
 ## 1. Purpose

@@ -22,12 +22,12 @@ Create a new app scaffold.
 - `--json`: emit machine-readable scaffold payload (`phase7g-agent-dx-contracts-v1`)
 - `--help` / `-h`: show command usage
 - scaffold defaults:
-  - `config/deploy.plist.example` with a commented deploy target sample
+ - `config/deploy.plist.example` with a commented deploy target sample
 - full-mode scaffold defaults:
-  - `templates/layouts/main.html.eoc`
-  - `templates/index.html.eoc` with `<%@ layout "layouts/main" %>`
-  - `templates/partials/_nav.html.eoc`
-  - `templates/partials/_feature.html.eoc`
+ - `templates/layouts/main.html.eoc`
+ - `templates/index.html.eoc` with `<%@ layout "layouts/main" %>`
+ - `templates/partials/_nav.html.eoc`
+ - `templates/partials/_feature.html.eoc`
 
 ### `arlen doctor [--env <name>] [--json]`
 
@@ -36,9 +36,9 @@ Run bootstrap environment diagnostics without requiring a framework build.
 - delegated by `bin/arlen` directly to `bin/arlen-doctor` before any `make arlen`
 - intended for first-run toolchain validation (GNUstep/tooling presence)
 - resolves GNUstep shell init in this order: `GNUSTEP_SH`, `GNUSTEP_MAKEFILES`,
-  `gnustep-config --variable=GNUSTEP_MAKEFILES`, then `/usr/GNUstep`
+ `gnustep-config --variable=GNUSTEP_MAKEFILES`, then `/usr/GNUstep`
 - verifies `dispatch/dispatch.h` is available to `clang` after GNUstep init so
-  managed toolchains without libdispatch headers fail early
+ managed toolchains without libdispatch headers fail early
 - `--env <name>`: include the target environment name in output (default `development`)
 - `--json`: emit structured JSON diagnostics
 
@@ -78,7 +78,7 @@ Generator behavior:
 - `migration`: `db/migrations/<timestamp>_<name>.sql`
 - `test`: `tests/<Name>Tests.m`
 - `plugin`: `src/Plugins/<Name>Plugin.{h,m}` and class auto-registration in `config/app.plist` (`plugins.classes`), with optional `--preset` service templates
-  - `redis-cache` preset uses `ALNRedisCacheAdapter` when `ARLEN_REDIS_URL` is configured
+ - `redis-cache` preset uses `ALNRedisCacheAdapter` when `ARLEN_REDIS_URL` is configured
 - `frontend`: deterministic starter assets under `public/frontend/<name_slug>/` with `index.html`, `app.js`, `styles.css`, `starter_manifest.json`, and `README.md`
 - `search`: app-owned searchable resource/provider scaffold plus `config/app.plist` registration and engine migration notes
 
@@ -137,7 +137,7 @@ Named targets:
 `arlen deploy`
 
 - with no subcommand, exits `0` and prints deploy command help plus target
-  discovery next steps
+ discovery next steps
 - with `--json`, emits `workflow = deploy.help`
 - missing `config/deploy.plist` is treated as onboarding state, not an error
 
@@ -154,16 +154,16 @@ Named targets:
 - creates deterministic Linux/Debian-style host scaffolding for that target
 - runs against the local filesystem; it does not SSH to `transport.sshHost`
 - for remote targets, run it on the target host or against an intentionally
-  mounted/staged representation of that host layout before remote push/release
+ mounted/staged representation of that host layout before remote push/release
 - creates:
-  - release/shared/log/tmp directories under the target release root
-  - generated systemd unit under `build/deploy/targets/<target>/systemd/`
-  - generated env example under `build/deploy/targets/<target>/env/`
-  - generated GNUstep runtime wrappers under `build/deploy/targets/<target>/bin/`
-  - generated README with operator follow-up steps
+ - release/shared/log/tmp directories under the target release root
+ - generated systemd unit under `build/deploy/targets/<target>/systemd/`
+ - generated env example under `build/deploy/targets/<target>/env/`
+ - generated GNUstep runtime wrappers under `build/deploy/targets/<target>/bin/`
+ - generated README with operator follow-up steps
 - honors target runtime metadata:
-  - `runtime.gnustepScript`
-  - `runtime.requiresEnvWrapper`
+ - `runtime.gnustepScript`
+ - `runtime.requiresEnvWrapper`
 - does not provision secrets, PostgreSQL, reverse proxies, TLS, or DNS
 
 `arlen deploy target sample`
@@ -180,49 +180,49 @@ Named targets:
 
 - validates release packaging inputs using `tools/deploy/build_release.sh --dry-run`
 - emits a normalized machine payload with:
-  - `workflow = deploy.dryrun`
-  - `manifest_version = phase32-deploy-manifest-v1`
-  - `warnings`, including `multi_worker_state` when production multi-worker
-    config has no durable state signal
-  - nested `build_release` payload from the packaging script
+ - `workflow = deploy.dryrun`
+ - `manifest_version = phase32-deploy-manifest-v1`
+ - `warnings`, including `multi_worker_state` when production multi-worker
+ config has no durable state signal
+ - nested `build_release` payload from the packaging script
 - `arlen deploy plan` remains a deprecated compatibility alias; JSON output
-  records `deprecated_alias = plan`
+ records `deprecated_alias = plan`
 
 `arlen deploy push`
 
 - builds a local immutable release under `releases/<release-id>/`
 - when `[target]` has SSH transport metadata, fails before build/upload with
-  `deploy_target_not_initialized` until `arlen deploy init <target>` has
-  generated the target host artifacts
+ `deploy_target_not_initialized` until `arlen deploy init <target>` has
+ generated the target host artifacts
 - when `[target]` has SSH transport metadata, stages the local release under
-  `build/deploy/targets/<target>/local-releases/` and uploads it to the remote
-  target release path over SSH/tar streaming
+ `build/deploy/targets/<target>/local-releases/` and uploads it to the remote
+ target release path over SSH/tar streaming
 - preserves `transport.sshOptions` in manifest order so positional SSH option
-  pairs such as `("-F", "/dev/null")` remain adjacent (`ARLEN-BUG-025`)
+ pairs such as `("-F", "/dev/null")` remain adjacent (`ARLEN-BUG-025`)
 - SSH transport uses argv-level local process execution and sends the remote
-  shell as one `bash -lc '<script>'` command string so SSH remote-command
-  reparsing cannot split the script into `bash -lc` positional arguments
-  (`ARLEN-BUG-021`)
+ shell as one `bash -lc '<script>'` command string so SSH remote-command
+ reparsing cannot split the script into `bash -lc` positional arguments
+ (`ARLEN-BUG-021`)
 - if SSH exits before upload completes, terminates the local tar producer and
-  emits `deploy_target_transport_failed` in `--json` mode with captured
-  transport output (`ARLEN-BUG-026`)
+ emits `deploy_target_transport_failed` in `--json` mode with captured
+ transport output (`ARLEN-BUG-026`)
 - local release build capture uses file-backed stdout/stderr capture, so noisy
-  compiler output cannot fill an `NSPipe` and hang before JSON error emission
-  (`ARLEN-BUG-027`)
+ compiler output cannot fill an `NSPipe` and hang before JSON error emission
+ (`ARLEN-BUG-027`)
 - writes `metadata/manifest.json` with release/runtime/health contract metadata
 - writes manifest paths release-relative so the packaged release stays valid
-  after ship/move (`ARLEN-BUG-017`)
+ after ship/move (`ARLEN-BUG-017`)
 - writes `deployment` and `propane_handoff` metadata into the packaged manifest
 - writes explicit `database` and `configuration` contracts into the packaged
-  manifest when `--database-mode`, `--database-adapter`, `--database-target`,
-  and `--require-env-key` are supplied
+ manifest when `--database-mode`, `--database-adapter`, `--database-target`,
+ and `--require-env-key` are supplied
 - ships the packaged deploy helper set under `framework/tools/deploy/`,
-  including activate/rollback/env-materialization helpers (`ARLEN-BUG-016`)
+ including activate/rollback/env-materialization helpers (`ARLEN-BUG-016`)
 - copies packaged runtime binaries as real files inside the release instead of
-  preserving build-host symlinks (`ARLEN-BUG-018`)
+ preserving build-host symlinks (`ARLEN-BUG-018`)
 - emits the manifest content in `--json` mode
 - emits warning data without changing a successful exit code when production
-  multi-worker state has no durable signal
+ multi-worker state has no durable signal
 
 `arlen deploy releases`
 
@@ -230,47 +230,47 @@ Named targets:
 - local mode lists directories under `--releases-dir`
 - named local targets list the target release directory
 - named remote targets list remote release directories over SSH without
-  requiring an active `releases/current` symlink
+ requiring an active `releases/current` symlink
 - excludes the `current` symlink and labels release state as `active`,
-  `previous`, or `available` when that state is known
+ `previous`, or `available` when that state is known
 - emits `workflow = deploy.releases` in `--json` mode and includes manifest
-  metadata when `metadata/manifest.json` is present
+ metadata when `metadata/manifest.json` is present
 
 `arlen deploy release`
 
 - reuses an existing release artifact for the selected `--release-id`, or builds it first if missing
 - when `[target]` has SSH transport metadata, fails before build/upload or
-  activation with `deploy_target_not_initialized` until
-  `arlen deploy init <target>` has generated the target host artifacts
+ activation with `deploy_target_not_initialized` until
+ `arlen deploy init <target>` has generated the target host artifacts
 - when `[target]` has SSH transport metadata:
-  - builds or reuses the local staged release
-  - uploads it to the remote target
-  - invokes the packaged remote `arlen deploy release` inside that uploaded release
+ - builds or reuses the local staged release
+ - uploads it to the remote target
+ - invokes the packaged remote `arlen deploy release` inside that uploaded release
 - runs `migrate --env <name>` only when packaged SQL migrations exist, unless `--skip-migrate` is passed
 - activates `releases/current` via `tools/deploy/activate_release.sh`
 - can reload or restart a systemd unit through `--service <unit>` and
-  `--runtime-action <reload|restart|none>` after activation
+ `--runtime-action <reload|restart|none>` after activation
 - rewrites `metadata/release.env` against the activated release root so
-  packaged `propane` handoff metadata is target-absolute after ship/move while
-  preserving the Phase 32 database contract fields
+ packaged `propane` handoff metadata is target-absolute after ship/move while
+ preserving the database contract fields
 - optionally probes `<base-url>/healthz` when `--base-url` is supplied
 - fails closed when the packaged manifest records an unsupported target profile
 - requires `--remote-build-check-command` to succeed when the packaged manifest records an experimental remote rebuild target
 - resolves the packaged `arlen` binary from manifest-backed paths, including
-  `.exe` siblings on Windows preview builds
+ `.exe` siblings on Windows preview builds
 - relies on the reserved operability contract, so app routes cannot shadow `/healthz`
 - emits warning data without changing a successful exit code when production
-  multi-worker state has no durable signal
+ multi-worker state has no durable signal
 
 `arlen deploy status`
 
 - reports the active release id, previous release id, manifest path, migration inventory, and health contract from `releases/current`
 - when `[target]` has SSH transport metadata, delegates to the active packaged
-  release on the remote host
+ release on the remote host
 - reports deployment metadata for the active release and rollback candidate
 - reports packaged `propane_handoff` metadata for the active release and rollback candidate
 - resolves manifest-backed runtime/helper paths relative to the active release,
-  so relocated packaged releases still report usable metadata (`ARLEN-BUG-017`)
+ so relocated packaged releases still report usable metadata (`ARLEN-BUG-017`)
 - reports service state when `--service <unit>` is supplied
 - can run a live operability probe when `--base-url <url>` is supplied
 
@@ -282,40 +282,40 @@ Named targets:
 - can verify operability after rollback with `--base-url <url>`
 - surfaces an explicit warning that packaged migrations do not imply reversibility
 - when `[target]` has SSH transport metadata, delegates the rollback to the
-  active packaged release on the remote host
+ active packaged release on the remote host
 
 `arlen deploy doctor`
 
 - validates release layout, manifest presence, packaged binaries, config loading, and database URL completeness
 - validates explicit database deployment contracts from the packaged manifest
-  (`external`, `host_local`, `embedded`)
+ (`external`, `host_local`, `embedded`)
 - includes a `multi_worker_state` check; production apps with
-  `propaneAccessories.workerCount > 1` warn when neither `state.durable = YES`
-  nor an acceptable database-backed state signal is configured
+ `propaneAccessories.workerCount > 1` warn when neither `state.durable = YES`
+ nor an acceptable database-backed state signal is configured
 - when run against a local named target without an active release, validates
-  target-host readiness instead of failing immediately:
-  - release/shared/log/tmp layout
-  - generated host artifacts
-  - GNUstep script presence
-  - `gnustep-config` after sourcing GNUstep
-  - wrapper generation/readiness for GNUstep targets
+ target-host readiness instead of failing immediately:
+ - release/shared/log/tmp layout
+ - generated host artifacts
+ - GNUstep script presence
+ - `gnustep-config` after sourcing GNUstep
+ - wrapper generation/readiness for GNUstep targets
 - validates required environment keys without printing their values
 - validates deployment compatibility metadata and requires a remote build-check command when the active release targets an experimental remote rebuild path
 - reports packaged `propane_handoff` metadata in JSON mode
 - reports service state when `--service <unit>` is supplied
 - flags effective runtime-root conflicts when a live service is using
-  `ARLEN_APP_ROOT` / `ARLEN_FRAMEWORK_ROOT` values that disagree with the
-  activated release
+ `ARLEN_APP_ROOT` / `ARLEN_FRAMEWORK_ROOT` values that disagree with the
+ activated release
 - runs full `tools/deploy/validate_operability.sh` when `--base-url <url>` is supplied
 - packaged releases include that helper under `framework/tools/deploy/`, so `deploy doctor --base-url` works against activated release payloads
 - resolves manifest-backed helper/runtime paths from the active release root
-  instead of trusting source-host absolute paths (`ARLEN-BUG-017`)
+ instead of trusting source-host absolute paths (`ARLEN-BUG-017`)
 - packaged binary checks resolve `.exe` siblings when the manifest records
-  Windows-style compiled output base names
+ Windows-style compiled output base names
 - `tools/deploy/smoke_release.sh` also resolves the packaged operability helper
-  against the selected release root instead of the caller's cwd (`ARLEN-BUG-019`)
+ against the selected release root instead of the caller's cwd (`ARLEN-BUG-019`)
 - when `[target]` has SSH transport metadata, delegates doctor to the active
-  packaged release on the remote host
+ packaged release on the remote host
 
 `arlen deploy logs`
 
@@ -339,8 +339,8 @@ Common options:
 - `--require-env-key <NAME>`: record a required environment key without storing its value in the release
 - `--allow-remote-rebuild`: allow the best-effort GNUstep cross-profile rebuild path
 - `--remote-build-check-command <shell>`: shell command used to validate the target build chain for experimental remote rebuild targets
-- `--certification-manifest <path>`: override Phase 9J certification manifest path
-- `--json-performance-manifest <path>`: override Phase 10E performance manifest path
+- `--certification-manifest <path>`: override certification manifest path
+- `--json-performance-manifest <path>`: override JSON performance manifest path
 - `--skip-release-certification`: waive certification/performance manifest enforcement for explicit non-RC app iteration
 - `--dev`: alias for `--skip-release-certification`
 - `--allow-missing-certification`: compatibility spelling for the same non-RC waiver
@@ -366,14 +366,14 @@ Release-only options:
 Generate shell completion scripts for the Arlen CLI.
 
 - `arlen completion bash` prints a bash completer that registers `arlen` with
-  `complete -F _arlen_complete arlen`
+ `complete -F _arlen_complete arlen`
 - `arlen completion powershell` prints a PowerShell completer that registers
-  `arlen` with `Register-ArgumentCompleter`
+ `arlen` with `Register-ArgumentCompleter`
 - generated scripts call `arlen completion candidates ...` for dynamic local
-  candidates such as deploy subcommands, deploy target names, release IDs, and
-  command options
+ candidates such as deploy subcommands, deploy target names, release IDs, and
+ command options
 - candidate generation is read-only and local-only; it does not perform SSH,
-  build releases, or write files
+ build releases, or write files
 
 ### `arlen migrate [--env <name>] [--database <target>] [--dsn <connection_string>] [--dry-run]`
 
@@ -385,21 +385,21 @@ selected database target.
 - `--dsn <connection_string>`: override config DSN
 - `--dry-run`: list pending migrations without applying
 - supported adapters:
-  - `postgresql` (default)
-  - `gdl2` (fallback compatibility wrapper over PostgreSQL)
-  - `mssql` / `sqlserver` (optional SQL Server path via ODBC connection string)
+ - `postgresql` (default)
+ - `gdl2` (fallback compatibility wrapper over PostgreSQL)
+ - `mssql` / `sqlserver` (optional SQL Server path via ODBC connection string)
 - per-target migration directory: `db/migrations/<target>` (for non-default targets)
 - per-target migration state table: `arlen_schema_migrations__<target>`
 - target-specific env override: `ARLEN_DATABASE_URL_<TARGET>`
 - migration files are executed as raw SQL inside one transaction per file
 - normal multi-statement `.sql` migration files are supported
 - for MSSQL migrations, standalone `GO` batch separator lines are normalized as
-  file-local statement boundaries before execution
+ file-local statement boundaries before execution
 - empty/comment-only migration files are rejected
 - top-level transaction control statements such as `BEGIN`, `COMMIT`, `ROLLBACK`, `SAVEPOINT`, and `SAVE TRANSACTION` are rejected
 - PostgreSQL-specific commands that are disallowed inside transaction blocks still fail under `arlen migrate`
 - MSSQL requires an installed ODBC manager/runtime client plus a SQL Server
-  driver; core Arlen does not link to Microsoft's driver
+ driver; core Arlen does not link to Microsoft's driver
 
 ### `arlen module <add|remove|list|doctor|migrate|assets|upgrade|eject> [options]`
 
@@ -413,13 +413,13 @@ Manage first-class vendored modules installed in `config/modules.plist` and `mod
 - `--force` replaces an existing install in place
 - `--json` emits machine-readable workflow output
 - first-party modules currently available in-tree:
-  - `auth`
-  - `admin-ui`
-  - `jobs`
-  - `notifications`
-  - `storage`
-  - `ops`
-  - `search`
+ - `auth`
+ - `admin-ui`
+ - `jobs`
+ - `notifications`
+ - `storage`
+ - `ops`
+ - `search`
 
 `arlen module remove <name> [--keep-files] [--json]`
 
@@ -440,7 +440,7 @@ Manage first-class vendored modules installed in `config/modules.plist` and `mod
 - records namespaced migration versions (`<module>::<migration>`) in the normal Arlen migrations table for the selected target
 - respects `migrations.databaseTarget` in each module manifest
 - uses the configured adapter for the selected target (`postgresql`, `gdl2`, or
-  optional `mssql`)
+ optional `mssql`)
 
 `arlen module assets [--output-dir <path>] [--json]`
 
@@ -457,13 +457,13 @@ Manage first-class vendored modules installed in `config/modules.plist` and `mod
 - scaffolds app-owned auth fragments under `templates/auth/fragments/...`
 - scaffolds auth partials under `templates/auth/partials/...`
 - scaffolds factor-management pages such as `templates/auth/mfa/manage.html.eoc`
-  and `templates/auth/mfa/sms.html.eoc`
+ and `templates/auth/mfa/sms.html.eoc`
 - scaffolds `templates/layouts/auth_generated.html.eoc`, `public/auth/auth.css`,
-  and `public/auth/auth_totp_qr.js`
+ and `public/auth/auth_totp_qr.js`
 - updates `config/app.plist` to use:
-  - `authModule.ui.mode = "generated-app-ui"`
-  - `authModule.ui.layout = "layouts/auth_generated"`
-  - `authModule.ui.generatedPagePrefix = "auth"`
+ - `authModule.ui.mode = "generated-app-ui"`
+ - `authModule.ui.layout = "layouts/auth_generated"`
+ - `authModule.ui.generatedPagePrefix = "auth"`
 - `--force` overwrites existing generated auth UI files
 - `--json` emits machine-readable workflow output with `created_files`, `updated_files`, and `next_steps`
 
@@ -486,7 +486,7 @@ surfaces that setup guidance directly instead of a generic database error.
 
 First-party module surfaces after install:
 
-- `auth`: stable JSON under `/auth/api/...`; HTML ownership under `/auth/...` is controlled by `authModule.ui.mode` (`module-ui`, `headless`, or `generated-app-ui`). Phase 18 also adds embeddable server-rendered MFA fragments, `/auth/api/mfa` factor discovery, and optional disabled-by-default SMS/Twilio Verify MFA support.
+- `auth`: stable JSON under `/auth/api/...`; HTML ownership under `/auth/...` is controlled by `authModule.ui.mode` (`module-ui`, `headless`, or `generated-app-ui`). The module also adds embeddable server-rendered MFA fragments, `/auth/api/mfa` factor discovery, and optional disabled-by-default SMS/Twilio Verify MFA support.
 - `admin-ui`: HTML under `/admin/...`, JSON under `/admin/api/...`
 - `jobs`: protected HTML under `/jobs/...`, JSON under `/jobs/api/...`
 - `notifications`: authenticated inbox/preferences plus admin preview/outbox/test-send under `/notifications/...` and `/notifications/api/...`
@@ -501,17 +501,17 @@ Introspect PostgreSQL schema metadata and generate typed table/column helper API
 - current backend scope: PostgreSQL only (`ALNPg`)
 - reflection path now goes through `ALNDatabaseInspector` / `ALNPostgresInspector`
 - generated manifests now include:
-  - `reflection_contract_version`
-  - `relation_kind`
-  - `read_only`
-  - `supports_write_contracts`
-  - per-table `column_metadata`
+ - `reflection_contract_version`
+ - `relation_kind`
+ - `read_only`
+ - `supports_write_contracts`
+ - per-table `column_metadata`
 - reflected views retain read-side typed contracts but do not get default write
-  builders/contracts
-- Phase 20 still does not add MSSQL schema introspection/codegen
+ builders/contracts
+- The current data-layer pass still does not add MSSQL schema introspection/codegen
 - `ALNDatabaseInspector inspectSchemaMetadataForAdapter:` remains PostgreSQL-only
-  and now emits additive `schemas`, `check_constraints`, `view_definitions`,
-  `relation_comments`, and `column_comments` metadata for audit/reporting tools
+ and now emits additive `schemas`, `check_constraints`, `view_definitions`,
+ `relation_comments`, and `column_comments` metadata for audit/reporting tools
 
 - `--env <name>`: select runtime environment (default: `development`)
 - `--database <target>`: select codegen target (default: `default`)
@@ -543,22 +543,22 @@ Fetch Dataverse metadata or normalize a saved metadata fixture and generate type
 - `--input <metadata.json>`: normalize a saved/raw metadata payload instead of making live Dataverse requests
 - live mode loads app config for `--env <name>` (default: `development`)
 - config lookup order for live mode:
-  - `config.dataverse`
-  - `config.dataverseTargets.<target>`
-  - `config.dataverse.targets.<target>`
+ - `config.dataverse`
+ - `config.dataverseTargets.<target>`
+ - `config.dataverse.targets.<target>`
 - environment overrides for live mode:
-  - `ARLEN_DATAVERSE_URL`
-  - `ARLEN_DATAVERSE_SERVICE_ROOT`
-  - `ARLEN_DATAVERSE_TENANT_ID`
-  - `ARLEN_DATAVERSE_CLIENT_ID`
-  - `ARLEN_DATAVERSE_CLIENT_SECRET`
-  - `ARLEN_DATAVERSE_PAGE_SIZE`
-  - `ARLEN_DATAVERSE_MAX_RETRIES`
-  - `ARLEN_DATAVERSE_TIMEOUT`
+ - `ARLEN_DATAVERSE_URL`
+ - `ARLEN_DATAVERSE_SERVICE_ROOT`
+ - `ARLEN_DATAVERSE_TENANT_ID`
+ - `ARLEN_DATAVERSE_CLIENT_ID`
+ - `ARLEN_DATAVERSE_CLIENT_SECRET`
+ - `ARLEN_DATAVERSE_PAGE_SIZE`
+ - `ARLEN_DATAVERSE_MAX_RETRIES`
+ - `ARLEN_DATAVERSE_TIMEOUT`
 - target-specific environment overrides append `_<TARGET>` (for example `ARLEN_DATAVERSE_URL_SALES`)
 - `ARLEN_DATAVERSE_URL` may be the bare Dataverse environment URL or the full
-  Web API service root; Arlen normalizes a bare environment URL to
-  `/api/data/v9.2`
+ Web API service root; Arlen normalizes a bare environment URL to
+ `/api/data/v9.2`
 - `--target <name>`: select a named Dataverse target (default: `default`)
 - `--service-root`, `--tenant-id`, `--client-id`, `--client-secret`: explicit live credential overrides
 - `--entity <logical_name>`: repeat to limit live metadata fetch/codegen to specific logical table names
@@ -566,9 +566,9 @@ Fetch Dataverse metadata or normalize a saved metadata fixture and generate type
 - `--manifest <path>`: normalized metadata manifest output (default: `db/schema/dataverse.json`)
 - `--prefix <ClassPrefix>`: generated class prefix (default: `ALNDV`)
 - non-default target defaults when those flags are omitted:
-  - output dir: `src/Generated/<target>`
-  - manifest: `db/schema/dataverse_<target>.json`
-  - class prefix: `ALNDV<PascalTarget>`
+ - output dir: `src/Generated/<target>`
+ - manifest: `db/schema/dataverse_<target>.json`
+ - class prefix: `ALNDV<PascalTarget>`
 - `--force`: overwrite existing generated files
 
 Generated artifacts:
@@ -581,11 +581,11 @@ Notes:
 
 - This is a Dataverse Web API/OData workflow, not Microsoft Graph and not the SQL migration/schema-codegen path.
 - Generated helpers expose logical names, entity-set names, alternate keys,
-  `field...` helpers only for Web-API-selectable attributes,
-  `nonSelectableField...` helpers plus `nonSelectableFields` for logical
-  lookup-name-style attributes, singular lookup navigation fields for
-  unambiguous attributes, additive `lookupNavigationTargetsMap` entries for
-  polymorphic attributes, and choice enums from normalized metadata.
+ `field...` helpers only for Web-API-selectable attributes,
+ `nonSelectableField...` helpers plus `nonSelectableFields` for logical
+ lookup-name-style attributes, singular lookup navigation fields for
+ unambiguous attributes, additive `lookupNavigationTargetsMap` entries for
+ polymorphic attributes, and choice enums from normalized metadata.
 
 ### `arlen typed-sql-codegen [--input-dir <path>] [--output-dir <path>] [--manifest <path>] [--prefix <ClassPrefix>] [--force]`
 
@@ -603,24 +603,24 @@ Generate a descriptor-first TypeScript package from Arlen ORM descriptors plus
 route/OpenAPI contracts.
 
 - input modes:
-  - checked-in ORM descriptor manifest (`arlen-orm-descriptor-v1`)
-  - raw schema metadata JSON
-  - raw schema metadata wrapped under `{ "metadata": ... }`
+ - checked-in ORM descriptor manifest (`arlen-orm-descriptor-v1`)
+ - raw schema metadata JSON
+ - raw schema metadata wrapped under `{ "metadata": ... }`
 - current contract is additive and consumer-facing:
-  - generated TypeScript stays downstream of Arlen descriptors
-  - browser-side persistence is out of scope
-  - React/TanStack output is optional and layered on top of the plain client
-  - top-level OpenAPI `x-arlen` metadata can add resource/module/workspace
-    contracts without changing route schemas
+ - generated TypeScript stays downstream of Arlen descriptors
+ - browser-side persistence is out of scope
+ - React/TanStack output is optional and layered on top of the plain client
+ - top-level OpenAPI `x-arlen` metadata can add resource/module/workspace
+ contracts without changing route schemas
 - missing or vague inputs fail closed:
-  - `client` / `react` targets require `--openapi-input`
-  - OpenAPI operations must carry stable `operationId` values
-  - request bodies must expose `application/json` schemas
-  - descriptor or operation naming collisions abort generation
-  - `x-arlen.resources` and `x-arlen.modules` references must point at known
-    ORM entities and known OpenAPI operation IDs
-  - resource query metadata cannot expose fields or relations the ORM
-    descriptors do not actually define
+ - `client` / `react` targets require `--openapi-input`
+ - OpenAPI operations must carry stable `operationId` values
+ - request bodies must expose `application/json` schemas
+ - descriptor or operation naming collisions abort generation
+ - `x-arlen.resources` and `x-arlen.modules` references must point at known
+ ORM entities and known OpenAPI operation IDs
+ - resource query metadata cannot expose fields or relations the ORM
+ descriptors do not actually define
 
 - `--orm-input <path>`: ORM manifest or schema metadata input (default: `db/schema/arlen_orm_manifest.json`)
 - `--openapi-input <path>`: exported OpenAPI JSON input; required for `client` and `react`
@@ -649,15 +649,15 @@ Generated artifacts:
 Notes:
 
 - `query.ts` and `meta.ts` are driven by additive top-level OpenAPI
-  `x-arlen.resources`, `x-arlen.modules`, and `x-arlen.workspace` metadata.
+ `x-arlen.resources`, `x-arlen.modules`, and `x-arlen.workspace` metadata.
 - `query.ts` does not widen typed client request shapes by itself; if a React
-  app should pass generated select/include/filter/sort params directly into
-  `client.ts`, those params still need to exist in the OpenAPI operation
-  schema.
+ app should pass generated select/include/filter/sort params directly into
+ `client.ts`, those params still need to exist in the OpenAPI operation
+ schema.
 - repo-native verification lanes for this generator live at
-  `make phase28-ts-generated`, `make phase28-ts-unit`,
-  `make phase28-ts-integration`, `make phase28-react-reference`, and
-  `make phase28-confidence`
+ `make phase28-ts-generated`, `make phase28-ts-unit`,
+ `make phase28-ts-integration`, `make phase28-react-reference`, and
+ `make phase28-confidence`
 
 ### `arlen boomhauer [server args...]`
 
@@ -667,10 +667,10 @@ Build and run `boomhauer` for the current app root.
 - defaults to watch mode (same as direct `bin/boomhauer`)
 - app-root non-watch and `--prepare-only` runs reuse `.boomhauer/build/boomhauer-app` when build inputs are unchanged
 - app-root non-watch flows emit explicit build phases:
-  - `[1/4]` framework tools + libraries
-  - `[2/4]` template transpilation
-  - `[3/4]` app-object compile/reuse
-  - `[4/4]` app-binary link/reuse
+ - `[1/4]` framework tools + libraries
+ - `[2/4]` template transpilation
+ - `[3/4]` app-object compile/reuse
+ - `[4/4]` app-binary link/reuse
 - `--prepare-only` prints a prepare-only scope banner and exits after the app is current
 - failed app-root `--prepare-only` / `--print-routes` runs preserve the underlying non-zero build status and leave `.boomhauer/last_build_error.{log,meta}` for triage
 - `--print-routes` prints a route-inspection scope banner, refreshes artifacts if needed, and then prints resolved routes without entering watch/server mode
@@ -691,8 +691,8 @@ Build and run the first-party jobs worker loop for the current app root.
 - compiles the app through `bin/boomhauer --no-watch --prepare-only` and then runs `.boomhauer/build/boomhauer-app` in jobs-worker mode
 - when `ARLEN_FRAMEWORK_ROOT` points at a packaged release payload and `app/.boomhauer/build/boomhauer-app` is already present, reuses that packaged binary instead of recompiling from source
 - packaged release reuse now wins even when the release app root no longer
-  carries source files; `boomhauer` is not required for immutable runtime
-  startup (`ARLEN-BUG-018`)
+ carries source files; `boomhauer` is not required for immutable runtime
+ startup (`ARLEN-BUG-018`)
 - if that prepare step fails, exits with the same non-zero status and points at `.boomhauer/last_build_error.log`
 - worker args are passed through (`--env`, `--once`, `--limit`, `--poll-interval-seconds`, `--run-scheduler`, `--scheduler-interval-seconds`)
 
@@ -704,8 +704,8 @@ Run production manager (`propane`) for the current app root.
 - app-root launches first run `bin/boomhauer --no-watch --prepare-only`; if that fails, `propane` exits non-zero and points at `.boomhauer/last_build_error.log`
 - when `ARLEN_FRAMEWORK_ROOT` points at a packaged release payload, `propane` runs directly from that payload and reuses `app/.boomhauer/build/boomhauer-app` without requiring a full Arlen checkout
 - when a packaged release app root already carries `.boomhauer/build/boomhauer-app`,
-  both `propane` and `jobs-worker` now prefer that shipped binary even if the
-  release app root is no longer a mutable source checkout (`ARLEN-BUG-018`)
+ both `propane` and `jobs-worker` now prefer that shipped binary even if the
+ release app root is no longer a mutable source checkout (`ARLEN-BUG-018`)
 - all production manager settings are called "propane accessories"
 
 ### `arlen routes`
@@ -773,40 +773,40 @@ Behavior:
 - `--template-root <dir>`: base tree used to compute deterministic logical template paths
 - `--output-dir <dir>`: destination root for generated Objective-C files (`<output-dir>/<logical_path>.m`)
 - `--manifest <file>`: enable manifest-backed incremental transpilation
-  - records `template_path`, `logical_path`, `output_path`, `template_hash`, metadata, and diagnostics
-  - unchanged generated outputs are reused when the manifest and output file still match
-  - stale generated outputs are removed when templates move or disappear
-  - stdout switches to `eocc: transpiled <n> templates (reused <n>, removed <n>)`
+ - records `template_path`, `logical_path`, `output_path`, `template_hash`, metadata, and diagnostics
+ - unchanged generated outputs are reused when the manifest and output file still match
+ - stale generated outputs are removed when templates move or disappear
+ - stdout switches to `eocc: transpiled <n> templates (reused <n>, removed <n>)`
 - `--registry-out <file>`: emit registry source mapping logical template paths to render symbols
-  - if neither `--manifest` nor `--registry-out` is supplied, `eocc` writes `<output-dir>/EOCRegistry.m`
-  - if `--manifest` is supplied without `--registry-out`, `eocc` skips registry generation and removes a stale default `EOCRegistry.m` if present
+ - if neither `--manifest` nor `--registry-out` is supplied, `eocc` writes `<output-dir>/EOCRegistry.m`
+ - if `--manifest` is supplied without `--registry-out`, `eocc` skips registry generation and removes a stale default `EOCRegistry.m` if present
 - `--logical-prefix <prefix>`: prepend a deterministic logical-path prefix before output-path generation
-  - used by Arlen's module template pipeline so module templates register under `modules/<module_id>/...`
+ - used by Arlen's module template pipeline so module templates register under `modules/<module_id>/...`
 
 Diagnostics behavior:
 
 - syntax/transpile failures return non-zero and emit deterministic location metadata:
-  - `eocc: location path=<path> line=<line> column=<column>`
+ - `eocc: location path=<path> line=<line> column=<column>`
 - static composition validation failures return non-zero before code generation:
-  - unknown `layout` / `include` / `render` dependencies
-  - static composition cycles across layouts/includes/renders
+ - unknown `layout` / `include` / `render` dependencies
+ - static composition cycles across layouts/includes/renders
 - lint warnings are emitted during successful transpile:
-  - `eocc: warning path=<path> line=<line> column=<column> code=<code> message=<message>`
-  - current lint codes:
-    - `unguarded_include`
-    - `slot_without_layout`
-    - `unused_slot_fill`
+ - `eocc: warning path=<path> line=<line> column=<column> code=<code> message=<message>`
+ - current lint codes:
+ - `unguarded_include`
+ - `slot_without_layout`
+ - `unused_slot_fill`
 - lint warnings are non-fatal in this phase slice
 - sigil local grammar supports:
-  - `$identifier`
-  - `$identifier(.identifier)*` (dotted keypaths)
+ - `$identifier`
+ - `$identifier(.identifier)*` (dotted keypaths)
 - composition directives support:
-  - `<%@ layout "layouts/application" %>`
-  - `<%@ requires title, rows %>`
-  - `<%@ yield %>` / `<%@ yield "sidebar" %>`
-  - `<%@ slot "sidebar" %>` ... `<%@ endslot %>`
-  - `<%@ include "partials/_row" with @{ ... } %>`
-  - `<%@ render "partials/_row" collection:$rows as:"row" empty:"partials/_empty" with @{ ... } %>`
+ - `<%@ layout "layouts/application" %>`
+ - `<%@ requires title, rows %>`
+ - `<%@ yield %>` / `<%@ yield "sidebar" %>`
+ - `<%@ slot "sidebar" %>` ... `<%@ endslot %>`
+ - `<%@ include "partials/_row" with @{ ... } %>`
+ - `<%@ render "partials/_row" collection:$rows as:"row" empty:"partials/_empty" with @{ ... } %>`
 
 ### `arlen config [--env <name>] [--json]`
 
@@ -844,91 +844,91 @@ Behavior:
 - concurrent HTTP sessions are bounded by `runtimeLimits.maxConcurrentHTTPSessions` (default `256`)
 - websocket session upgrades are bounded by `runtimeLimits.maxConcurrentWebSocketSessions` (default `256`)
 - request dispatch mode is controlled by `requestDispatchMode` (`concurrent` default)
-  - `serialized` mode keeps dispatch execution deterministic while still honoring HTTP keep-alive negotiation
+ - `serialized` mode keeps dispatch execution deterministic while still honoring HTTP keep-alive negotiation
 - HTTP session limit violations return deterministic overload diagnostics:
-  - status `503 Service Unavailable`
-  - header `Retry-After: 1`
-  - header `X-Arlen-Backpressure-Reason: http_session_limit`
+ - status `503 Service Unavailable`
+ - header `Retry-After: 1`
+ - header `X-Arlen-Backpressure-Reason: http_session_limit`
 - HTTP worker queue overflow returns deterministic overload diagnostics:
-  - status `503 Service Unavailable`
-  - header `Retry-After: 1`
-  - header `X-Arlen-Backpressure-Reason: http_worker_queue_full`
+ - status `503 Service Unavailable`
+ - header `Retry-After: 1`
+ - header `X-Arlen-Backpressure-Reason: http_worker_queue_full`
 - websocket backpressure limit violations return deterministic overload diagnostics:
-  - status `503 Service Unavailable`
-  - header `Retry-After: 1`
-  - header `X-Arlen-Backpressure-Reason: websocket_session_limit`
+ - status `503 Service Unavailable`
+ - header `Retry-After: 1`
+ - header `X-Arlen-Backpressure-Reason: websocket_session_limit`
 - realtime channel subscription cap violations return deterministic overload diagnostics:
-  - status `503 Service Unavailable`
-  - header `Retry-After: 1`
-  - header `X-Arlen-Backpressure-Reason: realtime_channel_subscriber_limit`
+ - status `503 Service Unavailable`
+ - header `Retry-After: 1`
+ - header `X-Arlen-Backpressure-Reason: realtime_channel_subscriber_limit`
 - realtime global subscription cap violations return deterministic overload diagnostics:
-  - status `503 Service Unavailable`
-  - header `Retry-After: 1`
-  - header `X-Arlen-Backpressure-Reason: realtime_total_subscriber_limit`
+ - status `503 Service Unavailable`
+ - header `Retry-After: 1`
+ - header `X-Arlen-Backpressure-Reason: realtime_total_subscriber_limit`
 - security misconfiguration now fails startup deterministically:
-  - missing `session.secret` when `session.enabled=YES`
-  - weak `session.secret` values (minimum 32 characters required when `session.enabled=YES`)
-  - weak `auth.bearerSecret` values (minimum 32 characters required when `auth.enabled=YES`)
-  - `csrf.enabled=YES` without session middleware
-  - query-string CSRF fallback is disabled by default; opt in with `ARLEN_CSRF_ALLOW_QUERY_FALLBACK=1`
+ - missing `session.secret` when `session.enabled=YES`
+ - weak `session.secret` values (minimum 32 characters required when `session.enabled=YES`)
+ - weak `auth.bearerSecret` values (minimum 32 characters required when `auth.enabled=YES`)
+ - `csrf.enabled=YES` without session middleware
+ - query-string CSRF fallback is disabled by default; opt in with `ARLEN_CSRF_ALLOW_QUERY_FALLBACK=1`
 - when `webSocket.allowedOrigins` is configured, websocket upgrades require a matching `Origin` header or return `403`
 - the legacy HTTP parser backend rejects duplicate `Content-Length` headers and all `Transfer-Encoding` requests
 - session middleware stores cookies as encrypted and authenticated tokens by default
 - route-level auth assurance can be configured with `configureAuthAssuranceForRouteNamed:minimumAuthAssuranceLevel:maximumAuthenticationAgeSeconds:stepUpPath:error:`
 - browser requests that fail an auth-assurance requirement return `302` to the configured step-up path with:
-  - header `X-Arlen-Step-Up-Required: 1`
-  - query params `reason=step_up_required` and `return_to=<original path>`
+ - header `X-Arlen-Step-Up-Required: 1`
+ - query params `reason=step_up_required` and `return_to=<original path>`
 - JSON/API requests that fail an auth-assurance requirement return structured `403 step_up_required`
-- Phase 12 public helper surface:
-  - `ALNAuthSession`
-  - `ALNTOTP`
-  - `ALNRecoveryCodes`
-  - `ALNWebAuthn`
-  - `ALNOIDCClient`
-  - `ALNAuthProviderPresets`
-  - `ALNAuthProviderSessionBridge`
-- `make phase12-confidence` runs the Phase 12 auth confidence gate and writes artifacts under `build/release_confidence/phase12`
+- Public helper surface:
+ - `ALNAuthSession`
+ - `ALNTOTP`
+ - `ALNRecoveryCodes`
+ - `ALNWebAuthn`
+ - `ALNOIDCClient`
+ - `ALNAuthProviderPresets`
+ - `ALNAuthProviderSessionBridge`
+- `make phase12-confidence` runs the auth confidence gate and writes artifacts under `build/release_confidence/phase12`
 - forwarded proxy headers are honored only when the peer IP matches `trustedProxyCIDRs`
-  - specifying `trustedProxyCIDRs` alone enables forwarded-header handling
-  - `trustedProxy=YES` remains as a compatibility toggle and seeds a loopback CIDR allowlist when no explicit CIDRs are configured
-  - `edge` profile defaults `trustedProxyCIDRs` to `127.0.0.1/32`
+ - specifying `trustedProxyCIDRs` alone enables forwarded-header handling
+ - `trustedProxy=YES` remains as a compatibility toggle and seeds a loopback CIDR allowlist when no explicit CIDRs are configured
+ - `edge` profile defaults `trustedProxyCIDRs` to `127.0.0.1/32`
 - text logger output escapes newline/tab/control characters in text mode
 - filesystem job/mail/attachment adapters enforce private `0700` directories and `0600` files; filesystem attachment IDs must be framework-generated `att-<32 hex>` values
 - route compile validation now fails startup deterministically when enabled (`routing.compileOnStart=YES`):
-  - invalid action/guard signatures
-  - invalid route schema transformer/type readiness
+ - invalid action/guard signatures
+ - invalid route schema transformer/type readiness
 - request responses emit correlation/trace headers by default:
-  - `X-Request-Id`
-  - `X-Correlation-Id`
-  - disable request/correlation headers with `ARLEN_RESPONSE_IDENTITY_HEADERS_ENABLED=0`
-  - `X-Trace-Id` + `traceparent` (when trace propagation is enabled)
+ - `X-Request-Id`
+ - `X-Correlation-Id`
+ - disable request/correlation headers with `ARLEN_RESPONSE_IDENTITY_HEADERS_ENABLED=0`
+ - `X-Trace-Id` + `traceparent` (when trace propagation is enabled)
 - built-in health/readiness probes support JSON signal payloads when requested:
-  - `GET /healthz` with `Accept: application/json` (or `?format=json`)
-  - `GET /readyz` with `Accept: application/json` (or `?format=json`)
-  - reserved operability endpoints (`/healthz`, `/readyz`, `/livez`, `/metrics`, `/clusterz`) are resolved ahead of app routes
-  - strict readiness (`503 not_ready` before startup) can be enabled with `ARLEN_READINESS_REQUIRES_STARTUP=1`
-  - quorum-gated readiness in cluster mode can be enabled with `ARLEN_READINESS_REQUIRES_CLUSTER_QUORUM=1`
+ - `GET /healthz` with `Accept: application/json` (or `?format=json`)
+ - `GET /readyz` with `Accept: application/json` (or `?format=json`)
+ - reserved operability endpoints (`/healthz`, `/readyz`, `/livez`, `/metrics`, `/clusterz`) are resolved ahead of app routes
+ - strict readiness (`503 not_ready` before startup) can be enabled with `ARLEN_READINESS_REQUIRES_STARTUP=1`
+ - quorum-gated readiness in cluster mode can be enabled with `ARLEN_READINESS_REQUIRES_CLUSTER_QUORUM=1`
 - distributed runtime diagnostics include:
-  - `GET /clusterz` quorum and coordination capability-matrix payload
-  - response headers `X-Arlen-Cluster-Status`, `X-Arlen-Cluster-Observed-Nodes`, and `X-Arlen-Cluster-Expected-Nodes` (when `cluster.enabled=YES` and `cluster.emitHeaders=YES`)
+ - `GET /clusterz` quorum and coordination capability-matrix payload
+ - response headers `X-Arlen-Cluster-Status`, `X-Arlen-Cluster-Observed-Nodes`, and `X-Arlen-Cluster-Expected-Nodes` (when `cluster.enabled=YES` and `cluster.emitHeaders=YES`)
 - built-in observability/API docs endpoints are available when enabled:
-  - `/metrics`
-  - `/clusterz`
-  - `/openapi.json`
-  - `/openapi` (interactive explorer by default)
-  - `/openapi/viewer` (lightweight fallback viewer)
-  - `/openapi/swagger` (self-hosted swagger-style docs UI)
-- built-in Phase 3D sample realtime/composition routes:
-  - `/ws/echo`
-  - `/ws/channel/:channel`
-  - `/sse/ticker`
-  - mounted app sample at `/embedded/*`
-- built-in Phase 3E sample ecosystem-service routes:
-  - `/services/cache`
-  - `/services/jobs`
-  - `/services/i18n`
-  - `/services/mail`
-  - `/services/attachments`
+ - `/metrics`
+ - `/clusterz`
+ - `/openapi.json`
+ - `/openapi` (interactive explorer by default)
+ - `/openapi/viewer` (lightweight fallback viewer)
+ - `/openapi/swagger` (self-hosted swagger-style docs UI)
+- built- sample realtime/composition routes:
+ - `/ws/echo`
+ - `/ws/channel/:channel`
+ - `/sse/ticker`
+ - mounted app sample at `/embedded/*`
+- built- sample ecosystem-service routes:
+ - `/services/cache`
+ - `/services/jobs`
+ - `/services/i18n`
+ - `/services/mail`
+ - `/services/attachments`
 
 Options:
 
@@ -1069,9 +1069,9 @@ Lifecycle diagnostics:
 - line contract: `event=<name> manager_pid=<pid> key=value ...`
 - worker churn fields include stable `status`, `exit_reason`, `restart_action`, and `reason`
 - Linux worker FD-pressure events include `worker_fd_pressure_warning`,
-  `worker_fd_pressure_critical`, and `worker_fd_pressure_retire_requested`
+ `worker_fd_pressure_critical`, and `worker_fd_pressure_retire_requested`
 - request FD-delta debugging is available with `ARLEN_FD_DELTA_DEBUG=1` and
-  `ARLEN_FD_DELTA_WARN=<n>`; keep it disabled except during diagnostics
+ `ARLEN_FD_DELTA_WARN=<n>`; keep it disabled except during diagnostics
 
 ## Other Helper Scripts and Build Targets
 
@@ -1080,137 +1080,137 @@ Lifecycle diagnostics:
 - `bin/dev`: alias for `bin/boomhauer`
 - `bin/jobs-worker`: build current app and run the first-party jobs worker loop
 - `make build-tests`: build unit + integration bundles through the incremental
-  object/archive/template graph without running XCTest
+ object/archive/template graph without running XCTest
 - `make test-unit` / `make test-integration`: run XCTest bundles with repo-local GNUstep defaults home (`.gnustep-home`)
-  - default to the repo-local patched runner at
-    `vendor/tools-xctest/obj/xctest` while GNUstep/tools-xctest PR 5 is pending
-    upstream
-  - honor `ARLEN_USE_VENDORED_XCTEST=0` to fall back to the system `xctest`
-  - honor `ARLEN_XCTEST` as the runner override
-  - honor `ARLEN_XCTEST_LD_LIBRARY_PATH` when the selected runner needs a non-system `libXCTest`
+ - default to the repo-local patched runner at
+ `vendor/tools-xctest/obj/xctest` while GNUstep/tools-xctest PR 5 is pending
+ upstream
+ - honor `ARLEN_USE_VENDORED_XCTEST=0` to fall back to the system `xctest`
+ - honor `ARLEN_XCTEST` as the runner override
+ - honor `ARLEN_XCTEST_LD_LIBRARY_PATH` when the selected runner needs a non-system `libXCTest`
 - `make test-unit-filter` / `make test-integration-filter`: focused XCTest reruns using `TEST=TestClass[/testMethod]` and optional `SKIP_TEST=TestClass[/testMethod]`
-  - Arlen prepends the bundle target name automatically, so you do not include `ArlenUnitTests/` or `ArlenIntegrationTests/` in `TEST`
-  - use the vendored patched runner by default so Apple-style `-only-testing`
-    / `-skip-testing` arguments work before the system package catches up
-  - example: `make test-unit-filter TEST=RuntimeTests/testRenderAndIncludeNormalizeUnsuffixedTemplateReferences`
-- `make phase20-sql-builder-tests` / `make phase20-schema-tests` / `make phase20-routing-tests`: focused Phase 20 pure-unit lanes that do not depend on `-only-testing`
-- `make phase20-postgres-live-tests` / `make phase20-mssql-live-tests`: focused Phase 20 live-backend lanes with explicit DSN/transport requirement logging
-- `make phase20-focused`: run the full focused Phase 20 lane set without relying on stock `xctest -only-testing`
+ - Arlen prepends the bundle target name automatically, so you do not include `ArlenUnitTests/` or `ArlenIntegrationTests/` in `TEST`
+ - use the vendored patched runner by default so Apple-style `-only-testing`
+ / `-skip-testing` arguments work before the system package catches up
+ - example: `make test-unit-filter TEST=RuntimeTests/testRenderAndIncludeNormalizeUnsuffixedTemplateReferences`
+- `make phase20-sql-builder-tests` / `make phase20-schema-tests` / `make phase20-routing-tests`: focused pure-unit lanes that do not depend on `-only-testing`
+- `make phase20-postgres-live-tests` / `make phase20-mssql-live-tests`: focused live-backend lanes with explicit DSN/transport requirement logging
+- `make phase20-focused`: run the full focused lane set without relying on stock `xctest -only-testing`
 - `make phase21-template-tests`: focused template parser/codegen/security/regression bundle
-- `make phase26-orm-tests`: full Phase 26 ORM regression bundle
+- `make phase26-orm-tests`: full ORM regression bundle
 - `make phase26-orm-unit`: SQL ORM runtime lane
-  - if `ARLEN_PG_TEST_DSN` is set, this lane also runs the live PostgreSQL
-    generated-primary-key hydration regression
+ - if `ARLEN_PG_TEST_DSN` is set, this lane also runs the live PostgreSQL
+ generated-primary-key hydration regression
 - `make phase26-orm-generated`: descriptor/codegen/history lane
 - `make phase26-orm-integration`: Dataverse ORM lane
 - `make phase26-orm-backend-parity`: backend capability and integration seam lane
 - `make phase26-orm-perf`: deterministic ORM perf smoke tool writing `build/release_confidence/phase26/perf/perf_smoke.json`
 - `make phase26-orm-live`: optional live Dataverse ORM descriptor smoke lane
-- `make phase26-confidence`: run the full Phase 26 confidence pack and regenerate artifacts under `build/release_confidence/phase26`
-- `make phase21-protocol-tests`: Phase 21 raw protocol corpus replay across the configured parser backends
+- `make phase26-confidence`: run the full ORM confidence pack and regenerate artifacts under `build/release_confidence/phase26`
+- `make phase21-protocol-tests`: raw protocol corpus replay across the configured parser backends
 - `make phase21-generated-app-tests`: curated generated-app/module/config matrix for first-user flows
-- `make phase21-focused`: run the full focused Phase 21 lane set
-- `make phase21-confidence`: rerun the focused Phase 21 lanes and regenerate artifacts under `build/release_confidence/phase21`
-- `tools/ci/run_phase21_focused.sh`: explicit focused Phase 21 lane runner for template, protocol, and generated-app coverage
-- `tools/ci/run_phase21_protocol_corpus.sh`: explicit Phase 21 raw protocol corpus gate entrypoint
-  - `ARLEN_PHASE21_PROTOCOL_BACKENDS=llhttp` narrows replay to one parser backend
-  - `ARLEN_PHASE21_PROTOCOL_CASES=case_a,case_b` reruns only selected checked-in protocol cases
+- `make phase21-focused`: run the full focused lane set
+- `make phase21-confidence`: rerun the focused lanes and regenerate artifacts under `build/release_confidence/phase21`
+- `tools/ci/run_phase21_focused.sh`: explicit focused lane runner for template, protocol, and generated-app coverage
+- `tools/ci/run_phase21_protocol_corpus.sh`: explicit raw protocol corpus gate entrypoint
+ - `ARLEN_PHASE21_PROTOCOL_BACKENDS=llhttp` narrows replay to one parser backend
+ - `ARLEN_PHASE21_PROTOCOL_CASES=case_a,case_b` reruns only selected checked-in protocol cases
 - `tools/ci/phase21_protocol_replay.py`: replay one checked-in protocol case or one saved raw request
-  - example checked-in case: `python3 tools/ci/phase21_protocol_replay.py --case websocket_invalid_key --backends llhttp --output-dir build/release_confidence/phase21/protocol_replay`
-  - example saved seed: `python3 tools/ci/phase21_protocol_replay.py --raw-request tests/fixtures/protocol/fuzz_seeds/websocket_invalid_key_seed.http --expected-status 400 --case-id websocket_invalid_key_seed --backends llhttp`
-- `tools/ci/run_phase21_generated_app_matrix.sh`: explicit Phase 21 generated-app matrix entrypoint
+ - example checked-in case: `python3 tools/ci/phase21_protocol_replay.py --case websocket_invalid_key --backends llhttp --output-dir build/release_confidence/phase21/protocol_replay`
+ - example saved seed: `python3 tools/ci/phase21_protocol_replay.py --raw-request tests/fixtures/protocol/fuzz_seeds/websocket_invalid_key_seed.http --expected-status 400 --case-id websocket_invalid_key_seed --backends llhttp`
+- `tools/ci/run_phase21_generated_app_matrix.sh`: explicit generated-app matrix entrypoint
 - `make browser-error-audit`: run the dedicated browser error audit bundle and generate a review gallery at `build/browser-error-audit/index.html`
-  - captures representative build/runtime/browser error scenarios into browsable HTML artifacts
-  - preserves raw responses plus wrapped review pages so plain-text/JSON browser fallbacks are easy to inspect
+ - captures representative build/runtime/browser error scenarios into browsable HTML artifacts
+ - preserves raw responses plus wrapped review pages so plain-text/JSON browser fallbacks are easy to inspect
 - `make ci-perf-smoke`: run the lighter standalone macro perf smoke lane for the checked-in `default` and `template_heavy` profiles and archive artifacts under `build/perf/ci_smoke`
-  - intended for local/manual perf triage; `make ci-quality` already covers the broader multi-profile macro perf matrix in CI
-- `make ci-quality`: run unit + integration + multi-profile perf quality gate plus runtime concurrency, JSON abstraction/performance gates, and Phase 9I fault-injection checks
-- `make ci-sanitizers`: run the Phase 10M ASan/UBSan sanitizer matrix (unit, runtime probe, backend parity, fault injection, soak, chaos restart, static analysis) and generate artifacts under `build/release_confidence/phase10m/sanitizers`
-- `make ci-soak`: run the Phase 10M long-run soak lane with health traffic, validated `fileBodyPath` responses, restart checks, and `/proc` FD target sampling including `/dev/null` drift
-- `make ci-phase38-fd-regression`: run the opt-in Phase 38 FD regression evidence lane, preserving Phase 10M soak artifacts plus a Phase 38 summary under `build/release_confidence/phase38/fd_regression`
-- `make ci-chaos-restart`: run the Phase 10M `propane` chaos/restart lane against the tech demo, warming the app build before manager startup with app-root-compatible framework flags and retaining manager stdout/stderr plus lifecycle artifacts under `build/release_confidence/phase10m/chaos_restart`
-- `make ci-fault-injection`: run Phase 9I runtime seam fault-injection matrix and generate artifacts under `build/release_confidence/phase9i`
-- `make ci-release-certification`: run Phase 9J enterprise release checklist and generate certification artifacts under `build/release_confidence/phase9j`
+ - intended for local/manual perf triage; `make ci-quality` already covers the broader multi-profile macro perf matrix in CI
+- `make ci-quality`: run unit + integration + multi-profile perf quality gate plus runtime concurrency, JSON abstraction/performance gates, and fault-injection checks
+- `make ci-sanitizers`: run the ASan/UBSan sanitizer matrix (unit, runtime probe, backend parity, fault injection, soak, chaos restart, static analysis) and generate artifacts under `build/release_confidence/phase10m/sanitizers`
+- `make ci-soak`: run the long-run soak lane with health traffic, validated `fileBodyPath` responses, restart checks, and `/proc` FD target sampling including `/dev/null` drift
+- `make ci-phase38-fd-regression`: run the opt-in FD regression evidence lane, preserving soak artifacts plus an FD summary under `build/release_confidence/phase38/fd_regression`
+- `make ci-chaos-restart`: run the `propane` chaos/restart lane against the tech demo, warming the app build before manager startup with app-root-compatible framework flags and retaining manager stdout/stderr plus lifecycle artifacts under `build/release_confidence/phase10m/chaos_restart`
+- `make ci-fault-injection`: run the runtime seam fault-injection matrix and generate artifacts under `build/release_confidence/phase9i`
+- `make ci-release-certification`: run enterprise release checklist and generate certification artifacts under `build/release_confidence/phase9j`
 - `make ci-json-abstraction`: fail when runtime sources bypass `ALNJSONSerialization`
-- `make ci-json-perf`: run Phase 10E JSON backend microbenchmark gate and generate artifacts under `build/release_confidence/phase10e`
-- `make ci-dispatch-perf`: run Phase 10G dispatch invocation benchmark gate and generate artifacts under `build/release_confidence/phase10g`
-- `make ci-http-parse-perf`: run Phase 10H HTTP parser benchmark gate and generate artifacts under `build/release_confidence/phase10h`
-- `make ci-phase11-protocol-adversarial`: run the Phase 11 hostile protocol corpus and generate artifacts under `build/release_confidence/phase11/protocol_adversarial`
-- `make ci-phase11-fuzz`: run the Phase 11 deterministic protocol mutation harness and generate artifacts under `build/release_confidence/phase11/protocol_fuzz`
-- `make ci-phase11-live-adversarial`: run the Phase 11 mixed hostile HTTP/websocket probe and generate artifacts under `build/release_confidence/phase11/live_adversarial`
-- `make ci-phase11-sanitizers`: run the Phase 11 ASan/UBSan hostile-traffic matrix and generate artifacts under `build/release_confidence/phase11/sanitizers`
-- `make ci-phase11`: run the full Phase 11 confidence pack (protocol corpus + fuzz + live probe + sanitizer matrix)
-- `make phase5e-confidence`: generate Phase 5E release confidence artifacts in `build/release_confidence/phase5e`
-- `make phase14-confidence`: run the Phase 14 module confidence gate and generate artifacts in `build/release_confidence/phase14`
-- `make phase15-confidence`: run the Phase 15 auth UI confidence gate and generate artifacts in `build/release_confidence/phase15`
-- `make phase16-confidence`: run the Phase 16 module-maturity confidence gate and generate artifacts in `build/release_confidence/phase16`
-- `make phase19-confidence`: run the Phase 19 incremental build-graph confidence gate and generate artifacts in `build/release_confidence/phase19`
-- `make phase20-confidence`: generate Phase 20 reflection/type-codec/backend-tier confidence artifacts in `build/release_confidence/phase20`
-- `tools/ci/run_phase30_confidence.sh`: run the Phase 30 Apple baseline confidence gate and generate artifacts in `build/release_confidence/phase30`
-- `tools/ci/run_phase20_focused.sh`: explicit focused Phase 20 lane runner for builder/schema/routing plus PostgreSQL/MSSQL live coverage
-- `tools/ci/run_phase5e_quality.sh`: explicit Phase 5E CI gate entrypoint
-- `tools/ci/run_phase5e_sanitizers.sh`: explicit Phase 5E sanitizer CI gate entrypoint
-  - remains the explicit Phase 9H-style blocking lane for ASan/UBSan unit + runtime/data-layer checks plus Phase 9H confidence artifact generation under `build/release_confidence/phase9h`
-  - set `ARLEN_SANITIZER_INCLUDE_INTEGRATION=1` to include full integration suite (default is `0`)
-  - set `ARLEN_SANITIZER_INCLUDE_TSAN=1` to run TSAN experimental lane (non-blocking)
+- `make ci-json-perf`: run JSON backend microbenchmark gate and generate artifacts under `build/release_confidence/phase10e`
+- `make ci-dispatch-perf`: run dispatch invocation benchmark gate and generate artifacts under `build/release_confidence/phase10g`
+- `make ci-http-parse-perf`: run HTTP parser benchmark gate and generate artifacts under `build/release_confidence/phase10h`
+- `make ci-phase11-protocol-adversarial`: run the hostile protocol corpus and generate artifacts under `build/release_confidence/phase11/protocol_adversarial`
+- `make ci-phase11-fuzz`: run the deterministic protocol mutation harness and generate artifacts under `build/release_confidence/phase11/protocol_fuzz`
+- `make ci-phase11-live-adversarial`: run the mixed hostile HTTP/websocket probe and generate artifacts under `build/release_confidence/phase11/live_adversarial`
+- `make ci-phase11-sanitizers`: run the ASan/UBSan hostile-traffic matrix and generate artifacts under `build/release_confidence/phase11/sanitizers`
+- `make ci-phase11`: run the full hostile-traffic confidence pack (protocol corpus + fuzz + live probe + sanitizer matrix)
+- `make phase5e-confidence`: generate release confidence artifacts in `build/release_confidence/phase5e`
+- `make phase14-confidence`: run the module confidence gate and generate artifacts in `build/release_confidence/phase14`
+- `make phase15-confidence`: run the auth UI confidence gate and generate artifacts in `build/release_confidence/phase15`
+- `make phase16-confidence`: run the module-maturity confidence gate and generate artifacts in `build/release_confidence/phase16`
+- `make phase19-confidence`: run the incremental build-graph confidence gate and generate artifacts in `build/release_confidence/phase19`
+- `make phase20-confidence`: generate reflection/type-codec/backend-tier confidence artifacts in `build/release_confidence/phase20`
+- `tools/ci/run_phase30_confidence.sh`: run the Apple baseline confidence gate and generate artifacts in `build/release_confidence/phase30`
+- `tools/ci/run_phase20_focused.sh`: explicit focused lane runner for builder/schema/routing plus PostgreSQL/MSSQL live coverage
+- `tools/ci/run_phase5e_quality.sh`: explicit data-layer CI gate entrypoint
+- `tools/ci/run_phase5e_sanitizers.sh`: explicit sanitizer CI gate entrypoint
+ - remains the explicit sanitizer blocking lane for ASan/UBSan unit + runtime/data-layer checks plus sanitizer confidence artifact generation under `build/release_confidence/phase9h`
+ - set `ARLEN_SANITIZER_INCLUDE_INTEGRATION=1` to include full integration suite (default is `0`)
+ - set `ARLEN_SANITIZER_INCLUDE_TSAN=1` to run TSAN experimental lane (non-blocking)
 - `tools/ci/run_phase5e_tsan_experimental.sh`: execute TSAN experimental lane directly and retain artifacts in `build/sanitizers/tsan`
-- `tools/ci/run_phase9i_fault_injection.sh`: explicit Phase 9I fault-injection gate entrypoint
-  - `ARLEN_PHASE9I_SEED` controls replay seed (default `9011`)
-  - `ARLEN_PHASE9I_ITERS` controls iterations per mode (default `1`)
-  - `ARLEN_PHASE9I_MODES` selects modes (`concurrent,serialized` by default)
-  - `ARLEN_PHASE9I_SCENARIOS` selects optional scenario subset (comma-separated)
-  - `ARLEN_PHASE9I_OUTPUT_DIR` overrides artifact output directory
-- `tools/ci/run_phase9j_release_certification.sh`: explicit Phase 9J release-certification gate entrypoint
-  - `ARLEN_PHASE9J_RELEASE_ID` sets the release-candidate id in generated pack metadata
-  - `ARLEN_PHASE9J_OUTPUT_DIR` overrides artifact output directory
-  - `ARLEN_PHASE9J_SKIP_GATES=1` skips gate execution and regenerates certification from existing artifacts
-  - `ARLEN_PHASE9J_ALLOW_INCOMPLETE=1` emits an incomplete pack without failing the command
-  - the default gate starts from `make clean`; unit-test prerequisites include
-    `build/arlen` so CLI regressions run against a freshly built tool
+- `tools/ci/run_phase9i_fault_injection.sh`: explicit fault-injection gate entrypoint
+ - `ARLEN_PHASE9I_SEED` controls replay seed (default `9011`)
+ - `ARLEN_PHASE9I_ITERS` controls iterations per mode (default `1`)
+ - `ARLEN_PHASE9I_MODES` selects modes (`concurrent,serialized` by default)
+ - `ARLEN_PHASE9I_SCENARIOS` selects optional scenario subset (comma-separated)
+ - `ARLEN_PHASE9I_OUTPUT_DIR` overrides artifact output directory
+- `tools/ci/run_phase9j_release_certification.sh`: explicit release-certification gate entrypoint
+ - `ARLEN_PHASE9J_RELEASE_ID` sets the release-candidate id in generated pack metadata
+ - `ARLEN_PHASE9J_OUTPUT_DIR` overrides artifact output directory
+ - `ARLEN_PHASE9J_SKIP_GATES=1` skips gate execution and regenerates certification from existing artifacts
+ - `ARLEN_PHASE9J_ALLOW_INCOMPLETE=1` emits an incomplete pack without failing the command
+ - the default gate starts from `make clean`; unit-test prerequisites include
+ `build/arlen` so CLI regressions run against a freshly built tool
 - `tools/ci/run_perf_smoke.sh`: explicit macro perf-smoke entrypoint used by `make ci-perf-smoke`
-  - kept standalone because the self-hosted Phase 5E quality workflow already runs the fuller macro perf matrix
-  - `ARLEN_PERF_SMOKE_PROFILES` selects the checked-in macro perf profiles to gate (default `default,template_heavy`)
-  - `ARLEN_PERF_SMOKE_REQUESTS` overrides requests per scenario (default `120`)
-  - `ARLEN_PERF_SMOKE_REPEATS` overrides median-aggregation repeats (default `3`)
-  - `ARLEN_PERF_SMOKE_OUTPUT_DIR` overrides the artifact output directory
-  - `ARLEN_PERF_SMOKE_SKIP_BUILD=1` reuses already-built binaries across profiles
-- `tools/ci/run_phase10e_json_performance.sh`: explicit Phase 10E JSON backend performance gate entrypoint
-  - `ARLEN_PHASE10E_ITERATIONS` controls benchmark iterations (default `1500`)
-  - `ARLEN_PHASE10E_WARMUP` controls warmup iterations (default `200`)
-  - `ARLEN_PHASE10E_ROUNDS` controls median-aggregation benchmark rounds (default `3`)
-  - `ARLEN_PHASE10E_OUTPUT_DIR` overrides artifact output directory
-  - `ARLEN_PHASE10E_FIXTURES_DIR` overrides fixture corpus directory
-  - `ARLEN_PHASE10E_THRESHOLDS` overrides threshold policy fixture path
-- `tools/ci/run_phase10g_dispatch_performance.sh`: explicit Phase 10G dispatch benchmark gate entrypoint
-  - `ARLEN_PHASE10G_ITERATIONS` controls benchmark iterations (default `50000`)
-  - `ARLEN_PHASE10G_WARMUP` controls warmup iterations (default `5000`)
-  - `ARLEN_PHASE10G_ROUNDS` controls median-aggregation benchmark rounds (default `3`)
-  - `ARLEN_PHASE10G_OUTPUT_DIR` overrides artifact output directory
-  - `ARLEN_PHASE10G_THRESHOLDS` overrides threshold policy fixture path
-- `tools/ci/run_phase10h_http_parse_performance.sh`: explicit Phase 10H HTTP parser benchmark gate entrypoint
-  - `ARLEN_PHASE10H_ITERATIONS` controls benchmark iterations (default `1500`)
-  - `ARLEN_PHASE10H_WARMUP` controls warmup iterations (default `200`)
-  - `ARLEN_PHASE10H_ROUNDS` controls median-aggregation benchmark rounds (default `5`)
-  - `ARLEN_PHASE10H_OUTPUT_DIR` overrides artifact output directory
-  - `ARLEN_PHASE10H_FIXTURES_DIR` overrides fixture corpus directory
-  - `ARLEN_PHASE10H_THRESHOLDS` overrides threshold policy fixture path
-- `tools/ci/run_phase11_protocol_adversarial.sh`: explicit Phase 11 hostile protocol corpus gate entrypoint
-  - `ARLEN_PHASE11_PROTOCOL_OUTPUT_DIR` overrides artifact output directory
-  - `ARLEN_PHASE11_PROTOCOL_BACKENDS` selects parser backends (default `llhttp,legacy`)
-- `tools/ci/run_phase11_protocol_fuzz.sh`: explicit Phase 11 deterministic protocol mutation gate entrypoint
-  - `ARLEN_PHASE11_FUZZ_OUTPUT_DIR` overrides artifact output directory
-  - `ARLEN_PHASE11_FUZZ_BACKENDS` selects parser backends (default `llhttp,legacy`)
-- `tools/ci/run_phase11_live_adversarial.sh`: explicit Phase 11 mixed hostile-traffic probe entrypoint
-  - `ARLEN_PHASE11_LIVE_OUTPUT_DIR` overrides artifact output directory
-  - `ARLEN_PHASE11_LIVE_MODES` selects dispatch modes (default `serialized,concurrent`)
-  - `ARLEN_PHASE11_LIVE_ROUNDS` controls probe rounds (default `2`)
-- `tools/ci/run_phase11_sanitizer_matrix.sh`: explicit Phase 11 sanitizer hostile-traffic matrix entrypoint
-  - `ARLEN_PHASE11_SANITIZER_OUTPUT_DIR` overrides artifact output directory
-  - `ARLEN_PHASE11_SANITIZER_LANES` selects sanitizer lanes
-  - threshold policy supports global + fixture-size classes:
-    - global: `parse_ops_ratio_min`, `parse_p95_ratio_max`, expected-improvement keys
-    - small fixture class: `small_request_bytes_max`, `small_parse_ops_ratio_min`, `small_parse_p95_ratio_max`
-    - large fixture class: `large_request_bytes_min`, `large_parse_ops_ratio_min`, `large_parse_p95_ratio_max`
+ - kept standalone because the self-hosted quality workflow already runs the fuller macro perf matrix
+ - `ARLEN_PERF_SMOKE_PROFILES` selects the checked-in macro perf profiles to gate (default `default,template_heavy`)
+ - `ARLEN_PERF_SMOKE_REQUESTS` overrides requests per scenario (default `120`)
+ - `ARLEN_PERF_SMOKE_REPEATS` overrides median-aggregation repeats (default `3`)
+ - `ARLEN_PERF_SMOKE_OUTPUT_DIR` overrides the artifact output directory
+ - `ARLEN_PERF_SMOKE_SKIP_BUILD=1` reuses already-built binaries across profiles
+- `tools/ci/run_phase10e_json_performance.sh`: explicit JSON backend performance gate entrypoint
+ - `ARLEN_PHASE10E_ITERATIONS` controls benchmark iterations (default `1500`)
+ - `ARLEN_PHASE10E_WARMUP` controls warmup iterations (default `200`)
+ - `ARLEN_PHASE10E_ROUNDS` controls median-aggregation benchmark rounds (default `3`)
+ - `ARLEN_PHASE10E_OUTPUT_DIR` overrides artifact output directory
+ - `ARLEN_PHASE10E_FIXTURES_DIR` overrides fixture corpus directory
+ - `ARLEN_PHASE10E_THRESHOLDS` overrides threshold policy fixture path
+- `tools/ci/run_phase10g_dispatch_performance.sh`: explicit dispatch benchmark gate entrypoint
+ - `ARLEN_PHASE10G_ITERATIONS` controls benchmark iterations (default `50000`)
+ - `ARLEN_PHASE10G_WARMUP` controls warmup iterations (default `5000`)
+ - `ARLEN_PHASE10G_ROUNDS` controls median-aggregation benchmark rounds (default `3`)
+ - `ARLEN_PHASE10G_OUTPUT_DIR` overrides artifact output directory
+ - `ARLEN_PHASE10G_THRESHOLDS` overrides threshold policy fixture path
+- `tools/ci/run_phase10h_http_parse_performance.sh`: explicit HTTP parser benchmark gate entrypoint
+ - `ARLEN_PHASE10H_ITERATIONS` controls benchmark iterations (default `1500`)
+ - `ARLEN_PHASE10H_WARMUP` controls warmup iterations (default `200`)
+ - `ARLEN_PHASE10H_ROUNDS` controls median-aggregation benchmark rounds (default `5`)
+ - `ARLEN_PHASE10H_OUTPUT_DIR` overrides artifact output directory
+ - `ARLEN_PHASE10H_FIXTURES_DIR` overrides fixture corpus directory
+ - `ARLEN_PHASE10H_THRESHOLDS` overrides threshold policy fixture path
+- `tools/ci/run_phase11_protocol_adversarial.sh`: explicit hostile protocol corpus gate entrypoint
+ - `ARLEN_PHASE11_PROTOCOL_OUTPUT_DIR` overrides artifact output directory
+ - `ARLEN_PHASE11_PROTOCOL_BACKENDS` selects parser backends (default `llhttp,legacy`)
+- `tools/ci/run_phase11_protocol_fuzz.sh`: explicit deterministic protocol mutation gate entrypoint
+ - `ARLEN_PHASE11_FUZZ_OUTPUT_DIR` overrides artifact output directory
+ - `ARLEN_PHASE11_FUZZ_BACKENDS` selects parser backends (default `llhttp,legacy`)
+- `tools/ci/run_phase11_live_adversarial.sh`: explicit mixed hostile-traffic probe entrypoint
+ - `ARLEN_PHASE11_LIVE_OUTPUT_DIR` overrides artifact output directory
+ - `ARLEN_PHASE11_LIVE_MODES` selects dispatch modes (default `serialized,concurrent`)
+ - `ARLEN_PHASE11_LIVE_ROUNDS` controls probe rounds (default `2`)
+- `tools/ci/run_phase11_sanitizer_matrix.sh`: explicit sanitizer hostile-traffic matrix entrypoint
+ - `ARLEN_PHASE11_SANITIZER_OUTPUT_DIR` overrides artifact output directory
+ - `ARLEN_PHASE11_SANITIZER_LANES` selects sanitizer lanes
+ - threshold policy supports global + fixture-size classes:
+ - global: `parse_ops_ratio_min`, `parse_p95_ratio_max`, expected-improvement keys
+ - small fixture class: `small_request_bytes_max`, `small_parse_ops_ratio_min`, `small_parse_p95_ratio_max`
+ - large fixture class: `large_request_bytes_min`, `large_parse_ops_ratio_min`, `large_parse_p95_ratio_max`
 - `make test-data-layer`: build and run standalone `ArlenData` example validation
 - `make parity-phaseb`: run Arlen-vs-FastAPI Phase B parity gate for frozen benchmark scenarios (creates report at `build/perf/parity_fastapi_latest.json`)
 - `make perf-phasec`: run Phase C benchmark protocol (warmup + concurrency ladder) and write `build/perf/phasec/latest_protocol_report.json`
@@ -1221,16 +1221,16 @@ Lifecycle diagnostics:
 - `make phase31-confidence`: packaged release/deploy parity lane covering `deploy doctor --base-url`, packaged `jobs-worker --once`, and `.exe` helper fallback checks
 - `make phase32-confidence`: target-aware deploy lane covering remote rebuild gating, rollback/status deployment metadata, unsupported-target rejection, and the packaged `propane_handoff` contract
 - `tools/deploy/build_release.sh --dry-run --json`: emit deploy release planning payload for coding-agent automation
-  - enforces Phase 9J certification manifest by default (`build/release_confidence/phase9j/manifest.json`)
-  - enforces Phase 10E JSON performance manifest by default (`build/release_confidence/phase10e/manifest.json`)
-  - use `--certification-manifest <path>` to override manifest location
-  - use `--json-performance-manifest <path>` to override JSON performance manifest location
-  - use `--skip-release-certification` or `--dev` only for explicit non-RC app iteration
-  - `--allow-missing-certification` remains available as the compatibility spelling
-  - if a configured runtime reload/restart fails after activation, Arlen restores `releases/current` to the previous release when possible and reports `deployment_state=activation_failed`; if restoration is not possible, JSON reports `deployment_state=stale_runtime`
-  - use `--runtime-restart-command` / `--runtime-reload-command` or target config keys `runtimeRestartCommand` / `runtimeReloadCommand` for non-interactive systemd wrappers such as `sudo -n systemctl restart ...`
-  - after a successful runtime action, health validation polls `/healthz` until `--health-startup-timeout` expires; timeout errors report `deployment_state=activated_health_unverified`
-  - packages `app/db/migrations` and the prepared app binary at `app/.boomhauer/build/boomhauer-app` so the documented release migrate and `framework/bin/propane` workflows run from the artifact itself
+ - enforces certification manifest by default (`build/release_confidence/phase9j/manifest.json`)
+ - enforces JSON performance manifest by default (`build/release_confidence/phase10e/manifest.json`)
+ - use `--certification-manifest <path>` to override manifest location
+ - use `--json-performance-manifest <path>` to override JSON performance manifest location
+ - use `--skip-release-certification` or `--dev` only for explicit non-RC app iteration
+ - `--allow-missing-certification` remains available as the compatibility spelling
+ - if a configured runtime reload/restart fails after activation, Arlen restores `releases/current` to the previous release when possible and reports `deployment_state=activation_failed`; if restoration is not possible, JSON reports `deployment_state=stale_runtime`
+ - use `--runtime-restart-command` / `--runtime-reload-command` or target config keys `runtimeRestartCommand` / `runtimeReloadCommand` for non-interactive systemd wrappers such as `sudo -n systemctl restart ...`
+ - after a successful runtime action, health validation polls `/healthz` until `--health-startup-timeout` expires; timeout errors report `deployment_state=activated_health_unverified`
+ - packages `app/db/migrations` and the prepared app binary at `app/.boomhauer/build/boomhauer-app` so the documented release migrate and `framework/bin/propane` workflows run from the artifact itself
 - `arlen generate frontend <Name> --preset <vanilla-spa|progressive-mpa>`: scaffold frontend starter templates with built-in API wiring examples
 - `make ci-docs`: run docs quality gate (API docs regen consistency + roadmap summary consistency + newcomer-doc navigation checks + imported comparative benchmark-contract consistency + HTML artifact/link checks)
 - `make ci-benchmark-contracts`: validate the imported lightweight comparative benchmark fixtures under `tests/fixtures/benchmarking/`
@@ -1242,7 +1242,7 @@ Lifecycle diagnostics:
 - `make docs-html`: generate browser-friendly docs under `build/docs`
 - `make docs-serve`: serve generated docs locally (default `http://127.0.0.1:4173`, override via `DOCS_PORT`)
 
-## Data-Layer Runtime APIs (Phase 4D)
+## Data-Layer Runtime APIs
 
 `ALNPgConnection`/`ALNPg` now provide builder-driven execution helpers with query diagnostics hooks:
 
@@ -1257,10 +1257,10 @@ Runtime controls:
 - `builderCompilationCacheLimit`
 - `queryDiagnosticsListener` (event stages: `compile`, `execute`, `result`, `error`)
 - `includeSQLInDiagnosticsEvents` (default off for redaction-safe metadata)
-- `ARLEN_PHASE5E_SOAK_ITERS` (optional loop count override for Phase 5E soak tests, default `120`)
+- `ARLEN_PHASE5E_SOAK_ITERS` (optional loop count override for soak tests, default `120`)
 - `emitDiagnosticsEventsToStderr`
 
-## Service Durability APIs (Phase 7D)
+## Service Durability APIs
 
 Jobs enqueue options:
 
@@ -1270,13 +1270,13 @@ Jobs enqueue options:
 Retry wrappers:
 
 - `ALNRetryingMailAdapter`
-  - wraps any `id<ALNMailAdapter>`
-  - controls: `maxAttempts`, `retryDelaySeconds`
-  - deterministic exhaustion error: `ALNServiceErrorDomain` code `4311`
+ - wraps any `id<ALNMailAdapter>`
+ - controls: `maxAttempts`, `retryDelaySeconds`
+ - deterministic exhaustion error: `ALNServiceErrorDomain` code `4311`
 - `ALNRetryingAttachmentAdapter`
-  - wraps any `id<ALNAttachmentAdapter>`
-  - controls: `maxAttempts`, `retryDelaySeconds`
-  - deterministic exhaustion error: `ALNServiceErrorDomain` code `564`
+ - wraps any `id<ALNAttachmentAdapter>`
+ - controls: `maxAttempts`, `retryDelaySeconds`
+ - deterministic exhaustion error: `ALNServiceErrorDomain` code `564`
 
 ## PostgreSQL Test Gate
 

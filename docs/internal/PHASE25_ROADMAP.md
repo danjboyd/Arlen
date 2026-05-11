@@ -8,7 +8,7 @@ Related docs:
 - `docs/STATUS.md`
 - `docs/LIVE_UI.md`
 - `docs/REALTIME_COMPOSITION.md`
-- `docs/FEATURE_PARITY_MATRIX.md`
+- `docs/internal/FEATURE_PARITY_MATRIX.md`
 - `docs/DOCUMENTATION_POLICY.md`
 
 ## 0. Progress Checkpoint (2026-04-01)

@@ -8,7 +8,7 @@ Related docs:
 - `docs/PHASE3_ROADMAP.md`
 - `docs/PHASE2_PHASE3_ROADMAP.md`
 - `docs/PHASE13_ROADMAP.md`
-- `docs/FEATURE_PARITY_MATRIX.md`
+- `docs/internal/FEATURE_PARITY_MATRIX.md`
 - `docs/PASSWORD_HASHING.md`
 - `docs/GETTING_STARTED.md`
 

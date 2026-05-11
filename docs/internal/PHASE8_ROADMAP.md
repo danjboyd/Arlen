@@ -6,7 +6,7 @@ Last updated: 2026-02-24
 Related docs:
 - `docs/PHASE7_ROADMAP.md`
 - `docs/PHASE2_PHASE3_ROADMAP.md`
-- `docs/RFC_KEYPATH_TRANSFORMERS_ROUTE_COMPILE.md`
+- `docs/internal/RFC_KEYPATH_TRANSFORMERS_ROUTE_COMPILE.md`
 - `docs/CORE_CONCEPTS.md`
 - `V1_SPEC.md`
 

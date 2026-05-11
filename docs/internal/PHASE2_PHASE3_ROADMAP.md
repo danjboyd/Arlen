@@ -21,7 +21,7 @@ This index points to the current roadmap documents:
 - `docs/PHASE12_ROADMAP.md`
 - `docs/PHASE13_ROADMAP.md`
 - `docs/PHASE14_ROADMAP.md`
-- `docs/FEATURE_PARITY_MATRIX.md`
+- `docs/internal/FEATURE_PARITY_MATRIX.md`
 
 ## Summary
 

@@ -41,7 +41,7 @@ Checked-in wrappers:
 - `scripts/run_clang64.ps1`
 - `scripts/run_clang64.sh`
 
-For Phase 34K runner provisioning, Arlen pins `gnustep-cli-new` as a submodule
+For Windows runner provisioning, Arlen pins `gnustep-cli-new` as a submodule
 at `vendor/gnustep-cli-new`. Use that checkout as the source of truth for the
 MSYS2 `CLANG64` GNUstep managed-toolchain manifests and Windows bootstrap
 validation helpers when preparing a self-hosted `windows-preview` runner. See

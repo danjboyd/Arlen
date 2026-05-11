@@ -1,6 +1,6 @@
 # Sanitizer Suppression Policy
 
-Phase 9H keeps sanitizer confidence high by treating suppressions as temporary and auditable.
+Arlen keeps sanitizer confidence high by treating suppressions as temporary and auditable.
 
 ## Registry
 
@@ -14,7 +14,7 @@ The registry is validated by:
 python3 ./tools/ci/check_sanitizer_suppressions.py
 ```
 
-This check is part of the explicit Phase 9H-style sanitizer entrypoint
+This check is part of the explicit the sanitizer entrypoint
 `bash ./tools/ci/run_phase5e_sanitizers.sh` and must pass for release candidates.
 
 ## Required Fields
@@ -43,7 +43,7 @@ Validation rules:
 
 ## Artifact Contract
 
-Phase 9H sanitizer confidence artifacts are generated at:
+Sanitizer confidence artifacts are generated at:
 
 - `build/release_confidence/phase9h/`
 

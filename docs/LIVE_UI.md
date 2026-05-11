@@ -1,6 +1,6 @@
 # Live UI Guide
 
-Arlen's Phase 25 live UI layer is fragment-first. It does not try to be a
+Arlen's live UI layer is fragment-first. It does not try to be a
 whole-page stateful diff engine. The current model is:
 
 - controllers return HTML fragments or explicit live operations

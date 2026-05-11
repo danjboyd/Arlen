@@ -165,7 +165,7 @@ ArlenData reuse remains continuously validated by CI via:
 
 - `tools/ci/run_phase3c_quality.sh` calling `make test-data-layer`
 - unit snapshots in `tests/unit/Phase3GTests.m`
-- Phase 4A safety/IR regressions in `tests/unit/Phase4ATests.m`
+- safety/IR regressions in `tests/unit/Phase4ATests.m`
 - PostgreSQL execution regression for identifier-bound templates in `tests/unit/PgTests.m`
 
 ## 8. Expression Template Safety Contracts
@@ -325,7 +325,7 @@ Conformance matrix:
 
 Migration/deprecation docs:
 
-- `docs/SQL_BUILDER_PHASE4_MIGRATION.md`
+- `docs/internal/SQL_BUILDER_PHASE4_MIGRATION.md`
 
 Regression coverage extends the data-layer contract with:
 

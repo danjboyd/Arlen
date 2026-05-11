@@ -23,9 +23,9 @@ Ownership rule:
 
 | TaxCalculator report | Upstream status | Evidence |
 | --- | --- | --- |
-| `sshOptions = ("-F", "/dev/null", "-oBatchMode=yes")` was reordered into an invalid SSH argv | fixed in current workspace; awaiting downstream revalidation | `docs/OPEN_ISSUES.md` (`ARLEN-BUG-025`), `tools/arlen.m`, `tests/integration/DeploymentIntegrationTests.m`, `docs/CLI_REFERENCE.md`, `docs/DEPLOYMENT.md` |
-| `deploy push --json` could hang when SSH exited early during tar-stream upload | fixed in current workspace; awaiting downstream revalidation | `docs/OPEN_ISSUES.md` (`ARLEN-BUG-026`), `tools/arlen.m`, `tests/integration/DeploymentIntegrationTests.m`, `docs/CLI_REFERENCE.md`, `docs/DEPLOYMENT.md` |
-| `deploy push --json` could hang before upload when a captured build child filled stdout/stderr pipes | fixed in current workspace; awaiting downstream revalidation | `docs/OPEN_ISSUES.md` (`ARLEN-BUG-027`), `tools/arlen.m`, `tests/unit/BuildPolicyTests.m`, `docs/CLI_REFERENCE.md`, `docs/DEPLOYMENT.md` |
+| `sshOptions = ("-F", "/dev/null", "-oBatchMode=yes")` was reordered into an invalid SSH argv | fixed in current workspace; awaiting downstream revalidation | `docs/internal/OPEN_ISSUES.md` (`ARLEN-BUG-025`), `tools/arlen.m`, `tests/integration/DeploymentIntegrationTests.m`, `docs/CLI_REFERENCE.md`, `docs/DEPLOYMENT.md` |
+| `deploy push --json` could hang when SSH exited early during tar-stream upload | fixed in current workspace; awaiting downstream revalidation | `docs/internal/OPEN_ISSUES.md` (`ARLEN-BUG-026`), `tools/arlen.m`, `tests/integration/DeploymentIntegrationTests.m`, `docs/CLI_REFERENCE.md`, `docs/DEPLOYMENT.md` |
+| `deploy push --json` could hang before upload when a captured build child filled stdout/stderr pipes | fixed in current workspace; awaiting downstream revalidation | `docs/internal/OPEN_ISSUES.md` (`ARLEN-BUG-027`), `tools/arlen.m`, `tests/unit/BuildPolicyTests.m`, `docs/CLI_REFERENCE.md`, `docs/DEPLOYMENT.md` |
 | `deploy init <remote-target> --json` created `/srv/arlen/...` directories locally | documented current behavior; not reclassified as a transport bug in this patch | `docs/CLI_REFERENCE.md`, `docs/DEPLOYMENT.md` |
 
 ## Notes

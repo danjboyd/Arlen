@@ -16,8 +16,8 @@ Ownership rule:
 
 | TaxCalculator report | Upstream status | Evidence |
 | --- | --- | --- |
-| Phase 9J certification hangs in `HTTPIntegrationTests/testReservedOperabilityEndpointsCannotBeShadowedByCatchAllRoute` | fixed upstream; awaiting downstream revalidation | `docs/OPEN_ISSUES.md` (`ARLEN-BUG-029`), `tests/integration/HTTPIntegrationTests.m` |
-| Downstream app deploys are blocked by heavyweight Arlen release certification by default | fixed upstream; awaiting downstream revalidation | `docs/OPEN_ISSUES.md` (`ARLEN-BUG-030`), `tools/arlen.m`, `tools/deploy/build_release.sh`, `docs/DEPLOYMENT.md`, `docs/CLI_REFERENCE.md` |
+| Phase 9J certification hangs in `HTTPIntegrationTests/testReservedOperabilityEndpointsCannotBeShadowedByCatchAllRoute` | fixed upstream; awaiting downstream revalidation | `docs/internal/OPEN_ISSUES.md` (`ARLEN-BUG-029`), `tests/integration/HTTPIntegrationTests.m` |
+| Downstream app deploys are blocked by heavyweight Arlen release certification by default | fixed upstream; awaiting downstream revalidation | `docs/internal/OPEN_ISSUES.md` (`ARLEN-BUG-030`), `tools/arlen.m`, `tools/deploy/build_release.sh`, `docs/DEPLOYMENT.md`, `docs/CLI_REFERENCE.md` |
 
 ## Notes
 

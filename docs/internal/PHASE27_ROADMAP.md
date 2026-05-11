@@ -8,7 +8,7 @@ Related docs:
 - `docs/SEARCH_MODULE.md`
 - `docs/PHASE14_ROADMAP.md`
 - `docs/PHASE16_ROADMAP.md`
-- `docs/FEATURE_PARITY_MATRIX.md`
+- `docs/internal/FEATURE_PARITY_MATRIX.md`
 - `docs/MODULES.md`
 - `docs/DOCUMENTATION_POLICY.md`
 

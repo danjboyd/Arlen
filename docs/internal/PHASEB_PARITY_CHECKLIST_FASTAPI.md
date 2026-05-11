@@ -4,7 +4,7 @@ Status: Complete (2026-02-24)
 Last updated: 2026-02-24
 
 Related docs:
-- `docs/COMPETITIVE_BENCHMARK_ROADMAP.md`
+- `docs/internal/COMPETITIVE_BENCHMARK_ROADMAP.md`
 - `docs/PERFORMANCE_PROFILES.md`
 - `docs/ARLEN_FOR_FASTAPI.md`
 - `tests/performance/check_parity_fastapi.py`

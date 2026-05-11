@@ -96,7 +96,7 @@ release candidate.
 When a downstream app reports a Phase 9J blocker, Arlen records upstream status
 separately from app closure. The expected upstream response is:
 
-- add or update the bug-ledger entry in `docs/OPEN_ISSUES.md`
+- add or update the bug-ledger entry in `docs/internal/OPEN_ISSUES.md`
 - preserve the downstream ownership split in a reconciliation note
 - fix the Arlen build/test/release contract rather than bypassing the Phase 9J
   manifest requirement

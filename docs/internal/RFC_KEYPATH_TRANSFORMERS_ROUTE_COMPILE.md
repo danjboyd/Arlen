@@ -7,7 +7,7 @@ Related docs:
 
 - `V1_SPEC.md`
 - `docs/internal/PHASE1_SPEC.md`
-- `docs/EOC_V1_ROADMAP.md`
+- `docs/internal/EOC_V1_ROADMAP.md`
 - `docs/internal/PHASE7E_TEMPLATE_PIPELINE_MATURITY.md`
 - `docs/CORE_CONCEPTS.md`
 

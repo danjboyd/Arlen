@@ -35,7 +35,7 @@ powershell -ExecutionPolicy Bypass -File scripts\run_clang64.ps1 -InnerCommand "
 
 ## Apple Baseline (2026-04-08)
 
-This is the closed Apple-runtime baseline for Phase 30 on the `mac` branch. It
+This is the closed Apple-runtime baseline on the `mac` branch. It
 is a verified build/runtime contract, not a claim that every Linux/GNUstep
 test lane has already been migrated to Apple-native XCTest bundles.
 
@@ -117,7 +117,7 @@ Current GitHub Actions workflow surface:
 - `windows-preview`
   - non-required Windows preview-confidence lane
 - `release-certification`
-  - release-only Phase 9J certification lane
+  - release-only certification lane
 
 Current documented required checks for `main`:
 
@@ -137,7 +137,7 @@ Windows preview helpers:
 - `scripts/run_clang64.sh`
 - `tools/ci/run_phase24_windows_preview.sh`
 - `tools/ci/run_phase31_confidence.sh`
-- `vendor/gnustep-cli-new` pins the Phase 34K Windows MSYS2/GNUstep
+- `vendor/gnustep-cli-new` pins the Windows MSYS2/GNUstep
   provisioning source for self-hosted `windows-preview` runners
 
 Supported CI bootstrap strategies:
@@ -170,7 +170,7 @@ Optional contributor override:
 
 Platform runner provisioning:
 
-- Arlen vendors `gnustep-cli-new` at `vendor/gnustep-cli-new` for the Phase 34K
+- Arlen vendors `gnustep-cli-new` at `vendor/gnustep-cli-new` for the Windows
   Windows runner path
 - use the pinned checkout's Windows integration docs, managed-toolchain
   manifests, and bootstrap validation helpers when preparing the MSYS2

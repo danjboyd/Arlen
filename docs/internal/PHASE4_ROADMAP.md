@@ -6,7 +6,7 @@ Last updated: 2026-02-20
 Related docs:
 - `docs/PHASE3_ROADMAP.md`
 - `docs/PHASE2_PHASE3_ROADMAP.md`
-- `docs/FEATURE_PARITY_MATRIX.md`
+- `docs/internal/FEATURE_PARITY_MATRIX.md`
 - `docs/ARLEN_DATA.md`
 
 ## 1. Objective
@@ -138,7 +138,7 @@ Acceptance (verified):
 - CI now has a dedicated Phase 4 quality gate path (`tools/ci/run_phase4_quality.sh`, `.github/workflows/phase4-quality.yml`) and `make ci-quality` points at the Phase 4 gate.
 - Conformance snapshots are enforced via machine-readable matrix fixture (`tests/fixtures/sql_builder/phase4e_conformance_matrix.json`) validated by `tests/unit/Phase4ETests.m`.
 - Property/long-run regression coverage now exercises placeholder shifting, parameter ordering, tuple predicate contracts, and nested expression shapes.
-- Migration path guidance is published in `docs/SQL_BUILDER_PHASE4_MIGRATION.md` and validated by representative-flow unit coverage (`testMigrationGuideRepresentativeFlowCompilesAndPreservesContracts`).
+- Migration path guidance is published in `docs/internal/SQL_BUILDER_PHASE4_MIGRATION.md` and validated by representative-flow unit coverage (`testMigrationGuideRepresentativeFlowCompilesAndPreservesContracts`).
 
 Implementation notes:
 - Added SQL builder conformance matrix doc and fixture:
@@ -150,7 +150,7 @@ Implementation notes:
   - deterministic property tests for placeholder and parameter contracts
   - long-run nested shape regression sweeps
 - Added migration/deprecation hardening docs:
-  - `docs/SQL_BUILDER_PHASE4_MIGRATION.md`
+  - `docs/internal/SQL_BUILDER_PHASE4_MIGRATION.md`
   - `docs/RELEASE_PROCESS.md` phase-4 transitional API lifecycle extension
 
 ## 4. Testing Strategy (Adopted from Best-in-Class Patterns)

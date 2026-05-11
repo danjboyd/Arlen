@@ -1,6 +1,6 @@
 # Arlen ORM Migration Contracts
 
-Phase 26 closes the migration-history gap by treating historical ORM
+ArlenORM closes the migration-history gap by treating historical ORM
 descriptors as explicit artifacts instead of an implicit side effect of current
 model code.
 

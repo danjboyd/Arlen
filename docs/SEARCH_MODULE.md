@@ -290,7 +290,7 @@ They also expose:
 
 ## Confidence Lane
 
-Phase 27 ships focused search verification and characterization artifacts:
+The search module ships focused verification and characterization artifacts:
 
 ```bash
 source tools/source_gnustep_env.sh

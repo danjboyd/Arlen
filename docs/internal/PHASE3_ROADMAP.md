@@ -6,7 +6,7 @@ Last updated: 2026-02-20
 Related docs:
 - `docs/PHASE2_ROADMAP.md`
 - `docs/PHASE4_ROADMAP.md`
-- `docs/FEATURE_PARITY_MATRIX.md`
+- `docs/internal/FEATURE_PARITY_MATRIX.md`
 - `docs/DEPLOYMENT.md`
 
 ## 1. Objective
@@ -376,6 +376,6 @@ Phase 3 scope is complete through 3H. Post-3H sequencing is tracked in:
 
 ## 7. Parity Governance in Phase 3
 
-- Continue quarterly Mojolicious parity deltas against the frozen baseline model in `docs/FEATURE_PARITY_MATRIX.md`.
+- Continue quarterly Mojolicious parity deltas against the frozen baseline model in `docs/internal/FEATURE_PARITY_MATRIX.md`.
 - Every newly in-scope capability must include acceptance tests and migration notes when API behavior changes.
 - Deferred items remain deferred until their prerequisites (observability, deployment reliability, and extension contracts) are complete.

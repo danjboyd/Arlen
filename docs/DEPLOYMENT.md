@@ -4,9 +4,9 @@ Arlen is designed for deployment behind a reverse proxy.
 
 This guide now has two layers:
 
-- the currently implemented Phase 29 release workflow
-- the Phase 32 deployment-target contract that future remote deploy work will
-  enforce
+- the currently implemented release workflow
+- the deployment-target contract that future remote deploy work will
+ enforce
 
 ## 1. Runtime Boundary
 
@@ -31,7 +31,7 @@ Recommended app/runtime defaults for production:
 - explicit observability policy (`observability.tracePropagationEnabled`, `observability.healthDetailsEnabled`, `observability.readinessRequiresStartup`, `observability.readinessRequiresClusterQuorum`)
 - explicit propane accessories (`workerCount`, shutdown/reload timings)
 - explicit durable state intent (`state.durable`, `state.mode`, `state.target`)
-  or an explicit deploy database contract for request-spanning app state
+ or an explicit deploy database contract for request-spanning app state
 - explicit cluster settings when running multi-node (`cluster.enabled`, `cluster.name`, `cluster.expectedNodes`, `cluster.observedNodes`)
 
 API-only mode (`apiOnly = YES`, or `ARLEN_API_ONLY=1`) defaults to:
@@ -77,9 +77,9 @@ database = { mode = "host_local"; adapter = "postgresql"; target = "default"; };
 `arlen deploy push`, and `arlen deploy release` warn, but do not fail, when a
 production multi-worker app has no durable state signal.
 
-## 4. Phase 32 Deployment Target Contract
+## 4. Deployment Target Contract
 
-Phase 29 gave Arlen a first-class release workflow. Phase 32 defines the
+Arlen ships a first-class release workflow. The deployment-target contract defines the
 target-compatibility contract that future remote deploy work must enforce.
 
 ### 4.1 Platform Profiles
@@ -106,21 +106,21 @@ Why this matters:
 
 - Apple Foundation and GNUstep are different runtime families
 - the same Objective-C source may still diverge in behavior across those
-  families
+ families
 - deployment safety depends on the full runtime boundary, not only on whether
-  the CPU is `arm64` or `x86_64`
+ the CPU is `arm64` or `x86_64`
 
 ### 4.2 Deployment Support Levels
 
 Arlen should classify deployment plans into these levels:
 
 - `supported`
-  - local build profile matches the remote target profile exactly
+ - local build profile matches the remote target profile exactly
 - `experimental`
-  - remote rebuild is explicitly enabled and the target falls within a
-    narrowly allowed best-effort class
+ - remote rebuild is explicitly enabled and the target falls within a
+ narrowly allowed best-effort class
 - `unsupported`
-  - profile or runtime-family mismatch is outside the supported contract
+ - profile or runtime-family mismatch is outside the supported contract
 
 Current intended v1 policy:
 
@@ -229,11 +229,11 @@ explicit configuration rather than implicit host state.
 Recommended strategies:
 
 - `system`
-  - the target already carries a compatible runtime/toolchain
+ - the target already carries a compatible runtime/toolchain
 - `managed`
-  - Arlen deploys and manages the expected runtime on the host
+ - Arlen deploys and manages the expected runtime on the host
 - `bundled`
-  - the release artifact carries the runtime beside the app
+ - the release artifact carries the runtime beside the app
 
 The default production bias should stay toward deterministic runtime control,
 not toward guessing that arbitrary host packages are compatible.
@@ -345,13 +345,13 @@ Release manifests expose `propane_handoff` metadata with:
 This is the boundary between responsibilities:
 
 - `arlen deploy`
-  - packages the release
-  - records deployment and `propane` handoff metadata
-  - activates releases and triggers lifecycle actions
+ - packages the release
+ - records deployment and `propane` handoff metadata
+ - activates releases and triggers lifecycle actions
 - `propane`
-  - owns process supervision
-  - owns worker lifecycle
-  - owns `propane accessories`
+ - owns process supervision
+ - owns worker lifecycle
+ - owns `propane accessories`
 
 The deploy product should not become a second process manager. It hands off to
 `propane` through the packaged metadata and environment contract.
@@ -411,9 +411,9 @@ For app-operator workflows, prefer the first-class `arlen deploy` wrapper:
 ./build/arlen deploy release --app-root /path/to/app --release-id rel-20260407 --skip-release-certification --json
 ```
 
-Phase 9J certification is enforced by default for release-candidate packaging.
+Release certification is enforced by default for release-candidate packaging.
 For explicit non-RC app iteration, use `--skip-release-certification` or
-`--dev`. These options waive Phase 9J and Phase 10E evidence checks, record
+`--dev`. These options waive certification and evidence checks, record
 `certification_status = waived` and `json_performance_status = waived` in the
 release metadata, and print a text-mode warning. The older
 `--allow-missing-certification` spelling remains supported for compatibility.
@@ -458,29 +458,29 @@ Target-aware deploy options:
 
 - `--target-profile <profile>` records the intended deployment target profile
 - `--runtime-strategy <system|managed|bundled>` records how the runtime should
-  be satisfied on the target
+ be satisfied on the target
 - `--database-mode <external|host_local|embedded>` records the declared
-  database dependency contract
+ database dependency contract
 - `--database-adapter <name>` records the declared database adapter contract
 - `--database-target <name>` records the declared database target name
 - `--require-env-key <NAME>` records required env keys without storing values
 - `--allow-remote-rebuild` opts into best-effort GNUstep cross-profile rebuild
-  planning
+ planning
 - `--remote-build-check-command <shell>` is required by `deploy release` when
-  the manifest represents an experimental remote rebuild target
+ the manifest represents an experimental remote rebuild target
 - `--runtime-restart-command <shell>` overrides the default
-  `systemctl restart <service>` command; use a non-interactive command such as
-  `sudo -n systemctl restart arlen@myapp`
+ `systemctl restart <service>` command; use a non-interactive command such as
+ `sudo -n systemctl restart arlen@myapp`
 - `--runtime-reload-command <shell>` overrides the default
-  `systemctl reload <service>` command
+ `systemctl reload <service>` command
 - `--health-startup-timeout <seconds>` sets the post-runtime health polling
-  window for `deploy release` (default `30`)
+ window for `deploy release` (default `30`)
 - `--health-startup-interval <seconds>` sets the polling interval (default `1`)
-- `--skip-release-certification` waives Phase 9J / Phase 10E evidence for
-  explicit non-RC app iteration
+- `--skip-release-certification` waives certification / evidence for
+ explicit non-RC app iteration
 - `--dev` is a shorter alias for `--skip-release-certification`
 - `--allow-missing-certification` remains as the compatibility spelling for the
-  same non-RC waiver
+ same non-RC waiver
 
 Additional deploy CLI helpers:
 
@@ -523,7 +523,7 @@ doctor/logs flows, and a reserved-endpoint smoke app where `/:token` must not
 shadow `/healthz`, `/readyz`, or `/metrics`.
 
 `phase31-confidence` adds the packaged-release closeout checks that were still
-missing from Phase 29:
+missing from earlier release workflows:
 
 - packaged release smoke through `tools/deploy/smoke_release.sh --json`
 - packaged `propane` startup plus `deploy doctor --base-url`
@@ -539,8 +539,8 @@ missing from Phase 29:
 - rollback-candidate deployment metadata in `deploy status`
 - rollback-source deployment metadata in `deploy rollback`
 - packaged `propane_handoff` manifest and `release.env` contract
-- activation/rollback preservation of the Phase 32 database contract in
-  `release.env` (`ARLEN-BUG-020`)
+- activation/rollback preservation of the database contract in
+ `release.env` (`ARLEN-BUG-020`)
 - explicit database/configuration manifest contracts
 - doctor validation for declared required env keys with secret-redacted output
 - runtime-root conflict detection for live services
@@ -549,9 +549,9 @@ missing from Phase 29:
 Windows support statement for deployment:
 
 - packaged release and deploy workflows are now available on MSYS2 `CLANG64`
-  as a preview path
+ as a preview path
 - the preview path is verified by the Windows self-hosted workflow and the
-  repo-native `phase31-confidence` lane
+ repo-native `phase31-confidence` lane
 - this is still not a general production support claim for Windows hosts
 
 ### 6.1 Build a release artifact
@@ -595,12 +595,12 @@ Packaged release payloads now include:
 - app config/templates/public/modules/source files needed for runtime inspection
 - `app/db/migrations` for the documented `arlen migrate` step
 - prebuilt app server binary at `app/.boomhauer/build/boomhauer-app` (or
-  `.exe` on Windows preview builds)
+ `.exe` on Windows preview builds)
 - runtime wrapper scripts plus `framework/build/arlen` and
-  `framework/build/boomhauer` (with `.exe` suffixes preserved when present)
+ `framework/build/boomhauer` (with `.exe` suffixes preserved when present)
 - deploy helpers under `framework/tools/deploy/`, including
-  `activate_release.sh`, `rollback_release.sh`, `write_release_env.py`, and
-  `validate_operability.sh`
+ `activate_release.sh`, `rollback_release.sh`, `write_release_env.py`, and
+ `validate_operability.sh`
 
 Compiled runtime binaries are copied into the release by value, not as
 preserved symlinks, so the activated release does not continue to point back at
@@ -611,9 +611,9 @@ Release metadata includes:
 - `metadata/release.env`
 - `metadata/README.txt` with migrate/run commands
 - manifest-backed runtime/helper paths for `arlen`, `boomhauer`, `propane`,
-  `jobs-worker`, and the operability helper
+ `jobs-worker`, and the operability helper
 - release-relative manifest paths for all packaged runtime/helper entries
-  (`ARLEN-BUG-017`)
+ (`ARLEN-BUG-017`)
 
 ### 6.2 Activate a release
 
@@ -629,11 +629,11 @@ Activation also rewrites `metadata/release.env` so:
 
 - the shipped manifest can stay portable in transit
 - the activated environment file points at the target host's actual release
-  root
+ root
 - `deploy status`, `deploy doctor`, and `propane` handoff metadata stay honest
-  after the release moves to a different machine/path
-- the packaged Phase 32 deploy contract, including database metadata, remains
-  present after activation/rollback (`ARLEN-BUG-020`)
+ after the release moves to a different machine/path
+- the packaged deploy contract, including database metadata, remains
+ present after activation/rollback (`ARLEN-BUG-020`)
 
 ### 6.3 Run migration step (explicit)
 
@@ -680,10 +680,10 @@ It currently creates:
 On GNUstep-backed targets, `config/deploy.plist` can declare:
 
 - `runtime.gnustepScript`
-  - the host GNUstep bootstrap script Arlen should source for runtime wrappers
+ - the host GNUstep bootstrap script Arlen should source for runtime wrappers
 - `runtime.requiresEnvWrapper`
-  - whether packaged `propane` / `jobs-worker` should run through generated
-    wrappers that source GNUstep first
+ - whether packaged `propane` / `jobs-worker` should run through generated
+ wrappers that source GNUstep first
 
 It does not:
 
@@ -768,15 +768,15 @@ Recommended checked-in target shape:
 Supported database dependency modes:
 
 - `external`
-  - the database is outside the app host
-  - doctor should validate config presence and optionally connectivity
-  - doctor should not require PostgreSQL to be installed on the app host
+ - the database is outside the app host
+ - doctor should validate config presence and optionally connectivity
+ - doctor should not require PostgreSQL to be installed on the app host
 - `host_local`
-  - the database is expected to be reachable on the deploy host
-  - doctor should fail if the declared local database service is unavailable
+ - the database is expected to be reachable on the deploy host
+ - doctor should fail if the declared local database service is unavailable
 - `embedded`
-  - the database is file/runtime-backed rather than a host service
-  - doctor should validate file and runtime prerequisites instead of service presence
+ - the database is file/runtime-backed rather than a host service
+ - doctor should validate file and runtime prerequisites instead of service presence
 
 Arlen should validate the declared mode. Arlen should not become a database
 installer or provisioner.
@@ -784,14 +784,14 @@ installer or provisioner.
 Current doctor behavior for those modes:
 
 - `external`
-  - requires database config presence
-  - does not require a local PostgreSQL install on the app host
+ - requires database config presence
+ - does not require a local PostgreSQL install on the app host
 - `host_local`
-  - requires a usable host-local database probe for the declared adapter
-  - currently ships PostgreSQL-oriented host readiness checks
+ - requires a usable host-local database probe for the declared adapter
+ - currently ships PostgreSQL-oriented host readiness checks
 - `embedded`
-  - records the contract and leaves file/runtime prerequisite checks to the
-    target-specific validation path
+ - records the contract and leaves file/runtime prerequisite checks to the
+ target-specific validation path
 
 Required environment keys:
 
@@ -807,10 +807,10 @@ side effect.
 Current Arlen behavior:
 
 - `arlen deploy release` runs `migrate --env <name>` before activation when
-  packaged SQL migrations exist
+ packaged SQL migrations exist
 - `--skip-migrate` is available for controlled rollouts
 - `--service <unit> --runtime-action <reload|restart|none>` can make runtime
-  restart/reload an explicit post-activation deploy step
+ restart/reload an explicit post-activation deploy step
 
 Expected app/operator behavior:
 
@@ -874,7 +874,7 @@ Important:
 - release activation should own `ARLEN_APP_ROOT` and `ARLEN_FRAMEWORK_ROOT`
 - shared env files should not persist legacy values for those runtime roots
 - if shared env overrides those values, live services can bypass the activated
-  immutable release even when the unit `ExecStart` points at `releases/current`
+ immutable release even when the unit `ExecStart` points at `releases/current`
 
 This was the exact failure mode observed during the `parker-app` migration from
 pre-release deploy wiring to Arlen-managed release activation.
@@ -903,7 +903,7 @@ After rollback symlink switch, restart/reload `propane` from `releases/current`.
 
 ## 9. Automated Runbook Validation
 
-Phase 3C adds automated smoke validation for the documented release runbook:
+Arlen adds automated smoke validation for the documented release runbook:
 
 ```bash
 tools/deploy/smoke_release.sh \
