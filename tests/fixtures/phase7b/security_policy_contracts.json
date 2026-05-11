@@ -5,8 +5,8 @@
       "id": "security_profile_preset_defaults_contract",
       "claim": "Security profile presets apply deterministic default behavior for proxy trust, session, CSRF, and security headers while preserving explicit overrides.",
       "source_docs": [
-        "docs/PHASE7_ROADMAP.md",
-        "docs/PHASE7B_SECURITY_DEFAULTS.md"
+        "docs/internal/PHASE7_ROADMAP.md",
+        "docs/internal/PHASE7B_SECURITY_DEFAULTS.md"
       ],
       "verification": [
         {
@@ -30,8 +30,8 @@
       "id": "security_misconfiguration_fail_fast_contract",
       "claim": "Misconfigured security-critical settings fail application startup with deterministic diagnostics.",
       "source_docs": [
-        "docs/PHASE7_ROADMAP.md",
-        "docs/PHASE7B_SECURITY_DEFAULTS.md"
+        "docs/internal/PHASE7_ROADMAP.md",
+        "docs/internal/PHASE7B_SECURITY_DEFAULTS.md"
       ],
       "verification": [
         {
