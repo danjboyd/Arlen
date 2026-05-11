@@ -7,7 +7,7 @@
       "source_docs": [
         "docs/internal/PHASE4_ROADMAP.md",
         "docs/ARLEN_DATA.md",
-        "docs/SQL_BUILDER_PHASE4_MIGRATION.md"
+        "docs/internal/SQL_BUILDER_PHASE4_MIGRATION.md"
       ],
       "verification": [
         {
