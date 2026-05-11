@@ -33,7 +33,7 @@ Core resource responsibilities:
 - optional autocomplete hooks
 - optional policy hook
 
-Useful Phase 16 metadata includes:
+Useful metadata includes:
 
 - `fields` with typed `kind`, `choices`, and optional `autocomplete`
 - `filters` with `type`, placeholder text, and numeric/date bounds when needed

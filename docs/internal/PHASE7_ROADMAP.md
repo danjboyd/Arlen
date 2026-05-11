@@ -15,9 +15,9 @@ Related docs:
 - `docs/PHASE7G_CODING_AGENT_DX_CONTRACTS.md`
 - `docs/PHASE7H_DISTRIBUTED_RUNTIME_DEPTH.md`
 - `docs/STATUS.md`
-- `docs/FEATURE_PARITY_MATRIX.md`
+- `docs/internal/FEATURE_PARITY_MATRIX.md`
 - `docs/PROPANE.md`
-- `docs/EOC_V1_ROADMAP.md`
+- `docs/internal/EOC_V1_ROADMAP.md`
 
 ## 1. Objective
 

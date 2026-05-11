@@ -2,7 +2,7 @@
 
 Last updated: 2026-04-20
 
-This runbook defines the Phase 34K platform-runner contract for the non-required
+This runbook defines the platform-runner contract for the non-required
 Apple and Windows confidence lanes.
 
 The authoritative merge gate remains:
@@ -37,7 +37,7 @@ Provisioning source:
 - the pinned checkout is the source of truth for the MSYS2 `CLANG64` GNUstep
   managed-toolchain manifests, Windows bootstrap helpers, and Windows
   validation contracts used by this runner family
-- the pinned revision for the Phase 34 closeout is
+- the pinned vendor revision is
   `5b83862fc81968d3614ebc2d92301a56354d7c15`
 
 Provisioning shape:
@@ -84,7 +84,7 @@ Workflow contract:
 
 The first operational target is a dedicated or long-lived LAN runner. Ephemeral
 lease-backed registration and teardown are valid follow-up work, but are not
-required to close Phase 34.
+required for current platform-runner support.
 
 ## Apple Baseline Runner
 
@@ -100,7 +100,7 @@ OracleTestVMs direction:
 - Apple should move to an OracleTestVMs-provisioned macOS VM only after that
   provider path is available and stable enough to operate without one-off host
   state
-- the future OracleTestVMs macOS runner must preserve the Phase 30 full-Xcode
+- the future OracleTestVMs macOS runner must preserve the full-Xcode
   and XCTest contract
 - until then, GitHub-hosted `macos-15` is the documented Apple baseline runner
   path
@@ -143,7 +143,7 @@ distribution path may allow:
 gnustep install arlen
 ```
 
-That package-manager path is not part of Phase 34. Phase 34 only requires a
+That package-manager path is not part of the current runner contract, which only requires a
 reproducible platform-runner provisioning contract. Arlen package publication
 through `gnustep-cli-new` belongs to a later distribution or release-management
 phase.

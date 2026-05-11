@@ -147,7 +147,7 @@ Environment fallbacks:
 
 ## Deploy Handoff
 
-Phase 32 makes the deploy-to-`propane` seam explicit.
+The deploy-to-`propane` seam is explicit.
 
 Packaged release manifests now carry a `propane_handoff` object describing:
 

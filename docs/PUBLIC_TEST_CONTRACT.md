@@ -1,6 +1,6 @@
 # Public Test Contract
 
-Status: Phase 37 complete
+Status: Active
 Last updated: 2026-04-24
 
 This document defines the release-confidence contract for Arlen's public
@@ -16,13 +16,13 @@ how to use it.
 - `optional`: characterization or live-service evidence that strengthens the
   release pack but does not block the default gate.
 
-Default Phase 37 checks are intentionally service-free. Live PostgreSQL, MSSQL,
+Default checks are intentionally service-free. Live PostgreSQL, MSSQL,
 Dataverse, OpenSearch, Meilisearch, Windows preview, and Apple baseline evidence
 remain conditional unless release scope or branch protection changes.
 
 ## Public Surfaces
 
-The Phase 37 matrix covers:
+The matrix covers:
 
 - EOC transpiler/runtime
 - view/controller/routing
@@ -64,7 +64,7 @@ make phase37-intake
 make phase37-packaged-deploy-proof
 ```
 
-Generate the current Phase 37 evidence pack:
+Generate the current evidence pack:
 
 ```sh
 make phase37-confidence
@@ -73,7 +73,7 @@ make phase37-confidence
 The confidence artifacts are written under
 `build/release_confidence/phase37/`.
 
-Phase 37 is a release-confidence lane, not a branch-protection change by
+This is a release-confidence lane, not a branch-protection change by
 itself. The current required merge-gate checks remain defined in
 `docs/CI_ALIGNMENT.md`.
 
@@ -89,7 +89,7 @@ The default `phase37-acceptance` manifest is service-free and currently covers:
 - `packaged_deploy`
 
 These sites prove integration contracts and user workflows. They do not replace
-focused unit/regression tests, live adapter tests, or the Phase 31/32/36 deploy
+focused unit/regression tests, live adapter tests, or the deploy
 confidence lanes that exercise packaged deployment behavior more deeply.
 
 Runtime-mode entries in `tests/fixtures/phase37/acceptance_sites.json` reserve
@@ -130,6 +130,6 @@ are `fixture_contract`, `unit_regression`, `integration`,
 `acceptance_fixture`, `real_runtime_acceptance`, and `optional_live`.
 
 Allowed values are `covered`, `planned`, `conditional`, and `not_applicable`.
-`planned` and `conditional` values are acceptable for the default Phase 37 lane
+`planned` and `conditional` values are acceptable for the default lane
 only when the surface is outside the current service-free release gate or is
 reserved for opt-in live/runtime proof.

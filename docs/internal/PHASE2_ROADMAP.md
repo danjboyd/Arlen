@@ -6,7 +6,7 @@ Last updated: 2026-02-19
 Related docs:
 - `docs/PHASE1_SPEC.md`
 - `docs/ARLEN_CLI_SPEC.md`
-- `docs/FEATURE_PARITY_MATRIX.md`
+- `docs/internal/FEATURE_PARITY_MATRIX.md`
 - `docs/PHASE3_ROADMAP.md`
 - `docs/DEPLOYMENT.md`
 
@@ -121,7 +121,7 @@ Delivered:
   - route-aware generation flows (`--route`, `--method`, `--action`, `--template`, `--api`)
   - placeholder route pattern support (for example `/user/admin/:id`) in concise generation flows
   - concise controller render/stash helpers while preserving explicit APIs
-- Implemented remaining in-scope parity capabilities from `docs/FEATURE_PARITY_MATRIX.md`:
+- Implemented remaining in-scope parity capabilities from `docs/internal/FEATURE_PARITY_MATRIX.md`:
   - nested route groups/guards/conditions
   - content negotiation and format-aware rendering paths
   - API-only mode defaults

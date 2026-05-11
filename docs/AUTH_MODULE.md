@@ -139,7 +139,7 @@ without hard-coding them.
 
 ## Server-Rendered Fragment Contract
 
-Phase 18 promotes a small coarse fragment contract for server-rendered EOC
+The module promotes a small coarse fragment contract for server-rendered EOC
 apps. These are the supported fragment identifiers:
 
 - `provider_login_buttons`
@@ -221,7 +221,7 @@ SPA or native clients should target `/auth/api/...` directly rather than
 scraping HTML routes. That API surface is the stable headless contract across
 all UI modes.
 
-Phase 18 makes the MFA JSON surface explicit:
+The module makes the MFA JSON surface explicit:
 
 - `GET /auth/api/mfa`
   - returns `status`, `preferred_factor`, `available_challenge_factors`,

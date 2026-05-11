@@ -1,6 +1,6 @@
 # Arlen ORM Backend Matrix
 
-Phase 26 ships two ORM families with intentionally different boundaries.
+Arlen ships two ORM families with intentionally different boundaries.
 
 ## SQL ORM
 

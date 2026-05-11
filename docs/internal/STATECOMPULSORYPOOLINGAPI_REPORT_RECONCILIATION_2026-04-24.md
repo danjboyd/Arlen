@@ -17,7 +17,7 @@ Ownership rule:
 | StateCompulsoryPoolingAPI report | Upstream status | Evidence |
 | --- | --- | --- |
 | `ALNResponse.fileBodyPath` responses send headers with `Content-Length` but no body bytes when file streaming fails | fixed upstream; awaiting downstream revalidation | `src/Arlen/HTTP/ALNHTTPServer.m`, `tools/boomhauer.m`, `tests/integration/HTTPIntegrationTests.m::testCommittedFileBodyPathStreamsCompleteBody_ARLEN_BUG_023` |
-| Long-lived workers accumulate `/dev/null` descriptors until PDF `GET` responses fail with `Failed to create pipe to handle perform in thread` | accepted as open Arlen-facing production reliability bug; root cause not yet isolated | `docs/OPEN_ISSUES.md::ISSUE-004`, `docs/PHASE38_ROADMAP.md`, Phase 10M soak `/dev/null` FD drift tripwire |
+| Long-lived workers accumulate `/dev/null` descriptors until PDF `GET` responses fail with `Failed to create pipe to handle perform in thread` | accepted as open Arlen-facing production reliability bug; root cause not yet isolated | `docs/internal/OPEN_ISSUES.md::ISSUE-004`, `docs/PHASE38_ROADMAP.md`, Phase 10M soak `/dev/null` FD drift tripwire |
 
 ## Notes
 

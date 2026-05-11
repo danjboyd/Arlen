@@ -63,7 +63,7 @@ The gate now enforces:
 
 - suppression registry validation (`tests/fixtures/sanitizers/phase9h_suppressions.json`)
 - runtime-critical probe coverage (routing, render, realtime, data-layer, lifecycle)
-- Phase 9H confidence artifact generation (`build/release_confidence/phase9h/`)
+- Sanitizer confidence artifact generation (`build/release_confidence/phase9h/`)
 
 - TSAN lane (`tsan_experimental`) remains non-blocking and can be executed directly:
 
@@ -79,7 +79,7 @@ Suppression lifecycle rules are documented in:
 
 ## Fault Injection
 
-Phase 9I adds deterministic runtime seam fault scenarios:
+Arlen adds deterministic runtime seam fault scenarios:
 
 ```bash
 make ci-fault-injection

@@ -1,6 +1,6 @@
 # Performance Profiles and Trends
 
-Phase 3C extends Arlen perf coverage from a single gate into profile-based trend tracking.
+Arlen extends perf coverage from a single gate into profile-based trend tracking.
 
 ## 1. Profile Pack
 

@@ -17,7 +17,7 @@ Ownership rule:
 
 | TaxCalculator report | Upstream status | Evidence |
 | --- | --- | --- |
-| Phase 9J certification failed in `BuildPolicyTests.testArlenBuildJSONCapturesLargeChildOutputWithoutPipeDeadlock_ARLEN_BUG_027` with empty redirected JSON output, then passed on focused rerun | fixed upstream; awaiting downstream revalidation | `docs/OPEN_ISSUES.md` (`ARLEN-BUG-028`), `GNUmakefile`, `tests/unit/BuildPolicyTests.m`, `docs/PHASE9J_RELEASE_CERTIFICATION.md`, `docs/TESTING_WORKFLOW.md` |
+| Phase 9J certification failed in `BuildPolicyTests.testArlenBuildJSONCapturesLargeChildOutputWithoutPipeDeadlock_ARLEN_BUG_027` with empty redirected JSON output, then passed on focused rerun | fixed upstream; awaiting downstream revalidation | `docs/internal/OPEN_ISSUES.md` (`ARLEN-BUG-028`), `GNUmakefile`, `tests/unit/BuildPolicyTests.m`, `docs/PHASE9J_RELEASE_CERTIFICATION.md`, `docs/TESTING_WORKFLOW.md` |
 
 ## Notes
 

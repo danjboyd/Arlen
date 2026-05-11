@@ -1,6 +1,6 @@
 # GSWeb-to-Arlen Migration Guide
 
-This guide provides the Phase 3C migration starter path from GNUstepWeb/legacy route patterns to Arlen.
+This guide provides the migration starter path from GNUstepWeb/legacy route patterns to Arlen.
 
 ## 1. Migration Strategy
 

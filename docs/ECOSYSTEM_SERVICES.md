@@ -1,6 +1,6 @@
 # Ecosystem Services
 
-Phase 3E introduces optional ecosystem service abstractions with plugin-first wiring.
+Arlen introduces optional ecosystem service abstractions with plugin-first wiring.
 
 For the practical `arlen generate plugin` workflow, see
 `docs/PLUGIN_SERVICE_GUIDE.md`.
@@ -156,7 +156,7 @@ Concrete backend adapter now available:
 
 ## 9. Compatibility Suites
 
-Phase 3E includes adapter compatibility suites:
+Adapter compatibility suites:
 
 - `ALNRunJobAdapterConformanceSuite`
 - `ALNRunCacheAdapterConformanceSuite`
@@ -166,7 +166,7 @@ Phase 3E includes adapter compatibility suites:
 - `ALNRunServiceCompatibilitySuite`
 
 These are intended for plugin adapter verification.
-Phase 7D extends durability checks for jobs/cache conformance:
+Arlen extends durability checks for jobs/cache conformance:
 
 - jobs idempotency-key dedupe/release semantics
 - cache zero-TTL persistence semantics
@@ -204,7 +204,7 @@ The `redis-cache` preset now instantiates `ALNRedisCacheAdapter` directly when `
 
 ## 12. Optional Job Worker Runtime Contract
 
-Phase 3E follow-on adds an optional worker contract for scheduled/asynchronous execution:
+An optional worker contract for scheduled/asynchronous execution:
 
 - `ALNJobWorkerRuntime` (`handleJob:error:`)
 - `ALNJobWorker` (`runDueJobsAt:runtime:error:`)

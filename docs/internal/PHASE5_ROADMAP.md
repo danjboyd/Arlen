@@ -8,7 +8,7 @@ Related docs:
 - `docs/PHASE7_ROADMAP.md`
 - `docs/PHASE2_PHASE3_ROADMAP.md`
 - `docs/STATUS.md`
-- `docs/FEATURE_PARITY_MATRIX.md`
+- `docs/internal/FEATURE_PARITY_MATRIX.md`
 - `docs/ARLEN_DATA.md`
 - `docs/SQL_BUILDER_CONFORMANCE_MATRIX.md`
 

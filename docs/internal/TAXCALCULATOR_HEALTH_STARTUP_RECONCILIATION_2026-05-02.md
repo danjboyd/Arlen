@@ -17,7 +17,7 @@ Ownership rule:
 
 | TaxCalculator report | Upstream status | Evidence |
 | --- | --- | --- |
-| `arlen deploy release` exits nonzero when immediate post-restart health probe races service startup | fixed upstream; awaiting downstream revalidation | `docs/OPEN_ISSUES.md` (`ARLEN-BUG-032`), `tools/arlen.m`, `tests/integration/DeploymentIntegrationTests.m`, `docs/DEPLOYMENT.md`, `docs/CLI_REFERENCE.md` |
+| `arlen deploy release` exits nonzero when immediate post-restart health probe races service startup | fixed upstream; awaiting downstream revalidation | `docs/internal/OPEN_ISSUES.md` (`ARLEN-BUG-032`), `tools/arlen.m`, `tests/integration/DeploymentIntegrationTests.m`, `docs/DEPLOYMENT.md`, `docs/CLI_REFERENCE.md` |
 
 ## Notes
 

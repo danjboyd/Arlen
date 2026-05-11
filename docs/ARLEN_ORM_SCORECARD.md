@@ -1,6 +1,6 @@
 # Arlen ORM Scorecard
 
-Phase 26 is done when Arlen can make a narrow, defensible best-in-class claim
+ArlenORM is done when Arlen can make a narrow, defensible best-in-class claim
 for its target ecosystem.
 
 ## Shipped Proof Points
@@ -22,7 +22,7 @@ for its target ecosystem.
   - explicit SQL capability metadata
   - separate Dataverse ORM capability metadata
 - Confidence story:
-  - split Phase 26 lanes for unit, generated, integration, backend parity,
+  - split ORM lanes for unit, generated, integration, backend parity,
     perf, live, and full confidence artifacts
 
 ## The Claim Arlen Can Defend

@@ -11,14 +11,14 @@ Related docs:
 - `docs/GETTING_STARTED_DATA_LAYER.md`
 - `docs/TESTING_WORKFLOW.md`
 - `docs/DATAVERSE.md`
-- `docs/FEATURE_PARITY_MATRIX.md`
+- `docs/internal/FEATURE_PARITY_MATRIX.md`
 - `docs/PHASE20_ROADMAP.md`
 - `docs/PHASE23_ROADMAP.md`
 
 Reference inputs reviewed for this roadmap:
 - `docs/ARLEN_DATA.md`
 - `docs/PHASE20_ROADMAP.md`
-- `docs/FEATURE_PARITY_MATRIX.md`
+- `docs/internal/FEATURE_PARITY_MATRIX.md`
 - `src/Arlen/Data/ALNDatabaseAdapter.h`
 - `src/Arlen/Data/ALNSQLBuilder.h`
 - `src/Arlen/Data/ALNSchemaCodegen.m`

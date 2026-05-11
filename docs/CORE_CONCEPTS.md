@@ -101,7 +101,7 @@ If controller action returns an `NSDictionary` or `NSArray` and no explicit body
   - `mountApplication:atPrefix:`
   - mounted requests are path-rewritten and dispatched into child app context.
 
-Cluster runtime contract (Phase 3H):
+Cluster runtime contract:
 
 - `GET /clusterz` returns runtime cluster identity and deployment contract details.
 - Responses include `X-Arlen-Cluster`, `X-Arlen-Node`, and `X-Arlen-Worker-Pid` when `cluster.emitHeaders = YES`.
@@ -110,7 +110,7 @@ Cluster runtime contract (Phase 3H):
 
 ## 8. Ecosystem Services
 
-Arlen Phase 3E adds plugin-first ecosystem service adapters:
+Arlen adds plugin-first ecosystem service adapters:
 
 - jobs: `ALNJobAdapter`
 - cache: `ALNCacheAdapter`

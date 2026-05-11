@@ -19,7 +19,7 @@ Ownership rule:
 | OwnerConnect report | Upstream status | Evidence |
 | --- | --- | --- |
 | SSH deploy push fails with `mkdir: missing operand` because remote `bash -lc` arguments are not preserved over SSH | fixed in current workspace; awaiting downstream revalidation | `tools/arlen.m`, `tests/integration/DeploymentIntegrationTests.m`, `docs/DEPLOYMENT.md`, `docs/CLI_REFERENCE.md` |
-| `arlen deploy release <target> --release-id <existing-id>` rebuilds an existing local release and fails with `release_exists` | fixed in Phase 36D; awaiting downstream revalidation | `docs/OPEN_ISSUES.md` (`ARLEN-BUG-022`), `tools/arlen.m`, `tests/integration/DeploymentIntegrationTests.m` |
+| `arlen deploy release <target> --release-id <existing-id>` rebuilds an existing local release and fails with `release_exists` | fixed in Phase 36D; awaiting downstream revalidation | `docs/internal/OPEN_ISSUES.md` (`ARLEN-BUG-022`), `tools/arlen.m`, `tests/integration/DeploymentIntegrationTests.m` |
 
 ## Notes
 

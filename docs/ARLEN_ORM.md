@@ -203,7 +203,7 @@ magic.
 
 ## Verification
 
-Use the Phase 26 lanes:
+Use the dedicated lanes:
 
 ```bash
 source tools/source_gnustep_env.sh

@@ -88,7 +88,7 @@ GNUstep bootstrap scripts.
 
 - Full repo-native Objective-C Apple XCTest bundle migration is still future
   work; the current closed baseline verifies Apple XCTest availability through
-  the dedicated `tools/apple_xctest_smoke.sh` helper and the Phase 30
+  the dedicated `tools/apple_xctest_smoke.sh` helper and the Apple-runtime
   confidence lane.
 - Some shell tooling and CI helpers outside the core build/test/run loop still
   remain GNUstep/Linux-specific because the Linux path is still supported.
@@ -96,16 +96,16 @@ GNUstep bootstrap scripts.
 - Apple watch-mode support for `boomhauer` is not implemented yet; the runtime
   falls back to non-watch execution with an explicit warning.
 
-## Non-Goals of Phase 30
+## Non-Goals
 
 - deprecating Linux/GNUstep support
 - shipping an Xcode project as the primary build path
 - claiming full Apple parity for every module before runtime validation closes
 - removing OpenSSL-backed crypto code in favor of Apple Security APIs
 
-## Current Phase 30 State
+## Current State
 
-Phase 30 now includes:
+The Apple-runtime path now includes:
 
 1. `30P` repo-native Objective-C Apple XCTest build/run integration for the full test suite
 2. `30Q` Apple-aware optional dependency normalization for PostgreSQL and ODBC-style backends

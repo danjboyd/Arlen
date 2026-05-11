@@ -5,7 +5,7 @@ Last updated: 2026-04-28
 
 Related docs:
 
-- `docs/OPEN_ISSUES.md`
+- `docs/internal/OPEN_ISSUES.md`
 - `docs/STATECOMPULSORYPOOLINGAPI_REPORT_RECONCILIATION_2026-04-24.md`
 - `docs/PHASE10_ROADMAP.md`
 - `docs/DEPLOYMENT.md`
@@ -364,7 +364,7 @@ Deliverables:
 - Validate the fix in `StateCompulsoryPoolingAPI` outside peak traffic before
   production rollout.
 - Update:
-  - `docs/OPEN_ISSUES.md`
+  - `docs/internal/OPEN_ISSUES.md`
   - `docs/STATECOMPULSORYPOOLINGAPI_REPORT_RECONCILIATION_2026-04-24.md`
   - `docs/STATUS.md`
   - release notes, if a shipped Arlen behavior changes

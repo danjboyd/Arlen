@@ -1,6 +1,6 @@
 # Release Process
 
-This document defines Arlen release lifecycle operations through Phase 9J.
+This document defines Arlen release lifecycle operations.
 
 ## 1. Versioning Policy
 
@@ -22,12 +22,12 @@ Deprecations are explicit and time-bounded:
 3. Emit development-facing warnings where practical.
 4. Remove only in next major release.
 
-### Phase 4 Transitional APIs (4A-4D)
+### SQL Transitional APIs
 
-For SQL/data-layer transitional APIs introduced in Phase 4:
+For SQL/data-layer transitional SQL APIs:
 
 - Keep compatibility through at least two 4.x minor releases.
-- Publish replacement migration snippets in `docs/SQL_BUILDER_PHASE4_MIGRATION.md`.
+- Publish replacement migration snippets in `docs/internal/SQL_BUILDER_PHASE4_MIGRATION.md`.
 - Track active transitional API status in `docs/STATUS.md`.
 - Permit removals only at a major release boundary.
 
@@ -40,7 +40,7 @@ make ci-release-certification
 ```
 
 `make ci-release-certification` executes the release checklist gates and generates the
-Phase 9J certification pack under:
+Certification pack under:
 
 - `build/release_confidence/phase9j/`
 

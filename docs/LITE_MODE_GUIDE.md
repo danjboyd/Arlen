@@ -93,4 +93,4 @@ is structural, not magical: move routes and bootstrap code into the usual
 - `docs/FIRST_APP_GUIDE.md`
 - `docs/APP_AUTHORING_GUIDE.md`
 - `docs/CONFIGURATION_REFERENCE.md`
-- `docs/LITE_MODE_SPEC.md`
+- `docs/internal/LITE_MODE_SPEC.md`

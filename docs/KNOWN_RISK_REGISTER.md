@@ -19,7 +19,7 @@ Last updated: 2026-05-11
 | ID | Title | Severity | Owner | Target Date | Notes |
 | --- | --- | --- | --- | --- | --- |
 | `phase9j-risk-benchmark-ladder` | Middleware-heavy benchmark concurrency ladder remains constrained to 1,4 | low | performance-core | 2026-03-21 | Deferred benchmark roadmap removes this from active release-risk scope; higher-concurrency middleware-heavy validation now lives in the parked comparative benchmark follow-on. |
-| `phase9j-risk-sanitizer-suppression-governance` | Suppression registry maintenance policy maturity | low | runtime-core | 2026-02-25 | Phase 9H introduced suppression lifecycle policy + validator. |
+| `phase9j-risk-sanitizer-suppression-governance` | Suppression registry maintenance policy maturity | low | runtime-core | 2026-02-25 | Suppression lifecycle policy + validator introduced. |
 
 ## Update Contract
 
