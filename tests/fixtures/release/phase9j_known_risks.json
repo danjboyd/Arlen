@@ -1,6 +1,6 @@
 {
   "version": "phase9j-known-risk-register-v1",
-  "lastUpdated": "2026-04-15",
+  "lastUpdated": "2026-05-11",
   "risks": [
     {
       "id": "phase9j-risk-tsan-nonblocking",
