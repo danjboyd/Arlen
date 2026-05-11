@@ -6,9 +6,9 @@ Last updated: 2026-02-24
 Related docs:
 
 - `V1_SPEC.md`
-- `docs/PHASE1_SPEC.md`
+- `docs/internal/PHASE1_SPEC.md`
 - `docs/EOC_V1_ROADMAP.md`
-- `docs/PHASE7E_TEMPLATE_PIPELINE_MATURITY.md`
+- `docs/internal/PHASE7E_TEMPLATE_PIPELINE_MATURITY.md`
 - `docs/CORE_CONCEPTS.md`
 
 ## 1. Purpose

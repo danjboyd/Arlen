@@ -5,11 +5,11 @@ Last updated: 2026-03-21
 
 Related documents:
 
-- `docs/PHASE1_SPEC.md` (framework-level Phase 1 architecture/specification)
+- `docs/internal/PHASE1_SPEC.md` (framework-level Phase 1 architecture/specification)
 - `docs/ARLEN_CLI_SPEC.md` (Phase 1 CLI contract for `arlen`)
 - `docs/LITE_MODE_SPEC.md` (Phase 1 lite-mode behavior and boundaries)
-- `docs/PHASE2_ROADMAP.md` (Phase 2 hardening milestones, including performance-gap closure)
-- `docs/PHASE3_ROADMAP.md` (Phase 3 trend analysis and expanded performance maturity work)
+- `docs/internal/PHASE2_ROADMAP.md` (Phase 2 hardening milestones, including performance-gap closure)
+- `docs/internal/PHASE3_ROADMAP.md` (Phase 3 trend analysis and expanded performance maturity work)
 - `V1_SPEC.md` (EOC template engine v1 details)
 
 ## Implementation Status (2026-03-13)

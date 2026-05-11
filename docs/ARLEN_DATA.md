@@ -30,7 +30,7 @@ Dataverse is intentionally not routed through `ALNDatabaseAdapter` or
 workloads, and keep using the SQL adapter path for PostgreSQL/MSSQL.
 
 The optional SQL ORM surface now lives in `src/ArlenORM/ArlenORM.h` on top of
-these contracts. See `docs/ARLEN_ORM.md` for the Phase 26 foundation.
+these contracts. See `docs/ARLEN_ORM.md` for the optional ORM foundation.
 
 ## 2. Non-Arlen Consumption
 
@@ -98,9 +98,9 @@ Compatibility contract:
 - Dialect-specific additions must remain in explicit dialect modules (`ALNPostgresSQLBuilder`) and not leak into base builder requirements.
 - `ALNSQLBuilder build:` remains PostgreSQL-default for backward compatibility; cross-dialect compilation should use `buildWithDialect:` / `buildSQLWithDialect:` / `buildParametersWithDialect:`.
 
-## 6. Phase 17 Dialect + Backend Portability
+## 6. Dialect and Backend Portability
 
-Phase 17 adds a backend-neutral seam around SQL compilation and migrations:
+Arlen ships a backend-neutral seam around SQL compilation and migrations:
 
 - `ALNSQLBuilder` now exposes:
   - `buildWithDialect:error:`
@@ -168,7 +168,7 @@ ArlenData reuse remains continuously validated by CI via:
 - Phase 4A safety/IR regressions in `tests/unit/Phase4ATests.m`
 - PostgreSQL execution regression for identifier-bound templates in `tests/unit/PgTests.m`
 
-## 8. Expression Template Safety Contracts (Phase 4A)
+## 8. Expression Template Safety Contracts
 
 Expression-capable builder APIs now route through a trusted-template IR (`trusted-template-v1`) with explicit contracts:
 
@@ -185,7 +185,7 @@ These contracts apply to:
 - `orderByExpression:...identifierBindings:parameters:`
 - subquery/lateral join `onExpression` APIs with `identifierBindings`
 
-## 9. Typed Schema Codegen Workflow (Phase 4C)
+## 9. Typed Schema Codegen Workflow
 
 Use the CLI in an app root with PostgreSQL config:
 
@@ -209,7 +209,7 @@ Generated table APIs expose:
 
 Consumers can include generated files in non-Arlen builds as long as `ALNSQLBuilder` is linked.
 
-## 10. Phase 20A-C Typed Materialization + Result Helpers
+## 10. Typed Materialization and Result Helpers
 
 PostgreSQL runtime materialization now aligns with the generated typed-contract
 surface for the supported scalar baseline.
@@ -296,7 +296,7 @@ Nested dialect compilation is also recursive now:
   as `ILIKE`, PostgreSQL pagination syntax, and related PostgreSQL-only forms
   inside subqueries instead of only at the root builder
 
-## 11. Phase 4D Query Execution Diagnostics + Caching
+## 11. Query Execution Diagnostics and Caching
 
 `ALNPgConnection`/`ALNPg` now expose builder-driven execution helpers:
 
@@ -315,7 +315,7 @@ Runtime controls:
   - `emitDiagnosticsEventsToStderr`
   - `includeSQLInDiagnosticsEvents` (default off; redaction-safe metadata remains default)
 
-## 12. Phase 4E Conformance + Migration Hardening
+## 12. Conformance and Migration Hardening
 
 Conformance matrix:
 
@@ -327,7 +327,7 @@ Migration/deprecation docs:
 
 - `docs/SQL_BUILDER_PHASE4_MIGRATION.md`
 
-Phase 20A-20C regression coverage extends the data-layer contract with:
+Regression coverage extends the data-layer contract with:
 
 - `tests/unit/SchemaCodegenTests.m`
 - `tests/unit/Phase17BTests.m`
@@ -335,7 +335,7 @@ Phase 20A-20C regression coverage extends the data-layer contract with:
 - `tests/integration/PostgresIntegrationTests.m`
 - `docs/RELEASE_PROCESS.md` (phase-4 transitional API lifecycle)
 
-## 12. Phase 5B Multi-Database Runtime Routing
+## 13. Multi-Database Runtime Routing
 
 `ALNDatabaseRouter` provides operation-aware target selection on top of adapter contracts:
 
@@ -346,11 +346,7 @@ Phase 20A-20C regression coverage extends the data-layer contract with:
 - optional read fallback to write target on execution error
 - structured route diagnostics via `routingDiagnosticsListener`
 
-Primary reference:
-
-- `docs/PHASE5B_RUNTIME_ROUTING.md`
-
-## 13. Phase 5C Target-Aware Migration + Codegen Tooling
+## 14. Target-Aware Migration and Codegen Tooling
 
 CLI workflows now support explicit target selection:
 
@@ -364,19 +360,15 @@ Target-aware defaults:
 - schema output dir: `src/Generated/<target>`
 - schema manifest path: `db/schema/arlen_schema_<target>.json`
 
-Phase 17 note:
+Adapter selection:
 
-- `arlen migrate` / `arlen module migrate` now select the configured adapter for
+- `arlen migrate` / `arlen module migrate` select the configured adapter for
   the target (`postgresql`, `gdl2`, or optional `mssql`)
 - `arlen schema-codegen` remains PostgreSQL-only in the current slice
 
 Schema manifests include `database_target` metadata for deterministic per-target artifact tracking.
 
-Primary reference:
-
-- `docs/PHASE5C_MULTI_DATABASE_TOOLING.md`
-
-## 14. Phase 5D Typed Data Contracts + Typed SQL
+## 15. Typed Data Contracts and Typed SQL
 
 Schema codegen now supports optional typed contract output:
 
@@ -395,13 +387,9 @@ Typed SQL helpers are available through:
 
 This compiles SQL files with metadata comments into typed parameter/result helper APIs.
 
-Primary reference:
+## 16. Hardening and Confidence Artifacts
 
-- `docs/PHASE5D_TYPED_CONTRACTS.md`
-
-## 15. Phase 5E Hardening + Confidence Artifacts
-
-Phase 5E adds explicit hardening and release-evidence workflows for the data layer:
+The data layer ships explicit hardening and release-evidence workflows:
 
 - soak/fault regression coverage in `tests/unit/PgTests.m`
   - connection interruption recovery
@@ -421,14 +409,10 @@ Soak loop count override:
 
 - `ARLEN_PHASE5E_SOAK_ITERS` (default `120`)
 
-Primary reference:
+## 17. Data-Layer Depth Pass
 
-- `docs/PHASE5E_HARDENING_CONFIDENCE.md`
-
-## 16. Phase 20 Data-Layer Depth Pass
-
-Phase 20 deepens the existing data layer without widening it into ORM-style
-metadata or lifecycle behavior.
+The current depth pass deepens the existing data layer without widening it
+into ORM-style metadata or lifecycle behavior.
 
 New internal seams and defaults:
 

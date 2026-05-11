@@ -1,22 +1,16 @@
 # Auth UI Integration Modes
 
-Status: Complete (Phase 15 delivered on 2026-03-10)  
-Last updated: 2026-03-13
+Status: Shipped
 
 Related docs:
 - `docs/AUTH_MODULE.md`
-- `docs/PHASE18_ROADMAP.md`
 - `docs/MODULES.md`
-- `docs/PHASE13_ROADMAP.md`
-- `docs/PHASE14_ROADMAP.md`
-- `docs/PHASE15_ROADMAP.md`
 - `docs/CLI_REFERENCE.md`
 - `docs/GETTING_STARTED.md`
 
 ## 1. Objective
 
-Define the first-class auth UI integration model to be delivered in Phase 15
-for the first-party `auth`
+Define the first-class auth UI integration model for the first-party `auth`
 module so apps can adopt Arlen auth without choosing only between:
 
 1. a framework-owned auth site, or
@@ -42,15 +36,13 @@ The `auth` module now provides:
 - generated app-owned auth templates under `templates/auth/...` for
   `generated-app-ui`
 
-Phase 18A-18D follow-on work in `docs/PHASE18_ROADMAP.md` is delivered with:
+The module also ships:
 
 - fragment-first stock auth pages
 - supported coarse embeddable auth fragments for server-rendered EOC apps
 - stronger MFA-focused headless JSON contracts for React/native clients
-
-Phase 18E-18G are also delivered with optional SMS MFA through Twilio Verify,
-while keeping SMS disabled by default and preserving the same UI ownership
-model.
+- optional SMS MFA through Twilio Verify, disabled by default and preserving
+  the same UI ownership model
 
 ## 3. Design Goals
 
@@ -232,11 +224,11 @@ Resolution precedence in `module-ui` should be deterministic:
 
 That gives the app a supported middle path before full ejection.
 
-Phase 18 refinement:
+Fragment-first refinement:
 
 - the current low-level partial contract remains useful for stock page assembly
   and targeted overrides
-- the supported embeddable fragment contract is now:
+- the supported embeddable fragment contract is:
   - `provider_login_buttons`
   - `mfa_factor_inventory_panel`
   - `mfa_enrollment_panel`
@@ -246,8 +238,8 @@ Phase 18 refinement:
   - `mfa_recovery_codes_panel`
 - stock full-page auth UI now renders through those coarse fragments so the
   default pages and embeddable surfaces stay aligned
-- app-owned EOC pages can assemble those fragments through the Phase 9 EOC
-  composition model plus `ALNAuthModuleRuntime`
+- app-owned EOC pages can assemble those fragments through the EOC composition
+  model plus `ALNAuthModuleRuntime`
 
 ## 9. Route and Rendering Contract
 
@@ -264,7 +256,7 @@ Important constraint:
 - JSON/session/provider backend behavior must not diverge by UI mode.
 - HTML mode changes presentation ownership, not auth semantics.
 
-Phase 18 extends this by making MFA-specific headless contracts explicit:
+The module also exposes MFA-specific headless contracts explicitly:
 
 - `GET /auth/api/mfa` returns factor inventory, policy, preferred factor, and
   enabled-path discovery for React/native clients
@@ -307,7 +299,7 @@ authModule = {
 - `examples/auth_ui_modes/module_ui/README.md`
 - `examples/auth_ui_modes/generated_app_ui/README.md`
 
-- emit Phase 7G-style machine-readable output:
+- emit machine-readable output:
   - `workflow`
   - `status`
   - `created_files`

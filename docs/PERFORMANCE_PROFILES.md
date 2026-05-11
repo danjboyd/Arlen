@@ -73,7 +73,7 @@ Phase C standardized benchmark protocol (warmup + concurrency ladder + metadata 
 make perf-phasec
 ```
 
-Protocol contract and artifacts are documented in `docs/PHASEC_BENCHMARK_PROTOCOL.md`.
+Protocol contract and artifacts are documented in `docs/internal/PHASEC_BENCHMARK_PROTOCOL.md`.
 
 Phase D standardized baseline campaign (parity + Arlen/FastAPI matrix + comparison artifacts):
 
@@ -81,7 +81,7 @@ Phase D standardized baseline campaign (parity + Arlen/FastAPI matrix + comparis
 make perf-phased
 ```
 
-Campaign contract and artifacts are documented in `docs/PHASED_BASELINE_CAMPAIGN.md`.
+Campaign contract and artifacts are documented in `docs/internal/PHASED_BASELINE_CAMPAIGN.md`.
 
 ## 3. Baselines and Policy
 

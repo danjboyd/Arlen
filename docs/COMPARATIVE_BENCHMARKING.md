@@ -43,10 +43,10 @@ These fixtures intentionally mirror only durable contract data from `../ArlenBen
 These documents are preserved as the historical in-repo benchmark track that seeded the later external program:
 
 - `docs/COMPETITIVE_BENCHMARK_ROADMAP.md`
-- `docs/BENCHMARK_HANDOFF_2026-02-24.md`
-- `docs/PHASEB_PARITY_CHECKLIST_FASTAPI.md`
-- `docs/PHASEC_BENCHMARK_PROTOCOL.md`
-- `docs/PHASED_BASELINE_CAMPAIGN.md`
+- `docs/internal/BENCHMARK_HANDOFF_2026-02-24.md`
+- `docs/internal/PHASEB_PARITY_CHECKLIST_FASTAPI.md`
+- `docs/internal/PHASEC_BENCHMARK_PROTOCOL.md`
+- `docs/internal/PHASED_BASELINE_CAMPAIGN.md`
 
 ## 4. Operational Rule
 
