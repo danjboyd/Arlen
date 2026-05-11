@@ -5,7 +5,7 @@
       "id": "phase7c.trace_propagation_headers",
       "claim": "Request correlation and trace context are propagated deterministically through response headers, logs, and trace exporter payloads.",
       "source_docs": [
-        "docs/PHASE7C_OBSERVABILITY_OPERABILITY.md",
+        "docs/internal/PHASE7C_OBSERVABILITY_OPERABILITY.md",
         "docs/CLI_REFERENCE.md"
       ],
       "verification": [
@@ -30,7 +30,7 @@
       "id": "phase7c.health_readiness_json_signals",
       "claim": "Built-in health/readiness signals provide deterministic JSON payloads and strict readiness can fail with deterministic 503 behavior.",
       "source_docs": [
-        "docs/PHASE7C_OBSERVABILITY_OPERABILITY.md",
+        "docs/internal/PHASE7C_OBSERVABILITY_OPERABILITY.md",
         "docs/DEPLOYMENT.md"
       ],
       "verification": [
@@ -55,7 +55,7 @@
       "id": "phase7c.deploy_operability_validation_script",
       "claim": "Deployment smoke runbook executes an operability validation script that checks text and JSON probes before declaring release success.",
       "source_docs": [
-        "docs/PHASE7C_OBSERVABILITY_OPERABILITY.md",
+        "docs/internal/PHASE7C_OBSERVABILITY_OPERABILITY.md",
         "docs/DEPLOYMENT.md"
       ],
       "verification": [

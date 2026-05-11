@@ -5,8 +5,8 @@
       "id": "http_session_limit_backpressure_contract",
       "claim": "When concurrent HTTP sessions exceed the configured runtime limit, Arlen returns deterministic 503 backpressure diagnostics.",
       "source_docs": [
-        "docs/PHASE7_ROADMAP.md",
-        "docs/PHASE7A_RUNTIME_HARDENING.md"
+        "docs/internal/PHASE7_ROADMAP.md",
+        "docs/internal/PHASE7A_RUNTIME_HARDENING.md"
       ],
       "verification": [
         {
@@ -20,8 +20,8 @@
       "id": "ws_session_limit_backpressure_contract",
       "claim": "When concurrent websocket sessions exceed the configured runtime limit, Arlen returns deterministic 503 backpressure diagnostics.",
       "source_docs": [
-        "docs/PHASE7_ROADMAP.md",
-        "docs/PHASE7A_RUNTIME_HARDENING.md"
+        "docs/internal/PHASE7_ROADMAP.md",
+        "docs/internal/PHASE7A_RUNTIME_HARDENING.md"
       ],
       "verification": [
         {
@@ -35,8 +35,8 @@
       "id": "runtime_http_limit_config_contract",
       "claim": "Runtime HTTP backpressure limit has deterministic default and environment override behavior.",
       "source_docs": [
-        "docs/PHASE7_ROADMAP.md",
-        "docs/PHASE7A_RUNTIME_HARDENING.md"
+        "docs/internal/PHASE7_ROADMAP.md",
+        "docs/internal/PHASE7A_RUNTIME_HARDENING.md"
       ],
       "verification": [
         {
@@ -60,8 +60,8 @@
       "id": "runtime_ws_limit_config_contract",
       "claim": "Runtime websocket backpressure limit has deterministic default and environment override behavior.",
       "source_docs": [
-        "docs/PHASE7_ROADMAP.md",
-        "docs/PHASE7A_RUNTIME_HARDENING.md"
+        "docs/internal/PHASE7_ROADMAP.md",
+        "docs/internal/PHASE7A_RUNTIME_HARDENING.md"
       ],
       "verification": [
         {
