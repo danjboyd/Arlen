@@ -116,6 +116,32 @@ def main() -> int:
         if not any_phase:
             errors.append("docs/internal/: expected at least one PHASE*_ROADMAP.md under engineering-history")
 
+    # No user-facing doc may carry a narrative phase ID. Phase tokens are
+    # permitted only inside backtick spans / fenced code blocks (where they
+    # name real identifiers like `phase14-confidence` make targets, artifact
+    # directories under `build/release_confidence/phaseN/`, or test fixtures
+    # under `tests/.../PhaseN*.m`). Outside of those contexts, phase IDs are
+    # engineering history and belong in docs/internal/.
+    docs_root = repo_root / "docs"
+    phase_pattern = re.compile(r"\bPhase\s*\d")
+    backtick_span = re.compile(r"`[^`]*`")
+    for md_path in sorted(docs_root.glob("*.md")):
+        text = md_path.read_text(encoding="utf-8")
+        in_fence = False
+        for line_no, line in enumerate(text.splitlines(), start=1):
+            stripped = line.strip()
+            if stripped.startswith("```"):
+                in_fence = not in_fence
+                continue
+            if in_fence:
+                continue
+            unbacked = backtick_span.sub("", line)
+            if phase_pattern.search(unbacked):
+                rel = md_path.relative_to(repo_root).as_posix()
+                errors.append(
+                    f"{rel}:{line_no}: narrative phase ID forbidden in user-facing prose: {line.strip()[:120]}"
+                )
+
     if errors:
         for error in errors:
             print(f"roadmap-consistency: {error}", file=sys.stderr)
