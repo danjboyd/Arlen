@@ -6,7 +6,7 @@ Source of truth fixture:
 
 - `tests/fixtures/release/phase9j_known_risks.json`
 
-Last updated: 2026-04-15
+Last updated: 2026-05-11
 
 ## Active Risks
 
