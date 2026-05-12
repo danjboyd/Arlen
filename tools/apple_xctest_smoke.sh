@@ -50,7 +50,7 @@ EOF
 
 package_file="$work_root/Package.swift"
 cat >"$package_file" <<'EOF'
-// swift-tools-version: 6.3
+// swift-tools-version: 6.0
 import PackageDescription
 
 let package = Package(
