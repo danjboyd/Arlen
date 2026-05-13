@@ -26,12 +26,12 @@ jobs:
         run: |
           bash ./tools/ci/install_ci_dependencies.sh
 
-      - name: Run Phase 5E quality gate
+      - name: Run linux quality gate
         env:
           GNUSTEP_USER_ROOT: ${{ github.workspace }}/.gnustep
           ARLEN_PERF_BASELINE_ROOT: tests/performance/baselines/iep-apt
         run: |
-          bash ./tools/ci/run_phase5e_quality.sh
+          bash ./tools/ci/run_linux_quality_gate.sh
 
       - name: Upload perf + confidence artifacts
         if: github.event_name == 'workflow_dispatch' || failure()
