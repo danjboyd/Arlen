@@ -124,7 +124,7 @@ def main() -> int:
             "",
             "Focused entrypoints:",
             "",
-            "- `bash ./tools/ci/run_phase30_confidence.sh`",
+            "- `bash ./tools/ci/run_apple_baseline_confidence.sh`",
             "- `./bin/test --smoke-only`",
             "",
         ]

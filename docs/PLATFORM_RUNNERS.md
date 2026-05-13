@@ -92,7 +92,7 @@ Current implementation:
 
 - `.github/workflows/apple-baseline.yml` runs on GitHub-hosted `macos-15`
 - the workflow selects full Xcode explicitly
-- the workflow runs `tools/ci/run_phase30_confidence.sh`
+- the workflow runs `tools/ci/run_apple_baseline_confidence.sh`
 - the workflow remains non-required
 
 OracleTestVMs direction:

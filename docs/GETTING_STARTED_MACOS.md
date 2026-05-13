@@ -62,7 +62,7 @@ What the closed Apple baseline covers now:
   `tools/build_apple_xctest.sh` and `tools/test_apple_xctest.sh`
 - Apple `tools/test_apple.sh` verification lane for the full Apple XCTest unit
   suite plus runtime, security, scaffolded-app, and example-app coverage
-- repo-native `tools/ci/run_phase30_confidence.sh` artifact lane under
+- repo-native `tools/ci/run_apple_baseline_confidence.sh` artifact lane under
   `build/release_confidence/phase30/`
 - Apple `bin/boomhauer` support for repo-root and app-root execution,
   including watch-mode rebuild/restart handling
@@ -93,7 +93,7 @@ It also:
 For the repeatable artifact pack, run:
 
 ```bash
-bash ./tools/ci/run_phase30_confidence.sh
+bash ./tools/ci/run_apple_baseline_confidence.sh
 ```
 
 ## 6. Read Next

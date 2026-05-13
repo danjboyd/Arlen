@@ -30,15 +30,15 @@ jobs:
         run: |
           bash ./tools/ci/install_ci_dependencies.sh
 
-      - name: Run Phase 30 Apple confidence gate
+      - name: Run Apple baseline confidence gate
         run: |
-          bash ./tools/ci/run_phase30_confidence.sh
+          bash ./tools/ci/run_apple_baseline_confidence.sh
 
       - name: Upload Apple confidence artifacts
         if: github.event_name == 'workflow_dispatch' || failure()
         uses: actions/upload-artifact@v4
         with:
-          name: phase30-apple-confidence-${{ github.run_id }}
+          name: apple-baseline-confidence-${{ github.run_id }}
           path: |
             build/release_confidence/phase30/**
           if-no-files-found: warn
