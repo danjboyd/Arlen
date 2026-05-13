@@ -40,7 +40,7 @@ if [[ "$phase9j_skip_gates" != "1" ]]; then
   # Release certification must rebuild from a clean tree so earlier sanitizer
   # lanes cannot leak instrumented binaries into the quality gate.
   make clean
-  bash ./tools/ci/run_phase5e_quality.sh
+  bash ./tools/ci/run_linux_quality_gate.sh
   # The sanitizer lane does its own clean rebuild, so preserve the earlier
   # quality/fault-injection evidence that Phase 9J still needs to certify.
   stash_release_artifact_dir phase5e
