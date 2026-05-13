@@ -56,7 +56,7 @@ Apple path notes:
 - use `./bin/arlen doctor`
 - use `./bin/build-apple`
 - use `./bin/test --smoke-only`
-- use `bash ./tools/ci/run_phase30_confidence.sh` for the artifact-backed
+- use `bash ./tools/ci/run_apple_baseline_confidence.sh` for the artifact-backed
   Apple baseline
 - do not source GNUstep bootstrap scripts on the Apple path
 - Apple XCTest availability is now verified with `tools/apple_xctest_smoke.sh`
@@ -98,7 +98,7 @@ Arlen CI now has two platform contracts:
   - full Xcode selected through `xcode-select`
   - `xcrun --find xctest` resolving successfully
   - Homebrew `openssl@3`
-  - `tools/ci/run_phase30_confidence.sh` as the canonical artifact gate
+  - `tools/ci/run_apple_baseline_confidence.sh` as the canonical artifact gate
 
 The workflow bootstrap entry point is:
 
