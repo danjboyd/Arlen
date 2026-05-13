@@ -148,7 +148,7 @@
     XCTAssertTrue([[NSFileManager defaultManager] isExecutableFileAtPath:arlenPath],
                   @"expected test-unit prerequisite to build executable %@", arlenPath);
     NSString *command = [NSString stringWithFormat:
-        @"cd %@ && ARLEN_FRAMEWORK_ROOT=%@ timeout 20s %@/build/arlen build --json > %@",
+        @"cd %@ && LD_PRELOAD='' ARLEN_FRAMEWORK_ROOT=%@ timeout 20s %@/build/arlen build --json > %@",
         [self shellQuoted:repoRoot],
         [self shellQuoted:fixtureRoot],
         [self shellQuoted:repoRoot],
