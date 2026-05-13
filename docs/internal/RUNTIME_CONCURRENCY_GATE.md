@@ -75,7 +75,7 @@ TSAN writes retained artifacts under `build/sanitizers/tsan/` (log + summary JSO
 
 Suppression lifecycle rules are documented in:
 
-- `docs/SANITIZER_SUPPRESSION_POLICY.md`
+- `docs/internal/SANITIZER_SUPPRESSION_POLICY.md`
 
 ## Fault Injection
 
