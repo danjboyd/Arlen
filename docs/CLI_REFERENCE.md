@@ -1148,7 +1148,7 @@ Lifecycle diagnostics:
 - `make phase20-confidence`: generate reflection/type-codec/backend-tier confidence artifacts in `build/release_confidence/phase20`
 - `tools/ci/run_phase30_confidence.sh`: run the Apple baseline confidence gate and generate artifacts in `build/release_confidence/phase30`
 - `tools/ci/run_phase20_focused.sh`: explicit focused lane runner for builder/schema/routing plus PostgreSQL/MSSQL live coverage
-- `tools/ci/run_phase5e_quality.sh`: explicit data-layer CI gate entrypoint
+- `tools/ci/run_linux_quality_gate.sh`: explicit data-layer CI gate entrypoint
 - `tools/ci/run_phase5e_sanitizers.sh`: explicit sanitizer CI gate entrypoint
  - remains the explicit sanitizer blocking lane for ASan/UBSan unit + runtime/data-layer checks plus sanitizer confidence artifact generation under `build/release_confidence/phase9h`
  - set `ARLEN_SANITIZER_INCLUDE_INTEGRATION=1` to include full integration suite (default is `0`)
