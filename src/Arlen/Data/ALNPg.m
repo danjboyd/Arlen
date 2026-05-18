@@ -1768,6 +1768,7 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result,
 
 - (BOOL)hasActiveTransaction;
 - (BOOL)checkConnectionLiveness:(NSError **)error;
+- (BOOL)isConnectionUsable;
 - (BOOL)deallocatePreparedStatementNamed:(NSString *)name error:(NSError **)error;
 
 @end
@@ -1860,6 +1861,26 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result,
 
 - (BOOL)hasActiveTransaction {
   return _inTransaction;
+}
+
+// Authoritative health of the underlying socket. Unlike `isOpen` (a cached
+// flag flipped only by an explicit -close), this asks libpq directly and is
+// free of a round-trip: libpq marks a connection CONNECTION_BAD as soon as a
+// send/recv on it fails, so a connection killed while pooled (server restart,
+// idle timeout, network drop) reports NO here even though `isOpen` is still
+// YES. A connection that merely returned a SQL error keeps CONNECTION_OK and
+// stays usable.
+- (BOOL)isConnectionUsable {
+  return _conn != NULL && self.isOpen && ALNPQstatus(_conn) == ALNConnectionOK;
+}
+
+// Close the connection if libpq has marked the socket dead. Called on the
+// query-failure path so a poisoned connection is torn down immediately
+// instead of being handed back to the pool.
+- (void)closeIfConnectionLost {
+  if (_conn != NULL && ALNPQstatus(_conn) != ALNConnectionOK) {
+    [self close];
+  }
 }
 
 - (BOOL)checkConnectionLiveness:(NSError **)error {
@@ -2257,6 +2278,7 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result,
                               detail,
                               sql);
     }
+    [self closeIfConnectionLost];
     return NULL;
   }
 
@@ -2291,6 +2313,7 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result,
                               detail,
                               sql);
     }
+    [self closeIfConnectionLost];
     return NULL;
   }
 
@@ -3185,7 +3208,14 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result,
   _preparedStatementReusePolicy = ALNPgPreparedStatementReusePolicyAuto;
   _preparedStatementCacheLimit = 128;
   _builderCompilationCacheLimit = 128;
-  _connectionLivenessChecksEnabled = NO;
+  // Default ON: validate a pooled connection before handing it out. The
+  // release-time status gate and failure-path teardown evict connections
+  // that die while checked out, but a connection can also die while sitting
+  // idle in the pool (server restart, idle/firewall timeout during a quiet
+  // period). The on-borrow SELECT 1 is the only thing that catches that case
+  // before a request fails. Previously NO, which let a single weekend
+  // network blip silently poison the whole pool until a manual restart.
+  _connectionLivenessChecksEnabled = YES;
   _includeSQLInDiagnosticsEvents = NO;
   _emitDiagnosticsEventsToStderr = NO;
   _queryDiagnosticsListener = nil;
@@ -3207,6 +3237,15 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result,
     while ([self.idleConnections count] > 0) {
       ALNPgConnection *connection = [self.idleConnections lastObject];
       [self.idleConnections removeLastObject];
+      // Drop a locally-known-dead idle connection with zero round-trip
+      // before doing any further work. This self-heals the pool: dead
+      // connections are discarded here and the create-new path below
+      // refills capacity, so the pool recovers its size instead of
+      // handing out poison. Works even when liveness checks are disabled.
+      if (![connection isConnectionUsable]) {
+        [connection close];
+        continue;
+      }
       connection.preparedStatementReusePolicy = self.preparedStatementReusePolicy;
       connection.preparedStatementCacheLimit = self.preparedStatementCacheLimit;
       connection.builderCompilationCacheLimit = self.builderCompilationCacheLimit;
@@ -3269,7 +3308,13 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result,
         [connection close];
       }
     }
-    if (connection.isOpen) {
+    // Gate re-pooling on the real libpq socket status, not the cached
+    // `isOpen` flag. A connection whose socket died while checked out (server
+    // restart, idle/firewall drop) still reports isOpen == YES; returning it
+    // here poisons the pool and every subsequent borrower fails the same way
+    // until the worker is restarted. isConnectionUsable asks libpq directly,
+    // so a dead connection is torn down instead of recirculated.
+    if ([connection isConnectionUsable]) {
       [self.idleConnections addObject:connection];
     } else {
       [connection close];
