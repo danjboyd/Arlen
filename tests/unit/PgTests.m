@@ -15,6 +15,54 @@
 #import "ALNSchemaCodegen.h"
 #import "ALNSQLBuilder.h"
 
+// `isConnectionUsable` / `checkConnectionLiveness:` / `hasActiveTransaction`
+// live in ALNPg's private class continuation. Re-declare the selectors here so
+// the regression fake can override them and the assertions can call them.
+@interface ALNPgConnection (ALNPgPoolRegressionHooks)
+- (BOOL)isConnectionUsable;
+- (BOOL)checkConnectionLiveness:(NSError **)error;
+- (BOOL)hasActiveTransaction;
+@end
+
+// A connection stand-in that never touches libpq, so the pool-poisoning
+// regression runs in the Linux quality gate without a live PostgreSQL.
+// `simulatedOpen` models the stale cached `isOpen` flag; `simulatedUsable`
+// models what libpq's PQstatus would actually report.
+@interface ALNFakePgConnection : ALNPgConnection
+@property(nonatomic, assign) BOOL simulatedOpen;
+@property(nonatomic, assign) BOOL simulatedUsable;
+@property(nonatomic, assign) NSInteger closeCount;
+@end
+
+@implementation ALNFakePgConnection
+
+- (BOOL)isOpen {
+  return self.simulatedOpen;
+}
+
+- (BOOL)isConnectionUsable {
+  return self.simulatedUsable;
+}
+
+- (BOOL)checkConnectionLiveness:(NSError **)error {
+  if (error != NULL) {
+    *error = nil;
+  }
+  return self.simulatedUsable;
+}
+
+- (BOOL)hasActiveTransaction {
+  return NO;
+}
+
+- (void)close {
+  self.closeCount += 1;
+  self.simulatedOpen = NO;
+  self.simulatedUsable = NO;
+}
+
+@end
+
 @interface PgTests : XCTestCase
 @end
 
@@ -30,6 +78,77 @@
       NSStringFromClass([self class]),
       NSStringFromSelector(selector),
       @"set ARLEN_PG_TEST_DSN to run live PostgreSQL data-layer coverage");
+}
+
+#pragma mark - Connection-pool poisoning regression (no live DB required)
+
+// Regression for the 2026-05-18 outage: a connection whose socket died while
+// checked out still reported isOpen == YES, so releaseConnection: returned it
+// to the idle pool and every subsequent borrower failed identically until a
+// manual restart. The release gate must use the real libpq status, not the
+// cached flag — even with on-borrow liveness checks disabled.
+- (void)testReleaseConnectionDiscardsDeadButOpenConnection {
+  NSError *error = nil;
+  ALNPg *pool = [[ALNPg alloc]
+      initWithConnectionString:@"postgresql://127.0.0.1:1/arlen_pool_regression"
+                maxConnections:2
+                         error:&error];
+  XCTAssertNil(error);
+  XCTAssertNotNil(pool);
+  pool.connectionLivenessChecksEnabled = NO;  // isolate the release-time gate
+
+  ALNFakePgConnection *dead = [ALNFakePgConnection new];
+  dead.simulatedOpen = YES;    // stale flag still claims the socket is open
+  dead.simulatedUsable = NO;   // libpq would report CONNECTION_BAD
+
+  [pool releaseConnection:dead];
+  XCTAssertEqual((NSInteger)1, dead.closeCount,
+                 @"a dead-but-open connection must be torn down on release");
+
+  NSError *acquireError = nil;
+  ALNPgConnection *next = [pool acquireConnection:&acquireError];
+  XCTAssertNotEqual(next, (ALNPgConnection *)dead,
+                    @"the dead connection must not be recirculated");
+}
+
+// Guards against over-eviction: the fix must not nuke the pool. A connection
+// libpq still reports OK must stay pooled and be reused.
+- (void)testReleaseConnectionKeepsAndReusesUsableConnection {
+  NSError *error = nil;
+  ALNPg *pool = [[ALNPg alloc]
+      initWithConnectionString:@"postgresql://127.0.0.1:1/arlen_pool_regression"
+                maxConnections:2
+                         error:&error];
+  XCTAssertNil(error);
+  XCTAssertNotNil(pool);
+
+  ALNFakePgConnection *good = [ALNFakePgConnection new];
+  good.simulatedOpen = YES;
+  good.simulatedUsable = YES;  // libpq reports CONNECTION_OK
+
+  [pool releaseConnection:good];
+  XCTAssertEqual((NSInteger)0, good.closeCount,
+                 @"a usable connection must stay pooled");
+
+  NSError *acquireError = nil;
+  ALNPgConnection *reused = [pool acquireConnection:&acquireError];
+  XCTAssertNil(acquireError);
+  XCTAssertEqual(reused, (ALNPgConnection *)good,
+                 @"a usable connection must be reused, not discarded");
+}
+
+// On-borrow liveness checks are the only thing that catches a connection that
+// died while idle in the pool; after the outage the safe default is ON.
+- (void)testConnectionLivenessChecksDefaultEnabled {
+  NSError *error = nil;
+  ALNPg *pool = [[ALNPg alloc]
+      initWithConnectionString:@"postgresql://127.0.0.1:1/arlen_pool_regression"
+                maxConnections:1
+                         error:&error];
+  XCTAssertNil(error);
+  XCTAssertNotNil(pool);
+  XCTAssertTrue(pool.connectionLivenessChecksEnabled,
+                @"liveness checks must default ON after the pool-poisoning fix");
 }
 
 - (NSInteger)phase5ESoakIterationCount {
