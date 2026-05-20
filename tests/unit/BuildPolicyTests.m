@@ -676,7 +676,7 @@
 
 - (void)testPhase5EQualityPipelineIncludesJSONPerformanceGate {
   NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
-  NSString *scriptPath = [repoRoot stringByAppendingPathComponent:@"tools/ci/run_phase5e_quality.sh"];
+  NSString *scriptPath = [repoRoot stringByAppendingPathComponent:@"tools/ci/run_linux_quality_gate.sh"];
   NSString *script = [self readFile:scriptPath];
 
   XCTAssertTrue([script containsString:@"check_runtime_json_abstraction.py"]);
@@ -1371,7 +1371,7 @@
       readFile:[repoRoot stringByAppendingPathComponent:@"tools/ci/run_phase9j_release_certification.sh"]];
 
   XCTAssertTrue([script containsString:@"make clean"]);
-  XCTAssertTrue([script containsString:@"bash ./tools/ci/run_phase5e_quality.sh"]);
+  XCTAssertTrue([script containsString:@"bash ./tools/ci/run_linux_quality_gate.sh"]);
   XCTAssertTrue([script containsString:@"stash_release_artifact_dir phase5e"]);
   XCTAssertTrue([script containsString:@"stash_release_artifact_dir phase9i"]);
   XCTAssertTrue([script containsString:@"restore_release_artifact_dir phase5e"]);
