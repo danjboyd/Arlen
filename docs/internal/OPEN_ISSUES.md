@@ -1,5 +1,80 @@
 # Open Issues
 
+## ISSUE-013: Synchronous `stderr` logging hangs the request path under an undrained output consumer
+
+- Status: `hardened upstream; awaiting downstream revalidation`
+- Priority: `medium` (production unaffected; blocks `make test` in the consumer suite)
+- Tracking ID: `ARLEN-BUG-033`
+- Discovered: `2026-06-03`
+- Reported by: `StateCompulsoryPoolingAPI`
+- Last updated: `2026-06-03`
+- Resolution: `ALNLogger` no longer blocks the calling thread on a stalled or
+  full output sink. Emission now goes through a bounded, poll-gated writer
+  (`src/Arlen/Support/ALNLogger.m`): a line is written only while the sink can
+  accept bytes within `writeTimeoutMilliseconds` (default 100 ms), and is
+  otherwise dropped with `droppedMessageCount` incremented instead of parking
+  in `write()`/`pipe_write`. `SIGPIPE` is ignored process-wide (without
+  clobbering an app-installed handler) so a closed reader degrades to a dropped
+  line rather than a crash. Per-line atomicity is preserved by serializing
+  emission through a write lock. Windows keeps the historical synchronous path.
+- Verification:
+  - `LoggerTests::testLoggerDropsAndDoesNotBlockWhenSinkIsFull_ARLEN_BUG_033`
+  - `LoggerTests::testLoggerResumesWritingAfterSinkDrains_ARLEN_BUG_033`
+- Reconciliation note:
+  `docs/internal/STATECOMPULSORYPOOLINGAPI_DISPATCH_HANG_RECONCILIATION_2026-06-03.md`
+
+### Summary
+
+The consumer reported a non-deterministic hang in their integration suite under
+Arlen's default (`concurrent`) dispatch mode: after some number of sequential
+requests the test server stops responding, with worker threads in
+`futex_wait_queue`, the main thread idle at `accept()`, and a "log thread" in
+`pipe_write`. The report attributed this to a concurrent-dispatch race / pool
+deadlock and suspected the same root cause as the resolved `ISSUE-001`
+`malloc_consolidate` crash.
+
+Upstream assessment: the hang is real, but the attribution is wrong. The
+reproduction is purely sequential, so no concurrent path is exercised. The
+`futex_wait_queue × 7` signature is the **normal idle state** of the
+eight-worker pool (seven idle on the timed work-queue `NSCondition` wait, one
+busy). The real fault is the thread blocked in `pipe_write`:
+
+- `ALNLogger` emits synchronously and unbuffered via `fprintf(stderr, …)` on the
+  request-handling thread (`src/Arlen/Support/ALNLogger.m:103,119`), with no
+  async queue and no drop-on-full path.
+- Each served request logs an Info-level line (`ALNApplication.m:5043,5168,5333,5708`),
+  emitted in the `test` environment.
+- The consumer's harness captures the child server's `stdout`/`stderr` into a
+  pipe it stops draining. Once cumulative log output crosses the 64 KiB pipe
+  buffer, the next `fprintf` blocks in `write()` and the in-flight request never
+  completes.
+
+This explains the non-deterministic hang point (a function of cumulative log
+bytes, not the endpoint) and why endpoints pass in isolation. Production is
+stable because journald continuously drains the service's output, not because
+of `serialized` dispatch mode (which still logs synchronously and would stall
+identically under an undrained consumer).
+
+### Current Contract (target)
+
+1. A stalled or slow `stderr` consumer must not block Arlen's request path.
+2. `ALNLogger` should degrade gracefully when its sink backpressures — drop with
+   a dropped-line counter on `EAGAIN`, or emit via a bounded queue that drops
+   rather than blocks when full.
+3. `SIGPIPE` should be ignored process-wide so a closed log reader surfaces as a
+   handleable error instead of a signal.
+
+### Confirmation status
+
+Root cause is code-and-evidence supported and is now covered by an upstream
+regression that reproduces the blocking-sink condition directly (a full pipe
+that the logger must drop rather than park in). The end-to-end consumer hang
+was not reproduced upstream (the `make test` harness is not in-tree); the
+remaining downstream check is to re-pin to a ref containing this fix and
+confirm the suite completes without the output-drain workaround. Frame-walking
+the busy worker (expected: `pipe_write` inside `ALNLogger`) remains the
+definitive on-host confirmation if needed.
+
 ## ISSUE-012: Post-restart health probe could race service startup
 
 - Status: `fixed upstream; awaiting downstream revalidation`
