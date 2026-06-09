@@ -20,8 +20,8 @@ Purpose:
 
 - run `.github/workflows/windows-preview.yml`
 - validate MSYS2 `CLANG64` runtime parity through
-  `tools/ci/run_phase24_windows_preview.sh`
-- validate packaged release/deploy parity through `make phase31-confidence`
+  `tools/ci/run_windows_preview.sh`
+- validate packaged release/deploy parity through `make windows-confidence`
 
 Required GitHub Actions labels:
 
@@ -69,8 +69,8 @@ Validation commands:
 powershell -ExecutionPolicy Bypass -File scripts\run_clang64.ps1 -InnerCommand "clang --version"
 powershell -ExecutionPolicy Bypass -File scripts\run_clang64.ps1 -InnerCommand "gnustep-config --objc-flags"
 powershell -ExecutionPolicy Bypass -File scripts\run_clang64.ps1 -InnerCommand "xctest --help"
-powershell -ExecutionPolicy Bypass -File scripts\run_clang64.ps1 -InnerCommand "bash ./tools/ci/run_phase24_windows_preview.sh"
-powershell -ExecutionPolicy Bypass -File scripts\run_clang64.ps1 -InnerCommand "make phase31-confidence"
+powershell -ExecutionPolicy Bypass -File scripts\run_clang64.ps1 -InnerCommand "bash ./tools/ci/run_windows_preview.sh"
+powershell -ExecutionPolicy Bypass -File scripts\run_clang64.ps1 -InnerCommand "make windows-confidence"
 ```
 
 Workflow contract:

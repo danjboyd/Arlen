@@ -1218,7 +1218,7 @@ Lifecycle diagnostics:
 - `make deploy-smoke`: validate deployment runbook with automated release smoke
 - `tools/deploy/validate_operability.sh`: validate text/JSON health/readiness/metrics operability contracts against a running server
 - `make phase29-confidence`: fail-closed deploy confidence lane covering manifest-backed deploy flows plus reserved operability endpoint regression smoke
-- `make phase31-confidence`: packaged release/deploy parity lane covering `deploy doctor --base-url`, packaged `jobs-worker --once`, and `.exe` helper fallback checks
+- `make windows-confidence`: packaged release/deploy parity lane covering `deploy doctor --base-url`, packaged `jobs-worker --once`, and `.exe` helper fallback checks
 - `make phase32-confidence`: target-aware deploy lane covering remote rebuild gating, rollback/status deployment metadata, unsupported-target rejection, and the packaged `propane_handoff` contract
 - `tools/deploy/build_release.sh --dry-run --json`: emit deploy release planning payload for coding-agent automation
  - enforces certification manifest by default (`build/release_confidence/phase9j/manifest.json`)
