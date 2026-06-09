@@ -28,13 +28,13 @@ jobs:
         run: |
           bash ./tools/ci/install_ci_dependencies.sh
 
-      - name: Run Phase 10M sanitizer matrix gate
+      - name: Run linux sanitizer matrix gate
         env:
           GNUSTEP_USER_ROOT: ${{ github.workspace }}/.gnustep
           ARLEN_PHASE10M_INCLUDE_THREAD_NIGHTLY: "0"
           ARLEN_PERF_RETRY_COUNT: "3"
         run: |
-          bash ./tools/ci/run_phase10m_sanitizer_matrix.sh
+          bash ./tools/ci/run_linux_sanitizer_matrix.sh
 
       - name: Upload sanitizer confidence artifacts
         if: github.event_name == 'workflow_dispatch' || failure()
@@ -70,11 +70,11 @@ jobs:
         run: |
           bash ./tools/ci/install_ci_dependencies.sh
 
-      - name: Run Phase 10M nightly thread-race lane
+      - name: Run nightly thread-race lane
         env:
           GNUSTEP_USER_ROOT: ${{ github.workspace }}/.gnustep
         run: |
-          bash ./tools/ci/run_phase10m_thread_race_nightly.sh
+          bash ./tools/ci/run_linux_thread_race_nightly.sh
 
       - name: Upload thread-race nightly artifacts
         if: github.event_name == 'workflow_dispatch' || failure()

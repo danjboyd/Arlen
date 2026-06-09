@@ -927,7 +927,7 @@ ci-quality:
 >bash ./tools/ci/run_phase5e_quality.sh
 
 ci-sanitizers:
->bash ./tools/ci/run_phase10m_sanitizer_matrix.sh
+>bash ./tools/ci/run_linux_sanitizer_matrix.sh
 
 ci-fault-injection:
 >bash ./tools/ci/run_phase9i_fault_injection.sh
