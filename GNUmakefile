@@ -928,7 +928,7 @@ phase20-confidence:
 >bash ./tools/ci/run_phase20_confidence.sh
 
 ci-quality:
->bash ./tools/ci/run_phase5e_quality.sh
+>bash ./tools/ci/run_linux_quality_gate.sh
 
 ci-sanitizers:
 >bash ./tools/ci/run_linux_sanitizer_matrix.sh
