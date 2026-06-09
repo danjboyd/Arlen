@@ -121,7 +121,7 @@ def main() -> int:
             "",
             "Focused entrypoint:",
             "",
-            "- `make phase31-confidence`",
+            "- `make windows-confidence`",
             "",
         ]
     )

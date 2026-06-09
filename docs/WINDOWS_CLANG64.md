@@ -89,13 +89,13 @@ make phase24-windows-confidence
 Packaged release confidence lane:
 
 ```sh
-make phase31-confidence
+make windows-confidence
 ```
 
 Convenience preview runner:
 
 ```sh
-bash ./tools/ci/run_phase24_windows_preview.sh
+bash ./tools/ci/run_windows_preview.sh
 ```
 
 Those lanes are intended to verify:
@@ -122,7 +122,7 @@ The current Windows packaged-release contract is now explicit:
   instead of assuming Unix-only filenames
 - `arlen deploy doctor` reads those manifest-backed helper paths when checking
   a packaged release root
-- `make phase31-confidence` exercises packaged release smoke, packaged
+- `make windows-confidence` exercises packaged release smoke, packaged
   `deploy doctor --base-url`, packaged `jobs-worker --once`, and a synthetic
   `.exe` fallback check suitable for CI/manual runner validation
 
@@ -151,6 +151,6 @@ Current Windows support statement:
 - Windows on MSYS2 `CLANG64` is a supported preview workflow for framework
   development, runtime parity checks, and packaged release/deploy validation
 - the authoritative preview verification entrypoints are
-  `make phase24-windows-confidence` and `make phase31-confidence`
+  `make phase24-windows-confidence` and `make windows-confidence`
 - Arlen does not yet claim broad production support for Windows deployments;
   Linux remains the authoritative production baseline

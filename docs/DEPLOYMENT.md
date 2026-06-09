@@ -514,7 +514,7 @@ Focused deploy confidence lane:
 
 ```bash
 make phase29-confidence
-make phase31-confidence
+make windows-confidence
 make phase32-confidence
 ```
 
@@ -522,7 +522,7 @@ That lane exercises deploy manifest generation, push/release/status/rollback/
 doctor/logs flows, and a reserved-endpoint smoke app where `/:token` must not
 shadow `/healthz`, `/readyz`, or `/metrics`.
 
-`phase31-confidence` adds the packaged-release closeout checks that were still
+`windows-confidence` adds the packaged-release closeout checks that were still
 missing from earlier release workflows:
 
 - packaged release smoke through `tools/deploy/smoke_release.sh --json`
@@ -551,7 +551,7 @@ Windows support statement for deployment:
 - packaged release and deploy workflows are now available on MSYS2 `CLANG64`
  as a preview path
 - the preview path is verified by the Windows self-hosted workflow and the
- repo-native `phase31-confidence` lane
+ repo-native `windows-confidence` lane
 - this is still not a general production support claim for Windows hosts
 
 ### 6.1 Build a release artifact

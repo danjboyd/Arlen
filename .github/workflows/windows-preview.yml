@@ -33,12 +33,12 @@ jobs:
       - name: Run Windows preview runtime parity lane
         shell: powershell
         run: |
-          powershell -ExecutionPolicy Bypass -File scripts\run_clang64.ps1 -InnerCommand "bash ./tools/ci/run_phase24_windows_preview.sh"
+          powershell -ExecutionPolicy Bypass -File scripts\run_clang64.ps1 -InnerCommand "bash ./tools/ci/run_windows_preview.sh"
 
       - name: Run Windows packaged release confidence lane
         shell: powershell
         run: |
-          powershell -ExecutionPolicy Bypass -File scripts\run_clang64.ps1 -InnerCommand "make phase31-confidence"
+          powershell -ExecutionPolicy Bypass -File scripts\run_clang64.ps1 -InnerCommand "make windows-confidence"
 
       - name: Upload Windows preview artifacts
         if: github.event_name == 'workflow_dispatch' || failure()

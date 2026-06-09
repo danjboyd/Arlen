@@ -135,8 +135,8 @@ Windows preview helpers:
 
 - `scripts/run_clang64.ps1`
 - `scripts/run_clang64.sh`
-- `tools/ci/run_phase24_windows_preview.sh`
-- `tools/ci/run_phase31_confidence.sh`
+- `tools/ci/run_windows_preview.sh`
+- `tools/ci/run_windows_confidence.sh`
 - `vendor/gnustep-cli-new` pins the Windows MSYS2/GNUstep
   provisioning source for self-hosted `windows-preview` runners
 
@@ -183,12 +183,12 @@ Platform runner provisioning:
 Windows preview CI currently validates two layers:
 
 - runtime parity via `make phase24-windows-confidence`
-- packaged release/deploy parity via `make phase31-confidence`
+- packaged release/deploy parity via `make windows-confidence`
 
 Linux/GNUstep deploy confidence now validates three layers:
 
 - local deploy orchestration via `make phase29-confidence`
-- packaged release/deploy parity via `make phase31-confidence`
+- packaged release/deploy parity via `make windows-confidence`
 - target-aware deploy compatibility and `propane` handoff coverage via
   `make phase32-confidence`
 

@@ -123,7 +123,7 @@ Windows-focused preview lanes:
  `propane`
 - `make phase24-windows-confidence`
  - runs both Windows preview lanes and matches the CI preview entrypoint
-- `make phase31-confidence`
+- `make windows-confidence`
  - runs packaged release smoke, packaged `deploy doctor --base-url`,
  packaged `jobs-worker --once`, and the synthetic `.exe` manifest fallback
  check
