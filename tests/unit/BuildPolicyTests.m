@@ -811,12 +811,12 @@
       [self readFile:[repoRoot stringByAppendingPathComponent:@"tools/ci/run_phase4_sanitizers.sh"]];
   NSString *phase5eScript =
       [self readFile:[repoRoot stringByAppendingPathComponent:@"tools/ci/run_phase5e_tsan_experimental.sh"]];
-  NSString *phase10mScript = [self
-      readFile:[repoRoot stringByAppendingPathComponent:@"tools/ci/run_phase10m_sanitizer_matrix.sh"]];
+  NSString *sanitizerMatrixScript = [self
+      readFile:[repoRoot stringByAppendingPathComponent:@"tools/ci/run_linux_sanitizer_matrix.sh"]];
 
   XCTAssertTrue([phase4Script containsString:@"make clean"]);
   XCTAssertTrue([phase5eScript containsString:@"make clean"]);
-  XCTAssertTrue([phase10mScript containsString:@"make clean"]);
+  XCTAssertTrue([sanitizerMatrixScript containsString:@"make clean"]);
 }
 
 - (void)testTSANScriptStagesArtifactsOutsideCleanBuildTree {
@@ -1169,9 +1169,9 @@
     XCTAssertNil(error);
 
     NSString *sourceScript =
-        [repoRoot stringByAppendingPathComponent:@"tools/ci/run_phase10m_thread_race_nightly.sh"];
+        [repoRoot stringByAppendingPathComponent:@"tools/ci/run_linux_thread_race_nightly.sh"];
     NSString *targetScript =
-        [toolsDir stringByAppendingPathComponent:@"run_phase10m_thread_race_nightly.sh"];
+        [toolsDir stringByAppendingPathComponent:@"run_linux_thread_race_nightly.sh"];
     XCTAssertTrue([[NSFileManager defaultManager] copyItemAtPath:sourceScript
                                                           toPath:targetScript
                                                            error:&error]);
@@ -1222,7 +1222,7 @@
     XCTAssertTrue([self makeExecutableAtPath:fakeClang]);
 
     NSString *command = [NSString
-        stringWithFormat:@"cd %@ && LD_PRELOAD='' PATH=%@:$PATH bash ./tools/ci/run_phase10m_thread_race_nightly.sh 2>&1",
+        stringWithFormat:@"cd %@ && LD_PRELOAD='' PATH=%@:$PATH bash ./tools/ci/run_linux_thread_race_nightly.sh 2>&1",
                          [self shellQuoted:fixtureRoot],
                          [self shellQuoted:fakeBin]];
     int exitCode = 0;
@@ -1330,7 +1330,7 @@
   NSString *workflow = [self
       readFile:[repoRoot stringByAppendingPathComponent:@".github/workflows/linux-sanitizers.yml"]];
 
-  XCTAssertTrue([workflow containsString:@"Run Phase 10M sanitizer matrix gate"]);
+  XCTAssertTrue([workflow containsString:@"Run linux sanitizer matrix gate"]);
   XCTAssertTrue([workflow containsString:@"ARLEN_PERF_RETRY_COUNT: \"3\""]);
 }
 
