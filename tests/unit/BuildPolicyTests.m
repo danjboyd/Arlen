@@ -1368,7 +1368,7 @@
 - (void)testReleaseCertificationStartsFromCleanBuildTree {
   NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
   NSString *script = [self
-      readFile:[repoRoot stringByAppendingPathComponent:@"tools/ci/run_phase9j_release_certification.sh"]];
+      readFile:[repoRoot stringByAppendingPathComponent:@"tools/ci/run_release_certification.sh"]];
 
   XCTAssertTrue([script containsString:@"make clean"]);
   XCTAssertTrue([script containsString:@"bash ./tools/ci/run_linux_quality_gate.sh"]);
