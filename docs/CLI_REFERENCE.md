@@ -1160,7 +1160,7 @@ Lifecycle diagnostics:
  - `ARLEN_PHASE9I_MODES` selects modes (`concurrent,serialized` by default)
  - `ARLEN_PHASE9I_SCENARIOS` selects optional scenario subset (comma-separated)
  - `ARLEN_PHASE9I_OUTPUT_DIR` overrides artifact output directory
-- `tools/ci/run_phase9j_release_certification.sh`: explicit release-certification gate entrypoint
+- `tools/ci/run_release_certification.sh`: explicit release-certification gate entrypoint
  - `ARLEN_PHASE9J_RELEASE_ID` sets the release-candidate id in generated pack metadata
  - `ARLEN_PHASE9J_OUTPUT_DIR` overrides artifact output directory
  - `ARLEN_PHASE9J_SKIP_GATES=1` skips gate execution and regenerates certification from existing artifacts

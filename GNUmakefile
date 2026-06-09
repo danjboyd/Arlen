@@ -933,7 +933,7 @@ ci-fault-injection:
 >bash ./tools/ci/run_phase9i_fault_injection.sh
 
 ci-release-certification:
->bash ./tools/ci/run_phase9j_release_certification.sh
+>bash ./tools/ci/run_release_certification.sh
 
 ci-json-abstraction:
 >python3 ./tools/ci/check_runtime_json_abstraction.py --repo-root $(ROOT_DIR)
