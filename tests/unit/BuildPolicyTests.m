@@ -667,7 +667,7 @@
   XCTAssertTrue([makefile containsString:@"ci-syscall-faults:"]);
   XCTAssertTrue([makefile containsString:@"ci-allocation-faults:"]);
   XCTAssertTrue([makefile containsString:@"ci-soak:"]);
-  XCTAssertTrue([makefile containsString:@"ci-phase38-fd-regression:"]);
+  XCTAssertTrue([makefile containsString:@"ci-fd-regression:"]);
   XCTAssertTrue([makefile containsString:@"ci-chaos-restart:"]);
   XCTAssertTrue([makefile containsString:@"ci-static-analysis:"]);
   XCTAssertTrue([makefile containsString:@"ci-blob-throughput:"]);
@@ -715,7 +715,7 @@
   NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
   NSString *makefilePath = [repoRoot stringByAppendingPathComponent:@"GNUmakefile"];
   NSString *makefile = [self readFile:makefilePath];
-  NSString *scriptPath = [repoRoot stringByAppendingPathComponent:@"tools/ci/run_phase38_fd_regression.sh"];
+  NSString *scriptPath = [repoRoot stringByAppendingPathComponent:@"tools/ci/run_fd_regression.sh"];
   NSString *script = [self readFile:scriptPath];
   NSString *samplerPath = [repoRoot stringByAppendingPathComponent:@"tools/ops/sample_fd_targets.py"];
   NSString *sampler = [self readFile:samplerPath];
@@ -724,7 +724,7 @@
       [self readFile:[repoRoot stringByAppendingPathComponent:@"src/Arlen/Core/ALNApplication.m"]];
   NSString *propaneDocs = [self readFile:[repoRoot stringByAppendingPathComponent:@"docs/PROPANE.md"]];
 
-  XCTAssertTrue([makefile containsString:@"ci-phase38-fd-regression:"]);
+  XCTAssertTrue([makefile containsString:@"ci-fd-regression:"]);
   XCTAssertTrue([script containsString:@"build/release_confidence/phase38/fd_regression"]);
   XCTAssertTrue([script containsString:@"phase38_fd_regression_summary.json"]);
   XCTAssertTrue([sampler containsString:@"arlen-fd-target-sample-v1"]);
