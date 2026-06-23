@@ -1,5 +1,8 @@
 # Arlen
 
+[![License: LGPL-2.0-or-later](https://img.shields.io/badge/license-LGPL--2.0--or--later-blue.svg)](LICENSE)
+[![Linux Quality](https://github.com/danjboyd/Arlen/actions/workflows/linux-quality.yml/badge.svg?branch=main)](https://github.com/danjboyd/Arlen/actions/workflows/linux-quality.yml)
+
 Arlen is a GNUstep-native Objective-C web framework with an MVC runtime, EOC templates (`.html.eoc`), and a developer server (`boomhauer`).
 
 Arlen is designed to solve the same class of problems as frameworks like
@@ -12,18 +15,53 @@ managed production runtime (`propane`). Linux with a clang-built GNUstep
 toolchain is the primary production target. macOS has a verified Apple-runtime
 path, and Windows `CLANG64` is currently a preview target.
 
+## Hello, Arlen
+
+What an Arlen app looks like — a controller and the EOC template it renders:
+
+```objc
+@interface HomeController : ALNController
+@end
+
+@implementation HomeController
+- (id)index:(ALNContext *)ctx {
+  NSDictionary *viewContext = @{
+    @"pageTitle": @"Hello, Arlen",
+    @"items": @[@"controller dispatch", @"EOC templates", @"implicit JSON"]
+  };
+  [self renderTemplate:@"home/index" context:viewContext error:NULL];
+  return nil;
+}
+@end
+```
+
+```html
+<%@ layout "layouts/main" %>
+<h1><%= $pageTitle %></h1>
+<ul>
+  <%@ render "partials/_item" collection:$items as:"item" %>
+</ul>
+```
+
+That route is wired up for you by `arlen new MyApp`; the
+[First App Guide](docs/FIRST_APP_GUIDE.md) takes you from there.
+
 ## Start Here
 
-If you are new to Arlen, start with:
+**New to Arlen** — pick the path that matches your platform:
 
-- `docs/GETTING_STARTED_MACOS.md` if you are targeting macOS with Apple APIs
-- `docs/FIRST_APP_GUIDE.md`
-- `docs/GETTING_STARTED.md`
-- `docs/GETTING_STARTED_TRACKS.md`
-- `docs/EOC_GUIDE.md` if you are building server-rendered pages with EOC
-- `docs/APP_AUTHORING_GUIDE.md`
-- `docs/LITE_MODE_GUIDE.md`
-- `docs/README.md`
+- [First App Guide](docs/FIRST_APP_GUIDE.md) — the shortest full-app walkthrough.
+- [Getting Started](docs/GETTING_STARTED.md) — Linux/GNUstep evaluation path; the primary production target.
+- [Getting Started on macOS](docs/GETTING_STARTED_MACOS.md) — Apple-runtime path.
+- [Getting Started Tracks](docs/GETTING_STARTED_TRACKS.md) — pick a track by role or use case.
+
+**Building apps:**
+
+- [App Authoring Guide](docs/APP_AUTHORING_GUIDE.md) — the long-form walkthrough.
+- [EOC Guide](docs/EOC_GUIDE.md) — server-rendered pages with EOC templates.
+- [Lite Mode Guide](docs/LITE_MODE_GUIDE.md) — single-file apps without scaffolding.
+
+**Full documentation:** the [Docs Index](docs/README.md) groups everything by intent (Building Apps, Modules, Data Layer, Operations and Deployment, Reference, Migration Guides, Examples).
 
 ## Quick Start
 
