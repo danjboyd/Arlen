@@ -177,3 +177,10 @@ If you are working on Arlen itself rather than just building an app with it:
 - `docs/DOCUMENTATION_POLICY.md` covers docs definition-of-done and quality
   expectations
 - `docs/TESTING_WORKFLOW.md` covers the focused regression and confidence lanes
+
+## Optional MCP tools
+
+After ordinary routes and services work, install and explicitly enable the
+[MCP module](MCP_MODULE.md) to expose selected capabilities to MCP clients.
+OpenAPI inclusion does not expose tools. The [catalog example](../examples/mcp_app/README.md)
+shows route and service registration with bearer authentication.

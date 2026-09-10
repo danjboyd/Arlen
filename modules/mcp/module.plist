@@ -1,0 +1,11 @@
+{
+  identifier = "mcp";
+  version = "1.0.0";
+  principalClass = "ALNMCPModule";
+  dependencies = ();
+  compatibility = { arlenVersion = ">= 0.1.0"; };
+  config = {
+    defaults = { mcp = { enabled = NO; path = "/mcp"; }; };
+    requiredKeys = ();
+  };
+}

@@ -347,6 +347,8 @@ Open `build/docs/index.html` in a browser.
 For the broader guide set, examples, historical roadmap material, and specs,
 use [docs/README.md](docs/README.md) and [docs/STATUS.md](docs/STATUS.md).
 
+Optional integrations: [MCP tools over Streamable HTTP](docs/MCP_MODULE.md).
+
 ## Naming
 
 - Development server: `boomhauer`

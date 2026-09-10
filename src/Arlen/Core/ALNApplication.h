@@ -172,6 +172,9 @@ NS_ASSUME_NONNULL_BEGIN
                                         error:(NSError *_Nullable *_Nullable)error;
 
 - (ALNResponse *)dispatchRequest:(ALNRequest *)request;
+/// Full dispatch constrained to an existing route. Rejects mounts, built-ins and
+/// a different matched route with 409; never invokes an alternate controller.
+- (ALNResponse *)dispatchRequest:(ALNRequest *)request requiringRoute:(nullable ALNRoute *)route;
 - (NSArray *)routeTable;
 - (NSDictionary *)openAPISpecification;
 - (BOOL)writeOpenAPISpecToPath:(NSString *)path

@@ -457,3 +457,11 @@ For most new apps:
 - `docs/APP_AUTHORING_GUIDE.md`
 - `docs/MODULES.md`
 - `docs/LITE_MODE_GUIDE.md`
+
+## Optional MCP module configuration
+
+`mcp.enabled` defaults to `NO`. Explicit registration is required for every tool.
+Settings include `path` (default `/mcp`), `providerClass`, `requiredScopes`,
+`requiredRoles`, `policies`, `allowedOrigins` (default empty), `maxOutputBytes`
+(default 262144), and `requestsPerMinute` (default 120). Authentication and
+existing request policies remain active. See [MCP Module](MCP_MODULE.md).

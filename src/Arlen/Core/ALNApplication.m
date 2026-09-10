@@ -4899,6 +4899,10 @@ static void ALNFinalizeResponse(ALNApplication *application,
 }
 
 - (ALNResponse *)dispatchRequest:(ALNRequest *)request {
+  return [self dispatchRequest:request requiringRoute:nil];
+}
+
+- (ALNResponse *)dispatchRequest:(ALNRequest *)request requiringRoute:(ALNRoute *)requiredRoute {
   BOOL fdDeltaDebugEnabled = ALNProcessFDDeltaDebugEnabled();
   NSInteger fdDeltaWarnThreshold =
       fdDeltaDebugEnabled ? ALNProcessFDDeltaWarnThreshold() : 0;
@@ -4907,6 +4911,12 @@ static void ALNFinalizeResponse(ALNApplication *application,
 
   NSString *rewrittenPath = nil;
   NSDictionary *mountedEntry = [self mountedEntryForPath:request.path rewrittenPath:&rewrittenPath];
+  if (requiredRoute && mountedEntry) {
+    ALNResponse *rejected = [[ALNResponse alloc] init];
+    rejected.statusCode = 409;
+    rejected.committed = YES;
+    return rejected;
+  }
   if (mountedEntry != nil) {
     ALNApplication *mountedApp =
         [mountedEntry[@"application"] isKindOfClass:[ALNApplication class]]
@@ -4992,6 +5002,12 @@ static void ALNFinalizeResponse(ALNApplication *application,
   }
 
   if ([reservedBuiltInPath length] > 0) {
+    if (requiredRoute) {
+      response.statusCode = 409;
+      response.committed = YES;
+      if (metricsEnabled) [self.metrics addGauge:@"http_requests_active" delta:-1.0];
+      return response;
+    }
     if ([requestFormat length] == 0) {
       requestFormat =
           ALNRequestPreferredFormatWithoutPathExtension(request, apiOnly, reservedBuiltInPath);
@@ -5082,6 +5098,13 @@ static void ALNFinalizeResponse(ALNApplication *application,
     [trace endStage:@"route"];
   }
   double benchmarkRouteStageDurationMs = ALNWallClockMilliseconds() - benchmarkRouteStageStartMs;
+
+  if (requiredRoute && matchedRoute != requiredRoute) {
+    response.statusCode = 409;
+    response.committed = YES;
+    if (metricsEnabled) [self.metrics addGauge:@"http_requests_active" delta:-1.0];
+    return response;
+  }
 
   if (matchedRoute == nil) {
     NSString *builtInPath = routePath;

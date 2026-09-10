@@ -11,6 +11,9 @@ Structured logger with configurable output format and level-specific convenience
 | --- | --- | --- | --- |
 | `format` | `NSString *` | `nonatomic, copy, readonly` | Public `format` property available on `ALNLogger`. |
 | `minimumLevel` | `ALNLogLevel` | `nonatomic, assign` | Public `minimumLevel` property available on `ALNLogger`. |
+| `outputFileDescriptor` | `int` | `nonatomic, assign` | Public `outputFileDescriptor` property available on `ALNLogger`. |
+| `writeTimeoutMilliseconds` | `NSInteger` | `nonatomic, assign` | Public `writeTimeoutMilliseconds` property available on `ALNLogger`. |
+| `droppedMessageCount` | `NSUInteger` | `nonatomic, readonly` | Public `droppedMessageCount` property available on `ALNLogger`. |
 
 ## Methods
 

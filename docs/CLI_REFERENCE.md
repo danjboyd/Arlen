@@ -1283,3 +1283,11 @@ Retry wrappers:
 DB-backed tests are skipped unless this environment variable is set:
 
 - `ARLEN_PG_TEST_DSN`: PostgreSQL connection string for migration/adapter tests
+
+## Optional MCP module
+
+`arlen module add mcp` vendors the optional MCP module; it remains disabled until
+`mcp.enabled = YES` and tool registrations are supplied. There is no automatic
+route export or consumer upgrade. From the framework checkout, `make mcp-example`
+builds the read-only example and `make mcp-check` runs focused unit and real HTTP
+checks. See [MCP Module](MCP_MODULE.md) for runtime configuration and protocol limits.

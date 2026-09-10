@@ -216,3 +216,12 @@ Whenever CI behavior changes, update in the same change:
 If a change causes CI drift, fix the drift immediately. Do not leave behind a
 state where docs, branch protection, and workflow names describe different
 quality gates.
+
+## Optional MCP coverage
+
+The existing `linux-quality / quality-gate` runs `make mcp-check`: the vendored
+XCTest runner executes `MCPModuleTests`, the optional example builds, and a real
+HTTP probe verifies protocol and JWT denial behavior. Ordinary unit lanes also
+include the module tests. No required check names or branch-protection settings
+change. Independent SDK verification is documented in `docs/MCP_MODULE.md`; it
+is an additional interoperability check, not a network-dependent CI prerequisite.

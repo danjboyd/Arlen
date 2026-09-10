@@ -4,6 +4,8 @@
 #import "ALNJSONSerialization.h"
 #import "ALNResponse.h"
 
+NSString *const ALNResponseEnvelopeDisabledStashKey = @"aln.responseEnvelope.disabled";
+
 @interface ALNResponseEnvelopeMiddleware ()
 
 @property(nonatomic, assign) BOOL includeRequestID;
@@ -73,6 +75,7 @@
 }
 
 - (void)didProcessContext:(ALNContext *)context {
+  if ([context.stash[ALNResponseEnvelopeDisabledStashKey] boolValue]) return;
   ALNResponse *response = context.response;
   if (!response.committed || response.statusCode == 304) {
     return;

@@ -58,6 +58,7 @@ toolchain env directly for the Linux/GNUstep path. On macOS, use
 - [Storage Module](STORAGE_MODULE.md): collections, direct uploads, signed downloads, and `/storage/api`.
 - [Ops Module](OPS_MODULE.md): operational dashboard plus `/ops/api`.
 - [Search Module](SEARCH_MODULE.md): shaped public query contracts, PostgreSQL/Meilisearch/OpenSearch engines, reindex/incremental sync, and admin/ops integration.
+- [MCP Module](MCP_MODULE.md): explicitly registered route and service tools over Streamable HTTP.
 - [Ecosystem Services](ECOSYSTEM_SERVICES.md): jobs/cache/i18n/mail/attachment adapter contracts.
 
 ## Data Layer
@@ -102,6 +103,8 @@ toolchain env directly for the Linux/GNUstep path. On macOS, use
 - [GSWeb Migration Guide](MIGRATION_GSWEB.md)
 
 ## Examples
+
+- [MCP Catalog Example](../examples/mcp_app/README.md): read-only route and service tools with bearer auth.
 
 - [Tech Demo](../examples/tech_demo/README.md): larger end-to-end example with Arlen UI/runtime features.
 - [Basic App Smoke Guide](../examples/basic_app/README.md): smallest app-owned smoke path.

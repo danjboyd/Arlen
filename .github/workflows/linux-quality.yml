@@ -33,6 +33,11 @@ jobs:
         run: |
           bash ./tools/ci/run_linux_quality_gate.sh
 
+      - name: Verify optional MCP module and HTTP example
+        run: |
+          source tools/source_gnustep_env.sh
+          make mcp-check
+
       - name: Upload perf + confidence artifacts
         if: github.event_name == 'workflow_dispatch' || failure()
         uses: actions/upload-artifact@v4

@@ -50,6 +50,7 @@ Current first-party modules in-tree:
 - `storage`
 - `ops`
 - `search`
+- `mcp`
 
 ## 3. List and Validate
 
@@ -167,3 +168,9 @@ Use a plugin when you need:
 - `docs/STORAGE_MODULE.md`
 - `docs/OPS_MODULE.md`
 - `docs/SEARCH_MODULE.md`
+
+## MCP tools
+
+The optional `mcp` module is disabled by default. It exposes only explicitly
+registered route-backed and service-backed tools. See [MCP Module](MCP_MODULE.md)
+for installation, schemas, auth, and compatibility.
