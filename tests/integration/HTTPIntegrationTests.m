@@ -4941,8 +4941,12 @@
   env[@"ARLEN_BOOMHAUER_BUILD_ERROR_RETRY_SECONDS"] = @"1";
   env[@"ARLEN_BOOMHAUER_BUILD_ERROR_AUTO_REFRESH_SECONDS"] = @"1";
   server.environment = env;
-  server.standardOutput = [NSPipe pipe];
-  server.standardError = [NSPipe pipe];
+  // Compiler output can exceed pipe capacity before the HTTP peer is ready.
+  NSString *logPath = [appRoot stringByAppendingPathComponent:@"watch-test.log"];
+  XCTAssertTrue([[NSFileManager defaultManager] createFileAtPath:logPath contents:nil attributes:nil]);
+  NSFileHandle *log = [NSFileHandle fileHandleForWritingAtPath:logPath];
+  server.standardOutput = log;
+  server.standardError = log;
   [server launch];
 
   @try {
@@ -4999,6 +5003,7 @@
       (void)kill(server.processIdentifier, SIGTERM);
       [server waitUntilExit];
     }
+    [log closeFile];
     [[NSFileManager defaultManager] removeItemAtPath:appRoot error:nil];
   }
 }
