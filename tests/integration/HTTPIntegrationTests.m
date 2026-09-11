@@ -4663,11 +4663,12 @@
                                 "}\n"]);
   XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"config/environments/development.plist"]
                         content:@"{\n  logFormat = \"text\";\n}\n"]);
-  NSString *appSourceTemplate = @"#import <Foundation/Foundation.h>\n"
+  // Keep the deliberate failure ahead of platform-header warnings.
+  NSString *appSourceTemplate = @"%BUILD_SENTINEL%\n"
+                                "#import <Foundation/Foundation.h>\n"
                                 "#import <stdio.h>\n"
                                 "#import <stdlib.h>\n"
                                 "#import \"ArlenServer.h\"\n"
-                                "%BUILD_SENTINEL%\n"
                                 "@interface LiteController : ALNController @end\n"
                                 "@implementation LiteController\n"
                                 "- (id)index:(ALNContext *)ctx {\n"
@@ -4752,8 +4753,13 @@
   env[@"ARLEN_BOOMHAUER_BUILD_ERROR_RETRY_SECONDS"] = @"1";
   env[@"ARLEN_BOOMHAUER_BUILD_ERROR_AUTO_REFRESH_SECONDS"] = @"1";
   server.environment = env;
-  server.standardOutput = [NSPipe pipe];
-  server.standardError = [NSPipe pipe];
+  // The test does not drain pipes while polling HTTP. A large compiler warning
+  // stream can otherwise block recovery and shutdown behind pipe backpressure.
+  NSString *logPath = [appRoot stringByAppendingPathComponent:@"watch-test.log"];
+  XCTAssertTrue([[NSFileManager defaultManager] createFileAtPath:logPath contents:nil attributes:nil]);
+  NSFileHandle *log = [NSFileHandle fileHandleForWritingAtPath:logPath];
+  server.standardOutput = log;
+  server.standardError = log;
   [server launch];
 
   @try {
@@ -4823,6 +4829,7 @@
       (void)kill(server.processIdentifier, SIGTERM);
       [server waitUntilExit];
     }
+    [log closeFile];
     [[NSFileManager defaultManager] removeItemAtPath:appRoot error:nil];
   }
 }
