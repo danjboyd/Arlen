@@ -57,6 +57,7 @@ Expected inside the active `CLANG64` environment:
 - `gnustep-config`
 - `xctest`
 - `libdispatch`
+- libcurl headers/library with TLS and asynchronous DNS (`mingw-w64-clang-x86_64-curl`)
 
 Recommended for the current Windows preview lanes:
 

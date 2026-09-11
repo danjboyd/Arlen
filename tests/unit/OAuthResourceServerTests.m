@@ -324,6 +324,7 @@ static NSUInteger OAuthCalls;
   XCTAssertNil([self.server principalForAccessToken:OAuthTestSignedJWT(claims, self.key[@"privateKeyPEM"], header) error:NULL]);
 }
 - (void)testBoundedFoundationMetadataTransport {
+#if !defined(GNUSTEP) // GNUstep production transport is covered by real socket tests.
   [NSURLProtocol registerClass:[OAuthMetadataProtocol class]];
   @try {
     XCTAssertNotNil(ALNBoundedMetadataGET([NSURL URLWithString:@"https://metadata.fixture.test/ok"], 32, 1));
@@ -331,6 +332,7 @@ static NSUInteger OAuthCalls;
       XCTAssertNil(ALNBoundedMetadataGET([NSURL URLWithString:[@"https://metadata.fixture.test/" stringByAppendingString:path]], 32, 0.15), @"%@", path);
     }
   } @finally { [NSURLProtocol unregisterClass:[OAuthMetadataProtocol class]]; }
+#endif
 }
 - (void)testConcurrentColdValidationCoalescesRefresh {
   NSString *token = [self token:[self claims]];
@@ -380,6 +382,22 @@ static NSUInteger OAuthCalls;
   claims = [self claims]; claims[@"roles"] = @[@"Service.Reader"];
   XCTAssertEqual(403, [self request:app path:@"/records" token:[self token:claims]].statusCode);
   XCTAssertEqual(1u, OAuthCalls);
+}
+- (void)testRefreshErrorsDistinguishFailureAndCooldownWithoutLeakingLoaderDetails {
+  self.server = [[ALNOAuthResourceServer alloc] initWithConfiguration:[self config]
+      documentLoader:^NSDictionary *(NSURL *url, NSError **error) {
+        if (error) *error = [NSError errorWithDomain:@"Arlen.Metadata" code:5
+            userInfo:@{NSLocalizedDescriptionKey:@"credential-secret response-body"}];
+        return nil;
+      } authorizationPolicy:nil error:NULL];
+  NSError *error = nil;
+  XCTAssertFalse([self.server refreshSigningKeysWithError:&error]);
+  XCTAssertTrue([error.localizedDescription containsString:@"discovery fetch failed"]);
+  XCTAssertFalse([error.description containsString:@"credential-secret"]);
+  XCTAssertFalse([error.description containsString:@"response-body"]);
+  XCTAssertFalse(self.server.isReady);
+  XCTAssertFalse([self.server refreshSigningKeysWithError:&error]);
+  XCTAssertEqualObjects(@"OAuth key refresh in cooldown", error.localizedDescription);
 }
 - (void)testMaintenanceModePreflightReadinessAndCooldown {
   NSMutableDictionary *config = [[self config] mutableCopy]; config[@"refreshOnRequest"] = @NO; config[@"preflightOnStart"] = @YES;

@@ -103,6 +103,8 @@ clang \
   "${base_libs[@]}" \
   -ldl \
   -lcrypto \
+  -lcurl \
+  -ldispatch \
   -lXCTest
 
 cp "$repo_root/tests/Info-gnustep-integration.plist" "$focused_bundle/Resources/Info-gnustep.plist"

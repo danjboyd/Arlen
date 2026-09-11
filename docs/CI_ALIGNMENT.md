@@ -229,3 +229,17 @@ cases offline. No tenant credentials or framework deployment are required. Ordin
 include the module tests. No required check names or branch-protection settings
 change. Independent SDK verification is documented in `docs/MCP_MODULE.md`; it
 is an additional interoperability check, not a network-dependent CI prerequisite.
+
+OAuth transport coverage in the existing linux-quality `oauth-check` step uses
+`MetadataTransportTests` with a Python loopback socket peer on calling and fresh
+maintenance threads. It covers successful/exact-limit bodies, declared/chunked
+oversize rejection, redirects, non-200 status, stalled and trickling deadlines,
+and untrusted HTTPS certificates. GNUstep provisioning also validates libcurl
+development files and asynchronous DNS; the clang `/usr/GNUstep` contract stays
+in effect. No lanes or branch-protection check names change.
+The ordinary unit lane also discovers these tests. No public network is required.
+For downstream live verification, run `ARLEN_TEST_ENTRA_TENANT=<tenant-guid> make
+test-unit-filter TEST=MetadataTransportTests` after sourcing
+`tools/source_gnustep_env.sh`. This additionally exercises the production default
+OAuth loader and signing-key preflight on both threads against discovery and JWKS;
+it is opt-in because public provider availability is not a deterministic CI gate.

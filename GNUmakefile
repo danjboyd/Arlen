@@ -205,7 +205,7 @@ ARLEN_PLATFORM_LINK_LIBS := -ldl
 ifeq ($(ARLEN_WINDOWS_PREVIEW),1)
 ARLEN_PLATFORM_LINK_LIBS := -lws2_32 -lbcrypt
 endif
-BASE_LINK_LIBS := $(ARLEN_PLATFORM_LINK_DIRS) $$(gnustep-config --base-libs) -lcrypto -ldispatch $(ARLEN_PLATFORM_LINK_LIBS)
+BASE_LINK_LIBS := $(ARLEN_PLATFORM_LINK_DIRS) $$(gnustep-config --base-libs) -lcrypto -ldispatch -lcurl $(ARLEN_PLATFORM_LINK_LIBS)
 XCTEST_LINK_LIBS := $(BASE_LINK_LIBS) -lXCTest
 
 ROOT_TEMPLATE_MANIFEST := $(GEN_DIR)/manifest.json
@@ -1041,6 +1041,7 @@ mcp-check:
 
 .PHONY: oauth-check
 oauth-check:
+>$(MAKE) test-unit-filter TEST=MetadataTransportTests
 >$(MAKE) test-unit-filter TEST=OAuthResourceServerTests mcp-example
 >python3 tools/oauth/check_example.py
 >python3 tools/oauth/check_discovery.py --self-test

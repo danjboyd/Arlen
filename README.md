@@ -371,3 +371,7 @@ For serialized request runtimes, configure `refreshOnRequest: false` and
 `preflightOnStart: true`, schedule key maintenance on an application worker, and
 wire `isReady` into private readiness. The OAuth runbook documents the tradeoff;
 framework tests require no tenant or public deployment.
+
+GNUstep OAuth metadata transport requires libcurl development files with TLS and
+asynchronous DNS (Debian/Ubuntu: `libcurl4-openssl-dev`). See the
+[getting-started guide](docs/GETTING_STARTED.md).

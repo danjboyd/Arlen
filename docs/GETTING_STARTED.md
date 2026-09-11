@@ -197,3 +197,13 @@ For serialized request runtimes, configure `refreshOnRequest: false` and
 `preflightOnStart: true`, schedule key maintenance on an application worker, and
 wire `isReady` into private readiness. The OAuth runbook documents the tradeoff;
 framework tests require no tenant or public deployment.
+
+OAuth metadata requests use certificate-chain and hostname verification with a 256 KiB response
+limit, a five-second total deadline per document, and redirect/non-200 rejection.
+GNUstep uses a bounded libcurl transport (development headers/library with TLS
+and asynchronous DNS required; Debian/Ubuntu: `libcurl4-openssl-dev`). This works
+on startup and maintenance threads without pumping application run-loop callbacks.
+Apple retains Foundation transport. GNUstep metadata uses libcurl's CA configuration,
+not GNUstep TLS user defaults. Use a dedicated maintenance worker. Refresh errors distinguish discovery/JWKS
+fetch failures, metadata validation failures, and cooldown. Diagnostics omit
+URLs, credentials, response bodies, and custom loader error details.

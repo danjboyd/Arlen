@@ -49,6 +49,7 @@ static NSDictionary *Part(NSString *part) {
 @property(nonatomic, copy) NSString *metadataPath;
 @property(nonatomic, copy) NSString *metadataURL;
 @property(nonatomic, copy) ALNOAuthDocumentLoader loader;
+@property(nonatomic, assign) BOOL usesDefaultLoader;
 @property(nonatomic, copy) ALNOAuthAuthorizationPolicy policy;
 @property(nonatomic, strong) NSDictionary *jwks;
 @property(nonatomic, strong) NSLock *refreshLock;
@@ -113,10 +114,12 @@ static NSDictionary *Part(NSString *part) {
   _metadataURL = [origin stringByAppendingString:_metadataPath];
   _policy = [policy copy];
   _loader = ^NSDictionary *(NSURL *url, NSError **fetchError) {
-    NSData *data = ALNBoundedMetadataGET(url, 262144, 5);
+    NSData *data = ALNBoundedMetadataGETWithError(url, 262144, 5, fetchError);
     id result = data ? [ALNJSONSerialization JSONObjectWithData:data options:0 error:NULL] : nil;
+    if (data && !D(result)) Fail(fetchError, @"Metadata JSON object invalid");
     return D(result) ? result : nil;
   };
+  _usesDefaultLoader = loader == nil;
   if (loader) _loader = [loader copy];
   return self;
 }
@@ -140,17 +143,31 @@ static NSDictionary *Part(NSString *part) {
   }
   return selected;
 }
-- (BOOL)fetchSigningKeys {
+- (BOOL)fetchSigningKeysWithError:(NSError **)error {
   @synchronized (self) {
     NSTimeInterval now = [NSProcessInfo processInfo].systemUptime;
-    if (now < self.nextRefresh) return NO;
+    if (now < self.nextRefresh) { Fail(error, @"OAuth key refresh in cooldown"); return NO; }
     self.nextRefresh = now + [self.configuration[@"refreshCooldownSeconds"] doubleValue];
   }
-  NSDictionary *metadata = self.loader([NSURL URLWithString:self.configuration[@"discoveryURL"]], NULL);
+  NSError *fetchError = nil;
+  NSDictionary *metadata = self.loader([NSURL URLWithString:self.configuration[@"discoveryURL"]], &fetchError);
+  if (!metadata) {
+    Fail(error, [@"OAuth discovery fetch failed: " stringByAppendingString:
+        self.usesDefaultLoader && [fetchError.domain isEqual:@"Arlen.Metadata"] ? fetchError.localizedDescription : @"metadata unavailable or invalid"]);
+    return NO;
+  }
+  Fail(error, @"OAuth discovery validation failed");
   if (!D(metadata) || ![metadata[@"issuer"] isEqual:self.configuration[@"issuer"]] || !HTTPS(metadata[@"jwks_uri"])) return NO;
   NSURL *url = [NSURL URLWithString:metadata[@"jwks_uri"]];
   if (![self.configuration[@"jwksAllowedHosts"] containsObject:url.host]) return NO;
-  NSDictionary *keys = self.loader(url, NULL);
+  fetchError = nil;
+  NSDictionary *keys = self.loader(url, &fetchError);
+  if (!keys) {
+    Fail(error, [@"OAuth JWKS fetch failed: " stringByAppendingString:
+        self.usesDefaultLoader && [fetchError.domain isEqual:@"Arlen.Metadata"] ? fetchError.localizedDescription : @"metadata unavailable or invalid"]);
+    return NO;
+  }
+  Fail(error, @"OAuth JWKS validation failed");
   if (!D(keys) || ![keys[@"keys"] isKindOfClass:[NSArray class]] || ![keys[@"keys"] count] || [keys[@"keys"] count] > 64) return NO;
   for (id key in keys[@"keys"]) if (!D(key)) return NO;
   NSData *snapshot = [ALNJSONSerialization dataWithJSONObject:keys options:0 error:NULL];
@@ -165,8 +182,7 @@ static NSDictionary *Part(NSString *part) {
   // Serialize fetchers separately from cache readers. No network under the cache monitor.
   [self.refreshLock lock];
   @try {
-    if ([self fetchSigningKeys]) return YES;
-    Fail(error, @"OAuth key refresh unavailable or in cooldown");
+    if ([self fetchSigningKeysWithError:error]) { if (error) *error = nil; return YES; }
     return NO;
   } @finally { [self.refreshLock unlock]; }
 }

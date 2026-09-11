@@ -686,7 +686,7 @@ emit_app_makefile() {
     printf 'OBJECTS_READY := %s\n' "$build_root/.objects-ready"
     printf 'FRAMEWORK_LIB := %s\n' "$framework_lib"
     printf 'GNUSTEP_OBJC_FLAGS := %s\n' "$gnustep_objc_flags"
-    printf 'BASE_LINK_LIBS := %s -ldl -lcrypto -ldispatch\n' "$gnustep_base_libs"
+    printf 'BASE_LINK_LIBS := %s -ldl -lcrypto -ldispatch -lcurl\n' "$gnustep_base_libs"
     printf 'OBJC_FLAGS := $(GNUSTEP_OBJC_FLAGS) -fobjc-arc -fPIC -DARLEN_ENABLE_YYJSON=%s -DARLEN_ENABLE_LLHTTP=%s -DARGON2_NO_THREADS=1\n' "$enable_yyjson" "$enable_llhttp"
     printf 'INCLUDE_FLAGS :='
     for source_path in "${include_args[@]}"; do
