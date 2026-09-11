@@ -37,7 +37,7 @@ output schema, compatible text, and a resource link.
 Copy `entra.example.json` outside the repository and replace all placeholders
 using the [administrator runbook](../../docs/OAUTH_RESOURCE_SERVER.md).
 The sample still exposes catalog data, demonstrating a protected REST route and
-MCP tools with the same `Research.Read` permission. It does not contact research.
+MCP tools with the same application-configured delegated permission. It does not contact research.
 
 ```bash
 source tools/source_gnustep_env.sh

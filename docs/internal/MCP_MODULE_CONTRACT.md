@@ -62,3 +62,10 @@ All backing routes must be covered by OAuth protected path prefixes at startup.
 Scope/role requirements and application data policy remain application-owned.
 See [the resource-server contract/runbook](../OAUTH_RESOURCE_SERVER.md) and
 [adoption handoff](STATE_COMPULSORY_POOLING_OAUTH_MIGRATION.md).
+
+For serialized applications, `refreshOnRequest=false` keeps network retrieval
+out of dispatch; `preflightOnStart=true` warms keys before listening. A dedicated
+application worker calls `refreshSigningKeysWithError:` and application readiness
+consults `isReady`. Fetches never hold the validation monitor. See the runbook
+for strict expiry, cooldown and maintenance requirements. All deployment values
+remain downstream configuration.

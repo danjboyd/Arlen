@@ -33,7 +33,7 @@ jobs:
         run: |
           bash ./tools/ci/run_linux_quality_gate.sh
 
-      - name: Verify OAuth resource server, optional MCP module and HTTP examples
+      - name: Verify OAuth maintenance, synthetic discovery and MCP HTTP examples
         run: |
           source tools/source_gnustep_env.sh
           make oauth-check mcp-check

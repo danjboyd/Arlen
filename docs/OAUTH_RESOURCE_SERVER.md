@@ -118,8 +118,8 @@ per cooldown per instance, serialized across threads; a refresh attempts at
 most two requests. Bad signatures for known keys never trigger refresh. Fresh
 trusted cached keys remain usable during an outage; expired keys do not.
 There is no stale-on-error extension, persistent cache, or unbounded per-key
-negative cache. New keys can be temporarily rejected during cooldown. Fetches
-are synchronous; allow for up to two fetch deadlines on a cold request.
+negative cache. New keys can be temporarily rejected during cooldown. By default fetches are synchronous; allow for up to two fetch deadlines on a
+cold request. For serialized runtimes use the maintenance mode below.
 
 Arlen does not fetch refresh tokens, implement password handling, or issue
 OAuth credentials. Offline signature validation **does not immediately observe
@@ -133,8 +133,8 @@ challenge handling is not implemented.
 1. Create a single-tenant **API registration** for research, separate from every
    interactive client registration. Set `api.requestedAccessTokenVersion` to 2
    for the recommended configuration. Expose a delegated scope such as
-   `api://<RESEARCH_API_APPLICATION_GUID>/Research.Read` and choose its consent
-   policy. The route checks the short `scp` value `Research.Read`.
+   `api://<RESEARCH_API_APPLICATION_GUID>/<DELEGATED_SCOPE>` and choose its consent
+   policy. The route checks the short `scp` value `<DELEGATED_SCOPE>`.
 2. Set the backend tenant GUID and exact issuer; do not use `common`,
    `organizations`, or caller-supplied tenants. Use the v2 API application GUID
    as audience. For a deliberate v1 deployment, configure its actual API
@@ -162,7 +162,7 @@ challenge handling is not implemented.
 Entra v2 selects the API through fully qualified scopes. Advertise the research
 scope and `offline_access` in `scopesSupported`, so the client requests renewable
 credentials. Do not add Graph scopes or use a Graph access token for research.
-The canonical MCP resource remains `https://mcp.invitoep.com/research/mcp`; it
+The canonical MCP resource remains `https://<PUBLIC_MCP_HOST>/research/mcp`; it
 need not equal Entra's GUID `aud`. Arlen binds that configured resource to its
 one exact audience. Verify this mapping during live acceptance.
 [Entra scopes](https://learn.microsoft.com/en-us/entra/identity-platform/scopes-oidc)
@@ -170,7 +170,8 @@ one exact audience. Verify this mapping during live acceptance.
 ### Client-specific registration and redirects
 
 Documentation reviewed and local CLI help checked on 2026-09-11. These are setup
-instructions, not a live acceptance claim. No approved test tenant information
+instructions, not a live acceptance claim. Framework fixtures require no tenant or deployment. Actual client acceptance
+is an application-owned gate; no approved downstream test tenant information
 was supplied during implementation. All direct sign-in entries remain subject
 to the PKCE metadata gap described below.
 
@@ -189,11 +190,11 @@ policies. [Claude connector authentication](https://claude.com/docs/connectors/b
 
 ```bash
 claude mcp add --transport http --client-id '<CLAUDE_CODE_CLIENT_GUID>' \
-  --callback-port 8765 research https://mcp.invitoep.com/research/mcp
+  --callback-port 8765 research https://<PUBLIC_MCP_HOST>/research/mcp
 # Within Claude Code, open /mcp and authenticate.
 
 codex -c mcp_oauth_callback_port=8766 mcp add research \
-  --url https://mcp.invitoep.com/research/mcp \
+  --url https://<PUBLIC_MCP_HOST>/research/mcp \
   --oauth-client-id '<CODEX_CLIENT_GUID>'
 # Register the callback printed above, then persist the port and log in:
 codex mcp login research
@@ -226,7 +227,7 @@ Observed primary-document evidence: the public Entra
 [`common` v2 discovery document](https://login.microsoftonline.com/common/v2.0/.well-known/openid-configuration)
 on 2026-09-11 contains no `code_challenge_methods_supported`, no registration
 endpoint, no CIMD support declaration, and no `none` token-auth method. Its
-scope list contains OIDC defaults, not the research API scope. This public
+scope list contains OIDC defaults, not the application API scope. This public
 metadata inspection is **not** a request against an approved company tenant.
 Never configure the resource server to trust `common`.
 
@@ -347,3 +348,83 @@ Operational troubleshooting:
 
 Run `source tools/source_gnustep_env.sh` then `make oauth-check mcp-check` for
 controlled local regressions. These checks do not establish live Entra acceptance.
+
+## Serialized-runtime maintenance and readiness
+
+All settings are application configuration. Arlen requires no hostname, Entra
+tenant, public listener, proxy, or identity-service deployment of its own.
+Use placeholders in reusable configuration; bind an actual service resource only
+in the downstream application. Live provider/client acceptance belongs to that
+application, independently of framework fixture coverage.
+
+For a serialized runtime, the recommended configuration is:
+
+```json
+{
+  "refreshOnRequest": false,
+  "preflightOnStart": true,
+  "jwksMaxAgeSeconds": 300,
+  "refreshCooldownSeconds": 30
+}
+```
+
+These keys belong inside the existing OAuth resource-server configuration.
+`preflightOnStart` defaults to false and `refreshOnRequest` defaults to true for
+compatibility. Preflight performs bounded discovery/JWKS retrieval before the
+application starts; failure prevents startup. It is not a sign-in compatibility
+test. After startup, schedule `refreshSigningKeysWithError:` every 30 seconds
+on **one dedicated application maintenance worker**, not the HTTP event loop or
+its timers. Use the existing application's scheduler if it already has one.
+The worker must call the same in-process resource-server instance: an external
+process cannot warm its memory cache. Stop/join that worker during application
+shutdown, allowing for the two bounded fetches. No perpetual worker is started
+implicitly by the framework.
+
+`isReady` is a nonblocking, no-network check for an unexpired trusted
+metadata/JWKS snapshot. Wire it into an application-owned **private** readiness
+endpoint or supervisor callback and return 503 when false. The stock `/readyz`
+does not automatically include this new check; do not claim it does. Choose a
+readiness route outside `protectedPaths`, protect it through the application's
+private observability/network policy, and avoid exposing keys, tenant details,
+or token content. This snapshot check cannot prove a key for every incoming
+`kid`, token correctness, or user authorization.
+
+In maintenance mode, requests never wait for network retrieval. A missing or
+unknown key gets 401 immediately; only the maintenance worker fetches. During
+rotation a new key may remain unavailable until the next successful maintenance
+cycle. During an outage, existing keys work only until the original cache
+expiry; afterwards readiness is false and protected requests fail closed. There
+is no extension of expired trust. The application decides how its gateway treats
+an unready backend; preserve authentication challenges if requests reach it.
+
+Refreshes are single-flight behind a separate fetch lock, with a short cache
+publication monitor. Existing-key validation and readiness checks do not wait
+on discovery I/O. A maintenance caller can wait behind another maintenance
+caller; keep exactly one scheduled worker rather than queueing work per request.
+The production loader remains bounded to two 5-second request timeouts, subject
+to scheduler/poll granularity. Warmup moves that cost to startup; it cannot
+remove issuer/network outages or the rotation visibility interval.
+
+Synthetic reproduction (no provider credentials, external hostname, or public
+routing required):
+
+```bash
+source tools/source_gnustep_env.sh
+make oauth-check mcp-check
+```
+
+`OAuthResourceServerTests` measures a synchronous cold fetch using two controlled
+150-ms loader delays, then holds a maintenance refresh in flight while checking
+existing-key validation, unknown/expired-key rejection, readiness and rotation
+recovery. The test logs timings only, never tokens. `check_discovery.py --self-test`
+checks synthetic PKCE/issuer/discovery cases; it is not an actual client test.
+For a downstream administrator's saved metadata document, audit without network:
+
+```bash
+python3 tools/oauth/check_discovery.py --metadata /path/to/metadata.json \
+  --expected-issuer 'https://<ISSUER_HOST>/<TENANT>/v2.0'
+```
+
+An audit pass establishes only the listed metadata properties. It does not
+establish preregistration, token authentication method, redirect support,
+resource/scope semantics, refresh, or any client's acceptance.

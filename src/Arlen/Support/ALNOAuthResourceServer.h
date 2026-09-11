@@ -12,7 +12,7 @@ typedef BOOL (^ALNOAuthAuthorizationPolicy)(NSDictionary *principal, ALNContext 
 
 /// Opt-in, bearer-only resource server. Install before application policy middleware.
 /// Configuration and hooks freeze when installed; one instance per resource/application.
-@interface ALNOAuthResourceServer : NSObject <ALNPlugin, ALNMiddleware>
+@interface ALNOAuthResourceServer : NSObject <ALNPlugin, ALNMiddleware, ALNLifecycleHook>
 @property(nonatomic, copy, readonly) NSDictionary *configuration;
 @property(nonatomic, copy, readonly) NSString *metadataPath;
 @property(nonatomic, copy, readonly) NSString *metadataURL;
@@ -30,6 +30,11 @@ typedef BOOL (^ALNOAuthAuthorizationPolicy)(NSDictionary *principal, ALNContext 
                                                error:(NSError *_Nullable *_Nullable)error;
 - (nullable NSDictionary *)principalForAccessToken:(nullable NSString *)token
                                             error:(NSError *_Nullable *_Nullable)error;
+/// Bounded synchronous maintenance; invoke before listening or from a dedicated worker.
+/// Respects the global refresh cooldown. Never call from a serialized request loop.
+- (BOOL)refreshSigningKeysWithError:(NSError *_Nullable *_Nullable)error;
+/// No network I/O: a fresh discovery/JWKS snapshot exists. Not a client acceptance check.
+- (BOOL)isReady;
 - (NSDictionary *)protectedResourceMetadata;
 - (NSString *)challengeForError:(nullable NSString *)error;
 - (BOOL)protectsPath:(NSString *)path;

@@ -473,3 +473,8 @@ See the [configuration and administrator runbook](OAUTH_RESOURCE_SERVER.md) for 
 example, client preregistration, public discovery routes, and live acceptance
 requirements. `mcp.oauth` requires OAuth bearer credentials without HS256/session
 fallback; REST routes and MCP calls reuse Arlen scope, role, and application policies.
+
+For serialized request runtimes, configure `refreshOnRequest: false` and
+`preflightOnStart: true`, schedule key maintenance on an application worker, and
+wire `isReady` into private readiness. The OAuth runbook documents the tradeoff;
+framework tests require no tenant or public deployment.

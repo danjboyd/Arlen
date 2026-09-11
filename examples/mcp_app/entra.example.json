@@ -9,7 +9,7 @@
   "mcp": {
     "enabled": true,
     "path": "/research/mcp",
-    "requiredScopes": ["Research.Read"],
+    "requiredScopes": ["<DELEGATED_SCOPE>"],
     "oauth": {
       "profile": "entra",
       "tenantID": "<TENANT_GUID>",
@@ -21,7 +21,7 @@
       "resourceURL": "https://<PUBLIC_MCP_HOST>/research/mcp",
       "algorithms": ["RS256"],
       "jwksAllowedHosts": ["login.microsoftonline.com"],
-      "scopesSupported": ["api://<RESEARCH_API_APPLICATION_GUID>/Research.Read", "offline_access"],
+      "scopesSupported": ["api://<RESEARCH_API_APPLICATION_GUID>/<DELEGATED_SCOPE>", "offline_access"],
       "protectedPaths": ["/"],
       "jwksMaxAgeSeconds": 300,
       "refreshCooldownSeconds": 30,

@@ -221,10 +221,11 @@ quality gates.
 
 The existing `linux-quality / quality-gate` runs `make oauth-check mcp-check`: the vendored
 XCTest runner executes `OAuthResourceServerTests` (controlled signing/JWKS, cache,
-transport and REST/MCP authorization fixtures) and `MCPModuleTests`; the optional
+transport, maintenance/preflight/readiness latency and REST/MCP authorization fixtures) and `MCPModuleTests`; the optional
 example builds in both authentication modes, and a real
 HTTP probe verifies protocol, path-prefixed discovery, spoofed-header resistance
-and JWT denial behavior. No tenant credentials are required. Ordinary unit lanes also
+and JWT denial behavior. The same target audits eight synthetic discovery
+cases offline. No tenant credentials or framework deployment are required. Ordinary unit lanes also
 include the module tests. No required check names or branch-protection settings
 change. Independent SDK verification is documented in `docs/MCP_MODULE.md`; it
 is an additional interoperability check, not a network-dependent CI prerequisite.

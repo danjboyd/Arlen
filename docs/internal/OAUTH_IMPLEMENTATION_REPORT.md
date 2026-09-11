@@ -90,3 +90,12 @@ untracked `.codex` entry were preserved and excluded from the commit.
   acceptance. Prepare both gateway paths; deployment requires separate approval.
 - Keep the private port-3122 HS256 pilot separate until acceptance. Retire it
   through an explicit revocation/cutover plan; never enable a public fallback.
+
+## Operational and interoperability follow-up
+
+See [the follow-up report](OAUTH_INTEROPERABILITY_FOLLOWUP.md). It adds optional
+startup preflight, dedicated-worker maintenance, no-network request validation
+and explicit readiness without changing default legacy behavior or trust expiry.
+All deployment values are application configuration. The company tenant/client
+acceptance gate remains downstream-owned and blocked; a framework hostname is
+neither required nor introduced.

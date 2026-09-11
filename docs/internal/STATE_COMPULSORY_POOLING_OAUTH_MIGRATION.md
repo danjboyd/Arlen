@@ -138,3 +138,32 @@ Rollback removes/disables the new public route and restores the prior private
 service arrangement under deployment approval. It must never relax the public
 Entra-only credential requirement. Downstream and DevOps agents own their
 rollout/rollback confirmation; upstream fixture tests do not close that work.
+
+## Follow-up: readiness and deployment ownership
+
+The intended company URL above belongs only to the downstream application. Arlen
+requires no hostname or deployment. Use [the exact administrator request](ENTRA_TEST_ADMIN_HANDOFF.md)
+and [client acceptance matrix](ENTRA_MCP_INTEROPERABILITY.md); no actual tenant
+configuration has been supplied. Keep public **research-data** forwarding disabled.
+An approved synthetic-only endpoint can be used for client acceptance without any
+connection to port 3122 or research storage.
+
+API agent: set `refreshOnRequest=false`, `preflightOnStart=true` on the existing
+resource-server configuration. Start one dedicated in-process maintenance worker
+that calls `refreshSigningKeysWithError:` every 30 seconds with the default
+300-second cache age; do not schedule this on the serialized dispatcher. Stop/join
+it during shutdown. Use the same module `resourceServer` instance. Wire `isReady`
+to a private application readiness endpoint returning 503 when false; the stock
+`/readyz` does not automatically consult it. Scope the endpoint outside protected
+data prefixes and protect its network access with application/DevOps policy.
+Readiness reports key-cache freshness, not end-to-end sign-in or all key IDs.
+
+DevOps agent: probe that application readiness route, allow bounded outbound
+HTTPS to application-configured issuer/JWKS destinations, and budget startup for
+two fetch deadlines plus scheduling overhead. Preserve canonical resource metadata
+and challenges at both existing handoff paths. TLS/proxy/Host policies remain
+application/gateway configuration; no framework hardcoded company trust settings
+were introduced. A gateway on another host needs approved private connectivity
+and cannot address the pilot's loopback remotely. No broker or adapter is approved
+for deployment by this change; the maintained-broker PoC contract is only a
+contingency proposal in the decision document.

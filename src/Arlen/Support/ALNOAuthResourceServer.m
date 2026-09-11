@@ -51,6 +51,7 @@ static NSDictionary *Part(NSString *part) {
 @property(nonatomic, copy) ALNOAuthDocumentLoader loader;
 @property(nonatomic, copy) ALNOAuthAuthorizationPolicy policy;
 @property(nonatomic, strong) NSDictionary *jwks;
+@property(nonatomic, strong) NSLock *refreshLock;
 @property(nonatomic, assign) NSTimeInterval expires;
 @property(nonatomic, assign) NSTimeInterval nextRefresh;
 @property(nonatomic, weak) ALNApplication *application;
@@ -86,6 +87,12 @@ static NSDictionary *Part(NSString *part) {
   c[@"refreshCooldownSeconds"] = c[@"refreshCooldownSeconds"] ?: @30;
   if (!Number(c[@"jwksMaxAgeSeconds"]) || [c[@"jwksMaxAgeSeconds"] doubleValue] < 30 || [c[@"jwksMaxAgeSeconds"] doubleValue] > 3600 ||
       !Number(c[@"refreshCooldownSeconds"]) || [c[@"refreshCooldownSeconds"] doubleValue] < 5 || [c[@"refreshCooldownSeconds"] doubleValue] > [c[@"jwksMaxAgeSeconds"] doubleValue]) return Fail(error, @"OAuth cache age must be 30..3600 seconds and refresh cooldown 5..cache age");
+  for (NSString *key in @[@"refreshOnRequest", @"preflightOnStart"]) {
+    if (c[key] && ![c[key] isKindOfClass:[NSNumber class]]) return Fail(error, @"OAuth refresh/preflight settings must be booleans");
+  }
+  c[@"refreshOnRequest"] = c[@"refreshOnRequest"] ?: @YES;
+  c[@"preflightOnStart"] = c[@"preflightOnStart"] ?: @NO;
+  _refreshLock = [NSLock new];
   c[@"profile"] = c[@"profile"] ?: @"rfc9068";
   if (![@[@"rfc9068", @"entra"] containsObject:c[@"profile"]]) return Fail(error, @"Unknown access-token profile");
   if ([c[@"profile"] isEqual:@"rfc9068"]) {
@@ -133,10 +140,12 @@ static NSDictionary *Part(NSString *part) {
   }
   return selected;
 }
-- (BOOL)refresh {
-  NSTimeInterval now = [NSProcessInfo processInfo].systemUptime;
-  if (now < self.nextRefresh) return NO;
-  self.nextRefresh = now + [self.configuration[@"refreshCooldownSeconds"] doubleValue];
+- (BOOL)fetchSigningKeys {
+  @synchronized (self) {
+    NSTimeInterval now = [NSProcessInfo processInfo].systemUptime;
+    if (now < self.nextRefresh) return NO;
+    self.nextRefresh = now + [self.configuration[@"refreshCooldownSeconds"] doubleValue];
+  }
   NSDictionary *metadata = self.loader([NSURL URLWithString:self.configuration[@"discoveryURL"]], NULL);
   if (!D(metadata) || ![metadata[@"issuer"] isEqual:self.configuration[@"issuer"]] || !HTTPS(metadata[@"jwks_uri"])) return NO;
   NSURL *url = [NSURL URLWithString:metadata[@"jwks_uri"]];
@@ -146,9 +155,30 @@ static NSDictionary *Part(NSString *part) {
   for (id key in keys[@"keys"]) if (!D(key)) return NO;
   NSData *snapshot = [ALNJSONSerialization dataWithJSONObject:keys options:0 error:NULL];
   if (!snapshot || snapshot.length > 262144) return NO;
-  self.jwks = [ALNJSONSerialization JSONObjectWithData:snapshot options:0 error:NULL];
-  self.expires = [NSProcessInfo processInfo].systemUptime + [self.configuration[@"jwksMaxAgeSeconds"] doubleValue];
+  @synchronized (self) {
+    self.jwks = [ALNJSONSerialization JSONObjectWithData:snapshot options:0 error:NULL];
+    self.expires = [NSProcessInfo processInfo].systemUptime + [self.configuration[@"jwksMaxAgeSeconds"] doubleValue];
+  }
   return YES;
+}
+- (BOOL)refreshSigningKeysWithError:(NSError **)error {
+  // Serialize fetchers separately from cache readers. No network under the cache monitor.
+  [self.refreshLock lock];
+  @try {
+    if ([self fetchSigningKeys]) return YES;
+    Fail(error, @"OAuth key refresh unavailable or in cooldown");
+    return NO;
+  } @finally { [self.refreshLock unlock]; }
+}
+- (BOOL)isReady {
+  @synchronized (self) {
+    return self.jwks != nil && [NSProcessInfo processInfo].systemUptime < self.expires;
+  }
+}
+- (BOOL)applicationWillStart:(ALNApplication *)application error:(NSError **)error {
+  if (![self.configuration[@"preflightOnStart"] boolValue]) return YES;
+  if (![self isReady]) [self refreshSigningKeysWithError:error];
+  return [self isReady];
 }
 - (NSDictionary *)principalForAccessToken:(NSString *)token error:(NSError **)error {
   if (!S(token) || token.length > 32768) return Fail(error, @"Invalid access token");
@@ -161,8 +191,12 @@ static NSDictionary *Part(NSString *part) {
   if (![header[@"alg"] isEqual:@"RS256"] || !S(header[@"kid"]) || [header[@"kid"] length] > 256 || header[@"crit"] || header[@"b64"] ||
       !(entra ? [header[@"typ"] isEqual:@"JWT"] : [@[@"at+jwt", @"application/at+jwt"] containsObject:header[@"typ"] ?: @""])) return Fail(error, @"Unsupported access token header");
   NSDictionary *key;
+  BOOL needsRefresh;
   @synchronized (self) {
-    if ([NSProcessInfo processInfo].systemUptime >= self.expires || ![self keyForID:header[@"kid"]]) [self refresh];
+    needsRefresh = [NSProcessInfo processInfo].systemUptime >= self.expires || ![self keyForID:header[@"kid"]];
+  }
+  if (needsRefresh && [self.configuration[@"refreshOnRequest"] boolValue]) [self refreshSigningKeysWithError:NULL];
+  @synchronized (self) {
     key = [NSProcessInfo processInfo].systemUptime < self.expires ? [self keyForID:header[@"kid"]] : nil;
   }
   if (!key || !S(key[@"n"]) || !S(key[@"e"]) || [key[@"e"] length] > 16 || ![key[@"kty"] isEqual:@"RSA"] || (key[@"use"] && ![key[@"use"] isEqual:@"sig"]) ||
@@ -226,6 +260,7 @@ static NSDictionary *Part(NSString *part) {
   ALNRoute *route = [application registerRouteMethod:@"GET" path:self.metadataPath name:@"oauth.resource.metadata" controllerClass:[ALNOAuthMetadataController class] action:@"metadata"];
   route.includeInOpenAPI = NO;
   [application addMiddleware:self];
+  [application registerLifecycleHook:self];
   return YES;
 }
 - (BOOL)processContext:(ALNContext *)context error:(NSError **)error {

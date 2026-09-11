@@ -1043,3 +1043,4 @@ mcp-check:
 oauth-check:
 >$(MAKE) test-unit-filter TEST=OAuthResourceServerTests mcp-example
 >python3 tools/oauth/check_example.py
+>python3 tools/oauth/check_discovery.py --self-test

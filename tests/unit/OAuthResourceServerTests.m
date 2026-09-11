@@ -381,4 +381,94 @@ static NSUInteger OAuthCalls;
   XCTAssertEqual(403, [self request:app path:@"/records" token:[self token:claims]].statusCode);
   XCTAssertEqual(1u, OAuthCalls);
 }
+- (void)testMaintenanceModePreflightReadinessAndCooldown {
+  NSMutableDictionary *config = [[self config] mutableCopy]; config[@"refreshOnRequest"] = @NO; config[@"preflightOnStart"] = @YES;
+  self.server = [self serverWithConfig:config policy:nil];
+  NSString *token = [self token:[self claims]];
+  XCTAssertFalse([self.server isReady]);
+  XCTAssertNil([self.server principalForAccessToken:token error:NULL]);
+  XCTAssertEqual(0u, self.requests.count);
+  ALNApplication *app = [[ALNApplication alloc] initWithConfig:@{@"environment":@"test", @"logLevel":@"error"}];
+  XCTAssertTrue([app registerPlugin:self.server error:NULL]);
+  XCTAssertTrue([app startWithError:NULL]);
+  XCTAssertTrue([self.server isReady]);
+  XCTAssertNotNil([self.server principalForAccessToken:token error:NULL]);
+  XCTAssertFalse([self.server refreshSigningKeysWithError:NULL]);
+  XCTAssertEqual(2u, self.requests.count);
+  [self.server setValue:@0 forKey:@"expires"];
+  XCTAssertFalse([self.server isReady]);
+  XCTAssertNil([self.server principalForAccessToken:token error:NULL]);
+  XCTAssertEqual(2u, self.requests.count);
+  [self.documents removeAllObjects];
+  [self.server setValue:@0 forKey:@"nextRefresh"];
+  XCTAssertFalse([self.server refreshSigningKeysWithError:NULL]);
+  XCTAssertFalse([self.server isReady]);
+  self.server = [self serverWithConfig:config policy:nil];
+  app = [[ALNApplication alloc] initWithConfig:@{@"environment":@"test", @"logLevel":@"error"}];
+  XCTAssertTrue([app registerPlugin:self.server error:NULL]);
+  XCTAssertFalse([app startWithError:NULL]);
+}
+- (void)testSlowRefreshDoesNotHoldValidationMonitorAndRotationRecovers {
+  NSMutableDictionary *config = [[self config] mutableCopy]; config[@"refreshOnRequest"] = @NO;
+  NSCondition *gate = [NSCondition new];
+  __block BOOL slow = NO, entered = NO, releaseFetch = NO;
+  __block NSUInteger fetches = 0;
+  NSDictionary *metadata = self.documents[config[@"discoveryURL"]];
+  NSDictionary *initialKeys = @{@"keys":@[self.key[@"jwk"]]};
+  NSDictionary *rotatedKeys = @{@"keys":@[self.key[@"jwk"], self.secondKey[@"jwk"]]};
+  self.server = [[ALNOAuthResourceServer alloc] initWithConfiguration:config documentLoader:^NSDictionary *(NSURL *url, NSError **error) {
+    fetches++;
+    if ([url.absoluteString isEqual:config[@"discoveryURL"]]) {
+      [gate lock];
+      if (slow) {
+        entered = YES; [gate broadcast];
+        NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:2];
+        while (!releaseFetch && [gate waitUntilDate:deadline]) {}
+      }
+      [gate unlock];
+      return metadata;
+    }
+    return slow ? rotatedKeys : initialKeys;
+  } authorizationPolicy:nil error:NULL];
+  XCTAssertTrue([self.server refreshSigningKeysWithError:NULL]);
+  NSString *token = [self token:[self claims]];
+  NSString *rotated = OAuthTestRS256JWT([self claims], self.secondKey[@"privateKeyPEM"], @"second");
+  [gate lock]; slow = YES; [gate unlock];
+  [self.server setValue:@0 forKey:@"nextRefresh"];
+  NSOperationQueue *worker = [NSOperationQueue new];
+  [worker addOperationWithBlock:^{ [self.server refreshSigningKeysWithError:NULL]; }];
+  [gate lock];
+  NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:2];
+  while (!entered && [gate waitUntilDate:deadline]) {}
+  XCTAssertTrue(entered);
+  [gate unlock];
+  NSTimeInterval start = [NSDate timeIntervalSinceReferenceDate];
+  XCTAssertNotNil([self.server principalForAccessToken:token error:NULL]);
+  XCTAssertNil([self.server principalForAccessToken:rotated error:NULL]);
+  [self.server setValue:@0 forKey:@"expires"];
+  XCTAssertFalse([self.server isReady]);
+  XCTAssertNil([self.server principalForAccessToken:token error:NULL]);
+  NSTimeInterval latency = [NSDate timeIntervalSinceReferenceDate] - start;
+  XCTAssertLessThan(latency, 0.5); // Loader remains blocked; validation must not wait for it.
+  [gate lock]; releaseFetch = YES; [gate broadcast]; [gate unlock];
+  [worker waitUntilAllOperationsAreFinished];
+  XCTAssertTrue([self.server isReady]);
+  XCTAssertNotNil([self.server principalForAccessToken:rotated error:NULL]);
+  XCTAssertEqual(4u, fetches);
+  NSLog(@"OAuth maintenance fixture validation seconds: %.6f", latency);
+}
+- (void)testMeasureSynchronousColdFetchLatency {
+  NSDictionary *config = [self config];
+  NSDictionary *documents = [self.documents copy];
+  self.server = [[ALNOAuthResourceServer alloc] initWithConfiguration:config documentLoader:^NSDictionary *(NSURL *url, NSError **error) {
+    [NSThread sleepForTimeInterval:0.15];
+    return documents[url.absoluteString];
+  } authorizationPolicy:nil error:NULL];
+  NSString *token = [self token:[self claims]];
+  NSTimeInterval start = [NSDate timeIntervalSinceReferenceDate];
+  XCTAssertNotNil([self.server principalForAccessToken:token error:NULL]);
+  NSTimeInterval latency = [NSDate timeIntervalSinceReferenceDate] - start;
+  XCTAssertGreaterThanOrEqual(latency, 0.29);
+  NSLog(@"OAuth synchronous fixture cold validation seconds: %.6f (two 150ms fetches)", latency);
+}
 @end

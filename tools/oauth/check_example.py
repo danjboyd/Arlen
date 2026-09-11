@@ -20,13 +20,14 @@ def main():
     config = json.loads((ROOT / "examples/mcp_app/entra.example.json").read_text()
                         .replace("<TENANT_GUID>", "11111111-1111-1111-1111-111111111111")
                         .replace("<RESEARCH_API_APPLICATION_GUID>", "22222222-2222-2222-2222-222222222222")
-                        .replace("<PUBLIC_MCP_HOST>", "mcp.example.test"))
+                        .replace("<PUBLIC_MCP_HOST>", "mcp.example.test")
+                        .replace("<DELEGATED_SCOPE>", "Fixture.Read"))
     # A valid legacy token and configured legacy verifier must not bypass OAuth.
     secret = "ignored-fixture-secret-01234567890123456789"
     config["auth"] = {"enabled": True, "bearerSecret": secret, "issuer": "old-pilot", "audience": "old-research"}
     def encode(value):
         return base64.urlsafe_b64encode(json.dumps(value).encode()).rstrip(b"=")
-    signing = encode({"alg": "HS256"}) + b"." + encode({"sub": "old-user", "iss": "old-pilot", "aud": "old-research", "exp": int(time.time()) + 300, "scope": "Research.Read"})
+    signing = encode({"alg": "HS256"}) + b"." + encode({"sub": "old-user", "iss": "old-pilot", "aud": "old-research", "exp": int(time.time()) + 300, "scope": "Fixture.Read"})
     legacy = (signing + b"." + base64.urlsafe_b64encode(hmac.new(secret.encode(), signing, hashlib.sha256).digest()).rstrip(b"=")).decode()
     with socket.socket() as probe:
         probe.bind(("127.0.0.1", 0))

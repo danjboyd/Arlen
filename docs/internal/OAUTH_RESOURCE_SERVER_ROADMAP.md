@@ -26,3 +26,12 @@
 See [implementation evidence](OAUTH_IMPLEMENTATION_REPORT.md),
 [administrator runbook](../OAUTH_RESOURCE_SERVER.md) and
 [API/DevOps handoff](STATE_COMPULSORY_POOLING_OAUTH_MIGRATION.md).
+
+## Operational follow-up
+
+Implemented: opt-in startup preflight, no-network request validation mode, public
+maintenance/readiness methods and separate single-flight fetch locking. Synthetic
+regressions measure stalled refresh, startup failure, strict expiry and rotation.
+Framework completion does not require a public deployment. Downstream Entra/client
+acceptance remains blocked on administrator input; see
+[the decision and matrix](ENTRA_MCP_INTEROPERABILITY.md).
