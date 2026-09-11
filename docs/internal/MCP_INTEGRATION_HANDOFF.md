@@ -94,8 +94,10 @@ are entirely consumer-owned. The runnable non-pooling example is
    path/session/CSRF/policy middleware must be revalidated. Custom tools need
    named service policies; unrelated HTTP path-prefix policies do not magically
    attach to them. Middleware can run twice per call.
-4. Supply configured credentials in the MCP client. This release does not
-   implement OAuth discovery, registration, PKCE, or issuance. No SSE, tasks,
+4. Configure explicit client credentials for legacy deployments, or adopt the
+   [OAuth resource-server extension](../OAUTH_RESOURCE_SERVER.md). It supplies
+   discovery and validation; registration, PKCE and issuance remain external.
+   Entra client acceptance is pending its documented metadata gap. No SSE, tasks,
    active cancellation, resources API, dynamic catalogs, or 2026 protocol.
 5. Configure TLS ingress, Origin/Host and trusted-proxy rules, request limits,
    shared production quotas, and backend deadlines. Synchronous service work

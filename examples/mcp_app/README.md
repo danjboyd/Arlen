@@ -31,3 +31,22 @@ To also exercise the official independent MCP SDK, follow the commands in
 Read [main.m](main.m) for complete registration code. The default route-to-result
 mapping returns the catalog JSON object; custom summary results include an
 output schema, compatible text, and a resource link.
+
+## Entra bearer-only variant
+
+Copy `entra.example.json` outside the repository and replace all placeholders
+using the [administrator runbook](../../docs/OAUTH_RESOURCE_SERVER.md).
+The sample still exposes catalog data, demonstrating a protected REST route and
+MCP tools with the same `Research.Read` permission. It does not contact research.
+
+```bash
+source tools/source_gnustep_env.sh
+make mcp-example
+MCP_EXAMPLE_OAUTH_CONFIG=/absolute/path/to/entra.json build/mcp-example
+```
+
+Setting `MCP_EXAMPLE_OAUTH_CONFIG` selects OAuth exclusively. A malformed file,
+failed validation, or missing credentials never falls back to
+`MCP_EXAMPLE_SECRET`. The process binds loopback port 3210. Public discovery is
+served at `/.well-known/oauth-protected-resource/research/mcp`; the configured
+public URL is independent of the loopback listener.

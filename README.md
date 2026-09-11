@@ -358,3 +358,11 @@ Optional integrations: [MCP tools over Streamable HTTP](docs/MCP_MODULE.md).
 ## License
 
 Arlen is licensed under the GNU Lesser General Public License, version 2 or (at your option) any later version (LGPL-2.0-or-later), aligned with GNUstep Base library licensing.
+
+## OAuth-protected MCP and REST
+
+Use the opt-in OAuth resource server and Entra preset for company API access.
+See the [configuration and administrator runbook](docs/OAUTH_RESOURCE_SERVER.md) for a protected
+example, client preregistration, public discovery routes, and live acceptance
+requirements. `mcp.oauth` requires OAuth bearer credentials without HS256/session
+fallback; REST routes and MCP calls reuse Arlen scope, role, and application policies.

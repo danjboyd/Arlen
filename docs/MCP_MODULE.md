@@ -291,12 +291,12 @@ authentication/session-management routes are unsuitable tool candidates.
 
 MCP resource credentials authorize access to this application. Downstream API
 credentials belong in application services and secret stores; never forward an
-MCP token to a different resource audience. This module does **not** implement
-the optional MCP OAuth discovery/authorization flow (protected-resource metadata,
-client registration, PKCE, or token issuance). Configure credentials explicitly
-in clients. Apps needing automatic OAuth must supply a conforming resource/auth
-integration; existing login UI alone does not provide it. See the official
-[authorization specification](https://modelcontextprotocol.io/specification/2025-11-25/basic/authorization).
+MCP token to a different resource audience. Configure `mcp.oauth` for protected
+resource metadata, bearer validation and challenges; see the
+[OAuth/Entra runbook](OAUTH_RESOURCE_SERVER.md). Clients and their authorization
+server handle registration, PKCE, token issuance and renewal. The runbook records
+the observed Entra PKCE metadata gap and pending live acceptance; existing login
+UI or fixture JWT verification alone does not establish sign-in compatibility.
 
 All incoming Origin values are denied unless exactly listed in `allowedOrigins`;
 no Origin is accepted for native clients. Configure exact scheme/host/port
@@ -341,3 +341,11 @@ It is not a drop-in source module for older pinned Arlen checkouts. The existing
 framework `0.1.0` version does not distinguish those commits, so the module
 manifest's semver check alone is insufficient; use the tested implementation
 commit recorded in the integration handoff.
+
+## OAuth-protected MCP and REST
+
+Use the opt-in OAuth resource server and Entra preset for company API access.
+See the [configuration and administrator runbook](OAUTH_RESOURCE_SERVER.md) for a protected
+example, client preregistration, public discovery routes, and live acceptance
+requirements. `mcp.oauth` requires OAuth bearer credentials without HS256/session
+fallback; REST routes and MCP calls reuse Arlen scope, role, and application policies.

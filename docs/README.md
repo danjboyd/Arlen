@@ -127,3 +127,11 @@ toolchain env directly for the Linux/GNUstep path. On macOS, use
 - [CI Alignment](CI_ALIGNMENT.md): required CI shape and merge-gate guidance.
 - [Comparative Benchmarking](COMPARATIVE_BENCHMARKING.md): benchmarking source-of-truth split.
 - [Internal docs (`docs/internal/`)](internal/): engineering material — phase roadmaps, session handoffs, dated reconciliation notes, audits, and benchmark/operational handoffs. Not part of the user-facing surface.
+
+## OAuth-protected MCP and REST
+
+Use the opt-in OAuth resource server and Entra preset for company API access.
+See the [configuration and administrator runbook](OAUTH_RESOURCE_SERVER.md) for a protected
+example, client preregistration, public discovery routes, and live acceptance
+requirements. `mcp.oauth` requires OAuth bearer credentials without HS256/session
+fallback; REST routes and MCP calls reuse Arlen scope, role, and application policies.

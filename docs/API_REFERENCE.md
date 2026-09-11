@@ -9,10 +9,10 @@ python3 tools/docs/generate_api_reference.py
 ```
 
 - Generated from source headers and metadata (deterministic output)
-- Public headers: `85`
-- Symbols: `148`
-- Public methods: `1009`
-- Public properties: `448`
+- Public headers: `86`
+- Symbols: `149`
+- Public methods: `1016`
+- Public properties: `451`
 
 ## API Surface Boundary
 
@@ -186,6 +186,7 @@ python3 tools/docs/generate_api_reference.py
 - [ALNMailAdapter](api/ALNMailAdapter.md): Mail adapter protocol for outbound delivery and delivery snapshot diagnostics.
 - [ALNMailMessage](api/ALNMailMessage.md): Mail payload model containing sender/recipients/content/headers/metadata fields.
 - [ALNMetricsRegistry](api/ALNMetricsRegistry.md): In-memory metrics registry for counters, gauges, timings, snapshots, and Prometheus text output.
+- [ALNOAuthResourceServer](api/ALNOAuthResourceServer.md): Opt-in OAuth access-token verifier, verified principal, protected-resource discovery and shared REST/MCP authorization middleware.
 - [ALNOIDCClient](api/ALNOIDCClient.md): Support services for auth, metrics, logging, performance, realtime, and adapters.
 - [ALNPasswordHash](api/ALNPasswordHash.md): Argon2id password hashing helpers that emit PHC strings, verify candidate passwords, and report when stored hashes should be rehashed.
 - [ALNPerfTrace](api/ALNPerfTrace.md): Per-request performance stage recorder used for internal timing diagnostics and perf event export.
@@ -278,6 +279,7 @@ python3 tools/docs/generate_api_reference.py
 - `src/Arlen/Support/ALNLive.h`
 - `src/Arlen/Support/ALNLogger.h`
 - `src/Arlen/Support/ALNMetrics.h`
+- `src/Arlen/Support/ALNOAuthResourceServer.h`
 - `src/Arlen/Support/ALNOIDCClient.h`
 - `src/Arlen/Support/ALNPasswordHash.h`
 - `src/Arlen/Support/ALNPerf.h`

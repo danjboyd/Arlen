@@ -465,3 +465,11 @@ Settings include `path` (default `/mcp`), `providerClass`, `requiredScopes`,
 `requiredRoles`, `policies`, `allowedOrigins` (default empty), `maxOutputBytes`
 (default 262144), and `requestsPerMinute` (default 120). Authentication and
 existing request policies remain active. See [MCP Module](MCP_MODULE.md).
+
+## OAuth-protected MCP and REST
+
+Use the opt-in OAuth resource server and Entra preset for company API access.
+See the [configuration and administrator runbook](OAUTH_RESOURCE_SERVER.md) for a protected
+example, client preregistration, public discovery routes, and live acceptance
+requirements. `mcp.oauth` requires OAuth bearer credentials without HS256/session
+fallback; REST routes and MCP calls reuse Arlen scope, role, and application policies.

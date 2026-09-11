@@ -184,3 +184,11 @@ After ordinary routes and services work, install and explicitly enable the
 [MCP module](MCP_MODULE.md) to expose selected capabilities to MCP clients.
 OpenAPI inclusion does not expose tools. The [catalog example](../examples/mcp_app/README.md)
 shows route and service registration with bearer authentication.
+
+## OAuth-protected MCP and REST
+
+Use the opt-in OAuth resource server and Entra preset for company API access.
+See the [configuration and administrator runbook](OAUTH_RESOURCE_SERVER.md) for a protected
+example, client preregistration, public discovery routes, and live acceptance
+requirements. `mcp.oauth` requires OAuth bearer credentials without HS256/session
+fallback; REST routes and MCP calls reuse Arlen scope, role, and application policies.

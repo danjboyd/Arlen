@@ -6,6 +6,7 @@
 #import "ALNMCPModule.h"
 #import "ALNResponse.h"
 #import "ALNRoute.h"
+#import "ALNJSONSerialization.h"
 
 // Application services stay in the application, not the framework module.
 @interface CatalogService : NSObject
@@ -25,18 +26,28 @@
 @end
 int main(int argc, const char *argv[]) {
   @autoreleasepool {
+    NSString *oauthPath = [NSProcessInfo processInfo].environment[@"MCP_EXAMPLE_OAUTH_CONFIG"];
+    NSDictionary *oauthConfig = nil;
+    if (oauthPath) {
+      NSData *data = [NSData dataWithContentsOfFile:oauthPath];
+      oauthConfig = data ? [ALNJSONSerialization JSONObjectWithData:data options:0 error:NULL] : nil;
+      if (![oauthConfig isKindOfClass:[NSDictionary class]] || ![oauthConfig[@"mcp"] isKindOfClass:[NSDictionary class]] ||
+          ![oauthConfig[@"mcp"][@"oauth"] isKindOfClass:[NSDictionary class]] || ![oauthConfig[@"mcp"][@"enabled"] boolValue]) {
+        fprintf(stderr, "MCP_EXAMPLE_OAUTH_CONFIG must contain valid mcp.oauth configuration.\n"); return 2;
+      }
+    }
     NSString *secret = [NSProcessInfo processInfo].environment[@"MCP_EXAMPLE_SECRET"];
-    if (secret.length < 32) { fprintf(stderr, "Set MCP_EXAMPLE_SECRET to at least 32 characters.\n"); return 2; }
-    ALNApplication *app = [[ALNApplication alloc] initWithConfig:@{
+    if (!oauthPath && secret.length < 32) { fprintf(stderr, "Set MCP_EXAMPLE_SECRET to at least 32 characters.\n"); return 2; }
+    ALNApplication *app = [[ALNApplication alloc] initWithConfig:oauthConfig ?: @{
       @"environment":@"development", @"host":@"127.0.0.1", @"port":@3210, @"apiOnly":@YES,
-      @"auth":@{@"enabled":@YES, @"bearerSecret":secret, @"issuer":@"mcp-example", @"audience":@"arlen-catalog"},
+      @"auth":@{@"enabled":@YES, @"bearerSecret":secret ?: @"", @"issuer":@"mcp-example", @"audience":@"arlen-catalog"},
       @"session":@{@"enabled":@NO}, @"csrf":@{@"enabled":@NO},
       @"mcp":@{@"enabled":@YES, @"requiredScopes":@[@"catalog:read"]}
     }];
     ALNRoute *route = [app registerRouteMethod:@"GET" path:@"/catalog/:id" name:@"catalog_item" controllerClass:[CatalogController class] action:@"item"];
     route.summary = @"Read one catalog item";
     route.operationID = @"catalog.item";
-    route.requiredScopes = @[@"catalog:read"];
+    route.requiredScopes = oauthConfig ? oauthConfig[@"mcp"][@"requiredScopes"] : @[@"catalog:read"];
     route.requestSchema = @{@"type":@"object", @"properties":@{@"id":@{@"type":@"string", @"source":@"path", @"required":@YES}}};
     route.responseSchema = @{@"type":@"object", @"properties":@{@"id":@{@"type":@"string"}, @"title":@{@"type":@"string"}}, @"required":@[@"id", @"title"]};
     NSDictionary *annotations = @{@"readOnlyHint":@YES, @"destructiveHint":@NO, @"idempotentHint":@YES, @"openWorldHint":@NO};

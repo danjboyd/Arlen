@@ -173,6 +173,9 @@
     },
     "ALNFileSystemAttachmentAdapter": {
       "summary": "Filesystem-backed attachment adapter for durable binary storage."
+    },
+    "ALNOAuthResourceServer": {
+      "summary": "Opt-in OAuth access-token verifier, verified principal, protected-resource discovery and shared REST/MCP authorization middleware."
     }
   },
   "properties": {
@@ -272,6 +275,18 @@
     "ALNPasswordHash|argon2Version": {
       "purpose": "Return the vendored Argon2 upstream version identifier used by this Arlen build.",
       "usage": "Use for diagnostics, support bundles, or build provenance reporting."
+    },
+    "ALNOAuthResourceServer|initWithConfiguration:documentLoader:authorizationPolicy:error:": {
+      "purpose": "Validate and freeze resource-server trust configuration and application policy.",
+      "usage": "Pass nil documentLoader for bounded Foundation HTTPS fetching; inject a controlled loader for tests. Register the instance as a plugin, or assign it to MCP before installing. A nil result indicates invalid configuration."
+    },
+    "ALNOAuthResourceServer|principalForAccessToken:error:": {
+      "purpose": "Validate access-token signature and claims and return an immutable normalized principal.",
+      "usage": "This cryptographic method does not invoke request policy. Use the installed middleware for authorization and suspension checks; do not log the token."
+    },
+    "ALNOIDCClient|verifyRS256Token:jwk:error:": {
+      "purpose": "Verify only the RS256 signature with a caller-selected trusted RSA JWK.",
+      "usage": "This low-level primitive does not establish an identity or validate JWT headers/claims. Use ALNOAuthResourceServer for access tokens or verifyIDToken for login tokens."
     }
   }
 }

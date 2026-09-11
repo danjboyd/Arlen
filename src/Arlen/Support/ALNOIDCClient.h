@@ -31,6 +31,11 @@ typedef NS_ENUM(NSInteger, ALNOIDCClientErrorCode) {
 
 @interface ALNOIDCClient : NSObject
 
+/// Verify only an RS256 signature using a caller-selected trusted RSA JWK.
+/// Callers must independently enforce access-token headers and claims.
++ (BOOL)verifyRS256Token:(NSString *)token jwk:(NSDictionary *)jwk
+                  error:(NSError *_Nullable *_Nullable)error;
+
 + (nullable NSDictionary *)authorizationRequestForProviderConfiguration:(NSDictionary *)providerConfiguration
                                                             redirectURI:(NSString *)redirectURI
                                                                  scopes:(nullable NSArray *)scopes

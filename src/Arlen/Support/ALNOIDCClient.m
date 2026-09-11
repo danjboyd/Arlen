@@ -471,6 +471,12 @@ static NSString *ALNOIDCURLWithQueryParameters(NSString *baseURL, NSArray *order
 }
 
 @implementation ALNOIDCClient
++ (BOOL)verifyRS256Token:(NSString *)token jwk:(NSDictionary *)jwk error:(NSError **)error {
+  NSArray *parts = [token componentsSeparatedByString:@"."];
+  if (parts.count != 3) return NO;
+  return ALNOIDCVerifyRS256Signature([NSString stringWithFormat:@"%@.%@", parts[0], parts[1]], parts[2], jwk, error);
+}
+
 
 + (NSDictionary *)authorizationRequestForProviderConfiguration:(NSDictionary *)providerConfiguration
                                                    redirectURI:(NSString *)redirectURI

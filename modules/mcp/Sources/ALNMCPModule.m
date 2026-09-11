@@ -1,6 +1,7 @@
 #import "ALNMCPModule.h"
 #import "ALNMCPSchema.h"
 #import "ALNAuth.h"
+#import "ALNOAuthResourceServer.h"
 #import "ALNJSONSerialization.h"
 #import "ALNContext.h"
 #import "ALNController.h"
@@ -77,6 +78,11 @@ static NSString *Encode(NSString *value) {
 @end
 
 @implementation ALNMCPModule
+@synthesize resourceServer = _resourceServer;
+- (void)setResourceServer:(ALNOAuthResourceServer *)resourceServer {
+  if (self.application) [NSException raise:NSInternalInconsistencyException format:@"MCP OAuth configuration freezes at installation"];
+  _resourceServer = resourceServer;
+}
 - (instancetype)init {
   if ((self = [super init])) _entries = [NSMutableArray array];
   return self;
@@ -136,6 +142,15 @@ static NSString *Encode(NSString *value) {
   // Reserve the whole prefix: private dispatch paths must never shadow application routes.
   for (ALNRoute *route in [application.router allRoutes]) {
     if ([route.pathPattern isEqual:self.path] || [route.pathPattern hasPrefix:[self.path stringByAppendingString:@"/"]]) return ALNMCPFail(error, @"MCP endpoint prefix collides with an existing route");
+  }
+  if (config[@"oauth"] && !self.resourceServer) {
+    self.resourceServer = [[ALNOAuthResourceServer alloc] initWithConfiguration:config[@"oauth"]
+        documentLoader:nil authorizationPolicy:nil error:error];
+    if (!self.resourceServer) return NO;
+  }
+  if (self.resourceServer) {
+    if (![self.resourceServer protectsPath:self.path]) return ALNMCPFail(error, @"OAuth must protect the MCP endpoint");
+    if (![application registerPlugin:self.resourceServer error:error]) return NO;
   }
   self.application = application;
   for (NSString *method in @[@"POST", @"GET", @"DELETE", @"PUT", @"PATCH", @"OPTIONS", @"HEAD"]) {
@@ -208,6 +223,7 @@ static NSString *Encode(NSString *value) {
     if (!entry.handler) entry.route = [application.router routeNamed:d[@"routeName"]];
     ALNRoute *route = entry.route;
     if (!route || (!entry.handler && ([route.pathPattern isEqual:self.path] || [route.pathPattern hasPrefix:[self.path stringByAppendingString:@"/"]]))) return ALNMCPFail(error, @"MCP routeName missing or recursive");
+    if (self.resourceServer && ![self.resourceServer protectsPath:route.pathPattern]) return ALNMCPFail(error, @"OAuth must protect every MCP backing route");
     NSString *name = d[@"name"] ?: (entry.handler ? nil : (route.operationID.length ? route.operationID : route.name));
     NSCharacterSet *invalid = [[NSCharacterSet characterSetWithCharactersInString:@"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_.-"] invertedSet];
     if (!String(name) || !name.length || name.length > 128 || [name rangeOfCharacterFromSet:invalid].location != NSNotFound || [names containsObject:name]) return ALNMCPFail(error, @"Invalid or duplicate MCP tool name");
@@ -295,6 +311,12 @@ static NSString *Encode(NSString *value) {
   request.scheme = context.request.scheme;
   // Fresh context, original credentials, complete dispatcher: no copied claims or session stash.
   ALNResponse *response = [self.application dispatchRequest:request requiringRoute:entry.route];
+  if (self.resourceServer && (response.statusCode == 401 || response.statusCode == 403)) {
+    context.response.statusCode = response.statusCode;
+    [context.response setHeader:@"WWW-Authenticate" value:[self.resourceServer challengeForError:response.statusCode == 401 ? @"invalid_token" : @"insufficient_scope"]];
+    context.response.committed = YES;
+    return nil;
+  }
   if (response.statusCode < 200 || response.statusCode >= 300) return ToolError([NSString stringWithFormat:@"Tool request rejected (HTTP %ld)", (long)response.statusCode]);
   if (response.fileBodyPath || response.bodyLength > self.maxBytes) return ToolError(@"Tool response exceeds supported output bounds");
   NSError *error = nil;
@@ -427,6 +449,7 @@ static NSString *Encode(NSString *value) {
       NSDictionary *result;
       @try { result = [self call:entry arguments:params[@"arguments"] ?: @{} context:context]; }
       @catch (NSException *exception) { result = ToolError(@"Tool execution failed"); }
+      if (context.response.committed) return;
       [self reply:result code:0 message:nil identifier:identifier context:context]; return;
     }
     [self reply:nil code:-32602 message:@"Unknown tool" identifier:identifier context:context]; return;

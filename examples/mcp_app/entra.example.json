@@ -1,0 +1,31 @@
+{
+  "environment": "development",
+  "host": "127.0.0.1",
+  "port": 3210,
+  "apiOnly": true,
+  "logLevel": "warn",
+  "session": {"enabled": false},
+  "csrf": {"enabled": false},
+  "mcp": {
+    "enabled": true,
+    "path": "/research/mcp",
+    "requiredScopes": ["Research.Read"],
+    "oauth": {
+      "profile": "entra",
+      "tenantID": "<TENANT_GUID>",
+      "tokenVersion": "2.0",
+      "issuer": "https://login.microsoftonline.com/<TENANT_GUID>/v2.0",
+      "discoveryURL": "https://login.microsoftonline.com/<TENANT_GUID>/v2.0/.well-known/openid-configuration",
+      "authorizationServer": "https://login.microsoftonline.com/<TENANT_GUID>/v2.0",
+      "audience": "<RESEARCH_API_APPLICATION_GUID>",
+      "resourceURL": "https://<PUBLIC_MCP_HOST>/research/mcp",
+      "algorithms": ["RS256"],
+      "jwksAllowedHosts": ["login.microsoftonline.com"],
+      "scopesSupported": ["api://<RESEARCH_API_APPLICATION_GUID>/Research.Read", "offline_access"],
+      "protectedPaths": ["/"],
+      "jwksMaxAgeSeconds": 300,
+      "refreshCooldownSeconds": 30,
+      "allowApplicationPermissions": false
+    }
+  }
+}

@@ -2,7 +2,7 @@
 #import "ALNApplication.h"
 
 NS_ASSUME_NONNULL_BEGIN
-@class ALNContext, ALNResponse, ALNMCPModule;
+@class ALNContext, ALNResponse, ALNMCPModule, ALNOAuthResourceServer;
 
 /// Return an MCP result: structuredContent (object), optional content (text/resource_link).
 typedef NSDictionary *_Nullable (^ALNMCPToolHandler)(NSDictionary *arguments,
@@ -19,6 +19,9 @@ typedef NSDictionary *_Nullable (^ALNMCPResponseTransform)(ALNResponse *response
 /// Optional module. Register definitions before installing; contracts freeze at startup.
 /// See docs/MCP_MODULE.md for the intentionally restricted JSON Schema/mapping contract.
 @interface ALNMCPModule : NSObject <ALNModule, ALNPlugin, ALNLifecycleHook, ALNMiddleware>
+/// Set before installation for custom transport/policy hooks. mcp.oauth may instead
+/// supply configuration. OAuth protects the endpoint and every mapped REST route.
+@property(nonatomic, strong, nullable) ALNOAuthResourceServer *resourceServer;
 - (BOOL)registerRouteTool:(NSDictionary *)definition
                transform:(nullable ALNMCPResponseTransform)transform
                    error:(NSError *_Nullable *_Nullable)error;

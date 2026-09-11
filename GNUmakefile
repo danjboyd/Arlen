@@ -1031,10 +1031,15 @@ clean:
 .PHONY: mcp-example
 mcp-example: $(MCP_EXAMPLE_TOOL)
 
-$(MCP_EXAMPLE_TOOL): $(MCP_EXAMPLE_OBJS) $(ARLEN_FRAMEWORK_LIB) $(filter %/mcp/Sources/ALNMCPModule.o %/mcp/Sources/ALNMCPSchema.o,$(MODULE_OBJS))
+$(MCP_EXAMPLE_TOOL): $(MCP_EXAMPLE_OBJS) $(filter %/mcp/Sources/ALNMCPModule.o %/mcp/Sources/ALNMCPSchema.o,$(MODULE_OBJS)) $(ARLEN_FRAMEWORK_LIB)
 >@source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) $^ -o $@ $(BASE_LINK_LIBS)
 
 .PHONY: mcp-check
 mcp-check:
 >$(MAKE) test-unit-filter TEST=MCPModuleTests mcp-example
 >python3 tools/mcp/check_client.py
+
+.PHONY: oauth-check
+oauth-check:
+>$(MAKE) test-unit-filter TEST=OAuthResourceServerTests mcp-example
+>python3 tools/oauth/check_example.py

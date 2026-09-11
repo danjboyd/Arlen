@@ -1291,3 +1291,11 @@ DB-backed tests are skipped unless this environment variable is set:
 route export or consumer upgrade. From the framework checkout, `make mcp-example`
 builds the read-only example and `make mcp-check` runs focused unit and real HTTP
 checks. See [MCP Module](MCP_MODULE.md) for runtime configuration and protocol limits.
+
+## OAuth-protected MCP and REST
+
+Use the opt-in OAuth resource server and Entra preset for company API access.
+See the [configuration and administrator runbook](OAUTH_RESOURCE_SERVER.md) for a protected
+example, client preregistration, public discovery routes, and live acceptance
+requirements. `mcp.oauth` requires OAuth bearer credentials without HS256/session
+fallback; REST routes and MCP calls reuse Arlen scope, role, and application policies.

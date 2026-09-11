@@ -45,8 +45,20 @@ rate limiting, output bounds, private invocation gates, and alternate dispatch.
 
 ## Deliberately deferred
 
-Full JSON Schema, OAuth discovery and issuance, newer MCP revisions, SSE,
+Full JSON Schema, OAuth credential issuance, newer MCP revisions, SSE,
 server-to-client features, progress/cancellation, dynamic catalogs/pagination,
 streaming results, session-changing tools, and mounted-application route tools.
 These require explicit future compatibility work and must not be advertised.
 Consumer adoption, deployment, and consumer pin changes belong to the consumer.
+
+## OAuth resource-server extension
+
+`mcp.oauth` or a preconfigured `resourceServer` installs the shared
+`ALNOAuthResourceServer` plugin. The canonical resource and RFC 9728 path-specific
+metadata are explicit configuration. MCP 2025-11-25 discovery and HTTP 401/403
+challenges supplement the existing stateless transport. Authentication executes
+on both outer and backing requests; backing-route denials propagate to HTTP.
+All backing routes must be covered by OAuth protected path prefixes at startup.
+Scope/role requirements and application data policy remain application-owned.
+See [the resource-server contract/runbook](../OAUTH_RESOURCE_SERVER.md) and
+[adoption handoff](STATE_COMPULSORY_POOLING_OAUTH_MIGRATION.md).
