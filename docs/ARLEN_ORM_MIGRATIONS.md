@@ -41,3 +41,16 @@ Arlen follows Django/Ecto-style discipline here:
 This is a descriptor-history contract, not a second migration runner. Arlen's
 canonical migration execution still lives in `ArlenData` and
 `ALNMigrationRunner`.
+
+## Generated property naming update
+
+Regenerate SQL ORM headers, implementations and manifests together when adopting
+reserved-name protection. Columns such as `State`, `Description`, `class`, `hash`,
+`context` and `descriptor` now have safe property aliases; consult each manifest's
+`property_name` or configure `property_names` in descriptor overrides. Update
+application property accesses and deliberately review descriptor snapshot drift.
+Original SQL columns, logical field names and relationship keys do not change.
+
+Generated setters now preserve internal capitalization (`displayName` uses
+`setDisplayName:`). Replace any direct calls to the previously emitted
+`setDisplayname:` spelling. Regeneration is an API update, not a database migration.

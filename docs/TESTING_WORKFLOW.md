@@ -342,3 +342,12 @@ Use runtime-mode entries for real Arlen app variants and keep fixture-backed
 entries in fast mode. Do not move runtime-mode entries into the default lane
 without updating CI alignment and branch-protection guidance in the same
 change.
+
+### Generated ORM naming regressions
+
+After sourcing `tools/source_gnustep_env.sh`, run `make phase26-orm-generated`.
+This uses the repo-local XCTest runner and compiles a generated model fixture
+with property-type, property-attribute and nullability warnings as errors, then
+loads it to exercise typed accessors and ORM runtime state. The Linux quality
+workflow runs this target explicitly. Use `make phase26-orm-unit` and
+`make phase26-orm-integration` for broader ORM runtime coverage.

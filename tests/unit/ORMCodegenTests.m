@@ -1,8 +1,16 @@
 #import <Foundation/Foundation.h>
 #import <XCTest/XCTest.h>
+#import <dlfcn.h>
+#import <objc/runtime.h>
 
 #import "../shared/ALNTestSupport.h"
 #import "ArlenORM/ArlenORM.h"
+
+@interface ReservedRuntimePublicReservedModel : ALNORMModel
+@property(nonatomic, copy) NSString *stateValue3;
+@property(nonatomic, copy) NSString *descriptionValue;
+@property(nonatomic, copy) NSString *displayName;
+@end
 
 @interface ORMCodegenTests : XCTestCase
 @end
@@ -230,6 +238,155 @@
   XCTAssertEqualObjects(@"articles", [users.relations[0] name]);
   XCTAssertEqualObjects(@"has_many", [[users.relations[0] kindName] lowercaseString]);
   XCTAssertFalse([users.relations[0] isInferred]);
+}
+
+- (NSDictionary *)reservedMetadata {
+  NSError *error = nil;
+  NSDictionary *metadata = ALNTestJSONDictionaryAtRelativePath(@"tests/fixtures/phase26/orm_reserved_names.json", &error);
+  XCTAssertNil(error);
+  return metadata;
+}
+
+- (void)testReservedPropertyNamesAndOverrides {
+  NSDictionary *metadata = [self reservedMetadata];
+  NSError *error = nil;
+  NSArray *models = [ALNORMCodegen modelDescriptorsFromSchemaMetadata:metadata classPrefix:@"Reserved" error:&error];
+  XCTAssertNil(error);
+  ALNORMModelDescriptor *model = [models firstObject];
+  NSDictionary *expected = @{ @"State": @"stateValue3", @"Description": @"descriptionValue",
+      @"class": @"classValue", @"hash": @"hashValue", @"context": @"contextValue",
+      @"descriptor": @"descriptorValue", @"field_values": @"fieldValuesValue",
+      @"new": @"fieldNew", @"copy": @"fieldCopy", @"init": @"fieldInit" };
+  for (NSString *column in expected) {
+    ALNORMFieldDescriptor *field = [model fieldForColumnName:column];
+    XCTAssertEqualObjects(expected[column], field.propertyName);
+    XCTAssertEqualObjects(field, [model fieldForPropertyName:expected[column]]);
+  }
+  XCTAssertEqualObjects(@"state", [model fieldForColumnName:@"State"].name);
+  XCTAssertEqualObjects((@[@"state"]), [model relationNamed:@"target"].sourceFieldNames);
+  NSDictionary *overrides = @{ @"public.reserved": @{ @"property_names": @{ @"State": @"taxState" } } };
+  models = [ALNORMCodegen modelDescriptorsFromSchemaMetadata:metadata classPrefix:@"Reserved"
+      databaseTarget:nil descriptorOverrides:overrides error:&error];
+  XCTAssertNil(error);
+  XCTAssertEqualObjects(@"taxState", [[models firstObject] fieldForColumnName:@"State"].propertyName);
+  for (NSDictionary *mapping in @[ @{ @"State": @"state" }, @{ @"State": @"context" },
+      @{ @"State": @"stateValue" }, @{ @"State": @"newThing" }, @{ @"State": @"bad-name" },
+      @{ @"missing": @"safeName" }, @{ @"State": @"same", @"Description": @"Same" } ]) {
+    error = nil;
+    models = [ALNORMCodegen modelDescriptorsFromSchemaMetadata:metadata classPrefix:@"Reserved"
+        databaseTarget:nil descriptorOverrides:@{ @"public.reserved": @{ @"property_names": mapping } } error:&error];
+    XCTAssertNil(models);
+    XCTAssertNotNil(error);
+    XCTAssertEqualObjects(@"public.reserved", error.userInfo[@"entity_name"]);
+  }
+  NSMutableDictionary *reversed = [metadata mutableCopy];
+  reversed[@"columns"] = [metadata[@"columns"] reverseObjectEnumerator].allObjects;
+  XCTAssertEqualObjects([ALNORMCodegen renderArtifactsFromSchemaMetadata:metadata classPrefix:@"Reserved" error:NULL],
+                       [ALNORMCodegen renderArtifactsFromSchemaMetadata:reversed classPrefix:@"Reserved" error:NULL]);
+  NSMutableArray *columns = [metadata[@"columns"] mutableCopy];
+  [columns addObject:@{ @"schema": @"public", @"table": @"reserved", @"column": @"STATE", @"data_type": @"text" }];
+  reversed[@"columns"] = columns;
+  XCTAssertNil([ALNORMCodegen renderArtifactsFromSchemaMetadata:reversed classPrefix:@"Reserved" error:&error]);
+  XCTAssertNotNil(error);
+}
+
+- (void)testReservedContractCoversORMBaseAccessors {
+  unsigned int count = 0;
+  Method *methods = class_copyMethodList([ALNORMModel class], &count);
+  for (unsigned int index = 0; index < count; index++) {
+    NSString *selector = NSStringFromSelector(method_getName(methods[index]));
+    if ([selector hasPrefix:@"."]) continue;
+    NSString *property = selector;
+    if ([selector containsString:@":"]) {
+      if (![selector hasPrefix:@"set"] || ![selector hasSuffix:@":"] ||
+          [[selector componentsSeparatedByString:@":"] count] != 2) continue;
+      property = [selector substringWithRange:NSMakeRange(3, selector.length - 4)];
+      property = [NSString stringWithFormat:@"%@%@", [[property substringToIndex:1] lowercaseString],
+                                             [property substringFromIndex:1]];
+    }
+    NSError *error = nil;
+    NSDictionary *overrides = @{ @"public.reserved": @{ @"property_names": @{ @"State": property } } };
+    XCTAssertNil([ALNORMCodegen renderArtifactsFromSchemaMetadata:[self reservedMetadata]
+        classPrefix:@"Reserved" databaseTarget:nil descriptorOverrides:overrides error:&error], @"%@", selector);
+    XCTAssertNotNil(error, @"%@", selector);
+  }
+  free(methods);
+}
+
+- (void)testGeneratedHelperCollisionsAreRejected {
+  NSError *error = nil;
+  NSDictionary *overrides = @{ @"public.reserved": @{ @"relations": @[
+      @{ @"name": @"someTarget", @"kind": @"belongs_to", @"target_entity_name": @"public.targets" },
+      @{ @"name": @"sometarget", @"kind": @"belongs_to", @"target_entity_name": @"public.targets" }
+  ] } };
+  XCTAssertNil([ALNORMCodegen renderArtifactsFromSchemaMetadata:[self reservedMetadata]
+      classPrefix:@"Reserved" databaseTarget:nil descriptorOverrides:overrides error:&error]);
+  XCTAssertEqualObjects(@"relationSometarget", error.userInfo[@"selector"]);
+}
+
+- (void)testReservedGeneratedModelsCompileAndPreserveRuntimeBehavior {
+  NSError *error = nil;
+  NSDictionary *artifacts = [ALNORMCodegen renderArtifactsFromSchemaMetadata:[self reservedMetadata]
+      classPrefix:@"ReservedRuntime" error:&error];
+  XCTAssertNil(error);
+  XCTAssertNotNil(artifacts);
+  if (artifacts == nil) return;
+  NSString *tmp = ALNTestTemporaryDirectory(@"orm_reserved_runtime");
+  NSString *header = [tmp stringByAppendingPathComponent:@"ReservedRuntimeGeneratedModels.h"];
+  NSString *implementation = [tmp stringByAppendingPathComponent:@"ReservedRuntimeGeneratedModels.m"];
+  NSString *library = [tmp stringByAppendingPathComponent:@"reserved.so"];
+  XCTAssertTrue(ALNTestWriteUTF8File(header, artifacts[@"header"], &error));
+  XCTAssertTrue(ALNTestWriteUTF8File(implementation, artifacts[@"implementation"], &error));
+  NSString *root = ALNTestRepoRoot();
+  NSString *flags = [self syntaxOnlyIncludeFlagsWithRepoRoot:root temporaryDir:tmp];
+#if defined(__APPLE__)
+  NSString *compiler = @"xcrun clang -fobjc-arc -bundle -undefined dynamic_lookup";
+#else
+  NSString *compiler = [NSString stringWithFormat:@"%@ && clang $(gnustep-config --objc-flags) -fobjc-arc -shared -fPIC", ALNTestGNUstepSourceCommandForRepoRoot(root)];
+#endif
+  NSString *command = [NSString stringWithFormat:@"cd %@ && %@ -Werror=incompatible-property-type -Werror=property-attribute-mismatch -Werror=nullability -Wno-nullability-completeness %@ %@ -o %@",
+      ALNTestShellQuote(tmp), compiler, flags, ALNTestShellQuote(implementation), ALNTestShellQuote(library)];
+  int exitCode = 0;
+  NSString *output = ALNTestRunShellCapture(command, &exitCode);
+  XCTAssertEqual(0, exitCode, @"%@", output);
+  if (exitCode != 0) return;
+  // Objective-C classes remain registered for the test process lifetime.
+  NSString *testBinary = [[NSBundle bundleForClass:[self class]] executablePath];
+  void *testHandle = dlopen([testBinary fileSystemRepresentation], RTLD_NOW | RTLD_GLOBAL);
+  XCTAssertTrue(testHandle != NULL);
+  void *handle = dlopen([library fileSystemRepresentation], RTLD_NOW | RTLD_GLOBAL);
+  XCTAssertTrue(handle != NULL, @"%s", dlerror());
+  if (handle == NULL) return;
+  Class cls = NSClassFromString(@"ReservedRuntimePublicReservedModel");
+  XCTAssertTrue([cls isSubclassOfClass:[ALNORMModel class]]);
+  ReservedRuntimePublicReservedModel *model = [cls modelFromRow:@{ @"id": @"1", @"State": @"Ohio", @"Description": @"Example" } error:&error];
+  XCTAssertNotNil(model);
+  XCTAssertNil(error);
+  XCTAssertEqual(ALNORMModelStateLoaded, model.state);
+  XCTAssertEqualObjects(@"Ohio", model.stateValue3);
+  XCTAssertEqualObjects(@"Example", model.descriptionValue);
+  XCTAssertEqualObjects(@"Ohio", [model objectForColumnName:@"State"]);
+  XCTAssertEqualObjects(@"Ohio", [model objectForFieldName:@"state"]);
+  XCTAssertNotNil(model.descriptor);
+  XCTAssertNil(model.context);
+  model.stateValue3 = @"Maine";
+  model.displayName = @"Display";
+  XCTAssertEqual(ALNORMModelStateDirty, model.state);
+  XCTAssertTrue([model.dirtyFieldNames containsObject:@"state"]);
+  XCTAssertEqualObjects(@"Maine", [model objectForColumnName:@"State"]);
+  XCTAssertEqualObjects(@"Display", [model objectForColumnName:@"display_name"]);
+  [model markClean];
+  XCTAssertEqual(ALNORMModelStateLoaded, model.state);
+  XCTAssertEqual((NSUInteger)0, model.dirtyFieldNames.count);
+  ALNORMModel *target = [NSClassFromString(@"ReservedRuntimePublicTargetsModel") modelFromRow:@{ @"id": @"Maine" } error:&error];
+  XCTAssertTrue([model markRelationLoaded:@"target" value:target pivotRows:nil error:&error]);
+  XCTAssertNil(error);
+  XCTAssertTrue([model isRelationLoaded:@"target"]);
+  XCTAssertEqualObjects(target, [model relationObjectForName:@"target"]);
+  XCTAssertEqualObjects(@"Maine", model.stateValue3);
+  XCTAssertEqual(ALNORMModelStateLoaded, model.state);
+  [model markDetached];
+  XCTAssertEqual(ALNORMModelStateDetached, model.state);
 }
 
 - (void)testGeneratedArtifactsCompileSyntaxOnly {

@@ -98,6 +98,40 @@ default in generated models. Historical SQL descriptor snapshots are serialized
 through `ALNORMDescriptorSnapshot`, and `ALNORMSchemaDrift` fails closed when
 current descriptors diverge from a checked-in history contract.
 
+### SQL property names
+
+SQL codegen reserves ORM lifecycle/runtime names, standard NSObject names,
+Objective-C method families and language keywords. Conflicting properties get a
+`Value` suffix (`State` → `stateValue`, `Description` → `descriptionValue`).
+Names that would remain in an ARC method family use a `field` prefix instead
+(`new` → `fieldNew`). Existing field/column names and explicit aliases are reserved
+before allocation; a collision adds a suffix starting at `2`. For example, with
+`State` and `state_value`, the former becomes `stateValue2`. Allocation is stable
+when schema metadata input order is reversed.
+
+Only `propertyName` changes: `State` still has logical field name `state` and SQL
+column name `State`. Queries, relationship keys and column/field lookup retain
+those names. `objectForPropertyName:` and generated accessors use the alias.
+The manifest records all three names. Case-folded logical field collisions are
+rejected, as are duplicate generated helper selectors.
+
+For a stable application-specific API, pass an entity override to the existing
+`descriptorOverrides:` codegen methods:
+
+```objc
+@{ @"public.tax_rates": @{
+    @"property_names": @{ @"State": @"taxState" }
+} }
+```
+
+Keys inside `property_names` are exact SQL column names. Unknown columns,
+reserved/invalid aliases and aliases overlapping another field, column or
+property produce an error identifying the entity and offending mapping.
+The reserved-name contract is fixed rather than discovered from host categories;
+applications adding methods to generated models must choose nonconflicting names.
+See [migration notes](ARLEN_ORM_MIGRATIONS.md#generated-property-naming-update)
+before regenerating existing models.
+
 Phase `28A-28D` adds a first consumer-contract bridge for React / TypeScript
 apps without making TypeScript the canonical ORM source. `ALNORMTypeScriptCodegen`
 consumes:

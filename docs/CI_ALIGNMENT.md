@@ -243,3 +243,12 @@ test-unit-filter TEST=MetadataTransportTests` after sourcing
 `tools/source_gnustep_env.sh`. This additionally exercises the production default
 OAuth loader and signing-key preflight on both threads against discovery and JWKS;
 it is opt-in because public provider availability is not a deterministic CI gate.
+
+## Generated ORM property coverage
+
+The existing `linux-quality / quality-gate` job explicitly runs
+`make phase26-orm-generated`, including reserved-name fixtures, generated-code
+compilation with incompatible-property/nullability warnings as errors, and typed
+accessor, lifecycle, dirty-tracking and relationship-state regressions. This adds
+coverage within the existing required job; branch-protection check names do not
+change.

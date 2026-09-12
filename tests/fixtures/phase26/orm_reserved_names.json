@@ -1,0 +1,169 @@
+{
+  "relations": [
+    {
+      "schema": "public",
+      "table": "reserved",
+      "relation_kind": "table"
+    },
+    {
+      "schema": "public",
+      "table": "targets",
+      "relation_kind": "table"
+    }
+  ],
+  "columns": [
+    {
+      "schema": "public",
+      "table": "reserved",
+      "column": "id",
+      "ordinal": 1,
+      "data_type": "text",
+      "nullable": true
+    },
+    {
+      "schema": "public",
+      "table": "reserved",
+      "column": "State",
+      "ordinal": 2,
+      "data_type": "text",
+      "nullable": true
+    },
+    {
+      "schema": "public",
+      "table": "reserved",
+      "column": "Description",
+      "ordinal": 3,
+      "data_type": "text",
+      "nullable": true
+    },
+    {
+      "schema": "public",
+      "table": "reserved",
+      "column": "class",
+      "ordinal": 4,
+      "data_type": "text",
+      "nullable": true
+    },
+    {
+      "schema": "public",
+      "table": "reserved",
+      "column": "hash",
+      "ordinal": 5,
+      "data_type": "text",
+      "nullable": true
+    },
+    {
+      "schema": "public",
+      "table": "reserved",
+      "column": "context",
+      "ordinal": 6,
+      "data_type": "text",
+      "nullable": true
+    },
+    {
+      "schema": "public",
+      "table": "reserved",
+      "column": "descriptor",
+      "ordinal": 7,
+      "data_type": "text",
+      "nullable": true
+    },
+    {
+      "schema": "public",
+      "table": "reserved",
+      "column": "state_value",
+      "ordinal": 8,
+      "data_type": "text",
+      "nullable": true
+    },
+    {
+      "schema": "public",
+      "table": "reserved",
+      "column": "state_value2",
+      "ordinal": 9,
+      "data_type": "text",
+      "nullable": true
+    },
+    {
+      "schema": "public",
+      "table": "reserved",
+      "column": "field_values",
+      "ordinal": 10,
+      "data_type": "text",
+      "nullable": true
+    },
+    {
+      "schema": "public",
+      "table": "reserved",
+      "column": "new",
+      "ordinal": 11,
+      "data_type": "text",
+      "nullable": true
+    },
+    {
+      "schema": "public",
+      "table": "reserved",
+      "column": "copy",
+      "ordinal": 12,
+      "data_type": "text",
+      "nullable": true
+    },
+    {
+      "schema": "public",
+      "table": "reserved",
+      "column": "init",
+      "ordinal": 13,
+      "data_type": "text",
+      "nullable": true
+    },
+    {
+      "schema": "public",
+      "table": "reserved",
+      "column": "display_name",
+      "ordinal": 14,
+      "data_type": "text",
+      "nullable": true
+    },
+    {
+      "schema": "public",
+      "table": "reserved",
+      "column": "observationInfo",
+      "ordinal": 15,
+      "data_type": "text",
+      "nullable": true
+    },
+    {
+      "schema": "public",
+      "table": "targets",
+      "column": "id",
+      "ordinal": 1,
+      "data_type": "text",
+      "nullable": false,
+      "primary_key": true
+    }
+  ],
+  "primary_keys": [
+    {
+      "schema": "public",
+      "table": "targets",
+      "columns": [
+        "id"
+      ]
+    }
+  ],
+  "foreign_keys": [
+    {
+      "schema": "public",
+      "table": "reserved",
+      "constraint_name": "reserved_state_fkey",
+      "columns": [
+        "State"
+      ],
+      "referenced_schema": "public",
+      "referenced_table": "targets",
+      "referenced_columns": [
+        "id"
+      ]
+    }
+  ]
+}

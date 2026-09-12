@@ -13,6 +13,10 @@ If you prefer a narrower path, see:
 - `docs/GETTING_STARTED_HTML_FIRST.md`
 - `docs/GETTING_STARTED_DATA_LAYER.md`
 
+For SQL ORM models, see the [ORM guide](ARLEN_ORM.md#sql-property-names).
+Generated properties may use safe aliases for columns such as `State`; use the
+manifest property names or `objectForColumnName:` with the original SQL name.
+
 ## 1. Prerequisites
 
 - a clang-built GNUstep toolchain

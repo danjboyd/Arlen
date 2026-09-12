@@ -691,3 +691,11 @@ Arlen can claim Phase 26 complete only if:
 - PDOM metadata import tooling.
 - Full inheritance/polymorphic-association productization in ORM v1.
 - Pretending Dataverse is a SQL adapter or a second SQL dialect.
+
+## Post-completion codegen correction (2026-09-12)
+
+SQL codegen now allocates reserved property aliases, accepts exact-column
+`property_names` overrides, rejects field/helper collisions and preserves setter
+capitalization. The generated confidence target includes strict compilation and
+a loaded generated-model runtime regression. See `docs/ARLEN_ORM.md` and
+`docs/ARLEN_ORM_MIGRATIONS.md` for the updated contract and regeneration procedure.

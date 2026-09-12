@@ -535,6 +535,11 @@ Generated artifacts:
 - `<output-dir>/<prefix>Schema.m`
 - `<manifest>`
 
+SQL ORM model generation through `ALNORMCodegen` has a separate
+[property naming contract](ARLEN_ORM.md#sql-property-names): reserved properties
+are aliased, and API callers can pass `property_names` descriptor overrides.
+These are library options, not additional `schema-codegen` CLI flags.
+
 ### `arlen dataverse-codegen [--input <metadata.json>] [--env <name>] [--target <name>] [--service-root <url>] [--tenant-id <id>] [--client-id <id>] [--client-secret <secret>] [--entity <logical_name>] [--output-dir <path>] [--manifest <path>] [--prefix <ClassPrefix>] [--force]`
 
 Fetch Dataverse metadata or normalize a saved metadata fixture and generate typed Dataverse helper APIs.
