@@ -538,7 +538,12 @@ Generated artifacts:
 SQL ORM model generation through `ALNORMCodegen` has a separate
 [property naming contract](ARLEN_ORM.md#sql-property-names): reserved properties
 are aliased, and API callers can pass `property_names` descriptor overrides.
-These are library options, not additional `schema-codegen` CLI flags.
+Quoted physical SQL names are preserved by ORM codegen and persistence. Use
+`field_names` to resolve logical-name normalization collisions and
+`property_names` for accessor aliases; see
+[quoted identifiers](ARLEN_ORM.md#quoted-sql-identifiers).
+These are library options, not additional `schema-codegen` CLI flags. The
+separate typed-schema generator retains its existing identifier restrictions.
 
 ### `arlen dataverse-codegen [--input <metadata.json>] [--env <name>] [--target <name>] [--service-root <url>] [--tenant-id <id>] [--client-id <id>] [--client-secret <secret>] [--entity <logical_name>] [--output-dir <path>] [--manifest <path>] [--prefix <ClassPrefix>] [--force]`
 

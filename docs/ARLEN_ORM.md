@@ -132,6 +132,53 @@ applications adding methods to generated models must choose nonconflicting names
 See [migration notes](ARLEN_ORM_MIGRATIONS.md#generated-property-naming-update)
 before regenerating existing models.
 
+### Quoted SQL identifiers
+
+SQL ORM descriptors preserve physical schema, table, and column names exactly,
+including case, spaces, punctuation, embedded quotes, and leading/trailing
+whitespace. Supply the original name as metadata (`Target ID`), without adding
+SQL quote delimiters. Empty names and names containing NUL are rejected.
+Generated properties use deterministic ASCII aliases: `Target ID` becomes
+`targetId`, `Unit/Well Notes` becomes `unitWellNotes`, and `State` retains its
+reserved-name alias `stateValue`. Existing ordinary names keep their generated APIs.
+
+`property_names` changes only the Objective-C property. If distinct SQL columns
+normalize to the same logical field (for example `Unit Name` and `Unit_Name`),
+codegen fails with `ALNORMErrorIdentifierCollision`. Resolve that ambiguity with
+an exact-column `field_names` override; schema renames are unnecessary:
+
+```objc
+@{ @"ot.CompulsoryUnitProjects": @{
+    @"field_names": @{ @"Unit_Name": @"alternateUnitName" },
+    @"property_names": @{ @"Target ID": @"legacyId" }
+} }
+```
+
+`field_names` sets the logical query/relationship field and its default property;
+`property_names` can then provide a separate nonreserved accessor. Both mappings
+must use known exact SQL column keys and valid, unambiguous aliases. Primary and
+foreign keys reflected from physical metadata resolve to the resulting logical
+fields. Explicit relation overrides should use those logical field names.
+
+The ORM encodes each physical component before passing it to the SQL builder.
+The builder parses qualified identifier paths into components and quotes each
+component for the selected dialect, doubling embedded delimiters. A literal dot
+inside a name remains part of that name. Descriptor `schemaName`, `tableName`,
+and `columnName` retain raw names; `entityName` and `qualifiedTableName` encode
+components requiring quotes, e.g. `legacy."Project.Table"`. Use this encoded
+entity name as the descriptor override key. Ordinary entity keys are unchanged.
+
+These names are trusted schema/descriptor data. Resolve request-selected fields
+through model descriptors or an application allowlist; do not build physical
+identifiers from arbitrary request input. Identifier APIs never evaluate names
+as SQL expressions. Values remain bound parameters. Existing explicit trusted
+expression APIs retain their trust contract.
+
+PostgreSQL coverage includes insert/generated-key hydration, find, query,
+changeset update, reload, delete, upsert, composite keys, and joined relations.
+MSSQL identifier/OUTPUT compilation is regression-tested; live quoted-name
+persistence qualification in this change is PostgreSQL-only.
+
 Phase `28A-28D` adds a first consumer-contract bridge for React / TypeScript
 apps without making TypeScript the canonical ORM source. `ALNORMTypeScriptCodegen`
 consumes:

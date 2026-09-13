@@ -1,6 +1,6 @@
 # CI Alignment
 
-Last updated: 2026-04-24
+Last updated: 2026-09-13
 
 This document defines the intended shape of Arlen CI so workflow names,
 required checks, and actual project contracts stay aligned.
@@ -252,3 +252,20 @@ compilation with incompatible-property/nullability warnings as errors, and typed
 accessor, lifecycle, dirty-tracking and relationship-state regressions. This adds
 coverage within the existing required job; branch-protection check names do not
 change.
+
+## Quoted ORM identifier persistence coverage
+
+The existing `linux-quality / quality-gate` job runs
+`bash tools/ci/run_orm_identifier_regressions.sh`. It starts a private temporary
+PostgreSQL cluster, runs `phase26-orm-generated`, `phase26-orm-unit`, and
+`phase20-sql-builder-tests`, then removes the cluster. Live PostgreSQL tests
+cannot skip for missing credentials in this step. Persistence tests use
+disposable schemas and the quoted-name test rolls back its writes.
+
+The Linux quality runner requires PostgreSQL server binaries (`initdb`,
+`pg_ctl`) in `pg_config --bindir`, or `ARLEN_TEST_PG_BIN`. Apt provisioning
+installs `postgresql`; preinstalled/bootstrap runners must provide it. The
+clang GNUstep toolchain remains at `/usr/GNUstep`. Contributors can run the same
+script as a non-root user; it requires local Unix socket access, no production
+credentials, and no TCP listener. This extends coverage within the existing
+job. Keep the current branch-protection checks unchanged: no new lane is added.

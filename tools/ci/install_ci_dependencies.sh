@@ -90,6 +90,7 @@ install_apt_toolchain() {
     jq \
     make \
     pandoc \
+    postgresql \
     python3 \
     gnustep-clang-tools-xctest \
     gnustep-clang-make \

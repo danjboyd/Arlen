@@ -1,21 +1,16 @@
 #import "ALNPostgresSQLBuilder.h"
+#import "ALNSQLLexical.h"
+
+@interface ALNSQLBuilder (ALNPostgresBaseCompile)
+- (nullable NSDictionary *)aln_buildDefaultDialect:(NSError **)error;
+@end
 
 static BOOL ALNPostgresSQLBuilderIdentifierIsSafe(NSString *value) {
-  if (![value isKindOfClass:[NSString class]] || [value length] == 0) {
-    return NO;
-  }
-  NSCharacterSet *allowed =
-      [NSCharacterSet characterSetWithCharactersInString:@"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_"];
-  if ([[value stringByTrimmingCharactersInSet:allowed] length] > 0) {
-    return NO;
-  }
-  unichar first = [value characterAtIndex:0];
-  BOOL validStart = [[NSCharacterSet letterCharacterSet] characterIsMember:first] || first == '_';
-  return validStart;
+  return [ALNSQLDialectIdentifierComponents(value) count] == 1;
 }
 
 static NSString *ALNPostgresSQLBuilderQuoteIdentifier(NSString *value) {
-  return [NSString stringWithFormat:@"\"%@\"", value ?: @""];
+  return ALNSQLDialectDoubleQuoteIdentifier([ALNSQLDialectIdentifierComponents(value) firstObject]);
 }
 
 static NSString *ALNPostgresSQLBuilderTrimmedString(NSString *value) {
@@ -39,7 +34,7 @@ static NSString *ALNPostgresSQLBuilderShiftPlaceholders(NSString *sql, NSUIntege
     return sql;
   }
 
-  NSArray *matches = [regex matchesInString:sql options:0 range:NSMakeRange(0, [sql length])];
+  NSArray *matches = [regex matchesInString:ALNSQLMaskQuotedText(sql, NO) options:0 range:NSMakeRange(0, [sql length])];
   if ([matches count] == 0) {
     return sql;
   }
@@ -333,8 +328,9 @@ typedef NS_ENUM(NSInteger, ALNPostgresSQLBuilderConflictMode) {
   return clause;
 }
 
-- (NSDictionary *)build:(NSError **)error {
-  NSDictionary *base = [super build:error];
+// Both plain build and dialect-directed compilation must retain ON CONFLICT.
+- (NSDictionary *)aln_buildDefaultDialect:(NSError **)error {
+  NSDictionary *base = [super aln_buildDefaultDialect:error];
   if (base == nil) {
     return nil;
   }
@@ -351,7 +347,7 @@ typedef NS_ENUM(NSInteger, ALNPostgresSQLBuilderConflictMode) {
     return base;
   }
 
-  NSRange returningRange = [sql rangeOfString:@" RETURNING " options:NSBackwardsSearch];
+  NSRange returningRange = [ALNSQLMaskQuotedText(sql, NO) rangeOfString:@" RETURNING " options:NSBackwardsSearch];
   NSString *rewritten = nil;
   if (returningRange.location != NSNotFound) {
     NSString *prefix = [sql substringToIndex:returningRange.location];

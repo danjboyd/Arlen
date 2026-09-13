@@ -389,9 +389,69 @@
   XCTAssertEqual(ALNORMModelStateDetached, model.state);
 }
 
-- (void)testGeneratedArtifactsCompileSyntaxOnly {
+- (void)testQuotedPhysicalNamesAndAliasCollisions {
   NSError *error = nil;
-  NSDictionary *artifacts = [ALNORMCodegen renderArtifactsFromSchemaMetadata:[self fixtureMetadata]
+  NSDictionary *metadata = ALNTestJSONDictionaryAtRelativePath(@"tests/fixtures/phase26/orm_quoted_identifiers.json", &error);
+  NSArray *models = [ALNORMCodegen modelDescriptorsFromSchemaMetadata:metadata classPrefix:@"Quoted" error:&error];
+  XCTAssertNil(error);
+  ALNORMModelDescriptor *model = [models firstObject];
+  XCTAssertEqualObjects(@"targetId", [model fieldForColumnName:@"Target ID"].propertyName);
+  XCTAssertEqualObjects(@"stateValue", [model fieldForColumnName:@"State"].propertyName);
+  XCTAssertEqualObjects(@"unitWellNotes", [model fieldForColumnName:@"Unit/Well Notes"].propertyName);
+  XCTAssertEqualObjects(@" leading ", [model fieldForPropertyName:@"leading"].columnName);
+  NSMutableDictionary *reversed = [metadata mutableCopy];
+  reversed[@"columns"] = [metadata[@"columns"] reverseObjectEnumerator].allObjects;
+  XCTAssertEqualObjects([ALNORMCodegen renderArtifactsFromSchemaMetadata:metadata classPrefix:@"Quoted" error:NULL],
+                       [ALNORMCodegen renderArtifactsFromSchemaMetadata:reversed classPrefix:@"Quoted" error:NULL]);
+  NSMutableArray *columns = [metadata[@"columns"] mutableCopy];
+  [columns addObject:@{ @"schema": @"ot", @"table": @"CompulsoryUnitProjects", @"column": @"Unit_Name", @"data_type": @"text" }];
+  reversed[@"columns"] = columns;
+  XCTAssertNil([ALNORMCodegen modelDescriptorsFromSchemaMetadata:reversed classPrefix:@"Quoted" error:&error]);
+  XCTAssertEqual(ALNORMErrorIdentifierCollision, error.code);
+  error = nil;
+  models = [ALNORMCodegen modelDescriptorsFromSchemaMetadata:reversed classPrefix:@"Quoted" databaseTarget:nil
+      descriptorOverrides:@{ @"ot.CompulsoryUnitProjects": @{
+          @"field_names": @{ @"Unit_Name": @"alternateUnitName" },
+          @"property_names": @{ @"Target ID": @"legacyId" } } } error:&error];
+  XCTAssertNil(error);
+  model = [models firstObject];
+  XCTAssertEqualObjects(@"Target ID", [model fieldForPropertyName:@"legacyId"].columnName);
+  XCTAssertEqualObjects(@"Unit_Name", [model fieldNamed:@"alternateUnitName"].columnName);
+  unichar nul = 0;
+  NSMutableDictionary *badColumn = [columns[0] mutableCopy];
+  badColumn[@"column"] = [NSString stringWithCharacters:&nul length:1];
+  reversed[@"columns"] = @[ badColumn ];
+  XCTAssertNil([ALNORMCodegen modelDescriptorsFromSchemaMetadata:reversed classPrefix:@"Quoted" error:&error]);
+}
+
+- (void)testQuotedGeneratedArtifactsCompileSyntaxOnly {
+  [self assertGeneratedArtifactsCompile:[ALNTestJSONDictionaryAtRelativePath(@"tests/fixtures/phase26/orm_quoted_identifiers.json", NULL) copy]];
+}
+
+- (void)testQuotedSchemaAndTableNamesCompile {
+  NSMutableDictionary *metadata = [[self reservedMetadata] mutableCopy];
+  for (NSString *collection in @[@"relations", @"columns", @"primary_keys", @"unique_constraints", @"foreign_keys"]) {
+    NSMutableArray *rows = [NSMutableArray array];
+    for (NSDictionary *raw in metadata[collection] ?: @[]) {
+      NSMutableDictionary *row = [raw mutableCopy];
+      row[@"schema"] = @"Legacy.Schema";
+      row[@"table"] = [row[@"table"] stringByAppendingString:@" \"Table\""];
+      if (row[@"referenced_schema"]) row[@"referenced_schema"] = @"Legacy.Schema";
+      if (row[@"referenced_table"]) row[@"referenced_table"] = [row[@"referenced_table"] stringByAppendingString:@" \"Table\""];
+      [rows addObject:row];
+    }
+    metadata[collection] = rows;
+  }
+  [self assertGeneratedArtifactsCompile:metadata];
+}
+
+- (void)testGeneratedArtifactsCompileSyntaxOnly {
+  [self assertGeneratedArtifactsCompile:[self fixtureMetadata]];
+}
+
+- (void)assertGeneratedArtifactsCompile:(NSDictionary *)metadata {
+  NSError *error = nil;
+  NSDictionary *artifacts = [ALNORMCodegen renderArtifactsFromSchemaMetadata:metadata
                                                                  classPrefix:@"ALNORMX"
                                                                        error:&error];
   XCTAssertNil(error);
@@ -428,7 +488,7 @@
        "cd %@ && "
        "%@ && "
        "LD_PRELOAD='' XCTEST_LD_PRELOAD='' ASAN_OPTIONS='' UBSAN_OPTIONS='' EXTRA_OBJC_FLAGS='' "
-       "clang $(gnustep-config --objc-flags) %@ -fsyntax-only "
+       "clang $(gnustep-config --objc-flags) %@ -Werror=incompatible-property-type -Werror=property-attribute-mismatch -Werror=nullability -fsyntax-only "
        "%@ $(find modules -mindepth 2 -maxdepth 2 -type d -name Sources -printf ' -I%%p') %@",
       ALNTestShellQuote(repoRoot),
       ALNTestGNUstepSourceCommandForRepoRoot(repoRoot),
@@ -494,7 +554,7 @@
          "cd %@ && "
          "%@ && "
          "LD_PRELOAD='' XCTEST_LD_PRELOAD='' ASAN_OPTIONS='' UBSAN_OPTIONS='' EXTRA_OBJC_FLAGS='' "
-         "clang $(gnustep-config --objc-flags) %@ -fsyntax-only "
+         "clang $(gnustep-config --objc-flags) %@ -Werror=incompatible-property-type -Werror=property-attribute-mismatch -Werror=nullability -fsyntax-only "
          "%@ $(find modules -mindepth 2 -maxdepth 2 -type d -name Sources -printf ' -I%%p') %@",
         ALNTestShellQuote(repoRoot),
         ALNTestGNUstepSourceCommandForRepoRoot(repoRoot),

@@ -1,4 +1,5 @@
 #import "ALNSQLBuilder.h"
+#import "ALNSQLLexical.h"
 
 NSString *const ALNSQLBuilderErrorDomain = @"Arlen.Data.SQLBuilder.Error";
 
@@ -57,26 +58,7 @@ static NSString *ALNSQLBuilderNormalizeNullsDirective(NSString *value) {
 }
 
 static BOOL ALNSQLBuilderIdentifierIsSafe(NSString *value) {
-  if (![value isKindOfClass:[NSString class]] || [value length] == 0) {
-    return NO;
-  }
-  NSCharacterSet *allowed =
-      [NSCharacterSet characterSetWithCharactersInString:@"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_."];
-  if ([[value stringByTrimmingCharactersInSet:allowed] length] > 0) {
-    return NO;
-  }
-  NSArray *parts = [value componentsSeparatedByString:@"."];
-  for (NSString *part in parts) {
-    if ([part length] == 0) {
-      return NO;
-    }
-    unichar first = [part characterAtIndex:0];
-    BOOL validStart = [[NSCharacterSet letterCharacterSet] characterIsMember:first] || first == '_';
-    if (!validStart) {
-      return NO;
-    }
-  }
-  return YES;
+  return ALNSQLDialectIdentifierComponents(value) != nil;
 }
 
 static BOOL ALNSQLBuilderAliasIsSafe(NSString *value) {
@@ -94,10 +76,10 @@ static BOOL ALNSQLBuilderAliasIsSafe(NSString *value) {
 }
 
 static NSString *ALNSQLBuilderQuoteIdentifier(NSString *value) {
-  NSArray *parts = [value componentsSeparatedByString:@"."];
+  NSArray *parts = ALNSQLDialectIdentifierComponents(value);
   NSMutableArray *quoted = [NSMutableArray arrayWithCapacity:[parts count]];
   for (NSString *part in parts) {
-    [quoted addObject:[NSString stringWithFormat:@"\"%@\"", part]];
+    [quoted addObject:ALNSQLDialectDoubleQuoteIdentifier(part)];
   }
   return [quoted componentsJoinedByString:@"."];
 }
@@ -163,7 +145,7 @@ static NSString *ALNSQLBuilderShiftPlaceholders(NSString *sql, NSUInteger offset
     return sql;
   }
 
-  NSArray *matches = [regex matchesInString:sql options:0 range:NSMakeRange(0, [sql length])];
+  NSArray *matches = [regex matchesInString:ALNSQLMaskQuotedText(sql, NO) options:0 range:NSMakeRange(0, [sql length])];
   if ([matches count] == 0) {
     return sql;
   }
@@ -1359,7 +1341,7 @@ static NSSet *ALNSQLBuilderAllowedJoinOperators(void) {
   }
   NSRegularExpression *placeholderRegex = ALNSQLBuilderPlaceholderRegex();
   NSArray *placeholderMatches =
-      [placeholderRegex matchesInString:resolvedExpression
+      [placeholderRegex matchesInString:ALNSQLMaskQuotedText(resolvedExpression, NO)
                                 options:0
                                   range:NSMakeRange(0, [resolvedExpression length])];
   if ([placeholderMatches count] == 0 && [expressionParameters count] > 0) {
@@ -2175,7 +2157,7 @@ static NSSet *ALNSQLBuilderAllowedJoinOperators(void) {
       NSMutableArray *quotedFields = [NSMutableArray arrayWithCapacity:[rawFields count]];
       for (id rawField in rawFields) {
         NSString *field = [rawField isKindOfClass:[NSString class]] ? rawField : @"";
-        if (!ALNSQLBuilderAliasIsSafe(field)) {
+        if ([ALNSQLDialectIdentifierComponents(field) count] != 1) {
           if (error != NULL) {
             *error = ALNSQLBuilderMakeError(ALNSQLBuilderErrorInvalidIdentifier,
                                             @"invalid USING join field",

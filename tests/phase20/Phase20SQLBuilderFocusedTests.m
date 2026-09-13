@@ -4,6 +4,8 @@
 #import "../shared/ALNDataTestAssertions.h"
 #import "ALNMSSQLDialect.h"
 #import "ALNSQLBuilder.h"
+#import "ALNPostgresSQLBuilder.h"
+#import "ALNPostgresDialect.h"
 
 @interface Phase20SQLBuilderFocusedTests : XCTestCase
 @end
@@ -85,6 +87,68 @@
   built = [nestedBuilder buildWithDialect:[ALNMSSQLDialect sharedDialect] error:&error];
   XCTAssertNil(built);
   ALNAssertErrorDetails(error, ALNSQLBuilderErrorDomain, NSNotFound, @"ILIKE");
+}
+
+
+
+- (void)testQuotedIdentifierComponentsStayDataAcrossDialects {
+  NSArray *components = @[ @"Target ID", @"Unit/Well Notes", @"Dot.Name", @"a\"b]c", @"Cost $1", @" leading ", @"x\"; DROP TABLE victims; --" ];
+  for (NSString *physical in components) {
+    NSString *encoded = ALNSQLDialectIdentifierComponent(physical);
+    XCTAssertEqualObjects((@[physical]), ALNSQLDialectIdentifierComponents(encoded));
+    ALNSQLBuilder *builder = [ALNSQLBuilder selectFrom:@"ot.\"Project.Table\"" columns:@[encoded]];
+    [builder whereField:encoded equals:@"bound"];
+    NSError *error = nil;
+    NSDictionary *plan = [builder build:&error];
+    XCTAssertNil(error);
+    XCTAssertTrue([plan[@"sql"] containsString:ALNSQLDialectDoubleQuoteIdentifier(physical)]);
+    XCTAssertEqualObjects((@[@"bound"]), plan[@"parameters"]);
+    plan = [[ALNMSSQLDialect sharedDialect] compileBuilder:builder error:&error];
+    XCTAssertNil(error);
+    XCTAssertTrue([plan[@"sql"] containsString:ALNSQLDialectBracketQuoteIdentifier(physical)]);
+    XCTAssertTrue([plan[@"sql"] hasSuffix:@" = ?"]);
+    ALNSQLBuilder *write = [ALNSQLBuilder insertInto:@"t" values:@{encoded: @"value"}];
+    [write returningField:encoded];
+    plan = [write buildWithDialect:[ALNMSSQLDialect sharedDialect] error:&error];
+    XCTAssertNil(error, @"%@ (%@)", error, physical);
+    XCTAssertEqualObjects(([NSString stringWithFormat:@"INSERT INTO [t] (%@) OUTPUT INSERTED.%@ VALUES (?)",
+        ALNSQLDialectBracketQuoteIdentifier(physical), ALNSQLDialectBracketQuoteIdentifier(physical)]), plan[@"sql"]);
+  }
+  for (NSString *invalid in @[ @"Target ID", @"a; DROP TABLE t", @"lower(a)", @"a..b", @"a.", @"\"a\" trailing", @"\"unterminated", @"\"\"" ]) {
+    XCTAssertNil(ALNSQLDialectIdentifierComponents(invalid));
+    NSError *error = nil;
+    XCTAssertNil([[ALNSQLBuilder selectFrom:@"t" columns:@[invalid]] build:&error]);
+    XCTAssertNotNil(error);
+  }
+  NSString *cost = ALNSQLDialectIdentifierComponent(@"Cost $1");
+  ALNSQLBuilder *sub = [ALNSQLBuilder selectFrom:@"t" columns:@[cost]];
+  [sub whereField:cost equals:@2];
+  ALNSQLBuilder *outer = [ALNSQLBuilder selectFrom:@"t" columns:@[@"id"]];
+  [outer whereField:@"id" equals:@1];
+  [outer whereField:@"id" inSubquery:sub];
+  NSError *error = nil;
+  NSDictionary *plan = [outer build:&error];
+  XCTAssertNil(error);
+  XCTAssertTrue([plan[@"sql"] containsString:@"\"Cost $1\" = $2"]);
+  [outer selectExpression:@"{{cost}}" alias:@"cost" identifierBindings:@{@"cost": cost} parameters:nil];
+  XCTAssertNotNil([outer build:&error]);
+  XCTAssertNil(error);
+}
+
+- (void)testQuotedUpsertRetainsConflictClauseWithExplicitPostgresDialect {
+  NSString *pk = ALNSQLDialectIdentifierComponent(@"Target ID");
+  NSString *name = ALNSQLDialectIdentifierComponent(@"Name RETURNING $1");
+  ALNPostgresSQLBuilder *builder = [ALNPostgresSQLBuilder insertInto:@"t" values:@{pk: @1, name: @"new"}];
+  [builder onConflictColumns:@[pk] doUpdateSetFields:@[name]];
+  [builder returningField:pk];
+  NSError *error = nil;
+  NSDictionary *plain = [builder build:&error];
+  XCTAssertNil(error);
+  NSDictionary *explicit = [builder buildWithDialect:[ALNPostgresDialect sharedDialect] error:&error];
+  XCTAssertNil(error);
+  XCTAssertEqualObjects(plain, explicit);
+  XCTAssertTrue([explicit[@"sql"] containsString:@" ON CONFLICT (\"Target ID\") DO UPDATE SET "]);
+  XCTAssertTrue([explicit[@"sql"] hasSuffix:@" RETURNING \"Target ID\""]);
 }
 
 @end

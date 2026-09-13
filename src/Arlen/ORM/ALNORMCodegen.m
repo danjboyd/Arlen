@@ -3,6 +3,7 @@
 #import <dispatch/dispatch.h>
 
 #import "ALNORMErrors.h"
+#import "ALNSQLDialect.h"
 
 typedef NS_ENUM(NSInteger, ALNORMFieldTypeKind) {
   ALNORMFieldTypeKindOther = 0,
@@ -18,6 +19,10 @@ static NSString *ALNORMCodegenStringValue(id value) {
     return [[value stringValue] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
   }
   return @"";
+}
+
+static NSString *ALNORMCodegenPhysicalName(id value) {
+  return [value isKindOfClass:[NSString class]] ? value : @"";
 }
 
 static BOOL ALNORMCodegenBoolValue(id value, BOOL fallback) {
@@ -58,7 +63,9 @@ static BOOL ALNORMCodegenIdentifierIsSafe(NSString *value) {
 }
 
 static NSString *ALNORMCodegenPascalSuffix(NSString *identifier) {
-  NSArray *parts = [identifier componentsSeparatedByString:@"_"];
+  NSCharacterSet *letters = [NSCharacterSet characterSetWithCharactersInString:
+      @"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"];
+  NSArray *parts = [identifier componentsSeparatedByCharactersInSet:[letters invertedSet]];
   NSMutableString *suffix = [NSMutableString string];
   for (NSString *part in parts) {
     if ([part length] == 0) {
@@ -137,25 +144,37 @@ static NSString *ALNORMCodegenSetterSuffix(NSString *name) {
 
 // Allocate all names together so a later column or an explicit override cannot
 // steal an alias. Logical field/column names remain unchanged for query/relation lookup.
-static NSDictionary *ALNORMCodegenPropertyNames(NSArray *columns, NSDictionary *overrides,
+static NSDictionary *ALNORMCodegenPropertyNames(NSArray *columns, NSDictionary *overrides, NSDictionary *fieldOverrides,
                                                NSString *entityName, NSError **error) {
   NSMutableDictionary *owners = [NSMutableDictionary dictionary];
   NSMutableDictionary *result = [NSMutableDictionary dictionary];
   NSMutableSet *fields = [NSMutableSet set];
   NSArray *ordered = [columns sortedArrayUsingComparator:^NSComparisonResult(NSDictionary *a, NSDictionary *b) {
-    return [ALNORMCodegenStringValue(a[@"column"]) compare:ALNORMCodegenStringValue(b[@"column"])];
+    return [ALNORMCodegenPhysicalName(a[@"column"]) compare:ALNORMCodegenPhysicalName(b[@"column"])];
   }];
   NSString *problem = nil;
   NSString *badColumn = @"";
   NSString *badProperty = @"";
   for (NSDictionary *row in ordered) {
-    NSString *column = ALNORMCodegenStringValue(row[@"column"]);
-    NSString *field = ALNORMCodegenCamelCase(column);
+    NSString *column = ALNORMCodegenPhysicalName(row[@"column"]);
+    NSString *field = fieldOverrides[column] ?: ALNORMCodegenCamelCase(column);
     badColumn = column;
-    if ([fields containsObject:[field lowercaseString]]) {
-      problem = @"field names collide after case folding; rename the SQL column";
+    if (!ALNORMCodegenIdentifierIsSafe(field)) {
+      problem = @"field_names overrides must be valid logical identifiers";
       break;
     }
+    if ([fields containsObject:[field lowercaseString]]) {
+      problem = @"logical field names collide after normalization; supply distinct field_names overrides";
+      break;
+    }
+    for (NSString *name in @[field, column]) {
+      NSString *owner = owners[[name lowercaseString]];
+      if (owner != nil && ![owner isEqual:column]) {
+        problem = @"logical field alias overlaps another SQL column; supply distinct field_names overrides";
+        break;
+      }
+    }
+    if (problem != nil) break;
     [fields addObject:[field lowercaseString]];
     owners[[field lowercaseString]] = column;
     owners[[column lowercaseString]] = column;
@@ -185,9 +204,9 @@ static NSDictionary *ALNORMCodegenPropertyNames(NSArray *columns, NSDictionary *
     return nil;
   }
   for (NSDictionary *row in ordered) {
-    NSString *column = ALNORMCodegenStringValue(row[@"column"]);
+    NSString *column = ALNORMCodegenPhysicalName(row[@"column"]);
     if (result[column] != nil) continue;
-    NSString *field = ALNORMCodegenCamelCase(column);
+    NSString *field = fieldOverrides[column] ?: ALNORMCodegenCamelCase(column);
     NSString *property = field;
     if (ALNORMCodegenPropertyIsReserved(property)) {
       // Prefix ARC-family names so repeated suffixing cannot remain in that family.
@@ -235,12 +254,12 @@ static NSString *ALNORMCodegenPluralize(NSString *identifier) {
 }
 
 static NSString *ALNORMCodegenQualifiedEntityName(NSString *schema, NSString *table) {
-  return [NSString stringWithFormat:@"%@.%@", schema ?: @"", table ?: @""];
+  return [NSString stringWithFormat:@"%@.%@", ALNSQLDialectIdentifierComponent(schema), ALNSQLDialectIdentifierComponent(table)];
 }
 
 static NSString *ALNORMCodegenQualifiedTableName(NSString *schema, NSString *table) {
-  if ([[schema lowercaseString] isEqualToString:@"public"]) {
-    return table ?: @"";
+  if ([schema isEqualToString:@"public"]) {
+    return ALNSQLDialectIdentifierComponent(table);
   }
   return ALNORMCodegenQualifiedEntityName(schema, table);
 }
@@ -251,7 +270,7 @@ static NSArray<NSString *> *ALNORMCodegenNormalizedStringArray(id value) {
   }
   NSMutableArray *items = [NSMutableArray array];
   for (id rawItem in value) {
-    NSString *string = ALNORMCodegenStringValue(rawItem);
+    NSString *string = ALNORMCodegenPhysicalName(rawItem);
     if ([string length] > 0) {
       [items addObject:string];
     }
@@ -444,7 +463,14 @@ static void ALNORMCodegenAppendJSONValue(NSMutableString *output, id value) {
 }
 
 static NSString *ALNORMCodegenObjectiveCStringLiteral(NSString *value) {
-  return [NSString stringWithFormat:@"@\"%@\"", ALNORMCodegenJSONEscape(value ?: @"")];
+  NSMutableString *escaped = [NSMutableString string];
+  for (NSUInteger i = 0; i < value.length; i++) {
+    unichar c = [value characterAtIndex:i];
+    if (c == '"' || c == '\\') [escaped appendFormat:@"\\%C", c];
+    else if (c < 0x20 || c == 0x7f) [escaped appendFormat:@"\\%03o", c];
+    else [escaped appendFormat:@"%C", c];
+  }
+  return [NSString stringWithFormat:@"@\"%@\"", escaped];
 }
 
 static NSString *ALNORMCodegenObjectiveCStringArray(NSArray<NSString *> *values) {
@@ -524,14 +550,14 @@ static NSString *ALNORMCodegenObjectiveCStringArray(NSArray<NSString *> *values)
   NSMutableSet<NSString *> *usedClassNames = [NSMutableSet set];
 
   for (NSDictionary *relationRow in relationRows) {
-    NSString *schema = ALNORMCodegenStringValue(relationRow[@"schema"]);
-    NSString *table = ALNORMCodegenStringValue(relationRow[@"table"]);
+    NSString *schema = ALNORMCodegenPhysicalName(relationRow[@"schema"]);
+    NSString *table = ALNORMCodegenPhysicalName(relationRow[@"table"]);
     NSString *relationKind = [[ALNORMCodegenStringValue(relationRow[@"relation_kind"]) lowercaseString] copy];
     if ([relationKind length] == 0) {
       relationKind = @"table";
     }
     BOOL readOnly = ALNORMCodegenBoolValue(relationRow[@"read_only"], ![relationKind isEqualToString:@"table"]);
-    if (!ALNORMCodegenIdentifierIsSafe(schema) || !ALNORMCodegenIdentifierIsSafe(table)) {
+    if (!ALNSQLDialectIdentifierComponentIsValid(schema) || !ALNSQLDialectIdentifierComponentIsValid(table)) {
       if (error != NULL) {
         *error = ALNORMMakeError(ALNORMErrorInvalidMetadata,
                                  @"relation metadata contains unsafe identifiers",
@@ -587,8 +613,8 @@ static NSString *ALNORMCodegenObjectiveCStringArray(NSArray<NSString *> *values)
   for (NSString *entityName in [[entities allKeys] sortedArrayUsingSelector:@selector(compare:)]) {
     NSMutableArray *columns = [NSMutableArray array];
     for (NSDictionary *row in columnRows) {
-      if ([ALNORMCodegenQualifiedEntityName(ALNORMCodegenStringValue(row[@"schema"]),
-                                           ALNORMCodegenStringValue(row[@"table"])) isEqual:entityName]) {
+      if ([ALNORMCodegenQualifiedEntityName(ALNORMCodegenPhysicalName(row[@"schema"]),
+                                           ALNORMCodegenPhysicalName(row[@"table"])) isEqual:entityName]) {
         [columns addObject:row];
       }
     }
@@ -599,21 +625,30 @@ static NSString *ALNORMCodegenObjectiveCStringArray(NSArray<NSString *> *values)
           @{ @"entity_name": entityName });
       return nil;
     }
-    NSDictionary *names = ALNORMCodegenPropertyNames(columns, overrides ?: @{}, entityName, error);
+    id fieldOverrides = descriptorOverrides[entityName][@"field_names"] ?: @{};
+    NSMutableSet *knownColumns = [NSMutableSet set];
+    for (NSDictionary *row in columns) [knownColumns addObject:row[@"column"] ?: @""];
+    if (![fieldOverrides isKindOfClass:[NSDictionary class]] ||
+        ![[NSSet setWithArray:[fieldOverrides allKeys]] isSubsetOfSet:knownColumns]) {
+      if (error != NULL) *error = ALNORMMakeError(ALNORMErrorInvalidMetadata,
+          @"field_names must map exact SQL column names to logical field identifiers", @{ @"entity_name": entityName });
+      return nil;
+    }
+    NSDictionary *names = ALNORMCodegenPropertyNames(columns, overrides ?: @{}, fieldOverrides, entityName, error);
     if (names == nil) return nil;
     entities[entityName][@"property_names"] = names;
   }
 
   for (NSDictionary *columnRow in columnRows) {
-    NSString *schema = ALNORMCodegenStringValue(columnRow[@"schema"]);
-    NSString *table = ALNORMCodegenStringValue(columnRow[@"table"]);
-    NSString *column = ALNORMCodegenStringValue(columnRow[@"column"]);
+    NSString *schema = ALNORMCodegenPhysicalName(columnRow[@"schema"]);
+    NSString *table = ALNORMCodegenPhysicalName(columnRow[@"table"]);
+    NSString *column = ALNORMCodegenPhysicalName(columnRow[@"column"]);
     NSString *entityName = ALNORMCodegenQualifiedEntityName(schema, table);
     NSMutableDictionary *entity = entities[entityName];
     if (entity == nil) {
       continue;
     }
-    if (!ALNORMCodegenIdentifierIsSafe(column)) {
+    if (!ALNSQLDialectIdentifierComponentIsValid(column)) {
       if (error != NULL) {
         *error = ALNORMMakeError(ALNORMErrorInvalidMetadata,
                                  @"column metadata contains unsafe identifiers",
@@ -624,7 +659,7 @@ static NSString *ALNORMCodegenObjectiveCStringArray(NSArray<NSString *> *values)
       }
       return nil;
     }
-    NSString *fieldName = ALNORMCodegenCamelCase(column);
+    NSString *fieldName = descriptorOverrides[entityName][@"field_names"][column] ?: ALNORMCodegenCamelCase(column);
     NSMutableSet *fieldNames = entity[@"field_names"];
     if ([fieldNames containsObject:fieldName]) {
       if (error != NULL) {
@@ -665,8 +700,8 @@ static NSString *ALNORMCodegenObjectiveCStringArray(NSArray<NSString *> *values)
 
   for (NSDictionary *primaryKeyRow in primaryKeyRows) {
     NSString *entityName =
-        ALNORMCodegenQualifiedEntityName(ALNORMCodegenStringValue(primaryKeyRow[@"schema"]),
-                                         ALNORMCodegenStringValue(primaryKeyRow[@"table"]));
+        ALNORMCodegenQualifiedEntityName(ALNORMCodegenPhysicalName(primaryKeyRow[@"schema"]),
+                                         ALNORMCodegenPhysicalName(primaryKeyRow[@"table"]));
     NSMutableDictionary *entity = entities[entityName];
     if (entity == nil) {
       continue;
@@ -683,8 +718,8 @@ static NSString *ALNORMCodegenObjectiveCStringArray(NSArray<NSString *> *values)
 
   for (NSDictionary *uniqueRow in uniqueRows) {
     NSString *entityName =
-        ALNORMCodegenQualifiedEntityName(ALNORMCodegenStringValue(uniqueRow[@"schema"]),
-                                         ALNORMCodegenStringValue(uniqueRow[@"table"]));
+        ALNORMCodegenQualifiedEntityName(ALNORMCodegenPhysicalName(uniqueRow[@"schema"]),
+                                         ALNORMCodegenPhysicalName(uniqueRow[@"table"]));
     NSMutableDictionary *entity = entities[entityName];
     if (entity == nil) {
       continue;
@@ -755,11 +790,11 @@ static NSString *ALNORMCodegenObjectiveCStringArray(NSArray<NSString *> *values)
 
   for (NSDictionary *foreignKeyRow in foreignKeyRows) {
     NSString *sourceEntityName =
-        ALNORMCodegenQualifiedEntityName(ALNORMCodegenStringValue(foreignKeyRow[@"schema"]),
-                                         ALNORMCodegenStringValue(foreignKeyRow[@"table"]));
+        ALNORMCodegenQualifiedEntityName(ALNORMCodegenPhysicalName(foreignKeyRow[@"schema"]),
+                                         ALNORMCodegenPhysicalName(foreignKeyRow[@"table"]));
     NSString *targetEntityName =
-        ALNORMCodegenQualifiedEntityName(ALNORMCodegenStringValue(foreignKeyRow[@"referenced_schema"]),
-                                         ALNORMCodegenStringValue(foreignKeyRow[@"referenced_table"]));
+        ALNORMCodegenQualifiedEntityName(ALNORMCodegenPhysicalName(foreignKeyRow[@"referenced_schema"]),
+                                         ALNORMCodegenPhysicalName(foreignKeyRow[@"referenced_table"]));
     NSMutableDictionary *sourceEntity = entities[sourceEntityName];
     NSMutableDictionary *targetEntity = entities[targetEntityName];
     if (sourceEntity == nil || targetEntity == nil) {

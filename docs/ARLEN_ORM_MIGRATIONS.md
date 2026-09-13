@@ -54,3 +54,12 @@ Original SQL columns, logical field names and relationship keys do not change.
 Generated setters now preserve internal capitalization (`displayName` uses
 `setDisplayName:`). Replace any direct calls to the previously emitted
 `setDisplayname:` spelling. Regeneration is an API update, not a database migration.
+
+## Adopting quoted SQL identifiers
+
+Regenerate ORM models from original physical metadata to adopt quoted legacy
+names. Ordinary generated names remain stable. Previously rejected punctuation
+names now receive safe aliases; resolve normalization collisions with
+`field_names` and inspect the manifest before updating application call sites.
+Property overrides do not rename columns. See the
+[identifier contract](ARLEN_ORM.md#quoted-sql-identifiers).

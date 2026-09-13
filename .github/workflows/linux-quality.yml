@@ -38,10 +38,10 @@ jobs:
           source tools/source_gnustep_env.sh
           make oauth-check mcp-check
 
-      - name: Verify generated ORM property and runtime contracts
+      - name: Verify generated ORM models and live quoted-identifier persistence
         run: |
           source tools/source_gnustep_env.sh
-          make phase26-orm-generated
+          bash tools/ci/run_orm_identifier_regressions.sh
 
       - name: Upload perf + confidence artifacts
         if: github.event_name == 'workflow_dispatch' || failure()

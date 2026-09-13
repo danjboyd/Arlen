@@ -699,3 +699,13 @@ SQL codegen now allocates reserved property aliases, accepts exact-column
 capitalization. The generated confidence target includes strict compilation and
 a loaded generated-model runtime regression. See `docs/ARLEN_ORM.md` and
 `docs/ARLEN_ORM_MIGRATIONS.md` for the updated contract and regeneration procedure.
+
+## Quoted legacy SQL identifiers (2026-09-13)
+
+The SQL descriptor/codegen/runtime contract now preserves quoted physical names
+and separates them from generated logical/property aliases. Strict component
+parsing and dialect escaping cover the ORM read/write, key, join, returning,
+and PostgreSQL conflict paths. Normalization collisions have explicit
+`field_names` overrides. The existing Linux quality lane exercises a disposable
+PostgreSQL cluster. See `../ARLEN_ORM.md` for the public contract and
+`OPPORTUNITYTRACKER_QUOTED_IDENTIFIERS_2026-09-13.md` for downstream report ownership.

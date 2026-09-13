@@ -173,7 +173,7 @@ ArlenData reuse remains continuously validated by CI via:
 Expression-capable builder APIs now route through a trusted-template IR (`trusted-template-v1`) with explicit contracts:
 
 - Identifier slots use `{{token}}` and must be satisfied by `identifierBindings`.
-- Identifier bindings must resolve to safe SQL identifiers/wildcards (for example `d.state_code`, `d.*`, `*`).
+- Identifier bindings must resolve to identifier paths/wildcards (for example `d.state_code`, `d.*`, `*`, or `d."Unit Name"`). Paths accept only ordinary or double-quoted components separated by dots, never SQL fragments. Use `ALNSQLDialectIdentifierComponent` to encode a physical component from trusted metadata; embedded quotes are doubled. Aliases remain ordinary identifiers.
 - Expression parameters must be an array and placeholders must map exactly to `$1..$N`.
 - Malformed expression IR shapes fail deterministically with `ALNSQLBuilderErrorDomain` diagnostics.
 

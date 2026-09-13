@@ -1326,4 +1326,146 @@ static ALNORMContext *ALNORMRuntimeConfiguredAuditContext(ORMRuntimeFakeAdapter 
   XCTAssertTrue(success, @"%@", error);
 }
 
+
+- (void)testLivePostgresQuotedIdentifiersCRUDCompositeKeysAndJoins {
+  NSString *dsn = [self requiredPGTestDSNForSelector:_cmd];
+  if (dsn == nil) return;
+  NSError *error = nil;
+  ALNPg *database = [[ALNPg alloc] initWithConnectionString:dsn maxConnections:2 error:&error];
+  XCTAssertNotNil(database);
+  if (database == nil) return;
+  BOOL success = ALNTestWithDisposableSchema(database, @"orm_quoted", ^BOOL(NSString *schema, NSError **blockError) {
+    NSMutableDictionary *metadata = [ALNTestJSONDictionaryAtRelativePath(@"tests/fixtures/phase26/orm_quoted_identifiers.json", blockError) mutableCopy];
+    NSMutableArray *columns = [NSMutableArray array];
+    for (NSDictionary *row in metadata[@"columns"]) {
+      NSMutableDictionary *column = [row mutableCopy];
+      column[@"schema"] = schema;
+      [columns addObject:column];
+    }
+    NSString *parent = @"CompulsoryUnitProjects";
+    NSString *child = @"Task.Items";
+    for (NSString *column in @[ @"Target ID", @"Task ID", @"Task Notes" ]) {
+      [columns addObject:@{ @"schema": schema, @"table": child, @"column": column,
+          @"data_type": [column hasSuffix:@"ID"] ? @"integer" : @"text",
+          @"primary_key": @([column hasSuffix:@"ID"]), @"has_default": @([column isEqual:@"Task ID"]), @"nullable": @NO, @"ordinal": @(columns.count + 1) }];
+    }
+    metadata[@"columns"] = columns;
+    metadata[@"relations"] = @[ @{ @"schema": schema, @"table": parent }, @{ @"schema": schema, @"table": child } ];
+    metadata[@"primary_keys"] = @[ @{ @"schema": schema, @"table": parent, @"columns": @[@"Target ID"] },
+        @{ @"schema": schema, @"table": child, @"columns": @[@"Target ID", @"Task ID"] } ];
+    metadata[@"foreign_keys"] = @[ @{ @"schema": schema, @"table": child, @"columns": @[@"Target ID"],
+        @"referenced_schema": schema, @"referenced_table": parent, @"referenced_columns": @[@"Target ID"], @"constraint_name": @"target_fk" } ];
+    NSString *parentEntity = [NSString stringWithFormat:@"%@.%@", schema, parent];
+    NSString *childEntity = [NSString stringWithFormat:@"%@.%@", schema, ALNSQLDialectIdentifierComponent(child)];
+    NSDictionary *overrides = @{
+      parentEntity: @{ @"class_name": @"ALNORMRuntimeGeneratedParentModel" },
+      childEntity: @{ @"class_name": @"ALNORMRuntimeGeneratedChildModel", @"relations": @[
+          @{ @"name": @"target", @"kind": @"belongs_to", @"target_entity_name": parentEntity,
+             @"source_field_names": @[@"targetId"], @"target_field_names": @[@"targetId"] } ] }
+    };
+    NSArray *descriptors = [ALNORMCodegen modelDescriptorsFromSchemaMetadata:metadata classPrefix:@"Quoted"
+        databaseTarget:nil descriptorOverrides:overrides error:blockError];
+    if (descriptors == nil) return NO;
+    for (ALNORMModelDescriptor *descriptor in descriptors) {
+      if ([descriptor.tableName isEqual:parent]) gALNORMRuntimeGeneratedParentDescriptor = descriptor;
+      else gALNORMRuntimeGeneratedChildDescriptor = descriptor;
+    }
+    NSString *parentSQL = [NSString stringWithFormat:@"%@.%@", ALNSQLDialectDoubleQuoteIdentifier(schema), ALNSQLDialectDoubleQuoteIdentifier(parent)];
+    NSString *childSQL = [NSString stringWithFormat:@"%@.%@", ALNSQLDialectDoubleQuoteIdentifier(schema), ALNSQLDialectDoubleQuoteIdentifier(child)];
+    NSMutableArray *definitions = [NSMutableArray array];
+    for (ALNORMFieldDescriptor *field in gALNORMRuntimeGeneratedParentDescriptor.fields) {
+      [definitions addObject:[NSString stringWithFormat:@"%@ %@%@", ALNSQLDialectDoubleQuoteIdentifier(field.columnName),
+          field.dataType, field.isPrimaryKey ? @" PRIMARY KEY" : @""]];
+    }
+    if ([database executeCommand:[NSString stringWithFormat:@"CREATE TABLE %@ (%@)", parentSQL,
+        [definitions componentsJoinedByString:@", "]] parameters:@[] error:blockError] < 0) return NO;
+    if ([database executeCommand:[NSString stringWithFormat:@"CREATE TABLE %@ (\"Target ID\" integer REFERENCES %@ (\"Target ID\"), \"Task ID\" integer DEFAULT 12, \"Task Notes\" text, PRIMARY KEY (\"Target ID\", \"Task ID\"))", childSQL, parentSQL]
+        parameters:@[] error:blockError] < 0) return NO;
+    ALNORMContext *context = [[ALNORMContext alloc] initWithAdapter:database];
+    ALNORMRepository *targets = [context repositoryForModelClass:[ALNORMRuntimeGeneratedParentModel class]];
+    ALNORMRepository *tasks = [context repositoryForModelClass:[ALNORMRuntimeGeneratedChildModel class]];
+    __block BOOL reachedRollback = NO;
+    NSError *rollback = [NSError errorWithDomain:@"QuotedRollback" code:1 userInfo:nil];
+    NSError *transactionError = nil;
+    BOOL committed = [context withTransactionUsingBlock:^BOOL(NSError **txError) {
+      for (NSNumber *pk in @[@1, @2]) {
+        ALNORMModel *model = [[ALNORMRuntimeGeneratedParentModel alloc] init];
+        if (![model setObject:pk forFieldName:@"targetId" error:txError] ||
+            ![model setObject:@"OK" forFieldName:@"state" error:txError] ||
+            ![model setObject:@"Original" forFieldName:@"unitName" error:txError] ||
+            ![model setObject:@"Unchanged" forFieldName:@"unitWellNotes" error:txError] ||
+            ![targets saveModel:model error:txError]) return NO;
+      }
+      for (NSNumber *taskID in @[@10, @11]) {
+        ALNORMModel *task = [[ALNORMRuntimeGeneratedChildModel alloc] init];
+        if (![task setObject:@1 forFieldName:@"targetId" error:txError] ||
+            ![task setObject:taskID forFieldName:@"taskId" error:txError] ||
+            ![task setObject:@"Task" forFieldName:@"taskNotes" error:txError] ||
+            ![tasks saveModel:task error:txError]) return NO;
+      }
+      ALNORMModel *generated = [[ALNORMRuntimeGeneratedChildModel alloc] init];
+      if (![generated setObject:@2 forFieldName:@"targetId" error:txError] ||
+          ![generated setObject:@"Generated" forFieldName:@"taskNotes" error:txError] ||
+          ![tasks saveModel:generated error:txError]) return NO;
+      XCTAssertEqualObjects(@12, [generated objectForFieldName:@"taskId"]);
+      if (![tasks deleteModel:generated error:txError]) return NO;
+      ALNORMModel *model = [targets findByPrimaryKey:@1 error:txError];
+      XCTAssertNotNil(model);
+      if (model == nil) return NO;
+      ALNORMChangeset *changes = [ALNORMChangeset changesetWithModel:model];
+      if (![changes setObject:@"Updated" forFieldName:@"unitName" error:txError] ||
+          ![changes setObject:@"Literal" forFieldName:@"dotName" error:txError] ||
+          ![changes setObject:@"Quoted" forFieldName:@"heSaidHi" error:txError] ||
+          ![changes setObject:@"Dollar" forFieldName:@"cost1" error:txError] ||
+          ![changes setObject:@"Whitespace" forFieldName:@"leading" error:txError] ||
+          ![targets saveModel:model changeset:changes options:nil error:txError]) return NO;
+      model = [context reloadModel:model error:txError];
+      XCTAssertEqualObjects(@"Updated", [model objectForFieldName:@"unitName"]);
+      XCTAssertEqualObjects(@"Unchanged", [model objectForFieldName:@"unitWellNotes"]);
+      XCTAssertEqualObjects(@"Literal", [model objectForColumnName:@"Dot.Name"]);
+      XCTAssertEqualObjects(@"Quoted", [model objectForColumnName:@"He said \"Hi\""]);
+      XCTAssertEqualObjects(@"Dollar", [model objectForColumnName:@"Cost $1"]);
+      XCTAssertEqualObjects(@"Whitespace", [model objectForColumnName:@" leading "]);
+      ALNORMModel *neighbor = [targets findByPrimaryKey:@2 error:txError];
+      XCTAssertEqualObjects(@"Original", [neighbor objectForFieldName:@"unitName"]);
+      if (![neighbor setObject:@"TX" forFieldName:@"state" error:txError] ||
+          ![targets upsertModel:neighbor options:nil error:txError]) return NO;
+      neighbor = [context reloadModel:neighbor error:txError];
+      XCTAssertEqualObjects(@"TX", [neighbor objectForFieldName:@"state"]);
+      XCTAssertEqualObjects(@"Original", [neighbor objectForFieldName:@"unitName"]);
+      ALNORMQuery *query = [[targets query] whereField:@"unitName" equals:@"Updated"];
+      XCTAssertEqual((NSUInteger)1, [[targets allMatchingQuery:query error:txError] count]);
+      XCTAssertEqual((NSUInteger)1, [[targets allMatchingQuery:[[targets query] whereField:@" leading " equals:@"Whitespace"] error:txError] count]);
+      ALNORMQuery *joined = [[tasks query] whereField:@"taskId" equals:@10];
+      [joined withJoinedRelationNamed:@"target"];
+      ALNORMModel *task = [tasks firstMatchingQuery:joined error:txError];
+      XCTAssertNotNil(task);
+      XCTAssertEqualObjects(@"Updated", [[task relationObjectForName:@"target"] objectForFieldName:@"unitName"]);
+      if (task == nil || ![task setObject:@"Changed task" forFieldName:@"taskNotes" error:txError] ||
+          ![tasks saveModel:task error:txError]) return NO;
+      task = [context reloadModel:task error:txError];
+      XCTAssertEqualObjects(@"Changed task", [task objectForFieldName:@"taskNotes"]);
+      ALNORMModel *otherTask = [tasks findByPrimaryKeyValues:@{@"targetId": @1, @"taskId": @11} error:txError];
+      XCTAssertEqualObjects(@"Task", [otherTask objectForFieldName:@"taskNotes"]);
+      if (![tasks deleteModel:task error:txError]) return NO;
+      XCTAssertEqual((NSUInteger)1, [tasks count:txError]);
+      if (![tasks deleteModel:otherTask error:txError] || ![targets deleteModel:model error:txError]) return NO;
+      XCTAssertEqual((NSUInteger)1, [targets count:txError]);
+      if (txError != NULL && *txError != nil) return NO;
+      reachedRollback = YES;
+      *txError = rollback;
+      return NO;
+    } error:&transactionError];
+    XCTAssertFalse(committed);
+    XCTAssertTrue(reachedRollback, @"%@", transactionError);
+    XCTAssertEqualObjects(rollback, transactionError);
+    NSArray *rows = [database executeQuery:[NSString stringWithFormat:@"SELECT COUNT(*) AS n FROM %@", parentSQL] parameters:@[] error:blockError];
+    XCTAssertEqualObjects(@"0", [[[rows firstObject] objectForKey:@"n"] description]);
+    return reachedRollback && rows != nil;
+  }, &error);
+  gALNORMRuntimeGeneratedParentDescriptor = nil;
+  gALNORMRuntimeGeneratedChildDescriptor = nil;
+  XCTAssertTrue(success, @"%@", error);
+}
+
 @end

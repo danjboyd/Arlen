@@ -16,6 +16,8 @@ If you prefer a narrower path, see:
 For SQL ORM models, see the [ORM guide](ARLEN_ORM.md#sql-property-names).
 Generated properties may use safe aliases for columns such as `State`; use the
 manifest property names or `objectForColumnName:` with the original SQL name.
+Legacy columns such as `Target ID` and `Unit/Well Notes` are supported without
+schema renames; see [quoted identifiers](ARLEN_ORM.md#quoted-sql-identifiers).
 
 ## 1. Prerequisites
 

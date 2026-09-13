@@ -110,7 +110,7 @@ one coherent toolchain.
 - `Auth and security`: sessions, CSRF, rate limiting, MFA, recovery codes, passkeys/WebAuthn, and OIDC/provider login.
 - `First-party modules`: `auth`, `admin-ui`, `jobs`, `notifications`, `storage`, `ops`, and `search`.
 - `Realtime and live UI`: WebSocket and SSE support, live fragment responses, built-in `/arlen/live.js`, keyed collection helpers, live regions, controller helpers for live updates/navigation, and a durable event-stream seam with append/replay/auth contracts plus websocket/SSE/poll integration.
-- `Data layer`: PostgreSQL-first migrations, schema codegen, typed SQL helpers, an optional SQL ORM foundation, optional MSSQL support, and a runtime-inactive Dataverse Web API client/query/codegen surface.
+- `Data layer`: PostgreSQL-first migrations, schema codegen, typed SQL helpers, an optional SQL ORM foundation with quoted legacy identifier support, optional MSSQL support, and a runtime-inactive Dataverse Web API client/query/codegen surface.
 - `Runtime`: `boomhauer` for development and `propane` for production worker supervision, reloads, and cluster controls.
 - `Diagnostics and verification`: `arlen doctor`, build diagnostics, focused regression lanes, and live-backed integration coverage.
 
