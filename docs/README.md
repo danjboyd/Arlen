@@ -32,6 +32,8 @@ toolchain env directly for the Linux/GNUstep path. On macOS, use
 
 ## Building Apps
 
+- [Multipart Uploads](MULTIPART_UPLOADS.md): ordered form fields, binary files, limits, and memory ownership.
+
 - [App Authoring Guide](APP_AUTHORING_GUIDE.md): routes, controllers, middleware, and route metadata.
 - [Core Concepts](CORE_CONCEPTS.md): runtime architecture and request lifecycle.
 - [Getting Started: API-First Track](GETTING_STARTED_API_FIRST.md): JSON APIs, schema/auth contracts, and OpenAPI.

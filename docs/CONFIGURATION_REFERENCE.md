@@ -478,3 +478,5 @@ For serialized request runtimes, configure `refreshOnRequest: false` and
 `preflightOnStart: true`, schedule key maintenance on an application worker, and
 wire `isReady` into private readiness. The OAuth runbook documents the tradeoff;
 framework tests require no tenant or public deployment.
+
+Multipart `requestLimits` keys are `maxMultipartParts` (128), `maxMultipartFieldBytes` (65536), `maxMultipartFileBytes` (1048576), and `maxMultipartHeaderBytes` (16384). All values must be positive. See [Multipart Uploads](MULTIPART_UPLOADS.md) for buffering behavior and a 110 MiB request configuration.

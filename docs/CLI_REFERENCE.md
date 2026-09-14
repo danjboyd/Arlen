@@ -1324,3 +1324,5 @@ Apple retains Foundation transport. GNUstep metadata uses libcurl's CA configura
 not GNUstep TLS user defaults. Use a dedicated maintenance worker. Refresh errors distinguish discovery/JWKS
 fetch failures, metadata validation failures, and cooldown. Diagnostics omit
 URLs, credentials, response bodies, and custom loader error details.
+
+Multipart uploads use the application `requestLimits` policy. `ARLEN_MAX_BODY_BYTES` sets the total body cap; per-part limits require configuration. See [Multipart Uploads](MULTIPART_UPLOADS.md).

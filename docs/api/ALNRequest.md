@@ -17,6 +17,10 @@ Immutable HTTP request model containing method/path/query/headers/body and parse
 | `body` | `NSData *` | `nonatomic, strong, readonly` | Public `body` property available on `ALNRequest`. |
 | `queryParams` | `NSDictionary *` | `nonatomic, copy, readonly` | Public `queryParams` property available on `ALNRequest`. |
 | `formParams` | `NSDictionary *` | `nonatomic, copy, readonly` | Public `formParams` property available on `ALNRequest`. |
+| `multipartParts` | `NSArray<ALNMultipartPart *> *` | `nonatomic, copy, readonly` | Public `multipartParts` property available on `ALNRequest`. |
+| `uploads` | `NSArray<ALNUpload *> *` | `nonatomic, copy, readonly` | Public `uploads` property available on `ALNRequest`. |
+| `formValues` | `NSDictionary<NSString *, NSArray<NSString *> *> *` | `nonatomic, copy, readonly` | Public `formValues` property available on `ALNRequest`. |
+| `multipartError` | `NSError *` | `nonatomic, strong, readonly, nullable` | Public `multipartError` property available on `ALNRequest`. |
 | `cookies` | `NSDictionary *` | `nonatomic, copy, readonly` | Public `cookies` property available on `ALNRequest`. |
 | `routeParams` | `NSDictionary *` | `nonatomic, copy` | Public `routeParams` property available on `ALNRequest`. |
 | `remoteAddress` | `NSString *` | `nonatomic, copy` | Public `remoteAddress` property available on `ALNRequest`. |
@@ -29,6 +33,8 @@ Immutable HTTP request model containing method/path/query/headers/body and parse
 
 | Selector | Signature | Purpose | How to use |
 | --- | --- | --- | --- |
+| `parseMultipartFormWithLimits:error:` | `- (BOOL)parseMultipartFormWithLimits:(nullable NSDictionary *)limits error:(NSError *_Nullable *_Nullable)error;` | Perform `parse multipart form with limits` for `ALNRequest`. | Check the returned `BOOL`; on `NO`, inspect the `error` out-parameter. |
+| `uploadsForName:` | `- (NSArray<ALNUpload *> *)uploadsForName:(NSString *)name;` | Perform `uploads for name` for `ALNRequest`. | Treat returned collection values as snapshots unless the API documents mutability. |
 | `headerValueForName:` | `- (NSString *)headerValueForName:(NSString *)name;` | Return a request header value by key. | Capture the returned value and propagate errors/validation as needed. |
 | `queryValueForName:` | `- (nullable NSString *)queryValueForName:(NSString *)name;` | Return a query-string parameter by key. | Capture the returned value and propagate errors/validation as needed. |
 | `initWithMethod:path:queryString:httpVersion:headers:body:` | `- (instancetype)initWithMethod:(NSString *)method path:(NSString *)path queryString:(NSString *)queryString httpVersion:(NSString *)httpVersion headers:(NSDictionary *)headers body:(NSData *)body;` | Initialize and return a new `ALNRequest` instance. | Use as `[[Class alloc] init...]`; treat `nil` as initialization failure. This method is chainable; continue composing and call `build`/`buildSQL` to finalize. |

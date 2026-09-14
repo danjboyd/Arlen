@@ -1491,6 +1491,9 @@ static ALNRequest *ALNRequestFromRawDataLLHTTP(NSData *data, NSError **error) {
 @property(nonatomic, strong, readwrite) NSData *body;
 @property(nonatomic, copy) NSDictionary *cachedQueryParams;
 @property(nonatomic, copy) NSDictionary *cachedFormParams;
+@property(nonatomic, copy) NSArray *cachedMultipartParts;
+@property(nonatomic, copy) NSDictionary *cachedMultipartLimits;
+@property(nonatomic, strong) NSError *cachedMultipartError;
 @property(nonatomic, copy) NSDictionary *cachedCookies;
 @property(nonatomic, strong) NSMutableDictionary *cachedQueryValueLookups;
 @property(nonatomic, copy) NSArray *deferredHeaderNames;
@@ -1612,7 +1615,7 @@ static BOOL ALNASCIIBytesEqualLowercaseCString(const unsigned char *bytes,
     _queryString = [queryString copy] ?: @"";
     _httpVersion = [httpVersion copy] ?: @"HTTP/1.1";
     _headers = [headers isKindOfClass:[NSDictionary class]] ? [headers copy] : @{};
-    _body = body ?: [NSData data];
+    _body = [body copy] ?: [NSData data];
     _routeParams = @{};
     _remoteAddress = @"";
     _effectiveRemoteAddress = @"";
@@ -1791,13 +1794,80 @@ static BOOL ALNASCIIBytesEqualLowercaseCString(const unsigned char *bytes,
   return self.cachedQueryParams ?: parsed;
 }
 
+- (BOOL)parseMultipartFormWithLimits:(NSDictionary *)limits error:(NSError **)error {
+  NSString *contentType = [self headerValueForName:@"content-type"];
+  NSString *mediaType = [[[contentType componentsSeparatedByString:@";"] firstObject]
+      stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
+  if (![[mediaType lowercaseString] isEqual:@"multipart/form-data"]) {
+    if (error) *error = nil;
+    return YES;
+  }
+  NSDictionary *policy = limits ?: [ALNMultipart defaultLimits];
+  if (!self.cachedMultipartParts || ![self.cachedMultipartLimits isEqual:policy]) {
+    NSError *failure = nil;
+    NSArray *parts = [ALNMultipart parseBody:self.body contentType:contentType limits:policy error:&failure];
+    self.cachedMultipartParts = parts ?: @[];
+    self.cachedMultipartLimits = policy;
+    self.cachedMultipartError = failure;
+    self.cachedFormParams = nil;
+  }
+  if (error) *error = self.cachedMultipartError;
+  return self.cachedMultipartError == nil;
+}
+
+- (NSArray *)multipartParts {
+  if (!self.cachedMultipartParts) [self parseMultipartFormWithLimits:nil error:NULL];
+  return self.cachedMultipartParts ?: @[];
+}
+
+- (NSError *)multipartError {
+  (void)self.multipartParts;
+  return self.cachedMultipartError;
+}
+
+- (NSArray *)uploads {
+  NSMutableArray *out = [NSMutableArray array];
+  for (ALNMultipartPart *part in self.multipartParts)
+    if ([part isKindOfClass:[ALNUpload class]]) [out addObject:part];
+  return [out copy];
+}
+
+- (NSArray *)uploadsForName:(NSString *)name {
+  NSMutableArray *out = [NSMutableArray array];
+  for (ALNUpload *upload in self.uploads)
+    if ([upload.fieldName isEqual:name]) [out addObject:upload];
+  return [out copy];
+}
+
+- (NSDictionary *)formValues {
+  NSMutableDictionary *out = [NSMutableDictionary dictionary];
+  for (ALNMultipartPart *part in self.multipartParts) {
+    if ([part isKindOfClass:[ALNUpload class]]) continue;
+    out[part.fieldName] = [(out[part.fieldName] ?: @[]) arrayByAddingObject:part.text ?: @""];
+  }
+  if (ALNContentTypeIsFormURLEncoded([self headerValueForName:@"content-type"])) {
+    NSString *bodyString = [[NSString alloc] initWithData:self.body encoding:NSUTF8StringEncoding];
+    for (NSString *pair in [bodyString componentsSeparatedByString:@"&"]) {
+      if (!pair.length) continue;
+      NSRange equals = [pair rangeOfString:@"="];
+      NSString *name = ALNURLDecode(equals.location == NSNotFound ? pair : [pair substringToIndex:equals.location]);
+      NSString *value = equals.location == NSNotFound ? @"" : ALNURLDecode([pair substringFromIndex:equals.location+1]);
+      out[name] = [(out[name] ?: @[]) arrayByAddingObject:value];
+    }
+  }
+  return [out copy];
+}
+
 - (NSDictionary *)formParams {
   NSDictionary *cached = self.cachedFormParams;
   if (cached != nil) {
     return cached;
   }
 
-  NSDictionary *parsed = @{};
+  NSMutableDictionary *fields = [NSMutableDictionary dictionary];
+  for (ALNMultipartPart *part in self.multipartParts)
+    if (![part isKindOfClass:[ALNUpload class]]) fields[part.fieldName] = part.text ?: @"";
+  NSDictionary *parsed = [fields copy];
   if (ALNContentTypeIsFormURLEncoded([self headerValueForName:@"content-type"]) &&
       [_body length] > 0) {
     NSString *bodyString = [[NSString alloc] initWithData:_body encoding:NSUTF8StringEncoding];

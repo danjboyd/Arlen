@@ -3209,6 +3209,34 @@
   XCTAssertEqualObjects(@"431", [status stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]]);
 }
 
+- (void)testMultipartFragmentedReadsLimitsAndAborts {
+  for (NSString *backend in @[@"llhttp", @"legacy"]) {
+    int port = [self randomPort];
+    NSTask *server = [[NSTask alloc] init];
+    server.launchPath = @"/bin/bash";
+    server.arguments = @[@"-lc", [NSString stringWithFormat:
+        @"ARLEN_MAX_BODY_BYTES=115343360 ARLEN_HTTP_PARSER_BACKEND=%@ ./build/boomhauer --port %d", backend, port]];
+    server.standardOutput = [NSPipe pipe];
+    server.standardError = [NSPipe pipe];
+    [server launch];
+    @try {
+      BOOL ready = NO;
+      (void)[self requestPathWithRetries:@"/healthz" port:port attempts:60 success:&ready];
+      XCTAssertTrue(ready);
+      NSString *script = [NSString stringWithContentsOfFile:@"tests/fixtures/http/multipart_socket_probe.py"
+          encoding:NSUTF8StringEncoding error:NULL];
+      XCTAssertNotNil(script);
+      script = [script stringByReplacingOccurrencesOfString:@"__PORT__" withString:[NSString stringWithFormat:@"%d", port]];
+      int code = 0;
+      NSString *output = [self runPythonScript:script exitCode:&code];
+      XCTAssertEqual(code, 0, @"%@: %@", backend, output);
+      XCTAssertTrue([output containsString:@"multipart socket checks passed"], @"%@", output);
+    } @finally {
+      if (server.isRunning) { (void)kill(server.processIdentifier, SIGTERM); [server waitUntilExit]; }
+    }
+  }
+}
+
 - (void)testBodyLimitReturns413 {
   int curlCode = 0;
   int serverCode = 0;

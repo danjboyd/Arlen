@@ -158,3 +158,12 @@ Routing compile defaults:
 - Development server: `boomhauer`
 - Production process manager: `propane`
 - `propane` config is called "propane accessories"
+
+## Multipart request contract
+
+Multipart validation runs before controller dispatch and static responses. Text
+fields and typed file parts retain arrival order, with immutable binary data and
+no implicit filesystem writes. The server buffers requests under `requestLimits`;
+malformed forms return 400 and exceeded limits return 413. See
+[Multipart Uploads](MULTIPART_UPLOADS.md) for the supported parsing subset, error
+codes, limits, and object/file ownership contract.

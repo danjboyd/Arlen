@@ -213,3 +213,5 @@ Apple retains Foundation transport. GNUstep metadata uses libcurl's CA configura
 not GNUstep TLS user defaults. Use a dedicated maintenance worker. Refresh errors distinguish discovery/JWKS
 fetch failures, metadata validation failures, and cooldown. Diagnostics omit
 URLs, credentials, response bodies, and custom loader error details.
+
+For file-upload forms, use `[ctx.request uploadsForName:@"document"]` and `formParams`; see [Multipart Uploads](MULTIPART_UPLOADS.md) for examples and request limits.

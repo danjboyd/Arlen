@@ -949,6 +949,12 @@ static NSDictionary *ALNSecurityProfileDefaults(NSString *profileName) {
   if (finalLimits[@"maxBodyBytes"] == nil) {
     finalLimits[@"maxBodyBytes"] = @(1048576);
   }
+  NSDictionary *multipartDefaults = @{ @"maxMultipartParts":@128,
+      @"maxMultipartFieldBytes":@65536, @"maxMultipartFileBytes":@1048576,
+      @"maxMultipartHeaderBytes":@16384 };
+  for (NSString *key in multipartDefaults) {
+    if (finalLimits[key] == nil) finalLimits[key] = multipartDefaults[key];
+  }
   config[@"requestLimits"] = finalLimits;
 
   NSMutableDictionary *finalRuntimeLimits =

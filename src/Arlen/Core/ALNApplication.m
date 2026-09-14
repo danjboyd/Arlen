@@ -4903,6 +4903,15 @@ static void ALNFinalizeResponse(ALNApplication *application,
 }
 
 - (ALNResponse *)dispatchRequest:(ALNRequest *)request requiringRoute:(ALNRoute *)requiredRoute {
+  NSError *multipartError = nil;
+  if (![request parseMultipartFormWithLimits:self.config[@"requestLimits"] error:&multipartError]) {
+    ALNResponse *rejected = [[ALNResponse alloc] init];
+    rejected.statusCode = multipartError.code == ALNMultipartErrorLimitExceeded ? 413 : 400;
+    [rejected setTextBody:multipartError.localizedDescription];
+    rejected.committed = YES;
+    return rejected;
+  }
+
   BOOL fdDeltaDebugEnabled = ALNProcessFDDeltaDebugEnabled();
   NSInteger fdDeltaWarnThreshold =
       fdDeltaDebugEnabled ? ALNProcessFDDeltaWarnThreshold() : 0;

@@ -9,10 +9,10 @@ python3 tools/docs/generate_api_reference.py
 ```
 
 - Generated from source headers and metadata (deterministic output)
-- Public headers: `86`
-- Symbols: `149`
-- Public methods: `1018`
-- Public properties: `451`
+- Public headers: `87`
+- Symbols: `152`
+- Public methods: `1023`
+- Public properties: `461`
 
 ## API Surface Boundary
 
@@ -41,8 +41,11 @@ python3 tools/docs/generate_api_reference.py
 ### HTTP
 
 - [ALNHTTPServer](api/ALNHTTPServer.md): HTTP server host that binds an `ALNApplication` to socket runtime and request loop execution.
+- [ALNMultipart](api/ALNMultipart.md): HTTP request/response and server runtime primitives.
+- [ALNMultipartPart](api/ALNMultipartPart.md): HTTP request/response and server runtime primitives.
 - [ALNRequest](api/ALNRequest.md): Immutable HTTP request model containing method/path/query/headers/body and parsed parameter helpers.
 - [ALNResponse](api/ALNResponse.md): Mutable HTTP response model for status, headers, buffered bodies, and preflighted file streaming into wire-format bytes.
+- [ALNUpload](api/ALNUpload.md): HTTP request/response and server runtime primitives.
 
 ### MVC Controllers
 
@@ -231,6 +234,7 @@ python3 tools/docs/generate_api_reference.py
 - `src/Arlen/Data/ALNSQLDialect.h`
 - `src/Arlen/Data/ALNSchemaCodegen.h`
 - `src/Arlen/HTTP/ALNHTTPServer.h`
+- `src/Arlen/HTTP/ALNMultipart.h`
 - `src/Arlen/HTTP/ALNRequest.h`
 - `src/Arlen/HTTP/ALNResponse.h`
 - `src/Arlen/MVC/Controller/ALNContext.h`

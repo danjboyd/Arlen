@@ -375,3 +375,5 @@ framework tests require no tenant or public deployment.
 GNUstep OAuth metadata transport requires libcurl development files with TLS and
 asynchronous DNS (Debian/Ubuntu: `libcurl4-openssl-dev`). See the
 [getting-started guide](docs/GETTING_STARTED.md).
+
+Multipart forms provide ordered fields and binary uploads; see [Multipart Uploads](docs/MULTIPART_UPLOADS.md) for APIs and memory limits.

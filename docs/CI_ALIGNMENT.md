@@ -1,6 +1,6 @@
 # CI Alignment
 
-Last updated: 2026-09-13
+Last updated: 2026-09-14
 
 This document defines the intended shape of Arlen CI so workflow names,
 required checks, and actual project contracts stay aligned.
@@ -269,3 +269,13 @@ clang GNUstep toolchain remains at `/usr/GNUstep`. Contributors can run the same
 script as a non-root user; it requires local Unix socket access, no production
 credentials, and no TCP listener. This extends coverage within the existing
 job. Keep the current branch-protection checks unchanged: no new lane is added.
+
+## Multipart upload coverage
+
+The existing Linux quality unit/integration suites discover `MultipartTests` and
+`HTTPIntegrationTests/testMultipartFragmentedReadsLimitsAndAborts`. They cover
+binary preservation, ordered fields/files, parser limits, both HTTP backends,
+fragmented sockets, and aborted uploads. No CI lanes or required-check names
+change. Focused local runs use `make test-unit-filter TEST=MultipartTests` and
+`make test-integration-filter TEST=HTTPIntegrationTests/testMultipartFragmentedReadsLimitsAndAborts`
+after building `boomhauer` and sourcing `tools/source_gnustep_env.sh`.

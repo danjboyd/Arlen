@@ -2,6 +2,7 @@
 #define ALN_REQUEST_H
 
 #import <Foundation/Foundation.h>
+#import "ALNMultipart.h"
 
 #ifndef ARLEN_ENABLE_LLHTTP
 #define ARLEN_ENABLE_LLHTTP 1
@@ -26,6 +27,15 @@ typedef NS_ENUM(NSUInteger, ALNHTTPParserBackend) {
 @property(nonatomic, strong, readonly) NSData *body;
 @property(nonatomic, copy, readonly) NSDictionary *queryParams;
 @property(nonatomic, copy, readonly) NSDictionary *formParams;
+// formParams keeps the last text value for each name, matching URL-encoded forms.
+@property(nonatomic, copy, readonly) NSArray<ALNMultipartPart *> *multipartParts;
+@property(nonatomic, copy, readonly) NSArray<ALNUpload *> *uploads;
+@property(nonatomic, copy, readonly) NSDictionary<NSString *, NSArray<NSString *> *> *formValues;
+@property(nonatomic, strong, readonly, nullable) NSError *multipartError;
+// Applies defaults plus the supplied limits; failure exposes no partial results.
+- (BOOL)parseMultipartFormWithLimits:(nullable NSDictionary *)limits
+                             error:(NSError *_Nullable *_Nullable)error;
+- (NSArray<ALNUpload *> *)uploadsForName:(NSString *)name;
 @property(nonatomic, copy, readonly) NSDictionary *cookies;
 @property(nonatomic, copy) NSDictionary *routeParams;
 @property(nonatomic, copy) NSString *remoteAddress;

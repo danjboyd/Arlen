@@ -3555,7 +3555,8 @@ static BOOL ALNSendSSEHeaders(ALNSocketHandle clientFd, ALNResponse *response) {
         BOOL supportsStaticMethod = [request.method isEqualToString:@"GET"] ||
                                     [request.method isEqualToString:@"HEAD"];
         BOOL handledStatic = NO;
-        if (supportsStaticMethod) {
+        BOOL multipartValid = [request parseMultipartFormWithLimits:self.application.config[@"requestLimits"] error:NULL];
+        if (supportsStaticMethod && multipartValid) {
           NSArray *staticMounts = [self effectiveStaticMounts];
           for (NSDictionary *mount in staticMounts) {
             ALNResponse *staticResponse = ALNStaticResponseForMount(request, mount, self.publicRoot);
