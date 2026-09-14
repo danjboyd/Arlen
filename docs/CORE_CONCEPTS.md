@@ -24,6 +24,9 @@ This guide explains Arlen's runtime model at a high level.
 - `ALNController`: base controller with render helpers.
 - `ALNContext`: request-scoped object (`request`, `response`, `params`, `stash`, logging/perf references, validated params/auth/page-state helpers).
 - `ALNRequest`: parsed request model.
+- Response headers retain repeated values in insertion order; session middleware
+  appends its cookie after controller processing. See the
+  [response header contract](RESPONSE_HEADERS.md).
 - `ALNResponse`: mutable response builder.
 
 ## 3. EOC Templates

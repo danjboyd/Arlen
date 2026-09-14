@@ -397,7 +397,7 @@ static NSData *ALNAES256CTRTransform(NSData *input, NSData *key, NSData *iv, BOO
 
   if ([session count] == 0) {
     if (hadCookie) {
-      [context.response setHeader:@"Set-Cookie"
+      [context.response appendHeader:@"Set-Cookie"
                             value:[self setCookieHeaderWithValue:@"" maxAge:0]];
     }
     return;
@@ -412,7 +412,7 @@ static NSData *ALNAES256CTRTransform(NSData *input, NSData *key, NSData *iv, BOO
     return;
   }
 
-  [context.response setHeader:@"Set-Cookie"
+  [context.response appendHeader:@"Set-Cookie"
                         value:[self setCookieHeaderWithValue:token maxAge:self.maxAgeSeconds]];
 }
 

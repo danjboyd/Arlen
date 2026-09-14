@@ -279,3 +279,10 @@ fragmented sockets, and aborted uploads. No CI lanes or required-check names
 change. Focused local runs use `make test-unit-filter TEST=MultipartTests` and
 `make test-integration-filter TEST=HTTPIntegrationTests/testMultipartFragmentedReadsLimitsAndAborts`
 after building `boomhauer` and sourcing `tools/source_gnustep_env.sh`.
+
+Repeated response headers are covered by `ResponseTests` and
+`HTTPIntegrationTests/testRepeatedSetCookieSessionAndCookieJar` in the existing
+unit/integration suites. The live test builds a temporary app and uses Python's
+standard-library cookie jar to verify issuance, session coexistence, scoped
+cookies, three-cookie expiration, and HEAD behavior. No new lane or required
+check name is introduced.

@@ -35,6 +35,7 @@ toolchain env directly for the Linux/GNUstep path. On macOS, use
 - [Multipart Uploads](MULTIPART_UPLOADS.md): ordered form fields, binary files, limits, and memory ownership.
 
 - [App Authoring Guide](APP_AUTHORING_GUIDE.md): routes, controllers, middleware, and route metadata.
+- [Response Headers and Multiple Cookies](RESPONSE_HEADERS.md): repeated headers, session coexistence, and cookie expiration.
 - [Core Concepts](CORE_CONCEPTS.md): runtime architecture and request lifecycle.
 - [Getting Started: API-First Track](GETTING_STARTED_API_FIRST.md): JSON APIs, schema/auth contracts, and OpenAPI.
 - [Getting Started: HTML-First Track](GETTING_STARTED_HTML_FIRST.md): server-rendered EOC templates, layouts, and forms.

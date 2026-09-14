@@ -212,6 +212,9 @@
     "ALNApplication|clusterNodeID": {
       "purpose": "Node identifier used for distributed-runtime diagnostics and headers."
     },
+    "ALNResponse|headers": {
+      "purpose": "Legacy dictionary of normalized names and first values. Use response header methods for validated mutations and repeated values."
+    },
     "ALNResponse|fileBodyPath": {
       "purpose": "Existing regular file path to stream after Arlen preflights the descriptor before successful headers are sent."
     },
@@ -232,6 +235,30 @@
     }
   },
   "methods": {
+    "ALNResponse|setHeadersIfMissing:": {
+      "purpose": "Set only response header names that have no current value.",
+      "usage": "Existing first and repeated values are preserved. Invalid header input is ignored."
+    },
+    "ALNResponse|setHeader:value:": {
+      "purpose": "Replace all values for a case-insensitive response header name.",
+      "usage": "Use before transmission. Invalid names or CR/LF/NUL input leave the response unchanged; use appendHeader:value: to preserve other cookies."
+    },
+    "ALNResponse|appendHeader:value:": {
+      "purpose": "Append a separate field line for an explicitly supported repeatable header.",
+      "usage": "Use for Set-Cookie, WWW-Authenticate, Proxy-Authenticate, Link, Warning, Vary, or Cache-Control. NO means invalid input or an unsupported name; state is unchanged. Framing headers cannot be appended."
+    },
+    "ALNResponse|headerValuesForName:": {
+      "purpose": "Return all values for a case-insensitive header name in insertion order.",
+      "usage": "Use to inspect multiple cookies. The returned array is an immutable snapshot; an absent header returns an empty array."
+    },
+    "ALNResponse|headerForName:": {
+      "purpose": "Return the first response header value for a case-insensitive name, or nil.",
+      "usage": "Use headerValuesForName: when every repeated value is needed; this accessor does not combine values."
+    },
+    "ALNResponse|removeHeaderForName:": {
+      "purpose": "Remove every value for a case-insensitive header name and invalidate serialization.",
+      "usage": "Use the response method instead of mutating headers directly. Default Content-Length and Content-Type may be regenerated during serialization."
+    },
     "ALNPasswordHash|defaultArgon2idOptions": {
       "purpose": "Return Arlen's default Argon2id cost, salt-length, and digest-length policy.",
       "usage": "Use as the baseline policy, then copy and raise costs to match deployment hardware."

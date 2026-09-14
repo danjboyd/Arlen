@@ -178,6 +178,11 @@ For auth-aware flows:
 
 Use those helpers instead of digging through raw session data directly.
 
+For independent application cookies, use `[ctx.response appendHeader:@"Set-Cookie" value:cookie]`.
+Session middleware appends its own cookie without replacing application cookies.
+See [Response Headers and Multiple Cookies](RESPONSE_HEADERS.md) for issuance,
+logout, and all-values access.
+
 ## 5.1 Request-Spanning State In Production
 
 Sessions are signed cookie-backed by default, but app-owned domain lookups still

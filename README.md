@@ -327,6 +327,7 @@ Best next reads for evaluation:
 - [First App Guide](docs/FIRST_APP_GUIDE.md)
 - [Getting Started](docs/GETTING_STARTED.md)
 - [App Authoring Guide](docs/APP_AUTHORING_GUIDE.md)
+- [Response Headers and Multiple Cookies](docs/RESPONSE_HEADERS.md)
 - [Modules](docs/MODULES.md)
 - [Auth Module](docs/AUTH_MODULE.md)
 - [Deployment Guide](docs/DEPLOYMENT.md)

@@ -144,6 +144,9 @@ and whether each route came from plist configuration or Objective-C code.
 
 ## 7. Choose the Next Guide
 
+For login/logout flows that issue multiple cookies, see
+[Response Headers and Multiple Cookies](RESPONSE_HEADERS.md).
+
 - building JSON-first endpoints: `docs/GETTING_STARTED_API_FIRST.md`
 - building server-rendered pages: `docs/GETTING_STARTED_HTML_FIRST.md`
 - writing routes/controllers/middleware directly: `docs/APP_AUTHORING_GUIDE.md`

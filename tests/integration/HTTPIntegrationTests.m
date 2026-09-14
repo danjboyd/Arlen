@@ -3209,6 +3209,52 @@
   XCTAssertEqualObjects(@"431", [status stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]]);
 }
 
+- (void)testRepeatedSetCookieSessionAndCookieJar {
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *appRoot = [self createTempDirectoryWithPrefix:@"arlen-cookie-jar"];
+  XCTAssertNotNil(appRoot);
+  if (!appRoot) return;
+  NSTask *server = nil;
+  @try {
+    NSString *entrypoint = [NSString stringWithContentsOfFile:@"tests/fixtures/http/cookie_app.m"
+        encoding:NSUTF8StringEncoding error:NULL];
+    XCTAssertNotNil(entrypoint);
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"app_lite.m"] content:entrypoint]);
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"config/app.plist"]
+        content:@"{ host = \"127.0.0.1\"; port = 3000; logLevel = error; csrf = { enabled = NO; }; session = { enabled = YES; secret = \"fixture-only-session-secret-0123456789abcdef\"; cookieName = fixture_session; secure = NO; sameSite = Lax; }; }"]);
+    NSString *envPrefix = [NSString stringWithFormat:@"ARLEN_FRAMEWORK_ROOT=%@ ARLEN_APP_ROOT=%@",
+        [self shellQuoted:repoRoot], [self shellQuoted:appRoot]];
+    int prepareCode = 0;
+    NSString *prepareOutput = [self runShellCapture:[NSString stringWithFormat:
+        @"%@ ./bin/boomhauer --prepare-only 2>&1", envPrefix] exitCode:&prepareCode];
+    XCTAssertEqual(prepareCode, 0, @"%@", prepareOutput);
+    if (prepareCode != 0) return;
+    int port = [self randomPort];
+    server = [[NSTask alloc] init];
+    server.launchPath = @"/bin/bash";
+    server.arguments = @[@"-lc", [NSString stringWithFormat:@"%@ %@ --port %d", envPrefix,
+        [self shellQuoted:[appRoot stringByAppendingPathComponent:@".boomhauer/build/boomhauer-app"]], port]];
+    server.standardOutput = [NSPipe pipe];
+    server.standardError = [NSPipe pipe];
+    [server launch];
+    BOOL ready = NO;
+    (void)[self requestPathWithRetries:@"/healthz" port:port attempts:60 success:&ready];
+    XCTAssertTrue(ready);
+    if (!ready) return;
+    NSString *script = [NSString stringWithContentsOfFile:@"tests/fixtures/http/cookie_jar_probe.py"
+        encoding:NSUTF8StringEncoding error:NULL];
+    XCTAssertNotNil(script);
+    script = [script stringByReplacingOccurrencesOfString:@"__PORT__" withString:[NSString stringWithFormat:@"%d", port]];
+    int code = 0;
+    NSString *output = [self runPythonScript:script exitCode:&code];
+    XCTAssertEqual(code, 0, @"%@", output);
+    XCTAssertTrue([output containsString:@"cookie jar issuance, scope, session, logout and HEAD checks passed"], @"%@", output);
+  } @finally {
+    if (server.isRunning) { (void)kill(server.processIdentifier, SIGTERM); [server waitUntilExit]; }
+    [[NSFileManager defaultManager] removeItemAtPath:appRoot error:NULL];
+  }
+}
+
 - (void)testMultipartFragmentedReadsLimitsAndAborts {
   for (NSString *backend in @[@"llhttp", @"legacy"]) {
     int port = [self randomPort];

@@ -827,6 +827,10 @@ Load and print merged runtime config.
 
 ## `boomhauer` Script (`bin/boomhauer`)
 
+The HTTP runtime transmits repeated response headers as separate lines, including
+multiple cookies on GET and HEAD responses. See [Response Headers](RESPONSE_HEADERS.md)
+for the append API, session middleware behavior, and framing restrictions.
+
 Usage:
 
 ```text

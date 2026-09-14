@@ -108,12 +108,8 @@ static BOOL ALNHeaderNameIsValid(NSString *name) {
   if (![name isKindOfClass:[NSString class]] || [name length] == 0) {
     return NO;
   }
-  const char *bytes = [name UTF8String];
-  if (bytes == NULL) {
-    return NO;
-  }
-  for (const unsigned char *cursor = (const unsigned char *)bytes; *cursor != '\0'; cursor++) {
-    unsigned char c = *cursor;
+  for (NSUInteger index = 0; index < [name length]; index++) {
+    unichar c = [name characterAtIndex:index];
     if (c > 127) {
       return NO;
     }
@@ -140,6 +136,18 @@ static BOOL ALNHeaderValueContainsForbiddenBytes(NSString *value) {
     }
   }
   return NO;
+}
+
+// An explicit allowlist prevents append from introducing ambiguous framing or
+// changing singleton fields. Expand only with a documented repeated-field contract.
+static BOOL ALNHeaderSupportsRepeatedValues(NSString *key) {
+  return [key isEqualToString:@"set-cookie"] ||
+         [key isEqualToString:@"www-authenticate"] ||
+         [key isEqualToString:@"proxy-authenticate"] ||
+         [key isEqualToString:@"link"] ||
+         [key isEqualToString:@"warning"] ||
+         [key isEqualToString:@"vary"] ||
+         [key isEqualToString:@"cache-control"];
 }
 
 static NSString *ALNStatusText(NSInteger statusCode) {
@@ -193,6 +201,7 @@ static NSString *ALNStatusText(NSInteger statusCode) {
 @property(nonatomic, strong) NSMutableArray *orderedHeaderKeys;
 @property(nonatomic, strong) NSMutableDictionary *headerNamesByNormalizedKey;
 @property(nonatomic, strong) NSData *cachedHeaderData;
+@property(nonatomic, strong) NSMutableDictionary<NSString *, NSArray<NSString *> *> *additionalHeaderValues;
 @property(nonatomic, assign) BOOL serializedHeadersDirty;
 
 @end
@@ -227,7 +236,7 @@ static BOOL ALNResponseCanUseSharedHeaderSerialization(ALNResponse *response,
                                                        NSString **contentTypeValueOut,
                                                        NSString **serverNameOut,
                                                        NSString **serverValueOut) {
-  if (response == nil) {
+  if (response == nil || [response.additionalHeaderValues count] > 0) {
     return NO;
   }
 
@@ -492,7 +501,8 @@ static NSData *ALNSharedSerializedHeaderDataForResponse(ALNResponse *response) {
                     value:(NSString *)value
                invalidate:(BOOL)invalidate {
   NSString *normalizedKey = ALNNormalizedHeaderKey(name);
-  if ([normalizedKey length] == 0 || !ALNHeaderNameIsValid(normalizedKey)) {
+  if (ALNHeaderValueContainsForbiddenBytes(name) ||
+      [normalizedKey length] == 0 || !ALNHeaderNameIsValid(normalizedKey)) {
     return NO;
   }
   NSString *resolvedValue = value ?: @"";
@@ -506,14 +516,16 @@ static NSData *ALNSharedSerializedHeaderDataForResponse(ALNResponse *response) {
   NSString *currentValue = [self.headers[normalizedKey] isKindOfClass:[NSString class]]
                                ? self.headers[normalizedKey]
                                : nil;
-  if (currentValue != nil && [currentValue isEqualToString:resolvedValue]) {
-    self.headerNamesByNormalizedKey[normalizedKey] = displayName;
+  BOOL repeated = [self.additionalHeaderValues[normalizedKey] count] > 0;
+  if (currentValue != nil && [currentValue isEqualToString:resolvedValue] && !repeated &&
+      [self.headerNamesByNormalizedKey[normalizedKey] isEqualToString:displayName]) {
     return NO;
   }
   if (currentValue == nil) {
     [self insertOrderedHeaderKeyIfNeeded:normalizedKey];
   }
-  self.headers[normalizedKey] = resolvedValue;
+  [self.additionalHeaderValues removeObjectForKey:normalizedKey];
+  self.headers[normalizedKey] = [resolvedValue copy];
   self.headerNamesByNormalizedKey[normalizedKey] = displayName;
   if (invalidate) {
     [self invalidateSerializedHeaders];
@@ -578,13 +590,53 @@ static NSData *ALNSharedSerializedHeaderDataForResponse(ALNResponse *response) {
   (void)[self setHeaderInternal:name value:value invalidate:YES];
 }
 
+- (BOOL)appendHeader:(NSString *)name value:(NSString *)value {
+  NSString *key = ALNNormalizedHeaderKey(name);
+  if (ALNHeaderValueContainsForbiddenBytes(name) || !ALNHeaderNameIsValid(key) ||
+      !ALNHeaderSupportsRepeatedValues(key) || ALNHeaderValueContainsForbiddenBytes(value)) {
+    return NO;
+  }
+  if ([self headerForName:key] == nil) {
+    return [self setHeaderInternal:name value:value invalidate:YES];
+  }
+  if (self.additionalHeaderValues == nil) {
+    self.additionalHeaderValues = [NSMutableDictionary dictionary];
+  }
+  NSArray *existing = self.additionalHeaderValues[key] ?: @[];
+  self.additionalHeaderValues[key] = [existing arrayByAddingObject:[value copy]];
+  [self invalidateSerializedHeaders];
+  return YES;
+}
+
+- (NSArray<NSString *> *)headerValuesForName:(NSString *)name {
+  NSString *key = ALNNormalizedHeaderKey(name);
+  NSString *first = [self headerForName:name];
+  if (first == nil) {
+    return @[];
+  }
+  NSArray *additional = self.additionalHeaderValues[key] ?: @[];
+  return [@[ first ] arrayByAddingObjectsFromArray:additional];
+}
+
+- (void)removeHeaderForName:(NSString *)name {
+  NSString *key = ALNNormalizedHeaderKey(name);
+  if (key == nil || self.headers[key] == nil) {
+    return;
+  }
+  [self.headers removeObjectForKey:key];
+  [self.additionalHeaderValues removeObjectForKey:key];
+  [self.headerNamesByNormalizedKey removeObjectForKey:key];
+  [self.orderedHeaderKeys removeObject:key];
+  [self invalidateSerializedHeaders];
+}
+
 - (void)setHeadersIfMissing:(NSDictionary<NSString *, NSString *> *)headers {
   if (![headers isKindOfClass:[NSDictionary class]] || [headers count] == 0) {
     return;
   }
   BOOL mutated = NO;
   for (id rawName in headers) {
-    if (![rawName isKindOfClass:[NSString class]]) {
+    if (![rawName isKindOfClass:[NSString class]] || ALNHeaderValueContainsForbiddenBytes(rawName)) {
       continue;
     }
     NSString *name = [(NSString *)rawName
@@ -733,6 +785,12 @@ static NSData *ALNSharedSerializedHeaderDataForResponse(ALNResponse *response) {
     [head appendString:@": "];
     [head appendString:value];
     [head appendString:@"\r\n"];
+    for (NSString *additional in self.additionalHeaderValues[normalizedKey]) {
+      [head appendString:displayName];
+      [head appendString:@": "];
+      [head appendString:additional];
+      [head appendString:@"\r\n"];
+    }
   }
   [head appendString:@"\r\n"];
   NSData *serialized = [head dataUsingEncoding:NSUTF8StringEncoding] ?: [NSData data];
