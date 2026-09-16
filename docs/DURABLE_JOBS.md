@@ -251,3 +251,11 @@ queue files remain `0600`. It avoids the observed GNUstep combined
 create-directory/attributes failure without relaxing permissions. The Windows
 Foundation path remains unchanged. Fixing initialization does not change the
 file adapter's concurrency or recovery limits.
+
+Server-tool discovery honors `ARLEN_TEST_PG_BIN` first (an invalid explicit path
+fails), then a complete `pg_config --bindir`, an `initdb` directory on PATH, and
+finally the newest complete Debian/Ubuntu server directory under
+`/usr/lib/postgresql`. This allows client development tools and server packages
+to have different versions. The Linux quality workflow installs the `postgresql`
+server package when tools are missing; clang-based GNUstep provisioning is
+unchanged. ORM identifier acceptance uses the same resolver.

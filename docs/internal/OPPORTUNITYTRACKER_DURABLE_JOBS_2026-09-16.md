@@ -104,3 +104,19 @@ smoke binary was missing, sanitizer suppression validation failed, and the
 release-certification risk register was stale. These failures are separate from
 the reproduced queue defect. Required checks must pass before merging the
 corrective PR; the queue's local pass does not authorize a check bypass.
+
+The first corrective PR run reached queue acceptance and exposed a provisioning
+gap: the self-hosted runner lacked PostgreSQL server tools. The follow-up
+workflow installs the server package when absent and shares deterministic
+server-tool discovery with ORM acceptance. This is a test infrastructure change;
+acceptance still requires a real disposable database and does not skip tests.
+
+GitHub inspection also found that protected contexts used full workflow/job
+names, while jobs emitted only bare names. Explicit job display names now match
+the existing three protected contexts. The inactivity-disabled sanitizer workflow
+was re-enabled. No required check or protection was removed.
+
+The re-enabled sanitizer gate failed validation because four existing GNUstep
+TSan suppressions expired on 2026-06-30. Their dates and policy are unchanged;
+revalidation is required before the gate can pass. This is independent of the
+SQL correction and remains a merge blocker.

@@ -307,3 +307,17 @@ branch protection must continue requiring the existing three checks listed
 above. Local contributor instructions are in `docs/TESTING_WORKFLOW.md` and the
 runtime contract is in `docs/DURABLE_JOBS.md`. The clang-based `/usr/GNUstep`
 provisioning contract is unchanged.
+
+The quality workflow verifies PostgreSQL server tools before isolated acceptance
+and installs the distro `postgresql` package if missing, including on the
+preinstalled-GNUstep runner. `tools/ci/resolve_postgres_test_bin.sh` honors an
+explicit `ARLEN_TEST_PG_BIN`, then probes `pg_config`, PATH, and installed
+Debian/Ubuntu server directories. Both durable jobs and ORM identifier acceptance
+use that resolver. This provisions a test dependency without changing the
+`/usr/GNUstep` clang toolchain or weakening any gate.
+
+The required job display names explicitly emit `linux-quality / quality-gate`,
+`linux-sanitizers / sanitizer-gate`, and `docs-quality / docs-gate`, matching the
+existing branch-protection contexts exactly. Keep those literal names aligned
+when editing workflows. Bare job IDs did not satisfy the configured contexts;
+no required check is removed or weakened by this alignment.

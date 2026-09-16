@@ -12,6 +12,7 @@ concurrency:
 
 jobs:
   quality-gate:
+    name: linux-quality / quality-gate
     runs-on: [self-hosted, Linux, X64, arlen, iep-apt]
     timeout-minutes: 90
     steps:
@@ -25,6 +26,14 @@ jobs:
           ARLEN_CI_GNUSTEP_STRATEGY: preinstalled
         run: |
           bash ./tools/ci/install_ci_dependencies.sh
+
+      - name: Install PostgreSQL server tools for isolated acceptance
+        run: |
+          if ! bash tools/ci/resolve_postgres_test_bin.sh; then
+            sudo apt-get update
+            sudo apt-get install -y postgresql
+          fi
+          bash tools/ci/resolve_postgres_test_bin.sh
 
       - name: Verify durable jobs concurrency, crash recovery, and database outages
         run: |

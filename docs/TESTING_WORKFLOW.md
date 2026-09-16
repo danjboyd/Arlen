@@ -378,3 +378,17 @@ Logs are saved to `build/release_confidence/durable_jobs.log`. The
 This runs before the broader gate as an explicit step in
 `linux-quality / quality-gate`, so later failures do not skip queue acceptance.
 Required check names and branch-protection settings are unchanged.
+
+Server-tool discovery honors `ARLEN_TEST_PG_BIN` first (an invalid explicit path
+fails), then a complete `pg_config --bindir`, an `initdb` directory on PATH, and
+finally the newest complete Debian/Ubuntu server directory under
+`/usr/lib/postgresql`. This allows client development tools and server packages
+to have different versions. The Linux quality workflow installs the `postgresql`
+server package when tools are missing; clang-based GNUstep provisioning is
+unchanged. ORM identifier acceptance uses the same resolver.
+
+The required job display names explicitly emit `linux-quality / quality-gate`,
+`linux-sanitizers / sanitizer-gate`, and `docs-quality / docs-gate`, matching the
+existing branch-protection contexts exactly. Keep those literal names aligned
+when editing workflows. Bare job IDs did not satisfy the configured contexts;
+no required check is removed or weakened by this alignment.
