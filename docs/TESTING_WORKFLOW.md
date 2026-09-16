@@ -366,9 +366,15 @@ Coverage includes four producers, four consumers, accepted-ID reconciliation,
 kill/restart, finite leases and heartbeat renewal, stale-worker mutation
 rejection, transaction rollback, retry exhaustion, replay/deduplication,
 module payload/results, database outage recovery, and private file initialization.
+Lock-contention coverage holds a terminal job or queue-control row locked while
+another adapter claims unrelated work, checks same-queue and cross-queue
+progress, and verifies eventual cleanup after release. A 205-job backlog verifies
+the 100-job cleanup limit and progress across polls; live and retryable leases
+must remain untouched by terminal cleanup.
 Logs are saved to `build/release_confidence/durable_jobs.log`. The
 `durable-jobs-tests` target is the inner bundle runner; use the outer
 `ci-durable-jobs` target to supply the isolated database contract.
 
-This runs as an explicit step in `linux-quality / quality-gate`; required check
-names and branch-protection settings are unchanged.
+This runs before the broader gate as an explicit step in
+`linux-quality / quality-gate`, so later failures do not skip queue acceptance.
+Required check names and branch-protection settings are unchanged.

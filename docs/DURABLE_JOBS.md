@@ -146,8 +146,11 @@ adopt the lease contract. The baseline adapter conformance suite assumes ID-only
 acknowledgement; use the durable jobs suite for this capability.
 
 A later claim recovers expired work; expired final attempts transition to
-`failed`. Recovery is driven by polling workers, including when queues are
-paused. There is no separate reaper service. Explicit retry delays come from the
+`failed`. Each dequeue cleans up at most 100 expired final-attempt jobs, ordered
+by expiry and sequence. Cleanup skips locked jobs, so a busy terminal job cannot
+block unrelated claims; later polls revisit it after its lock is released.
+Cleanup also runs when queues are paused. Recovery is driven by polling workers;
+there is no separate reaper service. Explicit retry delays come from the
 worker/runtime; the jobs module retains its constant, linear, and exponential
 backoff policies. Recovered crashed attempts become eligible immediately.
 
@@ -178,7 +181,10 @@ needed, transactional application-side ownership checks for side effects.
 | `draining` | Rejected | Allowed until empty | Continues |
 
 A duplicate existing idempotency key can still resolve its ID during drain.
-Queue locks serialize control changes with claim/enqueue transactions. A claim
+Queue locks serialize control changes with claim/enqueue transactions. Claims
+skip busy queue-control rows and consider only queues locked by that claim
+transaction, allowing other queues to keep processing. Skipped queues become
+eligible on a later poll after their control lock is released. A claim
 that committed before pause may still begin execution after the pause request.
 Draining stays enabled until an explicit resume; inspect shared counts for zero
 pending and leased jobs. Queue controls apply across independent processes.

@@ -709,7 +709,9 @@ Build and run the first-party jobs worker loop for the current app root.
 For separate web/worker processes, register `ALNPostgresJobAdapter` in the app
 before jobs module configuration and apply
 `tools/migrations/jobs/001_postgres_jobs.sql`. The worker automatically renews
-and fences supported leases. Use `--run-scheduler` in only one process; other
+and fences supported leases. Each PostgreSQL dequeue cleans up at most 100
+expired final attempts and skips busy job/queue rows so unrelated work remains
+claimable. Use `--run-scheduler` in only one process; other
 workers consume the shared queue without it. See [Durable Jobs](DURABLE_JOBS.md)
 for the database/dependency contract, transaction API, shared pause/drain, and
 persistent result polling. No new worker CLI flags are required.

@@ -290,12 +290,16 @@ check name is introduced.
 ## Durable jobs reliability coverage
 
 `linux-quality / quality-gate` explicitly runs `make ci-durable-jobs` after
-sourcing the repo GNUstep environment. The entrypoint
+sourcing the repo GNUstep environment, before the broader Linux quality gate so
+unrelated later failures do not skip queue acceptance. The entrypoint
 `tools/ci/run_durable_jobs.sh` provisions a disposable PostgreSQL cluster and
 executes the vendored XCTest runner and independent process probes. It requires
 real database concurrency, worker kill/restart, lease fencing/renewal, durable
 results, transaction rollback, retry/replay/deduplication, database outages, and
-module integration. Database provisioning failures fail the gate.
+module integration. The same gate also requires nonblocking same-queue and
+cross-queue claims under terminal-job/control-row contention, eventual cleanup
+after lock release, bounded cleanup backlogs, and preservation of live/retryable
+leases. Database provisioning failures fail the gate.
 
 The existing artifact upload includes
 `build/release_confidence/durable_jobs.log`. No CI lane is renamed or added;

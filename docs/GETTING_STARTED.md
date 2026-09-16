@@ -228,3 +228,7 @@ The [Durable Jobs guide](DURABLE_JOBS.md) covers setup, transactional enqueue,
 provider result methods, heartbeat pool capacity, shared queue controls, and
 single-scheduler deployment. The default memory adapter is for development and
 tests; file persistence alone does not provide worker crash recovery.
+
+PostgreSQL workers skip locked expired jobs and busy queue controls when claiming
+other work. Final-attempt cleanup processes at most 100 jobs per poll; skipped
+jobs and larger cleanup backlogs are revisited by subsequent worker polls.
