@@ -23,6 +23,7 @@ preview, and what is in flight. For engineering history, see
 | Auth | Sessions, CSRF, rate limiting, password reset, TOTP MFA, recovery codes, passkeys/WebAuthn, OIDC/provider login |
 | Auth UI | `headless`, `module-ui`, and `generated-app-ui` ownership modes |
 | Modules | `auth`, `admin-ui`, `jobs`, `notifications`, `storage`, `ops`, `search` |
+| Durable jobs | PostgreSQL transactional enqueue, renewable fenced leases, crash recovery, shared queue controls, retained results |
 | Data layer | PostgreSQL-first migrations, schema codegen, typed SQL helpers, `ALNSQLBuilder` |
 | ORM (optional) | ArlenORM SQL layer over PostgreSQL |
 | Realtime | WebSocket, SSE, live fragments, durable event streams (append/replay/auth) |

@@ -9,10 +9,10 @@ python3 tools/docs/generate_api_reference.py
 ```
 
 - Generated from source headers and metadata (deterministic output)
-- Public headers: `87`
-- Symbols: `152`
-- Public methods: `1026`
-- Public properties: `461`
+- Public headers: `88`
+- Symbols: `155`
+- Public methods: `1043`
+- Public properties: `467`
 
 ## API Surface Boundary
 
@@ -156,6 +156,7 @@ python3 tools/docs/generate_api_reference.py
 - [ALNAuthProviderSessionResolver](api/ALNAuthProviderSessionResolver.md): Protocol contract exported as part of the `ALNAuthProviderSessionResolver` API surface.
 - [ALNAuthSession](api/ALNAuthSession.md): Support services for auth, metrics, logging, performance, realtime, and adapters.
 - [ALNCacheAdapter](api/ALNCacheAdapter.md): Cache adapter protocol for set/get/remove/clear operations with optional TTL semantics.
+- [ALNDurableJobAdapter](api/ALNDurableJobAdapter.md): Durable jobs contract for fenced completion, renewal, status/results, replay, and shared queue controls.
 - [ALNEventEnvelope](api/ALNEventEnvelope.md): Support services for auth, metrics, logging, performance, realtime, and adapters.
 - [ALNEventStreamAppendResult](api/ALNEventStreamAppendResult.md): Support services for auth, metrics, logging, performance, realtime, and adapters.
 - [ALNEventStreamAuthorizationHook](api/ALNEventStreamAuthorizationHook.md): Lifecycle hook protocol for `ALNEventStreamAuthorizationHook` implementations.
@@ -167,7 +168,7 @@ python3 tools/docs/generate_api_reference.py
 - [ALNEventStreamRequestContext](api/ALNEventStreamRequestContext.md): Support services for auth, metrics, logging, performance, realtime, and adapters.
 - [ALNEventStreamService](api/ALNEventStreamService.md): Support services for auth, metrics, logging, performance, realtime, and adapters.
 - [ALNEventStreamStore](api/ALNEventStreamStore.md): Protocol contract exported as part of the `ALNEventStreamStore` API surface.
-- [ALNFileJobAdapter](api/ALNFileJobAdapter.md): Filesystem-backed job queue adapter for durable local/edge deployments.
+- [ALNFileJobAdapter](api/ALNFileJobAdapter.md): Filesystem-persisted job queue for one adapter instance; no cross-process coordination or crashed-worker lease recovery.
 - [ALNFileMailAdapter](api/ALNFileMailAdapter.md): Filesystem-backed mail adapter that writes deliveries to disk for auditing/testing.
 - [ALNFileSystemAttachmentAdapter](api/ALNFileSystemAttachmentAdapter.md): Filesystem-backed attachment adapter for durable binary storage.
 - [ALNInMemoryAttachmentAdapter](api/ALNInMemoryAttachmentAdapter.md): In-memory adapter implementation useful for development and tests.
@@ -180,6 +181,7 @@ python3 tools/docs/generate_api_reference.py
 - [ALNInMemoryWebhookAdapter](api/ALNInMemoryWebhookAdapter.md): In-memory adapter implementation useful for development and tests.
 - [ALNJobAdapter](api/ALNJobAdapter.md): Job adapter protocol for enqueue/dequeue/ack/retry operations and queue state diagnostics.
 - [ALNJobEnvelope](api/ALNJobEnvelope.md): Immutable leased-job envelope containing identity, payload, attempt counters, and schedule metadata.
+- [ALNJobLease](api/ALNJobLease.md): Immutable job claim carrying an ownership token, initial expiration, and heartbeat duration.
 - [ALNJobWorker](api/ALNJobWorker.md): Worker orchestration helper that leases due jobs and executes them through a runtime callback.
 - [ALNJobWorkerRunSummary](api/ALNJobWorkerRunSummary.md): Summary payload for one worker run, including lease/ack/retry/error counters.
 - [ALNJobWorkerRuntime](api/ALNJobWorkerRuntime.md): Worker runtime callback protocol that decides ack/retry/discard disposition for leased jobs.
@@ -193,6 +195,7 @@ python3 tools/docs/generate_api_reference.py
 - [ALNOIDCClient](api/ALNOIDCClient.md): Support services for auth, metrics, logging, performance, realtime, and adapters.
 - [ALNPasswordHash](api/ALNPasswordHash.md): Argon2id password hashing helpers that emit PHC strings, verify candidate passwords, and report when stored hashes should be rehashed.
 - [ALNPerfTrace](api/ALNPerfTrace.md): Per-request performance stage recorder used for internal timing diagnostics and perf event export.
+- [ALNPostgresJobAdapter](api/ALNPostgresJobAdapter.md): PostgreSQL durable queue with transactional enqueue, fenced renewable leases, retained results, replay, and shared queue controls. See docs/DURABLE_JOBS.md.
 - [ALNRealtimeHub](api/ALNRealtimeHub.md): In-process pub/sub hub used for websocket channel fanout and simple realtime event routing.
 - [ALNRealtimeSubscriber](api/ALNRealtimeSubscriber.md): Realtime callback protocol implemented by websocket/session subscribers.
 - [ALNRealtimeSubscription](api/ALNRealtimeSubscription.md): Subscription token returned by realtime hub subscribe calls and used for unsubscribe operations.
@@ -288,6 +291,7 @@ python3 tools/docs/generate_api_reference.py
 - `src/Arlen/Support/ALNPasswordHash.h`
 - `src/Arlen/Support/ALNPerf.h`
 - `src/Arlen/Support/ALNPlatform.h`
+- `src/Arlen/Support/ALNPostgresJobAdapter.h`
 - `src/Arlen/Support/ALNRealtime.h`
 - `src/Arlen/Support/ALNRecoveryCodes.h`
 - `src/Arlen/Support/ALNServices.h`

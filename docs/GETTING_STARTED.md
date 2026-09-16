@@ -218,3 +218,13 @@ fetch failures, metadata validation failures, and cooldown. Diagnostics omit
 URLs, credentials, response bodies, and custom loader error details.
 
 For file-upload forms, use `[ctx.request uploadsForName:@"document"]` and `formParams`; see [Multipart Uploads](MULTIPART_UPLOADS.md) for examples and request limits.
+
+## Background work in separate processes
+
+Configure `ALNPostgresJobAdapter` before registering the jobs module when web
+processes enqueue work for a separate worker. Apply its initial migration, use
+the same database/namespace in each process, and launch `arlen jobs worker`.
+The [Durable Jobs guide](DURABLE_JOBS.md) covers setup, transactional enqueue,
+provider result methods, heartbeat pool capacity, shared queue controls, and
+single-scheduler deployment. The default memory adapter is for development and
+tests; file persistence alone does not provide worker crash recovery.

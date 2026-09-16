@@ -55,6 +55,30 @@ static NSError *ALNPOSIXErrorForPath(NSString *path, NSString *message) {
   return [NSError errorWithDomain:NSPOSIXErrorDomain code:errorCode userInfo:userInfo];
 }
 
+#if !defined(_WIN32)
+// Create each missing component with private permissions from the outset. GNUstep
+// libs-base 1.31 can create the directory but fail its combined attributes call.
+static BOOL ALNCreatePrivateDirectory(NSString *path, NSError **error) {
+  if (mkdir([path fileSystemRepresentation], 0700) == 0) return YES;
+  if (errno == ENOENT) {
+    NSString *parent = [path stringByDeletingLastPathComponent];
+    if (parent.length == 0) parent = @".";
+    if (![parent isEqualToString:path] && ALNCreatePrivateDirectory(parent, error)) {
+      if (mkdir([path fileSystemRepresentation], 0700) == 0) return YES;
+    } else {
+      return NO;
+    }
+  }
+  if (errno == EEXIST) {
+    struct stat info;
+    if (lstat([path fileSystemRepresentation], &info) == 0 && S_ISDIR(info.st_mode)) return YES;
+    errno = ENOTDIR;
+  }
+  if (error) *error = ALNPOSIXErrorForPath(path, @"private directory could not be created");
+  return NO;
+}
+#endif
+
 static BOOL ALNEnsurePrivateDirectory(NSFileManager *fileManager, NSString *path, NSError **error) {
   if (![path isKindOfClass:[NSString class]] || [path length] == 0) {
     if (error != NULL) {
@@ -67,6 +91,18 @@ static BOOL ALNEnsurePrivateDirectory(NSFileManager *fileManager, NSString *path
     return NO;
   }
 
+#if !defined(_WIN32)
+  if (!ALNCreatePrivateDirectory(path, error)) return NO;
+  int fd = open([path fileSystemRepresentation], O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
+  if (fd < 0) {
+    if (error) *error = ALNPOSIXErrorForPath(path, @"private directory could not be opened");
+    return NO;
+  }
+  BOOL secured = (fchmod(fd, 0700) == 0);
+  if (!secured && error) *error = ALNPOSIXErrorForPath(path, @"private directory permissions could not be set");
+  close(fd);
+  if (!secured) return NO;
+#else
   NSError *directoryError = nil;
   if (![fileManager createDirectoryAtPath:path
               withIntermediateDirectories:YES
@@ -87,6 +123,7 @@ static BOOL ALNEnsurePrivateDirectory(NSFileManager *fileManager, NSString *path
     }
     return NO;
   }
+#endif
   return YES;
 }
 
@@ -618,6 +655,74 @@ static ALNJobEnvelope *ALNJobEnvelopeFromDictionary(id value) {
 
 @end
 
+@implementation ALNJobLease
+- (instancetype)initWithEnvelope:(ALNJobEnvelope *)envelope leaseToken:(NSString *)leaseToken
+                 leaseExpiresAt:(NSDate *)leaseExpiresAt leaseDurationSeconds:(NSTimeInterval)leaseDurationSeconds {
+  self = [super initWithJobID:envelope.jobID name:envelope.name payload:envelope.payload
+                     attempt:envelope.attempt maxAttempts:envelope.maxAttempts notBefore:envelope.notBefore
+                   createdAt:envelope.createdAt sequence:envelope.sequence];
+  if (self) {
+    _leaseToken = [leaseToken copy];
+    _leaseExpiresAt = leaseExpiresAt;
+    _leaseDurationSeconds = leaseDurationSeconds;
+  }
+  return self;
+}
+- (id)copyWithZone:(NSZone *)zone {
+  return [[ALNJobLease allocWithZone:zone] initWithEnvelope:self leaseToken:self.leaseToken
+      leaseExpiresAt:self.leaseExpiresAt leaseDurationSeconds:self.leaseDurationSeconds];
+}
+@end
+
+// One heartbeat per executing job. The condition joins shutdown before completion/retry.
+@interface ALNJobHeartbeat : NSObject
+@property(nonatomic, strong) NSCondition *condition;
+@property(nonatomic, strong) id<ALNDurableJobAdapter> adapter;
+@property(nonatomic, strong) ALNJobLease *job;
+@property(nonatomic, strong) NSError *failure;
+@property(nonatomic, assign) BOOL stopping;
+@property(nonatomic, assign) BOOL finished;
+- (void)run;
+- (NSError *)stop;
+@end
+@implementation ALNJobHeartbeat
+- (instancetype)init {
+  self = [super init];
+  if (self) _condition = [[NSCondition alloc] init];
+  return self;
+}
+- (void)run {
+  @autoreleasepool {
+    [self.condition lock];
+    while (!self.stopping) {
+      NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:self.job.leaseDurationSeconds / 3.0];
+      while (!self.stopping && [deadline timeIntervalSinceNow] > 0) [self.condition waitUntilDate:deadline];
+      if (self.stopping) break;
+      [self.condition unlock];
+      NSError *error = nil;
+      BOOL renewed = [self.adapter renewJob:self.job error:&error];
+      [self.condition lock];
+      if (!renewed) {
+        self.failure = error ?: ALNServiceError(505, @"job heartbeat failed", nil);
+        break;
+      }
+    }
+    self.finished = YES;
+    [self.condition broadcast];
+    [self.condition unlock];
+  }
+}
+- (NSError *)stop {
+  [self.condition lock];
+  self.stopping = YES;
+  [self.condition broadcast];
+  while (!self.finished) [self.condition wait];
+  NSError *failure = self.failure;
+  [self.condition unlock];
+  return failure;
+}
+@end
+
 @interface ALNJobWorker ()
 
 @property(nonatomic, strong) id<ALNJobAdapter> jobsAdapter;
@@ -676,15 +781,41 @@ static ALNJobEnvelope *ALNJobEnvelopeFromDictionary(id value) {
 
     leasedCount += 1;
 
+    id<ALNDurableJobAdapter> durable = [self.jobsAdapter respondsToSelector:@selector(completeJob:result:error:)]
+                                          ? (id<ALNDurableJobAdapter>)self.jobsAdapter : nil;
+    ALNJobHeartbeat *heartbeat = nil;
+    if (durable && [job isKindOfClass:[ALNJobLease class]]) {
+      heartbeat = [[ALNJobHeartbeat alloc] init];
+      heartbeat.adapter = durable;
+      heartbeat.job = (ALNJobLease *)job;
+      [[[NSThread alloc] initWithTarget:heartbeat selector:@selector(run) object:nil] start];
+    }
     NSError *handlerError = nil;
-    ALNJobWorkerDisposition disposition = [runtime handleJob:job error:&handlerError];
+    NSError *heartbeatError = nil;
+    id result = nil;
+    ALNJobWorkerDisposition disposition;
+    @try {
+      disposition = [runtime handleJob:job error:&handlerError];
+      if (durable && disposition == ALNJobWorkerDispositionAcknowledge &&
+          [runtime respondsToSelector:@selector(jobWorker:resultForJob:)]) {
+        result = [runtime jobWorker:self resultForJob:job];
+      }
+    } @finally {
+      heartbeatError = [heartbeat stop];
+    }
+    if (heartbeatError) {
+      if (error) *error = ALNServiceError(505, @"job heartbeat failed; completion was not attempted", heartbeatError);
+      return nil;
+    }
     if (handlerError != nil) {
       handlerErrorCount += 1;
     }
 
     if (disposition == ALNJobWorkerDispositionAcknowledge) {
       NSError *ackError = nil;
-      if (![self.jobsAdapter acknowledgeJobID:job.jobID error:&ackError]) {
+      BOOL acknowledged = durable ? [durable completeJob:(ALNJobLease *)job result:result error:&ackError]
+                                  : [self.jobsAdapter acknowledgeJobID:job.jobID error:&ackError];
+      if (!acknowledged) {
         if (error != NULL) {
           *error = ALNServiceError(503, @"failed to acknowledge job", ackError);
         }
@@ -705,7 +836,10 @@ static ALNJobEnvelope *ALNJobEnvelopeFromDictionary(id value) {
       }
     }
     NSError *retryError = nil;
-    if (![self.jobsAdapter retryJob:job delaySeconds:retryDelay error:&retryError]) {
+    BOOL retried = durable ? [durable retryJob:job delaySeconds:retryDelay
+                                failureMessage:handlerError.localizedDescription error:&retryError]
+                           : [self.jobsAdapter retryJob:job delaySeconds:retryDelay error:&retryError];
+    if (!retried) {
       if (error != NULL) {
         *error = ALNServiceError(504, @"failed to retry job", retryError);
       }

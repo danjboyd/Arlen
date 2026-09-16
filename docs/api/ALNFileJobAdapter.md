@@ -3,7 +3,7 @@
 - Kind: `interface`
 - Header: `src/Arlen/Support/ALNServices.h`
 
-Filesystem-backed job queue adapter for durable local/edge deployments.
+Filesystem-persisted job queue for one adapter instance; no cross-process coordination or crashed-worker lease recovery.
 
 ## Methods
 

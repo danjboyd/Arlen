@@ -1045,3 +1045,26 @@ oauth-check:
 >$(MAKE) test-unit-filter TEST=OAuthResourceServerTests mcp-example
 >python3 tools/oauth/check_example.py
 >python3 tools/oauth/check_discovery.py --self-test
+
+# Durable jobs are exercised against an isolated PostgreSQL cluster by CI.
+DURABLE_JOBS_BUNDLE := $(BUILD_DIR)/tests/ArlenDurableJobsTests.xctest
+DURABLE_JOBS_BIN := $(DURABLE_JOBS_BUNDLE)/ArlenDurableJobsTests
+DURABLE_JOBS_OBJ := $(OBJ_DIR)/tests/durable_jobs/DurableJobsTests.o
+DURABLE_JOB_PROBE_OBJ := $(OBJ_DIR)/tests/durable_jobs/job_probe.o
+
+$(BUILD_DIR)/durable-job-probe: $(DURABLE_JOB_PROBE_OBJ) $(ARLEN_FRAMEWORK_LIB)
+>@source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) $^ -o $@ $(BASE_LINK_LIBS)
+
+$(DURABLE_JOBS_BIN): $(DURABLE_JOBS_OBJ) $(OBJ_DIR)/modules/jobs/Sources/ALNJobsModule.o $(ARLEN_FRAMEWORK_LIB)
+>@mkdir -p $(DURABLE_JOBS_BUNDLE)/Resources
+>@source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) $^ -shared -fPIC -o $@ $(XCTEST_LINK_LIBS)
+>@sed 's/ArlenUnitTests/ArlenDurableJobsTests/g' tests/Info-gnustep-unit.plist > $(DURABLE_JOBS_BUNDLE)/Resources/Info-gnustep.plist
+
+.PHONY: durable-jobs-tests ci-durable-jobs
+durable-jobs-tests: $(DURABLE_JOBS_BIN) $(BUILD_DIR)/durable-job-probe $(XCTEST_RUNNER_PREREQ)
+>source tools/source_gnustep_env.sh && $(xctest_runtime_env) "$(ARLEN_XCTEST)" $(DURABLE_JOBS_BUNDLE)
+
+ci-durable-jobs:
+>bash tools/ci/run_durable_jobs.sh
+
+-include $(DURABLE_JOBS_OBJ:.o=.d) $(DURABLE_JOB_PROBE_OBJ:.o=.d)

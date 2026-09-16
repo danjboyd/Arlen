@@ -166,7 +166,7 @@
       "summary": "Redis-backed cache adapter implementation compatible with `ALNCacheAdapter` semantics."
     },
     "ALNFileJobAdapter": {
-      "summary": "Filesystem-backed job queue adapter for durable local/edge deployments."
+      "summary": "Filesystem-persisted job queue for one adapter instance; no cross-process coordination or crashed-worker lease recovery."
     },
     "ALNFileMailAdapter": {
       "summary": "Filesystem-backed mail adapter that writes deliveries to disk for auditing/testing."
@@ -176,6 +176,15 @@
     },
     "ALNOAuthResourceServer": {
       "summary": "Opt-in OAuth access-token verifier, verified principal, protected-resource discovery and shared REST/MCP authorization middleware."
+    },
+    "ALNPostgresJobAdapter": {
+      "summary": "PostgreSQL durable queue with transactional enqueue, fenced renewable leases, retained results, replay, and shared queue controls. See docs/DURABLE_JOBS.md."
+    },
+    "ALNDurableJobAdapter": {
+      "summary": "Durable jobs contract for fenced completion, renewal, status/results, replay, and shared queue controls."
+    },
+    "ALNJobLease": {
+      "summary": "Immutable job claim carrying an ownership token, initial expiration, and heartbeat duration."
     }
   },
   "properties": {

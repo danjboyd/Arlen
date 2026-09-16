@@ -706,6 +706,14 @@ Build and run the first-party jobs worker loop for the current app root.
 - if that prepare step fails, exits with the same non-zero status and points at `.boomhauer/last_build_error.log`
 - worker args are passed through (`--env`, `--once`, `--limit`, `--poll-interval-seconds`, `--run-scheduler`, `--scheduler-interval-seconds`)
 
+For separate web/worker processes, register `ALNPostgresJobAdapter` in the app
+before jobs module configuration and apply
+`tools/migrations/jobs/001_postgres_jobs.sql`. The worker automatically renews
+and fences supported leases. Use `--run-scheduler` in only one process; other
+workers consume the shared queue without it. See [Durable Jobs](DURABLE_JOBS.md)
+for the database/dependency contract, transaction API, shared pause/drain, and
+persistent result polling. No new worker CLI flags are required.
+
 ### `arlen propane [manager args...]`
 
 Run production manager (`propane`) for the current app root.
@@ -1107,6 +1115,7 @@ Lifecycle diagnostics:
  - use the vendored patched runner by default so Apple-style `-only-testing`
  / `-skip-testing` arguments work before the system package catches up
  - example: `make test-unit-filter TEST=RuntimeTests/testRenderAndIncludeNormalizeUnsuffixedTemplateReferences`
+- `make ci-durable-jobs`: isolated PostgreSQL/XCTest acceptance for concurrency, leases, crash/outage recovery, transactional enqueue, and durable results
 - `make phase20-sql-builder-tests` / `make phase20-schema-tests` / `make phase20-routing-tests`: focused pure-unit lanes that do not depend on `-only-testing`
 - `make phase20-postgres-live-tests` / `make phase20-mssql-live-tests`: focused live-backend lanes with explicit DSN/transport requirement logging
 - `make phase20-focused`: run the full focused lane set without relying on stock `xctest -only-testing`

@@ -351,3 +351,24 @@ with property-type, property-attribute and nullability warnings as errors, then
 loads it to exercise typed accessors and ORM runtime state. The Linux quality
 workflow runs this target explicitly. Use `make phase26-orm-unit` and
 `make phase26-orm-integration` for broader ORM runtime coverage.
+
+## Durable jobs acceptance
+
+Run `source tools/source_gnustep_env.sh` then `make ci-durable-jobs`. The gate
+creates a disposable PostgreSQL Unix-socket cluster and runs the repo-local
+XCTest bundle plus independent producer/consumer executables. PostgreSQL server
+binaries must be installed; `ARLEN_TEST_PG_BIN` overrides `pg_config --bindir`.
+No application credentials or database are used. The suite stops/restarts only
+its disposable cluster to exercise database outages. A missing server binary or
+failed database start is a failure, not a skipped test.
+
+Coverage includes four producers, four consumers, accepted-ID reconciliation,
+kill/restart, finite leases and heartbeat renewal, stale-worker mutation
+rejection, transaction rollback, retry exhaustion, replay/deduplication,
+module payload/results, database outage recovery, and private file initialization.
+Logs are saved to `build/release_confidence/durable_jobs.log`. The
+`durable-jobs-tests` target is the inner bundle runner; use the outer
+`ci-durable-jobs` target to supply the isolated database contract.
+
+This runs as an explicit step in `linux-quality / quality-gate`; required check
+names and branch-protection settings are unchanged.

@@ -2,6 +2,12 @@
 
 The first-party `jobs` module productizes queue and scheduler workflows on top of the `ALNJobAdapter` and `ALNJobWorker` contracts, with durable operator metadata, multi-queue controls, and deterministic retry/idempotency semantics.
 
+For independent production web/worker processes, configure
+[`ALNPostgresJobAdapter`](DURABLE_JOBS.md) before module registration. It adds
+transactional enqueue, renewable fenced leases, crash recovery, shared queue
+controls, and retained status/results. The module alone does not turn the
+default memory adapter into a durable queue.
+
 ## Install
 
 ```bash
@@ -95,6 +101,8 @@ JSON:
 - `POST /jobs/api/jobs/dead-letter/:jobID/replay`
 - `POST /jobs/api/queues/:queue/pause`
 - `POST /jobs/api/queues/:queue/resume`
+- `POST /jobs/api/queues/:queue/drain` (durable adapter)
+- `GET /jobs/api/jobs/:jobID` (durable status/results)
 
 The JSON routes are included in module OpenAPI output.
 
@@ -125,8 +133,36 @@ Manifest defaults:
 - worker retry delay: `5` seconds
 - persistence: enabled outside `test`, with an auto-resolved module state path when no explicit path is provided
 
+## Durable adapter integration
+
+The optional definition method
+`jobsModulePerformPayload:context:result:error:` supplies a JSON-compatible result
+for atomic fenced completion. The runtime's
+`enqueueJobIdentifier:payload:options:onConnection:error:` validates and wraps a
+job inside an application-owned PostgreSQL transaction.
+
+With the durable adapter, replay requests must include an explicit
+`idempotencyKey`; use the adapter's
+`replayJobID:idempotencyKey:delaySeconds:error:` for programmatic replay. The
+legacy runtime replay method has no request-key argument and rejects durable
+replay. Enqueue accepts `retainDeduplication` to retain request identity after
+terminal state. Existing memory/file adapter behavior is preserved.
+
+Pause/resume and queue JSON state use the shared database. Drain rejects new
+work while allowing pending work to finish. The JSON status/list/queue APIs
+report database failures; the older array-only runtime snapshots cannot report
+errors. The new status and drain routes retain admin/AAL2 protection.
+
 ## Current Limits
 
 - Job execution ordering remains adapter-backed; the module does not impose a supervisor or balancing layer above the configured `ALNJobAdapter`.
 - Tags, queue priority, and retry metadata are operator-facing contracts; adapters are not required to implement native queue-priority semantics.
 - The dashboard is module-owned HTML, not yet embedded into `admin-ui` navigation.
+
+- Multiple consumers are supported by the PostgreSQL adapter; run only one
+  scheduler because trigger bookkeeping remains local/plist-backed.
+- Plist operator run history is diagnostic, not a shared job/result store. Use
+  `jobsModule.persistence.enabled = NO` or a distinct diagnostic path per process
+  for separate workers. PostgreSQL retains authoritative job status and results.
+- The file adapter cannot coordinate independent processes or recover crashed
+  leases. Its private-directory initialization fix does not change those limits.

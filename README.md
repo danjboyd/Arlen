@@ -7,7 +7,7 @@ Mojolicious while staying idiomatic to Objective-C/GNUstep conventions.
 
 The project is still young, but the core shipped surface is already real:
 server-rendered HTML and JSON app paths, OpenAPI output, first-party auth/admin
-/jobs/storage modules, a PostgreSQL-first data layer, realtime support, and a
+/jobs/storage modules, [durable PostgreSQL jobs](docs/DURABLE_JOBS.md), a PostgreSQL-first data layer, realtime support, and a
 managed production runtime (`propane`). Linux with a clang-built GNUstep
 toolchain is the primary production target. macOS has a verified Apple-runtime
 path, and Windows `CLANG64` is currently a preview target.

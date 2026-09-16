@@ -286,3 +286,20 @@ unit/integration suites. The live test builds a temporary app and uses Python's
 standard-library cookie jar to verify issuance, session coexistence, scoped
 cookies, three-cookie expiration, and HEAD behavior. No new lane or required
 check name is introduced.
+
+## Durable jobs reliability coverage
+
+`linux-quality / quality-gate` explicitly runs `make ci-durable-jobs` after
+sourcing the repo GNUstep environment. The entrypoint
+`tools/ci/run_durable_jobs.sh` provisions a disposable PostgreSQL cluster and
+executes the vendored XCTest runner and independent process probes. It requires
+real database concurrency, worker kill/restart, lease fencing/renewal, durable
+results, transaction rollback, retry/replay/deduplication, database outages, and
+module integration. Database provisioning failures fail the gate.
+
+The existing artifact upload includes
+`build/release_confidence/durable_jobs.log`. No CI lane is renamed or added;
+branch protection must continue requiring the existing three checks listed
+above. Local contributor instructions are in `docs/TESTING_WORKFLOW.md` and the
+runtime contract is in `docs/DURABLE_JOBS.md`. The clang-based `/usr/GNUstep`
+provisioning contract is unchanged.

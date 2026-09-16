@@ -1,4 +1,5 @@
 #import "ALNJobsModule.h"
+#import "ALNPostgresJobAdapter.h"
 
 #import "ALNDataCompat.h"
 #import "ALNApplication.h"
@@ -477,6 +478,7 @@ static id<ALNJobsOptionalAuthRuntime> JMSharedAuthRuntime(void) {
 @property(nonatomic, strong) NSMutableArray<NSDictionary *> *schedules;
 @property(nonatomic, strong) NSMutableDictionary<NSString *, NSNumber *> *lastTriggeredAtByScheduleIdentifier;
 @property(nonatomic, strong) NSMutableDictionary<NSString *, NSString *> *lastTriggeredBucketByScheduleIdentifier;
+@property(nonatomic, strong) NSMutableDictionary *resultsByLeaseID;
 @property(nonatomic, strong) NSMutableSet<NSString *> *pausedQueues;
 @property(nonatomic, strong) NSMutableDictionary<NSString *, NSNumber *> *replayedDeadLetterTimestamps;
 @property(nonatomic, strong) NSMutableArray<NSDictionary *> *runHistory;
@@ -520,6 +522,7 @@ static id<ALNJobsOptionalAuthRuntime> JMSharedAuthRuntime(void) {
     _lastTriggeredAtByScheduleIdentifier = [NSMutableDictionary dictionary];
     _lastTriggeredBucketByScheduleIdentifier = [NSMutableDictionary dictionary];
     _pausedQueues = [NSMutableSet set];
+    _resultsByLeaseID = [NSMutableDictionary dictionary];
     _replayedDeadLetterTimestamps = [NSMutableDictionary dictionary];
     _runHistory = [NSMutableArray array];
     _persistenceEnabled = NO;
@@ -977,6 +980,14 @@ static id<ALNJobsOptionalAuthRuntime> JMSharedAuthRuntime(void) {
                            payload:(NSDictionary *)payload
                            options:(NSDictionary *)options
                              error:(NSError **)error {
+  return [self enqueueJobIdentifier:identifier payload:payload options:options onConnection:nil error:error];
+}
+
+- (NSString *)enqueueJobIdentifier:(NSString *)identifier
+                           payload:(NSDictionary *)payload
+                           options:(NSDictionary *)options
+                      onConnection:(id<ALNDatabaseConnection>)connection
+                             error:(NSError **)error {
   NSString *jobID = JMTrimmedString(identifier);
   if ([jobID length] == 0) {
     if (error != NULL) {
@@ -1022,7 +1033,7 @@ static id<ALNJobsOptionalAuthRuntime> JMSharedAuthRuntime(void) {
   if ([queue length] == 0) {
     queue = @"default";
   }
-  if ([self isQueuePaused:queue]) {
+  if (connection == nil && [self isQueuePaused:queue]) {
     if (error != NULL) {
       *error = JMError(ALNJobsModuleErrorUnsupported,
                        [NSString stringWithFormat:@"queue %@ is currently paused", queue],
@@ -1045,6 +1056,8 @@ static id<ALNJobsOptionalAuthRuntime> JMSharedAuthRuntime(void) {
 
   NSMutableDictionary *adapterOptions = [NSMutableDictionary dictionary];
   adapterOptions[@"maxAttempts"] = @(maxAttempts);
+  adapterOptions[@"queue"] = queue;
+  adapterOptions[@"retainDeduplication"] = @([normalizedOptions[@"retainDeduplication"] boolValue]);
   NSString *idempotencyKey = JMTrimmedString(normalizedOptions[@"idempotencyKey"]);
   if ([idempotencyKey length] == 0) {
     idempotencyKey = JMDerivedIdempotencyKey(jobID, metadata[@"uniqueness"], normalizedPayload);
@@ -1059,6 +1072,14 @@ static id<ALNJobsOptionalAuthRuntime> JMSharedAuthRuntime(void) {
   }
 
   NSDictionary *managedPayload = JMManagedPayload(normalizedPayload, queue, source, scheduleIdentifier);
+  if (connection) {
+    if (![self.jobsAdapter respondsToSelector:@selector(enqueueJobNamed:payload:options:onConnection:error:)]) {
+      if (error) *error = JMError(ALNJobsModuleErrorUnsupported, @"jobs adapter does not support transactional enqueue", nil);
+      return nil;
+    }
+    return [(ALNPostgresJobAdapter *)self.jobsAdapter enqueueJobNamed:jobID payload:managedPayload
+        options:adapterOptions onConnection:connection error:error];
+  }
   return [self.jobsAdapter enqueueJobNamed:jobID payload:managedPayload options:adapterOptions error:error];
 }
 
@@ -1159,7 +1180,7 @@ static id<ALNJobsOptionalAuthRuntime> JMSharedAuthRuntime(void) {
 - (NSDictionary *)runWorkerAt:(NSDate *)timestamp
                         limit:(NSUInteger)limit
                         error:(NSError **)error {
-  if ([self isQueuePaused:@"default"]) {
+  if (![self.jobsAdapter respondsToSelector:@selector(setQueue:state:error:)] && [self isQueuePaused:@"default"]) {
     NSDictionary *summary = @{
       @"leasedCount" : @(0),
       @"acknowledgedCount" : @(0),
@@ -1239,13 +1260,32 @@ static id<ALNJobsOptionalAuthRuntime> JMSharedAuthRuntime(void) {
   }
 
   NSError *performError = nil;
-  BOOL ok = [definition jobsModulePerformPayload:payload context:context error:&performError];
+  id result = nil;
+  BOOL ok = [definition respondsToSelector:@selector(jobsModulePerformPayload:context:result:error:)]
+      ? [definition jobsModulePerformPayload:payload context:context result:&result error:&performError]
+      : [definition jobsModulePerformPayload:payload context:context error:&performError];
+  if (ok && result && [self.jobsAdapter respondsToSelector:@selector(completeJob:result:error:)]) {
+    [self.lock lock];
+    NSString *claimID = [job isKindOfClass:[ALNJobLease class]] ? ((ALNJobLease *)job).leaseToken : job.jobID;
+    self.resultsByLeaseID[claimID] = result;
+    [self.lock unlock];
+  }
   if (!ok && error != NULL) {
     *error = performError ?: JMError(ALNJobsModuleErrorExecutionFailed,
                                      @"job execution failed",
                                      @{ @"job" : identifier });
   }
   return ok ? ALNJobWorkerDispositionAcknowledge : ALNJobWorkerDispositionRetry;
+}
+
+- (id)jobWorker:(ALNJobWorker *)worker resultForJob:(ALNJobEnvelope *)job {
+  (void)worker;
+  [self.lock lock];
+  NSString *claimID = [job isKindOfClass:[ALNJobLease class]] ? ((ALNJobLease *)job).leaseToken : job.jobID;
+  id result = self.resultsByLeaseID[claimID];
+  [self.resultsByLeaseID removeObjectForKey:claimID];
+  [self.lock unlock];
+  return result;
 }
 
 - (NSTimeInterval)jobWorker:(ALNJobWorker *)worker
@@ -1328,7 +1368,7 @@ static id<ALNJobsOptionalAuthRuntime> JMSharedAuthRuntime(void) {
 }
 
 - (NSArray<NSDictionary *> *)leasedJobs {
-  if (![self.jobsAdapter conformsToProtocol:@protocol(ALNJobsInspectableAdapter)]) {
+  if (![self.jobsAdapter respondsToSelector:@selector(leasedJobsSnapshot)]) {
     return @[];
   }
   NSMutableArray *jobs = [NSMutableArray array];
@@ -1353,6 +1393,11 @@ static id<ALNJobsOptionalAuthRuntime> JMSharedAuthRuntime(void) {
 - (NSDictionary *)replayDeadLetterJobID:(NSString *)jobID
                            delaySeconds:(NSTimeInterval)delaySeconds
                                   error:(NSError **)error {
+  if ([self.jobsAdapter respondsToSelector:@selector(replayJobID:idempotencyKey:delaySeconds:error:)]) {
+    if (error) *error = JMError(ALNJobsModuleErrorUnsupported,
+        @"durable replay requires replayJobID:idempotencyKey:delaySeconds:error: on the adapter", nil);
+    return nil;
+  }
   NSString *targetJobID = JMTrimmedString(jobID);
   if ([targetJobID length] == 0) {
     if (error != NULL) {
@@ -1418,6 +1463,9 @@ static id<ALNJobsOptionalAuthRuntime> JMSharedAuthRuntime(void) {
   if ([queue length] == 0) {
     queue = @"default";
   }
+  if ([self.jobsAdapter respondsToSelector:@selector(setQueue:state:error:)]) {
+    return [(id<ALNDurableJobAdapter>)self.jobsAdapter setQueue:queue state:@"paused" error:error];
+  }
   [self.lock lock];
   [self.pausedQueues addObject:queue];
   [self.lock unlock];
@@ -1430,6 +1478,9 @@ static id<ALNJobsOptionalAuthRuntime> JMSharedAuthRuntime(void) {
   if ([queue length] == 0) {
     queue = @"default";
   }
+  if ([self.jobsAdapter respondsToSelector:@selector(setQueue:state:error:)]) {
+    return [(id<ALNDurableJobAdapter>)self.jobsAdapter setQueue:queue state:@"active" error:error];
+  }
   [self.lock lock];
   [self.pausedQueues removeObject:queue];
   [self.lock unlock];
@@ -1440,6 +1491,16 @@ static id<ALNJobsOptionalAuthRuntime> JMSharedAuthRuntime(void) {
   NSString *queue = JMTrimmedString(queueName);
   if ([queue length] == 0) {
     queue = @"default";
+  }
+  if ([self.jobsAdapter respondsToSelector:@selector(queueStatesWithError:)]) {
+    NSError *error = nil;
+    NSArray *states = [(id<ALNDurableJobAdapter>)self.jobsAdapter queueStatesWithError:&error];
+    // A failed status lookup must not authorize new work.
+    if (!states) return YES;
+    for (NSDictionary *entry in states) {
+      if ([entry[@"queue"] isEqual:queue]) return [entry[@"state"] isEqual:@"paused"];
+    }
+    return NO;
   }
   [self.lock lock];
   BOOL paused = [self.pausedQueues containsObject:queue];
@@ -1528,6 +1589,13 @@ static id<ALNJobsOptionalAuthRuntime> JMSharedAuthRuntime(void) {
                                        } mutableCopy];
     entry[@"deadLetterCount"] = @([entry[@"deadLetterCount"] unsignedIntegerValue] + 1);
     queues[queue] = entry;
+  }
+  if ([self.jobsAdapter respondsToSelector:@selector(queueStatesWithError:)]) {
+    for (NSDictionary *entry in [(id<ALNDurableJobAdapter>)self.jobsAdapter queueStatesWithError:NULL]) {
+      NSString *name = entry[@"queue"];
+      queues[name] = [@{@"name":name, @"state":entry[@"state"], @"paused":@([entry[@"state"] isEqual:@"paused"]),
+                       @"pendingCount":entry[@"pending"], @"leasedCount":entry[@"leased"], @"deadLetterCount":entry[@"failed"]} mutableCopy];
+    }
   }
   NSArray *queueEntries = [[queues allValues] sortedArrayUsingComparator:^NSComparisonResult(NSDictionary *lhs, NSDictionary *rhs) {
     return [JMTrimmedString(lhs[@"name"]) compare:JMTrimmedString(rhs[@"name"])];
@@ -1685,25 +1753,57 @@ static id<ALNJobsOptionalAuthRuntime> JMSharedAuthRuntime(void) {
 
 - (id)apiQueues:(ALNContext *)ctx {
   (void)ctx;
+  if ([self.runtime.jobsAdapter respondsToSelector:@selector(queueStatesWithError:)]) {
+    NSError *error = nil;
+    NSArray *states = [(id<ALNDurableJobAdapter>)self.runtime.jobsAdapter queueStatesWithError:&error];
+    if (!states) {
+      [self setStatus:503];
+      [self renderJSONEnvelopeWithData:nil meta:@{@"error":error.localizedDescription ?: @"queue unavailable"} error:NULL];
+      return nil;
+    }
+    NSMutableArray *queues = [NSMutableArray array];
+    for (NSDictionary *entry in states) [queues addObject:@{@"name":entry[@"queue"],@"state":entry[@"state"],
+        @"paused":@([entry[@"state"] isEqual:@"paused"]),@"pendingCount":entry[@"pending"],
+        @"leasedCount":entry[@"leased"],@"deadLetterCount":entry[@"failed"]}];
+    [self renderJSONEnvelopeWithData:@{@"queues":queues} meta:nil error:NULL];
+    return nil;
+  }
   NSDictionary *summary = [self.runtime dashboardSummary];
   [self renderJSONEnvelopeWithData:@{ @"queues" : summary[@"queues"] ?: @[] } meta:nil error:NULL];
   return nil;
 }
 
+- (id)renderDurableJobsWithState:(NSString *)state {
+  NSError *error = nil;
+  NSArray *envelopes = [(id<ALNDurableJobAdapter>)self.runtime.jobsAdapter jobsWithState:state error:&error];
+  if (!envelopes) {
+    [self setStatus:503];
+    [self renderJSONEnvelopeWithData:nil meta:@{@"error":error.localizedDescription ?: @"queue unavailable"} error:NULL];
+    return nil;
+  }
+  NSMutableArray *jobs = [NSMutableArray array];
+  for (ALNJobEnvelope *envelope in envelopes) [jobs addObject:[self.runtime jobSummaryFromEnvelope:envelope state:state]];
+  [self renderJSONEnvelopeWithData:@{@"jobs":jobs} meta:nil error:NULL];
+  return nil;
+}
+
 - (id)apiPendingJobs:(ALNContext *)ctx {
   (void)ctx;
+  if ([self.runtime.jobsAdapter respondsToSelector:@selector(jobsWithState:error:)]) return [self renderDurableJobsWithState:@"pending"];
   [self renderJSONEnvelopeWithData:@{ @"jobs" : [self.runtime pendingJobs] ?: @[] } meta:nil error:NULL];
   return nil;
 }
 
 - (id)apiLeasedJobs:(ALNContext *)ctx {
   (void)ctx;
+  if ([self.runtime.jobsAdapter respondsToSelector:@selector(jobsWithState:error:)]) return [self renderDurableJobsWithState:@"leased"];
   [self renderJSONEnvelopeWithData:@{ @"jobs" : [self.runtime leasedJobs] ?: @[] } meta:nil error:NULL];
   return nil;
 }
 
 - (id)apiDeadLetterJobs:(ALNContext *)ctx {
   (void)ctx;
+  if ([self.runtime.jobsAdapter respondsToSelector:@selector(jobsWithState:error:)]) return [self renderDurableJobsWithState:@"failed"];
   [self renderJSONEnvelopeWithData:@{ @"jobs" : [self.runtime deadLetterJobs] ?: @[] } meta:nil error:NULL];
   return nil;
 }
@@ -1724,6 +1824,7 @@ static id<ALNJobsOptionalAuthRuntime> JMSharedAuthRuntime(void) {
                                                options:@{
                                                  @"queue" : JMTrimmedString(parameters[@"queue"]),
                                                  @"idempotencyKey" : JMTrimmedString(parameters[@"idempotencyKey"]),
+                                                 @"retainDeduplication" : @([parameters[@"retainDeduplication"] boolValue]),
                                                }
                                                  error:&error];
   if ([jobID length] == 0) {
@@ -1771,17 +1872,56 @@ static id<ALNJobsOptionalAuthRuntime> JMSharedAuthRuntime(void) {
 - (id)apiReplayDeadLetter:(ALNContext *)ctx {
   NSDictionary *parameters = [self requestParameters];
   NSError *error = nil;
-  NSDictionary *summary = [self.runtime replayDeadLetterJobID:[self stringParamForName:@"jobID"] ?: @""
+  NSDictionary *summary = nil;
+  if ([self.runtime.jobsAdapter respondsToSelector:@selector(replayJobID:idempotencyKey:delaySeconds:error:)]) {
+    NSString *sourceID = [self stringParamForName:@"jobID"] ?: @"";
+    NSString *newID = [(id<ALNDurableJobAdapter>)self.runtime.jobsAdapter replayJobID:sourceID
+        idempotencyKey:JMTrimmedString(parameters[@"idempotencyKey"])
+        delaySeconds:[parameters[@"delaySeconds"] doubleValue] error:&error];
+    if (newID) summary = @{@"deadLetterJobID":sourceID,@"replayedJobID":newID};
+  } else {
+  summary = [self.runtime replayDeadLetterJobID:[self stringParamForName:@"jobID"] ?: @""
                                                  delaySeconds:[parameters[@"delaySeconds"] respondsToSelector:@selector(doubleValue)]
                                                                   ? [parameters[@"delaySeconds"] doubleValue]
                                                                   : 0.0
                                                         error:&error];
+  }
   if (summary == nil) {
     [self setStatus:(error.code == ALNJobsModuleErrorNotFound) ? 404 : 422];
     [self renderJSONEnvelopeWithData:nil meta:@{ @"error" : error.localizedDescription ?: @"replay failed" } error:NULL];
     return nil;
   }
   [self renderJSONEnvelopeWithData:summary meta:nil error:NULL];
+  return nil;
+}
+
+- (id)apiJobStatus:(ALNContext *)ctx {
+  (void)ctx;
+  NSError *error = nil;
+  NSDictionary *status = nil;
+  if ([self.runtime.jobsAdapter respondsToSelector:@selector(jobStatusForID:error:)]) {
+    status = [(id<ALNDurableJobAdapter>)self.runtime.jobsAdapter jobStatusForID:[self stringParamForName:@"jobID"] error:&error];
+    if (!status) [self setStatus:error ? 503 : 404];
+  } else {
+    [self setStatus:501];
+  }
+  [self renderJSONEnvelopeWithData:status meta:error ? @{@"error":error.localizedDescription} : nil error:NULL];
+  return nil;
+}
+
+- (id)apiDrainQueue:(ALNContext *)ctx {
+  (void)ctx;
+  NSError *error = nil;
+  NSString *queue = [self stringParamForName:@"queue"] ?: @"default";
+  BOOL ok = NO;
+  if ([self.runtime.jobsAdapter respondsToSelector:@selector(setQueue:state:error:)]) {
+    ok = [(id<ALNDurableJobAdapter>)self.runtime.jobsAdapter setQueue:queue state:@"draining" error:&error];
+    if (!ok) [self setStatus:503];
+  } else {
+    [self setStatus:501];
+  }
+  [self renderJSONEnvelopeWithData:ok ? @{@"queue":queue,@"state":@"draining"} : nil
+                             meta:error ? @{@"error":error.localizedDescription} : nil error:NULL];
   return nil;
 }
 
@@ -1906,9 +2046,15 @@ static id<ALNJobsOptionalAuthRuntime> JMSharedAuthRuntime(void) {
                               name:@"jobs_api_queue_resume"
                    controllerClass:[ALNJobsModuleController class]
                             action:@"apiResumeQueue"];
+  [application registerRouteMethod:@"GET" path:@"/jobs/:jobID" name:@"jobs_api_status"
+                   controllerClass:[ALNJobsModuleController class] action:@"apiJobStatus"];
+  [application registerRouteMethod:@"POST" path:@"/queues/:queue/drain" name:@"jobs_api_queue_drain"
+                   controllerClass:[ALNJobsModuleController class] action:@"apiDrainQueue"];
   [application endRouteGroup];
 
   NSArray *apiRoutes = @[
+    @"jobs_api_status",
+    @"jobs_api_queue_drain",
     @"jobs_api_definitions",
     @"jobs_api_schedules",
     @"jobs_api_queues",

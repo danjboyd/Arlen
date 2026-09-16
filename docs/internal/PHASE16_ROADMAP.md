@@ -140,6 +140,13 @@ Execution order is intentional:
 
 Status: Complete (2026-03-10)
 
+Follow-on (2026-09-16): the OpportunityTracker durable-jobs request extends this
+module's adapter/worker contract with first-party PostgreSQL persistence,
+renewable fenced leases, transactional enqueue, shared controls, and durable
+results. See `docs/DURABLE_JOBS.md` and
+`docs/internal/OPPORTUNITYTRACKER_DURABLE_JOBS_2026-09-16.md`. Distributed scheduler
+coordination remains outside this implementation.
+
 Deliverables:
 
 - Extend job-definition metadata with richer operator-facing semantics:
