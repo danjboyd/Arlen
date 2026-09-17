@@ -3,6 +3,10 @@
 Status: fixed upstream in Arlen; awaiting downstream adoption and revalidation.
 Baseline: `19ff5b2f06a952317f809e59856afadf7e090529`.
 
+Follow-up: [2026-09-17 upstream verification](GNUSTEP_783_VERIFICATION_2026-09-17.md)
+confirms the custom-mode scheduling fix with explicit `start`, while recording a
+separate master-build subprocess termination issue. The libcurl workaround stays.
+
 ## Findings
 
 GNUstep Base 1.31.1's NSURLConnection custom-mode transport does not service
