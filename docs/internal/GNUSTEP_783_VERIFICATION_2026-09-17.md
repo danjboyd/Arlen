@@ -1,5 +1,10 @@
 # GNUstep #783 upstream verification — 2026-09-17
 
+Follow-up: the [transport-selection and NSTask report](GNUSTEP_TRANSPORT_SELECTION_2026-09-17.md)
+records a verified local patch for the subprocess blocker and a separate DNS
+deadline limitation that prevents selecting Foundation solely on #783 detection.
+The results below describe the unmodified master build tested initially.
+
 ## Conclusion
 
 The custom-run-loop HTTP(S) scheduling defect reported in

@@ -1,0 +1,145 @@
+From f34942cbc78bfc1cb6eb2e6e4e962725b294c49c Mon Sep 17 00:00:00 2001
+From: Daniel Boyd <danieljboyd@icloud.com>
+Date: Thu, 17 Sep 2026 12:44:20 -0500
+Subject: [PATCH] NSTask: clear inherited signal masks in child processes
+
+Set an empty child mask for posix_spawn and its fork fallback without changing the launching thread. Dispatch workers may block SIGTERM, causing terminate followed by waitUntilExit to hang. Add a deterministic regression that blocks SIGTERM and SIGUSR1 on the caller and checks the child and parent masks.
+---
+ Source/NSTask.m                             | 19 +++++-
+ Tests/base/NSTask/posix_spawn_signal_mask.m | 66 +++++++++++++++++++++
+ 2 files changed, 84 insertions(+), 1 deletion(-)
+ create mode 100644 Tests/base/NSTask/posix_spawn_signal_mask.m
+
+diff --git a/Source/NSTask.m b/Source/NSTask.m
+index cfec777..d3466c3 100644
+--- a/Source/NSTask.m
++++ b/Source/NSTask.m
+@@ -1719,6 +1719,7 @@ GSPrivateCheckTasks()
+     posix_spawnattr_t		attr;
+     short			flags;
+     sigset_t 			default_signals;
++    sigset_t                    child_mask;
+     int 			spawn_result;
+ 
+     /* Initialize spawn attributes and file actions */
+@@ -1745,7 +1746,8 @@ GSPrivateCheckTasks()
+      * POSIX_SPAWN_SETSID detaches from controlling terminal (like setsid()).
+      * It's reliably supported in glibc 2.26+ (2017).
+      */
+-    flags = POSIX_SPAWN_SETPGROUP | POSIX_SPAWN_SETSIGDEF;
++    flags = POSIX_SPAWN_SETPGROUP | POSIX_SPAWN_SETSIGDEF
++      | POSIX_SPAWN_SETSIGMASK;
+ #if defined(__GLIBC__) && (__GLIBC__ > 2 || (__GLIBC__ == 2 && __GLIBC_MINOR__ >= 29))
+     flags |= POSIX_SPAWN_SETSID;
+ #endif
+@@ -1756,6 +1758,13 @@ GSPrivateCheckTasks()
+     sigfillset(&default_signals);
+     posix_spawnattr_setsigdefault(&attr, &default_signals);
+ 
++    /* Resetting dispositions does not unblock signals inherited from the
++     * launching thread (for example, a libdispatch worker).  Start the child
++     * with an empty mask, without changing the parent's mask.
++     */
++    sigemptyset(&child_mask);
++    posix_spawnattr_setsigmask(&attr, &child_mask);
++
+     if (_usePseudoTerminal == YES)
+       {
+         int s;
+@@ -1875,6 +1884,7 @@ use_fork_implementation:
+   if (pid == 0)
+     {
+       int	i;
++      sigset_t child_mask;
+ 
+       /* Make sure the task gets default signal setup.
+        */
+@@ -1883,6 +1893,13 @@ use_fork_implementation:
+ 	  signal(i, SIG_DFL);
+ 	}
+ 
++      /* The posix_spawn fallback must not inherit the launching thread's
++       * blocked signals either.  Only change the mask in the child, after
++       * resetting the inherited signal dispositions.
++       */
++      sigemptyset(&child_mask);
++      sigprocmask(SIG_SETMASK, &child_mask, NULL);
++
+       /* Make sure task is session leader in it's own process group
+        * and with no controlling terminal.
+        * This allows us to use killpg() to put the task to sleep etc,
+diff --git a/Tests/base/NSTask/posix_spawn_signal_mask.m b/Tests/base/NSTask/posix_spawn_signal_mask.m
+new file mode 100644
+index 0000000..f977662
+--- /dev/null
++++ b/Tests/base/NSTask/posix_spawn_signal_mask.m
+@@ -0,0 +1,66 @@
++#import <Foundation/Foundation.h>
++#import "ObjectTesting.h"
++
++#if !defined(_WIN32)
++#include <pthread.h>
++#include <signal.h>
++#include <string.h>
++#endif
++
++int main(int argc, char **argv)
++{
++  NSAutoreleasePool *pool = [NSAutoreleasePool new];
++#if !defined(_WIN32)
++  sigset_t blocked, original, current;
++  NSTask *task;
++  NSString *path;
++  int result;
++
++  if (argc > 1 && strcmp(argv[1], "--check-mask") == 0)
++    {
++      result = pthread_sigmask(SIG_BLOCK, NULL, &current);
++      [pool release];
++      return result != 0 || sigismember(&current, SIGTERM) != 0
++        || sigismember(&current, SIGUSR1) != 0;
++    }
++
++  /* Dispatch workers may block these signals.  Reproduce deterministically
++   * without depending on the configured NSOperationQueue implementation.
++   */
++  sigemptyset(&blocked);
++  sigaddset(&blocked, SIGTERM);
++  sigaddset(&blocked, SIGUSR1);
++  result = pthread_sigmask(SIG_BLOCK, &blocked, &original);
++  PASS(result == 0, "block signals on the launching thread");
++  if (result == 0)
++    {
++      @try
++        {
++          path = [NSString stringWithUTF8String: argv[0]];
++          if (![path isAbsolutePath])
++            path = [[[NSFileManager defaultManager] currentDirectoryPath]
++              stringByAppendingPathComponent: path];
++          task = [NSTask new];
++          [task setLaunchPath: path];
++          [task setArguments: [NSArray arrayWithObject: @"--check-mask"]];
++          [task launch];
++          [task waitUntilExit];
++          PASS([task terminationStatus] == 0,
++            "child does not inherit blocked SIGTERM or SIGUSR1");
++          pthread_sigmask(SIG_BLOCK, NULL, &current);
++          PASS(sigismember(&current, SIGTERM) == 1
++            && sigismember(&current, SIGUSR1) == 1,
++            "launch preserves the parent's blocked signals");
++          [task release];
++        }
++      @finally
++        {
++          pthread_sigmask(SIG_SETMASK, &original, NULL);
++        }
++    }
++#else
++  SKIP("POSIX signal masks are not available on Windows");
++#endif
++  [pool release];
++  return 0;
++}
+-- 
+2.47.3
+

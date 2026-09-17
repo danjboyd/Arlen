@@ -6,6 +6,9 @@ Baseline: `19ff5b2f06a952317f809e59856afadf7e090529`.
 Follow-up: [2026-09-17 upstream verification](GNUSTEP_783_VERIFICATION_2026-09-17.md)
 confirms the custom-mode scheduling fix with explicit `start`, while recording a
 separate master-build subprocess termination issue. The libcurl workaround stays.
+The [same-day follow-up](GNUSTEP_TRANSPORT_SELECTION_2026-09-17.md) fixes that
+subprocess issue locally and verifies that synchronous Foundation DNS still
+prevents a scheduling-only automatic transport switch from preserving deadlines.
 
 ## Findings
 
