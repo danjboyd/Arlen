@@ -303,8 +303,25 @@
   return @"";
 }
 
+/// These tests do not wait for a process to bind a port; they wait for
+/// boomhauer to transpile templates, compile the scaffolded app -- including
+/// whichever modules the test installed -- link it, and only then serve. The
+/// budget therefore tracks build time, which scales with the size of the module
+/// sources and with how loaded the machine is, not with anything the server
+/// does at startup.
+///
+/// The previous 30s was tight enough that ordinary growth in
+/// modules/auth/Sources/ALNAuthModule.m pushed the build past it, turning any
+/// change to that file into a spurious failure here. A timeout is a blunt
+/// instrument for a build, so this one is generous: a real hang still fails, it
+/// just takes longer to say so.
+static const NSTimeInterval ALNTestServerBuildAndBootTimeout = 180.0;
+static const useconds_t ALNTestServerPollIntervalMicroseconds = 200000;
+
 - (BOOL)waitForServerOnPort:(int)port path:(NSString *)path {
-  for (NSInteger attempt = 0; attempt < 150; attempt++) {
+  NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:ALNTestServerBuildAndBootTimeout];
+  NSDate *started = [NSDate date];
+  while ([deadline timeIntervalSinceNow] > 0) {
     int exitCode = 0;
     NSDictionary *response = [self curlJSONAtPort:port
                                              path:path
@@ -318,8 +335,13 @@
     if (exitCode == 0 && statusCode > 0) {
       return YES;
     }
-    usleep(200000);
+    usleep(ALNTestServerPollIntervalMicroseconds);
   }
+  // Say that this was a timeout. The bare assertion failure that follows
+  // otherwise looks identical to the server answering wrongly, which is a
+  // different problem entirely.
+  NSLog(@"waitForServerOnPort: gave up on port %d path %@ after %.0fs", port, path,
+        -[started timeIntervalSinceNow]);
   return NO;
 }
 
