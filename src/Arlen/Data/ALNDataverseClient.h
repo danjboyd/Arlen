@@ -140,6 +140,11 @@ typedef NS_ENUM(NSInteger, ALNDataverseErrorCode) {
 
 @end
 
+/// Parses the header text curl reports for a response, selecting the final
+/// response block when the exchange produced more than one (100 Continue,
+/// redirects). Exposed for regression coverage; not part of the app-facing API.
+FOUNDATION_EXPORT NSDictionary<NSString *, NSString *> *ALNDataverseParseHeaders(NSString *headerText);
+
 @interface ALNDataverseCurlTransport : NSObject <ALNDataverseTransport>
 
 @property(nonatomic, assign, readonly) NSTimeInterval timeoutInterval;

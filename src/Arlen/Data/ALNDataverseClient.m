@@ -175,13 +175,20 @@ static NSDictionary<NSString *, NSString *> *ALNDataverseLowercaseHeaderMap(
   return [lowercase copy];
 }
 
-static NSDictionary<NSString *, NSString *> *ALNDataverseParseHeaders(NSString *headerText) {
+NSDictionary<NSString *, NSString *> *ALNDataverseParseHeaders(NSString *headerText) {
   NSString *raw = [headerText isKindOfClass:[NSString class]] ? headerText : @"";
   if ([raw length] == 0) {
     return @{};
   }
 
-  NSArray<NSString *> *lines = [raw componentsSeparatedByCharactersInSet:[NSCharacterSet newlineCharacterSet]];
+  // CRLF must be folded to a single separator before splitting. Splitting on a
+  // character set treats CR and LF as two separators, which puts an empty
+  // string between every header line; the blank-line handling below then ends a
+  // block at each one, leaving the status line alone in its own block and every
+  // header discarded.
+  NSString *normalized = [[raw stringByReplacingOccurrencesOfString:@"\r\n" withString:@"\n"]
+      stringByReplacingOccurrencesOfString:@"\r" withString:@"\n"];
+  NSArray<NSString *> *lines = [normalized componentsSeparatedByString:@"\n"];
   NSMutableArray<NSArray<NSString *> *> *blocks = [NSMutableArray array];
   NSMutableArray<NSString *> *current = [NSMutableArray array];
   for (NSString *line in lines) {
