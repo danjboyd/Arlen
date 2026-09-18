@@ -28,7 +28,9 @@ apps need first.
 - `host`: bind address for `boomhauer`
 - `port`: default app port
 - `logFormat`: `text` or `json`
-- `serveStatic`: serve files from `public/`
+- `serveStatic`: serve files from `public/`, mounted under `/static/` — the
+  scaffold's own `public/health.txt` answers at `/static/health.txt`, not at
+  `/health.txt`
 - `staticAllowExtensions`: extensions Arlen may serve from `public/`
 - `listenBacklog`: socket listen backlog
 - `connectionTimeoutSeconds`: request/connection timeout baseline
