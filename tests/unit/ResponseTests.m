@@ -24,6 +24,49 @@
   XCTAssertFalse([headerText containsString:@"hello"]);
 }
 
+- (NSString *)statusLineForCode:(NSInteger)statusCode {
+  ALNResponse *response = [[ALNResponse alloc] init];
+  response.statusCode = statusCode;
+  NSString *text = [[NSString alloc] initWithData:[response serializedData]
+                                         encoding:NSUTF8StringEncoding];
+  NSRange terminator = [text rangeOfString:@"\r\n"];
+  return terminator.location == NSNotFound ? text : [text substringToIndex:terminator.location];
+}
+
+/// B-1: 401 was absent from the reason-phrase table, and the fallback described
+/// every unknown code -- including every error -- as "OK".
+- (void)testUnauthorizedStatusUsesItsOwnReasonPhrase_HELPDESK_B1 {
+  XCTAssertEqualObjects(@"HTTP/1.1 401 Unauthorized", [self statusLineForCode:401]);
+}
+
+- (void)testCommonStatusCodesCarryCorrectReasonPhrases_HELPDESK_B1 {
+  NSDictionary *expected = @{
+    @303 : @"See Other",
+    @307 : @"Temporary Redirect",
+    @308 : @"Permanent Redirect",
+    @409 : @"Conflict",
+    @410 : @"Gone",
+    @412 : @"Precondition Failed",
+    @415 : @"Unsupported Media Type",
+    @428 : @"Precondition Required",
+    @451 : @"Unavailable For Legal Reasons",
+    @501 : @"Not Implemented",
+    @502 : @"Bad Gateway",
+    @504 : @"Gateway Timeout",
+  };
+  for (NSNumber *code in expected) {
+    NSString *want = [NSString stringWithFormat:@"HTTP/1.1 %@ %@", code, expected[code]];
+    XCTAssertEqualObjects(want, [self statusLineForCode:[code integerValue]]);
+  }
+}
+
+/// RFC 9112 section 4.1 permits an empty reason phrase, and the SP before it is
+/// still required, so the status line stays well-formed.
+- (void)testUnknownStatusCodeGetsEmptyReasonPhraseNotOK_HELPDESK_B1 {
+  XCTAssertEqualObjects(@"HTTP/1.1 599 ", [self statusLineForCode:599]);
+  XCTAssertFalse([[self statusLineForCode:599] containsString:@"OK"]);
+}
+
 - (void)testSerializedDataStillIncludesBody {
   ALNResponse *response = [[ALNResponse alloc] init];
   response.statusCode = 404;
