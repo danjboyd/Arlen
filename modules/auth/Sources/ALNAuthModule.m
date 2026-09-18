@@ -35,6 +35,49 @@ static NSString *AMTrimmedString(id value) {
   return [(NSString *)value stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
 }
 
+/// Clamps a caller-supplied `return_to` to a same-origin path.
+///
+/// `return_to` arrives from the query string or a form field and is handed back
+/// to the browser as a `Location` after a successful sign-in, so a value
+/// carrying its own origin turns a genuine authentication into an open
+/// redirect. That is worth more to an attacker than an ordinary one: the victim
+/// really did just authenticate on the legitimate host, which is exactly what
+/// makes a "your session expired, sign in again" page served immediately
+/// afterwards convincing.
+///
+/// Only a single-slash absolute path is accepted. Anything else yields an empty
+/// string, and callers fall back to the configured default redirect. Apps that
+/// genuinely need a cross-origin return use the session-policy hook, whose
+/// override is deliberately not clamped.
+static NSString *AMSafeReturnTo(id value) {
+  NSString *candidate = AMTrimmedString(value);
+  if ([candidate length] == 0) {
+    return @"";
+  }
+  // A scheme-bearing target ("https://evil.example") or a bare relative path
+  // both fail this: only a rooted path is a same-origin return.
+  if (![candidate hasPrefix:@"/"]) {
+    return @"";
+  }
+  // "//evil.example" is protocol-relative, and therefore off-origin.
+  if ([candidate hasPrefix:@"//"]) {
+    return @"";
+  }
+  // Browsers normalize a backslash to a slash, so "/\evil.example" is
+  // protocol-relative once the browser is done with it.
+  if ([candidate rangeOfString:@"\\"].location != NSNotFound) {
+    return @"";
+  }
+  NSUInteger length = [candidate length];
+  for (NSUInteger idx = 0; idx < length; idx++) {
+    unichar c = [candidate characterAtIndex:idx];
+    if (c < 0x20 || c == 0x7F) {
+      return @"";
+    }
+  }
+  return candidate;
+}
+
 static NSString *AMLowerTrimmedString(id value) {
   return [[AMTrimmedString(value) lowercaseString] copy];
 }
@@ -1396,7 +1439,12 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
 - (NSString *)postLoginRedirectForContext:(ALNContext *)context
                                      user:(NSDictionary *)user
                           defaultRedirect:(NSString *)defaultRedirect {
-  NSString *fallback = ([AMTrimmedString(defaultRedirect) length] > 0) ? AMTrimmedString(defaultRedirect) : self.defaultRedirect;
+  // Clamped here as well as where `return_to` is read, so a future caller that
+  // passes an unsanitized target cannot reopen the redirect. The hook's own
+  // override is intentionally left alone: an app that returns a cross-origin
+  // target from its session policy has said so explicitly.
+  NSString *requested = AMSafeReturnTo(defaultRedirect);
+  NSString *fallback = ([requested length] > 0) ? requested : self.defaultRedirect;
   if (self.sessionPolicyHook != nil &&
       [self.sessionPolicyHook respondsToSelector:@selector(authModulePostLoginRedirectForContext:user:defaultRedirect:)]) {
     NSString *override = [self.sessionPolicyHook authModulePostLoginRedirectForContext:context
@@ -2710,7 +2758,7 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
   if (![self.smsVerifyClient sendVerificationToPhoneNumber:resolvedPhone locale:self.smsLocale error:error]) {
     return nil;
   }
-  NSString *normalizedReturnTo = AMTrimmedString([context stringParamForName:@"return_to"]);
+  NSString *normalizedReturnTo = AMSafeReturnTo([context stringParamForName:@"return_to"]);
   NSDictionary *state = @{
     @"purpose" : normalizedPurpose ?: @"challenge",
     @"phone" : resolvedPhone ?: @"",
@@ -3438,7 +3486,7 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
       @"submitLabel" : @"Sign In",
       @"hidden" : @[ @{
         @"name" : @"return_to",
-        @"value" : AMTrimmedString(parameters[@"return_to"]),
+        @"value" : AMSafeReturnTo(parameters[@"return_to"]),
       } ],
       @"fields" : @[
         @{
@@ -3474,7 +3522,7 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
                                           errors:([providerError length] > 0
                                                       ? @[ @{ @"field" : @"", @"message" : providerError } ]
                                                       : nil)
-                                        formData:@{ @"return_to" : AMTrimmedString(parameters[@"return_to"]) }
+                                        formData:@{ @"return_to" : AMSafeReturnTo(parameters[@"return_to"]) }
                                         extraCtx:extraCtx
                                            error:NULL];
   [ctx.session removeObjectForKey:ALNAuthModuleVerificationNoticeSessionKey];
@@ -3493,7 +3541,7 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
   NSDictionary *parameters = [self requestParameters];
   NSString *email = AMLowerTrimmedString(parameters[@"email"]);
   NSString *password = AMTrimmedString(parameters[@"password"]);
-  NSString *returnTo = AMTrimmedString(parameters[@"return_to"]);
+  NSString *returnTo = AMSafeReturnTo(parameters[@"return_to"]);
   NSError *error = nil;
   NSDictionary *user = [self.runtime authenticateLocalEmail:email password:password error:&error];
   if (user == nil) {
@@ -3580,7 +3628,7 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
                                            title:@"Create Account"
                                          message:@""
                                           errors:nil
-                                        formData:@{ @"return_to" : AMTrimmedString(parameters[@"return_to"]) }
+                                        formData:@{ @"return_to" : AMSafeReturnTo(parameters[@"return_to"]) }
                                         extraCtx:@{
                                           @"authFormDescriptor" : @{
                                             @"action" : self.runtime.registerPath ?: @"/auth/register",
@@ -3588,7 +3636,7 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
                                             @"submitLabel" : @"Create Account",
                                             @"hidden" : @[ @{
                                               @"name" : @"return_to",
-                                              @"value" : AMTrimmedString(parameters[@"return_to"]),
+                                              @"value" : AMSafeReturnTo(parameters[@"return_to"]),
                                             } ],
                                             @"fields" : @[
                                               @{
@@ -3631,7 +3679,7 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
   NSString *email = AMLowerTrimmedString(parameters[@"email"]);
   NSString *displayName = AMTrimmedString(parameters[@"display_name"]);
   NSString *password = AMTrimmedString(parameters[@"password"]);
-  NSString *returnTo = AMTrimmedString(parameters[@"return_to"]);
+  NSString *returnTo = AMSafeReturnTo(parameters[@"return_to"]);
   NSError *error = nil;
   NSDictionary *user =
       [self.runtime createLocalUserWithEmail:email displayName:displayName password:password source:@"local_registration" error:&error];
@@ -3944,7 +3992,7 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
     [self redirectTo:[NSString stringWithFormat:@"%@?return_to=%@", self.runtime.loginPath, self.runtime.mfaManagePath] status:302];
     return nil;
   }
-  NSString *returnTo = AMTrimmedString([self requestParameters][@"return_to"]);
+  NSString *returnTo = AMSafeReturnTo([self requestParameters][@"return_to"]);
   if ([self shouldPreferJSONForHeadlessRequest:ctx]) {
     return [self mfaJSONResponseForContext:ctx returnTo:returnTo];
   }
@@ -3969,7 +4017,7 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
     [self redirectTo:[NSString stringWithFormat:@"%@?return_to=%@", self.runtime.loginPath, self.runtime.smsPath] status:302];
     return nil;
   }
-  NSString *returnTo = AMTrimmedString([self requestParameters][@"return_to"]);
+  NSString *returnTo = AMSafeReturnTo([self requestParameters][@"return_to"]);
   NSError *error = nil;
   if ([self shouldPreferJSONForHeadlessRequest:ctx]) {
     NSDictionary *payload = [self smsJSONChallengeResponseForContext:ctx returnTo:returnTo autoSend:NO error:&error];
@@ -4022,7 +4070,7 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
     return [self shouldPreferJSONForHeadlessRequest:ctx] ? @{ @"status" : @"error", @"message" : @"Authentication required" } : nil;
   }
   NSDictionary *parameters = [self requestParameters];
-  NSString *returnTo = AMTrimmedString(parameters[@"return_to"]);
+  NSString *returnTo = AMSafeReturnTo(parameters[@"return_to"]);
   NSError *error = nil;
   NSDictionary *state = [self.runtime issueSMSVerificationForUser:user
                                                             phone:parameters[@"phone_number"]
@@ -4073,7 +4121,7 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
   NSDictionary *smsState = AMSMSSessionState(ctx);
   NSString *purpose = AMLowerTrimmedString(smsState[@"purpose"]);
   NSString *phone = AMNormalizePhoneNumber(smsState[@"phone"]);
-  NSString *returnTo = AMTrimmedString([self requestParameters][@"return_to"]);
+  NSString *returnTo = AMSafeReturnTo([self requestParameters][@"return_to"]);
   NSError *error = nil;
   NSDictionary *state = [self.runtime issueSMSVerificationForUser:user
                                                             phone:([purpose isEqualToString:@"enrollment"] ? phone : nil)
@@ -4142,7 +4190,7 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
     return [self shouldPreferJSONForHeadlessRequest:ctx] ? @{ @"status" : @"error", @"message" : @"Authentication required" } : nil;
   }
   NSDictionary *parameters = [self requestParameters];
-  NSString *returnTo = AMTrimmedString(parameters[@"return_to"]);
+  NSString *returnTo = AMSafeReturnTo(parameters[@"return_to"]);
   NSString *purpose = AMLowerTrimmedString(AMSMSSessionState(ctx)[@"purpose"]);
   NSError *error = nil;
   NSDictionary *payload = [self.runtime verifySMSCode:parameters[@"code"] user:user context:ctx error:&error];
@@ -4214,7 +4262,7 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
     [self setStatus:401];
     return [self shouldPreferJSONForHeadlessRequest:ctx] ? @{ @"status" : @"error", @"message" : @"Authentication required" } : nil;
   }
-  NSString *returnTo = AMTrimmedString([self requestParameters][@"return_to"]);
+  NSString *returnTo = AMSafeReturnTo([self requestParameters][@"return_to"]);
   NSError *error = nil;
   BOOL ok = [self.runtime removeSMSEnrollmentForUser:user context:ctx error:&error];
   if (!ok) {
@@ -4261,7 +4309,7 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
     [self redirectTo:[NSString stringWithFormat:@"%@?return_to=%@", self.runtime.loginPath, self.runtime.totpPath] status:302];
     return nil;
   }
-  NSString *returnTo = AMTrimmedString([self requestParameters][@"return_to"]);
+  NSString *returnTo = AMSafeReturnTo([self requestParameters][@"return_to"]);
   NSDictionary *payload = [self.runtime totpProvisioningPayloadForUser:user error:NULL] ?: @{};
   if ([self shouldPreferJSONForHeadlessRequest:ctx]) {
     return [self totpJSONResponseForContext:ctx provisioning:payload returnTo:returnTo];
@@ -4292,7 +4340,7 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
   NSDictionary *parameters = [self requestParameters];
   NSError *error = nil;
   NSDictionary *payload = [self.runtime verifyTOTPCode:parameters[@"code"] user:user context:ctx error:&error];
-  NSString *returnTo = AMTrimmedString(parameters[@"return_to"]);
+  NSString *returnTo = AMSafeReturnTo(parameters[@"return_to"]);
   if (payload == nil) {
     [self setStatus:422];
     NSArray *errors = [self errorEntriesForError:error field:@"code"];
@@ -4345,12 +4393,7 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
   NSError *error = nil;
   NSMutableDictionary *state = [[provider beginLoginWithError:&error] mutableCopy];
   if (!state) { [self setStatus:502]; return @{ @"status": @"error", @"message": @"Provider login unavailable" }; }
-  NSString *returnTo = AMTrimmedString([self requestParameters][@"return_to"]);
-  // Only local absolute paths can become a post-login redirect.
-  if (![returnTo hasPrefix:@"/"] || [returnTo hasPrefix:@"//"] ||
-      [returnTo rangeOfString:@"\\"].location != NSNotFound ||
-      [returnTo rangeOfCharacterFromSet:[NSCharacterSet controlCharacterSet]].location != NSNotFound) returnTo = @"";
-  state[@"return_to"] = returnTo;
+  state[@"return_to"] = AMSafeReturnTo([self requestParameters][@"return_to"]);
   NSString *authorizeURL = state[@"authorizationURL"];
   [state removeObjectForKey:@"authorizationURL"];
   ctx.session[ALNAuthModuleProviderStateSessionKey] = state;
@@ -4399,7 +4442,7 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
     [self setStatus:401];
     return @{ @"status": @"error", @"code": failureCode, @"message": @"Provider login rejected" };
   }
-  NSString *redirect = AMTrimmedString(state[@"return_to"]);
+  NSString *redirect = AMSafeReturnTo(state[@"return_to"]);
   if (!redirect.length) redirect = self.runtime.defaultRedirect;
   if ([self shouldReturnJSON:ctx]) return @{ @"status": @"ok", @"redirect_to": redirect,
       @"session": [self.runtime sessionPayloadForContext:ctx includeUser:NO error:NULL] };
@@ -4416,7 +4459,7 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
   NSDictionary *providerConfiguration = [self.runtime stubProviderConfigurationForBaseURL:baseURL];
   NSString *state = AMRandomToken(12);
   NSString *nonce = AMRandomToken(12);
-  NSString *returnTo = AMTrimmedString([self requestParameters][@"return_to"]);
+  NSString *returnTo = AMSafeReturnTo([self requestParameters][@"return_to"]);
   ctx.session[ALNAuthModuleProviderStateSessionKey] = @{
     @"state" : state ?: @"",
     @"nonce" : nonce ?: @"",
@@ -4520,7 +4563,7 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
   NSDictionary *user = [self.runtime currentUserForContext:ctx error:NULL] ?: @{};
   NSString *redirectTarget = [self.runtime postLoginRedirectForContext:ctx
                                                                   user:user
-                                                       defaultRedirect:AMTrimmedString(callbackState[@"return_to"])];
+                                                       defaultRedirect:AMSafeReturnTo(callbackState[@"return_to"])];
   if ([self shouldReturnJSON:ctx]) {
     NSMutableDictionary *payload = [NSMutableDictionary dictionaryWithDictionary:result[@"session"] ?: @{}];
     payload[@"normalized_identity"] = result[@"normalizedIdentity"] ?: @{};
