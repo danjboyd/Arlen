@@ -345,7 +345,11 @@
 #if defined(__APPLE__)
   NSString *compiler = @"xcrun clang -fobjc-arc -bundle -undefined dynamic_lookup";
 #else
-  NSString *compiler = [NSString stringWithFormat:@"%@ && clang $(gnustep-config --objc-flags) -fobjc-arc -shared -fPIC", ALNTestGNUstepSourceCommandForRepoRoot(root)];
+  // Sanitizer lanes preload libasan into every child; gnustep-config then
+  // prints nothing, so name the runtime contract explicitly like the
+  // syntax-only tests do instead of depending on its output.
+  NSString *compiler = [NSString stringWithFormat:@"%@ && clang $(gnustep-config --objc-flags) %@ -fobjc-arc -shared -fPIC",
+      ALNTestGNUstepSourceCommandForRepoRoot(root), [self gnuStepSyntaxOnlyContractFlags]];
 #endif
   NSString *command = [NSString stringWithFormat:@"cd %@ && %@ -Werror=incompatible-property-type -Werror=property-attribute-mismatch -Werror=nullability -Wno-nullability-completeness %@ %@ -o %@",
       ALNTestShellQuote(tmp), compiler, flags, ALNTestShellQuote(implementation), ALNTestShellQuote(library)];
