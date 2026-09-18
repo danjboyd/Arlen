@@ -83,7 +83,13 @@ static BOOL Match(NSData *body, NSUInteger offset, NSData *needle) {
     if (limits[key]) {
       if (![limits[key] respondsToSelector:@selector(longLongValue)] || [limits[key] longLongValue] <= 0)
         return Failure(error, ALNMultipartErrorLimitExceeded, @"Multipart limits must be positive");
-      policy[key] = limits[key];
+      // Store the validated number, not the caller's object. GNUstep's old-style
+      // plist parser yields strings for unannotated integers, and NSString does
+      // not implement unsignedLongLongValue or unsignedIntegerValue -- the reads
+      // below would raise NSInvalidArgumentException and take down the process
+      // on the first multipart request. Coercing here keeps every downstream
+      // read on an NSNumber, whatever the config was quoted as.
+      policy[key] = @([limits[key] longLongValue]);
     }
   }
   if (body.length > [policy[@"maxBodyBytes"] unsignedLongLongValue])

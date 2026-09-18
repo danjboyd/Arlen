@@ -456,10 +456,15 @@ static double ALNNowMilliseconds(void) {
 
 static NSUInteger ALNConfigUInt(NSDictionary *dict, NSString *key, NSUInteger defaultValue) {
   id value = dict[key];
-  if ([value respondsToSelector:@selector(unsignedIntegerValue)]) {
-    NSUInteger parsed = [value unsignedIntegerValue];
+  // Guarded on longLongValue rather than unsignedIntegerValue: NSString does not
+  // implement the latter, and GNUstep's old-style plist parser yields strings
+  // for unannotated integers. The previous guard therefore rejected a quoted
+  // value and silently substituted the default, so an app that raised a limit in
+  // config got the stock limit with nothing said about it.
+  if ([value respondsToSelector:@selector(longLongValue)]) {
+    long long parsed = [value longLongValue];
     if (parsed > 0) {
-      return parsed;
+      return (NSUInteger)parsed;
     }
   }
   return defaultValue;
