@@ -7,12 +7,25 @@ import sys
 import tempfile
 
 
+TRACE = sys.argv[sys.argv.index("--trace") + 1] if "--trace" in sys.argv else None
+
+
+def request_host(request):
+    for line in request.split(b"\r\n")[1:]:
+        if line.lower().startswith(b"host:"):
+            return line.split(b":", 1)[1].strip()
+    return b"127.0.0.1"
+
+
 class Peer(socketserver.BaseRequestHandler):
     def handle(self):
         self.request.settimeout(2)
         try:
             request = self.request.recv(8192)
             path = request.split(b" ")[1]
+            if TRACE:
+                with open(TRACE, "ab") as trace:
+                    trace.write(path + b"\n")
             if path == b"/disconnect":
                 return
             if path == b"/timeout":
@@ -21,6 +34,15 @@ class Peer(socketserver.BaseRequestHandler):
             headers = b"HTTP/1.1 200 OK\r\nConnection: close\r\n"
             if path == b"/redirect":
                 wire = b"HTTP/1.1 302 Found\r\nLocation: /ok\r\nContent-Length: 0\r\n\r\n"
+            elif path == b"/redirect-absolute":
+                wire = (b"HTTP/1.1 302 Found\r\nLocation: http://" + request_host(request)
+                        + b"/ok\r\nContent-Length: 0\r\n\r\n")
+            elif path.startswith(b"/chain/"):
+                hops = int(path.rsplit(b"/", 1)[1])
+                target = b"/ok" if hops <= 1 else b"/chain/%d" % (hops - 1)
+                wire = b"HTTP/1.1 302 Found\r\nLocation: " + target + b"\r\nContent-Length: 0\r\n\r\n"
+            elif path == b"/loop":
+                wire = b"HTTP/1.1 302 Found\r\nLocation: /loop\r\nContent-Length: 0\r\n\r\n"
             elif path == b"/status":
                 wire = b"HTTP/1.1 503 Unavailable\r\nContent-Length: 2\r\n\r\n{}"
             elif path == b"/declared":

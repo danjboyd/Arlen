@@ -13,51 +13,6 @@
 #include <strings.h>
 #endif
 
-NSData *ALNSynchronousURLRequest(NSURLRequest *request,
-                                 NSURLResponse *__autoreleasing _Nullable *_Nullable response,
-                                 NSError *__autoreleasing _Nullable *_Nullable error) {
-  if (error != NULL) {
-    *error = nil;
-  }
-  if (response != NULL) {
-    *response = nil;
-  }
-  if (request == nil) {
-    return nil;
-  }
-
-#if defined(__APPLE__)
-  dispatch_semaphore_t semaphore = dispatch_semaphore_create(0);
-  __block NSData *resultData = nil;
-  __block NSURLResponse *resultResponse = nil;
-  __block NSError *resultError = nil;
-
-  NSURLSessionConfiguration *configuration = [NSURLSessionConfiguration ephemeralSessionConfiguration];
-  NSURLSession *session = [NSURLSession sessionWithConfiguration:configuration];
-  NSURLSessionDataTask *task =
-      [session dataTaskWithRequest:request
-                 completionHandler:^(NSData *data, NSURLResponse *taskResponse, NSError *taskError) {
-                   resultData = data;
-                   resultResponse = taskResponse;
-                   resultError = taskError;
-                   dispatch_semaphore_signal(semaphore);
-                 }];
-  [task resume];
-  dispatch_semaphore_wait(semaphore, DISPATCH_TIME_FOREVER);
-  [session finishTasksAndInvalidate];
-
-  if (response != NULL) {
-    *response = resultResponse;
-  }
-  if (error != NULL) {
-    *error = resultError;
-  }
-  return resultData;
-#else
-  return [NSURLConnection sendSynchronousRequest:request returningResponse:response error:error];
-#endif
-}
-
 // GNUstep's systemUptime returns whole seconds. Use a fractional monotonic
 // clock so short deadlines and slow trickling responses cannot evade the cap.
 static NSTimeInterval MetadataNow(void) {
@@ -187,13 +142,16 @@ static int MetadataProgress(void *context, curl_off_t total, curl_off_t received
   NSTimeInterval now = MetadataNow();
   return !isfinite(now) || now >= transfer->deadline;
 }
-static NSData *MetadataCurlGET(NSURL *url, NSUInteger maxBytes, NSTimeInterval timeout,
-                                NSTimeInterval deadline, NSError **error) {
+static BOOL ALNCurlGlobalReady(void) {
   static CURLcode initialized;
   static dispatch_once_t once;
   dispatch_once(&once, ^{ initialized = curl_global_init(CURL_GLOBAL_DEFAULT); });
+  return initialized == CURLE_OK;
+}
+static NSData *MetadataCurlGET(NSURL *url, NSUInteger maxBytes, NSTimeInterval timeout,
+                                NSTimeInterval deadline, NSError **error) {
   // Synchronous DNS cannot guarantee a total deadline with NOSIGNAL on workers.
-  if (initialized != CURLE_OK || (curl_version_info(CURLVERSION_NOW)->features & (CURL_VERSION_ASYNCHDNS | CURL_VERSION_SSL)) != (CURL_VERSION_ASYNCHDNS | CURL_VERSION_SSL)) {
+  if (!ALNCurlGlobalReady() || (curl_version_info(CURLVERSION_NOW)->features & (CURL_VERSION_ASYNCHDNS | CURL_VERSION_SSL)) != (CURL_VERSION_ASYNCHDNS | CURL_VERSION_SSL)) {
     if (error) *error = MetadataError(5, @"Metadata transport requires libcurl with TLS and asynchronous DNS");
     return nil;
   }
@@ -288,4 +246,321 @@ NSData *ALNBoundedMetadataGETWithError(NSURL *url, NSUInteger maxBytes, NSTimeIn
   if (error) *error = delegate.error;
   return delegate.accepted ? [delegate.data copy] : nil;
 #endif
+}
+
+#pragma mark - Synchronous requests
+
+const NSUInteger ALNSynchronousURLRequestDefaultMaxRedirects = 10;
+
+static NSError *ALNSynchronousURLError(NSInteger code, NSString *description) {
+  return [NSError errorWithDomain:NSURLErrorDomain
+                             code:code
+                         userInfo:@{NSLocalizedDescriptionKey : description ?: @"request failed"}];
+}
+
+#if defined(GNUSTEP)
+// GNUstep's -[NSURLConnection sendSynchronousRequest:...] never issues the
+// redirected request (issue #22, same libs-base transport as #783), so the
+// synchronous helper drives libcurl directly on GNUstep. libcurl follows a
+// bounded redirect chain, keeps only the final response's headers, and maps
+// transport failures onto NSURLErrorDomain codes; HTTP error statuses are
+// returned as responses, not errors, matching Foundation.
+typedef struct {
+  void *body;         // NSMutableData
+  void *headers;      // NSMutableDictionary<NSString *, NSString *>
+  void *httpVersion;  // NSMutableString
+} ALNSynchronousTransfer;
+
+static size_t ALNSynchronousWrite(char *bytes, size_t size, size_t count, void *context) {
+  ALNSynchronousTransfer *transfer = context;
+  if (size && count > NSUIntegerMax / size) return 0;
+  NSMutableData *body = (__bridge NSMutableData *)transfer->body;
+  [body appendBytes:bytes length:size * count];
+  return size * count;
+}
+
+static size_t ALNSynchronousHeader(char *bytes, size_t size, size_t count, void *context) {
+  ALNSynchronousTransfer *transfer = context;
+  if (size && count > NSUIntegerMax / size) return 0;
+  size_t length = size * count;
+  NSMutableDictionary *headers = (__bridge NSMutableDictionary *)transfer->headers;
+  NSMutableString *version = (__bridge NSMutableString *)transfer->httpVersion;
+  NSString *line = [[NSString alloc] initWithBytes:bytes length:length encoding:NSISOLatin1StringEncoding] ?: @"";
+  NSString *trimmed = [line stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+  if ([trimmed hasPrefix:@"HTTP/"]) {
+    // Every status line (1xx interim, a redirect hop, or the final response)
+    // starts a new header block; only the last block is reported.
+    [headers removeAllObjects];
+    NSRange space = [trimmed rangeOfString:@" "];
+    [version setString:(space.location == NSNotFound ? trimmed : [trimmed substringToIndex:space.location])];
+    return length;
+  }
+  NSRange separator = [trimmed rangeOfString:@":"];
+  if (separator.location == NSNotFound || separator.location == 0) return length;
+  NSCharacterSet *whitespace = [NSCharacterSet whitespaceCharacterSet];
+  NSString *name = [[trimmed substringToIndex:separator.location] stringByTrimmingCharactersInSet:whitespace];
+  NSString *value = [[trimmed substringFromIndex:separator.location + 1] stringByTrimmingCharactersInSet:whitespace];
+  NSString *existingKey = nil;
+  for (NSString *key in headers) {
+    if ([key caseInsensitiveCompare:name] == NSOrderedSame) { existingKey = key; break; }
+  }
+  if (existingKey != nil) {
+    headers[existingKey] = [headers[existingKey] stringByAppendingFormat:@", %@", value];
+  } else {
+    headers[name] = value;
+  }
+  return length;
+}
+
+static NSInteger ALNSynchronousURLErrorCode(CURLcode result) {
+  switch (result) {
+    case CURLE_OPERATION_TIMEDOUT: return NSURLErrorTimedOut;
+    case CURLE_COULDNT_RESOLVE_HOST:
+    case CURLE_COULDNT_RESOLVE_PROXY: return NSURLErrorCannotFindHost;
+    case CURLE_COULDNT_CONNECT: return NSURLErrorCannotConnectToHost;
+    case CURLE_TOO_MANY_REDIRECTS: return NSURLErrorHTTPTooManyRedirects;
+    case CURLE_URL_MALFORMAT: return NSURLErrorBadURL;
+    case CURLE_UNSUPPORTED_PROTOCOL: return NSURLErrorUnsupportedURL;
+    case CURLE_SEND_ERROR:
+    case CURLE_RECV_ERROR:
+    case CURLE_GOT_NOTHING:
+    case CURLE_PARTIAL_FILE: return NSURLErrorNetworkConnectionLost;
+    case CURLE_SSL_CONNECT_ERROR:
+    case CURLE_PEER_FAILED_VERIFICATION: return NSURLErrorSecureConnectionFailed;
+    default: return NSURLErrorUnknown;
+  }
+}
+
+static NSData *ALNSynchronousRequestBody(NSURLRequest *request) {
+  if (request.HTTPBody != nil) return request.HTTPBody;
+  NSInputStream *stream = request.HTTPBodyStream;
+  if (stream == nil) return nil;
+  NSMutableData *body = [NSMutableData data];
+  uint8_t buffer[16384];
+  [stream open];
+  for (;;) {
+    NSInteger count = [stream read:buffer maxLength:sizeof(buffer)];
+    if (count <= 0) break;
+    [body appendBytes:buffer length:(NSUInteger)count];
+  }
+  [stream close];
+  return body;
+}
+
+// Applies every libcurl option; returns the first failing CURLcode.
+static CURLcode ALNSynchronousConfigure(CURL *curl, NSString *urlString, NSString *method,
+                                        NSData *requestBody, struct curl_slist *headerList,
+                                        NSUInteger maxRedirects, NSTimeInterval timeout,
+                                        char *message, ALNSynchronousTransfer *transfer) {
+  CURLcode result = CURLE_OK;
+#define SYNC_OPTION(option, value) do { result = curl_easy_setopt(curl, option, value); if (result != CURLE_OK) return result; } while (0)
+  SYNC_OPTION(CURLOPT_URL, urlString.UTF8String);
+  SYNC_OPTION(CURLOPT_ERRORBUFFER, message);
+  SYNC_OPTION(CURLOPT_NOSIGNAL, 1L);
+  SYNC_OPTION(CURLOPT_SSL_VERIFYPEER, 1L);
+  SYNC_OPTION(CURLOPT_SSL_VERIFYHOST, 2L);
+  SYNC_OPTION(CURLOPT_FOLLOWLOCATION, maxRedirects > 0 ? 1L : 0L);
+  SYNC_OPTION(CURLOPT_MAXREDIRS, (long)MIN(maxRedirects, (NSUInteger)LONG_MAX));
+#if LIBCURL_VERSION_NUM >= 0x075500
+  SYNC_OPTION(CURLOPT_PROTOCOLS_STR, "http,https");
+  SYNC_OPTION(CURLOPT_REDIR_PROTOCOLS_STR, "http,https");
+#else
+  SYNC_OPTION(CURLOPT_PROTOCOLS, (long)(CURLPROTO_HTTP | CURLPROTO_HTTPS));
+  SYNC_OPTION(CURLOPT_REDIR_PROTOCOLS, (long)(CURLPROTO_HTTP | CURLPROTO_HTTPS));
+#endif
+  SYNC_OPTION(CURLOPT_TIMEOUT_MS,
+      timeout >= (double)LONG_MAX / 1000 ? LONG_MAX : MAX(1L, (long)ceil(timeout * 1000)));
+  SYNC_OPTION(CURLOPT_HTTPHEADER, headerList);
+  if ([method isEqualToString:@"HEAD"]) {
+    SYNC_OPTION(CURLOPT_NOBODY, 1L);
+  } else if ([method isEqualToString:@"GET"] && requestBody.length == 0) {
+    SYNC_OPTION(CURLOPT_HTTPGET, 1L);
+  } else {
+    if (requestBody.length > 0) {
+      SYNC_OPTION(CURLOPT_POSTFIELDSIZE_LARGE, (curl_off_t)requestBody.length);
+      SYNC_OPTION(CURLOPT_POSTFIELDS, requestBody.bytes);
+    } else {
+      SYNC_OPTION(CURLOPT_POST, 1L);
+      SYNC_OPTION(CURLOPT_POSTFIELDSIZE, 0L);
+    }
+    if (![method isEqualToString:@"POST"]) {
+      SYNC_OPTION(CURLOPT_CUSTOMREQUEST, method.UTF8String);
+    }
+  }
+  SYNC_OPTION(CURLOPT_WRITEFUNCTION, ALNSynchronousWrite);
+  SYNC_OPTION(CURLOPT_WRITEDATA, transfer);
+  SYNC_OPTION(CURLOPT_HEADERFUNCTION, ALNSynchronousHeader);
+  SYNC_OPTION(CURLOPT_HEADERDATA, transfer);
+#undef SYNC_OPTION
+  return result;
+}
+
+static NSData *ALNSynchronousCurlRequest(NSURLRequest *request, NSUInteger maxRedirects,
+                                         NSURLResponse *__autoreleasing *response,
+                                         NSError *__autoreleasing *error) {
+  if (!ALNCurlGlobalReady()) {
+    if (error) *error = ALNSynchronousURLError(NSURLErrorUnknown, @"libcurl could not initialize");
+    return nil;
+  }
+  CURL *curl = curl_easy_init();
+  if (!curl) {
+    if (error) *error = ALNSynchronousURLError(NSURLErrorUnknown, @"libcurl could not initialize");
+    return nil;
+  }
+  NSMutableData *body = [NSMutableData data];
+  NSMutableDictionary *headers = [NSMutableDictionary dictionary];
+  NSMutableString *httpVersion = [NSMutableString string];
+  ALNSynchronousTransfer transfer = {(__bridge void *)body, (__bridge void *)headers, (__bridge void *)httpVersion};
+  NSData *requestBody = ALNSynchronousRequestBody(request);
+  NSString *method = [request.HTTPMethod length] > 0 ? [request.HTTPMethod uppercaseString] : @"GET";
+  NSString *urlString = request.URL.absoluteString ?: @"";
+  NSDictionary *requestHeaders = request.allHTTPHeaderFields ?: @{};
+  NSTimeInterval timeout = request.timeoutInterval > 0 ? request.timeoutInterval : 60;
+  char message[CURL_ERROR_SIZE] = {0};
+  struct curl_slist *headerList = NULL;
+  CURLcode result = CURLE_OUT_OF_MEMORY;
+  long status = 0;
+  char *effectiveURL = NULL;
+  BOOL hasContentType = NO;
+  BOOL listOK = YES;
+
+  for (NSString *name in requestHeaders) {
+    NSString *line = [NSString stringWithFormat:@"%@: %@", name, requestHeaders[name]];
+    struct curl_slist *next = curl_slist_append(headerList, line.UTF8String);
+    if (!next) { listOK = NO; break; }
+    headerList = next;
+    if ([name caseInsensitiveCompare:@"Content-Type"] == NSOrderedSame) hasContentType = YES;
+  }
+  // Deterministic wire shape: no implicit Expect handshake and no implied form
+  // Content-Type for bodies the caller left untyped.
+  if (listOK) {
+    struct curl_slist *next = curl_slist_append(headerList, "Expect:");
+    listOK = next != NULL;
+    if (next) headerList = next;
+  }
+  if (listOK && requestBody.length > 0 && !hasContentType) {
+    struct curl_slist *next = curl_slist_append(headerList, "Content-Type:");
+    listOK = next != NULL;
+    if (next) headerList = next;
+  }
+  if (listOK) {
+    result = ALNSynchronousConfigure(curl, urlString, method, requestBody, headerList, maxRedirects,
+                                     timeout, message, &transfer);
+  }
+  if (result == CURLE_OK) {
+    result = curl_easy_perform(curl);
+  }
+  if (result == CURLE_OK) {
+    curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &status);
+    curl_easy_getinfo(curl, CURLINFO_EFFECTIVE_URL, &effectiveURL);
+  }
+
+  NSData *resultData = nil;
+  if (result == CURLE_OK) {
+    NSURL *finalURL = effectiveURL ? [NSURL URLWithString:@(effectiveURL)] : nil;
+    NSHTTPURLResponse *http = [[NSHTTPURLResponse alloc] initWithURL:finalURL ?: request.URL
+                                                         statusCode:status
+                                                        HTTPVersion:([httpVersion length] > 0 ? httpVersion : @"HTTP/1.1")
+                                                       headerFields:headers];
+    if (response) *response = http;
+    resultData = [body copy];
+  } else if (error) {
+    NSString *description = message[0] ? @(message) : @(curl_easy_strerror(result));
+    *error = ALNSynchronousURLError(ALNSynchronousURLErrorCode(result), description);
+  }
+  curl_slist_free_all(headerList);
+  curl_easy_cleanup(curl);
+  return resultData;
+}
+#endif
+
+#if defined(__APPLE__)
+@interface ALNSynchronousSessionDelegate : NSObject <NSURLSessionTaskDelegate>
+@property(nonatomic, assign) NSUInteger maxRedirects;
+@property(nonatomic, assign) NSUInteger redirectCount;
+@property(nonatomic, assign) BOOL exceeded;
+@end
+@implementation ALNSynchronousSessionDelegate
+- (void)URLSession:(NSURLSession *)session
+                          task:(NSURLSessionTask *)task
+    willPerformHTTPRedirection:(NSHTTPURLResponse *)response
+                    newRequest:(NSURLRequest *)request
+             completionHandler:(void (^)(NSURLRequest *_Nullable))completionHandler {
+  if (self.redirectCount >= self.maxRedirects) {
+    self.exceeded = self.maxRedirects > 0;
+    completionHandler(nil);
+    return;
+  }
+  self.redirectCount += 1;
+  completionHandler(request);
+}
+@end
+#endif
+
+NSData *ALNSynchronousURLRequestFollowingRedirects(NSURLRequest *request, NSUInteger maxRedirects,
+                                                   NSURLResponse *__autoreleasing _Nullable *_Nullable response,
+                                                   NSError *__autoreleasing _Nullable *_Nullable error) {
+  if (error != NULL) {
+    *error = nil;
+  }
+  if (response != NULL) {
+    *response = nil;
+  }
+  if (request == nil) {
+    return nil;
+  }
+  if (request.URL == nil) {
+    if (error != NULL) *error = ALNSynchronousURLError(NSURLErrorBadURL, @"request has no URL");
+    return nil;
+  }
+
+#if defined(__APPLE__)
+  dispatch_semaphore_t semaphore = dispatch_semaphore_create(0);
+  __block NSData *resultData = nil;
+  __block NSURLResponse *resultResponse = nil;
+  __block NSError *resultError = nil;
+
+  ALNSynchronousSessionDelegate *delegate = [ALNSynchronousSessionDelegate new];
+  delegate.maxRedirects = maxRedirects;
+  NSURLSessionConfiguration *configuration = [NSURLSessionConfiguration ephemeralSessionConfiguration];
+  NSURLSession *session = [NSURLSession sessionWithConfiguration:configuration
+                                                        delegate:delegate
+                                                   delegateQueue:nil];
+  NSURLSessionDataTask *task =
+      [session dataTaskWithRequest:request
+                 completionHandler:^(NSData *data, NSURLResponse *taskResponse, NSError *taskError) {
+                   resultData = data;
+                   resultResponse = taskResponse;
+                   resultError = taskError;
+                   dispatch_semaphore_signal(semaphore);
+                 }];
+  [task resume];
+  dispatch_semaphore_wait(semaphore, DISPATCH_TIME_FOREVER);
+  [session finishTasksAndInvalidate];
+
+  if (resultError == nil && delegate.exceeded) {
+    resultError = ALNSynchronousURLError(NSURLErrorHTTPTooManyRedirects, @"too many HTTP redirects");
+    resultData = nil;
+    resultResponse = nil;
+  }
+  if (response != NULL) {
+    *response = resultResponse;
+  }
+  if (error != NULL) {
+    *error = resultError;
+  }
+  return resultData;
+#elif defined(GNUSTEP)
+  return ALNSynchronousCurlRequest(request, maxRedirects, response, error);
+#else
+  (void)maxRedirects;
+  return [NSURLConnection sendSynchronousRequest:request returningResponse:response error:error];
+#endif
+}
+
+NSData *ALNSynchronousURLRequest(NSURLRequest *request,
+                                 NSURLResponse *__autoreleasing _Nullable *_Nullable response,
+                                 NSError *__autoreleasing _Nullable *_Nullable error) {
+  return ALNSynchronousURLRequestFollowingRedirects(request, ALNSynchronousURLRequestDefaultMaxRedirects,
+                                                    response, error);
 }
