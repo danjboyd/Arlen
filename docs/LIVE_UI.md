@@ -254,6 +254,41 @@ NSError *error = nil;
 The pushed message is the same live JSON payload used for ordinary HTTP live
 responses.
 
+### 7.1 Push is single-worker only
+
+**Push updates are incorrect under a multi-worker deployment, not merely
+unsupported.** Read this before building on `publishLiveOperations:`.
+
+`publishLiveOperations:onChannel:error:` fans out through `ALNRealtimeHub`,
+which is process-local. A publish that runs on one worker never reaches a
+subscriber whose websocket is held by another worker. There is no error, no log
+and no degraded flag — the update is simply never delivered.
+
+Because `docs/DEPLOYMENT.md` and `docs/PROPANE.md` describe a prefork worker
+model, this means a single-worker development environment will behave correctly
+and the same code will silently drop updates in production. This is the
+process-local state that `docs/APP_AUTHORING_GUIDE.md` §5.1 warns against, and
+realtime fanout is the easiest way to acquire it by accident.
+
+Supported options today:
+
+- **Run one worker.** Correct, and appropriate for low-traffic or internal apps.
+- **Use a polling live region** — `data-arlen-live-src` with
+  `data-arlen-live-poll` (§4). Correct under any worker count, and the right
+  default when the update's source is already periodic. This is the recommended
+  choice if you may ever scale beyond one worker.
+- **Rebuild on the durable event-stream seam** (`docs/EVENT_STREAMS.md`), which
+  supports a broker adapter for multi-node fanout.
+
+Note the migration cost of the third option before choosing it. The durable seam
+carries `ALNEventEnvelope` JSON — `streamID`, `sequence`, `eventID`,
+`eventType`, `occurredAt`, `payload` — not the `arlen-live-v1` operations
+payload that `/arlen/live.js` knows how to apply. An app taking that route gives
+up the runtime's DOM patching for that region and writes its own client glue.
+
+A first-party broker-backed fanout for `ALNRealtimeHub` is tracked but not
+shipped; see `docs/REALTIME_COMPOSITION.md` §4.1.
+
 ## 8. Upload Progress and Failure Signals
 
 For live forms with file inputs, or forms that set

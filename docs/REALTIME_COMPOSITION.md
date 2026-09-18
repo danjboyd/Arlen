@@ -108,6 +108,33 @@ Current non-goals still remain:
 See [Durable Event Streams](EVENT_STREAMS.md) for app-author usage and the
 module boundary.
 
+### 4.1.1 Multi-worker fanout is incorrect, not just unsupported
+
+The non-goal above is a live hazard, not a missing convenience, and it is worth
+stating plainly.
+
+Both fanout paths are process-local today:
+
+- `ALNRealtimeHub` backs `publishLiveOperations:onChannel:error:` and the
+  `/ws/channel/:channel` subscriptions described in §2. It is a bare singleton
+  with no adapter seam.
+- `ALNInMemoryEventStreamBroker` backs the durable seam when no other broker is
+  set, and `ALNInMemoryEventStreamStore` keeps its sequence space per process.
+
+Under the prefork worker model in `docs/DEPLOYMENT.md`, a publish on one worker
+never reaches a subscriber held by another. The failure is silent: no error, no
+log, no degraded flag, and no symptom under the single-worker configuration most
+development happens on. An app is therefore most likely to discover it in
+production, immediately after scaling.
+
+Until an adapter ships, run one worker or use a polling live region — see
+`docs/LIVE_UI.md` §7.1, which covers the app-author decision in full.
+
+Two tracked items address this: a durable PostgreSQL event-stream store and
+`LISTEN`/`NOTIFY` broker for the durable seam, and a transport seam on
+`ALNRealtimeHub` for the Live UI push path. Neither has shipped, and the second
+does not exist as a seam yet, so no adapter can be written against it today.
+
 ## 5. Live UI Baseline
 
 Arlen adds a fragment-first live UI layer on top of the realtime
