@@ -282,3 +282,17 @@ NSString *ALNTestRunShellCapture(NSString *command, int *exitCode) {
     return exception.reason ?: @"shell command failed";
   }
 }
+
+BOOL ALNTestThreadSanitizerRuntimeActive(void) {
+  // The TSAN lane (tools/ci/run_phase5e_tsan_experimental.sh) runs xctest with
+  // libtsan in LD_PRELOAD. Tests that spawn `bash -lc` children through NSTask
+  // do not survive that environment, so they quarantine themselves here.
+  NSDictionary<NSString *, NSString *> *environment = [[NSProcessInfo processInfo] environment];
+  for (NSString *name in @[ @"LD_PRELOAD", @"XCTEST_LD_PRELOAD" ]) {
+    NSString *value = environment[name];
+    if ([value isKindOfClass:[NSString class]] && [[value lowercaseString] containsString:@"tsan"]) {
+      return YES;
+    }
+  }
+  return NO;
+}
