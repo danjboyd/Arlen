@@ -6,13 +6,13 @@ Source of truth fixture:
 
 - `tests/fixtures/release/phase9j_known_risks.json`
 
-Last updated: 2026-05-11
+Last updated: 2026-09-18
 
 ## Active Risks
 
 | ID | Title | Severity | Owner | Target Date | Notes |
 | --- | --- | --- | --- | --- | --- |
-| `phase9j-risk-tsan-nonblocking` | TSAN lane remains non-blocking while false-positive budget is stabilized | medium | runtime-core | 2026-06-30 | A fresh local `phase5e` TSAN experimental run now passes after unsanitized `eocc` bootstrap, GNUstep suppression wiring, and TSAN-only quarantine of nested CLI/script assertion tests, but the GNUstep `libobjc`/base lock-order-inversion and monitor-race signatures remain unresolved in CI governance as of 2026-04-15; keep TSAN non-blocking until that stack is resolved and two consecutive deterministic pass cycles are observed. |
+| `phase9j-risk-tsan-nonblocking` | TSAN lane remains non-blocking while false-positive budget is stabilized | medium | runtime-core | 2026-12-31 | A fresh local `phase5e` TSAN experimental run now passes after unsanitized `eocc` bootstrap, GNUstep suppression wiring, and TSAN-only quarantine of nested CLI/script assertion tests, but the GNUstep `libobjc`/base lock-order-inversion and monitor-race signatures remain unresolved in CI governance as of 2026-09-18 (the 2026-09-18 nightly TSAN lane reports no sanitizer findings with the registry suppressions active, but still fails on unquarantined child-process unit tests); keep TSAN non-blocking until that stack is resolved and two consecutive deterministic pass cycles are observed. |
 
 ## Mitigated Risks
 
