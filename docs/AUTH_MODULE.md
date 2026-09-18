@@ -37,6 +37,8 @@ Interactive HTML routes:
 - `GET /auth/mfa/totp`
 - `POST /auth/mfa/totp/verify`
 - `GET /auth/provider/stub/login`
+- `GET /auth/provider/:provider/login`
+- `GET /auth/provider/:provider/callback`
 - when `authModule.mfa.sms.enabled = YES`:
   - `GET /auth/mfa/sms`
   - `POST /auth/mfa/sms/start`
@@ -58,6 +60,8 @@ Stable API-first aliases:
 - `GET /auth/api/mfa/totp`
 - `POST /auth/api/mfa/totp/verify`
 - `GET /auth/api/provider/stub/login`
+- `GET /auth/api/provider/:provider/login`
+- `GET /auth/api/provider/:provider/callback`
 - when `authModule.mfa.sms.enabled = YES`:
   - `GET /auth/api/mfa/sms`
   - `POST /auth/api/mfa/sms/start`
@@ -77,6 +81,73 @@ Mode behavior:
 Provider CTAs and provider API routes are driven by the enabled provider set in
 `authModule.providers`. If `authModule.providers.stub.enabled = NO`, the
 provider CTA disappears and the stub provider routes are not registered.
+
+## Generic OIDC Providers
+
+Every `authModule.providers` entry other than `stub` is a real OIDC provider
+driven by the module-owned `/auth/provider/:provider/...` routes. `stub` keeps
+its own hand-rolled routes because it is a test double with no upstream to talk
+to.
+
+```plist
+authModule = {
+  providers = {
+    entra = {
+      preset = "microsoft";
+      clientID = "00000000-0000-0000-0000-000000000000";
+      clientSecret = "...";
+      tenantID = "contoso-tenant-id";
+      issuer = "https://login.microsoftonline.com/contoso-tenant-id/v2.0";
+    };
+  };
+};
+```
+
+An entry names a `preset` (`google` or `microsoft`) and overrides any field on
+it; an entry with no preset must supply the endpoints itself. A provider whose
+key matches a preset name picks that preset up implicitly. Set `enabled = NO` to
+configure a provider without registering it.
+
+The flow the routes drive:
+
+- `GET /auth/provider/:provider/login` builds the authorization request,
+  generates PKCE (S256), state and nonce, stashes them in the session, and
+  redirects to the provider.
+- `GET /auth/provider/:provider/callback` validates state, exchanges the code
+  while replaying the stashed verifier, fetches and caches the JWKS, verifies
+  the ID token, normalizes the identity, and hands it to the app's
+  `ALNAuthProviderSessionResolver`.
+
+PKCE is always on and is not configurable. The stashed material is single-use:
+the callback consumes it before doing any work, so a replayed callback cannot
+reuse a state, nonce or verifier.
+
+Mapping a normalized identity onto the app's own user table stays the app's job
+through the resolver seam — the module does not assume a user model.
+
+### Tenant issuer overrides
+
+**Both shipped presets default to the multi-tenant issuer**
+(`login.microsoftonline.com/common/v2.0`). A single-tenant app must override
+`issuer` with its real tenant issuer, or issuer validation accepts tokens from
+any tenant.
+
+Configuration fails at registration when a provider sets `tenantID` to a real
+tenant but leaves a `/common/` issuer in place, since that combination is
+almost always the mistake rather than the intent.
+
+### JWKS fetching
+
+Keys are fetched over a bounded transport that rejects redirects, cookies and
+non-200 responses, and are cached per provider. `authModule.jwksMaxAgeSeconds`
+controls the cache lifetime and must be between 30 and 3600 seconds (default
+300). A provider may set `jwksAllowedHosts` to constrain which hosts its keys
+may come from; it defaults to the host of its own `jwksURI`, and a JWKS URI
+outside the allowlist is refused.
+
+This mirrors the resource-server side described in
+[OAuth Resource Server](OAUTH_RESOURCE_SERVER.md), so both JWKS consumers make
+the same trust decisions.
 
 TOTP route behavior:
 

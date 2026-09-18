@@ -590,6 +590,137 @@ static NSUInteger gPhase15UIContextCalls = 0;
   XCTAssertNil([app.router routeNamed:@"auth_api_provider_stub_callback"]);
 }
 
+- (void)testGenericProviderRoutesAreRegistered_ARLEN_FR_008 {
+  if ([[self pgTestDSN] length] == 0) {
+    return;
+  }
+  ALNApplication *app = [self applicationWithConfig:@{}];
+  NSError *error = nil;
+  XCTAssertTrue([[[ALNAuthModule alloc] init] registerWithApplication:app error:&error]);
+  XCTAssertNil(error);
+
+  XCTAssertNotNil([app.router routeNamed:@"auth_provider_login"]);
+  XCTAssertNotNil([app.router routeNamed:@"auth_provider_callback"]);
+  XCTAssertNotNil([app.router routeNamed:@"auth_api_provider_login"]);
+  XCTAssertNotNil([app.router routeNamed:@"auth_api_provider_callback"]);
+}
+
+- (void)testConfiguredPresetProviderBecomesALoginProvider_ARLEN_FR_008 {
+  if ([[self pgTestDSN] length] == 0) {
+    return;
+  }
+  ALNApplication *app = [self applicationWithConfig:@{
+    @"authModule" : @{
+      @"providers" : @{
+        @"entra" : @{
+          @"preset" : @"microsoft",
+          @"clientID" : @"client-abc",
+          @"clientSecret" : @"secret-abc",
+        },
+      },
+    },
+  }];
+  NSError *error = nil;
+  XCTAssertTrue([[[ALNAuthModule alloc] init] registerWithApplication:app error:&error]);
+  XCTAssertNil(error);
+
+  ALNAuthModuleRuntime *runtime = [ALNAuthModuleRuntime sharedRuntime];
+  XCTAssertTrue([runtime isProviderEnabled:@"entra"]);
+  XCTAssertEqualObjects(@"/auth/provider/entra/login", [runtime oidcLoginPathForIdentifier:@"entra"]);
+  XCTAssertEqualObjects(@"/auth/provider/entra/callback", [runtime oidcCallbackPathForIdentifier:@"entra"]);
+
+  NSDictionary *provider = [runtime oidcProviderConfigurationForIdentifier:@"entra"
+                                                                  baseURL:@"https://app.test"];
+  XCTAssertNotNil(provider);
+  XCTAssertEqualObjects(@"client-abc", provider[@"clientID"]);
+  // The redirect URI defaults to this provider's own callback route.
+  XCTAssertEqualObjects(@"https://app.test/auth/provider/entra/callback", provider[@"redirectURI"]);
+}
+
+- (void)testDisabledProviderIsNotEnabled_ARLEN_FR_008 {
+  if ([[self pgTestDSN] length] == 0) {
+    return;
+  }
+  ALNApplication *app = [self applicationWithConfig:@{
+    @"authModule" : @{
+      @"providers" : @{
+        @"entra" : @{
+          @"preset" : @"microsoft",
+          @"clientID" : @"client-abc",
+          @"clientSecret" : @"secret-abc",
+          @"enabled" : @NO,
+        },
+      },
+    },
+  }];
+  NSError *error = nil;
+  XCTAssertTrue([[[ALNAuthModule alloc] init] registerWithApplication:app error:&error]);
+  XCTAssertNil(error);
+
+  ALNAuthModuleRuntime *runtime = [ALNAuthModuleRuntime sharedRuntime];
+  XCTAssertFalse([runtime isProviderEnabled:@"entra"]);
+  XCTAssertNil([runtime oidcProviderConfigurationForIdentifier:@"entra" baseURL:@"https://app.test"]);
+}
+
+/// A tenantID with the multi-tenant issuer left in place means issuer
+/// validation accepts any tenant. Fail configuration rather than boot it.
+- (void)testTenantIDWithCommonIssuerIsRejected_ARLEN_FR_008 {
+  if ([[self pgTestDSN] length] == 0) {
+    return;
+  }
+  ALNApplication *app = [self applicationWithConfig:@{
+    @"authModule" : @{
+      @"providers" : @{
+        @"entra" : @{
+          @"preset" : @"microsoft",
+          @"clientID" : @"client-abc",
+          @"clientSecret" : @"secret-abc",
+          @"tenantID" : @"contoso-tenant-id",
+        },
+      },
+    },
+  }];
+  NSError *error = nil;
+  XCTAssertFalse([[[ALNAuthModule alloc] init] registerWithApplication:app error:&error]);
+  XCTAssertNotNil(error);
+  XCTAssertTrue([error.localizedDescription rangeOfString:@"tenant"].location != NSNotFound);
+}
+
+- (void)testTenantIssuerOverrideIsAccepted_ARLEN_FR_008 {
+  if ([[self pgTestDSN] length] == 0) {
+    return;
+  }
+  ALNApplication *app = [self applicationWithConfig:@{
+    @"authModule" : @{
+      @"providers" : @{
+        @"entra" : @{
+          @"preset" : @"microsoft",
+          @"clientID" : @"client-abc",
+          @"clientSecret" : @"secret-abc",
+          @"tenantID" : @"contoso-tenant-id",
+          @"issuer" : @"https://login.microsoftonline.com/contoso-tenant-id/v2.0",
+        },
+      },
+    },
+  }];
+  NSError *error = nil;
+  XCTAssertTrue([[[ALNAuthModule alloc] init] registerWithApplication:app error:&error]);
+  XCTAssertNil(error);
+  XCTAssertTrue([[ALNAuthModuleRuntime sharedRuntime] isProviderEnabled:@"entra"]);
+}
+
+- (void)testInvalidJWKSMaxAgeIsRejected_ARLEN_FR_008 {
+  if ([[self pgTestDSN] length] == 0) {
+    return;
+  }
+  ALNApplication *app = [self applicationWithConfig:@{
+    @"authModule" : @{ @"jwksMaxAgeSeconds" : @5 },
+  }];
+  NSError *error = nil;
+  XCTAssertFalse([[[ALNAuthModule alloc] init] registerWithApplication:app error:&error]);
+  XCTAssertNotNil(error);
+}
+
 - (void)testSMSRoutesAreNotRegisteredWhenSMSIsDisabled {
   if ([[self pgTestDSN] length] == 0) {
     return;

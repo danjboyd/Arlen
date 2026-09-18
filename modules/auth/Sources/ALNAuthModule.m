@@ -2,6 +2,8 @@
 
 #import "ALNHTTPCompat.h"
 #import "ALNApplication.h"
+#import "ALNAuthProviderPresets.h"
+#import "ALNOIDCClient.h"
 #import "ALNAuthSession.h"
 #import "ALNContext.h"
 #import "ALNController.h"
@@ -19,6 +21,14 @@
 NSString *const ALNAuthModuleErrorDomain = @"Arlen.Modules.Auth.Error";
 
 static NSString *const ALNAuthModuleProviderStateSessionKey = @"aln.auth_module.stub_provider_state";
+static NSString *const ALNAuthModuleOIDCStateSessionKey = @"aln.auth_module.oidc_provider_state";
+
+/// Bounds mirror docs/OAUTH_RESOURCE_SERVER.md so both JWKS consumers agree.
+static const NSUInteger ALNAuthModuleJWKSMaxBytes = 262144U;
+static const NSTimeInterval ALNAuthModuleJWKSFetchTimeout = 5.0;
+static const NSTimeInterval ALNAuthModuleJWKSMinMaxAge = 30.0;
+static const NSTimeInterval ALNAuthModuleJWKSMaxMaxAge = 3600.0;
+static const NSTimeInterval ALNAuthModuleTokenExchangeTimeout = 10.0;
 static NSString *const ALNAuthModuleVerificationNoticeSessionKey = @"aln.auth_module.notice.verify";
 static NSString *const ALNAuthModuleResetNoticeSessionKey = @"aln.auth_module.notice.reset";
 static NSString *const ALNAuthModuleSMSStateSessionKey = @"aln.auth_module.sms_state";
@@ -592,6 +602,11 @@ static NSString *AMStubHS256JWT(NSDictionary *claims, NSString *sharedSecret) {
 @property(nonatomic, copy, readwrite) NSString *providerStubLoginPath;
 @property(nonatomic, copy, readwrite) NSString *providerStubAuthorizePath;
 @property(nonatomic, copy, readwrite) NSString *providerStubCallbackPath;
+@property(nonatomic, copy, readwrite) NSString *providerLoginPathTemplate;
+@property(nonatomic, copy, readwrite) NSString *providerCallbackPathTemplate;
+@property(nonatomic, copy, readwrite) NSDictionary *oidcProviders;
+@property(nonatomic, strong) NSMutableDictionary *jwksCache;
+@property(nonatomic, assign, readwrite) NSTimeInterval jwksMaxAgeSeconds;
 @property(nonatomic, copy, readwrite) NSString *defaultRedirect;
 @property(nonatomic, copy, readwrite) NSArray<NSDictionary *> *loginProviders;
 @property(nonatomic, copy, readwrite) NSString *uiMode;
@@ -714,6 +729,12 @@ static NSString *AMStubHS256JWT(NSDictionary *claims, NSString *sharedSecret) {
 - (NSDictionary *)totpRecoveryCodesFragmentContextWithCodes:(NSArray<NSString *> *)recoveryCodes
                                                    returnTo:(NSString *)returnTo;
 - (NSDictionary *)stubProviderConfigurationForBaseURL:(NSString *)baseURL;
+- (nullable NSDictionary *)jwksDocumentForProviderConfiguration:(NSDictionary *)providerConfiguration
+                                                     identifier:(NSString *)identifier
+                                                          error:(NSError **)error;
+- (BOOL)validateOIDCProviderConfiguration:(NSDictionary *)provider
+                               identifier:(NSString *)identifier
+                                    error:(NSError **)error;
 
 @end
 
@@ -926,6 +947,11 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
     _providerStubLoginPath = @"/auth/provider/stub/login";
     _providerStubAuthorizePath = @"/auth/provider/stub/authorize";
     _providerStubCallbackPath = @"/auth/provider/stub/callback";
+    _providerLoginPathTemplate = @"/auth/provider/:provider/login";
+    _providerCallbackPathTemplate = @"/auth/provider/:provider/callback";
+    _oidcProviders = @{};
+    _jwksCache = [NSMutableDictionary dictionary];
+    _jwksMaxAgeSeconds = 300.0;
     _defaultRedirect = @"/";
     _loginProviders = @[ @{
       @"identifier" : @"stub",
@@ -985,6 +1011,10 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
       AMConfiguredPath(self.moduleConfig, @"providerStubAuthorize", @"provider/stub/authorize");
   self.providerStubCallbackPath =
       AMConfiguredPath(self.moduleConfig, @"providerStubCallback", @"provider/stub/callback");
+  self.providerLoginPathTemplate =
+      AMConfiguredPath(self.moduleConfig, @"providerLogin", @"provider/:provider/login");
+  self.providerCallbackPathTemplate =
+      AMConfiguredPath(self.moduleConfig, @"providerCallback", @"provider/:provider/callback");
   self.defaultRedirect = AMTrimmedString(self.moduleConfig[@"defaultRedirect"]);
   if ([self.defaultRedirect length] == 0) {
     self.defaultRedirect = @"/";
@@ -1045,17 +1075,91 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
   if ([sharedSecret length] > 0) {
     self.stubProviderSharedSecret = sharedSecret;
   }
+  NSMutableArray *descriptors = [NSMutableArray array];
   if (stubEnabled) {
-    self.loginProviders = @[ @{
+    [descriptors addObject:@{
       @"identifier" : @"stub",
       @"kind" : @"oidc",
       @"ctaLabel" : @"Continue with Stub OIDC",
       @"loginPath" : self.providerStubLoginPath ?: @"/auth/provider/stub/login",
       @"apiLoginPath" : AMPathJoin(self.apiPrefix, @"provider/stub/login"),
-    } ];
-  } else {
-    self.loginProviders = @[];
+    }];
   }
+
+  // Every non-stub entry is a real OIDC provider driven by the generic routes.
+  // `stub` stays hand-rolled: it is a test double with no upstream to talk to.
+  NSMutableDictionary *providerCandidates = [NSMutableDictionary dictionary];
+  for (id rawKey in providers) {
+    NSString *identifier = AMLowerTrimmedString(rawKey);
+    if ([identifier length] == 0 || [identifier isEqualToString:@"stub"]) {
+      continue;
+    }
+    if (![providers[rawKey] isKindOfClass:[NSDictionary class]]) {
+      if (error != NULL) {
+        *error = AMError(ALNAuthModuleErrorInvalidConfiguration,
+                         @"Auth provider entries must be dictionaries", nil);
+      }
+      return NO;
+    }
+    providerCandidates[identifier] = providers[rawKey];
+  }
+
+  NSDictionary *normalizedProviders = @{};
+  if ([providerCandidates count] > 0) {
+    NSError *providerError = nil;
+    normalizedProviders = [ALNAuthProviderPresets normalizedProvidersFromConfiguration:providerCandidates
+                                                                                 error:&providerError];
+    if (normalizedProviders == nil) {
+      if (error != NULL) {
+        *error = AMError(ALNAuthModuleErrorInvalidConfiguration,
+                         providerError.localizedDescription ?: @"Auth provider configuration is invalid",
+                         nil);
+      }
+      return NO;
+    }
+  }
+
+  NSMutableDictionary *enabledProviders = [NSMutableDictionary dictionary];
+  for (NSString *identifier in [[normalizedProviders allKeys] sortedArrayUsingSelector:@selector(compare:)]) {
+    NSDictionary *provider = normalizedProviders[identifier];
+    NSDictionary *rawEntry = providerCandidates[identifier] ?: @{};
+    if (!AMConfigBool(rawEntry[@"enabled"], YES)) {
+      continue;
+    }
+    if (![self validateOIDCProviderConfiguration:provider identifier:identifier error:error]) {
+      return NO;
+    }
+    enabledProviders[identifier] = provider;
+    NSString *ctaLabel = AMTrimmedString(rawEntry[@"ctaLabel"]);
+    if ([ctaLabel length] == 0) {
+      ctaLabel = [NSString stringWithFormat:@"Continue with %@",
+                                            AMTrimmedString(provider[@"displayName"]) ?: identifier];
+    }
+    [descriptors addObject:@{
+      @"identifier" : identifier,
+      @"kind" : @"oidc",
+      @"ctaLabel" : ctaLabel,
+      @"loginPath" : [self oidcLoginPathForIdentifier:identifier],
+      @"apiLoginPath" : AMPathJoin(self.apiPrefix,
+                                   [NSString stringWithFormat:@"provider/%@/login", identifier]),
+    }];
+  }
+  self.oidcProviders = enabledProviders;
+  self.loginProviders = descriptors;
+
+  double configuredJWKSMaxAge =
+      [self.moduleConfig[@"jwksMaxAgeSeconds"] respondsToSelector:@selector(doubleValue)]
+          ? [self.moduleConfig[@"jwksMaxAgeSeconds"] doubleValue]
+          : 300.0;
+  if (configuredJWKSMaxAge < ALNAuthModuleJWKSMinMaxAge ||
+      configuredJWKSMaxAge > ALNAuthModuleJWKSMaxMaxAge) {
+    if (error != NULL) {
+      *error = AMError(ALNAuthModuleErrorInvalidConfiguration,
+                       @"Auth jwksMaxAgeSeconds must be between 30 and 3600 seconds", nil);
+    }
+    return NO;
+  }
+  self.jwksMaxAgeSeconds = configuredJWKSMaxAge;
 
   self.bootstrapAdminEmails = AMNormalizedEmailArray(self.moduleConfig[@"bootstrapAdminEmails"]);
   NSDictionary *hooksConfig = [self.moduleConfig[@"hooks"] isKindOfClass:[NSDictionary class]]
@@ -2170,6 +2274,151 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
       @"href" : continueTarget,
     } ],
   };
+}
+
+- (NSString *)oidcLoginPathForIdentifier:(NSString *)identifier {
+  NSString *template = self.providerLoginPathTemplate ?: @"/auth/provider/:provider/login";
+  return [template stringByReplacingOccurrencesOfString:@":provider"
+                                             withString:AMLowerTrimmedString(identifier) ?: @""];
+}
+
+- (NSString *)oidcCallbackPathForIdentifier:(NSString *)identifier {
+  NSString *template = self.providerCallbackPathTemplate ?: @"/auth/provider/:provider/callback";
+  return [template stringByReplacingOccurrencesOfString:@":provider"
+                                             withString:AMLowerTrimmedString(identifier) ?: @""];
+}
+
+/// Fail configuration rather than boot a provider whose issuer check cannot mean
+/// anything. Both shipped presets default to the multi-tenant issuer, so a
+/// single-tenant app that sets `tenantID` and forgets `issuer` is the likely
+/// mistake, and it fails open at verification time.
+- (BOOL)validateOIDCProviderConfiguration:(NSDictionary *)provider
+                               identifier:(NSString *)identifier
+                                    error:(NSError **)error {
+  for (NSString *required in @[ @"issuer", @"authorizationEndpoint", @"tokenEndpoint", @"clientID" ]) {
+    if ([AMTrimmedString(provider[required]) length] == 0) {
+      if (error != NULL) {
+        *error = AMError(ALNAuthModuleErrorInvalidConfiguration,
+                         [NSString stringWithFormat:@"Auth provider '%@' is missing %@", identifier, required],
+                         nil);
+      }
+      return NO;
+    }
+  }
+
+  NSString *issuer = AMTrimmedString(provider[@"issuer"]);
+  NSString *tenantID = AMTrimmedString(provider[@"tenantID"]);
+  if ([tenantID length] > 0 && [tenantID caseInsensitiveCompare:@"common"] != NSOrderedSame &&
+      [issuer rangeOfString:@"/common/"].location != NSNotFound) {
+    if (error != NULL) {
+      *error = AMError(ALNAuthModuleErrorInvalidConfiguration,
+                       [NSString stringWithFormat:
+                                     @"Auth provider '%@' sets tenantID '%@' but leaves the multi-tenant "
+                                     @"issuer '%@'. Override issuer with the tenant issuer, or issuer "
+                                     @"validation accepts any tenant.",
+                                     identifier, tenantID, issuer],
+                       nil);
+    }
+    return NO;
+  }
+  return YES;
+}
+
+- (NSDictionary *)oidcProviderConfigurationForIdentifier:(NSString *)identifier
+                                                 baseURL:(NSString *)baseURL {
+  NSString *providerID = AMLowerTrimmedString(identifier);
+  NSDictionary *provider = [self.oidcProviders[providerID] isKindOfClass:[NSDictionary class]]
+                               ? self.oidcProviders[providerID]
+                               : nil;
+  if (provider == nil) {
+    return nil;
+  }
+  NSMutableDictionary *resolved = [NSMutableDictionary dictionaryWithDictionary:provider];
+  if ([AMTrimmedString(resolved[@"redirectURI"]) length] == 0) {
+    resolved[@"redirectURI"] = [NSString stringWithFormat:@"%@%@", baseURL ?: @"",
+                                                          [self oidcCallbackPathForIdentifier:providerID]];
+  }
+  return resolved;
+}
+
+/// Bounded, cached JWKS fetch. Deliberately the same shape as
+/// ALNOAuthResourceServer: a fail-closed host allowlist plus a bounded cache,
+/// so both JWKS consumers make the same trust decisions.
+- (NSDictionary *)jwksDocumentForProviderConfiguration:(NSDictionary *)providerConfiguration
+                                            identifier:(NSString *)identifier
+                                                 error:(NSError **)error {
+  NSString *providerID = AMLowerTrimmedString(identifier);
+  NSString *jwksURI = AMTrimmedString(providerConfiguration[@"jwksURI"]);
+  if ([jwksURI length] == 0) {
+    if (error != NULL) {
+      *error = AMError(ALNAuthModuleErrorInvalidConfiguration,
+                       @"Provider has no JWKS URI configured", nil);
+    }
+    return nil;
+  }
+  NSURL *url = [NSURL URLWithString:jwksURI];
+  if (url == nil || [AMTrimmedString(url.host) length] == 0 ||
+      [[url.scheme lowercaseString] isEqualToString:@"https"] == NO) {
+    if (error != NULL) {
+      *error = AMError(ALNAuthModuleErrorInvalidConfiguration,
+                       @"Provider JWKS URI must be an absolute https URL", nil);
+    }
+    return nil;
+  }
+
+  NSArray *allowedHosts = [providerConfiguration[@"jwksAllowedHosts"] isKindOfClass:[NSArray class]]
+                              ? providerConfiguration[@"jwksAllowedHosts"]
+                              : @[ url.host ];
+  BOOL hostAllowed = NO;
+  for (id candidate in allowedHosts) {
+    if ([AMLowerTrimmedString(candidate) isEqualToString:[url.host lowercaseString]]) {
+      hostAllowed = YES;
+      break;
+    }
+  }
+  if (!hostAllowed) {
+    if (error != NULL) {
+      *error = AMError(ALNAuthModuleErrorInvalidConfiguration,
+                       @"Provider JWKS host is not in the configured allowlist", nil);
+    }
+    return nil;
+  }
+
+  NSTimeInterval now = [NSProcessInfo processInfo].systemUptime;
+  @synchronized(self.jwksCache) {
+    NSDictionary *cached = [self.jwksCache[providerID] isKindOfClass:[NSDictionary class]]
+                               ? self.jwksCache[providerID]
+                               : nil;
+    if (cached != nil && [cached[@"expires"] doubleValue] > now &&
+        [cached[@"document"] isKindOfClass:[NSDictionary class]]) {
+      return cached[@"document"];
+    }
+  }
+
+  NSError *fetchError = nil;
+  NSData *data = ALNBoundedMetadataGETWithError(url, ALNAuthModuleJWKSMaxBytes,
+                                                ALNAuthModuleJWKSFetchTimeout, &fetchError);
+  NSDictionary *document = nil;
+  if (data != nil) {
+    id parsed = [ALNJSONSerialization JSONObjectWithData:data options:0 error:NULL];
+    document = [parsed isKindOfClass:[NSDictionary class]] ? parsed : nil;
+  }
+  if (document == nil || ![document[@"keys"] isKindOfClass:[NSArray class]] ||
+      [document[@"keys"] count] == 0) {
+    if (error != NULL) {
+      *error = AMError(ALNAuthModuleErrorInvalidConfiguration,
+                       @"Provider JWKS document could not be fetched or is empty", nil);
+    }
+    return nil;
+  }
+
+  @synchronized(self.jwksCache) {
+    self.jwksCache[providerID] = @{
+      @"document" : document,
+      @"expires" : @(now + self.jwksMaxAgeSeconds),
+    };
+  }
+  return document;
 }
 
 - (NSDictionary *)stubProviderConfigurationForBaseURL:(NSString *)baseURL {
@@ -4155,6 +4404,271 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
   return nil;
 }
 
+- (nullable NSDictionary *)resolvedOIDCProviderForContext:(ALNContext *)ctx
+                                              identifier:(NSString **)outIdentifier {
+  NSString *providerID = AMLowerTrimmedString([self stringParamForName:@"provider"]);
+  if (outIdentifier != NULL) {
+    *outIdentifier = providerID;
+  }
+  if ([providerID length] == 0 || [providerID isEqualToString:@"stub"]) {
+    return nil;
+  }
+  return [self.runtime oidcProviderConfigurationForIdentifier:providerID
+                                                      baseURL:[self requestBaseURL:ctx]];
+}
+
+- (id)providerNotFoundResponse {
+  [self setStatus:404];
+  return [self shouldReturnJSON:self.context] ? @{ @"status" : @"error", @"message" : @"Provider not found" }
+                                              : nil;
+}
+
+- (id)providerLogin:(ALNContext *)ctx {
+  NSString *providerID = nil;
+  NSDictionary *providerConfiguration = [self resolvedOIDCProviderForContext:ctx identifier:&providerID];
+  if (providerConfiguration == nil) {
+    return [self providerNotFoundResponse];
+  }
+
+  NSError *error = nil;
+  NSDictionary *request =
+      [ALNOIDCClient authorizationRequestForProviderConfiguration:providerConfiguration
+                                                      redirectURI:providerConfiguration[@"redirectURI"] ?: @""
+                                                           scopes:providerConfiguration[@"scopes"]
+                                                    referenceDate:nil
+                                                            error:&error];
+  if (request == nil) {
+    [self setStatus:500];
+    if ([self shouldPreferJSONForHeadlessRequest:ctx]) {
+      return @{ @"status" : @"error", @"message" : @"Provider login could not be started" };
+    }
+    [self renderAuthPageIdentifier:@"provider_result"
+                             title:@"Provider Login"
+                           message:@"Provider login could not be started"
+                            errors:nil
+                          formData:nil
+                          extraCtx:@{
+                            @"resultTitle" : @"Provider login failed",
+                            @"authResultActions" : @[ @{
+                              @"label" : @"Back to sign in",
+                              @"href" : self.runtime.loginPath ?: @"/auth/login",
+                            } ],
+                          }
+                             error:NULL];
+    return nil;
+  }
+
+  // The verifier never leaves the session: it is replayed at token exchange to
+  // prove this callback belongs to this authorization request.
+  NSString *returnTo = AMTrimmedString([self requestParameters][@"return_to"]);
+  ctx.session[ALNAuthModuleOIDCStateSessionKey] = @{
+    @"provider" : providerID ?: @"",
+    @"state" : request[@"state"] ?: @"",
+    @"nonce" : request[@"nonce"] ?: @"",
+    @"codeVerifier" : request[@"codeVerifier"] ?: @"",
+    @"redirectURI" : request[@"redirectURI"] ?: @"",
+    @"issuedAt" : request[@"issuedAt"] ?: @([[NSDate date] timeIntervalSince1970]),
+    @"return_to" : returnTo ?: @"",
+  };
+  [ctx markSessionDirty];
+
+  NSString *authorizationURL = request[@"authorizationURL"] ?: @"";
+  if ([self shouldReturnJSON:ctx]) {
+    return @{
+      @"status" : @"ok",
+      @"provider" : [ALNOIDCClient redactedProviderConfiguration:providerConfiguration],
+      @"authorize_url" : authorizationURL,
+      @"return_to" : returnTo ?: @"",
+    };
+  }
+  [self redirectTo:authorizationURL status:302];
+  return nil;
+}
+
+- (id)providerCallbackFailure:(ALNContext *)ctx message:(NSString *)message status:(NSInteger)status {
+  [self setStatus:status];
+  if ([self shouldPreferJSONForHeadlessRequest:ctx]) {
+    return @{ @"status" : @"error", @"message" : message ?: @"Provider login failed" };
+  }
+  [self renderAuthPageIdentifier:@"provider_result"
+                           title:@"Provider Login"
+                         message:message ?: @"Provider login failed"
+                          errors:nil
+                        formData:nil
+                        extraCtx:@{
+                          @"resultTitle" : @"Provider login failed",
+                          @"authResultActions" : @[ @{
+                            @"label" : @"Back to sign in",
+                            @"href" : self.runtime.loginPath ?: @"/auth/login",
+                          } ],
+                        }
+                           error:NULL];
+  return nil;
+}
+
+- (id)providerCallback:(ALNContext *)ctx {
+  NSString *providerID = nil;
+  NSDictionary *providerConfiguration = [self resolvedOIDCProviderForContext:ctx identifier:&providerID];
+  if (providerConfiguration == nil) {
+    return [self providerNotFoundResponse];
+  }
+
+  NSDictionary *callbackState =
+      [ctx.session[ALNAuthModuleOIDCStateSessionKey] isKindOfClass:[NSDictionary class]]
+          ? ctx.session[ALNAuthModuleOIDCStateSessionKey]
+          : @{};
+  // Single-use: consume the stashed material before anything can fail, so a
+  // replayed callback cannot reuse this state, nonce or verifier.
+  [ctx.session removeObjectForKey:ALNAuthModuleOIDCStateSessionKey];
+  [ctx markSessionDirty];
+
+  if (![AMLowerTrimmedString(callbackState[@"provider"]) isEqualToString:providerID]) {
+    return [self providerCallbackFailure:ctx message:@"No login is in progress for this provider" status:400];
+  }
+
+  NSError *error = nil;
+  NSTimeInterval issuedAt = [callbackState[@"issuedAt"] respondsToSelector:@selector(doubleValue)]
+                                ? [callbackState[@"issuedAt"] doubleValue]
+                                : 0.0;
+  // Same bound the session bridge applies, so this pre-check cannot disagree
+  // with the re-validation it performs during completion.
+  NSUInteger callbackMaxAgeSeconds =
+      [providerConfiguration[@"callbackMaxAgeSeconds"] respondsToSelector:@selector(integerValue)] &&
+              [providerConfiguration[@"callbackMaxAgeSeconds"] integerValue] > 0
+          ? (NSUInteger)[providerConfiguration[@"callbackMaxAgeSeconds"] integerValue]
+          : 300U;
+  NSDictionary *validated =
+      [ALNOIDCClient validateAuthorizationCallbackParameters:[self requestParameters]
+                                               expectedState:callbackState[@"state"] ?: @""
+                                                issuedAtDate:(issuedAt > 0
+                                                                  ? [NSDate dateWithTimeIntervalSince1970:issuedAt]
+                                                                  : nil)
+                                               maxAgeSeconds:callbackMaxAgeSeconds
+                                                       error:&error];
+  if (validated == nil) {
+    return [self providerCallbackFailure:ctx
+                                 message:error.localizedDescription ?: @"Provider callback was rejected"
+                                  status:400];
+  }
+
+  NSDictionary *exchange =
+      [ALNOIDCClient tokenExchangeRequestForProviderConfiguration:providerConfiguration
+                                               authorizationCode:validated[@"code"] ?: @""
+                                                     redirectURI:callbackState[@"redirectURI"] ?: @""
+                                                    codeVerifier:callbackState[@"codeVerifier"] ?: @""
+                                                           error:&error];
+  if (exchange == nil) {
+    return [self providerCallbackFailure:ctx
+                                 message:error.localizedDescription ?: @"Provider token exchange failed"
+                                  status:422];
+  }
+
+  NSDictionary *tokenResponse = [self exchangeOIDCTokenWithRequest:exchange error:&error];
+  if (tokenResponse == nil) {
+    return [self providerCallbackFailure:ctx
+                                 message:error.localizedDescription ?: @"Provider token exchange failed"
+                                  status:502];
+  }
+
+  NSDictionary *jwksDocument = [self.runtime jwksDocumentForProviderConfiguration:providerConfiguration
+                                                                       identifier:providerID
+                                                                            error:&error];
+  if (jwksDocument == nil) {
+    return [self providerCallbackFailure:ctx
+                                 message:error.localizedDescription ?: @"Provider keys are unavailable"
+                                  status:502];
+  }
+
+  NSDictionary *result =
+      [ALNAuthProviderSessionBridge completeLoginWithCallbackParameters:[self requestParameters]
+                                                         callbackState:callbackState
+                                                         tokenResponse:tokenResponse
+                                                      userInfoResponse:nil
+                                                 providerConfiguration:providerConfiguration
+                                                          jwksDocument:jwksDocument
+                                                              resolver:self.runtime
+                                                               context:ctx
+                                                                 error:&error];
+  if (result == nil) {
+    return [self providerCallbackFailure:ctx
+                                 message:error.localizedDescription ?: @"Provider login failed"
+                                  status:422];
+  }
+
+  NSDictionary *user = [self.runtime currentUserForContext:ctx error:NULL] ?: @{};
+  NSString *redirectTarget = [self.runtime postLoginRedirectForContext:ctx
+                                                                  user:user
+                                                       defaultRedirect:AMTrimmedString(callbackState[@"return_to"])];
+  if ([self shouldReturnJSON:ctx]) {
+    NSMutableDictionary *payload = [NSMutableDictionary dictionaryWithDictionary:result[@"session"] ?: @{}];
+    payload[@"normalized_identity"] = result[@"normalizedIdentity"] ?: @{};
+    payload[@"redirect_to"] = redirectTarget ?: self.runtime.defaultRedirect;
+    return payload;
+  }
+  [self redirectTo:redirectTarget status:302];
+  return nil;
+}
+
+/// Token exchange is the one step with no in-tree bounded helper: it is a POST,
+/// and ALNBoundedMetadataGET is GET-only by design. Errors stay generic because
+/// the request body carries the client secret and the authorization code.
+- (nullable NSDictionary *)exchangeOIDCTokenWithRequest:(NSDictionary *)exchange
+                                                  error:(NSError **)error {
+  NSURL *tokenURL = [NSURL URLWithString:AMTrimmedString(exchange[@"url"]) ?: @""];
+  if (tokenURL == nil || ![[tokenURL.scheme lowercaseString] isEqualToString:@"https"]) {
+    if (error != NULL) {
+      *error = AMError(ALNAuthModuleErrorInvalidConfiguration,
+                       @"Provider token endpoint must be an absolute https URL", nil);
+    }
+    return nil;
+  }
+
+  double timeoutSeconds = [exchange[@"timeoutSeconds"] respondsToSelector:@selector(doubleValue)]
+                              ? [exchange[@"timeoutSeconds"] doubleValue]
+                              : 0.0;
+  if (timeoutSeconds <= 0.0 || timeoutSeconds > ALNAuthModuleTokenExchangeTimeout) {
+    timeoutSeconds = ALNAuthModuleTokenExchangeTimeout;
+  }
+
+  NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:tokenURL];
+  request.HTTPMethod = AMTrimmedString(exchange[@"method"]) ?: @"POST";
+  request.timeoutInterval = timeoutSeconds;
+  request.HTTPBody = [AMTrimmedString(exchange[@"bodyString"]) dataUsingEncoding:NSUTF8StringEncoding];
+  NSDictionary *headers = [exchange[@"headers"] isKindOfClass:[NSDictionary class]] ? exchange[@"headers"] : @{};
+  for (id headerName in headers) {
+    NSString *name = AMTrimmedString(headerName);
+    NSString *value = AMTrimmedString(headers[headerName]);
+    if ([name length] > 0 && [value length] > 0) {
+      [request setValue:value forHTTPHeaderField:name];
+    }
+  }
+
+  NSURLResponse *response = nil;
+  NSError *transportError = nil;
+  NSData *data = ALNSynchronousURLRequest(request, &response, &transportError);
+  NSInteger status = [response isKindOfClass:[NSHTTPURLResponse class]]
+                         ? [(NSHTTPURLResponse *)response statusCode]
+                         : 0;
+  if (data == nil || status < 200 || status > 299) {
+    if (error != NULL) {
+      *error = AMError(ALNAuthModuleErrorInvalidConfiguration,
+                       @"Provider token endpoint rejected the exchange", nil);
+    }
+    return nil;
+  }
+
+  NSError *parseError = nil;
+  NSDictionary *tokenResponse = [ALNOIDCClient parseTokenResponseData:data error:&parseError];
+  if (tokenResponse == nil) {
+    if (error != NULL) {
+      *error = AMError(ALNAuthModuleErrorInvalidConfiguration,
+                       @"Provider token response was not valid", nil);
+    }
+    return nil;
+  }
+  return tokenResponse;
+}
+
 - (id)providerStubLogin:(ALNContext *)ctx {
   if (![self.runtime isProviderEnabled:@"stub"]) {
     [self setStatus:404];
@@ -4425,6 +4939,18 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
                      controllerClass:[ALNAuthModuleController class]
                                action:@"providerStubCallback"];
   }
+  // Registered unconditionally: the router prefers the more static stub paths,
+  // and an unconfigured provider id is rejected by the handler as a 404.
+  [application registerRouteMethod:@"GET"
+                              path:runtime.providerLoginPathTemplate
+                              name:@"auth_provider_login"
+                   controllerClass:[ALNAuthModuleController class]
+                            action:@"providerLogin"];
+  [application registerRouteMethod:@"GET"
+                              path:runtime.providerCallbackPathTemplate
+                              name:@"auth_provider_callback"
+                   controllerClass:[ALNAuthModuleController class]
+                            action:@"providerCallback"];
   [application beginRouteGroupWithPrefix:runtime.apiPrefix guardAction:nil formats:nil];
   [application registerRouteMethod:@"GET"
                               path:@"/session"
@@ -4530,6 +5056,16 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
                      controllerClass:[ALNAuthModuleController class]
                                action:@"providerStubCallback"];
   }
+  [application registerRouteMethod:@"GET"
+                              path:@"/provider/:provider/login"
+                              name:@"auth_api_provider_login"
+                   controllerClass:[ALNAuthModuleController class]
+                            action:@"providerLogin"];
+  [application registerRouteMethod:@"GET"
+                              path:@"/provider/:provider/callback"
+                              name:@"auth_api_provider_callback"
+                   controllerClass:[ALNAuthModuleController class]
+                            action:@"providerCallback"];
   [application endRouteGroup];
 
   NSError *routeError = nil;

@@ -125,6 +125,12 @@ typedef NS_ENUM(NSInteger, ALNAuthModuleErrorCode) {
                           defaultRedirect:(NSString *)defaultRedirect;
 - (BOOL)isHeadlessUIMode;
 - (BOOL)isProviderEnabled:(NSString *)identifier;
+/// Generic OIDC provider surface (ARLEN-FR-008). `identifier` keys
+/// `authModule.providers`; `stub` is excluded and keeps its own routes.
+- (nullable NSDictionary *)oidcProviderConfigurationForIdentifier:(NSString *)identifier
+                                                          baseURL:(NSString *)baseURL;
+- (NSString *)oidcLoginPathForIdentifier:(NSString *)identifier;
+- (NSString *)oidcCallbackPathForIdentifier:(NSString *)identifier;
 - (NSString *)pageTemplatePathForIdentifier:(NSString *)pageIdentifier
                                 defaultPath:(NSString *)defaultPath;
 - (NSString *)bodyTemplatePathForIdentifier:(NSString *)pageIdentifier
