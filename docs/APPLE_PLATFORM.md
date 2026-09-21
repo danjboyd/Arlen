@@ -110,3 +110,16 @@ The Apple-runtime path now includes:
 1. `30P` repo-native Objective-C Apple XCTest build/run integration for the full test suite
 2. `30Q` Apple-aware optional dependency normalization for PostgreSQL and ODBC-style backends
 3. `30R` Apple runtime ergonomics, including watch-mode rebuild/restart handling in `boomhauer`
+
+## HTTP/data contract verification
+
+The additive `ALNSynchronousHTTPResult` API uses system libcurl on Apple to retain
+received reason phrases and complete redirect-boundary bodies. Build scripts
+link `-lcurl`; custom consumers must do so too. Existing synchronous helpers
+continue using NSURLSession. See [HTTP client](HTTP_CLIENT.md).
+
+Apple confidence installs `postgresql@17` and `libpq` for a private database and
+runs `tools/ci/run_apple_client_data_regressions.sh` with Apple XCTest. This covers
+the shared HTTP/retry contracts and NSDate timestamp precision without a live
+provider. These dependencies are for database testing, not an application server
+requirement. See [Testing workflow](TESTING_WORKFLOW.md).

@@ -20,3 +20,6 @@ mkdir "$orm_pg_tmp/socket"
   -o "-k $orm_pg_tmp/socket -c listen_addresses=''" -w start
 export ARLEN_PG_TEST_DSN="host=$orm_pg_tmp/socket dbname=postgres user=arlen_orm_test"
 make phase26-orm-generated phase26-orm-unit phase20-sql-builder-tests
+
+# Mandatory driver round trips share this disposable database.
+make test-unit-filter TEST=PgTests

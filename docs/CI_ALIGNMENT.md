@@ -355,3 +355,25 @@ because TSAN is active; unrelated service-dependent opt-in tests remain.
 
 See [the investigation](internal/TSAN_RELIABILITY_2026-09-21.md) for evidence,
 remaining runtime work, and promotion criteria.
+
+## HTTP/data client contract regressions
+
+The existing disposable PostgreSQL step now also runs `PgTests`, including
+microsecond decode/rebind equality, fractional digits, negative epochs, offsets,
+boundary rounding, arrays, and lossless text values. The DSN is supplied by the
+private cluster; a missing server fails provisioning. Existing unit discovery
+runs `HTTPCompatTests` and `DataverseRegressionTests`, which use loopback peers
+and captured transports/injected sleepers rather than public providers.
+
+`apple-baseline` additionally runs `tools/ci/run_apple_client_data_regressions.sh`
+with the same HTTP/retry tests and live timestamp regression using Apple XCTest.
+Its bootstrap installs Homebrew `postgresql@17` and `libpq` in addition to
+`openssl@3`; the script selects their paths explicitly and uses a private Unix
+socket PostgreSQL cluster. Apple builds link system libcurl for the new HTTP
+result API. The existing NSURLSession helper remains covered too.
+
+The Apple job retains logs under its existing artifact directory. No lane or
+required check is renamed or promoted: branch protection continues to require
+`linux-quality / quality-gate`, `linux-sanitizers / sanitizer-gate`, and
+`docs-quality / docs-gate`. Apple confidence remains nonblocking globally, but
+these changes require its contract regression evidence before issue closure.

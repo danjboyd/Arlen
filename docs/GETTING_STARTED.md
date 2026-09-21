@@ -241,3 +241,16 @@ For form uploads, configure positive whole-number `requestLimits` in
 `config/app.plist`; bare and quoted decimal values behave identically. Invalid
 limits are rejected during configuration loading. See [Multipart Uploads](MULTIPART_UPLOADS.md)
 for a complete configuration example and buffering limits.
+
+## HTTP and data client contracts
+
+Use `ALNSynchronousHTTPResult` for received HTTP/1.x reason phrases and opt-in
+redirect-boundary responses; see [Synchronous HTTP client](HTTP_CLIENT.md).
+The existing synchronous helper defaults remain unchanged. The result API uses
+libcurl on GNUstep and Apple; Apple custom builds must also link `-lcurl`.
+
+`ALNPg` date parameters preserve microseconds within the documented NSDate range;
+use explicit text casts for lossless values outside it. See
+[PostgreSQL timestamp precision](ARLEN_DATA.md#postgresql-timestamp-precision).
+Dataverse callers can configure retry eligibility and backoff inside the client's
+existing bounded loop; see [Custom retry policies](DATAVERSE.md#custom-retry-policies).

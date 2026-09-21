@@ -2,6 +2,16 @@
 
 ## Upcoming Release Candidate
 
+- PostgreSQL date parameters retain six fractional digits for scalar and array
+  round trips. The documented precision range and lossless text alternative are
+  in [ArlenData](ARLEN_DATA.md#postgresql-timestamp-precision).
+- Dataverse clients expose a retry-delay policy and injectable sleeper, preserving
+  the existing defaults and hard attempt bound.
+- The additive synchronous HTTP result API returns complete redirect-boundary
+  responses on request and exposes received HTTP/1.x phrases on GNUstep and Apple.
+  Apple builds now link system libcurl for this API. Existing helpers retain
+  their defaults and platform transports.
+
 - Multipart limits accept bare or quoted decimal plist values without crashing
   the server. Invalid request limits now fail configuration loading with a keyed
   error; direct parser calls return an error instead of raising an exception.

@@ -352,6 +352,10 @@ use [docs/README.md](docs/README.md) and [docs/STATUS.md](docs/STATUS.md).
 
 Optional integrations: [MCP tools over Streamable HTTP](docs/MCP_MODULE.md).
 
+HTTP integrations can use [received response details and redirect policies](docs/HTTP_CLIENT.md),
+[Dataverse retry policies](docs/DATAVERSE.md#custom-retry-policies), and
+[PostgreSQL microsecond round trips](docs/ARLEN_DATA.md#postgresql-timestamp-precision).
+
 ## Naming
 
 - Development server: `boomhauer`

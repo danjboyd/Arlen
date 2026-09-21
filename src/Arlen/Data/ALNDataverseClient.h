@@ -234,11 +234,27 @@ FOUNDATION_EXPORT NSDictionary<NSString *, NSString *> *ALNDataverseParseHeaders
 
 @end
 
+/// Return a finite, nonnegative delay to retry, or nil to stop. retryIndex is
+/// zero for the first retry. Called only for failures with attempts remaining.
+/// The policy owns Retry-After precedence; request includes the URL ($batch).
+typedef NSNumber *_Nullable (^ALNDataverseRetryDelayProvider)(
+    ALNDataverseRequest *request, NSUInteger retryIndex,
+    ALNDataverseResponse *_Nullable response, NSError *_Nullable transportError);
+typedef void (^ALNDataverseRetrySleeper)(NSTimeInterval delay);
+
 @interface ALNDataverseClient : NSObject
 
 @property(nonatomic, strong, readonly) ALNDataverseTarget *target;
 @property(nonatomic, strong, readonly) id<ALNDataverseTransport> transport;
 @property(nonatomic, strong, readonly) id<ALNDataverseTokenProvider> tokenProvider;
+
+/// Configure before sharing the client. nil preserves 429/503/504 and transport
+/// retries, positive Retry-After or linear delays. target.maxRetries is a hard cap.
+/// Retrying non-idempotent operations is the caller's responsibility.
+@property(nonatomic, copy, nullable) ALNDataverseRetryDelayProvider retryDelayProvider;
+/// Injectable sleeper for deterministic tests. nil uses NSThread sleeping.
+@property(nonatomic, copy, nullable) ALNDataverseRetrySleeper retrySleeper;
+
 
 + (NSDictionary<NSString *, id> *)capabilityMetadata;
 + (nullable NSString *)recordPathForEntitySet:(NSString *)entitySetName

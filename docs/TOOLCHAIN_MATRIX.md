@@ -151,7 +151,7 @@ Supported CI bootstrap strategies:
   - runs `ARLEN_CI_GNUSTEP_BOOTSTRAP_SCRIPT` before validation
   - use this when the runner must build/install its own GNUstep stack
 - `ARLEN_CI_APPLE_STRATEGY=brew`
-  - installs Homebrew `openssl@3` and validates the Apple toolchain path
+  - installs Homebrew `openssl@3`, `postgresql@17`, and `libpq` and validates the Apple toolchain path
 - `ARLEN_CI_APPLE_STRATEGY=preinstalled`
   - validates an Apple runner image that already has the required dependencies
 
@@ -214,3 +214,7 @@ Update this matrix when:
 - CI base images change materially.
 - Arlen adds new hard toolchain/runtime dependencies.
 - `arlen doctor` check set changes.
+
+Apple builds additionally link the system libcurl for the received HTTP result
+API. HTTP/data contract confidence uses Apple XCTest and a disposable PostgreSQL
+cluster; GNUstep runs equivalent coverage with the vendored tools-xctest runner.

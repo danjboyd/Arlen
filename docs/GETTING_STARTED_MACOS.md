@@ -101,3 +101,9 @@ bash ./tools/ci/run_apple_baseline_confidence.sh
 - `docs/APPLE_PLATFORM.md`
 - `build/release_confidence/phase30/`
 - `docs/GETTING_STARTED.md`
+
+The build links macOS system libcurl for `ALNSynchronousHTTPResult`; custom link
+commands also need `-lcurl`. For live database and client contract regressions,
+install `postgresql@17` and `libpq`, then run
+`bash tools/ci/run_apple_client_data_regressions.sh`. See
+[HTTP client](HTTP_CLIENT.md) and [Testing workflow](TESTING_WORKFLOW.md).

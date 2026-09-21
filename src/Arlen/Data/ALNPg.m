@@ -8,6 +8,7 @@
 #import <ctype.h>
 #import <stdlib.h>
 #import <stdint.h>
+#import <math.h>
 #import <string.h>
 #if defined(_WIN32)
 #include <windows.h>
@@ -809,15 +810,36 @@ static NSString *ALNPgHexStringFromData(NSData *data) {
   return hex;
 }
 
+static NSDate *ALNPgDateWithReferenceInterval(NSTimeInterval interval) {
+#if defined(GNUSTEP)
+  // Some GNUstep tagged-date runtimes misrepresent an exact zero reference
+  // interval as two seconds. NSCalendarDate is a Foundation NSDate subclass
+  // that retains zero correctly and avoids that tagged representation.
+  if (interval == 0) return [[NSCalendarDate alloc] initWithTimeIntervalSinceReferenceDate:0];
+#endif
+  return [NSDate dateWithTimeIntervalSinceReferenceDate:interval];
+}
+
 static NSString *ALNPgTimestampStringFromDate(NSDate *value) {
   if (![value isKindOfClass:[NSDate class]]) {
     return @"";
   }
+  // Split before rounding: multiplying an epoch-sized double by a million
+  // needlessly loses precision. floor also handles dates before the epoch.
+  NSTimeInterval interval = [value timeIntervalSinceReferenceDate];
+  double seconds = floor(interval);
+  long microseconds = lround((interval - seconds) * 1000000.0);
+  if (microseconds == 1000000) {
+    seconds += 1;
+    microseconds = 0;
+  }
   NSDateFormatter *formatter = [[NSDateFormatter alloc] init];
   formatter.locale = [[NSLocale alloc] initWithLocaleIdentifier:@"en_US_POSIX"];
+  formatter.calendar = [[NSCalendar alloc] initWithCalendarIdentifier:NSCalendarIdentifierGregorian];
   formatter.timeZone = [NSTimeZone timeZoneForSecondsFromGMT:0];
-  formatter.dateFormat = @"yyyy-MM-dd'T'HH:mm:ss.SSS'Z'";
-  return [formatter stringFromDate:value] ?: @"";
+  formatter.dateFormat = @"yyyy-MM-dd'T'HH:mm:ss";
+  NSString *whole = [formatter stringFromDate:ALNPgDateWithReferenceInterval(seconds)];
+  return whole ? [NSString stringWithFormat:@"%@.%06ldZ", whole, microseconds] : @"";
 }
 
 static NSString *ALNPgJSONStringFromObject(id value, NSError **error) {
@@ -1072,7 +1094,8 @@ static NSDate *ALNPgUTCDate(NSInteger year,
   components.minute = minute;
   components.second = second;
 
-  NSDate *date = [calendar dateFromComponents:components];
+  NSDate *date = (year == 2001 && month == 1 && day == 1 && hour == 0 && minute == 0 && second == 0)
+      ? ALNPgDateWithReferenceInterval(0) : [calendar dateFromComponents:components];
   if (date == nil) {
     return nil;
   }
@@ -1085,7 +1108,7 @@ static NSDate *ALNPgUTCDate(NSInteger year,
   }
 
   if (fractionalSeconds != 0.0) {
-    return [date dateByAddingTimeInterval:fractionalSeconds];
+    return ALNPgDateWithReferenceInterval(date.timeIntervalSinceReferenceDate + fractionalSeconds);
   }
   return date;
 }
@@ -1188,7 +1211,7 @@ static NSDate *ALNPgDateFromTimestampString(NSString *value) {
 
   if (hasOffset) {
     NSInteger offset = ((offsetHours * 60 * 60) + (offsetMinutes * 60) + offsetSeconds) * sign;
-    date = [date dateByAddingTimeInterval:-(NSTimeInterval)offset];
+    date = ALNPgDateWithReferenceInterval(date.timeIntervalSinceReferenceDate - (NSTimeInterval)offset);
   }
   return date;
 }

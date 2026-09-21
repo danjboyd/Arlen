@@ -1,3 +1,4 @@
+#include <math.h>
 #import <Foundation/Foundation.h>
 #import <XCTest/XCTest.h>
 
@@ -178,6 +179,117 @@
   XCTAssertEqualObjects(diagnostics[@"status_code"], @429);
   XCTAssertEqualObjects(diagnostics[@"target_name"], @"sales");
   XCTAssertEqualObjects(diagnostics[@"body_bytes"], @0);
+}
+
+// Captured transport only: exact wire inputs and virtual sleeps, no provider writes.
+- (void)testConfigurableRetryPoliciesAndDefaultContract {
+  for (NSString *policy in @[@"default", @"ordinary", @"batch"]) {
+    for (NSNumber *status in @[@0, @200, @204, @400, @401, @404, @429, @500, @502, @503, @504]) {
+      for (NSString *retryAfter in @[@"", @"0", @"3"]) {
+        for (NSNumber *recover in @[@NO, @YES]) {
+          ALNFakeDataverseTransport *transport = [ALNFakeDataverseTransport new];
+          NSError *transportError = [NSError errorWithDomain:@"CapturedTransport" code:7 userInfo:nil];
+          NSDictionary *headers = retryAfter.length ? @{@"Retry-After":retryAfter} : @{};
+          for (NSUInteger i = 0; i < 4; i++) {
+            if (recover.boolValue && i > 0) {
+              [transport enqueueResponse:[self responseWithStatus:200 headers:nil JSONObject:@{}]];
+            } else if (status.integerValue == 0) {
+              [transport enqueueError:transportError];
+            } else {
+              [transport enqueueResponse:[self responseWithStatus:status.integerValue headers:headers JSONObject:@{}]];
+            }
+          }
+          NSError *error = nil;
+          ALNDataverseClient *client = [self clientWithTransport:transport
+              tokenProvider:[ALNFakeDataverseTokenProvider new] targetName:@"crm"
+              maxRetries:3 pageSize:250 error:&error];
+          XCTAssertNil(error);
+          NSMutableArray *delays = [NSMutableArray array];
+          client.retrySleeper = ^(NSTimeInterval delay) { [delays addObject:@(delay)]; };
+          BOOL custom = ![policy isEqualToString:@"default"];
+          BOOL batch = [policy isEqualToString:@"batch"];
+          if (custom) {
+            client.retryDelayProvider = ^NSNumber *(ALNDataverseRequest *request, NSUInteger retryIndex,
+                                                    ALNDataverseResponse *response, NSError *failure) {
+              XCTAssertEqualObjects(@"POST", request.method);
+              XCTAssertEqual(batch, [request.URLString hasSuffix:@"/$batch"]);
+              XCTAssertEqual(retryIndex, delays.count);
+              if (!response) XCTAssertEqualObjects(transportError, failure);
+              BOOL eligible = response ? response.statusCode == 429 || response.statusCode >= 500 : !batch;
+              if (!eligible || (batch && retryIndex >= 2)) return nil;
+              NSString *raw = [response headerValueForName:@"Retry-After"];
+              if (batch && raw.length) return @(raw.integerValue);
+              return @(0.25 * (1UL << retryIndex));
+            };
+          }
+          ALNDataverseResponse *response = [client performRequestWithMethod:@"POST"
+              path:batch ? @"$batch" : @"accounts" query:nil headers:@{@"X-Custom":@"unchanged"}
+              bodyObject:@{@"name":@"test"} includeFormattedValues:NO returnRepresentation:NO
+              consistencyCount:NO error:&error];
+          NSInteger code = status.integerValue;
+          BOOL success = code >= 200 && code < 300;
+          BOOL eligible = custom ? (code == 429 || code >= 500 || (code == 0 && !batch))
+                                 : (code == 0 || code == 429 || code == 503 || code == 504);
+          NSUInteger retries = eligible ? (recover.boolValue ? 1 : (batch ? 2 : 3)) : 0;
+          XCTAssertEqual(retries + 1, transport.capturedRequests.count);
+          XCTAssertEqual(retries, delays.count);
+          for (NSUInteger i = 0; i < retries; i++) {
+            double expected = custom ? 0.25 * (1UL << i) : (double)i + 1;
+            if (code != 0 && ((!custom && retryAfter.integerValue > 0) || (batch && retryAfter.length))) {
+              expected = retryAfter.doubleValue;
+            }
+            XCTAssertEqualWithAccuracy(expected, [delays[i] doubleValue], 0.000001);
+          }
+          if (success || (eligible && recover.boolValue)) {
+            XCTAssertNotNil(response);
+            XCTAssertNil(error);
+          } else {
+            XCTAssertNil(response);
+            XCTAssertNotNil(error);
+            XCTAssertEqualObjects(@(retries + 1), error.userInfo[ALNDataverseErrorDiagnosticsKey][@"attempt"]);
+            XCTAssertEqualObjects(@4, error.userInfo[ALNDataverseErrorDiagnosticsKey][@"max_attempts"]);
+          }
+          ALNDataverseRequest *first = transport.capturedRequests.firstObject;
+          for (ALNDataverseRequest *request in transport.capturedRequests) {
+            XCTAssertEqualObjects(first.method, request.method);
+            XCTAssertEqualObjects(first.URLString, request.URLString);
+            XCTAssertEqualObjects(first.headers, request.headers);
+            XCTAssertEqualObjects(first.bodyData, request.bodyData);
+          }
+        }
+      }
+    }
+  }
+}
+
+- (void)testRetryHardCapAndInvalidDelays {
+  for (NSNumber *limit in @[@0, @1]) {
+    for (NSNumber *delay in @[@(-1), @(NAN), @(INFINITY), @0]) {
+      ALNFakeDataverseTransport *transport = [ALNFakeDataverseTransport new];
+      for (NSUInteger i = 0; i < 2; i++) {
+        [transport enqueueResponse:[self responseWithStatus:500 headers:nil JSONObject:@{}]];
+      }
+      NSError *error = nil;
+      ALNDataverseClient *client = [self clientWithTransport:transport
+          tokenProvider:[ALNFakeDataverseTokenProvider new] targetName:@"crm"
+          maxRetries:limit.unsignedIntegerValue pageSize:250 error:&error];
+      __block NSUInteger calls = 0;
+      __block NSUInteger sleeps = 0;
+      client.retryDelayProvider = ^NSNumber *(ALNDataverseRequest *request, NSUInteger retryIndex,
+                                             ALNDataverseResponse *response, NSError *failure) {
+        calls++;
+        return delay;
+      };
+      client.retrySleeper = ^(NSTimeInterval seconds) { sleeps++; };
+      [client performRequestWithMethod:@"GET" path:@"accounts" query:nil headers:nil bodyObject:nil
+          includeFormattedValues:NO returnRepresentation:NO consistencyCount:NO error:&error];
+      XCTAssertNotNil(error);
+      XCTAssertEqual(limit.unsignedIntegerValue, calls);
+      NSUInteger expected = limit.unsignedIntegerValue && delay.doubleValue == 0 ? 1 : 0;
+      XCTAssertEqual(expected, sleeps);
+      XCTAssertEqual(expected + 1, transport.capturedRequests.count);
+    }
+  }
 }
 
 - (void)testBatchRequestsUseSharedRetryPolicy {

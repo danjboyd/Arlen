@@ -2,6 +2,8 @@
 #import <XCTest/XCTest.h>
 #import "ALNHTTPCompat.h"
 
+extern NSString *ALNHTTPReceivedReasonPhraseFromStatusLine(NSString *line);
+
 // Regression coverage for issue #22: ALNSynchronousURLRequest must follow
 // loopback redirects instead of waiting out its timeout on GNUstep.
 @interface HTTPCompatTests : XCTestCase
@@ -62,6 +64,109 @@
     if (line.length) [paths addObject:line];
   }
   return paths;
+}
+
+- (void)testResultRedirectBudgetPreservesCompleteFinalResponse {
+  for (NSString *prefix in @[@"/budget", @"/absolute-budget"]) {
+    for (NSNumber *budget in @[@0, @1, @3]) {
+      for (NSNumber *extra in @[@0, @1]) {
+        NSUInteger hops = budget.unsignedIntegerValue + extra.unsignedIntegerValue;
+        NSUInteger before = self.trace.count;
+        NSString *path = [NSString stringWithFormat:@"%@/%lu", prefix, (unsigned long)hops];
+        NSError *error = nil;
+        ALNHTTPClientResult *result = ALNSynchronousHTTPResult([self requestForPath:path timeout:3],
+            budget.unsignedIntegerValue, ALNHTTPRedirectLimitReturnResponse, &error);
+        XCTAssertNil(error);
+        XCTAssertNotNil(result);
+        XCTAssertEqual(extra.boolValue ? 302 : 200, result.response.statusCode);
+        XCTAssertEqual(extra.boolValue, result.stoppedAtRedirectLimit);
+        XCTAssertEqualObjects(extra.boolValue ? @"Budget Boundary" : @"Finished", result.receivedReasonPhrase);
+        XCTAssertEqualObjects(extra.boolValue ? @"body-1" : @"body-0",
+            [[NSString alloc] initWithData:result.body encoding:NSUTF8StringEncoding]);
+        XCTAssertEqualObjects(extra.boolValue ? @"1" : @"0", result.response.allHeaderFields[@"X-Hop"]);
+        if (extra.boolValue) XCTAssertNotNil(result.response.allHeaderFields[@"Location"]);
+        NSMutableArray *expected = [NSMutableArray array];
+        for (NSUInteger i = 0; i <= budget.unsignedIntegerValue; i++) {
+          [expected addObject:[NSString stringWithFormat:@"%@/%lu", prefix, (unsigned long)(hops-i)]];
+        }
+        NSArray *trace = self.trace;
+        XCTAssertEqualObjects(expected, [trace subarrayWithRange:NSMakeRange(before, trace.count-before)]);
+      }
+    }
+  }
+}
+
+- (void)testReasonPhraseAbsenceForProtocolsWithoutPhrases {
+  XCTAssertNil(ALNHTTPReceivedReasonPhraseFromStatusLine(@"HTTP/2 200\r\n"));
+  XCTAssertNil(ALNHTTPReceivedReasonPhraseFromStatusLine(@"HTTP/3 503\r\n"));
+  XCTAssertEqualObjects(@"", ALNHTTPReceivedReasonPhraseFromStatusLine(@"HTTP/1.1 200\r\n"));
+  XCTAssertEqualObjects(@" Custom  ", ALNHTTPReceivedReasonPhraseFromStatusLine(@"HTTP/1.0 503  Custom  \r\n"));
+}
+
+- (void)testResultReceivedReasonPhraseSelectsFinalHeaderBlock {
+  NSDictionary *cases = @{@"/ok":@"OK", @"/reason-custom":@"Extractor Unavailable  ",
+                         @"/reason-empty":@"", @"/reason-interim":@"Final Phrase", @"/reason-redirect":@""};
+  for (NSString *path in cases) {
+    NSError *error = nil;
+    ALNHTTPClientResult *result = ALNSynchronousHTTPResult([self requestForPath:path timeout:3], 3,
+        ALNHTTPRedirectLimitReturnResponse, &error);
+    XCTAssertNil(error);
+    XCTAssertEqualObjects(cases[path], result.receivedReasonPhrase);
+    XCTAssertEqualObjects(@"{}", [[NSString alloc] initWithData:result.body encoding:NSUTF8StringEncoding]);
+    XCTAssertNil(result.response.allHeaderFields[@"X-Stale"]);
+  }
+}
+
+- (void)testResultErrorsAndLoopBudget {
+  NSError *error = nil;
+  NSUInteger before = self.trace.count;
+  ALNHTTPClientResult *result = ALNSynchronousHTTPResult([self requestForPath:@"/loop" timeout:3], 3,
+      ALNHTTPRedirectLimitReturnResponse, &error);
+  XCTAssertNil(error);
+  XCTAssertEqual(302, result.response.statusCode);
+  XCTAssertTrue(result.stoppedAtRedirectLimit);
+  XCTAssertEqual(before + 4, self.trace.count);
+  for (NSString *path in @[@"/budget/4", @"/redirect-timeout", @"/redirect-file", @"/disconnect"]) {
+    error = nil;
+    result = ALNSynchronousHTTPResult([self requestForPath:path timeout:0.2], 3, ALNHTTPRedirectLimitError, &error);
+    XCTAssertNil(result);
+    XCTAssertEqualObjects(NSURLErrorDomain, error.domain);
+    NSInteger code = [path isEqualToString:@"/budget/4"] ? NSURLErrorHTTPTooManyRedirects :
+        ([path isEqualToString:@"/redirect-timeout"] ? NSURLErrorTimedOut :
+         ([path isEqualToString:@"/redirect-file"] ? NSURLErrorUnsupportedURL : NSURLErrorNetworkConnectionLost));
+    XCTAssertEqual(code, error.code);
+  }
+  result = ALNSynchronousHTTPResult([self requestForPath:@"/budget/1" timeout:3], 0, ALNHTTPRedirectLimitError, &error);
+  XCTAssertNil(error);
+  XCTAssertEqual(302, result.response.statusCode);
+}
+
+- (void)testResultRedirectMethodsBodiesAndCredentialBoundaries {
+  for (NSNumber *status in @[@301, @302, @303, @307, @308]) {
+    NSMutableURLRequest *request = [self requestForPath:[NSString stringWithFormat:@"/method/%@", status] timeout:3];
+    request.HTTPMethod = @"POST";
+    request.HTTPBody = [@"payload" dataUsingEncoding:NSUTF8StringEncoding];
+    [request setValue:@"Bearer test" forHTTPHeaderField:@"Authorization"];
+    NSError *error = nil;
+    ALNHTTPClientResult *result = ALNSynchronousHTTPResult(request, 1, ALNHTTPRedirectLimitReturnResponse, &error);
+    XCTAssertNil(error);
+    NSDictionary *echo = [NSJSONSerialization JSONObjectWithData:result.body options:0 error:&error];
+    XCTAssertNil(error);
+    BOOL preserve = status.integerValue >= 307;
+    XCTAssertEqualObjects(preserve ? @"POST" : @"GET", echo[@"method"]);
+    XCTAssertEqualObjects(preserve ? @"payload" : @"", echo[@"body"]);
+    XCTAssertEqualObjects(@"Bearer test", echo[@"headers"][@"authorization"]);
+  }
+  NSMutableURLRequest *request = [self requestForPath:@"/cross-origin" timeout:3];
+  [request setValue:@"Bearer secret" forHTTPHeaderField:@"Authorization"];
+  [request setValue:@"session=secret" forHTTPHeaderField:@"Cookie"];
+  NSError *error = nil;
+  ALNHTTPClientResult *result = ALNSynchronousHTTPResult(request, 1, ALNHTTPRedirectLimitReturnResponse, &error);
+  XCTAssertNil(error);
+  NSDictionary *echo = [NSJSONSerialization JSONObjectWithData:result.body options:0 error:&error];
+  XCTAssertNil(error);
+  XCTAssertNil(echo[@"headers"][@"authorization"]);
+  XCTAssertNil(echo[@"headers"][@"cookie"]);
 }
 
 - (void)testImmediateResponseCompletes {

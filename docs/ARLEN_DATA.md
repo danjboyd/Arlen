@@ -513,3 +513,38 @@ Confidence pack:
   - `tests/fixtures/phase20/postgres_reflection_contract.json`
   - `tests/fixtures/phase20/postgres_type_codec_contract.json`
   - `tests/fixtures/phase20/backend_support_matrix.json`
+
+## PostgreSQL timestamp precision
+
+`ALNPg` binds `NSDate` scalar and array parameters with six fractional digits,
+rounded to the nearest microsecond with carry into the next second. The decoder
+and encoder preserve PostgreSQL microseconds for dates from 1900-01-01 through
+2100-12-31 on the supported GNUstep and Apple double-precision `NSDate` runtimes.
+This is a database round-trip guarantee; binary floating-point does not represent
+every decimal fraction exactly. Negative epochs and offsets are supported.
+
+`timestamptz` becomes an instant: received offsets are normalized and parameters
+are emitted in UTC. The original offset/zone name is not retained. PostgreSQL
+`timestamp without time zone` is interpreted as UTC wall-clock components, and
+binding that date back to `timestamp` preserves those components; it does not
+attach the session or machine timezone. Use explicit SQL casts for parameter
+intent. An application-supplied date is rounded, not truncated.
+
+Outside this guaranteed range, or for PostgreSQL infinity/BC/extended-year
+values, use the lossless text path instead of converting through `NSDate`:
+
+```objc
+NSDictionary *row = [connection executeQueryOne:
+    @"SELECT audit_time::text AS value FROM events WHERE id = $1"
+    parameters:@[eventID] error:&error];
+[connection executeCommand:
+    @"UPDATE prospects SET changed_at = $1::timestamptz WHERE id = $2"
+    parameters:@[row[@"value"], prospectID] error:&error];
+```
+
+Keep a deterministic PostgreSQL `DateStyle` (`ISO, YMD`) for text interchange.
+For timestamps without a timezone, use `::timestamp` instead. Text values and
+`ALNDatabaseArrayParameter` containing timestamp strings bypass `NSDate` and
+retain all six digits. NSDate conversion outside the supported range can lose
+precision or fail decoding and is not the lossless alternative. PostgreSQL's
+original zone spelling is not stored even when text is used.

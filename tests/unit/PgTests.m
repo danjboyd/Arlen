@@ -436,6 +436,85 @@
   XCTAssertEqualObjects(@7, [[ordered first] objectAtColumnIndex:1]);
 }
 
+- (void)testPostgresTimestampMicrosecondRoundTrips {
+  NSString *dsn = [self requiredPGTestDSNForSelector:_cmd];
+  if (dsn.length == 0) return;
+  NSError *error = nil;
+  ALNPgConnection *connection = [[ALNPgConnection alloc] initWithConnectionString:dsn error:&error];
+  XCTAssertNotNil(connection);
+  XCTAssertNil(error, @"%@", error);
+  if (!connection) return;
+  // Keep the session non-UTC to exercise decoder offset normalization too.
+  [connection executeCommand:@"SET TIME ZONE 'America/New_York'" parameters:@[] error:&error];
+  XCTAssertNil(error, @"%@", error);
+  NSArray *values = @[
+    @"2026-09-17 12:34:56.123456+00", @"1969-12-31 23:59:59.999999+00",
+    @"1900-01-01 00:00:00.000001+00", @"2100-12-31 23:59:59.999999+00",
+    @"2001-01-01 00:00:00.000001+00", @"2001-01-01 00:00:00+00", @"2000-12-31 23:59:59.999999+00",
+    @"2026-09-17 18:04:56.123456+05:30", @"2026-09-17 12:34:56+00"
+  ];
+  for (NSString *type in @[@"timestamp", @"timestamptz"]) {
+    NSMutableArray *dates = [NSMutableArray array];
+    for (NSString *value in values) {
+      NSString *readSQL = [NSString stringWithFormat:@"SELECT $1::%@ AS value", type];
+      NSDictionary *row = [connection executeQueryOne:readSQL parameters:@[value] error:&error];
+      XCTAssertNil(error, @"%@", error);
+      NSDate *date = row[@"value"];
+      XCTAssertTrue([date isKindOfClass:[NSDate class]], @"%@ %@", type, value);
+      if (![date isKindOfClass:[NSDate class]]) continue;
+      [dates addObject:date];
+      NSString *sql = [NSString stringWithFormat:
+          @"SELECT $1::%@ = $2::%@ AS equal, to_char($1::%@, 'US') AS fraction, "
+           "to_char($2::%@, 'US') AS expected_fraction", type, type, type, type];
+      row = [connection executeQueryOne:sql parameters:@[date, value] error:&error];
+      XCTAssertNil(error, @"%@", error);
+      XCTAssertEqualObjects(@YES, row[@"equal"], @"%@ %@ date=%@ ref=%.12f row=%@", type, value, date, date.timeIntervalSinceReferenceDate, row);
+      XCTAssertEqualObjects(row[@"expected_fraction"], row[@"fraction"]);
+    }
+    NSString *sql = [NSString stringWithFormat:@"SELECT $1::%@[] = $2::%@[] AS equal", type, type];
+    NSDictionary *row = [connection executeQueryOne:sql
+        parameters:@[ALNDatabaseArrayParameter(dates), ALNDatabaseArrayParameter(values)] error:&error];
+    XCTAssertNil(error, @"%@", error);
+    XCTAssertEqualObjects(@YES, row[@"equal"], @"%@", row);
+    NSString *readArraySQL = [NSString stringWithFormat:@"SELECT $1::%@[] AS value", type];
+    row = [connection executeQueryOne:readArraySQL parameters:@[ALNDatabaseArrayParameter(values)] error:&error];
+    XCTAssertNil(error, @"%@", error);
+    NSArray *decoded = row[@"value"];
+    XCTAssertTrue([decoded isKindOfClass:[NSArray class]]);
+    if (decoded) {
+      row = [connection executeQueryOne:sql
+          parameters:@[ALNDatabaseArrayParameter(decoded), ALNDatabaseArrayParameter(values)] error:&error];
+      XCTAssertNil(error, @"%@", error);
+      XCTAssertEqualObjects(@YES, row[@"equal"], @"%@", row);
+    }
+  }
+  // Rounding must carry into the next second, including below the reference epoch.
+  for (NSNumber *interval in @[@0.9999996, @(-0.0000004)]) {
+    NSDate *date = [NSDate dateWithTimeIntervalSinceReferenceDate:interval.doubleValue];
+    NSString *expected = interval.doubleValue > 0 ? @"2001-01-01 00:00:01+00" : @"2001-01-01 00:00:00+00";
+    NSDictionary *row = [connection executeQueryOne:@"SELECT $1::timestamptz = $2::timestamptz AS equal"
+        parameters:@[date, expected] error:&error];
+    XCTAssertNil(error, @"%@", error);
+    XCTAssertEqualObjects(@YES, row[@"equal"], @"%@", row);
+  }
+  // Lossless escape hatch: read as text and rebind as text with an explicit SQL cast.
+  for (NSString *type in @[@"timestamp", @"timestamptz"]) {
+    for (NSString *value in @[@"12000-01-01 00:00:00.123456+00", @"infinity", @"-infinity"]) {
+      NSString *sql = [NSString stringWithFormat:@"SELECT ($1::%@)::text AS value", type];
+      NSDictionary *row = [connection executeQueryOne:sql parameters:@[value] error:&error];
+      XCTAssertNil(error, @"%@", error);
+      NSString *raw = row[@"value"];
+      XCTAssertTrue([raw isKindOfClass:[NSString class]]);
+      if (!raw) continue;
+      sql = [NSString stringWithFormat:@"SELECT $1::%@ = $2::%@ AS equal", type, type];
+      row = [connection executeQueryOne:sql parameters:@[raw, value] error:&error];
+      XCTAssertNil(error, @"%@", error);
+      XCTAssertEqualObjects(@YES, row[@"equal"], @"%@", row);
+    }
+  }
+  [connection close];
+}
+
 - (void)testPostgresRowsMaterializeTypedValuesForSupportedScalarColumns {
   NSString *dsn = [self pgTestDSN];
   if ([dsn length] == 0) {
