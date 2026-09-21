@@ -409,3 +409,30 @@ file and part caps on both HTTP parsers, including server usability after a
 rejected upload. The feature-toggle smoke compiles the legacy request parser
 with its multipart implementation while disabling both optional C backends.
 Both regressions also run in the existing Linux integration suite.
+
+## TSAN reliability and retained evidence
+
+The nightly thread-race lane remains informational. Its library-wide
+suppressions and 14 TSAN-only test returns were retired on 2026-09-21;
+previous green runs are not promotion evidence for the new configuration.
+GNUstep queue/CLI findings remain visible. Required check names and branch
+protection stay unchanged; do not add the full TSAN nightly as a required check
+until the investigation's clean-run criteria are met.
+
+Run `python3 tools/ci/test_tsan_reliability.py` for harness checks (also run by
+`make ci-sanitizers`). After sourcing `tools/source_gnustep_env.sh`, run
+`python3 tools/ci/tsan_runtime_diagnostics.py --output /tmp/arlen-tsan-diagnostics`
+for raw/suppressed Foundation reproducers and the deliberate application race
+control, or `bash tools/ci/run_linux_thread_race_nightly.sh` for the complete
+lane. Findings can make these commands fail on the current GNUstep toolchain.
+
+Nightly artifacts are uploaded on success and failure, including coverage
+counts, raw/suppressed probe logs, and toolchain details. Missing TSAN fails with
+exit 77 and `unavailable`, rather than passing. `ARLEN_REQUIRE_TSAN=0` explicitly
+permits the legacy local Helgrind fallback; its summary identifies the engine.
+Shell helpers remove only TSAN preload entries before launching Bash and keep
+TSAN options for linked instrumented binaries. No tests are excluded solely
+because TSAN is active; unrelated service-dependent opt-in tests remain.
+
+See [the investigation](internal/TSAN_RELIABILITY_2026-09-21.md) for evidence,
+remaining runtime work, and promotion criteria.

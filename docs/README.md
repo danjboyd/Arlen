@@ -129,6 +129,7 @@ toolchain env directly for the Linux/GNUstep path. On macOS, use
 
 - [Documentation Policy](DOCUMENTATION_POLICY.md): docs standards, review checklist, and the internal/user-facing split.
 - [CI Alignment](CI_ALIGNMENT.md): required CI shape and merge-gate guidance.
+- [TSAN reliability investigation](internal/TSAN_RELIABILITY_2026-09-21.md): current runtime findings, coverage repair, and promotion criteria.
 - [Comparative Benchmarking](COMPARATIVE_BENCHMARKING.md): benchmarking source-of-truth split.
 - [Internal docs (`docs/internal/`)](internal/): engineering material — phase roadmaps, session handoffs, dated reconciliation notes, audits, and benchmark/operational handoffs. Not part of the user-facing surface.
 

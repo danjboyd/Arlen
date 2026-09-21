@@ -192,6 +192,8 @@ Run bootstrap diagnostics before building:
 ```
 
 Contributor and CI notes:
+
+- [TSAN reliability investigation](docs/internal/TSAN_RELIABILITY_2026-09-21.md): restored test coverage, current GNUstep findings, and promotion criteria.
 - Arlen CI expects a clang-built GNUstep toolchain, not a generic GCC-oriented distro stack.
 - The workflow bootstrap entry point is `tools/ci/install_ci_dependencies.sh`.
 - The current documented required checks for `main` are `linux-quality / quality-gate`, `linux-sanitizers / sanitizer-gate`, and `docs-quality / docs-gate`.

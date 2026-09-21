@@ -325,9 +325,6 @@
 }
 
 - (void)testReservedGeneratedModelsCompileAndPreserveRuntimeBehavior {
-  if (ALNTestThreadSanitizerRuntimeActive()) {
-    return;
-  }
   NSError *error = nil;
   NSDictionary *artifacts = [ALNORMCodegen renderArtifactsFromSchemaMetadata:[self reservedMetadata]
       classPrefix:@"ReservedRuntime" error:&error];
@@ -432,16 +429,10 @@
 }
 
 - (void)testQuotedGeneratedArtifactsCompileSyntaxOnly {
-  if (ALNTestThreadSanitizerRuntimeActive()) {
-    return;
-  }
   [self assertGeneratedArtifactsCompile:[ALNTestJSONDictionaryAtRelativePath(@"tests/fixtures/phase26/orm_quoted_identifiers.json", NULL) copy]];
 }
 
 - (void)testQuotedSchemaAndTableNamesCompile {
-  if (ALNTestThreadSanitizerRuntimeActive()) {
-    return;
-  }
   NSMutableDictionary *metadata = [[self reservedMetadata] mutableCopy];
   for (NSString *collection in @[@"relations", @"columns", @"primary_keys", @"unique_constraints", @"foreign_keys"]) {
     NSMutableArray *rows = [NSMutableArray array];
@@ -459,9 +450,6 @@
 }
 
 - (void)testGeneratedArtifactsCompileSyntaxOnly {
-  if (ALNTestThreadSanitizerRuntimeActive()) {
-    return;
-  }
   [self assertGeneratedArtifactsCompile:[self fixtureMetadata]];
 }
 
@@ -518,9 +506,6 @@
 }
 
 - (void)testStandaloneUmbrellasCompileWithoutFrameworkUmbrella {
-  if (ALNTestThreadSanitizerRuntimeActive()) {
-    return;
-  }
   NSString *tmpDir = ALNTestTemporaryDirectory(@"orm_umbrella_compile");
   XCTAssertNotNil(tmpDir);
   if (tmpDir == nil) {

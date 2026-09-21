@@ -3521,7 +3521,7 @@
     XCTAssertNotNil(suppressionSummary);
     XCTAssertNil(error);
     XCTAssertEqualObjects(@"phase9h-sanitizer-confidence-v1", suppressionSummary[@"version"]);
-    XCTAssertEqual(4, [suppressionSummary[@"active_count"] integerValue]);
+    XCTAssertEqual(2, [suppressionSummary[@"active_count"] integerValue]);
 
     NSString *markdown =
         [NSString stringWithContentsOfFile:markdownPath encoding:NSUTF8StringEncoding error:&error];

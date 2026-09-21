@@ -60,6 +60,7 @@ run_lane() {
   return 0
 }
 
+python3 ./tools/ci/test_tsan_reliability.py
 python3 ./tools/ci/check_sanitizer_suppressions.py
 
 run_lane \

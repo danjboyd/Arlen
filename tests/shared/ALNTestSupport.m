@@ -254,6 +254,7 @@ NSString *ALNTestRunShellCapture(NSString *command, int *exitCode) {
     }
 
     NSTask *task = [[NSTask alloc] init];
+    task.environment = ALNTestShellEnvironment([[NSProcessInfo processInfo] environment]);
     task.launchPath = @"/bin/bash";
     task.arguments = @[ @"-lc", [command isKindOfClass:[NSString class]] ? command : @"" ];
 
@@ -283,16 +284,31 @@ NSString *ALNTestRunShellCapture(NSString *command, int *exitCode) {
   }
 }
 
-BOOL ALNTestThreadSanitizerRuntimeActive(void) {
-  // The TSAN lane (tools/ci/run_phase5e_tsan_experimental.sh) runs xctest with
-  // libtsan in LD_PRELOAD. Tests that spawn `bash -lc` children through NSTask
-  // do not survive that environment, so they quarantine themselves here.
-  NSDictionary<NSString *, NSString *> *environment = [[NSProcessInfo processInfo] environment];
+NSDictionary<NSString *, NSString *> *ALNTestShellEnvironment(
+    NSDictionary<NSString *, NSString *> *environment) {
+  // Strip only TSAN preloads before exec: clearing them inside bash is too late.
+  // Instrumented executables load their linked sanitizer runtime themselves.
+  // Keep TSAN_OPTIONS so those children retain the lane's diagnostic policy.
+  NSMutableDictionary *child = [environment mutableCopy];
+  NSCharacterSet *separators = [NSCharacterSet characterSetWithCharactersInString:@" :\t\n"];
   for (NSString *name in @[ @"LD_PRELOAD", @"XCTEST_LD_PRELOAD" ]) {
-    NSString *value = environment[name];
-    if ([value isKindOfClass:[NSString class]] && [[value lowercaseString] containsString:@"tsan"]) {
-      return YES;
+    NSString *value = child[name];
+    if (![value isKindOfClass:[NSString class]]) {
+      continue;
+    }
+    NSMutableArray *retained = [NSMutableArray array];
+    for (NSString *library in [value componentsSeparatedByCharactersInSet:separators]) {
+      NSString *filename = [library lastPathComponent];
+      BOOL isTSAN = [filename hasPrefix:@"libtsan.so"] || [filename hasPrefix:@"libclang_rt.tsan"];
+      if ([library length] > 0 && !isTSAN) {
+        [retained addObject:library];
+      }
+    }
+    if ([retained count] > 0) {
+      child[name] = [retained componentsJoinedByString:@" "];
+    } else {
+      [child removeObjectForKey:name];
     }
   }
-  return NO;
+  return child;
 }

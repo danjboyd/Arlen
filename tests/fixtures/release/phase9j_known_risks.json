@@ -1,15 +1,15 @@
 {
   "version": "phase9j-known-risk-register-v1",
-  "lastUpdated": "2026-09-18",
+  "lastUpdated": "2026-09-21",
   "risks": [
     {
       "id": "phase9j-risk-tsan-nonblocking",
-      "title": "TSAN lane remains non-blocking while false-positive budget is stabilized",
+      "title": "TSAN runtime findings remain unresolved after coverage repair",
       "status": "active",
       "severity": "medium",
       "owner": "runtime-core",
       "targetDate": "2026-12-31",
-      "notes": "A fresh local tsan_experimental run now passes after unsanitized eocc bootstrap, GNUstep suppression wiring, and TSAN-only quarantine of nested CLI/script assertion tests, but the GNUstep libobjc/base lock-order-inversion and monitor-race signatures remain unresolved in CI governance as of 2026-09-18 (the 2026-09-18 nightly tsan_experimental lane reports no sanitizer findings with the registry suppressions active; the child-process unit tests it failed on are quarantined under TSAN via ALNTestThreadSanitizerRuntimeActive as of 2026-09-18); keep tsan_experimental non-blocking until that stack is resolved and two consecutive deterministic pass cycles are observed."
+      "notes": "Library-wide suppressions demonstrably hid a deliberate application race through Foundation. On 2026-09-21 all 14 TSAN-only test returns were removed, registry initialization lock ordering was corrected, and suppressions narrowed to three Objective-C runtime function patterns. GNUstep queue mutex-lifetime/lock-order and CLI findings are now visible; the full TSAN lane is not clean. Retained raw reproducers, positive-control race detection, explicit unavailable status, and coverage summaries prevent a misleading green result. Keep non-blocking pending runtime classification/fixes and two consecutive clean runs of the new configuration; see docs/internal/TSAN_RELIABILITY_2026-09-21.md."
     },
     {
       "id": "phase9j-risk-benchmark-ladder",

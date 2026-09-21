@@ -337,9 +337,6 @@
 }
 
 - (void)testTypeScriptCodegenCLIFromFixtures {
-  if (ALNTestThreadSanitizerRuntimeActive()) {
-    return;
-  }
   NSString *tempDir = ALNTestTemporaryDirectory(@"orm_typescript_codegen");
   XCTAssertNotNil(tempDir);
   if (tempDir == nil) {

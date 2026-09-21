@@ -349,9 +349,6 @@ static NSUInteger DataverseMetadataCountOccurrences(NSString *text, NSString *ne
 }
 
 - (void)testDataverseCodegenCLIFromFixture {
-  if (ALNTestThreadSanitizerRuntimeActive()) {
-    return;
-  }
   NSString *tempDir = ALNTestTemporaryDirectory(@"dataverse_codegen");
   XCTAssertNotNil(tempDir);
   NSString *fixturePath =

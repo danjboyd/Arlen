@@ -2,6 +2,26 @@
 #import <XCTest/XCTest.h>
 
 #import "ALNEOCRuntime.h"
+#import <dispatch/dispatch.h>
+#include <pthread.h>
+
+typedef struct {
+  dispatch_semaphore_t held;
+  dispatch_semaphore_t release;
+  long waitResult;
+} RuntimeClassMonitorState;
+
+static void *HoldRuntimeClassMonitor(void *context) {
+  RuntimeClassMonitorState *state = context;
+  @autoreleasepool {
+    @synchronized([NSThread class]) {
+      dispatch_semaphore_signal(state->held);
+      state->waitResult = dispatch_semaphore_wait(
+          state->release, dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC));
+    }
+  }
+  return NULL;
+}
 
 static NSString *RenderGreeting(id ctx, NSError **error) {
   (void)error;
@@ -518,6 +538,30 @@ static NSString *RenderCollectionEmpty(id ctx, NSError **error) {
   } @finally {
     ALNEOCPopCompositionState(token);
   }
+}
+
+- (void)testTemplateRegistryDoesNotAcquireNSThreadClassMonitor {
+  RuntimeClassMonitorState state = {
+    dispatch_semaphore_create(0), dispatch_semaphore_create(0), -1
+  };
+  pthread_t thread;
+  int rc = pthread_create(&thread, NULL, HoldRuntimeClassMonitor, &state);
+  XCTAssertEqual(rc, 0);
+  if (rc != 0) { return; }
+  long ready = dispatch_semaphore_wait(state.held, dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC));
+  if (ready == 0) {
+    ALNEOCRegisterTemplate(@"monitor-independent", RenderGreeting);
+    ALNEOCRegisterTemplateLayout(@"monitor-independent", @"layouts/application");
+    XCTAssertTrue(ALNEOCResolveTemplate(@"monitor-independent") == RenderGreeting);
+    XCTAssertEqualObjects(ALNEOCResolveTemplateLayout(@"monitor-independent"), @"layouts/application.html.eoc");
+    ALNEOCClearTemplateRegistry();
+  }
+  dispatch_semaphore_signal(state.release);
+  pthread_join(thread, NULL);
+  XCTAssertEqual(ready, 0);
+  XCTAssertEqual(state.waitResult, 0, @"Registry operations waited for the shared NSThread class monitor");
+  dispatch_release(state.held);
+  dispatch_release(state.release);
 }
 
 - (void)testTemplateLayoutRegistryResolvesRegisteredLayout {

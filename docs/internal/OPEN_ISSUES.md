@@ -621,8 +621,8 @@ Regression coverage should include:
 
 - Status: `resolved`
 - Priority: `critical`
-- GitHub: https://github.com/danjboyd/Arlen/issues/1
-- Last updated: `2026-02-25`
+- GitHub: https://github.com/danjboyd/Arlen/issues/1 and https://github.com/danjboyd/Arlen/issues/2 (closed 2026-09-21)
+- Last updated: `2026-09-21`
 
 ### Summary
 
@@ -652,13 +652,20 @@ Externally this presents as intermittent or sustained `502 Bad Gateway` from ngi
 ### Resolution summary
 
 - Fix commit: `0920889` (`fix(http): stabilize serialized dispatch connection lifecycle`)
-- Final fix behavior in serialized mode:
+- Original fix behavior in serialized mode:
   - force one request per HTTP connection (`Connection: close`)
   - disable detached per-connection background thread handling
   - preserve explicit serialized behavior as opt-in (`requestDispatchMode=serialized`)
 - Regression coverage:
   - `HTTPIntegrationTests::testProductionSerializedDispatchClosesHTTPConnections`
   - existing production serialization/concurrent-override tests remained passing
+
+Current behavior: `b5dc20e` subsequently restored HTTP keep-alive with dedicated
+`testSerializedDispatchAllowsKeepAliveConnections` coverage. Serialized dispatch
+still handles connections on the accept thread. The original close-connection
+test above is historical; current main's HTTP lifecycle and runtime concurrency
+checks passed on 2026-09-21. Both GitHub reports predate the successful fix and
+have now been closed with that evidence.
 
 ### Verification evidence
 

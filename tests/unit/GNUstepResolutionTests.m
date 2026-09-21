@@ -61,9 +61,6 @@
 }
 
 - (void)testResolverPrefersGNUSTEP_SHOverOtherSources {
-  if (ALNTestThreadSanitizerRuntimeActive()) {
-    return;
-  }
   NSString *tempRoot = ALNTestTemporaryDirectory(@"gnustep_resolver_env");
   XCTAssertNotNil(tempRoot);
 
@@ -98,9 +95,6 @@
 }
 
 - (void)testResolverFallsBackToGNUSTEP_MAKEFILES {
-  if (ALNTestThreadSanitizerRuntimeActive()) {
-    return;
-  }
   NSString *tempRoot = ALNTestTemporaryDirectory(@"gnustep_resolver_makefiles");
   XCTAssertNotNil(tempRoot);
 
@@ -120,9 +114,6 @@
 }
 
 - (void)testResolverFallsBackToGnustepConfig {
-  if (ALNTestThreadSanitizerRuntimeActive()) {
-    return;
-  }
   NSString *tempRoot = ALNTestTemporaryDirectory(@"gnustep_resolver_config");
   XCTAssertNotNil(tempRoot);
 

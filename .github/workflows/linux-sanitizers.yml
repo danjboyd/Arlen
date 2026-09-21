@@ -78,7 +78,7 @@ jobs:
           bash ./tools/ci/run_linux_thread_race_nightly.sh
 
       - name: Upload thread-race nightly artifacts
-        if: github.event_name == 'workflow_dispatch' || failure()
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: linux-thread-race-nightly-${{ github.run_id }}

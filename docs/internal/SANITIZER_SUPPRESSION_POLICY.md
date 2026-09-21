@@ -58,3 +58,20 @@ bash ./tools/ci/run_phase5e_sanitizers.sh
 ```
 
 Outputs include lane status, suppression summary, and status deltas for release triage.
+
+## TSAN evidence and matching contract
+
+Active thread-sanitizer entries must also declare `patterns` matching the
+suppression file exactly and an `evidence` document present in the repository.
+The validator rejects unregistered patterns and missing evidence. Retired
+suppressions stay in the registry as `resolved`; that status retires the
+exception, not necessarily the underlying runtime finding.
+
+Library-wide patterns can hide application-owned races through library
+callbacks. New or renewed exceptions require a minimal reproducer, captured
+raw stacks/toolchain identity, a scoped matching rationale, and a positive
+control that still detects an application race with the exceptions enabled.
+Do not classify a runtime finding as a false positive without evidence.
+
+See [the September 21 investigation](TSAN_RELIABILITY_2026-09-21.md) for current
+findings, retired broad rules, and the conditions for TSAN gate promotion.

@@ -1,4 +1,5 @@
 #import "ALNEOCRuntime.h"
+#import <dispatch/dispatch.h>
 
 NSString *const ALNEOCErrorDomain = @"Arlen.EOC.Error";
 NSString *const ALNEOCErrorLineKey = @"line";
@@ -78,22 +79,20 @@ static id ALNEOCLookupValueOnObject(id object, NSString *name, BOOL *found);
 
 static NSMutableDictionary *ALNEOCTemplateRegistry(void) {
   static NSMutableDictionary *registry = nil;
-  @synchronized([NSThread class]) {
-    if (registry == nil) {
-      registry = [[NSMutableDictionary alloc] init];
-    }
-    return registry;
-  }
+  static dispatch_once_t onceToken;
+  dispatch_once(&onceToken, ^{
+    registry = [[NSMutableDictionary alloc] init];
+  });
+  return registry;
 }
 
 static NSMutableDictionary *ALNEOCTemplateLayoutRegistry(void) {
   static NSMutableDictionary *registry = nil;
-  @synchronized([NSThread class]) {
-    if (registry == nil) {
-      registry = [[NSMutableDictionary alloc] init];
-    }
-    return registry;
-  }
+  static dispatch_once_t onceToken;
+  dispatch_once(&onceToken, ^{
+    registry = [[NSMutableDictionary alloc] init];
+  });
+  return registry;
 }
 
 static NSMutableDictionary *ALNEOCThreadOptions(void) {

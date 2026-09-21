@@ -8,11 +8,6 @@
 
 @implementation BuildPolicyTests
 
-- (BOOL)isThreadSanitizerRuntimeActive {
-  NSString *ldPreload = [[[NSProcessInfo processInfo] environment] objectForKey:@"LD_PRELOAD"];
-  return [ldPreload length] > 0;
-}
-
 - (NSString *)readFile:(NSString *)path {
   NSError *error = nil;
   NSString *contents =
@@ -100,33 +95,10 @@
 }
 
 - (NSString *)runShellCapture:(NSString *)command exitCode:(int *)exitCode {
-  NSTask *task = [[NSTask alloc] init];
-  task.launchPath = @"/bin/bash";
-  task.arguments = @[ @"-lc", command ?: @"" ];
-  NSString *capturePath = [NSTemporaryDirectory()
-      stringByAppendingPathComponent:[NSString stringWithFormat:@"arlen-test-shell-%@.log",
-                                                               [[NSUUID UUID] UUIDString]]];
-  [[NSFileManager defaultManager] createFileAtPath:capturePath contents:nil attributes:nil];
-  NSFileHandle *captureWrite = [NSFileHandle fileHandleForWritingAtPath:capturePath];
-  task.standardOutput = captureWrite;
-  task.standardError = captureWrite;
-  [task launch];
-  [task waitUntilExit];
-
-  if (exitCode != NULL) {
-    *exitCode = task.terminationStatus;
-  }
-  [captureWrite closeFile];
-  NSData *capturedData = [NSData dataWithContentsOfFile:capturePath] ?: [NSData data];
-  [[NSFileManager defaultManager] removeItemAtPath:capturePath error:nil];
-  NSString *output = [[NSString alloc] initWithData:capturedData encoding:NSUTF8StringEncoding];
-  return output ?: @"";
+  return ALNTestRunShellCapture(command, exitCode);
 }
 
 - (void)testArlenBuildJSONCapturesLargeChildOutputWithoutPipeDeadlock_ARLEN_BUG_027 {
-  if (ALNTestThreadSanitizerRuntimeActive()) {
-    return;
-  }
   NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
   NSString *fixtureRoot = [self createTempDirectoryWithPrefix:@"arlen-shell-capture-large-output"];
   XCTAssertNotNil(fixtureRoot);
@@ -843,20 +815,23 @@
   XCTAssertTrue([script containsString:@"second_deadlock_stack=1"]);
 }
 
-- (void)testChildProcessUnitTestsAreQuarantinedUnderThreadSanitizer {
-  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
-  NSArray<NSString *> *files = @[
-    @"tests/unit/BuildPolicyTests.m",
-    @"tests/unit/DataverseMetadataTests.m",
-    @"tests/unit/GNUstepResolutionTests.m",
-    @"tests/unit/ORMCodegenTests.m",
-    @"tests/unit/ORMTypeScriptCodegenTests.m",
-  ];
-  for (NSString *relativePath in files) {
-    NSString *source = [self readFile:[repoRoot stringByAppendingPathComponent:relativePath]];
-    XCTAssertTrue([source containsString:@"if (ALNTestThreadSanitizerRuntimeActive()) {"],
-                  @"%@ spawns bash children and must quarantine those tests under TSAN", relativePath);
-  }
+- (void)testShellEnvironmentRemovesOnlyTSANPreloadBeforeLaunch {
+  NSDictionary *parent = @{
+    @"LD_PRELOAD": @"/tmp/libtsan.so:/tmp/libkeep.so /tmp/libclang_rt.tsan-x86_64.so",
+    @"XCTEST_LD_PRELOAD": @"/tmp/libtsan.so",
+    @"TSAN_OPTIONS": @"halt_on_error=1",
+    @"PATH": @"/usr/bin:/bin",
+  };
+  NSDictionary *child = ALNTestShellEnvironment(parent);
+  XCTAssertEqualObjects(child[@"LD_PRELOAD"], @"/tmp/libkeep.so");
+  XCTAssertNil(child[@"XCTEST_LD_PRELOAD"]);
+  XCTAssertEqualObjects(child[@"TSAN_OPTIONS"], parent[@"TSAN_OPTIONS"]);
+  XCTAssertEqualObjects(child[@"PATH"], parent[@"PATH"]);
+  XCTAssertNotNil(parent[@"XCTEST_LD_PRELOAD"]);
+  int exitCode = -1;
+  NSString *output = ALNTestRunShellCapture(@"printf shell-capture-ok", &exitCode);
+  XCTAssertEqual(exitCode, 0, @"%@", output);
+  XCTAssertEqualObjects(output, @"shell-capture-ok");
 }
 
 - (void)testTSANHotPathsAvoidObjCSynchronizedMonitors {
@@ -881,9 +856,6 @@
 }
 
 - (void)testTSANScriptBootstrapsEOCCUnsanitizedBeforeInstrumentedBuilds {
-  if ([self isThreadSanitizerRuntimeActive]) {
-    return;
-  }
   NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
   NSString *fixtureRoot = [self createTempDirectoryWithPrefix:@"arlen-tsan-fixture"];
   NSString *fakeBin = [self createTempDirectoryWithPrefix:@"arlen-tsan-fakebin"];
@@ -1050,9 +1022,6 @@
 }
 
 - (void)testTSANScriptStopsOnInstrumentedFailureBeforeRuntimeProbe {
-  if ([self isThreadSanitizerRuntimeActive]) {
-    return;
-  }
   NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
   NSString *fixtureRoot = [self createTempDirectoryWithPrefix:@"arlen-tsan-fail-fixture"];
   NSString *fakeBin = [self createTempDirectoryWithPrefix:@"arlen-tsan-fail-fakebin"];
@@ -1168,9 +1137,6 @@
 }
 
 - (void)testThreadRaceNightlyPropagatesUnderlyingTSANFailureExitCodeAndPreservesLog {
-  if ([self isThreadSanitizerRuntimeActive]) {
-    return;
-  }
   NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
   NSString *fixtureRoot = [self createTempDirectoryWithPrefix:@"arlen-thread-race-fixture"];
   NSString *fakeBin = [self createTempDirectoryWithPrefix:@"arlen-thread-race-fakebin"];

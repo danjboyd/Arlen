@@ -28,7 +28,8 @@ FOUNDATION_EXPORT BOOL ALNTestWriteUTF8File(NSString *path,
                                             NSString *content,
                                             NSError *_Nullable *_Nullable error);
 FOUNDATION_EXPORT NSString *ALNTestRunShellCapture(NSString *command, int *_Nullable exitCode);
-FOUNDATION_EXPORT BOOL ALNTestThreadSanitizerRuntimeActive(void);
+FOUNDATION_EXPORT NSDictionary<NSString *, NSString *> *ALNTestShellEnvironment(
+    NSDictionary<NSString *, NSString *> *environment);
 
 NS_ASSUME_NONNULL_END
 

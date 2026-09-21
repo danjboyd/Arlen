@@ -70,16 +70,28 @@ if [[ -n "$tsan_so" && -f "$tsan_so" ]]; then
   {
     echo "phase10m-thread-race: engine=tsan"
   } | tee -a "$staged_log_path"
-  if ARLEN_TSAN_ARTIFACT_DIR="$artifact_dir/tsan" bash ./tools/ci/run_phase5e_tsan_experimental.sh >>"$staged_log_path" 2>&1; then
-    write_summary "pass" "tsan" "0" ""
-    echo "ci: phase10m thread-race nightly complete (tsan)" | tee -a "$staged_log_path"
-    exit 0
-  else
-    rc=$?
-    write_summary "fail" "tsan" "$rc" "tsan_lane_failure"
+  tsan_rc=0
+  ARLEN_TSAN_ARTIFACT_DIR="$artifact_dir/tsan" bash ./tools/ci/run_phase5e_tsan_experimental.sh >>"$staged_log_path" 2>&1 || tsan_rc=$?
+  diagnostic_rc=0
+  python3 ./tools/ci/tsan_runtime_diagnostics.py --output "$artifact_dir/diagnostics" >>"$staged_log_path" 2>&1 || diagnostic_rc=$?
+  if [[ "$tsan_rc" -ne 0 ]]; then
+    write_summary "fail" "tsan" "$tsan_rc" "tsan_lane_failure"
     echo "ci: phase10m thread-race nightly failed (tsan)" | tee -a "$staged_log_path"
-    exit "$rc"
+    exit "$tsan_rc"
+  elif [[ "$diagnostic_rc" -ne 0 ]]; then
+    write_summary "fail" "tsan" "$diagnostic_rc" "tsan_diagnostic_control_failure"
+    echo "ci: TSAN diagnostic control failed" | tee -a "$staged_log_path"
+    exit "$diagnostic_rc"
   fi
+  write_summary "pass" "tsan" "0" ""
+  echo "ci: phase10m thread-race nightly complete (tsan)" | tee -a "$staged_log_path"
+  exit 0
+fi
+
+if [[ "${ARLEN_REQUIRE_TSAN:-1}" == "1" ]]; then
+  write_summary "unavailable" "none" "77" "libtsan_unavailable"
+  echo "ci: thread-race nightly requires TSAN; no fallback was run" | tee -a "$staged_log_path"
+  exit 77
 fi
 
 if command -v valgrind >/dev/null 2>&1; then
@@ -116,5 +128,7 @@ if command -v valgrind >/dev/null 2>&1; then
   exit "$rc"
 fi
 
-write_summary "skipped" "none" "0" "no_tsan_or_valgrind"
+write_summary "unavailable" "none" "77" "no_tsan_or_valgrind"
 echo "ci: phase10m thread-race nightly skipped (no tsan/helgrind)" | tee -a "$staged_log_path"
+
+exit 77
