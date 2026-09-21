@@ -60,7 +60,8 @@
 
 - (void)testNonNumericAndNonPositiveLimitsAreRejectedNotFatal_HELPDESK_B3 {
   for (id bad in @[ @"not-a-number", @"0", @"-5", @0, @(-5), [NSNull null], @[],
-                   @"16parts", @"1.5", @1.5, @"18446744073709551616", @"9223372036854775808" ]) {
+                   @"16parts", @"1.5", @1.5, @18446744073709551615ULL,
+                   @"18446744073709551616", @"9223372036854775808" ]) {
     ALNRequest *request = [self request:self.body];
     NSError *error = nil;
     // Rejected, and without raising: a bad config value is a bad request at

@@ -5,12 +5,21 @@
 #include <errno.h>
 #include <limits.h>
 #include <stdlib.h>
+#include <string.h>
 
 // Internal config/parser seam: old-style plists represent bare integers as strings.
 // Reject partial conversions, fractions and overflow instead of truncating limits.
 static inline NSNumber *ALNPositiveInteger(id value) {
   NSString *text = nil;
   if ([value isKindOfClass:[NSNumber class]]) {
+    // Config loading already normalizes limits. The HTTP server reads them for
+    // each connection, so keep integer numbers on an allocation-free path.
+    const char *type = [value objCType];
+    if (type != NULL && type[0] != '\0' && type[1] == '\0' &&
+        strchr("cCsSiIlLqQB", type[0]) != NULL) {
+      long long parsed = [value longLongValue];
+      return parsed > 0 && (unsigned long long)parsed <= NSUIntegerMax ? value : nil;
+    }
     text = [value stringValue];
   } else if ([value isKindOfClass:[NSString class]]) {
     text = [value stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
