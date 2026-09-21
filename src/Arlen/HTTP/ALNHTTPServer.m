@@ -11,6 +11,7 @@
 #import <sys/stat.h>
 #include <signal.h>
 #import "Support/ALNPlatform.h"
+#import "Support/ALNPositiveInteger.h"
 
 #if defined(_WIN32)
 #include <io.h>
@@ -455,14 +456,8 @@ static double ALNNowMilliseconds(void) {
 }
 
 static NSUInteger ALNConfigUInt(NSDictionary *dict, NSString *key, NSUInteger defaultValue) {
-  id value = dict[key];
-  if ([value respondsToSelector:@selector(unsignedIntegerValue)]) {
-    NSUInteger parsed = [value unsignedIntegerValue];
-    if (parsed > 0) {
-      return parsed;
-    }
-  }
-  return defaultValue;
+  NSNumber *value = ALNPositiveInteger(dict[key]);
+  return value != nil ? value.unsignedIntegerValue : defaultValue;
 }
 
 static NSUInteger ALNConfigUIntAllowZero(NSDictionary *dict, NSString *key, NSUInteger defaultValue) {

@@ -12,6 +12,7 @@ concurrency:
 
 jobs:
   docs-gate:
+    name: docs-quality / docs-gate
     runs-on: [self-hosted, Linux, X64, arlen, iep-apt]
     timeout-minutes: 45
     steps:

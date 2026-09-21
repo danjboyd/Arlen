@@ -1,6 +1,6 @@
 # CI Alignment
 
-Last updated: 2026-09-14
+Last updated: 2026-09-21
 
 This document defines the intended shape of Arlen CI so workflow names,
 required checks, and actual project contracts stay aligned.
@@ -290,12 +290,16 @@ check name is introduced.
 ## Durable jobs reliability coverage
 
 `linux-quality / quality-gate` explicitly runs `make ci-durable-jobs` after
-sourcing the repo GNUstep environment. The entrypoint
+sourcing the repo GNUstep environment, before the broader Linux quality gate so
+unrelated later failures do not skip queue acceptance. The entrypoint
 `tools/ci/run_durable_jobs.sh` provisions a disposable PostgreSQL cluster and
 executes the vendored XCTest runner and independent process probes. It requires
 real database concurrency, worker kill/restart, lease fencing/renewal, durable
 results, transaction rollback, retry/replay/deduplication, database outages, and
-module integration. Database provisioning failures fail the gate.
+module integration. The same gate also requires nonblocking same-queue and
+cross-queue claims under terminal-job/control-row contention, eventual cleanup
+after lock release, bounded cleanup backlogs, and preservation of live/retryable
+leases. Database provisioning failures fail the gate.
 
 The existing artifact upload includes
 `build/release_confidence/durable_jobs.log`. No CI lane is renamed or added;
@@ -303,3 +307,24 @@ branch protection must continue requiring the existing three checks listed
 above. Local contributor instructions are in `docs/TESTING_WORKFLOW.md` and the
 runtime contract is in `docs/DURABLE_JOBS.md`. The clang-based `/usr/GNUstep`
 provisioning contract is unchanged.
+
+The quality workflow verifies PostgreSQL server tools before isolated acceptance
+and installs the distro `postgresql` package if missing, including on the
+preinstalled-GNUstep runner. `tools/ci/resolve_postgres_test_bin.sh` honors an
+explicit `ARLEN_TEST_PG_BIN`, then probes `pg_config`, PATH, and installed
+Debian/Ubuntu server directories. Both durable jobs and ORM identifier acceptance
+use that resolver. This provisions a test dependency without changing the
+`/usr/GNUstep` clang toolchain or weakening any gate.
+
+The required job display names explicitly emit `linux-quality / quality-gate`,
+`linux-sanitizers / sanitizer-gate`, and `docs-quality / docs-gate`, matching the
+existing branch-protection contexts exactly. Keep those literal names aligned
+when editing workflows. Bare job IDs did not satisfy the configured contexts;
+no required check is removed or weakened by this alignment.
+
+The Linux integration suite verifies the documented multipart plist limits on
+both HTTP parsers and compiles the optional-backend-disabled smoke with the
+request parser's multipart source dependency. Keep that standalone compile
+representative when adding request-parser dependencies; do not remove the
+feature-toggle check to address link failures. No additional required lane is
+introduced for these regressions.

@@ -161,13 +161,20 @@ static ALNJobEnvelope *PJEnvelope(NSDictionary *row, NSTimeInterval duration) {
 - (ALNJobEnvelope *)dequeueDueJobAt:(NSDate *)timestamp error:(NSError **)error {
   __block ALNJobEnvelope *job = nil;
   BOOL ok = [self.database withTransactionUsingBlock:^BOOL(id<ALNDatabaseConnection> c, NSError **txError) {
+    // Bound maintenance work and skip busy jobs before touching any rows. A
+    // namespace-wide UPDATE here can block all consumers behind one expired job.
     // Expiration uses database time, never a caller's scheduling timestamp.
-    if ([c executeCommand:@"UPDATE arlen_jobs SET state='failed', lease_token=NULL, lease_expires_at=NULL, "
+    if ([c executeCommand:@"WITH expired AS ("
+        "SELECT namespace,job_id FROM arlen_jobs "
+        "WHERE namespace=$1 AND state='leased' AND lease_expires_at<=clock_timestamp() AND attempt>=max_attempts "
+        "ORDER BY lease_expires_at,sequence LIMIT 100 FOR UPDATE SKIP LOCKED) "
+        "UPDATE arlen_jobs AS job SET state='failed', lease_token=NULL, lease_expires_at=NULL, "
         "failure_message='worker lease expired at attempt limit', updated_at=clock_timestamp() "
-        "WHERE namespace=$1 AND state='leased' AND lease_expires_at<=clock_timestamp() AND attempt>=max_attempts"
+        "FROM expired WHERE job.namespace=expired.namespace AND job.job_id=expired.job_id"
         parameters:@[self.namespaceName] error:txError] < 0) return NO;
-    // Queue locks make pause/drain linearizable with claims and enqueues.
-    NSArray *queues = [c executeQuery:@"SELECT queue FROM arlen_job_queues WHERE namespace=$1 AND state IN ('active','draining') ORDER BY queue FOR SHARE"
+    // Lock only available queue controls, and restrict the claim to that list.
+    // This preserves pause/drain ordering without waiting on unrelated queues.
+    NSArray *queues = [c executeQuery:@"SELECT queue FROM arlen_job_queues WHERE namespace=$1 AND state IN ('active','draining') ORDER BY queue FOR SHARE SKIP LOCKED"
         parameters:@[self.namespaceName] error:txError];
     if (!queues) return NO;
     if (!queues.count) return YES;

@@ -37,7 +37,24 @@ Set these keys in the application's `requestLimits` configuration dictionary:
 | `maxMultipartFileBytes` | 1,048,576 | Bytes in each uploaded file |
 | `maxMultipartHeaderBytes` | 16,384 | Per-part header bytes, excluding the terminating CRLF CRLF |
 
-Limits must be positive. Values exactly at a limit are accepted. The HTTP
+For example, in `config/app.plist`:
+
+```plist
+requestLimits = {
+  maxBodyBytes = 6291456;
+  maxMultipartFileBytes = 5242880;
+  maxMultipartParts = 16;
+};
+```
+
+Bare decimal values, quoted decimal strings, and integer `NSNumber` values
+have the same meaning. All documented request limits are normalized to numbers
+when configuration loads. Limits must be positive whole numbers no greater than
+the smaller of `LLONG_MAX` and `NSUIntegerMax`; fractions, trailing text,
+overflow, and nonnumeric values are rejected with the offending
+`requestLimits.<key>` in the configuration error. Direct parser calls also
+validate their supplied limits and return an error without raising an exception.
+Values exactly at a limit are accepted. The HTTP
 server also applies `maxHeaderBytes` and `maxRequestLineBytes` to HTTP framing.
 `ARLEN_MAX_BODY_BYTES` overrides the total body limit; multipart-specific keys
 are configured in `requestLimits`.

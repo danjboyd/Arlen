@@ -298,8 +298,9 @@
          "-fobjc-arc -DARLEN_ENABLE_YYJSON=0 -DARLEN_ENABLE_LLHTTP=0 "
          "-I%@/src/Arlen -I%@/src/Arlen/HTTP -I%@/src/Arlen/Support "
          "%@ %@/src/Arlen/Support/ALNJSONSerialization.m %@/src/Arlen/HTTP/ALNRequest.m "
+         "%@/src/Arlen/HTTP/ALNMultipart.m "
          "-o %@ $(gnustep-config --base-libs) -ldl -lcrypto",
-        [self gnustepSourceCommandForRepoRoot:repoRoot], repoRoot, repoRoot, repoRoot, sourcePath, repoRoot, repoRoot, binaryPath]
+        [self gnustepSourceCommandForRepoRoot:repoRoot], repoRoot, repoRoot, repoRoot, sourcePath, repoRoot, repoRoot, repoRoot, binaryPath]
                                        exitCode:&code];
     XCTAssertEqual(0, code, @"%@", compileOutput);
 

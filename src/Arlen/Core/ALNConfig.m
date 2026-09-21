@@ -1,6 +1,7 @@
 #import "ALNConfig.h"
 #import "ALNDataCompat.h"
 #import "ALNModuleSystem.h"
+#import "ALNPositiveInteger.h"
 
 #if defined(_WIN32)
 #include <winsock2.h>
@@ -400,6 +401,14 @@ static NSDictionary *ALNSecurityProfileDefaults(NSString *profileName) {
       [NSMutableDictionary dictionaryWithDictionary:ALNMergeDictionaries(base, overlay)];
   config[@"environment"] = env;
   config[@"appRoot"] = [[rootPath ?: @"" stringByStandardizingPath] copy];
+  if (config[@"requestLimits"] != nil &&
+      ![config[@"requestLimits"] isKindOfClass:[NSDictionary class]]) {
+    if (error != NULL) {
+      *error = [NSError errorWithDomain:ALNConfigErrorDomain code:3
+                              userInfo:@{NSLocalizedDescriptionKey : @"requestLimits must be a dictionary"}];
+    }
+    return nil;
+  }
 
   NSString *host = ALNEnvValueCompat("ARLEN_HOST", "MOJOOBJC_HOST");
   NSString *port = ALNEnvValueCompat("ARLEN_PORT", "MOJOOBJC_PORT");
@@ -1345,9 +1354,20 @@ static NSDictionary *ALNSecurityProfileDefaults(NSString *profileName) {
   }
   config[@"requestDispatchMode"] = resolvedRequestDispatchMode;
 
-  finalLimits[@"maxRequestLineBytes"] = @([finalLimits[@"maxRequestLineBytes"] integerValue]);
-  finalLimits[@"maxHeaderBytes"] = @([finalLimits[@"maxHeaderBytes"] integerValue]);
-  finalLimits[@"maxBodyBytes"] = @([finalLimits[@"maxBodyBytes"] integerValue]);
+  for (NSString *key in @[@"maxRequestLineBytes", @"maxHeaderBytes", @"maxBodyBytes",
+                         @"maxMultipartParts", @"maxMultipartFieldBytes",
+                         @"maxMultipartFileBytes", @"maxMultipartHeaderBytes"]) {
+    NSNumber *value = ALNPositiveInteger(finalLimits[key]);
+    if (value == nil) {
+      if (error != NULL) {
+        *error = [NSError errorWithDomain:ALNConfigErrorDomain code:3
+                                userInfo:@{NSLocalizedDescriptionKey :
+                                    [NSString stringWithFormat:@"requestLimits.%@ must be a positive integer in range", key]}];
+      }
+      return nil;
+    }
+    finalLimits[key] = value;
+  }
   config[@"requestLimits"] = finalLimits;
 
   finalRuntimeLimits[@"maxConcurrentHTTPSessions"] =

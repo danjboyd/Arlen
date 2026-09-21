@@ -709,7 +709,9 @@ Build and run the first-party jobs worker loop for the current app root.
 For separate web/worker processes, register `ALNPostgresJobAdapter` in the app
 before jobs module configuration and apply
 `tools/migrations/jobs/001_postgres_jobs.sql`. The worker automatically renews
-and fences supported leases. Use `--run-scheduler` in only one process; other
+and fences supported leases. Each PostgreSQL dequeue cleans up at most 100
+expired final attempts and skips busy job/queue rows so unrelated work remains
+claimable. Use `--run-scheduler` in only one process; other
 workers consume the shared queue without it. See [Durable Jobs](DURABLE_JOBS.md)
 for the database/dependency contract, transaction API, shared pause/drain, and
 persistent result polling. No new worker CLI flags are required.
@@ -1339,3 +1341,7 @@ fetch failures, metadata validation failures, and cooldown. Diagnostics omit
 URLs, credentials, response bodies, and custom loader error details.
 
 Multipart uploads use the application `requestLimits` policy. `ARLEN_MAX_BODY_BYTES` sets the total body cap; per-part limits require configuration. See [Multipart Uploads](MULTIPART_UPLOADS.md).
+
+`arlen config` normalizes all documented `requestLimits` values to JSON numbers,
+including multipart limits. Bare and quoted decimal plist values are supported.
+Invalid limits fail configuration loading with the offending key in the error.

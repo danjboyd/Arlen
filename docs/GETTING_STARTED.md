@@ -232,3 +232,12 @@ The [Durable Jobs guide](DURABLE_JOBS.md) covers setup, transactional enqueue,
 provider result methods, heartbeat pool capacity, shared queue controls, and
 single-scheduler deployment. The default memory adapter is for development and
 tests; file persistence alone does not provide worker crash recovery.
+
+PostgreSQL workers skip locked expired jobs and busy queue controls when claiming
+other work. Final-attempt cleanup processes at most 100 jobs per poll; skipped
+jobs and larger cleanup backlogs are revisited by subsequent worker polls.
+
+For form uploads, configure positive whole-number `requestLimits` in
+`config/app.plist`; bare and quoted decimal values behave identically. Invalid
+limits are rejected during configuration loading. See [Multipart Uploads](MULTIPART_UPLOADS.md)
+for a complete configuration example and buffering limits.

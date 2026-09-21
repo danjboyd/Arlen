@@ -487,4 +487,121 @@
   }
   XCTAssertEqual(found,names.count);
 }
+// OT's review reproducer, extended to verify eventual terminal cleanup and
+// to exercise both same-queue and cross-queue isolation while the lock is held.
+- (void)assertPendingWorkSkipsLockedExpiredFinalAttemptInQueue:(NSString *)queue {
+  NSString *expired = [self enqueue:@{@"maxAttempts":@1}];
+  NSError *error = nil;
+  XCTAssertNotNil([self.adapter dequeueDueJobAt:[NSDate date] error:&error]);
+  [self expire:expired];
+  NSString *pending = [self enqueue:@{@"queue":queue}];
+  ALNPgConnection *blocker = [self.db acquireConnection:&error];
+  XCTAssertTrue([blocker beginTransaction:&error]);
+  XCTAssertNotNil(([blocker executeQuery:@"SELECT job_id FROM arlen_jobs WHERE namespace=$1 AND job_id=$2 FOR UPDATE"
+      parameters:@[self.namespaceName,expired] error:&error]));
+  ALNPostgresJobAdapter *other = [self adapterWithShortLockTimeout];
+  @try {
+    error = nil;
+    ALNJobEnvelope *claimed = [other dequeueDueJobAt:[NSDate date] error:&error];
+    XCTAssertNil(error,@"locked cleanup must not fail the claim: %@",error);
+    XCTAssertNotNil(claimed,@"unrelated work must remain claimable while the blocker is open");
+    XCTAssertEqualObjects(claimed.jobID,pending);
+    error = nil;
+    XCTAssertEqualObjects([other jobStatusForID:expired error:&error][@"state"],@"leased");
+  } @finally {
+    NSError *cleanup = nil;
+    XCTAssertTrue([blocker rollbackTransaction:&cleanup],@"%@",cleanup);
+    [self.db releaseConnection:blocker];
+  }
+  error = nil;
+  [other dequeueDueJobAt:[NSDate date] error:&error];
+  XCTAssertNil(error,@"%@",error);
+  XCTAssertEqualObjects([other jobStatusForID:expired error:&error][@"state"],@"failed");
+}
+- (ALNPostgresJobAdapter *)adapterWithShortLockTimeout {
+  NSError *error = nil;
+  NSString *dsn = [self.db.connectionString stringByAppendingString:@" options='-c lock_timeout=250ms'"];
+  ALNPg *db = [[ALNPg alloc] initWithConnectionString:dsn maxConnections:2 error:&error];
+  ALNPostgresJobAdapter *adapter = [[ALNPostgresJobAdapter alloc] initWithDatabase:db
+      namespace:self.namespaceName leaseDurationSeconds:60 error:&error];
+  XCTAssertNotNil(adapter,@"%@",error);
+  return adapter;
+}
+- (void)testUnrelatedPendingWorkSkipsLockedExpiredFinalAttempt {
+  [self assertPendingWorkSkipsLockedExpiredFinalAttemptInQueue:@"default"];
+}
+- (void)testOtherQueueSkipsLockedExpiredFinalAttempt {
+  [self assertPendingWorkSkipsLockedExpiredFinalAttemptInQueue:@"other"];
+}
+- (void)testTerminalCleanupIsBoundedAndEventuallyDrainsBacklog {
+  ALNPostgresJobAdapter *other = [self adapterWithShortLockTimeout];
+  NSError *error = nil;
+  // Longer leases keep setup independent of elapsed time; expire them together.
+  for (NSUInteger i = 0; i < 205; i++) {
+    NSString *jobID = [other enqueueJobNamed:@"synthetic" payload:@{}
+        options:@{@"queue":@"cleanup",@"maxAttempts":@1} error:&error];
+    XCTAssertNotNil(jobID,@"%@",error);
+    ALNJobEnvelope *lease = [other dequeueDueJobAt:[NSDate date] error:&error];
+    XCTAssertEqualObjects(lease.jobID,jobID);
+  }
+  XCTAssertTrue([other setQueue:@"cleanup" state:@"paused" error:&error]);
+  XCTAssertEqual(([self.db executeCommand:@"UPDATE arlen_jobs SET lease_expires_at=clock_timestamp()-interval '1 second' WHERE namespace=$1"
+      parameters:@[self.namespaceName] error:&error]),205);
+  NSString *pending = [self enqueue:@{@"queue":@"work"}];
+  ALNJobLease *claimed = (ALNJobLease *)[other dequeueDueJobAt:[NSDate date] error:&error];
+  XCTAssertNil(error,@"%@",error);
+  XCTAssertEqualObjects(claimed.jobID,pending);
+  XCTAssertEqual([other jobsWithState:@"failed" error:&error].count,100u);
+  XCTAssertTrue([other completeJob:claimed result:nil error:&error],@"%@",error);
+  XCTAssertNil([other dequeueDueJobAt:[NSDate date] error:&error]);
+  XCTAssertEqual([other jobsWithState:@"failed" error:&error].count,200u);
+  XCTAssertNil([other dequeueDueJobAt:[NSDate date] error:&error]);
+  XCTAssertNil(error,@"%@",error);
+  XCTAssertEqual([other jobsWithState:@"failed" error:&error].count,205u);
+  XCTAssertEqual([other jobsWithState:@"leased" error:&error].count,0u);
+}
+- (void)testTerminalCleanupPreservesLiveAndRetryableLeases {
+  ALNPostgresJobAdapter *other = [self adapterWithShortLockTimeout];
+  NSError *error = nil;
+  NSString *live = [self enqueue:@{@"maxAttempts":@1}];
+  ALNJobEnvelope *liveLease = [other dequeueDueJobAt:[NSDate date] error:&error];
+  XCTAssertEqualObjects(liveLease.jobID,live);
+  NSString *retryable = [self enqueue:@{@"maxAttempts":@2}];
+  XCTAssertEqualObjects([other dequeueDueJobAt:[NSDate date] error:&error].jobID,retryable);
+  [self expire:retryable];
+  XCTAssertTrue([other setQueue:@"default" state:@"paused" error:&error]);
+  XCTAssertNil([other dequeueDueJobAt:[NSDate date] error:&error]);
+  XCTAssertNil(error,@"%@",error);
+  XCTAssertEqualObjects([other jobStatusForID:live error:&error][@"state"],@"leased");
+  XCTAssertEqualObjects([other jobStatusForID:retryable error:&error][@"state"],@"leased");
+  XCTAssertTrue([other setQueue:@"default" state:@"active" error:&error]);
+  ALNJobEnvelope *reclaimed = [other dequeueDueJobAt:[NSDate date] error:&error];
+  XCTAssertEqualObjects(reclaimed.jobID,retryable);
+  XCTAssertEqual(reclaimed.attempt,2u);
+  XCTAssertEqualObjects([other jobStatusForID:live error:&error][@"state"],@"leased");
+}
+- (void)testBusyQueueControlDoesNotBlockOtherQueues {
+  NSString *busyJob = [self enqueue:@{@"queue":@"busy"}];
+  NSString *availableJob = [self enqueue:@{@"queue":@"available"}];
+  NSError *error = nil;
+  ALNPgConnection *blocker = [self.db acquireConnection:&error];
+  XCTAssertTrue([blocker beginTransaction:&error]);
+  XCTAssertNotNil(([blocker executeQuery:@"SELECT queue FROM arlen_job_queues WHERE namespace=$1 AND queue='busy' FOR UPDATE"
+      parameters:@[self.namespaceName] error:&error]));
+  ALNPostgresJobAdapter *other = [self adapterWithShortLockTimeout];
+  @try {
+    ALNJobLease *claimed = (ALNJobLease *)[other dequeueDueJobAt:[NSDate date] error:&error];
+    XCTAssertNil(error,@"busy control row must not block other queues: %@",error);
+    XCTAssertEqualObjects(claimed.jobID,availableJob);
+    error = nil;
+    XCTAssertEqualObjects([other jobStatusForID:busyJob error:&error][@"state"],@"pending");
+  } @finally {
+    NSError *cleanup = nil;
+    XCTAssertTrue([blocker rollbackTransaction:&cleanup],@"%@",cleanup);
+    [self.db releaseConnection:blocker];
+  }
+  error = nil;
+  XCTAssertEqualObjects([other dequeueDueJobAt:[NSDate date] error:&error].jobID,busyJob);
+  XCTAssertNil(error,@"%@",error);
+}
 @end

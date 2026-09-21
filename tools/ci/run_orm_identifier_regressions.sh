@@ -6,11 +6,8 @@ cd "$repo_root"
 source tools/source_gnustep_env.sh
 
 # An isolated cluster makes live persistence mandatory without application credentials.
-pg_bin="${ARLEN_TEST_PG_BIN:-$(pg_config --bindir)}"
-if [[ ! -x "$pg_bin/initdb" || ! -x "$pg_bin/pg_ctl" ]]; then
-  echo "ORM identifier regressions require PostgreSQL server binaries; set ARLEN_TEST_PG_BIN if needed" >&2
-  exit 1
-fi
+pg_bin="$(bash "$repo_root/tools/ci/resolve_postgres_test_bin.sh")"
+echo "ci: PostgreSQL server tools: $pg_bin"
 orm_pg_tmp="$(mktemp -d /tmp/arlen-orm-pg.XXXXXX)"
 cleanup() {
   "$pg_bin/pg_ctl" -D "$orm_pg_tmp/data" -m immediate -w stop >/dev/null 2>&1 || true

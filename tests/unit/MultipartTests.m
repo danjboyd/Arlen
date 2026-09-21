@@ -20,6 +20,61 @@
   return [[ALNRequest alloc] initWithMethod:@"POST" path:@"/" queryString:@""
       headers:@{@"Content-Type":@"multipart/form-data; boundary=\"Aa\""} body:body];
 }
+/// B-3: GNUstep's old-style plist parser yields strings for unannotated
+/// integers, so the documented requestLimits syntax reached the parser as
+/// NSStrings. NSString implements neither unsignedLongLongValue nor
+/// unsignedIntegerValue, so the first multipart request raised
+/// NSInvalidArgumentException and took the server process down.
+- (void)testStringValuedLimitsAreAcceptedNotFatal_HELPDESK_B3 {
+  ALNRequest *request = [self request:self.body];
+  NSError *error = nil;
+  // Exactly what docs/MULTIPART_UPLOADS.md tells an app to write, as the plist
+  // parser hands it over.
+  NSDictionary *limits = @{
+    @"maxBodyBytes" : @"5242880",
+    @"maxMultipartParts" : @"16",
+    @"maxMultipartFileBytes" : @"5242880",
+    @"maxMultipartFieldBytes" : @"65536",
+    @"maxMultipartHeaderBytes" : @"16384",
+  };
+  XCTAssertTrue([request parseMultipartFormWithLimits:limits error:&error], @"%@", error);
+  XCTAssertNil(error);
+  XCTAssertEqual(request.multipartParts.count, 4u);
+  XCTAssertEqual(request.uploads.count, 2u);
+}
+
+/// A string limit must be honoured, not merely survived: the same value quoted
+/// and unquoted has to produce the same decision.
+- (void)testStringValuedLimitsAreEnforcedLikeNumbers_HELPDESK_B3 {
+  NSError *error = nil;
+  for (NSString *key in @[ @"maxBodyBytes", @"maxMultipartParts", @"maxMultipartFileBytes",
+                           @"maxMultipartFieldBytes", @"maxMultipartHeaderBytes" ]) {
+    ALNRequest *stringLimited = [self request:self.body];
+    ALNRequest *numberLimited = [self request:self.body];
+    BOOL stringResult = [stringLimited parseMultipartFormWithLimits:@{key : @"1"} error:&error];
+    BOOL numberResult = [numberLimited parseMultipartFormWithLimits:@{key : @1} error:&error];
+    XCTAssertEqual(stringResult, numberResult, @"%@ disagreed when quoted", key);
+    XCTAssertFalse(stringResult, @"%@ should have been exceeded", key);
+  }
+}
+
+- (void)testNonNumericAndNonPositiveLimitsAreRejectedNotFatal_HELPDESK_B3 {
+  for (id bad in @[ @"not-a-number", @"0", @"-5", @0, @(-5), [NSNull null], @[],
+                   @"16parts", @"1.5", @1.5, @18446744073709551615ULL,
+                   @"18446744073709551616", @"9223372036854775808" ]) {
+    ALNRequest *request = [self request:self.body];
+    NSError *error = nil;
+    // Rejected, and without raising: a bad config value is a bad request at
+    // worst, never a dead process.
+    XCTAssertFalse([request parseMultipartFormWithLimits:@{ @"maxMultipartParts" : bad }
+                                                   error:&error],
+                   @"%@ should have been refused", bad);
+    XCTAssertEqualObjects(error.domain, ALNMultipartErrorDomain);
+    XCTAssertTrue([error.localizedDescription containsString:@"maxMultipartParts"]);
+    XCTAssertEqual(request.multipartParts.count, 0u);
+  }
+}
+
 - (void)testOrderedFieldsBinaryUploadsAndExplicitFileWrite {
   ALNRequest *request = [self request:self.body];
   XCTAssertEqualObjects(request.body, self.body);

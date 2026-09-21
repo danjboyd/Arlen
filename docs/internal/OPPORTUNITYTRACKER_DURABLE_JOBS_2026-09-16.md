@@ -68,3 +68,55 @@ Verification on the implementation host: the durable jobs gate, 26 existing
 regressions across the four classes above, generated API/HTML documentation, and
 `make ci-docs`. GitHub execution and OT adoption remain separate downstream/CI
 steps; this record does not claim they have run.
+
+## Review correction: claim progress under lock contention
+
+OT reviewed `08029e6` in
+`../OpportunityTracker/arlen-sprint6/upstream/durable-jobs-review-08029e6.md`
+and supplied `durable-jobs-review-lock-test.m`. The namespace-wide terminal-expiry
+UPDATE could wait on one locked expired job before reaching the claim query's
+`SKIP LOCKED`. This availability defect was reproduced upstream with a 250ms
+lock timeout, including when the available job was in another queue.
+
+The follow-up limits cleanup to 100 candidates per dequeue, selected in expiry
+and sequence order with `FOR UPDATE SKIP LOCKED`, and updates only those rows.
+The claim-path audit also reproduced blocking on an unrelated queue-control row;
+queue selection now uses `FOR SHARE SKIP LOCKED` and continues restricting claims
+to the exact queue names it locked. Pause/drain ordering and database-time lease
+checks remain intact. Busy jobs/queues are revisited on later polls.
+
+Five added regressions cover same-queue and cross-queue progress while the lock
+is held, eventual terminal failure after release, cleanup of a 205-job backlog
+in bounded batches, preservation of live/retryable leases, and independent
+progress while queue controls are locked. Before the correction, four of the
+five new tests failed and the original 20 passed. With the correction, all 25
+pass on the implementation host. The correction needs no schema migration or
+public API change; the existing linux-quality durable-jobs step runs these tests
+before the broader gate, so unrelated later failures cannot skip queue evidence.
+
+Status: fixed in the corrective implementation; awaiting GitHub checks and OT
+adoption/revalidation. Do not close OT's qualification or ARM64 gate on the
+strength of this host's tests.
+
+The baseline GitHub linux-quality run for `08029e6` (run `35135024797`) failed
+in deployment integration coverage before reaching durable jobs: the feature-flag
+smoke binary was missing, sanitizer suppression validation failed, and the
+release-certification risk register was stale. These failures are separate from
+the reproduced queue defect. Required checks must pass before merging the
+corrective PR; the queue's local pass does not authorize a check bypass.
+
+The first corrective PR run reached queue acceptance and exposed a provisioning
+gap: the self-hosted runner lacked PostgreSQL server tools. The follow-up
+workflow installs the server package when absent and shares deterministic
+server-tool discovery with ORM acceptance. This is a test infrastructure change;
+acceptance still requires a real disposable database and does not skip tests.
+
+GitHub inspection also found that protected contexts used full workflow/job
+names, while jobs emitted only bare names. Explicit job display names now match
+the existing three protected contexts. The inactivity-disabled sanitizer workflow
+was re-enabled. No required check or protection was removed.
+
+The re-enabled sanitizer gate failed validation because four existing GNUstep
+TSan suppressions expired on 2026-06-30. Their dates and policy are unchanged;
+revalidation is required before the gate can pass. This is independent of the
+SQL correction and remains a merge blocker.
