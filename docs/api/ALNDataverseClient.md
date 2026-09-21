@@ -12,6 +12,8 @@ Data-layer APIs for SQL composition, adapters, and migration/runtime operations.
 | `target` | `ALNDataverseTarget *` | `nonatomic, strong, readonly` | Public `target` property available on `ALNDataverseClient`. |
 | `transport` | `id<ALNDataverseTransport>` | `nonatomic, strong, readonly` | Public `transport` property available on `ALNDataverseClient`. |
 | `tokenProvider` | `id<ALNDataverseTokenProvider>` | `nonatomic, strong, readonly` | Public `tokenProvider` property available on `ALNDataverseClient`. |
+| `retryDelayProvider` | `ALNDataverseRetryDelayProvider` | `nonatomic, copy, nullable` | Optional retry eligibility/delay block. Receives request, zero-based retry index, response or transport error. nil preserves defaults; target.maxRetries remains the hard cap. |
+| `retrySleeper` | `ALNDataverseRetrySleeper` | `nonatomic, copy, nullable` | Optional injected sleeper receiving the policy delay; nil uses NSThread. Configure before concurrent use. |
 
 ## Methods
 

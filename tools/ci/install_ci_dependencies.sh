@@ -13,7 +13,7 @@ if [[ "$platform" == "Darwin" ]]; then
       echo "ci: Homebrew is required for the Apple CI bootstrap path" >&2
       exit 1
     fi
-    brew install openssl@3
+    brew install openssl@3 postgresql@17 libpq
   }
 
   validate_apple_toolchain() {

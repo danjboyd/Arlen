@@ -9,10 +9,10 @@ python3 tools/docs/generate_api_reference.py
 ```
 
 - Generated from source headers and metadata (deterministic output)
-- Public headers: `88`
-- Symbols: `155`
-- Public methods: `1043`
-- Public properties: `467`
+- Public headers: `89`
+- Symbols: `156`
+- Public methods: `1044`
+- Public properties: `473`
 
 ## API Surface Boundary
 
@@ -171,6 +171,7 @@ python3 tools/docs/generate_api_reference.py
 - [ALNFileJobAdapter](api/ALNFileJobAdapter.md): Filesystem-persisted job queue for one adapter instance; no cross-process coordination or crashed-worker lease recovery.
 - [ALNFileMailAdapter](api/ALNFileMailAdapter.md): Filesystem-backed mail adapter that writes deliveries to disk for auditing/testing.
 - [ALNFileSystemAttachmentAdapter](api/ALNFileSystemAttachmentAdapter.md): Filesystem-backed attachment adapter for durable binary storage.
+- [ALNHTTPClientResult](api/ALNHTTPClientResult.md): Complete final HTTP response returned by `ALNSynchronousHTTPResult`, including received phrase availability and redirect-budget termination. See [HTTP client](../HTTP_CLIENT.md).
 - [ALNInMemoryAttachmentAdapter](api/ALNInMemoryAttachmentAdapter.md): In-memory adapter implementation useful for development and tests.
 - [ALNInMemoryCacheAdapter](api/ALNInMemoryCacheAdapter.md): In-memory adapter implementation useful for development and tests.
 - [ALNInMemoryEventStreamBroker](api/ALNInMemoryEventStreamBroker.md): In-memory adapter implementation useful for development and tests.
@@ -283,6 +284,7 @@ python3 tools/docs/generate_api_reference.py
 - `src/Arlen/Support/ALNAuthProviderSessionBridge.h`
 - `src/Arlen/Support/ALNAuthSession.h`
 - `src/Arlen/Support/ALNEventStream.h`
+- `src/Arlen/Support/ALNHTTPCompat.h`
 - `src/Arlen/Support/ALNLive.h`
 - `src/Arlen/Support/ALNLogger.h`
 - `src/Arlen/Support/ALNMetrics.h`

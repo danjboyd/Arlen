@@ -436,3 +436,30 @@ because TSAN is active; unrelated service-dependent opt-in tests remain.
 
 See [the investigation](internal/TSAN_RELIABILITY_2026-09-21.md) for evidence,
 remaining runtime work, and promotion criteria.
+
+## HTTP/data client regressions
+
+On GNUstep, source `tools/source_gnustep_env.sh`, then run these commands
+sequentially (they share build artifacts):
+
+```bash
+make test-unit-filter TEST=HTTPCompatTests
+make phase23-dataverse-tests
+bash tools/ci/run_orm_identifier_regressions.sh
+```
+
+The PostgreSQL script provisions a disposable database and runs PgTests alongside
+ORM and SQL-builder checks. The HTTP peer binds loopback sockets. Neither path
+needs provider credentials. Dataverse policy tests record sleeps without waiting.
+
+On macOS with full Xcode:
+
+```bash
+brew install openssl@3 postgresql@17 libpq
+bash tools/ci/run_apple_client_data_regressions.sh
+```
+
+This builds the Apple XCTest bundle once and runs HTTP, Dataverse policy, and
+live timestamp regressions. `ARLEN_TEST_PG_BIN` and `ARLEN_LIBPQ_PREFIX` can select
+an existing PostgreSQL installation. Linux CI's clang `/usr/GNUstep` bootstrap
+and repo-local tools-xctest runner remain unchanged.

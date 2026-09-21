@@ -53,6 +53,7 @@
 #import "MVC/Template/ALNEOCRuntime.h"
 #import "MVC/Template/ALNEOCTranspiler.h"
 #import "MVC/View/ALNView.h"
+#import "Support/ALNHTTPCompat.h"
 #import "Support/ALNLogger.h"
 #import "Support/ALNLive.h"
 #import "Support/ALNMetrics.h"

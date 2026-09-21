@@ -1345,3 +1345,16 @@ Multipart uploads use the application `requestLimits` policy. `ARLEN_MAX_BODY_BY
 `arlen config` normalizes all documented `requestLimits` values to JSON numbers,
 including multipart limits. Bare and quoted decimal plist values are supported.
 Invalid limits fail configuration loading with the offending key in the error.
+
+## HTTP and data client contracts
+
+Use `ALNSynchronousHTTPResult` for received HTTP/1.x reason phrases and opt-in
+redirect-boundary responses; see [Synchronous HTTP client](HTTP_CLIENT.md).
+The existing synchronous helper defaults remain unchanged. The result API uses
+libcurl on GNUstep and Apple; Apple custom builds must also link `-lcurl`.
+
+`ALNPg` date parameters preserve microseconds within the documented NSDate range;
+use explicit text casts for lossless values outside it. See
+[PostgreSQL timestamp precision](ARLEN_DATA.md#postgresql-timestamp-precision).
+Dataverse callers can configure retry eligibility and backoff inside the client's
+existing bounded loop; see [Custom retry policies](DATAVERSE.md#custom-retry-policies).

@@ -312,3 +312,57 @@ This surface still does not try to make Dataverse behave like SQL:
 - no Microsoft Graph wrapper
 - no FetchXML-first builder
 - no TDS/SQL endpoint integration
+
+## Custom retry policies
+
+By default, `ALNDataverseClient` retries transport failures and HTTP 429/503/504.
+A positive integer `Retry-After` overrides the fallback delays of 1, 2, … seconds;
+transport failures use the fallback. `target.maxRetries` bounds retries after the
+initial request. Successful 2xx responses are never retried, and the client never
+sleeps after its last attempt.
+
+Set `retryDelayProvider` before sharing a client to override eligibility and
+backoff. Its arguments are the immutable request (method, URL, headers, body),
+zero-based retry index, response or transport error. Return a delay in seconds,
+or nil to stop. Negative or nonfinite delays stop; zero retries immediately.
+The policy owns `Retry-After` precedence. The target's attempt cap always wins.
+The policy is invoked only for a failure with another attempt available.
+
+For example, this declares ordinary and batch provider policies explicitly:
+
+```objc
+client.retryDelayProvider = ^NSNumber *(ALNDataverseRequest *request,
+    NSUInteger retryIndex, ALNDataverseResponse *response, NSError *transportError) {
+  BOOL batch = [[[NSURL URLWithString:request.URLString] path] hasSuffix:@"/$batch"];
+  BOOL eligible = response ? (response.statusCode == 429 ||
+      (response.statusCode >= 500 && response.statusCode <= 599)) : !batch;
+  if (!eligible || (batch && retryIndex >= 2)) return nil;
+  NSString *raw = [response headerValueForName:@"Retry-After"];
+  if (batch && raw.length) {
+    NSScanner *scanner = [NSScanner scannerWithString:raw];
+    long long seconds = 0;
+    if ([scanner scanLongLong:&seconds] && scanner.isAtEnd && seconds >= 0)
+      return @(seconds);
+  }
+  return @(0.25 * pow(2.0, (double)retryIndex));
+};
+```
+
+Include `<math.h>` for this example and choose an appropriate `maxRetries`.
+Ordinary requests retry 429/all 5xx and transport failures with exponential
+backoff, ignoring `Retry-After`. Batch requests retry 429/all 5xx at most twice,
+using a nonnegative integer `Retry-After` when supplied. Both execute inside the
+single existing retry loop, with identical request contents across attempts and
+existing final error diagnostics. Do not wrap this client in another retry loop.
+
+Applications own the decision to retry non-idempotent operations: a failed
+transport may have delivered a write. Leave the default in place unless the
+provider/application contract permits your selected policy. Configure a separate
+client when different callers need different policies. Avoid capturing the client
+strongly inside its own block. Policies/sleepers must support the concurrency of
+their client; do not mutate them while requests are running.
+
+`retrySleeper` is an injectable block receiving the chosen delay. Tests can record
+delays without actually sleeping; nil uses `NSThread`. No live provider writes
+are needed to validate a policy. Setting `retryDelayProvider` back to nil restores
+the default behavior.

@@ -185,6 +185,10 @@
     },
     "ALNJobLease": {
       "summary": "Immutable job claim carrying an ownership token, initial expiration, and heartbeat duration."
+    },
+    "ALNHTTPClientResult": {
+      "summary": "Complete final HTTP response returned by `ALNSynchronousHTTPResult`, including received phrase availability and redirect-budget termination. See [HTTP client](../HTTP_CLIENT.md).",
+      "usage_example": "ALNHTTPClientResult *result = ALNSynchronousHTTPResult(request, 3, ALNHTTPRedirectLimitReturnResponse, &error);\nif (result) {\n  NSData *body = result.body;\n  NSString *phrase = result.receivedReasonPhrase; // nil for HTTP/2 or HTTP/3\n}"
     }
   },
   "properties": {
@@ -241,6 +245,24 @@
     },
     "ALNResponse|fileBodyMTimeNanoseconds": {
       "purpose": "Optional file modification timestamp nanoseconds used to reject changed streaming targets before headers are sent."
+    },
+    "ALNHTTPClientResult|response": {
+      "purpose": "Final response URL, numeric status, and headers."
+    },
+    "ALNHTTPClientResult|body": {
+      "purpose": "Complete final response body, including a redirect body when stopped at its budget."
+    },
+    "ALNHTTPClientResult|receivedReasonPhrase": {
+      "purpose": "Actual HTTP/1.x phrase including spacing; empty string for an empty phrase, nil when the protocol transmits none. Never synthesized."
+    },
+    "ALNHTTPClientResult|stoppedAtRedirectLimit": {
+      "purpose": "YES when a followable redirect was returned because the configured redirect budget was exhausted."
+    },
+    "ALNDataverseClient|retryDelayProvider": {
+      "purpose": "Optional retry eligibility/delay block. Receives request, zero-based retry index, response or transport error. nil preserves defaults; target.maxRetries remains the hard cap."
+    },
+    "ALNDataverseClient|retrySleeper": {
+      "purpose": "Optional injected sleeper receiving the policy delay; nil uses NSThread. Configure before concurrent use."
     }
   },
   "methods": {
@@ -331,6 +353,10 @@
     "ALNOAuthResourceServer|isReady": {
       "purpose": "Check for a fresh trusted discovery/JWKS snapshot without network I/O.",
       "usage": "Integrate into private application readiness. This does not verify every incoming key ID, client sign-in or application permissions. The built-in /readyz is not automatically changed."
+    },
+    "ALNHTTPClientResult|init": {
+      "purpose": "Unavailable. Results are constructed by the synchronous transport.",
+      "usage": "Call `ALNSynchronousHTTPResult(request, maxRedirects, policy, &error)`."
     }
   }
 }

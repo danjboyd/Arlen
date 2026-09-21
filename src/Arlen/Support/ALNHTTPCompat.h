@@ -23,6 +23,30 @@ FOUNDATION_EXPORT NSData *_Nullable ALNSynchronousURLRequestFollowingRedirects(
 
 FOUNDATION_EXPORT const NSUInteger ALNSynchronousURLRequestDefaultMaxRedirects;
 
+typedef NS_ENUM(NSUInteger, ALNHTTPRedirectLimitPolicy) {
+  ALNHTTPRedirectLimitError = 0,
+  ALNHTTPRedirectLimitReturnResponse = 1,
+};
+
+/// Received data, without synthesized status descriptions. Uses libcurl on
+/// GNUstep and Apple; no shared cookie store. Existing helpers are unchanged.
+@interface ALNHTTPClientResult : NSObject
+@property(nonatomic, strong, readonly) NSHTTPURLResponse *response;
+@property(nonatomic, copy, readonly) NSData *body;
+/// nil for HTTP/2 or HTTP/3; an empty string means an empty HTTP/1.x phrase.
+@property(nonatomic, copy, readonly, nullable) NSString *receivedReasonPhrase;
+@property(nonatomic, assign, readonly) BOOL stoppedAtRedirectLimit;
+- (instancetype)init NS_UNAVAILABLE;
+@end
+
+/// Follows at most maxRedirects under one total request timeout. With the return
+/// policy, a boundary redirect includes its complete body and is not an error.
+/// Zero follows no redirects and returns the initial response under either policy.
+/// Real transport failures return nil and NSURLErrorDomain, never a partial result.
+FOUNDATION_EXPORT ALNHTTPClientResult *_Nullable ALNSynchronousHTTPResult(
+    NSURLRequest *request, NSUInteger maxRedirects, ALNHTTPRedirectLimitPolicy policy,
+    NSError *_Nullable *_Nullable error);
+
 /// Bounded GET for trusted metadata: rejects redirects, cookies and non-200 responses.
 FOUNDATION_EXPORT NSData *_Nullable ALNBoundedMetadataGET(NSURL *url, NSUInteger maxBytes,
                                                           NSTimeInterval timeout);

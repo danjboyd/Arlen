@@ -1,4 +1,5 @@
 """Loopback wire-level metadata regression peer; no external network required."""
+import json
 import socketserver
 import time
 import ssl
@@ -22,6 +23,19 @@ class Peer(socketserver.BaseRequestHandler):
         self.request.settimeout(2)
         try:
             request = self.request.recv(8192)
+            while b"\r\n\r\n" not in request:
+                chunk = self.request.recv(8192)
+                if not chunk:
+                    return
+                request += chunk
+            head, body = request.split(b"\r\n\r\n", 1)
+            fields = dict(line.split(b":", 1) for line in head.split(b"\r\n")[1:] if b":" in line)
+            length = next((int(v) for k, v in fields.items() if k.lower() == b"content-length"), 0)
+            while len(body) < length:
+                chunk = self.request.recv(8192)
+                if not chunk:
+                    return
+                body += chunk
             path = request.split(b" ")[1]
             if TRACE:
                 with open(TRACE, "ab") as trace:
@@ -32,7 +46,40 @@ class Peer(socketserver.BaseRequestHandler):
                 time.sleep(1)
                 return
             headers = b"HTTP/1.1 200 OK\r\nConnection: close\r\n"
-            if path == b"/redirect":
+            if path.startswith((b"/budget/", b"/absolute-budget/")):
+                hops = int(path.rsplit(b"/", 1)[1])
+                prefix = path.rsplit(b"/", 1)[0]
+                target = prefix + b"/%d" % (hops - 1)
+                if path.startswith(b"/absolute-budget/"):
+                    target = b"http://" + request_host(request) + target
+                payload = b"body-%d" % hops
+                status = b"302 Budget Boundary" if hops else b"200 Finished"
+                location = b"Location: " + target + b"\r\n" if hops else b""
+                wire = (b"HTTP/1.1 " + status + b"\r\n" + location + b"X-Hop: %d\r\n" % hops
+                        + b"Content-Length: %d\r\n\r\n" % len(payload) + payload)
+            elif path == b"/reason-custom":
+                wire = b"HTTP/1.1 503 Extractor Unavailable  \r\nContent-Length: 2\r\n\r\n{}"
+            elif path == b"/reason-empty":
+                wire = b"HTTP/1.1 200 \r\nContent-Length: 2\r\n\r\n{}"
+            elif path == b"/reason-interim":
+                wire = b"HTTP/1.1 100 Old Phrase\r\nX-Stale: yes\r\n\r\nHTTP/1.1 200 Final Phrase\r\nContent-Length: 2\r\n\r\n{}"
+            elif path == b"/reason-redirect":
+                wire = b"HTTP/1.1 302 Old Phrase\r\nLocation: /reason-empty\r\nContent-Length: 3\r\n\r\nold"
+            elif path == b"/redirect-timeout":
+                wire = b"HTTP/1.1 302 Found\r\nLocation: /timeout\r\nContent-Length: 0\r\n\r\n"
+            elif path == b"/redirect-file":
+                wire = b"HTTP/1.1 302 Found\r\nLocation: file:///etc/hosts\r\nContent-Length: 0\r\n\r\n"
+            elif path.startswith(b"/method/"):
+                code = int(path.rsplit(b"/", 1)[1])
+                wire = b"HTTP/1.1 %d Redirect\r\nLocation: /echo\r\nContent-Length: 3\r\n\r\nold" % code
+            elif path == b"/cross-origin":
+                target = b"http://localhost:" + request_host(request).rsplit(b":", 1)[1] + b"/echo"
+                wire = b"HTTP/1.1 302 Found\r\nLocation: " + target + b"\r\nContent-Length: 0\r\n\r\n"
+            elif path == b"/echo":
+                payload = json.dumps({"method": request.split(b" ")[0].decode(), "body": body.decode(),
+                                      "headers": {k.decode().lower(): v.decode().strip() for k, v in fields.items()}}).encode()
+                wire = headers + b"Content-Length: %d\r\n\r\n" % len(payload) + payload
+            elif path == b"/redirect":
                 wire = b"HTTP/1.1 302 Found\r\nLocation: /ok\r\nContent-Length: 0\r\n\r\n"
             elif path == b"/redirect-absolute":
                 wire = (b"HTTP/1.1 302 Found\r\nLocation: http://" + request_host(request)

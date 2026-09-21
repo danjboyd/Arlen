@@ -6,11 +6,20 @@
 #endif
 
 #import <dispatch/dispatch.h>
-#if defined(GNUSTEP)
+#if defined(GNUSTEP) || defined(__APPLE__)
 #include <curl/curl.h>
 #include <limits.h>
 #include <string.h>
 #include <strings.h>
+#endif
+
+#if defined(GNUSTEP) || defined(__APPLE__)
+static BOOL ALNCurlGlobalReady(void) {
+  static CURLcode initialized;
+  static dispatch_once_t once;
+  dispatch_once(&once, ^{ initialized = curl_global_init(CURL_GLOBAL_DEFAULT); });
+  return initialized == CURLE_OK;
+}
 #endif
 
 // GNUstep's systemUptime returns whole seconds. Use a fractional monotonic
@@ -142,12 +151,6 @@ static int MetadataProgress(void *context, curl_off_t total, curl_off_t received
   NSTimeInterval now = MetadataNow();
   return !isfinite(now) || now >= transfer->deadline;
 }
-static BOOL ALNCurlGlobalReady(void) {
-  static CURLcode initialized;
-  static dispatch_once_t once;
-  dispatch_once(&once, ^{ initialized = curl_global_init(CURL_GLOBAL_DEFAULT); });
-  return initialized == CURLE_OK;
-}
 static NSData *MetadataCurlGET(NSURL *url, NSUInteger maxBytes, NSTimeInterval timeout,
                                 NSTimeInterval deadline, NSError **error) {
   // Synchronous DNS cannot guarantee a total deadline with NOSIGNAL on workers.
@@ -258,7 +261,21 @@ static NSError *ALNSynchronousURLError(NSInteger code, NSString *description) {
                          userInfo:@{NSLocalizedDescriptionKey : description ?: @"request failed"}];
 }
 
-#if defined(GNUSTEP)
+// Internal parser seam used by wire-version regression tests. No canonical fallback.
+NSString *ALNHTTPReceivedReasonPhraseFromStatusLine(NSString *line) {
+  if (![line hasPrefix:@"HTTP/1."]) return nil;
+  NSUInteger length = line.length;
+  while (length && ([line characterAtIndex:length - 1] == '\r' || [line characterAtIndex:length - 1] == '\n')) length--;
+  NSString *statusLine = [line substringToIndex:length];
+  NSRange firstSpace = [statusLine rangeOfString:@" "];
+  if (firstSpace.location == NSNotFound) return @"";
+  NSUInteger start = firstSpace.location + 1;
+  NSRange secondSpace = [statusLine rangeOfString:@" " options:0
+      range:NSMakeRange(start, statusLine.length - start)];
+  return secondSpace.location == NSNotFound ? @"" : [statusLine substringFromIndex:secondSpace.location + 1];
+}
+
+#if defined(GNUSTEP) || defined(__APPLE__)
 // GNUstep's -[NSURLConnection sendSynchronousRequest:...] never issues the
 // redirected request (issue #22, same libs-base transport as #783), so the
 // synchronous helper drives libcurl directly on GNUstep. libcurl follows a
@@ -269,6 +286,8 @@ typedef struct {
   void *body;         // NSMutableData
   void *headers;      // NSMutableDictionary<NSString *, NSString *>
   void *httpVersion;  // NSMutableString
+  void *reasonPhrase; // NSMutableString
+  BOOL hasReasonPhrase;
 } ALNSynchronousTransfer;
 
 static size_t ALNSynchronousWrite(char *bytes, size_t size, size_t count, void *context) {
@@ -291,6 +310,12 @@ static size_t ALNSynchronousHeader(char *bytes, size_t size, size_t count, void 
     // Every status line (1xx interim, a redirect hop, or the final response)
     // starts a new header block; only the last block is reported.
     [headers removeAllObjects];
+    [(__bridge NSMutableData *)transfer->body setLength:0];
+    NSMutableString *phrase = (__bridge NSMutableString *)transfer->reasonPhrase;
+    [phrase setString:@""];
+    NSString *received = ALNHTTPReceivedReasonPhraseFromStatusLine(line);
+    transfer->hasReasonPhrase = received != nil;
+    [phrase setString:received ?: @""];
     NSRange space = [trimmed rangeOfString:@" "];
     [version setString:(space.location == NSNotFound ? trimmed : [trimmed substringToIndex:space.location])];
     return length;
@@ -397,6 +422,7 @@ static CURLcode ALNSynchronousConfigure(CURL *curl, NSString *urlString, NSStrin
 
 static NSData *ALNSynchronousCurlRequest(NSURLRequest *request, NSUInteger maxRedirects,
                                          NSURLResponse *__autoreleasing *response,
+                                         NSString *__autoreleasing *receivedPhrase,
                                          NSError *__autoreleasing *error) {
   if (!ALNCurlGlobalReady()) {
     if (error) *error = ALNSynchronousURLError(NSURLErrorUnknown, @"libcurl could not initialize");
@@ -410,7 +436,9 @@ static NSData *ALNSynchronousCurlRequest(NSURLRequest *request, NSUInteger maxRe
   NSMutableData *body = [NSMutableData data];
   NSMutableDictionary *headers = [NSMutableDictionary dictionary];
   NSMutableString *httpVersion = [NSMutableString string];
-  ALNSynchronousTransfer transfer = {(__bridge void *)body, (__bridge void *)headers, (__bridge void *)httpVersion};
+  NSMutableString *reasonPhrase = [NSMutableString string];
+  ALNSynchronousTransfer transfer = {(__bridge void *)body, (__bridge void *)headers,
+      (__bridge void *)httpVersion, (__bridge void *)reasonPhrase, NO};
   NSData *requestBody = ALNSynchronousRequestBody(request);
   NSString *method = [request.HTTPMethod length] > 0 ? [request.HTTPMethod uppercaseString] : @"GET";
   NSString *urlString = request.URL.absoluteString ?: @"";
@@ -463,6 +491,7 @@ static NSData *ALNSynchronousCurlRequest(NSURLRequest *request, NSUInteger maxRe
                                                         HTTPVersion:([httpVersion length] > 0 ? httpVersion : @"HTTP/1.1")
                                                        headerFields:headers];
     if (response) *response = http;
+    if (receivedPhrase) *receivedPhrase = transfer.hasReasonPhrase ? [reasonPhrase copy] : nil;
     resultData = [body copy];
   } else if (error) {
     NSString *description = message[0] ? @(message) : @(curl_easy_strerror(result));
@@ -473,6 +502,107 @@ static NSData *ALNSynchronousCurlRequest(NSURLRequest *request, NSUInteger maxRe
   return resultData;
 }
 #endif
+
+@interface ALNHTTPClientResult ()
+@property(nonatomic, strong, readwrite) NSHTTPURLResponse *response;
+@property(nonatomic, copy, readwrite) NSData *body;
+@property(nonatomic, copy, readwrite) NSString *receivedReasonPhrase;
+@property(nonatomic, assign, readwrite) BOOL stoppedAtRedirectLimit;
+- (instancetype)initWithResponse:(NSHTTPURLResponse *)response body:(NSData *)body
+                         phrase:(NSString *)phrase stopped:(BOOL)stopped;
+@end
+@implementation ALNHTTPClientResult
+- (instancetype)initWithResponse:(NSHTTPURLResponse *)response body:(NSData *)body
+                         phrase:(NSString *)phrase stopped:(BOOL)stopped {
+  self = [super init];
+  if (self) {
+    _response = response;
+    _body = [body copy];
+    _receivedReasonPhrase = [phrase copy];
+    _stoppedAtRedirectLimit = stopped;
+  }
+  return self;
+}
+@end
+
+static NSInteger ALNHTTPPort(NSURL *url) {
+  return url.port ? url.port.integerValue : ([url.scheme.lowercaseString isEqualToString:@"https"] ? 443 : 80);
+}
+
+ALNHTTPClientResult *ALNSynchronousHTTPResult(NSURLRequest *request, NSUInteger maxRedirects,
+                                             ALNHTTPRedirectLimitPolicy policy, NSError **error) {
+  if (error) *error = nil;
+  if (request.URL == nil || (policy != ALNHTTPRedirectLimitError && policy != ALNHTTPRedirectLimitReturnResponse)) {
+    if (error) *error = ALNSynchronousURLError(NSURLErrorBadURL, @"invalid request URL or redirect policy");
+    return nil;
+  }
+#if defined(GNUSTEP) || defined(__APPLE__)
+  if (!ALNCurlGlobalReady() || (curl_version_info(CURLVERSION_NOW)->features &
+      (CURL_VERSION_ASYNCHDNS | CURL_VERSION_SSL)) != (CURL_VERSION_ASYNCHDNS | CURL_VERSION_SSL)) {
+    if (error) *error = ALNSynchronousURLError(NSURLErrorUnknown, @"HTTP result transport requires TLS and asynchronous DNS");
+    return nil;
+  }
+  NSTimeInterval timeout = request.timeoutInterval > 0 ? request.timeoutInterval : 60;
+  NSTimeInterval deadline = MetadataNow() + timeout;
+  NSMutableURLRequest *hop = [request mutableCopy];
+  // Consume a stream once so 307/308 can replay it.
+  if (request.HTTPBodyStream && !request.HTTPBody) hop.HTTPBody = ALNSynchronousRequestBody(request);
+  for (NSUInteger followed = 0;; followed++) {
+    NSTimeInterval remaining = deadline - MetadataNow();
+    if (!isfinite(remaining) || remaining <= 0) {
+      if (error) *error = ALNSynchronousURLError(NSURLErrorTimedOut, @"HTTP total deadline exceeded");
+      return nil;
+    }
+    hop.timeoutInterval = remaining;
+    NSURLResponse *response = nil;
+    NSString *phrase = nil;
+    NSData *body = ALNSynchronousCurlRequest(hop, 0, &response, &phrase, error);
+    if (!body) return nil;
+    NSHTTPURLResponse *http = (NSHTTPURLResponse *)response;
+    NSInteger status = http.statusCode;
+    NSString *location = nil;
+    for (NSString *key in http.allHeaderFields) {
+      if ([key caseInsensitiveCompare:@"Location"] == NSOrderedSame) location = http.allHeaderFields[key];
+    }
+    BOOL redirect = location.length > 0 && (status == 301 || status == 302 || status == 303 || status == 307 || status == 308);
+    BOOL stopped = redirect && followed == maxRedirects;
+    if (stopped && maxRedirects > 0 && policy == ALNHTTPRedirectLimitError) {
+      if (error) *error = ALNSynchronousURLError(NSURLErrorHTTPTooManyRedirects, @"too many HTTP redirects");
+      return nil;
+    }
+    if (!redirect || stopped) {
+      return [[ALNHTTPClientResult alloc] initWithResponse:http body:body phrase:phrase stopped:stopped];
+    }
+    NSURL *next = [[NSURL URLWithString:location relativeToURL:hop.URL] absoluteURL];
+    NSString *scheme = next.scheme.lowercaseString;
+    if (!next.host.length || (![scheme isEqualToString:@"http"] && ![scheme isEqualToString:@"https"])) {
+      if (error) *error = ALNSynchronousURLError(NSURLErrorUnsupportedURL, @"redirect requires an HTTP or HTTPS URL");
+      return nil;
+    }
+    BOOL sameOrigin = [hop.URL.scheme.lowercaseString isEqualToString:scheme] &&
+        [hop.URL.host.lowercaseString isEqualToString:next.host.lowercaseString] && ALNHTTPPort(hop.URL) == ALNHTTPPort(next);
+    if (!sameOrigin) {
+      [hop setValue:nil forHTTPHeaderField:@"Authorization"];
+      [hop setValue:nil forHTTPHeaderField:@"Cookie"];
+    }
+    [hop setValue:nil forHTTPHeaderField:@"Host"];
+    NSString *method = hop.HTTPMethod.uppercaseString ?: @"GET";
+    if ((status == 303 && ![method isEqualToString:@"HEAD"]) ||
+        ((status == 301 || status == 302) && [method isEqualToString:@"POST"])) {
+      hop.HTTPMethod = @"GET";
+      hop.HTTPBody = nil;
+      hop.HTTPBodyStream = nil;
+      [hop setValue:nil forHTTPHeaderField:@"Content-Length"];
+      [hop setValue:nil forHTTPHeaderField:@"Content-Type"];
+      [hop setValue:nil forHTTPHeaderField:@"Transfer-Encoding"];
+    }
+    hop.URL = next;
+  }
+#else
+  if (error) *error = ALNSynchronousURLError(NSURLErrorUnsupportedURL, @"HTTP result transport unavailable");
+  return nil;
+#endif
+}
 
 #if defined(__APPLE__)
 @interface ALNSynchronousSessionDelegate : NSObject <NSURLSessionTaskDelegate>
@@ -551,7 +681,7 @@ NSData *ALNSynchronousURLRequestFollowingRedirects(NSURLRequest *request, NSUInt
   }
   return resultData;
 #elif defined(GNUSTEP)
-  return ALNSynchronousCurlRequest(request, maxRedirects, response, error);
+  return ALNSynchronousCurlRequest(request, maxRedirects, response, NULL, error);
 #else
   (void)maxRedirects;
   return [NSURLConnection sendSynchronousRequest:request returningResponse:response error:error];
