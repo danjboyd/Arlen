@@ -512,6 +512,10 @@ static NSData *ALNSynchronousCurlRequest(NSURLRequest *request, NSUInteger maxRe
                          phrase:(NSString *)phrase stopped:(BOOL)stopped;
 @end
 @implementation ALNHTTPClientResult
+- (instancetype)init {
+  [NSException raise:NSInvalidArgumentException format:@"Use ALNSynchronousHTTPResult to obtain a result"];
+  return nil;
+}
 - (instancetype)initWithResponse:(NSHTTPURLResponse *)response body:(NSData *)body
                          phrase:(NSString *)phrase stopped:(BOOL)stopped {
   self = [super init];
