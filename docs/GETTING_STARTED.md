@@ -213,7 +213,11 @@ GNUstep uses a bounded libcurl transport (development headers/library with TLS
 and asynchronous DNS required; Debian/Ubuntu: `libcurl4-openssl-dev`). This works
 on startup and maintenance threads without pumping application run-loop callbacks.
 Apple retains Foundation transport. GNUstep metadata uses libcurl's CA configuration,
-not GNUstep TLS user defaults. Use a dedicated maintenance worker. Refresh errors distinguish discovery/JWKS
+not GNUstep TLS user defaults. The general-purpose `ALNSynchronousURLRequest` helper
+in `ALNHTTPCompat.h` also uses libcurl on GNUstep: it follows up to ten redirects
+(`ALNSynchronousURLRequestFollowingRedirects` sets an explicit budget), returns HTTP
+error statuses as responses, and reports transport failures with `NSURLErrorDomain`
+codes such as `NSURLErrorTimedOut`. It does not consult shared cookie storage. Use a dedicated maintenance worker. Refresh errors distinguish discovery/JWKS
 fetch failures, metadata validation failures, and cooldown. Diagnostics omit
 URLs, credentials, response bodies, and custom loader error details.
 

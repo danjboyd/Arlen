@@ -1,6 +1,8 @@
 #import <Foundation/Foundation.h>
 #import <XCTest/XCTest.h>
 
+#import "../shared/ALNTestSupport.h"
+
 @interface BuildPolicyTests : XCTestCase
 @end
 
@@ -122,6 +124,9 @@
 }
 
 - (void)testArlenBuildJSONCapturesLargeChildOutputWithoutPipeDeadlock_ARLEN_BUG_027 {
+  if (ALNTestThreadSanitizerRuntimeActive()) {
+    return;
+  }
   NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
   NSString *fixtureRoot = [self createTempDirectoryWithPrefix:@"arlen-shell-capture-large-output"];
   XCTAssertNotNil(fixtureRoot);
@@ -836,6 +841,22 @@
   XCTAssertTrue([script containsString:@"suppressions=$tsan_suppressions_file"]);
   XCTAssertTrue([script containsString:@"trap cleanup EXIT"]);
   XCTAssertTrue([script containsString:@"second_deadlock_stack=1"]);
+}
+
+- (void)testChildProcessUnitTestsAreQuarantinedUnderThreadSanitizer {
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSArray<NSString *> *files = @[
+    @"tests/unit/BuildPolicyTests.m",
+    @"tests/unit/DataverseMetadataTests.m",
+    @"tests/unit/GNUstepResolutionTests.m",
+    @"tests/unit/ORMCodegenTests.m",
+    @"tests/unit/ORMTypeScriptCodegenTests.m",
+  ];
+  for (NSString *relativePath in files) {
+    NSString *source = [self readFile:[repoRoot stringByAppendingPathComponent:relativePath]];
+    XCTAssertTrue([source containsString:@"if (ALNTestThreadSanitizerRuntimeActive()) {"],
+                  @"%@ spawns bash children and must quarantine those tests under TSAN", relativePath);
+  }
 }
 
 - (void)testTSANHotPathsAvoidObjCSynchronizedMonitors {

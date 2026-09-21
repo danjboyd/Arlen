@@ -1,6 +1,7 @@
 #import <Foundation/Foundation.h>
 #import <XCTest/XCTest.h>
 
+#import "ALNDataverseClient.h"
 #import "ALNDataverseQuery.h"
 #import "../shared/ALNDataverseTestSupport.h"
 
@@ -8,6 +9,64 @@
 @end
 
 @implementation DataverseRegressionTests
+
+/// Issue 21: CRLF responses lost every header, because splitting on a newline
+/// character set turned each CRLF into two separators and the blank-line
+/// handling then ended a block between every pair of header lines.
+- (void)testCurlHeaderParsingKeepsHeadersAcrossLineEndings_ISSUE_21 {
+  NSDictionary *crlf = ALNDataverseParseHeaders(
+      @"HTTP/1.1 201 Created\r\nOData-EntityId: expected\r\nLocation: fallback\r\n\r\n");
+  XCTAssertEqualObjects(@"expected", crlf[@"odata-entityid"]);
+  XCTAssertEqualObjects(@"fallback", crlf[@"location"]);
+
+  NSDictionary *lf = ALNDataverseParseHeaders(@"HTTP/1.1 201 Created\nOData-EntityId: expected\n\n");
+  XCTAssertEqualObjects(@"expected", lf[@"odata-entityid"]);
+
+  NSDictionary *cr = ALNDataverseParseHeaders(@"HTTP/1.1 201 Created\rOData-EntityId: expected\r\r");
+  XCTAssertEqualObjects(@"expected", cr[@"odata-entityid"]);
+}
+
+/// curl reports every response block it saw, so the parser must select the
+/// final one rather than an interim 100 Continue or redirect.
+- (void)testCurlHeaderParsingSelectsFinalResponseBlock_ISSUE_21 {
+  NSDictionary *continued = ALNDataverseParseHeaders(
+      @"HTTP/1.1 100 Continue\r\n\r\nHTTP/1.1 201 Created\r\nOData-EntityId: expected\r\n\r\n");
+  XCTAssertEqualObjects(@"expected", continued[@"odata-entityid"]);
+
+  NSDictionary *redirected = ALNDataverseParseHeaders(
+      @"HTTP/1.1 302 Found\r\nOData-EntityId: stale\r\n\r\nHTTP/2 201\r\nOData-EntityId: expected\r\n\r\n");
+  XCTAssertEqualObjects(@"expected", redirected[@"odata-entityid"]);
+}
+
+/// The defect dropped every header, not only odata-entityid, so the headers
+/// other call sites depend on need coverage of their own.
+- (void)testCurlHeaderParsingKeepsOtherHeaderDependentFields_ISSUE_21 {
+  NSDictionary *headers = ALNDataverseParseHeaders(@"HTTP/1.1 429 Too Many Requests\r\n"
+                                                    "Retry-After: 30\r\n"
+                                                    "ETag: W/\"12345\"\r\n"
+                                                    "Location: https://fixture.invalid/leads(1)\r\n"
+                                                    "WWW-Authenticate: Bearer realm=\"dataverse\"\r\n"
+                                                    "\r\n");
+  XCTAssertEqualObjects(@"30", headers[@"retry-after"]);
+  XCTAssertEqualObjects(@"W/\"12345\"", headers[@"etag"]);
+  XCTAssertEqualObjects(@"https://fixture.invalid/leads(1)", headers[@"location"]);
+  XCTAssertEqualObjects(@"Bearer realm=\"dataverse\"", headers[@"www-authenticate"]);
+}
+
+- (void)testCurlHeaderParsingNormalizesNamesAndPreservesValueColons_ISSUE_21 {
+  NSDictionary *headers = ALNDataverseParseHeaders(
+      @"HTTP/1.1 200 OK\r\nOData-EntityId: https://fixture.invalid/leads(9)\r\n\r\n");
+  // Names lower-cased for lookup; a value containing ':' survives intact.
+  XCTAssertEqualObjects(@"https://fixture.invalid/leads(9)", headers[@"odata-entityid"]);
+  XCTAssertNil(headers[@"OData-EntityId"]);
+}
+
+- (void)testCurlHeaderParsingHandlesEmptyAndHeaderlessInput_ISSUE_21 {
+  XCTAssertEqual((NSUInteger)0, [ALNDataverseParseHeaders(@"") count]);
+  XCTAssertEqual((NSUInteger)0, [ALNDataverseParseHeaders(nil) count]);
+  XCTAssertEqual((NSUInteger)0, [ALNDataverseParseHeaders(@"not a status line\r\n\r\n") count]);
+  XCTAssertEqual((NSUInteger)0, [ALNDataverseParseHeaders(@"HTTP/1.1 204 No Content\r\n\r\n") count]);
+}
 
 - (void)testBatchAndFunctionEscapeHatchesWork {
   ALNFakeDataverseTransport *transport = [[ALNFakeDataverseTransport alloc] init];

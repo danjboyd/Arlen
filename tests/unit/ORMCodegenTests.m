@@ -325,6 +325,9 @@
 }
 
 - (void)testReservedGeneratedModelsCompileAndPreserveRuntimeBehavior {
+  if (ALNTestThreadSanitizerRuntimeActive()) {
+    return;
+  }
   NSError *error = nil;
   NSDictionary *artifacts = [ALNORMCodegen renderArtifactsFromSchemaMetadata:[self reservedMetadata]
       classPrefix:@"ReservedRuntime" error:&error];
@@ -342,7 +345,11 @@
 #if defined(__APPLE__)
   NSString *compiler = @"xcrun clang -fobjc-arc -bundle -undefined dynamic_lookup";
 #else
-  NSString *compiler = [NSString stringWithFormat:@"%@ && clang $(gnustep-config --objc-flags) -fobjc-arc -shared -fPIC", ALNTestGNUstepSourceCommandForRepoRoot(root)];
+  // Sanitizer lanes preload libasan into every child; gnustep-config then
+  // prints nothing, so name the runtime contract explicitly like the
+  // syntax-only tests do instead of depending on its output.
+  NSString *compiler = [NSString stringWithFormat:@"%@ && clang $(gnustep-config --objc-flags) %@ -fobjc-arc -shared -fPIC",
+      ALNTestGNUstepSourceCommandForRepoRoot(root), [self gnuStepSyntaxOnlyContractFlags]];
 #endif
   NSString *command = [NSString stringWithFormat:@"cd %@ && %@ -Werror=incompatible-property-type -Werror=property-attribute-mismatch -Werror=nullability -Wno-nullability-completeness %@ %@ -o %@",
       ALNTestShellQuote(tmp), compiler, flags, ALNTestShellQuote(implementation), ALNTestShellQuote(library)];
@@ -425,10 +432,16 @@
 }
 
 - (void)testQuotedGeneratedArtifactsCompileSyntaxOnly {
+  if (ALNTestThreadSanitizerRuntimeActive()) {
+    return;
+  }
   [self assertGeneratedArtifactsCompile:[ALNTestJSONDictionaryAtRelativePath(@"tests/fixtures/phase26/orm_quoted_identifiers.json", NULL) copy]];
 }
 
 - (void)testQuotedSchemaAndTableNamesCompile {
+  if (ALNTestThreadSanitizerRuntimeActive()) {
+    return;
+  }
   NSMutableDictionary *metadata = [[self reservedMetadata] mutableCopy];
   for (NSString *collection in @[@"relations", @"columns", @"primary_keys", @"unique_constraints", @"foreign_keys"]) {
     NSMutableArray *rows = [NSMutableArray array];
@@ -446,6 +459,9 @@
 }
 
 - (void)testGeneratedArtifactsCompileSyntaxOnly {
+  if (ALNTestThreadSanitizerRuntimeActive()) {
+    return;
+  }
   [self assertGeneratedArtifactsCompile:[self fixtureMetadata]];
 }
 
@@ -502,6 +518,9 @@
 }
 
 - (void)testStandaloneUmbrellasCompileWithoutFrameworkUmbrella {
+  if (ALNTestThreadSanitizerRuntimeActive()) {
+    return;
+  }
   NSString *tmpDir = ALNTestTemporaryDirectory(@"orm_umbrella_compile");
   XCTAssertNotNil(tmpDir);
   if (tmpDir == nil) {
