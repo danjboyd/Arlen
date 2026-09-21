@@ -392,3 +392,20 @@ The required job display names explicitly emit `linux-quality / quality-gate`,
 existing branch-protection contexts exactly. Keep those literal names aligned
 when editing workflows. Bare job IDs did not satisfy the configured contexts;
 no required check is removed or weakened by this alignment.
+
+## Request-limit and parser-backend regressions
+
+After sourcing `tools/source_gnustep_env.sh`, use:
+
+```bash
+make test-unit-filter TEST=ConfigTests
+make test-unit-filter TEST=MultipartTests
+make test-integration-filter TEST=HTTPIntegrationTests/testMultipartDocumentedPlistLimitsKeepServerAlive
+make test-integration-filter TEST=DeploymentIntegrationTests/testCompileTimeFeatureFlagsCanDisableYYJSONAndLLHTTP
+```
+
+The multipart socket regression loads an old-style plist and checks configured
+file and part caps on both HTTP parsers, including server usability after a
+rejected upload. The feature-toggle smoke compiles the legacy request parser
+with its multipart implementation while disabling both optional C backends.
+Both regressions also run in the existing Linux integration suite.

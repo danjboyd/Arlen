@@ -1,6 +1,6 @@
 # CI Alignment
 
-Last updated: 2026-09-14
+Last updated: 2026-09-21
 
 This document defines the intended shape of Arlen CI so workflow names,
 required checks, and actual project contracts stay aligned.
@@ -321,3 +321,10 @@ The required job display names explicitly emit `linux-quality / quality-gate`,
 existing branch-protection contexts exactly. Keep those literal names aligned
 when editing workflows. Bare job IDs did not satisfy the configured contexts;
 no required check is removed or weakened by this alignment.
+
+The Linux integration suite verifies the documented multipart plist limits on
+both HTTP parsers and compiles the optional-backend-disabled smoke with the
+request parser's multipart source dependency. Keep that standalone compile
+representative when adding request-parser dependencies; do not remove the
+feature-toggle check to address link failures. No additional required lane is
+introduced for these regressions.
