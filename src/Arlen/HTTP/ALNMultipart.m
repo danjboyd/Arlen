@@ -1,4 +1,5 @@
 #import "ALNMultipart.h"
+#import "ALNPositiveInteger.h"
 #include <string.h>
 NSString *const ALNMultipartErrorDomain = @"Arlen.HTTP.Multipart.Error";
 @interface ALNMultipartPart ()
@@ -78,18 +79,16 @@ static BOOL Match(NSData *body, NSUInteger offset, NSData *needle) {
 + (NSArray *)parseBody:(NSData *)body contentType:(NSString *)contentType
                 limits:(NSDictionary *)limits error:(NSError **)error {
   if (error) *error = nil;
+  if (limits != nil && ![limits isKindOfClass:[NSDictionary class]])
+    return Failure(error, ALNMultipartErrorLimitExceeded, @"Multipart limits must be a dictionary");
   NSMutableDictionary *policy = [[self defaultLimits] mutableCopy];
   for (NSString *key in policy.allKeys) {
     if (limits[key]) {
-      if (![limits[key] respondsToSelector:@selector(longLongValue)] || [limits[key] longLongValue] <= 0)
-        return Failure(error, ALNMultipartErrorLimitExceeded, @"Multipart limits must be positive");
-      // Store the validated number, not the caller's object. GNUstep's old-style
-      // plist parser yields strings for unannotated integers, and NSString does
-      // not implement unsignedLongLongValue or unsignedIntegerValue -- the reads
-      // below would raise NSInvalidArgumentException and take down the process
-      // on the first multipart request. Coercing here keeps every downstream
-      // read on an NSNumber, whatever the config was quoted as.
-      policy[key] = @([limits[key] longLongValue]);
+      NSNumber *value = ALNPositiveInteger(limits[key]);
+      if (value == nil)
+        return Failure(error, ALNMultipartErrorLimitExceeded,
+                       [NSString stringWithFormat:@"requestLimits.%@ must be a positive integer in range", key]);
+      policy[key] = value;
     }
   }
   if (body.length > [policy[@"maxBodyBytes"] unsignedLongLongValue])

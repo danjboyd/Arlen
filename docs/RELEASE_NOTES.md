@@ -2,6 +2,12 @@
 
 ## Upcoming Release Candidate
 
+- Multipart limits accept bare or quoted decimal plist values without crashing
+  the server. Invalid request limits now fail configuration loading with a keyed
+  error; direct parser calls return an error instead of raising an exception.
+- PostgreSQL job claims skip locked expired jobs and busy queue controls.
+  Terminal cleanup is bounded to 100 jobs per poll, so unrelated work can proceed.
+
 Certification evidence:
 
 - Certification pack: `build/release_confidence/phase9j/manifest.json`

@@ -5,11 +5,71 @@
 #import <string.h>
 
 #import "ALNConfig.h"
+#import "ALNMultipart.h"
 
 @interface ConfigTests : XCTestCase
 @end
 
 @implementation ConfigTests
+
+- (void)testDocumentedMultipartPlistLimitsNormalizeAndEnforce {
+  NSString *root = [self createTempAppRoot];
+  @try {
+    NSString *path = [root stringByAppendingPathComponent:@"config/app.plist"];
+    XCTAssertTrue([self writeFile:path content:
+        @"{ requestLimits = { maxBodyBytes = 6291456; maxMultipartFileBytes = 5242880; "
+         "maxMultipartParts = 16; maxMultipartFieldBytes = \"65536\"; maxMultipartHeaderBytes = 16384; }; }"]);
+    NSError *error = nil;
+    NSDictionary *config = [ALNConfig loadConfigAtRoot:root environment:@"test" includeModules:NO error:&error];
+    XCTAssertNotNil(config, @"%@", error);
+    NSDictionary *limits = config[@"requestLimits"];
+    for (NSString *key in limits) {
+      XCTAssertTrue([limits[key] isKindOfClass:[NSNumber class]], @"%@", key);
+    }
+    XCTAssertEqualObjects(limits[@"maxMultipartParts"], @16);
+    XCTAssertEqualObjects(limits[@"maxMultipartFileBytes"], @5242880);
+    NSString *part = @"--Aa\r\nContent-Disposition: form-data; name=x\r\n\r\nx\r\n";
+    NSMutableString *body = [NSMutableString string];
+    for (NSUInteger i = 0; i < 16; i++) [body appendString:part];
+    NSData *data = [[body stringByAppendingString:@"--Aa--"] dataUsingEncoding:NSUTF8StringEncoding];
+    XCTAssertEqual([ALNMultipart parseBody:data contentType:@"multipart/form-data; boundary=Aa"
+                                   limits:limits error:&error].count, 16u);
+    XCTAssertNil(error);
+    [body appendString:part];
+    data = [[body stringByAppendingString:@"--Aa--"] dataUsingEncoding:NSUTF8StringEncoding];
+    XCTAssertNil([ALNMultipart parseBody:data contentType:@"multipart/form-data; boundary=Aa"
+                                 limits:limits error:&error]);
+    XCTAssertEqual(error.code, ALNMultipartErrorLimitExceeded);
+  } @finally {
+    [[NSFileManager defaultManager] removeItemAtPath:root error:NULL];
+  }
+}
+
+- (void)testInvalidRequestLimitConfigurationReturnsKeyedError {
+  NSString *root = [self createTempAppRoot];
+  @try {
+    NSString *path = [root stringByAppendingPathComponent:@"config/app.plist"];
+    for (NSString *key in @[@"maxBodyBytes", @"maxHeaderBytes", @"maxRequestLineBytes",
+                           @"maxMultipartParts", @"maxMultipartFieldBytes",
+                           @"maxMultipartFileBytes", @"maxMultipartHeaderBytes"]) {
+      for (NSString *bad in @[@"0", @"-1", @"junk", @"16parts", @"1.5",
+                             @"18446744073709551616", @"()", @"{}"] ) {
+        XCTAssertTrue(([self writeFile:path content:[NSString stringWithFormat:
+            @"{ requestLimits = { %@ = %@; }; }", key, bad]]));
+        NSError *error = nil;
+        XCTAssertNil([ALNConfig loadConfigAtRoot:root environment:@"test" includeModules:NO error:&error]);
+        XCTAssertEqualObjects(error.domain, @"Arlen.Config.Error");
+        XCTAssertTrue([error.localizedDescription containsString:key], @"%@", error);
+      }
+    }
+    XCTAssertTrue([self writeFile:path content:@"{ requestLimits = invalid; }"]);
+    NSError *error = nil;
+    XCTAssertNil([ALNConfig loadConfigAtRoot:root environment:@"test" includeModules:NO error:&error]);
+    XCTAssertTrue([error.localizedDescription containsString:@"requestLimits must be a dictionary"]);
+  } @finally {
+    [[NSFileManager defaultManager] removeItemAtPath:root error:NULL];
+  }
+}
 
 - (NSString *)createTempAppRoot {
   NSString *templatePath = [NSTemporaryDirectory() stringByAppendingPathComponent:@"arlen-config-XXXXXX"];

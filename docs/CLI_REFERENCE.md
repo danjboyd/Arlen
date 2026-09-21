@@ -1341,3 +1341,7 @@ fetch failures, metadata validation failures, and cooldown. Diagnostics omit
 URLs, credentials, response bodies, and custom loader error details.
 
 Multipart uploads use the application `requestLimits` policy. `ARLEN_MAX_BODY_BYTES` sets the total body cap; per-part limits require configuration. See [Multipart Uploads](MULTIPART_UPLOADS.md).
+
+`arlen config` normalizes all documented `requestLimits` values to JSON numbers,
+including multipart limits. Bare and quoted decimal plist values are supported.
+Invalid limits fail configuration loading with the offending key in the error.

@@ -3283,6 +3283,52 @@
   }
 }
 
+- (void)testMultipartDocumentedPlistLimitsKeepServerAlive {
+  NSString *binary = [[[NSFileManager defaultManager] currentDirectoryPath]
+      stringByAppendingPathComponent:@"build/boomhauer"];
+  NSString *appRoot = [self createTempDirectoryWithPrefix:@"arlen-multipart-limits"];
+  XCTAssertNotNil(appRoot);
+  if (!appRoot) return;
+  @try {
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"config/app.plist"]
+        content:@"{ host = \"127.0.0.1\"; logLevel = error; requestLimits = { "
+                 "maxBodyBytes = 6291456; maxMultipartFileBytes = 5242880; "
+                 "maxMultipartParts = 16; maxMultipartFieldBytes = 65536; "
+                 "maxMultipartHeaderBytes = 16384; }; }"]);
+    for (NSString *backend in @[@"llhttp", @"legacy"]) {
+      int port = [self randomPort];
+      NSTask *server = [[NSTask alloc] init];
+      server.launchPath = @"/bin/bash";
+      server.currentDirectoryPath = appRoot;
+      server.arguments = @[@"-lc", [NSString stringWithFormat:
+          @"ARLEN_HTTP_PARSER_BACKEND=%@ %@ --port %d",
+          backend, [self shellQuoted:binary], port]];
+      server.standardOutput = [NSFileHandle fileHandleWithNullDevice];
+      server.standardError = server.standardOutput;
+      [server launch];
+      @try {
+        BOOL ready = NO;
+        (void)[self requestPathWithRetries:@"/healthz" port:port attempts:60 success:&ready];
+        XCTAssertTrue(ready);
+        NSString *script = [NSString stringWithContentsOfFile:@"tests/fixtures/http/multipart_config_probe.py"
+            encoding:NSUTF8StringEncoding error:NULL];
+        XCTAssertNotNil(script);
+        script = [script stringByReplacingOccurrencesOfString:@"__PORT__"
+                                                 withString:[NSString stringWithFormat:@"%d", port]];
+        int code = 0;
+        NSString *output = [self runPythonScript:script exitCode:&code];
+        XCTAssertEqual(code, 0, @"%@: %@", backend, output);
+        XCTAssertTrue([output containsString:@"configured multipart checks passed"], @"%@", output);
+      } @finally {
+        XCTAssertTrue([self terminateTask:server timeoutSeconds:5.0]);
+        [server.standardOutput closeFile];
+      }
+    }
+  } @finally {
+    [[NSFileManager defaultManager] removeItemAtPath:appRoot error:NULL];
+  }
+}
+
 - (void)testBodyLimitReturns413 {
   int curlCode = 0;
   int serverCode = 0;
