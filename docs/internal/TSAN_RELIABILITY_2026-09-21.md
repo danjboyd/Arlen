@@ -108,7 +108,10 @@ No upstream library modification or TSAN gate promotion is part of this change.
 - Five Python harness checks and `make ci-docs` passed.
 - Full ASAN/UBSAN unit suite: all 101 classes passed. The restored nested TSAN
   fixture explicitly clears inherited compiler flags so it tests TSAN bootstrap
-  behavior even when the outer suite is built with ASAN/UBSAN.
+  behavior even when the outer suite is built with ASAN/UBSAN. Nested fixtures
+  also clear inherited artifact paths and TSAN options; a regression injects
+  outer paths and verifies they remain untouched. The focused ASAN/UBSAN
+  build-policy suite passed with external artifact sentinels preserved.
 - TSAN diagnostic controls detect the deliberate application race; unsuppressed
   and narrowed runs expose the queue/CLI/configuration findings above. The full
   TSAN suite and HTTP concurrency probe are not certified clean.

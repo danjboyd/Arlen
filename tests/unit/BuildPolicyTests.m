@@ -985,13 +985,19 @@
     XCTAssertTrue([self makeExecutableAtPath:fakeClang]);
 
     NSString *command = [NSString
-        stringWithFormat:@"cd %@ && LD_PRELOAD='' EXTRA_OBJC_FLAGS='' PATH=%@:$PATH bash ./tools/ci/run_phase5e_tsan_experimental.sh 2>&1",
+        stringWithFormat:@"cd %@ && ARLEN_TSAN_ARTIFACT_DIR=./outer-tsan-artifacts "
+                          "ARLEN_PHASE10M_THREAD_ARTIFACT_DIR=./outer-thread-artifacts "
+                          "env -u ARLEN_TSAN_ARTIFACT_DIR -u ARLEN_PHASE10M_THREAD_ARTIFACT_DIR -u ARLEN_TSAN_RUNTIME_ITERS -u ARLEN_TSAN_SUPPRESSIONS_FILE -u TSAN_OPTIONS -u EXTRA_OBJC_FLAGS LD_PRELOAD='' PATH=%@:$PATH bash ./tools/ci/run_phase5e_tsan_experimental.sh 2>&1",
                          [self shellQuoted:fixtureRoot],
                          [self shellQuoted:fakeBin]];
     int exitCode = 0;
     NSString *output = [self runShellCapture:command exitCode:&exitCode];
 
     XCTAssertEqual(0, exitCode, @"%@", output);
+    XCTAssertFalse([[NSFileManager defaultManager] fileExistsAtPath:
+        [fixtureRoot stringByAppendingPathComponent:@"outer-tsan-artifacts"]]);
+    XCTAssertFalse([[NSFileManager defaultManager] fileExistsAtPath:
+        [fixtureRoot stringByAppendingPathComponent:@"outer-thread-artifacts"]]);
     XCTAssertTrue([output containsString:@"ci: tsan bootstrap eocc "], @"%@", output);
     XCTAssertTrue([output containsString:@"ci: phase5e tsan experimental run complete"], @"%@", output);
 
@@ -1113,7 +1119,7 @@
     XCTAssertTrue([self makeExecutableAtPath:fakeClang]);
 
     NSString *command = [NSString
-        stringWithFormat:@"cd %@ && LD_PRELOAD='' EXTRA_OBJC_FLAGS='' PATH=%@:$PATH bash ./tools/ci/run_phase5e_tsan_experimental.sh 2>&1",
+        stringWithFormat:@"cd %@ && env -u ARLEN_TSAN_ARTIFACT_DIR -u ARLEN_PHASE10M_THREAD_ARTIFACT_DIR -u ARLEN_TSAN_RUNTIME_ITERS -u ARLEN_TSAN_SUPPRESSIONS_FILE -u TSAN_OPTIONS -u EXTRA_OBJC_FLAGS LD_PRELOAD='' PATH=%@:$PATH bash ./tools/ci/run_phase5e_tsan_experimental.sh 2>&1",
                          [self shellQuoted:fixtureRoot],
                          [self shellQuoted:fakeBin]];
     int exitCode = 0;
@@ -1209,7 +1215,7 @@
     XCTAssertTrue([self makeExecutableAtPath:fakeClang]);
 
     NSString *command = [NSString
-        stringWithFormat:@"cd %@ && LD_PRELOAD='' PATH=%@:$PATH bash ./tools/ci/run_linux_thread_race_nightly.sh 2>&1",
+        stringWithFormat:@"cd %@ && env -u ARLEN_TSAN_ARTIFACT_DIR -u ARLEN_PHASE10M_THREAD_ARTIFACT_DIR -u ARLEN_TSAN_RUNTIME_ITERS -u ARLEN_TSAN_SUPPRESSIONS_FILE -u TSAN_OPTIONS -u EXTRA_OBJC_FLAGS LD_PRELOAD='' PATH=%@:$PATH bash ./tools/ci/run_linux_thread_race_nightly.sh 2>&1",
                          [self shellQuoted:fixtureRoot],
                          [self shellQuoted:fakeBin]];
     int exitCode = 0;
