@@ -560,8 +560,10 @@ static NSString *RenderCollectionEmpty(id ctx, NSError **error) {
   pthread_join(thread, NULL);
   XCTAssertEqual(ready, 0);
   XCTAssertEqual(state.waitResult, 0, @"Registry operations waited for the shared NSThread class monitor");
+#if !OS_OBJECT_USE_OBJC
   dispatch_release(state.held);
   dispatch_release(state.release);
+#endif
 }
 
 - (void)testTemplateLayoutRegistryResolvesRegisteredLayout {

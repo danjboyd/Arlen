@@ -106,6 +106,9 @@ No upstream library modification or TSAN gate promotion is part of this change.
 - Focused integration checks: suppression acceptance/expiry rejection,
   confidence-pack generation, and serialized HTTP keep-alive passed.
 - Five Python harness checks and `make ci-docs` passed.
+- Full ASAN/UBSAN unit suite: all 101 classes passed. The restored nested TSAN
+  fixture explicitly clears inherited compiler flags so it tests TSAN bootstrap
+  behavior even when the outer suite is built with ASAN/UBSAN.
 - TSAN diagnostic controls detect the deliberate application race; unsuppressed
   and narrowed runs expose the queue/CLI/configuration findings above. The full
   TSAN suite and HTTP concurrency probe are not certified clean.

@@ -985,7 +985,7 @@
     XCTAssertTrue([self makeExecutableAtPath:fakeClang]);
 
     NSString *command = [NSString
-        stringWithFormat:@"cd %@ && LD_PRELOAD='' PATH=%@:$PATH bash ./tools/ci/run_phase5e_tsan_experimental.sh 2>&1",
+        stringWithFormat:@"cd %@ && LD_PRELOAD='' EXTRA_OBJC_FLAGS='' PATH=%@:$PATH bash ./tools/ci/run_phase5e_tsan_experimental.sh 2>&1",
                          [self shellQuoted:fixtureRoot],
                          [self shellQuoted:fakeBin]];
     int exitCode = 0;
@@ -1113,7 +1113,7 @@
     XCTAssertTrue([self makeExecutableAtPath:fakeClang]);
 
     NSString *command = [NSString
-        stringWithFormat:@"cd %@ && LD_PRELOAD='' PATH=%@:$PATH bash ./tools/ci/run_phase5e_tsan_experimental.sh 2>&1",
+        stringWithFormat:@"cd %@ && LD_PRELOAD='' EXTRA_OBJC_FLAGS='' PATH=%@:$PATH bash ./tools/ci/run_phase5e_tsan_experimental.sh 2>&1",
                          [self shellQuoted:fixtureRoot],
                          [self shellQuoted:fakeBin]];
     int exitCode = 0;
