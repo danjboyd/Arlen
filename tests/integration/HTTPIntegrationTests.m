@@ -2903,6 +2903,49 @@
   XCTAssertTrue([output containsString:@"\"name_length\":1034"], @"%@", output);
 }
 
+- (void)assertStaticHTTPContractWithEnvironment:(NSDictionary *)extraEnvironment {
+  int port = [self randomPort];
+  NSTask *server = [[NSTask alloc] init];
+  server.launchPath = @"./build/boomhauer";
+  server.arguments = @[ @"--port", [NSString stringWithFormat:@"%d", port] ];
+  NSMutableDictionary *environment = [NSMutableDictionary dictionaryWithDictionary:
+      [[NSProcessInfo processInfo] environment]];
+  [environment addEntriesFromDictionary:extraEnvironment];
+  server.environment = environment;
+  server.standardOutput = [NSPipe pipe];
+  server.standardError = [NSPipe pipe];
+  [server launch];
+  @try {
+    BOOL ready = NO;
+    (void)[self requestPathWithRetries:@"/healthz" port:port attempts:60 success:&ready];
+    XCTAssertTrue(ready);
+    if (!ready) return;
+    int code = 0;
+    NSString *output = [self runShellCapture:[NSString stringWithFormat:
+        @"python3 tests/integration/static_http_probe.py %d 2>&1", port] exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", output);
+    XCTAssertTrue([output containsString:@"concurrent ranges passed"], @"%@", output);
+  } @finally {
+    XCTAssertTrue([self terminateTask:server timeoutSeconds:5.0]);
+  }
+}
+
+- (void)testStaticHTTPValidatorsHeadAndRanges {
+  [self assertStaticHTTPContractWithEnvironment:@{}];
+}
+
+- (void)testStaticHTTPValidatorsHeadAndRangesLegacyParser {
+  [self assertStaticHTTPContractWithEnvironment:@{ @"ARLEN_HTTP_PARSER_BACKEND": @"legacy" }];
+}
+
+- (void)testStaticHTTPValidatorsHeadAndRangesSendfileFallback {
+  [self assertStaticHTTPContractWithEnvironment:@{ @"ARLEN_FAULT_SENDFILE_FORCE_FALLBACK_ONCE": @"1" }];
+}
+
+- (void)testStaticHTTPValidatorsHeadAndRangesWithoutFDCache {
+  [self assertStaticHTTPContractWithEnvironment:@{ @"ARLEN_STATIC_FILE_FD_CACHE_CAPACITY": @"0" }];
+}
+
 - (void)testStaticAssetEndpointInDevelopment {
   NSString *body = [self simpleRequestPath:@"/static/sample.txt"];
   XCTAssertEqualObjects(@"static ok\n", body);

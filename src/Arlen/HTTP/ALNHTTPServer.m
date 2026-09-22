@@ -3,6 +3,7 @@
 #import <errno.h>
 #import <fcntl.h>
 #import <limits.h>
+#import <math.h>
 #import <openssl/sha.h>
 #import <stdlib.h>
 #import <stdio.h>
@@ -1382,6 +1383,16 @@ static long ALNStaticFileMTimeNanoseconds(const struct stat *fileStat) {
 #endif
 }
 
+static long ALNStaticFileCTimeNanoseconds(const struct stat *fileStat) {
+#if defined(__linux__)
+  return fileStat->st_ctim.tv_nsec;
+#elif defined(__APPLE__)
+  return fileStat->st_ctimespec.tv_nsec;
+#else
+  return 0;
+#endif
+}
+
 static void ALNEnsureStaticFileFDCache(void) {
   static BOOL initialized = NO;
   if (initialized) {
@@ -1499,8 +1510,24 @@ static int ALNStaticFileFDForPath(NSString *path,
   }
 
   ALNEnsureStaticFileFDCache();
-  if (gALNStaticFileFDCacheCapacity == 0) {
-    return ALNOpenWithRetry(filesystemPath, openFlags);
+  if (gALNStaticFileFDCacheCapacity == 0
+#if defined(_WIN32)
+      || YES // The Windows seek/read fallback needs an independent file position.
+#endif
+  ) {
+    int opened = ALNOpenWithRetry(filesystemPath, openFlags);
+    if (opened < 0) return -1;
+    struct stat openedStat;
+    if (ALNFstatWithRetry(opened, &openedStat) != 0 || !S_ISREG(openedStat.st_mode) ||
+        (unsigned long long)openedStat.st_dev != device ||
+        (unsigned long long)openedStat.st_ino != inode ||
+        (unsigned long long)openedStat.st_size != size ||
+        (long long)openedStat.st_mtime != mtimeSeconds ||
+        ALNStaticFileMTimeNanoseconds(&openedStat) != mtimeNanoseconds) {
+      close(opened);
+      return -1;
+    }
+    return opened;
   }
 
   [gALNStaticFileFDCacheLock lock];
@@ -1574,7 +1601,8 @@ static void ALNStaticFileFDCacheClear(void) {
 
 static BOOL ALNSendFileReadFallback(ALNSocketHandle clientFd,
                                     int fileFd,
-                                    unsigned long long remaining) {
+                                    unsigned long long remaining,
+                                    off_t offset) {
   if (remaining == 0) {
     return YES;
   }
@@ -1584,7 +1612,12 @@ static BOOL ALNSendFileReadFallback(ALNSocketHandle clientFd,
     size_t chunk = (remaining > (unsigned long long)sizeof(buffer))
                        ? sizeof(buffer)
                        : (size_t)remaining;
+#if defined(_WIN32)
+    if (lseek(fileFd, offset, SEEK_SET) < 0) return NO;
     ssize_t readBytes = read(fileFd, buffer, chunk);
+#else
+    ssize_t readBytes = pread(fileFd, buffer, chunk, offset);
+#endif
     if (readBytes < 0) {
       if (errno == EINTR) {
         continue;
@@ -1598,20 +1631,22 @@ static BOOL ALNSendFileReadFallback(ALNSocketHandle clientFd,
       return NO;
     }
     remaining -= (unsigned long long)readBytes;
+    offset += readBytes;
   }
   return YES;
 }
 
 static BOOL ALNSendFileDescriptor(ALNSocketHandle clientFd,
                                   int fileFd,
-                                  unsigned long long byteLength) {
+                                  unsigned long long byteLength,
+                                  unsigned long long byteOffset) {
   if (fileFd < 0) {
     return NO;
   }
   BOOL ok = NO;
   unsigned long long remaining = byteLength;
 #ifdef __linux__
-  off_t offset = 0;
+  off_t offset = (off_t)byteOffset;
   int transientRetries = 0;
   while (remaining > 0) {
     size_t chunk = (remaining > (unsigned long long)SSIZE_MAX)
@@ -1629,11 +1664,7 @@ static BOOL ALNSendFileDescriptor(ALNSocketHandle clientFd,
       }
       transientRetries = 0;
       if (errno == EINVAL || errno == ENOSYS) {
-        if (lseek(fileFd, offset, SEEK_SET) < 0) {
-          ok = NO;
-          goto cleanup;
-        }
-        ok = ALNSendFileReadFallback(clientFd, fileFd, remaining);
+        ok = ALNSendFileReadFallback(clientFd, fileFd, remaining, offset);
         goto cleanup;
       }
       ok = NO;
@@ -1647,13 +1678,10 @@ static BOOL ALNSendFileDescriptor(ALNSocketHandle clientFd,
   }
   ok = (remaining == 0);
   if (!ok) {
-    if (lseek(fileFd, offset, SEEK_SET) < 0) {
-      goto cleanup;
-    }
-    ok = ALNSendFileReadFallback(clientFd, fileFd, remaining);
+    ok = ALNSendFileReadFallback(clientFd, fileFd, remaining, offset);
   }
 #else
-  ok = ALNSendFileReadFallback(clientFd, fileFd, remaining);
+  ok = ALNSendFileReadFallback(clientFd, fileFd, remaining, (off_t)byteOffset);
 #endif
 
 #ifdef __linux__
@@ -2474,6 +2502,109 @@ static NSString *ALNPathWithTrailingSlash(NSString *path) {
   return normalized;
 }
 
+// HTTP dates are locale-independent and have whole-second precision. Formatters
+// are request-local because NSDateFormatter is mutable and requests run concurrently.
+static NSDateFormatter *ALNStaticDateFormatter(NSString *format) {
+  NSDateFormatter *formatter = [[NSDateFormatter alloc] init];
+  formatter.locale = [[NSLocale alloc] initWithLocaleIdentifier:@"en_US_POSIX"];
+  formatter.timeZone = [NSTimeZone timeZoneForSecondsFromGMT:0];
+  formatter.dateFormat = format;
+  formatter.lenient = NO;
+  return formatter;
+}
+
+static NSString *ALNStaticHTTPDate(NSTimeInterval seconds) {
+  return [ALNStaticDateFormatter(@"EEE, dd MMM yyyy HH:mm:ss 'GMT'")
+      stringFromDate:[NSDate dateWithTimeIntervalSince1970:seconds]];
+}
+
+static NSDate *ALNStaticParseHTTPDate(NSString *value) {
+  if ([value length] == 0) return nil;
+  for (NSString *format in @[@"EEE, dd MMM yyyy HH:mm:ss 'GMT'",
+                             @"EEEE, dd-MMM-yy HH:mm:ss 'GMT'",
+                             @"EEE MMM d HH:mm:ss yyyy"]) {
+    NSDateFormatter *formatter = ALNStaticDateFormatter(format);
+    NSDate *date = [formatter dateFromString:value];
+    // Round-trip validation rejects trailing garbage and normalized invalid dates.
+    NSString *normalized = [value stringByReplacingOccurrencesOfString:@"  " withString:@" "];
+    if (date != nil && [[formatter stringFromDate:date] isEqualToString:normalized]) return date;
+  }
+  return nil;
+}
+
+// Parse quoted tags explicitly: commas are legal inside an opaque entity tag.
+static BOOL ALNStaticETagMatches(NSString *field, NSString *etag, BOOL weak) {
+  NSString *value = [field stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
+  if ([value isEqualToString:@"*"]) return YES;
+  NSString *target = [etag hasPrefix:@"W/"] ? [etag substringFromIndex:2] : etag;
+  NSUInteger cursor = 0;
+  BOOL matched = NO;
+  while (cursor < [value length]) {
+    while (cursor < [value length] && ([value characterAtIndex:cursor] == ' ' ||
+                                      [value characterAtIndex:cursor] == '\t')) cursor++;
+    BOOL tagWeak = NO;
+    if (cursor + 2 <= [value length] && [[value substringWithRange:NSMakeRange(cursor, 2)] isEqualToString:@"W/"]) {
+      tagWeak = YES;
+      cursor += 2;
+    }
+    NSUInteger start = cursor;
+    if (cursor >= [value length] || [value characterAtIndex:cursor++] != '"') return NO;
+    while (cursor < [value length] && [value characterAtIndex:cursor] != '"') {
+      unichar ch = [value characterAtIndex:cursor++];
+      if (ch < 0x21 || ch == 0x7f || ch > 0xff) return NO;
+    }
+    if (cursor >= [value length]) return NO;
+    cursor++;
+    if ((weak || (!tagWeak && ![etag hasPrefix:@"W/"])) &&
+        [[value substringWithRange:NSMakeRange(start, cursor - start)] isEqualToString:target]) matched = YES;
+    while (cursor < [value length] && ([value characterAtIndex:cursor] == ' ' ||
+                                      [value characterAtIndex:cursor] == '\t')) cursor++;
+    if (cursor == [value length]) return matched;
+    if ([value characterAtIndex:cursor++] != ',' || cursor == [value length]) return NO;
+  }
+  return NO;
+}
+
+static BOOL ALNStaticDecimal(NSString *value, unsigned long long *result) {
+  if ([value length] == 0) return NO;
+  unsigned long long number = 0;
+  for (NSUInteger idx = 0; idx < [value length]; idx++) {
+    unichar ch = [value characterAtIndex:idx];
+    if (ch < '0' || ch > '9' || number > (ULLONG_MAX - (ch - '0')) / 10) return NO;
+    number = number * 10 + (ch - '0');
+  }
+  *result = number;
+  return YES;
+}
+
+// 0: ignore malformed/unsupported range; 1: selected range; -1: unsatisfiable.
+static NSInteger ALNStaticByteRange(NSString *field, unsigned long long size,
+                                    unsigned long long *offset, unsigned long long *length) {
+  if (![field hasPrefix:@"bytes="]) return 0;
+  NSString *value = [field substringFromIndex:6];
+  if ([value containsString:@","]) return 0; // Multipart ranges are deliberately unsupported.
+  NSArray *parts = [value componentsSeparatedByString:@"-"];
+  if ([parts count] != 2) return 0;
+  unsigned long long first = 0, last = 0;
+  if ([parts[0] length] == 0) {
+    if (!ALNStaticDecimal(parts[1], &last)) return 0;
+    if (last == 0 || size == 0) return -1;
+    *length = MIN(last, size);
+    *offset = size - *length;
+    return 1;
+  }
+  if (!ALNStaticDecimal(parts[0], &first)) return 0;
+  if ([parts[1] length] != 0) {
+    if (!ALNStaticDecimal(parts[1], &last) || last < first) return 0;
+  } else {
+    last = size == 0 ? 0 : size - 1;
+  }
+  if (first >= size) return -1;
+  *offset = first;
+  *length = MIN(last, size - 1) - first + 1;
+  return 1;
+}
+
 static ALNResponse *ALNStaticResponseForMount(ALNRequest *request,
                                               NSDictionary *mount,
                                               NSString *publicRoot) {
@@ -2571,17 +2702,70 @@ static ALNResponse *ALNStaticResponseForMount(ALNRequest *request,
     return response;
   }
 
+  unsigned long long size = (unsigned long long)fileStat.st_size;
+  NSTimeInterval now = floor([[NSDate date] timeIntervalSince1970]);
+  NSTimeInterval modified = MIN((NSTimeInterval)fileStat.st_mtime, now);
+  NSString *etag = [NSString stringWithFormat:@"W/\"%llx-%llx-%llx-%llx-%lx-%llx-%lx\"",
+      (unsigned long long)fileStat.st_dev, (unsigned long long)fileStat.st_ino, size,
+      (unsigned long long)fileStat.st_mtime, (unsigned long)ALNStaticFileMTimeNanoseconds(&fileStat),
+      (unsigned long long)fileStat.st_ctime, (unsigned long)ALNStaticFileCTimeNanoseconds(&fileStat)];
   ALNResponse *response = [[ALNResponse alloc] init];
   response.statusCode = 200;
   [response setHeader:@"Content-Type" value:ALNContentTypeForFilePath(resolvedFilePath)];
-  if (![request.method isEqualToString:@"HEAD"]) {
-    response.fileBodyPath = resolvedFilePath;
-    response.fileBodyLength = (unsigned long long)fileStat.st_size;
-    response.fileBodyDevice = (unsigned long long)fileStat.st_dev;
-    response.fileBodyInode = (unsigned long long)fileStat.st_ino;
-    response.fileBodyMTimeSeconds = (long long)fileStat.st_mtime;
-    response.fileBodyMTimeNanoseconds = ALNStaticFileMTimeNanoseconds(&fileStat);
+  [response setHeader:@"ETag" value:etag];
+  [response setHeader:@"Last-Modified" value:ALNStaticHTTPDate(modified)];
+  [response setHeader:@"Date" value:ALNStaticHTTPDate(now)];
+  [response setHeader:@"Accept-Ranges" value:@"bytes"];
+
+  NSString *ifMatch = request.headers[@"if-match"];
+  NSString *ifNoneMatch = request.headers[@"if-none-match"];
+  NSDate *unmodifiedSince = ALNStaticParseHTTPDate([request headerValueForName:@"if-unmodified-since"]);
+  NSDate *modifiedSince = ALNStaticParseHTTPDate([request headerValueForName:@"if-modified-since"]);
+  if ((ifMatch != nil && !ALNStaticETagMatches(ifMatch, etag, NO)) ||
+      (ifMatch == nil && unmodifiedSince != nil && modified > [unmodifiedSince timeIntervalSince1970])) {
+    response.statusCode = 412;
+  } else if ((ifNoneMatch != nil && ALNStaticETagMatches(ifNoneMatch, etag, YES)) ||
+             (ifNoneMatch == nil && modifiedSince != nil && modified <= [modifiedSince timeIntervalSince1970])) {
+    response.statusCode = 304;
   }
+  if (response.statusCode != 200) {
+    response.committed = YES;
+    return response;
+  }
+
+  unsigned long long offset = 0, length = size;
+  NSString *range = request.headers[@"range"];
+  NSString *ifRange = request.headers[@"if-range"];
+  BOOL rangeAllowed = YES;
+  if (ifRange != nil) {
+    // Our metadata ETag is weak and cannot establish byte-for-byte identity.
+    // A date is strong only when sufficiently older than the response Date.
+    NSDate *rangeDate = ALNStaticParseHTTPDate(ifRange);
+    rangeAllowed = rangeDate != nil && [rangeDate timeIntervalSince1970] == modified &&
+                   now - modified >= 60;
+  }
+  if ([request.method isEqualToString:@"GET"] && range != nil && rangeAllowed) {
+    NSInteger selection = ALNStaticByteRange(range, size, &offset, &length);
+    if (selection < 0) {
+      response.statusCode = 416;
+      [response setHeader:@"Content-Range" value:[NSString stringWithFormat:@"bytes */%llu", size]];
+      response.committed = YES;
+      return response;
+    }
+    if (selection > 0) {
+      response.statusCode = 206;
+      [response setHeader:@"Content-Range" value:[NSString stringWithFormat:@"bytes %llu-%llu/%llu",
+          offset, offset + length - 1, size]];
+    }
+  }
+  response.fileBodyPath = resolvedFilePath;
+  response.fileBodyLength = length;
+  response.fileBodyOffset = offset;
+  response.fileBodyFullLength = size;
+  response.fileBodyDevice = (unsigned long long)fileStat.st_dev;
+  response.fileBodyInode = (unsigned long long)fileStat.st_ino;
+  response.fileBodyMTimeSeconds = (long long)fileStat.st_mtime;
+  response.fileBodyMTimeNanoseconds = ALNStaticFileMTimeNanoseconds(&fileStat);
   response.committed = YES;
   return response;
 }
@@ -2641,7 +2825,7 @@ static double ALNSendResponse(ALNSocketHandle clientFd,
     fileBodyFd = ALNStaticFileFDForPath(fileBodyPath,
                                         fileBodyDevice,
                                         fileBodyInode,
-                                        fileBodyLength,
+                                        response.fileBodyFullLength ?: fileBodyLength,
                                         fileBodyMTimeSeconds,
                                         fileBodyMTimeNanoseconds);
     if (fileBodyFd < 0) {
@@ -2690,7 +2874,7 @@ static double ALNSendResponse(ALNSocketHandle clientFd,
       (void)ALNSendAll(clientFd, [headerData bytes], headerLength);
     }
     if (fileBodyFd >= 0) {
-      (void)ALNSendFileDescriptor(clientFd, fileBodyFd, fileBodyLength);
+      (void)ALNSendFileDescriptor(clientFd, fileBodyFd, fileBodyLength, response.fileBodyOffset);
       close(fileBodyFd);
       fileBodyFd = -1;
     }

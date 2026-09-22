@@ -254,3 +254,12 @@ use explicit text casts for lossless values outside it. See
 [PostgreSQL timestamp precision](ARLEN_DATA.md#postgresql-timestamp-precision).
 Dataverse callers can configure retry eligibility and backoff inside the client's
 existing bounded loop; see [Custom retry policies](DATAVERSE.md#custom-retry-policies).
+
+## Static asset HTTP behavior
+
+The server automatically emits ETag and Last-Modified for static GET/HEAD,
+handles conditional requests with bodyless 304 responses, preserves HEAD
+representation length, and streams single byte ranges with 206 responses.
+If-None-Match takes precedence over If-Modified-Since. No application middleware
+or additional CLI option is needed. See [Static files](STATIC_FILES.md) for
+range limits, If-Range rules, validator strength, and regression commands.
