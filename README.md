@@ -28,6 +28,9 @@ If you are new to Arlen, start with:
 Static assets support automatic cache revalidation, HEAD metadata, and single
 byte ranges. See [Static files](docs/STATIC_FILES.md) for the HTTP contract.
 
+Generated SQL ORM models support safe concurrent first use of their descriptors;
+see the [regeneration guidance](docs/ARLEN_ORM_MIGRATIONS.md#generated-descriptor-initialization-update) when upgrading existing generated code.
+
 ## Quick Start
 
 If you are evaluating Arlen on Linux/GNUstep, make sure you have:

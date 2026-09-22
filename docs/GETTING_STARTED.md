@@ -263,3 +263,10 @@ representation length, and streams single byte ranges with 206 responses.
 If-None-Match takes precedence over If-Modified-Since. No application middleware
 or additional CLI option is needed. See [Static files](STATIC_FILES.md) for
 range limits, If-Range rules, validator strength, and regression commands.
+
+## Updating generated ORM models
+
+After updating Arlen, regenerate existing SQL ORM model implementations with your
+application's `ALNORMCodegen` generation step and rebuild. Current output safely
+initializes each model descriptor on concurrent first use; older generated code
+must be regenerated to receive that fix. See [ArlenORM migration notes](ARLEN_ORM_MIGRATIONS.md#generated-descriptor-initialization-update).
