@@ -16,6 +16,9 @@ extern NSString *const ALNResponseErrorDomain;
 @property(nonatomic, assign) BOOL committed;
 @property(nonatomic, copy, nullable) NSString *fileBodyPath;
 @property(nonatomic, assign) unsigned long long fileBodyLength;
+// Selected transfer offset; full file size for identity checks (zero uses fileBodyLength).
+@property(nonatomic, assign) unsigned long long fileBodyOffset;
+@property(nonatomic, assign) unsigned long long fileBodyFullLength;
 @property(nonatomic, assign) unsigned long long fileBodyDevice;
 @property(nonatomic, assign) unsigned long long fileBodyInode;
 @property(nonatomic, assign) long long fileBodyMTimeSeconds;

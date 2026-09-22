@@ -32,6 +32,8 @@ toolchain env directly for the Linux/GNUstep path. On macOS, use
 
 ## Building Apps
 
+- [Static files](STATIC_FILES.md): cache validators, conditional GET/HEAD, and byte ranges.
+
 - [Multipart Uploads](MULTIPART_UPLOADS.md): ordered form fields, binary files, limits, and memory ownership.
 
 - [App Authoring Guide](APP_AUTHORING_GUIDE.md): routes, controllers, middleware, and route metadata.

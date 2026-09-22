@@ -147,12 +147,27 @@
   ALNResponse *response = [[ALNResponse alloc] init];
   response.fileBodyPath = @"/tmp/example.bin";
   response.fileBodyLength = 2048;
+  response.fileBodyOffset = 512;
+  response.fileBodyFullLength = 4096;
   [response setDataBody:[@"ok" dataUsingEncoding:NSUTF8StringEncoding]
             contentType:@"application/custom"];
 
   XCTAssertNil(response.fileBodyPath);
   XCTAssertEqual((unsigned long long)0, response.fileBodyLength);
+  XCTAssertEqual((unsigned long long)0, response.fileBodyOffset);
+  XCTAssertEqual((unsigned long long)0, response.fileBodyFullLength);
   XCTAssertEqualObjects(@"application/custom", [response headerForName:@"Content-Type"]);
+}
+
+- (void)testNotModifiedDoesNotInventZeroRepresentationLength {
+  ALNResponse *response = [[ALNResponse alloc] init];
+  response.statusCode = 304;
+  [response setHeader:@"ETag" value:@"W/\"asset\""];
+  NSString *headers = [[NSString alloc] initWithData:[response serializedHeaderData]
+                                           encoding:NSUTF8StringEncoding];
+  XCTAssertTrue([headers containsString:@"304 Not Modified"]);
+  XCTAssertFalse([headers containsString:@"Content-Length:"]);
+  XCTAssertTrue([headers containsString:@"ETag: W/\"asset\""]);
 }
 
 - (void)testSetDataBodyStillSupportsMutableBodyAccess {

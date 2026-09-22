@@ -234,6 +234,12 @@
     "ALNResponse|fileBodyLength": {
       "purpose": "Expected byte count for a file streaming response; also drives `Content-Length` for GET and HEAD."
     },
+    "ALNResponse|fileBodyOffset": {
+      "purpose": "Starting byte offset for streamed file responses; defaults to zero."
+    },
+    "ALNResponse|fileBodyFullLength": {
+      "purpose": "Full file size for identity validation when fileBodyLength selects a range; zero falls back to fileBodyLength."
+    },
     "ALNResponse|fileBodyDevice": {
       "purpose": "Optional device identity used to reject stale or replaced file streaming targets before headers are sent."
     },

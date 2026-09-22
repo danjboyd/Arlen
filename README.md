@@ -25,6 +25,9 @@ If you are new to Arlen, start with:
 - `docs/LITE_MODE_GUIDE.md`
 - `docs/README.md`
 
+Static assets support automatic cache revalidation, HEAD metadata, and single
+byte ranges. See [Static files](docs/STATIC_FILES.md) for the HTTP contract.
+
 ## Quick Start
 
 If you are evaluating Arlen on Linux/GNUstep, make sure you have:

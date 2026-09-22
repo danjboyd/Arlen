@@ -160,6 +160,8 @@ static NSString *ALNStatusText(NSInteger statusCode) {
     return @"Created";
   case 204:
     return @"No Content";
+  case 206:
+    return @"Partial Content";
   case 301:
     return @"Moved Permanently";
   case 302:
@@ -176,6 +178,10 @@ static NSString *ALNStatusText(NSInteger statusCode) {
     return @"Method Not Allowed";
   case 408:
     return @"Request Timeout";
+  case 412:
+    return @"Precondition Failed";
+  case 416:
+    return @"Range Not Satisfiable";
   case 429:
     return @"Too Many Requests";
   case 413:
@@ -430,6 +436,8 @@ static NSData *ALNSharedSerializedHeaderDataForResponse(ALNResponse *response) {
 - (void)resetFileBodyState {
   self.fileBodyPath = nil;
   self.fileBodyLength = 0;
+  self.fileBodyOffset = 0;
+  self.fileBodyFullLength = 0;
   self.fileBodyDevice = 0;
   self.fileBodyInode = 0;
   self.fileBodyMTimeSeconds = 0;
@@ -549,6 +557,8 @@ static NSData *ALNSharedSerializedHeaderDataForResponse(ALNResponse *response) {
   _fileBodyPath = [fileBodyPath copy];
   if ([_fileBodyPath length] == 0) {
     _fileBodyLength = 0;
+    _fileBodyOffset = 0;
+    _fileBodyFullLength = 0;
     _fileBodyDevice = 0;
     _fileBodyInode = 0;
     _fileBodyMTimeSeconds = 0;
@@ -742,7 +752,7 @@ static NSData *ALNSharedSerializedHeaderDataForResponse(ALNResponse *response) {
     return nil;
   }
 
-  if ([self headerForName:@"Content-Length"] == nil) {
+  if (self.statusCode != 304 && [self headerForName:@"Content-Length"] == nil) {
     unsigned long long bodyLength = [self bodyLength];
     if ([self.fileBodyPath length] > 0) {
       bodyLength = self.fileBodyLength;

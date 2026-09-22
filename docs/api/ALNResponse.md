@@ -15,6 +15,8 @@ Mutable HTTP response model for status, headers, buffered bodies, and preflighte
 | `committed` | `BOOL` | `nonatomic, assign` | Public `committed` property available on `ALNResponse`. |
 | `fileBodyPath` | `NSString *` | `nonatomic, copy, nullable` | Existing regular file path to stream after Arlen preflights the descriptor before successful headers are sent. |
 | `fileBodyLength` | `unsigned long long` | `nonatomic, assign` | Expected byte count for a file streaming response; also drives `Content-Length` for GET and HEAD. |
+| `fileBodyOffset` | `unsigned long long` | `nonatomic, assign` | Starting byte offset for streamed file responses; defaults to zero. |
+| `fileBodyFullLength` | `unsigned long long` | `nonatomic, assign` | Full file size for identity validation when fileBodyLength selects a range; zero falls back to fileBodyLength. |
 | `fileBodyDevice` | `unsigned long long` | `nonatomic, assign` | Optional device identity used to reject stale or replaced file streaming targets before headers are sent. |
 | `fileBodyInode` | `unsigned long long` | `nonatomic, assign` | Optional inode identity used to reject stale or replaced file streaming targets before headers are sent. |
 | `fileBodyMTimeSeconds` | `long long` | `nonatomic, assign` | Optional file modification timestamp seconds used to reject changed streaming targets before headers are sent. |
