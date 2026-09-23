@@ -10,7 +10,7 @@ generated_apps_output_dir="$output_dir/generated_apps"
 mkdir -p "$output_dir"
 
 set +u
-source /usr/GNUstep/System/Library/Makefiles/GNUstep.sh
+source "$repo_root/tools/source_gnustep_env.sh"
 set -u
 
 make -C "$repo_root" phase21-template-tests 2>&1 | tee "$template_log"

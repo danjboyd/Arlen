@@ -11,7 +11,7 @@ case_filter="${ARLEN_PHASE21_PROTOCOL_CASES:-}"
 allow_fail="${ARLEN_PHASE21_PROTOCOL_ALLOW_FAIL:-0}"
 
 set +u
-source /usr/GNUstep/System/Library/Makefiles/GNUstep.sh
+source "$repo_root/tools/source_gnustep_env.sh"
 set -u
 
 export ARLEN_WEBSOCKET_ALLOWED_ORIGINS="${ARLEN_WEBSOCKET_ALLOWED_ORIGINS:-https://allowed.example}"

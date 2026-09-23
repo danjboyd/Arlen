@@ -27,6 +27,13 @@ FOUNDATION_EXPORT NSString *_Nullable ALNTestTemporaryDirectory(NSString *prefix
 FOUNDATION_EXPORT BOOL ALNTestWriteUTF8File(NSString *path,
                                             NSString *content,
                                             NSError *_Nullable *_Nullable error);
+FOUNDATION_EXPORT NSString *ALNTestClientCompileCommand(NSArray<NSString *> *sources,
+                                                        NSString *includeDirectory,
+                                                        NSString *output);
+// Separate file-backed streams avoid pipe deadlocks and preserve JSON stdout.
+FOUNDATION_EXPORT NSDictionary *ALNTestRunShellCaptureStreams(NSString *command);
+// The task must own the server PID (launch with exec, without a shell wrapper).
+FOUNDATION_EXPORT BOOL ALNTestStopServerTask(NSTask *_Nullable task);
 FOUNDATION_EXPORT NSString *ALNTestRunShellCapture(NSString *command, int *_Nullable exitCode);
 FOUNDATION_EXPORT NSDictionary<NSString *, NSString *> *ALNTestShellEnvironment(
     NSDictionary<NSString *, NSString *> *environment);

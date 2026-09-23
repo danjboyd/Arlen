@@ -9,7 +9,7 @@ include_thread_nightly="${ARLEN_PHASE10M_INCLUDE_THREAD_NIGHTLY:-0}"
 allow_fail="${ARLEN_PHASE10M_SANITIZER_ALLOW_FAIL:-0}"
 
 set +u
-source /usr/GNUstep/System/Library/Makefiles/GNUstep.sh
+source "$repo_root/tools/source_gnustep_env.sh"
 set -u
 
 asan_so="$(clang -print-file-name=libasan.so)"

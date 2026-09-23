@@ -9,7 +9,7 @@ phase10m_dir="$output_dir/phase10m_soak"
 thresholds="${ARLEN_PHASE38_THRESHOLDS:-$repo_root/tests/fixtures/performance/phase38_fd_regression_thresholds.json}"
 
 set +u
-source /usr/GNUstep/System/Library/Makefiles/GNUstep.sh
+source "$repo_root/tools/source_gnustep_env.sh"
 set -u
 
 mkdir -p "$output_dir"

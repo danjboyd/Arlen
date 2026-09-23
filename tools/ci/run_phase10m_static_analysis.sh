@@ -9,7 +9,7 @@ policy="${ARLEN_PHASE10M_STATIC_ANALYSIS_POLICY:-$repo_root/tests/fixtures/stati
 allow_fail="${ARLEN_PHASE10M_STATIC_ANALYSIS_ALLOW_FAIL:-0}"
 
 set +u
-source /usr/GNUstep/System/Library/Makefiles/GNUstep.sh
+source "$repo_root/tools/source_gnustep_env.sh"
 set -u
 
 args=(

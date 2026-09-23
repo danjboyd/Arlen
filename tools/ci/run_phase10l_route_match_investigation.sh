@@ -17,7 +17,7 @@ flamegraph_warmup="${ARLEN_PHASE10L_FLAMEGRAPH_WARMUP:-1500}"
 allow_fail="${ARLEN_PHASE10L_ALLOW_FAIL:-0}"
 
 set +u
-source /usr/GNUstep/System/Library/Makefiles/GNUstep.sh
+source "$repo_root/tools/source_gnustep_env.sh"
 set -u
 make route-match-perf-bench
 

@@ -35,7 +35,14 @@
 }
 
 - (NSString *)runShellCapture:(NSString *)command exitCode:(int *)exitCode {
-  return ALNTestRunShellCapture(command, exitCode);
+  NSDictionary *result = ALNTestRunShellCaptureStreams(command);
+  if (exitCode != NULL) {
+    *exitCode = [result[@"status"] intValue];
+  }
+  if ([result[@"status"] intValue] != 0) {
+    return [NSString stringWithFormat:@"%@\n%@", result[@"stdout"], result[@"stderr"]];
+  }
+  return result[@"stdout"];
 }
 
 - (NSDictionary *)parseJSONDictionary:(NSString *)output {

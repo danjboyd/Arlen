@@ -1375,3 +1375,11 @@ initialization. Upgrading the framework binary alone does not update generated
 `.m` files: rerun the application's model-generation step and rebuild. There is
 no new CLI flag or startup warm-up requirement. See
 [ArlenORM migration notes](ARLEN_ORM_MIGRATIONS.md#generated-descriptor-initialization-update).
+
+## Capturing JSON output
+
+For commands such as `arlen module migrate --json`, parse stdout as JSON and
+retain stderr separately for diagnostics. PostgreSQL can emit notices on stderr
+when an idempotent migration encounters an existing relation. Do not merge
+`2>&1` into the JSON input. Check the process exit status before consuming the
+payload.

@@ -13,7 +13,7 @@ rounds="${ARLEN_PHASE10H_ROUNDS:-5}"
 allow_fail="${ARLEN_PHASE10H_ALLOW_FAIL:-0}"
 
 set +u
-source /usr/GNUstep/System/Library/Makefiles/GNUstep.sh
+source "$repo_root/tools/source_gnustep_env.sh"
 set -u
 make http-parse-perf-bench
 

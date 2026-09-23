@@ -12,7 +12,7 @@ fixture="${ARLEN_PHASE10M_ALLOC_FIXTURE:-tests/fixtures/fault_injection/phase10m
 scenarios="${ARLEN_PHASE10M_ALLOC_SCENARIOS:-}"
 
 set +u
-source /usr/GNUstep/System/Library/Makefiles/GNUstep.sh
+source "$repo_root/tools/source_gnustep_env.sh"
 set -u
 
 make boomhauer

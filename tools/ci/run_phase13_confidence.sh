@@ -16,7 +16,7 @@ server_log="$output_dir/auth_admin_demo_server.log"
 mkdir -p "$output_dir" "${HOME}/GNUstep/Defaults/.lck"
 
 set +u
-source /usr/GNUstep/System/Library/Makefiles/GNUstep.sh
+source "$repo_root/tools/source_gnustep_env.sh"
 set -u
 
 run_xctest() {

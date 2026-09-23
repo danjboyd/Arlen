@@ -152,3 +152,7 @@ framework tests require no tenant or public deployment.
 GNUstep OAuth metadata transport requires libcurl development files with TLS and
 asynchronous DNS (Debian/Ubuntu: `libcurl4-openssl-dev`). See the
 [getting-started guide](GETTING_STARTED.md).
+
+For isolated live database checks, see the
+[PostgreSQL regression gate](TESTING_WORKFLOW.md#live-postgresql-regression-gate).
+It covers generated clients, migrations, search, and auth server cleanup.

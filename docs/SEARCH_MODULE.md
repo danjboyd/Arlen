@@ -276,6 +276,23 @@ They also expose:
   query/sync translation, cursor pagination, and required live confidence
   validation.
 
+
+## PostgreSQL typo matching
+
+PostgreSQL fuzzy mode compares the query against word extents with
+`strict_word_similarity(query, searchable_text)` and the `<<%` operator. A typo
+such as `pririty` can match `priority` inside a long document without unrelated
+text diluting its score. The operator uses PostgreSQL's
+`pg_trgm.strict_word_similarity_threshold` (default `0.5`). Full-text matches
+also qualify; relevance uses the larger of the full-text and trigram scores.
+
+Highlights use `ts_headline` with matching document words as well as the original
+query, so a corrected word is marked with `<b>...</b>` even when the literal typo
+is absent. Treat headline output as untrusted document text when rendering HTML;
+the module's templates escape it. Backend rankings need not match other engines.
+Promotions continue to match configured queries exactly after trimming and
+lowercasing; phrase and fuzzy queries do not implicitly activate promotions.
+
 ## Migration Notes
 
 - Start with the default engine while you are still shaping the public-safe

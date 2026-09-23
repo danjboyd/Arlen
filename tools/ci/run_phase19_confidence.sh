@@ -6,7 +6,7 @@ final_output_dir="${ARLEN_PHASE19_OUTPUT_DIR:-$repo_root/build/release_confidenc
 work_dir="${ARLEN_PHASE19_WORK_DIR:-$repo_root/.phase19-confidence-work}"
 output_dir="$work_dir"
 app_root="${ARLEN_PHASE19_APP_ROOT:-$repo_root/examples/multi_module_demo_initial}"
-gnustep_sh="/usr/GNUstep/System/Library/Makefiles/GNUstep.sh"
+gnustep_sh="$repo_root/tools/source_gnustep_env.sh"
 overall_status=0
 
 shell_quote() {

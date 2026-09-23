@@ -40,6 +40,10 @@ jobs:
           source tools/source_gnustep_env.sh
           make ci-durable-jobs
 
+      - name: Verify live PostgreSQL CLI, search, and auth cleanup regressions
+        run: |
+          bash ./tools/ci/run_postgres_regressions.sh
+
       - name: Run linux quality gate
         env:
           GNUSTEP_USER_ROOT: ${{ github.workspace }}/.gnustep

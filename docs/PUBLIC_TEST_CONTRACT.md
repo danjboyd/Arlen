@@ -16,9 +16,12 @@ how to use it.
 - `optional`: characterization or live-service evidence that strengthens the
   release pack but does not block the default gate.
 
-Default checks are intentionally service-free. Live PostgreSQL, MSSQL,
-Dataverse, OpenSearch, Meilisearch, Windows preview, and Apple baseline evidence
-remain conditional unless release scope or branch protection changes.
+The default release-confidence pack is service-free. Broader live PostgreSQL,
+MSSQL, Dataverse, OpenSearch, Meilisearch, Windows preview, and Apple baseline
+evidence remains conditional in that pack. Separately, the required Linux merge
+gate provisions an isolated PostgreSQL cluster for generated clients, module
+migrations, search, and auth server cleanup; see
+[CI Alignment](CI_ALIGNMENT.md#live-postgresql-regression-coverage).
 
 ## Public Surfaces
 
