@@ -14,7 +14,12 @@ Arlen's existing health, readiness, metrics, and OpenAPI substrate.
 
 Install `jobs`, `notifications`, `storage`, and `search` as well if you want
 the dashboard to surface those module summaries. The module still remains
-useful when only a subset of those runtimes is installed.
+useful when only a subset of those runtimes is installed. Missing or unmounted
+runtimes report `available: false` with `informational` status; they are not link
+dependencies. Auth is also optional: without it, the application must supply
+authentication, operator/admin roles, and AAL2 through the framework auth context.
+Ops still enforces those checks, with `/auth/login` and `/auth/mfa/totp` as the
+default login and step-up destinations.
 
 ## Surfaces
 

@@ -86,3 +86,24 @@ retains the cache. Removing cookies also permits ordinary shared-header cache
 reuse; cookie-bearing responses do not use the shared cache. Automatically
 supplied `Content-Length` and `Content-Type` are restored during serialization
 if removed.
+
+## Concurrent Security Headers
+
+Security-header middleware initializes its immutable defaults exactly once,
+including when the first requests arrive concurrently. Every response receives
+missing defaults independently:
+
+| Header | Default |
+| --- | --- |
+| `X-Content-Type-Options` | `nosniff` |
+| `X-Frame-Options` | `SAMEORIGIN` |
+| `Referrer-Policy` | `strict-origin-when-cross-origin` |
+| `Cross-Origin-Opener-Policy` | `same-origin` |
+| `Cross-Origin-Resource-Policy` | `same-site` |
+| `X-Permitted-Cross-Domain-Policies` | `none` |
+
+Explicit response headers are preserved. The configured
+`securityHeaders.contentSecurityPolicy` still supplies CSP only when the
+response does not already contain it; the default is `default-src 'self'`.
+No configuration change is needed when upgrading for concurrent first-use
+safety.

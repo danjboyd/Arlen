@@ -156,3 +156,10 @@ asynchronous DNS (Debian/Ubuntu: `libcurl4-openssl-dev`). See the
 For isolated live database checks, see the
 [PostgreSQL regression gate](TESTING_WORKFLOW.md#live-postgresql-regression-gate).
 It covers generated clients, migrations, search, and auth server cleanup.
+
+For composing an ops dashboard with optional modules, see [Ops Module](OPS_MODULE.md).
+
+For enterprise browser sign-in, start with the [auth module OIDC/Entra setup](AUTH_MODULE.md#configurable-oidc-login-including-microsoft-entra).
+
+[Response Headers](RESPONSE_HEADERS.md#concurrent-security-headers) describes
+concurrent security defaults and explicit header overrides.

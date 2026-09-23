@@ -608,8 +608,10 @@ static NSUInteger const ALNOpsSnapshotHistoryLimit = 48U;
   };
 }
 
+// Optional modules must not emit Objective-C class linker references.
+// A linked but unmounted runtime is also unavailable for this application.
 - (NSDictionary *)jobsSummary {
-  ALNJobsModuleRuntime *runtime = [ALNJobsModuleRuntime sharedRuntime];
+  ALNJobsModuleRuntime *runtime = [NSClassFromString(@"ALNJobsModuleRuntime") sharedRuntime];
   if (runtime.application == nil || runtime.application != self.application) {
     return @{ @"available" : @NO, @"status" : @"informational" };
   }
@@ -628,7 +630,7 @@ static NSUInteger const ALNOpsSnapshotHistoryLimit = 48U;
 }
 
 - (NSDictionary *)notificationsSummary {
-  ALNNotificationsModuleRuntime *runtime = [ALNNotificationsModuleRuntime sharedRuntime];
+  ALNNotificationsModuleRuntime *runtime = [NSClassFromString(@"ALNNotificationsModuleRuntime") sharedRuntime];
   if (runtime.application == nil || runtime.application != self.application) {
     return @{ @"available" : @NO, @"status" : @"informational" };
   }
@@ -646,7 +648,7 @@ static NSUInteger const ALNOpsSnapshotHistoryLimit = 48U;
 }
 
 - (NSDictionary *)storageSummary {
-  ALNStorageModuleRuntime *runtime = [ALNStorageModuleRuntime sharedRuntime];
+  ALNStorageModuleRuntime *runtime = [NSClassFromString(@"ALNStorageModuleRuntime") sharedRuntime];
   if (runtime.application == nil || runtime.application != self.application) {
     return @{ @"available" : @NO, @"status" : @"informational" };
   }
@@ -897,7 +899,7 @@ static NSUInteger const ALNOpsSnapshotHistoryLimit = 48U;
   self = [super init];
   if (self != nil) {
     _runtime = [ALNOpsModuleRuntime sharedRuntime];
-    _authRuntime = [ALNAuthModuleRuntime sharedRuntime];
+    _authRuntime = [NSClassFromString(@"ALNAuthModuleRuntime") sharedRuntime];
   }
   return self;
 }

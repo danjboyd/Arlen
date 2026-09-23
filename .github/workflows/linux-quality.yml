@@ -61,6 +61,22 @@ jobs:
           source tools/source_gnustep_env.sh
           bash tools/ci/run_orm_identifier_regressions.sh
 
+      - name: Verify ops builds with optional modules absent
+        run: |
+          source tools/source_gnustep_env.sh
+          make test-integration-filter TEST=OpsOptionalModulesIntegrationTests
+
+      - name: Verify configurable OIDC login and bounded token transport
+        run: |
+          source tools/source_gnustep_env.sh
+          make test-unit-filter TEST=AuthModuleOIDCTests
+          make test-unit-filter TEST=MetadataTransportTests
+
+      - name: Verify concurrent security-header first use in fresh processes
+        run: |
+          source tools/source_gnustep_env.sh
+          make test-unit-filter TEST=SecurityHeadersColdStartTests
+
       - name: Upload perf + confidence artifacts
         if: github.event_name == 'workflow_dispatch' || failure()
         uses: actions/upload-artifact@v4

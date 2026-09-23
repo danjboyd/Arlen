@@ -505,3 +505,13 @@ Acceptance (required):
 - Multi-tenant/org/billing/invitation products in Phase 13 v1.
 - A full ORM requirement for admin/resource registration.
 - Replacing the existing plugin system or forcing apps to adopt modules.
+
+## Configurable Provider Integration Follow-up
+
+The auth module now connects OIDC discovery, PKCE, code exchange, RS256 JWKS
+verification and the provider session bridge through configuration. Real
+providers require an application resolver and do not inherit stub email linking.
+Entra tenant/subject mapping and OIDC-only login defaults have deterministic
+coverage in `AuthModuleOIDCTests`; bounded GET/POST is covered by
+`MetadataTransportTests`. InvitoContext real-tenant adoption remains downstream
+acceptance, separate from upstream implementation and synthetic coverage.

@@ -480,3 +480,40 @@ wire `isReady` into private readiness. The OAuth runbook documents the tradeoff;
 framework tests require no tenant or public deployment.
 
 Multipart `requestLimits` keys are `maxMultipartParts` (128), `maxMultipartFieldBytes` (65536), `maxMultipartFileBytes` (1048576), and `maxMultipartHeaderBytes` (16384). All values must be positive whole numbers. Bare or quoted decimal plist values are normalized to numbers; invalid values fail configuration loading with an error naming the key. See [Multipart Uploads](MULTIPART_UPLOADS.md) for buffering behavior and a 110 MiB request configuration.
+
+## Auth Module OIDC Providers
+
+Configure `authModule.providers.<identifier>` with `enabled = YES` and
+`type = "oidc"`. Provider identifiers contain only ASCII letters, digits,
+underscores, or hyphens; `stub` is reserved.
+
+| Key | Contract/default |
+| --- | --- |
+| `issuer` | Required exact HTTPS issuer; discovery must match it. |
+| `discoveryURL` | Required HTTPS discovery URL on an allowed endpoint host. |
+| `clientID` | Required web/public client identifier and ID-token audience. |
+| `redirectURI` | Required registered HTTPS callback URI. |
+| `clientSecretEnvironmentKey` | Required nonempty environment secret for confidential clients; never a literal secret. |
+| `tokenEndpointAuthMethod` | `client_secret_post` by default; `none` for public PKCE clients. |
+| `scopes` | Defaults to `(openid, profile, email)`; must include `openid`. |
+| `subjectClaim` | Verified claim used for the principal; defaults to `sub`. |
+| `tenantClaim`, `allowedTenants` | Configure together; nonempty allowlist required. Produces `<tenant>:<subject>`. |
+| `endpointAllowedHosts` | Lowercase host allowlist for discovery/authorization/token endpoints; defaults to issuer host. |
+| `jwksAllowedHosts` | Lowercase JWKS host allowlist; defaults to endpoint allowlist. |
+| `ctaLabel` | Login button text; defaults to `Continue with <identifier>`. |
+
+`authModule.hooks.providerSessionResolverClass` is required for real providers.
+Its class implements `ALNAuthProviderSessionResolver` and decides whether a
+verified principal maps to an application user. There is no automatic email
+linking or user creation on this path.
+
+`authModule.localPassword.enabled` and `authModule.providers.stub.enabled`
+default to false when a real provider is enabled, true otherwise. Explicit
+values override those defaults. Older copied manifests may explicitly enable
+stub; turn it off in application configuration. The same choices apply to
+HTML and API routes. `hooks.oidcTransportClass` is an optional trusted transport
+injection, primarily for deterministic tests.
+
+See [Auth Module](AUTH_MODULE.md#configurable-oidc-login-including-microsoft-entra)
+for the complete Entra example, callback/session semantics, transport limits,
+resolver implementation, and upgrade instructions.

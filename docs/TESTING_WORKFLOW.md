@@ -485,3 +485,26 @@ capture stdout separately from stderr, retaining notices for diagnostics. Auth
 servers launch with `exec` so the test owns the server PID; cleanup sends TERM,
 waits up to five seconds, escalates to KILL if necessary, and reaps the process.
 This cleanup runs in `@finally`, including assertion failures.
+
+## Security Header Cold-Start Regression
+
+After sourcing `tools/source_gnustep_env.sh`, run
+`make test-unit-filter TEST=SecurityHeadersColdStartTests`. The test compiles a
+standalone probe against the framework, runs a single-thread control, and runs
+20 fresh processes with 32 barrier-synchronized first callers each. It checks
+all six security-header defaults, default/custom CSP, and existing response
+header preservation. The probe inherits sanitizer instrumentation from the
+test bundle, while excluding preload libraries from compiler utilities.
+
+The test is included in the full unit suite, the Linux quality gate, and the
+ASan/UBSan unit lane. Required checks remain unchanged.
+
+On macOS, the Apple baseline job selects the OIDC, metadata transport, and
+security-header cold-start tests with native XCTest. To reproduce:
+
+```bash
+bundle_path="$(tools/build_apple_xctest.sh --suite unit --print-bundle-path)"
+for filter in AuthModuleOIDCTests MetadataTransportTests SecurityHeadersColdStartTests; do
+  xcrun xctest -XCTest "$filter" "$bundle_path"
+done
+```

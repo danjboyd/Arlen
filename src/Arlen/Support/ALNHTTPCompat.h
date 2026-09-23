@@ -53,9 +53,16 @@ FOUNDATION_EXPORT NSData *_Nullable ALNBoundedMetadataGET(NSURL *url, NSUInteger
 
 /// Same bounded transport with sanitized Arlen.Metadata errors (no URLs or bodies).
 /// Codes: 1 invalid bounds, 2 redirect, 3 response/declared size, 4 streamed size,
-/// 5 transport, 6 total deadline. GNUstep requires libcurl with TLS and async DNS.
+/// 5 transport, 6 total deadline. GNUstep and Apple require libcurl with TLS and async DNS.
 FOUNDATION_EXPORT NSData *_Nullable ALNBoundedMetadataGETWithError(NSURL *url, NSUInteger maxBytes,
     NSTimeInterval timeout, NSError *_Nullable *_Nullable error);
+
+/// Bounded libcurl GET or form POST on GNUstep and Apple, requiring HTTP 200,
+/// no redirects or shared cookies.
+/// Uses only the URL, method, body, and timeout; sets JSON Accept and form Content-Type.
+/// Errors are sanitized like ALNBoundedMetadataGETWithError; never include request secrets.
+FOUNDATION_EXPORT NSData *_Nullable ALNBoundedJSONRequest(NSURLRequest *request,
+    NSUInteger maxBytes, NSError *_Nullable *_Nullable error);
 
 NS_ASSUME_NONNULL_END
 

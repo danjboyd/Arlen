@@ -43,7 +43,7 @@
         };
         providers = {
           stub = {
-            enabled = YES;
+            /* Default enabled only when no real OIDC provider is enabled. */
             email = "stub-user@example.test";
             displayName = "Stub Provider User";
             clientSecret = "auth-module-stub-provider-secret-0123456789abcdef";

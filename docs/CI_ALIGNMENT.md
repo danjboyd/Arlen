@@ -387,3 +387,25 @@ migration JSON stdout, word-based fuzzy search, and repeated auth server cleanup
 It supplies a non-default `GNUSTEP_SH` to exercise portable bootstrap. Existing
 required check names and branch-protection contexts stay the same; a missing
 PostgreSQL server or extension is a failure, not a skipped live test.
+
+The Linux quality job explicitly runs `OpsOptionalModulesIntegrationTests`, which
+scaffolds and links both ops alone and auth/jobs/search/ops, then executes an
+absent-module summary and authorization probe. This covers link dependencies
+that the all-modules test bundle cannot detect.
+
+The Linux quality job explicitly runs `AuthModuleOIDCTests` and
+`MetadataTransportTests`: provider routes, PKCE/session completion, identity
+policy, default access modes, token rejection, and bounded socket GET/POST.
+Real tenant acceptance remains separate from deterministic required CI.
+
+`SecurityHeadersColdStartTests` is explicitly selected in the Linux quality job
+and included in the sanitizer matrix's full unit suite. Its child probe retains
+ASan/UBSan (or TSan) instrumentation and runs fresh processes, so warmed static
+state in the XCTest runner cannot hide initialization races. No required lane
+is added or renamed by this regression.
+
+The Apple baseline job also selects `AuthModuleOIDCTests`,
+`MetadataTransportTests`, and `SecurityHeadersColdStartTests` using Apple XCTest.
+This exercises the shared libcurl bounded-POST implementation and native
+cold-start probe on Apple, including cookie isolation and exact size/error
+contracts.

@@ -1383,3 +1383,16 @@ retain stderr separately for diagnostics. PostgreSQL can emit notices on stderr
 when an idempotent migration encounters an existing relation. Do not merge
 `2>&1` into the JSON input. Check the process exit status before consuming the
 payload.
+
+`module add ops` does not require installing jobs, notifications, storage, search,
+or auth. `boomhauer --prepare-only` can build these partial installations. Ops
+access checks still apply; see [Ops Module](OPS_MODULE.md).
+
+After `module add auth`, configure real OIDC providers and the resolver hook in
+`authModule`; provider login needs no separate CLI command. Updating an existing
+app requires updating its copied auth module sources/templates. See
+[Auth Module](AUTH_MODULE.md#configurable-oidc-login-including-microsoft-entra).
+
+Both `boomhauer` and `propane` use the same concurrent-safe security-header
+defaults. No new CLI option or propane accessory is required; see
+[Response Headers](RESPONSE_HEADERS.md#concurrent-security-headers).
