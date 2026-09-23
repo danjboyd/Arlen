@@ -406,5 +406,6 @@ is added or renamed by this regression.
 
 The Apple baseline job also selects `AuthModuleOIDCTests`,
 `MetadataTransportTests`, and `SecurityHeadersColdStartTests` using Apple XCTest.
-This exercises the Foundation bounded-POST implementation and native cold-start
-probe, rather than inferring Apple transport behavior from Linux coverage.
+This exercises the shared libcurl bounded-POST implementation and native
+cold-start probe on Apple, including cookie isolation and exact size/error
+contracts.

@@ -41,56 +41,14 @@ static NSError *MetadataError(NSInteger code, NSString *reason) {
                         userInfo:@{NSLocalizedDescriptionKey:reason}];
 }
 
-#if !defined(GNUSTEP)
-// Apple Foundation transport; GNUstep workaround follows below.
-@interface ALNMetadataConnection : NSObject <NSURLConnectionDelegate>
-@property(nonatomic, strong) NSMutableData *data;
-@property(nonatomic, assign) NSUInteger limit;
-@property(nonatomic, assign) BOOL done;
-@property(nonatomic, assign) BOOL accepted;
-@property(nonatomic, strong) NSError *error;
-@end
-@implementation ALNMetadataConnection
-- (NSURLRequest *)connection:(NSURLConnection *)connection willSendRequest:(NSURLRequest *)request
-            redirectResponse:(NSURLResponse *)response {
-  if (response) { self.error = MetadataError(2, @"Metadata redirect rejected"); self.accepted = NO; self.done = YES; [connection cancel]; return nil; }
-  return request;
-}
-- (void)connection:(NSURLConnection *)connection didReceiveResponse:(NSURLResponse *)response {
-  self.accepted = [response isKindOfClass:[NSHTTPURLResponse class]] &&
-      [(NSHTTPURLResponse *)response statusCode] == 200 &&
-      (response.expectedContentLength < 0 || (unsigned long long)response.expectedContentLength <= self.limit);
-  if (!self.accepted) {
-    self.error = MetadataError(3, @"Metadata HTTP response rejected (requires 200 within size limit)");
-    self.done = YES; [connection cancel]; }
-}
-- (void)connection:(NSURLConnection *)connection didReceiveData:(NSData *)data {
-  if (data.length > self.limit - self.data.length) {
-    self.error = MetadataError(4, @"Metadata response exceeds size limit");
-    self.accepted = NO; self.done = YES; [connection cancel]; return;
-  }
-  [self.data appendData:data];
-}
-- (void)connectionDidFinishLoading:(NSURLConnection *)connection { self.done = YES; }
-- (void)connection:(NSURLConnection *)connection didFailWithError:(NSError *)error {
-  // Never retain Foundation userInfo: it can contain URLs and response data.
-  self.error = MetadataError(5, @"Metadata transport failed");
-  if ([error.domain isEqual:NSURLErrorDomain]) {
-    self.error = MetadataError(5, [NSString stringWithFormat:@"Metadata transport failed (NSURLErrorDomain %ld)", (long)error.code]);
-  }
-  self.accepted = NO; self.done = YES;
-}
-@end
-#endif
-
 NSData *ALNBoundedMetadataGET(NSURL *url, NSUInteger maxBytes, NSTimeInterval timeout) {
   return ALNBoundedMetadataGETWithError(url, maxBytes, timeout, NULL);
 }
-#if defined(GNUSTEP)
-// Work around GNUstep libs-base #783. The older NSURLConnection socket path
-// requires default-mode pumping; its TLS defaults also depend on process-wide
-// settings. libcurl provides per-request chain/hostname verification and a
-// streaming, deadline-bounded transport without servicing the caller's run loop.
+#if defined(GNUSTEP) || defined(__APPLE__)
+// Reuse one bounded transport on GNUstep and Apple. This avoids GNUstep's
+// default-run-loop dependency (#783) and Foundation request-copy/cancellation
+// differences. No caller headers or shared cookies enter the transfer; TLS,
+// streamed size limits and the total deadline have identical semantics.
 typedef struct {
   void *buffer;
   NSError *__strong *failure;
@@ -240,37 +198,11 @@ NSData *ALNBoundedJSONRequest(NSURLRequest *input, NSUInteger maxBytes, NSError 
     if (error) *error = MetadataError(6, @"Metadata monotonic clock unavailable");
     return nil;
   }
-#if defined(GNUSTEP)
+#if defined(GNUSTEP) || defined(__APPLE__)
   return MetadataCurlRequest(input, maxBytes, timeout, deadline, error);
 #else
-  NSMutableURLRequest *request = [input mutableCopy];
-  [request setCachePolicy:NSURLRequestReloadIgnoringLocalCacheData];
-  [request setAllHTTPHeaderFields:@{ @"Accept": @"application/json" }];
-  if ([input.HTTPMethod isEqual:@"POST"])
-    [request setValue:@"application/x-www-form-urlencoded" forHTTPHeaderField:@"Content-Type"];
-  [request setHTTPShouldHandleCookies:NO];
-  [request setValue:@"application/json" forHTTPHeaderField:@"Accept"];
-  ALNMetadataConnection *delegate = [ALNMetadataConnection new];
-  delegate.limit = maxBytes; delegate.data = [NSMutableData data];
-  NSURLConnection *connection = [[NSURLConnection alloc] initWithRequest:request delegate:delegate startImmediately:NO];
-  if (!connection) {
-    if (error) *error = MetadataError(5, @"Metadata transport could not initialize");
-    return nil;
-  }
-  NSString *mode = @"Arlen.MetadataFetch";
-  [connection scheduleInRunLoop:[NSRunLoop currentRunLoop] forMode:mode];
-  [connection start];
-  while (!delegate.done && MetadataNow() < deadline) {
-    [[NSRunLoop currentRunLoop] runMode:mode beforeDate:[NSDate dateWithTimeIntervalSinceNow:MIN(0.05, MAX(0, deadline - MetadataNow()))]];
-  }
-  [connection cancel];
-  [connection unscheduleFromRunLoop:[NSRunLoop currentRunLoop] forMode:mode];
-  if (!delegate.done || !isfinite(MetadataNow()) || MetadataNow() >= deadline) {
-    if (error) *error = MetadataError(6, @"Metadata total deadline exceeded");
-    return nil;
-  }
-  if (error) *error = delegate.error;
-  return delegate.accepted ? [delegate.data copy] : nil;
+  if (error) *error = MetadataError(5, @"Bounded JSON transport requires libcurl on GNUstep or Apple");
+  return nil;
 #endif
 }
 

@@ -66,7 +66,7 @@ response. Bodies are buffered in memory. The bounded metadata helper remains a
 separate API with its own size limits and redirect rejection.
 
 `ALNBoundedJSONRequest` provides bounded GET and form POST for trusted JSON
-endpoints. It accepts URL, method, body, and timeout from `NSURLRequest`, sets
+endpoints, using the same libcurl implementation on GNUstep and Apple. It accepts URL, method, body, and timeout from `NSURLRequest`, sets
 JSON Accept/form Content-Type headers, requires HTTP 200, rejects redirects,
 and disables shared cookies. Its caller supplies a response byte limit. Errors
 are sanitized; request secrets and response bodies are not included.

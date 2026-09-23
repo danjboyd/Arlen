@@ -5,6 +5,7 @@
 #import "ALNCryptoCompat.h"
 #import "ALNSecurityPrimitives.h"
 #import "ALNAuthModule.h"
+#import "ALNEOCRuntime.h"
 #import "ALNAuthModuleOIDC.h"
 #import "ALNApplication.h"
 #import "ALNContext.h"
@@ -140,6 +141,27 @@ static NSDictionary *ResolvedIdentity;
   return @{ @"subject": @"person-42", @"roles": @[ @"staff" ], @"assuranceLevel": @1 };
 }
 @end
+
+// Other unit cases clear the process-global registry. Register exactly the real
+// compiled templates used by this test instead of depending on constructor order.
+static void RegisterOIDCLoginTemplates(void) {
+  extern NSString *ALNEOCRender_modules_auth_login_index_html_eoc(id, NSError **);
+  ALNEOCRegisterTemplate(@"modules/auth/login/index.html.eoc", &ALNEOCRender_modules_auth_login_index_html_eoc);
+  extern NSString *ALNEOCRender_modules_auth_layouts_main_html_eoc(id, NSError **);
+  ALNEOCRegisterTemplate(@"modules/auth/layouts/main.html.eoc", &ALNEOCRender_modules_auth_layouts_main_html_eoc);
+  extern NSString *ALNEOCRender_modules_auth_partials_page_wrapper_html_eoc(id, NSError **);
+  ALNEOCRegisterTemplate(@"modules/auth/partials/page_wrapper.html.eoc", &ALNEOCRender_modules_auth_partials_page_wrapper_html_eoc);
+  extern NSString *ALNEOCRender_modules_auth_partials_message_block_html_eoc(id, NSError **);
+  ALNEOCRegisterTemplate(@"modules/auth/partials/message_block.html.eoc", &ALNEOCRender_modules_auth_partials_message_block_html_eoc);
+  extern NSString *ALNEOCRender_modules_auth_partials_error_block_html_eoc(id, NSError **);
+  ALNEOCRegisterTemplate(@"modules/auth/partials/error_block.html.eoc", &ALNEOCRender_modules_auth_partials_error_block_html_eoc);
+  extern NSString *ALNEOCRender_modules_auth_partials_bodies_login_body_html_eoc(id, NSError **);
+  ALNEOCRegisterTemplate(@"modules/auth/partials/bodies/login_body.html.eoc", &ALNEOCRender_modules_auth_partials_bodies_login_body_html_eoc);
+  extern NSString *ALNEOCRender_modules_auth_fragments_provider_login_buttons_html_eoc(id, NSError **);
+  ALNEOCRegisterTemplate(@"modules/auth/fragments/provider_login_buttons.html.eoc", &ALNEOCRender_modules_auth_fragments_provider_login_buttons_html_eoc);
+  extern NSString *ALNEOCRender_modules_auth_partials_provider_row_html_eoc(id, NSError **);
+  ALNEOCRegisterTemplate(@"modules/auth/partials/provider_row.html.eoc", &ALNEOCRender_modules_auth_partials_provider_row_html_eoc);
+}
 
 @interface AuthModuleOIDCTests : XCTestCase
 @end
@@ -362,6 +384,7 @@ static NSDictionary *ResolvedIdentity;
   XCTAssertNil(provider.configuration[@"clientSecret"]);
 }
 - (void)testEnterpriseLoginPageHasProviderButtonWithoutPasswordForm {
+  RegisterOIDCLoginTemplates();
   ALNApplication *app = [self application];
   ALNResponse *response = [app dispatchRequest:[[ALNRequest alloc] initWithMethod:@"GET"
       path:@"/context/auth/login" queryString:@"" headers:@{} body:[NSData data]]];
