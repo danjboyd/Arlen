@@ -115,6 +115,81 @@
   return nil;
 }
 
+- (void)testGeneratedDescriptorsHaveStableIdentityOnConcurrentFirstUse {
+  // Two independent models catch accidental sharing of a once token/cache.
+  NSMutableArray *relations = [NSMutableArray array];
+  NSMutableArray *columns = [NSMutableArray array];
+  NSMutableArray *keys = [NSMutableArray array];
+  for (NSString *table in @[@"widgets", @"gadgets"]) {
+    [relations addObject:@{ @"schema": @"public", @"table": table, @"relation_kind": @"table" }];
+    [columns addObject:@{ @"schema": @"public", @"table": table, @"column": @"id",
+                         @"data_type": @"uuid", @"ordinal": @1, @"nullable": @NO }];
+    [keys addObject:@{ @"schema": @"public", @"table": table, @"columns": @[@"id"] }];
+  }
+  NSError *error = nil;
+  NSDictionary *artifacts = [ALNORMCodegen renderArtifactsFromSchemaMetadata:
+      @{ @"relations": relations, @"columns": columns, @"primary_keys": keys }
+      classPrefix:@"Cold" error:&error];
+  XCTAssertNil(error);
+  XCTAssertNotNil(artifacts);
+  if (artifacts == nil) return;
+  NSString *root = ALNTestRepoRoot();
+  NSString *tmp = ALNTestTemporaryDirectory(@"orm_cold_descriptor");
+  XCTAssertNotNil(tmp);
+  if (tmp == nil) return;
+  @try {
+    NSString *implementation = [tmp stringByAppendingPathComponent:@"ColdGeneratedModels.m"];
+    NSString *binary = [tmp stringByAppendingPathComponent:@"cold-descriptor-probe"];
+    XCTAssertTrue(ALNTestWriteUTF8File([tmp stringByAppendingPathComponent:@"ColdGeneratedModels.h"],
+                                      artifacts[@"header"], &error), @"%@", error);
+    XCTAssertTrue(ALNTestWriteUTF8File(implementation, artifacts[@"implementation"], &error), @"%@", error);
+    NSString *includeFlags = [self syntaxOnlyIncludeFlagsWithRepoRoot:root temporaryDir:tmp];
+    NSMutableString *sanitizers = [NSMutableString string];
+#if __has_feature(address_sanitizer)
+    [sanitizers appendString:@" -fsanitize=address -fno-omit-frame-pointer"];
+#endif
+#if __has_feature(undefined_behavior_sanitizer)
+    [sanitizers appendString:@" -fsanitize=undefined"];
+#endif
+#if __has_feature(thread_sanitizer)
+    [sanitizers appendString:@" -fsanitize=thread"];
+#endif
+#if defined(__APPLE__)
+    NSString *compiler = @"xcrun clang -fobjc-arc -fblocks -pthread";
+    NSString *archive = [root stringByAppendingPathComponent:@"build/apple/lib/libArlenFramework.a"];
+    NSString *libraries = @"-framework Foundation -framework CoreFoundation -L\"${ARLEN_OPENSSL_PREFIX:-$(brew --prefix openssl@3)}/lib\" -lcrypto -lcurl";
+#else
+    NSString *compiler = [NSString stringWithFormat:@"%@ && clang $(gnustep-config --objc-flags) %@ -fobjc-arc -pthread",
+        ALNTestGNUstepSourceCommandForRepoRoot(root), [self gnuStepSyntaxOnlyContractFlags]];
+    NSString *archive = [root stringByAppendingPathComponent:@"build/lib/libArlenFramework.a"];
+    NSString *libraries = @"$(gnustep-config --base-libs) -lcrypto -ldispatch -lcurl -ldl";
+#endif
+    NSString *compile = [NSString stringWithFormat:@"%@ %@ -Wno-nullability-completeness %@ %@ %@ %@ -o %@ %@",
+        compiler, sanitizers, includeFlags, ALNTestShellQuote(implementation),
+        ALNTestShellQuote([root stringByAppendingPathComponent:@"tests/fixtures/phase26/orm_descriptor_first_use_probe.m"]),
+        ALNTestShellQuote(archive), ALNTestShellQuote(binary), libraries];
+    // Keep preload runtimes out of compiler/config utilities. The child binary
+    // links its own sanitizer runtime and retains ASAN_OPTIONS/UBSAN_OPTIONS.
+    NSString *command = [NSString stringWithFormat:@"LD_PRELOAD='' XCTEST_LD_PRELOAD='' bash -c %@",
+        ALNTestShellQuote(compile)];
+    int code = 0;
+    NSString *output = ALNTestRunShellCapture(command, &code);
+    XCTAssertEqual(0, code, @"%@", output);
+    if (code != 0) return;
+    command = [NSString stringWithFormat:
+        @"set -e; ulimit -c 0; export LD_PRELOAD='' XCTEST_LD_PRELOAD=''; %@ 1; "
+         "for trial in {1..20}; do %@ 32; done",
+        ALNTestShellQuote(binary), ALNTestShellQuote(binary)];
+    output = ALNTestRunShellCapture(command, &code);
+    XCTAssertEqual(0, code, @"%@", output);
+    XCTAssertEqual((NSUInteger)21,
+        [[output componentsSeparatedByString:@"cold descriptor identity and ownership passed"] count] - 1,
+        @"%@", output);
+  } @finally {
+    [[NSFileManager defaultManager] removeItemAtPath:tmp error:NULL];
+  }
+}
+
 - (void)testDescriptorsReflectAssociationsAndReadOnlySemantics {
   NSError *error = nil;
   NSArray<ALNORMModelDescriptor *> *descriptors =
@@ -340,7 +415,7 @@
   NSString *root = ALNTestRepoRoot();
   NSString *flags = [self syntaxOnlyIncludeFlagsWithRepoRoot:root temporaryDir:tmp];
 #if defined(__APPLE__)
-  NSString *compiler = @"xcrun clang -fobjc-arc -bundle -undefined dynamic_lookup";
+  NSString *compiler = @"xcrun clang -fobjc-arc -fblocks -bundle -undefined dynamic_lookup";
 #else
   // Sanitizer lanes preload libasan into every child; gnustep-config then
   // prints nothing, so name the runtime contract explicitly like the
@@ -481,7 +556,7 @@
   NSString *command = [NSString stringWithFormat:
       @"set -euo pipefail && "
        "cd %@ && "
-       "xcrun clang -isysroot \"$(xcrun --show-sdk-path)\" -arch arm64 -fobjc-arc -fsyntax-only "
+       "xcrun clang -isysroot \"$(xcrun --show-sdk-path)\" -arch arm64 -fobjc-arc -fblocks -fsyntax-only "
        "%@ %@",
       ALNTestShellQuote(repoRoot),
       includeFlags,
@@ -547,7 +622,7 @@
     NSString *command = [NSString stringWithFormat:
         @"set -euo pipefail && "
          "cd %@ && "
-         "xcrun clang -isysroot \"$(xcrun --show-sdk-path)\" -arch arm64 -fobjc-arc -fsyntax-only "
+         "xcrun clang -isysroot \"$(xcrun --show-sdk-path)\" -arch arm64 -fobjc-arc -fblocks -fsyntax-only "
          "%@ %@",
         ALNTestShellQuote(repoRoot),
         includeFlags,

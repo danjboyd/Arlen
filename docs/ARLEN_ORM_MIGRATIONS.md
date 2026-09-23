@@ -63,3 +63,17 @@ names now receive safe aliases; resolve normalization collisions with
 `field_names` and inspect the manifest before updating application call sites.
 Property overrides do not rename columns. See the
 [identifier contract](ARLEN_ORM.md#quoted-sql-identifiers).
+
+## Generated descriptor initialization update
+
+Regenerate SQL model implementations with the updated `ALNORMCodegen` and rebuild
+your application to adopt the fix for [issue #32](https://github.com/danjboyd/Arlen/issues/32).
+Previously generated `+modelDescriptor` methods used an unsynchronized nil check;
+concurrent first use could construct multiple descriptors or crash under ARC.
+Updating the framework archive alone does not rewrite existing generated source.
+
+New output uses a separate `dispatch_once` token for each model and retains the
+fully initialized descriptor for subsequent callers. No application warm-up is
+required. Model names, fields, relationships, and descriptor snapshot formats are
+unchanged; no database migration is needed. This guarantee covers descriptor
+initialization, not concurrent mutation of model instances or ORM contexts.

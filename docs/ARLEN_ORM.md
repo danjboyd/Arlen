@@ -98,6 +98,19 @@ default in generated models. Historical SQL descriptor snapshots are serialized
 through `ALNORMDescriptorSnapshot`, and `ALNORMSchemaDrift` fails closed when
 current descriptors diverge from a checked-in history contract.
 
+### Concurrent first use
+
+Generated SQL models initialize each class's descriptor exactly once with
+`dispatch_once`. Concurrent first callers receive the same fully initialized,
+strongly retained descriptor, without application warm-up. Generated source
+imports libdispatch explicitly; the supported Arlen toolchains already provide it.
+
+To adopt the initialization fix, regenerate existing model implementations via
+`ALNORMCodegen renderArtifactsFromSchemaMetadata:classPrefix:error:` (or the
+variant accepting overrides), then rebuild the application. See the
+[migration note](ARLEN_ORM_MIGRATIONS.md#generated-descriptor-initialization-update).
+Model/context mutation still follows its existing ownership contract.
+
 ### SQL property names
 
 SQL codegen reserves ORM lifecycle/runtime names, standard NSObject names,

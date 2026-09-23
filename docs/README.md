@@ -73,7 +73,7 @@ toolchain env directly for the Linux/GNUstep path. On macOS, use
 - [Getting Started: Data Layer](GETTING_STARTED_DATA_LAYER.md): PostgreSQL-first migrations, typed SQL helpers, and codegen.
 - [ArlenData Reuse Guide](ARLEN_DATA.md): standalone data-layer packaging and PostgreSQL/MSSQL/Dataverse usage.
 - [Dataverse Integration](DATAVERSE.md): Dataverse Web API client, config shape, OData query usage, and typed codegen workflow.
-- [ArlenORM Guide](ARLEN_ORM.md): optional SQL and Dataverse ORM layers on ArlenData, including quoted legacy SQL identifiers and safe generated property names.
+- [ArlenORM Guide](ARLEN_ORM.md): optional SQL and Dataverse ORM layers on ArlenData, including quoted legacy SQL identifiers, safe generated property names, and concurrent descriptor initialization.
 - [ArlenORM Migration Contracts](ARLEN_ORM_MIGRATIONS.md): descriptor snapshots and schema/codegen drift checks.
 - [ArlenORM Backend Matrix](ARLEN_ORM_BACKEND_MATRIX.md): PostgreSQL, MSSQL, and Dataverse capability boundaries.
 - [SQL Builder Conformance Matrix](SQL_BUILDER_CONFORMANCE_MATRIX.md): SQL snapshot matrix and regression map.
