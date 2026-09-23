@@ -401,3 +401,6 @@ The ops dashboard supports partial module installations; see [Ops Module](docs/O
 
 The auth module supports configurable OIDC browser login, including Entra, with
 application-owned identity resolution. See [OIDC setup](docs/AUTH_MODULE.md#configurable-oidc-login-including-microsoft-entra).
+
+Security-header defaults are safe on concurrent first requests; see
+[Response Headers](docs/RESPONSE_HEADERS.md#concurrent-security-headers).

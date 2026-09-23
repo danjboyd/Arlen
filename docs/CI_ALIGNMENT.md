@@ -397,3 +397,9 @@ The Linux quality job explicitly runs `AuthModuleOIDCTests` and
 `MetadataTransportTests`: provider routes, PKCE/session completion, identity
 policy, default access modes, token rejection, and bounded socket GET/POST.
 Real tenant acceptance remains separate from deterministic required CI.
+
+`SecurityHeadersColdStartTests` is explicitly selected in the Linux quality job
+and included in the sanitizer matrix's full unit suite. Its child probe retains
+ASan/UBSan (or TSan) instrumentation and runs fresh processes, so warmed static
+state in the XCTest runner cannot hide initialization races. No required lane
+is added or renamed by this regression.

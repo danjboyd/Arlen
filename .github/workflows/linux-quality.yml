@@ -72,6 +72,11 @@ jobs:
           make test-unit-filter TEST=AuthModuleOIDCTests
           make test-unit-filter TEST=MetadataTransportTests
 
+      - name: Verify concurrent security-header first use in fresh processes
+        run: |
+          source tools/source_gnustep_env.sh
+          make test-unit-filter TEST=SecurityHeadersColdStartTests
+
       - name: Upload perf + confidence artifacts
         if: github.event_name == 'workflow_dispatch' || failure()
         uses: actions/upload-artifact@v4

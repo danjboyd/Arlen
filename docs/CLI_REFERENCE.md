@@ -1392,3 +1392,7 @@ After `module add auth`, configure real OIDC providers and the resolver hook in
 `authModule`; provider login needs no separate CLI command. Updating an existing
 app requires updating its copied auth module sources/templates. See
 [Auth Module](AUTH_MODULE.md#configurable-oidc-login-including-microsoft-entra).
+
+Both `boomhauer` and `propane` use the same concurrent-safe security-header
+defaults. No new CLI option or propane accessory is required; see
+[Response Headers](RESPONSE_HEADERS.md#concurrent-security-headers).

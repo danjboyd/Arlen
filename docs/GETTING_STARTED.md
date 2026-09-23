@@ -284,3 +284,7 @@ for authentication requirements when composing a partial module installation.
 For company sign-in, add `auth`, configure an OIDC provider and an application
 identity resolver, and explicitly disable stub/password access if your copied
 manifest enables it. Follow the [Entra example and upgrade steps](AUTH_MODULE.md#configurable-oidc-login-including-microsoft-entra).
+
+Security-header defaults are shared safely across concurrent first requests.
+Explicit response headers and configured CSP remain supported; see
+[Response Headers](RESPONSE_HEADERS.md#concurrent-security-headers).

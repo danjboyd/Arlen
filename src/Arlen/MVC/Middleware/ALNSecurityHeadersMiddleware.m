@@ -2,6 +2,7 @@
 
 #import "ALNContext.h"
 #import "ALNResponse.h"
+#import <dispatch/dispatch.h>
 
 @interface ALNSecurityHeadersMiddleware ()
 
@@ -30,7 +31,8 @@
   (void)error;
   ALNResponse *response = context.response;
   static NSDictionary<NSString *, NSString *> *defaults = nil;
-  if (defaults == nil) {
+  static dispatch_once_t defaultsOnce;
+  dispatch_once(&defaultsOnce, ^{
     defaults = @{
       @"X-Content-Type-Options" : @"nosniff",
       @"X-Frame-Options" : @"SAMEORIGIN",
@@ -39,7 +41,7 @@
       @"Cross-Origin-Resource-Policy" : @"same-site",
       @"X-Permitted-Cross-Domain-Policies" : @"none",
     };
-  }
+  });
   [response setHeadersIfMissing:defaults];
   if ([self.contentSecurityPolicy length] > 0) {
     [self ensureHeader:@"Content-Security-Policy" value:self.contentSecurityPolicy response:response];
