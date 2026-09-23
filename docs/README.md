@@ -156,3 +156,5 @@ asynchronous DNS (Debian/Ubuntu: `libcurl4-openssl-dev`). See the
 For isolated live database checks, see the
 [PostgreSQL regression gate](TESTING_WORKFLOW.md#live-postgresql-regression-gate).
 It covers generated clients, migrations, search, and auth server cleanup.
+
+For composing an ops dashboard with optional modules, see [Ops Module](OPS_MODULE.md).

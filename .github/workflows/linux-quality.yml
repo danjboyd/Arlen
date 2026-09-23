@@ -61,6 +61,11 @@ jobs:
           source tools/source_gnustep_env.sh
           bash tools/ci/run_orm_identifier_regressions.sh
 
+      - name: Verify ops builds with optional modules absent
+        run: |
+          source tools/source_gnustep_env.sh
+          make test-integration-filter TEST=OpsOptionalModulesIntegrationTests
+
       - name: Upload perf + confidence artifacts
         if: github.event_name == 'workflow_dispatch' || failure()
         uses: actions/upload-artifact@v4

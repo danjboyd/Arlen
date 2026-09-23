@@ -174,3 +174,8 @@ Use a plugin when you need:
 The optional `mcp` module is disabled by default. It exposes only explicitly
 registered route-backed and service-backed tools. See [MCP Module](MCP_MODULE.md)
 for installation, schemas, auth, and compatibility.
+
+The `ops` module resolves optional module runtimes at runtime. A partial
+installation can build without auth, jobs, notifications, storage, or search.
+Absent summary providers are reported as unavailable; authorization remains
+required. See [Ops Module](OPS_MODULE.md).

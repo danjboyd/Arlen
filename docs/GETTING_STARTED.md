@@ -276,3 +276,7 @@ separately. PostgreSQL notices may appear on stderr during repeated migrations;
 parse stdout as JSON and check the exit status. Framework contributors can run
 `bash tools/ci/run_postgres_regressions.sh` for isolated live database coverage;
 see [Testing Workflow](TESTING_WORKFLOW.md#live-postgresql-regression-gate).
+
+`arlen module add ops` works without jobs, notifications, storage, or search.
+Missing module summaries are marked unavailable. See [Ops Module](OPS_MODULE.md)
+for authentication requirements when composing a partial module installation.

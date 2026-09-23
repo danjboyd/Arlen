@@ -387,3 +387,8 @@ migration JSON stdout, word-based fuzzy search, and repeated auth server cleanup
 It supplies a non-default `GNUSTEP_SH` to exercise portable bootstrap. Existing
 required check names and branch-protection contexts stay the same; a missing
 PostgreSQL server or extension is a failure, not a skipped live test.
+
+The Linux quality job explicitly runs `OpsOptionalModulesIntegrationTests`, which
+scaffolds and links both ops alone and auth/jobs/search/ops, then executes an
+absent-module summary and authorization probe. This covers link dependencies
+that the all-modules test bundle cannot detect.
