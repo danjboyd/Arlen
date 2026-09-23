@@ -38,6 +38,13 @@ jobs:
         run: |
           bash tools/ci/run_apple_client_data_regressions.sh 2>&1 | tee build/release_confidence/phase30/client_data_regressions.log
 
+      - name: Verify OIDC transport and concurrent security-header initialization
+        run: |
+          bundle_path="$(tools/build_apple_xctest.sh --suite unit --print-bundle-path)"
+          for filter in AuthModuleOIDCTests MetadataTransportTests SecurityHeadersColdStartTests; do
+            xcrun xctest -XCTest "$filter" "$bundle_path"
+          done
+
       - name: Upload Apple confidence artifacts
         if: github.event_name == 'workflow_dispatch' || failure()
         uses: actions/upload-artifact@v4

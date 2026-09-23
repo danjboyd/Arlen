@@ -403,3 +403,8 @@ and included in the sanitizer matrix's full unit suite. Its child probe retains
 ASan/UBSan (or TSan) instrumentation and runs fresh processes, so warmed static
 state in the XCTest runner cannot hide initialization races. No required lane
 is added or renamed by this regression.
+
+The Apple baseline job also selects `AuthModuleOIDCTests`,
+`MetadataTransportTests`, and `SecurityHeadersColdStartTests` using Apple XCTest.
+This exercises the Foundation bounded-POST implementation and native cold-start
+probe, rather than inferring Apple transport behavior from Linux coverage.

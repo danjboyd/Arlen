@@ -498,3 +498,13 @@ test bundle, while excluding preload libraries from compiler utilities.
 
 The test is included in the full unit suite, the Linux quality gate, and the
 ASan/UBSan unit lane. Required checks remain unchanged.
+
+On macOS, the Apple baseline job selects the OIDC, metadata transport, and
+security-header cold-start tests with native XCTest. To reproduce:
+
+```bash
+bundle_path="$(tools/build_apple_xctest.sh --suite unit --print-bundle-path)"
+for filter in AuthModuleOIDCTests MetadataTransportTests SecurityHeadersColdStartTests; do
+  xcrun xctest -XCTest "$filter" "$bundle_path"
+done
+```
