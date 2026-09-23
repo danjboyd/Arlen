@@ -126,3 +126,8 @@ quality, sanitizer, and docs check names. Verify the Apple confidence job's
 `client_data_regressions.log` as well: it exercises received HTTP metadata,
 redirect boundaries, retry policies, and microsecond round trips on Apple
 Foundation. Its PostgreSQL database is disposable; no provider writes are used.
+
+The required `linux-quality / quality-gate` includes the isolated PostgreSQL
+regression step (`tools/ci/run_postgres_regressions.sh`). Release validation must
+include its generated-client, migration, search, and repeated server cleanup
+coverage. No additional branch-protection check name is needed for this step.

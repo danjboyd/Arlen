@@ -463,3 +463,25 @@ This builds the Apple XCTest bundle once and runs HTTP, Dataverse policy, and
 live timestamp regressions. `ARLEN_TEST_PG_BIN` and `ARLEN_LIBPQ_PREFIX` can select
 an existing PostgreSQL installation. Linux CI's clang `/usr/GNUstep` bootstrap
 and repo-local tools-xctest runner remain unchanged.
+
+## Live PostgreSQL regression gate
+
+Run `bash tools/ci/run_postgres_regressions.sh` with the supported clang GNUstep
+toolchain and PostgreSQL server tools, including `pg_trgm`, installed. It creates
+an isolated cluster, sets `ARLEN_PG_TEST_DSN`, and exercises generated-code
+consumers, module migrations, PostgreSQL search, and auth server lifecycle tests.
+Auth tests run twice; remaining database sessions fail the gate before `dropdb`
+without force verifies cleanup. Logs are under
+`build/release_confidence/postgres_regressions/`.
+
+The script also supplies a temporary non-default `GNUSTEP_SH`; CI harnesses use
+`tools/source_gnustep_env.sh` instead of assuming a system install. Deployment
+fixtures resolve the local toolchain while explicit deployment target paths
+remain subject to doctor validation. CI provisioning still uses `/usr/GNUstep`.
+
+Generated smoke programs use `make test-client-program` through the shared test
+helper, linking `libArlenFramework.a` with canonical build flags. JSON assertions
+capture stdout separately from stderr, retaining notices for diagnostics. Auth
+servers launch with `exec` so the test owns the server PID; cleanup sends TERM,
+waits up to five seconds, escalates to KILL if necessary, and reaps the process.
+This cleanup runs in `@finally`, including assertion failures.

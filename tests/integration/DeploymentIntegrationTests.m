@@ -1591,7 +1591,12 @@
 
   @try {
     NSString *releasePath = [workRoot stringByAppendingPathComponent:@"host/myapp"];
-    NSString *gnustepScript = @"/usr/GNUstep/System/Library/Makefiles/GNUstep.sh";
+    int resolverCode = 0;
+    NSString *gnustepScript = [[self runShellCapture:[NSString stringWithFormat:@"bash %@", [self shellQuoted:[repoRoot stringByAppendingPathComponent:@"tools/resolve_gnustep.sh"]]]
+                                          exitCode:&resolverCode]
+        stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    XCTAssertEqual(0, resolverCode);
+    XCTAssertTrue([gnustepScript length] > 0);
     NSString *deployConfig = [NSString stringWithFormat:
                                   @"{\n"
                                    "  deployment = {\n"

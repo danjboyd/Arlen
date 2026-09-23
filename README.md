@@ -299,6 +299,12 @@ make test-data-layer
 make browser-error-audit
 ```
 
+
+Live PostgreSQL regression coverage for generated clients, migration JSON,
+search, and auth server cleanup runs in the required Linux quality gate.
+Contributors can run `bash tools/ci/run_postgres_regressions.sh`; see the
+[testing workflow](docs/TESTING_WORKFLOW.md#live-postgresql-regression-gate).
+
 The `GNUmakefile` exposes additional confidence lanes tied to historical
 milestone work (search the `Makefile` for `*-confidence` targets). Those lanes
 are intended for contributors validating specific subsystems and are not part

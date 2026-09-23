@@ -270,3 +270,9 @@ After updating Arlen, regenerate existing SQL ORM model implementations with you
 application's `ALNORMCodegen` generation step and rebuild. Current output safely
 initializes each model descriptor on concurrent first use; older generated code
 must be regenerated to receive that fix. See [ArlenORM migration notes](ARLEN_ORM_MIGRATIONS.md#generated-descriptor-initialization-update).
+
+When automating `arlen module migrate --json`, capture stdout and stderr
+separately. PostgreSQL notices may appear on stderr during repeated migrations;
+parse stdout as JSON and check the exit status. Framework contributors can run
+`bash tools/ci/run_postgres_regressions.sh` for isolated live database coverage;
+see [Testing Workflow](TESTING_WORKFLOW.md#live-postgresql-regression-gate).

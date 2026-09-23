@@ -661,3 +661,12 @@ ARLEN_PHASE27_MEILI_URL=...
 ARLEN_PHASE27_OPENSEARCH_URL=...
 make phase27-confidence
 ```
+
+### PostgreSQL fuzzy contract correction (2026-09-23)
+
+Issue #37 separates exact-query promotion and phrase coverage from PostgreSQL
+fuzzy behavior. Fuzzy matching uses strict word similarity against document
+text and headlines mark matching document words. The mandatory Linux PostgreSQL
+regression step exercises typo matches inside long documents, excludes unrelated
+rows, and verifies repeatable ordering. Downstream adoption remains separately
+owned by the reporting application.

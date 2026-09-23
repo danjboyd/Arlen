@@ -9,7 +9,7 @@ thresholds="${ARLEN_PHASE10M_CHAOS_THRESHOLDS:-$repo_root/tests/fixtures/runtime
 allow_fail="${ARLEN_PHASE10M_CHAOS_ALLOW_FAIL:-0}"
 
 set +u
-source /usr/GNUstep/System/Library/Makefiles/GNUstep.sh
+source "$repo_root/tools/source_gnustep_env.sh"
 set -u
 make boomhauer
 prebuild_env=(

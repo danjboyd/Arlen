@@ -2162,16 +2162,22 @@ static NSDictionary *STStatusCard(NSString *label, NSString *value, NSString *st
           self.textSearchConfiguration,
           self.textSearchConfiguration];
     } else if ([queryMode isEqualToString:@"fuzzy"]) {
+      // Compare against word extents so document length does not dilute a typo.
+      // Headline uses matching document words, since the misspelling itself is absent.
       sql = [NSString stringWithFormat:
           @"SELECT record_id, "
-           "GREATEST(ts_rank_cd(to_tsvector('%@', searchable_text), plainto_tsquery('%@', $3)), similarity(searchable_text, $3)) AS score, "
-           "CASE WHEN searchable_text ILIKE ('%%' || $3 || '%%') "
-           "THEN regexp_replace(searchable_text, '(' || regexp_replace($3, '([\\\\.\\\\[\\\\]\\\\(\\\\)\\\\?\\\\+\\\\*\\\\^\\\\$\\\\|])', '\\\\\\\\\\1', 'g') || ')', '<b>\\\\1</b>', 'i') "
-           "ELSE searchable_text END AS highlight "
+           "GREATEST(ts_rank_cd(to_tsvector('%@', searchable_text), plainto_tsquery('%@', $3)), strict_word_similarity($3, searchable_text)) AS score, "
+           "ts_headline('%@', searchable_text, plainto_tsquery('%@', $3) || "
+           "plainto_tsquery('%@', COALESCE((SELECT string_agg(DISTINCT token, ' ') "
+           "FROM regexp_split_to_table(searchable_text, '[^[:alnum:]]+') AS words(token) "
+           "WHERE $3 <<%% token), ''))) AS highlight "
            "FROM %@ "
            "WHERE resource_identifier = $1 AND generation = $2 "
-           "AND (searchable_text %% $3 OR to_tsvector('%@', searchable_text) @@ plainto_tsquery('%@', $3)) "
+           "AND ($3 <<%% searchable_text OR to_tsvector('%@', searchable_text) @@ plainto_tsquery('%@', $3)) "
            "ORDER BY score DESC, record_id ASC",
+          self.textSearchConfiguration,
+          self.textSearchConfiguration,
+          self.textSearchConfiguration,
           self.textSearchConfiguration,
           self.textSearchConfiguration,
           self.tableName,

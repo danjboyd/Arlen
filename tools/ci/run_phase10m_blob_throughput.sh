@@ -16,7 +16,7 @@ perf_cooldown_seconds="${ARLEN_PERF_COOLDOWN_SECONDS:-15}"
 perf_retry_count="${ARLEN_PERF_RETRY_COUNT:-2}"
 
 set +u
-source /usr/GNUstep/System/Library/Makefiles/GNUstep.sh
+source "$repo_root/tools/source_gnustep_env.sh"
 set -u
 
 run_blob_gate() {

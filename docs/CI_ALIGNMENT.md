@@ -377,3 +377,13 @@ required check is renamed or promoted: branch protection continues to require
 `linux-quality / quality-gate`, `linux-sanitizers / sanitizer-gate`, and
 `docs-quality / docs-gate`. Apple confidence remains nonblocking globally, but
 these changes require its contract regression evidence before issue closure.
+
+## Live PostgreSQL regression coverage
+
+The existing `linux-quality / quality-gate` runs
+`tools/ci/run_postgres_regressions.sh` before the general quality suite. This
+mandatory isolated-cluster step covers PostgreSQL generated clients, module
+migration JSON stdout, word-based fuzzy search, and repeated auth server cleanup.
+It supplies a non-default `GNUSTEP_SH` to exercise portable bootstrap. Existing
+required check names and branch-protection contexts stay the same; a missing
+PostgreSQL server or extension is a failure, not a skipped live test.

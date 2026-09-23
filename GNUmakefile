@@ -453,6 +453,11 @@ $(ARLEN_FRAMEWORK_LIB): $(FRAMEWORK_OBJS) | $(LIB_DIR)
 
 framework-artifacts: eocc $(ARLEN_FRAMEWORK_LIB)
 
+# Compile generated-code consumers with the shipped archive and canonical flags.
+.PHONY: test-client-program
+test-client-program: $(ARLEN_FRAMEWORK_LIB)
+>@source "$(GNUSTEP_SH)" && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) $(CLIENT_INCLUDE_FLAGS) $(CLIENT_SOURCES) $(ARLEN_FRAMEWORK_LIB) -o "$(CLIENT_OUTPUT)" $(BASE_LINK_LIBS)
+
 $(EOC_TOOL): $(EOCC_ENTRY_OBJS) $(EOC_RUNTIME_OBJS) | $(BUILD_DIR)
 >@mkdir -p $(@D)
 >@source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) $(EOCC_ENTRY_OBJS) $(EOC_RUNTIME_OBJS) -o $(EOC_TOOL) $(BASE_LINK_LIBS)

@@ -13,7 +13,7 @@ rounds="${ARLEN_PHASE10E_ROUNDS:-3}"
 allow_fail="${ARLEN_PHASE10E_ALLOW_FAIL:-0}"
 
 set +u
-source /usr/GNUstep/System/Library/Makefiles/GNUstep.sh
+source "$repo_root/tools/source_gnustep_env.sh"
 set -u
 make json-perf-bench
 
