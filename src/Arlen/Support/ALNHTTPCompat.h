@@ -57,6 +57,12 @@ FOUNDATION_EXPORT NSData *_Nullable ALNBoundedMetadataGET(NSURL *url, NSUInteger
 FOUNDATION_EXPORT NSData *_Nullable ALNBoundedMetadataGETWithError(NSURL *url, NSUInteger maxBytes,
     NSTimeInterval timeout, NSError *_Nullable *_Nullable error);
 
+/// Bounded GET or form POST, requiring HTTP 200, no redirects or shared cookies.
+/// Uses only the URL, method, body, and timeout; sets JSON Accept and form Content-Type.
+/// Errors are sanitized like ALNBoundedMetadataGETWithError; never include request secrets.
+FOUNDATION_EXPORT NSData *_Nullable ALNBoundedJSONRequest(NSURLRequest *request,
+    NSUInteger maxBytes, NSError *_Nullable *_Nullable error);
+
 NS_ASSUME_NONNULL_END
 
 #endif

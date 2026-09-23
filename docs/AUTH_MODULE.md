@@ -285,3 +285,151 @@ The result payload includes `user`, `session`, `created_user`,
 - `headless`: `examples/auth_ui_modes/headless/README.md`
 - `module-ui`: `examples/auth_ui_modes/module_ui/README.md`
 - `generated-app-ui`: `examples/auth_ui_modes/generated_app_ui/README.md`
+
+## Configurable OIDC Login (including Microsoft Entra)
+
+Enable real providers under `authModule.providers`. The module owns discovery,
+authorization-code login with PKCE S256, the session-bound state and nonce,
+token exchange, RS256 ID-token verification against JWKS, and session completion.
+This is browser sign-in; `ALNOAuthResourceServer` separately handles bearer-token
+access to APIs and MCP.
+
+```plist
+authModule = {
+  paths = { prefix = "/context/auth"; };
+  localPassword = { enabled = NO; };
+  providers = {
+    stub = { enabled = NO; };
+    entra = {
+      enabled = YES;
+      type = "oidc";
+      ctaLabel = "Sign in with Microsoft";
+      issuer = "https://login.microsoftonline.com/<TENANT_GUID>/v2.0";
+      discoveryURL = "https://login.microsoftonline.com/<TENANT_GUID>/v2.0/.well-known/openid-configuration";
+      clientID = "<WEB_CLIENT_GUID>";
+      clientSecretEnvironmentKey = "ARLEN_AUTH_ENTRA_CLIENT_SECRET";
+      redirectURI = "https://example.com/context/auth/provider/entra/callback";
+      scopes = ("openid", "profile", "email");
+      subjectClaim = "oid";
+      tenantClaim = "tid";
+      allowedTenants = ("<TENANT_GUID>");
+      jwksAllowedHosts = ("login.microsoftonline.com");
+    };
+  };
+  hooks = { providerSessionResolverClass = "CompanyIdentityResolver"; };
+};
+```
+
+Register the exact HTTPS redirect URI as a web redirect in the identity provider,
+and supply the client secret through the named environment variable in every
+worker. Do not put the secret into the plist. The auth module's existing
+`session.secret` and `database.connectionString` requirements still apply.
+The resolver may use a separate application-owned person store; OIDC does not
+create or link an `auth_users` row automatically.
+
+For the example above, the module registers:
+
+- `GET /context/auth/provider/entra/login`
+- `GET /context/auth/provider/entra/callback`
+- `GET /context/auth/api/provider/entra/login`
+- `GET /context/auth/api/provider/entra/callback`
+
+Use the configured redirect URI consistently even when starting from the API
+login route. API login returns `authorize_url`; browser login redirects there.
+A successful browser callback redirects to a local `return_to` path or the
+module's `defaultRedirect`. External `return_to` URLs are ignored. JSON callbacks
+return session metadata and `redirect_to`, without provider tokens. Failed
+callbacks return 401 with a generic message; provider setup/network failures
+at login return 502. Disabled providers have no routes or login buttons.
+
+### Application Identity Resolver
+
+Implement `ALNAuthProviderSessionResolver` and configure its class under
+`hooks.providerSessionResolverClass`. The class is instantiated without arguments
+and must support concurrent calls. It receives only an identity whose ID token
+has passed signature, issuer, audience, expiry, nonce, and tenant checks.
+
+```objc
+@interface CompanyIdentityResolver : NSObject <ALNAuthProviderSessionResolver>
+@end
+
+@implementation CompanyIdentityResolver
+- (NSDictionary *)resolveSessionDescriptorForNormalizedIdentity:(NSDictionary *)identity
+                                         providerConfiguration:(NSDictionary *)provider
+                                                         error:(NSError **)error {
+  NSString *principal = identity[@"provider_subject"]; // verified "tid:oid"
+  // Implement this lookup against the application's durable person directory.
+  NSDictionary *person = [CompanyPeople activePersonForPrincipal:principal error:error];
+  if (person == nil) return nil; // deny unknown or suspended principals
+  return @{
+    @"subject": person[@"identifier"],
+    @"roles": person[@"roles"] ?: @[],
+    @"assuranceLevel": @1,
+  };
+}
+@end
+```
+
+`CompanyPeople` above represents application code, not a framework class. Use
+immutable principal identifiers for the lookup; email is display data and is
+never a fallback match on this path. With `tenantClaim` configured,
+`provider_subject` is `<tenant>:<subject>`; both claims must be nonempty, contain
+no colon, and the tenant must be allowed. Without `tenantClaim`, it is the
+verified `subjectClaim` (default `sub`). The raw verified claims remain available
+under `identity["claims"]`. Normal OIDC `sub` validation still applies when using
+`oid` as the application principal. The resolver owns membership, roles, and any
+explicit account-linking decision; nil rejects login. Arlen does not infer MFA
+assurance from the fact that a provider was used.
+
+OIDC sessions expose the application's subject and roles. The auth session API
+does not try to look up an external subject in its own user table. Stock local
+account/MFA management remains backed by the auth module's own user records;
+applications with external person stores own those account-management surfaces.
+
+### Defaults and Upgrade Behavior
+
+When any real OIDC provider is enabled, local password login and the stub
+provider default off. Explicit `localPassword.enabled` or
+`providers.stub.enabled` overrides are honored. Without real OIDC providers,
+the existing local-password and stub defaults remain enabled for compatibility.
+Disabling local passwords removes registration, verification, password-login,
+forgot/reset/change-password routes in both HTML and API surfaces. The login
+page remains available and shows provider buttons without a password form.
+Session payloads include `local_password_enabled` and `login_providers`.
+
+Existing applications may have copied an older auth manifest containing
+`stub.enabled = YES`. Set `authModule.providers.stub.enabled = NO` explicitly
+when upgrading to enterprise login; update the copied module sources and login
+body template together. The example above makes both opt-outs explicit.
+
+### Transport and Callback Contract
+
+- Provider/discovery/redirect URLs require HTTPS. Endpoint hosts default to the
+  issuer host; `endpointAllowedHosts` can explicitly allow other discovery,
+  authorization, and token hosts. `jwksAllowedHosts` separately restricts key
+  retrieval and defaults to the endpoint hosts. Redirects are rejected.
+- Each discovery, token, or JWKS request has a five-second total deadline and a
+  256 KiB response limit. TLS verification is required and shared cookies are
+  disabled. A callback fetches fresh discovery and keys, so a key rotation does
+  not depend on worker-local caches. Calls are synchronous; account for provider
+  latency in request capacity planning.
+- Confidential web clients use `client_secret_post` by default. Public clients
+  must explicitly set `tokenEndpointAuthMethod = "none"`; PKCE remains required.
+  Other token authentication methods and ID-token algorithms are not supported
+  by this module path.
+- One pending provider login is stored per browser session. Starting another
+  replaces it. The five-minute callback is bound to the provider, configured
+  redirect URI, state, nonce, and PKCE verifier. Callback attempts clear pending
+  state. Signed cookie sessions cannot revoke an older copied cookie; the
+  provider must enforce one-time authorization-code redemption, including PKCE.
+- `hooks.oidcTransportClass` optionally names an application implementation of
+  `ALNAuthModuleOIDCTransport` for controlled tests or custom networking. This is
+  trusted application code, responsible for the same TLS, redirect, deadline,
+  and response-limit contract. Normal deployments should use the default.
+
+Run `make test-unit-filter TEST=AuthModuleOIDCTests` and
+`make test-unit-filter TEST=MetadataTransportTests` after sourcing
+`tools/source_gnustep_env.sh`. These tests use synthetic signed tokens and local
+transport fixtures; no tenant credentials are required. Validate the registered
+web client, real tenant policy, reverse-proxy callback URL, and downstream person
+mapping separately before enabling an application deployment.

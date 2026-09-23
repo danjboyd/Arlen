@@ -49,6 +49,29 @@
         }
       }
     }
+    if (!tls) {
+      for (NSString *path in @[ @"echo", @"redirect", @"declared", @"chunked", @"timeout" ]) {
+        NSURL *url = [NSURL URLWithString:[NSString stringWithFormat:@"http://127.0.0.1:%ld/%@", (long)port, path]];
+        NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:url
+          cachePolicy:NSURLRequestReloadIgnoringLocalCacheData timeoutInterval:0.3];
+        request.HTTPMethod = @"POST";
+        request.HTTPBody = [@"code=private-code&client_secret=private-secret&code_verifier=private-verifier" dataUsingEncoding:NSUTF8StringEncoding];
+        [request setValue:@"private-cookie" forHTTPHeaderField:@"Cookie"];
+        NSError *error = nil;
+        NSData *data = ALNBoundedJSONRequest(request, [path isEqual:@"echo"] ? 4096 : 32, &error);
+        if ([path isEqual:@"echo"]) {
+          NSDictionary *echo = data ? [NSJSONSerialization JSONObjectWithData:data options:0 error:NULL] : nil;
+          XCTAssertEqualObjects(@"POST", echo[@"method"], @"%@", error);
+          XCTAssertEqualObjects([[NSString alloc] initWithData:request.HTTPBody encoding:NSUTF8StringEncoding], echo[@"body"]);
+          XCTAssertEqualObjects(@"application/x-www-form-urlencoded", echo[@"headers"][@"content-type"]);
+          XCTAssertNil(echo[@"headers"][@"cookie"]);
+        } else {
+          XCTAssertNil(data);
+          XCTAssertNotNil(error);
+          XCTAssertFalse([error.description containsString:@"private-"]);
+        }
+      }
+    }
     if (tls) {
       NSMutableDictionary *config = [[ALNOAuthResourceServer entraConfigurationForTenant:
           @"00000000-0000-0000-0000-000000000001" tokenVersion:@"2.0"

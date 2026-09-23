@@ -1387,3 +1387,8 @@ payload.
 `module add ops` does not require installing jobs, notifications, storage, search,
 or auth. `boomhauer --prepare-only` can build these partial installations. Ops
 access checks still apply; see [Ops Module](OPS_MODULE.md).
+
+After `module add auth`, configure real OIDC providers and the resolver hook in
+`authModule`; provider login needs no separate CLI command. Updating an existing
+app requires updating its copied auth module sources/templates. See
+[Auth Module](AUTH_MODULE.md#configurable-oidc-login-including-microsoft-entra).

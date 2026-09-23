@@ -20,7 +20,7 @@ preview, and what is in flight. For engineering history, see
 |---|---|
 | HTTP | HTML and JSON routing, controllers, middleware, route metadata |
 | Templates | EOC (`.html.eoc`) transpiler, layouts, partials, forms, live fragments |
-| Auth | Sessions, CSRF, rate limiting, password reset, TOTP MFA, recovery codes, passkeys/WebAuthn, OIDC/provider login |
+| Auth | Sessions, CSRF, rate limiting, password reset, TOTP MFA, recovery codes, passkeys/WebAuthn, OIDC/provider login, including configurable auth-module OIDC/Entra with app-owned identity resolution |
 | Auth UI | `headless`, `module-ui`, and `generated-app-ui` ownership modes |
 | Modules | `auth`, `admin-ui`, `jobs`, `notifications`, `storage`, `ops`, `search` |
 | Durable jobs | PostgreSQL transactional enqueue, renewable fenced leases, crash recovery, shared queue controls, retained results |

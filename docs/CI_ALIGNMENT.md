@@ -392,3 +392,8 @@ The Linux quality job explicitly runs `OpsOptionalModulesIntegrationTests`, whic
 scaffolds and links both ops alone and auth/jobs/search/ops, then executes an
 absent-module summary and authorization probe. This covers link dependencies
 that the all-modules test bundle cannot detect.
+
+The Linux quality job explicitly runs `AuthModuleOIDCTests` and
+`MetadataTransportTests`: provider routes, PKCE/session completion, identity
+policy, default access modes, token rejection, and bounded socket GET/POST.
+Real tenant acceptance remains separate from deterministic required CI.

@@ -151,7 +151,7 @@ static int MetadataProgress(void *context, curl_off_t total, curl_off_t received
   NSTimeInterval now = MetadataNow();
   return !isfinite(now) || now >= transfer->deadline;
 }
-static NSData *MetadataCurlGET(NSURL *url, NSUInteger maxBytes, NSTimeInterval timeout,
+static NSData *MetadataCurlRequest(NSURLRequest *request, NSUInteger maxBytes, NSTimeInterval timeout,
                                 NSTimeInterval deadline, NSError **error) {
   // Synchronous DNS cannot guarantee a total deadline with NOSIGNAL on workers.
   if (!ALNCurlGlobalReady() || (curl_version_info(CURLVERSION_NOW)->features & (CURL_VERSION_ASYNCHDNS | CURL_VERSION_SSL)) != (CURL_VERSION_ASYNCHDNS | CURL_VERSION_SSL)) {
@@ -168,7 +168,15 @@ static NSData *MetadataCurlGET(NSURL *url, NSUInteger maxBytes, NSTimeInterval t
   long status = 0;
   if (!headers) goto cleanup;
 #define METADATA_OPTION(option, value) do { result = curl_easy_setopt(curl, option, value); if (result != CURLE_OK) goto cleanup; } while (0)
-  METADATA_OPTION(CURLOPT_URL, url.absoluteString.UTF8String);
+  METADATA_OPTION(CURLOPT_URL, request.URL.absoluteString.UTF8String);
+  if ([request.HTTPMethod isEqual:@"POST"]) {
+    struct curl_slist *next = curl_slist_append(headers, "Content-Type: application/x-www-form-urlencoded");
+    if (!next) goto cleanup;
+    headers = next;
+    METADATA_OPTION(CURLOPT_POST, 1L);
+    METADATA_OPTION(CURLOPT_POSTFIELDS, request.HTTPBody.bytes ?: "");
+    METADATA_OPTION(CURLOPT_POSTFIELDSIZE_LARGE, (curl_off_t)request.HTTPBody.length);
+  }
   METADATA_OPTION(CURLOPT_HTTPHEADER, headers);
   METADATA_OPTION(CURLOPT_NOSIGNAL, 1L);
   METADATA_OPTION(CURLOPT_SSL_VERIFYPEER, 1L);
@@ -210,9 +218,21 @@ cleanup:
 
 NSData *ALNBoundedMetadataGETWithError(NSURL *url, NSUInteger maxBytes, NSTimeInterval timeout,
                                       NSError **error) {
-  if (error) *error = nil;
   if (!url || !maxBytes || !isfinite(timeout) || timeout <= 0) {
     if (error) *error = MetadataError(1, @"Invalid metadata request bounds");
+    return nil;
+  }
+  NSURLRequest *request = [NSURLRequest requestWithURL:url
+      cachePolicy:NSURLRequestReloadIgnoringLocalCacheData timeoutInterval:timeout];
+  return ALNBoundedJSONRequest(request, maxBytes, error);
+}
+
+NSData *ALNBoundedJSONRequest(NSURLRequest *input, NSUInteger maxBytes, NSError **error) {
+  if (error) *error = nil;
+  NSTimeInterval timeout = input.timeoutInterval;
+  if (!input.URL || !maxBytes || !isfinite(timeout) || timeout <= 0 ||
+      (![(input.HTTPMethod ?: @"GET") isEqual:@"GET"] && ![input.HTTPMethod isEqual:@"POST"])) {
+    if (error) *error = MetadataError(1, @"Invalid bounded JSON request");
     return nil;
   }
   NSTimeInterval deadline = MetadataNow() + timeout;
@@ -221,10 +241,13 @@ NSData *ALNBoundedMetadataGETWithError(NSURL *url, NSUInteger maxBytes, NSTimeIn
     return nil;
   }
 #if defined(GNUSTEP)
-  return MetadataCurlGET(url, maxBytes, timeout, deadline, error);
+  return MetadataCurlRequest(input, maxBytes, timeout, deadline, error);
 #else
-  NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:url
-      cachePolicy:NSURLRequestReloadIgnoringLocalCacheData timeoutInterval:timeout];
+  NSMutableURLRequest *request = [input mutableCopy];
+  [request setCachePolicy:NSURLRequestReloadIgnoringLocalCacheData];
+  [request setAllHTTPHeaderFields:@{ @"Accept": @"application/json" }];
+  if ([input.HTTPMethod isEqual:@"POST"])
+    [request setValue:@"application/x-www-form-urlencoded" forHTTPHeaderField:@"Content-Type"];
   [request setHTTPShouldHandleCookies:NO];
   [request setValue:@"application/json" forHTTPHeaderField:@"Accept"];
   ALNMetadataConnection *delegate = [ALNMetadataConnection new];

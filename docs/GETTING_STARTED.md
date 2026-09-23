@@ -280,3 +280,7 @@ see [Testing Workflow](TESTING_WORKFLOW.md#live-postgresql-regression-gate).
 `arlen module add ops` works without jobs, notifications, storage, or search.
 Missing module summaries are marked unavailable. See [Ops Module](OPS_MODULE.md)
 for authentication requirements when composing a partial module installation.
+
+For company sign-in, add `auth`, configure an OIDC provider and an application
+identity resolver, and explicitly disable stub/password access if your copied
+manifest enables it. Follow the [Entra example and upgrade steps](AUTH_MODULE.md#configurable-oidc-login-including-microsoft-entra).

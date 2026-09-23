@@ -4,6 +4,7 @@
 #import <Foundation/Foundation.h>
 
 #import "ALNAuthProviderSessionBridge.h"
+#import "ALNAuthModuleOIDC.h"
 #import "ALNModuleSystem.h"
 
 @class ALNApplication;
@@ -97,6 +98,7 @@ typedef NS_ENUM(NSInteger, ALNAuthModuleErrorCode) {
 @property(nonatomic, copy, readonly) NSString *providerStubCallbackPath;
 @property(nonatomic, copy, readonly) NSString *defaultRedirect;
 @property(nonatomic, copy, readonly) NSArray<NSDictionary *> *loginProviders;
+@property(nonatomic, assign, readonly) BOOL localPasswordEnabled;
 @property(nonatomic, copy, readonly) NSString *uiMode;
 @property(nonatomic, copy, readonly) NSString *layoutTemplate;
 @property(nonatomic, copy, readonly) NSString *generatedPagePrefix;

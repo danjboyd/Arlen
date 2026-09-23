@@ -398,3 +398,6 @@ asynchronous DNS (Debian/Ubuntu: `libcurl4-openssl-dev`). See the
 Multipart forms provide ordered fields and binary uploads; see [Multipart Uploads](docs/MULTIPART_UPLOADS.md) for APIs and memory limits.
 
 The ops dashboard supports partial module installations; see [Ops Module](docs/OPS_MODULE.md).
+
+The auth module supports configurable OIDC browser login, including Entra, with
+application-owned identity resolution. See [OIDC setup](docs/AUTH_MODULE.md#configurable-oidc-login-including-microsoft-entra).
