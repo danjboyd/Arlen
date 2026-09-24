@@ -163,3 +163,7 @@ For enterprise browser sign-in, start with the [auth module OIDC/Entra setup](AU
 
 [Response Headers](RESPONSE_HEADERS.md#concurrent-security-headers) describes
 concurrent security defaults and explicit header overrides.
+
+[Toolchain Matrix](TOOLCHAIN_MATRIX.md#known-libobjc2-defect-instance-synchronized)
+describes the libobjc2 `@synchronized` defect and the locking pattern to use
+in application code.

@@ -1,5 +1,7 @@
 #import "ALNRealtime.h"
 
+#import <dispatch/dispatch.h>
+
 static NSString *ALNNormalizeChannelName(NSString *value) {
   if (![value isKindOfClass:[NSString class]]) {
     return @"";
@@ -48,11 +50,10 @@ static NSString *ALNNormalizeChannelName(NSString *value) {
 
 + (instancetype)sharedHub {
   static ALNRealtimeHub *shared = nil;
-  @synchronized(self) {
-    if (shared == nil) {
-      shared = [[ALNRealtimeHub alloc] init];
-    }
-  }
+  static dispatch_once_t onceToken;
+  dispatch_once(&onceToken, ^{
+    shared = [[ALNRealtimeHub alloc] init];
+  });
   return shared;
 }
 

@@ -651,17 +651,17 @@ static NSUInteger AppFastPathControllerSlowInvocationCount = 0;
       BOOL guardedOK = (guardedResponse.statusCode == 200);
 
       if (!dictOK || !guardedOK) {
-        @synchronized(state) {
-          NSInteger failures = [state[@"failures"] integerValue];
-          state[@"failures"] = @(failures + 1);
-        }
+        [state[@"lock"] lock];
+        NSInteger failures = [state[@"failures"] integerValue];
+        state[@"failures"] = @(failures + 1);
+        [state[@"lock"] unlock];
       }
     }
 
-    @synchronized(state) {
-      NSInteger completed = [state[@"completed"] integerValue];
-      state[@"completed"] = @(completed + 1);
-    }
+    [state[@"lock"] lock];
+    NSInteger completed = [state[@"completed"] integerValue];
+    state[@"completed"] = @(completed + 1);
+    [state[@"lock"] unlock];
   }
 }
 
@@ -1862,6 +1862,9 @@ static NSUInteger AppFastPathControllerSlowInvocationCount = 0;
     @"iterations" : @(120),
     @"completed" : @(0),
     @"failures" : @(0),
+    // Created before the workers start; @synchronized on a fresh instance can
+    // race on first use (gnustep/libobjc2#424).
+    @"lock" : [[NSLock alloc] init],
   } mutableCopy];
 
   for (NSInteger idx = 0; idx < workers; idx++) {
@@ -1873,9 +1876,9 @@ static NSUInteger AppFastPathControllerSlowInvocationCount = 0;
   NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:20.0];
   while ([[NSDate date] compare:deadline] == NSOrderedAscending) {
     NSInteger completed = 0;
-    @synchronized(state) {
-      completed = [state[@"completed"] integerValue];
-    }
+    [state[@"lock"] lock];
+    completed = [state[@"completed"] integerValue];
+    [state[@"lock"] unlock];
     if (completed >= workers) {
       break;
     }
@@ -1884,10 +1887,10 @@ static NSUInteger AppFastPathControllerSlowInvocationCount = 0;
 
   NSInteger completed = 0;
   NSInteger failures = 0;
-  @synchronized(state) {
-    completed = [state[@"completed"] integerValue];
-    failures = [state[@"failures"] integerValue];
-  }
+  [state[@"lock"] lock];
+  completed = [state[@"completed"] integerValue];
+  failures = [state[@"failures"] integerValue];
+  [state[@"lock"] unlock];
 
   XCTAssertEqual(workers, completed);
   XCTAssertEqual((NSInteger)0, failures);

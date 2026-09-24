@@ -1,5 +1,7 @@
 #import "ALNAdminUIModule.h"
 
+#import <dispatch/dispatch.h>
+
 #import "../../auth/Sources/ALNAuthModule.h"
 
 #import "ALNApplication.h"
@@ -1053,11 +1055,10 @@ static void AUNotifySearchIncrementalSync(NSString *resourceIdentifier, NSDictio
 
 + (instancetype)sharedRuntime {
   static ALNAdminUIModuleRuntime *runtime = nil;
-  @synchronized(self) {
-    if (runtime == nil) {
-      runtime = [[ALNAdminUIModuleRuntime alloc] init];
-    }
-  }
+  static dispatch_once_t onceToken;
+  dispatch_once(&onceToken, ^{
+    runtime = [[ALNAdminUIModuleRuntime alloc] init];
+  });
   return runtime;
 }
 

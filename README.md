@@ -404,3 +404,6 @@ application-owned identity resolution. See [OIDC setup](docs/AUTH_MODULE.md#conf
 
 Security-header defaults are safe on concurrent first requests; see
 [Response Headers](docs/RESPONSE_HEADERS.md#concurrent-security-headers).
+
+Framework locks are safe on concurrent first use under GNUstep libobjc2; see
+[Toolchain Matrix](docs/TOOLCHAIN_MATRIX.md#known-libobjc2-defect-instance-synchronized).

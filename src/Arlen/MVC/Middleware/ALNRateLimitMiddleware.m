@@ -12,6 +12,7 @@
 @property(nonatomic, assign) NSUInteger windowSeconds;
 @property(nonatomic, strong) NSMutableDictionary *entries;
 @property(nonatomic, assign) NSUInteger seenRequests;
+@property(nonatomic, strong) NSLock *entriesLock;
 
 @end
 
@@ -25,6 +26,9 @@
     _windowSeconds = (windowSeconds > 0) ? windowSeconds : 60;
     _entries = [[NSMutableDictionary alloc] init];
     _seenRequests = 0;
+    // Created before the middleware is shared; libobjc2's first
+    // @synchronized on an instance can race (gnustep/libobjc2#424).
+    _entriesLock = [[NSLock alloc] init];
   }
   return self;
 }
@@ -63,7 +67,8 @@
   NSUInteger remaining = 0;
   NSUInteger retryAfterSeconds = self.windowSeconds;
 
-  @synchronized(self) {
+  [self.entriesLock lock];
+  @try {
     NSMutableDictionary *entry = [self.entries[key] mutableCopy];
     if (entry == nil) {
       entry = [NSMutableDictionary dictionaryWithDictionary:@{
@@ -103,6 +108,8 @@
     if ((self.seenRequests % 128) == 0) {
       [self pruneStaleEntriesAtTime:now];
     }
+  } @finally {
+    [self.entriesLock unlock];
   }
 
   [context.response setHeader:@"X-RateLimit-Limit"

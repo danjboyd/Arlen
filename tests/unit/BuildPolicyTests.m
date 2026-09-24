@@ -855,6 +855,78 @@
   XCTAssertFalse([pgTests containsString:@"@synchronized(state)"]);
 }
 
+// gnustep/libobjc2#424: the first @synchronized on an instance publishes its
+// lock before initializing it, so concurrent first use can hang or abort.
+// Class objects take a safe path. Shipped code must lock instances with
+// explicit locks created before the object is shared.
+- (void)testShippedSourcesAvoidSynchronizedOnInstanceReceivers {
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSRegularExpression *classReceiver =
+      [NSRegularExpression regularExpressionWithPattern:@"^\\[[A-Za-z_][A-Za-z0-9_]* class\\]$"
+                                                options:0
+                                                  error:NULL];
+  NSMutableArray<NSString *> *violations = [NSMutableArray array];
+  NSUInteger scannedFiles = 0;
+  for (NSString *root in @[ @"src", @"modules", @"tools", @"examples" ]) {
+    NSString *rootPath = [repoRoot stringByAppendingPathComponent:root];
+    NSDirectoryEnumerator *enumerator = [[NSFileManager defaultManager] enumeratorAtPath:rootPath];
+    for (NSString *relativePath in enumerator) {
+      NSString *extension = [relativePath pathExtension];
+      if (![extension isEqualToString:@"m"] && ![extension isEqualToString:@"h"]) {
+        continue;
+      }
+      NSString *source = [self readFile:[rootPath stringByAppendingPathComponent:relativePath]];
+      scannedFiles += 1;
+      if (![source containsString:@"@synchronized"]) {
+        continue;
+      }
+      NSArray<NSString *> *lines = [source componentsSeparatedByString:@"\n"];
+      for (NSUInteger index = 0; index < [lines count]; index++) {
+        NSString *line = lines[index];
+        NSRange keyword = [line rangeOfString:@"@synchronized"];
+        if (keyword.location == NSNotFound) {
+          continue;
+        }
+        NSRange comment = [line rangeOfString:@"//"];
+        if (comment.location != NSNotFound && comment.location < keyword.location) {
+          continue;
+        }
+        NSString *rest = [[line substringFromIndex:NSMaxRange(keyword)]
+            stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
+        if (![rest hasPrefix:@"("]) {
+          continue;
+        }
+        NSInteger depth = 0;
+        NSUInteger end = NSNotFound;
+        for (NSUInteger offset = 0; offset < [rest length]; offset++) {
+          unichar ch = [rest characterAtIndex:offset];
+          if (ch == '(') depth += 1;
+          if (ch == ')' && --depth == 0) {
+            end = offset;
+            break;
+          }
+        }
+        NSString *receiver = (end == NSNotFound)
+            ? rest
+            : [[rest substringWithRange:NSMakeRange(1, end - 1)]
+                  stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
+        if ([classReceiver numberOfMatchesInString:receiver
+                                           options:0
+                                             range:NSMakeRange(0, [receiver length])] == 1) {
+          continue;
+        }
+        [violations addObject:[NSString stringWithFormat:@"%@/%@:%lu: @synchronized(%@)",
+                                                         root, relativePath,
+                                                         (unsigned long)(index + 1), receiver]];
+      }
+    }
+  }
+  XCTAssertGreaterThan(scannedFiles, (NSUInteger)100);
+  XCTAssertEqual((NSUInteger)0, [violations count],
+                 @"use a lock created before the object is shared instead:\n%@",
+                 [violations componentsJoinedByString:@"\n"]);
+}
+
 - (void)testTSANScriptBootstrapsEOCCUnsanitizedBeforeInstrumentedBuilds {
   NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
   NSString *fixtureRoot = [self createTempDirectoryWithPrefix:@"arlen-tsan-fixture"];

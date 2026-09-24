@@ -1,4 +1,5 @@
 #import <Foundation/Foundation.h>
+#import <dispatch/dispatch.h>
 #import <sys/stat.h>
 #import <sys/time.h>
 #import <stdio.h>
@@ -432,11 +433,10 @@ static NSCache *BenchmarkBlobPayloadCache(void) {
   if (cache != nil) {
     return cache;
   }
-  @synchronized([NSProcessInfo processInfo]) {
-    if (lock == nil) {
-      lock = [[NSLock alloc] init];
-    }
-  }
+  static dispatch_once_t lockOnce;
+  dispatch_once(&lockOnce, ^{
+    lock = [[NSLock alloc] init];
+  });
   [lock lock];
   if (cache == nil) {
     cache = [[NSCache alloc] init];
@@ -470,11 +470,10 @@ static NSData *BenchmarkStaticHTMLData(void) {
   if (cached != nil) {
     return cached;
   }
-  @synchronized([NSProcessInfo processInfo]) {
-    if (lock == nil) {
-      lock = [[NSLock alloc] init];
-    }
-  }
+  static dispatch_once_t lockOnce;
+  dispatch_once(&lockOnce, ^{
+    lock = [[NSLock alloc] init];
+  });
   [lock lock];
   if (cached == nil) {
     static NSString *const kStaticHTML =

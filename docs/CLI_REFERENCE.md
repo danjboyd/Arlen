@@ -1396,3 +1396,7 @@ app requires updating its copied auth module sources/templates. See
 Both `boomhauer` and `propane` use the same concurrent-safe security-header
 defaults. No new CLI option or propane accessory is required; see
 [Response Headers](RESPONSE_HEADERS.md#concurrent-security-headers).
+
+`boomhauer` and `propane` need no new option or propane accessory for the
+libobjc2 first-use lock workaround; see
+[Toolchain Matrix](TOOLCHAIN_MATRIX.md#known-libobjc2-defect-instance-synchronized).
