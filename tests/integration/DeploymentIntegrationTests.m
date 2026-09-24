@@ -299,7 +299,7 @@
          "-I%@/src/Arlen -I%@/src/Arlen/HTTP -I%@/src/Arlen/Support "
          "%@ %@/src/Arlen/Support/ALNJSONSerialization.m %@/src/Arlen/HTTP/ALNRequest.m "
          "%@/src/Arlen/HTTP/ALNMultipart.m "
-         "-o %@ $(gnustep-config --base-libs) -ldl -lcrypto",
+         "-o %@ $(gnustep-config --base-libs) -ldispatch -ldl -lcrypto",
         [self gnustepSourceCommandForRepoRoot:repoRoot], repoRoot, repoRoot, repoRoot, sourcePath, repoRoot, repoRoot, repoRoot, binaryPath]
                                        exitCode:&code];
     XCTAssertEqual(0, code, @"%@", compileOutput);
