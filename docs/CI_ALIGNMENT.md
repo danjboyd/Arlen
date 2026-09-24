@@ -409,3 +409,11 @@ The Apple baseline job also selects `AuthModuleOIDCTests`,
 This exercises the shared libcurl bounded-POST implementation and native
 cold-start probe on Apple, including cookie isolation and exact size/error
 contracts.
+
+`InstanceLockColdStartTests` is explicitly selected in the Linux quality job
+and included in the sanitizer matrix's full unit suite. It guards the
+libobjc2 first-use `@synchronized` workaround
+([gnustep/libobjc2#424](https://github.com/gnustep/libobjc2/issues/424)) in
+fresh processes, with a per-process alarm so a hang fails instead of stalling
+the job. The companion source policy check runs with `BuildPolicyTests`. No
+required lane is added or renamed by this regression.

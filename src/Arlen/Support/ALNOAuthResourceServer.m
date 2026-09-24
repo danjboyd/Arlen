@@ -53,6 +53,7 @@ static NSDictionary *Part(NSString *part) {
 @property(nonatomic, copy) ALNOAuthAuthorizationPolicy policy;
 @property(nonatomic, strong) NSDictionary *jwks;
 @property(nonatomic, strong) NSLock *refreshLock;
+@property(nonatomic, strong) NSLock *cacheLock;
 @property(nonatomic, assign) NSTimeInterval expires;
 @property(nonatomic, assign) NSTimeInterval nextRefresh;
 @property(nonatomic, weak) ALNApplication *application;
@@ -94,6 +95,9 @@ static NSDictionary *Part(NSString *part) {
   c[@"refreshOnRequest"] = c[@"refreshOnRequest"] ?: @YES;
   c[@"preflightOnStart"] = c[@"preflightOnStart"] ?: @NO;
   _refreshLock = [NSLock new];
+  // Guards the key cache; libobjc2's first @synchronized on an instance can
+  // race (gnustep/libobjc2#424).
+  _cacheLock = [NSLock new];
   c[@"profile"] = c[@"profile"] ?: @"rfc9068";
   if (![@[@"rfc9068", @"entra"] containsObject:c[@"profile"]]) return Fail(error, @"Unknown access-token profile");
   if ([c[@"profile"] isEqual:@"rfc9068"]) {
@@ -144,10 +148,13 @@ static NSDictionary *Part(NSString *part) {
   return selected;
 }
 - (BOOL)fetchSigningKeysWithError:(NSError **)error {
-  @synchronized (self) {
+  [self.cacheLock lock];
+  @try {
     NSTimeInterval now = [NSProcessInfo processInfo].systemUptime;
     if (now < self.nextRefresh) { Fail(error, @"OAuth key refresh in cooldown"); return NO; }
     self.nextRefresh = now + [self.configuration[@"refreshCooldownSeconds"] doubleValue];
+  } @finally {
+    [self.cacheLock unlock];
   }
   NSError *fetchError = nil;
   NSDictionary *metadata = self.loader([NSURL URLWithString:self.configuration[@"discoveryURL"]], &fetchError);
@@ -172,9 +179,12 @@ static NSDictionary *Part(NSString *part) {
   for (id key in keys[@"keys"]) if (!D(key)) return NO;
   NSData *snapshot = [ALNJSONSerialization dataWithJSONObject:keys options:0 error:NULL];
   if (!snapshot || snapshot.length > 262144) return NO;
-  @synchronized (self) {
+  [self.cacheLock lock];
+  @try {
     self.jwks = [ALNJSONSerialization JSONObjectWithData:snapshot options:0 error:NULL];
     self.expires = [NSProcessInfo processInfo].systemUptime + [self.configuration[@"jwksMaxAgeSeconds"] doubleValue];
+  } @finally {
+    [self.cacheLock unlock];
   }
   return YES;
 }
@@ -187,8 +197,11 @@ static NSDictionary *Part(NSString *part) {
   } @finally { [self.refreshLock unlock]; }
 }
 - (BOOL)isReady {
-  @synchronized (self) {
+  [self.cacheLock lock];
+  @try {
     return self.jwks != nil && [NSProcessInfo processInfo].systemUptime < self.expires;
+  } @finally {
+    [self.cacheLock unlock];
   }
 }
 - (BOOL)applicationWillStart:(ALNApplication *)application error:(NSError **)error {
@@ -208,12 +221,18 @@ static NSDictionary *Part(NSString *part) {
       !(entra ? [header[@"typ"] isEqual:@"JWT"] : [@[@"at+jwt", @"application/at+jwt"] containsObject:header[@"typ"] ?: @""])) return Fail(error, @"Unsupported access token header");
   NSDictionary *key;
   BOOL needsRefresh;
-  @synchronized (self) {
+  [self.cacheLock lock];
+  @try {
     needsRefresh = [NSProcessInfo processInfo].systemUptime >= self.expires || ![self keyForID:header[@"kid"]];
+  } @finally {
+    [self.cacheLock unlock];
   }
   if (needsRefresh && [self.configuration[@"refreshOnRequest"] boolValue]) [self refreshSigningKeysWithError:NULL];
-  @synchronized (self) {
+  [self.cacheLock lock];
+  @try {
     key = [NSProcessInfo processInfo].systemUptime < self.expires ? [self keyForID:header[@"kid"]] : nil;
+  } @finally {
+    [self.cacheLock unlock];
   }
   if (!key || !S(key[@"n"]) || !S(key[@"e"]) || [key[@"e"] length] > 16 || ![key[@"kty"] isEqual:@"RSA"] || (key[@"use"] && ![key[@"use"] isEqual:@"sig"]) ||
       (key[@"alg"] && ![key[@"alg"] isEqual:@"RS256"]) || (key[@"key_ops"] && ![key[@"key_ops"] isEqual:@[@"verify"]]) ||

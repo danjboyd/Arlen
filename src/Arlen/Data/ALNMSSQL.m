@@ -512,18 +512,18 @@ static BOOL ALNMSSQLBindODBCSymbol(void **target, void *handle, const char *symb
   return (*target != NULL);
 }
 
-static NSObject *ALNMSSQLODBCLockToken(void) {
-  static NSObject *token = nil;
-  @synchronized([ALNMSSQL class]) {
-    if (token == nil) {
-      token = [[NSObject alloc] init];
-    }
-  }
-  return token;
+static NSLock *ALNMSSQLODBCLoadLock(void) {
+  static NSLock *lock = nil;
+  static dispatch_once_t onceToken;
+  dispatch_once(&onceToken, ^{
+    lock = [[NSLock alloc] init];
+  });
+  return lock;
 }
 
 static BOOL ALNMSSQLLoadODBC(NSError **error) {
-  @synchronized(ALNMSSQLODBCLockToken()) {
+  [ALNMSSQLODBCLoadLock() lock];
+  @try {
     if (gODBCHandle != NULL) {
       return YES;
     }
@@ -590,6 +590,8 @@ static BOOL ALNMSSQLLoadODBC(NSError **error) {
 
     gODBCHandle = handle;
     return YES;
+  } @finally {
+    [ALNMSSQLODBCLoadLock() unlock];
   }
 }
 
@@ -2280,6 +2282,7 @@ static id ALNMSSQLFetchColumnValue(SQLHSTMT statement,
 @property(nonatomic, assign, readwrite) NSUInteger maxConnections;
 @property(nonatomic, strong) NSMutableArray<ALNMSSQLConnection *> *idleConnections;
 @property(nonatomic, assign) NSUInteger inUseConnections;
+@property(nonatomic, strong) NSRecursiveLock *poolLock;
 
 @end
 
@@ -2327,10 +2330,21 @@ static id ALNMSSQLFetchColumnValue(SQLHSTMT statement,
   return [ALNMSSQLDialect sharedDialect];
 }
 
+- (instancetype)init {
+  self = [super init];
+  if (self != nil) {
+    // Created before the pool is shared; libobjc2's first @synchronized on an
+    // instance can race (gnustep/libobjc2#424). Recursive to keep
+    // @synchronized's re-entrancy for connection teardown.
+    _poolLock = [[NSRecursiveLock alloc] init];
+  }
+  return self;
+}
+
 - (instancetype)initWithConnectionString:(NSString *)connectionString
                            maxConnections:(NSUInteger)maxConnections
                                     error:(NSError **)error {
-  self = [super init];
+  self = [self init];
   if (self == nil) {
     return nil;
   }
@@ -2356,16 +2370,20 @@ static id ALNMSSQLFetchColumnValue(SQLHSTMT statement,
 }
 
 - (void)dealloc {
-  @synchronized(self) {
+  [self.poolLock lock];
+  @try {
     for (ALNMSSQLConnection *connection in self.idleConnections) {
       [connection close];
     }
     [self.idleConnections removeAllObjects];
+  } @finally {
+    [self.poolLock unlock];
   }
 }
 
 - (ALNMSSQLConnection *)acquireConnection:(NSError **)error {
-  @synchronized(self) {
+  [self.poolLock lock];
+  @try {
     while ([self.idleConnections count] > 0) {
       ALNMSSQLConnection *connection = [self.idleConnections lastObject];
       [self.idleConnections removeLastObject];
@@ -2398,6 +2416,8 @@ static id ALNMSSQLFetchColumnValue(SQLHSTMT statement,
     }
     self.inUseConnections += 1;
     return connection;
+  } @finally {
+    [self.poolLock unlock];
   }
 }
 
@@ -2405,7 +2425,8 @@ static id ALNMSSQLFetchColumnValue(SQLHSTMT statement,
   if (connection == nil) {
     return;
   }
-  @synchronized(self) {
+  [self.poolLock lock];
+  @try {
     if (self.inUseConnections > 0) {
       self.inUseConnections -= 1;
     }
@@ -2420,6 +2441,8 @@ static id ALNMSSQLFetchColumnValue(SQLHSTMT statement,
     } else {
       [connection close];
     }
+  } @finally {
+    [self.poolLock unlock];
   }
 }
 

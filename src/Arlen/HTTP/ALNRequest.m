@@ -1,5 +1,7 @@
 #import "ALNRequest.h"
 
+#import <dispatch/dispatch.h>
+
 #if ARLEN_ENABLE_LLHTTP
 #import "third_party/llhttp/llhttp.h"
 #include <pthread.h>
@@ -42,17 +44,11 @@ static BOOL ALNRequestEnvFlagEnabled(const char *name) {
 }
 
 static void ALNEnsureRequestFaultInjectionState(void) {
-  if (gALNRequestFaultInjectionLock != nil && gALNRequestFaultInjectionConsumed != nil) {
-    return;
-  }
-  @synchronized([NSProcessInfo processInfo]) {
-    if (gALNRequestFaultInjectionLock == nil) {
-      gALNRequestFaultInjectionLock = [[NSLock alloc] init];
-    }
-    if (gALNRequestFaultInjectionConsumed == nil) {
-      gALNRequestFaultInjectionConsumed = [NSMutableSet set];
-    }
-  }
+  static dispatch_once_t onceToken;
+  dispatch_once(&onceToken, ^{
+    gALNRequestFaultInjectionLock = [[NSLock alloc] init];
+    gALNRequestFaultInjectionConsumed = [NSMutableSet set];
+  });
 }
 
 static BOOL ALNRequestConsumeFaultOnce(const char *name) {

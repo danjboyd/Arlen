@@ -3152,6 +3152,7 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result,
 @property(nonatomic, assign, readwrite) NSUInteger maxConnections;
 @property(nonatomic, strong) NSMutableArray *idleConnections;
 @property(nonatomic, assign) NSUInteger inUseConnections;
+@property(nonatomic, strong) NSRecursiveLock *poolLock;
 
 @end
 
@@ -3204,10 +3205,22 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result,
   return [ALNPostgresDialect sharedDialect];
 }
 
+- (instancetype)init {
+  self = [super init];
+  if (self != nil) {
+    // Created before the pool is shared; libobjc2's first @synchronized on an
+    // instance can race (gnustep/libobjc2#424). Recursive to keep
+    // @synchronized's re-entrancy: diagnostics listeners run while connections
+    // are validated or rolled back under this lock.
+    _poolLock = [[NSRecursiveLock alloc] init];
+  }
+  return self;
+}
+
 - (instancetype)initWithConnectionString:(NSString *)connectionString
                            maxConnections:(NSUInteger)maxConnections
                                     error:(NSError **)error {
-  self = [super init];
+  self = [self init];
   if (!self) {
     return nil;
   }
@@ -3246,17 +3259,21 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result,
 }
 
 - (void)dealloc {
-  @synchronized(self) {
+  [self.poolLock lock];
+  @try {
     for (ALNPgConnection *connection in self.idleConnections) {
       [connection close];
     }
     [self.idleConnections removeAllObjects];
+  } @finally {
+    [self.poolLock unlock];
   }
 }
 
 - (ALNPgConnection *)acquireConnection:(NSError **)error {
   ALNPgClearError(error);
-  @synchronized(self) {
+  [self.poolLock lock];
+  @try {
     while ([self.idleConnections count] > 0) {
       ALNPgConnection *connection = [self.idleConnections lastObject];
       [self.idleConnections removeLastObject];
@@ -3314,6 +3331,8 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result,
     connection.queryDiagnosticsListener = self.queryDiagnosticsListener;
     self.inUseConnections += 1;
     return connection;
+  } @finally {
+    [self.poolLock unlock];
   }
 }
 
@@ -3321,7 +3340,8 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result,
   if (connection == nil) {
     return;
   }
-  @synchronized(self) {
+  [self.poolLock lock];
+  @try {
     if (self.inUseConnections > 0) {
       self.inUseConnections -= 1;
     }
@@ -3342,6 +3362,8 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result,
     } else {
       [connection close];
     }
+  } @finally {
+    [self.poolLock unlock];
   }
 }
 

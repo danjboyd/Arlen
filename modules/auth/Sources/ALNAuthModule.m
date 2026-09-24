@@ -1,4 +1,6 @@
 #import "ALNAuthModule.h"
+
+#import <dispatch/dispatch.h>
 #import "ALNAuthModuleOIDC.h"
 
 #import "ALNHTTPCompat.h"
@@ -897,11 +899,10 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
 
 + (instancetype)sharedRuntime {
   static ALNAuthModuleRuntime *runtime = nil;
-  @synchronized(self) {
-    if (runtime == nil) {
-      runtime = [[ALNAuthModuleRuntime alloc] init];
-    }
-  }
+  static dispatch_once_t onceToken;
+  dispatch_once(&onceToken, ^{
+    runtime = [[ALNAuthModuleRuntime alloc] init];
+  });
   return runtime;
 }
 

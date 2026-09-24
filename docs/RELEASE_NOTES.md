@@ -2,6 +2,14 @@
 
 ## Upcoming Release Candidate
 
+- Framework objects no longer use `@synchronized` on instances, working around
+  a GNUstep libobjc2 first-use lock race
+  ([gnustep/libobjc2#424](https://github.com/gnustep/libobjc2/issues/424)).
+  Concurrent first requests could hang, abort in `objc_sync_enter`, or corrupt
+  the PostgreSQL pool. Metrics, database pools, routing, rate limiting, OAuth
+  key caching and template registries now use locks created before the object
+  is shared. See the
+  [Toolchain Matrix](TOOLCHAIN_MATRIX.md#known-libobjc2-defect-instance-synchronized).
 - PostgreSQL date parameters retain six fractional digits for scalar and array
   round trips. The documented precision range and lossless text alternative are
   in [ArlenData](ARLEN_DATA.md#postgresql-timestamp-precision).

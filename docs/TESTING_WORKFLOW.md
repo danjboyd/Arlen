@@ -508,3 +508,24 @@ for filter in AuthModuleOIDCTests MetadataTransportTests SecurityHeadersColdStar
   xcrun xctest -XCTest "$filter" "$bundle_path"
 done
 ```
+
+## Instance Lock Cold-Start Regression
+
+After sourcing `tools/source_gnustep_env.sh`, run
+`make test-unit-filter TEST=InstanceLockColdStartTests`. The test compiles
+`tests/fixtures/runtime/instance_lock_first_use_probe.m` against the framework
+and runs a single-thread control and 20 fresh processes. In each process, 16
+threads lock a fresh `ALNMetricsRegistry` and a fresh `ALNPg` pool for the
+first time at once, for 2,000 rounds (fewer under sanitizers). The pool uses a
+nonexistent socket path, so no PostgreSQL server is needed. Each process runs
+under a 120-second alarm because a hang is one failure mode. The probe checks
+that no metric updates are lost.
+
+Against the unfixed code on the stock libobjc2 2.3 runtime, most processes
+hang or abort in `objc_sync_enter`
+([gnustep/libobjc2#424](https://github.com/gnustep/libobjc2/issues/424)).
+`BuildPolicyTests/testShippedSourcesAvoidSynchronizedOnInstanceReceivers`
+keeps new instance `@synchronized` out of shipped code.
+
+The test is included in the full unit suite, the Linux quality gate, and the
+sanitizer unit lanes. Required checks remain unchanged.

@@ -288,3 +288,7 @@ manifest enables it. Follow the [Entra example and upgrade steps](AUTH_MODULE.md
 Security-header defaults are shared safely across concurrent first requests.
 Explicit response headers and configured CSP remain supported; see
 [Response Headers](RESPONSE_HEADERS.md#concurrent-security-headers).
+
+On GNUstep, avoid `@synchronized` on instances that several request threads
+share; create an `NSLock` in the initializer instead. See
+[Toolchain Matrix](TOOLCHAIN_MATRIX.md#known-libobjc2-defect-instance-synchronized).

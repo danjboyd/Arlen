@@ -62,6 +62,25 @@ Apple path notes:
 - Apple XCTest availability is now verified with `tools/apple_xctest_smoke.sh`
 - full repo-native Objective-C Apple XCTest bundle migration remains future work
 
+## Known libobjc2 Defect: Instance `@synchronized`
+
+GNUstep libobjc2 (v2.3 and current master) publishes the lock for the first
+`@synchronized` on an object before initializing it
+([gnustep/libobjc2#424](https://github.com/gnustep/libobjc2/issues/424)).
+When several threads lock a fresh object for the first time at once, they can
+hang, lose mutual exclusion, or abort with
+`pthread_mutex_lock.c:130: mutex->__data.__owner == 0`. Class objects
+(`@synchronized([SomeClass class])`) use a different path and are not affected.
+
+Arlen does not use `@synchronized` on instances. Framework objects that request
+threads share create an `NSLock` or `NSRecursiveLock` in their initializer;
+static registries create theirs in the same `dispatch_once` block as the
+registry. Application code on GNUstep should do the same: create the lock
+before the object can reach another thread, and use `NSRecursiveLock` when a
+section may re-enter. `BuildPolicyTests` rejects instance `@synchronized` in
+`src/`, `modules/`, `tools/` and `examples/`. No runtime upgrade or
+configuration change is required.
+
 ## GNUstep Resolution Contract
 
 Repo-local shell initialization should prefer:

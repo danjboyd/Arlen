@@ -338,10 +338,11 @@ static NSUInteger OAuthCalls;
   NSString *token = [self token:[self claims]];
   NSOperationQueue *queue = [NSOperationQueue new]; queue.maxConcurrentOperationCount = 8;
   NSMutableArray *results = [NSMutableArray array];
+  NSLock *resultsLock = [NSLock new]; // not @synchronized: gnustep/libobjc2#424
   for (NSUInteger i = 0; i < 24; i++) [queue addOperationWithBlock:^{
     @autoreleasepool {
       BOOL valid = [self.server principalForAccessToken:token error:NULL] != nil;
-      @synchronized (results) { [results addObject:@(valid)]; }
+      [resultsLock lock]; [results addObject:@(valid)]; [resultsLock unlock];
     }
   }];
   [queue waitUntilAllOperationsAreFinished];

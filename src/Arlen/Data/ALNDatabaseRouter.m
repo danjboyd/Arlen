@@ -60,6 +60,7 @@ NSString *ALNDatabaseReadFallbackPolicyName(ALNDatabaseReadFallbackPolicy policy
 @property(nonatomic, copy, readwrite) NSString *defaultReadTarget;
 @property(nonatomic, copy, readwrite) NSString *defaultWriteTarget;
 @property(nonatomic, strong) NSMutableDictionary<NSString *, NSDate *> *lastWriteByScope;
+@property(nonatomic, strong) NSLock *stickinessLock;
 
 @end
 
@@ -131,6 +132,9 @@ NSString *ALNDatabaseReadFallbackPolicyName(ALNDatabaseReadFallbackPolicy policy
   _stickinessScopeContextKey = [ALNDatabaseRoutingContextStickinessScopeKey copy];
   _readFallbackPolicy = ALNDatabaseReadFallbackPolicyConnectivityErrors;
   _lastWriteByScope = [NSMutableDictionary dictionary];
+  // Created before the router is shared; libobjc2's first @synchronized on an
+  // instance can race (gnustep/libobjc2#424).
+  _stickinessLock = [[NSLock alloc] init];
   _routeTargetResolver = nil;
   _routingDiagnosticsListener = nil;
   return self;
@@ -476,7 +480,8 @@ NSString *ALNDatabaseReadFallbackPolicyName(ALNDatabaseReadFallbackPolicy policy
   }
   NSString *safeScope = ([scope length] > 0) ? scope : @"__global__";
 
-  @synchronized(self) {
+  [self.stickinessLock lock];
+  @try {
     NSDate *lastWrite = self.lastWriteByScope[safeScope];
     if (lastWrite == nil) {
       return NO;
@@ -487,13 +492,18 @@ NSString *ALNDatabaseReadFallbackPolicyName(ALNDatabaseReadFallbackPolicy policy
     }
     [self.lastWriteByScope removeObjectForKey:safeScope];
     return NO;
+  } @finally {
+    [self.stickinessLock unlock];
   }
 }
 
 - (void)recordWriteForScope:(NSString *)scope atDate:(NSDate *)now {
   NSString *safeScope = ([scope length] > 0) ? scope : @"__global__";
-  @synchronized(self) {
+  [self.stickinessLock lock];
+  @try {
     self.lastWriteByScope[safeScope] = now ?: [NSDate date];
+  } @finally {
+    [self.stickinessLock unlock];
   }
 }
 

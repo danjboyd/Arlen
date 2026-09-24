@@ -1,4 +1,5 @@
 #import <Foundation/Foundation.h>
+#import <dispatch/dispatch.h>
 #import <stdio.h>
 #import <stdlib.h>
 
@@ -53,6 +54,7 @@ static NSString *P28NextUserIdentifier(NSUInteger ordinal) {
 @property(nonatomic, strong) NSDate *startedAt;
 @property(nonatomic, strong) NSMutableArray<NSMutableDictionary *> *users;
 @property(nonatomic, assign) NSUInteger nextUserOrdinal;
+@property(nonatomic, strong) NSLock *lock;
 
 + (instancetype)sharedStore;
 - (NSDictionary *)sessionPayloadWithCSRFToken:(NSString *)csrfToken;
@@ -73,11 +75,10 @@ static NSString *P28NextUserIdentifier(NSUInteger ordinal) {
 
 + (instancetype)sharedStore {
   static Phase28FixtureStore *store = nil;
-  @synchronized(self) {
-    if (store == nil) {
-      store = [[Phase28FixtureStore alloc] init];
-    }
-  }
+  static dispatch_once_t onceToken;
+  dispatch_once(&onceToken, ^{
+    store = [[Phase28FixtureStore alloc] init];
+  });
   return store;
 }
 
@@ -86,6 +87,9 @@ static NSString *P28NextUserIdentifier(NSUInteger ordinal) {
   if (self) {
     _startedAt = [NSDate date];
     _nextUserOrdinal = 3;
+    // Create locks before sharing the store; avoid @synchronized on instances
+    // (gnustep/libobjc2#424).
+    _lock = [[NSLock alloc] init];
     _users = [NSMutableArray arrayWithArray:@[
       [@{
         @"id" : P28NextUserIdentifier(1),
@@ -195,7 +199,8 @@ static NSString *P28NextUserIdentifier(NSUInteger ordinal) {
 - (NSDictionary *)listUsersWithLimit:(NSUInteger)limit {
   NSUInteger effectiveLimit = (limit == 0) ? 25 : limit;
   NSMutableArray *items = [NSMutableArray array];
-  @synchronized(self) {
+  [self.lock lock];
+  @try {
     NSUInteger count = MIN(effectiveLimit, [self.users count]);
     for (NSUInteger idx = 0; idx < count; idx++) {
       [items addObject:[self listItemForUser:self.users[idx]]];
@@ -205,16 +210,21 @@ static NSString *P28NextUserIdentifier(NSUInteger ordinal) {
       @"nextCursor" : [NSNull null],
       @"totalCount" : @([self.users count]),
     };
+  } @finally {
+    [self.lock unlock];
   }
 }
 
 - (NSDictionary *)detailForUserID:(NSString *)userID includePosts:(BOOL)includePosts {
-  @synchronized(self) {
+  [self.lock lock];
+  @try {
     NSMutableDictionary *user = [self mutableUserWithID:userID];
     if (user == nil) {
       return nil;
     }
     return [self detailPayloadForUser:user includePosts:includePosts];
+  } @finally {
+    [self.lock unlock];
   }
 }
 
@@ -222,7 +232,8 @@ static NSString *P28NextUserIdentifier(NSUInteger ordinal) {
                           displayName:(NSString *)displayName
                                  role:(NSString *)role {
   (void)role;
-  @synchronized(self) {
+  [self.lock lock];
+  @try {
     NSString *identifier = P28NextUserIdentifier(self.nextUserOrdinal++);
     NSMutableDictionary *user = [NSMutableDictionary dictionaryWithDictionary:@{
       @"id" : identifier,
@@ -246,13 +257,16 @@ static NSString *P28NextUserIdentifier(NSUInteger ordinal) {
         @"created" : @YES,
       },
     };
+  } @finally {
+    [self.lock unlock];
   }
 }
 
 - (NSDictionary *)updateUserWithID:(NSString *)userID
                         displayName:(NSString *)displayName
                              active:(NSNumber *)active {
-  @synchronized(self) {
+  [self.lock lock];
+  @try {
     NSMutableDictionary *user = [self mutableUserWithID:userID];
     if (user == nil) {
       return nil;
@@ -274,6 +288,8 @@ static NSString *P28NextUserIdentifier(NSUInteger ordinal) {
         @"updated" : @YES,
       },
     };
+  } @finally {
+    [self.lock unlock];
   }
 }
 
