@@ -36,12 +36,13 @@ static NSString *P28TrimmedString(id value) {
 
 static NSString *P28ISO8601StringFromDate(NSDate *date) {
   static NSDateFormatter *formatter = nil;
-  if (formatter == nil) {
+  static dispatch_once_t onceToken;
+  dispatch_once(&onceToken, ^{
     formatter = [[NSDateFormatter alloc] init];
     formatter.locale = [NSLocale localeWithLocaleIdentifier:@"en_US_POSIX"];
     formatter.timeZone = [NSTimeZone timeZoneWithName:@"UTC"];
     formatter.dateFormat = @"yyyy-MM-dd'T'HH:mm:ss'Z'";
-  }
+  });
   return [formatter stringFromDate:date ?: [NSDate date]] ?: @"";
 }
 

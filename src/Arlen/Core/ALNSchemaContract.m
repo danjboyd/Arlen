@@ -1,4 +1,5 @@
 #import "ALNSchemaContract.h"
+#import <dispatch/dispatch.h>
 
 #import "ALNJSONSerialization.h"
 #import "ALNRequest.h"
@@ -162,7 +163,8 @@ static NSDictionary *ALNSchemaReadinessDiagnostic(NSString *field,
 
 static NSSet *ALNSupportedSchemaTypes(void) {
   static NSSet *types = nil;
-  if (types == nil) {
+  static dispatch_once_t onceToken;
+  dispatch_once(&onceToken, ^{
     types = [[NSSet alloc] initWithArray:@[
       @"string",
       @"integer",
@@ -171,7 +173,7 @@ static NSSet *ALNSupportedSchemaTypes(void) {
       @"object",
       @"array",
     ]];
-  }
+  });
   return types;
 }
 

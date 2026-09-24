@@ -1,4 +1,5 @@
 #import "ALNSQLBuilder.h"
+#import <dispatch/dispatch.h>
 #import "ALNSQLLexical.h"
 
 NSString *const ALNSQLBuilderErrorDomain = @"Arlen.Data.SQLBuilder.Error";
@@ -187,21 +188,23 @@ static BOOL ALNSQLBuilderExpressionTokenIsSafe(NSString *value) {
 
 static NSRegularExpression *ALNSQLBuilderPlaceholderRegex(void) {
   static NSRegularExpression *regex = nil;
-  if (regex == nil) {
+  static dispatch_once_t onceToken;
+  dispatch_once(&onceToken, ^{
     regex = [NSRegularExpression regularExpressionWithPattern:@"\\$([0-9]+)"
                                                       options:0
                                                         error:nil];
-  }
+  });
   return regex;
 }
 
 static NSRegularExpression *ALNSQLBuilderIdentifierTokenRegex(void) {
   static NSRegularExpression *regex = nil;
-  if (regex == nil) {
+  static dispatch_once_t onceToken;
+  dispatch_once(&onceToken, ^{
     regex = [NSRegularExpression regularExpressionWithPattern:@"\\{\\{([A-Za-z_][A-Za-z0-9_]*)\\}\\}"
                                                       options:0
                                                         error:nil];
-  }
+  });
   return regex;
 }
 
@@ -218,7 +221,8 @@ static NSDictionary *ALNSQLBuilderMakeExpressionIR(NSString *expression,
 
 static NSSet *ALNSQLBuilderAllowedComparisonOperators(void) {
   static NSSet *operators = nil;
-  if (operators == nil) {
+  static dispatch_once_t onceToken;
+  dispatch_once(&onceToken, ^{
     operators = [NSSet setWithArray:@[
       @"=",
       @"!=",
@@ -234,13 +238,14 @@ static NSSet *ALNSQLBuilderAllowedComparisonOperators(void) {
       @"IS DISTINCT FROM",
       @"IS NOT DISTINCT FROM",
     ]];
-  }
+  });
   return operators;
 }
 
 static NSSet *ALNSQLBuilderAllowedJoinOperators(void) {
   static NSSet *operators = nil;
-  if (operators == nil) {
+  static dispatch_once_t onceToken;
+  dispatch_once(&onceToken, ^{
     operators = [NSSet setWithArray:@[
       @"=",
       @"!=",
@@ -250,7 +255,7 @@ static NSSet *ALNSQLBuilderAllowedJoinOperators(void) {
       @">=",
       @"<=",
     ]];
-  }
+  });
   return operators;
 }
 

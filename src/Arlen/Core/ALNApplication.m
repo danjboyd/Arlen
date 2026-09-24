@@ -1,4 +1,5 @@
 #import "ALNApplication.h"
+#import <dispatch/dispatch.h>
 
 #import "ALNConfig.h"
 #import "ALNOpenAPI.h"
@@ -2013,7 +2014,8 @@ static NSArray *ALNAllowedRouteConfigKeys(void) {
 
 static NSSet *ALNSupportedConfiguredRouteMethods(void) {
   static NSSet *methods = nil;
-  if (methods == nil) {
+  static dispatch_once_t onceToken;
+  dispatch_once(&onceToken, ^{
     methods = [[NSSet alloc] initWithArray:@[
       @"ANY",
       @"DELETE",
@@ -2024,7 +2026,7 @@ static NSSet *ALNSupportedConfiguredRouteMethods(void) {
       @"POST",
       @"PUT",
     ]];
-  }
+  });
   return methods;
 }
 
@@ -2581,13 +2583,10 @@ static void ALNRecordRequestMetrics(ALNApplication *application,
 
 static ALNPerfTrace *ALNDisabledPerfTrace(void) {
   static ALNPerfTrace *trace = nil;
-  if (trace == nil) {
-    @synchronized([ALNPerfTrace class]) {
-      if (trace == nil) {
-        trace = [[ALNPerfTrace alloc] initWithEnabled:NO];
-      }
-    }
-  }
+  static dispatch_once_t onceToken;
+  dispatch_once(&onceToken, ^{
+    trace = [[ALNPerfTrace alloc] initWithEnabled:NO];
+  });
   return trace;
 }
 
