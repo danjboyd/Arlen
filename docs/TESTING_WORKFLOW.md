@@ -529,3 +529,24 @@ keeps new instance `@synchronized` out of shipped code.
 
 The test is included in the full unit suite, the Linux quality gate, and the
 sanitizer unit lanes. Required checks remain unchanged.
+
+## Lazy Static Cold-Start Regression
+
+After sourcing `tools/source_gnustep_env.sh`, run
+`make test-unit-filter TEST=LazyStaticColdStartTests`. The test compiles
+`tests/fixtures/runtime/lazy_static_first_use_probe.m` against the framework
+and runs a single-thread control and 100 fresh processes (fewer under
+sanitizers). In each process, 32 threads start at once and each builds the same
+`ALNSQLBuilder` query 20 times. The query uses identifier tokens, `$N`
+placeholders, a comparison operator, and a join operator, so it touches every
+lazily created regex and operator set in the builder. Each process runs under a
+60-second alarm and must produce identical SQL on every thread. No PostgreSQL
+server is needed.
+
+Against the unfixed code (issue #49), 77 of 100 processes crashed or returned a
+failed build. `BuildPolicyTests/testShippedSourcesAvoidUnguardedLazyStatics`
+rejects the `static T *x = nil; if (x == nil)` pattern in `src/`, `modules/`,
+`tools/` and `examples/`. Use `dispatch_once` instead.
+
+The test is included in the full unit suite, the Linux quality gate, and the
+sanitizer unit lanes. Required checks remain unchanged.

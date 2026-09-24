@@ -417,3 +417,10 @@ libobjc2 first-use `@synchronized` workaround
 fresh processes, with a per-process alarm so a hang fails instead of stalling
 the job. The companion source policy check runs with `BuildPolicyTests`. No
 required lane is added or renamed by this regression.
+
+`LazyStaticColdStartTests` is explicitly selected in the Linux quality job and
+included in the sanitizer matrix's full unit suite. It guards the
+`dispatch_once` initialization of `ALNSQLBuilder`'s process-wide regexes and
+operator sets (issue #49) by starting 32 threads on their first SQL build in
+each of many fresh processes. The companion source policy check runs with
+`BuildPolicyTests`. No required lane is added or renamed by this regression.

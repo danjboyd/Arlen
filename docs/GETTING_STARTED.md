@@ -292,3 +292,8 @@ Explicit response headers and configured CSP remain supported; see
 On GNUstep, avoid `@synchronized` on instances that several request threads
 share; create an `NSLock` in the initializer instead. See
 [Toolchain Matrix](TOOLCHAIN_MATRIX.md#known-libobjc2-defect-instance-synchronized).
+
+Create process-wide lazy objects, such as a shared `NSRegularExpression`, with
+`dispatch_once` rather than `if (x == nil) { x = ...; }`. Concurrent first
+requests can otherwise race, and one thread can free the object another is
+using.

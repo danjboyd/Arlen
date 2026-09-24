@@ -927,6 +927,48 @@
                  [violations componentsJoinedByString:@"\n"]);
 }
 
+// Issue #49: `static T *x = nil; if (x == nil) { x = ...; }` races on
+// concurrent first use. Both threads assign, and under ARC the second store
+// frees the object the first thread is still using. Use dispatch_once.
+- (void)testShippedSourcesAvoidUnguardedLazyStatics {
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSRegularExpression *lazyStatic = [NSRegularExpression
+      regularExpressionWithPattern:
+          @"^[ \\t]*static [A-Za-z_][A-Za-z0-9_]* *\\* *([A-Za-z_][A-Za-z0-9_]*) = nil;[ \\t]*\\n"
+           "[ \\t]*if \\((?:\\1 == nil|!\\1)\\)"
+                           options:NSRegularExpressionAnchorsMatchLines
+                             error:NULL];
+  XCTAssertNotNil(lazyStatic);
+  NSMutableArray<NSString *> *violations = [NSMutableArray array];
+  NSUInteger scannedFiles = 0;
+  for (NSString *root in @[ @"src", @"modules", @"tools", @"examples" ]) {
+    NSString *rootPath = [repoRoot stringByAppendingPathComponent:root];
+    NSDirectoryEnumerator *enumerator = [[NSFileManager defaultManager] enumeratorAtPath:rootPath];
+    for (NSString *relativePath in enumerator) {
+      if (![[relativePath pathExtension] isEqualToString:@"m"]) {
+        continue;
+      }
+      NSString *source = [self readFile:[rootPath stringByAppendingPathComponent:relativePath]];
+      scannedFiles += 1;
+      if (![source containsString:@" = nil;"]) {
+        continue;
+      }
+      for (NSTextCheckingResult *match in
+           [lazyStatic matchesInString:source options:0 range:NSMakeRange(0, [source length])]) {
+        NSUInteger line = [[[source substringToIndex:match.range.location]
+            componentsSeparatedByString:@"\n"] count];
+        [violations addObject:[NSString stringWithFormat:@"%@/%@:%lu: %@", root, relativePath,
+                                                         (unsigned long)line,
+                                                         [source substringWithRange:[match rangeAtIndex:1]]]];
+      }
+    }
+  }
+  XCTAssertGreaterThan(scannedFiles, (NSUInteger)100);
+  XCTAssertEqual((NSUInteger)0, [violations count],
+                 @"initialize these statics with dispatch_once instead:\n%@",
+                 [violations componentsJoinedByString:@"\n"]);
+}
+
 - (void)testTSANScriptBootstrapsEOCCUnsanitizedBeforeInstrumentedBuilds {
   NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
   NSString *fixtureRoot = [self createTempDirectoryWithPrefix:@"arlen-tsan-fixture"];
