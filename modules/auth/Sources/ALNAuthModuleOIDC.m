@@ -4,12 +4,30 @@
 #import "ALNSecurityPrimitives.h"
 
 NSString *const ALNAuthModuleOIDCErrorDomain = @"Arlen.Modules.Auth.OIDC";
+NSString *const ALNAuthModuleOIDCFailureCodeKey = @"ALNAuthFailureCode";
 
 static NSString *OS(id value) { return [value isKindOfClass:[NSString class]] ? value : @""; }
 static BOOL OFail(NSError **error, NSString *message) {
   if (error) *error = [NSError errorWithDomain:ALNAuthModuleOIDCErrorDomain code:ALNAuthModuleOIDCErrorRejected
                                     userInfo:@{NSLocalizedDescriptionKey: message}];
   return NO;
+}
+static BOOL OFailureCodeIsValid(id value) {
+  if (![value isKindOfClass:[NSString class]] || ![(NSString *)value length] || [(NSString *)value length] > 64) return NO;
+  NSCharacterSet *invalid = [[NSCharacterSet characterSetWithCharactersInString:
+      @"abcdefghijklmnopqrstuvwxyz0123456789_"] invertedSet];
+  return [(NSString *)value rangeOfCharacterFromSet:invalid].location == NSNotFound;
+}
+// Attaches a failure code unless the error already carries a valid one.
+static id OFailWithCode(NSError **error, NSError *underlying, NSString *message, NSString *code) {
+  if (!error) return nil;
+  if (OFailureCodeIsValid(underlying.userInfo[ALNAuthModuleOIDCFailureCodeKey])) { *error = underlying; return nil; }
+  NSMutableDictionary *userInfo = [NSMutableDictionary dictionaryWithDictionary:underlying.userInfo ?: @{}];
+  if (!underlying) userInfo[NSLocalizedDescriptionKey] = message ?: @"OIDC login rejected";
+  userInfo[ALNAuthModuleOIDCFailureCodeKey] = code;
+  *error = [NSError errorWithDomain:underlying.domain ?: ALNAuthModuleOIDCErrorDomain
+                               code:underlying ? underlying.code : ALNAuthModuleOIDCErrorRejected userInfo:userInfo];
+  return nil;
 }
 static NSString *OLower(id value) {
   return [[OS(value) stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]]
@@ -263,52 +281,67 @@ static BOOL OStrings(id values) {
 }
 - (NSDictionary *)completeLoginWithParameters:(NSDictionary *)parameters callbackState:(NSDictionary *)state
                                     context:(ALNContext *)context error:(NSError **)error {
+  NSError *failure = nil;
+  // A provider error response (for example access_denied) is reported as such
+  // even when the session state has also gone missing.
+  if (OS(parameters[@"error"]).length) {
+    return OFailWithCode(error, nil, @"OIDC provider returned an error", @"provider_error");
+  }
   NSTimeInterval issued = [state[@"issuedAt"] respondsToSelector:@selector(doubleValue)] ? [state[@"issuedAt"] doubleValue] : 0;
   NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
   if (![state[@"provider"] isEqual:self.configuration[@"identifier"]] ||
       ![state[@"redirectURI"] isEqual:self.configuration[@"redirectURI"]] ||
-      !OS(state[@"nonce"]).length || !OS(state[@"codeVerifier"]).length || issued <= 0 || issued > now ||
-      (parameters[@"iss"] && ![parameters[@"iss"] isEqual:self.configuration[@"issuer"]])) {
-    OFail(error, @"OIDC callback binding rejected"); return nil;
+      !OS(state[@"nonce"]).length || !OS(state[@"codeVerifier"]).length || issued <= 0 || issued > now) {
+    return OFailWithCode(error, nil, @"OIDC callback binding rejected", @"expired_state");
+  }
+  if (parameters[@"iss"] && ![parameters[@"iss"] isEqual:self.configuration[@"issuer"]]) {
+    return OFailWithCode(error, nil, @"OIDC callback issuer rejected", @"verification_failed");
   }
   NSDictionary *callback = [ALNOIDCClient validateAuthorizationCallbackParameters:parameters
       expectedState:state[@"state"] issuedAtDate:[NSDate dateWithTimeIntervalSince1970:issued]
-      maxAgeSeconds:300 error:error];
-  if (!callback) return nil;
-  NSMutableDictionary *config = [[self discoveredConfigurationWithError:error] mutableCopy];
-  if (!config) return nil;
+      maxAgeSeconds:300 error:&failure];
+  if (!callback) {
+    BOOL stateFailure = failure.code == ALNOIDCClientErrorCallbackStateMismatch ||
+                        failure.code == ALNOIDCClientErrorCallbackExpired;
+    return OFailWithCode(error, failure, nil, stateFailure ? @"expired_state" : @"provider_error");
+  }
+  NSMutableDictionary *config = [[self discoveredConfigurationWithError:&failure] mutableCopy];
+  if (!config) return OFailWithCode(error, failure, nil, @"provider_unavailable");
   NSString *secretKey = OS(config[@"clientSecretEnvironmentKey"]);
   if ([config[@"tokenEndpointAuthMethod"] isEqual:@"client_secret_post"]) {
     NSString *secret = OS([NSProcessInfo processInfo].environment[secretKey]);
-    if (!secret.length) { OFail(error, @"OIDC client secret unavailable"); return nil; }
+    if (!secret.length) return OFailWithCode(error, nil, @"OIDC client secret unavailable", @"provider_unavailable");
     config[@"clientSecret"] = secret;
   }
   NSDictionary *exchange = [ALNOIDCClient tokenExchangeRequestForProviderConfiguration:config
       authorizationCode:callback[@"code"] redirectURI:config[@"redirectURI"]
-      codeVerifier:state[@"codeVerifier"] error:error];
-  if (!exchange) return nil;
+      codeVerifier:state[@"codeVerifier"] error:&failure];
+  if (!exchange) return OFailWithCode(error, failure, nil, @"provider_unavailable");
   NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:exchange[@"url"]]
       cachePolicy:NSURLRequestReloadIgnoringLocalCacheData timeoutInterval:5];
   request.HTTPMethod = @"POST";
   request.HTTPBody = [exchange[@"bodyString"] dataUsingEncoding:NSUTF8StringEncoding];
   [request setValue:@"application/json" forHTTPHeaderField:@"Accept"];
   [request setValue:@"application/x-www-form-urlencoded" forHTTPHeaderField:@"Content-Type"];
-  NSDictionary *token = [self documentForRequest:request error:error];
+  NSDictionary *token = [self documentForRequest:request error:&failure];
   [config removeObjectForKey:@"clientSecret"];
-  if (!token) return nil;
+  if (!token) return OFailWithCode(error, failure, nil, @"provider_unavailable");
   NSArray *parts = [OS(token[@"id_token"]) componentsSeparatedByString:@"."];
   NSData *headerData = parts.count == 3 ? ALNDataFromBase64URLString(parts[0]) : nil;
   id header = headerData ? [NSJSONSerialization JSONObjectWithData:headerData options:0 error:NULL] : nil;
   if (token[@"error"] || ![header isKindOfClass:[NSDictionary class]] || ![header[@"alg"] isEqual:@"RS256"]) {
-    OFail(error, @"OIDC requires a successful token response with an RS256 ID token"); return nil;
+    return OFailWithCode(error, nil, @"OIDC requires a successful token response with an RS256 ID token",
+                         @"verification_failed");
   }
-  NSDictionary *keys = [self documentAtURL:config[@"jwksURI"] error:error];
-  if (!keys) return nil;
+  NSDictionary *keys = [self documentAtURL:config[@"jwksURI"] error:&failure];
+  if (!keys) return OFailWithCode(error, failure, nil, @"provider_unavailable");
   // Fetch keys on each callback so rotation does not depend on process-local cache freshness.
   NSMutableDictionary *result = [[ALNAuthProviderSessionBridge completeLoginWithCallbackParameters:parameters callbackState:state
       tokenResponse:token userInfoResponse:nil providerConfiguration:config jwksDocument:keys
-      resolver:self context:context error:error] mutableCopy];
-  if (result) result[@"normalizedIdentity"] = [self principalIdentity:result[@"normalizedIdentity"] configuration:config error:NULL];
+      resolver:self context:context error:&failure] mutableCopy];
+  // Resolver-stage failures already carry a code; anything else failed token verification.
+  if (!result) return OFailWithCode(error, failure, nil, @"verification_failed");
+  result[@"normalizedIdentity"] = [self principalIdentity:result[@"normalizedIdentity"] configuration:config error:NULL];
   return result;
 }
 - (NSDictionary *)principalIdentity:(NSDictionary *)identity configuration:(NSDictionary *)config error:(NSError **)error {
@@ -332,18 +365,24 @@ static BOOL OStrings(id values) {
 }
 - (NSDictionary *)resolveSessionDescriptorForNormalizedIdentity:(NSDictionary *)identity
                                          providerConfiguration:(NSDictionary *)config error:(NSError **)error {
-  NSDictionary *normalized = [self principalIdentity:identity configuration:config error:error];
-  if (!normalized) return nil;
+  NSError *failure = nil;
+  NSDictionary *normalized = [self principalIdentity:identity configuration:config error:&failure];
+  if (!normalized) return OFailWithCode(error, failure, nil, @"rejected");
   NSDictionary *admission = self.configuration[@"admission"];
   if (!OAdmits(admission, [normalized[@"claims"] isKindOfClass:[NSDictionary class]] ? normalized[@"claims"] : @{})) {
     if (error) *error = [NSError errorWithDomain:ALNAuthModuleOIDCErrorDomain code:ALNAuthModuleOIDCErrorAdmissionDenied
-                                        userInfo:@{NSLocalizedDescriptionKey: admission[@"rejectionMessage"]}];
+                                        userInfo:@{NSLocalizedDescriptionKey: admission[@"rejectionMessage"],
+                                                   ALNAuthModuleOIDCFailureCodeKey: @"admission_denied"}];
     return nil;
   }
   // Admission only gates sign-in; the application still decides membership, roles and
   // linking. No email fallback.
-  return [self.resolver resolveSessionDescriptorForNormalizedIdentity:normalized
-                                              providerConfiguration:config error:error];
+  NSDictionary *descriptor = [self.resolver resolveSessionDescriptorForNormalizedIdentity:normalized
+                                                                   providerConfiguration:config error:&failure];
+  if (![descriptor isKindOfClass:[NSDictionary class]]) {
+    return OFailWithCode(error, failure, @"Resolver rejected the provider identity", @"rejected");
+  }
+  return descriptor;
 }
 - (NSDictionary *)accountLinkingDescriptorForNormalizedIdentity:(NSDictionary *)identity
                                          providerConfiguration:(NSDictionary *)config error:(NSError **)error {

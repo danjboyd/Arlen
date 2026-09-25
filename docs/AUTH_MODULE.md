@@ -401,7 +401,9 @@ google = {
 Rejected logins never reach the resolver or create a session. JSON callbacks
 return `403` with `{"status":"error","code":"admission_denied","message":...}`.
 Browser callbacks redirect to the module's login page, which shows
-`rejectionMessage` (default "This account is not permitted to sign in.").
+`rejectionMessage` (default "This account is not permitted to sign in."). If a
+[failure redirect](#failure-redirect) is configured, they go there with
+`error=admission_denied` instead.
 
 Admission only decides who may sign in. It does not link identities: accounts
 are still keyed on the verified provider subject, the resolver still decides
@@ -422,6 +424,51 @@ return session metadata and `redirect_to`, without provider tokens. Failed
 callbacks return 401 with a generic message (403 `admission_denied` for an
 admission-policy rejection); provider setup/network failures
 at login return 502. Disabled providers have no routes or login buttons.
+
+### Failure redirect
+
+By default a rejected browser callback answers `401` with a small JSON body.
+SPA and headless apps can instead send people to their own page. Set
+`authModule.failureRedirect`, or `failureRedirect` on a provider (which wins),
+to a local absolute path:
+
+```plist
+authModule = {
+  failureRedirect = "/sign-in";
+  providers = { google = { /* ... */ failureRedirect = "/family/sign-in"; }; };
+};
+```
+
+A failed browser callback then redirects with `302` to
+`<failureRedirect>?error=<code>&provider=<identifier>`, or with `&` if the path
+already has a query string. The JSON API callback (`<apiPrefix>/provider/...`)
+never redirects. It keeps its `401` and adds the same `code` field. The value
+must be a local path: a scheme, a leading `//`, a backslash, a fragment or
+whitespace fails configuration at startup.
+
+| `error` code | Meaning |
+| --- | --- |
+| `rejected` | The resolver returned nil, or the verified subject/tenant was not accepted. |
+| `admission_denied` | The provider's `admission` policy refused the identity. |
+| `expired_state` | The login state was missing, expired, or did not match. |
+| `provider_error` | The provider returned an error, such as `access_denied`. |
+| `verification_failed` | Token or ID-token checks failed (signature, issuer, audience, nonce). |
+| `provider_unavailable` | Discovery, token or JWKS requests failed, or the client secret is missing. |
+
+A resolver can supply a more specific code by setting
+`ALNAuthModuleOIDCFailureCodeKey` in the `userInfo` of the NSError it returns.
+The code must be lowercase letters, digits or underscores, at most 64
+characters; otherwise `rejected` is used.
+
+```objc
+if (invite == nil) {
+  if (error) *error = [NSError errorWithDomain:@"App" code:1
+                                      userInfo:@{ ALNAuthModuleOIDCFailureCodeKey : @"not_invited" }];
+  return nil;
+}
+```
+
+Codes never include provider messages or claim values.
 
 ### Application Identity Resolver
 

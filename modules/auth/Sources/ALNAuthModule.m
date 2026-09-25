@@ -45,6 +45,18 @@ static NSError *AMError(ALNAuthModuleErrorCode code, NSString *message, NSDictio
   return [NSError errorWithDomain:ALNAuthModuleErrorDomain code:code userInfo:userInfo];
 }
 
+// Local absolute paths only: no scheme, no protocol-relative `//`, no backslashes,
+// fragments or control characters.
+static BOOL AMIsLocalRedirectPath(id value) {
+  if (![value isKindOfClass:[NSString class]]) return NO;
+  NSString *path = value;
+  return [path hasPrefix:@"/"] && ![path hasPrefix:@"//"] &&
+         [path rangeOfString:@"\\"].location == NSNotFound &&
+         [path rangeOfString:@"#"].location == NSNotFound &&
+         [path rangeOfCharacterFromSet:[NSCharacterSet controlCharacterSet]].location == NSNotFound &&
+         [path rangeOfCharacterFromSet:[NSCharacterSet whitespaceCharacterSet]].location == NSNotFound;
+}
+
 // OIDC presets the auth module can expand. Presets that need a tenant-specific issuer
 // or an unsupported client authentication method are deliberately not listed.
 static NSArray *AMSupportedOIDCProviderPresets(void) {
@@ -655,6 +667,8 @@ static NSString *AMStubHS256JWT(NSDictionary *claims, NSString *sharedSecret) {
 @property(nonatomic, copy, readwrite) NSString *providerStubAuthorizePath;
 @property(nonatomic, copy, readwrite) NSString *providerStubCallbackPath;
 @property(nonatomic, copy, readwrite) NSString *defaultRedirect;
+@property(nonatomic, copy) NSString *failureRedirect;
+@property(nonatomic, copy) NSDictionary<NSString *, NSString *> *providerFailureRedirects;
 @property(nonatomic, copy, readwrite) NSArray<NSDictionary *> *loginProviders;
 @property(nonatomic, copy, readwrite) NSString *uiMode;
 @property(nonatomic, copy, readwrite) NSString *layoutTemplate;
@@ -1050,6 +1064,13 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
   if ([self.defaultRedirect length] == 0) {
     self.defaultRedirect = @"/";
   }
+  id failureRedirect = self.moduleConfig[@"failureRedirect"];
+  if (failureRedirect != nil && !AMIsLocalRedirectPath(failureRedirect)) {
+    if (error) *error = AMError(ALNAuthModuleErrorInvalidConfiguration,
+                                @"authModule.failureRedirect must be a local absolute path", nil);
+    return NO;
+  }
+  self.failureRedirect = failureRedirect;
   NSDictionary *uiConfig = [self.moduleConfig[@"ui"] isKindOfClass:[NSDictionary class]] ? self.moduleConfig[@"ui"] : @{};
   NSString *uiMode = AMLowerTrimmedString(uiConfig[@"mode"]);
   if (![uiMode isEqualToString:@"headless"] && ![uiMode isEqualToString:@"generated-app-ui"]) {
@@ -1147,6 +1168,7 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
   BOOL allowLoopbackHTTPRedirect = [self.environmentName isEqualToString:@"development"] ||
                                    [self.environmentName isEqualToString:@"test"];
   NSMutableDictionary *oidcProviders = [NSMutableDictionary dictionary];
+  NSMutableDictionary *providerFailureRedirects = [NSMutableDictionary dictionary];
   NSMutableArray *loginProviders = [self.loginProviders mutableCopy];
   for (NSString *identifier in [[providers allKeys] sortedArrayUsingSelector:@selector(compare:)]) {
     if ([identifier isEqual:@"stub"] || !AMConfigBool(providers[identifier][@"enabled"], NO)) continue;
@@ -1162,12 +1184,22 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
                                                                   error:error];
     if (!oidc) return NO;
     oidcProviders[identifier] = oidc;
+    if (provider[@"failureRedirect"] != nil) {
+      if (!AMIsLocalRedirectPath(provider[@"failureRedirect"])) {
+        if (error) *error = AMError(ALNAuthModuleErrorInvalidConfiguration,
+                                    [NSString stringWithFormat:@"authModule.providers.%@.failureRedirect must be a local absolute path",
+                                                               identifier], nil);
+        return NO;
+      }
+      providerFailureRedirects[identifier] = provider[@"failureRedirect"];
+    }
     NSString *suffix = [NSString stringWithFormat:@"provider/%@/login", identifier];
     [loginProviders addObject:@{ @"identifier": identifier, @"kind": @"oidc",
        @"ctaLabel": AMTrimmedString(provider[@"ctaLabel"]).length ? provider[@"ctaLabel"] : [@"Continue with " stringByAppendingString:identifier],
        @"loginPath": AMPathJoin(self.prefix, suffix), @"apiLoginPath": AMPathJoin(self.apiPrefix, suffix) }];
   }
   self.oidcProviders = oidcProviders;
+  self.providerFailureRedirects = providerFailureRedirects;
   self.loginProviders = loginProviders;
 
   self.bootstrapAdminEmails = AMNormalizedEmailArray(self.moduleConfig[@"bootstrapAdminEmails"]);
@@ -4313,6 +4345,19 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
   [ctx markSessionDirty];
   NSError *error = nil;
   NSDictionary *result = [provider completeLoginWithParameters:[self requestParameters] callbackState:state context:ctx error:&error];
+  NSString *failureCode = [error.userInfo[ALNAuthModuleOIDCFailureCodeKey] isKindOfClass:[NSString class]]
+                              ? error.userInfo[ALNAuthModuleOIDCFailureCodeKey]
+                              : @"rejected";
+  NSString *identifier = AMTrimmedString(provider.configuration[@"identifier"]);
+  NSString *failureRedirect = self.runtime.providerFailureRedirects[identifier] ?: self.runtime.failureRedirect;
+  if (!result && [failureRedirect length] > 0 && ![self shouldReturnJSON:ctx]) {
+    // Codes and identifiers are restricted to URL-safe characters.
+    NSString *separator = [failureRedirect rangeOfString:@"?"].location == NSNotFound ? @"?" : @"&";
+    [self redirectTo:[NSString stringWithFormat:@"%@%@error=%@&provider=%@", failureRedirect, separator,
+                                                failureCode, identifier]
+              status:302];
+    return nil;
+  }
   if (!result && [error.domain isEqual:ALNAuthModuleOIDCErrorDomain] &&
       error.code == ALNAuthModuleOIDCErrorAdmissionDenied) {
     NSString *message = error.localizedDescription ?: @"This account is not permitted to sign in.";
@@ -4328,7 +4373,7 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
   }
   if (!result) {
     [self setStatus:401];
-    return @{ @"status": @"error", @"message": @"Provider login rejected" };
+    return @{ @"status": @"error", @"code": failureCode, @"message": @"Provider login rejected" };
   }
   NSString *redirect = AMTrimmedString(state[@"return_to"]);
   if (!redirect.length) redirect = self.runtime.defaultRedirect;
