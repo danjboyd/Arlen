@@ -2,6 +2,13 @@
 
 ## Upcoming Release Candidate
 
+- Static mounts accept `cacheControl`, either one value or glob patterns with a
+  `default` (for example immutable caching for hashed `assets/*` and `no-cache`
+  for `index.html`). The default `/static` mount reads the top-level
+  `staticCacheControl` or `ARLEN_STATIC_CACHE_CONTROL`. Static responses
+  previously sent no `Cache-Control` at all (GitHub issue 62, Cache-Control
+  part). See [Static files](STATIC_FILES.md#cache-control).
+
 - Auth module OIDC: `authModule.failureRedirect`, or a provider's own
   `failureRedirect`, sends failed browser callbacks to a local page with
   `?error=<code>&provider=<identifier>` instead of a raw 401 JSON body. The

@@ -30,6 +30,10 @@ apps need first.
 - `logFormat`: `text` or `json`
 - `serveStatic`: serve files from `public/`
 - `staticAllowExtensions`: extensions Arlen may serve from `public/`
+- `staticCacheControl`: optional `Cache-Control` for the default `/static` mount,
+  either one string or a glob dictionary (`ARLEN_STATIC_CACHE_CONTROL` supplies
+  a single string); `staticMounts` entries take the same form as `cacheControl`
+  (see [Static files](STATIC_FILES.md#cache-control))
 - `mimeTypes`: optional extension -> `Content-Type` overrides for static mounts
   and controller file responses (see [Static files](STATIC_FILES.md#content-types))
 - `listenBacklog`: socket listen backlog

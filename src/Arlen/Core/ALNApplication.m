@@ -1,4 +1,5 @@
 #import "ALNApplication.h"
+#import "ALNFileResponseInternal.h"
 #import <dispatch/dispatch.h>
 
 #import "ALNConfig.h"
@@ -1271,6 +1272,18 @@ static NSArray<NSString *> *ALNDataverseTargetNamesFromConfigAndEnvironment(NSDi
 - (BOOL)mountStaticDirectory:(NSString *)directory
                     atPrefix:(NSString *)prefix
              allowExtensions:(NSArray *)allowExtensions {
+  return [self mountStaticDirectory:directory atPrefix:prefix allowExtensions:allowExtensions options:nil];
+}
+
+- (BOOL)mountStaticDirectory:(NSString *)directory
+                    atPrefix:(NSString *)prefix
+             allowExtensions:(NSArray *)allowExtensions
+                     options:(NSDictionary *)options {
+  NSArray *cacheControlRules =
+      ALNStaticCacheControlRules([options isKindOfClass:[NSDictionary class]] ? options[@"cacheControl"] : nil, NULL);
+  if (cacheControlRules == nil) {
+    return NO;
+  }
   NSString *normalizedPrefix = ALNNormalizeMountPrefix(prefix);
   if ([normalizedPrefix length] == 0) {
     return NO;
@@ -1297,6 +1310,7 @@ static NSArray<NSString *> *ALNDataverseTargetNamesFromConfigAndEnvironment(NSDi
     @"prefix" : normalizedPrefix,
     @"directory" : normalizedDirectory,
     @"allowExtensions" : extensions ?: @[],
+    @"cacheControlRules" : cacheControlRules,
   }];
   return YES;
 }
@@ -4192,7 +4206,18 @@ static void ALNFinalizeResponse(ALNApplication *application,
       continue;
     }
 
-    if (![self mountStaticDirectory:directory atPrefix:prefix allowExtensions:allowExtensions]) {
+    NSString *cacheControlReason = nil;
+    if (ALNStaticCacheControlRules(entry[@"cacheControl"], &cacheControlReason) == nil) {
+      [self.logger warn:@"static mount skipped"
+                 fields:@{
+                   @"prefix" : prefix ?: @"",
+                   @"directory" : directory ?: @"",
+                   @"reason" : cacheControlReason ?: @"invalid cacheControl",
+                 }];
+      continue;
+    }
+    NSDictionary *options = entry[@"cacheControl"] ? @{ @"cacheControl" : entry[@"cacheControl"] } : nil;
+    if (![self mountStaticDirectory:directory atPrefix:prefix allowExtensions:allowExtensions options:options]) {
       [self.logger warn:@"static mount skipped"
                  fields:@{
                    @"prefix" : prefix ?: @"",
