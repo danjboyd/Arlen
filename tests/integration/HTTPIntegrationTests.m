@@ -2818,6 +2818,42 @@
   XCTAssertEqualObjects(binaryBody, sendfileBody);
 }
 
+- (void)testHeadOnGetRouteReturnsHeadersWithoutBody {
+  int port = [self randomPort];
+  NSTask *server = [[NSTask alloc] init];
+  server.launchPath = @"./build/boomhauer";
+  server.arguments = @[ @"--port", [NSString stringWithFormat:@"%d", port] ];
+  server.standardOutput = [NSPipe pipe];
+  server.standardError = [NSPipe pipe];
+  [server launch];
+  @try {
+    BOOL ready = NO;
+    (void)[self requestPathWithRetries:@"/healthz" port:port attempts:60 success:&ready];
+    XCTAssertTrue(ready);
+    if (!ready) return;
+    int code = 0;
+    NSString *script = [NSString stringWithFormat:
+        @"get=$(curl -sS -o /dev/null -w '%%{http_code} %%{size_download}' http://127.0.0.1:%d/about); "
+        @"head=$(curl -sS -I -o /dev/null -w '%%{http_code} %%{size_download}' http://127.0.0.1:%d/about); "
+        @"len=$(curl -sS -I http://127.0.0.1:%d/about | tr -d '\\r' | awk -F': ' 'tolower($1)==\"content-length\" {print $2}'); "
+        @"printf 'get=%%s\\nhead=%%s\\nlen=%%s\\n' \"$get\" \"$head\" \"$len\"", port, port, port];
+    NSString *output = [self runShellCapture:script exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", output);
+    NSString *getLine = nil, *headLine = nil, *lengthLine = nil;
+    for (NSString *line in [output componentsSeparatedByString:@"\n"]) {
+      if ([line hasPrefix:@"get="]) getLine = [line substringFromIndex:4];
+      if ([line hasPrefix:@"head="]) headLine = [line substringFromIndex:5];
+      if ([line hasPrefix:@"len="]) lengthLine = [line substringFromIndex:4];
+    }
+    NSArray *getParts = [getLine componentsSeparatedByString:@" "];
+    XCTAssertEqualObjects(@"200", getParts.firstObject, @"%@", output);
+    XCTAssertEqualObjects(@"200 0", headLine, @"%@", output);
+    XCTAssertEqualObjects(getParts.lastObject, lengthLine, @"%@", output);
+  } @finally {
+    XCTAssertTrue([self terminateTask:server timeoutSeconds:5.0]);
+  }
+}
+
 - (void)testCommittedFileBodyPathStreamsCompleteBody_ARLEN_BUG_023 {
   int curlCode = 0;
   int serverCode = 0;
