@@ -152,9 +152,11 @@ Named targets:
 
 - requires a named target from `config/deploy.plist`
 - creates deterministic Linux/Debian-style host scaffolding for that target
-- runs against the local filesystem; it does not SSH to `transport.sshHost`
-- for remote targets, run it on the target host or against an intentionally
- mounted/staged representation of that host layout before remote push/release
+- by default runs against the local filesystem; it does not SSH to
+ `transport.sshHost`
+- `--remote` (SSH targets only): creates the release/shared/log/tmp layout on
+ the target host over SSH with `mkdir -p`, and writes the generated artifacts
+ locally. Alternatively, run `arlen deploy init <target>` on the host itself.
 - creates:
  - release/shared/log/tmp directories under the target release root
  - generated systemd unit under `build/deploy/targets/<target>/systemd/`
@@ -191,9 +193,12 @@ Named targets:
 `arlen deploy push`
 
 - builds a local immutable release under `releases/<release-id>/`
-- when `[target]` has SSH transport metadata, fails before build/upload with
- `deploy_target_not_initialized` until `arlen deploy init <target>` has
- generated the target host artifacts
+- when `[target]` has SSH transport metadata, checks the release layout on the
+ host over SSH and fails before build/upload with
+ `deploy_target_not_initialized` (naming the missing host paths) until it
+ exists (`arlen deploy init <target> --remote`). Missing local generated
+ artifacts are regenerated automatically. If SSH is unreachable it fails with
+ `deploy_target_transport_failed`.
 - when `[target]` has SSH transport metadata, stages the local release under
  `build/deploy/targets/<target>/local-releases/` and uploads it to the remote
  target release path over SSH/tar streaming
@@ -239,9 +244,8 @@ Named targets:
 `arlen deploy release`
 
 - reuses an existing release artifact for the selected `--release-id`, or builds it first if missing
-- when `[target]` has SSH transport metadata, fails before build/upload or
- activation with `deploy_target_not_initialized` until
- `arlen deploy init <target>` has generated the target host artifacts
+- when `[target]` has SSH transport metadata, runs the same host layout check
+ as `deploy push` before build/upload or activation
 - when `[target]` has SSH transport metadata:
  - builds or reuses the local staged release
  - uploads it to the remote target

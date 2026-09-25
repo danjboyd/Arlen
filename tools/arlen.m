@@ -127,6 +127,7 @@ static void PrintDeployUsage(void) {
           "Release-only options:\n"
           "  --env <name>          Migration environment (default: production)\n"
           "  --skip-migrate        Skip migration step during activation\n"
+          "  --remote              init: create the release layout on the SSH target host\n"
           "  --runtime-action <reload|restart|none>\n"
           "\n"
           "Rollback options:\n"
@@ -1783,34 +1784,38 @@ static NSArray<NSDictionary *> *DeployTargetPayloads(NSArray<NSDictionary *> *ta
   return payloads;
 }
 
-static NSArray<NSString *> *MissingInitializedDeployTargetPaths(NSDictionary *target) {
-  NSMutableArray<NSString *> *missing = [NSMutableArray array];
-  NSArray<NSString *> *requiredPaths = @[
+// Release layout directories live on the deploy host; for SSH targets they are
+// checked and created over SSH, never on the operator's machine.
+static NSArray<NSString *> *DeployTargetHostLayoutPaths(NSDictionary *target) {
+  return @[
     StringValueForDeployKey(target, @"release_path"),
     StringValueForDeployKey(target, @"releases_dir"),
     StringValueForDeployKey(target, @"shared_dir"),
     StringValueForDeployKey(target, @"logs_dir"),
     StringValueForDeployKey(target, @"tmp_dir"),
+  ];
+}
+
+// Deterministic generated artifacts under build/deploy/targets/<target>/ on the
+// machine running arlen.
+static NSArray<NSString *> *DeployTargetGeneratedArtifactPaths(NSDictionary *target) {
+  return @[
     StringValueForDeployKey(target, @"generated_dir"),
     StringValueForDeployKey(target, @"propane_wrapper"),
     StringValueForDeployKey(target, @"jobs_worker_wrapper"),
     [[StringValueForDeployKey(target, @"generated_dir") stringByAppendingPathComponent:@"systemd"]
         stringByAppendingPathComponent:StringValueForDeployKey(target, @"systemd_unit_filename")],
   ];
-  for (NSString *path in requiredPaths) {
+}
+
+static NSArray<NSString *> *MissingLocalPaths(NSArray<NSString *> *paths) {
+  NSMutableArray<NSString *> *missing = [NSMutableArray array];
+  for (NSString *path in paths) {
     if ([path length] > 0 && !PathExists(path, NULL)) {
       [missing addObject:path];
     }
   }
   return missing;
-}
-
-static BOOL DeployTargetIsInitialized(NSDictionary *target, NSArray<NSString *> **missingPathsOut) {
-  NSArray<NSString *> *missing = MissingInitializedDeployTargetPaths(target);
-  if (missingPathsOut != NULL) {
-    *missingPathsOut = missing;
-  }
-  return [missing count] == 0;
 }
 
 static NSString *RenderedSystemdUnitForTarget(NSDictionary *target, NSString *frameworkRoot) {
@@ -1968,6 +1973,101 @@ static NSDictionary *RunSSHCommandForTarget(NSDictionary *target, NSString *remo
     @"captured_output" : capturedOutput ?: @"",
     @"exit_code" : @(exitCode),
   };
+}
+
+static BOOL WriteTextFile(NSString *path, NSString *content, BOOL force, NSError **error);
+
+// Writes the deterministic generated artifacts for a target under
+// build/deploy/targets/<target>/. Used by deploy init, and on demand before a
+// remote push or release.
+static BOOL WriteDeployTargetGeneratedArtifacts(NSDictionary *target,
+                                                NSString *frameworkRoot,
+                                                NSMutableArray<NSString *> *createdDirectories,
+                                                NSMutableArray<NSString *> *writtenFiles,
+                                                NSString **failureMessage) {
+  NSFileManager *fm = [NSFileManager defaultManager];
+  NSString *generatedDir = StringValueForDeployKey(target, @"generated_dir");
+  for (NSString *subdirectory in @[ @"bin", @"systemd", @"env" ]) {
+    NSString *directory = [generatedDir stringByAppendingPathComponent:subdirectory];
+    if ([generatedDir length] > 0 &&
+        [fm createDirectoryAtPath:directory withIntermediateDirectories:YES attributes:nil error:NULL]) {
+      [createdDirectories addObject:directory];
+    }
+  }
+  NSString *systemdPath =
+      [[generatedDir stringByAppendingPathComponent:@"systemd"] stringByAppendingPathComponent:StringValueForDeployKey(target, @"systemd_unit_filename")];
+  NSString *envExamplePath =
+      [[[generatedDir stringByAppendingPathComponent:@"env"] stringByAppendingPathComponent:StringValueForDeployKey(target, @"name")] stringByAppendingString:@".env.example"];
+  NSString *propaneWrapperPath = StringValueForDeployKey(target, @"propane_wrapper");
+  NSString *jobsWorkerWrapperPath = StringValueForDeployKey(target, @"jobs_worker_wrapper");
+  NSArray *files = @[
+    @[ systemdPath, RenderedSystemdUnitForTarget(target, frameworkRoot), @NO, @"failed writing generated systemd unit" ],
+    @[ envExamplePath, RenderedEnvExampleForTarget(target, frameworkRoot), @NO, @"failed writing generated env example" ],
+    @[ propaneWrapperPath, RenderedGNUstepWrapperForTarget(target, @"propane"), @YES, @"failed writing propane wrapper" ],
+    @[ jobsWorkerWrapperPath, RenderedGNUstepWrapperForTarget(target, @"jobs-worker"), @YES, @"failed writing jobs-worker wrapper" ],
+    @[ [generatedDir stringByAppendingPathComponent:@"README.txt"], RenderedInitReadmeForTarget(target), @NO,
+       @"failed writing deploy init README" ],
+  ];
+  for (NSArray *file in files) {
+    NSError *writeError = nil;
+    if (!WriteTextFile(file[0], file[1], YES, &writeError)) {
+      if (failureMessage != NULL) {
+        *failureMessage = writeError.localizedDescription ?: file[3];
+      }
+      return NO;
+    }
+    if ([file[2] boolValue]) {
+      SetExecutablePermissions(file[0], NULL);
+    }
+    [writtenFiles addObject:file[0]];
+  }
+  return YES;
+}
+
+// Returns the host layout paths missing on the SSH target, or nil with
+// *transportResult set when the target could not be reached.
+static NSArray<NSString *> *MissingRemoteDeployTargetPaths(NSDictionary *target, NSDictionary **transportResult) {
+  // Report indexes rather than echoing paths back, so output parsing never depends
+  // on how the host shell prints path names.
+  NSArray<NSString *> *layoutPaths = DeployTargetHostLayoutPaths(target);
+  NSMutableString *script = [NSMutableString stringWithString:@"set -eu"];
+  for (NSUInteger idx = 0; idx < [layoutPaths count]; idx++) {
+    if ([layoutPaths[idx] length] == 0) {
+      continue;
+    }
+    [script appendFormat:@"; if [ ! -d %@ ]; then printf 'ARLEN_MISSING\\t%lu\\n'; fi",
+                         ShellQuote(layoutPaths[idx]), (unsigned long)idx];
+  }
+  [script appendString:@"; printf 'ARLEN_LAYOUT_CHECKED\\n'"];
+  NSDictionary *result = RunSSHCommandForTarget(target, script);
+  NSString *output = [result[@"captured_output"] isKindOfClass:[NSString class]] ? result[@"captured_output"] : @"";
+  if (![[result[@"status"] description] isEqualToString:@"ok"] ||
+      [output rangeOfString:@"ARLEN_LAYOUT_CHECKED"].location == NSNotFound) {
+    if (transportResult != NULL) {
+      *transportResult = result;
+    }
+    return nil;
+  }
+  NSMutableArray<NSString *> *missing = [NSMutableArray array];
+  for (NSString *line in [output componentsSeparatedByString:@"\n"]) {
+    if ([line hasPrefix:@"ARLEN_MISSING\t"]) {
+      NSInteger idx = [[line substringFromIndex:[@"ARLEN_MISSING\t" length]] integerValue];
+      if (idx >= 0 && (NSUInteger)idx < [layoutPaths count]) {
+        [missing addObject:layoutPaths[(NSUInteger)idx]];
+      }
+    }
+  }
+  return missing;
+}
+
+static NSDictionary *CreateRemoteDeployTargetLayout(NSDictionary *target) {
+  NSMutableString *script = [NSMutableString stringWithString:@"set -eu && mkdir -p"];
+  for (NSString *path in DeployTargetHostLayoutPaths(target)) {
+    if ([path length] > 0) {
+      [script appendFormat:@" %@", ShellQuote(path)];
+    }
+  }
+  return RunSSHCommandForTarget(target, script);
 }
 
 static NSDictionary *ReleaseInventoryItem(NSString *releaseID,
@@ -5308,6 +5408,7 @@ static int CommandDeploy(NSArray *args) {
   BOOL asJSON = NO;
   BOOL skipMigrate = NO;
   BOOL followLogs = NO;
+  BOOL remoteLayoutInit = NO;
   BOOL releasesDirExplicit = NO;
   BOOL environmentExplicit = NO;
   BOOL baseURLExplicit = NO;
@@ -5665,6 +5766,8 @@ static int CommandDeploy(NSArray *args) {
       asJSON = YES;
     } else if ([arg isEqualToString:@"--skip-migrate"]) {
       skipMigrate = YES;
+    } else if ([arg isEqualToString:@"--remote"]) {
+      remoteLayoutInit = YES;
     } else if ([arg isEqualToString:@"--help"] || [arg isEqualToString:@"-h"]) {
       PrintDeployUsage();
       return 0;
@@ -5860,8 +5963,51 @@ static int CommandDeploy(NSArray *args) {
   }
 
   if (remoteTargetEnabled && [@[ @"push", @"release" ] containsObject:subcommand]) {
-    NSArray<NSString *> *missingInitPaths = nil;
-    if (!DeployTargetIsInitialized(resolvedTarget, &missingInitPaths)) {
+    // Generated artifacts are deterministic and local; regenerate any that are missing.
+    if ([MissingLocalPaths(DeployTargetGeneratedArtifactPaths(resolvedTarget)) count] > 0) {
+      NSString *artifactFailure = nil;
+      if (!WriteDeployTargetGeneratedArtifacts(resolvedTarget, frameworkRoot, [NSMutableArray array],
+                                               [NSMutableArray array], &artifactFailure)) {
+        return asJSON ? EmitMachineError(@"deploy", [NSString stringWithFormat:@"deploy.%@", subcommand],
+                                         @"deploy_init_write_failed",
+                                         artifactFailure ?: @"failed writing generated deploy artifacts",
+                                         @"Verify build/deploy/targets is writable, or run deploy init.",
+                                         @"arlen deploy init production --json", 1)
+                      : 1;
+      }
+    }
+    // The release layout lives on the host, so check it there.
+    NSDictionary *layoutTransport = nil;
+    NSArray<NSString *> *missingInitPaths = MissingRemoteDeployTargetPaths(resolvedTarget, &layoutTransport);
+    if (missingInitPaths == nil) {
+      NSString *transportOutput = Trimmed(layoutTransport[@"captured_output"]) ?: @"";
+      if (asJSON) {
+        NSDictionary *payload = @{
+          @"version" : AgentContractVersion(),
+          @"command" : @"deploy",
+          @"workflow" : [NSString stringWithFormat:@"deploy.%@", subcommand],
+          @"subcommand" : subcommand ?: @"",
+          @"status" : @"error",
+          @"target" : DeployTargetPayload(resolvedTarget),
+          @"transport" : layoutTransport ?: @{},
+          @"error" : @{
+            @"code" : @"deploy_target_transport_failed",
+            @"message" : @"could not check the release layout on the remote target over SSH",
+            @"fixit" : @{
+              @"action" : @"Verify transport.sshHost, SSH credentials and connectivity to the target.",
+              @"example" : [NSString stringWithFormat:@"arlen deploy doctor %@ --json", targetName ?: @"production"],
+            }
+          },
+          @"exit_code" : @1,
+        };
+        PrintJSONPayload(stdout, payload);
+        return 1;
+      }
+      fprintf(stderr, "arlen deploy: could not check the remote release layout for %s over SSH: %s\n",
+              [(targetName ?: @"") UTF8String], [transportOutput UTF8String]);
+      return 1;
+    }
+    if ([missingInitPaths count] > 0) {
       if (asJSON) {
         NSDictionary *payload = @{
           @"version" : AgentContractVersion(),
@@ -5873,10 +6019,10 @@ static int CommandDeploy(NSArray *args) {
           @"missing_paths" : missingInitPaths ?: @[],
           @"error" : @{
             @"code" : @"deploy_target_not_initialized",
-            @"message" : @"remote deploy target has not been initialized",
+            @"message" : @"remote deploy target has not been initialized: the release layout is missing on the host",
             @"fixit" : @{
-              @"action" : @"Run deploy init for the target before remote push or release.",
-              @"example" : [NSString stringWithFormat:@"arlen deploy init %@ --json", targetName ?: @"production"],
+              @"action" : @"Create the layout over SSH with deploy init --remote, or run deploy init on the target host.",
+              @"example" : [NSString stringWithFormat:@"arlen deploy init %@ --remote --json", targetName ?: @"production"],
             }
           },
           @"exit_code" : @1,
@@ -5884,7 +6030,9 @@ static int CommandDeploy(NSArray *args) {
         PrintJSONPayload(stdout, payload);
         return 1;
       }
-      fprintf(stderr, "arlen deploy: target %s is not initialized; run `arlen deploy init %s` first\n",
+      fprintf(stderr, "arlen deploy: target %s is not initialized on the remote host (missing: %s); "
+                      "run `arlen deploy init %s --remote`, or `arlen deploy init %s` on the host\n",
+              [(targetName ?: @"") UTF8String], [[missingInitPaths componentsJoinedByString:@", "] UTF8String],
               [(targetName ?: @"") UTF8String], [(targetName ?: @"") UTF8String]);
       return 1;
     }
@@ -5902,81 +6050,47 @@ static int CommandDeploy(NSArray *args) {
     NSFileManager *fm = [NSFileManager defaultManager];
     NSMutableArray<NSString *> *createdDirectories = [NSMutableArray array];
     NSMutableArray<NSString *> *writtenFiles = [NSMutableArray array];
-    NSArray<NSString *> *directories = @[
-      StringValueForDeployKey(resolvedTarget, @"release_path"),
-      StringValueForDeployKey(resolvedTarget, @"releases_dir"),
-      StringValueForDeployKey(resolvedTarget, @"shared_dir"),
-      StringValueForDeployKey(resolvedTarget, @"logs_dir"),
-      StringValueForDeployKey(resolvedTarget, @"tmp_dir"),
-      [StringValueForDeployKey(resolvedTarget, @"generated_dir") stringByAppendingPathComponent:@"bin"],
-      [StringValueForDeployKey(resolvedTarget, @"generated_dir") stringByAppendingPathComponent:@"systemd"],
-      [StringValueForDeployKey(resolvedTarget, @"generated_dir") stringByAppendingPathComponent:@"env"],
-    ];
-    for (NSString *directory in directories) {
-      if ([directory length] == 0) {
-        continue;
+    NSDictionary *remoteInitTransport = nil;
+    if (remoteLayoutInit) {
+      if (!remoteTargetEnabled) {
+        return asJSON ? EmitMachineError(@"deploy", @"deploy.init", @"deploy_init_remote_requires_ssh_target",
+                                         @"arlen deploy init --remote requires a target with transport.sshHost",
+                                         @"Drop --remote for local targets, or configure transport.sshHost.",
+                                         @"arlen deploy init production --remote --json", 2)
+                      : 2;
       }
-      if ([fm createDirectoryAtPath:directory withIntermediateDirectories:YES attributes:nil error:NULL]) {
-        [createdDirectories addObject:directory];
+      remoteInitTransport = CreateRemoteDeployTargetLayout(resolvedTarget);
+      if (![[remoteInitTransport[@"status"] description] isEqualToString:@"ok"]) {
+        return asJSON ? EmitMachineError(@"deploy", @"deploy.init", @"deploy_init_remote_failed",
+                                         [NSString stringWithFormat:@"failed to create the release layout on the remote host: %@",
+                                                                    Trimmed(remoteInitTransport[@"captured_output"]) ?: @""],
+                                         @"Verify SSH access and that the release path is writable on the host.",
+                                         @"arlen deploy init production --remote --json", 1)
+                      : 1;
+      }
+      for (NSString *directory in DeployTargetHostLayoutPaths(resolvedTarget)) {
+        if ([directory length] > 0) {
+          [createdDirectories addObject:directory];
+        }
+      }
+    } else {
+      for (NSString *directory in DeployTargetHostLayoutPaths(resolvedTarget)) {
+        if ([directory length] > 0 &&
+            [fm createDirectoryAtPath:directory withIntermediateDirectories:YES attributes:nil error:NULL]) {
+          [createdDirectories addObject:directory];
+        }
       }
     }
 
-    NSString *generatedDir = StringValueForDeployKey(resolvedTarget, @"generated_dir");
-    NSString *systemdPath =
-        [[generatedDir stringByAppendingPathComponent:@"systemd"] stringByAppendingPathComponent:StringValueForDeployKey(resolvedTarget, @"systemd_unit_filename")];
-    NSString *envExamplePath =
-        [[[generatedDir stringByAppendingPathComponent:@"env"] stringByAppendingPathComponent:StringValueForDeployKey(resolvedTarget, @"name")] stringByAppendingString:@".env.example"];
-    NSString *propaneWrapperPath = StringValueForDeployKey(resolvedTarget, @"propane_wrapper");
-    NSString *jobsWorkerWrapperPath = StringValueForDeployKey(resolvedTarget, @"jobs_worker_wrapper");
-    NSString *readmePath = [generatedDir stringByAppendingPathComponent:@"README.txt"];
-
-    NSError *writeError = nil;
-    if (!WriteTextFile(systemdPath, RenderedSystemdUnitForTarget(resolvedTarget, frameworkRoot), YES, &writeError)) {
+    NSString *artifactFailure = nil;
+    if (!WriteDeployTargetGeneratedArtifacts(resolvedTarget, frameworkRoot, createdDirectories, writtenFiles,
+                                             &artifactFailure)) {
       return asJSON ? EmitMachineError(@"deploy", @"deploy.init", @"deploy_init_write_failed",
-                                       writeError.localizedDescription ?: @"failed writing generated systemd unit",
+                                       artifactFailure ?: @"failed writing generated deploy artifacts",
                                        @"Verify the target output directory is writable and rerun deploy init.",
                                        @"arlen deploy init production --json", 1)
                     : 1;
     }
-    [writtenFiles addObject:systemdPath];
-    writeError = nil;
-    if (!WriteTextFile(envExamplePath, RenderedEnvExampleForTarget(resolvedTarget, frameworkRoot), YES, &writeError)) {
-      return asJSON ? EmitMachineError(@"deploy", @"deploy.init", @"deploy_init_write_failed",
-                                       writeError.localizedDescription ?: @"failed writing generated env example",
-                                       @"Verify the target output directory is writable and rerun deploy init.",
-                                       @"arlen deploy init production --json", 1)
-                    : 1;
-    }
-    [writtenFiles addObject:envExamplePath];
-    writeError = nil;
-    if (!WriteTextFile(propaneWrapperPath, RenderedGNUstepWrapperForTarget(resolvedTarget, @"propane"), YES, &writeError)) {
-      return asJSON ? EmitMachineError(@"deploy", @"deploy.init", @"deploy_init_write_failed",
-                                       writeError.localizedDescription ?: @"failed writing propane wrapper",
-                                       @"Verify the target output directory is writable and rerun deploy init.",
-                                       @"arlen deploy init production --json", 1)
-                    : 1;
-    }
-    SetExecutablePermissions(propaneWrapperPath, NULL);
-    [writtenFiles addObject:propaneWrapperPath];
-    writeError = nil;
-    if (!WriteTextFile(jobsWorkerWrapperPath, RenderedGNUstepWrapperForTarget(resolvedTarget, @"jobs-worker"), YES, &writeError)) {
-      return asJSON ? EmitMachineError(@"deploy", @"deploy.init", @"deploy_init_write_failed",
-                                       writeError.localizedDescription ?: @"failed writing jobs-worker wrapper",
-                                       @"Verify the target output directory is writable and rerun deploy init.",
-                                       @"arlen deploy init production --json", 1)
-                    : 1;
-    }
-    SetExecutablePermissions(jobsWorkerWrapperPath, NULL);
-    [writtenFiles addObject:jobsWorkerWrapperPath];
-    writeError = nil;
-    if (!WriteTextFile(readmePath, RenderedInitReadmeForTarget(resolvedTarget), YES, &writeError)) {
-      return asJSON ? EmitMachineError(@"deploy", @"deploy.init", @"deploy_init_write_failed",
-                                       writeError.localizedDescription ?: @"failed writing deploy init README",
-                                       @"Verify the target output directory is writable and rerun deploy init.",
-                                       @"arlen deploy init production --json", 1)
-                    : 1;
-    }
-    [writtenFiles addObject:readmePath];
 
     if (asJSON) {
       NSDictionary *payload = @{
@@ -5988,13 +6102,20 @@ static int CommandDeploy(NSArray *args) {
         @"target" : DeployTargetPayload(resolvedTarget),
         @"created_directories" : createdDirectories ?: @[],
         @"written_files" : writtenFiles ?: @[],
+        @"layout_location" : remoteLayoutInit ? @"remote" : @"local",
+        @"transport" : remoteInitTransport ?: @{},
       };
       PrintJSONPayload(stdout, payload);
       return 0;
     }
 
     fprintf(stdout, "Initialized deploy target %s\n", [targetName UTF8String]);
-    fprintf(stdout, "Generated artifacts under %s\n", [generatedDir UTF8String]);
+    if (remoteLayoutInit) {
+      fprintf(stdout, "Created the release layout on %s\n",
+              [StringValueForDeployKey(resolvedTarget, @"ssh_host") UTF8String]);
+    }
+    fprintf(stdout, "Generated artifacts under %s\n",
+            [StringValueForDeployKey(resolvedTarget, @"generated_dir") UTF8String]);
     return 0;
   }
 
@@ -10396,7 +10517,7 @@ static NSArray<NSString *> *DeployOptionCompletionCandidates(void) {
             @"--json-performance-manifest", @"--allow-missing-certification",
             @"--skip-release-certification", @"--dev", @"--json",
             @"--env", @"--skip-migrate", @"--runtime-action", @"--lines", @"--follow", @"--file",
-            @"--write", @"--force", @"--target", @"--ssh-host", @"--output" ];
+            @"--write", @"--force", @"--target", @"--ssh-host", @"--output", @"--remote" ];
 }
 
 static NSString *CompletionScriptBash(void) {

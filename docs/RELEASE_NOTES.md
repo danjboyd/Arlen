@@ -2,6 +2,15 @@
 
 ## Upcoming Release Candidate
 
+- Deploy: `deploy push` and `deploy release` for SSH targets no longer look for
+  the host's release layout on the operator's machine. They check it on the
+  host over SSH and report the missing host paths (`deploy_target_not_initialized`),
+  or fail with `deploy_target_transport_failed` when SSH is unreachable.
+  Missing local generated artifacts are regenerated automatically. The new
+  `arlen deploy init <target> --remote` creates the layout on the host over
+  SSH. There is no longer any need to mirror the host path locally (GitHub
+  issue 69).
+
 - Static files: `Content-Type` now comes from a public `ALNMIMETypes` table.
   gif, ico, webp, woff, woff2, map and xml were allowed by default but served as
   `application/octet-stream`; they now get specific types, as do common audio,

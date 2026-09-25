@@ -307,11 +307,11 @@ upload, use file-backed stdout/stderr capture. Large compiler warning output
 therefore cannot fill an `NSPipe` and deadlock Arlen before JSON diagnostics
 are emitted (`ARLEN-BUG-027`).
 
-`arlen deploy init <target>` is local host scaffolding. It creates the target
-release layout and generated wrappers on the filesystem where the command runs;
-it does not SSH to `transport.sshHost`. For remote targets, run it on the target
-host or against an intentionally mounted/staged host layout before relying on
-remote `push` or `release`.
+`arlen deploy init <target>` is host scaffolding. By default it creates the
+target release layout and generated wrappers on the filesystem where the command
+runs. For SSH targets, `arlen deploy init <target> --remote` creates the release
+layout on the host over SSH and writes the generated wrappers locally.
+Alternatively, run `arlen deploy init <target>` on the host itself.
 
 ### 4.7 Remote Rebuild Contract
 
@@ -419,9 +419,14 @@ release metadata, and print a text-mode warning. The older
 `--allow-missing-certification` spelling remains supported for compatibility.
 
 For named remote targets, `deploy push <target>` and `deploy release <target>`
-now require the target to be initialized first. If the target host artifacts are
-missing, Arlen fails before build/upload/activation with
-`deploy_target_not_initialized` and points to `arlen deploy init <target>`.
+require the release layout (release, shared, log and tmp directories) to exist on
+the host. Arlen checks it over SSH; it never looks for the host's paths on the
+operator's machine. If the layout is missing, Arlen fails before
+build/upload/activation with `deploy_target_not_initialized`, lists the missing
+host paths and points to `arlen deploy init <target> --remote`. If SSH cannot
+reach the host, it fails with `deploy_target_transport_failed`. The local
+generated artifacts under `build/deploy/targets/<target>/` are deterministic
+and are regenerated when missing.
 
 `arlen deploy push` writes `releases/<id>/metadata/manifest.json` using
 `phase32-deploy-manifest-v1`. The manifest now records deployment metadata for
