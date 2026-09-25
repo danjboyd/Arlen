@@ -146,7 +146,8 @@ The helpers you will use most often are:
 - `queryValueForName:`
 - `queryIntegerForName:`
 - `queryBooleanForName:`
-- `headerValueForName:`
+- `headerValueForName:`: case-insensitive, and never `nil`. An absent header
+  returns `@""`, so test with `length == 0`, not `== nil` or `?:`.
 - `requireStringParam:value:`
 - `requireIntegerParam:value:`
 

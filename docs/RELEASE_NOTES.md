@@ -2,6 +2,15 @@
 
 ## Upcoming Release Candidate
 
+- `headerValueForName:` on `ALNController` and `ALNContext` is now declared
+  nonnull, matching what it returns: an absent header gives `@""`, as
+  `ALNRequest` already documented. The empty-name case, which returned `nil`,
+  now also returns `@""`. Code that checked `== nil` or relied on `?:` to fall
+  back never saw a missing header; test `length == 0` instead. The storage
+  module's upload endpoint had such a fallback to a `?token=` query parameter
+  that could never trigger; it was removed, and tokens remain header-only
+  (GitHub issue 80).
+
 - Static files: `Content-Type` now comes from a public `ALNMIMETypes` table.
   gif, ico, webp, woff, woff2, map and xml were allowed by default but served as
   `application/octet-stream`; they now get specific types, as do common audio,
