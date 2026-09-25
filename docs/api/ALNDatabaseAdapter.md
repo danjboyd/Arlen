@@ -5,6 +5,12 @@
 
 Database-adapter protocol defining connection lifecycle, query primitives, transactions, and capability metadata.
 
+## Properties
+
+| Property | Type | Attributes | Purpose |
+| --- | --- | --- | --- |
+| `acquireTimeout` | `NSTimeInterval` | `nonatomic, assign` | Public `acquireTimeout` property available on `ALNDatabaseAdapter`. |
+
 ## Methods
 
 | Selector | Signature | Purpose | How to use |

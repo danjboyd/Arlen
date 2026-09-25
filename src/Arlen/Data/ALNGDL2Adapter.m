@@ -70,6 +70,14 @@
   return nil;
 }
 
+- (NSTimeInterval)acquireTimeout {
+  return self.fallbackAdapter.acquireTimeout;
+}
+
+- (void)setAcquireTimeout:(NSTimeInterval)acquireTimeout {
+  self.fallbackAdapter.acquireTimeout = acquireTimeout;
+}
+
 - (id<ALNDatabaseConnection>)acquireAdapterConnection:(NSError **)error {
   return (id<ALNDatabaseConnection>)[self.fallbackAdapter acquireConnection:error];
 }

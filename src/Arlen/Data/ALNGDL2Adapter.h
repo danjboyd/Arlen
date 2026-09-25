@@ -13,6 +13,8 @@ NS_ASSUME_NONNULL_BEGIN
 
 @property(nonatomic, strong, readonly) ALNPg *fallbackAdapter;
 @property(nonatomic, copy, readonly) NSString *migrationMode;
+/// Forwards to `fallbackAdapter.acquireTimeout`.
+@property(nonatomic, assign) NSTimeInterval acquireTimeout;
 
 + (NSDictionary<NSString *, id> *)capabilityMetadata;
 
