@@ -3,7 +3,10 @@
 Arlen's HTTP server serves configured static mounts before application dispatch.
 With `serveStatic = YES`, the default `/static/` mount serves the application's
 `public/` directory. Custom mounts retain their configured extension allowlists.
-Static responses do not pass through application response middleware.
+Static responses do not pass through application response middleware, but
+they do carry the app's security headers (`securityHeaders`, including the
+CSP), as described in
+[Response Headers](RESPONSE_HEADERS.md#concurrent-security-headers).
 
 ## Content types
 

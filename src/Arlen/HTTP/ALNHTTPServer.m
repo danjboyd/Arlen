@@ -3547,6 +3547,8 @@ static BOOL ALNSendSSEHeaders(ALNSocketHandle clientFd, ALNResponse *response) {
             if (staticResponse == nil) {
               continue;
             }
+            // Static responses bypass the middleware chain (GitHub issue 81).
+            [staticResponse setHeadersIfMissing:self.application.baselineSecurityHeaders];
             // Request dispatch mode does not force connection close; keep-alive follows HTTP semantics.
             BOOL keepAlive = ALNShouldKeepAliveForRequest(request, staticResponse);
             [staticResponse setHeader:@"Connection" value:(keepAlive ? @"keep-alive" : @"close")];

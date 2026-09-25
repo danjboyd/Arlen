@@ -215,7 +215,9 @@ Security headers:
 - `securityHeaders.contentSecurityPolicy`
 
 Many apps can keep the generated security-header defaults and only tighten the
-CSP later as the frontend becomes more specific.
+CSP later as the frontend becomes more specific. The headers cover every response, including static
+files, 404s and built-in endpoints, not only routed ones (see
+[Response Headers](RESPONSE_HEADERS.md#concurrent-security-headers)).
 
 ## 6.1 Route Policies
 
