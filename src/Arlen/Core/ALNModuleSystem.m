@@ -2,6 +2,7 @@
 
 #import "ALNDataCompat.h"
 #import "ALNApplication.h"
+#import "ALNSecurityPrimitives.h"
 
 NSString *const ALNModuleSystemErrorDomain = @"Arlen.ModuleSystem.Error";
 NSString *const ALNModuleSystemFrameworkVersion = @"0.1.0";
@@ -574,6 +575,10 @@ static NSDictionary *ALNModuleNormalizedDependency(id rawDependency,
     if ([version length] > 0) {
       normalized[@"version"] = version;
     }
+    NSString *contentDigest = ALNModuleTrim(entry[@"contentDigest"]);
+    if ([contentDigest length] > 0) {
+      normalized[@"contentDigest"] = contentDigest;
+    }
     [normalizedEntries addObject:normalized];
   }
   [normalizedEntries sortUsingComparator:^NSComparisonResult(NSDictionary *left, NSDictionary *right) {
@@ -622,6 +627,7 @@ static NSDictionary *ALNModuleNormalizedDependency(id rawDependency,
     id enabledValue = entry[@"enabled"];
     BOOL enabled = [enabledValue respondsToSelector:@selector(boolValue)] ? [enabledValue boolValue] : YES;
     NSString *version = ALNModuleTrim(entry[@"version"]);
+    NSString *contentDigest = ALNModuleTrim(entry[@"contentDigest"]);
     if (!ALNModuleIdentifierIsValid(identifier)) {
       if (error != NULL) {
         *error = ALNModuleError(12,
@@ -639,12 +645,82 @@ static NSDictionary *ALNModuleNormalizedDependency(id rawDependency,
       @"path" : path,
       @"enabled" : @(enabled),
       @"version" : version ?: @"",
+      @"contentDigest" : contentDigest ?: @"",
     }];
   }
   [records sortUsingComparator:^NSComparisonResult(NSDictionary *left, NSDictionary *right) {
     return [left[@"identifier"] compare:right[@"identifier"]];
   }];
   return records;
+}
+
++ (NSDictionary<NSString *, NSString *> *)contentFileDigestsForModuleAtPath:(NSString *)moduleRoot
+                                                                     error:(NSError **)error {
+  NSFileManager *fm = [NSFileManager defaultManager];
+  BOOL isDirectory = NO;
+  if (![fm fileExistsAtPath:moduleRoot isDirectory:&isDirectory] || !isDirectory) {
+    if (error != NULL) {
+      *error = ALNModuleError(40,
+                              [NSString stringWithFormat:@"module directory not found: %@", moduleRoot ?: @""],
+                              nil,
+                              nil);
+    }
+    return nil;
+  }
+
+  NSMutableDictionary<NSString *, NSString *> *digests = [NSMutableDictionary dictionary];
+  NSDirectoryEnumerator *enumerator = [fm enumeratorAtPath:moduleRoot];
+  NSString *relativePath = nil;
+  while ((relativePath = [enumerator nextObject]) != nil) {
+    if ([[relativePath lastPathComponent] isEqualToString:@".DS_Store"]) {
+      continue;
+    }
+    NSString *fullPath = [moduleRoot stringByAppendingPathComponent:relativePath];
+    NSDictionary *attributes = [fm attributesOfItemAtPath:fullPath error:NULL];
+    NSString *fileType = attributes[NSFileType];
+    NSData *content = nil;
+    if ([fileType isEqualToString:NSFileTypeRegular]) {
+      content = [NSData dataWithContentsOfFile:fullPath];
+    } else if ([fileType isEqualToString:NSFileTypeSymbolicLink]) {
+      NSString *destination = [fm pathContentOfSymbolicLinkAtPath:fullPath] ?: @"";
+      content = [[@"symlink:" stringByAppendingString:destination] dataUsingEncoding:NSUTF8StringEncoding];
+    } else {
+      continue;
+    }
+    NSString *hex = (content != nil) ? ALNLowercaseHexStringFromData(ALNSHA256(content)) : nil;
+    if ([hex length] == 0) {
+      if (error != NULL) {
+        *error = ALNModuleError(41,
+                                [NSString stringWithFormat:@"unable to hash module file %@", fullPath ?: @""],
+                                nil,
+                                nil);
+      }
+      return nil;
+    }
+    NSString *key = [relativePath stringByReplacingOccurrencesOfString:@"\\" withString:@"/"];
+    digests[key] = hex;
+  }
+  return digests;
+}
+
++ (NSString *)contentDigestForFileDigests:(NSDictionary<NSString *, NSString *> *)fileDigests {
+  NSMutableData *manifest = [NSMutableData data];
+  NSArray<NSString *> *paths = [[fileDigests allKeys] sortedArrayUsingSelector:@selector(compare:)];
+  for (NSString *path in paths) {
+    NSString *line = [NSString stringWithFormat:@"%@\t%@\n", path, fileDigests[path]];
+    [manifest appendData:[line dataUsingEncoding:NSUTF8StringEncoding]];
+  }
+  NSString *hex = ALNLowercaseHexStringFromData(ALNSHA256(manifest)) ?: @"";
+  return [@"sha256:" stringByAppendingString:hex];
+}
+
++ (NSString *)contentDigestForModuleAtPath:(NSString *)moduleRoot error:(NSError **)error {
+  NSDictionary<NSString *, NSString *> *fileDigests =
+      [self contentFileDigestsForModuleAtPath:moduleRoot error:error];
+  if (fileDigests == nil) {
+    return nil;
+  }
+  return [self contentDigestForFileDigests:fileDigests];
 }
 
 + (ALNModuleDefinition *)moduleDefinitionAtPath:(NSString *)moduleRoot
@@ -957,6 +1033,41 @@ static NSDictionary *ALNModuleNormalizedDependency(id rawDependency,
       [merged[@"moduleSystem"][@"installed"] isKindOfClass:[NSArray class]]
           ? merged[@"moduleSystem"][@"installed"]
           : @[];
+  NSArray<NSDictionary *> *records = [self installedModuleRecordsAtAppRoot:appRoot error:NULL] ?: @[];
+  for (NSDictionary *record in records) {
+    NSString *identifier = record[@"identifier"];
+    NSString *recordedDigest = record[@"contentDigest"];
+    NSString *installPath = [appRoot stringByAppendingPathComponent:record[@"path"]];
+    NSString *installedDigest = [self contentDigestForModuleAtPath:installPath error:NULL];
+    if (installedDigest == nil) {
+      continue;
+    }
+    if ([recordedDigest length] == 0) {
+      ALNModuleAppendDiagnostic(
+          diagnostics,
+          @"warning",
+          @"module_content_untracked",
+          identifier,
+          [NSString stringWithFormat:@"module %@ has no recorded contentDigest, so local edits and stale copies cannot be detected",
+                                     identifier],
+          @"Run `arlen module upgrade` for this module to record its content digest.",
+          @"");
+    } else if (![recordedDigest isEqualToString:installedDigest]) {
+      ALNModuleAppendDiagnostic(
+          diagnostics,
+          @"warning",
+          @"module_locally_modified",
+          identifier,
+          [NSString stringWithFormat:@"module %@ files under %@ differ from the tree that was installed",
+                                     identifier,
+                                     record[@"path"]],
+          [NSString stringWithFormat:@"recorded %@, found %@; `arlen module upgrade` will refuse to overwrite without --force",
+                                     recordedDigest,
+                                     installedDigest],
+          @"");
+    }
+  }
+
   ALNModuleAppendDiagnostic(diagnostics,
                             @"pass",
                             @"modules_loaded",
