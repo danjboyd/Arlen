@@ -131,6 +131,13 @@ NS_ASSUME_NONNULL_BEGIN
 - (BOOL)setSPAFallbackFile:(NSString *)file
                    options:(nullable NSDictionary *)options
                      error:(NSError *_Nullable *_Nullable)error;
+// The application root: config `appRoot` (set when config is loaded from an app
+// directory), else ARLEN_APP_ROOT, else the current directory.
+- (NSString *)appRootPath;
+// Resolves a relative path against -appRootPath; absolute paths are returned
+// standardized. Use this rather than the process working directory, which differs
+// between the server, workers and CLI delegates.
+- (NSString *)pathRelativeToAppRoot:(NSString *)path;
 - (void)addMiddleware:(id<ALNMiddleware>)middleware;
 - (void)setJobsAdapter:(id<ALNJobAdapter>)adapter;
 - (void)setCacheAdapter:(id<ALNCacheAdapter>)adapter;

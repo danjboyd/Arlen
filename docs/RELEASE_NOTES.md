@@ -2,6 +2,14 @@
 
 ## Upcoming Release Candidate
 
+- Modules: relative jobs, storage, notifications and search persistence paths,
+  including the `var/module_state/...` defaults, now resolve against the
+  application root instead of the process working directory.
+  `arlen jobs worker` runs from the framework root, so it had been reading and
+  writing scheduler state under the framework checkout, separately from the
+  server. Adds `-[ALNApplication appRootPath]` and `-pathRelativeToAppRoot:`
+  (GitHub issue 76).
+
 - Deploy: `deploy push` and `deploy release` for SSH targets no longer look for
   the host's release layout on the operator's machine. They check it on the
   host over SSH and report the missing host paths (`deploy_target_not_initialized`),
