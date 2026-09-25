@@ -227,6 +227,165 @@
   }
 }
 
+- (NSString *)arlenModuleCommand:(NSString *)arguments
+                        appRoot:(NSString *)appRoot
+                       repoRoot:(NSString *)repoRoot
+                  frameworkRoot:(NSString *)frameworkRoot {
+  return [NSString stringWithFormat:@"cd %@ && ARLEN_FRAMEWORK_ROOT=%@ %@/build/arlen module %@",
+                                    ALNTestShellQuote(appRoot),
+                                    ALNTestShellQuote(frameworkRoot),
+                                    ALNTestShellQuote(repoRoot),
+                                    arguments];
+}
+
+- (NSArray<NSString *> *)diagnosticCodesInDoctorPayload:(NSDictionary *)payload module:(NSString *)module {
+  NSMutableArray<NSString *> *codes = [NSMutableArray array];
+  for (NSDictionary *entry in payload[@"diagnostics"] ?: @[]) {
+    if ([entry[@"module"] isEqualToString:module]) {
+      [codes addObject:entry[@"code"] ?: @""];
+    }
+  }
+  return codes;
+}
+
+- (void)testModuleUpgradeDetectsSameVersionContentChanges {
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *appRoot = [self createTempDirectoryWithPrefix:@"phase13-module-digest-app"];
+  NSString *workRoot = [self createTempDirectoryWithPrefix:@"phase13-module-digest-src"];
+  XCTAssertNotNil(appRoot);
+  XCTAssertNotNil(workRoot);
+  if (appRoot == nil || workRoot == nil) {
+    return;
+  }
+
+  @try {
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"config/app.plist"]
+                          content:@"{\n  host = \"127.0.0.1\";\n  port = 3000;\n}\n"]);
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"config/environments/development.plist"]
+                          content:@"{}\n"]);
+
+    // The fake framework checkout doubles as the upgrade source, like vendor/Arlen/modules/<name>.
+    NSString *frameworkRoot = [workRoot stringByAppendingPathComponent:@"framework"];
+    NSString *source = [frameworkRoot stringByAppendingPathComponent:@"modules/alpha"];
+    NSString *sourceFile = [source stringByAppendingPathComponent:@"Sources/AlphaModule.m"];
+    NSString *installedFile = [appRoot stringByAppendingPathComponent:@"modules/alpha/Sources/AlphaModule.m"];
+    XCTAssertTrue([self writeFile:[source stringByAppendingPathComponent:@"module.plist"]
+                          content:@"{\n  identifier = \"alpha\";\n  version = \"1.0.0\";\n  principalClass = \"AlphaModule\";\n}\n"]);
+    XCTAssertTrue([self writeFile:sourceFile content:@"// release 1\n"]);
+
+    int code = 0;
+    NSString *buildOutput = [self runShellCapture:[self buildToolsCommandForRepoRoot:repoRoot] exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", buildOutput);
+
+    NSString *upgrade = [NSString stringWithFormat:@"upgrade alpha --source %@ --json", ALNTestShellQuote(source)];
+    NSString *forcedUpgrade =
+        [NSString stringWithFormat:@"upgrade alpha --source %@ --force --json", ALNTestShellQuote(source)];
+
+    NSString *output = [self runShellCapture:[self arlenModuleCommand:[NSString stringWithFormat:@"add alpha --source %@ --json",
+                                                                                                ALNTestShellQuote(source)]
+                                                              appRoot:appRoot
+                                                             repoRoot:repoRoot
+                                                        frameworkRoot:frameworkRoot]
+                                    exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", output);
+    NSDictionary *payload = [self parseJSONDictionary:output];
+    NSString *digestV1 = payload[@"contentDigest"];
+    XCTAssertTrue([digestV1 hasPrefix:@"sha256:"], @"%@", output);
+    NSDictionary *lock = [NSDictionary dictionaryWithContentsOfFile:
+        [appRoot stringByAppendingPathComponent:@"config/modules.plist"]];
+    XCTAssertEqualObjects(digestV1, lock[@"modules"][0][@"contentDigest"]);
+
+    // Unchanged source: a genuine no-op.
+    output = [self runShellCapture:[self arlenModuleCommand:upgrade appRoot:appRoot repoRoot:repoRoot frameworkRoot:frameworkRoot]
+                          exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", output);
+    XCTAssertEqualObjects(@"noop", [self parseJSONDictionary:output][@"status"]);
+
+    // Issue 54: upstream sources change but version stays 1.0.0.
+    XCTAssertTrue([self writeFile:sourceFile content:@"// release 2 security fix\n"]);
+    output = [self runShellCapture:[self arlenModuleCommand:@"doctor --json" appRoot:appRoot repoRoot:repoRoot frameworkRoot:frameworkRoot]
+                          exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", output);
+    XCTAssertTrue([[self diagnosticCodesInDoctorPayload:[self parseJSONDictionary:output] module:@"alpha"]
+                      containsObject:@"module_framework_copy_differs"], @"%@", output);
+
+    output = [self runShellCapture:[self arlenModuleCommand:upgrade appRoot:appRoot repoRoot:repoRoot frameworkRoot:frameworkRoot]
+                          exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", output);
+    payload = [self parseJSONDictionary:output];
+    XCTAssertEqualObjects(@"updated", payload[@"status"]);
+    XCTAssertEqualObjects(@"content_changed", payload[@"reason"]);
+    XCTAssertEqualObjects(@"// release 2 security fix\n",
+                          [NSString stringWithContentsOfFile:installedFile encoding:NSUTF8StringEncoding error:NULL]);
+
+    // A locally edited vendored copy is never overwritten without --force.
+    XCTAssertTrue([self writeFile:installedFile content:@"// local patch\n"]);
+    XCTAssertTrue([self writeFile:sourceFile content:@"// release 3\n"]);
+    output = [self runShellCapture:[self arlenModuleCommand:@"doctor --json" appRoot:appRoot repoRoot:repoRoot frameworkRoot:frameworkRoot]
+                          exitCode:&code];
+    XCTAssertTrue([[self diagnosticCodesInDoctorPayload:[self parseJSONDictionary:output] module:@"alpha"]
+                      containsObject:@"module_locally_modified"], @"%@", output);
+
+    output = [self runShellCapture:[self arlenModuleCommand:upgrade appRoot:appRoot repoRoot:repoRoot frameworkRoot:frameworkRoot]
+                          exitCode:&code];
+    XCTAssertEqual(1, code, @"%@", output);
+    payload = [self parseJSONDictionary:output];
+    XCTAssertEqualObjects(@"error", payload[@"status"]);
+    XCTAssertEqualObjects(@"content_differs", payload[@"error"][@"code"]);
+    XCTAssertEqualObjects(@YES, payload[@"locally_modified"]);
+    XCTAssertEqualObjects((@[ @"Sources/AlphaModule.m" ]), payload[@"differing_files"]);
+    XCTAssertEqualObjects(@"// local patch\n",
+                          [NSString stringWithContentsOfFile:installedFile encoding:NSUTF8StringEncoding error:NULL]);
+
+    // `module add` at the same version also refuses to silently keep stale files.
+    output = [self runShellCapture:[self arlenModuleCommand:[NSString stringWithFormat:@"add alpha --source %@ --json",
+                                                                                      ALNTestShellQuote(source)]
+                                                    appRoot:appRoot
+                                                   repoRoot:repoRoot
+                                              frameworkRoot:frameworkRoot]
+                          exitCode:&code];
+    XCTAssertEqual(1, code, @"%@", output);
+    XCTAssertEqualObjects(@"module_already_installed", [self parseJSONDictionary:output][@"error"][@"code"]);
+
+    output = [self runShellCapture:[self arlenModuleCommand:forcedUpgrade appRoot:appRoot repoRoot:repoRoot frameworkRoot:frameworkRoot]
+                          exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", output);
+    payload = [self parseJSONDictionary:output];
+    XCTAssertEqualObjects(@"updated", payload[@"status"]);
+    XCTAssertEqualObjects(@"forced", payload[@"reason"]);
+    XCTAssertEqualObjects(@"// release 3\n",
+                          [NSString stringWithContentsOfFile:installedFile encoding:NSUTF8StringEncoding error:NULL]);
+
+    // Locks written before contentDigest existed cannot prove the copy is unedited.
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"config/modules.plist"]
+                          content:@"{\n  modules = (\n    { identifier = \"alpha\"; path = \"modules/alpha\"; version = \"1.0.0\"; enabled = YES; }\n  );\n}\n"]);
+    output = [self runShellCapture:[self arlenModuleCommand:@"doctor --json" appRoot:appRoot repoRoot:repoRoot frameworkRoot:frameworkRoot]
+                          exitCode:&code];
+    XCTAssertTrue([[self diagnosticCodesInDoctorPayload:[self parseJSONDictionary:output] module:@"alpha"]
+                      containsObject:@"module_content_untracked"], @"%@", output);
+
+    XCTAssertTrue([self writeFile:sourceFile content:@"// release 4\n"]);
+    output = [self runShellCapture:[self arlenModuleCommand:upgrade appRoot:appRoot repoRoot:repoRoot frameworkRoot:frameworkRoot]
+                          exitCode:&code];
+    XCTAssertEqual(1, code, @"%@", output);
+    payload = [self parseJSONDictionary:output];
+    XCTAssertEqualObjects(@"content_differs", payload[@"error"][@"code"]);
+    XCTAssertEqualObjects(@NO, payload[@"locally_modified"]);
+
+    output = [self runShellCapture:[self arlenModuleCommand:forcedUpgrade appRoot:appRoot repoRoot:repoRoot frameworkRoot:frameworkRoot]
+                          exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", output);
+    output = [self runShellCapture:[self arlenModuleCommand:@"doctor --json" appRoot:appRoot repoRoot:repoRoot frameworkRoot:frameworkRoot]
+                          exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", output);
+    XCTAssertEqualObjects(@[], [self diagnosticCodesInDoctorPayload:[self parseJSONDictionary:output] module:@"alpha"],
+                          @"%@", output);
+  } @finally {
+    [[NSFileManager defaultManager] removeItemAtPath:appRoot error:nil];
+    [[NSFileManager defaultManager] removeItemAtPath:workRoot error:nil];
+  }
+}
+
 - (void)testBoomhauerIgnoresStaleGeneratedModuleSourcesOutsideCurrentTemplateInventory {
   NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
   NSString *appRoot = [self createTempDirectoryWithPrefix:@"phase13-stale-generated-module-app"];
