@@ -1,6 +1,6 @@
 # SPA History Fallback Design (GitHub issue 62, part 2)
 
-Status: Draft for review
+Status: Implemented (recommendations in section 8 accepted)
 Last updated: 2026-09-25
 Related: GitHub issue #62, PR #77 (static `cacheControl`, part 1), PR #70
 (`ALNFileResponse`), `docs/STATIC_FILES.md`

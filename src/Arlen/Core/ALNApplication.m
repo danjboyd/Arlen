@@ -26,6 +26,7 @@
 #import "ALNDataverseClient.h"
 #import "ALNLive.h"
 #import "ALNPlatform.h"
+#import "ALNSPAFallbackController.h"
 
 #include <ctype.h>
 #include <dirent.h>
@@ -640,6 +641,9 @@ static BOOL ALNInvokeRouteAction(id controller,
 @property(nonatomic, strong) NSMutableArray *mutableLifecycleHooks;
 @property(nonatomic, strong) NSMutableArray *mutableMounts;
 @property(nonatomic, strong) NSMutableArray *mutableStaticMounts;
+@property(nonatomic, copy, readwrite) NSDictionary *spaFallback;
+@property(nonatomic, strong) ALNRoute *spaFallbackRoute;
+@property(nonatomic, strong) NSError *spaFallbackConfigError;
 @property(nonatomic, strong, readwrite) id<ALNJobAdapter> jobsAdapter;
 @property(nonatomic, strong, readwrite) id<ALNCacheAdapter> cacheAdapter;
 @property(nonatomic, strong, readwrite) id<ALNLocalizationAdapter> localizationAdapter;
@@ -1173,6 +1177,7 @@ static NSArray<NSString *> *ALNDataverseTargetNamesFromConfigAndEnvironment(NSDi
     _logger.minimumLevel = ALNLogLevelFromConfigValue(_config[@"logLevel"], defaultLogLevel);
     [self registerBuiltInMiddlewares];
     [self loadConfiguredStaticMounts];
+    [self loadConfiguredSPAFallback];
     [self loadConfiguredPlugins];
     [self loadConfiguredModules];
   }
@@ -3249,6 +3254,124 @@ static NSDictionary *ALNClusterStatusPayload(ALNApplication *application) {
   };
 }
 
+static const NSInteger ALNApplicationErrorInvalidSPAFallback = 360;
+
+// Local absolute path: leading slash, no `//`, backslash, query, fragment, or whitespace.
+static BOOL ALNSPAPathIsLocal(id value) {
+  if (![value isKindOfClass:[NSString class]]) return NO;
+  NSString *path = value;
+  NSCharacterSet *forbidden = [NSCharacterSet characterSetWithCharactersInString:@"\\?#"];
+  return [path hasPrefix:@"/"] && ![path hasPrefix:@"//"] &&
+         [path rangeOfCharacterFromSet:forbidden].location == NSNotFound &&
+         [path rangeOfCharacterFromSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]].location == NSNotFound &&
+         [path rangeOfCharacterFromSet:[NSCharacterSet controlCharacterSet]].location == NSNotFound;
+}
+
+static NSString *ALNSPATrimmedPrefix(NSString *prefix) {
+  NSString *trimmed = prefix;
+  while ([trimmed length] > 1 && [trimmed hasSuffix:@"/"]) {
+    trimmed = [trimmed substringToIndex:[trimmed length] - 1];
+  }
+  return trimmed;
+}
+
+// Segment-boundary match: `/api` covers `/api` and `/api/x`, not `/apiary`.
+static BOOL ALNSPAPathWithinPrefix(NSString *path, NSString *prefix) {
+  if ([prefix isEqualToString:@"/"]) return YES;
+  return [path isEqualToString:prefix] || [path hasPrefix:[prefix stringByAppendingString:@"/"]];
+}
+
+static NSDictionary *ALNNormalizedSPAFallback(id file, id options, NSString *appRoot, NSString **reason) {
+  NSDictionary *opts = [options isKindOfClass:[NSDictionary class]] ? options : @{};
+  if (options != nil && ![options isKindOfClass:[NSDictionary class]]) {
+    *reason = @"spaFallback must be a dictionary";
+    return nil;
+  }
+  NSString *trimmedFile = [file isKindOfClass:[NSString class]]
+                              ? [file stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]]
+                              : @"";
+  if ([trimmedFile length] == 0) {
+    *reason = @"spaFallback.file must be a nonempty path";
+    return nil;
+  }
+  NSString *resolvedFile = ALNPlatformPathIsAbsolute(trimmedFile)
+                               ? [trimmedFile stringByStandardizingPath]
+                               : [[([appRoot length] > 0 ? appRoot
+                                                         : [[NSFileManager defaultManager] currentDirectoryPath])
+                                     stringByAppendingPathComponent:trimmedFile] stringByStandardizingPath];
+  id prefix = opts[@"prefix"] ?: @"/";
+  if (!ALNSPAPathIsLocal(prefix)) {
+    *reason = @"spaFallback.prefix must be a local absolute path";
+    return nil;
+  }
+  id excludes = opts[@"excludePrefixes"] ?: @[];
+  if (![excludes isKindOfClass:[NSArray class]]) {
+    *reason = @"spaFallback.excludePrefixes must be an array of local paths";
+    return nil;
+  }
+  NSMutableArray *normalizedExcludes = [NSMutableArray array];
+  for (id entry in excludes) {
+    if (!ALNSPAPathIsLocal(entry) || [ALNSPATrimmedPrefix(entry) isEqualToString:@"/"]) {
+      *reason = @"spaFallback.excludePrefixes entries must be local paths other than /";
+      return nil;
+    }
+    [normalizedExcludes addObject:ALNSPATrimmedPrefix(entry)];
+  }
+  id cacheControl = opts[@"cacheControl"] ?: @"no-cache";
+  if (![cacheControl isKindOfClass:[NSString class]] || [(NSString *)cacheControl length] == 0 ||
+      [(NSString *)cacheControl rangeOfCharacterFromSet:[NSCharacterSet controlCharacterSet]].location != NSNotFound) {
+    *reason = @"spaFallback.cacheControl must be a nonempty header value";
+    return nil;
+  }
+  id dotted = opts[@"allowDottedPaths"];
+  BOOL allowDotted = NO;
+  if ([dotted isKindOfClass:[NSNumber class]]) {
+    allowDotted = [dotted boolValue];
+  } else if ([dotted isKindOfClass:[NSString class]]) {
+    NSString *lower = [(NSString *)dotted lowercaseString];
+    if ([@[ @"yes", @"true", @"1" ] containsObject:lower]) {
+      allowDotted = YES;
+    } else if (![@[ @"no", @"false", @"0" ] containsObject:lower]) {
+      *reason = @"spaFallback.allowDottedPaths must be a boolean";
+      return nil;
+    }
+  } else if (dotted != nil) {
+    *reason = @"spaFallback.allowDottedPaths must be a boolean";
+    return nil;
+  }
+  return @{
+    @"file" : resolvedFile,
+    @"prefix" : ALNSPATrimmedPrefix(prefix),
+    @"excludePrefixes" : normalizedExcludes,
+    @"cacheControl" : cacheControl,
+    @"allowDottedPaths" : @(allowDotted),
+  };
+}
+
+// Only HTML navigations that neither a route nor a built-in claimed get the shell.
+static BOOL ALNSPAFallbackEligible(NSDictionary *fallback, ALNRequest *request, NSString *requestFormat) {
+  if (fallback == nil || [requestFormat isEqualToString:@"json"]) return NO;
+  NSString *method = [request.method uppercaseString] ?: @"";
+  if (![method isEqualToString:@"GET"] && ![method isEqualToString:@"HEAD"]) return NO;
+  NSString *accept = [request.headers[@"accept"] isKindOfClass:[NSString class]]
+                         ? [request.headers[@"accept"] lowercaseString]
+                         : @"";
+  // A bare */* is not enough: fetch() and curl should keep getting 404s.
+  if ([accept rangeOfString:@"text/html"].location == NSNotFound) return NO;
+  NSString *path = request.path ?: @"/";
+  NSRange query = [path rangeOfString:@"?"];
+  if (query.location != NSNotFound) path = [path substringToIndex:query.location];
+  if (!ALNSPAPathWithinPrefix(path, fallback[@"prefix"])) return NO;
+  for (NSString *exclude in fallback[@"excludePrefixes"]) {
+    if (ALNSPAPathWithinPrefix(path, exclude)) return NO;
+  }
+  if (![fallback[@"allowDottedPaths"] boolValue] &&
+      [[path lastPathComponent] rangeOfString:@"."].location != NSNotFound) {
+    return NO;
+  }
+  return YES;
+}
+
 static BOOL ALNRequestMethodIsReadOnly(ALNRequest *request) {
   return [request.method isEqualToString:@"GET"] ||
          [request.method isEqualToString:@"HEAD"];
@@ -4169,6 +4292,59 @@ static void ALNFinalizeResponse(ALNApplication *application,
   }
 }
 
+- (void)loadConfiguredSPAFallback {
+  id config = self.config[@"spaFallback"];
+  if (config == nil) {
+    return;
+  }
+  NSString *reason = nil;
+  NSDictionary *options = [config isKindOfClass:[NSDictionary class]] ? config : nil;
+  NSDictionary *normalized = [config isKindOfClass:[NSDictionary class]]
+                                 ? ALNNormalizedSPAFallback(config[@"file"], config, self.config[@"appRoot"], &reason)
+                                 : nil;
+  if (options == nil) {
+    reason = @"spaFallback must be a dictionary";
+  }
+  if (normalized == nil) {
+    self.spaFallbackConfigError =
+        [NSError errorWithDomain:ALNApplicationErrorDomain
+                            code:ALNApplicationErrorInvalidSPAFallback
+                        userInfo:@{ NSLocalizedDescriptionKey : reason ?: @"invalid spaFallback" }];
+    [self.logger error:@"spa fallback disabled" fields:@{ @"reason" : reason ?: @"invalid spaFallback" }];
+    return;
+  }
+  [self installSPAFallback:normalized];
+}
+
+- (BOOL)setSPAFallbackFile:(NSString *)file options:(NSDictionary *)options error:(NSError **)error {
+  NSString *reason = nil;
+  NSDictionary *normalized = ALNNormalizedSPAFallback(file, options ?: @{}, self.config[@"appRoot"], &reason);
+  if (normalized == nil) {
+    if (error != NULL) {
+      *error = [NSError errorWithDomain:ALNApplicationErrorDomain
+                                   code:ALNApplicationErrorInvalidSPAFallback
+                               userInfo:@{ NSLocalizedDescriptionKey : reason ?: @"invalid spaFallback" }];
+    }
+    return NO;
+  }
+  self.spaFallbackConfigError = nil;
+  [self installSPAFallback:normalized];
+  return YES;
+}
+
+- (void)installSPAFallback:(NSDictionary *)normalized {
+  ALNRoute *route = [[ALNRoute alloc] initWithMethod:@"GET"
+                                         pathPattern:@"/*arlen_spa_path"
+                                                name:@"arlen_spa_fallback"
+                                     controllerClass:[ALNSPAFallbackController class]
+                                          actionName:@"shell"
+                                   registrationIndex:NSUIntegerMax];
+  route.source = @"spa_fallback";
+  route.includeInOpenAPI = NO;
+  self.spaFallbackRoute = route;
+  self.spaFallback = normalized;
+}
+
 - (void)loadConfiguredStaticMounts {
   NSArray *mounts = [self.config[@"staticMounts"] isKindOfClass:[NSArray class]]
                         ? self.config[@"staticMounts"]
@@ -4716,6 +4892,27 @@ static void ALNFinalizeResponse(ALNApplication *application,
     }
     return NO;
   }
+  if (self.spaFallbackConfigError != nil) {
+    if (error != NULL) {
+      *error = self.spaFallbackConfigError;
+    }
+    return NO;
+  }
+  if (self.spaFallback != nil) {
+    // A missing shell is expected while a frontend dev server serves the app.
+    if (![[NSFileManager defaultManager] fileExistsAtPath:self.spaFallback[@"file"]]) {
+      [self.logger warn:@"spa fallback file missing"
+                 fields:@{ @"file" : self.spaFallback[@"file"] ?: @"" }];
+    }
+    for (NSDictionary *route in [self routeTable]) {
+      NSString *path = [route[@"path"] isKindOfClass:[NSString class]] ? route[@"path"] : @"";
+      NSString *method = [route[@"method"] isKindOfClass:[NSString class]] ? route[@"method"] : @"";
+      if ([path hasPrefix:@"/*"] && ([method isEqualToString:@"GET"] || [method isEqualToString:@"ANY"])) {
+        [self.logger warn:@"spa fallback shadowed by root wildcard route"
+                   fields:@{ @"route" : route[@"name"] ?: @"", @"path" : path }];
+      }
+    }
+  }
   NSError *routePolicyReferenceError = ALNValidateRoutePolicyReferences(self);
   if (routePolicyReferenceError != nil) {
     if (error != NULL) {
@@ -5114,8 +5311,9 @@ static void ALNFinalizeResponse(ALNApplication *application,
     return response;
   }
 
+  NSString *builtInPath = routePath;
+  BOOL handledBuiltIn = NO;
   if (matchedRoute == nil) {
-    NSString *builtInPath = routePath;
     if (!routerNeedsFormatExtraction && [retryStrippedPath length] > 0) {
       builtInPath = retryStrippedPath;
     }
@@ -5126,8 +5324,18 @@ static void ALNFinalizeResponse(ALNApplication *application,
       requestFormat =
           ALNRequestPreferredFormatWithoutPathExtension(request, apiOnly, builtInPath);
     }
+    handledBuiltIn = ALNApplyBuiltInResponse(self, request, response, builtInPath);
+    // The SPA shell is considered only after the router and route-miss built-ins
+    // decline, and then runs through the normal matched-route path (middleware).
+    if (!handledBuiltIn && !apiOnly && self.spaFallbackRoute != nil &&
+        ALNSPAFallbackEligible(self.spaFallback, request, requestFormat)) {
+      matchedRoute = self.spaFallbackRoute;
+      matchedParams = @{};
+    }
+  }
+
+  if (matchedRoute == nil) {
     BOOL prefersJSON = [requestFormat isEqualToString:@"json"];
-    BOOL handledBuiltIn = ALNApplyBuiltInResponse(self, request, response, builtInPath);
     if (!handledBuiltIn && (apiOnly || prefersJSON)) {
       NSDictionary *payload = ALNStructuredErrorPayload(404,
                                                         @"not_found",
