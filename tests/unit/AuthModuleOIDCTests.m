@@ -275,6 +275,57 @@ static void RegisterOIDCLoginTemplates(void) {
   }
 }
 
+- (void)testLoopbackHTTPRedirectURIRequiresExplicitAllowance {
+  for (NSString *redirect in @[ @"http://localhost:3000/auth/provider/entra/callback",
+                                @"http://127.0.0.1:3000/auth/provider/entra/callback",
+                                @"http://[::1]:3000/auth/provider/entra/callback" ]) {
+    NSMutableDictionary *config = [[self config] mutableCopy];
+    config[@"redirectURI"] = redirect;
+    NSError *error = nil;
+    XCTAssertNotNil([[ALNAuthModuleOIDC alloc] initWithIdentifier:@"entra" configuration:config
+        resolver:[ModuleOIDCResolver new] transport:nil allowLoopbackHTTPRedirect:YES error:&error], @"%@ %@", redirect, error);
+    XCTAssertNil([[ALNAuthModuleOIDC alloc] initWithIdentifier:@"entra" configuration:config
+        resolver:[ModuleOIDCResolver new] transport:nil allowLoopbackHTTPRedirect:NO error:NULL], @"%@", redirect);
+    XCTAssertNil([[ALNAuthModuleOIDC alloc] initWithIdentifier:@"entra" configuration:config
+        resolver:[ModuleOIDCResolver new] transport:nil error:NULL], @"%@", redirect);
+  }
+  NSArray *refused = @[
+    @{ @"redirectURI": @"http://app.example/callback" },
+    @{ @"redirectURI": @"http://localhost.evil.example/callback" },
+    @{ @"redirectURI": @"http://127.0.0.2/callback" },
+    @{ @"redirectURI": @"http://user:pass@localhost/callback" },
+    @{ @"redirectURI": @"ftp://localhost/callback" },
+    @{ @"issuer": @"http://localhost/tenant/v2.0" },
+    @{ @"discoveryURL": @"http://localhost/discovery", @"endpointAllowedHosts": @[ @"localhost" ] },
+  ];
+  for (NSDictionary *change in refused) {
+    NSMutableDictionary *config = [[self config] mutableCopy];
+    config[@"redirectURI"] = @"http://localhost:3000/auth/provider/entra/callback";
+    [config addEntriesFromDictionary:change];
+    XCTAssertNil([[ALNAuthModuleOIDC alloc] initWithIdentifier:@"entra" configuration:config
+        resolver:[ModuleOIDCResolver new] transport:nil allowLoopbackHTTPRedirect:YES error:NULL], @"%@", change);
+  }
+}
+- (void)testModuleAllowsLoopbackRedirectOnlyInDevelopmentAndTest {
+  NSMutableDictionary *provider = [[self config] mutableCopy];
+  provider[@"redirectURI"] = @"http://localhost:3000/context/auth/provider/entra/callback";
+  for (NSString *environment in @[ @"development", @"test", @"production", @"staging" ]) {
+    ALNApplication *app = [[ALNApplication alloc] initWithConfig:@{
+      @"environment": environment, @"csrf": @{ @"enabled": @NO },
+      @"database": @{ @"connectionString": @"host=127.0.0.1 port=1 dbname=unused connect_timeout=1" },
+      @"authModule": @{ @"paths": @{ @"prefix": @"/context/auth" }, @"providers": @{ @"entra": provider },
+        @"hooks": @{ @"providerSessionResolverClass": @"ModuleOIDCResolver", @"oidcTransportClass": @"ModuleOIDCFixture" } }
+    }];
+    NSError *error = nil;
+    BOOL registered = [[[ALNAuthModule alloc] init] registerWithApplication:app error:&error];
+    BOOL expected = [environment isEqualToString:@"development"] || [environment isEqualToString:@"test"];
+    XCTAssertEqual(expected, registered, @"%@ %@", environment, error);
+    if (!expected) {
+      XCTAssertTrue([error.localizedDescription containsString:@"redirect"], @"%@ %@", environment, error);
+    }
+  }
+}
+
 - (ALNApplication *)application {
   ALNApplication *app = [[ALNApplication alloc] initWithConfig:@{
     @"environment": @"test", @"csrf": @{ @"enabled": @NO },

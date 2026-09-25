@@ -4,6 +4,7 @@
 #import "ALNPlatform.h"
 #import "ALNRequest.h"
 #import "ALNResponse.h"
+#import "ALNSecurityPrimitives.h"
 
 static NSString *ALNCSRFTokenFromRandomBytes(void) {
   uint32_t parts[2] = {0, 0};
@@ -29,6 +30,43 @@ static NSString *ALNCSRFTokenFromFormBody(ALNRequest *request, NSString *queryPa
   }
   NSString *value = request.formParams[queryParamName];
   return [value isKindOfClass:[NSString class]] ? value : nil;
+}
+
+static BOOL ALNCSRFTokensMatch(id provided, NSString *expected) {
+  if (![provided isKindOfClass:[NSString class]] || [(NSString *)provided length] == 0 ||
+      [expected length] == 0) {
+    return NO;
+  }
+  return ALNConstantTimeDataEquals([(NSString *)provided dataUsingEncoding:NSUTF8StringEncoding],
+                                   [expected dataUsingEncoding:NSUTF8StringEncoding]);
+}
+
+static void ALNCSRFRejectRequest(ALNContext *context) {
+  ALNResponse *response = context.response;
+  [response clearBody];
+  response.statusCode = 403;
+  if ([context wantsJSON]) {
+    id stashedRequestID = context.stash[@"request_id"];
+    NSString *requestID = [stashedRequestID isKindOfClass:[NSString class]]
+                              ? stashedRequestID
+                              : ([response headerForName:@"X-Request-Id"] ?: @"");
+    NSDictionary *payload = @{
+      @"error" : @{
+        @"code" : @"csrf_invalid",
+        @"message" : @"CSRF token missing or invalid",
+        @"status" : @(403),
+        @"request_id" : requestID,
+        @"correlation_id" : requestID,
+      }
+    };
+    if ([response setJSONBody:payload options:0 error:NULL]) {
+      response.committed = YES;
+      return;
+    }
+  }
+  [response setHeader:@"Content-Type" value:@"text/plain; charset=utf-8"];
+  [response setTextBody:@"csrf verification failed\n"];
+  response.committed = YES;
 }
 
 @interface ALNCSRFMiddleware ()
@@ -94,14 +132,11 @@ static NSString *ALNCSRFTokenFromFormBody(ALNRequest *request, NSString *queryPa
     }
   }
 
-  if ([provided isKindOfClass:[NSString class]] && [provided isEqualToString:token]) {
+  if (ALNCSRFTokensMatch(provided, token)) {
     return YES;
   }
 
-  context.response.statusCode = 403;
-  [context.response setHeader:@"Content-Type" value:@"text/plain; charset=utf-8"];
-  [context.response setTextBody:@"csrf verification failed\n"];
-  context.response.committed = YES;
+  ALNCSRFRejectRequest(context);
   return NO;
 }
 

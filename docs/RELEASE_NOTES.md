@@ -2,6 +2,20 @@
 
 ## Upcoming Release Candidate
 
+- CSRF: rejected requests from JSON clients (JSON `Accept`, `/api` paths, or
+  `apiOnly`) now receive the structured error envelope with code `csrf_invalid`
+  instead of a plain-text body. Other clients still get the plain-text 403.
+  Tokens are now compared in constant time (GitHub issue 63). See
+  [Configuration Reference](CONFIGURATION_REFERENCE.md#5-session-and-csrf).
+- Security hardening: `ALNConstantTimeDataEquals` and the session middleware's
+  signature check truncated the length difference to one byte. Inputs whose
+  lengths differed by a multiple of 256, with zero-byte padding, could therefore
+  compare equal. Lengths are now compared at full width.
+- Auth module OIDC: in `development` and `test`, `redirectURI` may be a loopback
+  http URL (`localhost`, `127.0.0.1`, `[::1]`), so real Google or Entra login
+  works against `boomhauer`. Other environments still require HTTPS, and
+  provider endpoints are always HTTPS-only (GitHub issue 59). See
+  [Auth Module](AUTH_MODULE.md).
 - Static files: `Content-Type` now comes from a public `ALNMIMETypes` table.
   gif, ico, webp, woff, woff2, map and xml were allowed by default but served as
   `application/octet-stream`; they now get specific types, as do common audio,
@@ -16,7 +30,6 @@
   caller-supplied ETag. This fixes Safari/iOS media playback for authenticated
   audio and video (GitHub issue 58). See
   [Static files](STATIC_FILES.md#controller-file-responses).
-
 - `ALNPg` and `ALNMSSQL` accept an optional `acquireTimeout`: when every pooled
   connection is in use, `acquireConnection:` waits up to that many seconds for
   one to be released before failing with the pool-exhausted error. The default,
