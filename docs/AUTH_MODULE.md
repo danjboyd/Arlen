@@ -320,6 +320,13 @@ authModule = {
 };
 ```
 
+For local development against `boomhauer`, `redirectURI` may be a loopback
+`http` URL (`http://localhost:3000/...`, `http://127.0.0.1:3000/...` or
+`http://[::1]:3000/...`) when the app environment is `development` or `test`.
+Google and Entra both accept loopback http redirect URIs for development
+clients. Any other environment, including `production` and `staging`, refuses
+them at startup. Issuer, discovery, token and JWKS URLs are always HTTPS-only.
+
 Register the exact HTTPS redirect URI as a web redirect in the identity provider,
 and supply the client secret through the named environment variable in every
 worker. Do not put the secret into the plist. The auth module's existing
@@ -404,7 +411,8 @@ body template together. The example above makes both opt-outs explicit.
 
 ### Transport and Callback Contract
 
-- Provider/discovery/redirect URLs require HTTPS. Endpoint hosts default to the
+- Provider/discovery/redirect URLs require HTTPS. The only exception is a
+  loopback http `redirectURI` in `development`/`test`. Endpoint hosts default to the
   issuer host; `endpointAllowedHosts` can explicitly allow other discovery,
   authorization, and token hosts. `jwksAllowedHosts` separately restricts key
   retrieval and defaults to the endpoint hosts. Redirects are rejected.
