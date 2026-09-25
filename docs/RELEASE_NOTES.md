@@ -2,6 +2,13 @@
 
 ## Upcoming Release Candidate
 
+- Static mounts accept `cacheControl`, either one value or glob patterns with a
+  `default` (for example immutable caching for hashed `assets/*` and `no-cache`
+  for `index.html`). The default `/static` mount reads the top-level
+  `staticCacheControl` or `ARLEN_STATIC_CACHE_CONTROL`. Static responses
+  previously sent no `Cache-Control` at all (GitHub issue 62, Cache-Control
+  part). See [Static files](STATIC_FILES.md#cache-control).
+
 - Static files: `Content-Type` now comes from a public `ALNMIMETypes` table.
   gif, ico, webp, woff, woff2, map and xml were allowed by default but served as
   `application/octet-stream`; they now get specific types, as do common audio,

@@ -453,6 +453,7 @@ static NSDictionary *ALNSecurityProfileDefaults(NSString *profileName) {
   NSString *serveStatic = ALNEnvValueCompat("ARLEN_SERVE_STATIC", "MOJOOBJC_SERVE_STATIC");
   NSString *staticAllowExtensions =
       ALNEnvValueCompat("ARLEN_STATIC_ALLOW_EXTENSIONS", "MOJOOBJC_STATIC_ALLOW_EXTENSIONS");
+  NSString *staticCacheControl = ALNEnvValueCompat("ARLEN_STATIC_CACHE_CONTROL", NULL);
   NSString *apiOnly = ALNEnvValueCompat("ARLEN_API_ONLY", "MOJOOBJC_API_ONLY");
   NSString *securityProfile =
       ALNEnvValueCompat("ARLEN_SECURITY_PROFILE", "MOJOOBJC_SECURITY_PROFILE");
@@ -628,6 +629,11 @@ static NSDictionary *ALNSecurityProfileDefaults(NSString *profileName) {
   NSArray *staticAllowExtensionsValue = ALNParseCSVExtensions(staticAllowExtensions);
   if ([staticAllowExtensionsValue count] > 0) {
     config[@"staticAllowExtensions"] = staticAllowExtensionsValue;
+  }
+  NSString *trimmedStaticCacheControl =
+      [staticCacheControl stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+  if ([trimmedStaticCacheControl length] > 0) {
+    config[@"staticCacheControl"] = trimmedStaticCacheControl;
   }
   NSNumber *apiOnlyValue = ALNParseBooleanString(apiOnly);
   if (apiOnlyValue != nil) {

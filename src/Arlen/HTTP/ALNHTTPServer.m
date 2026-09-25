@@ -46,6 +46,7 @@ typedef SSIZE_T ssize_t;
 #import "ALNApplication.h"
 #import "ALNEventStream.h"
 #import "ALNFileResponseInternal.h"
+#import "ALNLogger.h"
 #import "ALNRequest.h"
 #import "ALNResponse.h"
 #import "ALNRealtime.h"
@@ -2562,9 +2563,26 @@ static ALNResponse *ALNStaticResponseForMount(ALNRequest *request,
     return response;
   }
 
+  NSMutableDictionary *options = [NSMutableDictionary dictionaryWithObject:mimeTypes ?: @{}
+                                                                    forKey:ALNFileResponseMIMETypesOption];
+  NSArray *cacheControlRules = [mount[@"cacheControlRules"] isKindOfClass:[NSArray class]]
+                                   ? mount[@"cacheControlRules"]
+                                   : nil;
+  if ([cacheControlRules count] > 0) {
+    // Rules match the served file's path under the mount root, so a directory
+    // request is matched as its index file.
+    NSString *rootPrefix = [canonicalRoot hasSuffix:@"/"] ? canonicalRoot
+                                                          : [canonicalRoot stringByAppendingString:@"/"];
+    NSString *mountRelativePath = [resolvedFilePath hasPrefix:rootPrefix]
+                                      ? [resolvedFilePath substringFromIndex:[rootPrefix length]]
+                                      : [resolvedFilePath lastPathComponent];
+    NSString *cacheControl = ALNStaticCacheControlForPath(cacheControlRules, mountRelativePath);
+    if ([cacheControl length] > 0) {
+      options[ALNFileResponseCacheControlOption] = cacheControl;
+    }
+  }
   ALNResponse *response = [[ALNResponse alloc] init];
-  ALNFileResponseApplyStat(response, request, resolvedFilePath, &fileStat, nil,
-                           @{ ALNFileResponseMIMETypesOption : mimeTypes ?: @{} });
+  ALNFileResponseApplyStat(response, request, resolvedFilePath, &fileStat, nil, options);
   return response;
 }
 
@@ -3026,6 +3044,9 @@ static BOOL ALNSendSSEHeaders(ALNSocketHandle clientFd, ALNResponse *response) {
       @"prefix" : prefix,
       @"directory" : directory,
       @"allowExtensions" : allowExtensions,
+      @"cacheControlRules" : [entry[@"cacheControlRules"] isKindOfClass:[NSArray class]]
+                                 ? entry[@"cacheControlRules"]
+                                 : @[],
     }];
   }
 
@@ -3035,10 +3056,22 @@ static BOOL ALNSendSSEHeaders(ALNSocketHandle clientFd, ALNResponse *response) {
         ALNNormalizedStaticAllowExtensions(self.application.config[@"staticAllowExtensions"]);
     NSArray *allowExtensions =
         ([configuredAllowlist count] > 0) ? configuredAllowlist : ALNDefaultStaticAllowExtensions();
+    NSString *cacheControlReason = nil;
+    NSArray *cacheControlRules =
+        ALNStaticCacheControlRules(self.application.config[@"staticCacheControl"], &cacheControlReason);
+    if (cacheControlRules == nil) {
+      [self.application.logger warn:@"static cache control ignored"
+                             fields:@{
+                               @"prefix" : @"/static",
+                               @"reason" : cacheControlReason ?: @"invalid staticCacheControl",
+                             }];
+      cacheControlRules = @[];
+    }
     [mounts addObject:@{
       @"prefix" : @"/static",
       @"directory" : @"public",
       @"allowExtensions" : allowExtensions,
+      @"cacheControlRules" : cacheControlRules,
     }];
   }
 

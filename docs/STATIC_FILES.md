@@ -28,6 +28,41 @@ mimeTypes = {
 
 Values that contain control characters or lack a `/` are ignored.
 
+## Cache-Control
+
+Static responses send no `Cache-Control` header unless one is configured. Each
+entry in `staticMounts` accepts `cacheControl`, either as one value for every
+file or as a dictionary of glob patterns. For a Vite or webpack build with
+hashed asset filenames:
+
+```plist
+staticMounts = ({
+  prefix = "/app";
+  directory = "public/app";
+  cacheControl = {
+    "assets/*" = "public, max-age=31536000, immutable";
+    default = "no-cache";
+  };
+});
+```
+
+- Patterns match the served file's path relative to the mount directory. A
+  directory request matches as its `index.html`.
+- `*` and `?` match within one path segment. `**` spans segments, and `**/`
+  also matches zero directories.
+- When several patterns match, the one with the most literal characters wins;
+  ties go to the lexically smaller pattern. `default` applies when nothing else
+  matches. If there is no `default` and no match, no header is sent.
+- The header is sent on 200, 206 and 304 responses.
+- Invalid values (non-strings, control characters) skip the mount with a
+  warning, the same as other invalid mount entries.
+
+The default `/static` mount from `serveStatic = YES` takes the same forms from
+the top-level `staticCacheControl` key, or from a single value in
+`ARLEN_STATIC_CACHE_CONTROL`. Code that mounts directories itself can pass
+`options:@{ @"cacheControl" : ... }` to
+`-mountStaticDirectory:atPrefix:allowExtensions:options:`.
+
 ## Validators and conditional requests
 
 Successful static GET and HEAD responses include `ETag`, `Last-Modified`, `Date`,

@@ -113,6 +113,12 @@ NS_ASSUME_NONNULL_BEGIN
 - (BOOL)mountStaticDirectory:(NSString *)directory
                     atPrefix:(NSString *)prefix
              allowExtensions:(nullable NSArray *)allowExtensions;
+// options: `cacheControl` is a Cache-Control string, or a dictionary of glob
+// pattern (relative to the mount root) -> value with an optional `default` key.
+- (BOOL)mountStaticDirectory:(NSString *)directory
+                    atPrefix:(NSString *)prefix
+             allowExtensions:(nullable NSArray *)allowExtensions
+                     options:(nullable NSDictionary *)options;
 - (void)addMiddleware:(id<ALNMiddleware>)middleware;
 - (void)setJobsAdapter:(id<ALNJobAdapter>)adapter;
 - (void)setCacheAdapter:(id<ALNCacheAdapter>)adapter;

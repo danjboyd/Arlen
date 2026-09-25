@@ -2930,6 +2930,40 @@
   }
 }
 
+- (void)testStaticCacheControlFromEnvironmentAppliesTo200And304 {
+  int port = [self randomPort];
+  NSTask *server = [[NSTask alloc] init];
+  server.launchPath = @"./build/boomhauer";
+  server.arguments = @[ @"--port", [NSString stringWithFormat:@"%d", port] ];
+  NSMutableDictionary *environment = [NSMutableDictionary dictionaryWithDictionary:
+      [[NSProcessInfo processInfo] environment]];
+  environment[@"ARLEN_STATIC_CACHE_CONTROL"] = @"public, max-age=600";
+  server.environment = environment;
+  server.standardOutput = [NSPipe pipe];
+  server.standardError = [NSPipe pipe];
+  [server launch];
+  @try {
+    BOOL ready = NO;
+    (void)[self requestPathWithRetries:@"/healthz" port:port attempts:60 success:&ready];
+    XCTAssertTrue(ready);
+    if (!ready) return;
+    int code = 0;
+    NSString *url = [NSString stringWithFormat:@"http://127.0.0.1:%d/static/sample.txt", port];
+    NSString *script = [NSString stringWithFormat:
+        @"set -e; first=$(curl -sS -D - -o /dev/null %@); printf '%%s\n' \"$first\"; "
+        @"tag=$(printf '%%s' \"$first\" | tr -d '\\r' | awk -F': ' 'tolower($1)==\"etag\" {print $2}'); "
+        @"curl -sS -D - -o /dev/null -H \"If-None-Match: $tag\" %@", url, url];
+    NSString *output = [self runShellCapture:script exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", output);
+    XCTAssertTrue([output containsString:@"HTTP/1.1 200 OK"], @"%@", output);
+    XCTAssertTrue([output containsString:@"HTTP/1.1 304 Not Modified"], @"%@", output);
+    NSUInteger count = [[output componentsSeparatedByString:@"Cache-Control: public, max-age=600"] count] - 1;
+    XCTAssertEqual((NSUInteger)2, count, @"%@", output);
+  } @finally {
+    XCTAssertTrue([self terminateTask:server timeoutSeconds:5.0]);
+  }
+}
+
 - (void)testStaticHTTPValidatorsHeadAndRanges {
   [self assertStaticHTTPContractWithEnvironment:@{}];
 }
