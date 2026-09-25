@@ -3,6 +3,7 @@
 #import "ALNApplication.h"
 #import "ALNAuthSession.h"
 #import "ALNContext.h"
+#import "ALNFileResponse.h"
 #import "ALNJSONSerialization.h"
 #import "ALNLive.h"
 #import "ALNPageState.h"
@@ -382,6 +383,23 @@ static NSDictionary *ALNEventStreamResyncPayload(ALNEventStreamReplayResult *res
 - (void)renderData:(NSData *)data contentType:(NSString *)contentType {
   [self.context.response setDataBody:(data ?: [NSData data]) contentType:contentType];
   self.context.response.committed = YES;
+}
+
+- (BOOL)renderFileAtPath:(NSString *)path
+             contentType:(NSString *)contentType
+                 options:(NSDictionary *)options {
+  NSMutableDictionary *resolvedOptions =
+      [options isKindOfClass:[NSDictionary class]] ? [options mutableCopy] : [NSMutableDictionary dictionary];
+  id configuredTypes = [self.context application].config[@"mimeTypes"];
+  if (resolvedOptions[ALNFileResponseMIMETypesOption] == nil &&
+      [configuredTypes isKindOfClass:[NSDictionary class]]) {
+    resolvedOptions[ALNFileResponseMIMETypesOption] = configuredTypes;
+  }
+  return [ALNFileResponse prepareResponse:self.context.response
+                               forRequest:self.context.request
+                                 filePath:path
+                              contentType:contentType
+                                  options:resolvedOptions];
 }
 
 - (BOOL)isLiveRequest {
