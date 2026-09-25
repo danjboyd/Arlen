@@ -126,8 +126,8 @@ A missing or non-regular file renders a 404, and the method returns `NO`.
   stored content hash. A bare value is quoted. A strong caller-supplied ETag can
   satisfy `If-Range`, which the weak metadata ETag never can.
 - `ALNFileResponseMIMETypesOption` overrides the app's `mimeTypes` for one call.
-- HEAD needs a route of its own (`HEAD` or `ANY`), because routes do not fall
-  back from HEAD to GET.
+- A `GET` route also answers `HEAD`; the body is omitted and the headers are
+  the same.
 
 Code that builds a response outside a controller can call
 `+[ALNFileResponse prepareResponse:forRequest:filePath:contentType:options:]`

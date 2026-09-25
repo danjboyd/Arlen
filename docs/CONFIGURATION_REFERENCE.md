@@ -356,7 +356,8 @@ security = {
 Required route fields:
 
 - `method`: one of `GET`, `POST`, `PUT`, `PATCH`, `DELETE`, `HEAD`,
-  `OPTIONS`, or `ANY`
+  `OPTIONS`, or `ANY`. `GET` routes also answer `HEAD` unless a `HEAD` or `ANY`
+  route matches first.
 - `path`: absolute route path beginning with `/`
 - `controller`: Objective-C controller class name
 - `action`: action name without a trailing colon

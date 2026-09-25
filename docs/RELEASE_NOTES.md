@@ -2,6 +2,12 @@
 
 ## Upcoming Release Candidate
 
+- Routing: `HEAD` requests now fall back to the matching `GET` route when no
+  `HEAD` or `ANY` route matches (RFC 9110 section 9.3.2). They return the same
+  status and headers, including `Content-Length`, without a body. Before this,
+  `curl -I`, uptime checks and link unfurlers got a 404 for any `GET`-only
+  route. Explicit `HEAD` routes still take precedence (GitHub issue 68).
+
 - Static files: `Content-Type` now comes from a public `ALNMIMETypes` table.
   gif, ico, webp, woff, woff2, map and xml were allowed by default but served as
   `application/octet-stream`; they now get specific types, as do common audio,

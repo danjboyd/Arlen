@@ -709,6 +709,29 @@ static NSUInteger AppFastPathControllerSlowInvocationCount = 0;
   XCTAssertTrue([body containsString:@"yes"]);
 }
 
+- (void)testHeadRequestDispatchesToGetRouteWithMatchingHeaders {
+  ALNApplication *app = [self buildAppWithHaltingMiddleware:NO];
+  ALNResponse *get = [app dispatchRequest:[self requestForPath:@"/dict"]];
+  ALNRequest *headRequest = [[ALNRequest alloc] initWithMethod:@"HEAD"
+                                                          path:@"/dict"
+                                                   queryString:@""
+                                                       headers:@{}
+                                                          body:[NSData data]];
+  ALNResponse *head = [app dispatchRequest:headRequest];
+  XCTAssertEqual(get.statusCode, head.statusCode);
+  XCTAssertEqualObjects([get headerForName:@"Content-Type"], [head headerForName:@"Content-Type"]);
+  XCTAssertEqualObjects(@"ran", [head headerForName:@"X-Middleware"]);
+  // The body is produced so Content-Length matches GET; the HTTP server omits it on the wire.
+  XCTAssertEqual([get bodyLength], [head bodyLength]);
+
+  ALNRequest *missing = [[ALNRequest alloc] initWithMethod:@"HEAD"
+                                                      path:@"/does-not-exist"
+                                               queryString:@""
+                                                   headers:@{}
+                                                      body:[NSData data]];
+  XCTAssertEqual((NSInteger)404, [app dispatchRequest:missing].statusCode);
+}
+
 - (void)testImplicitJSONForArrayReturn {
   ALNApplication *app = [self buildAppWithHaltingMiddleware:NO];
   ALNResponse *response = [app dispatchRequest:[self requestForPath:@"/array"]];

@@ -6,7 +6,10 @@ This guide explains Arlen's runtime model at a high level.
 
 1. `ALNHTTPServer` accepts an HTTP request.
 2. Request is parsed into `ALNRequest`.
-3. `ALNRouter` matches method/path to a route.
+3. `ALNRouter` matches method/path to a route: routes for the exact method
+   first, then `ANY` routes. A `HEAD` request that matches neither is answered
+   by the `GET` route; the response keeps the same status and headers,
+   including `Content-Length`, and the server omits the body.
 4. Route invocation metadata is resolved from startup compile output (or lazily compiled when startup compile is disabled).
 5. `ALNApplication` reserves operability built-ins (`/healthz`, `/readyz`, `/livez`, `/metrics`, `/clusterz`) ahead of app route dispatch and still serves docs/OpenAPI built-ins on unmatched paths.
 6. Request contract coercion/validation runs (if configured on the matched route).
