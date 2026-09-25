@@ -2,6 +2,14 @@
 
 ## Upcoming Release Candidate
 
+- Deploy: remote `arlen deploy release|status|doctor|logs|rollback` on SSH
+  targets now sources `runtime.gnustepScript` before running the packaged
+  `arlen` when `runtime.requiresEnvWrapper` is on. Before this, hosts whose
+  GNUstep libraries are not on the loader path failed with
+  `libgnustep-base.so: cannot open shared object file`. A configured script
+  that is missing on the host fails clearly with `missing GNUstep.sh: <path>`
+  (GitHub issue 71).
+
 - Routing: `HEAD` requests now fall back to the matching `GET` route when no
   `HEAD` or `ANY` route matches (RFC 9110 section 9.3.2). They return the same
   status and headers, including `Content-Length`, without a body. Before this,

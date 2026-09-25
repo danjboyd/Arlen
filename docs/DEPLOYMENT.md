@@ -685,6 +685,15 @@ On GNUstep-backed targets, `config/deploy.plist` can declare:
  - whether packaged `propane` / `jobs-worker` should run through generated
  wrappers that source GNUstep first
 
+For SSH targets (`transport.sshHost`), remote `arlen deploy release`, `status`,
+`doctor`, `logs` and `rollback` run the packaged `arlen` binary on the host. When
+`runtime.requiresEnvWrapper` is on, the remote command sources
+`runtime.gnustepScript` first, the same way the generated wrappers do, so hosts
+whose GNUstep libraries are not on the default loader path work. An explicitly
+configured script that is missing on the host fails with
+`missing GNUstep.sh: <path>`. A default script path that doesn't exist is
+skipped.
+
 It does not:
 
 - create or rotate secret values
