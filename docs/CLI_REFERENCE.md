@@ -164,6 +164,9 @@ Named targets:
 - honors target runtime metadata:
  - `runtime.gnustepScript`
  - `runtime.requiresEnvWrapper`
+ - for SSH targets, remote `release`/`status`/`doctor`/`logs`/`rollback` also
+ source `runtime.gnustepScript` before running the packaged `arlen` when
+ `runtime.requiresEnvWrapper` is on
 - does not provision secrets, PostgreSQL, reverse proxies, TLS, or DNS
 
 `arlen deploy target sample`

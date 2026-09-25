@@ -2,6 +2,14 @@
 
 ## Upcoming Release Candidate
 
+- Deploy: remote `arlen deploy release|status|doctor|logs|rollback` on SSH
+  targets now sources `runtime.gnustepScript` before running the packaged
+  `arlen` when `runtime.requiresEnvWrapper` is on. Before this, hosts whose
+  GNUstep libraries are not on the loader path failed with
+  `libgnustep-base.so: cannot open shared object file`. A configured script
+  that is missing on the host fails clearly with `missing GNUstep.sh: <path>`
+  (GitHub issue 71).
+
 - Static files: `Content-Type` now comes from a public `ALNMIMETypes` table.
   gif, ico, webp, woff, woff2, map and xml were allowed by default but served as
   `application/octet-stream`; they now get specific types, as do common audio,

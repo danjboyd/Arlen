@@ -1720,6 +1720,7 @@ static NSDictionary *LoadDeployTargetNamed(NSString *appRoot, NSString *targetNa
     @"runtime_user" : [StringValueForDeployKey(init, @"runtimeUser") length] > 0 ? StringValueForDeployKey(init, @"runtimeUser") : @"arlen",
     @"runtime_group" : [StringValueForDeployKey(init, @"runtimeGroup") length] > 0 ? StringValueForDeployKey(init, @"runtimeGroup") : @"arlen",
     @"gnustep_script" : gnustepScript ?: @"",
+    @"gnustep_script_configured" : @([StringValueForDeployKey(runtime, @"gnustepScript") length] > 0),
     @"requires_env_wrapper" : @(requiresEnvWrapper),
     @"propane_wrapper" : [binDir stringByAppendingPathComponent:@"propane-wrapper"],
     @"jobs_worker_wrapper" : [binDir stringByAppendingPathComponent:@"jobs-worker-wrapper"],
@@ -1956,6 +1957,25 @@ static NSArray<NSString *> *SSHArgumentsForTarget(NSDictionary *target, NSString
                                                        ShellQuote(remoteScript ?: @"true")];
   [arguments addObject:remoteCommand];
   return arguments;
+}
+
+// Remote delegates run the packaged arlen binary, which needs the GNUstep
+// environment on hosts whose libraries are not on the default loader path.
+// Mirrors the generated env wrapper: source GNUstep.sh when the target requires
+// it; an explicitly configured script that is missing on the host is an error.
+static NSString *RemoteGNUstepPreludeForTarget(NSDictionary *target) {
+  NSString *gnustepScript = StringValueForDeployKey(target, @"gnustep_script");
+  if (![target[@"requires_env_wrapper"] boolValue] || [gnustepScript length] == 0) {
+    return @"";
+  }
+  NSString *missing = [target[@"gnustep_script_configured"] boolValue]
+                          ? @"echo \"missing GNUstep.sh: $ARLEN_REMOTE_GNUSTEP_SCRIPT\" >&2; exit 1"
+                          : @"true";
+  return [NSString stringWithFormat:
+      @"ARLEN_REMOTE_GNUSTEP_SCRIPT=%@ && "
+       "if [ -f \"$ARLEN_REMOTE_GNUSTEP_SCRIPT\" ]; then set +u; source \"$ARLEN_REMOTE_GNUSTEP_SCRIPT\"; set -u; "
+       "else %@; fi && ",
+      ShellQuote(gnustepScript), missing];
 }
 
 static NSDictionary *RunSSHCommandForTarget(NSDictionary *target, NSString *remoteScript) {
@@ -6163,7 +6183,8 @@ static int CommandDeploy(NSArray *args) {
     NSString *remoteBinary = [remoteFrameworkRoot stringByAppendingPathComponent:@"build/arlen"];
 
     NSMutableString *remoteDelegate =
-        [NSMutableString stringWithFormat:@"set -euo pipefail && if [ ! -x %@ ]; then echo 'remote packaged arlen missing at %@' >&2; exit 1; fi && cd %@ && ARLEN_FRAMEWORK_ROOT=%@ %@ deploy %@",
+        [NSMutableString stringWithFormat:@"set -euo pipefail && %@if [ ! -x %@ ]; then echo 'remote packaged arlen missing at %@' >&2; exit 1; fi && cd %@ && ARLEN_FRAMEWORK_ROOT=%@ %@ deploy %@",
+                                           RemoteGNUstepPreludeForTarget(resolvedTarget),
                                            ShellQuote(remoteBinary), remoteBinary, ShellQuote(remoteAppRoot),
                                            ShellQuote(remoteFrameworkRoot), ShellQuote(remoteBinary),
                                            subcommand];
