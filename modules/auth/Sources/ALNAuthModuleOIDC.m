@@ -3,11 +3,107 @@
 #import "ALNHTTPCompat.h"
 #import "ALNSecurityPrimitives.h"
 
+NSString *const ALNAuthModuleOIDCErrorDomain = @"Arlen.Modules.Auth.OIDC";
+
 static NSString *OS(id value) { return [value isKindOfClass:[NSString class]] ? value : @""; }
 static BOOL OFail(NSError **error, NSString *message) {
-  if (error) *error = [NSError errorWithDomain:@"Arlen.Modules.Auth.OIDC" code:1
+  if (error) *error = [NSError errorWithDomain:ALNAuthModuleOIDCErrorDomain code:ALNAuthModuleOIDCErrorRejected
                                     userInfo:@{NSLocalizedDescriptionKey: message}];
   return NO;
+}
+static NSString *OLower(id value) {
+  return [[OS(value) stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]]
+      lowercaseString];
+}
+// Plist values may arrive as NSNumber or as YES/true/1 strings.
+static BOOL OBool(id value, BOOL *valid) {
+  *valid = YES;
+  if (!value) return NO;
+  if ([value isKindOfClass:[NSNumber class]]) return [value boolValue];
+  NSString *text = OLower(value);
+  if ([@[ @"yes", @"true", @"1" ] containsObject:text]) return YES;
+  if ([@[ @"no", @"false", @"0" ] containsObject:text]) return NO;
+  *valid = NO;
+  return NO;
+}
+static BOOL OAppendLowered(NSMutableArray *target, id values, BOOL domains) {
+  if (!values) return YES;
+  if (![values isKindOfClass:[NSArray class]]) return NO;
+  for (id value in values) {
+    NSString *entry = OLower(value);
+    if (domains && [entry hasPrefix:@"@"]) entry = [entry substringFromIndex:1];
+    if (!entry.length || (domains ? [entry containsString:@"@"] : ![entry containsString:@"@"])) return NO;
+    if (![target containsObject:entry]) [target addObject:entry];
+  }
+  return YES;
+}
+// Validates and normalizes a provider `admission` dictionary. Admission is not identity
+// linking: accounts stay keyed on the verified provider subject.
+static NSDictionary *OAdmissionPolicy(id admission, NSError **error) {
+  if (![admission isKindOfClass:[NSDictionary class]]) {
+    OFail(error, @"OIDC admission must be a dictionary"); return nil;
+  }
+  NSSet *known = [NSSet setWithArray:@[ @"requireVerifiedEmail", @"allowedEmails", @"allowedEmailsEnvironmentKey",
+                                        @"allowedDomains", @"requireHostedDomain", @"rejectionMessage" ]];
+  for (id key in admission) {
+    if (![known containsObject:key]) {
+      OFail(error, [NSString stringWithFormat:@"OIDC admission has unknown key %@", key]); return nil;
+    }
+  }
+  BOOL validVerified = YES, validHosted = YES;
+  BOOL requireVerified = OBool(admission[@"requireVerifiedEmail"], &validVerified);
+  BOOL requireHosted = OBool(admission[@"requireHostedDomain"], &validHosted);
+  NSMutableArray *emails = [NSMutableArray array];
+  NSMutableArray *domains = [NSMutableArray array];
+  if (!validVerified || !validHosted || !OAppendLowered(emails, admission[@"allowedEmails"], NO) ||
+      !OAppendLowered(domains, admission[@"allowedDomains"], YES)) {
+    OFail(error, @"OIDC admission values must be booleans, email addresses, and domains"); return nil;
+  }
+  id envKey = admission[@"allowedEmailsEnvironmentKey"];
+  if (envKey) {
+    NSString *list = OS([NSProcessInfo processInfo].environment[OS(envKey)]);
+    NSArray *envEmails = [list componentsSeparatedByString:@","];
+    NSMutableArray *nonempty = [NSMutableArray array];
+    for (NSString *email in envEmails) if (OLower(email).length) [nonempty addObject:email];
+    if (!OS(envKey).length || !nonempty.count || !OAppendLowered(emails, nonempty, NO)) {
+      OFail(error, @"OIDC admission allowedEmailsEnvironmentKey must name a nonempty comma-separated email list");
+      return nil;
+    }
+  }
+  if (requireHosted && !domains.count) {
+    OFail(error, @"OIDC admission requireHostedDomain needs allowedDomains"); return nil;
+  }
+  if (admission[@"rejectionMessage"] && !OS(admission[@"rejectionMessage"]).length) {
+    OFail(error, @"OIDC admission rejectionMessage must be a nonempty string"); return nil;
+  }
+  return @{
+    @"requireVerifiedEmail": @(requireVerified),
+    @"requireHostedDomain": @(requireHosted),
+    @"allowedEmails": emails,
+    @"allowedDomains": domains,
+    @"rejectionMessage": OS(admission[@"rejectionMessage"]).length ? admission[@"rejectionMessage"]
+                                                                  : @"This account is not permitted to sign in.",
+  };
+}
+static BOOL OClaimTrue(id value) {
+  if ([value isKindOfClass:[NSNumber class]]) return [value boolValue];
+  return [OLower(value) isEqual:@"true"];
+}
+static BOOL OAdmits(NSDictionary *policy, NSDictionary *claims) {
+  if (!policy) return YES;
+  NSString *email = OLower(claims[@"email"]);
+  NSArray *emails = policy[@"allowedEmails"];
+  NSArray *domains = policy[@"allowedDomains"];
+  BOOL listed = emails.count || domains.count;
+  // List matching is only meaningful for provider-verified addresses.
+  if (([policy[@"requireVerifiedEmail"] boolValue] || listed) &&
+      (!email.length || !OClaimTrue(claims[@"email_verified"]))) return NO;
+  if (!listed || [emails containsObject:email]) return YES;
+  NSRange at = [email rangeOfString:@"@" options:NSBackwardsSearch];
+  NSString *domain = at.location == NSNotFound ? @"" : [email substringFromIndex:at.location + 1];
+  NSString *hostedDomain = OLower(claims[@"hd"]);
+  if ([policy[@"requireHostedDomain"] boolValue] && !hostedDomain.length) return NO;
+  return [domains containsObject:domain] && (!hostedDomain.length || [domains containsObject:hostedDomain]);
 }
 static BOOL OURL(NSString *value, NSArray *hosts) {
   NSURL *url = [NSURL URLWithString:OS(value)];
@@ -88,6 +184,11 @@ static BOOL OStrings(id values) {
       (!secretKey.length || !OS([NSProcessInfo processInfo].environment[secretKey]).length)) {
     OFail(error, @"OIDC clientSecretEnvironmentKey must name a nonempty environment secret"); return nil;
   }
+  NSDictionary *admission = nil;
+  if (config[@"admission"]) {
+    admission = OAdmissionPolicy(config[@"admission"], error);
+    if (!admission) return nil;
+  }
   // Never copy arbitrary primitive overrides (HS256 secrets, audience, OAuth2 mode).
   NSMutableDictionary *safe = [NSMutableDictionary dictionary];
   for (NSString *key in @[ @"issuer", @"discoveryURL", @"redirectURI", @"clientID", @"subjectClaim",
@@ -101,6 +202,7 @@ static BOOL OStrings(id values) {
   safe[@"tokenEndpointAuthMethod"] = method;
   safe[@"callbackMaxAgeSeconds"] = @300;
   safe[@"timeoutSeconds"] = @5;
+  if (admission) safe[@"admission"] = admission;
   self.configuration = safe;
   self.resolver = resolver;
   self.transport = transport;
@@ -216,7 +318,14 @@ static BOOL OStrings(id values) {
                                          providerConfiguration:(NSDictionary *)config error:(NSError **)error {
   NSDictionary *normalized = [self principalIdentity:identity configuration:config error:error];
   if (!normalized) return nil;
-  // The application alone decides membership, roles and linking. No email fallback.
+  NSDictionary *admission = self.configuration[@"admission"];
+  if (!OAdmits(admission, [normalized[@"claims"] isKindOfClass:[NSDictionary class]] ? normalized[@"claims"] : @{})) {
+    if (error) *error = [NSError errorWithDomain:ALNAuthModuleOIDCErrorDomain code:ALNAuthModuleOIDCErrorAdmissionDenied
+                                        userInfo:@{NSLocalizedDescriptionKey: admission[@"rejectionMessage"]}];
+    return nil;
+  }
+  // Admission only gates sign-in; the application still decides membership, roles and
+  // linking. No email fallback.
   return [self.resolver resolveSessionDescriptorForNormalizedIdentity:normalized
                                               providerConfiguration:config error:error];
 }

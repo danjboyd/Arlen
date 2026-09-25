@@ -86,6 +86,7 @@ static NSString *OIDCTestRS256JWT(NSDictionary *claims, NSString *privateKeyPEM,
 @property(nonatomic, assign) BOOL failTransport;
 @property(nonatomic, assign) BOOL badSignature;
 @property(nonatomic, assign) BOOL badAlgorithm;
+@property(nonatomic, copy) NSString *lastKeysHost;
 @end
 static ModuleOIDCFixture *OIDCFixture;
 @implementation ModuleOIDCFixture
@@ -121,7 +122,8 @@ static ModuleOIDCFixture *OIDCFixture;
       [self.redeemedCodes addObject:code];
       response = @{ @"id_token": token, @"access_token": @"must-not-be-in-session" };
     }
-  } else if ([request.URL.path isEqual:@"/keys"]) {
+  } else if ([request.URL.path isEqual:@"/keys"] || [request.URL.path isEqual:@"/oauth2/v3/certs"]) {
+    self.lastKeysHost = request.URL.host;
     response = @{ @"keys": @[ self.material[@"jwk"] ] };
   }
   return [NSJSONSerialization dataWithJSONObject:response options:0 error:NULL];
@@ -139,6 +141,17 @@ static NSDictionary *ResolvedIdentity;
   ResolvedIdentity = identity;
   if (![identity[@"provider_subject"] isEqual:@"tenant:known"]) return nil;
   return @{ @"subject": @"person-42", @"roles": @[ @"staff" ], @"assuranceLevel": @1 };
+}
+@end
+
+@interface AdmissionOIDCResolver : NSObject <ALNAuthProviderSessionResolver>
+@end
+@implementation AdmissionOIDCResolver
+- (NSDictionary *)resolveSessionDescriptorForNormalizedIdentity:(NSDictionary *)identity
+                                         providerConfiguration:(NSDictionary *)config error:(NSError **)error {
+  ResolverCalls++;
+  ResolvedIdentity = identity;
+  return @{ @"subject": [@"person-" stringByAppendingString:identity[@"provider_subject"] ?: @""] };
 }
 @end
 
@@ -444,5 +457,222 @@ static void RegisterOIDCLoginTemplates(void) {
   XCTAssertTrue([html containsString:@"/context/auth/provider/entra/login"]);
   XCTAssertFalse([html containsString:@"type=\"password\""]);
   XCTAssertFalse([html containsString:@"provider/stub"]);
+}
+#pragma mark - Provider presets (issue 60)
+
+- (NSDictionary *)googleProvider {
+  return @{ @"enabled": @YES, @"preset": @"google", @"clientID": @"client", @"tokenEndpointAuthMethod": @"none",
+            @"redirectURI": @"https://app.example/context/auth/provider/google/callback" };
+}
+- (NSDictionary *)googleHooks {
+  return @{ @"providerSessionResolverClass": @"AdmissionOIDCResolver", @"oidcTransportClass": @"ModuleOIDCFixture" };
+}
+- (void)useGoogleDiscovery {
+  OIDCFixture.metadata = [@{ @"issuer": @"https://accounts.google.com",
+    @"authorization_endpoint": @"https://accounts.google.com/o/oauth2/v2/auth",
+    @"token_endpoint": @"https://oauth2.googleapis.com/token",
+    @"jwks_uri": @"https://www.googleapis.com/oauth2/v3/certs" } mutableCopy];
+  OIDCFixture.claims[@"iss"] = @"https://accounts.google.com";
+  OIDCFixture.claims[@"sub"] = @"google-subject";
+  OIDCFixture.claims[@"email"] = @"kid@family.example";
+  OIDCFixture.claims[@"email_verified"] = @YES;
+}
+- (void)testGooglePresetExpandsDiscoveryAndDerivedHosts {
+  ALNAuthModuleRuntime *runtime = [ALNAuthModuleRuntime new];
+  NSError *error = nil;
+  NSDictionary *moduleConfig = @{ @"providers": @{ @"google": [self googleProvider] }, @"hooks": [self googleHooks] };
+  XCTAssertTrue([runtime configureHooksWithModuleConfig:moduleConfig error:&error], @"%@", error);
+  ALNAuthModuleOIDC *google = [runtime valueForKey:@"oidcProviders"][@"google"];
+  XCTAssertNotNil(google);
+  NSDictionary *config = google.configuration;
+  XCTAssertEqualObjects(@"https://accounts.google.com", config[@"issuer"]);
+  XCTAssertEqualObjects(@"https://accounts.google.com/.well-known/openid-configuration", config[@"discoveryURL"]);
+  NSArray *expectedHosts = @[ @"accounts.google.com", @"oauth2.googleapis.com" ];
+  XCTAssertEqualObjects(expectedHosts, config[@"endpointAllowedHosts"]);
+  XCTAssertEqualObjects(@[ @"www.googleapis.com" ], config[@"jwksAllowedHosts"]);
+  XCTAssertEqualObjects((@[ @"openid", @"email", @"profile" ]), config[@"scopes"]);
+  XCTAssertTrue([runtime isProviderEnabled:@"google"]);
+  BOOL foundButton = NO;
+  for (NSDictionary *entry in runtime.loginProviders)
+    if ([entry[@"identifier"] isEqual:@"google"]) foundButton = [entry[@"ctaLabel"] isEqual:@"Continue with Google"];
+  XCTAssertTrue(foundButton);
+}
+- (void)testGooglePresetExplicitKeysOverridePreset {
+  NSMutableDictionary *provider = [[self googleProvider] mutableCopy];
+  provider[@"scopes"] = @[ @"openid", @"email" ];
+  provider[@"jwksAllowedHosts"] = @[ @"keys.example" ];
+  provider[@"ctaLabel"] = @"Sign in with Google";
+  ALNAuthModuleRuntime *runtime = [ALNAuthModuleRuntime new];
+  NSDictionary *moduleConfig = @{ @"providers": @{ @"google": provider }, @"hooks": [self googleHooks] };
+  XCTAssertTrue([runtime configureHooksWithModuleConfig:moduleConfig error:NULL]);
+  ALNAuthModuleOIDC *google = [runtime valueForKey:@"oidcProviders"][@"google"];
+  NSDictionary *config = google.configuration;
+  XCTAssertEqualObjects((@[ @"openid", @"email" ]), config[@"scopes"]);
+  XCTAssertEqualObjects(@[ @"keys.example" ], config[@"jwksAllowedHosts"]);
+  XCTAssertEqualObjects((@[ @"accounts.google.com", @"oauth2.googleapis.com" ]), config[@"endpointAllowedHosts"]);
+  for (NSDictionary *entry in runtime.loginProviders)
+    if ([entry[@"identifier"] isEqual:@"google"]) XCTAssertEqualObjects(@"Sign in with Google", entry[@"ctaLabel"]);
+}
+- (void)testUnknownOrUnsupportedPresetIsAClearConfigError {
+  for (NSString *preset in @[ @"nope", @"github", @"" ]) {
+    NSMutableDictionary *provider = [[self googleProvider] mutableCopy];
+    provider[@"preset"] = preset;
+    NSError *error = nil;
+    NSDictionary *moduleConfig = @{ @"providers": @{ @"google": provider }, @"hooks": [self googleHooks] };
+    XCTAssertFalse([[ALNAuthModuleRuntime new] configureHooksWithModuleConfig:moduleConfig error:&error], @"%@", preset);
+    XCTAssertTrue([error.localizedDescription containsString:@"preset"], @"%@", error);
+    XCTAssertTrue([error.localizedDescription containsString:@"supported: google"], @"%@", error);
+  }
+}
+- (ALNApplication *)googleApplication {
+  ALNApplication *app = [[ALNApplication alloc] initWithConfig:@{
+    @"environment": @"test", @"csrf": @{ @"enabled": @NO },
+    @"database": @{ @"connectionString": @"host=127.0.0.1 port=1 dbname=unused connect_timeout=1" },
+    @"authModule": @{ @"paths": @{ @"prefix": @"/context/auth" }, @"providers": @{ @"google": [self googleProvider] },
+      @"hooks": [self googleHooks] }
+  }];
+  [app addMiddleware:[[ALNSessionMiddleware alloc] initWithSecret:@"test-oidc-session-secret-long-enough-for-signing"
+      cookieName:@"oidc_session" maxAgeSeconds:3600 secure:NO sameSite:@"Lax"]];
+  NSError *error = nil;
+  XCTAssertTrue([[[ALNAuthModule alloc] init] registerWithApplication:app error:&error], @"%@", error);
+  return app;
+}
+- (void)testGooglePresetLoginVerifiesIDTokenWithJWKSOnSeparateHost {
+  ALNApplication *app = [self googleApplication];
+  [self useGoogleDiscovery];
+  ALNResponse *login = [self request:app method:@"GET" path:@"/context/auth/api/provider/google/login" query:@"" cookie:nil];
+  XCTAssertEqual((NSInteger)200, login.statusCode, @"%@", [self json:login]);
+  NSString *url = [self json:login][@"authorize_url"];
+  XCTAssertTrue([url hasPrefix:@"https://accounts.google.com/o/oauth2/v2/auth?"], @"%@", url);
+  NSMutableDictionary *parameters = [NSMutableDictionary dictionary];
+  for (NSURLQueryItem *item in [NSURLComponents componentsWithString:url].queryItems) parameters[item.name] = item.value;
+  OIDCFixture.claims[@"nonce"] = parameters[@"nonce"];
+  ALNResponse *callback = [self request:app method:@"GET" path:@"/context/auth/provider/google/callback"
+      query:[NSString stringWithFormat:@"code=code&state=%@", parameters[@"state"]] cookie:[self cookie:login]];
+  XCTAssertEqual((NSInteger)200, callback.statusCode, @"%@", [self json:callback]);
+  XCTAssertEqualObjects(@"person-google-subject", [self json:callback][@"session"][@"subject"]);
+  XCTAssertEqualObjects(@"www.googleapis.com", OIDCFixture.lastKeysHost);
+}
+
+#pragma mark - Admission policy (issue 61)
+
+- (ALNAuthModuleOIDC *)providerWithAdmission:(NSDictionary *)admission error:(NSError **)error {
+  NSMutableDictionary *config = [[self config] mutableCopy];
+  config[@"admission"] = admission;
+  return [[ALNAuthModuleOIDC alloc] initWithIdentifier:@"entra" configuration:config
+      resolver:[ModuleOIDCResolver new] transport:[ModuleOIDCFixture new] error:error];
+}
+- (BOOL)admitWithAdmission:(NSDictionary *)admission claims:(NSDictionary *)claims error:(NSError **)error {
+  ALNAuthModuleOIDC *provider = [self providerWithAdmission:admission error:NULL];
+  XCTAssertNotNil(provider, @"%@", admission);
+  [OIDCFixture.claims removeObjectForKey:@"email_verified"];
+  [OIDCFixture.claims addEntriesFromDictionary:claims];
+  for (NSString *key in claims) if (claims[key] == [NSNull null]) [OIDCFixture.claims removeObjectForKey:key];
+  ResolverCalls = 0;
+  NSDictionary *state = [self stateForProvider:provider];
+  return [self complete:provider state:state context:[self context] error:error] != nil;
+}
+- (void)testAdmissionAllowsVerifiedListedEmailsCaseInsensitively {
+  NSDictionary *admission = @{ @"allowedEmails": @[ @"SAME@Example.TEST" ] };
+  XCTAssertTrue([self admitWithAdmission:admission claims:@{ @"email_verified": @YES } error:NULL]);
+  NSDictionary *stringClaims = @{ @"email_verified": @"true", @"email": @"Same@example.test" };
+  XCTAssertTrue([self admitWithAdmission:admission claims:stringClaims error:NULL]);
+}
+- (void)testAdmissionRejectsUnverifiedAndUnlistedEmailsBeforeResolver {
+  NSDictionary *admission = @{ @"allowedEmails": @[ @"same@example.test" ], @"rejectionMessage": @"Family members only." };
+  for (NSDictionary *claims in @[ @{}, @{ @"email_verified": @NO }, @{ @"email_verified": @"false" },
+                                  @{ @"email_verified": @YES, @"email": @"other@example.test" },
+                                  @{ @"email_verified": @YES, @"email": [NSNull null] } ]) {
+    NSError *error = nil;
+    XCTAssertFalse([self admitWithAdmission:admission claims:claims error:&error], @"%@", claims);
+    XCTAssertEqualObjects(ALNAuthModuleOIDCErrorDomain, error.domain);
+    XCTAssertEqual((NSInteger)ALNAuthModuleOIDCErrorAdmissionDenied, error.code, @"%@", claims);
+    XCTAssertEqualObjects(@"Family members only.", error.localizedDescription);
+    XCTAssertEqual((NSUInteger)0, ResolverCalls);
+  }
+}
+- (void)testAdmissionRequireVerifiedEmailWithoutLists {
+  NSDictionary *admission = @{ @"requireVerifiedEmail": @"YES" };
+  XCTAssertFalse([self admitWithAdmission:admission claims:@{} error:NULL]);
+  NSDictionary *claims1 = @{ @"email_verified": @YES, @"email": @"anyone@else.test" };
+  XCTAssertTrue([self admitWithAdmission:admission claims:claims1 error:NULL]);
+}
+- (void)testAdmissionDomainsHonorHostedDomainClaim {
+  NSDictionary *admission = @{ @"allowedDomains": @[ @"@example.test" ] };
+  XCTAssertTrue([self admitWithAdmission:admission claims:@{ @"email_verified": @YES } error:NULL]);
+  NSDictionary *claims2 = @{ @"email_verified": @YES, @"hd": @"example.test" };
+  XCTAssertTrue([self admitWithAdmission:admission claims:claims2 error:NULL]);
+  NSDictionary *claims3 = @{ @"email_verified": @YES, @"hd": @"other.test" };
+  XCTAssertFalse([self admitWithAdmission:admission claims:claims3 error:NULL]);
+  NSDictionary *claims4 = @{ @"email_verified": @YES, @"email": @"x@notexample.test" };
+  XCTAssertFalse([self admitWithAdmission:admission claims:claims4 error:NULL]);
+  NSDictionary *claims5 = @{ @"email_verified": @YES, @"email": @"x@sub.example.test" };
+  XCTAssertFalse([self admitWithAdmission:admission claims:claims5 error:NULL]);
+  NSDictionary *hosted = @{ @"allowedDomains": @[ @"example.test" ], @"requireHostedDomain": @YES };
+  XCTAssertFalse([self admitWithAdmission:hosted claims:@{ @"email_verified": @YES } error:NULL]);
+  NSDictionary *claims6 = @{ @"email_verified": @YES, @"hd": @"example.test" };
+  XCTAssertTrue([self admitWithAdmission:hosted claims:claims6 error:NULL]);
+}
+- (void)testAdmissionEnvironmentListAndConfigValidation {
+  setenv("ARLEN_TEST_OIDC_ALLOWED_EMAILS", " other@example.test , Same@Example.test ", 1);
+  NSDictionary *fromEnvironment = @{ @"allowedEmailsEnvironmentKey": @"ARLEN_TEST_OIDC_ALLOWED_EMAILS" };
+  if ([[NSProcessInfo processInfo].environment[@"ARLEN_TEST_OIDC_ALLOWED_EMAILS"] length] > 0) {
+    XCTAssertTrue([self admitWithAdmission:fromEnvironment claims:@{ @"email_verified": @YES } error:NULL]);
+  }
+  for (NSDictionary *admission in @[ @{ @"allowedEmailsEnvironmentKey": @"ARLEN_TEST_OIDC_UNSET_EMAIL_LIST" },
+                                     @{ @"allowedEmailsEnvironmentKey": @"PATH" },
+                                     @{ @"allowedEmails": @[ @"not-an-email" ] },
+                                     @{ @"allowedDomains": @[ @"a@b.test" ] },
+                                     @{ @"allowedEmails": @"same@example.test" },
+                                     @{ @"requireHostedDomain": @YES },
+                                     @{ @"requireVerifiedEmail": @"sometimes" },
+                                     @{ @"allowedEmail": @[ @"typo@example.test" ] },
+                                     @{ @"rejectionMessage": @"" } ]) {
+    NSError *error = nil;
+    XCTAssertNil([self providerWithAdmission:admission error:&error], @"%@", admission);
+    XCTAssertTrue([error.localizedDescription containsString:@"admission"], @"%@ %@", admission, error);
+  }
+}
+- (void)testModuleCallbackReportsAdmissionDenial {
+  RegisterOIDCLoginTemplates();
+  NSMutableDictionary *provider = [[self googleProvider] mutableCopy];
+  provider[@"admission"] = @{ @"allowedEmails": @[ @"parent@family.example" ], @"rejectionMessage": @"Family members only." };
+  ALNApplication *app = [[ALNApplication alloc] initWithConfig:@{
+    @"environment": @"test", @"csrf": @{ @"enabled": @NO },
+    @"database": @{ @"connectionString": @"host=127.0.0.1 port=1 dbname=unused connect_timeout=1" },
+    @"authModule": @{ @"paths": @{ @"prefix": @"/context/auth" }, @"providers": @{ @"google": provider },
+      @"hooks": [self googleHooks] }
+  }];
+  [app addMiddleware:[[ALNSessionMiddleware alloc] initWithSecret:@"test-oidc-session-secret-long-enough-for-signing"
+      cookieName:@"oidc_session" maxAgeSeconds:3600 secure:NO sameSite:@"Lax"]];
+  XCTAssertTrue([[[ALNAuthModule alloc] init] registerWithApplication:app error:NULL]);
+  [self useGoogleDiscovery];
+  for (NSNumber *jsonClient in @[ @YES, @NO ]) {
+    ALNResponse *login = [self request:app method:@"GET" path:@"/context/auth/api/provider/google/login" query:@"" cookie:nil];
+    NSMutableDictionary *parameters = [NSMutableDictionary dictionary];
+    for (NSURLQueryItem *item in [NSURLComponents componentsWithString:[self json:login][@"authorize_url"]].queryItems)
+      parameters[item.name] = item.value;
+    OIDCFixture.claims[@"nonce"] = parameters[@"nonce"];
+    NSString *query = [NSString stringWithFormat:@"code=code-%@&state=%@", jsonClient, parameters[@"state"]];
+    ResolverCalls = 0;
+    if ([jsonClient boolValue]) {
+      ALNResponse *callback = [self request:app method:@"GET" path:@"/context/auth/provider/google/callback"
+                                      query:query cookie:[self cookie:login]];
+      XCTAssertEqual((NSInteger)403, callback.statusCode);
+      XCTAssertEqualObjects(@"admission_denied", [self json:callback][@"code"]);
+      XCTAssertEqualObjects(@"Family members only.", [self json:callback][@"message"]);
+    } else {
+      ALNResponse *callback = [app dispatchRequest:[[ALNRequest alloc] initWithMethod:@"GET"
+          path:@"/context/auth/provider/google/callback" queryString:query
+          headers:@{ @"cookie": [self cookie:login] ?: @"", @"accept": @"text/html" } body:[NSData data]]];
+      XCTAssertEqual((NSInteger)302, callback.statusCode);
+      XCTAssertEqualObjects(@"/context/auth/login", [callback headerForName:@"Location"]);
+      ALNResponse *page = [app dispatchRequest:[[ALNRequest alloc] initWithMethod:@"GET" path:@"/context/auth/login"
+          queryString:@"" headers:@{ @"cookie": [self cookie:callback] ?: @"", @"accept": @"text/html" } body:[NSData data]]];
+      NSString *html = [[NSString alloc] initWithData:page.bodyData encoding:NSUTF8StringEncoding];
+      XCTAssertTrue([html containsString:@"Family members only."], @"%@", html);
+    }
+    XCTAssertEqual((NSUInteger)0, ResolverCalls);
+  }
 }
 @end

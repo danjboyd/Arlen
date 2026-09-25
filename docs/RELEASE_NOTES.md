@@ -2,6 +2,18 @@
 
 ## Upcoming Release Candidate
 
+- Auth module OIDC: `preset = "google"` expands into Google's issuer, discovery
+  URL, scopes and client authentication method. The endpoint and JWKS allowed
+  hosts are now derived from the preset's endpoints, so they no longer have to
+  be listed by hand. Explicit keys override the preset, and unknown or
+  unsupported presets fail at startup (GitHub issue 60). See
+  [Auth Module](AUTH_MODULE.md#google-preset).
+- Auth module OIDC: an optional per-provider `admission` policy restricts
+  sign-in to verified allowlisted emails, domains (honoring Google's `hd`
+  claim), or an environment-supplied email list. It runs before the resolver
+  and never links identities (GitHub issue 61). See
+  [Auth Module](AUTH_MODULE.md#admission-policy).
+
 - CSRF: rejected requests from JSON clients (JSON `Accept`, `/api` paths, or
   `apiOnly`) now receive the structured error envelope with code `csrf_invalid`
   instead of a plain-text body. Other clients still get the plain-text 403.
