@@ -373,7 +373,8 @@ causing SSH to treat `-oBatchMode=yes` as the config-file path.
 - Tracking ID: `ARLEN-BUG-024`
 - Discovered: `2026-04-27`
 - Reported by: `StateCompulsoryPoolingAPI`
-- Last updated: `2026-04-28`
+- Last updated: `2026-09-25`
+- GitHub tracking issue: `danjboyd/Arlen#67`
 - Target follow-up: Phase 38
 - Reconciliation note:
   `docs/internal/STATECOMPULSORYPOOLINGAPI_REPORT_RECONCILIATION_2026-04-24.md`
@@ -414,7 +415,19 @@ GNUstep Base reason `Failed to create pipe to handle perform in thread`.
 
 ### Current assessment
 
-This is accepted as a real Arlen-facing production reliability bug. The visible
+2026-09-25 status: Phase 38 production follow-up points to a downstream opener
+rather than an Arlen file-response leak. `StateCompulsoryPoolingAPI` launches an
+`NSTask` with three `[NSFileHandle fileHandleWithNullDevice]` handles and does
+not release the task. On GNUstep that retains three `/dev/null` descriptors per
+launch (see `docs/internal/PHASE38_ROADMAP.md`). The issue stays open until
+production confirms that the drift stopped after the app fix, or until a
+downstream reproduction implicates Arlen. StateMap (serving authenticated media
+through `fileBodyPath`) was advised to use `workerFDRetirePercent`,
+`tools/ops/sample_fd_targets.py`, and `ARLEN_FD_DELTA_DEBUG=1` rather than
+scheduled reloads.
+
+Original assessment (2026-04-28): this is accepted as a real Arlen-facing
+production reliability bug. The visible
 `ALNResponse.fileBodyPath` send path preflights and closes its per-request
 descriptor, and the static file descriptor cache is capped and evicts by
 closing entries, so this does not currently look like a simple missing close in
