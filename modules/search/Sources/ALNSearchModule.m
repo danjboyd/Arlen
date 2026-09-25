@@ -475,15 +475,15 @@ static NSString *STResolvedPersistencePath(ALNApplication *application, NSDictio
     if ([configured hasPrefix:@"/"]) {
       return configured;
     }
-    NSString *cwd = [[NSFileManager defaultManager] currentDirectoryPath] ?: NSTemporaryDirectory();
-    return [cwd stringByAppendingPathComponent:configured];
+    // Relative paths belong to the app, not the process working directory, so the
+    // server and `arlen jobs worker` (which runs from the framework root) agree.
+    return [application pathRelativeToAppRoot:configured];
   }
   NSString *environment = STLowerTrimmedString(application.environment);
   if ([environment isEqualToString:@"test"]) {
     return @"";
   }
-  NSString *cwd = [[NSFileManager defaultManager] currentDirectoryPath] ?: NSTemporaryDirectory();
-  return [cwd stringByAppendingPathComponent:
+  return [application pathRelativeToAppRoot:
                    [NSString stringWithFormat:@"var/module_state/search-%@.plist",
                                               ([environment length] > 0) ? environment : @"development"]];
 }
@@ -2596,7 +2596,7 @@ static NSDictionary *STStatusCard(NSString *label, NSString *value, NSString *st
   if ([fixturesPath length] > 0) {
     NSString *resolvedPath = [fixturesPath hasPrefix:@"/"]
                                  ? fixturesPath
-                                 : [[[NSFileManager defaultManager] currentDirectoryPath] stringByAppendingPathComponent:fixturesPath];
+                                 : [application pathRelativeToAppRoot:fixturesPath];
     NSDictionary *loaded = STJSONDictionaryFromPath(resolvedPath, error);
     if (loaded == nil && error != NULL && *error != nil) {
       return NO;

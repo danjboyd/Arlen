@@ -2,6 +2,14 @@
 
 ## Upcoming Release Candidate
 
+- Modules: relative jobs, storage, notifications and search persistence paths,
+  including the `var/module_state/...` defaults, now resolve against the
+  application root instead of the process working directory.
+  `arlen jobs worker` runs from the framework root, so it had been reading and
+  writing scheduler state under the framework checkout, separately from the
+  server. Adds `-[ALNApplication appRootPath]` and `-pathRelativeToAppRoot:`
+  (GitHub issue 76).
+
 - Static files: `Content-Type` now comes from a public `ALNMIMETypes` table.
   gif, ico, webp, woff, woff2, map and xml were allowed by default but served as
   `application/octet-stream`; they now get specific types, as do common audio,

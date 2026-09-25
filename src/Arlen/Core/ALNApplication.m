@@ -1309,6 +1309,26 @@ static NSArray<NSString *> *ALNDataverseTargetNamesFromConfigAndEnvironment(NSDi
   return [NSArray arrayWithArray:self.mutableMiddlewares];
 }
 
+- (NSString *)appRootPath {
+  id configured = self.config[@"appRoot"];
+  if ([configured isKindOfClass:[NSString class]] && [(NSString *)configured length] > 0) {
+    return [(NSString *)configured stringByStandardizingPath];
+  }
+  NSString *environmentRoot = [[NSProcessInfo processInfo] environment][@"ARLEN_APP_ROOT"];
+  if ([environmentRoot length] > 0) {
+    return [environmentRoot stringByStandardizingPath];
+  }
+  return [[NSFileManager defaultManager] currentDirectoryPath] ?: NSTemporaryDirectory();
+}
+
+- (NSString *)pathRelativeToAppRoot:(NSString *)path {
+  NSString *candidate = [path isKindOfClass:[NSString class]] ? path : @"";
+  if (ALNPlatformPathIsAbsolute(candidate)) {
+    return [candidate stringByStandardizingPath];
+  }
+  return [[[self appRootPath] stringByAppendingPathComponent:candidate] stringByStandardizingPath];
+}
+
 - (void)addMiddleware:(id<ALNMiddleware>)middleware {
   if (middleware == nil) {
     return;

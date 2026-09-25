@@ -379,15 +379,15 @@ static NSString *JMResolvedPersistencePath(ALNApplication *application, NSDictio
     if ([configured hasPrefix:@"/"]) {
       return configured;
     }
-    NSString *cwd = [[NSFileManager defaultManager] currentDirectoryPath] ?: NSTemporaryDirectory();
-    return [cwd stringByAppendingPathComponent:configured];
+    // Relative paths belong to the app, not the process working directory, so the
+    // server and `arlen jobs worker` (which runs from the framework root) agree.
+    return [application pathRelativeToAppRoot:configured];
   }
   NSString *environment = JMLowerTrimmedString(application.environment);
   if ([environment isEqualToString:@"test"]) {
     return @"";
   }
-  NSString *cwd = [[NSFileManager defaultManager] currentDirectoryPath] ?: NSTemporaryDirectory();
-  return [cwd stringByAppendingPathComponent:
+  return [application pathRelativeToAppRoot:
                    [NSString stringWithFormat:@"var/module_state/jobs-%@.plist",
                                               ([environment length] > 0) ? environment : @"development"]];
 }
