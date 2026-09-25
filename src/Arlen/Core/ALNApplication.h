@@ -61,6 +61,9 @@ NS_ASSUME_NONNULL_BEGIN
 @property(nonatomic, copy, readonly) NSArray *modules;
 @property(nonatomic, copy, readonly) NSArray *lifecycleHooks;
 @property(nonatomic, copy, readonly) NSArray *staticMounts;
+// Normalized `spaFallback` descriptor (file, prefix, excludePrefixes, cacheControl,
+// allowDottedPaths), or nil when no fallback is configured.
+@property(nonatomic, copy, readonly, nullable) NSDictionary *spaFallback;
 @property(nonatomic, strong, readonly) id<ALNJobAdapter> jobsAdapter;
 @property(nonatomic, strong, readonly) id<ALNCacheAdapter> cacheAdapter;
 @property(nonatomic, strong, readonly) id<ALNLocalizationAdapter> localizationAdapter;
@@ -113,6 +116,12 @@ NS_ASSUME_NONNULL_BEGIN
 - (BOOL)mountStaticDirectory:(NSString *)directory
                     atPrefix:(NSString *)prefix
              allowExtensions:(nullable NSArray *)allowExtensions;
+// SPA history fallback (docs/STATIC_FILES.md#spa-history-fallback). `options` keys:
+// prefix, excludePrefixes, cacheControl, allowDottedPaths. Relative files resolve
+// against the app root. Returns NO with an error for invalid values.
+- (BOOL)setSPAFallbackFile:(NSString *)file
+                   options:(nullable NSDictionary *)options
+                     error:(NSError *_Nullable *_Nullable)error;
 - (void)addMiddleware:(id<ALNMiddleware>)middleware;
 - (void)setJobsAdapter:(id<ALNJobAdapter>)adapter;
 - (void)setCacheAdapter:(id<ALNCacheAdapter>)adapter;

@@ -3078,6 +3078,12 @@ static BOOL ALNSendSSEHeaders(ALNSocketHandle clientFd, ALNResponse *response) {
             [route[@"controller"] UTF8String], [route[@"action"] UTF8String],
             [route[@"name"] UTF8String]);
   }
+  NSDictionary *spaFallback = self.application.spaFallback;
+  if (spaFallback != nil) {
+    // Considered only after routes and built-ins decline an HTML navigation.
+    fprintf(out, "GET %s/* [spa_fallback] -> ALNSPAFallbackController#shell (arlen_spa_fallback)\n",
+            [[spaFallback[@"prefix"] isEqualToString:@"/"] ? @"" : spaFallback[@"prefix"] UTF8String]);
+  }
 }
 
 - (void)requestStop {

@@ -42,6 +42,7 @@ if (![app startWithError:&error]) {
 | `modules` | `NSArray *` | `nonatomic, copy, readonly` | Public `modules` property available on `ALNApplication`. |
 | `lifecycleHooks` | `NSArray *` | `nonatomic, copy, readonly` | Registered lifecycle hooks invoked around startup and shutdown. |
 | `staticMounts` | `NSArray *` | `nonatomic, copy, readonly` | Configured static mount definitions used by the HTTP server static-file path. |
+| `spaFallback` | `NSDictionary *` | `nonatomic, copy, readonly, nullable` | Public `spaFallback` property available on `ALNApplication`. |
 | `jobsAdapter` | `id<ALNJobAdapter>` | `nonatomic, strong, readonly` | Adapter used by this runtime for the corresponding service concern. |
 | `cacheAdapter` | `id<ALNCacheAdapter>` | `nonatomic, strong, readonly` | Adapter used by this runtime for the corresponding service concern. |
 | `localizationAdapter` | `id<ALNLocalizationAdapter>` | `nonatomic, strong, readonly` | Adapter used by this runtime for the corresponding service concern. |
@@ -74,6 +75,7 @@ if (![app startWithError:&error]) {
 | `endRouteGroup` | `- (void)endRouteGroup;` | Close a previously started scoped operation. | Always pair with `beginRouteGroupWithPrefix:guardAction:formats:` to avoid leaking group settings. |
 | `mountApplication:atPrefix:` | `- (BOOL)mountApplication:(ALNApplication *)application atPrefix:(NSString *)prefix;` | Mount or attach this component into the active application tree. | Mount child app at a fixed URL prefix before startup. |
 | `mountStaticDirectory:atPrefix:allowExtensions:` | `- (BOOL)mountStaticDirectory:(NSString *)directory atPrefix:(NSString *)prefix allowExtensions:(nullable NSArray *)allowExtensions;` | Mount or attach this component into the active application tree. | Prefer explicit extension allowlists in production to reduce accidental file exposure. |
+| `setSPAFallbackFile:options:error:` | `- (BOOL)setSPAFallbackFile:(NSString *)file options:(nullable NSDictionary *)options error:(NSError *_Nullable *_Nullable)error;` | Set or override the current value for this concern. | Check the returned `BOOL`; on `NO`, inspect the `error` out-parameter. |
 | `addMiddleware:` | `- (void)addMiddleware:(id<ALNMiddleware>)middleware;` | Add this item to the current runtime collection. | Call during bootstrap/setup before this behavior is exercised. |
 | `setJobsAdapter:` | `- (void)setJobsAdapter:(id<ALNJobAdapter>)adapter;` | Set or override the current value for this concern. | Call before downstream behavior that depends on this updated value. |
 | `setCacheAdapter:` | `- (void)setCacheAdapter:(id<ALNCacheAdapter>)adapter;` | Set or override the current value for this concern. | Call before downstream behavior that depends on this updated value. |
