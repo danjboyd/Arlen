@@ -2,6 +2,16 @@
 
 ## Upcoming Release Candidate
 
+- Security: static-mount responses, route-miss 404s and built-in endpoints
+  (OpenAPI docs pages, `/healthz`, `/arlen/live.js`) did not carry the
+  configured security headers, because they are produced outside the
+  middleware chain. HTML served from a static mount had no CSP or
+  `X-Frame-Options`, and static assets had no `nosniff`. These responses now
+  get the same headers as routed responses, without overriding headers
+  already set. `securityHeaders.enabled = NO` still disables them everywhere
+  (GitHub issue 81). See
+  [Response Headers](RESPONSE_HEADERS.md#concurrent-security-headers).
+
 - Static files: `Content-Type` now comes from a public `ALNMIMETypes` table.
   gif, ico, webp, woff, woff2, map and xml were allowed by default but served as
   `application/octet-stream`; they now get specific types, as do common audio,

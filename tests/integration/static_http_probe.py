@@ -31,6 +31,11 @@ def main():
         data = response.read()
         fields = dict((k.lower(), v) for k, v in response.getheaders())
         assert response.status == status, (headers, response.status, fields, data)
+        # Static responses bypass middleware but still carry the baseline
+        # security headers (GitHub issue 81), including 304/206/416/404.
+        assert fields.get("x-content-type-options") == "nosniff", (status, fields)
+        assert fields.get("x-frame-options") == "SAMEORIGIN", (status, fields)
+        assert "content-security-policy" in fields, (status, fields)
         assert data == body, (headers, data, body)
         if method != "HEAD" and status != 304:
             assert int(fields["content-length"]) == len(body), fields

@@ -107,3 +107,11 @@ Explicit response headers are preserved. The configured
 response does not already contain it; the default is `default-src 'self'`.
 No configuration change is needed when upgrading for concurrent first-use
 safety.
+
+The same headers, including the configured CSP, are also added to responses
+that never reach the middleware chain: static-mount responses (200, 206, 304,
+416, 404 and redirects), route-miss 404s, and built-in endpoints (`/healthz`,
+`/metrics`, `/openapi.json`, the OpenAPI docs pages, `/arlen/live.js`). As
+elsewhere, headers already on the response are kept.
+`securityHeaders.enabled = NO` turns them off on every path.
+`-[ALNApplication baselineSecurityHeaders]` returns the effective set.

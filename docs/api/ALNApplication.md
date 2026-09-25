@@ -42,6 +42,7 @@ if (![app startWithError:&error]) {
 | `modules` | `NSArray *` | `nonatomic, copy, readonly` | Public `modules` property available on `ALNApplication`. |
 | `lifecycleHooks` | `NSArray *` | `nonatomic, copy, readonly` | Registered lifecycle hooks invoked around startup and shutdown. |
 | `staticMounts` | `NSArray *` | `nonatomic, copy, readonly` | Configured static mount definitions used by the HTTP server static-file path. |
+| `baselineSecurityHeaders` | `NSDictionary<NSString *, NSString *> *` | `nonatomic, copy, readonly` | Public `baselineSecurityHeaders` property available on `ALNApplication`. |
 | `jobsAdapter` | `id<ALNJobAdapter>` | `nonatomic, strong, readonly` | Adapter used by this runtime for the corresponding service concern. |
 | `cacheAdapter` | `id<ALNCacheAdapter>` | `nonatomic, strong, readonly` | Adapter used by this runtime for the corresponding service concern. |
 | `localizationAdapter` | `id<ALNLocalizationAdapter>` | `nonatomic, strong, readonly` | Adapter used by this runtime for the corresponding service concern. |

@@ -3252,6 +3252,68 @@
   XCTAssertEqualObjects(@"431", [status stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]]);
 }
 
+- (void)testStaticMountSecurityHeadersFollowAppConfig {
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSArray *cases = @[
+    @[ @"securityHeaders = { contentSecurityPolicy = \"default-src 'self'; img-src data:\"; };",
+       @"Content-Security-Policy: default-src 'self'; img-src data:" ],
+    @[ @"securityHeaders = { enabled = NO; };", @"" ],
+  ];
+  for (NSArray *testCase in cases) {
+    NSString *appRoot = [self createTempDirectoryWithPrefix:@"arlen-static-security-headers"];
+    XCTAssertNotNil(appRoot);
+    if (!appRoot) return;
+    NSTask *server = nil;
+    @try {
+      NSString *entrypoint = [NSString stringWithContentsOfFile:@"tests/fixtures/http/cookie_app.m"
+          encoding:NSUTF8StringEncoding error:NULL];
+      XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"app_lite.m"] content:entrypoint]);
+      XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"public/app/index.html"]
+          content:@"<!doctype html><p>static</p>\n"]);
+      NSString *appConfig = [NSString stringWithFormat:@"{ host = \"127.0.0.1\"; port = 3000; logLevel = error; "
+                             @"csrf = { enabled = NO; }; %@ "
+                             @"staticMounts = ({ prefix = \"/app\"; directory = \"public/app\"; }); }", testCase[0]];
+      XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"config/app.plist"] content:appConfig]);
+      NSString *envPrefix = [NSString stringWithFormat:@"ARLEN_FRAMEWORK_ROOT=%@ ARLEN_APP_ROOT=%@",
+          [self shellQuoted:repoRoot], [self shellQuoted:appRoot]];
+      int prepareCode = 0;
+      NSString *prepareOutput = [self runShellCapture:[NSString stringWithFormat:
+          @"%@ ./bin/boomhauer --prepare-only 2>&1", envPrefix] exitCode:&prepareCode];
+      XCTAssertEqual(prepareCode, 0, @"%@", prepareOutput);
+      if (prepareCode != 0) return;
+      int port = [self randomPort];
+      server = [[NSTask alloc] init];
+      server.launchPath = @"/bin/bash";
+      server.arguments = @[@"-lc", [NSString stringWithFormat:@"%@ %@ --port %d", envPrefix,
+          [self shellQuoted:[appRoot stringByAppendingPathComponent:@".boomhauer/build/boomhauer-app"]], port]];
+      server.standardOutput = [NSPipe pipe];
+      server.standardError = [NSPipe pipe];
+      [server launch];
+      BOOL ready = NO;
+      (void)[self requestPathWithRetries:@"/healthz" port:port attempts:60 success:&ready];
+      XCTAssertTrue(ready);
+      if (!ready) return;
+      int code = 0;
+      NSString *output = [self runShellCapture:[NSString stringWithFormat:
+          @"curl -sS -o /dev/null -D - http://127.0.0.1:%d/app/ && curl -sS -o /dev/null -D - http://127.0.0.1:%d/app/missing.html",
+          port, port] exitCode:&code];
+      XCTAssertEqual(code, 0, @"%@", output);
+      NSString *expectedCSP = testCase[1];
+      if ([expectedCSP length] > 0) {
+        XCTAssertEqual((NSUInteger)2, [[output componentsSeparatedByString:expectedCSP] count] - 1, @"%@", output);
+        XCTAssertEqual((NSUInteger)2, [[output componentsSeparatedByString:@"X-Content-Type-Options: nosniff"] count] - 1,
+                       @"%@", output);
+      } else {
+        XCTAssertFalse([output containsString:@"Content-Security-Policy"], @"%@", output);
+        XCTAssertFalse([output containsString:@"X-Content-Type-Options"], @"%@", output);
+      }
+    } @finally {
+      if (server.isRunning) { (void)kill(server.processIdentifier, SIGTERM); [server waitUntilExit]; }
+      [[NSFileManager defaultManager] removeItemAtPath:appRoot error:NULL];
+    }
+  }
+}
+
 - (void)testRepeatedSetCookieSessionAndCookieJar {
   NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
   NSString *appRoot = [self createTempDirectoryWithPrefix:@"arlen-cookie-jar"];
