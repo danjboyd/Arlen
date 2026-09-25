@@ -1,6 +1,6 @@
 {
   identifier = "search";
-  version = "1.0.0";
+  version = "1.0.1";
   principalClass = "ALNSearchModule";
   dependencies = (
     { identifier = "jobs"; version = ">= 1.0.0"; }
