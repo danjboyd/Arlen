@@ -2,6 +2,21 @@
 
 ## Upcoming Release Candidate
 
+- Static files: `Content-Type` now comes from a public `ALNMIMETypes` table.
+  gif, ico, webp, woff, woff2, map and xml were allowed by default but served as
+  `application/octet-stream`; they now get specific types, as do common audio,
+  video, image and document types. Apps can add or override entries with a
+  top-level `mimeTypes` dictionary (GitHub issue 57). See
+  [Static files](STATIC_FILES.md#content-types).
+- Controllers can serve private files with
+  `renderFileAtPath:contentType:options:`, and other code with
+  `+[ALNFileResponse prepareResponse:...]`. These use the same ETag/Last-Modified,
+  conditional GET, single byte range (206/416), HEAD and sendfile behavior as
+  static mounts. Options set `Cache-Control`, a download filename and a
+  caller-supplied ETag. This fixes Safari/iOS media playback for authenticated
+  audio and video (GitHub issue 58). See
+  [Static files](STATIC_FILES.md#controller-file-responses).
+
 - `ALNPg` and `ALNMSSQL` accept an optional `acquireTimeout`: when every pooled
   connection is in use, `acquireConnection:` waits up to that many seconds for
   one to be released before failing with the pool-exhausted error. The default,

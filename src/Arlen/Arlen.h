@@ -35,7 +35,9 @@
 #import "Data/ALNSQLDialect.h"
 #endif
 #import "Data/ALNSQLBuilder.h"
+#import "HTTP/ALNFileResponse.h"
 #import "HTTP/ALNHTTPServer.h"
+#import "HTTP/ALNMIMETypes.h"
 #import "HTTP/ALNRequest.h"
 #import "HTTP/ALNMultipart.h"
 #import "HTTP/ALNResponse.h"

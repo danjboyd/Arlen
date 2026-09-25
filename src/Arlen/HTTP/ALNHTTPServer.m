@@ -45,6 +45,7 @@ typedef SSIZE_T ssize_t;
 
 #import "ALNApplication.h"
 #import "ALNEventStream.h"
+#import "ALNFileResponseInternal.h"
 #import "ALNRequest.h"
 #import "ALNResponse.h"
 #import "ALNRealtime.h"
@@ -1383,16 +1384,6 @@ static long ALNStaticFileMTimeNanoseconds(const struct stat *fileStat) {
 #endif
 }
 
-static long ALNStaticFileCTimeNanoseconds(const struct stat *fileStat) {
-#if defined(__linux__)
-  return fileStat->st_ctim.tv_nsec;
-#elif defined(__APPLE__)
-  return fileStat->st_ctimespec.tv_nsec;
-#else
-  return 0;
-#endif
-}
-
 static void ALNEnsureStaticFileFDCache(void) {
   static BOOL initialized = NO;
   if (initialized) {
@@ -2267,35 +2258,6 @@ static void ALNApplyProxyMetadata(ALNRequest *request, NSDictionary *config) {
   }
 }
 
-static NSString *ALNContentTypeForFilePath(NSString *filePath) {
-  NSString *extension = [[filePath pathExtension] lowercaseString];
-  if ([extension isEqualToString:@"html"] || [extension isEqualToString:@"htm"]) {
-    return @"text/html; charset=utf-8";
-  }
-  if ([extension isEqualToString:@"css"]) {
-    return @"text/css; charset=utf-8";
-  }
-  if ([extension isEqualToString:@"js"]) {
-    return @"application/javascript; charset=utf-8";
-  }
-  if ([extension isEqualToString:@"json"]) {
-    return @"application/json; charset=utf-8";
-  }
-  if ([extension isEqualToString:@"txt"]) {
-    return @"text/plain; charset=utf-8";
-  }
-  if ([extension isEqualToString:@"svg"]) {
-    return @"image/svg+xml";
-  }
-  if ([extension isEqualToString:@"png"]) {
-    return @"image/png";
-  }
-  if ([extension isEqualToString:@"jpg"] || [extension isEqualToString:@"jpeg"]) {
-    return @"image/jpeg";
-  }
-  return @"application/octet-stream";
-}
-
 static NSArray *ALNDefaultStaticAllowExtensions(void) {
   return @[
     @"css",
@@ -2502,112 +2464,10 @@ static NSString *ALNPathWithTrailingSlash(NSString *path) {
   return normalized;
 }
 
-// HTTP dates are locale-independent and have whole-second precision. Formatters
-// are request-local because NSDateFormatter is mutable and requests run concurrently.
-static NSDateFormatter *ALNStaticDateFormatter(NSString *format) {
-  NSDateFormatter *formatter = [[NSDateFormatter alloc] init];
-  formatter.locale = [[NSLocale alloc] initWithLocaleIdentifier:@"en_US_POSIX"];
-  formatter.timeZone = [NSTimeZone timeZoneForSecondsFromGMT:0];
-  formatter.dateFormat = format;
-  formatter.lenient = NO;
-  return formatter;
-}
-
-static NSString *ALNStaticHTTPDate(NSTimeInterval seconds) {
-  return [ALNStaticDateFormatter(@"EEE, dd MMM yyyy HH:mm:ss 'GMT'")
-      stringFromDate:[NSDate dateWithTimeIntervalSince1970:seconds]];
-}
-
-static NSDate *ALNStaticParseHTTPDate(NSString *value) {
-  if ([value length] == 0) return nil;
-  for (NSString *format in @[@"EEE, dd MMM yyyy HH:mm:ss 'GMT'",
-                             @"EEEE, dd-MMM-yy HH:mm:ss 'GMT'",
-                             @"EEE MMM d HH:mm:ss yyyy"]) {
-    NSDateFormatter *formatter = ALNStaticDateFormatter(format);
-    NSDate *date = [formatter dateFromString:value];
-    // Round-trip validation rejects trailing garbage and normalized invalid dates.
-    NSString *normalized = [value stringByReplacingOccurrencesOfString:@"  " withString:@" "];
-    if (date != nil && [[formatter stringFromDate:date] isEqualToString:normalized]) return date;
-  }
-  return nil;
-}
-
-// Parse quoted tags explicitly: commas are legal inside an opaque entity tag.
-static BOOL ALNStaticETagMatches(NSString *field, NSString *etag, BOOL weak) {
-  NSString *value = [field stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
-  if ([value isEqualToString:@"*"]) return YES;
-  NSString *target = [etag hasPrefix:@"W/"] ? [etag substringFromIndex:2] : etag;
-  NSUInteger cursor = 0;
-  BOOL matched = NO;
-  while (cursor < [value length]) {
-    while (cursor < [value length] && ([value characterAtIndex:cursor] == ' ' ||
-                                      [value characterAtIndex:cursor] == '\t')) cursor++;
-    BOOL tagWeak = NO;
-    if (cursor + 2 <= [value length] && [[value substringWithRange:NSMakeRange(cursor, 2)] isEqualToString:@"W/"]) {
-      tagWeak = YES;
-      cursor += 2;
-    }
-    NSUInteger start = cursor;
-    if (cursor >= [value length] || [value characterAtIndex:cursor++] != '"') return NO;
-    while (cursor < [value length] && [value characterAtIndex:cursor] != '"') {
-      unichar ch = [value characterAtIndex:cursor++];
-      if (ch < 0x21 || ch == 0x7f || ch > 0xff) return NO;
-    }
-    if (cursor >= [value length]) return NO;
-    cursor++;
-    if ((weak || (!tagWeak && ![etag hasPrefix:@"W/"])) &&
-        [[value substringWithRange:NSMakeRange(start, cursor - start)] isEqualToString:target]) matched = YES;
-    while (cursor < [value length] && ([value characterAtIndex:cursor] == ' ' ||
-                                      [value characterAtIndex:cursor] == '\t')) cursor++;
-    if (cursor == [value length]) return matched;
-    if ([value characterAtIndex:cursor++] != ',' || cursor == [value length]) return NO;
-  }
-  return NO;
-}
-
-static BOOL ALNStaticDecimal(NSString *value, unsigned long long *result) {
-  if ([value length] == 0) return NO;
-  unsigned long long number = 0;
-  for (NSUInteger idx = 0; idx < [value length]; idx++) {
-    unichar ch = [value characterAtIndex:idx];
-    if (ch < '0' || ch > '9' || number > (ULLONG_MAX - (ch - '0')) / 10) return NO;
-    number = number * 10 + (ch - '0');
-  }
-  *result = number;
-  return YES;
-}
-
-// 0: ignore malformed/unsupported range; 1: selected range; -1: unsatisfiable.
-static NSInteger ALNStaticByteRange(NSString *field, unsigned long long size,
-                                    unsigned long long *offset, unsigned long long *length) {
-  if (![field hasPrefix:@"bytes="]) return 0;
-  NSString *value = [field substringFromIndex:6];
-  if ([value containsString:@","]) return 0; // Multipart ranges are deliberately unsupported.
-  NSArray *parts = [value componentsSeparatedByString:@"-"];
-  if ([parts count] != 2) return 0;
-  unsigned long long first = 0, last = 0;
-  if ([parts[0] length] == 0) {
-    if (!ALNStaticDecimal(parts[1], &last)) return 0;
-    if (last == 0 || size == 0) return -1;
-    *length = MIN(last, size);
-    *offset = size - *length;
-    return 1;
-  }
-  if (!ALNStaticDecimal(parts[0], &first)) return 0;
-  if ([parts[1] length] != 0) {
-    if (!ALNStaticDecimal(parts[1], &last) || last < first) return 0;
-  } else {
-    last = size == 0 ? 0 : size - 1;
-  }
-  if (first >= size) return -1;
-  *offset = first;
-  *length = MIN(last, size - 1) - first + 1;
-  return 1;
-}
-
 static ALNResponse *ALNStaticResponseForMount(ALNRequest *request,
                                               NSDictionary *mount,
-                                              NSString *publicRoot) {
+                                              NSString *publicRoot,
+                                              NSDictionary *mimeTypes) {
   NSString *prefix = ALNNormalizeStaticPrefix(mount[@"prefix"]);
   NSString *directory = [mount[@"directory"] isKindOfClass:[NSString class]] ? mount[@"directory"] : @"";
   NSArray *allowExtensions = [mount[@"allowExtensions"] isKindOfClass:[NSArray class]]
@@ -2702,71 +2562,9 @@ static ALNResponse *ALNStaticResponseForMount(ALNRequest *request,
     return response;
   }
 
-  unsigned long long size = (unsigned long long)fileStat.st_size;
-  NSTimeInterval now = floor([[NSDate date] timeIntervalSince1970]);
-  NSTimeInterval modified = MIN((NSTimeInterval)fileStat.st_mtime, now);
-  NSString *etag = [NSString stringWithFormat:@"W/\"%llx-%llx-%llx-%llx-%lx-%llx-%lx\"",
-      (unsigned long long)fileStat.st_dev, (unsigned long long)fileStat.st_ino, size,
-      (unsigned long long)fileStat.st_mtime, (unsigned long)ALNStaticFileMTimeNanoseconds(&fileStat),
-      (unsigned long long)fileStat.st_ctime, (unsigned long)ALNStaticFileCTimeNanoseconds(&fileStat)];
   ALNResponse *response = [[ALNResponse alloc] init];
-  response.statusCode = 200;
-  [response setHeader:@"Content-Type" value:ALNContentTypeForFilePath(resolvedFilePath)];
-  [response setHeader:@"ETag" value:etag];
-  [response setHeader:@"Last-Modified" value:ALNStaticHTTPDate(modified)];
-  [response setHeader:@"Date" value:ALNStaticHTTPDate(now)];
-  [response setHeader:@"Accept-Ranges" value:@"bytes"];
-
-  NSString *ifMatch = request.headers[@"if-match"];
-  NSString *ifNoneMatch = request.headers[@"if-none-match"];
-  NSDate *unmodifiedSince = ALNStaticParseHTTPDate([request headerValueForName:@"if-unmodified-since"]);
-  NSDate *modifiedSince = ALNStaticParseHTTPDate([request headerValueForName:@"if-modified-since"]);
-  if ((ifMatch != nil && !ALNStaticETagMatches(ifMatch, etag, NO)) ||
-      (ifMatch == nil && unmodifiedSince != nil && modified > [unmodifiedSince timeIntervalSince1970])) {
-    response.statusCode = 412;
-  } else if ((ifNoneMatch != nil && ALNStaticETagMatches(ifNoneMatch, etag, YES)) ||
-             (ifNoneMatch == nil && modifiedSince != nil && modified <= [modifiedSince timeIntervalSince1970])) {
-    response.statusCode = 304;
-  }
-  if (response.statusCode != 200) {
-    response.committed = YES;
-    return response;
-  }
-
-  unsigned long long offset = 0, length = size;
-  NSString *range = request.headers[@"range"];
-  NSString *ifRange = request.headers[@"if-range"];
-  BOOL rangeAllowed = YES;
-  if (ifRange != nil) {
-    // Our metadata ETag is weak and cannot establish byte-for-byte identity.
-    // A date is strong only when sufficiently older than the response Date.
-    NSDate *rangeDate = ALNStaticParseHTTPDate(ifRange);
-    rangeAllowed = rangeDate != nil && [rangeDate timeIntervalSince1970] == modified &&
-                   now - modified >= 60;
-  }
-  if ([request.method isEqualToString:@"GET"] && range != nil && rangeAllowed) {
-    NSInteger selection = ALNStaticByteRange(range, size, &offset, &length);
-    if (selection < 0) {
-      response.statusCode = 416;
-      [response setHeader:@"Content-Range" value:[NSString stringWithFormat:@"bytes */%llu", size]];
-      response.committed = YES;
-      return response;
-    }
-    if (selection > 0) {
-      response.statusCode = 206;
-      [response setHeader:@"Content-Range" value:[NSString stringWithFormat:@"bytes %llu-%llu/%llu",
-          offset, offset + length - 1, size]];
-    }
-  }
-  response.fileBodyPath = resolvedFilePath;
-  response.fileBodyLength = length;
-  response.fileBodyOffset = offset;
-  response.fileBodyFullLength = size;
-  response.fileBodyDevice = (unsigned long long)fileStat.st_dev;
-  response.fileBodyInode = (unsigned long long)fileStat.st_ino;
-  response.fileBodyMTimeSeconds = (long long)fileStat.st_mtime;
-  response.fileBodyMTimeNanoseconds = ALNStaticFileMTimeNanoseconds(&fileStat);
-  response.committed = YES;
+  ALNFileResponseApplyStat(response, request, resolvedFilePath, &fileStat, nil,
+                           @{ ALNFileResponseMIMETypesOption : mimeTypes ?: @{} });
   return response;
 }
 
@@ -3737,8 +3535,15 @@ static BOOL ALNSendSSEHeaders(ALNSocketHandle clientFd, ALNResponse *response) {
         BOOL multipartValid = [request parseMultipartFormWithLimits:self.application.config[@"requestLimits"] error:NULL];
         if (supportsStaticMethod && multipartValid) {
           NSArray *staticMounts = [self effectiveStaticMounts];
+          NSDictionary *staticMIMETypes =
+              [self.application.config[@"mimeTypes"] isKindOfClass:[NSDictionary class]]
+                  ? self.application.config[@"mimeTypes"]
+                  : nil;
           for (NSDictionary *mount in staticMounts) {
-            ALNResponse *staticResponse = ALNStaticResponseForMount(request, mount, self.publicRoot);
+            ALNResponse *staticResponse = ALNStaticResponseForMount(request,
+                                                                      mount,
+                                                                      self.publicRoot,
+                                                                      staticMIMETypes);
             if (staticResponse == nil) {
               continue;
             }

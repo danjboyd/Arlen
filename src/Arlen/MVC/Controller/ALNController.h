@@ -48,6 +48,12 @@ NS_ASSUME_NONNULL_BEGIN
 - (BOOL)renderJSON:(id)object error:(NSError *_Nullable *_Nullable)error;
 - (void)renderText:(NSString *)text;
 - (void)renderData:(NSData *)data contentType:(nullable NSString *)contentType;
+// Streams an already-authorized file with ETag/Last-Modified, conditional GET,
+// single byte ranges and HEAD support. Options use the ALNFileResponse*Option keys.
+// Returns NO and renders 404 when the file is missing or not a regular file.
+- (BOOL)renderFileAtPath:(NSString *)path
+             contentType:(nullable NSString *)contentType
+                 options:(nullable NSDictionary *)options;
 - (BOOL)isLiveRequest;
 - (NSDictionary *)liveMetadata;
 - (BOOL)renderLiveOperations:(NSArray *)operations

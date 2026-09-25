@@ -9,9 +9,9 @@ python3 tools/docs/generate_api_reference.py
 ```
 
 - Generated from source headers and metadata (deterministic output)
-- Public headers: `89`
-- Symbols: `156`
-- Public methods: `1046`
+- Public headers: `91`
+- Symbols: `158`
+- Public methods: `1053`
 - Public properties: `479`
 
 ## API Surface Boundary
@@ -40,7 +40,9 @@ python3 tools/docs/generate_api_reference.py
 
 ### HTTP
 
+- [ALNFileResponse](api/ALNFileResponse.md): Filesystem-backed adapter implementation for durable local environments.
 - [ALNHTTPServer](api/ALNHTTPServer.md): HTTP server host that binds an `ALNApplication` to socket runtime and request loop execution.
+- [ALNMIMETypes](api/ALNMIMETypes.md): HTTP request/response and server runtime primitives.
 - [ALNMultipart](api/ALNMultipart.md): HTTP request/response and server runtime primitives.
 - [ALNMultipartPart](api/ALNMultipartPart.md): HTTP request/response and server runtime primitives.
 - [ALNRequest](api/ALNRequest.md): Immutable HTTP request model containing method/path/query/headers/body and parsed parameter helpers.
@@ -237,7 +239,9 @@ python3 tools/docs/generate_api_reference.py
 - `src/Arlen/Data/ALNSQLBuilder.h`
 - `src/Arlen/Data/ALNSQLDialect.h`
 - `src/Arlen/Data/ALNSchemaCodegen.h`
+- `src/Arlen/HTTP/ALNFileResponse.h`
 - `src/Arlen/HTTP/ALNHTTPServer.h`
+- `src/Arlen/HTTP/ALNMIMETypes.h`
 - `src/Arlen/HTTP/ALNMultipart.h`
 - `src/Arlen/HTTP/ALNRequest.h`
 - `src/Arlen/HTTP/ALNResponse.h`

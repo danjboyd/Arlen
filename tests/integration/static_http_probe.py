@@ -109,6 +109,12 @@ def main():
             redirect = request({"If-None-Match": "*"}, target=target,
                                status=301, body=b"moved permanently\n")
             assert redirect["location"] == base + "/"
+        # Default-allowed extensions carry specific Content-Types (GitHub issue 57).
+        for name, expected in (("font.woff2", "font/woff2"), ("image.webp", "image/webp"),
+                               ("icon.ico", "image/x-icon"), ("anim.gif", "image/gif")):
+            (root / name).write_bytes(b"\x00\x01binary")
+            typed = request(target=base + "/" + name, body=b"\x00\x01binary")
+            assert typed["content-type"] == expected, (name, typed)
         old_tag = tag
         payload = b"body { color: pink; }\n"  # same length, changed in the same second
         asset.write_bytes(payload)
