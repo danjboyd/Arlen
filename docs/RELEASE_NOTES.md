@@ -2,6 +2,16 @@
 
 ## Upcoming Release Candidate
 
+- Auth module OIDC: `authModule.failureRedirect`, or a provider's own
+  `failureRedirect`, sends failed browser callbacks to a local page with
+  `?error=<code>&provider=<identifier>` instead of a raw 401 JSON body. The
+  stable codes are `rejected`, `admission_denied`, `expired_state`,
+  `provider_error`, `verification_failed` and `provider_unavailable`, and a
+  resolver can supply its own through `ALNAuthModuleOIDCFailureCodeKey`. The
+  JSON API callback keeps its 401 and now includes `code`. External redirect
+  targets fail at startup (GitHub issue 75). See
+  [Auth Module](AUTH_MODULE.md#failure-redirect).
+
 - Auth module OIDC: `preset = "google"` expands into Google's issuer, discovery
   URL, scopes and client authentication method. The endpoint and JWKS allowed
   hosts are now derived from the preset's endpoints, so they no longer have to

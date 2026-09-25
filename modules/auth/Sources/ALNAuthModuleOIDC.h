@@ -3,6 +3,12 @@
 
 NS_ASSUME_NONNULL_BEGIN
 extern NSString *const ALNAuthModuleOIDCErrorDomain;
+/// NSError userInfo key carrying a stable, non-sensitive failure code for a rejected
+/// callback: `rejected`, `admission_denied`, `expired_state`, `provider_error`,
+/// `verification_failed`, or `provider_unavailable`. An application resolver may set
+/// its own code (lowercase letters, digits, underscore; at most 64 characters) on the
+/// NSError it returns to distinguish, for example, `not_invited` from `rejected`.
+extern NSString *const ALNAuthModuleOIDCFailureCodeKey;
 typedef NS_ENUM(NSInteger, ALNAuthModuleOIDCErrorCode) {
   ALNAuthModuleOIDCErrorRejected = 1,
   /// The verified identity failed the provider's `admission` policy.

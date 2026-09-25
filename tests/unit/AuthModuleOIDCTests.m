@@ -146,14 +146,27 @@ static NSDictionary *ResolvedIdentity;
 
 @interface AdmissionOIDCResolver : NSObject <ALNAuthProviderSessionResolver>
 @end
+static NSString *AdmissionResolverRejectCode;
+static BOOL AdmissionResolverRejects;
 @implementation AdmissionOIDCResolver
 - (NSDictionary *)resolveSessionDescriptorForNormalizedIdentity:(NSDictionary *)identity
                                          providerConfiguration:(NSDictionary *)config error:(NSError **)error {
   ResolverCalls++;
   ResolvedIdentity = identity;
+  if (AdmissionResolverRejects) {
+    if (error && AdmissionResolverRejectCode) {
+      *error = [NSError errorWithDomain:@"App" code:7
+                               userInfo:@{ ALNAuthModuleOIDCFailureCodeKey: AdmissionResolverRejectCode }];
+    }
+    return nil;
+  }
   return @{ @"subject": [@"person-" stringByAppendingString:identity[@"provider_subject"] ?: @""] };
 }
 @end
+
+static NSString *ALNTestBody(ALNResponse *response) {
+  return [[NSString alloc] initWithData:response.bodyData encoding:NSUTF8StringEncoding] ?: @"";
+}
 
 // Other unit cases clear the process-global registry. Register exactly the real
 // compiled templates used by this test instead of depending on constructor order.
@@ -678,5 +691,118 @@ static void RegisterOIDCLoginTemplates(void) {
     }
     XCTAssertEqual((NSUInteger)0, ResolverCalls);
   }
+}
+#pragma mark - Failure redirect (issue 75)
+
+- (ALNApplication *)failureApplicationWithModule:(NSDictionary *)moduleExtra provider:(NSDictionary *)providerExtra
+                                           error:(NSError **)error {
+  NSMutableDictionary *provider = [[self googleProvider] mutableCopy];
+  [provider addEntriesFromDictionary:providerExtra ?: @{}];
+  NSMutableDictionary *module = [@{ @"paths": @{ @"prefix": @"/context/auth" }, @"providers": @{ @"google": provider },
+                                    @"hooks": [self googleHooks] } mutableCopy];
+  [module addEntriesFromDictionary:moduleExtra ?: @{}];
+  ALNApplication *app = [[ALNApplication alloc] initWithConfig:@{
+    @"environment": @"test", @"csrf": @{ @"enabled": @NO },
+    @"database": @{ @"connectionString": @"host=127.0.0.1 port=1 dbname=unused connect_timeout=1" },
+    @"authModule": module
+  }];
+  [app addMiddleware:[[ALNSessionMiddleware alloc] initWithSecret:@"test-oidc-session-secret-long-enough-for-signing"
+      cookieName:@"oidc_session" maxAgeSeconds:3600 secure:NO sameSite:@"Lax"]];
+  if (![[[ALNAuthModule alloc] init] registerWithApplication:app error:error]) return nil;
+  [self useGoogleDiscovery];
+  return app;
+}
+// Starts a login and returns the browser callback query plus the session cookie.
+- (NSDictionary *)beginGoogleLogin:(ALNApplication *)app {
+  ALNResponse *login = [self request:app method:@"GET" path:@"/context/auth/api/provider/google/login" query:@"" cookie:nil];
+  NSMutableDictionary *parameters = [NSMutableDictionary dictionary];
+  for (NSURLQueryItem *item in [NSURLComponents componentsWithString:[self json:login][@"authorize_url"]].queryItems)
+    parameters[item.name] = item.value ?: @"";
+  OIDCFixture.claims[@"nonce"] = parameters[@"nonce"];
+  return @{ @"state": parameters[@"state"] ?: @"", @"cookie": [self cookie:login] ?: @"" };
+}
+- (ALNResponse *)browserCallback:(ALNApplication *)app query:(NSString *)query cookie:(NSString *)cookie {
+  return [app dispatchRequest:[[ALNRequest alloc] initWithMethod:@"GET" path:@"/context/auth/provider/google/callback"
+      queryString:query headers:@{ @"cookie": cookie ?: @"", @"accept": @"text/html" } body:[NSData data]]];
+}
+- (NSString *)failureLocationForModule:(NSDictionary *)moduleExtra provider:(NSDictionary *)providerExtra
+                             mutation:(void (^)(void))mutation queryFormat:(NSString *)queryFormat {
+  NSError *error = nil;
+  ALNApplication *app = [self failureApplicationWithModule:moduleExtra provider:providerExtra error:&error];
+  XCTAssertNotNil(app, @"%@", error);
+  NSDictionary *login = [self beginGoogleLogin:app];
+  if (mutation) mutation();
+  ALNResponse *callback = [self browserCallback:app query:[NSString stringWithFormat:queryFormat, login[@"state"]]
+                                         cookie:login[@"cookie"]];
+  XCTAssertEqual((NSInteger)302, callback.statusCode, @"%@", ALNTestBody(callback));
+  return [callback headerForName:@"Location"];
+}
+- (void)testFailureRedirectCarriesResolverRejectionCodes {
+  NSDictionary *module = @{ @"failureRedirect": @"/sign-in" };
+  AdmissionResolverRejects = YES;
+  AdmissionResolverRejectCode = nil;
+  XCTAssertEqualObjects(@"/sign-in?error=rejected&provider=google",
+                        ([self failureLocationForModule:module provider:nil mutation:nil queryFormat:@"code=c1&state=%@"]));
+  AdmissionResolverRejectCode = @"not_invited";
+  XCTAssertEqualObjects(@"/sign-in?error=not_invited&provider=google",
+                        ([self failureLocationForModule:module provider:nil mutation:nil queryFormat:@"code=c2&state=%@"]));
+  AdmissionResolverRejectCode = @"Not Invited!";
+  XCTAssertEqualObjects(@"/sign-in?error=rejected&provider=google",
+                        ([self failureLocationForModule:module provider:nil mutation:nil queryFormat:@"code=c3&state=%@"]));
+  AdmissionResolverRejects = NO;
+  AdmissionResolverRejectCode = nil;
+}
+- (void)testFailureRedirectCodesForProviderStateAndVerificationFailures {
+  NSDictionary *module = @{ @"failureRedirect": @"/sign-in?from=auth" };
+  XCTAssertEqualObjects(@"/sign-in?from=auth&error=provider_error&provider=google",
+                        ([self failureLocationForModule:module provider:nil mutation:nil
+                                           queryFormat:@"error=access_denied&state=%@"]));
+  XCTAssertEqualObjects(@"/sign-in?from=auth&error=expired_state&provider=google",
+                        ([self failureLocationForModule:module provider:nil mutation:nil
+                                           queryFormat:@"code=c4&state=%@-tampered"]));
+  XCTAssertEqualObjects(@"/sign-in?from=auth&error=verification_failed&provider=google",
+                        ([self failureLocationForModule:module provider:nil
+                                              mutation:^{ OIDCFixture.badSignature = YES; }
+                                           queryFormat:@"code=c5&state=%@"]));
+  XCTAssertEqualObjects(@"/sign-in?from=auth&error=provider_unavailable&provider=google",
+                        ([self failureLocationForModule:module provider:nil
+                                              mutation:^{ OIDCFixture.failTransport = YES; }
+                                           queryFormat:@"code=c6&state=%@"]));
+  XCTAssertEqualObjects(@"/family/sign-in?error=admission_denied&provider=google",
+                        ([self failureLocationForModule:module
+                                              provider:@{ @"failureRedirect": @"/family/sign-in",
+                                                          @"admission": @{ @"allowedEmails": @[ @"parent@family.example" ] } }
+                                              mutation:nil queryFormat:@"code=c7&state=%@"]));
+}
+- (void)testFailureWithoutRedirectKeeps401AndJSONGetsCode {
+  AdmissionResolverRejects = YES;
+  NSError *error = nil;
+  ALNApplication *app = [self failureApplicationWithModule:nil provider:nil error:&error];
+  NSDictionary *login = [self beginGoogleLogin:app];
+  ALNResponse *browser = [self browserCallback:app query:[NSString stringWithFormat:@"code=c8&state=%@", login[@"state"]]
+                                        cookie:login[@"cookie"]];
+  XCTAssertEqual((NSInteger)401, browser.statusCode);
+  XCTAssertTrue([ALNTestBody(browser) containsString:@"Provider login rejected"], @"%@", ALNTestBody(browser));
+
+  app = [self failureApplicationWithModule:@{ @"failureRedirect": @"/sign-in" } provider:nil error:&error];
+  login = [self beginGoogleLogin:app];
+  ALNResponse *api = [self request:app method:@"GET" path:@"/context/auth/api/provider/google/callback"
+                             query:[NSString stringWithFormat:@"code=c9&state=%@", login[@"state"]] cookie:login[@"cookie"]];
+  XCTAssertEqual((NSInteger)401, api.statusCode);
+  XCTAssertEqualObjects(@"rejected", [self json:api][@"code"]);
+  XCTAssertEqualObjects(@"Provider login rejected", [self json:api][@"message"]);
+  AdmissionResolverRejects = NO;
+}
+- (void)testNonLocalFailureRedirectIsRefusedAtConfigLoad {
+  for (NSString *redirect in @[ @"https://evil.example/x", @"//evil.example/x", @"sign-in", @"/a\\b", @"/x#frag", @"/a b" ]) {
+    NSError *error = nil;
+    XCTAssertNil(([self failureApplicationWithModule:@{ @"failureRedirect": redirect } provider:nil error:&error]), @"%@", redirect);
+    XCTAssertTrue([error.localizedDescription containsString:@"failureRedirect"], @"%@ %@", redirect, error);
+    error = nil;
+    XCTAssertNil(([self failureApplicationWithModule:nil provider:@{ @"failureRedirect": redirect } error:&error]), @"%@", redirect);
+    XCTAssertTrue([error.localizedDescription containsString:@"failureRedirect"], @"%@ %@", redirect, error);
+  }
+  NSError *error = nil;
+  XCTAssertNil([self failureApplicationWithModule:@{ @"failureRedirect": @42 } provider:nil error:&error]);
 }
 @end
