@@ -1,6 +1,6 @@
 {
   identifier = "admin-ui";
-  version = "1.0.0";
+  version = "1.0.1";
   principalClass = "ALNAdminUIModule";
   dependencies = (
     { identifier = "auth"; version = ">= 1.0.0"; }

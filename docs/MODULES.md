@@ -169,6 +169,26 @@ Use a plugin when you need:
 - `docs/OPS_MODULE.md`
 - `docs/SEARCH_MODULE.md`
 
+## First-party module versions
+
+Each first-party module's `version` changes whenever its files change, so the
+version in `config/modules.plist` tells you which module code an app vendors:
+
+- patch (`1.0.1`): internal fixes with no configuration or API change
+- minor (`1.1.0`): new features, security fixes, or new required configuration
+- major (`2.0.0`): removed or incompatible APIs
+
+CI enforces this with `tools/ci/check_module_versions.py`. Framework
+contributors can run it locally before opening a PR:
+
+```bash
+python3 tools/ci/check_module_versions.py --base origin/main
+```
+
+Module versions first changed on 2026-09-25: `auth` and `storage` moved to
+`1.1.0` (OIDC providers; required storage signing secret), and `admin-ui`,
+`ops`, and `search` moved to `1.0.1`.
+
 ## MCP tools
 
 The optional `mcp` module is disabled by default. It exposes only explicitly
