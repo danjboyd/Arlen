@@ -201,6 +201,18 @@ For browser-authenticated apps, enabling sessions usually comes before enabling
 CSRF. In stricter environments, Arlen expects a real session secret rather than
 an empty placeholder.
 
+A rejected unsafe request returns `403`. Requests that prefer JSON (an `Accept`
+of `application/json`, an `/api` path, or `apiOnly`) get the structured error
+envelope with the stable code `csrf_invalid`:
+
+```json
+{"error":{"code":"csrf_invalid","message":"CSRF token missing or invalid","status":403,"request_id":"...","correlation_id":"..."}}
+```
+
+Other clients get the plain-text `csrf verification failed` body. SPA clients
+can match on `error.code == "csrf_invalid"` to refresh their token and retry.
+Tokens are compared in constant time.
+
 ## 6. Rate Limits and Security Headers
 
 Rate limiting:

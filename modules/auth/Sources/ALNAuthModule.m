@@ -1088,6 +1088,8 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
   id transport = hasOIDC ? AMInstantiateHookClass(providerHooks, @"oidcTransportClass",
                                                  @protocol(ALNAuthModuleOIDCTransport), error) : nil;
   if (hasOIDC && AMTrimmedString(providerHooks[@"oidcTransportClass"]).length && !transport) return NO;
+  BOOL allowLoopbackHTTPRedirect = [self.environmentName isEqualToString:@"development"] ||
+                                   [self.environmentName isEqualToString:@"test"];
   NSMutableDictionary *oidcProviders = [NSMutableDictionary dictionary];
   NSMutableArray *loginProviders = [self.loginProviders mutableCopy];
   for (NSString *identifier in [[providers allKeys] sortedArrayUsingSelector:@selector(compare:)]) {
@@ -1098,7 +1100,9 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
       return NO;
     }
     ALNAuthModuleOIDC *oidc = [[ALNAuthModuleOIDC alloc] initWithIdentifier:identifier configuration:provider
-                                                               resolver:resolver transport:transport error:error];
+                                                               resolver:resolver transport:transport
+                                              allowLoopbackHTTPRedirect:allowLoopbackHTTPRedirect
+                                                                  error:error];
     if (!oidc) return NO;
     oidcProviders[identifier] = oidc;
     NSString *suffix = [NSString stringWithFormat:@"provider/%@/login", identifier];
@@ -1160,10 +1164,11 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
   NSDictionary *moduleConfig = [application.config[@"authModule"] isKindOfClass:[NSDictionary class]]
                                    ? application.config[@"authModule"]
                                    : @{};
+  // Provider validation depends on the environment (loopback redirect URIs).
+  self.environmentName = AMEffectiveEnvironmentName(application.environment);
   if (![self configureHooksWithModuleConfig:moduleConfig error:error]) {
     return NO;
   }
-  self.environmentName = AMEffectiveEnvironmentName(application.environment);
   NSDictionary *database = [application.config[@"database"] isKindOfClass:[NSDictionary class]]
                                ? application.config[@"database"]
                                : @{};
