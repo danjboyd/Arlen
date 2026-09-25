@@ -20,7 +20,6 @@
         cleanup = {
           intervalSeconds = 300;
         };
-        signingSecret = "storage-module-signing-secret";
         persistence = {
           enabled = YES;
           path = "";

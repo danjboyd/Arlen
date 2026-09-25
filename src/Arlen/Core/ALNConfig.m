@@ -502,6 +502,7 @@ static NSDictionary *ALNSecurityProfileDefaults(NSString *profileName) {
       ALNEnvValueCompat("ARLEN_SESSION_ENABLED", "MOJOOBJC_SESSION_ENABLED");
   NSString *sessionSecret =
       ALNEnvValueCompat("ARLEN_SESSION_SECRET", "MOJOOBJC_SESSION_SECRET");
+  NSString *storageSigningSecret = ALNEnvValueCompat("ARLEN_STORAGE_SIGNING_SECRET", NULL);
   NSString *sessionCookieName =
       ALNEnvValueCompat("ARLEN_SESSION_COOKIE_NAME", "MOJOOBJC_SESSION_COOKIE_NAME");
   NSString *sessionMaxAge =
@@ -727,6 +728,14 @@ static NSDictionary *ALNSecurityProfileDefaults(NSString *profileName) {
   }
   ALNApplyIntegerOverride(session, sessionMaxAge, @"maxAgeSeconds", 1);
   config[@"session"] = session;
+
+  if ([storageSigningSecret length] > 0) {
+    NSMutableDictionary *storageModule = [NSMutableDictionary
+        dictionaryWithDictionary:[config[@"storageModule"] isKindOfClass:[NSDictionary class]] ? config[@"storageModule"]
+                                                                                                : @{}];
+    storageModule[@"signingSecret"] = storageSigningSecret;
+    config[@"storageModule"] = storageModule;
+  }
 
   NSMutableDictionary *csrf =
       [NSMutableDictionary dictionaryWithDictionary:config[@"csrf"] ?: @{}];

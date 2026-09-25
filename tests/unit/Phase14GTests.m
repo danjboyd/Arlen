@@ -178,7 +178,7 @@
       @"providers" : @{ @"classes" : @[ @"Phase14GOpsNotificationProvider" ] },
     },
     @"storageModule" : @{
-      @"signingSecret" : @"phase14g-storage-secret",
+      @"signingSecret" : @"phase14g-storage-signing-secret-0123456789",
       @"collections" : @{ @"classes" : @[ @"Phase14GCollectionProvider" ] },
     },
     @"opsModule" : @{

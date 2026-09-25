@@ -59,6 +59,32 @@
   }];
 }
 
+- (ALNApplication *)applicationWithEnvironment:(NSString *)environment signingSecret:(NSString *)signingSecret {
+  NSMutableDictionary *storageModule = [NSMutableDictionary dictionaryWithDictionary:@{
+    @"collections" : @{ @"classes" : @[ @"Phase14ECollectionProvider" ] },
+  }];
+  if (signingSecret != nil) {
+    storageModule[@"signingSecret"] = signingSecret;
+  }
+  return [[ALNApplication alloc] initWithConfig:@{
+    @"environment" : environment,
+    @"logFormat" : @"json",
+    @"csrf" : @{ @"enabled" : @NO },
+    @"jobsModule" : @{ @"providers" : @{ @"classes" : @[] } },
+    @"storageModule" : storageModule,
+  }];
+}
+
+- (NSError *)storageRegistrationErrorForApplication:(ALNApplication *)app {
+  NSError *error = nil;
+  XCTAssertTrue([[[ALNJobsModule alloc] init] registerWithApplication:app error:&error]);
+  XCTAssertNil(error);
+  error = nil;
+  BOOL registered = [[[ALNStorageModule alloc] init] registerWithApplication:app error:&error];
+  XCTAssertEqual(registered, (error == nil));
+  return error;
+}
+
 - (void)registerModulesForApplication:(ALNApplication *)app {
   NSError *error = nil;
   XCTAssertTrue([[[ALNJobsModule alloc] init] registerWithApplication:app error:&error]);
@@ -133,6 +159,78 @@
   XCTAssertNotNil(error);
 
   usleep(300000);
+  error = nil;
+  XCTAssertNil([runtime payloadForDownloadToken:token error:&error]);
+  XCTAssertNotNil(error);
+}
+
+
+- (void)testMissingSigningSecretFailsClosedOutsideDevelopmentAndTest {
+  NSError *error =
+      [self storageRegistrationErrorForApplication:[self applicationWithEnvironment:@"production" signingSecret:nil]];
+  XCTAssertNotNil(error);
+  XCTAssertEqualObjects(ALNStorageModuleErrorDomain, error.domain);
+  XCTAssertEqual((NSInteger)ALNStorageModuleErrorInvalidConfiguration, error.code);
+  XCTAssertEqualObjects(@"storageModule.signingSecret", error.userInfo[@"config_key"]);
+  XCTAssertEqualObjects(@"missing_required_secret", error.userInfo[@"reason"]);
+
+  error = [self storageRegistrationErrorForApplication:[self applicationWithEnvironment:@"staging" signingSecret:@"   "]];
+  XCTAssertEqualObjects(@"missing_required_secret", error.userInfo[@"reason"]);
+}
+
+- (void)testShortSigningSecretIsRejectedInEveryEnvironment {
+  for (NSString *environment in @[ @"test", @"production" ]) {
+    NSError *error = [self storageRegistrationErrorForApplication:
+                               [self applicationWithEnvironment:environment signingSecret:@"too-short-secret"]];
+    XCTAssertNotNil(error);
+    XCTAssertEqualObjects(@"weak_secret", error.userInfo[@"reason"]);
+  }
+}
+
+- (void)testConfiguredSigningSecretIsUsedOutsideDevelopmentAndTest {
+  NSString *secretA = @"phase14e-production-signing-secret-A-0123";
+  NSString *secretB = @"phase14e-production-signing-secret-B-0123";
+  XCTAssertNil([self storageRegistrationErrorForApplication:[self applicationWithEnvironment:@"production"
+                                                                                signingSecret:secretA]]);
+
+  ALNStorageModuleRuntime *runtime = [ALNStorageModuleRuntime sharedRuntime];
+  NSError *error = nil;
+  NSDictionary *object = [runtime storeObjectInCollection:@"documents"
+                                                     name:@"secret.pdf"
+                                              contentType:@"application/pdf"
+                                                     data:[@"secret" dataUsingEncoding:NSUTF8StringEncoding]
+                                                 metadata:nil
+                                                    error:&error];
+  XCTAssertNotNil(object);
+  NSString *token = [runtime issueDownloadTokenForObjectID:object[@"objectID"] expiresIn:60 error:&error];
+  XCTAssertNotNil(token);
+  XCTAssertNotNil([runtime payloadForDownloadToken:token error:&error]);
+
+  XCTAssertNil([self storageRegistrationErrorForApplication:[self applicationWithEnvironment:@"production"
+                                                                                signingSecret:secretB]]);
+  error = nil;
+  XCTAssertNil([runtime payloadForDownloadToken:token error:&error]);
+  XCTAssertNotNil(error);
+}
+
+- (void)testUnsetSigningSecretUsesPerProcessRandomKeyInTest {
+  XCTAssertNil([self storageRegistrationErrorForApplication:[self applicationWithEnvironment:@"test"
+                                                                                signingSecret:nil]]);
+  ALNStorageModuleRuntime *runtime = [ALNStorageModuleRuntime sharedRuntime];
+  NSError *error = nil;
+  NSDictionary *object = [runtime storeObjectInCollection:@"documents"
+                                                     name:@"dev.pdf"
+                                              contentType:@"application/pdf"
+                                                     data:[@"dev" dataUsingEncoding:NSUTF8StringEncoding]
+                                                 metadata:nil
+                                                    error:&error];
+  XCTAssertNotNil(object);
+  NSString *token = [runtime issueDownloadTokenForObjectID:object[@"objectID"] expiresIn:60 error:&error];
+  XCTAssertNotNil(token);
+
+  // Reconfiguring without a secret must pick a fresh key, never a shared built-in constant.
+  XCTAssertNil([self storageRegistrationErrorForApplication:[self applicationWithEnvironment:@"test"
+                                                                                signingSecret:nil]]);
   error = nil;
   XCTAssertNil([runtime payloadForDownloadToken:token error:&error]);
   XCTAssertNotNil(error);

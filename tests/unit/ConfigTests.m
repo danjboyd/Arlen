@@ -362,6 +362,7 @@
   setenv("ARLEN_DB_ADAPTER", "gdl2", 1);
   setenv("ARLEN_SESSION_ENABLED", "1", 1);
   setenv("ARLEN_SESSION_SECRET", "super-secret", 1);
+  setenv("ARLEN_STORAGE_SIGNING_SECRET", "storage-env-signing-secret-0123456789", 1);
   setenv("ARLEN_SESSION_COOKIE_NAME", "sid", 1);
   setenv("ARLEN_SESSION_MAX_AGE_SECONDS", "777", 1);
   setenv("ARLEN_SESSION_SECURE", "1", 1);
@@ -437,6 +438,7 @@
   unsetenv("ARLEN_DB_ADAPTER");
   unsetenv("ARLEN_SESSION_ENABLED");
   unsetenv("ARLEN_SESSION_SECRET");
+  unsetenv("ARLEN_STORAGE_SIGNING_SECRET");
   unsetenv("ARLEN_SESSION_COOKIE_NAME");
   unsetenv("ARLEN_SESSION_MAX_AGE_SECONDS");
   unsetenv("ARLEN_SESSION_SECURE");
@@ -516,6 +518,7 @@
   NSDictionary *session = config[@"session"];
   XCTAssertEqualObjects(@(YES), session[@"enabled"]);
   XCTAssertEqualObjects(@"super-secret", session[@"secret"]);
+  XCTAssertEqualObjects(@"storage-env-signing-secret-0123456789", config[@"storageModule"][@"signingSecret"]);
   XCTAssertEqualObjects(@"sid", session[@"cookieName"]);
   XCTAssertEqual((NSInteger)777, [session[@"maxAgeSeconds"] integerValue]);
   XCTAssertEqualObjects(@(YES), session[@"secure"]);

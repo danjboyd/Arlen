@@ -80,6 +80,7 @@ set at least:
 
 - `ARLEN_DATABASE_URL`
 - `ARLEN_SESSION_SECRET` when sessions are enabled
+- `ARLEN_STORAGE_SIGNING_SECRET` when the `storage` module is installed
 - any instance-specific host/port overrides
 - any cluster or async-job overrides you need
 

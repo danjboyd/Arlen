@@ -277,6 +277,10 @@ parse stdout as JSON and check the exit status. Framework contributors can run
 `bash tools/ci/run_postgres_regressions.sh` for isolated live database coverage;
 see [Testing Workflow](TESTING_WORKFLOW.md#live-postgresql-regression-gate).
 
+If you install `storage`, set `ARLEN_STORAGE_SIGNING_SECRET` (32+ characters)
+before running outside `development` or `test`; the module refuses to start
+without it. See [Storage Module](STORAGE_MODULE.md#signing-secret).
+
 `arlen module add ops` works without jobs, notifications, storage, or search.
 Missing module summaries are marked unavailable. See [Ops Module](OPS_MODULE.md)
 for authentication requirements when composing a partial module installation.

@@ -2,6 +2,14 @@
 
 ## Upcoming Release Candidate
 
+- Security: the `storage` module no longer signs upload and download tokens
+  with a built-in default key when `storageModule.signingSecret` is unset
+  (GHSA-cmxm-f294-r8qh). Set `ARLEN_STORAGE_SIGNING_SECRET` (new) or
+  `storageModule.signingSecret`, at least 32 characters. Outside
+  `development`/`test` the module now refuses to configure without one; in
+  `development`/`test` it uses a random per-process key and logs a warning.
+  Tokens issued under the old default key stop validating. See
+  [Storage Module](STORAGE_MODULE.md#signing-secret).
 - Framework objects no longer use `@synchronized` on instances, working around
   a GNUstep libobjc2 first-use lock race
   ([gnustep/libobjc2#424](https://github.com/gnustep/libobjc2/issues/424)).

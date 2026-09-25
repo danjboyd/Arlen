@@ -106,6 +106,14 @@ This is an operator/developer intent signal. Arlen does not claim it can
 statically prove every app-owned store is durable. The signal drives production
 doctor/deploy warnings for multi-worker apps.
 
+## 4.1a Storage Module Signing Secret
+
+When the `storage` module is installed, `storageModule.signingSecret` signs
+its upload and download tokens. `ARLEN_STORAGE_SIGNING_SECRET` overrides it.
+The secret must be at least 32 characters. Outside `development` and `test` the
+module refuses to configure without one; see
+[Storage Module](STORAGE_MODULE.md#signing-secret).
+
 ## 4.2 Dataverse (Optional)
 
 Arlen's Dataverse surface is compiled in but runtime-inactive by default. Apps

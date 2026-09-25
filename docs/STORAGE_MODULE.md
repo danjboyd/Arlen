@@ -101,6 +101,23 @@ Config knobs:
 - `storageModule.cleanup.intervalSeconds`
 - `storageModule.signingSecret`
 
+### Signing Secret
+
+Upload and download tokens are HMAC-SHA256 signed with
+`storageModule.signingSecret`. Arlen does not ship a default key.
+
+- Set the secret with `ARLEN_STORAGE_SIGNING_SECRET` in the process
+  environment, or `storageModule.signingSecret` in untracked config. The
+  environment value wins.
+- The secret must be at least 32 characters in every environment.
+- Outside `development` and `test`, the module refuses to configure when no
+  secret is set (`ALNStorageModuleErrorInvalidConfiguration`,
+  `config_key = storageModule.signingSecret`).
+- In `development` and `test`, an unset secret uses a random per-process key
+  and logs a warning. Tokens issued before a restart then stop validating.
+- Use a secret distinct from `session.secret`. Rotating it invalidates
+  outstanding upload and download tokens.
+
 ## Variants
 
 - collection metadata can declare variant definitions
