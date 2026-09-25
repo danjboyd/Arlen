@@ -26,13 +26,29 @@ static BOOL OBool(id value, BOOL *valid) {
   *valid = NO;
   return NO;
 }
+// A DNS-style domain: dot-separated labels of letters, digits and hyphens.
+static BOOL ODomainIsValid(NSString *domain) {
+  NSCharacterSet *invalid = [[NSCharacterSet characterSetWithCharactersInString:
+      @"abcdefghijklmnopqrstuvwxyz0123456789.-"] invertedSet];
+  return domain.length && [domain rangeOfString:@"."].location != NSNotFound &&
+      [domain rangeOfCharacterFromSet:invalid].location == NSNotFound &&
+      ![domain hasPrefix:@"."] && ![domain hasSuffix:@"."] && [domain rangeOfString:@".."].location == NSNotFound;
+}
+// Deliberately narrow: exactly one `@`, a nonempty local part without whitespace
+// or separators, and a valid domain. Allowlist entries are addresses, not patterns.
+static BOOL OEmailIsValid(NSString *email) {
+  NSArray *parts = [email componentsSeparatedByString:@"@"];
+  if (parts.count != 2 || ![parts[0] length]) return NO;
+  NSCharacterSet *forbidden = [NSCharacterSet characterSetWithCharactersInString:@" \t\r\n,;:/\\<>()[]\""];
+  return [parts[0] rangeOfCharacterFromSet:forbidden].location == NSNotFound && ODomainIsValid(parts[1]);
+}
 static BOOL OAppendLowered(NSMutableArray *target, id values, BOOL domains) {
   if (!values) return YES;
   if (![values isKindOfClass:[NSArray class]]) return NO;
   for (id value in values) {
     NSString *entry = OLower(value);
     if (domains && [entry hasPrefix:@"@"]) entry = [entry substringFromIndex:1];
-    if (!entry.length || (domains ? [entry containsString:@"@"] : ![entry containsString:@"@"])) return NO;
+    if (!(domains ? ODomainIsValid(entry) : OEmailIsValid(entry))) return NO;
     if (![target containsObject:entry]) [target addObject:entry];
   }
   return YES;

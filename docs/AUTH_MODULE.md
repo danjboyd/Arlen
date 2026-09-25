@@ -394,8 +394,9 @@ google = {
 - If any list is configured, the address must be provider-verified
   (`email_verified` true). `requireVerifiedEmail = YES` imposes that requirement
   on its own, without lists.
-- Unknown keys and malformed values fail at startup. So does an
-  `allowedEmailsEnvironmentKey` whose variable is missing or empty.
+- Unknown keys and malformed values fail at startup. Entries must be plain
+  `name@domain.tld` addresses and dotted domain names, not patterns. A missing
+  or empty `allowedEmailsEnvironmentKey` variable also fails startup.
 
 Rejected logins never reach the resolver or create a session. JSON callbacks
 return `403` with `{"status":"error","code":"admission_denied","message":...}`.
