@@ -44,6 +44,8 @@ typedef NS_ENUM(NSUInteger, ALNHTTPParserBackend) {
 @property(nonatomic, assign) double parseDurationMilliseconds;
 @property(nonatomic, assign) double responseWriteDurationMilliseconds;
 
+// Case-insensitive header lookup. Never nil: an absent header (or an empty name)
+// returns @"", the same as a present-but-empty header. Test with `length == 0`.
 - (NSString *)headerValueForName:(NSString *)name;
 - (nullable NSString *)queryValueForName:(NSString *)name;
 

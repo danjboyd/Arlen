@@ -71,7 +71,9 @@ extern NSString *const ALNContextI18nFallbackLocaleStashKey;
 - (nullable id)paramValueForName:(NSString *)name;
 - (nullable NSString *)stringParamForName:(NSString *)name;
 - (nullable NSString *)queryValueForName:(NSString *)name;
-- (nullable NSString *)headerValueForName:(NSString *)name;
+// Case-insensitive header lookup. Never nil: an absent header (or an empty name)
+// returns @"", the same as a present-but-empty header. Test with `length == 0`.
+- (NSString *)headerValueForName:(NSString *)name;
 - (nullable NSNumber *)queryIntegerForName:(NSString *)name;
 - (nullable NSNumber *)queryBooleanForName:(NSString *)name;
 - (nullable NSNumber *)headerIntegerForName:(NSString *)name;

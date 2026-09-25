@@ -74,7 +74,7 @@ Base controller with template/JSON rendering, parameter helpers, auth/session he
 | `paramValueForName:` | `- (nullable id)paramValueForName:(NSString *)name;` | Return a raw parameter value by key. | Capture the returned value and propagate errors/validation as needed. |
 | `stringParamForName:` | `- (nullable NSString *)stringParamForName:(NSString *)name;` | Return a parameter coerced to string when possible. | Capture the returned value and propagate errors/validation as needed. |
 | `queryValueForName:` | `- (nullable NSString *)queryValueForName:(NSString *)name;` | Return a query-string parameter by key. | Capture the returned value and propagate errors/validation as needed. |
-| `headerValueForName:` | `- (nullable NSString *)headerValueForName:(NSString *)name;` | Return a request header value by key. | Capture the returned value and propagate errors/validation as needed. |
+| `headerValueForName:` | `- (NSString *)headerValueForName:(NSString *)name;` | Return a request header value by key. | Capture the returned value and propagate errors/validation as needed. |
 | `queryIntegerForName:` | `- (nullable NSNumber *)queryIntegerForName:(NSString *)name;` | Return a query parameter parsed as an integer. | Prefer this over manual parsing to avoid repeated validation boilerplate. |
 | `queryBooleanForName:` | `- (nullable NSNumber *)queryBooleanForName:(NSString *)name;` | Return a query parameter parsed as a boolean. | Accepts common boolean forms; check for `nil` when parameter is absent or invalid. |
 | `headerIntegerForName:` | `- (nullable NSNumber *)headerIntegerForName:(NSString *)name;` | Return a header parsed as an integer. | Use for numeric custom headers; returns `nil` when parsing fails. |

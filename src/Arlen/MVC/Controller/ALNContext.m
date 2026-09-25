@@ -251,10 +251,10 @@ static BOOL ALNETagListMatches(NSString *ifNoneMatchHeader, NSString *etag) {
 }
 
 - (NSString *)headerValueForName:(NSString *)name {
-  if ([name length] == 0) {
-    return nil;
+  if (![name isKindOfClass:[NSString class]] || [name length] == 0) {
+    return @"";
   }
-  return ALNStringFromValue([self.request headerValueForName:name]);
+  return ALNStringFromValue([self.request headerValueForName:name]) ?: @"";
 }
 
 - (NSNumber *)queryIntegerForName:(NSString *)name {

@@ -1992,7 +1992,8 @@ static NSDictionary *SMAttachmentAdapterCapabilities(id<ALNAttachmentAdapter> ad
 
 - (id)apiUpload:(ALNContext *)ctx {
   (void)ctx;
-  NSString *token = [self headerValueForName:@"x-upload-token"] ?: [self queryValueForName:@"token"] ?: @"";
+  // Upload tokens are accepted only in the header; query strings end up in logs.
+  NSString *token = [self headerValueForName:@"x-upload-token"];
   NSError *error = nil;
   NSDictionary *object = [self.runtime storeUploadData:self.context.request.body ?: [NSData data]
                                     forUploadSessionID:[self stringParamForName:@"sessionID"] ?: @""
