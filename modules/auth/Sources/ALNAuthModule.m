@@ -5,6 +5,7 @@
 
 #import "ALNHTTPCompat.h"
 #import "ALNApplication.h"
+#import "ALNAuthProviderPresets.h"
 #import "ALNAuthSession.h"
 #import "ALNContext.h"
 #import "ALNController.h"
@@ -23,6 +24,7 @@ NSString *const ALNAuthModuleErrorDomain = @"Arlen.Modules.Auth.Error";
 
 static NSString *const ALNAuthModuleProviderStateSessionKey = @"aln.auth_module.stub_provider_state";
 static NSString *const ALNAuthModuleVerificationNoticeSessionKey = @"aln.auth_module.notice.verify";
+static NSString *const ALNAuthModuleProviderErrorSessionKey = @"aln.auth_module.notice.provider_error";
 static NSString *const ALNAuthModuleResetNoticeSessionKey = @"aln.auth_module.notice.reset";
 static NSString *const ALNAuthModuleSMSStateSessionKey = @"aln.auth_module.sms_state";
 
@@ -41,6 +43,60 @@ static NSError *AMError(ALNAuthModuleErrorCode code, NSString *message, NSDictio
   NSMutableDictionary *userInfo = [NSMutableDictionary dictionaryWithDictionary:details ?: @{}];
   userInfo[NSLocalizedDescriptionKey] = message ?: @"auth module error";
   return [NSError errorWithDomain:ALNAuthModuleErrorDomain code:code userInfo:userInfo];
+}
+
+// OIDC presets the auth module can expand. Presets that need a tenant-specific issuer
+// or an unsupported client authentication method are deliberately not listed.
+static NSArray *AMSupportedOIDCProviderPresets(void) {
+  return @[ @"google" ];
+}
+
+static NSString *AMURLHost(id value) {
+  NSString *url = [value isKindOfClass:[NSString class]] ? value : @"";
+  return [[NSURL URLWithString:url].host lowercaseString] ?: @"";
+}
+
+// Expands `preset = "google"` into discovery-based provider keys, deriving the endpoint
+// and JWKS allowed hosts from the preset's own endpoints. Explicit keys win.
+static NSDictionary *AMExpandedOIDCProvider(NSString *identifier, NSDictionary *provider, NSError **error) {
+  if (provider[@"preset"] == nil) {
+    return provider;
+  }
+  NSString *presetName = AMLowerTrimmedString(provider[@"preset"]);
+  NSDictionary *preset = [AMSupportedOIDCProviderPresets() containsObject:presetName]
+                             ? [ALNAuthProviderPresets presetNamed:presetName error:NULL]
+                             : nil;
+  if (preset == nil) {
+    if (error) {
+      *error = AMError(ALNAuthModuleErrorInvalidConfiguration,
+                       [NSString stringWithFormat:@"authModule.providers.%@ has unknown OIDC preset \"%@\" (supported: %@)",
+                                                  identifier, presetName ?: @"",
+                                                  [AMSupportedOIDCProviderPresets() componentsJoinedByString:@", "]],
+                       nil);
+    }
+    return nil;
+  }
+  NSString *issuer = preset[@"issuer"];
+  NSMutableArray *endpointHosts = [NSMutableArray array];
+  for (NSString *key in @[ @"issuer", @"authorizationEndpoint", @"tokenEndpoint" ]) {
+    NSString *host = AMURLHost(preset[key]);
+    if ([host length] > 0 && ![endpointHosts containsObject:host]) {
+      [endpointHosts addObject:host];
+    }
+  }
+  NSMutableDictionary *expanded = [NSMutableDictionary dictionaryWithDictionary:@{
+    @"type" : @"oidc",
+    @"issuer" : issuer,
+    @"discoveryURL" : [issuer stringByAppendingString:@"/.well-known/openid-configuration"],
+    @"scopes" : preset[@"defaultScopes"] ?: @[ @"openid", @"email", @"profile" ],
+    @"tokenEndpointAuthMethod" : preset[@"tokenEndpointAuthMethod"] ?: @"client_secret_post",
+    @"endpointAllowedHosts" : endpointHosts,
+    @"jwksAllowedHosts" : @[ AMURLHost(preset[@"jwksURI"]) ],
+    @"ctaLabel" : [NSString stringWithFormat:@"Continue with %@", preset[@"displayName"] ?: identifier],
+  }];
+  [expanded addEntriesFromDictionary:provider];
+  [expanded removeObjectForKey:@"preset"];
+  return expanded;
 }
 
 static NSString *AMEffectiveEnvironmentName(NSString *environmentName) {
@@ -1094,7 +1150,8 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
   NSMutableArray *loginProviders = [self.loginProviders mutableCopy];
   for (NSString *identifier in [[providers allKeys] sortedArrayUsingSelector:@selector(compare:)]) {
     if ([identifier isEqual:@"stub"] || !AMConfigBool(providers[identifier][@"enabled"], NO)) continue;
-    NSDictionary *provider = providers[identifier];
+    NSDictionary *provider = AMExpandedOIDCProvider(identifier, providers[identifier], error);
+    if (!provider) return NO;
     if (![provider[@"type"] isEqual:@"oidc"]) {
       if (error) *error = AMError(ALNAuthModuleErrorInvalidConfiguration, @"Enabled provider requires type oidc", nil);
       return NO;
@@ -3354,14 +3411,21 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
       ],
     },
   };
+  NSString *providerError = AMTrimmedString(ctx.session[ALNAuthModuleProviderErrorSessionKey]);
   BOOL rendered = [self renderAuthPageIdentifier:@"login"
                                            title:@"Sign In"
                                          message:AMTrimmedString(ctx.session[ALNAuthModuleVerificationNoticeSessionKey])
-                                          errors:nil
+                                          errors:([providerError length] > 0
+                                                      ? @[ @{ @"field" : @"", @"message" : providerError } ]
+                                                      : nil)
                                         formData:@{ @"return_to" : AMTrimmedString(parameters[@"return_to"]) }
                                         extraCtx:extraCtx
                                            error:NULL];
   [ctx.session removeObjectForKey:ALNAuthModuleVerificationNoticeSessionKey];
+  if ([providerError length] > 0) {
+    [ctx.session removeObjectForKey:ALNAuthModuleProviderErrorSessionKey];
+    [ctx markSessionDirty];
+  }
   if (!rendered) {
     [self setStatus:500];
     [self renderText:@"render failed\n"];
@@ -4249,6 +4313,19 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
   [ctx markSessionDirty];
   NSError *error = nil;
   NSDictionary *result = [provider completeLoginWithParameters:[self requestParameters] callbackState:state context:ctx error:&error];
+  if (!result && [error.domain isEqual:ALNAuthModuleOIDCErrorDomain] &&
+      error.code == ALNAuthModuleOIDCErrorAdmissionDenied) {
+    NSString *message = error.localizedDescription ?: @"This account is not permitted to sign in.";
+    if ([self shouldReturnJSON:ctx]) {
+      [self setStatus:403];
+      return @{ @"status": @"error", @"code": @"admission_denied", @"message": message };
+    }
+    // Show the message on the stock login page rather than a bare error body.
+    ctx.session[ALNAuthModuleProviderErrorSessionKey] = message;
+    [ctx markSessionDirty];
+    [self redirectTo:self.runtime.loginPath ?: @"/auth/login" status:302];
+    return nil;
+  }
   if (!result) {
     [self setStatus:401];
     return @{ @"status": @"error", @"message": @"Provider login rejected" };

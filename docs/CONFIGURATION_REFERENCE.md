@@ -530,6 +530,8 @@ underscores, or hyphens; `stub` is reserved.
 | `endpointAllowedHosts` | Lowercase host allowlist for discovery/authorization/token endpoints; defaults to issuer host. |
 | `jwksAllowedHosts` | Lowercase JWKS host allowlist; defaults to endpoint allowlist. |
 | `ctaLabel` | Login button text; defaults to `Continue with <identifier>`. |
+| `preset` | Optional. `google` fills in `type`, `issuer`, `discoveryURL`, `scopes`, `tokenEndpointAuthMethod`, `ctaLabel`, and endpoint/JWKS allowed hosts derived from the preset's endpoints. Explicit keys win. Unknown or unsupported presets fail startup. |
+| `admission` | Optional sign-in allowlist, checked after ID-token verification and before the resolver: `requireVerifiedEmail`, `allowedEmails`, `allowedEmailsEnvironmentKey`, `allowedDomains`, `requireHostedDomain`, `rejectionMessage`. See [Auth Module](AUTH_MODULE.md#admission-policy). |
 
 `authModule.hooks.providerSessionResolverClass` is required for real providers.
 Its class implements `ALNAuthProviderSessionResolver` and decides whether a

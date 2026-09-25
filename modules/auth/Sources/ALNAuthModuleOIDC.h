@@ -2,6 +2,12 @@
 #import "ALNAuthProviderSessionBridge.h"
 
 NS_ASSUME_NONNULL_BEGIN
+extern NSString *const ALNAuthModuleOIDCErrorDomain;
+typedef NS_ENUM(NSInteger, ALNAuthModuleOIDCErrorCode) {
+  ALNAuthModuleOIDCErrorRejected = 1,
+  /// The verified identity failed the provider's `admission` policy.
+  ALNAuthModuleOIDCErrorAdmissionDenied = 2,
+};
 /// Trusted application transport seam for deterministic OIDC fixtures or custom networking.
 /// Implementations must enforce TLS, no redirects/cookies, HTTP 200, response size and deadline.
 @protocol ALNAuthModuleOIDCTransport <NSObject>
